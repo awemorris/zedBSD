@@ -1,125 +1,157 @@
+# Boots — a scriptable bootstrap environment.
+# Copyright (C) 2026 Awe Morris
+# SPDX-License-Identifier: Zlib
+#
+# Layout:
+#   core/             platform-neutral services (fs, env, Noct integration)
+#   libc/             freestanding libc subset
+#   softfloat/        soft-float support built from vendor GCC/musl sources
+#   platform/<arch>/  per-architecture targets (IPLs, stages, console)
+#   apps/             Noct programs shipped on the boot volume
+#   noct/             NoctLang submodule
+#
+# Architecture selection: `make ARCH=pc98` or `./build.sh pc98`.  Each
+# architecture provides platform/<arch>/platform.mk and its artifacts land
+# in build/<arch>/.  Architecture-neutral host artifacts stay shared at the
+# top of build/ (build/host-noct, build/remacs, build/releases).
+
 AS := as
 LD := ld
 OBJCOPY := objcopy
 CC := gcc
+HOSTCC ?= cc
+PYTHON ?= python3
+.DEFAULT_GOAL := all
+
+ARCH ?= pc98
+PLATFORM_MK := platform/$(ARCH)/platform.mk
+ifeq ($(wildcard $(PLATFORM_MK)),)
+$(error Unknown ARCH '$(ARCH)'; available: \
+	$(patsubst platform/%/platform.mk,%,$(wildcard platform/*/platform.mk)))
+endif
+
+BUILD := build/$(ARCH)
+SCRIPTS_DIR := scripts
+
+# Scripts invoked from make must resolve the same architecture and build
+# tree; direct invocations default to pc98 on their own.
+export BOOTS_ARCH := $(ARCH)
+export BOOTS_BUILD_DIR := $(CURDIR)/$(BUILD)
+
 ASFLAGS := --32
-STAGE2_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Wextra -Werror
-SCRIPTS_DIR := ../scripts
+BOOTS_CPPFLAGS := -I. -I$(BUILD)
+BOOTS_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fno-pic -fno-pie \
+	-fno-stack-protector -fno-asynchronous-unwind-tables \
+	-fno-unwind-tables -Wall -Wextra -Werror
 
-all: boot2.bin disk-ipl.bin partition-pbr.bin fat-loader.bin boot98-stage1.bin boot98-chain-test.bin boot98-fdd-ipl.bin BOOT98.BIN boot98-iplware-test.bin boot98-iplware-com-test.com BOOTAPP.BIN
+include libc/libc.mk
+include softfloat/softfloat.mk
+include noct.mk
 
-boot2.o: boot2.S
+# ----------------------------------------------------------------------
+# Generic compile rules.  Per-object flag overrides use target-specific
+# variables; header dependencies come from -MMD.
+
+OBJ_CPPFLAGS = $(BOOTS_CPPFLAGS)
+OBJ_CFLAGS = $(BOOTS_CFLAGS)
+
+$(BUILD)/%.o: %.S
+	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
 
-boot2.elf: boot2.o
-	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
+$(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(OBJ_CPPFLAGS) $(OBJ_CFLAGS) -MMD -MP -c $< -o $@
 
-boot2.bin: boot2.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@sz=$$(stat -c%s $@); echo "boot2.bin: $$sz bytes"; if [ $$sz -gt 1024 ]; then echo "ERROR: IPL > 1024"; exit 1; fi
+$(BOOTS_LIBC_OBJECTS): OBJ_CPPFLAGS = $(BOOTS_LIBC_CPPFLAGS)
+$(BOOTS_LIBC_OBJECTS): OBJ_CFLAGS = $(BOOTS_LIBC_CFLAGS)
 
-disk-ipl.o: disk-ipl.S
-	$(AS) $(ASFLAGS) $< -o $@
+$(BUILD)/core/messages.h: core/messages.txt $(SCRIPTS_DIR)/generate-messages.py
+	@mkdir -p $(dir $@)
+	$(PYTHON) $(SCRIPTS_DIR)/generate-messages.py $< $@
 
-disk-ipl.elf: disk-ipl.o
-	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
+# ----------------------------------------------------------------------
+# Architecture-neutral host tests.  Platform makefiles append their own
+# binaries to HOST_TEST_BINARIES and phony run targets to CHECK_RUN_TARGETS.
 
-disk-ipl.bin: disk-ipl.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 512
+HOST_TEST_CC := $(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -I.
 
-partition-pbr.o: partition-pbr.S
-	$(AS) $(ASFLAGS) $< -o $@
+$(BUILD)/tests/fat-host-test: tests/fat-host-test.c \
+	core/fs.c core/fat.c core/fat16.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) core/fs.c core/fat.c core/fat16.c $< -o $@
 
-partition-pbr.elf: partition-pbr.o
-	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
+$(BUILD)/tests/fat-write-host-test: tests/fat-write-host-test.c \
+	core/fs.c core/fat.c core/fat16.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) core/fs.c core/fat.c core/fat16.c $< -o $@
 
-partition-pbr.bin: partition-pbr.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 512
+$(BUILD)/tests/env-host-test: tests/env-host-test.c core/env.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -Wall -Wextra -Werror -I. core/env.c $< -o $@
 
-fat-loader.o: fat-loader.S
-	$(AS) $(ASFLAGS) $< -o $@
+$(BUILD)/tests/noct-memory-host-test: tests/noct-memory-host-test.c \
+	core/noct-memory.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -Wall -Wextra -Werror -I. core/noct-memory.c $< -o $@
 
-fat-loader.elf: fat-loader.o
-	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
+$(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
+	core/fs.c core/namespace.c core/env.c $(BOOTS_LIBC_SOURCES)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) $(BOOTS_HOST_TEST_CFLAGS) core/fs.c core/namespace.c \
+		core/env.c $(BOOTS_LIBC_SOURCES) $< -o $@
 
-fat-loader.bin: fat-loader.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@sz=$$(stat -c%s $@); echo "fat-loader.bin: $$sz bytes"; if [ $$sz -gt 57344 ]; then echo "ERROR: loader > 56 KiB"; exit 1; fi
+stdio-fs-host-test: $(BUILD)/tests/stdio-fs-host-test
+	$(BUILD)/tests/stdio-fs-host-test
 
-boot98-stage1.o: boot98-stage1.S
-	$(AS) $(ASFLAGS) $< -o $@
+# BeUI lives upstream in the Noct submodule, but Boots links it, so the
+# upstream host tests run here against the very sources this tree builds.
+BEUI_TEST_CC := $(HOST_TEST_CC) -I$(NOCT_ROOT)/include -I$(NOCT_ROOT)/src/api
+BEUI_CORE_SOURCES := $(NOCT_ROOT)/src/api/beui-core.c \
+	$(NOCT_ROOT)/src/api/beui-image.c
 
-boot98-stage1.elf: boot98-stage1.o
-	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
+$(BUILD)/tests/beui-host-test: $(NOCT_ROOT)/tests/beui-test.c \
+	$(BEUI_CORE_SOURCES)
+	@mkdir -p $(dir $@)
+	$(BEUI_TEST_CC) $(BEUI_CORE_SOURCES) $< -o $@
 
-boot98-stage1.bin: boot98-stage1.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@sz=$$(stat -c%s $@); remaining=$$((7168 - sz)); echo "boot98-stage1.bin: $$sz bytes ($$remaining bytes free of 7 KiB)"; test $$sz -le 7168
+$(BUILD)/tests/kbd-pc98-map-host-test: tests/kbd-pc98-map-host-test.c \
+	drivers/kbd-pc98-map.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Inoct/include drivers/kbd-pc98-map.c $< -o $@
 
-boot98-chain-test.o: boot98-chain-test.S
-	$(AS) $(ASFLAGS) $< -o $@
+$(BUILD)/tests/blkdev-host-test: tests/blkdev-host-test.c \
+	core/blkdev.c core/partition.c platform/pc98/partition-pc98.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) core/blkdev.c core/partition.c \
+		platform/pc98/partition-pc98.c $< -o $@
 
-boot98-chain-test.elf: boot98-chain-test.o
-	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
+HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
+	$(BUILD)/tests/blkdev-host-test \
+	$(BUILD)/tests/kbd-pc98-map-host-test \
+	$(BUILD)/tests/fat-host-test \
+	$(BUILD)/tests/fat-write-host-test \
+	$(BUILD)/tests/env-host-test \
+	$(BUILD)/tests/noct-memory-host-test
+CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test
 
-boot98-chain-test.bin: boot98-chain-test.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 512
+# ----------------------------------------------------------------------
+# Architecture-specific rules (artifacts, disk images, QEMU tests,
+# milestone verification chains).
 
-boot98-fdd-ipl.o: boot98-fdd-ipl.S
-	$(AS) $(ASFLAGS) $< -o $@
+include $(PLATFORM_MK)
 
-boot98-fdd-ipl.elf: boot98-fdd-ipl.o
-	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
-
-boot98-fdd-ipl.bin: boot98-fdd-ipl.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 512
-
-boot98-stage2-entry.o: boot98-stage2-entry.S
-	$(AS) $(ASFLAGS) $< -o $@
-
-boot98-stage2.o: boot98-stage2.c boot98-abi.h
-	$(CC) $(STAGE2_CFLAGS) -c $< -o $@
-
-boot98-stage2.elf: boot98-stage2-entry.o boot98-stage2.o boot98-stage2.ld
-	$(LD) -m elf_i386 -T boot98-stage2.ld -nostdlib boot98-stage2-entry.o boot98-stage2.o -o $@
-
-BOOT98.BIN: boot98-stage2.elf $(SCRIPTS_DIR)/patch-boot98-bin.py
-	$(OBJCOPY) -O binary $< $@
-	python3 $(SCRIPTS_DIR)/patch-boot98-bin.py $@
-
-boot98-iplware-test.o: boot98-iplware-test.S
-	$(AS) $(ASFLAGS) $< -o $@
-
-boot98-iplware-test.elf: boot98-iplware-test.o
-	$(LD) -m elf_i386 -Ttext=0x100 -e _start $< -o $@
-
-boot98-iplware-test.bin: boot98-iplware-test.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-
-boot98-iplware-com-test.o: boot98-iplware-com-test.S
-	$(AS) $(ASFLAGS) $< -o $@
-
-boot98-iplware-com-test.elf: boot98-iplware-com-test.o
-	$(LD) -m elf_i386 -Ttext=0x100 -e _start $< -o $@
-
-boot98-iplware-com-test.com: boot98-iplware-com-test.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-
-boot98-applet-test.o: boot98-applet-test.S
-	$(AS) $(ASFLAGS) $< -o $@
-
-boot98-applet-test.elf: boot98-applet-test.o boot98-applet.ld
-	$(LD) -m elf_i386 -T boot98-applet.ld -nostdlib $< -o $@
-
-BOOTAPP.BIN: boot98-applet-test.elf $(SCRIPTS_DIR)/patch-boot98-applet.py
-	$(OBJCOPY) -O binary $< $@
-	python3 $(SCRIPTS_DIR)/patch-boot98-applet.py $@
+check: $(HOST_TEST_BINARIES) $(CHECK_RUN_TARGETS)
+	@set -e; for test in $(HOST_TEST_BINARIES); do \
+		echo "$$test"; $$test; done
 
 clean:
-	rm -f *.o *.elf *.bin *.com *.BIN
+	rm -rf $(BUILD)
 
-.PHONY: all clean
+distclean:
+	rm -rf build
+
+-include $(wildcard $(BUILD)/*.d $(BUILD)/*/*.d $(BUILD)/*/*/*.d \
+	$(BUILD)/*/*/*/*.d)
+
+.PHONY: all check clean distclean stdio-fs-host-test

@@ -1,0 +1,14 @@
+/*
+ * NEC PC-98 partition-table scheme
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef BOOTS_PC98_PARTITION_H
+#define BOOTS_PC98_PARTITION_H
+
+#include "core/partition.h"
+
+extern const struct boots_partition_scheme boots_partition_scheme_pc98;
+
+#endif

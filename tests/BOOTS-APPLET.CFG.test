@@ -1,0 +1,3 @@
+echo Running Boots applet...
+run BOOTAPP.BIN one two
+echo Applet test complete

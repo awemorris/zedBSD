@@ -1,0 +1,9 @@
+[submodule "noct"]
+	path = noct
+	url = https://github.com/awemorris/NoctLang.git
+[submodule "vendor/gcc"]
+	path = vendor/gcc
+	url = https://github.com/awemorris/gcc-i386.git
+[submodule "vendor/musl"]
+	path = vendor/musl
+	url = https://github.com/awemorris/musl-i386.git

@@ -1,0 +1,5 @@
+# Boots automatic configuration test
+echo CFG execution OK
+devalias
+part
+ls
