@@ -30,7 +30,6 @@ NOCT_SOURCE_REL := \
 	src/core/module.c \
 	src/core/interpreter.c \
 	src/core/jit.c \
-	src/core/jit-x86.c \
 	src/core/execution.c \
 	src/core/gc.c \
 	src/core/intrinsics.c \
@@ -94,7 +93,7 @@ $(NOCT_BUILD_DIR)/noct.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=unused-parameter
 $(NOCT_BUILD_DIR)/runtime.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=maybe-uninitialized
-$(NOCT_BUILD_DIR)/jit.o $(NOCT_BUILD_DIR)/jit-x86.o: NOCT_WARNING_EXCEPTIONS := \
+$(NOCT_BUILD_DIR)/jit.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=unused-parameter -Wno-error=sign-compare
 $(NOCT_BUILD_DIR)/intrinsics.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=type-limits
