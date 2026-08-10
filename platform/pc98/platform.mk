@@ -10,6 +10,27 @@ BOOTSECT := bootsectors/pc98
 
 CIRRUS_NOCT_CFLAGS = $(filter-out -Os,$(NOCT_CFLAGS)) -O2
 
+# These object lists must be defined before the Stage 2 prerequisite list is
+# expanded below.  The compiler rules themselves may remain with the related
+# verification targets later in this file.
+HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
+	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
+	-Ihal/include -Ihal/i386 -DHAL_ARCH_I386 -DHAL_BOARD_PC98
+HAL_PC98_SOURCES := \
+	hal/i386/lib.c hal/i386/irq.c hal/i386/page.c hal/i386/univ.c \
+	hal/i386/int.c hal/i386/cmain.c hal/i386/task.c hal/i386/fb.c \
+	hal/i386/bsp-pc98/cons.c hal/i386/bsp-pc98/pic.c \
+	hal/i386/bsp-pc98/clock.c
+HAL_PC98_ASM := hal/i386/locore.S hal/i386/trap.S hal/i386/dispatch.S
+HAL_PC98_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(HAL_PC98_SOURCES)) \
+	$(patsubst %.S,$(BUILD)/%.o,$(HAL_PC98_ASM))
+
+BOOTS_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
+	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
+	-I. -Ilibc/include -Ihal/include
+KERN_OBJS := $(BUILD)/kern/kmain.o $(BUILD)/kern/sched-stub.o \
+	$(BUILD)/kern/entry.o
+
 # Milestone verification nests QEMU tests.  Keep those chains ordered even
 # when the caller requests a highly parallel compile.
 .NOTPARALLEL: noct-m9-verify noct-m10-verify noct-m11-verify \
@@ -234,21 +255,8 @@ noct-host-test: $(BUILD)/tests/noct-host-test
 	@test $$(stat -c%s $(NOCT_M6_JIT_CODE)) -eq $(NOCT_TEST_JIT_CODE_SIZE)
 	@echo "Boots Noct interpreter/JIT lifecycle host tests: PASS"
 
-# Compile-check the i386 HAL and PC-98 BSP.  The HAL is not linked into
-# BOOT.SYS yet (that integration is Phase B's boot wiring), but keeping
-# it building under the freestanding target flags guards the milestone.
-HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
-	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
-	-Ihal/include -Ihal/i386 -DHAL_ARCH_I386 -DHAL_BOARD_PC98
-HAL_PC98_SOURCES := \
-	hal/i386/lib.c hal/i386/irq.c hal/i386/page.c hal/i386/univ.c \
-	hal/i386/int.c hal/i386/cmain.c hal/i386/task.c hal/i386/fb.c \
-	hal/i386/bsp-pc98/cons.c hal/i386/bsp-pc98/pic.c \
-	hal/i386/bsp-pc98/clock.c
-HAL_PC98_ASM := hal/i386/locore.S hal/i386/trap.S hal/i386/dispatch.S
-
-HAL_PC98_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(HAL_PC98_SOURCES)) \
-	$(patsubst %.S,$(BUILD)/%.o,$(HAL_PC98_ASM))
+# Compile-check the i386 HAL and PC-98 BSP under the same freestanding
+# target flags used by the BOOT.SYS link.
 
 $(BUILD)/hal/%.o: hal/%.c
 	@mkdir -p $(dir $@)
@@ -262,11 +270,6 @@ hal-pc98-compile: $(HAL_PC98_OBJS)
 	@echo "HAL i386/PC-98 compile check: PASS"
 
 # The kernel-side HAL glue compiles in Boots' own type world.
-BOOTS_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
-	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
-	-I. -Ilibc/include -Ihal/include
-KERN_OBJS := $(BUILD)/kern/kmain.o $(BUILD)/kern/sched-stub.o \
-	$(BUILD)/kern/entry.o
 
 $(BUILD)/kern/kmain.o: kern/kmain.c
 	@mkdir -p $(dir $@)
