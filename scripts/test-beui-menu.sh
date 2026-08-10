@@ -10,6 +10,7 @@ qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
 machine="${BOOTS_BEUI_MACHINE:-pc9821}"
 cpu="${BOOTS_TEST_CPU:-486}"
+memory="${BOOTS_BEUI_MEMORY:-6}"
 tag="${BOOTS_BEUI_TEST_TAG:-menu-cirrus}"
 minimum_colors="${BOOTS_BEUI_MINIMUM_COLORS:-4}"
 initial_wait="${BOOTS_BEUI_INITIAL_WAIT:-15}"
@@ -97,7 +98,7 @@ func menu(selected) {
 
 func main() {
     FileUtil.writeText("G3TRACE.TXT", "start");
-    if (BeUI.init() != 1) {
+    if (BeUI.initWithHint(24) != 1) {
         FileUtil.writeText("G3TRACE.TXT", "init failed");
         return 1;
     }
@@ -127,7 +128,7 @@ EOF
 printf 'g3menu\nhalt\n' > "$cfg"
 
 make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
-BOOTS_FILES="$files" DISK_SECTORS=17 \
+BOOTS_AUTOEXEC="$files/G3MENU.NCT" BOOTS_FILES="$files" DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'
@@ -151,7 +152,7 @@ PY
 )"
 
 rm -f -- "$monitor" "$screenshot" "$qemu_log"
-"$qemu" -M "$machine" -cpu "$cpu" -m 6 -accel tcg -L "$bios_dir" \
+"$qemu" -M "$machine" -cpu "$cpu" -m "$memory" -accel tcg -L "$bios_dir" \
 	-nic none -drive "if=ide,bus=0,unit=0,format=raw,file=$image" \
 	-display none -serial none -qmp "unix:$monitor,server=on,wait=off" \
 	-no-reboot >"$qemu_log" 2>&1 &

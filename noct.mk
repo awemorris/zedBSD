@@ -8,10 +8,11 @@
 
 NOCT_ROOT ?= noct
 NOCT_ENABLE_JIT ?= 1
+NOCT_OPTIMIZE_LEVEL ?= 1
 # Compile every Boots build with the largest supported reservation.  The
 # installed-RAM profile selects a smaller per-VM reservation at runtime.
 NOCT_JIT_CODE_MAX ?= 2097152
-NOCT_PROFILE := $(if $(filter 1,$(NOCT_ENABLE_JIT)),jit-$(NOCT_JIT_CODE_MAX),nojit)
+NOCT_PROFILE := $(if $(filter 1,$(NOCT_ENABLE_JIT)),jit-$(NOCT_JIT_CODE_MAX),nojit)-opt-$(NOCT_OPTIMIZE_LEVEL)
 NOCT_BUILD_DIR := $(BUILD)/noct-$(NOCT_PROFILE)
 NOCT_CC ?= $(CC)
 NOCT_OBJDUMP ?= objdump
@@ -64,6 +65,7 @@ NOCT_CPPFLAGS := \
 	-I$(NOCT_ROOT)/src/api \
 	-DNOCT_TARGET_PC98BE \
 	-DNOCT_MEMORY_SMALL \
+	-DBOOTS_NOCT_OPTIMIZE_LEVEL=$(NOCT_OPTIMIZE_LEVEL) \
 	-DNOCT_JIT_CODE_MAX=$(NOCT_JIT_CODE_MAX) \
 	-DBOOTS_NOCT_JIT_CODE_MAX=$(NOCT_JIT_CODE_MAX) \
 	-DHAVE_STDINT_H=1 \

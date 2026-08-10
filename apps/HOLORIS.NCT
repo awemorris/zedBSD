@@ -410,7 +410,7 @@ func main(args) {
     for (arg in args) {
         if (arg == "test") { testMode = 1; }
     }
-    if (BeUI.init() != 1) {
+    if (BeUI.initWithHint(24) != 1) {
         Console.print("Holoris: BeUI is unavailable.");
         return 1;
     }

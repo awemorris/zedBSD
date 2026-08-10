@@ -14,6 +14,7 @@ memory="${BOOTS_BEUI_MEMORY:-6}"
 expected_height="${BOOTS_BEUI_EXPECT_HEIGHT:-400}"
 backend_name="${BOOTS_BEUI_BACKEND_NAME:-GDC}"
 test_tag="${BOOTS_BEUI_TEST_TAG:-gdc}"
+bits_per_pixel="${BOOTS_BEUI_BITS_PER_PIXEL:-24}"
 base="${BOOTS_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/beui-g2a-$test_tag"
 image="$work/g2a-ide.raw"
@@ -31,9 +32,13 @@ done
 
 mkdir -p "$work" "$files"
 cp --reflink=auto "$base" "$image"
+case "$bits_per_pixel" in
+	8|24) ;;
+	*) echo "BOOTS_BEUI_BITS_PER_PIXEL must be 8 or 24" >&2; exit 1 ;;
+esac
 cat > "$files/G2A.NCT" <<'EOF'
 func main() {
-    if (BeUI.initWithHint(24) != 1) { return 1; }
+    if (BeUI.initWithHint(__BEUI_BITS_PER_PIXEL__) != 1) { return 1; }
     if (BeUI.fill(0, 0, 640, 400, 255) != 1) { return 2; }
     if (BeUI.line(0, 0, 639, 399, 16777215) != 1) { return 3; }
     if (BeUI.patternFill(20, 20, 80, 80, 16711680,
@@ -58,6 +63,7 @@ func main() {
     return 0;
 }
 EOF
+sed -i "s/__BEUI_BITS_PER_PIXEL__/$bits_per_pixel/" "$files/G2A.NCT"
 printf 'g2a\nhalt\n' > "$cfg"
 
 # 80x80, uncompressed, 24-bit BMP. Four exact colors exercise the Cirrus
@@ -87,7 +93,7 @@ with open(sys.argv[1], 'wb') as stream:
 PY
 
 make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
-BOOTS_FILES="$files" DISK_SECTORS=17 \
+BOOTS_AUTOEXEC="$files/G2A.NCT" BOOTS_FILES="$files" DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'

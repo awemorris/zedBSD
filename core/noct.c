@@ -150,7 +150,7 @@ run_program_args(const char *program_name, void *program, uint32_t program_size,
 	}
 	config.jit_enable = options->jit_enable != 0;
 	config.jit_threshold = options->jit_threshold;
-	config.optimize_level = 2;
+	config.optimize_level = BOOTS_NOCT_OPTIMIZE_LEVEL;
 	if (!noct_create_vm(&vm, &env, &config)) {
 		status = BOOTS_NOCT_VM_ERROR;
 		emit_string("Noct: unable to create VM\n");
