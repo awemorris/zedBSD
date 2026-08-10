@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Exercise the GDC safe-mode backend and BMP pipeline in a real BOOT.SYS VM.
+# Exercise the display backend and BMP pipeline in a real BOOT.SYS VM.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 arch="${BOOTS_ARCH:-pc98}"
 build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
@@ -9,6 +9,8 @@ releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
 machine="${BOOTS_BEUI_MACHINE:-pc9801}"
+cpu="${BOOTS_BEUI_CPU:-386}"
+memory="${BOOTS_BEUI_MEMORY:-6}"
 expected_height="${BOOTS_BEUI_EXPECT_HEIGHT:-400}"
 backend_name="${BOOTS_BEUI_BACKEND_NAME:-GDC}"
 test_tag="${BOOTS_BEUI_TEST_TAG:-gdc}"
@@ -31,15 +33,23 @@ mkdir -p "$work" "$files"
 cp --reflink=auto "$base" "$image"
 cat > "$files/G2A.NCT" <<'EOF'
 func main() {
-    if (BeUI.init() != 1) { return 1; }
+    if (BeUI.initWithHint(24) != 1) { return 1; }
     if (BeUI.fill(0, 0, 640, 400, 255) != 1) { return 2; }
     if (BeUI.line(0, 0, 639, 399, 16777215) != 1) { return 3; }
     if (BeUI.patternFill(20, 20, 80, 80, 16711680,
                          6172840429334713770L) != 1) { return 4; }
-    var image = BeUI.loadImage("G2A.BMP");
+    var file = File.open("G2A.BMP", "rb");
+    var bytes = File.read(file, FileUtil.getFileSize("G2A.BMP"));
+    File.close(file);
+    var image = BeUI.loadImage(bytes);
+    if (BeUI.getImageWidth(image) != 80) { return 5; }
+    if (BeUI.getImageHeight(image) != 80) { return 5; }
     if (BeUI.drawImage(image, 280, 160) != 1) { return 5; }
-    if (BeUI.drawImagePattern(image, 120, 160,
-                              6172840429334713770L) != 1) { return 6; }
+    if (BeUI.drawImageRegion(image, 20, 20, 40, 40, 120, 160) != 1) {
+        return 6;
+    }
+    if (BeUI.drawImagePattern(image, 200, 160,
+                              6172840429334713770L) != 1) { return 7; }
     BeUI.flush();
     Keyboard.read();
     BeUI.destroyImage(image);
@@ -50,44 +60,42 @@ func main() {
 EOF
 printf 'g2a\nhalt\n' > "$cfg"
 
-# 80x80, uncompressed, 8-bit indexed BMP. Four colors make display failure
-# distinguishable from a valid all-black screenshot without PNG/zlib tools.
+# 80x80, uncompressed, 24-bit BMP. Four exact colors exercise the Cirrus
+# packed-color path while the GDC backend quantizes the same source image.
 python3 - "$files/G2A.BMP" <<'PY'
 import struct
 import sys
 
 width = height = 80
-stride = (width + 3) & ~3
-palette = [
-    (0, 0, 0, 0),
-    (0, 0, 255, 0),
-    (0, 255, 0, 0),
-    (255, 255, 255, 0),
-]
-offset = 14 + 40 + len(palette) * 4
+stride = (width * 3 + 3) & ~3
+offset = 14 + 40
 pixels = bytearray(stride * height)
 for y in range(height):
     for x in range(width):
-        pixels[(height - 1 - y) * stride + x] = 1 + (x >= 40) + (y >= 40)
+        colors = ((255, 0, 0), (0, 255, 0),
+                  (0, 0, 255), (255, 255, 255))
+        red, green, blue = colors[(x >= 40) + 2 * (y >= 40)]
+        position = (height - 1 - y) * stride + x * 3
+        pixels[position:position + 3] = bytes((blue, green, red))
 header = struct.pack('<2sIHHI', b'BM', offset + len(pixels), 0, 0, offset)
-dib = struct.pack('<IiiHHIIiiII', 40, width, height, 1, 8, 0,
-                  len(pixels), 0, 0, len(palette), len(palette))
+dib = struct.pack('<IiiHHIIiiII', 40, width, height, 1, 24, 0,
+                  len(pixels), 0, 0, 0, 0)
 with open(sys.argv[1], 'wb') as stream:
     stream.write(header)
     stream.write(dib)
-    for entry in palette:
-        stream.write(bytes(entry))
     stream.write(pixels)
 PY
 
 make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
-BOOTS_FILES="$files" DISK_HEADS=8 DISK_SECTORS=17 \
+BOOTS_FILES="$files" DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'
+import os
 import struct
 import sys
 
+heads = 4 if os.path.getsize(sys.argv[1]) <= 40 * 1024 * 1024 else 8
 with open(sys.argv[1], 'rb') as stream:
     stream.seek(512)
     table = stream.read(512)
@@ -95,7 +103,7 @@ for pos in range(0, 512, 32):
     entry = table[pos:pos + 32]
     if entry[0] and entry[16:32] == b'BOOT'.ljust(16, b' '):
         cylinder = struct.unpack_from('<H', entry, 6)[0]
-        print(cylinder * 8 * 17 * 512)
+        print(cylinder * heads * 17 * 512)
         break
 else:
     raise SystemExit('BOOT partition not found')
@@ -103,7 +111,7 @@ PY
 )"
 
 rm -f -- "$monitor" "$screenshot"
-"$qemu" -M "$machine" -cpu 386 -m 6 -accel tcg -L "$bios_dir" \
+"$qemu" -M "$machine" -cpu "$cpu" -m "$memory" -accel tcg -L "$bios_dir" \
 	-nic none -drive "if=ide,bus=0,unit=0,format=raw,file=$image" \
 	-display none -serial none -qmp "unix:$monitor,server=on,wait=off" \
 	-no-reboot >/dev/null 2>&1 &
@@ -118,7 +126,7 @@ cleanup()
 }
 trap cleanup EXIT INT TERM
 
-python3 - "$monitor" "$screenshot" <<'PY'
+python3 - "$monitor" "$screenshot" "$expected_height" <<'PY'
 import json
 import socket
 import sys
@@ -152,15 +160,43 @@ def qmp(execute, arguments=None, wait_reply=True):
             raise SystemExit(f"QMP {execute} failed: {reply['error']}")
 
 qmp('qmp_capabilities')
-time.sleep(7)
-qmp('screendump', {'filename': sys.argv[2]})
+started = time.monotonic()
+deadline = started + 60
+while True:
+    qmp('screendump', {'filename': sys.argv[2]})
+    try:
+        with open(sys.argv[2], 'rb') as capture:
+            if capture.readline().strip() != b'P6':
+                raise ValueError
+            dimensions = capture.readline()
+            while dimensions.startswith(b'#'):
+                dimensions = capture.readline()
+            width, height = map(int, dimensions.split())
+            if int(capture.readline()) != 255:
+                raise ValueError
+            pixels = capture.read()
+        colors = {pixels[pos:pos + 3]
+                  for pos in range(0, len(pixels), 3)}
+        if width >= 640 and height >= int(sys.argv[3]) and len(colors) >= 3:
+            break
+        if time.monotonic() - started >= 5:
+            lit_rows = [pos // (width * 3)
+                        for pos in range(0, len(pixels), 3)
+                        if pixels[pos:pos + 3] != b'\0\0\0']
+            if lit_rows and max(lit_rows) < 40:
+                raise SystemExit('compatible BIOS POST exceeded 5 seconds')
+    except (FileNotFoundError, ValueError):
+        pass
+    if time.monotonic() >= deadline:
+        raise SystemExit('BeUI display did not become ready')
+    time.sleep(1)
 qmp('input-send-event', {'events': [
     {'type': 'key', 'data': {'down': True,
       'key': {'type': 'qcode', 'data': 'ret'}}},
     {'type': 'key', 'data': {'down': False,
       'key': {'type': 'qcode', 'data': 'ret'}}},
 ]})
-time.sleep(3)
+time.sleep(5)
 qmp('quit', wait_reply=False)
 stream.close()
 client.close()
@@ -203,5 +239,9 @@ colors = {pixels[pos:pos + 3] for pos in range(0, len(pixels), 3)}
 expected_height = int(sys.argv[2])
 if width < 640 or height < expected_height or len(colors) < 3:
     raise SystemExit(f'display screenshot validation failed: {width}x{height}, {len(colors)} colors')
+if expected_height >= 480:
+    expected = {b'\xff\0\0', b'\0\xff\0', b'\0\0\xff', b'\xff\xff\xff'}
+    if not expected.issubset(colors):
+        raise SystemExit(f'24bpp colors missing: {expected - colors}')
 PY
 printf 'Boots BeUI %s/BMP QEMU test: PASS (%s)\n' "$backend_name" "$image"

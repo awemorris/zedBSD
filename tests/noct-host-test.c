@@ -899,7 +899,10 @@ main(int argc, char **argv)
 		"var image = BeUI.loadImage("
 		"File.read(file, FileUtil.getFileSize(\"TEST.BMP\"))); "
 		"File.close(file); print(image); "
+		"print(BeUI.getImageWidth(image)); "
+		"print(BeUI.getImageHeight(image)); "
 		"print(BeUI.drawImage(image, 5, 6)); "
+		"print(BeUI.drawImageRegion(image, 0, 0, 1, 1, 5, 6)); "
 		"print(BeUI.destroyImage(image)); "
 		"print(BeUI.flush()); print(BeUI.close()); "
 		"print(BeUI.isOpen()); return 0; }";
@@ -1018,13 +1021,13 @@ main(int argc, char **argv)
 		return 247;
 	memset(&mock, 0, sizeof(mock));
 	status = run_case(beui_script, 0, BOOTS_NOCT_OK,
-			  "0\n1\n1\n640\n400\n1\n1\n1\n1\n1\n1\n1\n0\n", &result);
+			  "0\n1\n1\n640\n400\n1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n0\n", &result);
 	if (status != 0 || mock.beui_enter_count != 1 ||
 	    mock.beui_leave_count != 1 ||
 	    mock.beui_pointer_start_count != 1 ||
 	    mock.beui_pointer_stop_count != 1 ||
 	    mock.beui_pointer_poll_count != 1 || mock.beui_flush_count != 1 ||
-	    mock.beui_fill_count != 1 || mock.beui_draw_count != 1)
+	    mock.beui_fill_count != 1 || mock.beui_draw_count != 2)
 		return 248 + status;
 	memset(&mock, 0, sizeof(mock));
 	status = run_case(beui_cleanup_script, 1, BOOTS_NOCT_OK, "", &result);

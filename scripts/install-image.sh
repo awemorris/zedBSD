@@ -233,6 +233,16 @@ for utility in LS.NCT CP.NCT; do
 		mcopy -o -i "$image@@$offset" "$repo/apps/$utility" ::CMD/"$utility"
 	fi
 done
+bmpview_nap="${BMPVIEW_NAP:-$repo/build/bmpview/BMPVIEW.NAP}"
+if test ! -s "$bmpview_nap" ||
+   test "$repo/apps/BMPVIEW.NCT" -nt "$bmpview_nap"; then
+	"$repo/scripts/build-bmpview-bytecode.sh"
+fi
+test -s "$bmpview_nap" || {
+	echo "BMP viewer bytecode not found: $bmpview_nap" >&2
+	exit 1
+}
+mcopy -o -i "$image@@$offset" "$bmpview_nap" ::APPS/BMPVIEW.NAP
 holoris_nap="${HOLORIS_NAP:-$repo/build/holoris/HOLORIS.NAP}"
 if test ! -s "$holoris_nap" ||
    test "$repo/apps/HOLORIS.NCT" -nt "$holoris_nap"; then

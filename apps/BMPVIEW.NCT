@@ -1,0 +1,98 @@
+func minimum(left, right) {
+    if (left < right)
+        return left;
+    return right;
+}
+
+func drawView(image, imageWidth, imageHeight, scrollY) {
+    var screenWidth = BeUI.getWidth();
+    var screenHeight = BeUI.getHeight();
+    var viewWidth = minimum(imageWidth, screenWidth);
+    var viewHeight = minimum(imageHeight, screenHeight);
+    var sourceX = 0;
+    var destinationX = 0;
+    var destinationY = 0;
+
+    if (imageWidth > screenWidth)
+        sourceX = (imageWidth - screenWidth) / 2;
+    else
+        destinationX = (screenWidth - imageWidth) / 2;
+    if (imageHeight < screenHeight)
+        destinationY = (screenHeight - imageHeight) / 2;
+
+    BeUI.fill(0, 0, screenWidth, screenHeight, 0x000000);
+    BeUI.drawImageRegion(image, sourceX, scrollY, viewWidth, viewHeight,
+                         destinationX, destinationY);
+    BeUI.flush();
+}
+
+func main(args) {
+    if (Array.size(args) != 1) {
+        Console.print("usage: bmpview FILE.BMP");
+        return 2;
+    }
+
+    var path = args[0];
+    if (!FileUtil.checkFileExists(path)) {
+        Console.print("bmpview: file not found: " + path);
+        return 1;
+    }
+
+    var size = FileUtil.getFileSize(path);
+    var file = File.open(path, "rb");
+    var bytes = File.read(file, size);
+    File.close(file);
+    if (Packed.size(bytes) != size) {
+        Console.print("bmpview: short read: " + path);
+        return 1;
+    }
+
+    var image = BeUI.loadImage(bytes);
+    var imageWidth = BeUI.getImageWidth(image);
+    var imageHeight = BeUI.getImageHeight(image);
+    if (BeUI.initWithHint(24) != 1) {
+        BeUI.destroyImage(image);
+        Console.print("bmpview: display is unavailable");
+        return 1;
+    }
+
+    var screenHeight = BeUI.getHeight();
+    var maximumScroll = imageHeight - screenHeight;
+    if (maximumScroll < 0)
+        maximumScroll = 0;
+    var pageStep = screenHeight - 16;
+    if (pageStep < 16)
+        pageStep = 16;
+    var scrollY = 0;
+    drawView(image, imageWidth, imageHeight, scrollY);
+
+    while (1) {
+        var key = Keyboard.read();
+        var previous = scrollY;
+
+        if (key == Key.Escape)
+            break;
+        if (key == Key.Up)
+            scrollY -= 16;
+        if (key == Key.Down)
+            scrollY += 16;
+        if (key == Key.PageUp)
+            scrollY -= pageStep;
+        if (key == Key.PageDown)
+            scrollY += pageStep;
+        if (key == Key.Home)
+            scrollY = 0;
+        if (key == Key.End)
+            scrollY = maximumScroll;
+        if (scrollY < 0)
+            scrollY = 0;
+        if (scrollY > maximumScroll)
+            scrollY = maximumScroll;
+        if (scrollY != previous)
+            drawView(image, imageWidth, imageHeight, scrollY);
+    }
+
+    BeUI.destroyImage(image);
+    BeUI.close();
+    return 0;
+}
