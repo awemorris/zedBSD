@@ -57,7 +57,7 @@ import os
 import struct
 import sys
 
-heads = 4 if os.path.getsize(sys.argv[1]) <= 40 * 1024 * 1024 else 8
+heads = 4 if os.path.getsize(sys.argv[1]) <= 20 * 1024 * 1024 else 8
 with open(sys.argv[1], 'rb') as stream:
     stream.seek(512)
     table = stream.read(512)

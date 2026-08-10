@@ -16,9 +16,8 @@ mkdir -p "$(dirname "$output")"
 truncate -s "${BOOTS_TEST_MB:-16}M" "$output"
 if test -z "$heads"; then
 	image_bytes="$(stat -c %s "$output")"
-	# QEMU's ATA IDENTIFY rounds the 40 MiB boundary down to the BIOS's
-	# small-disk geometry, so the boundary image also uses four heads.
-	if test "$image_bytes" -le $((40 * 1024 * 1024)); then
+	# Only the legacy 20 MiB disk class uses four-head geometry.
+	if test "$image_bytes" -le $((20 * 1024 * 1024)); then
 		heads=4
 	else
 		heads=8

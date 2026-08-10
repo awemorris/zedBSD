@@ -14,10 +14,9 @@ QEMU bring-up で判明した修正:
   物理終端を計算するよう修正した。
 - native keyboard event は Term 用 modifier snapshot を上位ビットに持つ。
   REPL line editor が key code 部分を取り出して Ctrl-C を認識するよう修正した。
-- 40 MiB 以下の raw image は現行 BIOS/QEMU の小容量判定に合わせ H=4/S=17 で
-  生成する。既存 H=8 image への install は、全 partition の start/data/end LBA を
-  保持したまま H=4 CHS に変換する。BusyBox image の BOOT/root/swap 三領域で
-  変換前後の LBA 一致を確認した。
+- 20 MiB 以下の legacy raw image は H=4/S=17、40 MiB 級を含む通常の IDE
+  image は H=8/S=17 で生成する。BusyBox release image も実機互換性を優先して
+  H=8/S=17 とする。
 - QEMU test profile を `pc9821 -cpu 486` に移行し、HDD 自動起動テストは一瞬の
   固定行ではなく専用 AUTOEXEC の完了 marker を text VRAM 全体から検査する。
 
@@ -44,7 +43,8 @@ MS-DOS 6.20: H=4-converted copy reached A:\\> prompt
 QEMU 本体には、BIOS の短い status poll 中にも file-backed request を完了させる
 `hw/ide/pc98-ide.c` の `blk_drain()` 変更を未コミットで残す。`pio_aiocb`/BUSY 限定は
 MS-DOS の command path を救えなかったため、PC-98 status read 前の drain とした。
-`roms/pc98bios/ide.S` の H=4/H=8 判定は変更していない。QEMU 差分は別途レビュー対象。
+`roms/pc98bios/ide.S` の H=4/H=8 境界も20 MiB級へ変更した。QEMU 差分は
+別途レビュー対象。
 
 Phase B/C と HAL boot flip は完了。未実装として残るのは固定ディスクの chain boot
 (現在は明示的に unavailable と表示)など、次フェーズの機能である。
