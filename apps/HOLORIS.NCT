@@ -1,4 +1,4 @@
-// Holoris — a wireframe hologram falling-block game for Boots.
+// Holoris -- a wireframe hologram falling-block game for Boots.
 //
 // The stage is a three-dimensional wire-frame well whose camera sways
 // slowly on its yaw axis, so the blocks read as floating holograms.
@@ -14,6 +14,10 @@
 // Controls: arrows move, Z/X or Up rotate, Space hard-drops, Esc quits.
 // "holoris test" fixes the camera and the piece sequence and records
 // lock states to HOLOLOCK.TXT for the QEMU test.
+
+func make_rgb(red, green, blue) {
+    return ((red & 0xff) << 16) | ((green & 0xff) << 8) | (blue & 0xff);
+}
 
 func makePieces() {
     // 7 pieces x 4 rotation states x 4 cells x (col,row) offsets.
@@ -43,8 +47,13 @@ func makePieces() {
 
 func pieceColor(type) {
     // I cyan, O yellow, T magenta, S green, Z red, J white, L cyan.
-    var colors = [65535, 16776960, 16711935, 65280, 16711680,
-                  16777215, 65535];
+    var colors = [make_rgb(0x00, 0xff, 0xff),
+                  make_rgb(0xff, 0xff, 0x00),
+                  make_rgb(0xff, 0x00, 0xff),
+                  make_rgb(0x00, 0xff, 0x00),
+                  make_rgb(0xff, 0x00, 0x00),
+                  make_rgb(0xff, 0xff, 0xff),
+                  make_rgb(0x00, 0xff, 0xff)];
     return colors[type];
 }
 
@@ -258,7 +267,7 @@ func pyAt(g, col, row, zi) {
 }
 
 func drawWell(g) {
-    var color = 65535;
+    var color = 0x00ffff;
     for (zi in 0..2) {
         var xa = pxAt(g, 0, zi);
         var xb = pxAt(g, 10, zi);
@@ -318,7 +327,7 @@ func drawCell(g, col, row, type) {
 
 // The falling piece: a full wire cube per cell.
 func drawPieceCell(g, col, row) {
-    var color = 16777215;
+    var color = 0xffffff;
     var fx0 = pxAt(g, col, 0);
     var fy0 = pyAt(g, col, row, 0);
     var fx1 = pxAt(g, col + 1, 0);
@@ -346,7 +355,7 @@ func drawPieceCell(g, col, row) {
 }
 
 func drawNext(g) {
-    BeUI.drawText("NEXT", 452, 210, 65535, 0);
+    BeUI.drawText("NEXT", 452, 210, 0x00ffff, 0x000000);
     var cells = g.pieces[g.next][0];
     var color = pieceColor(g.next);
     for (i in 0..4) {
@@ -360,21 +369,21 @@ func drawNext(g) {
 }
 
 func drawPanel(g) {
-    BeUI.fill(400, 0, 240, 400, 0);
-    BeUI.drawText("HOLORIS", 452, 36, 65535, 0);
-    BeUI.drawText("ホロリス", 452, 58, 16711935, 0);
-    BeUI.drawText("SCORE  " + g.score, 436, 100, 16777215, 0);
-    BeUI.drawText("LINES  " + g.lines, 436, 126, 16777215, 0);
-    BeUI.drawText("LEVEL  " + g.level, 436, 152, 16777215, 0);
+    BeUI.fill(400, 0, 240, 400, 0x000000);
+    BeUI.drawText("HOLORIS", 452, 36, 0x00ffff, 0x000000);
+    BeUI.drawText("ホロリス", 452, 58, 0xff00ff, 0x000000);
+    BeUI.drawText("SCORE  " + g.score, 436, 100, 0xffffff, 0x000000);
+    BeUI.drawText("LINES  " + g.lines, 436, 126, 0xffffff, 0x000000);
+    BeUI.drawText("LEVEL  " + g.level, 436, 152, 0xffffff, 0x000000);
     drawNext(g);
-    BeUI.drawText("↑/Z/X : SPIN", 420, 320, 10066329, 0);
-    BeUI.drawText("SPACE : DROP", 420, 344, 10066329, 0);
-    BeUI.drawText("ESC   : QUIT", 420, 368, 10066329, 0);
+    BeUI.drawText("↑/Z/X : SPIN", 420, 320, 0x999999, 0x000000);
+    BeUI.drawText("SPACE : DROP", 420, 344, 0x999999, 0x000000);
+    BeUI.drawText("ESC   : QUIT", 420, 368, 0x999999, 0x000000);
 }
 
 func draw(g, theta) {
     project(g, theta);
-    BeUI.fill(100, 0, 300, 400, 0);
+    BeUI.fill(100, 0, 300, 400, 0x000000);
     drawWell(g);
     for (row in 0..20) {
         for (col in 0..10) {
@@ -435,7 +444,7 @@ func main(args) {
     g.camStep = 0 - 1;
     g.keyZ = String.charCodeAt("z", 0);
     g.keyX = String.charCodeAt("x", 0);
-    BeUI.fill(0, 0, 640, 400, 0);
+    BeUI.fill(0, 0, 640, 400, 0x000000);
     g.next = rand7(g);
     spawn(g, BeUI.getMilliseconds());
     if (testMode == 1) {
@@ -460,8 +469,8 @@ func main(args) {
         BeUI.sleep(8);
     }
     if (g.over == 1) {
-        BeUI.drawText("GAME OVER", 204, 188, 16777215, 0);
-        BeUI.drawText("ENTER: EXIT", 196, 212, 10066329, 0);
+        BeUI.drawText("GAME OVER", 204, 188, 0xffffff, 0x000000);
+        BeUI.drawText("ENTER: EXIT", 196, 212, 0x999999, 0x000000);
         BeUI.flush();
         var waiting = 1;
         while (waiting == 1 && BeUI.poll() == 1) {
