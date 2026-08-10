@@ -27,8 +27,10 @@ NOCT_SOURCE_REL := \
 	src/core/lir.c \
 	src/core/noct.c \
 	src/core/runtime.c \
+	src/core/module.c \
 	src/core/interpreter.c \
 	src/core/jit.c \
+	src/core/jit-x86.c \
 	src/core/execution.c \
 	src/core/gc.c \
 	src/core/intrinsics.c \
@@ -50,6 +52,7 @@ NOCT_OBJECTS := \
 	$(patsubst $(NOCT_ROOT)/src/core/%.c,$(NOCT_BUILD_DIR)/%.o,$(NOCT_CORE_SOURCES)) \
 	$(patsubst $(NOCT_ROOT)/src/repl/%.c,$(NOCT_BUILD_DIR)/repl-%.o,$(NOCT_REPL_SOURCES)) \
 	$(patsubst $(NOCT_ROOT)/src/api/%.c,$(NOCT_BUILD_DIR)/%.o,$(NOCT_API_SOURCES))
+-include $(NOCT_OBJECTS:.o=.d)
 NOCT_UPSTREAM_COMMIT := $(shell git -C $(NOCT_ROOT) rev-parse HEAD 2>/dev/null || echo unknown)
 
 NOCT_CPPFLAGS := \
@@ -91,7 +94,7 @@ $(NOCT_BUILD_DIR)/noct.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=unused-parameter
 $(NOCT_BUILD_DIR)/runtime.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=maybe-uninitialized
-$(NOCT_BUILD_DIR)/jit.o: NOCT_WARNING_EXCEPTIONS := \
+$(NOCT_BUILD_DIR)/jit.o $(NOCT_BUILD_DIR)/jit-x86.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=unused-parameter -Wno-error=sign-compare
 $(NOCT_BUILD_DIR)/intrinsics.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=type-limits
@@ -101,12 +104,12 @@ $(NOCT_BUILD_DIR)/objectmodel-st.o: NOCT_WARNING_EXCEPTIONS := \
 $(NOCT_BUILD_DIR)/%.o: $(NOCT_ROOT)/src/core/%.c
 	@mkdir -p $(NOCT_BUILD_DIR)
 	$(NOCT_CC) $(NOCT_CPPFLAGS) $(NOCT_CFLAGS) \
-		$(NOCT_WARNING_EXCEPTIONS) -c $< -o $@
+		$(NOCT_WARNING_EXCEPTIONS) -MMD -MP -c $< -o $@
 
 $(NOCT_BUILD_DIR)/api-%.o: $(NOCT_ROOT)/src/api/api-%.c
 	@mkdir -p $(NOCT_BUILD_DIR)
 	$(NOCT_CC) $(NOCT_CPPFLAGS) $(NOCT_CFLAGS) \
-		$(NOCT_WARNING_EXCEPTIONS) -c $< -o $@
+		$(NOCT_WARNING_EXCEPTIONS) -MMD -MP -c $< -o $@
 
 # BeUI's core and its display backends.  The backends a target selects are
 # listed by that target's platform.mk; the rule is shared because they are
@@ -114,22 +117,22 @@ $(NOCT_BUILD_DIR)/api-%.o: $(NOCT_ROOT)/src/api/api-%.c
 $(NOCT_BUILD_DIR)/beui-%.o: $(NOCT_ROOT)/src/api/beui-%.c
 	@mkdir -p $(NOCT_BUILD_DIR)
 	$(NOCT_CC) $(NOCT_CPPFLAGS) $(NOCT_CFLAGS) \
-		$(NOCT_WARNING_EXCEPTIONS) -c $< -o $@
+		$(NOCT_WARNING_EXCEPTIONS) -MMD -MP -c $< -o $@
 
 $(NOCT_BUILD_DIR)/regex.o: $(NOCT_ROOT)/src/api/regex.c
 	@mkdir -p $(NOCT_BUILD_DIR)
 	$(NOCT_CC) $(NOCT_CPPFLAGS) $(NOCT_CFLAGS) \
-		$(NOCT_WARNING_EXCEPTIONS) -c $< -o $@
+		$(NOCT_WARNING_EXCEPTIONS) -MMD -MP -c $< -o $@
 
 $(NOCT_BUILD_DIR)/jisx0208.o: $(NOCT_ROOT)/src/api/jisx0208.c
 	@mkdir -p $(NOCT_BUILD_DIR)
 	$(NOCT_CC) $(NOCT_CPPFLAGS) $(NOCT_CFLAGS) \
-		$(NOCT_WARNING_EXCEPTIONS) -c $< -o $@
+		$(NOCT_WARNING_EXCEPTIONS) -MMD -MP -c $< -o $@
 
 $(NOCT_BUILD_DIR)/repl-%.o: $(NOCT_ROOT)/src/repl/%.c
 	@mkdir -p $(NOCT_BUILD_DIR)
 	$(NOCT_CC) $(NOCT_CPPFLAGS) $(NOCT_CFLAGS) \
-		$(NOCT_WARNING_EXCEPTIONS) -c $< -o $@
+		$(NOCT_WARNING_EXCEPTIONS) -MMD -MP -c $< -o $@
 
 noct-objects: $(NOCT_OBJECTS)
 	@echo "Noct upstream: $(NOCT_UPSTREAM_COMMIT)"

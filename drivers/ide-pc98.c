@@ -46,6 +46,7 @@
 
 struct ide_unit {
 	struct boots_blkdev blkdev;
+	uint8_t present;
 	uint8_t bank;
 	uint8_t drive;
 	uint8_t use_lba;
@@ -56,6 +57,7 @@ struct ide_unit {
 };
 
 static struct ide_unit units[IDE_UNIT_MAX];
+static struct ide_unit *unit_order[IDE_UNIT_MAX];
 static unsigned unit_count;
 
 static uint8_t
@@ -297,19 +299,23 @@ boots_ide_pc98_init(const struct boots_device *bios_devices,
 		     unsigned bios_device_count)
 {
 	static uint16_t data[256];
-	unsigned bios_ide_used = 0;
+	unsigned slot;
 	uint8_t bank;
 	uint8_t drive;
 
 	unit_count = 0;
+	for (slot = 0; slot < IDE_UNIT_MAX; slot++) {
+		units[slot].present = 0;
+		unit_order[slot] = NULL;
+	}
 	for (bank = 0; bank < 2; bank++) {
 		for (drive = 0; drive < 2; drive++) {
-			struct ide_unit *unit = &units[unit_count];
+			struct ide_unit *unit;
 			const struct boots_device *bios_dev = NULL;
 			unsigned i;
 
-			if (unit_count >= IDE_UNIT_MAX)
-				break;
+			slot = (unsigned)bank * 2U + drive;
+			unit = &units[slot];
 			if (!identify(bank, drive, data))
 				continue;
 			unit->bank = bank;
@@ -341,15 +347,13 @@ boots_ide_pc98_init(const struct boots_device *bios_devices,
 			 * Partition tables are written in the firmware-sensed
 			 * geometry, so prefer it over IDENTIFY.  The firmware
 			 * enumerates IDE disks in the same bank-major order
-			 * this probe uses, so the pairing is ordinal.
+			 * this probe uses, so BIOS ID 80h+slot is an exact pairing.
 			 */
-			for (i = bios_ide_used;
-			     bios_devices != NULL && i < bios_device_count;
+			for (i = 0; bios_devices != NULL && i < bios_device_count;
 			     i++) {
-				if (bios_devices[i].device_class ==
-				    BOOTS_DEV_IDE) {
+				if (bios_devices[i].device_class == BOOTS_DEV_IDE &&
+				    bios_devices[i].bios_id == 0x80U + slot) {
 					bios_dev = &bios_devices[i];
-					bios_ide_used = i + 1U;
 					break;
 				}
 			}
@@ -363,8 +367,11 @@ boots_ide_pc98_init(const struct boots_device *bios_devices,
 				unit->blkdev.sectors_per_track =
 					unit->native_sectors;
 			}
-			if (boots_blkdev_register(&unit->blkdev))
+			if (boots_blkdev_register(&unit->blkdev)) {
+				unit->present = 1;
+				unit_order[unit_count] = unit;
 				unit_count++;
+			}
 		}
 	}
 	return unit_count;
@@ -373,5 +380,16 @@ boots_ide_pc98_init(const struct boots_device *bios_devices,
 struct boots_blkdev *
 boots_ide_pc98_unit(unsigned ordinal)
 {
-	return ordinal < unit_count ? &units[ordinal].blkdev : NULL;
+	return ordinal < unit_count ? &unit_order[ordinal]->blkdev : NULL;
+}
+
+struct boots_blkdev *
+boots_ide_pc98_bios_unit(uint8_t bios_id)
+{
+	unsigned slot;
+
+	if (bios_id < 0x80U || bios_id >= 0x80U + IDE_UNIT_MAX)
+		return NULL;
+	slot = bios_id - 0x80U;
+	return units[slot].present ? &units[slot].blkdev : NULL;
 }

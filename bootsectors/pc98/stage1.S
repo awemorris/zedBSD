@@ -57,6 +57,9 @@
 	.set DEV_FLAG_GEOMETRY,   2
 	.set DEV_FLAG_BOOT,       4
 	.set DEV_DESC_SIZE,      16
+	.set MAX_IDE_DEVICES,     4
+	.set MAX_FIXED_DEVICES,  11
+	.set PC98_WA_IDE_DRIVES, 0x055d
 
 	.set DEV_CLASS,           0
 	.set DEV_INDEX,           1
@@ -93,6 +96,7 @@ stage1_main:
 	call	validate_bootstrap_handoff
 	jc	fatal_handoff
 	call	initialize_boot_device
+	call	enumerate_ide_devices
 	call	load_stage2
 	jc	fatal_stage2
 	jmp	enter_stage2
@@ -164,15 +168,14 @@ validate_bootstrap_handoff:
 	stc
 	ret
 
-/* Construct the one boot-origin descriptor needed before incremental probing
- * is added in the next refactoring step. */
+/* Construct the boot-origin descriptor before enumerating the other disks. */
 initialize_boot_device:
 	pushw	%es
 	pushw	%ds
 	popw	%es
 	movw	$device_table, %di
 	xorw	%ax, %ax
-	movw	$DEV_DESC_SIZE, %cx
+	movw	$(DEV_DESC_SIZE * MAX_FIXED_DEVICES), %cx
 	rep stosb
 	popw	%es
 
@@ -185,7 +188,11 @@ initialize_boot_device:
 	movl	HANDOFF+HO_PARTITION_LBA, %edx
 	popw	%ds
 
+	movb	%al, boot_bios_id
 	movb	%al, device_table+DEV_BIOS_ID
+	movb	%al, %ah
+	andb	$0x0f, %ah
+	movb	%ah, device_table+DEV_INDEX
 	movb	%al, gateway_menu+MENU_BIOS_ID
 	movb	%ch, device_table+DEV_HEADS
 	movb	%ch, gateway_menu+MENU_HEADS
@@ -210,6 +217,84 @@ initialize_boot_device:
 	movl	%edx, gateway_menu+MENU_LBA
 	movw	$gateway_menu, chain_entry
 	movb	$1, device_count
+	ret
+
+/*
+ * Build descriptors for every IDE unit reported by the BIOS before leaving
+ * real mode.  0:055dh is a dense bitmap whose bit N denotes BIOS unit 80h+N.
+ * Consulting it first avoids issuing SENSE to absent units on firmware which
+ * does not return from such a request.  The boot-origin unit is already in
+ * slot zero and is retained even when the firmware omitted its bitmap bit.
+ */
+enumerate_ide_devices:
+	pushw	%ax
+	pushw	%bx
+	pushw	%cx
+	pushw	%dx
+	pushw	%di
+	pushw	%ds
+	xorw	%ax, %ax
+	movw	%ax, %ds
+	movb	PC98_WA_IDE_DRIVES, %bl
+	popw	%ds
+	andb	$0x0f, %bl
+	movb	$0x80, %al
+	movw	$MAX_IDE_DEVICES, %cx
+1:
+	testb	$1, %bl
+	jz	2f
+	cmpb	boot_bios_id, %al
+	je	2f
+	call	bios_sense
+	jc	2f
+	cmpb	$0x20, sense_status
+	jae	2f
+	cmpw	$512, sense_bytes
+	jne	2f
+	cmpb	$0, sense_heads
+	je	2f
+	cmpb	$0, sense_sectors
+	je	2f
+	call	bios_probe_read_lba0
+	jc	2f
+	cmpb	$0x20, probe_read_status
+	jae	2f
+
+	pushw	%ax
+	movb	device_count, %al
+	xorb	%ah, %ah
+	shlw	$4, %ax
+	movw	%ax, %di
+	popw	%ax
+	movb	$DEV_CLASS_IDE, device_table+DEV_CLASS(%di)
+	movb	%al, %ah
+	andb	$0x0f, %ah
+	movb	%ah, device_table+DEV_INDEX(%di)
+	movb	%al, device_table+DEV_BIOS_ID(%di)
+	movb	$(DEV_FLAG_PRESENT | DEV_FLAG_GEOMETRY), device_table+DEV_FLAGS(%di)
+	movw	sense_bytes, %dx
+	movw	%dx, device_table+DEV_SECTOR_SIZE(%di)
+	movw	sense_cylinders, %dx
+	movw	%dx, device_table+DEV_CYLINDERS(%di)
+	movb	sense_heads, %dl
+	movb	%dl, device_table+DEV_HEADS(%di)
+	movb	sense_sectors, %dl
+	movb	%dl, device_table+DEV_SECTORS(%di)
+	movb	sense_status, %dl
+	movb	%dl, device_table+10(%di)
+	incb	device_count
+2:
+	shrb	$1, %bl
+	incb	%al
+	decw	%cx
+	jz	3f
+	jmp	1b
+3:
+	popw	%di
+	popw	%dx
+	popw	%cx
+	popw	%bx
+	popw	%ax
 	ret
 
 /* Load and validate BOOT.SYS from the handoff BOOT FAT16 volume. */
@@ -1474,6 +1559,7 @@ disk_flags:            .word 0
 chain_entry:           .word 0
 clock_calendar:        .space 6
 device_count:          .byte 0
+boot_bios_id:          .byte 0
 fat_sector_scale:      .byte 0
 fat_fs_hint:           .byte 0
 	.balign 2
@@ -1541,4 +1627,4 @@ gateway_module_type:    .word 0
 	.balign 16
 gateway_menu:           .space MENU_SIZE
 	.balign 16
-device_table:           .space DEV_DESC_SIZE
+device_table:           .space DEV_DESC_SIZE * MAX_FIXED_DEVICES

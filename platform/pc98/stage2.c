@@ -339,25 +339,15 @@ beui_display_stop(void *context)
 }
 /*
  * Native block device lookup.  The firmware enumerates IDE disks in the
- * same bank-major order the driver probes them, so the pairing between
- * a BIOS device descriptor and a registered unit is ordinal.  Non-IDE
- * classes have no native driver yet (SCSI later; floppies need a future
- * FDC driver) and read as absent.
+ * same bank-major order the driver probes them, so BIOS IDs 80h..83h map
+ * directly to native IDE slots.  Non-IDE classes have no native driver yet
+ * (SCSI later; floppies need a future FDC driver) and read as absent.
  */
 static struct boots_blkdev *blk_for_dev(const struct boots_device *d)
 {
-	unsigned ordinal = 0;
-
-	for (unsigned i = 0; i < device_count; i++) {
-		if (&devs[i] == d) {
-			if (d->device_class != BOOTS_DEV_IDE)
-				return 0;
-			return boots_ide_pc98_unit(ordinal);
-		}
-		if (devs[i].device_class == BOOTS_DEV_IDE)
-			ordinal++;
-	}
-	return 0;
+	if (d == NULL || d->device_class != BOOTS_DEV_IDE)
+		return NULL;
+	return boots_ide_pc98_bios_unit(d->bios_id);
 }
 /* Nonzero on failure, matching the old gateway convention. */
 static int readsec(const struct boots_device *d, uint32_t lba, void *buf)

@@ -24,4 +24,7 @@ unsigned boots_ide_pc98_init(const struct boots_device *bios_devices,
 /* The ordinal-th registered IDE disk, in probe (bank-major) order. */
 struct boots_blkdev *boots_ide_pc98_unit(unsigned ordinal);
 
+/* Look up the physical IDE slot corresponding to BIOS unit 80h..83h. */
+struct boots_blkdev *boots_ide_pc98_bios_unit(uint8_t bios_id);
+
 #endif

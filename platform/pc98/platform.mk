@@ -345,6 +345,9 @@ noct-m9-verify: noct-m8-verify check $(BUILD)/BOOT.SYS $(BUILD)/BOOT-M9.SYS \
 noct-file-qemu-test: $(BUILD)/BOOT.SYS
 	$(SCRIPTS_DIR)/test-noct-file.sh
 
+ide-multidrive-qemu-test: $(BUILD)/BOOT.SYS
+	$(SCRIPTS_DIR)/test-ide-multidrive.sh
+
 noct-m10-verify: noct-m9-verify check $(BUILD)/BOOT.SYS \
 	noct-m5-final-opcode-check noct-file-qemu-test
 	@echo "Boots M10 verification: PASS (FAT16 writer and Noct File API)"
@@ -432,6 +435,7 @@ beui-g5-verify: beui-g4-verify beui-input-qemu-test \
 	@echo "Boots BeUI G5 verification: PASS (BeUI-only input and Holoris)"
 
 .PHONY: noct-host-test noct-m4-opcode-check noct-m4-verify \
+	ide-multidrive-qemu-test \
 	noct-m5-final-opcode-check noct-m5-verify noct-m6-verify \
 	noct-m7-verify noct-m8-verify bios-write-qemu-test noct-m9-verify \
 	noct-file-qemu-test noct-m10-verify noct-utilities-qemu-test \
