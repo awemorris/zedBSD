@@ -5,9 +5,9 @@
  */
 
 #include "libc/stdio-fs.h"
-#include "core/env.h"
-#include "core/fs.h"
-#include "core/namespace.h"
+#include "kern/env.h"
+#include "kern/fs.h"
+#include "kern/namespace.h"
 
 #include <errno.h>
 #include <limits.h>

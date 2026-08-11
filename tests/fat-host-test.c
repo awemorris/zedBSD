@@ -1,6 +1,6 @@
 /* Host-side regression tests for the Boots FAT12/FAT16 driver. */
 
-#include "core/fat16.h"
+#include "kern/fat16.h"
 
 #include <assert.h>
 #include <stdint.h>

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include "core/blkdev.h"
-#include "core/partition.h"
-#include "platform/pc98/partition-pc98.h"
+#include "kern/block.h"
+#include "kern/partition.h"
+#include "kern/pc98/partition.h"
 
 #include <stdio.h>
 #include <string.h>

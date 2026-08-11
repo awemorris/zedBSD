@@ -3,7 +3,10 @@
 # SPDX-License-Identifier: Zlib
 #
 # Layout:
-#   core/             platform-neutral services (fs, env, Noct integration)
+#   include/          public HAL and kernel interfaces
+#   src/hal/          HAL and board support implementation
+#   src/kern/         platform-neutral kernel services
+#   src/noct/         temporary in-kernel Noct integration
 #   libc/             freestanding libc subset
 #   softfloat/        soft-float support built from vendor GCC/musl sources
 #   platform/<arch>/  per-architecture targets (IPLs, stages, console)
@@ -39,7 +42,7 @@ export BOOTS_ARCH := $(ARCH)
 export BOOTS_BUILD_DIR := $(CURDIR)/$(BUILD)
 
 ASFLAGS := --32
-BOOTS_CPPFLAGS := -nostdinc -I. -I$(BUILD) -Ilibc/include
+BOOTS_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. -I$(BUILD) -Ilibc/include
 BOOTS_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -Wall -Wextra -Werror
@@ -66,7 +69,7 @@ $(BUILD)/%.o: %.c
 $(BOOTS_LIBC_OBJECTS): OBJ_CPPFLAGS = $(BOOTS_LIBC_CPPFLAGS)
 $(BOOTS_LIBC_OBJECTS): OBJ_CFLAGS = $(BOOTS_LIBC_CFLAGS)
 
-$(BUILD)/core/messages.h: core/messages.txt $(SCRIPTS_DIR)/generate-messages.py
+$(BUILD)/kern/messages.h: src/kern/messages.txt $(SCRIPTS_DIR)/generate-messages.py
 	@mkdir -p $(dir $@)
 	$(PYTHON) $(SCRIPTS_DIR)/generate-messages.py $< $@
 
@@ -77,29 +80,31 @@ $(BUILD)/core/messages.h: core/messages.txt $(SCRIPTS_DIR)/generate-messages.py
 HOST_TEST_CC := $(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -I.
 
 $(BUILD)/tests/fat-host-test: tests/fat-host-test.c \
-	core/fs.c core/fat.c core/fat16.c
+	src/kern/fs.c src/kern/fat.c src/kern/fat16.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) core/fs.c core/fat.c core/fat16.c $< -o $@
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/fs.c src/kern/fat.c \
+		src/kern/fat16.c $< -o $@
 
 $(BUILD)/tests/fat-write-host-test: tests/fat-write-host-test.c \
-	core/fs.c core/fat.c core/fat16.c
+	src/kern/fs.c src/kern/fat.c src/kern/fat16.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) core/fs.c core/fat.c core/fat16.c $< -o $@
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/fs.c src/kern/fat.c \
+		src/kern/fat16.c $< -o $@
 
-$(BUILD)/tests/env-host-test: tests/env-host-test.c core/env.c
+$(BUILD)/tests/env-host-test: tests/env-host-test.c src/kern/env.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) -Wall -Wextra -Werror -I. core/env.c $< -o $@
+	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc src/kern/env.c $< -o $@
 
 $(BUILD)/tests/noct-memory-host-test: tests/noct-memory-host-test.c \
-	core/noct-memory.c
+	src/noct/memory.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) -Wall -Wextra -Werror -I. core/noct-memory.c $< -o $@
+	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc src/noct/memory.c $< -o $@
 
 $(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
-	core/fs.c core/namespace.c core/env.c $(BOOTS_LIBC_SOURCES)
+	src/kern/fs.c src/kern/namespace.c src/kern/env.c $(BOOTS_LIBC_SOURCES)
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(BOOTS_HOST_TEST_CFLAGS) core/fs.c core/namespace.c \
-		core/env.c $(BOOTS_LIBC_SOURCES) $< -o $@
+	$(HOSTCC) $(BOOTS_HOST_TEST_CFLAGS) -Iinclude -Isrc src/kern/fs.c \
+		src/kern/namespace.c src/kern/env.c $(BOOTS_LIBC_SOURCES) $< -o $@
 
 stdio-fs-host-test: $(BUILD)/tests/stdio-fs-host-test
 	$(BUILD)/tests/stdio-fs-host-test
@@ -115,20 +120,14 @@ $(BUILD)/tests/beui-host-test: $(NOCT_ROOT)/tests/beui-test.c \
 	@mkdir -p $(dir $@)
 	$(BEUI_TEST_CC) $(BEUI_CORE_SOURCES) $< -o $@
 
-$(BUILD)/tests/kbd-pc98-map-host-test: tests/kbd-pc98-map-host-test.c \
-	drivers/kbd-pc98-map.c
-	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Inoct/include drivers/kbd-pc98-map.c $< -o $@
-
 $(BUILD)/tests/blkdev-host-test: tests/blkdev-host-test.c \
-	core/blkdev.c core/partition.c platform/pc98/partition-pc98.c
+	src/kern/block.c src/kern/partition.c src/kern/pc98/partition.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) core/blkdev.c core/partition.c \
-		platform/pc98/partition-pc98.c $< -o $@
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/block.c src/kern/partition.c \
+		src/kern/pc98/partition.c $< -o $@
 
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/blkdev-host-test \
-	$(BUILD)/tests/kbd-pc98-map-host-test \
 	$(BUILD)/tests/fat-host-test \
 	$(BUILD)/tests/fat-write-host-test \
 	$(BUILD)/tests/env-host-test \

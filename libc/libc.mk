@@ -19,7 +19,7 @@ BOOTS_LIBC_SOURCES := \
 
 BOOTS_LIBC_OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(BOOTS_LIBC_SOURCES))
 
-BOOTS_LIBC_CPPFLAGS := -nostdinc -I. -I$(BUILD) -Ilibc/include
+BOOTS_LIBC_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. -I$(BUILD) -Ilibc/include
 BOOTS_LIBC_CFLAGS := \
 	-m32 -march=i386 -Os -ffreestanding -fno-builtin \
 	-fno-pic -fno-pie -fno-stack-protector \
@@ -32,13 +32,13 @@ BOOTS_LIBC_CFLAGS := \
 BOOTS_HOST_TEST_CFLAGS := \
 	-m32 -O2 -fno-builtin -fno-stack-protector \
 	-Wall -Wextra -Werror \
-	-I. -Ilibc/include
+	-I. -Iinclude -Isrc -Ilibc/include
 
 $(BUILD)/tests/libc-host-test: tests/libc-host-test.c \
-	$(BOOTS_LIBC_SOURCES) core/fs.c core/namespace.c core/env.c
+	$(BOOTS_LIBC_SOURCES) src/kern/fs.c src/kern/namespace.c src/kern/env.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(BOOTS_HOST_TEST_CFLAGS) \
-		core/fs.c core/namespace.c core/env.c \
+		src/kern/fs.c src/kern/namespace.c src/kern/env.c \
 		$(BOOTS_LIBC_SOURCES) $< -o $@
 
 libc-objects: $(BOOTS_LIBC_OBJECTS)

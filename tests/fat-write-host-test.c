@@ -1,6 +1,6 @@
 /* Destructive host-side regression tests for the Boots FAT16 writer. */
 
-#include "core/fat16.h"
+#include "kern/fat16.h"
 
 #include <assert.h>
 #include <stdint.h>

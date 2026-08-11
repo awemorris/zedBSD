@@ -1,8 +1,8 @@
 /* Host-side tests for Boots filesystem-backed stdio. */
 
-#include "core/fs.h"
-#include "core/env.h"
-#include "core/namespace.h"
+#include "kern/fs.h"
+#include "kern/env.h"
+#include "kern/namespace.h"
 #include "libc/heap.h"
 #include "libc/stdio-fs.h"
 

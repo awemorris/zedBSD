@@ -123,12 +123,12 @@ softfloat-opcode-check: softfloat-objects
 	@echo "Boots soft-float i386 opcode check: PASS"
 
 $(BUILD)/tests/softfloat-host-test: tests/softfloat-host-test.c \
-	$(BOOTS_LIBC_OBJECTS) $(BOOTS_SOFTFLOAT_OBJECTS) core/fs.c \
-	core/namespace.c
+	$(BOOTS_LIBC_OBJECTS) $(BOOTS_SOFTFLOAT_OBJECTS) src/kern/fs.c \
+	src/kern/namespace.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(BOOTS_LIBC_CPPFLAGS) $(BOOTS_SOFTFLOAT_CFLAGS) \
 		-no-pie \
-		tests/softfloat-host-test.c core/fs.c core/namespace.c \
+		tests/softfloat-host-test.c src/kern/fs.c src/kern/namespace.c \
 		$(BOOTS_LIBC_OBJECTS) \
 		$(BOOTS_SOFTFLOAT_OBJECTS) -o $@
 

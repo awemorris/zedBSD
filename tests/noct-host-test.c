@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include "core/noct.h"
+#include "kern/noct.h"
+#include "hal/console.h"
 #include <noct/beui.h>
-#include "core/noct-memory.h"
-#include "core/noct-napi.h"
-#include "core/noct-m6-script.h"
-#include "core/env.h"
-#include "core/fs.h"
+#include "noct/memory.h"
+#include "noct/napi.h"
+#include "noct/noct-m6-script.h"
+#include "kern/env.h"
+#include "kern/fs.h"
 #include "libc/heap.h"
 
 #include <stddef.h>
@@ -347,7 +348,7 @@ static int mock_keyboard_poll(void *context)
 			platform->keyboard_bios_position];
 	if (platform->keyboard_bios_key != 0)
 		return platform->keyboard_bios_key;
-	return 0x3b00; /* raw PC-98 BIOS AX for cursor left */
+	return NOCT_BEUI_KEY_LEFT;
 }
 
 static int mock_keyboard_read(void *context)
@@ -1019,6 +1020,17 @@ main(int argc, char **argv)
 	/* VM/API registration alone must never probe or enter graphics. */
 	if (mock.beui_enter_count != 0 || mock.beui_pointer_start_count != 0)
 		return 247;
+	/* Current Noct File APIs use the mounted Boots filesystem.  Give the
+	 * BeUI image test the same BMP through that path, then detach it so the
+	 * following terminal test continues to exercise the service callbacks. */
+	memset(records, 0, sizeof(records));
+	strcpy(records[0].name, "TEST.BMP");
+	records[0].exists = 1;
+	records[0].size = sizeof(mock_bmp);
+	memcpy(records[0].data, mock_bmp, sizeof(mock_bmp));
+	if (!boots_fs_mount(&filesystem, &volume, drivers, 1))
+		return 248;
+	test_filesystem = &filesystem;
 	memset(&mock, 0, sizeof(mock));
 	status = run_case(beui_script, 0, BOOTS_NOCT_OK,
 			  "0\n1\n1\n640\n400\n1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n0\n", &result);
@@ -1029,6 +1041,8 @@ main(int argc, char **argv)
 	    mock.beui_pointer_poll_count != 1 || mock.beui_flush_count != 1 ||
 	    mock.beui_fill_count != 1 || mock.beui_draw_count != 2)
 		return 248 + status;
+	test_filesystem = NULL;
+	memset(records, 0, sizeof(records));
 	memset(&mock, 0, sizeof(mock));
 	status = run_case(beui_cleanup_script, 1, BOOTS_NOCT_OK, "", &result);
 	if (status != 0 || mock.beui_enter_count != 1 ||
@@ -1045,20 +1059,16 @@ main(int argc, char **argv)
 	    mock.beui_pointer_stop_count != 1)
 		return 250 + status;
 	memset(&mock, 0, sizeof(mock));
-	mock.keyboard_bios_key = 0x3b00;
-	/* Modifier-only BIOS make events must not reach Term.readKey(). */
-	mock.keyboard_bios_queue[0] = 0x7000; /* Shift */
-	mock.keyboard_bios_queue[1] = 0x7300; /* Graph (PC/AT Alt) */
-	mock.keyboard_bios_queue[2] = 0x7400; /* Ctrl */
+	mock.keyboard_bios_key = NOCT_BEUI_KEY_LEFT;
+	/* Modifier-only HAL make events must not reach Term.readKey(). */
+	mock.keyboard_bios_queue[0] = HAL_KEY_SHIFT;
+	mock.keyboard_bios_queue[1] = 0x173; /* Graph */
+	mock.keyboard_bios_queue[2] = 0x174; /* Ctrl */
 	mock.keyboard_bios_queue[3] = 0x001b;
 	mock.keyboard_bios_queue[4] = 0x0078;
-	/* A genuine NEC ROM returns Graph+X as AX=2a81h.  Stage 1 packs the
-	 * work-area Graph bit into bits 23:16 and the Term adapter must recover
-	 * the ordinary scan-code character before applying META. */
-	mock.keyboard_bios_queue[5] = 0x00082a81;
+	mock.keyboard_bios_queue[5] = HAL_KEY_EVENT_GRAPH | 'x';
 	mock.keyboard_bios_queue[6] = 0x0003;
-	/* BL shift-state bit 4 is packed into bits 23:16 by Stage 1. */
-	mock.keyboard_bios_queue[7] = 0x00100020;
+	mock.keyboard_bios_queue[7] = HAL_KEY_EVENT_CTRL | 0x20;
 	mock.keyboard_bios_count = 8;
 	status = run_case_args(term_script, 0, NULL, 0, BOOTS_NOCT_OK, 0,
 			       "", &result);

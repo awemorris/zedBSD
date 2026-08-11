@@ -15,21 +15,25 @@ CIRRUS_NOCT_CFLAGS = $(filter-out -Os,$(NOCT_CFLAGS)) -O2
 # verification targets later in this file.
 HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
-	-Ihal/include -Ihal/i386 -DHAL_ARCH_I386 -DHAL_BOARD_PC98
+	-Iinclude -Isrc -Isrc/hal/i386 -Ilibc/include \
+	-DHAL_ARCH_I386 -DHAL_BOARD_PC98
 HAL_PC98_SOURCES := \
-	hal/i386/lib.c hal/i386/irq.c hal/i386/page.c hal/i386/univ.c \
-	hal/i386/int.c hal/i386/cmain.c hal/i386/task.c hal/i386/fb.c \
-	hal/i386/bsp-pc98/cons.c hal/i386/bsp-pc98/pic.c \
-	hal/i386/bsp-pc98/clock.c
-HAL_PC98_ASM := hal/i386/locore.S hal/i386/trap.S hal/i386/dispatch.S
+	src/hal/i386/lib.c src/hal/i386/irq.c src/hal/i386/page.c \
+	src/hal/i386/univ.c src/hal/i386/int.c src/hal/i386/cmain.c \
+	src/hal/i386/task.c src/hal/i386/fb.c \
+	src/hal/i386/bsp-pc98/cons.c src/hal/i386/bsp-pc98/pic.c \
+	src/hal/i386/bsp-pc98/clock.c src/hal/i386/bsp-pc98/display.c \
+	src/hal/i386/bsp-pc98/jisx0208.c
+HAL_PC98_ASM := src/hal/i386/locore.S src/hal/i386/trap.S \
+	src/hal/i386/dispatch.S
 HAL_PC98_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(HAL_PC98_SOURCES)) \
 	$(patsubst %.S,$(BUILD)/%.o,$(HAL_PC98_ASM))
 
 BOOTS_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
-	-I. -Ilibc/include -Ihal/include
-KERN_OBJS := $(BUILD)/kern/kmain.o $(BUILD)/kern/sched-stub.o \
-	$(BUILD)/kern/entry.o
+	-Iinclude -Isrc -I. -Ilibc/include
+KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
+	$(BUILD)/src/kern/sched-stub.o
 
 # Milestone verification nests QEMU tests.  Keep those chains ordered even
 # when the caller requests a highly parallel compile.
@@ -48,32 +52,38 @@ PC98_BEUI_OBJS := \
 
 STAGE2_OBJS = \
 	$(BUILD)/$(PC98)/boot-header.o \
-	$(BUILD)/$(PC98)/stage2.o \
-	$(BUILD)/$(PC98)/console.o \
-	$(BUILD)/$(PC98)/display-pc98.o \
-	$(BUILD)/$(PC98)/exit-trampoline.o \
-	$(BUILD)/core/env.o \
-	$(BUILD)/core/fs.o \
-	$(BUILD)/core/namespace.o \
+	$(BUILD)/src/kern/main.o \
+	$(BUILD)/src/kern/startup.o \
+	$(BUILD)/src/kern/shell.o \
+	$(BUILD)/src/kern/device.o \
+	$(BUILD)/src/kern/pc98/linux-entry.o \
+	$(BUILD)/src/kern/env.o \
+	$(BUILD)/src/kern/fs.o \
+	$(BUILD)/src/kern/namespace.o \
 	$(PC98_BEUI_OBJS) \
-	$(BUILD)/core/fat.o \
-	$(BUILD)/core/fat16.o \
-	$(BUILD)/core/blkdev.o \
-	$(BUILD)/core/partition.o \
-	$(BUILD)/drivers/ide-pc98.o \
-	$(BUILD)/drivers/kbd-pc98.o \
-	$(BUILD)/drivers/kbd-pc98-map.o \
-	$(BUILD)/$(PC98)/partition-pc98.o \
-	$(BUILD)/core/image.o \
-	$(BUILD)/core/noct.o \
-	$(BUILD)/core/noct-memory.o \
-	$(BUILD)/core/noct-napi.o \
-	$(BUILD)/$(PC98)/noct-platform.o \
-	$(BUILD)/$(PC98)/noct-target.o \
+	$(BUILD)/src/kern/fat.o \
+	$(BUILD)/src/kern/fat16.o \
+	$(BUILD)/src/kern/block.o \
+	$(BUILD)/src/kern/partition.o \
+	$(BUILD)/drivers/pc98-ide.o \
+	$(BUILD)/src/kern/pc98/partition.o \
+	$(BUILD)/src/kern/pc98/platform.o \
+	$(BUILD)/src/kern/pc98/linux-boot.o \
+	$(BUILD)/src/kern/image.o \
+	$(BUILD)/src/kern/panic.o \
+	$(BUILD)/src/noct/noct.o \
+	$(BUILD)/src/noct/memory.o \
+	$(BUILD)/src/noct/napi.o \
+	$(BUILD)/src/noct/platform.o \
+	$(BUILD)/src/noct/target.o \
+	$(BUILD)/src/noct/pc98-beui.o \
 	$(NOCT_OBJECTS) $(BOOTS_LIBC_OBJECTS) $(BOOTS_SOFTFLOAT_OBJECTS) \
 	$(HAL_PC98_OBJS) $(KERN_OBJS)
-M9_STAGE2_OBJS = $(filter-out $(BUILD)/$(PC98)/stage2.o,$(STAGE2_OBJS)) \
-	$(BUILD)/$(PC98)/stage2-m9-test.o
+M9_STAGE2_OBJS = $(filter-out $(BUILD)/src/kern/main.o \
+	$(BUILD)/src/kern/shell.o $(BUILD)/src/kern/device.o,$(STAGE2_OBJS)) \
+	$(BUILD)/$(PC98)/stage2-m9-test.o \
+	$(BUILD)/$(PC98)/shell-m9-test.o \
+	$(BUILD)/$(PC98)/device-m9-test.o
 
 all: $(BUILD)/boot2.bin $(BUILD)/ipl-lba0.bin $(BUILD)/ipl-lba2.bin \
 	$(BUILD)/ipl-lba0.img $(BUILD)/ipl-lba2.img $(BUILD)/ipl-part.img \
@@ -93,27 +103,39 @@ BOOTAPP.BIN: $(BUILD)/BOOTAPP.BIN
 
 $(NOCT_BUILD_DIR)/beui-pc98-cirrus.o: NOCT_CFLAGS := $(CIRRUS_NOCT_CFLAGS)
 
-NOCT_GLUE_OBJS := $(BUILD)/core/noct.o $(BUILD)/core/noct-napi.o \
-	$(BUILD)/$(PC98)/noct-target.o
-$(NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(NOCT_CPPFLAGS)
+NOCT_GLUE_OBJS := $(BUILD)/src/noct/noct.o $(BUILD)/src/noct/napi.o \
+	$(BUILD)/src/noct/target.o
+$(NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
 $(NOCT_GLUE_OBJS): OBJ_CFLAGS = $(NOCT_CFLAGS)
-$(BUILD)/$(PC98)/noct-platform.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) \
+$(BUILD)/src/noct/pc98-beui.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
+# This is Boots' BeUI/HAL adapter, not part of the Noct VM.  Keep the
+# pre-split ABI/code-generation flags that stage2.c used for this code.
+$(BUILD)/src/noct/pc98-beui.o: OBJ_CFLAGS = $(BOOTS_CFLAGS)
+$(BUILD)/src/noct/platform.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) \
 	$(BOOTS_LIBC_CPPFLAGS)
-$(BUILD)/$(PC98)/noct-platform.o: OBJ_CFLAGS = $(BOOTS_LIBC_CFLAGS)
+$(BUILD)/src/noct/platform.o: OBJ_CFLAGS = $(BOOTS_LIBC_CFLAGS)
 
-# stage2.c builds the BeUI HAL from the upstream PC-98 backends, so it
-# needs the Noct include paths and the freestanding libc headers those
-# reach for.  The code generation flags stay the ordinary Boots ones.
-STAGE2_CPPFLAGS = $(NOCT_CPPFLAGS) -Ihal/include
-$(BUILD)/$(PC98)/stage2.o: OBJ_CPPFLAGS = $(STAGE2_CPPFLAGS)
-$(BUILD)/drivers/kbd-pc98-map.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS)
+# The shell reaches the embedded Noct API, so it needs the Noct include paths.
+# Code generation flags remain the ordinary Boots ones.
+STAGE2_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
+$(BUILD)/src/kern/shell.o: OBJ_CPPFLAGS = $(STAGE2_CPPFLAGS)
 
-$(BUILD)/$(PC98)/stage2.o $(BUILD)/$(PC98)/stage2-m9-test.o: \
-	$(BUILD)/core/messages.h
+$(BUILD)/src/kern/startup.o $(BUILD)/$(PC98)/stage2-m9-test.o: \
+	$(BUILD)/kern/messages.h
 
-$(BUILD)/$(PC98)/stage2-m9-test.o: $(PC98)/stage2.c
+$(BUILD)/$(PC98)/stage2-m9-test.o: src/kern/main.c
 	@mkdir -p $(dir $@)
 	$(CC) $(STAGE2_CPPFLAGS) $(BOOTS_CFLAGS) -DBOOTS_M9_WRITE_TEST \
+		-MMD -MP -c $< -o $@
+
+$(BUILD)/$(PC98)/shell-m9-test.o: src/kern/shell.c
+	@mkdir -p $(dir $@)
+	$(CC) $(STAGE2_CPPFLAGS) $(BOOTS_CFLAGS) -DBOOTS_M9_WRITE_TEST \
+		-MMD -MP -c $< -o $@
+
+$(BUILD)/$(PC98)/device-m9-test.o: src/kern/device.c
+	@mkdir -p $(dir $@)
+	$(CC) $(BOOTS_CPPFLAGS) $(BOOTS_CFLAGS) -DBOOTS_M9_WRITE_TEST \
 		-MMD -MP -c $< -o $@
 
 # ----------------------------------------------------------------------
@@ -234,16 +256,17 @@ $(BUILD)/tests/beui-pc98-cirrus-host-test: \
 	$(BEUI_TEST_CC) $(NOCT_ROOT)/src/api/beui-pc98-cirrus.c $< -o $@
 
 $(BUILD)/tests/noct-host-test: tests/noct-host-test.c \
-	apps/LS.NCT apps/CP.NCT core/noct-m6-script.h \
-	$(NOCT_GLUE_OBJS) $(BUILD)/core/env.o $(BUILD)/core/fs.o $(BUILD)/core/namespace.o \
+	apps/LS.NCT apps/CP.NCT src/noct/noct-m6-script.h \
+	$(NOCT_GLUE_OBJS) $(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
+	$(BUILD)/src/kern/namespace.o \
 	$(NOCT_OBJECTS) $(BOOTS_LIBC_OBJECTS) $(BOOTS_SOFTFLOAT_OBJECTS)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -m32 -no-pie -fno-builtin -fno-stack-protector -Wall -Wextra \
-		-Werror -I. -Ilibc/include -I$(NOCT_ROOT)/include \
+		-Werror -I. -Iinclude -Isrc -Ilibc/include -I$(NOCT_ROOT)/include \
 		-DBOOTS_NOCT_JIT_CODE_MAX=$(NOCT_JIT_CODE_MAX) \
 		tests/noct-host-test.c $(NOCT_GLUE_OBJS) \
-		$(BUILD)/core/env.o $(BUILD)/core/fs.o \
-		$(BUILD)/core/namespace.o $(NOCT_OBJECTS) \
+		$(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
+		$(BUILD)/src/kern/namespace.o $(NOCT_OBJECTS) \
 		$(BOOTS_LIBC_OBJECTS) $(BOOTS_SOFTFLOAT_OBJECTS) -o $@
 
 NOCT_M6_JIT_CODE := $(BUILD)/logs/m6-jit-code.bin
@@ -258,11 +281,11 @@ noct-host-test: $(BUILD)/tests/noct-host-test
 # Compile-check the i386 HAL and PC-98 BSP under the same freestanding
 # target flags used by the BOOT.SYS link.
 
-$(BUILD)/hal/%.o: hal/%.c
+$(BUILD)/src/hal/%.o: src/hal/%.c
 	@mkdir -p $(dir $@)
 	$(HAL_CC) -MMD -MP -c $< -o $@
 
-$(BUILD)/hal/%.o: hal/%.S
+$(BUILD)/src/hal/%.o: src/hal/%.S
 	@mkdir -p $(dir $@)
 	$(HAL_CC) -D_ASM_SRC_ -MMD -MP -c $< -o $@
 
@@ -271,30 +294,34 @@ hal-pc98-compile: $(HAL_PC98_OBJS)
 
 # The kernel-side HAL glue compiles in Boots' own type world.
 
-$(BUILD)/kern/kmain.o: kern/kmain.c
+$(BUILD)/src/kern/entry.o: src/kern/entry.c
 	@mkdir -p $(dir $@)
 	$(BOOTS_KERN_CC) -MMD -MP -c $< -o $@
 
-$(BUILD)/kern/sched-stub.o: kern/sched-stub.c
+$(BUILD)/src/kern/sched-stub.o: src/kern/sched-stub.c
 	@mkdir -p $(dir $@)
 	$(HAL_CC) -MMD -MP -c $< -o $@
-
-$(BUILD)/kern/entry.o: kern/entry.S
-	@mkdir -p $(dir $@)
-	$(HAL_CC) -D_ASM_SRC_ -MMD -MP -c $< -o $@
 
 kern-compile: $(KERN_OBJS)
 	@echo "Boots kernel glue compile check: PASS"
 .PHONY: hal-pc98-compile kern-compile
 
+$(BUILD)/tests/hal-pc98-keyboard-host-test: \
+	tests/hal-pc98-keyboard-host-test.c \
+	src/hal/i386/bsp-pc98/cons.c \
+	src/hal/i386/bsp-pc98/jisx0208.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -std=gnu11 -Iinclude -Isrc $< -o $@
+
 HOST_TEST_BINARIES += $(BUILD)/tests/beui-pc98-gdc-host-test \
-	$(BUILD)/tests/beui-pc98-cirrus-host-test
+	$(BUILD)/tests/beui-pc98-cirrus-host-test \
+	$(BUILD)/tests/hal-pc98-keyboard-host-test
 CHECK_RUN_TARGETS += noct-host-test hal-pc98-compile kern-compile
 
 # ----------------------------------------------------------------------
 # Milestone and QEMU verification chains.
 
-noct-m4-opcode-check: $(BUILD)/core/noct.o $(BUILD)/$(PC98)/noct-platform.o
+noct-m4-opcode-check: $(BUILD)/src/noct/noct.o $(BUILD)/src/noct/platform.o
 	@if $(NOCT_OBJDUMP) -d --no-show-raw-insn $^ | \
 		grep -E '(^[[:space:]]*[0-9a-f]+:[[:space:]]+f[a-z0-9]+[[:space:]])|\b(bswap|cmpxchg|xadd|cmov[a-z]*|rdtsc|ud2|cpuid|fx[a-z]+|movaps|movups|xmm[0-9]|ymm[0-9]|zmm[0-9])\b'; then \
 		echo "ERROR: M4 glue contains a post-i386 opcode" >&2; \

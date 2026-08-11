@@ -151,12 +151,12 @@ noct-opcode-check: noct-objects
 NOCT_M3_RELOC := $(BUILD)/noct-libc-m3.o
 NOCT_M3_UNDEFINED := $(BUILD)/noct-libc-m3.undefined
 
-noct-link-audit: noct-objects libc-objects $(BUILD)/core/env.o \
-	$(BUILD)/core/fs.o $(BUILD)/core/namespace.o
+noct-link-audit: noct-objects libc-objects $(BUILD)/src/kern/env.o \
+	$(BUILD)/src/kern/fs.o $(BUILD)/src/kern/namespace.o
 	@mkdir -p $(dir $(NOCT_M3_RELOC))
 	$(NOCT_LD) -m elf_i386 -r $(NOCT_OBJECTS) $(BOOTS_LIBC_OBJECTS) \
-		$(BUILD)/core/env.o $(BUILD)/core/fs.o \
-		$(BUILD)/core/namespace.o \
+		$(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
+		$(BUILD)/src/kern/namespace.o \
 		-o $(NOCT_M3_RELOC)
 	@$(NOCT_NM) -u $(NOCT_M3_RELOC) | awk '{print $$NF}' | sort -u > \
 		$(NOCT_M3_UNDEFINED)

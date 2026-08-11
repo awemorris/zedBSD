@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include "core/env.h"
+#include "kern/env.h"
 
 #include <stdio.h>
 #include <string.h>
