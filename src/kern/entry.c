@@ -17,7 +17,7 @@
 #include "kern/process.h"
 #include "kern/sched.h"
 #include "kern/user-probe.h"
-#include "noct/platform.h"
+#include "kern/syscall.h"
 
 #define KERNEL_HEAP_SIZE (512U * 1024U)
 #define SYS_START 0x80000000U
@@ -76,11 +76,10 @@ kernel_entry(const void *handoff)
 	(void)boots_heap_set_active(&kernel_heap);
 	hal_set_allocator(kernel_alloc, kernel_free);
 	reserve_loaded_image();
-	if (!boots_noct_prepare_memory())
-		hal_fatal(__FILE__, __LINE__, "unable to reserve Noct arena");
 	hal_task_init();
 	process_init();
 	user_probe_init();
+	syscall_init();
 	sched_init();
 
 	device_count = kern_platform_init(h, devices, KERN_PLATFORM_MAX_DEVICES);

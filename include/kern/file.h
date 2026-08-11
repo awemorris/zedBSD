@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifndef NAME_MAX
 #define NAME_MAX 255U
@@ -29,11 +30,12 @@ struct dirent {
 };
 
 struct file_ops {
+	int (*open)(struct file *);
 	ssize_t (*read)(struct file *, void *, size_t);
 	ssize_t (*write)(struct file *, const void *, size_t);
 	int (*readdir)(struct file *, struct dirent *, int *);
 	off_t (*seek)(struct file *, off_t, int);
-	int (*ioctl)(struct file *, unsigned long, void *);
+	int (*ioctl)(struct file *, unsigned long, uintptr_t);
 	int (*fsync)(struct file *);
 	int (*close)(struct file *);
 };
@@ -49,10 +51,12 @@ struct file {
 
 int file_openat(struct cwdinfo *, const char *, int, mode_t,
 		struct file **);
+int file_create_pseudo(const struct file_ops *, int, void *, struct file **);
 ssize_t file_read(struct file *, void *, size_t);
 ssize_t file_write(struct file *, const void *, size_t);
 int file_readdir(struct file *, struct dirent *, int *);
 off_t file_seek(struct file *, off_t, int);
+int file_ioctl(struct file *, unsigned long, uintptr_t);
 int file_fsync(struct file *);
 int file_close(struct file *);
 void file_pool_reset(void);

@@ -42,7 +42,7 @@ export BOOTS_ARCH := $(ARCH)
 export BOOTS_BUILD_DIR := $(CURDIR)/$(BUILD)
 
 ASFLAGS := --32
-BOOTS_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. -I$(BUILD) -Ilibc/include
+BOOTS_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. -I$(BUILD) -Ilibc/include
 BOOTS_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -Wall -Wextra -Werror

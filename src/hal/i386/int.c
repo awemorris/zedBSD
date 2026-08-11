@@ -11,9 +11,11 @@
 #include "irq.h"
 #include "asm.h"
 #include "pic.h"
+#include <errno.h>
 
 /* Re-scheduling flag. */
 static int	 resched_flag;
+static hal_syscall_handler_t syscall_handler;
 static hal_user_int_handler_t user_int_handler;
 static hal_user_fault_handler_t user_fault_handler;
 
@@ -67,6 +69,12 @@ hal_user_int_set_handler(hal_user_int_handler_t handler)
 }
 
 void
+hal_syscall_set_handler(hal_syscall_handler_t handler)
+{
+	syscall_handler = handler;
+}
+
+void
 hal_user_fault_set_handler(hal_user_fault_handler_t handler)
 {
 	user_fault_handler = handler;
@@ -113,16 +121,26 @@ void int_handler(struct interrupt_frame *fp)
 	/*
 	 * CPUの例外をハンドルする
 	 */
-	else if (int_num == INT_SYSCALL && (fp->cs & 3) == 3 &&
-		 user_int_handler != NULL) {
+	else if (int_num == INT_SYSCALL && (fp->cs & 3) == 3) {
 		struct hal_user_trap trap;
+		uintptr_t args[HAL_SYSCALL_ARGS];
 		trap.vector = (uint32)int_num;
 		trap.cs = fp->cs;
 		trap.eip = fp->eip;
 		trap.eax = fp->regs.eax;
 		trap.error_code = 0;
 		trap.fault_address = 0;
-		user_int_handler(&trap);
+		if (user_int_handler != NULL)
+			user_int_handler(&trap);
+		args[0] = fp->regs.ebx;
+		args[1] = fp->regs.ecx;
+		args[2] = fp->regs.edx;
+		args[3] = fp->regs.esi;
+		args[4] = fp->regs.edi;
+		args[5] = fp->regs.ebp;
+		fp->regs.eax = syscall_handler != NULL ?
+			(uint32)syscall_handler(fp->regs.eax, args) :
+			(uint32)-(int32)ENOSYS;
 		is_handled = 1;
 	}
 	else if(int_num >= 0 && int_num <= 0x1f) {

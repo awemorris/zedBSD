@@ -162,15 +162,47 @@ int
 hal_pmem_alloc_limited(size_t size, uintptr_t above, uintptr_t below,
 		       struct hal_pmem *desc)
 {
-	int error = hal_pmem_alloc(size, desc, 0);
+	uint32 need_pages, first_page, end_page, start, i;
+	irqlock_t irqlock;
 
-	if (error != HAL_PMEM_SUCCESS)
-		return error;
-	if (desc->paddr < above || desc->paddr > below ||
-	    desc->size > below - desc->paddr) {
-		(void)hal_pmem_free(desc);
+	if (desc == NULL || above >= below ||
+	    above > UINTPTR_MAX - (PAGE_SIZE - 1U))
+		return HAL_PMEM_BADDESC;
+	need_pages = (size + PAGE_SIZE - 1U) / PAGE_SIZE;
+	first_page = (uint32)((above + PAGE_SIZE - 1U) / PAGE_SIZE);
+	end_page = (uint32)(below / PAGE_SIZE);
+	if (end_page > phys_pages)
+		end_page = phys_pages;
+	if (need_pages == 0 || first_page >= end_page ||
+	    need_pages > end_page - first_page)
 		return HAL_PMEM_NOSPACE;
+	ENTER_IRQLOCK(irqlock)
+	{
+		start = first_page;
+		for (;;) {
+			for (; start + need_pages <= end_page; start++)
+				if (!PAGEMAP_GET(start))
+					break;
+			if (start + need_pages > end_page)
+				break;
+			for (i = 0; i < need_pages; i++)
+				if (PAGEMAP_GET(start + i))
+					break;
+			if (i == need_pages)
+				break;
+			start += i + 1U;
+		}
+		if (start + need_pages > end_page) {
+			LEAVE_IRQLOCK(irqlock);
+			return HAL_PMEM_NOSPACE;
+		}
+		for (i = 0; i < need_pages; i++)
+			PAGEMAP_SET(start + i);
 	}
+	LEAVE_IRQLOCK(irqlock);
+	desc->paddr = (uintptr_t)start * PAGE_SIZE;
+	desc->vaddr = desc->paddr | SYS_START;
+	desc->size = (size_t)need_pages * PAGE_SIZE;
 	return HAL_PMEM_SUCCESS;
 }
 

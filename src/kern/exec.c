@@ -8,6 +8,7 @@
 #include "kern/process.h"
 #include "kern/thread.h"
 #include "kern/vmspace.h"
+#include "kern/filedesc.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -17,47 +18,141 @@
 #define USER_STACK_TOP 0x7ffff000U
 #define USER_STACK_SIZE (64U * 1024U)
 #define USER_STACK_BOTTOM (USER_STACK_TOP - USER_STACK_SIZE)
+#define EXEC_ARG_MAX 32U
+#define EXEC_ENV_MAX 64U
+#define EXEC_STRING_MAX (16U * 1024U)
 
 int
-exec_build_initial_stack(struct vmspace *vm, const char *name, uintptr_t *sp_out)
+exec_build_initial_stack(struct vmspace *vm, char *const argv[],
+			 char *const envp[], uintptr_t *sp_out)
 {
 	struct vm_region *region;
-	uintptr_t sp, string_address;
+	uintptr_t sp;
 	uint8_t *base;
-	size_t length;
+	size_t total = 0;
+	unsigned argc = 0, envc = 0, i;
+	uint32_t argv_address[EXEC_ARG_MAX];
+	uint32_t env_address[EXEC_ENV_MAX];
 	uint32_t *words;
 	int error;
 
-	if (vm == NULL || name == NULL || sp_out == NULL)
+	if (vm == NULL || argv == NULL || argv[0] == NULL || sp_out == NULL)
 		return EINVAL;
-	length = strlen(name) + 1U;
-	if (length > 256U)
-		return ENAMETOOLONG;
+	while (argv[argc] != NULL) {
+		size_t length;
+		if (argc >= EXEC_ARG_MAX)
+			return E2BIG;
+		length = strlen(argv[argc]) + 1U;
+		if (length > EXEC_STRING_MAX - total)
+			return E2BIG;
+		total += length;
+		argc++;
+	}
+	if (envp != NULL)
+		while (envp[envc] != NULL) {
+			size_t length;
+			if (envc >= EXEC_ENV_MAX)
+				return E2BIG;
+			length = strlen(envp[envc]) + 1U;
+			if (length > EXEC_STRING_MAX - total)
+				return E2BIG;
+			total += length;
+			envc++;
+		}
 	error = vmspace_map_anon(vm, USER_STACK_BOTTOM, USER_STACK_SIZE,
 				 HAL_SPACE_READ | HAL_SPACE_WRITE, &region);
 	if (error != 0)
 		return error;
 	base = (uint8_t *)region->pmem.vaddr;
-	sp = USER_STACK_TOP - length;
-	string_address = sp;
-	memcpy(base + (sp - USER_STACK_BOTTOM), name, length);
+	sp = USER_STACK_TOP;
+	for (i = envc; i != 0; i--) {
+		size_t length = strlen(envp[i - 1U]) + 1U;
+		sp -= length;
+		memcpy(base + (sp - USER_STACK_BOTTOM), envp[i - 1U], length);
+		env_address[i - 1U] = (uint32_t)sp;
+	}
+	for (i = argc; i != 0; i--) {
+		size_t length = strlen(argv[i - 1U]) + 1U;
+		sp -= length;
+		memcpy(base + (sp - USER_STACK_BOTTOM), argv[i - 1U], length);
+		argv_address[i - 1U] = (uint32_t)sp;
+	}
 	sp &= ~(uintptr_t)15U;
-	sp -= 4U * sizeof(uint32_t);
+	sp -= (1U + argc + 1U + envc + 1U) * sizeof(uint32_t);
 	if (sp < USER_STACK_BOTTOM)
 		return EOVERFLOW;
 	words = (uint32_t *)(base + (sp - USER_STACK_BOTTOM));
-	words[0] = 1;
-	words[1] = (uint32_t)string_address;
-	words[2] = 0;
-	words[3] = 0;
+	*words++ = argc;
+	for (i = 0; i < argc; i++) *words++ = argv_address[i];
+	*words++ = 0;
+	for (i = 0; i < envc; i++) *words++ = env_address[i];
+	*words = 0;
 	vm->stack_bottom = USER_STACK_BOTTOM;
 	vm->stack_top = USER_STACK_TOP;
 	*sp_out = sp;
 	return 0;
 }
 
+static int
+setup_standard_files(struct process *process)
+{
+	static const int flags[3] = { O_RDONLY, O_WRONLY, O_WRONLY };
+	int descriptor;
+	for (descriptor = 0; descriptor < 3; descriptor++) {
+		struct file *file;
+		int error = file_openat(process->cwdi, "/dev/console",
+			flags[descriptor], 0, &file);
+		if (error != 0)
+			return error;
+		error = filedesc_install_at(process->fd, file, descriptor);
+		if (error != 0) {
+			(void)file_close(file);
+			return error;
+		}
+	}
+	return 0;
+}
+
+static ssize_t
+result_write(struct file *file, const void *buffer, size_t length)
+{
+	struct process *process = file != NULL ? file->f_data : NULL;
+	size_t available;
+
+	if (process == NULL || buffer == NULL)
+		return -EINVAL;
+	available = (PROCESS_RESULT_MAX - 1U) - process->result_length;
+	if (length > available)
+		length = available;
+	if (length == 0)
+		return -ENOSPC;
+	memcpy(process->result + process->result_length, buffer, length);
+	process->result_length += length;
+	process->result[process->result_length] = '\0';
+	return (ssize_t)length;
+}
+
+static const struct file_ops result_ops = {
+	.write = result_write,
+};
+
+static int
+setup_result_file(struct process *process)
+{
+	struct file *file;
+	int error = file_create_pseudo(&result_ops, O_WRONLY, process, &file);
+
+	if (error != 0)
+		return error;
+	error = filedesc_install_at(process->fd, file, 3);
+	if (error != 0)
+		(void)file_close(file);
+	return error;
+}
+
 int
-process_spawn_init(const char *path, struct process **result)
+process_spawn(const char *path, char *const argv[], char *const envp[],
+	      unsigned flags, struct process **result)
 {
 	struct file *file = NULL;
 	struct process *process = NULL;
@@ -65,14 +160,14 @@ process_spawn_init(const char *path, struct process **result)
 	uintptr_t entry, sp;
 	int error;
 
-	if (path == NULL || process0.cwdi == NULL)
+	if (path == NULL || argv == NULL || argv[0] == NULL || process0.cwdi == NULL)
 		return EINVAL;
-	if (process_find(1) != NULL)
-		return EBUSY;
+	if ((flags & ~PROCESS_SPAWN_RESULT) != 0)
+		return EINVAL;
 	error = file_openat(process0.cwdi, path, O_RDONLY, 0, &file);
 	if (error != 0)
 		return error;
-	error = process_create(&process0, 1, &process);
+	error = process_create(&process0, 0, &process);
 	if (error != 0)
 		goto out;
 	process->vmspace = vmspace_create();
@@ -83,9 +178,17 @@ process_spawn_init(const char *path, struct process **result)
 	error = elf32_load(file, process->vmspace, &entry);
 	if (error != 0)
 		goto out;
-	error = exec_build_initial_stack(process->vmspace, path, &sp);
+	error = exec_build_initial_stack(process->vmspace, argv, envp, &sp);
 	if (error != 0)
 		goto out;
+	error = setup_standard_files(process);
+	if (error != 0)
+		goto out;
+	if ((flags & PROCESS_SPAWN_RESULT) != 0) {
+		error = setup_result_file(process);
+		if (error != 0)
+			goto out;
+	}
 	error = thread_create(process, entry, sp, &thread);
 	if (error != 0)
 		goto out;
@@ -100,4 +203,13 @@ out:
 	if (process != NULL)
 		process_free_mem(process);
 	return error;
+}
+
+int
+process_spawn_init(const char *path, struct process **result)
+{
+	char *argv[2];
+	argv[0] = (char *)path;
+	argv[1] = NULL;
+	return process_spawn(path, argv, NULL, 0, result);
 }

@@ -120,8 +120,7 @@ void kernel_main(const struct boots_handoff *h,
 	ho = h;
 	device_count = platform_device_count;
 	devs = platform_devices;
-	(void)kern_platform_graphics_init(boots_kernel_milliseconds,
-					 noct_key_is_down, noct_key_drain);
+	(void)kern_platform_graphics_init(boots_kernel_milliseconds, NULL, NULL);
 	boots_env_init(&boot_environment);
 	if (kern_vfs_init(h, platform_devices, platform_device_count) != 0)
 		puts("VFS initialization failed; using legacy disk selection.\n");

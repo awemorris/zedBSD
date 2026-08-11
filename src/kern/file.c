@@ -55,6 +55,10 @@ file_openat(struct cwdinfo *context, const char *path, int flags,
 
 	if (context == NULL || path == NULL || result == NULL)
 		return EINVAL;
+	if ((flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND |
+		       O_DIRECTORY)) != 0 || (flags & O_ACCMODE) > O_RDWR ||
+	    ((flags & O_EXCL) != 0 && (flags & O_CREAT) == 0))
+		return EINVAL;
 	error = namei_at(context, path, &inode);
 	if (error == ENOENT && (flags & O_CREAT)) {
 		struct inode *parent;
@@ -98,8 +102,44 @@ file_openat(struct cwdinfo *context, const char *path, int flags,
 	file->f_ops = inode->i_fop;
 	file->f_flags = flags;
 	file->f_offset = (flags & O_APPEND) ? inode->i_size : 0;
+	if (file->f_ops != NULL && file->f_ops->open != NULL) {
+		error = file->f_ops->open(file);
+		if (error != 0) {
+			inode_release(inode);
+			file_free(file);
+			return error;
+		}
+	}
 	*result = file;
 	return 0;
+}
+
+int
+file_create_pseudo(const struct file_ops *ops, int flags, void *data,
+		   struct file **result)
+{
+	struct file *file;
+
+	if (ops == NULL || result == NULL)
+		return EINVAL;
+	file = file_alloc();
+	if (file == NULL)
+		return ENOSPC;
+	file->f_ops = ops;
+	file->f_flags = flags;
+	file->f_data = data;
+	*result = file;
+	return 0;
+}
+
+int
+file_ioctl(struct file *file, unsigned long request, uintptr_t argument)
+{
+	if (file == NULL)
+		return EBADF;
+	if (file->f_ops == NULL || file->f_ops->ioctl == NULL)
+		return EOPNOTSUPP;
+	return file->f_ops->ioctl(file, request, argument);
 }
 
 ssize_t
@@ -109,7 +149,7 @@ file_read(struct file *file, void *buffer, size_t length)
 		return -EINVAL;
 	if ((file->f_flags & O_ACCMODE) == O_WRONLY)
 		return -EBADF;
-	if (file->f_inode->i_type == INODE_DIR)
+	if (file->f_inode != NULL && file->f_inode->i_type == INODE_DIR)
 		return -EISDIR;
 	if (file->f_ops == NULL || file->f_ops->read == NULL)
 		return -EOPNOTSUPP;
@@ -123,7 +163,7 @@ file_write(struct file *file, const void *buffer, size_t length)
 		return -EINVAL;
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
 		return -EBADF;
-	if (file->f_inode->i_type == INODE_DIR)
+	if (file->f_inode != NULL && file->f_inode->i_type == INODE_DIR)
 		return -EISDIR;
 	if (file->f_ops == NULL || file->f_ops->write == NULL)
 		return -EOPNOTSUPP;
@@ -135,7 +175,7 @@ file_readdir(struct file *file, struct dirent *entry, int *eof)
 {
 	if (file == NULL || entry == NULL || eof == NULL)
 		return EINVAL;
-	if (file->f_inode->i_type != INODE_DIR)
+	if (file->f_inode == NULL || file->f_inode->i_type != INODE_DIR)
 		return ENOTDIR;
 	if (file->f_ops == NULL || file->f_ops->readdir == NULL)
 		return EOPNOTSUPP;
@@ -154,7 +194,7 @@ file_seek(struct file *file, off_t offset, int whence)
 		base = 0;
 	else if (whence == 1)
 		base = file->f_offset;
-	else if (whence == 2)
+	else if (whence == 2 && file->f_inode != NULL)
 		base = file->f_inode->i_size;
 	else
 		return -EINVAL;
@@ -175,7 +215,7 @@ file_fsync(struct file *file)
 		return EINVAL;
 	if (file->f_ops != NULL && file->f_ops->fsync != NULL)
 		return file->f_ops->fsync(file);
-	return inode_sync(file->f_inode);
+	return file->f_inode != NULL ? inode_sync(file->f_inode) : 0;
 }
 
 int
@@ -184,9 +224,12 @@ file_close(struct file *file)
 	int error = 0;
 	if (file == NULL || file->f_usecount == 0)
 		return EBADF;
+	if (--file->f_usecount != 0)
+		return 0;
 	if (file->f_ops != NULL && file->f_ops->close != NULL)
 		error = file->f_ops->close(file);
-	inode_release(file->f_inode);
+	if (file->f_inode != NULL)
+		inode_release(file->f_inode);
 	file_free(file);
 	return error;
 }

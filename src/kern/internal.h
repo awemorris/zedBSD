@@ -6,6 +6,7 @@
 #include <kern/env.h>
 #include <kern/fs.h>
 #include <kern/namespace.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define MAX_PARTS 16
@@ -90,6 +91,8 @@ int kern_command(char *line);
 
 const char *startup_config_file(void);
 int run_autoexec(void);
+int run_noct_user(const char *, int, char *const [], unsigned, char *, size_t);
+extern int kern_noct_last_status;
 int startup_menu(struct startup_state *state);
 
 #define ho kern_handoff

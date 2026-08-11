@@ -113,4 +113,7 @@ SECTIONS
 	       "BOOT.SYS low segment overlaps boot parameters (0x80000)")
 	ASSERT(__high_end <= 0x80F00000,
 	       "BOOT.SYS high segment reaches the PC-98 15MB hole")
+	/* The retained PC-98 display backend shares the HAL's Unicode table;
+	 * the Noct VM's duplicate table now lives only in NOCT.ELF. */
+	PROVIDE(noct_jisx0208_to_ucs = hal_pc98_jisx0208_to_ucs);
 }

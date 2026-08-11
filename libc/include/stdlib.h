@@ -20,6 +20,9 @@ void *realloc(void *pointer, size_t size);
 void free(void *pointer);
 char *strdup(const char *string);
 char *getenv(const char *name);
+int setenv(const char *, const char *, int);
+int unsetenv(const char *);
+extern char **environ;
 
 int atoi(const char *string);
 long atol(const char *string);

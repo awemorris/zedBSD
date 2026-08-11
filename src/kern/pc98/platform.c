@@ -5,7 +5,6 @@
 #include "kern/pc98/partition.h"
 #include "kern/pc98/linux-boot.h"
 #include "hal/i386/bsp-pc98/display.h"
-#include "noct/pc98-beui.h"
 #include "drivers/pc98-ide.h"
 
 size_t
@@ -63,18 +62,11 @@ kern_platform_boot_linux(struct boots_filesystem *filesystem,
 			       boot_device);
 }
 
-int
-kern_platform_graphics_init(uint64_t (*milliseconds)(void *),
-			    int (*key_state)(void *, int), void (*drain)(void *))
-{
-	return boots_pc98_beui_init(milliseconds, key_state, drain);
-}
-
 void
 kern_platform_restore_text(void)
 {
 	(void)boots_pc98_display_text_restore();
-	(void)boots_pc98_beui_clear_graphics();
+	(void)kern_platform_graphics_clear();
 }
 
 void

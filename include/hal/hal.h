@@ -136,9 +136,11 @@ hal_clock_t clock_get_tick_count(void);
  * System Call
  */
 
-#define HAL_SYSCALL_ARGS	(7)
+#define HAL_SYSCALL_ARGS	(6)
 
-void hal_syscall_set_handler(void *(*handler)(int num, void *arg[]));
+typedef intptr_t (*hal_syscall_handler_t)(uint32_t number,
+					  const uintptr_t args[HAL_SYSCALL_ARGS]);
+void hal_syscall_set_handler(hal_syscall_handler_t handler);
 
 /*
  * Trap Handlers

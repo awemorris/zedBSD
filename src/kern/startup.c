@@ -7,11 +7,11 @@
 
 #include "kern/internal.h"
 #include "kern/clock.h"
+#include "kern/exec.h"
 #include "kern/messages.h"
 #include "kern/platform.h"
 #include "kern/vfs.h"
 #include "hal/hal.h"
-#include "noct/platform.h"
 
 /* The startup menu exposes only the first four fixed disks. The full stable
  * discovery order remains addressable through device and disk. */
@@ -146,18 +146,15 @@ static int valid_boot_action(const char *action)
 int run_autoexec(void)
 {
 	struct inode *inode;
-	const char *selected;
 	char action[LINE_MAX];
 	int script_ok;
 
 	if (namei_at(&kern_cwdinfo, "AUTOEXEC.NCT", &inode) != 0)
 		return 0;
 	inode_release(inode);
-	(void)boots_env_unset(&boot_environment, "BOOT_ACTION");
-	script_ok = boots_noct_run_file(&mounted_namespace, &mounted_fs,
-					 &boot_environment,
-					 "AUTOEXEC.NCT", 0, 0, noct_key_read,
-					 noct_key_poll, noct_clock_second, 0);
+	action[0] = '\0';
+	script_ok = run_noct_user("AUTOEXEC.NCT", 0, NULL,
+				  PROCESS_SPAWN_RESULT, action, sizeof(action));
 	/* A graphical script may have owned Cirrus or GDC graphics.  Restore the
 	 * firmware text display and erase every GDC graphics plane before its
 	 * selected Boots command runs.  Real Cirrus-equipped machines retain the
@@ -166,17 +163,23 @@ int run_autoexec(void)
 	hal_cons_reset();
 	hal_cons_set_mode(HAL_CONS_TERMINAL);
 	if (!script_ok) {
-		puts("AUTOEXEC.NCT failed; returning to the text shell.\n");
+		puts("AUTOEXEC.NCT failed (status ");
+		dec((unsigned)(kern_noct_last_status < 0 ?
+			-kern_noct_last_status : kern_noct_last_status));
+		puts(kern_noct_last_status < 0 ?
+			", launch error); returning to the text shell.\n" :
+			"); returning to the text shell.\n");
+		if (action[0] != '\0') {
+			puts("NOCT.ELF: ");
+			puts(action);
+			putc('\n');
+		}
 		return -1;
 	}
-	selected = boots_env_get(&boot_environment, "BOOT_ACTION");
-	if (!valid_boot_action(selected) ||
-	    !strcopy(action, selected, sizeof(action))) {
-		(void)boots_env_unset(&boot_environment, "BOOT_ACTION");
+	if (!valid_boot_action(action)) {
 		puts("AUTOEXEC.NCT did not select a valid BOOT_ACTION.\n");
 		return -1;
 	}
-	(void)boots_env_unset(&boot_environment, "BOOT_ACTION");
 	if (!command(action)) {
 		puts("BOOT_ACTION failed: ");
 		puts(action);

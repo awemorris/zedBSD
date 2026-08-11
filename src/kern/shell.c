@@ -10,12 +10,15 @@
 #include "kern/platform.h"
 #include "kern/file.h"
 #include "kern/vfs.h"
+#include "kern/exec.h"
+#include "kern/process.h"
 #include "hal/hal.h"
-#include "noct/napi.h"
-#include "noct/platform.h"
+#include <errno.h>
+#include <string.h>
 
 #define CFG_MAX 8192
 static uint8_t sec[512], cfg[CFG_MAX];
+int kern_noct_last_status;
 
 void prompt(void)
 {
@@ -325,6 +328,77 @@ static int open_noct_application(const char *prefix, const char *name,
  * volumes.  Unqualified names then fall back to precompiled NAME.NAP
  * bytecode in APPS/ (then CMD/ and the root), so applications too large
  * for the small-memory source compiler still launch as shell commands. */
+int run_noct_user(const char *path, int argc, char *const argv[],
+		  unsigned flags, char *result, size_t result_capacity)
+{
+	char executable[BOOTS_PATH_MAX];
+	char home[BOOTS_PATH_MAX + 6U];
+	char dictionary[BOOTS_PATH_MAX + 17U];
+	char *child_argv[23];
+	char *child_env[4];
+	struct process *child;
+	int status, error;
+	unsigned disk;
+	const char *value;
+
+	if (path == NULL || argc < 0 || argc > 20 ||
+	    (argc != 0 && argv == NULL)) {
+		kern_noct_last_status = -EINVAL;
+		return 0;
+	}
+	executable[0] = '\0';
+	for (disk = 1; disk <= 99U; disk++) {
+		struct inode *inode;
+		unsigned at = 5U;
+		memcpy(executable, "/disk", 5);
+		if (disk >= 10U)
+			executable[at++] = (char)('0' + disk / 10U);
+		executable[at++] = (char)('0' + disk % 10U);
+		memcpy(executable + at, "/NOCT.ELF", 10);
+		if (namei_at(&kern_cwdinfo, executable, &inode) == 0) {
+			inode_release(inode);
+			break;
+		}
+		executable[0] = '\0';
+	}
+	if (executable[0] == '\0') {
+		kern_noct_last_status = -ENOENT;
+		return 0;
+	}
+	child_argv[0] = executable;
+	child_argv[1] = (char *)path;
+	for (int i = 0; i < argc; i++)
+		child_argv[i + 2] = argv[i];
+	child_argv[argc + 2] = NULL;
+	memset(child_env, 0, sizeof(child_env));
+	value = boots_env_get(&boot_environment, "HOME");
+	if (value != NULL && strlen(value) + 6U <= sizeof(home)) {
+		memcpy(home, "HOME=", 5);
+		strcpy(home + 5, value);
+		child_env[0] = home;
+	}
+	value = boots_env_get(&boot_environment, "REMACS_SKK_DICT");
+	if (value != NULL && strlen(value) + 17U <= sizeof(dictionary)) {
+		unsigned slot = child_env[0] != NULL ? 1U : 0U;
+		memcpy(dictionary, "REMACS_SKK_DICT=", 16);
+		strcpy(dictionary + 16, value);
+		child_env[slot] = dictionary;
+	}
+	if ((flags & PROCESS_SPAWN_RESULT) != 0) {
+		unsigned slot = child_env[0] == NULL ? 0U :
+			(child_env[1] == NULL ? 1U : 2U);
+		child_env[slot] = "BOOTS_RESULT_FD=3";
+	}
+	error = process_spawn(executable, child_argv, child_env, flags, &child);
+	if (error != 0) {
+		kern_noct_last_status = -error;
+		return 0;
+	}
+	error = process_wait(child, &status, result, result_capacity);
+	kern_noct_last_status = error != 0 ? -error : status;
+	return error == 0 && status == 0;
+}
+
 static int run_noct_application(const char *name, const char *extension,
 				int nap_fallback, int argc,
 				char *const argv[])
@@ -338,10 +412,7 @@ static int run_noct_application(const char *name, const char *extension,
 	      !open_noct_application("CMD/", name, ".NAP", path) &&
 	      !open_noct_application("", name, ".NAP", path))))
 		return 0;
-	return boots_noct_run_file(&mounted_namespace, &mounted_fs,
-				    &boot_environment, path,
-				    argc, argv, noct_key_read, noct_key_poll,
-				    noct_clock_second, 0);
+	return run_noct_user(path, argc, argv, 0, NULL, 0);
 }
 
 int command(char *s)
@@ -360,7 +431,7 @@ int command(char *s)
 	if (streq(v[0], "help")) {
 		puts("help echo env set unset pause wait device probe-ide probe-scsi "
 		     "disk part pwd cd ls cat source kernel arg boot linux "
-		     "run noct emacs noct-test reboot halt\n");
+		     "run noct emacs reboot halt\n");
 		return 1;
 	}
 	if (streq(v[0], "env")) {
@@ -555,15 +626,8 @@ int command(char *s)
 		return n >= 2 && run_applet(v[1], n - 2, &v[2]);
 	if (streq(v[0], "noct")) {
 		if (n == 1)
-			return boots_noct_run_repl(&mounted_namespace, &mounted_fs,
-						    &boot_environment, noct_key_read,
-						    noct_key_poll,
-						    noct_clock_second, 0);
-		return boots_noct_run_file(&mounted_namespace, &mounted_fs,
-					    &boot_environment,
-					    v[1], n - 2, &v[2],
-					    noct_key_read, noct_key_poll,
-					    noct_clock_second, 0);
+			return run_noct_user("--repl", 0, NULL, 0, NULL, 0);
+		return run_noct_application(v[1], "", 0, n - 2, &v[2]);
 	}
 	if (streq(v[0], "emacs")) {
 		const char *dictionary = boots_env_get(&boot_environment,
@@ -574,16 +638,6 @@ int command(char *s)
 			(void)boots_env_set(&boot_environment, "REMACS_SKK_DICT",
 					     "HOME/SKKJISYO.DIC");
 		return run_noct_application("REMACS", ".NAP", 0, n - 1, &v[1]);
-	}
-	if (streq(v[0], "noct-test")) {
-		int repeat;
-
-		if (n > 2)
-			return 0;
-		repeat = n == 2 ? number(v[1]) : 1;
-		if (repeat < 1 || repeat > 100)
-			return 0;
-		return boots_noct_run_embedded((unsigned)repeat);
 	}
 	/* Unknown unqualified names resolve to NAME.NCT on the selected BOOT
 	 * filesystem.  C built-ins above always retain precedence, including

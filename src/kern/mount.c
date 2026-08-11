@@ -112,6 +112,13 @@ find_type(const char *name, struct disk *disk, int *probe_error)
 		int error;
 		if (strcmp(name, "auto") && strcmp(name, type->fs_name))
 			continue;
+		if ((type->fs_flags & FILESYSTEM_NODEV) != 0) {
+			if (!strcmp(name, type->fs_name))
+				return type;
+			continue;
+		}
+		if (disk == NULL)
+			continue;
 		if (type->probe == NULL)
 			return type;
 		error = type->probe(disk);
@@ -136,18 +143,17 @@ mount(const char *type_name, const char *dir, int flags, void *data)
 	const char *basename;
 	int error;
 
-	if (root_mount == NULL || type_name == NULL || dir == NULL ||
-	    args == NULL || args->fspec == NULL || dir[0] != '/' ||
+	if (root_mount == NULL || type_name == NULL || dir == NULL || dir[0] != '/' ||
 	    dir[1] == '\0' || strchr(dir + 1, '/') != NULL)
 		return EINVAL;
 	if (mount_find(dir) != NULL)
 		return EBUSY;
-	disk = disk_find(args->fspec);
-	if (disk == NULL)
-		return ENXIO;
+	disk = args != NULL && args->fspec != NULL ? disk_find(args->fspec) : NULL;
 	type = find_type(type_name, disk, &error);
 	if (type == NULL)
-		return error;
+		return disk == NULL && !strcmp(type_name, "auto") ? ENXIO : error;
+	if (!(type->fs_flags & FILESYSTEM_NODEV) && disk == NULL)
+		return ENXIO;
 	mountp = mount_alloc();
 	if (mountp == NULL)
 		return ENOSPC;
@@ -157,20 +163,24 @@ mount(const char *type_name, const char *dir, int flags, void *data)
 		mount_free(mountp);
 		return error;
 	}
-	error = disk_open(disk);
-	if (error != 0)
-		goto fail_mountpoint;
+	if (disk != NULL) {
+		error = disk_open(disk);
+		if (error != 0)
+			goto fail_mountpoint;
+	}
 	strcpy(mountp->m_path, dir);
 	mountp->m_flags = (unsigned)flags;
 	mountp->m_disk = disk;
 	mountp->m_type = type;
+	mountp->m_data = data;
 	mountp->m_mountpoint = mountpoint;
 	mountp->m_parent = root_mount;
 	error = type->mount(mountp);
 	if (error != 0 || mountp->m_root == NULL) {
 		if (error == 0)
 			error = EIO;
-		disk_close(disk);
+		if (disk != NULL)
+			disk_close(disk);
 		goto fail_mountpoint;
 	}
 	mountp->m_next = mount_head->m_next;
@@ -213,7 +223,8 @@ unmount(const char *dir, int flags)
 	inode_free(mountp->m_mountpoint);
 	inode_release(mountp->m_root);
 	inode_cache_purge_mount(mountp);
-	disk_close(mountp->m_disk);
+	if (mountp->m_disk != NULL)
+		disk_close(mountp->m_disk);
 	mount_free(mountp);
 	return 0;
 }

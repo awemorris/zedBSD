@@ -214,6 +214,9 @@ mcopy -o -i "$image@@$offset" "$build/IO.SYS" ::IO.SYS
 mattrib -i "$image@@$offset" +r +h +s ::IO.SYS
 mcopy -o -i "$image@@$offset" "$stage2_image" ::BOOT.SYS
 mattrib -i "$image@@$offset" +r +h +s ::BOOT.SYS
+if test -s "$build/NOCT.ELF"; then
+	mcopy -o -i "$image@@$offset" "$build/NOCT.ELF" ::NOCT.ELF
+fi
 mmd -i "$image@@$offset" ::CMD 2>/dev/null || true
 mmd -i "$image@@$offset" ::APPS 2>/dev/null || true
 mmd -i "$image@@$offset" ::HOME 2>/dev/null || true

@@ -12,4 +12,7 @@
 #define O_APPEND    0x0800
 #define O_DIRECTORY 0x1000
 
+#include <sys/types.h>
+int open(const char *, int, ...);
+
 #endif

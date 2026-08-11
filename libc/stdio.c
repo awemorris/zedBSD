@@ -195,9 +195,9 @@ access(const char *path, int mode)
 	return -1;
 }
 
-int isatty(int descriptor) { (void)descriptor; return 0; }
-int fileno(void *stream) { (void)stream; return -1; }
-time_t time(time_t *result) { if (result != NULL) *result = 0; return 0; }
+__attribute__((weak)) int isatty(int descriptor) { (void)descriptor; return 0; }
+__attribute__((weak)) int fileno(void *stream) { (void)stream; return -1; }
+__attribute__((weak)) time_t time(time_t *result) { if (result != NULL) *result = 0; return 0; }
 
 __attribute__((weak, noreturn)) void
 boots_libc_panic(const char *message)
@@ -213,7 +213,7 @@ abort(void)
 	boots_libc_panic("abort");
 }
 
-void
+__attribute__((weak)) void
 exit(int status)
 {
 	(void)status;

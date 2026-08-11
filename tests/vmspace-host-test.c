@@ -10,8 +10,8 @@
 
 struct fake_space { unsigned maps; };
 static unsigned spaces_created, spaces_destroyed;
-static unsigned pages_allocated, pages_freed, pages_unmapped;
-static int fail_space, fail_pages, fail_map;
+static unsigned pages_allocated, pages_freed, pages_unmapped, pages_protected;
+static int fail_space, fail_pages, fail_map, fail_protect;
 
 void *kern_malloc(size_t size) { return malloc(size); }
 void *kern_calloc(size_t count, size_t size) { return calloc(count, size); }
@@ -85,6 +85,19 @@ hal_page_unmap(hal_space_t handle, void *address, size_t size)
 }
 
 int
+hal_page_prot(hal_space_t handle, void *address, size_t size, uint32_t attr)
+{
+	(void)handle;
+	(void)address;
+	(void)size;
+	(void)attr;
+	if (fail_protect)
+		return HAL_PMEM_BADDESC;
+	pages_protected++;
+	return HAL_PMEM_SUCCESS;
+}
+
+int
 main(void)
 {
 	struct vmspace *vm;
@@ -96,6 +109,14 @@ main(void)
 				HAL_SPACE_READ | HAL_SPACE_EXEC, &region) == 0);
 	assert(region->start == 0x400000 && region->size == 4096);
 	assert(vmspace_find_region(vm, 0x400000, 16) == region);
+	assert(vmspace_protect(vm, 0x400000, 4096,
+			       HAL_SPACE_READ | HAL_SPACE_WRITE) == 0);
+	assert(region->prot == (HAL_SPACE_READ | HAL_SPACE_WRITE));
+	assert(pages_protected == 1);
+	fail_protect = 1;
+	assert(vmspace_protect(vm, 0x400000, 4096, HAL_SPACE_READ) == EINVAL);
+	assert(region->prot == (HAL_SPACE_READ | HAL_SPACE_WRITE));
+	fail_protect = 0;
 	assert(vmspace_map_anon(vm, 0x400000, 4096, HAL_SPACE_READ,
 				NULL) == EINVAL);
 	assert(vmspace_map_anon(vm, 0x400001, 4096, HAL_SPACE_READ,

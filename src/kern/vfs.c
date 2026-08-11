@@ -12,6 +12,10 @@
 #include "kern/partition.h"
 #include "kern/platform.h"
 #include "kern/process.h"
+#include "kern/cdev.h"
+#include "kern/console-device.h"
+#include "kern/graphics-device.h"
+#include "kern/devfs.h"
 
 #include <errno.h>
 #include <string.h>
@@ -57,11 +61,24 @@ kern_vfs_init(const struct boots_handoff *handoff,
 			physical[physical_count++] = disk;
 	}
 	mount_reset();
+	cdev_reset();
 	partition_reset();
 	error = filesystem_register(&fat_filesystem_type);
 	if (error != 0)
 		return error;
+	error = filesystem_register(&devfs_type);
+	if (error != 0)
+		return error;
+	error = console_device_register();
+	if (error != 0)
+		return error;
+	error = graphics_device_register();
+	if (error != 0)
+		return error;
 	error = mount_rootfs();
+	if (error != 0)
+		return error;
+	error = mount("devfs", "/dev", 0, NULL);
 	if (error != 0)
 		return error;
 	error = cwdinfo_init(&kern_cwdinfo, mount_root_inode());

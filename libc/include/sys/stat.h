@@ -48,4 +48,7 @@ struct stat {
 	off_t st_size;
 };
 
+int fstat(int, struct stat *);
+int stat(const char *, struct stat *);
+
 #endif

@@ -179,3 +179,51 @@ noct-m3-verify: libc-host-test libc-opcode-check \
 	@echo "Boots M3 historical boundary checks: PASS"
 
 .PHONY: noct-objects noct-opcode-check noct-link-audit noct-m3-verify
+
+# Static ring-3 Noct build.  Keep its target macros and object directory
+# separate from the transitional in-kernel PC98BE build until parity is proven.
+USER_NOCT_BUILD_DIR := $(BUILD)/noct-user
+USER_NOCT_OBJECTS := \
+	$(patsubst $(NOCT_ROOT)/src/core/%.c,$(USER_NOCT_BUILD_DIR)/%.o,$(NOCT_CORE_SOURCES)) \
+	$(patsubst $(NOCT_ROOT)/src/repl/%.c,$(USER_NOCT_BUILD_DIR)/repl-%.o,$(NOCT_REPL_SOURCES)) \
+	$(patsubst $(NOCT_ROOT)/src/api/%.c,$(USER_NOCT_BUILD_DIR)/%.o,$(NOCT_API_SOURCES))
+USER_NOCT_CPPFLAGS := -nostdinc -Iuser/include -Iinclude/uapi -I. \
+	-I$(BUILD) -Ilibc/include -I$(NOCT_ROOT)/include \
+	-I$(NOCT_ROOT)/src/core -I$(NOCT_ROOT)/src/api \
+	-DNOCT_TARGET_POSIX -DNOCT_TARGET_BOOTS -DNOCT_MEMORY_SMALL \
+	-DNOCT_USE_JIT -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 \
+	-DHAVE_SYS_TYPES_H=1 -DHAVE_STDBOOL_H=1 -U__linux__ -Ulinux
+USER_NOCT_CFLAGS := $(NOCT_CFLAGS)
+
+$(USER_NOCT_BUILD_DIR)/noct.o: USER_NOCT_WARN := -Wno-error=unused-parameter
+$(USER_NOCT_BUILD_DIR)/runtime.o: USER_NOCT_WARN := -Wno-error=maybe-uninitialized
+$(USER_NOCT_BUILD_DIR)/jit.o: USER_NOCT_WARN := -Wno-error=unused-parameter -Wno-error=sign-compare
+$(USER_NOCT_BUILD_DIR)/intrinsics.o: USER_NOCT_WARN := -Wno-error=type-limits
+$(USER_NOCT_BUILD_DIR)/objectmodel-st.o: USER_NOCT_WARN := -Wno-error=maybe-uninitialized
+
+$(USER_NOCT_BUILD_DIR)/%.o: $(NOCT_ROOT)/src/core/%.c
+	@mkdir -p $(USER_NOCT_BUILD_DIR)
+	$(NOCT_CC) $(USER_NOCT_CPPFLAGS) $(USER_NOCT_CFLAGS) $(USER_NOCT_WARN) \
+		-MMD -MP -c $< -o $@
+$(USER_NOCT_BUILD_DIR)/api-%.o: $(NOCT_ROOT)/src/api/api-%.c
+	@mkdir -p $(USER_NOCT_BUILD_DIR)
+	$(NOCT_CC) $(USER_NOCT_CPPFLAGS) $(USER_NOCT_CFLAGS) $(USER_NOCT_WARN) \
+		-MMD -MP -c $< -o $@
+$(USER_NOCT_BUILD_DIR)/beui-%.o: $(NOCT_ROOT)/src/api/beui-%.c
+	@mkdir -p $(USER_NOCT_BUILD_DIR)
+	$(NOCT_CC) $(USER_NOCT_CPPFLAGS) $(USER_NOCT_CFLAGS) $(USER_NOCT_WARN) \
+		-MMD -MP -c $< -o $@
+$(USER_NOCT_BUILD_DIR)/regex.o: $(NOCT_ROOT)/src/api/regex.c
+	@mkdir -p $(USER_NOCT_BUILD_DIR)
+	$(NOCT_CC) $(USER_NOCT_CPPFLAGS) $(USER_NOCT_CFLAGS) $(USER_NOCT_WARN) \
+		-MMD -MP -c $< -o $@
+$(USER_NOCT_BUILD_DIR)/jisx0208.o: $(NOCT_ROOT)/src/api/jisx0208.c
+	@mkdir -p $(USER_NOCT_BUILD_DIR)
+	$(NOCT_CC) $(USER_NOCT_CPPFLAGS) $(USER_NOCT_CFLAGS) $(USER_NOCT_WARN) \
+		-MMD -MP -c $< -o $@
+$(USER_NOCT_BUILD_DIR)/repl-%.o: $(NOCT_ROOT)/src/repl/%.c
+	@mkdir -p $(USER_NOCT_BUILD_DIR)
+	$(NOCT_CC) $(USER_NOCT_CPPFLAGS) $(USER_NOCT_CFLAGS) $(USER_NOCT_WARN) \
+		-MMD -MP -c $< -o $@
+
+-include $(USER_NOCT_OBJECTS:.o=.d)

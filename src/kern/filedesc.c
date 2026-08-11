@@ -56,3 +56,34 @@ filedesc_install(struct filedesc *fd, struct file *file, int *descriptor)
 		}
 	return ENOSPC;
 }
+
+int
+filedesc_install_at(struct filedesc *fd, struct file *file, int descriptor)
+{
+	if (fd == NULL || file == NULL || descriptor < 0 ||
+	    descriptor >= KERN_OPEN_MAX)
+		return EINVAL;
+	if (fd->files[descriptor] != NULL)
+		return EBUSY;
+	fd->files[descriptor] = file;
+	return 0;
+}
+
+int
+filedesc_take(struct filedesc *fd, int descriptor, struct file **result)
+{
+	if (fd == NULL || result == NULL || descriptor < 0 ||
+	    descriptor >= KERN_OPEN_MAX || fd->files[descriptor] == NULL)
+		return EBADF;
+	*result = fd->files[descriptor];
+	fd->files[descriptor] = NULL;
+	return 0;
+}
+
+int
+filedesc_close(struct filedesc *fd, int descriptor)
+{
+	struct file *file;
+	int error = filedesc_take(fd, descriptor, &file);
+	return error != 0 ? error : file_close(file);
+}

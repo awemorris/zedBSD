@@ -16,7 +16,7 @@
 
 struct process process0;
 static struct process *all_processes;
-static pid_t next_pid = 2;
+static pid_t next_pid = 1;
 
 void
 process_init(void)
@@ -146,11 +146,97 @@ process_free_mem(struct process *process)
 	kern_free(process);
 }
 
+int
+process_wait(struct process *process, int *status, char *result,
+	     size_t result_capacity)
+{
+	struct thread *thread;
+	bool enabled;
+	int error;
+
+	if (process == NULL || process == &process0 || curthread == NULL ||
+	    process->parent != curthread->proc)
+		return ECHILD;
+	enabled = hal_irq_disable();
+	while (process->state != PROCESS_ZOMBIE) {
+		if (process->waiter != NULL && process->waiter != curthread) {
+			if (enabled) hal_irq_enable();
+			return EBUSY;
+		}
+		process->waiter = curthread;
+		sched_sleep(0);
+	}
+	process->waiter = NULL;
+	if (enabled)
+		hal_irq_enable();
+	thread = process->threads;
+	if (thread == NULL)
+		return ECHILD;
+	error = thread_wait(thread, status);
+	if (error != 0)
+		return error;
+	if (result != NULL && result_capacity != 0) {
+		size_t length = process->result_length;
+		if (length >= result_capacity)
+			length = result_capacity - 1U;
+		memcpy(result, process->result, length);
+		result[length] = '\0';
+	}
+	process_free_mem(process);
+	return 0;
+}
+
+int
+process_quiesce_users(void)
+{
+	struct process *process;
+	bool enabled;
+
+	if (curthread == NULL || curthread->proc != &process0)
+		return EBUSY;
+	enabled = hal_irq_disable();
+	for (process = process0.children; process != NULL;
+	     process = process->sibling) {
+		if (process->state != PROCESS_ZOMBIE) {
+			if (enabled) hal_irq_enable();
+			return EBUSY;
+		}
+	}
+	while (process0.children != NULL) {
+		struct process *child = process0.children;
+		while (child->threads != NULL) {
+			int error = thread_wait(child->threads, NULL);
+			if (error != 0) {
+				if (enabled) hal_irq_enable();
+				return error;
+			}
+		}
+		process_free_mem(child);
+	}
+	if (enabled)
+		hal_irq_enable();
+	return 0;
+}
+
 void
 exit1(int status)
 {
 	struct process *process = curthread->proc;
+	struct thread *waiter;
+	bool enabled;
+
+	if (process == NULL || process == &process0)
+		HAL_FATAL("process0 exit");
+	filedesc_destroy(process->fd);
+	process->fd = NULL;
+	cwdinfo_release(process->cwdi);
+	process->cwdi = NULL;
+	enabled = hal_irq_disable();
 	process->exit_status = status;
 	process->state = PROCESS_ZOMBIE;
+	waiter = process->waiter;
+	if (waiter != NULL)
+		sched_wakeup(waiter);
+	(void)enabled;
 	thread_exit(status);
 }

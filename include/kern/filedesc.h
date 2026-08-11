@@ -20,5 +20,8 @@ struct filedesc *filedesc_create(void);
 void filedesc_destroy(struct filedesc *);
 struct file *filedesc_get(struct filedesc *, int descriptor);
 int filedesc_install(struct filedesc *, struct file *, int *descriptor);
+int filedesc_install_at(struct filedesc *, struct file *, int descriptor);
+int filedesc_take(struct filedesc *, int descriptor, struct file **);
+int filedesc_close(struct filedesc *, int descriptor);
 
 #endif

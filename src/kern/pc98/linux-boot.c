@@ -3,6 +3,7 @@
 #include <hal/hal.h>
 #include <kern/image.h>
 #include <kern/messages.h>
+#include <kern/process.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -165,64 +166,110 @@ static void load_progress(void *context, uint32_t bytes)
 static int vmlinux_load(struct boots_file *file, const char *arguments)
 {
 	struct elf32_header header;
-	struct elf32_program_header program;
+	struct elf32_program_header programs[16];
+	uint32_t staging_offsets[16];
+	struct hal_pmem staging;
 	unsigned segments = 0;
 	uint8_t *bp, *e820;
 	uint16_t high_mib;
+	int entry_valid = 0;
+	size_t argument_length, staging_size = 0;
+	uint32_t destination_end = 0;
 
-	if (!boots_file_read(file, 0, &header, sizeof(header)))
+	if (!boots_file_read(file, 0, &header, sizeof(header))) {
+		hal_cons_write("Linux: header read failed.\n");
 		return 0;
+	}
+	argument_length = arguments != NULL ? strlen(arguments) : 0;
 	if (read_le32(header.id) != 0x464c457f || header.id[4] != 1 ||
 	    header.id[5] != 1 || header.machine != 3 ||
-	    header.phsize != sizeof(program) || header.phnum > 16)
+	    header.phsize != sizeof(programs[0]) || header.phnum > 16 ||
+	    argument_length >= 4096U ||
+	    header.phoff > file->size ||
+	    (uint32_t)header.phnum >
+		(file->size - header.phoff) / sizeof(programs[0]))
+	{
+		hal_cons_write("Linux: invalid ELF header.\n");
 		return 0;
+	}
 	text_done = text_total = data_done = data_total = 0;
 	for (unsigned i = 0; i < header.phnum; i++) {
-		if (!boots_file_read(file, header.phoff + i * sizeof(program),
-				     &program, sizeof(program)))
+		struct elf32_program_header *program = &programs[i];
+		staging_offsets[i] = 0;
+		if (!boots_file_read(file, header.phoff + i * sizeof(programs[0]),
+				     program, sizeof(*program))) {
+			hal_cons_write("Linux: program header read failed.\n");
 			return 0;
-		if (program.type != 1)
+		}
+		if (program->type != 1)
 			continue;
-		if (program.filesz > program.memsz || program.paddr < 0x100000 ||
-		    program.offset + program.filesz < program.offset ||
-		    program.offset + program.filesz > file->size)
+		if (program->filesz > program->memsz ||
+		    program->paddr < 0x100000 ||
+		    program->paddr + program->memsz < program->paddr ||
+		    program->offset + program->filesz < program->offset ||
+		    program->offset + program->filesz > file->size)
+		{
+			hal_cons_write("Linux: invalid load segment.\n");
 			return 0;
-		if (program.flags & 2) {
-			if (data_total + program.filesz < data_total)
+		}
+		if (header.entry >= program->paddr &&
+		    header.entry < program->paddr + program->memsz)
+			entry_valid = 1;
+		if (program->filesz > SIZE_MAX - staging_size)
+			return 0;
+		staging_offsets[i] = (uint32_t)staging_size;
+		staging_size += program->filesz;
+		if (program->paddr + program->memsz > destination_end)
+			destination_end = program->paddr + program->memsz;
+		if (program->flags & 2) {
+			if (data_total + program->filesz < data_total)
 				return 0;
-			data_total += program.filesz;
+			data_total += program->filesz;
 		} else {
-			if (text_total + program.filesz < text_total)
+			if (text_total + program->filesz < text_total)
 				return 0;
-			text_total += program.filesz;
+			text_total += program->filesz;
 		}
 		segments++;
 	}
-	if (!segments)
+	if (!segments || !entry_valid) {
+		hal_cons_write("Linux: no loadable entry segment.\n");
 		return 0;
+	}
+	if (destination_end > UINT32_MAX - 4095U) {
+		hal_cons_write("Linux: load destination is out of range.\n");
+		return 0;
+	}
+	if (process_quiesce_users() != 0) {
+		hal_cons_write("Linux: a user process is still active.\n");
+		return 0;
+	}
+	if (hal_pmem_alloc_limited(staging_size,
+		(destination_end + 4095U) & ~4095U,
+		hal_pmem_get_total_size(), &staging) != HAL_PMEM_SUCCESS) {
+		hal_cons_write("Linux: no staging memory above destination.\n");
+		return 0;
+	}
 	begin_progress((uint32_t)file->size);
 	hal_pc98_enable_high_memory();
 	for (unsigned i = 0; i < header.phnum; i++) {
+		struct elf32_program_header *program = &programs[i];
 		int load_class;
 
-		if (!boots_file_read(file, header.phoff + i * sizeof(program),
-				     &program, sizeof(program)))
-			return 0;
-		if (program.type != 1)
+		if (program->type != 1)
 			continue;
-		if (program.filesz > program.memsz || program.paddr < 0x100000 ||
-		    program.offset + program.filesz > file->size)
+		load_class = !!(program->flags & 2);
+		if (!boots_file_read_progress(file, program->offset,
+			(void *)(staging.vaddr + staging_offsets[i]),
+			program->filesz, load_progress, &load_class)) {
+			(void)hal_pmem_free(&staging);
+			hal_cons_write("Linux: staging read failed.\n");
 			return 0;
-		load_class = !!(program.flags & 2);
-		if (!boots_file_read_progress(file, program.offset,
-					       (void *)program.paddr, program.filesz,
-					       load_progress, &load_class))
-			return 0;
-		memset((void *)(program.paddr + program.filesz), 0,
-		       program.memsz - program.filesz);
+		}
 	}
 	memset((void *)BP_ADDR, 0, 4096);
-	memcpy((void *)CMD_ADDR, arguments, strlen(arguments) + 1);
+	memcpy((void *)CMD_ADDR, arguments != NULL ? arguments : "",
+	       argument_length + 1U);
 	bp = (uint8_t *)BP_ADDR;
 	*(uint32_t *)(bp + 0x228) = CMD_ADDR;
 	bp[0x210] = 0xff;
@@ -243,8 +290,22 @@ static int vmlinux_load(struct boots_file *file, const char *arguments)
 	} else {
 		bp[0x1e8] = 2;
 	}
+	/* Point of no return.  All fallible file I/O is complete, every user task
+	 * is gone, and the staging allocation is disjoint from every destination.
+	 * The low closure now commits bytes with interrupts masked and cannot
+	 * return through the overwritten high kernel image or heap. */
+	(void)hal_irq_disable();
+	for (unsigned i = 0; i < header.phnum; i++) {
+		struct elf32_program_header *program = &programs[i];
+		if (program->type != 1)
+			continue;
+		memcpy((void *)program->paddr,
+		       (const void *)(staging.vaddr + staging_offsets[i]),
+		       program->filesz);
+		memset((void *)(program->paddr + program->filesz), 0,
+		       program->memsz - program->filesz);
+	}
 	boots_pc98_jump_linux(header.entry, BP_ADDR);
-	return 0;
 }
 
 static const struct boots_image_loader loader = {

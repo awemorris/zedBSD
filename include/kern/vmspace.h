@@ -36,6 +36,11 @@ struct vmspace *vmspace_create(void);
 int vmspace_map_anon(struct vmspace *, uintptr_t, size_t, uint32_t,
 		     struct vm_region **);
 struct vm_region *vmspace_find_region(struct vmspace *, uintptr_t, size_t);
+int vmspace_map_find(struct vmspace *, uintptr_t, size_t, uint32_t,
+		     uintptr_t *);
+int vmspace_unmap(struct vmspace *, uintptr_t, size_t);
+int vmspace_protect(struct vmspace *, uintptr_t, size_t, uint32_t);
+int vmspace_check(struct vmspace *, uintptr_t, size_t, uint32_t);
 void vmspace_free(struct vmspace *);
 
 #endif

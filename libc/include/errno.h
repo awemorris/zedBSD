@@ -31,5 +31,11 @@ extern int boots_errno;
 #define ENOSYS 20
 #define EOPNOTSUPP 21
 #define ENOEXEC 22
+#define EFAULT 23
+#define EAGAIN 24
+#define EACCES 25
+#define ESRCH 26
+#define ECHILD 27
+#define E2BIG 28
 
 #endif

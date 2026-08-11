@@ -14,12 +14,14 @@
 
 #define MOUNT_MAX 64U
 #define MOUNT_READ_ONLY 0x00000001U
+#define FILESYSTEM_NODEV 0x00000001U
 
 struct inode;
 struct mount;
 
 struct filesystem_type {
 	const char *fs_name;
+	unsigned fs_flags;
 	int (*probe)(struct disk *);
 	int (*mount)(struct mount *);
 	int (*unmount)(struct mount *);

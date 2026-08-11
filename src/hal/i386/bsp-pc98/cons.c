@@ -10,9 +10,9 @@
 #define TERMINAL_FIRST_ROW 18U
 
 static volatile uint16_t *const text_vram =
-	(volatile uint16_t *)0x000a0000;
+	(volatile uint16_t *)0x800a0000;
 static volatile uint8_t *const attribute_vram =
-	(volatile uint8_t *)0x000a2000;
+	(volatile uint8_t *)0x800a2000;
 static enum hal_cons_mode console_mode;
 static unsigned cursor_row;
 static unsigned cursor_column;

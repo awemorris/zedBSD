@@ -15,7 +15,7 @@ CIRRUS_NOCT_CFLAGS = $(filter-out -Os,$(NOCT_CFLAGS)) -O2
 # verification targets later in this file.
 HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
-	-Iinclude -Isrc -Isrc/hal/i386 -Ilibc/include \
+	-Iinclude -Iinclude/uapi -Isrc -Isrc/hal/i386 -Ilibc/include \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PC98
 HAL_PC98_SOURCES := \
 	src/hal/i386/lib.c src/hal/i386/irq.c src/hal/i386/page.c \
@@ -31,13 +31,17 @@ HAL_PC98_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(HAL_PC98_SOURCES)) \
 
 BOOTS_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
-	-Iinclude -Isrc -I. -Ilibc/include
+	-Iinclude -Iinclude/uapi -Isrc -I. -Ilibc/include
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/process.o $(BUILD)/src/kern/thread.o \
 	$(BUILD)/src/kern/sched.o $(BUILD)/src/kern/vmspace.o \
 	$(BUILD)/src/kern/filedesc.o $(BUILD)/src/kern/cwdinfo.o \
 	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec.o \
-	$(BUILD)/src/kern/user-probe.o
+	$(BUILD)/src/kern/user-probe.o $(BUILD)/src/kern/syscall.o \
+	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
+	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/console-device.o \
+	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
+	$(BUILD)/src/kern/pc98/graphics.o
 
 # Milestone verification nests QEMU tests.  Keep those chains ordered even
 # when the caller requests a highly parallel compile.
@@ -83,13 +87,7 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/pc98/linux-boot.o \
 	$(BUILD)/src/kern/image.o \
 	$(BUILD)/src/kern/panic.o \
-	$(BUILD)/src/noct/noct.o \
-	$(BUILD)/src/noct/memory.o \
-	$(BUILD)/src/noct/napi.o \
-	$(BUILD)/src/noct/platform.o \
-	$(BUILD)/src/noct/target.o \
-	$(BUILD)/src/noct/pc98-beui.o \
-	$(NOCT_OBJECTS) $(BOOTS_LIBC_OBJECTS) $(BOOTS_SOFTFLOAT_OBJECTS) \
+	$(BOOTS_LIBC_OBJECTS) \
 	$(HAL_PC98_OBJS) $(KERN_OBJS)
 M9_STAGE2_OBJS = $(filter-out $(BUILD)/src/kern/main.o \
 	$(BUILD)/src/kern/shell.o $(BUILD)/src/kern/device.o,$(STAGE2_OBJS)) \
@@ -100,7 +98,7 @@ M9_STAGE2_OBJS = $(filter-out $(BUILD)/src/kern/main.o \
 all: $(BUILD)/boot2.bin $(BUILD)/ipl-lba0.bin $(BUILD)/ipl-lba2.bin \
 	$(BUILD)/ipl-lba0.img $(BUILD)/ipl-lba2.img $(BUILD)/ipl-part.img \
 	$(BUILD)/IO.SYS $(BUILD)/BOOT.SYS \
-	$(BUILD)/INIT.ELF \
+	$(BUILD)/INIT.ELF $(BUILD)/NOCT.ELF \
 	$(BUILD)/partition-pbr.bin \
 	$(BUILD)/chain-test.bin $(BUILD)/fdd-ipl.bin \
 	$(BUILD)/BOOTAPP.BIN
@@ -110,8 +108,9 @@ BOOT.SYS: $(BUILD)/BOOT.SYS
 BOOT-M9.SYS: $(BUILD)/BOOT-M9.SYS
 BOOTAPP.BIN: $(BUILD)/BOOTAPP.BIN
 INIT.ELF: $(BUILD)/INIT.ELF
+NOCT.ELF: $(BUILD)/NOCT.ELF
 USER-FAULT.ELF: $(BUILD)/USER-FAULT.ELF
-.PHONY: BOOT.SYS BOOT-M9.SYS BOOTAPP.BIN INIT.ELF USER-FAULT.ELF
+.PHONY: BOOT.SYS BOOT-M9.SYS BOOTAPP.BIN INIT.ELF NOCT.ELF USER-FAULT.ELF
 
 # ----------------------------------------------------------------------
 # Per-object flag overrides.
@@ -122,18 +121,13 @@ NOCT_GLUE_OBJS := $(BUILD)/src/noct/noct.o $(BUILD)/src/noct/napi.o \
 	$(BUILD)/src/noct/target.o
 $(NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
 $(NOCT_GLUE_OBJS): OBJ_CFLAGS = $(NOCT_CFLAGS)
-$(BUILD)/src/noct/pc98-beui.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
-# This is Boots' BeUI/HAL adapter, not part of the Noct VM.  Keep the
-# pre-split ABI/code-generation flags that stage2.c used for this code.
-$(BUILD)/src/noct/pc98-beui.o: OBJ_CFLAGS = $(BOOTS_CFLAGS)
+$(BUILD)/src/kern/pc98/graphics.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
+$(BUILD)/src/kern/pc98/graphics.o: OBJ_CFLAGS = $(BOOTS_CFLAGS)
 $(BUILD)/src/noct/platform.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) \
 	$(BOOTS_LIBC_CPPFLAGS)
 $(BUILD)/src/noct/platform.o: OBJ_CFLAGS = $(BOOTS_LIBC_CFLAGS)
 
-# The shell reaches the embedded Noct API, so it needs the Noct include paths.
-# Code generation flags remain the ordinary Boots ones.
-STAGE2_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
-$(BUILD)/src/kern/shell.o: OBJ_CPPFLAGS = $(STAGE2_CPPFLAGS)
+STAGE2_CPPFLAGS = $(BOOTS_CPPFLAGS)
 
 $(BUILD)/src/kern/startup.o $(BUILD)/$(PC98)/stage2-m9-test.o: \
 	$(BUILD)/kern/messages.h
@@ -211,13 +205,45 @@ $(BUILD)/ipl-part.img: $(BUILD)/partition-pbr.bin
 # ----------------------------------------------------------------------
 # Stage 2 (BOOT.SYS) and the applet container.
 
-$(BUILD)/tests/user-init.o: tests/user-init.S
-	@mkdir -p $(dir $@)
-	$(AS) --32 $< -o $@
+USER_LIBC_OBJS := $(BUILD)/user/crt0.o $(BUILD)/user/libc/posix.o \
+	$(BUILD)/libc/heap.o $(BUILD)/libc/string.o $(BUILD)/libc/ctype.o \
+	$(BUILD)/libc/int64.o $(BUILD)/libc/strto.o $(BUILD)/libc/format.o \
+	$(BUILD)/libc/stdio.o
+USER_CFLAGS := $(BOOTS_CFLAGS) -fno-builtin -ffunction-sections \
+	-fdata-sections -msoft-float -mno-80387 -mno-fp-ret-in-387 \
+	-mno-mmx -mno-sse -mno-sse2
+$(BUILD)/user/libc/posix.o $(BUILD)/user/tests/syscall-smoke.o: \
+	OBJ_CPPFLAGS = $(BOOTS_CPPFLAGS)
+$(BUILD)/user/libc/posix.o $(BUILD)/user/tests/syscall-smoke.o: \
+	OBJ_CFLAGS = $(USER_CFLAGS)
 
-$(BUILD)/INIT.ELF: $(BUILD)/tests/user-init.o $(PC98)/user-init.ld
-	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
-		-T $(PC98)/user-init.ld $< -o $@
+$(BUILD)/INIT.ELF: $(USER_LIBC_OBJS) $(BUILD)/user/tests/syscall-smoke.o \
+	$(PC98)/noct-user.ld
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) \
+		$(BUILD)/user/tests/syscall-smoke.o -o $@
+
+USER_NOCT_GLUE_OBJS := $(BUILD)/user/noct/main.o \
+	$(BUILD)/user/noct/platform.o $(BUILD)/user/noct/napi.o \
+	$(BUILD)/user/noct/target.o $(BUILD)/user/noct/env.o
+$(USER_NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
+$(USER_NOCT_GLUE_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
+$(BUILD)/user/noct/napi.o: src/noct/napi.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
+$(BUILD)/user/noct/target.o: src/noct/target.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
+$(BUILD)/user/noct/env.o: src/kern/env.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/NOCT.ELF: $(USER_LIBC_OBJS) $(USER_NOCT_GLUE_OBJS) \
+	$(USER_NOCT_OBJECTS) $(BOOTS_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_NOCT_GLUE_OBJS) \
+		$(USER_NOCT_OBJECTS) $(BOOTS_SOFTFLOAT_OBJECTS) -o $@
+	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 
 $(BUILD)/tests/user-fault.o: tests/user-fault.S
 	@mkdir -p $(dir $@)

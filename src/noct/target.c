@@ -6,8 +6,20 @@
 
 #include "noct/target.h"
 #include "noct/napi.h"
-#include "hal/hal.h"
 
+#ifdef NOCT_TARGET_BOOTS
+#include <boots/console.h>
+#define TARGET_KEY_MASK BOOTS_CONSOLE_EVENT_KEY_MASK
+#define TARGET_KEY_SHIFT BOOTS_CONSOLE_EVENT_SHIFT
+#define TARGET_KEY_CTRL BOOTS_CONSOLE_EVENT_CTRL
+#define TARGET_KEY_GRAPH BOOTS_CONSOLE_EVENT_GRAPH
+#else
+#include "hal/hal.h"
+#define TARGET_KEY_MASK HAL_KEY_EVENT_KEY_MASK
+#define TARGET_KEY_SHIFT HAL_KEY_EVENT_SHIFT
+#define TARGET_KEY_CTRL HAL_KEY_EVENT_CTRL
+#define TARGET_KEY_GRAPH HAL_KEY_EVENT_GRAPH
+#endif
 #include <noct/noct.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -229,11 +241,11 @@ static int term_flush(void *context)
 
 static int translate_key(int event)
 {
-	unsigned shift = ((unsigned)event & HAL_KEY_EVENT_SHIFT ? 0x01U : 0) |
-		((unsigned)event & HAL_KEY_EVENT_CTRL ? 0x10U : 0) |
-		((unsigned)event & HAL_KEY_EVENT_GRAPH ? 0x08U : 0);
+	unsigned shift = ((unsigned)event & TARGET_KEY_SHIFT ? 0x01U : 0) |
+		((unsigned)event & TARGET_KEY_CTRL ? 0x10U : 0) |
+		((unsigned)event & TARGET_KEY_GRAPH ? 0x08U : 0);
 	int modifiers = 0;
-	int key = event & (int)HAL_KEY_EVENT_KEY_MASK;
+	int key = event & (int)TARGET_KEY_MASK;
 
 	/* Modifier make events describe state; they are not editor input. */
 	if (key == 0x170 || key == 0x173 || key == 0x174) /* Shift, Graph, Ctrl */
