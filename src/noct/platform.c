@@ -9,6 +9,8 @@
 #include "kern/env.h"
 #include "kern/fs.h"
 #include "kern/noct.h"
+#include "kern/file.h"
+#include "kern/vfs.h"
 #include "noct/memory.h"
 #include "noct/napi.h"
 #include "noct/noct-m6-script.h"
@@ -25,8 +27,12 @@
 
 static const char embedded_source[] = BOOTS_NOCT_M6_SOURCE;
 static const struct noct_beui_hal *target_beui_hal;
+/* Host tests do not construct the kernel VFS; the strong runtime definition
+ * in src/kern/vfs.c replaces this zeroed compatibility object. */
+struct fs_context kern_fs_context __attribute__((weak));
 
 struct target_context {
+	struct fs_context *fs_context;
 	struct boots_filesystem *filesystem;
 	struct boots_namespace *namespace;
 	boots_noct_key_fn key_read;
@@ -210,17 +216,30 @@ static int
 target_file_size(void *context, const char *path, uint32_t *size)
 {
 	struct target_context *target = context;
-	struct boots_file file;
+	struct file *file;
+	struct boots_file legacy;
 
-	if (size == NULL ||
-	    (target->namespace != NULL ?
-		boots_namespace_open_result(target->namespace, path, &file) !=
-			BOOTS_FS_OK :
-		target->filesystem == NULL ||
-		!boots_fs_open(target->filesystem, path, &file)) ||
-	    file.size > UINT32_MAX)
+	if (size == NULL)
 		return 0;
-	*size = (uint32_t)file.size;
+	if (target->fs_context == NULL) {
+		if ((target->namespace != NULL ?
+		     boots_namespace_open_result(target->namespace, path, &legacy) :
+		     target->filesystem != NULL ?
+		     boots_fs_open_result(target->filesystem, path, &legacy) :
+		     BOOTS_FS_NOT_FOUND) != BOOTS_FS_OK || legacy.size > UINT32_MAX)
+			return 0;
+		*size = (uint32_t)legacy.size;
+		return 1;
+	}
+	if (
+	    file_openat(target->fs_context, path, O_RDONLY, 0, &file) != 0)
+		return 0;
+	if (file->f_inode->i_size < 0) {
+		(void)file_close(file);
+		return 0;
+	}
+	*size = (uint32_t)file->f_inode->i_size;
+	(void)file_close(file);
 	return 1;
 }
 
@@ -229,14 +248,24 @@ target_file_read(void *context, const char *path, uint32_t offset,
 		 void *buffer, uint32_t length)
 {
 	struct target_context *target = context;
-	struct boots_file file;
-
-	return (target->namespace != NULL ?
-		boots_namespace_open_result(target->namespace, path, &file) ==
-			BOOTS_FS_OK :
-		target->filesystem != NULL &&
-		boots_fs_open(target->filesystem, path, &file)) &&
-	       boots_file_read(&file, offset, buffer, length);
+	struct file *file;
+	struct boots_file legacy;
+	int ok;
+	if (target->fs_context == NULL)
+		return (target->namespace != NULL ?
+			boots_namespace_open_result(target->namespace, path, &legacy) ==
+			BOOTS_FS_OK : target->filesystem != NULL &&
+			boots_fs_open(target->filesystem, path, &legacy)) &&
+		       boots_file_read(&legacy, offset, buffer, length);
+	if (
+	    file_openat(target->fs_context, path, O_RDONLY, 0, &file) != 0)
+		return 0;
+	if (file_seek(file, offset, 0) < 0) {
+		(void)file_close(file); return 0;
+	}
+	ok = file_read(file, buffer, length) == (ssize_t)length;
+	(void)file_close(file);
+	return ok;
 }
 
 static int
@@ -244,25 +273,50 @@ target_directory_read(void *context, const char *path, unsigned index,
 		      struct boots_noct_dirent *entry)
 {
 	struct target_context *target = context;
-	struct boots_dirent filesystem_entry;
+	struct file *directory;
+	struct dirent filesystem_entry;
 	size_t length;
+	int eof = 0, error = 0;
 
-	if ((target->filesystem == NULL && target->namespace == NULL) ||
-	    entry == NULL || path == NULL)
+	if (entry == NULL || path == NULL)
 		return -1;
-	if (target->namespace != NULL ?
-	    boots_namespace_readdir_result(target->namespace, path, index,
-					      &filesystem_entry) != BOOTS_FS_OK :
-	    !boots_fs_readdir(target->filesystem, path, index,
-				 &filesystem_entry))
+	if (target->fs_context == NULL) {
+		struct boots_dirent old;
+		enum boots_fs_result r = target->namespace != NULL ?
+			boots_namespace_readdir_result(target->namespace, path, index,
+						      &old) :
+			target->filesystem != NULL ?
+			boots_fs_readdir_result(target->filesystem, path, index, &old) :
+			BOOTS_FS_INVALID_ARGUMENT;
+		if (r == BOOTS_FS_NOT_FOUND) return 0;
+		if (r != BOOTS_FS_OK) return -1;
+		length = strnlen(old.name, sizeof(old.name));
+		if (length >= sizeof(entry->name)) return -1;
+		memcpy(entry->name, old.name, length + 1U);
+		entry->size = old.size; entry->attributes = old.attributes;
+		return 1;
+	}
+	if (file_openat(target->fs_context, path, O_RDONLY | O_DIRECTORY, 0,
+			&directory) != 0)
+		return -1;
+	for (unsigned i = 0; i <= index; i++) {
+		error = file_readdir(directory, &filesystem_entry, &eof);
+		if (error != 0 || eof)
+			break;
+	}
+	(void)file_close(directory);
+	if (error != 0)
+		return -1;
+	if (eof)
 		return 0;
-	length = strnlen(filesystem_entry.name, sizeof(filesystem_entry.name));
+	length = strnlen(filesystem_entry.d_name,
+			 sizeof(filesystem_entry.d_name));
 	if (length >= sizeof(entry->name))
 		return -1;
-	memcpy(entry->name, filesystem_entry.name, length);
+	memcpy(entry->name, filesystem_entry.d_name, length);
 	entry->name[length] = '\0';
-	entry->size = filesystem_entry.size;
-	entry->attributes = filesystem_entry.attributes;
+	entry->size = 0;
+	entry->attributes = filesystem_entry.d_type == INODE_DIR ? 0x10U : 0;
 	return 1;
 }
 
@@ -383,24 +437,31 @@ boots_noct_run_file(struct boots_namespace *namespace,
 	struct target_context target;
 	struct hal_cons_state console_state;
 	struct boots_noct_result result;
-	struct boots_file file;
+	struct file *file;
+	struct boots_file legacy_file;
 	struct boots_noct_memory_profile memory;
 	size_t source_area;
+	size_t file_size;
 	char *source;
-	int ok;
+	int ok, use_vfs = kern_fs_context.fc_root != NULL;
 
-	if (filesystem == NULL || path == NULL || path[0] == '\0')
+	if (path == NULL || path[0] == '\0')
 		return 0;
-	if (!boots_fs_open(filesystem, path, &file)) {
+	if ((use_vfs && file_openat(&kern_fs_context, path, O_RDONLY, 0, &file) != 0) ||
+	    (!use_vfs && (filesystem == NULL ||
+			 !boots_fs_open(filesystem, path, &legacy_file)))) {
 		console_string("Noct: file not found: ");
 		console_string(path);
 		console_string("\n");
 		hal_cons_update_cursor();
 		return 0;
 	}
+	file_size = use_vfs ? (size_t)file->f_inode->i_size :
+		(size_t)legacy_file.size;
 	hal_pc98_enable_high_memory();
 	target.filesystem = filesystem;
 	target.namespace = namespace;
+	target.fs_context = use_vfs ? &kern_fs_context : NULL;
 	target.key_read = key_read;
 	target.key_poll = key_poll;
 	target.clock_second = clock_second;
@@ -411,29 +472,30 @@ boots_noct_run_file(struct boots_namespace *namespace,
 		hal_cons_update_cursor();
 		return 0;
 	}
-	if (file.size > memory.source_max) {
+	if (file_size > memory.source_max) {
 		console_string("Noct: source exceeds memory profile limit: ");
 		console_string(path);
 		console_string("\n");
 		hal_cons_update_cursor();
 		return 0;
 	}
-	source_area = ((size_t)file.size + 1U + 15U) & ~(size_t)15U;
+	source_area = (file_size + 1U + 15U) & ~(size_t)15U;
 	if (memory.arena_size < source_area + SCRIPT_HEAP_MIN) {
 		console_string("Noct: insufficient script arena\n");
 		hal_cons_update_cursor();
 		return 0;
 	}
 	source = (char *)(memory.arena_base + memory.arena_size - source_area);
-	if (file.size != 0 &&
-	    !boots_file_read(&file, 0, source, (uint32_t)file.size)) {
+	if (file_size != 0 &&
+	    (use_vfs ? file_read(file, source, file_size) != (ssize_t)file_size :
+	     !boots_file_read(&legacy_file, 0, source, (uint32_t)file_size))) {
 		console_string("Noct: cannot read source: ");
 		console_string(path);
 		console_string("\n");
 		hal_cons_update_cursor();
 		return 0;
 	}
-	source[(size_t)file.size] = '\0';
+	source[file_size] = '\0';
 
 	options.arena = (void *)memory.arena_base;
 	options.arena_size = memory.arena_size - source_area;
@@ -448,13 +510,14 @@ boots_noct_run_file(struct boots_namespace *namespace,
 	options.filesystem = filesystem;
 	options.environment = environment;
 	options.memory = &memory;
-	boots_stdio_set_namespace(namespace);
+	if (use_vfs) boots_stdio_set_context(&kern_fs_context);
+	else boots_stdio_set_namespace(namespace);
 	hal_cons_save_state(&console_state);
-	if (file.size >= sizeof(NOCT_BYTECODE_HEADER) - 1U &&
+	if (file_size >= sizeof(NOCT_BYTECODE_HEADER) - 1U &&
 	    memcmp(source, NOCT_BYTECODE_HEADER,
 		   sizeof(NOCT_BYTECODE_HEADER) - 1U) == 0)
 		ok = boots_noct_run_bytecode_args(path, (uint8_t *)source,
-						 (uint32_t)file.size, argc, argv,
+						 (uint32_t)file_size, argc, argv,
 						 &options, &result);
 	else
 		ok = boots_noct_run_args(path, source, argc, argv, &options,
@@ -469,6 +532,7 @@ boots_noct_run_file(struct boots_namespace *namespace,
 	}
 	hal_cons_restore_terminal(&console_state);
 	boots_stdio_set_namespace(NULL);
+	if (use_vfs) (void)file_close(file);
 	return ok;
 }
 
@@ -492,6 +556,8 @@ boots_noct_run_repl(struct boots_namespace *namespace,
 	hal_pc98_enable_high_memory();
 	target.filesystem = filesystem;
 	target.namespace = namespace;
+	target.fs_context = kern_fs_context.fc_root != NULL ?
+		&kern_fs_context : NULL;
 	target.key_read = key_read;
 	target.key_poll = key_poll;
 	target.clock_second = clock_second;
@@ -516,7 +582,8 @@ boots_noct_run_repl(struct boots_namespace *namespace,
 	options.filesystem = filesystem;
 	options.environment = environment;
 	options.memory = &memory;
-	boots_stdio_set_namespace(namespace);
+	if (target.fs_context != NULL) boots_stdio_set_context(target.fs_context);
+	else boots_stdio_set_namespace(namespace);
 	hal_cons_save_state(&console_state);
 	ok = boots_noct_repl(&options, repl_read_line, &target, &result);
 	if (!ok) {

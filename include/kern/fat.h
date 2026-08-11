@@ -33,6 +33,10 @@ struct boots_fat_state {
 	uint8_t number_of_fats;
 	uint8_t type;
 	uint8_t fat16_layout;
+	uint8_t sector_cache[512];
+	uint32_t sector_cache_lba;
+	uint8_t sector_cache_valid;
+	uint8_t sector_cache_dirty;
 };
 
 struct boots_fat_file_state {

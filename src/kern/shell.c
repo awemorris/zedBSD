@@ -2,6 +2,8 @@
 #include "kern/internal.h"
 #include "kern/clock.h"
 #include "kern/platform.h"
+#include "kern/file.h"
+#include "kern/vfs.h"
 #include "hal/console.h"
 #include "noct/napi.h"
 #include "noct/platform.h"
@@ -11,15 +13,9 @@ static uint8_t sec[512], cfg[CFG_MAX];
 
 void prompt(void)
 {
-	if (curdev >= 0)
-		devname(curdev);
-	else
-		puts("none");
-	if (curpart >= 0) {
-		putc(':');
-		puts(parts[curpart].name);
-	}
-	puts(" ok ");
+	const char *cwd = fs_getcwd(&kern_fs_context);
+	puts(cwd != NULL ? cwd : "/");
+	puts(" $ ");
 	update_cursor();
 }
 static uint32_t raw_key(void)
@@ -208,46 +204,36 @@ static int selectpart(const char *s)
 }
 
 /* Filesystem-facing shell commands and extension-module loaders. */
-static void ls(void)
+static int vfs_ls(const char *path)
 {
-	if (curpart < 0) {
-		for (int i = 0; i < MAX_PARTS; i++)
-			if (parts[i].valid) {
-				dec(i);
-				putc(' ');
-				puts(parts[i].name);
-				puts(" LBA ");
-				dec(parts[i].start);
-				putc('\n');
-		}
-		return;
-	}
-	for (unsigned index = 0;; index++) {
-		struct boots_dirent entry;
-
-		if (!boots_fs_readdir(&mounted_fs, "", index, &entry))
-			return;
-		puts(entry.name);
+	struct file *directory;
+	int error = file_openat(&kern_fs_context, path,
+				O_RDONLY | O_DIRECTORY, 0, &directory);
+	if (error != 0)
+		return 0;
+	for (;;) {
+		struct dirent entry;
+		int eof;
+		error = file_readdir(directory, &entry, &eof);
+		if (error != 0 || eof)
+			break;
+		puts(entry.d_name);
 		putc('\n');
 	}
+	(void)file_close(directory);
+	return error == 0;
 }
 static int catfile(const char *n)
 {
-	struct boots_file file;
-	uint64_t offset = 0;
-
-	if (curpart < 0 || !boots_fs_open(&mounted_fs, n, &file))
+	struct file *file;
+	ssize_t count;
+	if (file_openat(&kern_fs_context, n, O_RDONLY, 0, &file) != 0)
 		return 0;
-	while (offset < file.size) {
-		uint32_t k = file.size - offset > 512 ?
-		             512 : (uint32_t)(file.size - offset);
-		if (!boots_file_read(&file, offset, sec, k))
-			return 0;
-		for (uint32_t i = 0; i < k; i++)
+	while ((count = file_read(file, sec, sizeof(sec))) > 0)
+		for (ssize_t i = 0; i < count; i++)
 			putc(sec[i]);
-		offset += k;
-	}
-	return 1;
+	(void)file_close(file);
+	return count == 0;
 }
 static uint32_t crc32_image(const uint8_t *p, uint32_t n)
 {
@@ -262,18 +248,23 @@ static uint32_t crc32_image(const uint8_t *p, uint32_t n)
 }
 static int run_applet(const char *n, int argc, char **argv)
 {
-	struct boots_file file;
+	struct file *file;
 	uint8_t *image = (uint8_t *)0x50000;
-	if (curpart < 0 || !boots_fs_open(&mounted_fs, n, &file) ||
-	    file.size < sizeof(struct boots_applet_header) ||
-	    file.size > 0x10000 ||
-	    !boots_file_read(&file, 0, image, (uint32_t)file.size))
+	off_t size;
+	if (file_openat(&kern_fs_context, n, O_RDONLY, 0, &file) != 0)
 		return 0;
+	size = file->f_inode->i_size;
+	if (size < (off_t)sizeof(struct boots_applet_header) ||
+	    size > 0x10000 || file_read(file, image, (size_t)size) != size) {
+		(void)file_close(file);
+		return 0;
+	}
+	(void)file_close(file);
 	struct boots_applet_header *h = (struct boots_applet_header *)image;
 	if (h->magic != BOOTS_APPLET_MAGIC || h->abi_version != 1 ||
-	    h->header_size != sizeof(*h) || h->image_size != file.size ||
-	    h->entry_offset < h->header_size || h->entry_offset >= file.size ||
-	    crc32_image(image, (uint32_t)file.size) != h->crc32)
+	    h->header_size != sizeof(*h) || h->image_size != (uint32_t)size ||
+	    h->entry_offset < h->header_size || h->entry_offset >= (uint32_t)size ||
+	    crc32_image(image, (uint32_t)size) != h->crc32)
 		return 0;
 	struct boots_applet_services s = {1, sizeof(s), putc, puts,
 	                                   applet_key};
@@ -361,8 +352,8 @@ int command(char *s)
 	}
 #endif
 	if (streq(v[0], "help")) {
-		puts("help echo env set unset pause wait devalias probe-ide probe-scsi "
-		     "disk part ls cat source kernel arg boot linux "
+		puts("help echo env set unset pause wait device probe-ide probe-scsi "
+		     "disk part pwd cd ls cat source kernel arg boot linux "
 		     "run noct emacs noct-test reboot halt\n");
 		return 1;
 	}
@@ -415,7 +406,7 @@ int command(char *s)
 			;
 		return 1;
 	}
-	if (streq(v[0], "devalias")) {
+	if (streq(v[0], "device")) {
 		listdev(0);
 		puts("boot -> BIOS ");
 		hex8(ho->boot_bios_id);
@@ -443,15 +434,26 @@ int command(char *s)
 	}
 	if (streq(v[0], "part")) {
 		if (n == 1) {
-			ls();
+			for (int i = 0; i < MAX_PARTS; i++)
+				if (parts[i].valid) {
+					dec(i); putc(' '); puts(parts[i].name);
+					puts(" LBA "); dec(parts[i].start); putc('\n');
+				}
 			return 1;
 		}
 		return selectpart(v[1]);
 	}
-	if (streq(v[0], "ls")) {
-		ls();
-		return 1;
+	if (streq(v[0], "pwd")) {
+		if (n != 1) return 0;
+		puts(fs_getcwd(&kern_fs_context)); putc('\n'); return 1;
 	}
+	if (streq(v[0], "cd")) {
+		const char *path = n == 1 ? boots_env_get(&boot_environment, "HOME") :
+			(n == 2 ? v[1] : NULL);
+		return path != NULL && fs_chdir(&kern_fs_context, path) == 0;
+	}
+	if (streq(v[0], "ls"))
+		return n <= 2 && vfs_ls(n == 2 ? v[1] : ".");
 	if (streq(v[0], "cat"))
 		return n == 2 && catfile(v[1]);
 	if (streq(v[0], "kernel")) {
@@ -502,13 +504,20 @@ int command(char *s)
 		return 0;
 	}
 	if (streq(v[0], "source")) {
-		struct boots_file file;
+		struct file *file;
+		off_t size;
 
-		if (n != 2 || !boots_fs_open(&mounted_fs, v[1], &file) ||
-		    file.size >= CFG_MAX ||
-		    !boots_file_read(&file, 0, cfg, (uint32_t)file.size))
+		if (n != 2 || file_openat(&kern_fs_context, v[1], O_RDONLY, 0,
+						 &file) != 0)
 			return 0;
-		cfg[(uint32_t)file.size] = 0;
+		size = file->f_inode->i_size;
+		if (size < 0 || size >= CFG_MAX ||
+		    file_read(file, cfg, (size_t)size) != size) {
+			(void)file_close(file);
+			return 0;
+		}
+		(void)file_close(file);
+		cfg[(uint32_t)size] = 0;
 		char *p = (char *)cfg;
 		unsigned ln = 1;
 		while (*p) {

@@ -3,11 +3,12 @@
 #include "kern/clock.h"
 #include "kern/messages.h"
 #include "kern/platform.h"
+#include "kern/vfs.h"
 #include "hal/console.h"
 #include "noct/platform.h"
 
 /* The startup menu exposes only the first four fixed disks. The full stable
- * discovery order remains addressable through devalias and disk. */
+ * discovery order remains addressable through device and disk. */
 static int menu_device(unsigned ordinal)
 {
 	unsigned found = 0;
@@ -22,21 +23,27 @@ static int menu_device(unsigned ordinal)
  * BOOT.CFG is the pre-1.0 name; keep reading it for one release. */
 const char *startup_config_file(void)
 {
-	struct boots_file file;
+	struct inode *inode;
 
-	if (boots_fs_open(&mounted_fs, "BOOTS.CFG", &file))
+	if (namei_at(&kern_fs_context, "BOOTS.CFG", &inode) == 0) {
+		inode_release(inode);
 		return "BOOTS.CFG";
-	if (boots_fs_open(&mounted_fs, "BOOT.CFG", &file))
+	}
+	if (namei_at(&kern_fs_context, "BOOT.CFG", &inode) == 0) {
+		inode_release(inode);
 		return "BOOT.CFG";
+	}
 	return NULL;
 }
 
 static enum startup_config_kind boot_volume_startup_kind(void)
 {
-	struct boots_file file;
+	struct inode *inode;
 
-	if (boots_fs_open(&mounted_fs, "AUTOEXEC.NCT", &file))
+	if (namei_at(&kern_fs_context, "AUTOEXEC.NCT", &inode) == 0) {
+		inode_release(inode);
 		return STARTUP_CONFIG_AUTOEXEC;
+	}
 	if (startup_config_file())
 		return STARTUP_CONFIG_BOOTCFG;
 	return STARTUP_CONFIG_NONE;
@@ -132,13 +139,14 @@ static int valid_boot_action(const char *action)
  * its selected action, and -1 when the script/action failed validation. */
 int run_autoexec(void)
 {
-	struct boots_file file;
+	struct inode *inode;
 	const char *selected;
 	char action[LINE_MAX];
 	int script_ok;
 
-	if (!boots_fs_open(&mounted_fs, "AUTOEXEC.NCT", &file))
+	if (namei_at(&kern_fs_context, "AUTOEXEC.NCT", &inode) != 0)
 		return 0;
+	inode_release(inode);
 	(void)boots_env_unset(&boot_environment, "BOOT_ACTION");
 	script_ok = boots_noct_run_file(&mounted_namespace, &mounted_fs,
 					 &boot_environment,

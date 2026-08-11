@@ -16,6 +16,7 @@
 
 #include "drivers/pc98-ide.h"
 #include "kern/boot.h"
+#include <errno.h>
 
 #define IDE_BANK_SELECT   0x432U
 #define IDE_DATA          0x640U
@@ -45,7 +46,7 @@
 #define IDE_TIMEOUT_SPINS 5000000U
 
 struct ide_unit {
-	struct boots_blkdev blkdev;
+	struct disk *disk;
 	uint8_t present;
 	uint8_t bank;
 	uint8_t drive;
@@ -54,6 +55,8 @@ struct ide_unit {
 	uint16_t native_cylinders;
 	uint16_t native_heads;
 	uint16_t native_sectors;
+	uint16_t firmware_heads;
+	uint16_t firmware_sectors;
 };
 
 static struct ide_unit units[IDE_UNIT_MAX];
@@ -182,10 +185,10 @@ setup_transfer(const struct ide_unit *unit, uint64_t lba, uint32_t count)
 	return 1;
 }
 
-static enum boots_blkdev_result
-pio_read(struct boots_blkdev *dev, uint64_t lba, uint32_t count, void *buffer)
+static int
+pio_read(struct disk *dev, uint64_t lba, uint32_t count, void *buffer)
 {
-	struct ide_unit *unit = dev->private_data;
+	struct ide_unit *unit = dev->d_data;
 	uint16_t *out = buffer;
 
 	while (count > 0) {
@@ -194,27 +197,27 @@ pio_read(struct boots_blkdev *dev, uint64_t lba, uint32_t count, void *buffer)
 		uint32_t sector;
 
 		if (!setup_transfer(unit, lba, chunk))
-			return BOOTS_BLKDEV_IO_ERROR;
+			return EIO;
 		outb(IDE_STATUS, IDE_CMD_READ);
 		for (sector = 0; sector < chunk; sector++) {
 			unsigned word;
 
 			if (!wait_drq())
-				return BOOTS_BLKDEV_IO_ERROR;
+				return EIO;
 			for (word = 0; word < 256; word++)
 				*out++ = inw(IDE_DATA);
 		}
 		lba += chunk;
 		count -= chunk;
 	}
-	return BOOTS_BLKDEV_OK;
+	return 0;
 }
 
-static enum boots_blkdev_result
-pio_write(struct boots_blkdev *dev, uint64_t lba, uint32_t count,
+static int
+pio_write(struct disk *dev, uint64_t lba, uint32_t count,
 	  const void *buffer)
 {
-	struct ide_unit *unit = dev->private_data;
+	struct ide_unit *unit = dev->d_data;
 	const uint16_t *in = buffer;
 
 	while (count > 0) {
@@ -222,33 +225,72 @@ pio_write(struct boots_blkdev *dev, uint64_t lba, uint32_t count,
 		uint32_t sector;
 
 		if (!setup_transfer(unit, lba, chunk))
-			return BOOTS_BLKDEV_IO_ERROR;
+			return EIO;
 		outb(IDE_STATUS, IDE_CMD_WRITE);
 		for (sector = 0; sector < chunk; sector++) {
 			unsigned word;
 
 			if (!wait_drq())
-				return BOOTS_BLKDEV_IO_ERROR;
+				return EIO;
 			for (word = 0; word < 256; word++)
 				outw(IDE_DATA, *in++);
 		}
 		if (!wait_clear(IDE_STATUS_BSY) ||
 		    (inb(IDE_ALT_STATUS) & IDE_STATUS_ERR))
-			return BOOTS_BLKDEV_IO_ERROR;
+			return EIO;
 		lba += chunk;
 		count -= chunk;
 	}
-	return BOOTS_BLKDEV_OK;
+	return 0;
 }
 
-static enum boots_blkdev_result
-pio_flush(struct boots_blkdev *dev)
+static int
+pc98_ide_submit(struct disk *dev, struct bio *bio)
 {
-	/* PIO writes complete synchronously; FLUSH CACHE errors on old
-	 * drives, so it is deliberately not issued. */
-	(void)dev;
-	return BOOTS_BLKDEV_OK;
+	int error;
+	size_t transferred = 0;
+
+	if (bio->b_op == BIO_READ)
+		error = pio_read(dev, bio->b_mapped_block,
+				 bio->b_block_count, bio->b_data);
+	else if (bio->b_op == BIO_WRITE)
+		error = pio_write(dev, bio->b_mapped_block,
+				  bio->b_block_count, bio->b_data);
+	else if (bio->b_op == BIO_FLUSH)
+		error = 0; /* PIO completion is synchronous on supported drives. */
+	else
+		return EOPNOTSUPP;
+	if (error == 0)
+		transferred = (size_t)bio->b_block_count * dev->d_block_size;
+	bio_complete(bio, error, transferred);
+	return 0;
 }
+
+static int
+pc98_ide_ioctl(struct disk *dev, unsigned long request, void *argument)
+{
+	struct ide_unit *unit = dev->d_data;
+	struct disk_geometry *geometry = argument;
+
+	if (request != DISK_IOCTL_GET_GEOMETRY)
+		return EOPNOTSUPP;
+	if (geometry == NULL)
+		return EINVAL;
+	geometry->cylinders = unit->native_cylinders;
+	geometry->heads = unit->native_heads;
+	geometry->sectors_per_track = unit->native_sectors;
+	/* Firmware geometry, when present, is stored separately below. */
+	if (unit->firmware_heads != 0) {
+		geometry->heads = unit->firmware_heads;
+		geometry->sectors_per_track = unit->firmware_sectors;
+	}
+	return 0;
+}
+
+static const struct disk_ops pc98_ide_disk_ops = {
+	.submit = pc98_ide_submit,
+	.ioctl = pc98_ide_ioctl,
+};
 
 static int
 identify(uint8_t bank, uint8_t drive, uint16_t data[256])
@@ -286,12 +328,12 @@ identify(uint8_t bank, uint8_t drive, uint16_t data[256])
 static void
 set_name(struct ide_unit *unit, unsigned ordinal)
 {
-	unit->blkdev.name[0] = 'i';
-	unit->blkdev.name[1] = 'd';
-	unit->blkdev.name[2] = 'e';
-	unit->blkdev.name[3] = (char)('0' + ordinal);
-	unit->blkdev.name[4] = '\0';
-	unit->blkdev.name[BOOTS_BLKDEV_NAME_MAX - 1U] = '\0';
+	unit->disk->d_name[0] = 'i';
+	unit->disk->d_name[1] = 'd';
+	unit->disk->d_name[2] = 'e';
+	unit->disk->d_name[3] = (char)('0' + ordinal);
+	unit->disk->d_name[4] = '\0';
+	unit->disk->d_name[DISK_NAME_MAX - 1U] = '\0';
 }
 
 unsigned
@@ -306,12 +348,14 @@ boots_ide_pc98_init(const struct boots_device *bios_devices,
 	unit_count = 0;
 	for (slot = 0; slot < IDE_UNIT_MAX; slot++) {
 		units[slot].present = 0;
+		units[slot].disk = NULL;
 		unit_order[slot] = NULL;
 	}
 	for (bank = 0; bank < 2; bank++) {
 		for (drive = 0; drive < 2; drive++) {
 			struct ide_unit *unit;
 			const struct boots_device *bios_dev = NULL;
+			uint64_t sector_count;
 			unsigned i;
 
 			slot = (unsigned)bank * 2U + drive;
@@ -325,23 +369,26 @@ boots_ide_pc98_init(const struct boots_device *bios_devices,
 			unit->native_sectors = data[6];
 			unit->use_lba = (data[49] & 0x0200U) != 0;
 			if (unit->use_lba) {
-				unit->blkdev.sector_count =
+				sector_count =
 					(uint32_t)data[60] |
 					((uint32_t)data[61] << 16);
 			} else {
-				unit->blkdev.sector_count =
+				sector_count =
 					(uint64_t)data[1] * data[3] * data[6];
 			}
-			if (unit->blkdev.sector_count == 0 ||
+			if (sector_count == 0 ||
 			    (!unit->use_lba &&
 			     (unit->native_heads == 0 ||
 			      unit->native_sectors == 0)))
 				continue;
-			unit->blkdev.sector_size = 512;
-			unit->blkdev.read = pio_read;
-			unit->blkdev.write = pio_write;
-			unit->blkdev.flush = pio_flush;
-			unit->blkdev.private_data = unit;
+			unit->disk = disk_alloc();
+			if (unit->disk == NULL)
+				continue;
+			unit->disk->d_block_count = sector_count;
+			unit->disk->d_block_size = 512;
+			unit->disk->d_max_transfer_blocks = 255;
+			unit->disk->d_ops = &pc98_ide_disk_ops;
+			unit->disk->d_data = unit;
 			set_name(unit, unit_count);
 			/*
 			 * Partition tables are written in the firmware-sensed
@@ -359,15 +406,13 @@ boots_ide_pc98_init(const struct boots_device *bios_devices,
 			}
 			if (bios_dev != NULL && bios_dev->heads != 0 &&
 			    bios_dev->sectors != 0) {
-				unit->blkdev.heads = bios_dev->heads;
-				unit->blkdev.sectors_per_track =
-					bios_dev->sectors;
+				unit->firmware_heads = bios_dev->heads;
+				unit->firmware_sectors = bios_dev->sectors;
 			} else {
-				unit->blkdev.heads = unit->native_heads;
-				unit->blkdev.sectors_per_track =
-					unit->native_sectors;
+				unit->firmware_heads = unit->native_heads;
+				unit->firmware_sectors = unit->native_sectors;
 			}
-			if (boots_blkdev_register(&unit->blkdev)) {
+			if (disk_create(unit->disk) == 0) {
 				unit->present = 1;
 				unit_order[unit_count] = unit;
 				unit_count++;
@@ -377,13 +422,13 @@ boots_ide_pc98_init(const struct boots_device *bios_devices,
 	return unit_count;
 }
 
-struct boots_blkdev *
+struct disk *
 boots_ide_pc98_unit(unsigned ordinal)
 {
-	return ordinal < unit_count ? &unit_order[ordinal]->blkdev : NULL;
+	return ordinal < unit_count ? unit_order[ordinal]->disk : NULL;
 }
 
-struct boots_blkdev *
+struct disk *
 boots_ide_pc98_bios_unit(uint8_t bios_id)
 {
 	unsigned slot;
@@ -391,5 +436,5 @@ boots_ide_pc98_bios_unit(uint8_t bios_id)
 	if (bios_id < 0x80U || bios_id >= 0x80U + IDE_UNIT_MAX)
 		return NULL;
 	slot = bios_id - 0x80U;
-	return units[slot].present ? &units[slot].blkdev : NULL;
+	return units[slot].present ? units[slot].disk : NULL;
 }

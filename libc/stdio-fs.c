@@ -8,6 +8,8 @@
 #include "kern/env.h"
 #include "kern/fs.h"
 #include "kern/namespace.h"
+#include "kern/file.h"
+#include "kern/namei.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -28,12 +30,14 @@ extern const char *boots_env_get(
 struct filesystem_stream {
 	FILE stream;
 	struct boots_file file;
+	struct file *vfile;
 	struct filesystem_stream *next;
 };
 
 static struct boots_filesystem *active_filesystem;
 static struct boots_namespace *active_namespace;
 static struct boots_environment *active_environment;
+static struct fs_context *active_context;
 static struct filesystem_stream *open_streams;
 static char current_directory[BOOTS_PATH_MAX] = "/";
 
@@ -75,6 +79,7 @@ void boots_stdio_set_namespace(struct boots_namespace *namespace)
 	const char *name;
 
 	active_namespace = namespace;
+	active_context = NULL;
 	current_directory[0] = '/';
 	current_directory[1] = '\0';
 	name = boots_namespace_default_name(namespace);
@@ -82,6 +87,13 @@ void boots_stdio_set_namespace(struct boots_namespace *namespace)
 		current_directory[1] = '\0';
 		strcat(current_directory, name);
 	}
+}
+
+void boots_stdio_set_context(struct fs_context *context)
+{
+	active_context = context;
+	active_namespace = NULL;
+	active_filesystem = NULL;
 }
 
 void boots_stdio_set_environment(struct boots_environment *environment)
@@ -98,7 +110,8 @@ FILE *fopen(const char *path, const char *mode)
 	unsigned flags;
 
 	if (path == NULL || mode == NULL ||
-	    (active_filesystem == NULL && active_namespace == NULL)) {
+	    (active_filesystem == NULL && active_namespace == NULL &&
+	     active_context == NULL)) {
 		errno = path == NULL || mode == NULL ? EINVAL : ENOENT;
 		return NULL;
 	}
@@ -130,7 +143,17 @@ FILE *fopen(const char *path, const char *mode)
 		return NULL;
 	}
 	memset(handle, 0, sizeof(*handle));
-	if (active_namespace != NULL)
+	if (active_context != NULL) {
+		int error = file_openat(active_context, path,
+			flags == STREAM_WRITE ? O_WRONLY | O_CREAT | O_TRUNC :
+			O_RDONLY, 0644U, &handle->vfile);
+		if (error != 0) {
+			errno = error;
+			free(handle);
+			return NULL;
+		}
+		result = BOOTS_FS_OK;
+	} else if (active_namespace != NULL)
 		result = flags == STREAM_WRITE ?
 			boots_namespace_create_result(active_namespace,
 						       resolved_path,
@@ -178,6 +201,13 @@ int fflush(FILE *stream)
 	}
 	if (!(stream->mode & STREAM_WRITE))
 		return 0;
+	if (handle->vfile != NULL) {
+		int error = file_fsync(handle->vfile);
+		if (error != 0) {
+			stream->error = 1; errno = error; return EOF;
+		}
+		return 0;
+	}
 	result = boots_file_flush_result(&handle->file);
 	if (result != BOOTS_FS_OK) {
 		stream->error = 1;
@@ -201,6 +231,8 @@ int fclose(FILE *stream)
 	}
 	handle = *link;
 	result = fflush(stream);
+	if (handle->vfile != NULL && file_close(handle->vfile) != 0)
+		result = EOF;
 	*link = handle->next;
 	memset(handle, 0, sizeof(*handle));
 	free(handle);
@@ -236,6 +268,13 @@ size_t fread(void *buffer, size_t size, size_t count, FILE *stream)
 			stream->error = 1;
 		errno = EINVAL;
 		return 0;
+	}
+	if (handle->vfile != NULL) {
+		ssize_t got = file_read(handle->vfile, buffer, total);
+		if (got < 0) { stream->error = 1; errno = (int)-got; return 0; }
+		stream->position = (uint64_t)handle->vfile->f_offset;
+		if ((size_t)got < total) stream->eof = 1;
+		return (size_t)got / size;
 	}
 	available = stream->position < handle->file.size ?
 		handle->file.size - stream->position : 0;
@@ -279,6 +318,12 @@ size_t fwrite(const void *buffer, size_t size, size_t count, FILE *stream)
 		errno = EINVAL;
 		return 0;
 	}
+	if (handle->vfile != NULL) {
+		ssize_t put = file_write(handle->vfile, buffer, total);
+		if (put < 0) { stream->error = 1; errno = (int)-put; return 0; }
+		stream->position = (uint64_t)handle->vfile->f_offset;
+		return (size_t)put / size;
+	}
 	result = boots_file_write_result(&handle->file, stream->position,
 					  buffer, (uint32_t)total);
 	if (result != BOOTS_FS_OK) {
@@ -306,6 +351,11 @@ int fseek(FILE *stream, long offset, int whence)
 				 whence != SEEK_END)) {
 		errno = EINVAL;
 		return -1;
+	}
+	if (handle->vfile != NULL) {
+		off_t position = file_seek(handle->vfile, offset, whence);
+		if (position < 0) { errno = (int)-position; return -1; }
+		stream->position = (uint64_t)position; stream->eof = 0; return 0;
 	}
 	base = whence == SEEK_SET ? 0 : whence == SEEK_CUR ? stream->position :
 		handle->file.size;
@@ -372,10 +422,18 @@ int access(const char *path, int mode)
 	const char *resolved_path = path;
 	enum boots_fs_result result;
 
-	if ((active_filesystem == NULL && active_namespace == NULL) ||
+	if ((active_filesystem == NULL && active_namespace == NULL &&
+	     active_context == NULL) ||
 	    path == NULL || mode != F_OK) {
 		errno = path == NULL || mode != F_OK ? EINVAL : ENOENT;
 		return -1;
+	}
+	if (active_context != NULL) {
+		struct inode *inode;
+		int error = namei_at(active_context, path, &inode);
+		if (error != 0) { errno = error; return -1; }
+		inode_release(inode);
+		return 0;
 	}
 	if (active_namespace != NULL && path[0] != '/') {
 		size_t cwd_length = strlen(current_directory);
@@ -404,13 +462,15 @@ int access(const char *path, int mode)
 
 char *getcwd(char *buffer, size_t size)
 {
-	size_t length = strlen(current_directory) + 1U;
+	const char *cwd = active_context != NULL ? fs_getcwd(active_context) :
+		current_directory;
+	size_t length = strlen(cwd) + 1U;
 
 	if (buffer == NULL || size < length) {
 		errno = buffer == NULL ? EINVAL : ERANGE;
 		return NULL;
 	}
-	memcpy(buffer, current_directory, length);
+	memcpy(buffer, cwd, length);
 	return buffer;
 }
 
@@ -424,6 +484,11 @@ int chdir(const char *path)
 	if (path == NULL) {
 		errno = EINVAL;
 		return -1;
+	}
+	if (active_context != NULL) {
+		int error = fs_chdir(active_context, path);
+		if (error != 0) { errno = error; return -1; }
+		return 0;
 	}
 	if (path[0] == '\0' || (path[0] == '.' && path[1] == '\0'))
 		return 0;

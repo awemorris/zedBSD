@@ -5,9 +5,11 @@
 struct boots_filesystem;
 struct boots_environment;
 struct boots_namespace;
+struct fs_context;
 
 void boots_stdio_set_filesystem(struct boots_filesystem *filesystem);
 void boots_stdio_set_namespace(struct boots_namespace *namespace);
+void boots_stdio_set_context(struct fs_context *context);
 void boots_stdio_set_environment(struct boots_environment *environment);
 int boots_stdio_close_all(void);
 

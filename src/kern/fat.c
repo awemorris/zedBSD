@@ -9,14 +9,7 @@
 
 #define FAT_PROGRESS_INTERVAL (64U * 1024U)
 
-/* Boots keeps one filesystem mounted, so one shared physical-sector cache is
- * sufficient and avoids consuming stack or private-handle space. */
-static uint8_t sector_cache[512];
 static uint8_t bpb_cache[512];
-static struct boots_filesystem *sector_cache_owner;
-static uint32_t sector_cache_lba;
-static int sector_cache_valid;
-static int sector_cache_dirty;
 
 _Static_assert(sizeof(struct boots_fat_state) <=
 	       sizeof(((struct boots_filesystem *)0)->private_data),
@@ -71,24 +64,30 @@ const uint8_t *boots_fat_read_sector(struct boots_filesystem *filesystem,
 enum boots_fs_result boots_fat_flush(
 	struct boots_filesystem *filesystem)
 {
+	struct boots_fat_state *fat;
 	enum boots_fs_result result;
 
-	if (!sector_cache_dirty || sector_cache_owner != filesystem)
+	if (!filesystem)
+		return BOOTS_FS_INVALID_ARGUMENT;
+	fat = boots_fat_state(filesystem);
+	if (!fat->sector_cache_dirty)
 		return BOOTS_FS_OK;
 	result = boots_volume_write_result(&filesystem->volume,
-					    sector_cache_lba, sector_cache);
+					    fat->sector_cache_lba,
+					    fat->sector_cache);
 	if (result == BOOTS_FS_OK)
-		sector_cache_dirty = 0;
+		fat->sector_cache_dirty = 0;
 	return result;
 }
 
 void boots_fat_invalidate(struct boots_filesystem *filesystem)
 {
-	if (sector_cache_owner == filesystem) {
-		sector_cache_owner = 0;
-		sector_cache_valid = 0;
-		sector_cache_dirty = 0;
-	}
+	struct boots_fat_state *fat;
+	if (!filesystem)
+		return;
+	fat = boots_fat_state(filesystem);
+	fat->sector_cache_valid = 0;
+	fat->sector_cache_dirty = 0;
 }
 
 enum boots_fs_result boots_fat_read_sector_result(
@@ -103,26 +102,24 @@ enum boots_fs_result boots_fat_read_sector_result(
 	fat = boots_fat_state(filesystem);
 	if (lba >= fat->total_sectors)
 		return BOOTS_FS_CORRUPT;
-	if (sector_cache_owner == filesystem && sector_cache_valid &&
-	    sector_cache_lba == lba) {
-		*sector = sector_cache;
+	if (fat->sector_cache_valid && fat->sector_cache_lba == lba) {
+		*sector = fat->sector_cache;
 		return BOOTS_FS_OK;
 	}
-	if (sector_cache_dirty && sector_cache_owner != 0) {
-		result = boots_fat_flush(sector_cache_owner);
+	if (fat->sector_cache_dirty) {
+		result = boots_fat_flush(filesystem);
 		if (result != BOOTS_FS_OK)
 			return result;
 	}
-	sector_cache_owner = filesystem;
-	sector_cache_valid = 0;
-	sector_cache_dirty = 0;
+	fat->sector_cache_valid = 0;
+	fat->sector_cache_dirty = 0;
 	result = boots_volume_read_result(&filesystem->volume, lba,
-					  sector_cache);
+					  fat->sector_cache);
 	if (result != BOOTS_FS_OK)
 		return result;
-	sector_cache_lba = lba;
-	sector_cache_valid = 1;
-	*sector = sector_cache;
+	fat->sector_cache_lba = lba;
+	fat->sector_cache_valid = 1;
+	*sector = fat->sector_cache;
 	return BOOTS_FS_OK;
 }
 
@@ -148,9 +145,9 @@ enum boots_fs_result boots_fat_mark_sector_dirty(
 {
 	if (!filesystem || !filesystem->volume.write)
 		return BOOTS_FS_READ_ONLY;
-	if (sector_cache_owner != filesystem || !sector_cache_valid)
+	if (!boots_fat_state(filesystem)->sector_cache_valid)
 		return BOOTS_FS_CORRUPT;
-	sector_cache_dirty = 1;
+	boots_fat_state(filesystem)->sector_cache_dirty = 1;
 	return BOOTS_FS_OK;
 }
 

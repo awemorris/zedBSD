@@ -39,6 +39,9 @@ $(BUILD)/tests/libc-host-test: tests/libc-host-test.c \
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(BOOTS_HOST_TEST_CFLAGS) \
 		src/kern/fs.c src/kern/namespace.c src/kern/env.c \
+		src/kern/disk.c src/kern/inode.c src/kern/file.c \
+		src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
+		src/kern/rootfs.c \
 		$(BOOTS_LIBC_SOURCES) $< -o $@
 
 libc-objects: $(BOOTS_LIBC_OBJECTS)

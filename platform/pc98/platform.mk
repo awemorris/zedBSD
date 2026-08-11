@@ -63,7 +63,15 @@ STAGE2_OBJS = \
 	$(PC98_BEUI_OBJS) \
 	$(BUILD)/src/kern/fat.o \
 	$(BUILD)/src/kern/fat16.o \
-	$(BUILD)/src/kern/block.o \
+	$(BUILD)/src/kern/fat-vfs.o \
+	$(BUILD)/src/kern/inode.o \
+	$(BUILD)/src/kern/file.o \
+	$(BUILD)/src/kern/namecache.o \
+	$(BUILD)/src/kern/namei.o \
+	$(BUILD)/src/kern/mount.o \
+	$(BUILD)/src/kern/rootfs.o \
+	$(BUILD)/src/kern/vfs.o \
+	$(BUILD)/src/kern/disk.o \
 	$(BUILD)/src/kern/partition.o \
 	$(BUILD)/drivers/pc98-ide.o \
 	$(BUILD)/src/kern/pc98/partition.o \
@@ -259,6 +267,10 @@ $(BUILD)/tests/noct-host-test: tests/noct-host-test.c \
 	apps/LS.NCT apps/CP.NCT src/noct/noct-m6-script.h \
 	$(NOCT_GLUE_OBJS) $(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
 	$(BUILD)/src/kern/namespace.o \
+	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/inode.o \
+	$(BUILD)/src/kern/file.o $(BUILD)/src/kern/namecache.o \
+	$(BUILD)/src/kern/namei.o $(BUILD)/src/kern/mount.o \
+	$(BUILD)/src/kern/rootfs.o \
 	$(NOCT_OBJECTS) $(BOOTS_LIBC_OBJECTS) $(BOOTS_SOFTFLOAT_OBJECTS)
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -m32 -no-pie -fno-builtin -fno-stack-protector -Wall -Wextra \
@@ -267,6 +279,10 @@ $(BUILD)/tests/noct-host-test: tests/noct-host-test.c \
 		tests/noct-host-test.c $(NOCT_GLUE_OBJS) \
 		$(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
 		$(BUILD)/src/kern/namespace.o $(NOCT_OBJECTS) \
+		$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/inode.o \
+		$(BUILD)/src/kern/file.o $(BUILD)/src/kern/namecache.o \
+		$(BUILD)/src/kern/namei.o $(BUILD)/src/kern/mount.o \
+		$(BUILD)/src/kern/rootfs.o \
 		$(BOOTS_LIBC_OBJECTS) $(BOOTS_SOFTFLOAT_OBJECTS) -o $@
 
 NOCT_M6_JIT_CODE := $(BUILD)/logs/m6-jit-code.bin

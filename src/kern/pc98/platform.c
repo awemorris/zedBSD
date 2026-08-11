@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/platform.h"
-#include "kern/block.h"
+#include "kern/disk.h"
 #include "kern/partition.h"
 #include "kern/pc98/partition.h"
 #include "kern/pc98/linux-boot.h"
@@ -16,7 +16,7 @@ kern_platform_init(const struct boots_handoff *handoff,
 	size_t count = 0;
 
 	if (handoff == NULL || devices == NULL || capacity == 0 ||
-	    handoff->magic != BOOTS_HANDOFF_MAGIC || handoff->version != 1 ||
+	    handoff->magic != BOOTS_HANDOFF_MAGIC || handoff->version != 2 ||
 	    handoff->size < sizeof(*handoff) || handoff->device_count == 0 ||
 	    handoff->device_table == 0)
 		return 0;
@@ -33,8 +33,8 @@ kern_platform_init(const struct boots_handoff *handoff,
 	if (count == 0)
 		return 0;
 
-	boots_partition_set_scheme(&boots_partition_scheme_pc98);
-	boots_blkdev_reset();
+	partition_set_scheme(&partition_scheme_pc98);
+	disk_registry_reset();
 	(void)boots_ide_pc98_init(devices, (unsigned)count);
 	return count;
 }
@@ -45,7 +45,7 @@ kern_platform_refresh_devices(const struct boots_device *devices, size_t count)
 	(void)boots_ide_pc98_init(devices, (unsigned)count);
 }
 
-struct boots_blkdev *
+struct disk *
 kern_platform_block_device(const struct boots_device *device)
 {
 	if (device == NULL || device->device_class != BOOTS_DEV_IDE)

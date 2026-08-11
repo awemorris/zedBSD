@@ -1,47 +1,38 @@
-/*
- * Boots partition-table interface
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
- *
- * Partition-table interpretation is target dependent: PC-98 disks carry
- * a NEC-format table, PC/AT disks an MBR.  A platform registers one
- * scheme during initialisation and the rest of the loader scans through
- * this neutral interface.
- */
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+#ifndef BOOTS_KERN_PARTITION_H
+#define BOOTS_KERN_PARTITION_H
 
-#ifndef BOOTS_PARTITION_H
-#define BOOTS_PARTITION_H
+#include "kern/disk.h"
 
-#include "kern/block.h"
+#define PARTITION_MAX 16U
+#define PARTITION_POOL_MAX 64U
+#define PARTITION_LABEL_MAX 17U
+#define PARTITION_BOOTABLE 0x0001U
 
-#define BOOTS_PARTITION_MAX 16U
-#define BOOTS_PARTITION_NAME_MAX 17U
-
-struct boots_partition {
-	uint64_t start_lba;    /* Head of the partition (boot code side). */
-	uint64_t data_lba;     /* Head of the data area (== start on MBR). */
-	uint64_t sector_count; /* 0 when the format records no size (PC-98). */
-	uint8_t bootable;
-	char name[BOOTS_PARTITION_NAME_MAX];
+struct partition {
+	struct disk *p_parent;
+	struct disk *p_disk;
+	unsigned p_index;
+	uint64_t p_start_block;
+	uint64_t p_data_block;
+	uint64_t p_block_count;
+	unsigned p_flags;
+	char p_label[PARTITION_LABEL_MAX];
 };
 
-struct boots_partition_scheme {
-	const char *name;   /* "pc98" / "mbr" */
-	/*
-	 * Read the table from dev and fill entries in table order (so an
-	 * empty slot yields a zeroed entry with bootable == 0 and an empty
-	 * name).  Returns the number of table slots examined, or -1 on I/O
-	 * failure.
-	 */
-	int (*scan)(const struct boots_partition_scheme *scheme,
-		    struct boots_blkdev *dev,
-		    struct boots_partition *entries, unsigned max_entries);
+struct partition_scheme {
+	const char *name;
+	int (*scan)(const struct partition_scheme *scheme, struct disk *disk,
+		    struct partition *entries, unsigned capacity);
 };
 
-void boots_partition_set_scheme(const struct boots_partition_scheme *scheme);
-const struct boots_partition_scheme *boots_partition_get_scheme(void);
-int boots_partition_scan(struct boots_blkdev *dev,
-			  struct boots_partition *entries,
-			  unsigned max_entries);
+void partition_set_scheme(const struct partition_scheme *scheme);
+const struct partition_scheme *partition_get_scheme(void);
+int partition_scan(struct disk *disk, struct partition *entries,
+		   unsigned capacity);
+int partition_create_disk(struct partition *partition);
+void partition_reset(void);
+unsigned partition_count(void);
+const struct partition *partition_at(unsigned index);
 
 #endif

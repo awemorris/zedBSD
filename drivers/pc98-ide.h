@@ -7,7 +7,7 @@
 #ifndef BOOTS_DRIVERS_IDE_PC98_H
 #define BOOTS_DRIVERS_IDE_PC98_H
 
-#include "kern/block.h"
+#include "kern/disk.h"
 
 struct boots_device;
 
@@ -22,9 +22,9 @@ unsigned boots_ide_pc98_init(const struct boots_device *bios_devices,
 			      unsigned bios_device_count);
 
 /* The ordinal-th registered IDE disk, in probe (bank-major) order. */
-struct boots_blkdev *boots_ide_pc98_unit(unsigned ordinal);
+struct disk *boots_ide_pc98_unit(unsigned ordinal);
 
 /* Look up the physical IDE slot corresponding to BIOS unit 80h..83h. */
-struct boots_blkdev *boots_ide_pc98_bios_unit(uint8_t bios_id);
+struct disk *boots_ide_pc98_bios_unit(uint8_t bios_id);
 
 #endif

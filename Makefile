@@ -101,10 +101,15 @@ $(BUILD)/tests/noct-memory-host-test: tests/noct-memory-host-test.c \
 	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc src/noct/memory.c $< -o $@
 
 $(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
-	src/kern/fs.c src/kern/namespace.c src/kern/env.c $(BOOTS_LIBC_SOURCES)
+	src/kern/fs.c src/kern/namespace.c src/kern/env.c $(BOOTS_LIBC_SOURCES) \
+	src/kern/disk.c src/kern/inode.c src/kern/file.c src/kern/namecache.c \
+	src/kern/namei.c src/kern/mount.c src/kern/rootfs.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(BOOTS_HOST_TEST_CFLAGS) -Iinclude -Isrc src/kern/fs.c \
-		src/kern/namespace.c src/kern/env.c $(BOOTS_LIBC_SOURCES) $< -o $@
+		src/kern/namespace.c src/kern/env.c src/kern/disk.c \
+		src/kern/inode.c src/kern/file.c src/kern/namecache.c \
+		src/kern/namei.c src/kern/mount.c src/kern/rootfs.c \
+		$(BOOTS_LIBC_SOURCES) $< -o $@
 
 stdio-fs-host-test: $(BUILD)/tests/stdio-fs-host-test
 	$(BUILD)/tests/stdio-fs-host-test
@@ -121,13 +126,21 @@ $(BUILD)/tests/beui-host-test: $(NOCT_ROOT)/tests/beui-test.c \
 	$(BEUI_TEST_CC) $(BEUI_CORE_SOURCES) $< -o $@
 
 $(BUILD)/tests/blkdev-host-test: tests/blkdev-host-test.c \
-	src/kern/block.c src/kern/partition.c src/kern/pc98/partition.c
+	src/kern/disk.c src/kern/partition.c src/kern/pc98/partition.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/block.c src/kern/partition.c \
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/disk.c src/kern/partition.c \
 		src/kern/pc98/partition.c $< -o $@
+
+VFS_CORE_SOURCES := src/kern/disk.c src/kern/inode.c src/kern/file.c \
+	src/kern/namecache.c src/kern/namei.c src/kern/mount.c src/kern/rootfs.c
+
+$(BUILD)/tests/vfs-host-test: tests/vfs-host-test.c $(VFS_CORE_SOURCES)
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc $(VFS_CORE_SOURCES) $< -o $@
 
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/blkdev-host-test \
+	$(BUILD)/tests/vfs-host-test \
 	$(BUILD)/tests/fat-host-test \
 	$(BUILD)/tests/fat-write-host-test \
 	$(BUILD)/tests/env-host-test \

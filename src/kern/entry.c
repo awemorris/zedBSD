@@ -52,7 +52,7 @@ kernel_entry(const void *handoff)
 	static struct boots_device devices[KERN_PLATFORM_MAX_DEVICES];
 	size_t device_count;
 
-	if (h == NULL || h->magic != BOOTS_HANDOFF_MAGIC || h->version != 1 ||
+	if (h == NULL || h->magic != BOOTS_HANDOFF_MAGIC || h->version != 2 ||
 	    h->size < sizeof(*h))
 		hal_fatal(__FILE__, __LINE__, "invalid Boots handoff");
 	/* The HAL allocates only through this hook (task creation); point

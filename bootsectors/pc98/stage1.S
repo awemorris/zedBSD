@@ -1513,8 +1513,8 @@ gateway_real_return:
 
 enter_stage2:
 	movl	$0x48323842, stage2_handoff
-	movw	$1, stage2_handoff+4
-	movw	$20, stage2_handoff+6
+	movw	$2, stage2_handoff+4
+	movw	$24, stage2_handoff+6
 	movb	device_count, %al
 	movb	%al, stage2_handoff+8
 	pushw	%ds
@@ -1525,6 +1525,8 @@ enter_stage2:
 	movb	%al, stage2_handoff+9
 	movl	$(0x10000 + device_table), stage2_handoff+12
 	movl	$(0x10000 + bios_gateway32), stage2_handoff+16
+	movl	fat_partition_lba, %eax
+	movl	%eax, stage2_handoff+20
 	movl	$(0x10000 + protected_entry), %eax
 	movl	%eax, pm_jump
 	movl	$(0x10000 + gdt), %eax
@@ -1588,7 +1590,7 @@ ph_filesz:             .long 0, 0, 0, 0
 elf_bounce:            .space 512
 
 	.balign 4
-stage2_handoff:        .space 20
+stage2_handoff:        .space 24
 pm_jump:               .long 0
 	.word 0x08
 	.balign 8

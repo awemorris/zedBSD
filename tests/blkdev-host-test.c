@@ -1,31 +1,32 @@
 /*
- * Boots block device and PC-98 partition scheme host tests
+ * Boots disk/bio and PC-98 partition scheme host tests
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
 
-#include "kern/block.h"
+#include "kern/disk.h"
 #include "kern/partition.h"
 #include "kern/pc98/partition.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
 static int failures;
 
-#define CHECK(expression)						\
-	do {								\
-		if (!(expression)) {					\
-			printf("FAIL %s:%d: %s\n", __FILE__, __LINE__,	\
-			       #expression);				\
-			failures++;					\
-		}							\
+#define CHECK(expression)                                                \
+	do {                                                               \
+		if (!(expression)) {                                          \
+			printf("FAIL %s:%d: %s\n", __FILE__, __LINE__,       \
+			       #expression);                                   \
+			failures++;                                             \
+		}                                                          \
 	} while (0)
 
 /* --------------------------------------------------------------- */
-/* In-memory fake device.                                          */
+/* In-memory leaf disk.                                            */
 
-#define FAKE_SECTORS 64U
+#define FAKE_SECTORS 1024U
 
 struct fake_disk {
 	uint8_t data[FAKE_SECTORS * 512U];
@@ -33,96 +34,132 @@ struct fake_disk {
 	unsigned write_calls;
 };
 
-static enum boots_blkdev_result
-fake_read(struct boots_blkdev *dev, uint64_t lba, uint32_t count, void *buffer)
-{
-	struct fake_disk *disk = dev->private_data;
-
-	disk->read_calls++;
-	memcpy(buffer, disk->data + (size_t)lba * 512U, (size_t)count * 512U);
-	return BOOTS_BLKDEV_OK;
-}
-
-static enum boots_blkdev_result
-fake_write(struct boots_blkdev *dev, uint64_t lba, uint32_t count,
-	   const void *buffer)
-{
-	struct fake_disk *disk = dev->private_data;
-
-	disk->write_calls++;
-	memcpy(disk->data + (size_t)lba * 512U, buffer, (size_t)count * 512U);
-	return BOOTS_BLKDEV_OK;
-}
-
 static struct fake_disk fake;
-static struct boots_blkdev fake_dev;
 
-static void
+static int
+fake_submit(struct disk *dev, struct bio *bio)
+{
+	struct fake_disk *store = dev->d_data;
+	size_t bytes = (size_t)bio->b_block_count * dev->d_block_size;
+	uint8_t *where = store->data + (size_t)bio->b_mapped_block * 512U;
+
+	CHECK(dev == bio->b_leaf_disk);
+	if (bio->b_op == BIO_READ) {
+		store->read_calls++;
+		memcpy(bio->b_data, where, bytes);
+	} else if (bio->b_op == BIO_WRITE) {
+		store->write_calls++;
+		memcpy(where, bio->b_data, bytes);
+	} else if (bio->b_op != BIO_FLUSH) {
+		return EOPNOTSUPP;
+	}
+	bio_complete(bio, 0, bytes);
+	return 0;
+}
+
+static int
+fake_ioctl(struct disk *dev, unsigned long request, void *argument)
+{
+	struct disk_geometry *geometry = argument;
+
+	(void)dev;
+	if (request != DISK_IOCTL_GET_GEOMETRY)
+		return EOPNOTSUPP;
+	if (geometry == NULL)
+		return EINVAL;
+	geometry->cylinders = 8;
+	geometry->heads = 8;
+	geometry->sectors_per_track = 17;
+	return 0;
+}
+
+static const struct disk_ops fake_ops = {
+	.submit = fake_submit,
+	.ioctl = fake_ioctl,
+};
+
+static struct disk *
 setup_fake(void)
 {
+	struct disk *dev;
+
 	memset(&fake, 0, sizeof(fake));
-	memset(&fake_dev, 0, sizeof(fake_dev));
-	strcpy(fake_dev.name, "fake0");
-	fake_dev.sector_size = 512;
-	fake_dev.sector_count = FAKE_SECTORS;
-	fake_dev.heads = 8;
-	fake_dev.sectors_per_track = 17;
-	fake_dev.read = fake_read;
-	fake_dev.write = fake_write;
-	fake_dev.private_data = &fake;
+	disk_registry_reset();
+	partition_reset();
+	dev = disk_alloc();
+	CHECK(dev != NULL);
+	if (dev == NULL)
+		return NULL;
+	strcpy(dev->d_name, "fake0");
+	dev->d_block_size = 512;
+	dev->d_block_count = FAKE_SECTORS;
+	dev->d_max_transfer_blocks = 255;
+	dev->d_ops = &fake_ops;
+	dev->d_data = &fake;
+	CHECK(disk_create(dev) == 0);
+	return dev;
 }
 
 /* --------------------------------------------------------------- */
-/* Registry.                                                       */
+/* Registry, synchronous bio, and slice mapping.                   */
 
 static void
 test_registry(void)
 {
 	uint8_t buffer[512];
+	struct disk *dev = setup_fake();
+	struct disk *bad;
 
-	boots_blkdev_reset();
-	setup_fake();
-	CHECK(boots_blkdev_count() == 0);
-	CHECK(boots_blkdev_register(&fake_dev));
-	CHECK(boots_blkdev_count() == 1);
-	CHECK(boots_blkdev_get(0) == &fake_dev);
-	CHECK(boots_blkdev_get(1) == NULL);
-	CHECK(boots_blkdev_find("fake0") == &fake_dev);
-	CHECK(boots_blkdev_find("nope") == NULL);
+	CHECK(disk_count() == 1);
+	CHECK(disk_at(0) == dev);
+	CHECK(disk_at(1) == NULL);
+	CHECK(disk_find("fake0") == dev);
+	CHECK(disk_find_by_dev(dev->d_dev) == dev);
+	CHECK(disk_find("nope") == NULL);
 
-	/* Range checking happens above the driver. */
-	CHECK(boots_blkdev_read(&fake_dev, 0, 1, buffer) == BOOTS_BLKDEV_OK);
-	CHECK(boots_blkdev_read(&fake_dev, FAKE_SECTORS, 1, buffer) ==
-	      BOOTS_BLKDEV_OUT_OF_RANGE);
-	CHECK(boots_blkdev_read(&fake_dev, FAKE_SECTORS - 1U, 2, buffer) ==
-	      BOOTS_BLKDEV_OUT_OF_RANGE);
-	CHECK(boots_blkdev_read(&fake_dev, 0, 0, buffer) ==
-	      BOOTS_BLKDEV_INVALID);
+	CHECK(disk_read(dev, 0, 1, buffer) == 0);
+	CHECK(fake.read_calls == 1);
+	CHECK(disk_read(dev, FAKE_SECTORS, 1, buffer) == EOVERFLOW);
+	CHECK(disk_read(dev, FAKE_SECTORS - 1U, 2, buffer) == EOVERFLOW);
+	CHECK(disk_read(dev, 0, 0, buffer) == EINVAL);
 
-	/* A device without a write callback is read-only. */
-	fake_dev.write = NULL;
-	CHECK(boots_blkdev_write(&fake_dev, 0, 1, buffer) ==
-	      BOOTS_BLKDEV_READ_ONLY);
-	fake_dev.write = fake_write;
-	CHECK(boots_blkdev_write(&fake_dev, 3, 1, buffer) == BOOTS_BLKDEV_OK);
+	dev->d_flags |= DISK_READ_ONLY;
+	CHECK(disk_write(dev, 0, 1, buffer) == EROFS);
+	dev->d_flags &= ~DISK_READ_ONLY;
+	memset(buffer, 0x5a, sizeof(buffer));
+	CHECK(disk_write(dev, 3, 1, buffer) == 0);
+	CHECK(fake.write_calls == 1);
+	CHECK(fake.data[3U * 512U] == 0x5a);
+	CHECK(bio_flush(dev) == 0);
 
-	/* Malformed registrations are rejected. */
-	{
-		struct boots_blkdev bad;
+	CHECK(disk_open(dev) == 0);
+	CHECK(dev->d_open_count == 1);
+	disk_close(dev);
+	CHECK(dev->d_open_count == 0);
 
-		memset(&bad, 0, sizeof(bad));
-		CHECK(!boots_blkdev_register(&bad));
-		CHECK(!boots_blkdev_register(NULL));
-	}
+	bad = disk_alloc();
+	CHECK(bad != NULL);
+	CHECK(disk_create(bad) == EINVAL);
+	CHECK(disk_create(NULL) == EINVAL);
 }
 
 /* --------------------------------------------------------------- */
 /* PC-98 partition scheme.                                         */
 
 static void
+put_chs(uint8_t *p, unsigned sect, unsigned head, unsigned cyl)
+{
+	p[0] = (uint8_t)sect;
+	p[1] = (uint8_t)head;
+	p[2] = (uint8_t)cyl;
+	p[3] = (uint8_t)(cyl >> 8);
+}
+
+static void
 put_entry(uint8_t *table, unsigned slot, unsigned boot_flags,
 	  unsigned start_sect, unsigned start_head, unsigned start_cyl,
 	  unsigned data_sect, unsigned data_head, unsigned data_cyl,
+	  unsigned end_sect, unsigned end_head, unsigned end_cyl,
 	  const char *name)
 {
 	uint8_t *p = table + slot * 32U;
@@ -130,14 +167,9 @@ put_entry(uint8_t *table, unsigned slot, unsigned boot_flags,
 
 	p[0] = (uint8_t)boot_flags;
 	p[1] = (uint8_t)(boot_flags & 0x80U);
-	p[4] = (uint8_t)start_sect;
-	p[5] = (uint8_t)start_head;
-	p[6] = (uint8_t)start_cyl;
-	p[7] = (uint8_t)(start_cyl >> 8);
-	p[8] = (uint8_t)data_sect;
-	p[9] = (uint8_t)data_head;
-	p[10] = (uint8_t)data_cyl;
-	p[11] = (uint8_t)(data_cyl >> 8);
+	put_chs(p + 4, start_sect, start_head, start_cyl);
+	put_chs(p + 8, data_sect, data_head, data_cyl);
+	put_chs(p + 12, end_sect, end_head, end_cyl);
 	for (i = 0; name[i] != '\0' && i < 16; i++)
 		p[16 + i] = (uint8_t)name[i];
 	for (; i < 16; i++)
@@ -147,49 +179,53 @@ put_entry(uint8_t *table, unsigned slot, unsigned boot_flags,
 static void
 test_pc98_partitions(void)
 {
-	struct boots_partition entries[16];
+	struct partition entries[PARTITION_MAX];
+	struct disk *dev = setup_fake();
+	struct disk *slice;
+	uint8_t buffer[512];
 	uint8_t *table = fake.data + 512;   /* LBA 1 */
 	int count;
 
-	boots_blkdev_reset();
-	setup_fake();
-	CHECK(boots_blkdev_register(&fake_dev));
-	boots_partition_set_scheme(&boots_partition_scheme_pc98);
-
+	partition_set_scheme(&partition_scheme_pc98);
 	memset(table, 0, 512);
-	/* geometry 8 heads x 17 spt:
-	 * cyl 1 head 0 sect 0 -> lba (1*8+0)*17+0 = 136
-	 * cyl 2 head 1 sect 3 -> lba (2*8+1)*17+3 = 292 */
-	put_entry(table, 0, 0x80, 0, 0, 1, 3, 1, 2, "BOOT");
-	/* 0x11: a live, non-bootable entry (byte 0 is zero only when the
-	 * slot is unused). */
-	put_entry(table, 2, 0x11, 0, 0, 3, 0, 0, 4, "DATA VOL");
+	/* 8 heads x 17 sectors.  Entry 0 data starts at LBA 292 and
+	 * ends at LBA 407 (cyl 2, head 7, sector 16). */
+	put_entry(table, 0, 0x80, 0, 0, 1, 3, 1, 2,
+		  16, 7, 2, "BOOT");
+	put_entry(table, 2, 0x11, 0, 0, 3, 0, 0, 4,
+		  16, 7, 4, "DATA VOL");
 
-	count = boots_partition_scan(&fake_dev, entries, 16);
+	count = partition_scan(dev, entries, PARTITION_MAX);
 	CHECK(count == 16);
-	CHECK(entries[0].bootable == 1);
-	CHECK(entries[0].start_lba == 136);
-	CHECK(entries[0].data_lba == 292);
-	CHECK(entries[0].sector_count == 0);
-	CHECK(strcmp(entries[0].name, "BOOT") == 0);
-	/* Slot 1 is empty. */
-	CHECK(entries[1].bootable == 0 && entries[1].start_lba == 0 &&
-	      entries[1].data_lba == 0 && entries[1].name[0] == '\0');
-	/* Slot 2: non-bootable, name stops at the first space. */
-	CHECK(entries[2].bootable == 0);
-	CHECK(entries[2].start_lba == (uint64_t)(3 * 8) * 17);
-	CHECK(strcmp(entries[2].name, "DATA") == 0);
+	CHECK((entries[0].p_flags & PARTITION_BOOTABLE) != 0);
+	CHECK(entries[0].p_start_block == 136);
+	CHECK(entries[0].p_data_block == 292);
+	CHECK(entries[0].p_block_count == 116);
+	CHECK(strcmp(entries[0].p_label, "BOOT") == 0);
+	CHECK(entries[1].p_block_count == 0);
+	CHECK((entries[2].p_flags & PARTITION_BOOTABLE) == 0);
+	CHECK(entries[2].p_start_block == 408);
+	CHECK(entries[2].p_data_block == 544);
+	CHECK(entries[2].p_block_count == 136);
+	CHECK(strcmp(entries[2].p_label, "DATA") == 0);
 
-	/* Unregistered scheme and bad arguments fail cleanly. */
-	boots_partition_set_scheme(NULL);
-	CHECK(boots_partition_scan(&fake_dev, entries, 16) == -1);
-	boots_partition_set_scheme(&boots_partition_scheme_pc98);
-	CHECK(boots_partition_scan(NULL, entries, 16) == -1);
+	CHECK(partition_create_disk(&entries[0]) == 0);
+	slice = entries[0].p_disk;
+	CHECK(slice != NULL);
+	CHECK(strcmp(slice->d_name, "fake0p1") == 0);
+	CHECK(slice->d_parent == dev);
+	CHECK(slice->d_parent_offset == 292);
+	CHECK(slice->d_block_count == 116);
+	fake.data[292U * 512U] = 0xa5;
+	memset(buffer, 0, sizeof(buffer));
+	CHECK(disk_read(slice, 0, 1, buffer) == 0);
+	CHECK(buffer[0] == 0xa5);
+	CHECK(disk_read(slice, 116, 1, buffer) == EOVERFLOW);
 
-	/* A geometry-less device cannot be interpreted. */
-	fake_dev.heads = 0;
-	CHECK(boots_partition_scan(&fake_dev, entries, 16) == -1);
-	fake_dev.heads = 8;
+	partition_set_scheme(NULL);
+	CHECK(partition_scan(dev, entries, PARTITION_MAX) == -EINVAL);
+	partition_set_scheme(&partition_scheme_pc98);
+	CHECK(partition_scan(NULL, entries, PARTITION_MAX) == -EINVAL);
 }
 
 int
@@ -198,9 +234,9 @@ main(void)
 	test_registry();
 	test_pc98_partitions();
 	if (failures != 0) {
-		printf("blkdev tests: %d failure(s)\n", failures);
+		printf("disk/bio tests: %d failure(s)\n", failures);
 		return 1;
 	}
-	printf("Boots blkdev/partition host tests: OK\n");
+	printf("Boots disk/bio/partition host tests: OK\n");
 	return 0;
 }

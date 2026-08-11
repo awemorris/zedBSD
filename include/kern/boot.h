@@ -57,6 +57,7 @@ struct boots_handoff {
 	uint16_t reserved;
 	uint32_t device_table;
 	uint32_t bios_gateway;
+	uint32_t boot_partition_lba;
 } __attribute__((packed));
 
 enum boots_bios_service {
@@ -121,8 +122,8 @@ _Static_assert(sizeof(struct boots_stage2_header) == 20,
                "Boots Stage 2 header must remain 20 bytes");
 _Static_assert(sizeof(struct boots_bootstrap_handoff) == 24,
                "Boots bootstrap handoff must remain 24 bytes");
-_Static_assert(sizeof(struct boots_handoff) == 20,
-               "Boots handoff must remain 20 bytes");
+_Static_assert(sizeof(struct boots_handoff) == 24,
+	       "Boots handoff version 2 must remain 24 bytes");
 _Static_assert(sizeof(struct boots_bios_request) == 16,
                "Boots BIOS request must remain 16 bytes");
 _Static_assert(sizeof(struct boots_applet_header) == 36,

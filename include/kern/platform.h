@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include "kern/boot.h"
 
-struct boots_blkdev;
+struct disk;
 struct boots_filesystem;
 
 #define KERN_PLATFORM_MAX_DEVICES 12U
@@ -15,7 +15,7 @@ size_t kern_platform_init(const struct boots_handoff *handoff,
 			  struct boots_device *devices, size_t capacity);
 void kern_platform_refresh_devices(const struct boots_device *devices,
 				   size_t count);
-struct boots_blkdev *kern_platform_block_device(
+struct disk *kern_platform_block_device(
 	const struct boots_device *device);
 int kern_platform_boot_linux(struct boots_filesystem *filesystem,
 			     const char *path, const char *arguments,

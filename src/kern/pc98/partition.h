@@ -9,6 +9,6 @@
 
 #include "kern/partition.h"
 
-extern const struct boots_partition_scheme boots_partition_scheme_pc98;
+extern const struct partition_scheme partition_scheme_pc98;
 
 #endif

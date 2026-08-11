@@ -16,5 +16,15 @@ extern int boots_errno;
 #define EROFS 9
 #define EOVERFLOW 10
 #define ENAMETOOLONG 11
+#define ENXIO 12
+#define ENODEV 13
+#define ENOTDIR 14
+#define EISDIR 15
+#define EEXIST 16
+#define EBUSY 17
+#define ENOTEMPTY 18
+#define EBADF 19
+#define ENOSYS 20
+#define EOPNOTSUPP 21
 
 #endif

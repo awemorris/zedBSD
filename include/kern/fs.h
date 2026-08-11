@@ -10,8 +10,10 @@
 
 #include <stdint.h>
 
+#ifndef BOOTS_PATH_MAX
 #define BOOTS_PATH_MAX 256
-#define BOOTS_FS_PRIVATE_WORDS 16
+#endif
+#define BOOTS_FS_PRIVATE_WORDS 160
 #define BOOTS_FILE_PRIVATE_WORDS 8
 
 struct boots_volume;

@@ -1,6 +1,6 @@
 /* Block-device discovery, partition selection, and image dispatch. SPDX-License-Identifier: Zlib */
 #include "kern/internal.h"
-#include "kern/block.h"
+#include "kern/disk.h"
 #include "kern/fat16.h"
 #include "kern/partition.h"
 #include "kern/platform.h"
@@ -15,25 +15,23 @@ static uint8_t m9_original[512], m9_pattern[512], m9_observed[512];
  * directly to native IDE slots.  Non-IDE classes have no native driver yet
  * (SCSI later; floppies need a future FDC driver) and read as absent.
  */
-static struct boots_blkdev *blk_for_dev(const struct boots_device *d)
+static struct disk *blk_for_dev(const struct boots_device *d)
 {
 	return kern_platform_block_device(d);
 }
 /* Nonzero on failure, matching the old gateway convention. */
 static int readsec(const struct boots_device *d, uint32_t lba, void *buf)
 {
-	struct boots_blkdev *blk = blk_for_dev(d);
+	struct disk *blk = blk_for_dev(d);
 
-	return blk == 0 ||
-	       boots_blkdev_read(blk, lba, 1, buf) != BOOTS_BLKDEV_OK;
+	return blk == 0 || disk_read(blk, lba, 1, buf) != 0;
 }
 static int writesec(const struct boots_device *d, uint32_t lba,
 		    const void *buf)
 {
-	struct boots_blkdev *blk = blk_for_dev(d);
+	struct disk *blk = blk_for_dev(d);
 
-	return blk == 0 ||
-	       boots_blkdev_write(blk, lba, 1, buf) != BOOTS_BLKDEV_OK;
+	return blk == 0 || disk_write(blk, lba, 1, buf) != 0;
 }
 /* PC-98 partition-table discovery using per-device BIOS logical geometry. */
 void devname(int i)
@@ -52,8 +50,8 @@ void devname(int i)
 }
 int scanparts(int di)
 {
-	struct boots_partition entries[MAX_PARTS];
-	struct boots_blkdev *blk;
+	struct partition entries[MAX_PARTS];
+	struct disk *blk;
 	int count;
 
 	memzero(parts, sizeof(parts));
@@ -62,22 +60,22 @@ int scanparts(int di)
 	blk = blk_for_dev(&devs[di]);
 	if (blk == 0)
 		return 0;
-	count = boots_partition_scan(blk, entries, MAX_PARTS);
+	count = partition_scan(blk, entries, MAX_PARTS);
 	if (count < 0)
 		return 0;
 	for (int i = 0; i < count; i++) {
-		const struct boots_partition *e = &entries[i];
+		const struct partition *e = &entries[i];
 
-		if (e->start_lba == 0 && e->data_lba == 0 &&
-		    e->name[0] == 0 && !e->bootable)
+		if (e->p_block_count == 0)
 			continue;
 		parts[i].valid = 1;
 		parts[i].index = i;
-		parts[i].bootable = e->bootable;
-		parts[i].start = (uint32_t)e->start_lba;
-		parts[i].data = (uint32_t)e->data_lba;
+		parts[i].bootable = (e->p_flags & PARTITION_BOOTABLE) != 0;
+		parts[i].start = (uint32_t)e->p_start_block;
+		parts[i].data = (uint32_t)e->p_data_block;
+		parts[i].count = (uint32_t)e->p_block_count;
 		for (int j = 0; j < 16; j++) {
-			parts[i].name[j] = e->name[j];
+			parts[i].name[j] = e->p_label[j];
 			if (!parts[i].name[j])
 				break;
 		}
@@ -266,10 +264,9 @@ void probe_fixed_class(uint8_t device_class)
 	unsigned count = device_class == BOOTS_DEV_IDE ? MAX_IDE_DEVICES :
 							MAX_SCSI_TARGETS;
 
-	if (device_class == BOOTS_DEV_IDE) {
-		boots_blkdev_reset();
-		kern_platform_refresh_devices(devs, device_count);
-	}
+	/* IDE disks back mounted partition objects.  Replacing their registry
+	 * objects in place would invalidate live mounts; the initial native probe
+	 * is authoritative until hot-unplug lifecycle support is added. */
 	for (unsigned index = 0; index < count; index++)
 		probe_fixed_device(device_class, first + index);
 }

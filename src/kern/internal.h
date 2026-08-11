@@ -18,7 +18,7 @@
 struct part {
 	uint8_t valid, index, bootable;
 	char name[17];
-	uint32_t start, data;
+	uint32_t start, data, count;
 };
 
 enum startup_phase {

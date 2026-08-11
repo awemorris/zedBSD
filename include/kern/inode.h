@@ -1,0 +1,100 @@
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+#ifndef BOOTS_KERN_INODE_H
+#define BOOTS_KERN_INODE_H
+
+#include <stddef.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+/* Strict host C modes hide these non-POSIX feature-test spellings. */
+#ifndef S_IFMT
+#define S_IFMT   0170000U
+#define S_IFSOCK 0140000U
+#define S_IFLNK  0120000U
+#define S_IFREG  0100000U
+#define S_IFBLK  0060000U
+#define S_IFDIR  0040000U
+#define S_IFCHR  0020000U
+#define S_IFIFO  0010000U
+#endif
+
+struct componentname;
+struct file_ops;
+struct mount;
+
+enum inode_type {
+	INODE_NONE,
+	INODE_REG,
+	INODE_DIR,
+	INODE_BLOCK,
+	INODE_CHAR,
+	INODE_SYMLINK,
+	INODE_SOCKET,
+	INODE_FIFO,
+};
+
+#define INODE_ROOT       0x00000001U
+#define INODE_DIRTY      0x00000002U
+#define INODE_DEAD       0x00000004U
+#define INODE_MOUNTPOINT 0x00000008U
+
+struct inode;
+
+struct inode_ops {
+	int (*lookup)(struct inode *, const struct componentname *,
+		      struct inode **);
+	int (*create)(struct inode *, const struct componentname *, mode_t,
+		      struct inode **);
+	int (*mkdir)(struct inode *, const struct componentname *, mode_t,
+		     struct inode **);
+	int (*unlink)(struct inode *, const struct componentname *);
+	int (*rmdir)(struct inode *, const struct componentname *);
+	int (*getattr)(struct inode *, struct stat *);
+	int (*setattr)(struct inode *, const struct stat *, unsigned);
+	int (*truncate)(struct inode *, off_t);
+	int (*sync)(struct inode *);
+	void (*reclaim)(struct inode *);
+};
+
+struct inode {
+	enum inode_type i_type;
+	ino_t i_ino;
+	struct mount *i_mount;
+	const struct inode_ops *i_op;
+	const struct file_ops *i_fop;
+	void *i_data;
+	unsigned i_usecount;
+	nlink_t i_linkcount;
+	mode_t i_mode;
+	uid_t i_uid;
+	gid_t i_gid;
+	off_t i_size;
+	dev_t i_rdev;
+	unsigned i_flags;
+	struct inode *i_hash_next;
+	struct inode *i_mount_next;
+};
+
+struct inode *inode_alloc(struct mount *mount);
+void inode_free(struct inode *inode);
+int inode_get(struct mount *mount, ino_t ino, struct inode **result);
+void inode_ref(struct inode *inode);
+void inode_release(struct inode *inode);
+void inode_cache_purge_mount(struct mount *mount);
+void inode_cache_reset(void);
+
+int inode_lookup(struct inode *, const struct componentname *, struct inode **);
+int inode_getattr(struct inode *, struct stat *);
+int inode_setattr(struct inode *, const struct stat *, unsigned);
+int inode_create(struct inode *, const struct componentname *, mode_t,
+		 struct inode **);
+int inode_mkdir(struct inode *, const struct componentname *, mode_t,
+		struct inode **);
+int inode_unlink(struct inode *, const struct componentname *);
+int inode_rmdir(struct inode *, const struct componentname *);
+int inode_truncate(struct inode *, off_t);
+int inode_sync(struct inode *);
+
+mode_t inode_type_mode(enum inode_type type);
+
+#endif

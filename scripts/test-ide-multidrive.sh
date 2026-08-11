@@ -30,9 +30,10 @@ test -d "$bios_dir" || {
 rm -rf -- "$work"
 mkdir -p "$work"
 cat > "$cfg" <<'EOF'
-devalias
-disk ide 1
-part BOOT
+device
+pwd
+cd /disk2
+pwd
 cat SECOND.TXT
 halt
 EOF
@@ -117,6 +118,8 @@ while time.time() < deadline:
     if b"SECOND IDE OK" in text:
         if b"ide1 BIOS 81 H/S 4/17" not in text:
             raise SystemExit("second disk was readable but its BIOS geometry was not listed")
+        if b"/disk2" not in text:
+            raise SystemExit("VFS did not enter the second mounted partition")
         print("IDE slave descriptor, CHS, partition mount, and read: PASS")
         sys.exit(0)
     time.sleep(0.25)

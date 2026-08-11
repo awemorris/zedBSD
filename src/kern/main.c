@@ -9,6 +9,7 @@
 #include "hal/console.h"
 #include "kern/platform.h"
 #include "kern/internal.h"
+#include "kern/vfs.h"
 
 
 /*
@@ -121,6 +122,8 @@ void kernel_main(const struct boots_handoff *h,
 	(void)kern_platform_graphics_init(boots_kernel_milliseconds,
 					 noct_key_is_down, noct_key_drain);
 	boots_env_init(&boot_environment);
+	if (kern_vfs_init(h, platform_devices, platform_device_count) != 0)
+		puts("VFS initialization failed; using legacy disk selection.\n");
 	(void)boots_env_set(&boot_environment, "HOME", "/");
 	(void)boots_env_set(&boot_environment, "REMACS_SKK_DICT",
 			     "/skkjisyo.dic");

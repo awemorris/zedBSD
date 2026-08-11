@@ -27,7 +27,7 @@ SECTIONS
 		*console.o(.text*) *env.o(.text*)
 		*fs.o(.text*) *namespace.o(.text*)
 		*fat.o(.text*) *fat16.o(.text*) *image.o(.text*)
-		*block.o(.text*) *partition.o(.text*)
+		*disk.o(.text*) *partition.o(.text*)
 		*pc98-ide.o(.text*)
 		*kbd-pc98.o(.text*) *kbd-pc98-map.o(.text*)
 		*display.o(.text*)
@@ -42,7 +42,7 @@ SECTIONS
 		*console.o(.rodata*) *env.o(.rodata*)
 		*fs.o(.rodata*) *namespace.o(.rodata*)
 		*fat.o(.rodata*) *fat16.o(.rodata*) *image.o(.rodata*)
-		*block.o(.rodata*) *partition.o(.rodata*)
+		*disk.o(.rodata*) *partition.o(.rodata*)
 		*pc98-ide.o(.rodata*)
 		*kbd-pc98.o(.rodata*) *kbd-pc98-map.o(.rodata*)
 		*display.o(.rodata*)
@@ -57,7 +57,7 @@ SECTIONS
 		*console.o(.data*) *env.o(.data*)
 		*fs.o(.data*) *namespace.o(.data*)
 		*fat.o(.data*) *fat16.o(.data*) *image.o(.data*)
-		*block.o(.data*) *partition.o(.data*)
+		*disk.o(.data*) *partition.o(.data*)
 		*pc98-ide.o(.data*)
 		*kbd-pc98.o(.data*) *kbd-pc98-map.o(.data*)
 		*display.o(.data*)
@@ -81,7 +81,7 @@ SECTIONS
 		*fs.o(.bss* COMMON) *namespace.o(.bss* COMMON)
 		*fat.o(.bss* COMMON) *fat16.o(.bss* COMMON)
 		*image.o(.bss* COMMON)
-		*block.o(.bss* COMMON) *partition.o(.bss* COMMON)
+		*disk.o(.bss* COMMON) *partition.o(.bss* COMMON)
 		*pc98-ide.o(.bss* COMMON)
 		*kbd-pc98.o(.bss* COMMON) *kbd-pc98-map.o(.bss* COMMON)
 		*display.o(.bss* COMMON)
@@ -100,7 +100,7 @@ SECTIONS
 	.data.high : { *(.data*) } :high
 	__high_image_end = .;
 	__high_bss_start = .;
-	.bss.high (NOLOAD) : { *(.bss*) *(COMMON) } :high
+	.bss.high (NOLOAD) : { *(.vfs_bss) *(.bss*) *(COMMON) } :high
 	__high_bss_end = .;
 	__high_end = .;
 

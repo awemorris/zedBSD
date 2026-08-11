@@ -13,4 +13,8 @@
 extern const struct boots_filesystem_driver boots_fat12_driver;
 extern const struct boots_filesystem_driver boots_fat16_driver;
 
+enum boots_fs_result boots_fat16_stat_location(
+	struct boots_filesystem *, const char *, struct boots_dirent *,
+	uint32_t *, uint16_t *, uint32_t *, uint8_t *);
+
 #endif

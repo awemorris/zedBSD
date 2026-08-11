@@ -957,6 +957,27 @@ static enum boots_fs_result fat16_stat(
 	return BOOTS_FS_OK;
 }
 
+enum boots_fs_result
+boots_fat16_stat_location(struct boots_filesystem *filesystem,
+			  const char *path, struct boots_dirent *entry,
+			  uint32_t *lba, uint16_t *offset,
+			  uint32_t *first_cluster, uint8_t *attributes)
+{
+	const uint8_t *raw;
+	enum boots_fs_result result;
+
+	if (!filesystem || !path || !entry || !lba || !offset ||
+	    !first_cluster || !attributes)
+		return BOOTS_FS_INVALID_ARGUMENT;
+	result = fat16_resolve_entry(filesystem, path, lba, offset, &raw);
+	if (result != BOOTS_FS_OK)
+		return result;
+	boots_fat_decode_dirent(raw, entry);
+	*first_cluster = boots_fat_get16(raw + 26);
+	*attributes = raw[11];
+	return BOOTS_FS_OK;
+}
+
 static enum boots_fs_result fat16_contiguous_lba(
 	struct boots_file *file, uint32_t *absolute_lba)
 {

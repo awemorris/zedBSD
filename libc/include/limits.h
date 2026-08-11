@@ -2,6 +2,9 @@
 #ifndef BOOTS_LIMITS_H
 #define BOOTS_LIMITS_H
 
+#define NAME_MAX 255
+#define PATH_MAX 256
+
 #define CHAR_BIT 8
 #define SCHAR_MIN (-128)
 #define SCHAR_MAX 127

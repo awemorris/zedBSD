@@ -124,11 +124,18 @@ softfloat-opcode-check: softfloat-objects
 
 $(BUILD)/tests/softfloat-host-test: tests/softfloat-host-test.c \
 	$(BOOTS_LIBC_OBJECTS) $(BOOTS_SOFTFLOAT_OBJECTS) src/kern/fs.c \
-	src/kern/namespace.c
+	src/kern/namespace.c $(BUILD)/src/kern/disk.o \
+	$(BUILD)/src/kern/inode.o $(BUILD)/src/kern/file.o \
+	$(BUILD)/src/kern/namecache.o $(BUILD)/src/kern/namei.o \
+	$(BUILD)/src/kern/mount.o $(BUILD)/src/kern/rootfs.o
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(BOOTS_LIBC_CPPFLAGS) $(BOOTS_SOFTFLOAT_CFLAGS) \
 		-no-pie \
 		tests/softfloat-host-test.c src/kern/fs.c src/kern/namespace.c \
+		$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/inode.o \
+		$(BUILD)/src/kern/file.o $(BUILD)/src/kern/namecache.o \
+		$(BUILD)/src/kern/namei.o $(BUILD)/src/kern/mount.o \
+		$(BUILD)/src/kern/rootfs.o \
 		$(BOOTS_LIBC_OBJECTS) \
 		$(BOOTS_SOFTFLOAT_OBJECTS) -o $@
 
