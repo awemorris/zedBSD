@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_FCNTL_H
-#define BOOTS_FCNTL_H
+#ifndef ZEDBSD_FCNTL_H
+#define ZEDBSD_FCNTL_H
 
 #define O_RDONLY    0x0000
 #define O_WRONLY    0x0001

@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "user/noct/boots-api.h"
+#include "user/noct/zedbsd-api.h"
 
 #include <noct/noct.h>
 #include <noct/repl.h>
@@ -49,6 +49,10 @@ static int read_repl_line(char *line, size_t capacity, int continuation)
 		unsigned char byte;
 		if (read(0, &byte, 1) != 1)
 			return -1;
+		if (byte == 3U) {
+			(void)write(1, "^C\n", 3);
+			return 0;
+		}
 		if (byte == 4U)
 			return 0;
 		if (byte == '\r' || byte == '\n') {
@@ -136,10 +140,10 @@ static int bytecode_path(const char *path)
 		(path[length - 1U] == 'P' || path[length - 1U] == 'p');
 }
 
-static void import_environment(struct boots_environment *environment, char **envp)
+static void import_environment(struct zedbsd_environment *environment, char **envp)
 {
 	unsigned i;
-	boots_env_init(environment);
+	zedbsd_env_init(environment);
 	for (i = 0; envp != NULL && envp[i] != NULL; i++) {
 		char *equals = strchr(envp[i], '=');
 		char name[32]; size_t length;
@@ -147,7 +151,7 @@ static void import_environment(struct boots_environment *environment, char **env
 		length = (size_t)(equals - envp[i]);
 		if (length == 0 || length >= sizeof(name)) continue;
 		memcpy(name, envp[i], length); name[length] = '\0';
-		(void)boots_env_set(environment, name, equals + 1);
+		(void)zedbsd_env_set(environment, name, equals + 1);
 	}
 }
 
@@ -158,8 +162,8 @@ int main(int argc, char **argv, char **envp)
 	NoctEnv *env = NULL;
 	NoctValue main_value, return_value, arguments, argument_value;
 	NoctFunc *function = NULL;
-	struct boots_noct_options options;
-	struct boots_environment environment;
+	struct zedbsd_noct_options options;
+	struct zedbsd_environment environment;
 	const char *path = NULL;
 	char *source = NULL;
 	size_t source_size = 0;
@@ -190,7 +194,7 @@ int main(int argc, char **argv, char **envp)
 	options.jit_enable = 1;
 	options.jit_threshold = 32;
 	options.write = noct_write;
-	options.services = boots_user_noct_services();
+	options.services = zedbsd_user_noct_services();
 	options.environment = &environment;
 
 	noct_set_default_config(&config);
@@ -205,8 +209,8 @@ int main(int argc, char **argv, char **envp)
 		status = 10;
 		goto out;
 	}
-	if (!boots_noct_napi_register(env, &options) ||
-	    !boots_noct_target_register(env, options.services)) {
+	if (!zedbsd_noct_napi_register(env, &options) ||
+	    !zedbsd_noct_target_register(env, options.services)) {
 		status = 11; print_error(env, "Noct target API error"); goto out;
 	}
 	if (path == NULL) {
@@ -242,9 +246,9 @@ int main(int argc, char **argv, char **envp)
 		status = 14; print_error(env, "Noct runtime error"); goto out;
 	}
 	{
-		const char *action = boots_env_get(&environment, "BOOT_ACTION");
-		const char *result_fd = boots_env_get(&environment,
-						      "BOOTS_RESULT_FD");
+		const char *action = zedbsd_env_get(&environment, "BOOT_ACTION");
+		const char *result_fd = zedbsd_env_get(&environment,
+						      "ZEDBSD_RESULT_FD");
 		if (action != NULL && result_fd != NULL &&
 		    result_fd[0] == '3' && result_fd[1] == '\0') {
 			size_t length = strlen(action);
@@ -260,8 +264,8 @@ int main(int argc, char **argv, char **envp)
 		(void)noct_get_int(env, &return_value, &status);
 out:
 	if (pinned) (void)noct_unpin_local(env, 2, &arguments, &argument_value);
-	boots_noct_target_cleanup();
-	boots_noct_napi_cleanup();
+	zedbsd_noct_target_cleanup();
+	zedbsd_noct_napi_cleanup();
 	noct_beui_cleanup();
 	if (vm != NULL) (void)noct_destroy_vm(vm);
 	free(source);

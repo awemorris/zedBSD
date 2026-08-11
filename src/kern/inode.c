@@ -211,6 +211,20 @@ inode_lookup(struct inode *directory, const struct componentname *name,
 }
 
 int
+inode_lookup_casefold(struct inode *directory,
+		      const struct componentname *name, struct inode **result)
+{
+	if (directory == NULL || name == NULL || result == NULL ||
+	    name->cn_namelen == 0 || name->cn_namelen > NAME_MAX)
+		return EINVAL;
+	if (directory->i_type != INODE_DIR)
+		return ENOTDIR;
+	if (directory->i_op == NULL || directory->i_op->lookup_casefold == NULL)
+		return EOPNOTSUPP;
+	return directory->i_op->lookup_casefold(directory, name, result);
+}
+
+int
 inode_getattr(struct inode *inode, struct stat *status)
 {
 	if (inode == NULL || status == NULL)
@@ -270,6 +284,7 @@ int inode_rmdir(struct inode *i, const struct componentname *n)
 int inode_truncate(struct inode *i, off_t size)
 {
 	if (i == NULL || size < 0) return EINVAL;
+	if (i->i_flags & INODE_SWAPFILE) return EBUSY;
 	if (readonly(i)) return EROFS;
 	return i->i_op != NULL && i->i_op->truncate != NULL ?
 		i->i_op->truncate(i, size) : EOPNOTSUPP;

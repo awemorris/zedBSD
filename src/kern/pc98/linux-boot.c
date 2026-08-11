@@ -4,6 +4,7 @@
 #include <kern/image.h>
 #include <kern/messages.h>
 #include <kern/process.h>
+#include <kern/swap.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -22,13 +23,13 @@ struct elf32_program_header {
 	uint32_t type, offset, vaddr, paddr, filesz, memsz, flags, align;
 };
 
-static const struct boots_device *linux_devices;
+static const struct zedbsd_device *linux_devices;
 static unsigned linux_device_count;
 static int linux_boot_device;
 static uint32_t text_done, text_total, data_done, data_total;
 static int progress_class = -1;
 
-void boots_pc98_jump_linux(uint32_t entry, uint32_t boot_params)
+void zedbsd_pc98_jump_linux(uint32_t entry, uint32_t boot_params)
 	__attribute__((noreturn));
 
 static uint32_t read_le32(const uint8_t *p)
@@ -70,7 +71,7 @@ static void show_progress(int load_class)
 	hal_cons_putc('\r');
 	hal_cons_clear_to_eol();
 	hal_cons_putc('\r');
-	hal_cons_write((const char *)(load_class ? boots_msg_data : boots_msg_code));
+	hal_cons_write((const char *)(load_class ? zedbsd_msg_data : zedbsd_msg_code));
 	write_unsigned(kibibytes(done));
 	hal_cons_write(" / ");
 	write_unsigned(kibibytes(total));
@@ -83,7 +84,7 @@ static void show_progress(int load_class)
 
 static void begin_progress(uint32_t kernel_size)
 {
-	hal_cons_write((const char *)boots_msg_kernel_size);
+	hal_cons_write((const char *)zedbsd_msg_kernel_size);
 	write_unsigned(kibibytes(kernel_size));
 	hal_cons_write(" KB\n");
 	progress_class = -1;
@@ -113,12 +114,12 @@ static void build_disk_setup(uint8_t *bp)
 	*(uint32_t *)(bp + 0x250) = 0;
 	*(uint32_t *)(bp + 0x254) = 0;
 	for (unsigned i = 0; i < linux_device_count; i++) {
-		const struct boots_device *d = &linux_devices[i];
+		const struct zedbsd_device *d = &linux_devices[i];
 		uint8_t *node;
 
-		if ((d->device_class != BOOTS_DEV_IDE &&
-		     d->device_class != BOOTS_DEV_SCSI) ||
-		    !(d->flags & BOOTS_DEV_HAS_GEOMETRY) || !d->heads ||
+		if ((d->device_class != ZEDBSD_DEV_IDE &&
+		     d->device_class != ZEDBSD_DEV_SCSI) ||
+		    !(d->flags & ZEDBSD_DEV_HAS_GEOMETRY) || !d->heads ||
 		    !d->sectors || count >= 12)
 			continue;
 		node = (uint8_t *)(PC98_ADDR + count * PC98_SETUP_NODE_SIZE);
@@ -136,18 +137,18 @@ static void build_disk_setup(uint8_t *bp)
 		node[25] = d->heads;
 		node[26] = d->sectors;
 		if ((int)i == linux_boot_device)
-			node[27] = BOOTS_LINUX_DISK_F_BOOT;
+			node[27] = ZEDBSD_LINUX_DISK_F_BOOT;
 		previous = node;
 		count++;
 	}
 }
 
-static int vmlinux_probe(struct boots_file *file)
+static int vmlinux_probe(struct zedbsd_file *file)
 {
 	struct elf32_header header;
 
 	return file->size <= UINT32_MAX &&
-	       boots_file_read(file, 0, &header, sizeof(header)) &&
+	       zedbsd_file_read(file, 0, &header, sizeof(header)) &&
 	       read_le32(header.id) == 0x464c457f && header.id[4] == 1 &&
 	       header.id[5] == 1 && header.machine == 3;
 }
@@ -163,7 +164,7 @@ static void load_progress(void *context, uint32_t bytes)
 	show_progress(load_class);
 }
 
-static int vmlinux_load(struct boots_file *file, const char *arguments)
+static int vmlinux_load(struct zedbsd_file *file, const char *arguments)
 {
 	struct elf32_header header;
 	struct elf32_program_header programs[16];
@@ -176,7 +177,7 @@ static int vmlinux_load(struct boots_file *file, const char *arguments)
 	size_t argument_length, staging_size = 0;
 	uint32_t destination_end = 0;
 
-	if (!boots_file_read(file, 0, &header, sizeof(header))) {
+	if (!zedbsd_file_read(file, 0, &header, sizeof(header))) {
 		hal_cons_write("Linux: header read failed.\n");
 		return 0;
 	}
@@ -196,7 +197,7 @@ static int vmlinux_load(struct boots_file *file, const char *arguments)
 	for (unsigned i = 0; i < header.phnum; i++) {
 		struct elf32_program_header *program = &programs[i];
 		staging_offsets[i] = 0;
-		if (!boots_file_read(file, header.phoff + i * sizeof(programs[0]),
+		if (!zedbsd_file_read(file, header.phoff + i * sizeof(programs[0]),
 				     program, sizeof(*program))) {
 			hal_cons_write("Linux: program header read failed.\n");
 			return 0;
@@ -259,13 +260,21 @@ static int vmlinux_load(struct boots_file *file, const char *arguments)
 		if (program->type != 1)
 			continue;
 		load_class = !!(program->flags & 2);
-		if (!boots_file_read_progress(file, program->offset,
+		if (!zedbsd_file_read_progress(file, program->offset,
 			(void *)(staging.vaddr + staging_offsets[i]),
 			program->filesz, load_progress, &load_class)) {
 			(void)hal_pmem_free(&staging);
 			hal_cons_write("Linux: staging read failed.\n");
 			return 0;
 		}
+	}
+	/* All user vmspaces are gone and every fallible kernel-image read has
+	 * completed.  Drop the swapfile pin and flush direct BIO state before the
+	 * low-memory handoff starts overwriting zedBSD itself. */
+	if (swap_shutdown(swap_system_backend()) != 0) {
+		(void)hal_pmem_free(&staging);
+		hal_cons_write("Linux: swap shutdown failed.\n");
+		return 0;
 	}
 	memset((void *)BP_ADDR, 0, 4096);
 	memcpy((void *)CMD_ADDR, arguments != NULL ? arguments : "",
@@ -305,19 +314,19 @@ static int vmlinux_load(struct boots_file *file, const char *arguments)
 		memset((void *)(program->paddr + program->filesz), 0,
 		       program->memsz - program->filesz);
 	}
-	boots_pc98_jump_linux(header.entry, BP_ADDR);
+	zedbsd_pc98_jump_linux(header.entry, BP_ADDR);
 }
 
-static const struct boots_image_loader loader = {
+static const struct zedbsd_image_loader loader = {
 	"vmlinux", vmlinux_probe, vmlinux_load
 };
 
-int pc98_linux_boot(struct boots_filesystem *filesystem, const char *path,
-		    const char *arguments, const struct boots_device *devices,
+int pc98_linux_boot(struct zedbsd_filesystem *filesystem, const char *path,
+		    const char *arguments, const struct zedbsd_device *devices,
 		    unsigned count, int boot_device)
 {
 	linux_devices = devices;
 	linux_device_count = count;
 	linux_boot_device = boot_device;
-	return boots_image_boot(&loader, filesystem, path, arguments);
+	return zedbsd_image_boot(&loader, filesystem, path, arguments);
 }

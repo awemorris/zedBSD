@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
-"""Check the BOOT.SYS ELF subset contract and patch the B98S v2 header.
+"""Check the vmunix ELF subset contract and patch the B98S v2 header.
 
-BOOT.SYS is a two-segment ELF that Stage 1 loads with a deliberately
+vmunix is a two-segment ELF that Stage 1 loads with a deliberately
 tiny real-mode loader.  Stage 1 trusts almost everything about the
 image, so every property it relies on is enforced here, at build time:
 

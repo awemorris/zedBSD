@@ -5,16 +5,16 @@ set -euo pipefail
 # select, partition-scan, mount, and read the slave disk through the native
 # PC-98 IDE driver.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-machine="${BOOTS_TEST_MACHINE:-pc9821}"
-cpu="${BOOTS_TEST_CPU:-486}"
+machine="${ZEDBSD_TEST_MACHINE:-pc9821}"
+cpu="${ZEDBSD_TEST_CPU:-486}"
 work="$build/tests/ide-multidrive"
 primary="$work/primary.img"
 secondary="$work/secondary.img"
-cfg="$work/BOOTS.CFG"
+cfg="$work/ZEDBSD.CFG"
 marker="$work/SECOND.TXT"
 monitor="$work/monitor.sock"
 
@@ -39,8 +39,8 @@ halt
 EOF
 printf '%s\n' 'SECOND IDE OK' > "$marker"
 
-BOOTS_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$primary"
-# BOOTS.CFG must win over the default graphical AUTOEXEC.NCT.
+ZEDBSD_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$primary"
+# ZEDBSD.CFG must win over the default graphical AUTOEXEC.NCT.
 mdel -i "$primary@@34816" ::AUTOEXEC.NCT
 cp --reflink=auto "$primary" "$secondary"
 mcopy -o -i "$secondary@@34816" "$marker" ::SECOND.TXT
@@ -123,7 +123,7 @@ while time.time() < deadline:
         print("IDE slave descriptor, CHS, partition mount, and read: PASS")
         sys.exit(0)
     time.sleep(0.25)
-raise SystemExit("Boots did not read SECOND.TXT from IDE unit 1")
+raise SystemExit("zedBSD did not read SECOND.TXT from IDE unit 1")
 PY
 
-echo "Boots IDE multidrive QEMU test: PASS"
+echo "zedBSD IDE multidrive QEMU test: PASS"

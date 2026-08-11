@@ -2,9 +2,9 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-stage2_image="${BOOTS_STAGE2_IMAGE:-$build/BOOT.SYS}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+vmunix_image="${ZEDBSD_VMUNIX_IMAGE:-$build/vmunix}"
 partition="${BOOT_PARTITION:-0}"
 install_disk_stubs="${INSTALL_DISK_STUBS:-0}"
 while test "$#" -gt 0; do
@@ -21,12 +21,21 @@ while test "$#" -gt 0; do
 		*) break ;;
 	esac
 done
-image="${1:?usage: $0 [--partition N] [--install-disk-stubs] IMAGE [VMLINUX [BOOTS.CFG]]}"
+image="${1:?usage: $0 [--partition N] [--install-disk-stubs] IMAGE [VMLINUX [ZEDBSD.CFG]]}"
 kernel="${2:-}"
 cfg="${3:-}"
 heads="${DISK_HEADS:-}"
 source_heads="${DISK_SOURCE_HEADS:-}"
 sectors="${DISK_SECTORS:-17}"
+swap_size_mib="${ZEDBSD_SWAP_SIZE_MIB:-0}"
+swap_temp=""
+cleanup()
+{
+	if test -n "$swap_temp"; then
+		rm -f -- "$swap_temp"
+	fi
+}
+trap cleanup EXIT INT TERM
 
 test -f "$image" || { echo "Image not found: $image" >&2; exit 1; }
 if test -z "$heads"; then
@@ -57,13 +66,17 @@ case "$install_disk_stubs" in
 	0 | 1) ;;
 	*) echo "INSTALL_DISK_STUBS must be 0 or 1" >&2; exit 2 ;;
 esac
+case "$swap_size_mib" in
+	0 | 32) ;;
+	*) echo "ZEDBSD_SWAP_SIZE_MIB must be 0 or 32" >&2; exit 2 ;;
+esac
 for command in dd mattrib mcopy mformat mmd python3; do
 	command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
 done
 
 make -C "$repo" ARCH="$arch" all
-test -f "$stage2_image" || {
-	echo "BOOT.SYS image not found: $stage2_image" >&2
+test -f "$vmunix_image" || {
+	echo "vmunix image not found: $vmunix_image" >&2
 	exit 1
 }
 io_sys_size="$(stat -c %s "$build/IO.SYS")"
@@ -212,20 +225,50 @@ with open(image, "r+b") as stream:
 PY
 mcopy -o -i "$image@@$offset" "$build/IO.SYS" ::IO.SYS
 mattrib -i "$image@@$offset" +r +h +s ::IO.SYS
-mcopy -o -i "$image@@$offset" "$stage2_image" ::BOOT.SYS
-mattrib -i "$image@@$offset" +r +h +s ::BOOT.SYS
+mcopy -o -i "$image@@$offset" "$vmunix_image" ::vmunix
+mattrib -i "$image@@$offset" +r +h +s ::vmunix
+if test "$swap_size_mib" -eq 32; then
+	swap_temp="$(mktemp "${TMPDIR:-/tmp}/zedbsd-swap.XXXXXX")"
+	python3 - "$swap_temp" <<'PY'
+import struct
+import sys
+
+path = sys.argv[1]
+header = bytearray(64)
+header[:8] = b"ZEDSWAP1"
+struct.pack_into("<IIIIII", header, 8, 1, 64, 4096,
+                 32 * 1024 * 1024, 8191, 0)
+checksum = 2166136261
+for index, byte in enumerate(header):
+    if 28 <= index < 32:
+        byte = 0
+    checksum = ((checksum ^ byte) * 16777619) & 0xffffffff
+struct.pack_into("<I", header, 28, checksum)
+with open(path, "wb") as stream:
+    stream.truncate(32 * 1024 * 1024)
+    stream.seek(0)
+    stream.write(header)
+PY
+	if ! mcopy -o -i "$image@@$offset" "$swap_temp" ::SWAPFILE; then
+		echo "BOOT partition has insufficient space for 32 MiB swapfile" >&2
+		exit 1
+	fi
+	mattrib -i "$image@@$offset" +h +s ::SWAPFILE
+	rm -f -- "$swap_temp"
+	swap_temp=""
+fi
 if test -s "$build/NOCT.ELF"; then
 	mcopy -o -i "$image@@$offset" "$build/NOCT.ELF" ::NOCT.ELF
 fi
 mmd -i "$image@@$offset" ::CMD 2>/dev/null || true
 mmd -i "$image@@$offset" ::APPS 2>/dev/null || true
 mmd -i "$image@@$offset" ::HOME 2>/dev/null || true
-if test -n "${BOOTS_AUTOEXEC:-}"; then
-	test -f "$BOOTS_AUTOEXEC" || {
-		echo "AUTOEXEC.NCT not found: $BOOTS_AUTOEXEC" >&2
+if test -n "${ZEDBSD_AUTOEXEC:-}"; then
+	test -f "$ZEDBSD_AUTOEXEC" || {
+		echo "AUTOEXEC.NCT not found: $ZEDBSD_AUTOEXEC" >&2
 		exit 1
 	}
-	mcopy -o -i "$image@@$offset" "$BOOTS_AUTOEXEC" ::AUTOEXEC.NCT
+	mcopy -o -i "$image@@$offset" "$ZEDBSD_AUTOEXEC" ::AUTOEXEC.NCT
 fi
 if test -f "$repo/apps/HELLO.NCT"; then
 	mcopy -o -i "$image@@$offset" "$repo/apps/HELLO.NCT" ::HELLO.NCT
@@ -282,8 +325,8 @@ if test -n "$kernel"; then
 	mcopy -o -i "$image@@$offset" "$kernel" ::VMLINUX
 fi
 if test -n "$cfg"; then
-	test -f "$cfg" || { echo "BOOTS.CFG not found: $cfg" >&2; exit 1; }
-	mcopy -o -i "$image@@$offset" "$cfg" ::BOOTS.CFG
+	test -f "$cfg" || { echo "ZEDBSD.CFG not found: $cfg" >&2; exit 1; }
+	mcopy -o -i "$image@@$offset" "$cfg" ::ZEDBSD.CFG
 fi
 if test -f "$repo/platform/pc98/dos/linux98.exe"; then
 	mcopy -o -i "$image@@$offset" "$repo/platform/pc98/dos/linux98.exe" ::LINUX98.EXE
@@ -298,14 +341,14 @@ if test -n "${BOOT_LOGO:-}"; then
 	test -f "$BOOT_LOGO" || { echo "Boot logo not found: $BOOT_LOGO" >&2; exit 1; }
 	mcopy -o -i "$image@@$offset" "$BOOT_LOGO" ::LOGO.RAW
 fi
-if test -n "${BOOTS_FILES:-}"; then
-	for file in "$BOOTS_FILES"/*; do
+if test -n "${ZEDBSD_FILES:-}"; then
+	for file in "$ZEDBSD_FILES"/*; do
 		test -f "$file" || continue
 		mcopy -o -i "$image@@$offset" "$file" ::
 	done
 fi
 sync
-printf 'Installed Boots in %s partition %s (H=%s S=%s, PBR LBA %s, IO.SYS %s bytes)\n' \
+printf 'Installed zedBSD in %s partition %s (H=%s S=%s, PBR LBA %s, IO.SYS %s bytes)\n' \
 	"$image" "$partition" "$heads" "$sectors" "$ipl_lba" "$io_sys_size"
 if test "$install_disk_stubs" -eq 1; then
 	printf 'Installed distributed disk stubs at LBA 0 and LBA 2-15\n'

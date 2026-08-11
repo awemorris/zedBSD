@@ -1,7 +1,15 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/disk.h"
+#include "kern/sched.h"
 
 #include <errno.h>
+#include <hal/hal.h>
+
+extern struct thread *thread_current(void) __attribute__((weak));
+extern void sched_sleep(uint64_t) __attribute__((weak));
+extern void sched_wakeup(struct thread *) __attribute__((weak));
+extern bool hal_irq_disable(void) __attribute__((weak));
+extern void hal_irq_enable(void) __attribute__((weak));
 
 #define DISK_ALLOCATED 1U
 #define DISK_LIVE 2U
@@ -267,12 +275,34 @@ void bio_complete(struct bio *bio, int error, size_t transferred)
 		leaf->d_inflight--;
 	if (bio->b_done != NULL)
 		bio->b_done(bio);
+	if (bio->b_waiter != NULL && sched_wakeup != NULL)
+		sched_wakeup(bio->b_waiter);
 }
 
 int bio_wait(struct bio *bio)
 {
+	struct thread *thread;
+	bool enabled;
+
 	if (bio == NULL)
 		return EINVAL;
+	thread = thread_current != NULL ? thread_current() : NULL;
+	if (thread != NULL && sched_sleep != NULL &&
+	    hal_irq_disable != NULL && hal_irq_enable != NULL) {
+		enabled = hal_irq_disable();
+		while (bio->b_state == BIO_SUBMITTED) {
+			if (bio->b_waiter != NULL && bio->b_waiter != thread) {
+				if (enabled) hal_irq_enable();
+				return EBUSY;
+			}
+			bio->b_waiter = thread;
+			sched_sleep(0);
+		}
+		bio->b_waiter = NULL;
+		if (enabled)
+			hal_irq_enable();
+		return bio->b_state == BIO_COMPLETED ? bio->b_error : EINVAL;
+	}
 	while (bio->b_state == BIO_SUBMITTED)
 		__asm__ volatile ("pause");
 	return bio->b_state == BIO_COMPLETED ? bio->b_error : EINVAL;

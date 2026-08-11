@@ -1,5 +1,5 @@
 /*
- * Boots
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
@@ -7,7 +7,7 @@
 
 	.code32
 	/*
-	 * B98S header, version 2.  BOOT.SYS is a two-segment ELF and this
+	 * B98S header, version 2.  vmunix is a two-segment ELF and this
 	 * section leads the low segment at file offset 512.  file size,
 	 * entry, and the payload byte-sum (file bytes from offset 532 to
 	 * the end) are patched in by scripts/patch-stage2.py.

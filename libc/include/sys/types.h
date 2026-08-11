@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef BOOTS_SYS_TYPES_H
-#define BOOTS_SYS_TYPES_H
+#ifndef ZEDBSD_SYS_TYPES_H
+#define ZEDBSD_SYS_TYPES_H
 
 #include <stddef.h>
 #include <stdint.h>

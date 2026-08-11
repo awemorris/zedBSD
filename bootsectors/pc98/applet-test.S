@@ -1,5 +1,5 @@
 /*
- * Boots
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
@@ -33,4 +33,4 @@ applet_entry:
 	leave
 	ret
 message:
-	.asciz "Boots applet ABI: OK\n"
+	.asciz "zedBSD applet ABI: OK\n"

@@ -12,6 +12,10 @@
 #include "kern/vfs.h"
 #include "kern/exec.h"
 #include "kern/process.h"
+#include "kern/kmem.h"
+#include "kern/swap.h"
+#include "kern/swap-fat.h"
+#include "kern/vm-reclaim.h"
 #include "hal/hal.h"
 #include <errno.h>
 #include <string.h>
@@ -19,6 +23,59 @@
 #define CFG_MAX 8192
 static uint8_t sec[512], cfg[CFG_MAX];
 int kern_noct_last_status;
+
+static void
+print_stat(const char *name, size_t value)
+{
+	puts(name);
+	putc('=');
+	dec((unsigned)value);
+	putc('\n');
+}
+
+static void
+print_vmstat(void)
+{
+	struct hal_memory_stats hal_stats;
+	struct kern_memory_stats kern_stats;
+	struct vm_reclaim_stats vm_stats;
+	struct swap_backend *swap = swap_system_backend();
+
+	hal_memory_get_stats(&hal_stats);
+	kern_memory_get_stats(&kern_stats);
+	vm_reclaim_get_stats(&vm_stats);
+	print_stat("physical.total", hal_stats.physical_total);
+	print_stat("physical.reserved", hal_stats.physical_reserved);
+	print_stat("physical.allocated", hal_stats.physical_allocated);
+	print_stat("physical.free", hal_stats.physical_free);
+	print_stat("image.low", kern_stats.low_image_bytes);
+	print_stat("image.high", kern_stats.high_image_bytes);
+	print_stat("heap.fixed", kern_stats.heap_fixed);
+	print_stat("heap.current", kern_stats.heap_current);
+	print_stat("heap.peak", kern_stats.heap_peak);
+	print_stat("heap.largest-free", kern_stats.heap_largest_free);
+	print_stat("heap.largest-failed", kern_stats.heap_largest_failed);
+	print_stat("hal.tasks", hal_stats.task_count);
+	print_stat("hal.task-stack-bytes", hal_stats.task_stack_bytes);
+	print_stat("hal.spaces", hal_stats.space_count);
+	print_stat("hal.page-tables", hal_stats.page_table_count);
+	print_stat("vm.resident", vm_stats.resident);
+	print_stat("vm.anonymous", vm_stats.anonymous_resident);
+	print_stat("vm.file", vm_stats.file_resident);
+	print_stat("vm.wired", vm_stats.wired);
+	print_stat("vm.busy", vm_stats.busy);
+	print_stat("vm.dirty", vm_stats.dirty);
+	print_stat("vm.clean", vm_stats.clean);
+	print_stat("vm.swapped", vm_stats.swapped);
+	print_stat("vm.faults", vm_stats.faults);
+	print_stat("vm.page-in", vm_stats.page_ins);
+	print_stat("vm.page-out", vm_stats.page_outs);
+	print_stat("vm.reclaims", vm_stats.reclaims);
+	print_stat("vm.io-errors", vm_stats.io_errors);
+	print_stat("swap.total", swap != NULL ? swap->slot_count : 0);
+	print_stat("swap.free", swap != NULL ? swap->free_slots : 0);
+	print_stat("swap.extents", swap_fat_extent_count());
+}
 
 void prompt(void)
 {
@@ -85,7 +142,7 @@ void noct_key_drain(void *context)
  * least useful. */
 int clock_second(void)
 {
-	return (int)((boots_kernel_ticks() / 100U) % 60U);
+	return (int)((zedbsd_kernel_ticks() / 100U) % 60U);
 }
 
 int noct_clock_second(void *context)
@@ -163,7 +220,7 @@ static void listdev(uint8_t cls)
 		devname(i);
 		puts(" BIOS ");
 		hex8(devs[i].bios_id);
-		if (devs[i].flags & BOOTS_DEV_HAS_GEOMETRY) {
+		if (devs[i].flags & ZEDBSD_DEV_HAS_GEOMETRY) {
 			puts(" H/S ");
 			dec(devs[i].heads);
 			putc('/');
@@ -263,22 +320,22 @@ static int run_applet(const char *n, int argc, char **argv)
 	if (file_openat(&kern_cwdinfo, n, O_RDONLY, 0, &file) != 0)
 		return 0;
 	size = file->f_inode->i_size;
-	if (size < (off_t)sizeof(struct boots_applet_header) ||
+	if (size < (off_t)sizeof(struct zedbsd_applet_header) ||
 	    size > 0x10000 || file_read(file, image, (size_t)size) != size) {
 		(void)file_close(file);
 		return 0;
 	}
 	(void)file_close(file);
-	struct boots_applet_header *h = (struct boots_applet_header *)image;
-	if (h->magic != BOOTS_APPLET_MAGIC || h->abi_version != 1 ||
+	struct zedbsd_applet_header *h = (struct zedbsd_applet_header *)image;
+	if (h->magic != ZEDBSD_APPLET_MAGIC || h->abi_version != 1 ||
 	    h->header_size != sizeof(*h) || h->image_size != (uint32_t)size ||
 	    h->entry_offset < h->header_size || h->entry_offset >= (uint32_t)size ||
 	    crc32_image(image, (uint32_t)size) != h->crc32)
 		return 0;
-	struct boots_applet_services s = {1, sizeof(s), putc, puts,
+	struct zedbsd_applet_services s = {1, sizeof(s), putc, puts,
 	                                   applet_key};
-	boots_applet_entry_t entry =
-	        (boots_applet_entry_t)(image + h->entry_offset);
+	zedbsd_applet_entry_t entry =
+	        (zedbsd_applet_entry_t)(image + h->entry_offset);
 	uint32_t r = entry(&s, (uint32_t)argc, (const char *const *)argv);
 	if (r) {
 		puts("applet status ");
@@ -290,16 +347,16 @@ static int run_applet(const char *n, int argc, char **argv)
 }
 static int open_noct_application(const char *prefix, const char *name,
 				 const char *extension,
-				 char path[BOOTS_PATH_MAX])
+				 char path[ZEDBSD_PATH_MAX])
 {
-	struct boots_file file;
+	struct zedbsd_file file;
 	unsigned source = 0;
 	unsigned position = 0;
 	unsigned base_length = 0;
 	unsigned extension_length = 0;
 
 	while (prefix[source] != '\0') {
-		if (position + 1U >= BOOTS_PATH_MAX)
+		if (position + 1U >= ZEDBSD_PATH_MAX)
 			return 0;
 		path[position++] = prefix[source++];
 	}
@@ -307,7 +364,7 @@ static int open_noct_application(const char *prefix, const char *name,
 		char ch = name[base_length++];
 
 		if (ch == '.' || ch == '/' || ch == '\\' ||
-		    position + 1U >= BOOTS_PATH_MAX)
+		    position + 1U >= ZEDBSD_PATH_MAX)
 			return 0;
 		path[position++] = ch >= 'a' && ch <= 'z' ?
 			(char)(ch - 'a' + 'A') : ch;
@@ -315,12 +372,12 @@ static int open_noct_application(const char *prefix, const char *name,
 	if (!base_length)
 		return 0;
 	while (extension[extension_length] != '\0') {
-		if (position + 1U >= BOOTS_PATH_MAX)
+		if (position + 1U >= ZEDBSD_PATH_MAX)
 			return 0;
 		path[position++] = extension[extension_length++];
 	}
 	path[position] = '\0';
-	return boots_fs_open(&mounted_fs, path, &file) ? 1 : 0;
+	return zedbsd_fs_open(&mounted_fs, path, &file) ? 1 : 0;
 }
 
 /* Execute one already-tokenized shell command against the current state.
@@ -331,9 +388,9 @@ static int open_noct_application(const char *prefix, const char *name,
 int run_noct_user(const char *path, int argc, char *const argv[],
 		  unsigned flags, char *result, size_t result_capacity)
 {
-	char executable[BOOTS_PATH_MAX];
-	char home[BOOTS_PATH_MAX + 6U];
-	char dictionary[BOOTS_PATH_MAX + 17U];
+	char executable[ZEDBSD_PATH_MAX];
+	char home[ZEDBSD_PATH_MAX + 6U];
+	char dictionary[ZEDBSD_PATH_MAX + 17U];
 	char *child_argv[23];
 	char *child_env[4];
 	struct process *child;
@@ -371,13 +428,13 @@ int run_noct_user(const char *path, int argc, char *const argv[],
 		child_argv[i + 2] = argv[i];
 	child_argv[argc + 2] = NULL;
 	memset(child_env, 0, sizeof(child_env));
-	value = boots_env_get(&boot_environment, "HOME");
+	value = zedbsd_env_get(&boot_environment, "HOME");
 	if (value != NULL && strlen(value) + 6U <= sizeof(home)) {
 		memcpy(home, "HOME=", 5);
 		strcpy(home + 5, value);
 		child_env[0] = home;
 	}
-	value = boots_env_get(&boot_environment, "REMACS_SKK_DICT");
+	value = zedbsd_env_get(&boot_environment, "REMACS_SKK_DICT");
 	if (value != NULL && strlen(value) + 17U <= sizeof(dictionary)) {
 		unsigned slot = child_env[0] != NULL ? 1U : 0U;
 		memcpy(dictionary, "REMACS_SKK_DICT=", 16);
@@ -387,7 +444,7 @@ int run_noct_user(const char *path, int argc, char *const argv[],
 	if ((flags & PROCESS_SPAWN_RESULT) != 0) {
 		unsigned slot = child_env[0] == NULL ? 0U :
 			(child_env[1] == NULL ? 1U : 2U);
-		child_env[slot] = "BOOTS_RESULT_FD=3";
+		child_env[slot] = "ZEDBSD_RESULT_FD=3";
 	}
 	error = process_spawn(executable, child_argv, child_env, flags, &child);
 	if (error != 0) {
@@ -403,7 +460,7 @@ static int run_noct_application(const char *name, const char *extension,
 				int nap_fallback, int argc,
 				char *const argv[])
 {
-	char path[BOOTS_PATH_MAX];
+	char path[ZEDBSD_PATH_MAX];
 
 	if (!open_noct_application("CMD/", name, extension, path) &&
 	    !open_noct_application("", name, extension, path) &&
@@ -421,7 +478,7 @@ int command(char *s)
 	int n = split(s, v, 20);
 	if (!n)
 		return 1;
-#ifdef BOOTS_M9_WRITE_TEST
+#ifdef ZEDBSD_M9_WRITE_TEST
 	if (streq(v[0], "m9-write-test")) {
 		int lba = n == 2 ? number(v[1]) : -1;
 
@@ -431,18 +488,24 @@ int command(char *s)
 	if (streq(v[0], "help")) {
 		puts("help echo env set unset pause wait device probe-ide probe-scsi "
 		     "disk part pwd cd ls cat source kernel arg boot linux "
-		     "run noct emacs reboot halt\n");
+		     "run noct emacs vmstat reboot halt\n");
+		return 1;
+	}
+	if (streq(v[0], "vmstat")) {
+		if (n != 1)
+			return 0;
+		print_vmstat();
 		return 1;
 	}
 	if (streq(v[0], "env")) {
 		if (n != 1)
 			return 0;
 		for (size_t index = 0;
-		     index < boots_env_count(&boot_environment); index++) {
+		     index < zedbsd_env_count(&boot_environment); index++) {
 			const char *name;
 			const char *value;
 
-			if (!boots_env_at(&boot_environment, index, &name, &value))
+			if (!zedbsd_env_at(&boot_environment, index, &name, &value))
 				return 0;
 			puts(name);
 			putc('=');
@@ -453,11 +516,11 @@ int command(char *s)
 	}
 	if (streq(v[0], "set"))
 		return n == 3 &&
-		       boots_env_set(&boot_environment, v[1], v[2]);
+		       zedbsd_env_set(&boot_environment, v[1], v[2]);
 	if (streq(v[0], "unset")) {
-		if (n != 2 || !boots_env_name_valid(v[1]))
+		if (n != 2 || !zedbsd_env_name_valid(v[1]))
 			return 0;
-		(void)boots_env_unset(&boot_environment, v[1]);
+		(void)zedbsd_env_unset(&boot_environment, v[1]);
 		return 1;
 	}
 	if (streq(v[0], "echo")) {
@@ -491,13 +554,13 @@ int command(char *s)
 		return 1;
 	}
 	if (streq(v[0], "probe-ide")) {
-		probe_fixed_class(BOOTS_DEV_IDE);
-		listdev(BOOTS_DEV_IDE);
+		probe_fixed_class(ZEDBSD_DEV_IDE);
+		listdev(ZEDBSD_DEV_IDE);
 		return 1;
 	}
 	if (streq(v[0], "probe-scsi")) {
-		probe_fixed_class(BOOTS_DEV_SCSI);
-		listdev(BOOTS_DEV_SCSI);
+		probe_fixed_class(ZEDBSD_DEV_SCSI);
+		listdev(ZEDBSD_DEV_SCSI);
 		return 1;
 	}
 	if (streq(v[0], "disk")) {
@@ -525,7 +588,7 @@ int command(char *s)
 		puts(fs_getcwd(&kern_cwdinfo)); putc('\n'); return 1;
 	}
 	if (streq(v[0], "cd")) {
-		const char *path = n == 1 ? boots_env_get(&boot_environment, "HOME") :
+		const char *path = n == 1 ? zedbsd_env_get(&boot_environment, "HOME") :
 			(n == 2 ? v[1] : NULL);
 		return path != NULL && fs_chdir(&kern_cwdinfo, path) == 0;
 	}
@@ -630,12 +693,12 @@ int command(char *s)
 		return run_noct_application(v[1], "", 0, n - 2, &v[2]);
 	}
 	if (streq(v[0], "emacs")) {
-		const char *dictionary = boots_env_get(&boot_environment,
+		const char *dictionary = zedbsd_env_get(&boot_environment,
 						      "REMACS_SKK_DICT");
 
-		/* The 8.3 path is present in every Boots image with REMACS.NAP. */
+		/* The 8.3 path is present in every zedBSD image with REMACS.NAP. */
 		if (dictionary == NULL || dictionary[0] == '\0')
-			(void)boots_env_set(&boot_environment, "REMACS_SKK_DICT",
+			(void)zedbsd_env_set(&boot_environment, "REMACS_SKK_DICT",
 					     "HOME/SKKJISYO.DIC");
 		return run_noct_application("REMACS", ".NAP", 0, n - 1, &v[1]);
 	}
@@ -644,4 +707,3 @@ int command(char *s)
 	 * their argument-validation failures. */
 	return run_noct_application(v[0], ".NCT", 1, n - 1, &v[1]);
 }
-

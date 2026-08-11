@@ -10,8 +10,8 @@
 #include "kern/uaccess.h"
 #include "kern/vmspace.h"
 
-#include <boots/dirent.h>
-#include <boots/syscall.h>
+#include <zedbsd/dirent.h>
+#include <zedbsd/syscall.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <hal/hal.h>
@@ -124,11 +124,11 @@ static intptr_t sys_fstat_call(const uintptr_t args[6])
 static uint32_t dirent_type(enum inode_type type)
 {
 	switch (type) {
-	case INODE_REG: return BOOTS_DT_REG;
-	case INODE_DIR: return BOOTS_DT_DIR;
-	case INODE_BLOCK: return BOOTS_DT_BLK;
-	case INODE_CHAR: return BOOTS_DT_CHR;
-	default: return BOOTS_DT_UNKNOWN;
+	case INODE_REG: return ZEDBSD_DT_REG;
+	case INODE_DIR: return ZEDBSD_DT_DIR;
+	case INODE_BLOCK: return ZEDBSD_DT_BLK;
+	case INODE_CHAR: return ZEDBSD_DT_CHR;
+	default: return ZEDBSD_DT_UNKNOWN;
 	}
 }
 
@@ -136,7 +136,7 @@ static intptr_t sys_getdents_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
 	struct file *file = process != NULL ? filedesc_get(process->fd, (int)args[0]) : NULL;
-	struct boots_dirent output;
+	struct zedbsd_dirent output;
 	struct dirent entry;
 	int eof, error;
 	if (file == NULL) return -EBADF;
@@ -269,22 +269,22 @@ static intptr_t sys_nanosleep_call(const uintptr_t args[6])
 static intptr_t syscall_dispatch(uint32_t number, const uintptr_t args[6])
 {
 	switch (number) {
-	case BOOTS_SYS_exit: exit1((int)args[0]);
-	case BOOTS_SYS_open: return sys_open_call(args);
-	case BOOTS_SYS_close: return sys_close_call(args);
-	case BOOTS_SYS_read: return sys_read_call(args);
-	case BOOTS_SYS_write: return sys_write_call(args);
-	case BOOTS_SYS_lseek: return sys_lseek_call(args);
-	case BOOTS_SYS_fstat: return sys_fstat_call(args);
-	case BOOTS_SYS_getdents: return sys_getdents_call(args);
-	case BOOTS_SYS_chdir: return sys_chdir_call(args);
-	case BOOTS_SYS_getcwd: return sys_getcwd_call(args);
-	case BOOTS_SYS_mmap: return sys_mmap_call(args);
-	case BOOTS_SYS_munmap: return sys_munmap_call(args);
-	case BOOTS_SYS_mprotect: return sys_mprotect_call(args);
-	case BOOTS_SYS_ioctl: return sys_ioctl_call(args);
-	case BOOTS_SYS_clock_gettime: return sys_clock_gettime_call(args);
-	case BOOTS_SYS_nanosleep: return sys_nanosleep_call(args);
+	case ZEDBSD_SYS_exit: exit1((int)args[0]);
+	case ZEDBSD_SYS_open: return sys_open_call(args);
+	case ZEDBSD_SYS_close: return sys_close_call(args);
+	case ZEDBSD_SYS_read: return sys_read_call(args);
+	case ZEDBSD_SYS_write: return sys_write_call(args);
+	case ZEDBSD_SYS_lseek: return sys_lseek_call(args);
+	case ZEDBSD_SYS_fstat: return sys_fstat_call(args);
+	case ZEDBSD_SYS_getdents: return sys_getdents_call(args);
+	case ZEDBSD_SYS_chdir: return sys_chdir_call(args);
+	case ZEDBSD_SYS_getcwd: return sys_getcwd_call(args);
+	case ZEDBSD_SYS_mmap: return sys_mmap_call(args);
+	case ZEDBSD_SYS_munmap: return sys_munmap_call(args);
+	case ZEDBSD_SYS_mprotect: return sys_mprotect_call(args);
+	case ZEDBSD_SYS_ioctl: return sys_ioctl_call(args);
+	case ZEDBSD_SYS_clock_gettime: return sys_clock_gettime_call(args);
+	case ZEDBSD_SYS_nanosleep: return sys_nanosleep_call(args);
 	default: return -ENOSYS;
 	}
 }

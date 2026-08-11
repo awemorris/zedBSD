@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_KERN_DISK_H
-#define BOOTS_KERN_DISK_H
+#ifndef ZEDBSD_KERN_DISK_H
+#define ZEDBSD_KERN_DISK_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -20,6 +20,7 @@ enum bio_state { BIO_NEW, BIO_SUBMITTED, BIO_COMPLETED };
 
 struct disk;
 struct bio;
+struct thread;
 
 struct disk_geometry {
 	uint32_t cylinders;
@@ -64,6 +65,7 @@ struct bio {
 	int b_error;
 	void (*b_done)(struct bio *bio);
 	void *b_private;
+	struct thread *b_waiter;
 	enum bio_state b_state;
 };
 

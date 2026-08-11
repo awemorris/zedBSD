@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_DIRENT_H
-#define BOOTS_DIRENT_H
+#ifndef ZEDBSD_DIRENT_H
+#define ZEDBSD_DIRENT_H
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -16,7 +16,7 @@ struct dirent {
 	uint8_t d_type;
 	char d_name[256];
 };
-typedef struct boots_directory DIR;
+typedef struct zedbsd_directory DIR;
 DIR *opendir(const char *);
 struct dirent *readdir(DIR *);
 int closedir(DIR *);

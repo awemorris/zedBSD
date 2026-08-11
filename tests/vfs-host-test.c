@@ -1,4 +1,4 @@
-/* Boots inode/namei/mount host tests. SPDX-License-Identifier: Zlib */
+/* zedBSD inode/namei/mount host tests. SPDX-License-Identifier: Zlib */
 #include "kern/disk.h"
 #include "kern/file.h"
 #include "kern/mount.h"
@@ -236,6 +236,6 @@ int main(void)
 		printf("VFS host tests: %d failure(s)\n", failures);
 		return 1;
 	}
-	printf("Boots inode/namei/mount host tests: OK\n");
+	printf("zedBSD inode/namei/mount host tests: OK\n");
 	return 0;
 }

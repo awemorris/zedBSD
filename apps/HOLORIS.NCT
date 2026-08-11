@@ -1,4 +1,4 @@
-// Holoris -- a wireframe hologram falling-block game for Boots.
+// Holoris -- a wireframe hologram falling-block game for zedBSD.
 //
 // The stage is a three-dimensional wire-frame well whose camera sways
 // slowly on its yaw axis, so the blocks read as floating holograms.

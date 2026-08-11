@@ -1,5 +1,5 @@
 /*
- * Boots Noct native APIs
+ * zedBSD Noct native APIs
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -30,13 +30,13 @@ struct imported_source {
 };
 
 struct active_napi {
-	const struct boots_noct_services *services;
-	boots_noct_write_fn write;
+	const struct zedbsd_noct_services *services;
+	zedbsd_noct_write_fn write;
 	void *write_context;
 	size_t arena_size;
 	size_t source_max;
 	struct imported_source *imports;
-	struct boots_environment *environment;
+	struct zedbsd_environment *environment;
 };
 
 struct api_item {
@@ -575,7 +575,7 @@ out:
 
 static bool
 make_directory_entry(NoctEnv *env, NoctValue *dictionary,
-		     NoctValue *scratch, const struct boots_noct_dirent *entry)
+		     NoctValue *scratch, const struct zedbsd_noct_dirent *entry)
 {
 	return noct_make_empty_dict(env, dictionary) &&
 	       noct_set_dict_elem_make_string(env, dictionary, "name", scratch,
@@ -595,7 +595,7 @@ cfunc_directory_list(NoctEnv *env)
 	NoctValue array;
 	NoctValue dictionary;
 	NoctValue scratch;
-	struct boots_noct_dirent entry;
+	struct zedbsd_noct_dirent entry;
 	const char *path;
 	unsigned index;
 	int status;
@@ -611,7 +611,7 @@ cfunc_directory_list(NoctEnv *env)
 	    !services_ready() || active.services->directory_read == NULL ||
 	    !noct_make_empty_array(env, &array))
 		goto error;
-	for (index = 0; index < BOOTS_NOCT_DIRECTORY_MAX; index++) {
+	for (index = 0; index < ZEDBSD_NOCT_DIRECTORY_MAX; index++) {
 		status = active.services->directory_read(active.services->context,
 							path, index, &entry);
 		if (status < 0)
@@ -622,7 +622,7 @@ cfunc_directory_list(NoctEnv *env)
 		    !noct_set_array_elem(env, &array, index, &dictionary))
 			goto error;
 	}
-	if (index == BOOTS_NOCT_DIRECTORY_MAX &&
+	if (index == ZEDBSD_NOCT_DIRECTORY_MAX &&
 	    active.services->directory_read(active.services->context, path,
 					    index, &entry) != 0) {
 		noct_error(env, "Directory contains too many entries.");
@@ -662,7 +662,7 @@ cfunc_directory_stat(NoctEnv *env)
 	NoctValue argument;
 	NoctValue dictionary;
 	NoctValue scratch;
-	struct boots_noct_dirent entry;
+	struct zedbsd_noct_dirent entry;
 	const char *path;
 	const char *name;
 	unsigned index;
@@ -686,7 +686,7 @@ cfunc_directory_stat(NoctEnv *env)
 		name = path[0] == '/' ? path + 1 : path;
 		if (*name == '\0' || strchr(name, '/') != NULL)
 			goto error;
-		for (index = 0; index < BOOTS_NOCT_DIRECTORY_MAX; index++) {
+		for (index = 0; index < ZEDBSD_NOCT_DIRECTORY_MAX; index++) {
 			status = active.services->directory_read(
 				active.services->context, "/", index, &entry);
 			if (status <= 0)
@@ -694,7 +694,7 @@ cfunc_directory_stat(NoctEnv *env)
 			if (ascii_equal_folded(entry.name, name))
 				break;
 		}
-		if (index == BOOTS_NOCT_DIRECTORY_MAX)
+		if (index == ZEDBSD_NOCT_DIRECTORY_MAX)
 			goto error;
 	}
 	if (!make_directory_entry(env, &dictionary, &scratch, &entry) ||
@@ -712,13 +712,13 @@ out:
 static bool
 cfunc_system_get_os_name(NoctEnv *env)
 {
-	return return_string(env, "Boots");
+	return return_string(env, "zedBSD");
 }
 
 /*
- * Keep the protected-call API available in the freestanding Boots System
+ * Keep the protected-call API available in the freestanding zedBSD System
  * module.  The hosted Noct runtime registers this from api-system.c, which
- * Boots intentionally does not link because that module depends on the host
+ * zedBSD intentionally does not link because that module depends on the host
  * operating system.  Remacs uses pcall to recover from command errors.
  */
 static bool
@@ -787,9 +787,9 @@ cfunc_system_get_env(NoctEnv *env)
 	if (!noct_pin_local(env, 1, &argument))
 		return false;
 	if (!noct_get_arg_check_string(env, 0, &argument, &name) ||
-	    active.environment == NULL || !boots_env_name_valid(name))
+	    active.environment == NULL || !zedbsd_env_name_valid(name))
 		goto error;
-	value = boots_env_get(active.environment, name);
+	value = zedbsd_env_get(active.environment, name);
 	ok = return_string(env, value != NULL ? value : "");
 	goto out;
 error:
@@ -815,7 +815,7 @@ cfunc_system_set_env(NoctEnv *env)
 	if (!noct_get_arg_check_string(env, 0, &name_value, &name) ||
 	    !noct_get_arg_check_string(env, 1, &string_value, &value) ||
 	    active.environment == NULL ||
-	    !boots_env_set(active.environment, name, value))
+	    !zedbsd_env_set(active.environment, name, value))
 		goto error;
 	ok = return_int(env, 0);
 	goto out;
@@ -837,9 +837,9 @@ cfunc_system_unset_env(NoctEnv *env)
 	if (!noct_pin_local(env, 1, &argument))
 		return false;
 	if (!noct_get_arg_check_string(env, 0, &argument, &name) ||
-	    active.environment == NULL || !boots_env_name_valid(name))
+	    active.environment == NULL || !zedbsd_env_name_valid(name))
 		goto error;
-	(void)boots_env_unset(active.environment, name);
+	(void)zedbsd_env_unset(active.environment, name);
 	ok = return_int(env, 0);
 	goto out;
 error:
@@ -864,11 +864,11 @@ cfunc_system_list_env(NoctEnv *env)
 		return false;
 	if (!noct_make_empty_dict(env, &dictionary))
 		goto out;
-	for (index = 0; index < boots_env_count(active.environment); index++) {
+	for (index = 0; index < zedbsd_env_count(active.environment); index++) {
 		const char *name;
 		const char *value;
 
-		if (!boots_env_at(active.environment, index, &name, &value) ||
+		if (!zedbsd_env_at(active.environment, index, &name, &value) ||
 		    !noct_set_dict_elem_make_string(env, &dictionary, name,
 						 &scratch, value))
 			goto out;
@@ -892,9 +892,9 @@ cfunc_system_memory_usage(NoctEnv *env)
 		return false;
 	if (noct_make_empty_dict(env, &dictionary) &&
 	    noct_set_dict_elem_make_long(env, &dictionary, "current", &scratch,
-					 (int64_t)boots_heap_current()) &&
+					 (int64_t)zedbsd_heap_current()) &&
 	    noct_set_dict_elem_make_long(env, &dictionary, "peak", &scratch,
-					 (int64_t)boots_heap_peak()) &&
+					 (int64_t)zedbsd_heap_peak()) &&
 	    noct_set_dict_elem_make_long(env, &dictionary, "arenaSize", &scratch,
 					 (int64_t)active.arena_size) &&
 	    noct_set_return(env, &dictionary))
@@ -924,7 +924,7 @@ cfunc_system_import(NoctEnv *env)
 	    size > active.source_max)
 		goto error;
 	path_length = strlen(path);
-	if (path_length >= BOOTS_NOCT_PATH_MAX ||
+	if (path_length >= ZEDBSD_NOCT_PATH_MAX ||
 	    path_length > SIZE_MAX - sizeof(*source) - (size_t)size - 2U)
 		goto error;
 	allocation = sizeof(*source) + path_length + 1U + (size_t)size + 1U;
@@ -954,7 +954,7 @@ out:
 }
 
 int
-boots_key_normalize_bios_ax(uint16_t bios_ax)
+zedbsd_key_normalize_bios_ax(uint16_t bios_ax)
 {
 	unsigned ascii = bios_ax & 0xffU;
 	unsigned scan = bios_ax >> 8;
@@ -970,8 +970,8 @@ boots_key_normalize_bios_ax(uint16_t bios_ax)
 }
 
 int
-boots_noct_napi_register(NoctEnv *env,
-			  const struct boots_noct_options *options)
+zedbsd_noct_napi_register(NoctEnv *env,
+			  const struct zedbsd_noct_options *options)
 {
 	static struct api_item console[] = {
 		{ "Console.print", "print", 1, { "value" }, cfunc_console_print },
@@ -1036,7 +1036,7 @@ boots_noct_napi_register(NoctEnv *env,
 	active.write_context = options->write_context;
 	active.arena_size = options->arena_size;
 	active.source_max = options->memory != NULL ?
-		options->memory->source_max : BOOTS_NOCT_SOURCE_MAX;
+		options->memory->source_max : ZEDBSD_NOCT_SOURCE_MAX;
 	active.imports = NULL;
 	active.environment = options->environment;
 	/* BeUI registers its own module, key dictionary, and image registry
@@ -1055,14 +1055,14 @@ boots_noct_napi_register(NoctEnv *env,
 			     sizeof(directory) / sizeof(directory[0])) ||
 	    !register_module(env, "System", system,
 			     sizeof(system) / sizeof(system[0]))) {
-		boots_noct_napi_cleanup();
+		zedbsd_noct_napi_cleanup();
 		return 0;
 	}
 	return 1;
 }
 
 void
-boots_noct_napi_cleanup(void)
+zedbsd_noct_napi_cleanup(void)
 {
 	struct imported_source *source = active.imports;
 

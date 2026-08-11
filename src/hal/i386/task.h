@@ -4,8 +4,8 @@
  *
  * i386 CPU-context implementation. Private to the HAL.
  */
-#ifndef BOOTS_HAL_I386_TASK_H
-#define BOOTS_HAL_I386_TASK_H
+#ifndef ZEDBSD_HAL_I386_TASK_H
+#define ZEDBSD_HAL_I386_TASK_H
 
 #include <hal/hal.h>
 #include "asm.h"

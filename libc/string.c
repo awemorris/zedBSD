@@ -1,7 +1,7 @@
 #include "libc/heap.h"
 
 /*
- * Boots freestanding C library
+ * zedBSD freestanding C library
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -185,5 +185,5 @@ strstr(const char *haystack, const char *needle)
 char *
 strdup(const char *string)
 {
-	return boots_strdup(string);
+	return zedbsd_strdup(string);
 }

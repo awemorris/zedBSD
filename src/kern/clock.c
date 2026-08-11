@@ -10,7 +10,7 @@ kernel_timer_handler(void)
 }
 
 uint64_t
-boots_kernel_ticks(void)
+zedbsd_kernel_ticks(void)
 {
 	uint64_t first, second;
 	do {
@@ -21,8 +21,8 @@ boots_kernel_ticks(void)
 }
 
 uint64_t
-boots_kernel_milliseconds(void *context)
+zedbsd_kernel_milliseconds(void *context)
 {
 	(void)context;
-	return boots_kernel_ticks() * 10U;
+	return zedbsd_kernel_ticks() * 10U;
 }

@@ -337,7 +337,7 @@ set_name(struct ide_unit *unit, unsigned ordinal)
 }
 
 unsigned
-boots_ide_pc98_init(const struct boots_device *bios_devices,
+zedbsd_ide_pc98_init(const struct zedbsd_device *bios_devices,
 		     unsigned bios_device_count)
 {
 	static uint16_t data[256];
@@ -354,7 +354,7 @@ boots_ide_pc98_init(const struct boots_device *bios_devices,
 	for (bank = 0; bank < 2; bank++) {
 		for (drive = 0; drive < 2; drive++) {
 			struct ide_unit *unit;
-			const struct boots_device *bios_dev = NULL;
+			const struct zedbsd_device *bios_dev = NULL;
 			uint64_t sector_count;
 			unsigned i;
 
@@ -398,7 +398,7 @@ boots_ide_pc98_init(const struct boots_device *bios_devices,
 			 */
 			for (i = 0; bios_devices != NULL && i < bios_device_count;
 			     i++) {
-				if (bios_devices[i].device_class == BOOTS_DEV_IDE &&
+				if (bios_devices[i].device_class == ZEDBSD_DEV_IDE &&
 				    bios_devices[i].bios_id == 0x80U + slot) {
 					bios_dev = &bios_devices[i];
 					break;
@@ -423,13 +423,13 @@ boots_ide_pc98_init(const struct boots_device *bios_devices,
 }
 
 struct disk *
-boots_ide_pc98_unit(unsigned ordinal)
+zedbsd_ide_pc98_unit(unsigned ordinal)
 {
 	return ordinal < unit_count ? unit_order[ordinal]->disk : NULL;
 }
 
 struct disk *
-boots_ide_pc98_bios_unit(uint8_t bios_id)
+zedbsd_ide_pc98_bios_unit(uint8_t bios_id)
 {
 	unsigned slot;
 

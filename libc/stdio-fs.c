@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  *
- * Boots filesystem-backed stdio for kernel mode Noct.
+ * zedBSD filesystem-backed stdio for kernel mode Noct.
  * This will be removed after moving Noct to userspace.
  */
 
@@ -24,36 +24,36 @@
 #define STREAM_READ 1U
 #define STREAM_WRITE 2U
 
-/* Small standalone libc tests do not link the Boots environment store. */
-extern const char *boots_env_get(
-	const struct boots_environment *environment,
+/* Small standalone libc tests do not link the zedBSD environment store. */
+extern const char *zedbsd_env_get(
+	const struct zedbsd_environment *environment,
 	const char *name) __attribute__((weak));
 
 struct filesystem_stream {
 	FILE stream;
-	struct boots_file file;
+	struct zedbsd_file file;
 	struct file *vfile;
 	struct filesystem_stream *next;
 };
 
-static struct boots_filesystem *active_filesystem;
-static struct boots_namespace *active_namespace;
-static struct boots_environment *active_environment;
+static struct zedbsd_filesystem *active_filesystem;
+static struct zedbsd_namespace *active_namespace;
+static struct zedbsd_environment *active_environment;
 static struct cwdinfo *active_context;
 static struct filesystem_stream *open_streams;
-static char current_directory[BOOTS_PATH_MAX] = "/";
+static char current_directory[ZEDBSD_PATH_MAX] = "/";
 
-static int result_errno(enum boots_fs_result result)
+static int result_errno(enum zedbsd_fs_result result)
 {
 	switch (result) {
-	case BOOTS_FS_NOT_FOUND:
+	case ZEDBSD_FS_NOT_FOUND:
 		return ENOENT;
-	case BOOTS_FS_READ_ONLY:
+	case ZEDBSD_FS_READ_ONLY:
 		return EROFS;
-	case BOOTS_FS_NO_SPACE:
+	case ZEDBSD_FS_NO_SPACE:
 		return ENOSPC;
-	case BOOTS_FS_INVALID_PATH:
-	case BOOTS_FS_INVALID_ARGUMENT:
+	case ZEDBSD_FS_INVALID_PATH:
+	case ZEDBSD_FS_INVALID_ARGUMENT:
 		return EINVAL;
 	default:
 		return EIO;
@@ -71,12 +71,12 @@ static struct filesystem_stream *filesystem_stream(FILE *stream)
 	return NULL;
 }
 
-void boots_stdio_set_filesystem(struct boots_filesystem *filesystem)
+void zedbsd_stdio_set_filesystem(struct zedbsd_filesystem *filesystem)
 {
 	active_filesystem = filesystem;
 }
 
-void boots_stdio_set_namespace(struct boots_namespace *namespace)
+void zedbsd_stdio_set_namespace(struct zedbsd_namespace *namespace)
 {
 	const char *name;
 
@@ -84,21 +84,21 @@ void boots_stdio_set_namespace(struct boots_namespace *namespace)
 	active_context = NULL;
 	current_directory[0] = '/';
 	current_directory[1] = '\0';
-	name = boots_namespace_default_name(namespace);
+	name = zedbsd_namespace_default_name(namespace);
 	if (name != NULL && strlen(name) + 2U <= sizeof(current_directory)) {
 		current_directory[1] = '\0';
 		strcat(current_directory, name);
 	}
 }
 
-void boots_stdio_set_context(struct cwdinfo *context)
+void zedbsd_stdio_set_context(struct cwdinfo *context)
 {
 	active_context = context;
 	active_namespace = NULL;
 	active_filesystem = NULL;
 }
 
-void boots_stdio_set_environment(struct boots_environment *environment)
+void zedbsd_stdio_set_environment(struct zedbsd_environment *environment)
 {
 	active_environment = environment;
 }
@@ -106,9 +106,9 @@ void boots_stdio_set_environment(struct boots_environment *environment)
 FILE *fopen(const char *path, const char *mode)
 {
 	struct filesystem_stream *handle;
-	char absolute[BOOTS_PATH_MAX];
+	char absolute[ZEDBSD_PATH_MAX];
 	const char *resolved_path = path;
-	enum boots_fs_result result;
+	enum zedbsd_fs_result result;
 	unsigned flags;
 
 	if (path == NULL || mode == NULL ||
@@ -154,22 +154,22 @@ FILE *fopen(const char *path, const char *mode)
 			free(handle);
 			return NULL;
 		}
-		result = BOOTS_FS_OK;
+		result = ZEDBSD_FS_OK;
 	} else if (active_namespace != NULL)
 		result = flags == STREAM_WRITE ?
-			boots_namespace_create_result(active_namespace,
+			zedbsd_namespace_create_result(active_namespace,
 						       resolved_path,
 						       &handle->file) :
-			boots_namespace_open_result(active_namespace,
+			zedbsd_namespace_open_result(active_namespace,
 						     resolved_path,
 						     &handle->file);
 	else
 		result = flags == STREAM_WRITE ?
-			boots_fs_create_result(active_filesystem, resolved_path,
+			zedbsd_fs_create_result(active_filesystem, resolved_path,
 						&handle->file) :
-			boots_fs_open_result(active_filesystem, resolved_path,
+			zedbsd_fs_open_result(active_filesystem, resolved_path,
 					      &handle->file);
-	if (result != BOOTS_FS_OK) {
+	if (result != ZEDBSD_FS_OK) {
 		errno = result_errno(result);
 		free(handle);
 		return NULL;
@@ -184,7 +184,7 @@ FILE *fopen(const char *path, const char *mode)
 int fflush(FILE *stream)
 {
 	struct filesystem_stream *handle;
-	enum boots_fs_result result;
+	enum zedbsd_fs_result result;
 	int failed = 0;
 
 	if (stream == NULL) {
@@ -210,8 +210,8 @@ int fflush(FILE *stream)
 		}
 		return 0;
 	}
-	result = boots_file_flush_result(&handle->file);
-	if (result != BOOTS_FS_OK) {
+	result = zedbsd_file_flush_result(&handle->file);
+	if (result != ZEDBSD_FS_OK) {
 		stream->error = 1;
 		errno = result_errno(result);
 		return EOF;
@@ -241,7 +241,7 @@ int fclose(FILE *stream)
 	return result;
 }
 
-int boots_stdio_close_all(void)
+int zedbsd_stdio_close_all(void)
 {
 	int failed = 0;
 
@@ -256,7 +256,7 @@ size_t fread(void *buffer, size_t size, size_t count, FILE *stream)
 	struct filesystem_stream *handle = filesystem_stream(stream);
 	uint64_t available;
 	size_t total, bytes;
-	enum boots_fs_result result;
+	enum zedbsd_fs_result result;
 
 	if (size != 0 && count > (size_t)-1 / size) {
 		errno = EINVAL;
@@ -285,9 +285,9 @@ size_t fread(void *buffer, size_t size, size_t count, FILE *stream)
 		stream->eof = 1;
 		return 0;
 	}
-	result = boots_file_read_result(&handle->file, stream->position,
+	result = zedbsd_file_read_result(&handle->file, stream->position,
 					 buffer, (uint32_t)bytes, NULL, NULL);
-	if (result != BOOTS_FS_OK) {
+	if (result != ZEDBSD_FS_OK) {
 		stream->error = 1;
 		errno = result_errno(result);
 		return 0;
@@ -302,7 +302,7 @@ size_t fwrite(const void *buffer, size_t size, size_t count, FILE *stream)
 {
 	struct filesystem_stream *handle;
 	size_t total;
-	enum boots_fs_result result;
+	enum zedbsd_fs_result result;
 
 	if (size != 0 && count > (size_t)-1 / size) {
 		errno = EINVAL;
@@ -310,7 +310,7 @@ size_t fwrite(const void *buffer, size_t size, size_t count, FILE *stream)
 	}
 	total = size * count;
 	if (stream == stdout || stream == stderr)
-		return boots_console_write_bytes(buffer, total) == total ? count : 0;
+		return zedbsd_console_write_bytes(buffer, total) == total ? count : 0;
 	if (total == 0)
 		return 0;
 	handle = filesystem_stream(stream);
@@ -326,9 +326,9 @@ size_t fwrite(const void *buffer, size_t size, size_t count, FILE *stream)
 		stream->position = (uint64_t)handle->vfile->f_offset;
 		return (size_t)put / size;
 	}
-	result = boots_file_write_result(&handle->file, stream->position,
+	result = zedbsd_file_write_result(&handle->file, stream->position,
 					  buffer, (uint32_t)total);
-	if (result != BOOTS_FS_OK) {
+	if (result != ZEDBSD_FS_OK) {
 		stream->error = 1;
 		errno = result_errno(result);
 		return 0;
@@ -419,10 +419,10 @@ char *fgets(char *buffer, int size, FILE *stream)
 
 int access(const char *path, int mode)
 {
-	struct boots_dirent entry;
-	char absolute[BOOTS_PATH_MAX];
+	struct zedbsd_dirent entry;
+	char absolute[ZEDBSD_PATH_MAX];
 	const char *resolved_path = path;
-	enum boots_fs_result result;
+	enum zedbsd_fs_result result;
 
 	if ((active_filesystem == NULL && active_namespace == NULL &&
 	     active_context == NULL) ||
@@ -452,10 +452,10 @@ int access(const char *path, int mode)
 		resolved_path = absolute;
 	}
 	result = active_namespace != NULL ?
-		boots_namespace_stat_result(active_namespace, resolved_path,
+		zedbsd_namespace_stat_result(active_namespace, resolved_path,
 					      &entry) :
-		boots_fs_stat_result(active_filesystem, resolved_path, &entry);
-	if (result != BOOTS_FS_OK) {
+		zedbsd_fs_stat_result(active_filesystem, resolved_path, &entry);
+	if (result != ZEDBSD_FS_OK) {
 		errno = result_errno(result);
 		return -1;
 	}
@@ -478,8 +478,8 @@ char *getcwd(char *buffer, size_t size)
 
 int chdir(const char *path)
 {
-	struct boots_dirent entry;
-	char absolute[BOOTS_PATH_MAX];
+	struct zedbsd_dirent entry;
+	char absolute[ZEDBSD_PATH_MAX];
 	const char *resolved = path;
 	size_t length;
 
@@ -514,8 +514,8 @@ int chdir(const char *path)
 		memcpy(absolute + cwd_length, path, path_length + 1U);
 		resolved = absolute;
 	}
-	if (boots_namespace_stat_result(active_namespace, resolved, &entry) !=
-		    BOOTS_FS_OK || !(entry.attributes & 0x10U)) {
+	if (zedbsd_namespace_stat_result(active_namespace, resolved, &entry) !=
+		    ZEDBSD_FS_OK || !(entry.attributes & 0x10U)) {
 		errno = ENOENT;
 		return -1;
 	}
@@ -530,7 +530,7 @@ int chdir(const char *path)
 
 char *getenv(const char *name)
 {
-	if (boots_env_get == NULL)
+	if (zedbsd_env_get == NULL)
 		return NULL;
-	return (char *)boots_env_get(active_environment, name);
+	return (char *)zedbsd_env_get(active_environment, name);
 }

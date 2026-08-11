@@ -16,8 +16,10 @@
 #include "kern/console-device.h"
 #include "kern/graphics-device.h"
 #include "kern/devfs.h"
+#include "kern/swap-fat.h"
 
 #include <errno.h>
+#include <hal/hal.h>
 #include <string.h>
 
 #define PHYSICAL_DISK_MAX 4U
@@ -25,7 +27,7 @@
 struct cwdinfo kern_cwdinfo __attribute__((section(".vfs_bss")));
 
 static int
-disk_path(unsigned number, char path[BOOTS_PATH_MAX])
+disk_path(unsigned number, char path[ZEDBSD_PATH_MAX])
 {
 	unsigned at = 5;
 	if (number == 0 || number > 99)
@@ -39,8 +41,8 @@ disk_path(unsigned number, char path[BOOTS_PATH_MAX])
 }
 
 int
-kern_vfs_init(const struct boots_handoff *handoff,
-	      const struct boots_device *devices, unsigned device_count)
+kern_vfs_init(const struct zedbsd_handoff *handoff,
+	      const struct zedbsd_device *devices, unsigned device_count)
 {
 	struct disk *physical[PHYSICAL_DISK_MAX];
 	struct mount *boot_mount = NULL;
@@ -93,7 +95,7 @@ kern_vfs_init(const struct boots_handoff *handoff,
 			continue;
 		for (slot = 0; slot < count; slot++) {
 			struct fat_mount_args args;
-			char path[BOOTS_PATH_MAX];
+			char path[ZEDBSD_PATH_MAX];
 			if (entries[slot].p_block_count == 0 ||
 			    partition_create_disk(&entries[slot]) != 0)
 				continue;
@@ -110,7 +112,13 @@ kern_vfs_init(const struct boots_handoff *handoff,
 				boot_mount = mount_find(path);
 		}
 	}
-	if (boot_mount != NULL)
-		return fs_chdir(&kern_cwdinfo, boot_mount->m_path);
+	if (boot_mount != NULL) {
+		error = fs_chdir(&kern_cwdinfo, boot_mount->m_path);
+		if (error != 0)
+			return error;
+		error = swap_fat_activate(&kern_cwdinfo, boot_mount->m_path);
+		if (error != 0 && error != ENOENT)
+			hal_printf("swap: /swapfile disabled (%d)\n", error);
+	}
 	return 0;
 }

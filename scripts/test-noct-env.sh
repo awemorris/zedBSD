@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verify the persistent shell/BOOTS.CFG <-> Noct environment bridge on i386.
+# Verify the persistent shell/ZEDBSD.CFG <-> Noct environment bridge on i386.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-base="${BOOTS_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
+base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/m14-env"
 image="$work/m14-ide.raw"
 files="$work/files"
-cfg="$work/BOOTS.CFG"
+cfg="$work/ZEDBSD.CFG"
 expected='M14 ENV PASS'
 
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
@@ -53,8 +53,8 @@ m14set
 m14check
 halt
 EOF
-make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
-BOOTS_FILES="$files" DISK_HEADS=8 DISK_SECTORS=17 \
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+ZEDBSD_FILES="$files" DISK_HEADS=8 DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'
@@ -91,4 +91,4 @@ test "$actual" = "$expected" || {
 	echo "M14 environment marker mismatch: '$actual'" >&2
 	exit 1
 }
-printf 'M14 Boots environment QEMU test: PASS (%s)\n' "$image"
+printf 'M14 zedBSD environment QEMU test: PASS (%s)\n' "$image"

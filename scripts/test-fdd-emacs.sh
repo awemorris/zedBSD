@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # Boot the floppy image and walk the full pre-boot editing path:
-# FDD IPL -> Stage 1 (FAT12) -> BOOT.SYS -> automatic AUTOEXEC.NCT ->
+# FDD IPL -> Stage 1 (FAT12) -> vmunix -> automatic AUTOEXEC.NCT ->
 # BeUI menu -> Remacs.  The Remacs mode line in text VRAM is the proof.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
 work="$build/tests/fdd-emacs"
@@ -135,4 +135,4 @@ while time.time() < deadline:
     time.sleep(5)
 raise SystemExit("Remacs never appeared in text VRAM")
 PY
-echo "Boots FDD Emacs boot test: PASS"
+echo "zedBSD FDD Emacs boot test: PASS"

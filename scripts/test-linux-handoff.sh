@@ -2,10 +2,10 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-build="${BOOTS_BUILD_DIR:-$repo/build/pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/pc98}"
 qemu="${QEMU:-qemu-system-i386}"
 bios="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-base="${BOOTS_TEST_BASE:-$repo/build/releases/linux-pc98-i386sx-busybox-ide.img}"
+base="${ZEDBSD_TEST_BASE:-$repo/build/releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/linux-handoff"
 image="$work/linux-handoff.img"
 monitor="$work/monitor.sock"
@@ -32,9 +32,18 @@ else:
 PY
 )"
 mcopy -o -i "$image@@$offset" ::VMLINUX "$kernel"
-BOOTS_AUTOEXEC="$repo/tests/auto-linux.nct" \
-	"$repo/scripts/install-image.sh" "$image" "$kernel" \
-	"$repo/tests/linux-boot.cfg"
+if test "${ZEDBSD_LINUX_HANDOFF_FRESH:-0}" = 1; then
+	rm -f -- "$image"
+	ZEDBSD_TEST_MB="${ZEDBSD_LINUX_HANDOFF_MB:-40}" \
+	ZEDBSD_SWAP_SIZE_MIB="${ZEDBSD_SWAP_SIZE_MIB:-32}" \
+	ZEDBSD_AUTOEXEC="$repo/tests/auto-linux.nct" \
+	ZEDBSD_KERNEL="$kernel" ZEDBSD_CFG="$repo/tests/linux-boot.cfg" \
+		"$repo/scripts/make-hdd-image.sh" "$image"
+else
+	ZEDBSD_AUTOEXEC="$repo/tests/auto-linux.nct" \
+		"$repo/scripts/install-image.sh" "$image" "$kernel" \
+		"$repo/tests/linux-boot.cfg"
+fi
 
 rm -f -- "$monitor"
 "$qemu" -M pc9821 -cpu 486 -m 64 -accel tcg -L "$bios" -nic none \
@@ -92,7 +101,7 @@ def registers():
 
 qmp("qmp_capabilities")
 
-# A successful handoff leaves Boots' 0x8002xxxx low-loader execution range.
+# A successful handoff leaves zedBSD' 0x8002xxxx low-loader execution range.
 # Linux may quickly enable its own high mapping, so accept either a physical
 # kernel entry or the normal 0xc0000000 kernel half.
 deadline = time.monotonic() + 35
@@ -110,11 +119,11 @@ while time.monotonic() < deadline:
     time.sleep(1)
 print(last, file=sys.stderr)
 qmp("screendump", {"filename": screenshot})
-raise SystemExit("Linux never left the Boots loader execution range")
+raise SystemExit("Linux never left the zedBSD loader execution range")
 PY
 
 kill "$qemu_pid" 2>/dev/null || true
 wait "$qemu_pid" 2>/dev/null || true
 trap - EXIT INT TERM
 rm -f -- "$monitor"
-echo "Boots Linux point-of-no-return QEMU test: PASS"
+echo "zedBSD Linux point-of-no-return QEMU test: PASS"

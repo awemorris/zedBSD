@@ -6,33 +6,33 @@ set -euo pipefail
 # and a gravity drop timed by the polled millisecond clock.  The script
 # records its state to marker files that this test asserts exactly.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-machine="${BOOTS_HOLORIS_MACHINE:-pc9821}"
-cpu="${BOOTS_TEST_CPU:-486}"
-tag="${BOOTS_HOLORIS_TEST_TAG:-holoris-cirrus}"
+machine="${ZEDBSD_HOLORIS_MACHINE:-pc9821}"
+cpu="${ZEDBSD_TEST_CPU:-486}"
+tag="${ZEDBSD_HOLORIS_TEST_TAG:-holoris-cirrus}"
 # The driver is event-based: it detects the game (cyan well pixels) and its
 # test-mode exit (cyan gone) from periodic screendumps, so only the held-key
 # durations and the overall timeouts are machine dependent.
-hold_wait="${BOOTS_HOLORIS_HOLD_WAIT:-2}"
-start_timeout="${BOOTS_HOLORIS_START_TIMEOUT:-240}"
-exit_timeout="${BOOTS_HOLORIS_EXIT_TIMEOUT:-120}"
-minimum_colors="${BOOTS_HOLORIS_MINIMUM_COLORS:-4}"
+hold_wait="${ZEDBSD_HOLORIS_HOLD_WAIT:-2}"
+start_timeout="${ZEDBSD_HOLORIS_START_TIMEOUT:-240}"
+exit_timeout="${ZEDBSD_HOLORIS_EXIT_TIMEOUT:-120}"
+minimum_colors="${ZEDBSD_HOLORIS_MINIMUM_COLORS:-4}"
 if [[ "$machine" == pc9801 ]]; then
 	# The throttled 9801 loads and JIT-compiles the bytecode for minutes,
 	# and every soft-dropped row costs one synchronous GDC redraw.
-	minimum_colors="${BOOTS_HOLORIS_MINIMUM_COLORS:-3}"
-	hold_wait="${BOOTS_HOLORIS_HOLD_WAIT:-8}"
-	start_timeout="${BOOTS_HOLORIS_START_TIMEOUT:-900}"
-	exit_timeout="${BOOTS_HOLORIS_EXIT_TIMEOUT:-900}"
+	minimum_colors="${ZEDBSD_HOLORIS_MINIMUM_COLORS:-3}"
+	hold_wait="${ZEDBSD_HOLORIS_HOLD_WAIT:-8}"
+	start_timeout="${ZEDBSD_HOLORIS_START_TIMEOUT:-900}"
+	exit_timeout="${ZEDBSD_HOLORIS_EXIT_TIMEOUT:-900}"
 fi
-base="${BOOTS_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
+base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/beui-$tag"
 image="$work/holoris.raw"
-cfg="$work/BOOTS.CFG"
+cfg="$work/ZEDBSD.CFG"
 monitor="$work/monitor.sock"
 screenshot="$work/holoris.ppm"
 qemu_log="$work/qemu.log"
@@ -48,7 +48,7 @@ mkdir -p "$work"
 cp --reflink=auto "$base" "$image"
 printf 'holoris test\nhalt\n' > "$cfg"
 
-make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
 DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
@@ -235,4 +235,4 @@ if width < 640 or height < 400 or len(colors) < minimum_colors or field < 100:
                      f'{width}x{height}, {len(colors)} colors, '
                      f'{field} lit field pixels')
 PY
-printf 'Boots BeUI Holoris QEMU test: PASS (%s)\n' "$image"
+printf 'zedBSD BeUI Holoris QEMU test: PASS (%s)\n' "$image"

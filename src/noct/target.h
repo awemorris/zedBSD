@@ -1,18 +1,18 @@
 /*
- * Boots Noct target adapters
+ * zedBSD Noct target adapters
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef BOOTS_NOCT_TARGET_H
-#define BOOTS_NOCT_TARGET_H
+#ifndef ZEDBSD_NOCT_TARGET_H
+#define ZEDBSD_NOCT_TARGET_H
 
 typedef struct rt_env NoctEnv;
 
-struct boots_noct_services;
+struct zedbsd_noct_services;
 
-int boots_noct_target_register(NoctEnv *env,
-				const struct boots_noct_services *services);
-void boots_noct_target_cleanup(void);
+int zedbsd_noct_target_register(NoctEnv *env,
+				const struct zedbsd_noct_services *services);
+void zedbsd_noct_target_cleanup(void);
 
 #endif

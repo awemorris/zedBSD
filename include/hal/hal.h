@@ -224,6 +224,12 @@ int hal_page_prot(hal_space_t space, void *vaddr, size_t size, uint32_t attr);
 /* Unmap address. Additional TLB flush is required if the current space is specified. */
 int hal_page_unmap(hal_space_t space, void *vaddr, size_t size);
 
+#define HAL_PAGE_PRESENT  0x01U
+#define HAL_PAGE_ACCESSED 0x02U
+#define HAL_PAGE_DIRTY    0x04U
+int hal_page_query(hal_space_t space, void *vaddr, uint32_t *flags);
+int hal_page_clear_flags(hal_space_t space, void *vaddr, uint32_t flags);
+
 /*
  * Flush TBLs.
  *
@@ -269,6 +275,19 @@ int hal_pmem_free(struct hal_pmem *desc);
 
 /* Get the total RAM size. */
 size_t hal_pmem_get_total_size(void);
+
+struct hal_memory_stats {
+	size_t physical_total;
+	size_t physical_reserved;
+	size_t physical_allocated;
+	size_t physical_free;
+	size_t task_stack_bytes;
+	uint32_t task_count;
+	uint32_t space_count;
+	uint32_t page_table_count;
+};
+
+void hal_memory_get_stats(struct hal_memory_stats *);
 
 /* Low-level physical-memory descriptor used inside the HAL. */
 struct pmem_desc {
@@ -338,7 +357,7 @@ struct hal_user_trap {
 	uint32_t fault_address;
 };
 typedef void (*hal_user_int_handler_t)(const struct hal_user_trap *);
-typedef void (*hal_user_fault_handler_t)(const struct hal_user_trap *);
+typedef int (*hal_user_fault_handler_t)(const struct hal_user_trap *);
 void hal_user_int_set_handler(hal_user_int_handler_t handler);
 void hal_user_fault_set_handler(hal_user_fault_handler_t handler);
 void hal_reschedule_on_interrupt_return(void);

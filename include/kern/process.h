@@ -4,8 +4,8 @@
  *
  * Kernel process objects.
  */
-#ifndef BOOTS_KERN_PROCESS_H
-#define BOOTS_KERN_PROCESS_H
+#ifndef ZEDBSD_KERN_PROCESS_H
+#define ZEDBSD_KERN_PROCESS_H
 
 #include <sys/types.h>
 #include <stdint.h>
@@ -16,6 +16,7 @@ struct thread;
 struct vmspace;
 
 #define PROCESS_RESULT_MAX 256U
+#define PROCESS_AUTOREAP 0x00000001U
 
 enum process_state {
 	PROCESS_NEW = 0,
@@ -47,6 +48,7 @@ struct process {
 
 extern struct process process0;
 void process_init(void);
+int process_reaper_start(void);
 struct process *process_find(pid_t pid);
 struct thread *process_find_by_tid(tid_t tid);
 int process_create(struct process *parent, pid_t requested_pid,

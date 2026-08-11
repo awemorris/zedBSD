@@ -1,5 +1,5 @@
 /*
- * Boots Noct lifecycle and M8 NAPI test
+ * zedBSD Noct lifecycle and M8 NAPI test
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -30,19 +30,19 @@
 #define OPEN_MODE 0644
 
 static unsigned char arena[ARENA_SIZE] __attribute__((aligned(4096)));
-static const struct boots_noct_memory_profile test_memory = {
-	BOOTS_NOCT_MEMORY_5, "5M", 5, 0, ARENA_SIZE,
+static const struct zedbsd_noct_memory_profile test_memory = {
+	ZEDBSD_NOCT_MEMORY_5, "5M", 5, 0, ARENA_SIZE,
 	64U * 1024U, 8U * 1024U,
 	128U * 1024U, 32U * 1024U, 512U * 1024U, 96U * 1024U,
 };
-static unsigned char jit_capture[BOOTS_NOCT_JIT_CODE_MAX];
+static unsigned char jit_capture[ZEDBSD_NOCT_JIT_CODE_MAX];
 static size_t jit_capture_length;
 static char output[OUTPUT_SIZE];
 static size_t output_length;
-static struct boots_filesystem *test_filesystem;
+static struct zedbsd_filesystem *test_filesystem;
 static char ls_source[SCRIPT_SIZE];
 static char cp_source[SCRIPT_SIZE];
-static struct boots_environment test_environment;
+static struct zedbsd_environment test_environment;
 
 struct memory_record {
 	char name[16];
@@ -77,70 +77,70 @@ static struct memory_record *find_record(const char *path, int create)
 	return NULL;
 }
 
-static enum boots_fs_result memory_probe(const struct boots_volume *volume)
+static enum zedbsd_fs_result memory_probe(const struct zedbsd_volume *volume)
 {
 	(void)volume;
-	return BOOTS_FS_OK;
+	return ZEDBSD_FS_OK;
 }
 
-static enum boots_fs_result memory_mount(struct boots_filesystem *filesystem)
+static enum zedbsd_fs_result memory_mount(struct zedbsd_filesystem *filesystem)
 {
 	(void)filesystem;
-	return BOOTS_FS_OK;
+	return ZEDBSD_FS_OK;
 }
 
-static enum boots_fs_result memory_create(
-	struct boots_filesystem *filesystem, const char *path,
-	struct boots_file *file)
+static enum zedbsd_fs_result memory_create(
+	struct zedbsd_filesystem *filesystem, const char *path,
+	struct zedbsd_file *file)
 {
 	struct memory_record *record = find_record(path, 1);
 
 	(void)filesystem;
 	if (record == NULL)
-		return BOOTS_FS_NO_SPACE;
+		return ZEDBSD_FS_NO_SPACE;
 	record->size = 0;
 	file->private_data[0] = (uint32_t)(record - records);
 	file->size = 0;
-	return BOOTS_FS_OK;
+	return ZEDBSD_FS_OK;
 }
 
-static enum boots_fs_result memory_open(
-	struct boots_filesystem *filesystem, const char *path,
-	struct boots_file *file)
+static enum zedbsd_fs_result memory_open(
+	struct zedbsd_filesystem *filesystem, const char *path,
+	struct zedbsd_file *file)
 {
 	struct memory_record *record = find_record(path, 0);
 
 	(void)filesystem;
 	if (record == NULL)
-		return BOOTS_FS_NOT_FOUND;
+		return ZEDBSD_FS_NOT_FOUND;
 	file->private_data[0] = (uint32_t)(record - records);
 	file->size = record->size;
-	return BOOTS_FS_OK;
+	return ZEDBSD_FS_OK;
 }
 
-static enum boots_fs_result memory_read(
-	struct boots_file *file, uint64_t offset, void *buffer, uint32_t length,
-	boots_read_progress_t progress, void *progress_context)
+static enum zedbsd_fs_result memory_read(
+	struct zedbsd_file *file, uint64_t offset, void *buffer, uint32_t length,
+	zedbsd_read_progress_t progress, void *progress_context)
 {
 	struct memory_record *record = &records[file->private_data[0]];
 
 	(void)progress;
 	(void)progress_context;
 	if (offset > record->size || length > record->size - offset)
-		return BOOTS_FS_IO_ERROR;
+		return ZEDBSD_FS_IO_ERROR;
 	memcpy(buffer, record->data + offset, length);
-	return BOOTS_FS_OK;
+	return ZEDBSD_FS_OK;
 }
 
-static enum boots_fs_result memory_write(
-	struct boots_file *file, uint64_t offset, const void *buffer,
+static enum zedbsd_fs_result memory_write(
+	struct zedbsd_file *file, uint64_t offset, const void *buffer,
 	uint32_t length)
 {
 	struct memory_record *record = &records[file->private_data[0]];
 	uint64_t end = offset + length;
 
 	if (end > sizeof(record->data))
-		return BOOTS_FS_NO_SPACE;
+		return ZEDBSD_FS_NO_SPACE;
 	if (offset > record->size)
 		memset(record->data + record->size, 0,
 		       (size_t)(offset - record->size));
@@ -148,61 +148,61 @@ static enum boots_fs_result memory_write(
 	if (end > record->size)
 		record->size = end;
 	file->size = record->size;
-	return BOOTS_FS_OK;
+	return ZEDBSD_FS_OK;
 }
 
-static enum boots_fs_result memory_truncate(struct boots_file *file,
+static enum zedbsd_fs_result memory_truncate(struct zedbsd_file *file,
 					     uint64_t size)
 {
 	struct memory_record *record = &records[file->private_data[0]];
 
 	if (size > sizeof(record->data))
-		return BOOTS_FS_NO_SPACE;
+		return ZEDBSD_FS_NO_SPACE;
 	record->size = size;
 	file->size = size;
-	return BOOTS_FS_OK;
+	return ZEDBSD_FS_OK;
 }
 
-static enum boots_fs_result memory_flush(struct boots_file *file)
+static enum zedbsd_fs_result memory_flush(struct zedbsd_file *file)
 {
 	records[file->private_data[0]].flushes++;
-	return BOOTS_FS_OK;
+	return ZEDBSD_FS_OK;
 }
 
-static enum boots_fs_result memory_readdir(
-	struct boots_filesystem *filesystem, const char *path, unsigned index,
-	struct boots_dirent *entry)
+static enum zedbsd_fs_result memory_readdir(
+	struct zedbsd_filesystem *filesystem, const char *path, unsigned index,
+	struct zedbsd_dirent *entry)
 {
 	unsigned visible = 0;
 
 	(void)filesystem;
 	if (*path && strcmp(path, "/"))
-		return BOOTS_FS_INVALID_PATH;
+		return ZEDBSD_FS_INVALID_PATH;
 	for (unsigned record = 0;
 	     record < sizeof(records) / sizeof(records[0]); record++)
 		if (records[record].exists && visible++ == index) {
 			strcpy(entry->name, records[record].name);
 			entry->size = records[record].size;
-			return BOOTS_FS_OK;
+			return ZEDBSD_FS_OK;
 		}
-	return BOOTS_FS_NOT_FOUND;
+	return ZEDBSD_FS_NOT_FOUND;
 }
 
-static enum boots_fs_result memory_stat(
-	struct boots_filesystem *filesystem, const char *path,
-	struct boots_dirent *entry)
+static enum zedbsd_fs_result memory_stat(
+	struct zedbsd_filesystem *filesystem, const char *path,
+	struct zedbsd_dirent *entry)
 {
 	struct memory_record *record = find_record(path, 0);
 
 	(void)filesystem;
 	if (record == NULL)
-		return BOOTS_FS_NOT_FOUND;
+		return ZEDBSD_FS_NOT_FOUND;
 	strcpy(entry->name, record->name);
 	entry->size = record->size;
-	return BOOTS_FS_OK;
+	return ZEDBSD_FS_OK;
 }
 
-static const struct boots_filesystem_driver memory_driver = {
+static const struct zedbsd_filesystem_driver memory_driver = {
 	.name = "memory",
 	.probe = memory_probe,
 	.mount = memory_mount,
@@ -404,9 +404,9 @@ static int mock_file_read(void *context, const char *path, uint32_t offset,
 }
 
 static int mock_directory_read(void *context, const char *path, unsigned index,
-			       struct boots_noct_dirent *entry)
+			       struct zedbsd_noct_dirent *entry)
 {
-	static const struct boots_noct_dirent entries[] = {
+	static const struct zedbsd_noct_dirent entries[] = {
 		{ "BOOT.CFG", 7, 0x20 },
 		{ "SCRIPTS", 0, 0x10 },
 		{ "LIB.NCT", 38, 0x20 },
@@ -524,7 +524,7 @@ static const struct noct_beui_hal mock_beui = {
 	},
 };
 
-static const struct boots_noct_services mock_services = {
+static const struct zedbsd_noct_services mock_services = {
 	.context = &mock,
 	.beui = &mock_beui,
 	.screen_clear = mock_screen_clear,
@@ -634,7 +634,7 @@ struct repl_input {
 	size_t call_count;
 };
 
-static enum boots_noct_repl_input_result
+static enum zedbsd_noct_repl_input_result
 read_repl_input(void *context, int continuation, char *line, size_t capacity)
 {
 	struct repl_input *input = context;
@@ -646,13 +646,13 @@ read_repl_input(void *context, int continuation, char *line, size_t capacity)
 		input->continuation[input->call_count] = continuation;
 	input->call_count++;
 	if (input->line_index == input->line_count)
-		return BOOTS_NOCT_REPL_INPUT_EXIT;
+		return ZEDBSD_NOCT_REPL_INPUT_EXIT;
 	source = input->lines[input->line_index++];
 	length = strlen(source);
 	if (length >= capacity)
-		return BOOTS_NOCT_REPL_INPUT_ERROR;
+		return ZEDBSD_NOCT_REPL_INPUT_ERROR;
 	memcpy(line, source, length + 1U);
-	return BOOTS_NOCT_REPL_INPUT_LINE;
+	return ZEDBSD_NOCT_REPL_INPUT_LINE;
 }
 
 static void
@@ -669,19 +669,19 @@ capture_jit(void *context, const void *code, size_t length)
 
 static int
 run_case_args(const char *source, int argc, char *const argv[], int jit_enable,
-	      enum boots_noct_status expected, int64_t expected_script_status,
+	      enum zedbsd_noct_status expected, int64_t expected_script_status,
 	      const char *expected_output,
-	      struct boots_noct_result *returned_result)
+	      struct zedbsd_noct_result *returned_result)
 {
-	struct boots_noct_options options;
-	struct boots_noct_result result;
+	struct zedbsd_noct_options options;
+	struct zedbsd_noct_result result;
 	int success;
 
 	output_length = 0;
 	output[0] = '\0';
 	options.arena = arena;
 	options.arena_size = sizeof(arena);
-	options.fail_after = BOOTS_NOCT_NO_FAILURE;
+	options.fail_after = ZEDBSD_NOCT_NO_FAILURE;
 	options.jit_enable = jit_enable;
 	options.jit_threshold = 1;
 	options.write = capture_output;
@@ -692,9 +692,9 @@ run_case_args(const char *source, int argc, char *const argv[], int jit_enable,
 	options.filesystem = test_filesystem;
 	options.environment = &test_environment;
 	options.memory = &test_memory;
-	success = boots_noct_run_args("noct-test.nct", source, argc, argv,
+	success = zedbsd_noct_run_args("noct-test.nct", source, argc, argv,
 				       &options, &result);
-	if (success != (expected == BOOTS_NOCT_OK) ||
+	if (success != (expected == ZEDBSD_NOCT_OK) ||
 	    result.status != expected ||
 	    result.script_status != expected_script_status) {
 		if (output_length != 0)
@@ -702,8 +702,8 @@ run_case_args(const char *source, int argc, char *const argv[], int jit_enable,
 				(long)(uintptr_t)output, (long)output_length);
 		return 10 + (int)result.status;
 	}
-	if (result.current_after_reset != 0 || boots_heap_current() != 0 ||
-	    result.heap_errors != 0 || !boots_heap_validate())
+	if (result.current_after_reset != 0 || zedbsd_heap_current() != 0 ||
+	    result.heap_errors != 0 || !zedbsd_heap_validate())
 		return 20;
 	if (expected_output != NULL && strcmp(output, expected_output) != 0) {
 		(void)host_syscall3(SYS_WRITE, 2, (long)(uintptr_t)output,
@@ -734,8 +734,8 @@ run_case_args(const char *source, int argc, char *const argv[], int jit_enable,
 
 static int
 run_case(const char *source, int jit_enable,
-	 enum boots_noct_status expected, const char *expected_output,
-	 struct boots_noct_result *returned_result)
+	 enum zedbsd_noct_status expected, const char *expected_output,
+	 struct zedbsd_noct_result *returned_result)
 {
 	return run_case_args(source, 0, NULL, jit_enable, expected, 0,
 			     expected_output, returned_result);
@@ -757,8 +757,8 @@ run_repl_case(int jit_enable)
 	static const int expected_continuation[] = {
 		0, 1, 1, 1, 0, 0, 0, 0, 0,
 	};
-	struct boots_noct_options options;
-	struct boots_noct_result result;
+	struct zedbsd_noct_options options;
+	struct zedbsd_noct_result result;
 	struct repl_input input;
 	size_t index;
 	int success;
@@ -771,7 +771,7 @@ run_repl_case(int jit_enable)
 	jit_capture_length = 0;
 	options.arena = arena;
 	options.arena_size = sizeof(arena);
-	options.fail_after = BOOTS_NOCT_NO_FAILURE;
+	options.fail_after = ZEDBSD_NOCT_NO_FAILURE;
 	options.jit_enable = jit_enable;
 	options.jit_threshold = 1;
 	options.write = capture_output;
@@ -782,8 +782,8 @@ run_repl_case(int jit_enable)
 	options.filesystem = test_filesystem;
 	options.environment = &test_environment;
 	options.memory = &test_memory;
-	success = boots_noct_repl(&options, read_repl_input, &input, &result);
-	if (!success || result.status != BOOTS_NOCT_OK)
+	success = zedbsd_noct_repl(&options, read_repl_input, &input, &result);
+	if (!success || result.status != ZEDBSD_NOCT_OK)
 		return 1;
 	if (input.line_index != input.line_count ||
 	    input.call_count != sizeof(expected_continuation) /
@@ -796,8 +796,8 @@ run_repl_case(int jit_enable)
 	    strstr(output, "Noct REPL error:") == NULL ||
 	    strstr(output, "M15_RECOVERED\n") == NULL)
 		return 4;
-	if (result.current_after_reset != 0 || boots_heap_current() != 0 ||
-	    result.heap_errors != 0 || !boots_heap_validate())
+	if (result.current_after_reset != 0 || zedbsd_heap_current() != 0 ||
+	    result.heap_errors != 0 || !zedbsd_heap_validate())
 		return 5;
 	if (jit_enable) {
 		if (result.jit_code_size != test_memory.jit_code_size ||
@@ -875,7 +875,7 @@ main(int argc, char **argv)
 		"{ return 6; } Term.close(); return 0; }";
 	static const char napi_output[] =
 		"{answer: 42, items: [\"x\", 2]}\n"
-		"raw\n2\n315\n65\n1\n315\nBOOT.CFG\n7\nBoots\n"
+		"raw\n2\n315\n65\n1\n315\nBOOT.CFG\n7\nzedBSD\n"
 		"imported\n6291456\n";
 	static const char invalid_screen[] =
 		"func main() { Screen.put(25, 0, \"bad\", 225); }";
@@ -920,13 +920,13 @@ main(int argc, char **argv)
 	static const char ls_output[] =
 		"BOOT.CFG 7\nSCRIPTS/ 0\nLIB.NCT 38\n";
 	static const char cp_output[] = "Copied 16417 bytes.\n";
-	struct boots_noct_result result;
-	const struct boots_filesystem_driver *drivers[] = { &memory_driver };
-	struct boots_volume volume = {
+	struct zedbsd_noct_result result;
+	const struct zedbsd_filesystem_driver *drivers[] = { &memory_driver };
+	struct zedbsd_volume volume = {
 		.sector_size = 512,
 		.read = volume_read,
 	};
-	struct boots_filesystem filesystem;
+	struct zedbsd_filesystem filesystem;
 	unsigned iteration;
 	int status;
 
@@ -936,62 +936,62 @@ main(int argc, char **argv)
 	    host_syscall3(SYS_MPROTECT, (long)(uintptr_t)arena,
 			  sizeof(arena), 7) != 0)
 		return 1;
-	boots_env_init(&test_environment);
-	status = run_case(BOOTS_NOCT_M6_SOURCE, 0, BOOTS_NOCT_OK,
-			  BOOTS_NOCT_M6_OUTPUT, &result);
+	zedbsd_env_init(&test_environment);
+	status = run_case(ZEDBSD_NOCT_M6_SOURCE, 0, ZEDBSD_NOCT_OK,
+			  ZEDBSD_NOCT_M6_OUTPUT, &result);
 	if (status != 0)
 		return status;
 	memcpy(interpreter_output, output, output_length + 1U);
 	for (iteration = 0; iteration < 100U; iteration++) {
-		status = run_case(BOOTS_NOCT_M6_SOURCE, 1, BOOTS_NOCT_OK,
-				  BOOTS_NOCT_M6_OUTPUT, &result);
+		status = run_case(ZEDBSD_NOCT_M6_SOURCE, 1, ZEDBSD_NOCT_OK,
+				  ZEDBSD_NOCT_M6_OUTPUT, &result);
 		if (status != 0 || strcmp(output, interpreter_output) != 0)
 			return status != 0 ? 40 + status : 79;
 	}
-	status = run_case(syntax_error, 0, BOOTS_NOCT_SOURCE_ERROR, NULL,
+	status = run_case(syntax_error, 0, ZEDBSD_NOCT_SOURCE_ERROR, NULL,
 			  &result);
 	if (status != 0)
 		return 80 + status;
-	status = run_case(runtime_error, 0, BOOTS_NOCT_RUNTIME_ERROR, NULL,
+	status = run_case(runtime_error, 0, ZEDBSD_NOCT_RUNTIME_ERROR, NULL,
 			  &result);
 	if (status != 0)
 		return 120 + status;
 	status = run_case_args(argument_script, 2, script_arguments, 0,
-			       BOOTS_NOCT_OK, 7, "[alpha][beta]", &result);
+			       ZEDBSD_NOCT_OK, 7, "[alpha][beta]", &result);
 	if (status != 0)
 		return 160 + status;
 	status = run_case_args(zero_argument_script, 2, script_arguments, 0,
-			       BOOTS_NOCT_OK, 0, "zero", &result);
+			       ZEDBSD_NOCT_OK, 0, "zero", &result);
 	if (status != 0)
 		return 170 + status;
 	status = run_case_args(long_status_script, 0, NULL, 0,
-			       BOOTS_NOCT_OK, 9, "long", &result);
+			       ZEDBSD_NOCT_OK, 9, "long", &result);
 	if (status != 0)
 		return 175 + status;
-	status = run_case(bad_signature, 0, BOOTS_NOCT_SIGNATURE_ERROR,
+	status = run_case(bad_signature, 0, ZEDBSD_NOCT_SIGNATURE_ERROR,
 			  NULL, &result);
 	if (status != 0)
 		return 180 + status;
 	status = run_repl_case(0);
 	if (status != 0 ||
-	    strcmp(boots_env_get(&test_environment, "REPL"), "yes") != 0)
+	    strcmp(zedbsd_env_get(&test_environment, "REPL"), "yes") != 0)
 		return 185 + status;
 	for (iteration = 0; iteration < 20U; iteration++) {
 		status = run_repl_case(1);
 		if (status != 0)
 			return 190 + status;
 	}
-	if (!boots_env_unset(&test_environment, "REPL"))
+	if (!zedbsd_env_unset(&test_environment, "REPL"))
 		return 191;
-	if (boots_key_normalize_bios_ax(0x1c0d) != NOCT_BEUI_KEY_ENTER ||
-	    boots_key_normalize_bios_ax(0x0f00) != NOCT_BEUI_KEY_TAB ||
-	    boots_key_normalize_bios_ax(0x0f09) != NOCT_BEUI_KEY_TAB ||
-	    boots_key_normalize_bios_ax(0x3b00) != NOCT_BEUI_KEY_LEFT ||
-	    boots_key_normalize_bios_ax(0x3900) != NOCT_BEUI_KEY_DELETE ||
-	    boots_key_normalize_bios_ax(0xff00) != 0x1ff)
+	if (zedbsd_key_normalize_bios_ax(0x1c0d) != NOCT_BEUI_KEY_ENTER ||
+	    zedbsd_key_normalize_bios_ax(0x0f00) != NOCT_BEUI_KEY_TAB ||
+	    zedbsd_key_normalize_bios_ax(0x0f09) != NOCT_BEUI_KEY_TAB ||
+	    zedbsd_key_normalize_bios_ax(0x3b00) != NOCT_BEUI_KEY_LEFT ||
+	    zedbsd_key_normalize_bios_ax(0x3900) != NOCT_BEUI_KEY_DELETE ||
+	    zedbsd_key_normalize_bios_ax(0xff00) != 0x1ff)
 		return 190;
 	memset(&mock, 0, sizeof(mock));
-	status = run_case(napi_script, 0, BOOTS_NOCT_OK, napi_output, &result);
+	status = run_case(napi_script, 0, ZEDBSD_NOCT_OK, napi_output, &result);
 	if (status != 0)
 		return 200 + status;
 	if (mock.clear_count != 1 || mock.clear_row != 7 ||
@@ -1004,23 +1004,23 @@ main(int argc, char **argv)
 		mock.keyboard_input = "OK\r";
 		mock.keyboard_position = 0;
 		status = run_case(intrinsic_script, iteration != 0,
-				  BOOTS_NOCT_OK, "OK\nOK\n", &result);
+				  ZEDBSD_NOCT_OK, "OK\nOK\n", &result);
 		mock.keyboard_input = NULL;
 		if (status != 0 || mock.cursor_visible != 1)
 			return 242 + status;
 	}
-	status = run_case(environment_set_script, 0, BOOTS_NOCT_OK,
+	status = run_case(environment_set_script, 0, ZEDBSD_NOCT_OK,
 			  "safe\nsafe\n", &result);
 	if (status != 0)
 		return 244 + status;
-	status = run_case(environment_persist_script, 0, BOOTS_NOCT_OK,
+	status = run_case(environment_persist_script, 0, ZEDBSD_NOCT_OK,
 			  "safe\n\n", &result);
-	if (status != 0 || boots_env_get(&test_environment, "MODE") != NULL)
+	if (status != 0 || zedbsd_env_get(&test_environment, "MODE") != NULL)
 		return 246 + status;
 	/* VM/API registration alone must never probe or enter graphics. */
 	if (mock.beui_enter_count != 0 || mock.beui_pointer_start_count != 0)
 		return 247;
-	/* Current Noct File APIs use the mounted Boots filesystem.  Give the
+	/* Current Noct File APIs use the mounted zedBSD filesystem.  Give the
 	 * BeUI image test the same BMP through that path, then detach it so the
 	 * following terminal test continues to exercise the service callbacks. */
 	memset(records, 0, sizeof(records));
@@ -1028,11 +1028,11 @@ main(int argc, char **argv)
 	records[0].exists = 1;
 	records[0].size = sizeof(mock_bmp);
 	memcpy(records[0].data, mock_bmp, sizeof(mock_bmp));
-	if (!boots_fs_mount(&filesystem, &volume, drivers, 1))
+	if (!zedbsd_fs_mount(&filesystem, &volume, drivers, 1))
 		return 248;
 	test_filesystem = &filesystem;
 	memset(&mock, 0, sizeof(mock));
-	status = run_case(beui_script, 0, BOOTS_NOCT_OK,
+	status = run_case(beui_script, 0, ZEDBSD_NOCT_OK,
 			  "0\n1\n1\n640\n400\n1\n1\n1\n1\n1\n1\n1\n1\n1\n1\n0\n", &result);
 	if (status != 0 || mock.beui_enter_count != 1 ||
 	    mock.beui_leave_count != 1 ||
@@ -1044,14 +1044,14 @@ main(int argc, char **argv)
 	test_filesystem = NULL;
 	memset(records, 0, sizeof(records));
 	memset(&mock, 0, sizeof(mock));
-	status = run_case(beui_cleanup_script, 1, BOOTS_NOCT_OK, "", &result);
+	status = run_case(beui_cleanup_script, 1, ZEDBSD_NOCT_OK, "", &result);
 	if (status != 0 || mock.beui_enter_count != 1 ||
 	    mock.beui_leave_count != 1 ||
 	    mock.beui_pointer_start_count != 1 ||
 	    mock.beui_pointer_stop_count != 1)
 		return 249 + status;
 	memset(&mock, 0, sizeof(mock));
-	status = run_case(beui_error_script, 0, BOOTS_NOCT_RUNTIME_ERROR,
+	status = run_case(beui_error_script, 0, ZEDBSD_NOCT_RUNTIME_ERROR,
 			  NULL, &result);
 	if (status != 0 || mock.beui_enter_count != 1 ||
 	    mock.beui_leave_count != 1 ||
@@ -1070,7 +1070,7 @@ main(int argc, char **argv)
 	mock.keyboard_bios_queue[6] = 0x0003;
 	mock.keyboard_bios_queue[7] = HAL_KEY_EVENT_CTRL | 0x20;
 	mock.keyboard_bios_count = 8;
-	status = run_case_args(term_script, 0, NULL, 0, BOOTS_NOCT_OK, 0,
+	status = run_case_args(term_script, 0, NULL, 0, ZEDBSD_NOCT_OK, 0,
 			       "", &result);
 	if (status != 0)
 		return 230 + status;
@@ -1087,38 +1087,38 @@ main(int argc, char **argv)
 	if (mock.cursor_visible != 1)
 		return 236;
 	for (iteration = 0; iteration < 20U; iteration++) {
-		status = run_case_args(ls_source, 0, NULL, 1, BOOTS_NOCT_OK,
+		status = run_case_args(ls_source, 0, NULL, 1, ZEDBSD_NOCT_OK,
 				       0, ls_output, &result);
 		if (status != 0)
 			return 50 + status;
 	}
 	status = run_case_args(ls_source, 2, ls_bad_arguments, 0,
-			       BOOTS_NOCT_OK, 2, "usage: ls [PATH]\n",
+			       ZEDBSD_NOCT_OK, 2, "usage: ls [PATH]\n",
 			       &result);
 	if (status != 0)
 		return 60 + status;
-	status = run_case(invalid_screen, 0, BOOTS_NOCT_RUNTIME_ERROR, NULL,
+	status = run_case(invalid_screen, 0, ZEDBSD_NOCT_RUNTIME_ERROR, NULL,
 			  &result);
 	if (status != 0)
 		return 245 + status;
-	status = run_case(invalid_directory, 0, BOOTS_NOCT_RUNTIME_ERROR, NULL,
+	status = run_case(invalid_directory, 0, ZEDBSD_NOCT_RUNTIME_ERROR, NULL,
 			  &result);
 	if (status != 0)
 		return 250 + status;
-	status = run_case(missing_import, 0, BOOTS_NOCT_RUNTIME_ERROR, NULL,
+	status = run_case(missing_import, 0, ZEDBSD_NOCT_RUNTIME_ERROR, NULL,
 			  &result);
 	if (status != 0)
 		return 255 + status;
 	memset(records, 0, sizeof(records));
-	if (!boots_fs_mount(&filesystem, &volume, drivers, 1))
+	if (!zedbsd_fs_mount(&filesystem, &volume, drivers, 1))
 		return 258;
 	test_filesystem = &filesystem;
-	status = run_case_args(file_script, 0, NULL, 0, BOOTS_NOCT_OK, 2,
+	status = run_case_args(file_script, 0, NULL, 0, ZEDBSD_NOCT_OK, 2,
 			       "alpha", &result);
 	if (status != 0 || !records[0].exists || records[0].size != 5 ||
 	    memcmp(records[0].data, "alpha", 5) != 0 || records[0].flushes == 0)
 		return 260 + status;
-	status = run_case(finalizer_script, 0, BOOTS_NOCT_OK, "", &result);
+	status = run_case(finalizer_script, 0, ZEDBSD_NOCT_OK, "", &result);
 	if (status != 0 || !records[1].exists || records[1].flushes == 0)
 		return 300 + status;
 	memset(records, 0, sizeof(records));
@@ -1129,7 +1129,7 @@ main(int argc, char **argv)
 		records[0].data[iteration] = (unsigned char)(iteration * 37U + 11U);
 	for (iteration = 0; iteration < 20U; iteration++) {
 		status = run_case_args(cp_source, 2, cp_arguments, 1,
-				       BOOTS_NOCT_OK, 0, cp_output, &result);
+				       ZEDBSD_NOCT_OK, 0, cp_output, &result);
 		if (status != 0)
 			return 70 + status;
 		if (!records[1].exists ||
@@ -1140,13 +1140,13 @@ main(int argc, char **argv)
 			return 80;
 	}
 	status = run_case_args(cp_source, 2, cp_same_arguments, 1,
-			       BOOTS_NOCT_OK, 2,
+			       ZEDBSD_NOCT_OK, 2,
 			       "cp: source and destination are the same file\n",
 			       &result);
 	if (status != 0)
 		return 90 + status;
 	status = run_case_args(cp_source, 2, cp_missing_arguments, 1,
-			       BOOTS_NOCT_OK, 1,
+			       ZEDBSD_NOCT_OK, 1,
 			       "cp: source file not found: /MISSING.BIN\n",
 			       &result);
 	if (status != 0)

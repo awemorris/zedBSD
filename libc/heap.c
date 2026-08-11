@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  *
- * Boots freestanding C library
+ * zedBSD freestanding C library
  */
 
 #include "libc/heap.h"
@@ -27,8 +27,8 @@ struct heap_block {
 	struct heap_block *next_free;
 };
 
-static struct boots_heap default_heap;
-static struct boots_heap *active_heap = &default_heap;
+static struct zedbsd_heap default_heap;
+static struct zedbsd_heap *active_heap = &default_heap;
 
 static size_t
 aligned_size(size_t size)
@@ -51,7 +51,7 @@ block_payload(struct heap_block *block)
 }
 
 static void
-remove_free(struct boots_heap *heap, struct heap_block *block)
+remove_free(struct zedbsd_heap *heap, struct heap_block *block)
 {
 	if (block->previous_free != NULL)
 		block->previous_free->next_free = block->next_free;
@@ -64,7 +64,7 @@ remove_free(struct boots_heap *heap, struct heap_block *block)
 }
 
 static void
-insert_free(struct boots_heap *heap, struct heap_block *block)
+insert_free(struct zedbsd_heap *heap, struct heap_block *block)
 {
 	block->previous_free = NULL;
 	block->next_free = heap->free_list;
@@ -74,7 +74,7 @@ insert_free(struct boots_heap *heap, struct heap_block *block)
 }
 
 static struct heap_block *
-split_block(struct boots_heap *heap, struct heap_block *block, size_t capacity)
+split_block(struct zedbsd_heap *heap, struct heap_block *block, size_t capacity)
 {
 	struct heap_block *tail;
 	size_t header = block_header_size();
@@ -100,7 +100,7 @@ split_block(struct boots_heap *heap, struct heap_block *block, size_t capacity)
 }
 
 static void
-merge_with_next(struct boots_heap *heap, struct heap_block *block)
+merge_with_next(struct zedbsd_heap *heap, struct heap_block *block)
 {
 	struct heap_block *next = block->next_physical;
 
@@ -115,7 +115,7 @@ merge_with_next(struct boots_heap *heap, struct heap_block *block)
 }
 
 static struct heap_block *
-pointer_block(const struct boots_heap *heap, void *pointer)
+pointer_block(const struct zedbsd_heap *heap, void *pointer)
 {
 	struct heap_block *block;
 	struct heap_block *cursor;
@@ -136,7 +136,7 @@ pointer_block(const struct boots_heap *heap, void *pointer)
 }
 
 void
-boots_heap_init_instance(struct boots_heap *heap, void *base, size_t size)
+zedbsd_heap_init_instance(struct zedbsd_heap *heap, void *base, size_t size)
 {
 	uintptr_t raw = (uintptr_t)base;
 	uintptr_t aligned;
@@ -175,7 +175,7 @@ boots_heap_init_instance(struct boots_heap *heap, void *base, size_t size)
 }
 
 void
-boots_heap_reset_instance(struct boots_heap *heap)
+zedbsd_heap_reset_instance(struct zedbsd_heap *heap)
 {
 	void *base;
 	size_t size;
@@ -186,12 +186,12 @@ boots_heap_reset_instance(struct boots_heap *heap)
 	base = heap->original_base;
 	size = heap->original_size;
 	failure = heap->fail_after;
-	boots_heap_init_instance(heap, base, size);
+	zedbsd_heap_init_instance(heap, base, size);
 	heap->fail_after = failure;
 }
 
 void
-boots_heap_set_failure_after_instance(struct boots_heap *heap,
+zedbsd_heap_set_failure_after_instance(struct zedbsd_heap *heap,
 				       size_t successful_allocations)
 {
 	if (heap == NULL)
@@ -201,8 +201,8 @@ boots_heap_set_failure_after_instance(struct boots_heap *heap,
 }
 
 void
-boots_heap_set_observer_instance(struct boots_heap *heap,
-				  boots_heap_observer_fn observer,
+zedbsd_heap_set_observer_instance(struct zedbsd_heap *heap,
+				  zedbsd_heap_observer_fn observer,
 				  void *context)
 {
 	if (heap == NULL)
@@ -212,7 +212,7 @@ boots_heap_set_observer_instance(struct boots_heap *heap,
 }
 
 void *
-boots_heap_alloc(struct boots_heap *heap, size_t size)
+zedbsd_heap_alloc(struct zedbsd_heap *heap, size_t size)
 {
 	struct heap_block *block;
 	size_t requested = size;
@@ -224,13 +224,19 @@ boots_heap_alloc(struct boots_heap *heap, size_t size)
 		size = 1;
 	capacity = aligned_size(size);
 	if (capacity == 0 ||
-	    heap->successful_allocations >= heap->fail_after)
+	    heap->successful_allocations >= heap->fail_after) {
+		if (requested > heap->largest_failed_allocation)
+			heap->largest_failed_allocation = requested;
 		return NULL;
+	}
 	for (block = heap->free_list; block != NULL; block = block->next_free)
 		if (block->capacity >= capacity)
 			break;
-	if (block == NULL)
+	if (block == NULL) {
+		if (requested > heap->largest_failed_allocation)
+			heap->largest_failed_allocation = requested;
 		return NULL;
+	}
 	remove_free(heap, block);
 	(void)split_block(heap, block, capacity);
 	block->state = HEAP_USED;
@@ -241,27 +247,30 @@ boots_heap_alloc(struct boots_heap *heap, size_t size)
 	heap->successful_allocations++;
 	if (heap->observer != NULL)
 		heap->observer(heap->observer_context, block_payload(block),
-			       requested, BOOTS_HEAP_ALLOCATED);
+			       requested, ZEDBSD_HEAP_ALLOCATED);
 	return block_payload(block);
 }
 
 void *
-boots_heap_calloc(struct boots_heap *heap, size_t count, size_t size)
+zedbsd_heap_calloc(struct zedbsd_heap *heap, size_t count, size_t size)
 {
 	void *pointer;
 	size_t total;
 
-	if (count != 0 && size > SIZE_MAX / count)
+	if (count != 0 && size > SIZE_MAX / count) {
+		if (heap != NULL && SIZE_MAX > heap->largest_failed_allocation)
+			heap->largest_failed_allocation = SIZE_MAX;
 		return NULL;
+	}
 	total = count * size;
-	pointer = boots_heap_alloc(heap, total);
+	pointer = zedbsd_heap_alloc(heap, total);
 	if (pointer != NULL)
 		memset(pointer, 0, total);
 	return pointer;
 }
 
 void
-boots_heap_free(struct boots_heap *heap, void *pointer)
+zedbsd_heap_free(struct zedbsd_heap *heap, void *pointer)
 {
 	struct heap_block *block;
 	struct heap_block *previous;
@@ -277,7 +286,7 @@ boots_heap_free(struct boots_heap *heap, void *pointer)
 	}
 	if (heap->observer != NULL)
 		heap->observer(heap->observer_context, pointer, block->used,
-			       BOOTS_HEAP_FREED);
+			       ZEDBSD_HEAP_FREED);
 	heap->current_bytes -= block->used;
 	block->used = 0;
 	block->state = HEAP_FREE;
@@ -296,7 +305,7 @@ boots_heap_free(struct boots_heap *heap, void *pointer)
 }
 
 void *
-boots_heap_realloc(struct boots_heap *heap, void *pointer, size_t size)
+zedbsd_heap_realloc(struct zedbsd_heap *heap, void *pointer, size_t size)
 {
 	struct heap_block *block;
 	struct heap_block *tail;
@@ -305,9 +314,9 @@ boots_heap_realloc(struct boots_heap *heap, void *pointer, size_t size)
 	size_t old_used;
 
 	if (pointer == NULL)
-		return boots_heap_alloc(heap, size);
+		return zedbsd_heap_alloc(heap, size);
 	if (size == 0) {
-		boots_heap_free(heap, pointer);
+		zedbsd_heap_free(heap, pointer);
 		return NULL;
 	}
 	if (heap == NULL)
@@ -343,34 +352,40 @@ boots_heap_realloc(struct boots_heap *heap, void *pointer, size_t size)
 			heap->peak_bytes = heap->current_bytes;
 		return pointer;
 	}
-	replacement = boots_heap_alloc(heap, size);
+	replacement = zedbsd_heap_alloc(heap, size);
 	if (replacement == NULL)
 		return NULL;
 	memcpy(replacement, pointer, old_used < size ? old_used : size);
-	boots_heap_free(heap, pointer);
+	zedbsd_heap_free(heap, pointer);
 	return replacement;
 }
 
 size_t
-boots_heap_current_instance(const struct boots_heap *heap)
+zedbsd_heap_current_instance(const struct zedbsd_heap *heap)
 {
 	return heap != NULL ? heap->current_bytes : 0;
 }
 
 size_t
-boots_heap_peak_instance(const struct boots_heap *heap)
+zedbsd_heap_peak_instance(const struct zedbsd_heap *heap)
 {
 	return heap != NULL ? heap->peak_bytes : 0;
 }
 
 size_t
-boots_heap_error_count_instance(const struct boots_heap *heap)
+zedbsd_heap_largest_failed_instance(const struct zedbsd_heap *heap)
+{
+	return heap != NULL ? heap->largest_failed_allocation : 0;
+}
+
+size_t
+zedbsd_heap_error_count_instance(const struct zedbsd_heap *heap)
 {
 	return heap != NULL ? heap->errors : 0;
 }
 
 size_t
-boots_heap_largest_free_instance(const struct boots_heap *heap)
+zedbsd_heap_largest_free_instance(const struct zedbsd_heap *heap)
 {
 	struct heap_block *block;
 	size_t largest = 0;
@@ -384,7 +399,7 @@ boots_heap_largest_free_instance(const struct boots_heap *heap)
 }
 
 int
-boots_heap_validate_instance(const struct boots_heap *heap)
+zedbsd_heap_validate_instance(const struct zedbsd_heap *heap)
 {
 	struct heap_block *block;
 	struct heap_block *previous = NULL;
@@ -456,64 +471,64 @@ boots_heap_validate_instance(const struct boots_heap *heap)
 		list_free_count == physical_free_count;
 }
 
-struct boots_heap *
-boots_heap_set_active(struct boots_heap *heap)
+struct zedbsd_heap *
+zedbsd_heap_set_active(struct zedbsd_heap *heap)
 {
-	struct boots_heap *previous = active_heap;
+	struct zedbsd_heap *previous = active_heap;
 
 	active_heap = heap != NULL ? heap : &default_heap;
 	return previous;
 }
 
-struct boots_heap *
-boots_heap_get_active(void)
+struct zedbsd_heap *
+zedbsd_heap_get_active(void)
 {
 	return active_heap;
 }
 
-void boots_heap_init(void *base, size_t size)
+void zedbsd_heap_init(void *base, size_t size)
 {
-	boots_heap_init_instance(active_heap, base, size);
+	zedbsd_heap_init_instance(active_heap, base, size);
 }
-void boots_heap_reset(void) { boots_heap_reset_instance(active_heap); }
-void boots_heap_set_failure_after(size_t n)
+void zedbsd_heap_reset(void) { zedbsd_heap_reset_instance(active_heap); }
+void zedbsd_heap_set_failure_after(size_t n)
 {
-	boots_heap_set_failure_after_instance(active_heap, n);
+	zedbsd_heap_set_failure_after_instance(active_heap, n);
 }
-void boots_heap_set_observer(boots_heap_observer_fn observer, void *context)
+void zedbsd_heap_set_observer(zedbsd_heap_observer_fn observer, void *context)
 {
-	boots_heap_set_observer_instance(active_heap, observer, context);
+	zedbsd_heap_set_observer_instance(active_heap, observer, context);
 }
-void *boots_malloc(size_t size) { return boots_heap_alloc(active_heap, size); }
-void *boots_calloc(size_t count, size_t size)
+void *zedbsd_malloc(size_t size) { return zedbsd_heap_alloc(active_heap, size); }
+void *zedbsd_calloc(size_t count, size_t size)
 {
-	return boots_heap_calloc(active_heap, count, size);
+	return zedbsd_heap_calloc(active_heap, count, size);
 }
-void *boots_realloc(void *pointer, size_t size)
+void *zedbsd_realloc(void *pointer, size_t size)
 {
-	return boots_heap_realloc(active_heap, pointer, size);
+	return zedbsd_heap_realloc(active_heap, pointer, size);
 }
-void boots_free(void *pointer) { boots_heap_free(active_heap, pointer); }
-size_t boots_heap_current(void)
+void zedbsd_free(void *pointer) { zedbsd_heap_free(active_heap, pointer); }
+size_t zedbsd_heap_current(void)
 {
-	return boots_heap_current_instance(active_heap);
+	return zedbsd_heap_current_instance(active_heap);
 }
-size_t boots_heap_peak(void) { return boots_heap_peak_instance(active_heap); }
-size_t boots_heap_error_count(void)
+size_t zedbsd_heap_peak(void) { return zedbsd_heap_peak_instance(active_heap); }
+size_t zedbsd_heap_error_count(void)
 {
-	return boots_heap_error_count_instance(active_heap);
+	return zedbsd_heap_error_count_instance(active_heap);
 }
-size_t boots_heap_largest_free(void)
+size_t zedbsd_heap_largest_free(void)
 {
-	return boots_heap_largest_free_instance(active_heap);
+	return zedbsd_heap_largest_free_instance(active_heap);
 }
-int boots_heap_validate(void)
+int zedbsd_heap_validate(void)
 {
-	return boots_heap_validate_instance(active_heap);
+	return zedbsd_heap_validate_instance(active_heap);
 }
 
 char *
-boots_strdup(const char *string)
+zedbsd_strdup(const char *string)
 {
 	size_t length;
 	char *copy;
@@ -523,30 +538,30 @@ boots_strdup(const char *string)
 	length = strlen(string);
 	if (length == SIZE_MAX)
 		return NULL;
-	copy = boots_malloc(length + 1U);
+	copy = zedbsd_malloc(length + 1U);
 	if (copy != NULL)
 		memcpy(copy, string, length + 1U);
 	return copy;
 }
 
-void *noct_pc98be_malloc(size_t size) { return boots_malloc(size); }
+void *noct_pc98be_malloc(size_t size) { return zedbsd_malloc(size); }
 void *noct_pc98be_calloc(size_t count, size_t size)
 {
-	return boots_calloc(count, size);
+	return zedbsd_calloc(count, size);
 }
 void *noct_pc98be_realloc(void *pointer, size_t size)
 {
-	return boots_realloc(pointer, size);
+	return zedbsd_realloc(pointer, size);
 }
-char *noct_pc98be_strdup(const char *string) { return boots_strdup(string); }
-void noct_pc98be_free(void *pointer) { boots_free(pointer); }
+char *noct_pc98be_strdup(const char *string) { return zedbsd_strdup(string); }
+void noct_pc98be_free(void *pointer) { zedbsd_free(pointer); }
 
 /* Standard names are real symbols; Noct's generated sources redefine these
  * locally and therefore cannot use global preprocessor aliases. */
-void *malloc(size_t size) { return boots_malloc(size); }
-void *calloc(size_t count, size_t size) { return boots_calloc(count, size); }
+void *malloc(size_t size) { return zedbsd_malloc(size); }
+void *calloc(size_t count, size_t size) { return zedbsd_calloc(count, size); }
 void *realloc(void *pointer, size_t size)
 {
-	return boots_realloc(pointer, size);
+	return zedbsd_realloc(pointer, size);
 }
-void free(void *pointer) { boots_free(pointer); }
+void free(void *pointer) { zedbsd_free(pointer); }

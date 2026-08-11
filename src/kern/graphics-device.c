@@ -6,16 +6,16 @@
 #include "kern/platform.h"
 #include "kern/uaccess.h"
 
-#include <boots/graphics.h>
+#include <zedbsd/graphics.h>
 #include <errno.h>
 #include <hal/hal.h>
 #include <string.h>
 
-#define GRAPHICS_CAPABILITIES (BOOTS_GRAPHICS_CAP_FILL | \
-	BOOTS_GRAPHICS_CAP_LINE | BOOTS_GRAPHICS_CAP_PATTERN | \
-	BOOTS_GRAPHICS_CAP_BLIT_INDEX8 | BOOTS_GRAPHICS_CAP_BLIT_RGB24 | \
-	BOOTS_GRAPHICS_CAP_BLIT_MONO1 | BOOTS_GRAPHICS_CAP_FLUSH | \
-	BOOTS_GRAPHICS_CAP_GLYPH)
+#define GRAPHICS_CAPABILITIES (ZEDBSD_GRAPHICS_CAP_FILL | \
+	ZEDBSD_GRAPHICS_CAP_LINE | ZEDBSD_GRAPHICS_CAP_PATTERN | \
+	ZEDBSD_GRAPHICS_CAP_BLIT_INDEX8 | ZEDBSD_GRAPHICS_CAP_BLIT_RGB24 | \
+	ZEDBSD_GRAPHICS_CAP_BLIT_MONO1 | ZEDBSD_GRAPHICS_CAP_FLUSH | \
+	ZEDBSD_GRAPHICS_CAP_GLYPH)
 #define GRAPHICS_MAX_RECTS 32U
 #define GRAPHICS_ROW_MAX 4096U
 
@@ -57,7 +57,7 @@ static int require_entered(struct file *file)
 	return file == graphics_owner && graphics_entered ? 0 : ENXIO;
 }
 
-static int valid_rect(const struct boots_graphics_rect *rect)
+static int valid_rect(const struct zedbsd_graphics_rect *rect)
 {
 	return rect->width != 0 && rect->height != 0 &&
 		rect->x <= graphics_mode.width && rect->y <= graphics_mode.height &&
@@ -66,7 +66,7 @@ static int valid_rect(const struct boots_graphics_rect *rect)
 }
 
 static void convert_rect(struct kern_graphics_rect *to,
-			 const struct boots_graphics_rect *from)
+			 const struct zedbsd_graphics_rect *from)
 {
 	to->x = from->x; to->y = from->y;
 	to->width = from->width; to->height = from->height;
@@ -74,7 +74,7 @@ static void convert_rect(struct kern_graphics_rect *to,
 
 static int graphics_enter(uintptr_t argument)
 {
-	struct boots_graphics_mode request;
+	struct zedbsd_graphics_mode request;
 	int error = copyin(argument, &request, sizeof(request));
 	if (error != 0)
 		return error;
@@ -108,7 +108,7 @@ static int graphics_fill(uintptr_t argument, int patterned)
 {
 	struct kern_graphics_rect native;
 	if (patterned) {
-		struct boots_graphics_pattern_fill request;
+		struct zedbsd_graphics_pattern_fill request;
 		int error = copyin(argument, &request, sizeof(request));
 		if (error != 0) return error;
 		if (request.reserved != 0 || !valid_rect(&request.rect)) return EINVAL;
@@ -116,7 +116,7 @@ static int graphics_fill(uintptr_t argument, int patterned)
 		return kern_platform_graphics_pattern_fill(&native, request.color,
 			request.pattern) ? 0 : EIO;
 	} else {
-		struct boots_graphics_fill request;
+		struct zedbsd_graphics_fill request;
 		int error = copyin(argument, &request, sizeof(request));
 		if (error != 0) return error;
 		if (request.reserved != 0 || !valid_rect(&request.rect)) return EINVAL;
@@ -127,7 +127,7 @@ static int graphics_fill(uintptr_t argument, int patterned)
 
 static int graphics_line(uintptr_t argument)
 {
-	struct boots_graphics_line request;
+	struct zedbsd_graphics_line request;
 	int error = copyin(argument, &request, sizeof(request));
 	if (error != 0) return error;
 	if (request.reserved != 0 || request.x0 >= graphics_mode.width ||
@@ -138,16 +138,16 @@ static int graphics_line(uintptr_t argument)
 		request.y1, request.color) ? 0 : EIO;
 }
 
-static int load_palette(const struct boots_graphics_blit *request)
+static int load_palette(const struct zedbsd_graphics_blit *request)
 {
-	if (request->format == BOOTS_GRAPHICS_FORMAT_MONO1) {
+	if (request->format == ZEDBSD_GRAPHICS_FORMAT_MONO1) {
 		palette_buffer[0] = request->background;
 		palette_buffer[1] = request->foreground;
 		return 0;
 	}
-	if (request->format == BOOTS_GRAPHICS_FORMAT_RGB24)
+	if (request->format == ZEDBSD_GRAPHICS_FORMAT_RGB24)
 		return request->palette == 0 && request->palette_count == 0 ? 0 : EINVAL;
-	if (request->format != BOOTS_GRAPHICS_FORMAT_INDEX8 ||
+	if (request->format != ZEDBSD_GRAPHICS_FORMAT_INDEX8 ||
 	    request->palette == 0 || request->palette_count == 0 ||
 	    request->palette_count > 256U)
 		return EINVAL;
@@ -157,7 +157,7 @@ static int load_palette(const struct boots_graphics_blit *request)
 
 static int graphics_blit(uintptr_t argument, int patterned)
 {
-	struct boots_graphics_blit request;
+	struct zedbsd_graphics_blit request;
 	struct kern_graphics_image image;
 	uint64_t minimum_stride, source_offset;
 	unsigned row;
@@ -168,11 +168,11 @@ static int graphics_blit(uintptr_t argument, int patterned)
 	    request.width > graphics_mode.width - request.x ||
 	    request.height > graphics_mode.height - request.y || request.pixels == 0)
 		return EINVAL;
-	if (request.format == BOOTS_GRAPHICS_FORMAT_RGB24)
+	if (request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24)
 		minimum_stride = (uint64_t)request.width * 3U;
-	else if (request.format == BOOTS_GRAPHICS_FORMAT_INDEX8)
+	else if (request.format == ZEDBSD_GRAPHICS_FORMAT_INDEX8)
 		minimum_stride = request.width;
-	else if (request.format == BOOTS_GRAPHICS_FORMAT_MONO1)
+	else if (request.format == ZEDBSD_GRAPHICS_FORMAT_MONO1)
 		minimum_stride = ((uint64_t)request.width + 7U) / 8U;
 	else
 		return EINVAL;
@@ -182,21 +182,21 @@ static int graphics_blit(uintptr_t argument, int patterned)
 	error = load_palette(&request);
 	if (error != 0) return error;
 	memset(&image, 0, sizeof(image));
-	image.format = request.format == BOOTS_GRAPHICS_FORMAT_RGB24 ? 2U : 1U;
+	image.format = request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24 ? 2U : 1U;
 	image.width = request.width;
 	image.height = 1;
-	image.stride = request.format == BOOTS_GRAPHICS_FORMAT_RGB24 ?
+	image.stride = request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24 ?
 		(size_t)request.width * 3U : request.width;
 	image.pixels = row_buffer;
 	image.palette = palette_buffer;
-	image.palette_size = request.format == BOOTS_GRAPHICS_FORMAT_RGB24 ? 0U :
-		request.format == BOOTS_GRAPHICS_FORMAT_MONO1 ? 2U : request.palette_count;
+	image.palette_size = request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24 ? 0U :
+		request.format == ZEDBSD_GRAPHICS_FORMAT_MONO1 ? 2U : request.palette_count;
 	for (row = 0; row < request.height; row++) {
 		unsigned column;
 		source_offset = (uint64_t)request.stride * row;
 		if ((uint64_t)request.pixels + source_offset > UINT32_MAX)
 			return EFAULT;
-		if (request.format == BOOTS_GRAPHICS_FORMAT_MONO1) {
+		if (request.format == ZEDBSD_GRAPHICS_FORMAT_MONO1) {
 			uint8_t packed[128];
 			if (minimum_stride > sizeof(packed)) return EINVAL;
 			error = copyin(request.pixels + (uintptr_t)source_offset,
@@ -219,8 +219,8 @@ static int graphics_blit(uintptr_t argument, int patterned)
 
 static int graphics_flush(uintptr_t argument)
 {
-	struct boots_graphics_flush request;
-	struct boots_graphics_rect input[GRAPHICS_MAX_RECTS];
+	struct zedbsd_graphics_flush request;
+	struct zedbsd_graphics_rect input[GRAPHICS_MAX_RECTS];
 	struct kern_graphics_rect native[GRAPHICS_MAX_RECTS];
 	unsigned i;
 	int error = copyin(argument, &request, sizeof(request));
@@ -242,7 +242,7 @@ static int graphics_flush(uintptr_t argument)
 
 static int graphics_glyph(uintptr_t argument)
 {
-	struct boots_graphics_glyph request;
+	struct zedbsd_graphics_glyph request;
 	uint8_t bitmap[32];
 	unsigned width, height;
 	int error = copyin(argument, &request, sizeof(request));
@@ -255,7 +255,7 @@ static int graphics_glyph(uintptr_t argument)
 	request.width = width; request.height = height;
 	request.stride = width / 8U; request.bearing_x = 0;
 	request.bearing_y = 0; request.advance = width;
-	request.format = BOOTS_GRAPHICS_GLYPH_MSB1;
+	request.format = ZEDBSD_GRAPHICS_GLYPH_MSB1;
 	request.bitmap_size = request.stride * height;
 	error = copyout(bitmap, request.bitmap, request.bitmap_size);
 	if (error == 0) error = copyout(&request, argument, sizeof(request));
@@ -268,32 +268,32 @@ static int graphics_ioctl(struct file *file, unsigned long request,
 	int error;
 	if (file != graphics_owner)
 		return EBADF;
-	if (request == BOOTS_GRAPHICS_GET_CAPS) {
-		const struct boots_graphics_caps caps = {
+	if (request == ZEDBSD_GRAPHICS_GET_CAPS) {
+		const struct zedbsd_graphics_caps caps = {
 			GRAPHICS_CAPABILITIES, 640U, 480U, 0U
 		};
 		return copyout(&caps, argument, sizeof(caps));
 	}
-	if (request == BOOTS_GRAPHICS_ENTER)
+	if (request == ZEDBSD_GRAPHICS_ENTER)
 		return graphics_enter(argument);
 	error = require_entered(file);
 	if (error != 0) return error;
 	switch (request) {
-	case BOOTS_GRAPHICS_GET_MODE: {
-		const struct boots_graphics_mode mode = {
+	case ZEDBSD_GRAPHICS_GET_MODE: {
+		const struct zedbsd_graphics_mode mode = {
 			graphics_mode.preferred_bits_per_pixel, graphics_mode.width,
 			graphics_mode.height, graphics_mode.bits_per_pixel,
 			graphics_mode.stride, GRAPHICS_CAPABILITIES, { 0, 0 }
 		};
 		return copyout(&mode, argument, sizeof(mode));
 	}
-	case BOOTS_GRAPHICS_FILL_RECT: return graphics_fill(argument, 0);
-	case BOOTS_GRAPHICS_DRAW_LINE: return graphics_line(argument);
-	case BOOTS_GRAPHICS_PATTERN_FILL: return graphics_fill(argument, 1);
-	case BOOTS_GRAPHICS_BLIT: return graphics_blit(argument, 0);
-	case BOOTS_GRAPHICS_BLIT_PATTERN: return graphics_blit(argument, 1);
-	case BOOTS_GRAPHICS_FLUSH: return graphics_flush(argument);
-	case BOOTS_GRAPHICS_GET_GLYPH: return graphics_glyph(argument);
+	case ZEDBSD_GRAPHICS_FILL_RECT: return graphics_fill(argument, 0);
+	case ZEDBSD_GRAPHICS_DRAW_LINE: return graphics_line(argument);
+	case ZEDBSD_GRAPHICS_PATTERN_FILL: return graphics_fill(argument, 1);
+	case ZEDBSD_GRAPHICS_BLIT: return graphics_blit(argument, 0);
+	case ZEDBSD_GRAPHICS_BLIT_PATTERN: return graphics_blit(argument, 1);
+	case ZEDBSD_GRAPHICS_FLUSH: return graphics_flush(argument);
+	case ZEDBSD_GRAPHICS_GET_GLYPH: return graphics_glyph(argument);
 	default: return EOPNOTSUPP;
 	}
 }

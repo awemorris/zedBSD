@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef BOOTS_ERRNO_H
-#define BOOTS_ERRNO_H
+#ifndef ZEDBSD_ERRNO_H
+#define ZEDBSD_ERRNO_H
 
-extern int boots_errno;
-#define errno boots_errno
+extern int zedbsd_errno;
+#define errno zedbsd_errno
 
 #define EDOM 1
 #define ERANGE 2

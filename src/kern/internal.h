@@ -1,6 +1,6 @@
 /* Private runtime wiring shared while the Stage 2 services are split. */
-#ifndef BOOTS_KERN_INTERNAL_H
-#define BOOTS_KERN_INTERNAL_H
+#ifndef ZEDBSD_KERN_INTERNAL_H
+#define ZEDBSD_KERN_INTERNAL_H
 
 #include <kern/boot.h>
 #include <kern/env.h>
@@ -43,15 +43,15 @@ struct startup_state {
 	unsigned timeout_budget;
 };
 
-extern const struct boots_handoff *kern_handoff;
-extern const struct boots_device *kern_devices;
+extern const struct zedbsd_handoff *kern_handoff;
+extern const struct zedbsd_device *kern_devices;
 extern unsigned kern_device_count;
-extern struct boots_filesystem kern_mounted_fs;
-extern struct boots_namespace kern_mounted_namespace;
-extern struct boots_environment kern_boot_environment;
+extern struct zedbsd_filesystem kern_mounted_fs;
+extern struct zedbsd_namespace kern_mounted_namespace;
+extern struct zedbsd_environment kern_boot_environment;
 extern struct part kern_parts[MAX_PARTS];
 extern int kern_current_device, kern_current_partition;
-extern char kern_kernel_name[BOOTS_PATH_MAX], kern_kernel_arguments[256];
+extern char kern_kernel_name[ZEDBSD_PATH_MAX], kern_kernel_arguments[256];
 
 int kern_streq(const char *left, const char *right);
 void kern_memzero(void *destination, uint32_t length);
@@ -84,7 +84,7 @@ unsigned kern_bit_count(uint8_t value);
 int kern_probe_fixed_device(uint8_t device_class, uint8_t bios_id);
 void kern_probe_fixed_class(uint8_t device_class);
 int kern_linuxboot(void);
-#ifdef BOOTS_M9_WRITE_TEST
+#ifdef ZEDBSD_M9_WRITE_TEST
 int kern_m9_write_test(uint32_t lba);
 #endif
 int kern_command(char *line);

@@ -10,6 +10,8 @@
 static hal_space_t current_space;
 static uint32 system_cr3;
 static int next_space_id;
+static uint32 space_count;
+static uint32 page_table_count;
 
 static int
 valid_space(hal_space_t space)
@@ -25,6 +27,7 @@ i386_space_init(void)
 	system_cr3 = asm_get_cr3();
 	current_space = HAL_SPACE_SYS;
 	next_space_id = 1;
+	space_count = page_table_count = 0;
 }
 
 static struct i386_page_table *
@@ -58,6 +61,7 @@ create_table(struct i386_space *space, uintptr_t vaddr)
 	hal_memset(table->pte, 0, PAGE_SIZE);
 	table->next = space->page_tables;
 	space->page_tables = table;
+	page_table_count++;
 	space->pdt[pde] = ((uint32)table->memory.paddr & 0xfffff000U) |
 		PTE_PRESENT | PTE_WRITE | PTE_USER;
 	return table;
@@ -85,6 +89,7 @@ hal_mem_create_space(void)
 		space->pdt[i] = system_pdt[i] & ~PTE_USER;
 	space->magic = I386_SPACE_MAGIC;
 	space->space_id = next_space_id++;
+	space_count++;
 	return space;
 }
 
@@ -104,10 +109,23 @@ hal_page_destroy_space(hal_space_t handle)
 		space->page_tables = table->next;
 		(void)pmem_free(&table->memory);
 		hal_free(table);
+		if (page_table_count != 0)
+			page_table_count--;
 	}
 	space->magic = 0;
 	(void)pmem_free(&space->directory_memory);
 	hal_free(space);
+	if (space_count != 0)
+		space_count--;
+}
+
+void
+hal_i386_space_memory_stats(uint32 *spaces, uint32 *tables)
+{
+	if (spaces != NULL)
+		*spaces = space_count;
+	if (tables != NULL)
+		*tables = page_table_count;
 }
 
 void
@@ -228,6 +246,72 @@ hal_page_unmap(hal_space_t handle, void *address, size_t size)
 		if (table != NULL)
 			table->pte[index] = 0;
 	}
+	{
+		struct i386_page_table **link = &space->page_tables;
+		while (*link != NULL) {
+			struct i386_page_table *table = *link;
+			unsigned index;
+			for (index = 0; index < 1024U; index++)
+				if (table->pte[index] & PTE_PRESENT)
+					break;
+			if (index != 1024U) {
+				link = &table->next;
+				continue;
+			}
+			space->pdt[table->vaddr >> 22] = 0;
+			*link = table->next;
+			(void)pmem_free(&table->memory);
+			hal_free(table);
+			if (page_table_count != 0)
+				page_table_count--;
+		}
+	}
+	if (current_space == space)
+		hal_page_flush_tlb(space);
+	return HAL_PMEM_SUCCESS;
+}
+
+int
+hal_page_query(hal_space_t handle, void *address, uint32_t *flags)
+{
+	struct i386_space *space = handle;
+	uintptr_t vaddr = (uintptr_t)address;
+	struct i386_page_table *table;
+	uint32 pte;
+	unsigned index;
+
+	if (space == NULL || !valid_space(space) || flags == NULL ||
+	    !valid_user_range(vaddr, PAGE_SIZE))
+		return HAL_PMEM_BADDESC;
+	table = find_table(space, vaddr);
+	index = (unsigned)(vaddr >> 12) & 1023U;
+	pte = table != NULL ? table->pte[index] : 0;
+	*flags = (pte & PTE_PRESENT ? HAL_PAGE_PRESENT : 0) |
+		(pte & PTE_ACCESS ? HAL_PAGE_ACCESSED : 0) |
+		(pte & PTE_DIRTY ? HAL_PAGE_DIRTY : 0);
+	return HAL_PMEM_SUCCESS;
+}
+
+int
+hal_page_clear_flags(hal_space_t handle, void *address, uint32_t flags)
+{
+	struct i386_space *space = handle;
+	uintptr_t vaddr = (uintptr_t)address;
+	struct i386_page_table *table;
+	unsigned index;
+	uint32 mask = 0;
+
+	if (space == NULL || !valid_space(space) ||
+	    !valid_user_range(vaddr, PAGE_SIZE) ||
+	    (flags & ~(HAL_PAGE_ACCESSED | HAL_PAGE_DIRTY)) != 0)
+		return HAL_PMEM_BADDESC;
+	table = find_table(space, vaddr);
+	index = (unsigned)(vaddr >> 12) & 1023U;
+	if (table == NULL || !(table->pte[index] & PTE_PRESENT))
+		return HAL_PMEM_BADDESC;
+	if (flags & HAL_PAGE_ACCESSED) mask |= PTE_ACCESS;
+	if (flags & HAL_PAGE_DIRTY) mask |= PTE_DIRTY;
+	table->pte[index] &= ~mask;
 	if (current_space == space)
 		hal_page_flush_tlb(space);
 	return HAL_PMEM_SUCCESS;

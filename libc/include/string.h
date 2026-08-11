@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_STRING_H
-#define BOOTS_STRING_H
+#ifndef ZEDBSD_STRING_H
+#define ZEDBSD_STRING_H
 
 #include <stddef.h>
 

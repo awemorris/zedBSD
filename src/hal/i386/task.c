@@ -13,6 +13,8 @@ extern uint32 tss_area[26];
 
 static struct task_info *task_list;
 static struct task_info *running_task;
+static uint32 task_count;
+static size_t task_stack_bytes;
 
 static void
 tasklist_add(struct task_info *task)
@@ -23,6 +25,7 @@ tasklist_add(struct task_info *task)
 		link = &(*link)->next;
 	*link = task;
 	task->next = NULL;
+	task_count++;
 }
 
 static void
@@ -32,8 +35,11 @@ tasklist_del(struct task_info *task)
 
 	while (*link != NULL && *link != task)
 		link = &(*link)->next;
-	if (*link == task)
+	if (*link == task) {
 		*link = task->next;
+		if (task_count != 0)
+			task_count--;
+	}
 	task->next = NULL;
 }
 
@@ -115,6 +121,7 @@ hal_task_create(hal_space_t space, void (*start)(void *), void *arg,
 		hal_free(task);
 		return NULL;
 	}
+	task_stack_bytes += SYS_STACK_SIZE;
 	set_initial_resume_frame(task, start, arg, user_stack_pointer);
 	tasklist_add(task);
 	return task;
@@ -130,6 +137,8 @@ hal_task_destroy(hal_task_t handle)
 	if (task == running_task)
 		HAL_FATAL("destroying current HAL task");
 	tasklist_del(task);
+	if (task->sys_stack != NULL)
+		task_stack_bytes -= SYS_STACK_SIZE;
 	if (task->sys_stack != NULL)
 		hal_free(task->sys_stack);
 	hal_free(task);
@@ -186,4 +195,13 @@ void *hal_task_get_private(hal_task_t handle)
 hal_space_t hal_task_get_space(hal_task_t handle)
 {
 	return handle != NULL ? ((struct task_info *)handle)->space : HAL_SPACE_SYS;
+}
+
+void
+hal_i386_task_memory_stats(uint32 *count, size_t *stack_bytes)
+{
+	if (count != NULL)
+		*count = task_count;
+	if (stack_bytes != NULL)
+		*stack_bytes = task_stack_bytes;
 }

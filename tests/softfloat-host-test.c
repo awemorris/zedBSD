@@ -1,5 +1,5 @@
 /*
- * Boots soft-float known-vector tests
+ * zedBSD soft-float known-vector tests
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */

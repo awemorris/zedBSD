@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_STDINT_H
-#define BOOTS_STDINT_H
+#ifndef ZEDBSD_STDINT_H
+#define ZEDBSD_STDINT_H
 
 typedef __INT8_TYPE__ int8_t;
 typedef __UINT8_TYPE__ uint8_t;

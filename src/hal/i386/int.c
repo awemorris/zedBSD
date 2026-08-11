@@ -229,8 +229,9 @@ static void handle_fault(struct interrupt_frame *fp)
 		trap.eax = fp->regs.eax;
 		trap.error_code = fp->error_code;
 		trap.fault_address = int_num == INT_PAGEFAULT ? asm_get_cr2() : 0;
-		if (user_fault_handler != NULL)
-			user_fault_handler(&trap);
+		if (user_fault_handler != NULL &&
+		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS)
+			return;
 		HAL_FATAL("user fault handler returned");
 	} else {
 		hal_printf("[INT] int 0x%02X handled!\n"

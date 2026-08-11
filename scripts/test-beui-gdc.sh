@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Exercise the display backend and BMP pipeline in a real BOOT.SYS VM.
+# Exercise the display backend and BMP pipeline in a real vmunix VM.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-machine="${BOOTS_BEUI_MACHINE:-pc9801}"
-cpu="${BOOTS_BEUI_CPU:-386}"
-memory="${BOOTS_BEUI_MEMORY:-6}"
-expected_height="${BOOTS_BEUI_EXPECT_HEIGHT:-400}"
-backend_name="${BOOTS_BEUI_BACKEND_NAME:-GDC}"
-test_tag="${BOOTS_BEUI_TEST_TAG:-gdc}"
-bits_per_pixel="${BOOTS_BEUI_BITS_PER_PIXEL:-24}"
-base="${BOOTS_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
+machine="${ZEDBSD_BEUI_MACHINE:-pc9801}"
+cpu="${ZEDBSD_BEUI_CPU:-386}"
+memory="${ZEDBSD_BEUI_MEMORY:-6}"
+expected_height="${ZEDBSD_BEUI_EXPECT_HEIGHT:-400}"
+backend_name="${ZEDBSD_BEUI_BACKEND_NAME:-GDC}"
+test_tag="${ZEDBSD_BEUI_TEST_TAG:-gdc}"
+bits_per_pixel="${ZEDBSD_BEUI_BITS_PER_PIXEL:-24}"
+base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/beui-g2a-$test_tag"
 image="$work/g2a-ide.raw"
 files="$work/files"
-cfg="$work/BOOTS.CFG"
+cfg="$work/ZEDBSD.CFG"
 monitor="$work/monitor.sock"
 screenshot="$work/g2a.ppm"
 
@@ -34,7 +34,7 @@ mkdir -p "$work" "$files"
 cp --reflink=auto "$base" "$image"
 case "$bits_per_pixel" in
 	8|24) ;;
-	*) echo "BOOTS_BEUI_BITS_PER_PIXEL must be 8 or 24" >&2; exit 1 ;;
+	*) echo "ZEDBSD_BEUI_BITS_PER_PIXEL must be 8 or 24" >&2; exit 1 ;;
 esac
 cat > "$files/G2A.NCT" <<'EOF'
 func main() {
@@ -92,8 +92,8 @@ with open(sys.argv[1], 'wb') as stream:
     stream.write(pixels)
 PY
 
-make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
-BOOTS_AUTOEXEC="$files/G2A.NCT" BOOTS_FILES="$files" DISK_SECTORS=17 \
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+ZEDBSD_AUTOEXEC="$files/G2A.NCT" ZEDBSD_FILES="$files" DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'
@@ -250,4 +250,4 @@ if expected_height >= 480:
     if not expected.issubset(colors):
         raise SystemExit(f'24bpp colors missing: {expected - colors}')
 PY
-printf 'Boots BeUI %s/BMP QEMU test: PASS (%s)\n' "$backend_name" "$image"
+printf 'zedBSD BeUI %s/BMP QEMU test: PASS (%s)\n' "$backend_name" "$image"

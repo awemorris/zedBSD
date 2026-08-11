@@ -101,17 +101,17 @@ static void port_out8(void *context, uint16_t port, uint8_t value)
 static int display_reset(void *context)
 {
 	(void)context;
-	return boots_pc98_display_graphics_start();
+	return zedbsd_pc98_display_graphics_start();
 }
 
 static int display_stop(void *context)
 {
 	(void)context;
-	return boots_pc98_display_graphics_stop();
+	return zedbsd_pc98_display_graphics_stop();
 }
 
 int
-boots_pc98_beui_init(uint64_t (*milliseconds)(void *),
+zedbsd_pc98_beui_init(uint64_t (*milliseconds)(void *),
 		     int (*key_state)(void *, int), void (*drain)(void *))
 {
 	noct_beui_pc98_auto_default(&display, display_reset, display_stop, NULL,
@@ -141,12 +141,12 @@ boots_pc98_beui_init(uint64_t (*milliseconds)(void *),
 	hal.input.context = NULL;
 	hal.input.is_key_down = key_state;
 	hal.input.drain = drain;
-	boots_noct_set_beui_hal(&hal);
+	zedbsd_noct_set_beui_hal(&hal);
 	return 1;
 }
 
 int
-boots_pc98_beui_clear_graphics(void)
+zedbsd_pc98_beui_clear_graphics(void)
 {
 	return noct_beui_pc98_gdc_clear_graphics(&display.gdc);
 }

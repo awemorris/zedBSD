@@ -7,7 +7,7 @@ path = sys.argv[1]
 data = bytearray(open(path, "rb").read())
 
 if len(data) < 36 or data[:4] != b"B98A":
-    raise SystemExit("invalid Boots applet")
+    raise SystemExit("invalid zedBSD applet")
 
 if struct.unpack_from("<I", data, 8)[0] != len(data):
     raise SystemExit("inconsistent applet size")

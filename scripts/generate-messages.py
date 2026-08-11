@@ -27,13 +27,13 @@ def main() -> int:
 
     lines = [
         "/* Generated from src/kern/messages.txt; do not edit. */",
-        "#ifndef BOOTS_MESSAGES_H",
-        "#define BOOTS_MESSAGES_H",
+        "#ifndef ZEDBSD_MESSAGES_H",
+        "#define ZEDBSD_MESSAGES_H",
         "",
     ]
     for identifier, encoded in entries:
         values = ", ".join(f"0x{byte:02x}" for byte in encoded + b"\0")
-        lines.append(f"static const char boots_msg_{identifier}[] = {{ {values} }};")
+        lines.append(f"static const char zedbsd_msg_{identifier}[] = {{ {values} }};")
     lines.extend(["", "#endif", ""])
     contents = "\n".join(lines)
     if not output.exists() or output.read_text(encoding="ascii") != contents:

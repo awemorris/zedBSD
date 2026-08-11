@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_STDBOOL_H
-#define BOOTS_STDBOOL_H
+#ifndef ZEDBSD_STDBOOL_H
+#define ZEDBSD_STDBOOL_H
 
 #define bool _Bool
 #define true 1

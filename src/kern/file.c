@@ -60,13 +60,30 @@ file_openat(struct cwdinfo *context, const char *path, int flags,
 	    ((flags & O_EXCL) != 0 && (flags & O_CREAT) == 0))
 		return EINVAL;
 	error = namei_at(context, path, &inode);
-	if (error == ENOENT && (flags & O_CREAT)) {
+	if (error == ENOENT &&
+	    ((flags & O_ACCMODE) != O_RDONLY ||
+	     (flags & (O_CREAT | O_TRUNC | O_APPEND)) != 0)) {
 		struct inode *parent;
+		struct inode *collision;
 		struct componentname last;
 		char storage[NAME_MAX + 1U];
 		error = namei_parent_at(context, path, &parent, &last, storage);
 		if (error != 0)
 			return error;
+		error = inode_lookup_casefold(parent, &last, &collision);
+		if (error == 0) {
+			inode_release(collision);
+			inode_release(parent);
+			return EEXIST;
+		}
+		if (error != ENOENT && error != EOPNOTSUPP) {
+			inode_release(parent);
+			return error;
+		}
+		if ((flags & O_CREAT) == 0) {
+			inode_release(parent);
+			return ENOENT;
+		}
 		error = inode_create(parent, &last, mode, &inode);
 		inode_release(parent);
 		if (error != 0)
@@ -157,12 +174,31 @@ file_read(struct file *file, void *buffer, size_t length)
 }
 
 ssize_t
+file_pread(struct file *file, void *buffer, size_t length, off_t offset)
+{
+	off_t saved;
+	ssize_t result;
+
+	if (file == NULL || offset < 0)
+		return -EINVAL;
+	saved = file->f_offset;
+	if (file_seek(file, offset, 0) != offset)
+		return -EIO;
+	result = file_read(file, buffer, length);
+	file->f_offset = saved;
+	return result;
+}
+
+ssize_t
 file_write(struct file *file, const void *buffer, size_t length)
 {
 	if (file == NULL || buffer == NULL)
 		return -EINVAL;
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
 		return -EBADF;
+	if (file->f_inode != NULL &&
+	    (file->f_inode->i_flags & INODE_SWAPFILE) != 0)
+		return -EBUSY;
 	if (file->f_inode != NULL && file->f_inode->i_type == INODE_DIR)
 		return -EISDIR;
 	if (file->f_ops == NULL || file->f_ops->write == NULL)
@@ -232,6 +268,13 @@ file_close(struct file *file)
 		inode_release(file->f_inode);
 	file_free(file);
 	return error;
+}
+
+void
+file_ref(struct file *file)
+{
+	if (file != NULL && file->f_usecount != 0)
+		file->f_usecount++;
 }
 
 void

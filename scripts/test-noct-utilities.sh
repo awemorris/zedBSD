@@ -2,19 +2,19 @@
 set -euo pipefail
 
 # End-to-end test for the safe M11 Noct utilities.  Only a private image below
-# build/tests is modified; the release image is copied before BOOT.SYS or FAT
+# build/tests is modified; the release image is copied before vmunix or FAT
 # contents are changed.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-base="${BOOTS_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
+base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/m11-utilities"
 image="$work/m11-ide.raw"
 files="$work/files"
-cfg="$work/BOOTS.CFG"
+cfg="$work/ZEDBSD.CFG"
 source_file="$files/SOURCE.BIN"
 copied_file="$work/COPY.BIN"
 
@@ -42,8 +42,8 @@ with open(sys.argv[1], "wb") as stream:
     stream.write(bytes((index * 37 + 11) & 0xff for index in range(16417)))
 PY
 printf 'ls\ncp SOURCE.BIN COPY.BIN\nhalt\n' > "$cfg"
-make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
-BOOTS_FILES="$files" DISK_HEADS=8 DISK_SECTORS=17 \
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+ZEDBSD_FILES="$files" DISK_HEADS=8 DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'

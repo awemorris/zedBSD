@@ -1,5 +1,5 @@
 /*
- * Boots Noct memory profile selection
+ * zedBSD Noct memory profile selection
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -26,53 +26,53 @@ struct profile_limits {
 };
 
 static const struct profile_limits limits[] = {
-	[BOOTS_NOCT_MEMORY_5] = {
+	[ZEDBSD_NOCT_MEMORY_5] = {
 		"5M", 4U * MIB, 512U * KIB, 8U * KIB,
 		128U * KIB, 32U * KIB, 512U * KIB, 96U * KIB,
 	},
-	[BOOTS_NOCT_MEMORY_8] = {
+	[ZEDBSD_NOCT_MEMORY_8] = {
 		"8M", 8U * MIB, 512U * KIB, 16U * KIB,
 		256U * KIB, 64U * KIB, 1U * MIB, 192U * KIB,
 	},
-	[BOOTS_NOCT_MEMORY_16] = {
+	[ZEDBSD_NOCT_MEMORY_16] = {
 		"16M", 14U * MIB, 512U * KIB, 32U * KIB,
 		512U * KIB, 128U * KIB, 2U * MIB, 256U * KIB,
 	},
-	[BOOTS_NOCT_MEMORY_32] = {
+	[ZEDBSD_NOCT_MEMORY_32] = {
 		"32M", 16U * MIB, 512U * KIB, 32U * KIB,
 		1U * MIB, 256U * KIB, 4U * MIB, 512U * KIB,
 	},
-	[BOOTS_NOCT_MEMORY_64] = {
+	[ZEDBSD_NOCT_MEMORY_64] = {
 		"64M", 48U * MIB, 512U * KIB, 32U * KIB,
 		2U * MIB, 256U * KIB, 8U * MIB, 1U * MIB,
 	},
-	[BOOTS_NOCT_MEMORY_LARGE] = {
+	[ZEDBSD_NOCT_MEMORY_LARGE] = {
 		">64M", 64U * MIB, 512U * KIB, 32U * KIB,
 		2U * MIB, 512U * KIB, 16U * MIB, 2U * MIB,
 	},
 };
 
-static enum boots_noct_memory_class
+static enum zedbsd_noct_memory_class
 classify(uint32_t installed_mib)
 {
 	if (installed_mib < 8U)
-		return BOOTS_NOCT_MEMORY_5;
+		return ZEDBSD_NOCT_MEMORY_5;
 	if (installed_mib < 16U)
-		return BOOTS_NOCT_MEMORY_8;
+		return ZEDBSD_NOCT_MEMORY_8;
 	if (installed_mib < 32U)
-		return BOOTS_NOCT_MEMORY_16;
+		return ZEDBSD_NOCT_MEMORY_16;
 	if (installed_mib < 64U)
-		return BOOTS_NOCT_MEMORY_32;
+		return ZEDBSD_NOCT_MEMORY_32;
 	if (installed_mib == 64U)
-		return BOOTS_NOCT_MEMORY_64;
-	return BOOTS_NOCT_MEMORY_LARGE;
+		return ZEDBSD_NOCT_MEMORY_64;
+	return ZEDBSD_NOCT_MEMORY_LARGE;
 }
 
 int
-boots_noct_select_memory(uint32_t low_extended_bytes,
+zedbsd_noct_select_memory(uint32_t low_extended_bytes,
 			  uint32_t high_memory_mib,
 			  uint32_t low_reserved_bytes,
-			  struct boots_noct_memory_profile *profile)
+			  struct zedbsd_noct_memory_profile *profile)
 {
 	const struct profile_limits *selected;
 	uint64_t high_bytes;
@@ -81,7 +81,7 @@ boots_noct_select_memory(uint32_t low_extended_bytes,
 	uintptr_t arena_base;
 	size_t available;
 	size_t arena_size;
-	enum boots_noct_memory_class memory_class;
+	enum zedbsd_noct_memory_class memory_class;
 
 	if (profile == NULL)
 		return 0;

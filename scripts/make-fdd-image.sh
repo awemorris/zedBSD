@@ -3,8 +3,8 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 output="${1:-$build/fdd-test.img}"
 
 if [ -e "$output" ]; then
@@ -19,7 +19,7 @@ for command in mformat mcopy mattrib mmd python3; do
 	}
 done
 
-make -C "$repo" ARCH="$arch" "build/$arch/fdd-ipl.bin" "build/$arch/IO.SYS" "build/$arch/BOOT.SYS"
+make -C "$repo" ARCH="$arch" "build/$arch/fdd-ipl.bin" "build/$arch/IO.SYS" "build/$arch/vmunix"
 
 # Stage 1 lives raw in the reserved sectors 3..16.
 io_sys_size="$(stat -c %s "$build/IO.SYS")"
@@ -53,8 +53,8 @@ PY
 
 dd if="$build/IO.SYS" of="$output" bs=512 seek=2 conv=notrunc status=none
 
-mcopy -i "$output" "$build/BOOT.SYS" ::BOOT.SYS
-mattrib -i "$output" +r +h +s ::BOOT.SYS
+mcopy -i "$output" "$build/vmunix" ::vmunix
+mattrib -i "$output" +r +h +s ::vmunix
 mcopy -i "$output" "$repo/apps/AUTOEXEC.NCT" ::AUTOEXEC.NCT
 if [ -f "$repo/apps/HELLO.NCT" ]; then
 	mcopy -i "$output" "$repo/apps/HELLO.NCT" ::HELLO.NCT
@@ -84,4 +84,4 @@ mcopy -i "$output" "$repo/apps/EMACS.RC" ::HOME/.remacs.el
 mcopy -i "$output" "$repo/apps/EMACS.RC" ::HOME/.emacs
 
 sha256sum "$output"
-printf 'Boots FDD image: %s\n' "$output"
+printf 'zedBSD FDD image: %s\n' "$output"

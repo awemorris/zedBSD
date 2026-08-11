@@ -1,5 +1,5 @@
 /*
- * Boots minimal real-mode system loader
+ * zedBSD minimal real-mode system loader
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
@@ -8,9 +8,9 @@
 /*
  * The FAT16 PBR (fixed disk) or the FDD IPL (FAT12 floppy) loads this file
  * at 1000:0000 and supplies a versioned bootstrap handoff at 0000:0700.
- * IO.SYS validates that handoff, loads BOOT.SYS from the already selected
+ * IO.SYS validates that handoff, loads vmunix from the already selected
  * BOOT volume, installs the BIOS gateway, and enters 32-bit protected mode.
- * Device discovery and all normal UI are intentionally owned by BOOT.SYS.
+ * Device discovery and all normal UI are intentionally owned by vmunix.
  */
 
 	.code16
@@ -43,7 +43,7 @@
 	.set ATTR_SEG,            0xa200
 	.set STACK_SEG,           0x9000
 	/*
-	 * BOOT.SYS is a two-segment ELF (subset enforced by
+	 * vmunix is a two-segment ELF (subset enforced by
 	 * scripts/patch-stage2.py): the low segment loads at 0x20000 and
 	 * the high segment at 0x100000, so the size bound is a file-size
 	 * sanity cap, not a memory window.
@@ -297,7 +297,7 @@ enumerate_ide_devices:
 	popw	%ax
 	ret
 
-/* Load and validate BOOT.SYS from the handoff BOOT FAT16 volume. */
+/* Load and validate vmunix from the handoff BOOT FAT16 volume. */
 load_stage2:
 	movw	$0x0800, %ax
 	movw	%ax, %es
@@ -1207,7 +1207,7 @@ gateway_key_poll:
 	 * undocumented return register.  The consuming AH=00h call remains the
 	 * single source of the key-data and modifier snapshot.
 	 *
-	 * BOOT.SYS has no protected-mode IDT and therefore runs with IF clear.
+	 * vmunix has no protected-mode IDT and therefore runs with IF clear.
 	 * Do not use STI/HLT here: the compatible BIOS deliberately leaves the
 	 * PIT stopped when no BIOS timer event is active, so an empty queue could
 	 * sleep forever and prevent the menu timeout from advancing.  Returning
@@ -1264,7 +1264,7 @@ gateway_display_stop:
 	movl	$0, %cs:gateway_result
 	jmp	gateway_real_return
 
-/* BOOT.SYS now owns its menu. These legacy service numbers remain stable. */
+/* vmunix now owns its menu. These legacy service numbers remain stable. */
 gateway_return_menu:
 gateway_reprobe:
 	movl	$0, %cs:gateway_result
@@ -1272,7 +1272,7 @@ gateway_reprobe:
 
 /*
  * Probe exactly one fixed BIOS unit. request.status supplies the IDE/SCSI
- * class and request.buffer receives one 16-byte boots_device descriptor.
+ * class and request.buffer receives one 16-byte zedbsd_device descriptor.
  */
 gateway_probe_fixed:
 	movb	%es:2(%bx), %al
@@ -1552,9 +1552,9 @@ protected_entry:
 	jmp	*%eax
 	.code16
 
-fatal_handoff_message: .asciz "Boots: invalid PBR handoff"
-fatal_stage2_message:  .asciz "Boots: cannot load BOOT.SYS"
-stage2_name:           .ascii "BOOT    SYS"
+fatal_handoff_message: .asciz "zedBSD: invalid PBR handoff"
+fatal_stage2_message:  .asciz "zedBSD: cannot load vmunix"
+stage2_name:           .ascii "VMUNIX     "
 
 	.balign 2
 disk_flags:            .word 0

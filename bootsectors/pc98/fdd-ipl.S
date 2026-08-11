@@ -1,12 +1,12 @@
 /*
- * Boots
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
  */
 
 /*
- * Boots 1.44 MiB floppy Stage 0.
+ * zedBSD 1.44 MiB floppy Stage 0.
  *
  * The boot sector doubles as the FAT12 BPB: make-fdd-image.sh merges the
  * code below around the BPB that mformat writes, so bytes 11..61 belong

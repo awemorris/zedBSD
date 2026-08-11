@@ -1,4 +1,4 @@
 func main(args) {
-    Console.write("Boots-M7-BUILTIN-PRECEDENCE-FAIL\n");
+    Console.write("zedBSD-M7-BUILTIN-PRECEDENCE-FAIL\n");
     return 1;
 }

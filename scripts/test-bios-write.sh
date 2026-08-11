@@ -4,9 +4,9 @@ set -euo pipefail
 # Destructive BIOS write/read/restore test.  Only private copies below build/
 # are modified; release images and source images are never opened writable.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
 selection="${1:-all}"
@@ -15,7 +15,7 @@ work="$build/tests/m9-bios-write"
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios_dir" || { echo "PC-98 BIOS directory not found: $bios_dir" >&2; exit 1; }
 mkdir -p "$work"
-make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT-M9.SYS
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix-m9
 
 run_one()
 {
@@ -33,7 +33,7 @@ run_one()
 	cp --reflink=auto "$base" "$image"
 	truncate -s $((new_sectors * 512)) "$image"
 	printf 'm9-write-test %s\nhalt\n' "$old_sectors" > "$cfg"
-	BOOTS_STAGE2_IMAGE="$build/BOOT-M9.SYS" \
+	ZEDBSD_VMUNIX_IMAGE="$build/vmunix-m9" \
 		DISK_HEADS="$heads" DISK_SECTORS="$sectors" \
 		"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 	dd if="$image" of="$before" bs=512 skip="$old_sectors" count=1 status=none

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef BOOTS_PC98_PARTITION_H
-#define BOOTS_PC98_PARTITION_H
+#ifndef ZEDBSD_PC98_PARTITION_H
+#define ZEDBSD_PC98_PARTITION_H
 
 #include "kern/partition.h"
 

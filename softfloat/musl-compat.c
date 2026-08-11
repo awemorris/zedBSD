@@ -1,5 +1,5 @@
 /*
- * Boots adapters for the selected musl string scanner.
+ * zedBSD adapters for the selected musl string scanner.
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */

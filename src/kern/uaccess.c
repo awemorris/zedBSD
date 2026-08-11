@@ -26,8 +26,7 @@ int copyin(uintptr_t source, void *destination, size_t size)
 	if (destination == NULL ||
 	    user_range_check(source, size, HAL_SPACE_READ) != 0)
 		return EFAULT;
-	memcpy(destination, (const void *)source, size);
-	return 0;
+	return vmspace_copy_from(current_vmspace(), destination, source, size);
 }
 
 int copyout(const void *source, uintptr_t destination, size_t size)
@@ -37,8 +36,7 @@ int copyout(const void *source, uintptr_t destination, size_t size)
 	if (source == NULL ||
 	    user_range_check(destination, size, HAL_SPACE_WRITE) != 0)
 		return EFAULT;
-	memcpy((void *)destination, source, size);
-	return 0;
+	return vmspace_copy_to(current_vmspace(), destination, source, size);
 }
 
 int copyinstr(uintptr_t source, char *destination, size_t capacity,

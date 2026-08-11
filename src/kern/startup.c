@@ -31,9 +31,9 @@ const char *startup_config_file(void)
 {
 	struct inode *inode;
 
-	if (namei_at(&kern_cwdinfo, "BOOTS.CFG", &inode) == 0) {
+	if (namei_at(&kern_cwdinfo, "ZEDBSD.CFG", &inode) == 0) {
 		inode_release(inode);
-		return "BOOTS.CFG";
+		return "ZEDBSD.CFG";
 	}
 	if (namei_at(&kern_cwdinfo, "BOOT.CFG", &inode) == 0) {
 		inode_release(inode);
@@ -70,7 +70,7 @@ static void consider_automatic_device(struct startup_state *state, int device)
 	int config_partition = -1;
 	enum startup_config_kind config_kind = STARTUP_CONFIG_NONE;
 
-	if (device < 0 || !(devs[device].flags & BOOTS_DEV_HAS_GEOMETRY) ||
+	if (device < 0 || !(devs[device].flags & ZEDBSD_DEV_HAS_GEOMETRY) ||
 	    !scanparts(device))
 		return;
 	register_scanned_disk(device);
@@ -78,7 +78,7 @@ static void consider_automatic_device(struct startup_state *state, int device)
 		if (!parts[partition].valid)
 			continue;
 		/* The BOOT volume's PBR reloads this loader.  It must not be the
-		 * fallback target when BOOTS.CFG is absent, or Auto loops forever. */
+		 * fallback target when ZEDBSD.CFG is absent, or Auto loops forever. */
 		if (first_bootable < 0 && parts[partition].bootable &&
 		    !streq(parts[partition].name, "BOOT"))
 			first_bootable = partition;
@@ -157,7 +157,7 @@ int run_autoexec(void)
 				  PROCESS_SPAWN_RESULT, action, sizeof(action));
 	/* A graphical script may have owned Cirrus or GDC graphics.  Restore the
 	 * firmware text display and erase every GDC graphics plane before its
-	 * selected Boots command runs.  Real Cirrus-equipped machines retain the
+	 * selected zedBSD command runs.  Real Cirrus-equipped machines retain the
 	 * old graphics VRAM contents when the display is switched back to GDC. */
 	kern_platform_restore_text();
 	hal_cons_reset();
@@ -191,10 +191,10 @@ int run_autoexec(void)
 
 static void draw_startup_header(void)
 {
-	hal_cons_write_at(0, 0, boots_msg_machine);
-	hal_cons_write_at(2, 0, boots_msg_loader);
-	hal_cons_write_at(3, 0, boots_msg_copyright);
-	hal_cons_write_at(5, 0, boots_msg_probing);
+	hal_cons_write_at(0, 0, zedbsd_msg_machine);
+	hal_cons_write_at(2, 0, zedbsd_msg_loader);
+	hal_cons_write_at(3, 0, zedbsd_msg_copyright);
+	hal_cons_write_at(5, 0, zedbsd_msg_probing);
 }
 
 static void draw_probe_bar(unsigned current, unsigned total)
@@ -226,11 +226,11 @@ static void draw_probe_progress(unsigned current, unsigned total,
 {
 
 	hal_cons_clear_row(5);
-	hal_cons_write_at(5, 0, boots_msg_probing);
+	hal_cons_write_at(5, 0, zedbsd_msg_probing);
 	putc(' ');
-	puts(device_class == BOOTS_DEV_IDE ? "IDE " : "SCSI ");
+	puts(device_class == ZEDBSD_DEV_IDE ? "IDE " : "SCSI ");
 	dec((unsigned)bios_id -
-	    (device_class == BOOTS_DEV_IDE ? 0x80U : 0xa0U) + 1U);
+	    (device_class == ZEDBSD_DEV_IDE ? 0x80U : 0xa0U) + 1U);
 	puts(" (");
 	dec(current);
 	putc('/');
@@ -243,11 +243,11 @@ static void draw_automatic_status(const struct startup_state *state)
 {
 	draw_probe_bar(state->probe_total, state->probe_total);
 	hal_cons_clear_row(5);
-	hal_cons_write_at(5, 0, boots_msg_automatic_run);
+	hal_cons_write_at(5, 0, zedbsd_msg_automatic_run);
 	if (state->auto_config_kind == STARTUP_CONFIG_AUTOEXEC)
 		puts(" AUTOEXEC.NCT");
 	else if (state->auto_config_kind == STARTUP_CONFIG_BOOTCFG)
-		puts(" BOOTS.CFG");
+		puts(" ZEDBSD.CFG");
 }
 
 static void draw_startup_menu(const struct startup_state *state)
@@ -256,25 +256,25 @@ static void draw_startup_menu(const struct startup_state *state)
 		hal_cons_clear_row(menu_row);
 	hal_cons_write_at(6, 0, "");
 	dec(state->fixed_count);
-	puts((const char *)boots_msg_found_suffix);
-	hal_cons_write_at(8, 0, boots_msg_boot_from);
-	hal_cons_write_at(9, 0, boots_msg_auto_prefix);
+	puts((const char *)zedbsd_msg_found_suffix);
+	hal_cons_write_at(8, 0, zedbsd_msg_boot_from);
+	hal_cons_write_at(9, 0, zedbsd_msg_auto_prefix);
 	if (state->phase == STARTUP_DRAW || state->phase == STARTUP_PROBE) {
-		puts((const char *)boots_msg_searching);
+		puts((const char *)zedbsd_msg_searching);
 	} else if (state->auto_kind != STARTUP_AUTO_NONE) {
-		puts(devs[state->auto_device].device_class == BOOTS_DEV_FDD ?
+		puts(devs[state->auto_device].device_class == ZEDBSD_DEV_FDD ?
 		     "FDD " : "HDD ");
 		dec(fixed_device_ordinal(state->auto_device));
-		puts((const char *)boots_msg_partition);
+		puts((const char *)zedbsd_msg_partition);
 		dec((unsigned)state->auto_partition + 1);
 		if (state->auto_kind == STARTUP_AUTO_CONFIG) {
 			if (state->auto_config_kind == STARTUP_CONFIG_AUTOEXEC)
-				puts((const char *)boots_msg_run_autoexec);
+				puts((const char *)zedbsd_msg_run_autoexec);
 			else
-				puts((const char *)boots_msg_run_cfg);
+				puts((const char *)zedbsd_msg_run_cfg);
 		}
 	} else {
-		puts((const char *)boots_msg_unavailable);
+		puts((const char *)zedbsd_msg_unavailable);
 	}
 	putc(')');
 
@@ -284,11 +284,11 @@ static void draw_startup_menu(const struct startup_state *state)
 		hal_cons_write_at(9 + ordinal, 0,
 					"  ");
 		putc((char)('1' + ordinal));
-		puts((const char *)boots_msg_fixed_disk_prefix);
+		puts((const char *)zedbsd_msg_fixed_disk_prefix);
 		dec(ordinal);
 	}
-	hal_cons_write_at(15, 0, boots_msg_esc_shell);
-	hal_cons_write_at(17, 0, boots_msg_select);
+	hal_cons_write_at(15, 0, zedbsd_msg_esc_shell);
+	hal_cons_write_at(17, 0, zedbsd_msg_select);
 	update_cursor();
 }
 
@@ -325,7 +325,7 @@ static void chain_automatic_partition(const struct startup_state *state)
 	puts("Chain boot is not available on the HAL yet.\n");
 }
 
-/* Return -1 for an ignored key, zero for Shell, and one for BOOTS.CFG. */
+/* Return -1 for an ignored key, zero for Shell, and one for ZEDBSD.CFG. */
 static int handle_startup_key(struct startup_state *state, int key_code)
 {
 	if (key_code == 0x1b) {
@@ -378,13 +378,13 @@ static void probe_next_startup_device(struct startup_state *state)
 			return;
 		candidate = state->next_candidate++;
 		if (candidate < MAX_IDE_DEVICES) {
-			device_class = BOOTS_DEV_IDE;
+			device_class = ZEDBSD_DEV_IDE;
 			bios_id = 0x80 + candidate;
 			if (state->ide_bitmap & (1U << candidate))
 				break;
 			continue;
 		}
-		device_class = BOOTS_DEV_SCSI;
+		device_class = ZEDBSD_DEV_SCSI;
 		bios_id = 0xa0 + candidate - MAX_IDE_DEVICES;
 		if (state->scsi_bitmap &
 		    (1U << (candidate - MAX_IDE_DEVICES)))
@@ -404,7 +404,7 @@ static void probe_next_startup_device(struct startup_state *state)
 int startup_menu(struct startup_state *state)
 {
 	curdev = curpart = -1;
-	boots_namespace_init(&mounted_namespace);
+	zedbsd_namespace_init(&mounted_namespace);
 	state->phase = STARTUP_DRAW;
 	state->next_candidate = 0;
 	state->ide_bitmap = ide_reported_drives();

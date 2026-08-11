@@ -7,6 +7,7 @@
 #include "kern/user-probe.h"
 #include "kern/process.h"
 #include "kern/thread.h"
+#include "kern/vmspace.h"
 
 #include <hal/hal.h>
 
@@ -30,12 +31,24 @@ observe_user_int(const struct hal_user_trap *trap)
 	user_int_probe.magic = USER_INT_PROBE_MAGIC;
 }
 
-static void
+static int
 observe_user_fault(const struct hal_user_trap *trap)
 {
 	struct thread *thread = curthread;
 	if (thread == NULL || thread->proc == NULL || trap == NULL)
-		return;
+		return HAL_TRAP_RET_FAILED;
+	if (trap->vector == 14U && thread->proc->vmspace != NULL) {
+		uint32_t required = (trap->error_code & 0x10U) ? HAL_SPACE_EXEC :
+			(trap->error_code & 2U) ? HAL_SPACE_WRITE : HAL_SPACE_READ;
+		int error;
+
+		hal_irq_enable();
+		error = vmspace_fault(thread->proc->vmspace,
+				      trap->fault_address, required);
+		(void)hal_irq_disable();
+		if (error == 0)
+			return HAL_TRAP_RET_SUCCESS;
+	}
 	thread->fault_vector = trap->vector;
 	thread->fault_eip = trap->eip;
 	thread->fault_address = trap->fault_address;
@@ -50,6 +63,7 @@ observe_user_fault(const struct hal_user_trap *trap)
 	hal_compiler_barrier();
 	user_fault_probe.magic = USER_FAULT_PROBE_MAGIC;
 	exit1(-(int)trap->vector);
+	return HAL_TRAP_RET_FAILED;
 }
 
 void

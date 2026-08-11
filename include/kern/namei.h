@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef BOOTS_KERN_NAMEI_H
-#define BOOTS_KERN_NAMEI_H
+#ifndef ZEDBSD_KERN_NAMEI_H
+#define ZEDBSD_KERN_NAMEI_H
 
 #include "kern/inode.h"
 #include <limits.h>
@@ -15,8 +15,8 @@
 #ifndef PATH_MAX
 #define PATH_MAX 256U
 #endif
-#ifndef BOOTS_PATH_MAX
-#define BOOTS_PATH_MAX PATH_MAX
+#ifndef ZEDBSD_PATH_MAX
+#define ZEDBSD_PATH_MAX PATH_MAX
 #endif
 
 #define COMPONENT_LAST 0x0001U
@@ -34,7 +34,7 @@ struct cwdinfo {
 	unsigned flags;
 	struct inode *root;
 	struct inode *cwd;
-	char cwd_path[BOOTS_PATH_MAX];
+	char cwd_path[ZEDBSD_PATH_MAX];
 };
 
 int namei_at(struct cwdinfo *, const char *, struct inode **);

@@ -1,31 +1,31 @@
 /*
- * Boots Noct native APIs
+ * zedBSD Noct native APIs
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef BOOTS_NOCT_NAPI_H
-#define BOOTS_NOCT_NAPI_H
+#ifndef ZEDBSD_NOCT_NAPI_H
+#define ZEDBSD_NOCT_NAPI_H
 
 #include <stddef.h>
 #include <stdint.h>
 
 /*
  * The normalized key namespace lives upstream with BeUI, because the
- * same compiled script must observe identical Key.* values in Boots, on
- * PC-98 MS-DOS, and on a desktop host.  Boots' own Screen and Keyboard
+ * same compiled script must observe identical Key.* values in zedBSD, on
+ * PC-98 MS-DOS, and on a desktop host.  zedBSD' own Screen and Keyboard
  * modules use the same codes so a script never has two vocabularies.
  */
 #include <noct/beui.h>
 
 typedef struct rt_env NoctEnv;
 
-#define BOOTS_NOCT_DIRECTORY_MAX 256U
-#define BOOTS_NOCT_PATH_MAX 256U
-#define BOOTS_NOCT_SOURCE_MAX (256U * 1024U)
+#define ZEDBSD_NOCT_DIRECTORY_MAX 256U
+#define ZEDBSD_NOCT_PATH_MAX 256U
+#define ZEDBSD_NOCT_SOURCE_MAX (256U * 1024U)
 
-struct boots_noct_dirent {
-	char name[BOOTS_NOCT_PATH_MAX];
+struct zedbsd_noct_dirent {
+	char name[ZEDBSD_NOCT_PATH_MAX];
 	uint64_t size;
 	uint8_t attributes;
 };
@@ -35,7 +35,7 @@ struct boots_noct_dirent {
  * to the GDC, BIOS keyboard gateway, and the selected filesystem.  Host tests
  * supply deterministic in-memory implementations.
  */
-struct boots_noct_services {
+struct zedbsd_noct_services {
 	void *context;
 	/*
 	 * Optional.  Binding this pointer does not touch graphical hardware.
@@ -63,16 +63,16 @@ struct boots_noct_services {
 			 void *buffer, uint32_t length);
 	/* Return 1 for an entry, 0 at end, and -1 for an invalid path/I/O. */
 	int (*directory_read)(void *context, const char *path, unsigned index,
-			      struct boots_noct_dirent *entry);
+			      struct zedbsd_noct_dirent *entry);
 };
 
-struct boots_noct_options;
+struct zedbsd_noct_options;
 
 /* Convert the PC-98 BIOS AX pair to the stable BE key namespace. */
-int boots_key_normalize_bios_ax(uint16_t bios_ax);
+int zedbsd_key_normalize_bios_ax(uint16_t bios_ax);
 
-int boots_noct_napi_register(NoctEnv *env,
-			      const struct boots_noct_options *options);
-void boots_noct_napi_cleanup(void);
+int zedbsd_noct_napi_register(NoctEnv *env,
+			      const struct zedbsd_noct_options *options);
+void zedbsd_noct_napi_cleanup(void);
 
 #endif

@@ -1,13 +1,13 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_KERN_PLATFORM_H
-#define BOOTS_KERN_PLATFORM_H
+#ifndef ZEDBSD_KERN_PLATFORM_H
+#define ZEDBSD_KERN_PLATFORM_H
 
 #include <stddef.h>
 #include <stdint.h>
 #include "kern/boot.h"
 
 struct disk;
-struct boots_filesystem;
+struct zedbsd_filesystem;
 
 struct kern_graphics_mode {
 	unsigned preferred_bits_per_pixel;
@@ -24,15 +24,15 @@ struct kern_graphics_image {
 
 #define KERN_PLATFORM_MAX_DEVICES 12U
 
-size_t kern_platform_init(const struct boots_handoff *handoff,
-			  struct boots_device *devices, size_t capacity);
-void kern_platform_refresh_devices(const struct boots_device *devices,
+size_t kern_platform_init(const struct zedbsd_handoff *handoff,
+			  struct zedbsd_device *devices, size_t capacity);
+void kern_platform_refresh_devices(const struct zedbsd_device *devices,
 				   size_t count);
 struct disk *kern_platform_block_device(
-	const struct boots_device *device);
-int kern_platform_boot_linux(struct boots_filesystem *filesystem,
+	const struct zedbsd_device *device);
+int kern_platform_boot_linux(struct zedbsd_filesystem *filesystem,
 			     const char *path, const char *arguments,
-			     const struct boots_device *devices, unsigned count,
+			     const struct zedbsd_device *devices, unsigned count,
 			     int boot_device);
 int kern_platform_graphics_init(uint64_t (*milliseconds)(void *),
 				int (*key_state)(void *, int),

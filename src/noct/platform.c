@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  *
- * Boots Noct target adapter
+ * zedBSD Noct target adapter
  * This will be removed after Noct is moved to userspace.
  */
 
@@ -26,7 +26,7 @@
 
 #define SCRIPT_HEAP_MIN (2U * 1024U * 1024U)
 
-static const char embedded_source[] = BOOTS_NOCT_M6_SOURCE;
+static const char embedded_source[] = ZEDBSD_NOCT_M6_SOURCE;
 static const struct noct_beui_hal *target_beui_hal;
 /* Host tests do not construct the kernel VFS; the strong runtime definition
  * in src/kern/vfs.c replaces this zeroed compatibility object. */
@@ -34,16 +34,16 @@ struct cwdinfo kern_cwdinfo __attribute__((weak));
 
 struct target_context {
 	struct cwdinfo *fs_context;
-	struct boots_filesystem *filesystem;
-	struct boots_namespace *namespace;
-	boots_noct_key_fn key_read;
-	boots_noct_key_fn key_poll;
-	boots_noct_clock_fn clock_second;
+	struct zedbsd_filesystem *filesystem;
+	struct zedbsd_namespace *namespace;
+	zedbsd_noct_key_fn key_read;
+	zedbsd_noct_key_fn key_poll;
+	zedbsd_noct_clock_fn clock_second;
 	void *key_context;
 };
 
 void
-boots_noct_set_beui_hal(const struct noct_beui_hal *hal)
+zedbsd_noct_set_beui_hal(const struct noct_beui_hal *hal)
 {
 	target_beui_hal = hal;
 }
@@ -80,7 +80,7 @@ console_writer(void *context, const char *bytes, size_t length)
 	return length;
 }
 
-static enum boots_noct_repl_input_result
+static enum zedbsd_noct_repl_input_result
 repl_read_line(void *context, int continuation, char *line, size_t capacity)
 {
 	struct target_context *target = context;
@@ -88,14 +88,14 @@ repl_read_line(void *context, int continuation, char *line, size_t capacity)
 
 	if (target == NULL || target->key_read == NULL || line == NULL ||
 	    capacity < 2U)
-		return BOOTS_NOCT_REPL_INPUT_ERROR;
+		return ZEDBSD_NOCT_REPL_INPUT_ERROR;
 	console_string(continuation ? ". " : "> ");
 	hal_cons_show_cursor(1);
 	for (;;) {
 		int key = target->key_read(target->key_context);
 
 		if (key < 0)
-			return BOOTS_NOCT_REPL_INPUT_ERROR;
+			return ZEDBSD_NOCT_REPL_INPUT_ERROR;
 		/* Native PC-98 input carries a modifier snapshot above the
 		 * normalized key code for the Term adapter.  The line editor
 		 * consumes characters, including the Ctrl-C code, only. */
@@ -106,13 +106,13 @@ repl_read_line(void *context, int continuation, char *line, size_t capacity)
 			console_string("^C\n");
 			line[0] = '\0';
 			hal_cons_update_cursor();
-			return BOOTS_NOCT_REPL_INPUT_EXIT;
+			return ZEDBSD_NOCT_REPL_INPUT_EXIT;
 		}
 		if (key == '\r' || key == '\n') {
 			hal_cons_putc('\n');
 			line[length] = '\0';
 			hal_cons_update_cursor();
-			return BOOTS_NOCT_REPL_INPUT_LINE;
+			return ZEDBSD_NOCT_REPL_INPUT_LINE;
 		}
 		if (key == '\b' || key == 0x7f) {
 			if (length != 0) {
@@ -218,16 +218,16 @@ target_file_size(void *context, const char *path, uint32_t *size)
 {
 	struct target_context *target = context;
 	struct file *file;
-	struct boots_file legacy;
+	struct zedbsd_file legacy;
 
 	if (size == NULL)
 		return 0;
 	if (target->fs_context == NULL) {
 		if ((target->namespace != NULL ?
-		     boots_namespace_open_result(target->namespace, path, &legacy) :
+		     zedbsd_namespace_open_result(target->namespace, path, &legacy) :
 		     target->filesystem != NULL ?
-		     boots_fs_open_result(target->filesystem, path, &legacy) :
-		     BOOTS_FS_NOT_FOUND) != BOOTS_FS_OK || legacy.size > UINT32_MAX)
+		     zedbsd_fs_open_result(target->filesystem, path, &legacy) :
+		     ZEDBSD_FS_NOT_FOUND) != ZEDBSD_FS_OK || legacy.size > UINT32_MAX)
 			return 0;
 		*size = (uint32_t)legacy.size;
 		return 1;
@@ -250,14 +250,14 @@ target_file_read(void *context, const char *path, uint32_t offset,
 {
 	struct target_context *target = context;
 	struct file *file;
-	struct boots_file legacy;
+	struct zedbsd_file legacy;
 	int ok;
 	if (target->fs_context == NULL)
 		return (target->namespace != NULL ?
-			boots_namespace_open_result(target->namespace, path, &legacy) ==
-			BOOTS_FS_OK : target->filesystem != NULL &&
-			boots_fs_open(target->filesystem, path, &legacy)) &&
-		       boots_file_read(&legacy, offset, buffer, length);
+			zedbsd_namespace_open_result(target->namespace, path, &legacy) ==
+			ZEDBSD_FS_OK : target->filesystem != NULL &&
+			zedbsd_fs_open(target->filesystem, path, &legacy)) &&
+		       zedbsd_file_read(&legacy, offset, buffer, length);
 	if (
 	    file_openat(target->fs_context, path, O_RDONLY, 0, &file) != 0)
 		return 0;
@@ -271,7 +271,7 @@ target_file_read(void *context, const char *path, uint32_t offset,
 
 static int
 target_directory_read(void *context, const char *path, unsigned index,
-		      struct boots_noct_dirent *entry)
+		      struct zedbsd_noct_dirent *entry)
 {
 	struct target_context *target = context;
 	struct file *directory;
@@ -282,15 +282,15 @@ target_directory_read(void *context, const char *path, unsigned index,
 	if (entry == NULL || path == NULL)
 		return -1;
 	if (target->fs_context == NULL) {
-		struct boots_dirent old;
-		enum boots_fs_result r = target->namespace != NULL ?
-			boots_namespace_readdir_result(target->namespace, path, index,
+		struct zedbsd_dirent old;
+		enum zedbsd_fs_result r = target->namespace != NULL ?
+			zedbsd_namespace_readdir_result(target->namespace, path, index,
 						      &old) :
 			target->filesystem != NULL ?
-			boots_fs_readdir_result(target->filesystem, path, index, &old) :
-			BOOTS_FS_INVALID_ARGUMENT;
-		if (r == BOOTS_FS_NOT_FOUND) return 0;
-		if (r != BOOTS_FS_OK) return -1;
+			zedbsd_fs_readdir_result(target->filesystem, path, index, &old) :
+			ZEDBSD_FS_INVALID_ARGUMENT;
+		if (r == ZEDBSD_FS_NOT_FOUND) return 0;
+		if (r != ZEDBSD_FS_OK) return -1;
 		length = strnlen(old.name, sizeof(old.name));
 		if (length >= sizeof(entry->name)) return -1;
 		memcpy(entry->name, old.name, length + 1U);
@@ -322,7 +322,7 @@ target_directory_read(void *context, const char *path, unsigned index,
 }
 
 static void
-make_services(struct boots_noct_services *services,
+make_services(struct zedbsd_noct_services *services,
 	      struct target_context *context)
 {
 	memset(services, 0, sizeof(*services));
@@ -343,13 +343,13 @@ make_services(struct boots_noct_services *services,
 	services->directory_read = target_directory_read;
 }
 
-/* End of the resident BOOT.SYS high segment, from the linker script. */
+/* End of the resident vmunix high segment, from the linker script. */
 extern char __high_end[];
-static struct boots_noct_memory_profile selected_memory;
+static struct zedbsd_noct_memory_profile selected_memory;
 static int selected_memory_ready;
 
 static int
-select_memory_raw(struct boots_noct_memory_profile *profile)
+select_memory_raw(struct zedbsd_noct_memory_profile *profile)
 {
 	uint32_t low_extended;
 	uint32_t high_mib;
@@ -360,12 +360,12 @@ select_memory_raw(struct boots_noct_memory_profile *profile)
 	uint32_t low_reserved = high_end_physical - 0x100000U;
 
 	hal_pc98_memory_segments(&low_extended, &high_mib);
-	return boots_noct_select_memory(low_extended, high_mib, low_reserved,
+	return zedbsd_noct_select_memory(low_extended, high_mib, low_reserved,
 					 profile);
 }
 
 int
-boots_noct_prepare_memory(void)
+zedbsd_noct_prepare_memory(void)
 {
 	if (selected_memory_ready)
 		return 1;
@@ -378,23 +378,23 @@ boots_noct_prepare_memory(void)
 }
 
 static int
-select_memory(struct boots_noct_memory_profile *profile)
+select_memory(struct zedbsd_noct_memory_profile *profile)
 {
-	if (profile == NULL || !boots_noct_prepare_memory())
+	if (profile == NULL || !zedbsd_noct_prepare_memory())
 		return 0;
 	*profile = selected_memory;
 	return 1;
 }
 
 int
-boots_noct_run_embedded(unsigned repeat_count)
+zedbsd_noct_run_embedded(unsigned repeat_count)
 {
-	struct boots_noct_options options;
-	struct boots_noct_services services;
+	struct zedbsd_noct_options options;
+	struct zedbsd_noct_services services;
 	struct target_context target = { 0 };
 	struct hal_cons_state console_state;
-	struct boots_noct_result result;
-	struct boots_noct_memory_profile memory;
+	struct zedbsd_noct_result result;
+	struct zedbsd_noct_memory_profile memory;
 	unsigned iteration;
 
 	if (repeat_count == 0 || repeat_count > 100U)
@@ -408,7 +408,7 @@ boots_noct_run_embedded(unsigned repeat_count)
 	}
 	options.arena = (void *)memory.arena_base;
 	options.arena_size = memory.arena_size;
-	options.fail_after = BOOTS_NOCT_NO_FAILURE;
+	options.fail_after = ZEDBSD_NOCT_NO_FAILURE;
 	options.jit_enable = 1;
 	options.jit_threshold = 1;
 	options.write = console_writer;
@@ -421,10 +421,10 @@ boots_noct_run_embedded(unsigned repeat_count)
 	options.memory = &memory;
 	hal_cons_save_state(&console_state);
 	for (iteration = 0; iteration < repeat_count; iteration++) {
-		if (!boots_noct_run("<embedded>", embedded_source, &options,
+		if (!zedbsd_noct_run("<embedded>", embedded_source, &options,
 				     &result)) {
 			console_string("Noct M6 failed: ");
-			console_string(boots_noct_status_string(result.status));
+			console_string(zedbsd_noct_status_string(result.status));
 			console_string("\n");
 			hal_cons_update_cursor();
 			hal_cons_restore_terminal(&console_state);
@@ -450,21 +450,21 @@ boots_noct_run_embedded(unsigned repeat_count)
 }
 
 int
-boots_noct_run_file(struct boots_namespace *namespace,
-		     struct boots_filesystem *filesystem,
-		     struct boots_environment *environment, const char *path,
-		     int argc, char *const argv[], boots_noct_key_fn key_read,
-		     boots_noct_key_fn key_poll,
-		     boots_noct_clock_fn clock_second, void *key_context)
+zedbsd_noct_run_file(struct zedbsd_namespace *namespace,
+		     struct zedbsd_filesystem *filesystem,
+		     struct zedbsd_environment *environment, const char *path,
+		     int argc, char *const argv[], zedbsd_noct_key_fn key_read,
+		     zedbsd_noct_key_fn key_poll,
+		     zedbsd_noct_clock_fn clock_second, void *key_context)
 {
-	struct boots_noct_options options;
-	struct boots_noct_services services;
+	struct zedbsd_noct_options options;
+	struct zedbsd_noct_services services;
 	struct target_context target;
 	struct hal_cons_state console_state;
-	struct boots_noct_result result;
+	struct zedbsd_noct_result result;
 	struct file *file;
-	struct boots_file legacy_file;
-	struct boots_noct_memory_profile memory;
+	struct zedbsd_file legacy_file;
+	struct zedbsd_noct_memory_profile memory;
 	size_t source_area;
 	size_t file_size;
 	char *source;
@@ -474,7 +474,7 @@ boots_noct_run_file(struct boots_namespace *namespace,
 		return 0;
 	if ((use_vfs && file_openat(&kern_cwdinfo, path, O_RDONLY, 0, &file) != 0) ||
 	    (!use_vfs && (filesystem == NULL ||
-			 !boots_fs_open(filesystem, path, &legacy_file)))) {
+			 !zedbsd_fs_open(filesystem, path, &legacy_file)))) {
 		console_string("Noct: file not found: ");
 		console_string(path);
 		console_string("\n");
@@ -513,7 +513,7 @@ boots_noct_run_file(struct boots_namespace *namespace,
 	source = (char *)(memory.arena_base + memory.arena_size - source_area);
 	if (file_size != 0 &&
 	    (use_vfs ? file_read(file, source, file_size) != (ssize_t)file_size :
-	     !boots_file_read(&legacy_file, 0, source, (uint32_t)file_size))) {
+	     !zedbsd_file_read(&legacy_file, 0, source, (uint32_t)file_size))) {
 		console_string("Noct: cannot read source: ");
 		console_string(path);
 		console_string("\n");
@@ -524,7 +524,7 @@ boots_noct_run_file(struct boots_namespace *namespace,
 
 	options.arena = (void *)memory.arena_base;
 	options.arena_size = memory.arena_size - source_area;
-	options.fail_after = BOOTS_NOCT_NO_FAILURE;
+	options.fail_after = ZEDBSD_NOCT_NO_FAILURE;
 	options.jit_enable = 1;
 	options.jit_threshold = 1;
 	options.write = console_writer;
@@ -535,45 +535,45 @@ boots_noct_run_file(struct boots_namespace *namespace,
 	options.filesystem = filesystem;
 	options.environment = environment;
 	options.memory = &memory;
-	if (use_vfs) boots_stdio_set_context(&kern_cwdinfo);
-	else boots_stdio_set_namespace(namespace);
+	if (use_vfs) zedbsd_stdio_set_context(&kern_cwdinfo);
+	else zedbsd_stdio_set_namespace(namespace);
 	hal_cons_save_state(&console_state);
 	if (file_size >= sizeof(NOCT_BYTECODE_HEADER) - 1U &&
 	    memcmp(source, NOCT_BYTECODE_HEADER,
 		   sizeof(NOCT_BYTECODE_HEADER) - 1U) == 0)
-		ok = boots_noct_run_bytecode_args(path, (uint8_t *)source,
+		ok = zedbsd_noct_run_bytecode_args(path, (uint8_t *)source,
 						 (uint32_t)file_size, argc, argv,
 						 &options, &result);
 	else
-		ok = boots_noct_run_args(path, source, argc, argv, &options,
+		ok = zedbsd_noct_run_args(path, source, argc, argv, &options,
 					  &result);
 	if (!ok) {
 		console_string("Noct: ");
-		console_string(boots_noct_status_string(result.status));
+		console_string(zedbsd_noct_status_string(result.status));
 		console_string("\n");
 	} else if (result.script_status != 0) {
 		console_string("Noct: script returned nonzero status\n");
 		ok = 0;
 	}
 	hal_cons_restore_terminal(&console_state);
-	boots_stdio_set_namespace(NULL);
+	zedbsd_stdio_set_namespace(NULL);
 	if (use_vfs) (void)file_close(file);
 	return ok;
 }
 
 int
-boots_noct_run_repl(struct boots_namespace *namespace,
-		     struct boots_filesystem *filesystem,
-		     struct boots_environment *environment,
-		     boots_noct_key_fn key_read, boots_noct_key_fn key_poll,
-		     boots_noct_clock_fn clock_second, void *key_context)
+zedbsd_noct_run_repl(struct zedbsd_namespace *namespace,
+		     struct zedbsd_filesystem *filesystem,
+		     struct zedbsd_environment *environment,
+		     zedbsd_noct_key_fn key_read, zedbsd_noct_key_fn key_poll,
+		     zedbsd_noct_clock_fn clock_second, void *key_context)
 {
-	struct boots_noct_options options;
-	struct boots_noct_services services;
+	struct zedbsd_noct_options options;
+	struct zedbsd_noct_services services;
 	struct target_context target;
 	struct hal_cons_state console_state;
-	struct boots_noct_result result;
-	struct boots_noct_memory_profile memory;
+	struct zedbsd_noct_result result;
+	struct zedbsd_noct_memory_profile memory;
 	int ok;
 
 	if (key_read == NULL)
@@ -596,7 +596,7 @@ boots_noct_run_repl(struct boots_namespace *namespace,
 
 	options.arena = (void *)memory.arena_base;
 	options.arena_size = memory.arena_size;
-	options.fail_after = BOOTS_NOCT_NO_FAILURE;
+	options.fail_after = ZEDBSD_NOCT_NO_FAILURE;
 	options.jit_enable = 1;
 	options.jit_threshold = 1;
 	options.write = console_writer;
@@ -607,16 +607,16 @@ boots_noct_run_repl(struct boots_namespace *namespace,
 	options.filesystem = filesystem;
 	options.environment = environment;
 	options.memory = &memory;
-	if (target.fs_context != NULL) boots_stdio_set_context(target.fs_context);
-	else boots_stdio_set_namespace(namespace);
+	if (target.fs_context != NULL) zedbsd_stdio_set_context(target.fs_context);
+	else zedbsd_stdio_set_namespace(namespace);
 	hal_cons_save_state(&console_state);
-	ok = boots_noct_repl(&options, repl_read_line, &target, &result);
+	ok = zedbsd_noct_repl(&options, repl_read_line, &target, &result);
 	if (!ok) {
 		console_string("Noct: ");
-		console_string(boots_noct_status_string(result.status));
+		console_string(zedbsd_noct_status_string(result.status));
 		console_string("\n");
 	}
 	hal_cons_restore_terminal(&console_state);
-	boots_stdio_set_namespace(NULL);
+	zedbsd_stdio_set_namespace(NULL);
 	return ok;
 }

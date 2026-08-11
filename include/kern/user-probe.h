@@ -4,8 +4,8 @@
  *
  * Temporary ring-3 INT 0xc2 observation record.
  */
-#ifndef BOOTS_KERN_USER_PROBE_H
-#define BOOTS_KERN_USER_PROBE_H
+#ifndef ZEDBSD_KERN_USER_PROBE_H
+#define ZEDBSD_KERN_USER_PROBE_H
 
 #include <stdint.h>
 

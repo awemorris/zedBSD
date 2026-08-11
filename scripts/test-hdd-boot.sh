@@ -4,12 +4,12 @@ set -euo pipefail
 # Boot the HDD test image and verify the automatic startup path: the
 # BOOT partition must be discovered and its AUTOEXEC.NCT must start.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-machine="${BOOTS_TEST_MACHINE:-pc9821}"
-cpu="${BOOTS_TEST_CPU:-486}"
+machine="${ZEDBSD_TEST_MACHINE:-pc9821}"
+cpu="${ZEDBSD_TEST_CPU:-486}"
 work="$build/tests/hdd-boot"
 image="$work/hdd.img"
 monitor="$work/monitor.sock"
@@ -29,7 +29,7 @@ func main() {
     return 0;
 }
 EOF
-BOOTS_AUTOEXEC="$autoexec" "$repo/scripts/make-hdd-image.sh" "$image"
+ZEDBSD_AUTOEXEC="$autoexec" "$repo/scripts/make-hdd-image.sh" "$image"
 
 rm -f -- "$monitor"
 "$qemu" -M "$machine" -cpu "$cpu" -m 8 -accel tcg -L "$bios_dir" \
@@ -101,11 +101,11 @@ cmd("qmp_capabilities")
 deadline = time.time() + 60
 while time.time() < deadline:
     if mem(0x20000, 4) == b"B98S":
-        print("BOOT.SYS loaded")
+        print("vmunix loaded")
         break
     time.sleep(2)
 else:
-    raise SystemExit("BOOT.SYS never appeared at the Stage 2 load address")
+    raise SystemExit("vmunix never appeared at the Stage 2 load address")
 
 deadline = time.time() + 120
 while time.time() < deadline:
@@ -116,4 +116,4 @@ while time.time() < deadline:
     time.sleep(2)
 raise SystemExit("automatic AUTOEXEC completion never appeared")
 PY
-echo "Boots HDD boot test: PASS"
+echo "zedBSD HDD boot test: PASS"

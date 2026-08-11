@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef BOOTS_KERN_FILE_H
-#define BOOTS_KERN_FILE_H
+#ifndef ZEDBSD_KERN_FILE_H
+#define ZEDBSD_KERN_FILE_H
 
 #include "kern/inode.h"
 #include <fcntl.h>
@@ -53,12 +53,14 @@ int file_openat(struct cwdinfo *, const char *, int, mode_t,
 		struct file **);
 int file_create_pseudo(const struct file_ops *, int, void *, struct file **);
 ssize_t file_read(struct file *, void *, size_t);
+ssize_t file_pread(struct file *, void *, size_t, off_t);
 ssize_t file_write(struct file *, const void *, size_t);
 int file_readdir(struct file *, struct dirent *, int *);
 off_t file_seek(struct file *, off_t, int);
 int file_ioctl(struct file *, unsigned long, uintptr_t);
 int file_fsync(struct file *);
 int file_close(struct file *);
+void file_ref(struct file *);
 void file_pool_reset(void);
 
 #endif

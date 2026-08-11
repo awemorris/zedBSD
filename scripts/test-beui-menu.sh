@@ -3,42 +3,44 @@ set -euo pipefail
 
 # Exercise the PC-98 CGROM glyph path and a keyboard-only graphical menu.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-machine="${BOOTS_BEUI_MACHINE:-pc9821}"
-cpu="${BOOTS_TEST_CPU:-486}"
-memory="${BOOTS_BEUI_MEMORY:-6}"
-tag="${BOOTS_BEUI_TEST_TAG:-menu-cirrus}"
-minimum_colors="${BOOTS_BEUI_MINIMUM_COLORS:-4}"
-initial_wait="${BOOTS_BEUI_INITIAL_WAIT:-15}"
-selection_wait="${BOOTS_BEUI_SELECTION_WAIT:-10}"
-completion_wait="${BOOTS_BEUI_COMPLETION_WAIT:-10}"
-if [[ "$machine" == pc9801 && -z "${BOOTS_BEUI_MINIMUM_COLORS+x}" ]]; then
+machine="${ZEDBSD_BEUI_MACHINE:-pc9821}"
+cpu="${ZEDBSD_TEST_CPU:-486}"
+memory="${ZEDBSD_BEUI_MEMORY:-6}"
+tag="${ZEDBSD_BEUI_TEST_TAG:-menu-cirrus}"
+minimum_colors="${ZEDBSD_BEUI_MINIMUM_COLORS:-4}"
+fresh_swap="${ZEDBSD_BEUI_SWAP:-0}"
+initial_wait="${ZEDBSD_BEUI_INITIAL_WAIT:-15}"
+selection_wait="${ZEDBSD_BEUI_SELECTION_WAIT:-10}"
+completion_wait="${ZEDBSD_BEUI_COMPLETION_WAIT:-10}"
+if [[ "$machine" == pc9801 && -z "${ZEDBSD_BEUI_MINIMUM_COLORS+x}" ]]; then
 	minimum_colors=3
-	initial_wait="${BOOTS_BEUI_INITIAL_WAIT:-25}"
-	selection_wait="${BOOTS_BEUI_SELECTION_WAIT:-25}"
+	initial_wait="${ZEDBSD_BEUI_INITIAL_WAIT:-25}"
+	selection_wait="${ZEDBSD_BEUI_SELECTION_WAIT:-25}"
 fi
-base="${BOOTS_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
+base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/beui-$tag"
 image="$work/menu.raw"
 files="$work/files"
-cfg="$work/BOOTS.CFG"
+cfg="$work/ZEDBSD.CFG"
 monitor="$work/monitor.sock"
 screenshot="$work/menu.ppm"
 qemu_log="$work/qemu.log"
 
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios_dir" || { echo "PC-98 BIOS directory not found: $bios_dir" >&2; exit 1; }
-test -f "$base" || { echo "source image not found: $base" >&2; exit 1; }
+if test "$fresh_swap" != 1; then
+	test -f "$base" || { echo "source image not found: $base" >&2; exit 1; }
+fi
 for command in mtype python3; do
 	command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
 done
 
 mkdir -p "$work" "$files"
-cp --reflink=auto "$base" "$image"
 cat > "$files/G3MENU.NCT" <<'EOF'
 func row(y, text, active) {
     if (active == 1) {
@@ -62,7 +64,7 @@ func menu(selected) {
 
     BeUI.fill(0, 0, 640, 42, 1382680);
     BeUI.fill(0, 40, 640, 2, 47062);
-    BeUI.drawText("Boots", 18, 12, 16777215, 1382680);
+    BeUI.drawText("zedBSD", 18, 12, 16777215, 1382680);
     BeUI.drawText("Boot loader and pre-boot environment", 190, 12,
                   10069165, 1382680);
 
@@ -127,9 +129,18 @@ func main() {
 EOF
 printf 'g3menu\nhalt\n' > "$cfg"
 
-make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
-BOOTS_AUTOEXEC="$files/G3MENU.NCT" BOOTS_FILES="$files" DISK_SECTORS=17 \
-	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+if test "$fresh_swap" = 1; then
+	rm -f -- "$image"
+	ZEDBSD_TEST_MB=40 ZEDBSD_SWAP_SIZE_MIB=32 \
+		ZEDBSD_AUTOEXEC="$files/G3MENU.NCT" ZEDBSD_FILES="$files" \
+		ZEDBSD_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$image"
+else
+	cp --reflink=auto "$base" "$image"
+	ZEDBSD_AUTOEXEC="$files/G3MENU.NCT" ZEDBSD_FILES="$files" \
+		DISK_SECTORS=17 \
+		"$repo/scripts/install-image.sh" "$image" "" "$cfg"
+fi
 
 offset="$(python3 - "$image" <<'PY'
 import os
@@ -253,4 +264,4 @@ minimum_colors = int(sys.argv[2])
 if width < 640 or height < 400 or len(colors) < minimum_colors:
     raise SystemExit(f'menu screenshot validation failed: {width}x{height}, {len(colors)} colors')
 PY
-printf 'Boots BeUI CGROM keyboard menu QEMU test: PASS (%s)\n' "$image"
+printf 'zedBSD BeUI CGROM keyboard menu QEMU test: PASS (%s)\n' "$image"

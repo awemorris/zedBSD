@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_STDIO_H
-#define BOOTS_STDIO_H
+#ifndef ZEDBSD_STDIO_H
+#define ZEDBSD_STDIO_H
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -12,7 +12,7 @@
 #define SEEK_CUR 1
 #define SEEK_END 2
 
-typedef struct boots_stdio_file {
+typedef struct zedbsd_stdio_file {
 	void *context;
 	uint64_t position;
 	int error;
@@ -24,7 +24,7 @@ extern FILE *stdin;
 extern FILE *stdout;
 extern FILE *stderr;
 
-size_t boots_console_write_bytes(const char *bytes, size_t length);
+size_t zedbsd_console_write_bytes(const char *bytes, size_t length);
 
 int printf(const char *format, ...);
 int snprintf(char *buffer, size_t size, const char *format, ...);

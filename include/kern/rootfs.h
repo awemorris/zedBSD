@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_KERN_ROOTFS_H
-#define BOOTS_KERN_ROOTFS_H
+#ifndef ZEDBSD_KERN_ROOTFS_H
+#define ZEDBSD_KERN_ROOTFS_H
 
 #include "kern/inode.h"
 

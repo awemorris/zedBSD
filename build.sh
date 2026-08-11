@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Boots build driver: ./build.sh <arch> [make targets and options...]
+# zedBSD build driver: ./build.sh <arch> [make targets and options...]
 # Copyright (C) 2026 Awe Morris
 # SPDX-License-Identifier: Zlib
 #
@@ -36,5 +36,5 @@ if ! test -f "$repo/platform/$arch/platform.mk"; then
 	exit 2
 fi
 
-jobs="${BOOTS_JOBS:-$(nproc)}"
+jobs="${ZEDBSD_JOBS:-$(nproc)}"
 exec make -C "$repo" ARCH="$arch" -j"$jobs" "$@"

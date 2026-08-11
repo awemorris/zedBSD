@@ -1,5 +1,5 @@
 /*
- * Minimal Boots installer for NEC PC-9800 real-mode DOS.
+ * Minimal zedBSD installer for NEC PC-9800 real-mode DOS.
  *
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
@@ -552,7 +552,7 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
-	printf("Boots installer for PC-9800 DOS\n");
+	printf("zedBSD installer for PC-9800 DOS\n");
 	printf("Copyright (C) 2026 Awe Morris\n\n");
 	if (argc == 2 && same_word(argv[1], "/LBA0"))
 		return install_disk_image(argv[0], "IPL-LBA0.IMG", 0, 1);

@@ -5,7 +5,7 @@
 #include "kern/partition.h"
 #include "kern/platform.h"
 
-#ifdef BOOTS_M9_WRITE_TEST
+#ifdef ZEDBSD_M9_WRITE_TEST
 static uint8_t m9_original[512], m9_pattern[512], m9_observed[512];
 #endif
 
@@ -15,18 +15,18 @@ static uint8_t m9_original[512], m9_pattern[512], m9_observed[512];
  * directly to native IDE slots.  Non-IDE classes have no native driver yet
  * (SCSI later; floppies need a future FDC driver) and read as absent.
  */
-static struct disk *blk_for_dev(const struct boots_device *d)
+static struct disk *blk_for_dev(const struct zedbsd_device *d)
 {
 	return kern_platform_block_device(d);
 }
 /* Nonzero on failure, matching the old gateway convention. */
-static int readsec(const struct boots_device *d, uint32_t lba, void *buf)
+static int readsec(const struct zedbsd_device *d, uint32_t lba, void *buf)
 {
 	struct disk *blk = blk_for_dev(d);
 
 	return blk == 0 || disk_read(blk, lba, 1, buf) != 0;
 }
-static int writesec(const struct boots_device *d, uint32_t lba,
+static int writesec(const struct zedbsd_device *d, uint32_t lba,
 		    const void *buf)
 {
 	struct disk *blk = blk_for_dev(d);
@@ -37,10 +37,10 @@ static int writesec(const struct boots_device *d, uint32_t lba,
 void devname(int i)
 {
 	switch (devs[i].device_class) {
-	case BOOTS_DEV_FDD:
+	case ZEDBSD_DEV_FDD:
 		puts("fd");
 		break;
-	case BOOTS_DEV_IDE:
+	case ZEDBSD_DEV_IDE:
 		puts("ide");
 		break;
 	default:
@@ -55,7 +55,7 @@ int scanparts(int di)
 	int count;
 
 	memzero(parts, sizeof(parts));
-	if (di < 0 || !(devs[di].flags & BOOTS_DEV_HAS_GEOMETRY))
+	if (di < 0 || !(devs[di].flags & ZEDBSD_DEV_HAS_GEOMETRY))
 		return 0;
 	blk = blk_for_dev(&devs[di]);
 	if (blk == 0)
@@ -93,14 +93,14 @@ static int disk_volume_write(void *context, uint32_t lba,
 	return !writesec(context, lba, buffer);
 }
 
-static int mountpart_into(struct boots_filesystem *filesystem,
+static int mountpart_into(struct zedbsd_filesystem *filesystem,
 			  int device_index, int partition_index)
 {
-	const struct boots_filesystem_driver *const drivers[] = {
-		&boots_fat16_driver,
-		&boots_fat12_driver,
+	const struct zedbsd_filesystem_driver *const drivers[] = {
+		&zedbsd_fat16_driver,
+		&zedbsd_fat12_driver,
 	};
-	struct boots_volume volume;
+	struct zedbsd_volume volume;
 
 	if (!parts[partition_index].valid)
 		return 0;
@@ -111,7 +111,7 @@ static int mountpart_into(struct boots_filesystem *filesystem,
 	volume.sector_size = 512;
 	volume.read = disk_volume_read;
 	volume.write = disk_volume_write;
-	return boots_fs_mount(filesystem, &volume, drivers,
+	return zedbsd_fs_mount(filesystem, &volume, drivers,
 			       sizeof(drivers) / sizeof(drivers[0]));
 }
 
@@ -150,16 +150,16 @@ void select_disk_home(int device_index)
 	unsigned name_length;
 
 	if (!disk_mount_name(device_index, name) ||
-	    !boots_namespace_set_default(&mounted_namespace, name))
+	    !zedbsd_namespace_set_default(&mounted_namespace, name))
 		return;
 	home[0] = '/';
 	name_length = slen(name);
 	memcopy(home + 1, name, name_length);
 	memcopy(home + 1 + name_length, "/home", 6);
-	(void)boots_env_set(&boot_environment, "HOME", home);
+	(void)zedbsd_env_set(&boot_environment, "HOME", home);
 	memcopy(dictionary, home, slen(home));
 	memcopy(dictionary + slen(home), "/skkjisyo.dic", 14);
-	(void)boots_env_set(&boot_environment, "REMACS_SKK_DICT", dictionary);
+	(void)zedbsd_env_set(&boot_environment, "REMACS_SKK_DICT", dictionary);
 }
 
 /* Mount one user-visible FAT volume per physical disk.  BOOT is preferred;
@@ -168,7 +168,7 @@ void select_disk_home(int device_index)
  * and UFS drivers can use the same UNIX path contract. */
 void register_scanned_disk(int device_index)
 {
-	struct boots_filesystem filesystem;
+	struct zedbsd_filesystem filesystem;
 	char name[8];
 	int preferred = -1;
 	int fallback = -1;
@@ -186,14 +186,14 @@ void register_scanned_disk(int device_index)
 	}
 	if (preferred >= 0 &&
 	    mountpart_into(&filesystem, device_index, preferred)) {
-		(void)boots_namespace_mount(&mounted_namespace, name, &filesystem);
+		(void)zedbsd_namespace_mount(&mounted_namespace, name, &filesystem);
 		return;
 	}
 	for (partition = fallback; partition >= 0 && partition < MAX_PARTS;
 	     partition++)
 		if (parts[partition].valid &&
 		    mountpart_into(&filesystem, device_index, partition)) {
-			(void)boots_namespace_mount(&mounted_namespace, name,
+			(void)zedbsd_namespace_mount(&mounted_namespace, name,
 						&filesystem);
 			return;
 		}
@@ -212,7 +212,7 @@ uint8_t ide_reported_drives(void)
 	uint8_t bitmap = 0;
 
 	for (unsigned i = 0; i < device_count; i++)
-		if (devs[i].device_class == BOOTS_DEV_IDE &&
+		if (devs[i].device_class == ZEDBSD_DEV_IDE &&
 		    devs[i].bios_id >= 0x80 &&
 		    devs[i].bios_id < 0x80 + MAX_IDE_DEVICES)
 			bitmap |= 1U << (devs[i].bios_id - 0x80);
@@ -229,7 +229,7 @@ uint8_t scsi_reported_targets(void)
 {
 	uint8_t bitmap = 0;
 	for (unsigned i = 0; i < device_count; i++)
-		if (devs[i].device_class == BOOTS_DEV_SCSI &&
+		if (devs[i].device_class == ZEDBSD_DEV_SCSI &&
 		    devs[i].bios_id >= 0xa0 &&
 		    devs[i].bios_id < 0xa0 + MAX_SCSI_TARGETS)
 			bitmap |= 1U << (devs[i].bios_id - 0xa0);
@@ -260,8 +260,8 @@ int probe_fixed_device(uint8_t device_class, uint8_t bios_id)
 /* Shell probes remain exhaustive; startup uses probe_fixed_device directly. */
 void probe_fixed_class(uint8_t device_class)
 {
-	uint8_t first = device_class == BOOTS_DEV_IDE ? 0x80 : 0xa0;
-	unsigned count = device_class == BOOTS_DEV_IDE ? MAX_IDE_DEVICES :
+	uint8_t first = device_class == ZEDBSD_DEV_IDE ? 0x80 : 0xa0;
+	unsigned count = device_class == ZEDBSD_DEV_IDE ? MAX_IDE_DEVICES :
 							MAX_SCSI_TARGETS;
 
 	/* IDE disks back mounted partition objects.  Replacing their registry
@@ -280,7 +280,7 @@ int linuxboot(void)
 					devs, device_count, curdev);
 }
 
-#ifdef BOOTS_M9_WRITE_TEST
+#ifdef ZEDBSD_M9_WRITE_TEST
 static void m9_debug_puts(const char *text)
 {
 	kern_platform_debug_write(text);
@@ -300,7 +300,7 @@ static int m9_same_sector(const uint8_t *left, const uint8_t *right)
 	return 1;
 }
 
-/* Destructive raw-sector test, compiled only into BOOT-M9.SYS.  The caller
+/* Destructive raw-sector test, compiled only into vmunix-m9.  The caller
  * must select an expendable sector in a temporary image.  Once the first
  * write succeeds, every exit path attempts to restore the original sector. */
 int m9_write_test(uint32_t lba)

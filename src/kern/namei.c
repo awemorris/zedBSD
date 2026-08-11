@@ -15,11 +15,11 @@ path_length(const char *path, size_t *length)
 	size_t n;
 	if (path == NULL)
 		return EINVAL;
-	for (n = 0; n < BOOTS_PATH_MAX && path[n] != '\0'; n++)
+	for (n = 0; n < ZEDBSD_PATH_MAX && path[n] != '\0'; n++)
 		;
 	if (n == 0)
 		return ENOENT;
-	if (n == BOOTS_PATH_MAX)
+	if (n == ZEDBSD_PATH_MAX)
 		return ENAMETOOLONG;
 	*length = n;
 	return 0;
@@ -118,7 +118,7 @@ namei_parent_at(struct cwdinfo *context, const char *path,
 		struct inode **parent, struct componentname *last,
 		char storage[NAME_MAX + 1U])
 {
-	char prefix[BOOTS_PATH_MAX];
+	char prefix[ZEDBSD_PATH_MAX];
 	size_t length, start, parent_length;
 	int error;
 
@@ -187,9 +187,9 @@ cwdinfo_destroy(struct cwdinfo *context)
 
 static int
 normalized_path(const struct cwdinfo *context, const char *path,
-		char output[BOOTS_PATH_MAX])
+		char output[ZEDBSD_PATH_MAX])
 {
-	char joined[BOOTS_PATH_MAX];
+	char joined[ZEDBSD_PATH_MAX];
 	size_t in = 0, out = 1, length, base;
 	int error = path_length(path, &length);
 	if (error != 0)
@@ -225,7 +225,7 @@ normalized_path(const struct cwdinfo *context, const char *path,
 			continue;
 		}
 		if (out > 1) output[out++] = '/';
-		if (out + part >= BOOTS_PATH_MAX) return ENAMETOOLONG;
+		if (out + part >= ZEDBSD_PATH_MAX) return ENAMETOOLONG;
 		memcpy(output + out, joined + start, part);
 		out += part;
 	}
@@ -237,7 +237,7 @@ int
 fs_chdir(struct cwdinfo *context, const char *path)
 {
 	struct inode *directory;
-	char normalized[BOOTS_PATH_MAX];
+	char normalized[ZEDBSD_PATH_MAX];
 	int error = namei_at(context, path, &directory);
 	if (error != 0)
 		return error;

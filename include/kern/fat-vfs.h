@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_KERN_FAT_VFS_H
-#define BOOTS_KERN_FAT_VFS_H
+#ifndef ZEDBSD_KERN_FAT_VFS_H
+#define ZEDBSD_KERN_FAT_VFS_H
 
 #include "kern/file.h"
 #include "kern/mount.h"
@@ -20,6 +20,8 @@ static inline struct fat_inode_info *fat_inode(struct inode *inode)
 }
 
 extern const struct filesystem_type fat_filesystem_type;
+typedef int (*fat_extent_cb)(uint64_t, uint64_t, uint32_t, void *);
+int fat_file_extents(struct file *, fat_extent_cb, void *);
 int fat_file_contiguous_block(struct file *, struct disk **, uint64_t *);
 
 #endif

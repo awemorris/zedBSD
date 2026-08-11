@@ -2,22 +2,22 @@
 set -euo pipefail
 
 # Boot the bytecode-only Remacs bundle, edit and save a FAT16 file, return to
-# Boots, and verify the full-screen mode line.  QMP qcodes cannot currently
+# zedBSD, and verify the full-screen mode line.  QMP qcodes cannot currently
 # synthesize PC-98 C-x reliably, so the test invokes the same commands through
 # M-x (ESC x) instead.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-base="${BOOTS_TEST_BASE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
-work="$build/tests/boots-remacs"
+base="${ZEDBSD_TEST_BASE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
+work="$build/tests/zedbsd-remacs"
 image="$work/remacs-qemu.raw"
-cfg="$work/BOOTS.CFG"
+cfg="$work/ZEDBSD.CFG"
 monitor="$work/monitor.sock"
 screenshot="$work/remacs.ppm"
-memory_mib="${BOOTS_TEST_MEMORY_MIB:-16}"
+memory_mib="${ZEDBSD_TEST_MEMORY_MIB:-16}"
 
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios_dir" || { echo "PC-98 BIOS directory not found: $bios_dir" >&2; exit 1; }
@@ -29,7 +29,7 @@ done
 mkdir -p "$work"
 cp --reflink=auto "$base" "$image"
 printf 'emacs EDIT.TXT\nhalt\n' > "$cfg"
-make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
 "$repo/scripts/build-remacs-bytecode.sh"
 DISK_HEADS=8 DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
@@ -189,5 +189,5 @@ for row in range(height * 2 // 3, height):
 else:
     raise SystemExit("Remacs reverse-video mode line was not detected")
 PY
-printf 'Boots Remacs bytecode QEMU launch test: PASS (%s MiB, %s)\n' \
+printf 'zedBSD Remacs bytecode QEMU launch test: PASS (%s MiB, %s)\n' \
 	"$memory_mib" "$image"

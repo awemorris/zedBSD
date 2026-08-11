@@ -1,13 +1,13 @@
 /*
- * Boots Noct M6 JIT verification program
+ * zedBSD Noct M6 JIT verification program
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef BOOTS_NOCT_M6_SCRIPT_H
-#define BOOTS_NOCT_M6_SCRIPT_H
+#ifndef ZEDBSD_NOCT_M6_SCRIPT_H
+#define ZEDBSD_NOCT_M6_SCRIPT_H
 
-#define BOOTS_NOCT_M6_SOURCE \
+#define ZEDBSD_NOCT_M6_SOURCE \
 	"func helper(a, b) { return (a * 3 + b) % 17; } " \
 	"func main() { " \
 	"var array = [2, 5, 8]; " \
@@ -22,7 +22,7 @@
 	"\":\" + (123.0f / 321.0f) + \":\" + (123.0lf / 321.0lf)); " \
 	"} else { Console.write(\"JIT:BAD\"); } }"
 
-#define BOOTS_NOCT_M6_OUTPUT \
+#define ZEDBSD_NOCT_M6_OUTPUT \
 	"JIT:24:14:11:0.3831776:0.383177570093458"
 
 #endif

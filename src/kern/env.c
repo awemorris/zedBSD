@@ -1,5 +1,5 @@
 /*
- * Boots persistent environment store
+ * zedBSD persistent environment store
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -20,7 +20,7 @@ valid_name(const char *name, size_t *length)
 	for (index = 1; name[index] != '\0'; index++) {
 		char ch = name[index];
 
-		if (index >= BOOTS_ENV_NAME_MAX ||
+		if (index >= ZEDBSD_ENV_NAME_MAX ||
 		    !((ch >= 'A' && ch <= 'Z') ||
 		      (ch >= 'a' && ch <= 'z') ||
 		      (ch >= '0' && ch <= '9') || ch == '_'))
@@ -31,7 +31,7 @@ valid_name(const char *name, size_t *length)
 }
 
 int
-boots_env_name_valid(const char *name)
+zedbsd_env_name_valid(const char *name)
 {
 	size_t length;
 
@@ -39,7 +39,7 @@ boots_env_name_valid(const char *name)
 }
 
 static int
-find_entry(const struct boots_environment *environment, const char *name,
+find_entry(const struct zedbsd_environment *environment, const char *name,
 	   size_t *offset, size_t *span)
 {
 	size_t position = 0;
@@ -63,14 +63,14 @@ find_entry(const struct boots_environment *environment, const char *name,
 }
 
 void
-boots_env_init(struct boots_environment *environment)
+zedbsd_env_init(struct zedbsd_environment *environment)
 {
 	if (environment != NULL)
 		memset(environment, 0, sizeof(*environment));
 }
 
 const char *
-boots_env_get(const struct boots_environment *environment, const char *name)
+zedbsd_env_get(const struct zedbsd_environment *environment, const char *name)
 {
 	size_t offset;
 
@@ -81,7 +81,7 @@ boots_env_get(const struct boots_environment *environment, const char *name)
 }
 
 int
-boots_env_set(struct boots_environment *environment, const char *name,
+zedbsd_env_set(struct zedbsd_environment *environment, const char *name,
 	       const char *value)
 {
 	size_t name_length;
@@ -95,18 +95,18 @@ boots_env_set(struct boots_environment *environment, const char *name,
 	if (environment == NULL || value == NULL ||
 	    !valid_name(name, &name_length))
 		return 0;
-	value_length = strnlen(value, BOOTS_ENV_VALUE_MAX + 1U);
-	if (value_length > BOOTS_ENV_VALUE_MAX)
+	value_length = strnlen(value, ZEDBSD_ENV_VALUE_MAX + 1U);
+	if (value_length > ZEDBSD_ENV_VALUE_MAX)
 		return 0;
 	new_span = name_length + 1U + value_length + 1U;
 	found = find_entry(environment, name, &offset, &old_span);
 	if (!found) {
-		if (environment->count >= BOOTS_ENV_MAX_ENTRIES)
+		if (environment->count >= ZEDBSD_ENV_MAX_ENTRIES)
 			return 0;
 		offset = environment->used;
 	}
 	if ((size_t)environment->used - old_span + new_span >
-	    BOOTS_ENV_STORAGE_SIZE)
+	    ZEDBSD_ENV_STORAGE_SIZE)
 		return 0;
 
 	tail = (size_t)environment->used - offset - old_span;
@@ -124,7 +124,7 @@ boots_env_set(struct boots_environment *environment, const char *name,
 }
 
 int
-boots_env_unset(struct boots_environment *environment, const char *name)
+zedbsd_env_unset(struct zedbsd_environment *environment, const char *name)
 {
 	size_t offset;
 	size_t span;
@@ -142,13 +142,13 @@ boots_env_unset(struct boots_environment *environment, const char *name)
 }
 
 size_t
-boots_env_count(const struct boots_environment *environment)
+zedbsd_env_count(const struct zedbsd_environment *environment)
 {
 	return environment != NULL ? environment->count : 0;
 }
 
 int
-boots_env_at(const struct boots_environment *environment, size_t index,
+zedbsd_env_at(const struct zedbsd_environment *environment, size_t index,
 	      const char **name, const char **value)
 {
 	size_t position = 0;

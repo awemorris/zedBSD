@@ -4,8 +4,8 @@
  *
  * Kernel thread objects backed by opaque HAL tasks.
  */
-#ifndef BOOTS_KERN_THREAD_H
-#define BOOTS_KERN_THREAD_H
+#ifndef ZEDBSD_KERN_THREAD_H
+#define ZEDBSD_KERN_THREAD_H
 
 #include <hal/hal.h>
 #include <kern/sched.h>

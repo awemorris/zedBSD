@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_SYS_STAT_H
-#define BOOTS_SYS_STAT_H
+#ifndef ZEDBSD_SYS_STAT_H
+#define ZEDBSD_SYS_STAT_H
 
 #include <sys/types.h>
 

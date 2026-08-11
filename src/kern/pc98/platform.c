@@ -8,24 +8,24 @@
 #include "drivers/pc98-ide.h"
 
 size_t
-kern_platform_init(const struct boots_handoff *handoff,
-		   struct boots_device *devices, size_t capacity)
+kern_platform_init(const struct zedbsd_handoff *handoff,
+		   struct zedbsd_device *devices, size_t capacity)
 {
-	const struct boots_device *initial;
+	const struct zedbsd_device *initial;
 	size_t count = 0;
 
 	if (handoff == NULL || devices == NULL || capacity == 0 ||
-	    handoff->magic != BOOTS_HANDOFF_MAGIC || handoff->version != 2 ||
+	    handoff->magic != ZEDBSD_HANDOFF_MAGIC || handoff->version != 2 ||
 	    handoff->size < sizeof(*handoff) || handoff->device_count == 0 ||
 	    handoff->device_table == 0)
 		return 0;
-	initial = (const struct boots_device *)handoff->device_table;
+	initial = (const struct zedbsd_device *)handoff->device_table;
 	for (size_t index = 0; index < handoff->device_count && count < capacity;
 	     index++) {
-		if ((initial[index].device_class != BOOTS_DEV_FDD &&
-		     initial[index].device_class != BOOTS_DEV_IDE &&
-		     initial[index].device_class != BOOTS_DEV_SCSI) ||
-		    !(initial[index].flags & BOOTS_DEV_PRESENT))
+		if ((initial[index].device_class != ZEDBSD_DEV_FDD &&
+		     initial[index].device_class != ZEDBSD_DEV_IDE &&
+		     initial[index].device_class != ZEDBSD_DEV_SCSI) ||
+		    !(initial[index].flags & ZEDBSD_DEV_PRESENT))
 			continue;
 		devices[count++] = initial[index];
 	}
@@ -34,28 +34,28 @@ kern_platform_init(const struct boots_handoff *handoff,
 
 	partition_set_scheme(&partition_scheme_pc98);
 	disk_registry_reset();
-	(void)boots_ide_pc98_init(devices, (unsigned)count);
+	(void)zedbsd_ide_pc98_init(devices, (unsigned)count);
 	return count;
 }
 
 void
-kern_platform_refresh_devices(const struct boots_device *devices, size_t count)
+kern_platform_refresh_devices(const struct zedbsd_device *devices, size_t count)
 {
-	(void)boots_ide_pc98_init(devices, (unsigned)count);
+	(void)zedbsd_ide_pc98_init(devices, (unsigned)count);
 }
 
 struct disk *
-kern_platform_block_device(const struct boots_device *device)
+kern_platform_block_device(const struct zedbsd_device *device)
 {
-	if (device == NULL || device->device_class != BOOTS_DEV_IDE)
+	if (device == NULL || device->device_class != ZEDBSD_DEV_IDE)
 		return NULL;
-	return boots_ide_pc98_bios_unit(device->bios_id);
+	return zedbsd_ide_pc98_bios_unit(device->bios_id);
 }
 
 int
-kern_platform_boot_linux(struct boots_filesystem *filesystem,
+kern_platform_boot_linux(struct zedbsd_filesystem *filesystem,
 			 const char *path, const char *arguments,
-			 const struct boots_device *devices, unsigned count,
+			 const struct zedbsd_device *devices, unsigned count,
 			 int boot_device)
 {
 	return pc98_linux_boot(filesystem, path, arguments, devices, count,
@@ -65,7 +65,7 @@ kern_platform_boot_linux(struct boots_filesystem *filesystem,
 void
 kern_platform_restore_text(void)
 {
-	(void)boots_pc98_display_text_restore();
+	(void)zedbsd_pc98_display_text_restore();
 	(void)kern_platform_graphics_clear();
 }
 

@@ -4,8 +4,8 @@
  *
  * Priority round-robin kernel scheduler.
  */
-#ifndef BOOTS_KERN_SCHED_H
-#define BOOTS_KERN_SCHED_H
+#ifndef ZEDBSD_KERN_SCHED_H
+#define ZEDBSD_KERN_SCHED_H
 
 #include <stdint.h>
 

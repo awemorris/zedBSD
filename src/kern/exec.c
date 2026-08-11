@@ -28,12 +28,12 @@ exec_build_initial_stack(struct vmspace *vm, char *const argv[],
 {
 	struct vm_region *region;
 	uintptr_t sp;
-	uint8_t *base;
 	size_t total = 0;
 	unsigned argc = 0, envc = 0, i;
 	uint32_t argv_address[EXEC_ARG_MAX];
 	uint32_t env_address[EXEC_ENV_MAX];
-	uint32_t *words;
+	uint32_t words[1U + EXEC_ARG_MAX + 1U + EXEC_ENV_MAX + 1U];
+	unsigned word_count = 0;
 	int error;
 
 	if (vm == NULL || argv == NULL || argv[0] == NULL || sp_out == NULL)
@@ -63,30 +63,37 @@ exec_build_initial_stack(struct vmspace *vm, char *const argv[],
 				 HAL_SPACE_READ | HAL_SPACE_WRITE, &region);
 	if (error != 0)
 		return error;
-	base = (uint8_t *)region->pmem.vaddr;
+	(void)region;
 	sp = USER_STACK_TOP;
 	for (i = envc; i != 0; i--) {
 		size_t length = strlen(envp[i - 1U]) + 1U;
 		sp -= length;
-		memcpy(base + (sp - USER_STACK_BOTTOM), envp[i - 1U], length);
+		error = vmspace_copy_to(vm, sp, envp[i - 1U], length);
+		if (error != 0)
+			return error;
 		env_address[i - 1U] = (uint32_t)sp;
 	}
 	for (i = argc; i != 0; i--) {
 		size_t length = strlen(argv[i - 1U]) + 1U;
 		sp -= length;
-		memcpy(base + (sp - USER_STACK_BOTTOM), argv[i - 1U], length);
+		error = vmspace_copy_to(vm, sp, argv[i - 1U], length);
+		if (error != 0)
+			return error;
 		argv_address[i - 1U] = (uint32_t)sp;
 	}
 	sp &= ~(uintptr_t)15U;
 	sp -= (1U + argc + 1U + envc + 1U) * sizeof(uint32_t);
 	if (sp < USER_STACK_BOTTOM)
 		return EOVERFLOW;
-	words = (uint32_t *)(base + (sp - USER_STACK_BOTTOM));
-	*words++ = argc;
-	for (i = 0; i < argc; i++) *words++ = argv_address[i];
-	*words++ = 0;
-	for (i = 0; i < envc; i++) *words++ = env_address[i];
-	*words = 0;
+	words[word_count++] = argc;
+	for (i = 0; i < argc; i++) words[word_count++] = argv_address[i];
+	words[word_count++] = 0;
+	for (i = 0; i < envc; i++) words[word_count++] = env_address[i];
+	words[word_count++] = 0;
+	error = vmspace_copy_to(vm, sp, words,
+				word_count * sizeof(words[0]));
+	if (error != 0)
+		return error;
 	vm->stack_bottom = USER_STACK_BOTTOM;
 	vm->stack_top = USER_STACK_TOP;
 	*sp_out = sp;
@@ -192,6 +199,8 @@ process_spawn(const char *path, char *const argv[], char *const envp[],
 	error = thread_create(process, entry, sp, &thread);
 	if (error != 0)
 		goto out;
+	if (result == NULL)
+		process->flags |= PROCESS_AUTOREAP;
 	process_publish(process);
 	thread_start(thread);
 	if (result != NULL)

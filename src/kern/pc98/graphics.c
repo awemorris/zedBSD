@@ -29,13 +29,13 @@ static void port_out8(void *context, uint16_t port, uint8_t value)
 static int display_reset(void *context)
 {
 	(void)context;
-	return boots_pc98_display_graphics_start();
+	return zedbsd_pc98_display_graphics_start();
 }
 
 static int display_stop(void *context)
 {
 	(void)context;
-	return boots_pc98_display_graphics_stop();
+	return zedbsd_pc98_display_graphics_stop();
 }
 
 int kern_platform_graphics_init(uint64_t (*milliseconds)(void *),

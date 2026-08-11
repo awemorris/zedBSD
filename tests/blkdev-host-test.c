@@ -1,5 +1,5 @@
 /*
- * Boots disk/bio and PC-98 partition scheme host tests
+ * zedBSD disk/bio and PC-98 partition scheme host tests
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -237,6 +237,6 @@ main(void)
 		printf("disk/bio tests: %d failure(s)\n", failures);
 		return 1;
 	}
-	printf("Boots disk/bio/partition host tests: OK\n");
+	printf("zedBSD disk/bio/partition host tests: OK\n");
 	return 0;
 }

@@ -19,6 +19,8 @@
 
 /* Number of physical pages present. */
 static uint32 phys_pages;
+static uint32 reserved_pages;
+static uint32 allocated_pages;
 
 /* Page usage bitmap. */
 static uint32 pagemap_tbl[PAGEMAP_WORDS];
@@ -58,14 +60,19 @@ init_pagemap_tbl(void)
 		HAL_FATAL("too few physical memory");
 
 	hal_memset(pagemap_tbl, 0, sizeof(pagemap_tbl));
+	reserved_pages = allocated_pages = 0;
 
 	/*
 	 * The fixed work areas below ADDR_FREE_TOP (IDT, boot info,
 	 * startup stack) stay out of the allocator.
 	 */
 	reserved_top = (ADDR_FREE_TOP + PAGE_SIZE - 1) / PAGE_SIZE;
-	for (i = 0; i < reserved_top; i++)
+	if (reserved_top > phys_pages)
+		reserved_top = phys_pages;
+	for (i = 0; i < reserved_top; i++) {
 		PAGEMAP_SET(i);
+		reserved_pages++;
+	}
 }
 
 /*
@@ -85,10 +92,13 @@ pmem_reserve(hal_physaddr_t paddr, size_t size)
 	else
 		last = (paddr + size + PAGE_SIZE - 1) / PAGE_SIZE;
 
-	if (last > PAGEMAP_WORDS * 32U)
-		last = PAGEMAP_WORDS * 32U;
+	if (last > phys_pages)
+		last = phys_pages;
 	for (i = first; i < last; i++)
-		PAGEMAP_SET(i);
+		if (!PAGEMAP_GET(i)) {
+			PAGEMAP_SET(i);
+			reserved_pages++;
+		}
 }
 
 /*
@@ -131,6 +141,7 @@ pmem_alloc_lo(size_t size, struct pmem_desc *desc)
 		}
 		for (i = 0; i < need_pages; i++)
 			PAGEMAP_SET(start_index + i);
+		allocated_pages += need_pages;
 	}
 	LEAVE_IRQLOCK(irqlock);
 
@@ -198,6 +209,7 @@ hal_pmem_alloc_limited(size_t size, uintptr_t above, uintptr_t below,
 		}
 		for (i = 0; i < need_pages; i++)
 			PAGEMAP_SET(start + i);
+		allocated_pages += need_pages;
 	}
 	LEAVE_IRQLOCK(irqlock);
 	desc->paddr = (uintptr_t)start * PAGE_SIZE;
@@ -229,6 +241,26 @@ size_t
 hal_pmem_get_total_size(void)
 {
 	return (size_t)phys_pages * PAGE_SIZE;
+}
+
+void hal_i386_task_memory_stats(uint32_t *, size_t *);
+void hal_i386_space_memory_stats(uint32_t *, uint32_t *);
+
+void
+hal_memory_get_stats(struct hal_memory_stats *stats)
+{
+	if (stats == NULL)
+		return;
+	hal_memset(stats, 0, sizeof(*stats));
+	stats->physical_total = (size_t)phys_pages * PAGE_SIZE;
+	stats->physical_reserved = (size_t)reserved_pages * PAGE_SIZE;
+	stats->physical_allocated = (size_t)allocated_pages * PAGE_SIZE;
+	stats->physical_free = stats->physical_total -
+		stats->physical_reserved - stats->physical_allocated;
+	hal_i386_task_memory_stats(&stats->task_count,
+				   &stats->task_stack_bytes);
+	hal_i386_space_memory_stats(&stats->space_count,
+				    &stats->page_table_count);
 }
 
 void
@@ -264,8 +296,13 @@ pmem_free(struct pmem_desc *desc)
 				return PMEM_BADDESC;
 			}
 		}
+		if (allocated_pages < end_page - start_page) {
+			LEAVE_IRQLOCK(irqlock);
+			return PMEM_BADDESC;
+		}
 		for (i = start_page; i < end_page; i++)
 			PAGEMAP_RESET(i);
+		allocated_pages -= end_page - start_page;
 	}
 	LEAVE_IRQLOCK(irqlock);
 	return PMEM_SUCCESS;

@@ -1,9 +1,9 @@
 /* Linux paging-off exit trampoline.  SPDX-License-Identifier: Zlib */
 	.code32
 	.section .text.low, "ax"
-	.globl boots_pc98_jump_linux
-	.type boots_pc98_jump_linux, @function
-boots_pc98_jump_linux:
+	.globl zedbsd_pc98_jump_linux
+	.type zedbsd_pc98_jump_linux, @function
+zedbsd_pc98_jump_linux:
 	movl 4(%esp), %edx	/* physical Linux entry */
 	movl 8(%esp), %esi	/* boot_params */
 	cli
@@ -24,5 +24,5 @@ boots_pc98_jump_linux:
 	xorl %edi, %edi
 	xorl %ebx, %ebx
 	jmp *%edx
-	.size boots_pc98_jump_linux, .-boots_pc98_jump_linux
+	.size zedbsd_pc98_jump_linux, .-zedbsd_pc98_jump_linux
 	.section .note.GNU-stack, "", @progbits

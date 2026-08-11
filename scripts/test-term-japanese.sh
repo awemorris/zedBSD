@@ -4,16 +4,16 @@ set -euo pipefail
 # Verify the PC-98 Term.* UTF-8 to JIS kuten conversion against the actual
 # text VRAM words, then preserve a screenshot for visual regression review.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-base="${BOOTS_TEST_BASE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
-work="$build/tests/boots-term-japanese"
+base="${ZEDBSD_TEST_BASE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
+work="$build/tests/zedbsd-term-japanese"
 image="$work/term-japanese.raw"
 files="$work/files"
-cfg="$work/BOOTS.CFG"
+cfg="$work/ZEDBSD.CFG"
 monitor="$work/monitor.sock"
 screenshot="$work/term-japanese.ppm"
 vram="$work/term-japanese-vram.bin"
@@ -37,8 +37,8 @@ func main() {
 EOF
 printf 'noct TERMJIS.NCT\nhalt\n' > "$cfg"
 
-make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
-BOOTS_FILES="$files" DISK_HEADS=8 DISK_SECTORS=17 \
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+ZEDBSD_FILES="$files" DISK_HEADS=8 DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 rm -f -- "$monitor" "$screenshot" "$vram"
@@ -136,4 +136,4 @@ if actual != expected:
         "Term Japanese VRAM mismatch: " +
         " ".join(f"{word:04x}" for word in actual))
 PY
-printf 'Boots Term Japanese QEMU test: PASS (%s)\n' "$image"
+printf 'zedBSD Term Japanese QEMU test: PASS (%s)\n' "$image"

@@ -1,4 +1,4 @@
-/* Destructive host-side regression tests for the Boots FAT16 writer. */
+/* Destructive host-side regression tests for the zedBSD FAT16 writer. */
 
 #include "kern/fat16.h"
 
@@ -140,12 +140,12 @@ static void destroy_disk(struct memory_disk *disk)
 }
 
 static void mount_disk(struct memory_disk *disk,
-		       struct boots_filesystem *filesystem)
+		       struct zedbsd_filesystem *filesystem)
 {
-	const struct boots_filesystem_driver *const drivers[] = {
-		&boots_fat16_driver,
+	const struct zedbsd_filesystem_driver *const drivers[] = {
+		&zedbsd_fat16_driver,
 	};
-	struct boots_volume volume = {
+	struct zedbsd_volume volume = {
 		.context = disk,
 		.start_lba = TEST_BASE_LBA,
 		.sector_size = 512,
@@ -153,47 +153,47 @@ static void mount_disk(struct memory_disk *disk,
 		.write = memory_write,
 	};
 
-	assert(boots_fs_mount_result(filesystem, &volume, drivers, 1) ==
-	       BOOTS_FS_OK);
+	assert(zedbsd_fs_mount_result(filesystem, &volume, drivers, 1) ==
+	       ZEDBSD_FS_OK);
 }
 
-static void reopen_and_read(struct boots_filesystem *filesystem,
+static void reopen_and_read(struct zedbsd_filesystem *filesystem,
 			    const char *path, void *buffer, uint32_t size)
 {
-	struct boots_file file;
+	struct zedbsd_file file;
 
-	assert(boots_fs_open_result(filesystem, path, &file) == BOOTS_FS_OK);
+	assert(zedbsd_fs_open_result(filesystem, path, &file) == ZEDBSD_FS_OK);
 	assert(file.size == size);
 	if (size)
-		assert(boots_file_read_result(&file, 0, buffer, size, 0, 0) ==
-		       BOOTS_FS_OK);
+		assert(zedbsd_file_read_result(&file, 0, buffer, size, 0, 0) ==
+		       ZEDBSD_FS_OK);
 }
 
 static void test_create_write_truncate(uint16_t logical_bytes)
 {
 	struct memory_disk disk;
-	struct boots_filesystem filesystem;
-	struct boots_file file;
-	struct boots_dirent entry;
+	struct zedbsd_filesystem filesystem;
+	struct zedbsd_file file;
+	struct zedbsd_dirent entry;
 	uint8_t buffer[1031];
 	uint32_t cluster;
 
 	format_disk(&disk, logical_bytes);
 	mount_disk(&disk, &filesystem);
-	assert(boots_fs_create_result(&filesystem, "/marker.txt", &file) ==
-	       BOOTS_FS_OK);
+	assert(zedbsd_fs_create_result(&filesystem, "/marker.txt", &file) ==
+	       ZEDBSD_FS_OK);
 	assert(file.size == 0);
-	assert(boots_file_write_result(&file, 0, "hello", 5) == BOOTS_FS_OK);
-	assert(boots_file_flush_result(&file) == BOOTS_FS_OK);
+	assert(zedbsd_file_write_result(&file, 0, "hello", 5) == ZEDBSD_FS_OK);
+	assert(zedbsd_file_flush_result(&file) == ZEDBSD_FS_OK);
 	memset(buffer, 0, sizeof(buffer));
 	reopen_and_read(&filesystem, "/MARKER.TXT", buffer, 5);
 	assert(!memcmp(buffer, "hello", 5));
 	assert_fats_equal(&disk);
 
-	assert(boots_file_write_result(&file, 1, "XYZ", 3) == BOOTS_FS_OK);
-	assert(boots_file_write_result(&file, 1027, "tail", 4) ==
-	       BOOTS_FS_OK);
-	assert(boots_file_flush_result(&file) == BOOTS_FS_OK);
+	assert(zedbsd_file_write_result(&file, 1, "XYZ", 3) == ZEDBSD_FS_OK);
+	assert(zedbsd_file_write_result(&file, 1027, "tail", 4) ==
+	       ZEDBSD_FS_OK);
+	assert(zedbsd_file_flush_result(&file) == ZEDBSD_FS_OK);
 	memset(buffer, 0xa5, sizeof(buffer));
 	reopen_and_read(&filesystem, "/marker.txt", buffer, sizeof(buffer));
 	assert(!memcmp(buffer, "hXYZo", 5));
@@ -202,17 +202,17 @@ static void test_create_write_truncate(uint16_t logical_bytes)
 	assert(!memcmp(buffer + 1027, "tail", 4));
 	assert_fats_equal(&disk);
 
-	assert(boots_file_truncate_result(&file, 3) == BOOTS_FS_OK);
-	assert(boots_file_flush_result(&file) == BOOTS_FS_OK);
+	assert(zedbsd_file_truncate_result(&file, 3) == ZEDBSD_FS_OK);
+	assert(zedbsd_file_flush_result(&file) == ZEDBSD_FS_OK);
 	memset(buffer, 0, sizeof(buffer));
 	reopen_and_read(&filesystem, "/marker.txt", buffer, 3);
 	assert(!memcmp(buffer, "hXY", 3));
-	assert(boots_fs_stat_result(&filesystem, "/marker.txt", &entry) ==
-	       BOOTS_FS_OK);
+	assert(zedbsd_fs_stat_result(&filesystem, "/marker.txt", &entry) ==
+	       ZEDBSD_FS_OK);
 	assert(entry.size == 3);
 
-	assert(boots_file_truncate_result(&file, 0) == BOOTS_FS_OK);
-	assert(boots_file_flush_result(&file) == BOOTS_FS_OK);
+	assert(zedbsd_file_truncate_result(&file, 0) == ZEDBSD_FS_OK);
+	assert(zedbsd_file_flush_result(&file) == ZEDBSD_FS_OK);
 	reopen_and_read(&filesystem, "/marker.txt", buffer, 0);
 	for (cluster = 2; cluster < 8; cluster++) {
 		assert(get_fat(&disk, 0, cluster) == 0);
@@ -225,8 +225,8 @@ static void test_create_write_truncate(uint16_t logical_bytes)
 static void test_existing_allocated_empty_file(void)
 {
 	struct memory_disk disk;
-	struct boots_filesystem filesystem;
-	struct boots_file file;
+	struct zedbsd_filesystem filesystem;
+	struct zedbsd_file file;
 	uint8_t *raw;
 
 	format_disk(&disk, 512);
@@ -237,8 +237,8 @@ static void test_existing_allocated_empty_file(void)
 	set_fat(&disk, 0, 2, 0xffff);
 	set_fat(&disk, 1, 2, 0xffff);
 	mount_disk(&disk, &filesystem);
-	assert(boots_fs_create_result(&filesystem, "/empty.bin", &file) ==
-	       BOOTS_FS_OK);
+	assert(zedbsd_fs_create_result(&filesystem, "/empty.bin", &file) ==
+	       ZEDBSD_FS_OK);
 	assert(file.size == 0 && get_fat(&disk, 0, 2) == 0 &&
 	       get_fat(&disk, 1, 2) == 0);
 	destroy_disk(&disk);
@@ -247,8 +247,8 @@ static void test_existing_allocated_empty_file(void)
 static void test_create_in_existing_directory(uint16_t logical_bytes)
 {
 	struct memory_disk disk;
-	struct boots_filesystem filesystem;
-	struct boots_file file;
+	struct zedbsd_filesystem filesystem;
+	struct zedbsd_file file;
 	uint8_t buffer[6] = { 0 };
 	uint8_t *root;
 
@@ -260,12 +260,12 @@ static void test_create_in_existing_directory(uint16_t logical_bytes)
 	set_fat(&disk, 0, 2, 0xffff);
 	set_fat(&disk, 1, 2, 0xffff);
 	mount_disk(&disk, &filesystem);
-	assert(boots_fs_create_result(&filesystem, "CMD/EDIT.TXT", &file) ==
-	       BOOTS_FS_OK);
-	assert(boots_file_write_result(&file, 0, "Boots", 5) == BOOTS_FS_OK);
-	assert(boots_file_flush_result(&file) == BOOTS_FS_OK);
+	assert(zedbsd_fs_create_result(&filesystem, "CMD/EDIT.TXT", &file) ==
+	       ZEDBSD_FS_OK);
+	assert(zedbsd_file_write_result(&file, 0, "zedBSD", 5) == ZEDBSD_FS_OK);
+	assert(zedbsd_file_flush_result(&file) == ZEDBSD_FS_OK);
 	reopen_and_read(&filesystem, "/cmd/edit.txt", buffer, 5);
-	assert(!memcmp(buffer, "Boots", 5));
+	assert(!memcmp(buffer, "zedBSD", 5));
 	assert_fats_equal(&disk);
 	destroy_disk(&disk);
 }
@@ -273,8 +273,8 @@ static void test_create_in_existing_directory(uint16_t logical_bytes)
 static void test_full_root(void)
 {
 	struct memory_disk disk;
-	struct boots_filesystem filesystem;
-	struct boots_file file;
+	struct zedbsd_filesystem filesystem;
+	struct zedbsd_file file;
 	uint8_t *root;
 
 	format_disk(&disk, 512);
@@ -288,16 +288,16 @@ static void test_full_root(void)
 		raw[11] = 0x20;
 	}
 	mount_disk(&disk, &filesystem);
-	assert(boots_fs_create_result(&filesystem, "/full.bin", &file) ==
-	       BOOTS_FS_NO_SPACE);
+	assert(zedbsd_fs_create_result(&filesystem, "/full.bin", &file) ==
+	       ZEDBSD_FS_NO_SPACE);
 	destroy_disk(&disk);
 }
 
 static void test_full_disk(void)
 {
 	struct memory_disk disk;
-	struct boots_filesystem filesystem;
-	struct boots_file file;
+	struct zedbsd_filesystem filesystem;
+	struct zedbsd_file file;
 
 	format_disk(&disk, 512);
 	for (uint32_t cluster = 2; cluster < disk.cluster_count + 2; cluster++) {
@@ -305,18 +305,18 @@ static void test_full_disk(void)
 		set_fat(&disk, 1, cluster, 0xffff);
 	}
 	mount_disk(&disk, &filesystem);
-	assert(boots_fs_create_result(&filesystem, "/full.bin", &file) ==
-	       BOOTS_FS_OK);
-	assert(boots_file_write_result(&file, 0, "x", 1) ==
-	       BOOTS_FS_NO_SPACE);
+	assert(zedbsd_fs_create_result(&filesystem, "/full.bin", &file) ==
+	       ZEDBSD_FS_OK);
+	assert(zedbsd_file_write_result(&file, 0, "x", 1) ==
+	       ZEDBSD_FS_NO_SPACE);
 	destroy_disk(&disk);
 }
 
 static void test_corrupt_chain(void)
 {
 	struct memory_disk disk;
-	struct boots_filesystem filesystem;
-	struct boots_file file;
+	struct zedbsd_filesystem filesystem;
+	struct zedbsd_file file;
 	uint8_t *raw;
 
 	format_disk(&disk, 512);
@@ -330,9 +330,9 @@ static void test_corrupt_chain(void)
 	set_fat(&disk, 1, 2, 3);
 	set_fat(&disk, 1, 3, 2);
 	mount_disk(&disk, &filesystem);
-	assert(boots_fs_open_result(&filesystem, "/loop.bin", &file) ==
-	       BOOTS_FS_OK);
-	assert(boots_file_truncate_result(&file, 0) == BOOTS_FS_CORRUPT);
+	assert(zedbsd_fs_open_result(&filesystem, "/loop.bin", &file) ==
+	       ZEDBSD_FS_OK);
+	assert(zedbsd_file_truncate_result(&file, 0) == ZEDBSD_FS_CORRUPT);
 	assert(get_fat(&disk, 0, 2) == 3 && get_fat(&disk, 0, 3) == 2);
 	assert_fats_equal(&disk);
 	destroy_disk(&disk);
@@ -341,17 +341,17 @@ static void test_corrupt_chain(void)
 static void test_write_error_not_exposed(void)
 {
 	struct memory_disk disk;
-	struct boots_filesystem filesystem;
-	struct boots_file file;
+	struct zedbsd_filesystem filesystem;
+	struct zedbsd_file file;
 	uint8_t *raw;
 
 	format_disk(&disk, 512);
 	mount_disk(&disk, &filesystem);
-	assert(boots_fs_create_result(&filesystem, "/error.bin", &file) ==
-	       BOOTS_FS_OK);
+	assert(zedbsd_fs_create_result(&filesystem, "/error.bin", &file) ==
+	       ZEDBSD_FS_OK);
 	disk.fail_write_at = disk.writes;
-	assert(boots_file_write_result(&file, 0, "x", 1) ==
-	       BOOTS_FS_IO_ERROR);
+	assert(zedbsd_file_write_result(&file, 0, "x", 1) ==
+	       ZEDBSD_FS_IO_ERROR);
 	raw = sector(&disk, disk.root_start);
 	assert(get16(raw + 26) == 0 &&
 	       raw[28] == 0 && raw[29] == 0 && raw[30] == 0 && raw[31] == 0);
@@ -369,6 +369,6 @@ int main(void)
 	test_full_disk();
 	test_corrupt_chain();
 	test_write_error_not_exposed();
-	puts("Boots FAT16 write host tests: OK");
+	puts("zedBSD FAT16 write host tests: OK");
 	return 0;
 }

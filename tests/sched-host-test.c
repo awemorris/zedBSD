@@ -81,6 +81,6 @@ main(void)
 	sched_unlink(&sleeper);
 	assert(sleeper.sched.queue_kind == SCHED_QUEUE_NONE);
 
-	puts("Boots scheduler host tests: PASS");
+	puts("zedBSD scheduler host tests: PASS");
 	return 0;
 }

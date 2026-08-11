@@ -1,48 +1,48 @@
 /*
- * Boots mounted-filesystem namespace
+ * zedBSD mounted-filesystem namespace
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef BOOTS_NAMESPACE_H
-#define BOOTS_NAMESPACE_H
+#ifndef ZEDBSD_NAMESPACE_H
+#define ZEDBSD_NAMESPACE_H
 
 #include "kern/fs.h"
 
-#define BOOTS_NAMESPACE_MAX_MOUNTS 12U
-#define BOOTS_NAMESPACE_NAME_MAX 16U
+#define ZEDBSD_NAMESPACE_MAX_MOUNTS 12U
+#define ZEDBSD_NAMESPACE_NAME_MAX 16U
 
-struct boots_namespace_mount {
-	char name[BOOTS_NAMESPACE_NAME_MAX];
-	struct boots_filesystem filesystem;
+struct zedbsd_namespace_mount {
+	char name[ZEDBSD_NAMESPACE_NAME_MAX];
+	struct zedbsd_filesystem filesystem;
 };
 
-struct boots_namespace {
-	struct boots_namespace_mount mounts[BOOTS_NAMESPACE_MAX_MOUNTS];
+struct zedbsd_namespace {
+	struct zedbsd_namespace_mount mounts[ZEDBSD_NAMESPACE_MAX_MOUNTS];
 	unsigned count;
 	int default_mount;
 };
 
-void boots_namespace_init(struct boots_namespace *namespace);
-int boots_namespace_mount(struct boots_namespace *namespace,
+void zedbsd_namespace_init(struct zedbsd_namespace *namespace);
+int zedbsd_namespace_mount(struct zedbsd_namespace *namespace,
 			   const char *name,
-			   const struct boots_filesystem *filesystem);
-int boots_namespace_set_default(struct boots_namespace *namespace,
+			   const struct zedbsd_filesystem *filesystem);
+int zedbsd_namespace_set_default(struct zedbsd_namespace *namespace,
 				 const char *name);
-const char *boots_namespace_default_name(
-	const struct boots_namespace *namespace);
+const char *zedbsd_namespace_default_name(
+	const struct zedbsd_namespace *namespace);
 
-enum boots_fs_result boots_namespace_open_result(
-	struct boots_namespace *namespace, const char *path,
-	struct boots_file *file);
-enum boots_fs_result boots_namespace_create_result(
-	struct boots_namespace *namespace, const char *path,
-	struct boots_file *file);
-enum boots_fs_result boots_namespace_stat_result(
-	struct boots_namespace *namespace, const char *path,
-	struct boots_dirent *entry);
-enum boots_fs_result boots_namespace_readdir_result(
-	struct boots_namespace *namespace, const char *path, unsigned index,
-	struct boots_dirent *entry);
+enum zedbsd_fs_result zedbsd_namespace_open_result(
+	struct zedbsd_namespace *namespace, const char *path,
+	struct zedbsd_file *file);
+enum zedbsd_fs_result zedbsd_namespace_create_result(
+	struct zedbsd_namespace *namespace, const char *path,
+	struct zedbsd_file *file);
+enum zedbsd_fs_result zedbsd_namespace_stat_result(
+	struct zedbsd_namespace *namespace, const char *path,
+	struct zedbsd_dirent *entry);
+enum zedbsd_fs_result zedbsd_namespace_readdir_result(
+	struct zedbsd_namespace *namespace, const char *path, unsigned index,
+	struct zedbsd_dirent *entry);
 
 #endif

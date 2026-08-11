@@ -1,15 +1,15 @@
-# Selected Noct core for Boots.
+# Selected Noct core for zedBSD.
 #
-# M2 deliberately compiled these objects without linking them into BOOT.SYS.
+# M2 deliberately compiled these objects without linking them into vmunix.
 # M3 kept that boundary and performed a relocatable link audit.  M4 linked the
-# interpreter into BOOT.SYS, M5 added soft-float, and M6 enables the i386 JIT.
+# interpreter into vmunix, M5 added soft-float, and M6 enables the i386 JIT.
 # Generated lexer/parser C sources are imported and used directly, so flex and
 # bison are not build dependencies.
 
 NOCT_ROOT ?= noct
 NOCT_ENABLE_JIT ?= 1
 NOCT_OPTIMIZE_LEVEL ?= 1
-# Compile every Boots build with the largest supported reservation.  The
+# Compile every zedBSD build with the largest supported reservation.  The
 # installed-RAM profile selects a smaller per-VM reservation at runtime.
 NOCT_JIT_CODE_MAX ?= 2097152
 NOCT_PROFILE := $(if $(filter 1,$(NOCT_ENABLE_JIT)),jit-$(NOCT_JIT_CODE_MAX),nojit)-opt-$(NOCT_OPTIMIZE_LEVEL)
@@ -65,9 +65,9 @@ NOCT_CPPFLAGS := \
 	-I$(NOCT_ROOT)/src/api \
 	-DNOCT_TARGET_PC98BE \
 	-DNOCT_MEMORY_SMALL \
-	-DBOOTS_NOCT_OPTIMIZE_LEVEL=$(NOCT_OPTIMIZE_LEVEL) \
+	-DZEDBSD_NOCT_OPTIMIZE_LEVEL=$(NOCT_OPTIMIZE_LEVEL) \
 	-DNOCT_JIT_CODE_MAX=$(NOCT_JIT_CODE_MAX) \
-	-DBOOTS_NOCT_JIT_CODE_MAX=$(NOCT_JIT_CODE_MAX) \
+	-DZEDBSD_NOCT_JIT_CODE_MAX=$(NOCT_JIT_CODE_MAX) \
 	-DHAVE_STDINT_H=1 \
 	-DHAVE_INTTYPES_H=1 \
 	-DHAVE_SYS_TYPES_H=1 \
@@ -154,7 +154,7 @@ NOCT_M3_UNDEFINED := $(BUILD)/noct-libc-m3.undefined
 noct-link-audit: noct-objects libc-objects $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/fs.o $(BUILD)/src/kern/namespace.o
 	@mkdir -p $(dir $(NOCT_M3_RELOC))
-	$(NOCT_LD) -m elf_i386 -r $(NOCT_OBJECTS) $(BOOTS_LIBC_OBJECTS) \
+	$(NOCT_LD) -m elf_i386 -r $(NOCT_OBJECTS) $(ZEDBSD_LIBC_OBJECTS) \
 		$(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
 		$(BUILD)/src/kern/namespace.o \
 		-o $(NOCT_M3_RELOC)
@@ -176,7 +176,7 @@ noct-link-audit: noct-objects libc-objects $(BUILD)/src/kern/env.o \
 
 noct-m3-verify: libc-host-test libc-opcode-check \
 	noct-opcode-check noct-link-audit
-	@echo "Boots M3 historical boundary checks: PASS"
+	@echo "zedBSD M3 historical boundary checks: PASS"
 
 .PHONY: noct-objects noct-opcode-check noct-link-audit noct-m3-verify
 
@@ -190,7 +190,7 @@ USER_NOCT_OBJECTS := \
 USER_NOCT_CPPFLAGS := -nostdinc -Iuser/include -Iinclude/uapi -I. \
 	-I$(BUILD) -Ilibc/include -I$(NOCT_ROOT)/include \
 	-I$(NOCT_ROOT)/src/core -I$(NOCT_ROOT)/src/api \
-	-DNOCT_TARGET_POSIX -DNOCT_TARGET_BOOTS -DNOCT_MEMORY_SMALL \
+	-DNOCT_TARGET_POSIX -DNOCT_TARGET_ZEDBSD -DNOCT_MEMORY_SMALL \
 	-DNOCT_USE_JIT -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 \
 	-DHAVE_SYS_TYPES_H=1 -DHAVE_STDBOOL_H=1 -U__linux__ -Ulinux
 USER_NOCT_CFLAGS := $(NOCT_CFLAGS)

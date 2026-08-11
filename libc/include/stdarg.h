@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_STDARG_H
-#define BOOTS_STDARG_H
+#ifndef ZEDBSD_STDARG_H
+#define ZEDBSD_STDARG_H
 
 typedef __builtin_va_list va_list;
 #define va_start(ap, last) __builtin_va_start(ap, last)

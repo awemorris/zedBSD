@@ -3,14 +3,14 @@
 #include <stddef.h>
 
 size_t
-boots_console_write_bytes(const char *bytes, size_t length)
+zedbsd_console_write_bytes(const char *bytes, size_t length)
 {
 	hal_cons_write_n(bytes, (unsigned)length);
 	return length;
 }
 
 __attribute__((noreturn)) void
-boots_libc_panic(const char *message)
+zedbsd_libc_panic(const char *message)
 {
 	hal_cons_write("kernel panic: ");
 	hal_cons_write(message != NULL ? message : "unknown");

@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_CTYPE_H
-#define BOOTS_CTYPE_H
+#ifndef ZEDBSD_CTYPE_H
+#define ZEDBSD_CTYPE_H
 
 int isalnum(int character);
 int isalpha(int character);

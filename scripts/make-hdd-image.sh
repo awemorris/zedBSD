@@ -2,8 +2,8 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 output="${1:-$build/hdd-test.img}"
 heads="${DISK_HEADS:-}"
 sectors="${DISK_SECTORS:-17}"
@@ -13,7 +13,7 @@ test ! -e "$output" || {
 	exit 1
 }
 mkdir -p "$(dirname "$output")"
-truncate -s "${BOOTS_TEST_MB:-16}M" "$output"
+truncate -s "${ZEDBSD_TEST_MB:-16}M" "$output"
 if test -z "$heads"; then
 	image_bytes="$(stat -c %s "$output")"
 	# Only the legacy 20 MiB disk class uses four-head geometry.
@@ -64,12 +64,17 @@ PY
 # the only partition is the BOOT volume itself, which is deliberately
 # excluded from chain boot.  Ship the graphical AUTOEXEC.NCT menu so
 # the automatic countdown has somewhere to go.
-BOOT_LOGO="${BOOTS_LOGO:-}" \
-BOOTS_FILES="${BOOTS_FILES:-}" \
-BOOTS_AUTOEXEC="${BOOTS_AUTOEXEC:-$repo/apps/AUTOEXEC.NCT}" \
+if test "${ZEDBSD_AUTOEXEC_DISABLE:-0}" = 1; then
+	autoexec=""
+else
+	autoexec="${ZEDBSD_AUTOEXEC:-$repo/apps/AUTOEXEC.NCT}"
+fi
+BOOT_LOGO="${ZEDBSD_LOGO:-}" \
+ZEDBSD_FILES="${ZEDBSD_FILES:-}" \
+ZEDBSD_AUTOEXEC="$autoexec" \
 DISK_HEADS="$heads" DISK_SECTORS="$sectors" \
 	"$repo/scripts/install-image.sh" --partition 1 \
-	--install-disk-stubs "$output" "${BOOTS_KERNEL:-}" "${BOOTS_CFG:-}"
+	--install-disk-stubs "$output" "${ZEDBSD_KERNEL:-}" "${ZEDBSD_CFG:-}"
 
 sha256sum "$output"
-printf 'Boots HDD test image: %s\n' "$output"
+printf 'zedBSD HDD test image: %s\n' "$output"

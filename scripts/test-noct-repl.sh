@@ -2,31 +2,34 @@
 set -euo pipefail
 
 # Exercise the interactive Noct REPL through the emulated PC-98 keyboard.
-# The release image is copied before BOOT.SYS or FAT16 contents are changed.
+# The release image is copied before vmunix or FAT16 contents are changed.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-machine="${BOOTS_TEST_MACHINE:-pc9821}"
-cpu="${BOOTS_TEST_CPU:-486}"
-base="${BOOTS_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
+machine="${ZEDBSD_TEST_MACHINE:-pc9821}"
+cpu="${ZEDBSD_TEST_CPU:-486}"
+base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/m15-repl"
 image="$work/m15-ide.raw"
 files="$work/files"
-cfg="$work/BOOTS.CFG"
+cfg="$work/ZEDBSD.CFG"
 monitor="$work/monitor.sock"
 screenshot="$work/m15.ppm"
-shift_test="${BOOTS_REPL_SHIFT_TEST:-0}"
-memory_mib="${BOOTS_TEST_MEMORY_MIB:-6}"
+shift_test="${ZEDBSD_REPL_SHIFT_TEST:-0}"
+memory_mib="${ZEDBSD_TEST_MEMORY_MIB:-6}"
+fresh_swap="${ZEDBSD_REPL_SWAP:-0}"
 
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios_dir" || {
 	echo "PC-98 BIOS directory not found: $bios_dir" >&2
 	exit 1
 }
-test -f "$base" || { echo "M15 source image not found: $base" >&2; exit 1; }
+if test "$fresh_swap" != 1; then
+	test -f "$base" || { echo "M15 source image not found: $base" >&2; exit 1; }
+fi
 for command in mtype python3; do
 	command -v "$command" >/dev/null || {
 		echo "$command is required" >&2
@@ -35,16 +38,23 @@ for command in mtype python3; do
 done
 
 mkdir -p "$work" "$files"
-cp --reflink=auto "$base" "$image"
 printf 'noct\nm15post\nhalt\n' > "$cfg"
 printf '%s\n' \
 	'func main() {' \
 	'    FileUtil.writeText("M15POST.TXT", "SHELL");' \
 	'    return 0;' \
 	'}' > "$files/M15POST.NCT"
-make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
-BOOTS_FILES="$files" DISK_SECTORS=17 \
-	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+if test "$fresh_swap" = 1; then
+	rm -f -- "$image"
+	ZEDBSD_TEST_MB=40 ZEDBSD_SWAP_SIZE_MIB=32 \
+		ZEDBSD_AUTOEXEC_DISABLE=1 ZEDBSD_FILES="$files" \
+		ZEDBSD_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$image"
+else
+	cp --reflink=auto "$base" "$image"
+	ZEDBSD_FILES="$files" DISK_SECTORS=17 \
+		"$repo/scripts/install-image.sh" "$image" "" "$cfg"
+fi
 
 offset="$(python3 - "$image" <<'PY'
 import os
@@ -170,7 +180,7 @@ def type_text(text):
             raise SystemExit(f"no QEMU key mapping for {char!r}")
         press(key, modifier)
 
-# Let the compatible BIOS and BOOTS.CFG reach the argument-free `noct` command.
+# Let the compatible BIOS and ZEDBSD.CFG reach the argument-free `noct` command.
 time.sleep(6)
 if shift_test:
     # A real PC-98 BIOS applies the injected Shift state, so exercise the
@@ -198,7 +208,7 @@ for line in lines:
     press("ret")
     time.sleep(0.35)
 
-# Exit the REPL. BOOTS.CFG must resume and execute M15POST.NCT before halt.
+# Exit the REPL. ZEDBSD.CFG must resume and execute M15POST.NCT before halt.
 press("c", "ctrl")
 time.sleep(4)
 qmp("screendump", {"filename": screenshot})
@@ -214,7 +224,7 @@ for _ in $(seq 1 50); do
 	sleep 0.1
 done
 if kill -0 "$qemu_pid" 2>/dev/null; then
-	# A guest halted by the final BOOTS.CFG command can stop servicing the
+	# A guest halted by the final ZEDBSD.CFG command can stop servicing the
 	# asynchronous QMP quit request. The FAT marker below is the authoritative
 	# completion check, so terminate only this test-owned QEMU after the grace
 	# period.
@@ -235,7 +245,7 @@ if test "$shift_test" = 1; then
 	}
 fi
 test "$(mtype -i "$image@@$offset" ::M15POST.TXT)" = "SHELL" || {
-	echo "M15 Ctrl-C did not return to BOOTS.CFG" >&2
+	echo "M15 Ctrl-C did not return to ZEDBSD.CFG" >&2
 	exit 1
 }
-printf 'M15 Boots Noct REPL QEMU test: PASS (%s)\n' "$image"
+printf 'M15 zedBSD Noct REPL QEMU test: PASS (%s)\n' "$image"

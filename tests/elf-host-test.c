@@ -58,8 +58,10 @@ file_read(struct file *file, void *buffer, size_t length)
 }
 
 int
-vmspace_map_anon(struct vmspace *vm, uintptr_t start, size_t size,
-		 uint32_t prot, struct vm_region **result)
+vmspace_map_file(struct vmspace *vm, uintptr_t start, size_t size,
+		 uint32_t prot, struct file *file, off_t file_offset,
+		 uintptr_t data_start, size_t data_size,
+		 struct vm_region **result)
 {
 	(void)vm;
 	if (map_count != 0)
@@ -68,19 +70,20 @@ vmspace_map_anon(struct vmspace *vm, uintptr_t start, size_t size,
 	mapped_region.start = start;
 	mapped_region.size = size;
 	mapped_region.prot = prot;
-	mapped_region.pmem.vaddr = (uintptr_t)calloc(1, size);
-	if (mapped_region.pmem.vaddr == 0)
-		return ENOMEM;
-	mapped_region.pmem.size = size;
+	mapped_region.backing = VM_BACKING_FILE;
+	mapped_region.file = file;
+	mapped_region.file_offset = file_offset;
+	mapped_region.data_start = data_start;
+	mapped_region.data_size = data_size;
 	map_count++;
-	*result = &mapped_region;
+	if (result != NULL)
+		*result = &mapped_region;
 	return 0;
 }
 
 static void
 reset_mapping(void)
 {
-	free((void *)mapped_region.pmem.vaddr);
 	memset(&mapped_region, 0, sizeof(mapped_region));
 	map_count = 0;
 }
@@ -147,8 +150,12 @@ main(void)
 	assert(mapped_region.start == LOAD_ADDRESS);
 	assert(mapped_region.size == 4096);
 	assert(mapped_region.prot == (HAL_SPACE_READ | HAL_SPACE_EXEC));
-	assert(memcmp((void *)mapped_region.pmem.vaddr, "ELF!", 4) == 0);
-	assert(((uint8_t *)mapped_region.pmem.vaddr)[4] == 0);
+	assert(mapped_region.backing == VM_BACKING_FILE);
+	assert(mapped_region.file == &image_file);
+	assert(mapped_region.file_offset == LOAD_OFFSET);
+	assert(mapped_region.data_start == LOAD_ADDRESS);
+	assert(mapped_region.data_size == 4);
+	assert(mapped_region.pages == NULL);
 	reset_mapping();
 
 	header = make_valid_image();
@@ -170,6 +177,6 @@ main(void)
 	image_inode.i_size = (off_t)image_size;
 	assert(load(&vm, &entry) == ENOEXEC);
 
-	puts("Boots ELF32 loader host tests: PASS");
+	puts("zedBSD ELF32 loader host tests: PASS");
 	return 0;
 }

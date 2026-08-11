@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_KERN_INODE_H
-#define BOOTS_KERN_INODE_H
+#ifndef ZEDBSD_KERN_INODE_H
+#define ZEDBSD_KERN_INODE_H
 
 #include <stddef.h>
 #include <sys/stat.h>
@@ -37,12 +37,15 @@ enum inode_type {
 #define INODE_DIRTY      0x00000002U
 #define INODE_DEAD       0x00000004U
 #define INODE_MOUNTPOINT 0x00000008U
+#define INODE_SWAPFILE   0x00000010U
 
 struct inode;
 
 struct inode_ops {
 	int (*lookup)(struct inode *, const struct componentname *,
 		      struct inode **);
+	int (*lookup_casefold)(struct inode *, const struct componentname *,
+			       struct inode **);
 	int (*create)(struct inode *, const struct componentname *, mode_t,
 		      struct inode **);
 	int (*mkdir)(struct inode *, const struct componentname *, mode_t,
@@ -84,6 +87,8 @@ void inode_cache_purge_mount(struct mount *mount);
 void inode_cache_reset(void);
 
 int inode_lookup(struct inode *, const struct componentname *, struct inode **);
+int inode_lookup_casefold(struct inode *, const struct componentname *,
+			  struct inode **);
 int inode_getattr(struct inode *, struct stat *);
 int inode_setattr(struct inode *, const struct stat *, unsigned);
 int inode_create(struct inode *, const struct componentname *, mode_t,

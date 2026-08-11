@@ -3,6 +3,7 @@
 #include "kern/fat-vfs.h"
 #include "kern/fat.h"
 #include "kern/fat16.h"
+#include "kern/fat32.h"
 #include "kern/namecache.h"
 #include "kern/namei.h"
 
@@ -17,18 +18,18 @@
 #define FAT_ATTRIBUTE_DIRECTORY 0x10U
 
 struct fat_mount_state {
-	struct boots_filesystem legacy;
+	struct zedbsd_filesystem legacy;
 	uint8_t used;
 };
 
 struct fat_inode_slot {
 	struct fat_inode_info info;
-	char path[BOOTS_PATH_MAX];
+	char path[ZEDBSD_PATH_MAX];
 	uint8_t used;
 };
 
 struct fat_file_state {
-	struct boots_file legacy;
+	struct zedbsd_file legacy;
 	uint8_t used;
 };
 
@@ -40,17 +41,18 @@ static struct fat_file_state fat_files[FAT_FILE_MAX]
 	__attribute__((section(".vfs_bss")));
 
 static int
-fs_error(enum boots_fs_result result)
+fs_error(enum zedbsd_fs_result result)
 {
 	switch (result) {
-	case BOOTS_FS_OK: return 0;
-	case BOOTS_FS_NOT_FOUND: return ENOENT;
-	case BOOTS_FS_INVALID_PATH: return EINVAL;
-	case BOOTS_FS_READ_ONLY: return EROFS;
-	case BOOTS_FS_NO_SPACE: return ENOSPC;
-	case BOOTS_FS_IO_ERROR: return EIO;
-	case BOOTS_FS_CORRUPT: return EIO;
-	case BOOTS_FS_UNSUPPORTED: return EOPNOTSUPP;
+	case ZEDBSD_FS_OK: return 0;
+	case ZEDBSD_FS_NOT_FOUND: return ENOENT;
+	case ZEDBSD_FS_INVALID_PATH: return EINVAL;
+	case ZEDBSD_FS_READ_ONLY: return EROFS;
+	case ZEDBSD_FS_NO_SPACE: return ENOSPC;
+	case ZEDBSD_FS_IO_ERROR: return EIO;
+	case ZEDBSD_FS_CORRUPT: return EIO;
+	case ZEDBSD_FS_UNSUPPORTED: return EOPNOTSUPP;
+	case ZEDBSD_FS_EXISTS: return EEXIST;
 	default: return EINVAL;
 	}
 }
@@ -67,10 +69,10 @@ volume_write(void *context, uint32_t lba, const void *buffer)
 	return disk_write(context, lba, 1, buffer) == 0;
 }
 
-static struct boots_volume
+static struct zedbsd_volume
 fat_volume(struct disk *disk)
 {
-	struct boots_volume volume;
+	struct zedbsd_volume volume;
 	memset(&volume, 0, sizeof(volume));
 	volume.context = disk;
 	volume.sector_size = 512;
@@ -129,12 +131,12 @@ fat_free_inode(struct inode *inode)
 
 static int
 join_path(const char *parent, const struct componentname *name,
-	  char output[BOOTS_PATH_MAX])
+	  char output[ZEDBSD_PATH_MAX])
 {
 	size_t parent_length = strlen(parent);
 	if (name->cn_namelen == 0 || name->cn_namelen > NAME_MAX ||
 	    parent_length + (parent_length != 0) + name->cn_namelen >=
-	    BOOTS_PATH_MAX)
+	    ZEDBSD_PATH_MAX)
 		return ENAMETOOLONG;
 	memcpy(output, parent, parent_length);
 	if (parent_length != 0)
@@ -152,7 +154,7 @@ fat_ino(uint32_t lba, uint16_t offset)
 
 static int
 fat_make_inode(struct mount *mountp, const char *path,
-	       const struct boots_dirent *entry, uint32_t lba,
+	       const struct zedbsd_dirent *entry, uint32_t lba,
 	       uint16_t offset, uint32_t first_cluster, uint8_t attributes,
 	       struct inode **result)
 {
@@ -168,7 +170,7 @@ fat_make_inode(struct mount *mountp, const char *path,
 		return ENOSPC;
 	info = fat_inode(inode);
 	slot = fat_slot(inode);
-	if (slot == NULL || strlen(path) >= BOOTS_PATH_MAX) {
+	if (slot == NULL || strlen(path) >= ZEDBSD_PATH_MAX) {
 		inode_release(inode);
 		return EINVAL;
 	}
@@ -198,6 +200,8 @@ fat_make_inode(struct mount *mountp, const char *path,
 
 static int fat_lookup(struct inode *, const struct componentname *,
 		      struct inode **);
+static int fat_lookup_casefold(struct inode *, const struct componentname *,
+			       struct inode **);
 static int fat_create(struct inode *, const struct componentname *, mode_t,
 		      struct inode **);
 static int fat_truncate(struct inode *, off_t);
@@ -210,6 +214,7 @@ static int fat_close_file(struct file *);
 
 static const struct inode_ops fat_inode_ops = {
 	.lookup = fat_lookup,
+	.lookup_casefold = fat_lookup_casefold,
 	.create = fat_create,
 	.getattr = fat_getattr,
 	.truncate = fat_truncate,
@@ -238,17 +243,57 @@ static int
 fat_stat_path(struct mount *mountp, const char *path, struct inode **result)
 {
 	struct fat_mount_state *state = fat_mount_state(mountp);
-	struct boots_dirent entry;
+	struct zedbsd_dirent entry;
+	char canonical[ZEDBSD_PATH_MAX];
+	const char *slash;
+	size_t prefix_length;
 	uint32_t lba, first_cluster;
 	uint16_t offset;
 	uint8_t attributes;
 	int error;
-	enum boots_fs_result fsresult = boots_fat16_stat_location(
+	enum zedbsd_fs_result fsresult = zedbsd_fat_stat_location(
 		&state->legacy, path, &entry, &lba, &offset,
 		&first_cluster, &attributes);
-	if (fsresult != BOOTS_FS_OK)
+	if (fsresult != ZEDBSD_FS_OK)
 		return fs_error(fsresult);
-	error = fat_make_inode(mountp, path, &entry, lba, offset,
+	slash = strrchr(path, '/');
+	prefix_length = slash != NULL ? (size_t)(slash - path + 1) : 0;
+	if (prefix_length + strlen(entry.name) >= sizeof(canonical))
+		return ENAMETOOLONG;
+	memcpy(canonical, path, prefix_length);
+	strcpy(canonical + prefix_length, entry.name);
+	error = fat_make_inode(mountp, canonical, &entry, lba, offset,
+			       first_cluster, attributes, result);
+	if (error == 0)
+		set_inode_ops(*result);
+	return error;
+}
+
+static int
+fat_stat_path_casefold(struct mount *mountp, const char *path,
+		       struct inode **result)
+{
+	struct fat_mount_state *state = fat_mount_state(mountp);
+	struct zedbsd_dirent entry;
+	char canonical[ZEDBSD_PATH_MAX];
+	const char *slash;
+	size_t prefix_length;
+	uint32_t lba, first_cluster;
+	uint16_t offset;
+	uint8_t attributes;
+	int error;
+	enum zedbsd_fs_result fsresult = zedbsd_fat_stat_location_casefold(
+		&state->legacy, path, &entry, &lba, &offset,
+		&first_cluster, &attributes);
+	if (fsresult != ZEDBSD_FS_OK)
+		return fs_error(fsresult);
+	slash = strrchr(path, '/');
+	prefix_length = slash != NULL ? (size_t)(slash - path + 1) : 0;
+	if (prefix_length + strlen(entry.name) >= sizeof(canonical))
+		return ENAMETOOLONG;
+	memcpy(canonical, path, prefix_length);
+	strcpy(canonical + prefix_length, entry.name);
+	error = fat_make_inode(mountp, canonical, &entry, lba, offset,
 			       first_cluster, attributes, result);
 	if (error == 0)
 		set_inode_ops(*result);
@@ -259,7 +304,7 @@ static int
 fat_lookup(struct inode *directory, const struct componentname *name,
 	   struct inode **result)
 {
-	char path[BOOTS_PATH_MAX];
+	char path[ZEDBSD_PATH_MAX];
 	const char *parent = fat_path(directory);
 	int error;
 	if (parent == NULL)
@@ -289,6 +334,21 @@ fat_lookup(struct inode *directory, const struct componentname *name,
 }
 
 static int
+fat_lookup_casefold(struct inode *directory,
+		    const struct componentname *name, struct inode **result)
+{
+	char path[ZEDBSD_PATH_MAX];
+	const char *parent = fat_path(directory);
+	int error;
+
+	if (parent == NULL)
+		return EIO;
+	error = join_path(parent, name, path);
+	return error != 0 ? error :
+		fat_stat_path_casefold(directory->i_mount, path, result);
+}
+
+static int
 fat_getattr(struct inode *inode, struct stat *status)
 {
 	memset(status, 0, sizeof(*status));
@@ -315,10 +375,10 @@ fat_file_get(struct file *file)
 			fat_files[i].used = 1;
 			memset(&fat_files[i].legacy, 0,
 			       sizeof(fat_files[i].legacy));
-			if (boots_fs_open_result(&mount_state->legacy,
+			if (zedbsd_fs_open_result(&mount_state->legacy,
 						 fat_path(file->f_inode),
 						 &fat_files[i].legacy) !=
-			    BOOTS_FS_OK) {
+			    ZEDBSD_FS_OK) {
 				fat_files[i].used = 0;
 				return NULL;
 			}
@@ -334,7 +394,7 @@ fat_read_file(struct file *file, void *buffer, size_t length)
 {
 	struct fat_file_state *state = fat_file_get(file);
 	uint32_t count;
-	enum boots_fs_result result;
+	enum zedbsd_fs_result result;
 	if (state == NULL)
 		return -EIO;
 	if (file->f_offset >= file->f_inode->i_size)
@@ -342,9 +402,9 @@ fat_read_file(struct file *file, void *buffer, size_t length)
 	if (length > (size_t)(file->f_inode->i_size - file->f_offset))
 		length = (size_t)(file->f_inode->i_size - file->f_offset);
 	count = length > UINT32_MAX ? UINT32_MAX : (uint32_t)length;
-	result = boots_file_read_result(&state->legacy, (uint64_t)file->f_offset,
+	result = zedbsd_file_read_result(&state->legacy, (uint64_t)file->f_offset,
 					buffer, count, NULL, NULL);
-	if (result != BOOTS_FS_OK)
+	if (result != ZEDBSD_FS_OK)
 		return -fs_error(result);
 	file->f_offset += count;
 	return count;
@@ -355,12 +415,12 @@ fat_write_file(struct file *file, const void *buffer, size_t length)
 {
 	struct fat_file_state *state = fat_file_get(file);
 	uint32_t count = length > UINT32_MAX ? UINT32_MAX : (uint32_t)length;
-	enum boots_fs_result result;
+	enum zedbsd_fs_result result;
 	if (state == NULL)
 		return -EIO;
-	result = boots_file_write_result(&state->legacy,
+	result = zedbsd_file_write_result(&state->legacy,
 					 (uint64_t)file->f_offset, buffer, count);
-	if (result != BOOTS_FS_OK)
+	if (result != ZEDBSD_FS_OK)
 		return -fs_error(result);
 	file->f_offset += count;
 	if (file->f_offset > file->f_inode->i_size)
@@ -372,18 +432,18 @@ static int
 fat_readdir(struct file *file, struct dirent *entry, int *eof)
 {
 	struct fat_mount_state *state = fat_mount_state(file->f_inode->i_mount);
-	struct boots_dirent legacy;
-	char child_path[BOOTS_PATH_MAX];
+	struct zedbsd_dirent legacy;
+	char child_path[ZEDBSD_PATH_MAX];
 	struct componentname component;
 	struct inode *child;
-	enum boots_fs_result result = boots_fs_readdir_result(
+	enum zedbsd_fs_result result = zedbsd_fs_readdir_result(
 		&state->legacy, fat_path(file->f_inode),
 		(unsigned)file->f_offset, &legacy);
-	if (result == BOOTS_FS_NOT_FOUND) {
+	if (result == ZEDBSD_FS_NOT_FOUND) {
 		*eof = 1;
 		return 0;
 	}
-	if (result != BOOTS_FS_OK)
+	if (result != ZEDBSD_FS_OK)
 		return fs_error(result);
 	component.cn_nameptr = legacy.name;
 	component.cn_namelen = strlen(legacy.name);
@@ -410,7 +470,7 @@ fat_close_file(struct file *file)
 	int error = 0;
 	if (state != NULL) {
 		if ((file->f_flags & O_ACCMODE) != O_RDONLY)
-			error = fs_error(boots_file_flush_result(&state->legacy));
+			error = fs_error(zedbsd_file_flush_result(&state->legacy));
 		memset(state, 0, sizeof(*state));
 		file->f_data = NULL;
 	}
@@ -424,24 +484,24 @@ fat_fsync(struct file *file)
 	int error;
 	if (state == NULL)
 		return EIO;
-	error = fs_error(boots_file_flush_result(&state->legacy));
+	error = fs_error(zedbsd_file_flush_result(&state->legacy));
 	return error != 0 ? error : bio_flush(file->f_inode->i_mount->m_disk);
 }
 
 static int
 fat_truncate(struct inode *inode, off_t size)
 {
-	struct boots_file file;
+	struct zedbsd_file file;
 	struct fat_mount_state *state = fat_mount_state(inode->i_mount);
-	enum boots_fs_result result;
+	enum zedbsd_fs_result result;
 	if (size < 0)
 		return EINVAL;
-	result = boots_fs_open_result(&state->legacy, fat_path(inode), &file);
-	if (result == BOOTS_FS_OK)
-		result = boots_file_truncate_result(&file, (uint64_t)size);
-	if (result == BOOTS_FS_OK)
-		result = boots_file_flush_result(&file);
-	if (result == BOOTS_FS_OK)
+	result = zedbsd_fs_open_result(&state->legacy, fat_path(inode), &file);
+	if (result == ZEDBSD_FS_OK)
+		result = zedbsd_file_truncate_result(&file, (uint64_t)size);
+	if (result == ZEDBSD_FS_OK)
+		result = zedbsd_file_flush_result(&file);
+	if (result == ZEDBSD_FS_OK)
 		inode->i_size = size;
 	return fs_error(result);
 }
@@ -451,19 +511,19 @@ fat_create(struct inode *directory, const struct componentname *name,
 	   mode_t mode, struct inode **result)
 {
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
-	struct boots_file file;
-	char path[BOOTS_PATH_MAX];
-	enum boots_fs_result fsresult;
+	struct zedbsd_file file;
+	char path[ZEDBSD_PATH_MAX];
+	enum zedbsd_fs_result fsresult;
 	int error;
 	(void)mode;
 	error = join_path(fat_path(directory), name, path);
 	if (error != 0)
 		return error;
-	fsresult = boots_fs_create_result(&state->legacy, path, &file);
-	if (fsresult != BOOTS_FS_OK)
+	fsresult = zedbsd_fs_create_result(&state->legacy, path, &file);
+	if (fsresult != ZEDBSD_FS_OK)
 		return fs_error(fsresult);
-	fsresult = boots_file_flush_result(&file);
-	if (fsresult != BOOTS_FS_OK)
+	fsresult = zedbsd_file_flush_result(&file);
+	if (fsresult != ZEDBSD_FS_OK)
 		return fs_error(fsresult);
 	namecache_remove(directory, name);
 	return fat_stat_path(directory->i_mount, path, result);
@@ -472,28 +532,31 @@ fat_create(struct inode *directory, const struct componentname *name,
 static int
 fat_probe(struct disk *disk)
 {
-	struct boots_volume volume;
-	enum boots_fs_result result;
+	struct zedbsd_volume volume;
+	enum zedbsd_fs_result result;
 	if (disk == NULL || disk->d_block_size != 512)
 		return EOPNOTSUPP;
 	volume = fat_volume(disk);
-	result = boots_fat12_driver.probe(&volume);
-	if (result == BOOTS_FS_UNSUPPORTED)
-		result = boots_fat16_driver.probe(&volume);
+	result = zedbsd_fat12_driver.probe(&volume);
+	if (result == ZEDBSD_FS_UNSUPPORTED)
+		result = zedbsd_fat16_driver.probe(&volume);
+	if (result == ZEDBSD_FS_UNSUPPORTED)
+		result = zedbsd_fat32_driver.probe(&volume);
 	return fs_error(result);
 }
 
 static int
 fat_mount_impl(struct mount *mountp)
 {
-	static const struct boots_filesystem_driver *const drivers[] = {
-		&boots_fat12_driver, &boots_fat16_driver,
+	static const struct zedbsd_filesystem_driver *const drivers[] = {
+		&zedbsd_fat12_driver, &zedbsd_fat16_driver,
+		&zedbsd_fat32_driver,
 	};
 	struct fat_mount_state *state = NULL;
 	struct inode *root;
 	struct fat_inode_info *info;
 	unsigned i;
-	enum boots_fs_result result;
+	enum zedbsd_fs_result result;
 	for (i = 0; i < FAT_MOUNT_MAX; i++)
 		if (!fat_mounts[i].used) {
 			state = &fat_mounts[i];
@@ -503,15 +566,16 @@ fat_mount_impl(struct mount *mountp)
 		return ENOSPC;
 	memset(state, 0, sizeof(*state));
 	state->used = 1;
-	result = boots_fs_mount_result(&state->legacy,
-				       &(struct boots_volume){
+	result = zedbsd_fs_mount_result(&state->legacy,
+				       &(struct zedbsd_volume){
 					.context = mountp->m_disk,
 					.sector_size = 512,
 					.read = volume_read,
 					.write = (mountp->m_flags & MOUNT_READ_ONLY) ?
 						NULL : volume_write,
-				       }, drivers, 2);
-	if (result != BOOTS_FS_OK) {
+				       }, drivers,
+				       sizeof(drivers) / sizeof(drivers[0]));
+	if (result != ZEDBSD_FS_OK) {
 		memset(state, 0, sizeof(*state));
 		return fs_error(result);
 	}
@@ -541,10 +605,10 @@ fat_unmount_impl(struct mount *mountp)
 	int error;
 	if (state == NULL)
 		return EINVAL;
-	error = fs_error(boots_fat_flush(&state->legacy));
+	error = fs_error(zedbsd_fat_flush(&state->legacy));
 	if (error != 0)
 		return error;
-	boots_fat_invalidate(&state->legacy);
+	zedbsd_fat_invalidate(&state->legacy);
 	memset(state, 0, sizeof(*state));
 	mountp->m_data = NULL;
 	return 0;
@@ -560,22 +624,55 @@ const struct filesystem_type fat_filesystem_type = {
 };
 
 int
-fat_file_contiguous_block(struct file *file, struct disk **disk,
-			  uint64_t *block)
+fat_file_extents(struct file *file, fat_extent_cb callback, void *context)
 {
 	struct fat_file_state *state;
-	uint32_t relative;
-	enum boots_fs_result result;
-	if (file == NULL || disk == NULL || block == NULL ||
+	if (file == NULL || callback == NULL || file->f_inode == NULL ||
+	    file->f_inode->i_type != INODE_REG ||
 	    file->f_inode->i_mount->m_type != &fat_filesystem_type)
 		return EINVAL;
 	state = fat_file_get(file);
 	if (state == NULL)
 		return EIO;
-	result = boots_file_contiguous_lba_result(&state->legacy, &relative);
-	if (result != BOOTS_FS_OK)
-		return fs_error(result);
+	return zedbsd_fat_file_extents(&state->legacy, callback, context) == 0 ?
+		0 : EIO;
+}
+
+struct contiguous_context {
+	uint64_t block;
+	uint64_t expected;
+	int seen;
+};
+
+static int contiguous_extent(uint64_t file_block, uint64_t disk_block,
+			     uint32_t count, void *argument)
+{
+	struct contiguous_context *context = argument;
+	if (!context->seen) {
+		context->block = disk_block;
+		context->expected = disk_block;
+		context->seen = 1;
+	}
+	if (file_block + context->block != disk_block ||
+	    disk_block != context->expected)
+		return EOPNOTSUPP;
+	context->expected += count;
+	return 0;
+}
+
+int
+fat_file_contiguous_block(struct file *file, struct disk **disk,
+			  uint64_t *block)
+{
+	struct contiguous_context context = { 0 };
+	int error;
+	if (file == NULL || disk == NULL || block == NULL ||
+	    file->f_inode->i_mount->m_type != &fat_filesystem_type)
+		return EINVAL;
+	error = fat_file_extents(file, contiguous_extent, &context);
+	if (error != 0 || !context.seen)
+		return error != 0 ? error : EIO;
 	*disk = file->f_inode->i_mount->m_disk;
-	*block = relative;
+	*block = context.block;
 	return 0;
 }

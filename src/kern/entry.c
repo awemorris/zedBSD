@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  *
- * Boots kernel bring-up bridge.
+ * zedBSD kernel bring-up bridge.
  */
 
 #include <stddef.h>
@@ -24,26 +24,42 @@
 
 static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
 	__attribute__((section(".kernel_heap"), aligned(4096)));
-static struct boots_heap kernel_heap;
+static struct zedbsd_heap kernel_heap;
 
 extern char __low_start[], __low_end[], __high_start[], __high_end[];
 
 void *
 kern_malloc(size_t size)
 {
-	return boots_heap_alloc(&kernel_heap, size);
+	return zedbsd_heap_alloc(&kernel_heap, size);
 }
 
 void *
 kern_calloc(size_t count, size_t size)
 {
-	return boots_heap_calloc(&kernel_heap, count, size);
+	return zedbsd_heap_calloc(&kernel_heap, count, size);
 }
 
 void
 kern_free(void *pointer)
 {
-	boots_heap_free(&kernel_heap, pointer);
+	zedbsd_heap_free(&kernel_heap, pointer);
+}
+
+void
+kern_memory_get_stats(struct kern_memory_stats *stats)
+{
+	if (stats == NULL)
+		return;
+	stats->heap_fixed = KERNEL_HEAP_SIZE;
+	stats->heap_current = zedbsd_heap_current_instance(&kernel_heap);
+	stats->heap_peak = zedbsd_heap_peak_instance(&kernel_heap);
+	stats->heap_largest_free =
+		zedbsd_heap_largest_free_instance(&kernel_heap);
+	stats->heap_largest_failed =
+		zedbsd_heap_largest_failed_instance(&kernel_heap);
+	stats->low_image_bytes = (size_t)(__low_end - __low_start);
+	stats->high_image_bytes = (size_t)(__high_end - __high_start);
 }
 
 static void *kernel_alloc(size_t size) { return kern_malloc(size); }
@@ -64,16 +80,16 @@ reserve_loaded_image(void)
 void
 kernel_entry(const void *handoff)
 {
-	const struct boots_handoff *h = handoff;
-	static struct boots_device devices[KERN_PLATFORM_MAX_DEVICES];
+	const struct zedbsd_handoff *h = handoff;
+	static struct zedbsd_device devices[KERN_PLATFORM_MAX_DEVICES];
 	size_t device_count;
 
-	if (h == NULL || h->magic != BOOTS_HANDOFF_MAGIC || h->version != 2 ||
+	if (h == NULL || h->magic != ZEDBSD_HANDOFF_MAGIC || h->version != 2 ||
 	    h->size < sizeof(*h))
-		hal_fatal(__FILE__, __LINE__, "invalid Boots handoff");
-	boots_heap_init_instance(&kernel_heap, kernel_heap_storage,
+		hal_fatal(__FILE__, __LINE__, "invalid zedBSD handoff");
+	zedbsd_heap_init_instance(&kernel_heap, kernel_heap_storage,
 				 KERNEL_HEAP_SIZE);
-	(void)boots_heap_set_active(&kernel_heap);
+	(void)zedbsd_heap_set_active(&kernel_heap);
 	hal_set_allocator(kernel_alloc, kernel_free);
 	reserve_loaded_image();
 	hal_task_init();
@@ -81,6 +97,8 @@ kernel_entry(const void *handoff)
 	user_probe_init();
 	syscall_init();
 	sched_init();
+	if (process_reaper_start() != 0)
+		hal_fatal(__FILE__, __LINE__, "process reaper initialization failed");
 
 	device_count = kern_platform_init(h, devices, KERN_PLATFORM_MAX_DEVICES);
 	if (device_count == 0)

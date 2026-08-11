@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # Boot the FAT12 floppy image under emulation and verify that Stage 1
-# located and loaded BOOT.SYS: the B98S Stage 2 header magic must appear
+# located and loaded vmunix: the B98S Stage 2 header magic must appear
 # at the load address 0x20000.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
 work="$build/tests/fdd-boot"
@@ -84,9 +84,9 @@ while time.time() < deadline:
     text = command("human-monitor-command",
                    {"command-line": "xp /4bx 0x20000"})
     if "0x42 0x39 0x38 0x53" in text:  # "B98S"
-        print("BOOT.SYS header found at 0x20000")
+        print("vmunix header found at 0x20000")
         sys.exit(0)
     time.sleep(1)
-raise SystemExit("BOOT.SYS never appeared at the Stage 2 load address")
+raise SystemExit("vmunix never appeared at the Stage 2 load address")
 PY
-echo "Boots FDD FAT12 boot test: PASS"
+echo "zedBSD FDD FAT12 boot test: PASS"

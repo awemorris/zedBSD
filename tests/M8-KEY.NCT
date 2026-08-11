@@ -3,9 +3,9 @@ func main() {
     var key = Keyboard.read();
     Console.print("key=" + key);
     if (key == Key.Left) {
-        Console.print("Boots-M8-KEY-PASS");
+        Console.print("zedBSD-M8-KEY-PASS");
         return 0;
     }
-    Console.print("Boots-M8-KEY-FAIL");
+    Console.print("zedBSD-M8-KEY-FAIL");
     return 1;
 }

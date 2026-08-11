@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef BOOTS_KERN_EXEC_H
-#define BOOTS_KERN_EXEC_H
+#ifndef ZEDBSD_KERN_EXEC_H
+#define ZEDBSD_KERN_EXEC_H
 
 #include <stdint.h>
 

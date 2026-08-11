@@ -1,7 +1,7 @@
 /* Kernel HAL compatibility aliases. */
 
-#ifndef BOOTS_HAL_TYPES_H
-#define BOOTS_HAL_TYPES_H
+#ifndef ZEDBSD_HAL_TYPES_H
+#define ZEDBSD_HAL_TYPES_H
 
 #include <stdbool.h>
 #include <stddef.h>

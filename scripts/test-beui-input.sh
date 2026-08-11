@@ -6,21 +6,21 @@ set -euo pipefail
 # arrow for a while; the script must see it held, see it released, and
 # see an unpressed key stay up.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-machine="${BOOTS_INPUT_MACHINE:-pc9821}"
-cpu="${BOOTS_TEST_CPU:-486}"
-initial_wait="${BOOTS_INPUT_INITIAL_WAIT:-15}"
-hold_wait="${BOOTS_INPUT_HOLD_WAIT:-3}"
-completion_wait="${BOOTS_INPUT_COMPLETION_WAIT:-15}"
-base="${BOOTS_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
+machine="${ZEDBSD_INPUT_MACHINE:-pc9821}"
+cpu="${ZEDBSD_TEST_CPU:-486}"
+initial_wait="${ZEDBSD_INPUT_INITIAL_WAIT:-15}"
+hold_wait="${ZEDBSD_INPUT_HOLD_WAIT:-3}"
+completion_wait="${ZEDBSD_INPUT_COMPLETION_WAIT:-15}"
+base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/beui-input"
 image="$work/input.raw"
 files="$work/files"
-cfg="$work/BOOTS.CFG"
+cfg="$work/ZEDBSD.CFG"
 monitor="$work/monitor.sock"
 qemu_log="$work/qemu.log"
 
@@ -68,8 +68,8 @@ func main() {
 EOF
 printf 'input98\nhalt\n' > "$cfg"
 
-make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
-BOOTS_FILES="$files" DISK_SECTORS=17 \
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+ZEDBSD_FILES="$files" DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'
@@ -180,4 +180,4 @@ test "$keystate_marker" = 'keystate 1 1 1' || {
 	echo "key state marker mismatch: '$keystate_marker'" >&2
 	exit 1
 }
-printf 'Boots BeUI input QEMU test: PASS (%s)\n' "$image"
+printf 'zedBSD BeUI input QEMU test: PASS (%s)\n' "$image"

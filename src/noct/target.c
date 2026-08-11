@@ -1,5 +1,5 @@
 /*
- * Boots Noct target adapters
+ * zedBSD Noct target adapters
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -7,12 +7,12 @@
 #include "noct/target.h"
 #include "noct/napi.h"
 
-#ifdef NOCT_TARGET_BOOTS
-#include <boots/console.h>
-#define TARGET_KEY_MASK BOOTS_CONSOLE_EVENT_KEY_MASK
-#define TARGET_KEY_SHIFT BOOTS_CONSOLE_EVENT_SHIFT
-#define TARGET_KEY_CTRL BOOTS_CONSOLE_EVENT_CTRL
-#define TARGET_KEY_GRAPH BOOTS_CONSOLE_EVENT_GRAPH
+#ifdef NOCT_TARGET_ZEDBSD
+#include <zedbsd/console.h>
+#define TARGET_KEY_MASK ZEDBSD_CONSOLE_EVENT_KEY_MASK
+#define TARGET_KEY_SHIFT ZEDBSD_CONSOLE_EVENT_SHIFT
+#define TARGET_KEY_CTRL ZEDBSD_CONSOLE_EVENT_CTRL
+#define TARGET_KEY_GRAPH ZEDBSD_CONSOLE_EVENT_GRAPH
 #else
 #include "hal/hal.h"
 #define TARGET_KEY_MASK HAL_KEY_EVENT_KEY_MASK
@@ -26,7 +26,7 @@
 #include <string.h>
 
 struct target_term {
-	const struct boots_noct_services *services;
+	const struct zedbsd_noct_services *services;
 	unsigned row;
 	unsigned column;
 	uint8_t attribute;
@@ -38,8 +38,8 @@ static struct target_term terminal;
 static int directory_read(void *context, const char *path, size_t index,
 			  char *name, size_t capacity, int *is_directory)
 {
-	const struct boots_noct_services *services = context;
-	struct boots_noct_dirent entry;
+	const struct zedbsd_noct_services *services = context;
+	struct zedbsd_noct_dirent entry;
 	size_t length;
 	int result;
 
@@ -386,8 +386,8 @@ static int term_pending_input(void *context)
 		term->services->keyboard_poll(term->services->context) >= 0;
 }
 
-int boots_noct_target_register(NoctEnv *env,
-				const struct boots_noct_services *services)
+int zedbsd_noct_target_register(NoctEnv *env,
+				const struct zedbsd_noct_services *services)
 {
 	static const struct NoctDirectoryBackend directory = {
 		.read = directory_read,
@@ -417,7 +417,7 @@ int boots_noct_target_register(NoctEnv *env,
 		noct_register_api_term_backend(env, &term, &terminal);
 }
 
-void boots_noct_target_cleanup(void)
+void zedbsd_noct_target_cleanup(void)
 {
 	noct_set_directory_backend(NULL, NULL);
 	memset(&terminal, 0, sizeof(terminal));

@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_MATH_H
-#define BOOTS_MATH_H
+#ifndef ZEDBSD_MATH_H
+#define ZEDBSD_MATH_H
 
 typedef float float_t;
 typedef double double_t;

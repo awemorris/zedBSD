@@ -127,26 +127,18 @@ elf32_load(struct file *file, struct vmspace *vm, uintptr_t *entry)
 
 	for (i = 0; i < header.e_phnum; i++) {
 		struct elf32_phdr *program = &programs[i];
-		struct vm_region *region;
 		uint32_t start, end;
-		uint8_t *destination;
 		if (program->p_type != PT_LOAD)
 			continue;
 		start = program->p_vaddr & ~(PAGE_SIZE - 1U);
 		end = (program->p_vaddr + program->p_memsz + PAGE_SIZE - 1U) &
 			~(PAGE_SIZE - 1U);
-		error = vmspace_map_anon(vm, start, end - start,
-					 segment_prot(program->p_flags), &region);
+		error = vmspace_map_file(vm, start, end - start,
+			segment_prot(program->p_flags), file,
+			(off_t)program->p_offset, program->p_vaddr,
+			program->p_filesz, NULL);
 		if (error != 0)
 			goto out;
-		destination = (uint8_t *)region->pmem.vaddr +
-			(program->p_vaddr - start);
-		if (program->p_filesz != 0 &&
-		    read_exact(file, (off_t)program->p_offset, destination,
-			       program->p_filesz) != 0) {
-			error = EIO;
-			goto out;
-		}
 	}
 	vm->entry = header.e_entry;
 	*entry = header.e_entry;

@@ -2,8 +2,8 @@
 #include "user/libc/syscall.h"
 #include "libc/heap.h"
 
-#include <boots/dirent.h>
-#include <boots/syscall.h>
+#include <zedbsd/dirent.h>
+#include <zedbsd/syscall.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -82,7 +82,7 @@ int unsetenv(const char *name)
 	return 0;
 }
 
-intptr_t boots_syscall_result(intptr_t result)
+intptr_t zedbsd_syscall_result(intptr_t result)
 {
 	if (result < 0 && result >= -4095) {
 		errno = (int)-result;
@@ -94,13 +94,13 @@ intptr_t boots_syscall_result(intptr_t result)
 static intptr_t call(uint32_t number, uintptr_t a0, uintptr_t a1,
 		     uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5)
 {
-	return boots_syscall_result(boots_syscall6(number, a0, a1, a2, a3,
+	return zedbsd_syscall_result(zedbsd_syscall6(number, a0, a1, a2, a3,
 		a4, a5));
 }
 
 void _exit(int status)
 {
-	(void)boots_syscall6(BOOTS_SYS_exit, (uintptr_t)status, 0, 0, 0, 0, 0);
+	(void)zedbsd_syscall6(ZEDBSD_SYS_exit, (uintptr_t)status, 0, 0, 0, 0, 0);
 	for (;;) ;
 }
 
@@ -110,32 +110,32 @@ int open(const char *path, int flags, ...)
 	if (flags & O_CREAT) {
 		va_list ap; va_start(ap, flags); mode = va_arg(ap, mode_t); va_end(ap);
 	}
-	return (int)call(BOOTS_SYS_open, (uintptr_t)path, flags, mode, 0, 0, 0);
+	return (int)call(ZEDBSD_SYS_open, (uintptr_t)path, flags, mode, 0, 0, 0);
 }
-int close(int fd) { return (int)call(BOOTS_SYS_close, fd, 0, 0, 0, 0, 0); }
-ssize_t read(int fd, void *p, size_t n) { return (ssize_t)call(BOOTS_SYS_read, fd, (uintptr_t)p, n, 0, 0, 0); }
-ssize_t write(int fd, const void *p, size_t n) { return (ssize_t)call(BOOTS_SYS_write, fd, (uintptr_t)p, n, 0, 0, 0); }
-off_t lseek(int fd, off_t off, int whence) { return (off_t)call(BOOTS_SYS_lseek, fd, off, whence, 0, 0, 0); }
-int fstat(int fd, struct stat *st) { return (int)call(BOOTS_SYS_fstat, fd, (uintptr_t)st, 0, 0, 0, 0); }
-int chdir(const char *p) { return (int)call(BOOTS_SYS_chdir, (uintptr_t)p, 0, 0, 0, 0, 0); }
-char *getcwd(char *p, size_t n) { return (char *)call(BOOTS_SYS_getcwd, (uintptr_t)p, n, 0, 0, 0, 0); }
+int close(int fd) { return (int)call(ZEDBSD_SYS_close, fd, 0, 0, 0, 0, 0); }
+ssize_t read(int fd, void *p, size_t n) { return (ssize_t)call(ZEDBSD_SYS_read, fd, (uintptr_t)p, n, 0, 0, 0); }
+ssize_t write(int fd, const void *p, size_t n) { return (ssize_t)call(ZEDBSD_SYS_write, fd, (uintptr_t)p, n, 0, 0, 0); }
+off_t lseek(int fd, off_t off, int whence) { return (off_t)call(ZEDBSD_SYS_lseek, fd, off, whence, 0, 0, 0); }
+int fstat(int fd, struct stat *st) { return (int)call(ZEDBSD_SYS_fstat, fd, (uintptr_t)st, 0, 0, 0, 0); }
+int chdir(const char *p) { return (int)call(ZEDBSD_SYS_chdir, (uintptr_t)p, 0, 0, 0, 0, 0); }
+char *getcwd(char *p, size_t n) { return (char *)call(ZEDBSD_SYS_getcwd, (uintptr_t)p, n, 0, 0, 0, 0); }
 int ioctl(int fd, unsigned long request, ...) {
 	va_list ap; uintptr_t arg = 0;
 	if (((request >> 16) & 0x1fffUL) != 0) {
 		va_start(ap, request); arg = va_arg(ap, uintptr_t); va_end(ap);
 	}
-	return (int)call(BOOTS_SYS_ioctl, fd, request, arg, 0, 0, 0);
+	return (int)call(ZEDBSD_SYS_ioctl, fd, request, arg, 0, 0, 0);
 }
 void *mmap(void *address, size_t length, int prot, int flags, int fd, off_t offset) {
-	intptr_t value = call(BOOTS_SYS_mmap, (uintptr_t)address, length, prot,
+	intptr_t value = call(ZEDBSD_SYS_mmap, (uintptr_t)address, length, prot,
 		flags, fd, offset);
 	return value == -1 ? MAP_FAILED : (void *)value;
 }
-int munmap(void *p, size_t n) { return (int)call(BOOTS_SYS_munmap, (uintptr_t)p, n, 0, 0, 0, 0); }
-int mprotect(void *p, size_t n, int prot) { return (int)call(BOOTS_SYS_mprotect, (uintptr_t)p, n, prot, 0, 0, 0); }
-int clock_gettime(clockid_t id, struct timespec *ts) { return (int)call(BOOTS_SYS_clock_gettime, id, (uintptr_t)ts, 0, 0, 0, 0); }
+int munmap(void *p, size_t n) { return (int)call(ZEDBSD_SYS_munmap, (uintptr_t)p, n, 0, 0, 0, 0); }
+int mprotect(void *p, size_t n, int prot) { return (int)call(ZEDBSD_SYS_mprotect, (uintptr_t)p, n, prot, 0, 0, 0); }
+int clock_gettime(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_gettime, id, (uintptr_t)ts, 0, 0, 0, 0); }
 int nanosleep(const struct timespec *request, struct timespec *remain) {
-	return (int)call(BOOTS_SYS_nanosleep, (uintptr_t)request,
+	return (int)call(ZEDBSD_SYS_nanosleep, (uintptr_t)request,
 		(uintptr_t)remain, 0, 0, 0, 0);
 }
 
@@ -160,7 +160,7 @@ int fileno(void *stream) {
 	return file == NULL || file->context == NULL ? -1 : (int)(intptr_t)file->context - 1;
 }
 
-struct boots_directory { int fd; struct dirent current; };
+struct zedbsd_directory { int fd; struct dirent current; };
 DIR *opendir(const char *path)
 {
 	DIR *directory = malloc(sizeof(*directory));
@@ -171,10 +171,10 @@ DIR *opendir(const char *path)
 }
 struct dirent *readdir(DIR *directory)
 {
-	struct boots_dirent entry;
+	struct zedbsd_dirent entry;
 	intptr_t result;
 	if (directory == NULL) { errno = EBADF; return NULL; }
-	result = call(BOOTS_SYS_getdents, directory->fd, (uintptr_t)&entry,
+	result = call(ZEDBSD_SYS_getdents, directory->fd, (uintptr_t)&entry,
 		sizeof(entry), 0, 0, 0);
 	if (result <= 0) return NULL;
 	directory->current.d_ino = entry.d_ino;
@@ -191,7 +191,7 @@ int closedir(DIR *directory)
 	result = close(directory->fd); free(directory); return result;
 }
 
-size_t boots_console_write_bytes(const char *bytes, size_t length)
+size_t zedbsd_console_write_bytes(const char *bytes, size_t length)
 {
 	ssize_t result = write(1, bytes, length);
 	return result < 0 ? 0U : (size_t)result;
@@ -251,10 +251,10 @@ time_t time(time_t *result) {
 	return value;
 }
 void exit(int status) { (void)fflush(NULL); _exit(status); }
-void boots_libc_panic(const char *message) { (void)write(2, message, strlen(message)); (void)write(2, "\n", 1); _exit(127); }
+void zedbsd_libc_panic(const char *message) { (void)write(2, message, strlen(message)); (void)write(2, "\n", 1); _exit(127); }
 
-static struct boots_heap user_heap;
-void boots_user_libc_init(int argc, char **argv, char **envp)
+static struct zedbsd_heap user_heap;
+void zedbsd_user_libc_init(int argc, char **argv, char **envp)
 {
 	static const size_t sizes[] = { 32U << 20, 16U << 20, 8U << 20, 4U << 20, 2U << 20 };
 	void *arena = MAP_FAILED; size_t i;
@@ -265,7 +265,7 @@ void boots_user_libc_init(int argc, char **argv, char **envp)
 	for (i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
 		arena = mmap(NULL, sizes[i], PROT_READ | PROT_WRITE,
 			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-		if (arena != MAP_FAILED) { boots_heap_init_instance(&user_heap, arena, sizes[i]); boots_heap_set_active(&user_heap); return; }
+		if (arena != MAP_FAILED) { zedbsd_heap_init_instance(&user_heap, arena, sizes[i]); zedbsd_heap_set_active(&user_heap); return; }
 	}
-	boots_libc_panic("unable to initialize user heap");
+	zedbsd_libc_panic("unable to initialize user heap");
 }

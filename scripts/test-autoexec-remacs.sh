@@ -4,17 +4,17 @@ set -euo pipefail
 # Exercise the complete graphical startup path:
 # AUTOEXEC.NCT -> BeUI menu -> BOOT_ACTION -> VM teardown -> Remacs.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-arch="${BOOTS_ARCH:-pc98}"
-build="${BOOTS_BUILD_DIR:-$repo/build/$arch}"
-releases="${BOOTS_RELEASES_DIR:-$repo/build/releases}"
+arch="${ZEDBSD_ARCH:-pc98}"
+build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
+releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
-cpu="${BOOTS_TEST_CPU:-486}"
+cpu="${ZEDBSD_TEST_CPU:-486}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-base="${BOOTS_TEST_BASE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
-work="$build/tests/boots-autoexec-remacs"
+base="${ZEDBSD_TEST_BASE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
+work="$build/tests/zedbsd-autoexec-remacs"
 image="$work/autoexec-remacs.raw"
 files="$work/files"
-cfg="$work/BOOTS.CFG"
+cfg="$work/ZEDBSD.CFG"
 monitor="$work/monitor.sock"
 menu_screenshot="$work/autoexec-emacs-menu.ppm"
 emacs_screenshot="$work/autoexec-remacs.ppm"
@@ -34,9 +34,9 @@ printf '日本語表示テスト\n' > "$files/EDIT.TXT"
 # AUTOEXEC must win.  Reaching this fallback makes the test stop before Emacs.
 printf 'halt\n' > "$cfg"
 
-make -C "$repo" ARCH="$arch" -j"$(nproc)" BOOT.SYS
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
 "$repo/scripts/build-remacs-bytecode.sh"
-BOOTS_FILES="$files" DISK_SECTORS=17 \
+ZEDBSD_FILES="$files" DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'
@@ -212,7 +212,7 @@ qmp("pmemsave", {"val": 0xa0000, "size": 2,
 type_text("oots")
 time.sleep(.5)
 # The cursor now precedes the first Japanese glyph at row 0, column 5.  PC-98
-# hardware cursor width is one cell, so Boots must reverse both attribute cells.
+# hardware cursor width is one cell, so zedBSD must reverse both attribute cells.
 qmp("pmemsave", {"val": 0xa2000 + 5 * 2, "size": 4,
                   "filename": wide_cursor_attr})
 emacs_command("save-buffer")
@@ -261,7 +261,7 @@ python3 - "$work/EDIT-SAVED.TXT" "$work/COMPLETE-SAVED.TXT" \
 import sys
 
 saved = open(sys.argv[1], "rb").read()
-expected = "Boots日本語表示テスト\n".encode()
+expected = "zedBSD日本語表示テスト\n".encode()
 if saved != expected:
     raise SystemExit(f"Remacs modifier/input mismatch: {saved.hex()}")
 completion = open(sys.argv[2], "rb").read()
@@ -296,4 +296,4 @@ for row in range(height * 2 // 3, height):
 else:
     raise SystemExit("Remacs mode line was not detected")
 PY
-printf 'Boots AUTOEXEC graphical Emacs path QEMU test: PASS (%s)\n' "$image"
+printf 'zedBSD AUTOEXEC graphical Emacs path QEMU test: PASS (%s)\n' "$image"

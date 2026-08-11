@@ -1,5 +1,5 @@
 /*
- * Boots freestanding C library tests
+ * zedBSD freestanding C library tests
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -18,7 +18,7 @@ static char console_output[512];
 static size_t console_length;
 
 size_t
-boots_console_write_bytes(const char *bytes, size_t length)
+zedbsd_console_write_bytes(const char *bytes, size_t length)
 {
 	size_t index;
 	for (index = 0; index < length && console_length < sizeof(console_output);
@@ -158,42 +158,44 @@ test_heap(void)
 	size_t initial_largest;
 	size_t index;
 
-	boots_heap_init(arena + 1, sizeof(arena) - 1);
-	CHECK(boots_heap_validate());
-	initial_largest = boots_heap_largest_free();
-	a = boots_malloc(13);
-	b = boots_malloc(257);
-	c = boots_calloc(17, 3);
+	zedbsd_heap_init(arena + 1, sizeof(arena) - 1);
+	CHECK(zedbsd_heap_validate());
+	initial_largest = zedbsd_heap_largest_free();
+	a = zedbsd_malloc(13);
+	b = zedbsd_malloc(257);
+	c = zedbsd_calloc(17, 3);
 	CHECK(a != NULL && b != NULL && c != NULL);
 	CHECK(((uintptr_t)a & 7U) == 0 && ((uintptr_t)b & 7U) == 0);
 	for (index = 0; index < 51; index++)
 		CHECK(((unsigned char *)c)[index] == 0);
 	memset(b, 0x5a, 257);
-	b = boots_realloc(b, 600);
+	b = zedbsd_realloc(b, 600);
 	CHECK(b != NULL);
 	for (index = 0; index < 257; index++)
 		CHECK(((unsigned char *)b)[index] == 0x5a);
-	b = boots_realloc(b, 64);
-	CHECK(b != NULL && boots_heap_validate());
-	copy = boots_strdup("Noct Boots");
-	CHECK(copy != NULL && strcmp(copy, "Noct Boots") == 0);
-	CHECK(boots_heap_current() == 13 + 64 + 51 + 11);
-	CHECK(boots_heap_peak() >= boots_heap_current());
-	CHECK(boots_calloc((size_t)-1, 2) == NULL);
-	boots_free(a);
-	boots_free(b);
-	boots_free(c);
-	boots_free(copy);
-	CHECK(boots_heap_current() == 0 && boots_heap_validate());
-	CHECK(boots_heap_largest_free() == initial_largest);
-	a = boots_malloc(32);
+	b = zedbsd_realloc(b, 64);
+	CHECK(b != NULL && zedbsd_heap_validate());
+	copy = zedbsd_strdup("Noct zedBSD");
+	CHECK(copy != NULL && strcmp(copy, "Noct zedBSD") == 0);
+	CHECK(zedbsd_heap_current() == 13 + 64 + 51 + 12);
+	CHECK(zedbsd_heap_peak() >= zedbsd_heap_current());
+	CHECK(zedbsd_calloc((size_t)-1, 2) == NULL);
+	CHECK(zedbsd_heap_largest_failed_instance(zedbsd_heap_get_active()) ==
+	      (size_t)-1);
+	zedbsd_free(a);
+	zedbsd_free(b);
+	zedbsd_free(c);
+	zedbsd_free(copy);
+	CHECK(zedbsd_heap_current() == 0 && zedbsd_heap_validate());
+	CHECK(zedbsd_heap_largest_free() == initial_largest);
+	a = zedbsd_malloc(32);
 	CHECK(a != NULL);
-	boots_free(a);
-	boots_free(a);
-	CHECK(boots_heap_error_count() == 1 && boots_heap_validate());
-	boots_heap_reset();
-	CHECK(boots_heap_current() == 0 && boots_heap_peak() == 0);
-	CHECK(boots_heap_error_count() == 0 && boots_heap_validate());
+	zedbsd_free(a);
+	zedbsd_free(a);
+	CHECK(zedbsd_heap_error_count() == 1 && zedbsd_heap_validate());
+	zedbsd_heap_reset();
+	CHECK(zedbsd_heap_current() == 0 && zedbsd_heap_peak() == 0);
+	CHECK(zedbsd_heap_error_count() == 0 && zedbsd_heap_validate());
 	return 0;
 }
 
@@ -206,18 +208,18 @@ test_fault_injection(void)
 	for (fail_after = 0; fail_after < 8; fail_after++) {
 		void *items[8];
 		size_t index;
-		boots_heap_init(arena, sizeof(arena));
-		boots_heap_set_failure_after(fail_after);
+		zedbsd_heap_init(arena, sizeof(arena));
+		zedbsd_heap_set_failure_after(fail_after);
 		for (index = 0; index < 8; index++)
-			items[index] = boots_malloc(24 + index);
+			items[index] = zedbsd_malloc(24 + index);
 		for (index = 0; index < fail_after; index++)
 			CHECK(items[index] != NULL);
 		for (index = fail_after; index < 8; index++)
 			CHECK(items[index] == NULL);
-		CHECK(boots_heap_validate());
+		CHECK(zedbsd_heap_validate());
 		for (index = 0; index < fail_after; index++)
-			boots_free(items[index]);
-		CHECK(boots_heap_current() == 0 && boots_heap_validate());
+			zedbsd_free(items[index]);
+		CHECK(zedbsd_heap_current() == 0 && zedbsd_heap_validate());
 	}
 	return 0;
 }
@@ -231,27 +233,27 @@ test_heap_boundaries(void)
 	void *replacement;
 	size_t index;
 
-	boots_heap_init(NULL, sizeof(arena));
-	CHECK(boots_malloc(1) == NULL && boots_heap_validate());
-	boots_heap_init(arena, 1);
-	CHECK(boots_malloc(1) == NULL && boots_heap_validate());
+	zedbsd_heap_init(NULL, sizeof(arena));
+	CHECK(zedbsd_malloc(1) == NULL && zedbsd_heap_validate());
+	zedbsd_heap_init(arena, 1);
+	CHECK(zedbsd_malloc(1) == NULL && zedbsd_heap_validate());
 
-	boots_heap_init(arena, sizeof(arena));
-	first = boots_malloc(64);
-	guard = boots_malloc(64);
+	zedbsd_heap_init(arena, sizeof(arena));
+	first = zedbsd_malloc(64);
+	guard = zedbsd_malloc(64);
 	CHECK(first != NULL && guard != NULL);
 	for (index = 0; index < 64; index++)
 		first[index] = (unsigned char)index;
-	boots_heap_set_failure_after(0);
-	replacement = boots_realloc(first, 512);
-	CHECK(replacement == NULL && boots_heap_validate());
+	zedbsd_heap_set_failure_after(0);
+	replacement = zedbsd_realloc(first, 512);
+	CHECK(replacement == NULL && zedbsd_heap_validate());
 	for (index = 0; index < 64; index++)
 		CHECK(first[index] == (unsigned char)index);
-	boots_free(first + 8);
-	CHECK(boots_heap_error_count() == 1 && boots_heap_validate());
-	boots_free(first);
-	boots_free(guard);
-	CHECK(boots_heap_current() == 0 && boots_heap_validate());
+	zedbsd_free(first + 8);
+	CHECK(zedbsd_heap_error_count() == 1 && zedbsd_heap_validate());
+	zedbsd_free(first);
+	zedbsd_free(guard);
+	CHECK(zedbsd_heap_current() == 0 && zedbsd_heap_validate());
 	return 0;
 }
 

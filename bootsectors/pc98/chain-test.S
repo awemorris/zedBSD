@@ -1,11 +1,11 @@
 /*
- * Boots
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
  */
 
-/* Test-only PBR proving that Boots Stage 1 transferred control. */
+/* Test-only PBR proving that zedBSD Stage 1 transferred control. */
 
 	.code16
 	.section .text
@@ -79,7 +79,7 @@ nibble:
 	movb	$0xe1, %gs:(%di)
 	addw	$2, %di
 	ret
-message: .asciz "Boots PBR CHAIN OK"
+message: .asciz "zedBSD PBR CHAIN OK"
 drive_label: .asciz "  DRIVE "
 	.org 510
 	.word 0xaa55

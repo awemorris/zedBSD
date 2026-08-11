@@ -1,5 +1,5 @@
 /*
- * Boots freestanding C library
+ * zedBSD freestanding C library
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -13,7 +13,7 @@
 #include <time.h>
 #include <unistd.h>
 
-int boots_errno;
+int zedbsd_errno;
 
 static FILE standard_input;
 static FILE standard_output;
@@ -23,7 +23,7 @@ FILE *stdout = &standard_output;
 FILE *stderr = &standard_error;
 
 __attribute__((weak)) size_t
-boots_console_write_bytes(const char *bytes, size_t length)
+zedbsd_console_write_bytes(const char *bytes, size_t length)
 {
 	(void)bytes;
 	return length;
@@ -43,7 +43,7 @@ printf(const char *format, ...)
 	write_length = length < 0 ? 0U : (size_t)length;
 	if (write_length >= sizeof(buffer))
 		write_length = sizeof(buffer) - 1U;
-	boots_console_write_bytes(buffer, write_length);
+	zedbsd_console_write_bytes(buffer, write_length);
 	return length;
 }
 
@@ -51,7 +51,7 @@ int
 putchar(int character)
 {
 	char byte = (char)character;
-	return boots_console_write_bytes(&byte, 1) == 1 ?
+	return zedbsd_console_write_bytes(&byte, 1) == 1 ?
 		(unsigned char)byte : EOF;
 }
 
@@ -59,8 +59,8 @@ int
 puts(const char *string)
 {
 	size_t length = strlen(string);
-	if (boots_console_write_bytes(string, length) != length ||
-	    boots_console_write_bytes("\n", 1) != 1)
+	if (zedbsd_console_write_bytes(string, length) != length ||
+	    zedbsd_console_write_bytes("\n", 1) != 1)
 		return EOF;
 	return 0;
 }
@@ -100,7 +100,7 @@ fwrite(const void *buffer, size_t size, size_t count, FILE *stream)
 	}
 	total = size * count;
 	if (stream == stdout || stream == stderr)
-		return boots_console_write_bytes(buffer, total) == total ? count : 0;
+		return zedbsd_console_write_bytes(buffer, total) == total ? count : 0;
 	if (stream != NULL)
 		stream->error = 1;
 	errno = EIO;
@@ -200,7 +200,7 @@ __attribute__((weak)) int fileno(void *stream) { (void)stream; return -1; }
 __attribute__((weak)) time_t time(time_t *result) { if (result != NULL) *result = 0; return 0; }
 
 __attribute__((weak, noreturn)) void
-boots_libc_panic(const char *message)
+zedbsd_libc_panic(const char *message)
 {
 	(void)message;
 	for (;;)
@@ -210,21 +210,21 @@ boots_libc_panic(const char *message)
 void
 abort(void)
 {
-	boots_libc_panic("abort");
+	zedbsd_libc_panic("abort");
 }
 
 __attribute__((weak)) void
 exit(int status)
 {
 	(void)status;
-	boots_libc_panic("exit");
+	zedbsd_libc_panic("exit");
 }
 
 void
-boots_assert_fail(const char *expression, const char *file, int line)
+zedbsd_assert_fail(const char *expression, const char *file, int line)
 {
 	char message[160];
 	snprintf(message, sizeof(message), "assertion failed: %s (%s:%d)",
 		expression, file, line);
-	boots_libc_panic(message);
+	zedbsd_libc_panic(message);
 }

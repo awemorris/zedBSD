@@ -1,5 +1,5 @@
 /*
- * Boots
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
@@ -18,16 +18,16 @@
  * object is the sole mutable argument passed through the real-mode BIOS
  * gateway in Stage 1.
  */
-const struct boots_handoff *ho;
-const struct boots_device *devs;
+const struct zedbsd_handoff *ho;
+const struct zedbsd_device *devs;
 unsigned device_count;
 
-struct boots_filesystem mounted_fs;
-struct boots_namespace mounted_namespace;
-struct boots_environment boot_environment;
+struct zedbsd_filesystem mounted_fs;
+struct zedbsd_namespace mounted_namespace;
+struct zedbsd_environment boot_environment;
 struct part parts[MAX_PARTS];
 int curdev = -1, curpart = -1;
-char kernel_name[BOOTS_PATH_MAX], kernel_arg[256];
+char kernel_name[ZEDBSD_PATH_MAX], kernel_arg[256];
 
 /* Minimal freestanding string and memory primitives. */
 void memzero(void *p, uint32_t n)
@@ -109,25 +109,25 @@ void dec(unsigned v)
 		putc(b[--n]);
 }
 
-uint64_t boots_kernel_ticks(void);
+uint64_t zedbsd_kernel_ticks(void);
 
 /* Validated Stage 1 handoff and top-level Stage 2 command loop. */
-void kernel_main(const struct boots_handoff *h,
-		 const struct boots_device *platform_devices,
+void kernel_main(const struct zedbsd_handoff *h,
+		 const struct zedbsd_device *platform_devices,
 		 unsigned platform_device_count)
 {
 	char b[LINE_MAX];
 	ho = h;
 	device_count = platform_device_count;
 	devs = platform_devices;
-	(void)kern_platform_graphics_init(boots_kernel_milliseconds, NULL, NULL);
-	boots_env_init(&boot_environment);
+	(void)kern_platform_graphics_init(zedbsd_kernel_milliseconds, NULL, NULL);
+	zedbsd_env_init(&boot_environment);
 	if (kern_vfs_init(h, platform_devices, platform_device_count) != 0)
 		puts("VFS initialization failed; using legacy disk selection.\n");
 	else if (process_spawn_init("INIT.ELF", NULL) != 0)
 		puts("INIT.ELF not started; continuing in kernel UI.\n");
-	(void)boots_env_set(&boot_environment, "HOME", "/");
-	(void)boots_env_set(&boot_environment, "REMACS_SKK_DICT",
+	(void)zedbsd_env_set(&boot_environment, "HOME", "/");
+	(void)zedbsd_env_set(&boot_environment, "REMACS_SKK_DICT",
 			     "/skkjisyo.dic");
 	for (;;) {
 		struct startup_state startup;
@@ -150,7 +150,7 @@ void kernel_main(const struct boots_handoff *h,
 				unsigned at = 7;
 
 				if (!cfg_name)
-					cfg_name = "BOOTS.CFG";
+					cfg_name = "ZEDBSD.CFG";
 				for (unsigned i = 0; cfg_name[i] &&
 				     at + 1 < sizeof(source_cfg); i++)
 					source_cfg[at++] = cfg_name[i];

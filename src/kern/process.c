@@ -17,6 +17,7 @@
 struct process process0;
 static struct process *all_processes;
 static pid_t next_pid = 1;
+static struct thread *reaper_thread;
 
 void
 process_init(void)
@@ -38,6 +39,50 @@ process_init(void)
 	thread0.sched.quantum = SCHED_QUANTUM_TICKS;
 	hal_task_set_private(thread0.task, &thread0);
 	all_processes = &process0;
+}
+
+static void
+process_reaper(void *argument)
+{
+	(void)argument;
+	for (;;) {
+		struct process *process = all_processes;
+		int reaped = 0;
+		while (process != NULL) {
+			struct process *next = process->all_next;
+			if (process != &process0 &&
+			    (process->flags & PROCESS_AUTOREAP) != 0 &&
+			    process->state == PROCESS_ZOMBIE) {
+				while (process->threads != NULL)
+					if (thread_wait(process->threads, NULL) != 0)
+						break;
+				if (process->threads == NULL) {
+					process_free_mem(process);
+					reaped = 1;
+				}
+			}
+			process = next;
+		}
+		if (!reaped)
+			sched_sleep(sched_ticks() + 1U);
+		else
+			sched_yield();
+	}
+}
+
+int
+process_reaper_start(void)
+{
+	int error;
+	if (reaper_thread != NULL)
+		return 0;
+	/* The current scheduler uses strict priority queues.  A low-priority
+	 * reaper would starve forever while process0 remains runnable. */
+	error = kthread_create(process_reaper, NULL, SCHED_PRIORITY_DEFAULT,
+			       &reaper_thread);
+	if (error == 0)
+		thread_start(reaper_thread);
+	return error;
 }
 
 struct process *

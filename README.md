@@ -1,7 +1,7 @@
-Boots
+zedBSD
 =====
 
-`Boots` is a boot loader and a generic pre-boot operating environment.
+`zedBSD` is a boot loader and a generic pre-boot operating environment.
 In addition to a normal boot loader feature, it integrates the Noct
 language and its JIT virtual machine for an extension mechanism.
 
@@ -50,16 +50,16 @@ git submodule update --init noct
 `./build.sh ARCH [targets...]` wraps `make ARCH=... -j$(nproc)` and lists
 the available architectures when run without arguments.  Each architecture
 is described by `platform/ARCH/platform.mk` and builds into `build/ARCH/`;
-for pc98 the main artifacts are `build/pc98/BOOT.SYS` (stage 2),
+for pc98 the main artifacts are `build/pc98/vmunix` (stage 2),
 `build/pc98/IO.SYS` (stage 1), and the IPL binaries.
 
-`BOOT.SYS` is a two-segment ELF: a loader-closure segment at 0x20000
+`vmunix` is a two-segment ELF: a loader-closure segment at 0x20000
 (everything that may run while a kernel loads, capped below the boot
 parameters at 0x80000) and the Noct/BeUI bulk at 0x100000, capped below
 the PC-98 15 MiB hole.  Stage 1 streams the segments into place with a
 tiny fixed-subset ELF loader; `scripts/patch-stage2.py` enforces the
 subset at build time.  Booting requires an IDE/CF-style disk with
-512-byte sectors — FDD boot retired when BOOT.SYS outgrew a flat image
+512-byte sectors — FDD boot retired when vmunix outgrew a flat image
 (floppies can still be mounted from the running system).  Architecture-neutral
 host artifacts stay shared at the top of `build/` (`build/host-noct`,
 `build/remacs`, `build/releases`).  `make check` runs the host test suite;
@@ -82,32 +82,32 @@ or point the build at existing checkouts (for example the linux-pc98
 toolchain trees):
 
 ```sh
-make BOOTS_GCC_ROOT=../linux-pc98/toolchain/gcc \
-     BOOTS_MUSL_ROOT=../linux-pc98/toolchain/musl all check
+make ZEDBSD_GCC_ROOT=../linux-pc98/toolchain/gcc \
+     ZEDBSD_MUSL_ROOT=../linux-pc98/toolchain/musl all check
 ```
 
 ## Configuration
 
-The boot volume is configured by `BOOTS.CFG` (or `AUTOEXEC.NCT` for a
+The boot volume is configured by `ZEDBSD.CFG` (or `AUTOEXEC.NCT` for a
 scripted startup).  Images created before the rename used `BOOT.CFG`;
 stage 2 still falls back to that name for one release.
 
 ## QEMU tests
 
-The `scripts/test-*.sh` suites run Boots under an emulated PC-98.  They
+The `scripts/test-*.sh` suites run zedBSD under an emulated PC-98.  They
 expect `QEMU` (a PC-98-capable `qemu-system-i386`), `PC98_BIOS_DIR`, and
-`BOOTS_TEST_BASE_IMAGE` (a release disk image to install into) in the
+`ZEDBSD_TEST_BASE_IMAGE` (a release disk image to install into) in the
 environment, and drive the milestone `*-verify` targets in the Makefile.
 
 ## History
 
-Boots grew inside the [linux-pc98](https://github.com/awemorris) project as
+zedBSD grew inside the [linux-pc98](https://github.com/awemorris) project as
 its `bootloader/` directory; this repository carries that history, extracted
-when Boots was promoted to a standalone project.
+when zedBSD was promoted to a standalone project.
 
 ## License
 
-Boots is distributed under the zlib License (see LICENSE).  NoctLang is
+zedBSD is distributed under the zlib License (see LICENSE).  NoctLang is
 also zlib-licensed.  The soft-float objects are built from GCC libgcc
 soft-fp sources (LGPL 2.1+ with a linking exception that permits
 unrestricted redistribution of linked combinations) and musl math

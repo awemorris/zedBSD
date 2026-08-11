@@ -5,8 +5,8 @@
  * i386 page-table implementation; private to the HAL.
  */
 
-#ifndef BOOTS_HAL_I386_SPACE_H
-#define BOOTS_HAL_I386_SPACE_H
+#ifndef ZEDBSD_HAL_I386_SPACE_H
+#define ZEDBSD_HAL_I386_SPACE_H
 
 #include <hal/hal.h>
 #include "asm.h"

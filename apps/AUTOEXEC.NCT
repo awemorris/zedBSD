@@ -1,4 +1,4 @@
-// Boots graphical startup menu.  The VM returns after placing exactly one
+// zedBSD graphical startup menu.  The VM returns after placing exactly one
 // command in BOOT_ACTION; Stage 2 validates and executes that command only
 // after BeUI and the Noct arena have been torn down.
 
@@ -38,7 +38,7 @@ func drawMenu(selected) {
 
     BeUI.fill(0, 0, 640, 42, header);
     BeUI.fill(0, 40, 640, 2, 0x00b7d6);
-    BeUI.drawText("Boots/98", 18, 12, primaryText, header);
+    BeUI.drawText("zedBSD/98", 18, 12, primaryText, header);
     BeUI.drawText("Boot loader and pre-boot environment", 190, 12,
                   secondaryText, header);
 
@@ -102,7 +102,7 @@ func main() {
         if (key == Key.Enter) {
             BeUI.close();
             if (selected == 0) {
-                System.setEnv("BOOT_ACTION", "source BOOTS.CFG");
+                System.setEnv("BOOT_ACTION", "source ZEDBSD.CFG");
             }
             if (selected == 1) {
                 System.setEnv("BOOT_ACTION", "emacs EDIT.TXT");

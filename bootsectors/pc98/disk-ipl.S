@@ -6,7 +6,7 @@
  * The ROM loads this 512-byte sector at 1fc0:0000.  It relocates itself and,
  * without changing the display or waiting for input, loads exactly one
  * sector from LBA 2 of the current fixed disk back at the firmware load
- * address.  Code installed at LBA 2 is therefore independent of Boots and
+ * address.  Code installed at LBA 2 is therefore independent of zedBSD and
  * may implement its own continuation-sector format.
  */
 

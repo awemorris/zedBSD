@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_FLOAT_H
-#define BOOTS_FLOAT_H
+#ifndef ZEDBSD_FLOAT_H
+#define ZEDBSD_FLOAT_H
 
 #define FLT_RADIX 2
 #define FLT_MANT_DIG 24
@@ -27,7 +27,7 @@
 #define DBL_MAX 1.79769313486231570815e+308
 #define DBL_EPSILON 2.22044604925031308085e-16
 
-/* Boots compiles imported musl conversion code with -mlong-double-64. */
+/* zedBSD compiles imported musl conversion code with -mlong-double-64. */
 #ifdef __LDBL_MANT_DIG__
 #define LDBL_MANT_DIG __LDBL_MANT_DIG__
 #define LDBL_MIN_EXP __LDBL_MIN_EXP__

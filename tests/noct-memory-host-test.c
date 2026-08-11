@@ -1,5 +1,5 @@
 /*
- * Boots Noct memory profile host tests
+ * zedBSD Noct memory profile host tests
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -15,13 +15,13 @@
 
 static int
 check_profile_reserved(uint32_t low, uint32_t high, uint32_t reserved,
-	      enum boots_noct_memory_class expected_class,
+	      enum zedbsd_noct_memory_class expected_class,
 	      uint32_t expected_installed, uintptr_t expected_base,
 	      size_t expected_arena)
 {
-	struct boots_noct_memory_profile profile;
+	struct zedbsd_noct_memory_profile profile;
 
-	CHECK(boots_noct_select_memory(low, high, reserved, &profile));
+	CHECK(zedbsd_noct_select_memory(low, high, reserved, &profile));
 	CHECK(profile.memory_class == expected_class);
 	CHECK(profile.installed_mib == expected_installed);
 	CHECK(profile.arena_base == expected_base);
@@ -35,7 +35,7 @@ check_profile_reserved(uint32_t low, uint32_t high, uint32_t reserved,
 
 static int
 check_profile(uint32_t low, uint32_t high,
-	      enum boots_noct_memory_class expected_class,
+	      enum zedbsd_noct_memory_class expected_class,
 	      uint32_t expected_installed, uintptr_t expected_base,
 	      size_t expected_arena)
 {
@@ -47,53 +47,53 @@ check_profile(uint32_t low, uint32_t high,
 int
 main(void)
 {
-	struct boots_noct_memory_profile profile;
+	struct zedbsd_noct_memory_profile profile;
 	int result;
 
-	result = check_profile(4U * MIB, 0, BOOTS_NOCT_MEMORY_5, 5,
+	result = check_profile(4U * MIB, 0, ZEDBSD_NOCT_MEMORY_5, 5,
 			       1U * MIB, 4U * MIB - 64U * KIB);
 	CHECK(result == 0);
-	result = check_profile(7U * MIB, 0, BOOTS_NOCT_MEMORY_8, 8,
+	result = check_profile(7U * MIB, 0, ZEDBSD_NOCT_MEMORY_8, 8,
 			       1U * MIB, 7U * MIB - 64U * KIB);
 	CHECK(result == 0);
-	result = check_profile(14U * MIB, 0, BOOTS_NOCT_MEMORY_16, 16,
+	result = check_profile(14U * MIB, 0, ZEDBSD_NOCT_MEMORY_16, 16,
 			       1U * MIB, 14U * MIB - 64U * KIB);
 	CHECK(result == 0);
-	result = check_profile(14U * MIB, 1, BOOTS_NOCT_MEMORY_16, 17,
+	result = check_profile(14U * MIB, 1, ZEDBSD_NOCT_MEMORY_16, 17,
 			       1U * MIB, 14U * MIB - 64U * KIB);
 	CHECK(result == 0);
-	result = check_profile(14U * MIB, 16, BOOTS_NOCT_MEMORY_32, 32,
+	result = check_profile(14U * MIB, 16, ZEDBSD_NOCT_MEMORY_32, 32,
 			       16U * MIB, 16U * MIB - 64U * KIB);
 	CHECK(result == 0);
-	result = check_profile(14U * MIB, 48, BOOTS_NOCT_MEMORY_64, 64,
+	result = check_profile(14U * MIB, 48, ZEDBSD_NOCT_MEMORY_64, 64,
 			       16U * MIB, 48U * MIB - 64U * KIB);
 	CHECK(result == 0);
-	result = check_profile(14U * MIB, 49, BOOTS_NOCT_MEMORY_LARGE, 65,
+	result = check_profile(14U * MIB, 49, ZEDBSD_NOCT_MEMORY_LARGE, 65,
 			       16U * MIB, 49U * MIB - 64U * KIB);
 	CHECK(result == 0);
 	result = check_profile(UINT32_MAX, UINT32_MAX,
-			       BOOTS_NOCT_MEMORY_LARGE, UINT32_MAX,
+			       ZEDBSD_NOCT_MEMORY_LARGE, UINT32_MAX,
 			       16U * MIB, 64U * MIB);
 	CHECK(result == 0);
 	/* A resident high image pushes the arena base up and shrinks the
 	 * arena; the reservation rounds up to 64 KiB. */
 	result = check_profile_reserved(4U * MIB, 0, 1U * MIB,
-				       BOOTS_NOCT_MEMORY_5, 5, 2U * MIB,
+				       ZEDBSD_NOCT_MEMORY_5, 5, 2U * MIB,
 				       3U * MIB - 64U * KIB);
 	CHECK(result == 0);
 	result = check_profile_reserved(4U * MIB, 0, 1U * MIB + 1U,
-				       BOOTS_NOCT_MEMORY_5, 5,
+				       ZEDBSD_NOCT_MEMORY_5, 5,
 				       2U * MIB + 64U * KIB,
 				       3U * MIB - 128U * KIB);
 	CHECK(result == 0);
 	/* The 16 MiB-and-up path keeps its 16 MiB arena base. */
 	result = check_profile_reserved(14U * MIB, 16, 1U * MIB,
-				       BOOTS_NOCT_MEMORY_32, 32, 16U * MIB,
+				       ZEDBSD_NOCT_MEMORY_32, 32, 16U * MIB,
 				       16U * MIB - 64U * KIB);
 	CHECK(result == 0);
 	/* A reservation covering all of low extended memory fails. */
-	CHECK(!boots_noct_select_memory(4U * MIB, 0, 4U * MIB, &profile));
-	CHECK(!boots_noct_select_memory(64U * KIB, 0, 0, &profile));
-	CHECK(!boots_noct_select_memory(4U * MIB, 0, 0, NULL));
+	CHECK(!zedbsd_noct_select_memory(4U * MIB, 0, 4U * MIB, &profile));
+	CHECK(!zedbsd_noct_select_memory(64U * KIB, 0, 0, &profile));
+	CHECK(!zedbsd_noct_select_memory(4U * MIB, 0, 0, NULL));
 	return 0;
 }

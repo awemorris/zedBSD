@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef BOOTS_TIME_H
-#define BOOTS_TIME_H
+#ifndef ZEDBSD_TIME_H
+#define ZEDBSD_TIME_H
 
 typedef long time_t;
 typedef int clockid_t;

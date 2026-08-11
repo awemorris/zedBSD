@@ -5,8 +5,8 @@
  * Per-process descriptor table.
  */
 
-#ifndef BOOTS_KERN_FILEDESC_H
-#define BOOTS_KERN_FILEDESC_H
+#ifndef ZEDBSD_KERN_FILEDESC_H
+#define ZEDBSD_KERN_FILEDESC_H
 
 #define KERN_OPEN_MAX 32
 

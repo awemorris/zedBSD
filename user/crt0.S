@@ -11,7 +11,7 @@ _start:
 	pushl %edx
 	pushl %ecx
 	pushl %eax
-	call boots_user_libc_init
+	call zedbsd_user_libc_init
 	addl $12, %esp
 	movl (%ebx), %eax
 	leal 4(%ebx), %ecx
@@ -26,9 +26,9 @@ _start:
 	jmp 1b
 .size _start, .-_start
 
-.globl boots_syscall6
-.type boots_syscall6, @function
-boots_syscall6:
+.globl zedbsd_syscall6
+.type zedbsd_syscall6, @function
+zedbsd_syscall6:
 	pushl %ebp
 	pushl %edi
 	pushl %esi
@@ -46,4 +46,4 @@ boots_syscall6:
 	popl %edi
 	popl %ebp
 	ret
-.size boots_syscall6, .-boots_syscall6
+.size zedbsd_syscall6, .-zedbsd_syscall6

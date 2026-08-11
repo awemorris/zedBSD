@@ -12,7 +12,7 @@
  * PDT/PT
  *
  * The initial tables live in kernel BSS (fixed low addresses collided
- * with the BOOT.SYS low segment at 0x20000).  Everything referenced
+ * with the vmunix low segment at 0x20000).  Everything referenced
  * before CR0.PG is up goes through "- SYS_START" to reach the physical
  * alias, exactly like the rest of this file.
  *
@@ -40,7 +40,7 @@ text_start:
 
 /*
  * Save the boot handoff.  Our own IPL chain reaches here with EBX
- * holding the physical address of the Boots handoff block; it is
+ * holding the physical address of the zedBSD handoff block; it is
  * parked at ADDR_BOOT_INFO and the kernel entry validates its "B82H"
  * magic (there is no multiboot in this path).
  */
