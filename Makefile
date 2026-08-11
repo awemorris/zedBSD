@@ -100,6 +100,24 @@ $(BUILD)/tests/noct-memory-host-test: tests/noct-memory-host-test.c \
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc src/noct/memory.c $< -o $@
 
+$(BUILD)/tests/heap-context-host-test: tests/heap-context-host-test.c \
+	libc/heap.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) libc/heap.c $< -o $@
+
+$(BUILD)/tests/elf-host-test: tests/elf-host-test.c src/kern/elf.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/elf.c $< -o $@
+
+$(BUILD)/tests/sched-host-test: tests/sched-host-test.c src/kern/sched.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Isrc src/kern/sched.c $< -o $@
+
+$(BUILD)/tests/vmspace-host-test: tests/vmspace-host-test.c \
+	src/kern/vmspace.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vmspace.c $< -o $@
+
 $(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
 	src/kern/fs.c src/kern/namespace.c src/kern/env.c $(BOOTS_LIBC_SOURCES) \
 	src/kern/disk.c src/kern/inode.c src/kern/file.c src/kern/namecache.c \
@@ -144,7 +162,11 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/fat-host-test \
 	$(BUILD)/tests/fat-write-host-test \
 	$(BUILD)/tests/env-host-test \
-	$(BUILD)/tests/noct-memory-host-test
+	$(BUILD)/tests/noct-memory-host-test \
+	$(BUILD)/tests/heap-context-host-test \
+	$(BUILD)/tests/elf-host-test \
+	$(BUILD)/tests/sched-host-test \
+	$(BUILD)/tests/vmspace-host-test
 CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test
 
 # ----------------------------------------------------------------------

@@ -1,49 +1,52 @@
 /*
- * Scheduler interface (priority round-robin; sched.c arrives with the
- * kernel scheduling phase — until then the kernel links stubs).
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ *
+ * Priority round-robin kernel scheduler.
  */
+#ifndef BOOTS_KERN_SCHED_H
+#define BOOTS_KERN_SCHED_H
 
-#ifndef _SYS_SCHED_H_
-#define _SYS_SCHED_H_
+#include <stdint.h>
 
-#include <hal/types.h>
-#include <hal/task.h>
+struct thread;
 
-/* Which list a task is linked on. */
-enum SchedListType {
-	SCHED_LIST_UNLINKED = 0,	/* not linked (sleeping) */
-	SCHED_LIST_ACTIVE = 1,
-	SCHED_LIST_TIMEWAIT = 2,
+#define SCHED_PRIOR_LEVELS 16
+#define SCHED_PRIOR_HIGH 0
+#define SCHED_PRIOR_LOW 15
+#define SCHED_PRIORITY_DEFAULT 8
+#define SCHED_QUANTUM_TICKS 5U
+
+enum sched_queue_kind {
+	SCHED_QUEUE_NONE = 0,
+	SCHED_QUEUE_RUN,
+	SCHED_QUEUE_SLEEP,
 };
 
-/* Priorities. */
-#define SCHED_PRIOR_LEVELS	(16)
-#define SCHED_PRIOR_HIGH	(0)
-#define SCHED_PRIOR_LOW		(15)
-
-/*
- * Schedulable header: placed first in the architecture task_info so
- * task_t, struct task_info *, and struct schedulable * cast freely.
- */
-struct schedulable {
-	int cpu;
-	int status;		/* SchedListType */
+struct sched {
 	int priority;
-	uint32 timeout;		/* tick for SCHED_LIST_TIMEWAIT */
-	struct schedulable *next;	/* circular per-list link */
+	uint32_t quantum;
+	uint64_t wakeup_tick;
+	unsigned queue_kind;
+	struct thread *next;
+	struct thread *prev;
 };
 
-/* Per-CPU scheduling lists. */
-struct cpu_sched_list {
-	struct schedulable *active_head[SCHED_PRIOR_LEVELS];
-	struct schedulable *timewait_head;
-	struct schedulable *idle_task;
+struct sched_queue {
+	struct thread *head;
+	struct thread *tail;
+	unsigned count;
 };
 
-/* sched.c — callable only with interrupts disabled. */
 void sched_init(void);
-void sched_link(task_t t, int list, int priority, int opt);
+void sched_add(struct thread *thread);
+void sched_unlink(struct thread *thread);
+void sched_wakeup(struct thread *thread);
+void sched_switch(void);
 void sched_yield(void);
-void sched_clock_handler(void);
+void sched_clock(void);
+void sched_sleep(uint64_t timeout_tick);
+void sched_awake_from_sleep(struct thread *thread);
+uint64_t sched_ticks(void);
 
 #endif

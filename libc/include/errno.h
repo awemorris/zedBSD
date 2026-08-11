@@ -1,4 +1,8 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef BOOTS_ERRNO_H
 #define BOOTS_ERRNO_H
 
@@ -26,5 +30,6 @@ extern int boots_errno;
 #define EBADF 19
 #define ENOSYS 20
 #define EOPNOTSUPP 21
+#define ENOEXEC 22
 
 #endif

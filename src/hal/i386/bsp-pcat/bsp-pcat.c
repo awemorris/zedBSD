@@ -1,5 +1,6 @@
 #include <hal/types.h>
 #include "../i386.h"
+#include "../space.h"
 
 void bsp_init(void)
 {
@@ -10,7 +11,7 @@ void bsp_init(void)
 	irq_init();
 
 	int_init();
-	univ_init();
+	i386_space_init();
 	task_init();
 	sched_init();
 	clock_init();

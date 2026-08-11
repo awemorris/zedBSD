@@ -19,7 +19,7 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PC98
 HAL_PC98_SOURCES := \
 	src/hal/i386/lib.c src/hal/i386/irq.c src/hal/i386/page.c \
-	src/hal/i386/univ.c src/hal/i386/int.c src/hal/i386/cmain.c \
+	src/hal/i386/space.c src/hal/i386/int.c src/hal/i386/cmain.c \
 	src/hal/i386/task.c src/hal/i386/fb.c \
 	src/hal/i386/bsp-pc98/cons.c src/hal/i386/bsp-pc98/pic.c \
 	src/hal/i386/bsp-pc98/clock.c src/hal/i386/bsp-pc98/display.c \
@@ -33,7 +33,11 @@ BOOTS_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
 	-Iinclude -Isrc -I. -Ilibc/include
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
-	$(BUILD)/src/kern/sched-stub.o
+	$(BUILD)/src/kern/process.o $(BUILD)/src/kern/thread.o \
+	$(BUILD)/src/kern/sched.o $(BUILD)/src/kern/vmspace.o \
+	$(BUILD)/src/kern/filedesc.o $(BUILD)/src/kern/cwdinfo.o \
+	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec.o \
+	$(BUILD)/src/kern/user-probe.o
 
 # Milestone verification nests QEMU tests.  Keep those chains ordered even
 # when the caller requests a highly parallel compile.
@@ -96,6 +100,7 @@ M9_STAGE2_OBJS = $(filter-out $(BUILD)/src/kern/main.o \
 all: $(BUILD)/boot2.bin $(BUILD)/ipl-lba0.bin $(BUILD)/ipl-lba2.bin \
 	$(BUILD)/ipl-lba0.img $(BUILD)/ipl-lba2.img $(BUILD)/ipl-part.img \
 	$(BUILD)/IO.SYS $(BUILD)/BOOT.SYS \
+	$(BUILD)/INIT.ELF \
 	$(BUILD)/partition-pbr.bin \
 	$(BUILD)/chain-test.bin $(BUILD)/fdd-ipl.bin \
 	$(BUILD)/BOOTAPP.BIN
@@ -104,7 +109,9 @@ all: $(BUILD)/boot2.bin $(BUILD)/ipl-lba0.bin $(BUILD)/ipl-lba2.bin \
 BOOT.SYS: $(BUILD)/BOOT.SYS
 BOOT-M9.SYS: $(BUILD)/BOOT-M9.SYS
 BOOTAPP.BIN: $(BUILD)/BOOTAPP.BIN
-.PHONY: BOOT.SYS BOOT-M9.SYS BOOTAPP.BIN
+INIT.ELF: $(BUILD)/INIT.ELF
+USER-FAULT.ELF: $(BUILD)/USER-FAULT.ELF
+.PHONY: BOOT.SYS BOOT-M9.SYS BOOTAPP.BIN INIT.ELF USER-FAULT.ELF
 
 # ----------------------------------------------------------------------
 # Per-object flag overrides.
@@ -203,6 +210,22 @@ $(BUILD)/ipl-part.img: $(BUILD)/partition-pbr.bin
 
 # ----------------------------------------------------------------------
 # Stage 2 (BOOT.SYS) and the applet container.
+
+$(BUILD)/tests/user-init.o: tests/user-init.S
+	@mkdir -p $(dir $@)
+	$(AS) --32 $< -o $@
+
+$(BUILD)/INIT.ELF: $(BUILD)/tests/user-init.o $(PC98)/user-init.ld
+	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
+		-T $(PC98)/user-init.ld $< -o $@
+
+$(BUILD)/tests/user-fault.o: tests/user-fault.S
+	@mkdir -p $(dir $@)
+	$(AS) --32 $< -o $@
+
+$(BUILD)/USER-FAULT.ELF: $(BUILD)/tests/user-fault.o $(PC98)/user-init.ld
+	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
+		-T $(PC98)/user-init.ld $< -o $@
 
 $(BUILD)/stage2.elf: $(STAGE2_OBJS) $(PC98)/stage2.ld
 	$(LD) -m elf_i386 --gc-sections -z max-page-size=512 \
@@ -313,10 +336,6 @@ hal-pc98-compile: $(HAL_PC98_OBJS)
 $(BUILD)/src/kern/entry.o: src/kern/entry.c
 	@mkdir -p $(dir $@)
 	$(BOOTS_KERN_CC) -MMD -MP -c $< -o $@
-
-$(BUILD)/src/kern/sched-stub.o: src/kern/sched-stub.c
-	@mkdir -p $(dir $@)
-	$(HAL_CC) -MMD -MP -c $< -o $@
 
 kern-compile: $(KERN_OBJS)
 	@echo "Boots kernel glue compile check: PASS"

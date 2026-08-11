@@ -1,10 +1,16 @@
-/* Startup selection and automatic boot policy. SPDX-License-Identifier: Zlib */
+/*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ *
+ * Startup selection and automatic boot policy.
+ */
+
 #include "kern/internal.h"
 #include "kern/clock.h"
 #include "kern/messages.h"
 #include "kern/platform.h"
 #include "kern/vfs.h"
-#include "hal/console.h"
+#include "hal/hal.h"
 #include "noct/platform.h"
 
 /* The startup menu exposes only the first four fixed disks. The full stable
@@ -25,11 +31,11 @@ const char *startup_config_file(void)
 {
 	struct inode *inode;
 
-	if (namei_at(&kern_fs_context, "BOOTS.CFG", &inode) == 0) {
+	if (namei_at(&kern_cwdinfo, "BOOTS.CFG", &inode) == 0) {
 		inode_release(inode);
 		return "BOOTS.CFG";
 	}
-	if (namei_at(&kern_fs_context, "BOOT.CFG", &inode) == 0) {
+	if (namei_at(&kern_cwdinfo, "BOOT.CFG", &inode) == 0) {
 		inode_release(inode);
 		return "BOOT.CFG";
 	}
@@ -40,7 +46,7 @@ static enum startup_config_kind boot_volume_startup_kind(void)
 {
 	struct inode *inode;
 
-	if (namei_at(&kern_fs_context, "AUTOEXEC.NCT", &inode) == 0) {
+	if (namei_at(&kern_cwdinfo, "AUTOEXEC.NCT", &inode) == 0) {
 		inode_release(inode);
 		return STARTUP_CONFIG_AUTOEXEC;
 	}
@@ -144,7 +150,7 @@ int run_autoexec(void)
 	char action[LINE_MAX];
 	int script_ok;
 
-	if (namei_at(&kern_fs_context, "AUTOEXEC.NCT", &inode) != 0)
+	if (namei_at(&kern_cwdinfo, "AUTOEXEC.NCT", &inode) != 0)
 		return 0;
 	inode_release(inode);
 	(void)boots_env_unset(&boot_environment, "BOOT_ACTION");
@@ -480,5 +486,4 @@ int startup_menu(struct startup_state *state)
 		}
 	}
 }
-
 

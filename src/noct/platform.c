@@ -1,11 +1,12 @@
 /*
- * Boots Noct target adapter
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
+ *
+ * Boots Noct target adapter
+ * This will be removed after Noct is moved to userspace.
  */
 
-#include "hal/console.h"
-#include "hal/memory.h"
+#include "hal/hal.h"
 #include "kern/env.h"
 #include "kern/fs.h"
 #include "kern/noct.h"
@@ -29,10 +30,10 @@ static const char embedded_source[] = BOOTS_NOCT_M6_SOURCE;
 static const struct noct_beui_hal *target_beui_hal;
 /* Host tests do not construct the kernel VFS; the strong runtime definition
  * in src/kern/vfs.c replaces this zeroed compatibility object. */
-struct fs_context kern_fs_context __attribute__((weak));
+struct cwdinfo kern_cwdinfo __attribute__((weak));
 
 struct target_context {
-	struct fs_context *fs_context;
+	struct cwdinfo *fs_context;
 	struct boots_filesystem *filesystem;
 	struct boots_namespace *namespace;
 	boots_noct_key_fn key_read;
@@ -344,9 +345,11 @@ make_services(struct boots_noct_services *services,
 
 /* End of the resident BOOT.SYS high segment, from the linker script. */
 extern char __high_end[];
+static struct boots_noct_memory_profile selected_memory;
+static int selected_memory_ready;
 
 static int
-select_memory(struct boots_noct_memory_profile *profile)
+select_memory_raw(struct boots_noct_memory_profile *profile)
 {
 	uint32_t low_extended;
 	uint32_t high_mib;
@@ -359,6 +362,28 @@ select_memory(struct boots_noct_memory_profile *profile)
 	hal_pc98_memory_segments(&low_extended, &high_mib);
 	return boots_noct_select_memory(low_extended, high_mib, low_reserved,
 					 profile);
+}
+
+int
+boots_noct_prepare_memory(void)
+{
+	if (selected_memory_ready)
+		return 1;
+	if (!select_memory_raw(&selected_memory))
+		return 0;
+	pmem_reserve((hal_physaddr_t)selected_memory.arena_base,
+		     selected_memory.arena_size);
+	selected_memory_ready = 1;
+	return 1;
+}
+
+static int
+select_memory(struct boots_noct_memory_profile *profile)
+{
+	if (profile == NULL || !boots_noct_prepare_memory())
+		return 0;
+	*profile = selected_memory;
+	return 1;
 }
 
 int
@@ -443,11 +468,11 @@ boots_noct_run_file(struct boots_namespace *namespace,
 	size_t source_area;
 	size_t file_size;
 	char *source;
-	int ok, use_vfs = kern_fs_context.fc_root != NULL;
+	int ok, use_vfs = kern_cwdinfo.root != NULL;
 
 	if (path == NULL || path[0] == '\0')
 		return 0;
-	if ((use_vfs && file_openat(&kern_fs_context, path, O_RDONLY, 0, &file) != 0) ||
+	if ((use_vfs && file_openat(&kern_cwdinfo, path, O_RDONLY, 0, &file) != 0) ||
 	    (!use_vfs && (filesystem == NULL ||
 			 !boots_fs_open(filesystem, path, &legacy_file)))) {
 		console_string("Noct: file not found: ");
@@ -461,7 +486,7 @@ boots_noct_run_file(struct boots_namespace *namespace,
 	hal_pc98_enable_high_memory();
 	target.filesystem = filesystem;
 	target.namespace = namespace;
-	target.fs_context = use_vfs ? &kern_fs_context : NULL;
+	target.fs_context = use_vfs ? &kern_cwdinfo : NULL;
 	target.key_read = key_read;
 	target.key_poll = key_poll;
 	target.clock_second = clock_second;
@@ -510,7 +535,7 @@ boots_noct_run_file(struct boots_namespace *namespace,
 	options.filesystem = filesystem;
 	options.environment = environment;
 	options.memory = &memory;
-	if (use_vfs) boots_stdio_set_context(&kern_fs_context);
+	if (use_vfs) boots_stdio_set_context(&kern_cwdinfo);
 	else boots_stdio_set_namespace(namespace);
 	hal_cons_save_state(&console_state);
 	if (file_size >= sizeof(NOCT_BYTECODE_HEADER) - 1U &&
@@ -556,8 +581,8 @@ boots_noct_run_repl(struct boots_namespace *namespace,
 	hal_pc98_enable_high_memory();
 	target.filesystem = filesystem;
 	target.namespace = namespace;
-	target.fs_context = kern_fs_context.fc_root != NULL ?
-		&kern_fs_context : NULL;
+	target.fs_context = kern_cwdinfo.root != NULL ?
+		&kern_cwdinfo : NULL;
 	target.key_read = key_read;
 	target.key_poll = key_poll;
 	target.clock_second = clock_second;

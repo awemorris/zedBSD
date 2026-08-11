@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "hal/console.h"
+#include "hal/hal.h"
 #include <stddef.h>
 
 size_t

@@ -5,7 +5,7 @@
  */
 
 #include "kern/noct.h"
-#include "hal/console.h"
+#include "hal/hal.h"
 #include <noct/beui.h>
 #include "noct/memory.h"
 #include "noct/napi.h"

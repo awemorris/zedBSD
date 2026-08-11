@@ -7,8 +7,7 @@
  * %c, %s, %d, %u, %x/%X with optional zero-padded width (e.g. %08X).
  */
 
-#include <hal/runtime.h>
-#include <hal/console.h>
+#include <hal/hal.h>
 #include "asm.h"
 
 int

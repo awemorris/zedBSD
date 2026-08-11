@@ -1,12 +1,14 @@
 /*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ *
  * IRQ numbers and the ISR-task registry.
  */
 
-#ifndef _SYS_ARCH_X86_IRQ_H_
-#define _SYS_ARCH_X86_IRQ_H_
+#ifndef HAL_I386_IRQ_H
+#define HAL_I386_IRQ_H
 
-#include <hal/irq.h>	/* interface definition */
-#include <hal/task.h>	/* task_t */
+#include <hal/hal.h>
 
 #define IRQ_MAX		(15)
 
@@ -16,7 +18,7 @@
 
 /* IRQ service registration. */
 struct irq_service_info {
-	task_t ist;	/* interrupt service task */
+	hal_task_t ist;	/* interrupt service task */
 };
 
 /* irq.c */

@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include "hal/console.h"
+#include "hal/hal.h"
 
 #define TERMINAL_FIRST_ROW 18U
 

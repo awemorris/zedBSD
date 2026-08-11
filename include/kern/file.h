@@ -1,4 +1,9 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef BOOTS_KERN_FILE_H
 #define BOOTS_KERN_FILE_H
 
@@ -14,7 +19,7 @@
 #define O_DIRECTORY 0x0100
 #endif
 
-struct fs_context;
+struct cwdinfo;
 struct file;
 
 struct dirent {
@@ -42,7 +47,7 @@ struct file {
 	void *f_data;
 };
 
-int file_openat(struct fs_context *, const char *, int, mode_t,
+int file_openat(struct cwdinfo *, const char *, int, mode_t,
 		struct file **);
 ssize_t file_read(struct file *, void *, size_t);
 ssize_t file_write(struct file *, const void *, size_t);

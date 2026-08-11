@@ -1,4 +1,8 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ */
+
 #include "kern/file.h"
 #include "kern/namei.h"
 
@@ -42,7 +46,7 @@ file_free(struct file *file)
 }
 
 int
-file_openat(struct fs_context *context, const char *path, int flags,
+file_openat(struct cwdinfo *context, const char *path, int flags,
 	    mode_t mode, struct file **result)
 {
 	struct inode *inode;
@@ -154,8 +158,8 @@ file_seek(struct file *file, off_t offset, int whence)
 		base = file->f_inode->i_size;
 	else
 		return -EINVAL;
-	if ((offset > 0 && base > (off_t)INT64_MAX - offset) ||
-	    (offset < 0 && base < (off_t)INT64_MIN - offset))
+	if ((offset > 0 && base > (off_t)INT32_MAX - offset) ||
+	    (offset < 0 && base < (off_t)INT32_MIN - offset))
 		return -EOVERFLOW;
 	target = base + offset;
 	if (target < 0)

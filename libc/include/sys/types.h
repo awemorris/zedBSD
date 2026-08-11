@@ -1,4 +1,8 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef BOOTS_SYS_TYPES_H
 #define BOOTS_SYS_TYPES_H
 
@@ -13,5 +17,7 @@ typedef uint32_t mode_t;
 typedef uint32_t nlink_t;
 typedef uint32_t uid_t;
 typedef uint32_t gid_t;
+typedef int32_t pid_t;
+typedef int32_t tid_t;
 
 #endif

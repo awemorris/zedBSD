@@ -11,7 +11,7 @@
  */
 
 #include <kern/sched.h>
-#include <hal/runtime.h>
+#include <hal/hal.h>
 
 void
 sched_init(void)

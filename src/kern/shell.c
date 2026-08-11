@@ -1,10 +1,16 @@
-/* Interactive shell and applet/Noct command dispatch. SPDX-License-Identifier: Zlib */
+/*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ *
+ * Interactive shell and applet/Noct command dispatch.
+ * This will be removed.
+ */
 #include "kern/internal.h"
 #include "kern/clock.h"
 #include "kern/platform.h"
 #include "kern/file.h"
 #include "kern/vfs.h"
-#include "hal/console.h"
+#include "hal/hal.h"
 #include "noct/napi.h"
 #include "noct/platform.h"
 
@@ -13,7 +19,7 @@ static uint8_t sec[512], cfg[CFG_MAX];
 
 void prompt(void)
 {
-	const char *cwd = fs_getcwd(&kern_fs_context);
+	const char *cwd = fs_getcwd(&kern_cwdinfo);
 	puts(cwd != NULL ? cwd : "/");
 	puts(" $ ");
 	update_cursor();
@@ -207,7 +213,7 @@ static int selectpart(const char *s)
 static int vfs_ls(const char *path)
 {
 	struct file *directory;
-	int error = file_openat(&kern_fs_context, path,
+	int error = file_openat(&kern_cwdinfo, path,
 				O_RDONLY | O_DIRECTORY, 0, &directory);
 	if (error != 0)
 		return 0;
@@ -227,7 +233,7 @@ static int catfile(const char *n)
 {
 	struct file *file;
 	ssize_t count;
-	if (file_openat(&kern_fs_context, n, O_RDONLY, 0, &file) != 0)
+	if (file_openat(&kern_cwdinfo, n, O_RDONLY, 0, &file) != 0)
 		return 0;
 	while ((count = file_read(file, sec, sizeof(sec))) > 0)
 		for (ssize_t i = 0; i < count; i++)
@@ -251,7 +257,7 @@ static int run_applet(const char *n, int argc, char **argv)
 	struct file *file;
 	uint8_t *image = (uint8_t *)0x50000;
 	off_t size;
-	if (file_openat(&kern_fs_context, n, O_RDONLY, 0, &file) != 0)
+	if (file_openat(&kern_cwdinfo, n, O_RDONLY, 0, &file) != 0)
 		return 0;
 	size = file->f_inode->i_size;
 	if (size < (off_t)sizeof(struct boots_applet_header) ||
@@ -445,12 +451,12 @@ int command(char *s)
 	}
 	if (streq(v[0], "pwd")) {
 		if (n != 1) return 0;
-		puts(fs_getcwd(&kern_fs_context)); putc('\n'); return 1;
+		puts(fs_getcwd(&kern_cwdinfo)); putc('\n'); return 1;
 	}
 	if (streq(v[0], "cd")) {
 		const char *path = n == 1 ? boots_env_get(&boot_environment, "HOME") :
 			(n == 2 ? v[1] : NULL);
-		return path != NULL && fs_chdir(&kern_fs_context, path) == 0;
+		return path != NULL && fs_chdir(&kern_cwdinfo, path) == 0;
 	}
 	if (streq(v[0], "ls"))
 		return n <= 2 && vfs_ls(n == 2 ? v[1] : ".");
@@ -507,7 +513,7 @@ int command(char *s)
 		struct file *file;
 		off_t size;
 
-		if (n != 2 || file_openat(&kern_fs_context, v[1], O_RDONLY, 0,
+		if (n != 2 || file_openat(&kern_cwdinfo, v[1], O_RDONLY, 0,
 						 &file) != 0)
 			return 0;
 		size = file->f_inode->i_size;
@@ -584,5 +590,4 @@ int command(char *s)
 	 * their argument-validation failures. */
 	return run_noct_application(v[0], ".NCT", 1, n - 1, &v[1]);
 }
-
 

@@ -1,8 +1,8 @@
 /*
- * Framebuffer ownership flag (see <hal/framebuffer.h>).
+ * Framebuffer ownership flag (see <hal/hal.h>).
  */
 
-#include <hal/framebuffer.h>
+#include <hal/hal.h>
 
 static int fb_active;
 

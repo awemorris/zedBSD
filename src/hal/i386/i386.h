@@ -2,7 +2,7 @@
  * Kernel HAL for i386: assembly routine declarations (locore.S).
  *
  * The board-support surface the HAL core relies on today is small and
- * declared where it lives: the console in <hal/console.h>, the PIC in
+ * declared where it lives: the console in <hal/hal.h>, the PIC in
  * pic.h, the interval timer in clock.h, and the memory windows through
  * bsp_mem_reserve() (page.c).  The wider hal.h contract grows onto
  * these pieces stage by stage.

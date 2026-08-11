@@ -1,4 +1,4 @@
-#include <hal/memory.h>
+#include <hal/hal.h>
 #include "../i386/asm.h"
 #include "../i386/pic.h"
 #include "../i386/int.h"

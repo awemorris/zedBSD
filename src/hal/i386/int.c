@@ -1,14 +1,23 @@
+/*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ *
+ * Interrupt management.
+ */
+
 #include <kern/sched.h>
-#include <hal/runtime.h>
+#include <hal/hal.h>
 #include "int.h"
 #include "irq.h"
 #include "asm.h"
 #include "pic.h"
 
-/* 再スケジュールフラグ */
+/* Re-scheduling flag. */
 static int	 resched_flag;
+static hal_user_int_handler_t user_int_handler;
+static hal_user_fault_handler_t user_fault_handler;
 
-/* forward declaration */
+/* Forward declaration. */
 static void create_idt();
 static void load_idt();
 static void set_idt_entry(int index, int dpl, void *handler);
@@ -16,39 +25,60 @@ static void handle_fault(struct interrupt_frame *fp);
 
 
 /*
- * 割り込み管理部を初期化する
+ * Initialize the interrupt managemtn module.
  */
 void i386_int_init(void)
 {
 
-	/* NOTE:
-	 *	o この時点では割り込みは禁止(IPL_HIGH)されている。
-	 *	o 割り込みの許可はIRQの初期化ルーチンでIRQをマスクしてから行う。 */
+	/*
+	 * NOTE:
+	 * - At this moment, IRQ are prohibited.
+	 * - Allowing IRQ is done in the initialization of IRQ after initializing PIC.
+	 */
 
-	/* IDTを作成する */
+	/* Create an IDT. */
 	create_idt();
 
-	/* CPUにIDTをロードする */
+	/* Load the IDT. */
 	load_idt();
 
 	/* cmain enables interrupts after the PIC and PIT are initialized. */
 }
 
 /*
- * 再スケジュールフラグをセットする
- * (現在の割り込み処理終了時に再スケジュールを行う)
+ * Set the re-scheduling flag.
+ * (Do a re-scheduling after the current IRQ handling is finished.)
  */
 void int_set_resched_flag()
 {
 	resched_flag = 1;
 }
 
+void
+hal_reschedule_on_interrupt_return(void)
+{
+	resched_flag = 1;
+}
+
+void
+hal_user_int_set_handler(hal_user_int_handler_t handler)
+{
+	user_int_handler = handler;
+}
+
+void
+hal_user_fault_set_handler(hal_user_fault_handler_t handler)
+{
+	user_fault_handler = handler;
+}
+
 /*
- * 一般割り込みハンドラ
+ * General Interrupt Handler
  * (called from trap.s)
  *
- * NOTE: IDT内で割り込みゲートとして登録されているため、
- *		 ハンドラは割り込み禁止状態で開始される。
+ * NOTE:
+ *  - Registered as an "interrupt gate" in IDT.
+ *  - So the handler is started with interrupts disabled.
  */
 void int_handler(struct interrupt_frame *fp)
 {
@@ -57,7 +87,7 @@ void int_handler(struct interrupt_frame *fp)
 	is_handled = 0;
 	int_num    = fp->int_num;
 
-	/* 再スケジュールフラグをクリアする */
+	/* Clear the re-scheduling flag. */
 	resched_flag = 0;
 
 	/*
@@ -83,6 +113,18 @@ void int_handler(struct interrupt_frame *fp)
 	/*
 	 * CPUの例外をハンドルする
 	 */
+	else if (int_num == INT_SYSCALL && (fp->cs & 3) == 3 &&
+		 user_int_handler != NULL) {
+		struct hal_user_trap trap;
+		trap.vector = (uint32)int_num;
+		trap.cs = fp->cs;
+		trap.eip = fp->eip;
+		trap.eax = fp->regs.eax;
+		trap.error_code = 0;
+		trap.fault_address = 0;
+		user_int_handler(&trap);
+		is_handled = 1;
+	}
 	else if(int_num >= 0 && int_num <= 0x1f) {
 		handle_fault(fp);
 		is_handled = 1;
@@ -162,28 +204,16 @@ static void handle_fault(struct interrupt_frame *fp)
 	int int_num = fp->int_num;
 
 	if (fp->cs & 3) {
-		hal_printf("[INT] int 0x%02X handled!\n"
-		       "CS:  %04X  EIP: %08X\n"
-		       "DS:  %04X  ES:  %04X  SS: %04X\n"
-		       "EAX: %08X  EBX: %08X  ECX: %08X  EDX: %08X\n"
-		       "ESI: %08X  EDI: %08X  EBP: %08X  ESP: %08X\n"
-		       "EFLAGS: %08X  ERRORCODE: %08X\n",
-		       int_num,
-		       fp->cs,
-		       fp->eip,
-		       fp->regs.ds,
-		       fp->regs.es,
-		       fp->user_ss,
-		       fp->regs.eax,
-		       fp->regs.ebx,
-		       fp->regs.ecx,
-		       fp->regs.edx,
-		       fp->regs.esi,
-		       fp->regs.edi,
-		       fp->regs.ebp,
-		       fp->user_esp,
-		       fp->eflags,
-		       fp->error_code);
+		struct hal_user_trap trap;
+		trap.vector = (uint32)int_num;
+		trap.cs = fp->cs;
+		trap.eip = fp->eip;
+		trap.eax = fp->regs.eax;
+		trap.error_code = fp->error_code;
+		trap.fault_address = int_num == INT_PAGEFAULT ? asm_get_cr2() : 0;
+		if (user_fault_handler != NULL)
+			user_fault_handler(&trap);
+		HAL_FATAL("user fault handler returned");
 	} else {
 		hal_printf("[INT] int 0x%02X handled!\n"
 		       "CS:  %04X  EIP: %08X\n"

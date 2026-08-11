@@ -1,7 +1,6 @@
 /* PC-98 Linux boot adapter. Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "linux-boot.h"
-#include <hal/console.h>
-#include <hal/memory.h>
+#include <hal/hal.h>
 #include <kern/image.h>
 #include <kern/messages.h>
 #include <stdint.h>

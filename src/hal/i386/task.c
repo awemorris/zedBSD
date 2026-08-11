@@ -1,256 +1,189 @@
 /*
- * タスク管理部
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ *
+ * i386 CPU-context implementation.
  */
 
-#include <hal/runtime.h>
+#include <hal/hal.h>
 #include "task.h"
 #include "asm.h"
 
-extern uint32 tss_area[26];	/* TSS */
+extern uint32 tss_area[26];
 
-static struct task_info	*task_list;		/* 全タスクのリスト */
-static struct task_info	*running_task;	/* CPUで実行中のタスク */
+static struct task_info *task_list;
+static struct task_info *running_task;
 
-static void set_initial_resume_frame(struct task_info *ti, void *start, void *param, void *user_sp);
-static void tasklist_add(struct task_info *ti);
-static void tasklist_del(struct task_info *ti);
-
-
-/*
- * タスク管理部を初期化する
- */
-void i386_task_init(void)
+static void
+tasklist_add(struct task_info *task)
 {
-	struct task_info *ti;
+	struct task_info **link = &task_list;
 
-	task_list = NULL;
-
-	/* TSSをゼロクリアする */
-	hal_memset(tss_area, 0, 104);
-	tss_area[2] = SEG_SYS_DATA;	/* SS0 */
-
-	/* 現在CPUで実行中のコンテキストを表すタスクを作成する */
-	ti = hal_malloc(sizeof(struct task_info));
-	hal_memset(ti, 0, sizeof(struct task_info));
-	ti->universe = UNIV_SYS;		/* カーネル空間で動作するタスクである */
-	ti->run_cpu = 0;			/* CPUの番号 */
-
-	/* タスクリストに追加する */
-	tasklist_add(ti);
-
-	/* 作成したタスクを、現在のCPUで実行中のタスクとして設定する */
-	running_task = ti;
+	while (*link != NULL)
+		link = &(*link)->next;
+	*link = task;
+	task->next = NULL;
 }
 
-/*
- * 新しいタスクを作成する
- */
-task_t task_create(
-	univ_t universe,	/* 動作アドレス空間 */
-	void *start,		/* 開始関数のアドレス */
-	void *param,		/* 開始関数の引数 */
-	void *user_sp)	/* ユーザスタックポインタ(カーネルタスクではNULL) */
+static void
+tasklist_del(struct task_info *task)
 {
-	struct task_info *ti;
+	struct task_info **link = &task_list;
 
-	/* タスク構造体のメモリを確保してメンバを設定する */
-	ti = hal_malloc(sizeof(struct task_info));
-	hal_memset(ti, 0, sizeof(struct task_info));
-	ti->universe = universe;		/* 動作アドレス空間 */
-	ti->run_cpu = -1;			/* 非実行状態 */
-
-	/* システムスタックを割り当てる */
-	ti->sys_stack = hal_malloc(SYS_STACK_SIZE);
-
-	/* システムスタックの最低位アドレスにタスク構造体へのポインタを格納する */
-	*(uint32 *)(ti->sys_stack) = (uint32) ti;
-
-	/* タスクの初期スタックフレームをセットする */
-	set_initial_resume_frame(ti, start, param, user_sp);
-
-	/* タスクリストに追加する */
-	tasklist_add(ti);
-
-	/* task型にキャストして返す*/
-	return (task_t)ti;
+	while (*link != NULL && *link != task)
+		link = &(*link)->next;
+	if (*link == task)
+		*link = task->next;
+	task->next = NULL;
 }
 
-/* タスク開始時のレジュームフレームを設定する */
-static void set_initial_resume_frame(
-	struct task_info *ti,
-	void	*start,
-	void	*param,
-	void	*user_sp)
+void
+i386_task_init(void)
 {
-	struct task_resume_frame *fp;
+	struct task_info *task;
 
-	/* 初期レジュームフレームポインタの位置を求める */
-//	ti->resume_esp = (struct task_resume_frame *)((uint32)ti->sys_stack - sizeof(struct task_resume_frame));
-	ti->resume_esp = (struct task_resume_frame *)((uint32)ti->sys_stack + SYS_STACK_SIZE - sizeof(struct task_resume_frame));
-    
-	/*
-	 * レジュームフレームを設定する
-	 */
+	if (running_task != NULL)
+		HAL_FATAL("hal_task_init called twice");
+	/* Preserve the TSS descriptor installed by locore; initialize its body. */
+	hal_memset(tss_area, 0, 104U);
+	tss_area[2] = SEG_SYS_DATA;
+	task = hal_malloc(sizeof(*task));
+	if (task == NULL)
+		HAL_FATAL("initial HAL task allocation failed");
+	hal_memset(task, 0, sizeof(*task));
+	task->space = HAL_SPACE_SYS;
+	task->run_cpu = 0;
+	tasklist_add(task);
+	running_task = task;
+}
 
-	/* ゼロクリアする */
-	fp = ti->resume_esp;
-	hal_memset(fp, 0, sizeof(struct task_resume_frame));
+void
+hal_task_init(void)
+{
+	i386_task_init();
+}
 
-	/* asm_task_entrypoint()から実行を開始する */
-	fp->eflags	= asm_get_eflags();
-	fp->ret_eip = (uint32) asm_task_entrypoint;
+static void
+set_initial_resume_frame(struct task_info *task, void (*start)(void *),
+			 void *arg, void *user_sp)
+{
+	struct task_resume_frame *frame;
 
-	if(ti->universe == UNIV_SYS) {
-		/* カーネルモードセグメントをセットする */
-		fp->ds = fp->es = fp->fs = fp->gs = SEG_SYS_DATA;
-
-		/* asm_task_entrypoint()のiret命令でstartにジャンプする */
-		fp->init.sys.eip	= (uint32) start;
-		fp->init.sys.cs		= SEG_SYS_CODE;
-		fp->init.sys.eflags	= EFLAGS_IF | EFLAGS_RSV1 | EFLAGS_IOPL_0;
-
-		/* 開始関数start()の呼び出しスタック(引数) */
-		fp->init.sys._ret_eip	= 0;
-		fp->init.sys.param	= (uint32) param;
+	frame = (struct task_resume_frame *)((uintptr_t)task->sys_stack +
+		SYS_STACK_SIZE - sizeof(*frame));
+	task->resume_esp = frame;
+	hal_memset(frame, 0, sizeof(*frame));
+	frame->eflags = asm_get_eflags();
+	frame->ret_eip = (uint32)asm_task_entrypoint;
+	if (task->space == HAL_SPACE_SYS) {
+		frame->gs = frame->fs = frame->es = frame->ds = SEG_SYS_DATA;
+		frame->initial.sys.eip = (uint32)start;
+		frame->initial.sys.cs = SEG_SYS_CODE;
+		frame->initial.sys.eflags =
+			EFLAGS_IF | EFLAGS_RSV1 | EFLAGS_IOPL_0;
+		frame->initial.sys.return_eip = 0;
+		frame->initial.sys.param = (uint32)arg;
 	} else {
-		/* ユーザモードセグメントをセットする */
-		fp->ds = fp->es	= fp->fs = fp->gs = SEG_USER_DATA;
-
-		/* asm_task_entrypoint()のiret命令でstartにジャンプする */
-		fp->init.usr.eip	= (uint32) start;
-		fp->init.usr.cs		= SEG_USER_CODE | SEG_RPL_3;
-		fp->init.usr.eflags	= EFLAGS_IF | EFLAGS_RSV1 | EFLAGS_IOPL_3;
-
-		/* 特権レベル移行によってスタック切り替えが発生する */
-		fp->init.usr.esp	= (uint32) user_sp - 8; /* -8は呼び出し規約の分 */
-		fp->init.usr.ss		= SEG_USER_DATA | SEG_RPL_3;
-
-		/* 開始関数start()の呼び出しスタック(引数) */
-		*((uint32 *) user_sp	) = (uint32) param;
-		*((uint32 *) user_sp - 1) = 0;	/* call ret */
+		frame->gs = frame->fs = frame->es = frame->ds =
+			SEG_USER_DATA | SEG_RPL_3;
+		frame->initial.user.eip = (uint32)start;
+		frame->initial.user.cs = SEG_USER_CODE | SEG_RPL_3;
+		frame->initial.user.eflags =
+			EFLAGS_IF | EFLAGS_RSV1 | EFLAGS_IOPL_0;
+		frame->initial.user.esp = (uint32)user_sp;
+		frame->initial.user.ss = SEG_USER_DATA | SEG_RPL_3;
 	}
 }
 
-/*
- * タスクを破棄する
- */
-void task_destroy(task_t t)
+hal_task_t
+hal_task_create(hal_space_t space, void (*start)(void *), void *arg,
+		void *user_stack_pointer)
 {
-	struct task_info *ti;
+	struct task_info *task;
 
-	ti = (struct task_info *)t;
-
-	/* タスクリストから削除する */
-	tasklist_del(ti);
-
-	/* システムスタックとして割り当てたメモリを解放する*/
-	hal_free(ti->sys_stack);
-
-	/* task構造体に割り当てたメモリを解放する */
-	hal_free(ti);
+	if (start == NULL ||
+	    ((space == HAL_SPACE_SYS) != (user_stack_pointer == NULL)))
+		return NULL;
+	task = hal_malloc(sizeof(*task));
+	if (task == NULL)
+		return NULL;
+	hal_memset(task, 0, sizeof(*task));
+	task->space = space;
+	task->run_cpu = -1;
+	task->sys_stack = hal_malloc(SYS_STACK_SIZE);
+	if (task->sys_stack == NULL) {
+		hal_free(task);
+		return NULL;
+	}
+	set_initial_resume_frame(task, start, arg, user_stack_pointer);
+	tasklist_add(task);
+	return task;
 }
 
-/*
- * タスクを切り替える
- */
-void task_switch(task_t t)
+void
+hal_task_destroy(hal_task_t handle)
 {
-	struct task_info *switch_to, *switch_from;
+	struct task_info *task = handle;
 
-	switch_to	 = (struct task_info *) t;	/* 切り替え先のタスク */
-	switch_from  = running_task;			/* 現在のCPUで実行中のタスク */
-	running_task = switch_to;				/* running_taskを変更する */
-
-	/* スイッチ先タスクが現在のタスクと同一なら何もせずリターンする */
-	if(switch_to == switch_from) {
-		/*puts("-same task-");*/
+	if (task == NULL)
 		return;
-	}
-
-	/* 切り替え先がユーザ空間の場合 */
-	if(switch_to->universe != UNIV_SYS) {
-		/* アドレス空間を変更する */
-		univ_switch(switch_to->universe);
-
-		/* システムスタックポインタを変更する */
-		tss_area[1] = (uint32) switch_to->sys_stack + SYS_STACK_SIZE;
-	}
-
-	/* 浮動小数点レジスタ群を切り替える */
-	asm_fnsave(switch_from->fpregs);
-	if(switch_to->resume_esp->ret_eip != (uint32)asm_task_entrypoint)
-		asm_frstor(switch_to->fpregs);
-
-	/* スタックを切り替える */
-	asm_task_dispatch(&switch_from->resume_esp, &switch_to->resume_esp);
-
-	/*
-	 * 新規タスクの場合はエントリへポイントジャンプする。
-	 * それ以外の場合は別なコンテキストのこの位置に戻ってくる。
-	 */
+	if (task == running_task)
+		HAL_FATAL("destroying current HAL task");
+	tasklist_del(task);
+	if (task->sys_stack != NULL)
+		hal_free(task->sys_stack);
+	hal_free(task);
 }
 
-/*
- * 指定したCPUで実行中のタスクを取得する
- */
-task_t task_get_current(void)
+void
+hal_task_context_switch(hal_task_t handle)
 {
-	/*
-	 * システムスタックの最低位アドレスに格納されている、タスク構造体への
-	 * ポインタを取得する
-	 */
-//	ti =  (struct task_info *)(asm_get_esp() & 0xfffff000);
+	struct task_info *to = handle;
+	struct task_info *from = running_task;
 
-//	return (task_t) ti;
+	if (to == NULL || from == NULL)
+		HAL_FATAL("invalid HAL task switch");
+	if (to == from)
+		return;
+	running_task = to;
+	hal_page_switch_space(to->space);
+	if (to->sys_stack != NULL)
+		tss_area[1] = (uint32)to->sys_stack + SYS_STACK_SIZE;
+	asm_fnsave(from->fpregs);
+	if (to->resume_esp->ret_eip != (uint32)asm_task_entrypoint)
+		asm_frstor(to->fpregs);
+	asm_task_dispatch(&from->resume_esp, &to->resume_esp);
+}
 
+hal_task_t
+hal_task_get_current(void)
+{
 	return running_task;
 }
 
-
-/**
- * タスクリスト操作
- */
-
-/* タスクをリストの最後に追加する */
-static void tasklist_add(struct task_info *ti)
+void hal_task_set_tls(hal_task_t handle, uintptr_t value)
 {
-	/* リストが空の場合 */
-	if(task_list == NULL) {
-		/* tをリストの先頭にセットする */
-		task_list = ti;
-		return;
-	}
-
-	/* リストの末尾ノードを探す */
-	struct task_info *p = task_list;
-	while(p->next != NULL)	/* リストの末尾を探す */
-		p = p->next;
-
-	/* リストの末尾に追加する */
-	p->next = ti;
-	ti->next = NULL;
+	if (handle != NULL)
+		((struct task_info *)handle)->tls = value;
 }
 
-/* タスクをリストから削除する */
-static void tasklist_del(struct task_info *ti)
+uintptr_t hal_task_get_tls(hal_task_t handle)
 {
-	struct task_info *p, *prev;
+	return handle != NULL ? ((struct task_info *)handle)->tls : 0;
+}
 
-	/* pを探すしてpの一つ前のノードを取得する */
-	p = task_list, prev = NULL;
-	while(p != NULL) {
-		if(p == ti)
-			break;
-		prev = p;
-		p = p->next;
-	}
-	if(p == NULL)
-		return;	/* not found */
+void hal_task_set_private(hal_task_t handle, void *private_data)
+{
+	if (handle != NULL)
+		((struct task_info *)handle)->private_data = private_data;
+}
 
-	/* リストから削除する */
-	if(prev == NULL)
-		task_list = p->next;	/* pがリストの先頭の場合*/
-	else
-		prev->next = p->next;	/* pがリストの先頭でない場合 */
-	p->next = NULL;
+void *hal_task_get_private(hal_task_t handle)
+{
+	return handle != NULL ? ((struct task_info *)handle)->private_data : NULL;
+}
+
+hal_space_t hal_task_get_space(hal_task_t handle)
+{
+	return handle != NULL ? ((struct task_info *)handle)->space : HAL_SPACE_SYS;
 }

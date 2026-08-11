@@ -101,6 +101,11 @@ SECTIONS
 	__high_image_end = .;
 	__high_bss_start = .;
 	.bss.high (NOLOAD) : { *(.vfs_bss) *(.bss*) *(COMMON) } :high
+	.kernel_heap (NOLOAD) : ALIGN(4096) {
+		__kernel_heap_start = .;
+		KEEP(*(.kernel_heap))
+		__kernel_heap_end = .;
+	} :high
 	__high_bss_end = .;
 	__high_end = .;
 

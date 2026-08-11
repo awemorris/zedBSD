@@ -1,13 +1,14 @@
 /*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ *
  * IRQ management: the local interrupt lock, the ISR-task protocol, and
- * the dispatch called from the general interrupt handler.  Restored
- * from the working kt snapshot (dc95e73) with comments translated; the
- * logic is unchanged.
+ * the dispatch called from the general interrupt handler.
  */
 
-#include <hal/clock.h>
-#include <hal/runtime.h>
+#include <hal/hal.h>
 #include <kern/sched.h>
+#include <kern/thread.h>
 #include "irq.h"
 #include "pic.h"
 #include "asm.h"
@@ -56,6 +57,18 @@ irq_unacquire_lock(irqlock_t lock)
 		asm_sti();
 }
 
+bool
+hal_irq_disable(void)
+{
+	return irq_acquire_lock() != 0;
+}
+
+void
+hal_irq_enable(void)
+{
+	asm_sti();
+}
+
 /*
  * Begin waiting for an IRQ: register the running task as the service
  * task, unlink it from the scheduler (so it sleeps from the next yield
@@ -65,7 +78,8 @@ irq_unacquire_lock(irqlock_t lock)
 void
 irq_enter_isr(int irq_num)
 {
-	task_t t;
+	hal_task_t t;
+	struct thread *thread;
 	irqlock_t irqlock;
 
 	ENTER_IRQLOCK(irqlock)
@@ -73,10 +87,12 @@ irq_enter_isr(int irq_num)
 		/* Only one service task per IRQ. */
 		HAL_ASSERT(irq_service[irq_num].ist == NULL);
 
-		t = task_get_current();
+		t = hal_task_get_current();
 		irq_service[irq_num].ist = t;
-
-		sched_link(t, SCHED_LIST_UNLINKED, 0, 0);
+		thread = hal_task_get_private(t);
+		HAL_ASSERT(thread != NULL);
+		thread->state = THREAD_SLEEPING;
+		sched_unlink(thread);
 
 		pic_set_irq_mask(irq_num, 0);
 	}
@@ -102,7 +118,8 @@ irq_leave_isr(int irq_num)
 void
 irq_handler(int irq_num)
 {
-	task_t t;
+	hal_task_t t;
+	struct thread *thread;
 
 	/*
 	 * The interval timer is handled inline: count the tick, run the
@@ -111,7 +128,7 @@ irq_handler(int irq_num)
 	if (irq_num == IRQ_TIMER) {
 		clock_handler();
 		kernel_timer_handler();
-		sched_clock_handler();
+		sched_clock();
 		pic_send_eoi(irq_num);
 		return;
 	}
@@ -125,8 +142,9 @@ irq_handler(int irq_num)
 	t = irq_service[irq_num].ist;
 	HAL_ASSERT(t != NULL);
 	irq_service[irq_num].ist = NULL;
-
-	sched_link(t, SCHED_LIST_ACTIVE, SCHED_PRIOR_HIGH, 0);
+	thread = hal_task_get_private(t);
+	HAL_ASSERT(thread != NULL);
+	sched_wakeup(thread);
 
 	int_set_resched_flag();
 }

@@ -1,7 +1,9 @@
 /*
- * Boots Noct target adapter
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
+ *
+ * Boots Noct target adapter
+ * This will be removed after Noct is moved to userspace.
  */
 
 #ifndef BOOTS_NOCT_PLATFORM_H
@@ -20,6 +22,9 @@ typedef int (*boots_noct_clock_fn)(void *context);
  * input section, which upstream BeUI owns.
  */
 void boots_noct_set_beui_hal(const struct noct_beui_hal *hal);
+
+/* Select and reserve the temporary embedded-Noct arena before pmem use. */
+int boots_noct_prepare_memory(void);
 
 int boots_noct_run_embedded(unsigned repeat_count);
 int boots_noct_run_file(struct boots_namespace *namespace,

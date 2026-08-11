@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ */
+
 #include "defs.h"
 
 .code32
@@ -21,9 +26,9 @@
 NUM_HIGH_PDE   = 32		/* 32 * 4MB = 128MB */
 NUM_PTE_TOTAL  = 32 * 1024      /* 128MB / 4KB */
 NUM_APERTURE_PDE = 4		/* 16MB at 0xf0000000 */
-PDE_SYS = PTE_PRESENT | PTE_USER | PTE_WRITE
-PTE_SYS = PTE_PRESENT | PTE_USER | PTE_WRITE
-PTE_APERTURE = PTE_PRESENT | PTE_USER | PTE_WRITE | PTE_NOCACHE
+PDE_SYS = PTE_PRESENT | PTE_WRITE
+PTE_SYS = PTE_PRESENT | PTE_WRITE
+PTE_APERTURE = PTE_PRESENT | PTE_WRITE | PTE_NOCACHE
 
 .text
 
@@ -219,6 +224,10 @@ init_paging:
 	*/
 	ljmp    $(SEG_SYS_CODE), $(.L_sys_area)
     .L_sys_area:
+	/* The bootstrap GDTR used the physical alias before paging.  User
+	 * address spaces deliberately omit that low mapping, so keep the GDT
+	 * reachable through the supervisor-only higher-half mapping. */
+	lgdt	gdtr_high
 
 	/*
 	 * Set startup stack in higher-half virtual address space.
@@ -467,6 +476,12 @@ EXT_C(asm_get_esp):
 	ret
 
 /* uint32 asm_get_cr3() */
+.global EXT_C(asm_get_cr2)
+EXT_C(asm_get_cr2):
+	movl	%cr2, %eax
+	ret
+
+/* uint32 asm_get_cr3() */
 	.global EXT_C(asm_get_cr3)
 EXT_C(asm_get_cr3):
 	movl	%cr3, %eax
@@ -533,6 +548,10 @@ gdt_end:
 gdtr:
 	.word gdt_end - gdt - 1
 	.long gdt - 0x80000000
+
+gdtr_high:
+	.word gdt_end - gdt - 1
+	.long gdt
 
 /*
  * TSS

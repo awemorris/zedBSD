@@ -2,7 +2,7 @@
 #include "noct/pc98-beui.h"
 #include "noct/platform.h"
 #include "hal/i386/bsp-pc98/display.h"
-#include <hal/framebuffer.h>
+#include <hal/hal.h>
 #include "beui-pc98-auto.h"
 
 #define CIRRUS_APERTURE 0xf0000000U

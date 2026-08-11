@@ -1,17 +1,51 @@
 /*
  * Kernel HAL
+ * Copyright (C) 2026, Awe Morris.
  *
  * This header defines a kernel porting HAL. A HAL is implemented for
  * a combination of a CPU architecture and a machine/board type. A HAL
  * doesn't implement basic kernel features such as scheduling
  * algorithm, and only implements low level operations required for
  * contemporary 32-bit and 64-bit POSIX-compatible kernels.
+ *
+ * SPDX-License-Identifier: Zlib
  */
 
 #ifndef SYS_KERN_HAL_H
 #define SYS_KERN_HAL_H
 
 #include <hal/types.h>
+
+struct hal_cpu_mask;
+
+/*
+ * Kernel C runtime
+ */
+
+#define HAL_ASSERT(e) ((e) ? (void)0 : hal_assert(__FILE__, __LINE__, #e))
+#define HAL_FATAL(msg) hal_fatal(__FILE__, __LINE__, msg)
+
+int hal_strlen(const char *s);
+void *hal_memset(void *s, int c, size_t n);
+void *hal_memset16(uint16 *s, uint16 c, size_t n);
+void *hal_memset32(uint32 *s, uint32 c, size_t n);
+void *hal_memcpy(void *dest, const void *src, size_t n);
+
+/* Freestanding compilers may emit calls to these bare names. */
+void *memset(void *s, int c, size_t n);
+void *memcpy(void *dest, const void *src, size_t n);
+
+/* The embedding kernel supplies the allocator used by the HAL. */
+void hal_set_allocator(void *(*alloc)(size_t size), void (*free)(void *p));
+void *hal_malloc(size_t size);
+void hal_free(void *ptr);
+
+int hal_putchar(int c);
+int hal_puts(const char *s);
+int hal_printf(const char *format, ...);
+
+void hal_assert(const char *file, int line, const char *exp);
+void hal_fatal(const char *file, int line, const char *s);
 
 /*
  * SMP
@@ -62,6 +96,24 @@ void hal_irq_send_eoi(int irq);
 /* Set an IRQ handler. */
 void hal_irq_set_handler(int irq_num, void (*func)(void *arg), void *arg);
 
+/* Local IRQ lock and interrupt-service-task interface. */
+typedef int irqlock_t;
+
+#define ENTER_IRQLOCK(v) \
+	do { \
+		(v) = irq_acquire_lock(); \
+	} while (0);
+
+#define LEAVE_IRQLOCK(v) \
+	do { \
+		irq_unacquire_lock(v); \
+	} while (0)
+
+irqlock_t irq_acquire_lock(void);
+void irq_unacquire_lock(irqlock_t lock);
+void irq_enter_isr(int irq_num);
+void irq_leave_isr(int irq_num);
+
 /*
  * Interval Timer
  *
@@ -76,6 +128,9 @@ uint64_t hal_timer_get_tick(void);
 
 /* Read the RTC. */
 uint64_t hal_timer_read_rtc(void);
+
+/* Legacy BSP tick accessor. */
+hal_clock_t clock_get_tick_count(void);
 
 /*
  * System Call
@@ -213,6 +268,25 @@ int hal_pmem_free(struct hal_pmem *desc);
 /* Get the total RAM size. */
 size_t hal_pmem_get_total_size(void);
 
+/* Low-level physical-memory descriptor used inside the HAL. */
+struct pmem_desc {
+	void *vaddr;
+	void *paddr;
+	size_t size;
+};
+
+#define PMEM_SUCCESS (0)
+#define PMEM_NOSPACE (1)
+#define PMEM_BADDESC (2)
+
+int pmem_alloc_lo(size_t size, struct pmem_desc *desc);
+int pmem_free(struct pmem_desc *desc);
+void pmem_reserve(hal_physaddr_t paddr, size_t size);
+
+/* PC-98 memory-controller and BIOS-work-area services. */
+void hal_pc98_enable_high_memory(void);
+void hal_pc98_memory_segments(uint32_t *low_extended, uint32_t *high_mib);
+
 
 /*
  * Task
@@ -225,6 +299,9 @@ size_t hal_pmem_get_total_size(void);
 
 /* Task handle. */
 typedef void *hal_task_t;
+
+/* Wrap the CPU context which entered kernel_entry() as the initial task. */
+void hal_task_init(void);
 
 /* Create a task. */
 hal_task_t hal_task_create(hal_space_t space, void (*start)(void *p), void *arg, void *user_stack_pointer);
@@ -243,6 +320,26 @@ void hal_task_set_tls(hal_task_t t, uintptr_t value);
 
 /* Get user TLS. */
 uintptr_t hal_task_get_tls(hal_task_t t);
+
+/* Opaque kernel ownership link.  HAL stores but never dereferences it. */
+void hal_task_set_private(hal_task_t t, void *private_data);
+void *hal_task_get_private(hal_task_t t);
+hal_space_t hal_task_get_space(hal_task_t t);
+
+/* Temporary ring-3 trap observation hooks used until the syscall ABI exists. */
+struct hal_user_trap {
+	uint32_t vector;
+	uint32_t cs;
+	uint32_t eip;
+	uint32_t eax;
+	uint32_t error_code;
+	uint32_t fault_address;
+};
+typedef void (*hal_user_int_handler_t)(const struct hal_user_trap *);
+typedef void (*hal_user_fault_handler_t)(const struct hal_user_trap *);
+void hal_user_int_set_handler(hal_user_int_handler_t handler);
+void hal_user_fault_set_handler(hal_user_fault_handler_t handler);
+void hal_reschedule_on_interrupt_return(void);
 
 /*
  * Synchronization
@@ -294,6 +391,64 @@ void hal_mmio_write64(volatile void *addr, uint64_t value);
  * Console
  */
 
+enum hal_cons_mode {
+	HAL_CONS_FIXED_MENU,
+	HAL_CONS_TERMINAL,
+};
+
+#define HAL_CONS_COLUMNS 80U
+#define HAL_CONS_ROWS 25U
+#define HAL_CONS_NORMAL_ATTRIBUTE 0xe1U
+
+enum hal_key {
+	HAL_KEY_ESCAPE = 0x1b,
+	HAL_KEY_BACKSPACE = 0x08,
+	HAL_KEY_TAB = 0x09,
+	HAL_KEY_ENTER = 0x0d,
+	HAL_KEY_PAGE_UP = 0x136,
+	HAL_KEY_PAGE_DOWN = 0x137,
+	HAL_KEY_INSERT = 0x138,
+	HAL_KEY_DELETE = 0x139,
+	HAL_KEY_UP = 0x13a,
+	HAL_KEY_LEFT = 0x13b,
+	HAL_KEY_RIGHT = 0x13c,
+	HAL_KEY_DOWN = 0x13d,
+	HAL_KEY_HOME = 0x13e,
+	HAL_KEY_END = 0x13f,
+	HAL_KEY_F1 = 0x162,
+	HAL_KEY_F2 = 0x163,
+	HAL_KEY_F3 = 0x164,
+	HAL_KEY_F4 = 0x165,
+	HAL_KEY_F5 = 0x166,
+	HAL_KEY_F6 = 0x167,
+	HAL_KEY_F7 = 0x168,
+	HAL_KEY_F8 = 0x169,
+	HAL_KEY_F9 = 0x16a,
+	HAL_KEY_F10 = 0x16b,
+	HAL_KEY_SHIFT = 0x170,
+};
+
+#define HAL_KEY_EVENT_KEY_MASK 0x000001ffU
+#define HAL_KEY_EVENT_SHIFT    0x00010000U
+#define HAL_KEY_EVENT_CTRL     0x00020000U
+#define HAL_KEY_EVENT_GRAPH    0x00040000U
+
+struct hal_cons_state {
+	enum hal_cons_mode mode;
+	unsigned row;
+	unsigned column;
+	int cursor_visible;
+};
+
+void bsp_cons_init(void);
+void cons_cls(void);
+void cons_putc(int c);
+void cons_puts(const char *utf8);
+int cons_getc(void);
+void cons_set_attr(int fg, int bg);
+
+void hal_cons_reset(void);
+
 /* Put a character on the kernel console. */
 void hal_cons_putc(int c);
 
@@ -305,6 +460,35 @@ void hal_cons_move_cursor(int line, int col);
 
 /* Get a character on the kernel console. */
 int hal_cons_getc(void);
+
+void hal_cons_set_mode(enum hal_cons_mode mode);
+void hal_cons_write(const char *utf8);
+void hal_cons_write_n(const char *utf8, unsigned length);
+void hal_cons_write_at(unsigned row, unsigned column, const char *utf8);
+void hal_cons_clear_row(unsigned row);
+void hal_cons_clear_to_eol(void);
+int hal_cons_write_at_attr(unsigned row, unsigned column, const char *utf8,
+			   uint8_t attribute);
+int hal_cons_write_n_at(unsigned row, unsigned column, const char *utf8,
+			unsigned length, uint8_t attribute);
+int hal_cons_clear_to_eol_at(unsigned row, unsigned column);
+int hal_cons_set_cursor(unsigned row, unsigned column);
+void hal_cons_show_cursor(int visible);
+void hal_cons_save_state(struct hal_cons_state *state);
+void hal_cons_restore_terminal(const struct hal_cons_state *state);
+void hal_cons_update_cursor(void);
+int hal_cons_read_event(void);
+int hal_cons_poll_event(void);
+int hal_cons_key_state(int key);
+void hal_cons_drain_input(void);
+unsigned hal_cons_modifiers(void);
+
+/*
+ * Framebuffer ownership
+ */
+
+void fb_set_active(int active);
+int fb_is_active(void);
 
 /*
  * Misc
@@ -319,7 +503,7 @@ void hal_panic(void);
  */
 
 /* Entrypoint. */
-void kernel_entry(void);
+void kernel_entry(const void *handoff);
 
 /* Interval timer handler. */
 void kernel_timer_handler(void);

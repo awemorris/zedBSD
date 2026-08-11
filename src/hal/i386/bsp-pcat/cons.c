@@ -3,7 +3,7 @@
  */
 
 #include <sys/kern/hal.h>
-#include <hal/runtime.h>
+#include <hal/hal.h>
 
 #include "../i386/bsp.h"
 

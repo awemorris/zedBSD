@@ -176,7 +176,7 @@ static struct disk *add_disk(const char *name, struct mem_fs *store)
 int main(void)
 {
 	struct fat_mount_args a = { "mem0" }, b = { "mem1" };
-	struct fs_context context;
+	struct cwdinfo context;
 	struct inode *inode, *again;
 	struct file *file;
 	struct dirent entry;
@@ -190,7 +190,7 @@ int main(void)
 	CHECK(mount_rootfs() == 0);
 	CHECK(mount("mem", "/disk1", MOUNT_READ_ONLY, &a) == 0);
 	CHECK(mount("auto", "/disk2", MOUNT_READ_ONLY, &b) == 0);
-	CHECK(fs_context_init(&context, mount_root_inode()) == 0);
+	CHECK(cwdinfo_init(&context, mount_root_inode()) == 0);
 
 	CHECK(namei_at(&context, "/disk1//dir/./nested", &inode) == 0);
 	CHECK(inode->i_type == INODE_REG);
@@ -231,7 +231,7 @@ int main(void)
 	CHECK(file_readdir(file, &entry, &eof) == 0 && eof);
 	CHECK(file_close(file) == 0);
 
-	fs_context_destroy(&context);
+	cwdinfo_destroy(&context);
 	if (failures) {
 		printf("VFS host tests: %d failure(s)\n", failures);
 		return 1;

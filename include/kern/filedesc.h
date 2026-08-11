@@ -1,0 +1,24 @@
+/*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ *
+ * Per-process descriptor table.
+ */
+
+#ifndef BOOTS_KERN_FILEDESC_H
+#define BOOTS_KERN_FILEDESC_H
+
+#define KERN_OPEN_MAX 32
+
+struct file;
+struct filedesc {
+	unsigned usecount;
+	struct file *files[KERN_OPEN_MAX];
+};
+
+struct filedesc *filedesc_create(void);
+void filedesc_destroy(struct filedesc *);
+struct file *filedesc_get(struct filedesc *, int descriptor);
+int filedesc_install(struct filedesc *, struct file *, int *descriptor);
+
+#endif

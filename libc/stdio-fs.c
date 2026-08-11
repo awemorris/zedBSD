@@ -1,7 +1,9 @@
 /*
- * Boots filesystem-backed stdio
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
+ *
+ * Boots filesystem-backed stdio for kernel mode Noct.
+ * This will be removed after moving Noct to userspace.
  */
 
 #include "libc/stdio-fs.h"
@@ -37,7 +39,7 @@ struct filesystem_stream {
 static struct boots_filesystem *active_filesystem;
 static struct boots_namespace *active_namespace;
 static struct boots_environment *active_environment;
-static struct fs_context *active_context;
+static struct cwdinfo *active_context;
 static struct filesystem_stream *open_streams;
 static char current_directory[BOOTS_PATH_MAX] = "/";
 
@@ -89,7 +91,7 @@ void boots_stdio_set_namespace(struct boots_namespace *namespace)
 	}
 }
 
-void boots_stdio_set_context(struct fs_context *context)
+void boots_stdio_set_context(struct cwdinfo *context)
 {
 	active_context = context;
 	active_namespace = NULL;

@@ -1,19 +1,13 @@
 /*
- * i386 physical memory management (pmem): range descriptors over a
- * page-usage bitmap.  Range bookkeeping only — page tables are managed
- * by univ.c and, later, the space API.
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
  *
- * Restored from the working kt snapshot with two mechanical changes:
- * the bitmap is a static array instead of a fixed physical address (the
- * old home at 2MB sat inside memory the kernel now hands to the script
- * arena), and reserved ranges — VRAM, ROM windows, the PC-98 15-16MB
- * hole, the kernel's own image — are excluded through pmem_reserve()
- * as declared by the BSP and the embedding kernel.
+ * i386 physical memory management (pmem): range descriptors over a
+ * page-usage bitmap.  Range bookkeeping only -- page tables are managed
+ * by the space API.
  */
 
-#include <hal/memory.h>
-#include <hal/irq.h>
-#include <hal/runtime.h>
+#include <hal/hal.h>
 #include "asm.h"
 
 #define PAGEMAP_GET(n)		(pagemap_tbl[(n) >> 5] & (1U << ((n) & 31)))
@@ -81,8 +75,15 @@ void
 pmem_reserve(hal_physaddr_t paddr, size_t size)
 {
 	uint32 first = paddr / PAGE_SIZE;
-	uint32 last = (paddr + size + PAGE_SIZE - 1) / PAGE_SIZE;
+	uint32 last;
 	uint32 i;
+
+	if (size == 0)
+		return;
+	if (paddr > UINT32_MAX - size)
+		last = PAGEMAP_WORDS * 32U;
+	else
+		last = (paddr + size + PAGE_SIZE - 1) / PAGE_SIZE;
 
 	if (last > PAGEMAP_WORDS * 32U)
 		last = PAGEMAP_WORDS * 32U;
@@ -137,6 +138,78 @@ pmem_alloc_lo(size_t size, struct pmem_desc *desc)
 	desc->vaddr = (void *)((start_index << 12) | SYS_START);
 	desc->size = need_pages << 12;
 	return PMEM_SUCCESS;
+}
+
+int
+hal_pmem_alloc(size_t size, struct hal_pmem *desc, uint32_t flags)
+{
+	struct pmem_desc memory;
+	int error;
+
+	if (desc == NULL || (flags & ~(HAL_PMEM_ATTR_NOCACHE |
+	    HAL_PMEM_ATTR_WRITETHRU)) != 0)
+		return HAL_PMEM_BADDESC;
+	error = pmem_alloc_lo(size, &memory);
+	if (error != PMEM_SUCCESS)
+		return error == PMEM_NOSPACE ? HAL_PMEM_NOSPACE : HAL_PMEM_BADDESC;
+	desc->vaddr = (uintptr_t)memory.vaddr;
+	desc->paddr = (uintptr_t)memory.paddr;
+	desc->size = memory.size;
+	return HAL_PMEM_SUCCESS;
+}
+
+int
+hal_pmem_alloc_limited(size_t size, uintptr_t above, uintptr_t below,
+		       struct hal_pmem *desc)
+{
+	int error = hal_pmem_alloc(size, desc, 0);
+
+	if (error != HAL_PMEM_SUCCESS)
+		return error;
+	if (desc->paddr < above || desc->paddr > below ||
+	    desc->size > below - desc->paddr) {
+		(void)hal_pmem_free(desc);
+		return HAL_PMEM_NOSPACE;
+	}
+	return HAL_PMEM_SUCCESS;
+}
+
+int
+hal_pmem_free(struct hal_pmem *desc)
+{
+	struct pmem_desc memory;
+	int error;
+
+	if (desc == NULL)
+		return HAL_PMEM_BADDESC;
+	memory.vaddr = (void *)desc->vaddr;
+	memory.paddr = (void *)desc->paddr;
+	memory.size = desc->size;
+	error = pmem_free(&memory);
+	if (error != PMEM_SUCCESS)
+		return HAL_PMEM_BADDESC;
+	desc->vaddr = desc->paddr = 0;
+	desc->size = 0;
+	return HAL_PMEM_SUCCESS;
+}
+
+size_t
+hal_pmem_get_total_size(void)
+{
+	return (size_t)phys_pages * PAGE_SIZE;
+}
+
+void
+hal_mem_get_memory_map(int *blocks, struct hal_memory_map_entry *entries,
+		       size_t buf_count)
+{
+	if (blocks != NULL)
+		*blocks = 1;
+	if (entries != NULL && buf_count != 0) {
+		entries[0].base = 0;
+		entries[0].size = hal_pmem_get_total_size();
+		entries[0].flags = HAL_PAGE_ENTRY_RAM;
+	}
 }
 
 /*

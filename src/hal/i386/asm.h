@@ -1,4 +1,7 @@
 /*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ *
  * i386 assembly helpers (implemented in locore.S) and the shared
  * constants.  defs.h carries the assembler-visible half.
  */
@@ -24,6 +27,7 @@ uint32 asm_get_eflags(void);
 uint32 asm_get_eip(void);
 uint32 asm_get_esp(void);
 uint32 asm_get_cr3(void);
+uint32 asm_get_cr2(void);
 uint32 asm_set_cr3(uint32 addr);
 void asm_hlt(void);
 void asm_lidt(void *idt_desc);

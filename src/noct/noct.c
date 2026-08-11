@@ -1,7 +1,9 @@
 /*
- * Boots Noct lifecycle
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
+ *
+ * Boots Noct lifecycle
+ * This will be removed after Noct is moved to userspace.
  */
 
 #include "kern/noct.h"
@@ -99,6 +101,8 @@ run_program_args(const char *program_name, void *program, uint32_t program_size,
 	NoctValue argument_value;
 	NoctFunc *main_function = NULL;
 	struct jit_observation jit;
+	struct boots_heap noct_heap;
+	struct boots_heap *previous_heap = NULL;
 	enum boots_noct_status status = BOOTS_NOCT_INVALID_ARGUMENT;
 	int vm_created = 0;
 	int arguments_pinned = 0;
@@ -134,7 +138,8 @@ run_program_args(const char *program_name, void *program, uint32_t program_size,
 	lifecycle_active = 1;
 	active_console.write = options->write;
 	active_console.context = options->write_context;
-	boots_heap_init(options->arena, options->arena_size);
+	boots_heap_init_instance(&noct_heap, options->arena, options->arena_size);
+	previous_heap = boots_heap_set_active(&noct_heap);
 	boots_stdio_set_filesystem(options->filesystem);
 	boots_stdio_set_environment(options->environment);
 	boots_heap_set_observer(observe_heap, &jit);
@@ -251,6 +256,7 @@ cleanup:
 	boots_heap_set_observer(NULL, NULL);
 	boots_heap_reset();
 	after_reset = boots_heap_current();
+	(void)boots_heap_set_active(previous_heap);
 	if ((after_reset != 0 || errors != 0) && status == BOOTS_NOCT_OK)
 		status = BOOTS_NOCT_CLEANUP_ERROR;
 	active_console.write = NULL;
@@ -311,6 +317,8 @@ boots_noct_repl(const struct boots_noct_options *options,
 	NoctEnv *env = NULL;
 	NoctReplSession *session = NULL;
 	struct jit_observation jit;
+	struct boots_heap noct_heap;
+	struct boots_heap *previous_heap = NULL;
 	enum boots_noct_status status = BOOTS_NOCT_INVALID_ARGUMENT;
 	char line[BOOTS_NOCT_REPL_LINE_MAX];
 	int vm_created = 0;
@@ -337,7 +345,8 @@ boots_noct_repl(const struct boots_noct_options *options,
 	lifecycle_active = 1;
 	active_console.write = options->write;
 	active_console.context = options->write_context;
-	boots_heap_init(options->arena, options->arena_size);
+	boots_heap_init_instance(&noct_heap, options->arena, options->arena_size);
+	previous_heap = boots_heap_set_active(&noct_heap);
 	boots_stdio_set_filesystem(options->filesystem);
 	boots_stdio_set_environment(options->environment);
 	boots_heap_set_observer(observe_heap, &jit);
@@ -436,6 +445,7 @@ cleanup:
 	boots_heap_set_observer(NULL, NULL);
 	boots_heap_reset();
 	after_reset = boots_heap_current();
+	(void)boots_heap_set_active(previous_heap);
 	if ((after_reset != 0 || errors != 0) && status == BOOTS_NOCT_OK)
 		status = BOOTS_NOCT_CLEANUP_ERROR;
 	active_console.write = NULL;

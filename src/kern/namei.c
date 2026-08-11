@@ -1,4 +1,8 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ */
+
 #include "kern/namei.h"
 #include "kern/mount.h"
 
@@ -32,20 +36,20 @@ component_is(const char *name, size_t length, const char *literal)
 }
 
 int
-namei_at(struct fs_context *context, const char *path, struct inode **result)
+namei_at(struct cwdinfo *context, const char *path, struct inode **result)
 {
 	struct inode *current;
 	size_t length, position = 0;
 	int error, trailing;
 
-	if (context == NULL || context->fc_root == NULL ||
-	    context->fc_cwd == NULL || result == NULL)
+	if (context == NULL || context->root == NULL ||
+	    context->cwd == NULL || result == NULL)
 		return EINVAL;
 	error = path_length(path, &length);
 	if (error != 0)
 		return error;
 	trailing = path[length - 1U] == '/';
-	current = path[0] == '/' ? context->fc_root : context->fc_cwd;
+	current = path[0] == '/' ? context->root : context->cwd;
 	inode_ref(current);
 	while (position < length) {
 		struct componentname component;
@@ -75,7 +79,7 @@ namei_at(struct fs_context *context, const char *path, struct inode **result)
 		if (component_is(component.cn_nameptr,
 				 component.cn_namelen, "..")) {
 			component.cn_flags |= COMPONENT_DOTDOT;
-			if (current == context->fc_root)
+			if (current == context->root)
 				continue;
 			error = mount_cross_parent(current, &next);
 			if (error != 0)
@@ -110,7 +114,7 @@ fail:
 }
 
 int
-namei_parent_at(struct fs_context *context, const char *path,
+namei_parent_at(struct cwdinfo *context, const char *path,
 		struct inode **parent, struct componentname *last,
 		char storage[NAME_MAX + 1U])
 {
@@ -156,32 +160,33 @@ namei_parent_at(struct fs_context *context, const char *path,
 }
 
 int
-fs_context_init(struct fs_context *context, struct inode *root)
+cwdinfo_init(struct cwdinfo *context, struct inode *root)
 {
 	if (context == NULL || root == NULL || root->i_type != INODE_DIR)
 		return EINVAL;
 	memset(context, 0, sizeof(*context));
 	inode_ref(root);
 	inode_ref(root);
-	context->fc_root = root;
-	context->fc_cwd = root;
-	context->fc_cwd_path[0] = '/';
-	context->fc_cwd_path[1] = '\0';
+	context->usecount = 1;
+	context->root = root;
+	context->cwd = root;
+	context->cwd_path[0] = '/';
+	context->cwd_path[1] = '\0';
 	return 0;
 }
 
 void
-fs_context_destroy(struct fs_context *context)
+cwdinfo_destroy(struct cwdinfo *context)
 {
 	if (context == NULL)
 		return;
-	inode_release(context->fc_root);
-	inode_release(context->fc_cwd);
+	inode_release(context->root);
+	inode_release(context->cwd);
 	memset(context, 0, sizeof(*context));
 }
 
 static int
-normalized_path(const struct fs_context *context, const char *path,
+normalized_path(const struct cwdinfo *context, const char *path,
 		char output[BOOTS_PATH_MAX])
 {
 	char joined[BOOTS_PATH_MAX];
@@ -194,10 +199,10 @@ normalized_path(const struct fs_context *context, const char *path,
 			return ENAMETOOLONG;
 		memcpy(joined, path, length + 1U);
 	} else {
-		base = strlen(context->fc_cwd_path);
+		base = strlen(context->cwd_path);
 		if (base + (base > 1 ? 1U : 0U) + length >= sizeof(joined))
 			return ENAMETOOLONG;
-		memcpy(joined, context->fc_cwd_path, base);
+		memcpy(joined, context->cwd_path, base);
 		if (base > 1)
 			joined[base++] = '/';
 		memcpy(joined + base, path, length + 1U);
@@ -229,7 +234,7 @@ normalized_path(const struct fs_context *context, const char *path,
 }
 
 int
-fs_chdir(struct fs_context *context, const char *path)
+fs_chdir(struct cwdinfo *context, const char *path)
 {
 	struct inode *directory;
 	char normalized[BOOTS_PATH_MAX];
@@ -245,15 +250,15 @@ fs_chdir(struct fs_context *context, const char *path)
 		inode_release(directory);
 		return error;
 	}
-	inode_release(context->fc_cwd);
-	context->fc_cwd = directory;
-	strcpy(context->fc_cwd_path, normalized);
+	inode_release(context->cwd);
+	context->cwd = directory;
+	strcpy(context->cwd_path, normalized);
 	return 0;
 }
 
 const char *
-fs_getcwd(const struct fs_context *context)
+fs_getcwd(const struct cwdinfo *context)
 {
-	return context != NULL && context->fc_cwd != NULL ?
-		context->fc_cwd_path : NULL;
+	return context != NULL && context->cwd != NULL ?
+		context->cwd_path : NULL;
 }

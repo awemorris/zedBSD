@@ -6,7 +6,7 @@
 
 #include "noct/target.h"
 #include "noct/napi.h"
-#include "hal/console.h"
+#include "hal/hal.h"
 
 #include <noct/noct.h>
 #include <stddef.h>

@@ -1,17 +1,24 @@
-/* Disk partition enumeration and boot VFS policy. SPDX-License-Identifier: Zlib */
+/*
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ *
+ * Disk partition enumeration and boot VFS policy.
+ */
+
 #include "kern/vfs.h"
 #include "kern/disk.h"
 #include "kern/fat-vfs.h"
 #include "kern/mount.h"
 #include "kern/partition.h"
 #include "kern/platform.h"
+#include "kern/process.h"
 
 #include <errno.h>
 #include <string.h>
 
 #define PHYSICAL_DISK_MAX 4U
 
-struct fs_context kern_fs_context __attribute__((section(".vfs_bss")));
+struct cwdinfo kern_cwdinfo __attribute__((section(".vfs_bss")));
 
 static int
 disk_path(unsigned number, char path[BOOTS_PATH_MAX])
@@ -57,9 +64,10 @@ kern_vfs_init(const struct boots_handoff *handoff,
 	error = mount_rootfs();
 	if (error != 0)
 		return error;
-	error = fs_context_init(&kern_fs_context, mount_root_inode());
+	error = cwdinfo_init(&kern_cwdinfo, mount_root_inode());
 	if (error != 0)
 		return error;
+	process_attach_boot_cwd(&kern_cwdinfo);
 	for (i = 0; i < physical_count; i++) {
 		struct partition entries[PARTITION_MAX];
 		int count = partition_scan(physical[i], entries, PARTITION_MAX);
@@ -86,6 +94,6 @@ kern_vfs_init(const struct boots_handoff *handoff,
 		}
 	}
 	if (boot_mount != NULL)
-		return fs_chdir(&kern_fs_context, boot_mount->m_path);
+		return fs_chdir(&kern_cwdinfo, boot_mount->m_path);
 	return 0;
 }

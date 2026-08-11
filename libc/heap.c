@@ -1,7 +1,8 @@
 /*
- * Boots freestanding C library
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
+ *
+ * Boots freestanding C library
  */
 
 #include "libc/heap.h"
@@ -26,19 +27,8 @@ struct heap_block {
 	struct heap_block *next_free;
 };
 
-static void *heap_original_base;
-static size_t heap_original_size;
-static uint8_t *heap_begin;
-static uint8_t *heap_end;
-static struct heap_block *heap_first;
-static struct heap_block *heap_free_list;
-static size_t heap_current_bytes;
-static size_t heap_peak_bytes;
-static size_t heap_errors;
-static size_t heap_fail_after = SIZE_MAX;
-static size_t heap_successful_allocations;
-static boots_heap_observer_fn heap_observer;
-static void *heap_observer_context;
+static struct boots_heap default_heap;
+static struct boots_heap *active_heap = &default_heap;
 
 static size_t
 aligned_size(size_t size)
@@ -61,12 +51,12 @@ block_payload(struct heap_block *block)
 }
 
 static void
-remove_free(struct heap_block *block)
+remove_free(struct boots_heap *heap, struct heap_block *block)
 {
 	if (block->previous_free != NULL)
 		block->previous_free->next_free = block->next_free;
 	else
-		heap_free_list = block->next_free;
+		heap->free_list = block->next_free;
 	if (block->next_free != NULL)
 		block->next_free->previous_free = block->previous_free;
 	block->previous_free = NULL;
@@ -74,17 +64,17 @@ remove_free(struct heap_block *block)
 }
 
 static void
-insert_free(struct heap_block *block)
+insert_free(struct boots_heap *heap, struct heap_block *block)
 {
 	block->previous_free = NULL;
-	block->next_free = heap_free_list;
-	if (heap_free_list != NULL)
-		heap_free_list->previous_free = block;
-	heap_free_list = block;
+	block->next_free = heap->free_list;
+	if (heap->free_list != NULL)
+		heap->free_list->previous_free = block;
+	heap->free_list = block;
 }
 
 static struct heap_block *
-split_block(struct heap_block *block, size_t capacity)
+split_block(struct boots_heap *heap, struct heap_block *block, size_t capacity)
 {
 	struct heap_block *tail;
 	size_t header = block_header_size();
@@ -105,18 +95,18 @@ split_block(struct heap_block *block, size_t capacity)
 	tail->next_free = NULL;
 	block->next_physical = tail;
 	block->capacity = capacity;
-	insert_free(tail);
+	insert_free(heap, tail);
 	return tail;
 }
 
 static void
-merge_with_next(struct heap_block *block)
+merge_with_next(struct boots_heap *heap, struct heap_block *block)
 {
 	struct heap_block *next = block->next_physical;
 
 	if (next == NULL || next->state != HEAP_FREE)
 		return;
-	remove_free(next);
+	remove_free(heap, next);
 	block->capacity += block_header_size() + next->capacity;
 	block->next_physical = next->next_physical;
 	if (block->next_physical != NULL)
@@ -125,20 +115,20 @@ merge_with_next(struct heap_block *block)
 }
 
 static struct heap_block *
-pointer_block(void *pointer)
+pointer_block(const struct boots_heap *heap, void *pointer)
 {
 	struct heap_block *block;
 	struct heap_block *cursor;
 	uint8_t *bytes = pointer;
 
-	if (pointer == NULL || heap_begin == NULL ||
-	    bytes < heap_begin + block_header_size() || bytes >= heap_end)
+	if (heap == NULL || pointer == NULL || heap->begin == NULL ||
+	    bytes < heap->begin + block_header_size() || bytes >= heap->end)
 		return NULL;
 	block = (struct heap_block *)(bytes - block_header_size());
 	if ((uintptr_t)block % HEAP_ALIGNMENT != 0 ||
 	    block->magic != HEAP_MAGIC || block_payload(block) != bytes)
 		return NULL;
-	for (cursor = heap_first; cursor != NULL;
+	for (cursor = heap->first; cursor != NULL;
 	     cursor = cursor->next_physical)
 		if (cursor == block)
 			return block;
@@ -146,26 +136,19 @@ pointer_block(void *pointer)
 }
 
 void
-boots_heap_init(void *base, size_t size)
+boots_heap_init_instance(struct boots_heap *heap, void *base, size_t size)
 {
 	uintptr_t raw = (uintptr_t)base;
 	uintptr_t aligned;
 	size_t skipped;
 	size_t usable;
 
-	heap_original_base = base;
-	heap_original_size = size;
-	heap_begin = NULL;
-	heap_end = NULL;
-	heap_first = NULL;
-	heap_free_list = NULL;
-	heap_current_bytes = 0;
-	heap_peak_bytes = 0;
-	heap_errors = 0;
-	heap_successful_allocations = 0;
-	heap_fail_after = SIZE_MAX;
-	heap_observer = NULL;
-	heap_observer_context = NULL;
+	if (heap == NULL)
+		return;
+	memset(heap, 0, sizeof(*heap));
+	heap->original_base = base;
+	heap->original_size = size;
+	heap->fail_after = SIZE_MAX;
 	if (base == NULL || raw > UINTPTR_MAX - (HEAP_ALIGNMENT - 1U))
 		return;
 	aligned = (raw + HEAP_ALIGNMENT - 1U) &
@@ -177,76 +160,93 @@ boots_heap_init(void *base, size_t size)
 	if (usable < block_header_size() + HEAP_ALIGNMENT ||
 	    usable > UINTPTR_MAX - aligned)
 		return;
-	heap_begin = (uint8_t *)aligned;
-	heap_end = heap_begin + usable;
-	heap_first = (struct heap_block *)heap_begin;
-	heap_first->magic = HEAP_MAGIC;
-	heap_first->state = HEAP_FREE;
-	heap_first->capacity = usable - block_header_size();
-	heap_first->used = 0;
-	heap_first->previous_physical = NULL;
-	heap_first->next_physical = NULL;
-	heap_first->previous_free = NULL;
-	heap_first->next_free = NULL;
-	heap_free_list = heap_first;
+	heap->begin = (uint8_t *)aligned;
+	heap->end = heap->begin + usable;
+	heap->first = (struct heap_block *)heap->begin;
+	heap->first->magic = HEAP_MAGIC;
+	heap->first->state = HEAP_FREE;
+	heap->first->capacity = usable - block_header_size();
+	heap->first->used = 0;
+	heap->first->previous_physical = NULL;
+	heap->first->next_physical = NULL;
+	heap->first->previous_free = NULL;
+	heap->first->next_free = NULL;
+	heap->free_list = heap->first;
 }
 
 void
-boots_heap_reset(void)
+boots_heap_reset_instance(struct boots_heap *heap)
 {
-	size_t failure = heap_fail_after;
-	boots_heap_init(heap_original_base, heap_original_size);
-	heap_fail_after = failure;
+	void *base;
+	size_t size;
+	size_t failure;
+
+	if (heap == NULL)
+		return;
+	base = heap->original_base;
+	size = heap->original_size;
+	failure = heap->fail_after;
+	boots_heap_init_instance(heap, base, size);
+	heap->fail_after = failure;
 }
 
 void
-boots_heap_set_failure_after(size_t successful_allocations)
+boots_heap_set_failure_after_instance(struct boots_heap *heap,
+				       size_t successful_allocations)
 {
-	heap_fail_after = successful_allocations;
-	heap_successful_allocations = 0;
+	if (heap == NULL)
+		return;
+	heap->fail_after = successful_allocations;
+	heap->successful_allocations = 0;
 }
 
 void
-boots_heap_set_observer(boots_heap_observer_fn observer, void *context)
+boots_heap_set_observer_instance(struct boots_heap *heap,
+				  boots_heap_observer_fn observer,
+				  void *context)
 {
-	heap_observer = observer;
-	heap_observer_context = context;
+	if (heap == NULL)
+		return;
+	heap->observer = observer;
+	heap->observer_context = context;
 }
 
 void *
-boots_malloc(size_t size)
+boots_heap_alloc(struct boots_heap *heap, size_t size)
 {
 	struct heap_block *block;
 	size_t requested = size;
 	size_t capacity;
 
+	if (heap == NULL)
+		return NULL;
 	if (size == 0)
 		size = 1;
 	capacity = aligned_size(size);
-	if (capacity == 0 || heap_successful_allocations >= heap_fail_after)
+	if (capacity == 0 ||
+	    heap->successful_allocations >= heap->fail_after)
 		return NULL;
-	for (block = heap_free_list; block != NULL; block = block->next_free) {
+	for (block = heap->free_list; block != NULL; block = block->next_free)
 		if (block->capacity >= capacity)
 			break;
-	}
 	if (block == NULL)
 		return NULL;
-	remove_free(block);
-	(void)split_block(block, capacity);
+	remove_free(heap, block);
+	(void)split_block(heap, block, capacity);
 	block->state = HEAP_USED;
 	block->used = requested;
-	heap_current_bytes += requested;
-	if (heap_current_bytes > heap_peak_bytes)
-		heap_peak_bytes = heap_current_bytes;
-	heap_successful_allocations++;
-	if (heap_observer != NULL)
-		heap_observer(heap_observer_context, block_payload(block), requested,
-			      BOOTS_HEAP_ALLOCATED);
+	heap->current_bytes += requested;
+	if (heap->current_bytes > heap->peak_bytes)
+		heap->peak_bytes = heap->current_bytes;
+	heap->successful_allocations++;
+	if (heap->observer != NULL)
+		heap->observer(heap->observer_context, block_payload(block),
+			       requested, BOOTS_HEAP_ALLOCATED);
 	return block_payload(block);
 }
 
 void *
-boots_calloc(size_t count, size_t size)
+boots_heap_calloc(struct boots_heap *heap, size_t count, size_t size)
 {
 	void *pointer;
 	size_t total;
@@ -254,35 +254,37 @@ boots_calloc(size_t count, size_t size)
 	if (count != 0 && size > SIZE_MAX / count)
 		return NULL;
 	total = count * size;
-	pointer = boots_malloc(total);
+	pointer = boots_heap_alloc(heap, total);
 	if (pointer != NULL)
 		memset(pointer, 0, total);
 	return pointer;
 }
 
 void
-boots_free(void *pointer)
+boots_heap_free(struct boots_heap *heap, void *pointer)
 {
 	struct heap_block *block;
 	struct heap_block *previous;
 
 	if (pointer == NULL)
 		return;
-	block = pointer_block(pointer);
+	if (heap == NULL)
+		return;
+	block = pointer_block(heap, pointer);
 	if (block == NULL || block->state != HEAP_USED) {
-		heap_errors++;
+		heap->errors++;
 		return;
 	}
-	if (heap_observer != NULL)
-		heap_observer(heap_observer_context, pointer, block->used,
-			      BOOTS_HEAP_FREED);
-	heap_current_bytes -= block->used;
+	if (heap->observer != NULL)
+		heap->observer(heap->observer_context, pointer, block->used,
+			       BOOTS_HEAP_FREED);
+	heap->current_bytes -= block->used;
 	block->used = 0;
 	block->state = HEAP_FREE;
-	merge_with_next(block);
+	merge_with_next(heap, block);
 	previous = block->previous_physical;
 	if (previous != NULL && previous->state == HEAP_FREE) {
-		remove_free(previous);
+		remove_free(heap, previous);
 		previous->capacity += block_header_size() + block->capacity;
 		previous->next_physical = block->next_physical;
 		if (previous->next_physical != NULL)
@@ -290,11 +292,11 @@ boots_free(void *pointer)
 		block->magic = 0;
 		block = previous;
 	}
-	insert_free(block);
+	insert_free(heap, block);
 }
 
 void *
-boots_realloc(void *pointer, size_t size)
+boots_heap_realloc(struct boots_heap *heap, void *pointer, size_t size)
 {
 	struct heap_block *block;
 	struct heap_block *tail;
@@ -303,14 +305,16 @@ boots_realloc(void *pointer, size_t size)
 	size_t old_used;
 
 	if (pointer == NULL)
-		return boots_malloc(size);
+		return boots_heap_alloc(heap, size);
 	if (size == 0) {
-		boots_free(pointer);
+		boots_heap_free(heap, pointer);
 		return NULL;
 	}
-	block = pointer_block(pointer);
+	if (heap == NULL)
+		return NULL;
+	block = pointer_block(heap, pointer);
 	if (block == NULL || block->state != HEAP_USED) {
-		heap_errors++;
+		heap->errors++;
 		return NULL;
 	}
 	capacity = aligned_size(size);
@@ -318,33 +322,194 @@ boots_realloc(void *pointer, size_t size)
 		return NULL;
 	old_used = block->used;
 	if (capacity <= block->capacity) {
-		tail = split_block(block, capacity);
+		tail = split_block(heap, block, capacity);
 		if (tail != NULL)
-			merge_with_next(tail);
+			merge_with_next(heap, tail);
 		block->used = size;
-		heap_current_bytes = heap_current_bytes - old_used + size;
-		if (heap_current_bytes > heap_peak_bytes)
-			heap_peak_bytes = heap_current_bytes;
+		heap->current_bytes = heap->current_bytes - old_used + size;
+		if (heap->current_bytes > heap->peak_bytes)
+			heap->peak_bytes = heap->current_bytes;
 		return pointer;
 	}
 	if (block->next_physical != NULL &&
 	    block->next_physical->state == HEAP_FREE &&
 	    block->capacity + block_header_size() +
 	    block->next_physical->capacity >= capacity) {
-		merge_with_next(block);
-		(void)split_block(block, capacity);
+		merge_with_next(heap, block);
+		(void)split_block(heap, block, capacity);
 		block->used = size;
-		heap_current_bytes = heap_current_bytes - old_used + size;
-		if (heap_current_bytes > heap_peak_bytes)
-			heap_peak_bytes = heap_current_bytes;
+		heap->current_bytes = heap->current_bytes - old_used + size;
+		if (heap->current_bytes > heap->peak_bytes)
+			heap->peak_bytes = heap->current_bytes;
 		return pointer;
 	}
-	replacement = boots_malloc(size);
+	replacement = boots_heap_alloc(heap, size);
 	if (replacement == NULL)
 		return NULL;
 	memcpy(replacement, pointer, old_used < size ? old_used : size);
-	boots_free(pointer);
+	boots_heap_free(heap, pointer);
 	return replacement;
+}
+
+size_t
+boots_heap_current_instance(const struct boots_heap *heap)
+{
+	return heap != NULL ? heap->current_bytes : 0;
+}
+
+size_t
+boots_heap_peak_instance(const struct boots_heap *heap)
+{
+	return heap != NULL ? heap->peak_bytes : 0;
+}
+
+size_t
+boots_heap_error_count_instance(const struct boots_heap *heap)
+{
+	return heap != NULL ? heap->errors : 0;
+}
+
+size_t
+boots_heap_largest_free_instance(const struct boots_heap *heap)
+{
+	struct heap_block *block;
+	size_t largest = 0;
+
+	if (heap == NULL)
+		return 0;
+	for (block = heap->free_list; block != NULL; block = block->next_free)
+		if (block->capacity > largest)
+			largest = block->capacity;
+	return largest;
+}
+
+int
+boots_heap_validate_instance(const struct boots_heap *heap)
+{
+	struct heap_block *block;
+	struct heap_block *previous = NULL;
+	struct heap_block *free_block;
+	struct heap_block *previous_free = NULL;
+	struct heap_block *slow;
+	struct heap_block *fast;
+	size_t used = 0;
+	size_t span = 0;
+	size_t physical_free_count = 0;
+	size_t list_free_count = 0;
+
+	if (heap == NULL)
+		return 0;
+	if (heap->first == NULL)
+		return heap->begin == NULL && heap->free_list == NULL;
+	for (block = heap->first; block != NULL; block = block->next_physical) {
+		if (block->magic != HEAP_MAGIC ||
+		    block->previous_physical != previous ||
+		    (uint8_t *)block != heap->begin + span ||
+		    (block->state != HEAP_FREE && block->state != HEAP_USED))
+			return 0;
+		if (block_header_size() >
+		    (size_t)(heap->end - (uint8_t *)block) ||
+		    block->capacity >
+		    (size_t)(heap->end - (uint8_t *)block) - block_header_size())
+			return 0;
+		span += block_header_size() + block->capacity;
+		if (block->state == HEAP_USED) {
+			if (block->used > block->capacity)
+				return 0;
+			used += block->used;
+		} else {
+			physical_free_count++;
+			if (block->next_physical != NULL &&
+			    block->next_physical->state == HEAP_FREE)
+				return 0;
+		}
+		previous = block;
+	}
+	slow = heap->free_list;
+	fast = heap->free_list;
+	while (fast != NULL && fast->next_free != NULL) {
+		slow = slow->next_free;
+		fast = fast->next_free->next_free;
+		if (slow == fast)
+			return 0;
+	}
+	for (free_block = heap->free_list; free_block != NULL;
+	     free_block = free_block->next_free) {
+		int found = 0;
+		if (free_block->magic != HEAP_MAGIC ||
+		    free_block->state != HEAP_FREE ||
+		    free_block->previous_free != previous_free)
+			return 0;
+		for (block = heap->first; block != NULL;
+		     block = block->next_physical)
+			if (block == free_block)
+				found++;
+		if (found != 1)
+			return 0;
+		previous_free = free_block;
+		list_free_count++;
+		if (list_free_count > physical_free_count)
+			return 0;
+	}
+	return heap->begin + span == heap->end &&
+		used == heap->current_bytes &&
+		list_free_count == physical_free_count;
+}
+
+struct boots_heap *
+boots_heap_set_active(struct boots_heap *heap)
+{
+	struct boots_heap *previous = active_heap;
+
+	active_heap = heap != NULL ? heap : &default_heap;
+	return previous;
+}
+
+struct boots_heap *
+boots_heap_get_active(void)
+{
+	return active_heap;
+}
+
+void boots_heap_init(void *base, size_t size)
+{
+	boots_heap_init_instance(active_heap, base, size);
+}
+void boots_heap_reset(void) { boots_heap_reset_instance(active_heap); }
+void boots_heap_set_failure_after(size_t n)
+{
+	boots_heap_set_failure_after_instance(active_heap, n);
+}
+void boots_heap_set_observer(boots_heap_observer_fn observer, void *context)
+{
+	boots_heap_set_observer_instance(active_heap, observer, context);
+}
+void *boots_malloc(size_t size) { return boots_heap_alloc(active_heap, size); }
+void *boots_calloc(size_t count, size_t size)
+{
+	return boots_heap_calloc(active_heap, count, size);
+}
+void *boots_realloc(void *pointer, size_t size)
+{
+	return boots_heap_realloc(active_heap, pointer, size);
+}
+void boots_free(void *pointer) { boots_heap_free(active_heap, pointer); }
+size_t boots_heap_current(void)
+{
+	return boots_heap_current_instance(active_heap);
+}
+size_t boots_heap_peak(void) { return boots_heap_peak_instance(active_heap); }
+size_t boots_heap_error_count(void)
+{
+	return boots_heap_error_count_instance(active_heap);
+}
+size_t boots_heap_largest_free(void)
+{
+	return boots_heap_largest_free_instance(active_heap);
+}
+int boots_heap_validate(void)
+{
+	return boots_heap_validate_instance(active_heap);
 }
 
 char *
@@ -364,140 +529,20 @@ boots_strdup(const char *string)
 	return copy;
 }
 
-size_t
-boots_heap_current(void)
-{
-	return heap_current_bytes;
-}
-
-size_t
-boots_heap_peak(void)
-{
-	return heap_peak_bytes;
-}
-
-size_t
-boots_heap_error_count(void)
-{
-	return heap_errors;
-}
-
-size_t
-boots_heap_largest_free(void)
-{
-	struct heap_block *block;
-	size_t largest = 0;
-
-	for (block = heap_free_list; block != NULL; block = block->next_free) {
-		if (block->capacity > largest)
-			largest = block->capacity;
-	}
-	return largest;
-}
-
-int
-boots_heap_validate(void)
-{
-	struct heap_block *block;
-	struct heap_block *previous = NULL;
-	struct heap_block *free_block;
-	struct heap_block *previous_free = NULL;
-	struct heap_block *slow;
-	struct heap_block *fast;
-	size_t used = 0;
-	size_t span = 0;
-	size_t physical_free_count = 0;
-	size_t list_free_count = 0;
-
-	if (heap_first == NULL)
-		return heap_begin == NULL && heap_free_list == NULL;
-	for (block = heap_first; block != NULL; block = block->next_physical) {
-		if (block->magic != HEAP_MAGIC ||
-		    block->previous_physical != previous ||
-		    (uint8_t *)block != heap_begin + span ||
-		    (block->state != HEAP_FREE && block->state != HEAP_USED))
-			return 0;
-		if (block->capacity > (size_t)(heap_end - (uint8_t *)block) ||
-		    block_header_size() > (size_t)(heap_end - (uint8_t *)block) ||
-		    block->capacity >
-		    (size_t)(heap_end - (uint8_t *)block) - block_header_size())
-			return 0;
-		span += block_header_size() + block->capacity;
-		if (block->state == HEAP_USED) {
-			if (block->used > block->capacity)
-				return 0;
-			used += block->used;
-		} else {
-			physical_free_count++;
-			if (block->next_physical != NULL &&
-			    block->next_physical->state == HEAP_FREE)
-				return 0;
-		}
-		previous = block;
-	}
-	slow = heap_free_list;
-	fast = heap_free_list;
-	while (fast != NULL && fast->next_free != NULL) {
-		slow = slow->next_free;
-		fast = fast->next_free->next_free;
-		if (slow == fast)
-			return 0;
-	}
-	for (free_block = heap_free_list; free_block != NULL;
-	     free_block = free_block->next_free) {
-		int found = 0;
-		if (free_block->magic != HEAP_MAGIC ||
-		    free_block->state != HEAP_FREE ||
-		    free_block->previous_free != previous_free)
-			return 0;
-		for (block = heap_first; block != NULL;
-		     block = block->next_physical)
-			if (block == free_block)
-				found++;
-		if (found != 1)
-			return 0;
-		previous_free = free_block;
-		list_free_count++;
-		if (list_free_count > physical_free_count)
-			return 0;
-	}
-	return heap_begin + span == heap_end && used == heap_current_bytes &&
-		list_free_count == physical_free_count;
-}
-
-void *
-noct_pc98be_malloc(size_t size)
-{
-	return boots_malloc(size);
-}
-
-void *
-noct_pc98be_calloc(size_t count, size_t size)
+void *noct_pc98be_malloc(size_t size) { return boots_malloc(size); }
+void *noct_pc98be_calloc(size_t count, size_t size)
 {
 	return boots_calloc(count, size);
 }
-
-void *
-noct_pc98be_realloc(void *pointer, size_t size)
+void *noct_pc98be_realloc(void *pointer, size_t size)
 {
 	return boots_realloc(pointer, size);
 }
+char *noct_pc98be_strdup(const char *string) { return boots_strdup(string); }
+void noct_pc98be_free(void *pointer) { boots_free(pointer); }
 
-char *
-noct_pc98be_strdup(const char *string)
-{
-	return boots_strdup(string);
-}
-
-void
-noct_pc98be_free(void *pointer)
-{
-	boots_free(pointer);
-}
-
-/* Standard names are real symbols, not preprocessor aliases.  Flex-generated
- * Noct sources intentionally redefine malloc/realloc/free locally for AST
- * allocation, so global macros would make that otherwise valid code noisy. */
+/* Standard names are real symbols; Noct's generated sources redefine these
+ * locally and therefore cannot use global preprocessor aliases. */
 void *malloc(size_t size) { return boots_malloc(size); }
 void *calloc(size_t count, size_t size) { return boots_calloc(count, size); }
 void *realloc(void *pointer, size_t size)
