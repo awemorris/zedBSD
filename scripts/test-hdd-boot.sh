@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Boot the HDD test image and verify the automatic startup path: the
-# BOOT partition must be discovered and its AUTOEXEC.NCT must start.
+# Boot the HDD test image and verify that BOOT.CFG starts after the one-second
+# countdown, then explicitly invokes AUTOEXEC.NCT.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 arch="${ZEDBSD_ARCH:-pc98}"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
@@ -14,6 +14,9 @@ work="$build/tests/hdd-boot"
 image="$work/hdd.img"
 monitor="$work/monitor.sock"
 autoexec="$work/AUTOEXEC.NCT"
+boot_cfg="$work/BOOT.CFG"
+screenshot="$work/hdd-boot-failure.ppm"
+qemu_memory="${ZEDBSD_QEMU_MEMORY:-8}"
 
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios_dir" || {
@@ -29,10 +32,12 @@ func main() {
     return 0;
 }
 EOF
-ZEDBSD_AUTOEXEC="$autoexec" "$repo/scripts/make-hdd-image.sh" "$image"
+printf '%s\n' 'autoexec /autoexec.nct' >"$boot_cfg"
+ZEDBSD_AUTOEXEC="$autoexec" ZEDBSD_BOOT_CFG="$boot_cfg" \
+	"$repo/scripts/make-hdd-image.sh" "$image"
 
 rm -f -- "$monitor"
-"$qemu" -M "$machine" -cpu "$cpu" -m 8 -accel tcg -L "$bios_dir" \
+"$qemu" -M "$machine" -cpu "$cpu" -m "$qemu_memory" -accel tcg -L "$bios_dir" \
 	-nic none -drive "if=ide,bus=0,unit=0,format=raw,file=$image" \
 	-display none -serial none \
 	-qmp "unix:$monitor,server=on,wait=off" -no-reboot \
@@ -48,13 +53,13 @@ cleanup()
 }
 trap cleanup EXIT INT TERM
 
-python3 - "$monitor" <<'PY'
+python3 - "$monitor" "$screenshot" <<'PY'
 import json
 import socket
 import sys
 import time
 
-monitor = sys.argv[1]
+monitor, screenshot = sys.argv[1:]
 
 deadline = time.time() + 25
 sock = None
@@ -111,9 +116,10 @@ deadline = time.time() + 120
 while time.time() < deadline:
     text = mem(0xA0000, 25 * 160)[0::2]
     if b"AUTOEXEC.NCT verified." in text:
-        print("automatic AUTOEXEC.NCT completed")
+        print("BOOT.CFG and explicit AUTOEXEC.NCT completed")
         sys.exit(0)
     time.sleep(2)
-raise SystemExit("automatic AUTOEXEC completion never appeared")
+cmd("screendump", {"filename": screenshot})
+raise SystemExit("BOOT.CFG/AUTOEXEC completion never appeared; " + screenshot)
 PY
 echo "zedBSD HDD boot test: PASS"

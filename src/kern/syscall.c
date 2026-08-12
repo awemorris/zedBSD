@@ -3,6 +3,8 @@
 #include "kern/file.h"
 #include "kern/filedesc.h"
 #include "kern/inode.h"
+#include "kern/exec.h"
+#include "kern/kmem.h"
 #include "kern/namei.h"
 #include "kern/process.h"
 #include "kern/sched.h"
@@ -12,6 +14,7 @@
 
 #include <zedbsd/dirent.h>
 #include <zedbsd/syscall.h>
+#include <zedbsd/process.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <hal/hal.h>
@@ -199,14 +202,27 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 	if (process == NULL || process->vmspace == NULL) return -EINVAL;
 	if ((args[3] & MAP_FIXED) != 0)
 		return -EINVAL;
-	if (args[3] != (MAP_PRIVATE | MAP_ANONYMOUS) ||
-	    (int)args[4] != -1 || args[5] != 0)
+	if (args[3] != (MAP_PRIVATE | MAP_ANONYMOUS) &&
+	    args[3] != (MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE))
 		return -EOPNOTSUPP;
+	if ((int)args[4] != -1 || args[5] != 0)
+		return -EOPNOTSUPP;
+	if ((args[3] & MAP_FIXED_NOREPLACE) != 0 && args[0] == 0)
+		return -EINVAL;
+	if (args[1] == 0 || args[1] > SIZE_MAX - 4095U)
+		return -EINVAL;
 	if (args[0] != 0 && (args[0] & 4095U) != 0)
 		return -EINVAL;
 	error = vm_prot((int)args[2], &prot);
-	if (error == 0)
-		error = vmspace_map_find(process->vmspace, args[0], args[1], prot, &mapped);
+	if (error == 0 && (args[3] & MAP_FIXED_NOREPLACE) != 0) {
+		size_t size = (args[1] + 4095U) & ~4095U;
+		error = vmspace_map_anon_fixed_noreplace(process->vmspace,
+			args[0], size, prot, NULL);
+		mapped = args[0];
+	} else if (error == 0) {
+		error = vmspace_map_find(process->vmspace, args[0], args[1], prot,
+			&mapped);
+	}
 	return error == 0 ? (intptr_t)mapped : -error;
 }
 
@@ -266,6 +282,105 @@ static intptr_t sys_nanosleep_call(const uintptr_t args[6])
 	return 0;
 }
 
+struct syscall_exec_args {
+	char *argv[ZEDBSD_SPAWN_ARG_MAX + 1U];
+	char *envp[ZEDBSD_SPAWN_ENV_MAX + 1U];
+	char strings[ZEDBSD_SPAWN_STRING_MAX];
+	size_t used;
+};
+
+static int
+copy_exec_vector(uintptr_t address, char **vector, unsigned maximum,
+		 struct syscall_exec_args *copy, int optional)
+{
+	unsigned index;
+	if (address == 0) {
+		if (!optional)
+			return EFAULT;
+		vector[0] = NULL;
+		return 0;
+	}
+	for (index = 0; index < maximum; index++) {
+		uint32_t pointer;
+		size_t length;
+		int error = copyin(address + index * sizeof(pointer), &pointer,
+				   sizeof(pointer));
+		if (error != 0)
+			return error;
+		if (pointer == 0) {
+			vector[index] = NULL;
+			return index == 0 && !optional ? EINVAL : 0;
+		}
+		if (copy->used >= sizeof(copy->strings))
+			return E2BIG;
+		vector[index] = copy->strings + copy->used;
+		error = copyinstr(pointer, vector[index],
+				  sizeof(copy->strings) - copy->used, &length);
+		if (error != 0)
+			return error == ENAMETOOLONG ? E2BIG : error;
+		copy->used += length;
+	}
+	return E2BIG;
+}
+
+static intptr_t
+sys_spawn_call(const uintptr_t args[6])
+{
+	struct process *parent = current_process();
+	struct process *child;
+	struct syscall_exec_args *copy;
+	char path[PATH_MAX];
+	int error;
+	if (parent == NULL || args[4] != 0 || args[5] != 0 ||
+	    (args[3] & ~ZEDBSD_SPAWN_RESULT) != 0)
+		return -EINVAL;
+	error = copyinstr(args[0], path, sizeof(path), NULL);
+	if (error != 0)
+		return -error;
+	copy = kern_calloc(1, sizeof(*copy));
+	if (copy == NULL)
+		return -ENOMEM;
+	error = copy_exec_vector(args[1], copy->argv, ZEDBSD_SPAWN_ARG_MAX,
+				 copy, 0);
+	if (error == 0)
+		error = copy_exec_vector(args[2], copy->envp, ZEDBSD_SPAWN_ENV_MAX,
+					 copy, 1);
+	if (error == 0)
+		error = process_spawn_from(parent, path, copy->argv, copy->envp,
+			(args[3] & ZEDBSD_SPAWN_RESULT) ? PROCESS_SPAWN_RESULT : 0,
+			&child);
+	kern_free(copy);
+	return error == 0 ? child->pid : -error;
+}
+
+static intptr_t
+sys_wait_call(const uintptr_t args[6])
+{
+	struct process *parent = current_process();
+	struct process *child;
+	char result[PROCESS_RESULT_MAX];
+	size_t capacity;
+	pid_t pid = (pid_t)args[0];
+	int status, error;
+	if (parent == NULL || pid <= 0 || args[2] != 0 || args[5] != 0 ||
+	    (args[3] == 0) != (args[4] == 0))
+		return -EINVAL;
+	child = process_find(pid);
+	if (child == NULL || child->parent != parent)
+		return -ECHILD;
+	capacity = args[4] > sizeof(result) ? sizeof(result) : (size_t)args[4];
+	memset(result, 0, sizeof(result));
+	error = process_wait(child, &status, capacity != 0 ? result : NULL,
+			     capacity);
+	if (error != 0)
+		return -error;
+	if (args[1] != 0 && (error = copyout(&status, args[1], sizeof(status))) != 0)
+		return -error;
+	if (capacity != 0 && (error = copyout(result, args[3], capacity)) != 0)
+		return -error;
+	return pid;
+}
+
 static intptr_t syscall_dispatch(uint32_t number, const uintptr_t args[6])
 {
 	switch (number) {
@@ -285,6 +400,8 @@ static intptr_t syscall_dispatch(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_ioctl: return sys_ioctl_call(args);
 	case ZEDBSD_SYS_clock_gettime: return sys_clock_gettime_call(args);
 	case ZEDBSD_SYS_nanosleep: return sys_nanosleep_call(args);
+	case ZEDBSD_SYS_spawn: return sys_spawn_call(args);
+	case ZEDBSD_SYS_wait: return sys_wait_call(args);
 	default: return -ENOSYS;
 	}
 }

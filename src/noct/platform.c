@@ -468,7 +468,7 @@ zedbsd_noct_run_file(struct zedbsd_namespace *namespace,
 	size_t source_area;
 	size_t file_size;
 	char *source;
-	int ok, use_vfs = kern_cwdinfo.root != NULL;
+	int ok, use_vfs = kern_cwdinfo.root.p_inode != NULL;
 
 	if (path == NULL || path[0] == '\0')
 		return 0;
@@ -581,7 +581,7 @@ zedbsd_noct_run_repl(struct zedbsd_namespace *namespace,
 	hal_pc98_enable_high_memory();
 	target.filesystem = filesystem;
 	target.namespace = namespace;
-	target.fs_context = kern_cwdinfo.root != NULL ?
+	target.fs_context = kern_cwdinfo.root.p_inode != NULL ?
 		&kern_cwdinfo : NULL;
 	target.key_read = key_read;
 	target.key_poll = key_poll;

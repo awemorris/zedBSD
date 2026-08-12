@@ -113,6 +113,18 @@ vmspace_map_anon(struct vmspace *vm, uintptr_t start, size_t size,
 }
 
 int
+vmspace_map_anon_fixed_noreplace(struct vmspace *vm, uintptr_t start,
+				 size_t size, uint32_t prot,
+				 struct vm_region **result)
+{
+	if (vm == NULL || !range_valid(start, size))
+		return EINVAL;
+	if (overlaps(vm, start, size))
+		return EEXIST;
+	return vmspace_map_anon(vm, start, size, prot, result);
+}
+
+int
 vmspace_map_file(struct vmspace *vm, uintptr_t start, size_t size,
 		 uint32_t prot, struct file *file, off_t file_offset,
 		 uintptr_t data_start, size_t data_size,

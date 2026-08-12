@@ -26,6 +26,9 @@ hal_irq_disable(void)
 
 void hal_irq_enable(void) { irq_enabled = 1; }
 void hal_reschedule_on_interrupt_return(void) { reschedule_requests++; }
+void hal_cpu_idle(void) { irq_enabled = 0; }
+int kern_boot_pending(void) { return 0; }
+void kern_boot_execute_pending(void) { abort(); }
 
 void
 hal_task_context_switch(hal_task_t task)

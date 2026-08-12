@@ -10,6 +10,7 @@
 
 /* Shared data contract between the real-mode Stage 1 and 32-bit Stage 2. */
 #include <stdint.h>
+#include <uapi/zedbsd/applet.h>
 
 #define ZEDBSD_STAGE2_MAGIC 0x53383942U  /* "B98S" */
 #define ZEDBSD_HANDOFF_MAGIC 0x48323842U /* "B82H" */
@@ -92,30 +93,6 @@ struct zedbsd_bios_request {
 	uint32_t buffer;
 } __attribute__((packed));
 
-#define ZEDBSD_APPLET_MAGIC 0x41383942U /* "B98A" */
-struct zedbsd_applet_header {
-	uint32_t magic;
-	uint16_t abi_version;
-	uint16_t header_size;
-	uint32_t image_size;
-	uint16_t entry_offset;
-	uint16_t flags;
-	uint32_t crc32;
-	char name[16];
-} __attribute__((packed));
-
-struct zedbsd_applet_services {
-	uint16_t abi_version;
-	uint16_t size;
-	void (*putc)(char c);
-	void (*puts)(const char *s);
-	uint32_t (*key_read)(void);
-};
-
-typedef uint32_t (*zedbsd_applet_entry_t)(
-        const struct zedbsd_applet_services *services, uint32_t argc,
-        const char *const *argv);
-
 typedef uint32_t (*zedbsd_bios_gateway_t)(struct zedbsd_bios_request *request);
 
 _Static_assert(sizeof(struct zedbsd_stage2_header) == 20,
@@ -126,9 +103,6 @@ _Static_assert(sizeof(struct zedbsd_handoff) == 24,
 	       "zedBSD handoff version 2 must remain 24 bytes");
 _Static_assert(sizeof(struct zedbsd_bios_request) == 16,
                "zedBSD BIOS request must remain 16 bytes");
-_Static_assert(sizeof(struct zedbsd_applet_header) == 36,
-               "zedBSD applet header must remain 36 bytes");
-
 enum zedbsd_device_class {
 	ZEDBSD_DEV_FDD = 1,
 	ZEDBSD_DEV_IDE = 2,

@@ -41,6 +41,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
 	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/console-device.o \
 	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
+	$(BUILD)/src/kern/system-device.o $(BUILD)/src/kern/boot-device.o \
+	$(BUILD)/src/kern/init.o \
 	$(BUILD)/src/kern/pc98/graphics.o
 
 # Milestone verification nests QEMU tests.  Keep those chains ordered even
@@ -61,9 +63,6 @@ PC98_BEUI_OBJS := \
 STAGE2_OBJS = \
 	$(BUILD)/$(PC98)/boot-header.o \
 	$(BUILD)/src/kern/main.o \
-	$(BUILD)/src/kern/startup.o \
-	$(BUILD)/src/kern/shell.o \
-	$(BUILD)/src/kern/device.o \
 	$(BUILD)/src/kern/pc98/linux-entry.o \
 	$(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/fs.o \
@@ -102,7 +101,8 @@ M9_STAGE2_OBJS = $(filter-out $(BUILD)/src/kern/main.o \
 all: $(BUILD)/boot2.bin $(BUILD)/ipl-lba0.bin $(BUILD)/ipl-lba2.bin \
 	$(BUILD)/ipl-lba0.img $(BUILD)/ipl-lba2.img $(BUILD)/ipl-part.img \
 	$(BUILD)/IO.SYS $(BUILD)/vmunix \
-	$(BUILD)/INIT.ELF $(BUILD)/NOCT.ELF \
+	$(BUILD)/INIT.ELF $(BUILD)/bin/noct $(BUILD)/bin/sh \
+	$(BUILD)/bin/linux \
 	$(BUILD)/partition-pbr.bin \
 	$(BUILD)/chain-test.bin $(BUILD)/fdd-ipl.bin \
 	$(BUILD)/BOOTAPP.BIN
@@ -113,9 +113,11 @@ vmunix-m9: $(BUILD)/vmunix-m9
 BOOTAPP.BIN: $(BUILD)/BOOTAPP.BIN
 INIT.ELF: $(BUILD)/INIT.ELF
 NOCT.ELF: $(BUILD)/NOCT.ELF
+SH: $(BUILD)/bin/sh
+LINUX: $(BUILD)/bin/linux
 USER-FAULT.ELF: $(BUILD)/USER-FAULT.ELF
 USER-SWAP.ELF: $(BUILD)/USER-SWAP.ELF
-.PHONY: vmunix vmunix-m9 BOOTAPP.BIN INIT.ELF NOCT.ELF USER-FAULT.ELF USER-SWAP.ELF
+.PHONY: vmunix vmunix-m9 BOOTAPP.BIN INIT.ELF NOCT.ELF SH LINUX USER-FAULT.ELF USER-SWAP.ELF
 
 # ----------------------------------------------------------------------
 # Per-object flag overrides.
@@ -248,6 +250,34 @@ $(BUILD)/NOCT.ELF: $(USER_LIBC_OBJS) $(USER_NOCT_GLUE_OBJS) \
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
 		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_NOCT_GLUE_OBJS) \
 		$(USER_NOCT_OBJECTS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+
+$(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
+	@mkdir -p $(dir $@)
+	cp $< $@
+
+USER_SH_OBJS := $(BUILD)/user/sh/main.o $(BUILD)/user/sh/applet.o
+$(USER_SH_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(USER_SH_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
+
+$(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
+	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
+		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+
+USER_BOOTLINUX_OBJS := $(BUILD)/user/bootlinux/main.o
+$(USER_BOOTLINUX_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(USER_BOOTLINUX_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
+
+$(BUILD)/bin/linux: $(USER_LIBC_OBJS) $(USER_BOOTLINUX_OBJS) \
+	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) \
+		$(USER_BOOTLINUX_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 
 $(BUILD)/tests/user-fault.o: tests/user-fault.S

@@ -11,6 +11,8 @@
 #include "kern/internal.h"
 #include "kern/vfs.h"
 #include "kern/exec.h"
+#include "kern/init.h"
+#include "kern/sched.h"
 
 
 /*
@@ -116,57 +118,14 @@ void kernel_main(const struct zedbsd_handoff *h,
 		 const struct zedbsd_device *platform_devices,
 		 unsigned platform_device_count)
 {
-	char b[LINE_MAX];
 	ho = h;
 	device_count = platform_device_count;
 	devs = platform_devices;
 	(void)kern_platform_graphics_init(zedbsd_kernel_milliseconds, NULL, NULL);
 	zedbsd_env_init(&boot_environment);
 	if (kern_vfs_init(h, platform_devices, platform_device_count) != 0)
-		puts("VFS initialization failed; using legacy disk selection.\n");
-	else if (process_spawn_init("INIT.ELF", NULL) != 0)
-		puts("INIT.ELF not started; continuing in kernel UI.\n");
-	(void)zedbsd_env_set(&boot_environment, "HOME", "/");
-	(void)zedbsd_env_set(&boot_environment, "REMACS_SKK_DICT",
-			     "/skkjisyo.dic");
-	for (;;) {
-		struct startup_state startup;
-
-		kern_platform_restore_text();
-		int automatic = startup_menu(&startup);
-		if (curpart >= 0) {
-			puts("source: ");
-			devname(curdev);
-			putc(':');
-			puts(parts[curpart].name);
-			putc('\n');
-		}
-		if (automatic) {
-			int autoexec = curpart >= 0 ? run_autoexec() : -1;
-
-			if (autoexec == 0) {
-				const char *cfg_name = startup_config_file();
-				char source_cfg[24] = "source ";
-				unsigned at = 7;
-
-				if (!cfg_name)
-					cfg_name = "ZEDBSD.CFG";
-				for (unsigned i = 0; cfg_name[i] &&
-				     at + 1 < sizeof(source_cfg); i++)
-					source_cfg[at++] = cfg_name[i];
-				source_cfg[at] = 0;
-				if (!command(source_cfg)) {
-					puts(cfg_name);
-					puts(" automatic boot failed.\n");
-				}
-			}
-		}
-		for (;;) {
-			prompt();
-			if (line(b) < 0)
-				break;
-			if (!command(b))
-				puts("error\n");
-		}
-	}
+		puts("VFS initialization failed; entering idle.\n");
+	else if (kern_init_start() != 0)
+		puts("init not started; entering idle.\n");
+	sched_idle();
 }

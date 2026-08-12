@@ -1,10 +1,4 @@
-/*
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
- *
- * Disk partition enumeration and boot VFS policy.
- */
-
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/vfs.h"
 #include "kern/disk.h"
 #include "kern/fat-vfs.h"
@@ -15,6 +9,8 @@
 #include "kern/cdev.h"
 #include "kern/console-device.h"
 #include "kern/graphics-device.h"
+#include "kern/system-device.h"
+#include "kern/boot-device.h"
 #include "kern/devfs.h"
 #include "kern/swap-fat.h"
 
@@ -27,16 +23,16 @@
 struct cwdinfo kern_cwdinfo __attribute__((section(".vfs_bss")));
 
 static int
-disk_path(unsigned number, char path[ZEDBSD_PATH_MAX])
+disk_name(unsigned number, char name[NAME_MAX + 1U])
 {
-	unsigned at = 5;
+	unsigned at = 4;
 	if (number == 0 || number > 99)
 		return EINVAL;
-	memcpy(path, "/disk", 5);
+	memcpy(name, "disk", 4);
 	if (number >= 10)
-		path[at++] = (char)('0' + number / 10);
-	path[at++] = (char)('0' + number % 10);
-	path[at] = '\0';
+		name[at++] = (char)('0' + number / 10);
+	name[at++] = (char)('0' + number % 10);
+	name[at] = '\0';
 	return 0;
 }
 
@@ -45,16 +41,18 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	      const struct zedbsd_device *devices, unsigned device_count)
 {
 	struct disk *physical[PHYSICAL_DISK_MAX];
-	struct mount *boot_mount = NULL;
-	struct disk *boot_disk = NULL;
-	unsigned physical_count = 0, mounted = 0, i;
+	struct disk *boot_physical = NULL;
+	struct disk *boot_partition = NULL;
+	struct mount *boot_mount;
+	struct path root_path;
+	unsigned physical_count = 0, next_number = 2, i;
 	int error;
 
 	if (handoff == NULL)
 		return EINVAL;
 	for (i = 0; i < device_count; i++)
 		if (devices[i].bios_id == handoff->boot_bios_id) {
-			boot_disk = kern_platform_block_device(&devices[i]);
+			boot_physical = kern_platform_block_device(&devices[i]);
 			break;
 		}
 	for (i = 0; i < disk_count() && physical_count < PHYSICAL_DISK_MAX; i++) {
@@ -77,16 +75,13 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	error = graphics_device_register();
 	if (error != 0)
 		return error;
-	error = mount_rootfs();
+	error = system_device_register();
 	if (error != 0)
 		return error;
-	error = mount("devfs", "/dev", 0, NULL);
+	error = boot_device_register();
 	if (error != 0)
 		return error;
-	error = cwdinfo_init(&kern_cwdinfo, mount_root_inode());
-	if (error != 0)
-		return error;
-	process_attach_boot_cwd(&kern_cwdinfo);
+
 	for (i = 0; i < physical_count; i++) {
 		struct partition entries[PARTITION_MAX];
 		int count = partition_scan(physical[i], entries, PARTITION_MAX);
@@ -94,31 +89,54 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		if (count < 0)
 			continue;
 		for (slot = 0; slot < count; slot++) {
-			struct fat_mount_args args;
-			char path[ZEDBSD_PATH_MAX];
 			if (entries[slot].p_block_count == 0 ||
 			    partition_create_disk(&entries[slot]) != 0)
 				continue;
-			if (disk_path(mounted + 1U, path) != 0)
-				continue;
-			args.fspec = entries[slot].p_disk->d_name;
-			error = mount("auto", path, 0, &args);
-			if (error != 0)
-				continue;
-			mounted++;
-			if (physical[i] == boot_disk &&
+			if (physical[i] == boot_physical &&
 			    entries[slot].p_start_block ==
 			    handoff->boot_partition_lba)
-				boot_mount = mount_find(path);
+				boot_partition = entries[slot].p_disk;
 		}
 	}
-	if (boot_mount != NULL) {
-		error = fs_chdir(&kern_cwdinfo, boot_mount->m_path);
-		if (error != 0)
-			return error;
-		error = swap_fat_activate(&kern_cwdinfo, boot_mount->m_path);
-		if (error != 0 && error != ENOENT)
-			hal_printf("swap: /swapfile disabled (%d)\n", error);
+	if (boot_partition == NULL)
+		return ENXIO;
+	{
+		struct fat_mount_args args = { boot_partition->d_name };
+		error = mount_root_create("auto", 0, &args, &boot_mount);
 	}
+	if (error != 0)
+		return error;
+	path_set(&root_path, boot_mount, boot_mount->m_root);
+	error = cwdinfo_init(&kern_cwdinfo, &root_path);
+	if (error != 0)
+		goto out_root;
+	process_attach_boot_cwd(&kern_cwdinfo);
+	error = mount_bind_at(&root_path, &root_path, "disk1", NULL);
+	if (error != 0)
+		goto out_root;
+	error = mount_at("devfs", &root_path, "dev", 0, NULL, NULL);
+	if (error != 0)
+		goto out_root;
+	for (i = 0; i < partition_count(); i++) {
+		const struct partition *partition = partition_at(i);
+		struct fat_mount_args args;
+		char name[NAME_MAX + 1U];
+		if (partition == NULL || partition->p_disk == NULL ||
+		    partition->p_disk == boot_partition ||
+		    disk_name(next_number, name) != 0)
+			continue;
+		args.fspec = partition->p_disk->d_name;
+		error = mount_at("auto", &root_path, name, 0, &args, NULL);
+		if (error == 0)
+			next_number++;
+	}
+	error = swap_fat_activate(&kern_cwdinfo, "/");
+	if (error != 0 && error != ENOENT)
+		hal_printf("swap: /swapfile disabled (%d)\n", error);
+	path_release(&root_path);
 	return 0;
+
+out_root:
+	path_release(&root_path);
+	return error;
 }

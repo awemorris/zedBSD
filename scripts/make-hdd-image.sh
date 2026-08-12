@@ -60,10 +60,8 @@ with open(image, "r+b") as stream:
     stream.write(entry)
 PY
 
-# Without a startup configuration the menu has no automatic target:
-# the only partition is the BOOT volume itself, which is deliberately
-# excluded from chain boot.  Ship the graphical AUTOEXEC.NCT menu so
-# the automatic countdown has somewhere to go.
+# AUTOEXEC.NCT is installed as a menu script, but is never run implicitly.
+# BOOT.CFG may select it explicitly with `autoexec /autoexec.nct`.
 if test "${ZEDBSD_AUTOEXEC_DISABLE:-0}" = 1; then
 	autoexec=""
 else
@@ -74,7 +72,8 @@ ZEDBSD_FILES="${ZEDBSD_FILES:-}" \
 ZEDBSD_AUTOEXEC="$autoexec" \
 DISK_HEADS="$heads" DISK_SECTORS="$sectors" \
 	"$repo/scripts/install-image.sh" --partition 1 \
-	--install-disk-stubs "$output" "${ZEDBSD_KERNEL:-}" "${ZEDBSD_CFG:-}"
+	--install-disk-stubs "$output" "${ZEDBSD_KERNEL:-}" \
+	"${ZEDBSD_BOOT_CFG:-}"
 
 sha256sum "$output"
 printf 'zedBSD HDD test image: %s\n' "$output"

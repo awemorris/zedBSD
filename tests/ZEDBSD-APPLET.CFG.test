@@ -1,3 +1,7 @@
 echo Running zedBSD applet...
+cd /disk1
+pwd
 run BOOTAPP.BIN one two
+cd ..
+pwd
 echo Applet test complete

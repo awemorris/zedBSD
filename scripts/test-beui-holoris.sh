@@ -32,7 +32,7 @@ fi
 base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/beui-$tag"
 image="$work/holoris.raw"
-cfg="$work/ZEDBSD.CFG"
+cfg="$work/BOOT.CFG"
 monitor="$work/monitor.sock"
 screenshot="$work/holoris.ppm"
 qemu_log="$work/qemu.log"

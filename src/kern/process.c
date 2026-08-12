@@ -35,6 +35,7 @@ process_init(void)
 	thread0.proc = &process0;
 	thread0.task = hal_task_get_current();
 	thread0.state = THREAD_RUNNING;
+	thread0.flags = THREAD_FLAG_IDLE;
 	thread0.sched.priority = SCHED_PRIORITY_DEFAULT;
 	thread0.sched.quantum = SCHED_QUANTUM_TICKS;
 	hal_task_set_private(thread0.task, &thread0);
@@ -64,7 +65,7 @@ process_reaper(void *argument)
 			process = next;
 		}
 		if (!reaped)
-			sched_sleep(sched_ticks() + 1U);
+			sched_sleep(0);
 		else
 			sched_yield();
 	}
@@ -264,6 +265,43 @@ process_quiesce_users(void)
 }
 
 void
+process_force_quiesce_users(void)
+{
+	struct process *process;
+	bool enabled;
+
+	if (curthread != &thread0)
+		HAL_FATAL("user quiescence outside thread0");
+	enabled = hal_irq_disable();
+	(void)enabled;
+	process0.children = NULL;
+	for (process = all_processes; process != NULL;
+	     process = process->all_next) {
+		if (process == &process0)
+			continue;
+		process->parent = &process0;
+		process->sibling = process0.children;
+		process0.children = process;
+	}
+	while (process0.children != NULL) {
+		struct process *victim = process0.children;
+		struct thread *thread = victim->threads;
+		while (thread != NULL) {
+			struct thread *next = thread->proc_next;
+			sched_unlink(thread);
+			hal_task_set_private(thread->task, NULL);
+			hal_task_destroy(thread->task);
+			thread->state = THREAD_DEAD;
+			kern_free(thread);
+			thread = next;
+		}
+		victim->threads = NULL;
+		victim->thread_count = 0;
+		process_free_mem(victim);
+	}
+}
+
+void
 exit1(int status)
 {
 	struct process *process = curthread->proc;
@@ -279,6 +317,8 @@ exit1(int status)
 	enabled = hal_irq_disable();
 	process->exit_status = status;
 	process->state = PROCESS_ZOMBIE;
+	if ((process->flags & PROCESS_AUTOREAP) != 0 && reaper_thread != NULL)
+		sched_wakeup(reaper_thread);
 	waiter = process->waiter;
 	if (waiter != NULL)
 		sched_wakeup(waiter);

@@ -1,8 +1,4 @@
-/*
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
- */
-
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/namei.h"
 #include "kern/mount.h"
 
@@ -36,24 +32,27 @@ component_is(const char *name, size_t length, const char *literal)
 }
 
 int
-namei_at(struct cwdinfo *context, const char *path, struct inode **result)
+namei_path_at(struct cwdinfo *context, const char *path, struct path *result)
 {
-	struct inode *current;
+	struct path current;
 	size_t length, position = 0;
 	int error, trailing;
 
-	if (context == NULL || context->root == NULL ||
-	    context->cwd == NULL || result == NULL)
+	if (context == NULL || context->root.p_inode == NULL ||
+	    context->cwd.p_inode == NULL || result == NULL)
 		return EINVAL;
 	error = path_length(path, &length);
 	if (error != 0)
 		return error;
 	trailing = path[length - 1U] == '/';
-	current = path[0] == '/' ? context->root : context->cwd;
-	inode_ref(current);
+	if (path[0] == '/')
+		path_set(&current, context->root.p_mount, context->root.p_inode);
+	else
+		path_set(&current, context->cwd.p_mount, context->cwd.p_inode);
 	while (position < length) {
 		struct componentname component;
-		struct inode *next;
+		struct path next_path;
+		struct inode *next_inode;
 		size_t start;
 		while (position < length && path[position] == '/')
 			position++;
@@ -71,52 +70,76 @@ namei_at(struct cwdinfo *context, const char *path, struct inode **result)
 		}
 		if (position == length)
 			component.cn_flags |= COMPONENT_LAST;
-		if (component_is(component.cn_nameptr,
-				 component.cn_namelen, ".")) {
+		if (component_is(component.cn_nameptr, component.cn_namelen, ".")) {
 			component.cn_flags |= COMPONENT_DOT;
 			continue;
 		}
-		if (component_is(component.cn_nameptr,
-				 component.cn_namelen, "..")) {
+		if (component_is(component.cn_nameptr, component.cn_namelen, "..")) {
 			component.cn_flags |= COMPONENT_DOTDOT;
-			if (current == context->root)
+			if (path_equal(&current, &context->root))
 				continue;
-			error = mount_cross_parent(current, &next);
+			error = mount_cross_path_parent(&current, &next_path);
+			if (error == 0) {
+				path_release(&current);
+				current = next_path;
+				continue;
+			}
+			error = inode_lookup(current.p_inode, &component, &next_inode);
 			if (error != 0)
-				error = inode_lookup(current, &component, &next);
-		} else {
-			error = inode_lookup(current, &component, &next);
+				goto fail;
+			path_set(&next_path, current.p_mount, next_inode);
+			inode_release(next_inode);
+			path_release(&current);
+			current = next_path;
+			continue;
 		}
+		error = mount_lookup_child(&current, &component, &next_path);
+		if (error == 0) {
+			path_release(&current);
+			current = next_path;
+			continue;
+		}
+		if (error != ENOENT)
+			goto fail;
+		error = inode_lookup(current.p_inode, &component, &next_inode);
 		if (error != 0)
 			goto fail;
-		inode_release(current);
-		current = next;
-		if (!(component.cn_flags & COMPONENT_DOTDOT)) {
-			error = mount_follow(current, &next);
-			if (error == 0) {
-				inode_release(current);
-				current = next;
-			} else if (error != ENOENT) {
-				goto fail;
-			}
-		}
+		path_set(&next_path, current.p_mount, next_inode);
+		inode_release(next_inode);
+		path_release(&current);
+		current = next_path;
 	}
-	if (trailing && current->i_type != INODE_DIR) {
+	if (trailing && current.p_inode->i_type != INODE_DIR) {
 		error = ENOTDIR;
 		goto fail;
 	}
 	*result = current;
 	return 0;
-
 fail:
-	inode_release(current);
+	path_release(&current);
 	return error;
 }
 
 int
-namei_parent_at(struct cwdinfo *context, const char *path,
-		struct inode **parent, struct componentname *last,
-		char storage[NAME_MAX + 1U])
+namei_at(struct cwdinfo *context, const char *path, struct inode **result)
+{
+	struct path found;
+	int error;
+	if (result == NULL)
+		return EINVAL;
+	error = namei_path_at(context, path, &found);
+	if (error != 0)
+		return error;
+	*result = found.p_inode;
+	found.p_inode = NULL;
+	path_release(&found);
+	return 0;
+}
+
+int
+namei_parent_path_at(struct cwdinfo *context, const char *path,
+		     struct path *parent, struct componentname *last,
+		     char storage[NAME_MAX + 1U])
 {
 	char prefix[ZEDBSD_PATH_MAX];
 	size_t length, start, parent_length;
@@ -151,25 +174,42 @@ namei_parent_at(struct cwdinfo *context, const char *path,
 		memcpy(prefix, path, parent_length);
 		prefix[parent_length] = '\0';
 	}
-	error = namei_at(context, prefix, parent);
-	if (error == 0 && (*parent)->i_type != INODE_DIR) {
-		inode_release(*parent);
+	error = namei_path_at(context, prefix, parent);
+	if (error == 0 && parent->p_inode->i_type != INODE_DIR) {
+		path_release(parent);
 		return ENOTDIR;
 	}
 	return error;
 }
 
 int
-cwdinfo_init(struct cwdinfo *context, struct inode *root)
+namei_parent_at(struct cwdinfo *context, const char *path,
+		struct inode **parent, struct componentname *last,
+		char storage[NAME_MAX + 1U])
 {
-	if (context == NULL || root == NULL || root->i_type != INODE_DIR)
+	struct path found;
+	int error;
+	if (parent == NULL)
+		return EINVAL;
+	error = namei_parent_path_at(context, path, &found, last, storage);
+	if (error != 0)
+		return error;
+	*parent = found.p_inode;
+	found.p_inode = NULL;
+	path_release(&found);
+	return 0;
+}
+
+int
+cwdinfo_init(struct cwdinfo *context, const struct path *root)
+{
+	if (context == NULL || root == NULL || root->p_mount == NULL ||
+	    root->p_inode == NULL || root->p_inode->i_type != INODE_DIR)
 		return EINVAL;
 	memset(context, 0, sizeof(*context));
-	inode_ref(root);
-	inode_ref(root);
 	context->usecount = 1;
-	context->root = root;
-	context->cwd = root;
+	path_set(&context->root, root->p_mount, root->p_inode);
+	path_set(&context->cwd, root->p_mount, root->p_inode);
 	context->cwd_path[0] = '/';
 	context->cwd_path[1] = '\0';
 	return 0;
@@ -180,8 +220,8 @@ cwdinfo_destroy(struct cwdinfo *context)
 {
 	if (context == NULL)
 		return;
-	inode_release(context->root);
-	inode_release(context->cwd);
+	path_release(&context->root);
+	path_release(&context->cwd);
 	memset(context, 0, sizeof(*context));
 }
 
@@ -210,24 +250,34 @@ normalized_path(const struct cwdinfo *context, const char *path,
 	}
 	output[0] = '/';
 	while (in < length) {
-		size_t start, part;
-		while (in < length && joined[in] == '/') in++;
-		if (in == length) break;
+		size_t start, component_length;
+		while (in < length && joined[in] == '/')
+			in++;
+		if (in == length)
+			break;
 		start = in;
-		while (in < length && joined[in] != '/') in++;
-		part = in - start;
-		if (part == 1 && joined[start] == '.') continue;
-		if (part == 2 && joined[start] == '.' && joined[start + 1U] == '.') {
+		while (in < length && joined[in] != '/')
+			in++;
+		component_length = in - start;
+		if (component_is(joined + start, component_length, "."))
+			continue;
+		if (component_is(joined + start, component_length, "..")) {
 			if (out > 1) {
-				while (out > 1 && output[out - 1U] != '/') out--;
-				if (out > 1) out--;
+				out--;
+				while (out > 1 && output[out - 1U] != '/')
+					out--;
 			}
 			continue;
 		}
-		if (out > 1) output[out++] = '/';
-		if (out + part >= ZEDBSD_PATH_MAX) return ENAMETOOLONG;
-		memcpy(output + out, joined + start, part);
-		out += part;
+		if (out > 1) {
+			if (out + 1U >= ZEDBSD_PATH_MAX)
+				return ENAMETOOLONG;
+			output[out++] = '/';
+		}
+		if (component_length >= ZEDBSD_PATH_MAX - out)
+			return ENAMETOOLONG;
+		memcpy(output + out, joined + start, component_length);
+		out += component_length;
 	}
 	output[out] = '\0';
 	return 0;
@@ -236,21 +286,21 @@ normalized_path(const struct cwdinfo *context, const char *path,
 int
 fs_chdir(struct cwdinfo *context, const char *path)
 {
-	struct inode *directory;
+	struct path directory;
 	char normalized[ZEDBSD_PATH_MAX];
-	int error = namei_at(context, path, &directory);
+	int error = namei_path_at(context, path, &directory);
 	if (error != 0)
 		return error;
-	if (directory->i_type != INODE_DIR) {
-		inode_release(directory);
+	if (directory.p_inode->i_type != INODE_DIR) {
+		path_release(&directory);
 		return ENOTDIR;
 	}
 	error = normalized_path(context, path, normalized);
 	if (error != 0) {
-		inode_release(directory);
+		path_release(&directory);
 		return error;
 	}
-	inode_release(context->cwd);
+	path_release(&context->cwd);
 	context->cwd = directory;
 	strcpy(context->cwd_path, normalized);
 	return 0;
@@ -259,6 +309,6 @@ fs_chdir(struct cwdinfo *context, const char *path)
 const char *
 fs_getcwd(const struct cwdinfo *context)
 {
-	return context != NULL && context->cwd != NULL ?
+	return context != NULL && context->cwd.p_inode != NULL ?
 		context->cwd_path : NULL;
 }

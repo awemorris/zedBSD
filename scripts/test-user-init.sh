@@ -61,13 +61,7 @@ malformed)
 	exit 1
 	;;
 esac
-if test -n "${ZEDBSD_USER_REQUIRE_GUI+x}"; then
-	require_gui="$ZEDBSD_USER_REQUIRE_GUI"
-elif test "$mode" = swap; then
-	require_gui=0
-else
-	require_gui=1
-fi
+require_gui="${ZEDBSD_USER_REQUIRE_GUI:-0}"
 
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios_dir" || { echo "BIOS directory not found: $bios_dir" >&2; exit 1; }
@@ -84,10 +78,17 @@ if test -n "$elf_source"; then
 fi
 if test "$mode" = swap; then
 	ZEDBSD_TEST_MB=40 ZEDBSD_SWAP_SIZE_MIB=32 ZEDBSD_AUTOEXEC_DISABLE=1 \
+		ZEDBSD_SH_IMAGE="$elf_source" \
 		ZEDBSD_FILES="$files" \
 		"$repo/scripts/make-hdd-image.sh" "$image"
 else
-	ZEDBSD_FILES="$files" "$repo/scripts/make-hdd-image.sh" "$image"
+	ZEDBSD_SH_IMAGE="${elf_source:-$build/bin/sh}" ZEDBSD_FILES="$files" \
+		"$repo/scripts/make-hdd-image.sh" "$image"
+fi
+
+if test "$mode" = missing; then
+	offset=$((4 * 17 * 512))
+	mdel -i "$image@@$offset" ::BIN/SH
 fi
 
 probe_vma="$(nm -n "$build/stage2.elf" | \
@@ -221,11 +222,7 @@ if record is None and not expect_failure:
           file=sys.stderr)
     raise SystemExit('ring-3 INT 0xc2 probe was not observed')
 if expect_failure:
-    # NOCT.ELF is itself a user process, so observing any ring-3 syscall no
-    # longer proves that INIT.ELF was accepted.  The fixture guarantees that
-    # INIT.ELF is absent or malformed; reaching a responsive GUI proves that
-    # exec rejected it without damaging subsequent user-process startup.
-    print(f'{mode} INIT.ELF did not prevent later user startup; checking GUI')
+    print(f'{mode} /bin/sh was rejected and thread0 remained idle')
 elif mode == 'int':
     magic, count, vector, cs, eip, eax, pid, tid = record
     # crt0/libc reaches exit(2) after mmap-backed heap setup and write(2).
@@ -293,6 +290,11 @@ if require_gui:
     print('GUI remained live and responded after the user test')
 PY
 
+if test "$expect_failure" = 1 && kill -0 "$qemu_pid" 2>/dev/null; then
+	# An idle guest has no user process left to service a shutdown request.
+	# Stop this test-owned QEMU after the rejection was observed through QMP.
+	kill "$qemu_pid" 2>/dev/null || true
+fi
 wait "$qemu_pid" 2>/dev/null || true
 trap - EXIT INT TERM
 rm -f -- "$monitor"

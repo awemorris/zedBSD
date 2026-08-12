@@ -14,7 +14,7 @@ base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/m11-utilities"
 image="$work/m11-ide.raw"
 files="$work/files"
-cfg="$work/ZEDBSD.CFG"
+cfg="$work/BOOT.CFG"
 source_file="$files/SOURCE.BIN"
 copied_file="$work/COPY.BIN"
 

@@ -8,6 +8,7 @@
 #define ZEDBSD_KERN_FILE_H
 
 #include "kern/inode.h"
+#include "kern/mount.h"
 #include <fcntl.h>
 #include <limits.h>
 #include <stddef.h>
@@ -41,11 +42,13 @@ struct file_ops {
 };
 
 struct file {
+	struct path f_path;
 	struct inode *f_inode;
 	const struct file_ops *f_ops;
 	off_t f_offset;
 	int f_flags;
 	unsigned f_usecount;
+	unsigned f_mount_cursor;
 	void *f_data;
 };
 

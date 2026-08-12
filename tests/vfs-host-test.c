@@ -177,6 +177,7 @@ int main(void)
 {
 	struct fat_mount_args a = { "mem0" }, b = { "mem1" };
 	struct cwdinfo context;
+	struct path root_path;
 	struct inode *inode, *again;
 	struct file *file;
 	struct dirent entry;
@@ -190,7 +191,9 @@ int main(void)
 	CHECK(mount_rootfs() == 0);
 	CHECK(mount("mem", "/disk1", MOUNT_READ_ONLY, &a) == 0);
 	CHECK(mount("auto", "/disk2", MOUNT_READ_ONLY, &b) == 0);
-	CHECK(cwdinfo_init(&context, mount_root_inode()) == 0);
+	path_set(&root_path, mount_root_get(), mount_root_inode());
+	CHECK(cwdinfo_init(&context, &root_path) == 0);
+	path_release(&root_path);
 
 	CHECK(namei_at(&context, "/disk1//dir/./nested", &inode) == 0);
 	CHECK(inode->i_type == INODE_REG);

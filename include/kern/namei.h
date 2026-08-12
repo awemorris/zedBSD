@@ -7,6 +7,7 @@
 #define ZEDBSD_KERN_NAMEI_H
 
 #include "kern/inode.h"
+#include "kern/mount.h"
 #include <limits.h>
 
 #ifndef NAME_MAX
@@ -32,15 +33,18 @@ struct componentname {
 struct cwdinfo {
 	unsigned usecount;
 	unsigned flags;
-	struct inode *root;
-	struct inode *cwd;
+	struct path root;
+	struct path cwd;
 	char cwd_path[ZEDBSD_PATH_MAX];
 };
 
 int namei_at(struct cwdinfo *, const char *, struct inode **);
+int namei_path_at(struct cwdinfo *, const char *, struct path *);
 int namei_parent_at(struct cwdinfo *, const char *, struct inode **,
 		    struct componentname *, char [NAME_MAX + 1U]);
-int cwdinfo_init(struct cwdinfo *, struct inode *);
+int namei_parent_path_at(struct cwdinfo *, const char *, struct path *,
+			 struct componentname *, char [NAME_MAX + 1U]);
+int cwdinfo_init(struct cwdinfo *, const struct path *);
 int cwdinfo_clone(const struct cwdinfo *, struct cwdinfo **);
 void cwdinfo_retain(struct cwdinfo *);
 void cwdinfo_release(struct cwdinfo *);

@@ -20,7 +20,7 @@ base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/beui-input"
 image="$work/input.raw"
 files="$work/files"
-cfg="$work/ZEDBSD.CFG"
+cfg="$work/BOOT.CFG"
 monitor="$work/monitor.sock"
 qemu_log="$work/qemu.log"
 

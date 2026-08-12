@@ -80,8 +80,6 @@ test -s "$remacs_nap" || {
 }
 mcopy -i "$output" "$remacs_nap" ::CMD/REMACS.NAP
 mcopy -i "$output" "$remacs_skk" ::HOME/SKKJISYO.DIC
-mcopy -i "$output" "$repo/apps/EMACS.RC" ::HOME/.remacs.el
-mcopy -i "$output" "$repo/apps/EMACS.RC" ::HOME/.emacs
 
 sha256sum "$output"
 printf 'zedBSD FDD image: %s\n' "$output"

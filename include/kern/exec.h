@@ -21,6 +21,8 @@ int exec_build_initial_stack(struct vmspace *, char *const [],
 			     char *const [], uintptr_t *sp);
 int process_spawn(const char *, char *const [], char *const [], unsigned,
 		  struct process **);
+int process_spawn_from(struct process *, const char *, char *const [],
+		       char *const [], unsigned, struct process **);
 int process_spawn_init(const char *, struct process **);
 
 #endif

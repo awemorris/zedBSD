@@ -23,5 +23,6 @@ int filedesc_install(struct filedesc *, struct file *, int *descriptor);
 int filedesc_install_at(struct filedesc *, struct file *, int descriptor);
 int filedesc_take(struct filedesc *, int descriptor, struct file **);
 int filedesc_close(struct filedesc *, int descriptor);
+int filedesc_clone_stdio(struct filedesc *, struct filedesc *);
 
 #endif

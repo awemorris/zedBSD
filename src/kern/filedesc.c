@@ -87,3 +87,24 @@ filedesc_close(struct filedesc *fd, int descriptor)
 	int error = filedesc_take(fd, descriptor, &file);
 	return error != 0 ? error : file_close(file);
 }
+
+int
+filedesc_clone_stdio(struct filedesc *source, struct filedesc *destination)
+{
+	int descriptor;
+	if (source == NULL || destination == NULL)
+		return EINVAL;
+	for (descriptor = 0; descriptor < 3; descriptor++) {
+		struct file *file = filedesc_get(source, descriptor);
+		int error;
+		if (file == NULL)
+			continue;
+		file_ref(file);
+		error = filedesc_install_at(destination, file, descriptor);
+		if (error != 0) {
+			(void)file_close(file);
+			return error;
+		}
+	}
+	return 0;
+}

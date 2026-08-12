@@ -4,6 +4,7 @@
  */
 
 #include "kern/sched.h"
+#include "kern/boot-device.h"
 #include "kern/thread.h"
 
 #include <hal/hal.h>
@@ -109,7 +110,9 @@ sched_switch(void)
 	if (next == NULL) {
 		if (curthread != NULL && curthread->state == THREAD_RUNNING)
 			return;
-		HAL_FATAL("no runnable thread");
+		next = &thread0;
+		if (curthread == next)
+			return;
 	}
 	next->state = THREAD_RUNNING;
 	next->sched.quantum = SCHED_QUANTUM_TICKS;
@@ -122,7 +125,8 @@ sched_yield(void)
 	bool enabled = hal_irq_disable();
 	struct thread *current = curthread;
 
-	if (current != NULL && current->state == THREAD_RUNNING) {
+	if (current != NULL && current->state == THREAD_RUNNING &&
+	    (current->flags & THREAD_FLAG_IDLE) == 0) {
 		current->state = THREAD_RUNNABLE;
 		current->sched.quantum = SCHED_QUANTUM_TICKS;
 		queue_append(&run_queues[current->sched.priority], current,
@@ -166,3 +170,32 @@ sched_sleep(uint64_t timeout_tick)
 }
 
 uint64_t sched_ticks(void) { return scheduler_ticks; }
+
+int
+sched_has_runnable(void)
+{
+	int priority;
+	for (priority = SCHED_PRIOR_HIGH; priority <= SCHED_PRIOR_LOW; priority++)
+		if (run_queues[priority].head != NULL)
+			return 1;
+	return 0;
+}
+
+void
+sched_idle(void)
+{
+	thread0.flags |= THREAD_FLAG_IDLE;
+	for (;;) {
+		(void)hal_irq_disable();
+		if (kern_boot_pending())
+			kern_boot_execute_pending();
+		if (sched_has_runnable())
+			sched_switch();
+		if (curthread != &thread0)
+			HAL_FATAL("idle resumed on foreign task");
+		hal_cpu_idle();
+		if (kern_boot_pending())
+			kern_boot_execute_pending();
+		sched_switch();
+	}
+}

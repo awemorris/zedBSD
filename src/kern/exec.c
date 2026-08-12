@@ -101,13 +101,19 @@ exec_build_initial_stack(struct vmspace *vm, char *const argv[],
 }
 
 static int
-setup_standard_files(struct process *process)
+setup_standard_files(struct process *parent, struct process *process)
 {
 	static const int flags[3] = { O_RDONLY, O_WRONLY, O_WRONLY };
 	int descriptor;
+	int error = parent != NULL && parent->fd != NULL ?
+		filedesc_clone_stdio(parent->fd, process->fd) : 0;
+	if (error != 0)
+		return error;
 	for (descriptor = 0; descriptor < 3; descriptor++) {
 		struct file *file;
-		int error = file_openat(process->cwdi, "/dev/console",
+		if (filedesc_get(process->fd, descriptor) != NULL)
+			continue;
+		error = file_openat(process->cwdi, "/dev/console",
 			flags[descriptor], 0, &file);
 		if (error != 0)
 			return error;
@@ -158,23 +164,39 @@ setup_result_file(struct process *process)
 }
 
 int
-process_spawn(const char *path, char *const argv[], char *const envp[],
-	      unsigned flags, struct process **result)
+process_spawn_from(struct process *parent, const char *path,
+		   char *const argv[], char *const envp[], unsigned flags,
+		   struct process **result)
 {
 	struct file *file = NULL;
 	struct process *process = NULL;
 	struct thread *thread;
+	char *result_envp[EXEC_ENV_MAX + 1U];
+	char *const *effective_envp = envp;
 	uintptr_t entry, sp;
 	int error;
+	unsigned env_count = 0;
 
-	if (path == NULL || argv == NULL || argv[0] == NULL || process0.cwdi == NULL)
+	if (parent == NULL || path == NULL || argv == NULL || argv[0] == NULL ||
+	    parent->cwdi == NULL)
 		return EINVAL;
 	if ((flags & ~PROCESS_SPAWN_RESULT) != 0)
 		return EINVAL;
-	error = file_openat(process0.cwdi, path, O_RDONLY, 0, &file);
+	if ((flags & PROCESS_SPAWN_RESULT) != 0) {
+		while (envp != NULL && envp[env_count] != NULL) {
+			if (env_count + 1U >= EXEC_ENV_MAX)
+				return E2BIG;
+			result_envp[env_count] = envp[env_count];
+			env_count++;
+		}
+		result_envp[env_count++] = "ZEDBSD_RESULT_FD=3";
+		result_envp[env_count] = NULL;
+		effective_envp = result_envp;
+	}
+	error = file_openat(parent->cwdi, path, O_RDONLY, 0, &file);
 	if (error != 0)
 		return error;
-	error = process_create(&process0, 0, &process);
+	error = process_create(parent, 0, &process);
 	if (error != 0)
 		goto out;
 	process->vmspace = vmspace_create();
@@ -185,10 +207,11 @@ process_spawn(const char *path, char *const argv[], char *const envp[],
 	error = elf32_load(file, process->vmspace, &entry);
 	if (error != 0)
 		goto out;
-	error = exec_build_initial_stack(process->vmspace, argv, envp, &sp);
+	error = exec_build_initial_stack(process->vmspace, argv,
+		effective_envp, &sp);
 	if (error != 0)
 		goto out;
-	error = setup_standard_files(process);
+	error = setup_standard_files(parent, process);
 	if (error != 0)
 		goto out;
 	if ((flags & PROCESS_SPAWN_RESULT) != 0) {
@@ -215,10 +238,23 @@ out:
 }
 
 int
+process_spawn(const char *path, char *const argv[], char *const envp[],
+	      unsigned flags, struct process **result)
+{
+	return process_spawn_from(&process0, path, argv, envp, flags, result);
+}
+
+int
 process_spawn_init(const char *path, struct process **result)
 {
 	char *argv[2];
+	char *envp[] = {
+		"HOME=/home",
+		"PATH=/bin:/cmd",
+		"REMACS_SKK_DICT=/home/skkjisyo.dic",
+		NULL
+	};
 	argv[0] = (char *)path;
 	argv[1] = NULL;
-	return process_spawn(path, argv, NULL, 0, result);
+	return process_spawn(path, argv, envp, 0, result);
 }

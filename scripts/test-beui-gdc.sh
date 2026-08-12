@@ -19,7 +19,7 @@ base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/beui-g2a-$test_tag"
 image="$work/g2a-ide.raw"
 files="$work/files"
-cfg="$work/ZEDBSD.CFG"
+cfg="$work/BOOT.CFG"
 monitor="$work/monitor.sock"
 screenshot="$work/g2a.ppm"
 

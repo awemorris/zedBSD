@@ -48,5 +48,7 @@ void sched_clock(void);
 void sched_sleep(uint64_t timeout_tick);
 void sched_awake_from_sleep(struct thread *thread);
 uint64_t sched_ticks(void);
+int sched_has_runnable(void);
+void sched_idle(void) __attribute__((noreturn));
 
 #endif

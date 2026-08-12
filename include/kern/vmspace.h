@@ -67,6 +67,8 @@ extern struct vmspace kernel_vmspace;
 struct vmspace *vmspace_create(void);
 int vmspace_map_anon(struct vmspace *, uintptr_t, size_t, uint32_t,
 		     struct vm_region **);
+int vmspace_map_anon_fixed_noreplace(struct vmspace *, uintptr_t, size_t,
+				      uint32_t, struct vm_region **);
 int vmspace_map_file(struct vmspace *, uintptr_t, size_t, uint32_t,
 		     struct file *, off_t, uintptr_t, size_t,
 		     struct vm_region **);

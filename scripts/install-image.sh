@@ -5,6 +5,7 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 arch="${ZEDBSD_ARCH:-pc98}"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 vmunix_image="${ZEDBSD_VMUNIX_IMAGE:-$build/vmunix}"
+shell_image="${ZEDBSD_SH_IMAGE:-$build/bin/sh}"
 partition="${BOOT_PARTITION:-0}"
 install_disk_stubs="${INSTALL_DISK_STUBS:-0}"
 while test "$#" -gt 0; do
@@ -21,9 +22,9 @@ while test "$#" -gt 0; do
 		*) break ;;
 	esac
 done
-image="${1:?usage: $0 [--partition N] [--install-disk-stubs] IMAGE [VMLINUX [ZEDBSD.CFG]]}"
+image="${1:?usage: $0 [--partition N] [--install-disk-stubs] IMAGE [VMLINUX [BOOT.CFG]]}"
 kernel="${2:-}"
-cfg="${3:-}"
+boot_cfg="${3:-}"
 heads="${DISK_HEADS:-}"
 source_heads="${DISK_SOURCE_HEADS:-}"
 sectors="${DISK_SECTORS:-17}"
@@ -257,9 +258,13 @@ PY
 	rm -f -- "$swap_temp"
 	swap_temp=""
 fi
-if test -s "$build/NOCT.ELF"; then
-	mcopy -o -i "$image@@$offset" "$build/NOCT.ELF" ::NOCT.ELF
-fi
+mmd -i "$image@@$offset" ::BIN 2>/dev/null || true
+test -s "$shell_image" || { echo "Shell ELF not found: $shell_image" >&2; exit 1; }
+test -s "$build/bin/noct" || { echo "Noct ELF not found: $build/bin/noct" >&2; exit 1; }
+test -s "$build/bin/linux" || { echo "Linux loader ELF not found: $build/bin/linux" >&2; exit 1; }
+mcopy -o -i "$image@@$offset" "$shell_image" ::BIN/SH
+mcopy -o -i "$image@@$offset" "$build/bin/noct" ::BIN/NOCT
+mcopy -o -i "$image@@$offset" "$build/bin/linux" ::BIN/LINUX
 mmd -i "$image@@$offset" ::CMD 2>/dev/null || true
 mmd -i "$image@@$offset" ::APPS 2>/dev/null || true
 mmd -i "$image@@$offset" ::HOME 2>/dev/null || true
@@ -313,20 +318,12 @@ test -s "$remacs_skk" || {
 	exit 1
 }
 mcopy -o -i "$image@@$offset" "$remacs_skk" ::HOME/SKKJISYO.DIC
-test -f "$repo/apps/EMACS.RC" || {
-	echo "Default Emacs configuration not found: $repo/apps/EMACS.RC" >&2
-	exit 1
-}
-# Current Remacs reads ~/.remacs.el.  Keep the historical .emacs copy in
-# published images as a convenience for older experimental builds.
-mcopy -o -i "$image@@$offset" "$repo/apps/EMACS.RC" ::HOME/.remacs.el
-mcopy -o -i "$image@@$offset" "$repo/apps/EMACS.RC" ::HOME/.emacs
 if test -n "$kernel"; then
 	mcopy -o -i "$image@@$offset" "$kernel" ::VMLINUX
 fi
-if test -n "$cfg"; then
-	test -f "$cfg" || { echo "ZEDBSD.CFG not found: $cfg" >&2; exit 1; }
-	mcopy -o -i "$image@@$offset" "$cfg" ::ZEDBSD.CFG
+if test -n "$boot_cfg"; then
+	test -f "$boot_cfg" || { echo "BOOT.CFG not found: $boot_cfg" >&2; exit 1; }
+	mcopy -o -i "$image@@$offset" "$boot_cfg" ::BOOT.CFG
 fi
 if test -f "$repo/platform/pc98/dos/linux98.exe"; then
 	mcopy -o -i "$image@@$offset" "$repo/platform/pc98/dos/linux98.exe" ::LINUX98.EXE

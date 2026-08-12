@@ -59,6 +59,7 @@ void process_free_mem(struct process *process);
 int process_wait(struct process *, int *status, char *result,
 		 size_t result_capacity);
 int process_quiesce_users(void);
+void process_force_quiesce_users(void);
 void exit1(int status) __attribute__((noreturn));
 
 #endif

@@ -1,5 +1,5 @@
 // QEMU handoff fixture: use the ordinary result-fd BOOT_ACTION path.
 func main() {
-    System.setEnv("BOOT_ACTION", "source ZEDBSD.CFG");
+    System.setEnv("BOOT_ACTION", "source BOOT.CFG");
     return 0;
 }

@@ -26,7 +26,7 @@ base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/beui-$tag"
 image="$work/menu.raw"
 files="$work/files"
-cfg="$work/ZEDBSD.CFG"
+cfg="$work/BOOT.CFG"
 monitor="$work/monitor.sock"
 screenshot="$work/menu.ppm"
 qemu_log="$work/qemu.log"
@@ -134,7 +134,7 @@ if test "$fresh_swap" = 1; then
 	rm -f -- "$image"
 	ZEDBSD_TEST_MB=40 ZEDBSD_SWAP_SIZE_MIB=32 \
 		ZEDBSD_AUTOEXEC="$files/G3MENU.NCT" ZEDBSD_FILES="$files" \
-		ZEDBSD_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$image"
+		ZEDBSD_BOOT_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$image"
 else
 	cp --reflink=auto "$base" "$image"
 	ZEDBSD_AUTOEXEC="$files/G3MENU.NCT" ZEDBSD_FILES="$files" \

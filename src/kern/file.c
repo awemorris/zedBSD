@@ -49,7 +49,8 @@ int
 file_openat(struct cwdinfo *context, const char *path, int flags,
 	    mode_t mode, struct file **result)
 {
-	struct inode *inode;
+	struct path found;
+	struct inode *inode = NULL;
 	struct file *file;
 	int error;
 
@@ -59,62 +60,68 @@ file_openat(struct cwdinfo *context, const char *path, int flags,
 		       O_DIRECTORY)) != 0 || (flags & O_ACCMODE) > O_RDWR ||
 	    ((flags & O_EXCL) != 0 && (flags & O_CREAT) == 0))
 		return EINVAL;
-	error = namei_at(context, path, &inode);
+	error = namei_path_at(context, path, &found);
 	if (error == ENOENT &&
 	    ((flags & O_ACCMODE) != O_RDONLY ||
 	     (flags & (O_CREAT | O_TRUNC | O_APPEND)) != 0)) {
-		struct inode *parent;
+		struct path parent;
 		struct inode *collision;
 		struct componentname last;
 		char storage[NAME_MAX + 1U];
-		error = namei_parent_at(context, path, &parent, &last, storage);
+		error = namei_parent_path_at(context, path, &parent, &last, storage);
 		if (error != 0)
 			return error;
-		error = inode_lookup_casefold(parent, &last, &collision);
+		error = inode_lookup_casefold(parent.p_inode, &last, &collision);
 		if (error == 0) {
 			inode_release(collision);
-			inode_release(parent);
+			path_release(&parent);
 			return EEXIST;
 		}
 		if (error != ENOENT && error != EOPNOTSUPP) {
-			inode_release(parent);
+			path_release(&parent);
 			return error;
 		}
 		if ((flags & O_CREAT) == 0) {
-			inode_release(parent);
+			path_release(&parent);
 			return ENOENT;
 		}
-		error = inode_create(parent, &last, mode, &inode);
-		inode_release(parent);
+		error = inode_create(parent.p_inode, &last, mode, &inode);
+		if (error == 0) {
+			path_set(&found, parent.p_mount, inode);
+			inode_release(inode);
+		}
+		path_release(&parent);
 		if (error != 0)
 			return error;
 	} else if (error != 0) {
 		return error;
 	} else if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {
-		inode_release(inode);
+		path_release(&found);
 		return EEXIST;
 	}
+	inode = found.p_inode;
 	if ((flags & O_DIRECTORY) && inode->i_type != INODE_DIR) {
-		inode_release(inode);
+		path_release(&found);
 		return ENOTDIR;
 	}
 	if (inode->i_type == INODE_DIR && (flags & O_ACCMODE) != O_RDONLY) {
-		inode_release(inode);
+		path_release(&found);
 		return EISDIR;
 	}
 	if ((flags & O_TRUNC) && inode->i_type == INODE_REG &&
 	    (flags & O_ACCMODE) != O_RDONLY) {
 		error = inode_truncate(inode, 0);
 		if (error != 0) {
-			inode_release(inode);
+			path_release(&found);
 			return error;
 		}
 	}
 	file = file_alloc();
 	if (file == NULL) {
-		inode_release(inode);
+		path_release(&found);
 		return ENOSPC;
 	}
+	file->f_path = found;
 	file->f_inode = inode;
 	file->f_ops = inode->i_fop;
 	file->f_flags = flags;
@@ -122,7 +129,7 @@ file_openat(struct cwdinfo *context, const char *path, int flags,
 	if (file->f_ops != NULL && file->f_ops->open != NULL) {
 		error = file->f_ops->open(file);
 		if (error != 0) {
-			inode_release(inode);
+			path_release(&file->f_path);
 			file_free(file);
 			return error;
 		}
@@ -209,13 +216,26 @@ file_write(struct file *file, const void *buffer, size_t length)
 int
 file_readdir(struct file *file, struct dirent *entry, int *eof)
 {
+	int error;
 	if (file == NULL || entry == NULL || eof == NULL)
 		return EINVAL;
 	if (file->f_inode == NULL || file->f_inode->i_type != INODE_DIR)
 		return ENOTDIR;
 	if (file->f_ops == NULL || file->f_ops->readdir == NULL)
 		return EOPNOTSUPP;
-	return file->f_ops->readdir(file, entry, eof);
+	error = mount_readdir_child(&file->f_path, &file->f_mount_cursor, entry);
+	if (error == 0) {
+		*eof = 0;
+		return 0;
+	}
+	if (error != ENOENT)
+		return error;
+	for (;;) {
+		error = file->f_ops->readdir(file, entry, eof);
+		if (error != 0 || *eof ||
+		    !mount_child_shadows(&file->f_path, entry->d_name))
+			return error;
+	}
 }
 
 off_t
@@ -264,7 +284,9 @@ file_close(struct file *file)
 		return 0;
 	if (file->f_ops != NULL && file->f_ops->close != NULL)
 		error = file->f_ops->close(file);
-	if (file->f_inode != NULL)
+	if (file->f_path.p_inode != NULL)
+		path_release(&file->f_path);
+	else if (file->f_inode != NULL)
 		inode_release(file->f_inode);
 	file_free(file);
 	return error;

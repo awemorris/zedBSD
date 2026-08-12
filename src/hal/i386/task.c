@@ -164,6 +164,12 @@ hal_task_context_switch(hal_task_t handle)
 	asm_task_dispatch(&from->resume_esp, &to->resume_esp);
 }
 
+void
+hal_cpu_idle(void)
+{
+	asm volatile("sti; hlt; cli" ::: "memory");
+}
+
 hal_task_t
 hal_task_get_current(void)
 {

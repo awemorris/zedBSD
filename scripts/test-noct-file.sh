@@ -13,7 +13,7 @@ base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/m10-file"
 image="$work/m10-ide.raw"
 files="$work/files"
-cfg="$work/ZEDBSD.CFG"
+cfg="$work/BOOT.CFG"
 expected='M10 File API PASS'
 
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }

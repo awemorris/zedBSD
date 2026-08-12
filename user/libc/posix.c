@@ -4,6 +4,7 @@
 
 #include <zedbsd/dirent.h>
 #include <zedbsd/syscall.h>
+#include <zedbsd/process.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -15,11 +16,14 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
 char **environ;
-static char *environment_overrides[32];
+#define ENVIRONMENT_MAX 64U
+static char *environment_entries[ENVIRONMENT_MAX + 1U];
+static unsigned char environment_owned[ENVIRONMENT_MAX];
 
 static int environment_name(const char *entry, const char *name)
 {
@@ -35,9 +39,6 @@ char *getenv(const char *name)
 	unsigned i;
 	if (name == NULL || name[0] == '\0' || strchr(name, '=') != NULL)
 		return NULL;
-	for (i = 0; i < 32U; i++)
-		if (environment_name(environment_overrides[i], name))
-			return strchr(environment_overrides[i], '=') + 1;
 	for (i = 0; environ != NULL && environ[i] != NULL; i++)
 		if (environment_name(environ[i], name))
 			return strchr(environ[i], '=') + 1;
@@ -48,24 +49,26 @@ int setenv(const char *name, const char *value, int overwrite)
 {
 	size_t name_length, value_length;
 	char *entry;
-	unsigned i, empty = 32U;
+	unsigned i, empty = ENVIRONMENT_MAX;
 	if (name == NULL || value == NULL || name[0] == '\0' || strchr(name, '=') != NULL) {
 		errno = EINVAL; return -1;
 	}
 	if (!overwrite && getenv(name) != NULL)
 		return 0;
-	for (i = 0; i < 32U; i++) {
-		if (environment_overrides[i] == NULL && empty == 32U) empty = i;
-		if (environment_name(environment_overrides[i], name)) { empty = i; break; }
+	for (i = 0; i < ENVIRONMENT_MAX; i++) {
+		if (environ[i] == NULL && empty == ENVIRONMENT_MAX) empty = i;
+		if (environment_name(environ[i], name)) { empty = i; break; }
 	}
-	if (empty == 32U) { errno = ENOSPC; return -1; }
+	if (empty == ENVIRONMENT_MAX) { errno = ENOSPC; return -1; }
 	name_length = strlen(name); value_length = strlen(value);
 	if (name_length > SIZE_MAX - value_length - 2U) { errno = ENOMEM; return -1; }
 	entry = malloc(name_length + value_length + 2U);
 	if (entry == NULL) { errno = ENOMEM; return -1; }
 	memcpy(entry, name, name_length); entry[name_length] = '=';
 	memcpy(entry + name_length + 1U, value, value_length + 1U);
-	free(environment_overrides[empty]); environment_overrides[empty] = entry;
+	if (environment_owned[empty]) free(environ[empty]);
+	environ[empty] = entry; environment_owned[empty] = 1U;
+	environ[empty + 1U] = NULL;
 	return 0;
 }
 
@@ -75,9 +78,17 @@ int unsetenv(const char *name)
 	if (name == NULL || name[0] == '\0' || strchr(name, '=') != NULL) {
 		errno = EINVAL; return -1;
 	}
-	for (i = 0; i < 32U; i++)
-		if (environment_name(environment_overrides[i], name)) {
-			free(environment_overrides[i]); environment_overrides[i] = NULL;
+	for (i = 0; i < ENVIRONMENT_MAX && environ[i] != NULL; )
+		if (environment_name(environ[i], name)) {
+			unsigned j;
+			if (environment_owned[i]) free(environ[i]);
+			for (j = i; j < ENVIRONMENT_MAX; j++) {
+				environ[j] = environ[j + 1U];
+				environment_owned[j] = j + 1U < ENVIRONMENT_MAX ?
+					environment_owned[j + 1U] : 0U;
+			}
+		} else {
+			i++;
 		}
 	return 0;
 }
@@ -137,6 +148,21 @@ int clock_gettime(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_S
 int nanosleep(const struct timespec *request, struct timespec *remain) {
 	return (int)call(ZEDBSD_SYS_nanosleep, (uintptr_t)request,
 		(uintptr_t)remain, 0, 0, 0, 0);
+}
+
+pid_t zedbsd_spawn(const char *path, char *const argv[], char *const envp[],
+		   unsigned flags) {
+	return (pid_t)call(ZEDBSD_SYS_spawn, (uintptr_t)path, (uintptr_t)argv,
+		(uintptr_t)envp, flags, 0, 0);
+}
+pid_t zedbsd_wait_result(pid_t pid, int *status, char *result,
+			 size_t capacity) {
+	return (pid_t)call(ZEDBSD_SYS_wait, (uintptr_t)pid, (uintptr_t)status,
+		0, (uintptr_t)result, capacity, 0);
+}
+pid_t waitpid(pid_t pid, int *status, int options) {
+	if (options != 0) { errno = EINVAL; return -1; }
+	return zedbsd_wait_result(pid, status, NULL, 0);
 }
 
 int stat(const char *path, struct stat *status)
@@ -257,8 +283,13 @@ static struct zedbsd_heap user_heap;
 void zedbsd_user_libc_init(int argc, char **argv, char **envp)
 {
 	static const size_t sizes[] = { 32U << 20, 16U << 20, 8U << 20, 4U << 20, 2U << 20 };
-	void *arena = MAP_FAILED; size_t i;
-	(void)argc; (void)argv; environ = envp;
+	void *arena = MAP_FAILED; size_t i, env_count;
+	(void)argc; (void)argv;
+	for (env_count = 0; env_count < ENVIRONMENT_MAX && envp != NULL &&
+	     envp[env_count] != NULL; env_count++)
+		environment_entries[env_count] = envp[env_count];
+	environment_entries[env_count] = NULL;
+	environ = environment_entries;
 	stdin->context = (void *)(intptr_t)1;
 	stdout->context = (void *)(intptr_t)2;
 	stderr->context = (void *)(intptr_t)3;

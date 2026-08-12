@@ -15,7 +15,7 @@ base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/m15-repl"
 image="$work/m15-ide.raw"
 files="$work/files"
-cfg="$work/ZEDBSD.CFG"
+cfg="$work/BOOT.CFG"
 monitor="$work/monitor.sock"
 screenshot="$work/m15.ppm"
 shift_test="${ZEDBSD_REPL_SHIFT_TEST:-0}"
@@ -49,7 +49,7 @@ if test "$fresh_swap" = 1; then
 	rm -f -- "$image"
 	ZEDBSD_TEST_MB=40 ZEDBSD_SWAP_SIZE_MIB=32 \
 		ZEDBSD_AUTOEXEC_DISABLE=1 ZEDBSD_FILES="$files" \
-		ZEDBSD_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$image"
+		ZEDBSD_BOOT_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$image"
 else
 	cp --reflink=auto "$base" "$image"
 	ZEDBSD_FILES="$files" DISK_SECTORS=17 \
@@ -180,7 +180,7 @@ def type_text(text):
             raise SystemExit(f"no QEMU key mapping for {char!r}")
         press(key, modifier)
 
-# Let the compatible BIOS and ZEDBSD.CFG reach the argument-free `noct` command.
+# Let the compatible BIOS and BOOT.CFG reach the argument-free `noct` command.
 time.sleep(6)
 if shift_test:
     # A real PC-98 BIOS applies the injected Shift state, so exercise the
@@ -208,7 +208,7 @@ for line in lines:
     press("ret")
     time.sleep(0.35)
 
-# Exit the REPL. ZEDBSD.CFG must resume and execute M15POST.NCT before halt.
+# Exit the REPL. BOOT.CFG must resume and execute M15POST.NCT before halt.
 press("c", "ctrl")
 time.sleep(4)
 qmp("screendump", {"filename": screenshot})
@@ -224,7 +224,7 @@ for _ in $(seq 1 50); do
 	sleep 0.1
 done
 if kill -0 "$qemu_pid" 2>/dev/null; then
-	# A guest halted by the final ZEDBSD.CFG command can stop servicing the
+	# A guest halted by the final BOOT.CFG command can stop servicing the
 	# asynchronous QMP quit request. The FAT marker below is the authoritative
 	# completion check, so terminate only this test-owned QEMU after the grace
 	# period.
@@ -245,7 +245,7 @@ if test "$shift_test" = 1; then
 	}
 fi
 test "$(mtype -i "$image@@$offset" ::M15POST.TXT)" = "SHELL" || {
-	echo "M15 Ctrl-C did not return to ZEDBSD.CFG" >&2
+	echo "M15 Ctrl-C did not return to BOOT.CFG" >&2
 	exit 1
 }
 printf 'M15 zedBSD Noct REPL QEMU test: PASS (%s)\n' "$image"

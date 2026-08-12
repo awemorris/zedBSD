@@ -14,6 +14,8 @@
 
 struct process;
 
+#define THREAD_FLAG_IDLE 0x00000001U
+
 enum thread_state {
 	THREAD_NEW = 0,
 	THREAD_RUNNABLE,

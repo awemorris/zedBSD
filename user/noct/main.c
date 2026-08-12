@@ -170,15 +170,11 @@ int main(int argc, char **argv, char **envp)
 	size_t parameter_count = 0;
 	int pinned = 0, status = 1, type;
 
-	if (argc < 2) {
-		fprintf(stderr, "usage: NOCT.ELF program.NCT [arguments...]\n");
-		return 2;
-	}
-	if (strcmp(argv[1], "--repl") != 0) {
+	if (argc >= 2 && strcmp(argv[1], "--repl") != 0) {
 		path = argv[1];
 		source = read_source(path, &source_size);
 		if (source == NULL) {
-			fprintf(stderr, "NOCT.ELF: cannot read %s\n", path);
+			fprintf(stderr, "noct: cannot read %s\n", path);
 			return 2;
 		}
 	}

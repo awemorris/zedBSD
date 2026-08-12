@@ -2,9 +2,15 @@
 #include "linux-boot.h"
 #include <hal/hal.h>
 #include <kern/image.h>
+#include <kern/file.h>
+#include <kern/inode.h>
+#include <kern/internal.h>
+#include <kern/kmem.h>
+#include <kern/platform.h>
 #include <kern/messages.h>
 #include <kern/process.h>
 #include <kern/swap.h>
+#include <errno.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -320,6 +326,200 @@ static int vmlinux_load(struct zedbsd_file *file, const char *arguments)
 static const struct zedbsd_image_loader loader = {
 	"vmlinux", vmlinux_probe, vmlinux_load
 };
+
+#define PC98_LINUX_DEVICE_MAX 16U
+
+struct pc98_linux_image {
+	struct elf32_header header;
+	struct elf32_program_header programs[16];
+	uint32_t staging_offsets[16];
+	struct hal_pmem staging;
+	struct zedbsd_device devices[PC98_LINUX_DEVICE_MAX];
+	unsigned device_count;
+	int boot_device;
+	char arguments[4096];
+};
+
+static int
+linux_boot_device_for_file(struct file *file)
+{
+	struct disk *disk;
+	unsigned i;
+	if (file == NULL || file->f_path.p_mount == NULL)
+		return -1;
+	disk = file->f_path.p_mount->m_disk;
+	while (disk != NULL && disk->d_parent != NULL)
+		disk = disk->d_parent;
+	for (i = 0; i < kern_device_count; i++)
+		if (kern_platform_block_device(&kern_devices[i]) == disk)
+			return (int)i;
+	return -1;
+}
+
+void
+pc98_linux_discard(struct pc98_linux_image *image)
+{
+	if (image == NULL)
+		return;
+	if (image->staging.size != 0)
+		(void)hal_pmem_free(&image->staging);
+	kern_free(image);
+}
+
+int
+pc98_linux_prepare(struct file *file, const char *arguments, int boot_device,
+		   struct pc98_linux_image **result)
+{
+	struct pc98_linux_image *image;
+	uint32_t destination_end = 0;
+	size_t file_size, staging_size = 0, argument_length;
+	unsigned segments = 0, i;
+	int entry_valid = 0;
+
+	if (file == NULL || file->f_inode == NULL ||
+	    file->f_inode->i_type != INODE_REG || arguments == NULL ||
+	    result == NULL || file->f_inode->i_size < 0 ||
+	    (uint64_t)file->f_inode->i_size > UINT32_MAX)
+		return EINVAL;
+	file_size = (size_t)file->f_inode->i_size;
+	argument_length = strlen(arguments);
+	if (argument_length >= 4096U || kern_device_count > PC98_LINUX_DEVICE_MAX)
+		return E2BIG;
+	if (boot_device < 0)
+		boot_device = linux_boot_device_for_file(file);
+	if (boot_device < 0 || (unsigned)boot_device >= kern_device_count ||
+	    (kern_devices[boot_device].device_class != ZEDBSD_DEV_IDE &&
+	     kern_devices[boot_device].device_class != ZEDBSD_DEV_SCSI))
+		return ENXIO;
+	image = kern_calloc(1, sizeof(*image));
+	if (image == NULL)
+		return ENOMEM;
+	if (file_pread(file, &image->header, sizeof(image->header), 0) !=
+	    (ssize_t)sizeof(image->header)) {
+		pc98_linux_discard(image);
+		return EIO;
+	}
+	if (read_le32(image->header.id) != 0x464c457f ||
+	    image->header.id[4] != 1 || image->header.id[5] != 1 ||
+	    image->header.machine != 3 ||
+	    image->header.phsize != sizeof(image->programs[0]) ||
+	    image->header.phnum > 16 || image->header.phoff > file_size ||
+	    image->header.phnum >
+	    (file_size - image->header.phoff) / sizeof(image->programs[0])) {
+		pc98_linux_discard(image);
+		return ENOEXEC;
+	}
+	for (i = 0; i < image->header.phnum; i++) {
+		struct elf32_program_header *program = &image->programs[i];
+		if (file_pread(file, program, sizeof(*program),
+		    image->header.phoff + i * sizeof(*program)) !=
+		    (ssize_t)sizeof(*program)) {
+			pc98_linux_discard(image);
+			return EIO;
+		}
+		if (program->type != 1)
+			continue;
+		if (program->filesz > program->memsz || program->paddr < 0x100000U ||
+		    program->paddr + program->memsz < program->paddr ||
+		    program->offset + program->filesz < program->offset ||
+		    program->offset + program->filesz > file_size ||
+		    program->filesz > SIZE_MAX - staging_size) {
+			pc98_linux_discard(image);
+			return ENOEXEC;
+		}
+		if (image->header.entry >= program->paddr &&
+		    image->header.entry < program->paddr + program->memsz)
+			entry_valid = 1;
+		image->staging_offsets[i] = (uint32_t)staging_size;
+		staging_size += program->filesz;
+		if (program->paddr + program->memsz > destination_end)
+			destination_end = program->paddr + program->memsz;
+		segments++;
+	}
+	if (segments == 0 || !entry_valid || staging_size == 0 ||
+	    destination_end > UINT32_MAX - 4095U) {
+		pc98_linux_discard(image);
+		return ENOEXEC;
+	}
+	if (hal_pmem_alloc_limited(staging_size,
+	    (destination_end + 4095U) & ~4095U, hal_pmem_get_total_size(),
+	    &image->staging) != HAL_PMEM_SUCCESS) {
+		pc98_linux_discard(image);
+		return ENOMEM;
+	}
+	hal_pc98_enable_high_memory();
+	for (i = 0; i < image->header.phnum; i++) {
+		struct elf32_program_header *program = &image->programs[i];
+		if (program->type != 1)
+			continue;
+		if (file_pread(file,
+		    (void *)(image->staging.vaddr + image->staging_offsets[i]),
+		    program->filesz, program->offset) != (ssize_t)program->filesz) {
+			pc98_linux_discard(image);
+			return EIO;
+		}
+	}
+	memcpy(image->arguments, arguments, argument_length + 1U);
+	memcpy(image->devices, kern_devices,
+	    kern_device_count * sizeof(image->devices[0]));
+	image->device_count = kern_device_count;
+	image->boot_device = boot_device;
+	*result = image;
+	return 0;
+}
+
+void
+pc98_linux_commit(struct pc98_linux_image *image)
+{
+	struct pc98_linux_image local;
+	uint8_t *bp, *e820;
+	uint16_t high_mib;
+	unsigned i;
+
+	if (image == NULL)
+		HAL_FATAL("missing prepared Linux image");
+	local = *image;
+	kern_free(image);
+	linux_devices = local.devices;
+	linux_device_count = local.device_count;
+	linux_boot_device = local.boot_device;
+	if (swap_shutdown(swap_system_backend()) != 0)
+		HAL_FATAL("Linux boot swap shutdown");
+	memset((void *)BP_ADDR, 0, 4096);
+	memcpy((void *)CMD_ADDR, local.arguments, strlen(local.arguments) + 1U);
+	bp = (uint8_t *)BP_ADDR;
+	*(uint32_t *)(bp + 0x228) = CMD_ADDR;
+	bp[0x210] = 0xff;
+	build_disk_setup(bp);
+	e820 = bp + 0x2d0;
+	*(uint64_t *)(e820 + 0) = 0;
+	*(uint64_t *)(e820 + 8) = ((uint32_t)(low_u8(0x501) & 7) + 1) << 17;
+	*(uint32_t *)(e820 + 16) = 1;
+	*(uint64_t *)(e820 + 20) = 0x100000;
+	*(uint64_t *)(e820 + 28) = (uint32_t)low_u8(0x401) << 17;
+	*(uint32_t *)(e820 + 36) = 1;
+	high_mib = low_u16(0x594);
+	if (high_mib) {
+		*(uint64_t *)(e820 + 40) = 0x1000000;
+		*(uint64_t *)(e820 + 48) = (uint64_t)high_mib << 20;
+		*(uint32_t *)(e820 + 56) = 1;
+		bp[0x1e8] = 3;
+	} else {
+		bp[0x1e8] = 2;
+	}
+	(void)hal_irq_disable();
+	for (i = 0; i < local.header.phnum; i++) {
+		struct elf32_program_header *program = &local.programs[i];
+		if (program->type != 1)
+			continue;
+		memcpy((void *)program->paddr,
+		    (const void *)(local.staging.vaddr + local.staging_offsets[i]),
+		    program->filesz);
+		memset((void *)(program->paddr + program->filesz), 0,
+		    program->memsz - program->filesz);
+	}
+	zedbsd_pc98_jump_linux(local.header.entry, BP_ADDR);
+}
 
 int pc98_linux_boot(struct zedbsd_filesystem *filesystem, const char *path,
 		    const char *arguments, const struct zedbsd_device *devices,

@@ -15,7 +15,8 @@ int
 cwdinfo_clone(const struct cwdinfo *source, struct cwdinfo **result)
 {
 	struct cwdinfo *copy;
-	if (source == NULL || source->root == NULL || source->cwd == NULL ||
+	if (source == NULL || source->root.p_inode == NULL ||
+	    source->cwd.p_inode == NULL ||
 	    result == NULL)
 		return EINVAL;
 	copy = kern_malloc(sizeof(*copy));
@@ -24,8 +25,8 @@ cwdinfo_clone(const struct cwdinfo *source, struct cwdinfo **result)
 	memcpy(copy, source, sizeof(*copy));
 	copy->usecount = 1;
 	copy->flags = CWDINFO_DYNAMIC;
-	inode_ref(copy->root);
-	inode_ref(copy->cwd);
+	path_set(&copy->root, source->root.p_mount, source->root.p_inode);
+	path_set(&copy->cwd, source->cwd.p_mount, source->cwd.p_inode);
 	*result = copy;
 	return 0;
 }
@@ -46,8 +47,8 @@ cwdinfo_release(struct cwdinfo *context)
 	if (--context->usecount != 0)
 		return;
 	dynamic = context->flags & CWDINFO_DYNAMIC;
-	inode_release(context->root);
-	inode_release(context->cwd);
+	path_release(&context->root);
+	path_release(&context->cwd);
 	if (dynamic)
 		kern_free(context);
 	else

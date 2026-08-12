@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verify the persistent shell/ZEDBSD.CFG <-> Noct environment bridge on i386.
+# Verify the persistent shell/BOOT.CFG <-> Noct environment bridge on i386.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 arch="${ZEDBSD_ARCH:-pc98}"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
@@ -12,7 +12,7 @@ base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/m14-env"
 image="$work/m14-ide.raw"
 files="$work/files"
-cfg="$work/ZEDBSD.CFG"
+cfg="$work/BOOT.CFG"
 expected='M14 ENV PASS'
 
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }

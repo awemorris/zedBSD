@@ -14,7 +14,7 @@ cpu="${ZEDBSD_TEST_CPU:-486}"
 work="$build/tests/ide-multidrive"
 primary="$work/primary.img"
 secondary="$work/secondary.img"
-cfg="$work/ZEDBSD.CFG"
+cfg="$work/BOOT.CFG"
 marker="$work/SECOND.TXT"
 monitor="$work/monitor.sock"
 
@@ -39,8 +39,8 @@ halt
 EOF
 printf '%s\n' 'SECOND IDE OK' > "$marker"
 
-ZEDBSD_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$primary"
-# ZEDBSD.CFG must win over the default graphical AUTOEXEC.NCT.
+ZEDBSD_BOOT_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$primary"
+# BOOT.CFG controls startup; AUTOEXEC.NCT is never implicit.
 mdel -i "$primary@@34816" ::AUTOEXEC.NCT
 cp --reflink=auto "$primary" "$secondary"
 mcopy -o -i "$secondary@@34816" "$marker" ::SECOND.TXT

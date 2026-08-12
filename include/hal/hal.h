@@ -333,6 +333,9 @@ void hal_task_destroy(hal_task_t t);
 /* Switch to a task. */
 void hal_task_context_switch(hal_task_t t);
 
+/* Atomically enable interrupts and halt, then return with IRQs disabled. */
+void hal_cpu_idle(void);
+
 /* Get the current task. */
 hal_task_t hal_task_get_current(void);
 
