@@ -121,13 +121,24 @@ func drawMenu(backgroundImage, selected) {
 }
 
 func main() {
+    Console.print("menu: loading /bin/menuback.bmp");
     var background = loadBackground("/bin/menuback.bmp");
-    if (BeUI.initWithHint(24) != 1) {
+    if (background == 0)
+        Console.print("menu: background unavailable; using solid fill");
+    else
+        Console.print("menu: background loaded");
+    Console.print("menu: entering 8bpp graphics mode");
+    if (BeUI.initWithHint(8) != 1) {
+        Console.print("menu: graphics mode initialization failed");
         if (background != 0) { BeUI.destroyImage(background); }
         return 1;
     }
     var selected = 0;
     drawMenu(background, selected);
+    // Discard type-ahead accumulated while the ELF, script, and BMP were
+    // loading.  In particular, an old Enter must not select Linux before
+    // the freshly drawn menu has been visible on real hardware.
+    BeUI.sleep(150);
     while (1) {
         var key = Keyboard.read();
         var previous = selected;
@@ -150,7 +161,7 @@ func main() {
                 System.setEnv("BOOT_ACTION", "emacs EDIT.TXT");
             }
             if (selected == 2) {
-                System.setEnv("BOOT_ACTION", "holoris");
+                System.setEnv("BOOT_ACTION", "noct /apps/holoris.nap");
             }
             if (selected == 3) {
                 System.setEnv("BOOT_ACTION", "echo Entering shell.");

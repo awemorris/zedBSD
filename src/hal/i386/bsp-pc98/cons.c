@@ -7,8 +7,6 @@
 
 #include "hal/hal.h"
 
-#define TERMINAL_FIRST_ROW 18U
-
 static volatile uint16_t *const text_vram =
 	(volatile uint16_t *)0x800a0000;
 static volatile uint8_t *const attribute_vram =
@@ -392,7 +390,7 @@ void hal_cons_restore_terminal(const struct hal_cons_state *state)
 
 	console_mode = HAL_CONS_TERMINAL;
 	if (output_row >= HAL_CONS_ROWS) {
-		output_row = TERMINAL_FIRST_ROW;
+		output_row = 0;
 		output_column = 0;
 	}
 	if (state != 0 && state->mode == HAL_CONS_TERMINAL &&
@@ -414,10 +412,6 @@ void hal_cons_restore_terminal(const struct hal_cons_state *state)
 void hal_cons_set_mode(enum hal_cons_mode mode)
 {
 	console_mode = mode;
-	if (mode == HAL_CONS_TERMINAL) {
-		cursor_row = TERMINAL_FIRST_ROW;
-		cursor_column = 0;
-	}
 }
 
 /* Program CSRFORM as well as CSRW so firmware cannot leave the cursor hidden. */

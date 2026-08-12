@@ -176,7 +176,8 @@ static enum zedbsd_fs_result memory_readdir(
 	unsigned visible = 0;
 
 	(void)filesystem;
-	if (*path && strcmp(path, "/"))
+	/* The process cwd is the mock filesystem root. */
+	if (*path && strcmp(path, "/") && strcmp(path, "."))
 		return ZEDBSD_FS_INVALID_PATH;
 	for (unsigned record = 0;
 	     record < sizeof(records) / sizeof(records[0]); record++)
@@ -412,7 +413,8 @@ static int mock_directory_read(void *context, const char *path, unsigned index,
 		{ "LIB.NCT", 38, 0x20 },
 	};
 	(void)context;
-	if (strcmp(path, "") != 0 && strcmp(path, "/") != 0)
+	if (strcmp(path, "") != 0 && strcmp(path, "/") != 0 &&
+	    strcmp(path, ".") != 0)
 		return -1;
 	if (index >= sizeof(entries) / sizeof(entries[0]))
 		return 0;

@@ -46,6 +46,7 @@ done
 
 mkdir -p "$work"
 cp --reflink=auto "$base" "$image"
+# Exercise the shell's /apps search and .nap suffix fallback.
 printf 'holoris test\nhalt\n' > "$cfg"
 
 "$repo/build.sh" vmunix "$arch"
@@ -53,11 +54,10 @@ ZEDBSD_ZINIT_RC="$cfg" DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'
-import os
 import struct
 import sys
 
-heads = 4 if os.path.getsize(sys.argv[1]) <= 20 * 1024 * 1024 else 8
+heads = 8
 with open(sys.argv[1], 'rb') as stream:
     stream.seek(512)
     table = stream.read(512)

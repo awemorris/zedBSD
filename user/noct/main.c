@@ -195,7 +195,6 @@ int main(int argc, char **argv, char **envp)
 
 	noct_set_default_config(&config);
 	config.jit_enable = true;
-	config.jit_threshold = 32;
 	config.jit_code_size = 1024U * 1024U;
 	config.gc_nursery_size = 256U * 1024U;
 	config.gc_graduate_size = 256U * 1024U;

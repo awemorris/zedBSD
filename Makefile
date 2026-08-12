@@ -156,7 +156,7 @@ BEUI_TEST_CC := $(HOST_TEST_CC) -I$(NOCT_ROOT)/include -I$(NOCT_ROOT)/src/api
 BEUI_CORE_SOURCES := $(NOCT_ROOT)/src/api/beui-core.c \
 	$(NOCT_ROOT)/src/api/beui-image.c
 
-$(BUILD)/tests/beui-host-test: $(NOCT_ROOT)/tests/beui-test.c \
+$(BUILD)/tests/beui-host-test: $(NOCT_ROOT)/tests/testcases/beui-test.c \
 	$(BEUI_CORE_SOURCES)
 	@mkdir -p $(dir $@)
 	$(BEUI_TEST_CC) $(BEUI_CORE_SOURCES) $< -o $@

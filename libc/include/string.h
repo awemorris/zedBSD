@@ -7,6 +7,7 @@
 void *memcpy(void *destination, const void *source, size_t count);
 void *memmove(void *destination, const void *source, size_t count);
 void *memset(void *destination, int value, size_t count);
+void *memchr(const void *memory, int character, size_t count);
 int memcmp(const void *left, const void *right, size_t count);
 size_t strlen(const char *string);
 size_t strnlen(const char *string, size_t maximum);
@@ -20,5 +21,6 @@ char *strchr(const char *string, int character);
 char *strrchr(const char *string, int character);
 char *strstr(const char *haystack, const char *needle);
 char *strdup(const char *string);
+char *strerror(int error);
 
 #endif

@@ -7,6 +7,7 @@
  */
 
 #include <stddef.h>
+#include <errno.h>
 #include <string.h>
 
 void *
@@ -46,6 +47,20 @@ memset(void *destination, int value, size_t count)
 	while (count-- != 0)
 		*dst++ = (unsigned char)value;
 	return destination;
+}
+
+void *
+memchr(const void *memory, int character, size_t count)
+{
+	const unsigned char *bytes = memory;
+	unsigned char wanted = (unsigned char)character;
+
+	while (count-- != 0) {
+		if (*bytes == wanted)
+			return (void *)bytes;
+		bytes++;
+	}
+	return NULL;
 }
 
 int
@@ -186,4 +201,40 @@ char *
 strdup(const char *string)
 {
 	return zedbsd_strdup(string);
+}
+
+char *
+strerror(int error)
+{
+	switch (error) {
+	case EDOM: return "Domain error";
+	case ERANGE: return "Range error";
+	case EINVAL: return "Invalid argument";
+	case ENOMEM: return "Not enough memory";
+	case EIO: return "Input/output error";
+	case ENOENT: return "No such file or directory";
+	case EINTR: return "Interrupted system call";
+	case ENOSPC: return "No space left on device";
+	case EROFS: return "Read-only file system";
+	case EOVERFLOW: return "Value too large";
+	case ENAMETOOLONG: return "File name too long";
+	case ENXIO: return "No such device or address";
+	case ENODEV: return "No such device";
+	case ENOTDIR: return "Not a directory";
+	case EISDIR: return "Is a directory";
+	case EEXIST: return "File exists";
+	case EBUSY: return "Device or resource busy";
+	case ENOTEMPTY: return "Directory not empty";
+	case EBADF: return "Bad file descriptor";
+	case ENOSYS: return "Function not implemented";
+	case EOPNOTSUPP: return "Operation not supported";
+	case ENOEXEC: return "Executable format error";
+	case EFAULT: return "Bad address";
+	case EAGAIN: return "Resource temporarily unavailable";
+	case EACCES: return "Permission denied";
+	case ESRCH: return "No such process";
+	case ECHILD: return "No child process";
+	case E2BIG: return "Argument list too long";
+	default: return "Unknown error";
+	}
 }

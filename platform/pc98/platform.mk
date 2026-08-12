@@ -339,14 +339,14 @@ hdd-boot-qemu-test:
 
 # Register-level backend tests, upstream with the drivers they cover.
 $(BUILD)/tests/beui-pc98-gdc-host-test: \
-	$(NOCT_ROOT)/tests/beui-pc98-gdc-test.c \
+	$(NOCT_ROOT)/tests/testcases/beui-pc98-gdc-test.c \
 	$(NOCT_ROOT)/src/api/beui-pc98-gdc.c $(BEUI_CORE_SOURCES)
 	@mkdir -p $(dir $@)
 	$(BEUI_TEST_CC) $(NOCT_ROOT)/src/api/beui-pc98-gdc.c \
 		$(BEUI_CORE_SOURCES) $< -o $@
 
 $(BUILD)/tests/beui-pc98-cirrus-host-test: \
-	$(NOCT_ROOT)/tests/beui-pc98-cirrus-test.c \
+	$(NOCT_ROOT)/tests/testcases/beui-pc98-cirrus-test.c \
 	$(NOCT_ROOT)/src/api/beui-pc98-cirrus.c
 	@mkdir -p $(dir $@)
 	$(BEUI_TEST_CC) $(NOCT_ROOT)/src/api/beui-pc98-cirrus.c $< -o $@

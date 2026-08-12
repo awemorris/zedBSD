@@ -20,6 +20,8 @@ copied_file="$work/COPY.BIN"
 fallback_file="$work/FALLBACK.TXT"
 elf_search_file="$work/ELFTEST.TXT"
 search_file="$work/SEARCH.NCT"
+cwd_file="$work/CWDTEST.TXT"
+cwd_script="$work/CWDCHECK.NCT"
 
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios_dir" || {
@@ -43,22 +45,34 @@ func main(args) {
     return 0;
 }
 EOF
+cat > "$cwd_script" <<'EOF'
+func main(args) {
+    for (entry in Directory.list(".")) {
+        if (entry.name == "ls.nct") {
+            FileUtil.writeText("/home/CWDTEST.TXT", "apps");
+            return 0;
+        }
+    }
+    return 1;
+}
+EOF
 python3 - "$source_file" <<'PY'
 import sys
 
 with open(sys.argv[1], "wb") as stream:
     stream.write(bytes((index * 37 + 11) & 0xff for index in range(16417)))
 PY
-printf 'ls\ncp SOURCE.BIN COPY.BIN\nhalt\n' > "$cfg"
-"$repo/build.sh" vmunix "$arch"
+printf 'cd /apps\ncwdcheck\nls\nls -l\ncd /\nsearch FALLBACK\nnoct /apps/search.nct ELFTEST\ncp SOURCE.BIN COPY.BIN\nhalt\n' > "$cfg"
+make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
 ZEDBSD_FILES="$files" ZEDBSD_ZINIT_RC="$cfg" \
-	DISK_HEADS=8 DISK_SECTORS=17 \
+	DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'
 import struct
 import sys
 
+heads = 8
 with open(sys.argv[1], "rb") as stream:
     stream.seek(512)
     table = stream.read(512)
@@ -66,7 +80,7 @@ for offset in range(0, 512, 32):
     entry = table[offset:offset + 32]
     if entry[0] and entry[16:32] == b"BOOT".ljust(16, b" "):
         cylinder = struct.unpack_from("<H", entry, 6)[0]
-        print(cylinder * 8 * 17 * 512)
+        print(cylinder * heads * 17 * 512)
         break
 else:
     raise SystemExit("BOOT partition not found")
@@ -77,6 +91,7 @@ PY
 # resolver deliberately searches only /bin and /apps, so place this script in
 # /apps as a separate test fixture.
 mcopy -o -i "$image@@$offset" "$search_file" ::APPS/SEARCH.NCT
+mcopy -o -i "$image@@$offset" "$cwd_script" ::APPS/CWDCHECK.NCT
 
 set +e
 timeout --signal=INT --kill-after=5 45 \
@@ -95,15 +110,20 @@ cmp -s "$source_file" "$copied_file" || {
 	echo "M11 CP.NCT result differs from SOURCE.BIN" >&2
 	exit 1
 }
-rm -f -- "$fallback_file" "$elf_search_file"
+rm -f -- "$fallback_file" "$elf_search_file" "$cwd_file"
 mcopy -i "$image@@$offset" ::HOME/FALLBACK.TXT "$fallback_file"
 mcopy -i "$image@@$offset" ::HOME/ELFTEST.TXT "$elf_search_file"
+mcopy -i "$image@@$offset" ::HOME/CWDTEST.TXT "$cwd_file"
 test "$(cat "$fallback_file")" = FALLBACK || {
 	echo "shell /apps .nct fallback result mismatch" >&2
 	exit 1
 }
 test "$(cat "$elf_search_file")" = ELFTEST || {
 	echo "shell /bin ELF search result mismatch" >&2
+	exit 1
+}
+test "$(cat "$cwd_file")" = apps || {
+	echo "shell cwd was not inherited by an /apps Noct command" >&2
 	exit 1
 }
 printf 'M11 LS.NCT/CP.NCT QEMU test: PASS (%s)\n' "$image"

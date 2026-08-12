@@ -23,6 +23,13 @@
 struct cwdinfo kern_cwdinfo __attribute__((section(".vfs_bss")));
 
 static int
+vfs_fail(const char *stage, int error)
+{
+	hal_printf("vfs: %s failed (error %d)\n", stage, error);
+	return error;
+}
+
+static int
 disk_name(unsigned number, char name[NAME_MAX + 1U])
 {
 	unsigned at = 4;
@@ -45,11 +52,14 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	struct disk *boot_partition = NULL;
 	struct mount *boot_mount;
 	struct path root_path;
+	const char *failure_stage = "initialize root cwd";
 	unsigned physical_count = 0, next_number = 2, i;
 	int error;
 
 	if (handoff == NULL)
-		return EINVAL;
+		return vfs_fail("handoff", EINVAL);
+	hal_printf("vfs: boot BIOS=%02X partition LBA=%u devices=%u\n",
+	    handoff->boot_bios_id, handoff->boot_partition_lba, device_count);
 	for (i = 0; i < device_count; i++)
 		if (devices[i].bios_id == handoff->boot_bios_id) {
 			boot_physical = kern_platform_block_device(&devices[i]);
@@ -60,38 +70,57 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		if (disk != NULL && !(disk->d_flags & DISK_PARTITION))
 			physical[physical_count++] = disk;
 	}
+	hal_printf("vfs: native boot disk=%s physical disks=%u\n",
+	    boot_physical != NULL ? boot_physical->d_name : "none",
+	    physical_count);
 	mount_reset();
 	cdev_reset();
 	partition_reset();
 	error = filesystem_register(&fat_filesystem_type);
 	if (error != 0)
-		return error;
+		return vfs_fail("register FAT", error);
 	error = filesystem_register(&devfs_type);
 	if (error != 0)
-		return error;
+		return vfs_fail("register devfs", error);
 	error = console_device_register();
 	if (error != 0)
-		return error;
+		return vfs_fail("register console", error);
 	error = graphics_device_register();
 	if (error != 0)
-		return error;
+		return vfs_fail("register graphics", error);
 	error = system_device_register();
 	if (error != 0)
-		return error;
+		return vfs_fail("register system", error);
 	error = boot_device_register();
 	if (error != 0)
-		return error;
+		return vfs_fail("register boot device", error);
 
 	for (i = 0; i < physical_count; i++) {
 		struct partition entries[PARTITION_MAX];
+		struct disk_geometry geometry;
+		int geometry_error = disk_ioctl(physical[i],
+		    DISK_IOCTL_GET_GEOMETRY, &geometry);
 		int count = partition_scan(physical[i], entries, PARTITION_MAX);
 		int slot;
+		if (geometry_error == 0)
+			hal_printf("vfs: scan %s H/S=%u/%u blocks=%u: %d entries\n",
+			    physical[i]->d_name, geometry.heads,
+			    geometry.sectors_per_track,
+			    (uint32_t)physical[i]->d_block_count, count);
+		else
+			hal_printf("vfs: scan %s geometry error=%d: %d entries\n",
+			    physical[i]->d_name, geometry_error, count);
 		if (count < 0)
 			continue;
 		for (slot = 0; slot < count; slot++) {
 			if (entries[slot].p_block_count == 0 ||
 			    partition_create_disk(&entries[slot]) != 0)
 				continue;
+			hal_printf("vfs: %s partition %u start=%u data=%u blocks=%u\n",
+			    physical[i]->d_name, (unsigned)slot + 1U,
+			    (uint32_t)entries[slot].p_start_block,
+			    (uint32_t)entries[slot].p_data_block,
+			    (uint32_t)entries[slot].p_block_count);
 			if (physical[i] == boot_physical &&
 			    entries[slot].p_start_block ==
 			    handoff->boot_partition_lba)
@@ -99,21 +128,23 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		}
 	}
 	if (boot_partition == NULL)
-		return ENXIO;
+		return vfs_fail("find boot partition", ENXIO);
 	{
 		struct fat_mount_args args = { boot_partition->d_name };
 		error = mount_root_create("auto", 0, &args, &boot_mount);
 	}
 	if (error != 0)
-		return error;
+		return vfs_fail("mount boot FAT", error);
 	path_set(&root_path, boot_mount, boot_mount->m_root);
 	error = cwdinfo_init(&kern_cwdinfo, &root_path);
 	if (error != 0)
 		goto out_root;
 	process_attach_boot_cwd(&kern_cwdinfo);
+	failure_stage = "bind /disk1";
 	error = mount_bind_at(&root_path, &root_path, "disk1", NULL);
 	if (error != 0)
 		goto out_root;
+	failure_stage = "mount /dev";
 	error = mount_at("devfs", &root_path, "dev", 0, NULL, NULL);
 	if (error != 0)
 		goto out_root;
@@ -138,5 +169,5 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 
 out_root:
 	path_release(&root_path);
-	return error;
+	return vfs_fail(failure_stage, error);
 }

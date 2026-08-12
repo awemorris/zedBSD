@@ -55,7 +55,7 @@ init_pagemap_tbl(void)
 	phys_pages = total / PAGE_SIZE;
 	if (phys_pages > PAGEMAP_WORDS * 32U)
 		phys_pages = PAGEMAP_WORDS * 32U;
-	hal_printf("mem: %d kb detected.\n", total / 1024);
+	hal_printf("boot: physical memory: %u KiB\n", total / 1024U);
 	if (total < 0x400000)
 		HAL_FATAL("too few physical memory");
 

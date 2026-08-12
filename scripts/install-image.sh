@@ -29,7 +29,7 @@ done
 image="${1:?usage: $0 [--partition N] [--install-disk-stubs] IMAGE [VMLINUX [BOOT.CFG]]}"
 kernel="${2:-}"
 boot_cfg="${3:-}"
-heads="${DISK_HEADS:-}"
+heads="${DISK_HEADS:-8}"
 source_heads="${DISK_SOURCE_HEADS:-}"
 sectors="${DISK_SECTORS:-17}"
 swap_size_mib="${ZEDBSD_SWAP_SIZE_MIB:-0}"
@@ -43,15 +43,6 @@ cleanup()
 trap cleanup EXIT INT TERM
 
 test -f "$image" || { echo "Image not found: $image" >&2; exit 1; }
-if test -z "$heads"; then
-	image_bytes="$(stat -c %s "$image")"
-	# Only the legacy 20 MiB disk class uses four-head geometry.
-	if test "$image_bytes" -le $((20 * 1024 * 1024)); then
-		heads=4
-	else
-		heads=8
-	fi
-fi
 test -z "$kernel" || test -f "$kernel" || {
 	echo "Kernel not found: $kernel" >&2
 	exit 1

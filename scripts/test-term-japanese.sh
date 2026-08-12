@@ -39,7 +39,7 @@ printf 'noct TERMJIS.NCT\nhalt\n' > "$cfg"
 
 "$repo/build.sh" vmunix "$arch"
 ZEDBSD_FILES="$files" ZEDBSD_ZINIT_RC="$cfg" \
-	DISK_HEADS=8 DISK_SECTORS=17 \
+	DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 rm -f -- "$monitor" "$screenshot" "$vram"

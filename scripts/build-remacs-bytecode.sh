@@ -42,6 +42,7 @@ if test -z "$noct"; then
 		-DNOCT_ENABLE_API_TERM=ON \
 		-DNOCT_ENABLE_REPL=ON \
 		-DNOCT_ENABLE_BCBACKEND=ON \
+		-DNOCT_ENABLE_OPTIMIZER=ON \
 		-DNOCT_ENABLE_INSTALL=OFF
 	cmake --build "$host_build" --target noctcli \
 		--parallel "${JOBS:-$(nproc)}"

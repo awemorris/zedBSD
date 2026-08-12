@@ -118,14 +118,24 @@ void kernel_main(const struct zedbsd_handoff *h,
 		 const struct zedbsd_device *platform_devices,
 		 unsigned platform_device_count)
 {
+	int error;
+
 	ho = h;
 	device_count = platform_device_count;
 	devs = platform_devices;
-	(void)kern_platform_graphics_init(zedbsd_kernel_milliseconds, NULL, NULL);
+	hal_printf("boot: graphics service initialization\n");
+	if (!kern_platform_graphics_init(zedbsd_kernel_milliseconds, NULL, NULL))
+		hal_printf("boot: graphics service unavailable\n");
 	zedbsd_env_init(&boot_environment);
-	if (kern_vfs_init(h, platform_devices, platform_device_count) != 0)
-		puts("VFS initialization failed; entering idle.\n");
-	else if (kern_init_start() != 0)
-		puts("init not started; entering idle.\n");
+	hal_printf("boot: VFS initialization\n");
+	error = kern_vfs_init(h, platform_devices, platform_device_count);
+	if (error != 0)
+		hal_printf("VFS initialization failed (%d); entering idle.\n",
+		    error);
+	else {
+		hal_printf("boot: starting init /bin/sh\n");
+		if (kern_init_start() != 0)
+			puts("init not started; entering idle.\n");
+	}
 	sched_idle();
 }

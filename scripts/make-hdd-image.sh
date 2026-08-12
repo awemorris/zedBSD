@@ -5,7 +5,7 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 arch="${ZEDBSD_ARCH:-pc98}"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 output="${1:-$build/hdd-test.img}"
-heads="${DISK_HEADS:-}"
+heads="${DISK_HEADS:-8}"
 sectors="${DISK_SECTORS:-17}"
 
 test ! -e "$output" || {
@@ -13,16 +13,7 @@ test ! -e "$output" || {
 	exit 1
 }
 mkdir -p "$(dirname "$output")"
-truncate -s "${ZEDBSD_TEST_MB:-16}M" "$output"
-if test -z "$heads"; then
-	image_bytes="$(stat -c %s "$output")"
-	# Only the legacy 20 MiB disk class uses four-head geometry.
-	if test "$image_bytes" -le $((20 * 1024 * 1024)); then
-		heads=4
-	else
-		heads=8
-	fi
-fi
+truncate -s "${ZEDBSD_TEST_MB:-40}M" "$output"
 
 # Write one NEC PC-98 partition-table entry.  The table lives in the
 # second physical sector (LBA 1) and holds sixteen 32-byte entries:

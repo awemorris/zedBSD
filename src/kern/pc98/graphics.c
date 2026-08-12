@@ -3,6 +3,7 @@
 #include "hal/i386/bsp-pc98/display.h"
 
 #include "beui-pc98-auto.h"
+#include <hal/hal.h>
 #include <noct/beui.h>
 #include <string.h>
 
@@ -71,19 +72,41 @@ int kern_platform_graphics_enter(struct kern_graphics_mode *mode)
 		return 0;
 	memset(&info, 0, sizeof(info));
 	info.preferred_bits_per_pixel = mode->preferred_bits_per_pixel;
-	if (!native_display.enter(native_display.context, &info))
+	hal_printf("graphics: enter request: preferred %u bpp\n",
+	    mode->preferred_bits_per_pixel);
+	/* Blank both PC-98 text and attribute VRAM while the motherboard GDC is
+	 * still selected.  The Cirrus probe and mode setup can take long enough
+	 * for stale attributes to be visible on real hardware. */
+	hal_cons_clear();
+	(void)hal_cons_set_cursor(0, 0);
+	hal_cons_show_cursor(0);
+	if (!native_display.enter(native_display.context, &info)) {
+		hal_cons_set_mode(HAL_CONS_TERMINAL);
+		hal_cons_show_cursor(1);
+		hal_printf("graphics: Cirrus and GDC mode entry failed\n");
 		return 0;
+	}
 	mode->width = info.width;
 	mode->height = info.height;
 	mode->bits_per_pixel = info.bits_per_pixel;
 	mode->stride = info.stride;
+	hal_printf("graphics: %s mode %ux%ux%u stride=%u\n",
+	    display.active == &display.cirrus_hal.display ? "Cirrus" : "GDC",
+	    info.width, info.height, info.bits_per_pixel, info.stride);
 	return 1;
 }
 
 void kern_platform_graphics_leave(void)
 {
-	if (native_display.leave != NULL)
+	if (native_display.leave != NULL) {
+		/* Clear the hidden text and attribute planes before selecting the
+		 * motherboard GDC again, so no stale cell is ever scanned out. */
+		hal_cons_reset();
+		hal_cons_set_mode(HAL_CONS_TERMINAL);
+		hal_cons_show_cursor(0);
 		native_display.leave(native_display.context);
+		hal_cons_show_cursor(1);
+	}
 }
 
 int kern_platform_graphics_fill(const struct kern_graphics_rect *rect,

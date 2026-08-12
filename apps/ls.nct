@@ -72,7 +72,8 @@ func printColumns(entries) {
 }
 
 func main(args) {
-    var path = "/";
+    // Relative lookup is resolved against the cwd inherited from the shell.
+    var path = ".";
     var pathSet = 0;
     var longFormat = 0;
 

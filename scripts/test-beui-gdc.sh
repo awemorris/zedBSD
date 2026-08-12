@@ -98,11 +98,10 @@ ZEDBSD_AUTOEXEC="$files/G2A.NCT" ZEDBSD_FILES="$files" \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'
-import os
 import struct
 import sys
 
-heads = 4 if os.path.getsize(sys.argv[1]) <= 20 * 1024 * 1024 else 8
+heads = 8
 with open(sys.argv[1], 'rb') as stream:
     stream.seek(512)
     table = stream.read(512)

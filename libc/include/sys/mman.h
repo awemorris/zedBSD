@@ -19,8 +19,11 @@
 #define MAP_ANON MAP_ANONYMOUS
 #define MAP_FAILED ((void *)-1)
 
+#define MS_SYNC 0x0001
+
 void *mmap(void *, size_t, int, int, int, off_t);
 int munmap(void *, size_t);
 int mprotect(void *, size_t, int);
+int msync(void *, size_t, int);
 
 #endif

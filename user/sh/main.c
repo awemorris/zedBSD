@@ -312,13 +312,16 @@ static int
 run_autoexec(const char *path)
 {
 	char result[256] = {0};
+	char action[sizeof(result)];
 	char *argv[] = { "/bin/noct", (char *)path, NULL };
 	if (!spawn_wait(argv, ZEDBSD_SPAWN_RESULT, result, sizeof(result)))
 		return 0;
 	if (result[0] == '\0')
 		return 1;
+	strncpy(action, result, sizeof(action) - 1U);
+	action[sizeof(action) - 1U] = '\0';
 	if (!command(result)) {
-		fprintf(stderr, "BOOT_ACTION failed: %s\n", result);
+		fprintf(stderr, "BOOT_ACTION failed: %s\n", action);
 		return 0;
 	}
 	return 1;
@@ -328,13 +331,16 @@ static int
 run_external(char *const argv[])
 {
 	char result[256] = {0};
+	char action[sizeof(result)];
 
 	if (!spawn_wait(argv, ZEDBSD_SPAWN_RESULT, result, sizeof(result)))
 		return 0;
 	if (result[0] == '\0')
 		return 1;
+	strncpy(action, result, sizeof(action) - 1U);
+	action[sizeof(action) - 1U] = '\0';
 	if (!command(result)) {
-		fprintf(stderr, "command result failed: %s\n", result);
+		fprintf(stderr, "command result failed: %s\n", action);
 		return 0;
 	}
 	return 1;
@@ -544,17 +550,10 @@ command(char *text)
 static void
 run_startup(void)
 {
-	struct zedbsd_console_cursor cursor = { 1, 0, 1 };
 	struct zedbsd_console_event event;
 	struct timespec start, now, delay = { 0, 10000000L };
 	int cancelled = 0;
 
-	(void)ioctl(0, ZEDBSD_CONSOLE_CLEAR);
-	(void)ioctl(0, ZEDBSD_CONSOLE_SET_CURSOR, &cursor);
-	puts("NEC PC-9800 ｼﾘｰｽﾞ ﾊﾟｰｿﾅﾙ ｺﾝﾋﾟｭｰﾀ");
-	putchar('\n');
-	puts("zedBSD ｵﾍﾟﾚｰﾃｨﾝｸﾞ ｼｽﾃﾑ ﾊﾞｰｼﾞｮﾝ 0.0.1");
-	putchar('\n');
 	if (access("/etc/zinit.rc", F_OK) != 0)
 		return;
 	(void)ioctl(0, ZEDBSD_CONSOLE_DRAIN_INPUT);

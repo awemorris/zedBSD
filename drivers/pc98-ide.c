@@ -17,6 +17,7 @@
 #include "drivers/pc98-ide.h"
 #include "kern/boot.h"
 #include <errno.h>
+#include <hal/hal.h>
 
 #define IDE_BANK_SELECT   0x432U
 #define IDE_DATA          0x640U
@@ -31,6 +32,7 @@
 
 #define IDE_STATUS_BSY    0x80U
 #define IDE_STATUS_DRDY   0x40U
+#define IDE_STATUS_DF     0x20U
 #define IDE_STATUS_DRQ    0x08U
 #define IDE_STATUS_ERR    0x01U
 
@@ -62,6 +64,8 @@ struct ide_unit {
 static struct ide_unit units[IDE_UNIT_MAX];
 static struct ide_unit *unit_order[IDE_UNIT_MAX];
 static unsigned unit_count;
+static uint8_t bank_control;
+static const char *failure_stage;
 
 static uint8_t
 inb(uint16_t port)
@@ -96,8 +100,8 @@ outw(uint16_t port, uint16_t value)
 static void
 select_bank(uint8_t bank)
 {
-	/* Bit 3 would enable 32-bit data transfers; stay on 16-bit PIO. */
-	outb(IDE_BANK_SELECT, bank & 1U);
+	/* Preserve controller state other than the channel-select bit. */
+	outb(IDE_BANK_SELECT, (uint8_t)(bank_control | (bank & 1U)));
 }
 
 /* Reading the alternate status four times gives the 400ns settle time
@@ -122,6 +126,27 @@ wait_clear(uint8_t mask)
 	return 0;
 }
 
+/*
+ * An absent device can leave the shared task-file bus floating at 0xff.
+ * That is not a busy device: it must be possible to write DRIVE/HEAD and
+ * select a known-present sibling.  Linux libata's ata_sff_busy_wait() uses
+ * the same rule.
+ */
+static int
+wait_selectable(void)
+{
+	uint32_t spins;
+
+	for (spins = 0; spins < IDE_TIMEOUT_SPINS; spins++) {
+		uint8_t status = inb(IDE_ALT_STATUS);
+
+		if (status == 0xffU ||
+		    !(status & (IDE_STATUS_BSY | IDE_STATUS_DRQ)))
+			return 1;
+	}
+	return 0;
+}
+
 /* Wait for BSY to drop and DRQ to rise; fails on ERR or timeout. */
 static int
 wait_drq(void)
@@ -133,7 +158,7 @@ wait_drq(void)
 
 		if (status & IDE_STATUS_BSY)
 			continue;
-		if (status & IDE_STATUS_ERR)
+		if (status & (IDE_STATUS_DF | IDE_STATUS_ERR))
 			return 0;
 		if (status & IDE_STATUS_DRQ)
 			return 1;
@@ -145,12 +170,14 @@ static int
 select_unit(const struct ide_unit *unit, uint8_t head_bits, int lba)
 {
 	select_bank(unit->bank);
-	if (!wait_clear(IDE_STATUS_BSY | IDE_STATUS_DRQ))
+	failure_stage = "wait before select";
+	if (!wait_selectable())
 		return 0;
 	outb(IDE_DRIVE_HEAD, (uint8_t)(0xa0U | (lba ? 0x40U : 0U) |
 				       ((unit->drive & 1U) << 4) |
 				       (head_bits & 0x0fU)));
 	select_delay();
+	failure_stage = "wait after select";
 	return wait_clear(IDE_STATUS_BSY);
 }
 
@@ -202,6 +229,7 @@ pio_read(struct disk *dev, uint64_t lba, uint32_t count, void *buffer)
 		for (sector = 0; sector < chunk; sector++) {
 			unsigned word;
 
+			failure_stage = "wait read DRQ";
 			if (!wait_drq())
 				return EIO;
 			for (word = 0; word < 256; word++)
@@ -230,13 +258,15 @@ pio_write(struct disk *dev, uint64_t lba, uint32_t count,
 		for (sector = 0; sector < chunk; sector++) {
 			unsigned word;
 
+			failure_stage = "wait write DRQ";
 			if (!wait_drq())
 				return EIO;
 			for (word = 0; word < 256; word++)
 				outw(IDE_DATA, *in++);
 		}
+		failure_stage = "wait write completion";
 		if (!wait_clear(IDE_STATUS_BSY) ||
-		    (inb(IDE_ALT_STATUS) & IDE_STATUS_ERR))
+		    (inb(IDE_ALT_STATUS) & (IDE_STATUS_DF | IDE_STATUS_ERR)))
 			return EIO;
 		lba += chunk;
 		count -= chunk;
@@ -247,8 +277,11 @@ pio_write(struct disk *dev, uint64_t lba, uint32_t count,
 static int
 pc98_ide_submit(struct disk *dev, struct bio *bio)
 {
+	struct ide_unit *unit = dev->d_data;
 	int error;
 	size_t transferred = 0;
+
+	failure_stage = "request";
 
 	if (bio->b_op == BIO_READ)
 		error = pio_read(dev, bio->b_mapped_block,
@@ -260,6 +293,20 @@ pc98_ide_submit(struct disk *dev, struct bio *bio)
 		error = 0; /* PIO completion is synchronous on supported drives. */
 	else
 		return EOPNOTSUPP;
+	if (error != 0) {
+		uint8_t status;
+		uint8_t ata_error;
+
+		select_bank(unit->bank);
+		status = inb(IDE_ALT_STATUS);
+		ata_error = (status & IDE_STATUS_ERR) ? inb(IDE_ERROR) : 0;
+		hal_printf("ide: %s %s LBA=%u count=%u bank=%u drive=%u "
+		    "stage=%s status=%02X error=%02X bankctl=%02X\n",
+		    dev->d_name, bio->b_op == BIO_READ ? "read" : "write",
+		    (uint32_t)bio->b_mapped_block, bio->b_block_count,
+		    unit->bank, unit->drive, failure_stage, status, ata_error,
+		    inb(IDE_BANK_SELECT));
+	}
 	if (error == 0)
 		transferred = (size_t)bio->b_block_count * dev->d_block_size;
 	bio_complete(bio, error, transferred);
@@ -346,6 +393,8 @@ zedbsd_ide_pc98_init(const struct zedbsd_device *bios_devices,
 	uint8_t drive;
 
 	unit_count = 0;
+	/* Linux's working PC-98 frontend preserves every non-bank bit. */
+	bank_control = (uint8_t)(inb(IDE_BANK_SELECT) & ~1U);
 	for (slot = 0; slot < IDE_UNIT_MAX; slot++) {
 		units[slot].present = 0;
 		units[slot].disk = NULL;

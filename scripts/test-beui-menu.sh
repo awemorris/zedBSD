@@ -100,7 +100,7 @@ func menu(selected) {
 
 func main() {
     FileUtil.writeText("G3TRACE.TXT", "start");
-    if (BeUI.initWithHint(24) != 1) {
+    if (BeUI.initWithHint(8) != 1) {
         FileUtil.writeText("G3TRACE.TXT", "init failed");
         return 1;
     }
@@ -127,7 +127,10 @@ func main() {
     return 0;
 }
 EOF
-printf 'g3menu\nhalt\n' > "$cfg"
+# The current boot policy always starts /bin/sh and sources /etc/zinit.rc;
+# AUTOEXEC.NCT is no longer executed by the kernel.  Invoke this test script
+# explicitly so the test exercises the same user-process path as menu.nct.
+printf '/bin/noct /G3MENU.NCT\nhalt\n' > "$cfg"
 
 "$repo/build.sh" vmunix "$arch"
 if test "$fresh_swap" = 1; then
@@ -145,11 +148,10 @@ else
 fi
 
 offset="$(python3 - "$image" <<'PY'
-import os
 import struct
 import sys
 
-heads = 4 if os.path.getsize(sys.argv[1]) <= 20 * 1024 * 1024 else 8
+heads = 8
 with open(sys.argv[1], 'rb') as stream:
     stream.seek(512)
     table = stream.read(512)

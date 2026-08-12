@@ -25,12 +25,19 @@ cmain(const void *handoff)
 {
 	/* First, the console, so every later failure can speak. */
 	bsp_cons_init();
+	/* hal_puts() decodes UTF-8 as a string.  hal_printf() emits literal
+	 * format bytes one at a time, which is only suitable for ASCII text. */
+	hal_puts("NEC PC-9800 ｼﾘｰｽﾞ ﾊﾟｰｿﾅﾙ ｺﾝﾋﾟｭｰﾀ\n\n");
+	hal_puts("zedBSD ｵﾍﾟﾚｰﾃｨﾝｸﾞ ｼｽﾃﾑ ﾊﾞｰｼﾞｮﾝ 0.0.1\n\n");
 
 	/* Physical memory ranges (with BSP device windows reserved). */
+	hal_printf("boot: HAL physical-memory initialization\n");
 	i386_page_init();
+	hal_printf("boot: HAL address-space initialization\n");
 	i386_space_init();
 
 	/* Build the IDT while interrupts remain disabled. */
+	hal_printf("boot: HAL interrupt and timer initialization\n");
 	i386_int_init();
 
 	/* Interrupt controller (all IRQs masked) and the interval timer. */

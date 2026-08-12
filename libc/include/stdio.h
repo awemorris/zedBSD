@@ -39,6 +39,8 @@ int fseek(FILE *stream, long offset, int whence);
 long ftell(FILE *stream);
 char *fgets(char *buffer, int size, FILE *stream);
 int fprintf(FILE *stream, const char *format, ...);
+int fputc(int character, FILE *stream);
+int fgetc(FILE *stream);
 int getc(FILE *stream);
 size_t fread(void *buffer, size_t size, size_t count, FILE *stream);
 size_t fwrite(const void *buffer, size_t size, size_t count, FILE *stream);

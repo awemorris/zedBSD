@@ -34,13 +34,14 @@ EOF
 printf 'm10\nhalt\n' > "$cfg"
 "$repo/build.sh" vmunix "$arch"
 ZEDBSD_FILES="$files" ZEDBSD_ZINIT_RC="$cfg" \
-	DISK_HEADS=8 DISK_SECTORS=17 \
+	DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'
 import struct
 import sys
 
+heads = 8
 with open(sys.argv[1], "rb") as stream:
     stream.seek(512)
     table = stream.read(512)
@@ -48,7 +49,7 @@ for offset in range(0, 512, 32):
     entry = table[offset:offset + 32]
     if entry[0] and entry[16:32] == b"BOOT".ljust(16, b" "):
         cylinder = struct.unpack_from("<H", entry, 6)[0]
-        print(cylinder * 8 * 17 * 512)
+        print(cylinder * heads * 17 * 512)
         break
 else:
     raise SystemExit("BOOT partition not found")

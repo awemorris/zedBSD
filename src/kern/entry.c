@@ -87,6 +87,7 @@ kernel_entry(const void *handoff)
 	if (h == NULL || h->magic != ZEDBSD_HANDOFF_MAGIC || h->version != 2 ||
 	    h->size < sizeof(*h))
 		hal_fatal(__FILE__, __LINE__, "invalid zedBSD handoff");
+	hal_printf("boot: kernel heap, process, and scheduler initialization\n");
 	zedbsd_heap_init_instance(&kernel_heap, kernel_heap_storage,
 				 KERNEL_HEAP_SIZE);
 	(void)zedbsd_heap_set_active(&kernel_heap);
@@ -100,9 +101,12 @@ kernel_entry(const void *handoff)
 	if (process_reaper_start() != 0)
 		hal_fatal(__FILE__, __LINE__, "process reaper initialization failed");
 
+	hal_printf("boot: platform device discovery\n");
 	device_count = kern_platform_init(h, devices, KERN_PLATFORM_MAX_DEVICES);
 	if (device_count == 0)
 		hal_fatal(__FILE__, __LINE__, "no boot devices");
+	hal_printf("boot: platform devices detected: %u\n",
+	    (unsigned)device_count);
 	hal_irq_enable();
 	kernel_main(h, devices, (unsigned)device_count);
 }

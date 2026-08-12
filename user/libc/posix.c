@@ -144,6 +144,22 @@ void *mmap(void *address, size_t length, int prot, int flags, int fd, off_t offs
 }
 int munmap(void *p, size_t n) { return (int)call(ZEDBSD_SYS_munmap, (uintptr_t)p, n, 0, 0, 0, 0); }
 int mprotect(void *p, size_t n, int prot) { return (int)call(ZEDBSD_SYS_mprotect, (uintptr_t)p, n, prot, 0, 0, 0); }
+int msync(void *p, size_t n, int flags) {
+	(void)p; (void)n; (void)flags;
+	errno = ENOSYS;
+	return -1;
+}
+long sysconf(int name) {
+	if (name == _SC_PAGE_SIZE)
+		return 4096;
+	errno = EINVAL;
+	return -1;
+}
+int mkdir(const char *path, mode_t mode) {
+	(void)path; (void)mode;
+	errno = ENOSYS;
+	return -1;
+}
 int clock_gettime(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_gettime, id, (uintptr_t)ts, 0, 0, 0, 0); }
 int nanosleep(const struct timespec *request, struct timespec *remain) {
 	return (int)call(ZEDBSD_SYS_nanosleep, (uintptr_t)request,

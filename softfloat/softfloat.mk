@@ -26,8 +26,13 @@ ZEDBSD_GCC_SOFTFP_REL := \
 
 ZEDBSD_MUSL_MATH_REL := \
 	sinf.c cosf.c tanf.c sqrtf.c \
+	sin.c cos.c tan.c sqrt.c fabs.c asin.c acos.c atan.c atan2.c \
+	exp.c log.c log10.c \
 	__sindf.c __cosdf.c __tandf.c __rem_pio2f.c __rem_pio2_large.c \
-	__math_invalidf.c sqrt_data.c fmod.c scalbn.c floor.c
+	__sin.c __cos.c __tan.c __rem_pio2.c \
+	__math_invalidf.c __math_invalid.c __math_divzero.c \
+	__math_xflow.c __math_oflow.c __math_uflow.c \
+	exp_data.c log_data.c sqrt_data.c fmod.c scalbn.c floor.c
 
 ZEDBSD_GCC_SOFTFP_OBJECTS := $(addprefix $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/gcc-,\
 	$(ZEDBSD_GCC_SOFTFP_REL:.c=.o))
@@ -55,7 +60,7 @@ ZEDBSD_MUSL_CPPFLAGS := \
 
 ZEDBSD_SOFTFLOAT_CFLAGS := $(ZEDBSD_LIBC_CFLAGS) -mlong-double-64
 ZEDBSD_MUSL_CFLAGS := $(ZEDBSD_SOFTFLOAT_CFLAGS) \
-	-Wno-error=unused-but-set-variable
+	-Wno-error=unused-but-set-variable -Wno-error=parentheses
 
 # GCC soft-fp intentionally shares a signed/unsigned conversion macro.  GCC
 # diagnoses its dead sign test for the four unsigned input translations.

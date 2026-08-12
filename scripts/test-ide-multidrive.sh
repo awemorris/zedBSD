@@ -41,10 +41,27 @@ printf '%s\n' 'SECOND IDE OK' > "$marker"
 
 ZEDBSD_BOOT_CFG="$cfg" ZEDBSD_ZINIT_RC="$cfg" \
 	"$repo/scripts/make-hdd-image.sh" "$primary"
+offset="$(python3 - "$primary" <<'PY'
+import struct
+import sys
+
+with open(sys.argv[1], "rb") as stream:
+    stream.seek(512)
+    table = stream.read(512)
+for pos in range(0, 512, 32):
+    entry = table[pos:pos + 32]
+    if entry[0] and entry[16:32] == b"BOOT".ljust(16, b" "):
+        cylinder = struct.unpack_from("<H", entry, 6)[0]
+        print(cylinder * 8 * 17 * 512)
+        break
+else:
+    raise SystemExit("BOOT partition not found")
+PY
+)"
 # BOOT.CFG controls startup; AUTOEXEC.NCT is never implicit.
-mdel -i "$primary@@34816" ::AUTOEXEC.NCT
+mdel -i "$primary@@$offset" ::AUTOEXEC.NCT 2>/dev/null || true
 cp --reflink=auto "$primary" "$secondary"
-mcopy -o -i "$secondary@@34816" "$marker" ::SECOND.TXT
+mcopy -o -i "$secondary@@$offset" "$marker" ::SECOND.TXT
 
 rm -f -- "$monitor"
 "$qemu" -M "$machine" -cpu "$cpu" -m 8 -accel tcg -L "$bios_dir" \

@@ -107,6 +107,20 @@ fwrite(const void *buffer, size_t size, size_t count, FILE *stream)
 	return 0;
 }
 
+int
+fputc(int character, FILE *stream)
+{
+	unsigned char byte = (unsigned char)character;
+
+	return fwrite(&byte, 1, 1, stream) == 1 ? byte : EOF;
+}
+
+int
+fgetc(FILE *stream)
+{
+	return getc(stream);
+}
+
 int ferror(FILE *stream) { return stream == NULL ? 1 : stream->error; }
 void
 clearerr(FILE *stream)

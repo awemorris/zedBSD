@@ -24,7 +24,17 @@ NOCT_SOURCE_REL := \
 	src/core/lexer.yy.c \
 	src/core/parser.tab.c \
 	src/core/ast.c \
+	src/core/accel_ops.c \
+	src/core/accel_program.c \
+	src/core/fast.c \
 	src/core/hir.c \
+	src/core/hir_loop_analyze.c \
+	src/core/hir_doall.c \
+	src/core/hir_dosum.c \
+	src/core/hir_opt_accel.c \
+	src/core/hir_gpu.c \
+	src/core/gpu_ir.c \
+	src/core/gpu_glsl.c \
 	src/core/lir.c \
 	src/core/noct.c \
 	src/core/runtime.c \
@@ -35,9 +45,12 @@ NOCT_SOURCE_REL := \
 	src/core/gc.c \
 	src/core/intrinsics.c \
 	src/core/objectmodel-st.c \
+	src/core/sha256.c \
 	src/repl/repl.c \
+	src/api/accel.c \
 	src/api/regex.c \
 	src/api/api-file.c \
+	src/api/api-binary.c \
 	src/api/api-term-backend.c \
 	src/api/beui-core.c \
 	src/api/beui-image.c \
@@ -65,6 +78,7 @@ NOCT_CPPFLAGS := \
 	-I$(NOCT_ROOT)/src/api \
 	-DNOCT_TARGET_PC98BE \
 	-DNOCT_MEMORY_SMALL \
+	-DNOCT_FORCE_SOFT_FMAF \
 	-DZEDBSD_NOCT_OPTIMIZE_LEVEL=$(NOCT_OPTIMIZE_LEVEL) \
 	-DNOCT_JIT_CODE_MAX=$(NOCT_JIT_CODE_MAX) \
 	-DZEDBSD_NOCT_JIT_CODE_MAX=$(NOCT_JIT_CODE_MAX) \
@@ -101,6 +115,8 @@ $(NOCT_BUILD_DIR)/intrinsics.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=type-limits
 $(NOCT_BUILD_DIR)/objectmodel-st.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=maybe-uninitialized
+$(NOCT_BUILD_DIR)/hir_opt_accel.o: NOCT_WARNING_EXCEPTIONS := \
+	-Wno-error=maybe-uninitialized
 
 $(NOCT_BUILD_DIR)/%.o: $(NOCT_ROOT)/src/core/%.c
 	@mkdir -p $(NOCT_BUILD_DIR)
@@ -121,6 +137,11 @@ $(NOCT_BUILD_DIR)/beui-%.o: $(NOCT_ROOT)/src/api/beui-%.c
 		$(NOCT_WARNING_EXCEPTIONS) -MMD -MP -c $< -o $@
 
 $(NOCT_BUILD_DIR)/regex.o: $(NOCT_ROOT)/src/api/regex.c
+	@mkdir -p $(NOCT_BUILD_DIR)
+	$(NOCT_CC) $(NOCT_CPPFLAGS) $(NOCT_CFLAGS) \
+		$(NOCT_WARNING_EXCEPTIONS) -MMD -MP -c $< -o $@
+
+$(NOCT_BUILD_DIR)/accel.o: $(NOCT_ROOT)/src/api/accel.c
 	@mkdir -p $(NOCT_BUILD_DIR)
 	$(NOCT_CC) $(NOCT_CPPFLAGS) $(NOCT_CFLAGS) \
 		$(NOCT_WARNING_EXCEPTIONS) -MMD -MP -c $< -o $@
@@ -191,7 +212,8 @@ USER_NOCT_CPPFLAGS := -nostdinc -Iuser/include -Iinclude/uapi -I. \
 	-I$(BUILD) -Ilibc/include -I$(NOCT_ROOT)/include \
 	-I$(NOCT_ROOT)/src/core -I$(NOCT_ROOT)/src/api \
 	-DNOCT_TARGET_POSIX -DNOCT_TARGET_ZEDBSD -DNOCT_MEMORY_SMALL \
-	-DNOCT_USE_JIT -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 \
+	-DNOCT_USE_JIT -DNOCT_FORCE_SOFT_FMAF \
+	-DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 \
 	-DHAVE_SYS_TYPES_H=1 -DHAVE_STDBOOL_H=1 -U__linux__ -Ulinux
 USER_NOCT_CFLAGS := $(NOCT_CFLAGS)
 
@@ -200,6 +222,7 @@ $(USER_NOCT_BUILD_DIR)/runtime.o: USER_NOCT_WARN := -Wno-error=maybe-uninitializ
 $(USER_NOCT_BUILD_DIR)/jit.o: USER_NOCT_WARN := -Wno-error=unused-parameter -Wno-error=sign-compare
 $(USER_NOCT_BUILD_DIR)/intrinsics.o: USER_NOCT_WARN := -Wno-error=type-limits
 $(USER_NOCT_BUILD_DIR)/objectmodel-st.o: USER_NOCT_WARN := -Wno-error=maybe-uninitialized
+$(USER_NOCT_BUILD_DIR)/hir_opt_accel.o: USER_NOCT_WARN := -Wno-error=maybe-uninitialized
 
 $(USER_NOCT_BUILD_DIR)/%.o: $(NOCT_ROOT)/src/core/%.c
 	@mkdir -p $(USER_NOCT_BUILD_DIR)
@@ -214,6 +237,10 @@ $(USER_NOCT_BUILD_DIR)/beui-%.o: $(NOCT_ROOT)/src/api/beui-%.c
 	$(NOCT_CC) $(USER_NOCT_CPPFLAGS) $(USER_NOCT_CFLAGS) $(USER_NOCT_WARN) \
 		-MMD -MP -c $< -o $@
 $(USER_NOCT_BUILD_DIR)/regex.o: $(NOCT_ROOT)/src/api/regex.c
+	@mkdir -p $(USER_NOCT_BUILD_DIR)
+	$(NOCT_CC) $(USER_NOCT_CPPFLAGS) $(USER_NOCT_CFLAGS) $(USER_NOCT_WARN) \
+		-MMD -MP -c $< -o $@
+$(USER_NOCT_BUILD_DIR)/accel.o: $(NOCT_ROOT)/src/api/accel.c
 	@mkdir -p $(USER_NOCT_BUILD_DIR)
 	$(NOCT_CC) $(USER_NOCT_CPPFLAGS) $(USER_NOCT_CFLAGS) $(USER_NOCT_WARN) \
 		-MMD -MP -c $< -o $@

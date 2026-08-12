@@ -7,6 +7,9 @@
 
 #define F_OK 0
 
+#define _SC_PAGE_SIZE 1
+#define _SC_PAGESIZE _SC_PAGE_SIZE
+
 int access(const char *path, int mode);
 char *getcwd(char *buffer, size_t size);
 int chdir(const char *path);
@@ -17,5 +20,6 @@ ssize_t write(int, const void *, size_t);
 int close(int);
 off_t lseek(int, off_t, int);
 void _exit(int) __attribute__((noreturn));
+long sysconf(int name);
 
 #endif
