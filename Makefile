@@ -13,7 +13,7 @@
 #   apps/             Noct programs shipped on the boot volume
 #   noct/             NoctLang submodule
 #
-# Architecture selection: `make ARCH=pc98` or `./build.sh pc98`.  Each
+# Architecture selection: `make ARCH=pc98` or `./build.sh all pc98`.  Each
 # architecture provides platform/<arch>/platform.mk and its artifacts land
 # in build/<arch>/.  Architecture-neutral host artifacts stay shared at the
 # top of build/ (build/host-noct, build/remacs, build/releases).
@@ -72,6 +72,8 @@ $(ZEDBSD_LIBC_OBJECTS): OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
 $(BUILD)/kern/messages.h: src/kern/messages.txt $(SCRIPTS_DIR)/generate-messages.py
 	@mkdir -p $(dir $@)
 	$(PYTHON) $(SCRIPTS_DIR)/generate-messages.py $< $@
+
+messages: $(BUILD)/kern/messages.h
 
 # ----------------------------------------------------------------------
 # Architecture-neutral host tests.  Platform makefiles append their own
@@ -207,4 +209,4 @@ distclean:
 -include $(wildcard $(BUILD)/*.d $(BUILD)/*/*.d $(BUILD)/*/*/*.d \
 	$(BUILD)/*/*/*/*.d)
 
-.PHONY: all check clean distclean stdio-fs-host-test
+.PHONY: all check clean distclean messages stdio-fs-host-test

@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
-# zedBSD build driver: ./build.sh <arch> [make targets and options...]
+# zedBSD build driver: ./build.sh <command> <platform> [make options...]
 # Copyright (C) 2026 Awe Morris
 # SPDX-License-Identifier: Zlib
-#
-# Examples:
-#   ./build.sh pc98              build every pc98 artifact
-#   ./build.sh pc98 check        build and run the host test suite
-#   ./build.sh pc98 clean        remove build/pc98
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")" && pwd)"
 
-available() {
+available_platforms()
+{
 	local mk
 	for mk in "$repo"/platform/*/platform.mk; do
 		test -f "$mk" || continue
@@ -19,22 +15,98 @@ available() {
 	done
 }
 
-if test "$#" -lt 1; then
-	echo "usage: $0 <arch> [make targets and options...]" >&2
-	echo "available architectures:" >&2
-	available | sed 's/^/  /' >&2
+usage()
+{
+	cat <<EOF
+usage: $0 <command> <platform> [make options or additional targets...]
+       $0 help [platform]
+
+Build commands:
+  all             Build every artifact for the platform
+  messages        Generate the kernel message header
+  vmunix          Build the zedBSD kernel
+  INIT.ELF        Build the initial user process
+  NOCT.ELF        Build the Noct user program
+  SH              Build /bin/sh
+  LINUX           Build /bin/linux
+  hdd-image       Build an installable HDD image
+
+Test commands:
+  check                       Build and run all host tests
+  hdd-boot-qemu-test          Test HDD boot in QEMU
+  autoexec-remacs-qemu-test   Test the graphical menu and Remacs
+  linux-handoff-qemu-test     Test Linux handoff
+
+Maintenance commands:
+  clean           Remove build/<platform>
+  distclean       Remove the complete build directory
+  help            Show this help
+
+Any Make target may be used as <command>.  For example:
+  $0 hdd-image pc98
+  $0 vmunix pc98
+  $0 check pc98
+  $0 NOCT.ELF pc98
+  $0 hdd-boot-qemu-test pc98
+
+Additional targets and Make variable assignments may follow the platform:
+  $0 all pc98 check
+  $0 messages pc98 PYTHON=python3
+
+Available platforms:
+EOF
+	available_platforms | sed 's/^/  /'
+}
+
+if test "$#" -eq 0; then
+	usage >&2
 	exit 2
 fi
 
-arch="$1"
+command_name="$1"
 shift
 
-if ! test -f "$repo/platform/$arch/platform.mk"; then
-	echo "unknown architecture: $arch" >&2
-	echo "available architectures:" >&2
-	available | sed 's/^/  /' >&2
+if test "$command_name" = help || test "$command_name" = -h || \
+   test "$command_name" = --help; then
+	if test "$#" -gt 1; then
+		echo "help accepts at most one platform" >&2
+		exit 2
+	fi
+	if test "$#" -eq 1 && ! test -f "$repo/platform/$1/platform.mk"; then
+		echo "unknown platform: $1" >&2
+		usage >&2
+		exit 2
+	fi
+	usage
+	exit 0
+fi
+
+if test "$#" -lt 1; then
+	echo "missing platform for command '$command_name'" >&2
+	usage >&2
+	exit 2
+fi
+
+platform="$1"
+shift
+
+if ! test -f "$repo/platform/$platform/platform.mk"; then
+	echo "unknown platform: $platform" >&2
+	usage >&2
 	exit 2
 fi
 
 jobs="${ZEDBSD_JOBS:-$(nproc)}"
-exec make -C "$repo" ARCH="$arch" -j"$jobs" "$@"
+make_command=(make -C "$repo" "ARCH=$platform" "-j$jobs")
+
+# All compilation and image commands update the generated kernel message
+# header.  Pass both targets to one Make process so Make records the generated
+# target once even when the generator leaves an identical file untouched.
+case "$command_name" in
+	clean|distclean|messages)
+		exec "${make_command[@]}" "$command_name" "$@"
+		;;
+	*)
+		exec "${make_command[@]}" messages "$command_name" "$@"
+		;;
+esac

@@ -44,12 +44,16 @@ QEMU tests additionally need `mtools` and a PC-98-capable QEMU.
 
 ```sh
 git submodule update --init noct
-./build.sh pc98 all check
+./build.sh all pc98
+./build.sh check pc98
 ```
 
-`./build.sh ARCH [targets...]` wraps `make ARCH=... -j$(nproc)` and lists
-the available architectures when run without arguments.  Each architecture
-is described by `platform/ARCH/platform.mk` and builds into `build/ARCH/`;
+`./build.sh COMMAND PLATFORM [make options or additional targets...]` wraps
+`make ARCH=... -j$(nproc)`.  Run `./build.sh help` to list the common commands,
+examples, and available platforms.  The first argument may be any Make target,
+so individual artifacts can be built with commands such as
+`./build.sh vmunix pc98` and `./build.sh NOCT.ELF pc98`.  Each platform is
+described by `platform/PLATFORM/platform.mk` and builds into `build/PLATFORM/`;
 for pc98 the main artifacts are `build/pc98/vmunix` (stage 2),
 `build/pc98/IO.SYS` (stage 1), and the IPL binaries.
 
@@ -70,6 +74,26 @@ removes all of `build/`.
 `build/pc98/hdd-test.img`: a disk with a NEC PC-98 partition table and a
 fully installed BOOT volume, including the Remacs bytecode (requires
 mtools, and cmake for the host Noct compiler).
+
+Kernel console messages are maintained as UTF-8 text in
+`src/kern/messages.txt`.  Every non-clean `build.sh` command first updates
+`build/PLATFORM/kern/messages.h`; it can also be generated on its own with:
+
+```sh
+./build.sh messages pc98
+```
+
+The underlying generator accepts an input file followed by an output file:
+
+```sh
+python3 scripts/generate-messages.py \
+    src/kern/messages.txt build/pc98/kern/messages.h
+```
+
+Input lines use `identifier<TAB>UTF-8 message`.  Blank lines and lines beginning
+with `#` are ignored.  The identifier must begin with a lowercase ASCII letter
+and may contain lowercase letters, digits, and underscores.  The generated
+header is deterministic and must not be edited by hand.
 
 The softfloat build compiles GCC soft-fp and musl math sources directly
 from source trees.  Either initialize the submodules:
