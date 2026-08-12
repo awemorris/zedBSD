@@ -13,7 +13,7 @@ test -x "$qemu" || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios" || { echo "BIOS directory not found: $bios" >&2; exit 1; }
 rm -rf -- "$work"
 mkdir -p "$work"
-ZEDBSD_AUTOEXEC_DISABLE=1 \
+ZEDBSD_ZINIT_DISABLE=1 \
 	"$repo/scripts/make-hdd-image.sh" "$image"
 
 "$qemu" -M pc9821 -cpu 486 -m 8 -accel tcg -L "$bios" -nic none \

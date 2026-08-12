@@ -191,14 +191,35 @@ static int display_image_common(void *context, unsigned x, unsigned y,
 				const struct noct_beui_image *image, uint64_t pattern, int patterned)
 {
 	struct zedbsd_graphics_blit request;
+	int result;
 	(void)context;
 	if (image == NULL) return 0;
 	memset(&request, 0, sizeof(request));
 	request.x = x; request.y = y; request.width = image->width; request.height = image->height;
 	request.format = image->format == NOCT_BEUI_IMAGE_RGB24 ? ZEDBSD_GRAPHICS_FORMAT_RGB24 : ZEDBSD_GRAPHICS_FORMAT_INDEX8;
 	request.stride = (uint32_t)image->stride; request.pixels = (uint32_t)(uintptr_t)image->pixels;
-	request.palette = (uint32_t)(uintptr_t)image->palette; request.palette_count = image->palette_size; request.pattern = pattern;
-	return graphics_fd >= 0 && ioctl(graphics_fd, patterned ? ZEDBSD_GRAPHICS_BLIT_PATTERN : ZEDBSD_GRAPHICS_BLIT, &request) == 0;
+	/* RGB24 has no palette; the graphics ABI requires both fields to remain
+	 * zero.  noct_beui_image embeds palette storage even for RGB24 images,
+	 * so do not infer palette presence from the array address. */
+	if (request.format == ZEDBSD_GRAPHICS_FORMAT_INDEX8) {
+		request.palette = (uint32_t)(uintptr_t)image->palette;
+		request.palette_count = image->palette_size;
+	}
+	request.pattern = pattern;
+	if (graphics_fd < 0)
+		return 0;
+	result = ioctl(graphics_fd, patterned ? ZEDBSD_GRAPHICS_BLIT_PATTERN :
+		ZEDBSD_GRAPHICS_BLIT, &request);
+	if (result != 0)
+		fprintf(stderr,
+		    "NOCT.ELF: graphics blit failed: errno=%d x=%u y=%u "
+		    "width=%u height=%u format=%u stride=%u pixels=%#x "
+		    "palette=%#x palette_count=%u display=%ux%ux%u\n",
+		    errno, request.x, request.y, request.width, request.height,
+		    request.format, request.stride, request.pixels,
+		    request.palette, request.palette_count, display_info.width,
+		    display_info.height, display_info.bits_per_pixel);
+	return result == 0;
 }
 static int display_image(void *c, unsigned x, unsigned y, const struct noct_beui_image *i) { return display_image_common(c, x, y, i, 0, 0); }
 static int display_image_pattern(void *c, unsigned x, unsigned y, const struct noct_beui_image *i, uint64_t p) { return display_image_common(c, x, y, i, p, 1); }

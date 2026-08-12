@@ -48,11 +48,11 @@ make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
 if test "$fresh_swap" = 1; then
 	rm -f -- "$image"
 	ZEDBSD_TEST_MB=40 ZEDBSD_SWAP_SIZE_MIB=32 \
-		ZEDBSD_AUTOEXEC_DISABLE=1 ZEDBSD_FILES="$files" \
+		ZEDBSD_FILES="$files" ZEDBSD_ZINIT_RC="$cfg" \
 		ZEDBSD_BOOT_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$image"
 else
 	cp --reflink=auto "$base" "$image"
-	ZEDBSD_FILES="$files" DISK_SECTORS=17 \
+	ZEDBSD_FILES="$files" ZEDBSD_ZINIT_RC="$cfg" DISK_SECTORS=17 \
 		"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 fi
 

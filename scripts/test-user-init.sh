@@ -77,7 +77,7 @@ if test -n "$elf_source"; then
 	cp "$elf_source" "$files/INIT.ELF"
 fi
 if test "$mode" = swap; then
-	ZEDBSD_TEST_MB=40 ZEDBSD_SWAP_SIZE_MIB=32 ZEDBSD_AUTOEXEC_DISABLE=1 \
+	ZEDBSD_TEST_MB=40 ZEDBSD_SWAP_SIZE_MIB=32 \
 		ZEDBSD_SH_IMAGE="$elf_source" \
 		ZEDBSD_FILES="$files" \
 		"$repo/scripts/make-hdd-image.sh" "$image"

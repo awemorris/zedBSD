@@ -64,7 +64,7 @@ func main() {
 }
 EOF
 sed -i "s/__BEUI_BITS_PER_PIXEL__/$bits_per_pixel/" "$files/G2A.NCT"
-printf 'g2a\nhalt\n' > "$cfg"
+printf '/bin/noct /G2A.NCT\n' > "$cfg"
 
 # 80x80, uncompressed, 24-bit BMP. Four exact colors exercise the Cirrus
 # packed-color path while the GDC backend quantizes the same source image.
@@ -93,7 +93,8 @@ with open(sys.argv[1], 'wb') as stream:
 PY
 
 make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
-ZEDBSD_AUTOEXEC="$files/G2A.NCT" ZEDBSD_FILES="$files" DISK_SECTORS=17 \
+ZEDBSD_AUTOEXEC="$files/G2A.NCT" ZEDBSD_FILES="$files" \
+	ZEDBSD_ZINIT_RC="$cfg" DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'

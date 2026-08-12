@@ -142,5 +142,9 @@ static const struct cdev_ops console_ops = {
 
 int console_device_register(void)
 {
-	return cdev_register("console", 0x00010000U, &console_ops, NULL);
+	int error = cdev_register("console", 0x00010000U, &console_ops, NULL);
+
+	if (error == 0)
+		hal_cons_set_mode(HAL_CONS_TERMINAL);
+	return error;
 }

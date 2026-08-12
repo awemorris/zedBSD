@@ -34,6 +34,7 @@ run_one()
 	truncate -s $((new_sectors * 512)) "$image"
 	printf 'm9-write-test %s\nhalt\n' "$old_sectors" > "$cfg"
 	ZEDBSD_VMUNIX_IMAGE="$build/vmunix-m9" \
+		ZEDBSD_ZINIT_RC="$cfg" \
 		DISK_HEADS="$heads" DISK_SECTORS="$sectors" \
 		"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 	dd if="$image" of="$before" bs=512 skip="$old_sectors" count=1 status=none

@@ -325,6 +325,22 @@ run_autoexec(const char *path)
 }
 
 static int
+run_external(char *const argv[])
+{
+	char result[256] = {0};
+
+	if (!spawn_wait(argv, ZEDBSD_SPAWN_RESULT, result, sizeof(result)))
+		return 0;
+	if (result[0] == '\0')
+		return 1;
+	if (!command(result)) {
+		fprintf(stderr, "command result failed: %s\n", result);
+		return 0;
+	}
+	return 1;
+}
+
+static int
 command(char *text)
 {
 	char *argv[ARG_MAX];
@@ -453,6 +469,15 @@ command(char *text)
 	}
 	if (!strcmp(argv[0], "exit"))
 		exit(argc == 2 ? atoi(argv[1]) : 0);
+	if (strchr(argv[0], '/') != NULL && access(argv[0], F_OK) == 0) {
+		char *child[ARG_MAX + 1];
+		int i;
+
+		for (i = 0; i < argc; i++)
+			child[i] = argv[i];
+		child[argc] = NULL;
+		return run_external(child);
+	}
 	{
 		char candidate[256];
 		char *args[ARG_MAX + 1];
@@ -484,10 +509,10 @@ run_startup(void)
 	putchar('\n');
 	puts("zedBSD ｵﾍﾟﾚｰﾃｨﾝｸﾞ ｼｽﾃﾑ ﾊﾞｰｼﾞｮﾝ 0.0.1");
 	putchar('\n');
-	if (access("/boot.cfg", F_OK) != 0)
+	if (access("/etc/zinit.rc", F_OK) != 0)
 		return;
 	(void)ioctl(0, ZEDBSD_CONSOLE_DRAIN_INPUT);
-	puts("Starting boot.cfg... (Press any key to cancel)");
+	puts("Loading /etc/zinit.rc ... (Press any key to cancel)");
 	if (clock_gettime(CLOCK_MONOTONIC, &start) != 0)
 		return;
 	for (;;) {
@@ -504,7 +529,7 @@ run_startup(void)
 		(void)nanosleep(&delay, NULL);
 	}
 	if (!cancelled)
-		(void)source_file_mode("/boot.cfg", 1);
+		(void)source_file_mode("/etc/zinit.rc", 1);
 }
 
 int

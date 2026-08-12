@@ -39,7 +39,8 @@ halt
 EOF
 printf '%s\n' 'SECOND IDE OK' > "$marker"
 
-ZEDBSD_BOOT_CFG="$cfg" "$repo/scripts/make-hdd-image.sh" "$primary"
+ZEDBSD_BOOT_CFG="$cfg" ZEDBSD_ZINIT_RC="$cfg" \
+	"$repo/scripts/make-hdd-image.sh" "$primary"
 # BOOT.CFG controls startup; AUTOEXEC.NCT is never implicit.
 mdel -i "$primary@@34816" ::AUTOEXEC.NCT
 cp --reflink=auto "$primary" "$secondary"

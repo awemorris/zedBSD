@@ -60,16 +60,15 @@ with open(image, "r+b") as stream:
     stream.write(entry)
 PY
 
-# AUTOEXEC.NCT is installed as a menu script, but is never run implicitly.
-# BOOT.CFG may select it explicitly with `autoexec /autoexec.nct`.
-if test "${ZEDBSD_AUTOEXEC_DISABLE:-0}" = 1; then
-	autoexec=""
-else
-	autoexec="${ZEDBSD_AUTOEXEC:-$repo/apps/AUTOEXEC.NCT}"
-fi
+# The normal image starts /bin/menu.nct through /etc/zinit.rc.  A legacy-named
+# AUTOEXEC.NCT remains only as an optional test payload.
+autoexec="${ZEDBSD_AUTOEXEC:-}"
 BOOT_LOGO="${ZEDBSD_LOGO:-}" \
 ZEDBSD_FILES="${ZEDBSD_FILES:-}" \
 ZEDBSD_AUTOEXEC="$autoexec" \
+ZEDBSD_MENU="${ZEDBSD_MENU:-}" \
+ZEDBSD_ZINIT_RC="${ZEDBSD_ZINIT_RC:-}" \
+ZEDBSD_ZINIT_DISABLE="${ZEDBSD_ZINIT_DISABLE:-0}" \
 DISK_HEADS="$heads" DISK_SECTORS="$sectors" \
 	"$repo/scripts/install-image.sh" --partition 1 \
 	--install-disk-stubs "$output" "${ZEDBSD_KERNEL:-}" \

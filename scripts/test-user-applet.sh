@@ -16,8 +16,8 @@ rm -rf -- "$work"
 mkdir -p "$files"
 make -C "$repo" ARCH=pc98 -j"$(nproc)" vmunix SH BOOTAPP.BIN
 cp "$build/BOOTAPP.BIN" "$files/BOOTAPP.BIN"
-ZEDBSD_AUTOEXEC_DISABLE=1 ZEDBSD_FILES="$files" \
-	ZEDBSD_BOOT_CFG="$repo/tests/ZEDBSD-APPLET.CFG.test" \
+ZEDBSD_FILES="$files" \
+	ZEDBSD_ZINIT_RC="$repo/tests/ZEDBSD-APPLET.CFG.test" \
 	"$repo/scripts/make-hdd-image.sh" "$image"
 
 "$qemu" -M pc9821 -cpu 486 -m 8 -accel tcg -L "$bios" -nic none \

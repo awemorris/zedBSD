@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Compile apps/BMPVIEW.NCT to BMPVIEW.NAP with the host Noct compiler.
+# Compile apps/bmpview.nct to BMPVIEW.NAP with the host Noct compiler.
 # The 5M small-memory profile cannot compile the source on the target, so
 # the boot volume ships bytecode, exactly like Remacs.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,8 +10,8 @@ host_build="${NOCT_HOST_BUILD:-$repo/build/host-noct}"
 output_dir="${BMPVIEW_OUTPUT_DIR:-$repo/build/bmpview}"
 noct="${NOCT_HOST:-}"
 
-test -f "$repo/apps/BMPVIEW.NCT" || {
-	echo "BMP viewer source not found: $repo/apps/BMPVIEW.NCT" >&2
+test -f "$repo/apps/bmpview.nct" || {
+	echo "BMP viewer source not found: $repo/apps/bmpview.nct" >&2
 	exit 1
 }
 
@@ -43,7 +43,7 @@ if test -z "$noct"; then
 fi
 
 mkdir -p "$output_dir"
-cp "$repo/apps/BMPVIEW.NCT" "$output_dir/BMPVIEW.NCT"
+cp "$repo/apps/bmpview.nct" "$output_dir/BMPVIEW.NCT"
 (cd "$output_dir" && "$noct" --compile BMPVIEW.NCT)
 mv "$output_dir/BMPVIEW.nb" "$output_dir/BMPVIEW.NAP"
 rm -f "$output_dir/BMPVIEW.NCT"

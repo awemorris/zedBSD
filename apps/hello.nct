@@ -1,5 +1,5 @@
 func main(args) {
-    Console.write("Hello from HELLO.NCT");
+    Console.write("Hello from hello.nct");
     for (arg in args) {
         Console.write(" " + arg);
     }

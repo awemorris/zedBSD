@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Boot the HDD test image and verify that BOOT.CFG starts after the one-second
-# countdown, then explicitly invokes AUTOEXEC.NCT.
+# Boot the HDD test image and verify that /etc/zinit.rc starts /bin/menu.nct
+# after the one-second countdown.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 arch="${ZEDBSD_ARCH:-pc98}"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
@@ -13,8 +13,8 @@ cpu="${ZEDBSD_TEST_CPU:-486}"
 work="$build/tests/hdd-boot"
 image="$work/hdd.img"
 monitor="$work/monitor.sock"
-autoexec="$work/AUTOEXEC.NCT"
-boot_cfg="$work/BOOT.CFG"
+menu="$work/MENU.NCT"
+background="$work/MENUBACK.BMP"
 screenshot="$work/hdd-boot-failure.ppm"
 qemu_memory="${ZEDBSD_QEMU_MEMORY:-8}"
 
@@ -26,14 +26,14 @@ test -d "$bios_dir" || {
 
 rm -rf "$work"
 mkdir -p "$work"
-cat > "$autoexec" <<'EOF'
+cat > "$menu" <<'EOF'
 func main() {
-    System.setEnv("BOOT_ACTION", "echo AUTOEXEC.NCT verified.");
+    System.setEnv("BOOT_ACTION", "echo zinit menu verified.");
     return 0;
 }
 EOF
-printf '%s\n' 'autoexec /autoexec.nct' >"$boot_cfg"
-ZEDBSD_AUTOEXEC="$autoexec" ZEDBSD_BOOT_CFG="$boot_cfg" \
+cp "$repo/apps/menuback.bmp" "$background"
+ZEDBSD_MENU="$menu" ZEDBSD_MENU_BACKGROUND="$background" \
 	"$repo/scripts/make-hdd-image.sh" "$image"
 
 rm -f -- "$monitor"
@@ -115,11 +115,11 @@ else:
 deadline = time.time() + 120
 while time.time() < deadline:
     text = mem(0xA0000, 25 * 160)[0::2]
-    if b"AUTOEXEC.NCT verified." in text:
-        print("BOOT.CFG and explicit AUTOEXEC.NCT completed")
+    if b"zinit menu verified." in text:
+        print("zinit.rc and /bin/menu.nct completed")
         sys.exit(0)
     time.sleep(2)
 cmd("screendump", {"filename": screenshot})
-raise SystemExit("BOOT.CFG/AUTOEXEC completion never appeared; " + screenshot)
+raise SystemExit("zinit.rc/menu completion never appeared; " + screenshot)
 PY
 echo "zedBSD HDD boot test: PASS"

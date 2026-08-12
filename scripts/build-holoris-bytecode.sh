@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Compile apps/HOLORIS.NCT to HOLORIS.NAP with the host Noct compiler.
+# Compile apps/holoris.nct to HOLORIS.NAP with the host Noct compiler.
 # The 5M small-memory profile cannot compile the source on the target, so
 # the boot volume ships bytecode, exactly like Remacs.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,8 +10,8 @@ host_build="${NOCT_HOST_BUILD:-$repo/build/host-noct}"
 output_dir="${HOLORIS_OUTPUT_DIR:-$repo/build/holoris}"
 noct="${NOCT_HOST:-}"
 
-test -f "$repo/apps/HOLORIS.NCT" || {
-	echo "Holoris source not found: $repo/apps/HOLORIS.NCT" >&2
+test -f "$repo/apps/holoris.nct" || {
+	echo "Holoris source not found: $repo/apps/holoris.nct" >&2
 	exit 1
 }
 
@@ -43,7 +43,7 @@ if test -z "$noct"; then
 fi
 
 mkdir -p "$output_dir"
-cp "$repo/apps/HOLORIS.NCT" "$output_dir/HOLORIS.NCT"
+cp "$repo/apps/holoris.nct" "$output_dir/HOLORIS.NCT"
 (cd "$output_dir" && "$noct" --compile HOLORIS.NCT)
 mv "$output_dir/HOLORIS.nb" "$output_dir/HOLORIS.NAP"
 rm -f "$output_dir/HOLORIS.NCT"

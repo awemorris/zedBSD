@@ -13,7 +13,7 @@ PC-9800 series, and on a desktop host used for development.
 The bundled Remacs editor (a Noct sample application, with SKK Japanese
 input) makes it possible to edit an operating system's configuration
 files before the operating system boots.  The Holoris game
-(`apps/HOLORIS.NCT`, a wireframe falling-block hologram) demonstrates
+(`apps/holoris.nct`, a wireframe falling-block hologram) demonstrates
 that BeUI alone carries real-time programs: it draws with the BeUI
 primitives, paces itself with `BeUI.getMilliseconds`/`BeUI.sleep`, and
 reads held keys with `BeUI.isKeyDown`.
@@ -30,7 +30,7 @@ platform/ without touching the shared code.
 | `libc/`          | Freestanding libc subset                                    |
 | `softfloat/`     | Soft-float support compiled from the vendor GCC/musl sources |
 | `platform/pc98/` | PC-9800 target: IPLs, stage 1/2, console, timer, Noct target adapter, DOS installer |
-| `apps/`          | Noct programs shipped on the boot volume (`AUTOEXEC.NCT`, `LS.NCT`, `CP.NCT`, `HOLORIS.NCT`, Remacs configuration) |
+| `apps/`          | Noct programs shipped on the boot volume (`menu.nct`, `ls.nct`, `cp.nct`, `holoris.nct`, Remacs configuration) |
 | `noct/`          | NoctLang submodule: the VM, the BeUI graphical API and its PC-98 display backends, and Remacs under `apps/remacs` |
 | `vendor/`        | GCC and musl source submodules, used only by the softfloat build |
 | `scripts/`       | Build helpers, image installer, QEMU tests                  |
@@ -88,7 +88,7 @@ make ZEDBSD_GCC_ROOT=../linux-pc98/toolchain/gcc \
 
 ## Configuration
 
-The boot volume is configured by `ZEDBSD.CFG` (or `AUTOEXEC.NCT` for a
+The boot volume is configured by `/etc/zinit.rc` (which starts `menu.nct` for a
 scripted startup).  Images created before the rename used `BOOT.CFG`;
 stage 2 still falls back to that name for one release.
 

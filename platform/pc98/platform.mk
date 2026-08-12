@@ -352,7 +352,7 @@ $(BUILD)/tests/beui-pc98-cirrus-host-test: \
 	$(BEUI_TEST_CC) $(NOCT_ROOT)/src/api/beui-pc98-cirrus.c $< -o $@
 
 $(BUILD)/tests/noct-host-test: tests/noct-host-test.c \
-	apps/LS.NCT apps/CP.NCT src/noct/noct-m6-script.h \
+	apps/ls.nct apps/cp.nct src/noct/noct-m6-script.h \
 	$(NOCT_GLUE_OBJS) $(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
 	$(BUILD)/src/kern/namespace.o \
 	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/inode.o \
@@ -378,7 +378,7 @@ NOCT_TEST_JIT_CODE_SIZE := 98304
 
 noct-host-test: $(BUILD)/tests/noct-host-test
 	@mkdir -p $(dir $(NOCT_M6_JIT_CODE))
-	$(BUILD)/tests/noct-host-test $(NOCT_M6_JIT_CODE) apps/LS.NCT apps/CP.NCT
+	$(BUILD)/tests/noct-host-test $(NOCT_M6_JIT_CODE) apps/ls.nct apps/cp.nct
 	@test $$(stat -c%s $(NOCT_M6_JIT_CODE)) -eq $(NOCT_TEST_JIT_CODE_SIZE)
 	@echo "zedBSD Noct interpreter/JIT lifecycle host tests: PASS"
 
@@ -479,12 +479,12 @@ noct-m10-verify: noct-m9-verify check $(BUILD)/vmunix \
 	noct-m5-final-opcode-check noct-file-qemu-test
 	@echo "zedBSD M10 verification: PASS (FAT16 writer and Noct File API)"
 
-noct-utilities-qemu-test: $(BUILD)/vmunix apps/LS.NCT apps/CP.NCT
+noct-utilities-qemu-test: $(BUILD)/vmunix apps/ls.nct apps/cp.nct
 	$(SCRIPTS_DIR)/test-noct-utilities.sh
 
 noct-m11-verify: noct-m10-verify check $(BUILD)/vmunix \
 	noct-m5-final-opcode-check noct-utilities-qemu-test
-	@echo "zedBSD M11 safe utilities verification: PASS (LS.NCT and CP.NCT)"
+	@echo "zedBSD M11 safe utilities verification: PASS (ls.nct and cp.nct)"
 
 noct-env-qemu-test: $(BUILD)/vmunix
 	$(SCRIPTS_DIR)/test-noct-env.sh
@@ -545,7 +545,7 @@ autoexec-remacs-qemu-test: $(BUILD)/vmunix
 
 beui-g4-verify: beui-g2c-verify term-japanese-qemu-test \
 	autoexec-remacs-qemu-test
-	@echo "zedBSD BeUI G4 verification: PASS (AUTOEXEC.NCT to Remacs)"
+	@echo "zedBSD BeUI G4 verification: PASS (menu.nct to Remacs)"
 
 beui-input-qemu-test: $(BUILD)/vmunix
 	$(SCRIPTS_DIR)/test-beui-input.sh

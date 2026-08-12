@@ -1,25 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verify that a key pressed during the one-second zinit.rc countdown skips the
-# file and enters the interactive /bin/sh immediately.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/pc98}"
 qemu="${QEMU:-qemu-system-i386}"
 bios="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-work="$build/tests/boot-cancel"
-image="$work/boot-cancel.img"
+work="$build/tests/console-scroll"
+image="$work/console-scroll.img"
 zinit="$work/ZINIT.RC"
 monitor="$work/monitor.sock"
-screenshot="$work/boot-countdown.ppm"
 
 test -x "$qemu" || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios" || { echo "BIOS directory not found: $bios" >&2; exit 1; }
 rm -rf -- "$work"
 mkdir -p "$work"
-printf 'echo ZINIT-RAN\n' >"$zinit"
-ZEDBSD_ZINIT_RC="$zinit" \
-	"$repo/scripts/make-hdd-image.sh" "$image"
+for number in $(seq -w 0 30); do
+	printf 'echo SCROLL-%s\n' "$number"
+done >"$zinit"
+ZEDBSD_ZINIT_RC="$zinit" "$repo/scripts/make-hdd-image.sh" "$image"
 
 "$qemu" -M pc9821 -cpu 486 -m 8 -accel tcg -L "$bios" -nic none \
 	-drive "if=ide,bus=0,unit=0,format=raw,file=$image" \
@@ -37,7 +35,7 @@ cleanup()
 }
 trap cleanup EXIT INT TERM
 
-python3 - "$monitor" "$screenshot" <<'PY'
+python3 - "$monitor" <<'PY'
 import json
 import socket
 import sys
@@ -82,34 +80,18 @@ qmp("qmp_capabilities")
 deadline = time.monotonic() + 45
 while time.monotonic() < deadline:
     screen = memory(0xa0000, 25 * 160)[0::2]
-    if b"Loading /etc/zinit.rc" in screen:
-        qmp("screendump", {"filename": sys.argv[2]})
-        qmp("input-send-event", {"events": [
-            {"type": "key", "data": {"down": True,
-             "key": {"type": "qcode", "data": "spc"}}},
-            {"type": "key", "data": {"down": False,
-             "key": {"type": "qcode", "data": "spc"}}},
-        ]})
-        break
-    time.sleep(.02)
-else:
-    raise SystemExit("zinit.rc countdown was not displayed")
-
-deadline = time.monotonic() + 10
-while time.monotonic() < deadline:
-    screen = memory(0xa0000, 25 * 160)[0::2]
-    if b"ZINIT-RAN" in screen:
-        raise SystemExit("zinit.rc ran despite the cancellation key")
-    if b"/ $ " in screen:
-        print("zinit.rc cancelled and /bin/sh prompt observed")
+    if b"SCROLL-30" in screen and b"/ $ " in screen:
+        if b"NEC PC-9800" in screen or b"SCROLL-00" in screen:
+            raise SystemExit("console reached the last row without scrolling")
+        print("console scrolled and retained the newest rows")
         qmp("quit")
         break
-    time.sleep(.05)
+    time.sleep(.1)
 else:
-    raise SystemExit("interactive /bin/sh prompt was not observed")
+    raise SystemExit("final scrolling marker was not observed")
 PY
 
 wait "$qemu_pid" 2>/dev/null || true
 trap - EXIT INT TERM
 rm -f -- "$monitor"
-echo "zedBSD zinit.rc cancellation QEMU test: PASS"
+echo "zedBSD console scrolling QEMU test: PASS"

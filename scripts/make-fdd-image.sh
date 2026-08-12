@@ -55,15 +55,15 @@ dd if="$build/IO.SYS" of="$output" bs=512 seek=2 conv=notrunc status=none
 
 mcopy -i "$output" "$build/vmunix" ::vmunix
 mattrib -i "$output" +r +h +s ::vmunix
-mcopy -i "$output" "$repo/apps/AUTOEXEC.NCT" ::AUTOEXEC.NCT
-if [ -f "$repo/apps/HELLO.NCT" ]; then
-	mcopy -i "$output" "$repo/apps/HELLO.NCT" ::HELLO.NCT
+mcopy -i "$output" "$repo/apps/menu.nct" ::AUTOEXEC.NCT
+if [ -f "$repo/apps/hello.nct" ]; then
+	mcopy -i "$output" "$repo/apps/hello.nct" ::HELLO.NCT
 fi
 mmd -i "$output" ::CMD 2>/dev/null || true
 mmd -i "$output" ::HOME 2>/dev/null || true
-for utility in LS.NCT CP.NCT; do
+for utility in ls.nct cp.nct; do
 	if [ -f "$repo/apps/$utility" ]; then
-		mcopy -i "$output" "$repo/apps/$utility" ::CMD/"$utility"
+		mcopy -i "$output" "$repo/apps/$utility" ::CMD/"${utility^^}"
 	fi
 done
 

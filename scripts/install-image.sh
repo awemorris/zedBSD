@@ -6,6 +6,10 @@ arch="${ZEDBSD_ARCH:-pc98}"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 vmunix_image="${ZEDBSD_VMUNIX_IMAGE:-$build/vmunix}"
 shell_image="${ZEDBSD_SH_IMAGE:-$build/bin/sh}"
+zinit_rc="${ZEDBSD_ZINIT_RC:-$repo/etc/zinit.rc}"
+menu_script="${ZEDBSD_MENU:-$repo/apps/menu.nct}"
+menu_background="${ZEDBSD_MENU_BACKGROUND:-$repo/apps/menuback.bmp}"
+zinit_disable="${ZEDBSD_ZINIT_DISABLE:-0}"
 partition="${BOOT_PARTITION:-0}"
 install_disk_stubs="${INSTALL_DISK_STUBS:-0}"
 while test "$#" -gt 0; do
@@ -70,6 +74,10 @@ esac
 case "$swap_size_mib" in
 	0 | 32) ;;
 	*) echo "ZEDBSD_SWAP_SIZE_MIB must be 0 or 32" >&2; exit 2 ;;
+esac
+case "$zinit_disable" in
+	0 | 1) ;;
+	*) echo "ZEDBSD_ZINIT_DISABLE must be 0 or 1" >&2; exit 2 ;;
 esac
 for command in dd mattrib mcopy mformat mmd python3; do
 	command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
@@ -265,6 +273,15 @@ test -s "$build/bin/linux" || { echo "Linux loader ELF not found: $build/bin/lin
 mcopy -o -i "$image@@$offset" "$shell_image" ::BIN/SH
 mcopy -o -i "$image@@$offset" "$build/bin/noct" ::BIN/NOCT
 mcopy -o -i "$image@@$offset" "$build/bin/linux" ::BIN/LINUX
+if test "$zinit_disable" = 0; then
+	test -f "$zinit_rc" || { echo "zinit.rc not found: $zinit_rc" >&2; exit 1; }
+	test -f "$menu_script" || { echo "menu.nct not found: $menu_script" >&2; exit 1; }
+	test -f "$menu_background" || { echo "menu background not found: $menu_background" >&2; exit 1; }
+	mmd -i "$image@@$offset" ::ETC 2>/dev/null || true
+	mcopy -o -i "$image@@$offset" "$zinit_rc" ::ETC/ZINIT.RC
+	mcopy -o -i "$image@@$offset" "$menu_script" ::BIN/MENU.NCT
+	mcopy -o -i "$image@@$offset" "$menu_background" ::BIN/MENUBACK.BMP
+fi
 mmd -i "$image@@$offset" ::CMD 2>/dev/null || true
 mmd -i "$image@@$offset" ::APPS 2>/dev/null || true
 mmd -i "$image@@$offset" ::HOME 2>/dev/null || true
@@ -275,17 +292,17 @@ if test -n "${ZEDBSD_AUTOEXEC:-}"; then
 	}
 	mcopy -o -i "$image@@$offset" "$ZEDBSD_AUTOEXEC" ::AUTOEXEC.NCT
 fi
-if test -f "$repo/apps/HELLO.NCT"; then
-	mcopy -o -i "$image@@$offset" "$repo/apps/HELLO.NCT" ::HELLO.NCT
+if test -f "$repo/apps/hello.nct"; then
+	mcopy -o -i "$image@@$offset" "$repo/apps/hello.nct" ::HELLO.NCT
 fi
-for utility in LS.NCT CP.NCT; do
+for utility in ls.nct cp.nct; do
 	if test -f "$repo/apps/$utility"; then
-		mcopy -o -i "$image@@$offset" "$repo/apps/$utility" ::CMD/"$utility"
+		mcopy -o -i "$image@@$offset" "$repo/apps/$utility" ::CMD/"${utility^^}"
 	fi
 done
 bmpview_nap="${BMPVIEW_NAP:-$repo/build/bmpview/BMPVIEW.NAP}"
 if test ! -s "$bmpview_nap" ||
-   test "$repo/apps/BMPVIEW.NCT" -nt "$bmpview_nap"; then
+   test "$repo/apps/bmpview.nct" -nt "$bmpview_nap"; then
 	"$repo/scripts/build-bmpview-bytecode.sh"
 fi
 test -s "$bmpview_nap" || {
@@ -295,7 +312,7 @@ test -s "$bmpview_nap" || {
 mcopy -o -i "$image@@$offset" "$bmpview_nap" ::APPS/BMPVIEW.NAP
 holoris_nap="${HOLORIS_NAP:-$repo/build/holoris/HOLORIS.NAP}"
 if test ! -s "$holoris_nap" ||
-   test "$repo/apps/HOLORIS.NCT" -nt "$holoris_nap"; then
+   test "$repo/apps/holoris.nct" -nt "$holoris_nap"; then
 	"$repo/scripts/build-holoris-bytecode.sh"
 fi
 test -s "$holoris_nap" || {

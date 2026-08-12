@@ -54,7 +54,8 @@ m14check
 halt
 EOF
 make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
-ZEDBSD_FILES="$files" DISK_HEADS=8 DISK_SECTORS=17 \
+ZEDBSD_FILES="$files" ZEDBSD_ZINIT_RC="$cfg" \
+	DISK_HEADS=8 DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'

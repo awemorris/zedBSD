@@ -36,11 +36,13 @@ if test "${ZEDBSD_LINUX_HANDOFF_FRESH:-0}" = 1; then
 	rm -f -- "$image"
 	ZEDBSD_TEST_MB="${ZEDBSD_LINUX_HANDOFF_MB:-40}" \
 	ZEDBSD_SWAP_SIZE_MIB="${ZEDBSD_SWAP_SIZE_MIB:-32}" \
-	ZEDBSD_AUTOEXEC_DISABLE=1 \
-	ZEDBSD_KERNEL="$kernel" ZEDBSD_BOOT_CFG="$repo/tests/linux-boot.cfg" \
+	ZEDBSD_KERNEL="$kernel" \
+	ZEDBSD_ZINIT_RC="$repo/tests/linux-boot.cfg" \
+	ZEDBSD_BOOT_CFG="$repo/tests/linux-boot.cfg" \
 		"$repo/scripts/make-hdd-image.sh" "$image"
 else
-	ZEDBSD_AUTOEXEC_DISABLE=1 "$repo/scripts/install-image.sh" \
+	ZEDBSD_ZINIT_RC="$repo/tests/linux-boot.cfg" \
+		"$repo/scripts/install-image.sh" \
 		"$image" "$kernel" \
 		"$repo/tests/linux-boot.cfg"
 fi

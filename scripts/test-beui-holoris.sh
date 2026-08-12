@@ -49,7 +49,7 @@ cp --reflink=auto "$base" "$image"
 printf 'holoris test\nhalt\n' > "$cfg"
 
 make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
-DISK_SECTORS=17 \
+ZEDBSD_ZINIT_RC="$cfg" DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
 
 offset="$(python3 - "$image" <<'PY'

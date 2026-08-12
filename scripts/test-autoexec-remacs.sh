@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Exercise the complete graphical startup path:
-# BOOT.CFG -> AUTOEXEC.NCT -> BeUI menu -> BOOT_ACTION -> Remacs.
+# /etc/zinit.rc -> /bin/menu.nct -> BOOT_ACTION -> Remacs.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 arch="${ZEDBSD_ARCH:-pc98}"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
@@ -14,7 +14,6 @@ base="${ZEDBSD_TEST_BASE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/zedbsd-autoexec-remacs"
 image="$work/autoexec-remacs.raw"
 files="$work/files"
-cfg="$work/BOOT.CFG"
 monitor="$work/monitor.sock"
 menu_screenshot="$work/autoexec-emacs-menu.ppm"
 emacs_screenshot="$work/autoexec-remacs.ppm"
@@ -29,15 +28,12 @@ test -f "$base" || { echo "source image not found: $base" >&2; exit 1; }
 
 mkdir -p "$work" "$files"
 cp --reflink=auto "$base" "$image"
-cp "$repo/apps/AUTOEXEC.NCT" "$files/AUTOEXEC.NCT"
 printf '日本語表示テスト\n' > "$files/EDIT.TXT"
-# AUTOEXEC is intentionally selected by BOOT.CFG; it is no longer implicit.
-printf 'autoexec /autoexec.nct\n' > "$cfg"
 
 make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
 "$repo/scripts/build-remacs-bytecode.sh"
 ZEDBSD_FILES="$files" DISK_SECTORS=17 \
-	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
+	"$repo/scripts/install-image.sh" "$image"
 
 offset="$(python3 - "$image" <<'PY'
 import os
@@ -296,4 +292,4 @@ for row in range(height * 2 // 3, height):
 else:
     raise SystemExit("Remacs mode line was not detected")
 PY
-printf 'zedBSD AUTOEXEC graphical Emacs path QEMU test: PASS (%s)\n' "$image"
+printf 'zedBSD zinit graphical Emacs path QEMU test: PASS (%s)\n' "$image"
