@@ -32,7 +32,7 @@ func main() {
 }
 EOF
 printf 'm10\nhalt\n' > "$cfg"
-make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+"$repo/build.sh" vmunix "$arch"
 ZEDBSD_FILES="$files" ZEDBSD_ZINIT_RC="$cfg" \
 	DISK_HEADS=8 DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"

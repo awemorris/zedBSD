@@ -19,7 +19,8 @@ for command in mformat mcopy mattrib mmd python3; do
 	}
 done
 
-make -C "$repo" ARCH="$arch" "build/$arch/fdd-ipl.bin" "build/$arch/IO.SYS" "build/$arch/vmunix"
+"$repo/build.sh" "build/$arch/fdd-ipl.bin" "$arch" \
+	"build/$arch/IO.SYS" "build/$arch/vmunix"
 
 # Stage 1 lives raw in the reserved sectors 3..16.
 io_sys_size="$(stat -c %s "$build/IO.SYS")"

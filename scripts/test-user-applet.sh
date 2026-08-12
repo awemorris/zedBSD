@@ -14,7 +14,7 @@ test -x "$qemu" || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios" || { echo "BIOS directory not found: $bios" >&2; exit 1; }
 rm -rf -- "$work"
 mkdir -p "$files"
-make -C "$repo" ARCH=pc98 -j"$(nproc)" vmunix SH BOOTAPP.BIN
+"$repo/build.sh" vmunix pc98 SH BOOTAPP.BIN
 cp "$build/BOOTAPP.BIN" "$files/BOOTAPP.BIN"
 ZEDBSD_FILES="$files" \
 	ZEDBSD_ZINIT_RC="$repo/tests/ZEDBSD-APPLET.CFG.test" \

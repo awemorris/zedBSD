@@ -100,13 +100,24 @@ jobs="${ZEDBSD_JOBS:-$(nproc)}"
 make_command=(make -C "$repo" "ARCH=$platform" "-j$jobs")
 
 # All compilation and image commands update the generated kernel message
-# header.  Pass both targets to one Make process so Make records the generated
-# target once even when the generator leaves an identical file untouched.
+# header.  Generate it in a separate Make process: multiple goals passed to a
+# parallel Make invocation are not ordered, so compilation could otherwise
+# start before messages.h exists.
 case "$command_name" in
-	clean|distclean|messages)
+	clean|distclean)
 		exec "${make_command[@]}" "$command_name" "$@"
 		;;
+	messages)
+		exec "${make_command[@]}" messages "$@"
+		;;
 	*)
-		exec "${make_command[@]}" messages "$command_name" "$@"
+		message_options=()
+		for argument in "$@"; do
+			case "$argument" in
+				-*|*=*) message_options+=("$argument") ;;
+			esac
+		done
+		"${make_command[@]}" messages "${message_options[@]}"
+		exec "${make_command[@]}" "$command_name" "$@"
 		;;
 esac

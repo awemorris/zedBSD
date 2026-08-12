@@ -15,7 +15,7 @@ work="$build/tests/m9-bios-write"
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios_dir" || { echo "PC-98 BIOS directory not found: $bios_dir" >&2; exit 1; }
 mkdir -p "$work"
-make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix-m9
+"$repo/build.sh" vmunix-m9 "$arch"
 
 run_one()
 {

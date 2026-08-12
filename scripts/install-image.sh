@@ -83,7 +83,7 @@ for command in dd mattrib mcopy mformat mmd python3; do
 	command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
 done
 
-make -C "$repo" ARCH="$arch" all
+"$repo/build.sh" all "$arch"
 test -f "$vmunix_image" || {
 	echo "vmunix image not found: $vmunix_image" >&2
 	exit 1

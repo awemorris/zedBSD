@@ -29,7 +29,7 @@ done
 mkdir -p "$work"
 cp --reflink=auto "$base" "$image"
 printf 'emacs EDIT.TXT\nhalt\n' > "$cfg"
-make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+"$repo/build.sh" vmunix "$arch"
 "$repo/scripts/build-remacs-bytecode.sh"
 ZEDBSD_ZINIT_RC="$cfg" DISK_HEADS=8 DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image" "" "$cfg"

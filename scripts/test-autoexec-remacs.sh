@@ -30,7 +30,7 @@ mkdir -p "$work" "$files"
 cp --reflink=auto "$base" "$image"
 printf '日本語表示テスト\n' > "$files/EDIT.TXT"
 
-make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+"$repo/build.sh" vmunix "$arch"
 "$repo/scripts/build-remacs-bytecode.sh"
 ZEDBSD_FILES="$files" DISK_SECTORS=17 \
 	"$repo/scripts/install-image.sh" "$image"

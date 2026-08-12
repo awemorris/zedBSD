@@ -72,7 +72,7 @@ build_targets=(vmunix)
 if test -n "$elf_target"; then
 	build_targets+=("$elf_target")
 fi
-make -C "$repo" ARCH="$arch" -j"$(nproc)" "${build_targets[@]}"
+"$repo/build.sh" "${build_targets[0]}" "$arch" "${build_targets[@]:1}"
 if test -n "$elf_source"; then
 	cp "$elf_source" "$files/INIT.ELF"
 fi

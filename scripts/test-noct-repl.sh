@@ -44,7 +44,7 @@ printf '%s\n' \
 	'    FileUtil.writeText("M15POST.TXT", "SHELL");' \
 	'    return 0;' \
 	'}' > "$files/M15POST.NCT"
-make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+"$repo/build.sh" vmunix "$arch"
 if test "$fresh_swap" = 1; then
 	rm -f -- "$image"
 	ZEDBSD_TEST_MB=40 ZEDBSD_SWAP_SIZE_MIB=32 \

@@ -129,7 +129,7 @@ func main() {
 EOF
 printf 'g3menu\nhalt\n' > "$cfg"
 
-make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
+"$repo/build.sh" vmunix "$arch"
 if test "$fresh_swap" = 1; then
 	rm -f -- "$image"
 	ZEDBSD_TEST_MB=40 ZEDBSD_SWAP_SIZE_MIB=32 \
