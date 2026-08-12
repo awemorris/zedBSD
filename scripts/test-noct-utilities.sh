@@ -17,6 +17,9 @@ files="$work/files"
 cfg="$work/BOOT.CFG"
 source_file="$files/SOURCE.BIN"
 copied_file="$work/COPY.BIN"
+fallback_file="$work/FALLBACK.TXT"
+elf_search_file="$work/ELFTEST.TXT"
+search_file="$work/SEARCH.NCT"
 
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios_dir" || {
@@ -31,17 +34,22 @@ for command in cmp mcopy python3 timeout; do
 	}
 done
 
+rm -rf -- "$files"
 mkdir -p "$work" "$files"
 cp --reflink=auto "$base" "$image"
-install -m 0644 "$repo/apps/ls.nct" "$files/LS.NCT"
-install -m 0644 "$repo/apps/cp.nct" "$files/CP.NCT"
+cat > "$search_file" <<'EOF'
+func main(args) {
+    FileUtil.writeText("/home/" + args[0] + ".TXT", args[0]);
+    return 0;
+}
+EOF
 python3 - "$source_file" <<'PY'
 import sys
 
 with open(sys.argv[1], "wb") as stream:
     stream.write(bytes((index * 37 + 11) & 0xff for index in range(16417)))
 PY
-printf 'ls\ncp SOURCE.BIN COPY.BIN\nhalt\n' > "$cfg"
+printf 'ls\nls -l\nsearch FALLBACK\nnoct /apps/search.nct ELFTEST\ncp SOURCE.BIN COPY.BIN\nhalt\n' > "$cfg"
 make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
 ZEDBSD_FILES="$files" ZEDBSD_ZINIT_RC="$cfg" \
 	DISK_HEADS=8 DISK_SECTORS=17 \
@@ -65,6 +73,11 @@ else:
 PY
 )"
 
+# ZEDBSD_FILES installs arbitrary fixtures at the volume root.  The command
+# resolver deliberately searches only /bin and /apps, so place this script in
+# /apps as a separate test fixture.
+mcopy -o -i "$image@@$offset" "$search_file" ::APPS/SEARCH.NCT
+
 set +e
 timeout --signal=INT --kill-after=5 45 \
 	"$qemu" -M pc9801 -cpu 386 -m 6 -accel tcg -L "$bios_dir" \
@@ -80,6 +93,17 @@ rm -f -- "$copied_file"
 mcopy -i "$image@@$offset" ::COPY.BIN "$copied_file"
 cmp -s "$source_file" "$copied_file" || {
 	echo "M11 CP.NCT result differs from SOURCE.BIN" >&2
+	exit 1
+}
+rm -f -- "$fallback_file" "$elf_search_file"
+mcopy -i "$image@@$offset" ::HOME/FALLBACK.TXT "$fallback_file"
+mcopy -i "$image@@$offset" ::HOME/ELFTEST.TXT "$elf_search_file"
+test "$(cat "$fallback_file")" = FALLBACK || {
+	echo "shell /apps .nct fallback result mismatch" >&2
+	exit 1
+}
+test "$(cat "$elf_search_file")" = ELFTEST || {
+	echo "shell /bin ELF search result mismatch" >&2
 	exit 1
 }
 printf 'M11 LS.NCT/CP.NCT QEMU test: PASS (%s)\n' "$image"

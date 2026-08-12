@@ -112,7 +112,8 @@ static int file_read_at(void *context, const char *path, uint32_t offset,
 static int directory_read(void *context, const char *path, unsigned index,
 			  struct zedbsd_noct_dirent *entry)
 {
-	DIR *directory; struct dirent *item = NULL; unsigned i;
+	DIR *directory; struct dirent *item = NULL; struct stat status;
+	char child[512]; unsigned i;
 	(void)context;
 	if (entry == NULL || (directory = opendir(path)) == NULL) return -1;
 	for (i = 0; i <= index; i++) {
@@ -130,8 +131,15 @@ static int directory_read(void *context, const char *path, unsigned index,
 		for (char *name = entry->name; *name != '\0'; name++)
 			if (*name >= 'A' && *name <= 'Z')
 				*name = (char)(*name - 'A' + 'a');
-		entry->size = 0;
-		entry->attributes = item->d_type == DT_DIR ? 0x10U : 0;
+		if (!strcmp(path, "/"))
+			snprintf(child, sizeof(child), "/%s", item->d_name);
+		else
+			snprintf(child, sizeof(child), "%s/%s", path, item->d_name);
+		if (stat(child, &status) == 0 && status.st_size >= 0)
+			entry->size = (uint64_t)status.st_size;
+		else
+			entry->size = 0;
+		entry->attributes = item->d_type == DT_DIR ? 0x10U : 0x20U;
 	}
 	(void)closedir(directory);
 	return item == NULL ? 0 : 1;

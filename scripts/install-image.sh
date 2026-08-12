@@ -282,7 +282,6 @@ if test "$zinit_disable" = 0; then
 	mcopy -o -i "$image@@$offset" "$menu_script" ::BIN/MENU.NCT
 	mcopy -o -i "$image@@$offset" "$menu_background" ::BIN/MENUBACK.BMP
 fi
-mmd -i "$image@@$offset" ::CMD 2>/dev/null || true
 mmd -i "$image@@$offset" ::APPS 2>/dev/null || true
 mmd -i "$image@@$offset" ::HOME 2>/dev/null || true
 if test -n "${ZEDBSD_AUTOEXEC:-}"; then
@@ -293,11 +292,11 @@ if test -n "${ZEDBSD_AUTOEXEC:-}"; then
 	mcopy -o -i "$image@@$offset" "$ZEDBSD_AUTOEXEC" ::AUTOEXEC.NCT
 fi
 if test -f "$repo/apps/hello.nct"; then
-	mcopy -o -i "$image@@$offset" "$repo/apps/hello.nct" ::HELLO.NCT
+	mcopy -o -i "$image@@$offset" "$repo/apps/hello.nct" ::APPS/HELLO.NCT
 fi
 for utility in ls.nct cp.nct; do
 	if test -f "$repo/apps/$utility"; then
-		mcopy -o -i "$image@@$offset" "$repo/apps/$utility" ::CMD/"${utility^^}"
+		mcopy -o -i "$image@@$offset" "$repo/apps/$utility" ::APPS/"${utility^^}"
 	fi
 done
 bmpview_nap="${BMPVIEW_NAP:-$repo/build/bmpview/BMPVIEW.NAP}"
@@ -329,7 +328,7 @@ test -s "$remacs_nap" || {
 	echo "Remacs bytecode not found: $remacs_nap" >&2
 	exit 1
 }
-mcopy -o -i "$image@@$offset" "$remacs_nap" ::CMD/REMACS.NAP
+mcopy -o -i "$image@@$offset" "$remacs_nap" ::APPS/REMACS.NAP
 test -s "$remacs_skk" || {
 	echo "Remacs SKK dictionary not found: $remacs_skk" >&2
 	exit 1
@@ -342,14 +341,21 @@ if test -n "$boot_cfg"; then
 	test -f "$boot_cfg" || { echo "BOOT.CFG not found: $boot_cfg" >&2; exit 1; }
 	mcopy -o -i "$image@@$offset" "$boot_cfg" ::BOOT.CFG
 fi
+if test -f "$repo/platform/pc98/dos/linux98.exe" ||
+   test -f "$repo/platform/pc98/dos/inst.exe"; then
+	mmd -i "$image@@$offset" ::INST 2>/dev/null || true
+fi
 if test -f "$repo/platform/pc98/dos/linux98.exe"; then
-	mcopy -o -i "$image@@$offset" "$repo/platform/pc98/dos/linux98.exe" ::LINUX98.EXE
+	mcopy -o -i "$image@@$offset" "$repo/platform/pc98/dos/linux98.exe" ::INST/LINUX98.EXE
 fi
 if test -f "$repo/platform/pc98/dos/inst.exe"; then
-	mcopy -o -i "$image@@$offset" "$repo/platform/pc98/dos/inst.exe" ::INST.EXE
-	mcopy -o -i "$image@@$offset" "$build/ipl-lba0.img" ::IPL-LBA0.IMG
-	mcopy -o -i "$image@@$offset" "$build/ipl-lba2.img" ::IPL-LBA2.IMG
-	mcopy -o -i "$image@@$offset" "$build/ipl-part.img" ::IPL-PART.IMG
+	# INST.EXE resolves its payloads relative to its own path.  Keep an
+	# installer copy of IO.SYS here while leaving the boot copy at the root.
+	mcopy -o -i "$image@@$offset" "$repo/platform/pc98/dos/inst.exe" ::INST/INST.EXE
+	mcopy -o -i "$image@@$offset" "$build/IO.SYS" ::INST/IO.SYS
+	mcopy -o -i "$image@@$offset" "$build/ipl-lba0.img" ::INST/IPL-LBA0.IMG
+	mcopy -o -i "$image@@$offset" "$build/ipl-lba2.img" ::INST/IPL-LBA2.IMG
+	mcopy -o -i "$image@@$offset" "$build/ipl-part.img" ::INST/IPL-PART.IMG
 fi
 if test -n "${BOOT_LOGO:-}"; then
 	test -f "$BOOT_LOGO" || { echo "Boot logo not found: $BOOT_LOGO" >&2; exit 1; }

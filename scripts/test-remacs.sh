@@ -161,7 +161,7 @@ wait "$qemu_pid" 2>/dev/null || true
 trap - EXIT INT TERM
 rm -f -- "$monitor"
 
-mdir -i "$image@@$offset" ::CMD/REMACS.NAP >/dev/null
+mdir -i "$image@@$offset" ::APPS/REMACS.NAP >/dev/null
 saved="$(mtype -i "$image@@$offset" ::EDIT.TXT)"
 test "$saved" = boots || {
 	printf 'Remacs FAT16 save mismatch: expected "boots", got "%s"\n' \

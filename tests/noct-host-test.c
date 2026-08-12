@@ -913,12 +913,17 @@ main(int argc, char **argv)
 		"func main() { BeUI.init(); Console.write(1); }";
 	char *script_arguments[] = { "alpha", "beta" };
 	char *ls_bad_arguments[] = { "one", "two" };
+	char *ls_long_arguments[] = { "-l" };
 	char *cp_arguments[] = { "/SOURCE.BIN", "/COPY.BIN" };
 	char *cp_same_arguments[] = { "/SOURCE.BIN", "source.bin" };
 	char *cp_missing_arguments[] = { "/MISSING.BIN", "/COPY.BIN" };
 	static char interpreter_output[OUTPUT_SIZE];
 	static const char ls_output[] =
-		"BOOT.CFG 7\nSCRIPTS/ 0\nLIB.NCT 38\n";
+		"BOOT.CFG  SCRIPTS/  LIB.NCT\n";
+	static const char ls_long_output[] =
+		"----a         7 BOOT.CFG\n"
+		"d----         0 SCRIPTS/\n"
+		"----a        38 LIB.NCT\n";
 	static const char cp_output[] = "Copied 16417 bytes.\n";
 	struct zedbsd_noct_result result;
 	const struct zedbsd_filesystem_driver *drivers[] = { &memory_driver };
@@ -1092,8 +1097,12 @@ main(int argc, char **argv)
 		if (status != 0)
 			return 50 + status;
 	}
+	status = run_case_args(ls_source, 1, ls_long_arguments, 1,
+			       ZEDBSD_NOCT_OK, 0, ls_long_output, &result);
+	if (status != 0)
+		return 55 + status;
 	status = run_case_args(ls_source, 2, ls_bad_arguments, 0,
-			       ZEDBSD_NOCT_OK, 2, "usage: ls [PATH]\n",
+			       ZEDBSD_NOCT_OK, 2, "usage: ls [-l] [PATH]\n",
 			       &result);
 	if (status != 0)
 		return 60 + status;

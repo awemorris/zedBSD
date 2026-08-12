@@ -47,16 +47,17 @@ copied there; every byte of `IO.SYS` remains in its ordinary FAT cluster
 chain. The contiguity requirement is the traditional DOS system-file rule.
 
 Generated BOOT partitions contain the complete reusable installer kit in
-their root directory: `INST.EXE`, `IO.SYS`, `IPL-LBA0.IMG`, `IPL-LBA2.IMG`,
-and `IPL-PART.IMG`. The PBR is deliberately kept as `IPL-PART.IMG`, rather
+their `INST` directory: `INST.EXE`, `IO.SYS`, `IPL-LBA0.IMG`, `IPL-LBA2.IMG`,
+and `IPL-PART.IMG`. The root also retains the active boot copy of `IO.SYS`.
+The PBR is deliberately kept as `IPL-PART.IMG`, rather
 than embedded in `INST.EXE`, so it can be inspected, replaced, and installed
 by non-DOS tooling.
 
-Run from plain real-mode DOS:
+Run from the `INST` directory under plain real-mode DOS:
 
 ```dos
-LINUX98.EXE VMLINUX ide0 root=PARTLABEL=LINUXROOT rw
-LINUX98.EXE VMLINUX scsi0 root=/dev/sda2 rw
+LINUX98.EXE ..\VMLINUX ide0 root=PARTLABEL=LINUXROOT rw
+LINUX98.EXE ..\VMLINUX scsi0 root=/dev/sda2 rw
 ```
 
 The drive argument accepts `ide0` through `ide3` (BIOS IDs 80h through 83h)

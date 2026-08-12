@@ -56,14 +56,14 @@ dd if="$build/IO.SYS" of="$output" bs=512 seek=2 conv=notrunc status=none
 mcopy -i "$output" "$build/vmunix" ::vmunix
 mattrib -i "$output" +r +h +s ::vmunix
 mcopy -i "$output" "$repo/apps/menu.nct" ::AUTOEXEC.NCT
-if [ -f "$repo/apps/hello.nct" ]; then
-	mcopy -i "$output" "$repo/apps/hello.nct" ::HELLO.NCT
-fi
-mmd -i "$output" ::CMD 2>/dev/null || true
+mmd -i "$output" ::APPS 2>/dev/null || true
 mmd -i "$output" ::HOME 2>/dev/null || true
+if [ -f "$repo/apps/hello.nct" ]; then
+	mcopy -i "$output" "$repo/apps/hello.nct" ::APPS/HELLO.NCT
+fi
 for utility in ls.nct cp.nct; do
 	if [ -f "$repo/apps/$utility" ]; then
-		mcopy -i "$output" "$repo/apps/$utility" ::CMD/"${utility^^}"
+		mcopy -i "$output" "$repo/apps/$utility" ::APPS/"${utility^^}"
 	fi
 done
 
@@ -78,7 +78,7 @@ test -s "$remacs_nap" || {
 	echo "Remacs bytecode not found: $remacs_nap" >&2
 	exit 1
 }
-mcopy -i "$output" "$remacs_nap" ::CMD/REMACS.NAP
+mcopy -i "$output" "$remacs_nap" ::APPS/REMACS.NAP
 mcopy -i "$output" "$remacs_skk" ::HOME/SKKJISYO.DIC
 
 sha256sum "$output"

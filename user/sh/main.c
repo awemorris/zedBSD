@@ -163,19 +163,6 @@ source_file(const char *path)
 }
 
 static int
-list_directory(const char *path)
-{
-	DIR *directory = opendir(path);
-	struct dirent *entry;
-	if (directory == NULL)
-		return 0;
-	while ((entry = readdir(directory)) != NULL)
-		printf("%s\n", entry->d_name);
-	closedir(directory);
-	return 1;
-}
-
-static int
 cat_file(const char *path)
 {
 	int fd = open(path, O_RDONLY);
@@ -193,6 +180,19 @@ cat_file(const char *path)
 }
 
 static int
+list_partitions(void)
+{
+	DIR *directory = opendir("/");
+	struct dirent *entry;
+	if (directory == NULL)
+		return 0;
+	while ((entry = readdir(directory)) != NULL)
+		printf("%s\n", entry->d_name);
+	closedir(directory);
+	return 1;
+}
+
+static int
 run_noct(int argc, char **argv)
 {
 	char *child[ARG_MAX + 2];
@@ -207,9 +207,9 @@ run_noct(int argc, char **argv)
 		strncpy(resolved, argv[0], sizeof(resolved) - 1U);
 		resolved[sizeof(resolved) - 1U] = '\0';
 	} else {
-		snprintf(resolved, sizeof(resolved), "/cmd/%s", argv[0]);
+		snprintf(resolved, sizeof(resolved), "/apps/%s", argv[0]);
 		if (access(resolved, F_OK) != 0) {
-			snprintf(resolved, sizeof(resolved), "/apps/%s", argv[0]);
+			snprintf(resolved, sizeof(resolved), "/bin/%s", argv[0]);
 			if (access(resolved, F_OK) != 0) {
 				snprintf(resolved, sizeof(resolved), "/%s", argv[0]);
 				if (access(resolved, F_OK) != 0)
@@ -341,6 +341,70 @@ run_external(char *const argv[])
 }
 
 static int
+is_elf(const char *path)
+{
+	unsigned char magic[4];
+	int fd = open(path, O_RDONLY);
+	ssize_t count;
+	if (fd < 0)
+		return 0;
+	count = read(fd, magic, sizeof(magic));
+	close(fd);
+	return count == (ssize_t)sizeof(magic) && magic[0] == 0x7f &&
+	    magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F';
+}
+
+static int
+run_search_path(int argc, char **argv)
+{
+	static const char *const directories[] = { "/bin", "/apps" };
+	char candidate[256];
+	char *child[ARG_MAX + 1];
+	char *script[ARG_MAX + 1];
+	unsigned directory;
+	int i;
+
+	for (directory = 0; directory < sizeof(directories) /
+	    sizeof(directories[0]); directory++) {
+		snprintf(candidate, sizeof(candidate), "%s/%s",
+		    directories[directory], argv[0]);
+		if (!is_elf(candidate))
+			continue;
+		child[0] = candidate;
+		for (i = 1; i < argc; i++)
+			child[i] = argv[i];
+		child[argc] = NULL;
+		return run_external(child);
+	}
+	for (directory = 0; directory < sizeof(directories) /
+	    sizeof(directories[0]); directory++) {
+		snprintf(candidate, sizeof(candidate), "%s/%s.nct",
+		    directories[directory], argv[0]);
+		if (access(candidate, F_OK) != 0)
+			continue;
+		script[0] = candidate;
+		for (i = 1; i < argc; i++)
+			script[i] = argv[i];
+		script[argc] = NULL;
+		return run_noct(argc, script);
+	}
+	/* Compiled Noct applications remain executable by command name. */
+	for (directory = 0; directory < sizeof(directories) /
+	    sizeof(directories[0]); directory++) {
+		snprintf(candidate, sizeof(candidate), "%s/%s.nap",
+		    directories[directory], argv[0]);
+		if (access(candidate, F_OK) != 0)
+			continue;
+		script[0] = candidate;
+		for (i = 1; i < argc; i++)
+			script[i] = argv[i];
+		script[argc] = NULL;
+		return run_noct(argc, script);
+	}
+	return 0;
+}
+
+static int
 command(char *text)
 {
 	char *argv[ARG_MAX];
@@ -349,7 +413,7 @@ command(char *text)
 		return 1;
 	if (!strcmp(argv[0], "help")) {
 		puts("help echo env set unset pause wait device probe-ide probe-scsi "
-		     "disk part pwd cd ls cat source kernel arg boot linux "
+		     "disk part pwd cd cat source kernel arg boot linux "
 		     "run noct autoexec emacs vmstat reboot halt exit");
 		return 1;
 	}
@@ -389,8 +453,6 @@ command(char *text)
 	if (!strcmp(argv[0], "cd"))
 		return argc <= 2 && chdir(argc == 2 ? argv[1] :
 		    (getenv("HOME") != NULL ? getenv("HOME") : "/")) == 0;
-	if (!strcmp(argv[0], "ls"))
-		return argc <= 2 && list_directory(argc == 2 ? argv[1] : ".");
 	if (!strcmp(argv[0], "cat"))
 		return argc == 2 && cat_file(argv[1]);
 	if (!strcmp(argv[0], "source"))
@@ -408,7 +470,7 @@ command(char *text)
 		return 1;
 	}
 	if (!strcmp(argv[0], "part"))
-		return list_directory("/");
+		return list_partitions();
 	if (!strcmp(argv[0], "vmstat"))
 		return argc == 1 && show_vmstat();
 	if (!strcmp(argv[0], "halt"))
@@ -449,8 +511,6 @@ command(char *text)
 	}
 	if (!strcmp(argv[0], "linux"))
 		return run_bootlinux(argc - 1, argv + 1);
-	if (!strcmp(argv[0], "noct"))
-		return run_noct(argc - 1, argv + 1);
 	if (!strcmp(argv[0], "autoexec"))
 		return argc <= 2 && run_autoexec(argc == 2 ? argv[1] :
 		    "/autoexec.nct");
@@ -459,7 +519,7 @@ command(char *text)
 		int i;
 		if (getenv("REMACS_SKK_DICT") == NULL)
 			(void)setenv("REMACS_SKK_DICT", "/home/skkjisyo.dic", 1);
-		args[0] = "/cmd/remacs.nap";
+		args[0] = "/apps/remacs.nap";
 		for (i = 1; i < argc && i < ARG_MAX; i++)
 			args[i] = argv[i];
 		return run_noct(argc, args);
@@ -478,21 +538,7 @@ command(char *text)
 		child[argc] = NULL;
 		return run_external(child);
 	}
-	{
-		char candidate[256];
-		char *args[ARG_MAX + 1];
-		int i;
-		snprintf(candidate, sizeof(candidate), "/cmd/%s.nct", argv[0]);
-		if (access(candidate, F_OK) != 0) {
-			snprintf(candidate, sizeof(candidate), "/apps/%s.nap", argv[0]);
-			if (access(candidate, F_OK) != 0)
-				return 0;
-		}
-		args[0] = candidate;
-		for (i = 1; i < argc; i++)
-			args[i] = argv[i];
-		return run_noct(argc, args);
-	}
+	return run_search_path(argc, argv);
 }
 
 static void
