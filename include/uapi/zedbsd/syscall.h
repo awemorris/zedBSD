@@ -21,6 +21,7 @@ enum zedbsd_syscall_number {
 	ZEDBSD_SYS_nanosleep = 16,
 	ZEDBSD_SYS_spawn = 17,
 	ZEDBSD_SYS_wait = 18,
+	ZEDBSD_SYS_brk = 19,
 };
 
 #endif

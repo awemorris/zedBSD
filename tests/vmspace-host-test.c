@@ -16,10 +16,30 @@ static unsigned pages_allocated, pages_freed, pages_unmapped, pages_protected;
 static int fail_space, fail_pages, fail_map, fail_protect;
 static unsigned page_ins, swap_reads, swap_slots_freed;
 static struct swap_backend fake_swap;
+static size_t commit_used;
+static int fail_commit;
 
 void *kern_malloc(size_t size) { return malloc(size); }
 void *kern_calloc(size_t count, size_t size) { return calloc(count, size); }
 void kern_free(void *pointer) { free(pointer); }
+
+int vm_commit_reserve(size_t size)
+{
+	if (fail_commit)
+		return ENOMEM;
+	commit_used += size;
+	return 0;
+}
+void vm_commit_release(size_t size)
+{
+	assert(size <= commit_used);
+	commit_used -= size;
+}
+void hal_fatal(const char *file, int line, const char *message)
+{
+	fprintf(stderr, "%s:%d: %s\n", file, line, message);
+	abort();
+}
 
 void vm_page_track(struct vm_page *page) { (void)page; }
 void vm_page_untrack(struct vm_page *page) { (void)page; }
@@ -115,12 +135,14 @@ int main(void)
 	struct vm_region *region;
 	struct file file = { .f_usecount = 1, .f_data = (void *)file_data };
 	struct vm_page *page;
+	uintptr_t mapped;
 	char buffer[8];
 
 	vm = vmspace_create();
 	assert(vm != NULL && spaces_created == 1);
 	assert(vmspace_map_anon(vm, 0x400000, 8192,
 		HAL_SPACE_READ | HAL_SPACE_WRITE, &region) == 0);
+	assert(commit_used == 8192);
 	assert(region->start == 0x400000 && region->size == 8192);
 	assert(region->pages == NULL && pages_allocated == 0);
 	assert(vmspace_fault(vm, 0x400123, HAL_SPACE_READ) == 0);
@@ -152,6 +174,22 @@ int main(void)
 	assert(vmspace_copy_to(vm, 0x400000, "x", 1) == EFAULT);
 	assert(vmspace_unmap(vm, 0x400000, 8192) == 0);
 	assert(pages_unmapped == 2 && pages_freed == 2);
+	assert(commit_used == 0);
+
+	assert(vmspace_map_anon(vm, 0x800000, 4096, 0, &region) == 0);
+	assert(commit_used == 0 && region->commit_size == 0);
+	assert(vmspace_protect(vm, 0x800000, 4096, HAL_SPACE_READ) == 0);
+	assert(commit_used == 4096 && region->commit_size == 4096);
+	assert(vmspace_protect(vm, 0x800000, 4096, 0) == 0);
+	assert(commit_used == 4096);
+	assert(vmspace_unmap(vm, 0x800000, 4096) == 0);
+	assert(commit_used == 0);
+
+	fail_commit = 1;
+	assert(vmspace_map_anon(vm, 0x810000, 4096, HAL_SPACE_READ, NULL) ==
+		ENOMEM);
+	assert(vmspace_find_region(vm, 0x810000, 1) == NULL);
+	fail_commit = 0;
 
 	fail_pages = 1;
 	assert(vmspace_map_anon(vm, 0x500000, 4096, HAL_SPACE_READ, NULL) == 0);
@@ -163,12 +201,54 @@ int main(void)
 
 	assert(vmspace_map_file(vm, 0x600000, 4096, HAL_SPACE_READ, &file,
 		2, 0x600003, 5, &region) == 0);
+	assert(commit_used == 4096); /* 0x500000 anonymous mapping */
 	assert(file.f_usecount == 2 && region->pages == NULL);
 	assert(vmspace_fault(vm, 0x600003, HAL_SPACE_READ) == 0);
 	memset(buffer, 0xaa, sizeof(buffer));
 	assert(vmspace_copy_from(vm, buffer, 0x600000, 8) == 0);
 	assert(buffer[0] == 0 && buffer[1] == 0 && buffer[2] == 0);
 	assert(!memcmp(buffer + 3, "ELF!t", 5));
+	assert(vmspace_map_file(vm, 0x900000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &file, 2, 0x900003, 5,
+		&region) == 0);
+	assert(region->commit_size == 4096 && commit_used == 8192);
+
+	assert(vmspace_set_brk_start(vm, 0x01000000U) == 0);
+	assert(vmspace_brk(vm, 0, &mapped) == 0 && mapped == 0x01000000U);
+	assert(vmspace_brk(vm, 0x01001001U, &mapped) == 0 &&
+		mapped == 0x01001001U);
+	region = vmspace_find_region(vm, 0x01000000U, 1);
+	assert(region != NULL && region->size == 8192 &&
+		(region->flags & VM_REGION_BRK) != 0);
+	assert(commit_used == 16384);
+	fail_commit = 1;
+	assert(vmspace_brk(vm, 0x01002001U, &mapped) == ENOMEM);
+	assert(vm->brk_current == 0x01001001U && region->size == 8192 &&
+		commit_used == 16384);
+	fail_commit = 0;
+	assert(vmspace_fault(vm, 0x01001000U, HAL_SPACE_WRITE) == 0);
+	assert(vmspace_brk(vm, 0x01000001U, &mapped) == 0);
+	assert(region->size == 4096 && commit_used == 12288);
+	assert(vmspace_brk(vm, 0x01000000U, &mapped) == 0);
+	assert(vmspace_find_region(vm, 0x01000000U, 1) == NULL);
+	assert(commit_used == 8192);
+	assert(vmspace_brk(vm, VM_BRK_TOP, &mapped) == ENOMEM);
+
+	assert(vmspace_map_stack(vm, 0x7ffff000U, 1024U * 1024U, 4096) == 0);
+	assert(vm->stack_guard_bottom == 0x7fefe000U);
+	assert(vm->stack_bottom == 0x7feff000U);
+	assert(vm->stack_top == 0x7ffff000U);
+	region = vmspace_find_region(vm, vm->stack_guard_bottom, 1);
+	assert(region != NULL && region->prot == 0 &&
+		(region->flags & (VM_REGION_GUARD | VM_REGION_IMMUTABLE)) ==
+		(VM_REGION_GUARD | VM_REGION_IMMUTABLE));
+	assert(vmspace_fault(vm, vm->stack_guard_bottom, HAL_SPACE_WRITE) ==
+		EFAULT);
+	assert(vmspace_unmap(vm, vm->stack_guard_bottom, 4096) == EACCES);
+	assert(vmspace_protect(vm, vm->stack_bottom, 1024U * 1024U,
+		HAL_SPACE_READ) == EACCES);
+	assert(vmspace_map_find(vm, 0, vm->stack_guard_bottom - 0x10000000U +
+		4096U, HAL_SPACE_READ, &mapped) == ENOMEM);
 
 	/* A page-in whose slot is released must remain reclaimable as dirty. */
 	assert(vmspace_map_anon(vm, 0x700000, 4096,
@@ -192,6 +272,7 @@ int main(void)
 	vmspace_free(vm);
 	assert(file.f_usecount == 1);
 	assert(spaces_destroyed == 1 && pages_allocated == pages_freed);
+	assert(commit_used == 0);
 
 	fail_space = 1;
 	assert(vmspace_create() == NULL);

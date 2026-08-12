@@ -245,6 +245,18 @@ static intptr_t sys_mprotect_call(const uintptr_t args[6])
 	return error == 0 ? 0 : -error;
 }
 
+static intptr_t sys_brk_call(const uintptr_t args[6])
+{
+	struct process *process = current_process();
+	uintptr_t result;
+	int error;
+
+	if (process == NULL || process->vmspace == NULL)
+		return -EINVAL;
+	error = vmspace_brk(process->vmspace, args[0], &result);
+	return error == 0 ? (intptr_t)result : -error;
+}
+
 static intptr_t sys_ioctl_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
@@ -402,6 +414,7 @@ static intptr_t syscall_dispatch(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_nanosleep: return sys_nanosleep_call(args);
 	case ZEDBSD_SYS_spawn: return sys_spawn_call(args);
 	case ZEDBSD_SYS_wait: return sys_wait_call(args);
+	case ZEDBSD_SYS_brk: return sys_brk_call(args);
 	default: return -ENOSYS;
 	}
 }

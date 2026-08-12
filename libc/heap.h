@@ -21,6 +21,8 @@ typedef void (*zedbsd_heap_observer_fn)(void *context, void *pointer,
 					enum zedbsd_heap_event event);
 
 struct heap_block;
+typedef size_t (*zedbsd_heap_grow_fn)(void *context, void *end,
+				      size_t minimum_size);
 
 /*
  * Allocator state is explicit.  Long-lived kernel users must use an explicit
@@ -41,6 +43,8 @@ struct zedbsd_heap {
 	size_t successful_allocations;
 	zedbsd_heap_observer_fn observer;
 	void *observer_context;
+	zedbsd_heap_grow_fn grow;
+	void *grow_context;
 };
 
 void zedbsd_heap_init_instance(struct zedbsd_heap *heap, void *base, size_t size);
@@ -50,6 +54,8 @@ void zedbsd_heap_set_failure_after_instance(struct zedbsd_heap *heap,
 void zedbsd_heap_set_observer_instance(struct zedbsd_heap *heap,
 				       zedbsd_heap_observer_fn observer,
 				       void *context);
+void zedbsd_heap_set_grow_instance(struct zedbsd_heap *heap,
+				   zedbsd_heap_grow_fn grow, void *context);
 void *zedbsd_heap_alloc(struct zedbsd_heap *heap, size_t size);
 void *zedbsd_heap_calloc(struct zedbsd_heap *heap, size_t count, size_t size);
 void *zedbsd_heap_realloc(struct zedbsd_heap *heap, void *pointer, size_t size);

@@ -31,6 +31,7 @@
 #define PT_LOAD 1
 #define PT_DYNAMIC 2
 #define PT_INTERP 3
+#define PT_GNU_STACK 0x6474e551U
 #define PF_X 1U
 #define PF_W 2U
 #define PF_R 4U

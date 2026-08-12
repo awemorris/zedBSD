@@ -3,6 +3,7 @@
 #define ZEDBSD_UNISTD_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 #define F_OK 0
@@ -20,6 +21,8 @@ ssize_t write(int, const void *, size_t);
 int close(int);
 off_t lseek(int, off_t, int);
 void _exit(int) __attribute__((noreturn));
+int brk(void *address);
+void *sbrk(intptr_t increment);
 long sysconf(int name);
 
 #endif

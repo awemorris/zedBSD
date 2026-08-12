@@ -108,6 +108,12 @@ $(BUILD)/tests/noct-memory-host-test: tests/noct-memory-host-test.c \
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc src/noct/memory.c $< -o $@
 
+$(BUILD)/tests/user-noct-memory-host-test: \
+	tests/user-noct-memory-host-test.c user/noct/memory.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc \
+		user/noct/memory.c $< -o $@
+
 $(BUILD)/tests/heap-context-host-test: tests/heap-context-host-test.c \
 	libc/heap.c
 	@mkdir -p $(dir $@)
@@ -125,6 +131,11 @@ $(BUILD)/tests/vmspace-host-test: tests/vmspace-host-test.c \
 	src/kern/vmspace.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vmspace.c $< -o $@
+
+$(BUILD)/tests/vm-commit-host-test: tests/vm-commit-host-test.c \
+	src/kern/vm-commit.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vm-commit.c $< -o $@
 
 $(BUILD)/tests/swap-host-test: tests/swap-host-test.c src/kern/swap.c
 	@mkdir -p $(dir $@)
@@ -182,10 +193,12 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/fat32-host-test \
 	$(BUILD)/tests/env-host-test \
 	$(BUILD)/tests/noct-memory-host-test \
+	$(BUILD)/tests/user-noct-memory-host-test \
 	$(BUILD)/tests/heap-context-host-test \
 	$(BUILD)/tests/elf-host-test \
 	$(BUILD)/tests/sched-host-test \
 	$(BUILD)/tests/vmspace-host-test \
+	$(BUILD)/tests/vm-commit-host-test \
 	$(BUILD)/tests/swap-host-test \
 	$(BUILD)/tests/vm-reclaim-host-test
 CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test

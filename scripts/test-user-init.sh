@@ -40,6 +40,22 @@ swap)
 	probe_size=32
 	expect_failure=0
 	;;
+stack)
+	elf_target=USER-STACK.ELF
+	elf_source="$build/USER-STACK.ELF"
+	probe_symbol=user_int_probe
+	probe_magic=0x42544332
+	probe_size=32
+	expect_failure=0
+	;;
+stack-guard)
+	elf_target=USER-STACK-GUARD.ELF
+	elf_source="$build/USER-STACK-GUARD.ELF"
+	probe_symbol=user_fault_probe
+	probe_magic=0x42544654
+	probe_size=36
+	expect_failure=0
+	;;
 missing)
 	elf_target=
 	elf_source=
@@ -201,10 +217,11 @@ while not expect_failure and time.monotonic() < deadline:
         if int.from_bytes(raw[:4], 'little') == expected_magic:
             fields = struct.unpack('<IIIIIIii' if probe_size == 32 else
                                    '<IIIIIIIii', raw)
-            # The real libc performs several calls.  Do not accept the
-            # first mmap observation before the final exit trap has updated
+	    # The real libc performs several calls.  Do not accept the
+	    # first brk observation before the final exit trap has updated
             # the same record.
             if ((mode == 'int' and fields[1] >= 3 and fields[5] == 1) or
+                (mode == 'stack' and fields[1] >= 4 and fields[5] == 1) or
                 (mode == 'swap' and
                  (fields[5] == 0x53574150 or
                   (fields[1] >= 5 and fields[5] == 1))) or
@@ -225,7 +242,7 @@ if expect_failure:
     print(f'{mode} /bin/sh was rejected and thread0 remained idle')
 elif mode == 'int':
     magic, count, vector, cs, eip, eax, pid, tid = record
-    # crt0/libc reaches exit(2) after mmap-backed heap setup and write(2).
+	# crt0/libc reaches exit(2) after brk-backed heap growth and write(2).
     # The probe records registers at interrupt entry, so the final EAX is the
     # exit system-call number rather than the legacy one-shot probe magic.
     if count < 3 or vector != 0xc2 or (cs & 3) != 3 or \
@@ -239,6 +256,20 @@ elif mode == 'fault':
         raise SystemExit(f'invalid fault probe record: {record!r}')
     print(f'user fault: vector={vector} count={count} cs=0x{cs:x} '
           f'eip=0x{eip:x} pid={pid} tid={tid}')
+elif mode == 'stack':
+    magic, count, vector, cs, eip, eax, pid, tid = record
+    if count < 4 or vector != 0xc2 or (cs & 3) != 3 or \
+       eax != 1 or pid != 1 or tid <= 0:
+        raise SystemExit(f'invalid stack probe record: {record!r}')
+    print(f'1 MiB stack touched: count={count} cs=0x{cs:x} '
+          f'pid={pid} tid={tid}')
+elif mode == 'stack-guard':
+    magic, count, vector, cs, eip, error, address, pid, tid = record
+    if count < 1 or vector != 14 or (cs & 3) != 3 or \
+       address != 0x7fefe000 or pid != 1 or tid <= 0:
+        raise SystemExit(f'invalid stack guard record: {record!r}')
+    print(f'stack guard fault: vector={vector} address=0x{address:x} '
+          f'cs=0x{cs:x} pid={pid} tid={tid}')
 elif mode == 'swap':
     magic, count, vector, cs, eip, eax, pid, tid = record
     if count < 2 or vector != 0xc2 or (cs & 3) != 3 or \

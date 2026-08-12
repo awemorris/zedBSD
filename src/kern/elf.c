@@ -43,7 +43,8 @@ segment_prot(uint32_t flags)
 }
 
 int
-elf32_load(struct file *file, struct vmspace *vm, uintptr_t *entry)
+elf32_load(struct file *file, struct vmspace *vm,
+	   struct elf32_image_info *image)
 {
 	struct elf32_ehdr header;
 	struct elf32_phdr *programs = NULL;
@@ -51,9 +52,13 @@ elf32_load(struct file *file, struct vmspace *vm, uintptr_t *entry)
 	unsigned i, j;
 	int error = ENOEXEC;
 	int loads = 0, entry_ok = 0;
+	unsigned stack_headers = 0;
+	size_t stack_size = EXEC_STACK_DEFAULT_SIZE;
+	uint32_t brk_start = 0;
 
-	if (file == NULL || vm == NULL || entry == NULL)
+	if (file == NULL || vm == NULL || image == NULL)
 		return EINVAL;
+	memset(image, 0, sizeof(*image));
 	file_size = file->f_inode->i_size;
 	if (file_size < (off_t)sizeof(header) ||
 	    read_exact(file, 0, &header, sizeof(header)) != 0)
@@ -86,6 +91,25 @@ elf32_load(struct file *file, struct vmspace *vm, uintptr_t *entry)
 		uint32_t start, end;
 		if (program->p_type == PT_INTERP || program->p_type == PT_DYNAMIC)
 			goto out;
+		if (program->p_type == PT_GNU_STACK) {
+			uint32_t requested = program->p_memsz;
+			if (++stack_headers != 1 || program->p_filesz != 0 ||
+			    (program->p_flags & ~(PF_R | PF_W | PF_X)) != 0 ||
+			    (program->p_flags & (PF_R | PF_W)) != (PF_R | PF_W) ||
+			    (program->p_flags & PF_X) != 0)
+				goto out;
+			if (requested == 0) {
+				stack_size = EXEC_STACK_DEFAULT_SIZE;
+				continue;
+			}
+			if (requested > EXEC_STACK_HARD_MAX)
+				goto out;
+			stack_size = (requested + PAGE_SIZE - 1U) &
+				~(size_t)(PAGE_SIZE - 1U);
+			if (stack_size == 0 || stack_size > EXEC_STACK_HARD_MAX)
+				goto out;
+			continue;
+		}
 		if (program->p_type != PT_LOAD)
 			continue;
 		loads++;
@@ -106,6 +130,8 @@ elf32_load(struct file *file, struct vmspace *vm, uintptr_t *entry)
 			~(PAGE_SIZE - 1U);
 		if (end <= start || end > VM_USER_TOP)
 			goto out;
+		if (end > brk_start)
+			brk_start = end;
 		for (j = 0; j < i; j++) {
 			struct elf32_phdr *other = &programs[j];
 			uint32_t other_start, other_end;
@@ -141,7 +167,9 @@ elf32_load(struct file *file, struct vmspace *vm, uintptr_t *entry)
 			goto out;
 	}
 	vm->entry = header.e_entry;
-	*entry = header.e_entry;
+	image->entry = header.e_entry;
+	image->brk_start = brk_start;
+	image->stack_size = stack_size;
 	error = 0;
 out:
 	kern_free(programs);

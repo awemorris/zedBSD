@@ -9,6 +9,7 @@ build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 cpu="${ZEDBSD_TEST_CPU:-486}"
+memory_mib="${ZEDBSD_TEST_MEMORY_MIB:-16}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
 base="${ZEDBSD_TEST_BASE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
 work="$build/tests/zedbsd-autoexec-remacs"
@@ -62,7 +63,7 @@ mcopy -o -i "$image@@$offset" "$work/COMPLETE.TXT" ::HOME/COMPLETE.TXT
 
 rm -f -- "$monitor" "$menu_screenshot" "$emacs_screenshot" "$text_vram" \
 	"$single_key_vram" "$wide_cursor_attr" "$qemu_debug"
-"$qemu" -M pc9821 -cpu "$cpu" -m 16 -accel tcg -L "$bios_dir" \
+"$qemu" -M pc9821 -cpu "$cpu" -m "$memory_mib" -accel tcg -L "$bios_dir" \
 	-nic none -drive "if=ide,bus=0,unit=0,format=raw,file=$image" \
 	-display none -serial none -qmp "unix:$monitor,server=on,wait=off" \
 	-no-reboot -d guest_errors,int -D "$qemu_debug" >/dev/null 2>&1 &

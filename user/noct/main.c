@@ -1,12 +1,18 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "user/noct/zedbsd-api.h"
+#include "user/noct/memory.h"
+#include "libc/heap.h"
 
 #include <noct/noct.h>
 #include <noct/repl.h>
+#include <zedbsd/system.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -155,6 +161,27 @@ static void import_environment(struct zedbsd_environment *environment, char **en
 	}
 }
 
+static int select_memory_profile(
+	struct zedbsd_user_noct_memory_profile *profile)
+{
+	struct zedbsd_system_vmstat stats;
+	int fd;
+
+	memset(&stats, 0, sizeof(stats));
+	fd = open("/dev/system", O_RDONLY);
+	if (fd < 0)
+		return 0;
+	if (ioctl(fd, ZEDBSD_SYSTEM_GET_VMSTAT, &stats) != 0) {
+		(void)close(fd);
+		return 0;
+	}
+	(void)close(fd);
+	return zedbsd_user_noct_select_memory(
+		stats.physical_total + stats.swap_total *
+		ZEDBSD_SYSTEM_SWAP_PAGE_SIZE,
+		stats.vm_commit_available, profile);
+}
+
 int main(int argc, char **argv, char **envp)
 {
 	NoctConfig config;
@@ -164,11 +191,15 @@ int main(int argc, char **argv, char **envp)
 	NoctFunc *function = NULL;
 	struct zedbsd_noct_options options;
 	struct zedbsd_environment environment;
+	struct zedbsd_user_noct_memory_profile memory;
+	struct zedbsd_heap noct_heap;
+	struct zedbsd_heap *bootstrap_heap = NULL;
 	const char *path = NULL;
 	char *source = NULL;
+	void *arena = MAP_FAILED;
 	size_t source_size = 0;
 	size_t parameter_count = 0;
-	int pinned = 0, status = 1, type;
+	int heap_active = 0, pinned = 0, status = 1, type;
 
 	if (argc >= 2 && strcmp(argv[1], "--repl") != 0) {
 		path = argv[1];
@@ -183,9 +214,26 @@ int main(int argc, char **argv, char **envp)
 	memset(&arguments, 0, sizeof(arguments));
 	memset(&argument_value, 0, sizeof(argument_value));
 	memset(&options, 0, sizeof(options));
+	memset(&memory, 0, sizeof(memory));
 	import_environment(&environment, envp);
-	options.arena = source;
-	options.arena_size = 8U * 1024U * 1024U;
+	if (!select_memory_profile(&memory)) {
+		fprintf(stderr, "noct: cannot determine virtual memory capacity\n");
+		status = 3;
+		goto out;
+	}
+	arena = mmap(NULL, memory.arena_size, PROT_READ | PROT_WRITE,
+		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (arena == MAP_FAILED) {
+		fprintf(stderr, "noct: cannot reserve %u MiB VM heap\n",
+			memory.profile_mib);
+		status = 4;
+		goto out;
+	}
+	zedbsd_heap_init_instance(&noct_heap, arena, memory.arena_size);
+	bootstrap_heap = zedbsd_heap_set_active(&noct_heap);
+	heap_active = 1;
+	options.arena = arena;
+	options.arena_size = memory.arena_size;
 	options.fail_after = (size_t)-1;
 	options.jit_enable = 1;
 	options.jit_threshold = 32;
@@ -195,10 +243,10 @@ int main(int argc, char **argv, char **envp)
 
 	noct_set_default_config(&config);
 	config.jit_enable = true;
-	config.jit_code_size = 1024U * 1024U;
-	config.gc_nursery_size = 256U * 1024U;
-	config.gc_graduate_size = 256U * 1024U;
-	config.gc_tenure_size = 2U * 1024U * 1024U;
+	config.jit_code_size = memory.jit_code_size;
+	config.gc_nursery_size = memory.gc_nursery_size;
+	config.gc_graduate_size = memory.gc_graduate_size;
+	config.gc_tenure_size = memory.gc_tenure_size;
 	if (!noct_create_vm(&vm, &env, &config)) {
 		fprintf(stderr, "NOCT.ELF: unable to create VM\n");
 		status = 10;
@@ -263,6 +311,12 @@ out:
 	zedbsd_noct_napi_cleanup();
 	noct_beui_cleanup();
 	if (vm != NULL) (void)noct_destroy_vm(vm);
+	if (heap_active) {
+		(void)zedbsd_heap_set_active(bootstrap_heap);
+		heap_active = 0;
+	}
+	if (arena != MAP_FAILED)
+		(void)munmap(arena, memory.arena_size);
 	free(source);
 	return status;
 }

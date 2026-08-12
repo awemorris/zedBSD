@@ -144,6 +144,41 @@ void *mmap(void *address, size_t length, int prot, int flags, int fd, off_t offs
 }
 int munmap(void *p, size_t n) { return (int)call(ZEDBSD_SYS_munmap, (uintptr_t)p, n, 0, 0, 0, 0); }
 int mprotect(void *p, size_t n, int prot) { return (int)call(ZEDBSD_SYS_mprotect, (uintptr_t)p, n, prot, 0, 0, 0); }
+static uintptr_t process_break;
+static int process_break_known;
+int brk(void *address) {
+	if (address == NULL) { errno = EINVAL; return -1; }
+	intptr_t value = call(ZEDBSD_SYS_brk, (uintptr_t)address, 0, 0, 0, 0, 0);
+	if (value == -1) return -1;
+	process_break = (uintptr_t)address;
+	process_break_known = 1;
+	return 0;
+}
+void *sbrk(intptr_t increment) {
+	uintptr_t old_break, new_break;
+	uintptr_t decrease = 0;
+	intptr_t value;
+	if (!process_break_known) {
+		value = call(ZEDBSD_SYS_brk, 0, 0, 0, 0, 0, 0);
+		if (value == -1) return (void *)-1;
+		process_break = (uintptr_t)value;
+		process_break_known = 1;
+	}
+	old_break = process_break;
+	if (increment < 0)
+		decrease = (uintptr_t)(-(increment + 1)) + 1U;
+	if ((increment > 0 && (uintptr_t)increment > UINTPTR_MAX - old_break) ||
+	    (increment < 0 && decrease > old_break)) {
+		errno = ENOMEM;
+		return (void *)-1;
+	}
+	new_break = increment < 0 ? old_break - decrease :
+		old_break + (uintptr_t)increment;
+	value = call(ZEDBSD_SYS_brk, new_break, 0, 0, 0, 0, 0);
+	if (value == -1) return (void *)-1;
+	process_break = new_break;
+	return (void *)old_break;
+}
 int msync(void *p, size_t n, int flags) {
 	(void)p; (void)n; (void)flags;
 	errno = ENOSYS;
@@ -296,10 +331,24 @@ void exit(int status) { (void)fflush(NULL); _exit(status); }
 void zedbsd_libc_panic(const char *message) { (void)write(2, message, strlen(message)); (void)write(2, "\n", 1); _exit(127); }
 
 static struct zedbsd_heap user_heap;
+static size_t user_heap_grow(void *context, void *end, size_t minimum)
+{
+	size_t amount;
+	void *old;
+	(void)context;
+	if (minimum > SIZE_MAX - 65535U)
+		return 0;
+	amount = (minimum + 65535U) & ~(size_t)65535U;
+	old = sbrk((intptr_t)amount);
+	if (old == (void *)-1 || old != end)
+		return 0;
+	return amount;
+}
 void zedbsd_user_libc_init(int argc, char **argv, char **envp)
 {
-	static const size_t sizes[] = { 32U << 20, 16U << 20, 8U << 20, 4U << 20, 2U << 20 };
-	void *arena = MAP_FAILED; size_t i, env_count;
+	#define USER_HEAP_INITIAL (64U * 1024U)
+	void *arena;
+	size_t env_count;
 	(void)argc; (void)argv;
 	for (env_count = 0; env_count < ENVIRONMENT_MAX && envp != NULL &&
 	     envp[env_count] != NULL; env_count++)
@@ -309,10 +358,10 @@ void zedbsd_user_libc_init(int argc, char **argv, char **envp)
 	stdin->context = (void *)(intptr_t)1;
 	stdout->context = (void *)(intptr_t)2;
 	stderr->context = (void *)(intptr_t)3;
-	for (i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
-		arena = mmap(NULL, sizes[i], PROT_READ | PROT_WRITE,
-			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-		if (arena != MAP_FAILED) { zedbsd_heap_init_instance(&user_heap, arena, sizes[i]); zedbsd_heap_set_active(&user_heap); return; }
-	}
-	zedbsd_libc_panic("unable to initialize user heap");
+	arena = sbrk((intptr_t)USER_HEAP_INITIAL);
+	if (arena == (void *)-1)
+		zedbsd_libc_panic("unable to initialize user heap");
+	zedbsd_heap_init_instance(&user_heap, arena, USER_HEAP_INITIAL);
+	zedbsd_heap_set_grow_instance(&user_heap, user_heap_grow, NULL);
+	zedbsd_heap_set_active(&user_heap);
 }

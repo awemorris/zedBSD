@@ -24,6 +24,13 @@ struct vmspace;
 #define VM_PAGE_BUSY     0x0004U
 #define VM_PAGE_SWAPPED  0x0008U
 
+#define VM_REGION_STACK     0x0001U
+#define VM_REGION_GUARD     0x0002U
+#define VM_REGION_IMMUTABLE 0x0004U
+#define VM_REGION_BRK       0x0008U
+
+#define VM_BRK_TOP 0x10000000U
+
 enum vm_region_backing {
 	VM_BACKING_ANON = 0,
 	VM_BACKING_FILE,
@@ -45,6 +52,8 @@ struct vm_region {
 	uintptr_t start;
 	size_t size;
 	uint32_t prot;
+	unsigned flags;
+	size_t commit_size;
 	enum vm_region_backing backing;
 	struct file *file;
 	off_t file_offset;
@@ -59,6 +68,9 @@ struct vmspace {
 	unsigned usecount;
 	struct vm_region *regions;
 	uintptr_t entry;
+	uintptr_t brk_start;
+	uintptr_t brk_current;
+	uintptr_t stack_guard_bottom;
 	uintptr_t stack_bottom;
 	uintptr_t stack_top;
 };
@@ -72,6 +84,9 @@ int vmspace_map_anon_fixed_noreplace(struct vmspace *, uintptr_t, size_t,
 int vmspace_map_file(struct vmspace *, uintptr_t, size_t, uint32_t,
 		     struct file *, off_t, uintptr_t, size_t,
 		     struct vm_region **);
+int vmspace_map_stack(struct vmspace *, uintptr_t, size_t, size_t);
+int vmspace_set_brk_start(struct vmspace *, uintptr_t);
+int vmspace_brk(struct vmspace *, uintptr_t, uintptr_t *);
 struct vm_region *vmspace_find_region(struct vmspace *, uintptr_t, size_t);
 int vmspace_map_find(struct vmspace *, uintptr_t, size_t, uint32_t,
 		     uintptr_t *);

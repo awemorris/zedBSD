@@ -6,6 +6,7 @@
 #include <sys/ioctl.h>
 
 #define ZEDBSD_SYSTEM_IOC_GROUP 's'
+#define ZEDBSD_SYSTEM_SWAP_PAGE_SIZE 4096U
 
 struct zedbsd_system_info {
 	uint32_t boot_bios_id;
@@ -33,6 +34,7 @@ struct zedbsd_system_vmstat {
 	uint64_t vm_resident, vm_anonymous, vm_file, vm_wired, vm_busy, vm_dirty;
 	uint64_t vm_clean, vm_swapped, vm_faults, vm_page_in, vm_page_out;
 	uint64_t vm_reclaims, vm_io_errors, swap_total, swap_free, swap_extents;
+	uint64_t vm_commit_limit, vm_commit_used, vm_commit_available;
 };
 
 #define ZEDBSD_SYSTEM_GET_INFO _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 1, struct zedbsd_system_info)

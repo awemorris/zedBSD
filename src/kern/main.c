@@ -13,6 +13,7 @@
 #include "kern/exec.h"
 #include "kern/init.h"
 #include "kern/sched.h"
+#include "kern/vm-commit.h"
 
 
 /*
@@ -133,9 +134,15 @@ void kernel_main(const struct zedbsd_handoff *h,
 		hal_printf("VFS initialization failed (%d); entering idle.\n",
 		    error);
 	else {
-		hal_printf("boot: starting init /bin/sh\n");
-		if (kern_init_start() != 0)
-			puts("init not started; entering idle.\n");
+		error = vm_commit_init();
+		if (error != 0)
+			hal_printf("VM commit initialization failed (%d); "
+			    "entering idle.\n", error);
+		else {
+			hal_printf("boot: starting init /bin/sh\n");
+			if (kern_init_start() != 0)
+				puts("init not started; entering idle.\n");
+		}
 	}
 	sched_idle();
 }

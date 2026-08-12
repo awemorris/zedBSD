@@ -180,14 +180,20 @@ zedbsd_heap_reset_instance(struct zedbsd_heap *heap)
 	void *base;
 	size_t size;
 	size_t failure;
+	zedbsd_heap_grow_fn grow;
+	void *grow_context;
 
 	if (heap == NULL)
 		return;
 	base = heap->original_base;
 	size = heap->original_size;
 	failure = heap->fail_after;
+	grow = heap->grow;
+	grow_context = heap->grow_context;
 	zedbsd_heap_init_instance(heap, base, size);
 	heap->fail_after = failure;
+	heap->grow = grow;
+	heap->grow_context = grow_context;
 }
 
 void
@@ -211,6 +217,57 @@ zedbsd_heap_set_observer_instance(struct zedbsd_heap *heap,
 	heap->observer_context = context;
 }
 
+void
+zedbsd_heap_set_grow_instance(struct zedbsd_heap *heap,
+			      zedbsd_heap_grow_fn grow, void *context)
+{
+	if (heap == NULL)
+		return;
+	heap->grow = grow;
+	heap->grow_context = context;
+}
+
+static int
+extend_heap(struct zedbsd_heap *heap, size_t minimum)
+{
+	struct heap_block *last;
+	size_t added;
+
+	if (heap->grow == NULL || heap->end == NULL)
+		return 0;
+	added = heap->grow(heap->grow_context, heap->end, minimum);
+	if (added < minimum || (added & (HEAP_ALIGNMENT - 1U)) != 0 ||
+	    added > UINTPTR_MAX - (uintptr_t)heap->end ||
+	    heap->original_size > SIZE_MAX - added)
+		return 0;
+	for (last = heap->first; last != NULL && last->next_physical != NULL;
+	     last = last->next_physical)
+		;
+	if (last == NULL)
+		return 0;
+	if (last->state == HEAP_FREE) {
+		last->capacity += added;
+	} else {
+		struct heap_block *block;
+		if (added < block_header_size() + HEAP_ALIGNMENT)
+			return 0;
+		block = (struct heap_block *)heap->end;
+		block->magic = HEAP_MAGIC;
+		block->state = HEAP_FREE;
+		block->capacity = added - block_header_size();
+		block->used = 0;
+		block->previous_physical = last;
+		block->next_physical = NULL;
+		block->previous_free = NULL;
+		block->next_free = NULL;
+		last->next_physical = block;
+		insert_free(heap, block);
+	}
+	heap->end += added;
+	heap->original_size += added;
+	return 1;
+}
+
 void *
 zedbsd_heap_alloc(struct zedbsd_heap *heap, size_t size)
 {
@@ -232,6 +289,12 @@ zedbsd_heap_alloc(struct zedbsd_heap *heap, size_t size)
 	for (block = heap->free_list; block != NULL; block = block->next_free)
 		if (block->capacity >= capacity)
 			break;
+	if (block == NULL && capacity <= SIZE_MAX - block_header_size() &&
+	    extend_heap(heap, capacity + block_header_size()))
+		for (block = heap->free_list; block != NULL;
+		     block = block->next_free)
+			if (block->capacity >= capacity)
+				break;
 	if (block == NULL) {
 		if (requested > heap->largest_failed_allocation)
 			heap->largest_failed_allocation = requested;

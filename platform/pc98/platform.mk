@@ -35,6 +35,7 @@ ZEDBSD_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/process.o $(BUILD)/src/kern/thread.o \
 	$(BUILD)/src/kern/sched.o $(BUILD)/src/kern/vmspace.o \
+	$(BUILD)/src/kern/vm-commit.o \
 	$(BUILD)/src/kern/filedesc.o $(BUILD)/src/kern/cwdinfo.o \
 	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec.o \
 	$(BUILD)/src/kern/user-probe.o $(BUILD)/src/kern/syscall.o \
@@ -117,7 +118,10 @@ SH: $(BUILD)/bin/sh
 LINUX: $(BUILD)/bin/linux
 USER-FAULT.ELF: $(BUILD)/USER-FAULT.ELF
 USER-SWAP.ELF: $(BUILD)/USER-SWAP.ELF
-.PHONY: vmunix vmunix-m9 BOOTAPP.BIN INIT.ELF NOCT.ELF SH LINUX USER-FAULT.ELF USER-SWAP.ELF
+USER-STACK.ELF: $(BUILD)/USER-STACK.ELF
+USER-STACK-GUARD.ELF: $(BUILD)/USER-STACK-GUARD.ELF
+.PHONY: vmunix vmunix-m9 BOOTAPP.BIN INIT.ELF NOCT.ELF SH LINUX \
+	USER-FAULT.ELF USER-SWAP.ELF USER-STACK.ELF USER-STACK-GUARD.ELF
 
 # ----------------------------------------------------------------------
 # Per-object flag overrides.
@@ -219,18 +223,23 @@ USER_LIBC_OBJS := $(BUILD)/user/crt0.o $(BUILD)/user/libc/posix.o \
 USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-fdata-sections -msoft-float -mno-80387 -mno-fp-ret-in-387 \
 	-mno-mmx -mno-sse -mno-sse2
+USER_STACK_LDFLAGS := -z stack-size=0x100000
+USER_ELF_CHECK := $(SCRIPTS_DIR)/check-user-elf.py
 $(BUILD)/user/libc/posix.o $(BUILD)/user/tests/syscall-smoke.o: \
 	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(BUILD)/user/libc/posix.o $(BUILD)/user/tests/syscall-smoke.o: \
 	OBJ_CFLAGS = $(USER_CFLAGS)
 
 $(BUILD)/INIT.ELF: $(USER_LIBC_OBJS) $(BUILD)/user/tests/syscall-smoke.o \
-	$(PC98)/noct-user.ld
+	$(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) \
 		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) \
 		$(BUILD)/user/tests/syscall-smoke.o -o $@
+	$(PYTHON) $(USER_ELF_CHECK) $@
 
 USER_NOCT_GLUE_OBJS := $(BUILD)/user/noct/main.o \
+	$(BUILD)/user/noct/memory.o \
 	$(BUILD)/user/noct/platform.o $(BUILD)/user/noct/napi.o \
 	$(BUILD)/user/noct/target.o $(BUILD)/user/noct/env.o
 $(USER_NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
@@ -246,51 +255,87 @@ $(BUILD)/user/noct/env.o: src/kern/env.c
 	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/NOCT.ELF: $(USER_LIBC_OBJS) $(USER_NOCT_GLUE_OBJS) \
-	$(USER_NOCT_OBJECTS) $(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld
+	$(USER_NOCT_OBJECTS) $(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld \
+	$(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) \
 		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_NOCT_GLUE_OBJS) \
 		$(USER_NOCT_OBJECTS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+	$(PYTHON) $(USER_ELF_CHECK) $@
 
 $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 	@mkdir -p $(dir $@)
 	cp $< $@
+	$(PYTHON) $(USER_ELF_CHECK) $@
 
 USER_SH_OBJS := $(BUILD)/user/sh/main.o $(BUILD)/user/sh/applet.o
 $(USER_SH_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_SH_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 
 $(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
-	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld
+	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) \
 		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+	$(PYTHON) $(USER_ELF_CHECK) $@
 
 USER_BOOTLINUX_OBJS := $(BUILD)/user/bootlinux/main.o
 $(USER_BOOTLINUX_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_BOOTLINUX_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 
 $(BUILD)/bin/linux: $(USER_LIBC_OBJS) $(USER_BOOTLINUX_OBJS) \
-	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld
+	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) \
 		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) \
 		$(USER_BOOTLINUX_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+	$(PYTHON) $(USER_ELF_CHECK) $@
 
 $(BUILD)/tests/user-fault.o: tests/user-fault.S
 	@mkdir -p $(dir $@)
 	$(AS) --32 $< -o $@
 
-$(BUILD)/USER-FAULT.ELF: $(BUILD)/tests/user-fault.o $(PC98)/user-init.ld
-	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
-		-T $(PC98)/user-init.ld $< -o $@
+$(BUILD)/tests/user-stack.o: tests/user-stack.S
+	@mkdir -p $(dir $@)
+	$(AS) --32 $< -o $@
 
-$(BUILD)/USER-SWAP.ELF: $(BUILD)/tests/user-swap.o $(PC98)/user-init.ld
+$(BUILD)/tests/user-stack-guard.o: tests/user-stack-guard.S
+	@mkdir -p $(dir $@)
+	$(AS) --32 $< -o $@
+
+$(BUILD)/USER-FAULT.ELF: $(BUILD)/tests/user-fault.o $(PC98)/user-init.ld \
+	$(USER_ELF_CHECK)
 	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) \
 		-T $(PC98)/user-init.ld $< -o $@
+	$(PYTHON) $(USER_ELF_CHECK) $@
+
+$(BUILD)/USER-SWAP.ELF: $(BUILD)/tests/user-swap.o $(PC98)/user-init.ld \
+	$(USER_ELF_CHECK)
+	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) \
+		-T $(PC98)/user-init.ld $< -o $@
+	$(PYTHON) $(USER_ELF_CHECK) $@
+
+$(BUILD)/USER-STACK.ELF: $(BUILD)/tests/user-stack.o \
+	$(PC98)/user-init.ld $(USER_ELF_CHECK)
+	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) \
+		-T $(PC98)/user-init.ld $< -o $@
+	$(PYTHON) $(USER_ELF_CHECK) $@
+
+$(BUILD)/USER-STACK-GUARD.ELF: $(BUILD)/tests/user-stack-guard.o \
+	$(PC98)/user-init.ld $(USER_ELF_CHECK)
+	$(LD) -m elf_i386 -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) \
+		-T $(PC98)/user-init.ld $< -o $@
+	$(PYTHON) $(USER_ELF_CHECK) $@
 
 $(BUILD)/stage2.elf: $(STAGE2_OBJS) $(PC98)/stage2.ld
 	$(LD) -m elf_i386 --gc-sections -z max-page-size=512 \
@@ -543,6 +588,9 @@ beui-g2c-verify: beui-g2b-verify \
 autoexec-remacs-qemu-test: $(BUILD)/vmunix
 	$(SCRIPTS_DIR)/test-autoexec-remacs.sh
 
+linux-handoff-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/linux
+	$(SCRIPTS_DIR)/test-linux-handoff.sh
+
 beui-g4-verify: beui-g2c-verify term-japanese-qemu-test \
 	autoexec-remacs-qemu-test
 	@echo "zedBSD BeUI G4 verification: PASS (menu.nct to Remacs)"
@@ -574,5 +622,6 @@ beui-g5-verify: beui-g4-verify beui-input-qemu-test \
 	noct-m17-verify beui-g1-verify beui-gdc-qemu-test beui-g2a-verify \
 	beui-cirrus-qemu-test beui-g2b-verify beui-menu-cirrus-qemu-test \
 	beui-menu-gdc-qemu-test beui-g2c-verify autoexec-remacs-qemu-test \
+	linux-handoff-qemu-test \
 	beui-g4-verify beui-input-qemu-test beui-holoris-cirrus-qemu-test \
 	beui-holoris-gdc-qemu-test beui-g5-verify swap-lowmem-qemu-test

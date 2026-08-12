@@ -129,10 +129,24 @@ make_valid_image(void)
 }
 
 static int
-load(struct vmspace *vm, uintptr_t *entry)
+load(struct vmspace *vm, struct elf32_image_info *info)
 {
 	image_file.f_offset = 0;
-	return elf32_load(&image_file, vm, entry);
+	return elf32_load(&image_file, vm, info);
+}
+
+static struct elf32_phdr *
+add_stack_header(struct elf32_ehdr *header, uint32_t size, uint32_t flags)
+{
+	struct elf32_phdr *program;
+	assert(header->e_phnum < 4);
+	program = (struct elf32_phdr *)(image + header->e_phoff) +
+		header->e_phnum++;
+	memset(program, 0, sizeof(*program));
+	program->p_type = PT_GNU_STACK;
+	program->p_memsz = size;
+	program->p_flags = flags;
+	return program;
 }
 
 int
@@ -141,12 +155,13 @@ main(void)
 	struct vmspace vm;
 	struct elf32_ehdr *header;
 	struct elf32_phdr *program;
-	uintptr_t entry = 0;
+	struct elf32_image_info info;
 
 	memset(&vm, 0, sizeof(vm));
 	header = make_valid_image();
-	assert(load(&vm, &entry) == 0);
-	assert(entry == LOAD_ADDRESS && vm.entry == LOAD_ADDRESS);
+	assert(load(&vm, &info) == 0);
+	assert(info.entry == LOAD_ADDRESS && vm.entry == LOAD_ADDRESS);
+	assert(info.stack_size == EXEC_STACK_DEFAULT_SIZE);
 	assert(mapped_region.start == LOAD_ADDRESS);
 	assert(mapped_region.size == 4096);
 	assert(mapped_region.prot == (HAL_SPACE_READ | HAL_SPACE_EXEC));
@@ -159,23 +174,73 @@ main(void)
 	reset_mapping();
 
 	header = make_valid_image();
+	add_stack_header(header, 0, PF_R | PF_W);
+	assert(load(&vm, &info) == 0);
+	assert(info.stack_size == EXEC_STACK_DEFAULT_SIZE && map_count == 1);
+	reset_mapping();
+
+	header = make_valid_image();
+	add_stack_header(header, 64U * 1024U, PF_R | PF_W);
+	assert(load(&vm, &info) == 0);
+	assert(info.stack_size == 64U * 1024U && map_count == 1);
+	reset_mapping();
+
+	header = make_valid_image();
+	add_stack_header(header, 64U * 1024U + 1U, PF_R | PF_W);
+	assert(load(&vm, &info) == 0);
+	assert(info.stack_size == 68U * 1024U && map_count == 1);
+	reset_mapping();
+
+	header = make_valid_image();
+	add_stack_header(header, EXEC_STACK_HARD_MAX, PF_R | PF_W);
+	assert(load(&vm, &info) == 0);
+	assert(info.stack_size == EXEC_STACK_HARD_MAX && map_count == 1);
+	reset_mapping();
+
+	header = make_valid_image();
+	add_stack_header(header, EXEC_STACK_HARD_MAX + 1U, PF_R | PF_W);
+	assert(load(&vm, &info) == ENOEXEC && map_count == 0);
+
+	header = make_valid_image();
+	add_stack_header(header, 65536, PF_R | PF_W);
+	add_stack_header(header, 65536, PF_R | PF_W);
+	assert(load(&vm, &info) == ENOEXEC && map_count == 0);
+
+	header = make_valid_image();
+	add_stack_header(header, 65536, PF_R | PF_W | PF_X);
+	assert(load(&vm, &info) == ENOEXEC && map_count == 0);
+
+	header = make_valid_image();
+	add_stack_header(header, 65536, PF_R);
+	assert(load(&vm, &info) == ENOEXEC && map_count == 0);
+
+	header = make_valid_image();
+	add_stack_header(header, 65536, PF_W);
+	assert(load(&vm, &info) == ENOEXEC && map_count == 0);
+
+	header = make_valid_image();
+	program = add_stack_header(header, 65536, PF_R | PF_W);
+	program->p_filesz = 1;
+	assert(load(&vm, &info) == ENOEXEC && map_count == 0);
+
+	header = make_valid_image();
 	header->e_ident[EI_CLASS] = 2;
-	assert(load(&vm, &entry) == ENOEXEC);
+	assert(load(&vm, &info) == ENOEXEC);
 
 	header = make_valid_image();
 	program = (struct elf32_phdr *)(image + header->e_phoff);
 	program->p_type = PT_INTERP;
-	assert(load(&vm, &entry) == ENOEXEC);
+	assert(load(&vm, &info) == ENOEXEC);
 
 	header = make_valid_image();
 	program = (struct elf32_phdr *)(image + header->e_phoff);
 	program->p_filesz = program->p_memsz + 1;
-	assert(load(&vm, &entry) == ENOEXEC);
+	assert(load(&vm, &info) == ENOEXEC);
 
 	header = make_valid_image();
 	image_size = sizeof(*header) - 1;
 	image_inode.i_size = (off_t)image_size;
-	assert(load(&vm, &entry) == ENOEXEC);
+	assert(load(&vm, &info) == ENOEXEC);
 
 	puts("zedBSD ELF32 loader host tests: PASS");
 	return 0;

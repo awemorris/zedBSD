@@ -257,6 +257,50 @@ test_heap_boundaries(void)
 	return 0;
 }
 
+struct grow_test {
+	unsigned char *end;
+	size_t remaining;
+	unsigned calls;
+};
+
+static size_t
+grow_test_heap(void *context, void *end, size_t minimum)
+{
+	struct grow_test *grow = context;
+	size_t amount;
+	if ((unsigned char *)end != grow->end || minimum > grow->remaining)
+		return 0;
+	amount = grow->remaining;
+	grow->end += amount;
+	grow->remaining = 0;
+	grow->calls++;
+	return amount;
+}
+
+static int
+test_heap_growth(void)
+{
+	static unsigned char arena[4096];
+	struct grow_test grow;
+	void *allocation;
+
+	grow.end = arena + 512;
+	grow.remaining = sizeof(arena) - 512U;
+	grow.calls = 0;
+	zedbsd_heap_init(arena, 512);
+	zedbsd_heap_set_grow_instance(zedbsd_heap_get_active(), grow_test_heap,
+		&grow);
+	allocation = zedbsd_malloc(2048);
+	CHECK(allocation != NULL);
+	CHECK(grow.calls == 1 && grow.remaining == 0);
+	CHECK(zedbsd_heap_validate());
+	zedbsd_free(allocation);
+	CHECK(zedbsd_heap_current() == 0 && zedbsd_heap_validate());
+	zedbsd_heap_reset();
+	CHECK(zedbsd_heap_validate());
+	return 0;
+}
+
 int
 main(void)
 {
@@ -274,6 +318,8 @@ main(void)
 	result = test_fault_injection();
 	if (result != 0) return result;
 	result = test_heap_boundaries();
+	if (result != 0) return result;
+	result = test_heap_growth();
 	if (result != 0) return result;
 	return 0;
 }

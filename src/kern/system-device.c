@@ -9,6 +9,7 @@
 #include "kern/swap-fat.h"
 #include "kern/uaccess.h"
 #include "kern/vm-reclaim.h"
+#include "kern/vm-commit.h"
 
 #include <zedbsd/system.h>
 #include <errno.h>
@@ -52,11 +53,13 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 		struct hal_memory_stats hs;
 		struct kern_memory_stats ks;
 		struct vm_reclaim_stats vs;
+		struct vm_commit_stats cs;
 		struct swap_backend *swap = swap_system_backend();
 		memset(&output, 0, sizeof(output));
 		hal_memory_get_stats(&hs);
 		kern_memory_get_stats(&ks);
 		vm_reclaim_get_stats(&vs);
+		vm_commit_get_stats(&cs);
 		output.physical_total = hs.physical_total;
 		output.physical_reserved = hs.physical_reserved;
 		output.physical_allocated = hs.physical_allocated;
@@ -76,6 +79,10 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 		output.swap_total = swap != NULL ? swap->slot_count : 0;
 		output.swap_free = swap != NULL ? swap->free_slots : 0;
 		output.swap_extents = swap_fat_extent_count();
+		output.vm_commit_limit = cs.limit_pages * VM_COMMIT_PAGE_SIZE;
+		output.vm_commit_used = cs.used_pages * VM_COMMIT_PAGE_SIZE;
+		output.vm_commit_available =
+			(cs.limit_pages - cs.used_pages) * VM_COMMIT_PAGE_SIZE;
 		return copyout(&output, argument, sizeof(output));
 	}
 	case ZEDBSD_SYSTEM_HALT:

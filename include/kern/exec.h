@@ -8,6 +8,7 @@
 #ifndef ZEDBSD_KERN_EXEC_H
 #define ZEDBSD_KERN_EXEC_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 struct file;
@@ -15,9 +16,19 @@ struct process;
 struct vmspace;
 
 #define PROCESS_SPAWN_RESULT 0x00000001U
+#define EXEC_STACK_TOP          0x7ffff000U
+#define EXEC_STACK_DEFAULT_SIZE (1024U * 1024U)
+#define EXEC_STACK_HARD_MAX     (1024U * 1024U)
+#define EXEC_STACK_GUARD_SIZE   4096U
 
-int elf32_load(struct file *, struct vmspace *, uintptr_t *entry);
-int exec_build_initial_stack(struct vmspace *, char *const [],
+struct elf32_image_info {
+	uintptr_t entry;
+	uintptr_t brk_start;
+	size_t stack_size;
+};
+
+int elf32_load(struct file *, struct vmspace *, struct elf32_image_info *);
+int exec_build_initial_stack(struct vmspace *, size_t, char *const [],
 			     char *const [], uintptr_t *sp);
 int process_spawn(const char *, char *const [], char *const [], unsigned,
 		  struct process **);

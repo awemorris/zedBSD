@@ -10,6 +10,7 @@
 #include <kern/messages.h>
 #include <kern/process.h>
 #include <kern/swap.h>
+#include <kern/vm-commit.h>
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
@@ -277,6 +278,11 @@ static int vmlinux_load(struct zedbsd_file *file, const char *arguments)
 	/* All user vmspaces are gone and every fallible kernel-image read has
 	 * completed.  Drop the swapfile pin and flush direct BIO state before the
 	 * low-memory handoff starts overwriting zedBSD itself. */
+	if (!vm_commit_can_shutdown_swap()) {
+		(void)hal_pmem_free(&staging);
+		hal_cons_write("Linux: live VM commitment at handoff.\n");
+		return 0;
+	}
 	if (swap_shutdown(swap_system_backend()) != 0) {
 		(void)hal_pmem_free(&staging);
 		hal_cons_write("Linux: swap shutdown failed.\n");
@@ -483,6 +489,8 @@ pc98_linux_commit(struct pc98_linux_image *image)
 	linux_devices = local.devices;
 	linux_device_count = local.device_count;
 	linux_boot_device = local.boot_device;
+	if (!vm_commit_can_shutdown_swap())
+		HAL_FATAL("Linux boot with live VM commitment");
 	if (swap_shutdown(swap_system_backend()) != 0)
 		HAL_FATAL("Linux boot swap shutdown");
 	memset((void *)BP_ADDR, 0, 4096);

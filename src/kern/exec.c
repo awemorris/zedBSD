@@ -15,18 +15,15 @@
 #include <stdint.h>
 #include <string.h>
 
-#define USER_STACK_TOP 0x7ffff000U
-#define USER_STACK_SIZE (64U * 1024U)
-#define USER_STACK_BOTTOM (USER_STACK_TOP - USER_STACK_SIZE)
 #define EXEC_ARG_MAX 32U
 #define EXEC_ENV_MAX 64U
 #define EXEC_STRING_MAX (16U * 1024U)
 
 int
-exec_build_initial_stack(struct vmspace *vm, char *const argv[],
+exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
+			 char *const argv[],
 			 char *const envp[], uintptr_t *sp_out)
 {
-	struct vm_region *region;
 	uintptr_t sp;
 	size_t total = 0;
 	unsigned argc = 0, envc = 0, i;
@@ -59,12 +56,11 @@ exec_build_initial_stack(struct vmspace *vm, char *const argv[],
 			total += length;
 			envc++;
 		}
-	error = vmspace_map_anon(vm, USER_STACK_BOTTOM, USER_STACK_SIZE,
-				 HAL_SPACE_READ | HAL_SPACE_WRITE, &region);
+	error = vmspace_map_stack(vm, EXEC_STACK_TOP, stack_size,
+				  EXEC_STACK_GUARD_SIZE);
 	if (error != 0)
 		return error;
-	(void)region;
-	sp = USER_STACK_TOP;
+	sp = vm->stack_top;
 	for (i = envc; i != 0; i--) {
 		size_t length = strlen(envp[i - 1U]) + 1U;
 		sp -= length;
@@ -83,7 +79,7 @@ exec_build_initial_stack(struct vmspace *vm, char *const argv[],
 	}
 	sp &= ~(uintptr_t)15U;
 	sp -= (1U + argc + 1U + envc + 1U) * sizeof(uint32_t);
-	if (sp < USER_STACK_BOTTOM)
+	if (sp < vm->stack_bottom)
 		return EOVERFLOW;
 	words[word_count++] = argc;
 	for (i = 0; i < argc; i++) words[word_count++] = argv_address[i];
@@ -94,8 +90,6 @@ exec_build_initial_stack(struct vmspace *vm, char *const argv[],
 				word_count * sizeof(words[0]));
 	if (error != 0)
 		return error;
-	vm->stack_bottom = USER_STACK_BOTTOM;
-	vm->stack_top = USER_STACK_TOP;
 	*sp_out = sp;
 	return 0;
 }
@@ -173,7 +167,8 @@ process_spawn_from(struct process *parent, const char *path,
 	struct thread *thread;
 	char *result_envp[EXEC_ENV_MAX + 1U];
 	char *const *effective_envp = envp;
-	uintptr_t entry, sp;
+	struct elf32_image_info image;
+	uintptr_t sp;
 	int error;
 	unsigned env_count = 0;
 
@@ -204,10 +199,13 @@ process_spawn_from(struct process *parent, const char *path,
 		error = ENOMEM;
 		goto out;
 	}
-	error = elf32_load(file, process->vmspace, &entry);
+	error = elf32_load(file, process->vmspace, &image);
 	if (error != 0)
 		goto out;
-	error = exec_build_initial_stack(process->vmspace, argv,
+	error = vmspace_set_brk_start(process->vmspace, image.brk_start);
+	if (error != 0)
+		goto out;
+	error = exec_build_initial_stack(process->vmspace, image.stack_size, argv,
 		effective_envp, &sp);
 	if (error != 0)
 		goto out;
@@ -219,7 +217,7 @@ process_spawn_from(struct process *parent, const char *path,
 		if (error != 0)
 			goto out;
 	}
-	error = thread_create(process, entry, sp, &thread);
+	error = thread_create(process, image.entry, sp, &thread);
 	if (error != 0)
 		goto out;
 	if (result == NULL)

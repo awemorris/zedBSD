@@ -1,0 +1,24 @@
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+#ifndef ZEDBSD_USER_NOCT_MEMORY_H
+#define ZEDBSD_USER_NOCT_MEMORY_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+struct zedbsd_user_noct_memory_profile {
+	uint64_t capacity_bytes;
+	uint64_t available_bytes;
+	uint32_t profile_mib;
+	size_t arena_size;
+	size_t jit_code_size;
+	size_t gc_nursery_size;
+	size_t gc_graduate_size;
+	size_t gc_tenure_size;
+};
+
+int zedbsd_user_noct_select_memory(
+	uint64_t capacity_bytes,
+	uint64_t available_bytes,
+	struct zedbsd_user_noct_memory_profile *profile);
+
+#endif

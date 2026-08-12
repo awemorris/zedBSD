@@ -14,9 +14,10 @@ test -d "$bios" || { echo "BIOS directory not found: $bios" >&2; exit 1; }
 rm -rf -- "$work"
 mkdir -p "$work"
 ZEDBSD_ZINIT_DISABLE=1 \
+ZEDBSD_SWAP_SIZE_MIB="${ZEDBSD_SWAP_SIZE_MIB:-32}" \
 	"$repo/scripts/make-hdd-image.sh" "$image"
 
-"$qemu" -M pc9821 -cpu 486 -m 8 -accel tcg -L "$bios" -nic none \
+"$qemu" -M pc9821 -cpu 486 -m "${ZEDBSD_QEMU_MEMORY:-8}" -accel tcg -L "$bios" -nic none \
 	-drive "if=ide,bus=0,unit=0,format=raw,file=$image" \
 	-display none -serial none \
 	-qmp "unix:$monitor,server=on,wait=off" -no-reboot \
@@ -99,6 +100,8 @@ while time.monotonic() < deadline:
         break
     time.sleep(.5)
 else:
+    screen = memory(0xa0000, 25 * 160)[0::2]
+    print(screen.decode("latin1", "replace"), file=sys.stderr)
     raise SystemExit("/bin/noct init did not enter the REPL")
 qmp("quit")
 PY
