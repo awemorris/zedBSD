@@ -23,6 +23,7 @@
 #define LINUX_PROGRESS_ROWS 4U
 #define LINUX_READ_CHUNK (64U * 1024U)
 #define PC98_GDC_STRIDE 80U
+#define PC98_GDC_PLANE_SIZE 0x8000U
 #define PC98_TEXT_ROW_HEIGHT 16U
 
 struct elf32_header {
@@ -209,6 +210,26 @@ static void linux_ui_failed(const char *message)
 	}
 	hal_cons_show_cursor(1);
 	hal_cons_write(message);
+}
+
+static void linux_ui_finish(void)
+{
+	unsigned offset;
+
+	/* Leave no progress graphics behind for Linux.  Clear every native GDC
+	 * plane while graphics output is still active, then stop graphics before
+	 * resetting the text-only handoff screen. */
+	for (offset = 0; offset < PC98_GDC_PLANE_SIZE; offset++) {
+		progress_blue[offset] = 0;
+		progress_red[offset] = 0;
+		progress_green[offset] = 0;
+		progress_intensity[offset] = 0;
+	}
+	(void)zedbsd_pc98_display_graphics_stop();
+	hal_cons_clear();
+	hal_cons_set_mode(HAL_CONS_FIXED_MENU);
+	(void)hal_cons_set_cursor(0, 0);
+	hal_cons_show_cursor(1);
 }
 
 static void show_progress(int load_class)
@@ -700,6 +721,7 @@ pc98_linux_commit(struct pc98_linux_image *image)
 	} else {
 		bp[0x1e8] = 2;
 	}
+	linux_ui_finish();
 	(void)hal_irq_disable();
 	for (i = 0; i < local.header.phnum; i++) {
 		struct elf32_program_header *program = &local.programs[i];
