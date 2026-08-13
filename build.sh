@@ -68,6 +68,7 @@ Any Make target may be used as <command>.  For example:
   $0 legacy-pc98-hdd-image pc98
   $0 pc-unified-hdd-image pcat
   $0 pc-unified-loader-qemu-test pcat
+  $0 hdd-image unified-pcat-pc98
 
 Additional targets and Make variable assignments may follow the platform:
   $0 all pc98 check

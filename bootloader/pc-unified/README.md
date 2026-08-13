@@ -12,11 +12,15 @@ LBA 1 contains a PC-98 CHS mirror of the authoritative MBR partition.
 Build and test with:
 
 ```sh
+./build.sh hdd-image unified-pcat-pc98
 ./build.sh pc-unified-hdd-image pcat
 ./build.sh pc-unified-loader-host-check pcat
 ./build.sh pc-unified-loader-qemu-test pcat
 ```
 
+The first command is the normal user-facing image build and writes
+`build/unified-pcat-pc98/hdd-image.img`.  The `pc-unified-*` targets remain
+available for low-level loader development and compatibility.
+
 The individual loaders in `bootloader/pcat` and `bootloader/pc98` remain
 separate supported targets.
-
