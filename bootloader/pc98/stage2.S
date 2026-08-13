@@ -1096,7 +1096,10 @@ msg_elf64:     .asciz "E6 "
 msg_loaded:    .asciz "LD "
 msg_go:        .asciz "GO\n"
 msg_error:     .asciz "ERR "
-vmunix_name:   .ascii "VMUNIX     "
+#ifndef ZBL_KERNEL_DOS_NAME
+#define ZBL_KERNEL_DOS_NAME "VMUNIX     "
+#endif
+vmunix_name:   .ascii ZBL_KERNEL_DOS_NAME
 
 .balign 8
 gdt:

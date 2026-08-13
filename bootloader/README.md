@@ -21,6 +21,8 @@ Build and test the loaders with the repository build driver:
 ./build.sh bios-loader-qemu-test pcat
 ./build.sh bios-bootloader pc98
 ./build.sh bios-loader-qemu-test pc98
+./build.sh pc-unified-hdd-image pcat
+./build.sh pc-unified-loader-qemu-test pcat
 ./build.sh legacy-pc98-hdd-image pc98
 ```
 

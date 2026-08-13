@@ -210,6 +210,7 @@ CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test
 # milestone verification chains).
 
 include $(PLATFORM_MK)
+include bootloader/pc-unified/pc-unified.mk
 
 check: $(HOST_TEST_BINARIES) $(CHECK_RUN_TARGETS)
 	@set -e; for test in $(HOST_TEST_BINARIES); do \

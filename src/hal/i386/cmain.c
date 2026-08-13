@@ -26,7 +26,8 @@ cmain(const void *raw_boot_info)
 	    "Copyright (C) 2005, 2026, Awe Morris.\n\n");
 #endif
 #if defined(HAL_BOARD_PC98)
-	hal_puts("zedBSD ｵﾍﾟﾚｰﾃｨﾝｸﾞ ｼｽﾃﾑ ﾊﾞｰｼﾞｮﾝ 0.0.1\n\n");
+	hal_puts("zedBSD ｵﾍﾟﾚｰﾃｨﾝｸﾞ ｼｽﾃﾑ ﾊﾞｰｼﾞｮﾝ 0.0.1\n"
+	    "Copyright (C) 2005, 2026, Awe Morris.\n\n");
 #endif
 
 	hal_printf("boot: HAL physical-memory initialization\n");
