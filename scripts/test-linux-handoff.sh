@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Exercise the production GUI menu's default Linux selection, then verify
+# that /bin/linux reaches the point-of-no-return handoff.
+
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/pc98}"
 qemu="${QEMU:-qemu-system-i386}"
@@ -9,11 +12,11 @@ base="${ZEDBSD_TEST_BASE:-$repo/build/releases/linux-pc98-i386sx-busybox-ide.img
 work="$build/tests/linux-handoff"
 image="$work/linux-handoff.img"
 monitor="$work/monitor.sock"
-kernel="$work/VMLINUX"
 
 test -x "$qemu" || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios" || { echo "BIOS directory not found: $bios" >&2; exit 1; }
 test -f "$base" || { echo "Linux image not found: $base" >&2; exit 1; }
+command -v mdel >/dev/null || { echo "mdel is required" >&2; exit 1; }
 mkdir -p "$work"
 cp --reflink=auto "$base" "$image"
 offset="$(python3 - "$image" <<'PY'
@@ -31,21 +34,11 @@ else:
     raise SystemExit("BOOT partition not found")
 PY
 )"
-mcopy -o -i "$image@@$offset" ::VMLINUX "$kernel"
-if test "${ZEDBSD_LINUX_HANDOFF_FRESH:-0}" = 1; then
-	rm -f -- "$image"
-	ZEDBSD_TEST_MB="${ZEDBSD_LINUX_HANDOFF_MB:-40}" \
-	ZEDBSD_SWAP_SIZE_MIB="${ZEDBSD_SWAP_SIZE_MIB:-32}" \
-	ZEDBSD_KERNEL="$kernel" \
-	ZEDBSD_ZINIT_RC="$repo/tests/linux-boot.cfg" \
-	ZEDBSD_BOOT_CFG="$repo/tests/linux-boot.cfg" \
-		"$repo/scripts/make-hdd-image.sh" "$image"
-else
-	ZEDBSD_ZINIT_RC="$repo/tests/linux-boot.cfg" \
-		"$repo/scripts/install-image.sh" \
-		"$image" "$kernel" \
-		"$repo/tests/linux-boot.cfg"
-fi
+
+# Deliberately remove the legacy script from the canonical image copy. If the
+# production menu regresses to `source /boot.cfg`, this test must stop at the
+# shell instead of accidentally demonstrating the obsolete fallback path.
+mdel -i "$image@@$offset" ::BOOT.CFG 2>/dev/null || true
 
 rm -f -- "$monitor"
 "$qemu" -M pc9821 -cpu 486 -m 64 -accel tcg -L "$bios" -nic none \
@@ -63,14 +56,15 @@ cleanup()
 }
 trap cleanup EXIT INT TERM
 
-python3 - "$monitor" "$work/linux-handoff.ppm" <<'PY'
+python3 - "$monitor" "$work/linux-menu.ppm" "$work/linux-tvram.bin" <<'PY'
 import json
+import pathlib
 import re
 import socket
 import sys
 import time
 
-path, screenshot = sys.argv[1:]
+path, screenshot, tvram = sys.argv[1:]
 client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 deadline = time.monotonic() + 20
 while True:
@@ -101,13 +95,39 @@ def qmp(execute, arguments=None, reply=True):
 def registers():
     return qmp("human-monitor-command", {"command-line": "info registers"})
 
+def key(qcode):
+    qmp("input-send-event", {"events": [
+        {"type": "key", "data": {"down": True,
+          "key": {"type": "qcode", "data": qcode}}},
+        {"type": "key", "data": {"down": False,
+          "key": {"type": "qcode", "data": qcode}}},
+    ]})
+
 qmp("qmp_capabilities")
+
+# Compatible BIOS POST, the one-second zinit delay, and menu/BMP loading.
+time.sleep(20)
+qmp("screendump", {"filename": screenshot})
+screen = pathlib.Path(screenshot).read_bytes()
+header = re.match(rb"P6\s+(\d+)\s+(\d+)\s+255\s", screen)
+if header is None or int(header.group(1)) != 640 or int(header.group(2)) != 480:
+    raise SystemExit("production GUI menu was not displayed at 640x480")
+pixels = screen[header.end():]
+colors = {pixels[index:index + 3] for index in range(0, len(pixels), 3)}
+if len(colors) < 16:
+    raise SystemExit(f"production GUI menu has only {len(colors)} colors")
+print(f"production GUI menu observed with {len(colors)} colors")
+
+# Linux is the initially selected row. Enter must return a /bin/linux action
+# to the shell; no BOOT.CFG is installed in this test image.
+key("ret")
 
 # A successful handoff leaves zedBSD' 0x8002xxxx low-loader execution range.
 # Linux may quickly enable its own high mapping, so accept either a physical
 # kernel entry or the normal 0xc0000000 kernel half.
 deadline = time.monotonic() + 35
 last = ""
+handoff = None
 while time.monotonic() < deadline:
     last = registers()
     match = re.search(r"EIP=([0-9A-Fa-f]{8})", last)
@@ -115,13 +135,31 @@ while time.monotonic() < deadline:
         eip = int(match.group(1), 16)
         if (0x00100000 <= eip < 0x80000000) or eip >= 0xc0000000:
             print(f"Linux handoff observed at EIP=0x{eip:08x}")
-            stream.close()
-            client.close()
-            raise SystemExit(0)
+            handoff = eip
+            break
     time.sleep(1)
-print(last, file=sys.stderr)
+if handoff is None:
+    print(last, file=sys.stderr)
+    qmp("screendump", {"filename": screenshot})
+    raise SystemExit("Linux never left the zedBSD loader execution range")
+
+# BusyBox init prints this marker after mounting proc/sysfs and enabling the
+# Linux swap partition. PC-98 text VRAM stores one character per little-endian
+# word at physical 0xa0000, so seeing it proves Linux reached userspace.
+deadline = time.monotonic() + 45
+while time.monotonic() < deadline:
+    qmp("pmemsave", {"val": 0xa0000, "size": 0x2000,
+                     "filename": tvram})
+    raw = pathlib.Path(tvram).read_bytes()
+    text = raw[0::2]
+    if b"I386-BUSYBOX-SUCCESS" in text:
+        print("Linux BusyBox init and shell startup observed")
+        stream.close()
+        client.close()
+        raise SystemExit(0)
+    time.sleep(1)
 qmp("screendump", {"filename": screenshot})
-raise SystemExit("Linux never left the zedBSD loader execution range")
+raise SystemExit("Linux handoff succeeded but BusyBox init marker was absent")
 PY
 
 kill "$qemu_pid" 2>/dev/null || true
