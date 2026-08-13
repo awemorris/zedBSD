@@ -55,7 +55,7 @@ def check_zbl2(stream, lba: int, expected_machine: int) -> int:
 
 def extracted_hash(image: Path, name: str) -> bytes:
     with tempfile.TemporaryDirectory() as directory:
-        output = Path(directory) / name.replace(".", "-")
+        output = Path(directory) / name.replace("/", "-").replace(".", "-")
         subprocess.run(["mcopy", "-n", "-i",
                         f"{image}@@{PARTITION_LBA * SECTOR_SIZE}",
                         f"::{name}", str(output)], check=True,
@@ -129,6 +129,9 @@ def check(args: argparse.Namespace) -> None:
     if args.pcat_kernel and extracted_hash(args.image, "VMUNIX.AT") != \
             hashlib.sha256(args.pcat_kernel.read_bytes()).digest():
         fail("VMUNIX.AT differs from the input kernel")
+    if args.noct and extracted_hash(args.image, "bin/noct") != \
+            hashlib.sha256(args.noct.read_bytes()).digest():
+        fail("/bin/noct differs from the input executable")
     print("Unified BIOS image check: PASS "
           f"(PC-98 ZBL2 {pc98_count} sectors, PC/AT ZBL2 {pcat_count} sectors)")
 
@@ -137,10 +140,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pc98-kernel", type=Path)
     parser.add_argument("--pcat-kernel", type=Path)
+    parser.add_argument("--noct", type=Path)
     parser.add_argument("image", type=Path)
     check(parser.parse_args())
 
 
 if __name__ == "__main__":
     main()
-

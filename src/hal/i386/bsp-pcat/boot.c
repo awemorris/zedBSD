@@ -5,6 +5,19 @@
 #include "../bsp.h"
 #include "../multiboot.h"
 #include "../i386.h"
+#include "boot-font.h"
+
+#define VGA_FONT_HANDOFF 0x00007000U
+#define VGA_FONT_MAGIC 0x3854465aU
+
+struct vga_font_handoff {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t height;
+	uint16_t glyphs;
+	uint16_t reserved[3];
+	uint8_t data[BSP_PCAT_ASCII_GLYPHS][BSP_PCAT_GLYPH_HEIGHT];
+} __attribute__((packed));
 
 static const struct multiboot_info *mbi;
 static struct zedbsd_handoff handoff;
@@ -13,6 +26,8 @@ static uint32_t total_memory;
 static uint8_t root_bios_id;
 static uint8_t root_partition;
 static int boot_info_valid;
+static uint8_t boot_font[BSP_PCAT_ASCII_GLYPHS][BSP_PCAT_GLYPH_HEIGHT];
+static int boot_font_valid;
 
 static int
 hex_digit(char c)
@@ -79,8 +94,15 @@ parse_command_line(const char *line)
 void
 bsp_boot_init(const void *raw_boot_info)
 {
+	const struct vga_font_handoff *font =
+		(const struct vga_font_handoff *)(uintptr_t)VGA_FONT_HANDOFF;
 	uint32_t upper;
 
+	boot_font_valid = font->magic == VGA_FONT_MAGIC && font->version == 1 &&
+		font->height == BSP_PCAT_GLYPH_HEIGHT &&
+		font->glyphs == BSP_PCAT_ASCII_GLYPHS;
+	if (boot_font_valid)
+		hal_memcpy(boot_font, font->data, sizeof(boot_font));
 	mbi = raw_boot_info;
 	boot_info_valid = mbi != 0 && (mbi->flags & MBINFO_FLAG_MEMORY) != 0;
 	if (!boot_info_valid) return;
@@ -99,6 +121,16 @@ bsp_boot_init(const void *raw_boot_info)
 	}
 	if ((mbi->flags & MBINFO_FLAG_CMDLINE) && mbi->cmdline != 0)
 		parse_command_line((const char *)(uintptr_t)mbi->cmdline);
+}
+
+int
+bsp_pcat_get_boot_font(
+	uint8_t font[BSP_PCAT_ASCII_GLYPHS][BSP_PCAT_GLYPH_HEIGHT])
+{
+	if (!boot_font_valid || font == NULL)
+		return 0;
+	hal_memcpy(font, boot_font, sizeof(boot_font));
+	return 1;
 }
 
 uint32_t

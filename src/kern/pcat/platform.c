@@ -52,25 +52,6 @@ int kern_platform_boot_linux(struct zedbsd_filesystem *fs, const char *path,
 	(void)boot_device; return EOPNOTSUPP;
 }
 
-int kern_platform_graphics_init(uint64_t (*ms)(void *),
-    int (*key)(void *, int), void (*drain)(void *))
-{ (void)ms; (void)key; (void)drain; return 0; }
-int kern_platform_graphics_enter(struct kern_graphics_mode *m)
-{ (void)m; return ENODEV; }
-int kern_platform_graphics_clear(void) { return ENODEV; }
-void kern_platform_graphics_leave(void) { }
-int kern_platform_graphics_fill(const struct kern_graphics_rect *r, uint32_t c)
-{ (void)r; (void)c; return ENODEV; }
-int kern_platform_graphics_line(unsigned a,unsigned b,unsigned c,unsigned d,uint32_t e)
-{ (void)a;(void)b;(void)c;(void)d;(void)e;return ENODEV; }
-int kern_platform_graphics_pattern_fill(const struct kern_graphics_rect *r,
-    uint32_t c,uint64_t p) { (void)r;(void)c;(void)p;return ENODEV; }
-int kern_platform_graphics_blit(unsigned x,unsigned y,
-    const struct kern_graphics_image *i,uint64_t m,int t)
-{ (void)x;(void)y;(void)i;(void)m;(void)t;return ENODEV; }
-int kern_platform_graphics_flush(const struct kern_graphics_rect *r,size_t n)
-{ (void)r;(void)n;return ENODEV; }
-void kern_platform_restore_text(void) { hal_cons_reset(); }
 void kern_platform_debug_write(const char *text)
 {
 	while (text != 0 && *text != '\0') {

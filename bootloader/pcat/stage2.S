@@ -48,6 +48,7 @@ stage2_entry:
 	mov ax, 0x3c00
 2:	movzx eax, ax
 	mov dword ptr [mbi_mem_upper], eax
+	call sample_vga_font
 
 	xor eax, eax
 	call disk_read_one
@@ -584,6 +585,51 @@ disk_read_one:
 	jmp fatal_disk
 2:	mov ax, ZBL_BOUNCE_SEG
 	mov es, ax
+	ret
+
+/* Preserve the BIOS 8x16 ASCII font before entering protected mode.  The
+ * kernel copies this low-memory handoff during its earliest BSP setup. */
+.set VGA_FONT_HANDOFF, 0x7000
+.set VGA_FONT_MAGIC, 0x3854465a        /* "ZFT8" */
+sample_vga_font:
+	push ax
+	push bx
+	push cx
+	push dx
+	push si
+	push di
+	push bp
+	push ds
+	push es
+	xor ax, ax
+	mov es, ax
+	mov dword ptr es:[VGA_FONT_HANDOFF], 0
+	mov ax, 0x1130
+	mov bh, 0x06                    /* ROM 8x16 font */
+	int 0x10
+	cmp cx, 16
+	jne 1f
+	mov ax, es
+	mov ds, ax
+	mov si, bp
+	xor ax, ax
+	mov es, ax
+	mov di, VGA_FONT_HANDOFF + 16
+	mov cx, 128 * 16
+	rep movsb
+	mov dword ptr es:[VGA_FONT_HANDOFF], VGA_FONT_MAGIC
+	mov word ptr es:[VGA_FONT_HANDOFF + 4], 1
+	mov word ptr es:[VGA_FONT_HANDOFF + 6], 16
+	mov word ptr es:[VGA_FONT_HANDOFF + 8], 128
+1:	pop es
+	pop ds
+	pop bp
+	pop di
+	pop si
+	pop dx
+	pop cx
+	pop bx
+	pop ax
 	ret
 
 /* Give GS a flat hidden descriptor while returning to real mode. */

@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/platform.h"
+#include "kern/pc98/font.h"
 #include "hal/i386/bsp-pc98/display.h"
 
 #include "beui-pc98-auto.h"
@@ -184,4 +185,11 @@ int kern_platform_graphics_flush(const struct kern_graphics_rect *rectangles,
 	}
 	return native_display.flush(native_display.context,
 		count == 0 ? NULL : native, count);
+}
+
+int
+kern_platform_graphics_get_glyph(uint32_t codepoint, uint8_t font[32],
+				 unsigned *width, unsigned *height)
+{
+	return pc98_font_get_glyph(codepoint, font, width, height);
 }

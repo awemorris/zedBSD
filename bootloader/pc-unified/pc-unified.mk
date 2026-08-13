@@ -81,12 +81,14 @@ pc-unified-bootloader: $(PC_UNIFIED_BUILD)/stage0.bin \
 	$(PC_UNIFIED_BUILD)/pc98-stage2.bin
 
 pc-unified-kernels:
-	$(MAKE) -C $(CURDIR) ARCH=pcat build/pcat/vmunix build/pcat/bin/sh
+	$(MAKE) -C $(CURDIR) ARCH=pcat build/pcat/vmunix build/pcat/bin/sh \
+		build/pcat/bin/noct
 	$(MAKE) -C $(CURDIR) ARCH=pc98 build/pc98/vmunix
 	@mkdir -p $(PC_UNIFIED_BUILD)
 	cp -f build/pcat/vmunix $(PC_UNIFIED_BUILD)/vmunix.at
 	cp -f build/pc98/vmunix $(PC_UNIFIED_BUILD)/vmunix.98
 	cp -f build/pcat/bin/sh $(PC_UNIFIED_BUILD)/sh
+	cp -f build/pcat/bin/noct $(PC_UNIFIED_BUILD)/noct
 
 $(PC_UNIFIED_BUILD)/hdd-image.img: pc-unified-bootloader \
 	pc-unified-kernels $(SCRIPTS_DIR)/make-pc-unified-hdd-image.py \
@@ -99,14 +101,16 @@ $(PC_UNIFIED_BUILD)/hdd-image.img: pc-unified-bootloader \
 		--pcat-stage2 $(PC_UNIFIED_BUILD)/pcat-stage2.bin \
 		--pc98-kernel $(PC_UNIFIED_BUILD)/vmunix.98 \
 		--pcat-kernel $(PC_UNIFIED_BUILD)/vmunix.at \
-		--shell $(PC_UNIFIED_BUILD)/sh $@
+		--shell $(PC_UNIFIED_BUILD)/sh \
+		--noct $(PC_UNIFIED_BUILD)/noct $@
 
 pc-unified-hdd-image: $(PC_UNIFIED_BUILD)/hdd-image.img
 
 pc-unified-loader-host-check: $(PC_UNIFIED_BUILD)/hdd-image.img
 	$(PYTHON) $(SCRIPTS_DIR)/check-pc-unified-hdd-image.py \
 		--pc98-kernel $(PC_UNIFIED_BUILD)/vmunix.98 \
-		--pcat-kernel $(PC_UNIFIED_BUILD)/vmunix.at $<
+		--pcat-kernel $(PC_UNIFIED_BUILD)/vmunix.at \
+		--noct $(PC_UNIFIED_BUILD)/noct $<
 
 pc-unified-loader-qemu-test: pc-unified-bootloader
 	$(MAKE) -C $(CURDIR) ARCH=pcat build/pcat/bootloader/payload32.elf \
@@ -116,4 +120,3 @@ pc-unified-loader-qemu-test: pc-unified-bootloader
 
 .PHONY: pc-unified-bootloader pc-unified-kernels pc-unified-hdd-image \
 	pc-unified-loader-host-check pc-unified-loader-qemu-test
-

@@ -2,7 +2,6 @@
 #include "kern/graphics-device.h"
 #include "kern/cdev.h"
 #include "kern/file.h"
-#include "kern/pc98/font.h"
 #include "kern/platform.h"
 #include "kern/uaccess.h"
 
@@ -250,7 +249,8 @@ static int graphics_glyph(uintptr_t argument)
 	if (request.reserved != 0 || request.bitmap == 0 ||
 	    request.bitmap_capacity < sizeof(bitmap))
 		return EINVAL;
-	if (!pc98_font_get_glyph(request.codepoint, bitmap, &width, &height))
+	if (!kern_platform_graphics_get_glyph(request.codepoint, bitmap, &width,
+	    &height))
 		return EINVAL;
 	request.width = width; request.height = height;
 	request.stride = width / 8U; request.bearing_x = 0;

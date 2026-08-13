@@ -14,10 +14,10 @@ $(UNIFIED_PLATFORM_IMAGE): $(UNIFIED_CANONICAL_IMAGE)
 	cp --reflink=auto -f $< $@
 	$(PYTHON) $(SCRIPTS_DIR)/check-pc-unified-hdd-image.py \
 		--pc98-kernel build/pc-unified/vmunix.98 \
-		--pcat-kernel build/pc-unified/vmunix.at $@
+		--pcat-kernel build/pc-unified/vmunix.at \
+		--noct build/pc-unified/noct $@
 
 hdd-image: $(UNIFIED_PLATFORM_IMAGE)
 	@echo "Unified PC/AT + PC-98 HDD image: $(UNIFIED_PLATFORM_IMAGE)"
 
 .PHONY: all hdd-image
-

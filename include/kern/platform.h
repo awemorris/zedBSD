@@ -48,6 +48,8 @@ int kern_platform_graphics_pattern_fill(const struct kern_graphics_rect *,
 int kern_platform_graphics_blit(unsigned, unsigned,
 				const struct kern_graphics_image *, uint64_t, int);
 int kern_platform_graphics_flush(const struct kern_graphics_rect *, size_t);
+int kern_platform_graphics_get_glyph(uint32_t, uint8_t[32], unsigned *,
+				     unsigned *);
 void kern_platform_restore_text(void);
 void kern_platform_debug_write(const char *text);
 void kern_platform_halt(void) __attribute__((noreturn));

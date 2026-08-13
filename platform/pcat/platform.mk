@@ -29,7 +29,9 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/exec.o $(BUILD)/src/kern/user-probe.o \
 	$(BUILD)/src/kern/syscall.o $(BUILD)/src/kern/uaccess.o \
 	$(BUILD)/src/kern/cdev.o $(BUILD)/src/kern/devfs.o \
-	$(BUILD)/src/kern/console-device.o $(BUILD)/src/kern/system-device.o \
+	$(BUILD)/src/kern/console-device.o $(BUILD)/src/kern/graphics-device.o \
+	$(BUILD)/src/kern/system-device.o \
+	$(BUILD)/src/kern/pcat/font.o $(BUILD)/src/kern/pcat/graphics.o \
 	$(BUILD)/src/kern/pcat/unsupported-devices.o $(BUILD)/src/kern/init.o
 
 VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
@@ -47,11 +49,13 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PCAT_OBJS) $(KERN_OBJS)
 
-all: $(BUILD)/bootsect.bin $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/hdd-image.img \
+all: $(BUILD)/bootsect.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
+	$(BUILD)/bin/noct $(BUILD)/hdd-image.img \
 	$(BUILD)/zedbsd-grub.iso
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
-.PHONY: vmunix SH
+NOCT.ELF: $(BUILD)/NOCT.ELF
+.PHONY: vmunix SH NOCT.ELF
 
 $(BUILD)/$(BOOTSECT)/bootsect.o: $(BOOTSECT)/bootsect.S
 	@mkdir -p $(dir $@)
@@ -164,6 +168,36 @@ USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-mno-mmx -mno-sse -mno-sse2
 USER_STACK_LDFLAGS := -z stack-size=0x100000
 USER_ELF_CHECK := $(SCRIPTS_DIR)/check-user-elf.py
+USER_NOCT_GLUE_OBJS := $(BUILD)/userland/noct/runtime/main.o \
+	$(BUILD)/userland/noct/runtime/memory.o \
+	$(BUILD)/userland/noct/runtime/platform.o \
+	$(BUILD)/userland/noct/runtime/env.o \
+	$(BUILD)/userland/noct/integration/napi.o \
+	$(BUILD)/userland/noct/integration/target.o
+$(USER_NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
+$(USER_NOCT_GLUE_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
+$(BUILD)/userland/noct/integration/napi.o: userland/noct/integration/napi.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
+$(BUILD)/userland/noct/integration/target.o: userland/noct/integration/target.c
+	@mkdir -p $(dir $@)
+	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/NOCT.ELF: $(USER_LIBC_OBJS) $(USER_NOCT_GLUE_OBJS) \
+	$(USER_NOCT_OBJECTS) $(ZEDBSD_SOFTFLOAT_OBJECTS) $(PCAT)/user.ld \
+	$(USER_ELF_CHECK)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
+		$(USER_NOCT_GLUE_OBJS) $(USER_NOCT_OBJECTS) \
+		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+	$(PYTHON) $(USER_ELF_CHECK) $@
+
+$(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
+	@mkdir -p $(dir $@)
+	cp $< $@
+	$(PYTHON) $(USER_ELF_CHECK) $@
+
 USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o \
 	$(BUILD)/userland/sh/builtins.o
 $(BUILD)/userland/libc/posix.o $(USER_SH_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
@@ -211,8 +245,13 @@ hdd-boot-qemu-test: $(BUILD)/vmunix $(BUILD)/hdd-image.img \
 sh-builtins-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/sh bios-bootloader
 	$(SCRIPTS_DIR)/test-sh-builtins.sh pcat
 
+pcat-beui-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/noct \
+	build/pc-unified/hdd-image.img
+	bash $(SCRIPTS_DIR)/test-pcat-beui.sh build/pc-unified/hdd-image.img
+
 HOST_TEST_BINARIES += $(BUILD)/tests/pcat-mbr-host-test
-.PHONY: pcat-mbr-host-test hdd-boot-qemu-test sh-builtins-qemu-test
+.PHONY: pcat-mbr-host-test hdd-boot-qemu-test sh-builtins-qemu-test \
+	pcat-beui-qemu-test
 
 hal-pcat-compile: $(HAL_PCAT_OBJS)
 	@echo "HAL i386/PCAT compile check: PASS"
