@@ -99,12 +99,16 @@ int kern_platform_graphics_enter(struct kern_graphics_mode *mode)
 void kern_platform_graphics_leave(void)
 {
 	if (native_display.leave != NULL) {
-		/* Clear the hidden text and attribute planes before selecting the
-		 * motherboard GDC again, so no stale cell is ever scanned out. */
+		/* Blank hidden text and attribute VRAM before the display handoff,
+		 * then blank them again after the backend has restored the motherboard
+		 * GDC.  The backend cleanup may change the active display and GDC
+		 * state, so only the second reset defines the visible post-BeUI
+		 * contents on real hardware. */
+		hal_cons_show_cursor(0);
+		hal_cons_clear();
+		native_display.leave(native_display.context);
 		hal_cons_reset();
 		hal_cons_set_mode(HAL_CONS_TERMINAL);
-		hal_cons_show_cursor(0);
-		native_display.leave(native_display.context);
 		hal_cons_show_cursor(1);
 	}
 }
