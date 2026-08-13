@@ -1,0 +1,8 @@
+.set MBR_TABLE_OFFSET,    0x01be
+.set MBR_ENTRY_SIZE,      16
+.set MBR_SIGNATURE,       0x01fe
+.set MBR_ACTIVE,          0x80
+.set MBR_TYPE_FAT16_16M,  0x04
+.set MBR_TYPE_FAT16,      0x06
+.set MBR_TYPE_FAT16_LBA,  0x0e
+

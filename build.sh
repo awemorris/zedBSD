@@ -30,11 +30,17 @@ Build commands:
   SH              Build /bin/sh
   LINUX           Build /bin/linux
   hdd-image       Build an installable HDD image
+  bios-bootloader Build the native BIOS Stage 1/2 loader
+  bios-hdd-image  Build the MBR/FAT16 native-loader image
+  legacy-pc98-hdd-image
+                  Build the legacy NEC98-partition image (PC-98 only)
   grub-iso        Build the PC/AT GRUB Multiboot test ISO
 
 Test commands:
   check                       Build and run all host tests
   hdd-boot-qemu-test          Test HDD boot (and PC/AT GRUB boot) in QEMU
+  bios-loader-host-check      Verify the native BIOS image on the host
+  bios-loader-qemu-test       Test native-loader ELF payloads in QEMU
 
 Maintenance commands:
   clean           Remove build/<platform>
@@ -47,6 +53,12 @@ Any Make target may be used as <command>.  For example:
   $0 check pc98
   $0 NOCT.ELF pc98
   $0 hdd-boot-qemu-test pc98
+  $0 bios-bootloader pcat
+  $0 bios-hdd-image pcat
+  $0 bios-loader-qemu-test pcat
+  $0 bios-bootloader pc98
+  $0 bios-hdd-image pc98
+  $0 legacy-pc98-hdd-image pc98
 
 Additional targets and Make variable assignments may follow the platform:
   $0 all pc98 check

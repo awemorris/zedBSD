@@ -1,6 +1,6 @@
 /* PC/AT MBR primary partition scheme.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "kern/pcat/partition.h"
+#include "kern/mbr-partition.h"
 
 #define MBR_TABLE 0x1beU
 #define MBR_ENTRY_SIZE 16U
@@ -20,7 +20,8 @@ mbr_scan(const struct partition_scheme *scheme, struct disk *disk,
 	(void)scheme;
 	if (disk->d_block_size != 512U || disk_read(disk, 0, 1, sector) != 0)
 		return -1;
-	if (sector[510] != 0x55U || sector[511] != 0xaaU) return -1;
+	if (sector[510] != 0x55U || sector[511] != 0xaaU)
+		return -1;
 	for (unsigned index = 0; index < count; index++) {
 		const uint8_t *raw = sector + MBR_TABLE + index * MBR_ENTRY_SIZE;
 		struct partition *entry = &entries[index];
@@ -44,3 +45,4 @@ mbr_scan(const struct partition_scheme *scheme, struct disk *disk,
 const struct partition_scheme partition_scheme_mbr = {
 	.name = "mbr", .scan = mbr_scan,
 };
+

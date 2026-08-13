@@ -120,4 +120,6 @@ boot_id:
 
 	.org	0x01fc
 	.word	9
-	.word	0xaa55
+	/* A native NEC98 disk is identified by the absence of the PC/AT MBR
+	 * signature.  The partition table for this path lives at LBA 1. */
+	.word	0

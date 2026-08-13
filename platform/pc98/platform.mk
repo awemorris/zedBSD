@@ -7,6 +7,7 @@
 
 PC98 := platform/pc98
 BOOTSECT := bootsectors/pc98
+BIOS_LOADER := bootloader/pc98
 
 CIRRUS_NOCT_CFLAGS = $(filter-out -Os,$(NOCT_CFLAGS)) -O2
 
@@ -87,7 +88,9 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/disk.o \
 	$(BUILD)/src/kern/partition.o \
 	$(BUILD)/drivers/pc98-ide.o \
+	$(BUILD)/src/kern/mbr-partition.o \
 	$(BUILD)/src/kern/pc98/partition.o \
+	$(BUILD)/src/kern/pc98/partition-auto.o \
 	$(BUILD)/src/kern/pc98/platform.o \
 	$(BUILD)/src/kern/pc98/linux-boot.o \
 	$(BUILD)/src/kern/image.o \
@@ -184,6 +187,80 @@ $(BUILD)/boot2.bin: $(BUILD)/boot2.elf
 $(BUILD)/ipl-lba0.bin: $(BUILD)/disk-ipl.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 	@test $$(stat -c%s $@) -eq 512
+	@test "$$(od -An -tx1 -j508 -N4 $@ | tr -d ' \n')" = 09000000
+
+# Native PC-98 BIOS code using a PC/AT-compatible MBR disk layout.
+$(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
+	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/stage1.elf: $(BUILD)/bootloader/stage1.o \
+	$(BIOS_LOADER)/stage1.ld
+	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage1.ld $< -o $@
+
+$(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+	@test $$(stat -c%s $@) -eq 512
+	@test "$$(od -An -tx1 -j510 -N2 $@ | tr -d ' \n')" = 55aa
+
+$(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2.S \
+	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
+	bootloader/include/mbr.inc bootloader/include/fat16.inc \
+	bootloader/include/elf.inc
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/stage2.elf: $(BUILD)/bootloader/stage2.o \
+	$(BIOS_LOADER)/stage2.ld
+	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
+
+$(BUILD)/bootloader/stage2.raw: $(BUILD)/bootloader/stage2.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+
+$(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.raw \
+	$(SCRIPTS_DIR)/finalize-bios-stage2.py
+	$(PYTHON) $(SCRIPTS_DIR)/finalize-bios-stage2.py --machine pc98 $< $@
+
+$(BUILD)/bootloader/payload32.o: bootloader/tests/payload32-pc98.S
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -c $< -o $@
+
+$(BUILD)/bootloader/payload32.elf: $(BUILD)/bootloader/payload32.o \
+	bootloader/tests/payload32-pc98.ld
+	$(LD) -m elf_i386 -T bootloader/tests/payload32-pc98.ld $< -o $@
+
+bios-bootloader: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin
+
+$(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
+	$(SCRIPTS_DIR)/make-bios-hdd-image.py \
+	$(SCRIPTS_DIR)/check-bios-hdd-image.py
+	$(PYTHON) $(SCRIPTS_DIR)/make-bios-hdd-image.py --force \
+		--machine pc98 --stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--shell $(BUILD)/bin/sh $@
+
+bios-hdd-image: $(BUILD)/bios-hdd-image.img
+bios-loader-host-check: $(BUILD)/bios-hdd-image.img
+	$(PYTHON) $(SCRIPTS_DIR)/check-bios-hdd-image.py --machine pc98 \
+		--kernel $(BUILD)/vmunix $<
+
+bios-loader-qemu-test: bios-bootloader $(BUILD)/bootloader/payload32.elf
+	bash $(SCRIPTS_DIR)/test-bios-bootloader-qemu.sh pc98
+
+$(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
+	cp -f $< $@
+
+$(BUILD)/legacy-nec98-hdd-image.img: $(BUILD)/hdd-test.img
+	cp -f $< $@
+
+legacy-pc98-hdd-image: $(BUILD)/legacy-nec98-hdd-image.img
+
+.PHONY: bios-bootloader bios-hdd-image bios-loader-host-check \
+	bios-loader-qemu-test \
+	legacy-pc98-hdd-image
 
 $(BUILD)/ipl-lba2.bin: $(BUILD)/lba2.elf
 	$(OBJCOPY) -O binary -j .text $< $@
@@ -372,7 +449,7 @@ $(BUILD)/hdd-test.img: all $(SCRIPTS_DIR)/make-hdd-image.sh \
 	rm -f $@
 	$(SCRIPTS_DIR)/make-hdd-image.sh $@
 
-hdd-image: $(BUILD)/hdd-test.img
+hdd-image: $(BUILD)/hdd-image.img
 
 hdd-boot-qemu-test:
 	$(SCRIPTS_DIR)/test-hdd-bare.sh

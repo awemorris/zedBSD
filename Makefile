@@ -173,10 +173,12 @@ $(BUILD)/tests/beui-host-test: $(NOCT_ROOT)/tests/testcases/beui-test.c \
 	$(BEUI_TEST_CC) $(BEUI_CORE_SOURCES) $< -o $@
 
 $(BUILD)/tests/blkdev-host-test: tests/blkdev-host-test.c \
-	src/kern/disk.c src/kern/partition.c src/kern/pc98/partition.c
+	src/kern/disk.c src/kern/partition.c src/kern/pc98/partition.c \
+	src/kern/mbr-partition.c src/kern/pc98/partition-auto.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/disk.c src/kern/partition.c \
-		src/kern/pc98/partition.c $< -o $@
+		src/kern/pc98/partition.c src/kern/mbr-partition.c \
+		src/kern/pc98/partition-auto.c $< -o $@
 
 VFS_CORE_SOURCES := src/kern/disk.c src/kern/inode.c src/kern/file.c \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c src/kern/rootfs.c

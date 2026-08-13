@@ -6,7 +6,9 @@
 
 #include "kern/disk.h"
 #include "kern/partition.h"
+#include "kern/mbr-partition.h"
 #include "kern/pc98/partition.h"
+#include "kern/pc98/partition-auto.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -228,11 +230,64 @@ test_pc98_partitions(void)
 	CHECK(partition_scan(NULL, entries, PARTITION_MAX) == -EINVAL);
 }
 
+static void
+put_le32(uint8_t *p, uint32_t value)
+{
+	p[0] = (uint8_t)value;
+	p[1] = (uint8_t)(value >> 8);
+	p[2] = (uint8_t)(value >> 16);
+	p[3] = (uint8_t)(value >> 24);
+}
+
+static void
+test_pc98_partition_auto(void)
+{
+	struct partition entries[PARTITION_MAX];
+	struct disk *dev = setup_fake();
+	uint8_t *mbr = fake.data;
+	uint8_t *raw = mbr + 0x1be;
+	uint8_t *native = fake.data + 512;
+	int count;
+
+	partition_set_scheme(&partition_scheme_pc98_auto);
+	mbr[510] = 0x55;
+	mbr[511] = 0xaa;
+	raw[0] = 0x80;
+	raw[4] = 0x0e;
+	put_le32(raw + 8, 128);
+	put_le32(raw + 12, 256);
+	count = partition_scan(dev, entries, PARTITION_MAX);
+	CHECK(count == 4);
+	CHECK(entries[0].p_start_block == 128);
+	CHECK(entries[0].p_block_count == 256);
+	CHECK(strcmp(entries[0].p_label, "mbr1") == 0);
+
+	/* Removing only the marker selects the LBA-1 native table. */
+	mbr[510] = 0;
+	mbr[511] = 0;
+	memset(native, 0, 512);
+	put_entry(native, 0, 0x80, 0, 0, 1, 0, 0, 1,
+	    16, 7, 1, "NATIVE");
+	count = partition_scan(dev, entries, PARTITION_MAX);
+	CHECK(count == 16);
+	CHECK(entries[0].p_start_block == 136);
+	CHECK(strcmp(entries[0].p_label, "NATIVE") == 0);
+
+	/* A signed but empty MBR remains MBR; there is no native fallback. */
+	memset(mbr, 0, 512);
+	mbr[510] = 0x55;
+	mbr[511] = 0xaa;
+	count = partition_scan(dev, entries, PARTITION_MAX);
+	CHECK(count == 4);
+	CHECK(entries[0].p_block_count == 0);
+}
+
 int
 main(void)
 {
 	test_registry();
 	test_pc98_partitions();
+	test_pc98_partition_auto();
 	if (failures != 0) {
 		printf("disk/bio tests: %d failure(s)\n", failures);
 		return 1;

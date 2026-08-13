@@ -2,7 +2,7 @@
 #include "kern/platform.h"
 #include "kern/disk.h"
 #include "kern/partition.h"
-#include "kern/pcat/partition.h"
+#include "kern/mbr-partition.h"
 #include "drivers/pcat-ide.h"
 #include <errno.h>
 #include <hal/hal.h>

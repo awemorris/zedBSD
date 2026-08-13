@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 PCAT := platform/pcat
 BOOTSECT := bootsectors/pcat
+BIOS_LOADER := bootloader/pcat
 
 HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
@@ -41,7 +42,7 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/swap.o \
 	$(BUILD)/src/kern/swap-fat.o $(BUILD)/src/kern/vm-reclaim.o \
 	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/partition.o \
-	$(BUILD)/drivers/pcat-ide.o $(BUILD)/src/kern/pcat/partition.o \
+	$(BUILD)/drivers/pcat-ide.o $(BUILD)/src/kern/mbr-partition.o \
 	$(BUILD)/src/kern/pcat/platform.o $(BUILD)/src/kern/image.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PCAT_OBJS) $(KERN_OBJS)
@@ -62,6 +63,80 @@ $(BUILD)/bootsect.bin: $(BUILD)/bootsect.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 	@test $$(stat -c%s $@) -eq 512
 	@test "$$(od -An -tx1 -j510 -N2 $@ | tr -d ' \n')" = 55aa
+
+# Native two-stage MBR/FAT16 loader.  Keep the historical raw-LBA loader
+# above until the new path has completed its regression matrix.
+$(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
+	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/stage1.elf: $(BUILD)/bootloader/stage1.o \
+	$(BIOS_LOADER)/stage1.ld
+	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage1.ld $< -o $@
+
+$(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+	@test $$(stat -c%s $@) -eq 512
+	@test "$$(od -An -tx1 -j510 -N2 $@ | tr -d ' \n')" = 55aa
+
+$(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2.S \
+	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
+	bootloader/include/mbr.inc bootloader/include/fat16.inc \
+	bootloader/include/elf.inc
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/stage2.elf: $(BUILD)/bootloader/stage2.o \
+	$(BIOS_LOADER)/stage2.ld
+	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
+
+$(BUILD)/bootloader/stage2.raw: $(BUILD)/bootloader/stage2.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+
+$(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.raw \
+	$(SCRIPTS_DIR)/finalize-bios-stage2.py
+	$(PYTHON) $(SCRIPTS_DIR)/finalize-bios-stage2.py --machine pcat $< $@
+
+$(BUILD)/bootloader/payload32.o: bootloader/tests/payload32-pcat.S
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -c $< -o $@
+
+$(BUILD)/bootloader/payload32.elf: $(BUILD)/bootloader/payload32.o \
+	bootloader/tests/payload32-pcat.ld
+	$(LD) -m elf_i386 -T bootloader/tests/payload32-pcat.ld $< -o $@
+
+$(BUILD)/bootloader/payload64.o: bootloader/tests/payload64-pcat.S
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -c $< -o $@
+
+$(BUILD)/bootloader/payload64.elf: $(BUILD)/bootloader/payload64.o \
+	bootloader/tests/payload64-pcat.ld
+	$(LD) -m elf_x86_64 -T bootloader/tests/payload64-pcat.ld $< -o $@
+
+bios-bootloader: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin
+
+$(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
+	$(SCRIPTS_DIR)/make-bios-hdd-image.py \
+	$(SCRIPTS_DIR)/check-bios-hdd-image.py
+	$(PYTHON) $(SCRIPTS_DIR)/make-bios-hdd-image.py --force \
+		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--shell $(BUILD)/bin/sh $@
+
+bios-hdd-image: $(BUILD)/bios-hdd-image.img
+bios-loader-host-check: $(BUILD)/bios-hdd-image.img
+	$(PYTHON) $(SCRIPTS_DIR)/check-bios-hdd-image.py --machine pcat \
+		--kernel $(BUILD)/vmunix $<
+
+bios-loader-qemu-test: bios-bootloader \
+	$(BUILD)/bootloader/payload32.elf $(BUILD)/bootloader/payload64.elf
+	bash $(SCRIPTS_DIR)/test-bios-bootloader-qemu.sh pcat
+
+.PHONY: bios-bootloader bios-hdd-image bios-loader-host-check \
+	bios-loader-qemu-test
 
 $(BUILD)/src/hal/%.o: src/hal/%.c
 	@mkdir -p $(dir $@)
@@ -102,10 +177,13 @@ $(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-$(BUILD)/hdd-image.img: $(BUILD)/bootsect.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
+$(BUILD)/legacy-pcat-hdd-image.img: $(BUILD)/bootsect.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
 	$(SCRIPTS_DIR)/make-pcat-hdd-image.sh
 	$(SCRIPTS_DIR)/make-pcat-hdd-image.sh $@ $(BUILD)/bootsect.bin \
 		$(BUILD)/vmunix $(BUILD)/bin/sh
+
+$(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
+	cp -f $< $@
 
 $(BUILD)/zedbsd-grub.iso: $(BUILD)/vmunix \
 	$(SCRIPTS_DIR)/make-pcat-grub-iso.sh
@@ -116,10 +194,10 @@ grub-iso: $(BUILD)/zedbsd-grub.iso
 .PHONY: hdd-image grub-iso
 
 $(BUILD)/tests/pcat-mbr-host-test: tests/pcat-mbr-host-test.c \
-	src/kern/disk.c src/kern/partition.c src/kern/pcat/partition.c
+	src/kern/disk.c src/kern/partition.c src/kern/mbr-partition.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/disk.c src/kern/partition.c \
-		src/kern/pcat/partition.c $< -o $@
+		src/kern/mbr-partition.c $< -o $@
 
 pcat-mbr-host-test: $(BUILD)/tests/pcat-mbr-host-test
 	$(BUILD)/tests/pcat-mbr-host-test

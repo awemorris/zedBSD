@@ -3,6 +3,7 @@
 #include "kern/disk.h"
 #include "kern/partition.h"
 #include "kern/pc98/partition.h"
+#include "kern/pc98/partition-auto.h"
 #include "kern/pc98/linux-boot.h"
 #include "hal/i386/bsp-pc98/display.h"
 #include "drivers/pc98-ide.h"
@@ -15,9 +16,16 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 	size_t count = 0;
 
 	if (handoff == NULL || devices == NULL || capacity == 0 ||
-	    handoff->magic != ZEDBSD_HANDOFF_MAGIC || handoff->version != 2 ||
+	    handoff->magic != ZEDBSD_HANDOFF_MAGIC ||
+	    (handoff->version != ZEDBSD_HANDOFF_VERSION_PC98 &&
+	     handoff->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT) ||
 	    handoff->size < sizeof(*handoff) || handoff->device_count == 0 ||
 	    handoff->device_table == 0)
+		return 0;
+	if (handoff->version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT &&
+	    (handoff->boot_partition_scheme != ZEDBSD_PARTITION_SCHEME_MBR ||
+	     handoff->boot_partition_index < 1 ||
+	     handoff->boot_partition_index > 4))
 		return 0;
 	initial = (const struct zedbsd_device *)handoff->device_table;
 	for (size_t index = 0; index < handoff->device_count && count < capacity;
@@ -32,7 +40,7 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 	if (count == 0)
 		return 0;
 
-	partition_set_scheme(&partition_scheme_pc98);
+	partition_set_scheme(&partition_scheme_pc98_auto);
 	disk_registry_reset();
 	(void)zedbsd_ide_pc98_init(devices, (unsigned)count);
 	return count;

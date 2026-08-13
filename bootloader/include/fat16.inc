@@ -1,0 +1,9 @@
+.set BPB_BYTES_PER_SECTOR, 11
+.set BPB_SECTORS_CLUSTER,  13
+.set BPB_RESERVED_SECTORS, 14
+.set BPB_FAT_COUNT,        16
+.set BPB_ROOT_ENTRIES,     17
+.set BPB_TOTAL16,          19
+.set BPB_SECTORS_FAT16,    22
+.set BPB_TOTAL32,          32
+

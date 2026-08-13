@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/disk.h"
 #include "kern/partition.h"
-#include "kern/pcat/partition.h"
+#include "kern/mbr-partition.h"
 
 #include <errno.h>
 #include <stdio.h>
