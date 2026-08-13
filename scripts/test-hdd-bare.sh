@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Boot the HDD test image and verify that /etc/zinit.rc starts /bin/menu.nct
-# after the one-second countdown.
+# Build the standard image and prove that it enters /bin/sh without a product
+# startup script.  Product GUI tests belong to linux-pc98/bootloader/tests.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 arch="${ZEDBSD_ARCH:-pc98}"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
@@ -10,38 +10,35 @@ qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
 machine="${ZEDBSD_TEST_MACHINE:-pc9821}"
 cpu="${ZEDBSD_TEST_CPU:-486}"
-work="$build/tests/hdd-boot"
+memory="${ZEDBSD_QEMU_MEMORY:-8}"
+work="$build/tests/hdd-bare"
 image="$work/hdd.img"
 monitor="$work/monitor.sock"
-menu="$work/MENU.NCT"
-background="$work/MENUBACK.BMP"
-screenshot="$work/hdd-boot-failure.ppm"
-qemu_memory="${ZEDBSD_QEMU_MEMORY:-8}"
+screenshot="$work/hdd-bare-failure.ppm"
 
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
-test -d "$bios_dir" || {
-	echo "PC-98 BIOS directory not found: $bios_dir" >&2
-	exit 1
-}
+test -d "$bios_dir" || { echo "PC-98 BIOS directory not found: $bios_dir" >&2; exit 1; }
 
-rm -rf "$work"
+rm -rf -- "$work"
 mkdir -p "$work"
-cat > "$menu" <<'EOF'
-func main() {
-    System.setEnv("BOOT_ACTION", "echo zinit menu verified.");
-    return 0;
-}
-EOF
-cp "$repo/apps/menuback.bmp" "$background"
-ZEDBSD_MENU="$menu" ZEDBSD_MENU_BACKGROUND="$background" \
-	"$repo/scripts/make-hdd-image.sh" "$image"
+"$repo/scripts/make-hdd-image.sh" "$image"
+
+# The test image has one partition beginning at cylinder 1 (H=8, S=17).
+fat_offset=$((8 * 17 * 512))
+for absent in ::ETC/ZINIT.RC ::BIN/MENU.NCT ::BIN/MENUBACK.BMP \
+    ::APPS/HOLORIS.NCT ::APPS/HOLORIS.NAP ::APPS/EMACS.NAP \
+    ::HOME/SKKJISYO.DIC; do
+	if mdir -i "$image@@$fat_offset" "$absent" >/dev/null 2>&1; then
+		echo "bare image unexpectedly contains $absent" >&2
+		exit 1
+	fi
+done
 
 rm -f -- "$monitor"
-"$qemu" -M "$machine" -cpu "$cpu" -m "$qemu_memory" -accel tcg -L "$bios_dir" \
+"$qemu" -M "$machine" -cpu "$cpu" -m "$memory" -accel tcg -L "$bios_dir" \
 	-nic none -drive "if=ide,bus=0,unit=0,format=raw,file=$image" \
-	-display none -serial none \
-	-qmp "unix:$monitor,server=on,wait=off" -no-reboot \
-	>/dev/null 2>&1 &
+	-display none -serial none -qmp "unix:$monitor,server=on,wait=off" \
+	-no-reboot >/dev/null 2>&1 &
 qemu_pid=$!
 cleanup()
 {
@@ -60,7 +57,6 @@ import sys
 import time
 
 monitor, screenshot = sys.argv[1:]
-
 deadline = time.time() + 25
 sock = None
 while time.time() < deadline:
@@ -69,8 +65,7 @@ while time.time() < deadline:
         sock.connect(monitor)
         break
     except OSError:
-        sock = None
-        time.sleep(0.5)
+        time.sleep(0.25)
 if sock is None:
     raise SystemExit("QMP socket did not appear")
 stream = sock.makefile("rw", encoding="utf-8")
@@ -95,31 +90,22 @@ def mem(addr, count):
     raw = []
     for line in text.splitlines():
         body = line.split(":", 1)
-        if len(body) != 2:
-            continue
-        for token in body[1].split():
-            raw.append(int(token, 16))
+        if len(body) == 2:
+            raw.extend(int(token, 16) for token in body[1].split())
     return bytes(raw)
 
 cmd("qmp_capabilities")
-
-deadline = time.time() + 60
-while time.time() < deadline:
-    if mem(0x20000, 4) == b"B98S":
-        print("vmunix loaded")
-        break
-    time.sleep(2)
-else:
-    raise SystemExit("vmunix never appeared at the Stage 2 load address")
-
-deadline = time.time() + 120
+deadline = time.time() + 90
 while time.time() < deadline:
     text = mem(0xA0000, 25 * 160)[0::2]
-    if b"zinit menu verified." in text:
-        print("zinit.rc and /bin/menu.nct completed")
+    if b"Loading /etc/zinit.rc" in text:
+        raise SystemExit("bare image attempted to load /etc/zinit.rc")
+    if b"/ $" in text:
+        print("bare zedBSD /bin/sh prompt observed")
         sys.exit(0)
-    time.sleep(2)
+    time.sleep(1)
 cmd("screendump", {"filename": screenshot})
-raise SystemExit("zinit.rc/menu completion never appeared; " + screenshot)
+raise SystemExit("/bin/sh prompt was not observed; " + screenshot)
 PY
-echo "zedBSD HDD boot test: PASS"
+
+echo "zedBSD bare HDD boot test: PASS"

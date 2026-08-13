@@ -6,7 +6,7 @@
 # Generated lexer/parser C sources are imported and used directly, so flex and
 # bison are not build dependencies.
 
-NOCT_ROOT ?= noct
+NOCT_ROOT ?= userland/noct/noct-upstream
 NOCT_ENABLE_JIT ?= 1
 NOCT_OPTIMIZE_LEVEL ?= 1
 # Compile every zedBSD build with the largest supported reservation.  The
@@ -208,7 +208,7 @@ USER_NOCT_OBJECTS := \
 	$(patsubst $(NOCT_ROOT)/src/core/%.c,$(USER_NOCT_BUILD_DIR)/%.o,$(NOCT_CORE_SOURCES)) \
 	$(patsubst $(NOCT_ROOT)/src/repl/%.c,$(USER_NOCT_BUILD_DIR)/repl-%.o,$(NOCT_REPL_SOURCES)) \
 	$(patsubst $(NOCT_ROOT)/src/api/%.c,$(USER_NOCT_BUILD_DIR)/%.o,$(NOCT_API_SOURCES))
-USER_NOCT_CPPFLAGS := -nostdinc -Iuser/include -Iinclude/uapi -I. \
+USER_NOCT_CPPFLAGS := -nostdinc -Iuserland/include -Iinclude/uapi -I. \
 	-I$(BUILD) -Ilibc/include -I$(NOCT_ROOT)/include \
 	-I$(NOCT_ROOT)/src/core -I$(NOCT_ROOT)/src/api \
 	-DNOCT_TARGET_POSIX -DNOCT_TARGET_ZEDBSD -DNOCT_MEMORY_SMALL \

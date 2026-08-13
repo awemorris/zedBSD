@@ -5,18 +5,15 @@ zedBSD
 In addition to a normal boot loader feature, it integrates the Noct
 language and its JIT virtual machine for an extension mechanism.
 
-The boot menu, shell, and utilities are [NoctLang](https://github.com/awemorris/NoctLang)
-scripts; hardware access is exposed to scripts through Noct's NAPI.  The
+The shell is a native user process and optional utilities are
+[NoctLang](https://github.com/awemorris/NoctLang) scripts; hardware access is
+exposed to scripts through Noct's NAPI.  The
 graphical layer, BeUI, grew here and now lives upstream in Noct, so the
 same program runs in the pre-boot environment, under MS-DOS on the
 PC-9800 series, and on a desktop host used for development.
-The bundled Remacs editor (a Noct sample application, with SKK Japanese
-input) makes it possible to edit an operating system's configuration
-files before the operating system boots.  The Holoris game
-(`apps/holoris.nct`, a wireframe falling-block hologram) demonstrates
-that BeUI alone carries real-time programs: it draws with the BeUI
-primitives, paces itself with `BeUI.getMilliseconds`/`BeUI.sleep`, and
-reads held keys with `BeUI.isKeyDown`.
+Product menus and applications such as Remacs and Holoris are maintained by
+linux-pc98 and installed as an overlay.  They are intentionally not part of a
+standard zedBSD image.
 
 The supported target today is the NEC PC-9800 series.  The tree is laid
 out so that further targets (PC/AT BIOS, UEFI) can be added under
@@ -26,12 +23,15 @@ platform/ without touching the shared code.
 
 | Directory        | Contents                                                    |
 |------------------|-------------------------------------------------------------|
-| `core/`          | Platform-neutral services: filesystem, FAT, environment, namespace, kernel image loading, console interface, Noct integration |
+| `include/`       | Public HAL, kernel, and user ABI interfaces              |
+| `src/hal/`       | HAL and PC-98 board support                              |
+| `src/kern/`      | Platform-neutral kernel services                         |
+| `userland/`      | crt0, libc glue, shell, Linux loader, and Noct runtime   |
 | `libc/`          | Freestanding libc subset                                    |
 | `softfloat/`     | Soft-float support compiled from the vendor GCC/musl sources |
 | `platform/pc98/` | PC-9800 target: IPLs, stage 1/2, console, timer, Noct target adapter, DOS installer |
-| `apps/`          | Noct programs shipped on the boot volume (`menu.nct`, `ls.nct`, `cp.nct`, `holoris.nct`, Remacs configuration) |
-| `noct/`          | NoctLang submodule: the VM, the BeUI graphical API and its PC-98 display backends, and Remacs under `apps/remacs` |
+| `apps/`          | Generic Noct programs (`ls.nct`, `cp.nct`, `hello.nct`, `bmpview.nct`) |
+| `userland/noct/noct-upstream/` | NoctLang submodule                       |
 | `vendor/`        | GCC and musl source submodules, used only by the softfloat build |
 | `scripts/`       | Build helpers, image installer, QEMU tests                  |
 | `tests/`         | Host tests and QEMU test configurations                     |
@@ -43,7 +43,7 @@ and `libc6-dev-i386` on Debian), and python3.  Image installation and the
 QEMU tests additionally need `mtools` and a PC-98-capable QEMU.
 
 ```sh
-git submodule update --init noct
+git submodule update --init userland/noct/noct-upstream
 ./build.sh all pc98
 ./build.sh check pc98
 ```
@@ -66,14 +66,14 @@ subset at build time.  Booting requires an IDE/CF-style disk with
 512-byte sectors — FDD boot retired when vmunix outgrew a flat image
 (floppies can still be mounted from the running system).  Architecture-neutral
 host artifacts stay shared at the top of `build/` (`build/host-noct`,
-`build/remacs`, `build/releases`).  `make check` runs the host test suite;
+`build/releases`).  `make check` runs the host test suite;
 `make clean` removes the current architecture's tree and `make distclean`
 removes all of `build/`.
 
 `make hdd-image` builds
-`build/pc98/hdd-test.img`: a disk with a NEC PC-98 partition table and a
-fully installed BOOT volume, including the Remacs bytecode (requires
-mtools, and cmake for the host Noct compiler).
+`build/pc98/hdd-test.img`: a disk with a NEC PC-98 partition table and a bare
+BOOT volume.  It starts `/bin/sh` directly and contains no automatic startup
+script or product GUI (requires mtools).
 
 Kernel console messages are maintained as UTF-8 text in
 `src/kern/messages.txt`.  Every non-clean `build.sh` command first updates
@@ -112,9 +112,10 @@ make ZEDBSD_GCC_ROOT=../linux-pc98/toolchain/gcc \
 
 ## Configuration
 
-The boot volume is configured by `/etc/zinit.rc` (which starts `menu.nct` for a
-scripted startup).  Images created before the rename used `BOOT.CFG`;
-stage 2 still falls back to that name for one release.
+The kernel starts `/bin/sh`.  If an integrator explicitly installs
+`/etc/zinit.rc`, the shell offers a one-second cancellation window and sources
+it; the standard zedBSD image does not install this file.  Linux-pc98 owns its
+product startup script and GUI overlay.
 
 ## QEMU tests
 

@@ -8,15 +8,25 @@
 typedef struct rt_env NoctEnv;
 typedef size_t (*zedbsd_noct_write_fn)(void *, const char *, size_t);
 
+#define ZEDBSD_ENV_STORAGE_SIZE 4096U
+#define ZEDBSD_ENV_MAX_ENTRIES 32U
+#define ZEDBSD_ENV_NAME_MAX 31U
+#define ZEDBSD_ENV_VALUE_MAX 255U
+
 struct zedbsd_environment {
 	uint16_t used;
 	uint8_t count;
 	uint8_t reserved;
-	char storage[4096];
+	char storage[ZEDBSD_ENV_STORAGE_SIZE];
 };
 void zedbsd_env_init(struct zedbsd_environment *);
+int zedbsd_env_name_valid(const char *);
 const char *zedbsd_env_get(const struct zedbsd_environment *, const char *);
 int zedbsd_env_set(struct zedbsd_environment *, const char *, const char *);
+int zedbsd_env_unset(struct zedbsd_environment *, const char *);
+size_t zedbsd_env_count(const struct zedbsd_environment *);
+int zedbsd_env_at(const struct zedbsd_environment *, size_t,
+		  const char **, const char **);
 
 struct zedbsd_noct_dirent {
 	char name[256];

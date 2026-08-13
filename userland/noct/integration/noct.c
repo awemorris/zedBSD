@@ -7,9 +7,9 @@
  */
 
 #include "kern/noct.h"
-#include "noct/memory.h"
-#include "noct/napi.h"
-#include "noct/target.h"
+#include <userland/noct/integration/memory.h>
+#include <userland/noct/integration/napi.h>
+#include <userland/noct/integration/target.h>
 #include "libc/heap.h"
 #include "libc/stdio-fs.h"
 

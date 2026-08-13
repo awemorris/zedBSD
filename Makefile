@@ -6,17 +6,17 @@
 #   include/          public HAL and kernel interfaces
 #   src/hal/          HAL and board support implementation
 #   src/kern/         platform-neutral kernel services
-#   src/noct/         temporary in-kernel Noct integration
+#   userland/        statically linked user programs and their libc glue
+#   userland/noct/   zedBSD Noct runtime, integration, and upstream submodule
 #   libc/             freestanding libc subset
 #   softfloat/        soft-float support built from vendor GCC/musl sources
 #   platform/<arch>/  per-architecture targets (IPLs, stages, console)
-#   apps/             Noct programs shipped on the boot volume
-#   noct/             NoctLang submodule
+#   apps/             generic Noct programs shipped on the boot volume
 #
 # Architecture selection: `make ARCH=pc98` or `./build.sh all pc98`.  Each
 # architecture provides platform/<arch>/platform.mk and its artifacts land
 # in build/<arch>/.  Architecture-neutral host artifacts stay shared at the
-# top of build/ (build/host-noct, build/remacs, build/releases).
+# top of build/ (build/host-noct, build/releases).
 
 AS := as
 LD := ld
@@ -104,15 +104,15 @@ $(BUILD)/tests/env-host-test: tests/env-host-test.c src/kern/env.c
 	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc src/kern/env.c $< -o $@
 
 $(BUILD)/tests/noct-memory-host-test: tests/noct-memory-host-test.c \
-	src/noct/memory.c
+	userland/noct/integration/memory.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc src/noct/memory.c $< -o $@
+	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc userland/noct/integration/memory.c $< -o $@
 
 $(BUILD)/tests/user-noct-memory-host-test: \
-	tests/user-noct-memory-host-test.c user/noct/memory.c
+	tests/user-noct-memory-host-test.c userland/noct/runtime/memory.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc \
-		user/noct/memory.c $< -o $@
+		userland/noct/runtime/memory.c $< -o $@
 
 $(BUILD)/tests/heap-context-host-test: tests/heap-context-host-test.c \
 	libc/heap.c

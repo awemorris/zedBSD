@@ -2,7 +2,7 @@
 #include <zedbsd/process.h>
 #include <zedbsd/console.h>
 #include <zedbsd/system.h>
-#include "user/sh/applet.h"
+#include "userland/sh/applet.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -525,7 +525,7 @@ command(char *text)
 		int i;
 		if (getenv("REMACS_SKK_DICT") == NULL)
 			(void)setenv("REMACS_SKK_DICT", "/home/skkjisyo.dic", 1);
-		args[0] = "/apps/remacs.nap";
+		args[0] = "/apps/emacs.nap";
 		for (i = 1; i < argc && i < ARG_MAX; i++)
 			args[i] = argv[i];
 		return run_noct(argc, args);

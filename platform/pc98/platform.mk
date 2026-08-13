@@ -128,15 +128,15 @@ USER-STACK-GUARD.ELF: $(BUILD)/USER-STACK-GUARD.ELF
 
 $(NOCT_BUILD_DIR)/beui-pc98-cirrus.o: NOCT_CFLAGS := $(CIRRUS_NOCT_CFLAGS)
 
-NOCT_GLUE_OBJS := $(BUILD)/src/noct/noct.o $(BUILD)/src/noct/napi.o \
-	$(BUILD)/src/noct/target.o
+NOCT_GLUE_OBJS := $(BUILD)/userland/noct/integration/noct.o $(BUILD)/userland/noct/integration/napi.o \
+	$(BUILD)/userland/noct/integration/target.o
 $(NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
 $(NOCT_GLUE_OBJS): OBJ_CFLAGS = $(NOCT_CFLAGS)
 $(BUILD)/src/kern/pc98/graphics.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
 $(BUILD)/src/kern/pc98/graphics.o: OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
-$(BUILD)/src/noct/platform.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) \
+$(BUILD)/userland/noct/integration/platform.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) \
 	$(ZEDBSD_LIBC_CPPFLAGS)
-$(BUILD)/src/noct/platform.o: OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
+$(BUILD)/userland/noct/integration/platform.o: OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
 
 STAGE2_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 
@@ -216,7 +216,7 @@ $(BUILD)/ipl-part.img: $(BUILD)/partition-pbr.bin
 # ----------------------------------------------------------------------
 # Stage 2 (vmunix) and the applet container.
 
-USER_LIBC_OBJS := $(BUILD)/user/crt0.o $(BUILD)/user/libc/posix.o \
+USER_LIBC_OBJS := $(BUILD)/userland/crt0.o $(BUILD)/userland/libc/posix.o \
 	$(BUILD)/libc/heap.o $(BUILD)/libc/string.o $(BUILD)/libc/ctype.o \
 	$(BUILD)/libc/int64.o $(BUILD)/libc/strto.o $(BUILD)/libc/format.o \
 	$(BUILD)/libc/stdio.o
@@ -225,32 +225,31 @@ USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-mno-mmx -mno-sse -mno-sse2
 USER_STACK_LDFLAGS := -z stack-size=0x100000
 USER_ELF_CHECK := $(SCRIPTS_DIR)/check-user-elf.py
-$(BUILD)/user/libc/posix.o $(BUILD)/user/tests/syscall-smoke.o: \
+$(BUILD)/userland/libc/posix.o $(BUILD)/userland/tests/syscall-smoke.o: \
 	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(BUILD)/user/libc/posix.o $(BUILD)/user/tests/syscall-smoke.o: \
+$(BUILD)/userland/libc/posix.o $(BUILD)/userland/tests/syscall-smoke.o: \
 	OBJ_CFLAGS = $(USER_CFLAGS)
 
-$(BUILD)/INIT.ELF: $(USER_LIBC_OBJS) $(BUILD)/user/tests/syscall-smoke.o \
+$(BUILD)/INIT.ELF: $(USER_LIBC_OBJS) $(BUILD)/userland/tests/syscall-smoke.o \
 	$(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
 		$(USER_STACK_LDFLAGS) \
 		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) \
-		$(BUILD)/user/tests/syscall-smoke.o -o $@
+		$(BUILD)/userland/tests/syscall-smoke.o -o $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_NOCT_GLUE_OBJS := $(BUILD)/user/noct/main.o \
-	$(BUILD)/user/noct/memory.o \
-	$(BUILD)/user/noct/platform.o $(BUILD)/user/noct/napi.o \
-	$(BUILD)/user/noct/target.o $(BUILD)/user/noct/env.o
+USER_NOCT_GLUE_OBJS := $(BUILD)/userland/noct/runtime/main.o \
+	$(BUILD)/userland/noct/runtime/memory.o \
+	$(BUILD)/userland/noct/runtime/platform.o \
+	$(BUILD)/userland/noct/runtime/env.o \
+	$(BUILD)/userland/noct/integration/napi.o \
+	$(BUILD)/userland/noct/integration/target.o
 $(USER_NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
 $(USER_NOCT_GLUE_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
-$(BUILD)/user/noct/napi.o: src/noct/napi.c
+$(BUILD)/userland/noct/integration/napi.o: userland/noct/integration/napi.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
-$(BUILD)/user/noct/target.o: src/noct/target.c
-	@mkdir -p $(dir $@)
-	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
-$(BUILD)/user/noct/env.o: src/kern/env.c
+$(BUILD)/userland/noct/integration/target.o: userland/noct/integration/target.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
@@ -269,7 +268,7 @@ $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 	cp $< $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_SH_OBJS := $(BUILD)/user/sh/main.o $(BUILD)/user/sh/applet.o
+USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o
 $(USER_SH_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_SH_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 
@@ -283,7 +282,7 @@ $(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_BOOTLINUX_OBJS := $(BUILD)/user/bootlinux/main.o
+USER_BOOTLINUX_OBJS := $(BUILD)/userland/bootlinux/main.o
 $(USER_BOOTLINUX_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_BOOTLINUX_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 
@@ -375,7 +374,7 @@ $(BUILD)/hdd-test.img: all $(SCRIPTS_DIR)/make-hdd-image.sh \
 hdd-image: $(BUILD)/hdd-test.img
 
 hdd-boot-qemu-test:
-	$(SCRIPTS_DIR)/test-hdd-boot.sh
+	$(SCRIPTS_DIR)/test-hdd-bare.sh
 
 .PHONY: hdd-image hdd-boot-qemu-test
 
@@ -397,7 +396,7 @@ $(BUILD)/tests/beui-pc98-cirrus-host-test: \
 	$(BEUI_TEST_CC) $(NOCT_ROOT)/src/api/beui-pc98-cirrus.c $< -o $@
 
 $(BUILD)/tests/noct-host-test: tests/noct-host-test.c \
-	apps/ls.nct apps/cp.nct src/noct/noct-m6-script.h \
+	apps/ls.nct apps/cp.nct userland/noct/integration/noct-m6-script.h \
 	$(NOCT_GLUE_OBJS) $(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
 	$(BUILD)/src/kern/namespace.o \
 	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/inode.o \
@@ -466,7 +465,7 @@ CHECK_RUN_TARGETS += noct-host-test hal-pc98-compile kern-compile
 # ----------------------------------------------------------------------
 # Milestone and QEMU verification chains.
 
-noct-m4-opcode-check: $(BUILD)/src/noct/noct.o $(BUILD)/src/noct/platform.o
+noct-m4-opcode-check: $(BUILD)/userland/noct/integration/noct.o $(BUILD)/userland/noct/integration/platform.o
 	@if $(NOCT_OBJDUMP) -d --no-show-raw-insn $^ | \
 		grep -E '(^[[:space:]]*[0-9a-f]+:[[:space:]]+f[a-z0-9]+[[:space:]])|\b(bswap|cmpxchg|xadd|cmov[a-z]*|rdtsc|ud2|cpuid|fx[a-z]+|movaps|movups|xmm[0-9]|ymm[0-9]|zmm[0-9])\b'; then \
 		echo "ERROR: M4 glue contains a post-i386 opcode" >&2; \
@@ -585,32 +584,17 @@ beui-g2c-verify: beui-g2b-verify \
 	beui-menu-cirrus-qemu-test beui-menu-gdc-qemu-test
 	@echo "zedBSD BeUI G2c verification: PASS (CGROM text and keyboard menu)"
 
-autoexec-remacs-qemu-test: $(BUILD)/vmunix
-	$(SCRIPTS_DIR)/test-autoexec-remacs.sh
-
-linux-handoff-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/linux
-	$(SCRIPTS_DIR)/test-linux-handoff.sh
-
-beui-g4-verify: beui-g2c-verify term-japanese-qemu-test \
-	autoexec-remacs-qemu-test
-	@echo "zedBSD BeUI G4 verification: PASS (menu.nct to Remacs)"
+beui-g4-verify: beui-g2c-verify term-japanese-qemu-test
+	@echo "zedBSD BeUI G4 verification: PASS (user-process menu and Japanese text)"
 
 beui-input-qemu-test: $(BUILD)/vmunix
 	$(SCRIPTS_DIR)/test-beui-input.sh
 
-beui-holoris-cirrus-qemu-test: $(BUILD)/vmunix
-	$(SCRIPTS_DIR)/test-beui-holoris.sh
-
-beui-holoris-gdc-qemu-test: $(BUILD)/vmunix
-	ZEDBSD_HOLORIS_MACHINE=pc9801 ZEDBSD_HOLORIS_TEST_TAG=holoris-gdc \
-		$(SCRIPTS_DIR)/test-beui-holoris.sh
-
 swap-lowmem-qemu-test: $(BUILD)/vmunix $(BUILD)/USER-SWAP.ELF
 	$(SCRIPTS_DIR)/test-swap-lowmem.sh
 
-beui-g5-verify: beui-g4-verify beui-input-qemu-test \
-	beui-holoris-cirrus-qemu-test beui-holoris-gdc-qemu-test
-	@echo "zedBSD BeUI G5 verification: PASS (BeUI-only input and Holoris)"
+beui-g5-verify: beui-g4-verify beui-input-qemu-test
+	@echo "zedBSD BeUI G5 verification: PASS (BeUI-only input)"
 
 .PHONY: noct-host-test noct-m4-opcode-check noct-m4-verify \
 	ide-multidrive-qemu-test \
@@ -621,7 +605,5 @@ beui-g5-verify: beui-g4-verify beui-input-qemu-test \
 	noct-repl-qemu-test term-japanese-qemu-test noct-m15-verify \
 	noct-m17-verify beui-g1-verify beui-gdc-qemu-test beui-g2a-verify \
 	beui-cirrus-qemu-test beui-g2b-verify beui-menu-cirrus-qemu-test \
-	beui-menu-gdc-qemu-test beui-g2c-verify autoexec-remacs-qemu-test \
-	linux-handoff-qemu-test \
-	beui-g4-verify beui-input-qemu-test beui-holoris-cirrus-qemu-test \
-	beui-holoris-gdc-qemu-test beui-g5-verify swap-lowmem-qemu-test
+	beui-menu-gdc-qemu-test beui-g2c-verify beui-g4-verify \
+	beui-input-qemu-test beui-g5-verify swap-lowmem-qemu-test

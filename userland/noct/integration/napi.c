@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include "noct/napi.h"
+#include <userland/noct/integration/napi.h>
 #include "kern/noct.h"
-#include "noct/memory.h"
+#include <userland/noct/integration/memory.h>
 #include "kern/env.h"
 #include "libc/heap.h"
 

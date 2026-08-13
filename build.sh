@@ -34,8 +34,7 @@ Build commands:
 Test commands:
   check                       Build and run all host tests
   hdd-boot-qemu-test          Test HDD boot in QEMU
-  autoexec-remacs-qemu-test   Test the graphical menu and Remacs
-  linux-handoff-qemu-test     Test Linux handoff
+  hdd-boot-qemu-test          Test a bare zedBSD image and /bin/sh
 
 Maintenance commands:
   clean           Remove build/<platform>

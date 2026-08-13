@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "user/noct/memory.h"
+#include "userland/noct/runtime/memory.h"
 
 #include <limits.h>
 #include <string.h>

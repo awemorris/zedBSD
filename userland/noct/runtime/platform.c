@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "user/noct/zedbsd-api.h"
+#include "userland/noct/runtime/zedbsd-api.h"
 
 #include <zedbsd/console.h>
 #include <zedbsd/dirent.h>

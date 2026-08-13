@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include "noct/memory.h"
+#include <userland/noct/integration/memory.h>
 
 #include <stdint.h>
 

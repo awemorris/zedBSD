@@ -7,9 +7,9 @@
 #include "kern/noct.h"
 #include "hal/hal.h"
 #include <noct/beui.h>
-#include "noct/memory.h"
-#include "noct/napi.h"
-#include "noct/noct-m6-script.h"
+#include <userland/noct/integration/memory.h>
+#include <userland/noct/integration/napi.h>
+#include <userland/noct/integration/noct-m6-script.h>
 #include "kern/env.h"
 #include "kern/fs.h"
 #include "libc/heap.h"

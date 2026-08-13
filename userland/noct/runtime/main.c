@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "user/noct/zedbsd-api.h"
-#include "user/noct/memory.h"
+#include "userland/noct/runtime/zedbsd-api.h"
+#include "userland/noct/runtime/memory.h"
 #include "libc/heap.h"
 
 #include <noct/noct.h>

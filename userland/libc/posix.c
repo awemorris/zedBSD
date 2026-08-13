@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "user/libc/syscall.h"
+#include "userland/libc/syscall.h"
 #include "libc/heap.h"
 
 #include <zedbsd/dirent.h>

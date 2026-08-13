@@ -696,11 +696,11 @@ int command(char *s)
 		const char *dictionary = zedbsd_env_get(&boot_environment,
 						      "REMACS_SKK_DICT");
 
-		/* The 8.3 path is present in every zedBSD image with REMACS.NAP. */
+		/* The 8.3 path is present in linux-pc98 product image with EMACS.NAP. */
 		if (dictionary == NULL || dictionary[0] == '\0')
 			(void)zedbsd_env_set(&boot_environment, "REMACS_SKK_DICT",
 					     "HOME/SKKJISYO.DIC");
-		return run_noct_application("REMACS", ".NAP", 0, n - 1, &v[1]);
+		return run_noct_application("EMACS", ".NAP", 0, n - 1, &v[1]);
 	}
 	/* Unknown unqualified names resolve to NAME.NCT on the selected BOOT
 	 * filesystem.  C built-ins above always retain precedence, including

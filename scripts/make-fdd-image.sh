@@ -20,7 +20,9 @@ for command in mformat mcopy mattrib mmd python3; do
 done
 
 "$repo/build.sh" "build/$arch/fdd-ipl.bin" "$arch" \
-	"build/$arch/IO.SYS" "build/$arch/vmunix"
+	"build/$arch/IO.SYS" "build/$arch/vmunix" \
+	"build/$arch/bin/sh" "build/$arch/bin/noct" \
+	"build/$arch/bin/linux"
 
 # Stage 1 lives raw in the reserved sectors 3..16.
 io_sys_size="$(stat -c %s "$build/IO.SYS")"
@@ -56,9 +58,11 @@ dd if="$build/IO.SYS" of="$output" bs=512 seek=2 conv=notrunc status=none
 
 mcopy -i "$output" "$build/vmunix" ::vmunix
 mattrib -i "$output" +r +h +s ::vmunix
-mcopy -i "$output" "$repo/apps/menu.nct" ::AUTOEXEC.NCT
+mmd -i "$output" ::BIN 2>/dev/null || true
+mcopy -i "$output" "$build/bin/sh" ::BIN/SH
+mcopy -i "$output" "$build/bin/noct" ::BIN/NOCT
+mcopy -i "$output" "$build/bin/linux" ::BIN/LINUX
 mmd -i "$output" ::APPS 2>/dev/null || true
-mmd -i "$output" ::HOME 2>/dev/null || true
 if [ -f "$repo/apps/hello.nct" ]; then
 	mcopy -i "$output" "$repo/apps/hello.nct" ::APPS/HELLO.NCT
 fi
@@ -67,20 +71,6 @@ for utility in ls.nct cp.nct; do
 		mcopy -i "$output" "$repo/apps/$utility" ::APPS/"${utility^^}"
 	fi
 done
-
-# Remacs and its SKK dictionary make the floppy a self-contained
-# pre-boot editing environment.
-remacs_nap="${REMACS_NAP:-$repo/build/remacs/REMACS.NAP}"
-remacs_skk="${REMACS_SKK_DICT:-$repo/build/remacs/SKKJISYO.DIC}"
-if [ ! -s "$remacs_nap" ]; then
-	"$repo/scripts/build-remacs-bytecode.sh"
-fi
-test -s "$remacs_nap" || {
-	echo "Remacs bytecode not found: $remacs_nap" >&2
-	exit 1
-}
-mcopy -i "$output" "$remacs_nap" ::APPS/REMACS.NAP
-mcopy -i "$output" "$remacs_skk" ::HOME/SKKJISYO.DIC
 
 sha256sum "$output"
 printf 'zedBSD FDD image: %s\n' "$output"

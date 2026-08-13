@@ -12,10 +12,10 @@
 #include "kern/noct.h"
 #include "kern/file.h"
 #include "kern/vfs.h"
-#include "noct/memory.h"
-#include "noct/napi.h"
-#include "noct/noct-m6-script.h"
-#include "noct/platform.h"
+#include <userland/noct/integration/memory.h>
+#include <userland/noct/integration/napi.h>
+#include <userland/noct/integration/noct-m6-script.h>
+#include <userland/noct/integration/platform.h>
 #include "kern/namespace.h"
 #include "libc/stdio-fs.h"
 

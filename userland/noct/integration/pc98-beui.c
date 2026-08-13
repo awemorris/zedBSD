@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "noct/pc98-beui.h"
-#include "noct/platform.h"
+#include <userland/noct/integration/pc98-beui.h>
+#include <userland/noct/integration/platform.h>
 #include "hal/i386/bsp-pc98/display.h"
 #include "kern/platform.h"
 #include <hal/hal.h>

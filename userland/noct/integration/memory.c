@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include "noct/memory.h"
+#include <userland/noct/integration/memory.h>
 
 #define KIB (1024U)
 #define MIB (1024U * KIB)

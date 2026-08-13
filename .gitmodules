@@ -1,5 +1,5 @@
-[submodule "noct"]
-	path = noct
+[submodule "userland/noct/noct-upstream"]
+	path = userland/noct/noct-upstream
 	url = https://github.com/awemorris/NoctLang.git
 [submodule "vendor/gcc"]
 	path = vendor/gcc

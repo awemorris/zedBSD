@@ -6,10 +6,9 @@ arch="${ZEDBSD_ARCH:-pc98}"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 vmunix_image="${ZEDBSD_VMUNIX_IMAGE:-$build/vmunix}"
 shell_image="${ZEDBSD_SH_IMAGE:-$build/bin/sh}"
-zinit_rc="${ZEDBSD_ZINIT_RC:-$repo/etc/zinit.rc}"
-menu_script="${ZEDBSD_MENU:-$repo/apps/menu.nct}"
-menu_background="${ZEDBSD_MENU_BACKGROUND:-$repo/apps/menuback.bmp}"
-zinit_disable="${ZEDBSD_ZINIT_DISABLE:-0}"
+# Optional test/image customization hook.  Standard zedBSD images leave this
+# empty and therefore enter /bin/sh without an automatic startup script.
+zinit_rc="${ZEDBSD_ZINIT_RC:-}"
 partition="${BOOT_PARTITION:-0}"
 install_disk_stubs="${INSTALL_DISK_STUBS:-0}"
 while test "$#" -gt 0; do
@@ -65,10 +64,6 @@ esac
 case "$swap_size_mib" in
 	0 | 32 | 64) ;;
 	*) echo "ZEDBSD_SWAP_SIZE_MIB must be 0, 32, or 64" >&2; exit 2 ;;
-esac
-case "$zinit_disable" in
-	0 | 1) ;;
-	*) echo "ZEDBSD_ZINIT_DISABLE must be 0 or 1" >&2; exit 2 ;;
 esac
 for command in dd mattrib mcopy mformat mmd python3; do
 	command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
@@ -266,24 +261,12 @@ test -s "$build/bin/linux" || { echo "Linux loader ELF not found: $build/bin/lin
 mcopy -o -i "$image@@$offset" "$shell_image" ::BIN/SH
 mcopy -o -i "$image@@$offset" "$build/bin/noct" ::BIN/NOCT
 mcopy -o -i "$image@@$offset" "$build/bin/linux" ::BIN/LINUX
-if test "$zinit_disable" = 0; then
+if test -n "$zinit_rc"; then
 	test -f "$zinit_rc" || { echo "zinit.rc not found: $zinit_rc" >&2; exit 1; }
-	test -f "$menu_script" || { echo "menu.nct not found: $menu_script" >&2; exit 1; }
-	test -f "$menu_background" || { echo "menu background not found: $menu_background" >&2; exit 1; }
 	mmd -i "$image@@$offset" ::ETC 2>/dev/null || true
 	mcopy -o -i "$image@@$offset" "$zinit_rc" ::ETC/ZINIT.RC
-	mcopy -o -i "$image@@$offset" "$menu_script" ::BIN/MENU.NCT
-	mcopy -o -i "$image@@$offset" "$menu_background" ::BIN/MENUBACK.BMP
 fi
 mmd -i "$image@@$offset" ::APPS 2>/dev/null || true
-mmd -i "$image@@$offset" ::HOME 2>/dev/null || true
-if test -n "${ZEDBSD_AUTOEXEC:-}"; then
-	test -f "$ZEDBSD_AUTOEXEC" || {
-		echo "AUTOEXEC.NCT not found: $ZEDBSD_AUTOEXEC" >&2
-		exit 1
-	}
-	mcopy -o -i "$image@@$offset" "$ZEDBSD_AUTOEXEC" ::AUTOEXEC.NCT
-fi
 if test -f "$repo/apps/hello.nct"; then
 	mcopy -o -i "$image@@$offset" "$repo/apps/hello.nct" ::APPS/HELLO.NCT
 fi
@@ -302,31 +285,6 @@ test -s "$bmpview_nap" || {
 	exit 1
 }
 mcopy -o -i "$image@@$offset" "$bmpview_nap" ::APPS/BMPVIEW.NAP
-holoris_nap="${HOLORIS_NAP:-$repo/build/holoris/HOLORIS.NAP}"
-if test ! -s "$holoris_nap" ||
-   test "$repo/apps/holoris.nct" -nt "$holoris_nap"; then
-	"$repo/scripts/build-holoris-bytecode.sh"
-fi
-test -s "$holoris_nap" || {
-	echo "Holoris bytecode not found: $holoris_nap" >&2
-	exit 1
-}
-mcopy -o -i "$image@@$offset" "$holoris_nap" ::APPS/HOLORIS.NAP
-remacs_nap="${REMACS_NAP:-$repo/build/remacs/REMACS.NAP}"
-remacs_skk="${REMACS_SKK_DICT:-$repo/build/remacs/SKKJISYO.DIC}"
-if test ! -s "$remacs_nap"; then
-	"$repo/scripts/build-remacs-bytecode.sh"
-fi
-test -s "$remacs_nap" || {
-	echo "Remacs bytecode not found: $remacs_nap" >&2
-	exit 1
-}
-mcopy -o -i "$image@@$offset" "$remacs_nap" ::APPS/REMACS.NAP
-test -s "$remacs_skk" || {
-	echo "Remacs SKK dictionary not found: $remacs_skk" >&2
-	exit 1
-}
-mcopy -o -i "$image@@$offset" "$remacs_skk" ::HOME/SKKJISYO.DIC
 if test -n "$kernel"; then
 	mcopy -o -i "$image@@$offset" "$kernel" ::VMLINUX
 fi
@@ -349,10 +307,6 @@ if test -f "$repo/platform/pc98/dos/inst.exe"; then
 	mcopy -o -i "$image@@$offset" "$build/ipl-lba0.img" ::INST/IPL-LBA0.IMG
 	mcopy -o -i "$image@@$offset" "$build/ipl-lba2.img" ::INST/IPL-LBA2.IMG
 	mcopy -o -i "$image@@$offset" "$build/ipl-part.img" ::INST/IPL-PART.IMG
-fi
-if test -n "${BOOT_LOGO:-}"; then
-	test -f "$BOOT_LOGO" || { echo "Boot logo not found: $BOOT_LOGO" >&2; exit 1; }
-	mcopy -o -i "$image@@$offset" "$BOOT_LOGO" ::LOGO.RAW
 fi
 if test -n "${ZEDBSD_FILES:-}"; then
 	for file in "$ZEDBSD_FILES"/*; do

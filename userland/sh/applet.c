@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "user/sh/applet.h"
+#include "userland/sh/applet.h"
 
 #include <zedbsd/applet.h>
 #include <fcntl.h>
