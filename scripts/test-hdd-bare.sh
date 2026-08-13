@@ -26,7 +26,7 @@ mkdir -p "$work"
 # The test image has one partition beginning at cylinder 1 (H=8, S=17).
 fat_offset=$((8 * 17 * 512))
 for absent in ::ETC/ZINIT.RC ::BIN/MENU.NCT ::BIN/MENUBACK.BMP \
-    ::APPS/HOLORIS.NCT ::APPS/HOLORIS.NAP ::APPS/EMACS.NAP \
+    ::APPS/HOLORIS.NAP ::APPS/EMACS.NAP \
     ::HOME/SKKJISYO.DIC; do
 	if mdir -i "$image@@$fat_offset" "$absent" >/dev/null 2>&1; then
 		echo "bare image unexpectedly contains $absent" >&2

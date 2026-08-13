@@ -275,6 +275,12 @@ if test -n "$zinit_rc"; then
 	mcopy -o -i "$image@@$offset" "$zinit_rc" ::ETC/ZINIT.RC
 fi
 ensure_directory ::APPS
+holoris="$repo/userland/noct/noct-upstream/apps/holoris/holoris.noct"
+test -s "$holoris" || {
+	echo "Holoris Noct source not found: $holoris" >&2
+	exit 1
+}
+mcopy -o -i "$image@@$offset" "$holoris" ::APPS/HOLORIS.NCT
 if test -f "$repo/apps/hello.nct"; then
 	mcopy -o -i "$image@@$offset" "$repo/apps/hello.nct" ::APPS/HELLO.NCT
 fi

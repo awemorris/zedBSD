@@ -132,6 +132,9 @@ def check(args: argparse.Namespace) -> None:
     if args.noct and extracted_hash(args.image, "bin/noct") != \
             hashlib.sha256(args.noct.read_bytes()).digest():
         fail("/bin/noct differs from the input executable")
+    if args.holoris and extracted_hash(args.image, "apps/holoris.nct") != \
+            hashlib.sha256(args.holoris.read_bytes()).digest():
+        fail("/apps/holoris.nct differs from the input script")
     print("Unified BIOS image check: PASS "
           f"(PC-98 ZBL2 {pc98_count} sectors, PC/AT ZBL2 {pcat_count} sectors)")
 
@@ -141,6 +144,7 @@ def main() -> None:
     parser.add_argument("--pc98-kernel", type=Path)
     parser.add_argument("--pcat-kernel", type=Path)
     parser.add_argument("--noct", type=Path)
+    parser.add_argument("--holoris", type=Path)
     parser.add_argument("image", type=Path)
     check(parser.parse_args())
 

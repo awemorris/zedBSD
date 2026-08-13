@@ -123,17 +123,20 @@ bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
+	$(BUILD)/bin/noct $(HOLORIS_NOCT) \
 	$(SCRIPTS_DIR)/make-bios-hdd-image.py \
 	$(SCRIPTS_DIR)/check-bios-hdd-image.py
 	$(PYTHON) $(SCRIPTS_DIR)/make-bios-hdd-image.py --force \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
-		--shell $(BUILD)/bin/sh $@
+		--shell $(BUILD)/bin/sh --noct $(BUILD)/bin/noct \
+		--holoris $(HOLORIS_NOCT) $@
 
 bios-hdd-image: $(BUILD)/bios-hdd-image.img
 bios-loader-host-check: $(BUILD)/bios-hdd-image.img
 	$(PYTHON) $(SCRIPTS_DIR)/check-bios-hdd-image.py --machine pcat \
-		--kernel $(BUILD)/vmunix $<
+		--kernel $(BUILD)/vmunix --noct $(BUILD)/bin/noct \
+		--holoris $(HOLORIS_NOCT) $<
 
 bios-loader-qemu-test: bios-bootloader \
 	$(BUILD)/bootloader/payload32.elf $(BUILD)/bootloader/payload64.elf

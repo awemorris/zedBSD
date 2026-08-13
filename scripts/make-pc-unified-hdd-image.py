@@ -84,6 +84,9 @@ def create(args: argparse.Namespace) -> None:
     for path in inputs:
         if not path.is_file():
             raise SystemExit(f"missing input: {path}")
+    for path in (args.shell, args.noct, args.holoris):
+        if path is not None and not path.is_file():
+            raise SystemExit(f"missing input: {path}")
     if args.output.exists() and not args.force:
         raise SystemExit(f"output exists (use --force): {args.output}")
 
@@ -156,11 +159,16 @@ def create(args: argparse.Namespace) -> None:
                 run("mmd", "-i", f"{temporary}@@{offset}", "::/bin")
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.noct),
                 "::/bin/noct")
+        if args.holoris:
+            run("mmd", "-i", f"{temporary}@@{offset}", "::/apps")
+            run("mcopy", "-i", f"{temporary}@@{offset}",
+                str(args.holoris), "::/apps/holoris.nct")
 
         checker = Path(__file__).with_name("check-pc-unified-hdd-image.py")
         run("python3", str(checker), "--pc98-kernel",
             str(args.pc98_kernel), "--pcat-kernel", str(args.pcat_kernel),
             *(["--noct", str(args.noct)] if args.noct else []),
+            *(["--holoris", str(args.holoris)] if args.holoris else []),
             str(temporary))
         os.replace(temporary, args.output)
     finally:
@@ -179,6 +187,7 @@ def main() -> None:
     parser.add_argument("--pcat-kernel", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
     parser.add_argument("--noct", type=Path)
+    parser.add_argument("--holoris", type=Path)
     parser.add_argument("--size-mib", type=int, default=129)
     parser.add_argument("--fragment-kernels", action="store_true")
     parser.add_argument("--force", action="store_true")

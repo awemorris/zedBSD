@@ -7,6 +7,7 @@
 # bison are not build dependencies.
 
 NOCT_ROOT ?= userland/noct/noct-upstream
+HOLORIS_NOCT := $(NOCT_ROOT)/apps/holoris/holoris.noct
 NOCT_ENABLE_JIT ?= 1
 NOCT_OPTIMIZE_LEVEL ?= 1
 # Compile every zedBSD build with the largest supported reservation.  The

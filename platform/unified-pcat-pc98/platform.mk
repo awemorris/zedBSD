@@ -15,7 +15,8 @@ $(UNIFIED_PLATFORM_IMAGE): $(UNIFIED_CANONICAL_IMAGE)
 	$(PYTHON) $(SCRIPTS_DIR)/check-pc-unified-hdd-image.py \
 		--pc98-kernel build/pc-unified/vmunix.98 \
 		--pcat-kernel build/pc-unified/vmunix.at \
-		--noct build/pc-unified/noct $@
+		--noct build/pc-unified/noct \
+		--holoris $(HOLORIS_NOCT) $@
 
 hdd-image: $(UNIFIED_PLATFORM_IMAGE)
 	@echo "Unified PC/AT + PC-98 HDD image: $(UNIFIED_PLATFORM_IMAGE)"

@@ -98,14 +98,22 @@ def check(args: argparse.Namespace) -> None:
         if struct.unpack_from("<H", bpb, 22)[0] == 0:
             fail("volume is not FAT12/16")
 
+    expected_files = (("VMUNIX", args.kernel, "VMUNIX"),
+                      ("bin/noct", args.noct, "/bin/noct"),
+                      ("apps/holoris.nct", args.holoris,
+                       "/apps/holoris.nct"))
     with tempfile.TemporaryDirectory() as directory:
-        extracted = Path(directory) / "VMUNIX"
-        subprocess.run(["mcopy", "-n", "-i", f"{image}@@{start * 512}",
-                        "::VMUNIX", str(extracted)], check=True,
-                       stdout=subprocess.DEVNULL)
-        if args.kernel and hashlib.sha256(extracted.read_bytes()).digest() != \
-                hashlib.sha256(args.kernel.read_bytes()).digest():
-            fail("VMUNIX content differs from the input kernel")
+        for image_name, source, label in expected_files:
+            if source is None:
+                continue
+            extracted = Path(directory) / image_name.replace("/", "-")
+            subprocess.run(["mcopy", "-n", "-i",
+                            f"{image}@@{start * 512}",
+                            f"::{image_name}", str(extracted)], check=True,
+                           stdout=subprocess.DEVNULL)
+            if hashlib.sha256(extracted.read_bytes()).digest() != \
+                    hashlib.sha256(source.read_bytes()).digest():
+                fail(f"{label} content differs from the input file")
     print(f"BIOS image check: PASS ({args.machine}, partition {index}, "
           f"Stage 2 {sectors} sectors)")
 
@@ -114,6 +122,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--machine", choices=sorted(MACHINES), required=True)
     parser.add_argument("--kernel", type=Path)
+    parser.add_argument("--noct", type=Path)
+    parser.add_argument("--holoris", type=Path)
     parser.add_argument("image", type=Path)
     check(parser.parse_args())
 

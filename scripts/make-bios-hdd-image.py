@@ -30,6 +30,9 @@ def create(args: argparse.Namespace) -> None:
     for path in (args.stage1, args.stage2, args.kernel):
         if not path.is_file():
             raise SystemExit(f"missing input: {path}")
+    for path in (args.shell, args.noct, args.holoris):
+        if path is not None and not path.is_file():
+            raise SystemExit(f"missing input: {path}")
     if args.output.exists() and not args.force:
         raise SystemExit(f"output exists (use --force): {args.output}")
     total_sectors = args.size_mib * 2048
@@ -90,13 +93,24 @@ def create(args: argparse.Namespace) -> None:
         else:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.kernel),
                 "::VMUNIX")
-        if args.shell:
+        if args.shell or args.noct:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/bin")
+        if args.shell:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.shell),
                 "::/bin/sh")
+        if args.noct:
+            run("mcopy", "-i", f"{temporary}@@{offset}", str(args.noct),
+                "::/bin/noct")
+        if args.holoris:
+            run("mmd", "-i", f"{temporary}@@{offset}", "::/apps")
+            run("mcopy", "-i", f"{temporary}@@{offset}",
+                str(args.holoris), "::/apps/holoris.nct")
         checker = Path(__file__).with_name("check-bios-hdd-image.py")
         run("python3", str(checker), "--machine", args.machine,
-            "--kernel", str(args.kernel), str(temporary))
+            "--kernel", str(args.kernel),
+            *(["--noct", str(args.noct)] if args.noct else []),
+            *(["--holoris", str(args.holoris)] if args.holoris else []),
+            str(temporary))
         os.replace(temporary, args.output)
     finally:
         if temporary.exists():
@@ -110,6 +124,8 @@ def main() -> None:
     parser.add_argument("--stage2", type=Path, required=True)
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
+    parser.add_argument("--noct", type=Path)
+    parser.add_argument("--holoris", type=Path)
     parser.add_argument("--size-mib", type=int, default=129)
     parser.add_argument("--fragment-kernel", action="store_true")
     parser.add_argument("--force", action="store_true")

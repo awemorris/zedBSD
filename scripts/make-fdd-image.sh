@@ -63,6 +63,12 @@ mcopy -i "$output" "$build/bin/sh" ::BIN/SH
 mcopy -i "$output" "$build/bin/noct" ::BIN/NOCT
 mcopy -i "$output" "$build/bin/linux" ::BIN/LINUX
 mmd -i "$output" ::APPS 2>/dev/null || true
+holoris="$repo/userland/noct/noct-upstream/apps/holoris/holoris.noct"
+test -s "$holoris" || {
+	echo "Holoris Noct source not found: $holoris" >&2
+	exit 1
+}
+mcopy -i "$output" "$holoris" ::APPS/HOLORIS.NCT
 if [ -f "$repo/apps/hello.nct" ]; then
 	mcopy -i "$output" "$repo/apps/hello.nct" ::APPS/HELLO.NCT
 fi
