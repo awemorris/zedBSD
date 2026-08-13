@@ -262,7 +262,24 @@ test_pc98_partition_auto(void)
 	CHECK(entries[0].p_block_count == 256);
 	CHECK(strcmp(entries[0].p_label, "mbr1") == 0);
 
-	/* Removing only the marker selects the LBA-1 native table. */
+	/* IPL1 is authoritative even when a PC/AT signature is also present. */
+	memcpy(mbr + 4, "IPL1", 4);
+	memset(native, 0, 512);
+	put_entry(native, 0, 0x80, 0, 0, 1, 0, 0, 1,
+	    16, 7, 1, "DUAL");
+	count = partition_scan(dev, entries, PARTITION_MAX);
+	CHECK(count == 16);
+	CHECK(entries[0].p_start_block == 136);
+	CHECK(strcmp(entries[0].p_label, "DUAL") == 0);
+
+	/* A partial or misplaced IPL marker must not override a signed MBR. */
+	mbr[7] = 'X';
+	count = partition_scan(dev, entries, PARTITION_MAX);
+	CHECK(count == 4);
+	CHECK(entries[0].p_start_block == 128);
+	memset(mbr + 4, 0, 4);
+
+	/* Removing only the PC/AT marker selects the LBA-1 native table. */
 	mbr[510] = 0;
 	mbr[511] = 0;
 	memset(native, 0, 512);

@@ -10,8 +10,20 @@ import tempfile
 from pathlib import Path
 
 
+SECTOR_SIZE = 512
+PC98_SECTORS = 17
+
+
 def run(*arguments: str) -> None:
     subprocess.run(arguments, check=True)
+
+
+def pc98_chs(lba: int, heads: int) -> bytes:
+    cylinder, remainder = divmod(lba, heads * PC98_SECTORS)
+    head, sector = divmod(remainder, PC98_SECTORS)
+    if cylinder > 0xFFFF:
+        raise SystemExit("partition exceeds the PC-98 CHS range")
+    return bytes((sector, head)) + struct.pack("<H", cylinder)
 
 
 def create(args: argparse.Namespace) -> None:
@@ -23,13 +35,14 @@ def create(args: argparse.Namespace) -> None:
     total_sectors = args.size_mib * 2048
     start = 2048
     blocks = total_sectors - start
+    stage2_lba = 1 if args.machine == "pcat" else 2
     if blocks <= 0:
         raise SystemExit("image is too small for the LBA 2048 partition")
     stage1 = bytearray(args.stage1.read_bytes())
     stage2 = args.stage2.read_bytes()
     if len(stage1) != 512 or stage1[510:512] != b"\x55\xaa":
         raise SystemExit("invalid Stage 1")
-    if len(stage2) % 512 or 1 + len(stage2) // 512 > start:
+    if len(stage2) % 512 or stage2_lba + len(stage2) // 512 > start:
         raise SystemExit("invalid or oversized Stage 2")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary_name = tempfile.mkstemp(prefix=args.output.name + ".",
@@ -45,7 +58,18 @@ def create(args: argparse.Namespace) -> None:
             stage1[510:512] = b"\x55\xaa"
             stream.seek(0)
             stream.write(stage1)
-            stream.seek(512)
+            if args.machine == "pc98":
+                heads = 4 if args.size_mib <= 20 else 8
+                entry = bytearray(32)
+                entry[0] = 0xA1
+                entry[1] = 0x91
+                entry[4:8] = pc98_chs(start, heads)
+                entry[8:12] = pc98_chs(start, heads)
+                entry[12:16] = pc98_chs(total_sectors - 1, heads)
+                entry[16:32] = b"BOOT".ljust(16, b" ")
+                stream.seek(SECTOR_SIZE)
+                stream.write(entry)
+            stream.seek(stage2_lba * SECTOR_SIZE)
             stream.write(stage2)
         offset = start * 512
         run("mformat", "-i", f"{temporary}@@{offset}", "-v", "BOOT", "::")

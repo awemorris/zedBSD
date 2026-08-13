@@ -9,6 +9,7 @@
 
 .set BOOTINFO, 0x0700
 .set BOOTINFO_MAGIC, 0x3150395a /* Z9P1 */
+.set PC98_STAGE2_LBA, 2
 
 _start:
 	jmp start
@@ -41,7 +42,7 @@ start:
 	jc error_sense
 
 	movw $ZBL_STAGE2_SEG, target_segment
-	movl $ZBL_STAGE2_LBA, read_lba
+	movl $PC98_STAGE2_LBA, read_lba
 	call read_one
 	jc error_disk
 
@@ -63,7 +64,7 @@ start:
 	decw %cx
 	jz loaded
 	movw $(ZBL_STAGE2_SEG + 0x20), %ax
-	movl $(ZBL_STAGE2_LBA + 1), read_lba
+	movl $(PC98_STAGE2_LBA + 1), read_lba
 load_loop:
 	movw %ax, target_segment
 	call read_one

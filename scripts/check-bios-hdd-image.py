@@ -11,10 +11,17 @@ from pathlib import Path
 
 MACHINES = {"pcat": 1, "pc98": 2}
 FAT16_TYPES = {0x04, 0x06, 0x0E}
+PC98_SECTORS = 17
 
 
 def fail(message: str) -> None:
     raise SystemExit("bios image check: " + message)
+
+
+def pc98_chs(lba: int, heads: int) -> bytes:
+    cylinder, remainder = divmod(lba, heads * PC98_SECTORS)
+    head, sector = divmod(remainder, PC98_SECTORS)
+    return bytes((sector, head)) + struct.pack("<H", cylinder)
 
 
 def check(args: argparse.Namespace) -> None:
@@ -46,7 +53,20 @@ def check(args: argparse.Namespace) -> None:
         if blocks == 0 or start + blocks > size // 512:
             fail("active partition lies outside the image")
 
-        stream.seek(512)
+        stage2_lba = 1 if args.machine == "pcat" else 2
+        if args.machine == "pc98":
+            heads = 4 if size <= 20 * 1024 * 1024 else 8
+            stream.seek(512)
+            table = stream.read(512)
+            expected = bytearray(32)
+            expected[0:2] = b"\xa1\x91"
+            expected[4:8] = pc98_chs(start, heads)
+            expected[8:12] = pc98_chs(start, heads)
+            expected[12:16] = pc98_chs(size // 512 - 1, heads)
+            expected[16:32] = b"BOOT".ljust(16, b" ")
+            if table[:32] != expected or any(table[32:]):
+                fail(f"invalid PC-98 H={heads}/S=17 partition mirror")
+        stream.seek(stage2_lba * 512)
         first = stream.read(512)
         if len(first) != 512:
             fail("missing Stage 2")
@@ -57,18 +77,18 @@ def check(args: argparse.Namespace) -> None:
             fail("invalid ZBL2 header")
         if machine != MACHINES[args.machine]:
             fail("ZBL2 machine mismatch")
-        if not 1 <= sectors <= 127 or 1 + sectors > 2048:
+        if not 1 <= sectors <= 127 or stage2_lba + sectors > 2048:
             fail("invalid ZBL2 sector count")
         if not 32 <= entry < image_size <= sectors * 512:
             fail("invalid ZBL2 size or entry")
-        stream.seek(512)
+        stream.seek(stage2_lba * 512)
         stage2 = stream.read(sectors * 512)
         total = sum(struct.unpack_from("<I", stage2, offset)[0]
                     for offset in range(0, len(stage2), 4)) & 0xFFFFFFFF
         if total:
             fail("ZBL2 checksum mismatch")
-        stream.seek((1 + sectors) * 512)
-        gap = stream.read((2048 - 1 - sectors) * 512)
+        stream.seek((stage2_lba + sectors) * 512)
+        gap = stream.read((2048 - stage2_lba - sectors) * 512)
         if any(gap):
             fail("reserved pre-partition gap is not zero")
         stream.seek(start * 512)
@@ -100,4 +120,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
