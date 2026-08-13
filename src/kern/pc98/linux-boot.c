@@ -1,5 +1,6 @@
 /* PC-98 Linux boot adapter. Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "linux-boot.h"
+#include "hal/i386/bsp-pc98/display.h"
 #include <hal/hal.h>
 #include <kern/image.h>
 #include <kern/file.h>
@@ -19,6 +20,10 @@
 #define CMD_ADDR 0x81000U
 #define PC98_ADDR 0x82000U
 #define PC98_SETUP_NODE_SIZE 32U
+#define LINUX_PROGRESS_ROWS 4U
+#define LINUX_READ_CHUNK (64U * 1024U)
+#define PC98_GDC_STRIDE 80U
+#define PC98_TEXT_ROW_HEIGHT 16U
 
 struct elf32_header {
 	uint8_t id[16];
@@ -35,6 +40,14 @@ static unsigned linux_device_count;
 static int linux_boot_device;
 static uint32_t text_done, text_total, data_done, data_total;
 static int progress_class = -1;
+static volatile uint8_t *const progress_blue =
+	(volatile uint8_t *)0x800a8000U;
+static volatile uint8_t *const progress_red =
+	(volatile uint8_t *)0x800b0000U;
+static volatile uint8_t *const progress_green =
+	(volatile uint8_t *)0x800b8000U;
+static volatile uint8_t *const progress_intensity =
+	(volatile uint8_t *)0x800e0000U;
 
 void zedbsd_pc98_jump_linux(uint32_t entry, uint32_t boot_params)
 	__attribute__((noreturn));
@@ -43,6 +56,33 @@ static uint32_t read_le32(const uint8_t *p)
 {
 	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
 	       ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static unsigned append_text(char *buffer, unsigned position, const char *text)
+{
+	while (*text != '\0' && position < HAL_CONS_COLUMNS)
+		buffer[position++] = *text++;
+	return position;
+}
+
+static unsigned append_unsigned(char *buffer, unsigned position,
+				unsigned value)
+{
+	char digits[11];
+	unsigned length = 0;
+
+	if (!value) {
+		if (position < HAL_CONS_COLUMNS)
+			buffer[position++] = '0';
+		return position;
+	}
+	while (value) {
+		digits[length++] = (char)('0' + value % 10);
+		value /= 10;
+	}
+	while (length != 0 && position < HAL_CONS_COLUMNS)
+		buffer[position++] = digits[--length];
+	return position;
 }
 
 static void write_unsigned(unsigned value)
@@ -65,6 +105,110 @@ static void write_unsigned(unsigned value)
 static unsigned kibibytes(uint32_t bytes)
 {
 	return (bytes >> 10) + !!(bytes & 1023U);
+}
+
+static void linux_ui_fill_graphics_row(unsigned row, unsigned yellow_columns)
+{
+	unsigned first = row * PC98_TEXT_ROW_HEIGHT * PC98_GDC_STRIDE;
+	unsigned last = first + PC98_TEXT_ROW_HEIGHT * PC98_GDC_STRIDE;
+	unsigned offset;
+
+	if (yellow_columns > HAL_CONS_COLUMNS)
+		yellow_columns = HAL_CONS_COLUMNS;
+	for (offset = first; offset < last; offset++) {
+		unsigned column = offset % PC98_GDC_STRIDE;
+		int yellow = column < yellow_columns;
+
+		progress_blue[offset] = yellow ? 0x00U : 0xffU;
+		progress_red[offset] = yellow ? 0xffU : 0x00U;
+		progress_green[offset] = yellow ? 0xffU : 0x00U;
+		progress_intensity[offset] = 0x00U;
+	}
+}
+
+static void linux_ui_draw_status_row(unsigned row, const char *label,
+				     uint32_t done, uint32_t total)
+{
+	char line[HAL_CONS_COLUMNS];
+	unsigned position = 2;
+
+	memset(line, ' ', sizeof(line));
+	position = append_text(line, position, label);
+	position = append_text(line, position, " ( ");
+	position = append_unsigned(line, position, kibibytes(done));
+	position = append_text(line, position, " / ");
+	position = append_unsigned(line, position, kibibytes(total));
+	(void)append_text(line, position, " KB )");
+	(void)hal_cons_write_n_at(row, 0, line, sizeof(line),
+		HAL_CONS_NORMAL_ATTRIBUTE);
+}
+
+static void linux_ui_draw_progress_bar(void)
+{
+	char row[HAL_CONS_COLUMNS];
+	char percentage_text[HAL_CONS_COLUMNS];
+	uint64_t done = (uint64_t)text_done + data_done;
+	uint64_t total = (uint64_t)text_total + data_total;
+	unsigned filled = total != 0 ?
+		(unsigned)(done * HAL_CONS_COLUMNS / total) : HAL_CONS_COLUMNS;
+	unsigned percentage = total != 0 ?
+		(unsigned)(done * 100U / total) : 100U;
+	unsigned length = 0, column;
+
+	if (filled > HAL_CONS_COLUMNS)
+		filled = HAL_CONS_COLUMNS;
+	if (percentage > 100U)
+		percentage = 100U;
+	memset(row, ' ', sizeof(row));
+	linux_ui_fill_graphics_row(3, filled);
+	(void)hal_cons_write_n_at(3, 0, row, sizeof(row),
+		HAL_CONS_NORMAL_ATTRIBUTE);
+	length = append_unsigned(percentage_text, length, percentage);
+	length = append_text(percentage_text, length, " %");
+	column = (HAL_CONS_COLUMNS - length) / 2U;
+	(void)hal_cons_write_n_at(3, column, percentage_text, length,
+		HAL_CONS_NORMAL_ATTRIBUTE);
+}
+
+static void linux_ui_show_progress(int load_class)
+{
+	if (load_class)
+		linux_ui_draw_status_row(2, "Data segment:", data_done,
+			data_total);
+	else
+		linux_ui_draw_status_row(1, "Code segment:", text_done,
+			text_total);
+	linux_ui_draw_progress_bar();
+}
+
+static void linux_ui_begin(void)
+{
+	char title[HAL_CONS_COLUMNS];
+
+	hal_cons_set_mode(HAL_CONS_FIXED_MENU);
+	hal_cons_show_cursor(0);
+	for (unsigned row = 0; row < LINUX_PROGRESS_ROWS; row++)
+		linux_ui_fill_graphics_row(row, 0);
+	(void)zedbsd_pc98_display_graphics_start();
+	memset(title, ' ', sizeof(title));
+	(void)append_text(title, 2, "Loading kernel...");
+	(void)hal_cons_write_n_at(0, 0, title, sizeof(title),
+		HAL_CONS_NORMAL_ATTRIBUTE);
+	linux_ui_draw_status_row(1, "Code segment:", 0, text_total);
+	linux_ui_draw_status_row(2, "Data segment:", 0, data_total);
+	linux_ui_draw_progress_bar();
+}
+
+static void linux_ui_failed(const char *message)
+{
+	(void)zedbsd_pc98_display_graphics_stop();
+	hal_cons_set_mode(HAL_CONS_TERMINAL);
+	if (LINUX_PROGRESS_ROWS < HAL_CONS_ROWS) {
+		hal_cons_clear_row(LINUX_PROGRESS_ROWS);
+		(void)hal_cons_set_cursor(LINUX_PROGRESS_ROWS, 0);
+	}
+	hal_cons_show_cursor(1);
+	hal_cons_write(message);
 }
 
 static void show_progress(int load_class)
@@ -169,6 +313,30 @@ static void load_progress(void *context, uint32_t bytes)
 	else
 		text_done += bytes;
 	show_progress(load_class);
+}
+
+static int file_pread_progress(struct file *file, void *buffer,
+			       uint32_t length, uint32_t offset,
+			       int load_class)
+{
+	uint32_t copied = 0;
+
+	while (copied < length) {
+		uint32_t chunk = length - copied;
+
+		if (chunk > LINUX_READ_CHUNK)
+			chunk = LINUX_READ_CHUNK;
+		if (file_pread(file, (uint8_t *)buffer + copied, chunk,
+		    (off_t)(offset + copied)) != (ssize_t)chunk)
+			return 0;
+		if (load_class)
+			data_done += chunk;
+		else
+			text_done += chunk;
+		linux_ui_show_progress(load_class);
+		copied += chunk;
+	}
+	return 1;
 }
 
 static int vmlinux_load(struct zedbsd_file *file, const char *arguments)
@@ -415,6 +583,7 @@ pc98_linux_prepare(struct file *file, const char *arguments, int boot_device,
 		pc98_linux_discard(image);
 		return ENOEXEC;
 	}
+	text_done = text_total = data_done = data_total = 0;
 	for (i = 0; i < image->header.phnum; i++) {
 		struct elf32_program_header *program = &image->programs[i];
 		if (file_pread(file, program, sizeof(*program),
@@ -440,6 +609,19 @@ pc98_linux_prepare(struct file *file, const char *arguments, int boot_device,
 		staging_size += program->filesz;
 		if (program->paddr + program->memsz > destination_end)
 			destination_end = program->paddr + program->memsz;
+		if (program->flags & 2U) {
+			if (data_total + program->filesz < data_total) {
+				pc98_linux_discard(image);
+				return E2BIG;
+			}
+			data_total += program->filesz;
+		} else {
+			if (text_total + program->filesz < text_total) {
+				pc98_linux_discard(image);
+				return E2BIG;
+			}
+			text_total += program->filesz;
+		}
 		segments++;
 	}
 	if (segments == 0 || !entry_valid || staging_size == 0 ||
@@ -453,15 +635,18 @@ pc98_linux_prepare(struct file *file, const char *arguments, int boot_device,
 		pc98_linux_discard(image);
 		return ENOMEM;
 	}
+	linux_ui_begin();
 	hal_pc98_enable_high_memory();
 	for (i = 0; i < image->header.phnum; i++) {
 		struct elf32_program_header *program = &image->programs[i];
 		if (program->type != 1)
 			continue;
-		if (file_pread(file,
+		if (!file_pread_progress(file,
 		    (void *)(image->staging.vaddr + image->staging_offsets[i]),
-		    program->filesz, program->offset) != (ssize_t)program->filesz) {
+		    program->filesz, program->offset,
+		    !!(program->flags & 2U))) {
 			pc98_linux_discard(image);
+			linux_ui_failed("Linux: staging read failed.\n");
 			return EIO;
 		}
 	}
