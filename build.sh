@@ -30,11 +30,11 @@ Build commands:
   SH              Build /bin/sh
   LINUX           Build /bin/linux
   hdd-image       Build an installable HDD image
+  grub-iso        Build the PC/AT GRUB Multiboot test ISO
 
 Test commands:
   check                       Build and run all host tests
-  hdd-boot-qemu-test          Test HDD boot in QEMU
-  hdd-boot-qemu-test          Test a bare zedBSD image and /bin/sh
+  hdd-boot-qemu-test          Test HDD boot (and PC/AT GRUB boot) in QEMU
 
 Maintenance commands:
   clean           Remove build/<platform>

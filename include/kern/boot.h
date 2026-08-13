@@ -55,11 +55,20 @@ struct zedbsd_handoff {
 	uint16_t size;
 	uint8_t device_count;
 	uint8_t boot_bios_id;
-	uint16_t reserved;
+	/* Version 2 treats these bytes as a reserved zero word and selects the
+	 * boot partition by LBA.  Version 3 uses an MBR partition index. */
+	uint8_t boot_partition_scheme;
+	uint8_t boot_partition_index;
 	uint32_t device_table;
 	uint32_t bios_gateway;
 	uint32_t boot_partition_lba;
 } __attribute__((packed));
+
+#define ZEDBSD_HANDOFF_VERSION_PC98 2U
+#define ZEDBSD_HANDOFF_VERSION_MULTIBOOT 3U
+#define ZEDBSD_PARTITION_SCHEME_LBA 0U
+#define ZEDBSD_PARTITION_SCHEME_MBR 1U
+#define ZEDBSD_BOOT_PARTITION_LBA_UNKNOWN 0xffffffffU
 
 enum zedbsd_bios_service {
 	ZEDBSD_BIOS_DISK_READ = 1,

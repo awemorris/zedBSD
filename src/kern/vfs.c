@@ -58,8 +58,14 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 
 	if (handoff == NULL)
 		return vfs_fail("handoff", EINVAL);
-	hal_printf("vfs: boot BIOS=%02X partition LBA=%u devices=%u\n",
-	    handoff->boot_bios_id, handoff->boot_partition_lba, device_count);
+	if (handoff->version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT)
+		hal_printf("vfs: boot BIOS=%02X MBR partition=%u devices=%u\n",
+		    handoff->boot_bios_id, handoff->boot_partition_index,
+		    device_count);
+	else
+		hal_printf("vfs: boot BIOS=%02X partition LBA=%u devices=%u\n",
+		    handoff->boot_bios_id, handoff->boot_partition_lba,
+		    device_count);
 	for (i = 0; i < device_count; i++)
 		if (devices[i].bios_id == handoff->boot_bios_id) {
 			boot_physical = kern_platform_block_device(&devices[i]);
@@ -122,8 +128,16 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 			    (uint32_t)entries[slot].p_data_block,
 			    (uint32_t)entries[slot].p_block_count);
 			if (physical[i] == boot_physical &&
-			    entries[slot].p_start_block ==
-			    handoff->boot_partition_lba)
+			    ((handoff->version ==
+			      ZEDBSD_HANDOFF_VERSION_MULTIBOOT &&
+			      handoff->boot_partition_scheme ==
+			      ZEDBSD_PARTITION_SCHEME_MBR &&
+			      entries[slot].p_index + 1U ==
+			      handoff->boot_partition_index) ||
+			     (handoff->version ==
+			      ZEDBSD_HANDOFF_VERSION_PC98 &&
+			      entries[slot].p_start_block ==
+			      handoff->boot_partition_lba)))
 				boot_partition = entries[slot].p_disk;
 		}
 	}

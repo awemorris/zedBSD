@@ -21,6 +21,7 @@ HAL_PC98_SOURCES := \
 	src/hal/i386/lib.c src/hal/i386/irq.c src/hal/i386/page.c \
 	src/hal/i386/space.c src/hal/i386/int.c src/hal/i386/cmain.c \
 	src/hal/i386/task.c src/hal/i386/fb.c \
+	src/hal/i386/bsp-pc98/boot.c \
 	src/hal/i386/bsp-pc98/cons.c src/hal/i386/bsp-pc98/pic.c \
 	src/hal/i386/bsp-pc98/clock.c src/hal/i386/bsp-pc98/display.c \
 	src/hal/i386/bsp-pc98/jisx0208.c

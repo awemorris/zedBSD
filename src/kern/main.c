@@ -139,7 +139,7 @@ void kernel_main(const struct zedbsd_handoff *h,
 			hal_printf("VM commit initialization failed (%d); "
 			    "entering idle.\n", error);
 		else {
-			hal_printf("boot: starting init /bin/sh\n");
+			hal_printf("boot: starting init /bin/sh\n\n");
 			if (kern_init_start() != 0)
 				puts("init not started; entering idle.\n");
 		}

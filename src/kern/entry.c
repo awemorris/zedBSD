@@ -84,7 +84,9 @@ kernel_entry(const void *handoff)
 	static struct zedbsd_device devices[KERN_PLATFORM_MAX_DEVICES];
 	size_t device_count;
 
-	if (h == NULL || h->magic != ZEDBSD_HANDOFF_MAGIC || h->version != 2 ||
+	if (h == NULL || h->magic != ZEDBSD_HANDOFF_MAGIC ||
+	    (h->version != ZEDBSD_HANDOFF_VERSION_PC98 &&
+	     h->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT) ||
 	    h->size < sizeof(*h))
 		hal_fatal(__FILE__, __LINE__, "invalid zedBSD handoff");
 	hal_printf("boot: kernel heap, process, and scheduler initialization\n");

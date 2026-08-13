@@ -5,6 +5,23 @@
 
 #include "defs.h"
 
+#if defined(HAL_BOARD_PCAT)
+	.section .multiboot,"a"
+	.balign 4
+	multiboot_header:
+	.long 0x1badb002
+	.long 0x00010003
+	.long -(0x1badb002 + 0x00010003)
+	/* Multiboot v1 address fields.  The ELF's first allocated section is
+	 * at file offset 0x1000, so GRUB copies the ELF header page just below
+	 * the 2 MiB kernel and enters the physical bootstrap alias. */
+	.long multiboot_header - SYS_START
+	.long multiboot_header - SYS_START - 0x1000
+	.long __low_image_end - SYS_START
+	.long __low_end - SYS_START
+	.long text_start - SYS_START
+#endif
+
 .code32
 .data
 
@@ -37,6 +54,11 @@ PTE_APERTURE = PTE_PRESENT | PTE_WRITE | PTE_NOCACHE
  */ 
 .global text_start
 text_start:
+
+#if defined(HAL_BOARD_PCAT)
+	cmpl	$0x2badb002, %eax
+	jne	.L_bad_multiboot
+#endif
 
 /*
  * Save the boot handoff.  Our own IPL chain reaches here with EBX
@@ -305,6 +327,13 @@ jump_to_extern_c:
 	cli
 	hlt
 	jmp	.L_cmain_returned
+
+#if defined(HAL_BOARD_PCAT)
+.L_bad_multiboot:
+	cli
+	hlt
+	jmp	.L_bad_multiboot
+#endif
 
 /*
  * Print message and halt.
