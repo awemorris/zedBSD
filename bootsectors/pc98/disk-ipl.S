@@ -120,6 +120,5 @@ boot_id:
 
 	.org	0x01fc
 	.word	9
-	/* A native NEC98 disk is identified by the absence of the PC/AT MBR
-	 * signature.  The partition table for this path lives at LBA 1. */
-	.word	0
+	/* Required by later PC-9821 firmware before it will execute the IPL. */
+	.word	0xaa55

@@ -12,7 +12,8 @@ chain.  The PC/AT loader accepts ELF32/i386 and ELF64/x86-64.  The PC-98
 loader accepts ELF32/i386 only.
 
 The old native NEC98 image path remains under `bootsectors/pc98`.  Its LBA 0
-does not carry the PC/AT `55 aa` signature; its partition table is at LBA 1.
+carries both `IPL1` and the firmware-compatible `55 aa` signature; `IPL1`
+distinguishes its NEC98 partition table at LBA 1 from a PC/AT MBR.
 
 Build and test the loaders with the repository build driver:
 

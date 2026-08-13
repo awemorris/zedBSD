@@ -187,7 +187,7 @@ $(BUILD)/boot2.bin: $(BUILD)/boot2.elf
 $(BUILD)/ipl-lba0.bin: $(BUILD)/disk-ipl.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 	@test $$(stat -c%s $@) -eq 512
-	@test "$$(od -An -tx1 -j508 -N4 $@ | tr -d ' \n')" = 09000000
+	@test "$$(od -An -tx1 -j508 -N4 $@ | tr -d ' \n')" = 090055aa
 
 # Native PC-98 BIOS code using a PC/AT-compatible MBR disk layout.
 $(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
