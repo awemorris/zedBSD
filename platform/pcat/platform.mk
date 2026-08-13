@@ -164,7 +164,8 @@ USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-mno-mmx -mno-sse -mno-sse2
 USER_STACK_LDFLAGS := -z stack-size=0x100000
 USER_ELF_CHECK := $(SCRIPTS_DIR)/check-user-elf.py
-USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o
+USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o \
+	$(BUILD)/userland/sh/builtins.o
 $(BUILD)/userland/libc/posix.o $(USER_SH_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(BUILD)/userland/libc/posix.o $(USER_SH_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 
@@ -207,8 +208,11 @@ hdd-boot-qemu-test: $(BUILD)/vmunix $(BUILD)/hdd-image.img \
 	$(SCRIPTS_DIR)/test-pcat-qemu.sh $(BUILD)/vmunix \
 		$(BUILD)/hdd-image.img $(BUILD)/zedbsd-grub.iso
 
+sh-builtins-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/sh bios-bootloader
+	$(SCRIPTS_DIR)/test-sh-builtins.sh pcat
+
 HOST_TEST_BINARIES += $(BUILD)/tests/pcat-mbr-host-test
-.PHONY: pcat-mbr-host-test hdd-boot-qemu-test
+.PHONY: pcat-mbr-host-test hdd-boot-qemu-test sh-builtins-qemu-test
 
 hal-pcat-compile: $(HAL_PCAT_OBJS)
 	@echo "HAL i386/PCAT compile check: PASS"

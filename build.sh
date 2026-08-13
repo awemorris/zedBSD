@@ -47,6 +47,7 @@ Test commands:
   bios-loader-qemu-test       Test native-loader ELF payloads in QEMU
   pc-unified-loader-host-check Verify the dual-machine BIOS image
   pc-unified-loader-qemu-test  Test one image on PC/AT and PC-98 QEMU
+  sh-builtins-qemu-test        Test /bin/sh filesystem builtins in QEMU
 
 Maintenance commands:
   clean           Remove build/<platform>

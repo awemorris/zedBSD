@@ -346,7 +346,8 @@ $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 	cp $< $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o
+USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o \
+	$(BUILD)/userland/sh/builtins.o
 $(USER_SH_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_SH_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 
@@ -609,6 +610,9 @@ noct-m10-verify: noct-m9-verify check $(BUILD)/vmunix \
 noct-utilities-qemu-test: $(BUILD)/vmunix apps/ls.nct apps/cp.nct
 	$(SCRIPTS_DIR)/test-noct-utilities.sh
 
+sh-builtins-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/sh bios-bootloader
+	$(SCRIPTS_DIR)/test-sh-builtins.sh pc98
+
 noct-m11-verify: noct-m10-verify check $(BUILD)/vmunix \
 	noct-m5-final-opcode-check noct-utilities-qemu-test
 	@echo "zedBSD M11 safe utilities verification: PASS (ls.nct and cp.nct)"
@@ -684,6 +688,7 @@ beui-g5-verify: beui-g4-verify beui-input-qemu-test
 	noct-m5-final-opcode-check noct-m5-verify noct-m6-verify \
 	noct-m7-verify noct-m8-verify bios-write-qemu-test noct-m9-verify \
 	noct-file-qemu-test noct-m10-verify noct-utilities-qemu-test \
+	sh-builtins-qemu-test \
 	noct-m11-verify noct-env-qemu-test noct-m14-verify \
 	noct-repl-qemu-test term-japanese-qemu-test noct-m15-verify \
 	noct-m17-verify beui-g1-verify beui-gdc-qemu-test beui-g2a-verify \

@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# End-to-end test for the safe M11 Noct utilities.  Only a private image below
-# build/tests is modified; the release image is copied before vmunix or FAT
-# contents are changed.
+# End-to-end test for the external M11 Noct utilities.  The shell now has
+# temporary ls/cp builtins, so these scripts are invoked explicitly through
+# /bin/noct.  A private native zedBSD BIOS image is used; no release image is
+# modified and no linux-pc98 artifact is required.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 arch="${ZEDBSD_ARCH:-pc98}"
 build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
-releases="${ZEDBSD_RELEASES_DIR:-$repo/build/releases}"
 qemu="${QEMU:-qemu-system-i386}"
 bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
-base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i486dx-debian13-ide.img}"
 work="$build/tests/m11-utilities"
 image="$work/m11-ide.raw"
 files="$work/files"
-cfg="$work/BOOT.CFG"
+cfg="$work/ZINIT.RC"
 source_file="$files/SOURCE.BIN"
 copied_file="$work/COPY.BIN"
 fallback_file="$work/FALLBACK.TXT"
@@ -22,14 +21,15 @@ elf_search_file="$work/ELFTEST.TXT"
 search_file="$work/SEARCH.NCT"
 cwd_file="$work/CWDTEST.TXT"
 cwd_script="$work/CWDCHECK.NCT"
+offset=$((2048 * 512))
 
+test "$arch" = pc98 || { echo "M11 utilities require ARCH=pc98" >&2; exit 2; }
 command -v "$qemu" >/dev/null || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios_dir" || {
 	echo "PC-98 BIOS directory not found: $bios_dir" >&2
 	exit 1
 }
-test -f "$base" || { echo "M11 source image not found: $base" >&2; exit 1; }
-for command in cmp mcopy python3 timeout; do
+for command in cmp mcopy mmd python3 timeout; do
 	command -v "$command" >/dev/null || {
 		echo "$command is required" >&2
 		exit 1
@@ -38,14 +38,13 @@ done
 
 rm -rf -- "$files"
 mkdir -p "$work" "$files"
-cp --reflink=auto "$base" "$image"
-cat > "$search_file" <<'EOF'
+cat >"$search_file" <<'EOF'
 func main(args) {
     FileUtil.writeText("/home/" + args[0] + ".TXT", args[0]);
     return 0;
 }
 EOF
-cat > "$cwd_script" <<'EOF'
+cat >"$cwd_script" <<'EOF'
 func main(args) {
     for (entry in Directory.list(".")) {
         if (entry.name == "ls.nct") {
@@ -62,40 +61,33 @@ import sys
 with open(sys.argv[1], "wb") as stream:
     stream.write(bytes((index * 37 + 11) & 0xff for index in range(16417)))
 PY
-printf 'cd /apps\ncwdcheck\nls\nls -l\ncd /\nsearch FALLBACK\nnoct /apps/search.nct ELFTEST\ncp SOURCE.BIN COPY.BIN\nhalt\n' > "$cfg"
-make -C "$repo" ARCH="$arch" -j"$(nproc)" vmunix
-ZEDBSD_FILES="$files" ZEDBSD_ZINIT_RC="$cfg" \
-	DISK_SECTORS=17 \
-	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
+printf '%s\n' \
+	'cd /apps' \
+	'cwdcheck' \
+	'noct /apps/ls.nct' \
+	'noct /apps/ls.nct -l' \
+	'cd /' \
+	'search FALLBACK' \
+	'noct /apps/search.nct ELFTEST' \
+	'noct /apps/cp.nct SOURCE.BIN COPY.BIN' \
+	'halt' >"$cfg"
 
-offset="$(python3 - "$image" <<'PY'
-import struct
-import sys
-
-heads = 8
-with open(sys.argv[1], "rb") as stream:
-    stream.seek(512)
-    table = stream.read(512)
-for offset in range(0, 512, 32):
-    entry = table[offset:offset + 32]
-    if entry[0] and entry[16:32] == b"BOOT".ljust(16, b" "):
-        cylinder = struct.unpack_from("<H", entry, 6)[0]
-        print(cylinder * heads * 17 * 512)
-        break
-else:
-    raise SystemExit("BOOT partition not found")
-PY
-)"
-
-# ZEDBSD_FILES installs arbitrary fixtures at the volume root.  The command
-# resolver deliberately searches only /bin and /apps, so place this script in
-# /apps as a separate test fixture.
-mcopy -o -i "$image@@$offset" "$search_file" ::APPS/SEARCH.NCT
-mcopy -o -i "$image@@$offset" "$cwd_script" ::APPS/CWDCHECK.NCT
+"$repo/build.sh" bios-hdd-image pc98 build/pc98/bin/noct
+cp --reflink=auto "$build/bios-hdd-image.img" "$image"
+mmd -i "$image@@$offset" ::/apps
+mmd -i "$image@@$offset" ::/etc
+mmd -i "$image@@$offset" ::/home
+mcopy -o -i "$image@@$offset" "$build/bin/noct" ::/bin/noct
+mcopy -o -i "$image@@$offset" "$repo/apps/ls.nct" ::/apps/ls.nct
+mcopy -o -i "$image@@$offset" "$repo/apps/cp.nct" ::/apps/cp.nct
+mcopy -o -i "$image@@$offset" "$search_file" ::/apps/search.nct
+mcopy -o -i "$image@@$offset" "$cwd_script" ::/apps/cwdcheck.nct
+mcopy -o -i "$image@@$offset" "$source_file" ::/source.bin
+mcopy -o -i "$image@@$offset" "$cfg" ::/etc/zinit.rc
 
 set +e
 timeout --signal=INT --kill-after=5 45 \
-	"$qemu" -M pc9801 -cpu 386 -m 6 -accel tcg -L "$bios_dir" \
+	"$qemu" -M pc9821 -cpu 486 -m 64 -accel tcg -L "$bios_dir" \
 	-nic none -drive "if=ide,bus=0,unit=0,format=raw,file=$image" \
 	-display none -serial none -monitor none -no-reboot >/dev/null 2>&1
 status=$?
@@ -104,16 +96,17 @@ if test "$status" -ne 0 && test "$status" -ne 124; then
 	echo "M11 QEMU failed with status $status" >&2
 	exit 1
 fi
+
 rm -f -- "$copied_file"
-mcopy -i "$image@@$offset" ::COPY.BIN "$copied_file"
+mcopy -i "$image@@$offset" ::/copy.bin "$copied_file"
 cmp -s "$source_file" "$copied_file" || {
 	echo "M11 CP.NCT result differs from SOURCE.BIN" >&2
 	exit 1
 }
 rm -f -- "$fallback_file" "$elf_search_file" "$cwd_file"
-mcopy -i "$image@@$offset" ::HOME/FALLBACK.TXT "$fallback_file"
-mcopy -i "$image@@$offset" ::HOME/ELFTEST.TXT "$elf_search_file"
-mcopy -i "$image@@$offset" ::HOME/CWDTEST.TXT "$cwd_file"
+mcopy -i "$image@@$offset" ::/home/fallback.txt "$fallback_file"
+mcopy -i "$image@@$offset" ::/home/elftest.txt "$elf_search_file"
+mcopy -i "$image@@$offset" ::/home/cwdtest.txt "$cwd_file"
 test "$(cat "$fallback_file")" = FALLBACK || {
 	echo "shell /apps .nct fallback result mismatch" >&2
 	exit 1
@@ -126,4 +119,4 @@ test "$(cat "$cwd_file")" = apps || {
 	echo "shell cwd was not inherited by an /apps Noct command" >&2
 	exit 1
 }
-printf 'M11 LS.NCT/CP.NCT QEMU test: PASS (%s)\n' "$image"
+printf 'M11 explicit LS.NCT/CP.NCT QEMU test: PASS (%s)\n' "$image"

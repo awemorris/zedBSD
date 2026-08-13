@@ -3,6 +3,7 @@
 #include <zedbsd/console.h>
 #include <zedbsd/system.h>
 #include "userland/sh/applet.h"
+#include "userland/sh/builtins.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -160,23 +161,6 @@ static int
 source_file(const char *path)
 {
 	return source_file_mode(path, 0);
-}
-
-static int
-cat_file(const char *path)
-{
-	int fd = open(path, O_RDONLY);
-	char buffer[512];
-	ssize_t count;
-	if (fd < 0)
-		return 0;
-	while ((count = read(fd, buffer, sizeof(buffer))) > 0)
-		if (write(1, buffer, (size_t)count) != count) {
-			close(fd);
-			return 0;
-		}
-	close(fd);
-	return count == 0;
 }
 
 static int
@@ -415,20 +399,20 @@ command(char *text)
 {
 	char *argv[ARG_MAX];
 	int argc = split(text, argv, ARG_MAX);
+	int handled;
 	if (argc == 0)
 		return 1;
 	if (!strcmp(argv[0], "help")) {
-		puts("help echo env set unset pause wait device probe-ide probe-scsi "
-		     "disk part pwd cd cat source kernel arg boot linux "
+		puts("help echo pwd cd ls cp cat stat touch clear true false "
+		     "env set unset pause wait device probe-ide probe-scsi "
+		     "disk part source kernel arg boot linux "
 		     "run noct autoexec emacs vmstat reboot halt exit");
 		return 1;
 	}
-	if (!strcmp(argv[0], "echo")) {
-		int i;
-		for (i = 1; i < argc; i++)
-			printf("%s%s", i == 1 ? "" : " ", argv[i]);
-		putchar('\n');
-		return 1;
+	{
+		int result = sh_builtin_dispatch(argc, argv, &handled);
+		if (handled)
+			return result;
 	}
 	if (!strcmp(argv[0], "env")) {
 		int i;
@@ -451,16 +435,6 @@ command(char *text)
 		struct timespec delay = { argc == 2 ? atoi(argv[1]) : 1, 0 };
 		return nanosleep(&delay, NULL) == 0;
 	}
-	if (!strcmp(argv[0], "pwd")) {
-		char path[256];
-		return argc == 1 && getcwd(path, sizeof(path)) != NULL &&
-		    printf("%s\n", path) >= 0;
-	}
-	if (!strcmp(argv[0], "cd"))
-		return argc <= 2 && chdir(argc == 2 ? argv[1] :
-		    (getenv("HOME") != NULL ? getenv("HOME") : "/")) == 0;
-	if (!strcmp(argv[0], "cat"))
-		return argc == 2 && cat_file(argv[1]);
 	if (!strcmp(argv[0], "source"))
 		return argc == 2 && source_file(argv[1]);
 	if (!strcmp(argv[0], "device") || !strcmp(argv[0], "probe-ide") ||
