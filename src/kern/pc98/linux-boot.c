@@ -22,9 +22,9 @@
 #define PC98_SETUP_NODE_SIZE 32U
 #define LINUX_PROGRESS_ROWS 4U
 #define LINUX_READ_CHUNK (64U * 1024U)
-#define PC98_GDC_STRIDE 80U
 #define PC98_GDC_PLANE_SIZE 0x8000U
-#define PC98_TEXT_ROW_HEIGHT 16U
+#define PC98_CYAN_BACKGROUND 0xa5U
+#define PC98_YELLOW_BACKGROUND 0xc5U
 
 struct elf32_header {
 	uint8_t id[16];
@@ -108,25 +108,6 @@ static unsigned kibibytes(uint32_t bytes)
 	return (bytes >> 10) + !!(bytes & 1023U);
 }
 
-static void linux_ui_fill_graphics_row(unsigned row, unsigned yellow_columns)
-{
-	unsigned first = row * PC98_TEXT_ROW_HEIGHT * PC98_GDC_STRIDE;
-	unsigned last = first + PC98_TEXT_ROW_HEIGHT * PC98_GDC_STRIDE;
-	unsigned offset;
-
-	if (yellow_columns > HAL_CONS_COLUMNS)
-		yellow_columns = HAL_CONS_COLUMNS;
-	for (offset = first; offset < last; offset++) {
-		unsigned column = offset % PC98_GDC_STRIDE;
-		int yellow = column < yellow_columns;
-
-		progress_blue[offset] = yellow ? 0x00U : 0xffU;
-		progress_red[offset] = yellow ? 0xffU : 0x00U;
-		progress_green[offset] = yellow ? 0xffU : 0x00U;
-		progress_intensity[offset] = 0x00U;
-	}
-}
-
 static void linux_ui_draw_status_row(unsigned row, const char *label,
 				     uint32_t done, uint32_t total)
 {
@@ -141,7 +122,7 @@ static void linux_ui_draw_status_row(unsigned row, const char *label,
 	position = append_unsigned(line, position, kibibytes(total));
 	(void)append_text(line, position, " KB )");
 	(void)hal_cons_write_n_at(row, 0, line, sizeof(line),
-		HAL_CONS_NORMAL_ATTRIBUTE);
+		PC98_CYAN_BACKGROUND);
 }
 
 static void linux_ui_draw_progress_bar(void)
@@ -154,21 +135,31 @@ static void linux_ui_draw_progress_bar(void)
 		(unsigned)(done * HAL_CONS_COLUMNS / total) : HAL_CONS_COLUMNS;
 	unsigned percentage = total != 0 ?
 		(unsigned)(done * 100U / total) : 100U;
-	unsigned length = 0, column;
+	unsigned length = 0, column, yellow_text;
 
 	if (filled > HAL_CONS_COLUMNS)
 		filled = HAL_CONS_COLUMNS;
 	if (percentage > 100U)
 		percentage = 100U;
 	memset(row, ' ', sizeof(row));
-	linux_ui_fill_graphics_row(3, filled);
 	(void)hal_cons_write_n_at(3, 0, row, sizeof(row),
-		HAL_CONS_NORMAL_ATTRIBUTE);
+		PC98_CYAN_BACKGROUND);
+	if (filled != 0)
+		(void)hal_cons_write_n_at(3, 0, row, filled,
+			PC98_YELLOW_BACKGROUND);
 	length = append_unsigned(percentage_text, length, percentage);
 	length = append_text(percentage_text, length, " %");
 	column = (HAL_CONS_COLUMNS - length) / 2U;
-	(void)hal_cons_write_n_at(3, column, percentage_text, length,
-		HAL_CONS_NORMAL_ATTRIBUTE);
+	yellow_text = column < filled ? filled - column : 0;
+	if (yellow_text > length)
+		yellow_text = length;
+	if (yellow_text != 0)
+		(void)hal_cons_write_n_at(3, column, percentage_text,
+			yellow_text, PC98_YELLOW_BACKGROUND);
+	if (yellow_text < length)
+		(void)hal_cons_write_n_at(3, column + yellow_text,
+			percentage_text + yellow_text, length - yellow_text,
+			PC98_CYAN_BACKGROUND);
 }
 
 static void linux_ui_show_progress(int load_class)
@@ -186,15 +177,15 @@ static void linux_ui_begin(void)
 {
 	char title[HAL_CONS_COLUMNS];
 
+	/* BeUI has already returned to text mode.  Do not start the graphics GDC
+	 * for this progress display; use only reverse-color text attributes. */
+	(void)zedbsd_pc98_display_graphics_stop();
 	hal_cons_set_mode(HAL_CONS_FIXED_MENU);
 	hal_cons_show_cursor(0);
-	for (unsigned row = 0; row < LINUX_PROGRESS_ROWS; row++)
-		linux_ui_fill_graphics_row(row, 0);
-	(void)zedbsd_pc98_display_graphics_start();
 	memset(title, ' ', sizeof(title));
 	(void)append_text(title, 2, "Loading kernel...");
 	(void)hal_cons_write_n_at(0, 0, title, sizeof(title),
-		HAL_CONS_NORMAL_ATTRIBUTE);
+		PC98_CYAN_BACKGROUND);
 	linux_ui_draw_status_row(1, "Code segment:", 0, text_total);
 	linux_ui_draw_status_row(2, "Data segment:", 0, data_total);
 	linux_ui_draw_progress_bar();
@@ -216,9 +207,8 @@ static void linux_ui_finish(void)
 {
 	unsigned offset;
 
-	/* Leave no progress graphics behind for Linux.  Clear every native GDC
-	 * plane while graphics output is still active, then stop graphics before
-	 * resetting the text-only handoff screen. */
+	/* Leave no graphics behind for Linux even if an earlier application used
+	 * the GDC.  Keep graphics stopped throughout the text-only handoff. */
 	for (offset = 0; offset < PC98_GDC_PLANE_SIZE; offset++) {
 		progress_blue[offset] = 0;
 		progress_red[offset] = 0;
