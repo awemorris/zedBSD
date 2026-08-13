@@ -14,16 +14,11 @@ pc98_auto_scan(const struct partition_scheme *scheme, struct disk *disk,
 	if (disk == NULL || disk->d_block_size != 512U ||
 	    disk_read(disk, 0, 1, sector) != 0)
 		return -1;
-<<<<<<< HEAD
 	/*
 	 * A PC-98 IPL may intentionally carry the PC/AT 55 aa marker as part
 	 * of a dual-format disk.  The firmware's IPL1 signature is therefore
 	 * authoritative when both signatures are present.
 	 */
-=======
-	/* Later PC-9821 firmware requires 55 AA on native disks too.  IPL1 is
-	 * therefore the positive discriminator and must take precedence. */
->>>>>>> af9dbbd (Fix IPL)
 	if (sector[4] == 'I' && sector[5] == 'P' &&
 	    sector[6] == 'L' && sector[7] == '1')
 		return partition_scheme_pc98.scan(&partition_scheme_pc98, disk,
