@@ -65,9 +65,17 @@ case "$swap_size_mib" in
 	0 | 32 | 64) ;;
 	*) echo "ZEDBSD_SWAP_SIZE_MIB must be 0, 32, or 64" >&2; exit 2 ;;
 esac
-for command in dd mattrib mcopy mformat mmd python3; do
+for command in dd mattrib mcopy mdir mformat mmd python3; do
 	command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
 done
+
+ensure_directory()
+{
+	local directory="$1"
+	if ! mdir -i "$image@@$offset" "$directory" >/dev/null 2>&1; then
+		mmd -i "$image@@$offset" "$directory"
+	fi
+}
 
 "$repo/build.sh" all "$arch"
 test -f "$vmunix_image" || {
@@ -254,7 +262,7 @@ PY
 	rm -f -- "$swap_temp"
 	swap_temp=""
 fi
-mmd -i "$image@@$offset" ::BIN 2>/dev/null || true
+ensure_directory ::BIN
 test -s "$shell_image" || { echo "Shell ELF not found: $shell_image" >&2; exit 1; }
 test -s "$build/bin/noct" || { echo "Noct ELF not found: $build/bin/noct" >&2; exit 1; }
 test -s "$build/bin/linux" || { echo "Linux loader ELF not found: $build/bin/linux" >&2; exit 1; }
@@ -263,10 +271,10 @@ mcopy -o -i "$image@@$offset" "$build/bin/noct" ::BIN/NOCT
 mcopy -o -i "$image@@$offset" "$build/bin/linux" ::BIN/LINUX
 if test -n "$zinit_rc"; then
 	test -f "$zinit_rc" || { echo "zinit.rc not found: $zinit_rc" >&2; exit 1; }
-	mmd -i "$image@@$offset" ::ETC 2>/dev/null || true
+	ensure_directory ::ETC
 	mcopy -o -i "$image@@$offset" "$zinit_rc" ::ETC/ZINIT.RC
 fi
-mmd -i "$image@@$offset" ::APPS 2>/dev/null || true
+ensure_directory ::APPS
 if test -f "$repo/apps/hello.nct"; then
 	mcopy -o -i "$image@@$offset" "$repo/apps/hello.nct" ::APPS/HELLO.NCT
 fi
@@ -294,7 +302,7 @@ if test -n "$boot_cfg"; then
 fi
 if test -f "$repo/platform/pc98/dos/linux98.exe" ||
    test -f "$repo/platform/pc98/dos/inst.exe"; then
-	mmd -i "$image@@$offset" ::INST 2>/dev/null || true
+	ensure_directory ::INST
 fi
 if test -f "$repo/platform/pc98/dos/linux98.exe"; then
 	mcopy -o -i "$image@@$offset" "$repo/platform/pc98/dos/linux98.exe" ::INST/LINUX98.EXE
@@ -314,7 +322,19 @@ if test -n "${ZEDBSD_FILES:-}"; then
 		mcopy -o -i "$image@@$offset" "$file" ::
 	done
 fi
-sync
+# mtools closes the image when each command exits but does not promise that
+# dirty pages have reached storage.  Flush only this image instead of all
+# pending writes on the host.
+python3 - "$image" <<'PY'
+import os
+import sys
+
+descriptor = os.open(sys.argv[1], os.O_RDWR)
+try:
+    os.fdatasync(descriptor)
+finally:
+    os.close(descriptor)
+PY
 printf 'Installed zedBSD in %s partition %s (H=%s S=%s, PBR LBA %s, IO.SYS %s bytes)\n' \
 	"$image" "$partition" "$heads" "$sectors" "$ipl_lba" "$io_sys_size"
 if test "$install_disk_stubs" -eq 1; then
