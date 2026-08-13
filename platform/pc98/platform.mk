@@ -485,8 +485,13 @@ noct-m5-final-opcode-check: $(BUILD)/stage2.elf softfloat-opcode-check
 	@mkdir -p $(dir $(NOCT_M5_DISASSEMBLY))
 	@$(NOCT_OBJDUMP) -d --no-show-raw-insn $(BUILD)/stage2.elf > \
 		$(NOCT_M5_DISASSEMBLY)
+	@# i486DX task switching legitimately uses the 80387-compatible
+	@# fnsave/frstor pair. SSE, FXSR, XMM and all other x87 instructions
+	@# remain forbidden in the linked image.
 	@grep -E '(^[[:space:]]*[0-9a-f]+:[[:space:]]+f[a-z0-9]+[[:space:]])|\b(bswap|cmpxchg|xadd|cmov[a-z]*|rdtsc|ud2|cpuid|fx[a-z]+|movaps|movups|xmm[0-9]|ymm[0-9]|zmm[0-9])\b' \
-		$(NOCT_M5_DISASSEMBLY) > $(NOCT_M5_REJECTED) || true
+		$(NOCT_M5_DISASSEMBLY) | \
+		grep -Ev '^[[:space:]]*[0-9a-f]+:[[:space:]]+(fnsave|frstor)[[:space:]]' \
+		> $(NOCT_M5_REJECTED) || true
 	@if test -s $(NOCT_M5_REJECTED); then \
 		echo "ERROR: final vmunix ELF contains a forbidden opcode" >&2; \
 		cat $(NOCT_M5_REJECTED) >&2; \

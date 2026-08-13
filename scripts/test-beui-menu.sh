@@ -22,7 +22,7 @@ if [[ "$machine" == pc9801 && -z "${ZEDBSD_BEUI_MINIMUM_COLORS+x}" ]]; then
 	initial_wait="${ZEDBSD_BEUI_INITIAL_WAIT:-25}"
 	selection_wait="${ZEDBSD_BEUI_SELECTION_WAIT:-25}"
 fi
-base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i386sx-busybox-ide.img}"
+base="${ZEDBSD_TEST_BASE_IMAGE:-$releases/linux-pc98-i486dx-debian13-ide.img}"
 work="$build/tests/beui-$tag"
 image="$work/menu.raw"
 files="$work/files"

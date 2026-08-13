@@ -454,20 +454,6 @@ EXT_C(asm_inw):
 	popl	%ebp
 	ret
 
-/* void asm_fxsave(void *save_area) */
-	.global EXT_C(asm_fxsave)
-EXT_C(asm_fxsave):
-	movl	4(%esp), %eax
-	fxsave	(%eax)
-	ret
-
-/* void asm_fxrstor(void *save_area) */
-	.global EXT_C(asm_fxrstor)
-EXT_C(asm_fxrstor):
-	movl	4(%esp), %eax
-	fxrstor	(%eax)
-	ret
-
 /* void asm_fnsave(void *save_area) */
 	.global EXT_C(asm_fnsave)
 EXT_C(asm_fnsave):

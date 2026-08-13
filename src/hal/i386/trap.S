@@ -227,6 +227,7 @@ EXT_C(_asm_undefined_int_handler):
  *
  * void *asm_fault_int_handler_tbl[32];
  */
+	.section .rodata
 .global EXT_C(_asm_fault_int_handler_tbl)
 EXT_C(_asm_fault_int_handler_tbl):
 	.long	fault_0x00

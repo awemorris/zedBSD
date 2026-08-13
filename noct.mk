@@ -162,8 +162,10 @@ noct-objects: $(NOCT_OBJECTS)
 	@$(NOCT_SIZE) --totals $(NOCT_OBJECTS) | tail -1
 
 noct-opcode-check: noct-objects
+	@# CPUID is reached only after jit_x86_has_cpuid() verifies that EFLAGS.ID
+	@# is writable. Old i386 CPUs therefore return with SIMD capabilities 0.
 	@if $(NOCT_OBJDUMP) -d --no-show-raw-insn $(NOCT_OBJECTS) | \
-		grep -E '(^[[:space:]]*[0-9a-f]+:[[:space:]]+f[a-z0-9]+[[:space:]])|\b(bswap|cmpxchg|xadd|cmov[a-z]*|rdtsc|ud2|cpuid|fx[a-z]+|movaps|movups|xmm[0-9]|ymm[0-9]|zmm[0-9])\b'; then \
+		grep -E '(^[[:space:]]*[0-9a-f]+:[[:space:]]+f[a-z0-9]+[[:space:]])|\b(bswap|cmpxchg|xadd|cmov[a-z]*|rdtsc|ud2|fx[a-z]+|movaps|movups|xmm[0-9]|ymm[0-9]|zmm[0-9])\b'; then \
 		echo "ERROR: selected Noct objects contain a post-i386 opcode" >&2; \
 		exit 1; \
 	fi
@@ -189,10 +191,10 @@ noct-link-audit: noct-objects libc-objects $(BUILD)/src/kern/env.o \
 	fi
 	@echo "Noct/libc unresolved-symbol audit: PASS"
 	@if test -s $(NOCT_M3_UNDEFINED); then \
-		echo "Deferred soft-float/math symbols:"; \
+		echo "Deferred platform/soft-float/math symbols:"; \
 		sed 's/^/  /' $(NOCT_M3_UNDEFINED); \
 	else \
-		echo "Deferred soft-float/math symbols: none"; \
+		echo "Deferred platform/soft-float/math symbols: none"; \
 	fi
 
 noct-m3-verify: libc-host-test libc-opcode-check \

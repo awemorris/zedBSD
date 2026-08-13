@@ -19,8 +19,6 @@ void asm_outb(uint16 port, uint8 data);
 void asm_outw(uint16 port, uint16 data);
 uint8 asm_inb(uint16 port);
 uint16 asm_inw(uint16 port);
-void asm_fxsave(void *save_area);
-void asm_fxrstor(void *save_area);
 void asm_fnsave(void *save_area);
 void asm_frstor(void *save_area);
 uint32 asm_get_eflags(void);
