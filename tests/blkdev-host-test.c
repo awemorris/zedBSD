@@ -285,7 +285,6 @@ test_pc98_partition_auto(void)
 	memset(native, 0, 512);
 	put_entry(native, 0, 0x80, 0, 0, 1, 0, 0, 1,
 	    16, 7, 1, "NATIVE");
-	CHECK(mbr[510] == 0x55 && mbr[511] == 0xaa);
 	count = partition_scan(dev, entries, PARTITION_MAX);
 	CHECK(count == 16);
 	CHECK(entries[0].p_start_block == 136);

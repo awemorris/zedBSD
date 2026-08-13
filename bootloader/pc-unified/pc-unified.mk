@@ -81,8 +81,10 @@ pc-unified-bootloader: $(PC_UNIFIED_BUILD)/stage0.bin \
 	$(PC_UNIFIED_BUILD)/pc98-stage2.bin
 
 pc-unified-kernels:
+	$(MAKE) -C $(CURDIR) ARCH=pcat messages
 	$(MAKE) -C $(CURDIR) ARCH=pcat build/pcat/vmunix build/pcat/bin/sh \
 		build/pcat/bin/noct
+	$(MAKE) -C $(CURDIR) ARCH=pc98 messages
 	$(MAKE) -C $(CURDIR) ARCH=pc98 build/pc98/vmunix
 	@mkdir -p $(PC_UNIFIED_BUILD)
 	cp -f build/pcat/vmunix $(PC_UNIFIED_BUILD)/vmunix.at
