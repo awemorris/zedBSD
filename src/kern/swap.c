@@ -34,13 +34,19 @@ int swap_header_validate(const uint8_t *header, uint32_t file_bytes)
 		'Z', 'E', 'D', 'S', 'W', 'A', 'P', '1'
 	};
 	unsigned i;
-	if (header == NULL || file_bytes != ZEDBSD_SWAP_FILE_BYTES ||
+	uint32_t slots;
+	if (header == NULL ||
+	    (file_bytes != ZEDBSD_SWAP_FILE_MIN_BYTES &&
+	     file_bytes != ZEDBSD_SWAP_FILE_MAX_BYTES) ||
+	    file_bytes % SWAP_PAGE_SIZE != 0 ||
 	    memcmp(header, magic, sizeof(magic)) != 0 || get32(header + 8) != 1 ||
 	    get32(header + 12) != ZEDBSD_SWAP_HEADER_SIZE ||
 	    get32(header + 16) != SWAP_PAGE_SIZE ||
-	    get32(header + 20) != ZEDBSD_SWAP_FILE_BYTES ||
-	    get32(header + 24) != ZEDBSD_SWAP_DATA_SLOTS ||
+	    get32(header + 20) != file_bytes ||
 	    get32(header + 28) != swap_header_checksum(header))
+		return EINVAL;
+	slots = file_bytes / SWAP_PAGE_SIZE - 1U;
+	if (get32(header + 24) != slots)
 		return EINVAL;
 	for (i = 32; i < ZEDBSD_SWAP_HEADER_SIZE; i++)
 		if (header[i] != 0)

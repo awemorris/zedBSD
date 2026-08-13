@@ -120,6 +120,7 @@ int swap_fat_activate(struct cwdinfo *cwd, const char *mount_path)
 	struct fat_swap_data *data = NULL;
 	struct file *file = NULL;
 	uint8_t header[ZEDBSD_SWAP_HEADER_SIZE];
+	uint32_t file_bytes, slot_count;
 	char path[ZEDBSD_PATH_MAX];
 	size_t length;
 	int error;
@@ -135,14 +136,17 @@ int swap_fat_activate(struct cwdinfo *cwd, const char *mount_path)
 	if (error != 0)
 		return error;
 	if (file->f_inode == NULL || file->f_inode->i_type != INODE_REG ||
-	    file->f_inode->i_size != (off_t)ZEDBSD_SWAP_FILE_BYTES ||
+	    (file->f_inode->i_size != (off_t)ZEDBSD_SWAP_FILE_MIN_BYTES &&
+	     file->f_inode->i_size != (off_t)ZEDBSD_SWAP_FILE_MAX_BYTES) ||
 	    (file->f_inode->i_mount->m_flags & MOUNT_READ_ONLY) ||
 	    (file->f_inode->i_mount->m_disk->d_flags & DISK_READ_ONLY)) {
 		error = EINVAL;
 		goto out;
 	}
+	file_bytes = (uint32_t)file->f_inode->i_size;
+	slot_count = file_bytes / SWAP_PAGE_SIZE - 1U;
 	if (file_pread(file, header, sizeof(header), 0) != (ssize_t)sizeof(header) ||
-	    swap_header_validate(header, (uint32_t)file->f_inode->i_size) != 0) {
+	    swap_header_validate(header, file_bytes) != 0) {
 		error = EINVAL;
 		goto out;
 	}
@@ -165,7 +169,7 @@ int swap_fat_activate(struct cwdinfo *cwd, const char *mount_path)
 	data->inode->i_flags |= INODE_SWAPFILE;
 	swap_init(&fat_swap_backend);
 	error = swap_activate(&fat_swap_backend, &ops, data, SWAP_PAGE_SIZE,
-			      ZEDBSD_SWAP_DATA_SLOTS);
+			      slot_count);
 	if (error != 0) {
 		data->inode->i_flags &= ~INODE_SWAPFILE;
 		inode_release(data->inode);

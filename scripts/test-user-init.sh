@@ -14,6 +14,7 @@ before="$work/menu-before.ppm"
 after="$work/menu-after.ppm"
 mode="${ZEDBSD_USER_TEST_MODE:-int}"
 qemu_memory="${ZEDBSD_QEMU_MEMORY:-64}"
+swap_size_mib="${ZEDBSD_SWAP_SIZE_MIB:-32}"
 
 case "$mode" in
 int)
@@ -93,7 +94,8 @@ if test -n "$elf_source"; then
 	cp "$elf_source" "$files/INIT.ELF"
 fi
 if test "$mode" = swap; then
-	ZEDBSD_TEST_MB=40 ZEDBSD_SWAP_SIZE_MIB=32 \
+	ZEDBSD_TEST_MB="$((swap_size_mib + 8))" \
+		ZEDBSD_SWAP_SIZE_MIB="$swap_size_mib" \
 		ZEDBSD_SH_IMAGE="$elf_source" \
 		ZEDBSD_FILES="$files" \
 		"$repo/scripts/make-hdd-image.sh" "$image"
@@ -146,7 +148,7 @@ cleanup()
 }
 trap cleanup EXIT INT TERM
 
-python3 - "$monitor" "$probe_phys" "$probe_magic" "$probe_size" "$mode" "$expect_failure" "$before" "$after" "$backend_phys" "$stats_phys" "$require_gui" <<'PY'
+python3 - "$monitor" "$probe_phys" "$probe_magic" "$probe_size" "$mode" "$expect_failure" "$before" "$after" "$backend_phys" "$stats_phys" "$require_gui" "$swap_size_mib" <<'PY'
 import json
 import pathlib
 import socket
@@ -154,7 +156,7 @@ import struct
 import sys
 import time
 
-monitor, probe_text, magic_text, size_text, mode, failure_text, before_name, after_name, backend_text, stats_text, gui_text = sys.argv[1:]
+monitor, probe_text, magic_text, size_text, mode, failure_text, before_name, after_name, backend_text, stats_text, gui_text, swap_mib_text = sys.argv[1:]
 probe = int(probe_text, 0)
 backend_address = int(backend_text, 0)
 stats_address = int(stats_text, 0)
@@ -162,6 +164,7 @@ expected_magic = int(magic_text, 0)
 probe_size = int(size_text, 0)
 expect_failure = int(failure_text) != 0
 require_gui = int(gui_text) != 0
+expected_swap_slots = int(swap_mib_text) * 256 - 1
 client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 deadline = time.monotonic() + 10
 while True:
@@ -290,7 +293,7 @@ elif mode == 'swap':
         if time.monotonic() >= cleanup_deadline:
             break
         time.sleep(.1)
-    if slot_count != 8191 or free_slots != slot_count or enabled != 1 or \
+    if slot_count != expected_swap_slots or free_slots != slot_count or enabled != 1 or \
        stats[2] == 0 or stats[3] == 0 or stats[1] != 0:
         raise SystemExit(f'swap was not exercised: backend={backend.hex()} '
                          f'stats={stats!r}')

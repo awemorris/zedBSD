@@ -63,8 +63,8 @@ case "$install_disk_stubs" in
 	*) echo "INSTALL_DISK_STUBS must be 0 or 1" >&2; exit 2 ;;
 esac
 case "$swap_size_mib" in
-	0 | 32) ;;
-	*) echo "ZEDBSD_SWAP_SIZE_MIB must be 0 or 32" >&2; exit 2 ;;
+	0 | 32 | 64) ;;
+	*) echo "ZEDBSD_SWAP_SIZE_MIB must be 0, 32, or 64" >&2; exit 2 ;;
 esac
 case "$zinit_disable" in
 	0 | 1) ;;
@@ -227,17 +227,19 @@ mcopy -o -i "$image@@$offset" "$build/IO.SYS" ::IO.SYS
 mattrib -i "$image@@$offset" +r +h +s ::IO.SYS
 mcopy -o -i "$image@@$offset" "$vmunix_image" ::vmunix
 mattrib -i "$image@@$offset" +r +h +s ::vmunix
-if test "$swap_size_mib" -eq 32; then
+if test "$swap_size_mib" -ne 0; then
 	swap_temp="$(mktemp "${TMPDIR:-/tmp}/zedbsd-swap.XXXXXX")"
-	python3 - "$swap_temp" <<'PY'
+	python3 - "$swap_temp" "$swap_size_mib" <<'PY'
 import struct
 import sys
 
 path = sys.argv[1]
+file_bytes = int(sys.argv[2]) * 1024 * 1024
+slots = file_bytes // 4096 - 1
 header = bytearray(64)
 header[:8] = b"ZEDSWAP1"
 struct.pack_into("<IIIIII", header, 8, 1, 64, 4096,
-                 32 * 1024 * 1024, 8191, 0)
+                 file_bytes, slots, 0)
 checksum = 2166136261
 for index, byte in enumerate(header):
     if 28 <= index < 32:
@@ -245,12 +247,12 @@ for index, byte in enumerate(header):
     checksum = ((checksum ^ byte) * 16777619) & 0xffffffff
 struct.pack_into("<I", header, 28, checksum)
 with open(path, "wb") as stream:
-    stream.truncate(32 * 1024 * 1024)
+    stream.truncate(file_bytes)
     stream.seek(0)
     stream.write(header)
 PY
 	if ! mcopy -o -i "$image@@$offset" "$swap_temp" ::SWAPFILE; then
-		echo "BOOT partition has insufficient space for 32 MiB swapfile" >&2
+		echo "BOOT partition has insufficient space for ${swap_size_mib} MiB swapfile" >&2
 		exit 1
 	fi
 	mattrib -i "$image@@$offset" +h +s ::SWAPFILE

@@ -6,9 +6,9 @@
 
 #define SWAP_SLOT_NONE UINT32_MAX
 #define SWAP_PAGE_SIZE 4096U
-#define ZEDBSD_SWAP_FILE_BYTES (32U * 1024U * 1024U)
+#define ZEDBSD_SWAP_FILE_MIN_BYTES (32U * 1024U * 1024U)
+#define ZEDBSD_SWAP_FILE_MAX_BYTES (64U * 1024U * 1024U)
 #define ZEDBSD_SWAP_HEADER_SIZE 64U
-#define ZEDBSD_SWAP_DATA_SLOTS 8191U
 
 uint32_t swap_header_checksum(const uint8_t *);
 int swap_header_validate(const uint8_t *, uint32_t);
