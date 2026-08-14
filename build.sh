@@ -57,7 +57,7 @@ QEMU and image checks:
   uefi-entry-qemu-test       Test OVMF, amd64 HAL, IDE root, and userland
   sh-builtins-qemu-test      Test /bin/sh filesystem builtins in QEMU
   pcat-beui-qemu-test        Test PC/AT Cirrus and VGA BeUI backends
-  network-qemu-test          Test PC-98 LGY-98, ICMP, UDP, and TCP
+  network-qemu-test          Test the platform NIC with ARP, ICMP, UDP, and TCP
 
 Maintenance:
   clean           Remove build/<platform>

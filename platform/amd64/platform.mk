@@ -32,7 +32,8 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
 	src/kern/rootfs.c src/kern/vfs.c src/kern/swap.c src/kern/swap-fat.c \
 	src/kern/vm-reclaim.c src/kern/disk.c src/kern/partition.c \
-	drivers/pcat-ide.c src/kern/mbr-partition.c src/kern/pcat/platform.c \
+	drivers/pcat-ide.c drivers/dp8390.c drivers/pcat-ne2000.c \
+	src/kern/mbr-partition.c src/kern/pcat/platform.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c \
 	src/kern/vmspace.c src/kern/vm-commit.c src/kern/filedesc.c \
@@ -50,7 +51,8 @@ AMD64_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
 AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS) \
 	$(AMD64_KERNEL_LIBC_OBJS)
 
-all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/hdd-image.img
+all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/nettest \
+	$(BUILD)/hdd-image.img
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
 
@@ -119,6 +121,9 @@ AMD64_USER_LIBC_OBJS := $(BUILD)/userland/crt0.o \
 	$(BUILD)/userland/libc/posix.o $(BUILD)/libc/heap.o \
 	$(BUILD)/libc/string.o $(BUILD)/libc/ctype.o $(BUILD)/libc/int64.o \
 	$(BUILD)/libc/strto.o $(BUILD)/libc/format.o $(BUILD)/libc/stdio.o
+AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS) \
+	$(BUILD)/userland/libc/socket.o
+AMD64_USER_NETTEST_OBJS := $(BUILD)/userland/nettest/main.o
 AMD64_USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-fdata-sections -msoft-float -mno-80387 -mno-fp-ret-in-387 \
 	-mno-mmx -mno-sse -mno-sse2
@@ -129,6 +134,11 @@ AMD64_USER_ELF_CHECK := scripts/check-user-elf.py
 $(BUILD)/userland/libc/posix.o $(AMD64_USER_SH_OBJS): \
 	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(BUILD)/userland/libc/posix.o $(AMD64_USER_SH_OBJS): \
+	OBJ_CFLAGS = $(AMD64_USER_CFLAGS)
+
+$(BUILD)/userland/libc/socket.o $(AMD64_USER_NETTEST_OBJS): \
+	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(BUILD)/userland/libc/socket.o $(AMD64_USER_NETTEST_OBJS): \
 	OBJ_CFLAGS = $(AMD64_USER_CFLAGS)
 
 $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
@@ -142,21 +152,35 @@ $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) $@
 
+$(BUILD)/bin/nettest: $(AMD64_USER_NET_LIBC_OBJS) \
+	$(AMD64_USER_NETTEST_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) \
+	platform/pcat/user.ld $(AMD64_USER_ELF_CHECK)
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T platform/pcat/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+		$(AMD64_USER_NETTEST_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) $@
+
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
+	$(BUILD)/bin/nettest \
 	scripts/make-bios-hdd-image.py scripts/check-bios-hdd-image.py
 	$(PYTHON) scripts/make-bios-hdd-image.py --force --machine pcat \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
-		--shell $(BUILD)/bin/sh $@
+		--shell $(BUILD)/bin/sh --nettest $(BUILD)/bin/nettest $@
 
 $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
+	$(BUILD)/bin/nettest \
 	scripts/make-bios-hdd-image.py scripts/check-bios-hdd-image.py
 	$(PYTHON) scripts/make-bios-hdd-image.py --force --machine pcat \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
-		--shell $(BUILD)/bin/sh --fragment-kernel $@
+		--shell $(BUILD)/bin/sh --nettest $(BUILD)/bin/nettest \
+		--fragment-kernel $@
 
 $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
 	cp -f $< $@
@@ -179,6 +203,10 @@ hdd-boot-qemu-test amd64-qemu-test: $(BUILD)/hdd-image.img \
 	bash scripts/test-amd64-qemu.sh $(BUILD)/hdd-image.img \
 		$(BUILD)/bios-hdd-image-fragmented.img
 
+network-qemu-test: bios-bootloader $(BUILD)/vmunix \
+	$(BUILD)/bin/nettest scripts/test-pcat-ne2000.sh
+	bash scripts/test-pcat-ne2000.sh amd64
+
 .PHONY: all vmunix SH bios-bootloader bios-hdd-image hdd-image \
 	bios-loader-host-check amd64-hal-compile amd64-entry-qemu-test \
-	hdd-boot-qemu-test amd64-qemu-test
+	hdd-boot-qemu-test amd64-qemu-test network-qemu-test

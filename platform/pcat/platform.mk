@@ -45,7 +45,9 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/swap.o \
 	$(BUILD)/src/kern/swap-fat.o $(BUILD)/src/kern/vm-reclaim.o \
 	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/partition.o \
-	$(BUILD)/drivers/pcat-ide.o $(BUILD)/src/kern/mbr-partition.o \
+	$(BUILD)/drivers/pcat-ide.o $(BUILD)/drivers/dp8390.o \
+	$(BUILD)/drivers/pcat-ne2000.o \
+	$(BUILD)/src/kern/mbr-partition.o \
 	$(BUILD)/src/kern/pcat/platform.o $(BUILD)/src/kern/image.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PCAT_OBJS) $(KERN_OBJS)
@@ -271,9 +273,13 @@ pcat-beui-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/noct \
 	build/unified/hdd-image.img
 	bash $(SCRIPTS_DIR)/test-pcat-beui.sh build/unified/hdd-image.img
 
+network-qemu-test: bios-bootloader $(BUILD)/vmunix \
+	$(BUILD)/bin/nettest $(SCRIPTS_DIR)/test-pcat-ne2000.sh
+	bash $(SCRIPTS_DIR)/test-pcat-ne2000.sh pcat
+
 HOST_TEST_BINARIES += $(BUILD)/tests/pcat-mbr-host-test
 .PHONY: pcat-mbr-host-test hdd-boot-qemu-test sh-builtins-qemu-test \
-	pcat-beui-qemu-test
+	pcat-beui-qemu-test network-qemu-test
 
 hal-pcat-compile: $(HAL_PCAT_OBJS)
 	@echo "HAL i386/PCAT compile check: PASS"

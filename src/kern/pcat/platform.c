@@ -4,6 +4,7 @@
 #include "kern/partition.h"
 #include "kern/mbr-partition.h"
 #include "drivers/pcat-ide.h"
+#include "drivers/pcat-ne2000.h"
 #include <errno.h>
 #include <hal/hal.h>
 
@@ -31,6 +32,16 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 		device->sectors=0; device->controller_location=(uint8_t)slot;
 		for (unsigned i=0;i<sizeof(device->reserved);i++) device->reserved[i]=0;
 		count++;
+	}
+	{
+		int network_error = zedbsd_pcat_ne2000_init();
+
+		if (network_error == 0)
+			hal_printf("net: ISA NE2000 at 0x300 irq 10 registered "
+			    "as ne0\n");
+		else if (network_error != ENODEV)
+			hal_printf("net: ISA NE2000 initialization failed (%d)\n",
+			    network_error);
 	}
 	return count;
 }
