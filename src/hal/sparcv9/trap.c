@@ -36,10 +36,10 @@ deliver_user_fault(uintptr_t pc, uintptr_t address, int instruction,
 
 	trap.vector = 14U;
 	trap.cs = 3U;
-	trap.eip = (uint32)pc;
-	trap.eax = (uint32)value;
+	trap.eip = pc;
+	trap.eax = value;
 	trap.error_code = instruction ? 0x10U : write ? 2U : 0U;
-	trap.fault_address = (uint32)address;
+	trap.fault_address = address;
 	if (user_fault_handler != NULL) {
 		int result;
 		user_fault_active++;
@@ -125,8 +125,8 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 
 		trap.vector = 0xc2U;
 		trap.cs = 3U;
-		trap.eip = (uint32)pc;
-		trap.eax = (uint32)frame->syscall_number;
+		trap.eip = pc;
+		trap.eax = frame->syscall_number;
 		trap.error_code = 0;
 		trap.fault_address = 0;
 		if (user_int_handler != NULL)
@@ -161,8 +161,8 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 		trap.vector = trap_type == 0x34U ? 17U :
 		    trap_type == 0x101U ? 3U : 6U;
 		trap.cs = 3U;
-		trap.eip = (uint32)pc;
-		trap.eax = (uint32)frame->out[0];
+		trap.eip = pc;
+		trap.eax = frame->out[0];
 		trap.error_code = 0;
 		trap.fault_address = 0;
 		if (user_fault_handler != NULL)

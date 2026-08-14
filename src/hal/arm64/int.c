@@ -31,8 +31,8 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 
 		trap.vector = 0xc2U;
 		trap.cs = 3U;
-		trap.eip = (uint32)f->elr;
-		trap.eax = (uint32)f->x[8];
+		trap.eip = f->elr;
+		trap.eax = f->x[8];
 		trap.error_code = 0;
 		trap.fault_address = 0;
 		if (user_int_handler != NULL)
@@ -52,11 +52,11 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 		struct hal_user_trap trap;
 		trap.vector = 14U;
 		trap.cs = 3U;
-		trap.eip = (uint32)f->elr;
-		trap.eax = (uint32)f->x[0];
+		trap.eip = f->elr;
+		trap.eax = f->x[0];
 		trap.error_code = (ec == 0x20 || ec == 0x21) ? 0x10U :
 			((f->esr & (1ULL << 6)) ? 2U : 0U);
-		trap.fault_address = (uint32)f->far;
+		trap.fault_address = f->far;
 		if (user_fault_handler != NULL &&
 		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS)
 			return;
@@ -67,10 +67,10 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 		trap.vector = (ec == 0x3c) ? 3U :
 			(ec == 0x22 || ec == 0x26) ? 17U : 6U;
 		trap.cs = 3U;
-		trap.eip = (uint32)f->elr;
-		trap.eax = (uint32)f->x[0];
+		trap.eip = f->elr;
+		trap.eax = f->x[0];
 		trap.error_code = 0;
-		trap.fault_address = (uint32)f->far;
+		trap.fault_address = f->far;
 		if (user_fault_handler != NULL)
 			(void)user_fault_handler(&trap);
 		HAL_FATAL("AArch64 user fault handler returned");

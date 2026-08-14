@@ -354,10 +354,19 @@ hal_space_t hal_task_get_space(hal_task_t t);
 struct hal_user_trap {
 	uint32_t vector;
 	uint32_t cs;
+#if UINTPTR_MAX == UINT64_MAX
+	uint64_t eip;
+	uint64_t eax;
+	uint64_t error_code;
+	uint64_t fault_address;
+#elif UINTPTR_MAX == UINT32_MAX
 	uint32_t eip;
 	uint32_t eax;
 	uint32_t error_code;
 	uint32_t fault_address;
+#else
+#error "Unsupported pointer size for struct hal_user_trap"
+#endif
 };
 typedef void (*hal_user_int_handler_t)(const struct hal_user_trap *);
 typedef int (*hal_user_fault_handler_t)(const struct hal_user_trap *);

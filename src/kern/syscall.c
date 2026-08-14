@@ -662,7 +662,7 @@ copy_exec_vector(uintptr_t address, char **vector, unsigned maximum,
 		return 0;
 	}
 	for (index = 0; index < maximum; index++) {
-#ifdef ZEDBSD_USER_ABI_AARCH64
+#if defined(ZEDBSD_USER_ABI_AARCH64) || defined(ZEDBSD_USER_ABI_SPARCV9)
 		uintptr_t pointer;
 #else
 		uint32_t pointer;

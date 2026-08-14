@@ -14,6 +14,11 @@
 volatile struct user_int_probe user_int_probe;
 volatile struct user_fault_probe user_fault_probe;
 
+_Static_assert(sizeof(user_int_probe.eip) == sizeof(uintptr_t),
+	       "user trap PC width must match uintptr_t");
+_Static_assert(sizeof(user_fault_probe.fault_address) == sizeof(uintptr_t),
+	       "user fault address width must match uintptr_t");
+
 static void
 observe_user_int(const struct hal_user_trap *trap)
 {
