@@ -53,7 +53,9 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(HAL_PCAT_OBJS) $(KERN_OBJS)
 
 all: $(BUILD)/bootsect.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
-	$(BUILD)/bin/noct $(BUILD)/bin/nettest $(BUILD)/hdd-image.img \
+	$(BUILD)/bin/noct $(BUILD)/bin/nettest $(BUILD)/bin/ping \
+	$(BUILD)/bin/ifconfig $(BUILD)/bin/route $(BUILD)/bin/dhcpcd \
+	$(BUILD)/bin/nslookup $(BUILD)/hdd-image.img \
 	$(BUILD)/zedbsd-grub.iso
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
@@ -128,6 +130,8 @@ bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
 	$(BUILD)/bin/noct $(BUILD)/bin/nettest $(HOLORIS_NOCT) \
+	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
+	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup \
 	$(SCRIPTS_DIR)/make-bios-hdd-image.py \
 	$(SCRIPTS_DIR)/check-bios-hdd-image.py
 	$(PYTHON) $(SCRIPTS_DIR)/make-bios-hdd-image.py --force \
@@ -135,6 +139,11 @@ $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
 		--shell $(BUILD)/bin/sh --noct $(BUILD)/bin/noct \
 		--nettest $(BUILD)/bin/nettest \
+		--bin-file ping=$(BUILD)/bin/ping \
+		--bin-file ifconfig=$(BUILD)/bin/ifconfig \
+		--bin-file route=$(BUILD)/bin/route \
+		--bin-file dhcpcd=$(BUILD)/bin/dhcpcd \
+		--bin-file nslookup=$(BUILD)/bin/nslookup \
 		--holoris $(HOLORIS_NOCT) $@
 
 bios-hdd-image: $(BUILD)/bios-hdd-image.img
@@ -169,6 +178,7 @@ $(BUILD)/vmunix: $(VMUNIX_OBJS) $(PCAT)/vmunix.ld \
 
 USER_LIBC_OBJS := $(BUILD)/userland/crt0.o \
 	$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/socket.o \
+	$(BUILD)/userland/libc/resolver.o $(BUILD)/userland/libc/resolver-dns.o \
 	$(BUILD)/libc/heap.o \
 	$(BUILD)/libc/string.o $(BUILD)/libc/ctype.o $(BUILD)/libc/int64.o \
 	$(BUILD)/libc/strto.o $(BUILD)/libc/format.o $(BUILD)/libc/stdio.o
@@ -235,6 +245,36 @@ $(BUILD)/bin/nettest: $(USER_LIBC_OBJS) $(USER_NETTEST_OBJS) \
 		$(USER_NETTEST_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(USER_ELF_CHECK) $@
+
+USER_NET_COMMANDS := ping ifconfig route dhcpcd nslookup
+USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
+USER_NET_COMMON_OBJS := $(BUILD)/userland/net/netutil.o \
+	$(BUILD)/userland/net/dhcp.o
+USER_NET_COMMAND_OBJS := $(addsuffix /main.o, \
+	$(addprefix $(BUILD)/userland/,$(USER_NET_COMMANDS)))
+$(BUILD)/userland/libc/resolver.o $(BUILD)/userland/libc/resolver-dns.o \
+	$(USER_NET_COMMON_OBJS) $(USER_NET_COMMAND_OBJS): \
+	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(BUILD)/userland/libc/resolver.o $(BUILD)/userland/libc/resolver-dns.o \
+	$(USER_NET_COMMON_OBJS) $(USER_NET_COMMAND_OBJS): \
+	OBJ_CFLAGS = $(USER_CFLAGS)
+
+define PCAT_USER_NET_COMMAND
+$(BUILD)/bin/$(1): $(USER_LIBC_OBJS) $(USER_NET_COMMON_OBJS) \
+	$(BUILD)/userland/$(1)/main.o $(ZEDBSD_SOFTFLOAT_OBJECTS) \
+	$(PCAT)/user.ld $(USER_ELF_CHECK)
+	@mkdir -p $$(dir $$@)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
+		$(USER_NET_COMMON_OBJS) $(BUILD)/userland/$(1)/main.o \
+		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
+	@test -z "$$$$($(NOCT_NM) -u $$@)" || { $(NOCT_NM) -u $$@; exit 1; }
+	$(PYTHON) $(USER_ELF_CHECK) $$@
+endef
+$(foreach command,$(USER_NET_COMMANDS),\
+	$(eval $(call PCAT_USER_NET_COMMAND,$(command))))
+network-tools: $(USER_NET_COMMAND_TARGETS)
+.PHONY: network-tools
 
 $(BUILD)/legacy-pcat-hdd-image.img: $(BUILD)/bootsect.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
 	$(SCRIPTS_DIR)/make-pcat-hdd-image.sh

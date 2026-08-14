@@ -4,6 +4,7 @@
 
 import argparse
 import os
+import re
 import struct
 import subprocess
 import tempfile
@@ -27,6 +28,19 @@ def pc98_chs(lba: int, heads: int) -> bytes:
 
 
 def create(args: argparse.Namespace) -> None:
+    bin_files = {}
+    for specification in args.bin_file:
+        if "=" not in specification:
+            raise SystemExit("--bin-file requires NAME=SOURCE")
+        name, source_text = specification.split("=", 1)
+        source = Path(source_text)
+        if not re.fullmatch(r"[a-z0-9_]{1,8}(?:\.[a-z0-9_]{1,3})?", name):
+            raise SystemExit(f"invalid FAT16 /bin name: {name}")
+        if name in bin_files:
+            raise SystemExit(f"duplicate /bin name: {name}")
+        if not source.is_file():
+            raise SystemExit(f"missing input: {source}")
+        bin_files[name] = source
     for path in (args.stage1, args.stage2, args.kernel):
         if not path.is_file():
             raise SystemExit(f"missing input: {path}")
@@ -93,8 +107,9 @@ def create(args: argparse.Namespace) -> None:
         else:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.kernel),
                 "::VMUNIX")
-        if args.shell or args.noct or args.nettest:
+        if args.shell or args.noct or args.nettest or bin_files:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/bin")
+        run("mmd", "-i", f"{temporary}@@{offset}", "::/etc")
         if args.shell:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.shell),
                 "::/bin/sh")
@@ -104,6 +119,9 @@ def create(args: argparse.Namespace) -> None:
         if args.nettest:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.nettest),
                 "::/bin/nettest")
+        for name, source in bin_files.items():
+            run("mcopy", "-i", f"{temporary}@@{offset}", str(source),
+                f"::/bin/{name}")
         if args.holoris:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/apps")
             run("mcopy", "-i", f"{temporary}@@{offset}",
@@ -113,6 +131,8 @@ def create(args: argparse.Namespace) -> None:
             "--kernel", str(args.kernel),
             *(["--noct", str(args.noct)] if args.noct else []),
             *(["--holoris", str(args.holoris)] if args.holoris else []),
+            *(sum((["--bin-file", f"{name}={source}"]
+                   for name, source in bin_files.items()), [])),
             str(temporary))
         os.replace(temporary, args.output)
     finally:
@@ -130,6 +150,7 @@ def main() -> None:
     parser.add_argument("--noct", type=Path)
     parser.add_argument("--nettest", type=Path)
     parser.add_argument("--holoris", type=Path)
+    parser.add_argument("--bin-file", action="append", default=[])
     parser.add_argument("--size-mib", type=int, default=129)
     parser.add_argument("--fragment-kernel", action="store_true")
     parser.add_argument("--force", action="store_true")

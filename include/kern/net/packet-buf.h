@@ -26,6 +26,7 @@ struct packet_buf {
 	uint16_t l2_offset;
 	uint16_t l3_offset;
 	uint16_t l4_offset;
+	uint16_t l3_length;
 	uint16_t protocol;
 	uint32_t flags;
 	struct net_device *device;
@@ -46,6 +47,8 @@ void *packet_buf_pull(struct packet_buf *packet, size_t length);
 void *packet_buf_append(struct packet_buf *packet, size_t length);
 int packet_buf_trim(struct packet_buf *packet, size_t length);
 struct packet_buf *packet_buf_copy(const struct packet_buf *packet);
+struct packet_buf *packet_buf_copy_region(const struct packet_buf *packet,
+					  size_t offset, size_t length);
 unsigned packet_buf_in_use(void);
 
 #endif

@@ -199,6 +199,17 @@ $(BUILD)/tests/inet-stack-host-test: tests/inet-stack-host-test.c \
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
 		$(INET_HOST_SOURCES) $< -o $@
 
+$(BUILD)/tests/dhcp-host-test: tests/dhcp-host-test.c userland/net/dhcp.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
+		userland/net/dhcp.c $< -o $@
+
+$(BUILD)/tests/dns-host-test: tests/dns-host-test.c \
+	userland/libc/resolver-dns.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
+		userland/libc/resolver-dns.c $< -o $@
+
 $(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
 	src/kern/fs.c src/kern/namespace.c src/kern/env.c $(ZEDBSD_LIBC_SOURCES) \
 	src/kern/disk.c src/kern/inode.c src/kern/file.c src/kern/namecache.c \
@@ -258,7 +269,9 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/packet-buf-host-test \
 	$(BUILD)/tests/net-device-host-test \
 	$(BUILD)/tests/packet-socket-host-test \
-	$(BUILD)/tests/inet-stack-host-test
+	$(BUILD)/tests/inet-stack-host-test \
+	$(BUILD)/tests/dhcp-host-test \
+	$(BUILD)/tests/dns-host-test
 CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test
 
 # ----------------------------------------------------------------------

@@ -11,6 +11,7 @@
 
 extern int net_input_enqueue(struct net_device *, struct packet_buf *);
 extern void net_worker_wakeup(void);
+extern void route_purge_device(struct net_device *) __attribute__((weak));
 
 static struct net_device devices[NET_DEVICE_MAX];
 static uint8_t device_used[NET_DEVICE_MAX];
@@ -97,6 +98,8 @@ net_device_gone(struct net_device *device)
 		break;
 	}
 	device->next = NULL;
+	if (route_purge_device != NULL)
+		route_purge_device(device);
 	device->state = NET_DEVICE_GONE;
 }
 

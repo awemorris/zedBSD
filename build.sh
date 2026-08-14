@@ -37,6 +37,7 @@ Native kernel commands (pcat, pc98, amd64):
   vmunix          Build the zedBSD kernel
   SH              Build /bin/sh
   NOCT.ELF        Build the Noct user program
+  network-tools   Build ping, ifconfig, route, dhcpcd, and nslookup
   bios-bootloader Build the native BIOS Stage 1/2 loader
   bios-hdd-image  Build the native MBR/FAT16 image
 

@@ -26,6 +26,9 @@ int ipv4_init(void);
 int ipv4_protocol_register(uint8_t protocol, ipv4_input_fn input);
 int ipv4_output(struct net_device *, uint32_t destination, uint8_t protocol,
 		struct packet_buf *);
+int ipv4_output_source(struct net_device *, uint32_t destination,
+		       uint8_t protocol, uint32_t source,
+		       struct packet_buf *);
 
 int icmp_init(void);
 int icmp_socket_create(int protocol, struct socket **result);

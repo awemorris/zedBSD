@@ -37,8 +37,14 @@ int inet_socket_connect(struct inet_socket *, const struct sockaddr *,
 int inet_socket_getsockname(struct inet_socket *, struct sockaddr *, socklen_t *);
 int inet_socket_getpeername(struct inet_socket *, struct sockaddr *, socklen_t *);
 int inet_socket_ioctl(struct socket *, unsigned long, uintptr_t);
+int inet_socket_setsockopt(struct inet_socket *, int level, int option,
+			   const void *value, socklen_t length);
+int inet_socket_getsockopt(struct inet_socket *, int level, int option,
+			   void *value, socklen_t *length);
 
 int inet_interface_address(struct net_device *, uint32_t *address,
 			   uint32_t *netmask, uint32_t *broadcast);
+int inet_interface_configuration(struct net_device *, uint32_t *address,
+				 uint32_t *netmask, uint32_t *broadcast);
 
 #endif

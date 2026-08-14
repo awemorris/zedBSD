@@ -6,6 +6,7 @@
 #include <zedbsd/syscall.h>
 #include <zedbsd/process.h>
 #include <zedbsd/netif.h>
+#include <zedbsd/route.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -131,10 +132,18 @@ off_t lseek(int fd, off_t off, int whence) { return (off_t)call(ZEDBSD_SYS_lseek
 int fstat(int fd, struct stat *st) { return (int)call(ZEDBSD_SYS_fstat, fd, (uintptr_t)st, 0, 0, 0, 0); }
 int chdir(const char *p) { return (int)call(ZEDBSD_SYS_chdir, (uintptr_t)p, 0, 0, 0, 0, 0); }
 char *getcwd(char *p, size_t n) { return (char *)call(ZEDBSD_SYS_getcwd, (uintptr_t)p, n, 0, 0, 0, 0); }
+static int ioctl_has_argument(unsigned long request) {
+	if (((request >> 16) & 0x1fffUL) != 0)
+		return 1;
+	if ((request >= SIOCGIFNAME && request <= SIOCGIFINDEX) ||
+	    request == SIOCGIFSTATS)
+		return 1;
+	return request == SIOCADDRT || request == SIOCDELRT ||
+	    request == SIOCGRTENTRY;
+}
 int ioctl(int fd, unsigned long request, ...) {
 	va_list ap; uintptr_t arg = 0;
-	if (((request >> 16) & 0x1fffUL) != 0 ||
-	    (request >= SIOCGIFNAME && request <= SIOCGIFINDEX)) {
+	if (ioctl_has_argument(request)) {
 		va_start(ap, request); arg = va_arg(ap, uintptr_t); va_end(ap);
 	}
 	return (int)call(ZEDBSD_SYS_ioctl, fd, request, arg, 0, 0, 0);

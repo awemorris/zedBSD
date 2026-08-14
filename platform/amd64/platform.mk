@@ -52,6 +52,8 @@ AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS) \
 	$(AMD64_KERNEL_LIBC_OBJS)
 
 all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/nettest \
+	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
+	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup \
 	$(BUILD)/hdd-image.img
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
@@ -122,7 +124,8 @@ AMD64_USER_LIBC_OBJS := $(BUILD)/userland/crt0.o \
 	$(BUILD)/libc/string.o $(BUILD)/libc/ctype.o $(BUILD)/libc/int64.o \
 	$(BUILD)/libc/strto.o $(BUILD)/libc/format.o $(BUILD)/libc/stdio.o
 AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS) \
-	$(BUILD)/userland/libc/socket.o
+	$(BUILD)/userland/libc/socket.o $(BUILD)/userland/libc/resolver.o \
+	$(BUILD)/userland/libc/resolver-dns.o
 AMD64_USER_NETTEST_OBJS := $(BUILD)/userland/nettest/main.o
 AMD64_USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-fdata-sections -msoft-float -mno-80387 -mno-fp-ret-in-387 \
@@ -163,14 +166,52 @@ $(BUILD)/bin/nettest: $(AMD64_USER_NET_LIBC_OBJS) \
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) $@
 
+USER_NET_COMMANDS := ping ifconfig route dhcpcd nslookup
+USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
+AMD64_USER_NET_COMMON_OBJS := $(BUILD)/userland/net/netutil.o \
+	$(BUILD)/userland/net/dhcp.o
+AMD64_USER_NET_COMMAND_OBJS := $(addsuffix /main.o, \
+	$(addprefix $(BUILD)/userland/,$(USER_NET_COMMANDS)))
+$(BUILD)/userland/libc/socket.o $(BUILD)/userland/libc/resolver.o \
+	$(BUILD)/userland/libc/resolver-dns.o $(AMD64_USER_NET_COMMON_OBJS) \
+	$(AMD64_USER_NET_COMMAND_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(BUILD)/userland/libc/socket.o $(BUILD)/userland/libc/resolver.o \
+	$(BUILD)/userland/libc/resolver-dns.o $(AMD64_USER_NET_COMMON_OBJS) \
+	$(AMD64_USER_NET_COMMAND_OBJS): OBJ_CFLAGS = $(AMD64_USER_CFLAGS)
+
+define AMD64_USER_NET_COMMAND
+$(BUILD)/bin/$(1): $(AMD64_USER_NET_LIBC_OBJS) \
+	$(AMD64_USER_NET_COMMON_OBJS) $(BUILD)/userland/$(1)/main.o \
+	$(ZEDBSD_SOFTFLOAT_OBJECTS) platform/pcat/user.ld $(AMD64_USER_ELF_CHECK)
+	@mkdir -p $$(dir $$@)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T platform/pcat/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+		$(AMD64_USER_NET_COMMON_OBJS) $(BUILD)/userland/$(1)/main.o \
+		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
+	@test -z "$$$$($(NOCT_NM) -u $$@)" || { $(NOCT_NM) -u $$@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) $$@
+endef
+$(foreach command,$(USER_NET_COMMANDS),\
+	$(eval $(call AMD64_USER_NET_COMMAND,$(command))))
+network-tools: $(USER_NET_COMMAND_TARGETS)
+.PHONY: network-tools
+
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
 	$(BUILD)/bin/nettest \
+	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
+	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup \
 	scripts/make-bios-hdd-image.py scripts/check-bios-hdd-image.py
 	$(PYTHON) scripts/make-bios-hdd-image.py --force --machine pcat \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
-		--shell $(BUILD)/bin/sh --nettest $(BUILD)/bin/nettest $@
+		--shell $(BUILD)/bin/sh --nettest $(BUILD)/bin/nettest \
+		--bin-file ping=$(BUILD)/bin/ping \
+		--bin-file ifconfig=$(BUILD)/bin/ifconfig \
+		--bin-file route=$(BUILD)/bin/route \
+		--bin-file dhcpcd=$(BUILD)/bin/dhcpcd \
+		--bin-file nslookup=$(BUILD)/bin/nslookup $@
 
 $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \

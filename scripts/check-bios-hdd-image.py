@@ -4,6 +4,7 @@
 
 import argparse
 import hashlib
+import re
 import struct
 import subprocess
 import tempfile
@@ -25,6 +26,18 @@ def pc98_chs(lba: int, heads: int) -> bytes:
 
 
 def check(args: argparse.Namespace) -> None:
+    bin_files = []
+    seen = set()
+    for specification in args.bin_file:
+        if "=" not in specification:
+            fail("--bin-file requires NAME=SOURCE")
+        name, source_text = specification.split("=", 1)
+        if not re.fullmatch(r"[a-z0-9_]{1,8}(?:\.[a-z0-9_]{1,3})?", name):
+            fail(f"invalid FAT16 /bin name: {name}")
+        if name in seen:
+            fail(f"duplicate /bin name: {name}")
+        seen.add(name)
+        bin_files.append((f"bin/{name}", Path(source_text), f"/bin/{name}"))
     image = args.image
     size = image.stat().st_size
     if size == 0 or size % 512:
@@ -101,7 +114,7 @@ def check(args: argparse.Namespace) -> None:
     expected_files = (("VMUNIX", args.kernel, "VMUNIX"),
                       ("bin/noct", args.noct, "/bin/noct"),
                       ("apps/holoris.nct", args.holoris,
-                       "/apps/holoris.nct"))
+                       "/apps/holoris.nct")) + tuple(bin_files)
     with tempfile.TemporaryDirectory() as directory:
         for image_name, source, label in expected_files:
             if source is None:
@@ -124,6 +137,7 @@ def main() -> None:
     parser.add_argument("--kernel", type=Path)
     parser.add_argument("--noct", type=Path)
     parser.add_argument("--holoris", type=Path)
+    parser.add_argument("--bin-file", action="append", default=[])
     parser.add_argument("image", type=Path)
     check(parser.parse_args())
 

@@ -14,6 +14,8 @@
 
 #define UDP_EPHEMERAL_FIRST 49152U
 #define UDP_EPHEMERAL_LAST  65535U
+#define DHCP_SERVER_PORT 67U
+#define DHCP_CLIENT_PORT 68U
 
 struct udp_endpoint {
 	struct inet_socket inet;
@@ -133,8 +135,21 @@ udp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 	if (device == NULL)
 		return -ENETUNREACH;
 	error = inet_interface_address(device, &source, NULL, &broadcast);
-	if (error != 0)
-		return -error;
+	if (error != 0) {
+		uint32_t configured = 0;
+		(void)inet_interface_configuration(device, &configured, NULL,
+		    &broadcast);
+		if (configured != 0 || destination != INADDR_BROADCAST ||
+		    destination_port != DHCP_SERVER_PORT ||
+		    endpoint->inet.local_port != DHCP_CLIENT_PORT ||
+		    endpoint->inet.ifindex == 0 ||
+		    !(endpoint->inet.inet_flags & INET_SOCKET_BROADCAST) ||
+		    (device->flags & (NET_DEVICE_UP | NET_DEVICE_RUNNING |
+		     NET_DEVICE_BROADCAST)) != (NET_DEVICE_UP |
+		     NET_DEVICE_RUNNING | NET_DEVICE_BROADCAST))
+			return -error;
+		source = 0;
+	}
 	if ((destination == INADDR_BROADCAST || destination == broadcast) &&
 	    !(endpoint->inet.inet_flags & INET_SOCKET_BROADCAST))
 		return -EACCES;
@@ -160,7 +175,9 @@ udp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 	if (checksum == 0)
 		checksum = 0xffffU;
 	wire_put16(udp->checksum, checksum);
-	error = ipv4_output(device, destination, IPPROTO_UDP, packet);
+	error = source == 0 ?
+	    ipv4_output_source(device, destination, IPPROTO_UDP, source, packet) :
+	    ipv4_output(device, destination, IPPROTO_UDP, packet);
 	return error == 0 ? (ssize_t)length : -error;
 }
 
@@ -206,15 +223,18 @@ udp_setsockopt(struct socket *socket, int level, int option, const void *value,
 	struct udp_endpoint *endpoint = udp_endpoint(socket);
 	int enabled;
 
-	if (level != SOL_SOCKET || option != SO_BROADCAST ||
-	    value == NULL || length != sizeof(enabled))
-		return EOPNOTSUPP;
-	memcpy(&enabled, value, sizeof(enabled));
-	if (enabled)
-		endpoint->inet.inet_flags |= INET_SOCKET_BROADCAST;
-	else
-		endpoint->inet.inet_flags &= ~INET_SOCKET_BROADCAST;
-	return 0;
+	if (level == SOL_SOCKET && option == SO_BROADCAST) {
+		if (value == NULL || length != sizeof(enabled))
+			return EINVAL;
+		memcpy(&enabled, value, sizeof(enabled));
+		if (enabled)
+			endpoint->inet.inet_flags |= INET_SOCKET_BROADCAST;
+		else
+			endpoint->inet.inet_flags &= ~INET_SOCKET_BROADCAST;
+		return 0;
+	}
+	return inet_socket_setsockopt(&endpoint->inet, level, option, value,
+	    length);
 }
 
 static int
@@ -224,13 +244,16 @@ udp_getsockopt(struct socket *socket, int level, int option, void *value,
 	struct udp_endpoint *endpoint = udp_endpoint(socket);
 	int enabled;
 
-	if (level != SOL_SOCKET || option != SO_BROADCAST || value == NULL ||
-	    length == NULL || *length < sizeof(enabled))
-		return EOPNOTSUPP;
-	enabled = (endpoint->inet.inet_flags & INET_SOCKET_BROADCAST) != 0;
-	memcpy(value, &enabled, sizeof(enabled));
-	*length = sizeof(enabled);
-	return 0;
+	if (level == SOL_SOCKET && option == SO_BROADCAST) {
+		if (value == NULL || length == NULL || *length < sizeof(enabled))
+			return EINVAL;
+		enabled = (endpoint->inet.inet_flags & INET_SOCKET_BROADCAST) != 0;
+		memcpy(value, &enabled, sizeof(enabled));
+		*length = sizeof(enabled);
+		return 0;
+	}
+	return inet_socket_getsockopt(&endpoint->inet, level, option, value,
+	    length);
 }
 
 static void

@@ -92,7 +92,7 @@ static void ipv4_header(struct ipv4_wire *ip, uint16_t total, uint8_t protocol,
 	ip->version_ihl = 0x45;
 	wire_put16(ip->total_length, total);
 	wire_put16(ip->fragment, 0x4000);
-	ip->ttl = 64;
+	ip->ttl = 47;
 	ip->protocol = protocol;
 	wire_put32(ip->source, source);
 	wire_put32(ip->destination, destination);
@@ -198,7 +198,7 @@ int main(void)
 	struct net_device *device;
 	struct socket *control, *udp_socket, *tcp_socket;
 	struct sockaddr_in address;
-	char buffer[16];
+	char buffer[64];
 	ssize_t count;
 	uint32_t syn_sequence, peer_sequence = 0x10203040U;
 	uint16_t tcp_local_port;
@@ -221,6 +221,13 @@ int main(void)
 	assert(transmitted != NULL && transmitted->length == 42);
 	assert(transmitted->data[21] == 2); packet_buf_free(transmitted); transmitted = NULL;
 	input_icmp(device, peer_mac, peer_ip, local_ip);
+	count = control->ops->recvfrom(control, buffer, sizeof(buffer),
+	    MSG_DONTWAIT, NULL, NULL);
+	assert(count == 28);
+	assert(((uint8_t *)buffer)[0] == 0x45);
+	assert(((uint8_t *)buffer)[8] == 47);
+	assert(((uint8_t *)buffer)[9] == IPPROTO_ICMP);
+	assert(((uint8_t *)buffer)[20] == 8);
 	assert(transmitted != NULL && transmitted->data[34] == 0);
 	assert(net_checksum(transmitted->data + 34, 8) == 0);
 	packet_buf_free(transmitted); transmitted = NULL;

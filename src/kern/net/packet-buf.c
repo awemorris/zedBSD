@@ -202,9 +202,41 @@ packet_buf_copy(const struct packet_buf *source)
 	copy->l2_offset = source->l2_offset;
 	copy->l3_offset = source->l3_offset;
 	copy->l4_offset = source->l4_offset;
+	copy->l3_length = source->l3_length;
 	copy->protocol = source->protocol;
 	copy->flags = source->flags;
 	copy->device = source->device;
+	copy->source_length = source->source_length;
+	memcpy(copy->source_address, source->source_address,
+	    sizeof(copy->source_address));
+	return copy;
+}
+
+struct packet_buf *
+packet_buf_copy_region(const struct packet_buf *source, size_t offset,
+		       size_t length)
+{
+	struct packet_buf *copy;
+	void *data;
+
+	if (source == NULL || offset > source->capacity ||
+	    length > source->capacity - offset)
+		return NULL;
+	copy = packet_buf_alloc(0);
+	if (copy == NULL)
+		return NULL;
+	data = packet_buf_append(copy, length);
+	if (data == NULL) {
+		packet_buf_free(copy);
+		return NULL;
+	}
+	memcpy(data, source->storage + offset, length);
+	copy->protocol = source->protocol;
+	copy->flags = source->flags;
+	copy->device = source->device;
+	copy->source_length = source->source_length;
+	memcpy(copy->source_address, source->source_address,
+	    sizeof(copy->source_address));
 	return copy;
 }
 

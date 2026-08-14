@@ -8,6 +8,7 @@
 
 #include <zedbsd/netif.h>
 #include <zedbsd/netinet.h>
+#include <zedbsd/route.h>
 #include <errno.h>
 #include <string.h>
 
@@ -38,12 +39,12 @@ interface_for_device(struct net_device *device, int create)
 }
 
 int
-inet_interface_address(struct net_device *device, uint32_t *address,
-		       uint32_t *netmask, uint32_t *broadcast)
+inet_interface_configuration(struct net_device *device, uint32_t *address,
+			     uint32_t *netmask, uint32_t *broadcast)
 {
 	struct inet_interface *interface = interface_for_device(device, 0);
 
-	if (interface == NULL || interface->address == 0)
+	if (interface == NULL)
 		return EADDRNOTAVAIL;
 	if (address != NULL)
 		*address = interface->address;
@@ -51,6 +52,21 @@ inet_interface_address(struct net_device *device, uint32_t *address,
 		*netmask = interface->netmask;
 	if (broadcast != NULL)
 		*broadcast = interface->broadcast;
+	return 0;
+}
+
+int
+inet_interface_address(struct net_device *device, uint32_t *address,
+		       uint32_t *netmask, uint32_t *broadcast)
+{
+	uint32_t configured;
+	int error = inet_interface_configuration(device, &configured, netmask,
+	    broadcast);
+
+	if (error != 0 || configured == 0)
+		return error != 0 ? error : EADDRNOTAVAIL;
+	if (address != NULL)
+		*address = configured;
 	return 0;
 }
 
@@ -62,8 +78,9 @@ interface_update_route(struct inet_interface *interface, uint32_t old_address,
 		(void)route_delete(old_address & old_netmask, old_netmask,
 		    interface->device);
 	if (interface->address != 0 && interface->netmask != 0) {
-		(void)route_add(interface->address & interface->netmask,
-		    interface->netmask, 0, interface->device);
+		(void)route_add_flags(interface->address & interface->netmask,
+		    interface->netmask, 0, interface->device,
+		    RTF_UP | RTF_CONNECTED);
 		if (interface->broadcast == 0)
 			interface->broadcast = interface->address |
 			    ~interface->netmask;
@@ -156,6 +173,54 @@ int inet_socket_getpeername(struct inet_socket *inet, struct sockaddr *address,
 	return inet_socket_name(inet, address, length, 1);
 }
 
+int
+inet_socket_setsockopt(struct inet_socket *inet, int level, int option,
+		       const void *value, socklen_t length)
+{
+	char name[IFNAMSIZ];
+	struct net_device *device;
+
+	if (inet == NULL || level != SOL_SOCKET || option != SO_BINDTODEVICE)
+		return EOPNOTSUPP;
+	if (value == NULL || length == 0 || length > sizeof(name))
+		return EINVAL;
+	memset(name, 0, sizeof(name));
+	memcpy(name, value, length);
+	if (name[length - 1U] != '\0')
+		return EINVAL;
+	if (name[0] == '\0') {
+		inet->ifindex = 0;
+		return 0;
+	}
+	device = net_device_find(name);
+	if (device == NULL)
+		return ENODEV;
+	inet->ifindex = device->ifindex;
+	return 0;
+}
+
+int
+inet_socket_getsockopt(struct inet_socket *inet, int level, int option,
+		       void *value, socklen_t *length)
+{
+	struct net_device *device;
+	size_t required;
+
+	if (inet == NULL || level != SOL_SOCKET || option != SO_BINDTODEVICE)
+		return EOPNOTSUPP;
+	if (value == NULL || length == NULL)
+		return EINVAL;
+	device = net_device_find_by_index(inet->ifindex);
+	required = device != NULL ? strlen(device->name) + 1U : 1U;
+	if (*length < required)
+		return EINVAL;
+	memset(value, 0, required);
+	if (device != NULL)
+		memcpy(value, device->name, required);
+	*length = (socklen_t)required;
+	return 0;
+}
+
 static unsigned
 device_flags(const struct net_device *device)
 {
@@ -177,6 +242,54 @@ set_ifreq_address(struct ifreq *request, uint32_t address)
 	output->sin_addr.s_addr = net_htonl(address);
 }
 
+static int
+inet_ioctl_ifconf(uintptr_t argument)
+{
+	struct ifconf configuration;
+	struct ifreq request;
+	uint32_t required, capacity, copied = 0;
+	unsigned index;
+	int error;
+
+	if (argument == 0)
+		return EFAULT;
+	error = copyin(argument, &configuration, sizeof(configuration));
+	if (error != 0)
+		return error;
+	if (configuration.ifc_reserved != 0 ||
+	    (configuration.ifc_len % sizeof(struct ifreq)) != 0)
+		return EINVAL;
+	required = net_device_count() * (uint32_t)sizeof(struct ifreq);
+	if (configuration.ifc_buf == 0 || configuration.ifc_len == 0) {
+		configuration.ifc_len = required;
+		return copyout(&configuration, argument, sizeof(configuration));
+	}
+	if (configuration.ifc_buf > UINT32_MAX)
+		return EFAULT;
+	capacity = configuration.ifc_len / (uint32_t)sizeof(struct ifreq);
+	for (index = 0; index < net_device_count() && index < capacity; index++) {
+		struct net_device *device = net_device_at(index);
+		memset(&request, 0, sizeof(request));
+		memcpy(request.ifr_name, device->name,
+		    strnlen(device->name, sizeof(request.ifr_name) - 1U));
+		request.ifr_ifindex = (int)device->ifindex;
+		error = copyout(&request,
+		    (uintptr_t)configuration.ifc_buf + copied, sizeof(request));
+		if (error != 0)
+			return error;
+		copied += sizeof(request);
+	}
+	configuration.ifc_len = copied;
+	return copyout(&configuration, argument, sizeof(configuration));
+}
+
+static int
+is_route_request(unsigned long command)
+{
+	return command == SIOCADDRT || command == SIOCDELRT ||
+	    command == SIOCGRTENTRY;
+}
+
 int
 inet_socket_ioctl(struct socket *socket, unsigned long command,
 		  uintptr_t argument)
@@ -188,6 +301,10 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 	int error;
 
 	(void)socket;
+	if (is_route_request(command))
+		return route_ioctl(command, argument);
+	if (command == SIOCGIFCONF)
+		return inet_ioctl_ifconf(argument);
 	if (argument == 0)
 		return EFAULT;
 	error = copyin(argument, &request, sizeof(request));
@@ -229,6 +346,21 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 	case SIOCGIFHWADDR:
 		memset(request.ifr_hwaddr, 0, sizeof(request.ifr_hwaddr));
 		memcpy(request.ifr_hwaddr, device->hwaddr, device->hwaddr_len);
+		break;
+	case SIOCGIFMTU:
+		request.ifr_mtu = (int)device->mtu;
+		break;
+	case SIOCGIFSTATS:
+		memset(&request.ifr_data, 0, sizeof(request.ifr_data));
+		request.ifr_data.ifi_mtu = device->mtu;
+		request.ifr_data.ifi_ipackets = device->rx_packets;
+		request.ifr_data.ifi_ibytes = device->rx_bytes;
+		request.ifr_data.ifi_ierrors = device->rx_errors;
+		request.ifr_data.ifi_iqdrops = device->rx_dropped;
+		request.ifr_data.ifi_opackets = device->tx_packets;
+		request.ifr_data.ifi_obytes = device->tx_bytes;
+		request.ifr_data.ifi_oerrors = device->tx_errors;
+		request.ifr_data.ifi_oqdrops = device->tx_dropped;
 		break;
 	case SIOCGIFADDR:
 		set_ifreq_address(&request, interface->address);

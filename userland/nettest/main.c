@@ -115,6 +115,7 @@ main(int argc, char **argv)
 	struct timespec delay = { 0, 100000000L };
 	uint8_t echo[16] = { 8, 0, 0, 0, 0x5a, 0x42, 0, 1,
 	    'z','e','d','B','S','D','!','!' };
+	uint8_t packet[64];
 	socklen_t source_length;
 	int descriptor, attempt;
 	ssize_t count;
@@ -160,15 +161,19 @@ main(int argc, char **argv)
 	}
 	for (attempt = 0; attempt < 30; attempt++) {
 		source_length = sizeof(source);
-		count = recvfrom(descriptor, echo, sizeof(echo), MSG_DONTWAIT,
+		count = recvfrom(descriptor, packet, sizeof(packet), MSG_DONTWAIT,
 		    (struct sockaddr *)&source, &source_length);
-		if (count >= 8 && echo[0] == 0) {
+		if (count >= 28 && (packet[0] >> 4) == 4 &&
+		    (packet[0] & 0x0fU) >= 5U && packet[9] == IPPROTO_ICMP &&
+		    (size_t)count >= (size_t)(packet[0] & 0x0fU) * 4U + 8U &&
+		    packet[(packet[0] & 0x0fU) * 4U] == 0) {
 			char address[16];
+			size_t header_length = (size_t)(packet[0] & 0x0fU) * 4U;
 			if (inet_ntop(AF_INET, &source.sin_addr, address,
 			    sizeof(address)) == NULL)
 				strcpy(address, "?");
-			printf("nettest: ICMP echo reply from %s (%ld bytes)\n",
-			    address, (long)count);
+			printf("nettest: ICMP echo reply from %s (%ld bytes, ttl %u)\n",
+			    address, (long)(count - (ssize_t)header_length), packet[8]);
 			close(descriptor);
 			if (udp_test(&peer) != 0)
 				return 1;

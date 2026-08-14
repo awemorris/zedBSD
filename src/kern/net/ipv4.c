@@ -41,13 +41,14 @@ ipv4_protocol_register(uint8_t protocol, ipv4_input_fn input)
 	return 0;
 }
 
-int
-ipv4_output(struct net_device *device, uint32_t destination, uint8_t protocol,
-	    struct packet_buf *packet)
+static int
+ipv4_output_common(struct net_device *device, uint32_t destination,
+		   uint8_t protocol, uint32_t source, int source_given,
+		   struct packet_buf *packet)
 {
 	const struct net_route *route;
 	struct ipv4_wire *header;
-	uint32_t source, next_hop;
+	uint32_t next_hop;
 	uint16_t checksum, total;
 	uint8_t hardware[6];
 	int error;
@@ -65,10 +66,12 @@ ipv4_output(struct net_device *device, uint32_t destination, uint8_t protocol,
 		packet_buf_free(packet);
 		return EMSGSIZE;
 	}
-	error = inet_interface_address(device, &source, NULL, NULL);
-	if (error != 0) {
-		packet_buf_free(packet);
-		return error;
+	if (!source_given) {
+		error = inet_interface_address(device, &source, NULL, NULL);
+		if (error != 0) {
+			packet_buf_free(packet);
+			return error;
+		}
 	}
 	next_hop = route != NULL && route->gateway != 0 ?
 		route->gateway : destination;
@@ -99,6 +102,25 @@ ipv4_output(struct net_device *device, uint32_t destination, uint8_t protocol,
 	return ethernet_output(device, hardware, ETHERNET_TYPE_IPV4, packet);
 }
 
+int
+ipv4_output(struct net_device *device, uint32_t destination, uint8_t protocol,
+	    struct packet_buf *packet)
+{
+	return ipv4_output_common(device, destination, protocol, 0, 0, packet);
+}
+
+int
+ipv4_output_source(struct net_device *device, uint32_t destination,
+		   uint8_t protocol, uint32_t source, struct packet_buf *packet)
+{
+	if (source != 0 || destination != INADDR_BROADCAST) {
+		packet_buf_free(packet);
+		return EINVAL;
+	}
+	return ipv4_output_common(device, destination, protocol, source, 1,
+	    packet);
+}
+
 static int
 ipv4_input(struct packet_buf *packet)
 {
@@ -127,9 +149,19 @@ ipv4_input(struct packet_buf *packet)
 	}
 	source = wire_get32(header->source);
 	destination = wire_get32(header->destination);
-	if (inet_interface_address(packet->device, &local, NULL, &broadcast) != 0 ||
-	    (destination != local && destination != broadcast &&
-	     destination != INADDR_BROADCAST)) {
+	if (packet->l3_offset == PACKET_OFFSET_NONE)
+		packet->l3_offset = (uint16_t)(packet->data - packet->storage);
+	packet->l3_length = total;
+	if (destination == INADDR_BROADCAST) {
+		if ((packet->device->flags & (NET_DEVICE_UP | NET_DEVICE_RUNNING |
+		    NET_DEVICE_BROADCAST)) != (NET_DEVICE_UP | NET_DEVICE_RUNNING |
+		    NET_DEVICE_BROADCAST)) {
+			packet_buf_free(packet);
+			return 0;
+		}
+	} else if (inet_interface_address(packet->device, &local, NULL,
+	    &broadcast) != 0 ||
+	    (destination != local && destination != broadcast)) {
 		packet_buf_free(packet);
 		return 0;
 	}

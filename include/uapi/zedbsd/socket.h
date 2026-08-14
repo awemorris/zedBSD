@@ -29,6 +29,7 @@ typedef uint32_t socklen_t;
 
 #define SOL_SOCKET 0xffff
 #define SO_BROADCAST 0x0020
+#define SO_BINDTODEVICE 0x0019
 #define SO_RCVTIMEO  0x1006
 
 struct zedbsd_timeval {

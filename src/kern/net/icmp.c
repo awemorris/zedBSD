@@ -173,9 +173,18 @@ icmp_deliver(struct packet_buf *packet, uint32_t source, uint32_t destination)
 		if ((endpoint->inet.inet_flags & INET_SOCKET_CONNECTED) &&
 		    endpoint->inet.remote_address != source)
 			continue;
-		copy = packet_buf_copy(packet);
+		if (packet->l3_offset == PACKET_OFFSET_NONE ||
+		    packet->l3_length == 0)
+			continue;
+		copy = packet_buf_copy_region(packet, packet->l3_offset,
+		    packet->l3_length);
 		if (copy == NULL)
 			continue;
+		copy->l3_offset = 0;
+		copy->l3_length = packet->l3_length;
+		copy->l4_offset = packet->l4_offset >= packet->l3_offset ?
+		    (uint16_t)(packet->l4_offset - packet->l3_offset) :
+		    PACKET_OFFSET_NONE;
 		memset(&address, 0, sizeof(address));
 		address.sin_family = AF_INET;
 		address.sin_addr.s_addr = net_htonl(source);
