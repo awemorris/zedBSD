@@ -116,6 +116,7 @@ enum zedbsd_device_class {
 	ZEDBSD_DEV_FDD = 1,
 	ZEDBSD_DEV_IDE = 2,
 	ZEDBSD_DEV_SCSI = 3,
+	ZEDBSD_DEV_SD = 4,
 };
 
 enum zedbsd_device_flags {

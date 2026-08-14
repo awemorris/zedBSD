@@ -154,6 +154,27 @@ def check(args: argparse.Namespace) -> None:
             fail("FAT16 VMUNIX.X64 differs from the input kernel")
         if extracted_hash(args.image, "VMUNIX.X64", ESP_LBA) != expected_amd64:
             fail("ESP VMUNIX.X64 differs from the input kernel")
+    if args.arm64_kernel and extracted_hash(args.image, "VMUNIX.A64") != \
+            hashlib.sha256(args.arm64_kernel.read_bytes()).digest():
+        fail("FAT16 VMUNIX.A64 differs from the input kernel")
+    if args.arm64_shell and extracted_hash(args.image, "arm64/bin/sh") != \
+            hashlib.sha256(args.arm64_shell.read_bytes()).digest():
+        fail("/arm64/bin/sh differs from the input executable")
+    if args.rpi4_config and extracted_hash(args.image, "config.txt") != \
+            hashlib.sha256(args.rpi4_config.read_bytes()).digest():
+        fail("/config.txt differs from the Pi 4 configuration")
+    if args.rpi4_firmware_dir:
+        names = ("start4.elf", "fixup4.dat", "bcm2711-rpi-4-b.dtb",
+                 "LICENCE.broadcom")
+        for name in names:
+            source = args.rpi4_firmware_dir / name
+            if extracted_hash(args.image, name) != \
+                    hashlib.sha256(source.read_bytes()).digest():
+                fail(f"/{name} differs from the pinned Pi firmware")
+        overlay = args.rpi4_firmware_dir / "overlays" / "disable-bt.dtbo"
+        if extracted_hash(args.image, "overlays/disable-bt.dtbo") != \
+                hashlib.sha256(overlay.read_bytes()).digest():
+            fail("/overlays/disable-bt.dtbo differs from pinned firmware")
     if args.bootx64 and extracted_hash(
             args.image, "EFI/BOOT/BOOTX64.EFI", ESP_LBA) != \
             hashlib.sha256(args.bootx64.read_bytes()).digest():
@@ -167,7 +188,7 @@ def check(args: argparse.Namespace) -> None:
     if args.remacs and extracted_hash(args.image, "apps/remacs.nap") != \
             hashlib.sha256(args.remacs.read_bytes()).digest():
         fail("/apps/remacs.nap differs from the input bytecode")
-    print("Unified BIOS/UEFI image check: PASS "
+    print("Unified BIOS/UEFI/Raspberry Pi 4 image check: PASS "
           f"(PC-98 ZBL2 {pc98_count} sectors, PC/AT ZBL2 {pcat_count} sectors)")
 
 
@@ -176,6 +197,10 @@ def main() -> None:
     parser.add_argument("--pc98-kernel", type=Path)
     parser.add_argument("--pcat-kernel", type=Path)
     parser.add_argument("--amd64-kernel", type=Path)
+    parser.add_argument("--arm64-kernel", type=Path)
+    parser.add_argument("--arm64-shell", type=Path)
+    parser.add_argument("--rpi4-config", type=Path)
+    parser.add_argument("--rpi4-firmware-dir", type=Path)
     parser.add_argument("--bootx64", type=Path)
     parser.add_argument("--noct", type=Path)
     parser.add_argument("--holoris", type=Path)

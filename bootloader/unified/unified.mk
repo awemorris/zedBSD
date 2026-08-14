@@ -133,10 +133,15 @@ unified-kernels:
 	$(MAKE) -C $(CURDIR) ARCH=pc98 build/pc98/vmunix
 	$(MAKE) -C $(CURDIR) ARCH=amd64 messages
 	$(MAKE) -C $(CURDIR) ARCH=amd64 build/amd64/vmunix
+	$(MAKE) -C $(CURDIR) ARCH=arm64 messages
+	$(MAKE) -C $(CURDIR) ARCH=arm64 build/arm64/VMUNIX.A64 \
+		build/arm64/bin/sh
 	@mkdir -p $(UNIFIED_BUILD)
 	cp -f build/pcat/vmunix $(UNIFIED_BUILD)/vmunix.at
 	cp -f build/pc98/vmunix $(UNIFIED_BUILD)/vmunix.98
 	cp -f build/amd64/vmunix $(UNIFIED_BUILD)/vmunix.x64
+	cp -f build/arm64/VMUNIX.A64 $(UNIFIED_BUILD)/VMUNIX.A64
+	cp -f build/arm64/bin/sh $(UNIFIED_BUILD)/sh.a64
 	cp -f build/pcat/bin/sh $(UNIFIED_BUILD)/sh
 	cp -f build/pcat/bin/noct $(UNIFIED_BUILD)/noct
 
@@ -156,6 +161,10 @@ $(UNIFIED_BUILD)/hdd-image.img: unified-bootloader \
 		--pc98-kernel $(UNIFIED_BUILD)/vmunix.98 \
 		--pcat-kernel $(UNIFIED_BUILD)/vmunix.at \
 		--amd64-kernel $(UNIFIED_BUILD)/vmunix.x64 \
+		--arm64-kernel $(UNIFIED_BUILD)/VMUNIX.A64 \
+		--arm64-shell $(UNIFIED_BUILD)/sh.a64 \
+		--rpi4-config platform/arm64/config.txt \
+		--rpi4-firmware-dir vendor/raspberrypi-firmware/boot \
 		--bootx64 $(UEFI_BUILD)/BOOTX64.EFI \
 		--shell $(UNIFIED_BUILD)/sh \
 		--noct $(UNIFIED_BUILD)/noct \
@@ -169,6 +178,10 @@ unified-loader-host-check: $(UNIFIED_BUILD)/hdd-image.img
 		--pc98-kernel $(UNIFIED_BUILD)/vmunix.98 \
 		--pcat-kernel $(UNIFIED_BUILD)/vmunix.at \
 		--amd64-kernel $(UNIFIED_BUILD)/vmunix.x64 \
+		--arm64-kernel $(UNIFIED_BUILD)/VMUNIX.A64 \
+		--arm64-shell $(UNIFIED_BUILD)/sh.a64 \
+		--rpi4-config platform/arm64/config.txt \
+		--rpi4-firmware-dir vendor/raspberrypi-firmware/boot \
 		--bootx64 $(UEFI_BUILD)/BOOTX64.EFI \
 		--noct $(UNIFIED_BUILD)/noct \
 		--holoris $(HOLORIS_NOCT) \

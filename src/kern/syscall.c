@@ -662,7 +662,11 @@ copy_exec_vector(uintptr_t address, char **vector, unsigned maximum,
 		return 0;
 	}
 	for (index = 0; index < maximum; index++) {
+#ifdef ZEDBSD_USER_ABI_AARCH64
+		uintptr_t pointer;
+#else
 		uint32_t pointer;
+#endif
 		size_t length;
 		int error = copyin(address + index * sizeof(pointer), &pointer,
 				   sizeof(pointer));

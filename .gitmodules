@@ -7,3 +7,6 @@
 [submodule "vendor/musl"]
 	path = vendor/musl
 	url = https://github.com/awemorris/musl-i386.git
+[submodule "vendor/raspberrypi-firmware"]
+	path = vendor/raspberrypi-firmware
+	url = https://github.com/raspberrypi/firmware.git

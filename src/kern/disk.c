@@ -304,7 +304,7 @@ int bio_wait(struct bio *bio)
 		return bio->b_state == BIO_COMPLETED ? bio->b_error : EINVAL;
 	}
 	while (bio->b_state == BIO_SUBMITTED)
-		__asm__ volatile ("pause");
+		hal_compiler_barrier();
 	return bio->b_state == BIO_COMPLETED ? bio->b_error : EINVAL;
 }
 

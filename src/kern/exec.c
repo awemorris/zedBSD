@@ -19,6 +19,16 @@
 #define EXEC_ENV_MAX 64U
 #define EXEC_STRING_MAX (16U * 1024U)
 
+#ifdef ZEDBSD_USER_ABI_AARCH64
+typedef uintptr_t exec_user_word_t;
+#define EXEC_IMAGE_INFO struct elf64_image_info
+#define exec_elf_load elf64_load
+#else
+typedef uint32_t exec_user_word_t;
+#define EXEC_IMAGE_INFO struct elf32_image_info
+#define exec_elf_load elf32_load
+#endif
+
 int
 exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
 			 char *const argv[],
@@ -27,9 +37,9 @@ exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
 	uintptr_t sp;
 	size_t total = 0;
 	unsigned argc = 0, envc = 0, i;
-	uint32_t argv_address[EXEC_ARG_MAX];
-	uint32_t env_address[EXEC_ENV_MAX];
-	uint32_t words[1U + EXEC_ARG_MAX + 1U + EXEC_ENV_MAX + 1U];
+	exec_user_word_t argv_address[EXEC_ARG_MAX];
+	exec_user_word_t env_address[EXEC_ENV_MAX];
+	exec_user_word_t words[1U + EXEC_ARG_MAX + 1U + EXEC_ENV_MAX + 1U];
 	unsigned word_count = 0;
 	int error;
 
@@ -67,7 +77,7 @@ exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
 		error = vmspace_copy_to(vm, sp, envp[i - 1U], length);
 		if (error != 0)
 			return error;
-		env_address[i - 1U] = (uint32_t)sp;
+		env_address[i - 1U] = (exec_user_word_t)sp;
 	}
 	for (i = argc; i != 0; i--) {
 		size_t length = strlen(argv[i - 1U]) + 1U;
@@ -75,10 +85,10 @@ exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
 		error = vmspace_copy_to(vm, sp, argv[i - 1U], length);
 		if (error != 0)
 			return error;
-		argv_address[i - 1U] = (uint32_t)sp;
+		argv_address[i - 1U] = (exec_user_word_t)sp;
 	}
 	sp &= ~(uintptr_t)15U;
-	sp -= (1U + argc + 1U + envc + 1U) * sizeof(uint32_t);
+	sp -= (1U + argc + 1U + envc + 1U) * sizeof(exec_user_word_t);
 	if (sp < vm->stack_bottom)
 		return EOVERFLOW;
 	words[word_count++] = argc;
@@ -167,7 +177,7 @@ process_spawn_from(struct process *parent, const char *path,
 	struct thread *thread;
 	char *result_envp[EXEC_ENV_MAX + 1U];
 	char *const *effective_envp = envp;
-	struct elf32_image_info image;
+	EXEC_IMAGE_INFO image;
 	uintptr_t sp;
 	int error;
 	unsigned env_count = 0;
@@ -199,7 +209,7 @@ process_spawn_from(struct process *parent, const char *path,
 		error = ENOMEM;
 		goto out;
 	}
-	error = elf32_load(file, process->vmspace, &image);
+	error = exec_elf_load(file, process->vmspace, &image);
 	if (error != 0)
 		goto out;
 	error = vmspace_set_brk_start(process->vmspace, image.brk_start);
@@ -248,7 +258,11 @@ process_spawn_init(const char *path, struct process **result)
 	char *argv[2];
 	char *envp[] = {
 		"HOME=/home",
+#ifdef ZEDBSD_USER_ABI_AARCH64
+		"PATH=/arm64/bin:/bin:/apps",
+#else
 		"PATH=/bin:/apps",
+#endif
 		"REMACS_SKK_DICT=/home/skkjisyo.dic",
 		NULL
 	};

@@ -83,13 +83,24 @@ def copy_kernel(image: Path, offset: int, kernel: Path, dos_name: str,
 def create(args: argparse.Namespace) -> None:
     inputs = (args.stage0, args.pc98_stage1, args.pc98_stage2,
               args.pcat_stage1, args.pcat_stage2, args.pc98_kernel,
-              args.pcat_kernel, args.amd64_kernel, args.bootx64)
+              args.pcat_kernel, args.amd64_kernel, args.arm64_kernel,
+              args.arm64_shell, args.rpi4_config, args.bootx64)
     for path in inputs:
         if not path.is_file():
             raise SystemExit(f"missing input: {path}")
     for path in (args.shell, args.noct, args.holoris, args.remacs):
         if path is not None and not path.is_file():
             raise SystemExit(f"missing input: {path}")
+    firmware_files = (
+        args.rpi4_firmware_dir / "start4.elf",
+        args.rpi4_firmware_dir / "fixup4.dat",
+        args.rpi4_firmware_dir / "bcm2711-rpi-4-b.dtb",
+        args.rpi4_firmware_dir / "LICENCE.broadcom",
+        args.rpi4_firmware_dir / "overlays" / "disable-bt.dtbo",
+    )
+    for path in firmware_files:
+        if not path.is_file():
+            raise SystemExit(f"missing Raspberry Pi firmware input: {path}")
     if args.output.exists() and not args.force:
         raise SystemExit(f"output exists (use --force): {args.output}")
 
@@ -160,6 +171,8 @@ def create(args: argparse.Namespace) -> None:
                     args.fragment_kernels)
         copy_kernel(temporary, offset, args.amd64_kernel, "VMUNIX.X64",
                     args.fragment_kernels)
+        copy_kernel(temporary, offset, args.arm64_kernel, "VMUNIX.A64",
+                    args.fragment_kernels)
         if args.shell:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/bin")
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.shell),
@@ -177,6 +190,18 @@ def create(args: argparse.Namespace) -> None:
         if args.remacs:
             run("mcopy", "-i", f"{temporary}@@{offset}",
                 str(args.remacs), "::/apps/remacs.nap")
+        run("mmd", "-i", f"{temporary}@@{offset}", "::/arm64")
+        run("mmd", "-i", f"{temporary}@@{offset}", "::/arm64/bin")
+        run("mmd", "-i", f"{temporary}@@{offset}", "::/overlays")
+        run("mcopy", "-i", f"{temporary}@@{offset}",
+            str(args.arm64_shell), "::/arm64/bin/sh")
+        run("mcopy", "-i", f"{temporary}@@{offset}",
+            str(args.rpi4_config), "::/config.txt")
+        for path in firmware_files[:-1]:
+            run("mcopy", "-i", f"{temporary}@@{offset}", str(path),
+                f"::/{path.name}")
+        run("mcopy", "-i", f"{temporary}@@{offset}",
+            str(firmware_files[-1]), "::/overlays/disable-bt.dtbo")
 
         run("mformat", "-F", "-i", f"{temporary}@@{esp_offset}", "-T",
             str(esp_blocks), "-v", "ZEDESP", "::")
@@ -191,6 +216,10 @@ def create(args: argparse.Namespace) -> None:
         run("python3", str(checker), "--pc98-kernel",
             str(args.pc98_kernel), "--pcat-kernel", str(args.pcat_kernel),
             "--amd64-kernel", str(args.amd64_kernel),
+            "--arm64-kernel", str(args.arm64_kernel),
+            "--arm64-shell", str(args.arm64_shell),
+            "--rpi4-config", str(args.rpi4_config),
+            "--rpi4-firmware-dir", str(args.rpi4_firmware_dir),
             "--bootx64", str(args.bootx64),
             *(["--noct", str(args.noct)] if args.noct else []),
             *(["--holoris", str(args.holoris)] if args.holoris else []),
@@ -212,6 +241,10 @@ def main() -> None:
     parser.add_argument("--pc98-kernel", type=Path, required=True)
     parser.add_argument("--pcat-kernel", type=Path, required=True)
     parser.add_argument("--amd64-kernel", type=Path, required=True)
+    parser.add_argument("--arm64-kernel", type=Path, required=True)
+    parser.add_argument("--arm64-shell", type=Path, required=True)
+    parser.add_argument("--rpi4-config", type=Path, required=True)
+    parser.add_argument("--rpi4-firmware-dir", type=Path, required=True)
     parser.add_argument("--bootx64", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
     parser.add_argument("--noct", type=Path)
