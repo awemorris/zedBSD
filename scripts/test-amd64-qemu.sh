@@ -4,9 +4,9 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-source_image="${1:-$repo/build/amd64-pcat/hdd-image.img}"
-fragmented_image="${2:-$repo/build/amd64-pcat/bios-hdd-image-fragmented.img}"
-work="$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-amd64-pcat.XXXXXX")"
+source_image="${1:-$repo/build/amd64/hdd-image.img}"
+fragmented_image="${2:-$repo/build/amd64/bios-hdd-image-fragmented.img}"
+work="$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-amd64.XXXXXX")"
 qemu_pid=
 cleanup()
 {

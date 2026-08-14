@@ -183,7 +183,7 @@ def create(args: argparse.Namespace) -> None:
         run("mcopy", "-i", f"{temporary}@@{esp_offset}",
             str(args.amd64_kernel), "::/VMUNIX.X64")
 
-        checker = Path(__file__).with_name("check-pc-unified-hdd-image.py")
+        checker = Path(__file__).with_name("check-unified-hdd-image.py")
         run("python3", str(checker), "--pc98-kernel",
             str(args.pc98_kernel), "--pcat-kernel", str(args.pcat_kernel),
             "--amd64-kernel", str(args.amd64_kernel),

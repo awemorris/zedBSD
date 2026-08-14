@@ -5,7 +5,7 @@
 .section .text
 .global _start
 
-#include "bootloader/pc-unified/layout.inc"
+#include "bootloader/unified/layout.inc"
 
 _start:
 	jmp short locate

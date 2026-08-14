@@ -5,7 +5,7 @@
 .section .text
 .global _start
 
-#include "bootloader/pc-unified/layout.inc"
+#include "bootloader/unified/layout.inc"
 #include "bootloader/include/stage2-header.inc"
 
 _start:

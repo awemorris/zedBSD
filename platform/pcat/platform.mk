@@ -250,8 +250,8 @@ sh-builtins-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/sh bios-bootloader
 	$(SCRIPTS_DIR)/test-sh-builtins.sh pcat
 
 pcat-beui-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/noct \
-	build/pc-unified/hdd-image.img
-	bash $(SCRIPTS_DIR)/test-pcat-beui.sh build/pc-unified/hdd-image.img
+	build/unified/hdd-image.img
+	bash $(SCRIPTS_DIR)/test-pcat-beui.sh build/unified/hdd-image.img
 
 HOST_TEST_BINARIES += $(BUILD)/tests/pcat-mbr-host-test
 .PHONY: pcat-mbr-host-test hdd-boot-qemu-test sh-builtins-qemu-test \

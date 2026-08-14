@@ -4,8 +4,8 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-build="$repo/build/pc-unified"
-tmp="$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-pc-unified.XXXXXX")"
+build="$repo/build/unified"
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-unified.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
 run_and_expect()
@@ -37,7 +37,7 @@ make_image()
 	local at_kernel="$1" image="$2" fragment="${3:-no}"
 	local options=()
 	if test "$fragment" = yes; then options+=(--fragment-kernels); fi
-	python3 "$repo/scripts/make-pc-unified-hdd-image.py" --force \
+	python3 "$repo/scripts/make-unified-hdd-image.py" --force \
 		--stage0 "$build/stage0.bin" \
 		--pc98-stage1 "$build/pc98-stage1.bin" \
 		--pc98-stage2 "$build/pc98-stage2.bin" \

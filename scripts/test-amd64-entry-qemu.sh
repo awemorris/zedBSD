@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-build="$repo/build/amd64-pcat"
+build="$repo/build/amd64"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-amd64-entry.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 

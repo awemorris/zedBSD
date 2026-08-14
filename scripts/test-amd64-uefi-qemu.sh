@@ -4,7 +4,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-source_image="${1:-$repo/build/pc-unified/hdd-image.img}"
+source_image="${1:-$repo/build/unified/hdd-image.img}"
 ovmf_code="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"
 ovmf_vars="${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}"
 qemu="${QEMU_PCAT_X86_64:-qemu-system-x86_64}"

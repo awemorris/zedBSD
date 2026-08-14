@@ -4,7 +4,7 @@ set -euo pipefail
 # Exercise /dev/graphics, ASCII glyphs, and text restoration through the
 # actual Noct/BeUI user process on both PC/AT display backends.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-image="${1:-$repo/build/pc-unified/hdd-image.img}"
+image="${1:-$repo/build/unified/hdd-image.img}"
 qemu="${QEMU_PCAT_I386:-qemu-system-i386}"
 work="$repo/build/pcat/tests/beui"
 offset=$((2048 * 512))

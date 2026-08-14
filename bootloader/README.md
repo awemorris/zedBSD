@@ -22,10 +22,10 @@ Build and test the loaders with the repository build driver:
 ./build.sh bios-loader-qemu-test pcat
 ./build.sh bios-bootloader pc98
 ./build.sh bios-loader-qemu-test pc98
-./build.sh pc-unified-hdd-image pcat
-./build.sh pc-unified-loader-qemu-test pcat
-./build.sh uefi-loader-host-check amd64-pcat
-./build.sh uefi-entry-qemu-test amd64-pcat
+./build.sh hdd-image unified
+./build.sh unified-loader-qemu-test unified
+./build.sh uefi-loader-host-check unified
+./build.sh uefi-entry-qemu-test unified
 ./build.sh legacy-pc98-hdd-image pc98
 ```
 

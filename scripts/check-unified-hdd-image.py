@@ -22,7 +22,7 @@ SECTORS = 17
 
 
 def fail(message: str) -> None:
-    raise SystemExit("unified BIOS image check: " + message)
+    raise SystemExit("unified image check: " + message)
 
 
 def pc98_chs(lba: int) -> bytes:

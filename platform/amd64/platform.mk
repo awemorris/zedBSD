@@ -1,7 +1,7 @@
 # zedBSD amd64/PC-AT bootstrap rules.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
-AMD64_PCAT := platform/amd64-pcat
+AMD64_PLATFORM := platform/amd64
 BIOS_LOADER := bootloader/pcat
 
 AMD64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
@@ -74,10 +74,10 @@ $(BUILD)/kern64/%.o: %.c
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_KERNEL_LIBC_CFLAGS) -fno-builtin \
 		-fno-strict-aliasing -MMD -MP -c $< -o $@
 
-$(BUILD)/vmunix: $(AMD64_VMUNIX_OBJS) $(AMD64_PCAT)/vmunix.ld \
+$(BUILD)/vmunix: $(AMD64_VMUNIX_OBJS) $(AMD64_PLATFORM)/vmunix.ld \
 	scripts/check-amd64-vmunix.py
 	$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 \
-		-T $(AMD64_PCAT)/vmunix.ld -nostdlib $(AMD64_VMUNIX_OBJS) -o $@
+		-T $(AMD64_PLATFORM)/vmunix.ld -nostdlib $(AMD64_VMUNIX_OBJS) -o $@
 	$(PYTHON) scripts/check-amd64-vmunix.py $@
 
 $(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
@@ -171,13 +171,13 @@ amd64-hal-compile: $(AMD64_HAL_OBJS)
 CHECK_RUN_TARGETS += amd64-hal-compile
 
 amd64-entry-qemu-test: $(BUILD)/vmunix bios-bootloader
-	bash scripts/test-amd64-pcat-entry-qemu.sh
+	bash scripts/test-amd64-entry-qemu.sh
 
-hdd-boot-qemu-test amd64-pcat-qemu-test: $(BUILD)/hdd-image.img \
+hdd-boot-qemu-test amd64-qemu-test: $(BUILD)/hdd-image.img \
 	$(BUILD)/bios-hdd-image-fragmented.img
-	bash scripts/test-amd64-pcat-qemu.sh $(BUILD)/hdd-image.img \
+	bash scripts/test-amd64-qemu.sh $(BUILD)/hdd-image.img \
 		$(BUILD)/bios-hdd-image-fragmented.img
 
 .PHONY: all vmunix SH bios-bootloader bios-hdd-image hdd-image \
 	bios-loader-host-check amd64-hal-compile amd64-entry-qemu-test \
-	hdd-boot-qemu-test amd64-pcat-qemu-test
+	hdd-boot-qemu-test amd64-qemu-test

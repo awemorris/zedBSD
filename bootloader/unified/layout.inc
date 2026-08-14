@@ -1,4 +1,4 @@
-/* Fixed disk layout for the dual PC/AT and PC-98 BIOS loader. */
+/* Fixed disk layout for the unified PC/AT and PC-98 BIOS loader. */
 .set ZBU_RELOC_ADDR,        0x0600
 .set ZBU_PC98_STAGE1_LBA,   2
 .set ZBU_PC98_STAGE2_LBA,   3

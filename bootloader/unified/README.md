@@ -20,17 +20,16 @@ and entry array conflict with the PC-98 table and loader slots at LBA 1 onward.
 Build and test with:
 
 ```sh
-./build.sh hdd-image unified-pcat-pc98
-./build.sh pc-unified-hdd-image pcat
-./build.sh pc-unified-loader-host-check pcat
-./build.sh pc-unified-loader-qemu-test pcat
-./build.sh uefi-loader-host-check amd64-pcat
-./build.sh uefi-entry-qemu-test amd64-pcat
+./build.sh hdd-image unified
+./build.sh unified-loader-host-check unified
+./build.sh unified-loader-qemu-test unified
+./build.sh uefi-loader-host-check unified
+./build.sh uefi-entry-qemu-test unified
 ```
 
 The first command is the normal user-facing image build and writes
-`build/unified-pcat-pc98/hdd-image.img`.  The `pc-unified-*` targets remain
-available for low-level loader development and compatibility. The UEFI test
+`build/unified/hdd-image.img`. The `unified-*` targets remain available for
+low-level loader development. The UEFI test
 uses non-Secure-Boot OVMF, QEMU `-M pc`, and one PIIX IDE disk at 64, 128, and
 256 MiB. AHCI, NVMe, Secure Boot, and GPT are outside the initial target.
 
