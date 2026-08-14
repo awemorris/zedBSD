@@ -6,6 +6,6 @@
 all: hdd-image
 
 hdd-image: unified-hdd-image
-	@echo "Unified PC-98/PC-AT BIOS and x64 UEFI image: $(BUILD)/hdd-image.img"
+	@echo "Unified PC-98/PC-AT BIOS, x64 UEFI, and Pi 4 image: $(BUILD)/hdd-image.img"
 
 .PHONY: all hdd-image

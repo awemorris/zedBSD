@@ -15,6 +15,10 @@
 #include "kern/sched.h"
 #include "kern/vm-commit.h"
 
+#ifndef ZEDBSD_INIT_PATH
+#define ZEDBSD_INIT_PATH "/bin/sh"
+#endif
+
 
 /*
  * Stage 2 runs without a C library or operating-system services.  The request
@@ -139,7 +143,7 @@ void kernel_main(const struct zedbsd_handoff *h,
 			hal_printf("VM commit initialization failed (%d); "
 			    "entering idle.\n", error);
 		else {
-			hal_printf("boot: starting init /bin/sh\n\n");
+			hal_printf("boot: starting init %s\n\n", ZEDBSD_INIT_PATH);
 			if (kern_init_start() != 0)
 				puts("init not started; entering idle.\n");
 		}

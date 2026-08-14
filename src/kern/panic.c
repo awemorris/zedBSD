@@ -16,6 +16,7 @@ zedbsd_libc_panic(const char *message)
 	hal_cons_write(message != NULL ? message : "unknown");
 	hal_cons_write("\n");
 	hal_cons_update_cursor();
+	(void)hal_irq_disable();
 	for (;;)
-		__asm__ volatile ("cli; hlt");
+		hal_halt();
 }

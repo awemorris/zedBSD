@@ -219,7 +219,7 @@ zedbsd_libc_panic(const char *message)
 {
 	(void)message;
 	for (;;)
-		__asm__ volatile ("hlt");
+		__asm__ volatile ("" ::: "memory");
 }
 
 void

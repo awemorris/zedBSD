@@ -25,7 +25,8 @@ Platform roles:
   pcat          i386 PC/AT BIOS kernel and image
   pc98          i386 PC-98 BIOS kernel and image
   amd64         amd64 PC/AT BIOS kernel and image
-  unified       PC-98/PC-AT BIOS + amd64 UEFI disk image
+  arm64         arm64 Raspberry Pi 4 kernel and SD image
+  unified       PC-98/PC-AT BIOS + amd64 UEFI + Raspberry Pi 4 image
 
 Common commands:
   all             Build the platform's normal artifacts
@@ -33,7 +34,7 @@ Common commands:
   check           Build and run its host tests
   messages        Generate the kernel message header
 
-Native kernel commands (pcat, pc98, amd64):
+Native kernel commands (pcat, pc98, amd64, arm64):
   vmunix          Build the zedBSD kernel
   SH              Build /bin/sh
   NOCT.ELF        Build the Noct user program
@@ -43,7 +44,7 @@ Native kernel commands (pcat, pc98, amd64):
 
 Unified and special image commands:
   unified-bootloader Build the PC-98/PC/AT BIOS dispatcher and loaders
-  unified-hdd-image  Build the four-path BIOS/UEFI image
+  unified-hdd-image  Build the BIOS/UEFI/Pi 4 multi-platform image
   uefi-loader        Build EFI/BOOT/BOOTX64.EFI
   legacy-pc98-hdd-image Build the legacy NEC98-partition image
   grub-iso           Build the PC/AT GRUB test ISO
@@ -56,6 +57,9 @@ QEMU and image checks:
   unified-loader-qemu-test   Test its three BIOS loader paths
   uefi-loader-host-check     Verify the PE32+ UEFI application
   uefi-entry-qemu-test       Test OVMF, amd64 HAL, IDE root, and userland
+  arm64-image-check          Verify the AArch64 ELF and Raspberry Pi Image
+  rpi4-entry-qemu-test       Test EL1/high-VMA/UART entry on QEMU raspi4b
+  rpi4-qemu-test             Test the Raspberry Pi 4 kernel and SD root
   sh-builtins-qemu-test      Test /bin/sh filesystem builtins in QEMU
   pcat-beui-qemu-test        Test PC/AT Cirrus and VGA BeUI backends
   network-qemu-test          Test the platform NIC with ARP, ICMP, UDP, and TCP
@@ -69,10 +73,12 @@ Examples:
   $0 all pcat
   $0 all pc98
   $0 all amd64
+  $0 all arm64
   $0 hdd-image unified
   $0 check amd64
   $0 unified-loader-qemu-test unified
   $0 uefi-entry-qemu-test unified
+  $0 rpi4-entry-qemu-test arm64
 
 Any Make target may be used as <command>.
 

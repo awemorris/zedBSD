@@ -27,7 +27,14 @@ struct elf32_image_info {
 	size_t stack_size;
 };
 
+struct elf64_image_info {
+	uintptr_t entry;
+	uintptr_t brk_start;
+	size_t stack_size;
+};
+
 int elf32_load(struct file *, struct vmspace *, struct elf32_image_info *);
+int elf64_load(struct file *, struct vmspace *, struct elf64_image_info *);
 int exec_build_initial_stack(struct vmspace *, size_t, char *const [],
 			     char *const [], uintptr_t *sp);
 int process_spawn(const char *, char *const [], char *const [], unsigned,

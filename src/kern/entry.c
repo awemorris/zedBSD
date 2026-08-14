@@ -27,7 +27,11 @@ static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
 	__attribute__((section(".kernel_heap"), aligned(4096)));
 static struct zedbsd_heap kernel_heap;
 
+#ifdef HAL_ARCH_ARM64
+extern char __kernel_vma_start[], __kernel_vma_end[];
+#else
 extern char __low_start[], __low_end[], __high_start[], __high_end[];
+#endif
 
 void *
 kern_malloc(size_t size)
@@ -59,8 +63,13 @@ kern_memory_get_stats(struct kern_memory_stats *stats)
 		zedbsd_heap_largest_free_instance(&kernel_heap);
 	stats->heap_largest_failed =
 		zedbsd_heap_largest_failed_instance(&kernel_heap);
+#ifdef HAL_ARCH_ARM64
+	stats->low_image_bytes = 0;
+	stats->high_image_bytes = (size_t)(__kernel_vma_end - __kernel_vma_start);
+#else
 	stats->low_image_bytes = (size_t)(__low_end - __low_start);
 	stats->high_image_bytes = (size_t)(__high_end - __high_start);
+#endif
 }
 
 static void *kernel_alloc(size_t size) { return kern_malloc(size); }
@@ -69,6 +78,11 @@ static void kernel_free(void *pointer) { kern_free(pointer); }
 static void
 reserve_loaded_image(void)
 {
+#ifdef HAL_ARCH_ARM64
+	pmem_reserve((hal_physaddr_t)((uintptr_t)__kernel_vma_start -
+	    0xffff000000000000ULL),
+	    (size_t)(__kernel_vma_end - __kernel_vma_start));
+#else
 	uintptr_t low_start = (uintptr_t)__low_start & ~SYS_START;
 	uintptr_t low_end = (uintptr_t)__low_end & ~SYS_START;
 	uintptr_t high_start = (uintptr_t)__high_start & ~SYS_START;
@@ -76,6 +90,7 @@ reserve_loaded_image(void)
 
 	pmem_reserve((hal_physaddr_t)low_start, low_end - low_start);
 	pmem_reserve((hal_physaddr_t)high_start, high_end - high_start);
+#endif
 }
 
 void
