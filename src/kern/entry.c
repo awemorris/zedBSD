@@ -14,6 +14,7 @@
 #include "kern/kernel.h"
 #include "kern/kmem.h"
 #include "kern/net.h"
+#include "kern/page.h"
 #include "kern/platform.h"
 #include "kern/process.h"
 #include "kern/sched.h"
@@ -24,11 +25,12 @@
 #define SYS_START 0x80000000U
 
 static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
-	__attribute__((section(".kernel_heap"), aligned(4096)));
+	__attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
 static struct zedbsd_heap kernel_heap;
 
-#ifdef HAL_ARCH_ARM64
+#if defined(HAL_ARCH_ARM64) || defined(HAL_ARCH_SPARCV9)
 extern char __kernel_vma_start[], __kernel_vma_end[];
+extern char __kernel_phys_start[], __kernel_phys_end[];
 #else
 extern char __low_start[], __low_end[], __high_start[], __high_end[];
 #endif
@@ -63,7 +65,7 @@ kern_memory_get_stats(struct kern_memory_stats *stats)
 		zedbsd_heap_largest_free_instance(&kernel_heap);
 	stats->heap_largest_failed =
 		zedbsd_heap_largest_failed_instance(&kernel_heap);
-#ifdef HAL_ARCH_ARM64
+#if defined(HAL_ARCH_ARM64) || defined(HAL_ARCH_SPARCV9)
 	stats->low_image_bytes = 0;
 	stats->high_image_bytes = (size_t)(__kernel_vma_end - __kernel_vma_start);
 #else
@@ -78,10 +80,9 @@ static void kernel_free(void *pointer) { kern_free(pointer); }
 static void
 reserve_loaded_image(void)
 {
-#ifdef HAL_ARCH_ARM64
-	pmem_reserve((hal_physaddr_t)((uintptr_t)__kernel_vma_start -
-	    0xffff000000000000ULL),
-	    (size_t)(__kernel_vma_end - __kernel_vma_start));
+#if defined(HAL_ARCH_ARM64) || defined(HAL_ARCH_SPARCV9)
+	pmem_reserve((hal_physaddr_t)(uintptr_t)__kernel_phys_start,
+	    (size_t)(__kernel_phys_end - __kernel_phys_start));
 #else
 	uintptr_t low_start = (uintptr_t)__low_start & ~SYS_START;
 	uintptr_t low_end = (uintptr_t)__low_end & ~SYS_START;
@@ -102,7 +103,8 @@ kernel_entry(const void *handoff)
 
 	if (h == NULL || h->magic != ZEDBSD_HANDOFF_MAGIC ||
 	    (h->version != ZEDBSD_HANDOFF_VERSION_PC98 &&
-	     h->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT) ||
+	     h->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT &&
+	     h->version != ZEDBSD_HANDOFF_VERSION_SUN4U) ||
 	    h->size < sizeof(*h))
 		hal_fatal(__FILE__, __LINE__, "invalid zedBSD handoff");
 	hal_printf("boot: kernel heap, process, and scheduler initialization\n");

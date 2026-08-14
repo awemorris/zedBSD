@@ -144,8 +144,12 @@ void kernel_main(const struct zedbsd_handoff *h,
 			    "entering idle.\n", error);
 		else {
 			hal_printf("boot: starting init %s\n\n", ZEDBSD_INIT_PATH);
-			if (kern_init_start() != 0)
-				puts("init not started; entering idle.\n");
+			{
+				int init_error = kern_init_start();
+				if (init_error != 0)
+					hal_printf("init not started (%d); entering idle.\n",
+					    init_error);
+			}
 		}
 	}
 	sched_idle();

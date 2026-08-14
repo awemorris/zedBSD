@@ -108,15 +108,23 @@ int getsockopt(int descriptor, int level, int option, void *value,
 
 uint16_t htons(uint16_t value)
 {
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	return value;
+#else
 	return (uint16_t)(value << 8) | (uint16_t)(value >> 8);
+#endif
 }
 
 uint16_t ntohs(uint16_t value) { return htons(value); }
 
 uint32_t htonl(uint32_t value)
 {
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	return value;
+#else
 	return (value << 24) | ((value << 8) & 0x00ff0000U) |
 	    ((value >> 8) & 0x0000ff00U) | (value >> 24);
+#endif
 }
 
 uint32_t ntohl(uint32_t value) { return htonl(value); }

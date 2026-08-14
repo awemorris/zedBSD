@@ -23,9 +23,16 @@ static inline uint32_t net_bswap32(uint32_t value)
 	       ((value & 0xff000000U) >> 24);
 }
 
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define net_htons(v) ((uint16_t)(v))
+#define net_ntohs(v) ((uint16_t)(v))
+#define net_htonl(v) ((uint32_t)(v))
+#define net_ntohl(v) ((uint32_t)(v))
+#else
 #define net_htons(v) net_bswap16((uint16_t)(v))
 #define net_ntohs(v) net_bswap16((uint16_t)(v))
 #define net_htonl(v) net_bswap32((uint32_t)(v))
 #define net_ntohl(v) net_bswap32((uint32_t)(v))
+#endif
 
 #endif

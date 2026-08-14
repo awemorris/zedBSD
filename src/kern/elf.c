@@ -7,6 +7,7 @@
 #include "kern/exec.h"
 #include "kern/file.h"
 #include "kern/kmem.h"
+#include "kern/page.h"
 #include "kern/vmspace.h"
 
 #include <errno.h>
@@ -14,8 +15,16 @@
 #include <string.h>
 
 #define ELF_PHNUM_MAX 32U
-#define PAGE_SIZE 4096U
+#define PAGE_SIZE ZEDBSD_PAGE_SIZE
 #define ELF_OFF_MAX 0x7fffffffULL
+
+#ifdef ZEDBSD_USER_ABI_SPARCV9
+#define ELF64_EXPECTED_DATA ELFDATA2MSB
+#define ELF64_EXPECTED_MACHINE EM_SPARCV9
+#else
+#define ELF64_EXPECTED_DATA ELFDATA2LSB
+#define ELF64_EXPECTED_MACHINE EM_AARCH64
+#endif
 
 static int
 read_exact(struct file *file, off_t offset, void *buffer, size_t size)
@@ -75,7 +84,7 @@ elf32_load(struct file *file, struct vmspace *vm,
 	    header.e_ident[EI_MAG2] != ELFMAG2 ||
 	    header.e_ident[EI_MAG3] != ELFMAG3 ||
 	    header.e_ident[EI_CLASS] != ELFCLASS32 ||
-	    header.e_ident[EI_DATA] != ELFDATA2LSB ||
+	    header.e_ident[EI_DATA] != ELF64_EXPECTED_DATA ||
 	    header.e_ident[EI_VERSION] != EV_CURRENT ||
 	    header.e_type != ET_EXEC || header.e_machine != EM_386 ||
 	    header.e_version != EV_CURRENT || header.e_ehsize != sizeof(header) ||
@@ -209,9 +218,10 @@ elf64_load(struct file *file, struct vmspace *vm,
 	    header.e_ident[EI_MAG2] != ELFMAG2 ||
 	    header.e_ident[EI_MAG3] != ELFMAG3 ||
 	    header.e_ident[EI_CLASS] != ELFCLASS64 ||
-	    header.e_ident[EI_DATA] != ELFDATA2LSB ||
+	    header.e_ident[EI_DATA] != ELF64_EXPECTED_DATA ||
 	    header.e_ident[EI_VERSION] != EV_CURRENT ||
-	    header.e_type != ET_EXEC || header.e_machine != EM_AARCH64 ||
+	    header.e_type != ET_EXEC ||
+	    header.e_machine != ELF64_EXPECTED_MACHINE ||
 	    header.e_version != EV_CURRENT || header.e_ehsize != sizeof(header) ||
 	    header.e_phentsize != sizeof(struct elf64_phdr) ||
 	    header.e_phnum == 0 || header.e_phnum > ELF_PHNUM_MAX)

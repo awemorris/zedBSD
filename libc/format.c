@@ -18,12 +18,14 @@ struct format_output {
 	size_t length;
 };
 
+#ifndef ZEDBSD_NO_PRINTF_FLOAT
 #define FLOAT_DIGITS_MAX 17
 
 union double_shape {
 	double value;
 	uint64_t bits;
 };
+#endif
 
 static void
 emit_character(struct format_output *output, char character)
@@ -47,6 +49,7 @@ emit_bytes(struct format_output *output, const char *text, size_t length)
 		emit_character(output, *text++);
 }
 
+#ifndef ZEDBSD_NO_PRINTF_FLOAT
 static void
 append_character(char *buffer, size_t capacity, size_t *length, char character)
 {
@@ -306,6 +309,7 @@ emit_float(struct format_output *output, double value, char conversion,
 	if (left && width > 0 && (size_t)width > total)
 		emit_repeat(output, ' ', (size_t)width - total);
 }
+#endif
 
 static size_t
 unsigned_digits(char *reverse, uint64_t value, unsigned int base, int upper)
@@ -496,10 +500,15 @@ vsnprintf(char *buffer, size_t size, const char *format, va_list arguments)
 		} else if (conversion == 'f' || conversion == 'F' ||
 			   conversion == 'e' || conversion == 'E' ||
 			   conversion == 'g' || conversion == 'G') {
+			#ifdef ZEDBSD_NO_PRINTF_FLOAT
+			(void)va_arg(arguments, double);
+			emit_bytes(&output, "[float]", 7U);
+			#else
 			double value = va_arg(arguments, double);
 
 			emit_float(&output, value, conversion, alternate, left, plus,
 				space, zero, width, precision);
+			#endif
 		} else if (conversion == '\0') {
 			break;
 		} else {

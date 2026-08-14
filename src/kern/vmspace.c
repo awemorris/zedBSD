@@ -8,6 +8,7 @@
 #include "kern/vmspace.h"
 #include "kern/file.h"
 #include "kern/kmem.h"
+#include "kern/page.h"
 #include "kern/swap.h"
 #include "kern/vm-commit.h"
 #include "kern/vm-reclaim.h"
@@ -15,7 +16,7 @@
 #include <errno.h>
 #include <string.h>
 
-#define PAGE_SIZE 4096U
+#define PAGE_SIZE ZEDBSD_PAGE_SIZE
 #define VM_MMAP_BASE 0x10000000U
 
 struct vmspace kernel_vmspace = {

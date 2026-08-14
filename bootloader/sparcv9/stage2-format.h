@@ -1,0 +1,19 @@
+/*
+ * On-disk zedBSD SPARC V9 second-stage header.
+ * Multi-byte fields are big-endian.
+ * Copyright (C) 2026 Awe Morris
+ * SPDX-License-Identifier: Zlib
+ */
+
+#ifndef ZEDBSD_SPARCV9_STAGE2_FORMAT_H
+#define ZEDBSD_SPARCV9_STAGE2_FORMAT_H
+
+#define SPARCV9_STAGE2_MAGIC 0x5a533932U
+#define SPARCV9_STAGE2_VERSION 1U
+#define SPARCV9_STAGE2_HEADER_SIZE 32U
+#define SPARCV9_STAGE2_HEADER_LBA 32U
+#define SPARCV9_STAGE2_PAYLOAD_LBA 33U
+#define SPARCV9_STAGE2_LOAD_ADDRESS 0x00100000UL
+#define SPARCV9_STAGE2_LOAD_LIMIT 0x00300000UL
+
+#endif

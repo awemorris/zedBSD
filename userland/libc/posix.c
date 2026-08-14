@@ -22,6 +22,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifndef ZEDBSD_USER_PAGE_SIZE
+#define ZEDBSD_USER_PAGE_SIZE 4096
+#endif
+
 char **environ;
 #define ENVIRONMENT_MAX 64U
 static char *environment_entries[ENVIRONMENT_MAX + 1U];
@@ -197,7 +201,7 @@ int msync(void *p, size_t n, int flags) {
 }
 long sysconf(int name) {
 	if (name == _SC_PAGE_SIZE)
-		return 4096;
+		return ZEDBSD_USER_PAGE_SIZE;
 	errno = EINVAL;
 	return -1;
 }
