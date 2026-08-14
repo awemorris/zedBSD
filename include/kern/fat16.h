@@ -1,5 +1,5 @@
 /*
- * zedBSD FAT12/FAT16 driver
+ * FAT12/FAT16 driver
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib

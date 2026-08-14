@@ -1,4 +1,9 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef ZEDBSD_UAPI_PROCESS_H
 #define ZEDBSD_UAPI_PROCESS_H
 

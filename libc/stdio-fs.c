@@ -1,9 +1,10 @@
 /*
+ * zedBSD filesystem-backed stdio
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * zedBSD filesystem-backed stdio for kernel mode Noct.
  * This will be removed after moving Noct to userspace.
+ *
+ * SPDX-License-Identifier: Zlib
  */
 
 #include "libc/stdio-fs.h"

@@ -1,6 +1,7 @@
 /*
- * zedBSD persistent environment store
+ * Persistent environment store
  * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
 

@@ -7,6 +7,9 @@
 #include "kern/pc98/linux-boot.h"
 #include "hal/i386/bsp-pc98/display.h"
 #include "drivers/pc98-ide.h"
+#include "drivers/pc98-lgy98.h"
+#include <errno.h>
+#include <hal/hal.h>
 
 size_t
 kern_platform_init(const struct zedbsd_handoff *handoff,
@@ -43,6 +46,18 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 	partition_set_scheme(&partition_scheme_pc98_auto);
 	disk_registry_reset();
 	(void)zedbsd_ide_pc98_init(devices, (unsigned)count);
+	{
+		int network_error = zedbsd_pc98_lgy98_init();
+
+		if (network_error == 0)
+		{
+			hal_printf("net: LGY-98 registered as ne0\n");
+			kern_platform_debug_write("net: LGY-98 registered as ne0\n");
+		}
+		else if (network_error != ENODEV)
+			hal_printf("net: LGY-98 initialization failed (%d)\n",
+			    network_error);
+	}
 	return count;
 }
 

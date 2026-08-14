@@ -46,7 +46,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
 	$(BUILD)/src/kern/system-device.o $(BUILD)/src/kern/boot-device.o \
 	$(BUILD)/src/kern/init.o \
-	$(BUILD)/src/kern/pc98/graphics.o
+	$(BUILD)/src/kern/pc98/graphics.o \
+	$(KERN_NET_OBJS)
 
 # Milestone verification nests QEMU tests.  Keep those chains ordered even
 # when the caller requests a highly parallel compile.
@@ -88,6 +89,8 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/disk.o \
 	$(BUILD)/src/kern/partition.o \
 	$(BUILD)/drivers/pc98-ide.o \
+	$(BUILD)/drivers/dp8390.o \
+	$(BUILD)/drivers/pc98-lgy98.o \
 	$(BUILD)/src/kern/mbr-partition.o \
 	$(BUILD)/src/kern/pc98/partition.o \
 	$(BUILD)/src/kern/pc98/partition-auto.o \
@@ -107,7 +110,7 @@ all: $(BUILD)/boot2.bin $(BUILD)/ipl-lba0.bin $(BUILD)/ipl-lba2.bin \
 	$(BUILD)/ipl-lba0.img $(BUILD)/ipl-lba2.img $(BUILD)/ipl-part.img \
 	$(BUILD)/IO.SYS $(BUILD)/vmunix \
 	$(BUILD)/INIT.ELF $(BUILD)/bin/noct $(BUILD)/bin/sh \
-	$(BUILD)/bin/linux \
+	$(BUILD)/bin/linux $(BUILD)/bin/nettest \
 	$(BUILD)/partition-pbr.bin \
 	$(BUILD)/chain-test.bin $(BUILD)/fdd-ipl.bin \
 	$(BUILD)/BOOTAPP.BIN
@@ -235,13 +238,14 @@ bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
-	$(BUILD)/bin/noct $(HOLORIS_NOCT) \
+	$(BUILD)/bin/noct $(BUILD)/bin/nettest $(HOLORIS_NOCT) \
 	$(SCRIPTS_DIR)/make-bios-hdd-image.py \
 	$(SCRIPTS_DIR)/check-bios-hdd-image.py
 	$(PYTHON) $(SCRIPTS_DIR)/make-bios-hdd-image.py --force \
 		--machine pc98 --stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
 		--shell $(BUILD)/bin/sh --noct $(BUILD)/bin/noct \
+		--nettest $(BUILD)/bin/nettest \
 		--holoris $(HOLORIS_NOCT) $@
 
 bios-hdd-image: $(BUILD)/bios-hdd-image.img
@@ -252,6 +256,11 @@ bios-loader-host-check: $(BUILD)/bios-hdd-image.img
 
 bios-loader-qemu-test: bios-bootloader $(BUILD)/bootloader/payload32.elf
 	bash $(SCRIPTS_DIR)/test-bios-bootloader-qemu.sh pc98
+
+network-qemu-test: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix \
+	$(BUILD)/bin/nettest
+	bash $(SCRIPTS_DIR)/test-pc98-network.sh
 
 $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
 	cp -f $< $@
@@ -298,6 +307,7 @@ $(BUILD)/ipl-part.img: $(BUILD)/partition-pbr.bin
 # Stage 2 (vmunix) and the applet container.
 
 USER_LIBC_OBJS := $(BUILD)/userland/crt0.o $(BUILD)/userland/libc/posix.o \
+	$(BUILD)/userland/libc/socket.o \
 	$(BUILD)/libc/heap.o $(BUILD)/libc/string.o $(BUILD)/libc/ctype.o \
 	$(BUILD)/libc/int64.o $(BUILD)/libc/strto.o $(BUILD)/libc/format.o \
 	$(BUILD)/libc/stdio.o
@@ -306,9 +316,11 @@ USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-mno-mmx -mno-sse -mno-sse2
 USER_STACK_LDFLAGS := -z stack-size=0x100000
 USER_ELF_CHECK := $(SCRIPTS_DIR)/check-user-elf.py
-$(BUILD)/userland/libc/posix.o $(BUILD)/userland/tests/syscall-smoke.o: \
+$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/socket.o \
+	$(BUILD)/userland/tests/syscall-smoke.o: \
 	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(BUILD)/userland/libc/posix.o $(BUILD)/userland/tests/syscall-smoke.o: \
+$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/socket.o \
+	$(BUILD)/userland/tests/syscall-smoke.o: \
 	OBJ_CFLAGS = $(USER_CFLAGS)
 
 $(BUILD)/INIT.ELF: $(USER_LIBC_OBJS) $(BUILD)/userland/tests/syscall-smoke.o \
@@ -375,6 +387,20 @@ $(BUILD)/bin/linux: $(USER_LIBC_OBJS) $(USER_BOOTLINUX_OBJS) \
 		$(USER_STACK_LDFLAGS) \
 		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) \
 		$(USER_BOOTLINUX_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+	$(PYTHON) $(USER_ELF_CHECK) $@
+
+USER_NETTEST_OBJS := $(BUILD)/userland/nettest/main.o
+$(USER_NETTEST_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(USER_NETTEST_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
+
+$(BUILD)/bin/nettest: $(USER_LIBC_OBJS) $(USER_NETTEST_OBJS) \
+	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
+		$(USER_LIBC_OBJS) $(USER_NETTEST_OBJS) \
+		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(USER_ELF_CHECK) $@
 

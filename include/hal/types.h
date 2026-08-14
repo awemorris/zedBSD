@@ -1,4 +1,7 @@
-/* Kernel HAL compatibility aliases. */
+/*
+ * Kernel HAL compatibility aliases.
+ * Copyright (C) 2026, Awe Morris.
+ */
 
 #ifndef ZEDBSD_HAL_TYPES_H
 #define ZEDBSD_HAL_TYPES_H

@@ -1,5 +1,10 @@
-/* Legacy PC/AT ATA PIO driver.
- * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * PC/AT ATA PIO driver
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #include "drivers/pcat-ide.h"
 #include <errno.h>
 #include <hal/hal.h>

@@ -1,9 +1,10 @@
 /*
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
- *
  * Temporary ring-3 INT 0xc2 observation record.
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
  */
+
 #ifndef ZEDBSD_KERN_USER_PROBE_H
 #define ZEDBSD_KERN_USER_PROBE_H
 

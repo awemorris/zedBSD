@@ -32,7 +32,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/console-device.o $(BUILD)/src/kern/graphics-device.o \
 	$(BUILD)/src/kern/system-device.o \
 	$(BUILD)/src/kern/pcat/font.o $(BUILD)/src/kern/pcat/graphics.o \
-	$(BUILD)/src/kern/pcat/unsupported-devices.o $(BUILD)/src/kern/init.o
+	$(BUILD)/src/kern/pcat/unsupported-devices.o $(BUILD)/src/kern/init.o \
+	$(KERN_NET_OBJS)
 
 VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/fs.o $(BUILD)/src/kern/namespace.o \
@@ -50,7 +51,7 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(HAL_PCAT_OBJS) $(KERN_OBJS)
 
 all: $(BUILD)/bootsect.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
-	$(BUILD)/bin/noct $(BUILD)/hdd-image.img \
+	$(BUILD)/bin/noct $(BUILD)/bin/nettest $(BUILD)/hdd-image.img \
 	$(BUILD)/zedbsd-grub.iso
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
@@ -123,13 +124,14 @@ bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
-	$(BUILD)/bin/noct $(HOLORIS_NOCT) \
+	$(BUILD)/bin/noct $(BUILD)/bin/nettest $(HOLORIS_NOCT) \
 	$(SCRIPTS_DIR)/make-bios-hdd-image.py \
 	$(SCRIPTS_DIR)/check-bios-hdd-image.py
 	$(PYTHON) $(SCRIPTS_DIR)/make-bios-hdd-image.py --force \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
 		--shell $(BUILD)/bin/sh --noct $(BUILD)/bin/noct \
+		--nettest $(BUILD)/bin/nettest \
 		--holoris $(HOLORIS_NOCT) $@
 
 bios-hdd-image: $(BUILD)/bios-hdd-image.img
@@ -163,7 +165,8 @@ $(BUILD)/vmunix: $(VMUNIX_OBJS) $(PCAT)/vmunix.ld \
 	grub-file --is-x86-multiboot $@
 
 USER_LIBC_OBJS := $(BUILD)/userland/crt0.o \
-	$(BUILD)/userland/libc/posix.o $(BUILD)/libc/heap.o \
+	$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/socket.o \
+	$(BUILD)/libc/heap.o \
 	$(BUILD)/libc/string.o $(BUILD)/libc/ctype.o $(BUILD)/libc/int64.o \
 	$(BUILD)/libc/strto.o $(BUILD)/libc/format.o $(BUILD)/libc/stdio.o
 USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
@@ -203,8 +206,10 @@ $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 
 USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o \
 	$(BUILD)/userland/sh/builtins.o
-$(BUILD)/userland/libc/posix.o $(USER_SH_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(BUILD)/userland/libc/posix.o $(USER_SH_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
+$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/socket.o \
+	$(USER_SH_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/socket.o \
+	$(USER_SH_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 
 $(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
 	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PCAT)/user.ld $(USER_ELF_CHECK)
@@ -212,6 +217,19 @@ $(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
 		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
 		$(USER_SH_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+	$(PYTHON) $(USER_ELF_CHECK) $@
+
+USER_NETTEST_OBJS := $(BUILD)/userland/nettest/main.o
+$(USER_NETTEST_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(USER_NETTEST_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
+
+$(BUILD)/bin/nettest: $(USER_LIBC_OBJS) $(USER_NETTEST_OBJS) \
+	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PCAT)/user.ld $(USER_ELF_CHECK)
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
+		$(USER_NETTEST_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(USER_ELF_CHECK) $@
 

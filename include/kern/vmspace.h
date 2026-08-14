@@ -1,9 +1,11 @@
 /*
+ * vmspace
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
- *
  * Process virtual-memory ownership.
+ *
+ * SPDX-License-Identifier: Zlib
  */
+
 #ifndef ZEDBSD_KERN_VMSPACE_H
 #define ZEDBSD_KERN_VMSPACE_H
 

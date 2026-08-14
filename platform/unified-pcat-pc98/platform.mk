@@ -16,7 +16,8 @@ $(UNIFIED_PLATFORM_IMAGE): $(UNIFIED_CANONICAL_IMAGE)
 		--pc98-kernel build/pc-unified/vmunix.98 \
 		--pcat-kernel build/pc-unified/vmunix.at \
 		--noct build/pc-unified/noct \
-		--holoris $(HOLORIS_NOCT) $@
+		--holoris $(HOLORIS_NOCT) \
+		--remacs build/pc-unified/remacs.nap $@
 
 hdd-image: $(UNIFIED_PLATFORM_IMAGE)
 	@echo "Unified PC/AT + PC-98 HDD image: $(UNIFIED_PLATFORM_IMAGE)"

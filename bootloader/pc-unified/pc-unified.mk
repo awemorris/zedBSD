@@ -3,6 +3,11 @@
 
 PC_UNIFIED := bootloader/pc-unified
 PC_UNIFIED_BUILD := build/pc-unified
+REMACS_NAP := $(PC_UNIFIED_BUILD)/remacs.nap
+REMACS_ROOT := $(NOCT_ROOT)/apps/remacs
+REMACS_SOURCES := $(wildcard $(REMACS_ROOT)/editor/*.noct) \
+	$(REMACS_ROOT)/src/napi.def $(REMACS_ROOT)/tools/gen-napi.py \
+	$(REMACS_ROOT)/tools/build-nap.sh
 PC_UNIFIED_COMMON_DEPS := $(PC_UNIFIED)/layout.inc \
 	bootloader/include/stage2-header.inc
 
@@ -92,8 +97,11 @@ pc-unified-kernels:
 	cp -f build/pcat/bin/sh $(PC_UNIFIED_BUILD)/sh
 	cp -f build/pcat/bin/noct $(PC_UNIFIED_BUILD)/noct
 
+$(REMACS_NAP): $(SCRIPTS_DIR)/build-remacs-nap.sh $(REMACS_SOURCES)
+	bash $(SCRIPTS_DIR)/build-remacs-nap.sh $@
+
 $(PC_UNIFIED_BUILD)/hdd-image.img: pc-unified-bootloader \
-	pc-unified-kernels $(HOLORIS_NOCT) \
+	pc-unified-kernels $(HOLORIS_NOCT) $(REMACS_NAP) \
 	$(SCRIPTS_DIR)/make-pc-unified-hdd-image.py \
 	$(SCRIPTS_DIR)/check-pc-unified-hdd-image.py
 	$(PYTHON) $(SCRIPTS_DIR)/make-pc-unified-hdd-image.py --force \
@@ -106,7 +114,8 @@ $(PC_UNIFIED_BUILD)/hdd-image.img: pc-unified-bootloader \
 		--pcat-kernel $(PC_UNIFIED_BUILD)/vmunix.at \
 		--shell $(PC_UNIFIED_BUILD)/sh \
 		--noct $(PC_UNIFIED_BUILD)/noct \
-		--holoris $(HOLORIS_NOCT) $@
+		--holoris $(HOLORIS_NOCT) \
+		--remacs $(REMACS_NAP) $@
 
 pc-unified-hdd-image: $(PC_UNIFIED_BUILD)/hdd-image.img
 
@@ -115,7 +124,8 @@ pc-unified-loader-host-check: $(PC_UNIFIED_BUILD)/hdd-image.img
 		--pc98-kernel $(PC_UNIFIED_BUILD)/vmunix.98 \
 		--pcat-kernel $(PC_UNIFIED_BUILD)/vmunix.at \
 		--noct $(PC_UNIFIED_BUILD)/noct \
-		--holoris $(HOLORIS_NOCT) $<
+		--holoris $(HOLORIS_NOCT) \
+		--remacs $(REMACS_NAP) $<
 
 pc-unified-loader-qemu-test: pc-unified-bootloader
 	$(MAKE) -C $(CURDIR) ARCH=pcat build/pcat/bootloader/payload32.elf \

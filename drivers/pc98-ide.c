@@ -1,17 +1,17 @@
 /*
  * NEC PC-98 internal IDE driver (PIO, polled)
  * Copyright (C) 2026 Awe Morris
+ *
+ * - The PC-98 built-in IDE multiplexes two ATA channels.
+ * - Each with a master/slave pair onto one register block.
+ * - Port 0x432 bit 0 selects the active bank.
+ * - The command block lives at 0x640-0x64e with a 2-byte stride
+ *   (16-bit data at 0x640), and the control block at 0x74c/0x74e.
+ * - Reference model: qemu-pc98 hw/ide/pc98-ide.c
+ * - Reference driver: linux-pc98 drivers/ata/pata_pc9800.c.
+ * - Interrupts stay disabled (nIEN), everything is polled.
+ *
  * SPDX-License-Identifier: Zlib
- *
- * The PC-98 built-in IDE multiplexes two ATA channels (each with a
- * master/slave pair) onto one register block: port 0x432 bit 0 selects
- * the active bank, the command block lives at 0x640-0x64e with a 2-byte
- * stride (16-bit data at 0x640), and the control block at 0x74c/0x74e.
- * Reference model: qemu-pc98 hw/ide/pc98-ide.c; reference driver:
- * linux-pc98 drivers/ata/pata_pc9800.c.
- *
- * Interrupts stay disabled (nIEN); everything is polled.  IRQ 9
- * completion arrives with the Phase D scheduler.
  */
 
 #include "drivers/pc98-ide.h"
@@ -41,11 +41,16 @@
 #define IDE_CMD_IDENTIFY  0xecU
 
 #define IDE_DEVCTL_NIEN   0x02U
+#define IDE_DEVCTL_SRST   0x04U
 
 #define IDE_UNIT_MAX      4U
-/* Polls before a stuck controller is declared dead.  PIO on real
- * hardware answers within microseconds; QEMU immediately. */
-#define IDE_TIMEOUT_SPINS 5000000U
+
+/*
+ * Match the independently proven Linux pc98ide driver's five-second
+ * ceiling: every unsuccessful poll is followed by about 10
+ * microseconds of ISA I/O delay.
+ */
+#define IDE_TIMEOUT_POLLS 500000U
 
 struct ide_unit {
 	struct disk *disk;
@@ -64,7 +69,6 @@ struct ide_unit {
 static struct ide_unit units[IDE_UNIT_MAX];
 static struct ide_unit *unit_order[IDE_UNIT_MAX];
 static unsigned unit_count;
-static uint8_t bank_control;
 static const char *failure_stage;
 
 static uint8_t
@@ -100,8 +104,17 @@ outw(uint16_t port, uint16_t value)
 static void
 select_bank(uint8_t bank)
 {
-	/* Preserve controller state other than the channel-select bit. */
-	outb(IDE_BANK_SELECT, (uint8_t)(bank_control | (bank & 1U)));
+	/*
+	 * Select the channel and deliberately clear every other writable bit.
+	 * In particular, bit 3 selects DWORD data transfers on later PC-9821
+	 * controllers, while this driver always transfers with 16-bit INW/OUTW.
+	 *
+	 * The original Linux/98 IDE frontend and the small pc98ide block driver
+	 * both write exactly 0 or 1 here.  Reusing the value read from 0x432 is
+	 * unsafe: it contains capability/status bits as well as mode state, and
+	 * firmware is allowed to leave DWORD mode enabled.
+	 */
+	outb(IDE_BANK_SELECT, (uint8_t)(bank & 1U));
 }
 
 /* Reading the alternate status four times gives the 400ns settle time
@@ -115,14 +128,37 @@ select_delay(void)
 	(void)inb(IDE_ALT_STATUS);
 }
 
+/* Four alternate-status reads are the ATA-mandated 400 ns delay.  Using
+ * that hardware-timed delay also avoids depending on a calibrated CPU loop
+ * this early in boot. */
+static void
+delay_10us(void)
+{
+	unsigned i;
+
+	for (i = 0; i < 25U; i++)
+		select_delay();
+}
+
+static void
+delay_2ms(void)
+{
+	unsigned i;
+
+	for (i = 0; i < 200U; i++)
+		delay_10us();
+}
+
 static int
 wait_clear(uint8_t mask)
 {
 	uint32_t spins;
 
-	for (spins = 0; spins < IDE_TIMEOUT_SPINS; spins++)
+	for (spins = 0; spins < IDE_TIMEOUT_POLLS; spins++) {
 		if (!(inb(IDE_ALT_STATUS) & mask))
 			return 1;
+		delay_10us();
+	}
 	return 0;
 }
 
@@ -137,12 +173,12 @@ wait_selectable(void)
 {
 	uint32_t spins;
 
-	for (spins = 0; spins < IDE_TIMEOUT_SPINS; spins++) {
+	for (spins = 0; spins < IDE_TIMEOUT_POLLS; spins++) {
 		uint8_t status = inb(IDE_ALT_STATUS);
 
-		if (status == 0xffU ||
-		    !(status & (IDE_STATUS_BSY | IDE_STATUS_DRQ)))
+		if (status == 0xffU || !(status & IDE_STATUS_BSY))
 			return 1;
+		delay_10us();
 	}
 	return 0;
 }
@@ -153,17 +189,35 @@ wait_drq(void)
 {
 	uint32_t spins;
 
-	for (spins = 0; spins < IDE_TIMEOUT_SPINS; spins++) {
+	for (spins = 0; spins < IDE_TIMEOUT_POLLS; spins++) {
 		uint8_t status = inb(IDE_ALT_STATUS);
 
-		if (status & IDE_STATUS_BSY)
+		if (status & IDE_STATUS_BSY) {
+			delay_10us();
 			continue;
+		}
 		if (status & (IDE_STATUS_DF | IDE_STATUS_ERR))
 			return 0;
 		if (status & IDE_STATUS_DRQ)
 			return 1;
+		delay_10us();
 	}
 	return 0;
+}
+
+/* Reset one channel before IDENTIFY.  This is the sequence used by the
+ * working minimal Linux PC-98 IDE driver: assert SRST for at least 10 us,
+ * release it with interrupts disabled, then allow 2 ms for settling. */
+static int
+reset_bank(uint8_t bank)
+{
+	select_bank(bank);
+	outb(IDE_ALT_STATUS, IDE_DEVCTL_NIEN | IDE_DEVCTL_SRST);
+	delay_10us();
+	outb(IDE_ALT_STATUS, IDE_DEVCTL_NIEN);
+	delay_2ms();
+	failure_stage = "wait after software reset";
+	return wait_clear(IDE_STATUS_BSY);
 }
 
 static int
@@ -349,6 +403,7 @@ identify(uint8_t bank, uint8_t drive, uint16_t data[256])
 	probe.bank = bank;
 	probe.drive = drive;
 	select_bank(bank);
+	failure_stage = "read initial status";
 	status = inb(IDE_ALT_STATUS);
 	/* A floating bus reads 0xff on both units: nothing on this bank. */
 	if (status == 0xffU)
@@ -358,18 +413,49 @@ identify(uint8_t bank, uint8_t drive, uint16_t data[256])
 	/* Selecting an absent device makes its sibling answer (or the bus
 	 * float); the signature check below rejects both cases. */
 	outb(IDE_ALT_STATUS, IDE_DEVCTL_NIEN);
+	failure_stage = "issue IDENTIFY";
 	outb(IDE_STATUS, IDE_CMD_IDENTIFY);
-	status = inb(IDE_ALT_STATUS);
+	status = inb(IDE_STATUS);
 	if (status == 0 || status == 0xffU)
 		return 0;
+	failure_stage = "wait IDENTIFY DRQ";
 	if (!wait_drq())
 		return 0;
+	failure_stage = "read IDENTIFY data";
 	for (word = 0; word < 256; word++)
 		data[word] = inw(IDE_DATA);
 	/* Word 0 bit 15 clear identifies an ATA (not ATAPI) device. */
 	if (data[0] & 0x8000U)
 		return 0;
 	return 1;
+}
+
+static const struct zedbsd_device *
+bios_device_for_slot(const struct zedbsd_device *devices, unsigned count,
+		     unsigned slot)
+{
+	unsigned i;
+
+	for (i = 0; devices != NULL && i < count; i++)
+		if (devices[i].device_class == ZEDBSD_DEV_IDE &&
+		    devices[i].bios_id == 0x80U + slot)
+			return &devices[i];
+	return NULL;
+}
+
+static void
+report_probe_failure(unsigned slot)
+{
+	uint8_t status;
+	uint8_t error;
+
+	select_bank((uint8_t)(slot / 2U));
+	status = inb(IDE_ALT_STATUS);
+	error = (status & IDE_STATUS_ERR) ? inb(IDE_ERROR) : 0;
+	hal_printf("ide: probe BIOS=%02X bank=%u drive=%u stage=%s "
+	    "status=%02X error=%02X bankctl=%02X\n", 0x80U + slot,
+	    slot / 2U, slot & 1U, failure_stage, status, error,
+	    inb(IDE_BANK_SELECT));
 }
 
 static void
@@ -388,29 +474,45 @@ zedbsd_ide_pc98_init(const struct zedbsd_device *bios_devices,
 		     unsigned bios_device_count)
 {
 	static uint16_t data[256];
+	uint8_t reset_done[2] = { 0, 0 };
+	unsigned pass;
 	unsigned slot;
-	uint8_t bank;
-	uint8_t drive;
 
 	unit_count = 0;
-	/* Linux's working PC-98 frontend preserves every non-bank bit. */
-	bank_control = (uint8_t)(inb(IDE_BANK_SELECT) & ~1U);
 	for (slot = 0; slot < IDE_UNIT_MAX; slot++) {
 		units[slot].present = 0;
 		units[slot].disk = NULL;
 		unit_order[slot] = NULL;
 	}
-	for (bank = 0; bank < 2; bank++) {
-		for (drive = 0; drive < 2; drive++) {
+	/* Probe only BIOS-advertised units, with the boot-origin unit first.
+	 * Besides avoiding hangs on floating secondary channels, this preserves
+	 * the BIOS-to-native mapping used by VFS. */
+	for (pass = 0; pass < 2; pass++) {
+		for (slot = 0; slot < IDE_UNIT_MAX; slot++) {
 			struct ide_unit *unit;
-			const struct zedbsd_device *bios_dev = NULL;
+			const struct zedbsd_device *bios_dev;
 			uint64_t sector_count;
-			unsigned i;
+			uint8_t bank = (uint8_t)(slot / 2U);
+			uint8_t drive = (uint8_t)(slot & 1U);
 
-			slot = (unsigned)bank * 2U + drive;
-			unit = &units[slot];
-			if (!identify(bank, drive, data))
+			bios_dev = bios_device_for_slot(bios_devices,
+			    bios_device_count, slot);
+			if (bios_dev == NULL ||
+			    (((bios_dev->flags & ZEDBSD_DEV_BOOT_ORIGIN) != 0) !=
+			     (pass == 0)))
 				continue;
+			if (!reset_done[bank]) {
+				reset_done[bank] = 1;
+				if (!reset_bank(bank)) {
+					report_probe_failure(slot);
+					continue;
+				}
+			}
+			unit = &units[slot];
+			if (!identify(bank, drive, data)) {
+				report_probe_failure(slot);
+				continue;
+			}
 			unit->bank = bank;
 			unit->drive = drive;
 			unit->native_cylinders = data[1];
@@ -445,15 +547,7 @@ zedbsd_ide_pc98_init(const struct zedbsd_device *bios_devices,
 			 * enumerates IDE disks in the same bank-major order
 			 * this probe uses, so BIOS ID 80h+slot is an exact pairing.
 			 */
-			for (i = 0; bios_devices != NULL && i < bios_device_count;
-			     i++) {
-				if (bios_devices[i].device_class == ZEDBSD_DEV_IDE &&
-				    bios_devices[i].bios_id == 0x80U + slot) {
-					bios_dev = &bios_devices[i];
-					break;
-				}
-			}
-			if (bios_dev != NULL && bios_dev->heads != 0 &&
+			if (bios_dev->heads != 0 &&
 			    bios_dev->sectors != 0) {
 				unit->firmware_heads = bios_dev->heads;
 				unit->firmware_sectors = bios_dev->sectors;

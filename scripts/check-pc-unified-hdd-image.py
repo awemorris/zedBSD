@@ -135,6 +135,9 @@ def check(args: argparse.Namespace) -> None:
     if args.holoris and extracted_hash(args.image, "apps/holoris.nct") != \
             hashlib.sha256(args.holoris.read_bytes()).digest():
         fail("/apps/holoris.nct differs from the input script")
+    if args.remacs and extracted_hash(args.image, "apps/remacs.nap") != \
+            hashlib.sha256(args.remacs.read_bytes()).digest():
+        fail("/apps/remacs.nap differs from the input bytecode")
     print("Unified BIOS image check: PASS "
           f"(PC-98 ZBL2 {pc98_count} sectors, PC/AT ZBL2 {pcat_count} sectors)")
 
@@ -145,6 +148,7 @@ def main() -> None:
     parser.add_argument("--pcat-kernel", type=Path)
     parser.add_argument("--noct", type=Path)
     parser.add_argument("--holoris", type=Path)
+    parser.add_argument("--remacs", type=Path)
     parser.add_argument("image", type=Path)
     check(parser.parse_args())
 

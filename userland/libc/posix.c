@@ -5,6 +5,7 @@
 #include <zedbsd/dirent.h>
 #include <zedbsd/syscall.h>
 #include <zedbsd/process.h>
+#include <zedbsd/netif.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -132,7 +133,8 @@ int chdir(const char *p) { return (int)call(ZEDBSD_SYS_chdir, (uintptr_t)p, 0, 0
 char *getcwd(char *p, size_t n) { return (char *)call(ZEDBSD_SYS_getcwd, (uintptr_t)p, n, 0, 0, 0, 0); }
 int ioctl(int fd, unsigned long request, ...) {
 	va_list ap; uintptr_t arg = 0;
-	if (((request >> 16) & 0x1fffUL) != 0) {
+	if (((request >> 16) & 0x1fffUL) != 0 ||
+	    (request >= SIOCGIFNAME && request <= SIOCGIFINDEX)) {
 		va_start(ap, request); arg = va_arg(ap, uintptr_t); va_end(ap);
 	}
 	return (int)call(ZEDBSD_SYS_ioctl, fd, request, arg, 0, 0, 0);

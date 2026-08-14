@@ -1,9 +1,10 @@
 /*
+ * Kernel thread objects backed by opaque HAL tasks
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * Kernel thread objects backed by opaque HAL tasks.
+ * SPDX-License-Identifier: Zlib
  */
+
 #ifndef ZEDBSD_KERN_THREAD_H
 #define ZEDBSD_KERN_THREAD_H
 

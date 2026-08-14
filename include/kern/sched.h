@@ -1,9 +1,10 @@
 /*
+ * Round-robin kernel scheduler
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * Priority round-robin kernel scheduler.
+ * SPDX-License-Identifier: Zlib
  */
+
 #ifndef ZEDBSD_KERN_SCHED_H
 #define ZEDBSD_KERN_SCHED_H
 

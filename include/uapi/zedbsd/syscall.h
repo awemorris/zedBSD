@@ -1,4 +1,10 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * syscall
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef ZEDBSD_UAPI_SYSCALL_H
 #define ZEDBSD_UAPI_SYSCALL_H
 
@@ -22,6 +28,18 @@ enum zedbsd_syscall_number {
 	ZEDBSD_SYS_spawn = 17,
 	ZEDBSD_SYS_wait = 18,
 	ZEDBSD_SYS_brk = 19,
+	ZEDBSD_SYS_socket = 20,
+	ZEDBSD_SYS_bind = 21,
+	ZEDBSD_SYS_connect = 22,
+	ZEDBSD_SYS_listen = 23,
+	ZEDBSD_SYS_accept = 24,
+	ZEDBSD_SYS_sendto = 25,
+	ZEDBSD_SYS_recvfrom = 26,
+	ZEDBSD_SYS_shutdown = 27,
+	ZEDBSD_SYS_getsockname = 28,
+	ZEDBSD_SYS_getpeername = 29,
+	ZEDBSD_SYS_setsockopt = 30,
+	ZEDBSD_SYS_getsockopt = 31,
 };
 
 #endif

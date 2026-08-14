@@ -1,8 +1,8 @@
 /*
+ * Per-process file descriptor table
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * Per-process descriptor table.
+ * SPDX-License-Identifier: Zlib
  */
 
 #ifndef ZEDBSD_KERN_FILEDESC_H

@@ -51,6 +51,23 @@ include libc/libc.mk
 include softfloat/softfloat.mk
 include noct.mk
 
+KERN_NET_OBJS := \
+	$(BUILD)/src/kern/net/packet-buf.o \
+	$(BUILD)/src/kern/net/net-device.o \
+	$(BUILD)/src/kern/net/core.o \
+	$(BUILD)/src/kern/net/socket.o \
+	$(BUILD)/src/kern/net/socket-file.o \
+	$(BUILD)/src/kern/net/packet-socket.o \
+	$(BUILD)/src/kern/net/checksum.o \
+	$(BUILD)/src/kern/net/ethernet.o \
+	$(BUILD)/src/kern/net/route.o \
+	$(BUILD)/src/kern/net/inet-socket.o \
+	$(BUILD)/src/kern/net/arp.o \
+	$(BUILD)/src/kern/net/ipv4.o \
+	$(BUILD)/src/kern/net/icmp.o \
+	$(BUILD)/src/kern/net/udp.o \
+	$(BUILD)/src/kern/net/tcp.o
+
 # ----------------------------------------------------------------------
 # Generic compile rules.  Per-object flag overrides use target-specific
 # variables; header dependencies come from -MMD.
@@ -147,6 +164,40 @@ $(BUILD)/tests/vm-reclaim-host-test: tests/vm-reclaim-host-test.c \
 	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vm-reclaim.c \
 		src/kern/swap.c $< -o $@
 
+$(BUILD)/tests/packet-buf-host-test: tests/packet-buf-host-test.c \
+	src/kern/net/packet-buf.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
+		src/kern/net/packet-buf.c $< -o $@
+
+$(BUILD)/tests/net-device-host-test: tests/net-device-host-test.c \
+	src/kern/net/packet-buf.c src/kern/net/net-device.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
+		src/kern/net/packet-buf.c src/kern/net/net-device.c $< -o $@
+
+$(BUILD)/tests/packet-socket-host-test: tests/packet-socket-host-test.c \
+	src/kern/net/packet-buf.c src/kern/net/net-device.c \
+	src/kern/net/socket.c src/kern/net/packet-socket.c \
+	src/kern/net/ethernet.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
+		src/kern/net/packet-buf.c src/kern/net/net-device.c \
+		src/kern/net/socket.c src/kern/net/packet-socket.c \
+		src/kern/net/ethernet.c $< -o $@
+
+INET_HOST_SOURCES := src/kern/net/packet-buf.c src/kern/net/net-device.c \
+	src/kern/net/socket.c src/kern/net/checksum.c src/kern/net/ethernet.c \
+	src/kern/net/route.c src/kern/net/inet-socket.c src/kern/net/arp.c \
+	src/kern/net/ipv4.c src/kern/net/icmp.c src/kern/net/udp.c \
+	src/kern/net/tcp.c
+
+$(BUILD)/tests/inet-stack-host-test: tests/inet-stack-host-test.c \
+	$(INET_HOST_SOURCES)
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
+		$(INET_HOST_SOURCES) $< -o $@
+
 $(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
 	src/kern/fs.c src/kern/namespace.c src/kern/env.c $(ZEDBSD_LIBC_SOURCES) \
 	src/kern/disk.c src/kern/inode.c src/kern/file.c src/kern/namecache.c \
@@ -202,7 +253,11 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/vmspace-host-test \
 	$(BUILD)/tests/vm-commit-host-test \
 	$(BUILD)/tests/swap-host-test \
-	$(BUILD)/tests/vm-reclaim-host-test
+	$(BUILD)/tests/vm-reclaim-host-test \
+	$(BUILD)/tests/packet-buf-host-test \
+	$(BUILD)/tests/net-device-host-test \
+	$(BUILD)/tests/packet-socket-host-test \
+	$(BUILD)/tests/inet-stack-host-test
 CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test
 
 # ----------------------------------------------------------------------

@@ -49,6 +49,7 @@ Test commands:
   pc-unified-loader-qemu-test  Test one image on PC/AT and PC-98 QEMU
   sh-builtins-qemu-test        Test /bin/sh filesystem builtins in QEMU
   pcat-beui-qemu-test          Test PC/AT Cirrus and VGA BeUI backends
+  network-qemu-test            Test PC-98 LGY-98, ICMP, UDP, and TCP
 
 Maintenance commands:
   clean           Remove build/<platform>

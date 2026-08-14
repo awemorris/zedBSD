@@ -1,9 +1,10 @@
 /*
+ * Kernel process objects
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * Kernel process objects.
+ * SPDX-License-Identifier: Zlib
  */
+
 #ifndef ZEDBSD_KERN_PROCESS_H
 #define ZEDBSD_KERN_PROCESS_H
 

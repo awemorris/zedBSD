@@ -1,6 +1,6 @@
 /*
- * Minimal ELF32/i386 definitions owned by the kernel.
- * Copyright (C) 2026, Awe Morris.
+ * ELF
+ * Copyright (C) 2026, Awe Morris
  *
  * SPDX-License-Identifier: Zlib
  */

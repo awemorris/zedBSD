@@ -1,4 +1,10 @@
-/* zedBSD VFAT long-file-name helpers. */
+/*
+ * VFAT long-file-name helpers.
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef ZEDBSD_FAT_LFN_H
 #define ZEDBSD_FAT_LFN_H
 

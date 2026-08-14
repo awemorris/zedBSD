@@ -1,8 +1,8 @@
 /*
+ * Kernel memory allocation
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * Persistent kernel allocation, independent of the active Noct arena.
+ * SPDX-License-Identifier: Zlib
  */
 #ifndef ZEDBSD_KERN_KMEM_H
 #define ZEDBSD_KERN_KMEM_H

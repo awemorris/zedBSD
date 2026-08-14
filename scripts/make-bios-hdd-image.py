@@ -30,7 +30,7 @@ def create(args: argparse.Namespace) -> None:
     for path in (args.stage1, args.stage2, args.kernel):
         if not path.is_file():
             raise SystemExit(f"missing input: {path}")
-    for path in (args.shell, args.noct, args.holoris):
+    for path in (args.shell, args.noct, args.nettest, args.holoris):
         if path is not None and not path.is_file():
             raise SystemExit(f"missing input: {path}")
     if args.output.exists() and not args.force:
@@ -93,7 +93,7 @@ def create(args: argparse.Namespace) -> None:
         else:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.kernel),
                 "::VMUNIX")
-        if args.shell or args.noct:
+        if args.shell or args.noct or args.nettest:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/bin")
         if args.shell:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.shell),
@@ -101,6 +101,9 @@ def create(args: argparse.Namespace) -> None:
         if args.noct:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.noct),
                 "::/bin/noct")
+        if args.nettest:
+            run("mcopy", "-i", f"{temporary}@@{offset}", str(args.nettest),
+                "::/bin/nettest")
         if args.holoris:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/apps")
             run("mcopy", "-i", f"{temporary}@@{offset}",
@@ -125,6 +128,7 @@ def main() -> None:
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
     parser.add_argument("--noct", type=Path)
+    parser.add_argument("--nettest", type=Path)
     parser.add_argument("--holoris", type=Path)
     parser.add_argument("--size-mib", type=int, default=129)
     parser.add_argument("--fragment-kernel", action="store_true")

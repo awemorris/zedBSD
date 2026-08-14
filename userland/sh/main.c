@@ -499,7 +499,7 @@ command(char *text)
 		int i;
 		if (getenv("REMACS_SKK_DICT") == NULL)
 			(void)setenv("REMACS_SKK_DICT", "/home/skkjisyo.dic", 1);
-		args[0] = "/apps/emacs.nap";
+		args[0] = "/apps/remacs.nap";
 		for (i = 1; i < argc && i < ARG_MAX; i++)
 			args[i] = argv[i];
 		return run_noct(argc, args);

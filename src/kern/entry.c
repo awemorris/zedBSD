@@ -13,6 +13,7 @@
 #include "kern/boot.h"
 #include "kern/kernel.h"
 #include "kern/kmem.h"
+#include "kern/net.h"
 #include "kern/platform.h"
 #include "kern/process.h"
 #include "kern/sched.h"
@@ -102,6 +103,8 @@ kernel_entry(const void *handoff)
 	sched_init();
 	if (process_reaper_start() != 0)
 		hal_fatal(__FILE__, __LINE__, "process reaper initialization failed");
+	if (net_init() != 0)
+		hal_fatal(__FILE__, __LINE__, "network subsystem initialization failed");
 
 	hal_printf("boot: platform device discovery\n");
 	device_count = kern_platform_init(h, devices, KERN_PLATFORM_MAX_DEVICES);

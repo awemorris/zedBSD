@@ -1,10 +1,11 @@
-#include "libc/heap.h"
-
 /*
  * zedBSD freestanding C library
  * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
  */
+
+#include "libc/heap.h"
 
 #include <stddef.h>
 #include <errno.h>

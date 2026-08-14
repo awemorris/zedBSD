@@ -1,4 +1,9 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * PC/AT ATA PIO driver
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 #ifndef ZEDBSD_DRIVERS_PCAT_IDE_H
 #define ZEDBSD_DRIVERS_PCAT_IDE_H
 #include "kern/disk.h"

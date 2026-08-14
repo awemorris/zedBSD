@@ -22,7 +22,8 @@ SECTIONS
 	.text.low : {
 		*(.text.entry)
 		*/hal/i386/*.o(.text*) */hal/i386/bsp-pc98/*.o(.text*)
-		*/kern/*.o(.text*) */kern/pc98/*.o(.text*)
+		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o) .text*)
+		*/kern/pc98/*.o(.text*)
 		*main.o(.text*) *stage2-m9-test.o(.text*)
 		*console.o(.text*) *env.o(.text*)
 		*fs.o(.text*) *namespace.o(.text*)
@@ -37,7 +38,8 @@ SECTIONS
 	} :low
 	.rodata.low : {
 		*/hal/i386/*.o(.rodata*) */hal/i386/bsp-pc98/*.o(.rodata*)
-		*/kern/*.o(.rodata*) */kern/pc98/*.o(.rodata*)
+		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o) .rodata*)
+		*/kern/pc98/*.o(.rodata*)
 		*main.o(.rodata*) *stage2-m9-test.o(.rodata*)
 		*console.o(.rodata*) *env.o(.rodata*)
 		*fs.o(.rodata*) *namespace.o(.rodata*)
@@ -52,7 +54,8 @@ SECTIONS
 	} :low
 	.data.low : {
 		*/hal/i386/*.o(.data*) */hal/i386/bsp-pc98/*.o(.data*)
-		*/kern/*.o(.data*) */kern/pc98/*.o(.data*)
+		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o) .data*)
+		*/kern/pc98/*.o(.data*)
 		*main.o(.data*) *stage2-m9-test.o(.data*)
 		*console.o(.data*) *env.o(.data*)
 		*fs.o(.data*) *namespace.o(.data*)
@@ -75,7 +78,8 @@ SECTIONS
 		*/hal/i386/locore.o(.bss* COMMON)
 		*/hal/i386/*.o(.bss* COMMON)
 		*/hal/i386/bsp-pc98/*.o(.bss* COMMON)
-		*/kern/*.o(.bss* COMMON) */kern/pc98/*.o(.bss* COMMON)
+		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o) .bss* COMMON)
+		*/kern/pc98/*.o(.bss* COMMON)
 		*main.o(.bss* COMMON) *stage2-m9-test.o(.bss* COMMON)
 		*console.o(.bss* COMMON) *env.o(.bss* COMMON)
 		*fs.o(.bss* COMMON) *namespace.o(.bss* COMMON)
@@ -100,7 +104,7 @@ SECTIONS
 	.data.high : { *(.data*) } :high
 	__high_image_end = .;
 	__high_bss_start = .;
-	.bss.high (NOLOAD) : { *(.vfs_bss) *(.bss*) *(COMMON) } :high
+	.bss.high (NOLOAD) : { *(.vfs_bss) *(.net_bss) *(.bss*) *(COMMON) } :high
 	.kernel_heap (NOLOAD) : ALIGN(4096) {
 		__kernel_heap_start = .;
 		KEEP(*(.kernel_heap))

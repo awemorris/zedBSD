@@ -1,5 +1,5 @@
 /*
- * zedBSD filesystem interface
+ * Filesystem interface
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib

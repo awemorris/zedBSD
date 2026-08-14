@@ -7,6 +7,7 @@
 #include <kern/inode.h>
 #include <kern/internal.h>
 #include <kern/kmem.h>
+#include <kern/net.h>
 #include <kern/platform.h>
 #include <kern/messages.h>
 #include <kern/process.h>
@@ -689,6 +690,7 @@ pc98_linux_commit(struct pc98_linux_image *image)
 		HAL_FATAL("Linux boot with live VM commitment");
 	if (swap_shutdown(swap_system_backend()) != 0)
 		HAL_FATAL("Linux boot swap shutdown");
+	net_shutdown_for_boot();
 	memset((void *)BP_ADDR, 0, 4096);
 	memcpy((void *)CMD_ADDR, local.arguments, strlen(local.arguments) + 1U);
 	bp = (uint8_t *)BP_ADDR;

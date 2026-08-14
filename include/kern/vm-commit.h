@@ -1,9 +1,10 @@
 /*
+ * Strict user virtual-memory commitment accounting
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
- * Strict user virtual-memory commitment accounting.
+ * SPDX-License-Identifier: Zlib
  */
+
 #ifndef ZEDBSD_KERN_VM_COMMIT_H
 #define ZEDBSD_KERN_VM_COMMIT_H
 

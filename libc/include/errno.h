@@ -37,5 +37,22 @@ extern int zedbsd_errno;
 #define ESRCH 26
 #define ECHILD 27
 #define E2BIG 28
+#define ENFILE 29
+#define EMSGSIZE 30
+#define ENOBUFS 31
+#define ENETDOWN 32
+#define ENETUNREACH 33
+#define EPROTONOSUPPORT 34
+#define EAFNOSUPPORT 35
+#define EADDRINUSE 36
+#define EADDRNOTAVAIL 37
+#define EISCONN 38
+#define ENOTCONN 39
+#define ECONNREFUSED 40
+#define ECONNRESET 41
+#define ETIMEDOUT 42
+#define EHOSTUNREACH 43
+#define EPIPE 44
+#define EDESTADDRREQ 45
 
 #endif
