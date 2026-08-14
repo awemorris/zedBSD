@@ -87,7 +87,7 @@ $(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
 $(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2.S \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
-	bootloader/include/elf.inc
+	bootloader/include/elf.inc bootloader/include/amd64-handoff.h
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
 
@@ -110,9 +110,10 @@ $(BUILD)/bootloader/payload32.elf: $(BUILD)/bootloader/payload32.o \
 	bootloader/tests/payload32-pcat.ld
 	$(LD) -m elf_i386 -T bootloader/tests/payload32-pcat.ld $< -o $@
 
-$(BUILD)/bootloader/payload64.o: bootloader/tests/payload64-pcat.S
+$(BUILD)/bootloader/payload64.o: bootloader/tests/payload64-pcat.S \
+	bootloader/include/amd64-handoff.h
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -c $< -o $@
+	$(CC) -m64 -I. -c $< -o $@
 
 $(BUILD)/bootloader/payload64.elf: $(BUILD)/bootloader/payload64.o \
 	bootloader/tests/payload64-pcat.ld

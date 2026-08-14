@@ -46,7 +46,10 @@ struct stat {
 	gid_t st_gid;
 	dev_t st_rdev;
 	off_t st_size;
-};
+} __attribute__((packed, aligned(4)));
+
+_Static_assert(sizeof(struct stat) == 36,
+	"zedBSD ELF32 stat ABI must remain 36 bytes");
 
 int fstat(int, struct stat *);
 int stat(const char *, struct stat *);

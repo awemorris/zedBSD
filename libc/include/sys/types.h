@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef int32_t ssize_t;
+typedef __PTRDIFF_TYPE__ ssize_t;
 typedef int32_t off_t;
 typedef uint32_t dev_t;
 typedef uint64_t ino_t;

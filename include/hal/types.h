@@ -17,6 +17,6 @@ typedef int16_t int16;
 typedef int8_t int8;
 
 typedef uint32_t hal_clock_t;
-typedef uint32_t hal_physaddr_t;	/* TODO: 64-bit targets */
+typedef uintptr_t hal_physaddr_t;
 
 #endif

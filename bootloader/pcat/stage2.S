@@ -10,6 +10,7 @@
 #include "bootloader/include/mbr.inc"
 #include "bootloader/include/fat16.inc"
 #include "bootloader/include/elf.inc"
+#include "bootloader/include/amd64-handoff.h"
 
 .set PH_RECORD_SIZE, 28
 
@@ -672,8 +673,25 @@ enter_protected_mode:
 
 /* Build a one-GiB identity map and the usual ffffffff80000000 window. */
 enter_long_mode:
+	mov eax, 0x80000000
+	cpuid
+	cmp eax, 0x80000001
+	jb fatal_elf64
+	mov eax, 0x80000001
+	cpuid
+	and edx, 0x20100000
+	cmp edx, 0x20100000
+	jne fatal_elf64
 	mov si, offset msg_go
 	call puts
+	mov al, byte ptr [boot_drive]
+	mov byte ptr [long_handoff + ZBL6_HANDOFF_BOOT_DRIVE_OFFSET], al
+	mov al, byte ptr [partition_index]
+	mov byte ptr [long_handoff + ZBL6_HANDOFF_PARTITION_OFFSET], al
+	mov eax, dword ptr [mbi_mem_lower]
+	mov dword ptr [long_handoff + ZBL6_HANDOFF_MEM_LOWER_OFFSET], eax
+	mov eax, dword ptr [mbi_mem_upper]
+	mov dword ptr [long_handoff + ZBL6_HANDOFF_MEM_UPPER_OFFSET], eax
 	call unreal_gs
 	mov edi, 0x00050000
 	mov ecx, 0x5000 / 4
@@ -878,10 +896,15 @@ mbi_mem_upper:   .long 0
 mbi_boot_device: .long 0
 
 long_handoff:
-	.long 0x364c425a                 /* ZBL6 */
-	.long 1
-	.long partition_index
-	.long boot_drive
+	.long ZBL6_HANDOFF_MAGIC
+	.word ZBL6_HANDOFF_VERSION
+	.word ZBL6_HANDOFF_SIZE
+	.byte 0                         /* boot drive, populated at runtime */
+	.byte 0                         /* partition index, populated at runtime */
+	.word 0                         /* flags */
+	.long 0                         /* conventional memory, KiB */
+	.long 0                         /* extended memory, KiB */
+	.long 0
 
 fat_cache: .space 512
 
