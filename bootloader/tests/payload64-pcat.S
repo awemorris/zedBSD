@@ -1,5 +1,6 @@
 /* PC/AT ELF64 long-mode native-loader payload. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+#include "bootloader/include/amd64-handoff.h"
 .code64
 .section .text
 .global _start
@@ -18,6 +19,20 @@ _start:
 	jne fail
 	testq %rdi, %rdi
 	jz fail
+	cmpl $ZBL6_HANDOFF_MAGIC, ZBL6_HANDOFF_MAGIC_OFFSET(%rdi)
+	jne fail
+	cmpw $ZBL6_HANDOFF_VERSION, ZBL6_HANDOFF_VERSION_OFFSET(%rdi)
+	jne fail
+	cmpw $ZBL6_HANDOFF_SIZE, ZBL6_HANDOFF_SIZE_OFFSET(%rdi)
+	jne fail
+	cmpb $0x80, ZBL6_HANDOFF_BOOT_DRIVE_OFFSET(%rdi)
+	jne fail
+	cmpb $1, ZBL6_HANDOFF_PARTITION_OFFSET(%rdi)
+	jne fail
+	cmpl $640, ZBL6_HANDOFF_MEM_LOWER_OFFSET(%rdi)
+	jne fail
+	cmpl $0, ZBL6_HANDOFF_MEM_UPPER_OFFSET(%rdi)
+	je fail
 	leaq pass(%rip), %rsi
 	jmp write
 fail:

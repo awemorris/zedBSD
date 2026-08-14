@@ -21,56 +21,59 @@ usage()
 usage: $0 <command> <platform> [make options or additional targets...]
        $0 help [platform]
 
-Build commands:
-  all             Build every artifact for the platform
+Platform roles:
+  pcat          i386 PC/AT BIOS kernel and image
+  pc98          i386 PC-98 BIOS kernel and image
+  amd64         amd64 PC/AT BIOS kernel and image
+  unified       PC-98/PC-AT BIOS + amd64 UEFI disk image
+
+Common commands:
+  all             Build the platform's normal artifacts
+  hdd-image       Build its installable HDD image
+  check           Build and run its host tests
   messages        Generate the kernel message header
+
+Native kernel commands (pcat, pc98, amd64):
   vmunix          Build the zedBSD kernel
-  INIT.ELF        Build the initial user process
-  NOCT.ELF        Build the Noct user program
   SH              Build /bin/sh
-  LINUX           Build /bin/linux
-  hdd-image       Build an installable HDD image
+  NOCT.ELF        Build the Noct user program
   bios-bootloader Build the native BIOS Stage 1/2 loader
-  bios-hdd-image  Build the MBR/FAT16 native-loader image
-  pc-unified-bootloader
-                  Build the dual PC/AT and PC-98 BIOS loader
-  pc-unified-hdd-image
-                  Build one FAT16 image bootable on PC/AT and PC-98
-  legacy-pc98-hdd-image
-                  Build the legacy NEC98-partition image (PC-98 only)
-  grub-iso        Build the PC/AT GRUB Multiboot test ISO
+  bios-hdd-image  Build the native MBR/FAT16 image
 
-Test commands:
-  check                       Build and run all host tests
-  hdd-boot-qemu-test          Test HDD boot (and PC/AT GRUB boot) in QEMU
-  bios-loader-host-check      Verify the native BIOS image on the host
-  bios-loader-qemu-test       Test native-loader ELF payloads in QEMU
-  pc-unified-loader-host-check Verify the dual-machine BIOS image
-  pc-unified-loader-qemu-test  Test one image on PC/AT and PC-98 QEMU
-  sh-builtins-qemu-test        Test /bin/sh filesystem builtins in QEMU
-  pcat-beui-qemu-test          Test PC/AT Cirrus and VGA BeUI backends
-  network-qemu-test            Test PC-98 LGY-98, ICMP, UDP, and TCP
+Unified and special image commands:
+  unified-bootloader Build the PC-98/PC/AT BIOS dispatcher and loaders
+  unified-hdd-image  Build the four-path BIOS/UEFI image
+  uefi-loader        Build EFI/BOOT/BOOTX64.EFI
+  legacy-pc98-hdd-image Build the legacy NEC98-partition image
+  grub-iso           Build the PC/AT GRUB test ISO
 
-Maintenance commands:
+QEMU and image checks:
+  hdd-boot-qemu-test         Test a native HDD boot
+  bios-loader-host-check     Verify a native BIOS image
+  bios-loader-qemu-test      Test native BIOS ELF payloads
+  unified-loader-host-check  Verify the unified disk layout and files
+  unified-loader-qemu-test   Test its three BIOS loader paths
+  uefi-loader-host-check     Verify the PE32+ UEFI application
+  uefi-entry-qemu-test       Test OVMF, amd64 HAL, IDE root, and userland
+  sh-builtins-qemu-test      Test /bin/sh filesystem builtins in QEMU
+  pcat-beui-qemu-test        Test PC/AT Cirrus and VGA BeUI backends
+  network-qemu-test          Test PC-98 LGY-98, ICMP, UDP, and TCP
+
+Maintenance:
   clean           Remove build/<platform>
   distclean       Remove the complete build directory
   help            Show this help
 
-Any Make target may be used as <command>.  For example:
-  $0 hdd-image pc98
-  $0 vmunix pc98
-  $0 check pc98
-  $0 NOCT.ELF pc98
-  $0 hdd-boot-qemu-test pc98
-  $0 bios-bootloader pcat
-  $0 bios-hdd-image pcat
-  $0 bios-loader-qemu-test pcat
-  $0 bios-bootloader pc98
-  $0 bios-hdd-image pc98
-  $0 legacy-pc98-hdd-image pc98
-  $0 pc-unified-hdd-image pcat
-  $0 pc-unified-loader-qemu-test pcat
-  $0 hdd-image unified-pcat-pc98
+Examples:
+  $0 all pcat
+  $0 all pc98
+  $0 all amd64
+  $0 hdd-image unified
+  $0 check amd64
+  $0 unified-loader-qemu-test unified
+  $0 uefi-entry-qemu-test unified
+
+Any Make target may be used as <command>.
 
 Additional targets and Make variable assignments may follow the platform:
   $0 all pc98 check

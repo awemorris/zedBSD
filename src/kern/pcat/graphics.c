@@ -8,8 +8,16 @@
 
 #define WIDTH 640U
 #define HEIGHT 480U
-#define CIRRUS_APERTURE ((volatile uint8_t *)0xf0000000U)
-#define VGA_APERTURE ((volatile uint8_t *)0x800a0000U)
+#ifndef PCAT_CIRRUS_APERTURE_ADDRESS
+#define PCAT_CIRRUS_APERTURE_ADDRESS 0xf0000000U
+#endif
+#ifndef PCAT_VGA_APERTURE_ADDRESS
+#define PCAT_VGA_APERTURE_ADDRESS 0x800a0000U
+#endif
+#define CIRRUS_APERTURE ((volatile uint8_t *)(uintptr_t) \
+	PCAT_CIRRUS_APERTURE_ADDRESS)
+#define VGA_APERTURE ((volatile uint8_t *)(uintptr_t) \
+	PCAT_VGA_APERTURE_ADDRESS)
 #define CIRRUS_STRIDE8 WIDTH
 #define CIRRUS_STRIDE24 (WIDTH * 3U)
 #define PCI_CONFIG_ADDRESS 0x0cf8U

@@ -88,7 +88,7 @@ $(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
 $(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2.S \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
-	bootloader/include/elf.inc
+	bootloader/include/elf.inc bootloader/include/amd64-handoff.h
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
 
@@ -111,9 +111,10 @@ $(BUILD)/bootloader/payload32.elf: $(BUILD)/bootloader/payload32.o \
 	bootloader/tests/payload32-pcat.ld
 	$(LD) -m elf_i386 -T bootloader/tests/payload32-pcat.ld $< -o $@
 
-$(BUILD)/bootloader/payload64.o: bootloader/tests/payload64-pcat.S
+$(BUILD)/bootloader/payload64.o: bootloader/tests/payload64-pcat.S \
+	bootloader/include/amd64-handoff.h
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -c $< -o $@
+	$(CC) -m64 -I. -c $< -o $@
 
 $(BUILD)/bootloader/payload64.elf: $(BUILD)/bootloader/payload64.o \
 	bootloader/tests/payload64-pcat.ld
@@ -267,8 +268,8 @@ sh-builtins-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/sh bios-bootloader
 	$(SCRIPTS_DIR)/test-sh-builtins.sh pcat
 
 pcat-beui-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/noct \
-	build/pc-unified/hdd-image.img
-	bash $(SCRIPTS_DIR)/test-pcat-beui.sh build/pc-unified/hdd-image.img
+	build/unified/hdd-image.img
+	bash $(SCRIPTS_DIR)/test-pcat-beui.sh build/unified/hdd-image.img
 
 HOST_TEST_BINARIES += $(BUILD)/tests/pcat-mbr-host-test
 .PHONY: pcat-mbr-host-test hdd-boot-qemu-test sh-builtins-qemu-test \

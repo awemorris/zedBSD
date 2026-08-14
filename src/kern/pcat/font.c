@@ -1,12 +1,16 @@
 /* PC/AT VGA 8x16 ASCII font preservation.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/pcat/font.h"
-#include "hal/i386/bsp-pcat/boot-font.h"
+#include <hal/pcat/boot-font.h>
 
 #include <hal/hal.h>
 #include <string.h>
 
-#define VGA_FONT_MEMORY ((volatile uint8_t *)0x800a0000U)
+#ifndef PCAT_VGA_APERTURE_ADDRESS
+#define PCAT_VGA_APERTURE_ADDRESS 0x800a0000U
+#endif
+#define VGA_FONT_MEMORY ((volatile uint8_t *)(uintptr_t) \
+	PCAT_VGA_APERTURE_ADDRESS)
 #define ASCII_GLYPHS 128U
 #define GLYPH_HEIGHT 16U
 #define VGA_GLYPH_SLOT 32U

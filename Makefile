@@ -51,22 +51,23 @@ include libc/libc.mk
 include softfloat/softfloat.mk
 include noct.mk
 
-KERN_NET_OBJS := \
-	$(BUILD)/src/kern/net/packet-buf.o \
-	$(BUILD)/src/kern/net/net-device.o \
-	$(BUILD)/src/kern/net/core.o \
-	$(BUILD)/src/kern/net/socket.o \
-	$(BUILD)/src/kern/net/socket-file.o \
-	$(BUILD)/src/kern/net/packet-socket.o \
-	$(BUILD)/src/kern/net/checksum.o \
-	$(BUILD)/src/kern/net/ethernet.o \
-	$(BUILD)/src/kern/net/route.o \
-	$(BUILD)/src/kern/net/inet-socket.o \
-	$(BUILD)/src/kern/net/arp.o \
-	$(BUILD)/src/kern/net/ipv4.o \
-	$(BUILD)/src/kern/net/icmp.o \
-	$(BUILD)/src/kern/net/udp.o \
-	$(BUILD)/src/kern/net/tcp.o
+KERN_NET_SOURCES := \
+	src/kern/net/packet-buf.c \
+	src/kern/net/net-device.c \
+	src/kern/net/core.c \
+	src/kern/net/socket.c \
+	src/kern/net/socket-file.c \
+	src/kern/net/packet-socket.c \
+	src/kern/net/checksum.c \
+	src/kern/net/ethernet.c \
+	src/kern/net/route.c \
+	src/kern/net/inet-socket.c \
+	src/kern/net/arp.c \
+	src/kern/net/ipv4.c \
+	src/kern/net/icmp.c \
+	src/kern/net/udp.c \
+	src/kern/net/tcp.c
+KERN_NET_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_NET_SOURCES))
 
 # ----------------------------------------------------------------------
 # Generic compile rules.  Per-object flag overrides use target-specific
@@ -265,7 +266,7 @@ CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test
 # milestone verification chains).
 
 include $(PLATFORM_MK)
-include bootloader/pc-unified/pc-unified.mk
+include bootloader/unified/unified.mk
 
 check: $(HOST_TEST_BINARIES) $(CHECK_RUN_TARGETS)
 	@set -e; for test in $(HOST_TEST_BINARIES); do \

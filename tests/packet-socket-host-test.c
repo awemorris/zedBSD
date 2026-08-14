@@ -27,6 +27,13 @@ struct thread *thread_current(void) { return NULL; }
 void sched_sleep(uint64_t ticks) { (void)ticks; }
 void sched_wakeup(struct thread *thread) { (void)thread; }
 
+uint64_t
+sched_ticks(void)
+{
+	static uint64_t ticks;
+	return ticks++;
+}
+
 static struct packet_buf *transmitted;
 
 int net_input_enqueue(struct net_device *device, struct packet_buf *packet)

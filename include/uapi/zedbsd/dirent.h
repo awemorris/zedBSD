@@ -19,6 +19,9 @@ struct zedbsd_dirent {
 	uint64_t d_ino;
 	uint32_t d_type;
 	char d_name[256];
-};
+} __attribute__((packed, aligned(4)));
+
+_Static_assert(sizeof(struct zedbsd_dirent) == 268,
+	"zedBSD ELF32 dirent ABI must remain 268 bytes");
 
 #endif

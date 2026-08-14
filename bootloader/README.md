@@ -22,8 +22,10 @@ Build and test the loaders with the repository build driver:
 ./build.sh bios-loader-qemu-test pcat
 ./build.sh bios-bootloader pc98
 ./build.sh bios-loader-qemu-test pc98
-./build.sh pc-unified-hdd-image pcat
-./build.sh pc-unified-loader-qemu-test pcat
+./build.sh hdd-image unified
+./build.sh unified-loader-qemu-test unified
+./build.sh uefi-loader-host-check unified
+./build.sh uefi-entry-qemu-test unified
 ./build.sh legacy-pc98-hdd-image pc98
 ```
 
@@ -31,3 +33,9 @@ Build and test the loaders with the repository build driver:
 PC-98 QEMU test covers normal H=8 geometry, a sub-20-MiB H=4 image, and a
 fragmented `VMUNIX` cluster chain.  The PC/AT test covers ELF32 and ELF64,
 including fragmented variants.
+
+The unified image additionally contains an MBR type `0xEF` FAT32 ESP after a
+fixed 128-MiB FAT16 root partition. PC/AT BIOS chooses the i386 or amd64 kernel
+from CPUID capabilities, while x64 UEFI loads the amd64 kernel through
+`EFI/BOOT/BOOTX64.EFI`. PC-98 continues to see only the FAT16 mirror in its
+LBA 1 partition table.

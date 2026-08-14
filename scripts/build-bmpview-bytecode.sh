@@ -5,7 +5,7 @@ set -euo pipefail
 # The 5M small-memory profile cannot compile the source on the target, so
 # the boot volume ships bytecode, exactly like Remacs.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-noct_src="$repo/noct"
+noct_src="$repo/userland/noct/noct-upstream"
 host_build="${NOCT_HOST_BUILD:-$repo/build/host-noct}"
 output_dir="${BMPVIEW_OUTPUT_DIR:-$repo/build/bmpview}"
 noct="${NOCT_HOST:-}"
@@ -17,7 +17,8 @@ test -f "$repo/apps/bmpview.nct" || {
 
 if test -z "$noct"; then
 	test -f "$noct_src/CMakeLists.txt" || {
-		echo "Noct submodule is missing; run git submodule update --init noct" >&2
+		echo "Noct submodule is missing; run git submodule update --init " \
+			"userland/noct/noct-upstream" >&2
 		exit 1
 	}
 	command -v cmake >/dev/null 2>&1 || {
