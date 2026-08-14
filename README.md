@@ -5,6 +5,10 @@ zedBSD
 small computers with a nice hardware abstraction layer. The HAL
 approach makes zedBSD kernel very portable.
 
+The currently implemented system-call subset is documented in
+[`POSIX-R1.md`](POSIX-R1.md). It is an incremental compatibility profile,
+not a claim of complete POSIX conformance.
+
 At this moment, it can run on `IBM PC/AT` and `NEC PC-9800` with
 i386SX CPU. The disk image runs on both architecture because the boot
 sector checks the machine type.

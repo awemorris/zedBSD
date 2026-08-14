@@ -37,8 +37,10 @@ ZEDBSD_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/process.o $(BUILD)/src/kern/thread.o \
 	$(BUILD)/src/kern/sched.o $(BUILD)/src/kern/vmspace.o \
-	$(BUILD)/src/kern/vm-commit.o \
-	$(BUILD)/src/kern/filedesc.o $(BUILD)/src/kern/cwdinfo.o \
+	$(BUILD)/src/kern/vm-object.o $(BUILD)/src/kern/vm-commit.o \
+	$(BUILD)/src/kern/filedesc.o $(BUILD)/src/kern/pipe.o \
+	$(BUILD)/src/kern/cred.o $(BUILD)/src/kern/signal.o \
+	$(BUILD)/src/kern/cwdinfo.o \
 	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec.o \
 	$(BUILD)/src/kern/user-probe.o $(BUILD)/src/kern/syscall.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
@@ -317,7 +319,7 @@ $(BUILD)/ipl-part.img: $(BUILD)/partition-pbr.bin
 
 USER_LIBC_OBJS := $(BUILD)/userland/crt0.o $(BUILD)/userland/libc/posix.o \
 	$(BUILD)/userland/libc/socket.o $(BUILD)/userland/libc/resolver.o \
-	$(BUILD)/userland/libc/resolver-dns.o \
+	$(BUILD)/userland/libc/resolver-dns.o $(BUILD)/userland/libc/signal.o \
 	$(BUILD)/libc/heap.o $(BUILD)/libc/string.o $(BUILD)/libc/ctype.o \
 	$(BUILD)/libc/int64.o $(BUILD)/libc/strto.o $(BUILD)/libc/format.o \
 	$(BUILD)/libc/stdio.o
@@ -544,6 +546,7 @@ $(BUILD)/tests/beui-pc98-cirrus-host-test: \
 	$(BEUI_TEST_CC) $(NOCT_ROOT)/src/api/beui-pc98-cirrus.c $< -o $@
 
 $(BUILD)/tests/noct-host-test: tests/noct-host-test.c \
+	tests/vfs-host-stubs.c \
 	apps/ls.nct apps/cp.nct userland/noct/integration/noct-m6-script.h \
 	$(NOCT_GLUE_OBJS) $(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
 	$(BUILD)/src/kern/namespace.o \
@@ -556,7 +559,7 @@ $(BUILD)/tests/noct-host-test: tests/noct-host-test.c \
 	$(HOSTCC) -m32 -no-pie -fno-builtin -fno-stack-protector -Wall -Wextra \
 		-Werror -I. -Iinclude -Isrc -Ilibc/include -I$(NOCT_ROOT)/include \
 		-DZEDBSD_NOCT_JIT_CODE_MAX=$(NOCT_JIT_CODE_MAX) \
-		tests/noct-host-test.c $(NOCT_GLUE_OBJS) \
+		tests/noct-host-test.c tests/vfs-host-stubs.c $(NOCT_GLUE_OBJS) \
 		$(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
 		$(BUILD)/src/kern/namespace.o $(NOCT_OBJECTS) \
 		$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/inode.o \

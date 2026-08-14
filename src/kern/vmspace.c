@@ -10,10 +10,12 @@
 #include "kern/kmem.h"
 #include "kern/swap.h"
 #include "kern/vm-commit.h"
+#include "kern/vm-object.h"
 #include "kern/vm-reclaim.h"
 
 #include <errno.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #define PAGE_SIZE 4096U
 #define VM_MMAP_BASE 0x10000000U
@@ -53,6 +55,12 @@ insert_region(struct vmspace *vm, struct vm_region *region)
 	*link = region;
 }
 
+static int map_region(struct vmspace *, uintptr_t, size_t, uint32_t,
+		      enum vm_region_backing, struct file *, off_t, uintptr_t,
+		      size_t, unsigned, size_t, struct vm_region **);
+static int allocate_page_frame(struct vm_page *);
+static int page_in(struct vm_page *);
+
 struct vmspace *
 vmspace_create(void)
 {
@@ -67,6 +75,102 @@ vmspace_create(void)
 	}
 	vm->usecount = 1;
 	return vm;
+}
+
+int
+vmspace_fork(struct vmspace *source, struct vmspace **result)
+{
+	struct vmspace *copy;
+	struct vm_region *source_region;
+	int error = 0;
+
+	if (source == NULL || source == &kernel_vmspace || result == NULL)
+		return EINVAL;
+	copy = vmspace_create();
+	if (copy == NULL)
+		return ENOMEM;
+	for (source_region = source->regions; source_region != NULL;
+	     source_region = source_region->next) {
+		struct vm_region *copy_region;
+		struct vm_page *source_page;
+
+		error = map_region(copy, source_region->start, source_region->size,
+		    source_region->prot, source_region->backing,
+		    source_region->file, source_region->file_offset,
+		    source_region->data_start, source_region->data_size,
+		    source_region->flags, source_region->commit_size,
+		    &copy_region);
+		if (error != 0)
+			goto fail;
+		if (source_region->object != NULL) {
+			vm_object_ref(source_region->object);
+			copy_region->object = source_region->object;
+			/* Shared object pages are mapped lazily in the child. */
+			continue;
+		}
+		for (source_page = source_region->pages; source_page != NULL;
+		     source_page = source_page->next) {
+			struct vm_page *copy_page;
+			uint32_t page_flags;
+			int mapped;
+
+			if (source_page->flags & VM_PAGE_SWAPPED) {
+				error = page_in(source_page);
+				if (error != 0)
+					goto fail;
+			}
+			copy_page = kern_calloc(1, sizeof(*copy_page));
+			if (copy_page == NULL) {
+				error = ENOMEM;
+				goto fail;
+			}
+			copy_page->swap_slot = SWAP_SLOT_NONE;
+			copy_page->vm = copy;
+			copy_page->region = copy_region;
+			copy_page->address = source_page->address;
+			copy_page->flags = VM_PAGE_BUSY;
+			error = allocate_page_frame(copy_page);
+			if (error != 0) {
+				kern_free(copy_page);
+				goto fail;
+			}
+			memcpy((void *)copy_page->pmem.vaddr,
+			    (const void *)source_page->pmem.vaddr, PAGE_SIZE);
+			page_flags = 0;
+			if (hal_page_query(source->space,
+			    (void *)source_page->address, &page_flags) ==
+			    HAL_PMEM_SUCCESS && (page_flags & HAL_PAGE_DIRTY) != 0)
+				copy_page->flags |= VM_PAGE_DIRTY;
+			if (source_page->flags & VM_PAGE_DIRTY)
+				copy_page->flags |= VM_PAGE_DIRTY;
+			mapped = hal_page_map(copy->space,
+			    (void *)copy_page->address, copy_page->pmem.paddr,
+			    PAGE_SIZE, copy_region->prot);
+			if (mapped != HAL_PMEM_SUCCESS) {
+				(void)hal_pmem_free(&copy_page->pmem);
+				kern_free(copy_page);
+				error = ENOMEM;
+				goto fail;
+			}
+			copy_page->flags &= ~VM_PAGE_BUSY;
+			copy_page->flags |= VM_PAGE_RESIDENT;
+			copy_page->next = copy_region->pages;
+			copy_region->pages = copy_page;
+			vm_page_track(copy_page);
+		}
+	}
+	copy->entry = source->entry;
+	copy->brk_start = source->brk_start;
+	copy->brk_current = source->brk_current;
+	copy->stack_guard_bottom = source->stack_guard_bottom;
+	copy->stack_bottom = source->stack_bottom;
+	copy->stack_top = source->stack_top;
+	*result = copy;
+	return 0;
+
+fail:
+	vmspace_free(copy);
+	return error;
 }
 
 static int
@@ -143,6 +247,32 @@ vmspace_map_file(struct vmspace *vm, uintptr_t start, size_t size,
 	return map_region(vm, start, size, prot, VM_BACKING_FILE, file,
 			  file_offset, data_start, data_size, 0,
 			  (prot & HAL_SPACE_WRITE) != 0 ? size : 0, result);
+}
+
+int
+vmspace_map_file_shared(struct vmspace *vm, uintptr_t start, size_t size,
+			uint32_t prot, struct file *file, off_t file_offset,
+			size_t data_size, struct vm_region **result)
+{
+	struct vm_object *object;
+	struct vm_region *region;
+	int error;
+
+	if (file_offset < 0 || (file_offset & (PAGE_SIZE - 1U)) != 0)
+		return EINVAL;
+	error = vm_object_get_shared(file, &object);
+	if (error != 0)
+		return error;
+	error = map_region(vm, start, size, prot, VM_BACKING_FILE, file,
+	    file_offset, start, data_size, VM_REGION_SHARED, 0, &region);
+	if (error != 0) {
+		vm_object_put(object);
+		return error;
+	}
+	region->object = object;
+	if (result != NULL)
+		*result = region;
+	return 0;
 }
 
 int
@@ -324,6 +454,40 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 	page = find_page(region, page_address);
 	if (page != NULL)
 		return page->flags & VM_PAGE_SWAPPED ? page_in(page) : 0;
+	if (region->object != NULL) {
+		struct vm_object_page *object_page;
+		off_t object_offset;
+		int mapped;
+		if ((uint64_t)(uint32_t)region->file_offset +
+		    (uint64_t)(page_address - region->start) > INT32_MAX)
+			return EOVERFLOW;
+		object_offset = region->file_offset +
+		    (off_t)(page_address - region->start);
+		error = vm_object_fault(region->object, object_offset,
+		    &object_page);
+		if (error != 0)
+			return error;
+		page = kern_calloc(1, sizeof(*page));
+		if (page == NULL)
+			return ENOMEM;
+		page->swap_slot = SWAP_SLOT_NONE;
+		page->vm = vm;
+		page->region = region;
+		page->address = page_address;
+		page->object_page = object_page;
+		page->pmem = object_page->pmem;
+		mapped = hal_page_map(vm->space, (void *)page_address,
+		    object_page->pmem.paddr, PAGE_SIZE, region->prot);
+		if (mapped != HAL_PMEM_SUCCESS) {
+			kern_free(page);
+			return ENOMEM;
+		}
+		page->flags = VM_PAGE_RESIDENT;
+		page->next = region->pages;
+		region->pages = page;
+		vm_object_mapping_add(object_page, page);
+		return 0;
+	}
 	page = kern_calloc(1, sizeof(*page));
 	if (page == NULL)
 		return ENOMEM;
@@ -482,7 +646,10 @@ copy_backing(struct vmspace *vm, uintptr_t user_address, void *kernel,
 		if (to_user)
 		{
 			memcpy(mapped, bytes, chunk);
-			page->flags |= VM_PAGE_DIRTY;
+			if (page->object_page != NULL)
+				vm_object_mark_dirty(page->object_page);
+			else
+				page->flags |= VM_PAGE_DIRTY;
 		} else
 			memcpy(bytes, mapped, chunk);
 		bytes += chunk;
@@ -509,9 +676,9 @@ vmspace_copy_from(struct vmspace *vm, void *destination,
 			    HAL_SPACE_READ, 0);
 }
 
-int
-vmspace_map_find(struct vmspace *vm, uintptr_t hint, size_t size,
-		 uint32_t prot, uintptr_t *mapped)
+static int
+find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
+		uintptr_t *mapped)
 {
 	uintptr_t start, limit;
 	struct vm_region *region;
@@ -544,18 +711,73 @@ vmspace_map_find(struct vmspace *vm, uintptr_t hint, size_t size,
 		if (!moved)
 			break;
 	}
-	{
-		int error = vmspace_map_anon(vm, start, size, prot, NULL);
-		if (error != 0)
-			return error;
-	}
 	*mapped = start;
 	return 0;
+}
+
+int
+vmspace_map_find(struct vmspace *vm, uintptr_t hint, size_t size,
+		 uint32_t prot, uintptr_t *mapped)
+{
+	uintptr_t start;
+	int error = find_free_range(vm, hint, size, &start);
+	if (error == 0)
+		error = vmspace_map_anon(vm, start,
+		    (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U), prot, NULL);
+	if (error == 0)
+		*mapped = start;
+	return error;
+}
+
+int
+vmspace_map_file_find(struct vmspace *vm, uintptr_t hint, size_t size,
+		      uint32_t prot, struct file *file, off_t offset,
+		      size_t data_size, uintptr_t *mapped)
+{
+	uintptr_t start;
+	size_t rounded;
+	int error = find_free_range(vm, hint, size, &start);
+	if (error != 0)
+		return error;
+	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
+	if (data_size > size)
+		data_size = size;
+	error = vmspace_map_file(vm, start, rounded, prot, file, offset,
+	    start, data_size, NULL);
+	if (error == 0)
+		*mapped = start;
+	return error;
+}
+
+int
+vmspace_map_file_shared_find(struct vmspace *vm, uintptr_t hint, size_t size,
+			     uint32_t prot, struct file *file, off_t offset,
+			     size_t data_size, uintptr_t *mapped)
+{
+	uintptr_t start;
+	size_t rounded;
+	int error = find_free_range(vm, hint, size, &start);
+	if (error != 0)
+		return error;
+	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
+	if (data_size > size)
+		data_size = size;
+	error = vmspace_map_file_shared(vm, start, rounded, prot, file, offset,
+	    data_size, NULL);
+	if (error == 0)
+		*mapped = start;
+	return error;
 }
 
 static void
 free_vm_page(struct vmspace *vm, struct vm_page *page)
 {
+	if (page->object_page != NULL) {
+		(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
+		vm_object_mapping_remove(page->object_page, page);
+		kern_free(page);
+		return;
+	}
 	vm_page_untrack(page);
 	if (page->flags & VM_PAGE_RESIDENT) {
 		(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
@@ -575,6 +797,63 @@ free_region_pages(struct vmspace *vm, struct vm_region *region)
 		region->pages = page->next;
 		free_vm_page(vm, page);
 	}
+}
+
+static int
+split_region(struct vm_region *region, uintptr_t address)
+{
+	struct vm_region *right;
+	struct vm_page **link;
+	size_t left_size, right_size, data_skip;
+
+	if (region == NULL || address <= region->start ||
+	    address >= region->start + region->size ||
+	    (address & (PAGE_SIZE - 1U)) != 0)
+		return EINVAL;
+	/* ELF mappings may have an unaligned data subrange, but they are immutable
+	 * and never reach this helper.  User mmap regions use data_start=start. */
+	if (region->flags & VM_REGION_IMMUTABLE ||
+	    region->data_start != region->start)
+		return EACCES;
+	right = kern_calloc(1, sizeof(*right));
+	if (right == NULL)
+		return ENOMEM;
+	left_size = address - region->start;
+	right_size = region->size - left_size;
+	*right = *region;
+	right->start = address;
+	right->size = right_size;
+	right->data_start = address;
+	data_skip = left_size < region->data_size ? left_size : region->data_size;
+	right->data_size = region->data_size - data_skip;
+	if (right->data_size > right_size)
+		right->data_size = right_size;
+	if (region->backing == VM_BACKING_FILE)
+		right->file_offset += (off_t)data_skip;
+	right->commit_size = region->commit_size != 0 ? right_size : 0;
+	right->pages = NULL;
+	if (right->file != NULL)
+		file_ref(right->file);
+	if (right->object != NULL)
+		vm_object_ref(right->object);
+	region->size = left_size;
+	if (region->data_size > left_size)
+		region->data_size = left_size;
+	region->commit_size = region->commit_size != 0 ? left_size : 0;
+	for (link = &region->pages; *link != NULL; ) {
+		struct vm_page *page = *link;
+		if (page->address < address) {
+			link = &page->next;
+			continue;
+		}
+		*link = page->next;
+		page->region = right;
+		page->next = right->pages;
+		right->pages = page;
+	}
+	right->next = region->next;
+	region->next = right;
+	return 0;
 }
 
 int
@@ -667,24 +946,42 @@ int
 vmspace_unmap(struct vmspace *vm, uintptr_t start, size_t size)
 {
 	struct vm_region **link, *region;
+	uintptr_t end;
+	int error;
 
-	if (vm == NULL || vm == &kernel_vmspace)
+	if (vm == NULL || vm == &kernel_vmspace || !range_valid(start, size))
 		return EINVAL;
+	end = start + size;
+	region = vmspace_find_region(vm, end - 1U, 1);
+	if (region != NULL && end < region->start + region->size) {
+		error = split_region(region, end);
+		if (error != 0)
+			return error;
+	}
+	region = vmspace_find_region(vm, start, 1);
+	if (region != NULL && start > region->start) {
+		error = split_region(region, start);
+		if (error != 0)
+			return error;
+	}
+	for (region = vm->regions; region != NULL; region = region->next)
+		if (region->start >= start && region->start < end &&
+		    (region->flags & VM_REGION_IMMUTABLE) != 0)
+			return EACCES;
 	for (link = &vm->regions; *link != NULL; link = &(*link)->next)
-		if ((*link)->start == start && (*link)->size == size)
+		if ((*link)->start >= start)
 			break;
-	region = *link;
-	if (region == NULL)
-		return EINVAL;
-	if (region->flags & VM_REGION_IMMUTABLE)
-		return EACCES;
-	*link = region->next;
-	free_region_pages(vm, region);
-	if (region->file != NULL)
-		(void)file_close(region->file);
-	if (region->commit_size != 0)
-		vm_commit_release(region->commit_size);
-	kern_free(region);
+	while ((region = *link) != NULL && region->start < end) {
+		*link = region->next;
+		free_region_pages(vm, region);
+		if (region->file != NULL)
+			(void)file_close(region->file);
+		if (region->object != NULL)
+			vm_object_put(region->object);
+		if (region->commit_size != 0)
+			vm_commit_release(region->commit_size);
+		kern_free(region);
+	}
 	return 0;
 }
 
@@ -692,50 +989,136 @@ int
 vmspace_protect(struct vmspace *vm, uintptr_t start, size_t size,
 		uint32_t prot)
 {
-	struct vm_region *region;
-	struct vm_page *page;
+	struct vm_region *region, *first, *end_region;
+	struct vm_page *page, *failed_page = NULL;
+	struct vm_region *failed_region = NULL;
+	uintptr_t end, covered;
 	size_t new_commit = 0;
 	int error;
 
-	if (vm == NULL || vm == &kernel_vmspace ||
+	if (vm == NULL || vm == &kernel_vmspace || !range_valid(start, size) ||
 	    (prot & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) != 0)
 		return EINVAL;
-	for (region = vm->regions; region != NULL; region = region->next)
-		if (region->start == start && region->size == size)
-			break;
-	if (region == NULL)
+	end = start + size;
+	covered = start;
+	for (region = vm->regions; region != NULL && covered < end;
+	     region = region->next) {
+		if (covered < region->start)
+			return EINVAL;
+		if (covered >= region->start + region->size)
+			continue;
+		if (region->flags & VM_REGION_IMMUTABLE)
+			return EACCES;
+		covered = region->start + region->size;
+		if (covered > end)
+			covered = end;
+	}
+	if (covered != end)
 		return EINVAL;
-	if (region->flags & VM_REGION_IMMUTABLE)
-		return EACCES;
-	if (region->commit_size == 0 &&
-	    ((region->backing == VM_BACKING_ANON && prot != 0) ||
-	     (region->backing == VM_BACKING_FILE &&
-	      (prot & HAL_SPACE_WRITE) != 0))) {
-		error = vm_commit_reserve(region->size);
+	end_region = vmspace_find_region(vm, end - 1U, 1);
+	if (end_region != NULL && end < end_region->start + end_region->size) {
+		error = split_region(end_region, end);
 		if (error != 0)
 			return error;
-		new_commit = region->size;
 	}
-	for (page = region->pages; page != NULL; page = page->next)
-		if ((page->flags & VM_PAGE_RESIDENT) &&
-		    hal_page_prot(vm->space, (void *)page->address, PAGE_SIZE,
-				  prot) != HAL_PMEM_SUCCESS) {
-			struct vm_page *rollback;
-			for (rollback = region->pages; rollback != page;
-			     rollback = rollback->next)
-				if ((rollback->flags & VM_PAGE_RESIDENT) &&
-				    hal_page_prot(vm->space,
-					(void *)rollback->address, PAGE_SIZE,
-					region->prot) != HAL_PMEM_SUCCESS)
-					HAL_FATAL("VM protection rollback failed");
-			if (new_commit != 0)
-				vm_commit_release(new_commit);
-			return EINVAL;
+	region = vmspace_find_region(vm, start, 1);
+	if (start > region->start) {
+		error = split_region(region, start);
+		if (error != 0)
+			return error;
+		region = region->next;
+	}
+	first = region;
+	for (; region != NULL && region->start < end; region = region->next)
+		if (region->commit_size == 0 && region->object == NULL &&
+		    ((region->backing == VM_BACKING_ANON && prot != 0) ||
+		     (region->backing == VM_BACKING_FILE &&
+		      (prot & HAL_SPACE_WRITE) != 0))) {
+			if (new_commit > SIZE_MAX - region->size)
+				return EOVERFLOW;
+			new_commit += region->size;
 		}
-	region->prot = prot;
-	if (new_commit != 0)
-		region->commit_size = new_commit;
+	if (new_commit != 0) {
+		error = vm_commit_reserve(new_commit);
+		if (error != 0)
+			return error;
+	}
+	for (region = first; region != NULL && region->start < end;
+	     region = region->next) {
+		for (page = region->pages; page != NULL; page = page->next)
+			if ((page->flags & VM_PAGE_RESIDENT) &&
+			    hal_page_prot(vm->space, (void *)page->address,
+				PAGE_SIZE, prot) != HAL_PMEM_SUCCESS) {
+				failed_region = region;
+				failed_page = page;
+				goto rollback;
+			}
+	}
+	for (region = first; region != NULL && region->start < end;
+	     region = region->next) {
+		region->prot = prot;
+		if (region->commit_size == 0 && region->object == NULL &&
+		    ((region->backing == VM_BACKING_ANON && prot != 0) ||
+		     (region->backing == VM_BACKING_FILE &&
+		      (prot & HAL_SPACE_WRITE) != 0)))
+			region->commit_size = region->size;
+	}
 	return 0;
+
+rollback:
+	for (region = first; region != NULL && region->start < end;
+	     region = region->next) {
+		struct vm_page *rollback;
+		for (rollback = region->pages; rollback != NULL;
+		     rollback = rollback->next) {
+			if (region == failed_region && rollback == failed_page)
+				break;
+			if ((rollback->flags & VM_PAGE_RESIDENT) &&
+			    hal_page_prot(vm->space, (void *)rollback->address,
+				PAGE_SIZE, region->prot) != HAL_PMEM_SUCCESS)
+				HAL_FATAL("VM protection rollback failed");
+		}
+		if (region == failed_region)
+			break;
+	}
+	if (new_commit != 0)
+		vm_commit_release(new_commit);
+	return EINVAL;
+}
+
+int
+vmspace_sync(struct vmspace *vm, uintptr_t start, size_t size, int flags)
+{
+	uintptr_t current, end;
+	struct vm_region *region;
+	if (vm == NULL || vm == &kernel_vmspace || !range_valid(start, size) ||
+	    (flags & ~(MS_ASYNC | MS_INVALIDATE | MS_SYNC)) != 0 ||
+	    (flags & (MS_ASYNC | MS_SYNC)) == 0 ||
+	    (flags & (MS_ASYNC | MS_SYNC)) == (MS_ASYNC | MS_SYNC))
+		return EINVAL;
+	current = start;
+	end = start + size;
+	for (region = vm->regions; region != NULL && current < end;
+	     region = region->next) {
+		if (current < region->start)
+			return ENOMEM;
+		if (current >= region->start + region->size)
+			continue;
+		{
+			uintptr_t region_end = region->start + region->size;
+			uintptr_t overlap_end = region_end < end ? region_end : end;
+			if (region->object != NULL) {
+				off_t offset = region->file_offset +
+				    (off_t)(current - region->start);
+				int error = vm_object_sync_range(region->object, offset,
+				    overlap_end - current, flags);
+				if (error != 0)
+					return error;
+			}
+			current = overlap_end;
+		}
+	}
+	return current == end ? 0 : ENOMEM;
 }
 
 void
@@ -750,6 +1133,8 @@ vmspace_free(struct vmspace *vm)
 		free_region_pages(vm, region);
 		if (region->file != NULL)
 			(void)file_close(region->file);
+		if (region->object != NULL)
+			vm_object_put(region->object);
 		if (region->commit_size != 0)
 			vm_commit_release(region->commit_size);
 		kern_free(region);

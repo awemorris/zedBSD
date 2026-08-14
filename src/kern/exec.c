@@ -4,16 +4,19 @@
  */
 
 #include "kern/exec.h"
+#include "kern/cred.h"
 #include "kern/file.h"
 #include "kern/process.h"
 #include "kern/thread.h"
 #include "kern/vmspace.h"
 #include "kern/filedesc.h"
+#include "kern/signal.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <string.h>
+#include <unistd.h>
 
 #define EXEC_ARG_MAX 32U
 #define EXEC_ENV_MAX 64U
@@ -117,7 +120,7 @@ setup_standard_files(struct process *parent, struct process *process)
 		struct file *file;
 		if (filedesc_get(process->fd, descriptor) != NULL)
 			continue;
-		error = file_openat(process->cwdi, "/dev/console",
+		error = file_openat_cred(process->cwdi, process->cred, "/dev/console",
 			flags[descriptor], 0, &file);
 		if (error != 0)
 			return error;
@@ -198,9 +201,13 @@ process_spawn_from(struct process *parent, const char *path,
 		result_envp[env_count] = NULL;
 		effective_envp = result_envp;
 	}
-	error = file_openat(parent->cwdi, path, O_RDONLY, 0, &file);
+	error = file_openat_cred(parent->cwdi, parent->cred, path, O_RDONLY, 0,
+	    &file);
 	if (error != 0)
 		return error;
+	error = vfs_access(file->f_inode, parent->cred, X_OK);
+	if (error != 0)
+		goto out;
 	error = process_create(parent, 0, &process);
 	if (error != 0)
 		goto out;
@@ -242,6 +249,64 @@ out:
 		(void)file_close(file);
 	if (process != NULL)
 		process_free_mem(process);
+	return error;
+}
+
+int
+process_execve(struct process *process, const char *path, char *const argv[],
+	       char *const envp[])
+{
+	struct vmspace *new_vm = NULL, *old_vm;
+	struct file *file = NULL;
+	EXEC_IMAGE_INFO image;
+	uintptr_t sp;
+	bool irq_enabled;
+	int error;
+
+	if (process == NULL || process == &process0 || process != curthread->proc ||
+	    process->thread_count != 1 || process->cwdi == NULL || path == NULL ||
+	    argv == NULL || argv[0] == NULL)
+		return EINVAL;
+	error = file_openat_cred(process->cwdi, process->cred, path, O_RDONLY, 0,
+	    &file);
+	if (error != 0)
+		return error;
+	error = vfs_access(file->f_inode, process->cred, X_OK);
+	if (error != 0)
+		goto out;
+	new_vm = vmspace_create();
+	if (new_vm == NULL) {
+		error = ENOMEM;
+		goto out;
+	}
+	error = exec_elf_load(file, new_vm, &image);
+	if (error == 0)
+		error = vmspace_set_brk_start(new_vm, image.brk_start);
+	if (error == 0)
+		error = exec_build_initial_stack(new_vm, image.stack_size, argv, envp,
+		    &sp);
+	if (error != 0)
+		goto out;
+	old_vm = process->vmspace;
+	irq_enabled = hal_irq_disable();
+	error = hal_task_exec_current(new_vm->space, image.entry, sp) == 0 ?
+	    0 : EINVAL;
+	if (error == 0) {
+		process->vmspace = new_vm;
+		new_vm = NULL;
+	}
+	if (irq_enabled)
+		hal_irq_enable();
+	if (error != 0)
+		goto out;
+	filedesc_close_on_exec(process->fd);
+	signal_exec(process);
+	vmspace_free(old_vm);
+out:
+	if (file != NULL)
+		(void)file_close(file);
+	if (new_vm != NULL)
+		vmspace_free(new_vm);
 	return error;
 }
 

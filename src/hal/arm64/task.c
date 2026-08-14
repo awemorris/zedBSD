@@ -1,6 +1,7 @@
 #include <hal/hal.h>
 #include "asm.h"
 #include "task.h"
+#include "int.h"
 
 static struct arm64_task *task_list;
 static struct arm64_task *running_task;
@@ -41,6 +42,53 @@ hal_task_t hal_task_create(hal_space_t space,void(*start)(void *),void *arg,void
 	t->space=space;t->run_cpu=-1;hal_memcpy(t->fpregs,initial_fpregs,sizeof(initial_fpregs));
 	build_stack(t,start,arg,user_sp);task_stack_bytes+=ARM64_SYS_STACK_SIZE;task_add(t);return t;
 }
+
+void arm64_task_enter_user_frame(void *f)
+{if(running_task)running_task->active_user_frame=f;}
+void arm64_task_leave_user_frame(void)
+{if(running_task)running_task->active_user_frame=NULL;}
+
+hal_task_t hal_task_fork_current(hal_space_t child_space,intptr_t child_result)
+{
+	struct arm64_exception_frame *source,*copy;
+	struct arm64_task *child;
+	uint64 *resume;
+	if(!running_task||child_space==HAL_SPACE_SYS||!running_task->active_user_frame)return NULL;
+	source=running_task->active_user_frame;
+	child=hal_task_create(child_space,(void(*)(void *))(uintptr_t)source->elr,
+		NULL,(void *)(uintptr_t)source->user_sp);
+	if(!child)return NULL;
+	resume=(uint64 *)((uintptr_t)child->sys_stack+ARM64_SYS_STACK_SIZE-
+		sizeof(*source)-12U*sizeof(uint64));
+	hal_memset(resume,0,12U*sizeof(uint64));
+	resume[11]=(uintptr_t)arm64_user_frame_entry;
+	copy=(struct arm64_exception_frame *)(resume+12);
+	*copy=*source;
+	copy->x[0]=(uint64)child_result;
+	child->resume_sp=(uintptr_t)resume;
+	child->tls=running_task->tls;
+	hal_memcpy(child->fpregs,running_task->fpregs,sizeof(child->fpregs));
+	return child;
+}
+
+int hal_task_exec_current(hal_space_t new_space,uintptr_t entry,uintptr_t user_sp)
+{
+	struct arm64_exception_frame *frame;
+	if(!running_task||new_space==HAL_SPACE_SYS||!running_task->active_user_frame||
+		!entry||!user_sp)return -1;
+	frame=running_task->active_user_frame;
+	hal_memset(frame,0,sizeof(*frame));
+	frame->elr=(uint64)entry;
+	frame->user_sp=(uint64)user_sp;
+	running_task->space=new_space;
+	running_task->tls=0;
+	running_task->signal_depth=0;running_task->signal_token=0;
+	hal_page_switch_space(new_space);
+	return 0;
+}
+uintptr_t hal_task_user_stack(void){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;return f!=NULL?(uintptr_t)f->user_sp:0;}
+int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t rest,uint32_t token){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;if(f==NULL||running_task->signal_depth!=0||h==0||sp==0||token==0)return-1;running_task->signal_frame=*f;running_task->signal_token=token;running_task->signal_depth=1;f->elr=h;f->user_sp=sp;f->x[0]=(uint64)sig;f->x[30]=rest;return 0;}
+int hal_task_signal_return(uint32_t token,intptr_t*value){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;if(f==NULL||value==NULL||running_task->signal_depth!=1||token==0||token!=running_task->signal_token)return-1;*f=running_task->signal_frame;*value=(intptr_t)f->x[0];running_task->signal_depth=0;running_task->signal_token=0;return 0;}
 void hal_task_destroy(hal_task_t h)
 {
 	struct arm64_task *t=h;if(!t)return;if(t==running_task)HAL_FATAL("destroy current arm64 task");task_del(t);

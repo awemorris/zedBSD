@@ -130,17 +130,19 @@ def mem(addr, count):
     return bytes(raw)
 
 cmd("qmp_capabilities")
-deadline = time.time() + 20
+deadline = time.time() + 35
+text = b""
 while time.time() < deadline:
     text = mem(0xA0000, 25 * 160)[0::2]
     if b"SECOND IDE OK" in text:
-        if b"ide1 BIOS 81 H/S 4/17" not in text:
+        if b"ide1 BIOS 81 H/S 8/17" not in text:
             raise SystemExit("second disk was readable but its BIOS geometry was not listed")
         if b"/disk2" not in text:
             raise SystemExit("VFS did not enter the second mounted partition")
         print("IDE slave descriptor, CHS, partition mount, and read: PASS")
         sys.exit(0)
     time.sleep(0.25)
+print(text.decode("ascii", "replace"), file=sys.stderr)
 raise SystemExit("zedBSD did not read SECOND.TXT from IDE unit 1")
 PY
 

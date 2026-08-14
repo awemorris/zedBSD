@@ -47,11 +47,15 @@ arm64_vectors:
 	mrs x3,far_el1
 	stp x0,x1,[sp,#248]
 	stp x2,x3,[sp,#264]
+	mrs x4,sp_el0
+	str x4,[sp,#280]
 	.endm
 	.macro RESTORE_FRAME
 	ldp x0,x1,[sp,#248]
 	msr elr_el1,x0
 	msr spsr_el1,x1
+	ldr x2,[sp,#280]
+	msr sp_el0,x2
 	ldp x0,x1,[sp,#0]
 	ldp x2,x3,[sp,#16]
 	ldp x4,x5,[sp,#32]

@@ -23,6 +23,7 @@
 #endif
 
 struct cwdinfo;
+struct ucred;
 struct file;
 
 struct dirent {
@@ -35,6 +36,8 @@ struct file_ops {
 	int (*open)(struct file *);
 	ssize_t (*read)(struct file *, void *, size_t);
 	ssize_t (*write)(struct file *, const void *, size_t);
+	ssize_t (*pread)(struct file *, void *, size_t, off_t);
+	ssize_t (*pwrite)(struct file *, const void *, size_t, off_t);
 	int (*readdir)(struct file *, struct dirent *, int *);
 	off_t (*seek)(struct file *, off_t, int);
 	int (*ioctl)(struct file *, unsigned long, uintptr_t);
@@ -55,9 +58,12 @@ struct file {
 
 int file_openat(struct cwdinfo *, const char *, int, mode_t,
 		struct file **);
+int file_openat_cred(struct cwdinfo *, const struct ucred *, const char *,
+		     int, mode_t, struct file **);
 int file_create_pseudo(const struct file_ops *, int, void *, struct file **);
 ssize_t file_read(struct file *, void *, size_t);
 ssize_t file_pread(struct file *, void *, size_t, off_t);
+ssize_t file_pwrite(struct file *, const void *, size_t, off_t);
 ssize_t file_write(struct file *, const void *, size_t);
 int file_readdir(struct file *, struct dirent *, int *);
 off_t file_seek(struct file *, off_t, int);

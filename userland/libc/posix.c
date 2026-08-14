@@ -18,6 +18,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -125,9 +126,41 @@ int open(const char *path, int flags, ...)
 	}
 	return (int)call(ZEDBSD_SYS_open, (uintptr_t)path, flags, mode, 0, 0, 0);
 }
+int openat(int dirfd, const char *path, int flags, ...)
+{
+	mode_t mode = 0;
+	if (flags & O_CREAT) {
+		va_list ap; va_start(ap, flags); mode = va_arg(ap, mode_t); va_end(ap);
+	}
+	return (int)call(ZEDBSD_SYS_openat, dirfd, (uintptr_t)path, flags,
+	    mode, 0, 0);
+}
 int close(int fd) { return (int)call(ZEDBSD_SYS_close, fd, 0, 0, 0, 0, 0); }
+int dup(int fd) { return (int)call(ZEDBSD_SYS_dup, fd, 0, 0, 0, 0, 0); }
+int dup2(int oldfd, int newfd) { return (int)call(ZEDBSD_SYS_dup2, oldfd, newfd, 0, 0, 0, 0); }
+int dup3(int oldfd, int newfd, int flags) { return (int)call(ZEDBSD_SYS_dup3, oldfd, newfd, flags, 0, 0, 0); }
+int fcntl(int fd, int command, ...)
+{
+	va_list ap;
+	intptr_t argument = 0;
+	if (command == F_DUPFD || command == F_DUPFD_CLOEXEC ||
+	    command == F_SETFD || command == F_SETFL) {
+		va_start(ap, command);
+		argument = va_arg(ap, int);
+		va_end(ap);
+	}
+	return (int)call(ZEDBSD_SYS_fcntl, fd, command, argument, 0, 0, 0);
+}
+int pipe2(int result[2], int flags) { return (int)call(ZEDBSD_SYS_pipe2, (uintptr_t)result, flags, 0, 0, 0, 0); }
+int pipe(int result[2]) { return pipe2(result, 0); }
 ssize_t read(int fd, void *p, size_t n) { return (ssize_t)call(ZEDBSD_SYS_read, fd, (uintptr_t)p, n, 0, 0, 0); }
 ssize_t write(int fd, const void *p, size_t n) { return (ssize_t)call(ZEDBSD_SYS_write, fd, (uintptr_t)p, n, 0, 0, 0); }
+ssize_t pread(int fd, void *p, size_t n, off_t offset) { return (ssize_t)call(ZEDBSD_SYS_pread, fd, (uintptr_t)p, n, offset, 0, 0); }
+ssize_t pwrite(int fd, const void *p, size_t n, off_t offset) { return (ssize_t)call(ZEDBSD_SYS_pwrite, fd, (uintptr_t)p, n, offset, 0, 0); }
+ssize_t readv(int fd, const struct iovec *iov, int count) { return (ssize_t)call(ZEDBSD_SYS_readv, fd, (uintptr_t)iov, count, 0, 0, 0); }
+ssize_t writev(int fd, const struct iovec *iov, int count) { return (ssize_t)call(ZEDBSD_SYS_writev, fd, (uintptr_t)iov, count, 0, 0, 0); }
+int fsync(int fd) { return (int)call(ZEDBSD_SYS_fsync, fd, 0, 0, 0, 0, 0); }
+int fdatasync(int fd) { return (int)call(ZEDBSD_SYS_fdatasync, fd, 0, 0, 0, 0, 0); }
 off_t lseek(int fd, off_t off, int whence) { return (off_t)call(ZEDBSD_SYS_lseek, fd, off, whence, 0, 0, 0); }
 int fstat(int fd, struct stat *st) { return (int)call(ZEDBSD_SYS_fstat, fd, (uintptr_t)st, 0, 0, 0, 0); }
 int chdir(const char *p) { return (int)call(ZEDBSD_SYS_chdir, (uintptr_t)p, 0, 0, 0, 0, 0); }
@@ -155,6 +188,7 @@ void *mmap(void *address, size_t length, int prot, int flags, int fd, off_t offs
 }
 int munmap(void *p, size_t n) { return (int)call(ZEDBSD_SYS_munmap, (uintptr_t)p, n, 0, 0, 0, 0); }
 int mprotect(void *p, size_t n, int prot) { return (int)call(ZEDBSD_SYS_mprotect, (uintptr_t)p, n, prot, 0, 0, 0); }
+int msync(void *p, size_t n, int flags) { return (int)call(ZEDBSD_SYS_msync, (uintptr_t)p, n, flags, 0, 0, 0); }
 static uintptr_t process_break;
 static int process_break_known;
 int brk(void *address) {
@@ -190,22 +224,28 @@ void *sbrk(intptr_t increment) {
 	process_break = new_break;
 	return (void *)old_break;
 }
-int msync(void *p, size_t n, int flags) {
-	(void)p; (void)n; (void)flags;
-	errno = ENOSYS;
-	return -1;
-}
 long sysconf(int name) {
 	if (name == _SC_PAGE_SIZE)
 		return 4096;
 	errno = EINVAL;
 	return -1;
 }
-int mkdir(const char *path, mode_t mode) {
-	(void)path; (void)mode;
-	errno = ENOSYS;
-	return -1;
-}
+int mkdir(const char *path, mode_t mode) { return (int)call(ZEDBSD_SYS_mkdir, (uintptr_t)path, mode, 0, 0, 0, 0); }
+int mkdirat(int dirfd, const char *path, mode_t mode) { return (int)call(ZEDBSD_SYS_mkdirat, dirfd, (uintptr_t)path, mode, 0, 0, 0); }
+int unlink(const char *path) { return (int)call(ZEDBSD_SYS_unlink, (uintptr_t)path, 0, 0, 0, 0, 0); }
+int unlinkat(int dirfd, const char *path, int flags) { return (int)call(ZEDBSD_SYS_unlinkat, dirfd, (uintptr_t)path, flags, 0, 0, 0); }
+int rmdir(const char *path) { return (int)call(ZEDBSD_SYS_rmdir, (uintptr_t)path, 0, 0, 0, 0, 0); }
+int rename(const char *oldpath, const char *newpath) { return (int)call(ZEDBSD_SYS_rename, (uintptr_t)oldpath, (uintptr_t)newpath, 0, 0, 0, 0); }
+int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath) { return (int)call(ZEDBSD_SYS_renameat, olddirfd, (uintptr_t)oldpath, newdirfd, (uintptr_t)newpath, 0, 0); }
+int linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags) { return (int)call(ZEDBSD_SYS_linkat, olddirfd, (uintptr_t)oldpath, newdirfd, (uintptr_t)newpath, flags, 0); }
+int link(const char *oldpath, const char *newpath) { return linkat(AT_FDCWD, oldpath, AT_FDCWD, newpath, 0); }
+int symlinkat(const char *target, int dirfd, const char *path) { return (int)call(ZEDBSD_SYS_symlinkat, (uintptr_t)target, dirfd, (uintptr_t)path, 0, 0, 0); }
+int symlink(const char *target, const char *path) { return symlinkat(target, AT_FDCWD, path); }
+ssize_t readlinkat(int dirfd, const char *path, char *buffer, size_t size) { return (ssize_t)call(ZEDBSD_SYS_readlinkat, dirfd, (uintptr_t)path, (uintptr_t)buffer, size, 0, 0); }
+ssize_t readlink(const char *path, char *buffer, size_t size) { return readlinkat(AT_FDCWD, path, buffer, size); }
+int truncate(const char *path, off_t length) { return (int)call(ZEDBSD_SYS_truncate, (uintptr_t)path, length, 0, 0, 0, 0); }
+int ftruncate(int fd, off_t length) { return (int)call(ZEDBSD_SYS_ftruncate, fd, length, 0, 0, 0, 0); }
+mode_t umask(mode_t mask) { return (mode_t)call(ZEDBSD_SYS_umask, mask, 0, 0, 0, 0, 0); }
 int clock_gettime(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_gettime, id, (uintptr_t)ts, 0, 0, 0, 0); }
 int nanosleep(const struct timespec *request, struct timespec *remain) {
 	return (int)call(ZEDBSD_SYS_nanosleep, (uintptr_t)request,
@@ -223,25 +263,49 @@ pid_t zedbsd_wait_result(pid_t pid, int *status, char *result,
 		0, (uintptr_t)result, capacity, 0);
 }
 pid_t waitpid(pid_t pid, int *status, int options) {
-	if (options != 0) { errno = EINVAL; return -1; }
-	return zedbsd_wait_result(pid, status, NULL, 0);
+	return (pid_t)call(ZEDBSD_SYS_waitpid, (uintptr_t)pid,
+		(uintptr_t)status, (uintptr_t)options, 0, 0, 0);
 }
+pid_t wait(int *status) { return waitpid(-1, status, 0); }
+pid_t fork(void) { return (pid_t)call(ZEDBSD_SYS_fork, 0, 0, 0, 0, 0, 0); }
+int execve(const char *path, char *const argv[], char *const envp[]) {
+	return (int)call(ZEDBSD_SYS_execve, (uintptr_t)path, (uintptr_t)argv,
+		(uintptr_t)envp, 0, 0, 0);
+}
+pid_t getpid(void) { return (pid_t)call(ZEDBSD_SYS_getpid, 0, 0, 0, 0, 0, 0); }
+pid_t getppid(void) { return (pid_t)call(ZEDBSD_SYS_getppid, 0, 0, 0, 0, 0, 0); }
+pid_t getpgrp(void) { return (pid_t)call(ZEDBSD_SYS_getpgrp, 0, 0, 0, 0, 0, 0); }
+pid_t getpgid(pid_t pid) { return (pid_t)call(ZEDBSD_SYS_getpgid, pid, 0, 0, 0, 0, 0); }
+int setpgid(pid_t pid, pid_t pgid) { return (int)call(ZEDBSD_SYS_setpgid, pid, pgid, 0, 0, 0, 0); }
+pid_t setsid(void) { return (pid_t)call(ZEDBSD_SYS_setsid, 0, 0, 0, 0, 0, 0); }
+pid_t getsid(pid_t pid) { return (pid_t)call(ZEDBSD_SYS_getsid, pid, 0, 0, 0, 0, 0); }
+uid_t getuid(void) { return (uid_t)call(ZEDBSD_SYS_getuid, 0, 0, 0, 0, 0, 0); }
+uid_t geteuid(void) { return (uid_t)call(ZEDBSD_SYS_geteuid, 0, 0, 0, 0, 0, 0); }
+gid_t getgid(void) { return (gid_t)call(ZEDBSD_SYS_getgid, 0, 0, 0, 0, 0, 0); }
+gid_t getegid(void) { return (gid_t)call(ZEDBSD_SYS_getegid, 0, 0, 0, 0, 0, 0); }
+int getgroups(int count, gid_t groups[]) { return (int)call(ZEDBSD_SYS_getgroups, count, (uintptr_t)groups, 0, 0, 0, 0); }
+int setuid(uid_t id) { return (int)call(ZEDBSD_SYS_setuid, id, 0, 0, 0, 0, 0); }
+int seteuid(uid_t id) { return (int)call(ZEDBSD_SYS_seteuid, id, 0, 0, 0, 0, 0); }
+int setgid(gid_t id) { return (int)call(ZEDBSD_SYS_setgid, id, 0, 0, 0, 0, 0); }
+int setegid(gid_t id) { return (int)call(ZEDBSD_SYS_setegid, id, 0, 0, 0, 0, 0); }
+int setgroups(size_t count, const gid_t groups[]) { return (int)call(ZEDBSD_SYS_setgroups, count, (uintptr_t)groups, 0, 0, 0, 0); }
+int setreuid(uid_t real, uid_t effective) { return (int)call(ZEDBSD_SYS_setreuid, real, effective, 0, 0, 0, 0); }
+int setregid(gid_t real, gid_t effective) { return (int)call(ZEDBSD_SYS_setregid, real, effective, 0, 0, 0, 0); }
 
-int stat(const char *path, struct stat *status)
-{
-	int fd = open(path, O_RDONLY);
-	int result;
-	if (fd < 0) return -1;
-	result = fstat(fd, status);
-	(void)close(fd);
-	return result;
-}
-int access(const char *path, int mode)
-{
-	struct stat status;
-	if (mode != F_OK) { errno = EINVAL; return -1; }
-	return stat(path, &status);
-}
+int stat(const char *path, struct stat *status) { return (int)call(ZEDBSD_SYS_stat, (uintptr_t)path, (uintptr_t)status, 0, 0, 0, 0); }
+int lstat(const char *path, struct stat *status) { return (int)call(ZEDBSD_SYS_lstat, (uintptr_t)path, (uintptr_t)status, 0, 0, 0, 0); }
+int fstatat(int dirfd, const char *path, struct stat *status, int flags) { return (int)call(ZEDBSD_SYS_fstatat, dirfd, (uintptr_t)path, (uintptr_t)status, flags, 0, 0); }
+int access(const char *path, int mode) { return (int)call(ZEDBSD_SYS_access, (uintptr_t)path, mode, 0, 0, 0, 0); }
+int faccessat(int dirfd, const char *path, int mode, int flags) { return (int)call(ZEDBSD_SYS_faccessat, dirfd, (uintptr_t)path, mode, flags, 0, 0); }
+int chmod(const char *path, mode_t mode) { return (int)call(ZEDBSD_SYS_chmod, (uintptr_t)path, mode, 0, 0, 0, 0); }
+int fchmod(int fd, mode_t mode) { return (int)call(ZEDBSD_SYS_fchmod, fd, mode, 0, 0, 0, 0); }
+int fchmodat(int dirfd, const char *path, mode_t mode, int flags) { return (int)call(ZEDBSD_SYS_fchmodat, dirfd, (uintptr_t)path, mode, flags, 0, 0); }
+int chown(const char *path, uid_t uid, gid_t gid) { return (int)call(ZEDBSD_SYS_chown, (uintptr_t)path, uid, gid, 0, 0, 0); }
+int fchown(int fd, uid_t uid, gid_t gid) { return (int)call(ZEDBSD_SYS_fchown, fd, uid, gid, 0, 0, 0); }
+int lchown(const char *path, uid_t uid, gid_t gid) { return (int)call(ZEDBSD_SYS_lchown, (uintptr_t)path, uid, gid, 0, 0, 0); }
+int fchownat(int dirfd, const char *path, uid_t uid, gid_t gid, int flags) { return (int)call(ZEDBSD_SYS_fchownat, dirfd, (uintptr_t)path, uid, gid, flags, 0); }
+int utimensat(int dirfd, const char *path, const struct timespec times[2], int flags) { return (int)call(ZEDBSD_SYS_utimensat, dirfd, (uintptr_t)path, (uintptr_t)times, flags, 0, 0); }
+int futimens(int fd, const struct timespec times[2]) { return (int)call(ZEDBSD_SYS_futimens, fd, (uintptr_t)times, 0, 0, 0, 0); }
 int isatty(int fd) { struct stat st; return fstat(fd, &st) == 0 && S_ISCHR(st.st_mode); }
 int fileno(void *stream) {
 	FILE *file = stream;
@@ -333,7 +397,7 @@ int fseek(FILE *stream, long offset, int whence) { off_t at = lseek(stream_fd(st
 long ftell(FILE *stream) { off_t at = lseek(stream_fd(stream), 0, SEEK_CUR); return at < 0 ? -1L : (long)at; }
 
 time_t time(time_t *result) {
-	struct timespec ts; time_t value = clock_gettime(CLOCK_MONOTONIC, &ts) == 0 ? ts.tv_sec : (time_t)-1;
+	struct timespec ts; time_t value = clock_gettime(CLOCK_REALTIME, &ts) == 0 ? ts.tv_sec : (time_t)-1;
 	if (result != NULL)
 		*result = value;
 	return value;

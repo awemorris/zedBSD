@@ -3,6 +3,7 @@
 #include "kern/mount.h"
 #include "kern/namecache.h"
 #include "kern/namei.h"
+#include "kern/clock.h"
 
 #include <errno.h>
 #include <string.h>
@@ -241,53 +242,245 @@ inode_getattr(struct inode *inode, struct stat *status)
 	status->st_gid = inode->i_gid;
 	status->st_rdev = inode->i_rdev;
 	status->st_size = inode->i_size;
+	status->st_atime = inode->i_atime.tv_sec;
+	status->st_mtime = inode->i_mtime.tv_sec;
+	status->st_ctime = inode->i_ctime.tv_sec;
+	status->st_blksize = 512;
+	status->st_blocks = inode->i_size > 0 ?
+	    (blkcnt_t)(((uint32_t)inode->i_size + 511U) / 512U) : 0;
 	return 0;
+}
+
+void
+inode_touch(struct inode *inode, unsigned mask)
+{
+	struct inode_time now;
+	if (inode == NULL)
+		return;
+	zedbsd_clock_realtime(&now.tv_sec, &now.tv_nsec);
+	if (mask & INODE_ATTR_ATIME)
+		inode->i_atime = now;
+	if (mask & INODE_ATTR_MTIME)
+		inode->i_mtime = now;
+	if (mask & INODE_ATTR_CTIME)
+		inode->i_ctime = now;
 }
 
 int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 {
-	if (i == NULL || s == NULL) return EINVAL;
-	if (readonly(i)) return EROFS;
-	return i->i_op != NULL && i->i_op->setattr != NULL ?
-		i->i_op->setattr(i, s, mask) : EOPNOTSUPP;
+	const unsigned valid = INODE_ATTR_MODE | INODE_ATTR_UID |
+		INODE_ATTR_GID | INODE_ATTR_SIZE | INODE_ATTR_ATIME |
+		INODE_ATTR_MTIME | INODE_ATTR_CTIME |
+		INODE_ATTR_ATIME_NOW | INODE_ATTR_MTIME_NOW;
+	struct stat requested;
+	struct inode_time now;
+	int error;
+
+	if (i == NULL || s == NULL || (mask & ~valid) != 0)
+		return EINVAL;
+	if (readonly(i))
+		return EROFS;
+	requested = *s;
+	if (mask & (INODE_ATTR_ATIME_NOW | INODE_ATTR_MTIME_NOW)) {
+		zedbsd_clock_realtime(&now.tv_sec, &now.tv_nsec);
+		if (mask & INODE_ATTR_ATIME_NOW) {
+			requested.st_atime = now.tv_sec;
+#ifdef ZEDBSD_SYS_STAT_H
+			requested.st_atim.tv_nsec = now.tv_nsec;
+#endif
+			mask |= INODE_ATTR_ATIME;
+		}
+		if (mask & INODE_ATTR_MTIME_NOW) {
+			requested.st_mtime = now.tv_sec;
+#ifdef ZEDBSD_SYS_STAT_H
+			requested.st_mtim.tv_nsec = now.tv_nsec;
+#endif
+			mask |= INODE_ATTR_MTIME;
+		}
+		mask &= ~(INODE_ATTR_ATIME_NOW | INODE_ATTR_MTIME_NOW);
+	}
+	if ((mask & INODE_ATTR_MODE) != 0 &&
+	    (requested.st_mode & S_IFMT) != 0 &&
+	    (requested.st_mode & S_IFMT) != (i->i_mode & S_IFMT))
+		return EINVAL;
+	if (i->i_op == NULL || i->i_op->setattr == NULL)
+		return EOPNOTSUPP;
+	error = i->i_op->setattr(i, &requested, mask);
+	if (error != 0)
+		return error;
+	if (mask & INODE_ATTR_MODE)
+		i->i_mode = (i->i_mode & S_IFMT) |
+			(requested.st_mode & ~S_IFMT);
+	if (mask & INODE_ATTR_UID)
+		i->i_uid = requested.st_uid;
+	if (mask & INODE_ATTR_GID)
+		i->i_gid = requested.st_gid;
+	if (mask & INODE_ATTR_SIZE)
+		i->i_size = requested.st_size;
+	if (mask & INODE_ATTR_ATIME) {
+		i->i_atime.tv_sec = requested.st_atime;
+#ifdef ZEDBSD_SYS_STAT_H
+		i->i_atime.tv_nsec = requested.st_atim.tv_nsec;
+#else
+		i->i_atime.tv_nsec = 0;
+#endif
+	}
+	if (mask & INODE_ATTR_MTIME) {
+		i->i_mtime.tv_sec = requested.st_mtime;
+#ifdef ZEDBSD_SYS_STAT_H
+		i->i_mtime.tv_nsec = requested.st_mtim.tv_nsec;
+#else
+		i->i_mtime.tv_nsec = 0;
+#endif
+	}
+	if (mask & INODE_ATTR_CTIME) {
+		i->i_ctime.tv_sec = requested.st_ctime;
+#ifdef ZEDBSD_SYS_STAT_H
+		i->i_ctime.tv_nsec = requested.st_ctim.tv_nsec;
+#else
+		i->i_ctime.tv_nsec = 0;
+#endif
+	} else if (mask != 0) {
+		inode_touch(i, INODE_ATTR_CTIME);
+	}
+	return 0;
 }
 int inode_create(struct inode *i, const struct componentname *n, mode_t m,
 		 struct inode **r)
 {
+	int error;
 	if (i == NULL || n == NULL || r == NULL) return EINVAL;
 	if (readonly(i)) return EROFS;
-	return i->i_op != NULL && i->i_op->create != NULL ?
+	error = i->i_op != NULL && i->i_op->create != NULL ?
 		i->i_op->create(i, n, m, r) : EOPNOTSUPP;
+	if (error == 0) {
+		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+		inode_touch(*r, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
+			INODE_ATTR_CTIME);
+	}
+	return error;
 }
 int inode_mkdir(struct inode *i, const struct componentname *n, mode_t m,
 		struct inode **r)
 {
+	int error;
 	if (i == NULL || n == NULL || r == NULL) return EINVAL;
 	if (readonly(i)) return EROFS;
-	return i->i_op != NULL && i->i_op->mkdir != NULL ?
+	error = i->i_op != NULL && i->i_op->mkdir != NULL ?
 		i->i_op->mkdir(i, n, m, r) : EOPNOTSUPP;
+	if (error == 0) {
+		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+		inode_touch(*r, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
+			INODE_ATTR_CTIME);
+	}
+	return error;
 }
 int inode_unlink(struct inode *i, const struct componentname *n)
 {
+	int error;
 	if (i == NULL || n == NULL) return EINVAL;
 	if (readonly(i)) return EROFS;
-	return i->i_op != NULL && i->i_op->unlink != NULL ?
+	error = i->i_op != NULL && i->i_op->unlink != NULL ?
 		i->i_op->unlink(i, n) : EOPNOTSUPP;
+	if (error == 0)
+		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	return error;
 }
 int inode_rmdir(struct inode *i, const struct componentname *n)
 {
+	int error;
 	if (i == NULL || n == NULL) return EINVAL;
 	if (readonly(i)) return EROFS;
-	return i->i_op != NULL && i->i_op->rmdir != NULL ?
+	error = i->i_op != NULL && i->i_op->rmdir != NULL ?
 		i->i_op->rmdir(i, n) : EOPNOTSUPP;
+	if (error == 0)
+		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	return error;
+}
+int inode_rename(struct inode *od, const struct componentname *on,
+		 struct inode *nd, const struct componentname *nn, unsigned flags)
+{
+	int error;
+	if (od == NULL || on == NULL || nd == NULL || nn == NULL || flags != 0)
+		return EINVAL;
+	if (od->i_mount != nd->i_mount)
+		return EXDEV;
+	if (readonly(od) || readonly(nd))
+		return EROFS;
+	error = od->i_op != NULL && od->i_op->rename != NULL ?
+		od->i_op->rename(od, on, nd, nn, flags) : EOPNOTSUPP;
+	if (error == 0) {
+		inode_touch(od, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+		if (nd != od)
+			inode_touch(nd, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	}
+	return error;
+}
+int inode_link(struct inode *directory, const struct componentname *name,
+	       struct inode *target)
+{
+	int error;
+	if (directory == NULL || name == NULL || target == NULL)
+		return EINVAL;
+	if (directory->i_type != INODE_DIR)
+		return ENOTDIR;
+	if (target->i_type == INODE_DIR)
+		return EPERM;
+	if (directory->i_mount != target->i_mount)
+		return EXDEV;
+	if (readonly(directory))
+		return EROFS;
+	error = directory->i_op != NULL && directory->i_op->link != NULL ?
+		directory->i_op->link(directory, name, target) : EOPNOTSUPP;
+	if (error == 0) {
+		target->i_linkcount++;
+		inode_touch(target, INODE_ATTR_CTIME);
+		inode_touch(directory, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	}
+	return error;
+}
+int inode_symlink(struct inode *directory, const struct componentname *name,
+		  const char *target, struct inode **result)
+{
+	int error;
+	if (directory == NULL || name == NULL || target == NULL || result == NULL)
+		return EINVAL;
+	if (directory->i_type != INODE_DIR)
+		return ENOTDIR;
+	if (target[0] == '\0')
+		return ENOENT;
+	if (readonly(directory))
+		return EROFS;
+	error = directory->i_op != NULL && directory->i_op->symlink != NULL ?
+		directory->i_op->symlink(directory, name, target, result) :
+		EOPNOTSUPP;
+	if (error == 0) {
+		inode_touch(directory, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+		inode_touch(*result, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
+			INODE_ATTR_CTIME);
+	}
+	return error;
+}
+ssize_t inode_readlink(struct inode *inode, char *buffer, size_t capacity)
+{
+	if (inode == NULL || buffer == NULL)
+		return -EINVAL;
+	if (inode->i_type != INODE_SYMLINK)
+		return -EINVAL;
+	return inode->i_op != NULL && inode->i_op->readlink != NULL ?
+		inode->i_op->readlink(inode, buffer, capacity) : -EOPNOTSUPP;
 }
 int inode_truncate(struct inode *i, off_t size)
 {
+	int error;
 	if (i == NULL || size < 0) return EINVAL;
 	if (i->i_flags & INODE_SWAPFILE) return EBUSY;
 	if (readonly(i)) return EROFS;
-	return i->i_op != NULL && i->i_op->truncate != NULL ?
+	error = i->i_op != NULL && i->i_op->truncate != NULL ?
 		i->i_op->truncate(i, size) : EOPNOTSUPP;
+	if (error == 0)
+		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	return error;
 }
 int inode_sync(struct inode *i)
 {

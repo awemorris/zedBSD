@@ -22,7 +22,8 @@ SECTIONS
 	.text.low : {
 		*(.text.entry)
 		*/hal/i386/*.o(.text*) */hal/i386/bsp-pc98/*.o(.text*)
-		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o) .text*)
+		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o */kern/vm-object.o \
+			*/kern/signal.o) .text*)
 		*/kern/pc98/*.o(.text*)
 		*main.o(.text*) *stage2-m9-test.o(.text*)
 		*console.o(.text*) *env.o(.text*)
@@ -99,7 +100,7 @@ SECTIONS
 
 	. = 0x80100000;
 	__high_start = .;
-	.text.high : { *(.text*) } :high
+	.text.high : { *(.hightext) *(.text*) } :high
 	.rodata.high : { *(.rodata*) } :high
 	.data.high : { *(.data*) } :high
 	__high_image_end = .;

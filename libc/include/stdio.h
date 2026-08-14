@@ -46,5 +46,6 @@ size_t fread(void *buffer, size_t size, size_t count, FILE *stream);
 size_t fwrite(const void *buffer, size_t size, size_t count, FILE *stream);
 int ferror(FILE *stream);
 void clearerr(FILE *stream);
+int rename(const char *, const char *);
 
 #endif

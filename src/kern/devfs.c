@@ -52,6 +52,9 @@ static int devfs_getattr(struct inode *inode, struct stat *status)
 	status->st_mode = inode->i_mode;
 	status->st_nlink = inode->i_linkcount;
 	status->st_rdev = inode->i_rdev;
+	status->st_uid = inode->i_uid;
+	status->st_gid = inode->i_gid;
+	status->st_blksize = 512;
 	return 0;
 }
 

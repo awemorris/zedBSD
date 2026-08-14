@@ -327,6 +327,21 @@ void hal_task_init(void);
 /* Create a task. */
 hal_task_t hal_task_create(hal_space_t space, void (*start)(void *p), void *arg, void *user_stack_pointer);
 
+/* Duplicate/replace the active return-to-user context.  These operations are
+ * valid only while the current task is handling a user system call. */
+hal_task_t hal_task_fork_current(hal_space_t child_space,
+				 intptr_t child_syscall_result);
+int hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
+			  uintptr_t user_stack_pointer);
+uintptr_t hal_task_user_stack(void);
+int hal_task_signal_enter(uintptr_t handler, uintptr_t stack, int signo,
+			  uintptr_t restorer, uint32_t token);
+int hal_task_signal_return(uint32_t token, intptr_t *return_value);
+
+typedef void (*hal_user_return_handler_t)(void);
+void hal_user_return_set_handler(hal_user_return_handler_t handler);
+void hal_user_return_invoke(void);
+
 /* Destroy a task. */
 void hal_task_destroy(hal_task_t t);
 

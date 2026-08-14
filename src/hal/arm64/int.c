@@ -1,6 +1,7 @@
 #include <hal/hal.h>
 #include "asm.h"
 #include "int.h"
+#include "task.h"
 #include "irq.h"
 #include "bsp-rpi4/gic.h"
 #include <kern/sched.h>
@@ -9,6 +10,9 @@
 extern char arm64_vectors[];
 static hal_trap_handler_t trap_handlers[5];
 static hal_syscall_handler_t syscall_handler;
+static hal_user_return_handler_t user_return_handler;
+void hal_user_return_set_handler(hal_user_return_handler_t h){user_return_handler=h;}
+void hal_user_return_invoke(void){if(user_return_handler!=NULL)user_return_handler();}
 static hal_user_int_handler_t user_int_handler;
 static hal_user_fault_handler_t user_fault_handler;
 static int resched_pending;
@@ -39,8 +43,11 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 			user_int_handler(&trap);
 		for (i = 0; i < HAL_SYSCALL_ARGS; i++)
 			args[i] = (uintptr_t)f->x[i];
+		arm64_task_enter_user_frame(f);
 		f->x[0] = (uint64)(syscall_handler != NULL ?
 			syscall_handler((uint32)f->x[8], args) : -ENOSYS);
+		hal_user_return_invoke();
+		arm64_task_leave_user_frame();
 		if (resched_pending) {
 			resched_pending = 0;
 			sched_yield();
@@ -50,6 +57,7 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 	if (vector == 8 && (ec == 0x20 || ec == 0x21 ||
 	    ec == 0x24 || ec == 0x25)) {
 		struct hal_user_trap trap;
+		int handled;
 		trap.vector = 14U;
 		trap.cs = 3U;
 		trap.eip = (uint32)f->elr;
@@ -57,13 +65,20 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 		trap.error_code = (ec == 0x20 || ec == 0x21) ? 0x10U :
 			((f->esr & (1ULL << 6)) ? 2U : 0U);
 		trap.fault_address = (uint32)f->far;
-		if (user_fault_handler != NULL &&
-		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS)
+		arm64_task_enter_user_frame(f);
+		handled = user_fault_handler != NULL &&
+		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS;
+		if (handled) {
+			hal_user_return_invoke();
+			arm64_task_leave_user_frame();
 			return;
+		}
+		arm64_task_leave_user_frame();
 		HAL_FATAL("AArch64 user page fault handler returned");
 	}
 	if (vector == 8) {
 		struct hal_user_trap trap;
+		int handled;
 		trap.vector = (ec == 0x3c) ? 3U :
 			(ec == 0x22 || ec == 0x26) ? 17U : 6U;
 		trap.cs = 3U;
@@ -71,8 +86,15 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 		trap.eax = (uint32)f->x[0];
 		trap.error_code = 0;
 		trap.fault_address = (uint32)f->far;
-		if (user_fault_handler != NULL)
-			(void)user_fault_handler(&trap);
+		arm64_task_enter_user_frame(f);
+		handled = user_fault_handler != NULL &&
+		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS;
+		if (handled) {
+			hal_user_return_invoke();
+			arm64_task_leave_user_frame();
+			return;
+		}
+		arm64_task_leave_user_frame();
 		HAL_FATAL("AArch64 user fault handler returned");
 	}
 	hal_printf("ARM64 sync vector=%u ec=%x esr=%llx elr=%llx far=%llx\n",

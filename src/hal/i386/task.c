@@ -8,6 +8,7 @@
 #include <hal/hal.h>
 #include "task.h"
 #include "asm.h"
+#include "int.h"
 
 extern uint32 tss_area[26];
 
@@ -125,6 +126,101 @@ hal_task_create(hal_space_t space, void (*start)(void *), void *arg,
 	set_initial_resume_frame(task, start, arg, user_stack_pointer);
 	tasklist_add(task);
 	return task;
+}
+
+void
+i386_task_enter_user_frame(void *frame)
+{
+	if (running_task != NULL)
+		running_task->active_user_frame = frame;
+}
+
+void
+i386_task_leave_user_frame(void)
+{
+	if (running_task != NULL)
+		running_task->active_user_frame = NULL;
+}
+
+hal_task_t
+hal_task_fork_current(hal_space_t child_space, intptr_t child_result)
+{
+	struct interrupt_frame *source;
+	struct task_info *child;
+	struct task_resume_frame *resume;
+
+	if (running_task == NULL || child_space == HAL_SPACE_SYS ||
+	    running_task->active_user_frame == NULL)
+		return NULL;
+	source = running_task->active_user_frame;
+	if ((source->cs & 3U) != 3U)
+		return NULL;
+	child = hal_task_create(child_space, (void (*)(void *))source->eip,
+	    NULL, (void *)(uintptr_t)source->user_esp);
+	if (child == NULL)
+		return NULL;
+	resume = child->resume_esp;
+	resume->edi = source->regs.edi;
+	resume->esi = source->regs.esi;
+	resume->ebp = source->regs.ebp;
+	resume->ebx = source->regs.ebx;
+	resume->edx = source->regs.edx;
+	resume->ecx = source->regs.ecx;
+	resume->eax = (uint32)child_result;
+	resume->initial.user.eip = source->eip;
+	resume->initial.user.cs = source->cs;
+	resume->initial.user.eflags = source->eflags;
+	resume->initial.user.esp = source->user_esp;
+	resume->initial.user.ss = source->user_ss;
+	child->tls = running_task->tls;
+	hal_memcpy(child->fpregs, running_task->fpregs,
+	    sizeof(child->fpregs));
+	return child;
+}
+
+int
+hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
+		      uintptr_t user_stack_pointer)
+{
+	struct interrupt_frame *frame;
+	if (running_task == NULL || new_space == HAL_SPACE_SYS ||
+	    running_task->active_user_frame == NULL || entry == 0 ||
+	    user_stack_pointer == 0 || entry > UINT32_MAX ||
+	    user_stack_pointer > UINT32_MAX)
+		return -1;
+	frame = running_task->active_user_frame;
+	hal_memset(&frame->regs, 0, sizeof(frame->regs));
+	frame->eip = (uint32)entry;
+	frame->cs = SEG_USER_CODE | SEG_RPL_3;
+	frame->eflags = EFLAGS_IF | EFLAGS_RSV1 | EFLAGS_IOPL_0;
+	frame->user_esp = (uint32)user_stack_pointer;
+	frame->user_ss = SEG_USER_DATA | SEG_RPL_3;
+	running_task->space = new_space;
+	running_task->tls = 0;
+	running_task->signal_depth = 0;
+	running_task->signal_token = 0;
+	hal_page_switch_space(new_space);
+	return 0;
+}
+
+uintptr_t hal_task_user_stack(void)
+{
+	struct interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
+	return f!=NULL&&(f->cs&3U)==3U?f->user_esp:0;
+}
+int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t rest,uint32_t token)
+{
+	struct interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
+	(void)sig;(void)rest;
+	if(f==NULL||running_task->signal_depth!=0||h==0||sp==0||h>UINT32_MAX||sp>UINT32_MAX||token==0)return -1;
+	running_task->signal_frame=*f;running_task->signal_token=token;
+	running_task->signal_depth=1;f->eip=(uint32)h;f->user_esp=(uint32)sp;return 0;
+}
+int hal_task_signal_return(uint32_t token,intptr_t *value)
+{
+	struct interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
+	if(f==NULL||value==NULL||running_task->signal_depth!=1||token==0||token!=running_task->signal_token)return -1;
+	*f=running_task->signal_frame;*value=(intptr_t)(int32)f->regs.eax;running_task->signal_depth=0;running_task->signal_token=0;return 0;
 }
 
 void

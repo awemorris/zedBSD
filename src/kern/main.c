@@ -26,6 +26,7 @@
  * gateway in Stage 1.
  */
 const struct zedbsd_handoff *ho;
+static struct zedbsd_handoff handoff_snapshot;
 const struct zedbsd_device *devs;
 unsigned device_count;
 
@@ -125,7 +126,11 @@ void kernel_main(const struct zedbsd_handoff *h,
 {
 	int error;
 
-	ho = h;
+	/* PC-98 Stage 1 places its handoff below 1 MiB.  User address spaces do
+	 * not retain that identity mapping, so persistent kernel services must
+	 * refer to a kernel-owned copy after init has started. */
+	memcopy(&handoff_snapshot, h, sizeof(handoff_snapshot));
+	ho = &handoff_snapshot;
 	device_count = platform_device_count;
 	devs = platform_devices;
 	hal_printf("boot: graphics service initialization\n");

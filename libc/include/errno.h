@@ -54,5 +54,10 @@ extern int zedbsd_errno;
 #define EHOSTUNREACH 43
 #define EPIPE 44
 #define EDESTADDRREQ 45
+#define EMFILE 46
+#define EPERM 47
+#define EXDEV 48
+#define ESPIPE 49
+#define ELOOP 50
 
 #endif

@@ -45,7 +45,22 @@ enum inode_type {
 #define INODE_MOUNTPOINT 0x00000008U
 #define INODE_SWAPFILE   0x00000010U
 
+#define INODE_ATTR_MODE       0x00000001U
+#define INODE_ATTR_UID        0x00000002U
+#define INODE_ATTR_GID        0x00000004U
+#define INODE_ATTR_SIZE       0x00000008U
+#define INODE_ATTR_ATIME      0x00000010U
+#define INODE_ATTR_MTIME      0x00000020U
+#define INODE_ATTR_CTIME      0x00000040U
+#define INODE_ATTR_ATIME_NOW  0x00000080U
+#define INODE_ATTR_MTIME_NOW  0x00000100U
+
 struct inode;
+
+struct inode_time {
+	int32_t tv_sec;
+	int32_t tv_nsec;
+};
 
 struct inode_ops {
 	int (*lookup)(struct inode *, const struct componentname *,
@@ -58,6 +73,12 @@ struct inode_ops {
 		     struct inode **);
 	int (*unlink)(struct inode *, const struct componentname *);
 	int (*rmdir)(struct inode *, const struct componentname *);
+	int (*rename)(struct inode *, const struct componentname *,
+		      struct inode *, const struct componentname *, unsigned);
+	int (*link)(struct inode *, const struct componentname *, struct inode *);
+	int (*symlink)(struct inode *, const struct componentname *, const char *,
+		       struct inode **);
+	ssize_t (*readlink)(struct inode *, char *, size_t);
 	int (*getattr)(struct inode *, struct stat *);
 	int (*setattr)(struct inode *, const struct stat *, unsigned);
 	int (*truncate)(struct inode *, off_t);
@@ -79,6 +100,9 @@ struct inode {
 	gid_t i_gid;
 	off_t i_size;
 	dev_t i_rdev;
+	struct inode_time i_atime;
+	struct inode_time i_mtime;
+	struct inode_time i_ctime;
 	unsigned i_flags;
 	struct inode *i_hash_next;
 	struct inode *i_mount_next;
@@ -103,8 +127,15 @@ int inode_mkdir(struct inode *, const struct componentname *, mode_t,
 		struct inode **);
 int inode_unlink(struct inode *, const struct componentname *);
 int inode_rmdir(struct inode *, const struct componentname *);
+int inode_rename(struct inode *, const struct componentname *, struct inode *,
+		 const struct componentname *, unsigned);
+int inode_link(struct inode *, const struct componentname *, struct inode *);
+int inode_symlink(struct inode *, const struct componentname *, const char *,
+		  struct inode **);
+ssize_t inode_readlink(struct inode *, char *, size_t);
 int inode_truncate(struct inode *, off_t);
 int inode_sync(struct inode *);
+void inode_touch(struct inode *, unsigned);
 
 mode_t inode_type_mode(enum inode_type type);
 

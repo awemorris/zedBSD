@@ -7,6 +7,8 @@
 
 #include "kern/fs.h"
 
+#include <stddef.h>
+
 static void clear_bytes(void *pointer, uint32_t length)
 {
 	uint8_t *bytes = pointer;
@@ -143,6 +145,55 @@ enum zedbsd_fs_result zedbsd_fs_create_result(
 		return result;
 	clear_bytes(file, sizeof(*file));
 	return result;
+}
+
+static enum zedbsd_fs_result
+path_operation(struct zedbsd_filesystem *filesystem, const char *path,
+	       enum zedbsd_fs_result (*operation)(struct zedbsd_filesystem *,
+						    const char *))
+{
+	if (filesystem == NULL || filesystem->driver == NULL || path == NULL ||
+	    *path == '\0')
+		return ZEDBSD_FS_INVALID_ARGUMENT;
+	if (operation == NULL)
+		return ZEDBSD_FS_UNSUPPORTED;
+	return operation(filesystem, path);
+}
+
+enum zedbsd_fs_result
+zedbsd_fs_mkdir_result(struct zedbsd_filesystem *filesystem, const char *path)
+{
+	return path_operation(filesystem, path,
+		filesystem != NULL && filesystem->driver != NULL ?
+		filesystem->driver->mkdir : NULL);
+}
+
+enum zedbsd_fs_result
+zedbsd_fs_unlink_result(struct zedbsd_filesystem *filesystem, const char *path)
+{
+	return path_operation(filesystem, path,
+		filesystem != NULL && filesystem->driver != NULL ?
+		filesystem->driver->unlink : NULL);
+}
+
+enum zedbsd_fs_result
+zedbsd_fs_rmdir_result(struct zedbsd_filesystem *filesystem, const char *path)
+{
+	return path_operation(filesystem, path,
+		filesystem != NULL && filesystem->driver != NULL ?
+		filesystem->driver->rmdir : NULL);
+}
+
+enum zedbsd_fs_result
+zedbsd_fs_rename_result(struct zedbsd_filesystem *filesystem,
+			const char *old_path, const char *new_path)
+{
+	if (filesystem == NULL || filesystem->driver == NULL || old_path == NULL ||
+	    new_path == NULL || *old_path == '\0' || *new_path == '\0')
+		return ZEDBSD_FS_INVALID_ARGUMENT;
+	if (filesystem->driver->rename == NULL)
+		return ZEDBSD_FS_UNSUPPORTED;
+	return filesystem->driver->rename(filesystem, old_path, new_path);
 }
 
 enum zedbsd_fs_result zedbsd_file_read_result(

@@ -6,9 +6,11 @@
 
 #include "kern/user-probe.h"
 #include "kern/process.h"
+#include "kern/signal.h"
 #include "kern/thread.h"
 #include "kern/vmspace.h"
 
+#include <errno.h>
 #include <hal/hal.h>
 
 volatile struct user_int_probe user_int_probe;
@@ -35,18 +37,18 @@ static int
 observe_user_fault(const struct hal_user_trap *trap)
 {
 	struct thread *thread = curthread;
+	int signo;
+	int page_fault_error = 0;
 	if (thread == NULL || thread->proc == NULL || trap == NULL)
 		return HAL_TRAP_RET_FAILED;
 	if (trap->vector == 14U && thread->proc->vmspace != NULL) {
 		uint32_t required = (trap->error_code & 0x10U) ? HAL_SPACE_EXEC :
 			(trap->error_code & 2U) ? HAL_SPACE_WRITE : HAL_SPACE_READ;
-		int error;
-
 		hal_irq_enable();
-		error = vmspace_fault(thread->proc->vmspace,
+		page_fault_error = vmspace_fault(thread->proc->vmspace,
 				      trap->fault_address, required);
 		(void)hal_irq_disable();
-		if (error == 0)
+		if (page_fault_error == 0)
 			return HAL_TRAP_RET_SUCCESS;
 	}
 	thread->fault_vector = trap->vector;
@@ -62,8 +64,19 @@ observe_user_fault(const struct hal_user_trap *trap)
 	user_fault_probe.tid = thread->tid;
 	hal_compiler_barrier();
 	user_fault_probe.magic = USER_FAULT_PROBE_MAGIC;
-	exit1(-(int)trap->vector);
-	return HAL_TRAP_RET_FAILED;
+	switch (trap->vector) {
+	case 0: signo = SIGFPE; break;
+	case 3: signo = SIGTRAP; break;
+	case 6: signo = SIGILL; break;
+	case 14:
+		signo = page_fault_error == ENXIO ? SIGBUS : SIGSEGV; break;
+	case 10: case 11: case 12: case 13:
+		signo = SIGSEGV; break;
+	default: signo = SIGBUS; break;
+	}
+	if (signal_send_process(thread->proc, signo) != 0)
+		return HAL_TRAP_RET_FAILED;
+	return HAL_TRAP_RET_SUCCESS;
 }
 
 void

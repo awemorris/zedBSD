@@ -61,6 +61,28 @@ thread_create(struct process *process, uintptr_t entry, uintptr_t user_sp,
 	return 0;
 }
 
+int
+thread_fork(struct process *process, hal_task_t task, struct thread **result)
+{
+	struct thread *thread;
+	if (process == NULL || process->vmspace == NULL || task == NULL ||
+	    result == NULL || hal_task_get_space(task) != process->vmspace->space)
+		return EINVAL;
+	thread = kern_calloc(1, sizeof(*thread));
+	if (thread == NULL)
+		return ENOMEM;
+	thread->tid = next_tid++;
+	thread->proc = process;
+	thread->task = task;
+	thread->state = THREAD_NEW;
+	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
+	thread->sched.quantum = SCHED_QUANTUM_TICKS;
+	hal_task_set_private(task, thread);
+	attach_thread(process, thread);
+	*result = thread;
+	return 0;
+}
+
 static void
 kernel_thread_trampoline(void *argument)
 {

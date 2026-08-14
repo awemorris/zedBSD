@@ -1,9 +1,14 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/namei.h"
+#include "kern/cred.h"
 #include "kern/mount.h"
 
 #include <errno.h>
 #include <string.h>
+#include <unistd.h>
+
+/* Some VFS host tests deliberately link without the process subsystem. */
+extern const struct ucred *cred_current(void) __attribute__((weak));
 
 static int
 path_length(const char *path, size_t *length)
@@ -31,24 +36,44 @@ component_is(const char *name, size_t length, const char *literal)
 	return i == length && literal[i] == '\0';
 }
 
+static int
+search_access(const struct inode *directory)
+{
+	const struct ucred *cred;
+
+	cred = cred_current != NULL ? cred_current() : NULL;
+	if (cred == NULL)
+		return 0;
+	return vfs_access(directory, cred, X_OK);
+}
+
 int
-namei_path_at(struct cwdinfo *context, const char *path, struct path *result)
+namei_path_flags_at(struct cwdinfo *context, const char *path, unsigned flags,
+		    struct path *result)
 {
 	struct path current;
+	char work[ZEDBSD_PATH_MAX];
 	size_t length, position = 0;
+	unsigned symlinks = 0;
 	int error, trailing;
 
 	if (context == NULL || context->root.p_inode == NULL ||
-	    context->cwd.p_inode == NULL || result == NULL)
+	    context->cwd.p_inode == NULL || result == NULL ||
+	    (flags & ~NAMEI_NOFOLLOW_FINAL) != 0)
 		return EINVAL;
 	error = path_length(path, &length);
 	if (error != 0)
 		return error;
+	memcpy(work, path, length + 1U);
+	path = work;
 	trailing = path[length - 1U] == '/';
 	if (path[0] == '/')
 		path_set(&current, context->root.p_mount, context->root.p_inode);
 	else
 		path_set(&current, context->cwd.p_mount, context->cwd.p_inode);
+	error = search_access(current.p_inode);
+	if (error != 0)
+		goto fail;
 	while (position < length) {
 		struct componentname component;
 		struct path next_path;
@@ -58,6 +83,9 @@ namei_path_at(struct cwdinfo *context, const char *path, struct path *result)
 			position++;
 		if (position == length)
 			break;
+		error = search_access(current.p_inode);
+		if (error != 0)
+			goto fail;
 		start = position;
 		while (position < length && path[position] != '/')
 			position++;
@@ -104,20 +132,73 @@ namei_path_at(struct cwdinfo *context, const char *path, struct path *result)
 		error = inode_lookup(current.p_inode, &component, &next_inode);
 		if (error != 0)
 			goto fail;
+		if (next_inode->i_type == INODE_SYMLINK &&
+		    !((flags & NAMEI_NOFOLLOW_FINAL) != 0 && position == length &&
+		      !trailing)) {
+			char target[ZEDBSD_PATH_MAX], combined[ZEDBSD_PATH_MAX];
+			ssize_t target_length;
+			size_t remainder = length - position;
+			if (++symlinks > ZEDBSD_SYMLOOP_MAX) {
+				inode_release(next_inode);
+				error = ELOOP;
+				goto fail;
+			}
+			target_length = inode_readlink(next_inode, target,
+				sizeof(target) - 1U);
+			inode_release(next_inode);
+			if (target_length < 0) {
+				error = (int)-target_length;
+				goto fail;
+			}
+			if (target_length == 0 ||
+			    (size_t)target_length + remainder >= sizeof(combined)) {
+				error = target_length == 0 ? ENOENT : ENAMETOOLONG;
+				goto fail;
+			}
+			memcpy(combined, target, (size_t)target_length);
+			memcpy(combined + target_length, path + position,
+				remainder + 1U);
+			memcpy(work, combined,
+				(size_t)target_length + remainder + 1U);
+			length = (size_t)target_length + remainder;
+			path = work;
+			position = 0;
+			trailing = path[length - 1U] == '/';
+			if (path[0] == '/') {
+				path_release(&current);
+				path_set(&current, context->root.p_mount,
+					context->root.p_inode);
+			}
+			continue;
+		}
 		path_set(&next_path, current.p_mount, next_inode);
 		inode_release(next_inode);
 		path_release(&current);
 		current = next_path;
+		if (position < length || trailing) {
+			error = current.p_inode->i_type != INODE_DIR ? ENOTDIR :
+			    search_access(current.p_inode);
+			if (error != 0)
+				goto fail;
+		}
 	}
 	if (trailing && current.p_inode->i_type != INODE_DIR) {
 		error = ENOTDIR;
 		goto fail;
 	}
+	if (trailing && (error = search_access(current.p_inode)) != 0)
+		goto fail;
 	*result = current;
 	return 0;
 fail:
 	path_release(&current);
 	return error;
+}
+
+int
+namei_path_at(struct cwdinfo *context, const char *path, struct path *result)
+{
+	return namei_path_flags_at(context, path, 0, result);
 }
 
 int
@@ -294,6 +375,11 @@ fs_chdir(struct cwdinfo *context, const char *path)
 	if (directory.p_inode->i_type != INODE_DIR) {
 		path_release(&directory);
 		return ENOTDIR;
+	}
+	error = search_access(directory.p_inode);
+	if (error != 0) {
+		path_release(&directory);
+		return error;
 	}
 	error = normalized_path(context, path, normalized);
 	if (error != 0) {

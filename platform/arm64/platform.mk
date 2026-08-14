@@ -39,7 +39,10 @@ ARM64_KERNEL_SOURCES := \
 	drivers/rpi4-sdhci.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/vmspace.c \
-	src/kern/vm-commit.c src/kern/filedesc.c src/kern/cwdinfo.c \
+	src/kern/vm-object.c src/kern/vm-commit.c src/kern/filedesc.c \
+	src/kern/pipe.c src/kern/cred.c \
+	src/kern/signal.c \
+	src/kern/cwdinfo.c \
 	src/kern/elf.c src/kern/exec.c src/kern/user-probe.c src/kern/syscall.c \
 	src/kern/uaccess.c src/kern/cdev.c src/kern/devfs.c \
 	src/kern/console-device.c src/kern/graphics-device.c \
@@ -55,16 +58,23 @@ ARM64_USER_CFLAGS := -march=armv8-a -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-builtin -fno-common -ffunction-sections -fdata-sections \
 	-Os -Wall -Wextra -Werror
-ARM64_USER_C_SOURCES := userland/libc/posix.c userland/libc/socket.c \
-	userland/sh/main.c userland/sh/applet.c userland/sh/builtins.c \
+ARM64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/socket.c \
+	userland/libc/signal.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
+ARM64_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
+	userland/sh/builtins.c
+ARM64_USER_RUNTIME_OBJS := \
+	$(patsubst %.c,$(BUILD)/user/%.o,$(ARM64_USER_RUNTIME_SOURCES))
+ARM64_USER_SH_OBJS := \
+	$(patsubst %.c,$(BUILD)/user/%.o,$(ARM64_USER_SH_SOURCES))
 ARM64_USER_OBJS := $(BUILD)/user/userland/crt0-aarch64.o \
-	$(patsubst %.c,$(BUILD)/user/%.o,$(ARM64_USER_C_SOURCES))
+	$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_SH_OBJS)
 
 all: $(BUILD)/vmunix $(BUILD)/VMUNIX.A64 $(BUILD)/bin/sh
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
+POSIX-R1.ELF: $(BUILD)/POSIX-R1.ELF
 arm64-image-check: $(BUILD)/VMUNIX.A64
 rpi4-entry-qemu-test: $(BUILD)/VMUNIX.A64
 	bash scripts/test-arm64-rpi4-entry-qemu.sh
@@ -118,6 +128,18 @@ $(BUILD)/bin/sh: $(ARM64_USER_OBJS) $(ARM64_PLATFORM)/user.ld \
 	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
 
+$(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-aarch64.o \
+	$(ARM64_USER_RUNTIME_OBJS) \
+	$(BUILD)/user/userland/tests/syscall-smoke.o \
+	$(ARM64_PLATFORM)/user.ld scripts/check-user-elf.py
+	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
+		$(BUILD)/user/userland/crt0-aarch64.o \
+		$(ARM64_USER_RUNTIME_OBJS) \
+		$(BUILD)/user/userland/tests/syscall-smoke.o -o $@
+	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
+
 $(BUILD)/hdd-image.img: $(BUILD)/VMUNIX.A64 $(BUILD)/bin/sh \
 	$(ARM64_PLATFORM)/config.txt scripts/make-rpi4-hdd-image.py \
 	scripts/check-rpi4-hdd-image.py
@@ -143,7 +165,7 @@ $(BUILD)/VMUNIX.A64: $(BUILD)/vmunix scripts/check-arm64-vmunix.py
 	$(PYTHON) scripts/check-arm64-vmunix.py --elf $< --image $@ --fix-image
 	$(PYTHON) scripts/check-arm64-vmunix.py --elf $< --image $@
 
-.PHONY: vmunix SH hdd-image rpi4-image-check arm64-image-check \
+.PHONY: vmunix SH POSIX-R1.ELF hdd-image rpi4-image-check arm64-image-check \
 	rpi4-entry-qemu-test rpi4-fdt-host-test
 
 .PHONY: rpi4-qemu-test

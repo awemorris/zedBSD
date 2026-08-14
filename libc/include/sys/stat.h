@@ -3,6 +3,7 @@
 #define ZEDBSD_SYS_STAT_H
 
 #include <sys/types.h>
+#include <time.h>
 
 #define S_IFMT   0170000U
 #define S_IFSOCK 0140000U
@@ -46,13 +47,31 @@ struct stat {
 	gid_t st_gid;
 	dev_t st_rdev;
 	off_t st_size;
+	struct timespec st_atim;
+	struct timespec st_mtim;
+	struct timespec st_ctim;
+	blksize_t st_blksize;
+	blkcnt_t st_blocks;
 } __attribute__((packed, aligned(4)));
 
-_Static_assert(sizeof(struct stat) == 36,
-	"zedBSD ELF32 stat ABI must remain 36 bytes");
+#define st_atime st_atim.tv_sec
+#define st_mtime st_mtim.tv_sec
+#define st_ctime st_ctim.tv_sec
+
+_Static_assert(sizeof(struct stat) == 68,
+	"zedBSD stat ABI must remain 68 bytes");
 
 int fstat(int, struct stat *);
 int stat(const char *, struct stat *);
+int lstat(const char *, struct stat *);
+int fstatat(int, const char *, struct stat *, int);
 int mkdir(const char *, mode_t);
+int mkdirat(int, const char *, mode_t);
+int chmod(const char *, mode_t);
+int fchmod(int, mode_t);
+int fchmodat(int, const char *, mode_t, int);
+int futimens(int, const struct timespec [2]);
+int utimensat(int, const char *, const struct timespec [2], int);
+mode_t umask(mode_t);
 
 #endif

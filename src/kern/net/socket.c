@@ -3,6 +3,7 @@
 #include "kern/net/packet-buf.h"
 #include "kern/kmem.h"
 #include "kern/sched.h"
+#include "kern/signal.h"
 #include "kern/thread.h"
 
 #include <errno.h>
@@ -223,6 +224,12 @@ socket_dequeue_packet(struct socket *socket, int flags,
 		}
 		socket->receive_waiter = thread;
 		sched_sleep(deadline);
+		if (signal_pending_unblocked(thread)) {
+			socket->receive_waiter = NULL;
+			if (enabled)
+				hal_irq_enable();
+			return EINTR;
+		}
 	}
 	*result = socket->receive_head;
 	socket->receive_head = (*result)->next;

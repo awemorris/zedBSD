@@ -5,17 +5,22 @@
 
 #include "kern/file.h"
 #include "kern/namei.h"
+#include "kern/cred.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <string.h>
+#include <unistd.h>
 
 #define FILE_MAX 64U
 #define VFS_BSS __attribute__((section(".vfs_bss")))
 
 static struct file files[FILE_MAX] VFS_BSS;
 static uint8_t file_used[FILE_MAX] VFS_BSS;
+
+extern void vm_object_truncate_inode(struct inode *, off_t)
+	__attribute__((weak));
 
 static struct file *
 file_alloc(void)
@@ -49,6 +54,13 @@ int
 file_openat(struct cwdinfo *context, const char *path, int flags,
 	    mode_t mode, struct file **result)
 {
+	return file_openat_cred(context, NULL, path, flags, mode, result);
+}
+
+int
+file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
+		 const char *path, int flags, mode_t mode, struct file **result)
+{
 	struct path found;
 	struct inode *inode = NULL;
 	struct file *file;
@@ -57,7 +69,8 @@ file_openat(struct cwdinfo *context, const char *path, int flags,
 	if (context == NULL || path == NULL || result == NULL)
 		return EINVAL;
 	if ((flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND |
-		       O_DIRECTORY)) != 0 || (flags & O_ACCMODE) > O_RDWR ||
+		       O_DIRECTORY | O_NONBLOCK)) != 0 ||
+	    (flags & O_ACCMODE) > O_RDWR ||
 	    ((flags & O_EXCL) != 0 && (flags & O_CREAT) == 0))
 		return EINVAL;
 	error = namei_path_at(context, path, &found);
@@ -71,6 +84,11 @@ file_openat(struct cwdinfo *context, const char *path, int flags,
 		error = namei_parent_path_at(context, path, &parent, &last, storage);
 		if (error != 0)
 			return error;
+		if (cred != NULL &&
+		    (error = vfs_access(parent.p_inode, cred, W_OK | X_OK)) != 0) {
+			path_release(&parent);
+			return error;
+		}
 		error = inode_lookup_casefold(parent.p_inode, &last, &collision);
 		if (error == 0) {
 			inode_release(collision);
@@ -100,6 +118,18 @@ file_openat(struct cwdinfo *context, const char *path, int flags,
 		return EEXIST;
 	}
 	inode = found.p_inode;
+	if (cred != NULL) {
+		int requested = 0;
+		if ((flags & O_ACCMODE) != O_WRONLY)
+			requested |= R_OK;
+		if ((flags & O_ACCMODE) != O_RDONLY || (flags & O_TRUNC) != 0)
+			requested |= W_OK;
+		error = vfs_access(inode, cred, requested);
+		if (error != 0) {
+			path_release(&found);
+			return error;
+		}
+	}
 	if ((flags & O_DIRECTORY) && inode->i_type != INODE_DIR) {
 		path_release(&found);
 		return ENOTDIR;
@@ -115,11 +145,13 @@ file_openat(struct cwdinfo *context, const char *path, int flags,
 			path_release(&found);
 			return error;
 		}
+		if (vm_object_truncate_inode != NULL)
+			vm_object_truncate_inode(inode, 0);
 	}
 	file = file_alloc();
 	if (file == NULL) {
 		path_release(&found);
-		return ENOSPC;
+		return ENFILE;
 	}
 	file->f_path = found;
 	file->f_inode = inode;
@@ -148,7 +180,7 @@ file_create_pseudo(const struct file_ops *ops, int flags, void *data,
 		return EINVAL;
 	file = file_alloc();
 	if (file == NULL)
-		return ENOSPC;
+		return ENFILE;
 	file->f_ops = ops;
 	file->f_flags = flags;
 	file->f_data = data;
@@ -169,6 +201,7 @@ file_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 ssize_t
 file_read(struct file *file, void *buffer, size_t length)
 {
+	ssize_t result;
 	if (file == NULL || buffer == NULL)
 		return -EINVAL;
 	if ((file->f_flags & O_ACCMODE) == O_WRONLY)
@@ -177,28 +210,51 @@ file_read(struct file *file, void *buffer, size_t length)
 		return -EISDIR;
 	if (file->f_ops == NULL || file->f_ops->read == NULL)
 		return -EOPNOTSUPP;
-	return file->f_ops->read(file, buffer, length);
+	result = file->f_ops->read(file, buffer, length);
+	if (result >= 0 && file->f_inode != NULL)
+		inode_touch(file->f_inode, INODE_ATTR_ATIME);
+	return result;
 }
 
 ssize_t
 file_pread(struct file *file, void *buffer, size_t length, off_t offset)
 {
-	off_t saved;
 	ssize_t result;
-
-	if (file == NULL || offset < 0)
+	if (file == NULL || buffer == NULL || offset < 0)
 		return -EINVAL;
-	saved = file->f_offset;
-	if (file_seek(file, offset, 0) != offset)
-		return -EIO;
-	result = file_read(file, buffer, length);
-	file->f_offset = saved;
+	if ((file->f_flags & O_ACCMODE) == O_WRONLY)
+		return -EBADF;
+	if (file->f_ops == NULL || file->f_ops->pread == NULL)
+		return -EOPNOTSUPP;
+	result = file->f_ops->pread(file, buffer, length, offset);
+	if (result >= 0 && file->f_inode != NULL)
+		inode_touch(file->f_inode, INODE_ATTR_ATIME);
+	return result;
+}
+
+ssize_t
+file_pwrite(struct file *file, const void *buffer, size_t length, off_t offset)
+{
+	ssize_t result;
+	if (file == NULL || buffer == NULL || offset < 0)
+		return -EINVAL;
+	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
+		return -EBADF;
+	if (file->f_inode != NULL &&
+	    (file->f_inode->i_flags & INODE_SWAPFILE) != 0)
+		return -EBUSY;
+	if (file->f_ops == NULL || file->f_ops->pwrite == NULL)
+		return -EOPNOTSUPP;
+	result = file->f_ops->pwrite(file, buffer, length, offset);
+	if (result >= 0 && file->f_inode != NULL)
+		inode_touch(file->f_inode, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	return result;
 }
 
 ssize_t
 file_write(struct file *file, const void *buffer, size_t length)
 {
+	ssize_t result;
 	if (file == NULL || buffer == NULL)
 		return -EINVAL;
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
@@ -210,7 +266,10 @@ file_write(struct file *file, const void *buffer, size_t length)
 		return -EISDIR;
 	if (file->f_ops == NULL || file->f_ops->write == NULL)
 		return -EOPNOTSUPP;
-	return file->f_ops->write(file, buffer, length);
+	result = file->f_ops->write(file, buffer, length);
+	if (result >= 0 && file->f_inode != NULL)
+		inode_touch(file->f_inode, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	return result;
 }
 
 int

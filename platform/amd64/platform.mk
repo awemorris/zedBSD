@@ -36,7 +36,9 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/mbr-partition.c src/kern/pcat/platform.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c \
-	src/kern/vmspace.c src/kern/vm-commit.c src/kern/filedesc.c \
+	src/kern/vmspace.c src/kern/vm-object.c src/kern/vm-commit.c \
+	src/kern/filedesc.c \
+	src/kern/pipe.c src/kern/cred.c src/kern/signal.c \
 	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
 	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
@@ -57,6 +59,8 @@ all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(BUILD)/hdd-image.img
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
+POSIX-R1.ELF: $(BUILD)/POSIX-R1.ELF
+.PHONY: POSIX-R1.ELF
 
 $(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.S
 	@mkdir -p $(dir $@)
@@ -121,6 +125,7 @@ bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 
 AMD64_USER_LIBC_OBJS := $(BUILD)/userland/crt0.o \
 	$(BUILD)/userland/libc/posix.o $(BUILD)/libc/heap.o \
+	$(BUILD)/userland/libc/signal.o \
 	$(BUILD)/libc/string.o $(BUILD)/libc/ctype.o $(BUILD)/libc/int64.o \
 	$(BUILD)/libc/strto.o $(BUILD)/libc/format.o $(BUILD)/libc/stdio.o
 AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS) \
@@ -138,6 +143,19 @@ $(BUILD)/userland/libc/posix.o $(AMD64_USER_SH_OBJS): \
 	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(BUILD)/userland/libc/posix.o $(AMD64_USER_SH_OBJS): \
 	OBJ_CFLAGS = $(AMD64_USER_CFLAGS)
+
+$(BUILD)/userland/tests/syscall-smoke.o: \
+	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(BUILD)/userland/tests/syscall-smoke.o: OBJ_CFLAGS = $(AMD64_USER_CFLAGS)
+
+$(BUILD)/POSIX-R1.ELF: $(AMD64_USER_LIBC_OBJS) \
+	$(BUILD)/userland/tests/syscall-smoke.o platform/pcat/user.ld \
+	$(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-z stack-size=0x100000 -T platform/pcat/user.ld \
+		$(AMD64_USER_LIBC_OBJS) \
+		$(BUILD)/userland/tests/syscall-smoke.o -o $@
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) $@
 
 $(BUILD)/userland/libc/socket.o $(AMD64_USER_NETTEST_OBJS): \
 	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)

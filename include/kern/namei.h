@@ -26,6 +26,9 @@
 #define COMPONENT_DOT 0x0002U
 #define COMPONENT_DOTDOT 0x0004U
 
+#define NAMEI_NOFOLLOW_FINAL 0x0001U
+#define ZEDBSD_SYMLOOP_MAX 40U
+
 struct componentname {
 	const char *cn_nameptr;
 	size_t cn_namelen;
@@ -42,6 +45,8 @@ struct cwdinfo {
 
 int namei_at(struct cwdinfo *, const char *, struct inode **);
 int namei_path_at(struct cwdinfo *, const char *, struct path *);
+int namei_path_flags_at(struct cwdinfo *, const char *, unsigned,
+			struct path *);
 int namei_parent_at(struct cwdinfo *, const char *, struct inode **,
 		    struct componentname *, char [NAME_MAX + 1U]);
 int namei_parent_path_at(struct cwdinfo *, const char *, struct path *,

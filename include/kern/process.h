@@ -10,11 +10,14 @@
 
 #include <sys/types.h>
 #include <stdint.h>
+#include <uapi/zedbsd/signal.h>
+#include <kern/signal.h>
 
 struct cwdinfo;
 struct filedesc;
 struct thread;
 struct vmspace;
+struct ucred;
 
 #define PROCESS_RESULT_MAX 256U
 #define PROCESS_AUTOREAP 0x00000001U
@@ -22,27 +25,36 @@ struct vmspace;
 enum process_state {
 	PROCESS_NEW = 0,
 	PROCESS_RUNNING,
+	PROCESS_STOPPED,
 	PROCESS_ZOMBIE,
 	PROCESS_DEAD,
 };
 
 struct process {
 	pid_t pid;
+	pid_t pgrp;
+	pid_t session;
+	mode_t umask;
+	struct ucred *cred;
+	struct signal_action signal_actions[NSIG];
+	sigset_t signal_pending;
 	enum process_state state;
 	unsigned flags;
 	unsigned thread_count;
 	int exit_status;
+	int wait_status;
+	unsigned wait_stopped;
+	unsigned wait_continued;
 	struct process *parent;
 	struct process *children;
 	struct process *sibling;
 	struct process *all_next;
 	struct thread *threads;
 	struct thread *waiter;
+	struct thread *child_waiter;
 	struct vmspace *vmspace;
 	struct filedesc *fd;
 	struct cwdinfo *cwdi;
-	uint32_t signal_pending;
-	uint32_t signal_ignored;
 	char result[PROCESS_RESULT_MAX];
 	size_t result_length;
 };
@@ -51,16 +63,25 @@ extern struct process process0;
 void process_init(void);
 int process_reaper_start(void);
 struct process *process_find(pid_t pid);
+struct process *process_first(void);
+struct process *process_next(struct process *);
 struct thread *process_find_by_tid(tid_t tid);
+int process_setpgid(struct process *, pid_t, pid_t);
+pid_t process_setsid(struct process *);
 int process_create(struct process *parent, pid_t requested_pid,
 		   struct process **result);
+int process_fork(struct process *, struct process **);
 void process_publish(struct process *process);
 void process_attach_boot_cwd(struct cwdinfo *cwd);
 void process_free_mem(struct process *process);
 int process_wait(struct process *, int *status, char *result,
 		 size_t result_capacity);
+pid_t process_waitpid(struct process *, pid_t, int *, int);
 int process_quiesce_users(void);
 void process_force_quiesce_users(void);
+void process_note_stopped(struct process *, int);
+void process_note_continued(struct process *);
 void exit1(int status) __attribute__((noreturn));
+void exit1_signal(int signo) __attribute__((noreturn));
 
 #endif

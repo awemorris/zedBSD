@@ -146,9 +146,10 @@ $(BUILD)/tests/sched-host-test: tests/sched-host-test.c src/kern/sched.c
 	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Isrc src/kern/sched.c $< -o $@
 
 $(BUILD)/tests/vmspace-host-test: tests/vmspace-host-test.c \
-	src/kern/vmspace.c
+	src/kern/vmspace.c src/kern/vm-object.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vmspace.c $< -o $@
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vmspace.c \
+		src/kern/vm-object.c $< -o $@
 
 $(BUILD)/tests/vm-commit-host-test: tests/vm-commit-host-test.c \
 	src/kern/vm-commit.c
@@ -211,6 +212,7 @@ $(BUILD)/tests/dns-host-test: tests/dns-host-test.c \
 		userland/libc/resolver-dns.c $< -o $@
 
 $(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
+	tests/vfs-host-stubs.c \
 	src/kern/fs.c src/kern/namespace.c src/kern/env.c $(ZEDBSD_LIBC_SOURCES) \
 	src/kern/disk.c src/kern/inode.c src/kern/file.c src/kern/namecache.c \
 	src/kern/namei.c src/kern/mount.c src/kern/rootfs.c
@@ -219,6 +221,7 @@ $(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
 		src/kern/namespace.c src/kern/env.c src/kern/disk.c \
 		src/kern/inode.c src/kern/file.c src/kern/namecache.c \
 		src/kern/namei.c src/kern/mount.c src/kern/rootfs.c \
+		tests/vfs-host-stubs.c \
 		$(ZEDBSD_LIBC_SOURCES) $< -o $@
 
 stdio-fs-host-test: $(BUILD)/tests/stdio-fs-host-test
@@ -248,7 +251,8 @@ VFS_CORE_SOURCES := src/kern/disk.c src/kern/inode.c src/kern/file.c \
 
 $(BUILD)/tests/vfs-host-test: tests/vfs-host-test.c $(VFS_CORE_SOURCES)
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Isrc $(VFS_CORE_SOURCES) $< -o $@
+	$(HOST_TEST_CC) -Iinclude -Isrc $(VFS_CORE_SOURCES) \
+		tests/vfs-host-stubs.c $< -o $@
 
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/blkdev-host-test \

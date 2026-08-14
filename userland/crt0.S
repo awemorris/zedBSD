@@ -47,3 +47,12 @@ zedbsd_syscall6:
 	popl %ebp
 	ret
 .size zedbsd_syscall6, .-zedbsd_syscall6
+
+.globl zedbsd_signal_restorer
+.type zedbsd_signal_restorer, @function
+zedbsd_signal_restorer:
+	movl 4(%esp), %ebx
+	movl $80, %eax
+	int $0xc2
+	ud2
+.size zedbsd_signal_restorer, .-zedbsd_signal_restorer

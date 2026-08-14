@@ -19,6 +19,7 @@ SECTIONS
 	.text : AT(__kernel_phys_start) {
 		__kernel_text_virt_start = .;
 		KEEP(*(.text.entry))
+		*(.hightext)
 		*(.text*)
 		. = ALIGN(4096);
 		__kernel_text_virt_end = .;

@@ -35,13 +35,15 @@ ZEDBSD_HOST_TEST_CFLAGS := \
 	-I. -Iinclude -Isrc -Ilibc/include
 
 $(BUILD)/tests/libc-host-test: tests/libc-host-test.c \
-	$(ZEDBSD_LIBC_SOURCES) src/kern/fs.c src/kern/namespace.c src/kern/env.c
+	$(ZEDBSD_LIBC_SOURCES) src/kern/fs.c src/kern/namespace.c src/kern/env.c \
+	tests/vfs-host-stubs.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(ZEDBSD_HOST_TEST_CFLAGS) \
 		src/kern/fs.c src/kern/namespace.c src/kern/env.c \
 		src/kern/disk.c src/kern/inode.c src/kern/file.c \
 		src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
 		src/kern/rootfs.c \
+		tests/vfs-host-stubs.c \
 		$(ZEDBSD_LIBC_SOURCES) $< -o $@
 
 libc-objects: $(ZEDBSD_LIBC_OBJECTS)

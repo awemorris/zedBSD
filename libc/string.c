@@ -236,6 +236,11 @@ strerror(int error)
 	case ESRCH: return "No such process";
 	case ECHILD: return "No child process";
 	case E2BIG: return "Argument list too long";
+	case EMFILE: return "Too many open files";
+	case EPERM: return "Operation not permitted";
+	case EXDEV: return "Cross-device link";
+	case ESPIPE: return "Illegal seek";
+	case ELOOP: return "Too many levels of symbolic links";
 	default: return "Unknown error";
 	}
 }

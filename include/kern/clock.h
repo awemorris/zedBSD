@@ -12,5 +12,6 @@
 
 uint64_t zedbsd_kernel_ticks(void);
 uint64_t zedbsd_kernel_milliseconds(void *context);
+void zedbsd_clock_realtime(int32_t *seconds, int32_t *nanoseconds);
 
 #endif

@@ -42,5 +42,7 @@ int process_spawn(const char *, char *const [], char *const [], unsigned,
 int process_spawn_from(struct process *, const char *, char *const [],
 		       char *const [], unsigned, struct process **);
 int process_spawn_init(const char *, struct process **);
+int process_execve(struct process *, const char *, char *const [],
+		   char *const []);
 
 #endif

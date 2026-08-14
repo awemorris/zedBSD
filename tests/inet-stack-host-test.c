@@ -31,6 +31,11 @@ void kern_free(void *p) { free(p); }
 bool hal_irq_disable(void) { return false; }
 void hal_irq_enable(void) { }
 struct thread *thread_current(void) { return current_thread; }
+int signal_pending_unblocked(const struct thread *thread)
+{
+	(void)thread;
+	return 0;
+}
 void sched_sleep(uint64_t deadline) { ticks = deadline; }
 void sched_wakeup(struct thread *thread) { (void)thread; }
 uint64_t sched_ticks(void) { return ticks++; }

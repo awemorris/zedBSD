@@ -9,6 +9,7 @@
 
 #include <hal/hal.h>
 #include "asm.h"
+#include "int.h"
 
 #define SYS_STACK_SIZE 8192U
 
@@ -36,11 +37,17 @@ struct task_info {
 	uint8 fpregs[512];
 	void *private_data;
 	uintptr_t tls;
+	void *active_user_frame;
+	struct interrupt_frame signal_frame;
+	uint32 signal_token;
+	unsigned signal_depth;
 };
 
 void i386_task_init(void);
 void asm_task_entrypoint(void);
 void asm_task_dispatch(struct task_resume_frame **save,
 			struct task_resume_frame **load);
+void i386_task_enter_user_frame(void *);
+void i386_task_leave_user_frame(void);
 
 #endif

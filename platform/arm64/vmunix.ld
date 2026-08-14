@@ -15,6 +15,7 @@ SECTIONS
 	{
 		__kernel_text_start = .;
 		KEEP(*(.text.boot))
+		*(.hightext)
 		*(.text .text.*)
 		__kernel_text_end = .;
 	}

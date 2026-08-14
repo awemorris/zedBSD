@@ -14,6 +14,10 @@ static struct vm_page *page_queue;
 struct vm_reclaim_stats vm_reclaim_counters;
 #define stats vm_reclaim_counters
 
+/* vm-reclaim-host-test deliberately links without the object subsystem. */
+__attribute__((weak)) int vm_object_reclaim_one(void) { return ENOMEM; }
+__attribute__((weak)) unsigned vm_object_page_count(void) { return 0; }
+
 void vm_page_track(struct vm_page *page)
 {
 	if (page == NULL)
@@ -131,6 +135,10 @@ int vm_reclaim_one(struct vm_page *avoid)
 			page = next;
 		}
 	}
+	if (vm_object_reclaim_one() == 0) {
+		stats.reclaims++;
+		return 0;
+	}
 	return ENOMEM;
 }
 
@@ -175,4 +183,6 @@ void vm_reclaim_get_stats(struct vm_reclaim_stats *output)
 		else
 			output->clean++;
 	}
+	output->file_resident += vm_object_page_count();
+	output->resident += vm_object_page_count();
 }

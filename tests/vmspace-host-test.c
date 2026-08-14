@@ -2,13 +2,16 @@
 #include "kern/kmem.h"
 #include "kern/swap.h"
 #include "kern/vmspace.h"
+#include "kern/vm-object.h"
 
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 struct fake_space { unsigned maps; };
 static unsigned spaces_created, spaces_destroyed;
@@ -18,6 +21,7 @@ static unsigned page_ins, swap_reads, swap_slots_freed;
 static struct swap_backend fake_swap;
 static size_t commit_used;
 static int fail_commit;
+static unsigned pwrite_calls;
 
 void *kern_malloc(size_t size) { return malloc(size); }
 void *kern_calloc(size_t count, size_t size) { return calloc(count, size); }
@@ -66,6 +70,14 @@ ssize_t file_pread(struct file *file, void *buffer, size_t length, off_t offset)
 {
 	const uint8_t *data = file->f_data;
 	memcpy(buffer, data + offset, length);
+	return (ssize_t)length;
+}
+ssize_t file_pwrite(struct file *file, const void *buffer, size_t length,
+		    off_t offset)
+{
+	uint8_t *data = file->f_data;
+	memcpy(data + offset, buffer, length);
+	pwrite_calls++;
 	return (ssize_t)length;
 }
 
@@ -128,6 +140,19 @@ int hal_page_prot(hal_space_t handle, void *address, size_t size, uint32_t attr)
 	return HAL_PMEM_SUCCESS;
 }
 
+int hal_page_query(hal_space_t handle, void *address, uint32_t *flags)
+{
+	(void)handle; (void)address;
+	if (flags != NULL)
+		*flags = 0;
+	return HAL_PMEM_SUCCESS;
+}
+int hal_page_clear_flags(hal_space_t handle, void *address, uint32_t flags)
+{
+	(void)handle; (void)address; (void)flags;
+	return HAL_PMEM_SUCCESS;
+}
+
 int main(void)
 {
 	static const uint8_t file_data[] = "xxELF!tail";
@@ -137,6 +162,14 @@ int main(void)
 	struct vm_page *page;
 	uintptr_t mapped;
 	char buffer[8];
+	static uint8_t shared_data[4096];
+	struct inode shared_inode = {
+		.i_type = INODE_REG, .i_size = sizeof(shared_data)
+	};
+	struct file shared_file = {
+		.f_usecount = 1, .f_data = shared_data, .f_inode = &shared_inode,
+		.f_flags = O_RDWR
+	};
 
 	vm = vmspace_create();
 	assert(vm != NULL && spaces_created == 1);
@@ -212,6 +245,32 @@ int main(void)
 		HAL_SPACE_READ | HAL_SPACE_WRITE, &file, 2, 0x900003, 5,
 		&region) == 0);
 	assert(region->commit_size == 4096 && commit_used == 8192);
+
+	/* MAP_SHARED mappings of one inode use one physical object page. */
+	memcpy(shared_data, "shared", 7);
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	assert(vmspace_map_file_shared(vm, 0x00a01000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), NULL) == 0);
+	assert(vm_object_count() == 1 && vm_object_page_count() == 0);
+	assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+	assert(vmspace_fault(vm, 0x00a01000, HAL_SPACE_READ) == 0);
+	assert(vm_object_page_count() == 1);
+	assert(vmspace_copy_to(vm, 0x00a00000, "object", 6) == 0);
+	memset(buffer, 0, sizeof(buffer));
+	assert(vmspace_copy_from(vm, buffer, 0x00a01000, 6) == 0);
+	assert(!memcmp(buffer, "object", 6));
+	assert(!memcmp(shared_data, "shared", 6));
+	assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == 0);
+	assert(pwrite_calls == 1 && !memcmp(shared_data, "object", 6));
+	assert(vm_object_reclaim_one() == 0 && vm_object_page_count() == 0);
+	memset(buffer, 0, sizeof(buffer));
+	assert(vmspace_copy_from(vm, buffer, 0x00a01000, 6) == 0);
+	assert(!memcmp(buffer, "object", 6) && vm_object_page_count() == 1);
+	assert(vmspace_unmap(vm, 0x00a00000, 8192) == 0);
+	assert(vm_object_count() == 0 && vm_object_page_count() == 0);
 
 	assert(vmspace_set_brk_start(vm, 0x01000000U) == 0);
 	assert(vmspace_brk(vm, 0, &mapped) == 0 && mapped == 0x01000000U);

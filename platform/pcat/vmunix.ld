@@ -11,7 +11,7 @@ SECTIONS
 	} :kernel
 	.text : AT(ADDR(.text) - 0x80000000) {
 		KEEP(*/hal/i386/locore.o(.text*))
-		*(.text.entry) *(.text*)
+		*(.text.entry) *(.hightext) *(.text*)
 	} :kernel
 	.rodata : AT(ADDR(.rodata) - 0x80000000) { *(.rodata*) } :kernel
 	.data : AT(ADDR(.data) - 0x80000000) { *(.data*) } :kernel

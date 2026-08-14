@@ -8,6 +8,8 @@ static uint64 timer_interval;
 static uint64 timer_deadline;
 static uint64 timer_ticks;
 
+void sched_clock(void);
+
 static uint64 counter(void){uint64 v;__asm__ volatile("mrs %0, cntpct_el0":"=r"(v));return v;}
 static void set_cval(uint64 v){__asm__ volatile("msr cntp_cval_el0, %0"::"r"(v));}
 
@@ -28,6 +30,7 @@ void rpi4_timer_interrupt(void)
 	set_cval(timer_deadline);
 	if(timer_ticks==1)hal_puts("ARM64 TIMER TICK\n");
 	kernel_timer_handler();
+	sched_clock();
 }
 
 uint64 hal_timer_get_tick(void){return timer_ticks;}

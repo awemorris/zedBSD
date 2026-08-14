@@ -39,6 +39,10 @@ struct thread {
 	void *kernel_arg;
 	uint32_t signal_mask;
 	uint32_t signal_pending;
+	uint32_t signal_saved_mask;
+	uint32_t signal_suspend_mask;
+	uint32_t signal_token;
+	unsigned signal_suspended;
 	uint32_t fault_vector;
 	uint32_t fault_eip;
 	uint32_t fault_address;
@@ -50,6 +54,7 @@ struct thread *thread_current(void);
 
 int thread_create(struct process *, uintptr_t entry, uintptr_t user_sp,
 		  struct thread **result);
+int thread_fork(struct process *, hal_task_t, struct thread **);
 int kthread_create(void (*entry)(void *), void *arg, int priority,
 		   struct thread **result);
 void thread_start(struct thread *thread);

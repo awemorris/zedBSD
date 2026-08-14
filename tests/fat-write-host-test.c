@@ -1,6 +1,7 @@
 /* Destructive host-side regression tests for the zedBSD FAT16 writer. */
 
 #include "kern/fat16.h"
+#include "kern/fat.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -358,6 +359,46 @@ static void test_write_error_not_exposed(void)
 	destroy_disk(&disk);
 }
 
+static void test_namespace_mutation(void)
+{
+	struct memory_disk disk;
+	struct zedbsd_filesystem filesystem;
+	struct zedbsd_file file;
+	struct zedbsd_dirent entry;
+	char data[6] = { 0 };
+	uint32_t orphan_cluster;
+
+	format_disk(&disk, 512);
+	mount_disk(&disk, &filesystem);
+	assert(zedbsd_fs_mkdir_result(&filesystem, "/work") == ZEDBSD_FS_OK);
+	assert(zedbsd_fs_create_result(&filesystem, "/work/a.txt", &file) ==
+	       ZEDBSD_FS_OK);
+	assert(zedbsd_file_write_result(&file, 0, "hello", 5) == ZEDBSD_FS_OK);
+	assert(zedbsd_file_flush_result(&file) == ZEDBSD_FS_OK);
+	assert(zedbsd_fs_rmdir_result(&filesystem, "/work") ==
+	       ZEDBSD_FS_NOT_EMPTY);
+	assert(zedbsd_fs_rename_result(&filesystem, "/work/a.txt",
+		"/work/b.txt") == ZEDBSD_FS_OK);
+	assert(zedbsd_fs_stat_result(&filesystem, "/work/a.txt", &entry) ==
+	       ZEDBSD_FS_NOT_FOUND);
+	reopen_and_read(&filesystem, "/work/b.txt", data, 5);
+	assert(!memcmp(data, "hello", 5));
+	orphan_cluster = zedbsd_fat_file_state(&file)->first_cluster;
+	assert(zedbsd_fs_unlink_result(&filesystem, "/work/b.txt") ==
+	       ZEDBSD_FS_OK);
+	assert(zedbsd_fs_open_result(&filesystem, "/work/b.txt", &file) ==
+	       ZEDBSD_FS_NOT_FOUND);
+	assert(zedbsd_fat_discard_chain_result(&filesystem, orphan_cluster) ==
+	       ZEDBSD_FS_OK);
+	assert(zedbsd_fs_rmdir_result(&filesystem, "/work") == ZEDBSD_FS_OK);
+	zedbsd_fs_reset(&filesystem);
+	mount_disk(&disk, &filesystem);
+	assert(zedbsd_fs_stat_result(&filesystem, "/work", &entry) ==
+	       ZEDBSD_FS_NOT_FOUND);
+	assert_fats_equal(&disk);
+	destroy_disk(&disk);
+}
+
 int main(void)
 {
 	test_create_write_truncate(512);
@@ -369,6 +410,7 @@ int main(void)
 	test_full_disk();
 	test_corrupt_chain();
 	test_write_error_not_exposed();
+	test_namespace_mutation();
 	puts("zedBSD FAT16 write host tests: OK");
 	return 0;
 }

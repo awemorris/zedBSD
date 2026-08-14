@@ -23,5 +23,7 @@ enum zedbsd_fs_result zedbsd_fat_stat_location(
 enum zedbsd_fs_result zedbsd_fat_stat_location_casefold(
 	struct zedbsd_filesystem *, const char *, struct zedbsd_dirent *,
 	uint32_t *, uint16_t *, uint32_t *, uint8_t *);
+enum zedbsd_fs_result zedbsd_fat_discard_chain_result(
+	struct zedbsd_filesystem *, uint32_t);
 
 #endif

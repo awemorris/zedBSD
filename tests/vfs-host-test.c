@@ -19,10 +19,12 @@ struct mem_node {
 	struct mem_node *parent;
 	const char *name;
 	const char *contents;
+	char link_target[64];
 };
 
+#define MEM_NODE_MAX 8U
 struct mem_fs {
-	struct mem_node nodes[4];
+	struct mem_node nodes[MEM_NODE_MAX];
 	unsigned lookup_calls;
 	char marker;
 };
@@ -46,7 +48,7 @@ static int mem_lookup(struct inode *directory, const struct componentname *name,
 	if (component_equal(name, "..")) {
 		inode_ref(node->parent->inode); *result = node->parent->inode; return 0;
 	}
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < MEM_NODE_MAX; i++)
 		if (fs->nodes[i].parent == node && fs->nodes[i].name != NULL &&
 		    component_equal(name, fs->nodes[i].name)) {
 			inode_ref(fs->nodes[i].inode);
@@ -74,7 +76,7 @@ static int mem_readdir(struct file *file, struct dirent *entry, int *eof)
 	struct mem_node *directory = file->f_inode->i_data;
 	struct mem_fs *fs = file->f_inode->i_mount->m_data;
 	unsigned wanted = (unsigned)file->f_offset, seen = 0, i;
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < MEM_NODE_MAX; i++) {
 		if (fs->nodes[i].parent != directory || fs->nodes[i].name == NULL)
 			continue;
 		if (seen++ != wanted)
@@ -91,7 +93,78 @@ static int mem_readdir(struct file *file, struct dirent *entry, int *eof)
 	return 0;
 }
 
-static const struct inode_ops mem_iops = { .lookup = mem_lookup };
+static int mem_link(struct inode *directory,
+		    const struct componentname *name, struct inode *target)
+{
+	struct mem_node *parent = directory->i_data;
+	struct mem_fs *fs = directory->i_mount->m_data;
+	unsigned i;
+	for (i = 0; i < MEM_NODE_MAX; i++) {
+		if (fs->nodes[i].name != NULL)
+			continue;
+		fs->nodes[i].parent = parent;
+		fs->nodes[i].name = "hard";
+		if (!component_equal(name, fs->nodes[i].name))
+			return EINVAL;
+		fs->nodes[i].inode = target;
+		return 0;
+	}
+	return ENOSPC;
+}
+
+static int mem_symlink(struct inode *directory,
+		       const struct componentname *name, const char *target,
+		       struct inode **result)
+{
+	struct mem_node *parent = directory->i_data;
+	struct mem_fs *fs = directory->i_mount->m_data;
+	struct inode *inode;
+	unsigned i;
+	for (i = 0; i < MEM_NODE_MAX; i++)
+		if (fs->nodes[i].name == NULL)
+			break;
+	if (i == MEM_NODE_MAX)
+		return ENOSPC;
+	inode = inode_alloc(directory->i_mount);
+	if (inode == NULL)
+		return ENOSPC;
+	fs->nodes[i].parent = parent;
+	fs->nodes[i].name = component_equal(name, "link") ? "link" :
+		component_equal(name, "loop") ? "loop" : "relative";
+	if (strlen(target) >= sizeof(fs->nodes[i].link_target)) {
+		inode_release(inode);
+		return ENAMETOOLONG;
+	}
+	strcpy(fs->nodes[i].link_target, target);
+	fs->nodes[i].contents = fs->nodes[i].link_target;
+	fs->nodes[i].inode = inode;
+	inode->i_ino = i + 1U;
+	inode->i_type = INODE_SYMLINK;
+	inode->i_mode = S_IFLNK | 0777U;
+	inode->i_linkcount = 1;
+	inode->i_size = (off_t)strlen(target);
+	inode->i_data = &fs->nodes[i];
+	inode->i_op = directory->i_op;
+	*result = inode;
+	return 0;
+}
+
+static ssize_t mem_readlink(struct inode *inode, char *buffer, size_t capacity)
+{
+	struct mem_node *node = inode->i_data;
+	size_t length = strlen(node->link_target);
+	if (length > capacity)
+		length = capacity;
+	memcpy(buffer, node->link_target, length);
+	return (ssize_t)length;
+}
+
+static const struct inode_ops mem_iops = {
+	.lookup = mem_lookup,
+	.link = mem_link,
+	.symlink = mem_symlink,
+	.readlink = mem_readlink,
+};
 static const struct file_ops mem_dir_fops = { .readdir = mem_readdir };
 static const struct file_ops mem_file_fops = { .read = mem_read };
 
@@ -189,8 +262,8 @@ int main(void)
 	add_disk("mem0", &stores[0]); add_disk("mem1", &stores[1]);
 	CHECK(filesystem_register(&mem_type) == 0);
 	CHECK(mount_rootfs() == 0);
-	CHECK(mount("mem", "/disk1", MOUNT_READ_ONLY, &a) == 0);
-	CHECK(mount("auto", "/disk2", MOUNT_READ_ONLY, &b) == 0);
+	CHECK(mount("mem", "/disk1", 0, &a) == 0);
+	CHECK(mount("auto", "/disk2", 0, &b) == 0);
 	path_set(&root_path, mount_root_get(), mount_root_inode());
 	CHECK(cwdinfo_init(&context, &root_path) == 0);
 	path_release(&root_path);
@@ -204,6 +277,47 @@ int main(void)
 	CHECK(namei_at(&context, "/disk1/dir/..", &inode) == 0);
 	CHECK(inode == mount_find("/disk1")->m_root);
 	inode_release(inode);
+
+	/* Generic VFS hard links and relative/absolute symlink traversal. */
+	CHECK(namei_at(&context, "/disk1/hello", &inode) == 0);
+	{
+		struct componentname hard = {
+			.cn_nameptr = "hard", .cn_namelen = 4
+		};
+		CHECK(inode_link(mount_find("/disk1")->m_root, &hard, inode) == 0);
+	}
+	CHECK(namei_at(&context, "/disk1/hard", &again) == 0);
+	CHECK(again == inode && inode->i_linkcount == 2);
+	inode_release(again);
+	inode_release(inode);
+	{
+		struct componentname link = {
+			.cn_nameptr = "link", .cn_namelen = 4
+		};
+		struct componentname relative = {
+			.cn_nameptr = "relative", .cn_namelen = 8
+		};
+		struct componentname loop = {
+			.cn_nameptr = "loop", .cn_namelen = 4
+		};
+		struct inode *created;
+		CHECK(inode_symlink(mount_find("/disk1")->m_root, &link,
+		    "/disk1/dir/nested", &created) == 0);
+		inode_release(created);
+		CHECK(inode_symlink(stores[0].nodes[1].inode, &relative,
+		    "../hello", &created) == 0);
+		inode_release(created);
+		CHECK(inode_symlink(mount_find("/disk1")->m_root, &loop,
+		    "loop", &created) == 0);
+		inode_release(created);
+	}
+	CHECK(namei_at(&context, "/disk1/link", &inode) == 0);
+	CHECK(inode == stores[0].nodes[3].inode);
+	inode_release(inode);
+	CHECK(namei_at(&context, "/disk1/dir/relative", &inode) == 0);
+	CHECK(inode == stores[0].nodes[2].inode);
+	inode_release(inode);
+	CHECK(namei_at(&context, "/disk1/loop", &inode) == ELOOP);
 	CHECK(namei_at(&context, "/disk1/..", &inode) == 0);
 	CHECK(inode == mount_root_inode());
 	inode_release(inode);

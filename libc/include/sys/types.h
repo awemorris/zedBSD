@@ -11,6 +11,8 @@
 
 typedef __PTRDIFF_TYPE__ ssize_t;
 typedef int32_t off_t;
+typedef int32_t blkcnt_t;
+typedef int32_t blksize_t;
 typedef uint32_t dev_t;
 typedef uint64_t ino_t;
 typedef uint32_t mode_t;

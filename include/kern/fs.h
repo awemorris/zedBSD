@@ -39,6 +39,8 @@ enum zedbsd_fs_result {
 	ZEDBSD_FS_UNSUPPORTED,
 	ZEDBSD_FS_INVALID_ARGUMENT,
 	ZEDBSD_FS_EXISTS,
+	ZEDBSD_FS_NOT_EMPTY,
+	ZEDBSD_FS_IS_DIRECTORY,
 };
 
 /* A partition-sized view of a BIOS block device. LBA values passed to the
@@ -65,6 +67,15 @@ struct zedbsd_filesystem_driver {
 	enum zedbsd_fs_result (*create)(struct zedbsd_filesystem *filesystem,
 					const char *path,
 					struct zedbsd_file *file);
+	enum zedbsd_fs_result (*mkdir)(struct zedbsd_filesystem *filesystem,
+				       const char *path);
+	enum zedbsd_fs_result (*unlink)(struct zedbsd_filesystem *filesystem,
+				        const char *path);
+	enum zedbsd_fs_result (*rmdir)(struct zedbsd_filesystem *filesystem,
+				       const char *path);
+	enum zedbsd_fs_result (*rename)(struct zedbsd_filesystem *filesystem,
+				        const char *old_path,
+				        const char *new_path);
 	enum zedbsd_fs_result (*open)(struct zedbsd_filesystem *filesystem,
 				      const char *path,
 				      struct zedbsd_file *file);
@@ -123,6 +134,14 @@ enum zedbsd_fs_result zedbsd_fs_open_result(
 enum zedbsd_fs_result zedbsd_fs_create_result(
 	struct zedbsd_filesystem *filesystem, const char *path,
 	struct zedbsd_file *file);
+enum zedbsd_fs_result zedbsd_fs_mkdir_result(
+	struct zedbsd_filesystem *, const char *);
+enum zedbsd_fs_result zedbsd_fs_unlink_result(
+	struct zedbsd_filesystem *, const char *);
+enum zedbsd_fs_result zedbsd_fs_rmdir_result(
+	struct zedbsd_filesystem *, const char *);
+enum zedbsd_fs_result zedbsd_fs_rename_result(
+	struct zedbsd_filesystem *, const char *, const char *);
 int zedbsd_file_read(struct zedbsd_file *file, uint64_t offset, void *buffer,
 		     uint32_t length);
 int zedbsd_file_read_progress(struct zedbsd_file *file, uint64_t offset,

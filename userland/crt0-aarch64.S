@@ -37,3 +37,12 @@ zedbsd_syscall6:
 	svc #0
 	ret
 	.size zedbsd_syscall6, .-zedbsd_syscall6
+
+	.global zedbsd_signal_restorer
+	.type zedbsd_signal_restorer, %function
+zedbsd_signal_restorer:
+	ldr w0, [sp]
+	mov x8, #80
+	svc #0
+	brk #0
+	.size zedbsd_signal_restorer, .-zedbsd_signal_restorer

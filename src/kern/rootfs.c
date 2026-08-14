@@ -65,6 +65,10 @@ rootfs_getattr(struct inode *inode, struct stat *status)
 	status->st_ino = inode->i_ino;
 	status->st_mode = inode->i_mode;
 	status->st_nlink = inode->i_linkcount;
+	status->st_uid = inode->i_uid;
+	status->st_gid = inode->i_gid;
+	status->st_size = inode->i_size;
+	status->st_blksize = 512;
 	return 0;
 }
 

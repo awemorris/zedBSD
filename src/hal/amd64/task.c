@@ -4,6 +4,7 @@
 #include "defs.h"
 #include "asm.h"
 #include "descriptor.h"
+#include "int.h"
 
 static struct amd64_task *task_list;
 static struct amd64_task *running_task;
@@ -103,6 +104,100 @@ hal_task_create(hal_space_t space, void (*start)(void *), void *arg,
 	task_stack_bytes += AMD64_SYS_STACK_SIZE;
 	tasklist_add(task);
 	return task;
+}
+
+void
+amd64_task_enter_user_frame(void *frame)
+{
+	if (running_task != NULL)
+		running_task->active_user_frame = frame;
+}
+
+void
+amd64_task_leave_user_frame(void)
+{
+	if (running_task != NULL)
+		running_task->active_user_frame = NULL;
+}
+
+hal_task_t
+hal_task_fork_current(hal_space_t child_space, intptr_t child_result)
+{
+	struct amd64_interrupt_frame *source, *copy;
+	struct amd64_task *child;
+	uintptr_t *resume;
+
+	if (running_task == NULL || child_space == HAL_SPACE_SYS ||
+	    running_task->active_user_frame == NULL)
+		return NULL;
+	source = running_task->active_user_frame;
+	if ((source->cs & 3U) != 3U)
+		return NULL;
+	child = hal_task_create(child_space, (void (*)(void *))source->rip,
+	    NULL, (void *)(uintptr_t)source->rsp);
+	if (child == NULL)
+		return NULL;
+	resume = (uintptr_t *)((uintptr_t)child->sys_stack +
+	    AMD64_SYS_STACK_SIZE - sizeof(*source) - 8U * sizeof(uintptr_t));
+	hal_memset(resume, 0, 8U * sizeof(uintptr_t));
+	resume[6] = 0x202U;
+	resume[7] = (uintptr_t)amd64_user_frame_entry;
+	copy = (struct amd64_interrupt_frame *)(resume + 8);
+	*copy = *source;
+	copy->rax = (uint32)child_result;
+	child->resume_rsp = (uintptr_t)resume;
+	child->tls = running_task->tls;
+	hal_memcpy(task_fpregs(child), task_fpregs(running_task), 512U);
+	return child;
+}
+
+int
+hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
+		      uintptr_t user_stack_pointer)
+{
+	struct amd64_interrupt_frame *frame;
+	uint64 cs, ss, rflags;
+	if (running_task == NULL || new_space == HAL_SPACE_SYS ||
+	    running_task->active_user_frame == NULL || entry == 0 ||
+	    entry > UINT32_MAX || user_stack_pointer == 0 ||
+	    user_stack_pointer > UINT32_MAX)
+		return -1;
+	frame = running_task->active_user_frame;
+	cs = SEG_USER32_CODE | 3U;
+	ss = SEG_USER_DATA | 3U;
+	rflags = 0x202U;
+	hal_memset(frame, 0, sizeof(*frame));
+	frame->rip = (uint32)entry;
+	frame->cs = cs;
+	frame->rflags = rflags;
+	frame->rsp = (uint32)user_stack_pointer;
+	frame->ss = ss;
+	running_task->space = new_space;
+	running_task->tls = 0;
+	running_task->signal_depth = 0;
+	running_task->signal_token = 0;
+	hal_page_switch_space(new_space);
+	return 0;
+}
+
+uintptr_t hal_task_user_stack(void)
+{
+	struct amd64_interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
+	return f!=NULL&&(f->cs&3U)==3U?(uintptr_t)f->rsp:0;
+}
+int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t rest,uint32_t token)
+{
+	struct amd64_interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
+	(void)sig;(void)rest;
+	if(f==NULL||running_task->signal_depth!=0||h==0||sp==0||h>UINT32_MAX||sp>UINT32_MAX||token==0)return -1;
+	running_task->signal_frame=*f;running_task->signal_token=token;
+	running_task->signal_depth=1;f->rip=h;f->rsp=sp;return 0;
+}
+int hal_task_signal_return(uint32_t token,intptr_t *value)
+{
+	struct amd64_interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
+	if(f==NULL||value==NULL||running_task->signal_depth!=1||token==0||token!=running_task->signal_token)return -1;
+	*f=running_task->signal_frame;*value=(intptr_t)(int32)f->rax;running_task->signal_depth=0;running_task->signal_token=0;return 0;
 }
 
 void

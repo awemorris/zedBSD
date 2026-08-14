@@ -3,6 +3,7 @@
 #include <hal/hal.h>
 #include <errno.h>
 #include "int.h"
+#include "task.h"
 #include "irq.h"
 #include "asm.h"
 
@@ -24,6 +25,9 @@ struct amd64_idtr {
 static struct amd64_idt_entry idt[256] __attribute__((aligned(16)));
 static int resched_flag;
 static hal_syscall_handler_t syscall_handler;
+static hal_user_return_handler_t user_return_handler;
+void hal_user_return_set_handler(hal_user_return_handler_t h) { user_return_handler = h; }
+void hal_user_return_invoke(void) { if (user_return_handler != NULL) user_return_handler(); }
 static hal_user_int_handler_t user_int_handler;
 static hal_user_fault_handler_t user_fault_handler;
 static hal_trap_handler_t trap_handlers[5];
@@ -90,14 +94,22 @@ handle_fault(struct amd64_interrupt_frame *frame)
 
 	if ((frame->cs & 3U) == 3U) {
 		struct hal_user_trap trap;
+		int handled;
 		trap.vector = (uint32)vector;
 		trap.cs = (uint32)frame->cs;
 		trap.eip = (uint32)frame->rip;
 		trap.eax = (uint32)frame->rax;
 		trap.error_code = (uint32)frame->error_code;
 		trap.fault_address = (uint32)address;
-		if (user_fault_handler != NULL &&
-		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS) return;
+		amd64_task_enter_user_frame(frame);
+		handled = user_fault_handler != NULL &&
+		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS;
+		if (handled) {
+			hal_user_return_invoke();
+			amd64_task_leave_user_frame();
+			return;
+		}
+		amd64_task_leave_user_frame();
 		HAL_FATAL("amd64 user fault handler returned");
 	}
 	if (cause >= 0 && cause < 5 && trap_handlers[cause] != NULL &&
@@ -132,9 +144,12 @@ int_handler(struct amd64_interrupt_frame *frame)
 		args[3] = (uint32)frame->rsi;
 		args[4] = (uint32)frame->rdi;
 		args[5] = (uint32)frame->rbp;
+		amd64_task_enter_user_frame(frame);
 		frame->rax = syscall_handler != NULL ?
 		    (uint32)syscall_handler((uint32)frame->rax, args) :
 		    (uint32)-(int32)ENOSYS;
+		hal_user_return_invoke();
+		amd64_task_leave_user_frame();
 	} else if (vector >= 0 && vector < 32) {
 		handle_fault(frame);
 	} else {

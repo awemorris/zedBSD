@@ -24,7 +24,10 @@ ZEDBSD_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/process.o $(BUILD)/src/kern/thread.o \
 	$(BUILD)/src/kern/sched.o $(BUILD)/src/kern/vmspace.o \
-	$(BUILD)/src/kern/vm-commit.o $(BUILD)/src/kern/filedesc.o \
+	$(BUILD)/src/kern/vm-object.o $(BUILD)/src/kern/vm-commit.o \
+	$(BUILD)/src/kern/filedesc.o \
+	$(BUILD)/src/kern/pipe.o $(BUILD)/src/kern/cred.o \
+	$(BUILD)/src/kern/signal.o \
 	$(BUILD)/src/kern/cwdinfo.o $(BUILD)/src/kern/elf.o \
 	$(BUILD)/src/kern/exec.o $(BUILD)/src/kern/user-probe.o \
 	$(BUILD)/src/kern/syscall.o $(BUILD)/src/kern/uaccess.o \
@@ -60,7 +63,8 @@ all: $(BUILD)/bootsect.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
 NOCT.ELF: $(BUILD)/NOCT.ELF
-.PHONY: vmunix SH NOCT.ELF
+POSIX-R1.ELF: $(BUILD)/POSIX-R1.ELF
+.PHONY: vmunix SH NOCT.ELF POSIX-R1.ELF
 
 $(BUILD)/$(BOOTSECT)/bootsect.o: $(BOOTSECT)/bootsect.S
 	@mkdir -p $(dir $@)
@@ -179,6 +183,7 @@ $(BUILD)/vmunix: $(VMUNIX_OBJS) $(PCAT)/vmunix.ld \
 USER_LIBC_OBJS := $(BUILD)/userland/crt0.o \
 	$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/socket.o \
 	$(BUILD)/userland/libc/resolver.o $(BUILD)/userland/libc/resolver-dns.o \
+	$(BUILD)/userland/libc/signal.o \
 	$(BUILD)/libc/heap.o \
 	$(BUILD)/libc/string.o $(BUILD)/libc/ctype.o $(BUILD)/libc/int64.o \
 	$(BUILD)/libc/strto.o $(BUILD)/libc/format.o $(BUILD)/libc/stdio.o
@@ -187,6 +192,18 @@ USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-mno-mmx -mno-sse -mno-sse2
 USER_STACK_LDFLAGS := -z stack-size=0x100000
 USER_ELF_CHECK := $(SCRIPTS_DIR)/check-user-elf.py
+$(BUILD)/userland/tests/syscall-smoke.o: \
+	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(BUILD)/userland/tests/syscall-smoke.o: OBJ_CFLAGS = $(USER_CFLAGS)
+
+$(BUILD)/POSIX-R1.ELF: $(USER_LIBC_OBJS) \
+	$(BUILD)/userland/tests/syscall-smoke.o $(PCAT)/user.ld \
+	$(USER_ELF_CHECK)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
+		$(BUILD)/userland/tests/syscall-smoke.o -o $@
+	$(PYTHON) $(USER_ELF_CHECK) $@
+
 USER_NOCT_GLUE_OBJS := $(BUILD)/userland/noct/runtime/main.o \
 	$(BUILD)/userland/noct/runtime/memory.o \
 	$(BUILD)/userland/noct/runtime/platform.o \

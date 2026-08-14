@@ -35,7 +35,7 @@ printf '%s\n' \
 	'echo SH_BUILTINS_PASS' \
 	'halt' >"$work/zinit.rc"
 
-mmd -i "$work/test.img@@$offset" ::/etc
+mmd -i "$work/test.img@@$offset" ::/etc 2>/dev/null || true
 mcopy -i "$work/test.img@@$offset" "$work/source.txt" ::/source.txt
 mcopy -i "$work/test.img@@$offset" "$work/zinit.rc" ::/etc/zinit.rc
 

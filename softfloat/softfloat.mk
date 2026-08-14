@@ -132,7 +132,8 @@ $(BUILD)/tests/softfloat-host-test: tests/softfloat-host-test.c \
 	src/kern/namespace.c $(BUILD)/src/kern/disk.o \
 	$(BUILD)/src/kern/inode.o $(BUILD)/src/kern/file.o \
 	$(BUILD)/src/kern/namecache.o $(BUILD)/src/kern/namei.o \
-	$(BUILD)/src/kern/mount.o $(BUILD)/src/kern/rootfs.o
+	$(BUILD)/src/kern/mount.o $(BUILD)/src/kern/rootfs.o \
+	tests/vfs-host-stubs.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(ZEDBSD_LIBC_CPPFLAGS) $(ZEDBSD_SOFTFLOAT_CFLAGS) \
 		-no-pie \
@@ -141,6 +142,7 @@ $(BUILD)/tests/softfloat-host-test: tests/softfloat-host-test.c \
 		$(BUILD)/src/kern/file.o $(BUILD)/src/kern/namecache.o \
 		$(BUILD)/src/kern/namei.o $(BUILD)/src/kern/mount.o \
 		$(BUILD)/src/kern/rootfs.o \
+		tests/vfs-host-stubs.c \
 		$(ZEDBSD_LIBC_OBJECTS) \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 

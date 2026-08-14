@@ -9,7 +9,7 @@ struct arm64_exception_frame {
 	uint64 spsr;
 	uint64 esr;
 	uint64 far;
-	uint64 reserved;
+	uint64 user_sp;
 };
 
 void arm64_int_init(void);

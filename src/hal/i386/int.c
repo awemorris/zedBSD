@@ -8,6 +8,7 @@
 #include <kern/sched.h>
 #include <hal/hal.h>
 #include "int.h"
+#include "task.h"
 #include "irq.h"
 #include "asm.h"
 #include "pic.h"
@@ -16,6 +17,9 @@
 /* Re-scheduling flag. */
 static int	 resched_flag;
 static hal_syscall_handler_t syscall_handler;
+static hal_user_return_handler_t user_return_handler;
+void hal_user_return_set_handler(hal_user_return_handler_t h) { user_return_handler = h; }
+void hal_user_return_invoke(void) { if (user_return_handler != NULL) user_return_handler(); }
 static hal_user_int_handler_t user_int_handler;
 static hal_user_fault_handler_t user_fault_handler;
 
@@ -138,9 +142,12 @@ void int_handler(struct interrupt_frame *fp)
 		args[3] = fp->regs.esi;
 		args[4] = fp->regs.edi;
 		args[5] = fp->regs.ebp;
+		i386_task_enter_user_frame(fp);
 		fp->regs.eax = syscall_handler != NULL ?
 			(uint32)syscall_handler(fp->regs.eax, args) :
 			(uint32)-(int32)ENOSYS;
+		hal_user_return_invoke();
+		i386_task_leave_user_frame();
 		is_handled = 1;
 	}
 	else if(int_num >= 0 && int_num <= 0x1f) {
@@ -223,15 +230,22 @@ static void handle_fault(struct interrupt_frame *fp)
 
 	if (fp->cs & 3) {
 		struct hal_user_trap trap;
+		int handled;
 		trap.vector = (uint32)int_num;
 		trap.cs = fp->cs;
 		trap.eip = fp->eip;
 		trap.eax = fp->regs.eax;
 		trap.error_code = fp->error_code;
 		trap.fault_address = int_num == INT_PAGEFAULT ? asm_get_cr2() : 0;
-		if (user_fault_handler != NULL &&
-		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS)
+		i386_task_enter_user_frame(fp);
+		handled = user_fault_handler != NULL &&
+		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS;
+		if (handled) {
+			hal_user_return_invoke();
+			i386_task_leave_user_frame();
 			return;
+		}
+		i386_task_leave_user_frame();
 		HAL_FATAL("user fault handler returned");
 	} else {
 		hal_printf("[INT] int 0x%02X handled!\n"
