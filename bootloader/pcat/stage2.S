@@ -101,6 +101,7 @@ mbr_status_ok:
 	call puts
 
 	call fat16_mount
+	call select_kernel_name
 	call fat16_find_vmunix
 	mov si, offset msg_vmunix
 	call puts
@@ -352,6 +353,33 @@ load_complete:
 
 /* ------------------------------------------------------------------ */
 /* FAT16. */
+select_kernel_name:
+	mov word ptr [vmunix_name_pointer], offset vmunix32_name
+	pushfd
+	pop eax
+	mov ecx, eax
+	xor eax, 0x00200000
+	push eax
+	popfd
+	pushfd
+	pop eax
+	push ecx
+	popfd
+	xor eax, ecx
+	test eax, 0x00200000
+	jz 1f
+	mov eax, 0x80000000
+	cpuid
+	cmp eax, 0x80000001
+	jb 1f
+	mov eax, 0x80000001
+	cpuid
+	and edx, 0x20100000
+	cmp edx, 0x20100000
+	jne 1f
+	mov word ptr [vmunix_name_pointer], offset vmunix64_name
+1:	ret
+
 fat16_mount:
 	mov eax, dword ptr [partition_lba]
 	call disk_read_one
@@ -421,7 +449,7 @@ fat_root_entry:
 	je fat_root_next
 	push bx
 	push cx
-	mov si, offset vmunix_name
+	mov si, word ptr [vmunix_name_pointer]
 	mov di, bx
 	mov cx, 11
 fat_name_loop:
@@ -821,10 +849,23 @@ msg_elf64:     .asciz "E6 "
 msg_loaded:    .asciz "LD "
 msg_go:        .asciz "GO\n"
 msg_error:     .asciz "ERR "
-#ifndef ZBL_KERNEL_DOS_NAME
-#define ZBL_KERNEL_DOS_NAME "VMUNIX     "
+#ifndef ZBL_KERNEL32_DOS_NAME
+#ifdef ZBL_KERNEL_DOS_NAME
+#define ZBL_KERNEL32_DOS_NAME ZBL_KERNEL_DOS_NAME
+#else
+#define ZBL_KERNEL32_DOS_NAME "VMUNIX     "
 #endif
-vmunix_name:   .ascii ZBL_KERNEL_DOS_NAME
+#endif
+#ifndef ZBL_KERNEL64_DOS_NAME
+#ifdef ZBL_KERNEL_DOS_NAME
+#define ZBL_KERNEL64_DOS_NAME ZBL_KERNEL_DOS_NAME
+#else
+#define ZBL_KERNEL64_DOS_NAME "VMUNIX     "
+#endif
+#endif
+vmunix32_name: .ascii ZBL_KERNEL32_DOS_NAME
+vmunix64_name: .ascii ZBL_KERNEL64_DOS_NAME
+vmunix_name_pointer: .word 0
 
 .balign 8
 gdt:

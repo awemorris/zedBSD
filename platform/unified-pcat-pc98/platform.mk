@@ -15,6 +15,8 @@ $(UNIFIED_PLATFORM_IMAGE): $(UNIFIED_CANONICAL_IMAGE)
 	$(PYTHON) $(SCRIPTS_DIR)/check-pc-unified-hdd-image.py \
 		--pc98-kernel build/pc-unified/vmunix.98 \
 		--pcat-kernel build/pc-unified/vmunix.at \
+		--amd64-kernel build/pc-unified/vmunix.x64 \
+		--bootx64 build/uefi/BOOTX64.EFI \
 		--noct build/pc-unified/noct \
 		--holoris $(HOLORIS_NOCT) $@
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create one FAT16 HDD image bootable on PC/AT and NEC PC-98."""
+"""Create one BIOS/UEFI HDD image for PC/AT and NEC PC-98."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 import argparse
@@ -11,6 +11,9 @@ from pathlib import Path
 
 SECTOR_SIZE = 512
 PARTITION_LBA = 2048
+FAT16_BLOCKS = 262144
+ESP_LBA = PARTITION_LBA + FAT16_BLOCKS
+MIN_ESP_BLOCKS = 131072
 PC98_STAGE1_LBA = 2
 PCAT_STAGE1_LBA = 66
 SLOT_SECTORS = 64
@@ -80,7 +83,7 @@ def copy_kernel(image: Path, offset: int, kernel: Path, dos_name: str,
 def create(args: argparse.Namespace) -> None:
     inputs = (args.stage0, args.pc98_stage1, args.pc98_stage2,
               args.pcat_stage1, args.pcat_stage2, args.pc98_kernel,
-              args.pcat_kernel)
+              args.pcat_kernel, args.amd64_kernel, args.bootx64)
     for path in inputs:
         if not path.is_file():
             raise SystemExit(f"missing input: {path}")
@@ -101,17 +104,20 @@ def create(args: argparse.Namespace) -> None:
     zbl2_sectors(args.pcat_stage2, 1)
 
     total_sectors = args.size_mib * 2048
-    blocks = total_sectors - PARTITION_LBA
-    if blocks <= 0:
-        raise SystemExit("image is too small for the LBA 2048 partition")
-    last_lba = total_sectors - 1
+    esp_blocks = total_sectors - ESP_LBA
+    if esp_blocks < MIN_ESP_BLOCKS:
+        raise SystemExit("image is too small for the 128 MiB FAT16 and ESP")
+    fat16_last_lba = ESP_LBA - 1
+    esp_last_lba = total_sectors - 1
 
-    # Only the first three MBR entries are available: offset 508 is PC-98
-    # firmware metadata.  This builder intentionally emits one partition.
+    # Entry four remains unavailable because offset 508 is PC-98 metadata.
     stage0[0x1BE:0x1FE] = bytes(64)
     stage0[0x1BE:0x1CE] = struct.pack(
         "<B3sB3sII", 0x80, mbr_chs(PARTITION_LBA), 0x0E,
-        mbr_chs(last_lba), PARTITION_LBA, blocks)
+        mbr_chs(fat16_last_lba), PARTITION_LBA, FAT16_BLOCKS)
+    stage0[0x1CE:0x1DE] = struct.pack(
+        "<B3sB3sII", 0x00, mbr_chs(ESP_LBA), 0xEF,
+        mbr_chs(esp_last_lba), ESP_LBA, esp_blocks)
     stage0[508:510] = struct.pack("<H", 9)
     stage0[510:512] = b"\x55\xaa"
 
@@ -121,7 +127,7 @@ def create(args: argparse.Namespace) -> None:
     entry[1] = 0x91
     entry[4:8] = pc98_chs(PARTITION_LBA)
     entry[8:12] = pc98_chs(PARTITION_LBA)
-    entry[12:16] = pc98_chs(last_lba)
+    entry[12:16] = pc98_chs(fat16_last_lba)
     entry[16:32] = b"BOOT".ljust(16, b" ")
     pc98_table[:32] = entry
 
@@ -145,10 +151,14 @@ def create(args: argparse.Namespace) -> None:
             stream.write(args.pcat_stage2.read_bytes())
 
         offset = PARTITION_LBA * SECTOR_SIZE
-        run("mformat", "-i", f"{temporary}@@{offset}", "-v", "BOOT", "::")
+        esp_offset = ESP_LBA * SECTOR_SIZE
+        run("mformat", "-i", f"{temporary}@@{offset}", "-T",
+            str(FAT16_BLOCKS), "-v", "BOOT", "::")
         copy_kernel(temporary, offset, args.pc98_kernel, "VMUNIX.98",
                     args.fragment_kernels)
         copy_kernel(temporary, offset, args.pcat_kernel, "VMUNIX.AT",
+                    args.fragment_kernels)
+        copy_kernel(temporary, offset, args.amd64_kernel, "VMUNIX.X64",
                     args.fragment_kernels)
         if args.shell:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/bin")
@@ -164,9 +174,20 @@ def create(args: argparse.Namespace) -> None:
             run("mcopy", "-i", f"{temporary}@@{offset}",
                 str(args.holoris), "::/apps/holoris.nct")
 
+        run("mformat", "-F", "-i", f"{temporary}@@{esp_offset}", "-T",
+            str(esp_blocks), "-v", "ZEDESP", "::")
+        run("mmd", "-i", f"{temporary}@@{esp_offset}", "::/EFI")
+        run("mmd", "-i", f"{temporary}@@{esp_offset}", "::/EFI/BOOT")
+        run("mcopy", "-i", f"{temporary}@@{esp_offset}",
+            str(args.bootx64), "::/EFI/BOOT/BOOTX64.EFI")
+        run("mcopy", "-i", f"{temporary}@@{esp_offset}",
+            str(args.amd64_kernel), "::/VMUNIX.X64")
+
         checker = Path(__file__).with_name("check-pc-unified-hdd-image.py")
         run("python3", str(checker), "--pc98-kernel",
             str(args.pc98_kernel), "--pcat-kernel", str(args.pcat_kernel),
+            "--amd64-kernel", str(args.amd64_kernel),
+            "--bootx64", str(args.bootx64),
             *(["--noct", str(args.noct)] if args.noct else []),
             *(["--holoris", str(args.holoris)] if args.holoris else []),
             str(temporary))
@@ -185,10 +206,12 @@ def main() -> None:
     parser.add_argument("--pcat-stage2", type=Path, required=True)
     parser.add_argument("--pc98-kernel", type=Path, required=True)
     parser.add_argument("--pcat-kernel", type=Path, required=True)
+    parser.add_argument("--amd64-kernel", type=Path, required=True)
+    parser.add_argument("--bootx64", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
     parser.add_argument("--noct", type=Path)
     parser.add_argument("--holoris", type=Path)
-    parser.add_argument("--size-mib", type=int, default=129)
+    parser.add_argument("--size-mib", type=int, default=256)
     parser.add_argument("--fragment-kernels", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("output", type=Path)

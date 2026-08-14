@@ -4,6 +4,7 @@
 #include "asm.h"
 #include "space.h"
 #include "bsp.h"
+#include "bootloader/include/amd64-handoff.h"
 
 #define MAX_PHYS_PAGES (AMD64_DIRECT_LIMIT / PAGE_SIZE)
 #define BITMAP_WORDS   (MAX_PHYS_PAGES / 32U)
@@ -18,6 +19,26 @@ static uint32 reserved_bitmap[BITMAP_WORDS];
 static uint32 phys_pages;
 static uint32 reserved_pages;
 static uint32 allocated_pages;
+
+static void
+release_usable_range(uint64 base, uint64 size)
+{
+	uint64 limit = (uint64)phys_pages * PAGE_SIZE;
+	uint64 end;
+	uint32 first, last, index;
+
+	if (size == 0 || base >= limit)
+		return;
+	end = size > limit - base ? limit : base + size;
+	first = (uint32)((base + PAGE_SIZE - 1U) / PAGE_SIZE);
+	last = (uint32)(end / PAGE_SIZE);
+	for (index = first; index < last; index++)
+		if (BIT_GET(index)) {
+			BIT_CLEAR(index);
+			reserved_bitmap[index >> 5] &= ~(1U << (index & 31U));
+			reserved_pages--;
+		}
+}
 
 static void
 reserve_range(uintptr_t address, size_t size)
@@ -44,12 +65,22 @@ void
 amd64_page_init(void)
 {
 	uint64 total = bsp_mem_probe();
+	uint32 index;
 
 	phys_pages = (uint32)(total / PAGE_SIZE);
 	if (phys_pages > MAX_PHYS_PAGES) phys_pages = MAX_PHYS_PAGES;
-	hal_memset(page_bitmap, 0, sizeof(page_bitmap));
-	hal_memset(reserved_bitmap, 0, sizeof(reserved_bitmap));
-	reserved_pages = allocated_pages = 0;
+	hal_memset(page_bitmap, 0xff, sizeof(page_bitmap));
+	hal_memset(reserved_bitmap, 0xff, sizeof(reserved_bitmap));
+	reserved_pages = phys_pages;
+	allocated_pages = 0;
+	for (index = 0; index < bsp_mem_range_count(); index++) {
+		uint64 base, size;
+		uint32 type;
+		if (!bsp_mem_range(index, &base, &size, &type))
+			HAL_FATAL("invalid BSP memory range index");
+		if (type == ZBL6_MEMORY_USABLE)
+			release_usable_range(base, size);
+	}
 	reserve_range(0, 0x00100000U);
 	reserve_range((uintptr_t)__kernel_phys_start,
 	    (size_t)(__kernel_phys_end - __kernel_phys_start));
@@ -195,11 +226,23 @@ void
 hal_mem_get_memory_map(int *blocks, struct hal_memory_map_entry *entries,
 	size_t count)
 {
-	if (blocks != NULL) *blocks = 1;
-	if (entries != NULL && count != 0) {
-		entries[0].base = 0;
-		entries[0].size = hal_pmem_get_total_size();
-		entries[0].flags = HAL_PAGE_ENTRY_RAM;
+	uint32 index, available = bsp_mem_range_count();
+	if (blocks != NULL) *blocks = (int)available;
+	if (entries != NULL) {
+		for (index = 0; index < available && index < count; index++) {
+			uint64 base, size;
+			uint32 type;
+			(void)bsp_mem_range(index, &base, &size, &type);
+			entries[index].base = (uintptr_t)base;
+			entries[index].size = (uintptr_t)size;
+			if (type == ZBL6_MEMORY_USABLE)
+				entries[index].flags = HAL_PAGE_ENTRY_RAM;
+			else if (type == ZBL6_MEMORY_MMIO)
+				entries[index].flags = HAL_PAGE_ENTRY_MMIO |
+				    HAL_PAGE_ENTRY_DEVICE;
+			else
+				entries[index].flags = HAL_PAGE_ENTRY_SPECIAL;
+		}
 	}
 }
 

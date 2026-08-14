@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the dual PC/AT and PC-98 zedBSD BIOS disk layout."""
+"""Validate the PC-98/PC-AT BIOS and x64 UEFI disk layout."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 import argparse
@@ -11,6 +11,9 @@ from pathlib import Path
 
 SECTOR_SIZE = 512
 PARTITION_LBA = 2048
+FAT16_BLOCKS = 262144
+ESP_LBA = PARTITION_LBA + FAT16_BLOCKS
+MIN_ESP_BLOCKS = 131072
 PC98_STAGE1_LBA = 2
 PCAT_STAGE1_LBA = 66
 SLOT_SECTORS = 64
@@ -53,11 +56,11 @@ def check_zbl2(stream, lba: int, expected_machine: int) -> int:
     return count
 
 
-def extracted_hash(image: Path, name: str) -> bytes:
+def extracted_hash(image: Path, name: str, lba: int = PARTITION_LBA) -> bytes:
     with tempfile.TemporaryDirectory() as directory:
         output = Path(directory) / name.replace("/", "-").replace(".", "-")
         subprocess.run(["mcopy", "-n", "-i",
-                        f"{image}@@{PARTITION_LBA * SECTOR_SIZE}",
+                        f"{image}@@{lba * SECTOR_SIZE}",
                         f"::{name}", str(output)], check=True,
                        stdout=subprocess.DEVNULL)
         return hashlib.sha256(output.read_bytes()).digest()
@@ -76,19 +79,27 @@ def check(args: argparse.Namespace) -> None:
             fail("missing MBR signature")
         if struct.unpack_from("<H", mbr, 508)[0] != 9:
             fail("missing PC-98 IPL metadata")
-        status, ptype, start, blocks = (mbr[0x1BE], mbr[0x1C2],
-                                        struct.unpack_from("<I", mbr, 0x1C6)[0],
-                                        struct.unpack_from("<I", mbr, 0x1CA)[0])
-        if (status, ptype, start) != (0x80, 0x0E, PARTITION_LBA):
+        status, ptype, start, blocks = (
+            mbr[0x1BE], mbr[0x1C2],
+            struct.unpack_from("<I", mbr, 0x1C6)[0],
+            struct.unpack_from("<I", mbr, 0x1CA)[0])
+        if (status, ptype, start, blocks) != (
+                0x80, 0x0E, PARTITION_LBA, FAT16_BLOCKS):
             fail("first MBR entry is not the expected active FAT16 partition")
-        if blocks == 0 or start + blocks != total_sectors:
-            fail("first MBR entry has an invalid extent")
-        if any(mbr[0x1CE:0x1FC]):
-            fail("MBR entries two and three or reserved entry-four bytes are used")
+        status2, ptype2, start2, blocks2 = (
+            mbr[0x1CE], mbr[0x1D2],
+            struct.unpack_from("<I", mbr, 0x1D6)[0],
+            struct.unpack_from("<I", mbr, 0x1DA)[0])
+        if (status2, ptype2, start2) != (0x00, 0xEF, ESP_LBA):
+            fail("second MBR entry is not the expected FAT32 ESP")
+        if blocks2 < MIN_ESP_BLOCKS or start2 + blocks2 != total_sectors:
+            fail("second MBR entry has an invalid extent")
+        if any(mbr[0x1DE:0x1FC]):
+            fail("MBR entry three or reserved entry-four bytes are used")
 
         stream.seek(SECTOR_SIZE)
         table = stream.read(SECTOR_SIZE)
-        last_lba = total_sectors - 1
+        last_lba = ESP_LBA - 1
         expected = bytearray(32)
         expected[0:2] = b"\xa1\x91"
         expected[4:8] = pc98_chs(PARTITION_LBA)
@@ -123,19 +134,37 @@ def check(args: argparse.Namespace) -> None:
         if struct.unpack_from("<H", bpb, 22)[0] == 0:
             fail("volume is not FAT12/16")
 
+        stream.seek(ESP_LBA * SECTOR_SIZE)
+        esp_bpb = stream.read(SECTOR_SIZE)
+        if struct.unpack_from("<H", esp_bpb, 11)[0] != SECTOR_SIZE:
+            fail("ESP bytes/sector is not 512")
+        if struct.unpack_from("<H", esp_bpb, 22)[0] != 0 or \
+                struct.unpack_from("<I", esp_bpb, 36)[0] == 0:
+            fail("ESP is not FAT32")
+
     if args.pc98_kernel and extracted_hash(args.image, "VMUNIX.98") != \
             hashlib.sha256(args.pc98_kernel.read_bytes()).digest():
         fail("VMUNIX.98 differs from the input kernel")
     if args.pcat_kernel and extracted_hash(args.image, "VMUNIX.AT") != \
             hashlib.sha256(args.pcat_kernel.read_bytes()).digest():
         fail("VMUNIX.AT differs from the input kernel")
+    if args.amd64_kernel:
+        expected_amd64 = hashlib.sha256(args.amd64_kernel.read_bytes()).digest()
+        if extracted_hash(args.image, "VMUNIX.X64") != expected_amd64:
+            fail("FAT16 VMUNIX.X64 differs from the input kernel")
+        if extracted_hash(args.image, "VMUNIX.X64", ESP_LBA) != expected_amd64:
+            fail("ESP VMUNIX.X64 differs from the input kernel")
+    if args.bootx64 and extracted_hash(
+            args.image, "EFI/BOOT/BOOTX64.EFI", ESP_LBA) != \
+            hashlib.sha256(args.bootx64.read_bytes()).digest():
+        fail("ESP BOOTX64.EFI differs from the input loader")
     if args.noct and extracted_hash(args.image, "bin/noct") != \
             hashlib.sha256(args.noct.read_bytes()).digest():
         fail("/bin/noct differs from the input executable")
     if args.holoris and extracted_hash(args.image, "apps/holoris.nct") != \
             hashlib.sha256(args.holoris.read_bytes()).digest():
         fail("/apps/holoris.nct differs from the input script")
-    print("Unified BIOS image check: PASS "
+    print("Unified BIOS/UEFI image check: PASS "
           f"(PC-98 ZBL2 {pc98_count} sectors, PC/AT ZBL2 {pcat_count} sectors)")
 
 
@@ -143,6 +172,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pc98-kernel", type=Path)
     parser.add_argument("--pcat-kernel", type=Path)
+    parser.add_argument("--amd64-kernel", type=Path)
+    parser.add_argument("--bootx64", type=Path)
     parser.add_argument("--noct", type=Path)
     parser.add_argument("--holoris", type=Path)
     parser.add_argument("image", type=Path)

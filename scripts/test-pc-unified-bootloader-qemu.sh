@@ -44,7 +44,10 @@ make_image()
 		--pcat-stage1 "$build/pcat-stage1.bin" \
 		--pcat-stage2 "$build/pcat-stage2.bin" \
 		--pc98-kernel "$repo/build/pc98/bootloader/payload32.elf" \
-		--pcat-kernel "$at_kernel" "${options[@]}" "$image"
+		--pcat-kernel "$at_kernel" \
+		--amd64-kernel "$at_kernel" \
+		--bootx64 "$repo/build/uefi/BOOTX64.EFI" \
+		"${options[@]}" "$image"
 }
 
 qemu32="${QEMU_PCAT_I386:-$(command -v qemu-system-i386)}"
