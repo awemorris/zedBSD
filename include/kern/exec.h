@@ -10,16 +10,17 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <kern/page.h>
 
 struct file;
 struct process;
 struct vmspace;
 
 #define PROCESS_SPAWN_RESULT 0x00000001U
-#define EXEC_STACK_TOP          0x7ffff000U
+#define EXEC_STACK_TOP          (0x80000000U - ZEDBSD_PAGE_SIZE)
 #define EXEC_STACK_DEFAULT_SIZE (1024U * 1024U)
 #define EXEC_STACK_HARD_MAX     (1024U * 1024U)
-#define EXEC_STACK_GUARD_SIZE   4096U
+#define EXEC_STACK_GUARD_SIZE   ZEDBSD_PAGE_SIZE
 
 struct elf32_image_info {
 	uintptr_t entry;

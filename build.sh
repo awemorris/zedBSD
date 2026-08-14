@@ -26,6 +26,7 @@ Platform roles:
   pc98          i386 PC-98 BIOS kernel and image
   amd64         amd64 PC/AT BIOS kernel and image
   arm64         arm64 Raspberry Pi 4 kernel and SD image
+  sparcv9       SPARC V9 sun4u kernel and OpenBoot disk image
   unified       PC-98/PC-AT BIOS + amd64 UEFI + Raspberry Pi 4 image
 
 Common commands:
@@ -34,7 +35,7 @@ Common commands:
   check           Build and run its host tests
   messages        Generate the kernel message header
 
-Native kernel commands (pcat, pc98, amd64, arm64):
+Native kernel commands (pcat, pc98, amd64, arm64, sparcv9):
   vmunix          Build the zedBSD kernel
   SH              Build /bin/sh
   NOCT.ELF        Build the Noct user program
@@ -60,6 +61,9 @@ QEMU and image checks:
   arm64-image-check          Verify the AArch64 ELF and Raspberry Pi Image
   rpi4-entry-qemu-test       Test EL1/high-VMA/UART entry on QEMU raspi4b
   rpi4-qemu-test             Test the Raspberry Pi 4 kernel and SD root
+  sparcv9-image-check        Verify the SPARC V9 ELF and disk layout
+  sparcv9-entry-qemu-test    Test sun4u entry, traps, and MMU
+  sparcv9-qemu-test          Test the sun4u disk root and userland
   sh-builtins-qemu-test      Test /bin/sh filesystem builtins in QEMU
   pcat-beui-qemu-test        Test PC/AT Cirrus and VGA BeUI backends
   network-qemu-test          Test the platform NIC with ARP, ICMP, UDP, and TCP
@@ -74,6 +78,7 @@ Examples:
   $0 all pc98
   $0 all amd64
   $0 all arm64
+  $0 all sparcv9
   $0 hdd-image unified
   $0 check amd64
   $0 unified-loader-qemu-test unified

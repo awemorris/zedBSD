@@ -97,10 +97,10 @@ handle_fault(struct amd64_interrupt_frame *frame)
 		int handled;
 		trap.vector = (uint32)vector;
 		trap.cs = (uint32)frame->cs;
-		trap.eip = (uint32)frame->rip;
-		trap.eax = (uint32)frame->rax;
-		trap.error_code = (uint32)frame->error_code;
-		trap.fault_address = (uint32)address;
+		trap.eip = frame->rip;
+		trap.eax = frame->rax;
+		trap.error_code = frame->error_code;
+		trap.fault_address = address;
 		amd64_task_enter_user_frame(frame);
 		handled = user_fault_handler != NULL &&
 		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS;
@@ -134,8 +134,8 @@ int_handler(struct amd64_interrupt_frame *frame)
 		struct hal_user_trap trap;
 		trap.vector = (uint32)vector;
 		trap.cs = (uint32)frame->cs;
-		trap.eip = (uint32)frame->rip;
-		trap.eax = (uint32)frame->rax;
+		trap.eip = frame->rip;
+		trap.eax = frame->rax;
 		trap.error_code = trap.fault_address = 0;
 		if (user_int_handler != NULL) user_int_handler(&trap);
 		args[0] = (uint32)frame->rbx;

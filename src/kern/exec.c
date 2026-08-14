@@ -14,6 +14,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <hal/hal.h>
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
@@ -22,7 +23,7 @@
 #define EXEC_ENV_MAX 64U
 #define EXEC_STRING_MAX (16U * 1024U)
 
-#ifdef ZEDBSD_USER_ABI_AARCH64
+#if defined(ZEDBSD_USER_ABI_AARCH64) || defined(ZEDBSD_USER_ABI_SPARCV9)
 typedef uintptr_t exec_user_word_t;
 #define EXEC_IMAGE_INFO struct elf64_image_info
 #define exec_elf_load elf64_load
@@ -183,6 +184,7 @@ process_spawn_from(struct process *parent, const char *path,
 	EXEC_IMAGE_INFO image;
 	uintptr_t sp;
 	int error;
+	const char *stage = "open executable";
 	unsigned env_count = 0;
 
 	if (parent == NULL || path == NULL || argv == NULL || argv[0] == NULL ||
@@ -208,6 +210,7 @@ process_spawn_from(struct process *parent, const char *path,
 	error = vfs_access(file->f_inode, parent->cred, X_OK);
 	if (error != 0)
 		goto out;
+	stage = "create process";
 	error = process_create(parent, 0, &process);
 	if (error != 0)
 		goto out;
@@ -216,24 +219,30 @@ process_spawn_from(struct process *parent, const char *path,
 		error = ENOMEM;
 		goto out;
 	}
+	stage = "load ELF";
 	error = exec_elf_load(file, process->vmspace, &image);
 	if (error != 0)
 		goto out;
+	stage = "set brk";
 	error = vmspace_set_brk_start(process->vmspace, image.brk_start);
 	if (error != 0)
 		goto out;
+	stage = "build initial stack";
 	error = exec_build_initial_stack(process->vmspace, image.stack_size, argv,
 		effective_envp, &sp);
 	if (error != 0)
 		goto out;
+	stage = "open standard files";
 	error = setup_standard_files(parent, process);
 	if (error != 0)
 		goto out;
 	if ((flags & PROCESS_SPAWN_RESULT) != 0) {
+		stage = "open result file";
 		error = setup_result_file(process);
 		if (error != 0)
 			goto out;
 	}
+	stage = "create initial thread";
 	error = thread_create(process, image.entry, sp, &thread);
 	if (error != 0)
 		goto out;
@@ -245,6 +254,8 @@ process_spawn_from(struct process *parent, const char *path,
 		*result = process;
 	process = NULL;
 out:
+	if (error != 0)
+		hal_printf("exec: %s failed for %s (%d)\n", stage, path, error);
 	if (file != NULL)
 		(void)file_close(file);
 	if (process != NULL)
@@ -325,6 +336,8 @@ process_spawn_init(const char *path, struct process **result)
 		"HOME=/home",
 #ifdef ZEDBSD_USER_ABI_AARCH64
 		"PATH=/arm64/bin:/bin:/apps",
+#elif defined(ZEDBSD_USER_ABI_SPARCV9)
+		"PATH=/sparcv9/bin:/bin:/apps",
 #else
 		"PATH=/bin:/apps",
 #endif

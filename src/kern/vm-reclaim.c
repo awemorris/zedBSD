@@ -3,12 +3,13 @@
 #include "kern/vmspace.h"
 #include "kern/swap.h"
 #include "kern/kmem.h"
+#include "kern/page.h"
 
 #include <errno.h>
 #include <hal/hal.h>
 #include <string.h>
 
-#define PAGE_SIZE 4096U
+#define PAGE_SIZE ZEDBSD_PAGE_SIZE
 
 static struct vm_page *page_queue;
 struct vm_reclaim_stats vm_reclaim_counters;
@@ -68,7 +69,8 @@ static int swap_out_page(struct vm_page *page)
 	uint32_t slot;
 	int error;
 
-	if (backend == NULL || page->wire_count != 0)
+	if (PAGE_SIZE != SWAP_PAGE_SIZE || backend == NULL ||
+	    page->wire_count != 0)
 		return ENOSPC;
 	error = swap_alloc_slot(backend, &slot);
 	if (error != 0)

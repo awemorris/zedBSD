@@ -44,8 +44,8 @@ struct thread {
 	uint32_t signal_token;
 	unsigned signal_suspended;
 	uint32_t fault_vector;
-	uint32_t fault_eip;
-	uint32_t fault_address;
+	uintptr_t fault_eip;
+	uintptr_t fault_address;
 };
 
 extern struct thread thread0;

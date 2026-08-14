@@ -25,9 +25,11 @@
 #define ELFCLASS32 1
 #define ELFCLASS64 2
 #define ELFDATA2LSB 1
+#define ELFDATA2MSB 2
 #define EV_CURRENT 1
 #define ET_EXEC 2
 #define EM_386 3
+#define EM_SPARCV9 43
 #define EM_AARCH64 183
 #define PT_NULL 0
 #define PT_LOAD 1

@@ -58,8 +58,12 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 
 	if (handoff == NULL)
 		return vfs_fail("handoff", EINVAL);
-	if (handoff->version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT)
-		hal_printf("vfs: boot BIOS=%02X MBR partition=%u devices=%u\n",
+	if (handoff->version == ZEDBSD_HANDOFF_VERSION_SUN4U)
+		hal_printf("vfs: boot BIOS=%02x Sun slice=%u devices=%u\n",
+		    handoff->boot_bios_id, handoff->boot_partition_index,
+		    device_count);
+	else if (handoff->version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT)
+		hal_printf("vfs: boot BIOS=%02x MBR partition=%u devices=%u\n",
 		    handoff->boot_bios_id, handoff->boot_partition_index,
 		    device_count);
 	else
@@ -133,6 +137,11 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 			      handoff->boot_partition_scheme ==
 			      ZEDBSD_PARTITION_SCHEME_MBR &&
 			      entries[slot].p_index + 1U ==
+			      handoff->boot_partition_index) ||
+			     (handoff->version == ZEDBSD_HANDOFF_VERSION_SUN4U &&
+			      handoff->boot_partition_scheme ==
+			      ZEDBSD_PARTITION_SCHEME_SUN &&
+			      entries[slot].p_index ==
 			      handoff->boot_partition_index) ||
 			     (handoff->version ==
 			      ZEDBSD_HANDOFF_VERSION_PC98 &&
