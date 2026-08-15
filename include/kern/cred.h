@@ -2,13 +2,14 @@
 #ifndef ZEDBSD_KERN_CRED_H
 #define ZEDBSD_KERN_CRED_H
 
+#include <kern/atomic.h>
 #include <sys/types.h>
 
 #define KERN_NGROUPS_MAX 16U
 
 struct inode;
 struct ucred {
-	unsigned usecount;
+	refcount_t refs;
 	uid_t ruid, euid, suid;
 	gid_t rgid, egid, sgid;
 	unsigned ngroups;
@@ -22,6 +23,7 @@ void cred_release(struct ucred *);
 int cred_is_superuser(const struct ucred *);
 int cred_in_group(const struct ucred *, gid_t);
 const struct ucred *cred_current(void);
+struct ucred *cred_current_ref(void);
 int vfs_access(const struct inode *, const struct ucred *, int);
 int vfs_may_create(const struct inode *, const struct ucred *);
 int vfs_may_remove(const struct inode *, const struct inode *,

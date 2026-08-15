@@ -8,6 +8,7 @@
 #ifndef ZEDBSD_KERN_NET_PACKET_BUF_H
 #define ZEDBSD_KERN_NET_PACKET_BUF_H
 
+#include <kern/atomic.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -31,7 +32,7 @@ struct packet_buf {
 	uint32_t flags;
 	struct net_device *device;
 	struct packet_buf *next;
-	unsigned refcount;
+	refcount_t refcount;
 	uint8_t source_address[32];
 	uint8_t source_length;
 };

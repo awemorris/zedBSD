@@ -51,7 +51,7 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/graphics-device.c src/kern/system-device.c \
 	src/kern/pcat/font.c drivers/pcat-graphics.c \
 	src/kern/init.c
-AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES)
+AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES)
 AMD64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
 	$(AMD64_KERNEL_SOURCES))
 AMD64_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
@@ -228,8 +228,12 @@ AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
 	--file /bin/nslookup=$(BUILD)/bin/nslookup
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AMD64_ARCH_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
+AMD64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/amd64.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_ARCH_UFS_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
 arch-image: $(AMD64_ARCH_IMAGE)
 arch-image-check: $(AMD64_ARCH_IMAGE)-check
+arch-image-ufs: $(AMD64_ARCH_UFS_IMAGE)
+arch-image-ufs-check: $(AMD64_ARCH_UFS_IMAGE)-check
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_IMAGE) \
@@ -238,6 +242,21 @@ $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_IMAGE) $@
+
+$(BUILD)/ufs-root.img: $(AMD64_ARCH_UFS_IMAGE) \
+	$(SCRIPTS_DIR)/make-ufs1-root-image.py scripts/ufs1_format.py
+	$(PYTHON) $(SCRIPTS_DIR)/make-ufs1-root-image.py --force \
+		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) $@
+
+$(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/ufs-root.img \
+	$(SCRIPTS_DIR)/make-bios-hdd-image.py
+	$(PYTHON) $(SCRIPTS_DIR)/make-bios-hdd-image.py --force \
+		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
+
+ufs-root-image: $(BUILD)/ufs-root-hdd-image.img
 
 $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_IMAGE) \
@@ -274,6 +293,7 @@ network-qemu-test: bios-bootloader $(BUILD)/vmunix \
 	$(BUILD)/bin/nettest scripts/test-pcat-ne2000.sh
 	bash scripts/test-pcat-ne2000.sh amd64
 
-.PHONY: all vmunix SH arch-image arch-image-check bios-bootloader bios-hdd-image hdd-image \
+.PHONY: all vmunix SH arch-image arch-image-check arch-image-ufs \
+	arch-image-ufs-check ufs-root-image bios-bootloader bios-hdd-image hdd-image \
 	bios-loader-host-check amd64-hal-compile amd64-entry-qemu-test \
 	hdd-boot-qemu-test amd64-qemu-test network-qemu-test

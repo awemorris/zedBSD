@@ -12,18 +12,29 @@
 struct thread;
 static struct spinlock test_lock;
 static unsigned protected_counter;
+static _Thread_local hal_cpu_id_t test_cpu;
 
 bool hal_irq_disable(void) { return false; }
 void hal_irq_enable(void) { }
+hal_cpu_id_t hal_cpu_current(void) { return test_cpu; }
 struct thread *thread_current(void) { return (struct thread *)(uintptr_t)1; }
 int signal_pending_unblocked(const struct thread *thread)
 { (void)thread; return 0; }
 void sched_yield(void) { thrd_yield(); }
+void waitq_init(struct wait_queue *queue, const char *name)
+{ queue->head = queue->tail = NULL; queue->sequence = 1; queue->name = name; }
+uint64_t waitq_sequence(const struct wait_queue *queue)
+{ return queue->sequence; }
+int waitq_sleep(struct wait_queue *queue, struct spinlock *lock,
+    uint64_t sequence, uint64_t deadline, unsigned flags)
+{ (void)queue; (void)lock; (void)sequence; (void)deadline; (void)flags; return 0; }
+void waitq_wake_one(struct wait_queue *queue) { (void)queue; }
+void waitq_wake_all(struct wait_queue *queue) { (void)queue; }
 
 static int increment(void *argument)
 {
 	unsigned i;
-	(void)argument;
+	test_cpu = (hal_cpu_id_t)(uintptr_t)argument;
 	for (i = 0; i < 100000U; i++) {
 		spin_lock(&test_lock);
 		protected_counter++;
@@ -71,8 +82,8 @@ int main(void)
 	assert(hal_cpu_mask_test(&mask, HAL_CPU_MAX - 1U));
 
 	spin_init(&test_lock, LOCK_RANK_FILE, "host-test");
-	assert(thrd_create(&first, increment, NULL) == thrd_success);
-	assert(thrd_create(&second, increment, NULL) == thrd_success);
+	assert(thrd_create(&first, increment, (void *)(uintptr_t)1) == thrd_success);
+	assert(thrd_create(&second, increment, (void *)(uintptr_t)2) == thrd_success);
 	assert(thrd_join(first, NULL) == thrd_success);
 	assert(thrd_join(second, NULL) == thrd_success);
 	assert(protected_counter == 200000U);

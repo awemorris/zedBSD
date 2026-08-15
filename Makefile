@@ -78,6 +78,12 @@ KERN_NET_SOURCES := \
 	src/kern/net/tcp.c
 KERN_NET_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_NET_SOURCES))
 
+KERN_UFS1_SOURCES := \
+	src/kern/ufs1/ufs1-endian.c \
+	src/kern/ufs1/ufs1-super.c \
+	src/kern/ufs1/ufs1-vfs.c
+KERN_UFS1_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_UFS1_SOURCES))
+
 # ----------------------------------------------------------------------
 # Generic compile rules.  Per-object flag overrides use target-specific
 # variables; header dependencies come from -MMD.
@@ -171,13 +177,38 @@ $(BUILD)/tests/elf-host-test: tests/elf-host-test.c src/kern/elf.c
 
 $(BUILD)/tests/sched-host-test: tests/sched-host-test.c src/kern/sched.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Isrc src/kern/sched.c $< -o $@
+	$(HOST_TEST_CC) -Dtid_t=int -DZEDBSD_SCHED_TEST -Iinclude -Isrc \
+		src/kern/sched.c $< -o $@
 
 $(BUILD)/tests/concurrency-host-test: tests/concurrency-host-test.c \
 	src/kern/lock.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -pthread -Dtid_t=int -Iinclude -Isrc \
-		src/kern/lock.c $< -o $@
+	src/kern/lock.c $< -o $@
+
+$(BUILD)/tests/smp-contract-host-test: tests/smp-contract-host-test.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Isrc $< -o $@
+
+$(BUILD)/tests/ufs1-format-host-test: tests/ufs1-format-host-test.c \
+	src/kern/ufs1/ufs1-endian.c src/kern/ufs1/ufs1-super.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/ufs1/ufs1-endian.c \
+		src/kern/ufs1/ufs1-super.c $< -o $@
+
+ufs1-format-host-test: $(BUILD)/tests/ufs1-format-host-test
+	@$(BUILD)/tests/ufs1-format-host-test
+
+$(BUILD)/tests/ufs1-test.img: scripts/make-ufs1-image.py scripts/ufs1_format.py
+	@mkdir -p $(dir $@)
+	PYTHONPATH=scripts $(PYTHON) scripts/make-ufs1-image.py --size-mib 4 $@
+
+$(BUILD)/tests/ufs1-vfs-host-test: tests/ufs1-vfs-host-test.c \
+	$(BUILD)/tests/ufs1-test.img $(VFS_CORE_SOURCES) $(KERN_UFS1_SOURCES)
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc \
+		-DUFS1_TEST_IMAGE='"$(BUILD)/tests/ufs1-test.img"' \
+		$(VFS_CORE_SOURCES) $(KERN_UFS1_SOURCES) tests/vfs-host-stubs.c $< -o $@
 
 $(BUILD)/tests/vmspace-host-test: tests/vmspace-host-test.c \
 	src/kern/vmspace.c src/kern/vm-object.c
@@ -295,6 +326,7 @@ $(BUILD)/tests/cred-host-test: tests/cred-host-test.c src/kern/cred.c
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/blkdev-host-test \
 	$(BUILD)/tests/vfs-host-test \
+	$(BUILD)/tests/ufs1-vfs-host-test \
 	$(BUILD)/tests/cred-host-test \
 	$(BUILD)/tests/fat-host-test \
 	$(BUILD)/tests/fat-write-host-test \
@@ -305,6 +337,7 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/heap-context-host-test \
 	$(BUILD)/tests/elf-host-test \
 	$(BUILD)/tests/sched-host-test \
+	$(BUILD)/tests/smp-contract-host-test \
 	$(BUILD)/tests/concurrency-host-test \
 	$(BUILD)/tests/vmspace-host-test \
 	$(BUILD)/tests/vm-commit-host-test \
@@ -317,13 +350,19 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/dhcp-host-test \
 	$(BUILD)/tests/dns-host-test
 CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test \
-	uapi-abi-layout-check
+	uapi-abi-layout-check ufs1-format-host-test
 
 overlay-journal-format-host-test: tests/overlay-journal-format-host-test.py \
 	scripts/overlay_journal_format.py
 	PYTHONPATH=scripts $(PYTHON) tests/overlay-journal-format-host-test.py
 
 CHECK_RUN_TARGETS += overlay-journal-format-host-test
+
+ufs1-format-python-test: tests/ufs1-format-host-test.py \
+	scripts/ufs1_format.py scripts/check-ufs1-image.py
+	PYTHONPATH=scripts $(PYTHON) tests/ufs1-format-host-test.py
+
+CHECK_RUN_TARGETS += ufs1-format-python-test
 
 # ----------------------------------------------------------------------
 # Architecture-specific rules (artifacts, disk images, QEMU tests,
@@ -347,4 +386,5 @@ distclean:
 	$(BUILD)/*/*/*/*.d)
 
 .PHONY: all check clean distclean messages stdio-fs-host-test \
-	overlay-journal-format-host-test uapi-abi-layout-check
+	overlay-journal-format-host-test uapi-abi-layout-check \
+	ufs1-format-host-test ufs1-format-python-test

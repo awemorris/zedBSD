@@ -3,6 +3,7 @@
 #define ZEDBSD_KERN_LOCK_H
 
 #include <kern/atomic.h>
+#include <kern/waitq.h>
 
 enum lock_rank {
 	LOCK_RANK_PROCESS_TREE = 10,
@@ -24,6 +25,8 @@ struct spinlock {
 	atomic_uint_t held;
 	enum lock_rank rank;
 	const char *name;
+	unsigned owner_cpu;
+	unsigned owner_valid;
 };
 
 void spin_init(struct spinlock *, enum lock_rank, const char *);
@@ -33,12 +36,11 @@ void spin_unlock(struct spinlock *);
 unsigned long spin_lock_irqsave(struct spinlock *);
 void spin_unlock_irqrestore(struct spinlock *, unsigned long);
 
-struct wait_queue;
 struct thread;
 struct mutex {
 	struct spinlock guard;
 	struct thread *owner;
-	struct wait_queue *waiters;
+	struct wait_queue waiters;
 	unsigned locked;
 };
 int mutex_init(struct mutex *, enum lock_rank, const char *);

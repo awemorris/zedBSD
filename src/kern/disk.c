@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/disk.h"
 #include "kern/sched.h"
+#include "kern/atomic.h"
 
 #include <errno.h>
 #include <hal/hal.h>
@@ -21,16 +22,21 @@ static uint8_t disk_used[DISK_MAX];
 static struct disk *disk_head;
 static unsigned live_count;
 static dev_t next_dev = 1;
+static atomic_uint_t disk_registry_lock;
 
 static bool
 disk_lock(void)
 {
-	return hal_irq_disable != NULL ? hal_irq_disable() : false;
+	bool enabled = hal_irq_disable != NULL ? hal_irq_disable() : false;
+	while (!atomic_try_acquire_zero(&disk_registry_lock))
+		hal_compiler_barrier();
+	return enabled;
 }
 
 static void
 disk_unlock(bool enabled)
 {
+	atomic_store_release(&disk_registry_lock, 0);
 	if (enabled && hal_irq_enable != NULL)
 		hal_irq_enable();
 }
@@ -215,6 +221,8 @@ struct disk *disk_find(const char *name)
 	for (disk = disk_head; disk != NULL; disk = disk->d_next)
 		if (name_equal(disk->d_name, name))
 			break;
+	if (disk != NULL)
+		disk->d_refcount++;
 	disk_unlock(enabled);
 	return disk;
 }
@@ -226,6 +234,8 @@ struct disk *disk_find_by_dev(dev_t dev)
 	for (disk = disk_head; disk != NULL; disk = disk->d_next)
 		if (disk->d_dev == dev)
 			break;
+	if (disk != NULL)
+		disk->d_refcount++;
 	disk_unlock(enabled);
 	return disk;
 }
@@ -246,6 +256,8 @@ struct disk *disk_at(unsigned index)
 	for (disk = disk_head; disk != NULL && index != 0;
 	     disk = disk->d_next, index--)
 		;
+	if (disk != NULL)
+		disk->d_refcount++;
 	disk_unlock(enabled);
 	return disk;
 }

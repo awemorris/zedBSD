@@ -10,14 +10,14 @@ import tempfile
 from pathlib import Path
 
 SECTOR_SIZE = 512
-IMAGE_SIZE_MIB = 128
-IMAGE_SECTORS = IMAGE_SIZE_MIB * 2048
+LEGACY_IMAGE_SECTORS = 128 * 2048
+UFS_IMAGE_SECTORS = 190 * 2048
 HEADS = 64
 SECTORS_PER_TRACK = 64
 SECTORS_PER_CYLINDER = HEADS * SECTORS_PER_TRACK
 BOOT_SLICE_SECTORS = SECTORS_PER_CYLINDER
 FAT_LBA = BOOT_SLICE_SECTORS
-FAT_SECTORS = IMAGE_SECTORS - FAT_LBA
+UFS_FAT_SECTORS = 128 * 2048
 STAGE1_LBA = 1
 STAGE1_LOAD_SIZE = 15 * SECTOR_SIZE
 STAGE2_HEADER_LBA = 32
@@ -47,7 +47,8 @@ def put32(buffer: bytearray, offset: int, value: int) -> None:
     struct.pack_into(">I", buffer, offset, value)
 
 
-def sun_label() -> bytes:
+def sun_label(image_sectors: int, fat_sectors: int,
+              root_sectors: int = 0) -> bytes:
     label = bytearray(SECTOR_SIZE)
     text = b"zedBSD SPARC V9 sun4u"
     label[:len(text)] = text
@@ -61,19 +62,19 @@ def sun_label() -> bytes:
     put32(label, 188, SUN_VTOC_SANITY)
 
     put16(label, 420, 7200)
-    put16(label, 422, IMAGE_SECTORS // SECTORS_PER_CYLINDER)
+    put16(label, 422, image_sectors // SECTORS_PER_CYLINDER)
     put16(label, 424, 0)
     put16(label, 430, 1)
-    put16(label, 432, IMAGE_SECTORS // SECTORS_PER_CYLINDER)
+    put16(label, 432, image_sectors // SECTORS_PER_CYLINDER)
     put16(label, 434, 0)
     put16(label, 436, HEADS)
     put16(label, 438, SECTORS_PER_TRACK)
 
     partitions = (
         (0, BOOT_SLICE_SECTORS),
-        (1, FAT_SECTORS),
-        (0, IMAGE_SECTORS),
-        (0, 0),
+        (1, fat_sectors),
+        (0, image_sectors),
+        (1 + fat_sectors // SECTORS_PER_CYLINDER, root_sectors),
         (0, 0),
         (0, 0),
         (0, 0),
@@ -122,6 +123,10 @@ def create(args: argparse.Namespace) -> None:
         require(path)
     if args.shell is not None:
         require(args.shell)
+    if args.ufs_root is not None:
+        require(args.ufs_root)
+        if args.ufs_root.stat().st_size % SECTOR_SIZE:
+            raise SystemExit("UFS1 root image is not sector aligned")
     if args.output.exists() and not args.force:
         raise SystemExit(f"output exists (use --force): {args.output}")
 
@@ -133,6 +138,13 @@ def create(args: argparse.Namespace) -> None:
     if not stage2 or STAGE2_PAYLOAD_LBA + stage2_sectors > FAT_LBA:
         raise SystemExit("stage2 overlaps the FAT slice")
 
+    root_sectors = (args.ufs_root.stat().st_size // SECTOR_SIZE
+                    if args.ufs_root is not None else 0)
+    image_sectors = UFS_IMAGE_SECTORS if root_sectors else LEGACY_IMAGE_SECTORS
+    fat_sectors = UFS_FAT_SECTORS if root_sectors else image_sectors - FAT_LBA
+    root_lba = FAT_LBA + fat_sectors
+    if root_lba % SECTORS_PER_CYLINDER or root_lba + root_sectors > image_sectors:
+        raise SystemExit("UFS1 root does not fit cylinder-aligned slice d")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=args.output.name + ".", dir=args.output.parent
@@ -141,9 +153,9 @@ def create(args: argparse.Namespace) -> None:
     temporary = Path(temporary_name)
     try:
         with temporary.open("r+b") as image:
-            image.truncate(IMAGE_SECTORS * SECTOR_SIZE)
+            image.truncate(image_sectors * SECTOR_SIZE)
             image.seek(0)
-            image.write(sun_label())
+            image.write(sun_label(image_sectors, fat_sectors, root_sectors))
             # OpenBIOS relocates OMAGIC text from load-base+32 back to
             # load-base.  The padded body satisfies its fixed 7680-byte read.
             image.seek(STAGE1_LBA * SECTOR_SIZE)
@@ -154,14 +166,16 @@ def create(args: argparse.Namespace) -> None:
             image.write(stage2)
 
         fat_spec = f"{temporary}@@{FAT_LBA * SECTOR_SIZE}"
-        run("mformat", "-i", fat_spec, "-T", str(FAT_SECTORS),
+        run("mformat", "-i", fat_spec, "-T", str(fat_sectors),
             "-v", "ZEDSP9", "::")
         run("mcopy", "-i", fat_spec, str(args.kernel), "::/VMUNIX.S9")
         if args.shell is not None:
-            run("mmd", "-i", fat_spec, "::/sparcv9")
-            run("mmd", "-i", fat_spec, "::/sparcv9/bin")
-            run("mcopy", "-i", fat_spec, str(args.shell),
-                "::/sparcv9/bin/sh")
+            run("mmd", "-i", fat_spec, "::/bin")
+            run("mcopy", "-i", fat_spec, str(args.shell), "::/bin/sh")
+        if args.ufs_root is not None:
+            with temporary.open("r+b") as image:
+                image.seek(root_lba * SECTOR_SIZE)
+                image.write(args.ufs_root.read_bytes())
 
         checker = Path(__file__).with_name("check-sparcv9-hdd-image.py")
         command = [
@@ -172,6 +186,8 @@ def create(args: argparse.Namespace) -> None:
         ]
         if args.shell is not None:
             command += ["--shell", str(args.shell)]
+        if args.ufs_root is not None:
+            command += ["--ufs-root", str(args.ufs_root)]
         command.append(str(temporary))
         run(*command)
         os.replace(temporary, args.output)
@@ -186,6 +202,7 @@ def main() -> None:
     parser.add_argument("--stage2", type=Path, required=True)
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
+    parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("output", type=Path)
     create(parser.parse_args())

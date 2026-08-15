@@ -2292,8 +2292,15 @@ sys_process_identity_call(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_getpgrp: return process->pgrp;
 	case ZEDBSD_SYS_getpgid:
 		pid = (pid_t)args[0];
-		target = pid == 0 ? process : process_find(pid);
-		return target != NULL ? target->pgrp : -ESRCH;
+		if (pid == 0)
+			return process->pgrp;
+		target = process_find_ref(pid);
+		if (target != NULL) {
+			pid_t value = target->pgrp;
+			process_release(target);
+			return value;
+		}
+		return -ESRCH;
 	case ZEDBSD_SYS_setpgid:
 		error = process_setpgid(process, (pid_t)args[0],
 		    (pid_t)args[1]);
@@ -2302,8 +2309,15 @@ sys_process_identity_call(uint32_t number, const uintptr_t args[6])
 		return process_setsid(process);
 	case ZEDBSD_SYS_getsid:
 		pid = (pid_t)args[0];
-		target = pid == 0 ? process : process_find(pid);
-		return target != NULL ? target->session : -ESRCH;
+		if (pid == 0)
+			return process->session;
+		target = process_find_ref(pid);
+		if (target != NULL) {
+			pid_t value = target->session;
+			process_release(target);
+			return value;
+		}
+		return -ESRCH;
 	default:
 		return -ENOSYS;
 	}
@@ -2352,9 +2366,13 @@ sys_wait_call(const uintptr_t args[6])
 	if (parent == NULL || pid <= 0 || args[2] != 0 || args[5] != 0 ||
 	    (args[3] == 0) != (args[4] == 0))
 		return -EINVAL;
-	child = process_find(pid);
-	if (child == NULL || child->parent != parent)
+	child = process_find_ref(pid);
+	if (child == NULL)
 		return -ECHILD;
+	if (child->parent != parent) {
+		process_release(child);
+		return -ECHILD;
+	}
 	capacity = args[4] > sizeof(result) ? sizeof(result) : (size_t)args[4];
 	memset(&status_pin, 0, sizeof(status_pin));
 	memset(&result_pin, 0, sizeof(result_pin));
@@ -2362,12 +2380,16 @@ sys_wait_call(const uintptr_t args[6])
 		error = uaccess_pin(args[1], sizeof(status), HAL_SPACE_WRITE,
 		    &status_pin);
 		if (error != 0)
+		{
+			process_release(child);
 			return -error;
+		}
 	}
 	if (capacity != 0) {
 		error = uaccess_pin(args[3], capacity, HAL_SPACE_WRITE, &result_pin);
 		if (error != 0) {
 			uaccess_unpin(&status_pin);
+			process_release(child);
 			return -error;
 		}
 	}
@@ -2377,6 +2399,7 @@ sys_wait_call(const uintptr_t args[6])
 	if (error != 0) {
 		uaccess_unpin(&result_pin);
 		uaccess_unpin(&status_pin);
+		process_release(child);
 		return -error;
 	}
 	if (args[1] != 0)
@@ -2385,6 +2408,7 @@ sys_wait_call(const uintptr_t args[6])
 		error = copyout_pinned(&result_pin, 0, result, capacity);
 	uaccess_unpin(&result_pin);
 	uaccess_unpin(&status_pin);
+	process_release(child);
 	if (error != 0)
 		return -error;
 	return pid;

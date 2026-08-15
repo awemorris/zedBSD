@@ -11,6 +11,15 @@
 
 /* Some VFS host tests deliberately link without the process subsystem. */
 extern const struct ucred *cred_current(void) __attribute__((weak));
+extern struct ucred *cred_current_ref(void) __attribute__((weak));
+extern void cred_release(struct ucred *) __attribute__((weak));
+
+static void
+release_cred(struct ucred *cred)
+{
+	if (cred != NULL && cred_release != NULL)
+		cred_release(cred);
+}
 
 static int
 path_length(const char *path, size_t *length)
@@ -39,11 +48,8 @@ component_is(const char *name, size_t length, const char *literal)
 }
 
 static int
-search_access(const struct inode *directory)
+search_access(const struct inode *directory,const struct ucred *cred)
 {
-	const struct ucred *cred;
-
-	cred = cred_current != NULL ? cred_current() : NULL;
 	if (cred == NULL)
 		return 0;
 	return vfs_access(directory, cred, X_OK);
@@ -53,27 +59,37 @@ int
 namei_path_flags_at(struct cwdinfo *context, const char *path, unsigned flags,
 		    struct path *result)
 {
-	struct path current;
+	struct path current, root;
 	char work[ZEDBSD_PATH_MAX];
 	size_t length, position = 0;
 	unsigned symlinks = 0;
 	int error, trailing;
-
-	if (context == NULL || context->root.p_inode == NULL ||
-	    context->cwd.p_inode == NULL || result == NULL ||
+	struct ucred *owned_cred;
+	const struct ucred *cred;
+	unsigned long irq;
+	if (context == NULL || result == NULL ||
 	    (flags & ~NAMEI_NOFOLLOW_FINAL) != 0)
 		return EINVAL;
 	error = path_length(path, &length);
 	if (error != 0)
 		return error;
+	owned_cred=cred_current_ref!=NULL?cred_current_ref():NULL;
+	cred=owned_cred!=NULL?owned_cred:
+	    (cred_current!=NULL?cred_current():NULL);
 	memcpy(work, path, length + 1U);
 	path = work;
 	trailing = path[length - 1U] == '/';
-	if (path[0] == '/')
-		path_set(&current, context->root.p_mount, context->root.p_inode);
-	else
-		path_set(&current, context->cwd.p_mount, context->cwd.p_inode);
-	error = search_access(current.p_inode);
+	irq=spin_lock_irqsave(&context->lock);
+	if(context->root.p_inode==NULL||context->cwd.p_inode==NULL){
+		spin_unlock_irqrestore(&context->lock,irq);
+		release_cred(owned_cred);
+		return EINVAL;
+	}
+	path_set(&root,context->root.p_mount,context->root.p_inode);
+	if(path[0]=='/')path_set(&current,root.p_mount,root.p_inode);
+	else path_set(&current,context->cwd.p_mount,context->cwd.p_inode);
+	spin_unlock_irqrestore(&context->lock,irq);
+	error = search_access(current.p_inode,cred);
 	if (error != 0)
 		goto fail;
 	while (position < length) {
@@ -85,7 +101,7 @@ namei_path_flags_at(struct cwdinfo *context, const char *path, unsigned flags,
 			position++;
 		if (position == length)
 			break;
-		error = search_access(current.p_inode);
+		error = search_access(current.p_inode,cred);
 		if (error != 0)
 			goto fail;
 		start = position;
@@ -106,7 +122,7 @@ namei_path_flags_at(struct cwdinfo *context, const char *path, unsigned flags,
 		}
 		if (component_is(component.cn_nameptr, component.cn_namelen, "..")) {
 			component.cn_flags |= COMPONENT_DOTDOT;
-			if (path_equal(&current, &context->root))
+			if (path_equal(&current, &root))
 				continue;
 			error = mount_cross_path_parent(&current, &next_path);
 			if (error == 0) {
@@ -168,8 +184,7 @@ namei_path_flags_at(struct cwdinfo *context, const char *path, unsigned flags,
 			trailing = path[length - 1U] == '/';
 			if (path[0] == '/') {
 				path_release(&current);
-				path_set(&current, context->root.p_mount,
-					context->root.p_inode);
+				path_set(&current, root.p_mount, root.p_inode);
 			}
 			continue;
 		}
@@ -179,7 +194,7 @@ namei_path_flags_at(struct cwdinfo *context, const char *path, unsigned flags,
 		current = next_path;
 		if (position < length || trailing) {
 			error = current.p_inode->i_type != INODE_DIR ? ENOTDIR :
-			    search_access(current.p_inode);
+			    search_access(current.p_inode,cred);
 			if (error != 0)
 				goto fail;
 		}
@@ -188,12 +203,16 @@ namei_path_flags_at(struct cwdinfo *context, const char *path, unsigned flags,
 		error = ENOTDIR;
 		goto fail;
 	}
-	if (trailing && (error = search_access(current.p_inode)) != 0)
+	if (trailing && (error = search_access(current.p_inode,cred)) != 0)
 		goto fail;
 	*result = current;
+	path_release(&root);
+	release_cred(owned_cred);
 	return 0;
 fail:
 	path_release(&current);
+	path_release(&root);
+	release_cred(owned_cred);
 	return error;
 }
 
@@ -290,7 +309,8 @@ cwdinfo_init(struct cwdinfo *context, const struct path *root)
 	    root->p_inode == NULL || root->p_inode->i_type != INODE_DIR)
 		return EINVAL;
 	memset(context, 0, sizeof(*context));
-	context->usecount = 1;
+	refcount_init(&context->refs,1);
+	spin_init(&context->lock,LOCK_RANK_PROCESS,"cwdinfo");
 	path_set(&context->root, root->p_mount, root->p_inode);
 	path_set(&context->cwd, root->p_mount, root->p_inode);
 	return 0;
@@ -310,20 +330,33 @@ int
 fs_chdir(struct cwdinfo *context, const char *path)
 {
 	struct path directory;
+	struct ucred *cred=cred_current_ref!=NULL?cred_current_ref():NULL;
+	const struct ucred *check=cred!=NULL?cred:
+	    (cred_current!=NULL?cred_current():NULL);
 	int error = namei_path_at(context, path, &directory);
-	if (error != 0)
+	if (error != 0) {
+		release_cred(cred);
 		return error;
+	}
 	if (directory.p_inode->i_type != INODE_DIR) {
 		path_release(&directory);
+		release_cred(cred);
 		return ENOTDIR;
 	}
-	error = search_access(directory.p_inode);
+	error = search_access(directory.p_inode,check);
 	if (error != 0) {
 		path_release(&directory);
+		release_cred(cred);
 		return error;
 	}
-	path_release(&context->cwd);
-	context->cwd = directory;
+	{
+		struct path old;
+		unsigned long irq=spin_lock_irqsave(&context->lock);
+		old=context->cwd;context->cwd=directory;
+		spin_unlock_irqrestore(&context->lock,irq);
+		path_release(&old);
+	}
+	release_cred(cred);
 	return 0;
 }
 
@@ -397,7 +430,8 @@ out:
 }
 
 static int
-getcwd_once(const struct cwdinfo *context, char *buffer, size_t capacity)
+getcwd_once(const struct path *root,const struct path *cwd,
+    char *buffer, size_t capacity)
 {
 	struct componentname dotdot = { "..", 2, COMPONENT_DOTDOT };
 	struct path current;
@@ -407,8 +441,8 @@ getcwd_once(const struct cwdinfo *context, char *buffer, size_t capacity)
 	int error = 0;
 
 	reverse[position] = '\0';
-	path_set(&current, context->cwd.p_mount, context->cwd.p_inode);
-	while (!path_equal(&current, &context->root)) {
+	path_set(&current,cwd->p_mount,cwd->p_inode);
+	while (!path_equal(&current,root)) {
 		struct path parent;
 		char name[NAME_MAX + 1U];
 		size_t length;
@@ -476,14 +510,23 @@ fs_getcwd(const struct cwdinfo *context, char *buffer, size_t capacity)
 {
 	unsigned attempt;
 	int error;
+	struct path root,cwd;
+	unsigned long irq;
 
-	if (context == NULL || context->root.p_inode == NULL ||
-	    context->cwd.p_inode == NULL || buffer == NULL || capacity == 0)
+	if (context == NULL || buffer == NULL || capacity == 0)
 		return EINVAL;
-	for (attempt = 0; attempt < 8U; attempt++) {
-		error = getcwd_once(context, buffer, capacity);
-		if (error != EAGAIN)
-			return error;
+	irq=spin_lock_irqsave((struct spinlock *)&context->lock);
+	if(context->root.p_inode==NULL||context->cwd.p_inode==NULL){
+		spin_unlock_irqrestore((struct spinlock *)&context->lock,irq);
+		return EINVAL;
 	}
-	return EAGAIN;
+	path_set(&root,context->root.p_mount,context->root.p_inode);
+	path_set(&cwd,context->cwd.p_mount,context->cwd.p_inode);
+	spin_unlock_irqrestore((struct spinlock *)&context->lock,irq);
+	for (attempt = 0; attempt < 8U; attempt++) {
+		error = getcwd_once(&root,&cwd,buffer,capacity);
+		if (error != EAGAIN)break;
+	}
+	path_release(&cwd);path_release(&root);
+	return error;
 }

@@ -21,39 +21,16 @@ struct process process0;
 static struct process *all_processes;
 static pid_t next_pid = 1;
 static struct thread *reaper_thread;
+static struct spinlock process_tree_lock = {
+	{ 0 }, LOCK_RANK_PROCESS_TREE, "process tree", 0, 0
+};
 #define PROCESS_EXT __attribute__((section(".hightext")))
-
-/* All helpers below are called with local interrupts disabled. */
-static PROCESS_EXT void
-child_waiter_add(struct process *parent, struct thread *thread)
-{
-	struct thread *entry;
-	for (entry = parent->child_waiters; entry != NULL;
-	     entry = entry->wait_next)
-		if (entry == thread)
-			return;
-	thread->wait_next = parent->child_waiters;
-	parent->child_waiters = thread;
-}
-
-static PROCESS_EXT void
-child_waiter_remove(struct process *parent, struct thread *thread)
-{
-	struct thread **link = &parent->child_waiters;
-	while (*link != NULL && *link != thread)
-		link = &(*link)->wait_next;
-	if (*link == thread)
-		*link = thread->wait_next;
-	thread->wait_next = NULL;
-}
 
 static PROCESS_EXT void
 child_waiters_wake(struct process *parent)
 {
-	struct thread *thread;
-	for (thread = parent != NULL ? parent->child_waiters : NULL;
-	     thread != NULL; thread = thread->wait_next)
-		sched_wakeup(thread);
+	if (parent != NULL)
+		waitq_wake_all(&parent->child_waitq);
 }
 
 static PROCESS_EXT void
@@ -82,6 +59,9 @@ process_init(void)
 		return;
 	memset(&process0, 0, sizeof(process0));
 	memset(&thread0, 0, sizeof(thread0));
+	refcount_init(&process0.refs, 1);
+	spin_init(&process0.lock, LOCK_RANK_PROCESS, "process0");
+	waitq_init(&process0.child_waitq, "process0 children");
 	process0.pid = 0;
 	process0.pgrp = 0;
 	process0.session = 0;
@@ -94,12 +74,15 @@ process_init(void)
 	process0.threads = &thread0;
 	process0.thread_count = 1;
 	thread0.tid = 0;
+	refcount_init(&thread0.refs, 1);
 	thread0.proc = &process0;
 	thread0.task = hal_task_get_current();
 	thread0.state = THREAD_RUNNING;
 	thread0.flags = THREAD_FLAG_IDLE;
 	thread0.sched.priority = SCHED_PRIORITY_DEFAULT;
 	thread0.sched.quantum = SCHED_QUANTUM_TICKS;
+	thread0.sched.cpu = 0;
+	thread0.sched.last_cpu = 0;
 	hal_task_set_private(thread0.task, &thread0);
 	all_processes = &process0;
 }
@@ -109,13 +92,19 @@ process_reaper(void *argument)
 {
 	(void)argument;
 	for (;;) {
-		struct process *process = all_processes;
+		struct process *process = NULL;
+		pid_t cursor = -1;
 		int reaped = 0;
-		while (process != NULL) {
-			struct process *next = process->all_next;
-			if (process != &process0 &&
+		while ((process = process_find_next_ref(cursor)) != NULL) {
+			int reap;
+			unsigned long irq;
+			cursor = process->pid;
+			irq = spin_lock_irqsave(&process->lock);
+			reap = process != &process0 &&
 			    (process->flags & PROCESS_AUTOREAP) != 0 &&
-			    process->state == PROCESS_ZOMBIE) {
+			    process->state == PROCESS_ZOMBIE;
+			spin_unlock_irqrestore(&process->lock, irq);
+			if (reap) {
 				while (process->threads != NULL)
 					if (thread_wait(process->threads, NULL) != 0)
 						break;
@@ -124,7 +113,7 @@ process_reaper(void *argument)
 					reaped = 1;
 				}
 			}
-			process = next;
+			process_release(process);
 		}
 		if (!reaped)
 			sched_sleep(0);
@@ -148,47 +137,97 @@ process_reaper_start(void)
 	return error;
 }
 
-struct process *
-process_find(pid_t pid)
+void
+process_ref(struct process *process)
 {
-	struct process *process;
+	if (process != NULL)
+		refcount_get(&process->refs);
+}
+
+void
+process_release(struct process *process)
+{
+	if (process == NULL || !refcount_put(&process->refs))
+		return;
+	if (process == &process0 || process->state != PROCESS_DEAD)
+		HAL_FATAL("releasing live process");
+	kern_free(process);
+}
+
+struct process *
+process_find_ref(pid_t pid)
+{
+	struct process *process, *result = NULL;
+	unsigned long irq = spin_lock_irqsave(&process_tree_lock);
 	for (process = all_processes; process != NULL; process = process->all_next)
-		if (process->pid == pid && process->state != PROCESS_DEAD)
-			return process;
-	return NULL;
+		if (process->pid == pid && process->state != PROCESS_DEAD) {
+			process_ref(process);
+			result = process;
+			break;
+		}
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	return result;
+}
+
+struct process *
+process_find_next_ref(pid_t after)
+{
+	struct process *process, *result = NULL;
+	unsigned long irq = spin_lock_irqsave(&process_tree_lock);
+	for (process = all_processes; process != NULL; process = process->all_next)
+		if (process->state != PROCESS_DEAD && process->pid > after &&
+		    (result == NULL || process->pid < result->pid))
+			result = process;
+	if (result != NULL)
+		process_ref(result);
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	return result;
 }
 
 struct thread *
-process_find_by_tid(tid_t tid)
+thread_find_ref(tid_t tid)
 {
 	struct process *process;
-	for (process = all_processes; process != NULL; process = process->all_next) {
+	struct thread *result = NULL;
+	unsigned long tree_irq = spin_lock_irqsave(&process_tree_lock);
+	for (process = all_processes; process != NULL && result == NULL;
+	    process = process->all_next) {
 		struct thread *thread;
+		unsigned long process_irq = spin_lock_irqsave(&process->lock);
 		for (thread = process->threads; thread != NULL;
-		     thread = thread->proc_next)
-			if (thread->tid == tid && thread->state != THREAD_DEAD)
-				return thread;
+		    thread = thread->proc_next)
+			if (thread->tid == tid && thread->state != THREAD_DEAD) {
+				thread_ref(thread);
+				result = thread;
+				break;
+			}
+		spin_unlock_irqrestore(&process->lock, process_irq);
 	}
-	return NULL;
+	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
+	return result;
 }
-struct process *process_first(void) { return all_processes; }
-struct process *process_next(struct process *p) { return p != NULL ? p->all_next : NULL; }
 
 int
 process_setpgid(struct process *caller, pid_t pid, pid_t pgid)
 {
 	struct process *target, *member;
+	unsigned long irq;
+	int error = 0;
 	if (caller == NULL || caller == &process0 || pid < 0 || pgid < 0)
 		return EINVAL;
-	target = pid == 0 ? caller : process_find(pid);
+	target = pid == 0 ? caller : process_find_ref(pid);
 	if (target == NULL)
 		return ESRCH;
+	irq = spin_lock_irqsave(&process_tree_lock);
 	if (target != caller && target->parent != caller)
-		return ESRCH;
-	if (target != caller && target->did_exec)
-		return EACCES;
-	if (target->session != caller->session || target->session == target->pid)
-		return EPERM;
+		error = ESRCH;
+	else if (target != caller && target->did_exec)
+		error = EACCES;
+	else if (target->session != caller->session ||
+	    target->session == target->pid)
+		error = EPERM;
+	if (error != 0)
+		goto out;
 	if (pgid == 0)
 		pgid = target->pid;
 	if (pgid != target->pid) {
@@ -198,23 +237,33 @@ process_setpgid(struct process *caller, pid_t pid, pid_t pgid)
 			    member->pgrp == pgid)
 				break;
 		if (member == NULL)
-			return EPERM;
+			error = EPERM;
 	}
-	target->pgrp = pgid;
-	return 0;
+	if (error == 0)
+		target->pgrp = pgid;
+out:
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	if (target != caller)
+		process_release(target);
+	return error;
 }
 
 pid_t
 process_setsid(struct process *process)
 {
 	struct process *member;
+	unsigned long irq;
 	if (process == NULL || process == &process0)
 		return -EPERM;
+	irq = spin_lock_irqsave(&process_tree_lock);
 	for (member = all_processes; member != NULL; member = member->all_next)
-		if (member->pgrp == process->pid)
+		if (member->pgrp == process->pid) {
+			spin_unlock_irqrestore(&process_tree_lock, irq);
 			return -EPERM;
+		}
 	process->session = process->pid;
 	process->pgrp = process->pid;
+	spin_unlock_irqrestore(&process_tree_lock, irq);
 	return process->pid;
 }
 
@@ -223,24 +272,42 @@ process_create(struct process *parent, pid_t requested_pid,
 	       struct process **result)
 {
 	struct process *process;
+	struct process *duplicate;
+	unsigned long parent_irq;
 
 	if (parent == NULL || result == NULL || requested_pid < 0)
 		return EINVAL;
-	if (requested_pid != 0 && process_find(requested_pid) != NULL)
+	duplicate = requested_pid != 0 ? process_find_ref(requested_pid) : NULL;
+	if (duplicate != NULL) {
+		process_release(duplicate);
 		return EBUSY;
+	}
 	process = kern_calloc(1, sizeof(*process));
 	if (process == NULL)
 		return ENOMEM;
+	refcount_init(&process->refs, 1);
+	spin_init(&process->lock, LOCK_RANK_PROCESS, "process");
+	waitq_init(&process->child_waitq, "process children");
 	process->fd = filedesc_create();
 	if (process->fd == NULL) {
 		kern_free(process);
 		return ENOMEM;
 	}
-	process->pid = requested_pid != 0 ? requested_pid : next_pid++;
-	if (process->pid >= next_pid)
-		next_pid = process->pid + 1;
+	process->pid = requested_pid != 0 ? requested_pid :
+	    (pid_t)atomic_raw_fetch_add_relaxed(
+	    (volatile unsigned *)&next_pid, 1U);
+	if (requested_pid != 0) {
+		unsigned observed = atomic_raw_load_acquire(
+		    (volatile unsigned *)&next_pid);
+		while ((unsigned)process->pid >= observed &&
+		    !atomic_raw_compare_exchange(
+		    (volatile unsigned *)&next_pid, &observed,
+		    (unsigned)process->pid + 1U))
+			;
+	}
 	process->state = PROCESS_NEW;
 	process->parent = parent;
+	parent_irq = spin_lock_irqsave(&parent->lock);
 	process->umask = parent->umask;
 	process->cred = parent->cred;
 	cred_ref(process->cred);
@@ -251,6 +318,7 @@ process_create(struct process *parent, pid_t requested_pid,
 		process->pgrp = parent->pgrp;
 		process->session = parent->session;
 	}
+	spin_unlock_irqrestore(&parent->lock, parent_irq);
 	if (parent->cwdi != NULL) {
 		int error = cwdinfo_clone(parent->cwdi, &process->cwdi);
 		if (error != 0) {
@@ -315,13 +383,17 @@ fail:
 void
 process_publish(struct process *process)
 {
+	unsigned long irq;
 	if (process == NULL || process == &process0 || process->state != PROCESS_NEW)
 		return;
+	irq = spin_lock_irqsave(&process_tree_lock);
 	process->all_next = all_processes;
 	all_processes = process;
 	process->sibling = process->parent->children;
 	process->parent->children = process;
 	process->state = PROCESS_RUNNING;
+	waitq_wake_all(&process->parent->child_waitq);
+	spin_unlock_irqrestore(&process_tree_lock, irq);
 }
 
 void
@@ -335,17 +407,33 @@ process_free_mem(struct process *process)
 {
 	struct process **link;
 	struct process **child_link;
+	unsigned long tree_irq, process_irq;
+	struct vmspace *vmspace;
+	struct filedesc *fd;
+	struct ucred *cred;
+	struct cwdinfo *cwdi;
 
-	if (process == NULL || process == &process0 || process->thread_count != 0 ||
-	    process == curthread->proc)
+	if (process == NULL || process == &process0 ||
+	    (curthread != NULL && process == curthread->proc))
 		return;
+	process_irq = spin_lock_irqsave(&process->lock);
+	if (process->thread_count != 0) {
+		spin_unlock_irqrestore(&process->lock, process_irq);
+		return;
+	}
+	vmspace = process->vmspace;
+	fd = process->fd;
+	cred = process->cred;
+	cwdi = process->cwdi;
+	process->vmspace = NULL;
+	process->fd = NULL;
+	process->cred = NULL;
+	process->cwdi = NULL;
+	spin_unlock_irqrestore(&process->lock, process_irq);
+
+	tree_irq = spin_lock_irqsave(&process_tree_lock);
 	if (process->children != NULL)
 		HAL_FATAL("freeing process with children");
-	if (process->vmspace != NULL)
-		vmspace_free(process->vmspace);
-	filedesc_destroy(process->fd);
-	cred_release(process->cred);
-	cwdinfo_release(process->cwdi);
 	link = &all_processes;
 	while (*link != NULL && *link != process)
 		link = &(*link)->all_next;
@@ -359,7 +447,13 @@ process_free_mem(struct process *process)
 			*child_link = process->sibling;
 	}
 	process->state = PROCESS_DEAD;
-	kern_free(process);
+	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
+	if (vmspace != NULL)
+		vmspace_free(vmspace);
+	filedesc_destroy(fd);
+	cred_release(cred);
+	cwdinfo_release(cwdi);
+	process_release(process);
 }
 
 int
@@ -367,28 +461,30 @@ process_wait(struct process *process, int *status, char *result,
 	     size_t result_capacity)
 {
 	struct thread *thread;
-	bool enabled;
+	unsigned long irq;
 	int error;
 
 	if (process == NULL || process == &process0 || curthread == NULL ||
 	    process->parent != curthread->proc)
 		return ECHILD;
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&process_tree_lock);
 	while (process->state != PROCESS_ZOMBIE) {
-		if (process->waiter != NULL && process->waiter != curthread) {
-			if (enabled) hal_irq_enable();
-			return EBUSY;
+		uint64_t sequence = waitq_sequence(&process->parent->child_waitq);
+		error = waitq_sleep(&process->parent->child_waitq,
+		    &process_tree_lock, sequence, 0, WAITQ_INTERRUPTIBLE);
+		if (error == EINTR) {
+			spin_unlock_irqrestore(&process_tree_lock, irq);
+			return EINTR;
 		}
-		process->waiter = curthread;
-		sched_sleep(0);
 	}
-	process->waiter = NULL;
-	if (enabled)
-		hal_irq_enable();
 	thread = process->threads;
+	if (thread != NULL)
+		thread_ref(thread);
+	spin_unlock_irqrestore(&process_tree_lock, irq);
 	if (thread == NULL)
 		return ECHILD;
 	error = thread_wait(thread, status);
+	thread_release(thread);
 	if (error != 0)
 		return error;
 	if (result != NULL && result_capacity != 0) {
@@ -419,14 +515,14 @@ PROCESS_EXT pid_t
 process_wait_select(struct process *parent, pid_t selector, int options,
 		    struct process_wait_event *event)
 {
-	bool enabled;
+	unsigned long irq;
 
 	if (parent == NULL || parent != curthread->proc || selector == INT32_MIN ||
 	    event == NULL ||
 	    (options & ~(WNOHANG | WUNTRACED | WCONTINUED)) != 0)
 		return -EINVAL;
 	memset(event, 0, sizeof(*event));
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&process_tree_lock);
 	for (;;) {
 		struct process *child;
 		int matched = 0;
@@ -454,29 +550,28 @@ process_wait_select(struct process *parent, pid_t selector, int options,
 			continue;
 reserve:
 			child->wait_reserved = event->kind;
+			process_ref(child);
 			event->parent = parent;
 			event->child = child;
 			event->pid = child->pid;
-			if (enabled)
-				hal_irq_enable();
+			spin_unlock_irqrestore(&process_tree_lock, irq);
 			return event->pid;
 		}
 		if (!matched) {
-			if (enabled)
-				hal_irq_enable();
+			spin_unlock_irqrestore(&process_tree_lock, irq);
 			return -ECHILD;
 		}
 		if ((options & WNOHANG) != 0) {
-			if (enabled)
-				hal_irq_enable();
+			spin_unlock_irqrestore(&process_tree_lock, irq);
 			return 0;
 		}
-		child_waiter_add(parent, curthread);
-		sched_sleep(0);
-		child_waiter_remove(parent, curthread);
-		if (signal_pending_unblocked(curthread)) {
-			if (enabled)
-				hal_irq_enable();
+		{
+			uint64_t sequence = waitq_sequence(&parent->child_waitq);
+			int error = waitq_sleep(&parent->child_waitq,
+			    &process_tree_lock, sequence, 0, WAITQ_INTERRUPTIBLE);
+			if (error != EINTR)
+				continue;
+			spin_unlock_irqrestore(&process_tree_lock, irq);
 			return -EINTR;
 		}
 	}
@@ -486,13 +581,14 @@ PROCESS_EXT int
 process_wait_commit(struct process_wait_event *event)
 {
 	struct process *child;
-	bool enabled;
+	unsigned long irq;
 	int error = 0;
+	int reap = 0;
 
 	if (event == NULL || event->parent == NULL || event->child == NULL ||
 	    event->kind == PROCESS_WAIT_NONE)
 		return EINVAL;
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&process_tree_lock);
 	child = event->child;
 	if (child->parent != event->parent || child->pid != event->pid ||
 	    child->wait_reserved != event->kind) {
@@ -504,27 +600,33 @@ process_wait_commit(struct process_wait_event *event)
 	else if (event->kind == PROCESS_WAIT_CONTINUED)
 		child->wait_continued = 0;
 	else {
-		struct thread *thread = child->threads;
-		if (child->state != PROCESS_ZOMBIE || thread == NULL) {
+		if (child->state != PROCESS_ZOMBIE || child->threads == NULL) {
 			error = ECHILD;
 			goto out;
 		}
-		error = thread_wait(thread, NULL);
-		if (error != 0)
-			goto out;
 		child->wait_reserved = PROCESS_WAIT_NONE;
-		process_free_mem(child);
-		memset(event, 0, sizeof(*event));
-		goto done;
+		reap = 1;
+		goto out;
 	}
 	child->wait_reserved = PROCESS_WAIT_NONE;
 	child_waiters_wake(event->parent);
 out:
 	if (error != 0 && child->wait_reserved == event->kind)
 		child->wait_reserved = PROCESS_WAIT_NONE;
-	done:
-	if (enabled)
-		hal_irq_enable();
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	if (error == 0 && reap) {
+		struct thread *thread;
+		while ((thread = child->threads) != NULL) {
+			thread_ref(thread);
+			error = thread_wait(thread, NULL);
+			thread_release(thread);
+			if (error != 0)
+				break;
+		}
+		if (error == 0)
+			process_free_mem(child);
+	}
+	process_release(child);
 	if (error == 0)
 		memset(event, 0, sizeof(*event));
 	return error;
@@ -533,17 +635,19 @@ out:
 PROCESS_EXT void
 process_wait_abort(struct process_wait_event *event)
 {
-	bool enabled;
+	unsigned long irq;
+	struct process *child;
 	if (event == NULL || event->child == NULL || event->parent == NULL)
 		return;
-	enabled = hal_irq_disable();
-	if (event->child->parent == event->parent &&
-	    event->child->wait_reserved == event->kind) {
-		event->child->wait_reserved = PROCESS_WAIT_NONE;
+	child = event->child;
+	irq = spin_lock_irqsave(&process_tree_lock);
+	if (child->parent == event->parent &&
+	    child->wait_reserved == event->kind) {
+		child->wait_reserved = PROCESS_WAIT_NONE;
 		child_waiters_wake(event->parent);
 	}
-	if (enabled)
-		hal_irq_enable();
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	process_release(child);
 	memset(event, 0, sizeof(*event));
 }
 
@@ -570,139 +674,115 @@ static void
 notify_parent_event(struct process *process, int stopped_or_continued)
 {
 	const struct signal_action *action;
+	struct process *parent;
+	unsigned long irq;
 
 	if (process == NULL || process->parent == NULL ||
 	    process->parent == &process0)
 		return;
-	action = &process->parent->signal_actions[SIGCHLD];
+	parent = process->parent;
+	process_ref(parent);
+	action = &parent->signal_actions[SIGCHLD];
 	if (!stopped_or_continued || (action->flags & SA_NOCLDSTOP) == 0)
-		(void)signal_send_process(process->parent, SIGCHLD);
-	child_waiters_wake(process->parent);
+		(void)signal_send_process(parent, SIGCHLD);
+	irq = spin_lock_irqsave(&process_tree_lock);
+	child_waiters_wake(parent);
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	process_release(parent);
 }
 
 void
 process_note_stopped(struct process *process, int signo)
 {
+	unsigned long irq;
 	if (process == NULL || process == &process0)
 		return;
+	irq = spin_lock_irqsave(&process->lock);
 	process->wait_status = ((signo & 0xff) << 8) | 0x7f;
 	process->wait_stopped = 1;
 	process->wait_continued = 0;
+	spin_unlock_irqrestore(&process->lock, irq);
 	notify_parent_event(process, 1);
 }
 
 void
 process_note_continued(struct process *process)
 {
+	unsigned long irq;
 	if (process == NULL || process == &process0)
 		return;
+	irq = spin_lock_irqsave(&process->lock);
 	process->wait_continued = 1;
 	process->wait_stopped = 0;
+	spin_unlock_irqrestore(&process->lock, irq);
 	notify_parent_event(process, 1);
 }
 
-int
-process_quiesce_users(void)
-{
-	struct process *process;
-	bool enabled;
-
-	if (curthread == NULL || curthread->proc != &process0)
-		return EBUSY;
-	enabled = hal_irq_disable();
-	for (process = process0.children; process != NULL;
-	     process = process->sibling) {
-		if (process->state != PROCESS_ZOMBIE) {
-			if (enabled) hal_irq_enable();
-			return EBUSY;
-		}
-	}
-	while (process0.children != NULL) {
-		struct process *child = process0.children;
-		while (child->threads != NULL) {
-			int error = thread_wait(child->threads, NULL);
-			if (error != 0) {
-				if (enabled) hal_irq_enable();
-				return error;
-			}
-		}
-		process_free_mem(child);
-	}
-	if (enabled)
-		hal_irq_enable();
-	return 0;
-}
-
 void
-process_force_quiesce_users(void)
+process_thread_retired(struct thread *thread)
 {
-	struct process *process;
-	bool enabled;
+	struct process *process, *parent = NULL;
+	unsigned long irq;
+	int notify = 0, autoreap = 0;
 
-	if (curthread != &thread0)
-		HAL_FATAL("user quiescence outside thread0");
-	enabled = hal_irq_disable();
-	(void)enabled;
-	process0.children = NULL;
-	for (process = all_processes; process != NULL;
-	     process = process->all_next) {
-		if (process == &process0)
-			continue;
-		process->parent = &process0;
-		process->sibling = process0.children;
-		process0.children = process;
+	if (thread == NULL || (process = thread->proc) == NULL)
+		return;
+	irq = spin_lock_irqsave(&process_tree_lock);
+	if (process != &process0 && process->state == PROCESS_EXITING) {
+		process->state = PROCESS_ZOMBIE;
+		parent = process->parent;
+		if (parent != NULL)
+			process_ref(parent);
+		if (parent != NULL)
+			child_waiters_wake(parent);
+		notify = parent != NULL && parent != &process0;
+		autoreap = (process->flags & PROCESS_AUTOREAP) != 0;
 	}
-	while (process0.children != NULL) {
-		struct process *victim = process0.children;
-		struct thread *thread = victim->threads;
-		while (thread != NULL) {
-			struct thread *next = thread->proc_next;
-			sched_unlink(thread);
-			hal_task_set_private(thread->task, NULL);
-			hal_task_destroy(thread->task);
-			thread->state = THREAD_DEAD;
-			kern_free(thread);
-			thread = next;
-		}
-		victim->threads = NULL;
-		victim->thread_count = 0;
-		process_free_mem(victim);
-	}
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	if (notify)
+		(void)signal_send_process(parent, SIGCHLD);
+	if (parent != NULL)
+		process_release(parent);
+	if (autoreap && reaper_thread != NULL)
+		sched_wakeup(reaper_thread);
 }
 
 static void __attribute__((noreturn))
 process_exit_final(int thread_status, int wait_status)
 {
 	struct process *process = curthread->proc;
-	struct thread *waiter;
-	bool enabled;
+	struct process *parent;
+	struct filedesc *fd;
+	struct cwdinfo *cwdi;
+	unsigned long process_irq, tree_irq;
 
 	if (process == NULL || process == &process0)
 		HAL_FATAL("process0 exit");
-	filedesc_destroy(process->fd);
+	process_irq = spin_lock_irqsave(&process->lock);
+	fd = process->fd;
+	cwdi = process->cwdi;
 	process->fd = NULL;
-	cwdinfo_release(process->cwdi);
 	process->cwdi = NULL;
-	enabled = hal_irq_disable();
+	spin_unlock_irqrestore(&process->lock, process_irq);
+	filedesc_destroy(fd);
+	cwdinfo_release(cwdi);
+	tree_irq = spin_lock_irqsave(&process_tree_lock);
 	reparent_children(process);
 	process->exit_status = wait_status;
-	process->state = PROCESS_ZOMBIE;
-	if (process->parent != NULL && process->parent != &process0) {
+	process->state = PROCESS_EXITING;
+	parent = process->parent;
+	if (parent != NULL)
+		process_ref(parent);
+	if (parent != NULL && parent != &process0) {
 		const struct signal_action *action =
-		    &process->parent->signal_actions[SIGCHLD];
+		    &parent->signal_actions[SIGCHLD];
 		if ((action->flags & SA_NOCLDWAIT) != 0 ||
 		    action->handler == (uintptr_t)SIG_IGN)
 			process->flags |= PROCESS_AUTOREAP;
-		(void)signal_send_process(process->parent, SIGCHLD);
 	}
-	if ((process->flags & PROCESS_AUTOREAP) != 0 && reaper_thread != NULL)
-		sched_wakeup(reaper_thread);
-	waiter = process->waiter;
-	if (waiter != NULL)
-		sched_wakeup(waiter);
-	if (process->parent != NULL)
-		child_waiters_wake(process->parent);
-	(void)enabled;
+	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
+	if (parent != NULL)
+		process_release(parent);
 	thread_exit(thread_status);
 }
 

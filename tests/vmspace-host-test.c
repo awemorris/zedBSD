@@ -65,8 +65,8 @@ void swap_free_slot(struct swap_backend *b, uint32_t s)
 	swap_slots_freed++;
 }
 
-void file_ref(struct file *file) { file->f_usecount++; }
-int file_close(struct file *file) { file->f_usecount--; return 0; }
+void file_ref(struct file *file) { refcount_get(&file->f_refs); }
+int file_close(struct file *file) { (void)refcount_put(&file->f_refs); return 0; }
 struct inode *file_vm_inode(struct file *file)
 {
 	return file->f_vm_inode != NULL ? file->f_vm_inode : file->f_inode;
@@ -209,7 +209,7 @@ int main(void)
 	static const uint8_t file_data[] = "xxELF!tail";
 	struct vmspace *vm;
 	struct vm_region *region;
-	struct file file = { .f_usecount = 1, .f_data = (void *)file_data };
+	struct file file = { .f_data = (void *)file_data };
 	struct vm_page *page;
 	uintptr_t mapped;
 	char buffer[8];
@@ -218,10 +218,12 @@ int main(void)
 		.i_type = INODE_REG, .i_size = sizeof(shared_data)
 	};
 	struct file shared_file = {
-		.f_usecount = 1, .f_data = shared_data, .f_inode = &shared_inode,
+		.f_data = shared_data, .f_inode = &shared_inode,
 		.f_ops = &shared_file_ops, .f_flags = O_RDWR
 	};
 
+	refcount_init(&file.f_refs,1);
+	refcount_init(&shared_file.f_refs,1);
 	vm = vmspace_create();
 	assert(vm != NULL && spaces_created == 1);
 	assert(vmspace_map_anon(vm, 0x400000, 8192,
@@ -286,7 +288,7 @@ int main(void)
 	assert(vmspace_map_file(vm, 0x600000, 4096, HAL_SPACE_READ, &file,
 		2, 0x600003, 5, &region) == 0);
 	assert(commit_used == 4096); /* 0x500000 anonymous mapping */
-	assert(file.f_usecount == 2 && region->pages == NULL);
+	assert(refcount_load(&file.f_refs) == 2 && region->pages == NULL);
 	assert(vmspace_fault(vm, 0x600003, HAL_SPACE_READ) == 0);
 	memset(buffer, 0xaa, sizeof(buffer));
 	assert(vmspace_copy_from(vm, buffer, 0x600000, 8) == 0);
@@ -322,7 +324,7 @@ int main(void)
 	assert(!memcmp(buffer, "object", 6) && vm_object_page_count() == 1);
 	assert(vmspace_unmap(vm, 0x00a00000, 8192) == 0);
 	assert(vm_object_count() == 0 && vm_object_page_count() == 0);
-	assert(vm_object_retained_count() == 0 && shared_file.f_usecount == 1);
+	assert(vm_object_retained_count() == 0 && refcount_load(&shared_file.f_refs) == 1);
 
 	/* A page write failure is reported, remains dirty, and is retried. */
 	memcpy(shared_data, "before", 7);
@@ -383,11 +385,11 @@ int main(void)
 	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
 	assert(vm_object_count() == 1 && vm_object_page_count() == 1);
 	assert(vm_object_retained_count() == 1);
-	assert(shared_file.f_usecount == 3);
+	assert(refcount_load(&shared_file.f_refs) == 3);
 	assert(vm_object_sync_inode(&shared_inode) == 0);
 	assert(!memcmp(shared_data, "retain", 6));
 	assert(vm_object_count() == 0 && vm_object_page_count() == 0);
-	assert(vm_object_retained_count() == 0 && shared_file.f_usecount == 1);
+	assert(vm_object_retained_count() == 0 && refcount_load(&shared_file.f_refs) == 1);
 
 	/* A new mapping revives the retained object and sees its latest page. */
 	memcpy(shared_data, "before", 7);
@@ -457,7 +459,7 @@ int main(void)
 		assert(!memcmp(shared_data, "exitwb", 6));
 		assert(vm_object_count() == 0 && vm_object_page_count() == 0);
 	}
-	assert(shared_file.f_usecount == 1);
+	assert(refcount_load(&shared_file.f_refs) == 1);
 
 	assert(vmspace_set_brk_start(vm, 0x01000000U) == 0);
 	assert(vmspace_brk(vm, 0, &mapped) == 0 && mapped == 0x01000000U);
@@ -516,7 +518,7 @@ int main(void)
 	assert(page_ins == 1 && swap_reads == 1 && swap_slots_freed == 1);
 
 	vmspace_free(vm);
-	assert(file.f_usecount == 1);
+	assert(refcount_load(&file.f_refs) == 1);
 	assert(spaces_created == spaces_destroyed);
 	assert(pages_allocated == pages_freed);
 	assert(commit_used == 0);

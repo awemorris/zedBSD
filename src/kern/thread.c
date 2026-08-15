@@ -14,6 +14,8 @@
 
 struct thread thread0;
 static tid_t next_tid = 1;
+static struct thread *secondary_idle_threads;
+static unsigned secondary_idle_count;
 
 struct thread *
 thread_current(void)
@@ -25,9 +27,31 @@ thread_current(void)
 static void
 attach_thread(struct process *process, struct thread *thread)
 {
+	unsigned long irq = spin_lock_irqsave(&process->lock);
 	thread->proc_next = process->threads;
 	process->threads = thread;
 	process->thread_count++;
+	spin_unlock_irqrestore(&process->lock, irq);
+}
+
+static tid_t
+allocate_tid(void)
+{
+	return (tid_t)atomic_raw_fetch_add_relaxed(
+	    (volatile unsigned *)&next_tid, 1U);
+}
+
+static int
+prepare_created_thread(struct thread *thread)
+{
+	int error = sched_prepare_thread(thread);
+
+	if (error == 0)
+		return 0;
+	hal_task_set_private(thread->task, NULL);
+	hal_task_destroy(thread->task);
+	thread->task = NULL;
+	return error;
 }
 
 int
@@ -44,7 +68,8 @@ thread_create(struct process *process, uintptr_t entry, uintptr_t user_sp,
 	thread = kern_calloc(1, sizeof(*thread));
 	if (thread == NULL)
 		return ENOMEM;
-	thread->tid = next_tid++;
+	thread->tid = allocate_tid();
+	refcount_init(&thread->refs, 1);
 	thread->proc = process;
 	thread->state = THREAD_NEW;
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
@@ -56,6 +81,13 @@ thread_create(struct process *process, uintptr_t entry, uintptr_t user_sp,
 		return ENOMEM;
 	}
 	hal_task_set_private(thread->task, thread);
+	{
+		int error = prepare_created_thread(thread);
+		if (error != 0) {
+			kern_free(thread);
+			return error;
+		}
+	}
 	attach_thread(process, thread);
 	*result = thread;
 	return 0;
@@ -71,13 +103,21 @@ thread_fork(struct process *process, hal_task_t task, struct thread **result)
 	thread = kern_calloc(1, sizeof(*thread));
 	if (thread == NULL)
 		return ENOMEM;
-	thread->tid = next_tid++;
+	thread->tid = allocate_tid();
+	refcount_init(&thread->refs, 1);
 	thread->proc = process;
 	thread->task = task;
 	thread->state = THREAD_NEW;
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 	hal_task_set_private(task, thread);
+	{
+		int error = prepare_created_thread(thread);
+		if (error != 0) {
+			kern_free(thread);
+			return error;
+		}
+	}
 	attach_thread(process, thread);
 	*result = thread;
 	return 0;
@@ -103,7 +143,8 @@ kthread_create(void (*entry)(void *), void *arg, int priority,
 	thread = kern_calloc(1, sizeof(*thread));
 	if (thread == NULL)
 		return ENOMEM;
-	thread->tid = next_tid++;
+	thread->tid = allocate_tid();
+	refcount_init(&thread->refs, 1);
 	thread->proc = &process0;
 	thread->state = THREAD_NEW;
 	thread->sched.priority = priority;
@@ -117,9 +158,71 @@ kthread_create(void (*entry)(void *), void *arg, int priority,
 		return ENOMEM;
 	}
 	hal_task_set_private(thread->task, thread);
+	{
+		int error = prepare_created_thread(thread);
+		if (error != 0) {
+			kern_free(thread);
+			return error;
+		}
+	}
 	attach_thread(&process0, thread);
 	*result = thread;
 	return 0;
+}
+
+int
+thread_prepare_secondaries(unsigned cpu_count)
+{
+	if (cpu_count <= 1U)
+		return 0;
+	if (secondary_idle_threads != NULL)
+		return secondary_idle_count == cpu_count - 1U ? 0 : EBUSY;
+	secondary_idle_threads = kern_calloc(cpu_count - 1U,
+	    sizeof(*secondary_idle_threads));
+	if (secondary_idle_threads == NULL)
+		return ENOMEM;
+	secondary_idle_count = cpu_count - 1U;
+	return 0;
+}
+
+void
+thread_init_secondary(hal_cpu_id_t cpu)
+{
+	struct thread *thread;
+	hal_task_t task;
+
+	if (cpu == 0 || cpu > secondary_idle_count ||
+	    secondary_idle_threads == NULL)
+		HAL_FATAL("invalid secondary idle thread");
+	thread = &secondary_idle_threads[cpu - 1U];
+	task = hal_task_get_current();
+	if (task == NULL || hal_task_get_private(task) != NULL)
+		HAL_FATAL("secondary HAL task ownership");
+	thread->tid = -(tid_t)cpu;
+	refcount_init(&thread->refs, 1);
+	thread->proc = &process0;
+	thread->task = task;
+	thread->state = THREAD_RUNNING;
+	thread->flags = THREAD_FLAG_IDLE;
+	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
+	thread->sched.quantum = SCHED_QUANTUM_TICKS;
+	thread->sched.cpu = cpu;
+	thread->sched.last_cpu = cpu;
+	hal_task_set_private(task, thread);
+}
+
+void
+thread_attach_secondaries(void)
+{
+	unsigned index;
+
+	/* This runs on the BSP before ordinary kernel threads are published. */
+	for (index = 0; index < secondary_idle_count; index++) {
+		struct thread *thread = &secondary_idle_threads[index];
+		if (thread->task == NULL || thread->proc_next != NULL)
+			HAL_FATAL("secondary idle thread not initialized");
+		attach_thread(&process0, thread);
+	}
 }
 
 void
@@ -138,38 +241,65 @@ void
 thread_exit(int status)
 {
 	struct thread *thread = curthread;
-	bool enabled = hal_irq_disable();
-
-	(void)enabled;
 	if (thread == NULL)
 		HAL_FATAL("thread_exit without current thread");
 	thread->exit_status = status;
+	sched_exit_current();
+}
+
+void
+thread_sched_retired(struct thread *thread)
+{
+	if (thread == NULL || thread->state != THREAD_EXITING)
+		HAL_FATAL("invalid retired thread");
 	thread->state = THREAD_ZOMBIE;
-	sched_unlink(thread);
-	sched_yield();
-	HAL_FATAL("zombie thread resumed");
-	__builtin_unreachable();
+	thread->state_generation++;
+	process_thread_retired(thread);
 }
 
 int
 thread_wait(struct thread *thread, int *status)
 {
 	struct thread **link;
+	unsigned expected = THREAD_ZOMBIE;
+	unsigned long irq;
 	if (thread == NULL || thread == curthread)
 		return EINVAL;
-	if (thread->state != THREAD_ZOMBIE)
+	if (!atomic_raw_compare_exchange((volatile unsigned *)&thread->state,
+	    &expected, THREAD_REAPING))
 		return EBUSY;
 	if (status != NULL)
 		*status = thread->exit_status;
 	hal_task_set_private(thread->task, NULL);
 	hal_task_destroy(thread->task);
+	irq = spin_lock_irqsave(&thread->proc->lock);
 	link = &thread->proc->threads;
 	while (*link != NULL && *link != thread)
 		link = &(*link)->proc_next;
 	if (*link == thread)
 		*link = thread->proc_next;
 	thread->proc->thread_count--;
-	thread->state = THREAD_DEAD;
-	kern_free(thread);
+	atomic_raw_store_release((volatile unsigned *)&thread->state,
+	    THREAD_DEAD);
+	spin_unlock_irqrestore(&thread->proc->lock, irq);
+	thread_release(thread);
 	return 0;
+}
+
+void
+thread_ref(struct thread *thread)
+{
+	if (thread != NULL)
+		refcount_get(&thread->refs);
+}
+
+void
+thread_release(struct thread *thread)
+{
+	if (thread == NULL || !refcount_put(&thread->refs))
+		return;
+	if (thread->state != THREAD_DEAD ||
+	    (thread->flags & THREAD_FLAG_IDLE) != 0)
+		HAL_FATAL("releasing live kernel thread");
+	kern_free(thread);
 }

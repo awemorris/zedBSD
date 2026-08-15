@@ -10,7 +10,8 @@ import tempfile
 from pathlib import Path
 
 SECTOR_SIZE = 512
-IMAGE_SECTORS = 128 * 2048
+LEGACY_IMAGE_SECTORS = 128 * 2048
+UFS_IMAGE_SECTORS = 190 * 2048
 HEADS = 64
 SECTORS_PER_TRACK = 64
 SECTORS_PER_CYLINDER = HEADS * SECTORS_PER_TRACK
@@ -51,7 +52,8 @@ def same_file(image: Path, name: str, source: Path) -> None:
         fail(f"/{name} differs from {source}")
 
 
-def check_label(label: bytes) -> None:
+def check_label(label: bytes, image_sectors: int, fat_sectors: int,
+                root_sectors: int) -> None:
     if len(label) != SECTOR_SIZE:
         fail("short Sun disklabel")
     if struct.unpack_from(">H", label, 508)[0] != SUN_LABEL_MAGIC:
@@ -71,16 +73,22 @@ def check_label(label: bytes) -> None:
     ]
     expected = [
         (0, SECTORS_PER_CYLINDER),
-        (1, IMAGE_SECTORS - FAT_LBA),
-        (0, IMAGE_SECTORS),
+        (1, fat_sectors),
+        (0, image_sectors),
+        (1 + fat_sectors // SECTORS_PER_CYLINDER, root_sectors),
     ]
-    if partitions[:3] != expected or any(
-            start or size for start, size in partitions[3:]):
+    if partitions[:4] != expected or any(
+            start or size for start, size in partitions[4:]):
         fail("unexpected Sun slices")
 
 
 def check(args: argparse.Namespace) -> None:
-    if args.image.stat().st_size != IMAGE_SECTORS * SECTOR_SIZE:
+    root_sectors = (args.ufs_root.stat().st_size // SECTOR_SIZE
+                    if args.ufs_root is not None else 0)
+    image_sectors = UFS_IMAGE_SECTORS if root_sectors else LEGACY_IMAGE_SECTORS
+    fat_sectors = 128 * 2048 if root_sectors else image_sectors - FAT_LBA
+    root_lba = FAT_LBA + fat_sectors
+    if args.image.stat().st_size != image_sectors * SECTOR_SIZE:
         fail("unexpected image size")
     stage1 = args.stage1.read_bytes()
     stage2 = args.stage2.read_bytes()
@@ -88,7 +96,8 @@ def check(args: argparse.Namespace) -> None:
         fail("invalid stage1")
 
     with args.image.open("rb") as image:
-        check_label(image.read(SECTOR_SIZE))
+        check_label(image.read(SECTOR_SIZE), image_sectors, fat_sectors,
+                    root_sectors)
         image.seek(STAGE1_LBA * SECTOR_SIZE)
         wrapper = image.read(STAGE1_AOUT_SIZE)
         fields = struct.unpack_from(">BBHIIIIIII", wrapper)
@@ -125,7 +134,17 @@ def check(args: argparse.Namespace) -> None:
     if struct.unpack_from(">H", kernel, 18)[0] != 43:
         fail("/VMUNIX.S9 is not EM_SPARCV9")
     if args.shell is not None:
-        same_file(args.image, "sparcv9/bin/sh", args.shell)
+        same_file(args.image, "bin/sh", args.shell)
+    if args.ufs_root is not None:
+        with args.image.open("rb") as image:
+            image.seek(root_lba * SECTOR_SIZE)
+            actual = image.read(args.ufs_root.stat().st_size)
+        if hashlib.sha256(actual).digest() != hashlib.sha256(
+                args.ufs_root.read_bytes()).digest():
+            fail("slice d differs from UFS1 root input")
+        checker = Path(__file__).with_name("check-ufs1-image.py")
+        subprocess.run(["python3", str(checker), str(args.ufs_root)],
+                       check=True)
     print("SPARC V9 image check: PASS")
 
 
@@ -135,6 +154,7 @@ def main() -> None:
     parser.add_argument("--stage2", type=Path, required=True)
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
+    parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("image", type=Path)
     check(parser.parse_args())
 

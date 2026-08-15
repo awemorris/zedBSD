@@ -51,6 +51,9 @@ def create(args: argparse.Namespace) -> None:
         raise SystemExit("--arch-profile and --arch-image must be used together")
     if args.arch_image is not None and not args.arch_image.is_file():
         raise SystemExit(f"missing architecture image: {args.arch_image}")
+    if args.ufs_root is not None and (not args.ufs_root.is_file() or
+                                     args.ufs_root.stat().st_size % SECTOR_SIZE):
+        raise SystemExit("--ufs-root must be a sector-aligned image")
     if args.arch_image is not None and (args.shell or args.noct or
                                         args.nettest or bin_files):
         raise SystemExit("architecture image cannot be mixed with direct /bin files")
@@ -58,10 +61,15 @@ def create(args: argparse.Namespace) -> None:
         raise SystemExit(f"output exists (use --force): {args.output}")
     total_sectors = args.size_mib * 2048
     start = 2048
-    blocks = total_sectors - start
+    blocks = args.fat_size_mib * 2048 if args.ufs_root is not None else total_sectors - start
+    root_start = start + blocks
+    root_blocks = (args.ufs_root.stat().st_size // SECTOR_SIZE
+                   if args.ufs_root is not None else 0)
     stage2_lba = 1 if args.machine == "pcat" else 2
     if blocks <= 0:
         raise SystemExit("image is too small for the LBA 2048 partition")
+    if args.ufs_root is not None and root_start + root_blocks > total_sectors:
+        raise SystemExit("FAT16 and UFS1 partitions exceed the image")
     stage1 = bytearray(args.stage1.read_bytes())
     stage2 = args.stage2.read_bytes()
     if len(stage1) != 512 or stage1[510:512] != b"\x55\xaa":
@@ -79,6 +87,10 @@ def create(args: argparse.Namespace) -> None:
             stage1[0x1BE:0x1CE] = struct.pack(
                 "<BBBBBBBBII", 0x80, 0xFE, 0xFF, 0xFF,
                 0x0E, 0xFE, 0xFF, 0xFF, start, blocks)
+            if args.ufs_root is not None:
+                stage1[0x1CE:0x1DE] = struct.pack(
+                    "<BBBBBBBBII", 0x00, 0xFE, 0xFF, 0xFF,
+                    0xA5, 0xFE, 0xFF, 0xFF, root_start, root_blocks)
             stage1[510:512] = b"\x55\xaa"
             stream.seek(0)
             stream.write(stage1)
@@ -93,10 +105,24 @@ def create(args: argparse.Namespace) -> None:
                 entry[16:32] = b"BOOT".ljust(16, b" ")
                 stream.seek(SECTOR_SIZE)
                 stream.write(entry)
+                if args.ufs_root is not None:
+                    root_entry = bytearray(32)
+                    root_entry[0] = 0x21
+                    root_entry[1] = 0x01
+                    root_entry[4:8] = pc98_chs(root_start, heads)
+                    root_entry[8:12] = pc98_chs(root_start, heads)
+                    root_entry[12:16] = pc98_chs(
+                        root_start + root_blocks - 1, heads)
+                    root_entry[16:32] = b"ROOT".ljust(16, b" ")
+                    stream.write(root_entry)
             stream.seek(stage2_lba * SECTOR_SIZE)
             stream.write(stage2)
+            if args.ufs_root is not None:
+                stream.seek(root_start * SECTOR_SIZE)
+                stream.write(args.ufs_root.read_bytes())
         offset = start * 512
-        run("mformat", "-i", f"{temporary}@@{offset}", "-v", "BOOT", "::")
+        run("mformat", "-i", f"{temporary}@@{offset}", "-T", str(blocks),
+            "-v", "BOOT", "::")
         if args.fragment_kernel:
             with tempfile.TemporaryDirectory(prefix="zedbsd-fragment-") as work:
                 hole = Path(work) / "hole.bin"
@@ -148,6 +174,7 @@ def create(args: argparse.Namespace) -> None:
             *(["--holoris", str(args.holoris)] if args.holoris else []),
             *(sum((["--bin-file", f"{name}={source}"]
                    for name, source in bin_files.items()), [])),
+            *(["--ufs-root", str(args.ufs_root)] if args.ufs_root else []),
             str(temporary))
         os.replace(temporary, args.output)
     finally:
@@ -169,6 +196,8 @@ def main() -> None:
     parser.add_argument("--arch-image", type=Path)
     parser.add_argument("--bin-file", action="append", default=[])
     parser.add_argument("--size-mib", type=int, default=129)
+    parser.add_argument("--fat-size-mib", type=int, default=128)
+    parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("--fragment-kernel", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("output", type=Path)

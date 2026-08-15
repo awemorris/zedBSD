@@ -27,6 +27,9 @@
 
 static struct file files[FILE_MAX] VFS_BSS;
 static uint8_t file_used[FILE_MAX] VFS_BSS;
+static struct spinlock file_pool_lock = {
+	{ 0 }, LOCK_RANK_FILE, "file pool", 0, 0
+};
 
 extern void vm_object_truncate_inode(struct inode *, off_t)
 	__attribute__((weak));
@@ -35,19 +38,19 @@ static struct file *
 file_alloc(void)
 {
 	unsigned i;
-	bool enabled = hal_irq_disable();
+	unsigned long irq = spin_lock_irqsave(&file_pool_lock);
 	for (i = 0; i < FILE_MAX; i++) {
 		if (!file_used[i]) {
 			file_used[i] = 1;
 			memset(&files[i], 0, sizeof(files[i]));
-			files[i].f_usecount = 1;
-			if (enabled)
-				hal_irq_enable();
+			refcount_init(&files[i].f_refs, 1);
+			(void)mutex_init(&files[i].f_lock, LOCK_RANK_FILE,
+			    "open file");
+			spin_unlock_irqrestore(&file_pool_lock, irq);
 			return &files[i];
 		}
 	}
-	if (enabled)
-		hal_irq_enable();
+	spin_unlock_irqrestore(&file_pool_lock, irq);
 	return NULL;
 }
 
@@ -55,7 +58,7 @@ static void
 file_free(struct file *file)
 {
 	unsigned i;
-	bool enabled = hal_irq_disable();
+	unsigned long irq = spin_lock_irqsave(&file_pool_lock);
 	for (i = 0; i < FILE_MAX; i++) {
 		if (&files[i] == file) {
 			memset(file, 0, sizeof(*file));
@@ -63,8 +66,7 @@ file_free(struct file *file)
 			break;
 		}
 	}
-	if (enabled)
-		hal_irq_enable();
+	spin_unlock_irqrestore(&file_pool_lock, irq);
 }
 
 int
@@ -248,11 +250,15 @@ file_create_pseudo(const struct file_ops *ops, int flags, void *data,
 int
 file_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 {
+	int error;
 	if (file == NULL)
 		return EBADF;
 	if (file->f_ops == NULL || file->f_ops->ioctl == NULL)
 		return EOPNOTSUPP;
-	return file->f_ops->ioctl(file, request, argument);
+	mutex_lock(&file->f_lock);
+	error = file->f_ops->ioctl(file, request, argument);
+	mutex_unlock(&file->f_lock);
+	return error;
 }
 
 ssize_t
@@ -267,9 +273,11 @@ file_read(struct file *file, void *buffer, size_t length)
 		return -EISDIR;
 	if (file->f_ops == NULL || file->f_ops->read == NULL)
 		return -EOPNOTSUPP;
+	mutex_lock(&file->f_lock);
 	result = file->f_ops->read(file, buffer, length);
 	if (result >= 0 && file->f_inode != NULL)
 		inode_touch(file->f_inode, INODE_ATTR_ATIME);
+	mutex_unlock(&file->f_lock);
 	return result;
 }
 
@@ -283,9 +291,11 @@ file_pread(struct file *file, void *buffer, size_t length, off_t offset)
 		return -EBADF;
 	if (file->f_ops == NULL || file->f_ops->pread == NULL)
 		return -EOPNOTSUPP;
+	mutex_lock(&file->f_lock);
 	result = file->f_ops->pread(file, buffer, length, offset);
 	if (result >= 0 && file->f_inode != NULL)
 		inode_touch(file->f_inode, INODE_ATTR_ATIME);
+	mutex_unlock(&file->f_lock);
 	return result;
 }
 
@@ -312,9 +322,11 @@ file_pwrite_internal(struct file *file, const void *buffer, size_t length,
 		return -EBUSY;
 	if (file->f_ops == NULL || file->f_ops->pwrite == NULL)
 		return -EOPNOTSUPP;
+	mutex_lock(&file->f_lock);
 	result = file->f_ops->pwrite(file, buffer, length, offset);
 	if (result >= 0 && file->f_inode != NULL)
 		inode_touch(file->f_inode, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	mutex_unlock(&file->f_lock);
 	return result;
 }
 
@@ -333,9 +345,11 @@ file_write(struct file *file, const void *buffer, size_t length)
 		return -EISDIR;
 	if (file->f_ops == NULL || file->f_ops->write == NULL)
 		return -EOPNOTSUPP;
+	mutex_lock(&file->f_lock);
 	result = file->f_ops->write(file, buffer, length);
 	if (result >= 0 && file->f_inode != NULL)
 		inode_touch(file->f_inode, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	mutex_unlock(&file->f_lock);
 	return result;
 }
 
@@ -349,18 +363,24 @@ file_readdir(struct file *file, struct dirent *entry, int *eof)
 		return ENOTDIR;
 	if (file->f_ops == NULL || file->f_ops->readdir == NULL)
 		return EOPNOTSUPP;
+	mutex_lock(&file->f_lock);
 	error = mount_readdir_child(&file->f_path, &file->f_mount_cursor, entry);
 	if (error == 0) {
 		*eof = 0;
+		mutex_unlock(&file->f_lock);
 		return 0;
 	}
-	if (error != ENOENT)
+	if (error != ENOENT) {
+		mutex_unlock(&file->f_lock);
 		return error;
+	}
 	for (;;) {
 		error = file->f_ops->readdir(file, entry, eof);
 		if (error != 0 || *eof ||
-		    !mount_child_shadows(&file->f_path, entry->d_name))
+		    !mount_child_shadows(&file->f_path, entry->d_name)) {
+			mutex_unlock(&file->f_lock);
 			return error;
+		}
 	}
 }
 
@@ -370,8 +390,10 @@ file_seek(struct file *file, off_t offset, int whence)
 	off_t base, target;
 	if (file == NULL)
 		return -EINVAL;
+	mutex_lock(&file->f_lock);
 	if (file->f_ops != NULL && file->f_ops->seek != NULL)
-		return file->f_ops->seek(file, offset, whence);
+		base = file->f_ops->seek(file, offset, whence);
+	else {
 	if (whence == 0)
 		base = 0;
 	else if (whence == 1)
@@ -379,48 +401,53 @@ file_seek(struct file *file, off_t offset, int whence)
 	else if (whence == 2 && file->f_inode != NULL)
 		base = file->f_inode->i_size;
 	else
+		base = OFF_T_MIN;
+	if (base == OFF_T_MIN) {
+		mutex_unlock(&file->f_lock);
 		return -EINVAL;
+	}
 	if ((offset > 0 && base > OFF_T_MAX - offset) ||
-	    (offset < 0 && base < OFF_T_MIN - offset))
+	    (offset < 0 && base < OFF_T_MIN - offset)) {
+		mutex_unlock(&file->f_lock);
 		return -EOVERFLOW;
+	}
 	target = base + offset;
-	if (target < 0)
+	if (target < 0) {
+		mutex_unlock(&file->f_lock);
 		return -EINVAL;
+	}
 	file->f_offset = target;
-	return target;
+	base = target;
+	}
+	mutex_unlock(&file->f_lock);
+	return base;
 }
 
 int
 file_fsync(struct file *file)
 {
+	int error;
 	if (file == NULL)
 		return EINVAL;
+	mutex_lock(&file->f_lock);
 	if (file->f_ops != NULL && file->f_ops->fsync != NULL)
-		return file->f_ops->fsync(file);
-	return file->f_inode != NULL ? inode_sync(file->f_inode) : 0;
+		error = file->f_ops->fsync(file);
+	else
+		error = file->f_inode != NULL ? inode_sync(file->f_inode) : 0;
+	mutex_unlock(&file->f_lock);
+	return error;
 }
 
 int
 file_close(struct file *file)
 {
 	int error = 0;
-	bool enabled;
 	if (file == NULL)
 		return EBADF;
-	enabled = hal_irq_disable();
-	if (file->f_usecount == 0) {
-		if (enabled)
-			hal_irq_enable();
+	if (refcount_load(&file->f_refs) == 0)
 		return EBADF;
-	}
-	file->f_usecount--;
-	if (file->f_usecount != 0) {
-		if (enabled)
-			hal_irq_enable();
+	if (!refcount_put(&file->f_refs))
 		return 0;
-	}
-	if (enabled)
-		hal_irq_enable();
 	if (file->f_ops != NULL && file->f_ops->close != NULL)
 		error = file->f_ops->close(file);
 	if (file->f_path.p_inode != NULL)
@@ -434,14 +461,9 @@ file_close(struct file *file)
 void
 file_ref(struct file *file)
 {
-	bool enabled;
 	if (file == NULL)
 		return;
-	enabled = hal_irq_disable();
-	if (file->f_usecount != 0)
-		file->f_usecount++;
-	if (enabled)
-		hal_irq_enable();
+	refcount_get(&file->f_refs);
 }
 
 struct inode *

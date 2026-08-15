@@ -8,6 +8,7 @@
 #include "percpu.h"
 #include "smp.h"
 #include "space.h"
+#include "task.h"
 #include "bsp-pcat/lapic.h"
 
 extern uint8 amd64_ap_trampoline_start[];
@@ -155,6 +156,7 @@ amd64_ap_entry(uint64 logical_cpu)
 	amd64_descriptor_init();
 	amd64_int_load();
 	amd64_lapic_init_cpu();
+	amd64_task_init_cpu(0);
 	amd64_lapic_timer_start();
 	__atomic_store_n(&cpu->ready, 1U, __ATOMIC_RELEASE);
 	(void)__atomic_fetch_or(

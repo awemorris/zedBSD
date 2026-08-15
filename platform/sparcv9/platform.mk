@@ -17,7 +17,7 @@ SPARCV9_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-DZEDBSD_PAGE_SIZE=8192 \
 	-DZEDBSD_USER_PAGE_SIZE=8192 \
 	-DZEDBSD_NO_PRINTF_FLOAT \
-	-DZEDBSD_INIT_PATH='"/sparcv9/bin/sh"'
+	-DZEDBSD_INIT_PATH='"/bin/sh"'
 SPARCV9_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias -mcmodel=medany \
 	-msoft-float -mno-app-regs -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables \
@@ -57,7 +57,7 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
 	src/kern/graphics-device.c src/kern/system-device.c \
 	src/kern/init.c
-SPARCV9_KERNEL_SOURCES += $(KERN_NET_SOURCES)
+SPARCV9_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES)
 SPARCV9_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(SPARCV9_KERNEL_SOURCES))
 SPARCV9_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURCES))
 SPARCV9_VMUNIX_OBJS := $(SPARCV9_EARLY_OBJS) $(SPARCV9_KERNEL_OBJS) \
@@ -214,6 +214,23 @@ $(BUILD)/hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh \
 		--stage2 $(BUILD)/boot/stage2.bin \
 		--kernel $(BUILD)/vmunix --shell $(BUILD)/bin/sh $@
 
+$(BUILD)/ufs-root.img: $(BUILD)/bin/sh scripts/make-ufs1-root-image.py \
+	scripts/ufs1_format.py
+	$(PYTHON) scripts/make-ufs1-root-image.py --force \
+		--arch-profile sparcv9 --native-shell $(BUILD)/bin/sh $@
+
+$(BUILD)/ufs-root-hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh \
+	$(BUILD)/boot/stage1.bin $(BUILD)/boot/stage2.bin \
+	$(BUILD)/ufs-root.img scripts/make-sparcv9-hdd-image.py \
+	scripts/check-sparcv9-hdd-image.py scripts/check-ufs1-image.py
+	$(PYTHON) scripts/make-sparcv9-hdd-image.py --force \
+		--stage1 $(BUILD)/boot/stage1.bin \
+		--stage2 $(BUILD)/boot/stage2.bin \
+		--kernel $(BUILD)/vmunix --shell $(BUILD)/bin/sh \
+		--ufs-root $(BUILD)/ufs-root.img $@
+
+ufs-root-image: $(BUILD)/ufs-root-hdd-image.img
+
 hdd-image: $(BUILD)/hdd-image.img
 
 sparcv9-disk-check: $(BUILD)/hdd-image.img
@@ -228,9 +245,12 @@ sparcv9-entry-qemu-test: $(BUILD)/hdd-image.img
 sparcv9-qemu-test: $(BUILD)/hdd-image.img
 	bash scripts/test-sparcv9-qemu.sh
 
-.PHONY: all vmunix SH POSIX-R1.ELF hdd-image sparcv9-toolchain sparcv9-image-check \
+sparcv9-ufs-qemu-test: $(BUILD)/ufs-root-hdd-image.img
+	bash scripts/test-sparcv9-ufs-qemu.sh
+
+.PHONY: all vmunix SH POSIX-R1.ELF hdd-image ufs-root-image sparcv9-toolchain sparcv9-image-check \
 	sparcv9-bootloader sparcv9-disk-check sparcv9-entry-qemu-test \
-	sparcv9-qemu-test
+	sparcv9-qemu-test sparcv9-ufs-qemu-test
 
 -include $(SPARCV9_EARLY_OBJS:.o=.d) \
 	$(SPARCV9_STAGE1_OBJS:.o=.d) $(SPARCV9_STAGE2_OBJS:.o=.d)

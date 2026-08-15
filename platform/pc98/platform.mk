@@ -50,7 +50,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/system-device.o \
 	$(BUILD)/src/kern/init.o \
 	$(BUILD)/drivers/pc98-graphics.o \
-	$(KERN_NET_OBJS)
+	$(KERN_NET_OBJS) \
+	$(KERN_UFS1_OBJS)
 
 # Milestone verification nests QEMU tests.  Keep those chains ordered even
 # when the caller requests a highly parallel compile.
@@ -247,8 +248,12 @@ I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
 	--file /bin/nslookup=$(BUILD)/bin/nslookup
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
+I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(I386_ARCH_UFS_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 arch-image: $(I386_ARCH_IMAGE)
 arch-image-check: $(I386_ARCH_IMAGE)-check
+arch-image-ufs: $(I386_ARCH_UFS_IMAGE)
+arch-image-ufs-check: $(I386_ARCH_UFS_IMAGE)-check
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(I386_ARCH_IMAGE) \
@@ -260,6 +265,21 @@ $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
 		--arch-profile i386 --arch-image $(I386_ARCH_IMAGE) \
 		--holoris $(HOLORIS_NOCT) $@
+
+$(BUILD)/ufs-root.img: $(I386_ARCH_UFS_IMAGE) \
+	$(SCRIPTS_DIR)/make-ufs1-root-image.py scripts/ufs1_format.py
+	$(PYTHON) $(SCRIPTS_DIR)/make-ufs1-root-image.py --force \
+		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) $@
+
+$(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/ufs-root.img \
+	$(SCRIPTS_DIR)/make-bios-hdd-image.py
+	$(PYTHON) $(SCRIPTS_DIR)/make-bios-hdd-image.py --force \
+		--machine pc98 --stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
+
+ufs-root-image: $(BUILD)/ufs-root-hdd-image.img
 
 bios-hdd-image: $(BUILD)/bios-hdd-image.img
 bios-loader-host-check: $(BUILD)/bios-hdd-image.img
@@ -284,7 +304,8 @@ $(BUILD)/legacy-nec98-hdd-image.img: $(BUILD)/hdd-test.img
 
 legacy-pc98-hdd-image: $(BUILD)/legacy-nec98-hdd-image.img
 
-.PHONY: arch-image arch-image-check bios-bootloader bios-hdd-image bios-loader-host-check \
+.PHONY: arch-image arch-image-check arch-image-ufs arch-image-ufs-check \
+	ufs-root-image bios-bootloader bios-hdd-image bios-loader-host-check \
 	bios-loader-qemu-test \
 	legacy-pc98-hdd-image
 

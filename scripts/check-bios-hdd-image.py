@@ -67,6 +67,22 @@ def check(args: argparse.Namespace) -> None:
             fail("active partition does not start at LBA 2048")
         if blocks == 0 or start + blocks > size // 512:
             fail("active partition lies outside the image")
+        if args.ufs_root is not None:
+            if not args.ufs_root.is_file() or args.ufs_root.stat().st_size % 512:
+                fail("invalid UFS1 root input")
+            root_blocks = args.ufs_root.stat().st_size // 512
+            if entries[1] != (0, 0xA5, start + blocks, root_blocks):
+                fail("second MBR entry does not describe the UFS1 root")
+            empty_tail = [(0, 0, 0, 0), (0, 0, 0, 0)]
+            if args.machine == "pc98":
+                # Native PC-98 Stage 1 stores its IPL sector-count word at
+                # bytes 508..509.  Those bytes overlap the otherwise unused
+                # fourth MBR entry's block-count field.
+                empty_tail[1] = (0, 0, 0, 9 << 16)
+            if entries[2:] != empty_tail:
+                fail("unexpected MBR partition after the UFS1 root")
+            if start + blocks + root_blocks > size // 512:
+                fail("UFS1 root partition lies outside the image")
 
         stage2_lba = 1 if args.machine == "pcat" else 2
         if args.machine == "pc98":
@@ -79,7 +95,20 @@ def check(args: argparse.Namespace) -> None:
             expected[8:12] = pc98_chs(start, heads)
             expected[12:16] = pc98_chs(size // 512 - 1, heads)
             expected[16:32] = b"BOOT".ljust(16, b" ")
-            if table[:32] != expected or any(table[32:]):
+            expected_table = bytearray(512)
+            expected_table[:32] = expected
+            if args.ufs_root is not None:
+                root_start = start + blocks
+                root_blocks = args.ufs_root.stat().st_size // 512
+                root = bytearray(32)
+                root[0:2] = b"\x21\x01"
+                root[4:8] = pc98_chs(root_start, heads)
+                root[8:12] = pc98_chs(root_start, heads)
+                root[12:16] = pc98_chs(root_start + root_blocks - 1,
+                                       heads)
+                root[16:32] = b"ROOT".ljust(16, b" ")
+                expected_table[32:64] = root
+            if table != expected_table:
                 fail(f"invalid PC-98 H={heads}/S=17 partition mirror")
         stream.seek(stage2_lba * 512)
         first = stream.read(512)
@@ -147,6 +176,23 @@ def check(args: argparse.Namespace) -> None:
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if direct_shell.returncode == 0:
                 fail("architecture-specific /bin/sh leaked into the outer FAT")
+    if args.ufs_root is not None:
+        expected_hash = hashlib.sha256(args.ufs_root.read_bytes()).digest()
+        digest = hashlib.sha256()
+        with image.open("rb") as stream:
+            stream.seek((start + blocks) * 512)
+            remaining = args.ufs_root.stat().st_size
+            while remaining:
+                chunk = stream.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    fail("truncated UFS1 root partition")
+                digest.update(chunk)
+                remaining -= len(chunk)
+        if digest.digest() != expected_hash:
+            fail("UFS1 root partition content differs from the input")
+        checker = Path(__file__).with_name("check-ufs1-image.py")
+        subprocess.run(["python3", str(checker), str(args.ufs_root)],
+                       check=True)
     print(f"BIOS image check: PASS ({args.machine}, partition {index}, "
           f"Stage 2 {sectors} sectors)")
 
@@ -160,6 +206,7 @@ def main() -> None:
     parser.add_argument("--arch-profile", choices=("i386", "amd64", "aarch64"))
     parser.add_argument("--arch-image", type=Path)
     parser.add_argument("--bin-file", action="append", default=[])
+    parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("image", type=Path)
     check(parser.parse_args())
 

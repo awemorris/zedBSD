@@ -194,7 +194,12 @@ mount_filesystem(struct mount *mountp, const char *type_name, int flags,
 				flags, data);
 	if (args != NULL && args->fspec != NULL)
 		disk = disk_find(args->fspec);
-	return mount_filesystem_on_disk(mountp, type_name, disk, flags, data);
+	{
+		int error = mount_filesystem_on_disk(mountp, type_name, disk,
+		    flags, data);
+		disk_release(disk);
+		return error;
+	}
 }
 
 int

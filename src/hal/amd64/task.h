@@ -30,6 +30,7 @@ void amd64_user_frame_entry(void);
 void amd64_task_returned(void) __attribute__((noreturn));
 void amd64_task_enter_user_frame(void *);
 void amd64_task_leave_user_frame(void);
+void amd64_task_init_cpu(int run_selftest);
 void amd64_xmm_load(const void *);
 void amd64_xmm_store(void *);
 

@@ -8,6 +8,7 @@
 #ifndef ZEDBSD_KERN_SCHED_H
 #define ZEDBSD_KERN_SCHED_H
 
+#include <hal/hal.h>
 #include <stdint.h>
 
 struct thread;
@@ -30,6 +31,9 @@ struct sched {
 	uint32_t quantum;
 	uint64_t wakeup_tick;
 	unsigned queue_kind;
+	hal_cpu_id_t cpu;
+	hal_cpu_id_t last_cpu;
+	unsigned need_migrate;
 	struct thread *next;
 	struct thread *prev;
 };
@@ -41,12 +45,14 @@ struct sched_queue {
 };
 
 void sched_init(void);
+int sched_prepare_thread(struct thread *thread);
 void sched_add(struct thread *thread);
 void sched_unlink(struct thread *thread);
 void sched_wakeup(struct thread *thread);
 void sched_switch(void);
 void sched_yield(void);
-void sched_clock(void);
+void sched_exit_current(void) __attribute__((noreturn));
+void sched_clock_cpu(hal_cpu_id_t cpu, uint64_t now);
 void sched_sleep(uint64_t timeout_tick);
 /* Atomically transitions the current thread to sleep, releases an IRQ-safe
  * condition lock, switches, and reacquires that lock before returning. */
@@ -55,5 +61,13 @@ void sched_awake_from_sleep(struct thread *thread);
 uint64_t sched_ticks(void);
 int sched_has_runnable(void);
 void sched_idle(void) __attribute__((noreturn));
+void sched_secondary_init(hal_cpu_id_t cpu) __attribute__((noreturn));
+int sched_wait_others_online(void);
+int sched_set_cpu(struct thread *, hal_cpu_id_t cpu);
+void sched_cpu_notify(hal_cpu_id_t cpu);
+
+#ifdef ZEDBSD_SCHED_TEST
+int sched_test_cpu_online(hal_cpu_id_t, struct thread *);
+#endif
 
 #endif

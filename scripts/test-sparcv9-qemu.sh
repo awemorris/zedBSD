@@ -25,7 +25,7 @@ run_qemu()
 		printf 'echo SPARCV9-USER64-PASS\n'
 		printf 'pwd\n'
 		printf 'ls /\n'
-		printf 'cp /sparcv9/bin/sh /SPARCTST\n'
+		printf 'cp /bin/sh /SPARCTST\n'
 		printf 'ls /\n'
 		sleep 2
 	} | timeout 20s qemu-system-sparc64 -M sun4u -m "$memory" \
@@ -40,7 +40,7 @@ run_qemu()
 	cat "$log"
 	tr -d '\r' <"$log" >"$clean_log"
 	grep -q 'SPARCV9 IDE PASS' "$clean_log"
-	grep -q 'boot: starting init /sparcv9/bin/sh' "$clean_log"
+	grep -q 'boot: starting init /bin/sh' "$clean_log"
 	grep -qx 'SPARCV9-USER64-PASS' "$clean_log"
 	grep -q 'vmunix.s9' "$clean_log"
 	grep -q 'sparctst' "$clean_log"

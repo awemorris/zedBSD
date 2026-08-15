@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <kern/waitq.h>
+#include <kern/atomic.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/signal.h>
@@ -10,7 +11,7 @@
 void waitq_init(struct wait_queue *queue, const char *name)
 { queue->head = queue->tail = NULL; queue->sequence = 1; queue->name = name; }
 uint64_t waitq_sequence(const struct wait_queue *queue)
-{ return __atomic_load_n(&queue->sequence, __ATOMIC_ACQUIRE); }
+{ return atomic_u64_load_acquire(&queue->sequence); }
 
 static void waitq_remove(struct wait_queue *queue, struct wait_token *token)
 {
@@ -51,7 +52,7 @@ void waitq_wake_one(struct wait_queue *queue)
 {
 	struct wait_token *token;
 	if (queue == NULL) return;
-	__atomic_add_fetch(&queue->sequence, 1U, __ATOMIC_RELEASE);
+	(void)atomic_u64_fetch_add_relaxed(&queue->sequence, 1U);
 	token = queue->head;
 	if (token == NULL) return;
 	waitq_remove(queue, token);
@@ -60,7 +61,7 @@ void waitq_wake_one(struct wait_queue *queue)
 void waitq_wake_all(struct wait_queue *queue)
 {
 	if (queue == NULL) return;
-	__atomic_add_fetch(&queue->sequence, 1U, __ATOMIC_RELEASE);
+	(void)atomic_u64_fetch_add_relaxed(&queue->sequence, 1U);
 	while (queue->head != NULL) {
 		struct wait_token *token = queue->head;
 		waitq_remove(queue, token);

@@ -9,6 +9,7 @@
 #define ZEDBSD_KERN_NAMEI_H
 
 #include "kern/inode.h"
+#include "kern/lock.h"
 #include "kern/mount.h"
 #include <limits.h>
 
@@ -36,7 +37,8 @@ struct componentname {
 };
 
 struct cwdinfo {
-	unsigned usecount;
+	refcount_t refs;
+	struct spinlock lock;
 	unsigned flags;
 	struct path root;
 	struct path cwd;

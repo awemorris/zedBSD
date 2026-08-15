@@ -21,6 +21,7 @@
 #include "kern/sched.h"
 #include "kern/user-probe.h"
 #include "kern/syscall.h"
+#include "kern/thread.h"
 
 #define KERNEL_HEAP_SIZE (512U * 1024U)
 static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
@@ -117,11 +118,17 @@ kernel_entry(const void *handoff)
 	hal_set_allocator(kernel_alloc, kernel_free);
 	hal_task_init();
 	process_init();
+	kern_clock_init();
 	user_probe_init();
 	syscall_init();
 	sched_init();
+	if (thread_prepare_secondaries(hal_cpu_count()) != 0)
+		hal_fatal(__FILE__, __LINE__, "secondary thread allocation failed");
 	if (hal_cpu_start_others() != HAL_OK)
 		hal_fatal(__FILE__, __LINE__, "secondary CPU startup failed");
+	if (sched_wait_others_online() != 0)
+		hal_fatal(__FILE__, __LINE__, "secondary scheduler startup failed");
+	thread_attach_secondaries();
 	/* Synchronize the shared kernel translation domain with newly ready CPUs. */
 	hal_page_flush_tlb_range(HAL_SPACE_SYS, __kernel_vma_start,
 	    ZEDBSD_PAGE_SIZE);
@@ -146,9 +153,8 @@ kernel_entry(const void *handoff)
 void
 kernel_secondary_entry(hal_cpu_id_t cpu)
 {
-	(void)cpu;
-	for (;;) {
-		(void)hal_irq_disable();
-		hal_cpu_idle();
-	}
+	if (cpu == 0 || cpu != hal_cpu_current())
+		hal_fatal(__FILE__, __LINE__, "invalid secondary CPU entry");
+	thread_init_secondary(cpu);
+	sched_secondary_init(cpu);
 }

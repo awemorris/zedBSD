@@ -65,6 +65,7 @@ extern int zedbsd_errno;
 #define EALREADY 54
 #define ECONNABORTED 55
 #define ENOPROTOOPT 56
+#define EMLINK 57
 
 #define EWOULDBLOCK EAGAIN
 

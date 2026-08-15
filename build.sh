@@ -36,6 +36,9 @@ Common commands:
   messages        Generate the kernel message header
   arch-image PROFILE  Build i386, amd64, or aarch64 inner FAT16 userland
   arch-images all     Build all three inner FAT16 userland images
+  arch-image-ufs PROFILE Build an architecture-specific UFS1 userland image
+  arch-images-ufs all Build all three inner UFS1 userland images
+  ufs-root-image    Build a FAT16-boot/UFS1-root image
 
 Native kernel commands (pcat, pc98, amd64, arm64, sparcv9):
   vmunix          Build the zedBSD kernel
@@ -66,6 +69,7 @@ QEMU and image checks:
   sparcv9-image-check        Verify the SPARC V9 ELF and disk layout
   sparcv9-entry-qemu-test    Test sun4u entry, traps, and MMU
   sparcv9-qemu-test          Test the sun4u disk root and userland
+  sparcv9-ufs-qemu-test      Test the sun4u UFS1 root and userland
   sh-builtins-qemu-test      Test /bin/sh filesystem builtins in QEMU
   pcat-beui-qemu-test        Test PC/AT Cirrus and VGA BeUI backends
   network-qemu-test          Test the platform NIC with ARP, ICMP, UDP, and TCP
@@ -123,9 +127,9 @@ if test "$command_name" = help || test "$command_name" = -h || \
 	exit 0
 fi
 
-if test "$command_name" = arch-image; then
+if test "$command_name" = arch-image || test "$command_name" = arch-image-ufs; then
 	if test "$#" -ne 1; then
-		echo "usage: $0 arch-image i386|amd64|aarch64" >&2
+		echo "usage: $0 $command_name i386|amd64|aarch64" >&2
 		exit 2
 	fi
 	case "$1" in
@@ -136,16 +140,20 @@ if test "$command_name" = arch-image; then
 	esac
 	jobs="${ZEDBSD_JOBS:-$(nproc)}"
 	make -C "$repo" "ARCH=$platform" "-j$jobs" messages
-	exec make -C "$repo" "ARCH=$platform" "-j$jobs" arch-image
+	exec make -C "$repo" "ARCH=$platform" "-j$jobs" "$command_name"
 fi
 
-if test "$command_name" = arch-images; then
+if test "$command_name" = arch-images || test "$command_name" = arch-images-ufs; then
 	if test "$#" -ne 1 || test "$1" != all; then
-		echo "usage: $0 arch-images all" >&2
+		echo "usage: $0 $command_name all" >&2
 		exit 2
 	fi
 	for profile in i386 amd64 aarch64; do
-		"$0" arch-image "$profile"
+		if test "$command_name" = arch-images-ufs; then
+			"$0" arch-image-ufs "$profile"
+		else
+			"$0" arch-image "$profile"
+		fi
 	done
 	exit 0
 fi

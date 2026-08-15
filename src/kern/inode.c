@@ -16,6 +16,10 @@
 static struct inode common_pool[INODE_COMMON_MAX] VFS_BSS;
 static uint8_t common_used[INODE_COMMON_MAX] VFS_BSS;
 static struct inode *inode_cache[INODE_CACHE_MAX] VFS_BSS;
+static struct spinlock inode_cache_lock = {
+	{ 0 }, LOCK_RANK_INODE, "inode cache", 0, 0
+};
+#define INODE_CACHE_RESERVED ((struct inode *)(uintptr_t)1U)
 
 mode_t
 inode_type_mode(enum inode_type type)
@@ -52,21 +56,52 @@ cache_index(const struct inode *inode)
 	return -1;
 }
 
+static void
+destroy_inode(struct inode *inode)
+{
+	struct mount *mountp;
+	int pindex;
+	unsigned long irq;
+
+	if (inode->i_op != NULL && inode->i_op->reclaim != NULL)
+		inode->i_op->reclaim(inode);
+	mountp = inode->i_mount;
+	pindex = common_index(inode);
+	if (pindex >= 0) {
+		memset(inode, 0, sizeof(*inode));
+		irq = spin_lock_irqsave(&inode_cache_lock);
+		common_used[pindex] = 0;
+		spin_unlock_irqrestore(&inode_cache_lock, irq);
+	} else if (mountp != NULL && mountp->m_type != NULL &&
+	    mountp->m_type->free_inode != NULL) {
+		mountp->m_type->free_inode(inode);
+	}
+}
+
 static int
-cache_slot(void)
+reserve_cache_slot(struct inode **victim)
 {
 	unsigned i;
+	unsigned long irq = spin_lock_irqsave(&inode_cache_lock);
+	*victim = NULL;
 	for (i = 0; i < INODE_CACHE_MAX; i++)
-		if (inode_cache[i] == NULL)
+		if (inode_cache[i] == NULL) {
+			inode_cache[i] = INODE_CACHE_RESERVED;
+			spin_unlock_irqrestore(&inode_cache_lock, irq);
 			return (int)i;
+		}
 	for (i = 0; i < INODE_CACHE_MAX; i++) {
 		struct inode *inode = inode_cache[i];
-		if (inode->i_usecount == 1 &&
+		if (inode != INODE_CACHE_RESERVED && refcount_load(&inode->i_refs) == 1 &&
 		    !(inode->i_flags & (INODE_DIRTY | INODE_ROOT))) {
-			inode_free(inode);
+			inode_cache[i] = INODE_CACHE_RESERVED;
+			(void)refcount_put(&inode->i_refs);
+			*victim = inode;
+			spin_unlock_irqrestore(&inode_cache_lock, irq);
 			return (int)i;
 		}
 	}
+	spin_unlock_irqrestore(&inode_cache_lock, irq);
 	return -1;
 }
 
@@ -74,16 +109,21 @@ struct inode *
 inode_alloc(struct mount *mountp)
 {
 	struct inode *inode = NULL;
+	struct inode *victim;
+	unsigned long irq;
 	int slot;
 	unsigned i;
 
-	slot = cache_slot();
+	slot = reserve_cache_slot(&victim);
 	if (slot < 0)
 		return NULL;
+	if (victim != NULL)
+		destroy_inode(victim);
 	if (mountp != NULL && mountp->m_type != NULL &&
 	    mountp->m_type->alloc_inode != NULL)
 		inode = mountp->m_type->alloc_inode(mountp);
 	else {
+		irq = spin_lock_irqsave(&inode_cache_lock);
 		for (i = 0; i < INODE_COMMON_MAX; i++) {
 			if (!common_used[i]) {
 				common_used[i] = 1;
@@ -91,74 +131,81 @@ inode_alloc(struct mount *mountp)
 				break;
 			}
 		}
+		spin_unlock_irqrestore(&inode_cache_lock, irq);
 	}
-	if (inode == NULL)
+	if (inode == NULL) {
+		irq = spin_lock_irqsave(&inode_cache_lock);
+		inode_cache[slot] = NULL;
+		spin_unlock_irqrestore(&inode_cache_lock, irq);
 		return NULL;
+	}
 	memset(inode, 0, sizeof(*inode));
 	inode->i_mount = mountp;
 	inode->i_dirseq = 1;
 	/* One cache reference and one reference returned to the caller. */
-	inode->i_usecount = 2;
+	refcount_init(&inode->i_refs, 2);
+	(void)mutex_init(&inode->i_lock, LOCK_RANK_INODE, "inode");
+	irq = spin_lock_irqsave(&inode_cache_lock);
 	inode_cache[slot] = inode;
+	spin_unlock_irqrestore(&inode_cache_lock, irq);
 	return inode;
 }
 
 void
 inode_free(struct inode *inode)
 {
-	int cindex, pindex;
-	struct mount *mountp;
+	int cindex;
+	unsigned long irq;
 
-	if (inode == NULL || inode->i_usecount != 1 ||
+	if (inode == NULL || refcount_load(&inode->i_refs) != 1 ||
 	    (inode->i_flags & INODE_DIRTY))
 		return;
+	irq = spin_lock_irqsave(&inode_cache_lock);
 	cindex = cache_index(inode);
-	if (cindex < 0)
+	if (cindex < 0 || refcount_load(&inode->i_refs) != 1) {
+		spin_unlock_irqrestore(&inode_cache_lock, irq);
 		return;
-	inode_cache[cindex] = NULL;
-	inode->i_usecount = 0;
-	if (inode->i_op != NULL && inode->i_op->reclaim != NULL)
-		inode->i_op->reclaim(inode);
-	mountp = inode->i_mount;
-	pindex = common_index(inode);
-	if (pindex >= 0) {
-		memset(inode, 0, sizeof(*inode));
-		common_used[pindex] = 0;
-	} else if (mountp != NULL && mountp->m_type != NULL &&
-		   mountp->m_type->free_inode != NULL) {
-		mountp->m_type->free_inode(inode);
 	}
+	inode_cache[cindex] = NULL;
+	(void)refcount_put(&inode->i_refs);
+	spin_unlock_irqrestore(&inode_cache_lock, irq);
+	destroy_inode(inode);
 }
 
 int
 inode_get(struct mount *mountp, ino_t ino, struct inode **result)
 {
 	unsigned i;
+	unsigned long irq;
 	if (mountp == NULL || result == NULL)
 		return EINVAL;
+	irq = spin_lock_irqsave(&inode_cache_lock);
 	for (i = 0; i < INODE_CACHE_MAX; i++) {
 		struct inode *inode = inode_cache[i];
-		if (inode != NULL && inode->i_mount == mountp &&
+		if (inode != NULL && inode != INODE_CACHE_RESERVED &&
+		    inode->i_mount == mountp &&
 		    inode->i_ino == ino && !(inode->i_flags & INODE_DEAD)) {
 			inode_ref(inode);
 			*result = inode;
+			spin_unlock_irqrestore(&inode_cache_lock, irq);
 			return 0;
 		}
 	}
+	spin_unlock_irqrestore(&inode_cache_lock, irq);
 	return ENOENT;
 }
 
 void inode_ref(struct inode *inode)
 {
-	if (inode != NULL && inode->i_usecount != 0)
-		inode->i_usecount++;
+	if (inode != NULL)
+		refcount_get(&inode->i_refs);
 }
 
 void inode_release(struct inode *inode)
 {
-	if (inode != NULL && inode->i_usecount > 1) {
-		inode->i_usecount--;
-		if (inode->i_usecount == 1 &&
+	if (inode != NULL) {
+		unsigned remaining = refcount_put_not_last(&inode->i_refs);
+		if (remaining == 1 &&
 		    (inode->i_flags & INODE_DEAD) != 0 &&
 		    (inode->i_flags & (INODE_DIRTY | INODE_ROOT)) == 0)
 			inode_free(inode);
@@ -168,43 +215,86 @@ void inode_release(struct inode *inode)
 void
 inode_cache_purge_mount(struct mount *mountp)
 {
-	unsigned i;
-	for (i = 0; i < INODE_CACHE_MAX; i++)
-		if (inode_cache[i] != NULL && inode_cache[i]->i_mount == mountp &&
-		    inode_cache[i]->i_usecount == 1)
-			inode_free(inode_cache[i]);
+	for (;;) {
+		struct inode *victim = NULL;
+		unsigned long irq = spin_lock_irqsave(&inode_cache_lock);
+		unsigned i;
+		for (i = 0; i < INODE_CACHE_MAX; i++) {
+			struct inode *inode = inode_cache[i];
+			if (inode != NULL && inode != INODE_CACHE_RESERVED &&
+			    inode->i_mount == mountp &&
+			    refcount_load(&inode->i_refs) == 1 &&
+			    (inode->i_flags & INODE_DIRTY) == 0) {
+				inode_cache[i] = NULL;
+				(void)refcount_put(&inode->i_refs);
+				victim = inode;
+				break;
+			}
+		}
+		spin_unlock_irqrestore(&inode_cache_lock, irq);
+		if (victim == NULL)
+			break;
+		destroy_inode(victim);
+	}
 }
 
 INODE_HIGH int
 inode_cache_mount_busy(struct mount *mountp)
 {
 	unsigned i;
+	unsigned long irq;
+	int busy = 0;
+	irq = spin_lock_irqsave(&inode_cache_lock);
 	for (i = 0; i < INODE_CACHE_MAX; i++)
-		if (inode_cache[i] != NULL && inode_cache[i]->i_mount == mountp &&
-		    inode_cache[i]->i_usecount >
-		    (inode_cache[i] == mountp->m_root ? 2U : 1U))
-			return EBUSY;
-	return 0;
+		if (inode_cache[i] != NULL &&
+		    inode_cache[i] != INODE_CACHE_RESERVED &&
+		    inode_cache[i]->i_mount == mountp &&
+		    refcount_load(&inode_cache[i]->i_refs) >
+		    (inode_cache[i] == mountp->m_root ? 2U : 1U)) {
+			busy = 1;
+			break;
+		}
+	spin_unlock_irqrestore(&inode_cache_lock, irq);
+	return busy ? EBUSY : 0;
 }
 
 INODE_HIGH unsigned
 inode_cache_mount_count(struct mount *mountp)
 {
 	unsigned i, count = 0;
+	unsigned long irq = spin_lock_irqsave(&inode_cache_lock);
 	for (i = 0; i < INODE_CACHE_MAX; i++)
-		if (inode_cache[i] != NULL && inode_cache[i]->i_mount == mountp)
+		if (inode_cache[i] != NULL && inode_cache[i] != INODE_CACHE_RESERVED &&
+		    inode_cache[i]->i_mount == mountp)
 			count++;
+	spin_unlock_irqrestore(&inode_cache_lock, irq);
 	return count;
 }
 
 void
 inode_cache_reset(void)
 {
-	unsigned i;
 	namecache_reset();
-	for (i = 0; i < INODE_CACHE_MAX; i++)
-		if (inode_cache[i] != NULL && inode_cache[i]->i_usecount == 1)
-			inode_free(inode_cache[i]);
+	for (;;) {
+		struct inode *victim = NULL;
+		unsigned long irq = spin_lock_irqsave(&inode_cache_lock);
+		unsigned i;
+		for (i = 0; i < INODE_CACHE_MAX; i++) {
+			struct inode *inode = inode_cache[i];
+			if (inode != NULL && inode != INODE_CACHE_RESERVED &&
+			    refcount_load(&inode->i_refs) == 1 &&
+			    (inode->i_flags & INODE_DIRTY) == 0) {
+				inode_cache[i] = NULL;
+				(void)refcount_put(&inode->i_refs);
+				victim = inode;
+				break;
+			}
+		}
+		spin_unlock_irqrestore(&inode_cache_lock, irq);
+		if (victim == NULL)
+			break;
+		destroy_inode(victim);
+	}
 }
 
 static int readonly(const struct inode *inode)
@@ -440,6 +530,7 @@ int inode_unlink(struct inode *i, const struct componentname *n)
 	error = i->i_op != NULL && i->i_op->unlink != NULL ?
 		i->i_op->unlink(i, n) : EOPNOTSUPP;
 	if (error == 0) {
+		namecache_remove(i, n);
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
@@ -461,6 +552,7 @@ int inode_rmdir(struct inode *i, const struct componentname *n)
 	error = i->i_op != NULL && i->i_op->rmdir != NULL ?
 		i->i_op->rmdir(i, n) : EOPNOTSUPP;
 	if (error == 0) {
+		namecache_remove(i, n);
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
@@ -498,6 +590,8 @@ int inode_rename(struct inode *od, const struct componentname *on,
 	error = od->i_op != NULL && od->i_op->rename != NULL ?
 		od->i_op->rename(od, on, nd, nn, flags) : EOPNOTSUPP;
 	if (error == 0) {
+		namecache_remove(od, on);
+		namecache_remove(nd, nn);
 		inode_dir_changed(od);
 		if (nd != od)
 			inode_dir_changed(nd);

@@ -1916,6 +1916,8 @@ overlay_cleanup_temps(struct path *directory, unsigned depth,
 		error = file_readdir(file, &entry, &eof);
 		if (error != 0 || eof)
 			break;
+		if (!strcmp(entry.d_name, ".") || !strcmp(entry.d_name, ".."))
+			continue;
 		if (++*visited > 512U) {
 			error = EOVERFLOW;
 			break;

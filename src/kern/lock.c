@@ -8,16 +8,33 @@
 #include <hal/hal.h>
 
 void spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
-{ lock->held.value = 0; lock->rank = rank; lock->name = name; }
+{
+	lock->held.value = 0;
+	lock->rank = rank;
+	lock->name = name;
+	lock->owner_cpu = 0;
+	lock->owner_valid = 0;
+}
 int spin_trylock(struct spinlock *lock)
 {
-	return atomic_try_acquire_zero(&lock->held);
+	unsigned cpu = hal_cpu_current();
+	if (atomic_load_acquire(&lock->held) != 0 && lock->owner_valid &&
+	    lock->owner_cpu == cpu)
+		__builtin_trap();
+	if (!atomic_try_acquire_zero(&lock->held))
+		return 0;
+	lock->owner_cpu = cpu;
+	__atomic_store_n(&lock->owner_valid, 1U, __ATOMIC_RELEASE);
+	return 1;
 }
 void spin_lock(struct spinlock *lock)
 { while (!spin_trylock(lock)) __asm__ volatile("" ::: "memory"); }
 void spin_unlock(struct spinlock *lock)
 {
-	if (atomic_load_acquire(&lock->held) == 0) __builtin_trap();
+	if (atomic_load_acquire(&lock->held) == 0 || !lock->owner_valid ||
+	    lock->owner_cpu != hal_cpu_current())
+		__builtin_trap();
+	__atomic_store_n(&lock->owner_valid, 0U, __ATOMIC_RELEASE);
 	atomic_store_release(&lock->held, 0);
 }
 unsigned long spin_lock_irqsave(struct spinlock *lock)
@@ -30,7 +47,7 @@ int mutex_init(struct mutex *mutex, enum lock_rank rank, const char *name)
 	if (mutex == NULL) return EINVAL;
 	spin_init(&mutex->guard, rank, name);
 	mutex->owner = NULL; mutex->locked = 0;
-	mutex->waiters = NULL;
+	waitq_init(&mutex->waiters, name);
 	return 0;
 }
 int mutex_lock_interruptible(struct mutex *mutex)
@@ -41,10 +58,13 @@ int mutex_lock_interruptible(struct mutex *mutex)
 	irq = spin_lock_irqsave(&mutex->guard);
 	if (mutex->owner == thread) __builtin_trap();
 	while (mutex->locked) {
-		spin_unlock_irqrestore(&mutex->guard, irq);
-		if (signal_pending_unblocked(thread)) return EINTR;
-		sched_yield();
-		irq = spin_lock_irqsave(&mutex->guard);
+		uint64_t sequence = waitq_sequence(&mutex->waiters);
+		int error = waitq_sleep(&mutex->waiters, &mutex->guard,
+		    sequence, 0, WAITQ_INTERRUPTIBLE);
+		if (error == EINTR) {
+			spin_unlock_irqrestore(&mutex->guard, irq);
+			return EINTR;
+		}
 	}
 	mutex->locked = 1; mutex->owner = thread;
 	spin_unlock_irqrestore(&mutex->guard, irq);
@@ -59,5 +79,6 @@ void mutex_unlock(struct mutex *mutex)
 	irq = spin_lock_irqsave(&mutex->guard);
 	if (!mutex->locked || mutex->owner != thread_current()) __builtin_trap();
 	mutex->owner = NULL; mutex->locked = 0;
+	waitq_wake_one(&mutex->waiters);
 	spin_unlock_irqrestore(&mutex->guard, irq);
 }

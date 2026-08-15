@@ -8,6 +8,9 @@
 #ifndef ZEDBSD_KERN_FILEDESC_H
 #define ZEDBSD_KERN_FILEDESC_H
 
+#include <kern/atomic.h>
+#include <kern/lock.h>
+
 #define KERN_OPEN_MAX 32
 #define FILEDESC_CLOEXEC 0x00000001U
 
@@ -18,11 +21,13 @@ struct filedesc_entry {
 };
 
 struct filedesc {
-	unsigned usecount;
+	refcount_t refs;
+	struct spinlock lock;
 	struct filedesc_entry entries[KERN_OPEN_MAX];
 };
 
 struct filedesc *filedesc_create(void);
+void filedesc_ref(struct filedesc *);
 void filedesc_destroy(struct filedesc *);
 struct file *filedesc_get_ref(struct filedesc *, int descriptor);
 int filedesc_install(struct filedesc *, struct file *, int *descriptor);

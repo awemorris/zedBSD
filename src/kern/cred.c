@@ -13,12 +13,17 @@
 #include <string.h>
 #include <unistd.h>
 
+extern unsigned long spin_lock_irqsave(struct spinlock *)
+    __attribute__((weak));
+extern void spin_unlock_irqrestore(struct spinlock *, unsigned long)
+    __attribute__((weak));
+
 struct ucred *
 cred_alloc_root(void)
 {
 	struct ucred *cred = kern_calloc(1, sizeof(*cred));
 	if (cred != NULL)
-		cred->usecount = 1;
+		refcount_init(&cred->refs, 1);
 	return cred;
 }
 
@@ -31,15 +36,16 @@ cred_copy(const struct ucred *source)
 	cred = kern_calloc(1, sizeof(*cred));
 	if (cred != NULL) {
 		memcpy(cred, source, sizeof(*cred));
-		cred->usecount = 1;
+		refcount_init(&cred->refs, 1);
 	}
 	return cred;
 }
 
-void cred_ref(struct ucred *cred) { if (cred != NULL) cred->usecount++; }
+void cred_ref(struct ucred *cred)
+{ if (cred != NULL) refcount_get(&cred->refs); }
 void cred_release(struct ucred *cred)
 {
-	if (cred != NULL && cred->usecount != 0 && --cred->usecount == 0)
+	if (cred != NULL && refcount_put(&cred->refs))
 		kern_free(cred);
 }
 int cred_is_superuser(const struct ucred *cred)
@@ -62,6 +68,24 @@ cred_current(void)
 {
 	struct thread *thread = thread_current();
 	return thread != NULL && thread->proc != NULL ? thread->proc->cred : NULL;
+}
+
+struct ucred *
+cred_current_ref(void)
+{
+	struct thread *thread = thread_current();
+	struct process *process;
+	struct ucred *cred;
+	unsigned long irq;
+	if (thread == NULL || (process = thread->proc) == NULL)
+		return NULL;
+	irq = spin_lock_irqsave != NULL ? spin_lock_irqsave(&process->lock) : 0;
+	cred = process->cred;
+	if (cred != NULL)
+		cred_ref(cred);
+	if (spin_unlock_irqrestore != NULL)
+		spin_unlock_irqrestore(&process->lock, irq);
+	return cred;
 }
 
 int

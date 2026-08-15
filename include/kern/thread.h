@@ -11,6 +11,7 @@
 #include <hal/hal.h>
 #include <kern/sched.h>
 #include <kern/waitq.h>
+#include <kern/atomic.h>
 #include <sys/types.h>
 #include <stdint.h>
 
@@ -23,16 +24,20 @@ enum thread_state {
 	THREAD_RUNNABLE,
 	THREAD_RUNNING,
 	THREAD_SLEEPING,
+	THREAD_EXITING,
 	THREAD_ZOMBIE,
+	THREAD_REAPING,
 	THREAD_DEAD,
 };
 
 struct thread {
+	refcount_t refs;
 	tid_t tid;
 	struct process *proc;
 	hal_task_t task;
 	enum thread_state state;
 	unsigned flags;
+	unsigned state_generation;
 	int exit_status;
 	struct sched sched;
 	struct thread *proc_next;
@@ -65,7 +70,13 @@ int thread_create(struct process *, uintptr_t entry, uintptr_t user_sp,
 int thread_fork(struct process *, hal_task_t, struct thread **);
 int kthread_create(void (*entry)(void *), void *arg, int priority,
 		   struct thread **result);
+int thread_prepare_secondaries(unsigned cpu_count);
+void thread_init_secondary(hal_cpu_id_t cpu);
+void thread_attach_secondaries(void);
 void thread_start(struct thread *thread);
+void thread_ref(struct thread *thread);
+void thread_release(struct thread *thread);
+void thread_sched_retired(struct thread *thread);
 void thread_exit(int status) __attribute__((noreturn));
 int thread_wait(struct thread *thread, int *status);
 

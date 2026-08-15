@@ -16,6 +16,7 @@ static size_t task_stack_bytes;
 static hal_task_t xmm_selftest_main;
 static hal_task_t xmm_selftest_task;
 static volatile unsigned xmm_selftest_stage;
+static volatile unsigned initial_fpregs_ready;
 static volatile unsigned task_registry_lock;
 static const uint8 xmm_main_pattern[16] = {
 	0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
@@ -123,21 +124,36 @@ tasklist_del(struct amd64_task *task)
 }
 
 void
-hal_task_init(void)
+amd64_task_init_cpu(int run_selftest)
 {
 	struct amd64_task *task;
+	hal_cpu_id_t cpu = hal_cpu_current();
+
 	if (running_task != NULL) HAL_FATAL("hal_task_init twice");
-	__asm__ volatile("fninit; fxsave64 %0" : "=m"(initial_fpregs));
+	if (run_selftest) {
+		__asm__ volatile("fninit; fxsave64 %0" : "=m"(initial_fpregs));
+		__atomic_store_n(&initial_fpregs_ready, 1U, __ATOMIC_RELEASE);
+	} else if (__atomic_load_n(&initial_fpregs_ready,
+	    __ATOMIC_ACQUIRE) == 0) {
+		HAL_FATAL("amd64 AP task before BSP task initialization");
+	}
 	task = hal_malloc(sizeof(*task));
 	if (task == NULL) HAL_FATAL("initial amd64 task allocation failed");
 	hal_memset(task, 0, sizeof(*task));
 	task->space = HAL_SPACE_SYS;
-	task->run_cpu = 0;
-	task->target_cpu = hal_cpu_current();
+	task->run_cpu = (int)cpu;
+	task->target_cpu = cpu;
 	hal_memcpy(task_fpregs(task), initial_fpregs, sizeof(initial_fpregs));
 	tasklist_add(task);
 	running_task = task;
-	xmm_context_selftest();
+	if (run_selftest)
+		xmm_context_selftest();
+}
+
+void
+hal_task_init(void)
+{
+	amd64_task_init_cpu(1);
 }
 
 static void

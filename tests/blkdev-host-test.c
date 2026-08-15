@@ -113,10 +113,22 @@ test_registry(void)
 	struct disk *bad;
 
 	CHECK(disk_count() == 1);
-	CHECK(disk_at(0) == dev);
+	{
+		struct disk *found = disk_at(0);
+		CHECK(found == dev);
+		disk_release(found);
+	}
 	CHECK(disk_at(1) == NULL);
-	CHECK(disk_find("fake0") == dev);
-	CHECK(disk_find_by_dev(dev->d_dev) == dev);
+	{
+		struct disk *found = disk_find("fake0");
+		CHECK(found == dev);
+		disk_release(found);
+	}
+	{
+		struct disk *found = disk_find_by_dev(dev->d_dev);
+		CHECK(found == dev);
+		disk_release(found);
+	}
 	CHECK(disk_find("nope") == NULL);
 
 	CHECK(disk_read(dev, 0, 1, buffer) == 0);

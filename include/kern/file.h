@@ -10,6 +10,8 @@
 
 #include "kern/inode.h"
 #include "kern/mount.h"
+#include "kern/atomic.h"
+#include "kern/lock.h"
 #include <fcntl.h>
 #include <limits.h>
 #include <stddef.h>
@@ -52,7 +54,8 @@ struct file {
 	const struct file_ops *f_ops;
 	off_t f_offset;
 	int f_flags;
-	unsigned f_usecount;
+	refcount_t f_refs;
+	struct mutex f_lock;
 	unsigned f_mount_cursor;
 	void *f_data;
 };

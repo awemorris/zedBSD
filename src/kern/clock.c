@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/clock.h"
+#include "kern/atomic.h"
 #include "kern/cred.h"
 #include "kern/sched.h"
 
@@ -15,15 +16,46 @@ static struct kern_timespec realtime_offset = {
 	ZEDBSD_REALTIME_EPOCH_2026, 0
 };
 static int realtime_synchronized;
+static volatile unsigned realtime_sequence;
+static atomic_uint_t realtime_writer;
+
+static void realtime_write_begin(void)
+{
+	while(!atomic_try_acquire_zero(&realtime_writer))
+		hal_compiler_barrier();
+	(void)atomic_raw_fetch_add_relaxed(&realtime_sequence,1U);
+}
+static void realtime_write_end(void)
+{
+	(void)atomic_raw_fetch_add_relaxed(&realtime_sequence,1U);
+	atomic_store_release(&realtime_writer,0);
+}
+
+void kern_clock_init(void)
+{
+	uint64 seconds;
+	atomic_u64_store_release(&kernel_ticks,0);
+	atomic_raw_store_release(&realtime_sequence,0);
+	atomic_store_release(&realtime_writer,0);
+	realtime_offset.tv_sec=ZEDBSD_REALTIME_EPOCH_2026;
+	realtime_offset.tv_nsec=0;
+	atomic_raw_store_release((volatile unsigned *)&realtime_synchronized,0);
+	if(hal_rtc_read(&seconds)){
+		realtime_offset.tv_sec=(int64_t)seconds;
+		atomic_raw_store_release((volatile unsigned *)&realtime_synchronized,1);
+	}
+}
 
 void
 kernel_timer_handler(hal_cpu_id_t cpu, hal_irq_ack_t acknowledge)
 {
+	uint64_t now;
+
 	hal_irq_send_eoi(acknowledge);
-	if (cpu != 0)
-		return;
-	kernel_ticks++;
-	sched_clock();
+	if (cpu == 0)
+		(void)atomic_u64_fetch_add_relaxed(&kernel_ticks, 1U);
+	now = atomic_u64_load_acquire(&kernel_ticks);
+	sched_clock_cpu(cpu, now);
 }
 
 void
@@ -31,8 +63,8 @@ kernel_cpu_notify_handler(hal_cpu_id_t cpu, hal_irq_ack_t acknowledge)
 {
 	hal_irq_send_eoi(acknowledge);
 	if (cpu < HAL_CPU_MAX)
-		(void)__atomic_add_fetch(&cpu_notify_count[cpu], 1U,
-		    __ATOMIC_RELEASE);
+		(void)atomic_raw_fetch_add_relaxed(&cpu_notify_count[cpu], 1U);
+	sched_cpu_notify(cpu);
 }
 
 int
@@ -45,8 +77,7 @@ kern_cpu_notify_probe(void)
 
 	hal_cpu_mask_zero(&targets);
 	for (cpu = 1; cpu < hal_cpu_count(); cpu++) {
-		before[cpu] = __atomic_load_n(&cpu_notify_count[cpu],
-		    __ATOMIC_ACQUIRE);
+		before[cpu] = atomic_raw_load_acquire(&cpu_notify_count[cpu]);
 		hal_cpu_mask_set(&targets, cpu);
 	}
 	if (hal_cpu_count() <= 1)
@@ -55,8 +86,8 @@ kern_cpu_notify_probe(void)
 		return HAL_ERR_IO;
 	for (timeout = 0; timeout < 10000000U; timeout++) {
 		for (cpu = 1; cpu < hal_cpu_count(); cpu++)
-			if (__atomic_load_n(&cpu_notify_count[cpu],
-			    __ATOMIC_ACQUIRE) == before[cpu])
+			if (atomic_raw_load_acquire(&cpu_notify_count[cpu]) ==
+			    before[cpu])
 				break;
 		if (cpu == hal_cpu_count())
 			return HAL_OK;
@@ -68,13 +99,7 @@ kern_cpu_notify_probe(void)
 uint64_t
 zedbsd_kernel_ticks(void)
 {
-	uint64_t value;
-	bool enabled = hal_irq_disable();
-
-	value = kernel_ticks;
-	if (enabled)
-		hal_irq_enable();
-	return value;
+	return atomic_u64_load_acquire(&kernel_ticks);
 }
 
 uint64_t
@@ -190,6 +215,8 @@ kern_clock_gettime(clockid_t clock, struct timespec *result)
 {
 	uint64_t ticks;
 	struct kern_timespec monotonic, value;
+	struct kern_timespec offset;
+	unsigned before,after;
 	int error;
 
 	if (result == NULL)
@@ -202,7 +229,14 @@ kern_clock_gettime(clockid_t clock, struct timespec *result)
 	    (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ));
 	value = monotonic;
 	if (clock == CLOCK_REALTIME) {
-		error = kern_timespec_add(&monotonic, &realtime_offset, &value);
+		for (;;) {
+			before=atomic_raw_load_acquire(&realtime_sequence);
+			if(before&1U)continue;
+			offset=realtime_offset;
+			after=atomic_raw_load_acquire(&realtime_sequence);
+			if(before==after)break;
+		}
+		error = kern_timespec_add(&monotonic, &offset, &value);
 		if (error != 0)
 			return error;
 	}
@@ -245,16 +279,18 @@ kern_clock_settime(clockid_t clock, const struct timespec *requested,
 	target.tv_nsec = (int32_t)requested->tv_nsec;
 	monotonic.tv_sec = now.tv_sec;
 	monotonic.tv_nsec = (int32_t)now.tv_nsec;
+	realtime_write_begin();
 	error = kern_timespec_sub(&target, &monotonic, &realtime_offset);
 	if (error == 0)
-		realtime_synchronized = 1;
+		atomic_raw_store_release((volatile unsigned *)&realtime_synchronized,1);
+	realtime_write_end();
 	return error;
 }
 
 int
 kern_clock_realtime_synchronized(void)
 {
-	return realtime_synchronized;
+	return atomic_raw_load_acquire((volatile unsigned *)&realtime_synchronized)!=0;
 }
 
 void

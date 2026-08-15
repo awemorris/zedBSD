@@ -18,16 +18,21 @@ struct packet_slot {
 
 static struct packet_slot packet_pool[PACKET_BUF_POOL_COUNT] NET_BSS;
 static unsigned packet_used;
+static atomic_uint_t packet_guard;
 
 static bool
 packet_lock(void)
 {
-	return hal_irq_disable != NULL ? hal_irq_disable() : false;
+	bool enabled = hal_irq_disable != NULL ? hal_irq_disable() : false;
+	while (!atomic_try_acquire_zero(&packet_guard))
+		__asm__ volatile("" ::: "memory");
+	return enabled;
 }
 
 static void
 packet_unlock(bool enabled)
 {
+	atomic_store_release(&packet_guard, 0);
 	if (enabled && hal_irq_enable != NULL)
 		hal_irq_enable();
 }
@@ -66,7 +71,7 @@ packet_buf_alloc(size_t headroom)
 		slot->packet.l2_offset = PACKET_OFFSET_NONE;
 		slot->packet.l3_offset = PACKET_OFFSET_NONE;
 		slot->packet.l4_offset = PACKET_OFFSET_NONE;
-		slot->packet.refcount = 1;
+		refcount_init(&slot->packet.refcount, 1);
 		packet = &slot->packet;
 		break;
 	}
@@ -82,8 +87,7 @@ packet_buf_ref(struct packet_buf *packet)
 	if (packet == NULL)
 		return;
 	enabled = packet_lock();
-	if (packet->refcount != 0)
-		packet->refcount++;
+	refcount_get(&packet->refcount);
 	packet_unlock(enabled);
 }
 
@@ -96,7 +100,7 @@ packet_buf_free(struct packet_buf *packet)
 	if (packet == NULL)
 		return;
 	enabled = packet_lock();
-	if (packet->refcount == 0 || --packet->refcount != 0) {
+	if (!refcount_put(&packet->refcount)) {
 		packet_unlock(enabled);
 		return;
 	}
@@ -243,5 +247,8 @@ packet_buf_copy_region(const struct packet_buf *source, size_t offset,
 unsigned
 packet_buf_in_use(void)
 {
-	return packet_used;
+	bool enabled = packet_lock();
+	unsigned result = packet_used;
+	packet_unlock(enabled);
+	return result;
 }

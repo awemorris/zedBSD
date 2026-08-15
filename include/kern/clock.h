@@ -21,6 +21,7 @@ struct kern_timespec {
 	int32_t tv_nsec;
 };
 
+void kern_clock_init(void);
 uint64_t zedbsd_kernel_ticks(void);
 uint64_t zedbsd_kernel_milliseconds(void *context);
 void zedbsd_clock_realtime(time_t *seconds, long *nanoseconds);

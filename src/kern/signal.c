@@ -59,8 +59,11 @@ int
 signal_send_process(struct process *process, int signo)
 {
 	struct thread *thread;
+	unsigned long irq;
+	int continued = 0;
 	if (process == NULL || process == &process0 || !signal_valid(signo))
 		return EINVAL;
+	irq = spin_lock_irqsave(&process->lock);
 	process->signal_pending |= SIGNAL_BIT(signo);
 	for (thread = process->threads; thread != NULL;
 	     thread = thread->proc_next)
@@ -70,13 +73,15 @@ signal_send_process(struct process *process, int signo)
 	if ((signo == SIGCONT || signo == SIGKILL) &&
 	    process->state == PROCESS_STOPPED) {
 		process->state = PROCESS_RUNNING;
-		if (signo == SIGCONT)
-			process_note_continued(process);
+		continued = signo == SIGCONT;
 		for (thread = process->threads; thread != NULL;
 		     thread = thread->proc_next)
 			if (thread->state == THREAD_SLEEPING)
 				sched_wakeup(thread);
 	}
+	spin_unlock_irqrestore(&process->lock, irq);
+	if (continued)
+		process_note_continued(process);
 	return 0;
 }
 
@@ -99,21 +104,28 @@ int
 signal_kill(struct process *sender, pid_t selector, int signo)
 {
 	struct process *p;
+	pid_t cursor = -1;
 	int found = 0, permitted = 0;
 	if (sender == NULL || signo < 0 || signo >= NSIG)
 		return EINVAL;
-	for (p = process_first(); p != NULL; p = process_next(p)) {
+	while ((p = process_find_next_ref(cursor)) != NULL) {
 		int match = selector > 0 ? p->pid == selector :
 		    selector == 0 ? p->pgrp == sender->pgrp :
 		    selector == -1 ? p != &process0 : p->pgrp == -selector;
-		if (!match || p == &process0 || p->state == PROCESS_DEAD)
+		cursor = p->pid;
+		if (!match || p == &process0 || p->state == PROCESS_DEAD) {
+			process_release(p);
 			continue;
+		}
 		found = 1;
-		if (!signal_permitted(sender, p, signo))
+		if (!signal_permitted(sender, p, signo)) {
+			process_release(p);
 			continue;
+		}
 		permitted = 1;
 		if (signo != 0)
 			(void)signal_send_process(p, signo);
+		process_release(p);
 	}
 	return !found ? ESRCH : (!permitted ? EPERM : 0);
 }

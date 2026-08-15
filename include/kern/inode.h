@@ -12,6 +12,8 @@
 #include <stdint.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <kern/atomic.h>
+#include <kern/lock.h>
 
 /* Strict host C modes hide these non-POSIX feature-test spellings. */
 #ifndef S_IFMT
@@ -105,7 +107,8 @@ struct inode {
 	const struct inode_ops *i_op;
 	const struct file_ops *i_fop;
 	void *i_data;
-	unsigned i_usecount;
+	refcount_t i_refs;
+	struct mutex i_lock;
 	nlink_t i_linkcount;
 	mode_t i_mode;
 	uid_t i_uid;

@@ -210,7 +210,8 @@ process_spawn_from(struct process *parent, const char *path,
 	error = file_openat_cred(parent->cwdi, parent->cred, path, O_RDONLY, 0,
 	    &file);
 	if (error != 0)
-		return error;
+		goto out;
+	stage = "check execute access";
 	error = vfs_access(file->f_inode, parent->cred, X_OK);
 	if (error != 0)
 		goto out;
@@ -339,11 +340,7 @@ process_spawn_init(const char *path, struct process **result)
 	char *argv[2];
 	char *envp[] = {
 		"HOME=/home",
-#ifdef ZEDBSD_USER_ABI_SPARCV9
-		"PATH=/sparcv9/bin:/bin:/apps",
-#else
 		"PATH=/bin:/apps",
-#endif
 		"REMACS_SKK_DICT=/home/skkjisyo.dic",
 		NULL
 	};

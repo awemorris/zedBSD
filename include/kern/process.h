@@ -12,6 +12,9 @@
 #include <stdint.h>
 #include <uapi/zedbsd/signal.h>
 #include <kern/signal.h>
+#include <kern/atomic.h>
+#include <kern/lock.h>
+#include <kern/waitq.h>
 
 struct cwdinfo;
 struct filedesc;
@@ -26,6 +29,7 @@ enum process_state {
 	PROCESS_NEW = 0,
 	PROCESS_RUNNING,
 	PROCESS_STOPPED,
+	PROCESS_EXITING,
 	PROCESS_ZOMBIE,
 	PROCESS_DEAD,
 };
@@ -46,6 +50,9 @@ struct process_wait_event {
 };
 
 struct process {
+	refcount_t refs;
+	struct spinlock lock;
+	struct wait_queue child_waitq;
 	pid_t pid;
 	pid_t pgrp;
 	pid_t session;
@@ -79,10 +86,11 @@ struct process {
 extern struct process process0;
 void process_init(void);
 int process_reaper_start(void);
-struct process *process_find(pid_t pid);
-struct process *process_first(void);
-struct process *process_next(struct process *);
-struct thread *process_find_by_tid(tid_t tid);
+struct process *process_find_ref(pid_t pid);
+struct process *process_find_next_ref(pid_t after);
+void process_ref(struct process *);
+void process_release(struct process *);
+struct thread *thread_find_ref(tid_t tid);
 int process_setpgid(struct process *, pid_t, pid_t);
 pid_t process_setsid(struct process *);
 int process_create(struct process *parent, pid_t requested_pid,
@@ -98,10 +106,9 @@ pid_t process_wait_select(struct process *, pid_t, int,
 			  struct process_wait_event *);
 int process_wait_commit(struct process_wait_event *);
 void process_wait_abort(struct process_wait_event *);
-int process_quiesce_users(void);
-void process_force_quiesce_users(void);
 void process_note_stopped(struct process *, int);
 void process_note_continued(struct process *);
+void process_thread_retired(struct thread *);
 void exit1(int status) __attribute__((noreturn));
 void exit1_signal(int signo) __attribute__((noreturn));
 

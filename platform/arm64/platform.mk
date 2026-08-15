@@ -49,7 +49,7 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/uaccess.c src/kern/cdev.c src/kern/devfs.c \
 	src/kern/console-device.c src/kern/graphics-device.c \
 	src/kern/system-device.c src/kern/init.c
-ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES)
+ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES)
 ARM64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ARM64_KERNEL_SOURCES))
 ARM64_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURCES))
 ARM64_VMUNIX_OBJS := $(ARM64_BOOT_OBJS) $(ARM64_KERNEL_OBJS) $(ARM64_KERNEL_LIBC_OBJS)
@@ -149,8 +149,29 @@ $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-aarch64.o \
 AARCH64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.img
 AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AARCH64_ARCH_IMAGE),aarch64,$(BUILD)/bin/sh,$(AARCH64_ARCH_FILES)))
+AARCH64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AARCH64_ARCH_UFS_IMAGE),aarch64,$(BUILD)/bin/sh,$(AARCH64_ARCH_FILES)))
 arch-image: $(AARCH64_ARCH_IMAGE)
 arch-image-check: $(AARCH64_ARCH_IMAGE)-check
+arch-image-ufs: $(AARCH64_ARCH_UFS_IMAGE)
+arch-image-ufs-check: $(AARCH64_ARCH_UFS_IMAGE)-check
+
+$(BUILD)/ufs-root.img: $(AARCH64_ARCH_UFS_IMAGE) \
+	scripts/make-ufs1-root-image.py scripts/ufs1_format.py
+	$(PYTHON) scripts/make-ufs1-root-image.py --force \
+		--arch-profile aarch64 --arch-image $(AARCH64_ARCH_UFS_IMAGE) $@
+
+$(BUILD)/ufs-root-hdd-image.img: $(BUILD)/VMUNIX.A64 \
+	$(AARCH64_ARCH_IMAGE) $(BUILD)/ufs-root.img \
+	$(ARM64_PLATFORM)/config.txt scripts/make-rpi4-hdd-image.py \
+	scripts/make-rpi4-ufs-root-hdd-image.py scripts/check-ufs1-image.py
+	$(PYTHON) scripts/make-rpi4-ufs-root-hdd-image.py --force \
+		--kernel $(BUILD)/VMUNIX.A64 --arch-image $(AARCH64_ARCH_IMAGE) \
+		--ufs-root $(BUILD)/ufs-root.img \
+		--config $(ARM64_PLATFORM)/config.txt \
+		--firmware-dir vendor/raspberrypi-firmware/boot $@
+
+ufs-root-image: $(BUILD)/ufs-root-hdd-image.img
 
 $(BUILD)/hdd-image.img: $(BUILD)/VMUNIX.A64 $(AARCH64_ARCH_IMAGE) \
 	$(ARM64_PLATFORM)/config.txt scripts/make-rpi4-hdd-image.py \
@@ -178,7 +199,8 @@ $(BUILD)/VMUNIX.A64: $(BUILD)/vmunix scripts/check-arm64-vmunix.py
 	$(PYTHON) scripts/check-arm64-vmunix.py --elf $< --image $@ --fix-image
 	$(PYTHON) scripts/check-arm64-vmunix.py --elf $< --image $@
 
-.PHONY: vmunix SH POSIX-R1.ELF arch-image arch-image-check hdd-image rpi4-image-check arm64-image-check \
+.PHONY: vmunix SH POSIX-R1.ELF arch-image arch-image-check arch-image-ufs \
+	arch-image-ufs-check hdd-image ufs-root-image rpi4-image-check arm64-image-check \
 	rpi4-entry-qemu-test rpi4-fdt-host-test
 
 .PHONY: rpi4-qemu-test
