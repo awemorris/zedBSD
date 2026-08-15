@@ -43,22 +43,25 @@ boot_ioctl(struct file *device, unsigned long request, uintptr_t argument)
 		if (input.reserved[i] != 0)
 			return EINVAL;
 	process = curthread != NULL ? curthread->proc : NULL;
-	kernel = process != NULL ? filedesc_get(process->fd, input.kernel_fd) : NULL;
+	kernel = process != NULL ?
+		filedesc_get_ref(process->fd, input.kernel_fd) : NULL;
 	if (kernel == NULL)
 		return EBADF;
 	arguments = kern_malloc((size_t)input.command_line_length + 1U);
-	if (arguments == NULL)
+	if (arguments == NULL) {
+		(void)file_close(kernel);
 		return ENOMEM;
+	}
 	if (input.command_line_length != 0) {
 		error = copyin(input.command_line, arguments,
 		    input.command_line_length);
 		if (error != 0) {
 			kern_free(arguments);
+			(void)file_close(kernel);
 			return error;
 		}
 	}
 	arguments[input.command_line_length] = '\0';
-	file_ref(kernel);
 	error = pc98_linux_prepare(kernel, arguments,
 	    input.boot_device_index, &image);
 	(void)file_close(kernel);

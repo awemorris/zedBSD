@@ -42,6 +42,7 @@ struct vmspace;
 #define VM_REGION_IMMUTABLE 0x0004U
 #define VM_REGION_BRK       0x0008U
 #define VM_REGION_SHARED    0x0010U
+#define VM_REGION_ELF_ZERO_TAIL 0x0020U
 
 enum vm_region_backing {
 	VM_BACKING_ANON = 0,

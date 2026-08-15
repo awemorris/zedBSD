@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <hal/hal.h>
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
@@ -34,14 +35,19 @@ static struct file *
 file_alloc(void)
 {
 	unsigned i;
+	bool enabled = hal_irq_disable();
 	for (i = 0; i < FILE_MAX; i++) {
 		if (!file_used[i]) {
 			file_used[i] = 1;
 			memset(&files[i], 0, sizeof(files[i]));
 			files[i].f_usecount = 1;
+			if (enabled)
+				hal_irq_enable();
 			return &files[i];
 		}
 	}
+	if (enabled)
+		hal_irq_enable();
 	return NULL;
 }
 
@@ -49,13 +55,16 @@ static void
 file_free(struct file *file)
 {
 	unsigned i;
+	bool enabled = hal_irq_disable();
 	for (i = 0; i < FILE_MAX; i++) {
 		if (&files[i] == file) {
 			memset(file, 0, sizeof(*file));
 			file_used[i] = 0;
-			return;
+			break;
 		}
 	}
+	if (enabled)
+		hal_irq_enable();
 }
 
 int
@@ -395,10 +404,23 @@ int
 file_close(struct file *file)
 {
 	int error = 0;
-	if (file == NULL || file->f_usecount == 0)
+	bool enabled;
+	if (file == NULL)
 		return EBADF;
-	if (--file->f_usecount != 0)
+	enabled = hal_irq_disable();
+	if (file->f_usecount == 0) {
+		if (enabled)
+			hal_irq_enable();
+		return EBADF;
+	}
+	file->f_usecount--;
+	if (file->f_usecount != 0) {
+		if (enabled)
+			hal_irq_enable();
 		return 0;
+	}
+	if (enabled)
+		hal_irq_enable();
 	if (file->f_ops != NULL && file->f_ops->close != NULL)
 		error = file->f_ops->close(file);
 	if (file->f_path.p_inode != NULL)
@@ -412,8 +434,14 @@ file_close(struct file *file)
 void
 file_ref(struct file *file)
 {
-	if (file != NULL && file->f_usecount != 0)
+	bool enabled;
+	if (file == NULL)
+		return;
+	enabled = hal_irq_disable();
+	if (file->f_usecount != 0)
 		file->f_usecount++;
+	if (enabled)
+		hal_irq_enable();
 }
 
 struct inode *

@@ -183,8 +183,15 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 			return 0;
 		}
 		if (deliver_user_fault(pc, address, instruction, write,
-		    frame->out[0]) == HAL_TRAP_RET_SUCCESS &&
-		    sparcv9_prime_mapping(address, instruction, write)) {
+		    frame->out[0]) == HAL_TRAP_RET_SUCCESS) {
+			/*
+			 * A successful generic handler either installed the mapping or
+			 * queued a user signal.  Deliver pending signals before retrying;
+			 * unlike a demand fault, SIGBUS/SIGSEGV intentionally has no PTE
+			 * for prime_mapping() to find.
+			 */
+			hal_user_return_invoke();
+			(void)sparcv9_prime_mapping(address, instruction, write);
 			sparcv9_task_leave_user_frame();
 			return 0;
 		}

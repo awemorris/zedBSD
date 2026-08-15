@@ -461,10 +461,12 @@ fill_file_page(struct vm_region *region, struct vm_page *page)
 
 	memset((void *)page->pmem.vaddr, 0, PAGE_SIZE);
 	if (read_start >= read_end)
-		return 0;
+		return (region->flags & VM_REGION_ELF_ZERO_TAIL) != 0 ? 0 : ENXIO;
 	length = read_end - read_start;
-	if ((uint64_t)region->file_offset +
-	    (uint64_t)(read_start - region->data_start) > INT32_MAX)
+	if (region->file_offset < 0 ||
+	    (uint64_t)(read_start - region->data_start) >
+	    (sizeof(off_t) == sizeof(int64_t) ? (uint64_t)INT64_MAX :
+	    (uint64_t)INT32_MAX) - (uint64_t)region->file_offset)
 		return EOVERFLOW;
 	offset = region->file_offset +
 		(off_t)(read_start - region->data_start);
@@ -993,6 +995,18 @@ vmspace_unmap(struct vmspace *vm, uintptr_t start, size_t size)
 	if (vm == NULL || vm == &kernel_vmspace || !range_valid(start, size))
 		return EINVAL;
 	end = start + size;
+	/* Validate the complete transaction before split_region mutates metadata. */
+	for (region = vm->regions; region != NULL; region = region->next) {
+		struct vm_page *page;
+		if (region->start >= end || region->start + region->size <= start)
+			continue;
+		if ((region->flags & VM_REGION_IMMUTABLE) != 0)
+			return EACCES;
+		for (page = region->pages; page != NULL; page = page->next)
+			if (page->address < end && page->address + PAGE_SIZE > start &&
+			    page->wire_count != 0)
+				return EBUSY;
+	}
 	region = vmspace_find_region(vm, end - 1U, 1);
 	if (region != NULL && end < region->start + region->size) {
 		error = split_region(region, end);
@@ -1005,10 +1019,6 @@ vmspace_unmap(struct vmspace *vm, uintptr_t start, size_t size)
 		if (error != 0)
 			return error;
 	}
-	for (region = vm->regions; region != NULL; region = region->next)
-		if (region->start >= start && region->start < end &&
-		    (region->flags & VM_REGION_IMMUTABLE) != 0)
-			return EACCES;
 	for (link = &vm->regions; *link != NULL; link = &(*link)->next)
 		if ((*link)->start >= start)
 			break;

@@ -129,6 +129,8 @@ static int console_ioctl(struct file *file, unsigned long request,
 	case ZEDBSD_CONSOLE_DRAIN_INPUT:
 		hal_cons_drain_input();
 		return 0;
+	case ZEDBSD_CONSOLE_ISATTY:
+		return 0;
 	default:
 		return EOPNOTSUPP;
 	}

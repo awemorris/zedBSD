@@ -592,6 +592,14 @@ fat_file_get(struct file *file)
 				fat_files[i].used = 0;
 				return NULL;
 			}
+			/*
+			 * Another open file may have extended this inode without yet
+			 * flushing its FAT directory entry.  The inode is the coherent
+			 * in-memory size/cluster authority for every open description.
+			 */
+			fat_files[i].legacy.size = (uint64_t)file->f_inode->i_size;
+			zedbsd_fat_file_state(&fat_files[i].legacy)->first_cluster =
+				fat_inode(file->f_inode)->fi_first_cluster;
 			file->f_data = &fat_files[i];
 			return &fat_files[i];
 		}
@@ -630,6 +638,7 @@ fat_sync_inode_state(struct inode *inode, const struct zedbsd_file *file)
 {
 	struct fat_inode_info *info;
 	const struct zedbsd_fat_file_state *state;
+	unsigned i;
 
 	if (inode == NULL || file == NULL)
 		return;
@@ -637,6 +646,14 @@ fat_sync_inode_state(struct inode *inode, const struct zedbsd_file *file)
 	state = (const struct zedbsd_fat_file_state *)file->private_data;
 	info->fi_first_cluster = state->first_cluster;
 	inode->i_size = (off_t)file->size;
+	for (i = 0; i < FAT_FILE_MAX; i++) {
+		struct zedbsd_fat_file_state *open_state;
+		if (!fat_files[i].used || fat_files[i].owner != inode)
+			continue;
+		fat_files[i].legacy.size = file->size;
+		open_state = zedbsd_fat_file_state(&fat_files[i].legacy);
+		open_state->first_cluster = state->first_cluster;
+	}
 }
 
 static ssize_t
@@ -724,9 +741,11 @@ fat_close_file(struct file *file)
 	if (state != NULL) {
 		if ((file->f_flags & O_ACCMODE) != O_RDONLY &&
 		    file->f_inode != NULL &&
-		    (file->f_inode->i_flags & INODE_DEAD) == 0)
+		    (file->f_inode->i_flags & INODE_DEAD) == 0) {
 			error = fs_error(zedbsd_file_flush_result(&state->legacy));
-		else if (file->f_inode != NULL &&
+			if (error == 0)
+				fat_sync_inode_state(file->f_inode, &state->legacy);
+		} else if (file->f_inode != NULL &&
 			 (file->f_inode->i_flags & INODE_DEAD) != 0)
 			error = fs_error(zedbsd_fat_flush(
 				&fat_mount_state(file->f_inode->i_mount)->legacy));
@@ -957,11 +976,35 @@ fat_rename(struct inode *old_directory, const struct componentname *old_name,
 	error = fs_error(zedbsd_fat_stat_location(&state->legacy, new_path,
 		&entry, &lba, &offset, &cluster, &attributes));
 	if (error == 0) {
+		uint32_t authoritative_cluster;
+		off_t authoritative_size;
+		struct zedbsd_file renamed_file;
+
 		info = fat_inode(source);
-		info->fi_first_cluster = cluster;
+		authoritative_cluster = info->fi_first_cluster;
+		authoritative_size = source->i_size;
 		info->fi_dirent_lba = lba;
 		info->fi_dirent_offset = offset;
 		info->fi_attributes = attributes;
+		/*
+		 * The legacy rename engine copies the on-disk directory entry.  An
+		 * open writer may have newer size/cluster state which has not reached
+		 * that entry yet.  Keep the inode authoritative and repair the new
+		 * directory location before exposing it to a subsequent open.
+		 */
+		if (source->i_type == INODE_REG &&
+		    (cluster != authoritative_cluster ||
+		     (off_t)entry.size != authoritative_size)) {
+			error = fs_error(zedbsd_fs_open_result(&state->legacy,
+				new_path, &renamed_file));
+			if (error == 0) {
+				renamed_file.size = (uint64_t)authoritative_size;
+				zedbsd_fat_file_state(&renamed_file)->first_cluster =
+					authoritative_cluster;
+				zedbsd_fat_file_state(&renamed_file)->directory_dirty = 1;
+				error = fs_error(zedbsd_file_flush_result(&renamed_file));
+			}
+		}
 		source->i_ino = fat_ino(lba, offset);
 		for (i = 0; i < FAT_FILE_MAX; i++) {
 			struct zedbsd_fat_file_state *open_state;

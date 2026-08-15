@@ -51,9 +51,21 @@ static struct socket *
 descriptor_socket(struct process *process, int descriptor)
 {
 	struct file *file = process != NULL && process->fd != NULL ?
-		filedesc_get(process->fd, descriptor) : NULL;
+		filedesc_get_ref(process->fd, descriptor) : NULL;
+	struct socket *socket = socket_from_file(file);
 
-	return socket_from_file(file);
+	if (socket != NULL)
+		socket_ref(socket);
+	if (file != NULL)
+		(void)file_close(file);
+	return socket;
+}
+
+static intptr_t
+socket_result(struct socket *socket, intptr_t result)
+{
+	socket_release(socket);
+	return result;
 }
 
 static int
@@ -88,6 +100,73 @@ copy_sockaddr_out(uintptr_t address, uintptr_t length_address,
 			return error;
 	}
 	return copyout(&actual, length_address, sizeof(actual));
+}
+
+struct sockaddr_output_pin {
+	struct uaccess_pin address;
+	struct uaccess_pin length;
+	socklen_t capacity;
+};
+
+static void
+sockaddr_output_unpin(struct sockaddr_output_pin *pin)
+{
+	if (pin == NULL)
+		return;
+	uaccess_unpin(&pin->address);
+	uaccess_unpin(&pin->length);
+}
+
+static int
+sockaddr_output_pin(uintptr_t address, uintptr_t length_address,
+		    struct sockaddr_output_pin *pin)
+{
+	size_t bytes;
+	int error;
+
+	if (pin == NULL)
+		return EINVAL;
+	memset(pin, 0, sizeof(*pin));
+	if (address == 0 && length_address == 0)
+		return 0;
+	if (address == 0 || length_address == 0)
+		return EINVAL;
+	error = uaccess_pin(length_address, sizeof(pin->capacity), PROT_WRITE,
+	    &pin->length);
+	if (error != 0)
+		return error;
+	error = copyin_pinned(&pin->length, 0, &pin->capacity,
+	    sizeof(pin->capacity));
+	if (error != 0) {
+		sockaddr_output_unpin(pin);
+		return error;
+	}
+	bytes = pin->capacity < sizeof(struct sockaddr_storage) ?
+	    pin->capacity : sizeof(struct sockaddr_storage);
+	error = uaccess_pin(address, bytes, PROT_WRITE, &pin->address);
+	if (error != 0)
+		sockaddr_output_unpin(pin);
+	return error;
+}
+
+static int
+copy_sockaddr_out_pinned(const struct sockaddr_output_pin *pin,
+			 const struct sockaddr_storage *storage,
+			 socklen_t actual)
+{
+	size_t copied;
+	int error;
+
+	if (pin == NULL || storage == NULL)
+		return EINVAL;
+	if (!pin->length.active)
+		return 0;
+	copied = pin->capacity < actual ? pin->capacity : actual;
+	error = copied == 0 ? 0 :
+	    copyout_pinned(&pin->address, 0, storage, copied);
+	if (error == 0)
+		error = copyout_pinned(&pin->length, 0, &actual, sizeof(actual));
+	return error;
 }
 
 static intptr_t
@@ -132,12 +211,12 @@ sys_bind_call(const uintptr_t args[6])
 	if (socket == NULL)
 		return -EBADF;
 	if (socket->ops == NULL || socket->ops->bind == NULL)
-		return -EOPNOTSUPP;
+		return socket_result(socket, -EOPNOTSUPP);
 	error = copy_sockaddr_in(args[1], (socklen_t)args[2], &address);
 	if (error == 0)
 		error = socket->ops->bind(socket, (struct sockaddr *)&address,
 		    (socklen_t)args[2]);
-	return error == 0 ? 0 : -error;
+	return socket_result(socket, error == 0 ? 0 : -error);
 }
 
 static intptr_t
@@ -151,12 +230,12 @@ sys_connect_call(const uintptr_t args[6])
 	if (socket == NULL)
 		return -EBADF;
 	if (socket->ops == NULL || socket->ops->connect == NULL)
-		return -EOPNOTSUPP;
+		return socket_result(socket, -EOPNOTSUPP);
 	error = copy_sockaddr_in(args[1], (socklen_t)args[2], &address);
 	if (error == 0)
 		error = socket->ops->connect(socket, (struct sockaddr *)&address,
 		    (socklen_t)args[2]);
-	return error == 0 ? 0 : -error;
+	return socket_result(socket, error == 0 ? 0 : -error);
 }
 
 static intptr_t
@@ -169,9 +248,9 @@ sys_listen_call(const uintptr_t args[6])
 	if (socket == NULL)
 		return -EBADF;
 	if (socket->ops == NULL || socket->ops->listen == NULL)
-		return -EOPNOTSUPP;
+		return socket_result(socket, -EOPNOTSUPP);
 	error = socket->ops->listen(socket, (int)args[1]);
-	return error == 0 ? 0 : -error;
+	return socket_result(socket, error == 0 ? 0 : -error);
 }
 
 static intptr_t
@@ -180,6 +259,7 @@ sys_accept_call(const uintptr_t args[6])
 	struct process *process = current_process();
 	struct socket *socket = descriptor_socket(process, (int)args[0]);
 	struct sockaddr_storage address;
+	struct sockaddr_output_pin output;
 	struct socket *accepted = NULL;
 	struct file *file = NULL;
 	socklen_t length = sizeof(address);
@@ -188,17 +268,25 @@ sys_accept_call(const uintptr_t args[6])
 	if (socket == NULL)
 		return -EBADF;
 	if ((args[1] == 0) != (args[2] == 0))
-		return -EINVAL;
+		return socket_result(socket, -EINVAL);
 	if (socket->ops == NULL || socket->ops->accept == NULL)
-		return -EOPNOTSUPP;
+		return socket_result(socket, -EOPNOTSUPP);
+	error = sockaddr_output_pin(args[1], args[2], &output);
+	if (error != 0)
+		return socket_result(socket, -error);
 	memset(&address, 0, sizeof(address));
 	error = socket->ops->accept(socket, &accepted,
 	    args[1] != 0 ? (struct sockaddr *)&address : NULL,
 	    args[1] != 0 ? &length : NULL);
-	if (error != 0)
-		return -error;
-	if (accepted == NULL)
-		return -EIO;
+	if (error != 0) {
+		sockaddr_output_unpin(&output);
+		return socket_result(socket, -error);
+	}
+	if (accepted == NULL) {
+		sockaddr_output_unpin(&output);
+		return socket_result(socket, -EIO);
+	}
+	socket_release(socket);
 	error = socket_file_create(accepted, &file);
 	if (error == 0)
 		error = filedesc_install(process->fd, file, &descriptor);
@@ -207,9 +295,11 @@ sys_accept_call(const uintptr_t args[6])
 			(void)file_close(file);
 		else
 			socket_release(accepted);
+		sockaddr_output_unpin(&output);
 		return -error;
 	}
-	error = copy_sockaddr_out(args[1], args[2], &address, length);
+	error = copy_sockaddr_out_pinned(&output, &address, length);
+	sockaddr_output_unpin(&output);
 	if (error != 0) {
 		(void)filedesc_close(process->fd, descriptor);
 		return -error;
@@ -231,29 +321,29 @@ sys_sendto_call(const uintptr_t args[6])
 	if (socket == NULL)
 		return -EBADF;
 	if (socket->ops == NULL || socket->ops->sendto == NULL)
-		return -EOPNOTSUPP;
+		return socket_result(socket, -EOPNOTSUPP);
 	if ((args[4] == 0) != (args[5] == 0))
-		return -EINVAL;
+		return socket_result(socket, -EINVAL);
 	if (args[2] > PACKET_BUF_STORAGE_SIZE)
-		return -EMSGSIZE;
+		return socket_result(socket, -EMSGSIZE);
 	if (args[4] != 0) {
 		error = copy_sockaddr_in(args[4], (socklen_t)args[5], &address);
 		if (error != 0)
-			return -error;
+			return socket_result(socket, -error);
 		destination = (const struct sockaddr *)&address;
 	}
 	if (args[2] == 0)
-		return socket->ops->sendto(socket, "", 0, (int)args[3],
-		    destination, (socklen_t)args[5]);
+		return socket_result(socket, socket->ops->sendto(socket, "", 0,
+		    (int)args[3], destination, (socklen_t)args[5]));
 	buffer = kern_malloc((size_t)args[2]);
 	if (buffer == NULL)
-		return -ENOMEM;
+		return socket_result(socket, -ENOMEM);
 	error = copyin(args[1], buffer, (size_t)args[2]);
 	result = error == 0 ? socket->ops->sendto(socket, buffer,
 	    (size_t)args[2], (int)args[3], destination,
 	    (socklen_t)args[5]) : -error;
 	kern_free(buffer);
-	return result;
+	return socket_result(socket, result);
 }
 
 static intptr_t
@@ -262,6 +352,8 @@ sys_recvfrom_call(const uintptr_t args[6])
 	struct socket *socket = descriptor_socket(current_process(),
 	    (int)args[0]);
 	struct sockaddr_storage address;
+	struct sockaddr_output_pin output;
+	struct uaccess_pin data_pin;
 	socklen_t length = sizeof(address);
 	size_t capacity;
 	void *buffer;
@@ -271,29 +363,42 @@ sys_recvfrom_call(const uintptr_t args[6])
 	if (socket == NULL)
 		return -EBADF;
 	if (socket->ops == NULL || socket->ops->recvfrom == NULL)
-		return -EOPNOTSUPP;
+		return socket_result(socket, -EOPNOTSUPP);
 	if ((args[4] == 0) != (args[5] == 0))
-		return -EINVAL;
+		return socket_result(socket, -EINVAL);
 	if (args[2] == 0)
-		return 0;
+		return socket_result(socket, 0);
 	capacity = args[2] > PACKET_BUF_STORAGE_SIZE ?
 		PACKET_BUF_STORAGE_SIZE : (size_t)args[2];
+	error = uaccess_pin(args[1], capacity, PROT_WRITE, &data_pin);
+	if (error != 0)
+		return socket_result(socket, -error);
+	error = sockaddr_output_pin(args[4], args[5], &output);
+	if (error != 0) {
+		uaccess_unpin(&data_pin);
+		return socket_result(socket, -error);
+	}
 	buffer = kern_malloc(capacity);
-	if (buffer == NULL)
-		return -ENOMEM;
+	if (buffer == NULL) {
+		sockaddr_output_unpin(&output);
+		uaccess_unpin(&data_pin);
+		return socket_result(socket, -ENOMEM);
+	}
 	memset(&address, 0, sizeof(address));
 	result = socket->ops->recvfrom(socket, buffer, capacity, (int)args[3],
 	    args[4] != 0 ? (struct sockaddr *)&address : NULL,
 	    args[4] != 0 ? &length : NULL);
 	if (result >= 0) {
-		error = copyout(buffer, args[1], (size_t)result);
+		error = copyout_pinned(&data_pin, 0, buffer, (size_t)result);
 		if (error == 0)
-			error = copy_sockaddr_out(args[4], args[5], &address, length);
+			error = copy_sockaddr_out_pinned(&output, &address, length);
 		if (error != 0)
 			result = -error;
 	}
 	kern_free(buffer);
-	return result;
+	sockaddr_output_unpin(&output);
+	uaccess_unpin(&data_pin);
+	return socket_result(socket, result);
 }
 
 static intptr_t
@@ -306,9 +411,9 @@ sys_shutdown_call(const uintptr_t args[6])
 	if (socket == NULL)
 		return -EBADF;
 	if (socket->ops == NULL || socket->ops->shutdown == NULL)
-		return -EOPNOTSUPP;
+		return socket_result(socket, -EOPNOTSUPP);
 	error = socket->ops->shutdown(socket, (int)args[1]);
-	return error == 0 ? 0 : -error;
+	return socket_result(socket, error == 0 ? 0 : -error);
 }
 
 static intptr_t
@@ -323,22 +428,22 @@ sys_socket_name_call(const uintptr_t args[6], int peer)
 	if (socket == NULL)
 		return -EBADF;
 	if (args[1] == 0 || args[2] == 0)
-		return -EINVAL;
+		return socket_result(socket, -EINVAL);
 	memset(&address, 0, sizeof(address));
 	if (peer) {
 		if (socket->ops == NULL || socket->ops->getpeername == NULL)
-			return -EOPNOTSUPP;
+			return socket_result(socket, -EOPNOTSUPP);
 		error = socket->ops->getpeername(socket,
 		    (struct sockaddr *)&address, &length);
 	} else {
 		if (socket->ops == NULL || socket->ops->getsockname == NULL)
-			return -EOPNOTSUPP;
+			return socket_result(socket, -EOPNOTSUPP);
 		error = socket->ops->getsockname(socket,
 		    (struct sockaddr *)&address, &length);
 	}
 	if (error == 0)
 		error = copy_sockaddr_out(args[1], args[2], &address, length);
-	return error == 0 ? 0 : -error;
+	return socket_result(socket, error == 0 ? 0 : -error);
 }
 
 static intptr_t
@@ -352,7 +457,7 @@ sys_setsockopt_call(const uintptr_t args[6])
 	if (socket == NULL)
 		return -EBADF;
 	if (args[4] > sizeof(value) || (args[4] != 0 && args[3] == 0))
-		return -EINVAL;
+		return socket_result(socket, -EINVAL);
 	error = args[4] == 0 ? 0 : copyin(args[3], value, (size_t)args[4]);
 	if (error == 0)
 		error = socket_setsockopt_common(socket, (int)args[1],
@@ -361,7 +466,7 @@ sys_setsockopt_call(const uintptr_t args[6])
 	    socket->ops->setsockopt != NULL)
 		error = socket->ops->setsockopt(socket, (int)args[1],
 		    (int)args[2], value, (socklen_t)args[4]);
-	return error == 0 ? 0 : -error;
+	return socket_result(socket, error == 0 ? 0 : -error);
 }
 
 static intptr_t
@@ -376,10 +481,10 @@ sys_getsockopt_call(const uintptr_t args[6])
 	if (socket == NULL)
 		return -EBADF;
 	if (args[3] == 0 || args[4] == 0)
-		return -EINVAL;
+		return socket_result(socket, -EINVAL);
 	error = copyin(args[4], &length, sizeof(length));
 	if (error != 0)
-		return -error;
+		return socket_result(socket, -error);
 	if (length > sizeof(value))
 		length = sizeof(value);
 	error = socket_getsockopt_common(socket, (int)args[1], (int)args[2],
@@ -392,7 +497,7 @@ sys_getsockopt_call(const uintptr_t args[6])
 		error = copyout(value, args[3], length);
 	if (error == 0)
 		error = copyout(&length, args[4], sizeof(length));
-	return error == 0 ? 0 : -error;
+	return socket_result(socket, error == 0 ? 0 : -error);
 }
 
 static int
@@ -464,66 +569,114 @@ static intptr_t sys_close_call(const uintptr_t args[6])
 	return error == 0 ? 0 : -error;
 }
 
-static intptr_t sys_read_call(const uintptr_t args[6])
+static SYSCALL_EXT intptr_t sys_read_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
 	struct file *file;
+	struct uaccess_pin pin;
 	uint8_t buffer[SYSCALL_IO_CHUNK];
 	size_t done = 0, length = (size_t)args[2];
-	if (process == NULL || (file = filedesc_get(process->fd, (int)args[0])) == NULL)
+	intptr_t result;
+	int error;
+	if (process == NULL ||
+	    (file = filedesc_get_ref(process->fd, (int)args[0])) == NULL)
 		return -EBADF;
+	error = uaccess_pin(args[1], length, HAL_SPACE_WRITE, &pin);
+	if (error != 0) {
+		(void)file_close(file);
+		return -error;
+	}
 	while (done < length) {
 		size_t chunk = length - done > sizeof(buffer) ? sizeof(buffer) : length - done;
 		ssize_t count = file_read(file, buffer, chunk);
-		int error;
-		if (count < 0) return done != 0 ? (intptr_t)done : count;
+		if (count < 0) {
+			result = done != 0 ? (intptr_t)done : count;
+			goto out;
+		}
 		if (count == 0) break;
-		error = copyout(buffer, args[1] + done, (size_t)count);
-		if (error != 0) return done != 0 ? (intptr_t)done : -error;
+		error = copyout_pinned(&pin, done, buffer, (size_t)count);
+		if (error != 0) {
+			result = done != 0 ? (intptr_t)done : -error;
+			goto out;
+		}
 		done += (size_t)count;
 		if ((size_t)count < chunk) break;
 	}
-	return (intptr_t)done;
+	result = (intptr_t)done;
+out:
+	uaccess_unpin(&pin);
+	(void)file_close(file);
+	return result;
 }
 
-static intptr_t sys_write_call(const uintptr_t args[6])
+static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
 	struct file *file;
+	struct uaccess_pin pin;
 	uint8_t buffer[SYSCALL_IO_CHUNK];
 	size_t done = 0, length = (size_t)args[2];
-	if (process == NULL || (file = filedesc_get(process->fd, (int)args[0])) == NULL)
+	intptr_t result;
+	int error;
+	if (process == NULL ||
+	    (file = filedesc_get_ref(process->fd, (int)args[0])) == NULL)
 		return -EBADF;
+	error = uaccess_pin(args[1], length, HAL_SPACE_READ, &pin);
+	if (error != 0) {
+		(void)file_close(file);
+		return -error;
+	}
 	while (done < length) {
 		size_t chunk = length - done > sizeof(buffer) ? sizeof(buffer) : length - done;
 		ssize_t count;
-		int error = copyin(args[1] + done, buffer, chunk);
-		if (error != 0) return done != 0 ? (intptr_t)done : -error;
+		error = copyin_pinned(&pin, done, buffer, chunk);
+		if (error != 0) {
+			result = done != 0 ? (intptr_t)done : -error;
+			goto out;
+		}
 		count = file_write(file, buffer, chunk);
-		if (count < 0) return done != 0 ? (intptr_t)done : count;
+		if (count < 0) {
+			result = done != 0 ? (intptr_t)done : count;
+			goto out;
+		}
 		done += (size_t)count;
 		if ((size_t)count < chunk) break;
 	}
-	return (intptr_t)done;
+	result = (intptr_t)done;
+out:
+	uaccess_unpin(&pin);
+	(void)file_close(file);
+	return result;
 }
 
 static intptr_t sys_lseek_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct file *file = process != NULL ? filedesc_get(process->fd, (int)args[0]) : NULL;
-	return file == NULL ? -EBADF : file_seek(file, (off_t)args[1], (int)args[2]);
+	struct file *file = process != NULL ?
+	    filedesc_get_ref(process->fd, (int)args[0]) : NULL;
+	off_t result;
+	if (file == NULL)
+		return -EBADF;
+	result = file_seek(file, (off_t)args[1], (int)args[2]);
+	(void)file_close(file);
+	return result;
 }
 
 static intptr_t sys_fstat_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct file *file = process != NULL ? filedesc_get(process->fd, (int)args[0]) : NULL;
+	struct file *file = process != NULL ?
+	    filedesc_get_ref(process->fd, (int)args[0]) : NULL;
 	struct stat status;
 	int error;
 	if (file == NULL) return -EBADF;
-	if (file->f_inode == NULL) return -EINVAL;
+	if (file->f_inode == NULL) {
+		(void)file_close(file);
+		return -EINVAL;
+	}
 	error = inode_getattr(file->f_inode, &status);
 	if (error == 0) error = copyout(&status, args[1], sizeof(status));
+	(void)file_close(file);
 	return error == 0 ? 0 : -error;
 }
 
@@ -541,20 +694,40 @@ static uint32_t dirent_type(enum inode_type type)
 static intptr_t sys_getdents_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct file *file = process != NULL ? filedesc_get(process->fd, (int)args[0]) : NULL;
+	struct file *file = process != NULL ?
+	    filedesc_get_ref(process->fd, (int)args[0]) : NULL;
+	struct uaccess_pin pin;
 	struct zedbsd_dirent output;
 	struct dirent entry;
 	int eof, error;
 	if (file == NULL) return -EBADF;
-	if (args[2] < sizeof(output)) return -EINVAL;
+	if (args[2] < sizeof(output)) {
+		(void)file_close(file);
+		return -EINVAL;
+	}
+	error = uaccess_pin(args[1], sizeof(output), HAL_SPACE_WRITE, &pin);
+	if (error != 0) {
+		(void)file_close(file);
+		return -error;
+	}
 	error = file_readdir(file, &entry, &eof);
-	if (error != 0) return -error;
-	if (eof) return 0;
+	if (error != 0) {
+		uaccess_unpin(&pin);
+		(void)file_close(file);
+		return -error;
+	}
+	if (eof) {
+		uaccess_unpin(&pin);
+		(void)file_close(file);
+		return 0;
+	}
 	memset(&output, 0, sizeof(output));
 	output.d_ino = entry.d_ino;
 	output.d_type = dirent_type(entry.d_type);
 	strncpy(output.d_name, entry.d_name, sizeof(output.d_name) - 1U);
-	error = copyout(&output, args[1], sizeof(output));
+	error = copyout_pinned(&pin, 0, &output, sizeof(output));
+	uaccess_unpin(&pin);
+	(void)file_close(file);
 	return error == 0 ? (intptr_t)sizeof(output) : -error;
 }
 
@@ -739,8 +912,11 @@ static intptr_t sys_brk_call(const uintptr_t args[6])
 static intptr_t sys_ioctl_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct file *file = process != NULL ? filedesc_get(process->fd, (int)args[0]) : NULL;
+	struct file *file = process != NULL ?
+	    filedesc_get_ref(process->fd, (int)args[0]) : NULL;
 	int error = file == NULL ? EBADF : file_ioctl(file, args[1], args[2]);
+	if (file != NULL)
+		(void)file_close(file);
 	return error == 0 ? 0 : -error;
 }
 
@@ -839,48 +1015,71 @@ copy_exec_vector(uintptr_t address, char **vector, unsigned maximum,
 	return E2BIG;
 }
 
-static intptr_t
+static SYSCALL_EXT intptr_t
 sys_positional_call(const uintptr_t args[6], int writing)
 {
 	struct process *process = current_process();
 	struct file *file;
+	struct uaccess_pin pin;
 	uint8_t buffer[SYSCALL_IO_CHUNK];
 	size_t done = 0, length = (size_t)args[2];
 	off_t offset = (off_t)args[3];
+	intptr_t result;
+	int error;
 	if (process == NULL ||
-	    (file = filedesc_get(process->fd, (int)args[0])) == NULL)
+	    (file = filedesc_get_ref(process->fd, (int)args[0])) == NULL)
 		return -EBADF;
-	if (offset < 0)
+	if (offset < 0) {
+		(void)file_close(file);
 		return -EINVAL;
+	}
+	error = uaccess_pin(args[1], length,
+	    writing ? HAL_SPACE_READ : HAL_SPACE_WRITE, &pin);
+	if (error != 0) {
+		(void)file_close(file);
+		return -error;
+	}
 	while (done < length) {
 		size_t chunk = length - done > sizeof(buffer) ?
 		    sizeof(buffer) : length - done;
 		ssize_t count;
-		int error;
-		if (writing) {
-			error = copyin(args[1] + done, buffer, chunk);
-			if (error != 0)
-				return done != 0 ? (intptr_t)done : -error;
-			count = file_pwrite(file, buffer, chunk,
-			    offset + (off_t)done);
-		} else {
-			count = file_pread(file, buffer, chunk,
-			    offset + (off_t)done);
+		off_t current;
+		error = off_add_size(offset, done, &current);
+		if (error != 0) {
+			result = done != 0 ? (intptr_t)done : -error;
+			goto out;
 		}
-		if (count < 0)
-			return done != 0 ? (intptr_t)done : count;
+		if (writing) {
+			error = copyin_pinned(&pin, done, buffer, chunk);
+			if (error != 0)
+				goto copy_error;
+			count = file_pwrite(file, buffer, chunk, current);
+		} else {
+			count = file_pread(file, buffer, chunk, current);
+		}
+		if (count < 0) {
+			result = done != 0 ? (intptr_t)done : count;
+			goto out;
+		}
 		if (count == 0)
 			break;
 		if (!writing) {
-			error = copyout(buffer, args[1] + done, (size_t)count);
+			error = copyout_pinned(&pin, done, buffer, (size_t)count);
 			if (error != 0)
-				return done != 0 ? (intptr_t)done : -error;
+				goto copy_error;
 		}
 		done += (size_t)count;
 		if ((size_t)count < chunk)
 			break;
 	}
-	return (intptr_t)done;
+	result = (intptr_t)done;
+	goto out;
+copy_error:
+	result = done != 0 ? (intptr_t)done : -error;
+out:
+	uaccess_unpin(&pin);
+	(void)file_close(file);
+	return result;
 }
 
 #ifdef ZEDBSD_USER_ABI_LP64
@@ -889,32 +1088,56 @@ struct syscall_iovec { uint64_t base, length; };
 struct syscall_iovec { uint32_t base, length; };
 #endif
 
-static intptr_t
+static SYSCALL_EXT intptr_t
 sys_vector_call(const uintptr_t args[6], int writing)
 {
-	int count = (int)args[2], i;
+	struct syscall_iovec vectors[16];
+	struct uaccess_pin pins[16];
+	int count = (int)args[2], i, pinned = 0;
 	intptr_t total = 0;
+	int error;
 	if (count < 0 || count > 16)
 		return -EINVAL;
+	if (count == 0)
+		return 0;
+	if ((size_t)count > SIZE_MAX / sizeof(vectors[0]))
+		return -EOVERFLOW;
+	error = copyin(args[1], vectors, (size_t)count * sizeof(vectors[0]));
+	if (error != 0)
+		return -error;
 	for (i = 0; i < count; i++) {
-		struct syscall_iovec vector;
-		uintptr_t scalar[6] = { args[0], 0, 0, 0, 0, 0 };
-		intptr_t result;
-		int error = copyin(args[1] + (uintptr_t)i * sizeof(vector),
-		    &vector, sizeof(vector));
+		if (vectors[i].length > (uint64_t)SSIZE_MAX - (uint64_t)total) {
+			error = EINVAL;
+			goto fail;
+		}
+		error = uaccess_pin((uintptr_t)vectors[i].base,
+		    (size_t)vectors[i].length,
+		    writing ? HAL_SPACE_READ : HAL_SPACE_WRITE, &pins[i]);
 		if (error != 0)
-			return total != 0 ? total : -error;
-		if (vector.length > (uint64_t)INT32_MAX - (uint64_t)total)
-			return total != 0 ? total : -EINVAL;
-		scalar[1] = (uintptr_t)vector.base;
-		scalar[2] = (uintptr_t)vector.length;
+			goto fail;
+		pinned++;
+		total += (intptr_t)vectors[i].length;
+	}
+	total = 0;
+	for (i = 0; i < count; i++) {
+		uintptr_t scalar[6] = { args[0], (uintptr_t)vectors[i].base,
+		    (uintptr_t)vectors[i].length, 0, 0, 0 };
+		intptr_t result;
 		result = writing ? sys_write_call(scalar) : sys_read_call(scalar);
-		if (result < 0)
-			return total != 0 ? total : result;
+		if (result < 0) {
+			total = total != 0 ? total : result;
+			goto out;
+		}
 		total += result;
-		if ((uintptr_t)result < (uintptr_t)vector.length)
+		if ((uintptr_t)result < (uintptr_t)vectors[i].length)
 			break;
 	}
+	goto out;
+fail:
+	total = -error;
+out:
+	while (pinned != 0)
+		uaccess_unpin(&pins[--pinned]);
 	return total;
 }
 
@@ -923,12 +1146,14 @@ sys_fsync_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
 	struct file *file = process != NULL ?
-	    filedesc_get(process->fd, (int)args[0]) : NULL;
+	    filedesc_get_ref(process->fd, (int)args[0]) : NULL;
 	int error = file == NULL ? EBADF :
 	    file_vm_inode(file) == NULL ? EINVAL :
 	    vm_object_sync_inode(file_vm_inode(file));
 	if (error == 0 && file != NULL)
 		error = file_fsync(file);
+	if (file != NULL)
+		(void)file_close(file);
 	return error == 0 ? 0 : -error;
 }
 
@@ -984,11 +1209,13 @@ sys_truncate_call(const uintptr_t args[6], int by_fd)
 	if (process == NULL || length < 0)
 		return -EINVAL;
 	if (by_fd) {
-		file = filedesc_get(process->fd, (int)args[0]);
+		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
 			return -EBADF;
-		if ((file->f_flags & O_ACCMODE) == O_RDONLY)
+		if ((file->f_flags & O_ACCMODE) == O_RDONLY) {
+			(void)file_close(file);
 			return -EBADF;
+		}
 		inode = file->f_inode;
 	} else {
 		error = copyinstr(args[0], pathname, sizeof(pathname), NULL);
@@ -1010,6 +1237,8 @@ sys_truncate_call(const uintptr_t args[6], int by_fd)
 		vm_object_truncate_inode(inode, length);
 	if (!by_fd)
 		path_release(&path);
+	else
+		(void)file_close(file);
 	return error == 0 ? 0 : -error;
 }
 
@@ -1440,7 +1669,7 @@ sys_chown_common(int dirfd, uintptr_t pathname, int fd, uid_t uid, gid_t gid,
 }
 
 static int
-valid_utime_nsec(int32_t nanoseconds)
+valid_utime_nsec(long nanoseconds)
 {
 	return (nanoseconds >= 0 && nanoseconds < 1000000000L) ||
 		nanoseconds == UTIME_NOW || nanoseconds == UTIME_OMIT;
@@ -1857,16 +2086,23 @@ sys_fcntl_call(const uintptr_t args[6])
 		    ((int)args[2] & FD_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0);
 		return error == 0 ? 0 : -error;
 	case F_GETFL:
-		file = filedesc_get(process->fd, (int)args[0]);
-		return file != NULL ? file->f_flags : -EBADF;
-	case F_SETFL:
-		file = filedesc_get(process->fd, (int)args[0]);
+		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
 			return -EBADF;
-		if (((int)args[2] & ~(O_APPEND | O_NONBLOCK)) != 0)
+		result = file->f_flags;
+		(void)file_close(file);
+		return result;
+	case F_SETFL:
+		file = filedesc_get_ref(process->fd, (int)args[0]);
+		if (file == NULL)
+			return -EBADF;
+		if (((int)args[2] & ~(O_APPEND | O_NONBLOCK)) != 0) {
+			(void)file_close(file);
 			return -EINVAL;
+		}
 		file->f_flags = (file->f_flags & ~(O_APPEND | O_NONBLOCK)) |
 		    ((int)args[2] & (O_APPEND | O_NONBLOCK));
+		(void)file_close(file);
 		return 0;
 	default:
 		return -EINVAL;
@@ -1943,20 +2179,43 @@ sys_execve_call(const uintptr_t args[6])
 	return error == 0 ? 0 : -error;
 }
 
-static intptr_t
+static SYSCALL_EXT intptr_t
 sys_waitpid_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
+	struct process_wait_event event;
+	struct uaccess_pin pin;
 	int status = 0;
 	pid_t result;
-	int error;
+	int error = 0;
 	if (args[3] != 0 || args[4] != 0 || args[5] != 0)
 		return -EINVAL;
-	result = process_waitpid(process, (pid_t)args[0], &status,
-	    (int)args[2]);
-	if (result <= 0 || args[1] == 0)
+	if (args[1] != 0) {
+		error = uaccess_pin(args[1], sizeof(status), HAL_SPACE_WRITE, &pin);
+		if (error != 0)
+			return -error;
+	} else
+		memset(&pin, 0, sizeof(pin));
+	result = process_wait_select(process, (pid_t)args[0], (int)args[2],
+	    &event);
+	if (result <= 0 || args[1] == 0) {
+		if (result > 0) {
+			error = process_wait_commit(&event);
+			if (error != 0) {
+				process_wait_abort(&event);
+				result = -error;
+			}
+		}
+		uaccess_unpin(&pin);
 		return result;
-	error = copyout(&status, args[1], sizeof(status));
+	}
+	status = event.status;
+	error = copyout_pinned(&pin, 0, &status, sizeof(status));
+	if (error == 0)
+		error = process_wait_commit(&event);
+	if (error != 0)
+		process_wait_abort(&event);
+	uaccess_unpin(&pin);
 	return error == 0 ? result : -error;
 }
 
@@ -2023,11 +2282,12 @@ sys_spawn_call(const uintptr_t args[6])
 	return error == 0 ? child->pid : -error;
 }
 
-static intptr_t
+static SYSCALL_EXT intptr_t
 sys_wait_call(const uintptr_t args[6])
 {
 	struct process *parent = current_process();
 	struct process *child;
+	struct uaccess_pin status_pin, result_pin;
 	char result[PROCESS_RESULT_MAX];
 	size_t capacity;
 	pid_t pid = (pid_t)args[0];
@@ -2039,14 +2299,36 @@ sys_wait_call(const uintptr_t args[6])
 	if (child == NULL || child->parent != parent)
 		return -ECHILD;
 	capacity = args[4] > sizeof(result) ? sizeof(result) : (size_t)args[4];
+	memset(&status_pin, 0, sizeof(status_pin));
+	memset(&result_pin, 0, sizeof(result_pin));
+	if (args[1] != 0) {
+		error = uaccess_pin(args[1], sizeof(status), HAL_SPACE_WRITE,
+		    &status_pin);
+		if (error != 0)
+			return -error;
+	}
+	if (capacity != 0) {
+		error = uaccess_pin(args[3], capacity, HAL_SPACE_WRITE, &result_pin);
+		if (error != 0) {
+			uaccess_unpin(&status_pin);
+			return -error;
+		}
+	}
 	memset(result, 0, sizeof(result));
 	error = process_wait(child, &status, capacity != 0 ? result : NULL,
 			     capacity);
+	if (error != 0) {
+		uaccess_unpin(&result_pin);
+		uaccess_unpin(&status_pin);
+		return -error;
+	}
+	if (args[1] != 0)
+		error = copyout_pinned(&status_pin, 0, &status, sizeof(status));
+	if (error == 0 && capacity != 0)
+		error = copyout_pinned(&result_pin, 0, result, capacity);
+	uaccess_unpin(&result_pin);
+	uaccess_unpin(&status_pin);
 	if (error != 0)
-		return -error;
-	if (args[1] != 0 && (error = copyout(&status, args[1], sizeof(status))) != 0)
-		return -error;
-	if (capacity != 0 && (error = copyout(result, args[3], capacity)) != 0)
 		return -error;
 	return pid;
 }

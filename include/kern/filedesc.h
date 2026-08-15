@@ -24,7 +24,6 @@ struct filedesc {
 
 struct filedesc *filedesc_create(void);
 void filedesc_destroy(struct filedesc *);
-struct file *filedesc_get(struct filedesc *, int descriptor);
 struct file *filedesc_get_ref(struct filedesc *, int descriptor);
 int filedesc_install(struct filedesc *, struct file *, int *descriptor);
 int filedesc_install_from(struct filedesc *, struct file *, unsigned,

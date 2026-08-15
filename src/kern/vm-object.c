@@ -38,10 +38,17 @@ vm_object_get_shared(struct file *file, struct vm_object **result)
 {
 	struct vm_object *object;
 	struct inode *inode = file_vm_inode(file);
+	int writable;
 	if (file == NULL || inode == NULL || result == NULL)
 		return EINVAL;
+	writable = (file->f_flags & O_ACCMODE) != O_RDONLY &&
+	    file->f_ops != NULL && file->f_ops->pwrite != NULL;
 	for (object = shared_objects; object != NULL; object = object->next) {
 		if (object->inode == inode) {
+			if (writable && object->write_file == NULL) {
+				file_ref(file);
+				object->write_file = file;
+			}
 			object->usecount++;
 			*result = object;
 			return 0;
@@ -54,6 +61,10 @@ vm_object_get_shared(struct file *file, struct vm_object **result)
 	object->file = file;
 	object->inode = inode;
 	file_ref(file);
+	if (writable) {
+		object->write_file = file;
+		file_ref(file);
+	}
 	object->next = shared_objects;
 	shared_objects = object;
 	object_count++;
@@ -94,13 +105,16 @@ write_page(struct vm_object *object, struct vm_object_page *page)
 	ssize_t count;
 	if (!page_is_dirty(page))
 		return 0;
+	if (object->write_file == NULL)
+		return EACCES;
 	if (page->offset < 0 || page->offset >= object->inode->i_size)
 		return 0;
 	length = (size_t)(object->inode->i_size - page->offset);
 	if (length > PAGE_SIZE)
 		length = PAGE_SIZE;
 	page->flags |= VM_OBJECT_PAGE_BUSY;
-	count = file_pwrite(object->file, (const void *)page->pmem.vaddr,
+	count = file_pwrite(object->write_file,
+	    (const void *)page->pmem.vaddr,
 	    length, page->offset);
 	page->flags &= ~VM_OBJECT_PAGE_BUSY;
 	if (count != (ssize_t)length) {
@@ -145,6 +159,8 @@ vm_object_put(struct vm_object *object)
 		free_object_page(page);
 	}
 	(void)file_close(object->file);
+	if (object->write_file != NULL)
+		(void)file_close(object->write_file);
 	kern_free(object);
 	if (object_count != 0)
 		object_count--;

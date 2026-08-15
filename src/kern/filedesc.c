@@ -36,19 +36,18 @@ filedesc_destroy(struct filedesc *fd)
 }
 
 struct file *
-filedesc_get(struct filedesc *fd, int descriptor)
-{
-	if (fd == NULL || descriptor < 0 || descriptor >= KERN_OPEN_MAX)
-		return NULL;
-	return fd->entries[descriptor].file;
-}
-
-struct file *
 filedesc_get_ref(struct filedesc *fd, int descriptor)
 {
-	struct file *file = filedesc_get(fd, descriptor);
+	struct file *file;
+	bool enabled;
+	if (fd == NULL || descriptor < 0 || descriptor >= KERN_OPEN_MAX)
+		return NULL;
+	enabled = hal_irq_disable();
+	file = fd->entries[descriptor].file;
 	if (file != NULL)
 		file_ref(file);
+	if (enabled)
+		hal_irq_enable();
 	return file;
 }
 
@@ -63,41 +62,63 @@ filedesc_install_from(struct filedesc *fd, struct file *file, unsigned flags,
 		      int minimum, int *descriptor)
 {
 	int i;
+	bool enabled;
 	if (fd == NULL || file == NULL || descriptor == NULL || minimum < 0 ||
 	    minimum >= KERN_OPEN_MAX || (flags & ~FILEDESC_CLOEXEC) != 0)
 		return EINVAL;
+	enabled = hal_irq_disable();
 	for (i = minimum; i < KERN_OPEN_MAX; i++)
 		if (fd->entries[i].file == NULL) {
 			fd->entries[i].file = file;
 			fd->entries[i].flags = flags;
 			*descriptor = i;
+			if (enabled)
+				hal_irq_enable();
 			return 0;
 		}
+	if (enabled)
+		hal_irq_enable();
 	return EMFILE;
 }
 
 int
 filedesc_install_at(struct filedesc *fd, struct file *file, int descriptor)
 {
+	bool enabled;
 	if (fd == NULL || file == NULL || descriptor < 0 ||
 	    descriptor >= KERN_OPEN_MAX)
 		return EINVAL;
-	if (fd->entries[descriptor].file != NULL)
+	enabled = hal_irq_disable();
+	if (fd->entries[descriptor].file != NULL) {
+		if (enabled)
+			hal_irq_enable();
 		return EBUSY;
+	}
 	fd->entries[descriptor].file = file;
 	fd->entries[descriptor].flags = 0;
+	if (enabled)
+		hal_irq_enable();
 	return 0;
 }
 
 int
 filedesc_take(struct filedesc *fd, int descriptor, struct file **result)
 {
+	bool enabled;
 	if (fd == NULL || result == NULL || descriptor < 0 ||
-	    descriptor >= KERN_OPEN_MAX || fd->entries[descriptor].file == NULL)
+	    descriptor >= KERN_OPEN_MAX)
 		return EBADF;
+	enabled = hal_irq_disable();
+	if (fd->entries[descriptor].file == NULL) {
+		if (enabled)
+			hal_irq_enable();
+		return EBADF;
+	}
 	*result = fd->entries[descriptor].file;
 	fd->entries[descriptor].file = NULL;
 	fd->entries[descriptor].flags = 0;
+	if (enabled)
+		hal_irq_enable();
 	return 0;
 }
 
@@ -116,11 +137,10 @@ filedesc_clone_stdio(struct filedesc *source, struct filedesc *destination)
 	if (source == NULL || destination == NULL)
 		return EINVAL;
 	for (descriptor = 0; descriptor < 3; descriptor++) {
-		struct file *file = filedesc_get(source, descriptor);
+		struct file *file = filedesc_get_ref(source, descriptor);
 		int error;
 		if (file == NULL)
 			continue;
-		file_ref(file);
 		error = filedesc_install_at(destination, file, descriptor);
 		if (error != 0) {
 			(void)file_close(file);
@@ -134,6 +154,7 @@ int
 filedesc_clone(struct filedesc *source, struct filedesc **result)
 {
 	struct filedesc *copy;
+	bool enabled;
 	int descriptor;
 
 	if (source == NULL || result == NULL)
@@ -141,6 +162,7 @@ filedesc_clone(struct filedesc *source, struct filedesc **result)
 	copy = filedesc_create();
 	if (copy == NULL)
 		return ENOMEM;
+	enabled = hal_irq_disable();
 	for (descriptor = 0; descriptor < KERN_OPEN_MAX; descriptor++) {
 		struct file *file = source->entries[descriptor].file;
 		if (file == NULL)
@@ -149,6 +171,8 @@ filedesc_clone(struct filedesc *source, struct filedesc **result)
 		copy->entries[descriptor].file = file;
 		copy->entries[descriptor].flags = source->entries[descriptor].flags;
 	}
+	if (enabled)
+		hal_irq_enable();
 	*result = copy;
 	return 0;
 }
@@ -156,22 +180,39 @@ filedesc_clone(struct filedesc *source, struct filedesc **result)
 int
 filedesc_get_flags(struct filedesc *fd, int descriptor, unsigned *flags)
 {
+	bool enabled;
 	if (fd == NULL || flags == NULL || descriptor < 0 ||
-	    descriptor >= KERN_OPEN_MAX || fd->entries[descriptor].file == NULL)
+	    descriptor >= KERN_OPEN_MAX)
 		return EBADF;
+	enabled = hal_irq_disable();
+	if (fd->entries[descriptor].file == NULL) {
+		if (enabled)
+			hal_irq_enable();
+		return EBADF;
+	}
 	*flags = fd->entries[descriptor].flags;
+	if (enabled)
+		hal_irq_enable();
 	return 0;
 }
 
 int
 filedesc_set_flags(struct filedesc *fd, int descriptor, unsigned flags)
 {
+	bool enabled;
 	if ((flags & ~FILEDESC_CLOEXEC) != 0)
 		return EINVAL;
-	if (fd == NULL || descriptor < 0 || descriptor >= KERN_OPEN_MAX ||
-	    fd->entries[descriptor].file == NULL)
+	if (fd == NULL || descriptor < 0 || descriptor >= KERN_OPEN_MAX)
 		return EBADF;
+	enabled = hal_irq_disable();
+	if (fd->entries[descriptor].file == NULL) {
+		if (enabled)
+			hal_irq_enable();
+		return EBADF;
+	}
 	fd->entries[descriptor].flags = flags;
+	if (enabled)
+		hal_irq_enable();
 	return 0;
 }
 
@@ -189,16 +230,15 @@ filedesc_dup(struct filedesc *fd, int oldfd, int minimum, unsigned flags,
 		return oldfd < 0 || oldfd >= KERN_OPEN_MAX ? EBADF : EINVAL;
 	enabled = hal_irq_disable();
 	file = fd->entries[oldfd].file;
-	if (file == NULL)
-		error = EBADF;
-	else {
+	if (file != NULL)
 		file_ref(file);
-		error = filedesc_install_from(fd, file, flags, minimum, result);
-		if (error != 0)
-			(void)file_close(file);
-	}
 	if (enabled)
 		hal_irq_enable();
+	if (file == NULL)
+		return EBADF;
+	error = filedesc_install_from(fd, file, flags, minimum, result);
+	if (error != 0)
+		(void)file_close(file);
 	return error;
 }
 

@@ -32,7 +32,9 @@ struct vm_object_page {
 
 struct vm_object {
 	unsigned usecount;
+	/* file is retained for reads; write_file carries write capability. */
 	struct file *file;
+	struct file *write_file;
 	struct inode *inode;
 	struct vm_object_page *pages;
 	int writeback_error;

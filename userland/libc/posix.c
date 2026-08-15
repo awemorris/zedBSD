@@ -3,6 +3,7 @@
 #include "libc/heap.h"
 
 #include <zedbsd/dirent.h>
+#include <zedbsd/console.h>
 #include <zedbsd/syscall.h>
 #include <zedbsd/process.h>
 #include <zedbsd/netif.h>
@@ -310,7 +311,14 @@ int lchown(const char *path, uid_t uid, gid_t gid) { return (int)call(ZEDBSD_SYS
 int fchownat(int dirfd, const char *path, uid_t uid, gid_t gid, int flags) { return (int)call(ZEDBSD_SYS_fchownat, dirfd, (uintptr_t)path, uid, gid, flags, 0); }
 int utimensat(int dirfd, const char *path, const struct timespec times[2], int flags) { return (int)call(ZEDBSD_SYS_utimensat, dirfd, (uintptr_t)path, (uintptr_t)times, flags, 0, 0); }
 int futimens(int fd, const struct timespec times[2]) { return (int)call(ZEDBSD_SYS_futimens, fd, (uintptr_t)times, 0, 0, 0, 0); }
-int isatty(int fd) { struct stat st; return fstat(fd, &st) == 0 && S_ISCHR(st.st_mode); }
+int isatty(int fd)
+{
+	if (ioctl(fd, ZEDBSD_CONSOLE_ISATTY) == 0)
+		return 1;
+	if (errno != EBADF)
+		errno = ENOTTY;
+	return 0;
+}
 int fileno(void *stream) {
 	FILE *file = stream;
 	return file == NULL || file->context == NULL ? -1 : (int)(intptr_t)file->context - 1;

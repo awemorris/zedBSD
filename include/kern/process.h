@@ -30,6 +30,21 @@ enum process_state {
 	PROCESS_DEAD,
 };
 
+enum process_wait_kind {
+	PROCESS_WAIT_NONE = 0,
+	PROCESS_WAIT_EXITED,
+	PROCESS_WAIT_STOPPED,
+	PROCESS_WAIT_CONTINUED,
+};
+
+struct process_wait_event {
+	struct process *parent;
+	struct process *child;
+	pid_t pid;
+	int status;
+	enum process_wait_kind kind;
+};
+
 struct process {
 	pid_t pid;
 	pid_t pgrp;
@@ -45,13 +60,14 @@ struct process {
 	int wait_status;
 	unsigned wait_stopped;
 	unsigned wait_continued;
+	enum process_wait_kind wait_reserved;
 	struct process *parent;
 	struct process *children;
 	struct process *sibling;
 	struct process *all_next;
 	struct thread *threads;
 	struct thread *waiter;
-	struct thread *child_waiter;
+	struct thread *child_waiters;
 	struct vmspace *vmspace;
 	struct filedesc *fd;
 	struct cwdinfo *cwdi;
@@ -77,6 +93,10 @@ void process_free_mem(struct process *process);
 int process_wait(struct process *, int *status, char *result,
 		 size_t result_capacity);
 pid_t process_waitpid(struct process *, pid_t, int *, int);
+pid_t process_wait_select(struct process *, pid_t, int,
+			  struct process_wait_event *);
+int process_wait_commit(struct process_wait_event *);
+void process_wait_abort(struct process_wait_event *);
 int process_quiesce_users(void);
 void process_force_quiesce_users(void);
 void process_note_stopped(struct process *, int);

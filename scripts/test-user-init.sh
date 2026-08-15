@@ -230,12 +230,13 @@ while not expect_failure and time.monotonic() < deadline:
 	    # The real libc performs several calls.  Do not accept the
 	    # first brk observation before the final exit trap has updated
             # the same record.
-            if ((mode == 'int' and fields[1] >= 3 and fields[5] == 1) or
+            if (fields[-2] == 1 and
+                ((mode == 'int' and fields[1] >= 3 and fields[5] == 1) or
                 (mode == 'stack' and fields[1] >= 4 and fields[5] == 1) or
                 (mode == 'swap' and
                  (fields[5] == 0x53574150 or
                   (fields[1] >= 5 and fields[5] == 1))) or
-                mode not in ('int', 'swap')):
+                mode not in ('int', 'swap'))):
                 record = fields
                 break
     time.sleep(.25)

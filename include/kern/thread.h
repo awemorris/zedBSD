@@ -35,6 +35,8 @@ struct thread {
 	int exit_status;
 	struct sched sched;
 	struct thread *proc_next;
+	/* Intrusive link used only while sleeping on a process child event. */
+	struct thread *wait_next;
 	void (*kernel_entry)(void *);
 	void *kernel_arg;
 	uint32_t signal_mask;

@@ -184,6 +184,7 @@ elf32_load(struct file *file, struct vmspace *vm,
 
 	for (i = 0; i < header.e_phnum; i++) {
 		struct elf32_phdr *program = &programs[i];
+		struct vm_region *region;
 		uint32_t start, end;
 		if (program->p_type != PT_LOAD)
 			continue;
@@ -193,9 +194,10 @@ elf32_load(struct file *file, struct vmspace *vm,
 		error = vmspace_map_file(vm, start, end - start,
 			segment_prot(program->p_flags), file,
 			(off_t)program->p_offset, program->p_vaddr,
-			program->p_filesz, NULL);
+			program->p_filesz, &region);
 		if (error != 0)
 			goto out;
+		region->flags |= VM_REGION_ELF_ZERO_TAIL;
 	}
 	vm->entry = header.e_entry;
 	image->entry = header.e_entry;
@@ -325,6 +327,7 @@ elf64_load(struct file *file, struct vmspace *vm,
 
 	for (i = 0; i < header.e_phnum; i++) {
 		struct elf64_phdr *program = &programs[i];
+		struct vm_region *region;
 		uintptr_t start, end;
 		if (program->p_type != PT_LOAD)
 			continue;
@@ -334,9 +337,10 @@ elf64_load(struct file *file, struct vmspace *vm,
 		error = vmspace_map_file(vm, start, end - start,
 			segment_prot(program->p_flags), file,
 			(off_t)program->p_offset, (uintptr_t)program->p_vaddr,
-			(size_t)program->p_filesz, NULL);
+			(size_t)program->p_filesz, &region);
 		if (error != 0)
 			goto out;
+		region->flags |= VM_REGION_ELF_ZERO_TAIL;
 	}
 	vm->entry = (uintptr_t)header.e_entry;
 	image->entry = (uintptr_t)header.e_entry;

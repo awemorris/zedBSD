@@ -120,8 +120,11 @@ setup_standard_files(struct process *parent, struct process *process)
 		return error;
 	for (descriptor = 0; descriptor < 3; descriptor++) {
 		struct file *file;
-		if (filedesc_get(process->fd, descriptor) != NULL)
+		file = filedesc_get_ref(process->fd, descriptor);
+		if (file != NULL) {
+			(void)file_close(file);
 			continue;
+		}
 		error = file_openat_cred(process->cwdi, process->cred, "/dev/console",
 			flags[descriptor], 0, &file);
 		if (error != 0)

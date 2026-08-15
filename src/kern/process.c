@@ -21,6 +21,59 @@ struct process process0;
 static struct process *all_processes;
 static pid_t next_pid = 1;
 static struct thread *reaper_thread;
+#define PROCESS_EXT __attribute__((section(".hightext")))
+
+/* All helpers below are called with local interrupts disabled. */
+static PROCESS_EXT void
+child_waiter_add(struct process *parent, struct thread *thread)
+{
+	struct thread *entry;
+	for (entry = parent->child_waiters; entry != NULL;
+	     entry = entry->wait_next)
+		if (entry == thread)
+			return;
+	thread->wait_next = parent->child_waiters;
+	parent->child_waiters = thread;
+}
+
+static PROCESS_EXT void
+child_waiter_remove(struct process *parent, struct thread *thread)
+{
+	struct thread **link = &parent->child_waiters;
+	while (*link != NULL && *link != thread)
+		link = &(*link)->wait_next;
+	if (*link == thread)
+		*link = thread->wait_next;
+	thread->wait_next = NULL;
+}
+
+static PROCESS_EXT void
+child_waiters_wake(struct process *parent)
+{
+	struct thread *thread;
+	for (thread = parent != NULL ? parent->child_waiters : NULL;
+	     thread != NULL; thread = thread->wait_next)
+		sched_wakeup(thread);
+}
+
+static PROCESS_EXT void
+reparent_children(struct process *process)
+{
+	struct process *child;
+	int wake_reaper = 0;
+
+	while ((child = process->children) != NULL) {
+		process->children = child->sibling;
+		child->parent = &process0;
+		child->flags |= PROCESS_AUTOREAP;
+		child->sibling = process0.children;
+		process0.children = child;
+		if (child->state == PROCESS_ZOMBIE)
+			wake_reaper = 1;
+	}
+	if (wake_reaper && reaper_thread != NULL)
+		sched_wakeup(reaper_thread);
+}
 
 void
 process_init(void)
@@ -284,6 +337,8 @@ process_free_mem(struct process *process)
 	if (process == NULL || process == &process0 || process->thread_count != 0 ||
 	    process == curthread->proc)
 		return;
+	if (process->children != NULL)
+		HAL_FATAL("freeing process with children");
 	if (process->vmspace != NULL)
 		vmspace_free(process->vmspace);
 	filedesc_destroy(process->fd);
@@ -358,67 +413,155 @@ wait_selector_matches(const struct process *child, pid_t selector,
 	return child->pgrp == -selector;
 }
 
-pid_t
-process_waitpid(struct process *parent, pid_t selector, int *status,
-		int options)
+PROCESS_EXT pid_t
+process_wait_select(struct process *parent, pid_t selector, int options,
+		    struct process_wait_event *event)
 {
+	bool enabled;
+
 	if (parent == NULL || parent != curthread->proc || selector == INT32_MIN ||
+	    event == NULL ||
 	    (options & ~(WNOHANG | WUNTRACED | WCONTINUED)) != 0)
 		return -EINVAL;
+	memset(event, 0, sizeof(*event));
+	enabled = hal_irq_disable();
 	for (;;) {
-		struct process *child, *zombie = NULL;
+		struct process *child;
 		int matched = 0;
 		for (child = parent->children; child != NULL; child = child->sibling) {
 			if (!wait_selector_matches(child, selector, parent->pgrp))
 				continue;
 			matched = 1;
+			if (child->wait_reserved != PROCESS_WAIT_NONE)
+				continue;
 			if ((options & WUNTRACED) != 0 && child->wait_stopped) {
-				pid_t pid = child->pid;
-				if (status != NULL)
-					*status = child->wait_status;
-				child->wait_stopped = 0;
-				return pid;
+				event->kind = PROCESS_WAIT_STOPPED;
+				event->status = child->wait_status;
+				goto reserve;
 			}
 			if ((options & WCONTINUED) != 0 && child->wait_continued) {
-				pid_t pid = child->pid;
-				if (status != NULL)
-					*status = 0xffff;
-				child->wait_continued = 0;
-				return pid;
+				event->kind = PROCESS_WAIT_CONTINUED;
+				event->status = 0xffff;
+				goto reserve;
 			}
 			if (child->state == PROCESS_ZOMBIE) {
-				zombie = child;
-				break;
+				event->kind = PROCESS_WAIT_EXITED;
+				event->status = child->exit_status;
+				goto reserve;
 			}
+			continue;
+reserve:
+			child->wait_reserved = event->kind;
+			event->parent = parent;
+			event->child = child;
+			event->pid = child->pid;
+			if (enabled)
+				hal_irq_enable();
+			return event->pid;
 		}
-		if (!matched)
+		if (!matched) {
+			if (enabled)
+				hal_irq_enable();
 			return -ECHILD;
-		if (zombie != NULL) {
-			pid_t pid = zombie->pid;
-			struct thread *thread = zombie->threads;
-			int child_status = zombie->exit_status;
-			int error;
-			if (thread == NULL)
-				return -ECHILD;
-			error = thread_wait(thread, NULL);
-			if (error != 0)
-				return -error;
-			if (status != NULL)
-				*status = child_status;
-			process_free_mem(zombie);
-			return pid;
 		}
-		if ((options & WNOHANG) != 0)
+		if ((options & WNOHANG) != 0) {
+			if (enabled)
+				hal_irq_enable();
 			return 0;
-		if (parent->child_waiter != NULL &&
-		    parent->child_waiter != curthread)
-			return -EBUSY;
-		parent->child_waiter = curthread;
+		}
+		child_waiter_add(parent, curthread);
 		sched_sleep(0);
-		parent->child_waiter = NULL;
-		if (signal_pending_unblocked(curthread))
+		child_waiter_remove(parent, curthread);
+		if (signal_pending_unblocked(curthread)) {
+			if (enabled)
+				hal_irq_enable();
 			return -EINTR;
+		}
 	}
+}
+
+PROCESS_EXT int
+process_wait_commit(struct process_wait_event *event)
+{
+	struct process *child;
+	bool enabled;
+	int error = 0;
+
+	if (event == NULL || event->parent == NULL || event->child == NULL ||
+	    event->kind == PROCESS_WAIT_NONE)
+		return EINVAL;
+	enabled = hal_irq_disable();
+	child = event->child;
+	if (child->parent != event->parent || child->pid != event->pid ||
+	    child->wait_reserved != event->kind) {
+		error = ECHILD;
+		goto out;
+	}
+	if (event->kind == PROCESS_WAIT_STOPPED)
+		child->wait_stopped = 0;
+	else if (event->kind == PROCESS_WAIT_CONTINUED)
+		child->wait_continued = 0;
+	else {
+		struct thread *thread = child->threads;
+		if (child->state != PROCESS_ZOMBIE || thread == NULL) {
+			error = ECHILD;
+			goto out;
+		}
+		error = thread_wait(thread, NULL);
+		if (error != 0)
+			goto out;
+		child->wait_reserved = PROCESS_WAIT_NONE;
+		process_free_mem(child);
+		memset(event, 0, sizeof(*event));
+		goto done;
+	}
+	child->wait_reserved = PROCESS_WAIT_NONE;
+	child_waiters_wake(event->parent);
+out:
+	if (error != 0 && child->wait_reserved == event->kind)
+		child->wait_reserved = PROCESS_WAIT_NONE;
+	done:
+	if (enabled)
+		hal_irq_enable();
+	if (error == 0)
+		memset(event, 0, sizeof(*event));
+	return error;
+}
+
+PROCESS_EXT void
+process_wait_abort(struct process_wait_event *event)
+{
+	bool enabled;
+	if (event == NULL || event->child == NULL || event->parent == NULL)
+		return;
+	enabled = hal_irq_disable();
+	if (event->child->parent == event->parent &&
+	    event->child->wait_reserved == event->kind) {
+		event->child->wait_reserved = PROCESS_WAIT_NONE;
+		child_waiters_wake(event->parent);
+	}
+	if (enabled)
+		hal_irq_enable();
+	memset(event, 0, sizeof(*event));
+}
+
+PROCESS_EXT pid_t
+process_waitpid(struct process *parent, pid_t selector, int *status,
+		int options)
+{
+	struct process_wait_event event;
+	pid_t pid = process_wait_select(parent, selector, options, &event);
+	int error;
+	if (pid <= 0)
+		return pid;
+	if (status != NULL)
+		*status = event.status;
+	error = process_wait_commit(&event);
+	if (error != 0) {
+		process_wait_abort(&event);
+		return -error;
+	}
+	return pid;
 }
 
 static void
@@ -428,8 +571,7 @@ notify_parent_event(struct process *process)
 	    process->parent == &process0)
 		return;
 	(void)signal_send_process(process->parent, SIGCHLD);
-	if (process->parent->child_waiter != NULL)
-		sched_wakeup(process->parent->child_waiter);
+	child_waiters_wake(process->parent);
 }
 
 void
@@ -536,6 +678,7 @@ process_exit_final(int thread_status, int wait_status)
 	cwdinfo_release(process->cwdi);
 	process->cwdi = NULL;
 	enabled = hal_irq_disable();
+	reparent_children(process);
 	process->exit_status = wait_status;
 	process->state = PROCESS_ZOMBIE;
 	if (process->parent != NULL && process->parent != &process0)
@@ -545,8 +688,8 @@ process_exit_final(int thread_status, int wait_status)
 	waiter = process->waiter;
 	if (waiter != NULL)
 		sched_wakeup(waiter);
-	if (process->parent != NULL && process->parent->child_waiter != NULL)
-		sched_wakeup(process->parent->child_waiter);
+	if (process->parent != NULL)
+		child_waiters_wake(process->parent);
 	(void)enabled;
 	thread_exit(thread_status);
 }

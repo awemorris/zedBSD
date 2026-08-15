@@ -79,5 +79,7 @@ struct zedbsd_console_key_state {
 #define ZEDBSD_CONSOLE_KEY_STATE \
 	_IOWR(ZEDBSD_CONSOLE_IOC_GROUP, 11, struct zedbsd_console_key_state)
 #define ZEDBSD_CONSOLE_DRAIN_INPUT _IO(ZEDBSD_CONSOLE_IOC_GROUP, 12)
+/* Terminal-capability probe used by isatty(). */
+#define ZEDBSD_CONSOLE_ISATTY _IO(ZEDBSD_CONSOLE_IOC_GROUP, 13)
 
 #endif
