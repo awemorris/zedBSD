@@ -7,6 +7,8 @@ build="${ZEDBSD_BUILD_DIR:-$repo/build/$arch}"
 output="${1:-$build/hdd-test.img}"
 heads="${DISK_HEADS:-8}"
 sectors="${DISK_SECTORS:-17}"
+arch_profile="${ZEDBSD_ARCH_PROFILE:-i386}"
+arch_image="${ZEDBSD_ARCH_IMAGE:-$repo/build/arch-images/$arch_profile.img}"
 
 test ! -e "$output" || {
 	echo "Refusing to overwrite existing image: $output" >&2
@@ -51,7 +53,10 @@ with open(image, "r+b") as stream:
     stream.write(entry)
 PY
 
+"$repo/build.sh" arch-image "$arch_profile"
+
 ZEDBSD_FILES="${ZEDBSD_FILES:-}" \
+ZEDBSD_ARCH_PROFILE="$arch_profile" ZEDBSD_ARCH_IMAGE="$arch_image" \
 DISK_HEADS="$heads" DISK_SECTORS="$sectors" \
 	"$repo/scripts/install-image.sh" --partition 1 \
 	--install-disk-stubs "$output" "${ZEDBSD_KERNEL:-}" \

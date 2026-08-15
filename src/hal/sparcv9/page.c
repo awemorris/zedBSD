@@ -22,7 +22,7 @@ static void reserve_range(uint64 base,uint64 size){uint64 limit=(uint64)phys_pag
 	end=size>limit-base?limit:base+size;first=(uint32)(base/SPARCV9_PAGE_SIZE);last=(uint32)((end+SPARCV9_PAGE_MASK)/SPARCV9_PAGE_SIZE);if(last>phys_pages)last=phys_pages;
 	for(p=first;p<last;p++)if(!GET(used,p)){SET(used,p);SET(reserved,p);reserved_pages++;}}
 void sparcv9_page_init(void){const struct zedbsd_sun4u_handoff*h=sun4u_boot_handoff();uint64 top=0;unsigned i;
-	for(i=0;i<h->installed_count;i++){uint64 end=h->installed[i].base+h->installed[i].size;if(end>top)top=end;}if(top>0x08000000ULL)top=0x08000000ULL;phys_pages=(uint32)(top/SPARCV9_PAGE_SIZE);
+	for(i=0;i<h->installed_count;i++){uint64 end=h->installed[i].base+h->installed[i].size;if(end>top)top=end;}if(top>0x20000000ULL)top=0x20000000ULL;phys_pages=(uint32)(top/SPARCV9_PAGE_SIZE);
 	hal_memset(used,0xff,sizeof(used));hal_memset(reserved,0xff,sizeof(reserved));reserved_pages=phys_pages;allocated_pages=0;
 	for(i=0;i<h->available_count;i++)release(h->available[i].base,h->available[i].size);
 	/* Loader, firmware scratch, kernel locked window and handoff occupy low 8 MiB. */reserve_range(0,0x00800000UL);

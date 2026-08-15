@@ -23,7 +23,7 @@
 #define EXEC_ENV_MAX 64U
 #define EXEC_STRING_MAX (16U * 1024U)
 
-#if defined(ZEDBSD_USER_ABI_AARCH64) || defined(ZEDBSD_USER_ABI_SPARCV9)
+#ifdef ZEDBSD_USER_ABI_LP64
 typedef uintptr_t exec_user_word_t;
 #define EXEC_IMAGE_INFO struct elf64_image_info
 #define exec_elf_load elf64_load
@@ -70,7 +70,8 @@ exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
 			total += length;
 			envc++;
 		}
-	error = vmspace_map_stack(vm, EXEC_STACK_TOP, stack_size,
+	vmspace_layout_init();
+	error = vmspace_map_stack(vm, vm_layout.stack_top, stack_size,
 				  EXEC_STACK_GUARD_SIZE);
 	if (error != 0)
 		return error;
@@ -334,9 +335,7 @@ process_spawn_init(const char *path, struct process **result)
 	char *argv[2];
 	char *envp[] = {
 		"HOME=/home",
-#ifdef ZEDBSD_USER_ABI_AARCH64
-		"PATH=/arm64/bin:/bin:/apps",
-#elif defined(ZEDBSD_USER_ABI_SPARCV9)
+#ifdef ZEDBSD_USER_ABI_SPARCV9
 		"PATH=/sparcv9/bin:/bin:/apps",
 #else
 		"PATH=/bin:/apps",

@@ -60,8 +60,8 @@ enum inode_type {
 struct inode;
 
 struct inode_time {
-	int32_t tv_sec;
-	int32_t tv_nsec;
+	time_t tv_sec;
+	long tv_nsec;
 };
 
 struct inode_ops {

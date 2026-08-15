@@ -100,6 +100,14 @@ void hal_page_destroy_space(hal_space_t handle)
 	free(handle);
 }
 
+void hal_page_get_user_range(uintptr_t *minimum, uintptr_t *limit)
+{
+	if (minimum != NULL)
+		*minimum = 4096U;
+	if (limit != NULL)
+		*limit = 0x80000000U;
+}
+
 int hal_pmem_alloc(size_t size, struct hal_pmem *memory, uint32_t flags)
 {
 	(void)flags;
@@ -295,7 +303,7 @@ int main(void)
 	assert(vmspace_brk(vm, 0x01000000U, &mapped) == 0);
 	assert(vmspace_find_region(vm, 0x01000000U, 1) == NULL);
 	assert(commit_used == 8192);
-	assert(vmspace_brk(vm, VM_BRK_TOP, &mapped) == ENOMEM);
+	assert(vmspace_brk(vm, vm_layout.brk_limit, &mapped) == ENOMEM);
 
 	assert(vmspace_map_stack(vm, 0x7ffff000U, 1024U * 1024U, 4096) == 0);
 	assert(vm->stack_guard_bottom == 0x7fefe000U);

@@ -138,16 +138,16 @@ int_handler(struct amd64_interrupt_frame *frame)
 		trap.eax = frame->rax;
 		trap.error_code = trap.fault_address = 0;
 		if (user_int_handler != NULL) user_int_handler(&trap);
-		args[0] = (uint32)frame->rbx;
-		args[1] = (uint32)frame->rcx;
-		args[2] = (uint32)frame->rdx;
-		args[3] = (uint32)frame->rsi;
-		args[4] = (uint32)frame->rdi;
-		args[5] = (uint32)frame->rbp;
+		args[0] = (uintptr_t)frame->rbx;
+		args[1] = (uintptr_t)frame->rcx;
+		args[2] = (uintptr_t)frame->rdx;
+		args[3] = (uintptr_t)frame->rsi;
+		args[4] = (uintptr_t)frame->rdi;
+		args[5] = (uintptr_t)frame->rbp;
 		amd64_task_enter_user_frame(frame);
 		frame->rax = syscall_handler != NULL ?
-		    (uint32)syscall_handler((uint32)frame->rax, args) :
-		    (uint32)-(int32)ENOSYS;
+		    (uint64)syscall_handler((uint32)frame->rax, args) :
+		    (uint64)(intptr_t)-ENOSYS;
 		hal_user_return_invoke();
 		amd64_task_leave_user_frame();
 	} else if (vector >= 0 && vector < 32) {

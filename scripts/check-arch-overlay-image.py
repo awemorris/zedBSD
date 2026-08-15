@@ -16,7 +16,7 @@ from overlay_journal_format import JOURNAL_BYTES, validate_empty_active_slot
 
 PROFILES = {
     "i386": ("ZEDI386", 1, 3),
-    "amd64": ("ZEDAMD64", 1, 3),
+    "amd64": ("ZEDAMD64", 2, 62),
     "aarch64": ("ZEDAARCH64", 2, 183),
 }
 

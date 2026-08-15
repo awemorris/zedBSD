@@ -52,14 +52,28 @@ struct stat {
 	struct timespec st_ctim;
 	blksize_t st_blksize;
 	blkcnt_t st_blocks;
+#ifndef ZEDBSD_USER_ABI_LP64
 } __attribute__((packed, aligned(4)));
+#else
+};
+#endif
 
 #define st_atime st_atim.tv_sec
 #define st_mtime st_mtim.tv_sec
 #define st_ctime st_ctim.tv_sec
 
-_Static_assert(sizeof(struct stat) == 68,
-	"zedBSD stat ABI must remain 68 bytes");
+#ifdef ZEDBSD_USER_ABI_LP64
+_Static_assert(sizeof(struct timespec) == 16, "LP64 timespec ABI");
+_Static_assert(sizeof(struct stat) == 112, "LP64 stat ABI");
+_Static_assert(__builtin_offsetof(struct stat, st_ino) == 8, "LP64 stat ino");
+_Static_assert(__builtin_offsetof(struct stat, st_size) == 40, "LP64 stat size");
+_Static_assert(__builtin_offsetof(struct stat, st_atim) == 48, "LP64 stat time");
+_Static_assert(__builtin_offsetof(struct stat, st_blksize) == 96,
+	"LP64 stat blksize");
+#else
+_Static_assert(sizeof(struct timespec) == 8, "ILP32 timespec ABI");
+_Static_assert(sizeof(struct stat) == 68, "ILP32 stat ABI");
+#endif
 
 int fstat(int, struct stat *);
 int stat(const char *, struct stat *);

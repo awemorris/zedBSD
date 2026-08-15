@@ -16,6 +16,13 @@
 #define FILE_MAX 192U
 #define VFS_BSS __attribute__((section(".vfs_bss")))
 #define FILE_HIGH __attribute__((section(".hightext")))
+#ifdef ZEDBSD_USER_ABI_LP64
+#define OFF_T_MAX ((off_t)INT64_MAX)
+#define OFF_T_MIN ((off_t)INT64_MIN)
+#else
+#define OFF_T_MAX ((off_t)INT32_MAX)
+#define OFF_T_MIN ((off_t)INT32_MIN)
+#endif
 
 static struct file files[FILE_MAX] VFS_BSS;
 static uint8_t file_used[FILE_MAX] VFS_BSS;
@@ -364,8 +371,8 @@ file_seek(struct file *file, off_t offset, int whence)
 		base = file->f_inode->i_size;
 	else
 		return -EINVAL;
-	if ((offset > 0 && base > (off_t)INT32_MAX - offset) ||
-	    (offset < 0 && base < (off_t)INT32_MIN - offset))
+	if ((offset > 0 && base > OFF_T_MAX - offset) ||
+	    (offset < 0 && base < OFF_T_MIN - offset))
 		return -EOVERFLOW;
 	target = base + offset;
 	if (target < 0)

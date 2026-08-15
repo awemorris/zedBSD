@@ -37,9 +37,9 @@ thread_create(struct process *process, uintptr_t entry, uintptr_t user_sp,
 	struct thread *thread;
 
 	if (process == NULL || process->vmspace == NULL ||
-	    process->vmspace == &kernel_vmspace || entry < VM_USER_MIN ||
-	    entry >= VM_USER_TOP || user_sp < VM_USER_MIN ||
-	    user_sp >= VM_USER_TOP || result == NULL)
+	    process->vmspace == &kernel_vmspace ||
+	    !vmspace_user_range_valid(entry, 1) ||
+	    !vmspace_user_range_valid(user_sp, 1) || result == NULL)
 		return EINVAL;
 	thread = kern_calloc(1, sizeof(*thread));
 	if (thread == NULL)

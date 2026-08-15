@@ -327,3 +327,9 @@ size_t hal_page_get_page_size(int level)
 {
 	return level == 1 ? PAGE_SIZE : 0;
 }
+
+void hal_page_get_user_range(uintptr_t *minimum, uintptr_t *limit)
+{
+	if (minimum != NULL) *minimum = PAGE_SIZE;
+	if (limit != NULL) *limit = SYS_START;
+}

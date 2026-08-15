@@ -144,6 +144,7 @@ sparcv9_user_trap_entry:
 	stx %g4, [%g3 + 56]
 	setx sparcv9_current_user_windows, %g3, %g5
 	ldx [%g5], %g5
+	stx %g7, [%g5 + 1128]
 	rdpr %cwp, %g1
 	stx %g1, [%g5 + 1024]
 	rdpr %cansave, %g1
@@ -275,6 +276,7 @@ sparcv9_user_trap_entry:
 	wrpr %g1, 0, %wstate
 	ldx [%g5 + 1024], %g1
 	wrpr %g1, 0, %cwp
+	ldx [%g5 + 1128], %g7
 	cmp %g4, 1
 	be,pn %xcc, 2f
 	 nop

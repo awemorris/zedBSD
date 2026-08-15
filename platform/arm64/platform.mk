@@ -9,7 +9,7 @@ ARM64_PLATFORM := platform/arm64
 
 ARM64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -Isrc/hal/arm64 -DHAL_ARCH_ARM64 -DHAL_BOARD_RPI4 \
-	-DZEDBSD_USER_ABI_AARCH64
+	-DZEDBSD_USER_ABI_AARCH64 -DZEDBSD_USER_ABI_LP64
 ARM64_CFLAGS := -march=armv8-a -mgeneral-regs-only -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werror
@@ -55,7 +55,7 @@ ARM64_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURC
 ARM64_VMUNIX_OBJS := $(ARM64_BOOT_OBJS) $(ARM64_KERNEL_OBJS) $(ARM64_KERNEL_LIBC_OBJS)
 
 ARM64_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
-	-Ilibc/include -DZEDBSD_USER_ABI_AARCH64
+	-Ilibc/include -DZEDBSD_USER_ABI_AARCH64 -DZEDBSD_USER_ABI_LP64
 ARM64_USER_CFLAGS := -march=armv8-a -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-builtin -fno-common -ffunction-sections -fdata-sections \

@@ -1,6 +1,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +10,18 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+#ifndef ZEDBSD_USER_PAGE_SIZE
+#define ZEDBSD_USER_PAGE_SIZE 4096U
+#endif
+#define TEST_PAGE_SIZE ((size_t)ZEDBSD_USER_PAGE_SIZE)
+
+#ifdef ZEDBSD_USER_ABI_LP64
+_Static_assert(sizeof(void *) == 8, "LP64 pointer ABI");
+_Static_assert(sizeof(long) == 8, "LP64 long ABI");
+_Static_assert(sizeof(off_t) == 8, "LP64 off_t ABI");
+_Static_assert(sizeof(time_t) == 8, "LP64 time_t ABI");
+#endif
 
 static volatile unsigned int caught_signals;
 
@@ -44,6 +57,10 @@ run_test(int argc, char **argv, char **envp)
 	allocation = malloc(256U * 1024U);
 	if (allocation == NULL)
 		return 2;
+#ifdef ZEDBSD_USER_ABI_LP64
+	if ((uintptr_t)&message <= UINT32_MAX)
+		return 201;
+#endif
 	for (offset = 0; offset < 256U * 1024U; offset += 4096U)
 		allocation[offset] = (unsigned char)(offset >> 12);
 	if (allocation[63U * 4096U] != 63U) {
@@ -161,18 +178,22 @@ run_test(int argc, char **argv, char **envp)
 		return 15;
 	report_stage(7);
 	{
-		unsigned char *mapping = mmap(NULL, 3U * 4096U,
+		unsigned char *mapping = mmap(NULL, 3U * TEST_PAGE_SIZE,
 		    PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 		if (mapping == MAP_FAILED)
 			return 16;
+#ifdef ZEDBSD_USER_ABI_LP64
+		if ((uintptr_t)mapping <= UINT32_MAX)
+			return 202;
+#endif
 		mapping[0] = 1;
-		mapping[4096U] = 2;
-		mapping[8192U] = 3;
-		if (mprotect(mapping + 4096U, 4096U, PROT_READ) != 0 ||
-		    msync(mapping, 4096U, MS_SYNC) != 0 ||
-		    munmap(mapping + 4096U, 4096U) != 0 ||
-		    munmap(mapping, 4096U) != 0 ||
-		    munmap(mapping + 8192U, 4096U) != 0)
+		mapping[TEST_PAGE_SIZE] = 2;
+		mapping[2U * TEST_PAGE_SIZE] = 3;
+		if (mprotect(mapping + TEST_PAGE_SIZE, TEST_PAGE_SIZE, PROT_READ) != 0 ||
+		    msync(mapping, TEST_PAGE_SIZE, MS_SYNC) != 0 ||
+		    munmap(mapping + TEST_PAGE_SIZE, TEST_PAGE_SIZE) != 0 ||
+		    munmap(mapping, TEST_PAGE_SIZE) != 0 ||
+		    munmap(mapping + 2U * TEST_PAGE_SIZE, TEST_PAGE_SIZE) != 0)
 			return 17;
 	}
 	report_stage(8);
@@ -202,9 +223,9 @@ run_test(int argc, char **argv, char **envp)
 			return 21;
 		{
 			char persisted = 0;
-			unsigned char *shared1 = mmap(NULL, 4096,
+			unsigned char *shared1 = mmap(NULL, TEST_PAGE_SIZE,
 			    PROT_READ | PROT_WRITE, MAP_SHARED, file, 0);
-			unsigned char *shared2 = mmap(NULL, 4096,
+			unsigned char *shared2 = mmap(NULL, TEST_PAGE_SIZE,
 			    PROT_READ | PROT_WRITE, MAP_SHARED, file, 0);
 			unsigned char *private_map;
 			if (shared1 == MAP_FAILED || shared2 == MAP_FAILED)
@@ -217,18 +238,26 @@ run_test(int argc, char **argv, char **envp)
 				return 21;
 			if (child == 0) {
 				shared2[0] = 'c';
-				_exit(msync(shared2, 4096, MS_SYNC) == 0 ? 0 : 1);
+				_exit(msync(shared2, TEST_PAGE_SIZE, MS_SYNC) == 0 ? 0 : 1);
 			}
 			if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
-			    WEXITSTATUS(status) != 0 || shared1[0] != 'c' ||
-			    msync(shared1, 4096, MS_SYNC) != 0 ||
-			    pread(file, &persisted, 1, 0) != 1 || persisted != 'c' ||
-			    munmap(shared1, 4096) != 0 || munmap(shared2, 4096) != 0)
-				return 21;
-			private_map = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+			    WEXITSTATUS(status) != 0)
+				return 211;
+			if (shared1[0] != 'c')
+				return 215;
+			if (msync(shared1, TEST_PAGE_SIZE, MS_SYNC) != 0)
+				return 216;
+			if (pread(file, &persisted, 1, 0) != 1)
+				return 217;
+			if (persisted != 'c')
+				return 218;
+			if (munmap(shared1, TEST_PAGE_SIZE) != 0 ||
+			    munmap(shared2, TEST_PAGE_SIZE) != 0)
+				return 219;
+			private_map = mmap(NULL, TEST_PAGE_SIZE, PROT_READ | PROT_WRITE,
 			    MAP_PRIVATE, file, 0);
 			if (private_map == MAP_FAILED)
-				return 21;
+				return 212;
 			private_map[0] = 'p';
 			child = fork();
 			if (child < 0)
@@ -239,30 +268,52 @@ run_test(int argc, char **argv, char **envp)
 			}
 			if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
 			    WEXITSTATUS(status) != 0 || private_map[0] != 'p')
-				return 21;
+				return 213;
 			persisted = 0;
-			if (msync(private_map, 4096, MS_SYNC) != 0 ||
+			if (msync(private_map, TEST_PAGE_SIZE, MS_SYNC) != 0 ||
 			    pread(file, &persisted, 1, 0) != 1 || persisted != 'c' ||
-			    munmap(private_map, 4096) != 0)
-				return 21;
+			    munmap(private_map, TEST_PAGE_SIZE) != 0)
+				return 214;
 		}
 		{
 			struct timespec times[2] = {
+#ifdef ZEDBSD_USER_ABI_LP64
+				{ (time_t)2208988800LL, 123456789 },
+				{ (time_t)2208988802LL, 987654321 },
+#else
 				{ 1767225600, 123456789 },
 				{ 1767225602, 987654321 },
+#endif
 			};
 			struct stat attributes;
-			if (futimens(file, times) != 0 || fstat(file, &attributes) != 0 ||
-			    attributes.st_atime != times[0].tv_sec ||
-			    attributes.st_mtime != times[1].tv_sec ||
-			    fchmod(file, 0555) != 0 || fstat(file, &attributes) != 0 ||
-			    (attributes.st_mode & 0777U) != 0555U ||
-			    fchown(file, getuid(), getgid()) != 0)
-				return 21;
+			if (futimens(file, times) != 0)
+				return 231;
+			if (fstat(file, &attributes) != 0)
+				return 232;
+			if (attributes.st_atime != times[0].tv_sec ||
+			    attributes.st_mtime != times[1].tv_sec)
+				return 233;
+			if (fchmod(file, 0555) != 0)
+				return 234;
+			if (fstat(file, &attributes) != 0)
+				return 235;
+			if ((attributes.st_mode & 0777U) != 0555U)
+				return 236;
+			if (fchown(file, getuid(), getgid()) != 0)
+				return 237;
 			errno = 0;
 			if (fchmod(file, 0644) != -1 || errno != EOPNOTSUPP)
-				return 21;
+				return 238;
 		}
+#ifdef ZEDBSD_USER_ABI_LP64
+		if (lseek(file, (off_t)UINT32_MAX + 1, SEEK_SET) !=
+		    (off_t)UINT32_MAX + 1)
+			return 229;
+		errno = 0;
+		if (write(file, "x", 1) != -1 || errno != EFBIG ||
+		    lseek(file, 0, SEEK_SET) != 0)
+			return 230;
+#endif
 		if (renameat(directory, "a", directory, "b") != 0 ||
 		    close(file) != 0)
 			return 21;

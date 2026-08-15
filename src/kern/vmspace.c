@@ -19,19 +19,55 @@
 #include <sys/mman.h>
 
 #define PAGE_SIZE ZEDBSD_PAGE_SIZE
-#define VM_MMAP_BASE 0x10000000U
-
 struct vmspace kernel_vmspace = {
 	.space = HAL_SPACE_SYS,
 	.usecount = 1,
 };
 
+struct vm_layout vm_layout;
+static int vm_layout_initialized;
+
+void
+vmspace_layout_init(void)
+{
+	uintptr_t minimum, limit;
+	if (vm_layout_initialized)
+		return;
+	hal_page_get_user_range(&minimum, &limit);
+	if (minimum < PAGE_SIZE || (minimum & (PAGE_SIZE - 1U)) != 0 ||
+	    limit <= minimum || (limit & (PAGE_SIZE - 1U)) != 0)
+		HAL_FATAL("invalid HAL user address range");
+	vm_layout.user_minimum = minimum;
+	vm_layout.user_limit = limit;
+#ifdef ZEDBSD_USER_ABI_LP64
+	vm_layout.brk_limit = 0x0000000100000000ULL;
+	vm_layout.mmap_base = 0x0000000100000000ULL;
+#else
+	vm_layout.brk_limit = 0x10000000U;
+	vm_layout.mmap_base = 0x10000000U;
+#endif
+	if (vm_layout.brk_limit >= limit || vm_layout.mmap_base >= limit ||
+	    limit - minimum <= PAGE_SIZE)
+		HAL_FATAL("user address range too small");
+	vm_layout.stack_top = limit - PAGE_SIZE;
+	vm_layout_initialized = 1;
+}
+
 static int
 range_valid(uintptr_t start, size_t size)
 {
+	vmspace_layout_init();
 	return size != 0 && (start & (PAGE_SIZE - 1U)) == 0 &&
-		(size & (PAGE_SIZE - 1U)) == 0 && start >= VM_USER_MIN &&
-		start < VM_USER_TOP && size <= VM_USER_TOP - start;
+		(size & (PAGE_SIZE - 1U)) == 0 &&
+		start >= vm_layout.user_minimum && start < vm_layout.user_limit &&
+		size <= vm_layout.user_limit - start;
+}
+
+int vmspace_user_range_valid(uintptr_t start, size_t size)
+{
+	vmspace_layout_init();
+	return size != 0 && start >= vm_layout.user_minimum &&
+	    start < vm_layout.user_limit && size <= vm_layout.user_limit - start;
 }
 
 static int
@@ -66,6 +102,7 @@ struct vmspace *
 vmspace_create(void)
 {
 	struct vmspace *vm = kern_calloc(1, sizeof(*vm));
+	vmspace_layout_init();
 
 	if (vm == NULL)
 		return NULL;
@@ -287,7 +324,7 @@ vmspace_map_stack(struct vmspace *vm, uintptr_t top, size_t size,
 	if (vm == NULL || vm == &kernel_vmspace || size == 0 ||
 	    guard_size == 0 || (top & (PAGE_SIZE - 1U)) != 0 ||
 	    (size & (PAGE_SIZE - 1U)) != 0 ||
-	    (guard_size & (PAGE_SIZE - 1U)) != 0 || top > VM_USER_TOP ||
+	    (guard_size & (PAGE_SIZE - 1U)) != 0 || top > vm_layout.user_limit ||
 	    size > top || guard_size > top - size)
 		return EINVAL;
 	bottom = top - size;
@@ -459,8 +496,11 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 		struct vm_object_page *object_page;
 		off_t object_offset;
 		int mapped;
-		if ((uint64_t)(uint32_t)region->file_offset +
-		    (uint64_t)(page_address - region->start) > INT32_MAX)
+		uint64_t maximum_offset = sizeof(off_t) == 8 ?
+		    (uint64_t)INT64_MAX : (uint64_t)INT32_MAX;
+		if (region->file_offset < 0 ||
+		    (uint64_t)region->file_offset +
+		    (uint64_t)(page_address - region->start) > maximum_offset)
 			return EOVERFLOW;
 		object_offset = region->file_offset +
 		    (off_t)(page_address - region->start);
@@ -535,8 +575,7 @@ vmspace_check(struct vmspace *vm, uintptr_t address, size_t size,
 	struct vm_region *region;
 	uintptr_t current, end;
 
-	if (vm == NULL || size == 0 || address < VM_USER_MIN ||
-	    address >= VM_USER_TOP || size > VM_USER_TOP - address)
+	if (vm == NULL || !vmspace_user_range_valid(address, size))
 		return EFAULT;
 	current = address;
 	end = address + size;
@@ -685,15 +724,15 @@ find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
 	struct vm_region *region;
 
 	if (vm == NULL || mapped == NULL || size == 0 ||
-	    size > (size_t)(VM_USER_TOP - VM_MMAP_BASE))
+	    size > (size_t)(vm_layout.user_limit - vm_layout.mmap_base))
 		return EINVAL;
 	if (size > SIZE_MAX - (PAGE_SIZE - 1U))
 		return EOVERFLOW;
 	size = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
 	limit = vm->stack_guard_bottom != 0 ?
-		vm->stack_guard_bottom : VM_USER_TOP;
-	start = hint >= VM_MMAP_BASE && (hint & (PAGE_SIZE - 1U)) == 0 ?
-		hint : VM_MMAP_BASE;
+		vm->stack_guard_bottom : vm_layout.user_limit;
+	start = hint >= vm_layout.mmap_base && (hint & (PAGE_SIZE - 1U)) == 0 ?
+		hint : vm_layout.mmap_base;
 	for (;;) {
 		int moved = 0;
 		if (start >= limit || size > limit - start)
@@ -861,8 +900,9 @@ int
 vmspace_set_brk_start(struct vmspace *vm, uintptr_t start)
 {
 	if (vm == NULL || vm == &kernel_vmspace || vm->brk_start != 0 ||
-	    (start & (PAGE_SIZE - 1U)) != 0 || start < VM_USER_MIN ||
-	    start >= VM_BRK_TOP || overlaps(vm, start, PAGE_SIZE))
+	    (start & (PAGE_SIZE - 1U)) != 0 ||
+	    start < vm_layout.user_minimum || start >= vm_layout.brk_limit ||
+	    overlaps(vm, start, PAGE_SIZE))
 		return EINVAL;
 	vm->brk_start = start;
 	vm->brk_current = start;
@@ -884,7 +924,7 @@ vmspace_brk(struct vmspace *vm, uintptr_t requested, uintptr_t *result)
 		*result = vm->brk_current;
 		return 0;
 	}
-	if (requested < vm->brk_start || requested >= VM_BRK_TOP)
+	if (requested < vm->brk_start || requested >= vm_layout.brk_limit)
 		return ENOMEM;
 	old_end = (vm->brk_current + PAGE_SIZE - 1U) &
 		~(uintptr_t)(PAGE_SIZE - 1U);

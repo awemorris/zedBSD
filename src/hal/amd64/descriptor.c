@@ -35,7 +35,8 @@ amd64_descriptor_init(void)
 	hal_memset(&tss, 0, sizeof(tss));
 	gdt[1] = 0x00af9a000000ffffULL;
 	gdt[2] = 0x00cf92000000ffffULL;
-	gdt[3] = 0x00cffa000000ffffULL;
+	/* DPL3 64-bit code: L=1 and D=0. */
+	gdt[3] = 0x00affa000000ffffULL;
 	gdt[4] = 0x00cff2000000ffffULL;
 	low = (sizeof(tss) - 1U) & 0xffffU;
 	low |= (uint64)(base & 0xffffffU) << 16;

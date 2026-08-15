@@ -44,7 +44,7 @@ static int screen_put_utf8(void *context, unsigned row, unsigned column,
 	struct zedbsd_console_write_at request;
 	(void)context;
 	request.row = row; request.column = column; request.attribute = attribute;
-	request.address = (uint32_t)(uintptr_t)text; request.length = length;
+	request.address = (uapi_ptr_t)(uintptr_t)text; request.length = length;
 	return get_console() >= 0 && ioctl(console_fd, ZEDBSD_CONSOLE_WRITE_AT, &request) == 0;
 }
 static int screen_put(void *context, unsigned row, unsigned column,
@@ -205,12 +205,12 @@ static int display_image_common(void *context, unsigned x, unsigned y,
 	memset(&request, 0, sizeof(request));
 	request.x = x; request.y = y; request.width = image->width; request.height = image->height;
 	request.format = image->format == NOCT_BEUI_IMAGE_RGB24 ? ZEDBSD_GRAPHICS_FORMAT_RGB24 : ZEDBSD_GRAPHICS_FORMAT_INDEX8;
-	request.stride = (uint32_t)image->stride; request.pixels = (uint32_t)(uintptr_t)image->pixels;
+	request.stride = (uint32_t)image->stride; request.pixels = (uapi_ptr_t)(uintptr_t)image->pixels;
 	/* RGB24 has no palette; the graphics ABI requires both fields to remain
 	 * zero.  noct_beui_image embeds palette storage even for RGB24 images,
 	 * so do not infer palette presence from the array address. */
 	if (request.format == ZEDBSD_GRAPHICS_FORMAT_INDEX8) {
-		request.palette = (uint32_t)(uintptr_t)image->palette;
+		request.palette = (uapi_ptr_t)(uintptr_t)image->palette;
 		request.palette_count = image->palette_size;
 	}
 	request.pattern = pattern;
@@ -236,14 +236,14 @@ static int display_flush(void *context, const struct noct_beui_rect *rectangles,
 	struct zedbsd_graphics_rect converted[32]; struct zedbsd_graphics_flush request; size_t i;
 	(void)context; if (count > 32U) return 0;
 	for (i = 0; i < count; i++) rect_copy(&converted[i], &rectangles[i]);
-	request.rectangles = count == 0 ? 0U : (uint32_t)(uintptr_t)converted; request.rectangle_count = (uint32_t)count;
+	request.rectangles = count == 0 ? 0U : (uapi_ptr_t)(uintptr_t)converted; request.rectangle_count = (uint32_t)count;
 	return graphics_fd >= 0 && ioctl(graphics_fd, ZEDBSD_GRAPHICS_FLUSH, &request) == 0;
 }
 static int glyph_measure(void *context, uint32_t codepoint, unsigned *width, unsigned *height)
 {
 	struct zedbsd_graphics_glyph request; uint8_t bitmap[32];
 	(void)context; memset(&request, 0, sizeof(request)); request.codepoint = codepoint;
-	request.bitmap = (uint32_t)(uintptr_t)bitmap; request.bitmap_capacity = sizeof(bitmap);
+	request.bitmap = (uapi_ptr_t)(uintptr_t)bitmap; request.bitmap_capacity = sizeof(bitmap);
 	if (graphics_fd < 0 || ioctl(graphics_fd, ZEDBSD_GRAPHICS_GET_GLYPH, &request) != 0) return 0;
 	*width = request.width; *height = request.height; return 1;
 }
@@ -251,11 +251,11 @@ static int glyph_draw(void *context, unsigned x, unsigned y, uint32_t codepoint,
 {
 	struct zedbsd_graphics_glyph glyph; struct zedbsd_graphics_blit blit; uint8_t bitmap[32];
 	(void)context; memset(&glyph, 0, sizeof(glyph)); glyph.codepoint = codepoint;
-	glyph.bitmap = (uint32_t)(uintptr_t)bitmap; glyph.bitmap_capacity = sizeof(bitmap);
+	glyph.bitmap = (uapi_ptr_t)(uintptr_t)bitmap; glyph.bitmap_capacity = sizeof(bitmap);
 	if (graphics_fd < 0 || ioctl(graphics_fd, ZEDBSD_GRAPHICS_GET_GLYPH, &glyph) != 0) return 0;
 	memset(&blit, 0, sizeof(blit)); blit.x = x; blit.y = y; blit.width = glyph.width; blit.height = glyph.height;
 	blit.format = ZEDBSD_GRAPHICS_FORMAT_MONO1; blit.stride = glyph.stride;
-	blit.pixels = (uint32_t)(uintptr_t)bitmap; blit.foreground = foreground; blit.background = background;
+	blit.pixels = (uapi_ptr_t)(uintptr_t)bitmap; blit.foreground = foreground; blit.background = background;
 	return ioctl(graphics_fd, ZEDBSD_GRAPHICS_BLIT, &blit) == 0;
 }
 static uint64_t milliseconds(void *context)

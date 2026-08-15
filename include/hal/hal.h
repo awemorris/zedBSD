@@ -243,6 +243,7 @@ void hal_page_flush_tlb(hal_space_t space);
 
 /* Get the page size. (level > 1 means a large page size.) */
 size_t hal_page_get_page_size(int level);
+void hal_page_get_user_range(uintptr_t *minimum, uintptr_t *limit);
 
 /*
  * Physical Memory Allocation (Page Unit)

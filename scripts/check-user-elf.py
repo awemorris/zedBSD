@@ -19,6 +19,7 @@ def fail(path: Path, message: str) -> None:
 
 MACHINES = {
     "i386": (1, 3, 52, 32, "<", "little"),
+    "amd64": (2, 62, 64, 56, "<", "little"),
     "aarch64": (2, 183, 64, 56, "<", "little"),
     "sparcv9": (2, 43, 64, 56, ">", "big"),
 }
@@ -71,16 +72,21 @@ def check(path: Path, machine: str) -> None:
         fail(path, f"PT_GNU_STACK size is 0x{p_memsz:x}, expected 0x100000")
     if p_flags != PF_R | PF_W or p_flags & PF_X:
         fail(path, f"PT_GNU_STACK flags are 0x{p_flags:x}, expected RW")
-    if machine == "sparcv9":
+    if machine in ("amd64", "aarch64", "sparcv9"):
         if not loads:
             fail(path, "expected at least one PT_LOAD")
         for index, program in enumerate(loads):
             alignment = program[7]
             vaddr = program[3]
             memory_size = program[6]
-            if alignment < 8192 or alignment & (alignment - 1):
-                fail(path, f"PT_LOAD {index} is not 8 KiB aligned")
-            if vaddr < 0x2000 or memory_size > 0x80000000 - vaddr:
+            minimum = 0x2000 if machine == "sparcv9" else 0x1000
+            limit = (0x0000080000000000 if machine == "sparcv9" else
+                     0x0000800000000000 if machine == "amd64" else
+                     0x0001000000000000)
+            required_alignment = 8192 if machine == "sparcv9" else 4096
+            if alignment < required_alignment or alignment & (alignment - 1):
+                fail(path, f"PT_LOAD {index} has invalid alignment")
+            if vaddr < minimum or vaddr >= limit or memory_size > limit - vaddr:
                 fail(path, f"PT_LOAD {index} exceeds the initial user VA")
 
 

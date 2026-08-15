@@ -107,7 +107,8 @@ static int valid_user_range(uintptr_t address, size_t size)
 {
 	return size != 0 && (address & (PAGE_SIZE - 1U)) == 0 &&
 	    (size & (PAGE_SIZE - 1U)) == 0 && address >= PAGE_SIZE &&
-	    address < 0x80000000ULL && size <= 0x80000000ULL - address;
+	    address < 0x0000800000000000ULL &&
+	    size <= 0x0000800000000000ULL - address;
 }
 
 static struct amd64_table_page *
@@ -365,6 +366,12 @@ size_t hal_page_get_page_size(int level)
 	if (level == 1) return PAGE_SIZE;
 	if (level == 2) return 0x200000U;
 	return 0;
+}
+
+void hal_page_get_user_range(uintptr_t *minimum, uintptr_t *limit)
+{
+	if (minimum != NULL) *minimum = PAGE_SIZE;
+	if (limit != NULL) *limit = 0x0000800000000000ULL;
 }
 
 void hal_amd64_space_memory_stats(uint32 *spaces, uint32 *tables)

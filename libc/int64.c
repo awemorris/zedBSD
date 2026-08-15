@@ -77,6 +77,24 @@ __moddi3(int64_t numerator, int64_t denominator)
 	return numerator < 0 ? (int64_t)(0U - remainder) : (int64_t)remainder;
 }
 
+int64_t
+__divmoddi4(int64_t numerator, int64_t denominator, int64_t *remainder)
+{
+	int quotient_negative = (numerator < 0) != (denominator < 0);
+	uint64_t left = numerator < 0 ? 0U - (uint64_t)numerator :
+		(uint64_t)numerator;
+	uint64_t right = denominator < 0 ? 0U - (uint64_t)denominator :
+		(uint64_t)denominator;
+	uint64_t unsigned_remainder;
+	uint64_t quotient = unsigned_divide(left, right, &unsigned_remainder);
+
+	if (remainder != 0)
+		*remainder = numerator < 0 ?
+			(int64_t)(0U - unsigned_remainder) :
+			(int64_t)unsigned_remainder;
+	return quotient_negative ? (int64_t)(0U - quotient) : (int64_t)quotient;
+}
+
 uint64_t
 __muldi3(uint64_t left, uint64_t right)
 {

@@ -61,3 +61,17 @@ amd64_user_frame_entry:
 	addq $16, %rsp
 	iretq
 .size amd64_user_frame_entry, .-amd64_user_frame_entry
+
+.global amd64_xmm_load
+.type amd64_xmm_load, @function
+amd64_xmm_load:
+	movdqu (%rdi), %xmm0
+	ret
+.size amd64_xmm_load, .-amd64_xmm_load
+
+.global amd64_xmm_store
+.type amd64_xmm_store, @function
+amd64_xmm_store:
+	movdqu %xmm0, (%rdi)
+	ret
+.size amd64_xmm_store, .-amd64_xmm_store

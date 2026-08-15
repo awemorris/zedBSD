@@ -9,6 +9,7 @@ bios_dir="${PC98_BIOS_DIR:-$repo/roms/pc98bios}"
 work="$build/tests/user-init"
 files="$work/files"
 image="$work/user-init.img"
+profile_image="$work/i386.img"
 monitor="$work/monitor.sock"
 before="$work/menu-before.ppm"
 after="$work/menu-after.ppm"
@@ -104,10 +105,16 @@ else
 		"$repo/scripts/make-hdd-image.sh" "$image"
 fi
 
+# /bin is supplied by the mounted i386 architecture profile.  Replace the
+# profile copy, rather than the hidden file in the outer BOOT filesystem.
+outer_spec="$image@@$(( ${DISK_HEADS:-8} * ${DISK_SECTORS:-17} * 512 ))"
+mcopy -i "$outer_spec" ::/arch/i386.img "$profile_image"
 if test "$mode" = missing; then
-	offset=$((4 * 17 * 512))
-	mdel -i "$image@@$offset" ::BIN/SH
+	mdel -i "$profile_image" ::BIN/SH
+else
+	mcopy -o -i "$profile_image" "$elf_source" ::BIN/SH
 fi
+mcopy -o -i "$outer_spec" "$profile_image" ::/arch/i386.img
 
 probe_vma="$(nm -n "$build/stage2.elf" | \
 	awk -v symbol="$probe_symbol" '$3 == symbol { value = "0x" $1 } END { print value }')"

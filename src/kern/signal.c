@@ -190,10 +190,28 @@ signal_deliver_on_user_return(void)
 	token = ++thread->signal_token;
 	if (token == 0)
 		token = ++thread->signal_token;
-#ifdef ZEDBSD_USER_ABI_AARCH64
+#if defined(HAL_ARCH_ARM64)
 	sp = (sp - 16U) & ~(uintptr_t)15U;
 	if (copyout(&token, sp, sizeof(token)) != 0)
 		exit1_signal(SIGSEGV);
+#elif defined(HAL_ARCH_AMD64)
+	{
+		uint64_t frame[2];
+		sp = (sp - sizeof(frame)) & ~(uintptr_t)15U;
+		frame[0] = (uint64_t)restorer;
+		frame[1] = token;
+		if (copyout(frame, sp, sizeof(frame)) != 0)
+			exit1_signal(SIGSEGV);
+	}
+#elif defined(HAL_ARCH_SPARCV9)
+	{
+		uint64_t frame[2];
+		sp = (sp - sizeof(frame)) & ~(uintptr_t)15U;
+		frame[0] = token;
+		frame[1] = 0;
+		if (copyout(frame, sp, sizeof(frame)) != 0)
+			exit1_signal(SIGSEGV);
+	}
 #else
 	{
 		uint32_t frame[3];

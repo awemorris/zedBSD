@@ -13,6 +13,7 @@
 #include "kern/net/socket.h"
 #include "kern/process.h"
 #include "kern/pipe.h"
+#include "kern/page.h"
 #include "kern/sched.h"
 #include "kern/signal.h"
 #include "kern/thread.h"
@@ -38,6 +39,7 @@
 #define SYSCALL_IO_CHUNK 512U
 #define SYSCALL_SOCKET_OPTION_MAX 128U
 #define CLOCK_HZ 100U
+#define SYSCALL_PAGE_MASK (ZEDBSD_PAGE_SIZE - 1U)
 #define SYSCALL_EXT __attribute__((section(".hightext")))
 
 static struct process *current_process(void)
@@ -613,9 +615,9 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 	    MAP_FIXED_NOREPLACE)) != 0)
 		return -EOPNOTSUPP;
 	shared = (args[3] & MAP_SHARED) != 0;
-	if (args[1] == 0 || args[1] > SIZE_MAX - 4095U)
+	if (args[1] == 0 || args[1] > SIZE_MAX - SYSCALL_PAGE_MASK)
 		return -EINVAL;
-	if (args[0] != 0 && (args[0] & 4095U) != 0)
+	if (args[0] != 0 && (args[0] & SYSCALL_PAGE_MASK) != 0)
 		return -EINVAL;
 	if ((args[3] & MAP_FIXED_NOREPLACE) != 0 && args[0] == 0)
 		return -EINVAL;
@@ -625,7 +627,7 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 		if (shared)
 			return -EOPNOTSUPP;
 	} else {
-		if ((args[5] & 4095U) != 0 || (off_t)args[5] < 0)
+		if ((args[5] & SYSCALL_PAGE_MASK) != 0 || (off_t)args[5] < 0)
 			return -EINVAL;
 		file = filedesc_get_ref(process->fd, (int)args[4]);
 		if (file == NULL)
@@ -651,18 +653,18 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 	if (error == 0 && file != NULL && shared &&
 	    (args[3] & MAP_FIXED_NOREPLACE) != 0) {
 		error = vmspace_map_file_shared(process->vmspace, args[0],
-		    (args[1] + 4095U) & ~4095U, prot, file,
+		    (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK, prot, file,
 		    (off_t)args[5], data_size, NULL);
 		mapped = args[0];
 	} else if (error == 0 && file != NULL &&
 	    (args[3] & MAP_FIXED_NOREPLACE) != 0) {
 		error = vmspace_map_file(process->vmspace, args[0],
-		    (args[1] + 4095U) & ~4095U, prot, file,
+		    (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK, prot, file,
 		    (off_t)args[5], args[0], data_size, NULL);
 		mapped = args[0];
 	} else if (error == 0 &&
 	    (args[3] & MAP_FIXED_NOREPLACE) != 0) {
-		size_t size = (args[1] + 4095U) & ~4095U;
+		size_t size = (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK;
 		error = vmspace_map_anon_fixed_noreplace(process->vmspace,
 			args[0], size, prot, NULL);
 		mapped = args[0];
@@ -686,9 +688,9 @@ static intptr_t sys_munmap_call(const uintptr_t args[6])
 	struct process *process = current_process();
 	size_t size;
 	int error;
-	if (args[1] == 0 || args[1] > SIZE_MAX - 4095U)
+	if (args[1] == 0 || args[1] > SIZE_MAX - SYSCALL_PAGE_MASK)
 		return -EINVAL;
-	size = (args[1] + 4095U) & ~4095U;
+	size = (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK;
 	error = process == NULL ? EINVAL :
 		vmspace_unmap(process->vmspace, args[0], size);
 	return error == 0 ? 0 : -error;
@@ -699,12 +701,13 @@ static intptr_t sys_mprotect_call(const uintptr_t args[6])
 	struct process *process = current_process();
 	uint32_t prot;
 	int error = vm_prot((int)args[2], &prot);
-	if (error == 0 && (args[1] == 0 || args[1] > SIZE_MAX - 4095U))
+	if (error == 0 && (args[1] == 0 ||
+	    args[1] > SIZE_MAX - SYSCALL_PAGE_MASK))
 		error = EINVAL;
 	if (error == 0)
 		error = process == NULL ? EINVAL :
 			vmspace_protect(process->vmspace, args[0],
-			    (args[1] + 4095U) & ~4095U, prot);
+			    (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK, prot);
 	return error == 0 ? 0 : -error;
 }
 
@@ -713,9 +716,9 @@ static intptr_t sys_msync_call(const uintptr_t args[6])
 	struct process *process = current_process();
 	size_t size;
 	int error;
-	if (args[1] == 0 || args[1] > SIZE_MAX - 4095U)
+	if (args[1] == 0 || args[1] > SIZE_MAX - SYSCALL_PAGE_MASK)
 		return -EINVAL;
-	size = (args[1] + 4095U) & ~4095U;
+	size = (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK;
 	error = process == NULL ? EINVAL : vmspace_sync(process->vmspace,
 	    args[0], size, (int)args[2]);
 	return error == 0 ? 0 : -error;
@@ -810,7 +813,7 @@ copy_exec_vector(uintptr_t address, char **vector, unsigned maximum,
 		return 0;
 	}
 	for (index = 0; index < maximum; index++) {
-#if defined(ZEDBSD_USER_ABI_AARCH64) || defined(ZEDBSD_USER_ABI_SPARCV9)
+#ifdef ZEDBSD_USER_ABI_LP64
 		uintptr_t pointer;
 #else
 		uint32_t pointer;
@@ -880,7 +883,7 @@ sys_positional_call(const uintptr_t args[6], int writing)
 	return (intptr_t)done;
 }
 
-#ifdef ZEDBSD_USER_ABI_AARCH64
+#ifdef ZEDBSD_USER_ABI_LP64
 struct syscall_iovec { uint64_t base, length; };
 #else
 struct syscall_iovec { uint32_t base, length; };
@@ -1702,9 +1705,11 @@ sys_sigaction_call(const uintptr_t args[6])
 		if (signo == SIGKILL || signo == SIGSTOP)
 			return -EINVAL;
 		if ((action.sa_flags & ~SA_RESTART) != 0 ||
-		    (action.sa_handler > 1U && action.sa_handler >= VM_USER_TOP) ||
 		    (action.sa_handler > 1U &&
-		    (action.sa_restorer == 0 || action.sa_restorer >= VM_USER_TOP)))
+		     !vmspace_user_range_valid((uintptr_t)action.sa_handler, 1)) ||
+		    (action.sa_handler > 1U &&
+		    (action.sa_restorer == 0 ||
+		     !vmspace_user_range_valid((uintptr_t)action.sa_restorer, 1))))
 			return -EINVAL;
 		current->handler = (uintptr_t)action.sa_handler;
 		current->mask = action.sa_mask &

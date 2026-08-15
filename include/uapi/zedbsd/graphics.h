@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <sys/ioctl.h>
+#include <zedbsd/types.h>
 
 #define ZEDBSD_GRAPHICS_IOC_GROUP 'g'
 
@@ -80,8 +81,8 @@ struct zedbsd_graphics_blit {
 	uint32_t height;
 	uint32_t format;
 	uint32_t stride;
-	uint32_t pixels;
-	uint32_t palette;
+	uapi_ptr_t pixels;
+	uapi_ptr_t palette;
 	uint32_t palette_count;
 	uint32_t foreground;
 	uint32_t background;
@@ -90,13 +91,13 @@ struct zedbsd_graphics_blit {
 };
 
 struct zedbsd_graphics_flush {
-	uint32_t rectangles;
+	uapi_ptr_t rectangles;
 	uint32_t rectangle_count;
 };
 
 struct zedbsd_graphics_glyph {
 	uint32_t codepoint;
-	uint32_t bitmap;
+	uapi_ptr_t bitmap;
 	uint32_t bitmap_capacity;
 	uint32_t width;
 	uint32_t height;

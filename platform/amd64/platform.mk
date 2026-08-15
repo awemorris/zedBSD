@@ -6,6 +6,7 @@ BIOS_LOADER := bootloader/pcat
 
 AMD64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON \
+	-DZEDBSD_USER_ABI_LP64 \
 	-DPCAT_VGA_APERTURE_ADDRESS=0xffffffff800a0000ULL \
 	-DPCAT_CIRRUS_APERTURE_ADDRESS=0xffffffffc0000000ULL
 AMD64_CFLAGS := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
@@ -125,92 +126,87 @@ $(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.raw \
 bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin
 
-AMD64_USER_LIBC_OBJS := $(BUILD)/userland/crt0.o \
-	$(BUILD)/userland/libc/posix.o $(BUILD)/libc/heap.o \
-	$(BUILD)/userland/libc/signal.o \
-	$(BUILD)/libc/string.o $(BUILD)/libc/ctype.o $(BUILD)/libc/int64.o \
-	$(BUILD)/libc/strto.o $(BUILD)/libc/format.o $(BUILD)/libc/stdio.o
+AMD64_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
+	-Ilibc/include -DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64
+AMD64_USER_CFLAGS := -m64 -march=x86-64 -mno-red-zone -ffreestanding \
+	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
+	-fno-unwind-tables -fno-builtin -fno-common -ffunction-sections \
+	-fdata-sections -Os -Wall -Wextra -Werror
+AMD64_USER_RUNTIME_SOURCES := userland/libc/posix.c \
+	userland/libc/signal.c libc/heap.c libc/string.c libc/ctype.c \
+	libc/int64.c libc/strto.c libc/format.c libc/stdio.c
+AMD64_USER_LIBC_OBJS := $(BUILD)/user64/userland/crt0-amd64.o \
+	$(patsubst %.c,$(BUILD)/user64/%.o,$(AMD64_USER_RUNTIME_SOURCES))
 AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS) \
-	$(BUILD)/userland/libc/socket.o $(BUILD)/userland/libc/resolver.o \
-	$(BUILD)/userland/libc/resolver-dns.o
-AMD64_USER_NETTEST_OBJS := $(BUILD)/userland/nettest/main.o
-AMD64_USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
-	-fdata-sections -msoft-float -mno-80387 -mno-fp-ret-in-387 \
-	-mno-mmx -mno-sse -mno-sse2
-AMD64_USER_SH_OBJS := $(BUILD)/userland/sh/main.o \
-	$(BUILD)/userland/sh/applet.o $(BUILD)/userland/sh/builtins.o
+	$(BUILD)/user64/userland/libc/socket.o \
+	$(BUILD)/user64/userland/libc/resolver.o \
+	$(BUILD)/user64/userland/libc/resolver-dns.o
+AMD64_USER_NETTEST_OBJS := $(BUILD)/user64/userland/nettest/main.o
+AMD64_USER_SH_OBJS := $(BUILD)/user64/userland/sh/main.o \
+	$(BUILD)/user64/userland/sh/applet.o \
+	$(BUILD)/user64/userland/sh/builtins.o
 AMD64_USER_ELF_CHECK := scripts/check-user-elf.py
 
-$(BUILD)/userland/libc/posix.o $(AMD64_USER_SH_OBJS): \
-	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(BUILD)/userland/libc/posix.o $(AMD64_USER_SH_OBJS): \
-	OBJ_CFLAGS = $(AMD64_USER_CFLAGS)
+$(BUILD)/user64/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) \
+		-fno-strict-aliasing -MMD -MP -c $< -o $@
 
-$(BUILD)/userland/tests/syscall-smoke.o: \
-	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(BUILD)/userland/tests/syscall-smoke.o: OBJ_CFLAGS = $(AMD64_USER_CFLAGS)
+$(BUILD)/user64/userland/crt0-amd64.o: userland/crt0-amd64.S
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) -c $< -o $@
 
 $(BUILD)/POSIX-R1.ELF: $(AMD64_USER_LIBC_OBJS) \
-	$(BUILD)/userland/tests/syscall-smoke.o platform/pcat/user.ld \
+	$(BUILD)/user64/userland/tests/syscall-smoke.o $(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		-z stack-size=0x100000 -T platform/pcat/user.ld \
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T $(AMD64_PLATFORM)/user.ld \
 		$(AMD64_USER_LIBC_OBJS) \
-		$(BUILD)/userland/tests/syscall-smoke.o -o $@
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) $@
-
-$(BUILD)/userland/libc/socket.o $(AMD64_USER_NETTEST_OBJS): \
-	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(BUILD)/userland/libc/socket.o $(AMD64_USER_NETTEST_OBJS): \
-	OBJ_CFLAGS = $(AMD64_USER_CFLAGS)
+		$(BUILD)/user64/userland/tests/syscall-smoke.o -o $@
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
-	$(ZEDBSD_SOFTFLOAT_OBJECTS) platform/pcat/user.ld \
+	$(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static \
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
 		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T platform/pcat/user.ld $(AMD64_USER_LIBC_OBJS) \
-		$(AMD64_USER_SH_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) $@
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+		$(AMD64_USER_SH_OBJS) -o $@
+	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/bin/nettest: $(AMD64_USER_NET_LIBC_OBJS) \
-	$(AMD64_USER_NETTEST_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) \
-	platform/pcat/user.ld $(AMD64_USER_ELF_CHECK)
+	$(AMD64_USER_NETTEST_OBJS) $(AMD64_PLATFORM)/user.ld \
+	$(AMD64_USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static \
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
 		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T platform/pcat/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(AMD64_USER_NETTEST_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) $@
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+		$(AMD64_USER_NETTEST_OBJS) -o $@
+	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 USER_NET_COMMANDS := ping ifconfig route dhcpcd nslookup
 USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
-AMD64_USER_NET_COMMON_OBJS := $(BUILD)/userland/net/netutil.o \
-	$(BUILD)/userland/net/dhcp.o
+AMD64_USER_NET_COMMON_OBJS := $(BUILD)/user64/userland/net/netutil.o \
+	$(BUILD)/user64/userland/net/dhcp.o
 AMD64_USER_NET_COMMAND_OBJS := $(addsuffix /main.o, \
-	$(addprefix $(BUILD)/userland/,$(USER_NET_COMMANDS)))
-$(BUILD)/userland/libc/socket.o $(BUILD)/userland/libc/resolver.o \
-	$(BUILD)/userland/libc/resolver-dns.o $(AMD64_USER_NET_COMMON_OBJS) \
-	$(AMD64_USER_NET_COMMAND_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(BUILD)/userland/libc/socket.o $(BUILD)/userland/libc/resolver.o \
-	$(BUILD)/userland/libc/resolver-dns.o $(AMD64_USER_NET_COMMON_OBJS) \
-	$(AMD64_USER_NET_COMMAND_OBJS): OBJ_CFLAGS = $(AMD64_USER_CFLAGS)
+	$(addprefix $(BUILD)/user64/userland/,$(USER_NET_COMMANDS)))
 
 define AMD64_USER_NET_COMMAND
 $(BUILD)/bin/$(1): $(AMD64_USER_NET_LIBC_OBJS) \
-	$(AMD64_USER_NET_COMMON_OBJS) $(BUILD)/userland/$(1)/main.o \
-	$(ZEDBSD_SOFTFLOAT_OBJECTS) platform/pcat/user.ld $(AMD64_USER_ELF_CHECK)
+	$(AMD64_USER_NET_COMMON_OBJS) $(BUILD)/user64/userland/$(1)/main.o \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	@mkdir -p $$(dir $$@)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static \
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
 		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T platform/pcat/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(AMD64_USER_NET_COMMON_OBJS) $(BUILD)/userland/$(1)/main.o \
-		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
-	@test -z "$$$$($(NOCT_NM) -u $$@)" || { $(NOCT_NM) -u $$@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) $$@
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+		$(AMD64_USER_NET_COMMON_OBJS) \
+		$(BUILD)/user64/userland/$(1)/main.o -o $$@
+	@test -z "$$$$(nm -u $$@)" || { nm -u $$@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
 endef
 $(foreach command,$(USER_NET_COMMANDS),\
 	$(eval $(call AMD64_USER_NET_COMMAND,$(command))))

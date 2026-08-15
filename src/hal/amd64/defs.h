@@ -9,7 +9,7 @@
 
 #define SEG_KERNEL_CODE        0x08
 #define SEG_KERNEL_DATA        0x10
-#define SEG_USER32_CODE        0x18
+#define SEG_USER_CODE          0x18
 #define SEG_USER_DATA          0x20
 #define SEG_TSS                0x28
 
@@ -29,5 +29,7 @@
 #define AMD64_PTE_GLOBAL       0x100
 #define AMD64_PTE_NX           0x8000000000000000
 #define AMD64_PTE_ADDR_MASK    0x000ffffffffff000
+
+#define AMD64_MSR_FS_BASE      0xc0000100U
 
 #endif

@@ -13,7 +13,7 @@ SPARCV9_PLATFORM := platform/sparcv9
 
 SPARCV9_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -Isrc/hal/sparcv9 -DHAL_ARCH_SPARCV9 \
-	-DHAL_BOARD_SUN4U -DZEDBSD_USER_ABI_SPARCV9 \
+	-DHAL_BOARD_SUN4U -DZEDBSD_USER_ABI_SPARCV9 -DZEDBSD_USER_ABI_LP64 \
 	-DZEDBSD_PAGE_SIZE=8192 \
 	-DZEDBSD_USER_PAGE_SIZE=8192 \
 	-DZEDBSD_NO_PRINTF_FLOAT \
@@ -72,17 +72,23 @@ SPARCV9_STAGE2_OBJS := $(BUILD)/boot/stage2/stage2-entry.o \
 
 SPARCV9_USER_CFLAGS := $(SPARCV9_CFLAGS) -fno-builtin \
 	-ffunction-sections -fdata-sections
-SPARCV9_USER_SOURCES := userland/libc/posix.c userland/libc/socket.c \
+SPARCV9_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/socket.c \
 	userland/libc/signal.c \
-	userland/sh/main.c userland/sh/applet.c userland/sh/builtins.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
+SPARCV9_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
+	userland/sh/builtins.c
+SPARCV9_USER_RUNTIME_OBJS := \
+	$(patsubst %.c,$(BUILD)/user/%.o,$(SPARCV9_USER_RUNTIME_SOURCES))
+SPARCV9_USER_SH_OBJS := \
+	$(patsubst %.c,$(BUILD)/user/%.o,$(SPARCV9_USER_SH_SOURCES))
 SPARCV9_USER_OBJS := $(BUILD)/user/userland/crt0-sparcv9.o \
-	$(patsubst %.c,$(BUILD)/user/%.o,$(SPARCV9_USER_SOURCES))
+	$(SPARCV9_USER_RUNTIME_OBJS) $(SPARCV9_USER_SH_OBJS)
 
 all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/hdd-image.img
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
+POSIX-R1.ELF: $(BUILD)/POSIX-R1.ELF
 
 sparcv9-toolchain:
 	bash scripts/build-sparcv9-toolchain.sh --prefix $(SPARCV9_PREFIX)
@@ -158,6 +164,19 @@ $(BUILD)/bin/sh: $(SPARCV9_USER_OBJS) $(SPARCV9_PLATFORM)/user.ld \
 	@test -z "$$($(SPARCV9_NM) -u $@)" || { $(SPARCV9_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine sparcv9 $@
 
+$(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-sparcv9.o \
+	$(SPARCV9_USER_RUNTIME_OBJS) \
+	$(BUILD)/user/userland/tests/syscall-smoke.o \
+	$(SPARCV9_PLATFORM)/user.ld scripts/check-user-elf.py
+	$(SPARCV9_CC) $(SPARCV9_USER_CFLAGS) -nostdlib -static \
+		-Wl,--gc-sections -Wl,-z,max-page-size=8192 \
+		-Wl,-T,$(SPARCV9_PLATFORM)/user.ld \
+		$(BUILD)/user/userland/crt0-sparcv9.o \
+		$(SPARCV9_USER_RUNTIME_OBJS) \
+		$(BUILD)/user/userland/tests/syscall-smoke.o -lgcc -o $@
+	@test -z "$$($(SPARCV9_NM) -u $@)" || { $(SPARCV9_NM) -u $@; exit 1; }
+	$(PYTHON) scripts/check-user-elf.py --machine sparcv9 $@
+
 $(BUILD)/boot/stage1.elf: $(SPARCV9_STAGE1_OBJS) \
 	bootloader/sparcv9/stage1.ld
 	$(SPARCV9_LD) -m elf64_sparc -z max-page-size=512 \
@@ -203,7 +222,7 @@ sparcv9-entry-qemu-test: $(BUILD)/hdd-image.img
 sparcv9-qemu-test: $(BUILD)/hdd-image.img
 	bash scripts/test-sparcv9-qemu.sh
 
-.PHONY: all vmunix SH hdd-image sparcv9-toolchain sparcv9-image-check \
+.PHONY: all vmunix SH POSIX-R1.ELF hdd-image sparcv9-toolchain sparcv9-image-check \
 	sparcv9-bootloader sparcv9-disk-check sparcv9-entry-qemu-test \
 	sparcv9-qemu-test
 

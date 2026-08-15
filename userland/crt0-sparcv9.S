@@ -49,3 +49,14 @@ zedbsd_syscall6:
 	retl
 	 nop
 	.size zedbsd_syscall6, .-zedbsd_syscall6
+
+	.global zedbsd_signal_restorer
+	.type zedbsd_signal_restorer, #function
+zedbsd_signal_restorer:
+	add	%sp, 2047, %o1
+	ldx	[%o1], %o1
+	mov	80, %o0
+	call	zedbsd_syscall6
+	 nop
+	ta	0x70
+	.size zedbsd_signal_restorer, .-zedbsd_signal_restorer

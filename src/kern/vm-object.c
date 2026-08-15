@@ -8,6 +8,7 @@
 #include "kern/vm-object.h"
 #include "kern/file.h"
 #include "kern/kmem.h"
+#include "kern/page.h"
 #include "kern/vm-reclaim.h"
 #include "kern/vmspace.h"
 
@@ -15,7 +16,7 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#define PAGE_SIZE 4096U
+#define PAGE_SIZE ZEDBSD_PAGE_SIZE
 #define VM_OBJECT_DATA __attribute__((section(".vfs_bss")))
 
 static struct vm_object *shared_objects VM_OBJECT_DATA;
@@ -133,7 +134,7 @@ vm_object_put(struct vm_object *object)
 	struct vm_object_page *page;
 	if (object == NULL || object->usecount == 0 || --object->usecount != 0)
 		return;
-	(void)vm_object_sync_range(object, 0, (size_t)INT32_MAX, MS_SYNC);
+	(void)vm_object_sync_range(object, 0, SIZE_MAX, MS_SYNC);
 	for (link = &shared_objects; *link != NULL; link = &(*link)->next)
 		if (*link == object) {
 			*link = object->next;
@@ -239,13 +240,15 @@ vm_object_sync_range(struct vm_object *object, off_t offset, size_t size,
 	int first_error = 0;
 	if (object == NULL || offset < 0 || size == 0)
 		return EINVAL;
-	end = (uint64_t)(uint32_t)offset + size;
+	end = (uint64_t)offset + size;
+	if (end < (uint64_t)offset)
+		end = UINT64_MAX;
 	for (link = &object->pages; *link != NULL; ) {
 		struct vm_object_page *page = *link;
-		uint64_t page_end = (uint64_t)(uint32_t)page->offset + PAGE_SIZE;
+		uint64_t page_end = (uint64_t)page->offset + PAGE_SIZE;
 		int error;
-		if (page_end <= (uint64_t)(uint32_t)offset ||
-		    (uint64_t)(uint32_t)page->offset >= end) {
+		if (page_end <= (uint64_t)offset ||
+		    (uint64_t)page->offset >= end) {
 			link = &page->next;
 			continue;
 		}
@@ -288,7 +291,7 @@ vm_object_sync_inode(struct inode *inode)
 		int error;
 		if (object->inode != inode)
 			continue;
-		error = vm_object_sync_range(object, 0, (size_t)INT32_MAX, MS_SYNC);
+		error = vm_object_sync_range(object, 0, SIZE_MAX, MS_SYNC);
 		if (error != 0 && first_error == 0)
 			first_error = error;
 	}

@@ -32,11 +32,11 @@ zedbsd_kernel_milliseconds(void *context)
 }
 
 void
-zedbsd_clock_realtime(int32_t *seconds, int32_t *nanoseconds)
+zedbsd_clock_realtime(time_t *seconds, long *nanoseconds)
 {
 	uint64_t ticks = zedbsd_kernel_ticks();
 	if (seconds != 0)
-		*seconds = ZEDBSD_REALTIME_EPOCH_2026 + (int32_t)(ticks / 100U);
+		*seconds = (time_t)ZEDBSD_REALTIME_EPOCH_2026 + (time_t)(ticks / 100U);
 	if (nanoseconds != 0)
-		*nanoseconds = (int32_t)((ticks % 100U) * 10000000U);
+		*nanoseconds = (long)((ticks % 100U) * 10000000U);
 }

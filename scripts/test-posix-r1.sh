@@ -22,8 +22,21 @@ install_test_elf()
 {
 	local platform="$1" image="$2" destination="$3"
 	local spec="$image@@$((2048 * 512))"
+	local profile inner
+	case "$platform" in
+	pcat) profile=i386 ;;
+	amd64) profile=amd64 ;;
+	arm64) profile=aarch64 ;;
+	*) echo "no architecture profile for POSIX test: $platform" >&2; exit 2 ;;
+	esac
+	inner="$work/$platform-profile.img"
 	mcopy -o -i "$spec" "$repo/build/$platform/POSIX-R1.ELF" ::/init.elf
-	mcopy -o -i "$spec" "$repo/build/$platform/POSIX-R1.ELF" "$destination"
+	mcopy -i "$spec" ::/arch/"$profile.img" "$inner"
+	mcopy -o -i "$inner" "$repo/build/$platform/POSIX-R1.ELF" ::/bin/sh
+	mcopy -o -i "$spec" "$inner" ::/arch/"$profile.img"
+	# Keep the argument for callers documenting the historical injection
+	# point; direct /bin overlays now come from the nested profile image.
+	: "$destination"
 }
 
 wait_for_marker()
@@ -92,6 +105,28 @@ run_arm64()
 	wait_for_marker "$log" "$platform"
 }
 
+run_sparcv9()
+{
+	local platform=sparcv9 image="$work/sparcv9.img" log="$work/sparcv9.log"
+	local clean_log="$work/sparcv9.clean.log"
+	"$repo/build.sh" all "$platform"
+	"$repo/build.sh" POSIX-R1.ELF "$platform"
+	python3 "$repo/scripts/make-sparcv9-hdd-image.py" --force \
+		--stage1 "$repo/build/sparcv9/boot/stage1.bin" \
+		--stage2 "$repo/build/sparcv9/boot/stage2.bin" \
+		--kernel "$repo/build/sparcv9/vmunix" \
+		--shell "$repo/build/sparcv9/POSIX-R1.ELF" "$image"
+	mcopy -o -i "$image@@$((4096 * 512))" \
+		"$repo/build/sparcv9/POSIX-R1.ELF" ::/init.elf
+	qemu-system-sparc64 -M sun4u -m 256M \
+		-drive "file=$image,format=raw,if=ide" -nographic -no-reboot \
+		-no-shutdown >"$log" 2>&1 &
+	qemu_pid=$!
+	wait_for_marker "$log" "$platform"
+	tr -d '\r' <"$log" >"$clean_log"
+	grep -q 'SPARCV9 IDE PASS' "$clean_log"
+}
+
 case "$arch" in
 pc98)
 	ZEDBSD_USER_TEST_MODE=int "$repo/scripts/test-user-init.sh"
@@ -105,14 +140,18 @@ amd64)
 arm64)
 	run_arm64
 	;;
+sparcv9)
+	run_sparcv9
+	;;
 all)
 	ZEDBSD_USER_TEST_MODE=int "$repo/scripts/test-user-init.sh"
 	run_x86 pcat "${QEMU_SYSTEM_I386:-qemu-system-i386}" 486
 	run_x86 amd64 "${QEMU_PCAT_X86_64:-qemu-system-x86_64}" qemu64
 	run_arm64
+	run_sparcv9
 	;;
 *)
-	echo "usage: $0 [all|pc98|pcat|amd64|arm64]" >&2
+	echo "usage: $0 [all|pc98|pcat|amd64|arm64|sparcv9]" >&2
 	exit 2
 	;;
 esac

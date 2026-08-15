@@ -108,6 +108,25 @@ messages: $(BUILD)/kern/messages.h
 
 HOST_TEST_CC := $(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -I.
 
+# Compile the public headers in both supported data models.  These are object
+# fixtures rather than host executables so the ILP32 check does not depend on
+# the host having 32-bit startup objects or libraries installed.
+UAPI_ABI_TEST_FLAGS := -std=c11 -Wall -Wextra -Werror -nostdinc \
+	-Ilibc/include -Iinclude/uapi -Iinclude
+
+$(BUILD)/tests/uapi-abi-ilp32.o: tests/uapi-abi-layout.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m32 $(UAPI_ABI_TEST_FLAGS) -c $< -o $@
+
+$(BUILD)/tests/uapi-abi-lp64.o: tests/uapi-abi-layout.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m64 $(UAPI_ABI_TEST_FLAGS) -DZEDBSD_USER_ABI_LP64 \
+		-c $< -o $@
+
+uapi-abi-layout-check: $(BUILD)/tests/uapi-abi-ilp32.o \
+	$(BUILD)/tests/uapi-abi-lp64.o
+	@echo "zedBSD ILP32/LP64 UAPI layout check: PASS"
+
 $(BUILD)/tests/fat-host-test: tests/fat-host-test.c \
 	src/kern/fs.c src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c
 	@mkdir -p $(dir $@)
@@ -148,7 +167,7 @@ $(BUILD)/tests/heap-context-host-test: tests/heap-context-host-test.c \
 
 $(BUILD)/tests/elf-host-test: tests/elf-host-test.c src/kern/elf.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/elf.c $< -o $@
+	$(HOST_TEST_CC) -DHAL_ARCH_I386 -Iinclude -Isrc src/kern/elf.c $< -o $@
 
 $(BUILD)/tests/sched-host-test: tests/sched-host-test.c src/kern/sched.c
 	@mkdir -p $(dir $@)
@@ -285,7 +304,8 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/inet-stack-host-test \
 	$(BUILD)/tests/dhcp-host-test \
 	$(BUILD)/tests/dns-host-test
-CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test
+CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test \
+	uapi-abi-layout-check
 
 overlay-journal-format-host-test: tests/overlay-journal-format-host-test.py \
 	scripts/overlay_journal_format.py
@@ -315,4 +335,4 @@ distclean:
 	$(BUILD)/*/*/*/*.d)
 
 .PHONY: all check clean distclean messages stdio-fs-host-test \
-	overlay-journal-format-host-test
+	overlay-journal-format-host-test uapi-abi-layout-check

@@ -264,8 +264,6 @@ inet_ioctl_ifconf(uintptr_t argument)
 		configuration.ifc_len = required;
 		return copyout(&configuration, argument, sizeof(configuration));
 	}
-	if (configuration.ifc_buf > UINT32_MAX)
-		return EFAULT;
 	capacity = configuration.ifc_len / (uint32_t)sizeof(struct ifreq);
 	for (index = 0; index < net_device_count() && index < capacity; index++) {
 		struct net_device *device = net_device_at(index);

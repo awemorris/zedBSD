@@ -173,7 +173,7 @@ fat_month_days(int year, int month)
 	return month == 2 && fat_leap_year(year) ? 29 : days[month - 1];
 }
 
-static int32_t
+static time_t
 fat_decode_time(uint16_t date, uint16_t time)
 {
 	int year, month, day, days = 0;
@@ -194,13 +194,17 @@ fat_decode_time(uint16_t date, uint16_t time)
 	days += day - 1;
 	seconds = (int64_t)days * 86400 + ((time >> 11) & 0x1f) * 3600 +
 		((time >> 5) & 0x3f) * 60 + (time & 0x1f) * 2;
-	return seconds > INT32_MAX ? INT32_MAX : (int32_t)seconds;
+#ifdef ZEDBSD_USER_ABI_LP64
+	return (time_t)seconds;
+#else
+	return seconds > INT32_MAX ? (time_t)INT32_MAX : (time_t)seconds;
+#endif
 }
 
 static FAT_MUTATION int
-fat_encode_time(int32_t seconds, uint16_t *date, uint16_t *time)
+fat_encode_time(time_t seconds, uint16_t *date, uint16_t *time)
 {
-	int32_t days, remainder;
+	int64_t days, remainder;
 	int year = 1970, month = 1;
 
 	if (seconds < FAT_EPOCH_1980)
@@ -478,7 +482,7 @@ fat_getattr(struct inode *inode, struct stat *status)
 	status->st_ctime = inode->i_ctime.tv_sec;
 	status->st_blksize = 512;
 	status->st_blocks = inode->i_size > 0 ?
-	    (blkcnt_t)(((uint32_t)inode->i_size + 511U) / 512U) : 0;
+	    (blkcnt_t)(((uint64_t)inode->i_size + 511U) / 512U) : 0;
 	return 0;
 }
 
@@ -653,6 +657,11 @@ fat_pwrite_file(struct file *file, const void *buffer, size_t length,
 	enum zedbsd_fs_result result;
 	if (state == NULL)
 		return -EIO;
+	if (offset < 0)
+		return -EINVAL;
+	if ((uint64_t)offset > UINT32_MAX ||
+	    (uint64_t)count > UINT32_MAX - (uint64_t)offset)
+		return -EFBIG;
 	result = zedbsd_file_write_result(&state->legacy,
 					 (uint64_t)offset, buffer, count);
 	if (result != ZEDBSD_FS_OK)
@@ -750,6 +759,8 @@ fat_truncate(struct inode *inode, off_t size)
 	enum zedbsd_fs_result result;
 	if (size < 0)
 		return EINVAL;
+	if ((uint64_t)size > UINT32_MAX)
+		return EFBIG;
 	result = zedbsd_fs_open_result(&state->legacy, fat_path(inode), &file);
 	if (result == ZEDBSD_FS_OK)
 		result = zedbsd_file_truncate_result(&file, (uint64_t)size);

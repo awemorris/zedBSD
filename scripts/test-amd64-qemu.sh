@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# amd64 kernel / ELF32 userland integration test on PC/AT.
+# amd64 kernel / native ELF64 userland integration test on PC/AT.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -euo pipefail
 
@@ -21,7 +21,7 @@ offset=$((2048 * 512))
 
 cp --reflink=auto "$source_image" "$work/test.img"
 cp --reflink=auto "$fragmented_image" "$work/fragmented.img"
-printf '%s\n' 'echo A64 USER32 PASS' 'halt' >"$work/zinit.rc"
+printf '%s\n' 'echo AMD64 USER64 PASS' 'halt' >"$work/zinit.rc"
 for image in "$work/test.img" "$work/fragmented.img"; do
 	mmd -i "$image@@$offset" ::/etc 2>/dev/null || true
 	mcopy -o -i "$image@@$offset" "$work/zinit.rc" ::/etc/zinit.rc
@@ -40,7 +40,7 @@ run_qemu()
 		-drive "if=ide,format=raw,file=$image" >/dev/null 2>&1 &
 	qemu_pid=$!
 	for _ in $(seq 1 200); do
-		if test -f "$log" && grep -Fq 'A64 USER32 PASS' "$log"; then
+		if test -f "$log" && grep -Fq 'AMD64 USER64 PASS' "$log"; then
 			found=1
 			break
 		fi
@@ -56,8 +56,9 @@ run_qemu()
 		exit 1
 	fi
 	for marker in 'A64 PAGING PASS' 'A64 IRQ READY' \
-		'A64 TIMER TICK' 'boot: platform devices detected: 1' \
-		'A64 USER32 PASS'; do
+		'A64 XMM CONTEXT PASS' 'A64 TIMER TICK' \
+		'boot: platform devices detected: 1' \
+		'AMD64 USER64 PASS'; do
 		if ! grep -Fq "$marker" "$log"; then
 			cat "$log" >&2
 			echo "missing amd64 marker ($label): $marker" >&2

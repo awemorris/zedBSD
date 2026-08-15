@@ -2,9 +2,10 @@
 #include "kern/cred.h"
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 void
-zedbsd_clock_realtime(int32_t *seconds, int32_t *nanoseconds)
+zedbsd_clock_realtime(time_t *seconds, long *nanoseconds)
 {
 	if (seconds != NULL)
 		*seconds = 1;

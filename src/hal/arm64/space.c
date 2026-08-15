@@ -1,5 +1,6 @@
 #include <hal/hal.h>
 #include "asm.h"
+#include "bsp.h"
 #include "defs.h"
 #include "space.h"
 
@@ -22,6 +23,7 @@ static uint64 system_kernel_l0[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
 static uint64 system_kernel_l1[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
 static uint64 system_kernel_l2_low[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
 static uint64 system_kernel_l3_low[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
+static uint64 system_kernel_l2_high[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
 static uintptr_t system_ttbr0;
 static hal_space_t current_space;
 static int next_space_id=1;
@@ -35,6 +37,18 @@ void *arm64_phys_to_direct(uintptr_t p) { return (void *)(ARM64_DIRECT_BASE+p); 
 
 static uint64 table_desc(const void *table)
 { return arm64_direct_to_phys(table)|PTE_VALID|PTE_TABLE; }
+
+static void
+map_device_block(uint64 physical)
+{
+	unsigned index;
+	if (physical < 0xc0000000ULL || physical >= 0x100000000ULL)
+		return;
+	index = (unsigned)((physical - 0xc0000000ULL) >> 21);
+	system_kernel_l2_high[index] =
+	    (physical & ~0x1fffffULL) | BLOCK_FLAGS | PTE_ATTR(1) |
+	    PTE_PXN | PTE_UXN;
+}
 
 void
 arm64_space_init(void)
@@ -50,14 +64,32 @@ arm64_space_init(void)
 	hal_memset(system_kernel_l1,0,sizeof(system_kernel_l1));
 	hal_memset(system_kernel_l2_low,0,sizeof(system_kernel_l2_low));
 	hal_memset(system_kernel_l3_low,0,sizeof(system_kernel_l3_low));
+	hal_memset(system_kernel_l2_high,0,sizeof(system_kernel_l2_high));
 	system_kernel_l0[0]=table_desc(system_kernel_l1);
 	for(i=0;i<512;i++) {
 		uint64 physical=(uint64)i<<30;
 		if(physical>=total) break;
 		system_kernel_l1[i]=physical|BLOCK_FLAGS|PTE_PXN|PTE_UXN;
 	}
-	/* The top 64 MiB of the 32-bit aperture contains Pi 4 MMIO. */
-	system_kernel_l1[3]=0xc0000000ULL|BLOCK_FLAGS|PTE_ATTR(1)|PTE_PXN|PTE_UXN;
+	/*
+	 * Do not turn the complete 3--4 GiB aperture into Device memory: a
+	 * 4 GiB Pi has ordinary RAM there.  Split that L1 entry and replace only
+	 * the FDT-discovered peripheral blocks with Device-nGnRE mappings.
+	 */
+	system_kernel_l1[3]=table_desc(system_kernel_l2_high);
+	for(i=0;i<512;i++) {
+		uint64 physical=0xc0000000ULL+((uint64)i<<21);
+		if(physical<total)
+			system_kernel_l2_high[i]=physical|BLOCK_FLAGS|PTE_PXN|PTE_UXN;
+	}
+	{
+		const struct rpi4_fdt_info *info=rpi4_boot_info();
+		map_device_block(info->uart_base);
+		map_device_block(info->mailbox_base);
+		map_device_block(info->gic_dist_base);
+		map_device_block(info->gic_cpu_base);
+		map_device_block(info->sdhci_base);
+	}
 	system_kernel_l1[0]=table_desc(system_kernel_l2_low);
 	for(i=0;i<512;i++)
 		system_kernel_l2_low[i]=((uint64)i<<21)|BLOCK_FLAGS|PTE_PXN|PTE_UXN;
@@ -86,7 +118,7 @@ arm64_space_init(void)
 static int valid_space(hal_space_t h)
 { return h==HAL_SPACE_SYS||(h&&((struct arm64_space *)h)->magic==ARM64_SPACE_MAGIC); }
 static int valid_user(uintptr_t a,size_t n)
-{ return n&&(a&4095)==0&&(n&4095)==0&&a>=4096&&a<0x80000000ULL&&n<=0x80000000ULL-a; }
+{ return n&&(a&4095)==0&&(n&4095)==0&&a>=4096&&a<0x0001000000000000ULL&&n<=0x0001000000000000ULL-a; }
 
 static struct arm64_table_page *allocate_table(struct arm64_space *s,uint64 *parent,unsigned index)
 {
@@ -178,4 +210,5 @@ int hal_page_clear_flags(hal_space_t h,void *v,uint32 flags)
 }
 void hal_page_flush_tlb(hal_space_t h){if(h==HAL_SPACE_SYS||h==current_space)arm64_flush_tlb();}
 size_t hal_page_get_page_size(int level){if(level==1)return 4096;if(level==2)return 0x200000;if(level==3)return 0x40000000;return 0;}
+void hal_page_get_user_range(uintptr_t *minimum,uintptr_t *limit){if(minimum)*minimum=4096;if(limit)*limit=0x0001000000000000ULL;}
 void hal_arm64_space_memory_stats(uint32 *s,uint32 *t){if(s)*s=space_count;if(t)*t=page_table_count;}

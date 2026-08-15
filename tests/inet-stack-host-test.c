@@ -239,7 +239,7 @@ int main(void)
 
 	assert(socket_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &udp_socket) == 0);
 	{
-		struct zedbsd_timeval timeout = { 0, 20000 }, returned = { 0, 0 };
+		struct timeval timeout = { 0, 20000 }, returned = { 0, 0 };
 		socklen_t option_length = sizeof(returned);
 		assert(socket_setsockopt_common(udp_socket, SOL_SOCKET,
 		    SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0);

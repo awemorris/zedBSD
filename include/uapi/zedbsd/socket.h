@@ -10,6 +10,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
 typedef uint16_t sa_family_t;
@@ -31,11 +32,6 @@ typedef uint32_t socklen_t;
 #define SO_BROADCAST 0x0020
 #define SO_BINDTODEVICE 0x0019
 #define SO_RCVTIMEO  0x1006
-
-struct zedbsd_timeval {
-	int32_t tv_sec;
-	int32_t tv_usec;
-};
 
 #define MSG_DONTWAIT 0x0040
 

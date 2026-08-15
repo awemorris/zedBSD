@@ -278,7 +278,7 @@ inode_getattr(struct inode *inode, struct stat *status)
 	status->st_ctime = inode->i_ctime.tv_sec;
 	status->st_blksize = 512;
 	status->st_blocks = inode->i_size > 0 ?
-	    (blkcnt_t)(((uint32_t)inode->i_size + 511U) / 512U) : 0;
+	    (blkcnt_t)(((uint64_t)inode->i_size + 511U) / 512U) : 0;
 	return 0;
 }
 

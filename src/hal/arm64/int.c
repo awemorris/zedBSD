@@ -28,6 +28,24 @@ void arm64_int_init(void)
 void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 {
 	uint32 ec=(uint32)((f->esr>>26)&0x3f);
+	if (vector == 0) {
+		int cause = (ec == 0x20 || ec == 0x21 || ec == 0x24 ||
+		    ec == 0x25) ? HAL_TRAP_CAUSE_PAGE_FAULT :
+		    ec == 0x3c ? HAL_TRAP_CAUSE_BREAKPOINT :
+		    (ec == 0x22 || ec == 0x26) ? HAL_TRAP_CAUSE_ALIGNMENT :
+		    ec == 0 ? HAL_TRAP_CAUSE_ILLEGAL_INSN :
+		    HAL_TRAP_CAUSE_MACHINE_CHECK;
+		int mode = (ec == 0x20 || ec == 0x21) ? HAL_TRAP_MODE_EXEC :
+		    (f->esr & (1ULL << 6)) ? HAL_TRAP_MODE_WRITE :
+		    HAL_TRAP_MODE_READ;
+		uintptr_t address = cause == HAL_TRAP_CAUSE_PAGE_FAULT ?
+		    (uintptr_t)f->far : 0;
+
+		if (trap_handlers[cause] != NULL &&
+		    trap_handlers[cause]((void *)(uintptr_t)f->elr,
+		    (void *)address, mode) == HAL_TRAP_RET_SUCCESS)
+			return;
+	}
 	if (vector == 8 && ec == 0x15) {
 		struct hal_user_trap trap;
 		uintptr_t args[HAL_SYSCALL_ARGS];

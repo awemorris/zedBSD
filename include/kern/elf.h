@@ -30,6 +30,7 @@
 #define ET_EXEC 2
 #define EM_386 3
 #define EM_SPARCV9 43
+#define EM_X86_64 62
 #define EM_AARCH64 183
 #define PT_NULL 0
 #define PT_LOAD 1

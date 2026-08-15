@@ -17,7 +17,7 @@ from overlay_journal_format import JOURNAL_BYTES, empty_active_slot, self_test
 
 PROFILES = {
     "i386": ("ZEDI386", 1, 3),
-    "amd64": ("ZEDAMD64", 1, 3),  # current user ABI is transitional ELF32
+    "amd64": ("ZEDAMD64", 2, 62),
     "aarch64": ("ZEDAARCH64", 2, 183),
 }
 DESTINATION = re.compile(r"/(bin|lib)/[a-z0-9_]{1,8}(?:\.[a-z0-9_]{1,3})?")

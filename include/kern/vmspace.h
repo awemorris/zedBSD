@@ -14,8 +14,17 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#define VM_USER_MIN 0x00001000U
-#define VM_USER_TOP 0x80000000U
+struct vm_layout {
+	uintptr_t user_minimum;
+	uintptr_t user_limit;
+	uintptr_t brk_limit;
+	uintptr_t mmap_base;
+	uintptr_t stack_top;
+};
+
+extern struct vm_layout vm_layout;
+void vmspace_layout_init(void);
+int vmspace_user_range_valid(uintptr_t, size_t);
 
 struct file;
 struct vm_object;
@@ -33,8 +42,6 @@ struct vmspace;
 #define VM_REGION_IMMUTABLE 0x0004U
 #define VM_REGION_BRK       0x0008U
 #define VM_REGION_SHARED    0x0010U
-
-#define VM_BRK_TOP 0x10000000U
 
 enum vm_region_backing {
 	VM_BACKING_ANON = 0,

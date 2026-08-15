@@ -9,6 +9,8 @@ shell_image="${ZEDBSD_SH_IMAGE:-$build/bin/sh}"
 # Optional test/image customization hook.  Standard zedBSD images leave this
 # empty and therefore enter /bin/sh without an automatic startup script.
 zinit_rc="${ZEDBSD_ZINIT_RC:-}"
+arch_profile="${ZEDBSD_ARCH_PROFILE:-}"
+arch_image="${ZEDBSD_ARCH_IMAGE:-}"
 partition="${BOOT_PARTITION:-0}"
 install_disk_stubs="${INSTALL_DISK_STUBS:-0}"
 while test "$#" -gt 0; do
@@ -263,6 +265,23 @@ PY
 	swap_temp=""
 fi
 ensure_directory ::BIN
+# The architecture profile is overlaid directly on both directories.  Keep
+# an empty lower /lib in the base image even while all libraries are linked
+# statically; VFS must be able to capture both lower mount points before it
+# attaches the profile image.
+ensure_directory ::LIB
+if test -n "$arch_profile" || test -n "$arch_image"; then
+	test -n "$arch_profile" && test -n "$arch_image" || {
+		echo "ZEDBSD_ARCH_PROFILE and ZEDBSD_ARCH_IMAGE must be set together" >&2
+		exit 2
+	}
+	test -s "$arch_image" || {
+		echo "Architecture profile image not found: $arch_image" >&2
+		exit 1
+	}
+	ensure_directory ::ARCH
+	mcopy -o -i "$image@@$offset" "$arch_image" ::ARCH/"${arch_profile^^}.IMG"
+fi
 test -s "$shell_image" || { echo "Shell ELF not found: $shell_image" >&2; exit 1; }
 test -s "$build/bin/noct" || { echo "Noct ELF not found: $build/bin/noct" >&2; exit 1; }
 test -s "$build/bin/linux" || { echo "Linux loader ELF not found: $build/bin/linux" >&2; exit 1; }

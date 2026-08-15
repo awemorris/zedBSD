@@ -5,6 +5,7 @@
 #include "asi.h"
 #include "defs.h"
 #include "space.h"
+#include "task.h"
 #include "trap.h"
 #include <kern/sched.h>
 #include <errno.h>
@@ -88,12 +89,36 @@ int
 sparcv9_trap_dispatch(uint64 trap_type, uintptr_t pc, uintptr_t next_pc,
 	uint64 tstate)
 {
+	int cause, mode = HAL_TRAP_MODE_READ;
+	uintptr_t address = 0;
 	(void)next_pc;
 	(void)tstate;
 	if (trap_type == 0x4eU) {
 		handle_timer();
 		return 0;
 	}
+	if (trap_type == 0x64U || trap_type == 0x68U) {
+		int instruction = trap_type == 0x64U;
+		address = (uintptr_t)sparcv9_mmu_read(instruction ?
+		    SPARCV9_ASI_IMMU : SPARCV9_ASI_DMMU,
+		    SPARCV9_MMU_TAG_ACCESS) & ~SPARCV9_PAGE_MASK;
+		mode = instruction ? HAL_TRAP_MODE_EXEC :
+		    (sparcv9_mmu_read(SPARCV9_ASI_DMMU, 0x18) & 4U) ?
+		    HAL_TRAP_MODE_WRITE : HAL_TRAP_MODE_READ;
+		cause = HAL_TRAP_CAUSE_PAGE_FAULT;
+	} else if (trap_type == 0x10U) {
+		cause = HAL_TRAP_CAUSE_ILLEGAL_INSN;
+	} else if (trap_type == 0x101U) {
+		cause = HAL_TRAP_CAUSE_BREAKPOINT;
+	} else if (trap_type == 0x34U) {
+		cause = HAL_TRAP_CAUSE_ALIGNMENT;
+	} else {
+		cause = HAL_TRAP_CAUSE_MACHINE_CHECK;
+	}
+	if (trap_handlers[cause] != NULL &&
+	    trap_handlers[cause]((void *)pc, (void *)address, mode) ==
+	    HAL_TRAP_RET_SUCCESS)
+		return 0;
 	hal_printf("SPARCV9 trap=%llx pc=%p target=%llx access=%llx sfar=%llx\n",
 	    trap_type, (void *)pc,
 	    sparcv9_mmu_read(SPARCV9_ASI_DMMU, SPARCV9_MMU_TAG_TARGET),
@@ -115,8 +140,10 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 	(void)tstate;
 	if (frame == NULL)
 		HAL_FATAL("SPARC V9 missing user trap frame");
+	sparcv9_task_enter_user_frame(frame, pc, next_pc, tstate, trap_type);
 	if (trap_type == 0x4eU) {
 		handle_timer();
+		sparcv9_task_leave_user_frame();
 		return 0;
 	}
 	if (trap_type == 0x16dU) {
@@ -141,6 +168,7 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 			reschedule_pending = 0;
 			sched_yield();
 		}
+		sparcv9_task_leave_user_frame();
 		return 1;
 	}
 	if (trap_type == 0x64U || trap_type == 0x68U) {
@@ -150,16 +178,23 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 		    SPARCV9_MMU_TAG_ACCESS) & ~SPARCV9_PAGE_MASK;
 		write = !instruction &&
 		    (sparcv9_mmu_read(SPARCV9_ASI_DMMU, 0x18) & 4U) != 0;
-		if (sparcv9_resolve_miss(address, instruction, write))
+		if (sparcv9_resolve_miss(address, instruction, write)) {
+			sparcv9_task_leave_user_frame();
 			return 0;
+		}
 		if (deliver_user_fault(pc, address, instruction, write,
 		    frame->out[0]) == HAL_TRAP_RET_SUCCESS &&
-		    sparcv9_prime_mapping(address, instruction, write))
+		    sparcv9_prime_mapping(address, instruction, write)) {
+			sparcv9_task_leave_user_frame();
 			return 0;
+		}
 		HAL_FATAL("SPARC V9 user page fault handler returned");
 	}
 	{
 		struct hal_user_trap trap;
+		hal_printf("SPARCV9 user trap=%llx pc=%p npc=%p tstate=%llx o0=%llx sp=%llx\n",
+		    trap_type, (void *)pc, (void *)next_pc, tstate,
+		    frame->out[0], frame->old_sp + SPARCV9_STACK_BIAS);
 		trap.vector = trap_type == 0x34U ? 17U :
 		    trap_type == 0x101U ? 3U : 6U;
 		trap.cs = 3U;

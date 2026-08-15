@@ -175,8 +175,7 @@ static int graphics_blit(uintptr_t argument, int patterned)
 		minimum_stride = ((uint64_t)request.width + 7U) / 8U;
 	else
 		return EINVAL;
-	if (minimum_stride > request.stride || minimum_stride > GRAPHICS_ROW_MAX ||
-	    (uint64_t)request.stride * request.height > UINT32_MAX)
+	if (minimum_stride > request.stride || minimum_stride > GRAPHICS_ROW_MAX)
 		return EINVAL;
 	error = load_palette(&request);
 	if (error != 0) return error;
@@ -193,7 +192,7 @@ static int graphics_blit(uintptr_t argument, int patterned)
 	for (row = 0; row < request.height; row++) {
 		unsigned column;
 		source_offset = (uint64_t)request.stride * row;
-		if ((uint64_t)request.pixels + source_offset > UINT32_MAX)
+		if (source_offset > UINTPTR_MAX - (uintptr_t)request.pixels)
 			return EFAULT;
 		if (request.format == ZEDBSD_GRAPHICS_FORMAT_MONO1) {
 			uint8_t packed[128];

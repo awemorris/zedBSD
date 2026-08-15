@@ -103,6 +103,21 @@ sparcv9_task_dispatch:
 	 nop
 	.size sparcv9_task_dispatch, .-sparcv9_task_dispatch
 
+	.global sparcv9_tls_read
+	.type sparcv9_tls_read, #function
+sparcv9_tls_read:
+	retl
+	 mov %g7, %o0
+	.size sparcv9_tls_read, .-sparcv9_tls_read
+
+	.global sparcv9_tls_write
+	.type sparcv9_tls_write, #function
+sparcv9_tls_write:
+	mov %o0, %g7
+	retl
+	 nop
+	.size sparcv9_tls_write, .-sparcv9_tls_write
+
 	.global sparcv9_kernel_task_entry
 sparcv9_kernel_task_entry:
 	mov %l1, %o0
@@ -130,4 +145,49 @@ sparcv9_user_task_entry:
 	or %l2, %l3, %l2
 	wrpr %l2, 0, %tstate
 	retry
+	 nop
+
+	.global sparcv9_user_fork_entry
+sparcv9_user_fork_entry:
+	setx sparcv9_current_user_windows, %g3, %g5
+	ldx [%g5], %g5
+	clr %g2
+1:
+	wrpr %g2, 0, %cwp
+	sllx %g2, 7, %g3
+	add %g5, %g3, %g3
+	ldx [%g3 + 0], %l0
+	ldx [%g3 + 8], %l1
+	ldx [%g3 + 16], %l2
+	ldx [%g3 + 24], %l3
+	ldx [%g3 + 32], %l4
+	ldx [%g3 + 40], %l5
+	ldx [%g3 + 48], %l6
+	ldx [%g3 + 56], %l7
+	ldx [%g3 + 64], %i0
+	ldx [%g3 + 72], %i1
+	ldx [%g3 + 80], %i2
+	ldx [%g3 + 88], %i3
+	ldx [%g3 + 96], %i4
+	ldx [%g3 + 104], %i5
+	ldx [%g3 + 112], %i6
+	ldx [%g3 + 120], %i7
+	inc %g2
+	cmp %g2, 8
+	blu,pt %xcc, 1b
+	 nop
+	ldx [%g5 + 1032], %g1
+	wrpr %g1, 0, %cansave
+	ldx [%g5 + 1040], %g1
+	wrpr %g1, 0, %canrestore
+	ldx [%g5 + 1048], %g1
+	wrpr %g1, 0, %otherwin
+	ldx [%g5 + 1056], %g1
+	wrpr %g1, 0, %cleanwin
+	ldx [%g5 + 1064], %g1
+	wrpr %g1, 0, %wstate
+	ldx [%g5 + 1024], %g1
+	wrpr %g1, 0, %cwp
+	ldx [%g5 + 1128], %g7
+	done
 	 nop

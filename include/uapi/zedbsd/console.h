@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <sys/ioctl.h>
+#include <zedbsd/types.h>
 
 #define ZEDBSD_CONSOLE_IOC_GROUP 'c'
 
@@ -43,7 +44,7 @@ struct zedbsd_console_write_at {
 	uint32_t row;
 	uint32_t column;
 	uint32_t attribute;
-	uint32_t address;
+	uapi_ptr_t address;
 	uint32_t length;
 };
 

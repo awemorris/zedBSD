@@ -16,21 +16,22 @@ static void restore_trap_state(const struct sparcv9_task*t){__asm__ volatile("wr
 void hal_task_context_switch(hal_task_t h){struct sparcv9_task*to=h,*from=running;if(!to||!from)HAL_FATAL("invalid SPARC V9 task switch");if(to==from)return;save_trap_state(from);running=to;sparcv9_current_trap_sp=to->trap_sp;sparcv9_current_user_windows=&to->trap_windows;hal_page_switch_space(to->space);restore_trap_state(to);sparcv9_task_dispatch(&from->windows,&to->windows);}
 void sparcv9_task_returned(void){HAL_FATAL("SPARC V9 task returned");for(;;)__asm__ volatile("nop");}
 hal_task_t hal_task_get_current(void){return running;}
-void hal_task_set_tls(hal_task_t h,uintptr_t v){if(h)((struct sparcv9_task*)h)->tls=v;}
-uintptr_t hal_task_get_tls(hal_task_t h){return h?((struct sparcv9_task*)h)->tls:0;}
+void hal_task_set_tls(hal_task_t h,uintptr_t v){struct sparcv9_task*t=h;if(t){t->tls=v;t->windows.global[7]=v;if(t==running)sparcv9_tls_write(v);}}
+uintptr_t hal_task_get_tls(hal_task_t h){if(h==running)return sparcv9_tls_read();return h?((struct sparcv9_task*)h)->tls:0;}
 void hal_task_set_private(hal_task_t h,void*p){if(h)((struct sparcv9_task*)h)->private_data=p;}
 void *hal_task_get_private(hal_task_t h){return h?((struct sparcv9_task*)h)->private_data:NULL;}
 hal_space_t hal_task_get_space(hal_task_t h){return h?((struct sparcv9_task*)h)->space:HAL_SPACE_SYS;}
 
-/*
- * The generic POSIX layer fails these operations cleanly until the sun4u
- * return-to-user path can clone and replace a complete register-window set.
- */
-hal_task_t hal_task_fork_current(hal_space_t s,intptr_t r){(void)s;(void)r;return NULL;}
-int hal_task_exec_current(hal_space_t s,uintptr_t e,uintptr_t sp){(void)s;(void)e;(void)sp;return-1;}
-uintptr_t hal_task_user_stack(void){return 0;}
-int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int n,uintptr_t r,uint32_t t){(void)h;(void)sp;(void)n;(void)r;(void)t;return-1;}
-int hal_task_signal_return(uint32_t t,intptr_t*v){(void)t;(void)v;return-1;}
+void sparcv9_task_enter_user_frame(struct sparcv9_user_trap_frame*f,
+	uintptr_t pc,uintptr_t npc,uint64 tstate,uint64 type){if(running){running->active_user_frame=f;running->active_pc=pc;running->active_next_pc=npc;running->active_tstate=tstate;running->active_trap_type=type;}}
+void sparcv9_task_leave_user_frame(void){if(running)running->active_user_frame=NULL;}
+static void set_user_trap(uintptr_t pc,uintptr_t npc,uint64 state){__asm__ volatile("wrpr %0,0,%%tpc\n\twrpr %1,0,%%tnpc\n\twrpr %2,0,%%tstate"::"r"(pc),"r"(npc),"r"(state):"memory");}
+static unsigned user_output_window(const struct sparcv9_window_context*c){return(unsigned)((c->cwp+1U)&(SPARCV9_NWINDOWS-1U));}
+hal_task_t hal_task_fork_current(hal_space_t s,intptr_t r){struct sparcv9_task*t;unsigned w;if(!running||s==HAL_SPACE_SYS||!running->active_user_frame)return NULL;t=hal_task_create(s,(void(*)(void*))(uintptr_t)running->active_next_pc,NULL,(void*)(running->active_user_frame->old_sp+SPARCV9_STACK_BIAS));if(!t)return NULL;t->trap_windows=running->trap_windows;w=user_output_window(&t->trap_windows);t->trap_windows.window[w][8]=(uint64)r;t->tls=sparcv9_tls_read();t->trap_windows.global[7]=t->tls;t->trap_level=1;t->trap_pc=running->active_pc;t->trap_next_pc=running->active_next_pc;t->trap_state=running->active_tstate;t->trap_type=running->active_trap_type;t->windows.window[1][15]=(uintptr_t)sparcv9_user_fork_entry-8U;return t;}
+int hal_task_exec_current(hal_space_t s,uintptr_t e,uintptr_t sp){struct sparcv9_user_trap_frame*f;uint64 state;if(!running||s==HAL_SPACE_SYS||(f=running->active_user_frame)==NULL||!e||!sp||sp<SPARCV9_STACK_BIAS)return-1;state=running->active_tstate&~0x1fULL;hal_memset(&running->trap_windows,0,sizeof(running->trap_windows));running->trap_windows.cansave=6;running->trap_windows.cleanwin=7;running->trap_windows.window[1][14]=sp-SPARCV9_STACK_BIAS;hal_memset(f,0,sizeof(*f));f->old_sp=sp-SPARCV9_STACK_BIAS;running->space=s;running->tls=0;running->signal_depth=0;running->signal_token=0;running->active_pc=e-4U;running->active_next_pc=e;running->active_tstate=state;hal_page_switch_space(s);set_user_trap(e-4U,e,state);return 0;}
+uintptr_t hal_task_user_stack(void){return running&&running->active_user_frame?running->active_user_frame->old_sp+SPARCV9_STACK_BIAS:0;}
+int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int n,uintptr_t r,uint32_t t){struct sparcv9_user_trap_frame*f;unsigned w;if(!running||(f=running->active_user_frame)==NULL||running->signal_depth||!h||!sp||sp<SPARCV9_STACK_BIAS||!r||!t)return-1;running->signal_windows=running->trap_windows;running->signal_frame=*f;running->signal_pc=running->active_pc;running->signal_next_pc=running->active_next_pc;running->signal_tstate=running->active_tstate;running->signal_token=t;running->signal_depth=1;w=user_output_window(&running->trap_windows);running->trap_windows.window[w][8]=(uint64)n;running->trap_windows.window[w][14]=sp-SPARCV9_STACK_BIAS;running->trap_windows.window[w][15]=r-8U;f->old_sp=sp-SPARCV9_STACK_BIAS;f->out[0]=(uint64)n;running->active_pc=h-4U;running->active_next_pc=h;set_user_trap(h-4U,h,running->active_tstate);return 0;}
+int hal_task_signal_return(uint32_t t,intptr_t*v){struct sparcv9_user_trap_frame*f;if(!running||(f=running->active_user_frame)==NULL||!v||running->signal_depth!=1||!t||t!=running->signal_token)return-1;running->trap_windows=running->signal_windows;*f=running->signal_frame;*v=(intptr_t)f->out[0];running->active_pc=running->signal_pc;running->active_next_pc=running->signal_next_pc;running->active_tstate=running->signal_tstate;set_user_trap(running->signal_pc,running->signal_next_pc,running->signal_tstate);running->signal_depth=0;running->signal_token=0;return 0;}
 void hal_sparcv9_task_memory_stats(uint32*c,size_t*b){if(c)*c=task_count;if(b)*b=stack_bytes;}
 
 static uint8 self_stack[4096]__attribute__((aligned(16)));static struct sparcv9_window_context main_context,test_context;static unsigned count;

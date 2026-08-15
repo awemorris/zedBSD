@@ -21,6 +21,14 @@ static struct inode image_inode;
 static struct file image_file;
 static struct vm_region mapped_region;
 static unsigned map_count;
+struct vm_layout vm_layout;
+
+void
+vmspace_layout_init(void)
+{
+	vm_layout.user_minimum = 4096U;
+	vm_layout.user_limit = 0x80000000U;
+}
 
 void *kern_malloc(size_t size) { return malloc(size); }
 void *kern_calloc(size_t count, size_t size) { return calloc(count, size); }

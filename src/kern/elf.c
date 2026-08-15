@@ -16,14 +16,27 @@
 
 #define ELF_PHNUM_MAX 32U
 #define PAGE_SIZE ZEDBSD_PAGE_SIZE
+#ifdef ZEDBSD_USER_ABI_LP64
+#define ELF_OFF_MAX 0x7fffffffffffffffULL
+#else
 #define ELF_OFF_MAX 0x7fffffffULL
+#endif
 
-#ifdef ZEDBSD_USER_ABI_SPARCV9
+#if defined(HAL_ARCH_SPARCV9)
 #define ELF64_EXPECTED_DATA ELFDATA2MSB
 #define ELF64_EXPECTED_MACHINE EM_SPARCV9
-#else
+#elif defined(HAL_ARCH_AMD64)
+#define ELF64_EXPECTED_DATA ELFDATA2LSB
+#define ELF64_EXPECTED_MACHINE EM_X86_64
+#elif defined(HAL_ARCH_ARM64)
 #define ELF64_EXPECTED_DATA ELFDATA2LSB
 #define ELF64_EXPECTED_MACHINE EM_AARCH64
+#elif defined(HAL_ARCH_I386)
+/* elf64_load is not selected by the ILP32 exec path. */
+#define ELF64_EXPECTED_DATA ELFDATA2LSB
+#define ELF64_EXPECTED_MACHINE EM_X86_64
+#else
+#error ELF64 machine is not defined for this architecture
 #endif
 
 static int
@@ -74,6 +87,7 @@ elf32_load(struct file *file, struct vmspace *vm,
 
 	if (file == NULL || vm == NULL || image == NULL)
 		return EINVAL;
+	vmspace_layout_init();
 	memset(image, 0, sizeof(*image));
 	file_size = file->f_inode->i_size;
 	if (file_size < (off_t)sizeof(header) ||
@@ -133,8 +147,8 @@ elf32_load(struct file *file, struct vmspace *vm,
 		    segment_prot(program->p_flags) == 0 ||
 		    program->p_offset > (uint32_t)file_size ||
 		    program->p_filesz > (uint32_t)file_size - program->p_offset ||
-		    program->p_vaddr < VM_USER_MIN ||
-		    program->p_memsz > VM_USER_TOP - program->p_vaddr ||
+		    program->p_vaddr < vm_layout.user_minimum ||
+		    program->p_memsz > vm_layout.user_limit - program->p_vaddr ||
 		    ((program->p_offset ^ program->p_vaddr) & (PAGE_SIZE - 1U)) != 0 ||
 		    (program->p_align > 1U &&
 		     (!power_of_two(program->p_align) ||
@@ -144,7 +158,7 @@ elf32_load(struct file *file, struct vmspace *vm,
 		start = program->p_vaddr & ~(PAGE_SIZE - 1U);
 		end = (program->p_vaddr + program->p_memsz + PAGE_SIZE - 1U) &
 			~(PAGE_SIZE - 1U);
-		if (end <= start || end > VM_USER_TOP)
+		if (end <= start || end > vm_layout.user_limit)
 			goto out;
 		if (end > brk_start)
 			brk_start = end;
@@ -163,8 +177,9 @@ elf32_load(struct file *file, struct vmspace *vm,
 		    header.e_entry < program->p_vaddr + program->p_memsz)
 			entry_ok = 1;
 	}
-	if (loads == 0 || !entry_ok || header.e_entry < VM_USER_MIN ||
-	    header.e_entry >= VM_USER_TOP)
+	if (loads == 0 || !entry_ok ||
+	    header.e_entry < vm_layout.user_minimum ||
+	    header.e_entry >= vm_layout.user_limit)
 		goto out;
 
 	for (i = 0; i < header.e_phnum; i++) {
@@ -208,6 +223,7 @@ elf64_load(struct file *file, struct vmspace *vm,
 
 	if (file == NULL || vm == NULL || image == NULL)
 		return EINVAL;
+	vmspace_layout_init();
 	memset(image, 0, sizeof(*image));
 	file_size = (uint64_t)file->f_inode->i_size;
 	if (file_size < sizeof(header) || file_size > ELF_OFF_MAX ||
@@ -266,8 +282,10 @@ elf64_load(struct file *file, struct vmspace *vm,
 		    segment_prot(program->p_flags) == 0 ||
 		    program->p_offset > file_size ||
 		    program->p_filesz > file_size - program->p_offset ||
-		    program->p_vaddr < VM_USER_MIN || program->p_vaddr >= VM_USER_TOP ||
-		    program->p_memsz > (uint64_t)VM_USER_TOP - program->p_vaddr ||
+		    program->p_vaddr < vm_layout.user_minimum ||
+		    program->p_vaddr >= vm_layout.user_limit ||
+		    program->p_memsz >
+		    (uint64_t)vm_layout.user_limit - program->p_vaddr ||
 		    ((program->p_offset ^ program->p_vaddr) & (PAGE_SIZE - 1U)) != 0 ||
 		    (program->p_align > 1U &&
 		     (!power_of_two64(program->p_align) ||
@@ -278,7 +296,7 @@ elf64_load(struct file *file, struct vmspace *vm,
 		start = (uintptr_t)program->p_vaddr & ~(uintptr_t)(PAGE_SIZE - 1U);
 		end = ((uintptr_t)program->p_vaddr + (uintptr_t)program->p_memsz +
 		       PAGE_SIZE - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
-		if (end <= start || end > VM_USER_TOP)
+		if (end <= start || end > vm_layout.user_limit)
 			goto out;
 		if (end > brk_start)
 			brk_start = end;
@@ -300,8 +318,9 @@ elf64_load(struct file *file, struct vmspace *vm,
 		    header.e_entry < program->p_vaddr + program->p_memsz)
 			entry_ok = 1;
 	}
-	if (loads == 0 || !entry_ok || header.e_entry < VM_USER_MIN ||
-	    header.e_entry >= VM_USER_TOP)
+	if (loads == 0 || !entry_ok ||
+	    header.e_entry < vm_layout.user_minimum ||
+	    header.e_entry >= vm_layout.user_limit)
 		goto out;
 
 	for (i = 0; i < header.e_phnum; i++) {

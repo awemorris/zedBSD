@@ -70,7 +70,7 @@ int
 socket_setsockopt_common(struct socket *socket, int level, int option,
 			 const void *value, socklen_t length)
 {
-	struct zedbsd_timeval timeout;
+	struct timeval timeout;
 	uint64_t ticks;
 
 	if (socket == NULL || level != SOL_SOCKET || option != SO_RCVTIMEO)
@@ -81,8 +81,8 @@ socket_setsockopt_common(struct socket *socket, int level, int option,
 	if (timeout.tv_sec < 0 || timeout.tv_usec < 0 ||
 	    timeout.tv_usec >= 1000000)
 		return EINVAL;
-	ticks = (uint64_t)(uint32_t)timeout.tv_sec * SOCKET_CLOCK_HZ;
-	ticks += ((uint64_t)(uint32_t)timeout.tv_usec * SOCKET_CLOCK_HZ +
+	ticks = (uint64_t)timeout.tv_sec * SOCKET_CLOCK_HZ;
+	ticks += ((uint64_t)timeout.tv_usec * SOCKET_CLOCK_HZ +
 	    999999U) / 1000000U;
 	socket->receive_timeout_ticks = ticks;
 	return 0;
@@ -92,15 +92,15 @@ int
 socket_getsockopt_common(struct socket *socket, int level, int option,
 			 void *value, socklen_t *length)
 {
-	struct zedbsd_timeval timeout;
+	struct timeval timeout;
 
 	if (socket == NULL || level != SOL_SOCKET || option != SO_RCVTIMEO)
 		return EOPNOTSUPP;
 	if (value == NULL || length == NULL || *length < sizeof(timeout))
 		return EINVAL;
-	timeout.tv_sec = (int32_t)(socket->receive_timeout_ticks /
+	timeout.tv_sec = (time_t)(socket->receive_timeout_ticks /
 	    SOCKET_CLOCK_HZ);
-	timeout.tv_usec = (int32_t)((socket->receive_timeout_ticks %
+	timeout.tv_usec = (long)((socket->receive_timeout_ticks %
 	    SOCKET_CLOCK_HZ) * (1000000U / SOCKET_CLOCK_HZ));
 	memcpy(value, &timeout, sizeof(timeout));
 	*length = sizeof(timeout);
