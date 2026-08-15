@@ -10,7 +10,7 @@
 #include <errno.h>
 
 extern char sparcv9_trap_table[];
-static hal_trap_handler_t trap_handlers[5];
+static hal_trap_handler_t trap_handlers[HAL_TRAP_CAUSE_COUNT];
 static hal_syscall_handler_t syscall_handler;
 static hal_user_int_handler_t user_int_handler;
 static hal_user_fault_handler_t user_fault_handler;
@@ -35,11 +35,13 @@ deliver_user_fault(uintptr_t pc, uintptr_t address, int instruction,
 {
 	struct hal_user_trap trap;
 
-	trap.vector = 14U;
-	trap.cs = 3U;
-	trap.eip = pc;
-	trap.eax = value;
-	trap.error_code = instruction ? 0x10U : write ? 2U : 0U;
+	trap.cause = HAL_TRAP_CAUSE_PAGE_FAULT;
+	trap.access = instruction ? HAL_TRAP_MODE_EXEC :
+	    write ? HAL_TRAP_MODE_WRITE : HAL_TRAP_MODE_READ;
+	trap.raw_vector = instruction ? 0x64U : 0x68U;
+	trap.status = 0;
+	trap.pc = pc;
+	trap.result = (uintptr_t)value;
 	trap.fault_address = address;
 	if (user_fault_handler != NULL) {
 		int result;
@@ -124,11 +126,12 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 		uintptr_t args[HAL_SYSCALL_ARGS];
 		unsigned i;
 
-		trap.vector = 0xc2U;
-		trap.cs = 3U;
-		trap.eip = pc;
-		trap.eax = frame->syscall_number;
-		trap.error_code = 0;
+		trap.cause = HAL_TRAP_CAUSE_SYSCALL;
+		trap.access = HAL_TRAP_MODE_UNKNOWN;
+		trap.raw_vector = (uint32)trap_type;
+		trap.status = 0;
+		trap.pc = pc;
+		trap.result = (uintptr_t)frame->syscall_number;
 		trap.fault_address = 0;
 		if (user_int_handler != NULL)
 			user_int_handler(&trap);
@@ -160,12 +163,14 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 	}
 	{
 		struct hal_user_trap trap;
-		trap.vector = trap_type == 0x34U ? 17U :
-		    trap_type == 0x101U ? 3U : 6U;
-		trap.cs = 3U;
-		trap.eip = pc;
-		trap.eax = frame->out[0];
-		trap.error_code = 0;
+		trap.cause = trap_type == 0x34U ? HAL_TRAP_CAUSE_ALIGNMENT :
+		    trap_type == 0x101U ? HAL_TRAP_CAUSE_BREAKPOINT :
+		    HAL_TRAP_CAUSE_ILLEGAL_INSN;
+		trap.access = HAL_TRAP_MODE_UNKNOWN;
+		trap.raw_vector = (uint32)trap_type;
+		trap.status = 0;
+		trap.pc = pc;
+		trap.result = (uintptr_t)frame->out[0];
 		trap.fault_address = 0;
 		if (user_fault_handler != NULL)
 			(void)user_fault_handler(&trap);
@@ -184,7 +189,7 @@ void hal_reschedule_on_interrupt_return(void){reschedule_pending=1;}
 void
 hal_set_trap_handler(int trap, hal_trap_handler_t handler)
 {
-	if (trap < 0 || trap >= 5)
+	if (trap < 0 || trap >= HAL_TRAP_CAUSE_COUNT)
 		HAL_FATAL("bad SPARC V9 trap handler");
 	trap_handlers[trap] = handler;
 }

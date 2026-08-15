@@ -19,6 +19,7 @@ def fail(path: Path, message: str) -> None:
 
 MACHINES = {
     "i386": (1, 3, 52, 32, "<", "little"),
+    "m68k": (1, 4, 52, 32, ">", "big"),
     "aarch64": (2, 183, 64, 56, "<", "little"),
     "sparcv9": (2, 43, 64, 56, ">", "big"),
 }

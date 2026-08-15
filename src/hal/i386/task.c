@@ -14,6 +14,7 @@ extern uint32 tss_area[26];
 
 static struct task_info *task_list;
 static struct task_info *running_task;
+static uint8 initial_fpregs[512] __attribute__((aligned(16)));
 static uint32 task_count;
 static size_t task_stack_bytes;
 
@@ -51,6 +52,11 @@ i386_task_init(void)
 
 	if (running_task != NULL)
 		HAL_FATAL("hal_task_init called twice");
+	/* Establish and retain one canonical x87 image for new/exec tasks.
+	 * FNSAVE resets the unit, so restore that same image immediately. */
+	asm_fninit();
+	asm_fnsave(initial_fpregs);
+	asm_frstor(initial_fpregs);
 	/* Preserve the TSS descriptor installed by locore; initialize its body. */
 	hal_memset(tss_area, 0, 104U);
 	tss_area[2] = SEG_SYS_DATA;
@@ -60,6 +66,7 @@ i386_task_init(void)
 	hal_memset(task, 0, sizeof(*task));
 	task->space = HAL_SPACE_SYS;
 	task->run_cpu = 0;
+	hal_memcpy(task->fpregs, initial_fpregs, sizeof(initial_fpregs));
 	tasklist_add(task);
 	running_task = task;
 }
@@ -117,6 +124,7 @@ hal_task_create(hal_space_t space, void (*start)(void *), void *arg,
 	hal_memset(task, 0, sizeof(*task));
 	task->space = space;
 	task->run_cpu = -1;
+	hal_memcpy(task->fpregs, initial_fpregs, sizeof(initial_fpregs));
 	task->sys_stack = hal_malloc(SYS_STACK_SIZE);
 	if (task->sys_stack == NULL) {
 		hal_free(task);
@@ -155,6 +163,10 @@ hal_task_fork_current(hal_space_t child_space, intptr_t child_result)
 	source = running_task->active_user_frame;
 	if ((source->cs & 3U) != 3U)
 		return NULL;
+	/* The running task's registers are live, not necessarily reflected in
+	 * its last switch image.  Snapshot and resume them before allocation. */
+	asm_fnsave(running_task->fpregs);
+	asm_frstor(running_task->fpregs);
 	child = hal_task_create(child_space, (void (*)(void *))source->eip,
 	    NULL, (void *)(uintptr_t)source->user_esp);
 	if (child == NULL)
@@ -199,6 +211,9 @@ hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
 	running_task->tls = 0;
 	running_task->signal_depth = 0;
 	running_task->signal_token = 0;
+	hal_memcpy(running_task->fpregs, initial_fpregs,
+	    sizeof(running_task->fpregs));
+	asm_frstor(running_task->fpregs);
 	hal_page_switch_space(new_space);
 	return 0;
 }
@@ -255,8 +270,7 @@ hal_task_context_switch(hal_task_t handle)
 	if (to->sys_stack != NULL)
 		tss_area[1] = (uint32)to->sys_stack + SYS_STACK_SIZE;
 	asm_fnsave(from->fpregs);
-	if (to->resume_esp->ret_eip != (uint32)asm_task_entrypoint)
-		asm_frstor(to->fpregs);
+	asm_frstor(to->fpregs);
 	asm_task_dispatch(&from->resume_esp, &to->resume_esp);
 }
 

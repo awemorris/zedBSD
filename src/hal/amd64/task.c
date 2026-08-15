@@ -133,6 +133,8 @@ hal_task_fork_current(hal_space_t child_space, intptr_t child_result)
 	source = running_task->active_user_frame;
 	if ((source->cs & 3U) != 3U)
 		return NULL;
+	__asm__ volatile("fxsave64 (%0)" : :
+	    "r"(task_fpregs(running_task)) : "memory");
 	child = hal_task_create(child_space, (void (*)(void *))source->rip,
 	    NULL, (void *)(uintptr_t)source->rsp);
 	if (child == NULL)
@@ -176,6 +178,10 @@ hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
 	running_task->tls = 0;
 	running_task->signal_depth = 0;
 	running_task->signal_token = 0;
+	hal_memcpy(task_fpregs(running_task), initial_fpregs,
+	    sizeof(initial_fpregs));
+	__asm__ volatile("fxrstor64 (%0)" : :
+	    "r"(task_fpregs(running_task)) : "memory");
 	hal_page_switch_space(new_space);
 	return 0;
 }

@@ -153,10 +153,15 @@ struct hal_reg_set;
 #define HAL_TRAP_CAUSE_BREAKPOINT	(2)
 #define HAL_TRAP_CAUSE_ALIGNMENT	(3)
 #define HAL_TRAP_CAUSE_MACHINE_CHECK	(4)
+#define HAL_TRAP_CAUSE_ARITHMETIC	(5)
+#define HAL_TRAP_CAUSE_BUS		(6)
+#define HAL_TRAP_CAUSE_SYSCALL		(7)
+#define HAL_TRAP_CAUSE_COUNT		(8)
 
 #define HAL_TRAP_MODE_READ		(0)
 #define HAL_TRAP_MODE_WRITE		(1)
 #define HAL_TRAP_MODE_EXEC		(2)
+#define HAL_TRAP_MODE_UNKNOWN		(3)
 
 #define HAL_TRAP_RET_SUCCESS		(0)
 #define HAL_TRAP_RET_FAILED		(1)
@@ -365,23 +370,16 @@ void hal_task_set_private(hal_task_t t, void *private_data);
 void *hal_task_get_private(hal_task_t t);
 hal_space_t hal_task_get_space(hal_task_t t);
 
-/* Temporary ring-3 trap observation hooks used until the syscall ABI exists. */
+/* Architecture-neutral user trap/syscall observation.  raw_vector and status
+ * are diagnostic values only; kernel policy uses cause and access. */
 struct hal_user_trap {
-	uint32_t vector;
-	uint32_t cs;
-#if UINTPTR_MAX == UINT64_MAX
-	uint64_t eip;
-	uint64_t eax;
-	uint64_t error_code;
-	uint64_t fault_address;
-#elif UINTPTR_MAX == UINT32_MAX
-	uint32_t eip;
-	uint32_t eax;
-	uint32_t error_code;
-	uint32_t fault_address;
-#else
-#error "Unsupported pointer size for struct hal_user_trap"
-#endif
+	uint32_t cause;
+	uint32_t access;
+	uint32_t raw_vector;
+	uint32_t status;
+	uintptr_t pc;
+	uintptr_t result;
+	uintptr_t fault_address;
 };
 typedef void (*hal_user_int_handler_t)(const struct hal_user_trap *);
 typedef int (*hal_user_fault_handler_t)(const struct hal_user_trap *);

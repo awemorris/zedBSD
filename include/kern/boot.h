@@ -67,10 +67,43 @@ struct zedbsd_handoff {
 #define ZEDBSD_HANDOFF_VERSION_PC98 2U
 #define ZEDBSD_HANDOFF_VERSION_MULTIBOOT 3U
 #define ZEDBSD_HANDOFF_VERSION_SUN4U 4U
+#define ZEDBSD_HANDOFF_VERSION_X68K 5U
 #define ZEDBSD_PARTITION_SCHEME_LBA 0U
 #define ZEDBSD_PARTITION_SCHEME_MBR 1U
 #define ZEDBSD_PARTITION_SCHEME_SUN 2U
+#define ZEDBSD_PARTITION_SCHEME_X68K 3U
 #define ZEDBSD_BOOT_PARTITION_LBA_UNKNOWN 0xffffffffU
+
+#define ZEDBSD_X68K_HANDOFF_MAGIC 0x58363848U /* "X68H" */
+#define ZEDBSD_X68K_HANDOFF_VERSION 1U
+#define ZEDBSD_X68K_MAX_MEMORY_REGIONS 4U
+
+#define ZEDBSD_MEMORY_AVAILABLE 1U
+#define ZEDBSD_MEMORY_RESERVED 2U
+
+struct zedbsd_memory_region32 {
+	uint32_t base;
+	uint32_t size;
+	uint32_t type;
+} __attribute__((packed));
+
+struct zedbsd_x68k_handoff {
+	struct zedbsd_handoff common;
+	uint32_t extension_magic;
+	uint16_t extension_version;
+	uint16_t extension_size;
+	uint32_t ram_bytes;
+	uint32_t kernel_phys_start;
+	uint32_t kernel_phys_end;
+	uint32_t loader_phys_start;
+	uint32_t loader_phys_end;
+	uint32_t memory_region_count;
+	struct zedbsd_memory_region32
+		memory_regions[ZEDBSD_X68K_MAX_MEMORY_REGIONS];
+} __attribute__((packed));
+
+_Static_assert(sizeof(struct zedbsd_x68k_handoff) == 104,
+	       "zedBSD X68k handoff ABI must remain 104 bytes");
 
 enum zedbsd_bios_service {
 	ZEDBSD_BIOS_DISK_READ = 1,

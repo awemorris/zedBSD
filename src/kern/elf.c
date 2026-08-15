@@ -18,6 +18,14 @@
 #define PAGE_SIZE ZEDBSD_PAGE_SIZE
 #define ELF_OFF_MAX 0x7fffffffULL
 
+#ifdef ZEDBSD_USER_ABI_M68K
+#define ELF32_EXPECTED_DATA ELFDATA2MSB
+#define ELF32_EXPECTED_MACHINE EM_68K
+#else
+#define ELF32_EXPECTED_DATA ELFDATA2LSB
+#define ELF32_EXPECTED_MACHINE EM_386
+#endif
+
 #ifdef ZEDBSD_USER_ABI_SPARCV9
 #define ELF64_EXPECTED_DATA ELFDATA2MSB
 #define ELF64_EXPECTED_MACHINE EM_SPARCV9
@@ -25,6 +33,103 @@
 #define ELF64_EXPECTED_DATA ELFDATA2LSB
 #define ELF64_EXPECTED_MACHINE EM_AARCH64
 #endif
+
+static uint16_t
+elf_u16(const void *field, unsigned data)
+{
+	const uint8_t *p = field;
+	if (data == ELFDATA2MSB)
+		return (uint16_t)((uint16_t)p[0] << 8 | p[1]);
+	return (uint16_t)((uint16_t)p[1] << 8 | p[0]);
+}
+
+static uint32_t
+elf_u32(const void *field, unsigned data)
+{
+	const uint8_t *p = field;
+	if (data == ELFDATA2MSB)
+		return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 |
+		       (uint32_t)p[2] << 8 | p[3];
+	return (uint32_t)p[3] << 24 | (uint32_t)p[2] << 16 |
+	       (uint32_t)p[1] << 8 | p[0];
+}
+
+static uint64_t
+elf_u64(const void *field, unsigned data)
+{
+	const uint8_t *p = field;
+	uint64_t high, low;
+	if (data == ELFDATA2MSB) {
+		high = elf_u32(p, data);
+		low = elf_u32(p + 4, data);
+	} else {
+		low = elf_u32(p, data);
+		high = elf_u32(p + 4, data);
+	}
+	return high << 32 | low;
+}
+
+static void
+decode_elf32_header(struct elf32_ehdr *h, unsigned data)
+{
+	h->e_type = elf_u16(&h->e_type, data);
+	h->e_machine = elf_u16(&h->e_machine, data);
+	h->e_version = elf_u32(&h->e_version, data);
+	h->e_entry = elf_u32(&h->e_entry, data);
+	h->e_phoff = elf_u32(&h->e_phoff, data);
+	h->e_shoff = elf_u32(&h->e_shoff, data);
+	h->e_flags = elf_u32(&h->e_flags, data);
+	h->e_ehsize = elf_u16(&h->e_ehsize, data);
+	h->e_phentsize = elf_u16(&h->e_phentsize, data);
+	h->e_phnum = elf_u16(&h->e_phnum, data);
+	h->e_shentsize = elf_u16(&h->e_shentsize, data);
+	h->e_shnum = elf_u16(&h->e_shnum, data);
+	h->e_shstrndx = elf_u16(&h->e_shstrndx, data);
+}
+
+static void
+decode_elf32_program(struct elf32_phdr *p, unsigned data)
+{
+	p->p_type = elf_u32(&p->p_type, data);
+	p->p_offset = elf_u32(&p->p_offset, data);
+	p->p_vaddr = elf_u32(&p->p_vaddr, data);
+	p->p_paddr = elf_u32(&p->p_paddr, data);
+	p->p_filesz = elf_u32(&p->p_filesz, data);
+	p->p_memsz = elf_u32(&p->p_memsz, data);
+	p->p_flags = elf_u32(&p->p_flags, data);
+	p->p_align = elf_u32(&p->p_align, data);
+}
+
+static void
+decode_elf64_header(struct elf64_ehdr *h, unsigned data)
+{
+	h->e_type = elf_u16(&h->e_type, data);
+	h->e_machine = elf_u16(&h->e_machine, data);
+	h->e_version = elf_u32(&h->e_version, data);
+	h->e_entry = elf_u64(&h->e_entry, data);
+	h->e_phoff = elf_u64(&h->e_phoff, data);
+	h->e_shoff = elf_u64(&h->e_shoff, data);
+	h->e_flags = elf_u32(&h->e_flags, data);
+	h->e_ehsize = elf_u16(&h->e_ehsize, data);
+	h->e_phentsize = elf_u16(&h->e_phentsize, data);
+	h->e_phnum = elf_u16(&h->e_phnum, data);
+	h->e_shentsize = elf_u16(&h->e_shentsize, data);
+	h->e_shnum = elf_u16(&h->e_shnum, data);
+	h->e_shstrndx = elf_u16(&h->e_shstrndx, data);
+}
+
+static void
+decode_elf64_program(struct elf64_phdr *p, unsigned data)
+{
+	p->p_type = elf_u32(&p->p_type, data);
+	p->p_flags = elf_u32(&p->p_flags, data);
+	p->p_offset = elf_u64(&p->p_offset, data);
+	p->p_vaddr = elf_u64(&p->p_vaddr, data);
+	p->p_paddr = elf_u64(&p->p_paddr, data);
+	p->p_filesz = elf_u64(&p->p_filesz, data);
+	p->p_memsz = elf_u64(&p->p_memsz, data);
+	p->p_align = elf_u64(&p->p_align, data);
+}
 
 static int
 read_exact(struct file *file, off_t offset, void *buffer, size_t size)
@@ -84,9 +189,12 @@ elf32_load(struct file *file, struct vmspace *vm,
 	    header.e_ident[EI_MAG2] != ELFMAG2 ||
 	    header.e_ident[EI_MAG3] != ELFMAG3 ||
 	    header.e_ident[EI_CLASS] != ELFCLASS32 ||
-	    header.e_ident[EI_DATA] != ELF64_EXPECTED_DATA ||
-	    header.e_ident[EI_VERSION] != EV_CURRENT ||
-	    header.e_type != ET_EXEC || header.e_machine != EM_386 ||
+	    header.e_ident[EI_DATA] != ELF32_EXPECTED_DATA ||
+	    header.e_ident[EI_VERSION] != EV_CURRENT)
+		return ENOEXEC;
+	decode_elf32_header(&header, ELF32_EXPECTED_DATA);
+	if (header.e_type != ET_EXEC ||
+	    header.e_machine != ELF32_EXPECTED_MACHINE ||
 	    header.e_version != EV_CURRENT || header.e_ehsize != sizeof(header) ||
 	    header.e_phentsize != sizeof(struct elf32_phdr) ||
 	    header.e_phnum == 0 || header.e_phnum > ELF_PHNUM_MAX)
@@ -101,6 +209,8 @@ elf32_load(struct file *file, struct vmspace *vm,
 	if (read_exact(file, (off_t)header.e_phoff, programs,
 		       (size_t)header.e_phnum * sizeof(*programs)) != 0)
 		goto out;
+	for (i = 0; i < header.e_phnum; i++)
+		decode_elf32_program(&programs[i], ELF32_EXPECTED_DATA);
 
 	for (i = 0; i < header.e_phnum; i++) {
 		struct elf32_phdr *program = &programs[i];
@@ -219,8 +329,10 @@ elf64_load(struct file *file, struct vmspace *vm,
 	    header.e_ident[EI_MAG3] != ELFMAG3 ||
 	    header.e_ident[EI_CLASS] != ELFCLASS64 ||
 	    header.e_ident[EI_DATA] != ELF64_EXPECTED_DATA ||
-	    header.e_ident[EI_VERSION] != EV_CURRENT ||
-	    header.e_type != ET_EXEC ||
+	    header.e_ident[EI_VERSION] != EV_CURRENT)
+		return ENOEXEC;
+	decode_elf64_header(&header, ELF64_EXPECTED_DATA);
+	if (header.e_type != ET_EXEC ||
 	    header.e_machine != ELF64_EXPECTED_MACHINE ||
 	    header.e_version != EV_CURRENT || header.e_ehsize != sizeof(header) ||
 	    header.e_phentsize != sizeof(struct elf64_phdr) ||
@@ -236,6 +348,8 @@ elf64_load(struct file *file, struct vmspace *vm,
 	    read_exact(file, (off_t)header.e_phoff, programs,
 		       (size_t)header.e_phnum * sizeof(*programs)) != 0)
 		goto out;
+	for (i = 0; i < header.e_phnum; i++)
+		decode_elf64_program(&programs[i], ELF64_EXPECTED_DATA);
 
 	for (i = 0; i < header.e_phnum; i++) {
 		struct elf64_phdr *program = &programs[i];

@@ -75,6 +75,7 @@ KERN_NET_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_NET_SOURCES))
 
 OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
+OBJ_CC = $(CC)
 
 $(BUILD)/%.o: %.S
 	@mkdir -p $(dir $@)
@@ -82,8 +83,9 @@ $(BUILD)/%.o: %.S
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(OBJ_CPPFLAGS) $(OBJ_CFLAGS) -MMD -MP -c $< -o $@
+	$(OBJ_CC) $(OBJ_CPPFLAGS) $(OBJ_CFLAGS) -MMD -MP -c $< -o $@
 
+$(ZEDBSD_LIBC_OBJECTS): OBJ_CC = $(ZEDBSD_LIBC_CC)
 $(ZEDBSD_LIBC_OBJECTS): OBJ_CPPFLAGS = $(ZEDBSD_LIBC_CPPFLAGS)
 $(ZEDBSD_LIBC_OBJECTS): OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
 
@@ -140,6 +142,71 @@ $(BUILD)/tests/heap-context-host-test: tests/heap-context-host-test.c \
 $(BUILD)/tests/elf-host-test: tests/elf-host-test.c src/kern/elf.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/elf.c $< -o $@
+
+$(BUILD)/tests/elf-m68k-host-test: tests/elf-m68k-host-test.c src/kern/elf.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -DZEDBSD_USER_ABI_M68K -Iinclude -Isrc \
+		src/kern/elf.c $< -o $@
+
+$(BUILD)/tests/m68k-mmu-host-test: tests/m68k-mmu-host-test.c \
+	src/hal/m68k/mmu030.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc $< -o $@
+
+$(BUILD)/tests/m68k-space-host-test: tests/m68k-space-host-test.c \
+	src/hal/m68k/space.c src/hal/m68k/space.h src/hal/m68k/mmu030.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc src/hal/m68k/space.c $< -o $@
+
+$(BUILD)/tests/x68k-memory-map-host-test: \
+	tests/x68k-memory-map-host-test.c \
+	src/hal/m68k/bsp-x68k/memory-map.c \
+	src/hal/m68k/bsp-x68k/memory-map.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc \
+		src/hal/m68k/bsp-x68k/memory-map.c $< -o $@
+
+$(BUILD)/tests/x68k-handoff-host-test: tests/x68k-handoff-host-test.c \
+	src/hal/m68k/bsp-x68k/handoff.c src/hal/m68k/bsp-x68k/bsp.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc \
+		src/hal/m68k/bsp-x68k/handoff.c $< -o $@
+
+$(BUILD)/tests/x68k-mmio-host-test: tests/x68k-mmio-host-test.c \
+	src/hal/m68k/bsp-x68k/mmio.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc $< -o $@
+
+$(BUILD)/tests/m68k-exception-host-test: \
+	tests/m68k-exception-host-test.c src/hal/m68k/exception.c \
+	src/hal/m68k/exception.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc src/hal/m68k/exception.c $< -o $@
+
+$(BUILD)/tests/m68k-fpu-frame-host-test: \
+	tests/m68k-fpu-frame-host-test.c src/hal/m68k/fpu.c src/hal/m68k/fpu.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc src/hal/m68k/fpu.c $< -o $@
+
+$(BUILD)/tests/x68k-partition-host-test: \
+	tests/x68k-partition-host-test.c src/kern/x68k/partition.c \
+	include/kern/x68k-partition.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/x68k/partition.c $< -o $@
+
+$(BUILD)/tests/x68k-scsi-host-test: tests/x68k-scsi-host-test.c \
+	drivers/x68k-mb89352.c drivers/x68k-mb89352.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc drivers/x68k-mb89352.c $< -o $@
+
+$(BUILD)/tests/x68k-scsi-disk-host-test: \
+	tests/x68k-scsi-disk-host-test.c drivers/x68k-spc-disk.c \
+	drivers/x68k-spc-disk.h drivers/x68k-mb89352.c \
+	drivers/x68k-mb89352.h src/kern/disk.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc -Ilibc/include \
+		drivers/x68k-mb89352.c drivers/x68k-spc-disk.c \
+		src/kern/disk.c $< -o $@
 
 $(BUILD)/tests/sched-host-test: tests/sched-host-test.c src/kern/sched.c
 	@mkdir -p $(dir $@)
@@ -265,6 +332,17 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/user-noct-memory-host-test \
 	$(BUILD)/tests/heap-context-host-test \
 	$(BUILD)/tests/elf-host-test \
+	$(BUILD)/tests/elf-m68k-host-test \
+	$(BUILD)/tests/m68k-mmu-host-test \
+	$(BUILD)/tests/m68k-space-host-test \
+	$(BUILD)/tests/x68k-memory-map-host-test \
+	$(BUILD)/tests/x68k-handoff-host-test \
+	$(BUILD)/tests/x68k-mmio-host-test \
+	$(BUILD)/tests/m68k-exception-host-test \
+	$(BUILD)/tests/m68k-fpu-frame-host-test \
+	$(BUILD)/tests/x68k-partition-host-test \
+	$(BUILD)/tests/x68k-scsi-host-test \
+	$(BUILD)/tests/x68k-scsi-disk-host-test \
 	$(BUILD)/tests/sched-host-test \
 	$(BUILD)/tests/vmspace-host-test \
 	$(BUILD)/tests/vm-commit-host-test \

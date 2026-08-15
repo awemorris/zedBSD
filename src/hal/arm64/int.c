@@ -8,7 +8,7 @@
 #include <errno.h>
 
 extern char arm64_vectors[];
-static hal_trap_handler_t trap_handlers[5];
+static hal_trap_handler_t trap_handlers[HAL_TRAP_CAUSE_COUNT];
 static hal_syscall_handler_t syscall_handler;
 static hal_user_return_handler_t user_return_handler;
 void hal_user_return_set_handler(hal_user_return_handler_t h){user_return_handler=h;}
@@ -33,11 +33,12 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 		uintptr_t args[HAL_SYSCALL_ARGS];
 		unsigned i;
 
-		trap.vector = 0xc2U;
-		trap.cs = 3U;
-		trap.eip = f->elr;
-		trap.eax = f->x[8];
-		trap.error_code = 0;
+		trap.cause = HAL_TRAP_CAUSE_SYSCALL;
+		trap.access = HAL_TRAP_MODE_UNKNOWN;
+		trap.raw_vector = (uint32)vector;
+		trap.status = (uint32)f->esr;
+		trap.pc = (uintptr_t)f->elr;
+		trap.result = (uintptr_t)f->x[8];
 		trap.fault_address = 0;
 		if (user_int_handler != NULL)
 			user_int_handler(&trap);
@@ -58,12 +59,14 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 	    ec == 0x24 || ec == 0x25)) {
 		struct hal_user_trap trap;
 		int handled;
-		trap.vector = 14U;
-		trap.cs = 3U;
-		trap.eip = f->elr;
-		trap.eax = f->x[0];
-		trap.error_code = (ec == 0x20 || ec == 0x21) ? 0x10U :
-			((f->esr & (1ULL << 6)) ? 2U : 0U);
+		trap.cause = HAL_TRAP_CAUSE_PAGE_FAULT;
+		trap.access = (ec == 0x20 || ec == 0x21) ?
+			HAL_TRAP_MODE_EXEC : (f->esr & (1ULL << 6)) ?
+			HAL_TRAP_MODE_WRITE : HAL_TRAP_MODE_READ;
+		trap.raw_vector = (uint32)vector;
+		trap.status = (uint32)f->esr;
+		trap.pc = (uintptr_t)f->elr;
+		trap.result = (uintptr_t)f->x[0];
 		trap.fault_address = f->far;
 		arm64_task_enter_user_frame(f);
 		handled = user_fault_handler != NULL &&
@@ -79,12 +82,15 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 	if (vector == 8) {
 		struct hal_user_trap trap;
 		int handled;
-		trap.vector = (ec == 0x3c) ? 3U :
-			(ec == 0x22 || ec == 0x26) ? 17U : 6U;
-		trap.cs = 3U;
-		trap.eip = f->elr;
-		trap.eax = f->x[0];
-		trap.error_code = 0;
+		trap.cause = (ec == 0x3c) ? HAL_TRAP_CAUSE_BREAKPOINT :
+			(ec == 0x22 || ec == 0x26) ? HAL_TRAP_CAUSE_ALIGNMENT :
+			ec == 0x2c ? HAL_TRAP_CAUSE_ARITHMETIC :
+			HAL_TRAP_CAUSE_ILLEGAL_INSN;
+		trap.access = HAL_TRAP_MODE_UNKNOWN;
+		trap.raw_vector = (uint32)vector;
+		trap.status = (uint32)f->esr;
+		trap.pc = (uintptr_t)f->elr;
+		trap.result = (uintptr_t)f->x[0];
 		trap.fault_address = f->far;
 		arm64_task_enter_user_frame(f);
 		handled = user_fault_handler != NULL &&
@@ -114,7 +120,7 @@ void arm64_irq_handler(struct arm64_exception_frame *f)
 	}
 }
 
-void hal_set_trap_handler(int trap,hal_trap_handler_t h){if(trap<0||trap>=5)HAL_FATAL("bad trap");trap_handlers[trap]=h;}
+void hal_set_trap_handler(int trap,hal_trap_handler_t h){if(trap<0||trap>=HAL_TRAP_CAUSE_COUNT)HAL_FATAL("bad trap");trap_handlers[trap]=h;}
 void hal_syscall_set_handler(hal_syscall_handler_t h){syscall_handler=h;}
 void hal_user_int_set_handler(hal_user_int_handler_t h){user_int_handler=h;}
 void hal_user_fault_set_handler(hal_user_fault_handler_t h){user_fault_handler=h;}

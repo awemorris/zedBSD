@@ -27,6 +27,7 @@ Platform roles:
   amd64         amd64 PC/AT BIOS kernel and image
   arm64         arm64 Raspberry Pi 4 kernel and SD image
   sparcv9       SPARC V9 sun4u kernel and OpenBoot disk image
+  x68k          MC68030 + MC68881/2 X68000 dedicated disk image
   unified       PC-98/PC-AT BIOS + amd64 UEFI + Raspberry Pi 4 image
 
 Common commands:
@@ -79,6 +80,7 @@ Examples:
   $0 all amd64
   $0 all arm64
   $0 all sparcv9
+  $0 all x68k
   $0 hdd-image unified
   $0 check amd64
   $0 unified-loader-qemu-test unified

@@ -30,7 +30,7 @@ void hal_user_return_set_handler(hal_user_return_handler_t h) { user_return_hand
 void hal_user_return_invoke(void) { if (user_return_handler != NULL) user_return_handler(); }
 static hal_user_int_handler_t user_int_handler;
 static hal_user_fault_handler_t user_fault_handler;
-static hal_trap_handler_t trap_handlers[5];
+static hal_trap_handler_t trap_handlers[HAL_TRAP_CAUSE_COUNT];
 
 _Static_assert(sizeof(struct amd64_idt_entry) == 16, "amd64 IDT entry");
 
@@ -75,7 +75,8 @@ void hal_syscall_set_handler(hal_syscall_handler_t h) { syscall_handler = h; }
 void
 hal_set_trap_handler(int trap, hal_trap_handler_t handler)
 {
-	if (trap >= 0 && trap < 5) trap_handlers[trap] = handler;
+	if (trap >= 0 && trap < HAL_TRAP_CAUSE_COUNT)
+		trap_handlers[trap] = handler;
 }
 
 static void
@@ -87,19 +88,22 @@ handle_fault(struct amd64_interrupt_frame *frame)
 	    HAL_TRAP_MODE_EXEC : vector == INT_PAGEFAULT &&
 	    (frame->error_code & 2U) ? HAL_TRAP_MODE_WRITE : HAL_TRAP_MODE_READ;
 	int cause = vector == INT_PAGEFAULT ? HAL_TRAP_CAUSE_PAGE_FAULT :
+	    vector == 0 ? HAL_TRAP_CAUSE_ARITHMETIC :
 	    vector == 6 ? HAL_TRAP_CAUSE_ILLEGAL_INSN :
 	    vector == 3 ? HAL_TRAP_CAUSE_BREAKPOINT :
 	    vector == 17 ? HAL_TRAP_CAUSE_ALIGNMENT :
+	    vector >= 10 && vector <= 13 ? HAL_TRAP_CAUSE_BUS :
 	    HAL_TRAP_CAUSE_MACHINE_CHECK;
 
 	if ((frame->cs & 3U) == 3U) {
 		struct hal_user_trap trap;
 		int handled;
-		trap.vector = (uint32)vector;
-		trap.cs = (uint32)frame->cs;
-		trap.eip = frame->rip;
-		trap.eax = frame->rax;
-		trap.error_code = frame->error_code;
+		trap.cause = (uint32)cause;
+		trap.access = (uint32)mode;
+		trap.raw_vector = (uint32)vector;
+		trap.status = (uint32)frame->error_code;
+		trap.pc = (uintptr_t)frame->rip;
+		trap.result = (uintptr_t)frame->rax;
 		trap.fault_address = address;
 		amd64_task_enter_user_frame(frame);
 		handled = user_fault_handler != NULL &&
@@ -112,7 +116,8 @@ handle_fault(struct amd64_interrupt_frame *frame)
 		amd64_task_leave_user_frame();
 		HAL_FATAL("amd64 user fault handler returned");
 	}
-	if (cause >= 0 && cause < 5 && trap_handlers[cause] != NULL &&
+	if (cause >= 0 && cause < HAL_TRAP_CAUSE_COUNT &&
+	    trap_handlers[cause] != NULL &&
 	    trap_handlers[cause]((void *)(uintptr_t)frame->rip,
 	    (void *)address, mode) == HAL_TRAP_RET_SUCCESS) return;
 	hal_printf("amd64 fault v=%u rip=%08X:%08X err=%08X cr2=%08X:%08X\n",
@@ -132,11 +137,13 @@ int_handler(struct amd64_interrupt_frame *frame)
 	} else if (vector == INT_SYSCALL && (frame->cs & 3U) == 3U) {
 		uintptr_t args[HAL_SYSCALL_ARGS];
 		struct hal_user_trap trap;
-		trap.vector = (uint32)vector;
-		trap.cs = (uint32)frame->cs;
-		trap.eip = frame->rip;
-		trap.eax = frame->rax;
-		trap.error_code = trap.fault_address = 0;
+		trap.cause = HAL_TRAP_CAUSE_SYSCALL;
+		trap.access = HAL_TRAP_MODE_UNKNOWN;
+		trap.raw_vector = (uint32)vector;
+		trap.status = 0;
+		trap.pc = (uintptr_t)frame->rip;
+		trap.result = (uintptr_t)frame->rax;
+		trap.fault_address = 0;
 		if (user_int_handler != NULL) user_int_handler(&trap);
 		args[0] = (uint32)frame->rbx;
 		args[1] = (uint32)frame->rcx;

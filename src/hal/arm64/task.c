@@ -55,6 +55,7 @@ hal_task_t hal_task_fork_current(hal_space_t child_space,intptr_t child_result)
 	uint64 *resume;
 	if(!running_task||child_space==HAL_SPACE_SYS||!running_task->active_user_frame)return NULL;
 	source=running_task->active_user_frame;
+	arm64_fp_save(running_task->fpregs);
 	child=hal_task_create(child_space,(void(*)(void *))(uintptr_t)source->elr,
 		NULL,(void *)(uintptr_t)source->user_sp);
 	if(!child)return NULL;
@@ -83,6 +84,8 @@ int hal_task_exec_current(hal_space_t new_space,uintptr_t entry,uintptr_t user_s
 	running_task->space=new_space;
 	running_task->tls=0;
 	running_task->signal_depth=0;running_task->signal_token=0;
+	hal_memcpy(running_task->fpregs,initial_fpregs,sizeof(initial_fpregs));
+	arm64_fp_restore(running_task->fpregs);
 	hal_page_switch_space(new_space);
 	return 0;
 }

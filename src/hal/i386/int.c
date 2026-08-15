@@ -29,6 +29,27 @@ static void load_idt();
 static void set_idt_entry(int index, int dpl, void *handler);
 static void handle_fault(struct interrupt_frame *fp);
 
+static uint32
+i386_fault_cause(int vector)
+{
+	if (vector == INT_PAGEFAULT) return HAL_TRAP_CAUSE_PAGE_FAULT;
+	if (vector == 0) return HAL_TRAP_CAUSE_ARITHMETIC;
+	if (vector == 3) return HAL_TRAP_CAUSE_BREAKPOINT;
+	if (vector == 6) return HAL_TRAP_CAUSE_ILLEGAL_INSN;
+	if (vector == 17) return HAL_TRAP_CAUSE_ALIGNMENT;
+	if (vector >= 10 && vector <= 13) return HAL_TRAP_CAUSE_BUS;
+	return HAL_TRAP_CAUSE_MACHINE_CHECK;
+}
+
+static uint32
+i386_fault_access(const struct interrupt_frame *fp)
+{
+	if (fp->int_num != INT_PAGEFAULT) return HAL_TRAP_MODE_UNKNOWN;
+	if (fp->error_code & 0x10U) return HAL_TRAP_MODE_EXEC;
+	if (fp->error_code & 2U) return HAL_TRAP_MODE_WRITE;
+	return HAL_TRAP_MODE_READ;
+}
+
 
 /*
  * Initialize the interrupt managemtn module.
@@ -128,11 +149,12 @@ void int_handler(struct interrupt_frame *fp)
 	else if (int_num == INT_SYSCALL && (fp->cs & 3) == 3) {
 		struct hal_user_trap trap;
 		uintptr_t args[HAL_SYSCALL_ARGS];
-		trap.vector = (uint32)int_num;
-		trap.cs = fp->cs;
-		trap.eip = fp->eip;
-		trap.eax = fp->regs.eax;
-		trap.error_code = 0;
+		trap.cause = HAL_TRAP_CAUSE_SYSCALL;
+		trap.access = HAL_TRAP_MODE_UNKNOWN;
+		trap.raw_vector = (uint32)int_num;
+		trap.status = 0;
+		trap.pc = fp->eip;
+		trap.result = fp->regs.eax;
 		trap.fault_address = 0;
 		if (user_int_handler != NULL)
 			user_int_handler(&trap);
@@ -231,11 +253,12 @@ static void handle_fault(struct interrupt_frame *fp)
 	if (fp->cs & 3) {
 		struct hal_user_trap trap;
 		int handled;
-		trap.vector = (uint32)int_num;
-		trap.cs = fp->cs;
-		trap.eip = fp->eip;
-		trap.eax = fp->regs.eax;
-		trap.error_code = fp->error_code;
+		trap.cause = i386_fault_cause(int_num);
+		trap.access = i386_fault_access(fp);
+		trap.raw_vector = (uint32)int_num;
+		trap.status = fp->error_code;
+		trap.pc = fp->eip;
+		trap.result = fp->regs.eax;
 		trap.fault_address = int_num == INT_PAGEFAULT ? asm_get_cr2() : 0;
 		i386_task_enter_user_frame(fp);
 		handled = user_fault_handler != NULL &&

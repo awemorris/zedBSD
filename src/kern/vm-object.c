@@ -8,6 +8,7 @@
 #include "kern/vm-object.h"
 #include "kern/file.h"
 #include "kern/kmem.h"
+#include "kern/page.h"
 #include "kern/vm-reclaim.h"
 #include "kern/vmspace.h"
 
@@ -15,7 +16,6 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#define PAGE_SIZE 4096U
 #define VM_OBJECT_DATA __attribute__((section(".vfs_bss")))
 
 static struct vm_object *shared_objects VM_OBJECT_DATA;
@@ -95,8 +95,8 @@ write_page(struct vm_object *object, struct vm_object_page *page)
 	if (page->offset < 0 || page->offset >= object->inode->i_size)
 		return 0;
 	length = (size_t)(object->inode->i_size - page->offset);
-	if (length > PAGE_SIZE)
-		length = PAGE_SIZE;
+	if (length > ZEDBSD_PAGE_SIZE)
+		length = ZEDBSD_PAGE_SIZE;
 	page->flags |= VM_OBJECT_PAGE_BUSY;
 	count = file_pwrite(object->file, (const void *)page->pmem.vaddr,
 	    length, page->offset);
@@ -156,7 +156,7 @@ vm_object_fault(struct vm_object *object, off_t offset,
 	size_t length;
 	ssize_t count;
 	if (object == NULL || result == NULL || offset < 0 ||
-	    (offset & (PAGE_SIZE - 1U)) != 0)
+	    (offset & (ZEDBSD_PAGE_SIZE - 1U)) != 0)
 		return EINVAL;
 	if (offset >= object->inode->i_size)
 		return ENXIO;
@@ -170,16 +170,16 @@ vm_object_fault(struct vm_object *object, off_t offset,
 		return ENOMEM;
 	page->offset = offset;
 	page->flags = VM_OBJECT_PAGE_BUSY;
-	if (hal_pmem_alloc(PAGE_SIZE, &page->pmem, 0) != HAL_PMEM_SUCCESS &&
+	if (hal_pmem_alloc(ZEDBSD_PAGE_SIZE, &page->pmem, 0) != HAL_PMEM_SUCCESS &&
 	    (vm_reclaim_one(NULL) != 0 ||
-	     hal_pmem_alloc(PAGE_SIZE, &page->pmem, 0) != HAL_PMEM_SUCCESS)) {
+	     hal_pmem_alloc(ZEDBSD_PAGE_SIZE, &page->pmem, 0) != HAL_PMEM_SUCCESS)) {
 		kern_free(page);
 		return ENOMEM;
 	}
-	memset((void *)page->pmem.vaddr, 0, PAGE_SIZE);
+	memset((void *)page->pmem.vaddr, 0, ZEDBSD_PAGE_SIZE);
 	length = (size_t)(object->inode->i_size - offset);
-	if (length > PAGE_SIZE)
-		length = PAGE_SIZE;
+	if (length > ZEDBSD_PAGE_SIZE)
+		length = ZEDBSD_PAGE_SIZE;
 	count = file_pread(object->file, (void *)page->pmem.vaddr,
 	    length, offset);
 	if (count != (ssize_t)length) {
@@ -241,7 +241,8 @@ vm_object_sync_range(struct vm_object *object, off_t offset, size_t size,
 	end = (uint64_t)(uint32_t)offset + size;
 	for (link = &object->pages; *link != NULL; ) {
 		struct vm_object_page *page = *link;
-		uint64_t page_end = (uint64_t)(uint32_t)page->offset + PAGE_SIZE;
+		uint64_t page_end = (uint64_t)(uint32_t)page->offset +
+			ZEDBSD_PAGE_SIZE;
 		int error;
 		if (page_end <= (uint64_t)(uint32_t)offset ||
 		    (uint64_t)(uint32_t)page->offset >= end) {
@@ -265,7 +266,7 @@ vm_object_sync_range(struct vm_object *object, off_t offset, size_t size,
 				if (*map_link == mapping)
 					*map_link = mapping->next;
 				(void)hal_page_unmap(mapping->vm->space,
-				    (void *)mapping->address, PAGE_SIZE);
+				    (void *)mapping->address, ZEDBSD_PAGE_SIZE);
 				vm_object_mapping_remove(page, mapping);
 				kern_free(mapping);
 			}
@@ -313,7 +314,8 @@ vm_object_truncate_inode(struct inode *inode, off_t size)
 					if (*map_link == mapping)
 						*map_link = mapping->next;
 					(void)hal_page_unmap(mapping->vm->space,
-					    (void *)mapping->address, PAGE_SIZE);
+					    (void *)mapping->address,
+					    ZEDBSD_PAGE_SIZE);
 					vm_object_mapping_remove(page, mapping);
 					kern_free(mapping);
 				}
@@ -322,9 +324,10 @@ vm_object_truncate_inode(struct inode *inode, off_t size)
 				continue;
 			}
 			if (size > page->offset &&
-			    (size_t)(size - page->offset) < PAGE_SIZE)
+			    (size_t)(size - page->offset) < ZEDBSD_PAGE_SIZE)
 				memset((void *)(page->pmem.vaddr + size - page->offset),
-				    0, PAGE_SIZE - (size_t)(size - page->offset));
+				    0, ZEDBSD_PAGE_SIZE -
+				    (size_t)(size - page->offset));
 			link = &page->next;
 		}
 	}
@@ -357,7 +360,7 @@ vm_object_reclaim_one(void)
 				if (*map_link == mapping)
 					*map_link = mapping->next;
 				(void)hal_page_unmap(mapping->vm->space,
-				    (void *)mapping->address, PAGE_SIZE);
+				    (void *)mapping->address, ZEDBSD_PAGE_SIZE);
 				vm_object_mapping_remove(page, mapping);
 				kern_free(mapping);
 			}

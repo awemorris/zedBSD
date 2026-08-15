@@ -455,6 +455,11 @@ EXT_C(asm_inw):
 	ret
 
 /* void asm_fnsave(void *save_area) */
+	.global EXT_C(asm_fninit)
+EXT_C(asm_fninit):
+	fninit
+	ret
+
 	.global EXT_C(asm_fnsave)
 EXT_C(asm_fnsave):
 	movl	4(%esp), %eax

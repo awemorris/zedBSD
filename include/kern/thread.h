@@ -43,8 +43,10 @@ struct thread {
 	uint32_t signal_suspend_mask;
 	uint32_t signal_token;
 	unsigned signal_suspended;
-	uint32_t fault_vector;
-	uintptr_t fault_eip;
+	uint32_t fault_cause;
+	uint32_t fault_raw_vector;
+	uint32_t fault_status;
+	uintptr_t fault_pc;
 	uintptr_t fault_address;
 };
 
