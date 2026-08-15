@@ -11,6 +11,7 @@
 
 #define FILESYSTEM_MAX 8U
 #define MOUNT_BIND_INTERNAL 0x00000001U
+#define MOUNT_HIGH __attribute__((section(".hightext")))
 
 static struct mount mounts[MOUNT_MAX] __attribute__((section(".vfs_bss")));
 static uint8_t mount_used[MOUNT_MAX] __attribute__((section(".vfs_bss")));
@@ -149,15 +150,12 @@ find_type(const char *name, struct disk *disk, int *probe_error)
 }
 
 static int
-mount_filesystem(struct mount *mountp, const char *type_name, int flags,
-		 void *data)
+mount_filesystem_on_disk(struct mount *mountp, const char *type_name,
+			 struct disk *disk, int flags, void *data)
 {
-	const struct fat_mount_args *args = data;
 	const struct filesystem_type *type;
-	struct disk *disk;
 	int error;
 
-	disk = args != NULL && args->fspec != NULL ? disk_find(args->fspec) : NULL;
 	type = find_type(type_name, disk, &error);
 	if (type == NULL)
 		return disk == NULL && !strcmp(type_name, "auto") ? ENXIO : error;
@@ -179,6 +177,24 @@ mount_filesystem(struct mount *mountp, const char *type_name, int flags,
 		return error != 0 ? error : EIO;
 	}
 	return 0;
+}
+
+static int
+mount_filesystem(struct mount *mountp, const char *type_name, int flags,
+		 void *data)
+{
+	const struct fat_mount_args *args = data;
+	struct disk *disk = NULL;
+	unsigned i;
+	/* A nodev filesystem owns the interpretation of its mount data. */
+	for (i = 0; i < filesystem_count; i++)
+		if (!strcmp(type_name, filesystems[i]->fs_name) &&
+		    (filesystems[i]->fs_flags & FILESYSTEM_NODEV) != 0)
+			return mount_filesystem_on_disk(mountp, type_name, NULL,
+				flags, data);
+	if (args != NULL && args->fspec != NULL)
+		disk = disk_find(args->fspec);
+	return mount_filesystem_on_disk(mountp, type_name, disk, flags, data);
 }
 
 int
@@ -355,6 +371,85 @@ fail:
 	return error;
 }
 
+MOUNT_HIGH int
+mount_private(const char *type_name, struct disk *disk, int flags, void *data,
+	      struct mount **result)
+{
+	struct mount *mountp;
+	int error;
+	if (type_name == NULL || disk == NULL || result == NULL)
+		return EINVAL;
+	*result = NULL;
+	mountp = mount_alloc();
+	if (mountp == NULL)
+		return ENOSPC;
+	mountp->m_internal_flags = MOUNT_PRIVATE_INTERNAL;
+	error = mount_filesystem_on_disk(mountp, type_name, disk, flags, data);
+	if (error != 0) {
+		mount_free(mountp);
+		return error;
+	}
+	*result = mountp;
+	return 0;
+}
+
+static MOUNT_HIGH int
+valid_private_path(const char *path)
+{
+	const char *component = path;
+	const char *cursor;
+	if (path == NULL || path[0] == '\0' || path[0] == '/')
+		return 0;
+	for (cursor = path;; cursor++) {
+		if (*cursor != '/' && *cursor != '\0')
+			continue;
+		if (cursor == component ||
+		    (cursor - component == 1 && component[0] == '.') ||
+		    (cursor - component == 2 && component[0] == '.' &&
+		     component[1] == '.'))
+			return 0;
+		if (*cursor == '\0')
+			return 1;
+		component = cursor + 1;
+	}
+}
+
+MOUNT_HIGH int
+mount_private_lookup(struct mount *mountp, const char *relative,
+		     struct path *result)
+{
+	struct cwdinfo context;
+	struct path root;
+	int error;
+	if (!mount_is_private(mountp) || result == NULL ||
+	    !valid_private_path(relative))
+		return EINVAL;
+	path_init(&root);
+	path_set(&root, mountp, mountp->m_root);
+	error = cwdinfo_init(&context, &root);
+	path_release(&root);
+	if (error != 0)
+		return error;
+	error = namei_path_at(&context, relative, result);
+	cwdinfo_destroy(&context);
+	return error;
+}
+
+MOUNT_HIGH int
+mount_is_private(const struct mount *mountp)
+{
+	return mountp != NULL &&
+		(mountp->m_internal_flags & MOUNT_PRIVATE_INTERNAL) != 0;
+}
+
+int
+mount_sync(struct mount *mountp)
+{
+	if (mountp == NULL || mountp->m_type == NULL)
+		return EINVAL;
+	return mountp->m_type->sync != NULL ? mountp->m_type->sync(mountp) : 0;
+}
+
 int
 mount(const char *type_name, const char *dir, int flags, void *data)
 {
@@ -504,6 +599,50 @@ unlink_child(struct mount *mountp)
 		}
 }
 
+static int
+prepare_filesystem_destroy(struct mount *mountp)
+{
+	int error;
+	if (mountp == NULL || mountp->m_children != NULL ||
+	    mountp->m_usecount != 1)
+		return EBUSY;
+	namecache_purge_mount(mountp);
+	error = inode_cache_mount_busy(mountp);
+	if (error != 0)
+		return error;
+	return mount_sync(mountp);
+}
+
+static void
+finalize_filesystem_destroy(struct mount *mountp)
+{
+	if (mountp->m_root != NULL) {
+		inode_release(mountp->m_root);
+		mountp->m_root = NULL;
+	}
+	inode_cache_purge_mount(mountp);
+	if (mountp->m_type != NULL && mountp->m_type->unmount != NULL)
+		mountp->m_type->unmount(mountp);
+	if (mountp->m_disk != NULL) {
+		disk_close(mountp->m_disk);
+		mountp->m_disk = NULL;
+	}
+}
+
+MOUNT_HIGH int
+unmount_private(struct mount *mountp)
+{
+	int error;
+	if (!mount_is_private(mountp))
+		return EINVAL;
+	error = prepare_filesystem_destroy(mountp);
+	if (error != 0)
+		return error;
+	finalize_filesystem_destroy(mountp);
+	mount_free(mountp);
+	return 0;
+}
+
 int
 unmount(const char *dir, int flags)
 {
@@ -516,15 +655,9 @@ unmount(const char *dir, int flags)
 	if (mountp->m_children != NULL || mountp->m_usecount != 1)
 		return EBUSY;
 	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) == 0) {
-		namecache_purge_mount(mountp);
-		if (mountp->m_type->unmount != NULL) {
-			error = mountp->m_type->unmount(mountp);
-			if (error != 0)
-				return error;
-		}
-		inode_cache_purge_mount(mountp);
-		if (mountp->m_disk != NULL)
-			disk_close(mountp->m_disk);
+		error = prepare_filesystem_destroy(mountp);
+		if (error != 0)
+			return error;
 	} else if (mountp->m_bind_source != NULL &&
 		   mountp->m_bind_source->m_usecount != 0) {
 		mountp->m_bind_source->m_usecount--;
@@ -536,7 +669,9 @@ unmount(const char *dir, int flags)
 			break;
 		}
 	path_release(&mountp->m_cover);
-	if (mountp->m_root != NULL)
+	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) == 0)
+		finalize_filesystem_destroy(mountp);
+	else if (mountp->m_root != NULL)
 		inode_release(mountp->m_root);
 	mount_free(mountp);
 	return 0;

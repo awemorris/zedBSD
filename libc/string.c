@@ -241,6 +241,8 @@ strerror(int error)
 	case EXDEV: return "Cross-device link";
 	case ESPIPE: return "Illegal seek";
 	case ELOOP: return "Too many levels of symbolic links";
+	case EFBIG: return "File too large";
+	case ENOTTY: return "Inappropriate ioctl for device";
 	default: return "Unknown error";
 	}
 }

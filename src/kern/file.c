@@ -13,8 +13,9 @@
 #include <string.h>
 #include <unistd.h>
 
-#define FILE_MAX 64U
+#define FILE_MAX 192U
 #define VFS_BSS __attribute__((section(".vfs_bss")))
+#define FILE_HIGH __attribute__((section(".hightext")))
 
 static struct file files[FILE_MAX] VFS_BSS;
 static uint8_t file_used[FILE_MAX] VFS_BSS;
@@ -155,9 +156,49 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 	}
 	file->f_path = found;
 	file->f_inode = inode;
+	file->f_vm_inode = inode;
 	file->f_ops = inode->i_fop;
 	file->f_flags = flags;
 	file->f_offset = (flags & O_APPEND) ? inode->i_size : 0;
+	if (file->f_ops != NULL && file->f_ops->open != NULL) {
+		error = file->f_ops->open(file);
+		if (error != 0) {
+			path_release(&file->f_path);
+			file_free(file);
+			return error;
+		}
+	}
+	*result = file;
+	return 0;
+}
+
+FILE_HIGH int
+file_open_resolved(const struct path *resolved, int flags,
+		   struct file **result)
+{
+	struct file *file;
+	int error;
+	if (resolved == NULL || resolved->p_mount == NULL ||
+	    resolved->p_inode == NULL || result == NULL)
+		return EINVAL;
+	if ((flags & (O_CREAT | O_EXCL | O_TRUNC)) != 0 ||
+	    (flags & ~(O_ACCMODE | O_APPEND | O_DIRECTORY | O_NONBLOCK)) != 0 ||
+	    (flags & O_ACCMODE) > O_RDWR)
+		return EINVAL;
+	if ((flags & O_DIRECTORY) != 0 && resolved->p_inode->i_type != INODE_DIR)
+		return ENOTDIR;
+	if (resolved->p_inode->i_type == INODE_DIR &&
+	    (flags & O_ACCMODE) != O_RDONLY)
+		return EISDIR;
+	file = file_alloc();
+	if (file == NULL)
+		return ENFILE;
+	path_set(&file->f_path, resolved->p_mount, resolved->p_inode);
+	file->f_inode = resolved->p_inode;
+	file->f_vm_inode = resolved->p_inode;
+	file->f_ops = resolved->p_inode->i_fop;
+	file->f_flags = flags;
+	file->f_offset = (flags & O_APPEND) ? resolved->p_inode->i_size : 0;
 	if (file->f_ops != NULL && file->f_ops->open != NULL) {
 		error = file->f_ops->open(file);
 		if (error != 0) {
@@ -235,13 +276,23 @@ file_pread(struct file *file, void *buffer, size_t length, off_t offset)
 ssize_t
 file_pwrite(struct file *file, const void *buffer, size_t length, off_t offset)
 {
+	return file_pwrite_internal(file, buffer, length, offset, 0);
+}
+
+ssize_t
+file_pwrite_internal(struct file *file, const void *buffer, size_t length,
+		     off_t offset, unsigned internal_flags)
+{
 	ssize_t result;
-	if (file == NULL || buffer == NULL || offset < 0)
+	if (file == NULL || buffer == NULL || offset < 0 ||
+	    (internal_flags & ~FILE_IO_LOOP_BACKING) != 0)
 		return -EINVAL;
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
 		return -EBADF;
-	if (file->f_inode != NULL &&
-	    (file->f_inode->i_flags & INODE_SWAPFILE) != 0)
+	if (file->f_inode != NULL && (file->f_inode->i_flags & INODE_SWAPFILE))
+		return -EBUSY;
+	if (file->f_inode != NULL && (file->f_inode->i_flags & INODE_LOOPFILE) &&
+	    (internal_flags & FILE_IO_LOOP_BACKING) == 0)
 		return -EBUSY;
 	if (file->f_ops == NULL || file->f_ops->pwrite == NULL)
 		return -EOPNOTSUPP;
@@ -260,7 +311,7 @@ file_write(struct file *file, const void *buffer, size_t length)
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
 		return -EBADF;
 	if (file->f_inode != NULL &&
-	    (file->f_inode->i_flags & INODE_SWAPFILE) != 0)
+	    (file->f_inode->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0)
 		return -EBUSY;
 	if (file->f_inode != NULL && file->f_inode->i_type == INODE_DIR)
 		return -EISDIR;
@@ -356,6 +407,12 @@ file_ref(struct file *file)
 {
 	if (file != NULL && file->f_usecount != 0)
 		file->f_usecount++;
+}
+
+struct inode *
+file_vm_inode(struct file *file)
+{
+	return file != NULL ? file->f_vm_inode : NULL;
 }
 
 void

@@ -30,6 +30,8 @@ printf '%s\n' \
 	'pwd' \
 	'ls' \
 	'cp ../copy.txt ../copy2.txt' \
+	'cp /source.txt /bin/overlay.txt' \
+	'stat /bin/overlay.txt' \
 	'clear' \
 	'true' \
 	'echo SH_BUILTINS_PASS' \
@@ -47,8 +49,13 @@ pcat)
 		-debugcon "file:$work/debug.log" -global isa-debugcon.iobase=0xe9 \
 		-drive "if=ide,index=0,media=disk,format=raw,file=$work/test.img" \
 		>/dev/null 2>&1 || test "$?" -eq 124
-	grep -Fq 'zedBSD shell builtin copy fixture' "$work/debug.log"
-	grep -Fq 'SH_BUILTINS_PASS' "$work/debug.log"
+	for marker in 'zedBSD shell builtin copy fixture' SH_BUILTINS_PASS; do
+		if ! grep -Fq "$marker" "$work/debug.log"; then
+			cat "$work/debug.log" >&2
+			echo "missing shell test marker: $marker" >&2
+			exit 1
+		fi
+	done
 	grep -Fq '/bin' "$work/debug.log"
 	grep -Fq 'type=regular' "$work/debug.log"
 	if grep -Fq 'command failed' "$work/debug.log"; then
@@ -74,5 +81,15 @@ for name in copy.txt copy2.txt; do
 done
 mcopy -i "$work/test.img@@$offset" ::/touch.txt "$work/touch.txt"
 test ! -s "$work/touch.txt"
+
+# /bin is a direct overlay: the write must persist inside the selected inner
+# FAT image and must never leak into the outer lower /bin directory.
+if mdir -i "$work/test.img@@$offset" ::/bin/overlay.txt >/dev/null 2>&1; then
+	echo "overlay write leaked into the outer FAT /bin" >&2
+	exit 1
+fi
+mcopy -i "$work/test.img@@$offset" ::/arch/i386.img "$work/i386.img"
+mcopy -i "$work/i386.img" ::/bin/overlay.txt "$work/overlay.txt"
+cmp "$work/source.txt" "$work/overlay.txt"
 
 echo "zedBSD /bin/sh builtin QEMU test: PASS ($arch)"

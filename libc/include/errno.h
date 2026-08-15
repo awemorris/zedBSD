@@ -59,5 +59,7 @@ extern int zedbsd_errno;
 #define EXDEV 48
 #define ESPIPE 49
 #define ELOOP 50
+#define EFBIG 51
+#define ENOTTY 52
 
 #endif

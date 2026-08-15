@@ -30,8 +30,10 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c \
 	src/kern/fat-vfs.c src/kern/inode.c src/kern/file.c \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
-	src/kern/rootfs.c src/kern/vfs.c src/kern/swap.c src/kern/swap-fat.c \
+	src/kern/rootfs.c src/kern/overlayfs.c src/kern/vfs.c \
+	src/kern/swap.c src/kern/swap-fat.c \
 	src/kern/vm-reclaim.c src/kern/disk.c src/kern/partition.c \
+	drivers/loop.c \
 	drivers/pcat-ide.c drivers/dp8390.c drivers/pcat-ne2000.c \
 	src/kern/mbr-partition.c src/kern/pcat/platform.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
@@ -215,30 +217,36 @@ $(foreach command,$(USER_NET_COMMANDS),\
 network-tools: $(USER_NET_COMMAND_TARGETS)
 .PHONY: network-tools
 
-$(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
-	$(BUILD)/bin/nettest \
+AMD64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/amd64.img
+AMD64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
-	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup \
+	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup
+AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
+	--file /bin/nettest=$(BUILD)/bin/nettest \
+	--file /bin/ping=$(BUILD)/bin/ping \
+	--file /bin/ifconfig=$(BUILD)/bin/ifconfig \
+	--file /bin/route=$(BUILD)/bin/route \
+	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
+	--file /bin/nslookup=$(BUILD)/bin/nslookup
+$(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AMD64_ARCH_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
+arch-image: $(AMD64_ARCH_IMAGE)
+arch-image-check: $(AMD64_ARCH_IMAGE)-check
+
+$(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_IMAGE) \
 	scripts/make-bios-hdd-image.py scripts/check-bios-hdd-image.py
 	$(PYTHON) scripts/make-bios-hdd-image.py --force --machine pcat \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
-		--shell $(BUILD)/bin/sh --nettest $(BUILD)/bin/nettest \
-		--bin-file ping=$(BUILD)/bin/ping \
-		--bin-file ifconfig=$(BUILD)/bin/ifconfig \
-		--bin-file route=$(BUILD)/bin/route \
-		--bin-file dhcpcd=$(BUILD)/bin/dhcpcd \
-		--bin-file nslookup=$(BUILD)/bin/nslookup $@
+		--arch-profile amd64 --arch-image $(AMD64_ARCH_IMAGE) $@
 
 $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
-	$(BUILD)/bin/nettest \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_IMAGE) \
 	scripts/make-bios-hdd-image.py scripts/check-bios-hdd-image.py
 	$(PYTHON) scripts/make-bios-hdd-image.py --force --machine pcat \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
-		--shell $(BUILD)/bin/sh --nettest $(BUILD)/bin/nettest \
+		--arch-profile amd64 --arch-image $(AMD64_ARCH_IMAGE) \
 		--fragment-kernel $@
 
 $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
@@ -248,7 +256,8 @@ bios-hdd-image: $(BUILD)/bios-hdd-image.img
 hdd-image: $(BUILD)/hdd-image.img
 bios-loader-host-check: $(BUILD)/bios-hdd-image.img
 	$(PYTHON) scripts/check-bios-hdd-image.py --machine pcat \
-		--kernel $(BUILD)/vmunix $<
+		--kernel $(BUILD)/vmunix --arch-profile amd64 \
+		--arch-image $(AMD64_ARCH_IMAGE) $<
 
 amd64-hal-compile: $(AMD64_HAL_OBJS)
 	@echo "HAL amd64/PCAT compile check: PASS"
@@ -266,6 +275,6 @@ network-qemu-test: bios-bootloader $(BUILD)/vmunix \
 	$(BUILD)/bin/nettest scripts/test-pcat-ne2000.sh
 	bash scripts/test-pcat-ne2000.sh amd64
 
-.PHONY: all vmunix SH bios-bootloader bios-hdd-image hdd-image \
+.PHONY: all vmunix SH arch-image arch-image-check bios-bootloader bios-hdd-image hdd-image \
 	bios-loader-host-check amd64-hal-compile amd64-entry-qemu-test \
 	hdd-boot-qemu-test amd64-qemu-test network-qemu-test

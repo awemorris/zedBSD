@@ -66,6 +66,13 @@ def extracted_hash(image: Path, name: str, lba: int = PARTITION_LBA) -> bytes:
         return hashlib.sha256(output.read_bytes()).digest()
 
 
+def extract_file(image: Path, name: str, output: Path,
+                 lba: int = PARTITION_LBA) -> None:
+    subprocess.run(["mcopy", "-n", "-i",
+                    f"{image}@@{lba * SECTOR_SIZE}", f"::{name}", str(output)],
+                   check=True, stdout=subprocess.DEVNULL)
+
+
 def check(args: argparse.Namespace) -> None:
     size = args.image.stat().st_size
     if size == 0 or size % SECTOR_SIZE:
@@ -157,9 +164,20 @@ def check(args: argparse.Namespace) -> None:
     if args.arm64_kernel and extracted_hash(args.image, "VMUNIX.A64") != \
             hashlib.sha256(args.arm64_kernel.read_bytes()).digest():
         fail("FAT16 VMUNIX.A64 differs from the input kernel")
-    if args.arm64_shell and extracted_hash(args.image, "arm64/bin/sh") != \
-            hashlib.sha256(args.arm64_shell.read_bytes()).digest():
-        fail("/arm64/bin/sh differs from the input executable")
+    for profile, source in (("i386", args.i386_arch_image),
+                            ("amd64", args.amd64_arch_image),
+                            ("aarch64", args.aarch64_arch_image)):
+        if source is None:
+            continue
+        if extracted_hash(args.image, f"arch/{profile}.img") != \
+                hashlib.sha256(source.read_bytes()).digest():
+            fail(f"/arch/{profile}.img differs from the input image")
+        with tempfile.TemporaryDirectory(prefix="zedbsd-unified-arch-") as work:
+            inner = Path(work) / f"{profile}.img"
+            extract_file(args.image, f"arch/{profile}.img", inner)
+            checker = Path(__file__).with_name("check-arch-overlay-image.py")
+            subprocess.run(["python3", str(checker), "--profile", profile,
+                            "--image", str(inner)], check=True)
     if args.rpi4_config and extracted_hash(args.image, "config.txt") != \
             hashlib.sha256(args.rpi4_config.read_bytes()).digest():
         fail("/config.txt differs from the Pi 4 configuration")
@@ -179,9 +197,6 @@ def check(args: argparse.Namespace) -> None:
             args.image, "EFI/BOOT/BOOTX64.EFI", ESP_LBA) != \
             hashlib.sha256(args.bootx64.read_bytes()).digest():
         fail("ESP BOOTX64.EFI differs from the input loader")
-    if args.noct and extracted_hash(args.image, "bin/noct") != \
-            hashlib.sha256(args.noct.read_bytes()).digest():
-        fail("/bin/noct differs from the input executable")
     if args.holoris and extracted_hash(args.image, "apps/holoris.nct") != \
             hashlib.sha256(args.holoris.read_bytes()).digest():
         fail("/apps/holoris.nct differs from the input script")
@@ -198,11 +213,12 @@ def main() -> None:
     parser.add_argument("--pcat-kernel", type=Path)
     parser.add_argument("--amd64-kernel", type=Path)
     parser.add_argument("--arm64-kernel", type=Path)
-    parser.add_argument("--arm64-shell", type=Path)
+    parser.add_argument("--i386-arch-image", type=Path)
+    parser.add_argument("--amd64-arch-image", type=Path)
+    parser.add_argument("--aarch64-arch-image", type=Path)
     parser.add_argument("--rpi4-config", type=Path)
     parser.add_argument("--rpi4-firmware-dir", type=Path)
     parser.add_argument("--bootx64", type=Path)
-    parser.add_argument("--noct", type=Path)
     parser.add_argument("--holoris", type=Path)
     parser.add_argument("--remacs", type=Path)
     parser.add_argument("image", type=Path)

@@ -34,6 +34,15 @@ struct disk_geometry {
 	uint16_t sectors_per_track;
 };
 
+/* Scalar registry snapshot.  It deliberately contains no disk pointer. */
+struct disk_info {
+	char name[DISK_NAME_MAX];
+	dev_t dev;
+	uint32_t flags;
+	uint32_t block_size;
+	uint64_t block_count;
+};
+
 struct disk_ops {
 	int (*open)(struct disk *disk);
 	void (*close)(struct disk *disk);
@@ -78,7 +87,8 @@ struct bio {
 struct disk *disk_alloc(void);
 int disk_create(struct disk *disk);
 void disk_gone(struct disk *disk);
-void disk_destroy(struct disk *disk);
+int disk_gone_if_idle(struct disk *disk);
+int disk_destroy(struct disk *disk);
 struct disk *disk_find(const char *name);
 struct disk *disk_find_by_dev(dev_t dev);
 unsigned disk_count(void);
@@ -86,6 +96,10 @@ struct disk *disk_at(unsigned index);
 void disk_ref(struct disk *disk);
 void disk_release(struct disk *disk);
 void disk_registry_reset(void);
+int disk_get_info(const char *name, struct disk_info *result);
+int disk_registry_snapshot(struct disk_info *entries, unsigned capacity,
+			   unsigned *count_out);
+int disk_open_by_dev(dev_t dev, struct disk **result);
 
 int disk_open(struct disk *disk);
 void disk_close(struct disk *disk);

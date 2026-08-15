@@ -27,7 +27,7 @@ def require_file(path: Path) -> None:
 
 
 def create(args: argparse.Namespace) -> None:
-    for path in (args.kernel, args.shell, args.config):
+    for path in (args.kernel, args.arch_image, args.config):
         require_file(path)
     for name in FIRMWARE_FILES:
         require_file(args.firmware_dir / name)
@@ -56,8 +56,8 @@ def create(args: argparse.Namespace) -> None:
         run("mformat", "-i", spec, "-T", str(PARTITION_BLOCKS),
             "-v", "ZEDRPI4", "::")
         run("mmd", "-i", spec, "::/overlays")
-        run("mmd", "-i", spec, "::/arm64")
-        run("mmd", "-i", spec, "::/arm64/bin")
+        for directory in ("arch", "bin", "lib"):
+            run("mmd", "-i", spec, f"::/{directory}")
         for name in FIRMWARE_FILES:
             run("mcopy", "-i", spec, str(args.firmware_dir / name),
                 f"::/{name}")
@@ -65,11 +65,12 @@ def create(args: argparse.Namespace) -> None:
             "::/overlays/disable-bt.dtbo")
         run("mcopy", "-i", spec, str(args.config), "::/config.txt")
         run("mcopy", "-i", spec, str(args.kernel), "::/VMUNIX.A64")
-        run("mcopy", "-i", spec, str(args.shell), "::/arm64/bin/sh")
+        run("mcopy", "-i", spec, str(args.arch_image),
+            "::/arch/aarch64.img")
 
         checker = Path(__file__).with_name("check-rpi4-hdd-image.py")
         run("python3", str(checker), "--kernel", str(args.kernel),
-            "--shell", str(args.shell), "--config", str(args.config),
+            "--arch-image", str(args.arch_image), "--config", str(args.config),
             str(temporary))
         os.replace(temporary, args.output)
     finally:
@@ -80,7 +81,7 @@ def create(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--kernel", type=Path, required=True)
-    parser.add_argument("--shell", type=Path, required=True)
+    parser.add_argument("--arch-image", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--firmware-dir", type=Path, required=True)
     parser.add_argument("--force", action="store_true")

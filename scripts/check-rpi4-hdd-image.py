@@ -56,7 +56,7 @@ def check(args: argparse.Namespace) -> None:
             fail("partition 1 is not FAT16")
 
     same_file(args.image, "VMUNIX.A64", args.kernel)
-    same_file(args.image, "arm64/bin/sh", args.shell)
+    same_file(args.image, "arch/aarch64.img", args.arch_image)
     same_file(args.image, "config.txt", args.config)
     for name in ("start4.elf", "fixup4.dat", "bcm2711-rpi-4-b.dtb",
                  "overlays/disable-bt.dtbo", "LICENCE.broadcom"):
@@ -65,17 +65,19 @@ def check(args: argparse.Namespace) -> None:
     kernel = extract(args.image, "VMUNIX.A64")
     if len(kernel) < 64 or kernel[56:60] != b"ARM\x64":
         fail("VMUNIX.A64 has no Linux arm64 Image header")
-    shell = extract(args.image, "arm64/bin/sh")
-    if len(shell) < 64 or shell[:5] != b"\x7fELF\x02" or \
-            struct.unpack_from("<H", shell, 18)[0] != 183:
-        fail("/arm64/bin/sh is not ELF64/AArch64")
+    with tempfile.TemporaryDirectory(prefix="zedbsd-rpi4-arch-check-") as work:
+        inner = Path(work) / "aarch64.img"
+        inner.write_bytes(extract(args.image, "arch/aarch64.img"))
+        checker = Path(__file__).with_name("check-arch-overlay-image.py")
+        subprocess.run(["python3", str(checker), "--profile", "aarch64",
+                        "--image", str(inner)], check=True)
     print("Raspberry Pi 4 image check: PASS")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--kernel", type=Path, required=True)
-    parser.add_argument("--shell", type=Path, required=True)
+    parser.add_argument("--arch-image", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("image", type=Path)
     check(parser.parse_args())

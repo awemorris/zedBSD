@@ -48,6 +48,7 @@ struct file_ops {
 struct file {
 	struct path f_path;
 	struct inode *f_inode;
+	struct inode *f_vm_inode;
 	const struct file_ops *f_ops;
 	off_t f_offset;
 	int f_flags;
@@ -60,10 +61,14 @@ int file_openat(struct cwdinfo *, const char *, int, mode_t,
 		struct file **);
 int file_openat_cred(struct cwdinfo *, const struct ucred *, const char *,
 		     int, mode_t, struct file **);
+int file_open_resolved(const struct path *, int, struct file **);
 int file_create_pseudo(const struct file_ops *, int, void *, struct file **);
 ssize_t file_read(struct file *, void *, size_t);
 ssize_t file_pread(struct file *, void *, size_t, off_t);
 ssize_t file_pwrite(struct file *, const void *, size_t, off_t);
+#define FILE_IO_LOOP_BACKING 0x00000001U
+ssize_t file_pwrite_internal(struct file *, const void *, size_t, off_t,
+			     unsigned);
 ssize_t file_write(struct file *, const void *, size_t);
 int file_readdir(struct file *, struct dirent *, int *);
 off_t file_seek(struct file *, off_t, int);
@@ -71,6 +76,7 @@ int file_ioctl(struct file *, unsigned long, uintptr_t);
 int file_fsync(struct file *);
 int file_close(struct file *);
 void file_ref(struct file *);
+struct inode *file_vm_inode(struct file *);
 void file_pool_reset(void);
 
 #endif

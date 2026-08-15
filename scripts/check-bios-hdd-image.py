@@ -39,6 +39,8 @@ def check(args: argparse.Namespace) -> None:
         seen.add(name)
         bin_files.append((f"bin/{name}", Path(source_text), f"/bin/{name}"))
     image = args.image
+    if (args.arch_profile is None) != (args.arch_image is None):
+        fail("--arch-profile and --arch-image must be used together")
     size = image.stat().st_size
     if size == 0 or size % 512:
         fail("image size is not a positive sector multiple")
@@ -127,6 +129,24 @@ def check(args: argparse.Namespace) -> None:
             if hashlib.sha256(extracted.read_bytes()).digest() != \
                     hashlib.sha256(source.read_bytes()).digest():
                 fail(f"{label} content differs from the input file")
+        if args.arch_image is not None:
+            extracted = Path(directory) / f"{args.arch_profile}.img"
+            subprocess.run(["mcopy", "-n", "-i",
+                            f"{image}@@{start * 512}",
+                            f"::arch/{args.arch_profile}.img", str(extracted)],
+                           check=True, stdout=subprocess.DEVNULL)
+            if hashlib.sha256(extracted.read_bytes()).digest() != \
+                    hashlib.sha256(args.arch_image.read_bytes()).digest():
+                fail("architecture image content differs from the input")
+            checker = Path(__file__).with_name("check-arch-overlay-image.py")
+            subprocess.run(["python3", str(checker), "--profile",
+                            args.arch_profile, "--image", str(extracted)], check=True)
+            direct_shell = subprocess.run(
+                ["mcopy", "-n", "-i", f"{image}@@{start * 512}",
+                 "::bin/sh", str(Path(directory) / "outer-sh")],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if direct_shell.returncode == 0:
+                fail("architecture-specific /bin/sh leaked into the outer FAT")
     print(f"BIOS image check: PASS ({args.machine}, partition {index}, "
           f"Stage 2 {sectors} sectors)")
 
@@ -137,6 +157,8 @@ def main() -> None:
     parser.add_argument("--kernel", type=Path)
     parser.add_argument("--noct", type=Path)
     parser.add_argument("--holoris", type=Path)
+    parser.add_argument("--arch-profile", choices=("i386", "amd64", "aarch64"))
+    parser.add_argument("--arch-image", type=Path)
     parser.add_argument("--bin-file", action="append", default=[])
     parser.add_argument("image", type=Path)
     check(parser.parse_args())

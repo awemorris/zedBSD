@@ -23,6 +23,7 @@
 
 #define MOUNT_MAX 64U
 #define MOUNT_READ_ONLY 0x00000001U
+#define MOUNT_PRIVATE_INTERNAL 0x00000002U
 #define FILESYSTEM_NODEV 0x00000001U
 
 struct inode;
@@ -40,7 +41,8 @@ struct filesystem_type {
 	unsigned fs_flags;
 	int (*probe)(struct disk *);
 	int (*mount)(struct mount *);
-	int (*unmount)(struct mount *);
+	int (*sync)(struct mount *);
+	void (*unmount)(struct mount *);
 	struct inode *(*alloc_inode)(struct mount *);
 	void (*free_inode)(struct inode *);
 };
@@ -81,6 +83,11 @@ int mount_at(const char *, const struct path *, const char *, int, void *,
 	     struct mount **);
 int mount_bind_at(const struct path *, const struct path *, const char *,
 		  struct mount **);
+int mount_private(const char *, struct disk *, int, void *, struct mount **);
+int mount_private_lookup(struct mount *, const char *, struct path *);
+int unmount_private(struct mount *);
+int mount_is_private(const struct mount *);
+int mount_sync(struct mount *);
 int mount(const char *, const char *, int, void *);
 int unmount(const char *, int);
 struct mount *mount_find(const char *);

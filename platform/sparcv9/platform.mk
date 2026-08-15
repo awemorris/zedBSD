@@ -41,8 +41,10 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/main.c src/kern/env.c src/kern/fs.c src/kern/namespace.c \
 	src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c src/kern/fat-vfs.c \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
-	src/kern/mount.c src/kern/rootfs.c src/kern/vfs.c src/kern/swap.c \
+	src/kern/mount.c src/kern/rootfs.c src/kern/overlayfs.c \
+	src/kern/vfs.c src/kern/swap.c \
 	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/disk.c \
+	drivers/loop.c \
 	src/kern/partition.c src/kern/sun-disklabel.c src/kern/sun4u/platform.c \
 	drivers/sun4u-cmd646.c src/kern/image.c src/kern/panic.c \
 	src/kern/entry.c src/kern/clock.c src/kern/process.c src/kern/thread.c \

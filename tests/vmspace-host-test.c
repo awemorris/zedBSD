@@ -66,6 +66,10 @@ void swap_free_slot(struct swap_backend *b, uint32_t s)
 
 void file_ref(struct file *file) { file->f_usecount++; }
 int file_close(struct file *file) { file->f_usecount--; return 0; }
+struct inode *file_vm_inode(struct file *file)
+{
+	return file->f_vm_inode != NULL ? file->f_vm_inode : file->f_inode;
+}
 ssize_t file_pread(struct file *file, void *buffer, size_t length, off_t offset)
 {
 	const uint8_t *data = file->f_data;

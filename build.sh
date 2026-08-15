@@ -34,6 +34,8 @@ Common commands:
   hdd-image       Build its installable HDD image
   check           Build and run its host tests
   messages        Generate the kernel message header
+  arch-image PROFILE  Build i386, amd64, or aarch64 inner FAT16 userland
+  arch-images all     Build all three inner FAT16 userland images
 
 Native kernel commands (pcat, pc98, amd64, arm64, sparcv9):
   vmunix          Build the zedBSD kernel
@@ -80,6 +82,8 @@ Examples:
   $0 all arm64
   $0 all sparcv9
   $0 hdd-image unified
+  $0 arch-image i386
+  $0 arch-images all
   $0 check amd64
   $0 unified-loader-qemu-test unified
   $0 uefi-entry-qemu-test unified
@@ -116,6 +120,33 @@ if test "$command_name" = help || test "$command_name" = -h || \
 		exit 2
 	fi
 	usage
+	exit 0
+fi
+
+if test "$command_name" = arch-image; then
+	if test "$#" -ne 1; then
+		echo "usage: $0 arch-image i386|amd64|aarch64" >&2
+		exit 2
+	fi
+	case "$1" in
+		i386) platform=pcat ;;
+		amd64) platform=amd64 ;;
+		aarch64) platform=arm64 ;;
+		*) echo "unknown architecture image profile: $1" >&2; exit 2 ;;
+	esac
+	jobs="${ZEDBSD_JOBS:-$(nproc)}"
+	make -C "$repo" "ARCH=$platform" "-j$jobs" messages
+	exec make -C "$repo" "ARCH=$platform" "-j$jobs" arch-image
+fi
+
+if test "$command_name" = arch-images; then
+	if test "$#" -ne 1 || test "$1" != all; then
+		echo "usage: $0 arch-images all" >&2
+		exit 2
+	fi
+	for profile in i386 amd64 aarch64; do
+		"$0" arch-image "$profile"
+	done
 	exit 0
 fi
 

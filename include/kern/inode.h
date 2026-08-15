@@ -44,6 +44,8 @@ enum inode_type {
 #define INODE_DEAD       0x00000004U
 #define INODE_MOUNTPOINT 0x00000008U
 #define INODE_SWAPFILE   0x00000010U
+#define INODE_LOOPFILE   0x00000020U
+#define INODE_NOCACHE_CHILDREN 0x00000040U
 
 #define INODE_ATTR_MODE       0x00000001U
 #define INODE_ATTR_UID        0x00000002U
@@ -114,6 +116,8 @@ int inode_get(struct mount *mount, ino_t ino, struct inode **result);
 void inode_ref(struct inode *inode);
 void inode_release(struct inode *inode);
 void inode_cache_purge_mount(struct mount *mount);
+int inode_cache_mount_busy(struct mount *mount);
+unsigned inode_cache_mount_count(struct mount *mount);
 void inode_cache_reset(void);
 
 int inode_lookup(struct inode *, const struct componentname *, struct inode **);

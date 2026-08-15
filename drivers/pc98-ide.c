@@ -39,6 +39,7 @@
 #define IDE_CMD_READ      0x20U
 #define IDE_CMD_WRITE     0x30U
 #define IDE_CMD_IDENTIFY  0xecU
+#define IDE_CMD_FLUSH_CACHE 0xe7U
 
 #define IDE_DEVCTL_NIEN   0x02U
 #define IDE_DEVCTL_SRST   0x04U
@@ -64,6 +65,9 @@ struct ide_unit {
 	uint16_t native_sectors;
 	uint16_t firmware_heads;
 	uint16_t firmware_sectors;
+	uint8_t flush_supported;
+	uint8_t write_cache_known;
+	uint8_t write_cache_enabled;
 };
 
 static struct ide_unit units[IDE_UNIT_MAX];
@@ -329,6 +333,28 @@ pio_write(struct disk *dev, uint64_t lba, uint32_t count,
 }
 
 static int
+pio_flush(struct disk *dev)
+{
+	struct ide_unit *unit = dev->d_data;
+	uint8_t status;
+
+	if (!unit->flush_supported) {
+		/* A valid disabled-cache report needs no media flush command. */
+		return unit->write_cache_known && !unit->write_cache_enabled ?
+			0 : EOPNOTSUPP;
+	}
+	if (!select_unit(unit, 0, unit->use_lba))
+		return EIO;
+	failure_stage = "issue FLUSH CACHE";
+	outb(IDE_STATUS, IDE_CMD_FLUSH_CACHE);
+	failure_stage = "wait FLUSH CACHE completion";
+	if (!wait_clear(IDE_STATUS_BSY))
+		return EIO;
+	status = inb(IDE_ALT_STATUS);
+	return (status & (IDE_STATUS_DF | IDE_STATUS_ERR)) != 0 ? EIO : 0;
+}
+
+static int
 pc98_ide_submit(struct disk *dev, struct bio *bio)
 {
 	struct ide_unit *unit = dev->d_data;
@@ -344,7 +370,7 @@ pc98_ide_submit(struct disk *dev, struct bio *bio)
 		error = pio_write(dev, bio->b_mapped_block,
 				  bio->b_block_count, bio->b_data);
 	else if (bio->b_op == BIO_FLUSH)
-		error = 0; /* PIO completion is synchronous on supported drives. */
+		error = pio_flush(dev);
 	else
 		return EOPNOTSUPP;
 	if (error != 0) {
@@ -356,7 +382,8 @@ pc98_ide_submit(struct disk *dev, struct bio *bio)
 		ata_error = (status & IDE_STATUS_ERR) ? inb(IDE_ERROR) : 0;
 		hal_printf("ide: %s %s LBA=%u count=%u bank=%u drive=%u "
 		    "stage=%s status=%02X error=%02X bankctl=%02X\n",
-		    dev->d_name, bio->b_op == BIO_READ ? "read" : "write",
+		    dev->d_name, bio->b_op == BIO_READ ? "read" :
+		    bio->b_op == BIO_WRITE ? "write" : "flush",
 		    (uint32_t)bio->b_mapped_block, bio->b_block_count,
 		    unit->bank, unit->drive, failure_stage, status, ata_error,
 		    inb(IDE_BANK_SELECT));
@@ -519,6 +546,13 @@ zedbsd_ide_pc98_init(const struct zedbsd_device *bios_devices,
 			unit->native_heads = data[3];
 			unit->native_sectors = data[6];
 			unit->use_lba = (data[49] & 0x0200U) != 0;
+			unit->flush_supported =
+				(data[83] & 0xc000U) == 0x4000U &&
+				(data[83] & 0x1000U) != 0;
+			unit->write_cache_known =
+				(data[87] & 0xc000U) == 0x4000U;
+			unit->write_cache_enabled = unit->write_cache_known &&
+				(data[85] & 0x0020U) != 0;
 			if (unit->use_lba) {
 				sector_count =
 					(uint32_t)data[60] |

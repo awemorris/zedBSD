@@ -45,9 +45,11 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/inode.o $(BUILD)/src/kern/file.o \
 	$(BUILD)/src/kern/namecache.o $(BUILD)/src/kern/namei.o \
 	$(BUILD)/src/kern/mount.o $(BUILD)/src/kern/rootfs.o \
+	$(BUILD)/src/kern/overlayfs.o \
 	$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/swap.o \
 	$(BUILD)/src/kern/swap-fat.o $(BUILD)/src/kern/vm-reclaim.o \
 	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/partition.o \
+	$(BUILD)/drivers/loop.o \
 	$(BUILD)/drivers/pcat-ide.o $(BUILD)/drivers/dp8390.o \
 	$(BUILD)/drivers/pcat-ne2000.o \
 	$(BUILD)/src/kern/mbr-partition.o \
@@ -131,36 +133,45 @@ $(BUILD)/bootloader/payload64.elf: $(BUILD)/bootloader/payload64.o \
 bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin
 
+I386_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/i386.img
+I386_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/noct \
+	$(BUILD)/bin/nettest $(BUILD)/bin/ping $(BUILD)/bin/ifconfig \
+	$(BUILD)/bin/route $(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup
+I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
+	--file /bin/noct=$(BUILD)/bin/noct \
+	--file /bin/nettest=$(BUILD)/bin/nettest \
+	--file /bin/ping=$(BUILD)/bin/ping \
+	--file /bin/ifconfig=$(BUILD)/bin/ifconfig \
+	--file /bin/route=$(BUILD)/bin/route \
+	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
+	--file /bin/nslookup=$(BUILD)/bin/nslookup
+$(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
+arch-image: $(I386_ARCH_IMAGE)
+arch-image-check: $(I386_ARCH_IMAGE)-check
+
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
-	$(BUILD)/bin/noct $(BUILD)/bin/nettest $(HOLORIS_NOCT) \
-	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
-	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(I386_ARCH_IMAGE) \
+	$(HOLORIS_NOCT) \
 	$(SCRIPTS_DIR)/make-bios-hdd-image.py \
 	$(SCRIPTS_DIR)/check-bios-hdd-image.py
 	$(PYTHON) $(SCRIPTS_DIR)/make-bios-hdd-image.py --force \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
-		--shell $(BUILD)/bin/sh --noct $(BUILD)/bin/noct \
-		--nettest $(BUILD)/bin/nettest \
-		--bin-file ping=$(BUILD)/bin/ping \
-		--bin-file ifconfig=$(BUILD)/bin/ifconfig \
-		--bin-file route=$(BUILD)/bin/route \
-		--bin-file dhcpcd=$(BUILD)/bin/dhcpcd \
-		--bin-file nslookup=$(BUILD)/bin/nslookup \
+		--arch-profile i386 --arch-image $(I386_ARCH_IMAGE) \
 		--holoris $(HOLORIS_NOCT) $@
 
 bios-hdd-image: $(BUILD)/bios-hdd-image.img
 bios-loader-host-check: $(BUILD)/bios-hdd-image.img
 	$(PYTHON) $(SCRIPTS_DIR)/check-bios-hdd-image.py --machine pcat \
-		--kernel $(BUILD)/vmunix --noct $(BUILD)/bin/noct \
+		--kernel $(BUILD)/vmunix --arch-profile i386 \
+		--arch-image $(I386_ARCH_IMAGE) \
 		--holoris $(HOLORIS_NOCT) $<
 
 bios-loader-qemu-test: bios-bootloader \
 	$(BUILD)/bootloader/payload32.elf $(BUILD)/bootloader/payload64.elf
 	bash $(SCRIPTS_DIR)/test-bios-bootloader-qemu.sh pcat
 
-.PHONY: bios-bootloader bios-hdd-image bios-loader-host-check \
+.PHONY: arch-image arch-image-check bios-bootloader bios-hdd-image bios-loader-host-check \
 	bios-loader-qemu-test
 
 $(BUILD)/src/hal/%.o: src/hal/%.c

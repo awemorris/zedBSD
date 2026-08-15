@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Create an architecture-specific raw FAT16 userland overlay image."""
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import stat
+import subprocess
+import tempfile
+from pathlib import Path
+
+from overlay_journal_format import JOURNAL_BYTES, empty_active_slot, self_test
+
+
+PROFILES = {
+    "i386": ("ZEDI386", 1, 3),
+    "amd64": ("ZEDAMD64", 1, 3),  # current user ABI is transitional ELF32
+    "aarch64": ("ZEDAARCH64", 2, 183),
+}
+DESTINATION = re.compile(r"/(bin|lib)/[a-z0-9_]{1,8}(?:\.[a-z0-9_]{1,3})?")
+TEMP_NAME = re.compile(r"ov[0-9a-f]{4}\.tmp")
+
+
+def run(*arguments: str) -> None:
+    subprocess.run(arguments, check=True)
+
+
+def parse_files(specifications: list[str]) -> dict[str, Path]:
+    files: dict[str, Path] = {}
+    folded: set[str] = set()
+    for specification in specifications:
+        if "=" not in specification:
+            raise SystemExit("--file requires /bin/NAME=SOURCE or /lib/NAME=SOURCE")
+        destination, source_text = specification.split("=", 1)
+        source = Path(source_text)
+        if not DESTINATION.fullmatch(destination):
+            raise SystemExit(f"invalid FAT16 destination: {destination}")
+        if TEMP_NAME.fullmatch(destination.rsplit("/", 1)[1]):
+            raise SystemExit(f"reserved overlay temporary name: {destination}")
+        key = destination.casefold()
+        if key in folded:
+            raise SystemExit(f"case-insensitive destination collision: {destination}")
+        if not source.is_file():
+            raise SystemExit(f"missing manifest input: {source}")
+        if not stat.S_ISREG(source.stat().st_mode):
+            raise SystemExit(f"manifest input is not a regular file: {source}")
+        files[destination] = source
+        folded.add(key)
+    if "/bin/sh" not in files:
+        raise SystemExit("profile manifest must contain /bin/sh")
+    return files
+
+
+def create(args: argparse.Namespace) -> None:
+    self_test()
+    label, _, _ = PROFILES[args.profile]
+    files = parse_files(args.file)
+    if args.size_mib < 16:
+        raise SystemExit("architecture image must be at least 16 MiB")
+    if args.output.exists() and not args.force:
+        raise SystemExit(f"output exists (use --force): {args.output}")
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=args.output.name + ".", dir=args.output.parent)
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        with temporary.open("r+b") as stream:
+            stream.truncate(args.size_mib * 1024 * 1024)
+        # -h/-s select a geometry whose 16-MiB default formats as FAT16.
+        run("mformat", "-i", str(temporary), "-h", "16", "-s", "32",
+            "-v", label, "::")
+        for directory in ("bin", "lib", "zedovl"):
+            run("mmd", "-i", str(temporary), f"::/{directory}")
+        with tempfile.TemporaryDirectory(prefix="zedbsd-arch-files-") as work_text:
+            work = Path(work_text)
+            marker = work / "arch.id"
+            marker.write_text(args.profile + "\n", encoding="ascii")
+            run("mcopy", "-i", str(temporary), str(marker), "::/lib/arch.id")
+            for base in ("bin", "lib"):
+                active = work / f"{base}0.log"
+                inactive = work / f"{base}1.log"
+                active.write_bytes(empty_active_slot(base))
+                inactive.write_bytes(bytes(JOURNAL_BYTES))
+                run("mcopy", "-i", str(temporary), str(active),
+                    f"::/zedovl/{base}0.log")
+                run("mcopy", "-i", str(temporary), str(inactive),
+                    f"::/zedovl/{base}1.log")
+        for destination, source in sorted(files.items()):
+            run("mcopy", "-i", str(temporary), str(source), f"::{destination}")
+        checker = Path(__file__).with_name("check-arch-overlay-image.py")
+        command = ["python3", str(checker), "--profile", args.profile,
+                   "--image", str(temporary), "--size-mib", str(args.size_mib),
+                   "--min-free-bytes", str(args.min_free_bytes)]
+        for destination, source in sorted(files.items()):
+            command += ["--file", f"{destination}={source}"]
+        run(*command)
+        os.replace(temporary, args.output)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--profile", choices=PROFILES, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--size-mib", type=int, default=16)
+    parser.add_argument("--min-free-bytes", type=int, default=4 * 1024 * 1024)
+    parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--force", action="store_true")
+    create(parser.parse_args())
+
+
+if __name__ == "__main__":
+    main()

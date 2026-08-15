@@ -12,13 +12,58 @@
 #include "kern/system-device.h"
 #include "kern/boot-device.h"
 #include "kern/devfs.h"
+#include "kern/overlayfs.h"
+#include "kern/loop.h"
 #include "kern/swap-fat.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <hal/hal.h>
 #include <string.h>
 
 #define PHYSICAL_DISK_MAX 4U
+#define VFS_HIGH __attribute__((section(".hightext")))
+
+struct userland_profile_desc {
+	const char *name;
+	const char *image_path;
+	const char *init_path;
+};
+
+struct arch_userland_state {
+	struct disk *loop_disk;
+	struct mount *private_mount;
+	struct mount *bin_overlay;
+	struct mount *lib_overlay;
+	struct path lower_bin;
+	struct path lower_lib;
+	struct path upper_bin;
+	struct path upper_lib;
+	struct path metadata_root;
+	int active;
+};
+
+#if defined(HAL_ARCH_I386)
+static const struct userland_profile_desc userland_profile = {
+	"i386", "/arch/i386.img", "/bin/sh"
+};
+#define ZEDBSD_HAS_ARCH_USERLAND 1
+#elif defined(HAL_ARCH_AMD64)
+static const struct userland_profile_desc userland_profile = {
+	"amd64", "/arch/amd64.img", "/bin/sh"
+};
+#define ZEDBSD_HAS_ARCH_USERLAND 1
+#elif defined(HAL_ARCH_ARM64)
+static const struct userland_profile_desc userland_profile = {
+	"aarch64", "/arch/aarch64.img", "/bin/sh"
+};
+#define ZEDBSD_HAS_ARCH_USERLAND 1
+#endif
+
+#ifdef ZEDBSD_HAS_ARCH_USERLAND
+static struct arch_userland_state arch_userland
+	__attribute__((section(".vfs_bss")));
+#endif
 
 struct cwdinfo kern_cwdinfo __attribute__((section(".vfs_bss")));
 
@@ -42,6 +87,148 @@ disk_name(unsigned number, char name[NAME_MAX + 1U])
 	name[at] = '\0';
 	return 0;
 }
+
+#ifdef ZEDBSD_HAS_ARCH_USERLAND
+static VFS_HIGH void
+vfs_arch_userland_cleanup(void)
+{
+	if (arch_userland.lib_overlay != NULL) {
+		(void)unmount("/lib", 0);
+		arch_userland.lib_overlay = NULL;
+	}
+	if (arch_userland.bin_overlay != NULL) {
+		(void)unmount("/bin", 0);
+		arch_userland.bin_overlay = NULL;
+	}
+	path_release(&arch_userland.metadata_root);
+	path_release(&arch_userland.upper_lib);
+	path_release(&arch_userland.upper_bin);
+	if (arch_userland.private_mount != NULL) {
+		(void)unmount_private(arch_userland.private_mount);
+		arch_userland.private_mount = NULL;
+	}
+	if (arch_userland.loop_disk != NULL) {
+		(void)loop_detach(arch_userland.loop_disk);
+		arch_userland.loop_disk = NULL;
+	}
+	path_release(&arch_userland.lower_lib);
+	path_release(&arch_userland.lower_bin);
+	arch_userland.active = 0;
+}
+
+static VFS_HIGH int
+vfs_check_profile_marker(const struct userland_profile_desc *profile)
+{
+	struct path marker;
+	struct file *file;
+	char value[32];
+	ssize_t count;
+	size_t expected = strlen(profile->name);
+	int error;
+	path_init(&marker);
+	error = mount_private_lookup(arch_userland.private_mount,
+		"lib/arch.id", &marker);
+	if (error != 0)
+		return error;
+	error = file_open_resolved(&marker, O_RDONLY, &file);
+	path_release(&marker);
+	if (error != 0)
+		return error;
+	count = file_read(file, value, sizeof(value));
+	(void)file_close(file);
+	if (count < 0)
+		return (int)-count;
+	if ((size_t)count != expected + 1U || value[expected] != '\n' ||
+	    memcmp(value, profile->name, expected))
+		return EINVAL;
+	return 0;
+}
+
+static VFS_HIGH int
+vfs_mount_arch_userland(const struct userland_profile_desc *profile,
+			const struct path *root)
+{
+	struct overlay_mount_args args;
+	struct path shell;
+	const char *stage = "capture lower /bin";
+	int error;
+	memset(&arch_userland, 0, sizeof(arch_userland));
+	path_init(&arch_userland.lower_bin);
+	path_init(&arch_userland.lower_lib);
+	path_init(&arch_userland.upper_bin);
+	path_init(&arch_userland.upper_lib);
+	path_init(&arch_userland.metadata_root);
+	error = namei_path_at(&kern_cwdinfo, "/bin", &arch_userland.lower_bin);
+	if (error != 0) goto fail;
+	stage = "capture lower /lib";
+	error = namei_path_at(&kern_cwdinfo, "/lib", &arch_userland.lower_lib);
+	if (error != 0) goto fail;
+	stage = "attach profile loop";
+	error = loop_attach_path(root, profile->image_path, LOOP_READ_WRITE,
+		&arch_userland.loop_disk);
+	if (error != 0) goto fail;
+	stage = "mount private profile FAT";
+	error = mount_private("fat", arch_userland.loop_disk, 0, NULL,
+		&arch_userland.private_mount);
+	if (error != 0) goto fail;
+	stage = "lookup private /bin";
+	error = mount_private_lookup(arch_userland.private_mount, "bin",
+		&arch_userland.upper_bin);
+	if (error != 0) goto fail;
+	stage = "lookup private /lib";
+	error = mount_private_lookup(arch_userland.private_mount, "lib",
+		&arch_userland.upper_lib);
+	if (error != 0) goto fail;
+	stage = "lookup private metadata";
+	error = mount_private_lookup(arch_userland.private_mount, "zedovl",
+		&arch_userland.metadata_root);
+	if (error != 0) goto fail;
+	if (arch_userland.upper_bin.p_inode->i_type != INODE_DIR ||
+	    arch_userland.upper_lib.p_inode->i_type != INODE_DIR ||
+	    arch_userland.metadata_root.p_inode->i_type != INODE_DIR) {
+		error = ENOTDIR;
+		goto fail;
+	}
+	stage = "validate profile marker";
+	error = vfs_check_profile_marker(profile);
+	if (error != 0) goto fail;
+	memset(&args, 0, sizeof(args));
+	args.upper = arch_userland.upper_bin;
+	args.lower = arch_userland.lower_bin;
+	args.metadata_root = arch_userland.metadata_root;
+	args.journal_base = "bin";
+	args.flags = OVERLAY_READ_WRITE;
+	stage = "mount /bin overlay";
+	error = overlay_mount_at(root->p_mount, "bin", &args,
+		&arch_userland.bin_overlay);
+	if (error != 0) goto fail;
+	args.upper = arch_userland.upper_lib;
+	args.lower = arch_userland.lower_lib;
+	args.journal_base = "lib";
+	stage = "mount /lib overlay";
+	error = overlay_mount_at(root->p_mount, "lib", &args,
+		&arch_userland.lib_overlay);
+	if (error != 0) goto fail;
+	path_init(&shell);
+	stage = "resolve /bin/sh";
+	error = namei_path_at(&kern_cwdinfo, profile->init_path, &shell);
+	if (error == 0 && shell.p_inode->i_type != INODE_REG)
+		error = ENOEXEC;
+	path_release(&shell);
+	if (error != 0) goto fail;
+	arch_userland.active = 1;
+	hal_printf("vfs: userland profile=%s image=%s loop=%s "
+	    "source=private overlay=rw\n", profile->name, profile->image_path,
+	    arch_userland.loop_disk->d_name);
+	return 0;
+fail:
+	hal_printf("vfs: userland stage=%s profile=%s image=%s "
+	    "failed (error %d)\n", stage, profile->name, profile->image_path,
+	    error);
+	vfs_arch_userland_cleanup();
+	return error;
+}
+#endif
 
 int
 kern_vfs_init(const struct zedbsd_handoff *handoff,
@@ -84,6 +271,7 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	    boot_physical != NULL ? boot_physical->d_name : "none",
 	    physical_count);
 	mount_reset();
+	(void)loop_init();
 	cdev_reset();
 	partition_reset();
 	error = filesystem_register(&fat_filesystem_type);
@@ -92,6 +280,9 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	error = filesystem_register(&devfs_type);
 	if (error != 0)
 		return vfs_fail("register devfs", error);
+	error = overlayfs_init();
+	if (error != 0)
+		return vfs_fail("register overlayfs", error);
 	error = console_device_register();
 	if (error != 0)
 		return vfs_fail("register console", error);
@@ -184,6 +375,12 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		if (error == 0)
 			next_number++;
 	}
+#ifdef ZEDBSD_HAS_ARCH_USERLAND
+	failure_stage = "mount architecture userland";
+	error = vfs_mount_arch_userland(&userland_profile, &root_path);
+	if (error != 0)
+		goto out_root;
+#endif
 	error = swap_fat_activate(&kern_cwdinfo, "/");
 	if (error != 0 && error != ENOENT)
 		hal_printf("swap: /swapfile disabled (%d)\n", error);

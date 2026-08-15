@@ -47,6 +47,13 @@ def create(args: argparse.Namespace) -> None:
     for path in (args.shell, args.noct, args.nettest, args.holoris):
         if path is not None and not path.is_file():
             raise SystemExit(f"missing input: {path}")
+    if (args.arch_profile is None) != (args.arch_image is None):
+        raise SystemExit("--arch-profile and --arch-image must be used together")
+    if args.arch_image is not None and not args.arch_image.is_file():
+        raise SystemExit(f"missing architecture image: {args.arch_image}")
+    if args.arch_image is not None and (args.shell or args.noct or
+                                        args.nettest or bin_files):
+        raise SystemExit("architecture image cannot be mixed with direct /bin files")
     if args.output.exists() and not args.force:
         raise SystemExit(f"output exists (use --force): {args.output}")
     total_sectors = args.size_mib * 2048
@@ -107,7 +114,12 @@ def create(args: argparse.Namespace) -> None:
         else:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.kernel),
                 "::VMUNIX")
-        if args.shell or args.noct or args.nettest or bin_files:
+        if args.arch_image is not None:
+            for directory in ("bin", "lib", "arch"):
+                run("mmd", "-i", f"{temporary}@@{offset}", f"::/{directory}")
+            run("mcopy", "-i", f"{temporary}@@{offset}",
+                str(args.arch_image), f"::/arch/{args.arch_profile}.img")
+        elif args.shell or args.noct or args.nettest or bin_files:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/bin")
         run("mmd", "-i", f"{temporary}@@{offset}", "::/etc")
         if args.shell:
@@ -129,6 +141,9 @@ def create(args: argparse.Namespace) -> None:
         checker = Path(__file__).with_name("check-bios-hdd-image.py")
         run("python3", str(checker), "--machine", args.machine,
             "--kernel", str(args.kernel),
+            *(["--arch-profile", args.arch_profile,
+               "--arch-image", str(args.arch_image)]
+              if args.arch_image is not None else []),
             *(["--noct", str(args.noct)] if args.noct else []),
             *(["--holoris", str(args.holoris)] if args.holoris else []),
             *(sum((["--bin-file", f"{name}={source}"]
@@ -150,6 +165,8 @@ def main() -> None:
     parser.add_argument("--noct", type=Path)
     parser.add_argument("--nettest", type=Path)
     parser.add_argument("--holoris", type=Path)
+    parser.add_argument("--arch-profile", choices=("i386", "amd64", "aarch64"))
+    parser.add_argument("--arch-image", type=Path)
     parser.add_argument("--bin-file", action="append", default=[])
     parser.add_argument("--size-mib", type=int, default=129)
     parser.add_argument("--fragment-kernel", action="store_true")

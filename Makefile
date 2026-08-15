@@ -43,6 +43,15 @@ export ZEDBSD_BUILD_DIR := $(CURDIR)/$(BUILD)
 
 ASFLAGS := --32
 ZEDBSD_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. -I$(BUILD) -Ilibc/include
+ifneq ($(filter $(ARCH),pc98 pcat),)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_I386
+else ifeq ($(ARCH),amd64)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_AMD64
+else ifeq ($(ARCH),arm64)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_ARM64
+else ifeq ($(ARCH),sparcv9)
+ZEDBSD_CPPFLAGS += -DHAL_ARCH_SPARCV9
+endif
 ZEDBSD_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -Wall -Wextra -Werror
@@ -278,10 +287,17 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/dns-host-test
 CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test
 
+overlay-journal-format-host-test: tests/overlay-journal-format-host-test.py \
+	scripts/overlay_journal_format.py
+	PYTHONPATH=scripts $(PYTHON) tests/overlay-journal-format-host-test.py
+
+CHECK_RUN_TARGETS += overlay-journal-format-host-test
+
 # ----------------------------------------------------------------------
 # Architecture-specific rules (artifacts, disk images, QEMU tests,
 # milestone verification chains).
 
+include mk/arch-images.mk
 include $(PLATFORM_MK)
 include bootloader/unified/unified.mk
 
@@ -298,4 +314,5 @@ distclean:
 -include $(wildcard $(BUILD)/*.d $(BUILD)/*/*.d $(BUILD)/*/*/*.d \
 	$(BUILD)/*/*/*/*.d)
 
-.PHONY: all check clean distclean messages stdio-fs-host-test
+.PHONY: all check clean distclean messages stdio-fs-host-test \
+	overlay-journal-format-host-test

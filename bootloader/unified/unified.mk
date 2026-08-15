@@ -127,23 +127,18 @@ unified-bootloader: $(UNIFIED_BUILD)/stage0.bin \
 
 unified-kernels:
 	$(MAKE) -C $(CURDIR) ARCH=pcat messages
-	$(MAKE) -C $(CURDIR) ARCH=pcat build/pcat/vmunix build/pcat/bin/sh \
-		build/pcat/bin/noct
+	$(MAKE) -C $(CURDIR) ARCH=pcat build/pcat/vmunix arch-image
 	$(MAKE) -C $(CURDIR) ARCH=pc98 messages
 	$(MAKE) -C $(CURDIR) ARCH=pc98 build/pc98/vmunix
 	$(MAKE) -C $(CURDIR) ARCH=amd64 messages
-	$(MAKE) -C $(CURDIR) ARCH=amd64 build/amd64/vmunix
+	$(MAKE) -C $(CURDIR) ARCH=amd64 build/amd64/vmunix arch-image
 	$(MAKE) -C $(CURDIR) ARCH=arm64 messages
-	$(MAKE) -C $(CURDIR) ARCH=arm64 build/arm64/VMUNIX.A64 \
-		build/arm64/bin/sh
+	$(MAKE) -C $(CURDIR) ARCH=arm64 build/arm64/VMUNIX.A64 arch-image
 	@mkdir -p $(UNIFIED_BUILD)
 	cp -f build/pcat/vmunix $(UNIFIED_BUILD)/vmunix.at
 	cp -f build/pc98/vmunix $(UNIFIED_BUILD)/vmunix.98
 	cp -f build/amd64/vmunix $(UNIFIED_BUILD)/vmunix.x64
 	cp -f build/arm64/VMUNIX.A64 $(UNIFIED_BUILD)/VMUNIX.A64
-	cp -f build/arm64/bin/sh $(UNIFIED_BUILD)/sh.a64
-	cp -f build/pcat/bin/sh $(UNIFIED_BUILD)/sh
-	cp -f build/pcat/bin/noct $(UNIFIED_BUILD)/noct
 
 $(REMACS_NAP): $(SCRIPTS_DIR)/build-remacs-nap.sh $(REMACS_SOURCES)
 	bash $(SCRIPTS_DIR)/build-remacs-nap.sh $@
@@ -162,12 +157,12 @@ $(UNIFIED_BUILD)/hdd-image.img: unified-bootloader \
 		--pcat-kernel $(UNIFIED_BUILD)/vmunix.at \
 		--amd64-kernel $(UNIFIED_BUILD)/vmunix.x64 \
 		--arm64-kernel $(UNIFIED_BUILD)/VMUNIX.A64 \
-		--arm64-shell $(UNIFIED_BUILD)/sh.a64 \
+		--i386-arch-image $(ARCH_IMAGE_DIR)/i386.img \
+		--amd64-arch-image $(ARCH_IMAGE_DIR)/amd64.img \
+		--aarch64-arch-image $(ARCH_IMAGE_DIR)/aarch64.img \
 		--rpi4-config platform/arm64/config.txt \
 		--rpi4-firmware-dir vendor/raspberrypi-firmware/boot \
 		--bootx64 $(UEFI_BUILD)/BOOTX64.EFI \
-		--shell $(UNIFIED_BUILD)/sh \
-		--noct $(UNIFIED_BUILD)/noct \
 		--holoris $(HOLORIS_NOCT) \
 		--remacs $(REMACS_NAP) $@
 
@@ -179,11 +174,12 @@ unified-loader-host-check: $(UNIFIED_BUILD)/hdd-image.img
 		--pcat-kernel $(UNIFIED_BUILD)/vmunix.at \
 		--amd64-kernel $(UNIFIED_BUILD)/vmunix.x64 \
 		--arm64-kernel $(UNIFIED_BUILD)/VMUNIX.A64 \
-		--arm64-shell $(UNIFIED_BUILD)/sh.a64 \
+		--i386-arch-image $(ARCH_IMAGE_DIR)/i386.img \
+		--amd64-arch-image $(ARCH_IMAGE_DIR)/amd64.img \
+		--aarch64-arch-image $(ARCH_IMAGE_DIR)/aarch64.img \
 		--rpi4-config platform/arm64/config.txt \
 		--rpi4-firmware-dir vendor/raspberrypi-firmware/boot \
 		--bootx64 $(UEFI_BUILD)/BOOTX64.EFI \
-		--noct $(UNIFIED_BUILD)/noct \
 		--holoris $(HOLORIS_NOCT) \
 		--remacs $(REMACS_NAP) $<
 

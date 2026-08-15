@@ -46,6 +46,12 @@ make_image()
 		--pc98-kernel "$repo/build/pc98/bootloader/payload32.elf" \
 		--pcat-kernel "$at_kernel" \
 		--amd64-kernel "$at_kernel" \
+		--arm64-kernel "$repo/build/arm64/VMUNIX.A64" \
+		--i386-arch-image "$repo/build/arch-images/i386.img" \
+		--amd64-arch-image "$repo/build/arch-images/amd64.img" \
+		--aarch64-arch-image "$repo/build/arch-images/aarch64.img" \
+		--rpi4-config "$repo/platform/arm64/config.txt" \
+		--rpi4-firmware-dir "$repo/vendor/raspberrypi-firmware/boot" \
 		--bootx64 "$repo/build/uefi/BOOTX64.EFI" \
 		"${options[@]}" "$image"
 }

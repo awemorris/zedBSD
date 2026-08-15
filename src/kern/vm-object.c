@@ -36,10 +36,11 @@ int
 vm_object_get_shared(struct file *file, struct vm_object **result)
 {
 	struct vm_object *object;
-	if (file == NULL || file->f_inode == NULL || result == NULL)
+	struct inode *inode = file_vm_inode(file);
+	if (file == NULL || inode == NULL || result == NULL)
 		return EINVAL;
 	for (object = shared_objects; object != NULL; object = object->next) {
-		if (object->inode == file->f_inode) {
+		if (object->inode == inode) {
 			object->usecount++;
 			*result = object;
 			return 0;
@@ -50,7 +51,7 @@ vm_object_get_shared(struct file *file, struct vm_object **result)
 		return ENOMEM;
 	object->usecount = 1;
 	object->file = file;
-	object->inode = file->f_inode;
+	object->inode = inode;
 	file_ref(file);
 	object->next = shared_objects;
 	shared_objects = object;

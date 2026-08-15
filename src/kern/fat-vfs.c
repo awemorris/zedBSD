@@ -13,7 +13,7 @@
 
 #define FAT_MOUNT_MAX MOUNT_MAX
 #define FAT_INODE_MAX 256U
-#define FAT_FILE_MAX 64U
+#define FAT_FILE_MAX 96U
 #define FAT_ATTRIBUTE_READ_ONLY 0x01U
 #define FAT_ATTRIBUTE_DIRECTORY 0x10U
 #define FAT_INODE_ORPHANED 0x01U
@@ -873,7 +873,8 @@ fat_path_descendant(const char *parent, const char *path)
 }
 
 static FAT_MUTATION void
-fat_repath_descendants(const char *old_path, const char *new_path)
+fat_repath_descendants(struct mount *mountp, const char *old_path,
+		       const char *new_path)
 {
 	size_t old_length = strlen(old_path), new_length = strlen(new_path);
 	unsigned i;
@@ -882,6 +883,7 @@ fat_repath_descendants(const char *old_path, const char *new_path)
 		char replacement[ZEDBSD_PATH_MAX];
 		size_t suffix;
 		if (!fat_inodes[i].used ||
+		    fat_inodes[i].info.fi_inode.i_mount != mountp ||
 		    !fat_path_descendant(old_path, fat_inodes[i].path))
 			continue;
 		suffix = strlen(fat_inodes[i].path + old_length);
@@ -959,7 +961,8 @@ fat_rename(struct inode *old_directory, const struct componentname *old_name,
 			open_state->directory_offset = offset;
 		}
 		if (source->i_type == INODE_DIR)
-			fat_repath_descendants(old_path, new_path);
+			fat_repath_descendants(old_directory->i_mount,
+				old_path, new_path);
 		strcpy(fat_slot(source)->path, new_path);
 	}
 	namecache_remove(old_directory, old_name);
@@ -1053,25 +1056,32 @@ fat_mount_impl(struct mount *mountp)
 }
 
 static int
-fat_unmount_impl(struct mount *mountp)
+fat_sync_mount(struct mount *mountp)
 {
 	struct fat_mount_state *state = fat_mount_state(mountp);
 	int error;
 	if (state == NULL)
 		return EINVAL;
 	error = fs_error(zedbsd_fat_flush(&state->legacy));
-	if (error != 0)
-		return error;
+	return error != 0 ? error : bio_flush(mountp->m_disk);
+}
+
+static void
+fat_unmount_impl(struct mount *mountp)
+{
+	struct fat_mount_state *state = fat_mount_state(mountp);
+	if (state == NULL)
+		return;
 	zedbsd_fat_invalidate(&state->legacy);
 	memset(state, 0, sizeof(*state));
 	mountp->m_data = NULL;
-	return 0;
 }
 
 const struct filesystem_type fat_filesystem_type = {
 	.fs_name = "fat",
 	.probe = fat_probe,
 	.mount = fat_mount_impl,
+	.sync = fat_sync_mount,
 	.unmount = fat_unmount_impl,
 	.alloc_inode = fat_alloc_inode,
 	.free_inode = fat_free_inode,

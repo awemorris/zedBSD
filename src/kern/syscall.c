@@ -922,7 +922,8 @@ sys_fsync_call(const uintptr_t args[6])
 	struct file *file = process != NULL ?
 	    filedesc_get(process->fd, (int)args[0]) : NULL;
 	int error = file == NULL ? EBADF :
-	    vm_object_sync_inode(file->f_inode);
+	    file_vm_inode(file) == NULL ? EINVAL :
+	    vm_object_sync_inode(file_vm_inode(file));
 	if (error == 0 && file != NULL)
 		error = file_fsync(file);
 	return error == 0 ? 0 : -error;

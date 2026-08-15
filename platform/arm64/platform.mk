@@ -9,7 +9,7 @@ ARM64_PLATFORM := platform/arm64
 
 ARM64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -Isrc/hal/arm64 -DHAL_ARCH_ARM64 -DHAL_BOARD_RPI4 \
-	-DZEDBSD_USER_ABI_AARCH64 -DZEDBSD_INIT_PATH='"/arm64/bin/sh"'
+	-DZEDBSD_USER_ABI_AARCH64
 ARM64_CFLAGS := -march=armv8-a -mgeneral-regs-only -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werror
@@ -33,8 +33,10 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/main.c src/kern/env.c src/kern/fs.c src/kern/namespace.c \
 	src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c src/kern/fat-vfs.c \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
-	src/kern/mount.c src/kern/rootfs.c src/kern/vfs.c src/kern/swap.c \
+	src/kern/mount.c src/kern/rootfs.c src/kern/overlayfs.c \
+	src/kern/vfs.c src/kern/swap.c \
 	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/disk.c \
+	drivers/loop.c \
 	src/kern/partition.c src/kern/mbr-partition.c src/kern/rpi4/platform.c \
 	drivers/rpi4-sdhci.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
@@ -140,18 +142,25 @@ $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-aarch64.o \
 	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
 
-$(BUILD)/hdd-image.img: $(BUILD)/VMUNIX.A64 $(BUILD)/bin/sh \
+AARCH64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.img
+AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh
+$(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AARCH64_ARCH_IMAGE),aarch64,$(BUILD)/bin/sh,$(AARCH64_ARCH_FILES)))
+arch-image: $(AARCH64_ARCH_IMAGE)
+arch-image-check: $(AARCH64_ARCH_IMAGE)-check
+
+$(BUILD)/hdd-image.img: $(BUILD)/VMUNIX.A64 $(AARCH64_ARCH_IMAGE) \
 	$(ARM64_PLATFORM)/config.txt scripts/make-rpi4-hdd-image.py \
 	scripts/check-rpi4-hdd-image.py
 	$(PYTHON) scripts/make-rpi4-hdd-image.py --force \
-		--kernel $(BUILD)/VMUNIX.A64 --shell $(BUILD)/bin/sh \
+		--kernel $(BUILD)/VMUNIX.A64 --arch-image $(AARCH64_ARCH_IMAGE) \
 		--config $(ARM64_PLATFORM)/config.txt \
 		--firmware-dir vendor/raspberrypi-firmware/boot $@
 
 hdd-image: $(BUILD)/hdd-image.img
 rpi4-image-check: $(BUILD)/hdd-image.img
 	$(PYTHON) scripts/check-rpi4-hdd-image.py --kernel $(BUILD)/VMUNIX.A64 \
-		--shell $(BUILD)/bin/sh --config $(ARM64_PLATFORM)/config.txt $<
+		--arch-image $(AARCH64_ARCH_IMAGE) \
+		--config $(ARM64_PLATFORM)/config.txt $<
 
 $(BUILD)/vmunix: $(ARM64_VMUNIX_OBJS) $(ARM64_PLATFORM)/vmunix.ld \
 	scripts/check-arm64-vmunix.py
@@ -165,7 +174,7 @@ $(BUILD)/VMUNIX.A64: $(BUILD)/vmunix scripts/check-arm64-vmunix.py
 	$(PYTHON) scripts/check-arm64-vmunix.py --elf $< --image $@ --fix-image
 	$(PYTHON) scripts/check-arm64-vmunix.py --elf $< --image $@
 
-.PHONY: vmunix SH POSIX-R1.ELF hdd-image rpi4-image-check arm64-image-check \
+.PHONY: vmunix SH POSIX-R1.ELF arch-image arch-image-check hdd-image rpi4-image-check arm64-image-check \
 	rpi4-entry-qemu-test rpi4-fdt-host-test
 
 .PHONY: rpi4-qemu-test

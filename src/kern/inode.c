@@ -8,12 +8,14 @@
 #include <errno.h>
 #include <string.h>
 
-#define INODE_POOL_MAX 256U
+#define INODE_COMMON_MAX 256U
+#define INODE_CACHE_MAX 512U
 #define VFS_BSS __attribute__((section(".vfs_bss")))
+#define INODE_HIGH __attribute__((section(".hightext")))
 
-static struct inode common_pool[INODE_POOL_MAX] VFS_BSS;
-static uint8_t common_used[INODE_POOL_MAX] VFS_BSS;
-static struct inode *inode_cache[INODE_POOL_MAX] VFS_BSS;
+static struct inode common_pool[INODE_COMMON_MAX] VFS_BSS;
+static uint8_t common_used[INODE_COMMON_MAX] VFS_BSS;
+static struct inode *inode_cache[INODE_CACHE_MAX] VFS_BSS;
 
 mode_t
 inode_type_mode(enum inode_type type)
@@ -34,7 +36,7 @@ static int
 common_index(const struct inode *inode)
 {
 	unsigned i;
-	for (i = 0; i < INODE_POOL_MAX; i++)
+	for (i = 0; i < INODE_COMMON_MAX; i++)
 		if (&common_pool[i] == inode)
 			return (int)i;
 	return -1;
@@ -44,7 +46,7 @@ static int
 cache_index(const struct inode *inode)
 {
 	unsigned i;
-	for (i = 0; i < INODE_POOL_MAX; i++)
+	for (i = 0; i < INODE_CACHE_MAX; i++)
 		if (inode_cache[i] == inode)
 			return (int)i;
 	return -1;
@@ -54,10 +56,10 @@ static int
 cache_slot(void)
 {
 	unsigned i;
-	for (i = 0; i < INODE_POOL_MAX; i++)
+	for (i = 0; i < INODE_CACHE_MAX; i++)
 		if (inode_cache[i] == NULL)
 			return (int)i;
-	for (i = 0; i < INODE_POOL_MAX; i++) {
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
 		struct inode *inode = inode_cache[i];
 		if (inode->i_usecount == 1 &&
 		    !(inode->i_flags & (INODE_DIRTY | INODE_ROOT))) {
@@ -82,7 +84,7 @@ inode_alloc(struct mount *mountp)
 	    mountp->m_type->alloc_inode != NULL)
 		inode = mountp->m_type->alloc_inode(mountp);
 	else {
-		for (i = 0; i < INODE_POOL_MAX; i++) {
+		for (i = 0; i < INODE_COMMON_MAX; i++) {
 			if (!common_used[i]) {
 				common_used[i] = 1;
 				inode = &common_pool[i];
@@ -133,7 +135,7 @@ inode_get(struct mount *mountp, ino_t ino, struct inode **result)
 	unsigned i;
 	if (mountp == NULL || result == NULL)
 		return EINVAL;
-	for (i = 0; i < INODE_POOL_MAX; i++) {
+	for (i = 0; i < INODE_CACHE_MAX; i++) {
 		struct inode *inode = inode_cache[i];
 		if (inode != NULL && inode->i_mount == mountp &&
 		    inode->i_ino == ino && !(inode->i_flags & INODE_DEAD)) {
@@ -153,18 +155,45 @@ void inode_ref(struct inode *inode)
 
 void inode_release(struct inode *inode)
 {
-	if (inode != NULL && inode->i_usecount > 1)
+	if (inode != NULL && inode->i_usecount > 1) {
 		inode->i_usecount--;
+		if (inode->i_usecount == 1 &&
+		    (inode->i_flags & INODE_DEAD) != 0 &&
+		    (inode->i_flags & (INODE_DIRTY | INODE_ROOT)) == 0)
+			inode_free(inode);
+	}
 }
 
 void
 inode_cache_purge_mount(struct mount *mountp)
 {
 	unsigned i;
-	for (i = 0; i < INODE_POOL_MAX; i++)
+	for (i = 0; i < INODE_CACHE_MAX; i++)
 		if (inode_cache[i] != NULL && inode_cache[i]->i_mount == mountp &&
 		    inode_cache[i]->i_usecount == 1)
 			inode_free(inode_cache[i]);
+}
+
+INODE_HIGH int
+inode_cache_mount_busy(struct mount *mountp)
+{
+	unsigned i;
+	for (i = 0; i < INODE_CACHE_MAX; i++)
+		if (inode_cache[i] != NULL && inode_cache[i]->i_mount == mountp &&
+		    inode_cache[i]->i_usecount >
+		    (inode_cache[i] == mountp->m_root ? 2U : 1U))
+			return EBUSY;
+	return 0;
+}
+
+INODE_HIGH unsigned
+inode_cache_mount_count(struct mount *mountp)
+{
+	unsigned i, count = 0;
+	for (i = 0; i < INODE_CACHE_MAX; i++)
+		if (inode_cache[i] != NULL && inode_cache[i]->i_mount == mountp)
+			count++;
+	return count;
 }
 
 void
@@ -172,7 +201,7 @@ inode_cache_reset(void)
 {
 	unsigned i;
 	namecache_reset();
-	for (i = 0; i < INODE_POOL_MAX; i++)
+	for (i = 0; i < INODE_CACHE_MAX; i++)
 		if (inode_cache[i] != NULL && inode_cache[i]->i_usecount == 1)
 			inode_free(inode_cache[i]);
 }
@@ -194,7 +223,8 @@ inode_lookup(struct inode *directory, const struct componentname *name,
 		return EINVAL;
 	if (directory->i_type != INODE_DIR)
 		return ENOTDIR;
-	if (namecache_lookup(directory, name, result) == 0)
+	if ((directory->i_flags & INODE_NOCACHE_CHILDREN) == 0 &&
+	    namecache_lookup(directory, name, result) == 0)
 		return 0;
 	if (directory->i_op == NULL || directory->i_op->lookup == NULL)
 		return EOPNOTSUPP;
@@ -206,7 +236,8 @@ inode_lookup(struct inode *directory, const struct componentname *name,
 			inode_release(child);
 		return EIO;
 	}
-	(void)namecache_enter(directory, name, child);
+	if ((directory->i_flags & INODE_NOCACHE_CHILDREN) == 0)
+		(void)namecache_enter(directory, name, child);
 	*result = child;
 	return 0;
 }
@@ -377,9 +408,17 @@ int inode_mkdir(struct inode *i, const struct componentname *n, mode_t m,
 }
 int inode_unlink(struct inode *i, const struct componentname *n)
 {
+	struct inode *target;
 	int error;
 	if (i == NULL || n == NULL) return EINVAL;
 	if (readonly(i)) return EROFS;
+	error = inode_lookup(i, n, &target);
+	if (error != 0) return error;
+	if ((target->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+		inode_release(target);
+		return EBUSY;
+	}
+	inode_release(target);
 	error = i->i_op != NULL && i->i_op->unlink != NULL ?
 		i->i_op->unlink(i, n) : EOPNOTSUPP;
 	if (error == 0)
@@ -388,9 +427,17 @@ int inode_unlink(struct inode *i, const struct componentname *n)
 }
 int inode_rmdir(struct inode *i, const struct componentname *n)
 {
+	struct inode *target;
 	int error;
 	if (i == NULL || n == NULL) return EINVAL;
 	if (readonly(i)) return EROFS;
+	error = inode_lookup(i, n, &target);
+	if (error != 0) return error;
+	if ((target->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+		inode_release(target);
+		return EBUSY;
+	}
+	inode_release(target);
 	error = i->i_op != NULL && i->i_op->rmdir != NULL ?
 		i->i_op->rmdir(i, n) : EOPNOTSUPP;
 	if (error == 0)
@@ -400,6 +447,7 @@ int inode_rmdir(struct inode *i, const struct componentname *n)
 int inode_rename(struct inode *od, const struct componentname *on,
 		 struct inode *nd, const struct componentname *nn, unsigned flags)
 {
+	struct inode *source, *target;
 	int error;
 	if (od == NULL || on == NULL || nd == NULL || nn == NULL || flags != 0)
 		return EINVAL;
@@ -407,6 +455,24 @@ int inode_rename(struct inode *od, const struct componentname *on,
 		return EXDEV;
 	if (readonly(od) || readonly(nd))
 		return EROFS;
+	error = inode_lookup(od, on, &source);
+	if (error != 0)
+		return error;
+	if ((source->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+		inode_release(source);
+		return EBUSY;
+	}
+	inode_release(source);
+	error = inode_lookup(nd, nn, &target);
+	if (error == 0) {
+		if ((target->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+			inode_release(target);
+			return EBUSY;
+		}
+		inode_release(target);
+	} else if (error != ENOENT) {
+		return error;
+	}
 	error = od->i_op != NULL && od->i_op->rename != NULL ?
 		od->i_op->rename(od, on, nd, nn, flags) : EOPNOTSUPP;
 	if (error == 0) {
@@ -474,7 +540,7 @@ int inode_truncate(struct inode *i, off_t size)
 {
 	int error;
 	if (i == NULL || size < 0) return EINVAL;
-	if (i->i_flags & INODE_SWAPFILE) return EBUSY;
+	if (i->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) return EBUSY;
 	if (readonly(i)) return EROFS;
 	error = i->i_op != NULL && i->i_op->truncate != NULL ?
 		i->i_op->truncate(i, size) : EOPNOTSUPP;
