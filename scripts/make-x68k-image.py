@@ -3,6 +3,7 @@
 
 import argparse
 import binascii
+import hashlib
 import json
 import os
 import struct
@@ -31,7 +32,20 @@ def align(value: int, amount: int) -> int:
     return (value + amount - 1) // amount * amount
 
 
-def fat16_partition(sectors: int, hidden: int) -> bytes:
+def fat_entry(name: bytes, attributes: int, cluster: int = 0,
+              size: int = 0) -> bytes:
+    if len(name) != 11:
+        raise ValueError("FAT 8.3 name must contain exactly 11 bytes")
+    entry = bytearray(32)
+    entry[:11] = name
+    entry[11] = attributes
+    struct.pack_into("<H", entry, 26, cluster)
+    struct.pack_into("<I", entry, 28, size)
+    return bytes(entry)
+
+
+def fat16_partition(sectors: int, hidden: int,
+                    shell: bytes | None = None) -> bytes:
     sectors_per_cluster = 4
     reserved = 1
     fats = 2
@@ -78,8 +92,51 @@ def fat16_partition(sectors: int, hidden: int) -> bytes:
         base = first_fat + index * fat_bytes
         image[base:base + 4] = b"\xf8\xff\xff\xff"
     root = (reserved + fats * sectors_per_fat) * SECTOR
-    image[root:root + 11] = b"ZEDX68K    "
-    image[root + 11] = 0x08
+    image[root:root + 32] = fat_entry(b"ZEDX68K    ", 0x08)
+
+    if shell is not None:
+        cluster_bytes = sectors_per_cluster * SECTOR
+        data_start = (reserved + fats * sectors_per_fat + root_sectors) * SECTOR
+        x68k_cluster = 2
+        bin_cluster = 3
+        shell_first = 4
+        shell_clusters = align(len(shell), cluster_bytes) // cluster_bytes
+        if shell_clusters == 0 or shell_first + shell_clusters > clusters + 2:
+            raise SystemExit("shell does not fit in the FAT16 root partition")
+
+        def set_fat(cluster: int, value: int) -> None:
+            for fat_index in range(fats):
+                base = first_fat + fat_index * fat_bytes + cluster * 2
+                struct.pack_into("<H", image, base, value)
+
+        def cluster_offset(cluster: int) -> int:
+            return data_start + (cluster - 2) * cluster_bytes
+
+        set_fat(x68k_cluster, 0xffff)
+        set_fat(bin_cluster, 0xffff)
+        for index in range(shell_clusters):
+            cluster = shell_first + index
+            set_fat(cluster, 0xffff if index + 1 == shell_clusters
+                    else cluster + 1)
+
+        image[root + 32:root + 64] = fat_entry(
+            b"X68K       ", 0x10, x68k_cluster)
+        x68k_dir = cluster_offset(x68k_cluster)
+        image[x68k_dir:x68k_dir + 32] = fat_entry(
+            b".          ", 0x10, x68k_cluster)
+        image[x68k_dir + 32:x68k_dir + 64] = fat_entry(
+            b"..         ", 0x10, 0)
+        image[x68k_dir + 64:x68k_dir + 96] = fat_entry(
+            b"BIN        ", 0x10, bin_cluster)
+        bin_dir = cluster_offset(bin_cluster)
+        image[bin_dir:bin_dir + 32] = fat_entry(
+            b".          ", 0x10, bin_cluster)
+        image[bin_dir + 32:bin_dir + 64] = fat_entry(
+            b"..         ", 0x10, x68k_cluster)
+        image[bin_dir + 64:bin_dir + 96] = fat_entry(
+            b"SH         ", 0x20, shell_first, len(shell))
+        shell_offset = cluster_offset(shell_first)
+        image[shell_offset:shell_offset + len(shell)] = shell
     return bytes(image)
 
 
@@ -116,6 +173,7 @@ def create(args: argparse.Namespace) -> None:
     stage1 = require(args.stage1)
     stage2 = require(args.stage2)
     kernel = require(args.kernel)
+    shell = require(args.shell) if args.shell else None
     if len(stage1) > 1024:
         raise SystemExit(f"stage 1 is {len(stage1)} bytes, maximum is 1024")
     if not stage2 or len(stage2) > 0x20000:
@@ -123,6 +181,10 @@ def create(args: argparse.Namespace) -> None:
     if len(kernel) < 52 or kernel[:7] != b"\x7fELF\x01\x02\x01" or \
             struct.unpack_from(">H", kernel, 18)[0] != 4:
         raise SystemExit("kernel is not current big-endian ELF32/EM_68K")
+    if shell is not None and (len(shell) < 52 or
+                              shell[:7] != b"\x7fELF\x01\x02\x01" or
+                              struct.unpack_from(">H", shell, 18)[0] != 4):
+        raise SystemExit("shell is not big-endian ELF32/EM_68K")
     if args.output.exists() and not args.force:
         raise SystemExit(f"output exists (use --force): {args.output}")
 
@@ -163,7 +225,7 @@ def create(args: argparse.Namespace) -> None:
             stream.seek(kernel_lba * SECTOR)
             stream.write(kernel)
             stream.seek(ROOT_LBA * SECTOR)
-            stream.write(fat16_partition(root_sectors, ROOT_LBA))
+            stream.write(fat16_partition(root_sectors, ROOT_LBA, shell))
         os.replace(temporary, args.output)
     finally:
         if temporary.exists():
@@ -183,6 +245,9 @@ def create(args: argparse.Namespace) -> None:
         "root_sectors": root_sectors,
         "ram_bytes": args.ram_bytes,
     }
+    if shell is not None:
+        metadata["shell_bytes"] = len(shell)
+        metadata["shell_sha256"] = hashlib.sha256(shell).hexdigest()
     if args.manifest_json:
         args.manifest_json.parent.mkdir(parents=True, exist_ok=True)
         args.manifest_json.write_text(
@@ -199,6 +264,7 @@ def main() -> None:
     parser.add_argument("--stage1", required=True, type=Path)
     parser.add_argument("--stage2", required=True, type=Path)
     parser.add_argument("--kernel", required=True, type=Path)
+    parser.add_argument("--shell", type=Path)
     parser.add_argument("--manifest-json", type=Path)
     parser.add_argument("--manifest-bin", type=Path,
                         help="also write the 64-byte boot manifest")

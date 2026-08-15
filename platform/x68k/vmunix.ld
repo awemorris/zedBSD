@@ -83,3 +83,5 @@ ASSERT((__kernel_vma_start - __kernel_phys_start) == KERNEL_DIRECT_BASE,
        "kernel VMA/LMA does not match the direct map")
 ASSERT(__kernel_phys_end <= X68K_INITIAL_PHYS_END,
        "kernel exceeds the initial 12 MiB physical window")
+ASSERT((x68k_machine_reset - KERNEL_DIRECT_BASE) < 0x00400000,
+       "reboot trampoline exceeds its temporary identity map")

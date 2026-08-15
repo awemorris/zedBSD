@@ -194,8 +194,6 @@ hal_halt(void)
 	__asm__ volatile("stop #0x2000" ::: "memory");
 }
 
-void hal_reset(void) { HAL_FATAL("X68k reset is not implemented"); }
-void hal_poweroff(void) { HAL_FATAL("X68k poweroff is not implemented"); }
 void hal_panic(void) { HAL_FATAL("kernel panic"); }
 void fb_set_active(int active) { (void)active; }
 int fb_is_active(void) { return 0; }

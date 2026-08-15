@@ -26,6 +26,68 @@ def read_source(path: Path | None) -> bytes | None:
     return path.read_bytes()
 
 
+def fat16_file(data: bytes, path: list[bytes]) -> bytes:
+    partition = ROOT_LBA * SECTOR
+    boot = data[partition:partition + SECTOR]
+    sectors_per_cluster = boot[13]
+    reserved = struct.unpack_from("<H", boot, 14)[0]
+    fats = boot[16]
+    root_entries = struct.unpack_from("<H", boot, 17)[0]
+    sectors_per_fat = struct.unpack_from("<H", boot, 22)[0]
+    root_sectors = (root_entries * 32 + SECTOR - 1) // SECTOR
+    fat_start = partition + reserved * SECTOR
+    root_start = partition + (reserved + fats * sectors_per_fat) * SECTOR
+    data_start = root_start + root_sectors * SECTOR
+    cluster_bytes = sectors_per_cluster * SECTOR
+    first_fat = data[fat_start:fat_start + sectors_per_fat * SECTOR]
+    second_fat = data[fat_start + sectors_per_fat * SECTOR:
+                      fat_start + 2 * sectors_per_fat * SECTOR]
+    if first_fat != second_fat:
+        fail("FAT16 copies differ")
+
+    def chain(first: int) -> bytes:
+        output = bytearray()
+        cluster = first
+        visited: set[int] = set()
+        while 2 <= cluster < 0xfff8:
+            if cluster in visited:
+                fail("FAT16 cluster chain loops")
+            visited.add(cluster)
+            offset = data_start + (cluster - 2) * cluster_bytes
+            output += data[offset:offset + cluster_bytes]
+            if cluster * 2 + 2 > len(first_fat):
+                fail("FAT16 cluster lies outside the FAT")
+            cluster = struct.unpack_from("<H", first_fat, cluster * 2)[0]
+        if cluster < 0xfff8:
+            fail("FAT16 cluster chain has an invalid terminator")
+        return bytes(output)
+
+    directory = data[root_start:root_start + root_entries * 32]
+    entry = None
+    for component_index, component in enumerate(path):
+        entry = None
+        for offset in range(0, len(directory), 32):
+            candidate = directory[offset:offset + 32]
+            if candidate[0] == 0:
+                break
+            if candidate[0] != 0xe5 and candidate[:11] == component:
+                entry = candidate
+                break
+        if entry is None:
+            fail("missing FAT16 path /" + "/".join(
+                item.decode("ascii").rstrip() for item in path))
+        cluster = struct.unpack_from("<H", entry, 26)[0]
+        if component_index + 1 != len(path):
+            if (entry[11] & 0x10) == 0:
+                fail("FAT16 path component is not a directory")
+            directory = chain(cluster)
+    assert entry is not None
+    if (entry[11] & 0x10) != 0:
+        fail("FAT16 path resolves to a directory")
+    size = struct.unpack_from("<I", entry, 28)[0]
+    return chain(struct.unpack_from("<H", entry, 26)[0])[:size]
+
+
 def check(args: argparse.Namespace) -> None:
     data = args.image.read_bytes()
     if len(data) != IMAGE_SECTORS * SECTOR:
@@ -75,6 +137,7 @@ def check(args: argparse.Namespace) -> None:
     stage1_source = read_source(args.stage1)
     stage2_source = read_source(args.stage2)
     kernel_source = read_source(args.kernel)
+    shell_source = read_source(args.shell)
     if stage1_source is not None:
         if len(stage1_source) > 1024 or data[1024:1024 + len(stage1_source)] != stage1_source:
             fail("stage 1 differs from its source")
@@ -90,6 +153,15 @@ def check(args: argparse.Namespace) -> None:
             boot[16] != 2 or struct.unpack_from("<H", boot, 22)[0] == 0 or \
             boot[54:62] != b"FAT16   " or boot[510:512] != b"\x55\xaa":
         fail("root partition does not contain the expected FAT16 BPB")
+    if shell_source is not None:
+        installed_shell = fat16_file(
+            data, [b"X68K       ", b"BIN        ", b"SH         "])
+        if installed_shell != shell_source:
+            fail("/x68k/bin/sh differs from its source")
+        if len(installed_shell) < 52 or \
+                installed_shell[:7] != b"\x7fELF\x01\x02\x01" or \
+                struct.unpack_from(">H", installed_shell, 18)[0] != 4:
+            fail("/x68k/bin/sh is not ELF32/MSB/EM_68K")
 
     forbidden = (b"IPLROM", b"CGROM", b"X68BIOS3.LZH")
     if any(token in data for token in forbidden):
@@ -104,6 +176,7 @@ def main() -> None:
     parser.add_argument("--stage1", type=Path)
     parser.add_argument("--stage2", type=Path)
     parser.add_argument("--kernel", type=Path)
+    parser.add_argument("--shell", type=Path)
     parser.add_argument("image", type=Path)
     check(parser.parse_args())
 

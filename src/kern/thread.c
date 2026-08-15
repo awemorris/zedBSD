@@ -35,12 +35,25 @@ thread_create(struct process *process, uintptr_t entry, uintptr_t user_sp,
 	      struct thread **result)
 {
 	struct thread *thread;
+	int error;
 
 	if (process == NULL || process->vmspace == NULL ||
 	    process->vmspace == &kernel_vmspace || entry < VM_USER_MIN ||
 	    entry >= VM_USER_TOP || user_sp < VM_USER_MIN ||
 	    user_sp >= VM_USER_TOP || result == NULL)
 		return EINVAL;
+	/*
+	 * HAL task constructors may validate the initial PC and stack against
+	 * their hardware page tables.  ELF and stack mappings are demand paged,
+	 * so make the two pages required for the first dispatch resident before
+	 * handing the addresses to the HAL.
+	 */
+	error = vmspace_fault(process->vmspace, entry, HAL_SPACE_EXEC);
+	if (error != 0)
+		return error;
+	error = vmspace_fault(process->vmspace, user_sp - 1U, HAL_SPACE_WRITE);
+	if (error != 0)
+		return error;
 	thread = kern_calloc(1, sizeof(*thread));
 	if (thread == NULL)
 		return ENOMEM;

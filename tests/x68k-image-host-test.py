@@ -24,10 +24,11 @@ def main() -> None:
     parser.add_argument("--stage1", required=True, type=Path)
     parser.add_argument("--stage2", required=True, type=Path)
     parser.add_argument("--kernel", required=True, type=Path)
+    parser.add_argument("--shell", required=True, type=Path)
     parser.add_argument("image", type=Path)
     args = parser.parse_args()
     common = ["--stage1", str(args.stage1), "--stage2", str(args.stage2),
-              "--kernel", str(args.kernel)]
+              "--kernel", str(args.kernel), "--shell", str(args.shell)]
     original = args.image.read_bytes()
 
     damaged = bytearray(original)
@@ -49,6 +50,14 @@ def main() -> None:
 
     damaged = bytearray(original)
     damaged[4096 * 512 + 510] = 0
+    rejected(args.checker, damaged, common)
+
+    shell = args.shell.read_bytes()
+    shell_offset = original.find(shell)
+    if shell_offset < 0:
+        raise SystemExit("shell payload is absent from the source image")
+    damaged = bytearray(original)
+    damaged[shell_offset] ^= 1
     rejected(args.checker, damaged, common)
 
     print("zedBSD X68k image negative-path tests: PASS")

@@ -144,7 +144,8 @@ cons_putc(int character)
 }
 
 void cons_puts(const char *string) { if (string != NULL) while (*string != '\0') cons_putc(*string++); }
-int cons_getc(void) { return 0; }
+int cons_getc(void)
+{ return hal_cons_read_event() & (int)HAL_KEY_EVENT_KEY_MASK; }
 void cons_set_attr(int foreground, int background)
 { current_attribute = (uint8_t)(((background & 15) << 4) | (foreground & 15)); }
 void hal_cons_putc(int character) { cons_putc(character); }
@@ -220,8 +221,3 @@ void hal_cons_restore_terminal(const struct hal_cons_state *input)
 	    input->column < HAL_CONS_COLUMNS)
 		state = *input;
 }
-int hal_cons_read_event(void) { return 0; }
-int hal_cons_poll_event(void) { return 0; }
-int hal_cons_key_state(int key) { (void)key; return 0; }
-void hal_cons_drain_input(void) {}
-unsigned hal_cons_modifiers(void) { return 0; }

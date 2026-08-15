@@ -177,6 +177,14 @@ $(BUILD)/tests/x68k-mmio-host-test: tests/x68k-mmio-host-test.c \
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc $< -o $@
 
+$(BUILD)/tests/x68k-keyboard-host-test: \
+	tests/x68k-keyboard-host-test.c \
+	src/hal/m68k/bsp-x68k/keyboard-map.c \
+	src/hal/m68k/bsp-x68k/keyboard-map.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc \
+		src/hal/m68k/bsp-x68k/keyboard-map.c $< -o $@
+
 $(BUILD)/tests/m68k-exception-host-test: \
 	tests/m68k-exception-host-test.c src/hal/m68k/exception.c \
 	src/hal/m68k/exception.h
@@ -338,6 +346,7 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/x68k-memory-map-host-test \
 	$(BUILD)/tests/x68k-handoff-host-test \
 	$(BUILD)/tests/x68k-mmio-host-test \
+	$(BUILD)/tests/x68k-keyboard-host-test \
 	$(BUILD)/tests/m68k-exception-host-test \
 	$(BUILD)/tests/m68k-fpu-frame-host-test \
 	$(BUILD)/tests/x68k-partition-host-test \
