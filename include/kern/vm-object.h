@@ -20,6 +20,9 @@ struct vm_page;
 
 #define VM_OBJECT_PAGE_DIRTY 0x0001U
 #define VM_OBJECT_PAGE_BUSY  0x0002U
+#define VM_OBJECT_PAGE_WRITEBACK 0x0004U
+
+#define VM_OBJECT_RETAINED_WRITEBACK 0x00000001U
 
 struct vm_object_page {
 	off_t offset;
@@ -31,7 +34,9 @@ struct vm_object_page {
 };
 
 struct vm_object {
+	/* usecount counts VM regions; zero is valid while writeback is retained. */
 	unsigned usecount;
+	unsigned flags;
 	/* file is retained for reads; write_file carries write capability. */
 	struct file *file;
 	struct file *write_file;
@@ -54,5 +59,6 @@ void vm_object_truncate_inode(struct inode *, off_t);
 int vm_object_reclaim_one(void);
 unsigned vm_object_count(void);
 unsigned vm_object_page_count(void);
+unsigned vm_object_retained_count(void);
 
 #endif

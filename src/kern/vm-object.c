@@ -33,6 +33,17 @@ find_page(struct vm_object *object, off_t offset)
 	return NULL;
 }
 
+static int
+page_overlaps(const struct vm_object_page *page, uint64_t start, uint64_t end)
+{
+	uint64_t page_start, page_end;
+	if (page->offset < 0)
+		return 0;
+	page_start = (uint64_t)page->offset;
+	page_end = page_start + PAGE_SIZE;
+	return page_end > start && page_start < end;
+}
+
 int
 vm_object_get_shared(struct file *file, struct vm_object **result)
 {
@@ -45,6 +56,11 @@ vm_object_get_shared(struct file *file, struct vm_object **result)
 	    file->f_ops != NULL && file->f_ops->pwrite != NULL;
 	for (object = shared_objects; object != NULL; object = object->next) {
 		if (object->inode == inode) {
+			if (object->usecount == 0) {
+				if (!(object->flags & VM_OBJECT_RETAINED_WRITEBACK))
+					HAL_FATAL("reviving unretained VM object");
+				object->flags &= ~VM_OBJECT_RETAINED_WRITEBACK;
+			}
 			if (writable && object->write_file == NULL) {
 				file_ref(file);
 				object->write_file = file;
@@ -98,35 +114,65 @@ page_is_dirty(struct vm_object_page *page)
 }
 
 static int
-write_page(struct vm_object *object, struct vm_object_page *page)
+object_has_dirty_pages(struct vm_object *object)
 {
-	struct vm_page *mapping;
+	struct vm_object_page *page;
+	for (page = object->pages; page != NULL; page = page->next)
+		if (page_is_dirty(page))
+			return 1;
+	return 0;
+}
+
+static int
+object_has_busy_pages(const struct vm_object *object)
+{
+	const struct vm_object_page *page;
+	for (page = object->pages; page != NULL; page = page->next)
+		if (page->flags & VM_OBJECT_PAGE_BUSY)
+			return 1;
+	return 0;
+}
+
+static void
+object_record_writeback_error(struct vm_object *object, int error)
+{
+	if (object->writeback_error == 0 && error != 0)
+		object->writeback_error = error;
+}
+
+static int
+write_page_data(struct vm_object *object, struct vm_object_page *page)
+{
 	size_t length;
 	ssize_t count;
-	if (!page_is_dirty(page))
-		return 0;
+	if (page->flags & VM_OBJECT_PAGE_BUSY)
+		return EBUSY;
 	if (object->write_file == NULL)
 		return EACCES;
-	if (page->offset < 0 || page->offset >= object->inode->i_size)
+	if (page->offset < 0)
+		return EIO;
+	/* Truncate already discarded full pages beyond the new EOF. */
+	if (page->offset >= object->inode->i_size)
 		return 0;
 	length = (size_t)(object->inode->i_size - page->offset);
 	if (length > PAGE_SIZE)
 		length = PAGE_SIZE;
 	page->flags |= VM_OBJECT_PAGE_BUSY;
 	count = file_pwrite(object->write_file,
-	    (const void *)page->pmem.vaddr,
-	    length, page->offset);
+	    (const void *)page->pmem.vaddr, length, page->offset);
 	page->flags &= ~VM_OBJECT_PAGE_BUSY;
-	if (count != (ssize_t)length) {
-		object->writeback_error = count < 0 ? (int)-count : EIO;
-		return object->writeback_error;
-	}
+	return count == (ssize_t)length ? 0 : count < 0 ? (int)-count : EIO;
+}
+
+static void
+clear_page_dirty(struct vm_object_page *page)
+{
+	struct vm_page *mapping;
 	page->flags &= ~VM_OBJECT_PAGE_DIRTY;
 	for (mapping = page->mappings; mapping != NULL;
 	     mapping = mapping->object_next)
 		(void)hal_page_clear_flags(mapping->vm->space,
 		    (void *)mapping->address, HAL_PAGE_DIRTY);
-	return 0;
 }
 
 static void
@@ -141,19 +187,29 @@ free_object_page(struct vm_object_page *page)
 		object_pages--;
 }
 
-void
-vm_object_put(struct vm_object *object)
+static int
+object_can_destroy(struct vm_object *object)
+{
+	return object->usecount == 0 && object->writeback_error == 0 &&
+	    !object_has_dirty_pages(object) && !object_has_busy_pages(object);
+}
+
+static void
+unlink_and_destroy_object(struct vm_object *object)
 {
 	struct vm_object **link;
 	struct vm_object_page *page;
-	if (object == NULL || object->usecount == 0 || --object->usecount != 0)
-		return;
-	(void)vm_object_sync_range(object, 0, SIZE_MAX, MS_SYNC);
+	int found = 0;
+	if (!object_can_destroy(object))
+		HAL_FATAL("destroying unsynchronized VM object");
 	for (link = &shared_objects; *link != NULL; link = &(*link)->next)
 		if (*link == object) {
 			*link = object->next;
+			found = 1;
 			break;
 		}
+	if (!found)
+		HAL_FATAL("VM object list unlink failed");
 	while ((page = object->pages) != NULL) {
 		object->pages = page->next;
 		free_object_page(page);
@@ -162,8 +218,33 @@ vm_object_put(struct vm_object *object)
 	if (object->write_file != NULL)
 		(void)file_close(object->write_file);
 	kern_free(object);
-	if (object_count != 0)
-		object_count--;
+	if (object_count == 0)
+		HAL_FATAL("VM object counter underflow");
+	object_count--;
+}
+
+static void
+retain_object(struct vm_object *object, int error)
+{
+	if (object->usecount != 0)
+		HAL_FATAL("retaining referenced VM object");
+	if (error == 0)
+		error = object_has_busy_pages(object) ? EBUSY : EIO;
+	object_record_writeback_error(object, error);
+	object->flags |= VM_OBJECT_RETAINED_WRITEBACK;
+}
+
+void
+vm_object_put(struct vm_object *object)
+{
+	int error;
+	if (object == NULL || object->usecount == 0 || --object->usecount != 0)
+		return;
+	error = vm_object_sync_range(object, 0, SIZE_MAX, MS_SYNC);
+	if (error == 0 && object_can_destroy(object))
+		unlink_and_destroy_object(object);
+	else
+		retain_object(object, error);
 }
 
 int
@@ -247,69 +328,131 @@ vm_object_mark_dirty(struct vm_object_page *page)
 		page->flags |= VM_OBJECT_PAGE_DIRTY;
 }
 
+static int
+range_has_wired_mapping(struct vm_object *object, uint64_t start, uint64_t end)
+{
+	struct vm_object_page *page;
+	for (page = object->pages; page != NULL; page = page->next) {
+		struct vm_page *mapping;
+		if (!page_overlaps(page, start, end))
+			continue;
+		for (mapping = page->mappings; mapping != NULL;
+		     mapping = mapping->object_next)
+			if (mapping->wire_count != 0)
+				return 1;
+	}
+	return 0;
+}
+
+static void
+invalidate_page(struct vm_object_page *page)
+{
+	struct vm_page *mapping;
+	while ((mapping = page->mappings) != NULL) {
+		struct vm_page **map_link = &mapping->region->pages;
+		while (*map_link != NULL && *map_link != mapping)
+			map_link = &(*map_link)->next;
+		if (*map_link == mapping)
+			*map_link = mapping->next;
+		(void)hal_page_unmap(mapping->vm->space,
+		    (void *)mapping->address, PAGE_SIZE);
+		vm_object_mapping_remove(page, mapping);
+		kern_free(mapping);
+	}
+}
+
 int
 vm_object_sync_range(struct vm_object *object, off_t offset, size_t size,
 		     int flags)
 {
+	struct vm_object_page *page;
 	struct vm_object_page **link;
-	uint64_t end;
+	uint64_t start, end;
 	int first_error = 0;
-	if (object == NULL || offset < 0 || size == 0)
+	int selected = 0;
+	if (object == NULL || offset < 0 || size == 0 ||
+	    (flags & ~(MS_ASYNC | MS_INVALIDATE | MS_SYNC)) != 0 ||
+	    (flags & (MS_ASYNC | MS_SYNC)) == 0 ||
+	    (flags & (MS_ASYNC | MS_SYNC)) == (MS_ASYNC | MS_SYNC))
 		return EINVAL;
-	end = (uint64_t)offset + size;
-	if (end < (uint64_t)offset)
+	start = (uint64_t)offset;
+	/* offset zero plus SIZE_MAX is the internal full-object sentinel. */
+	if (start == 0 && size == SIZE_MAX)
 		end = UINT64_MAX;
-	for (link = &object->pages; *link != NULL; ) {
-		struct vm_object_page *page = *link;
-		uint64_t page_end = (uint64_t)page->offset + PAGE_SIZE;
+	else {
+		end = start + size;
+		if (end < start)
+			end = UINT64_MAX;
+	}
+	if ((flags & MS_INVALIDATE) != 0 &&
+	    range_has_wired_mapping(object, start, end))
+		return EBUSY;
+
+	for (page = object->pages; page != NULL; page = page->next) {
 		int error;
-		if (page_end <= (uint64_t)offset ||
-		    (uint64_t)page->offset >= end) {
-			link = &page->next;
+		if (!page_overlaps(page, start, end) || !page_is_dirty(page))
 			continue;
-		}
-		error = write_page(object, page);
+		page->flags |= VM_OBJECT_PAGE_WRITEBACK;
+		selected = 1;
+		error = write_page_data(object, page);
 		if (error != 0 && first_error == 0)
 			first_error = error;
-		if ((flags & MS_INVALIDATE) != 0 && error == 0 &&
-		    !page_is_dirty(page)) {
-			struct vm_page *mapping;
-			for (mapping = page->mappings; mapping != NULL;
-			     mapping = mapping->object_next)
-				if (mapping->wire_count != 0)
-					return EBUSY;
-			while ((mapping = page->mappings) != NULL) {
-				struct vm_page **map_link = &mapping->region->pages;
-				while (*map_link != NULL && *map_link != mapping)
-					map_link = &(*map_link)->next;
-				if (*map_link == mapping)
-					*map_link = mapping->next;
-				(void)hal_page_unmap(mapping->vm->space,
-				    (void *)mapping->address, PAGE_SIZE);
-				vm_object_mapping_remove(page, mapping);
-				kern_free(mapping);
+	}
+	if (selected || object->writeback_error != 0) {
+		int error = object->write_file != NULL ?
+		    file_fsync(object->write_file) : EACCES;
+		if (error != 0 && first_error == 0)
+			first_error = error;
+	}
+	if (first_error != 0) {
+		object_record_writeback_error(object, first_error);
+		for (page = object->pages; page != NULL; page = page->next)
+			page->flags &= ~VM_OBJECT_PAGE_WRITEBACK;
+		return first_error;
+	}
+
+	for (page = object->pages; page != NULL; page = page->next) {
+		if (!(page->flags & VM_OBJECT_PAGE_WRITEBACK))
+			continue;
+		clear_page_dirty(page);
+		page->flags &= ~VM_OBJECT_PAGE_WRITEBACK;
+	}
+	if ((flags & MS_INVALIDATE) != 0) {
+		for (link = &object->pages; *link != NULL; ) {
+			page = *link;
+			if (!page_overlaps(page, start, end) || page_is_dirty(page)) {
+				link = &page->next;
+				continue;
 			}
+			invalidate_page(page);
 			*link = page->next;
 			free_object_page(page);
-			continue;
 		}
-		link = &page->next;
 	}
-	return first_error;
+	if (!object_has_dirty_pages(object))
+		object->writeback_error = 0;
+	return 0;
 }
 
 int
 vm_object_sync_inode(struct inode *inode)
 {
-	struct vm_object *object;
+	struct vm_object *object, *next;
 	int first_error = 0;
-	for (object = shared_objects; object != NULL; object = object->next) {
+	for (object = shared_objects; object != NULL; object = next) {
 		int error;
+		next = object->next;
 		if (object->inode != inode)
 			continue;
 		error = vm_object_sync_range(object, 0, SIZE_MAX, MS_SYNC);
 		if (error != 0 && first_error == 0)
 			first_error = error;
+		if (object->usecount != 0)
+			continue;
+		if (error == 0 && object_can_destroy(object))
+			unlink_and_destroy_object(object);
+		else
+			retain_object(object, error);
 	}
 	return first_error;
 }
@@ -325,18 +468,7 @@ vm_object_truncate_inode(struct inode *inode, off_t size)
 		for (link = &object->pages; *link != NULL; ) {
 			struct vm_object_page *page = *link;
 			if (page->offset >= size) {
-				struct vm_page *mapping;
-				while ((mapping = page->mappings) != NULL) {
-					struct vm_page **map_link = &mapping->region->pages;
-					while (*map_link != NULL && *map_link != mapping)
-						map_link = &(*map_link)->next;
-					if (*map_link == mapping)
-						*map_link = mapping->next;
-					(void)hal_page_unmap(mapping->vm->space,
-					    (void *)mapping->address, PAGE_SIZE);
-					vm_object_mapping_remove(page, mapping);
-					kern_free(mapping);
-				}
+				invalidate_page(page);
 				*link = page->next;
 				free_object_page(page);
 				continue;
@@ -353,13 +485,14 @@ vm_object_truncate_inode(struct inode *inode, off_t size)
 int
 vm_object_reclaim_one(void)
 {
-	struct vm_object *object;
-	for (object = shared_objects; object != NULL; object = object->next) {
-		struct vm_object_page **link;
-		for (link = &object->pages; *link != NULL; link = &(*link)->next) {
-			struct vm_object_page *page = *link;
+	struct vm_object *object, *next;
+	for (object = shared_objects; object != NULL; object = next) {
+		struct vm_object_page *page;
+		next = object->next;
+		for (page = object->pages; page != NULL; page = page->next) {
 			struct vm_page *mapping;
 			int wired = 0;
+			int error;
 			if (page->flags & VM_OBJECT_PAGE_BUSY)
 				continue;
 			for (mapping = page->mappings; mapping != NULL;
@@ -368,21 +501,14 @@ vm_object_reclaim_one(void)
 					wired = 1;
 					break;
 				}
-			if (wired || write_page(object, page) != 0)
+			if (wired)
 				continue;
-			while ((mapping = page->mappings) != NULL) {
-				struct vm_page **map_link = &mapping->region->pages;
-				while (*map_link != NULL && *map_link != mapping)
-					map_link = &(*map_link)->next;
-				if (*map_link == mapping)
-					*map_link = mapping->next;
-				(void)hal_page_unmap(mapping->vm->space,
-				    (void *)mapping->address, PAGE_SIZE);
-				vm_object_mapping_remove(page, mapping);
-				kern_free(mapping);
-			}
-			*link = page->next;
-			free_object_page(page);
+			error = vm_object_sync_range(object, page->offset, PAGE_SIZE,
+			    MS_SYNC | MS_INVALIDATE);
+			if (error != 0)
+				continue;
+			if (object->usecount == 0 && object_can_destroy(object))
+				unlink_and_destroy_object(object);
 			return 0;
 		}
 	}
@@ -391,3 +517,14 @@ vm_object_reclaim_one(void)
 
 unsigned vm_object_count(void) { return object_count; }
 unsigned vm_object_page_count(void) { return object_pages; }
+
+unsigned
+vm_object_retained_count(void)
+{
+	struct vm_object *object;
+	unsigned count = 0;
+	for (object = shared_objects; object != NULL; object = object->next)
+		if (object->flags & VM_OBJECT_RETAINED_WRITEBACK)
+			count++;
+	return count;
+}

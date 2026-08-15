@@ -21,7 +21,8 @@ static unsigned page_ins, swap_reads, swap_slots_freed;
 static struct swap_backend fake_swap;
 static size_t commit_used;
 static int fail_commit;
-static unsigned pwrite_calls;
+static unsigned pwrite_calls, fsync_calls;
+static int fail_pwrite_count, short_pwrite_count, fail_fsync_count;
 
 void *kern_malloc(size_t size) { return malloc(size); }
 void *kern_calloc(size_t count, size_t size) { return calloc(count, size); }
@@ -80,10 +81,44 @@ ssize_t file_pwrite(struct file *file, const void *buffer, size_t length,
 		    off_t offset)
 {
 	uint8_t *data = file->f_data;
-	memcpy(data + offset, buffer, length);
 	pwrite_calls++;
+	if (fail_pwrite_count != 0) {
+		fail_pwrite_count--;
+		return -EIO;
+	}
+	if (short_pwrite_count != 0) {
+		short_pwrite_count--;
+		assert(length != 0);
+		memcpy(data + offset, buffer, length - 1);
+		return (ssize_t)length - 1;
+	}
+	memcpy(data + offset, buffer, length);
 	return (ssize_t)length;
 }
+int file_fsync(struct file *file)
+{
+	(void)file;
+	fsync_calls++;
+	if (fail_fsync_count != 0) {
+		fail_fsync_count--;
+		return EIO;
+	}
+	return 0;
+}
+
+static ssize_t
+fake_pwrite_op(struct file *file, const void *buffer, size_t length,
+	       off_t offset)
+{
+	(void)file;
+	(void)buffer;
+	(void)offset;
+	return (ssize_t)length;
+}
+
+static const struct file_ops shared_file_ops = {
+	.pwrite = fake_pwrite_op,
+};
 
 hal_space_t hal_mem_create_space(void)
 {
@@ -180,7 +215,7 @@ int main(void)
 	};
 	struct file shared_file = {
 		.f_usecount = 1, .f_data = shared_data, .f_inode = &shared_inode,
-		.f_flags = O_RDWR
+		.f_ops = &shared_file_ops, .f_flags = O_RDWR
 	};
 
 	vm = vmspace_create();
@@ -283,6 +318,142 @@ int main(void)
 	assert(!memcmp(buffer, "object", 6) && vm_object_page_count() == 1);
 	assert(vmspace_unmap(vm, 0x00a00000, 8192) == 0);
 	assert(vm_object_count() == 0 && vm_object_page_count() == 0);
+	assert(vm_object_retained_count() == 0 && shared_file.f_usecount == 1);
+
+	/* A page write failure is reported, remains dirty, and is retried. */
+	memcpy(shared_data, "before", 7);
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+	assert(vmspace_copy_to(vm, 0x00a00000, "retry1", 6) == 0);
+	fail_pwrite_count = 1;
+	assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == EIO);
+	assert(!memcmp(shared_data, "before", 6));
+	assert(vm_object_count() == 1 && vm_object_page_count() == 1);
+	assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == 0);
+	assert(!memcmp(shared_data, "retry1", 6));
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+	assert(vm_object_count() == 0 && vm_object_page_count() == 0);
+
+	/* A short write is EIO and the next attempt rewrites the whole page. */
+	memcpy(shared_data, "before", 7);
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+	assert(vmspace_copy_to(vm, 0x00a00000, "short1", 6) == 0);
+	short_pwrite_count = 1;
+	assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == EIO);
+	assert(vm_object_page_count() == 1);
+	assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == 0);
+	assert(!memcmp(shared_data, "short1", 6));
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+
+	/* A backend flush failure keeps the page dirty for a full rewrite. */
+	memcpy(shared_data, "before", 7);
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+	assert(vmspace_copy_to(vm, 0x00a00000, "retry2", 6) == 0);
+	{
+		unsigned before_writes = pwrite_calls;
+		fail_fsync_count = 1;
+		assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == EIO);
+		assert(pwrite_calls == before_writes + 1);
+		assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == 0);
+		assert(pwrite_calls == before_writes + 2);
+	}
+	assert(!memcmp(shared_data, "retry2", 6));
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+
+	/* Final put retains data and file references until an inode retry. */
+	memcpy(shared_data, "before", 7);
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+	assert(vmspace_copy_to(vm, 0x00a00000, "retain", 6) == 0);
+	fail_pwrite_count = 1;
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+	assert(vm_object_count() == 1 && vm_object_page_count() == 1);
+	assert(vm_object_retained_count() == 1);
+	assert(shared_file.f_usecount == 3);
+	assert(vm_object_sync_inode(&shared_inode) == 0);
+	assert(!memcmp(shared_data, "retain", 6));
+	assert(vm_object_count() == 0 && vm_object_page_count() == 0);
+	assert(vm_object_retained_count() == 0 && shared_file.f_usecount == 1);
+
+	/* A new mapping revives the retained object and sees its latest page. */
+	memcpy(shared_data, "before", 7);
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+	assert(vmspace_copy_to(vm, 0x00a00000, "revive", 6) == 0);
+	fail_pwrite_count = 1;
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+	assert(vm_object_retained_count() == 1);
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	assert(vm_object_count() == 1 && vm_object_retained_count() == 0);
+	assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+	memset(buffer, 0, sizeof(buffer));
+	assert(vmspace_copy_from(vm, buffer, 0x00a00000, 6) == 0);
+	assert(!memcmp(buffer, "revive", 6));
+	assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == 0);
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+
+	/* MS_INVALIDATE never drops a page whose writeback failed. */
+	memcpy(shared_data, "before", 7);
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+	assert(vmspace_copy_to(vm, 0x00a00000, "invald", 6) == 0);
+	fail_pwrite_count = 1;
+	assert(vmspace_sync(vm, 0x00a00000, 4096,
+		MS_SYNC | MS_INVALIDATE) == EIO);
+	assert(region->pages != NULL && vm_object_page_count() == 1);
+	assert(vmspace_sync(vm, 0x00a00000, 4096,
+		MS_SYNC | MS_INVALIDATE) == 0);
+	assert(region->pages == NULL && vm_object_page_count() == 0);
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+
+	/* Reclaim skips a failed page and frees it only after a successful retry. */
+	memcpy(shared_data, "before", 7);
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+	assert(vmspace_copy_to(vm, 0x00a00000, "reclm1", 6) == 0);
+	fail_pwrite_count = 1;
+	assert(vm_object_reclaim_one() == ENOMEM);
+	assert(region->pages != NULL && vm_object_page_count() == 1);
+	assert(vm_object_reclaim_one() == 0);
+	assert(region->pages == NULL && vm_object_page_count() == 0);
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+
+	/* vmspace teardown may retain an object; a later inode sync reaps it. */
+	{
+		struct vmspace *teardown_vm = vmspace_create();
+		assert(teardown_vm != NULL);
+		memcpy(shared_data, "before", 7);
+		assert(vmspace_map_file_shared(teardown_vm, 0x00a00000, 4096,
+			HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+			sizeof(shared_data), &region) == 0);
+		assert(vmspace_fault(teardown_vm, 0x00a00000, HAL_SPACE_READ) == 0);
+		assert(vmspace_copy_to(teardown_vm, 0x00a00000, "exitwb", 6) == 0);
+		fail_fsync_count = 1;
+		vmspace_free(teardown_vm);
+		assert(vm_object_retained_count() == 1);
+		assert(vm_object_sync_inode(&shared_inode) == 0);
+		assert(!memcmp(shared_data, "exitwb", 6));
+		assert(vm_object_count() == 0 && vm_object_page_count() == 0);
+	}
+	assert(shared_file.f_usecount == 1);
 
 	assert(vmspace_set_brk_start(vm, 0x01000000U) == 0);
 	assert(vmspace_brk(vm, 0, &mapped) == 0 && mapped == 0x01000000U);
@@ -342,7 +513,8 @@ int main(void)
 
 	vmspace_free(vm);
 	assert(file.f_usecount == 1);
-	assert(spaces_destroyed == 1 && pages_allocated == pages_freed);
+	assert(spaces_created == spaces_destroyed);
+	assert(pages_allocated == pages_freed);
 	assert(commit_used == 0);
 
 	fail_space = 1;

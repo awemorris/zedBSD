@@ -73,6 +73,7 @@ ssize_t file_write(struct file *, const void *, size_t);
 int file_readdir(struct file *, struct dirent *, int *);
 off_t file_seek(struct file *, off_t, int);
 int file_ioctl(struct file *, unsigned long, uintptr_t);
+/* Flush this open file/backend; VM pages are synchronized by vm-object. */
 int file_fsync(struct file *);
 int file_close(struct file *);
 void file_ref(struct file *);

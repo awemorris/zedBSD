@@ -1150,6 +1150,7 @@ sys_fsync_call(const uintptr_t args[6])
 	int error = file == NULL ? EBADF :
 	    file_vm_inode(file) == NULL ? EINVAL :
 	    vm_object_sync_inode(file_vm_inode(file));
+	/* Then flush this descriptor's own backend/open-file state. */
 	if (error == 0 && file != NULL)
 		error = file_fsync(file);
 	if (file != NULL)
