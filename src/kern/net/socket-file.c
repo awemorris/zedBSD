@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/net/socket.h"
 #include "kern/file.h"
+#include "kern/filedesc.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -15,7 +16,8 @@ socket_file_read(struct file *file, void *buffer, size_t length)
 	if (socket->type != SOCK_STREAM || socket->ops == NULL ||
 	    socket->ops->recvfrom == NULL)
 		return -EOPNOTSUPP;
-	return socket->ops->recvfrom(socket, buffer, length, 0, NULL, NULL);
+	return socket->ops->recvfrom(socket, buffer, length,
+	    (file->f_flags & O_NONBLOCK) != 0 ? MSG_DONTWAIT : 0, NULL, NULL);
 }
 
 static ssize_t
@@ -28,7 +30,8 @@ socket_file_write(struct file *file, const void *buffer, size_t length)
 	if (socket->type != SOCK_STREAM || socket->ops == NULL ||
 	    socket->ops->sendto == NULL)
 		return -EOPNOTSUPP;
-	return socket->ops->sendto(socket, buffer, length, 0, NULL, 0);
+	return socket->ops->sendto(socket, buffer, length,
+	    (file->f_flags & O_NONBLOCK) != 0 ? MSG_DONTWAIT : 0, NULL, 0);
 }
 
 static int
@@ -75,4 +78,47 @@ socket_from_file(struct file *file)
 {
 	return file != NULL && file->f_ops == &socket_file_ops ?
 		file->f_data : NULL;
+}
+
+int
+socket_file_ref_get(struct filedesc *fd, int descriptor,
+	struct socket_file_ref *reference)
+{
+	if (reference == NULL)
+		return EINVAL;
+	reference->file = filedesc_get_ref(fd, descriptor);
+	reference->socket = socket_from_file(reference->file);
+	if (reference->socket == NULL) {
+		if (reference->file != NULL)
+			(void)file_close(reference->file);
+		reference->file = NULL;
+		return EBADF;
+	}
+	return 0;
+}
+
+void
+socket_file_ref_put(struct socket_file_ref *reference)
+{
+	if (reference == NULL)
+		return;
+	if (reference->file != NULL)
+		(void)file_close(reference->file);
+	reference->file = NULL;
+	reference->socket = NULL;
+}
+
+unsigned
+socket_file_effective_flags(const struct socket_file_ref *reference,
+	int message_flags)
+{
+	unsigned flags = 0;
+	if (reference != NULL && reference->file != NULL &&
+	    (reference->file->f_flags & O_NONBLOCK) != 0)
+		flags |= MSG_DONTWAIT;
+	if ((message_flags & MSG_DONTWAIT) != 0)
+		flags |= MSG_DONTWAIT;
+	if ((message_flags & MSG_NOSIGNAL) != 0)
+		flags |= MSG_NOSIGNAL;
+	return flags;
 }

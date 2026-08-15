@@ -10,6 +10,7 @@
 
 #include <hal/hal.h>
 #include <kern/sched.h>
+#include <kern/waitq.h>
 #include <sys/types.h>
 #include <stdint.h>
 
@@ -37,6 +38,7 @@ struct thread {
 	struct thread *proc_next;
 	/* Intrusive link used only while sleeping on a process child event. */
 	struct thread *wait_next;
+	struct wait_token wait_token;
 	void (*kernel_entry)(void *);
 	void *kernel_arg;
 	uint32_t signal_mask;
@@ -45,6 +47,10 @@ struct thread {
 	uint32_t signal_suspend_mask;
 	uint32_t signal_token;
 	unsigned signal_suspended;
+	uint32_t syscall_restart_number;
+	uintptr_t syscall_restart_args[HAL_SYSCALL_ARGS];
+	unsigned syscall_restart_valid;
+	unsigned syscall_restart_on_return;
 	uint32_t fault_vector;
 	uintptr_t fault_eip;
 	uintptr_t fault_address;

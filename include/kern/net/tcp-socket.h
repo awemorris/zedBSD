@@ -12,7 +12,9 @@
 
 enum tcp_state {
 	TCP_CLOSED,
+	TCP_LISTEN,
 	TCP_SYN_SENT,
+	TCP_SYN_RECEIVED,
 	TCP_ESTABLISHED,
 	TCP_FIN_WAIT_1,
 	TCP_FIN_WAIT_2,
@@ -33,6 +35,14 @@ struct tcp_socket {
 	uint64_t retransmit_deadline;
 	uint8_t retransmit_flags;
 	unsigned retransmit_count;
+	unsigned listen_backlog;
+	unsigned half_open_count;
+	unsigned accept_count;
+	struct tcp_socket *listener;
+	struct tcp_socket *queue_next;
+	struct tcp_socket *half_open_head;
+	struct tcp_socket *accept_head;
+	struct tcp_socket *accept_tail;
 };
 
 int tcp_init(void);

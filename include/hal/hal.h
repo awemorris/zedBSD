@@ -338,6 +338,8 @@ uintptr_t hal_task_user_stack(void);
 int hal_task_signal_enter(uintptr_t handler, uintptr_t stack, int signo,
 			  uintptr_t restorer, uint32_t token);
 int hal_task_signal_return(uint32_t token, intptr_t *return_value);
+int hal_task_signal_restart(uint32_t token, uint32_t number,
+	const uintptr_t args[HAL_SYSCALL_ARGS], intptr_t *return_value);
 
 typedef void (*hal_user_return_handler_t)(void);
 void hal_user_return_set_handler(hal_user_return_handler_t handler);

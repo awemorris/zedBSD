@@ -465,12 +465,25 @@ int access(const char *path, int mode)
 
 char *getcwd(char *buffer, size_t size)
 {
-	const char *cwd = active_context != NULL ? fs_getcwd(active_context) :
-		current_directory;
-	size_t length = strlen(cwd) + 1U;
+	const char *cwd = current_directory;
+	size_t length;
+	int error;
 
-	if (buffer == NULL || size < length) {
-		errno = buffer == NULL ? EINVAL : ERANGE;
+	if (buffer == NULL) {
+		errno = EINVAL;
+		return NULL;
+	}
+	if (active_context != NULL) {
+		error = fs_getcwd(active_context, buffer, size);
+		if (error != 0) {
+			errno = error;
+			return NULL;
+		}
+		return buffer;
+	}
+	length = strlen(cwd) + 1U;
+	if (size < length) {
+		errno = ERANGE;
 		return NULL;
 	}
 	memcpy(buffer, cwd, length);

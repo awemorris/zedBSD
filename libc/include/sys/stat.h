@@ -71,8 +71,8 @@ _Static_assert(__builtin_offsetof(struct stat, st_atim) == 48, "LP64 stat time")
 _Static_assert(__builtin_offsetof(struct stat, st_blksize) == 96,
 	"LP64 stat blksize");
 #else
-_Static_assert(sizeof(struct timespec) == 8, "ILP32 timespec ABI");
-_Static_assert(sizeof(struct stat) == 68, "ILP32 stat ABI");
+_Static_assert(sizeof(struct timespec) == 12, "ILP32 time64 timespec ABI");
+_Static_assert(sizeof(struct stat) == 80, "ILP32 time64 stat ABI");
 #endif
 
 int fstat(int, struct stat *);

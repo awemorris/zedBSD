@@ -109,6 +109,8 @@ enum zedbsd_syscall_number {
 	ZEDBSD_SYS_symlinkat = 98,
 	ZEDBSD_SYS_readlinkat = 99,
 	ZEDBSD_SYS_sigsuspend = 100,
+	ZEDBSD_SYS_clock_getres = 101,
+	ZEDBSD_SYS_clock_settime = 102,
 };
 
 #endif

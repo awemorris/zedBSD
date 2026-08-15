@@ -23,7 +23,8 @@ SECTIONS
 		*(.text.entry)
 		*/hal/i386/*.o(.text*) */hal/i386/bsp-pc98/*.o(.text*)
 		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o */kern/vm-object.o \
-			*/kern/signal.o) .text*)
+			*/kern/signal.o */kern/clock.o */kern/namei.o */kern/lock.o \
+			*/kern/waitq.o) .text*)
 		*/kern/pc98/*.o(.text*)
 		*main.o(.text*) *stage2-m9-test.o(.text*)
 		*console.o(.text*) *env.o(.text*)
@@ -39,7 +40,9 @@ SECTIONS
 	} :low
 	.rodata.low : {
 		*/hal/i386/*.o(.rodata*) */hal/i386/bsp-pc98/*.o(.rodata*)
-		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o) .rodata*)
+		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o */kern/clock.o */kern/namei.o \
+			*/kern/lock.o \
+			*/kern/waitq.o) .rodata*)
 		*/kern/pc98/*.o(.rodata*)
 		*main.o(.rodata*) *stage2-m9-test.o(.rodata*)
 		*console.o(.rodata*) *env.o(.rodata*)
@@ -55,7 +58,9 @@ SECTIONS
 	} :low
 	.data.low : {
 		*/hal/i386/*.o(.data*) */hal/i386/bsp-pc98/*.o(.data*)
-		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o) .data*)
+		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o */kern/clock.o */kern/namei.o \
+			*/kern/lock.o \
+			*/kern/waitq.o) .data*)
 		*/kern/pc98/*.o(.data*)
 		*main.o(.data*) *stage2-m9-test.o(.data*)
 		*console.o(.data*) *env.o(.data*)
@@ -79,7 +84,9 @@ SECTIONS
 		*/hal/i386/locore.o(.bss* COMMON)
 		*/hal/i386/*.o(.bss* COMMON)
 		*/hal/i386/bsp-pc98/*.o(.bss* COMMON)
-		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o) .bss* COMMON)
+		*/kern/*.o(EXCLUDE_FILE (*/kern/net/*.o */kern/clock.o */kern/namei.o \
+			*/kern/lock.o \
+			*/kern/waitq.o) .bss* COMMON)
 		*/kern/pc98/*.o(.bss* COMMON)
 		*main.o(.bss* COMMON) *stage2-m9-test.o(.bss* COMMON)
 		*console.o(.bss* COMMON) *env.o(.bss* COMMON)

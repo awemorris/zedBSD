@@ -38,6 +38,7 @@ AMD64_KERNEL_SOURCES := \
 	drivers/pcat-ide.c drivers/dp8390.c drivers/pcat-ne2000.c \
 	src/kern/mbr-partition.c src/kern/pcat/platform.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
+	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c \
 	src/kern/vmspace.c src/kern/vm-object.c src/kern/vm-commit.c \
 	src/kern/filedesc.c \

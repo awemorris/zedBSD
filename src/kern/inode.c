@@ -96,6 +96,7 @@ inode_alloc(struct mount *mountp)
 		return NULL;
 	memset(inode, 0, sizeof(*inode));
 	inode->i_mount = mountp;
+	inode->i_dirseq = 1;
 	/* One cache reference and one reference returned to the caller. */
 	inode->i_usecount = 2;
 	inode_cache[slot] = inode;
@@ -297,6 +298,21 @@ inode_touch(struct inode *inode, unsigned mask)
 		inode->i_ctime = now;
 }
 
+void
+inode_dir_changed(struct inode *inode)
+{
+	if (inode == NULL || inode->i_type != INODE_DIR)
+		return;
+	if (inode->i_dirseq == UINT64_MAX) {
+		namecache_purge_inode(inode);
+		inode->i_dirseq = 1;
+	} else {
+		inode->i_dirseq++;
+		if (inode->i_dirseq == 0)
+			inode->i_dirseq = 1;
+	}
+}
+
 int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 {
 	const unsigned valid = INODE_ATTR_MODE | INODE_ATTR_UID |
@@ -385,6 +401,7 @@ int inode_create(struct inode *i, const struct componentname *n, mode_t m,
 	error = i->i_op != NULL && i->i_op->create != NULL ?
 		i->i_op->create(i, n, m, r) : EOPNOTSUPP;
 	if (error == 0) {
+		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 		inode_touch(*r, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
 			INODE_ATTR_CTIME);
@@ -400,6 +417,7 @@ int inode_mkdir(struct inode *i, const struct componentname *n, mode_t m,
 	error = i->i_op != NULL && i->i_op->mkdir != NULL ?
 		i->i_op->mkdir(i, n, m, r) : EOPNOTSUPP;
 	if (error == 0) {
+		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 		inode_touch(*r, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
 			INODE_ATTR_CTIME);
@@ -421,8 +439,10 @@ int inode_unlink(struct inode *i, const struct componentname *n)
 	inode_release(target);
 	error = i->i_op != NULL && i->i_op->unlink != NULL ?
 		i->i_op->unlink(i, n) : EOPNOTSUPP;
-	if (error == 0)
+	if (error == 0) {
+		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	}
 	return error;
 }
 int inode_rmdir(struct inode *i, const struct componentname *n)
@@ -440,8 +460,10 @@ int inode_rmdir(struct inode *i, const struct componentname *n)
 	inode_release(target);
 	error = i->i_op != NULL && i->i_op->rmdir != NULL ?
 		i->i_op->rmdir(i, n) : EOPNOTSUPP;
-	if (error == 0)
+	if (error == 0) {
+		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	}
 	return error;
 }
 int inode_rename(struct inode *od, const struct componentname *on,
@@ -476,6 +498,9 @@ int inode_rename(struct inode *od, const struct componentname *on,
 	error = od->i_op != NULL && od->i_op->rename != NULL ?
 		od->i_op->rename(od, on, nd, nn, flags) : EOPNOTSUPP;
 	if (error == 0) {
+		inode_dir_changed(od);
+		if (nd != od)
+			inode_dir_changed(nd);
 		inode_touch(od, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 		if (nd != od)
 			inode_touch(nd, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
@@ -499,6 +524,7 @@ int inode_link(struct inode *directory, const struct componentname *name,
 	error = directory->i_op != NULL && directory->i_op->link != NULL ?
 		directory->i_op->link(directory, name, target) : EOPNOTSUPP;
 	if (error == 0) {
+		inode_dir_changed(directory);
 		target->i_linkcount++;
 		inode_touch(target, INODE_ATTR_CTIME);
 		inode_touch(directory, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
@@ -521,6 +547,7 @@ int inode_symlink(struct inode *directory, const struct componentname *name,
 		directory->i_op->symlink(directory, name, target, result) :
 		EOPNOTSUPP;
 	if (error == 0) {
+		inode_dir_changed(directory);
 		inode_touch(directory, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 		inode_touch(*result, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
 			INODE_ATTR_CTIME);

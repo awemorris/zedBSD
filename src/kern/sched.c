@@ -6,6 +6,7 @@
 #include "kern/sched.h"
 #include "kern/boot-device.h"
 #include "kern/thread.h"
+#include "kern/lock.h"
 
 #include <hal/hal.h>
 #include <string.h>
@@ -167,6 +168,22 @@ sched_sleep(uint64_t timeout_tick)
 	sched_yield();
 	if (enabled)
 		hal_irq_enable();
+}
+
+void
+sched_sleep_locked(uint64_t timeout_tick, struct spinlock *condition_lock)
+{
+	struct thread *thread = curthread;
+	(void)hal_irq_disable();
+	if (thread == NULL || condition_lock == NULL)
+		HAL_FATAL("invalid locked sleep");
+	thread->state = THREAD_SLEEPING;
+	thread->sched.wakeup_tick = timeout_tick;
+	if (timeout_tick != 0)
+		queue_append(&sleep_queue, thread, SCHED_QUEUE_SLEEP);
+	spin_unlock(condition_lock);
+	sched_switch();
+	spin_lock(condition_lock);
 }
 
 uint64_t sched_ticks(void) { return scheduler_ticks; }

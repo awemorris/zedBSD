@@ -17,15 +17,18 @@
 #define SOCKET_RECEIVE_PACKETS_MAX 8U
 
 struct file;
+struct filedesc;
 struct packet_buf;
 struct socket;
 struct thread;
 
 struct socket_ops {
 	int (*bind)(struct socket *, const struct sockaddr *, socklen_t);
-	int (*connect)(struct socket *, const struct sockaddr *, socklen_t);
+	int (*connect)(struct socket *, const struct sockaddr *, socklen_t,
+	    unsigned);
 	int (*listen)(struct socket *, int);
-	int (*accept)(struct socket *, struct socket **, struct sockaddr *, socklen_t *);
+	int (*accept)(struct socket *, struct socket **, struct sockaddr *,
+	    socklen_t *, unsigned);
 	ssize_t (*sendto)(struct socket *, const void *, size_t, int, const struct sockaddr *, socklen_t);
 	ssize_t (*recvfrom)(struct socket *, void *, size_t, int, struct sockaddr *, socklen_t *);
 	int (*shutdown)(struct socket *, int);
@@ -53,10 +56,22 @@ struct socket {
 	size_t receive_bytes;
 	size_t receive_limit;
 	uint64_t receive_timeout_ticks;
+	uint64_t send_timeout_ticks;
+	unsigned reuse_address;
+	unsigned read_shutdown;
+	unsigned write_shutdown;
 	struct thread *receive_waiter;
 	struct thread *send_waiter;
 	struct thread *connect_waiter;
 	struct thread *accept_waiter;
+};
+
+#define SOCKET_IO_NONBLOCK 0x0001U
+#define SOCKET_IO_NOSIGNAL 0x0002U
+
+struct socket_file_ref {
+	struct file *file;
+	struct socket *socket;
 };
 
 struct socket_family_ops {
@@ -81,6 +96,11 @@ int socket_dequeue_packet(struct socket *socket, int flags,
 			  struct packet_buf **result);
 int socket_file_create(struct socket *socket, struct file **result);
 struct socket *socket_from_file(struct file *file);
+int socket_file_ref_get(struct filedesc *, int, struct socket_file_ref *);
+void socket_file_ref_put(struct socket_file_ref *);
+unsigned socket_file_effective_flags(const struct socket_file_ref *, int);
+int socket_take_error(struct socket *);
+void socket_set_error(struct socket *, int);
 
 int packet_socket_init(void);
 void packet_socket_deliver(const struct packet_buf *packet,

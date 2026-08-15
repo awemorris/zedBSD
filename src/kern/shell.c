@@ -79,8 +79,10 @@ print_vmstat(void)
 
 void prompt(void)
 {
-	const char *cwd = fs_getcwd(&kern_cwdinfo);
-	puts(cwd != NULL ? cwd : "/");
+	char cwd[ZEDBSD_PATH_MAX];
+	if (fs_getcwd(&kern_cwdinfo, cwd, sizeof(cwd)) != 0)
+		strcpy(cwd, "/");
+	puts(cwd);
 	puts(" $ ");
 	update_cursor();
 }
@@ -584,8 +586,11 @@ int command(char *s)
 		return selectpart(v[1]);
 	}
 	if (streq(v[0], "pwd")) {
+		char cwd[ZEDBSD_PATH_MAX];
 		if (n != 1) return 0;
-		puts(fs_getcwd(&kern_cwdinfo)); putc('\n'); return 1;
+		if (fs_getcwd(&kern_cwdinfo, cwd, sizeof(cwd)) != 0)
+			return 0;
+		puts(cwd); putc('\n'); return 1;
 	}
 	if (streq(v[0], "cd")) {
 		const char *path = n == 1 ? zedbsd_env_get(&boot_environment, "HOME") :

@@ -28,8 +28,8 @@ _Static_assert(sizeof(struct zedbsd_graphics_glyph) == 56,
 _Static_assert(sizeof(void *) == 4, "ILP32 pointer");
 _Static_assert(sizeof(long) == 4, "ILP32 long");
 _Static_assert(sizeof(off_t) == 4, "ILP32 off_t");
-_Static_assert(sizeof(time_t) == 4, "ILP32 time_t");
-_Static_assert(sizeof(struct timeval) == 8, "ILP32 timeval");
+_Static_assert(sizeof(time_t) == 8, "ILP32 time64 time_t");
+_Static_assert(sizeof(struct timeval) == 12, "ILP32 time64 timeval");
 _Static_assert(sizeof(struct iovec) == 8, "ILP32 iovec");
 _Static_assert(sizeof(struct zedbsd_console_write_at) == 20,
     "ILP32 console write-at");

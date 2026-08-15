@@ -33,8 +33,9 @@ static int icmp_bind(struct socket *socket, const struct sockaddr *address,
 }
 
 static int icmp_connect(struct socket *socket, const struct sockaddr *address,
-			socklen_t length)
+			 socklen_t length, unsigned io_flags)
 {
+	(void)io_flags;
 	return inet_socket_connect(&icmp_endpoint(socket)->inet, address, length);
 }
 
@@ -50,7 +51,8 @@ icmp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 	uint16_t checksum;
 	int error;
 
-	if (flags != 0 || buffer == NULL || length < sizeof(struct icmp_wire))
+	if ((flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) != 0 || buffer == NULL ||
+	    length < sizeof(struct icmp_wire))
 		return -EINVAL;
 	if (address != NULL) {
 		if (address_length < sizeof(destination_address) ||

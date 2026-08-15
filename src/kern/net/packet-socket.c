@@ -60,7 +60,8 @@ packet_sendto(struct socket *socket, const void *buffer, size_t length,
 	void *data;
 	int error;
 
-	if (flags != 0 || buffer == NULL || length < ETHERNET_HEADER_LENGTH)
+	if ((flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) != 0 || buffer == NULL ||
+	    length < ETHERNET_HEADER_LENGTH)
 		return -EINVAL;
 	if (address != NULL) {
 		if (address_length < sizeof(*l2) || l2->sl2_family != AF_PACKET)

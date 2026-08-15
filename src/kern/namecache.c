@@ -8,6 +8,7 @@
 struct namecache_entry {
 	struct inode *parent;
 	struct inode *child;
+	uint64_t parent_dirseq;
 	size_t length;
 	char name[NAME_MAX + 1U];
 };
@@ -44,6 +45,10 @@ namecache_lookup(struct inode *parent, const struct componentname *name,
 		return EINVAL;
 	for (i = 0; i < NAMECACHE_MAX; i++) {
 		if (entries[i].parent != NULL && matches(&entries[i], parent, name)) {
+			if (entries[i].parent_dirseq != parent->i_dirseq) {
+				drop(&entries[i]);
+				continue;
+			}
 			inode_ref(entries[i].child);
 			*result = entries[i].child;
 			return 0;
@@ -62,7 +67,8 @@ namecache_enter(struct inode *parent, const struct componentname *name,
 		return EINVAL;
 	for (i = 0; i < NAMECACHE_MAX; i++) {
 		if (entries[i].parent != NULL && matches(&entries[i], parent, name)) {
-			if (entries[i].child == child)
+			if (entries[i].child == child &&
+			    entries[i].parent_dirseq == parent->i_dirseq)
 				return 0;
 			drop(&entries[i]);
 			slot = i;
@@ -79,6 +85,7 @@ namecache_enter(struct inode *parent, const struct componentname *name,
 	inode_ref(child);
 	entries[slot].parent = parent;
 	entries[slot].child = child;
+	entries[slot].parent_dirseq = parent->i_dirseq;
 	entries[slot].length = name->cn_namelen;
 	memcpy(entries[slot].name, name->cn_nameptr, name->cn_namelen);
 	entries[slot].name[name->cn_namelen] = '\0';

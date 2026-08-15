@@ -316,6 +316,7 @@ process_execve(struct process *process, const char *path, char *const argv[],
 		goto out;
 	filedesc_close_on_exec(process->fd);
 	signal_exec(process);
+	process->did_exec = 1;
 	vmspace_free(old_vm);
 out:
 	if (file != NULL)

@@ -47,7 +47,8 @@ SPARCV9_KERNEL_SOURCES := \
 	drivers/loop.c \
 	src/kern/partition.c src/kern/sun-disklabel.c src/kern/sun4u/platform.c \
 	drivers/sun4u-cmd646.c src/kern/image.c src/kern/panic.c \
-	src/kern/entry.c src/kern/clock.c src/kern/process.c src/kern/thread.c \
+	src/kern/entry.c src/kern/clock.c src/kern/lock.c src/kern/waitq.c \
+	src/kern/process.c src/kern/thread.c \
 	src/kern/sched.c src/kern/vmspace.c src/kern/vm-object.c \
 	src/kern/vm-commit.c src/kern/filedesc.c src/kern/pipe.c \
 	src/kern/cred.c src/kern/signal.c src/kern/cwdinfo.c \

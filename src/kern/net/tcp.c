@@ -6,6 +6,7 @@
 #include "kern/net/route.h"
 #include "kern/kmem.h"
 #include "kern/sched.h"
+#include "kern/signal.h"
 #include "kern/thread.h"
 #include "internal.h"
 #include "wire.h"
@@ -24,6 +25,7 @@
 #define TCP_EPHEMERAL_FIRST 49152U
 #define TCP_INITIAL_RTO 100U
 #define TCP_RETRANSMIT_MAX 5U
+#define TCP_LISTEN_BACKLOG_MAX 16U
 
 struct tcp_endpoint {
 	struct tcp_socket tcp;
@@ -36,6 +38,70 @@ static uint16_t next_ephemeral;
 static struct tcp_endpoint *tcp_endpoint(struct socket *socket)
 {
 	return (struct tcp_endpoint *)socket;
+}
+
+static void
+tcp_listener_remove(struct tcp_endpoint *child)
+{
+	struct tcp_endpoint *listener;
+	struct tcp_socket **link, *previous = NULL;
+
+	if (child == NULL || child->tcp.listener == NULL)
+		return;
+	listener = (struct tcp_endpoint *)child->tcp.listener;
+	for (link = &listener->tcp.half_open_head; *link != NULL;
+	    link = &(*link)->queue_next) {
+		if (*link == &child->tcp) {
+			*link = child->tcp.queue_next;
+			if (listener->tcp.half_open_count != 0)
+				listener->tcp.half_open_count--;
+			child->tcp.queue_next = NULL;
+			child->tcp.listener = NULL;
+			return;
+		}
+	}
+	for (link = &listener->tcp.accept_head; *link != NULL;
+	    link = &(*link)->queue_next) {
+		if (*link == &child->tcp) {
+			*link = child->tcp.queue_next;
+			if (listener->tcp.accept_tail == &child->tcp)
+				listener->tcp.accept_tail = previous;
+			if (listener->tcp.accept_count != 0)
+				listener->tcp.accept_count--;
+			child->tcp.queue_next = NULL;
+			child->tcp.listener = NULL;
+			return;
+		}
+		previous = *link;
+	}
+}
+
+static void
+tcp_listener_established(struct tcp_endpoint *child)
+{
+	struct tcp_endpoint *listener;
+	struct tcp_socket **link;
+
+	if (child == NULL || child->tcp.listener == NULL)
+		return;
+	listener = (struct tcp_endpoint *)child->tcp.listener;
+	for (link = &listener->tcp.half_open_head; *link != NULL;
+	    link = &(*link)->queue_next)
+		if (*link == &child->tcp) {
+			*link = child->tcp.queue_next;
+			if (listener->tcp.half_open_count != 0)
+				listener->tcp.half_open_count--;
+			break;
+		}
+	child->tcp.queue_next = NULL;
+	if (listener->tcp.accept_tail != NULL)
+		listener->tcp.accept_tail->queue_next = &child->tcp;
+	else
+		listener->tcp.accept_head = &child->tcp;
+	listener->tcp.accept_tail = &child->tcp;
+	listener->tcp.accept_count++;
+	if (listener->tcp.inet.socket.accept_waiter != NULL)
+		sched_wakeup(listener->tcp.inet.socket.accept_waiter);
 }
 
 static int
@@ -204,14 +270,74 @@ tcp_bind(struct socket *socket, const struct sockaddr *address,
 }
 
 static int
+tcp_listen(struct socket *socket, int backlog)
+{
+	struct tcp_endpoint *endpoint = tcp_endpoint(socket);
+
+	if (endpoint->tcp.state != TCP_CLOSED)
+		return endpoint->tcp.state == TCP_LISTEN ? 0 : EISCONN;
+	if ((endpoint->tcp.inet.inet_flags & INET_SOCKET_BOUND) == 0 ||
+	    endpoint->tcp.inet.local_port == 0)
+		return EDESTADDRREQ;
+	if (backlog < 0)
+		backlog = 0;
+	if ((unsigned)backlog > TCP_LISTEN_BACKLOG_MAX)
+		backlog = TCP_LISTEN_BACKLOG_MAX;
+	endpoint->tcp.listen_backlog = backlog == 0 ? 1U : (unsigned)backlog;
+	endpoint->tcp.state = TCP_LISTEN;
+	return 0;
+}
+
+static int
+tcp_accept(struct socket *socket, struct socket **result,
+	struct sockaddr *address, socklen_t *length, unsigned io_flags)
+{
+	struct tcp_endpoint *listener = tcp_endpoint(socket);
+	struct tcp_socket *accepted;
+	struct thread *thread = thread_current();
+	int error;
+
+	if (result == NULL || listener->tcp.state != TCP_LISTEN)
+		return EINVAL;
+	while (listener->tcp.accept_head == NULL) {
+		if ((io_flags & SOCKET_IO_NONBLOCK) != 0 || thread == NULL)
+			return EAGAIN;
+		if (signal_pending_unblocked(thread))
+			return EINTR;
+		socket->accept_waiter = thread;
+		sched_sleep(0);
+		socket->accept_waiter = NULL;
+		if (socket->error != 0)
+			return socket_take_error(socket);
+	}
+	accepted = listener->tcp.accept_head;
+	if (address != NULL && length != NULL) {
+		error = inet_socket_getpeername(&accepted->inet, address, length);
+		if (error != 0)
+			return error;
+	}
+	listener->tcp.accept_head = accepted->queue_next;
+	if (listener->tcp.accept_head == NULL)
+		listener->tcp.accept_tail = NULL;
+	if (listener->tcp.accept_count != 0)
+		listener->tcp.accept_count--;
+	accepted->queue_next = NULL;
+	accepted->listener = NULL;
+	*result = &accepted->inet.socket;
+	return 0;
+}
+
+static int
 tcp_connect(struct socket *socket, const struct sockaddr *address,
-	    socklen_t length)
+	    socklen_t length, unsigned io_flags)
 {
 	struct tcp_endpoint *endpoint = tcp_endpoint(socket);
 	struct thread *thread = thread_current();
 	unsigned attempt;
 	int error;
 
+	if (endpoint->tcp.state == TCP_SYN_SENT)
+		return EALREADY;
 	if (endpoint->tcp.state != TCP_CLOSED)
 		return EISCONN;
 	error = inet_socket_connect(&endpoint->tcp.inet, address, length);
@@ -242,6 +368,8 @@ tcp_connect(struct socket *socket, const struct sockaddr *address,
 		return error;
 	}
 	endpoint->tcp.send_next++;
+	if ((io_flags & SOCKET_IO_NONBLOCK) != 0)
+		return EINPROGRESS;
 	if (thread == NULL)
 		return EAGAIN;
 	socket->connect_waiter = thread;
@@ -249,8 +377,7 @@ tcp_connect(struct socket *socket, const struct sockaddr *address,
 		sched_sleep(0);
 	socket->connect_waiter = NULL;
 	if (socket->error != 0) {
-		error = socket->error;
-		socket->error = 0;
+		error = socket_take_error(socket);
 		return error;
 	}
 	return endpoint->tcp.state == TCP_ESTABLISHED ? 0 : ETIMEDOUT;
@@ -266,9 +393,15 @@ tcp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 	int error;
 
 	(void)address_length;
-	if ((flags & ~MSG_DONTWAIT) != 0 || address != NULL ||
+	if ((flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) != 0 || address != NULL ||
 	    (buffer == NULL && length != 0))
 		return -EINVAL;
+	if (socket->write_shutdown) {
+		if ((flags & MSG_NOSIGNAL) == 0 && thread != NULL &&
+		    thread->proc != NULL)
+			(void)signal_send_process(thread->proc, SIGPIPE);
+		return -EPIPE;
+	}
 	if (endpoint->tcp.state != TCP_ESTABLISHED)
 		return -ENOTCONN;
 	if (length == 0)
@@ -282,8 +415,7 @@ tcp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 		sched_sleep(0);
 		socket->send_waiter = NULL;
 		if (socket->error != 0) {
-			error = socket->error;
-			socket->error = 0;
+			error = socket_take_error(socket);
 			return -error;
 		}
 	}
@@ -313,6 +445,8 @@ tcp_recvfrom(struct socket *socket, void *buffer, size_t length, int flags,
 
 	(void)address;
 	(void)address_length;
+	if (socket->read_shutdown)
+		return 0;
 	if (endpoint->tcp.state == TCP_CLOSE_WAIT && socket->receive_head == NULL)
 		return 0;
 	error = socket_dequeue_packet(socket, flags, &packet);
@@ -338,13 +472,18 @@ static int tcp_shutdown(struct socket *socket, int how)
 
 	if (how != SHUT_WR && how != SHUT_RDWR && how != SHUT_RD)
 		return EINVAL;
+	if (how == SHUT_RD || how == SHUT_RDWR)
+		socket->read_shutdown = 1;
 	if (how == SHUT_RD)
+		return 0;
+	if (socket->write_shutdown)
 		return 0;
 	if (endpoint->tcp.state != TCP_ESTABLISHED &&
 	    endpoint->tcp.state != TCP_CLOSE_WAIT)
 		return ENOTCONN;
 	error = tcp_send_reliable(endpoint, TCP_FIN | TCP_ACK, NULL, 0);
 	if (error == 0) {
+		socket->write_shutdown = 1;
 		endpoint->tcp.send_next++;
 		endpoint->tcp.state = endpoint->tcp.state == TCP_CLOSE_WAIT ?
 		    TCP_LAST_ACK : TCP_FIN_WAIT_1;
@@ -371,10 +510,27 @@ tcp_close(struct socket *socket)
 {
 	struct tcp_endpoint *endpoint = tcp_endpoint(socket);
 	struct tcp_endpoint **link;
+	struct tcp_socket *queued;
 
 	if (endpoint->tcp.state == TCP_ESTABLISHED ||
 	    endpoint->tcp.state == TCP_CLOSE_WAIT)
 		(void)tcp_shutdown(socket, SHUT_RDWR);
+	if (endpoint->tcp.listener != NULL)
+		tcp_listener_remove(endpoint);
+	while ((queued = endpoint->tcp.half_open_head) != NULL) {
+		endpoint->tcp.half_open_head = queued->queue_next;
+		queued->queue_next = NULL;
+		queued->listener = NULL;
+		socket_set_error(&queued->inet.socket, ECONNABORTED);
+		socket_release(&queued->inet.socket);
+	}
+	while ((queued = endpoint->tcp.accept_head) != NULL) {
+		endpoint->tcp.accept_head = queued->queue_next;
+		queued->queue_next = NULL;
+		queued->listener = NULL;
+		socket_set_error(&queued->inet.socket, ECONNABORTED);
+		socket_release(&queued->inet.socket);
+	}
 	for (link = &tcp_sockets; *link != NULL; link = &(*link)->next)
 		if (*link == endpoint) {
 			*link = endpoint->next;
@@ -387,6 +543,8 @@ tcp_close(struct socket *socket)
 static const struct socket_ops tcp_ops = {
 	.bind = tcp_bind,
 	.connect = tcp_connect,
+	.listen = tcp_listen,
+	.accept = tcp_accept,
 	.sendto = tcp_sendto,
 	.recvfrom = tcp_recvfrom,
 	.shutdown = tcp_shutdown,
@@ -419,16 +577,73 @@ static struct tcp_endpoint *
 tcp_lookup(uint32_t source, uint32_t destination, uint16_t source_port,
 	   uint16_t destination_port)
 {
-	struct tcp_endpoint *endpoint;
+	struct tcp_endpoint *endpoint, *wildcard = NULL;
 
 	for (endpoint = tcp_sockets; endpoint != NULL; endpoint = endpoint->next)
-		if (endpoint->tcp.inet.local_port == destination_port &&
+		if (endpoint->tcp.state != TCP_LISTEN &&
+		    endpoint->tcp.inet.local_port == destination_port &&
 		    endpoint->tcp.inet.remote_port == source_port &&
 		    endpoint->tcp.inet.remote_address == source &&
 		    (endpoint->tcp.inet.local_address == 0 ||
 		     endpoint->tcp.inet.local_address == destination))
 			return endpoint;
-	return NULL;
+	for (endpoint = tcp_sockets; endpoint != NULL; endpoint = endpoint->next) {
+		if (endpoint->tcp.state != TCP_LISTEN ||
+		    endpoint->tcp.inet.local_port != destination_port)
+			continue;
+		if (endpoint->tcp.inet.local_address == destination)
+			return endpoint;
+		if (endpoint->tcp.inet.local_address == 0)
+			wildcard = endpoint;
+	}
+	return wildcard;
+}
+
+static struct tcp_endpoint *
+tcp_passive_syn(struct tcp_endpoint *listener, uint32_t source,
+	uint32_t destination, uint16_t source_port, uint32_t sequence)
+{
+	struct socket *created;
+	struct tcp_endpoint *child;
+	int error;
+
+	if (listener->tcp.half_open_count + listener->tcp.accept_count >=
+	    listener->tcp.listen_backlog)
+		return NULL;
+	error = socket_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &created);
+	if (error != 0)
+		return NULL;
+	child = tcp_endpoint(created);
+	child->tcp.inet.local_address = listener->tcp.inet.local_address == 0 ?
+	    destination : listener->tcp.inet.local_address;
+	child->tcp.inet.local_port = listener->tcp.inet.local_port;
+	child->tcp.inet.remote_address = source;
+	child->tcp.inet.remote_port = source_port;
+	child->tcp.inet.ifindex = listener->tcp.inet.ifindex;
+	child->tcp.inet.inet_flags = INET_SOCKET_BOUND | INET_SOCKET_CONNECTED;
+	child->tcp.receive_next = sequence + 1U;
+	child->tcp.send_next = (uint32_t)sched_ticks() * 1103515245U +
+	    child->tcp.inet.local_port + source_port;
+	child->tcp.send_unacknowledged = child->tcp.send_next;
+	child->tcp.state = TCP_SYN_RECEIVED;
+	child->tcp.listener = &listener->tcp;
+	child->tcp.inet.socket.receive_timeout_ticks =
+	    listener->tcp.inet.socket.receive_timeout_ticks;
+	child->tcp.inet.socket.send_timeout_ticks =
+	    listener->tcp.inet.socket.send_timeout_ticks;
+	child->tcp.inet.socket.reuse_address =
+	    listener->tcp.inet.socket.reuse_address;
+	child->tcp.queue_next = listener->tcp.half_open_head;
+	listener->tcp.half_open_head = &child->tcp;
+	listener->tcp.half_open_count++;
+	error = tcp_send_reliable(child, TCP_SYN | TCP_ACK, NULL, 0);
+	if (error != 0) {
+		tcp_listener_remove(child);
+		socket_release(created);
+		return NULL;
+	}
+	child->tcp.send_next++;
+	return child;
 }
 
 static int
@@ -464,11 +679,35 @@ tcp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 	acknowledgement = wire_get32(tcp->acknowledgement);
 	flags = tcp->flags;
 	payload_length = packet->length - header_length;
+	if (endpoint->tcp.state == TCP_LISTEN) {
+		if ((flags & (TCP_SYN | TCP_ACK | TCP_RST)) == TCP_SYN)
+			(void)tcp_passive_syn(endpoint, source, destination,
+			    source_port, sequence);
+		packet_buf_free(packet);
+		return 0;
+	}
 	if (flags & TCP_RST) {
-		endpoint->tcp.inet.socket.error = ECONNRESET;
+		socket_set_error(&endpoint->tcp.inet.socket, ECONNRESET);
 		endpoint->tcp.state = TCP_CLOSED;
+		if (endpoint->tcp.listener != NULL) {
+			tcp_listener_remove(endpoint);
+			packet_buf_free(packet);
+			socket_release(&endpoint->tcp.inet.socket);
+			return 0;
+		}
 		if (endpoint->tcp.inet.socket.connect_waiter != NULL)
 			sched_wakeup(endpoint->tcp.inet.socket.connect_waiter);
+		packet_buf_free(packet);
+		return 0;
+	}
+	if (endpoint->tcp.state == TCP_SYN_RECEIVED) {
+		if ((flags & TCP_ACK) != 0 &&
+		    acknowledgement == endpoint->tcp.send_next) {
+			endpoint->tcp.send_unacknowledged = acknowledgement;
+			tcp_retransmit_clear(endpoint);
+			endpoint->tcp.state = TCP_ESTABLISHED;
+			tcp_listener_established(endpoint);
+		}
 		packet_buf_free(packet);
 		return 0;
 	}
@@ -500,8 +739,10 @@ tcp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 			return EINVAL;
 		}
 		endpoint->tcp.receive_next += (uint32_t)payload_length;
-		(void)socket_enqueue_packet(&endpoint->tcp.inet.socket, packet);
-		packet = NULL;
+		if (!endpoint->tcp.inet.socket.read_shutdown) {
+			(void)socket_enqueue_packet(&endpoint->tcp.inet.socket, packet);
+			packet = NULL;
+		}
 		(void)tcp_send_segment(endpoint, TCP_ACK, NULL, 0);
 	}
 	if ((flags & TCP_FIN) != 0 &&
@@ -544,13 +785,14 @@ tcp_init(void)
 void
 tcp_timer_run(void)
 {
-	struct tcp_endpoint *endpoint;
+	struct tcp_endpoint *endpoint, *next;
 	uint64_t now = sched_ticks();
 
-	for (endpoint = tcp_sockets; endpoint != NULL; endpoint = endpoint->next) {
+	for (endpoint = tcp_sockets; endpoint != NULL; endpoint = next) {
 		struct socket *socket = &endpoint->tcp.inet.socket;
 		uint64_t delay;
 		int error;
+		next = endpoint->next;
 
 		if (endpoint->tcp.retransmit == NULL ||
 		    endpoint->tcp.retransmit_deadline > now)
@@ -558,7 +800,12 @@ tcp_timer_run(void)
 		if (endpoint->tcp.retransmit_count >= TCP_RETRANSMIT_MAX) {
 			tcp_retransmit_clear(endpoint);
 			endpoint->tcp.state = TCP_CLOSED;
-			socket->error = ETIMEDOUT;
+			socket_set_error(socket, ETIMEDOUT);
+			if (endpoint->tcp.listener != NULL) {
+				tcp_listener_remove(endpoint);
+				socket_release(socket);
+				continue;
+			}
 			if (socket->connect_waiter != NULL)
 				sched_wakeup(socket->connect_waiter);
 			if (socket->receive_waiter != NULL)
@@ -573,7 +820,12 @@ tcp_timer_run(void)
 		if (error != 0 && error != EAGAIN && error != ENOBUFS) {
 			tcp_retransmit_clear(endpoint);
 			endpoint->tcp.state = TCP_CLOSED;
-			socket->error = error;
+			socket_set_error(socket, error);
+			if (endpoint->tcp.listener != NULL) {
+				tcp_listener_remove(endpoint);
+				socket_release(socket);
+				continue;
+			}
 			if (socket->connect_waiter != NULL)
 				sched_wakeup(socket->connect_waiter);
 			continue;

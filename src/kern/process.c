@@ -185,6 +185,8 @@ process_setpgid(struct process *caller, pid_t pid, pid_t pgid)
 		return ESRCH;
 	if (target != caller && target->parent != caller)
 		return ESRCH;
+	if (target != caller && target->did_exec)
+		return EACCES;
 	if (target->session != caller->session || target->session == target->pid)
 		return EPERM;
 	if (pgid == 0)
@@ -565,12 +567,16 @@ process_waitpid(struct process *parent, pid_t selector, int *status,
 }
 
 static void
-notify_parent_event(struct process *process)
+notify_parent_event(struct process *process, int stopped_or_continued)
 {
+	const struct signal_action *action;
+
 	if (process == NULL || process->parent == NULL ||
 	    process->parent == &process0)
 		return;
-	(void)signal_send_process(process->parent, SIGCHLD);
+	action = &process->parent->signal_actions[SIGCHLD];
+	if (!stopped_or_continued || (action->flags & SA_NOCLDSTOP) == 0)
+		(void)signal_send_process(process->parent, SIGCHLD);
 	child_waiters_wake(process->parent);
 }
 
@@ -582,7 +588,7 @@ process_note_stopped(struct process *process, int signo)
 	process->wait_status = ((signo & 0xff) << 8) | 0x7f;
 	process->wait_stopped = 1;
 	process->wait_continued = 0;
-	notify_parent_event(process);
+	notify_parent_event(process, 1);
 }
 
 void
@@ -592,7 +598,7 @@ process_note_continued(struct process *process)
 		return;
 	process->wait_continued = 1;
 	process->wait_stopped = 0;
-	notify_parent_event(process);
+	notify_parent_event(process, 1);
 }
 
 int
@@ -681,8 +687,14 @@ process_exit_final(int thread_status, int wait_status)
 	reparent_children(process);
 	process->exit_status = wait_status;
 	process->state = PROCESS_ZOMBIE;
-	if (process->parent != NULL && process->parent != &process0)
+	if (process->parent != NULL && process->parent != &process0) {
+		const struct signal_action *action =
+		    &process->parent->signal_actions[SIGCHLD];
+		if ((action->flags & SA_NOCLDWAIT) != 0 ||
+		    action->handler == (uintptr_t)SIG_IGN)
+			process->flags |= PROCESS_AUTOREAP;
 		(void)signal_send_process(process->parent, SIGCHLD);
+	}
 	if ((process->flags & PROCESS_AUTOREAP) != 0 && reaper_thread != NULL)
 		sched_wakeup(reaper_thread);
 	waiter = process->waiter;

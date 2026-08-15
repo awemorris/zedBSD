@@ -23,5 +23,13 @@ int cred_is_superuser(const struct ucred *);
 int cred_in_group(const struct ucred *, gid_t);
 const struct ucred *cred_current(void);
 int vfs_access(const struct inode *, const struct ucred *, int);
+int vfs_may_create(const struct inode *, const struct ucred *);
+int vfs_may_remove(const struct inode *, const struct inode *,
+		   const struct ucred *);
+int vfs_may_rename(const struct inode *, const struct inode *,
+		   const struct inode *, const struct inode *,
+		   const struct ucred *);
+int vfs_may_chown(const struct inode *, const struct ucred *, uid_t, gid_t);
+int vfs_clear_setid_on_write(struct inode *, const struct ucred *);
 
 #endif

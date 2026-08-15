@@ -38,33 +38,29 @@
 
 #define SYSCALL_IO_CHUNK 512U
 #define SYSCALL_SOCKET_OPTION_MAX 128U
-#define CLOCK_HZ 100U
 #define SYSCALL_PAGE_MASK (ZEDBSD_PAGE_SIZE - 1U)
 #define SYSCALL_EXT __attribute__((section(".hightext")))
+
+static intptr_t syscall_dispatch(uint32_t, const uintptr_t [6]);
+static intptr_t syscall_dispatch_body(uint32_t, const uintptr_t [6]);
 
 static struct process *current_process(void)
 {
 	return curthread != NULL ? curthread->proc : NULL;
 }
 
-static struct socket *
-descriptor_socket(struct process *process, int descriptor)
+static int
+descriptor_socket(struct process *process, int descriptor,
+	struct socket_file_ref *reference)
 {
-	struct file *file = process != NULL && process->fd != NULL ?
-		filedesc_get_ref(process->fd, descriptor) : NULL;
-	struct socket *socket = socket_from_file(file);
-
-	if (socket != NULL)
-		socket_ref(socket);
-	if (file != NULL)
-		(void)file_close(file);
-	return socket;
+	return process == NULL || process->fd == NULL ? EBADF :
+	    socket_file_ref_get(process->fd, descriptor, reference);
 }
 
 static intptr_t
-socket_result(struct socket *socket, intptr_t result)
+socket_result(struct socket_file_ref *reference, intptr_t result)
 {
-	socket_release(socket);
+	socket_file_ref_put(reference);
 	return result;
 }
 
@@ -204,60 +200,68 @@ static intptr_t
 sys_bind_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct socket *socket = descriptor_socket(process, (int)args[0]);
+	struct socket_file_ref reference;
+	struct socket *socket;
 	struct sockaddr_storage address;
 	int error;
 
-	if (socket == NULL)
+	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
+	socket = reference.socket;
 	if (socket->ops == NULL || socket->ops->bind == NULL)
-		return socket_result(socket, -EOPNOTSUPP);
+		return socket_result(&reference, -EOPNOTSUPP);
 	error = copy_sockaddr_in(args[1], (socklen_t)args[2], &address);
 	if (error == 0)
 		error = socket->ops->bind(socket, (struct sockaddr *)&address,
 		    (socklen_t)args[2]);
-	return socket_result(socket, error == 0 ? 0 : -error);
+	return socket_result(&reference, error == 0 ? 0 : -error);
 }
 
 static intptr_t
 sys_connect_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct socket *socket = descriptor_socket(process, (int)args[0]);
+	struct socket_file_ref reference;
+	struct socket *socket;
 	struct sockaddr_storage address;
 	int error;
 
-	if (socket == NULL)
+	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
+	socket = reference.socket;
 	if (socket->ops == NULL || socket->ops->connect == NULL)
-		return socket_result(socket, -EOPNOTSUPP);
+		return socket_result(&reference, -EOPNOTSUPP);
 	error = copy_sockaddr_in(args[1], (socklen_t)args[2], &address);
 	if (error == 0)
 		error = socket->ops->connect(socket, (struct sockaddr *)&address,
-		    (socklen_t)args[2]);
-	return socket_result(socket, error == 0 ? 0 : -error);
+		    (socklen_t)args[2],
+		    (reference.file->f_flags & O_NONBLOCK) != 0 ?
+		    SOCKET_IO_NONBLOCK : 0);
+	return socket_result(&reference, error == 0 ? 0 : -error);
 }
 
 static intptr_t
 sys_listen_call(const uintptr_t args[6])
 {
-	struct socket *socket = descriptor_socket(current_process(),
-	    (int)args[0]);
+	struct socket_file_ref reference;
+	struct socket *socket;
 	int error;
 
-	if (socket == NULL)
+	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
+	socket = reference.socket;
 	if (socket->ops == NULL || socket->ops->listen == NULL)
-		return socket_result(socket, -EOPNOTSUPP);
+		return socket_result(&reference, -EOPNOTSUPP);
 	error = socket->ops->listen(socket, (int)args[1]);
-	return socket_result(socket, error == 0 ? 0 : -error);
+	return socket_result(&reference, error == 0 ? 0 : -error);
 }
 
 static intptr_t
 sys_accept_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct socket *socket = descriptor_socket(process, (int)args[0]);
+	struct socket_file_ref reference;
+	struct socket *socket;
 	struct sockaddr_storage address;
 	struct sockaddr_output_pin output;
 	struct socket *accepted = NULL;
@@ -265,28 +269,31 @@ sys_accept_call(const uintptr_t args[6])
 	socklen_t length = sizeof(address);
 	int descriptor, error;
 
-	if (socket == NULL)
+	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
+	socket = reference.socket;
 	if ((args[1] == 0) != (args[2] == 0))
-		return socket_result(socket, -EINVAL);
+		return socket_result(&reference, -EINVAL);
 	if (socket->ops == NULL || socket->ops->accept == NULL)
-		return socket_result(socket, -EOPNOTSUPP);
+		return socket_result(&reference, -EOPNOTSUPP);
 	error = sockaddr_output_pin(args[1], args[2], &output);
 	if (error != 0)
-		return socket_result(socket, -error);
+		return socket_result(&reference, -error);
 	memset(&address, 0, sizeof(address));
 	error = socket->ops->accept(socket, &accepted,
 	    args[1] != 0 ? (struct sockaddr *)&address : NULL,
-	    args[1] != 0 ? &length : NULL);
+	    args[1] != 0 ? &length : NULL,
+	    (reference.file->f_flags & O_NONBLOCK) != 0 ?
+	    SOCKET_IO_NONBLOCK : 0);
 	if (error != 0) {
 		sockaddr_output_unpin(&output);
-		return socket_result(socket, -error);
+		return socket_result(&reference, -error);
 	}
 	if (accepted == NULL) {
 		sockaddr_output_unpin(&output);
-		return socket_result(socket, -EIO);
+		return socket_result(&reference, -EIO);
 	}
-	socket_release(socket);
+	socket_file_ref_put(&reference);
 	error = socket_file_create(accepted, &file);
 	if (error == 0)
 		error = filedesc_install(process->fd, file, &descriptor);
@@ -310,47 +317,50 @@ sys_accept_call(const uintptr_t args[6])
 static intptr_t
 sys_sendto_call(const uintptr_t args[6])
 {
-	struct socket *socket = descriptor_socket(current_process(),
-	    (int)args[0]);
+	struct socket_file_ref reference;
+	struct socket *socket;
 	struct sockaddr_storage address;
 	const struct sockaddr *destination = NULL;
 	void *buffer;
 	ssize_t result;
 	int error;
 
-	if (socket == NULL)
+	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
+	socket = reference.socket;
 	if (socket->ops == NULL || socket->ops->sendto == NULL)
-		return socket_result(socket, -EOPNOTSUPP);
+		return socket_result(&reference, -EOPNOTSUPP);
 	if ((args[4] == 0) != (args[5] == 0))
-		return socket_result(socket, -EINVAL);
+		return socket_result(&reference, -EINVAL);
 	if (args[2] > PACKET_BUF_STORAGE_SIZE)
-		return socket_result(socket, -EMSGSIZE);
+		return socket_result(&reference, -EMSGSIZE);
 	if (args[4] != 0) {
 		error = copy_sockaddr_in(args[4], (socklen_t)args[5], &address);
 		if (error != 0)
-			return socket_result(socket, -error);
+			return socket_result(&reference, -error);
 		destination = (const struct sockaddr *)&address;
 	}
 	if (args[2] == 0)
-		return socket_result(socket, socket->ops->sendto(socket, "", 0,
-		    (int)args[3], destination, (socklen_t)args[5]));
+		return socket_result(&reference, socket->ops->sendto(socket, "", 0,
+		    (int)socket_file_effective_flags(&reference, (int)args[3]),
+		    destination, (socklen_t)args[5]));
 	buffer = kern_malloc((size_t)args[2]);
 	if (buffer == NULL)
-		return socket_result(socket, -ENOMEM);
+		return socket_result(&reference, -ENOMEM);
 	error = copyin(args[1], buffer, (size_t)args[2]);
 	result = error == 0 ? socket->ops->sendto(socket, buffer,
-	    (size_t)args[2], (int)args[3], destination,
+	    (size_t)args[2],
+	    (int)socket_file_effective_flags(&reference, (int)args[3]), destination,
 	    (socklen_t)args[5]) : -error;
 	kern_free(buffer);
-	return socket_result(socket, result);
+	return socket_result(&reference, result);
 }
 
 static intptr_t
 sys_recvfrom_call(const uintptr_t args[6])
 {
-	struct socket *socket = descriptor_socket(current_process(),
-	    (int)args[0]);
+	struct socket_file_ref reference;
+	struct socket *socket;
 	struct sockaddr_storage address;
 	struct sockaddr_output_pin output;
 	struct uaccess_pin data_pin;
@@ -360,32 +370,34 @@ sys_recvfrom_call(const uintptr_t args[6])
 	ssize_t result;
 	int error;
 
-	if (socket == NULL)
+	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
+	socket = reference.socket;
 	if (socket->ops == NULL || socket->ops->recvfrom == NULL)
-		return socket_result(socket, -EOPNOTSUPP);
+		return socket_result(&reference, -EOPNOTSUPP);
 	if ((args[4] == 0) != (args[5] == 0))
-		return socket_result(socket, -EINVAL);
+		return socket_result(&reference, -EINVAL);
 	if (args[2] == 0)
-		return socket_result(socket, 0);
+		return socket_result(&reference, 0);
 	capacity = args[2] > PACKET_BUF_STORAGE_SIZE ?
 		PACKET_BUF_STORAGE_SIZE : (size_t)args[2];
 	error = uaccess_pin(args[1], capacity, PROT_WRITE, &data_pin);
 	if (error != 0)
-		return socket_result(socket, -error);
+		return socket_result(&reference, -error);
 	error = sockaddr_output_pin(args[4], args[5], &output);
 	if (error != 0) {
 		uaccess_unpin(&data_pin);
-		return socket_result(socket, -error);
+		return socket_result(&reference, -error);
 	}
 	buffer = kern_malloc(capacity);
 	if (buffer == NULL) {
 		sockaddr_output_unpin(&output);
 		uaccess_unpin(&data_pin);
-		return socket_result(socket, -ENOMEM);
+		return socket_result(&reference, -ENOMEM);
 	}
 	memset(&address, 0, sizeof(address));
-	result = socket->ops->recvfrom(socket, buffer, capacity, (int)args[3],
+	result = socket->ops->recvfrom(socket, buffer, capacity,
+	    (int)socket_file_effective_flags(&reference, (int)args[3]),
 	    args[4] != 0 ? (struct sockaddr *)&address : NULL,
 	    args[4] != 0 ? &length : NULL);
 	if (result >= 0) {
@@ -398,98 +410,102 @@ sys_recvfrom_call(const uintptr_t args[6])
 	kern_free(buffer);
 	sockaddr_output_unpin(&output);
 	uaccess_unpin(&data_pin);
-	return socket_result(socket, result);
+	return socket_result(&reference, result);
 }
 
 static intptr_t
 sys_shutdown_call(const uintptr_t args[6])
 {
-	struct socket *socket = descriptor_socket(current_process(),
-	    (int)args[0]);
+	struct socket_file_ref reference;
+	struct socket *socket;
 	int error;
 
-	if (socket == NULL)
+	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
+	socket = reference.socket;
 	if (socket->ops == NULL || socket->ops->shutdown == NULL)
-		return socket_result(socket, -EOPNOTSUPP);
+		return socket_result(&reference, -EOPNOTSUPP);
 	error = socket->ops->shutdown(socket, (int)args[1]);
-	return socket_result(socket, error == 0 ? 0 : -error);
+	return socket_result(&reference, error == 0 ? 0 : -error);
 }
 
 static intptr_t
 sys_socket_name_call(const uintptr_t args[6], int peer)
 {
-	struct socket *socket = descriptor_socket(current_process(),
-	    (int)args[0]);
+	struct socket_file_ref reference;
+	struct socket *socket;
 	struct sockaddr_storage address;
 	socklen_t length = sizeof(address);
 	int error;
 
-	if (socket == NULL)
+	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
+	socket = reference.socket;
 	if (args[1] == 0 || args[2] == 0)
-		return socket_result(socket, -EINVAL);
+		return socket_result(&reference, -EINVAL);
 	memset(&address, 0, sizeof(address));
 	if (peer) {
 		if (socket->ops == NULL || socket->ops->getpeername == NULL)
-			return socket_result(socket, -EOPNOTSUPP);
+			return socket_result(&reference, -EOPNOTSUPP);
 		error = socket->ops->getpeername(socket,
 		    (struct sockaddr *)&address, &length);
 	} else {
 		if (socket->ops == NULL || socket->ops->getsockname == NULL)
-			return socket_result(socket, -EOPNOTSUPP);
+			return socket_result(&reference, -EOPNOTSUPP);
 		error = socket->ops->getsockname(socket,
 		    (struct sockaddr *)&address, &length);
 	}
 	if (error == 0)
 		error = copy_sockaddr_out(args[1], args[2], &address, length);
-	return socket_result(socket, error == 0 ? 0 : -error);
+	return socket_result(&reference, error == 0 ? 0 : -error);
 }
 
 static intptr_t
 sys_setsockopt_call(const uintptr_t args[6])
 {
-	struct socket *socket = descriptor_socket(current_process(),
-	    (int)args[0]);
+	struct socket_file_ref reference;
+	struct socket *socket;
 	uint8_t value[SYSCALL_SOCKET_OPTION_MAX];
 	int error;
 
-	if (socket == NULL)
+	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
+	socket = reference.socket;
 	if (args[4] > sizeof(value) || (args[4] != 0 && args[3] == 0))
-		return socket_result(socket, -EINVAL);
+		return socket_result(&reference, -EINVAL);
 	error = args[4] == 0 ? 0 : copyin(args[3], value, (size_t)args[4]);
 	if (error == 0)
 		error = socket_setsockopt_common(socket, (int)args[1],
 		    (int)args[2], value, (socklen_t)args[4]);
-	if (error == EOPNOTSUPP && socket->ops != NULL &&
+	if (error == ENOPROTOOPT && socket->ops != NULL &&
 	    socket->ops->setsockopt != NULL)
 		error = socket->ops->setsockopt(socket, (int)args[1],
 		    (int)args[2], value, (socklen_t)args[4]);
-	return socket_result(socket, error == 0 ? 0 : -error);
+	return socket_result(&reference, error == 0 ? 0 : -error);
 }
 
 static intptr_t
 sys_getsockopt_call(const uintptr_t args[6])
 {
-	struct socket *socket = descriptor_socket(current_process(),
-	    (int)args[0]);
+	struct socket_file_ref reference;
+	struct socket *socket;
 	uint8_t value[SYSCALL_SOCKET_OPTION_MAX];
 	socklen_t length;
 	int error;
 
-	if (socket == NULL)
+	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
 		return -EBADF;
+	socket = reference.socket;
 	if (args[3] == 0 || args[4] == 0)
-		return socket_result(socket, -EINVAL);
+		return socket_result(&reference, -EINVAL);
 	error = copyin(args[4], &length, sizeof(length));
 	if (error != 0)
-		return socket_result(socket, -error);
+		return socket_result(&reference, -error);
 	if (length > sizeof(value))
 		length = sizeof(value);
 	error = socket_getsockopt_common(socket, (int)args[1], (int)args[2],
 	    value, &length);
-	if (error == EOPNOTSUPP && socket->ops != NULL &&
+	if (error == ENOPROTOOPT && socket->ops != NULL &&
 	    socket->ops->getsockopt != NULL)
 		error = socket->ops->getsockopt(socket, (int)args[1],
 		    (int)args[2], value, &length);
@@ -497,7 +513,7 @@ sys_getsockopt_call(const uintptr_t args[6])
 		error = copyout(value, args[3], length);
 	if (error == 0)
 		error = copyout(&length, args[4], sizeof(length));
-	return socket_result(socket, error == 0 ? 0 : -error);
+	return socket_result(&reference, error == 0 ? 0 : -error);
 }
 
 static int
@@ -644,6 +660,8 @@ static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6])
 	}
 	result = (intptr_t)done;
 out:
+	if (result > 0 && file->f_inode != NULL)
+		(void)vfs_clear_setid_on_write(file->f_inode, process->cred);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -745,12 +763,12 @@ static intptr_t sys_chdir_call(const uintptr_t args[6])
 static intptr_t sys_getcwd_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	const char *path;
+	char path[PATH_MAX];
 	size_t length;
 	int error;
 	if (process == NULL || process->cwdi == NULL) return -EINVAL;
-	path = fs_getcwd(process->cwdi);
-	if (path == NULL) return -ENOENT;
+	error = fs_getcwd(process->cwdi, path, sizeof(path));
+	if (error != 0) return -error;
 	length = strlen(path) + 1U;
 	if (length > args[1]) return -ERANGE;
 	error = copyout(path, args[0], length);
@@ -923,19 +941,34 @@ static intptr_t sys_ioctl_call(const uintptr_t args[6])
 static intptr_t sys_clock_gettime_call(const uintptr_t args[6])
 {
 	struct timespec time;
-	uint64_t ticks;
-	int error;
-	if ((clockid_t)args[0] == CLOCK_MONOTONIC) {
-		ticks = sched_ticks();
-		time.tv_sec = (time_t)(ticks / CLOCK_HZ);
-		time.tv_nsec = (long)((ticks % CLOCK_HZ) *
-			(1000000000UL / CLOCK_HZ));
-	} else if ((clockid_t)args[0] == CLOCK_REALTIME) {
-		zedbsd_clock_realtime(&time.tv_sec, &time.tv_nsec);
-	} else {
-		return -EINVAL;
-	}
+	int error = kern_clock_gettime((clockid_t)args[0], &time);
+	if (error != 0) return -error;
 	error = copyout(&time, args[1], sizeof(time));
+	return error == 0 ? 0 : -error;
+}
+
+static intptr_t sys_clock_getres_call(const uintptr_t args[6])
+{
+	struct timespec resolution;
+	int error = kern_clock_getres((clockid_t)args[0],
+	    args[1] == 0 ? NULL : &resolution);
+	if (error == 0 && args[1] != 0)
+		error = copyout(&resolution, args[1], sizeof(resolution));
+	return error == 0 ? 0 : -error;
+}
+
+static intptr_t sys_clock_settime_call(const uintptr_t args[6])
+{
+	struct process *process = current_process();
+	struct timespec requested;
+	int error;
+
+	if (process == NULL || process->cred == NULL)
+		return -EINVAL;
+	error = copyin(args[1], &requested, sizeof(requested));
+	if (error == 0)
+		error = kern_clock_settime((clockid_t)args[0], &requested,
+		    process->cred);
 	return error == 0 ? 0 : -error;
 }
 
@@ -946,21 +979,20 @@ static intptr_t sys_nanosleep_call(const uintptr_t args[6])
 	uint64_t ticks, deadline, left;
 	int error = copyin(args[0], &request, sizeof(request));
 	if (error != 0) return -error;
-	if (request.tv_sec < 0 || request.tv_nsec < 0 || request.tv_nsec >= 1000000000L)
-		return -EINVAL;
-	ticks = (uint64_t)request.tv_sec * CLOCK_HZ +
-		((uint64_t)request.tv_nsec * CLOCK_HZ + 999999999ULL) / 1000000000ULL;
+	error = kern_duration_to_ticks_ceil(&request, &ticks);
+	if (error != 0) return -error;
 	if (ticks == 0) return 0;
 	if (signal_pending_unblocked(curthread))
 		return -EINTR;
-	deadline = sched_ticks() + ticks;
+	error = kern_deadline_after(sched_ticks(), ticks, &deadline);
+	if (error != 0) return -error;
 	sched_sleep(deadline);
 	if (signal_pending_unblocked(curthread) && sched_ticks() < deadline) {
-		left = deadline - sched_ticks();
+		left = kern_deadline_remaining(sched_ticks(), deadline);
 		if (args[1] != 0) {
-			remaining.tv_sec = (time_t)(left / CLOCK_HZ);
-			remaining.tv_nsec = (long)((left % CLOCK_HZ) *
-			    (1000000000UL / CLOCK_HZ));
+			remaining.tv_sec = (time_t)(left / KERN_CLOCK_HZ);
+			remaining.tv_nsec = (long)((left % KERN_CLOCK_HZ) *
+			    (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ));
 			error = copyout(&remaining, args[1], sizeof(remaining));
 			if (error != 0)
 				return -error;
@@ -1077,6 +1109,8 @@ sys_positional_call(const uintptr_t args[6], int writing)
 copy_error:
 	result = done != 0 ? (intptr_t)done : -error;
 out:
+	if (writing && result > 0 && file->f_inode != NULL)
+		(void)vfs_clear_setid_on_write(file->f_inode, process->cred);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -1235,6 +1269,8 @@ sys_truncate_call(const uintptr_t args[6], int by_fd)
 	else
 		error = inode_truncate(inode, length);
 	if (error == 0)
+		error = vfs_clear_setid_on_write(inode, process->cred);
+	if (error == 0)
 		vm_object_truncate_inode(inode, length);
 	if (!by_fd)
 		path_release(&path);
@@ -1273,19 +1309,28 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 	    storage);
 	if (error != 0)
 		goto out_held;
-	error = vfs_access(parent.p_inode, process->cred, W_OK | X_OK);
-	if (error != 0) {
-		path_release(&parent);
-		goto out_held;
-	}
-	if (number == ZEDBSD_SYS_mkdir)
-		error = inode_mkdir(parent.p_inode, &name,
-		    ((mode_t)option & 07777U) & ~process->umask, &created);
-	else if (number == ZEDBSD_SYS_unlink)
-		error = inode_unlink(parent.p_inode, &name);
-	else if (number == ZEDBSD_SYS_rmdir)
-		error = inode_rmdir(parent.p_inode, &name);
-	else {
+	if (number == ZEDBSD_SYS_mkdir) {
+		error = vfs_may_create(parent.p_inode, process->cred);
+		if (error == 0)
+			error = inode_mkdir(parent.p_inode, &name,
+			    ((mode_t)option & 07777U) & ~process->umask, &created);
+	} else if (number == ZEDBSD_SYS_unlink ||
+	    number == ZEDBSD_SYS_rmdir) {
+		struct inode *victim;
+
+		error = inode_lookup(parent.p_inode, &name, &victim);
+		if (error == 0) {
+			error = vfs_may_remove(parent.p_inode, victim,
+			    process->cred);
+			inode_release(victim);
+		}
+		if (error == 0)
+			error = number == ZEDBSD_SYS_unlink ?
+			    inode_unlink(parent.p_inode, &name) :
+			    inode_rmdir(parent.p_inode, &name);
+	} else {
+		struct inode *source = NULL, *target = NULL;
+
 		error = copyinstr(new_address, other_pathname,
 		    sizeof(other_pathname), NULL);
 		if (error == 0 && other_pathname[0] == '/')
@@ -1300,14 +1345,26 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 				other_valid = 1;
 		}
 		if (error == 0)
-			error = vfs_access(other_parent.p_inode, process->cred,
-			    W_OK | X_OK);
+			error = inode_lookup(parent.p_inode, &name, &source);
+		if (error == 0) {
+			int target_error = inode_lookup(other_parent.p_inode,
+			    &other_name, &target);
+			if (target_error != 0 && target_error != ENOENT)
+				error = target_error;
+		}
+		if (error == 0)
+			error = vfs_may_rename(parent.p_inode, source,
+			    other_parent.p_inode, target, process->cred);
 		if (error == 0) {
 			error = inode_rename(parent.p_inode, &name,
 			    other_parent.p_inode, &other_name, 0);
 			if (error == 0)
 				namecache_remove(other_parent.p_inode, &other_name);
 		}
+		if (target != NULL)
+			inode_release(target);
+		if (source != NULL)
+			inode_release(source);
 		if (other_valid)
 			path_release(&other_parent);
 		if (other_held != NULL)
@@ -1594,22 +1651,6 @@ sys_chmod_common(int dirfd, uintptr_t pathname, int fd, mode_t mode, int flags)
 	return error == 0 ? 0 : -error;
 }
 
-static int
-inode_chown_allowed(const struct inode *inode, const struct ucred *cred,
-		    uid_t uid, gid_t gid)
-{
-	if (inode == NULL || cred == NULL)
-		return 0;
-	if (cred_is_superuser(cred))
-		return 1;
-	if (cred->euid != inode->i_uid)
-		return 0;
-	if (uid != (uid_t)-1 && uid != inode->i_uid)
-		return 0;
-	return gid == (gid_t)-1 || gid == inode->i_gid ||
-		cred_in_group(cred, gid);
-}
-
 static SYSCALL_EXT intptr_t
 sys_chown_common(int dirfd, uintptr_t pathname, int fd, uid_t uid, gid_t gid,
 		 int flags)
@@ -1640,9 +1681,8 @@ sys_chown_common(int dirfd, uintptr_t pathname, int fd, uid_t uid, gid_t gid,
 			return -error;
 		inode = path.p_inode;
 	}
-	if (!inode_chown_allowed(inode, process->cred, uid, gid))
-		error = EPERM;
-	else {
+	error = vfs_may_chown(inode, process->cred, uid, gid);
+	if (error == 0) {
 		error = inode_getattr(inode, &status);
 		if (error == 0 && uid != (uid_t)-1 && uid != status.st_uid) {
 			status.st_uid = uid;
@@ -1832,7 +1872,7 @@ sys_linkat_call(const uintptr_t args[6])
 	if (error == 0)
 		parent_valid = 1;
 	if (error == 0)
-		error = vfs_access(parent.p_inode, process->cred, W_OK | X_OK);
+		error = vfs_may_create(parent.p_inode, process->cred);
 	if (error == 0)
 		error = inode_link(parent.p_inode, &name, target.p_inode);
 	if (error == 0)
@@ -1871,7 +1911,7 @@ sys_symlinkat_call(const uintptr_t args[6])
 			parent_valid = 1;
 	}
 	if (error == 0)
-		error = vfs_access(parent.p_inode, process->cred, W_OK | X_OK);
+		error = vfs_may_create(parent.p_inode, process->cred);
 	if (error == 0)
 		error = inode_symlink(parent.p_inode, &name, target, &created);
 	if (error == 0)
@@ -1934,7 +1974,10 @@ sys_sigaction_call(const uintptr_t args[6])
 			return -error;
 		if (signo == SIGKILL || signo == SIGSTOP)
 			return -EINVAL;
-		if ((action.sa_flags & ~SA_RESTART) != 0 ||
+		if ((action.sa_flags & ~(SA_RESTART | SA_NOCLDSTOP |
+		    SA_NOCLDWAIT | SA_NODEFER | SA_RESETHAND)) != 0 ||
+		    (signo != SIGCHLD && (action.sa_flags &
+		    (SA_NOCLDSTOP | SA_NOCLDWAIT)) != 0) ||
 		    (action.sa_handler > 1U &&
 		     !vmspace_user_range_valid((uintptr_t)action.sa_handler, 1)) ||
 		    (action.sa_handler > 1U &&
@@ -2022,12 +2065,25 @@ static intptr_t
 sys_sigreturn_call(const uintptr_t args[6])
 {
 	intptr_t restored;
+	uint32_t restart_number;
+	uintptr_t restart_args[6];
+	unsigned restart;
+
 	if (curthread == NULL || args[0] == 0 ||
-	    (uint32_t)args[0] != curthread->signal_token ||
-	    hal_task_signal_return((uint32_t)args[0], &restored) != 0)
+	    (uint32_t)args[0] != curthread->signal_token)
+		return -EINVAL;
+	restart = curthread->syscall_restart_on_return;
+	restart_number = curthread->syscall_restart_number;
+	memcpy(restart_args, curthread->syscall_restart_args,
+	    sizeof(restart_args));
+	if ((restart ? hal_task_signal_restart((uint32_t)args[0],
+	    restart_number, restart_args, &restored) :
+	    hal_task_signal_return((uint32_t)args[0], &restored)) != 0)
 		return -EINVAL;
 	curthread->signal_mask = curthread->signal_saved_mask;
 	curthread->signal_token = 0;
+	curthread->syscall_restart_on_return = 0;
+	curthread->syscall_restart_valid = 0;
 	return restored;
 }
 
@@ -2334,7 +2390,8 @@ sys_wait_call(const uintptr_t args[6])
 	return pid;
 }
 
-static intptr_t syscall_dispatch(uint32_t number, const uintptr_t args[6])
+static intptr_t
+syscall_dispatch_body(uint32_t number, const uintptr_t args[6])
 {
 	switch (number) {
 	case ZEDBSD_SYS_exit: exit1((int)args[0]);
@@ -2353,6 +2410,8 @@ static intptr_t syscall_dispatch(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_mprotect: return sys_mprotect_call(args);
 	case ZEDBSD_SYS_ioctl: return sys_ioctl_call(args);
 	case ZEDBSD_SYS_clock_gettime: return sys_clock_gettime_call(args);
+	case ZEDBSD_SYS_clock_getres: return sys_clock_getres_call(args);
+	case ZEDBSD_SYS_clock_settime: return sys_clock_settime_call(args);
 	case ZEDBSD_SYS_nanosleep: return sys_nanosleep_call(args);
 	case ZEDBSD_SYS_spawn: return sys_spawn_call(args);
 	case ZEDBSD_SYS_wait: return sys_wait_call(args);
@@ -2460,6 +2519,43 @@ static intptr_t syscall_dispatch(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_sigsuspend: return sys_sigsuspend_call(args);
 	default: return -ENOSYS;
 	}
+}
+
+static int
+syscall_restartable(uint32_t number)
+{
+	switch (number) {
+	case ZEDBSD_SYS_read:
+	case ZEDBSD_SYS_write:
+	case ZEDBSD_SYS_readv:
+	case ZEDBSD_SYS_writev:
+	case ZEDBSD_SYS_waitpid:
+	case ZEDBSD_SYS_accept:
+	case ZEDBSD_SYS_recvfrom:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static intptr_t
+syscall_dispatch(uint32_t number, const uintptr_t args[6])
+{
+	struct thread *thread = curthread;
+	intptr_t result;
+
+	if (thread != NULL && number != ZEDBSD_SYS_sigreturn) {
+		thread->syscall_restart_number = number;
+		memcpy(thread->syscall_restart_args, args,
+		    sizeof(thread->syscall_restart_args));
+		thread->syscall_restart_valid = 0;
+		thread->syscall_restart_on_return = 0;
+	}
+	result = syscall_dispatch_body(number, args);
+	if (thread != NULL && number != ZEDBSD_SYS_sigreturn)
+		thread->syscall_restart_valid = result == -EINTR &&
+		    syscall_restartable(number);
+	return result;
 }
 
 void syscall_init(void)

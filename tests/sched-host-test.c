@@ -1,6 +1,7 @@
 #include "kern/process.h"
 #include "kern/sched.h"
 #include "kern/thread.h"
+#include "kern/lock.h"
 
 #include <assert.h>
 #include <stdarg.h>
@@ -27,6 +28,8 @@ hal_irq_disable(void)
 void hal_irq_enable(void) { irq_enabled = 1; }
 void hal_reschedule_on_interrupt_return(void) { reschedule_requests++; }
 void hal_cpu_idle(void) { irq_enabled = 0; }
+void spin_lock(struct spinlock *lock) { (void)lock; }
+void spin_unlock(struct spinlock *lock) { (void)lock; }
 int kern_boot_pending(void) { return 0; }
 void kern_boot_execute_pending(void) { abort(); }
 

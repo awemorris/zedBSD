@@ -18,6 +18,7 @@ struct mem_node {
 	struct inode *inode;
 	struct mem_node *parent;
 	const char *name;
+	char owned_name[NAME_MAX + 1U];
 	const char *contents;
 	char link_target[64];
 };
@@ -149,6 +150,39 @@ static int mem_symlink(struct inode *directory,
 	return 0;
 }
 
+static int
+mem_rename(struct inode *old_directory, const struct componentname *old_name,
+	   struct inode *new_directory, const struct componentname *new_name,
+	   unsigned flags)
+{
+	struct mem_node *old_parent = old_directory->i_data;
+	struct mem_node *new_parent = new_directory->i_data;
+	struct mem_fs *fs = old_directory->i_mount->m_data;
+	struct mem_node *source = NULL;
+	unsigned i;
+
+	if (flags != 0 || new_name->cn_namelen > NAME_MAX)
+		return EINVAL;
+	for (i = 0; i < MEM_NODE_MAX; i++) {
+		if (fs->nodes[i].parent == old_parent &&
+		    fs->nodes[i].name != NULL &&
+		    component_equal(old_name, fs->nodes[i].name))
+			source = &fs->nodes[i];
+		if (fs->nodes[i].parent == new_parent &&
+		    fs->nodes[i].name != NULL &&
+		    component_equal(new_name, fs->nodes[i].name))
+			return EEXIST;
+	}
+	if (source == NULL)
+		return ENOENT;
+	memcpy(source->owned_name, new_name->cn_nameptr,
+	    new_name->cn_namelen);
+	source->owned_name[new_name->cn_namelen] = '\0';
+	source->name = source->owned_name;
+	source->parent = new_parent;
+	return 0;
+}
+
 static ssize_t mem_readlink(struct inode *inode, char *buffer, size_t capacity)
 {
 	struct mem_node *node = inode->i_data;
@@ -161,6 +195,7 @@ static ssize_t mem_readlink(struct inode *inode, char *buffer, size_t capacity)
 
 static const struct inode_ops mem_iops = {
 	.lookup = mem_lookup,
+	.rename = mem_rename,
 	.link = mem_link,
 	.symlink = mem_symlink,
 	.readlink = mem_readlink,
@@ -255,6 +290,7 @@ int main(void)
 	struct file *file;
 	struct dirent entry;
 	char data[32] = {0};
+	char cwd[ZEDBSD_PATH_MAX];
 	int eof;
 	unsigned lookups;
 
@@ -330,11 +366,34 @@ int main(void)
 	inode_release(inode); inode_release(again);
 
 	CHECK(fs_chdir(&context, "/disk1/dir") == 0);
-	CHECK(!strcmp(fs_getcwd(&context), "/disk1/dir"));
+	CHECK(fs_getcwd(&context, cwd, sizeof(cwd)) == 0);
+	CHECK(!strcmp(cwd, "/disk1/dir"));
 	CHECK(namei_at(&context, "nested", &inode) == 0);
 	inode_release(inode);
+	{
+		struct componentname old_name = {
+			.cn_nameptr = "dir", .cn_namelen = 3
+		};
+		struct componentname new_name = {
+			.cn_nameptr = "moved", .cn_namelen = 5
+		};
+		struct inode *root = mount_find("/disk1")->m_root;
+		uint64_t before = root->i_dirseq;
+
+		CHECK(inode_rename(root, &old_name, root, &new_name, 0) == 0);
+		CHECK(root->i_dirseq == before + 1U);
+		CHECK(fs_getcwd(&context, cwd, sizeof(cwd)) == 0);
+		CHECK(!strcmp(cwd, "/disk1/moved"));
+		CHECK(namei_at(&context, "nested", &inode) == 0);
+		inode_release(inode);
+		CHECK(namei_at(&context, "/disk1/dir", &inode) == ENOENT);
+		CHECK(namei_at(&context, "/disk1/moved", &inode) == 0);
+		inode_release(inode);
+	}
 	CHECK(fs_chdir(&context, "../..") == 0);
-	CHECK(!strcmp(fs_getcwd(&context), "/"));
+	CHECK(fs_getcwd(&context, cwd, sizeof(cwd)) == 0);
+	CHECK(!strcmp(cwd, "/"));
+	CHECK(fs_getcwd(&context, cwd, 1) == ERANGE);
 
 	CHECK(file_openat(&context, "/disk2/hello", O_RDONLY, 0, &file) == 0);
 	CHECK(file_read(file, data, sizeof(data)) == 11);

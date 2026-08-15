@@ -29,6 +29,10 @@ typedef uint32_t sigset_t;
 #define SIG_UNBLOCK 1
 #define SIG_SETMASK 2
 #define SA_RESTART 0x0001U
+#define SA_NOCLDSTOP 0x0002U
+#define SA_NOCLDWAIT 0x0004U
+#define SA_NODEFER 0x0008U
+#define SA_RESETHAND 0x0010U
 #define SIG_DFL 0ULL
 #define SIG_IGN 1ULL
 struct sigaction {

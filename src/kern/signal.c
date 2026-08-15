@@ -124,6 +124,8 @@ signal_fork(struct process *child, const struct process *parent,
 	child->signal_pending = 0;
 	child_thread->signal_mask = parent_thread->signal_mask;
 	child_thread->signal_pending = 0;
+	child_thread->syscall_restart_valid = 0;
+	child_thread->syscall_restart_on_return = 0;
 }
 
 void
@@ -141,6 +143,8 @@ signal_exec(struct process *process)
 		curthread->signal_pending = 0;
 		curthread->signal_token = 0;
 		curthread->signal_suspended = 0;
+		curthread->syscall_restart_valid = 0;
+		curthread->syscall_restart_on_return = 0;
 	}
 }
 
@@ -229,7 +233,18 @@ signal_deliver_on_user_return(void)
 		thread->signal_mask = thread->signal_suspend_mask;
 		thread->signal_suspended = 0;
 	}
-	thread->signal_mask |= action->mask | SIGNAL_BIT(signo);
+	thread->syscall_restart_on_return =
+	    thread->syscall_restart_valid &&
+	    (action->flags & SA_RESTART) != 0;
+	thread->signal_mask |= action->mask;
+	if ((action->flags & SA_NODEFER) == 0)
+		thread->signal_mask |= SIGNAL_BIT(signo);
+	if ((action->flags & SA_RESETHAND) != 0) {
+		action->handler = (uintptr_t)SIG_DFL;
+		action->mask = 0;
+		action->flags = 0;
+		action->restorer = 0;
+	}
 	if (hal_task_signal_enter(action->handler, sp, signo, restorer,
 	    token) != 0)
 		exit1_signal(SIGSEGV);

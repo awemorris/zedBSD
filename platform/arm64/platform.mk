@@ -40,6 +40,7 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/partition.c src/kern/mbr-partition.c src/kern/rpi4/platform.c \
 	drivers/rpi4-sdhci.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
+	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/vmspace.c \
 	src/kern/vm-object.c src/kern/vm-commit.c src/kern/filedesc.c \
 	src/kern/pipe.c src/kern/cred.c \

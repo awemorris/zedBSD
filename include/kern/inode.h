@@ -9,6 +9,7 @@
 #define ZEDBSD_KERN_INODE_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -22,6 +23,15 @@
 #define S_IFDIR  0040000U
 #define S_IFCHR  0020000U
 #define S_IFIFO  0010000U
+#endif
+#ifndef S_ISUID
+#define S_ISUID 0004000U
+#endif
+#ifndef S_ISGID
+#define S_ISGID 0002000U
+#endif
+#ifndef S_ISVTX
+#define S_ISVTX 0001000U
 #endif
 
 struct componentname;
@@ -105,6 +115,8 @@ struct inode {
 	struct inode_time i_atime;
 	struct inode_time i_mtime;
 	struct inode_time i_ctime;
+	/* Changes whenever this directory's visible namespace is committed. */
+	uint64_t i_dirseq;
 	unsigned i_flags;
 	struct inode *i_hash_next;
 	struct inode *i_mount_next;
@@ -140,6 +152,7 @@ ssize_t inode_readlink(struct inode *, char *, size_t);
 int inode_truncate(struct inode *, off_t);
 int inode_sync(struct inode *);
 void inode_touch(struct inode *, unsigned);
+void inode_dir_changed(struct inode *);
 
 mode_t inode_type_mode(enum inode_type type);
 

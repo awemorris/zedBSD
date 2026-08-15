@@ -88,3 +88,78 @@ vfs_access(const struct inode *inode, const struct ucred *cred, int requested)
 		return EACCES;
 	return 0;
 }
+
+int
+vfs_may_create(const struct inode *parent, const struct ucred *cred)
+{
+	if (parent == NULL || cred == NULL)
+		return EINVAL;
+	if (parent->i_type != INODE_DIR)
+		return ENOTDIR;
+	return vfs_access(parent, cred, W_OK | X_OK);
+}
+
+int
+vfs_may_remove(const struct inode *parent, const struct inode *victim,
+	       const struct ucred *cred)
+{
+	int error;
+
+	if (parent == NULL || victim == NULL || cred == NULL)
+		return EINVAL;
+	error = vfs_may_create(parent, cred);
+	if (error != 0)
+		return error;
+	if ((parent->i_mode & S_ISVTX) != 0 && !cred_is_superuser(cred) &&
+	    cred->euid != parent->i_uid && cred->euid != victim->i_uid)
+		return EPERM;
+	return 0;
+}
+
+int
+vfs_may_rename(const struct inode *old_parent, const struct inode *source,
+	       const struct inode *new_parent, const struct inode *target,
+	       const struct ucred *cred)
+{
+	int error;
+
+	error = vfs_may_remove(old_parent, source, cred);
+	if (error != 0)
+		return error;
+	return target != NULL ? vfs_may_remove(new_parent, target, cred) :
+		vfs_may_create(new_parent, cred);
+}
+
+int
+vfs_may_chown(const struct inode *inode, const struct ucred *cred,
+	      uid_t uid, gid_t gid)
+{
+	if (inode == NULL || cred == NULL)
+		return EINVAL;
+	if (cred_is_superuser(cred))
+		return 0;
+	if (cred->euid != inode->i_uid ||
+	    (uid != (uid_t)-1 && uid != inode->i_uid) ||
+	    (gid != (gid_t)-1 && gid != inode->i_gid &&
+	     !cred_in_group(cred, gid)))
+		return EPERM;
+	return 0;
+}
+
+int
+vfs_clear_setid_on_write(struct inode *inode, const struct ucred *cred)
+{
+	struct stat status;
+	int error;
+
+	if (inode == NULL || cred == NULL)
+		return EINVAL;
+	if (cred_is_superuser(cred) || inode->i_type != INODE_REG ||
+	    (inode->i_mode & (S_ISUID | S_ISGID)) == 0)
+		return 0;
+	error = inode_getattr(inode, &status);
+	if (error != 0)
+		return error;
+	status.st_mode &= ~(mode_t)(S_ISUID | S_ISGID);
+	return inode_setattr(inode, &status, INODE_ATTR_MODE);
+}

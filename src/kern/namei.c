@@ -1,9 +1,11 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/namei.h"
 #include "kern/cred.h"
+#include "kern/file.h"
 #include "kern/mount.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -291,8 +293,6 @@ cwdinfo_init(struct cwdinfo *context, const struct path *root)
 	context->usecount = 1;
 	path_set(&context->root, root->p_mount, root->p_inode);
 	path_set(&context->cwd, root->p_mount, root->p_inode);
-	context->cwd_path[0] = '/';
-	context->cwd_path[1] = '\0';
 	return 0;
 }
 
@@ -306,69 +306,10 @@ cwdinfo_destroy(struct cwdinfo *context)
 	memset(context, 0, sizeof(*context));
 }
 
-static int
-normalized_path(const struct cwdinfo *context, const char *path,
-		char output[ZEDBSD_PATH_MAX])
-{
-	char joined[ZEDBSD_PATH_MAX];
-	size_t in = 0, out = 1, length, base;
-	int error = path_length(path, &length);
-	if (error != 0)
-		return error;
-	if (path[0] == '/') {
-		if (length >= sizeof(joined))
-			return ENAMETOOLONG;
-		memcpy(joined, path, length + 1U);
-	} else {
-		base = strlen(context->cwd_path);
-		if (base + (base > 1 ? 1U : 0U) + length >= sizeof(joined))
-			return ENAMETOOLONG;
-		memcpy(joined, context->cwd_path, base);
-		if (base > 1)
-			joined[base++] = '/';
-		memcpy(joined + base, path, length + 1U);
-		length += base;
-	}
-	output[0] = '/';
-	while (in < length) {
-		size_t start, component_length;
-		while (in < length && joined[in] == '/')
-			in++;
-		if (in == length)
-			break;
-		start = in;
-		while (in < length && joined[in] != '/')
-			in++;
-		component_length = in - start;
-		if (component_is(joined + start, component_length, "."))
-			continue;
-		if (component_is(joined + start, component_length, "..")) {
-			if (out > 1) {
-				out--;
-				while (out > 1 && output[out - 1U] != '/')
-					out--;
-			}
-			continue;
-		}
-		if (out > 1) {
-			if (out + 1U >= ZEDBSD_PATH_MAX)
-				return ENAMETOOLONG;
-			output[out++] = '/';
-		}
-		if (component_length >= ZEDBSD_PATH_MAX - out)
-			return ENAMETOOLONG;
-		memcpy(output + out, joined + start, component_length);
-		out += component_length;
-	}
-	output[out] = '\0';
-	return 0;
-}
-
 int
 fs_chdir(struct cwdinfo *context, const char *path)
 {
 	struct path directory;
-	char normalized[ZEDBSD_PATH_MAX];
 	int error = namei_path_at(context, path, &directory);
 	if (error != 0)
 		return error;
@@ -381,20 +322,168 @@ fs_chdir(struct cwdinfo *context, const char *path)
 		path_release(&directory);
 		return error;
 	}
-	error = normalized_path(context, path, normalized);
-	if (error != 0) {
-		path_release(&directory);
-		return error;
-	}
 	path_release(&context->cwd);
 	context->cwd = directory;
-	strcpy(context->cwd_path, normalized);
 	return 0;
 }
 
-const char *
-fs_getcwd(const struct cwdinfo *context)
+static int
+child_path(const struct path *parent, const char *name, struct path *result)
 {
-	return context != NULL && context->cwd.p_inode != NULL ?
-		context->cwd_path : NULL;
+	struct componentname component;
+	struct inode *inode;
+	int error;
+
+	component.cn_nameptr = name;
+	component.cn_namelen = strlen(name);
+	component.cn_flags = COMPONENT_LAST;
+	error = mount_lookup_child(parent, &component, result);
+	if (error == 0)
+		return 0;
+	if (error != ENOENT)
+		return error;
+	error = inode_lookup(parent->p_inode, &component, &inode);
+	if (error != 0)
+		return error;
+	path_set(result, parent->p_mount, inode);
+	inode_release(inode);
+	return 0;
+}
+
+static int
+find_child_name(const struct path *parent, const struct path *child,
+		char name[NAME_MAX + 1U])
+{
+	struct file *directory;
+	struct dirent entry;
+	uint64_t sequence;
+	int eof = 0, error;
+
+	sequence = parent->p_inode->i_dirseq;
+	error = file_open_resolved(parent, O_RDONLY | O_DIRECTORY, &directory);
+	if (error != 0)
+		return error;
+	while (!eof) {
+		struct path candidate;
+
+		error = file_readdir(directory, &entry, &eof);
+		if (error != 0)
+			break;
+		if (eof)
+			break;
+		if (entry.d_name[0] == '\0' || !strcmp(entry.d_name, ".") ||
+		    !strcmp(entry.d_name, ".."))
+			continue;
+		error = child_path(parent, entry.d_name, &candidate);
+		if (error == ENOENT)
+			continue;
+		if (error != 0)
+			break;
+		if (path_equal(&candidate, child)) {
+			strcpy(name, entry.d_name);
+			path_release(&candidate);
+			error = 0;
+			goto out;
+		}
+		path_release(&candidate);
+	}
+	if (error == 0)
+		error = ENOENT;
+out:
+	(void)file_close(directory);
+	if (parent->p_inode->i_dirseq != sequence)
+		return EAGAIN;
+	return error;
+}
+
+static int
+getcwd_once(const struct cwdinfo *context, char *buffer, size_t capacity)
+{
+	struct componentname dotdot = { "..", 2, COMPONENT_DOTDOT };
+	struct path current;
+	char reverse[ZEDBSD_PATH_MAX];
+	size_t position = sizeof(reverse) - 1U;
+	unsigned depth = 0;
+	int error = 0;
+
+	reverse[position] = '\0';
+	path_set(&current, context->cwd.p_mount, context->cwd.p_inode);
+	while (!path_equal(&current, &context->root)) {
+		struct path parent;
+		char name[NAME_MAX + 1U];
+		size_t length;
+
+		if (++depth > ZEDBSD_PATH_MAX / 2U) {
+			error = ELOOP;
+			break;
+		}
+		error = mount_cross_path_parent(&current, &parent);
+		if (error == 0) {
+			length = strlen(current.p_mount->m_name);
+			if (length == 0 || length > NAME_MAX) {
+				path_release(&parent);
+				error = ENOENT;
+				break;
+			}
+			memcpy(name, current.p_mount->m_name, length + 1U);
+		} else if (error == ENOENT) {
+			struct inode *parent_inode;
+
+			error = inode_lookup(current.p_inode, &dotdot,
+			    &parent_inode);
+			if (error != 0)
+				break;
+			path_set(&parent, current.p_mount, parent_inode);
+			inode_release(parent_inode);
+			if (path_equal(&parent, &current)) {
+				path_release(&parent);
+				error = ENOENT;
+				break;
+			}
+			error = find_child_name(&parent, &current, name);
+			if (error != 0) {
+				path_release(&parent);
+				break;
+			}
+			length = strlen(name);
+		} else {
+			break;
+		}
+		if (length + 1U > position) {
+			path_release(&parent);
+			error = ERANGE;
+			break;
+		}
+		position -= length;
+		memcpy(reverse + position, name, length);
+		reverse[--position] = '/';
+		path_release(&current);
+		current = parent;
+	}
+	path_release(&current);
+	if (error != 0)
+		return error;
+	if (position == sizeof(reverse) - 1U)
+		reverse[--position] = '/';
+	if (sizeof(reverse) - position > capacity)
+		return ERANGE;
+	memcpy(buffer, reverse + position, sizeof(reverse) - position);
+	return 0;
+}
+
+int
+fs_getcwd(const struct cwdinfo *context, char *buffer, size_t capacity)
+{
+	unsigned attempt;
+	int error;
+
+	if (context == NULL || context->root.p_inode == NULL ||
+	    context->cwd.p_inode == NULL || buffer == NULL || capacity == 0)
+		return EINVAL;
+	for (attempt = 0; attempt < 8U; attempt++) {
+		error = getcwd_once(context, buffer, capacity);
+		if (error != EAGAIN)
+			return error;
+	}
+	return EAGAIN;
 }

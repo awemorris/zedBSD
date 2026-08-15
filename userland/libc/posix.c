@@ -19,6 +19,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -252,6 +253,8 @@ int truncate(const char *path, off_t length) { return (int)call(ZEDBSD_SYS_trunc
 int ftruncate(int fd, off_t length) { return (int)call(ZEDBSD_SYS_ftruncate, fd, length, 0, 0, 0, 0); }
 mode_t umask(mode_t mask) { return (mode_t)call(ZEDBSD_SYS_umask, mask, 0, 0, 0, 0, 0); }
 int clock_gettime(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_gettime, id, (uintptr_t)ts, 0, 0, 0, 0); }
+int clock_getres(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_getres, id, (uintptr_t)ts, 0, 0, 0, 0); }
+int clock_settime(clockid_t id, const struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_settime, id, (uintptr_t)ts, 0, 0, 0, 0); }
 int nanosleep(const struct timespec *request, struct timespec *remain) {
 	return (int)call(ZEDBSD_SYS_nanosleep, (uintptr_t)request,
 		(uintptr_t)remain, 0, 0, 0, 0);
@@ -413,6 +416,15 @@ time_t time(time_t *result) {
 	if (result != NULL)
 		*result = value;
 	return value;
+}
+int gettimeofday(struct timeval *result, void *timezone) {
+	struct timespec now;
+	(void)timezone;
+	if (result == NULL) { errno = EINVAL; return -1; }
+	if (clock_gettime(CLOCK_REALTIME, &now) != 0) return -1;
+	result->tv_sec = now.tv_sec;
+	result->tv_usec = now.tv_nsec / 1000L;
+	return 0;
 }
 void exit(int status) { (void)fflush(NULL); _exit(status); }
 void zedbsd_libc_panic(const char *message) { (void)write(2, message, strlen(message)); (void)write(2, "\n", 1); _exit(127); }

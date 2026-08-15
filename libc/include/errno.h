@@ -61,5 +61,11 @@ extern int zedbsd_errno;
 #define ELOOP 50
 #define EFBIG 51
 #define ENOTTY 52
+#define EINPROGRESS 53
+#define EALREADY 54
+#define ECONNABORTED 55
+#define ENOPROTOOPT 56
+
+#define EWOULDBLOCK EAGAIN
 
 #endif

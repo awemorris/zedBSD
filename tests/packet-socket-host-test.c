@@ -39,6 +39,13 @@ sched_ticks(void)
 	return ticks++;
 }
 
+int kern_deadline_after(uint64_t now, uint64_t delta, uint64_t *deadline)
+{
+	if (now > UINT64_MAX - delta) return EOVERFLOW;
+	*deadline = now + delta;
+	return 0;
+}
+
 static struct packet_buf *transmitted;
 
 int net_input_enqueue(struct net_device *device, struct packet_buf *packet)

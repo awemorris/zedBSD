@@ -55,6 +55,7 @@ struct process {
 	sigset_t signal_pending;
 	enum process_state state;
 	unsigned flags;
+	unsigned did_exec;
 	unsigned thread_count;
 	int exit_status;
 	int wait_status;

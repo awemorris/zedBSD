@@ -82,10 +82,11 @@ udp_bind(struct socket *socket, const struct sockaddr *address,
 
 static int
 udp_connect(struct socket *socket, const struct sockaddr *address,
-	    socklen_t length)
+	    socklen_t length, unsigned io_flags)
 {
 	struct udp_endpoint *endpoint = udp_endpoint(socket);
 	int error = inet_socket_connect(&endpoint->inet, address, length);
+	(void)io_flags;
 
 	if (error == 0 && endpoint->inet.remote_port == 0)
 		error = EADDRNOTAVAIL;
@@ -109,7 +110,8 @@ udp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 	void *payload;
 	int error;
 
-	if (flags != 0 || (buffer == NULL && length != 0))
+	if ((flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) != 0 ||
+	    (buffer == NULL && length != 0))
 		return -EINVAL;
 	if (address != NULL) {
 		if (address_length < sizeof(output) || address->sa_family != AF_INET)

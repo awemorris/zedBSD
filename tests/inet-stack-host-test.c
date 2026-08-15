@@ -23,6 +23,7 @@
 static struct packet_buf *transmitted;
 static uint64_t ticks;
 static struct thread *current_thread;
+struct process;
 
 void zedbsd_assert_fail(const char *e, const char *f, int l)
 { fprintf(stderr, "%s:%d: assertion failed: %s\n", f, l, e); abort(); }
@@ -36,9 +37,21 @@ int signal_pending_unblocked(const struct thread *thread)
 	(void)thread;
 	return 0;
 }
+int signal_send_process(struct process *process, int signal)
+{
+	(void)process;
+	(void)signal;
+	return 0;
+}
 void sched_sleep(uint64_t deadline) { ticks = deadline; }
 void sched_wakeup(struct thread *thread) { (void)thread; }
 uint64_t sched_ticks(void) { return ticks++; }
+int kern_deadline_after(uint64_t now, uint64_t delta, uint64_t *deadline)
+{
+	if (now > UINT64_MAX - delta) return EOVERFLOW;
+	*deadline = now + delta;
+	return 0;
+}
 int copyin(uintptr_t source, void *destination, size_t length)
 { memcpy(destination, (const void *)source, length); return 0; }
 int copyout(const void *source, uintptr_t destination, size_t length)
@@ -201,7 +214,7 @@ int main(void)
 	static const uint8_t peer_mac[6] = { 0x52,0x54,0,0xaa,0xbb,0xcc };
 	const uint32_t local_ip = 0x0a00020fU, peer_ip = 0x0a000202U;
 	struct net_device *device;
-	struct socket *control, *udp_socket, *tcp_socket;
+	struct socket *control, *udp_socket, *tcp_socket, *listener, *accepted;
 	struct sockaddr_in address;
 	char buffer[64];
 	ssize_t count;
@@ -272,7 +285,7 @@ int main(void)
 	assert(socket_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &tcp_socket) == 0);
 	address.sin_port = net_htons(80); address.sin_addr.s_addr = net_htonl(peer_ip);
 	assert(tcp_socket->ops->connect(tcp_socket, (struct sockaddr *)&address,
-	    sizeof(address)) == EAGAIN);
+	    sizeof(address), 0) == EAGAIN);
 	assert(transmitted != NULL && (transmitted->data[47] & 0x02) != 0);
 	syn_sequence = wire_get32(transmitted->data + 38);
 	tcp_local_port = wire_get16(transmitted->data + 34);
@@ -296,6 +309,35 @@ int main(void)
 	count = tcp_socket->ops->recvfrom(tcp_socket, buffer, sizeof(buffer),
 	    MSG_DONTWAIT, NULL, NULL);
 	assert(count == 2 && !memcmp(buffer, "OK", 2));
+	assert(tcp_socket->ops->shutdown(tcp_socket, SHUT_RD) == 0);
+	assert(tcp_socket->ops->recvfrom(tcp_socket, buffer, sizeof(buffer),
+	    MSG_DONTWAIT, NULL, NULL) == 0);
+	assert(tcp_socket->ops->shutdown(tcp_socket, SHUT_WR) == 0);
+	assert(transmitted != NULL);
+	packet_buf_free(transmitted);
+	transmitted = NULL;
+	assert(tcp_socket->ops->sendto(tcp_socket, "x", 1, MSG_NOSIGNAL,
+	    NULL, 0) == -EPIPE);
+
+	assert(socket_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &listener) == 0);
+	memset(&address, 0, sizeof(address)); address.sin_family = AF_INET;
+	address.sin_port = net_htons(8080);
+	assert(listener->ops->bind(listener, (struct sockaddr *)&address,
+	    sizeof(address)) == 0);
+	assert(listener->ops->listen(listener, 4) == 0);
+	input_tcp(device, peer_mac, peer_ip, local_ip, 50000, 8080,
+	    0x55667788U, 0, 0x02, NULL);
+	assert(transmitted != NULL && (transmitted->data[47] & 0x12) == 0x12);
+	syn_sequence = wire_get32(transmitted->data + 38);
+	packet_buf_free(transmitted); transmitted = NULL;
+	input_tcp(device, peer_mac, peer_ip, local_ip, 50000, 8080,
+	    0x55667789U, syn_sequence + 1U, 0x10, NULL);
+	assert(listener->ops->accept(listener, &accepted, NULL, NULL,
+	    SOCKET_IO_NONBLOCK) == 0);
+	assert(((struct tcp_socket *)accepted)->state == TCP_ESTABLISHED);
+	socket_release(accepted);
+	if (transmitted != NULL) { packet_buf_free(transmitted); transmitted = NULL; }
+	socket_release(listener);
 
 	socket_release(tcp_socket); socket_release(udp_socket); socket_release(control);
 	if (transmitted != NULL) { packet_buf_free(transmitted); transmitted = NULL; }

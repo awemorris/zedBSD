@@ -4,11 +4,7 @@
 
 #include <stdint.h>
 
-#ifdef ZEDBSD_USER_ABI_LP64
 typedef int64_t time_t;
-#else
-typedef int32_t time_t;
-#endif
 typedef int clockid_t;
 #define CLOCK_MONOTONIC 1
 #define CLOCK_REALTIME  2
@@ -17,6 +13,8 @@ typedef int clockid_t;
 struct timespec { time_t tv_sec; long tv_nsec; };
 time_t time(time_t *result);
 int clock_gettime(clockid_t, struct timespec *);
+int clock_getres(clockid_t, struct timespec *);
+int clock_settime(clockid_t, const struct timespec *);
 int nanosleep(const struct timespec *, struct timespec *);
 
 #endif

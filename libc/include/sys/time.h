@@ -9,4 +9,6 @@ struct timeval {
 	long tv_usec;
 };
 
+int gettimeofday(struct timeval *, void *);
+
 #endif

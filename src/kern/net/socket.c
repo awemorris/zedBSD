@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/net/socket.h"
 #include "kern/net/packet-buf.h"
+#include "kern/clock.h"
 #include "kern/kmem.h"
 #include "kern/sched.h"
 #include "kern/signal.h"
@@ -11,7 +12,6 @@
 #include <string.h>
 
 #define SOCKET_FAMILY_MAX 32U
-#define SOCKET_CLOCK_HZ 100U
 
 static const struct socket_family_ops *families[SOCKET_FAMILY_MAX];
 static unsigned socket_count;
@@ -73,18 +73,37 @@ socket_setsockopt_common(struct socket *socket, int level, int option,
 	struct timeval timeout;
 	uint64_t ticks;
 
-	if (socket == NULL || level != SOL_SOCKET || option != SO_RCVTIMEO)
-		return EOPNOTSUPP;
+	if (socket == NULL || level != SOL_SOCKET)
+		return ENOPROTOOPT;
+	if (option == SO_REUSEADDR) {
+		int enabled;
+		if (value == NULL || length != sizeof(enabled)) return EINVAL;
+		memcpy(&enabled, value, sizeof(enabled));
+		socket->reuse_address = enabled != 0;
+		return 0;
+	}
+	if (option != SO_RCVTIMEO && option != SO_SNDTIMEO)
+		return ENOPROTOOPT;
 	if (value == NULL || length != sizeof(timeout))
 		return EINVAL;
 	memcpy(&timeout, value, sizeof(timeout));
 	if (timeout.tv_sec < 0 || timeout.tv_usec < 0 ||
 	    timeout.tv_usec >= 1000000)
 		return EINVAL;
-	ticks = (uint64_t)timeout.tv_sec * SOCKET_CLOCK_HZ;
-	ticks += ((uint64_t)timeout.tv_usec * SOCKET_CLOCK_HZ +
-	    999999U) / 1000000U;
-	socket->receive_timeout_ticks = ticks;
+	if ((uint64_t)timeout.tv_sec > UINT64_MAX / KERN_CLOCK_HZ)
+		return EOVERFLOW;
+	ticks = (uint64_t)timeout.tv_sec * KERN_CLOCK_HZ;
+	{
+		uint64_t fraction = ((uint64_t)timeout.tv_usec *
+		    KERN_CLOCK_HZ + 999999U) / 1000000U;
+		if (ticks > UINT64_MAX - fraction)
+			return EOVERFLOW;
+		ticks += fraction;
+	}
+	if (option == SO_RCVTIMEO)
+		socket->receive_timeout_ticks = ticks;
+	else
+		socket->send_timeout_ticks = ticks;
 	return 0;
 }
 
@@ -94,17 +113,73 @@ socket_getsockopt_common(struct socket *socket, int level, int option,
 {
 	struct timeval timeout;
 
-	if (socket == NULL || level != SOL_SOCKET || option != SO_RCVTIMEO)
-		return EOPNOTSUPP;
+	if (socket == NULL || level != SOL_SOCKET)
+		return ENOPROTOOPT;
+	if (option == SO_ERROR) {
+		int error;
+		if (value == NULL || length == NULL || *length < sizeof(error))
+			return EINVAL;
+		error = socket_take_error(socket);
+		memcpy(value, &error, sizeof(error));
+		*length = sizeof(error);
+		return 0;
+	}
+	if (option == SO_REUSEADDR) {
+		int enabled = socket->reuse_address != 0;
+		if (value == NULL || length == NULL || *length < sizeof(enabled))
+			return EINVAL;
+		memcpy(value, &enabled, sizeof(enabled));
+		*length = sizeof(enabled);
+		return 0;
+	}
+	if (option != SO_RCVTIMEO && option != SO_SNDTIMEO)
+		return ENOPROTOOPT;
 	if (value == NULL || length == NULL || *length < sizeof(timeout))
 		return EINVAL;
-	timeout.tv_sec = (time_t)(socket->receive_timeout_ticks /
-	    SOCKET_CLOCK_HZ);
-	timeout.tv_usec = (long)((socket->receive_timeout_ticks %
-	    SOCKET_CLOCK_HZ) * (1000000U / SOCKET_CLOCK_HZ));
+	{
+		uint64_t ticks = option == SO_RCVTIMEO ?
+		    socket->receive_timeout_ticks : socket->send_timeout_ticks;
+		timeout.tv_sec = (time_t)(ticks / KERN_CLOCK_HZ);
+		timeout.tv_usec = (long)((ticks % KERN_CLOCK_HZ) *
+		    (1000000U / KERN_CLOCK_HZ));
+	}
 	memcpy(value, &timeout, sizeof(timeout));
 	*length = sizeof(timeout);
 	return 0;
+}
+
+int
+socket_take_error(struct socket *socket)
+{
+	int error;
+	bool enabled;
+
+	if (socket == NULL)
+		return EINVAL;
+	enabled = hal_irq_disable();
+	error = socket->error;
+	socket->error = 0;
+	if (enabled)
+		hal_irq_enable();
+	return error;
+}
+
+void
+socket_set_error(struct socket *socket, int error)
+{
+	bool enabled;
+
+	if (socket == NULL || error == 0)
+		return;
+	enabled = hal_irq_disable();
+	if (socket->error == 0)
+		socket->error = error;
+	if (socket->receive_waiter != NULL) sched_wakeup(socket->receive_waiter);
+	if (socket->send_waiter != NULL) sched_wakeup(socket->send_waiter);
+	if (socket->connect_waiter != NULL) sched_wakeup(socket->connect_waiter);
+	if (socket->accept_waiter != NULL) sched_wakeup(socket->accept_waiter);
+	if (enabled)
+		hal_irq_enable();
 }
 
 void
@@ -194,13 +269,14 @@ socket_dequeue_packet(struct socket *socket, int flags,
 	if (socket == NULL || result == NULL || (flags & ~MSG_DONTWAIT) != 0)
 		return EINVAL;
 	thread = thread_current();
-	if (socket->receive_timeout_ticks != 0)
-		deadline = sched_ticks() + socket->receive_timeout_ticks;
+	if (socket->receive_timeout_ticks != 0 &&
+	    kern_deadline_after(sched_ticks(), socket->receive_timeout_ticks,
+	    &deadline) != 0)
+		return EOVERFLOW;
 	enabled = hal_irq_disable();
 	while (socket->receive_head == NULL) {
 		if (socket->error != 0) {
-			int error = socket->error;
-			socket->error = 0;
+			int error = socket_take_error(socket);
 			if (enabled)
 				hal_irq_enable();
 			return error;

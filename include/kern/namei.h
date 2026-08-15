@@ -40,7 +40,6 @@ struct cwdinfo {
 	unsigned flags;
 	struct path root;
 	struct path cwd;
-	char cwd_path[ZEDBSD_PATH_MAX];
 };
 
 int namei_at(struct cwdinfo *, const char *, struct inode **);
@@ -57,6 +56,6 @@ void cwdinfo_retain(struct cwdinfo *);
 void cwdinfo_release(struct cwdinfo *);
 void cwdinfo_destroy(struct cwdinfo *);
 int fs_chdir(struct cwdinfo *, const char *);
-const char *fs_getcwd(const struct cwdinfo *);
+int fs_getcwd(const struct cwdinfo *, char *, size_t);
 
 #endif

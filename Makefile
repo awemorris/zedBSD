@@ -173,6 +173,12 @@ $(BUILD)/tests/sched-host-test: tests/sched-host-test.c src/kern/sched.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Isrc src/kern/sched.c $< -o $@
 
+$(BUILD)/tests/concurrency-host-test: tests/concurrency-host-test.c \
+	src/kern/lock.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -pthread -Dtid_t=int -Iinclude -Isrc \
+		src/kern/lock.c $< -o $@
+
 $(BUILD)/tests/vmspace-host-test: tests/vmspace-host-test.c \
 	src/kern/vmspace.c src/kern/vm-object.c
 	@mkdir -p $(dir $@)
@@ -282,9 +288,14 @@ $(BUILD)/tests/vfs-host-test: tests/vfs-host-test.c $(VFS_CORE_SOURCES)
 	$(HOST_TEST_CC) -Iinclude -Isrc $(VFS_CORE_SOURCES) \
 		tests/vfs-host-stubs.c $< -o $@
 
+$(BUILD)/tests/cred-host-test: tests/cred-host-test.c src/kern/cred.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Isrc src/kern/cred.c $< -o $@
+
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/blkdev-host-test \
 	$(BUILD)/tests/vfs-host-test \
+	$(BUILD)/tests/cred-host-test \
 	$(BUILD)/tests/fat-host-test \
 	$(BUILD)/tests/fat-write-host-test \
 	$(BUILD)/tests/fat32-host-test \
@@ -294,6 +305,7 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/heap-context-host-test \
 	$(BUILD)/tests/elf-host-test \
 	$(BUILD)/tests/sched-host-test \
+	$(BUILD)/tests/concurrency-host-test \
 	$(BUILD)/tests/vmspace-host-test \
 	$(BUILD)/tests/vm-commit-host-test \
 	$(BUILD)/tests/swap-host-test \
