@@ -127,12 +127,7 @@ enum zedbsd_device_flags {
 	ZEDBSD_DEV_BOOT_ORIGIN = 1U << 2,
 };
 
-/* flags in the Linux SETUP_PC98_DISK payload */
-enum zedbsd_linux_disk_flags {
-	ZEDBSD_LINUX_DISK_F_FALLBACK = 1U << 0,
-	ZEDBSD_LINUX_DISK_F_BOOT = 1U << 1,
-};
-
+/* Firmware-discovered boot device descriptor shared with the kernel. */
 struct zedbsd_device {
 	uint8_t device_class;
 	uint8_t display_index;

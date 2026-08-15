@@ -25,11 +25,20 @@ static uint32 allocated_pages;
 /* Page usage bitmap. */
 static uint32 pagemap_tbl[PAGEMAP_WORDS];
 
-/* Provided by the BSP: total RAM in bytes, and device-window reserves. */
+#define FIXED_CLAIMS 8U
+static struct hal_pmem fixed_claims[FIXED_CLAIMS];
+
+/* Provided by the BSP: total RAM in bytes. */
 uint32 bsp_mem_probe(void);
-void bsp_mem_reserve(void);
+
+#ifdef HAL_BOARD_PC98
+extern char __kernel_phys_start[], __kernel_phys_end[];
+#else
+extern char __low_start[], __low_end[], __high_start[], __high_end[];
+#endif
 
 static void init_pagemap_tbl(void);
+static void reserve_range(hal_physaddr_t, size_t);
 
 /*
  * Initialize the memory management module.
@@ -38,7 +47,20 @@ void
 i386_page_init(void)
 {
 	init_pagemap_tbl();
-	bsp_mem_reserve();
+	reserve_range(0x000a0000U, 0x00060000U);
+#ifdef HAL_BOARD_PC98
+	reserve_range(0x00f00000U, 0x00100000U);
+#endif
+#ifdef HAL_BOARD_PC98
+	reserve_range((hal_physaddr_t)(uintptr_t)__kernel_phys_start,
+	    (size_t)(__kernel_phys_end - __kernel_phys_start));
+#else
+	reserve_range((hal_physaddr_t)((uintptr_t)__low_start & ~SYS_START),
+	    (size_t)(__low_end - __low_start));
+	reserve_range((hal_physaddr_t)((uintptr_t)__high_start & ~SYS_START),
+	    (size_t)(__high_end - __high_start));
+#endif
+	hal_memset(fixed_claims, 0, sizeof(fixed_claims));
 }
 
 /* Build the physical page map from the BSP's memory probe. */
@@ -78,8 +100,8 @@ init_pagemap_tbl(void)
 /*
  * Exclude [paddr, paddr+size) from allocation.
  */
-void
-pmem_reserve(hal_physaddr_t paddr, size_t size)
+static void
+reserve_range(hal_physaddr_t paddr, size_t size)
 {
 	uint32 first = paddr / PAGE_SIZE;
 	uint32 last;
@@ -105,27 +127,33 @@ pmem_reserve(hal_physaddr_t paddr, size_t size)
  * Allocate contiguous physical pages from the direct-mapped low area
  * (< 1GB); accessible without pmem_lock().
  */
-int
-pmem_alloc_lo(size_t size, struct pmem_desc *desc)
+static int
+alloc_ram(size_t size, size_t alignment, struct hal_pmem *desc)
 {
 	uint32 need_pages;
 	uint32 start_index;
 	uint32 page_end;
 	uint32 i;
-	irqlock_t irqlock;
+	bool irq_enabled;
+
+	uint32 align_pages;
 
 	need_pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+	align_pages = (uint32)(alignment / PAGE_SIZE);
 	if (need_pages == 0 || need_pages > phys_pages)
-		return PMEM_NOSPACE;
+		return HAL_ERR_NOMEM;
 	page_end = phys_pages - need_pages;
 
-	ENTER_IRQLOCK(irqlock)
+	irq_enabled = hal_irq_disable();
 	{
 		start_index = 0;
 		for (;;) {
-			for (; start_index <= page_end; start_index++)
+			for (; start_index <= page_end; start_index++) {
+				if ((start_index & (align_pages - 1U)) != 0)
+					continue;
 				if (PAGEMAP_GET(start_index) == 0)
 					break;
+			}
 			if (start_index > page_end)
 				break;
 			for (i = 0; i < need_pages; i++)
@@ -136,105 +164,98 @@ pmem_alloc_lo(size_t size, struct pmem_desc *desc)
 			start_index += i + 1;
 		}
 		if (start_index > page_end) {
-			LEAVE_IRQLOCK(irqlock);
-			return PMEM_NOSPACE;
+			if (irq_enabled) hal_irq_enable();
+			return HAL_ERR_NOMEM;
 		}
 		for (i = 0; i < need_pages; i++)
 			PAGEMAP_SET(start_index + i);
 		allocated_pages += need_pages;
 	}
-	LEAVE_IRQLOCK(irqlock);
+	if (irq_enabled) hal_irq_enable();
 
-	desc->paddr = (void *)(start_index << 12);
+	desc->paddr = (hal_physaddr_t)(start_index << 12);
 	desc->vaddr = (void *)((start_index << 12) | SYS_START);
 	desc->size = need_pages << 12;
-	return PMEM_SUCCESS;
+	desc->type = HAL_PMEM_TYPE_RAM;
+	desc->attr = 0;
+	return HAL_OK;
 }
 
-int
-hal_pmem_alloc(size_t size, struct hal_pmem *desc, uint32_t flags)
+static int
+valid_fixed_window(hal_physaddr_t paddr, size_t size)
 {
-	struct pmem_desc memory;
-	int error;
-
-	if (desc == NULL || (flags & ~(HAL_PMEM_ATTR_NOCACHE |
-	    HAL_PMEM_ATTR_WRITETHRU)) != 0)
-		return HAL_PMEM_BADDESC;
-	error = pmem_alloc_lo(size, &memory);
-	if (error != PMEM_SUCCESS)
-		return error == PMEM_NOSPACE ? HAL_PMEM_NOSPACE : HAL_PMEM_BADDESC;
-	desc->vaddr = (uintptr_t)memory.vaddr;
-	desc->paddr = (uintptr_t)memory.paddr;
-	desc->size = memory.size;
-	return HAL_PMEM_SUCCESS;
+	return (paddr >= 0x000a0000U && paddr <= 0x00100000U &&
+	    size <= 0x00100000U - paddr) ||
+	    (paddr >= 0xf0000000U && paddr <= 0xf1000000U &&
+	    size <= 0xf1000000U - paddr);
 }
 
-int
-hal_pmem_alloc_limited(size_t size, uintptr_t above, uintptr_t below,
-		       struct hal_pmem *desc)
+static int
+claim_fixed(const struct hal_pmem_request *request, struct hal_pmem *desc)
 {
-	uint32 need_pages, first_page, end_page, start, i;
-	irqlock_t irqlock;
+	unsigned i, free_slot = FIXED_CLAIMS;
+	hal_physaddr_t end = request->paddr + request->size;
+	bool irq_enabled;
 
-	if (desc == NULL || above >= below ||
-	    above > UINTPTR_MAX - (PAGE_SIZE - 1U))
-		return HAL_PMEM_BADDESC;
-	need_pages = (size + PAGE_SIZE - 1U) / PAGE_SIZE;
-	first_page = (uint32)((above + PAGE_SIZE - 1U) / PAGE_SIZE);
-	end_page = (uint32)(below / PAGE_SIZE);
-	if (end_page > phys_pages)
-		end_page = phys_pages;
-	if (need_pages == 0 || first_page >= end_page ||
-	    need_pages > end_page - first_page)
-		return HAL_PMEM_NOSPACE;
-	ENTER_IRQLOCK(irqlock)
+	irq_enabled = hal_irq_disable();
 	{
-		start = first_page;
-		for (;;) {
-			for (; start + need_pages <= end_page; start++)
-				if (!PAGEMAP_GET(start))
-					break;
-			if (start + need_pages > end_page)
-				break;
-			for (i = 0; i < need_pages; i++)
-				if (PAGEMAP_GET(start + i))
-					break;
-			if (i == need_pages)
-				break;
-			start += i + 1U;
+		for (i = 0; i < FIXED_CLAIMS; i++) {
+			hal_physaddr_t claim_end;
+			if (fixed_claims[i].size == 0) {
+				if (free_slot == FIXED_CLAIMS)
+					free_slot = i;
+				continue;
+			}
+			claim_end = fixed_claims[i].paddr + fixed_claims[i].size;
+			if (request->paddr < claim_end && end > fixed_claims[i].paddr) {
+				if (irq_enabled) hal_irq_enable();
+				return HAL_ERR_BUSY;
+			}
 		}
-		if (start + need_pages > end_page) {
-			LEAVE_IRQLOCK(irqlock);
-			return HAL_PMEM_NOSPACE;
+		if (free_slot == FIXED_CLAIMS) {
+			if (irq_enabled) hal_irq_enable();
+			return HAL_ERR_NOMEM;
 		}
-		for (i = 0; i < need_pages; i++)
-			PAGEMAP_SET(start + i);
-		allocated_pages += need_pages;
+		fixed_claims[free_slot].vaddr =
+		    (void *)((uintptr_t)request->paddr | SYS_START);
+		fixed_claims[free_slot].paddr = request->paddr;
+		fixed_claims[free_slot].size = request->size;
+		fixed_claims[free_slot].type = request->type;
+		fixed_claims[free_slot].attr = request->attr;
+		*desc = fixed_claims[free_slot];
 	}
-	LEAVE_IRQLOCK(irqlock);
-	desc->paddr = (uintptr_t)start * PAGE_SIZE;
-	desc->vaddr = desc->paddr | SYS_START;
-	desc->size = (size_t)need_pages * PAGE_SIZE;
-	return HAL_PMEM_SUCCESS;
+	if (irq_enabled) hal_irq_enable();
+	return HAL_OK;
 }
 
 int
-hal_pmem_free(struct hal_pmem *desc)
+hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *desc)
 {
-	struct pmem_desc memory;
-	int error;
+	struct hal_pmem result;
+	size_t alignment;
 
-	if (desc == NULL)
-		return HAL_PMEM_BADDESC;
-	memory.vaddr = (void *)desc->vaddr;
-	memory.paddr = (void *)desc->paddr;
-	memory.size = desc->size;
-	error = pmem_free(&memory);
-	if (error != PMEM_SUCCESS)
-		return HAL_PMEM_BADDESC;
-	desc->vaddr = desc->paddr = 0;
-	desc->size = 0;
-	return HAL_PMEM_SUCCESS;
+	if (request == NULL || desc == NULL || request->size == 0 ||
+	    (request->attr & ~(HAL_PMEM_ATTR_NOCACHE |
+	    HAL_PMEM_ATTR_WRITETHRU)) != 0)
+		return HAL_ERR_INVALID;
+	alignment = request->alignment == 0 ? PAGE_SIZE : request->alignment;
+	if (alignment < PAGE_SIZE || (alignment & (alignment - 1U)) != 0)
+		return HAL_ERR_INVALID;
+	if (request->type == HAL_PMEM_TYPE_RAM) {
+		if (request->paddr != HAL_PMEM_PADDR_ANY || request->attr != 0)
+			return HAL_ERR_INVALID;
+		return alloc_ram(request->size, alignment, desc);
+	}
+	if ((request->type != HAL_PMEM_TYPE_MMIO &&
+	    request->type != HAL_PMEM_TYPE_VRAM) ||
+	    request->paddr == HAL_PMEM_PADDR_ANY ||
+	    request->paddr > UINT32_MAX - request->size ||
+	    (request->paddr & (alignment - 1U)) != 0 ||
+	    !valid_fixed_window(request->paddr, request->size))
+		return HAL_ERR_INVALID;
+	result = *desc;
+	(void)result;
+	return claim_fixed(request, desc);
 }
 
 size_t
@@ -263,47 +284,61 @@ hal_memory_get_stats(struct hal_memory_stats *stats)
 				    &stats->page_table_count);
 }
 
-void
-hal_mem_get_memory_map(int *blocks, struct hal_memory_map_entry *entries,
-		       size_t buf_count)
-{
-	if (blocks != NULL)
-		*blocks = 1;
-	if (entries != NULL && buf_count != 0) {
-		entries[0].base = 0;
-		entries[0].size = hal_pmem_get_total_size();
-		entries[0].flags = HAL_PAGE_ENTRY_RAM;
-	}
-}
-
-/*
- * Free pages allocated with pmem_alloc_lo().
- */
 int
-pmem_free(struct pmem_desc *desc)
+hal_pmem_free(struct hal_pmem *desc)
 {
 	uint32 start_page, end_page, i;
-	irqlock_t irqlock;
+	unsigned slot;
+	bool irq_enabled;
 
+	if (desc == NULL || desc->size == 0)
+		return HAL_ERR_INVALID;
+	if (desc->type != HAL_PMEM_TYPE_RAM) {
+		irq_enabled = hal_irq_disable();
+		{
+			for (slot = 0; slot < FIXED_CLAIMS; slot++)
+				if (fixed_claims[slot].vaddr == desc->vaddr &&
+				    fixed_claims[slot].paddr == desc->paddr &&
+				    fixed_claims[slot].size == desc->size &&
+				    fixed_claims[slot].type == desc->type)
+					break;
+			if (slot == FIXED_CLAIMS) {
+				if (irq_enabled) hal_irq_enable();
+				return HAL_ERR_STATE;
+			}
+			hal_memset(&fixed_claims[slot], 0,
+			    sizeof(fixed_claims[slot]));
+		}
+		if (irq_enabled) hal_irq_enable();
+		hal_memset(desc, 0, sizeof(*desc));
+		return HAL_OK;
+	}
+	if (desc->vaddr != (void *)((uintptr_t)desc->paddr | SYS_START) ||
+	    (desc->paddr & (PAGE_SIZE - 1U)) != 0 ||
+	    (desc->size & (PAGE_SIZE - 1U)) != 0)
+		return HAL_ERR_INVALID;
 	start_page = (uint32)desc->paddr >> 12;
 	end_page = start_page + (desc->size >> 12);
+	if (start_page >= phys_pages || end_page > phys_pages)
+		return HAL_ERR_INVALID;
 
-	ENTER_IRQLOCK(irqlock)
+	irq_enabled = hal_irq_disable();
 	{
 		for (i = start_page; i < end_page; i++) {
 			if (PAGEMAP_GET(i) == 0) {
-				LEAVE_IRQLOCK(irqlock);
-				return PMEM_BADDESC;
+				if (irq_enabled) hal_irq_enable();
+				return HAL_ERR_STATE;
 			}
 		}
 		if (allocated_pages < end_page - start_page) {
-			LEAVE_IRQLOCK(irqlock);
-			return PMEM_BADDESC;
+			if (irq_enabled) hal_irq_enable();
+			return HAL_ERR_STATE;
 		}
 		for (i = start_page; i < end_page; i++)
 			PAGEMAP_RESET(i);
 		allocated_pages -= end_page - start_page;
 	}
-	LEAVE_IRQLOCK(irqlock);
-	return PMEM_SUCCESS;
+	if (irq_enabled) hal_irq_enable();
+	hal_memset(desc, 0, sizeof(*desc));
+	return HAL_OK;
 }

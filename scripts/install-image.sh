@@ -13,6 +13,7 @@ arch_profile="${ZEDBSD_ARCH_PROFILE:-}"
 arch_image="${ZEDBSD_ARCH_IMAGE:-}"
 partition="${BOOT_PARTITION:-0}"
 install_disk_stubs="${INSTALL_DISK_STUBS:-0}"
+boot_cfg=""
 while test "$#" -gt 0; do
 	case "$1" in
 		--partition)
@@ -24,12 +25,19 @@ while test "$#" -gt 0; do
 			install_disk_stubs=1
 			shift
 			;;
+		--boot-cfg)
+			test "$#" -ge 2 || { echo "Missing value for --boot-cfg" >&2; exit 2; }
+			boot_cfg="$2"
+			shift 2
+			;;
 		*) break ;;
 	esac
 done
-image="${1:?usage: $0 [--partition N] [--install-disk-stubs] IMAGE [VMLINUX [BOOT.CFG]]}"
-kernel="${2:-}"
-boot_cfg="${3:-}"
+test "$#" -eq 1 || {
+	echo "usage: $0 [--partition N] [--install-disk-stubs] [--boot-cfg FILE] IMAGE" >&2
+	exit 2
+}
+image="$1"
 heads="${DISK_HEADS:-8}"
 source_heads="${DISK_SOURCE_HEADS:-}"
 sectors="${DISK_SECTORS:-17}"
@@ -44,10 +52,6 @@ cleanup()
 trap cleanup EXIT INT TERM
 
 test -f "$image" || { echo "Image not found: $image" >&2; exit 1; }
-test -z "$kernel" || test -f "$kernel" || {
-	echo "Kernel not found: $kernel" >&2
-	exit 1
-}
 case "$heads:$sectors" in
 	*[!0-9:]* | 0:* | *:0) echo "Invalid geometry: H=$heads S=$sectors" >&2; exit 2 ;;
 esac
@@ -284,10 +288,8 @@ if test -n "$arch_profile" || test -n "$arch_image"; then
 fi
 test -s "$shell_image" || { echo "Shell ELF not found: $shell_image" >&2; exit 1; }
 test -s "$build/bin/noct" || { echo "Noct ELF not found: $build/bin/noct" >&2; exit 1; }
-test -s "$build/bin/linux" || { echo "Linux loader ELF not found: $build/bin/linux" >&2; exit 1; }
 mcopy -o -i "$image@@$offset" "$shell_image" ::BIN/SH
 mcopy -o -i "$image@@$offset" "$build/bin/noct" ::BIN/NOCT
-mcopy -o -i "$image@@$offset" "$build/bin/linux" ::BIN/LINUX
 if test -n "$zinit_rc"; then
 	test -f "$zinit_rc" || { echo "zinit.rc not found: $zinit_rc" >&2; exit 1; }
 	ensure_directory ::ETC
@@ -318,19 +320,12 @@ test -s "$bmpview_nap" || {
 	exit 1
 }
 mcopy -o -i "$image@@$offset" "$bmpview_nap" ::APPS/BMPVIEW.NAP
-if test -n "$kernel"; then
-	mcopy -o -i "$image@@$offset" "$kernel" ::VMLINUX
-fi
 if test -n "$boot_cfg"; then
 	test -f "$boot_cfg" || { echo "BOOT.CFG not found: $boot_cfg" >&2; exit 1; }
 	mcopy -o -i "$image@@$offset" "$boot_cfg" ::BOOT.CFG
 fi
-if test -f "$repo/platform/pc98/dos/linux98.exe" ||
-   test -f "$repo/platform/pc98/dos/inst.exe"; then
+if test -f "$repo/platform/pc98/dos/inst.exe"; then
 	ensure_directory ::INST
-fi
-if test -f "$repo/platform/pc98/dos/linux98.exe"; then
-	mcopy -o -i "$image@@$offset" "$repo/platform/pc98/dos/linux98.exe" ::INST/LINUX98.EXE
 fi
 if test -f "$repo/platform/pc98/dos/inst.exe"; then
 	# INST.EXE resolves its payloads relative to its own path.  Keep an

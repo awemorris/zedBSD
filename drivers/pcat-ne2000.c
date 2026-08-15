@@ -146,9 +146,11 @@ ne2000_irq_service(void *argument)
 	struct pcat_ne2000 *state = argument;
 
 	for (;;) {
-		irq_enter_isr((int)state->irq);
+		hal_irq_ack_t acknowledge;
+		if (hal_irq_service_wait((int)state->irq, &acknowledge) != HAL_OK)
+			HAL_FATAL("NE2000 IRQ service wait failed");
 		dp8390_interrupt(&state->dp);
-		irq_leave_isr((int)state->irq);
+		hal_irq_send_eoi(acknowledge);
 	}
 }
 

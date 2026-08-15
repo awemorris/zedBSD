@@ -32,7 +32,6 @@ void pic_init()
 	asm_outb(PIC_MASTER_PORT2, 0xff);
 	asm_outb(PIC_SLAVE_PORT2, 0xff);
 }
-
 /*
  * Set the IRQ mask.
  */
@@ -154,11 +153,4 @@ hal_pc98_enable_high_memory(void)
 	asm_outb(0x0439, (uint8)(value & 0xfb));
 	asm_outb(0x00f8, 0x00);
 	asm_outb(0x043b, 0x04);
-}
-
-void
-bsp_mem_reserve(void)
-{
-	pmem_reserve(0x000a0000, 0x00060000);	/* VRAM + ROM window */
-	pmem_reserve(0x00f00000, 0x00100000);	/* 15-16MB hole */
 }

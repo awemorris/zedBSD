@@ -22,6 +22,7 @@
 
 #define ZBL6_HANDOFF_FLAG_UEFI          (1U << 0)
 #define ZBL6_HANDOFF_FLAG_MEMORY_MAP    (1U << 1)
+#define ZBL6_HANDOFF_FLAG_ACPI_RSDP     (1U << 2)
 
 #define ZBL6_MEMORY_USABLE              1U
 #define ZBL6_MEMORY_RESERVED            2U

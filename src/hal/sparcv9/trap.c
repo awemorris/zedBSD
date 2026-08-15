@@ -7,49 +7,33 @@
 #include "space.h"
 #include "task.h"
 #include "trap.h"
-#include <kern/sched.h>
+#include "irq.h"
 #include <errno.h>
 
 extern char sparcv9_trap_table[];
 static hal_trap_handler_t trap_handlers[5];
 static hal_syscall_handler_t syscall_handler;
-static hal_user_int_handler_t user_int_handler;
-static hal_user_fault_handler_t user_fault_handler;
-static hal_user_return_handler_t user_return_handler;
-static int reschedule_pending;
 static int user_fault_active;
 
 static void
 handle_timer(void)
 {
-	extern void sun4u_timer_interrupt(void);
-	sun4u_timer_interrupt();
-	if (reschedule_pending && !user_fault_active) {
-		reschedule_pending = 0;
-		sched_yield();
-	}
+	extern void sun4u_timer_interrupt(hal_irq_ack_t acknowledge);
+	sun4u_timer_interrupt(sparcv9_irq_begin(0));
 }
 
 static int
 deliver_user_fault(uintptr_t pc, uintptr_t address, int instruction,
 	int write, uint64 value)
 {
-	struct hal_user_trap trap;
+	int result;
 
-	trap.vector = 14U;
-	trap.cs = 3U;
-	trap.eip = pc;
-	trap.eax = value;
-	trap.error_code = instruction ? 0x10U : write ? 2U : 0U;
-	trap.fault_address = address;
-	if (user_fault_handler != NULL) {
-		int result;
-		user_fault_active++;
-		result = user_fault_handler(&trap);
-		user_fault_active--;
-		return result;
-	}
-	return HAL_TRAP_RET_FAILED;
+	(void)value;
+	user_fault_active++;
+	result = kernel_user_fault_handler(14U, 3U, pc,
+	    instruction ? 0x10U : write ? 2U : 0U, address);
+	user_fault_active--;
+	return result;
 }
 
 void
@@ -147,27 +131,16 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 		return 0;
 	}
 	if (trap_type == 0x16dU) {
-		struct hal_user_trap trap;
 		uintptr_t args[HAL_SYSCALL_ARGS];
 		unsigned i;
 
-		trap.vector = 0xc2U;
-		trap.cs = 3U;
-		trap.eip = pc;
-		trap.eax = frame->syscall_number;
-		trap.error_code = 0;
-		trap.fault_address = 0;
-		if (user_int_handler != NULL)
-			user_int_handler(&trap);
+		kernel_user_int_handler(0xc2U, 3U, pc,
+		    frame->syscall_number);
 		for (i = 0; i < HAL_SYSCALL_ARGS; i++)
 			args[i] = (uintptr_t)frame->out[i];
 		frame->out[0] = (uint64)(syscall_handler != NULL ?
 		    syscall_handler((uint32)frame->syscall_number, args) : -ENOSYS);
-		hal_user_return_invoke();
-		if (reschedule_pending) {
-			reschedule_pending = 0;
-			sched_yield();
-		}
+		kernel_user_return_handler();
 		sparcv9_task_leave_user_frame();
 		return 1;
 	}
@@ -190,7 +163,7 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 			 * unlike a demand fault, SIGBUS/SIGSEGV intentionally has no PTE
 			 * for prime_mapping() to find.
 			 */
-			hal_user_return_invoke();
+			kernel_user_return_handler();
 			(void)sparcv9_prime_mapping(address, instruction, write);
 			sparcv9_task_leave_user_frame();
 			return 0;
@@ -198,30 +171,19 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 		HAL_FATAL("SPARC V9 user page fault handler returned");
 	}
 	{
-		struct hal_user_trap trap;
+		uint32 vector;
 		hal_printf("SPARCV9 user trap=%llx pc=%p npc=%p tstate=%llx o0=%llx sp=%llx\n",
 		    trap_type, (void *)pc, (void *)next_pc, tstate,
 		    frame->out[0], frame->old_sp + SPARCV9_STACK_BIAS);
-		trap.vector = trap_type == 0x34U ? 17U :
+		vector = trap_type == 0x34U ? 17U :
 		    trap_type == 0x101U ? 3U : 6U;
-		trap.cs = 3U;
-		trap.eip = pc;
-		trap.eax = frame->out[0];
-		trap.error_code = 0;
-		trap.fault_address = 0;
-		if (user_fault_handler != NULL)
-			(void)user_fault_handler(&trap);
+		(void)kernel_user_fault_handler(vector, 3U, pc, 0, 0);
 	}
 	HAL_FATAL("SPARC V9 user fault handler returned");
 	return 0;
 }
 
 void hal_syscall_set_handler(hal_syscall_handler_t h){syscall_handler=h;}
-void hal_user_int_set_handler(hal_user_int_handler_t h){user_int_handler=h;}
-void hal_user_fault_set_handler(hal_user_fault_handler_t h){user_fault_handler=h;}
-void hal_user_return_set_handler(hal_user_return_handler_t h){user_return_handler=h;}
-void hal_user_return_invoke(void){if(user_return_handler!=NULL)user_return_handler();}
-void hal_reschedule_on_interrupt_return(void){reschedule_pending=1;}
 
 void
 hal_set_trap_handler(int trap, hal_trap_handler_t handler)

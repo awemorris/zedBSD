@@ -19,9 +19,9 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-Iinclude -Iinclude/uapi -Isrc -Isrc/hal/i386 -Ilibc/include \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PC98
 HAL_PC98_SOURCES := \
-	src/hal/i386/lib.c src/hal/i386/irq.c src/hal/i386/page.c \
+	src/hal/cpu-up.c src/hal/i386/lib.c src/hal/i386/irq.c src/hal/i386/page.c \
 	src/hal/i386/space.c src/hal/i386/int.c src/hal/i386/cmain.c \
-	src/hal/i386/task.c src/hal/i386/fb.c \
+	src/hal/i386/task.c \
 	src/hal/i386/bsp-pc98/boot.c \
 	src/hal/i386/bsp-pc98/cons.c src/hal/i386/bsp-pc98/pic.c \
 	src/hal/i386/bsp-pc98/clock.c src/hal/i386/bsp-pc98/display.c \
@@ -47,9 +47,9 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
 	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/console-device.o \
 	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
-	$(BUILD)/src/kern/system-device.o $(BUILD)/src/kern/boot-device.o \
+	$(BUILD)/src/kern/system-device.o \
 	$(BUILD)/src/kern/init.o \
-	$(BUILD)/src/kern/pc98/graphics.o \
+	$(BUILD)/drivers/pc98-graphics.o \
 	$(KERN_NET_OBJS)
 
 # Milestone verification nests QEMU tests.  Keep those chains ordered even
@@ -70,7 +70,6 @@ PC98_BEUI_OBJS := \
 STAGE2_OBJS = \
 	$(BUILD)/$(PC98)/boot-header.o \
 	$(BUILD)/src/kern/main.o \
-	$(BUILD)/src/kern/pc98/linux-entry.o \
 	$(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/fs.o \
 	$(BUILD)/src/kern/namespace.o \
@@ -100,7 +99,6 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/pc98/partition.o \
 	$(BUILD)/src/kern/pc98/partition-auto.o \
 	$(BUILD)/src/kern/pc98/platform.o \
-	$(BUILD)/src/kern/pc98/linux-boot.o \
 	$(BUILD)/src/kern/image.o \
 	$(BUILD)/src/kern/panic.o \
 	$(ZEDBSD_LIBC_OBJECTS) \
@@ -111,11 +109,11 @@ M9_STAGE2_OBJS = $(filter-out $(BUILD)/src/kern/main.o \
 	$(BUILD)/$(PC98)/shell-m9-test.o \
 	$(BUILD)/$(PC98)/device-m9-test.o
 
-all: $(BUILD)/boot2.bin $(BUILD)/ipl-lba0.bin $(BUILD)/ipl-lba2.bin \
+all: $(BUILD)/ipl-lba0.bin $(BUILD)/ipl-lba2.bin \
 	$(BUILD)/ipl-lba0.img $(BUILD)/ipl-lba2.img $(BUILD)/ipl-part.img \
 	$(BUILD)/IO.SYS $(BUILD)/vmunix \
 	$(BUILD)/INIT.ELF $(BUILD)/bin/noct $(BUILD)/bin/sh \
-	$(BUILD)/bin/linux $(BUILD)/bin/nettest $(BUILD)/bin/ping \
+	$(BUILD)/bin/nettest $(BUILD)/bin/ping \
 	$(BUILD)/bin/ifconfig $(BUILD)/bin/route $(BUILD)/bin/dhcpcd \
 	$(BUILD)/bin/nslookup \
 	$(BUILD)/partition-pbr.bin \
@@ -129,12 +127,11 @@ BOOTAPP.BIN: $(BUILD)/BOOTAPP.BIN
 INIT.ELF: $(BUILD)/INIT.ELF
 NOCT.ELF: $(BUILD)/NOCT.ELF
 SH: $(BUILD)/bin/sh
-LINUX: $(BUILD)/bin/linux
 USER-FAULT.ELF: $(BUILD)/USER-FAULT.ELF
 USER-SWAP.ELF: $(BUILD)/USER-SWAP.ELF
 USER-STACK.ELF: $(BUILD)/USER-STACK.ELF
 USER-STACK-GUARD.ELF: $(BUILD)/USER-STACK-GUARD.ELF
-.PHONY: vmunix vmunix-m9 BOOTAPP.BIN INIT.ELF NOCT.ELF SH LINUX \
+.PHONY: vmunix vmunix-m9 BOOTAPP.BIN INIT.ELF NOCT.ELF SH \
 	USER-FAULT.ELF USER-SWAP.ELF USER-STACK.ELF USER-STACK-GUARD.ELF
 
 # ----------------------------------------------------------------------
@@ -146,8 +143,8 @@ NOCT_GLUE_OBJS := $(BUILD)/userland/noct/integration/noct.o $(BUILD)/userland/no
 	$(BUILD)/userland/noct/integration/target.o
 $(NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
 $(NOCT_GLUE_OBJS): OBJ_CFLAGS = $(NOCT_CFLAGS)
-$(BUILD)/src/kern/pc98/graphics.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
-$(BUILD)/src/kern/pc98/graphics.o: OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
+$(BUILD)/drivers/pc98-graphics.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
+$(BUILD)/drivers/pc98-graphics.o: OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
 $(BUILD)/userland/noct/integration/platform.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) \
 	$(ZEDBSD_LIBC_CPPFLAGS)
 $(BUILD)/userland/noct/integration/platform.o: OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
@@ -181,18 +178,12 @@ $(BUILD)/$(1).elf: $(BUILD)/$(BOOTSECT)/$(2).o
 	$$(LD) -m elf_i386 -Ttext=$(3) -e _start $$< -o $$@
 endef
 
-$(eval $(call link-flat,boot2,boot2,0))
 $(eval $(call link-flat,disk-ipl,disk-ipl,0))
 $(eval $(call link-flat,lba2,lba2,0))
 $(eval $(call link-flat,partition-pbr,partition-pbr,0))
 $(eval $(call link-flat,stage1,stage1,0))
 $(eval $(call link-flat,chain-test,chain-test,0))
 $(eval $(call link-flat,fdd-ipl,fdd-ipl,0))
-
-$(BUILD)/boot2.bin: $(BUILD)/boot2.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@sz=$$(stat -c%s $@); echo "boot2.bin: $$sz bytes"; \
-		if [ $$sz -gt 1024 ]; then echo "ERROR: IPL > 1024"; exit 1; fi
 
 $(BUILD)/ipl-lba0.bin: $(BUILD)/disk-ipl.elf
 	$(OBJCOPY) -O binary -j .text $< $@
@@ -397,20 +388,6 @@ $(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
 		$(USER_STACK_LDFLAGS) \
 		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
-	$(PYTHON) $(USER_ELF_CHECK) $@
-
-USER_BOOTLINUX_OBJS := $(BUILD)/userland/bootlinux/main.o
-$(USER_BOOTLINUX_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(USER_BOOTLINUX_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
-
-$(BUILD)/bin/linux: $(USER_LIBC_OBJS) $(USER_BOOTLINUX_OBJS) \
-	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
-	@mkdir -p $(dir $@)
-	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
-		$(USER_STACK_LDFLAGS) \
-		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) \
-		$(USER_BOOTLINUX_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(USER_ELF_CHECK) $@
 

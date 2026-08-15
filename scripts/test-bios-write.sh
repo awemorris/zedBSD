@@ -36,7 +36,7 @@ run_one()
 	ZEDBSD_VMUNIX_IMAGE="$build/vmunix-m9" \
 		ZEDBSD_ZINIT_RC="$cfg" \
 		DISK_HEADS="$heads" DISK_SECTORS="$sectors" \
-		"$repo/scripts/install-image.sh" "$image" "" "$cfg"
+		"$repo/scripts/install-image.sh" --boot-cfg "$cfg" "$image"
 	dd if="$image" of="$before" bs=512 skip="$old_sectors" count=1 status=none
 	: > "$log"
 

@@ -2,7 +2,10 @@
 #include <hal/hal.h>
 #include "defs.h"
 #include "asm.h"
+#include "percpu.h"
 #include "space.h"
+#include "smp.h"
+#include "bsp-pcat/lapic.h"
 
 static uint64 system_pml4[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64 system_pdpt[512] __attribute__((aligned(PAGE_SIZE)));
@@ -11,10 +14,40 @@ static uint64 system_kernel_pt[8][512]
 	__attribute__((aligned(PAGE_SIZE)));
 static uint64 system_mmio_pd[512] __attribute__((aligned(PAGE_SIZE)));
 static uintptr_t system_cr3;
-static hal_space_t current_space;
+#define AMD64_CURRENT_SPACE (amd64_percpu_current()->current_space)
 static int next_space_id = 1;
 static uint32 space_count;
 static uint32 page_table_count;
+
+struct amd64_shootdown_request {
+	volatile unsigned active;
+	hal_space_t space;
+	void *vaddr;
+	size_t size;
+	volatile uint64 pending;
+};
+static struct amd64_shootdown_request shootdowns[AMD64_SMP_MAX_CPUS];
+
+static void shootdown(hal_space_t handle, void *vaddr, size_t size);
+
+static void
+table_count_drop(void)
+{
+	uint32 old = __atomic_fetch_sub(&page_table_count, 1U,
+	    __ATOMIC_RELAXED);
+	if (old == 0)
+		HAL_FATAL("amd64 page-table counter underflow");
+}
+
+static int
+alloc_page(struct hal_pmem *memory)
+{
+	const struct hal_pmem_request request = {
+		HAL_PMEM_PADDR_ANY, PAGE_SIZE, PAGE_SIZE,
+		HAL_PMEM_TYPE_RAM, 0
+	};
+	return hal_pmem_alloc(&request, memory);
+}
 
 extern char __kernel_phys_start[], __kernel_phys_end[];
 extern char __kernel_text_phys_start[], __kernel_text_phys_end[];
@@ -30,6 +63,8 @@ void *amd64_phys_to_direct(uintptr_t address)
 {
 	return (void *)((uintptr_t)AMD64_DIRECT_BASE + address);
 }
+
+uintptr_t amd64_system_cr3(void) { return system_cr3; }
 
 void
 amd64_space_init(void)
@@ -77,11 +112,24 @@ amd64_space_init(void)
 		    (uint64)index * 0x200000ULL) | AMD64_PTE_PRESENT |
 		    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
 		    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+	/* Dedicated uncached windows for the Local APIC and I/O APIC. */
+	system_mmio_pd[8] = 0xfee00000ULL | AMD64_PTE_PRESENT |
+	    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
+	    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+	system_mmio_pd[9] = 0xfec00000ULL | AMD64_PTE_PRESENT |
+	    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
+	    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+	/* APs enter long mode at the low trampoline before jumping high. */
+	system_pd[0] &= ~AMD64_PTE_NX;
+	system_pdpt[0] = amd64_direct_to_phys(system_pd) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 	system_pdpt[510] = amd64_direct_to_phys(system_pd) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 	system_pdpt[511] = amd64_direct_to_phys(system_mmio_pd) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 	system_pml4[511] = amd64_direct_to_phys(system_pdpt) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	system_pml4[0] = amd64_direct_to_phys(system_pdpt) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 	efer = asm_read_msr(0xc0000080U);
 	asm_write_msr(0xc0000080U, efer | (1ULL << 11));
@@ -93,7 +141,7 @@ amd64_space_init(void)
 	__asm__ volatile("movq %0,%%cr0" : : "r"(cr0) : "memory");
 	system_cr3 = amd64_direct_to_phys(system_pml4);
 	asm_load_cr3(system_cr3);
-	current_space = HAL_SPACE_SYS;
+	__atomic_store_n(&AMD64_CURRENT_SPACE, HAL_SPACE_SYS, __ATOMIC_RELEASE);
 }
 
 static int valid_space(hal_space_t handle)
@@ -101,6 +149,23 @@ static int valid_space(hal_space_t handle)
 	return handle == HAL_SPACE_SYS ||
 	    (handle != NULL && ((struct amd64_space *)handle)->magic ==
 	    AMD64_SPACE_MAGIC);
+}
+
+static bool
+space_lock_enter(struct amd64_space *space)
+{
+	bool enabled = hal_irq_disable();
+	while (__atomic_exchange_n(&space->lock, 1U, __ATOMIC_ACQUIRE) != 0)
+		__asm__ volatile("pause");
+	return enabled;
+}
+
+static void
+space_lock_leave(struct amd64_space *space, bool enabled)
+{
+	__atomic_store_n(&space->lock, 0U, __ATOMIC_RELEASE);
+	if (enabled)
+		hal_irq_enable();
 }
 
 static int valid_user_range(uintptr_t address, size_t size)
@@ -117,7 +182,7 @@ allocate_table(struct amd64_space *space, uint64 *parent,
 {
 	struct amd64_table_page *page = hal_malloc(sizeof(*page));
 	if (page == NULL) return NULL;
-	if (pmem_alloc_lo(PAGE_SIZE, &page->memory) != PMEM_SUCCESS) {
+	if (alloc_page(&page->memory) != HAL_OK) {
 		hal_free(page);
 		return NULL;
 	}
@@ -126,7 +191,7 @@ allocate_table(struct amd64_space *space, uint64 *parent,
 	page->parent_index = parent_index;
 	page->next = space->tables;
 	space->tables = page;
-	page_table_count++;
+	(void)__atomic_fetch_add(&page_table_count, 1U, __ATOMIC_RELAXED);
 	return page;
 }
 
@@ -184,9 +249,9 @@ reclaim_empty_tables(struct amd64_space *space)
 			    AMD64_PTE_ADDR_MASK) == expected)
 				page->parent[page->parent_index] = 0;
 			*link = page->next;
-			(void)pmem_free(&page->memory);
+			(void)hal_pmem_free(&page->memory);
 			hal_free(page);
-			if (page_table_count != 0) page_table_count--;
+			table_count_drop();
 			reclaimed = 1;
 		}
 	} while (reclaimed);
@@ -198,7 +263,7 @@ hal_mem_create_space(void)
 	struct amd64_space *space = hal_malloc(sizeof(*space));
 	if (space == NULL) return NULL;
 	hal_memset(space, 0, sizeof(*space));
-	if (pmem_alloc_lo(PAGE_SIZE, &space->pml4_memory) != PMEM_SUCCESS) {
+	if (alloc_page(&space->pml4_memory) != HAL_OK) {
 		hal_free(space);
 		return NULL;
 	}
@@ -206,8 +271,9 @@ hal_mem_create_space(void)
 	hal_memset(space->pml4, 0, PAGE_SIZE);
 	space->pml4[511] = system_pml4[511];
 	space->magic = AMD64_SPACE_MAGIC;
-	space->space_id = next_space_id++;
-	space_count++;
+	space->space_id = __atomic_fetch_add(&next_space_id, 1,
+	    __ATOMIC_RELAXED);
+	(void)__atomic_fetch_add(&space_count, 1U, __ATOMIC_RELAXED);
 	return space;
 }
 
@@ -216,19 +282,28 @@ hal_page_destroy_space(hal_space_t handle)
 {
 	struct amd64_space *space = handle;
 	struct amd64_table_page *page;
+	bool enabled;
 	if (space == NULL) return;
 	if (!valid_space(space)) HAL_FATAL("invalid amd64 space destroy");
-	if (current_space == space) hal_page_switch_space(HAL_SPACE_SYS);
+	if (AMD64_CURRENT_SPACE == space) hal_page_switch_space(HAL_SPACE_SYS);
+	enabled = space_lock_enter(space);
+	if (__atomic_exchange_n(&space->destroying, 1U,
+	    __ATOMIC_ACQ_REL) != 0)
+		HAL_FATAL("amd64 space destroyed twice");
+	/* Flush stale translations before any table or frame is released. */
+	shootdown(space, NULL, 0);
 	while ((page = space->tables) != NULL) {
 		space->tables = page->next;
-		(void)pmem_free(&page->memory);
+		(void)hal_pmem_free(&page->memory);
 		hal_free(page);
-		if (page_table_count != 0) page_table_count--;
+		table_count_drop();
 	}
 	space->magic = 0;
-	(void)pmem_free(&space->pml4_memory);
+	space_lock_leave(space, enabled);
+	(void)hal_pmem_free(&space->pml4_memory);
 	hal_free(space);
-	if (space_count != 0) space_count--;
+	if (__atomic_fetch_sub(&space_count, 1U, __ATOMIC_RELAXED) == 0)
+		HAL_FATAL("amd64 space counter underflow");
 }
 
 void
@@ -236,11 +311,15 @@ hal_page_switch_space(hal_space_t handle)
 {
 	uintptr_t cr3;
 	if (!valid_space(handle)) HAL_FATAL("invalid amd64 space switch");
-	if (handle == current_space) return;
+	if (handle != HAL_SPACE_SYS && __atomic_load_n(
+	    &((struct amd64_space *)handle)->destroying,
+	    __ATOMIC_ACQUIRE) != 0)
+		HAL_FATAL("switch to destroying amd64 space");
+	if (handle == AMD64_CURRENT_SPACE) return;
 	cr3 = handle == HAL_SPACE_SYS ? system_cr3 :
 	    (uintptr_t)((struct amd64_space *)handle)->pml4_memory.paddr;
 	asm_load_cr3(cr3);
-	current_space = handle;
+	__atomic_store_n(&AMD64_CURRENT_SPACE, handle, __ATOMIC_RELEASE);
 }
 
 static uint64 leaf_flags(uint32 attr)
@@ -255,33 +334,47 @@ static uint64 leaf_flags(uint32 attr)
 }
 
 int
-hal_page_map(hal_space_t handle, void *pointer, uintptr_t physical,
+hal_page_map(hal_space_t handle, void *pointer, hal_physaddr_t physical,
 	size_t size, uint32 attr)
 {
 	struct amd64_space *space = handle;
 	uintptr_t address = (uintptr_t)pointer, offset;
+	bool enabled;
 	if (space == NULL || !valid_space(space) ||
 	    !valid_user_range(address, size) ||
 	    (physical & (PAGE_SIZE - 1U)) != 0 ||
 	    physical >= AMD64_DIRECT_LIMIT || size > AMD64_DIRECT_LIMIT - physical ||
 	    !(attr & (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)))
-		return HAL_PMEM_BADDESC;
+		return HAL_ERR_INVALID;
+	enabled = space_lock_enter(space);
+	if (space->destroying) {
+		space_lock_leave(space, enabled);
+		return HAL_ERR_STATE;
+	}
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
 		uint64 *leaf = walk_leaf(space, address + offset, 0);
-		if (leaf != NULL && (*leaf & AMD64_PTE_PRESENT))
-			return HAL_PMEM_BADDESC;
+		if (leaf != NULL && (*leaf & AMD64_PTE_PRESENT)) {
+			space_lock_leave(space, enabled);
+			return HAL_ERR_INVALID;
+		}
 	}
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
 		uint64 *leaf = walk_leaf(space, address + offset, 1);
 		if (leaf == NULL) {
-			(void)hal_page_unmap(space, pointer, offset);
+			uintptr_t rollback;
+			for (rollback = 0; rollback < offset; rollback += PAGE_SIZE) {
+				leaf = walk_leaf(space, address + rollback, 0);
+				if (leaf != NULL) *leaf = 0;
+			}
 			reclaim_empty_tables(space);
-			return HAL_PMEM_NOSPACE;
+			space_lock_leave(space, enabled);
+			return HAL_ERR_NOMEM;
 		}
 		*leaf = (physical + offset) | leaf_flags(attr);
 	}
-	if (current_space == space) hal_page_flush_tlb(space);
-	return HAL_PMEM_SUCCESS;
+	if (AMD64_CURRENT_SPACE == space) hal_page_flush_tlb(space);
+	space_lock_leave(space, enabled);
+	return HAL_OK;
 }
 
 int
@@ -289,20 +382,29 @@ hal_page_prot(hal_space_t handle, void *pointer, size_t size, uint32 attr)
 {
 	struct amd64_space *space = handle;
 	uintptr_t address = (uintptr_t)pointer, offset;
+	bool enabled;
 	if (space == NULL || !valid_space(space) ||
 	    !valid_user_range(address, size) ||
 	    !(attr & (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)))
-		return HAL_PMEM_BADDESC;
+		return HAL_ERR_INVALID;
+	enabled = space_lock_enter(space);
+	if (space->destroying) {
+		space_lock_leave(space, enabled);
+		return HAL_ERR_STATE;
+	}
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
 		uint64 *leaf = walk_leaf(space, address + offset, 0);
 		uint64 physical;
-		if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT))
-			return HAL_PMEM_BADDESC;
+		if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT)) {
+			space_lock_leave(space, enabled);
+			return HAL_ERR_INVALID;
+		}
 		physical = *leaf & AMD64_PTE_ADDR_MASK;
 		*leaf = physical | leaf_flags(attr);
 	}
-	if (current_space == space) hal_page_flush_tlb(space);
-	return HAL_PMEM_SUCCESS;
+	if (AMD64_CURRENT_SPACE == space) hal_page_flush_tlb(space);
+	space_lock_leave(space, enabled);
+	return HAL_OK;
 }
 
 int
@@ -310,16 +412,23 @@ hal_page_unmap(hal_space_t handle, void *pointer, size_t size)
 {
 	struct amd64_space *space = handle;
 	uintptr_t address = (uintptr_t)pointer, offset;
-	if (size == 0) return HAL_PMEM_SUCCESS;
+	bool enabled;
+	if (size == 0) return HAL_OK;
 	if (space == NULL || !valid_space(space) ||
-	    !valid_user_range(address, size)) return HAL_PMEM_BADDESC;
+	    !valid_user_range(address, size)) return HAL_ERR_INVALID;
+	enabled = space_lock_enter(space);
+	if (space->destroying) {
+		space_lock_leave(space, enabled);
+		return HAL_ERR_STATE;
+	}
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
 		uint64 *leaf = walk_leaf(space, address + offset, 0);
 		if (leaf != NULL) *leaf = 0;
 	}
 	reclaim_empty_tables(space);
-	if (current_space == space) hal_page_flush_tlb(space);
-	return HAL_PMEM_SUCCESS;
+	if (AMD64_CURRENT_SPACE == space) hal_page_flush_tlb(space);
+	space_lock_leave(space, enabled);
+	return HAL_OK;
 }
 
 int
@@ -327,14 +436,21 @@ hal_page_query(hal_space_t handle, void *pointer, uint32 *flags)
 {
 	struct amd64_space *space = handle;
 	uint64 *leaf;
+	bool enabled;
 	if (space == NULL || !valid_space(space) || flags == NULL ||
 	    !valid_user_range((uintptr_t)pointer, PAGE_SIZE))
-		return HAL_PMEM_BADDESC;
+		return HAL_ERR_INVALID;
+	enabled = space_lock_enter(space);
+	if (space->destroying) {
+		space_lock_leave(space, enabled);
+		return HAL_ERR_STATE;
+	}
 	leaf = walk_leaf(space, (uintptr_t)pointer, 0);
 	*flags = leaf != NULL && (*leaf & AMD64_PTE_PRESENT) ? HAL_PAGE_PRESENT : 0;
 	if (leaf != NULL && (*leaf & AMD64_PTE_ACCESSED)) *flags |= HAL_PAGE_ACCESSED;
 	if (leaf != NULL && (*leaf & AMD64_PTE_DIRTY)) *flags |= HAL_PAGE_DIRTY;
-	return HAL_PMEM_SUCCESS;
+	space_lock_leave(space, enabled);
+	return HAL_OK;
 }
 
 int
@@ -342,23 +458,95 @@ hal_page_clear_flags(hal_space_t handle, void *pointer, uint32 flags)
 {
 	struct amd64_space *space = handle;
 	uint64 *leaf, mask = 0;
+	bool enabled;
 	if (space == NULL || !valid_space(space) ||
 	    !valid_user_range((uintptr_t)pointer, PAGE_SIZE) ||
 	    (flags & ~(HAL_PAGE_ACCESSED | HAL_PAGE_DIRTY)) != 0)
-		return HAL_PMEM_BADDESC;
+		return HAL_ERR_INVALID;
+	enabled = space_lock_enter(space);
+	if (space->destroying) {
+		space_lock_leave(space, enabled);
+		return HAL_ERR_STATE;
+	}
 	leaf = walk_leaf(space, (uintptr_t)pointer, 0);
-	if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT))
-		return HAL_PMEM_BADDESC;
+	if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT)) {
+		space_lock_leave(space, enabled);
+		return HAL_ERR_INVALID;
+	}
 	if (flags & HAL_PAGE_ACCESSED) mask |= AMD64_PTE_ACCESSED;
 	if (flags & HAL_PAGE_DIRTY) mask |= AMD64_PTE_DIRTY;
 	*leaf &= ~mask;
-	if (current_space == space) hal_page_flush_tlb(space);
-	return HAL_PMEM_SUCCESS;
+	if (AMD64_CURRENT_SPACE == space) hal_page_flush_tlb(space);
+	space_lock_leave(space, enabled);
+	return HAL_OK;
+}
+
+static void
+shootdown(hal_space_t handle, void *vaddr, size_t size)
+{
+	hal_cpu_id_t sender = hal_cpu_current(), cpu;
+	struct amd64_shootdown_request *request = &shootdowns[sender];
+	struct hal_cpu_mask ready;
+	uint64 pending = 0;
+
+	if (__atomic_exchange_n(&request->active, 1U, __ATOMIC_ACQUIRE) != 0)
+		HAL_FATAL("nested amd64 TLB shootdown");
+	hal_cpu_ready_mask(&ready);
+	for (cpu = 0; cpu < hal_cpu_count(); cpu++) {
+		struct amd64_percpu *target;
+		if (cpu == sender || cpu >= AMD64_SMP_MAX_CPUS ||
+		    !hal_cpu_mask_test(&ready, cpu))
+			continue;
+		target = amd64_percpu_get(cpu);
+		if (handle == HAL_SPACE_SYS ||
+		    __atomic_load_n(&target->current_space, __ATOMIC_ACQUIRE) ==
+		    handle)
+			pending |= (uint64)1U << cpu;
+	}
+	request->space = handle;
+	request->vaddr = vaddr;
+	request->size = size;
+	__atomic_store_n(&request->pending, pending, __ATOMIC_RELEASE);
+	for (cpu = 0; cpu < hal_cpu_count(); cpu++)
+		if ((pending & ((uint64)1U << cpu)) != 0 &&
+		    amd64_lapic_send_vector(amd64_smp_apic_id(cpu),
+		    AMD64_VECTOR_TLB) != HAL_OK)
+			HAL_FATAL("amd64 TLB shootdown delivery failed");
+	if (handle == HAL_SPACE_SYS || AMD64_CURRENT_SPACE == handle)
+		asm_flush_tlb();
+	while (__atomic_load_n(&request->pending, __ATOMIC_ACQUIRE) != 0)
+		__asm__ volatile("pause");
+	__atomic_store_n(&request->active, 0U, __ATOMIC_RELEASE);
+}
+
+void
+amd64_tlb_interrupt(void)
+{
+	hal_cpu_id_t cpu = hal_cpu_current(), sender;
+	uint64 bit = (uint64)1U << cpu;
+	hal_irq_ack_t acknowledge = amd64_irq_ack_begin(AMD64_VECTOR_TLB, -1);
+
+	for (sender = 0; sender < hal_cpu_count(); sender++) {
+		struct amd64_shootdown_request *request = &shootdowns[sender];
+		if (__atomic_load_n(&request->active, __ATOMIC_ACQUIRE) != 0 &&
+		    (__atomic_load_n(&request->pending, __ATOMIC_ACQUIRE) & bit) != 0) {
+			asm_flush_tlb();
+			(void)__atomic_fetch_and(&request->pending, ~bit,
+			    __ATOMIC_RELEASE);
+		}
+	}
+	hal_irq_send_eoi(acknowledge);
 }
 
 void hal_page_flush_tlb(hal_space_t handle)
 {
-	if (handle == HAL_SPACE_SYS || handle == current_space) asm_flush_tlb();
+	shootdown(handle, NULL, 0);
+}
+
+void hal_page_flush_tlb_range(hal_space_t handle, void *vaddr, size_t size)
+{
+	if (size != 0)
+		shootdown(handle, vaddr, size);
 }
 
 size_t hal_page_get_page_size(int level)
@@ -376,6 +564,8 @@ void hal_page_get_user_range(uintptr_t *minimum, uintptr_t *limit)
 
 void hal_amd64_space_memory_stats(uint32 *spaces, uint32 *tables)
 {
-	if (spaces != NULL) *spaces = space_count;
-	if (tables != NULL) *tables = page_table_count;
+	if (spaces != NULL)
+		*spaces = __atomic_load_n(&space_count, __ATOMIC_RELAXED);
+	if (tables != NULL)
+		*tables = __atomic_load_n(&page_table_count, __ATOMIC_RELAXED);
 }

@@ -118,6 +118,30 @@ IRQ 13
 IRQ 14
 IRQ 15
 
+.global amd64_notify_entry
+amd64_notify_entry:
+	pushq $0
+	pushq $AMD64_VECTOR_NOTIFY
+	jmp amd64_common_interrupt
+
+.global amd64_tlb_entry
+amd64_tlb_entry:
+	pushq $0
+	pushq $AMD64_VECTOR_TLB
+	jmp amd64_common_interrupt
+
+.global amd64_error_entry
+amd64_error_entry:
+	pushq $0
+	pushq $AMD64_VECTOR_ERROR
+	jmp amd64_common_interrupt
+
+.global amd64_spurious_entry
+amd64_spurious_entry:
+	pushq $0
+	pushq $AMD64_VECTOR_SPURIOUS
+	jmp amd64_common_interrupt
+
 .global amd64_syscall_entry
 amd64_syscall_entry:
 	pushq $0

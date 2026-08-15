@@ -55,12 +55,15 @@ PY
 
 "$repo/build.sh" arch-image "$arch_profile"
 
+install_args=(--partition 1 --install-disk-stubs)
+if test -n "${ZEDBSD_BOOT_CFG:-}"; then
+	install_args+=(--boot-cfg "$ZEDBSD_BOOT_CFG")
+fi
+
 ZEDBSD_FILES="${ZEDBSD_FILES:-}" \
 ZEDBSD_ARCH_PROFILE="$arch_profile" ZEDBSD_ARCH_IMAGE="$arch_image" \
 DISK_HEADS="$heads" DISK_SECTORS="$sectors" \
-	"$repo/scripts/install-image.sh" --partition 1 \
-	--install-disk-stubs "$output" "${ZEDBSD_KERNEL:-}" \
-	"${ZEDBSD_BOOT_CFG:-}"
+	"$repo/scripts/install-image.sh" "${install_args[@]}" "$output"
 
 sha256sum "$output"
 printf 'zedBSD HDD test image: %s\n' "$output"

@@ -69,6 +69,9 @@ static void (*allocator_free)(void *p);
 void
 hal_set_allocator(void *(*alloc)(size_t size), void (*free_fn)(void *p))
 {
+	if (alloc == NULL || free_fn == NULL || allocator_alloc != NULL ||
+	    allocator_free != NULL)
+		HAL_FATAL("hal_set_allocator must be called exactly once");
 	allocator_alloc = alloc;
 	allocator_free = free_fn;
 }
@@ -89,19 +92,25 @@ hal_free(void *ptr)
 	allocator_free(ptr);
 }
 
+void
+hal_halt(void)
+{
+	asm_hlt();
+}
+
 /* --------------------------------------------------------------- */
 
 int
 hal_putchar(int c)
 {
-	cons_putc(c);
+	hal_cons_putc(c);
 	return c;
 }
 
 int
 hal_puts(const char *s)
 {
-	cons_puts(s);
+	hal_cons_write(s);
 	return 0;
 }
 
@@ -119,11 +128,11 @@ put_unsigned(uint32 value, unsigned base, int upper, int width, int zero)
 		value /= base;
 	} while (value != 0);
 	while (width > n) {
-		cons_putc(zero ? '0' : ' ');
+		hal_cons_putc(zero ? '0' : ' ');
 		width--;
 	}
 	while (n > 0)
-		cons_putc(digits[--n]);
+		hal_cons_putc(digits[--n]);
 }
 
 int
@@ -138,7 +147,7 @@ hal_printf(const char *format, ...)
 		int width = 0;
 
 		if (*p != '%') {
-			cons_putc(*p);
+			hal_cons_putc(*p);
 			continue;
 		}
 		p++;
@@ -152,19 +161,19 @@ hal_printf(const char *format, ...)
 		}
 		switch (*p) {
 		case 'c':
-			cons_putc(__builtin_va_arg(ap, int));
+			hal_cons_putc(__builtin_va_arg(ap, int));
 			break;
 		case 's': {
 			const char *s = __builtin_va_arg(ap, const char *);
 
-			cons_puts(s != NULL ? s : "(null)");
+			hal_cons_write(s != NULL ? s : "(null)");
 			break;
 		}
 		case 'd': {
 			int v = __builtin_va_arg(ap, int);
 
 			if (v < 0) {
-				cons_putc('-');
+				hal_cons_putc('-');
 				v = -v;
 			}
 			put_unsigned((uint32)v, 10, 0, width, zero);
@@ -183,12 +192,12 @@ hal_printf(const char *format, ...)
 				     width, zero);
 			break;
 		case '%':
-			cons_putc('%');
+			hal_cons_putc('%');
 			break;
 		default:
-			cons_putc('%');
+			hal_cons_putc('%');
 			if (*p != '\0')
-				cons_putc(*p);
+				hal_cons_putc(*p);
 			else
 				p--;
 			break;
@@ -217,3 +226,14 @@ hal_fatal(const char *file, int line, const char *s)
 	for (;;)
 		asm_hlt();
 }
+
+void hal_mb(void)
+{
+	unsigned value = 0;
+	__asm__ volatile("lock; addl $0,%0" : "+m"(value) : : "memory");
+}
+void hal_rmb(void) { __asm__ volatile("" ::: "memory"); }
+void hal_wmb(void) { __asm__ volatile("" ::: "memory"); }
+void hal_io_mb(void) { hal_mb(); }
+void hal_io_rmb(void) { hal_rmb(); }
+void hal_io_wmb(void) { hal_wmb(); }

@@ -5,6 +5,13 @@ void asm_cli(void) { __asm__ volatile("cli" ::: "memory"); }
 void asm_sti(void) { __asm__ volatile("sti" ::: "memory"); }
 void asm_hlt(void) { __asm__ volatile("hlt"); }
 
+void hal_mb(void) { __asm__ volatile("mfence" ::: "memory"); }
+void hal_rmb(void) { __asm__ volatile("lfence" ::: "memory"); }
+void hal_wmb(void) { __asm__ volatile("sfence" ::: "memory"); }
+void hal_io_mb(void) { hal_mb(); }
+void hal_io_rmb(void) { hal_rmb(); }
+void hal_io_wmb(void) { hal_wmb(); }
+
 void asm_outb(uint16 port, uint8 data)
 {
 	__asm__ volatile("outb %0,%w1" : : "a"(data), "Nd"(port));

@@ -15,7 +15,7 @@
 
 struct i386_page_table {
 	uintptr_t vaddr;
-	struct pmem_desc memory;
+	struct hal_pmem memory;
 	uint32 *pte;
 	struct i386_page_table *next;
 };
@@ -23,7 +23,7 @@ struct i386_page_table {
 struct i386_space {
 	uint32 magic;
 	int space_id;
-	struct pmem_desc directory_memory;
+	struct hal_pmem directory_memory;
 	uint32 *pdt;
 	struct i386_page_table *page_tables;
 };

@@ -53,7 +53,7 @@ static void unlink_region_page(struct vm_page *page)
 static int discard_page(struct vm_page *page)
 {
 	if (hal_page_unmap(page->vm->space, (void *)page->address,
-			   PAGE_SIZE) != HAL_PMEM_SUCCESS)
+			   PAGE_SIZE) != HAL_OK)
 		return EIO;
 	unlink_region_page(page);
 	vm_page_untrack(page);
@@ -77,7 +77,7 @@ static int swap_out_page(struct vm_page *page)
 		return error;
 	page->flags |= VM_PAGE_BUSY;
 	if (hal_page_unmap(page->vm->space, (void *)page->address,
-			   PAGE_SIZE) != HAL_PMEM_SUCCESS) {
+			   PAGE_SIZE) != HAL_OK) {
 		swap_free_slot(backend, slot);
 		page->flags &= ~VM_PAGE_BUSY;
 		return EIO;
@@ -118,7 +118,7 @@ int vm_reclaim_one(struct vm_page *avoid)
 				continue;
 			}
 			if (hal_page_query(page->vm->space, (void *)page->address,
-					   &flags) != HAL_PMEM_SUCCESS) {
+					   &flags) != HAL_OK) {
 				page = next;
 				continue;
 			}

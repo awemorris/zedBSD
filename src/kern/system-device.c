@@ -64,7 +64,7 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 		output.physical_reserved = hs.physical_reserved;
 		output.physical_allocated = hs.physical_allocated;
 		output.physical_free = hs.physical_free;
-		output.image_low = ks.low_image_bytes; output.image_high = ks.high_image_bytes;
+		output.image = ks.image_bytes;
 		output.heap_fixed = ks.heap_fixed; output.heap_current = ks.heap_current;
 		output.heap_peak = ks.heap_peak; output.heap_largest_free = ks.heap_largest_free;
 		output.heap_largest_failed = ks.heap_largest_failed;

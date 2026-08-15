@@ -18,11 +18,13 @@ AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
 AMD64_HAL_SOURCES := src/hal/amd64/asm.c src/hal/amd64/lib.c \
 	src/hal/amd64/page.c src/hal/amd64/space.c src/hal/amd64/cmain.c \
 	src/hal/amd64/descriptor.c src/hal/amd64/int.c src/hal/amd64/irq.c \
-	src/hal/amd64/task.c src/hal/amd64/fb.c \
+	src/hal/amd64/task.c src/hal/amd64/percpu.c src/hal/amd64/smp.c \
 	src/hal/amd64/bsp-pcat/boot.c src/hal/amd64/bsp-pcat/cons.c \
-	src/hal/amd64/bsp-pcat/pic.c src/hal/amd64/bsp-pcat/clock.c
+	src/hal/amd64/bsp-pcat/pic.c src/hal/amd64/bsp-pcat/clock.c \
+	src/hal/amd64/bsp-pcat/acpi.c src/hal/amd64/bsp-pcat/lapic.c \
+	src/hal/amd64/bsp-pcat/ioapic.c
 AMD64_HAL_ASM := src/hal/amd64/locore.S src/hal/amd64/trap.S \
-	src/hal/amd64/dispatch.S
+	src/hal/amd64/dispatch.S src/hal/amd64/ap-trampoline.S
 AMD64_HAL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AMD64_HAL_SOURCES)) \
 	$(patsubst %.S,$(BUILD)/%.o,$(AMD64_HAL_ASM))
 
@@ -47,8 +49,8 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
 	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
 	src/kern/graphics-device.c src/kern/system-device.c \
-	src/kern/pcat/font.c src/kern/pcat/graphics.c \
-	src/kern/pcat/unsupported-devices.c src/kern/init.c
+	src/kern/pcat/font.c drivers/pcat-graphics.c \
+	src/kern/init.c
 AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES)
 AMD64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
 	$(AMD64_KERNEL_SOURCES))

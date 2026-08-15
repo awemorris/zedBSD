@@ -8,6 +8,7 @@
 #include "kern/internal.h"
 #include "kern/clock.h"
 #include "kern/exec.h"
+#include "kern/graphics-device.h"
 #include "kern/messages.h"
 #include "kern/platform.h"
 #include "kern/vfs.h"
@@ -117,7 +118,6 @@ static int activate_automatic_target(const struct startup_state *state)
 	curdev = state->auto_device;
 	curpart = state->auto_partition;
 	select_disk_home(curdev);
-	kernel_name[0] = kernel_arg[0] = 0;
 	return 1;
 }
 
@@ -159,7 +159,7 @@ int run_autoexec(void)
 	 * firmware text display and erase every GDC graphics plane before its
 	 * selected zedBSD command runs.  Real Cirrus-equipped machines retain the
 	 * old graphics VRAM contents when the display is switched back to GDC. */
-	kern_platform_restore_text();
+	graphics_device_restore_text();
 	hal_cons_reset();
 	hal_cons_set_mode(HAL_CONS_TERMINAL);
 	if (!script_ok) {
@@ -312,7 +312,6 @@ static void chain_menu_device(unsigned ordinal)
 	}
 	curdev = di;
 	curpart = -1;
-	kernel_name[0] = kernel_arg[0] = 0;
 	puts("Chain boot is not available on the HAL yet.\n");
 }
 
@@ -489,4 +488,3 @@ int startup_menu(struct startup_state *state)
 		}
 	}
 }
-

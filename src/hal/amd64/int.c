@@ -1,11 +1,11 @@
 /* amd64 IDT, exception and syscall dispatch. */
-#include <kern/sched.h>
 #include <hal/hal.h>
 #include <errno.h>
 #include "int.h"
 #include "task.h"
 #include "irq.h"
 #include "asm.h"
+#include "space.h"
 
 struct amd64_idt_entry {
 	uint16 offset_low;
@@ -23,13 +23,7 @@ struct amd64_idtr {
 } __attribute__((packed));
 
 static struct amd64_idt_entry idt[256] __attribute__((aligned(16)));
-static int resched_flag;
 static hal_syscall_handler_t syscall_handler;
-static hal_user_return_handler_t user_return_handler;
-void hal_user_return_set_handler(hal_user_return_handler_t h) { user_return_handler = h; }
-void hal_user_return_invoke(void) { if (user_return_handler != NULL) user_return_handler(); }
-static hal_user_int_handler_t user_int_handler;
-static hal_user_fault_handler_t user_fault_handler;
 static hal_trap_handler_t trap_handlers[5];
 
 _Static_assert(sizeof(struct amd64_idt_entry) == 16, "amd64 IDT entry");
@@ -49,9 +43,17 @@ set_gate(unsigned vector, unsigned dpl, void *handler)
 }
 
 void
-amd64_int_init(void)
+amd64_int_load(void)
 {
 	struct amd64_idtr idtr;
+	idtr.limit = sizeof(idt) - 1U;
+	idtr.base = (uintptr_t)idt;
+	asm_lidt(&idtr);
+}
+
+void
+amd64_int_init(void)
+{
 	unsigned index;
 	for (index = 0; index < 256; index++)
 		set_gate(index, 0, amd64_undefined_entry);
@@ -60,16 +62,14 @@ amd64_int_init(void)
 	idt[8].ist = 1;
 	for (index = 0; index < 16; index++)
 		set_gate(INT_IRQ_BASE + index, 0, amd64_irq_table[index]);
+	set_gate(AMD64_VECTOR_NOTIFY, 0, amd64_notify_entry);
+	set_gate(AMD64_VECTOR_TLB, 0, amd64_tlb_entry);
+	set_gate(AMD64_VECTOR_ERROR, 0, amd64_error_entry);
+	set_gate(AMD64_VECTOR_SPURIOUS, 0, amd64_spurious_entry);
 	set_gate(INT_SYSCALL, 3, amd64_syscall_entry);
-	idtr.limit = sizeof(idt) - 1U;
-	idtr.base = (uintptr_t)idt;
-	asm_lidt(&idtr);
+	amd64_int_load();
 }
 
-void int_set_resched_flag(void) { resched_flag = 1; }
-void hal_reschedule_on_interrupt_return(void) { resched_flag = 1; }
-void hal_user_int_set_handler(hal_user_int_handler_t h) { user_int_handler = h; }
-void hal_user_fault_set_handler(hal_user_fault_handler_t h) { user_fault_handler = h; }
 void hal_syscall_set_handler(hal_syscall_handler_t h) { syscall_handler = h; }
 
 void
@@ -93,19 +93,13 @@ handle_fault(struct amd64_interrupt_frame *frame)
 	    HAL_TRAP_CAUSE_MACHINE_CHECK;
 
 	if ((frame->cs & 3U) == 3U) {
-		struct hal_user_trap trap;
 		int handled;
-		trap.vector = (uint32)vector;
-		trap.cs = (uint32)frame->cs;
-		trap.eip = frame->rip;
-		trap.eax = frame->rax;
-		trap.error_code = frame->error_code;
-		trap.fault_address = address;
 		amd64_task_enter_user_frame(frame);
-		handled = user_fault_handler != NULL &&
-		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS;
+		handled = kernel_user_fault_handler((uint32)vector,
+		    (uint32)frame->cs, frame->rip, frame->error_code, address) ==
+		    HAL_TRAP_RET_SUCCESS;
 		if (handled) {
-			hal_user_return_invoke();
+			kernel_user_return_handler();
 			amd64_task_leave_user_frame();
 			return;
 		}
@@ -126,18 +120,20 @@ void
 int_handler(struct amd64_interrupt_frame *frame)
 {
 	int vector = (int)frame->vector;
-	resched_flag = 0;
 	if (vector >= INT_IRQ_BASE && vector <= INT_IRQ_BASE + IRQ_MAX) {
 		irq_handler(vector - INT_IRQ_BASE);
+	} else if (vector == AMD64_VECTOR_NOTIFY) {
+		amd64_notify_interrupt();
+	} else if (vector == AMD64_VECTOR_TLB) {
+		amd64_tlb_interrupt();
+	} else if (vector == AMD64_VECTOR_ERROR) {
+		amd64_error_interrupt();
+	} else if (vector == AMD64_VECTOR_SPURIOUS) {
+		return;
 	} else if (vector == INT_SYSCALL && (frame->cs & 3U) == 3U) {
 		uintptr_t args[HAL_SYSCALL_ARGS];
-		struct hal_user_trap trap;
-		trap.vector = (uint32)vector;
-		trap.cs = (uint32)frame->cs;
-		trap.eip = frame->rip;
-		trap.eax = frame->rax;
-		trap.error_code = trap.fault_address = 0;
-		if (user_int_handler != NULL) user_int_handler(&trap);
+		kernel_user_int_handler((uint32)vector, (uint32)frame->cs,
+		    frame->rip, frame->rax);
 		args[0] = (uintptr_t)frame->rbx;
 		args[1] = (uintptr_t)frame->rcx;
 		args[2] = (uintptr_t)frame->rdx;
@@ -148,12 +144,11 @@ int_handler(struct amd64_interrupt_frame *frame)
 		frame->rax = syscall_handler != NULL ?
 		    (uint64)syscall_handler((uint32)frame->rax, args) :
 		    (uint64)(intptr_t)-ENOSYS;
-		hal_user_return_invoke();
+		kernel_user_return_handler();
 		amd64_task_leave_user_frame();
 	} else if (vector >= 0 && vector < 32) {
 		handle_fault(frame);
 	} else {
 		HAL_FATAL("undefined amd64 interrupt");
 	}
-	if (resched_flag) sched_yield();
 }

@@ -48,8 +48,7 @@ print_vmstat(void)
 	print_stat("physical.reserved", hal_stats.physical_reserved);
 	print_stat("physical.allocated", hal_stats.physical_allocated);
 	print_stat("physical.free", hal_stats.physical_free);
-	print_stat("image.low", kern_stats.low_image_bytes);
-	print_stat("image.high", kern_stats.high_image_bytes);
+	print_stat("image", kern_stats.image_bytes);
 	print_stat("heap.fixed", kern_stats.heap_fixed);
 	print_stat("heap.current", kern_stats.heap_current);
 	print_stat("heap.peak", kern_stats.heap_peak);
@@ -90,7 +89,7 @@ static uint32_t raw_key(void)
 {
 	/* A blocking read must never leave the hardware cursor stale or hidden. */
 	update_cursor();
-	return (uint32_t)cons_getc();
+	return (uint32_t)hal_cons_getc();
 }
 int key(void)
 {
@@ -247,7 +246,6 @@ static int selectdisk(const char *c, const char *n)
 		    devs[i].display_index == ix) {
 			curdev = i;
 			curpart = -1;
-			kernel_name[0] = kernel_arg[0] = 0;
 			scanparts(i);
 			return 1;
 		}
@@ -265,7 +263,6 @@ static int selectpart(const char *s)
 				return 0;
 			curpart = i;
 			select_disk_home(curdev);
-			kernel_name[0] = kernel_arg[0] = 0;
 			return 1;
 		}
 	return 0;
@@ -489,7 +486,7 @@ int command(char *s)
 #endif
 	if (streq(v[0], "help")) {
 		puts("help echo env set unset pause wait device probe-ide probe-scsi "
-		     "disk part pwd cd ls cat source kernel arg boot linux "
+		     "disk part pwd cd ls cat source "
 		     "run noct emacs vmstat reboot halt\n");
 		return 1;
 	}
@@ -601,53 +598,6 @@ int command(char *s)
 		return n <= 2 && vfs_ls(n == 2 ? v[1] : ".");
 	if (streq(v[0], "cat"))
 		return n == 2 && catfile(v[1]);
-	if (streq(v[0], "kernel")) {
-		if (n == 1) {
-			puts(kernel_name);
-			putc('\n');
-			return 1;
-		}
-		if (!strcopy(kernel_name, v[1], sizeof(kernel_name)))
-			return 0;
-		kernel_arg[0] = 0;
-		return 1;
-	}
-	if (streq(v[0], "arg")) {
-		kernel_arg[0] = 0;
-		unsigned z = 0;
-		for (int i = 1; i < n; i++) {
-			if (i > 1 && z < 255)
-				kernel_arg[z++] = ' ';
-			for (char *p = v[i]; *p && z < 255;)
-				kernel_arg[z++] = *p++;
-		}
-		kernel_arg[z] = 0;
-		return 1;
-	}
-	if (streq(v[0], "linux")) {
-		if (n < 2)
-			return 0;
-		if (!strcopy(kernel_name, v[1], sizeof(kernel_name)))
-			return 0;
-		kernel_arg[0] = 0;
-		unsigned z = 0;
-		for (int i = 2; i < n; i++) {
-			if (i > 2)
-				kernel_arg[z++] = ' ';
-			for (char *p = v[i]; *p && z < 255;)
-				kernel_arg[z++] = *p++;
-		}
-		kernel_arg[z] = 0;
-		return linuxboot();
-	}
-	if (streq(v[0], "boot")) {
-		if (kernel_name[0])
-			return linuxboot();
-		if (curdev < 0)
-			return 0;
-		puts("Chain boot is not available on the HAL yet.\n");
-		return 0;
-	}
 	if (streq(v[0], "source")) {
 		struct file *file;
 		off_t size;

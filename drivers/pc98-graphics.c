@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "kern/platform.h"
+#include "kern/graphics-driver.h"
 #include "kern/pc98/font.h"
+#include "drivers/pc98-graphics.h"
 #include "hal/i386/bsp-pc98/display.h"
 
 #include "beui-pc98-auto.h"
@@ -8,7 +9,10 @@
 #include <noct/beui.h>
 #include <string.h>
 
-#define CIRRUS_APERTURE 0xf0000000U
+#define CIRRUS_PADDR 0xf0000000U
+
+static struct hal_pmem gdc_memory[4];
+static struct hal_pmem cirrus_memory;
 
 static struct noct_beui_pc98_auto display;
 static struct noct_beui_hal backend_hal;
@@ -40,50 +44,68 @@ static int display_stop(void *context)
 	return zedbsd_pc98_display_graphics_stop();
 }
 
-int kern_platform_graphics_init(uint64_t (*milliseconds)(void *),
-				int (*key_state)(void *, int),
-				void (*drain)(void *))
+static int pc98_graphics_prepare(void)
 {
-	(void)milliseconds;
-	(void)key_state;
-	(void)drain;
+	static const hal_physaddr_t plane_address[4] = {
+		0x000a8000U, 0x000b0000U, 0x000b8000U, 0x000e0000U
+	};
+	struct hal_pmem_request request;
+	unsigned i;
+
+	memset(&request, 0, sizeof(request));
+	request.size = 0x8000U;
+	request.alignment = 0x1000U;
+	request.type = HAL_PMEM_TYPE_VRAM;
+	request.attr = HAL_PMEM_ATTR_NOCACHE;
+	for (i = 0; i < 4; i++) {
+		request.paddr = plane_address[i];
+		if (hal_pmem_alloc(&request, &gdc_memory[i]) != HAL_OK)
+			goto fail;
+	}
+	request.paddr = CIRRUS_PADDR;
+	request.size = 4U * 1024U * 1024U;
+	if (hal_pmem_alloc(&request, &cirrus_memory) != HAL_OK)
+		goto fail;
 	noct_beui_pc98_auto_default(&display, display_reset, display_stop, NULL,
 		port_in8, port_out8, NULL,
-		(volatile uint8_t *)CIRRUS_APERTURE);
+		(volatile uint8_t *)cirrus_memory.vaddr);
 	/* Kernel code may run while a user CR3 is active. */
-	display.gdc.planes[0] = (volatile uint8_t *)0x800a8000U;
-	display.gdc.planes[1] = (volatile uint8_t *)0x800b0000U;
-	display.gdc.planes[2] = (volatile uint8_t *)0x800b8000U;
-	display.gdc.planes[3] = (volatile uint8_t *)0x800e0000U;
+	for (i = 0; i < 4; i++)
+		display.gdc.planes[i] =
+		    (volatile uint8_t *)gdc_memory[i].vaddr;
 	if (!noct_beui_pc98_auto_make_hal(&backend_hal, &display))
-		return 0;
+		goto fail;
 	native_display = backend_hal.display;
 	return 1;
+
+fail:
+	if (cirrus_memory.size != 0)
+		(void)hal_pmem_free(&cirrus_memory);
+	while (i != 0) {
+		i--;
+		if (gdc_memory[i].size != 0)
+			(void)hal_pmem_free(&gdc_memory[i]);
+	}
+	return 0;
 }
 
-int kern_platform_graphics_clear(void)
+static int pc98_graphics_clear(void *context)
 {
+	(void)context;
 	return noct_beui_pc98_gdc_clear_graphics(&display.gdc);
 }
 
-int kern_platform_graphics_enter(struct kern_graphics_mode *mode)
+static int pc98_graphics_enter(void *context, struct kern_graphics_mode *mode)
 {
 	struct noct_beui_display_info info;
+	(void)context;
 	if (mode == NULL || native_display.enter == NULL)
 		return 0;
 	memset(&info, 0, sizeof(info));
 	info.preferred_bits_per_pixel = mode->preferred_bits_per_pixel;
 	hal_printf("graphics: enter request: preferred %u bpp\n",
 	    mode->preferred_bits_per_pixel);
-	/* Blank both PC-98 text and attribute VRAM while the motherboard GDC is
-	 * still selected.  The Cirrus probe and mode setup can take long enough
-	 * for stale attributes to be visible on real hardware. */
-	hal_cons_clear();
-	(void)hal_cons_set_cursor(0, 0);
-	hal_cons_show_cursor(0);
 	if (!native_display.enter(native_display.context, &info)) {
-		hal_cons_set_mode(HAL_CONS_TERMINAL);
-		hal_cons_show_cursor(1);
 		hal_printf("graphics: Cirrus and GDC mode entry failed\n");
 		return 0;
 	}
@@ -97,27 +119,18 @@ int kern_platform_graphics_enter(struct kern_graphics_mode *mode)
 	return 1;
 }
 
-void kern_platform_graphics_leave(void)
+static void pc98_graphics_leave(void *context)
 {
-	if (native_display.leave != NULL) {
-		/* Blank hidden text and attribute VRAM before the display handoff,
-		 * then blank them again after the backend has restored the motherboard
-		 * GDC.  The backend cleanup may change the active display and GDC
-		 * state, so only the second reset defines the visible post-BeUI
-		 * contents on real hardware. */
-		hal_cons_show_cursor(0);
-		hal_cons_clear();
+	(void)context;
+	if (native_display.leave != NULL)
 		native_display.leave(native_display.context);
-		hal_cons_reset();
-		hal_cons_set_mode(HAL_CONS_TERMINAL);
-		hal_cons_show_cursor(1);
-	}
 }
 
-int kern_platform_graphics_fill(const struct kern_graphics_rect *rect,
-				uint32_t color)
+static int pc98_graphics_fill(void *context,
+			     const struct kern_graphics_rect *rect, uint32_t color)
 {
 	struct noct_beui_rect native;
+	(void)context;
 	if (rect == NULL || native_display.fill == NULL)
 		return 0;
 	native.x = rect->x; native.y = rect->y;
@@ -125,17 +138,19 @@ int kern_platform_graphics_fill(const struct kern_graphics_rect *rect,
 	return native_display.fill(native_display.context, &native, color);
 }
 
-int kern_platform_graphics_line(unsigned x0, unsigned y0, unsigned x1,
-				unsigned y1, uint32_t color)
+static int pc98_graphics_line(void *context, unsigned x0, unsigned y0,
+			     unsigned x1, unsigned y1, uint32_t color)
 {
+	(void)context;
 	return native_display.line != NULL && native_display.line(
 		native_display.context, x0, y0, x1, y1, color);
 }
 
-int kern_platform_graphics_pattern_fill(const struct kern_graphics_rect *rect,
-					uint32_t color, uint64_t pattern)
+static int pc98_graphics_pattern_fill(void *context,
+	const struct kern_graphics_rect *rect, uint32_t color, uint64_t pattern)
 {
 	struct noct_beui_rect native;
+	(void)context;
 	if (rect == NULL || native_display.pattern_fill == NULL)
 		return 0;
 	native.x = rect->x; native.y = rect->y;
@@ -144,12 +159,12 @@ int kern_platform_graphics_pattern_fill(const struct kern_graphics_rect *rect,
 		color, pattern);
 }
 
-int kern_platform_graphics_blit(unsigned x, unsigned y,
-				const struct kern_graphics_image *image,
-				uint64_t pattern, int patterned)
+static int pc98_graphics_blit(void *context, unsigned x, unsigned y,
+	const struct kern_graphics_image *image, uint64_t pattern, int patterned)
 {
 	struct noct_beui_image native;
 	unsigned i;
+	(void)context;
 	if (image == NULL || image->palette_size > 256U)
 		return 0;
 	memset(&native, 0, sizeof(native));
@@ -170,11 +185,12 @@ int kern_platform_graphics_blit(unsigned x, unsigned y,
 		native_display.context, x, y, &native);
 }
 
-int kern_platform_graphics_flush(const struct kern_graphics_rect *rectangles,
-				 size_t count)
+static int pc98_graphics_flush(void *context,
+	const struct kern_graphics_rect *rectangles, size_t count)
 {
 	struct noct_beui_rect native[32];
 	size_t i;
+	(void)context;
 	if (count > 32U || native_display.flush == NULL)
 		return 0;
 	for (i = 0; i < count; i++) {
@@ -187,9 +203,30 @@ int kern_platform_graphics_flush(const struct kern_graphics_rect *rectangles,
 		count == 0 ? NULL : native, count);
 }
 
-int
-kern_platform_graphics_get_glyph(uint32_t codepoint, uint8_t font[32],
-				 unsigned *width, unsigned *height)
+static int
+pc98_graphics_get_glyph(void *context, uint32_t codepoint, uint8_t font[32],
+			 unsigned *width, unsigned *height)
 {
+	(void)context;
 	return pc98_font_get_glyph(codepoint, font, width, height);
+}
+
+static const struct graphics_driver_ops pc98_graphics_ops = {
+	.enter = pc98_graphics_enter,
+	.clear = pc98_graphics_clear,
+	.leave = pc98_graphics_leave,
+	.fill = pc98_graphics_fill,
+	.line = pc98_graphics_line,
+	.pattern_fill = pc98_graphics_pattern_fill,
+	.blit = pc98_graphics_blit,
+	.flush = pc98_graphics_flush,
+	.get_glyph = pc98_graphics_get_glyph,
+};
+
+int
+zedbsd_pc98_graphics_init(void)
+{
+	if (!pc98_graphics_prepare())
+		return 0;
+	return graphics_driver_register(&pc98_graphics_ops, NULL) == 0;
 }

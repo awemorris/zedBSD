@@ -11,6 +11,7 @@
 #include "libc/heap.h"
 #include "hal/hal.h"
 #include "kern/boot.h"
+#include "kern/clock.h"
 #include "kern/kernel.h"
 #include "kern/kmem.h"
 #include "kern/net.h"
@@ -22,44 +23,66 @@
 #include "kern/syscall.h"
 
 #define KERNEL_HEAP_SIZE (512U * 1024U)
-#define SYS_START 0x80000000U
-
 static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
 	__attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
 static struct zedbsd_heap kernel_heap;
+static volatile unsigned kernel_heap_lock;
 
-#ifdef HAL_ARCH_ARM64
 extern char __kernel_vma_start[], __kernel_vma_end[];
-#elif defined(HAL_ARCH_SPARCV9)
-extern char __kernel_vma_start[], __kernel_vma_end[];
-extern char __kernel_phys_start[], __kernel_phys_end[];
-#else
-extern char __low_start[], __low_end[], __high_start[], __high_end[];
-#endif
+
+static bool
+kernel_heap_lock_enter(void)
+{
+	bool enabled = hal_irq_disable();
+	while (__atomic_exchange_n(&kernel_heap_lock, 1U,
+	    __ATOMIC_ACQUIRE) != 0)
+		hal_compiler_barrier();
+	return enabled;
+}
+
+static void
+kernel_heap_lock_leave(bool enabled)
+{
+	__atomic_store_n(&kernel_heap_lock, 0U, __ATOMIC_RELEASE);
+	if (enabled)
+		hal_irq_enable();
+}
 
 void *
 kern_malloc(size_t size)
 {
-	return zedbsd_heap_alloc(&kernel_heap, size);
+	void *result;
+	bool enabled = kernel_heap_lock_enter();
+	result = zedbsd_heap_alloc(&kernel_heap, size);
+	kernel_heap_lock_leave(enabled);
+	return result;
 }
 
 void *
 kern_calloc(size_t count, size_t size)
 {
-	return zedbsd_heap_calloc(&kernel_heap, count, size);
+	void *result;
+	bool enabled = kernel_heap_lock_enter();
+	result = zedbsd_heap_calloc(&kernel_heap, count, size);
+	kernel_heap_lock_leave(enabled);
+	return result;
 }
 
 void
 kern_free(void *pointer)
 {
+	bool enabled = kernel_heap_lock_enter();
 	zedbsd_heap_free(&kernel_heap, pointer);
+	kernel_heap_lock_leave(enabled);
 }
 
 void
 kern_memory_get_stats(struct kern_memory_stats *stats)
 {
+	bool enabled;
 	if (stats == NULL)
 		return;
+	enabled = kernel_heap_lock_enter();
 	stats->heap_fixed = KERNEL_HEAP_SIZE;
 	stats->heap_current = zedbsd_heap_current_instance(&kernel_heap);
 	stats->heap_peak = zedbsd_heap_peak_instance(&kernel_heap);
@@ -67,38 +90,12 @@ kern_memory_get_stats(struct kern_memory_stats *stats)
 		zedbsd_heap_largest_free_instance(&kernel_heap);
 	stats->heap_largest_failed =
 		zedbsd_heap_largest_failed_instance(&kernel_heap);
-#if defined(HAL_ARCH_ARM64) || defined(HAL_ARCH_SPARCV9)
-	stats->low_image_bytes = 0;
-	stats->high_image_bytes = (size_t)(__kernel_vma_end - __kernel_vma_start);
-#else
-	stats->low_image_bytes = (size_t)(__low_end - __low_start);
-	stats->high_image_bytes = (size_t)(__high_end - __high_start);
-#endif
+	stats->image_bytes = (size_t)(__kernel_vma_end - __kernel_vma_start);
+	kernel_heap_lock_leave(enabled);
 }
 
 static void *kernel_alloc(size_t size) { return kern_malloc(size); }
 static void kernel_free(void *pointer) { kern_free(pointer); }
-
-static void
-reserve_loaded_image(void)
-{
-#ifdef HAL_ARCH_ARM64
-	pmem_reserve((hal_physaddr_t)((uintptr_t)__kernel_vma_start -
-	    0xffff000000000000ULL),
-	    (size_t)(__kernel_vma_end - __kernel_vma_start));
-#elif defined(HAL_ARCH_SPARCV9)
-	pmem_reserve((hal_physaddr_t)(uintptr_t)__kernel_phys_start,
-	    (size_t)(__kernel_phys_end - __kernel_phys_start));
-#else
-	uintptr_t low_start = (uintptr_t)__low_start & ~SYS_START;
-	uintptr_t low_end = (uintptr_t)__low_end & ~SYS_START;
-	uintptr_t high_start = (uintptr_t)__high_start & ~SYS_START;
-	uintptr_t high_end = (uintptr_t)__high_end & ~SYS_START;
-
-	pmem_reserve((hal_physaddr_t)low_start, low_end - low_start);
-	pmem_reserve((hal_physaddr_t)high_start, high_end - high_start);
-#endif
-}
 
 void
 kernel_entry(const void *handoff)
@@ -118,12 +115,19 @@ kernel_entry(const void *handoff)
 				 KERNEL_HEAP_SIZE);
 	(void)zedbsd_heap_set_active(&kernel_heap);
 	hal_set_allocator(kernel_alloc, kernel_free);
-	reserve_loaded_image();
 	hal_task_init();
 	process_init();
 	user_probe_init();
 	syscall_init();
 	sched_init();
+	if (hal_cpu_start_others() != HAL_OK)
+		hal_fatal(__FILE__, __LINE__, "secondary CPU startup failed");
+	/* Synchronize the shared kernel translation domain with newly ready CPUs. */
+	hal_page_flush_tlb_range(HAL_SPACE_SYS, __kernel_vma_start,
+	    ZEDBSD_PAGE_SIZE);
+	if (kern_cpu_notify_probe() != HAL_OK)
+		hal_fatal(__FILE__, __LINE__, "secondary CPU notification failed");
+	hal_printf("boot: CPUs ready: %u\n", hal_cpu_count());
 	if (process_reaper_start() != 0)
 		hal_fatal(__FILE__, __LINE__, "process reaper initialization failed");
 	if (net_init() != 0)
@@ -137,4 +141,14 @@ kernel_entry(const void *handoff)
 	    (unsigned)device_count);
 	hal_irq_enable();
 	kernel_main(h, devices, (unsigned)device_count);
+}
+
+void
+kernel_secondary_entry(hal_cpu_id_t cpu)
+{
+	(void)cpu;
+	for (;;) {
+		(void)hal_irq_disable();
+		hal_cpu_idle();
+	}
 }

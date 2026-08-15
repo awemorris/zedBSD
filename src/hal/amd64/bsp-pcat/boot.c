@@ -59,8 +59,10 @@ bsp_boot_init(const void *raw_boot_info)
 
 		if (raw_v2->size < sizeof(*raw_v2) ||
 		    (raw_v2->flags & (ZBL6_HANDOFF_FLAG_UEFI |
-		    ZBL6_HANDOFF_FLAG_MEMORY_MAP)) !=
-		    (ZBL6_HANDOFF_FLAG_UEFI | ZBL6_HANDOFF_FLAG_MEMORY_MAP) ||
+		    ZBL6_HANDOFF_FLAG_MEMORY_MAP |
+		    ZBL6_HANDOFF_FLAG_ACPI_RSDP)) !=
+		    (ZBL6_HANDOFF_FLAG_UEFI | ZBL6_HANDOFF_FLAG_MEMORY_MAP |
+		    ZBL6_HANDOFF_FLAG_ACPI_RSDP) ||
 		    raw_v2->boot_drive < 0x80U ||
 		    raw_v2->root_partition_scheme !=
 		    ZEDBSD_PARTITION_SCHEME_MBR ||
@@ -80,7 +82,8 @@ bsp_boot_init(const void *raw_boot_info)
 		    raw_v2->kernel_phys_end <= raw_v2->kernel_phys_start ||
 		    raw_v2->kernel_phys_end > 0x01200000ULL ||
 		    (raw_v2->bootstrap_cr3 & 0xfffU) != 0 ||
-		    raw_v2->bootstrap_cr3 >= 0x40000000ULL)
+		    raw_v2->bootstrap_cr3 >= 0x40000000ULL ||
+		    raw_v2->rsdp == 0 || raw_v2->rsdp >= 0x40000000ULL)
 			HAL_FATAL("invalid amd64 ZBL6 v2 handoff");
 		boot_info_v2 = *raw_v2;
 		source = (const void *)(uintptr_t)raw_v2->memory_ranges;
@@ -160,6 +163,13 @@ bsp_mem_range(uint32 index, uint64 *base, uint64 *size, uint32 *type)
 	*size = boot_memory_range[index].size;
 	*type = boot_memory_range[index].type;
 	return 1;
+}
+
+uint64
+bsp_acpi_rsdp(void)
+{
+	return boot_info_v2.magic == ZBL6_HANDOFF_MAGIC ?
+	    boot_info_v2.rsdp : 0;
 }
 
 const void *

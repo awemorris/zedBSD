@@ -143,48 +143,52 @@ void hal_page_get_user_range(uintptr_t *minimum, uintptr_t *limit)
 		*limit = 0x80000000U;
 }
 
-int hal_pmem_alloc(size_t size, struct hal_pmem *memory, uint32_t flags)
+int hal_pmem_alloc(const struct hal_pmem_request *request,
+	struct hal_pmem *memory)
 {
-	(void)flags;
-	if (fail_pages) return HAL_PMEM_NOSPACE;
-	memory->vaddr = (uintptr_t)calloc(1, size);
-	if (memory->vaddr == 0) return HAL_PMEM_NOSPACE;
-	memory->paddr = memory->vaddr & ~(uintptr_t)4095U;
-	memory->size = size;
+	if (fail_pages) return HAL_ERR_NOMEM;
+	memory->vaddr = calloc(1, request->size);
+	if (memory->vaddr == NULL) return HAL_ERR_NOMEM;
+	memory->paddr = (hal_physaddr_t)(uintptr_t)memory->vaddr &
+	    ~(hal_physaddr_t)4095U;
+	memory->size = request->size;
+	memory->type = request->type;
+	memory->attr = request->attr;
 	pages_allocated++;
-	return HAL_PMEM_SUCCESS;
+	return HAL_OK;
 }
 
 int hal_pmem_free(struct hal_pmem *memory)
 {
-	free((void *)memory->vaddr);
+	free(memory->vaddr);
 	pages_freed++;
-	return HAL_PMEM_SUCCESS;
+	memset(memory, 0, sizeof(*memory));
+	return HAL_OK;
 }
 
-int hal_page_map(hal_space_t handle, void *address, uintptr_t paddr,
+int hal_page_map(hal_space_t handle, void *address, hal_physaddr_t paddr,
 		 size_t size, uint32_t attr)
 {
 	struct fake_space *space = handle;
 	(void)address; (void)paddr; (void)size; (void)attr;
-	if (fail_map) return HAL_PMEM_BADDESC;
+	if (fail_map) return HAL_ERR_INVALID;
 	space->maps++;
-	return HAL_PMEM_SUCCESS;
+	return HAL_OK;
 }
 
 int hal_page_unmap(hal_space_t handle, void *address, size_t size)
 {
 	(void)handle; (void)address; (void)size;
 	pages_unmapped++;
-	return HAL_PMEM_SUCCESS;
+	return HAL_OK;
 }
 
 int hal_page_prot(hal_space_t handle, void *address, size_t size, uint32_t attr)
 {
 	(void)handle; (void)address; (void)size; (void)attr;
-	if (fail_protect) return HAL_PMEM_BADDESC;
+	if (fail_protect) return HAL_ERR_INVALID;
 	pages_protected++;
-	return HAL_PMEM_SUCCESS;
+	return HAL_OK;
 }
 
 int hal_page_query(hal_space_t handle, void *address, uint32_t *flags)
@@ -192,12 +196,12 @@ int hal_page_query(hal_space_t handle, void *address, uint32_t *flags)
 	(void)handle; (void)address;
 	if (flags != NULL)
 		*flags = 0;
-	return HAL_PMEM_SUCCESS;
+	return HAL_OK;
 }
 int hal_page_clear_flags(hal_space_t handle, void *address, uint32_t flags)
 {
 	(void)handle; (void)address; (void)flags;
-	return HAL_PMEM_SUCCESS;
+	return HAL_OK;
 }
 
 int main(void)

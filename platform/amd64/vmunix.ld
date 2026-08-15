@@ -59,6 +59,8 @@ SECTIONS
 	__low_end = __kernel_virt_end;
 	__high_start = __kernel_virt_end;
 	__high_end = __kernel_virt_end;
+	__kernel_vma_start = __kernel_virt_start;
+	__kernel_vma_end = __kernel_virt_end;
 
 	/DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }
 

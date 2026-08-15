@@ -258,6 +258,10 @@ hal_task_context_switch(hal_task_t handle)
 		HAL_FATAL("invalid HAL task switch");
 	if (to == from)
 		return;
+	if (to->run_cpu >= 0)
+		HAL_FATAL("i386 HAL task already running");
+	from->run_cpu = -1;
+	to->run_cpu = 0;
 	running_task = to;
 	hal_page_switch_space(to->space);
 	if (to->sys_stack != NULL)
@@ -305,6 +309,17 @@ void *hal_task_get_private(hal_task_t handle)
 hal_space_t hal_task_get_space(hal_task_t handle)
 {
 	return handle != NULL ? ((struct task_info *)handle)->space : HAL_SPACE_SYS;
+}
+
+int
+hal_task_transfer(hal_task_t handle, hal_cpu_id_t target_cpu)
+{
+	struct task_info *task = handle;
+	if (task == NULL || target_cpu != 0)
+		return HAL_ERR_INVALID;
+	if (task->run_cpu >= 0)
+		return HAL_ERR_BUSY;
+	return HAL_OK;
 }
 
 void

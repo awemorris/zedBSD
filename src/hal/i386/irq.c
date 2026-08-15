@@ -1,150 +1,167 @@
-/*
- * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
- *
- * IRQ management: the local interrupt lock, the ISR-task protocol, and
- * the dispatch called from the general interrupt handler.
- */
-
+/* i386 UP IRQ controller contract and task-based IRQ service. */
 #include <hal/hal.h>
-#include <kern/sched.h>
-#include <kern/thread.h>
 #include "irq.h"
 #include "pic.h"
 #include "asm.h"
 #include "clock.h"
-#include "int.h"
 
-void kernel_timer_handler(void);
+enum irq_mode { IRQ_MODE_NONE, IRQ_MODE_REALTIME, IRQ_MODE_TASK };
 
-/* IRQ service registry. */
 static struct irq_service_info irq_service[IRQ_MAX + 1];
 
-/*
- * Initialize IRQ management.
- */
 void
 irq_init(void)
 {
-	int i;
-
-	for (i = 0; i <= IRQ_MAX; i++)
-		irq_service[i].ist = NULL;
-
-	/* Initialize the interrupt controller; every IRQ starts masked. */
+	hal_memset(irq_service, 0, sizeof(irq_service));
 	pic_init();
 }
 
-/*
- * Disable local IRQ delivery, returning the previous state.
- */
-irqlock_t
-irq_acquire_lock(void)
+bool hal_irq_disable(void)
 {
-	int status = asm_get_eflags() & EFLAGS_IF;
-
+	bool enabled = (asm_get_eflags() & EFLAGS_IF) != 0;
 	asm_cli();
-	return status;
+	return enabled;
 }
 
-/*
- * Restore the interrupt-enable state saved by irq_acquire_lock().
- */
-void
-irq_unacquire_lock(irqlock_t lock)
-{
-	if (lock != 0)
-		asm_sti();
-}
+void hal_irq_enable(void) { asm_sti(); }
+void hal_irq_mask(int irq) { if (irq >= 0 && irq <= IRQ_MAX) pic_set_irq_mask(irq, 1); }
+void hal_irq_unmask(int irq) { if (irq >= 0 && irq <= IRQ_MAX) pic_set_irq_mask(irq, 0); }
 
-bool
-hal_irq_disable(void)
+static hal_irq_ack_t
+begin_ack(int irq)
 {
-	return irq_acquire_lock() != 0;
+	struct irq_service_info *service = &irq_service[irq];
+	if (service->in_flight)
+		HAL_FATAL("nested i386 IRQ acknowledgement");
+	service->in_flight = 1;
+	return (hal_irq_ack_t)(unsigned)(irq + 1);
 }
 
 void
-hal_irq_enable(void)
+hal_irq_send_eoi(hal_irq_ack_t acknowledge)
 {
-	asm_sti();
+	unsigned irq;
+	if (acknowledge == HAL_IRQ_ACK_NONE || acknowledge > IRQ_MAX + 1U)
+		HAL_FATAL("invalid i386 IRQ acknowledgement");
+	irq = (unsigned)acknowledge - 1U;
+	if (!irq_service[irq].in_flight)
+		HAL_FATAL("stale i386 IRQ acknowledgement");
+	irq_service[irq].in_flight = 0;
+	pic_send_eoi((int)irq);
 }
 
-/*
- * Begin waiting for an IRQ: register the running task as the service
- * task, unlink it from the scheduler (so it sleeps from the next yield
- * or preemption), unmask the IRQ, and yield.  The task resumes when
- * irq_handler() relinks it.
- */
-void
-irq_enter_isr(int irq_num)
+int
+hal_irq_set_handler(int irq, hal_irq_handler_t handler, void *argument)
 {
-	hal_task_t t;
-	struct thread *thread;
-	irqlock_t irqlock;
-
-	ENTER_IRQLOCK(irqlock)
-	{
-		/* Only one service task per IRQ. */
-		HAL_ASSERT(irq_service[irq_num].ist == NULL);
-
-		t = hal_task_get_current();
-		irq_service[irq_num].ist = t;
-		thread = hal_task_get_private(t);
-		HAL_ASSERT(thread != NULL);
-		thread->state = THREAD_SLEEPING;
-		sched_unlink(thread);
-
-		pic_set_irq_mask(irq_num, 0);
+	struct irq_service_info *service;
+	bool enabled;
+	if (irq < 0 || irq > IRQ_MAX || (handler == NULL && argument != NULL))
+		return HAL_ERR_INVALID;
+	enabled = hal_irq_disable();
+	service = &irq_service[irq];
+	if (service->in_handler || service->in_flight) {
+		if (enabled) hal_irq_enable();
+		return HAL_ERR_BUSY;
 	}
-	LEAVE_IRQLOCK(irqlock);
-
-	sched_yield();
-
-	/* The IRQ has fired and irq_handler() relinked this task. */
+	if (handler == NULL) {
+		pic_set_irq_mask(irq, 1);
+		if (service->mode == IRQ_MODE_TASK) {
+			if (enabled) hal_irq_enable();
+			return HAL_ERR_BUSY;
+		}
+		service->mode = IRQ_MODE_NONE;
+		service->handler = NULL;
+		service->argument = NULL;
+	} else {
+		if (service->mode != IRQ_MODE_NONE) {
+			if (enabled) hal_irq_enable();
+			return HAL_ERR_BUSY;
+		}
+		service->mode = IRQ_MODE_REALTIME;
+		service->handler = handler;
+		service->argument = argument;
+	}
+	if (enabled) hal_irq_enable();
+	return HAL_OK;
 }
 
-/*
- * Called when the interrupt service routine finishes.
- */
-void
-irq_leave_isr(int irq_num)
+int
+hal_irq_service_wait(int irq, hal_irq_ack_t *acknowledge)
 {
-	(void)irq_num;
+	struct irq_service_info *service;
+	bool enabled;
+	if (irq < 0 || irq > IRQ_MAX || irq == IRQ_TIMER || acknowledge == NULL)
+		return HAL_ERR_INVALID;
+	for (;;) {
+		enabled = hal_irq_disable();
+		service = &irq_service[irq];
+		if (service->mode == IRQ_MODE_REALTIME ||
+		    (service->waiter != NULL &&
+		    service->waiter != hal_task_get_current())) {
+			if (enabled) hal_irq_enable();
+			return HAL_ERR_BUSY;
+		}
+		service->mode = IRQ_MODE_TASK;
+		service->waiter = hal_task_get_current();
+		if (service->pending) {
+			service->pending = 0;
+			*acknowledge = service->acknowledge;
+			return HAL_OK;
+		}
+		pic_set_irq_mask(irq, 0);
+		if (enabled) hal_irq_enable();
+		hal_cpu_idle();
+		kernel_yield();
+	}
 }
 
-/*
- * IRQ dispatch; runs with interrupts disabled, from int_handler().
- */
-void
-irq_handler(int irq_num)
+int
+hal_irq_set_affinity(int irq, const struct hal_cpu_mask *requested)
 {
-	hal_task_t t;
-	struct thread *thread;
+	if (irq < 0 || irq > IRQ_MAX || requested == NULL ||
+	    (requested->bits[0] & 1U) == 0)
+		return HAL_ERR_INVALID;
+	irq_service[irq].requested = *requested;
+	return HAL_OK;
+}
 
-	/*
-	 * The interval timer is handled inline: count the tick, run the
-	 * scheduler's clock hook, and finish the IRQ.
-	 */
-	if (irq_num == IRQ_TIMER) {
+int
+hal_irq_get_affinity(int irq, struct hal_irq_affinity *result)
+{
+	if (irq < 0 || irq > IRQ_MAX || result == NULL)
+		return HAL_ERR_INVALID;
+	result->requested = irq_service[irq].requested;
+	hal_memset(&result->effective, 0, sizeof(result->effective));
+	result->effective.bits[0] = 1U;
+	return HAL_OK;
+}
+
+void
+irq_handler(int irq)
+{
+	struct irq_service_info *service;
+	hal_irq_ack_t acknowledge;
+	if (irq < 0 || irq > IRQ_MAX)
+		HAL_FATAL("invalid i386 IRQ");
+	service = &irq_service[irq];
+	acknowledge = begin_ack(irq);
+	if (irq == IRQ_TIMER) {
 		clock_handler();
-		kernel_timer_handler();
-		sched_clock();
-		pic_send_eoi(irq_num);
+		kernel_timer_handler(0, acknowledge);
 		return;
 	}
-
-	/*
-	 * Every other IRQ wakes its registered service task.
-	 */
-	pic_set_irq_mask(irq_num, 1);
-	pic_send_eoi(irq_num);
-
-	t = irq_service[irq_num].ist;
-	HAL_ASSERT(t != NULL);
-	irq_service[irq_num].ist = NULL;
-	thread = hal_task_get_private(t);
-	HAL_ASSERT(thread != NULL);
-	sched_wakeup(thread);
-
-	int_set_resched_flag();
+	if (service->mode == IRQ_MODE_REALTIME && service->handler != NULL) {
+		service->in_handler = 1;
+		service->handler(irq, acknowledge, service->argument);
+		service->in_handler = 0;
+		return;
+	}
+	if (service->mode == IRQ_MODE_TASK && service->waiter != NULL) {
+		pic_set_irq_mask(irq, 1);
+		service->acknowledge = acknowledge;
+		service->pending = 1;
+		return;
+	}
+	pic_set_irq_mask(irq, 1);
+	hal_irq_send_eoi(acknowledge);
 }

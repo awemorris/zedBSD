@@ -31,5 +31,15 @@
 #define AMD64_PTE_ADDR_MASK    0x000ffffffffff000
 
 #define AMD64_MSR_FS_BASE      0xc0000100U
+#define AMD64_MSR_GS_BASE      0xc0000101U
+
+#define AMD64_SMP_MAX_CPUS     64U
+#define AMD64_AP_TRAMPOLINE    0x00008000U
+#define AMD64_AP_STACK_SIZE    16384U
+
+#define AMD64_VECTOR_NOTIFY    0xf0U
+#define AMD64_VECTOR_TLB       0xf1U
+#define AMD64_VECTOR_ERROR     0xfeU
+#define AMD64_VECTOR_SPURIOUS  0xffU
 
 #endif

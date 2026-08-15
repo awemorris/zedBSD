@@ -7,8 +7,8 @@
 
 	.code32
 	/*
-	 * B98S header, version 2.  vmunix is a two-segment ELF and this
-	 * section leads the low segment at file offset 512.  file size,
+	 * B98S header, version 2.  This section leads the single kernel
+	 * PT_LOAD at file offset 512.  File size,
 	 * entry, and the payload byte-sum (file bytes from offset 532 to
 	 * the end) are patched in by scripts/patch-stage2.py.
 	 */

@@ -4,10 +4,9 @@
 #include "kern/partition.h"
 #include "kern/pc98/partition.h"
 #include "kern/pc98/partition-auto.h"
-#include "kern/pc98/linux-boot.h"
-#include "hal/i386/bsp-pc98/display.h"
 #include "drivers/pc98-ide.h"
 #include "drivers/pc98-lgy98.h"
+#include "drivers/pc98-graphics.h"
 #include <errno.h>
 #include <hal/hal.h>
 
@@ -58,6 +57,8 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 			hal_printf("net: LGY-98 initialization failed (%d)\n",
 			    network_error);
 	}
+	if (!zedbsd_pc98_graphics_init())
+		hal_printf("graphics: PC-98 driver unavailable\n");
 	return count;
 }
 
@@ -73,23 +74,6 @@ kern_platform_block_device(const struct zedbsd_device *device)
 	if (device == NULL || device->device_class != ZEDBSD_DEV_IDE)
 		return NULL;
 	return zedbsd_ide_pc98_bios_unit(device->bios_id);
-}
-
-int
-kern_platform_boot_linux(struct zedbsd_filesystem *filesystem,
-			 const char *path, const char *arguments,
-			 const struct zedbsd_device *devices, unsigned count,
-			 int boot_device)
-{
-	return pc98_linux_boot(filesystem, path, arguments, devices, count,
-			       boot_device);
-}
-
-void
-kern_platform_restore_text(void)
-{
-	(void)zedbsd_pc98_display_text_restore();
-	(void)kern_platform_graphics_clear();
 }
 
 void

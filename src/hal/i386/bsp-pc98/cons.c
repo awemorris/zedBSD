@@ -15,6 +15,7 @@ static enum hal_cons_mode console_mode;
 static unsigned cursor_row;
 static unsigned cursor_column;
 static int cursor_visible;
+static int console_suspended;
 static int software_cursor_drawn;
 static unsigned software_cursor_offset;
 static uint8_t software_cursor_attribute[2];
@@ -61,6 +62,8 @@ static void write_cell(unsigned row, unsigned column, uint16_t code,
 		       uint8_t attribute)
 {
 	unsigned offset = row * HAL_CONS_COLUMNS + column;
+	if (console_suspended)
+		return;
 
 	/* A double-cell software cursor may cover the cell being rewritten. */
 	software_cursor_remove();
@@ -93,16 +96,17 @@ void hal_cons_reset(void)
 
 static void scroll(void)
 {
-	for (unsigned row = 0; row + 1 < HAL_CONS_ROWS; row++)
-		for (unsigned column = 0; column < HAL_CONS_COLUMNS;
-		     column++) {
-			unsigned destination = row * HAL_CONS_COLUMNS + column;
-			unsigned source = destination + HAL_CONS_COLUMNS;
+	if (!console_suspended)
+		for (unsigned row = 0; row + 1 < HAL_CONS_ROWS; row++)
+			for (unsigned column = 0; column < HAL_CONS_COLUMNS;
+			     column++) {
+				unsigned destination = row * HAL_CONS_COLUMNS + column;
+				unsigned source = destination + HAL_CONS_COLUMNS;
 
-			text_vram[destination] = text_vram[source];
-			attribute_vram[destination * 2] =
-				attribute_vram[source * 2];
-		}
+				text_vram[destination] = text_vram[source];
+				attribute_vram[destination * 2] =
+					attribute_vram[source * 2];
+			}
 	hal_cons_clear_row(HAL_CONS_ROWS - 1);
 	cursor_row = HAL_CONS_ROWS - 1;
 }
@@ -414,11 +418,36 @@ void hal_cons_set_mode(enum hal_cons_mode mode)
 	console_mode = mode;
 }
 
+void hal_cons_suspend(void)
+{
+	if (console_suspended)
+		return;
+	software_cursor_remove();
+	(void)gdc_write(0x62, 0x4b);
+	(void)gdc_write(0x60, 0x0f);
+	(void)gdc_write(0x60, 0x20);
+	(void)gdc_write(0x60, 0x7b);
+	console_suspended = 1;
+}
+
+void hal_cons_resume(void)
+{
+	if (!console_suspended)
+		return;
+	console_suspended = 0;
+	console_mode = HAL_CONS_TERMINAL;
+	cursor_row = cursor_column = 0;
+	hal_cons_clear();
+	hal_cons_update_cursor();
+}
+
 /* Program CSRFORM as well as CSRW so firmware cannot leave the cursor hidden. */
 void hal_cons_update_cursor(void)
 {
 	unsigned address = cursor_row * HAL_CONS_COLUMNS + cursor_column;
 	int wide = 0;
+	if (console_suspended)
+		return;
 
 	software_cursor_remove();
 	if (cursor_visible && cursor_column + 1U < HAL_CONS_COLUMNS) {
@@ -744,7 +773,7 @@ int hal_cons_read_event(void)
 	return event;
 }
 
-int cons_getc(void)
+int hal_cons_getc(void)
 {
 	return hal_cons_read_event() & (int)HAL_KEY_EVENT_KEY_MASK;
 }
@@ -761,30 +790,9 @@ void hal_cons_drain_input(void)
 	tail = head;
 }
 
-void bsp_cons_init(void)
+void i386_bsp_cons_init(void)
 {
 	pc98_keyboard_reset(&keyboard);
 	head = tail = 0;
 	hal_cons_reset();
-}
-
-void cons_cls(void)
-{
-	hal_cons_clear();
-}
-
-void cons_putc(int character)
-{
-	hal_cons_putc(character);
-}
-
-void cons_puts(const char *utf8)
-{
-	hal_cons_write(utf8);
-}
-
-void cons_set_attr(int foreground, int background)
-{
-	(void)foreground;
-	(void)background;
 }

@@ -47,7 +47,13 @@ signal_pending_unblocked(const struct thread *thread)
 	return 0;
 }
 
-void signal_init(void) { hal_user_return_set_handler(signal_deliver_on_user_return); }
+void signal_init(void) { }
+
+void
+kernel_user_return_handler(void)
+{
+	signal_deliver_on_user_return();
+}
 
 int
 signal_send_process(struct process *process, int signo)

@@ -100,6 +100,8 @@ void hal_task_context_switch(hal_task_t h)
 	struct arm64_task *to=h,*from=running_task;uint64 tls;
 	if(!to||!from)HAL_FATAL("invalid arm64 task switch");
 	if(to==from)return;
+	if(to->run_cpu>=0)HAL_FATAL("arm64 HAL task already running");
+	from->run_cpu=-1;to->run_cpu=0;
 	arm64_fp_save(from->fpregs);__asm__ volatile("mrs %0,tpidr_el0":"=r"(tls));from->tls=(uintptr_t)tls;
 	running_task=to;hal_page_switch_space(to->space);arm64_fp_restore(to->fpregs);
 	__asm__ volatile("msr tpidr_el0,%0"::"r"((uint64)to->tls));
@@ -113,6 +115,7 @@ uintptr_t hal_task_get_tls(hal_task_t h){return h?((struct arm64_task*)h)->tls:0
 void hal_task_set_private(hal_task_t h,void*p){if(h)((struct arm64_task*)h)->private_data=p;}
 void *hal_task_get_private(hal_task_t h){return h?((struct arm64_task*)h)->private_data:NULL;}
 hal_space_t hal_task_get_space(hal_task_t h){return h?((struct arm64_task*)h)->space:HAL_SPACE_SYS;}
+int hal_task_transfer(hal_task_t h,hal_cpu_id_t cpu){struct arm64_task*t=h;if(!t||cpu!=0)return HAL_ERR_INVALID;if(t->run_cpu>=0)return HAL_ERR_BUSY;return HAL_OK;}
 void hal_arm64_task_memory_stats(uint32*c,size_t*b){if(c)*c=task_count;if(b)*b=task_stack_bytes;}
 
 static uint8 self_stack[4096] __attribute__((aligned(16)));

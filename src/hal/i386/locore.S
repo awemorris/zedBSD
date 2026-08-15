@@ -77,6 +77,7 @@ save_boot_info:
 clear_bss:
 	xorl	%eax, %eax
 	cld
+#if defined(HAL_BOARD_PCAT)
 	movl	$(__low_bss_start - SYS_START), %edi
 	movl	$(__low_bss_end - SYS_START), %ecx
 	subl	%edi, %ecx
@@ -85,6 +86,12 @@ clear_bss:
 	movl	$(__high_bss_end - SYS_START), %ecx
 	subl	%edi, %ecx
 	rep stosb
+#else
+	movl	$(__kernel_bss_start - SYS_START), %edi
+	movl	$(__kernel_bss_end - SYS_START), %ecx
+	subl	%edi, %ecx
+	rep stosb
+#endif
 
 /*
  * Setup GDT.

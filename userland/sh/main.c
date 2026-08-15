@@ -21,10 +21,6 @@
 #define ARG_MAX 20
 #define SOURCE_MAX 8192
 
-static char kernel_path[256];
-static char kernel_arguments[4096];
-static int selected_device = -1;
-
 static int
 spawn_wait(char *const argv[], unsigned flags, char *result, size_t capacity)
 {
@@ -275,24 +271,6 @@ system_power(unsigned long request)
 }
 
 static int
-run_bootlinux(int argc, char **argv)
-{
-	char *child[ARG_MAX + 4];
-	char device[16];
-	int at = 0, i;
-	child[at++] = "/bin/linux";
-	if (selected_device >= 0) {
-		child[at++] = "-d";
-		snprintf(device, sizeof(device), "%d", selected_device);
-		child[at++] = device;
-	}
-	for (i = 0; i < argc && at < ARG_MAX + 3; i++)
-		child[at++] = argv[i];
-	child[at] = NULL;
-	return argc != 0 && spawn_wait(child, 0, NULL, 0);
-}
-
-static int
 run_autoexec(const char *path)
 {
 	char result[256] = {0};
@@ -405,7 +383,7 @@ command(char *text)
 	if (!strcmp(argv[0], "help")) {
 		puts("help echo pwd cd ls cp cat stat touch clear true false "
 		     "env set unset pause wait device probe-ide probe-scsi "
-		     "disk part source kernel arg boot linux "
+		     "part source "
 		     "run noct autoexec emacs vmstat reboot halt exit");
 		return 1;
 	}
@@ -440,15 +418,6 @@ command(char *text)
 	if (!strcmp(argv[0], "device") || !strcmp(argv[0], "probe-ide") ||
 	    !strcmp(argv[0], "probe-scsi"))
 		return show_devices();
-	if (!strcmp(argv[0], "disk")) {
-		if (argc == 1)
-			printf("%d\n", selected_device);
-		else if (argc == 2)
-			selected_device = atoi(argv[1]);
-		else
-			return 0;
-		return 1;
-	}
 	if (!strcmp(argv[0], "part"))
 		return list_partitions();
 	if (!strcmp(argv[0], "vmstat"))
@@ -457,40 +426,6 @@ command(char *text)
 		return argc == 1 && system_power(ZEDBSD_SYSTEM_HALT);
 	if (!strcmp(argv[0], "reboot"))
 		return argc == 1 && system_power(ZEDBSD_SYSTEM_REBOOT);
-	if (!strcmp(argv[0], "kernel")) {
-		if (argc == 1) puts(kernel_path);
-		else if (argc == 2) {
-			strncpy(kernel_path, argv[1], sizeof(kernel_path) - 1U);
-			kernel_path[sizeof(kernel_path) - 1U] = '\0';
-			kernel_arguments[0] = '\0';
-		} else return 0;
-		return 1;
-	}
-	if (!strcmp(argv[0], "arg")) {
-		int i;
-		kernel_arguments[0] = '\0';
-		for (i = 1; i < argc; i++) {
-			if (i != 1) strncat(kernel_arguments, " ",
-			    sizeof(kernel_arguments) - strlen(kernel_arguments) - 1U);
-			strncat(kernel_arguments, argv[i],
-			    sizeof(kernel_arguments) - strlen(kernel_arguments) - 1U);
-		}
-		return 1;
-	}
-	if (!strcmp(argv[0], "boot")) {
-		char *args[ARG_MAX];
-		char copy[4096];
-		int count = 0;
-		if (kernel_path[0] == '\0')
-			return 0;
-		args[count++] = kernel_path;
-		strncpy(copy, kernel_arguments, sizeof(copy) - 1U);
-		copy[sizeof(copy) - 1U] = '\0';
-		count += split(copy, args + count, ARG_MAX - count);
-		return run_bootlinux(count, args);
-	}
-	if (!strcmp(argv[0], "linux"))
-		return run_bootlinux(argc - 1, argv + 1);
 	if (!strcmp(argv[0], "autoexec"))
 		return argc <= 2 && run_autoexec(argc == 2 ? argv[1] :
 		    "/autoexec.nct");

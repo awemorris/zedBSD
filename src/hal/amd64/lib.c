@@ -9,6 +9,7 @@
 
 #include <hal/hal.h>
 #include "asm.h"
+#include "smp.h"
 
 int
 hal_strlen(const char *s)
@@ -65,10 +66,14 @@ hal_memcpy(void *dest, const void *src, size_t n)
 
 static void *(*allocator_alloc)(size_t size);
 static void (*allocator_free)(void *p);
+static volatile unsigned panic_in_progress;
 
 void
 hal_set_allocator(void *(*alloc)(size_t size), void (*free_fn)(void *p))
 {
+	if (alloc == NULL || free_fn == NULL || allocator_alloc != NULL ||
+	    allocator_free != NULL)
+		HAL_FATAL("hal_set_allocator must be called exactly once");
 	allocator_alloc = alloc;
 	allocator_free = free_fn;
 }
@@ -94,14 +99,14 @@ hal_free(void *ptr)
 int
 hal_putchar(int c)
 {
-	cons_putc(c);
+	hal_cons_putc(c);
 	return c;
 }
 
 int
 hal_puts(const char *s)
 {
-	cons_puts(s);
+	hal_cons_write(s);
 	return 0;
 }
 
@@ -119,11 +124,11 @@ put_unsigned(uint32 value, unsigned base, int upper, int width, int zero)
 		value /= base;
 	} while (value != 0);
 	while (width > n) {
-		cons_putc(zero ? '0' : ' ');
+		hal_cons_putc(zero ? '0' : ' ');
 		width--;
 	}
 	while (n > 0)
-		cons_putc(digits[--n]);
+		hal_cons_putc(digits[--n]);
 }
 
 int
@@ -138,7 +143,7 @@ hal_printf(const char *format, ...)
 		int width = 0;
 
 		if (*p != '%') {
-			cons_putc(*p);
+			hal_cons_putc(*p);
 			continue;
 		}
 		p++;
@@ -152,19 +157,19 @@ hal_printf(const char *format, ...)
 		}
 		switch (*p) {
 		case 'c':
-			cons_putc(__builtin_va_arg(ap, int));
+			hal_cons_putc(__builtin_va_arg(ap, int));
 			break;
 		case 's': {
 			const char *s = __builtin_va_arg(ap, const char *);
 
-			cons_puts(s != NULL ? s : "(null)");
+			hal_cons_write(s != NULL ? s : "(null)");
 			break;
 		}
 		case 'd': {
 			int v = __builtin_va_arg(ap, int);
 
 			if (v < 0) {
-				cons_putc('-');
+				hal_cons_putc('-');
 				v = -v;
 			}
 			put_unsigned((uint32)v, 10, 0, width, zero);
@@ -183,12 +188,12 @@ hal_printf(const char *format, ...)
 				     width, zero);
 			break;
 		case '%':
-			cons_putc('%');
+			hal_cons_putc('%');
 			break;
 		default:
-			cons_putc('%');
+			hal_cons_putc('%');
 			if (*p != '\0')
-				cons_putc(*p);
+				hal_cons_putc(*p);
 			else
 				p--;
 			break;
@@ -203,7 +208,14 @@ hal_printf(const char *format, ...)
 void
 hal_assert(const char *file, int line, const char *exp)
 {
+	if (__atomic_exchange_n(&panic_in_progress, 1U,
+	    __ATOMIC_ACQ_REL) != 0) {
+		asm_cli();
+		for (;;) asm_hlt();
+	}
 	hal_printf("\nassert: %s:%d: %s\n", file, line, exp);
+	if (amd64_smp_panic_available())
+		hal_cpu_panic_all();
 	asm_cli();
 	for (;;)
 		asm_hlt();
@@ -212,7 +224,14 @@ hal_assert(const char *file, int line, const char *exp)
 void
 hal_fatal(const char *file, int line, const char *s)
 {
+	if (__atomic_exchange_n(&panic_in_progress, 1U,
+	    __ATOMIC_ACQ_REL) != 0) {
+		asm_cli();
+		for (;;) asm_hlt();
+	}
 	hal_printf("\nfatal: %s:%d: %s\n", file, line, s);
+	if (amd64_smp_panic_available())
+		hal_cpu_panic_all();
 	asm_cli();
 	for (;;)
 		asm_hlt();

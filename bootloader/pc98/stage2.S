@@ -152,6 +152,8 @@ parse_elf32:
 	ja fatal_elf
 	mov eax, dword ptr es:[24]
 	and eax, 0x7fffffff
+	cmp eax, 0x00100000
+	jb fatal_elf
 	mov dword ptr [elf_entry_low], eax
 	mov dword ptr [elf_entry_high], 0
 	mov byte ptr [elf_class], ELFCLASS32
@@ -168,6 +170,8 @@ elf32_ph_loop:
 	mov dword ptr [di + 0], eax
 	mov eax, dword ptr es:[si + 12]
 	and eax, 0x7fffffff
+	cmp eax, 0x00100000
+	jb fatal_elf
 	mov dword ptr [di + 4], eax
 	mov eax, dword ptr es:[si + 16]
 	mov dword ptr [di + 8], eax
@@ -175,6 +179,10 @@ elf32_ph_loop:
 	cmp eax, edx
 	ja fatal_elf
 	mov dword ptr [di + 12], edx
+	add edx, dword ptr [di + 4]
+	jc fatal_elf
+	cmp edx, 0x00f00000
+	jae fatal_elf
 	mov eax, dword ptr es:[si + 8]
 	mov dword ptr [di + 16], eax
 	mov dword ptr [di + 20], 0
@@ -184,7 +192,10 @@ elf32_ph_loop:
 	inc word ptr [ph_load_count]
 elf32_ph_next:
 	add si, 32
-	loop elf32_ph_loop
+	dec cx
+	jz elf32_ph_done
+	jmp elf32_ph_loop
+elf32_ph_done:
 	cmp word ptr [ph_load_count], 0
 	je fatal_elf
 	mov si, offset msg_elf32

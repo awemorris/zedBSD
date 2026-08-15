@@ -4,7 +4,7 @@
  * The board-support surface the HAL core relies on today is small and
  * declared where it lives: the console in <hal/hal.h>, the PIC in
  * pic.h, the interval timer in clock.h, and the memory windows through
- * bsp_mem_reserve() (page.c).  The wider hal.h contract grows onto
+ * i386_page_init() (page.c).  The wider hal.h contract grows onto
  * these pieces stage by stage.
  */
 
@@ -33,5 +33,6 @@ void asm_hlt(void);
 void asm_lidt(void *idt_desc);
 void asm_load_cr3(uint32_t addr);
 void asm_flash_tlb(void);
+void i386_bsp_cons_init(void);
 
 #endif

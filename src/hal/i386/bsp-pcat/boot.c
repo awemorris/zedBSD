@@ -139,12 +139,6 @@ bsp_mem_probe(void)
 	return total_memory;
 }
 
-void
-bsp_mem_reserve(void)
-{
-	pmem_reserve(0x000a0000U, 0x00060000U);
-}
-
 const void *
 bsp_kernel_handoff(const void *raw_boot_info)
 {

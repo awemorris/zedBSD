@@ -28,6 +28,15 @@ static uintptr_t system_ttbr0;
 static hal_space_t current_space;
 static int next_space_id=1;
 static uint32 space_count, page_table_count;
+
+static int alloc_page(struct hal_pmem *memory)
+{
+	const struct hal_pmem_request request = {
+		HAL_PMEM_PADDR_ANY, ARM64_PAGE_SIZE, ARM64_PAGE_SIZE,
+		HAL_PMEM_TYPE_RAM, 0
+	};
+	return hal_pmem_alloc(&request, memory);
+}
 extern char __kernel_text_start[],__kernel_text_end[];
 extern char __kernel_rodata_start[],__kernel_rodata_end[];
 extern char __kernel_data_start[],__kernel_data_end[];
@@ -124,7 +133,7 @@ static struct arm64_table_page *allocate_table(struct arm64_space *s,uint64 *par
 {
 	struct arm64_table_page *p=hal_malloc(sizeof(*p));
 	if(!p)return NULL;
-	if(pmem_alloc_lo(ARM64_PAGE_SIZE,&p->memory)){hal_free(p);return NULL;}
+	if(alloc_page(&p->memory)!=HAL_OK){hal_free(p);return NULL;}
 	hal_memset(p->memory.vaddr,0,ARM64_PAGE_SIZE);p->parent=parent;p->parent_index=index;
 	p->next=s->tables;s->tables=p;page_table_count++;return p;
 }
@@ -145,12 +154,12 @@ static void reclaim(struct arm64_space *s)
 	int again;do{struct arm64_table_page **link=&s->tables;again=0;while(*link){struct arm64_table_page *p=*link;
 		if(!table_empty(p->memory.vaddr)){link=&p->next;continue;}
 		if((p->parent[p->parent_index]&PTE_ADDR)==(uintptr_t)p->memory.paddr)p->parent[p->parent_index]=0;
-		*link=p->next;(void)pmem_free(&p->memory);hal_free(p);if(page_table_count)page_table_count--;again=1;}}while(again);
+		*link=p->next;(void)hal_pmem_free(&p->memory);hal_free(p);if(page_table_count)page_table_count--;again=1;}}while(again);
 }
 hal_space_t hal_mem_create_space(void)
 {
 	struct arm64_space *s=hal_malloc(sizeof(*s));if(!s)return NULL;hal_memset(s,0,sizeof(*s));
-	if(pmem_alloc_lo(ARM64_PAGE_SIZE,&s->l0_memory)){hal_free(s);return NULL;}
+	if(alloc_page(&s->l0_memory)!=HAL_OK){hal_free(s);return NULL;}
 	s->l0=s->l0_memory.vaddr;hal_memset(s->l0,0,ARM64_PAGE_SIZE);s->magic=ARM64_SPACE_MAGIC;s->space_id=next_space_id++;space_count++;return s;
 }
 void hal_page_destroy_space(hal_space_t h)
@@ -158,8 +167,8 @@ void hal_page_destroy_space(hal_space_t h)
 	struct arm64_space *s=h;struct arm64_table_page *p;if(!s)return;
 	if(!valid_space(s))HAL_FATAL("invalid arm64 space destroy");
 	if(current_space==s)hal_page_switch_space(NULL);
-	while((p=s->tables)){s->tables=p->next;(void)pmem_free(&p->memory);hal_free(p);if(page_table_count)page_table_count--;}
-	s->magic=0;(void)pmem_free(&s->l0_memory);hal_free(s);if(space_count)space_count--;
+	while((p=s->tables)){s->tables=p->next;(void)hal_pmem_free(&p->memory);hal_free(p);if(page_table_count)page_table_count--;}
+	s->magic=0;(void)hal_pmem_free(&s->l0_memory);hal_free(s);if(space_count)space_count--;
 }
 void hal_page_switch_space(hal_space_t h)
 {
@@ -175,40 +184,41 @@ static uint64 leaf_flags(uint32 attr)
 	if(attr&HAL_SPACE_DEVICE)f|=PTE_ATTR(1);else if(attr&HAL_SPACE_NOCACHE)f|=PTE_ATTR(2);
 	return f;
 }
-int hal_page_map(hal_space_t h,void *v,uintptr_t p,size_t n,uint32 attr)
+int hal_page_map(hal_space_t h,void *v,hal_physaddr_t p,size_t n,uint32 attr)
 {
 	struct arm64_space *s=h;uintptr_t a=(uintptr_t)v,o;
 	if(!s||!valid_space(s)||!valid_user(a,n)||(p&4095)||p>=hal_pmem_get_total_size()||n>hal_pmem_get_total_size()-p||
-	   !(attr&(HAL_SPACE_READ|HAL_SPACE_WRITE|HAL_SPACE_EXEC))||((attr&HAL_SPACE_WRITE)&&(attr&HAL_SPACE_EXEC)))return HAL_PMEM_BADDESC;
-	for(o=0;o<n;o+=4096){uint64 *l=walk_leaf(s,a+o,0);if(l&&(*l&PTE_VALID))return HAL_PMEM_BADDESC;}
-	for(o=0;o<n;o+=4096){uint64 *l=walk_leaf(s,a+o,1);if(!l){(void)hal_page_unmap(s,v,o);reclaim(s);return HAL_PMEM_NOSPACE;}*l=(p+o)|leaf_flags(attr);}
+	   !(attr&(HAL_SPACE_READ|HAL_SPACE_WRITE|HAL_SPACE_EXEC))||((attr&HAL_SPACE_WRITE)&&(attr&HAL_SPACE_EXEC)))return HAL_ERR_INVALID;
+	for(o=0;o<n;o+=4096){uint64 *l=walk_leaf(s,a+o,0);if(l&&(*l&PTE_VALID))return HAL_ERR_INVALID;}
+	for(o=0;o<n;o+=4096){uint64 *l=walk_leaf(s,a+o,1);if(!l){(void)hal_page_unmap(s,v,o);reclaim(s);return HAL_ERR_NOMEM;}*l=(p+o)|leaf_flags(attr);}
 	if(current_space==s)hal_page_flush_tlb(s);
-	return HAL_PMEM_SUCCESS;
+	return HAL_OK;
 }
 int hal_page_prot(hal_space_t h,void *v,size_t n,uint32 attr)
 {
 	struct arm64_space *s=h;uintptr_t a=(uintptr_t)v,o;if(!s||!valid_space(s)||!valid_user(a,n)||
-	 !(attr&(HAL_SPACE_READ|HAL_SPACE_WRITE|HAL_SPACE_EXEC))||((attr&HAL_SPACE_WRITE)&&(attr&HAL_SPACE_EXEC)))return HAL_PMEM_BADDESC;
-	for(o=0;o<n;o+=4096){uint64 *l=walk_leaf(s,a+o,0),p;if(!l||!(*l&PTE_VALID))return HAL_PMEM_BADDESC;p=*l&PTE_ADDR;*l=p|leaf_flags(attr);}
+	 !(attr&(HAL_SPACE_READ|HAL_SPACE_WRITE|HAL_SPACE_EXEC))||((attr&HAL_SPACE_WRITE)&&(attr&HAL_SPACE_EXEC)))return HAL_ERR_INVALID;
+	for(o=0;o<n;o+=4096){uint64 *l=walk_leaf(s,a+o,0),p;if(!l||!(*l&PTE_VALID))return HAL_ERR_INVALID;p=*l&PTE_ADDR;*l=p|leaf_flags(attr);}
 	if(current_space==s)hal_page_flush_tlb(s);
-	return HAL_PMEM_SUCCESS;
+	return HAL_OK;
 }
 int hal_page_unmap(hal_space_t h,void *v,size_t n)
 {
-	struct arm64_space *s=h;uintptr_t a=(uintptr_t)v,o;if(!n)return HAL_PMEM_SUCCESS;if(!s||!valid_space(s)||!valid_user(a,n))return HAL_PMEM_BADDESC;
-	for(o=0;o<n;o+=4096){uint64 *l=walk_leaf(s,a+o,0);if(l)*l=0;}reclaim(s);if(current_space==s)hal_page_flush_tlb(s);return HAL_PMEM_SUCCESS;
+	struct arm64_space *s=h;uintptr_t a=(uintptr_t)v,o;if(!n)return HAL_OK;if(!s||!valid_space(s)||!valid_user(a,n))return HAL_ERR_INVALID;
+	for(o=0;o<n;o+=4096){uint64 *l=walk_leaf(s,a+o,0);if(l)*l=0;}reclaim(s);if(current_space==s)hal_page_flush_tlb(s);return HAL_OK;
 }
 int hal_page_query(hal_space_t h,void *v,uint32 *flags)
 {
-	struct arm64_space *s=h;uint64 *l;if(!s||!valid_space(s)||!flags||!valid_user((uintptr_t)v,4096))return HAL_PMEM_BADDESC;
-	l=walk_leaf(s,(uintptr_t)v,0);*flags=l&&(*l&PTE_VALID)?HAL_PAGE_PRESENT|HAL_PAGE_ACCESSED:0;if(l&&(*l&PTE_SW_DIRTY))*flags|=HAL_PAGE_DIRTY;return HAL_PMEM_SUCCESS;
+	struct arm64_space *s=h;uint64 *l;if(!s||!valid_space(s)||!flags||!valid_user((uintptr_t)v,4096))return HAL_ERR_INVALID;
+	l=walk_leaf(s,(uintptr_t)v,0);*flags=l&&(*l&PTE_VALID)?HAL_PAGE_PRESENT|HAL_PAGE_ACCESSED:0;if(l&&(*l&PTE_SW_DIRTY))*flags|=HAL_PAGE_DIRTY;return HAL_OK;
 }
 int hal_page_clear_flags(hal_space_t h,void *v,uint32 flags)
 {
-	struct arm64_space *s=h;uint64 *l;if(!s||!valid_space(s)||!valid_user((uintptr_t)v,4096)||(flags&~(HAL_PAGE_ACCESSED|HAL_PAGE_DIRTY)))return HAL_PMEM_BADDESC;
-	l=walk_leaf(s,(uintptr_t)v,0);if(!l||!(*l&PTE_VALID))return HAL_PMEM_BADDESC;if(flags&HAL_PAGE_DIRTY)*l&=~PTE_SW_DIRTY;if(current_space==s)hal_page_flush_tlb(s);return HAL_PMEM_SUCCESS;
+	struct arm64_space *s=h;uint64 *l;if(!s||!valid_space(s)||!valid_user((uintptr_t)v,4096)||(flags&~(HAL_PAGE_ACCESSED|HAL_PAGE_DIRTY)))return HAL_ERR_INVALID;
+	l=walk_leaf(s,(uintptr_t)v,0);if(!l||!(*l&PTE_VALID))return HAL_ERR_INVALID;if(flags&HAL_PAGE_DIRTY)*l&=~PTE_SW_DIRTY;if(current_space==s)hal_page_flush_tlb(s);return HAL_OK;
 }
 void hal_page_flush_tlb(hal_space_t h){if(h==HAL_SPACE_SYS||h==current_space)arm64_flush_tlb();}
+void hal_page_flush_tlb_range(hal_space_t h,void*v,size_t n){(void)v;if(n)hal_page_flush_tlb(h);}
 size_t hal_page_get_page_size(int level){if(level==1)return 4096;if(level==2)return 0x200000;if(level==3)return 0x40000000;return 0;}
 void hal_page_get_user_range(uintptr_t *minimum,uintptr_t *limit){if(minimum)*minimum=4096;if(limit)*limit=0x0001000000000000ULL;}
 void hal_arm64_space_memory_stats(uint32 *s,uint32 *t){if(s)*s=space_count;if(t)*t=page_table_count;}

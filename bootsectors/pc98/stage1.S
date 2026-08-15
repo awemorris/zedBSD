@@ -465,8 +465,7 @@ load_stage2_error:
 
 /*
  * PC-98 A20 gate, plus the GDT descriptor base used by the unreal-mode
- * copies below and by enter_stage2 later.  The sequence matches the
- * proven fat-loader.S one.
+ * copies below and by enter_stage2 later.
  */
 elf_prepare_highmem:
 	xorb	%al, %al
@@ -1547,8 +1546,8 @@ protected_entry:
 	movw	%ax, %fs
 	movw	%ax, %gs
 	movl	$(0x10000 + stage2_handoff), %ebx
-	/* The B98S v2 entry field is an absolute physical address. */
-	movl	0x0002000c, %eax
+	/* elf_parse_header already validated and saved the physical entry. */
+	movl	(0x10000 + elf_entry), %eax
 	jmp	*%eax
 	.code16
 

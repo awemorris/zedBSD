@@ -1,22 +1,105 @@
 /* UP interrupt implementation for sun4u. */
 #include <hal/hal.h>
 #include "asi.h"
+#include "irq.h"
 
 #define SPARCV9_IRQ_MAX 16
-struct irq_slot { void (*handler)(void *); void *argument; };
-static struct irq_slot slots[SPARCV9_IRQ_MAX];
-static unsigned isr_depth;
 
-bool hal_irq_disable(void){unsigned long p=sparcv9_pstate();sparcv9_write_pstate(p&~2UL);return(p&2UL)!=0;}
-void hal_irq_enable(void){sparcv9_write_pstate(sparcv9_pstate()|2UL);}
-irqlock_t irq_acquire_lock(void){return hal_irq_disable()?1:0;}
-void irq_unacquire_lock(irqlock_t l){if(l)hal_irq_enable();}
-void hal_irq_mask(int n){(void)n;}
-void hal_irq_unmask(int n){(void)n;}
-void hal_irq_send_eoi(int n){(void)n;}
-void hal_irq_set_handler(int n,void(*f)(void*),void*a){if(n<0||n>=SPARCV9_IRQ_MAX)HAL_FATAL("bad sun4u IRQ");slots[n].handler=f;slots[n].argument=a;}
-void irq_enter_isr(int n){(void)n;isr_depth++;}
-void irq_leave_isr(int n){(void)n;if(isr_depth)isr_depth--;}
-int hal_get_current_cpu(void){return 0;}int hal_get_cpu_count(void){return 1;}
-void hal_send_ipi_one(int c,int n){(void)c;(void)n;}void hal_send_ipi_mask(uint8*m,int n){(void)m;(void)n;}void hal_send_ipi_others(int n){(void)n;}
-void hal_cpu_idle(void){hal_irq_enable();for(unsigned i=0;i<10000U;i++)__asm__ volatile("nop");(void)hal_irq_disable();}
+struct irq_slot {
+	hal_irq_handler_t handler;
+	void *argument;
+	struct hal_cpu_mask requested;
+};
+
+static struct irq_slot slots[SPARCV9_IRQ_MAX];
+static hal_irq_ack_t active_ack;
+
+bool
+hal_irq_disable(void)
+{
+	unsigned long pstate = sparcv9_pstate();
+	sparcv9_write_pstate(pstate & ~2UL);
+	return (pstate & 2UL) != 0;
+}
+
+void
+hal_irq_enable(void)
+{
+	sparcv9_write_pstate(sparcv9_pstate() | 2UL);
+}
+
+void hal_irq_mask(int irq) { (void)irq; }
+void hal_irq_unmask(int irq) { (void)irq; }
+
+hal_irq_ack_t
+sparcv9_irq_begin(int irq)
+{
+	if (active_ack != HAL_IRQ_ACK_NONE)
+		HAL_FATAL("nested SPARC V9 IRQ acknowledgement");
+	active_ack = (hal_irq_ack_t)irq + 1U;
+	return active_ack;
+}
+
+void
+hal_irq_send_eoi(hal_irq_ack_t acknowledge)
+{
+	if (acknowledge == HAL_IRQ_ACK_NONE || acknowledge != active_ack)
+		HAL_FATAL("invalid SPARC V9 IRQ acknowledgement");
+	active_ack = HAL_IRQ_ACK_NONE;
+}
+
+int
+hal_irq_set_handler(int irq, hal_irq_handler_t handler, void *argument)
+{
+	bool enabled;
+
+	if (irq < 0 || irq >= SPARCV9_IRQ_MAX)
+		return HAL_ERR_INVALID;
+	enabled = hal_irq_disable();
+	slots[irq].handler = handler;
+	slots[irq].argument = handler != NULL ? argument : NULL;
+	if (enabled)
+		hal_irq_enable();
+	return HAL_OK;
+}
+
+int
+hal_irq_service_wait(int irq, hal_irq_ack_t *acknowledge)
+{
+	(void)irq;
+	(void)acknowledge;
+	return HAL_ERR_UNSUPPORTED;
+}
+
+int
+hal_irq_set_affinity(int irq, const struct hal_cpu_mask *requested)
+{
+	if (irq < 0 || irq >= SPARCV9_IRQ_MAX || requested == NULL ||
+	    (requested->bits[0] & 1U) == 0)
+		return HAL_ERR_INVALID;
+	slots[irq].requested = *requested;
+	return HAL_OK;
+}
+
+int
+hal_irq_get_affinity(int irq, struct hal_irq_affinity *result)
+{
+	unsigned i;
+
+	if (irq < 0 || irq >= SPARCV9_IRQ_MAX || result == NULL)
+		return HAL_ERR_INVALID;
+	result->requested = slots[irq].requested;
+	for (i = 0; i < HAL_CPU_MASK_WORDS; i++)
+		result->effective.bits[i] = 0;
+	result->effective.bits[0] = 1;
+	return HAL_OK;
+}
+
+void
+hal_cpu_idle(void)
+{
+	hal_irq_enable();
+	for (unsigned i = 0; i < 10000U; i++)
+		__asm__ volatile("nop");
+	(void)hal_irq_disable();
+}

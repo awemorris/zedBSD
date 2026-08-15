@@ -21,8 +21,7 @@ done
 
 "$repo/build.sh" "build/$arch/fdd-ipl.bin" "$arch" \
 	"build/$arch/IO.SYS" "build/$arch/vmunix" \
-	"build/$arch/bin/sh" "build/$arch/bin/noct" \
-	"build/$arch/bin/linux"
+	"build/$arch/bin/sh" "build/$arch/bin/noct"
 
 # Stage 1 lives raw in the reserved sectors 3..16.
 io_sys_size="$(stat -c %s "$build/IO.SYS")"
@@ -61,7 +60,6 @@ mattrib -i "$output" +r +h +s ::vmunix
 mmd -i "$output" ::BIN 2>/dev/null || true
 mcopy -i "$output" "$build/bin/sh" ::BIN/SH
 mcopy -i "$output" "$build/bin/noct" ::BIN/NOCT
-mcopy -i "$output" "$build/bin/linux" ::BIN/LINUX
 mmd -i "$output" ::APPS 2>/dev/null || true
 holoris="$repo/userland/noct/noct-upstream/apps/holoris/holoris.noct"
 test -s "$holoris" || {

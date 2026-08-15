@@ -10,15 +10,14 @@ ARM64_PLATFORM := platform/arm64
 ARM64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -Isrc/hal/arm64 -DHAL_ARCH_ARM64 -DHAL_BOARD_RPI4 \
 	-DZEDBSD_USER_ABI_AARCH64 -DZEDBSD_USER_ABI_LP64
-ARM64_CFLAGS := -march=armv8-a -mgeneral-regs-only -ffreestanding \
+ARM64_CFLAGS := -march=armv8-a -mno-outline-atomics -mgeneral-regs-only -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werror
 
-ARM64_BOOT_C := src/hal/arm64/asm.c src/hal/arm64/lib.c \
+ARM64_BOOT_C := src/hal/cpu-up.c src/hal/arm64/asm.c src/hal/arm64/lib.c \
 	src/hal/arm64/page.c src/hal/arm64/space.c \
 	src/hal/arm64/int.c src/hal/arm64/irq.c \
 	src/hal/arm64/task.c \
-	src/hal/arm64/fb.c \
 	src/hal/arm64/cmain.c src/hal/arm64/bsp-rpi4/uart.c \
 	src/hal/arm64/bsp-rpi4/cons.c src/hal/arm64/bsp-rpi4/fdt.c \
 	src/hal/arm64/bsp-rpi4/mailbox.c src/hal/arm64/bsp-rpi4/framebuffer.c \
@@ -49,7 +48,7 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/elf.c src/kern/exec.c src/kern/user-probe.c src/kern/syscall.c \
 	src/kern/uaccess.c src/kern/cdev.c src/kern/devfs.c \
 	src/kern/console-device.c src/kern/graphics-device.c \
-	src/kern/system-device.c src/kern/rpi4/unsupported-devices.c src/kern/init.c
+	src/kern/system-device.c src/kern/init.c
 ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES)
 ARM64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ARM64_KERNEL_SOURCES))
 ARM64_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURCES))
@@ -94,6 +93,10 @@ rpi4-fdt-host-test: $(BUILD)/tests/rpi4-fdt-host-test
 	$< vendor/raspberrypi-firmware/boot/bcm2711-rpi-4-b.dtb
 
 CHECK_RUN_TARGETS += rpi4-fdt-host-test
+
+$(BUILD)/src/hal/cpu-up.o: src/hal/cpu-up.c
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) $(ARM64_CPPFLAGS) $(ARM64_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/src/hal/arm64/%.o: src/hal/arm64/%.c
 	@mkdir -p $(dir $@)

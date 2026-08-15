@@ -1,8 +1,8 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/graphics-device.h"
+#include "kern/graphics-driver.h"
 #include "kern/cdev.h"
 #include "kern/file.h"
-#include "kern/platform.h"
 #include "kern/uaccess.h"
 
 #include <zedbsd/graphics.h>
@@ -20,6 +20,9 @@
 
 static struct file *graphics_owner __attribute__((section(".vfs_bss")));
 static int graphics_entered __attribute__((section(".vfs_bss")));
+static const struct graphics_driver_ops *graphics_driver
+	__attribute__((section(".vfs_bss")));
+static void *graphics_driver_context __attribute__((section(".vfs_bss")));
 static struct kern_graphics_mode graphics_mode __attribute__((section(".vfs_bss")));
 static uint8_t row_buffer[GRAPHICS_ROW_MAX] __attribute__((section(".vfs_bss")));
 static uint32_t palette_buffer[256] __attribute__((section(".vfs_bss")));
@@ -27,6 +30,10 @@ static uint32_t palette_buffer[256] __attribute__((section(".vfs_bss")));
 static int graphics_open(struct file *file)
 {
 	bool enabled = hal_irq_disable();
+	if (graphics_driver == NULL) {
+		if (enabled) hal_irq_enable();
+		return ENODEV;
+	}
 	if (graphics_owner != NULL) {
 		if (enabled) hal_irq_enable();
 		return EBUSY;
@@ -43,8 +50,8 @@ static int graphics_close(struct file *file)
 	if (graphics_owner != file)
 		return 0;
 	if (graphics_entered) {
-		kern_platform_graphics_leave();
-		fb_set_active(0);
+		graphics_driver->leave(graphics_driver_context);
+		hal_cons_resume();
 		graphics_entered = 0;
 	}
 	graphics_owner = NULL;
@@ -85,10 +92,13 @@ static int graphics_enter(uintptr_t argument)
 		return EINVAL;
 	memset(&graphics_mode, 0, sizeof(graphics_mode));
 	graphics_mode.preferred_bits_per_pixel = request.preferred_bits_per_pixel;
-	if (!kern_platform_graphics_enter(&graphics_mode))
+	hal_cons_suspend();
+	if (!graphics_driver->enter(graphics_driver_context, &graphics_mode)) {
+		graphics_driver->leave(graphics_driver_context);
+		hal_cons_resume();
 		return ENODEV;
+	}
 	graphics_entered = 1;
-	fb_set_active(1);
 	request.width = graphics_mode.width;
 	request.height = graphics_mode.height;
 	request.bits_per_pixel = graphics_mode.bits_per_pixel;
@@ -96,8 +106,8 @@ static int graphics_enter(uintptr_t argument)
 	request.capabilities = GRAPHICS_CAPABILITIES;
 	error = copyout(&request, argument, sizeof(request));
 	if (error != 0) {
-		kern_platform_graphics_leave();
-		fb_set_active(0);
+		graphics_driver->leave(graphics_driver_context);
+		hal_cons_resume();
 		graphics_entered = 0;
 	}
 	return error;
@@ -112,15 +122,16 @@ static int graphics_fill(uintptr_t argument, int patterned)
 		if (error != 0) return error;
 		if (request.reserved != 0 || !valid_rect(&request.rect)) return EINVAL;
 		convert_rect(&native, &request.rect);
-		return kern_platform_graphics_pattern_fill(&native, request.color,
-			request.pattern) ? 0 : EIO;
+		return graphics_driver->pattern_fill(graphics_driver_context, &native,
+			request.color, request.pattern) ? 0 : EIO;
 	} else {
 		struct zedbsd_graphics_fill request;
 		int error = copyin(argument, &request, sizeof(request));
 		if (error != 0) return error;
 		if (request.reserved != 0 || !valid_rect(&request.rect)) return EINVAL;
 		convert_rect(&native, &request.rect);
-		return kern_platform_graphics_fill(&native, request.color) ? 0 : EIO;
+		return graphics_driver->fill(graphics_driver_context, &native,
+			request.color) ? 0 : EIO;
 	}
 }
 
@@ -133,8 +144,8 @@ static int graphics_line(uintptr_t argument)
 	    request.x1 >= graphics_mode.width || request.y0 >= graphics_mode.height ||
 	    request.y1 >= graphics_mode.height)
 		return EINVAL;
-	return kern_platform_graphics_line(request.x0, request.y0, request.x1,
-		request.y1, request.color) ? 0 : EIO;
+	return graphics_driver->line(graphics_driver_context, request.x0,
+		request.y0, request.x1, request.y1, request.color) ? 0 : EIO;
 }
 
 static int load_palette(const struct zedbsd_graphics_blit *request)
@@ -208,8 +219,8 @@ static int graphics_blit(uintptr_t argument, int patterned)
 				row_buffer, (size_t)minimum_stride);
 			if (error != 0) return error;
 		}
-		if (!kern_platform_graphics_blit(request.x, request.y + row, &image,
-			request.pattern, patterned))
+		if (!graphics_driver->blit(graphics_driver_context, request.x,
+			request.y + row, &image, request.pattern, patterned))
 			return EIO;
 	}
 	return 0;
@@ -235,7 +246,8 @@ static int graphics_flush(uintptr_t argument)
 		if (!valid_rect(&input[i])) return EINVAL;
 		convert_rect(&native[i], &input[i]);
 	}
-	return kern_platform_graphics_flush(native, request.rectangle_count) ? 0 : EIO;
+	return graphics_driver->flush(graphics_driver_context, native,
+		request.rectangle_count) ? 0 : EIO;
 }
 
 static int graphics_glyph(uintptr_t argument)
@@ -248,8 +260,8 @@ static int graphics_glyph(uintptr_t argument)
 	if (request.reserved != 0 || request.bitmap == 0 ||
 	    request.bitmap_capacity < sizeof(bitmap))
 		return EINVAL;
-	if (!kern_platform_graphics_get_glyph(request.codepoint, bitmap, &width,
-	    &height))
+	if (!graphics_driver->get_glyph(graphics_driver_context,
+	    request.codepoint, bitmap, &width, &height))
 		return EINVAL;
 	request.width = width; request.height = height;
 	request.stride = width / 8U; request.bearing_x = 0;
@@ -308,4 +320,35 @@ int graphics_device_register(void)
 	graphics_owner = NULL;
 	graphics_entered = 0;
 	return cdev_register("graphics", 0x00010001U, &graphics_ops, NULL);
+}
+
+int
+graphics_driver_register(const struct graphics_driver_ops *ops, void *context)
+{
+	bool enabled;
+
+	if (ops == NULL || ops->enter == NULL || ops->clear == NULL ||
+	    ops->leave == NULL || ops->fill == NULL || ops->line == NULL ||
+	    ops->pattern_fill == NULL || ops->blit == NULL ||
+	    ops->flush == NULL || ops->get_glyph == NULL)
+		return EINVAL;
+	enabled = hal_irq_disable();
+	if (graphics_driver != NULL) {
+		if (enabled) hal_irq_enable();
+		return EBUSY;
+	}
+	graphics_driver = ops;
+	graphics_driver_context = context;
+	if (enabled) hal_irq_enable();
+	return 0;
+}
+
+void
+graphics_device_restore_text(void)
+{
+	if (graphics_entered && graphics_driver != NULL) {
+		graphics_driver->leave(graphics_driver_context);
+		graphics_entered = 0;
+	}
+	hal_cons_resume();
 }

@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/clock.h"
 #include "kern/cred.h"
+#include "kern/sched.h"
 
 #include <errno.h>
 #include <hal/hal.h>
@@ -9,15 +10,59 @@
 #define ZEDBSD_REALTIME_EPOCH_2026 1767225600LL
 
 static volatile uint64_t kernel_ticks;
+static volatile uint32_t cpu_notify_count[HAL_CPU_MAX];
 static struct kern_timespec realtime_offset = {
 	ZEDBSD_REALTIME_EPOCH_2026, 0
 };
 static int realtime_synchronized;
 
 void
-kernel_timer_handler(void)
+kernel_timer_handler(hal_cpu_id_t cpu, hal_irq_ack_t acknowledge)
 {
+	hal_irq_send_eoi(acknowledge);
+	if (cpu != 0)
+		return;
 	kernel_ticks++;
+	sched_clock();
+}
+
+void
+kernel_cpu_notify_handler(hal_cpu_id_t cpu, hal_irq_ack_t acknowledge)
+{
+	hal_irq_send_eoi(acknowledge);
+	if (cpu < HAL_CPU_MAX)
+		(void)__atomic_add_fetch(&cpu_notify_count[cpu], 1U,
+		    __ATOMIC_RELEASE);
+}
+
+int
+kern_cpu_notify_probe(void)
+{
+	struct hal_cpu_mask targets;
+	uint32_t before[HAL_CPU_MAX];
+	hal_cpu_id_t cpu;
+	unsigned timeout;
+
+	hal_cpu_mask_zero(&targets);
+	for (cpu = 1; cpu < hal_cpu_count(); cpu++) {
+		before[cpu] = __atomic_load_n(&cpu_notify_count[cpu],
+		    __ATOMIC_ACQUIRE);
+		hal_cpu_mask_set(&targets, cpu);
+	}
+	if (hal_cpu_count() <= 1)
+		return HAL_OK;
+	if (hal_cpu_notify_mask(&targets) != HAL_OK)
+		return HAL_ERR_IO;
+	for (timeout = 0; timeout < 10000000U; timeout++) {
+		for (cpu = 1; cpu < hal_cpu_count(); cpu++)
+			if (__atomic_load_n(&cpu_notify_count[cpu],
+			    __ATOMIC_ACQUIRE) == before[cpu])
+				break;
+		if (cpu == hal_cpu_count())
+			return HAL_OK;
+		hal_compiler_barrier();
+	}
+	return HAL_ERR_TIMEOUT;
 }
 
 uint64_t

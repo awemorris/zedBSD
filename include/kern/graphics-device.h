@@ -9,5 +9,6 @@
 #define ZEDBSD_KERN_GRAPHICS_DEVICE_H
 
 int graphics_device_register(void);
+void graphics_device_restore_text(void);
 
 #endif

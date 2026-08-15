@@ -35,7 +35,6 @@ struct zedbsd_namespace mounted_namespace;
 struct zedbsd_environment boot_environment;
 struct part parts[MAX_PARTS];
 int curdev = -1, curpart = -1;
-char kernel_name[ZEDBSD_PATH_MAX], kernel_arg[256];
 
 /* Minimal freestanding string and memory primitives. */
 void memzero(void *p, uint32_t n)
@@ -133,9 +132,6 @@ void kernel_main(const struct zedbsd_handoff *h,
 	ho = &handoff_snapshot;
 	device_count = platform_device_count;
 	devs = platform_devices;
-	hal_printf("boot: graphics service initialization\n");
-	if (!kern_platform_graphics_init(zedbsd_kernel_milliseconds, NULL, NULL))
-		hal_printf("boot: graphics service unavailable\n");
 	zedbsd_env_init(&boot_environment);
 	hal_printf("boot: VFS initialization\n");
 	error = kern_vfs_init(h, platform_devices, platform_device_count);

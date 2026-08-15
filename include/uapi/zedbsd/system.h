@@ -34,7 +34,7 @@ struct zedbsd_system_device {
 
 struct zedbsd_system_vmstat {
 	uint64_t physical_total, physical_reserved, physical_allocated, physical_free;
-	uint64_t image_low, image_high, heap_fixed, heap_current, heap_peak;
+	uint64_t image, heap_fixed, heap_current, heap_peak;
 	uint64_t heap_largest_free, heap_largest_failed;
 	uint64_t hal_tasks, hal_task_stack_bytes, hal_spaces, hal_page_tables;
 	uint64_t vm_resident, vm_anonymous, vm_file, vm_wired, vm_busy, vm_dirty;

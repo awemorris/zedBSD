@@ -40,5 +40,6 @@ int kern_clock_getres(clockid_t, struct timespec *);
 int kern_clock_settime(clockid_t, const struct timespec *,
 	const struct ucred *);
 int kern_clock_realtime_synchronized(void);
+int kern_cpu_notify_probe(void);
 
 #endif

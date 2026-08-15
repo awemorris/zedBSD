@@ -23,6 +23,16 @@ static struct vm_object *shared_objects VM_OBJECT_DATA;
 static unsigned object_count VM_OBJECT_DATA;
 static unsigned object_pages VM_OBJECT_DATA;
 
+static int
+alloc_vm_page(struct hal_pmem *memory)
+{
+	const struct hal_pmem_request request = {
+		HAL_PMEM_PADDR_ANY, PAGE_SIZE, PAGE_SIZE,
+		HAL_PMEM_TYPE_RAM, 0
+	};
+	return hal_pmem_alloc(&request, memory);
+}
+
 static struct vm_object_page *
 find_page(struct vm_object *object, off_t offset)
 {
@@ -105,7 +115,7 @@ page_is_dirty(struct vm_object_page *page)
 	     mapping = mapping->object_next) {
 		uint32_t flags = 0;
 		if (hal_page_query(mapping->vm->space, (void *)mapping->address,
-		    &flags) == HAL_PMEM_SUCCESS && (flags & HAL_PAGE_DIRTY) != 0) {
+		    &flags) == HAL_OK && (flags & HAL_PAGE_DIRTY) != 0) {
 			page->flags |= VM_OBJECT_PAGE_DIRTY;
 			return 1;
 		}
@@ -269,9 +279,9 @@ vm_object_fault(struct vm_object *object, off_t offset,
 		return ENOMEM;
 	page->offset = offset;
 	page->flags = VM_OBJECT_PAGE_BUSY;
-	if (hal_pmem_alloc(PAGE_SIZE, &page->pmem, 0) != HAL_PMEM_SUCCESS &&
+	if (alloc_vm_page(&page->pmem) != HAL_OK &&
 	    (vm_reclaim_one(NULL) != 0 ||
-	     hal_pmem_alloc(PAGE_SIZE, &page->pmem, 0) != HAL_PMEM_SUCCESS)) {
+	     alloc_vm_page(&page->pmem) != HAL_OK)) {
 		kern_free(page);
 		return ENOMEM;
 	}

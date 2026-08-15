@@ -4,7 +4,6 @@
  */
 
 #include "kern/sched.h"
-#include "kern/boot-device.h"
 #include "kern/thread.h"
 #include "kern/lock.h"
 
@@ -152,7 +151,13 @@ sched_clock(void)
 	}
 	if (curthread != NULL && curthread->state == THREAD_RUNNING &&
 	    curthread->sched.quantum != 0 && --curthread->sched.quantum == 0)
-		hal_reschedule_on_interrupt_return();
+		sched_yield();
+}
+
+void
+kernel_yield(void)
+{
+	sched_yield();
 }
 
 void
@@ -204,15 +209,11 @@ sched_idle(void)
 	thread0.flags |= THREAD_FLAG_IDLE;
 	for (;;) {
 		(void)hal_irq_disable();
-		if (kern_boot_pending())
-			kern_boot_execute_pending();
 		if (sched_has_runnable())
 			sched_switch();
 		if (curthread != &thread0)
 			HAL_FATAL("idle resumed on foreign task");
 		hal_cpu_idle();
-		if (kern_boot_pending())
-			kern_boot_execute_pending();
 		sched_switch();
 	}
 }

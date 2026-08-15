@@ -16,9 +16,16 @@
 #define IRQ_TIMER	(0)
 #define IRQ_KEYBOARD	(1)
 
-/* IRQ service registration. */
 struct irq_service_info {
-	hal_task_t ist;	/* interrupt service task */
+	int mode;
+	hal_irq_handler_t handler;
+	void *argument;
+	hal_task_t waiter;
+	hal_irq_ack_t acknowledge;
+	unsigned pending;
+	unsigned in_flight;
+	unsigned in_handler;
+	struct hal_cpu_mask requested;
 };
 
 /* irq.c */

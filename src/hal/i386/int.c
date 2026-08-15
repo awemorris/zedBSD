@@ -5,7 +5,6 @@
  * Interrupt management.
  */
 
-#include <kern/sched.h>
 #include <hal/hal.h>
 #include "int.h"
 #include "task.h"
@@ -14,14 +13,7 @@
 #include "pic.h"
 #include <errno.h>
 
-/* Re-scheduling flag. */
-static int	 resched_flag;
 static hal_syscall_handler_t syscall_handler;
-static hal_user_return_handler_t user_return_handler;
-void hal_user_return_set_handler(hal_user_return_handler_t h) { user_return_handler = h; }
-void hal_user_return_invoke(void) { if (user_return_handler != NULL) user_return_handler(); }
-static hal_user_int_handler_t user_int_handler;
-static hal_user_fault_handler_t user_fault_handler;
 
 /* Forward declaration. */
 static void create_idt();
@@ -51,37 +43,10 @@ void i386_int_init(void)
 	/* cmain enables interrupts after the PIC and PIT are initialized. */
 }
 
-/*
- * Set the re-scheduling flag.
- * (Do a re-scheduling after the current IRQ handling is finished.)
- */
-void int_set_resched_flag()
-{
-	resched_flag = 1;
-}
-
-void
-hal_reschedule_on_interrupt_return(void)
-{
-	resched_flag = 1;
-}
-
-void
-hal_user_int_set_handler(hal_user_int_handler_t handler)
-{
-	user_int_handler = handler;
-}
-
 void
 hal_syscall_set_handler(hal_syscall_handler_t handler)
 {
 	syscall_handler = handler;
-}
-
-void
-hal_user_fault_set_handler(hal_user_fault_handler_t handler)
-{
-	user_fault_handler = handler;
 }
 
 /*
@@ -98,9 +63,6 @@ void int_handler(struct interrupt_frame *fp)
 
 	is_handled = 0;
 	int_num    = fp->int_num;
-
-	/* Clear the re-scheduling flag. */
-	resched_flag = 0;
 
 	/*
 	 * IRQに割り当てられた割り込みの番号である場合
@@ -126,16 +88,9 @@ void int_handler(struct interrupt_frame *fp)
 	 * CPUの例外をハンドルする
 	 */
 	else if (int_num == INT_SYSCALL && (fp->cs & 3) == 3) {
-		struct hal_user_trap trap;
 		uintptr_t args[HAL_SYSCALL_ARGS];
-		trap.vector = (uint32)int_num;
-		trap.cs = fp->cs;
-		trap.eip = fp->eip;
-		trap.eax = fp->regs.eax;
-		trap.error_code = 0;
-		trap.fault_address = 0;
-		if (user_int_handler != NULL)
-			user_int_handler(&trap);
+		kernel_user_int_handler((uint32)int_num, fp->cs,
+		    fp->eip, fp->regs.eax);
 		args[0] = fp->regs.ebx;
 		args[1] = fp->regs.ecx;
 		args[2] = fp->regs.edx;
@@ -146,7 +101,7 @@ void int_handler(struct interrupt_frame *fp)
 		fp->regs.eax = syscall_handler != NULL ?
 			(uint32)syscall_handler(fp->regs.eax, args) :
 			(uint32)-(int32)ENOSYS;
-		hal_user_return_invoke();
+		kernel_user_return_handler();
 		i386_task_leave_user_frame();
 		is_handled = 1;
 	}
@@ -164,8 +119,6 @@ void int_handler(struct interrupt_frame *fp)
 	}
 
 	/* 割り込み処理ハンドラ内で再スケジュールが要求された場合*/
-	if(resched_flag != 0)
-		sched_yield();	/* タスクを切り替える */
 }
 
 /* IDTを作成する */
@@ -229,19 +182,14 @@ static void handle_fault(struct interrupt_frame *fp)
 	int int_num = fp->int_num;
 
 	if (fp->cs & 3) {
-		struct hal_user_trap trap;
 		int handled;
-		trap.vector = (uint32)int_num;
-		trap.cs = fp->cs;
-		trap.eip = fp->eip;
-		trap.eax = fp->regs.eax;
-		trap.error_code = fp->error_code;
-		trap.fault_address = int_num == INT_PAGEFAULT ? asm_get_cr2() : 0;
 		i386_task_enter_user_frame(fp);
-		handled = user_fault_handler != NULL &&
-		    user_fault_handler(&trap) == HAL_TRAP_RET_SUCCESS;
+		handled = kernel_user_fault_handler((uint32)int_num, fp->cs,
+		    fp->eip, fp->error_code,
+		    int_num == INT_PAGEFAULT ? asm_get_cr2() : 0) ==
+		    HAL_TRAP_RET_SUCCESS;
 		if (handled) {
-			hal_user_return_invoke();
+			kernel_user_return_handler();
 			i386_task_leave_user_frame();
 			return;
 		}

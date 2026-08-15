@@ -27,6 +27,16 @@ struct vmspace kernel_vmspace = {
 struct vm_layout vm_layout;
 static int vm_layout_initialized;
 
+static int
+alloc_vm_page(struct hal_pmem *memory)
+{
+	const struct hal_pmem_request request = {
+		HAL_PMEM_PADDR_ANY, PAGE_SIZE, PAGE_SIZE,
+		HAL_PMEM_TYPE_RAM, 0
+	};
+	return hal_pmem_alloc(&request, memory);
+}
+
 void
 vmspace_layout_init(void)
 {
@@ -177,14 +187,14 @@ vmspace_fork(struct vmspace *source, struct vmspace **result)
 			page_flags = 0;
 			if (hal_page_query(source->space,
 			    (void *)source_page->address, &page_flags) ==
-			    HAL_PMEM_SUCCESS && (page_flags & HAL_PAGE_DIRTY) != 0)
+			    HAL_OK && (page_flags & HAL_PAGE_DIRTY) != 0)
 				copy_page->flags |= VM_PAGE_DIRTY;
 			if (source_page->flags & VM_PAGE_DIRTY)
 				copy_page->flags |= VM_PAGE_DIRTY;
 			mapped = hal_page_map(copy->space,
 			    (void *)copy_page->address, copy_page->pmem.paddr,
 			    PAGE_SIZE, copy_region->prot);
-			if (mapped != HAL_PMEM_SUCCESS) {
+			if (mapped != HAL_OK) {
 				(void)hal_pmem_free(&copy_page->pmem);
 				kern_free(copy_page);
 				error = ENOMEM;
@@ -394,10 +404,10 @@ find_page(struct vm_region *region, uintptr_t address)
 static int
 allocate_page_frame(struct vm_page *page)
 {
-	if (hal_pmem_alloc(PAGE_SIZE, &page->pmem, 0) == HAL_PMEM_SUCCESS)
+	if (alloc_vm_page(&page->pmem) == HAL_OK)
 		return 0;
 	if (vm_reclaim_one(page) != 0 ||
-	    hal_pmem_alloc(PAGE_SIZE, &page->pmem, 0) != HAL_PMEM_SUCCESS)
+	    alloc_vm_page(&page->pmem) != HAL_OK)
 		return ENOMEM;
 	return 0;
 }
@@ -419,11 +429,11 @@ page_in(struct vm_page *page)
 		int mapped = hal_page_map(page->vm->space,
 			(void *)page->address, page->pmem.paddr, PAGE_SIZE,
 			page->region->prot);
-		if (mapped == HAL_PMEM_NOSPACE && vm_reclaim_one(page) == 0)
+		if (mapped == HAL_ERR_NOMEM && vm_reclaim_one(page) == 0)
 			mapped = hal_page_map(page->vm->space,
 				(void *)page->address, page->pmem.paddr, PAGE_SIZE,
 				page->region->prot);
-		if (mapped != HAL_PMEM_SUCCESS)
+		if (mapped != HAL_OK)
 			error = ENOMEM;
 	}
 	if (error != 0) {
@@ -521,7 +531,7 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 		page->pmem = object_page->pmem;
 		mapped = hal_page_map(vm->space, (void *)page_address,
 		    object_page->pmem.paddr, PAGE_SIZE, region->prot);
-		if (mapped != HAL_PMEM_SUCCESS) {
+		if (mapped != HAL_OK) {
 			kern_free(page);
 			return ENOMEM;
 		}
@@ -552,10 +562,10 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 	if (error == 0) {
 		int mapped = hal_page_map(vm->space, (void *)page_address,
 			page->pmem.paddr, PAGE_SIZE, region->prot);
-		if (mapped == HAL_PMEM_NOSPACE && vm_reclaim_one(page) == 0)
+		if (mapped == HAL_ERR_NOMEM && vm_reclaim_one(page) == 0)
 			mapped = hal_page_map(vm->space, (void *)page_address,
 				page->pmem.paddr, PAGE_SIZE, region->prot);
-		if (mapped != HAL_PMEM_SUCCESS)
+		if (mapped != HAL_OK)
 			error = ENOMEM;
 	}
 	if (error != 0) {
@@ -1099,7 +1109,7 @@ vmspace_protect(struct vmspace *vm, uintptr_t start, size_t size,
 		for (page = region->pages; page != NULL; page = page->next)
 			if ((page->flags & VM_PAGE_RESIDENT) &&
 			    hal_page_prot(vm->space, (void *)page->address,
-				PAGE_SIZE, prot) != HAL_PMEM_SUCCESS) {
+				PAGE_SIZE, prot) != HAL_OK) {
 				failed_region = region;
 				failed_page = page;
 				goto rollback;
@@ -1126,7 +1136,7 @@ rollback:
 				break;
 			if ((rollback->flags & VM_PAGE_RESIDENT) &&
 			    hal_page_prot(vm->space, (void *)rollback->address,
-				PAGE_SIZE, region->prot) != HAL_PMEM_SUCCESS)
+				PAGE_SIZE, region->prot) != HAL_OK)
 				HAL_FATAL("VM protection rollback failed");
 		}
 		if (region == failed_region)

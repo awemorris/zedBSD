@@ -7,7 +7,7 @@
 #define AMD64_SPACE_MAGIC 0x36435053U
 
 struct amd64_table_page {
-	struct pmem_desc memory;
+	struct hal_pmem memory;
 	uint64 *parent;
 	unsigned parent_index;
 	struct amd64_table_page *next;
@@ -16,7 +16,9 @@ struct amd64_table_page {
 struct amd64_space {
 	uint32 magic;
 	int space_id;
-	struct pmem_desc pml4_memory;
+	volatile unsigned lock;
+	volatile unsigned destroying;
+	struct hal_pmem pml4_memory;
 	uint64 *pml4;
 	struct amd64_table_page *tables;
 };
@@ -24,5 +26,7 @@ struct amd64_space {
 void amd64_space_init(void);
 uintptr_t amd64_direct_to_phys(const void *address);
 void *amd64_phys_to_direct(uintptr_t address);
+uintptr_t amd64_system_cr3(void);
+void amd64_tlb_interrupt(void);
 
 #endif

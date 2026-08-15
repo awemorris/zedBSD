@@ -3,8 +3,6 @@
 #include "../i386/asm.h"
 #include "../i386/pic.h"
 
-static hal_clock_t cpu_tick_count;
-
 /*
  * Forward declaration
  */
@@ -15,8 +13,6 @@ static void init_8253(void);
  */
 void bsp_timer_init(void)
 {
-	cpu_tick_count = 0;
-
 	init_8253();
 
 	/* Unmask the IRQ of PIT. (Start interrupting from this moment.) */
@@ -55,17 +51,16 @@ static void init_8253(void)
 }
 
 /*
- * Get the CPU local tick count.
- */
-hal_clock_t	clock_get_tick_count(void)
-{
-	return cpu_tick_count;
-}
-
-/*
  * Interrupt handler for PIT.
  */
 void clock_handler(void)
 {
-	cpu_tick_count++;
+	/* The kernel owns tick accounting. */
+}
+
+bool
+hal_rtc_read(uint64 *unix_seconds)
+{
+	(void)unix_seconds;
+	return false;
 }

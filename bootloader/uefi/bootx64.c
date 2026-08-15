@@ -53,6 +53,39 @@ byte_copy(void *destination, const void *source, UINTN size)
 		*out++ = *in++;
 }
 
+static int
+guid_equal(const EFI_GUID *left, const EFI_GUID *right)
+{
+	const uint8_t *a = (const void *)left;
+	const uint8_t *b = (const void *)right;
+	UINTN index;
+
+	for (index = 0; index < sizeof(*left); index++)
+		if (a[index] != b[index])
+			return 0;
+	return 1;
+}
+
+static uint64_t
+find_acpi_rsdp(const EFI_SYSTEM_TABLE *system)
+{
+	UINTN index;
+	void *acpi10 = 0;
+
+	if (system->ConfigurationTable == 0 ||
+	    system->NumberOfTableEntries > 1024U)
+		return 0;
+	for (index = 0; index < system->NumberOfTableEntries; index++) {
+		const EFI_CONFIGURATION_TABLE *entry =
+		    &system->ConfigurationTable[index];
+		if (guid_equal(&entry->VendorGuid, &EFI_ACPI_20_TABLE_GUID))
+			return (uint64_t)(uintptr_t)entry->VendorTable;
+		if (guid_equal(&entry->VendorGuid, &EFI_ACPI_TABLE_GUID))
+			acpi10 = entry->VendorTable;
+	}
+	return (uint64_t)(uintptr_t)acpi10;
+}
+
 static void
 debug_byte(uint8_t byte)
 {
@@ -346,6 +379,10 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	build_bootstrap(low_address, &plan);
 	handoff = (void *)(uintptr_t)(low_address + HANDOFF_OFFSET);
 	ranges = (void *)(uintptr_t)(low_address + MEMORY_RANGES_OFFSET);
+	handoff->rsdp = find_acpi_rsdp(system);
+	if (handoff->rsdp == 0)
+		fail_status(&context, "Locate ACPI RSDP", EFI_NOT_FOUND);
+	handoff->flags |= ZBL6_HANDOFF_FLAG_ACPI_RSDP;
 
 	map_size = 0;
 	status = boot->GetMemoryMap(&map_size, 0, &map_key,

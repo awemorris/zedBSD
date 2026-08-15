@@ -43,7 +43,6 @@ struct interrupt_frame {
  */
 void int_init(void);
 void int_handler(struct interrupt_frame *fp);	/* called from trap.s */
-void int_set_resched_flag(void);		/* 再スケジュールフラグをセットする */
 
 /*
  * trap.S

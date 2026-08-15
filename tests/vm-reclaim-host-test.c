@@ -17,13 +17,13 @@ void *kern_calloc(size_t n, size_t s) { return calloc(n, s); }
 void kern_free(void *p) { free(p); }
 
 int hal_page_query(hal_space_t s, void *v, uint32_t *flags)
-{ (void)s; (void)v; *flags = query_flags; return HAL_PMEM_SUCCESS; }
+{ (void)s; (void)v; *flags = query_flags; return HAL_OK; }
 int hal_page_clear_flags(hal_space_t s, void *v, uint32_t flags)
-{ (void)s; (void)v; query_flags &= ~flags; return HAL_PMEM_SUCCESS; }
+{ (void)s; (void)v; query_flags &= ~flags; return HAL_OK; }
 int hal_page_unmap(hal_space_t s, void *v, size_t z)
-{ (void)s; (void)v; (void)z; unmaps++; return HAL_PMEM_SUCCESS; }
-int hal_page_map(hal_space_t s, void *v, uintptr_t p, size_t z, uint32_t a)
-{ (void)s; (void)v; (void)p; (void)z; (void)a; return HAL_PMEM_SUCCESS; }
+{ (void)s; (void)v; (void)z; unmaps++; return HAL_OK; }
+int hal_page_map(hal_space_t s, void *v, hal_physaddr_t p, size_t z, uint32_t a)
+{ (void)s; (void)v; (void)p; (void)z; (void)a; return HAL_OK; }
 int hal_pmem_free(struct hal_pmem *p)
 { free((void *)p->vaddr); memset(p, 0, sizeof(*p)); frees++; return 0; }
 
@@ -36,10 +36,12 @@ static struct vm_page *make_page(struct vmspace *vm, struct vm_region *region,
 				 unsigned flags, uint8_t fill)
 {
 	struct vm_page *page = calloc(1, sizeof(*page));
-	page->pmem.vaddr = (uintptr_t)malloc(4096);
-	page->pmem.paddr = page->pmem.vaddr & ~(uintptr_t)4095U;
+	page->pmem.vaddr = malloc(4096);
+	page->pmem.paddr = (hal_physaddr_t)(uintptr_t)page->pmem.vaddr &
+	    ~(hal_physaddr_t)4095U;
 	page->pmem.size = 4096;
-	memset((void *)page->pmem.vaddr, fill, 4096);
+	page->pmem.type = HAL_PMEM_TYPE_RAM;
+	memset(page->pmem.vaddr, fill, 4096);
 	page->address = region->start;
 	page->vm = vm;
 	page->region = region;

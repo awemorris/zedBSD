@@ -1,4 +1,4 @@
-/* amd64 GDT and single-CPU TSS. */
+/* amd64 per-CPU GDT and TSS. */
 #include <hal/hal.h>
 #include "defs.h"
 #include "descriptor.h"
@@ -18,9 +18,12 @@ struct table_descriptor {
 	uint64 base;
 } __attribute__((packed));
 
-static uint64 gdt[7] __attribute__((aligned(16)));
-static struct amd64_tss tss __attribute__((aligned(16)));
-static uint8 double_fault_stack[PAGE_SIZE * 4] __attribute__((aligned(16)));
+struct descriptor_state {
+	uint64 gdt[7] __attribute__((aligned(16)));
+	struct amd64_tss tss __attribute__((aligned(16)));
+	uint8 double_fault_stack[PAGE_SIZE * 4] __attribute__((aligned(16)));
+};
+static struct descriptor_state states[AMD64_SMP_MAX_CPUS];
 
 _Static_assert(sizeof(struct amd64_tss) == 104, "amd64 TSS size");
 
@@ -28,28 +31,30 @@ void
 amd64_descriptor_init(void)
 {
 	struct table_descriptor gdtr;
-	uintptr_t base = (uintptr_t)&tss;
+	struct descriptor_state *state = &states[hal_cpu_current()];
+	uintptr_t base = (uintptr_t)&state->tss;
 	uint64 low;
 
-	hal_memset(gdt, 0, sizeof(gdt));
-	hal_memset(&tss, 0, sizeof(tss));
-	gdt[1] = 0x00af9a000000ffffULL;
-	gdt[2] = 0x00cf92000000ffffULL;
+	hal_memset(state, 0, sizeof(*state));
+	state->gdt[1] = 0x00af9a000000ffffULL;
+	state->gdt[2] = 0x00cf92000000ffffULL;
 	/* DPL3 64-bit code: L=1 and D=0. */
-	gdt[3] = 0x00affa000000ffffULL;
-	gdt[4] = 0x00cff2000000ffffULL;
-	low = (sizeof(tss) - 1U) & 0xffffU;
+	state->gdt[3] = 0x00affa000000ffffULL;
+	state->gdt[4] = 0x00cff2000000ffffULL;
+	low = (sizeof(state->tss) - 1U) & 0xffffU;
 	low |= (uint64)(base & 0xffffffU) << 16;
 	low |= (uint64)0x89U << 40;
-	low |= (uint64)((sizeof(tss) - 1U) >> 16 & 0x0fU) << 48;
+	low |= (uint64)((sizeof(state->tss) - 1U) >> 16 & 0x0fU) << 48;
 	low |= (uint64)((base >> 24) & 0xffU) << 56;
-	gdt[5] = low;
-	gdt[6] = base >> 32;
-	tss.ist1 = (uintptr_t)double_fault_stack + sizeof(double_fault_stack);
-	tss.iomap_base = sizeof(tss);
-	gdtr.limit = sizeof(gdt) - 1U;
-	gdtr.base = (uintptr_t)gdt;
+	state->gdt[5] = low;
+	state->gdt[6] = base >> 32;
+	state->tss.ist1 = (uintptr_t)state->double_fault_stack +
+	    sizeof(state->double_fault_stack);
+	state->tss.iomap_base = sizeof(state->tss);
+	gdtr.limit = sizeof(state->gdt) - 1U;
+	gdtr.base = (uintptr_t)state->gdt;
 	amd64_load_gdt(&gdtr);
 }
 
-void amd64_set_tss_rsp0(uintptr_t stack_top) { tss.rsp0 = stack_top; }
+void amd64_set_tss_rsp0(uintptr_t stack_top)
+{ states[hal_cpu_current()].tss.rsp0 = stack_top; }

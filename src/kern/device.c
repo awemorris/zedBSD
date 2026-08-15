@@ -272,14 +272,6 @@ void probe_fixed_class(uint8_t device_class)
 }
 
 
-int linuxboot(void)
-{
-	if (curpart < 0 || !kernel_name[0])
-		return 0;
-	return kern_platform_boot_linux(&mounted_fs, kernel_name, kernel_arg,
-					devs, device_count, curdev);
-}
-
 #ifdef ZEDBSD_M9_WRITE_TEST
 static void m9_debug_puts(const char *text)
 {

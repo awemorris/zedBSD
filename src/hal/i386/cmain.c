@@ -18,7 +18,7 @@ cmain(const void *raw_boot_info)
 	const void *handoff;
 
 	bsp_boot_init(raw_boot_info);
-	bsp_cons_init();
+	i386_bsp_cons_init();
 #if defined(HAL_BOARD_PC98)
 	hal_puts("NEC PC-9800 ｼﾘｰｽﾞ ﾊﾟｰｿﾅﾙ ｺﾝﾋﾟｭｰﾀ\n\n");
 #else

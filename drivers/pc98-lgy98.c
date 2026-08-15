@@ -107,9 +107,11 @@ lgy_irq_service(void *argument)
 	struct dp8390 *dp = argument;
 
 	for (;;) {
-		irq_enter_isr(LGY_IRQ);
+		hal_irq_ack_t acknowledge;
+		if (hal_irq_service_wait(LGY_IRQ, &acknowledge) != HAL_OK)
+			HAL_FATAL("LGY-98 IRQ service wait failed");
 		dp8390_interrupt(dp);
-		irq_leave_isr(LGY_IRQ);
+		hal_irq_send_eoi(acknowledge);
 	}
 }
 

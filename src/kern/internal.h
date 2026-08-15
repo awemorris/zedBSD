@@ -48,10 +48,9 @@ extern const struct zedbsd_device *kern_devices;
 extern unsigned kern_device_count;
 extern struct zedbsd_filesystem kern_mounted_fs;
 extern struct zedbsd_namespace kern_mounted_namespace;
-extern struct zedbsd_environment kern_boot_environment;
+extern struct zedbsd_environment kern_environment;
 extern struct part kern_parts[MAX_PARTS];
 extern int kern_current_device, kern_current_partition;
-extern char kern_kernel_name[ZEDBSD_PATH_MAX], kern_kernel_arguments[256];
 
 int kern_streq(const char *left, const char *right);
 void kern_memzero(void *destination, uint32_t length);
@@ -83,7 +82,6 @@ uint8_t kern_scsi_reported_targets(void);
 unsigned kern_bit_count(uint8_t value);
 int kern_probe_fixed_device(uint8_t device_class, uint8_t bios_id);
 void kern_probe_fixed_class(uint8_t device_class);
-int kern_linuxboot(void);
 #ifdef ZEDBSD_M9_WRITE_TEST
 int kern_m9_write_test(uint32_t lba);
 #endif
@@ -100,12 +98,10 @@ int startup_menu(struct startup_state *state);
 #define device_count kern_device_count
 #define mounted_fs kern_mounted_fs
 #define mounted_namespace kern_mounted_namespace
-#define boot_environment kern_boot_environment
+#define boot_environment kern_environment
 #define parts kern_parts
 #define curdev kern_current_device
 #define curpart kern_current_partition
-#define kernel_name kern_kernel_name
-#define kernel_arg kern_kernel_arguments
 #define streq kern_streq
 #define memzero kern_memzero
 #define memcopy kern_memcopy
@@ -136,7 +132,6 @@ int startup_menu(struct startup_state *state);
 #define bit_count kern_bit_count
 #define probe_fixed_device kern_probe_fixed_device
 #define probe_fixed_class kern_probe_fixed_class
-#define linuxboot kern_linuxboot
 #define m9_write_test kern_m9_write_test
 #define command kern_command
 

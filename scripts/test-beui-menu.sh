@@ -144,7 +144,7 @@ else
 	ZEDBSD_AUTOEXEC="$files/G3MENU.NCT" ZEDBSD_FILES="$files" \
 		ZEDBSD_ZINIT_RC="$cfg" \
 		DISK_SECTORS=17 \
-		"$repo/scripts/install-image.sh" "$image" "" "$cfg"
+		"$repo/scripts/install-image.sh" --boot-cfg "$cfg" "$image"
 fi
 
 offset="$(python3 - "$image" <<'PY'

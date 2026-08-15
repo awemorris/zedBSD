@@ -26,7 +26,7 @@ SPARCV9_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias -mcmodel=medany \
 SPARCV9_EARLY_SOURCES := src/hal/sparcv9/locore.S \
 	src/hal/sparcv9/trap-table.S src/hal/sparcv9/trap-entry.S \
 	src/hal/sparcv9/window.S src/hal/sparcv9/context.S
-SPARCV9_EARLY_C_SOURCES := src/hal/sparcv9/cmain.c \
+SPARCV9_EARLY_C_SOURCES := src/hal/cpu-up.c src/hal/sparcv9/cmain.c \
 	src/hal/sparcv9/runtime.c src/hal/sparcv9/io.c \
 	src/hal/sparcv9/trap.c src/hal/sparcv9/irq.c \
 	src/hal/sparcv9/timer.c src/hal/sparcv9/page.c \
@@ -56,7 +56,7 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
 	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
 	src/kern/graphics-device.c src/kern/system-device.c \
-	src/kern/sun4u/unsupported-devices.c src/kern/init.c
+	src/kern/init.c
 SPARCV9_KERNEL_SOURCES += $(KERN_NET_SOURCES)
 SPARCV9_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(SPARCV9_KERNEL_SOURCES))
 SPARCV9_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURCES))
@@ -93,6 +93,11 @@ POSIX-R1.ELF: $(BUILD)/POSIX-R1.ELF
 
 sparcv9-toolchain:
 	bash scripts/build-sparcv9-toolchain.sh --prefix $(SPARCV9_PREFIX)
+
+$(BUILD)/src/hal/cpu-up.o: src/hal/cpu-up.c
+	@mkdir -p $(dir $@)
+	$(SPARCV9_CC) $(SPARCV9_CPPFLAGS) $(SPARCV9_CFLAGS) \
+		-MMD -MP -c $< -o $@
 
 $(BUILD)/src/hal/sparcv9/%.o: src/hal/sparcv9/%.S
 	@mkdir -p $(dir $@)

@@ -88,7 +88,7 @@ void rpi4_framebuffer_cell(unsigned row,unsigned column,int character,uint8 attr
 {
 	uint32 fg=colour(attribute&15U),bg=colour(attribute>>4);
 	unsigned x=x_origin+column*8U,y=y_origin+row*16U;
-	if(!pixels||fb_is_active()||row>=25||column>=80)return;
+	if(!pixels||row>=25||column>=80)return;
 	for(unsigned py=0;py<16;py++){
 		uint8 bits=(py==0||py==15)?0:glyph_row(character,(py-1U)/2U);
 		for(unsigned px=0;px<8;px++)
@@ -98,7 +98,7 @@ void rpi4_framebuffer_cell(unsigned row,unsigned column,int character,uint8 attr
 
 void rpi4_framebuffer_cursor(unsigned row,unsigned column,int visible)
 {
-	if(!pixels||fb_is_active()||!visible||row>=25||column>=80)return;
+	if(!pixels||!visible||row>=25||column>=80)return;
 	for(unsigned y=14;y<16;y++)for(unsigned x=0;x<8;x++)
 		put_pixel(x_origin+column*8U+x,y_origin+row*16U+y,colour(15));
 }

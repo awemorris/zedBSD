@@ -5,6 +5,7 @@
 #include "kern/mbr-partition.h"
 #include "drivers/pcat-ide.h"
 #include "drivers/pcat-ne2000.h"
+#include "drivers/pcat-graphics.h"
 #include <errno.h>
 #include <hal/hal.h>
 
@@ -43,6 +44,8 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 			hal_printf("net: ISA NE2000 initialization failed (%d)\n",
 			    network_error);
 	}
+	if (!zedbsd_pcat_graphics_init())
+		hal_printf("graphics: PC/AT driver unavailable\n");
 	return count;
 }
 
@@ -53,14 +56,6 @@ struct disk *kern_platform_block_device(const struct zedbsd_device *device)
 {
 	if (device == 0 || device->device_class != ZEDBSD_DEV_IDE) return 0;
 	return zedbsd_ide_pcat_bios_unit(device->bios_id);
-}
-
-int kern_platform_boot_linux(struct zedbsd_filesystem *fs, const char *path,
-    const char *args, const struct zedbsd_device *devices, unsigned count,
-    int boot_device)
-{
-	(void)fs; (void)path; (void)args; (void)devices; (void)count;
-	(void)boot_device; return EOPNOTSUPP;
 }
 
 void kern_platform_debug_write(const char *text)

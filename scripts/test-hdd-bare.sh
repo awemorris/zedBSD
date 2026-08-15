@@ -38,7 +38,7 @@ rm -f -- "$monitor"
 "$qemu" -M "$machine" -cpu "$cpu" -m "$memory" -accel tcg -L "$bios_dir" \
 	-nic none -drive "if=ide,bus=0,unit=0,format=raw,file=$image" \
 	-display none -serial none -qmp "unix:$monitor,server=on,wait=off" \
-	-no-reboot >/dev/null 2>&1 &
+	-no-reboot -no-shutdown >/dev/null 2>&1 &
 qemu_pid=$!
 cleanup()
 {

@@ -13,7 +13,6 @@ struct thread thread0;
 struct process process0;
 static struct thread *current;
 static int irq_enabled = 1;
-static unsigned reschedule_requests;
 
 struct thread *thread_current(void) { return current; }
 
@@ -26,12 +25,9 @@ hal_irq_disable(void)
 }
 
 void hal_irq_enable(void) { irq_enabled = 1; }
-void hal_reschedule_on_interrupt_return(void) { reschedule_requests++; }
 void hal_cpu_idle(void) { irq_enabled = 0; }
 void spin_lock(struct spinlock *lock) { (void)lock; }
 void spin_unlock(struct spinlock *lock) { (void)lock; }
-int kern_boot_pending(void) { return 0; }
-void kern_boot_execute_pending(void) { abort(); }
 
 void
 hal_task_context_switch(hal_task_t task)
@@ -75,7 +71,6 @@ main(void)
 
 	for (i = 0; i < SCHED_QUANTUM_TICKS; i++)
 		sched_clock();
-	assert(reschedule_requests == 1);
 	assert(sched_ticks() == SCHED_QUANTUM_TICKS);
 
 	memset(&sleeper, 0, sizeof(sleeper));

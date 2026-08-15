@@ -5,15 +5,18 @@
 #include "asm.h"
 #include "descriptor.h"
 #include "int.h"
+#include "irq.h"
+#include "percpu.h"
 
 static struct amd64_task *task_list;
-static struct amd64_task *running_task;
+#define running_task (amd64_percpu_current()->running_task)
 static uint8 initial_fpregs[512] __attribute__((aligned(16)));
 static uint32 task_count;
 static size_t task_stack_bytes;
 static hal_task_t xmm_selftest_main;
 static hal_task_t xmm_selftest_task;
 static volatile unsigned xmm_selftest_stage;
+static volatile unsigned task_registry_lock;
 static const uint8 xmm_main_pattern[16] = {
 	0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
 	0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01
@@ -84,22 +87,39 @@ task_fpregs(struct amd64_task *task)
 static void
 tasklist_add(struct amd64_task *task)
 {
+	bool enabled = hal_irq_disable();
 	struct amd64_task **link = &task_list;
+	while (__atomic_exchange_n(&task_registry_lock, 1U,
+	    __ATOMIC_ACQUIRE) != 0)
+		__asm__ volatile("pause");
 	while (*link != NULL) link = &(*link)->next;
 	*link = task;
 	task->next = NULL;
 	task_count++;
+	if (task->sys_stack != NULL)
+		task_stack_bytes += AMD64_SYS_STACK_SIZE;
+	__atomic_store_n(&task_registry_lock, 0U, __ATOMIC_RELEASE);
+	if (enabled) hal_irq_enable();
 }
 
 static void
 tasklist_del(struct amd64_task *task)
 {
+	bool enabled = hal_irq_disable();
 	struct amd64_task **link = &task_list;
+	while (__atomic_exchange_n(&task_registry_lock, 1U,
+	    __ATOMIC_ACQUIRE) != 0)
+		__asm__ volatile("pause");
 	while (*link != NULL && *link != task) link = &(*link)->next;
 	if (*link == task) {
 		*link = task->next;
 		if (task_count != 0) task_count--;
+		if (task->sys_stack != NULL &&
+		    task_stack_bytes >= AMD64_SYS_STACK_SIZE)
+			task_stack_bytes -= AMD64_SYS_STACK_SIZE;
 	}
+	__atomic_store_n(&task_registry_lock, 0U, __ATOMIC_RELEASE);
+	if (enabled) hal_irq_enable();
 }
 
 void
@@ -113,6 +133,7 @@ hal_task_init(void)
 	hal_memset(task, 0, sizeof(*task));
 	task->space = HAL_SPACE_SYS;
 	task->run_cpu = 0;
+	task->target_cpu = hal_cpu_current();
 	hal_memcpy(task_fpregs(task), initial_fpregs, sizeof(initial_fpregs));
 	tasklist_add(task);
 	running_task = task;
@@ -163,9 +184,9 @@ hal_task_create(hal_space_t space, void (*start)(void *), void *arg,
 	    ~(uintptr_t)15U);
 	task->space = space;
 	task->run_cpu = -1;
+	task->target_cpu = hal_cpu_current();
 	hal_memcpy(task_fpregs(task), initial_fpregs, sizeof(initial_fpregs));
 	build_initial_stack(task, start, arg, user_stack_pointer);
-	task_stack_bytes += AMD64_SYS_STACK_SIZE;
 	tasklist_add(task);
 	return task;
 }
@@ -275,10 +296,10 @@ hal_task_destroy(hal_task_t handle)
 {
 	struct amd64_task *task = handle;
 	if (task == NULL) return;
-	if (task == running_task) HAL_FATAL("destroying current amd64 task");
+	if (__atomic_load_n(&task->run_cpu, __ATOMIC_ACQUIRE) >= 0)
+		HAL_FATAL("destroying running amd64 task");
 	tasklist_del(task);
 	if (task->sys_stack != NULL) {
-		task_stack_bytes -= AMD64_SYS_STACK_SIZE;
 		hal_free(task->sys_stack_allocation);
 	}
 	hal_free(task);
@@ -290,6 +311,14 @@ hal_task_context_switch(hal_task_t handle)
 	struct amd64_task *to = handle, *from = running_task;
 	if (to == NULL || from == NULL) HAL_FATAL("invalid amd64 task switch");
 	if (to == from) return;
+	if (__atomic_load_n(&to->run_cpu, __ATOMIC_ACQUIRE) >= 0)
+		HAL_FATAL("amd64 HAL task already running");
+	if (__atomic_load_n(&to->target_cpu, __ATOMIC_ACQUIRE) !=
+	    hal_cpu_current())
+		HAL_FATAL("amd64 HAL task resumed on wrong CPU");
+	__atomic_store_n(&from->run_cpu, -1, __ATOMIC_RELEASE);
+	__atomic_store_n(&to->run_cpu, (int)hal_cpu_current(),
+	    __ATOMIC_RELEASE);
 	from->tls = (uintptr_t)asm_read_msr(AMD64_MSR_FS_BASE);
 	running_task = to;
 	hal_page_switch_space(to->space);
@@ -328,8 +357,28 @@ void *hal_task_get_private(hal_task_t t)
 { return t != NULL ? ((struct amd64_task *)t)->private_data : NULL; }
 hal_space_t hal_task_get_space(hal_task_t t)
 { return t != NULL ? ((struct amd64_task *)t)->space : HAL_SPACE_SYS; }
+int hal_task_transfer(hal_task_t handle, hal_cpu_id_t target_cpu)
+{
+	struct amd64_task *task = handle;
+	struct hal_cpu_mask ready;
+	if (task == NULL || target_cpu >= hal_cpu_count()) return HAL_ERR_INVALID;
+	if (__atomic_load_n(&task->run_cpu, __ATOMIC_ACQUIRE) >= 0)
+		return HAL_ERR_BUSY;
+	if (!amd64_irq_task_transferable(task))
+		return HAL_ERR_BUSY;
+	hal_cpu_ready_mask(&ready);
+	if (!hal_cpu_mask_test(&ready, target_cpu)) return HAL_ERR_STATE;
+	__atomic_store_n(&task->target_cpu, target_cpu, __ATOMIC_RELEASE);
+	return HAL_OK;
+}
 void hal_amd64_task_memory_stats(uint32 *count, size_t *bytes)
 {
+	bool enabled = hal_irq_disable();
+	while (__atomic_exchange_n(&task_registry_lock, 1U,
+	    __ATOMIC_ACQUIRE) != 0)
+		__asm__ volatile("pause");
 	if (count != NULL) *count = task_count;
 	if (bytes != NULL) *bytes = task_stack_bytes;
+	__atomic_store_n(&task_registry_lock, 0U, __ATOMIC_RELEASE);
+	if (enabled) hal_irq_enable();
 }

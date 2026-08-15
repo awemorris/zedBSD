@@ -12,10 +12,14 @@ struct amd64_interrupt_frame {
 };
 
 void amd64_int_init(void);
+void amd64_int_load(void);
 void int_handler(struct amd64_interrupt_frame *frame);
-void int_set_resched_flag(void);
 extern void *amd64_fault_table[32];
 extern void *amd64_irq_table[16];
+void amd64_notify_entry(void);
+void amd64_tlb_entry(void);
+void amd64_error_entry(void);
+void amd64_spurious_entry(void);
 void amd64_syscall_entry(void);
 void amd64_undefined_entry(void);
 

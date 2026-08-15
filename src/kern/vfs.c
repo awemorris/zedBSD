@@ -10,7 +10,6 @@
 #include "kern/console-device.h"
 #include "kern/graphics-device.h"
 #include "kern/system-device.h"
-#include "kern/boot-device.h"
 #include "kern/devfs.h"
 #include "kern/overlayfs.h"
 #include "kern/loop.h"
@@ -292,10 +291,6 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	error = system_device_register();
 	if (error != 0)
 		return vfs_fail("register system", error);
-	error = boot_device_register();
-	if (error != 0)
-		return vfs_fail("register boot device", error);
-
 	for (i = 0; i < physical_count; i++) {
 		struct partition entries[PARTITION_MAX];
 		struct disk_geometry geometry;

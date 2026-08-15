@@ -19,8 +19,7 @@ struct kern_memory_stats {
 	size_t heap_peak;
 	size_t heap_largest_free;
 	size_t heap_largest_failed;
-	size_t low_image_bytes;
-	size_t high_image_bytes;
+	size_t image_bytes;
 };
 
 void kern_memory_get_stats(struct kern_memory_stats *);

@@ -37,9 +37,8 @@ static void scroll(void)
 static void newline(void)
 {state.column=0;if(++state.row>=HAL_CONS_ROWS){scroll();state.row=HAL_CONS_ROWS-1;}}
 
-void bsp_cons_init(void){rpi4_uart_init();for(unsigned r=0;r<HAL_CONS_ROWS;r++)for(unsigned c=0;c<HAL_CONS_COLUMNS;c++){shadow[r][c].character=' ';shadow[r][c].attribute=current_attribute;}}
-void cons_cls(void){hal_cons_clear();}
-void cons_putc(int character)
+void rpi4_cons_init(void){rpi4_uart_init();for(unsigned r=0;r<HAL_CONS_ROWS;r++)for(unsigned c=0;c<HAL_CONS_COLUMNS;c++){shadow[r][c].character=' ';shadow[r][c].attribute=current_attribute;}}
+static void console_putc(int character)
 {
 	rpi4_uart_putc(character);erase_cursor();
 	if(character=='\n'){newline();hal_cons_update_cursor();return;}
@@ -49,22 +48,21 @@ void cons_putc(int character)
 		shadow[state.row][state.column].character=' ';
 		draw(state.row,state.column);hal_cons_update_cursor();return;
 	}
-	if(character=='\t'){do cons_putc(' ');while(state.column&7U);return;}
+	if(character=='\t'){do console_putc(' ');while(state.column&7U);return;}
 	if(state.column>=HAL_CONS_COLUMNS)newline();
 	shadow[state.row][state.column].character=(uint8)(character>=0x20&&character<0x7f?character:'?');
 	shadow[state.row][state.column].attribute=current_attribute;draw(state.row,state.column++);
 	if(state.column>=HAL_CONS_COLUMNS)newline();
 	hal_cons_update_cursor();
 }
-void cons_puts(const char*s){if(s)while(*s)cons_putc(*s++);}
-int cons_getc(void){return rpi4_uart_getc();}
-void cons_set_attr(int fg,int bg){current_attribute=(uint8)(((bg&15)<<4)|(fg&15));}
-void hal_cons_putc(int c){cons_putc(c);}
+static void console_puts(const char*s){if(s)while(*s)console_putc(*s++);}
+static int console_getc(void){return rpi4_uart_getc();}
+void hal_cons_putc(int c){console_putc(c);}
 void hal_cons_move_cursor(int row,int column){(void)hal_cons_set_cursor((unsigned)row,(unsigned)column);}
-int hal_cons_getc(void){return cons_getc();}
+int hal_cons_getc(void){return console_getc();}
 void hal_cons_set_mode(enum hal_cons_mode mode){state.mode=mode;}
-void hal_cons_write(const char*s){cons_puts(s);}
-void hal_cons_write_n(const char*s,unsigned n){if(s)while(n--)cons_putc(*s++);}
+void hal_cons_write(const char*s){console_puts(s);}
+void hal_cons_write_n(const char*s,unsigned n){if(s)while(n--)console_putc(*s++);}
 int hal_cons_write_n_at(unsigned row,unsigned column,const char*s,unsigned n,uint8 attr)
 {
 	unsigned changed=0;if(!s||row>=HAL_CONS_ROWS||column>=HAL_CONS_COLUMNS)return -1;erase_cursor();
@@ -80,8 +78,10 @@ int hal_cons_set_cursor(unsigned r,unsigned c){if(r>=HAL_CONS_ROWS||c>=HAL_CONS_
 void hal_cons_show_cursor(int visible){erase_cursor();state.cursor_visible=visible!=0;hal_cons_update_cursor();}
 void hal_cons_save_state(struct hal_cons_state*out){if(out)*out=state;}
 void hal_cons_restore_terminal(const struct hal_cons_state*in){erase_cursor();state.mode=HAL_CONS_TERMINAL;if(in&&in->row<HAL_CONS_ROWS&&in->column<HAL_CONS_COLUMNS)state=*in;hal_cons_update_cursor();}
-int hal_cons_read_event(void){return cons_getc();}
-int hal_cons_poll_event(void){return rpi4_uart_poll()?cons_getc():0;}
+int hal_cons_read_event(void){return console_getc();}
+int hal_cons_poll_event(void){return rpi4_uart_poll()?console_getc():0;}
 int hal_cons_key_state(int key){(void)key;return 0;}
-void hal_cons_drain_input(void){while(rpi4_uart_poll())(void)cons_getc();}
+void hal_cons_drain_input(void){while(rpi4_uart_poll())(void)console_getc();}
 unsigned hal_cons_modifiers(void){return 0;}
+void hal_cons_suspend(void){}
+void hal_cons_resume(void){}

@@ -20,7 +20,7 @@ sector checks the machine type.
 | `include/`       | Public HAL, kernel, and user ABI interfaces                                         |
 | `src/hal/`       | HAL and PC-98 board support                                                         |
 | `src/kern/`      | Platform-neutral kernel services                                                    |
-| `userland/`      | crt0, libc glue, shell, Linux loader, and Noct runtime                              |
+| `userland/`      | crt0, libc glue, shell, network tools, and Noct runtime                             |
 | `libc/`          | Freestanding libc subset                                                            |
 | `softfloat/`     | Soft-float support compiled from the vendor GCC/musl sources                        |
 | `platform/pc98/` | PC-9800 target: IPLs, stage 1/2, console, timer, Noct target adapter, DOS installer |

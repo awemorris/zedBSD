@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <kern/atomic.h>
 #include <kern/lock.h>
+#include <hal/hal.h>
 
 #include <assert.h>
 #include <stdbool.h>
@@ -35,6 +36,7 @@ int main(void)
 {
 	atomic_uint_t atomic = { 0 };
 	refcount_t references;
+	struct hal_cpu_mask mask;
 	thrd_t first, second;
 	unsigned expected = 1;
 
@@ -49,6 +51,24 @@ int main(void)
 	assert(refcount_put(&references) == 0);
 	assert(refcount_put(&references) != 0);
 	assert(refcount_tryget(&references) == 0);
+
+	hal_cpu_mask_zero(&mask);
+	assert(!hal_cpu_mask_test(&mask, 0));
+	hal_cpu_mask_set(&mask, 0);
+	hal_cpu_mask_set(&mask, 63);
+	hal_cpu_mask_set(&mask, 64);
+	hal_cpu_mask_set(&mask, HAL_CPU_MAX - 1U);
+	hal_cpu_mask_set(&mask, HAL_CPU_MAX);
+	assert(hal_cpu_mask_test(&mask, 0));
+	assert(hal_cpu_mask_test(&mask, 63));
+	assert(hal_cpu_mask_test(&mask, 64));
+	assert(hal_cpu_mask_test(&mask, HAL_CPU_MAX - 1U));
+	assert(!hal_cpu_mask_test(&mask, HAL_CPU_MAX));
+	hal_cpu_mask_clear(&mask, 64);
+	assert(!hal_cpu_mask_test(&mask, 64));
+	hal_cpu_mask_fill(&mask);
+	assert(hal_cpu_mask_test(&mask, 0));
+	assert(hal_cpu_mask_test(&mask, HAL_CPU_MAX - 1U));
 
 	spin_init(&test_lock, LOCK_RANK_FILE, "host-test");
 	assert(thrd_create(&first, increment, NULL) == thrd_success);

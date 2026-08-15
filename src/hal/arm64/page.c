@@ -91,99 +91,80 @@ arm64_page_init(void)
 	    ((uint64)phys_pages - reserved_pages) * ARM64_PAGE_SIZE / (1024 * 1024));
 }
 
-void pmem_reserve(hal_physaddr_t paddr, size_t size) { reserve_range(paddr, size); }
-
 static int
-alloc_range(size_t size, uintptr_t above, uintptr_t below, struct pmem_desc *desc)
+alloc_ram(size_t size, size_t alignment, struct hal_pmem *desc)
 {
-	uint32 need, first, end, start, index;
+	uint32 need, end, start, index, align_pages;
 	uint64 state;
 	uintptr_t limit = (uintptr_t)phys_pages * ARM64_PAGE_SIZE;
-	if (below > limit) below = limit;
 	if (desc == NULL || size == 0 || size > SIZE_MAX - (ARM64_PAGE_SIZE - 1) ||
-	    above >= below) return PMEM_BADDESC;
+	    alignment < ARM64_PAGE_SIZE) return HAL_ERR_INVALID;
 	need = (uint32)((size + ARM64_PAGE_SIZE - 1) / ARM64_PAGE_SIZE);
-	first = (uint32)((above + ARM64_PAGE_SIZE - 1) / ARM64_PAGE_SIZE);
-	end = (uint32)(below / ARM64_PAGE_SIZE);
-	if (need == 0 || first >= end || need > end - first) return PMEM_NOSPACE;
+	align_pages = (uint32)(alignment / ARM64_PAGE_SIZE);
+	end = (uint32)(limit / ARM64_PAGE_SIZE);
+	if (need == 0 || need >= end) return HAL_ERR_NOMEM;
 	state = arm64_irq_save();
-	for (start = first; start + need <= end; start++) {
+	for (start = 1; start + need <= end; start++) {
+		if ((start & (align_pages - 1U)) != 0) continue;
 		for (index = 0; index < need && !BIT_GET(page_bitmap, start + index); index++) ;
 		if (index == need) break;
 		start += index;
 	}
-	if (start + need > end) { arm64_irq_restore(state); return PMEM_NOSPACE; }
+	if (start + need > end) { arm64_irq_restore(state); return HAL_ERR_NOMEM; }
 	for (index = 0; index < need; index++) BIT_SET(page_bitmap, start + index);
 	allocated_pages += need;
 	arm64_irq_restore(state);
-	desc->paddr = (void *)((uintptr_t)start * ARM64_PAGE_SIZE);
+	desc->paddr = (hal_physaddr_t)start * ARM64_PAGE_SIZE;
 	desc->vaddr = arm64_phys_to_direct((uintptr_t)desc->paddr);
 	desc->size = (size_t)need * ARM64_PAGE_SIZE;
-	return PMEM_SUCCESS;
+	desc->type = HAL_PMEM_TYPE_RAM; desc->attr = 0;
+	return HAL_OK;
 }
 
-int pmem_alloc_lo(size_t size, struct pmem_desc *desc)
-{ return alloc_range(size, ARM64_PAGE_SIZE, (uintptr_t)phys_pages * ARM64_PAGE_SIZE, desc); }
-
-int
-pmem_free(struct pmem_desc *desc)
+static int
+free_ram(struct hal_pmem *desc)
 {
 	uint32 first, count, i;
 	uint64 state;
 	if (desc == NULL || desc->size == 0 ||
 	    ((uintptr_t)desc->paddr & (ARM64_PAGE_SIZE - 1)) != 0 ||
 	    (desc->size & (ARM64_PAGE_SIZE - 1)) != 0 ||
-	    desc->vaddr != arm64_phys_to_direct((uintptr_t)desc->paddr)) return PMEM_BADDESC;
+	    desc->vaddr != arm64_phys_to_direct((uintptr_t)desc->paddr)) return HAL_ERR_INVALID;
 	first = (uint32)((uintptr_t)desc->paddr / ARM64_PAGE_SIZE);
 	count = (uint32)(desc->size / ARM64_PAGE_SIZE);
-	if (first >= phys_pages || count > phys_pages - first) return PMEM_BADDESC;
+	if (first >= phys_pages || count > phys_pages - first) return HAL_ERR_INVALID;
 	state = arm64_irq_save();
 	for (i = 0; i < count; i++)
 		if (!BIT_GET(page_bitmap, first + i) || BIT_GET(reserved_bitmap, first + i)) {
-			arm64_irq_restore(state); return PMEM_BADDESC;
+			arm64_irq_restore(state); return HAL_ERR_STATE;
 		}
 	for (i = 0; i < count; i++) BIT_CLEAR(page_bitmap, first + i);
 	allocated_pages -= count;
 	arm64_irq_restore(state);
-	desc->vaddr = desc->paddr = NULL; desc->size = 0;
-	return PMEM_SUCCESS;
+	hal_memset(desc, 0, sizeof(*desc));
+	return HAL_OK;
 }
 
-int hal_pmem_alloc(size_t size, struct hal_pmem *desc, uint32 flags)
+int hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *desc)
 {
-	struct pmem_desc p; int error;
-	if (desc == NULL || (flags & ~(HAL_PMEM_ATTR_NOCACHE | HAL_PMEM_ATTR_WRITETHRU))) return HAL_PMEM_BADDESC;
-	error = pmem_alloc_lo(size, &p); if (error) return error;
-	desc->vaddr = (uintptr_t)p.vaddr; desc->paddr = (uintptr_t)p.paddr; desc->size = p.size;
-	return HAL_PMEM_SUCCESS;
-}
-int hal_pmem_alloc_limited(size_t size, uintptr_t above, uintptr_t below, struct hal_pmem *desc)
-{
-	struct pmem_desc p; int error;
-	if (desc == NULL) return HAL_PMEM_BADDESC;
-	error = alloc_range(size, above, below, &p); if (error) return error;
-	desc->vaddr = (uintptr_t)p.vaddr; desc->paddr = (uintptr_t)p.paddr; desc->size = p.size;
-	return HAL_PMEM_SUCCESS;
+	size_t alignment;
+	if (request == NULL || desc == NULL || request->size == 0 ||
+	    request->type != HAL_PMEM_TYPE_RAM ||
+	    request->paddr != HAL_PMEM_PADDR_ANY || request->attr != 0)
+		return request != NULL && request->type != HAL_PMEM_TYPE_RAM ?
+		    HAL_ERR_UNSUPPORTED : HAL_ERR_INVALID;
+	alignment = request->alignment == 0 ? ARM64_PAGE_SIZE : request->alignment;
+	if (alignment < ARM64_PAGE_SIZE || (alignment & (alignment - 1U)) != 0)
+		return HAL_ERR_INVALID;
+	return alloc_ram(request->size, alignment, desc);
 }
 int hal_pmem_free(struct hal_pmem *desc)
 {
-	struct pmem_desc p; int error;
-	if (desc == NULL) return HAL_PMEM_BADDESC;
-	p.vaddr=(void *)desc->vaddr; p.paddr=(void *)desc->paddr; p.size=desc->size;
-	error=pmem_free(&p); if (!error) desc->vaddr=desc->paddr=desc->size=0; return error;
+	if (desc == NULL || desc->type != HAL_PMEM_TYPE_RAM)
+		return HAL_ERR_INVALID;
+	return free_ram(desc);
 }
 size_t hal_pmem_get_total_size(void) { return (size_t)phys_pages * ARM64_PAGE_SIZE; }
-
-void hal_mem_get_memory_map(int *blocks, struct hal_memory_map_entry *entries, size_t count)
-{
-	const struct rpi4_fdt_info *info=rpi4_boot_info(); unsigned i;
-	if (blocks) *blocks=(int)info->memory_count;
-	for (i=0; entries && i<info->memory_count && i<count; i++) {
-		entries[i].base=(uintptr_t)info->memory[i].base;
-		entries[i].size=(size_t)info->memory[i].size;
-		entries[i].flags=HAL_PAGE_ENTRY_RAM;
-	}
-}
 void __attribute__((weak)) hal_arm64_task_memory_stats(uint32 *c,size_t *s)
 { if(c)*c=0; if(s)*s=0; }
 void hal_arm64_space_memory_stats(uint32 *,uint32 *);

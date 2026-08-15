@@ -34,3 +34,5 @@ sparcv9_boot_handoff:
 sparcv9_boot_stack:
 	.skip 32768
 sparcv9_boot_stack_top:
+	/* Reserve ABI register-window spill slots before the following BSS. */
+	.skip 4096

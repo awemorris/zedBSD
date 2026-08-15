@@ -343,8 +343,8 @@ make_services(struct zedbsd_noct_services *services,
 	services->directory_read = target_directory_read;
 }
 
-/* End of the resident vmunix high segment, from the linker script. */
-extern char __high_end[];
+/* End of the resident vmunix image, from the linker script. */
+extern char __kernel_vma_end[];
 static struct zedbsd_noct_memory_profile selected_memory;
 static int selected_memory_ready;
 
@@ -353,13 +353,22 @@ select_memory_raw(struct zedbsd_noct_memory_profile *profile)
 {
 	uint32_t low_extended;
 	uint32_t high_mib;
-	/* __high_end is a higher-half VMA.  Noct's arena accounting uses the
+	/* The kernel end is a higher-half VMA.  Noct's arena accounting uses the
 	 * corresponding physical range beginning at 1 MiB. */
 	uint32_t high_end_physical =
-		(uint32_t)(uintptr_t)__high_end & 0x7fffffffU;
+		(uint32_t)(uintptr_t)__kernel_vma_end & 0x7fffffffU;
 	uint32_t low_reserved = high_end_physical - 0x100000U;
 
-	hal_pc98_memory_segments(&low_extended, &high_mib);
+	{
+		size_t total = hal_pmem_get_total_size();
+		low_extended = total > 0x00100000U ?
+		    (uint32_t)(total - 0x00100000U) : 0;
+		if (low_extended > 14U * 1024U * 1024U)
+			low_extended = 14U * 1024U * 1024U;
+		high_mib = total > 16U * 1024U * 1024U ?
+		    (uint32_t)((total - 16U * 1024U * 1024U) /
+		    (1024U * 1024U)) : 0;
+	}
 	return zedbsd_noct_select_memory(low_extended, high_mib, low_reserved,
 					 profile);
 }
@@ -371,8 +380,6 @@ zedbsd_noct_prepare_memory(void)
 		return 1;
 	if (!select_memory_raw(&selected_memory))
 		return 0;
-	pmem_reserve((hal_physaddr_t)selected_memory.arena_base,
-		     selected_memory.arena_size);
 	selected_memory_ready = 1;
 	return 1;
 }

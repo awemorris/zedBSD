@@ -30,6 +30,8 @@ SECTIONS
 	__high_bss_start = .;
 	__high_bss_end = .;
 	__high_end = .;
+	__kernel_vma_start = __low_start;
+	__kernel_vma_end = __high_end;
 	text_start_phys = ABSOLUTE(text_start - 0x80000000);
 	/DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }
 	ASSERT((ADDR(.multiboot) - 0x80200000) < 8192,

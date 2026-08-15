@@ -15,6 +15,7 @@
 static unsigned cursor_row, cursor_column;
 static uint8_t current_attribute = 0x07U;
 static int cursor_visible = 1;
+static int console_suspended;
 static enum hal_cons_mode console_mode = HAL_CONS_TERMINAL;
 static unsigned events[EVENT_COUNT], event_head, event_tail;
 static uint8_t key_down[32];
@@ -23,6 +24,8 @@ static int shift_down, ctrl_down, alt_down, caps_lock, e0_prefix;
 static void
 write_cell(unsigned row, unsigned column, int character, uint8_t attribute)
 {
+	if (console_suspended)
+		return;
 	VGA_MEMORY[row * HAL_CONS_COLUMNS + column] =
 	    (uint16_t)((uint8_t)character | ((uint16_t)attribute << 8));
 }
@@ -31,6 +34,8 @@ void
 hal_cons_update_cursor(void)
 {
 	unsigned position = cursor_row * HAL_CONS_COLUMNS + cursor_column;
+	if (console_suspended)
+		return;
 
 	asm_outb(VGA_INDEX, 0x0aU);
 	asm_outb(VGA_DATA, cursor_visible ? 0x0dU : 0x20U);
@@ -69,10 +74,11 @@ hal_cons_reset(void)
 static void
 scroll(void)
 {
-	for (unsigned row = 1; row < HAL_CONS_ROWS; row++)
-		for (unsigned column = 0; column < HAL_CONS_COLUMNS; column++)
-			VGA_MEMORY[(row - 1U) * HAL_CONS_COLUMNS + column] =
-			    VGA_MEMORY[row * HAL_CONS_COLUMNS + column];
+	if (!console_suspended)
+		for (unsigned row = 1; row < HAL_CONS_ROWS; row++)
+			for (unsigned column = 0; column < HAL_CONS_COLUMNS; column++)
+				VGA_MEMORY[(row - 1U) * HAL_CONS_COLUMNS + column] =
+				    VGA_MEMORY[row * HAL_CONS_COLUMNS + column];
 	hal_cons_clear_row(HAL_CONS_ROWS - 1U);
 }
 
@@ -226,6 +232,23 @@ void hal_cons_restore_terminal(const struct hal_cons_state *state)
 
 void hal_cons_set_mode(enum hal_cons_mode mode) { console_mode = mode; }
 
+void hal_cons_suspend(void)
+{
+	if (console_suspended)
+		return;
+	asm_outb(VGA_INDEX, 0x0aU);
+	asm_outb(VGA_DATA, 0x20U);
+	console_suspended = 1;
+}
+
+void hal_cons_resume(void)
+{
+	if (!console_suspended)
+		return;
+	console_suspended = 0;
+	hal_cons_clear();
+}
+
 static const char normal_map[128] = {
 	[0x01]=27,[0x02]='1',[0x03]='2',[0x04]='3',[0x05]='4',[0x06]='5',
 	[0x07]='6',[0x08]='7',[0x09]='8',[0x0a]='9',[0x0b]='0',[0x0c]='-',
@@ -316,8 +339,7 @@ int hal_cons_read_event(void)
 	return event;
 }
 
-int cons_getc(void) { return hal_cons_read_event() & HAL_KEY_EVENT_KEY_MASK; }
-int hal_cons_getc(void) { return cons_getc(); }
+int hal_cons_getc(void) { return hal_cons_read_event() & HAL_KEY_EVENT_KEY_MASK; }
 int hal_cons_key_state(int key)
 {
 	(void)key; pump_keyboard();
@@ -325,17 +347,10 @@ int hal_cons_key_state(int key)
 }
 void hal_cons_drain_input(void) { pump_keyboard(); event_tail = event_head; }
 
-void bsp_cons_init(void)
+void pcat_cons_init(void)
 {
 	event_head = event_tail = 0; shift_down = ctrl_down = alt_down = 0;
 	caps_lock = e0_prefix = 0;
 	for (unsigned i = 0; i < sizeof(key_down); i++) key_down[i] = 0;
 	hal_cons_reset();
-}
-void cons_cls(void) { hal_cons_clear(); }
-void cons_putc(int c) { hal_cons_putc(c); }
-void cons_puts(const char *s) { hal_cons_write(s); }
-void cons_set_attr(int foreground, int background)
-{
-	current_attribute = (uint8_t)((foreground & 15) | ((background & 7) << 4));
 }

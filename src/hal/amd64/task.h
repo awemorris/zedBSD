@@ -10,6 +10,7 @@ struct amd64_task {
 	struct amd64_task *next;
 	hal_space_t space;
 	int run_cpu;
+	hal_cpu_id_t target_cpu;
 	void *sys_stack;
 	void *sys_stack_allocation;
 	uintptr_t resume_rsp;

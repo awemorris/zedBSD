@@ -42,7 +42,7 @@ sparcv9_cmain(const struct zedbsd_sun4u_handoff *handoff)
 	sun4u_uart_puts("SPARCV9 ENTRY\n");
 	sun4u_uart_puts("SPARCV9 HANDOFF PASS\n");
 	sun4u_boot_init(handoff);
-	bsp_cons_init();
+	sun4u_cons_init();
 	(void)hal_irq_disable();
 	sparcv9_trap_init();
 	sparcv9_page_init();
@@ -50,7 +50,6 @@ sparcv9_cmain(const struct zedbsd_sun4u_handoff *handoff)
 	sparcv9_io_init(handoff->pci_io_base);
 	sparcv9_context_selftest();
 	sparcv9_timer_init(handoff->tick_frequency);
-	hal_timer_set_freq(100);
 	hal_puts("SPARCV9 TIMER PASS\n");
 	kernel_entry(sun4u_boot_handoff());
 	HAL_FATAL("SPARC V9 kernel_entry returned");

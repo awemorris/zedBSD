@@ -40,7 +40,7 @@ printf 'noct TERMJIS.NCT\nhalt\n' > "$cfg"
 "$repo/build.sh" vmunix "$arch"
 ZEDBSD_FILES="$files" ZEDBSD_ZINIT_RC="$cfg" \
 	DISK_SECTORS=17 \
-	"$repo/scripts/install-image.sh" "$image" "" "$cfg"
+	"$repo/scripts/install-image.sh" --boot-cfg "$cfg" "$image"
 
 rm -f -- "$monitor" "$screenshot" "$vram"
 "$qemu" -M pc9801 -cpu 386 -m 6 -accel tcg -L "$bios_dir" \

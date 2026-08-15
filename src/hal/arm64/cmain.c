@@ -15,7 +15,7 @@ arm64_cmain(uintptr_t fdt_phys)
 	struct rpi4_fdt_info info;
 	int error;
 
-	bsp_cons_init();
+	rpi4_cons_init();
 	hal_puts("RPI4 ENTRY\n");
 	if (arm64_current_el() != 1)
 		HAL_FATAL("AArch64 kernel did not enter EL1");
