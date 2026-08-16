@@ -387,14 +387,32 @@ bmap_ensure(struct inode *inode,uint64_t logical,uint32_t *result)
 		}
 		next=ufs1_get32(block,(size_t)index*4U,s->swapped);
 		if(next==0) {
+			uint32_t allocated=0;
 			error=allocate_block(inode->i_mount,&next);
 			if(error==0) {
+				allocated=next;
 				ufs1_put32(block,(size_t)index*4U,next,s->swapped);
 				error=write_block(inode->i_mount,fragment,block);
 			}
 			if(error!=0) {
-				if(next!=0)
-					(void)free_block(inode->i_mount,next);
+				if(allocated!=0) {
+					int rollback_error;
+					/* A short write may have published the pointer even
+					 * though write_block() reported EIO.  Make it
+					 * unreachable before returning its block. */
+					ufs1_put32(block,(size_t)index*4U,0,s->swapped);
+					rollback_error=write_block(inode->i_mount,
+					    fragment,block);
+					if(rollback_error==0)
+						rollback_error=free_block(inode->i_mount,
+						    allocated);
+					if(rollback_error!=0) {
+						/* The block may remain reachable.  Never free
+						 * uncertain storage or continue writable. */
+						ui->blocks+=s->bsize/UFS1_SECTOR_SIZE;
+						state(inode->i_mount)->writable=0;
+					}
+				}
 				kern_free(block);
 				return error;
 			}

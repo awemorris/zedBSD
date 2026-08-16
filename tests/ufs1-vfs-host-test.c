@@ -5,6 +5,7 @@
 #include "kern/inode.h"
 #include "kern/mount.h"
 #include "kern/namei.h"
+#include "kern/ufs1/ufs1-disk.h"
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -18,6 +19,8 @@
 static unsigned char *image;
 static size_t image_size;
 static unsigned write_operations, fail_write_at, short_write_at;
+static unsigned injected_writes;
+static uint64_t last_injected_block;
 static unsigned get32(size_t offset)
 { return (unsigned)image[offset]|(unsigned)image[offset+1]<<8|
 	(unsigned)image[offset+2]<<16|(unsigned)image[offset+3]<<24; }
@@ -39,14 +42,104 @@ static int submit(struct disk *disk,struct bio *bio)
 	if(bio->b_op==BIO_READ)memcpy(bio->b_data,image+offset,length);
 	else if(bio->b_op==BIO_WRITE){
 		write_operations++;
-		if(write_operations==fail_write_at){bio_complete(bio,EIO,0);return 0;}
+		if(write_operations==fail_write_at){injected_writes++;last_injected_block=bio->b_mapped_block;bio_complete(bio,EIO,0);return 0;}
 		memcpy(image+offset,bio->b_data,length);
-		if(write_operations==short_write_at){bio_complete(bio,0,length-1U);return 0;}
+		if(write_operations==short_write_at){injected_writes++;last_injected_block=bio->b_mapped_block;bio_complete(bio,0,length-1U);return 0;}
 	}
 	else return EOPNOTSUPP;
 	bio_complete(bio,0,length);return 0;
 }
 static const struct disk_ops ops={.submit=submit};
+
+static void
+expect_summary(unsigned ndir,unsigned nbfree,unsigned nifree)
+{
+	assert(get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NDIR)==ndir);
+	assert(get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NBFREE)==nbfree);
+	assert(get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NIFREE)==nifree);
+}
+
+static void
+test_sparse_failure_boundary(struct mount *mountp,struct inode *directory,
+	off_t offset,int short_io)
+{
+	static const struct componentname name={"indfail",7,0};
+	unsigned attempt;
+	int reached_end=0;
+
+	for(attempt=1;attempt<=64U;attempt++) {
+		struct inode *inode;
+		struct file *file;
+		struct path path;
+		unsigned ndir=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NDIR);
+		unsigned nbfree=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NBFREE);
+		unsigned nifree=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NIFREE);
+		unsigned before_injected=injected_writes;
+		char value=(char)(0x40U+(attempt&31U)),readback=0;
+		ssize_t result;
+
+		assert(inode_create(directory,&name,0600,&inode)==0);
+		path_init(&path);path_set(&path,mountp,inode);
+		assert(file_open_resolved(&path,O_RDWR,&file)==0);
+		if(short_io)
+			short_write_at=write_operations+attempt;
+		else
+			fail_write_at=write_operations+attempt;
+		result=file_pwrite(file,&value,1,offset);
+		fail_write_at=0;short_write_at=0;
+		if(injected_writes==before_injected) {
+			assert(result==1);
+			reached_end=1;
+		} else if(result==1) {
+			/* Data was accepted before the transient inode metadata error.
+			 * fsync must make the in-memory size/pointers durable. */
+			assert(file_fsync(file)==0);
+		} else {
+			assert(result==-EIO);
+		}
+		if(result==1) {
+			assert(inode->i_size==offset+1);
+			assert(file_pread(file,&readback,1,offset)==1);
+			assert(readback==value);
+		}
+		assert(file_close(file)==0);path_release(&path);
+		assert(inode_unlink(directory,&name)==0);
+		inode_release(inode);
+		if(get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NDIR)!=ndir||
+		    get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NBFREE)!=nbfree||
+		    get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NIFREE)!=nifree)
+			fprintf(stderr,"UFS1 rollback mismatch: offset=%lld %s attempt=%u result=%lld injected=%u block=%llu counters=%u/%u/%u expected=%u/%u/%u\n",
+			    (long long)offset,short_io?"short":"hard",attempt,
+			    (long long)result,injected_writes-before_injected,
+			    (unsigned long long)last_injected_block,
+			    get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NDIR),
+			    get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NBFREE),
+			    get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NIFREE),
+			    ndir,nbfree,nifree);
+		expect_summary(ndir,nbfree,nifree);
+		if(reached_end)
+			break;
+	}
+	assert(reached_end&&attempt<=64U);
+}
+
+static void
+test_indirect_failure_matrix(struct mount *mountp,struct inode *directory)
+{
+	uint64_t bsize=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_BSIZE);
+	uint64_t nindir=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_NINDIR);
+	uint64_t logical[4];
+	unsigned depth,short_io;
+
+	logical[0]=UFS1_NDADDR-1U;
+	logical[1]=UFS1_NDADDR;
+	logical[2]=UFS1_NDADDR+nindir;
+	logical[3]=UFS1_NDADDR+nindir+nindir*nindir;
+	for(depth=0;depth<4U;depth++)
+		for(short_io=0;short_io<2U;short_io++)
+			test_sparse_failure_boundary(mountp,directory,
+			    (off_t)(logical[depth]*bsize),short_io!=0);
+}
 
 static void
 expect_mount_error(int expected)
@@ -134,6 +227,10 @@ int main(void)
 	assert(file_close(file)==0);path_release(&path);
 	assert(inode_unlink(etc,&iofail_name)==0);
 	inode_release(iofail);
+
+	/* Exercise every write boundary while allocating direct through
+	 * triple-indirect sparse blocks, for both hard and short BIO writes. */
+	test_indirect_failure_matrix(mountp,etc);
 
 	assert(inode_create(etc,&fresh_name,0644,&fresh)==0);
 	large=malloc(200000U);assert(large!=NULL);
