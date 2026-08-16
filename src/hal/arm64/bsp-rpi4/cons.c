@@ -6,6 +6,7 @@ struct cell{uint8 character,attribute;};
 static struct cell shadow[HAL_CONS_ROWS][HAL_CONS_COLUMNS];
 static struct hal_cons_state state={HAL_CONS_TERMINAL,0,0,1};
 static uint8 current_attribute=HAL_CONS_NORMAL_ATTRIBUTE;
+static int input_peek=-1;
 
 static void draw(unsigned row,unsigned column)
 {struct cell*c=&shadow[row][column];rpi4_framebuffer_cell(row,column,c->character,c->attribute);}
@@ -59,7 +60,7 @@ static void console_puts(const char*s){if(s)while(*s)console_putc(*s++);}
 static int console_getc(void){return rpi4_uart_getc();}
 void hal_cons_putc(int c){console_putc(c);}
 void hal_cons_move_cursor(int row,int column){(void)hal_cons_set_cursor((unsigned)row,(unsigned)column);}
-int hal_cons_getc(void){return console_getc();}
+int hal_cons_getc(void){return hal_cons_read_event()&HAL_KEY_EVENT_KEY_MASK;}
 void hal_cons_set_mode(enum hal_cons_mode mode){state.mode=mode;}
 void hal_cons_write(const char*s){console_puts(s);}
 void hal_cons_write_n(const char*s,unsigned n){if(s)while(n--)console_putc(*s++);}
@@ -78,10 +79,10 @@ int hal_cons_set_cursor(unsigned r,unsigned c){if(r>=HAL_CONS_ROWS||c>=HAL_CONS_
 void hal_cons_show_cursor(int visible){erase_cursor();state.cursor_visible=visible!=0;hal_cons_update_cursor();}
 void hal_cons_save_state(struct hal_cons_state*out){if(out)*out=state;}
 void hal_cons_restore_terminal(const struct hal_cons_state*in){erase_cursor();state.mode=HAL_CONS_TERMINAL;if(in&&in->row<HAL_CONS_ROWS&&in->column<HAL_CONS_COLUMNS)state=*in;hal_cons_update_cursor();}
-int hal_cons_read_event(void){return console_getc();}
-int hal_cons_poll_event(void){return rpi4_uart_poll()?console_getc():0;}
+int hal_cons_poll_event(void){if(input_peek<0&&rpi4_uart_poll())input_peek=console_getc();return input_peek;}
+int hal_cons_read_event(void){int event;while((event=hal_cons_poll_event())<0);input_peek=-1;return event;}
 int hal_cons_key_state(int key){(void)key;return 0;}
-void hal_cons_drain_input(void){while(rpi4_uart_poll())(void)console_getc();}
+void hal_cons_drain_input(void){input_peek=-1;while(rpi4_uart_poll())(void)console_getc();}
 unsigned hal_cons_modifiers(void){return 0;}
 void hal_cons_suspend(void){}
 void hal_cons_resume(void){}

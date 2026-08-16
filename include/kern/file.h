@@ -43,6 +43,7 @@ struct file_ops {
 	int (*readdir)(struct file *, struct dirent *, int *);
 	off_t (*seek)(struct file *, off_t, int);
 	int (*ioctl)(struct file *, unsigned long, uintptr_t);
+	int (*poll)(struct file *, short, short *);
 	int (*fsync)(struct file *);
 	int (*close)(struct file *);
 };

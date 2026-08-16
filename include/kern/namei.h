@@ -58,6 +58,7 @@ void cwdinfo_retain(struct cwdinfo *);
 void cwdinfo_release(struct cwdinfo *);
 void cwdinfo_destroy(struct cwdinfo *);
 int fs_chdir(struct cwdinfo *, const char *);
+int fs_chdir_path(struct cwdinfo *, const struct path *);
 int fs_getcwd(const struct cwdinfo *, char *, size_t);
 
 #endif

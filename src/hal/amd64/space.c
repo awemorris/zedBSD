@@ -26,9 +26,11 @@ struct amd64_shootdown_request {
 	size_t size;
 	volatile uint64 pending;
 };
-static struct amd64_shootdown_request shootdowns[AMD64_SMP_MAX_CPUS];
+#define AMD64_SHOOTDOWN_REQUESTS (AMD64_SMP_MAX_CPUS * 4U)
+static struct amd64_shootdown_request shootdowns[AMD64_SHOOTDOWN_REQUESTS];
 
 static void shootdown(hal_space_t handle, void *vaddr, size_t size);
+static void service_shootdowns(hal_cpu_id_t cpu);
 
 static void
 table_count_drop(void)
@@ -290,8 +292,14 @@ hal_page_destroy_space(hal_space_t handle)
 	if (__atomic_exchange_n(&space->destroying, 1U,
 	    __ATOMIC_ACQ_REL) != 0)
 		HAL_FATAL("amd64 space destroyed twice");
-	/* Flush stale translations before any table or frame is released. */
+	space_lock_leave(space, enabled);
+	/*
+	 * Never wait for another CPU while holding a space lock with local
+	 * interrupts disabled: the target may be waiting for this lock and
+	 * therefore unable to acknowledge the TLB interrupt.
+	 */
 	shootdown(space, NULL, 0);
+	enabled = space_lock_enter(space);
 	while ((page = space->tables) != NULL) {
 		space->tables = page->next;
 		(void)hal_pmem_free(&page->memory);
@@ -372,8 +380,9 @@ hal_page_map(hal_space_t handle, void *pointer, hal_physaddr_t physical,
 		}
 		*leaf = (physical + offset) | leaf_flags(attr);
 	}
-	if (AMD64_CURRENT_SPACE == space) hal_page_flush_tlb(space);
 	space_lock_leave(space, enabled);
+	/* A different CPU may currently execute in this address space. */
+	hal_page_flush_tlb_range(space, pointer, size);
 	return HAL_OK;
 }
 
@@ -402,8 +411,8 @@ hal_page_prot(hal_space_t handle, void *pointer, size_t size, uint32 attr)
 		physical = *leaf & AMD64_PTE_ADDR_MASK;
 		*leaf = physical | leaf_flags(attr);
 	}
-	if (AMD64_CURRENT_SPACE == space) hal_page_flush_tlb(space);
 	space_lock_leave(space, enabled);
+	hal_page_flush_tlb_range(space, pointer, size);
 	return HAL_OK;
 }
 
@@ -425,8 +434,16 @@ hal_page_unmap(hal_space_t handle, void *pointer, size_t size)
 		uint64 *leaf = walk_leaf(space, address + offset, 0);
 		if (leaf != NULL) *leaf = 0;
 	}
-	reclaim_empty_tables(space);
-	if (AMD64_CURRENT_SPACE == space) hal_page_flush_tlb(space);
+	space_lock_leave(space, enabled);
+	/*
+	 * Keep the page-table pages alive until every CPU has discarded the
+	 * leaf translations.  Reclaiming them before shootdown can turn a
+	 * remote page walk into a use-after-free.
+	 */
+	hal_page_flush_tlb_range(space, pointer, size);
+	enabled = space_lock_enter(space);
+	if (!space->destroying)
+		reclaim_empty_tables(space);
 	space_lock_leave(space, enabled);
 	return HAL_OK;
 }
@@ -476,8 +493,8 @@ hal_page_clear_flags(hal_space_t handle, void *pointer, uint32 flags)
 	if (flags & HAL_PAGE_ACCESSED) mask |= AMD64_PTE_ACCESSED;
 	if (flags & HAL_PAGE_DIRTY) mask |= AMD64_PTE_DIRTY;
 	*leaf &= ~mask;
-	if (AMD64_CURRENT_SPACE == space) hal_page_flush_tlb(space);
 	space_lock_leave(space, enabled);
+	hal_page_flush_tlb_range(space, pointer, PAGE_SIZE);
 	return HAL_OK;
 }
 
@@ -485,12 +502,26 @@ static void
 shootdown(hal_space_t handle, void *vaddr, size_t size)
 {
 	hal_cpu_id_t sender = hal_cpu_current(), cpu;
-	struct amd64_shootdown_request *request = &shootdowns[sender];
+	struct amd64_shootdown_request *request = NULL;
 	struct hal_cpu_mask ready;
+	unsigned slot;
 	uint64 pending = 0;
 
-	if (__atomic_exchange_n(&request->active, 1U, __ATOMIC_ACQUIRE) != 0)
-		HAL_FATAL("nested amd64 TLB shootdown");
+	/*
+	 * A timer interrupt may preempt a thread that is waiting here and run a
+	 * second thread on the same CPU.  Requests therefore cannot be indexed
+	 * by sender CPU.  Reserve a pool entry before publishing its fields.
+	 */
+	for (slot = 0; slot < AMD64_SHOOTDOWN_REQUESTS; slot++) {
+		unsigned expected = 0;
+		if (__atomic_compare_exchange_n(&shootdowns[slot].active,
+		    &expected, 2U, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+			request = &shootdowns[slot];
+			break;
+		}
+	}
+	if (request == NULL)
+		HAL_FATAL("amd64 TLB shootdown request pool exhausted");
 	hal_cpu_ready_mask(&ready);
 	for (cpu = 0; cpu < hal_cpu_count(); cpu++) {
 		struct amd64_percpu *target;
@@ -507,6 +538,7 @@ shootdown(hal_space_t handle, void *vaddr, size_t size)
 	request->vaddr = vaddr;
 	request->size = size;
 	__atomic_store_n(&request->pending, pending, __ATOMIC_RELEASE);
+	__atomic_store_n(&request->active, 1U, __ATOMIC_RELEASE);
 	for (cpu = 0; cpu < hal_cpu_count(); cpu++)
 		if ((pending & ((uint64)1U << cpu)) != 0 &&
 		    amd64_lapic_send_vector(amd64_smp_apic_id(cpu),
@@ -514,27 +546,41 @@ shootdown(hal_space_t handle, void *vaddr, size_t size)
 			HAL_FATAL("amd64 TLB shootdown delivery failed");
 	if (handle == HAL_SPACE_SYS || AMD64_CURRENT_SPACE == handle)
 		asm_flush_tlb();
-	while (__atomic_load_n(&request->pending, __ATOMIC_ACQUIRE) != 0)
+	while (__atomic_load_n(&request->pending, __ATOMIC_ACQUIRE) != 0) {
+		/*
+		 * Page operations are legal with local interrupts disabled.  Polling
+		 * incoming requests here breaks the reciprocal-shootdown deadlock
+		 * without enabling arbitrary interrupt handlers inside a caller's
+		 * critical section.
+		 */
+		service_shootdowns(sender);
 		__asm__ volatile("pause");
+	}
 	__atomic_store_n(&request->active, 0U, __ATOMIC_RELEASE);
 }
 
-void
-amd64_tlb_interrupt(void)
+static void
+service_shootdowns(hal_cpu_id_t cpu)
 {
-	hal_cpu_id_t cpu = hal_cpu_current(), sender;
 	uint64 bit = (uint64)1U << cpu;
-	hal_irq_ack_t acknowledge = amd64_irq_ack_begin(AMD64_VECTOR_TLB, -1);
+	unsigned slot;
 
-	for (sender = 0; sender < hal_cpu_count(); sender++) {
-		struct amd64_shootdown_request *request = &shootdowns[sender];
-		if (__atomic_load_n(&request->active, __ATOMIC_ACQUIRE) != 0 &&
+	for (slot = 0; slot < AMD64_SHOOTDOWN_REQUESTS; slot++) {
+		struct amd64_shootdown_request *request = &shootdowns[slot];
+		if (__atomic_load_n(&request->active, __ATOMIC_ACQUIRE) == 1U &&
 		    (__atomic_load_n(&request->pending, __ATOMIC_ACQUIRE) & bit) != 0) {
 			asm_flush_tlb();
 			(void)__atomic_fetch_and(&request->pending, ~bit,
 			    __ATOMIC_RELEASE);
 		}
 	}
+}
+
+void
+amd64_tlb_interrupt(void)
+{
+	hal_irq_ack_t acknowledge = amd64_irq_ack_begin(AMD64_VECTOR_TLB, -1);
+	service_shootdowns(hal_cpu_current());
 	hal_irq_send_eoi(acknowledge);
 }
 

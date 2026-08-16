@@ -13,6 +13,7 @@
 #include "kern/graphics-device.h"
 #include "kern/system-device.h"
 #include "kern/devfs.h"
+#include "kern/tmpfs.h"
 #include "kern/overlayfs.h"
 #include "kern/loop.h"
 #include "kern/swap-fat.h"
@@ -88,6 +89,30 @@ disk_name(unsigned number, char name[NAME_MAX + 1U])
 	name[at++] = (char)('0' + number % 10);
 	name[at] = '\0';
 	return 0;
+}
+
+static int
+vfs_ensure_root_directory(const struct path *root, const char *name,
+	mode_t mode)
+{
+	struct componentname component;
+	struct inode *inode = NULL;
+	int error;
+	component.cn_nameptr = name;
+	component.cn_namelen = strlen(name);
+	component.cn_flags = COMPONENT_LAST;
+	error = inode_lookup(root->p_inode, &component, &inode);
+	if (error == 0) {
+		error = inode->i_type == INODE_DIR ? 0 : ENOTDIR;
+		inode_release(inode);
+		return error;
+	}
+	if (error != ENOENT)
+		return error;
+	error = inode_mkdir(root->p_inode, &component, mode, &inode);
+	if (inode != NULL)
+		inode_release(inode);
+	return error;
 }
 
 static VFS_HIGH int
@@ -334,6 +359,9 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	error = filesystem_register(&devfs_type);
 	if (error != 0)
 		return vfs_fail("register devfs", error);
+	error = filesystem_register(&tmpfs_type);
+	if (error != 0)
+		return vfs_fail("register tmpfs", error);
 	error = overlayfs_init();
 	if (error != 0)
 		return vfs_fail("register overlayfs", error);
@@ -429,6 +457,23 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	if (error != 0)
 		goto out_root;
 	process_attach_boot_cwd(&kern_cwdinfo);
+	error = vfs_ensure_root_directory(&root_path, "shm", 01777U);
+	if (error != 0 && error != EROFS && error != EOPNOTSUPP)
+		goto out_root;
+	error = vfs_ensure_root_directory(&root_path, "tmp", 01777U);
+	if (error != 0 && error != EROFS && error != EOPNOTSUPP)
+		goto out_root;
+	failure_stage = "mount /tmp";
+	error = mount_at("tmpfs", &root_path, "tmp", 0, NULL, NULL);
+	if (error != 0)
+		goto out_root;
+	error = vfs_ensure_root_directory(&root_path, "run", 0755U);
+	if (error != 0 && error != EROFS && error != EOPNOTSUPP)
+		goto out_root;
+	failure_stage = "mount /run";
+	error = mount_at("tmpfs", &root_path, "run", 0, NULL, NULL);
+	if (error != 0)
+		goto out_root;
 	if(root_partition!=NULL) {
 		struct fat_mount_args args={boot_partition->d_name};
 		failure_stage="mount boot FAT at /boot";
@@ -460,6 +505,28 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	error = mount_at("devfs", &root_path, "dev", 0, NULL, NULL);
 	if (error != 0)
 		goto out_root;
+	{
+		struct path dev_path, shm_path;
+		struct mount *shm_mount = NULL;
+		path_init(&dev_path);
+		path_init(&shm_path);
+		failure_stage = "resolve /dev";
+		error = namei_path_at(&kern_cwdinfo, "/dev", &dev_path);
+		if (error == 0) {
+			failure_stage = "mount /dev/shm";
+			error = mount_at("tmpfs", &dev_path, "shm", 0, NULL,
+			    &shm_mount);
+		}
+		if (error == 0) {
+			path_set(&shm_path, shm_mount, shm_mount->m_root);
+			failure_stage = "bind /dev/shm at /shm";
+			error = mount_bind_at(&shm_path, &root_path, "shm", NULL);
+		}
+		path_release(&shm_path);
+		path_release(&dev_path);
+		if (error != 0)
+			goto out_root;
+	}
 	for (i = 0; i < partition_count(); i++) {
 		const struct partition *partition = partition_at(i);
 		struct fat_mount_args args;

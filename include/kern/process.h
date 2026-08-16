@@ -15,12 +15,14 @@
 #include <kern/atomic.h>
 #include <kern/lock.h>
 #include <kern/waitq.h>
+#include <kern/resource-limit.h>
 
 struct cwdinfo;
 struct filedesc;
 struct thread;
 struct vmspace;
 struct ucred;
+struct tty;
 
 #define PROCESS_RESULT_MAX 256U
 #define PROCESS_AUTOREAP 0x00000001U
@@ -48,8 +50,13 @@ struct process_wait_event {
 	struct process *child;
 	pid_t pid;
 	int status;
+	uid_t uid;
 	enum process_wait_kind kind;
 };
+
+#define PROCESS_WAIT_EVENT_EXITED    0x01U
+#define PROCESS_WAIT_EVENT_STOPPED   0x02U
+#define PROCESS_WAIT_EVENT_CONTINUED 0x04U
 
 struct process {
 	refcount_t refs;
@@ -59,13 +66,18 @@ struct process {
 	pid_t pgrp;
 	pid_t session;
 	mode_t umask;
+	struct process_limits limits;
 	struct ucred *cred;
 	struct signal_action signal_actions[NSIG];
 	sigset_t signal_pending;
 	struct signal_info signal_info[NSIG];
+	struct queued_signal signal_queue[SIGNAL_QUEUE_MAX];
+	unsigned signal_queue_count;
+	uint64_t signal_queue_sequence;
 	enum process_state state;
 	unsigned flags;
 	unsigned did_exec;
+	unsigned execing;
 	unsigned thread_count;
 	int exit_status;
 	int wait_status;
@@ -82,6 +94,7 @@ struct process {
 	struct vmspace *vmspace;
 	struct filedesc *fd;
 	struct cwdinfo *cwdi;
+	struct tty *controlling_tty;
 	char result[PROCESS_RESULT_MAX];
 	size_t result_length;
 };
@@ -96,6 +109,8 @@ void process_release(struct process *);
 struct thread *thread_find_ref(tid_t tid);
 int process_setpgid(struct process *, pid_t, pid_t);
 pid_t process_setsid(struct process *);
+int process_signal_pgrp(pid_t, pid_t, int);
+int process_pgrp_in_session(pid_t, pid_t);
 int process_create(struct process *parent, pid_t requested_pid,
 		   struct process **result);
 int process_fork(struct process *, struct process **);
@@ -107,6 +122,8 @@ int process_wait(struct process *, int *status, char *result,
 pid_t process_waitpid(struct process *, pid_t, int *, int);
 pid_t process_wait_select(struct process *, pid_t, int,
 			  struct process_wait_event *);
+pid_t process_wait_select_mask(struct process *, pid_t, int, unsigned,
+			       struct process_wait_event *);
 int process_wait_commit(struct process_wait_event *);
 void process_wait_abort(struct process_wait_event *);
 void process_note_stopped(struct process *, int);

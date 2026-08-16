@@ -6,6 +6,7 @@
 #include "kern/net/route.h"
 #include "kern/clock.h"
 #include "kern/kmem.h"
+#include "kern/poll.h"
 #include "kern/sched.h"
 #include "kern/signal.h"
 #include "kern/thread.h"
@@ -113,6 +114,7 @@ tcp_listener_established(struct tcp_endpoint *child)
 	listener->tcp.accept_tail = &child->tcp;
 	listener->tcp.accept_count++;
 	waitq_wake_all(&listener->tcp.inet.socket.accept_waitq);
+	poll_notify();
 	spin_unlock_irqrestore(&listener->tcp.inet.socket.lock, irq);
 }
 
@@ -284,6 +286,7 @@ tcp_connect_cancel_locked(struct tcp_endpoint *endpoint, uint32_t generation)
 	tcp_forget_peer(endpoint);
 	waitq_wake_all(&socket->connect_waitq);
 	waitq_wake_all(&socket->send_waitq);
+	poll_notify();
 	return packet;
 }
 
@@ -724,6 +727,47 @@ tcp_close(struct socket *socket)
 	kern_free(endpoint);
 }
 
+static int
+tcp_poll(struct socket *socket, short events, short *revents)
+{
+	struct tcp_endpoint *endpoint = tcp_endpoint(socket);
+	short result = 0;
+	unsigned long irq;
+
+	if (socket == NULL || revents == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&socket->lock);
+	if (socket->error != 0)
+		result |= POLLERR;
+	if (endpoint->tcp.state == TCP_LISTEN) {
+		if (endpoint->tcp.accept_head != NULL)
+			result |= events & (POLLIN | POLLRDNORM);
+	} else {
+		if (socket->receive_head != NULL || socket->read_shutdown ||
+		    endpoint->tcp.state == TCP_CLOSE_WAIT ||
+		    endpoint->tcp.state == TCP_TIME_WAIT ||
+		    (endpoint->tcp.state == TCP_CLOSED &&
+		     (endpoint->tcp.inet.inet_flags & INET_SOCKET_CONNECTED) != 0))
+			result |= events & (POLLIN | POLLRDNORM);
+		if (!socket->write_shutdown &&
+		    endpoint->tcp.state == TCP_ESTABLISHED &&
+		    endpoint->tcp.send_unacknowledged == endpoint->tcp.send_next)
+			result |= events & (POLLOUT | POLLWRNORM);
+		if (endpoint->tcp.state == TCP_SYN_SENT && socket->error != 0)
+			result |= events & (POLLOUT | POLLWRNORM);
+		if (socket->read_shutdown || socket->write_shutdown ||
+		    endpoint->tcp.state == TCP_CLOSE_WAIT ||
+		    endpoint->tcp.state == TCP_TIME_WAIT ||
+		    socket->lifecycle != SOCKET_OPEN)
+			result |= POLLHUP;
+	}
+	if (socket->lifecycle != SOCKET_OPEN)
+		result |= POLLHUP;
+	spin_unlock_irqrestore(&socket->lock, irq);
+	*revents = result;
+	return 0;
+}
+
 static const struct socket_ops tcp_ops = {
 	.bind = tcp_bind,
 	.connect = tcp_connect,
@@ -735,6 +779,7 @@ static const struct socket_ops tcp_ops = {
 	.getsockname = tcp_getsockname,
 	.getpeername = tcp_getpeername,
 	.ioctl = inet_socket_ioctl,
+	.poll = tcp_poll,
 	.close = tcp_close,
 };
 
@@ -935,6 +980,7 @@ tcp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 			endpoint->tcp.active_connect_generation = 0;
 			waitq_wake_all(&endpoint->tcp.inet.socket.connect_waitq);
 			waitq_wake_all(&endpoint->tcp.inet.socket.send_waitq);
+			poll_notify();
 			established = 1;
 		}
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);

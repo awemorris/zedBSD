@@ -10,6 +10,9 @@ extern void sched_sleep(uint64_t);
 extern int signal_pending_unblocked(const struct thread *);
 extern struct thread *thread_current(void);
 
+/* Socket readiness is exercised synchronously by the host fixtures. */
+void poll_notify(void) { }
+
 void
 spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
 {

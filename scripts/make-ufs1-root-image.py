@@ -19,6 +19,13 @@ def build(args: argparse.Namespace) -> None:
             raise SystemExit("sparcv9 root requires --native-shell")
         if args.native_sysctl is None or not args.native_sysctl.is_file():
             raise SystemExit("sparcv9 root requires --native-sysctl")
+        dynamic = (args.native_rtld, args.native_libc,
+                   args.native_tlstest, args.native_dyntest)
+        if any(path is not None for path in dynamic):
+            if not all(path is not None and path.is_file()
+                       for path in dynamic):
+                raise SystemExit(
+                    "sparcv9 dynamic userland inputs must be complete")
     elif args.arch_image is None or not args.arch_image.is_file():
         raise SystemExit(f"missing architecture image: {args.arch_image}")
     if args.output.exists() and not args.force:
@@ -34,6 +41,13 @@ def build(args: argparse.Namespace) -> None:
         if native:
             shutil.copy2(args.native_shell, root / "bin" / "sh")
             shutil.copy2(args.native_sysctl, root / "bin" / "sysctl")
+            if args.native_rtld is not None:
+                shutil.copy2(args.native_rtld, root / "lib" / "ld.so")
+                shutil.copy2(args.native_libc, root / "lib" / "libc.so")
+                shutil.copy2(args.native_tlstest,
+                             root / "lib" / "tlstest.so")
+                shutil.copy2(args.native_dyntest,
+                             root / "bin" / "dyntest")
         else:
             shutil.copyfile(args.arch_image,
                             root / "arch" / f"{args.arch_profile}.ufs")
@@ -55,6 +69,10 @@ def main() -> None:
     parser.add_argument("--arch-image", type=Path)
     parser.add_argument("--native-shell", type=Path)
     parser.add_argument("--native-sysctl", type=Path)
+    parser.add_argument("--native-rtld", type=Path)
+    parser.add_argument("--native-libc", type=Path)
+    parser.add_argument("--native-tlstest", type=Path)
+    parser.add_argument("--native-dyntest", type=Path)
     # The canonical writer intentionally uses one cylinder group.  With 1 KiB
     # fragments its free-fragment bitmap fits in the 8 KiB CG block through
     # 60 MiB, leaving a small margin for the fixed CG header.

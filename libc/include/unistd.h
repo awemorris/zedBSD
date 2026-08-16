@@ -2,6 +2,8 @@
 #ifndef ZEDBSD_UNISTD_H
 #define ZEDBSD_UNISTD_H
 
+#include <zedbsd/features.h>
+
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -13,11 +15,56 @@
 
 #define _SC_PAGE_SIZE 1
 #define _SC_PAGESIZE _SC_PAGE_SIZE
+#define _SC_OPEN_MAX 2
+#define _SC_CLK_TCK 3
+#define _SC_JOB_CONTROL 4
+#define _SC_THREADS 5
+#define _SC_THREAD_PROCESS_SHARED 6
+#define _SC_REALTIME_SIGNALS 7
+#define _SC_SHARED_MEMORY_OBJECTS 8
+#define _SC_SEMAPHORES 9
+#define _SC_MESSAGE_PASSING 10
+#define _SC_VERSION 11
+#define _SC_2_VERSION 12
+#define _SC_ARG_MAX 13
+#define _SC_CHILD_MAX 14
+#define _SC_STREAM_MAX 15
+#define _SC_NPROCESSORS_CONF 16
+#define _SC_NPROCESSORS_ONLN 17
+#define _SC_THREAD_KEYS_MAX 18
+#define _SC_THREAD_DESTRUCTOR_ITERATIONS 19
+#define _SC_THREAD_STACK_MIN 20
+#define _SC_THREAD_THREADS_MAX 21
+#define _SC_SEM_NSEMS_MAX 22
+#define _SC_SEM_VALUE_MAX 23
+#define _SC_MQ_OPEN_MAX 24
+#define _SC_MQ_PRIO_MAX 25
+#define _SC_TIMERS 26
+
+#define _PC_LINK_MAX 1
+#define _PC_MAX_CANON 2
+#define _PC_MAX_INPUT 3
+#define _PC_NAME_MAX 4
+#define _PC_PATH_MAX 5
+#define _PC_PIPE_BUF 6
+#define _PC_CHOWN_RESTRICTED 7
+#define _PC_NO_TRUNC 8
+#define _PC_VDISABLE 9
+
+#define _CS_PATH 1
 
 int access(const char *path, int mode);
 int faccessat(int, const char *, int, int);
 char *getcwd(char *buffer, size_t size);
 int chdir(const char *path);
+int fchdir(int descriptor);
+unsigned sleep(unsigned seconds);
+int usleep(useconds_t microseconds);
+int pause(void);
+char *getlogin(void);
+int getlogin_r(char *, size_t);
+char *ttyname(int);
+int ttyname_r(int, char *, size_t);
 int isatty(int descriptor);
 int fileno(void *stream);
 ssize_t read(int, void *, size_t);
@@ -49,6 +96,9 @@ void _exit(int) __attribute__((noreturn));
 int brk(void *address);
 void *sbrk(intptr_t increment);
 long sysconf(int name);
+long pathconf(const char *, int);
+long fpathconf(int, int);
+size_t confstr(int, char *, size_t);
 pid_t fork(void);
 int execve(const char *, char *const [], char *const []);
 pid_t getpid(void);
@@ -76,3 +126,9 @@ int lchown(const char *, uid_t, gid_t);
 int fchownat(int, const char *, uid_t, gid_t, int);
 
 #endif
+#define F_ULOCK 0
+#define F_LOCK  1
+#define F_TLOCK 2
+#define F_TEST  3
+
+int lockf(int, int, off_t);

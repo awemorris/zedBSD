@@ -2,6 +2,7 @@
 #include "kern/net/socket.h"
 #include "kern/file.h"
 #include "kern/filedesc.h"
+#include "kern/poll.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -13,7 +14,8 @@ socket_file_read(struct file *file, void *buffer, size_t length)
 
 	if (socket == NULL)
 		return -EBADF;
-	if (socket->type != SOCK_STREAM || socket->ops == NULL ||
+	if ((socket->type != SOCK_STREAM && socket->type != SOCK_DGRAM) ||
+	    socket->ops == NULL ||
 	    socket->ops->recvfrom == NULL)
 		return -EOPNOTSUPP;
 	return socket->ops->recvfrom(socket, buffer, length,
@@ -27,7 +29,8 @@ socket_file_write(struct file *file, const void *buffer, size_t length)
 
 	if (socket == NULL)
 		return -EBADF;
-	if (socket->type != SOCK_STREAM || socket->ops == NULL ||
+	if ((socket->type != SOCK_STREAM && socket->type != SOCK_DGRAM) ||
+	    socket->ops == NULL ||
 	    socket->ops->sendto == NULL)
 		return -EOPNOTSUPP;
 	return socket->ops->sendto(socket, buffer, length,
@@ -58,10 +61,22 @@ socket_file_close(struct file *file)
 	return 0;
 }
 
+static int
+socket_file_poll(struct file *file, short events, short *revents)
+{
+	struct socket *socket = socket_from_file(file);
+	if (socket == NULL)
+		return EBADF;
+	return socket->ops != NULL && socket->ops->poll != NULL ?
+		socket->ops->poll(socket, events, revents) :
+		socket_poll_common(socket, events, revents);
+}
+
 static const struct file_ops socket_file_ops = {
 	.read = socket_file_read,
 	.write = socket_file_write,
 	.ioctl = socket_file_ioctl,
+	.poll = socket_file_poll,
 	.close = socket_file_close,
 };
 
@@ -120,5 +135,13 @@ socket_file_effective_flags(const struct socket_file_ref *reference,
 		flags |= MSG_DONTWAIT;
 	if ((message_flags & MSG_NOSIGNAL) != 0)
 		flags |= MSG_NOSIGNAL;
+	if ((message_flags & MSG_PEEK) != 0)
+		flags |= MSG_PEEK;
+	if ((message_flags & MSG_TRUNC) != 0)
+		flags |= MSG_TRUNC;
+	if ((message_flags & MSG_WAITALL) != 0)
+		flags |= MSG_WAITALL;
+	if ((message_flags & MSG_CMSG_CLOEXEC) != 0)
+		flags |= MSG_CMSG_CLOEXEC;
 	return flags;
 }

@@ -66,6 +66,7 @@ KERN_NET_SOURCES := \
 	src/kern/net/core.c \
 	src/kern/net/socket.c \
 	src/kern/net/socket-file.c \
+	src/kern/net/unix-socket.c \
 	src/kern/net/packet-socket.c \
 	src/kern/net/checksum.c \
 	src/kern/net/ethernet.c \
@@ -112,7 +113,7 @@ messages: $(BUILD)/kern/messages.h
 # Architecture-neutral host tests.  Platform makefiles append their own
 # binaries to HOST_TEST_BINARIES and phony run targets to CHECK_RUN_TARGETS.
 
-HOST_TEST_CC := $(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -I.
+HOST_TEST_CC := $(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -I. -Iinclude/uapi
 
 # Compile the public headers in both supported data models.  These are object
 # fixtures rather than host executables so the ILP32 check does not depend on
@@ -132,6 +133,23 @@ $(BUILD)/tests/uapi-abi-lp64.o: tests/uapi-abi-layout.c
 uapi-abi-layout-check: $(BUILD)/tests/uapi-abi-ilp32.o \
 	$(BUILD)/tests/uapi-abi-lp64.o
 	@echo "zedBSD ILP32/LP64 UAPI layout check: PASS"
+
+$(BUILD)/tests/posix-header-ilp32.o: tests/posix-header-compile.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m32 $(UAPI_ABI_TEST_FLAGS) -c $< -o $@
+
+$(BUILD)/tests/posix-header-lp64.o: tests/posix-header-compile.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m64 $(UAPI_ABI_TEST_FLAGS) -DZEDBSD_USER_ABI_LP64 \
+		-c $< -o $@
+
+posix-header-check: $(BUILD)/tests/posix-header-ilp32.o \
+	$(BUILD)/tests/posix-header-lp64.o
+	@echo "zedBSD POSIX ILP32/LP64 public-header check: PASS"
+
+posix-api-matrix-check: tests/posix-r2-api.csv \
+	scripts/check-posix-api-matrix.py
+	$(PYTHON) scripts/check-posix-api-matrix.py
 
 $(BUILD)/tests/fat-host-test: tests/fat-host-test.c \
 	src/kern/fs.c src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c
@@ -340,7 +358,7 @@ $(BUILD)/tests/vfs-host-test: tests/vfs-host-test.c $(VFS_CORE_SOURCES)
 
 $(BUILD)/tests/cred-host-test: tests/cred-host-test.c src/kern/cred.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Isrc src/kern/cred.c $< -o $@
+	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Iinclude/uapi -Isrc src/kern/cred.c $< -o $@
 
 $(BUILD)/tests/clock-rtc-host-test: tests/clock-rtc-host-test.c \
 	src/hal/x86/rtc.c
@@ -377,7 +395,8 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/dhcp-host-test \
 	$(BUILD)/tests/dns-host-test
 CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test \
-	uapi-abi-layout-check ufs1-format-host-test
+	uapi-abi-layout-check posix-header-check posix-api-matrix-check \
+	ufs1-format-host-test
 
 overlay-journal-format-host-test: tests/overlay-journal-format-host-test.py \
 	scripts/overlay_journal_format.py
@@ -415,4 +434,5 @@ distclean:
 
 .PHONY: all check clean distclean messages stdio-fs-host-test \
 	overlay-journal-format-host-test uapi-abi-layout-check \
-	ufs1-format-host-test ufs1-format-python-test
+	posix-header-check posix-api-matrix-check ufs1-format-host-test \
+	ufs1-format-python-test

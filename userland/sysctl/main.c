@@ -37,7 +37,6 @@ show_name(const char *name)
 		return 0;
 	}
 }
-
 static int
 show_all(void)
 {
@@ -103,4 +102,3 @@ main(int argc, char **argv)
 	fprintf(stderr, "sysctl: %s: %s\n", argv[1], strerror(error));
 	return 1;
 }
-

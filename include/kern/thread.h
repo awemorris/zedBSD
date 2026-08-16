@@ -27,6 +27,7 @@ struct thread_signal_level {
 	uint32_t restart_number;
 	uintptr_t restart_args[HAL_SYSCALL_ARGS];
 	unsigned restart_on_return;
+	unsigned used_altstack;
 	uintptr_t user_ucontext;
 	ucontext_t saved_ucontext;
 };
@@ -51,6 +52,12 @@ struct thread {
 	unsigned flags;
 	unsigned state_generation;
 	int exit_status;
+	uintptr_t user_exit_value;
+	unsigned detached;
+	unsigned join_claimed;
+	unsigned cancel_pending;
+	unsigned terminate_requested;
+	struct wait_queue join_waitq;
 	struct sched sched;
 	struct thread *proc_next;
 	/* Intrusive link used only while sleeping on a process child event. */
@@ -66,6 +73,12 @@ struct thread {
 	unsigned signal_depth;
 	struct thread_signal_level signal_levels[SIGNAL_NEST_MAX];
 	unsigned signal_suspended;
+	uintptr_t signal_altstack_base;
+	size_t signal_altstack_size;
+	unsigned signal_altstack_flags;
+	unsigned signal_on_altstack_depth;
+	sigset_t signal_wait_set;
+	unsigned signal_waiting;
 	uint32_t syscall_restart_number;
 	uintptr_t syscall_restart_args[HAL_SYSCALL_ARGS];
 	unsigned syscall_restart_valid;

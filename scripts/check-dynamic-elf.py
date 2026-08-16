@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""Reject dynamic ELF features that the first zedBSD rtld cannot consume."""
+
+import argparse
+import struct
+from pathlib import Path
+
+PT_LOAD, PT_INTERP, PT_DYNAMIC = 1, 3, 2
+PT_GNU_STACK, PT_GNU_RELRO = 0x6474E551, 0x6474E552
+PF_X, PF_W, PF_R = 1, 2, 4
+ET_EXEC, ET_DYN = 2, 3
+DT_NULL, DT_NEEDED, DT_HASH, DT_SONAME = 0, 1, 4, 14
+DT_TEXTREL, DT_FLAGS = 22, 30
+DF_TEXTREL = 4
+
+MACHINES = {
+    "i386": (1, 3, "<", {0, 1, 2, 6, 7, 8, 35, 36}),
+    "amd64": (2, 62, "<", {0, 1, 6, 7, 8, 16, 17}),
+    "aarch64": (2, 183, "<", {0, 257, 1025, 1026, 1027, 1028, 1029}),
+    "sparcv9": (2, 43, ">", {0, 20, 21, 22, 32, 75, 77}),
+}
+
+PRIVATE_RTLD = {
+    "__zedbsd_rtld_dlclose", "__zedbsd_rtld_dlerror",
+    "__zedbsd_rtld_dlopen", "__zedbsd_rtld_dlsym",
+    "__zedbsd_rtld_fork_child", "__zedbsd_rtld_fork_parent",
+    "__zedbsd_rtld_fork_prepare", "__zedbsd_rtld_process_fini",
+    "__zedbsd_rtld_pthread_private", "__zedbsd_rtld_startup_init",
+    "__zedbsd_rtld_thread_alloc", "__zedbsd_rtld_thread_attach",
+    "__zedbsd_rtld_thread_free", "__tls_get_addr", "___tls_get_addr",
+}
+
+
+def fail(path, message):
+    raise SystemExit(f"{path}: {message}")
+
+
+def cstring(blob, offset, path, what):
+    if offset < 0 or offset >= len(blob):
+        fail(path, f"{what} string offset is outside its table")
+    end = blob.find(b"\0", offset)
+    if end < 0:
+        fail(path, f"unterminated {what} string")
+    try:
+        return blob[offset:end].decode("ascii")
+    except UnicodeDecodeError:
+        fail(path, f"non-ASCII {what} string")
+
+
+def unpack_table(data, offset, count, size, fmt, path, what):
+    native = struct.calcsize(fmt)
+    if size < native or offset > len(data) or count > (len(data) - offset) // size:
+        fail(path, f"invalid {what} table")
+    return [struct.unpack_from(fmt, data, offset + i * size) for i in range(count)]
+
+
+def check(path, machine_name, role):
+    data = path.read_bytes()
+    elf_class, machine, endian, allowed_relocs = MACHINES[machine_name]
+    if len(data) < 64 or data[:4] != b"\x7fELF" or data[4] != elf_class:
+        fail(path, f"expected ELF{elf_class * 32}")
+    if data[5] != (1 if endian == "<" else 2) or data[6] != 1:
+        fail(path, "wrong byte order or ELF version")
+    if elf_class == 1:
+        ehfmt, phfmt, shfmt = endian+"16sHHIIIIIHHHHHH", endian+"IIIIIIII", endian+"IIIIIIIIII"
+    else:
+        ehfmt, phfmt, shfmt = endian+"16sHHIQQQIHHHHHH", endian+"IIQQQQQQ", endian+"IIQQQQIIQQ"
+    eh = struct.unpack_from(ehfmt, data)
+    e_type, e_machine = eh[1], eh[2]
+    phoff, shoff = eh[5], eh[6]
+    phentsize, phnum, shentsize, shnum, shstrndx = eh[9], eh[10], eh[11], eh[12], eh[13]
+    expected_type = ET_EXEC if role == "program" else ET_DYN
+    if e_machine != machine or e_type != expected_type:
+        fail(path, f"wrong machine or ELF type for {role}")
+    phdrs = unpack_table(data, phoff, phnum, phentsize, phfmt, path, "program-header")
+    shdrs = unpack_table(data, shoff, shnum, shentsize, shfmt, path, "section-header")
+    if shstrndx >= len(shdrs):
+        fail(path, "invalid section-name table")
+
+    def section_values(sh):
+        return (sh[4], sh[5], sh[6], sh[9]) if elf_class == 2 else (sh[4], sh[5], sh[6], sh[9])
+
+    shstr_off, shstr_size, _, _ = section_values(shdrs[shstrndx])
+    if shstr_off > len(data) or shstr_size > len(data) - shstr_off:
+        fail(path, "section-name table is outside file")
+    shstr = data[shstr_off:shstr_off+shstr_size]
+    sections = {}
+    for sh in shdrs:
+        name = cstring(shstr, sh[0], path, "section")
+        off, size, link, entsize = section_values(sh)
+        if off > len(data) or sh[1] != 8 and size > len(data) - off:
+            fail(path, f"section {name} is outside file")
+        sections[name] = (sh, data[off:off+size], link, entsize)
+    for forbidden in (".gnu.hash", ".gnu.version", ".gnu.version_d",
+                      ".gnu.version_r", ".relr.dyn"):
+        if forbidden in sections:
+            fail(path, f"unsupported section {forbidden}")
+
+    interps, stacks, relros, tls_segments = [], [], [], []
+    for ph in phdrs:
+        if elf_class == 1:
+            p_type, p_offset, _, _, p_filesz, _, p_flags, _ = ph
+        else:
+            p_type, p_flags, p_offset, _, _, p_filesz, _, _ = ph
+        if p_type == PT_LOAD and p_flags & PF_W and p_flags & PF_X:
+            fail(path, "writable executable PT_LOAD")
+        if p_type == PT_INTERP:
+            if p_offset > len(data) or p_filesz > len(data) - p_offset:
+                fail(path, "PT_INTERP outside file")
+            interps.append(data[p_offset:p_offset+p_filesz].rstrip(b"\0"))
+        if p_type == PT_GNU_STACK:
+            stacks.append(p_flags)
+        if p_type == PT_GNU_RELRO:
+            relros.append(ph)
+        if p_type == 7:
+            tls_segments.append(ph)
+    if role == "program":
+        if interps != [b"/lib/ld.so"]:
+            fail(path, "dynamic program must use /lib/ld.so")
+        if len(stacks) != 1 or stacks[0] != PF_R | PF_W:
+            fail(path, "program requires one non-executable RW stack")
+        if tls_segments:
+            fail(path, "ET_EXEC TLS would relax to unsupported IE/LE access")
+    elif interps:
+        fail(path, "shared object must not contain PT_INTERP")
+    if not relros:
+        fail(path, "missing PT_GNU_RELRO")
+
+    dynamic = sections.get(".dynamic")
+    dynstr_entry = sections.get(".dynstr")
+    if dynamic is None or dynstr_entry is None or ".hash" not in sections:
+        fail(path, "missing .dynamic, .dynstr, or SysV .hash")
+    _, dynblob, _, dynentsize = dynamic
+    dynstr = dynstr_entry[1]
+    dynfmt = endian + ("iI" if elf_class == 1 else "qQ")
+    if dynentsize != struct.calcsize(dynfmt) or len(dynblob) % dynentsize:
+        fail(path, "invalid dynamic table entry size")
+    tags, needed, sonames = [], [], []
+    for off in range(0, len(dynblob), dynentsize):
+        tag, value = struct.unpack_from(dynfmt, dynblob, off)
+        tags.append(tag)
+        if tag == DT_NEEDED:
+            needed.append(cstring(dynstr, value, path, "DT_NEEDED"))
+        elif tag == DT_SONAME:
+            sonames.append(cstring(dynstr, value, path, "DT_SONAME"))
+        elif tag == DT_TEXTREL or tag == DT_FLAGS and value & DF_TEXTREL:
+            fail(path, "text relocations are forbidden")
+    if DT_NULL not in tags:
+        fail(path, "unterminated dynamic table")
+    if role == "interpreter" and needed:
+        fail(path, "ld.so must not have dependencies")
+    if role == "libc" and (sonames != ["libc.so"] or needed):
+        fail(path, "libc.so has wrong SONAME or dependency")
+    if role == "module" and (len(sonames) != 1 or needed):
+        fail(path, "module needs exactly one SONAME and no dependency")
+    if role == "program" and needed != ["libc.so"]:
+        fail(path, "test program must depend only on libc.so")
+
+    for name, (sh, blob, link, entsize) in sections.items():
+        if sh[1] not in (9, 4):
+            continue
+        expected = ((12 if elf_class == 1 else 24) if sh[1] == 4 else
+                    (8 if elf_class == 1 else 16))
+        if entsize != expected or len(blob) % entsize:
+            fail(path, f"invalid relocation section {name}")
+        for off in range(0, len(blob), entsize):
+            if elf_class == 1:
+                _, info = struct.unpack_from(endian+"II", blob, off)
+                kind = info & 0xff
+            else:
+                _, info = struct.unpack_from(endian+"QQ", blob, off)
+                kind = info & 0xffffffff
+            if kind not in allowed_relocs:
+                fail(path, f"unsupported relocation {kind} in {name}")
+            if role == "interpreter" and kind not in ({8} if machine_name in ("i386", "amd64") else {22} if machine_name == "sparcv9" else {1027}):
+                fail(path, f"ld.so bootstrap relocation {kind} is not relative")
+
+    if role in ("libc", "module") and ".dynsym" in sections:
+        sh, syms, link, entsize = sections[".dynsym"]
+        if link >= len(shdrs):
+            fail(path, "invalid dynsym string-table link")
+        strings = dynstr
+        symfmt = endian + ("IIIBBH" if elf_class == 1 else "IBBHQQ")
+        if entsize != struct.calcsize(symfmt) or len(syms) % entsize:
+            fail(path, "invalid dynsym")
+        for off in range(0, len(syms), entsize):
+            sym = struct.unpack_from(symfmt, syms, off)
+            name_offset = sym[0]
+            shndx = sym[5] if elf_class == 1 else sym[3]
+            bind = (sym[3] if elf_class == 1 else sym[1]) >> 4
+            if shndx == 0 and bind == 1:
+                name = cstring(strings, name_offset, path, "symbol")
+                if role == "module" and name not in {"__tls_get_addr", "___tls_get_addr"}:
+                    fail(path, f"unexpected module undefined symbol {name}")
+                if role == "libc" and name not in PRIVATE_RTLD:
+                    fail(path, f"unexpected libc undefined symbol {name}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--machine", choices=MACHINES, required=True)
+    parser.add_argument("--role", choices=("interpreter", "libc", "module", "program"), required=True)
+    parser.add_argument("elf", type=Path)
+    args = parser.parse_args()
+    check(args.elf, args.machine, args.role)
+
+
+if __name__ == "__main__":
+    main()

@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
+#include <stdlib.h>
 
 extern intptr_t zedbsd_syscall_result(intptr_t);
 
@@ -22,6 +24,12 @@ int socket(int domain, int type, int protocol)
 {
 	return (int)socket_call(ZEDBSD_SYS_socket, domain, type, protocol,
 	    0, 0, 0);
+}
+
+int socketpair(int domain, int type, int protocol, int descriptors[2])
+{
+	return (int)socket_call(ZEDBSD_SYS_socketpair, domain, type, protocol,
+	    (uintptr_t)descriptors, 0, 0);
 }
 
 int bind(int descriptor, const struct sockaddr *address, socklen_t length)
@@ -72,6 +80,133 @@ ssize_t recvfrom(int descriptor, void *buffer, size_t length, int flags,
 ssize_t recv(int descriptor, void *buffer, size_t length, int flags)
 {
 	return recvfrom(descriptor, buffer, length, flags, NULL, NULL);
+}
+
+ssize_t
+sendmsg(int descriptor, const struct msghdr *message, int flags)
+{
+	struct zedbsd_sendmsg_request request;
+	const struct cmsghdr *control = NULL;
+	const int *descriptors = NULL;
+	unsigned descriptor_count = 0;
+	unsigned char *buffer;
+	size_t total = 0, offset = 0, i;
+	ssize_t result;
+	if (message == NULL || (message->msg_iovlen != 0 &&
+	    message->msg_iov == NULL)) { errno = EINVAL; return -1; }
+	if (message->msg_controllen != 0) {
+		if (message->msg_control == NULL ||
+		    message->msg_controllen < sizeof(struct cmsghdr)) {
+			errno = EINVAL; return -1;
+		}
+		control = message->msg_control;
+		if (control->cmsg_level != SOL_SOCKET ||
+		    control->cmsg_type != SCM_RIGHTS ||
+		    control->cmsg_len < CMSG_LEN(sizeof(int)) ||
+		    control->cmsg_len > message->msg_controllen ||
+		    (control->cmsg_len - CMSG_ALIGN(sizeof(*control))) %
+		    sizeof(int) != 0) {
+			errno = EINVAL; return -1;
+		}
+		descriptor_count = (unsigned)((control->cmsg_len -
+		    CMSG_ALIGN(sizeof(*control))) / sizeof(int));
+		if (descriptor_count > ZEDBSD_MSG_FD_MAX) {
+			errno = EMSGSIZE; return -1;
+		}
+		descriptors = (const int *)CMSG_DATA(control);
+	}
+	for (i = 0; i < message->msg_iovlen; i++) {
+		if (message->msg_iov[i].iov_len > SIZE_MAX - total) {
+			errno = EMSGSIZE; return -1;
+		}
+		total += message->msg_iov[i].iov_len;
+	}
+	buffer = total != 0 ? malloc(total) : NULL;
+	if (total != 0 && buffer == NULL) { errno = ENOMEM; return -1; }
+	for (i = 0; i < message->msg_iovlen; i++) {
+		memcpy(buffer + offset, message->msg_iov[i].iov_base,
+		    message->msg_iov[i].iov_len);
+		offset += message->msg_iov[i].iov_len;
+	}
+	memset(&request, 0, sizeof(request));
+	request.data = (uapi_ptr_t)(uintptr_t)(buffer != NULL ?
+	    (void *)buffer : (void *)"");
+	request.data_length = total;
+	request.name = (uapi_ptr_t)(uintptr_t)message->msg_name;
+	request.name_length = message->msg_name != NULL ?
+	    message->msg_namelen : 0;
+	request.flags = (uint32_t)flags;
+	request.descriptors = (uapi_ptr_t)(uintptr_t)descriptors;
+	request.descriptor_count = descriptor_count;
+	result = (ssize_t)socket_call(ZEDBSD_SYS_sendmsg, descriptor,
+	    (uintptr_t)&request, 0, 0, 0, 0);
+	free(buffer);
+	return result;
+}
+
+ssize_t
+recvmsg(int descriptor, struct msghdr *message, int flags)
+{
+	struct zedbsd_recvmsg_request request;
+	int descriptors[ZEDBSD_MSG_FD_MAX];
+	unsigned descriptor_capacity = 0;
+	unsigned char *buffer;
+	size_t total = 0, offset = 0, i, copied;
+	ssize_t result;
+	if (message == NULL || (message->msg_iovlen != 0 &&
+	    message->msg_iov == NULL)) { errno = EINVAL; return -1; }
+	if (message->msg_control != NULL &&
+	    message->msg_controllen >= CMSG_SPACE(sizeof(int))) {
+		descriptor_capacity = (unsigned)((message->msg_controllen -
+		    CMSG_ALIGN(sizeof(struct cmsghdr))) / sizeof(int));
+		if (descriptor_capacity > ZEDBSD_MSG_FD_MAX)
+			descriptor_capacity = ZEDBSD_MSG_FD_MAX;
+	}
+	for (i = 0; i < message->msg_iovlen; i++) {
+		if (message->msg_iov[i].iov_len > SIZE_MAX - total) {
+			errno = EMSGSIZE; return -1;
+		}
+		total += message->msg_iov[i].iov_len;
+	}
+	buffer = total != 0 ? malloc(total) : NULL;
+	if (total != 0 && buffer == NULL) { errno = ENOMEM; return -1; }
+	memset(&request, 0, sizeof(request));
+	request.data = (uapi_ptr_t)(uintptr_t)(buffer != NULL ?
+	    (void *)buffer : (void *)"");
+	request.data_capacity = total;
+	request.name = (uapi_ptr_t)(uintptr_t)message->msg_name;
+	request.name_capacity = message->msg_name != NULL ?
+	    message->msg_namelen : 0;
+	request.flags = (uint32_t)flags;
+	request.descriptors = (uapi_ptr_t)(uintptr_t)descriptors;
+	request.descriptor_capacity = descriptor_capacity;
+	result = (ssize_t)socket_call(ZEDBSD_SYS_recvmsg, descriptor,
+	    (uintptr_t)&request, 0, 0, 0, 0);
+	if (result >= 0) {
+		message->msg_namelen = request.name_length;
+		message->msg_flags = (int)request.output_flags;
+		copied = (size_t)result;
+		for (i = 0; i < message->msg_iovlen && copied != 0; i++) {
+			size_t part = message->msg_iov[i].iov_len < copied ?
+			    message->msg_iov[i].iov_len : copied;
+			memcpy(message->msg_iov[i].iov_base, buffer + offset, part);
+			offset += part;
+			copied -= part;
+		}
+		if (request.descriptor_count != 0) {
+			struct cmsghdr *control = message->msg_control;
+			size_t bytes = request.descriptor_count * sizeof(int);
+			control->cmsg_level = SOL_SOCKET;
+			control->cmsg_type = SCM_RIGHTS;
+			control->cmsg_len = CMSG_LEN(bytes);
+			memcpy(CMSG_DATA(control), descriptors, bytes);
+			message->msg_controllen = CMSG_SPACE(bytes);
+		} else {
+			message->msg_controllen = 0;
+		}
+	}
+	free(buffer);
+	return result;
 }
 
 int shutdown(int descriptor, int how)

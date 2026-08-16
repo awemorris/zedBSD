@@ -23,6 +23,7 @@ struct cdev_ops {
 	ssize_t (*read)(struct file *, void *, size_t);
 	ssize_t (*write)(struct file *, const void *, size_t);
 	int (*ioctl)(struct file *, unsigned long, uintptr_t);
+	int (*poll)(struct file *, short, short *);
 };
 
 struct cdev {

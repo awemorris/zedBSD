@@ -358,6 +358,18 @@ int main(void)
 	assert(vmspace_copy_from(vm, buffer, 0x600000, 8) == 0);
 	assert(buffer[0] == 0 && buffer[1] == 0 && buffer[2] == 0);
 	assert(!memcmp(buffer + 3, "ELF!t", 5));
+	/* GNU_RELRO may end inside the final page-rounded ELF mapping.  Splitting
+	 * must preserve an unaligned ELF data subrange instead of rejecting it. */
+	assert(vmspace_map_file(vm, 0x700000, 8192,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &file, 2, 0x700003, 5,
+		&region) == 0);
+	region->flags |= VM_REGION_ELF_ZERO_TAIL;
+	assert(vmspace_protect(vm, 0x700000, 4096, HAL_SPACE_READ) == 0);
+	assert(region->start == 0x700000 && region->size == 4096 &&
+		region->data_start == 0x700003 && region->data_size == 5);
+	assert(region->next != NULL && region->next->start == 0x701000 &&
+		region->next->size == 4096 && region->next->data_size == 0);
+	assert(vmspace_unmap(vm, 0x700000, 8192) == 0);
 	assert(vmspace_map_file(vm, 0x900000, 4096,
 		HAL_SPACE_READ | HAL_SPACE_WRITE, &file, 2, 0x900003, 5,
 		&region) == 0);

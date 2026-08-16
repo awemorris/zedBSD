@@ -23,10 +23,16 @@ fabsl(long double value)
 {
 	union {
 		long double value;
-		uint64_t bits;
+		unsigned char bytes[sizeof(long double)];
 	} shape = { value };
+	size_t sign =
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	    0;
+#else
+	    sizeof(shape.bytes) - 1U;
+#endif
 
-	shape.bits &= 0x7fffffffffffffffULL;
+	shape.bytes[sign] &= 0x7fU;
 	return shape.value;
 }
 
@@ -35,11 +41,17 @@ copysignl(long double magnitude, long double sign)
 {
 	union {
 		long double value;
-		uint64_t bits;
+		unsigned char bytes[sizeof(long double)];
 	} left = { magnitude }, right = { sign };
+	size_t sign_byte =
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	    0;
+#else
+	    sizeof(left.bytes) - 1U;
+#endif
 
-	left.bits &= 0x7fffffffffffffffULL;
-	left.bits |= right.bits & 0x8000000000000000ULL;
+	left.bytes[sign_byte] &= 0x7fU;
+	left.bytes[sign_byte] |= right.bytes[sign_byte] & 0x80U;
 	return left.value;
 }
 

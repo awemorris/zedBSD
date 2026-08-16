@@ -7,6 +7,7 @@
  */
 #include "kern/internal.h"
 #include "kern/clock.h"
+#include "kern/console-device.h"
 #include "kern/platform.h"
 #include "kern/file.h"
 #include "kern/vfs.h"
@@ -92,7 +93,7 @@ static uint32_t raw_key(void)
 {
 	/* A blocking read must never leave the hardware cursor stale or hidden. */
 	update_cursor();
-	return (uint32_t)hal_cons_getc();
+	return (uint32_t)console_input_read_event() & HAL_KEY_EVENT_KEY_MASK;
 }
 int key(void)
 {
@@ -105,7 +106,7 @@ static uint32_t applet_key(void)
 int poll(void)
 {
 	{
-		int event = hal_cons_poll_event();
+		int event = console_input_poll_event();
 		return event < 0 ? -1 : event & (int)HAL_KEY_EVENT_KEY_MASK;
 	}
 }
@@ -113,13 +114,13 @@ int poll(void)
 int noct_key_read(void *context)
 {
 	(void)context;
-	return hal_cons_read_event();
+	return console_input_read_event();
 }
 
 int noct_key_poll(void *context)
 {
 	(void)context;
-	return hal_cons_poll_event();
+	return console_input_poll_event();
 }
 
 int noct_key_is_down(void *context, int key)

@@ -205,6 +205,8 @@ file_open_resolved(const struct path *resolved, int flags,
 		return EINVAL;
 	if ((flags & O_DIRECTORY) != 0 && resolved->p_inode->i_type != INODE_DIR)
 		return ENOTDIR;
+	if (resolved->p_inode->i_type == INODE_SOCKET)
+		return ENXIO;
 	if (resolved->p_inode->i_type == INODE_DIR &&
 	    (flags & O_ACCMODE) != O_RDONLY)
 		return EISDIR;
@@ -417,6 +419,9 @@ file_seek(struct file *file, off_t offset, int whence)
 		return -EINVAL;
 	}
 	file->f_offset = target;
+	if (file->f_inode != NULL && file->f_inode->i_type == INODE_DIR &&
+	    whence == 0 && target == 0)
+		file->f_mount_cursor = 0;
 	base = target;
 	}
 	mutex_unlock(&file->f_lock);

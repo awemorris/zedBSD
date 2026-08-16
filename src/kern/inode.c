@@ -4,6 +4,7 @@
 #include "kern/namecache.h"
 #include "kern/namei.h"
 #include "kern/clock.h"
+#include "kern/record-lock.h"
 
 #include <errno.h>
 #include <string.h>
@@ -60,9 +61,20 @@ static void
 destroy_inode(struct inode *inode)
 {
 	struct mount *mountp;
+	void *special;
+	void (*special_destroy)(void *);
 	int pindex;
 	unsigned long irq;
 
+	record_lock_inode_destroy(inode);
+	mutex_lock(&inode->i_lock);
+	special = inode->i_special;
+	special_destroy = inode->i_special_destroy;
+	inode->i_special = NULL;
+	inode->i_special_destroy = NULL;
+	mutex_unlock(&inode->i_lock);
+	if (special != NULL && special_destroy != NULL)
+		special_destroy(special);
 	if (inode->i_op != NULL && inode->i_op->reclaim != NULL)
 		inode->i_op->reclaim(inode);
 	mountp = inode->i_mount;
@@ -506,6 +518,31 @@ int inode_mkdir(struct inode *i, const struct componentname *n, mode_t m,
 	if (readonly(i)) return EROFS;
 	error = i->i_op != NULL && i->i_op->mkdir != NULL ?
 		i->i_op->mkdir(i, n, m, r) : EOPNOTSUPP;
+	if (error == 0) {
+		inode_dir_changed(i);
+		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+		inode_touch(*r, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
+			INODE_ATTR_CTIME);
+	}
+	return error;
+}
+int inode_mknod(struct inode *i, const struct componentname *n,
+		enum inode_type type, mode_t m, dev_t dev, struct inode **r)
+{
+	int error;
+	mode_t expected;
+	if (i == NULL || n == NULL || r == NULL)
+		return EINVAL;
+	if (type != INODE_FIFO && type != INODE_SOCKET)
+		return EOPNOTSUPP;
+	expected = inode_type_mode(type);
+	if ((m & S_IFMT) != 0 && (m & S_IFMT) != expected)
+		return EINVAL;
+	if (readonly(i))
+		return EROFS;
+	error = i->i_op != NULL && i->i_op->mknod != NULL ?
+		i->i_op->mknod(i, n, type, expected | (m & 07777U), dev, r) :
+		EOPNOTSUPP;
 	if (error == 0) {
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);

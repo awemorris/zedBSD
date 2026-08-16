@@ -123,6 +123,8 @@ vmspace_create(void)
 		return NULL;
 	}
 	refcount_init(&vm->refs, 1);
+	vm->address_limit = vmspace_address_cap();
+	vm->stack_limit = vm->address_limit;
 	(void)atomic_fetch_add_relaxed(&vmspace_live, 1U);
 	return vm;
 }
@@ -152,6 +154,8 @@ vmspace_fork(struct vmspace *source, struct vmspace **result)
 	copy = vmspace_create();
 	if (copy == NULL)
 		return ENOMEM;
+	copy->address_limit = source->address_limit;
+	copy->stack_limit = source->stack_limit;
 	for (source_region = source->regions; source_region != NULL;
 	     source_region = source_region->next) {
 		struct vm_region *copy_region;
@@ -249,6 +253,10 @@ map_region(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot,
 	    overlaps(vm, start, size) ||
 	    (prot & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) != 0)
 		return EINVAL;
+	if ((uint64_t)size > vm->address_limit -
+	    (vm->mapped_virtual_bytes > vm->address_limit ?
+	    vm->address_limit : vm->mapped_virtual_bytes))
+		return ENOMEM;
 	if (backing == VM_BACKING_FILE &&
 	    (file == NULL || file_offset < 0 || data_start < start ||
 	     data_start >= start + size || data_size > start + size - data_start))
@@ -276,6 +284,7 @@ map_region(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot,
 	if (file != NULL)
 		file_ref(file);
 	insert_region(vm, region);
+	vm->mapped_virtual_bytes += size;
 	if (result != NULL)
 		*result = region;
 	return 0;
@@ -352,6 +361,11 @@ vmspace_map_stack(struct vmspace *vm, uintptr_t top, size_t size,
 	    (guard_size & (PAGE_SIZE - 1U)) != 0 || top > vm_layout.user_limit ||
 	    size > top || guard_size > top - size)
 		return EINVAL;
+	if ((uint64_t)size > vm->stack_limit ||
+	    (uint64_t)size + guard_size > vm->address_limit -
+	    (vm->mapped_virtual_bytes > vm->address_limit ?
+	    vm->address_limit : vm->mapped_virtual_bytes))
+		return ENOMEM;
 	bottom = top - size;
 	guard_bottom = bottom - guard_size;
 	if (!range_valid(guard_bottom, size + guard_size) ||
@@ -385,6 +399,7 @@ vmspace_map_stack(struct vmspace *vm, uintptr_t top, size_t size,
 	stack->data_start = bottom;
 	insert_region(vm, guard);
 	insert_region(vm, stack);
+	vm->mapped_virtual_bytes += size + guard_size;
 	vm->stack_guard_bottom = guard_bottom;
 	vm->stack_bottom = bottom;
 	vm->stack_top = top;
@@ -628,17 +643,30 @@ vmspace_wire_range(struct vmspace *vm, uintptr_t address, size_t size,
 		   uint32_t required)
 {
 	uintptr_t page, first, last;
+	uint32_t fault_access;
 	int error = vmspace_check(vm, address, size, required);
 
 	if (error != 0)
 		return error;
+	/*
+	 * vmspace_check() accepts a protection mask, while vmspace_fault()
+	 * describes one concrete access.  A bidirectional uaccess pin asks for
+	 * READ|WRITE and must not pass that mask through as though it were an
+	 * individual fault access.
+	 */
+	if ((required & HAL_SPACE_WRITE) != 0)
+		fault_access = HAL_SPACE_WRITE;
+	else if ((required & HAL_SPACE_READ) != 0)
+		fault_access = HAL_SPACE_READ;
+	else
+		fault_access = HAL_SPACE_EXEC;
 	first = page = address & ~(uintptr_t)(PAGE_SIZE - 1U);
 	last = (address + size - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
 	for (;;) {
 		struct vm_region *region;
 		struct vm_page *entry;
 
-		error = vmspace_fault(vm, page, required);
+		error = vmspace_fault(vm, page, fault_access);
 		if (error != 0)
 			break;
 		region = vmspace_find_region(vm, page, 1);
@@ -746,14 +774,15 @@ vmspace_copy_from(struct vmspace *vm, void *destination,
 			    HAL_SPACE_READ, 0);
 }
 
-static int
-find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
-		uintptr_t *mapped)
+int
+vmspace_find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
+			 size_t alignment, uintptr_t *mapped)
 {
 	uintptr_t start, limit;
 	struct vm_region *region;
 
 	if (vm == NULL || mapped == NULL || size == 0 ||
+	    alignment < PAGE_SIZE || (alignment & (alignment - 1U)) != 0 ||
 	    size > (size_t)(vm_layout.user_limit - vm_layout.mmap_base))
 		return EINVAL;
 	if (size > SIZE_MAX - (PAGE_SIZE - 1U))
@@ -761,8 +790,10 @@ find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
 	size = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
 	limit = vm->stack_guard_bottom != 0 ?
 		vm->stack_guard_bottom : vm_layout.user_limit;
-	start = hint >= vm_layout.mmap_base && (hint & (PAGE_SIZE - 1U)) == 0 ?
-		hint : vm_layout.mmap_base;
+	start = hint >= vm_layout.mmap_base ? hint : vm_layout.mmap_base;
+	if (start > UINTPTR_MAX - (alignment - 1U))
+		return ENOMEM;
+	start = (start + alignment - 1U) & ~(uintptr_t)(alignment - 1U);
 	for (;;) {
 		int moved = 0;
 		if (start >= limit || size > limit - start)
@@ -772,8 +803,12 @@ find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
 				break;
 			if (start < region->start + region->size &&
 			    region->start < start + size) {
-				start = (region->start + region->size + PAGE_SIZE - 1U) &
-					~(uintptr_t)(PAGE_SIZE - 1U);
+				if (region->start > UINTPTR_MAX - region->size ||
+				    region->start + region->size >
+				    UINTPTR_MAX - (alignment - 1U))
+					return ENOMEM;
+				start = (region->start + region->size + alignment - 1U) &
+					~(uintptr_t)(alignment - 1U);
 				moved = 1;
 				break;
 			}
@@ -790,7 +825,7 @@ vmspace_map_find(struct vmspace *vm, uintptr_t hint, size_t size,
 		 uint32_t prot, uintptr_t *mapped)
 {
 	uintptr_t start;
-	int error = find_free_range(vm, hint, size, &start);
+	int error = vmspace_find_free_range(vm, hint, size, PAGE_SIZE, &start);
 	if (error == 0)
 		error = vmspace_map_anon(vm, start,
 		    (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U), prot, NULL);
@@ -806,7 +841,7 @@ vmspace_map_file_find(struct vmspace *vm, uintptr_t hint, size_t size,
 {
 	uintptr_t start;
 	size_t rounded;
-	int error = find_free_range(vm, hint, size, &start);
+	int error = vmspace_find_free_range(vm, hint, size, PAGE_SIZE, &start);
 	if (error != 0)
 		return error;
 	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
@@ -826,7 +861,7 @@ vmspace_map_file_shared_find(struct vmspace *vm, uintptr_t hint, size_t size,
 {
 	uintptr_t start;
 	size_t rounded;
-	int error = find_free_range(vm, hint, size, &start);
+	int error = vmspace_find_free_range(vm, hint, size, PAGE_SIZE, &start);
 	if (error != 0)
 		return error;
 	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
@@ -874,32 +909,39 @@ split_region(struct vm_region *region, uintptr_t address)
 {
 	struct vm_region *right;
 	struct vm_page **link;
-	size_t left_size, right_size, data_skip;
+	size_t left_size, right_size;
+	uintptr_t original_data_start, original_data_end;
+	uintptr_t left_data_start, left_data_end;
+	uintptr_t right_data_start, right_data_end;
 
 	if (region == NULL || address <= region->start ||
 	    address >= region->start + region->size ||
 	    (address & (PAGE_SIZE - 1U)) != 0)
 		return EINVAL;
-	/* ELF mappings may have an unaligned data subrange, but they are immutable
-	 * and never reach this helper.  User mmap regions use data_start=start. */
-	if (region->flags & VM_REGION_IMMUTABLE ||
-	    region->data_start != region->start)
+	if (region->flags & VM_REGION_IMMUTABLE)
 		return EACCES;
 	right = kern_calloc(1, sizeof(*right));
 	if (right == NULL)
 		return ENOMEM;
 	left_size = address - region->start;
 	right_size = region->size - left_size;
+	original_data_start = region->data_start;
+	original_data_end = region->data_start + region->data_size;
 	*right = *region;
 	right->start = address;
 	right->size = right_size;
-	right->data_start = address;
-	data_skip = left_size < region->data_size ? left_size : region->data_size;
-	right->data_size = region->data_size - data_skip;
-	if (right->data_size > right_size)
-		right->data_size = right_size;
-	if (region->backing == VM_BACKING_FILE)
-		right->file_offset += (off_t)data_skip;
+	right_data_start = original_data_start > address ?
+	    original_data_start : address;
+	right_data_end = original_data_end < region->start + region->size ?
+	    original_data_end : region->start + region->size;
+	if (right_data_end < right_data_start)
+		right_data_end = right_data_start;
+	right->data_start = right_data_start;
+	right->data_size = right_data_end - right_data_start;
+	if (region->backing == VM_BACKING_FILE &&
+	    right_data_start > original_data_start)
+		right->file_offset +=
+		    (off_t)(right_data_start - original_data_start);
 	right->commit_size = region->commit_size != 0 ? right_size : 0;
 	right->pages = NULL;
 	if (right->file != NULL)
@@ -907,8 +949,17 @@ split_region(struct vm_region *region, uintptr_t address)
 	if (right->object != NULL)
 		vm_object_ref(right->object);
 	region->size = left_size;
-	if (region->data_size > left_size)
-		region->data_size = left_size;
+	if (original_data_start < address &&
+	    original_data_end > region->start) {
+		left_data_start = original_data_start;
+		left_data_end = original_data_end < address ?
+		    original_data_end : address;
+	} else {
+		left_data_start = region->start;
+		left_data_end = left_data_start;
+	}
+	region->data_start = left_data_start;
+	region->data_size = left_data_end - left_data_start;
 	region->commit_size = region->commit_size != 0 ? left_size : 0;
 	for (link = &region->pages; *link != NULL; ) {
 		struct vm_page *page = *link;
@@ -980,11 +1031,16 @@ vmspace_brk(struct vmspace *vm, uintptr_t requested, uintptr_t *result)
 			if (region->start + region->size != old_end ||
 			    overlaps(vm, old_end, difference))
 				return ENOMEM;
+			if ((uint64_t)difference > vm->address_limit -
+			    (vm->mapped_virtual_bytes > vm->address_limit ?
+			    vm->address_limit : vm->mapped_virtual_bytes))
+				return ENOMEM;
 			error = vm_commit_reserve(difference);
 			if (error != 0)
 				return error;
 			region->size += difference;
 			region->commit_size += difference;
+			vm->mapped_virtual_bytes += difference;
 		}
 	} else if (new_end < old_end) {
 		struct vm_page **page_link;
@@ -1003,6 +1059,7 @@ vmspace_brk(struct vmspace *vm, uintptr_t requested, uintptr_t *result)
 		vm_commit_release(difference);
 		region->size -= difference;
 		region->commit_size -= difference;
+		vm->mapped_virtual_bytes -= difference;
 		if (region->size == 0) {
 			*link = region->next;
 			kern_free(region);
@@ -1052,6 +1109,7 @@ vmspace_unmap(struct vmspace *vm, uintptr_t start, size_t size)
 			break;
 	while ((region = *link) != NULL && region->start < end) {
 		*link = region->next;
+		vm->mapped_virtual_bytes -= region->size;
 		free_region_pages(vm, region);
 		if (region->file != NULL)
 			(void)file_close(region->file);
@@ -1227,3 +1285,26 @@ vmspace_free(struct vmspace *vm)
 
 unsigned vmspace_count(void)
 { return atomic_load_acquire(&vmspace_live); }
+
+uint64_t
+vmspace_address_cap(void)
+{
+	vmspace_layout_init();
+	return (uint64_t)(vm_layout.user_limit - vm_layout.user_minimum);
+}
+
+int
+vmspace_set_address_limit(struct vmspace *vm, uint64_t limit)
+{
+	if (vm == NULL || vm == &kernel_vmspace || limit > vmspace_address_cap())
+		return EINVAL;
+	vm->address_limit = limit;
+	return 0;
+}
+
+void
+vmspace_set_stack_limit(struct vmspace *vm, uint64_t limit)
+{
+	if (vm != NULL && vm != &kernel_vmspace)
+		vm->stack_limit = limit;
+}

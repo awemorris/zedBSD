@@ -21,6 +21,8 @@
 
 struct file;
 struct filedesc;
+struct cwdinfo;
+struct ucred;
 struct packet_buf;
 struct socket;
 struct thread;
@@ -46,6 +48,7 @@ struct socket_ops {
 	int (*setsockopt)(struct socket *, int, int, const void *, socklen_t);
 	int (*getsockopt)(struct socket *, int, int, void *, socklen_t *);
 	int (*ioctl)(struct socket *, unsigned long, uintptr_t);
+	int (*poll)(struct socket *, short, short *);
 	void (*close)(struct socket *);
 };
 
@@ -85,6 +88,18 @@ struct socket_file_ref {
 	struct socket *socket;
 };
 
+struct unix_recv_transaction {
+	struct socket *socket;
+	void *packet;
+	uint64_t token;
+	size_t copied;
+	unsigned datagram;
+	unsigned file_count;
+	unsigned control_truncated;
+	unsigned active;
+	struct file *files[ZEDBSD_MSG_FD_MAX];
+};
+
 struct socket_family_ops {
 	int (*create)(int type, int protocol, struct socket **result);
 };
@@ -117,9 +132,28 @@ void socket_wake_receive(struct socket *);
 void socket_wake_send(struct socket *);
 void socket_wake_connect(struct socket *);
 void socket_wake_accept(struct socket *);
+int socket_poll_common(struct socket *, short, short *);
 unsigned socket_count_current(void);
 
 int packet_socket_init(void);
+int unix_socket_init(void);
+int unix_socket_pair_create(int, int, struct socket **, struct socket **);
+ssize_t unix_socket_send_message(struct socket *, const void *, size_t, int,
+	const struct sockaddr *, socklen_t, struct file **, unsigned);
+ssize_t unix_socket_send_message_at(struct socket *, struct cwdinfo *,
+	const struct ucred *, const void *, size_t, int,
+	const struct sockaddr *, socklen_t, struct file **, unsigned);
+ssize_t unix_socket_receive_message(struct socket *, void *, size_t, int,
+	struct sockaddr *, socklen_t *, struct file **, unsigned *, unsigned *);
+ssize_t unix_socket_receive_begin(struct socket *, void *, size_t, int,
+	struct sockaddr *, socklen_t *, unsigned,
+	struct unix_recv_transaction *);
+void unix_socket_receive_commit(struct unix_recv_transaction *);
+void unix_socket_receive_abort(struct unix_recv_transaction *);
+int unix_socket_bind_path(struct socket *, struct cwdinfo *,
+	const struct ucred *, mode_t, const struct sockaddr *, socklen_t);
+int unix_socket_connect_path(struct socket *, struct cwdinfo *,
+	const struct ucred *, const struct sockaddr *, socklen_t, unsigned);
 void packet_socket_deliver(const struct packet_buf *packet,
 			   const uint8_t source[6], uint8_t packet_type);
 

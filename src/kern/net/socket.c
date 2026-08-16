@@ -3,6 +3,7 @@
 #include "kern/net/packet-buf.h"
 #include "kern/clock.h"
 #include "kern/kmem.h"
+#include "kern/poll.h"
 #include "kern/sched.h"
 #include "kern/signal.h"
 #include "kern/thread.h"
@@ -218,6 +219,7 @@ socket_set_error(struct socket *socket, int error)
 	waitq_wake_all(&socket->connect_waitq);
 	waitq_wake_all(&socket->accept_waitq);
 	spin_unlock_irqrestore(&socket->lock, irq);
+	poll_notify();
 }
 
 void
@@ -252,6 +254,7 @@ socket_release(struct socket *socket)
 	waitq_wake_all(&socket->connect_waitq);
 	waitq_wake_all(&socket->accept_waitq);
 	spin_unlock_irqrestore(&socket->lock, irq);
+	poll_notify();
 	while ((packet = packets) != NULL) {
 		packets = packet->next;
 		packet_buf_free(packet);
@@ -291,6 +294,7 @@ socket_enqueue_packet(struct socket *socket, struct packet_buf *packet)
 	socket->receive_bytes += packet->length;
 	waitq_wake_one(&socket->receive_waitq);
 	spin_unlock_irqrestore(&socket->lock, irq);
+	poll_notify();
 	return 0;
 }
 
@@ -317,6 +321,7 @@ socket_requeue_packet_front(struct socket *socket, struct packet_buf *packet)
 	socket->receive_bytes += packet->length;
 	waitq_wake_one(&socket->receive_waitq);
 	spin_unlock_irqrestore(&socket->lock, irq);
+	poll_notify();
 	return 0;
 }
 
@@ -393,6 +398,7 @@ socket_wake_queue(struct socket *socket, struct wait_queue *queue)
 	irq = spin_lock_irqsave(&socket->lock);
 	waitq_wake_all(queue);
 	spin_unlock_irqrestore(&socket->lock, irq);
+	poll_notify();
 }
 
 void socket_wake_receive(struct socket *socket)
@@ -403,3 +409,28 @@ void socket_wake_connect(struct socket *socket)
 { if (socket != NULL) socket_wake_queue(socket, &socket->connect_waitq); }
 void socket_wake_accept(struct socket *socket)
 { if (socket != NULL) socket_wake_queue(socket, &socket->accept_waitq); }
+
+int
+socket_poll_common(struct socket *socket, short events, short *revents)
+{
+	short result = 0;
+	unsigned long irq;
+
+	if (socket == NULL || revents == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&socket->lock);
+	if (socket->receive_head != NULL || socket->read_shutdown ||
+	    socket->lifecycle != SOCKET_OPEN)
+		result |= events & (POLLIN | POLLRDNORM);
+	if (socket->error != 0)
+		result |= POLLERR;
+	if (socket->lifecycle != SOCKET_OPEN || socket->read_shutdown)
+		result |= POLLHUP;
+	if (!socket->write_shutdown && socket->lifecycle == SOCKET_OPEN)
+		result |= events & (POLLOUT | POLLWRNORM);
+	else if (socket->write_shutdown)
+		result |= POLLERR;
+	spin_unlock_irqrestore(&socket->lock, irq);
+	*revents = result;
+	return 0;
+}

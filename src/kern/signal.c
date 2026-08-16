@@ -5,6 +5,7 @@
  */
 #include "kern/signal.h"
 #include "kern/cred.h"
+#include "kern/clock.h"
 #include "kern/process.h"
 #include "kern/sched.h"
 #include "kern/thread.h"
@@ -21,6 +22,33 @@ static int signal_valid(int signo) { return signo > 0 && signo < NSIG; }
 static int signal_stop(int s)
 { return s==SIGSTOP||s==SIGTSTP||s==SIGTTIN||s==SIGTTOU; }
 static int signal_ignored_default(int s) { return s==SIGCHLD||s==SIGCONT; }
+
+/* Caller holds process->lock. */
+static void
+signal_take_process_locked(struct process *process, int signo,
+	struct signal_info *info)
+{
+	unsigned i, selected = SIGNAL_QUEUE_MAX;
+	for (i = 0; i < process->signal_queue_count; i++)
+		if (process->signal_queue[i].signo == signo) {
+			selected = i;
+			break;
+		}
+	if (selected != SIGNAL_QUEUE_MAX) {
+		*info = process->signal_queue[selected].info;
+		for (i = selected + 1U; i < process->signal_queue_count; i++)
+			process->signal_queue[i - 1U] = process->signal_queue[i];
+		process->signal_queue_count--;
+		for (i = 0; i < process->signal_queue_count; i++)
+			if (process->signal_queue[i].signo == signo)
+				return;
+	} else {
+		*info = process->signal_info[signo];
+	}
+	process->signal_pending &= ~SIGNAL_BIT(signo);
+	memset(&process->signal_info[signo], 0,
+	    sizeof(process->signal_info[signo]));
+}
 
 int
 signal_pending_unblocked(const struct thread *thread)
@@ -53,6 +81,8 @@ void signal_init(void) { }
 void
 kernel_user_return_handler(void)
 {
+	if (curthread != NULL && curthread->terminate_requested)
+		thread_exit(0);
 	signal_deliver_on_user_return();
 }
 
@@ -75,6 +105,17 @@ signal_send_process_info(struct process *process, int signo,
 	if (process == NULL || process == &process0 || !signal_valid(signo))
 		return EINVAL;
 	irq = spin_lock_irqsave(&process->lock);
+	if (info != NULL && (info->code == SI_QUEUE || signo >= SIGRTMIN)) {
+		struct queued_signal *queued;
+		if (process->signal_queue_count == SIGNAL_QUEUE_MAX) {
+			spin_unlock_irqrestore(&process->lock, irq);
+			return EAGAIN;
+		}
+		queued = &process->signal_queue[process->signal_queue_count++];
+		queued->signo = signo;
+		queued->info = *info;
+		queued->sequence = ++process->signal_queue_sequence;
+	}
 	if ((process->signal_pending & SIGNAL_BIT(signo)) == 0) {
 		memset(&process->signal_info[signo], 0,
 		    sizeof(process->signal_info[signo]));
@@ -85,7 +126,9 @@ signal_send_process_info(struct process *process, int signo,
 	for (thread = process->threads; thread != NULL;
 	     thread = thread->proc_next)
 		if (thread->state == THREAD_SLEEPING &&
-		    signal_pending_unblocked(thread))
+		    (signal_pending_unblocked(thread) ||
+		     (thread->signal_waiting &&
+		      (thread->signal_wait_set & SIGNAL_BIT(signo)) != 0)))
 			sched_wakeup(thread);
 	if ((signo == SIGCONT || signo == SIGKILL) &&
 	    process->state == PROCESS_STOPPED) {
@@ -168,6 +211,12 @@ signal_fork(struct process *child, const struct process *parent,
 	child_thread->signal_token = 0;
 	child_thread->signal_token_counter = 0;
 	child_thread->signal_depth = 0;
+	child_thread->signal_altstack_base = parent_thread->signal_altstack_base;
+	child_thread->signal_altstack_size = parent_thread->signal_altstack_size;
+	child_thread->signal_altstack_flags = parent_thread->signal_altstack_flags;
+	child_thread->signal_on_altstack_depth = 0;
+	child_thread->signal_wait_set = 0;
+	child_thread->signal_waiting = 0;
 	memset(child_thread->signal_levels, 0,
 	    sizeof(child_thread->signal_levels));
 	child_thread->syscall_restart_valid = 0;
@@ -185,6 +234,8 @@ signal_exec(struct process *process)
 			memset(&process->signal_actions[i], 0,
 			    sizeof(process->signal_actions[i]));
 	process->signal_pending = 0;
+	process->signal_queue_count = 0;
+	process->signal_queue_sequence = 0;
 	memset(process->signal_info, 0, sizeof(process->signal_info));
 	if (curthread != NULL) {
 		curthread->signal_pending = 0;
@@ -194,6 +245,12 @@ signal_exec(struct process *process)
 		memset(curthread->signal_levels, 0,
 		    sizeof(curthread->signal_levels));
 		curthread->signal_suspended = 0;
+		curthread->signal_altstack_base = 0;
+		curthread->signal_altstack_size = 0;
+		curthread->signal_altstack_flags = SS_DISABLE;
+		curthread->signal_on_altstack_depth = 0;
+		curthread->signal_wait_set = 0;
+		curthread->signal_waiting = 0;
 		curthread->syscall_restart_valid = 0;
 		curthread->syscall_restart_on_return = 0;
 	}
@@ -232,12 +289,14 @@ retry:
 	for (signo = 1; signo < NSIG && (pending & SIGNAL_BIT(signo)) == 0;
 	     signo++)
 		;
-	thread->signal_pending &= ~SIGNAL_BIT(signo);
-	process->signal_pending &= ~SIGNAL_BIT(signo);
 	action = process->signal_actions[signo];
-	selected_info = process->signal_info[signo];
-	memset(&process->signal_info[signo], 0,
-	    sizeof(process->signal_info[signo]));
+	if ((thread->signal_pending & SIGNAL_BIT(signo)) != 0) {
+		thread->signal_pending &= ~SIGNAL_BIT(signo);
+		memset(&selected_info, 0, sizeof(selected_info));
+		selected_info.code = SI_KERNEL;
+	} else {
+		signal_take_process_locked(process, signo, &selected_info);
+	}
 	spin_unlock_irqrestore(&process->lock, irq);
 	if (action.handler == (uintptr_t)SIG_IGN && signo != SIGKILL &&
 	    signo != SIGSTOP)
@@ -260,12 +319,24 @@ retry:
 	if (hal_task_user_context(&interrupted) != 0)
 		exit1_signal(SIGSEGV);
 	sp = interrupted.stack_pointer;
+	if ((action.flags & SA_ONSTACK) != 0 &&
+	    (thread->signal_altstack_flags & SS_DISABLE) == 0 &&
+	    thread->signal_on_altstack_depth == 0) {
+		sp = thread->signal_altstack_base + thread->signal_altstack_size;
+		thread->signal_on_altstack_depth++;
+		level = &thread->signal_levels[thread->signal_depth];
+		level->used_altstack = 1;
+	}
 	restorer = action.restorer;
 	token = ++thread->signal_token_counter;
 	if (token == 0)
 		token = ++thread->signal_token_counter;
 	level = &thread->signal_levels[thread->signal_depth];
-	memset(level, 0, sizeof(*level));
+	{
+		unsigned used_altstack = level->used_altstack;
+		memset(level, 0, sizeof(*level));
+		level->used_altstack = used_altstack;
+	}
 	level->token = token;
 	level->saved_mask = thread->signal_suspended ?
 	    thread->signal_suspend_mask : thread->signal_mask;
@@ -282,6 +353,8 @@ retry:
 	user_info.si_uid = selected_info.uid;
 	user_info.si_status = selected_info.status;
 	user_info.si_addr = (uint64_t)selected_info.address;
+	memcpy(&user_info.si_value, &selected_info.value,
+	    sizeof(selected_info.value));
 	memset(&user_context, 0, sizeof(user_context));
 	user_context.uc_sigmask = level->saved_mask;
 	user_context.uc_mcontext.mc_pc = (uint64_t)interrupted.pc;
@@ -396,4 +469,80 @@ retry:
 	if (hal_task_signal_enter(action.handler, sp, signo, info_pointer,
 	    context_pointer, restorer, token) != 0)
 		exit1_signal(SIGSEGV);
+}
+
+int
+signal_send_thread(struct thread *thread, int signo)
+{
+	struct process *process;
+	unsigned long irq;
+	if (thread == NULL || (process = thread->proc) == NULL ||
+	    !signal_valid(signo)) return EINVAL;
+	irq = spin_lock_irqsave(&process->lock);
+	thread->signal_pending |= SIGNAL_BIT(signo);
+	if (thread->state == THREAD_SLEEPING)
+		sched_wakeup(thread);
+	spin_unlock_irqrestore(&process->lock, irq);
+	return 0;
+}
+
+int
+signal_timedwait(struct thread *thread, sigset_t set,
+	const struct timespec *timeout, struct signal_info *info, int *signo_out)
+{
+	struct process *process;
+	uint64_t deadline = 0, ticks;
+	unsigned long irq;
+	int signo, error;
+
+	if (thread == NULL || (process = thread->proc) == NULL || info == NULL ||
+	    signo_out == NULL || set == 0)
+		return EINVAL;
+	set &= ~(SIGNAL_BIT(SIGKILL) | SIGNAL_BIT(SIGSTOP));
+	if (set == 0) return EINVAL;
+	if (timeout != NULL) {
+		error = kern_duration_to_ticks_ceil(timeout, &ticks);
+		if (error != 0) return error;
+		if (ticks == 0) deadline = sched_ticks();
+		else {
+			error = kern_deadline_after(sched_ticks(), ticks, &deadline);
+			if (error != 0) return error;
+		}
+	}
+	irq = spin_lock_irqsave(&process->lock);
+	for (;;) {
+		sigset_t pending = (thread->signal_pending |
+		    process->signal_pending) & set;
+		if (pending != 0) {
+			for (signo = 1; signo < NSIG &&
+			    (pending & SIGNAL_BIT(signo)) == 0; signo++) ;
+			if ((thread->signal_pending & SIGNAL_BIT(signo)) != 0) {
+				thread->signal_pending &= ~SIGNAL_BIT(signo);
+				memset(info, 0, sizeof(*info));
+				info->code = SI_KERNEL;
+			} else {
+				signal_take_process_locked(process, signo, info);
+			}
+			thread->signal_waiting = 0;
+			thread->signal_wait_set = 0;
+			spin_unlock_irqrestore(&process->lock, irq);
+			*signo_out = signo;
+			return 0;
+		}
+		if (timeout != NULL && sched_ticks() >= deadline) {
+			thread->signal_waiting = 0;
+			thread->signal_wait_set = 0;
+			spin_unlock_irqrestore(&process->lock, irq);
+			return EAGAIN;
+		}
+		if (signal_pending_unblocked(thread)) {
+			thread->signal_waiting = 0;
+			thread->signal_wait_set = 0;
+			spin_unlock_irqrestore(&process->lock, irq);
+			return EINTR;
+		}
+		thread->signal_wait_set = set;
+		thread->signal_waiting = 1;
+		sched_sleep_locked(deadline, &process->lock);
+	}
 }

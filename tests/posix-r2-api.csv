@@ -1,0 +1,67 @@
+standard_section,header,symbol,option_group,mandatory,kernel_entry,libc_source,runtime_test,status,notes
+XSH poll,libc/include/poll.h,poll,base,yes,src/kern/poll.c,userland/libc/poll.c,userland/tests/posix-r2.c,implemented,Millisecond timeout wrapper
+XSH poll,libc/include/poll.h,ppoll,base,yes,src/kern/poll.c,userland/libc/poll.c,userland/tests/posix-r2.c,implemented,Atomic temporary signal mask
+XSH select,libc/include/sys/select.h,select,base,yes,src/kern/poll.c,userland/libc/poll.c,userland/tests/posix-r2.c,implemented,fd_set wrapper
+XSH select,libc/include/sys/select.h,pselect,base,yes,src/kern/poll.c,userland/libc/poll.c,userland/tests/posix-r2.c,implemented,Atomic temporary signal mask
+XSH terminal,libc/include/termios.h,tcgetattr,job-control,yes,src/kern/tty.c,userland/libc/termios.c,userland/tests/posix-r2.c,implemented,Console TTY
+XSH terminal,libc/include/termios.h,tcsetattr,job-control,yes,src/kern/tty.c,userland/libc/termios.c,userland/tests/posix-r2.c,implemented,Canonical and raw mode
+XSH terminal,libc/include/termios.h,tcgetpgrp,job-control,yes,src/kern/tty.c,userland/libc/termios.c,userland/tests/posix-r2.c,implemented,Foreground process group
+XSH terminal,libc/include/termios.h,tcsetpgrp,job-control,yes,src/kern/tty.c,userland/libc/termios.c,userland/tests/posix-r2.c,implemented,Foreground process group
+XSH signal,libc/include/signal.h,sigaltstack,realtime-signals,yes,src/kern/signal.c,userland/libc/signal.c,userland/tests/posix-r2.c,implemented,SA_ONSTACK delivery
+XSH signal,libc/include/signal.h,sigwait,realtime-signals,yes,src/kern/signal.c,userland/libc/signal.c,userland/tests/posix-r2.c,implemented,Synchronous signal wait
+XSH signal,libc/include/signal.h,sigwaitinfo,realtime-signals,yes,src/kern/signal.c,userland/libc/signal.c,userland/tests/posix-r2.c,implemented,Queued siginfo
+XSH signal,libc/include/signal.h,sigtimedwait,realtime-signals,yes,src/kern/signal.c,userland/libc/signal.c,userland/tests/posix-r2.c,implemented,Timed queued signal wait
+XSH signal,libc/include/signal.h,sigqueue,realtime-signals,yes,src/kern/signal.c,userland/libc/signal.c,userland/tests/posix-r2.c,implemented,Process-directed queued signal
+XSH pthread,libc/include/pthread.h,pthread_create,threads,yes,src/kern/thread.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,Guarded or caller supplied stack
+XSH pthread,libc/include/pthread.h,pthread_join,threads,yes,src/kern/thread.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,Join result and reclamation
+XSH pthread,libc/include/pthread.h,pthread_detach,threads,yes,src/kern/thread.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,Detached reaper
+XSH pthread,libc/include/pthread.h,pthread_cancel,threads,yes,src/kern/thread.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,Deferred cancellation points
+XSH pthread,libc/include/pthread.h,pthread_atfork,threads,yes,src/kern/process.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,Prepare parent and child hooks
+XSH pthread,libc/include/pthread.h,pthread_mutex_lock,threads,yes,src/kern/usync.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,Private and shared synchronization
+XSH pthread,libc/include/pthread.h,pthread_mutex_timedlock,threads,yes,src/kern/usync.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,Absolute timeout
+XSH pthread,libc/include/pthread.h,pthread_cond_wait,threads,yes,src/kern/usync.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,Mutex reacquisition
+XSH pthread,libc/include/pthread.h,pthread_rwlock_timedrdlock,threads,yes,src/kern/usync.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,Timed reader lock
+XSH pthread,libc/include/pthread.h,pthread_rwlock_timedwrlock,threads,yes,src/kern/usync.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,Timed writer lock
+XSH pthread,libc/include/pthread.h,pthread_barrier_wait,threads,yes,src/kern/usync.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,Reusable barrier
+XSH pthread,libc/include/pthread.h,pthread_spin_lock,threads,yes,src/kern/usync.c,userland/libc/pthread.c,userland/tests/posix-r2.c,implemented,User spin primitive
+XSH sockets,libc/include/sys/socket.h,socketpair,unix-sockets,yes,src/kern/net/unix-socket.c,userland/libc/socket.c,userland/tests/posix-r2.c,implemented,Stream and datagram pairs
+XSH sockets,libc/include/sys/socket.h,sendmsg,unix-sockets,yes,src/kern/net/unix-socket.c,userland/libc/socket.c,userland/tests/posix-r2.c,implemented,Normalized ILP32 and LP64 request
+XSH sockets,libc/include/sys/socket.h,recvmsg,unix-sockets,yes,src/kern/net/unix-socket.c,userland/libc/socket.c,userland/tests/posix-r2.c,implemented,Transactional SCM_RIGHTS receive
+XSH sockets,libc/include/sys/socket.h,bind,unix-sockets,yes,src/kern/net/unix-socket.c,userland/libc/socket.c,userland/tests/posix-r2.c,implemented,VFS socket inode identity
+XSH sockets,libc/include/sys/socket.h,connect,unix-sockets,yes,src/kern/net/unix-socket.c,userland/libc/socket.c,userland/tests/posix-r2.c,implemented,Stream and datagram
+XSH shared-memory,libc/include/sys/mman.h,shm_open,shared-memory,yes,src/kern/tmpfs.c,userland/libc/shm.c,userland/tests/posix-r2.c,implemented,tmpfs backed object
+XSH shared-memory,libc/include/sys/mman.h,shm_unlink,shared-memory,yes,src/kern/tmpfs.c,userland/libc/shm.c,userland/tests/posix-r2.c,implemented,Name removal with open lifetime
+XSH semaphore,libc/include/semaphore.h,sem_init,semaphores,yes,src/kern/usync.c,userland/libc/semaphore.c,userland/tests/posix-r2.c,implemented,Unnamed semaphore
+XSH semaphore,libc/include/semaphore.h,sem_wait,semaphores,yes,src/kern/usync.c,userland/libc/semaphore.c,userland/tests/posix-r2.c,implemented,Cancellation point
+XSH semaphore,libc/include/semaphore.h,sem_timedwait,semaphores,yes,src/kern/usync.c,userland/libc/semaphore.c,userland/tests/posix-r2.c,implemented,Absolute timeout
+XSH semaphore,libc/include/semaphore.h,sem_open,semaphores,yes,src/kern/tmpfs.c,userland/libc/semaphore.c,userland/tests/posix-r2.c,implemented,Named shared object
+XSH mqueue,libc/include/mqueue.h,mq_open,message-passing,yes,src/kern/tmpfs.c,userland/libc/mqueue.c,userland/tests/posix-r2.c,implemented,Shared-store queue
+XSH mqueue,libc/include/mqueue.h,mq_timedsend,message-passing,yes,src/kern/usync.c,userland/libc/mqueue.c,userland/tests/posix-r2.c,implemented,Priority ordered queue
+XSH mqueue,libc/include/mqueue.h,mq_timedreceive,message-passing,yes,src/kern/usync.c,userland/libc/mqueue.c,userland/tests/posix-r2.c,implemented,Absolute timeout
+XSH mqueue,libc/include/mqueue.h,mq_notify,message-passing,yes,src/kern/signal.c,userland/libc/mqueue.c,userland/tests/posix-r2.c,implemented,One-shot SIGEV_SIGNAL
+XSH process,libc/include/spawn.h,posix_spawn,base,yes,src/kern/process.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,File actions and core attributes
+XSH process,libc/include/spawn.h,posix_spawnp,base,yes,src/kern/process.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,PATH search
+XSH process,libc/include/sys/wait.h,waitid,base,yes,src/kern/process.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,P_ALL P_PID P_PGID and WNOWAIT
+XSH file-control,libc/include/fcntl.h,fcntl,base,yes,src/kern/record-lock.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Process-owned POSIX record locks
+XSH file-control,libc/include/unistd.h,lockf,base,yes,src/kern/record-lock.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,fcntl record-lock wrapper
+XSH fifo,libc/include/sys/stat.h,mkfifo,base,yes,src/kern/pipe.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,VFS named FIFO backed by pipe core
+XSH resource,libc/include/sys/resource.h,getrlimit,base,yes,src/kern/resource-limit.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,NOFILE STACK AS and CORE
+XSH resource,libc/include/sys/resource.h,setrlimit,base,yes,src/kern/resource-limit.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Privilege and hard-limit enforcement
+XSH directory,libc/include/unistd.h,fchdir,base,yes,src/kern/namei.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Directory descriptor
+XSH directory,libc/include/dirent.h,fdopendir,base,yes,src/kern/file.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Consumes descriptor ownership
+XSH directory,libc/include/dirent.h,rewinddir,base,yes,src/kern/file.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Reset directory cursor
+XSH directory,libc/include/dirent.h,seekdir,base,yes,src/kern/file.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Directory cursor
+XSH directory,libc/include/dirent.h,telldir,base,yes,src/kern/file.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Directory cursor
+XSH file-io,libc/include/sys/uio.h,preadv,base,yes,src/kern/file.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Positioned vector read wrapper
+XSH file-io,libc/include/sys/uio.h,pwritev,base,yes,src/kern/file.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Positioned vector write wrapper
+XSH time,libc/include/time.h,clock_nanosleep,base,yes,src/kern/syscall.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Relative and absolute modes
+XSH time,libc/include/unistd.h,sleep,base,yes,src/kern/syscall.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Remaining seconds on interruption
+XSH identity,libc/include/sys/utsname.h,uname,base,yes,src/kern/syscall.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Static zedBSD identity
+XSH identity,libc/include/unistd.h,getlogin_r,base,yes,src/kern/tty.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Single-user console profile
+XSH identity,libc/include/unistd.h,ttyname_r,base,yes,src/kern/tty.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Console descriptor
+XSH configuration,libc/include/unistd.h,sysconf,base,yes,src/kern/sysctl.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Table-driven limits
+XSH configuration,libc/include/unistd.h,pathconf,base,yes,src/kern/vfs.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,Generic filesystem limits
+XSH configuration,libc/include/unistd.h,confstr,base,yes,src/kern/sysctl.c,userland/libc/posix.c,userland/tests/posix-r2.c,implemented,CS_PATH
+XSH timers,libc/include/zedbsd/features.h,timer_create,posix-timers,no,,,userland/tests/posix-r2.c,optional-disabled,_POSIX_TIMERS is -1
+XSH aio,libc/include/zedbsd/features.h,aio_read,asynchronous-io,no,,,userland/tests/posix-r2.c,optional-disabled,_POSIX_ASYNCHRONOUS_IO is -1
+XSH scheduling,libc/include/zedbsd/features.h,sched_setscheduler,process-scheduling,no,,,userland/tests/posix-r2.c,optional-disabled,Realtime scheduling is not advertised

@@ -15,7 +15,8 @@
 
 #define DEVFS_BLOCK_INO_BASE 0x100000000ULL
 #define DEVFS_NAME_MAX 32U
-#define DEVFS_ENTRY_MAX (CDEV_MAX + DISK_MAX)
+#define DEVFS_ENTRY_MAX (CDEV_MAX + DISK_MAX + 1U)
+#define DEVFS_SHM_INO 2U
 #define DEVFS_HIGH __attribute__((section(".hightext")))
 
 typedef char devfs_ino_must_be_64_bit[(sizeof(ino_t) >= 8) ? 1 : -1];
@@ -40,6 +41,7 @@ struct devfs_dir_state {
 static struct devfs_node nodes[CDEV_MAX] __attribute__((section(".vfs_bss")));
 static unsigned node_count __attribute__((section(".vfs_bss")));
 static struct inode *devfs_root __attribute__((section(".vfs_bss")));
+static struct inode *devfs_shm __attribute__((section(".vfs_bss")));
 static const struct file_ops devfs_block_ops;
 
 static DEVFS_HIGH int
@@ -62,6 +64,11 @@ devfs_lookup(struct inode *directory, const struct componentname *component,
 	if (component_equal(component, ".") || component_equal(component, "..")) {
 		inode_ref(directory);
 		*result = directory;
+		return 0;
+	}
+	if (component_equal(component, "shm")) {
+		inode_ref(devfs_shm);
+		*result = devfs_shm;
 		return 0;
 	}
 	for (i = 0; i < node_count; i++)
@@ -129,6 +136,10 @@ devfs_dir_open(struct file *file)
 	if (state == NULL)
 		return ENFILE;
 	memset(state, 0, sizeof(*state));
+	strcpy(state->entries[state->count].name, "shm");
+	state->entries[state->count].ino = DEVFS_SHM_INO;
+	state->entries[state->count].type = INODE_DIR;
+	state->count++;
 	for (i = 0; i < node_count; i++) {
 		struct devfs_dir_entry *entry = &state->entries[state->count++];
 		strncpy(entry->name, nodes[i].device->name, DEVFS_NAME_MAX - 1U);
@@ -348,6 +359,16 @@ devfs_mount_impl(struct mount *mountp)
 	devfs_root->i_linkcount = 1;
 	devfs_root->i_mode = S_IFDIR | 0555U;
 	devfs_root->i_flags = INODE_ROOT | INODE_NOCACHE_CHILDREN;
+	devfs_shm = inode_alloc(mountp);
+	if (devfs_shm == NULL)
+		return ENOSPC;
+	devfs_shm->i_type = INODE_DIR;
+	devfs_shm->i_ino = DEVFS_SHM_INO;
+	devfs_shm->i_op = &devfs_inode_ops;
+	devfs_shm->i_fop = &devfs_directory_ops;
+	devfs_shm->i_linkcount = 2;
+	devfs_shm->i_mode = S_IFDIR | 0555U;
+	devfs_shm->i_flags = INODE_NOCACHE_CHILDREN;
 	for (i = 0; i < node_count; i++) {
 		struct inode *inode = inode_alloc(mountp);
 		if (inode == NULL)
@@ -355,7 +376,7 @@ devfs_mount_impl(struct mount *mountp)
 		nodes[i].device = cdev_at(i);
 		nodes[i].inode = inode;
 		inode->i_type = INODE_CHAR;
-		inode->i_ino = 2U + i;
+		inode->i_ino = 3U + i;
 		inode->i_op = &devfs_inode_ops;
 		inode->i_fop = &cdev_file_ops;
 		inode->i_data = (void *)nodes[i].device;

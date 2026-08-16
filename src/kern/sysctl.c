@@ -3,6 +3,7 @@
 #include "kern/buf.h"
 
 #include <errno.h>
+#include <hal/hal.h>
 #include <stdint.h>
 #include <string.h>
 #include <zedbsd/sysctl.h>
@@ -16,6 +17,8 @@ struct sysctl_leaf {
 };
 
 static const struct sysctl_leaf leaves[] = {
+	{{ CTL_HW, HW_NCPU, 0 }, 2, "hw.ncpu"},
+	{{ CTL_HW, HW_NCPUONLINE, 0 }, 2, "hw.ncpuonline"},
 	{{ CTL_VFS, VFS_BUFCACHE, VFS_BUFCACHE_MAX_BYTES }, 3,
 	 "vfs.bufcache.max_bytes"},
 	{{ CTL_VFS, VFS_BUFCACHE, VFS_BUFCACHE_CURRENT_BYTES }, 3,
@@ -38,7 +41,6 @@ oid_compare(const int *a, unsigned alen, const int *b, unsigned blen)
 	}
 	return alen < blen ? -1 : alen > blen;
 }
-
 static const struct sysctl_leaf *
 find_oid(const int *oid, unsigned oidlen)
 {
@@ -122,6 +124,13 @@ kern_sysctl(const int *name, unsigned namelen, void *oldp, size_t *oldlenp,
 		return EINVAL;
 	if (namelen == 2 && name[0] == CTL_SYSCTL)
 		return sysctl_meta(name[1], oldp, oldlenp, newp, newlen);
+	if (namelen == 2 && name[0] == CTL_HW &&
+	    (name[1] == HW_NCPU || name[1] == HW_NCPUONLINE)) {
+		uint32_t cpus = hal_cpu_count();
+		if (newp != NULL || newlen != 0)
+			return EPERM;
+		return sysctl_output(oldp, oldlenp, &cpus, sizeof(cpus));
+	}
 	if (namelen != 3 || name[0] != CTL_VFS ||
 	    name[1] != VFS_BUFCACHE || find_oid(name, namelen) == NULL)
 		return ENOENT;
@@ -155,4 +164,3 @@ kern_sysctl(const int *name, unsigned namelen, void *oldp, size_t *oldlenp,
 		return ENOENT;
 	}
 }
-

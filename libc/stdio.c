@@ -14,7 +14,12 @@
 #include <time.h>
 #include <unistd.h>
 
-int zedbsd_errno;
+static int zedbsd_global_errno;
+__attribute__((weak)) int *
+zedbsd_errno_location(void)
+{
+	return &zedbsd_global_errno;
+}
 
 static FILE standard_input;
 static FILE standard_output;
@@ -222,7 +227,7 @@ zedbsd_libc_panic(const char *message)
 		__asm__ volatile ("" ::: "memory");
 }
 
-void
+__attribute__((weak)) void
 abort(void)
 {
 	zedbsd_libc_panic("abort");

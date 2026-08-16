@@ -22,5 +22,5 @@ SECTIONS
 	/DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }
 }
 
-ASSERT(__bss_end <= 0x00300000,
+ASSERT(__bss_end <= 0x00400000,
        "SPARC V9 stage2 exceeds its claimed OpenBoot memory")

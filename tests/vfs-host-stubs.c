@@ -1,5 +1,6 @@
 /* Host-only process/credential stubs for isolated VFS and libc tests. */
 #include "kern/cred.h"
+#include "kern/file.h"
 #include "kern/lock.h"
 #include <hal/hal.h>
 #include <stdbool.h>
@@ -99,3 +100,6 @@ vfs_access(const struct inode *inode, const struct ucred *cred, int requested)
 	(void)requested;
 	return 0;
 }
+
+void record_lock_inode_destroy(struct inode *inode) { (void)inode; }
+const struct file_ops fifo_file_ops = { 0 };

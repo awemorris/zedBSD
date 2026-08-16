@@ -327,37 +327,50 @@ cwdinfo_destroy(struct cwdinfo *context)
 }
 
 int
-fs_chdir(struct cwdinfo *context, const char *path)
+fs_chdir_path(struct cwdinfo *context, const struct path *directory)
 {
-	struct path directory;
 	struct ucred *cred=cred_current_ref!=NULL?cred_current_ref():NULL;
 	const struct ucred *check=cred!=NULL?cred:
 	    (cred_current!=NULL?cred_current():NULL);
-	int error = namei_path_at(context, path, &directory);
-	if (error != 0) {
+	struct path replacement, old;
+	unsigned long irq;
+	int error;
+
+	if (context == NULL || directory == NULL || directory->p_inode == NULL ||
+	    directory->p_mount == NULL) {
 		release_cred(cred);
-		return error;
+		return EINVAL;
 	}
-	if (directory.p_inode->i_type != INODE_DIR) {
-		path_release(&directory);
+	if (directory->p_inode->i_type != INODE_DIR) {
 		release_cred(cred);
 		return ENOTDIR;
 	}
-	error = search_access(directory.p_inode,check);
+	error = search_access(directory->p_inode, check);
 	if (error != 0) {
-		path_release(&directory);
 		release_cred(cred);
 		return error;
 	}
-	{
-		struct path old;
-		unsigned long irq=spin_lock_irqsave(&context->lock);
-		old=context->cwd;context->cwd=directory;
-		spin_unlock_irqrestore(&context->lock,irq);
-		path_release(&old);
-	}
+	path_init(&replacement);
+	path_set(&replacement, directory->p_mount, directory->p_inode);
+	irq = spin_lock_irqsave(&context->lock);
+	old = context->cwd;
+	context->cwd = replacement;
+	spin_unlock_irqrestore(&context->lock, irq);
+	path_release(&old);
 	release_cred(cred);
 	return 0;
+}
+
+int
+fs_chdir(struct cwdinfo *context, const char *path)
+{
+	struct path directory;
+	int error = namei_path_at(context, path, &directory);
+	if (error != 0)
+		return error;
+	error = fs_chdir_path(context, &directory);
+	path_release(&directory);
+	return error;
 }
 
 static int

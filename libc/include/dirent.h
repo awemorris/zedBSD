@@ -18,6 +18,11 @@ struct dirent {
 };
 typedef struct zedbsd_directory DIR;
 DIR *opendir(const char *);
+DIR *fdopendir(int);
 struct dirent *readdir(DIR *);
 int closedir(DIR *);
+void rewinddir(DIR *);
+void seekdir(DIR *, long);
+long telldir(DIR *);
+int dirfd(DIR *);
 #endif

@@ -38,16 +38,21 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/waitq.o \
 	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/sysctl.o \
 	$(BUILD)/src/kern/resource.o \
+	$(BUILD)/src/kern/resource-limit.o \
+	$(BUILD)/src/kern/poll.o \
+	$(BUILD)/src/kern/usync.o \
 	$(BUILD)/src/kern/process.o $(BUILD)/src/kern/thread.o \
 	$(BUILD)/src/kern/sched.o $(BUILD)/src/kern/vmspace.o \
 	$(BUILD)/src/kern/vm-object.o $(BUILD)/src/kern/vm-commit.o \
 	$(BUILD)/src/kern/filedesc.o $(BUILD)/src/kern/pipe.o \
+	$(BUILD)/src/kern/record-lock.o \
 	$(BUILD)/src/kern/cred.o $(BUILD)/src/kern/signal.o \
 	$(BUILD)/src/kern/cwdinfo.o \
 	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec.o \
 	$(BUILD)/src/kern/user-probe.o $(BUILD)/src/kern/syscall.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
 	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/console-device.o \
+	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
 	$(BUILD)/src/kern/system-device.o \
 	$(BUILD)/src/kern/init.o \
@@ -87,6 +92,7 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/namei.o \
 	$(BUILD)/src/kern/mount.o \
 	$(BUILD)/src/kern/rootfs.o \
+	$(BUILD)/src/kern/tmpfs.o \
 	$(BUILD)/src/kern/overlayfs.o \
 	$(BUILD)/src/kern/vfs.o \
 	$(BUILD)/src/kern/swap.o \
@@ -134,8 +140,11 @@ USER-FAULT.ELF: $(BUILD)/USER-FAULT.ELF
 USER-SWAP.ELF: $(BUILD)/USER-SWAP.ELF
 USER-STACK.ELF: $(BUILD)/USER-STACK.ELF
 USER-STACK-GUARD.ELF: $(BUILD)/USER-STACK-GUARD.ELF
+POSIX-R2.ELF: $(BUILD)/POSIX-R2.ELF
+POSIX-R2-REMAINING.ELF: $(BUILD)/POSIX-R2-REMAINING.ELF
 .PHONY: vmunix vmunix-m9 BOOTAPP.BIN INIT.ELF NOCT.ELF SH \
-	USER-FAULT.ELF USER-SWAP.ELF USER-STACK.ELF USER-STACK-GUARD.ELF
+	USER-FAULT.ELF USER-SWAP.ELF USER-STACK.ELF USER-STACK-GUARD.ELF \
+	POSIX-R2.ELF POSIX-R2-REMAINING.ELF
 
 # ----------------------------------------------------------------------
 # Per-object flag overrides.
@@ -241,7 +250,8 @@ I386_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/i386.img
 I386_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/noct \
 	$(BUILD)/bin/nettest $(BUILD)/bin/ping $(BUILD)/bin/ifconfig \
 	$(BUILD)/bin/route $(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup \
-	$(BUILD)/bin/sysctl
+	$(BUILD)/bin/sysctl $(BUILD)/dynamic/ld.so $(BUILD)/dynamic/libc.so \
+	$(BUILD)/dynamic/tlstest.so $(BUILD)/dynamic/dyntest
 I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/noct=$(BUILD)/bin/noct \
 	--file /bin/nettest=$(BUILD)/bin/nettest \
@@ -250,7 +260,11 @@ I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/route=$(BUILD)/bin/route \
 	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
 	--file /bin/nslookup=$(BUILD)/bin/nslookup \
-	--file /bin/sysctl=$(BUILD)/bin/sysctl
+	--file /bin/sysctl=$(BUILD)/bin/sysctl \
+	--file /lib/ld.so=$(BUILD)/dynamic/ld.so \
+	--file /lib/libc.so=$(BUILD)/dynamic/libc.so \
+	--file /lib/tlstest.so=$(BUILD)/dynamic/tlstest.so \
+	--file /bin/dyntest=$(BUILD)/dynamic/dyntest
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(I386_ARCH_UFS_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
@@ -346,6 +360,13 @@ $(BUILD)/ipl-part.img: $(BUILD)/partition-pbr.bin
 # Stage 2 (vmunix) and the applet container.
 
 USER_LIBC_OBJS := $(BUILD)/userland/crt0.o $(BUILD)/userland/libc/posix.o \
+	$(BUILD)/userland/libc/dlfcn.o \
+	$(BUILD)/userland/libc/static-tls.o \
+	$(BUILD)/userland/libc/poll.o $(BUILD)/userland/libc/termios.o \
+	$(BUILD)/userland/libc/pthread.o \
+	$(BUILD)/userland/libc/shm.o \
+	$(BUILD)/userland/libc/semaphore.o \
+	$(BUILD)/userland/libc/mqueue.o \
 	$(BUILD)/userland/libc/socket.o $(BUILD)/userland/libc/resolver.o \
 	$(BUILD)/userland/libc/resolver-dns.o $(BUILD)/userland/libc/signal.o \
 	$(BUILD)/libc/heap.o $(BUILD)/libc/string.o $(BUILD)/libc/ctype.o \
@@ -356,11 +377,21 @@ USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-mno-mmx -mno-sse -mno-sse2
 USER_STACK_LDFLAGS := -z stack-size=0x100000
 USER_ELF_CHECK := $(SCRIPTS_DIR)/check-user-elf.py
-$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/socket.o \
-	$(BUILD)/userland/tests/syscall-smoke.o: \
+$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/poll.o \
+	$(BUILD)/userland/libc/termios.o \
+	$(BUILD)/userland/libc/pthread.o \
+	$(BUILD)/userland/libc/socket.o \
+	$(BUILD)/userland/tests/syscall-smoke.o \
+	$(BUILD)/userland/tests/posix-r2.o \
+	$(BUILD)/userland/tests/posix-r2-remaining.o: \
 	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/socket.o \
-	$(BUILD)/userland/tests/syscall-smoke.o: \
+$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/poll.o \
+	$(BUILD)/userland/libc/termios.o \
+	$(BUILD)/userland/libc/pthread.o \
+	$(BUILD)/userland/libc/socket.o \
+	$(BUILD)/userland/tests/syscall-smoke.o \
+	$(BUILD)/userland/tests/posix-r2.o \
+	$(BUILD)/userland/tests/posix-r2-remaining.o: \
 	OBJ_CFLAGS = $(USER_CFLAGS)
 
 $(BUILD)/INIT.ELF: $(USER_LIBC_OBJS) $(BUILD)/userland/tests/syscall-smoke.o \
@@ -414,6 +445,22 @@ $(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
 		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+	$(PYTHON) $(USER_ELF_CHECK) $@
+
+$(BUILD)/POSIX-R2.ELF: $(USER_LIBC_OBJS) \
+	$(BUILD)/userland/tests/posix-r2.o $(PC98)/noct-user.ld \
+	$(USER_ELF_CHECK)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
+		$(USER_LIBC_OBJS) $(BUILD)/userland/tests/posix-r2.o -o $@
+	$(PYTHON) $(USER_ELF_CHECK) $@
+
+$(BUILD)/POSIX-R2-REMAINING.ELF: $(USER_LIBC_OBJS) \
+	$(BUILD)/userland/tests/posix-r2-remaining.o $(PC98)/noct-user.ld \
+	$(USER_ELF_CHECK)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
+		$(USER_LIBC_OBJS) $(BUILD)/userland/tests/posix-r2-remaining.o -o $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
 USER_SYSCTL_OBJ := $(BUILD)/userland/sysctl/main.o
@@ -472,6 +519,124 @@ $(foreach command,$(USER_NET_COMMANDS),\
 	$(eval $(call PC98_USER_NET_COMMAND,$(command))))
 network-tools: $(USER_NET_COMMAND_TARGETS)
 .PHONY: network-tools
+
+# ELF32 runtime linker and shared libc.  PC-98 and PC/AT intentionally use
+# the same i386 user ABI; only their HAL and boot paths differ.
+DYNAMIC_DIR := $(BUILD)/dynamic
+DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Iinclude/uapi -Ilibc/include \
+	-DHAL_ARCH_I386 -DZEDBSD_DYNAMIC_LIBC
+DYNAMIC_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fPIC -fno-builtin \
+	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
+	-ftls-model=global-dynamic -Wall -Wextra -Werror -msoft-float \
+	-mno-80387 -mno-fp-ret-in-387 -mno-mmx -mno-sse -mno-sse2
+DYNAMIC_LIBC_SOURCES := userland/libc/posix.c userland/libc/poll.c \
+	userland/libc/termios.c userland/libc/pthread.c userland/libc/shm.c \
+	userland/libc/semaphore.c userland/libc/mqueue.c userland/libc/dlfcn.c \
+	userland/libc/socket.c userland/libc/resolver.c \
+	userland/libc/resolver-dns.c userland/libc/signal.c libc/heap.c \
+	libc/string.c libc/ctype.c libc/int64.c libc/strto.c libc/format.c \
+	libc/stdio.c
+DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
+	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/libc/syscall.o
+DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/rtld/entry.o \
+	$(DYNAMIC_DIR)/obj/userland/rtld/rtld.o \
+	$(DYNAMIC_DIR)/obj/userland/rtld/string.o
+DYNAMIC_SOFTFLOAT_DIR := $(DYNAMIC_DIR)/softfloat
+DYNAMIC_GCC_SOFTFLOAT_OBJS := $(addprefix $(DYNAMIC_SOFTFLOAT_DIR)/gcc-,\
+	$(ZEDBSD_GCC_SOFTFP_REL:.c=.o))
+DYNAMIC_MUSL_MATH_OBJS := $(addprefix $(DYNAMIC_SOFTFLOAT_DIR)/musl-,\
+	$(ZEDBSD_MUSL_MATH_REL:.c=.o))
+DYNAMIC_MUSL_SCAN_OBJS := $(DYNAMIC_SOFTFLOAT_DIR)/musl-shgetc.o \
+	$(DYNAMIC_SOFTFLOAT_DIR)/musl-floatscan.o \
+	$(DYNAMIC_SOFTFLOAT_DIR)/musl-strtod.o \
+	$(DYNAMIC_SOFTFLOAT_DIR)/musl-compat.o
+DYNAMIC_LIBC_OBJS += $(DYNAMIC_GCC_SOFTFLOAT_OBJS) \
+	$(DYNAMIC_MUSL_MATH_OBJS) $(DYNAMIC_MUSL_SCAN_OBJS)
+
+$(DYNAMIC_DIR)/obj/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/userland/libc/syscall.o: userland/libc/syscall-i386.S
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/userland/rtld/entry.o: userland/rtld/entry-i386.S
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -c $< -o $@
+
+$(DYNAMIC_SOFTFLOAT_DIR)/gcc-%.o: $(ZEDBSD_GCC_ROOT)/libgcc/soft-fp/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_GCC_SOFTFP_CPPFLAGS) $(DYNAMIC_CFLAGS) \
+		-mlong-double-64 -Wno-error=type-limits -c $< -o $@
+
+$(DYNAMIC_SOFTFLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
+		-Wno-error=unused-but-set-variable -Wno-error=parentheses \
+		-c $< -o $@
+
+$(DYNAMIC_SOFTFLOAT_DIR)/musl-shgetc.o: \
+	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
+		-Wno-error=parentheses -include softfloat/musl-floatscan.h \
+		-c $< -o $@
+
+$(DYNAMIC_SOFTFLOAT_DIR)/musl-floatscan.o: \
+	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
+		-Wno-error=parentheses -Wno-error=sign-compare \
+		-include softfloat/musl-floatscan.h -c $< -o $@
+
+$(DYNAMIC_SOFTFLOAT_DIR)/musl-strtod.o: \
+	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
+		-include softfloat/musl-floatscan.h -c $< -o $@
+
+$(DYNAMIC_SOFTFLOAT_DIR)/musl-compat.o: softfloat/musl-compat.c \
+	softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
+		-include softfloat/musl-floatscan.h -c $< -o $@
+
+$(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
+	$(LD) -m elf_i386 -shared -Bsymbolic -e _rtld_start --hash-style=sysv \
+		-z now -z relro -z separate-code $^ -o $@
+
+$(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
+	$(LD) -m elf_i386 -shared -soname libc.so --hash-style=sysv -z now \
+		-z relro -z separate-code $(USER_STACK_LDFLAGS) $^ -o $@
+
+$(DYNAMIC_DIR)/obj/userland/crt1.o: userland/crt1-i386.S
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -c $< -o $@
+
+$(DYNAMIC_DIR)/tlstest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_i386 -shared -soname tlstest.so --hash-style=sysv \
+		-z now -z relro -z separate-code $< -o $@
+
+$(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/userland/crt1.o \
+	$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so
+	$(CC) -m32 -nostdlib -no-pie -Wl,--no-relax,--hash-style=sysv,-z,now,-z,relro \
+		-Wl,-z,separate-code,-z,stack-size=0x100000,--allow-shlib-undefined \
+		-Wl,--dynamic-linker=/lib/ld.so \
+		$(DYNAMIC_DIR)/obj/userland/crt1.o \
+		$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o \
+		-L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) -l:libc.so -o $@
+
+dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so scripts/check-dynamic-elf.py
+	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role interpreter $(DYNAMIC_DIR)/ld.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role libc $(DYNAMIC_DIR)/libc.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role module $(DYNAMIC_DIR)/tlstest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role program $(DYNAMIC_DIR)/dyntest
+	@echo "zedBSD PC-98 i386 dynamic userland artifacts: PASS"
+.PHONY: dynamic-userland-check
 
 $(BUILD)/tests/user-fault.o: tests/user-fault.S
 	@mkdir -p $(dir $@)

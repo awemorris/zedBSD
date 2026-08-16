@@ -13,6 +13,7 @@
 #define O_DIRECTORY 0x1000
 #define O_NONBLOCK  0x2000
 #define O_CLOEXEC   0x4000
+#define O_NOCTTY    0x8000
 
 #define AT_FDCWD            (-100)
 #define AT_SYMLINK_NOFOLLOW 0x0100
@@ -30,10 +31,25 @@ int faccessat(int, const char *, int, int);
 #define F_GETFL         3
 #define F_SETFL         4
 #define F_DUPFD_CLOEXEC 5
+#define F_GETLK          6
+#define F_SETLK          7
+#define F_SETLKW         8
+
+#define F_RDLCK 1
+#define F_WRLCK 2
+#define F_UNLCK 3
 
 #include <sys/types.h>
+struct flock {
+	short l_type;
+	short l_whence;
+	off_t l_start;
+	off_t l_len;
+	pid_t l_pid;
+};
 int open(const char *, int, ...);
 int openat(int, const char *, int, ...);
+int creat(const char *, mode_t);
 int fcntl(int, int, ...);
 
 #endif

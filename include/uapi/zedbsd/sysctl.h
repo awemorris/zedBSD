@@ -7,6 +7,7 @@
 #define CTL_MAXNAME 8U
 
 #define CTL_SYSCTL 0
+#define CTL_HW     1
 #define CTL_VFS    3
 
 #define CTL_SYSCTL_NAME2OID 1
@@ -18,6 +19,9 @@
 #define VFS_BUFCACHE_CURRENT_BYTES 2
 #define VFS_BUFCACHE_DIRTY_BYTES   3
 #define VFS_BUFCACHE_STATS         4
+
+#define HW_NCPU        1
+#define HW_NCPUONLINE  2
 
 struct zedbsd_bufcache_stats {
 	uint64_t max_bytes;
@@ -36,4 +40,3 @@ struct zedbsd_bufcache_stats {
 };
 
 #endif
-

@@ -40,7 +40,6 @@ fixture_submit(struct disk *disk, struct bio *bio)
 	bio_complete(bio, 0, bio->b_op == BIO_FLUSH ? 0 : bytes);
 	return 0;
 }
-
 static const struct disk_ops fixture_ops = { .submit = fixture_submit };
 
 struct read_worker {
@@ -194,4 +193,3 @@ main(void)
 	puts("zedBSD buffer cache/sysctl host tests: OK");
 	return 0;
 }
-

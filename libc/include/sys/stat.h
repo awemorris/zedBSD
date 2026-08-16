@@ -81,6 +81,8 @@ int lstat(const char *, struct stat *);
 int fstatat(int, const char *, struct stat *, int);
 int mkdir(const char *, mode_t);
 int mkdirat(int, const char *, mode_t);
+int mkfifo(const char *, mode_t);
+int mkfifoat(int, const char *, mode_t);
 int chmod(const char *, mode_t);
 int fchmod(int, mode_t);
 int fchmodat(int, const char *, mode_t, int);

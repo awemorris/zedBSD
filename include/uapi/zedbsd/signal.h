@@ -2,6 +2,8 @@
 #ifndef ZEDBSD_UAPI_SIGNAL_H
 #define ZEDBSD_UAPI_SIGNAL_H
 #include <stdint.h>
+#include <stddef.h>
+#include <zedbsd/types.h>
 typedef uint32_t sigset_t;
 #define NSIG 32
 #define SIGHUP 1
@@ -25,6 +27,8 @@ typedef uint32_t sigset_t;
 #define SIGTSTP 21
 #define SIGTTIN 22
 #define SIGTTOU 23
+#define SIGRTMIN 24
+#define SIGRTMAX 31
 #define SIG_BLOCK 0
 #define SIG_UNBLOCK 1
 #define SIG_SETMASK 2
@@ -43,6 +47,7 @@ typedef uint32_t sigset_t;
  * for process-generated events.  All public signal records use fixed-width
  * fields so their layout is identical in the ILP32 and LP64 ABIs. */
 #define SI_USER 0
+#define SI_QUEUE (-1)
 #define SI_KERNEL 0x80
 #define ILL_ILLOPC 1
 #define FPE_INTDIV 1
@@ -58,6 +63,12 @@ typedef uint32_t sigset_t;
 #define CLD_STOPPED 5
 #define CLD_CONTINUED 6
 
+union sigval {
+	int32_t sival_int;
+	void *sival_ptr;
+	uint64_t __sival_pad;
+};
+
 typedef struct siginfo {
 	int32_t si_signo;
 	int32_t si_errno;
@@ -68,8 +79,23 @@ typedef struct siginfo {
 	int32_t si_status;
 	uint32_t si_reserved1;
 	uint64_t si_addr;
-	uint64_t si_reserved[11];
+	union sigval si_value;
+	uint64_t si_reserved[10];
 } siginfo_t;
+
+#define SS_ONSTACK 0x0001
+#define SS_DISABLE 0x0002
+#define MINSIGSTKSZ 8192U
+#define SIGSTKSZ 32768U
+struct zedbsd_sigaltstack {
+	uapi_ptr_t ss_sp;
+#ifndef ZEDBSD_USER_ABI_LP64
+	uint32_t ss_pointer_pad;
+#endif
+	uint64_t ss_size;
+	int32_t ss_flags;
+	uint32_t ss_reserved;
+};
 
 /* mc_pc, mc_sp, and mc_retval describe the interrupted user context.  The
  * first ABI revision deliberately permits sigreturn to adopt only

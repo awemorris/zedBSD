@@ -32,10 +32,11 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/main.c src/kern/env.c src/kern/fs.c src/kern/namespace.c \
 	src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c src/kern/fat-vfs.c \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
-	src/kern/mount.c src/kern/rootfs.c src/kern/overlayfs.c \
+	src/kern/mount.c src/kern/rootfs.c src/kern/tmpfs.c src/kern/overlayfs.c \
 	src/kern/vfs.c src/kern/swap.c \
 	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/buf.c \
-	src/kern/sysctl.c src/kern/resource.c src/kern/disk.c \
+	src/kern/sysctl.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
+	src/kern/resource-limit.c \
 	drivers/loop.c \
 	src/kern/partition.c src/kern/mbr-partition.c src/kern/rpi4/platform.c \
 	drivers/rpi4-sdhci.c \
@@ -43,12 +44,13 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/vmspace.c \
 	src/kern/vm-object.c src/kern/vm-commit.c src/kern/filedesc.c \
+	src/kern/record-lock.c \
 	src/kern/pipe.c src/kern/cred.c \
 	src/kern/signal.c \
 	src/kern/cwdinfo.c \
 	src/kern/elf.c src/kern/exec.c src/kern/user-probe.c src/kern/syscall.c \
 	src/kern/uaccess.c src/kern/cdev.c src/kern/devfs.c \
-	src/kern/console-device.c src/kern/graphics-device.c \
+	src/kern/console-device.c src/kern/tty.c src/kern/graphics-device.c \
 	src/kern/system-device.c src/kern/init.c
 ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES)
 ARM64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ARM64_KERNEL_SOURCES))
@@ -57,11 +59,18 @@ ARM64_VMUNIX_OBJS := $(ARM64_BOOT_OBJS) $(ARM64_KERNEL_OBJS) $(ARM64_KERNEL_LIBC
 
 ARM64_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -DZEDBSD_USER_ABI_AARCH64 -DZEDBSD_USER_ABI_LP64
-ARM64_USER_CFLAGS := -march=armv8-a -ffreestanding -fno-pic -fno-pie \
+ARM64_USER_CFLAGS := -march=armv8-a -mno-outline-atomics \
+	-ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-builtin -fno-common -ffunction-sections -fdata-sections \
 	-Os -Wall -Wextra -Werror
-ARM64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/socket.c \
+ARM64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c userland/libc/static-tls.c userland/libc/poll.c \
+	userland/libc/termios.c \
+	userland/libc/pthread.c \
+	userland/libc/shm.c \
+	userland/libc/semaphore.c \
+	userland/libc/mqueue.c \
+	userland/libc/socket.c \
 	userland/libc/signal.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
@@ -79,6 +88,8 @@ all: $(BUILD)/vmunix $(BUILD)/VMUNIX.A64 $(BUILD)/bin/sh \
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
 POSIX-R1.ELF: $(BUILD)/POSIX-R1.ELF
+POSIX-R2.ELF: $(BUILD)/POSIX-R2.ELF
+POSIX-R2-REMAINING.ELF: $(BUILD)/POSIX-R2-REMAINING.ELF
 arm64-image-check: $(BUILD)/VMUNIX.A64
 rpi4-entry-qemu-test: $(BUILD)/VMUNIX.A64
 	bash scripts/test-arm64-rpi4-entry-qemu.sh
@@ -160,10 +171,130 @@ $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-aarch64.o \
 	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
 
+$(BUILD)/POSIX-R2.ELF: $(BUILD)/user/userland/crt0-aarch64.o \
+	$(ARM64_USER_RUNTIME_OBJS) \
+	$(BUILD)/user/userland/tests/posix-r2.o \
+	$(ARM64_PLATFORM)/user.ld scripts/check-user-elf.py
+	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
+		$(BUILD)/user/userland/crt0-aarch64.o \
+		$(ARM64_USER_RUNTIME_OBJS) \
+		$(BUILD)/user/userland/tests/posix-r2.o -o $@
+	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
+
+$(BUILD)/POSIX-R2-REMAINING.ELF: \
+	$(BUILD)/user/userland/crt0-aarch64.o $(ARM64_USER_RUNTIME_OBJS) \
+	$(BUILD)/user/userland/tests/posix-r2-remaining.o \
+	$(ARM64_PLATFORM)/user.ld scripts/check-user-elf.py
+	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
+		$(BUILD)/user/userland/crt0-aarch64.o \
+		$(ARM64_USER_RUNTIME_OBJS) \
+		$(BUILD)/user/userland/tests/posix-r2-remaining.o -o $@
+	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
+
+# ELF64 runtime linker and shared libc for the aarch64 architecture overlay.
+DYNAMIC_DIR := $(BUILD)/dynamic
+DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Iinclude/uapi -Ilibc/include \
+	-DHAL_ARCH_ARM64 -DZEDBSD_USER_ABI_AARCH64 -DZEDBSD_USER_ABI_LP64 \
+	-DZEDBSD_DYNAMIC_LIBC
+DYNAMIC_CFLAGS := -march=armv8-a -mno-outline-atomics -Os -ffreestanding \
+	-fPIC -fno-builtin -fno-stack-protector \
+	-fno-asynchronous-unwind-tables -fno-unwind-tables \
+	-ftls-model=global-dynamic -mtls-dialect=trad -Wall -Wextra -Werror
+DYNAMIC_LIBC_SOURCES := userland/libc/posix.c userland/libc/poll.c \
+	userland/libc/termios.c userland/libc/pthread.c userland/libc/shm.c \
+	userland/libc/semaphore.c userland/libc/mqueue.c userland/libc/dlfcn.c \
+	userland/libc/socket.c userland/libc/signal.c libc/heap.c libc/string.c \
+	libc/ctype.c libc/int64.c libc/strto.c libc/format.c libc/stdio.c
+DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
+	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/libc/syscall.o
+DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/rtld/entry.o \
+	$(DYNAMIC_DIR)/obj/userland/rtld/rtld.o \
+	$(DYNAMIC_DIR)/obj/userland/rtld/string.o
+DYNAMIC_FLOAT_DIR := $(DYNAMIC_DIR)/float
+DYNAMIC_MUSL_MATH_OBJS := $(addprefix $(DYNAMIC_FLOAT_DIR)/musl-,\
+	$(ZEDBSD_MUSL_MATH_REL:.c=.o))
+DYNAMIC_MUSL_SCAN_OBJS := $(DYNAMIC_FLOAT_DIR)/musl-shgetc.o \
+	$(DYNAMIC_FLOAT_DIR)/musl-floatscan.o \
+	$(DYNAMIC_FLOAT_DIR)/musl-strtod.o $(DYNAMIC_FLOAT_DIR)/musl-compat.o
+DYNAMIC_LIBC_OBJS += $(DYNAMIC_MUSL_MATH_OBJS) $(DYNAMIC_MUSL_SCAN_OBJS)
+
+$(DYNAMIC_DIR)/obj/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
+$(DYNAMIC_DIR)/obj/userland/libc/syscall.o: userland/libc/syscall-aarch64.S
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) -c $< -o $@
+$(DYNAMIC_DIR)/obj/userland/rtld/entry.o: userland/rtld/entry-aarch64.S
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) -c $< -o $@
+$(DYNAMIC_DIR)/obj/userland/crt1.o: userland/crt1-aarch64.S
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) -c $< -o $@
+$(DYNAMIC_FLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \
+		-Wno-error=unused-but-set-variable \
+		-Wno-error=parentheses -c $< -o $@
+$(DYNAMIC_FLOAT_DIR)/musl-shgetc.o: $(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \
+		-Wno-error=parentheses -include softfloat/musl-floatscan.h -c $< -o $@
+$(DYNAMIC_FLOAT_DIR)/musl-floatscan.o: $(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \
+		-Wno-error=parentheses -Wno-error=sign-compare \
+		-include softfloat/musl-floatscan.h -c $< -o $@
+$(DYNAMIC_FLOAT_DIR)/musl-strtod.o: $(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \
+		-include softfloat/musl-floatscan.h -c $< -o $@
+$(DYNAMIC_FLOAT_DIR)/musl-compat.o: softfloat/musl-compat.c softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \
+		-include softfloat/musl-floatscan.h -c $< -o $@
+
+$(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
+	$(ARM64_LD) -shared -Bsymbolic -e _rtld_start --hash-style=sysv \
+		-z now -z relro -z separate-code -z max-page-size=4096 $^ -o $@
+$(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
+	$(ARM64_CC) $(DYNAMIC_CFLAGS) -nostdlib -shared -static-libgcc \
+		-Wl,-soname,libc.so,--hash-style=sysv,-z,now,-z,relro \
+		-Wl,-z,separate-code,-z,max-page-size=4096,-z,stack-size=0x100000 \
+		$^ -lgcc -o $@
+$(DYNAMIC_DIR)/tlstest.so: $(DYNAMIC_DIR)/obj/userland/tests/tlstest.o $(DYNAMIC_DIR)/ld.so
+	$(ARM64_LD) -shared -soname tlstest.so --hash-style=sysv \
+		-z now -z relro -z separate-code -z max-page-size=4096 $< -o $@
+$(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/userland/crt1.o \
+	$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so
+	$(ARM64_CC) -nostdlib -no-pie -Wl,--no-relax,--hash-style=sysv,-z,now,-z,relro \
+		-Wl,-z,separate-code,-z,stack-size=0x100000,--allow-shlib-undefined \
+		-Wl,--dynamic-linker=/lib/ld.so $(DYNAMIC_DIR)/obj/userland/crt1.o \
+		$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o -L$(DYNAMIC_DIR) \
+		-Wl,-rpath-link,$(DYNAMIC_DIR) -l:libc.so -static-libgcc -lgcc -o $@
+dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so scripts/check-dynamic-elf.py
+	$(PYTHON) scripts/check-dynamic-elf.py --machine aarch64 --role interpreter $(DYNAMIC_DIR)/ld.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine aarch64 --role libc $(DYNAMIC_DIR)/libc.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine aarch64 --role module $(DYNAMIC_DIR)/tlstest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine aarch64 --role program $(DYNAMIC_DIR)/dyntest
+	@echo "zedBSD aarch64 dynamic userland artifacts: PASS"
+.PHONY: dynamic-userland-check
+
 AARCH64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.img
-AARCH64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/sysctl
+AARCH64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
+	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/tlstest.so $(DYNAMIC_DIR)/dyntest
 AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
-	--file /bin/sysctl=$(BUILD)/bin/sysctl
+	--file /bin/sysctl=$(BUILD)/bin/sysctl \
+	--file /lib/ld.so=$(DYNAMIC_DIR)/ld.so \
+	--file /lib/libc.so=$(DYNAMIC_DIR)/libc.so \
+	--file /lib/tlstest.so=$(DYNAMIC_DIR)/tlstest.so \
+	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AARCH64_ARCH_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
 AARCH64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AARCH64_ARCH_UFS_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
@@ -215,7 +346,7 @@ $(BUILD)/VMUNIX.A64: $(BUILD)/vmunix scripts/check-arm64-vmunix.py
 	$(PYTHON) scripts/check-arm64-vmunix.py --elf $< --image $@ --fix-image
 	$(PYTHON) scripts/check-arm64-vmunix.py --elf $< --image $@
 
-.PHONY: vmunix SH POSIX-R1.ELF arch-image arch-image-check arch-image-ufs \
+.PHONY: vmunix SH POSIX-R1.ELF POSIX-R2.ELF POSIX-R2-REMAINING.ELF arch-image arch-image-check arch-image-ufs \
 	arch-image-ufs-check hdd-image ufs-root-image rpi4-image-check arm64-image-check \
 	rpi4-entry-qemu-test rpi4-fdt-host-test
 

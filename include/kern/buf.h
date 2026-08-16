@@ -67,4 +67,3 @@ int buf_set_max_bytes(uint64_t);
 void buf_reset(void);
 
 #endif
-

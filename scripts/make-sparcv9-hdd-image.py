@@ -123,6 +123,12 @@ def create(args: argparse.Namespace) -> None:
         require(path)
     if args.shell is not None:
         require(args.shell)
+    dynamic = (args.rtld, args.libc, args.tlstest, args.dyntest)
+    if any(path is not None for path in dynamic):
+        if not all(path is not None for path in dynamic):
+            raise SystemExit("SPARC V9 dynamic userland inputs must be complete")
+        for path in dynamic:
+            require(path)
     if args.ufs_root is not None:
         require(args.ufs_root)
         if args.ufs_root.stat().st_size % SECTOR_SIZE:
@@ -176,6 +182,16 @@ def create(args: argparse.Namespace) -> None:
             if args.shell is None:
                 run("mmd", "-i", fat_spec, "::/bin")
             run("mcopy", "-i", fat_spec, str(args.sysctl), "::/bin/sysctl")
+        if args.rtld is not None:
+            run("mmd", "-i", fat_spec, "::/lib")
+            run("mcopy", "-i", fat_spec, str(args.rtld), "::/lib/ld.so")
+            run("mcopy", "-i", fat_spec, str(args.libc), "::/lib/libc.so")
+            run("mcopy", "-i", fat_spec, str(args.tlstest),
+                "::/lib/tlstest.so")
+            if args.shell is None:
+                run("mmd", "-i", fat_spec, "::/bin")
+            run("mcopy", "-i", fat_spec, str(args.dyntest),
+                "::/bin/dyntest")
         if args.ufs_root is not None:
             with temporary.open("r+b") as image:
                 image.seek(root_lba * SECTOR_SIZE)
@@ -192,6 +208,10 @@ def create(args: argparse.Namespace) -> None:
             command += ["--shell", str(args.shell)]
         if args.sysctl is not None:
             command += ["--sysctl", str(args.sysctl)]
+        if args.rtld is not None:
+            command += ["--rtld", str(args.rtld), "--libc", str(args.libc),
+                        "--tlstest", str(args.tlstest),
+                        "--dyntest", str(args.dyntest)]
         if args.ufs_root is not None:
             command += ["--ufs-root", str(args.ufs_root)]
         command.append(str(temporary))
@@ -209,6 +229,10 @@ def main() -> None:
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
     parser.add_argument("--sysctl", type=Path)
+    parser.add_argument("--rtld", type=Path)
+    parser.add_argument("--libc", type=Path)
+    parser.add_argument("--tlstest", type=Path)
+    parser.add_argument("--dyntest", type=Path)
     parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("output", type=Path)

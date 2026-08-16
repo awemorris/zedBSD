@@ -10,6 +10,7 @@
 bool hal_irq_disable(void) { return false; }
 void hal_irq_enable(void) { }
 hal_cpu_id_t hal_cpu_current(void) { return 0; }
+unsigned hal_cpu_count(void) { return 1; }
 struct thread *thread_current(void) { return NULL; }
 
 int

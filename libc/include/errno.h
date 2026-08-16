@@ -6,8 +6,8 @@
 #ifndef ZEDBSD_ERRNO_H
 #define ZEDBSD_ERRNO_H
 
-extern int zedbsd_errno;
-#define errno zedbsd_errno
+int *zedbsd_errno_location(void);
+#define errno (*zedbsd_errno_location())
 
 #define EDOM 1
 #define ERANGE 2
@@ -66,6 +66,10 @@ extern int zedbsd_errno;
 #define ECONNABORTED 55
 #define ENOPROTOOPT 56
 #define EMLINK 57
+#define EDEADLK 58
+#define ECANCELED 59
+#define ENOTSOCK 60
+#define ENOTSUP EOPNOTSUPP
 
 #define EWOULDBLOCK EAGAIN
 

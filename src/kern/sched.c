@@ -359,6 +359,10 @@ sched_exit_current(void)
 	if (current == NULL || (current->flags & THREAD_FLAG_IDLE) != 0 ||
 	    current->sched.cpu != id)
 		HAL_FATAL("invalid scheduler exit");
+	/* A newly started task does not return through the previous task's
+	 * hal_task_context_switch() call.  Retire that predecessor before this
+	 * task is allowed to become the next retirement candidate. */
+	complete_retired(cpu);
 	ignored = spin_lock_irqsave(&cpu->lock);
 	(void)ignored;
 	if (current->state != THREAD_RUNNING || cpu->retired != NULL)

@@ -33,10 +33,11 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c \
 	src/kern/fat-vfs.c src/kern/inode.c src/kern/file.c \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
-	src/kern/rootfs.c src/kern/overlayfs.c src/kern/vfs.c \
+	src/kern/rootfs.c src/kern/tmpfs.c src/kern/overlayfs.c src/kern/vfs.c \
 	src/kern/swap.c src/kern/swap-fat.c \
 	src/kern/vm-reclaim.c src/kern/buf.c src/kern/sysctl.c \
-	src/kern/resource.c \
+	src/kern/resource.c src/kern/poll.c src/kern/usync.c \
+	src/kern/resource-limit.c \
 	src/kern/disk.c src/kern/partition.c \
 	drivers/loop.c \
 	drivers/pcat-ide.c drivers/dp8390.c drivers/pcat-ne2000.c \
@@ -46,10 +47,11 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c \
 	src/kern/vmspace.c src/kern/vm-object.c src/kern/vm-commit.c \
 	src/kern/filedesc.c \
+	src/kern/record-lock.c \
 	src/kern/pipe.c src/kern/cred.c src/kern/signal.c \
 	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
-	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
+	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c src/kern/tty.c \
 	src/kern/graphics-device.c src/kern/system-device.c \
 	src/kern/pcat/font.c drivers/pcat-graphics.c \
 	src/kern/init.c
@@ -68,8 +70,10 @@ all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
 POSIX-R1.ELF: $(BUILD)/POSIX-R1.ELF
+POSIX-R2.ELF: $(BUILD)/POSIX-R2.ELF
+POSIX-R2-REMAINING.ELF: $(BUILD)/POSIX-R2-REMAINING.ELF
 SMP-STRESS.ELF: $(BUILD)/SMP-STRESS.ELF
-.PHONY: POSIX-R1.ELF SMP-STRESS.ELF
+.PHONY: POSIX-R1.ELF POSIX-R2.ELF POSIX-R2-REMAINING.ELF SMP-STRESS.ELF
 
 $(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.S
 	@mkdir -p $(dir $@)
@@ -144,7 +148,12 @@ AMD64_USER_CFLAGS := -m64 -march=x86-64 -mno-red-zone -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-builtin -fno-common -ffunction-sections \
 	-fdata-sections -Os -Wall -Wextra -Werror
-AMD64_USER_RUNTIME_SOURCES := userland/libc/posix.c \
+AMD64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c userland/libc/static-tls.c userland/libc/poll.c \
+	userland/libc/termios.c \
+	userland/libc/pthread.c \
+	userland/libc/shm.c \
+	userland/libc/semaphore.c \
+	userland/libc/mqueue.c \
 	userland/libc/signal.c libc/heap.c libc/string.c libc/ctype.c \
 	libc/int64.c libc/strto.c libc/format.c libc/stdio.c
 AMD64_USER_LIBC_OBJS := $(BUILD)/user64/userland/crt0-amd64.o \
@@ -176,6 +185,24 @@ $(BUILD)/POSIX-R1.ELF: $(AMD64_USER_LIBC_OBJS) \
 		-T $(AMD64_PLATFORM)/user.ld \
 		$(AMD64_USER_LIBC_OBJS) \
 		$(BUILD)/user64/userland/tests/syscall-smoke.o -o $@
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+$(BUILD)/POSIX-R2.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
+	$(BUILD)/user64/userland/tests/posix-r2.o $(AMD64_PLATFORM)/user.ld \
+	$(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+		$(BUILD)/user64/userland/tests/posix-r2.o -o $@
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+$(BUILD)/POSIX-R2-REMAINING.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
+	$(BUILD)/user64/userland/tests/posix-r2-remaining.o \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+		$(BUILD)/user64/userland/tests/posix-r2-remaining.o -o $@
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
@@ -246,10 +273,123 @@ $(foreach command,$(USER_NET_COMMANDS),\
 network-tools: $(USER_NET_COMMAND_TARGETS)
 .PHONY: network-tools
 
+# ELF64 runtime linker and shared libc.
+DYNAMIC_DIR := $(BUILD)/dynamic
+DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Iinclude/uapi -Ilibc/include \
+	-DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64 -DZEDBSD_DYNAMIC_LIBC
+DYNAMIC_CFLAGS := -m64 -march=x86-64 -mno-red-zone -Os -ffreestanding \
+	-fPIC -fno-builtin -fno-stack-protector \
+	-fno-asynchronous-unwind-tables -fno-unwind-tables \
+	-ftls-model=global-dynamic -Wall -Wextra -Werror
+DYNAMIC_LIBC_SOURCES := userland/libc/posix.c userland/libc/poll.c \
+	userland/libc/termios.c userland/libc/pthread.c userland/libc/shm.c \
+	userland/libc/semaphore.c userland/libc/mqueue.c userland/libc/dlfcn.c \
+	userland/libc/socket.c userland/libc/resolver.c \
+	userland/libc/resolver-dns.c userland/libc/signal.c libc/heap.c \
+	libc/string.c libc/ctype.c libc/int64.c libc/strto.c libc/format.c \
+	libc/stdio.c
+DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
+	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/libc/syscall.o
+DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/rtld/entry.o \
+	$(DYNAMIC_DIR)/obj/userland/rtld/rtld.o \
+	$(DYNAMIC_DIR)/obj/userland/rtld/string.o
+DYNAMIC_FLOAT_DIR := $(DYNAMIC_DIR)/float
+DYNAMIC_MUSL_MATH_OBJS := $(addprefix $(DYNAMIC_FLOAT_DIR)/musl-,\
+	$(ZEDBSD_MUSL_MATH_REL:.c=.o))
+DYNAMIC_MUSL_SCAN_OBJS := $(DYNAMIC_FLOAT_DIR)/musl-shgetc.o \
+	$(DYNAMIC_FLOAT_DIR)/musl-floatscan.o \
+	$(DYNAMIC_FLOAT_DIR)/musl-strtod.o \
+	$(DYNAMIC_FLOAT_DIR)/musl-compat.o
+DYNAMIC_LIBC_OBJS += $(DYNAMIC_MUSL_MATH_OBJS) $(DYNAMIC_MUSL_SCAN_OBJS)
+
+$(DYNAMIC_DIR)/obj/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/userland/libc/syscall.o: userland/libc/syscall-amd64.S
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/userland/rtld/entry.o: userland/rtld/entry-amd64.S
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -c $< -o $@
+
+$(DYNAMIC_FLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
+		-Wno-error=unused-but-set-variable -Wno-error=parentheses \
+		-c $< -o $@
+
+$(DYNAMIC_FLOAT_DIR)/musl-shgetc.o: \
+	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
+		-Wno-error=parentheses -include softfloat/musl-floatscan.h \
+		-c $< -o $@
+
+$(DYNAMIC_FLOAT_DIR)/musl-floatscan.o: \
+	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
+		-Wno-error=parentheses -Wno-error=sign-compare \
+		-include softfloat/musl-floatscan.h -c $< -o $@
+
+$(DYNAMIC_FLOAT_DIR)/musl-strtod.o: \
+	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
+		-include softfloat/musl-floatscan.h -c $< -o $@
+
+$(DYNAMIC_FLOAT_DIR)/musl-compat.o: softfloat/musl-compat.c \
+	softfloat/musl-floatscan.h
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
+		-include softfloat/musl-floatscan.h -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/userland/crt1.o: userland/crt1-amd64.S
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -c $< -o $@
+
+$(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
+	$(LD) -m elf_x86_64 -shared -Bsymbolic -e _rtld_start \
+		--hash-style=sysv -z now -z relro -z separate-code $^ -o $@
+
+$(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
+	$(LD) -m elf_x86_64 -shared -soname libc.so --hash-style=sysv \
+		-z now -z relro -z separate-code -z stack-size=0x100000 $^ -o $@
+
+$(DYNAMIC_DIR)/tlstest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_x86_64 -shared -soname tlstest.so --hash-style=sysv \
+		-z now -z relro -z separate-code $< -o $@
+
+$(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/userland/crt1.o \
+	$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so
+	$(CC) -m64 -nostdlib -no-pie -Wl,--no-relax \
+		-Wl,--hash-style=sysv,-z,now,-z,relro,-z,separate-code \
+		-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+		-Wl,--dynamic-linker=/lib/ld.so \
+		$(DYNAMIC_DIR)/obj/userland/crt1.o \
+		$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o \
+		-L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
+		-l:libc.so -o $@
+
+dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so scripts/check-dynamic-elf.py
+	$(PYTHON) scripts/check-dynamic-elf.py --machine amd64 --role interpreter $(DYNAMIC_DIR)/ld.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine amd64 --role libc $(DYNAMIC_DIR)/libc.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine amd64 --role module $(DYNAMIC_DIR)/tlstest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine amd64 --role program $(DYNAMIC_DIR)/dyntest
+	@echo "zedBSD amd64 dynamic userland artifacts: PASS"
+.PHONY: dynamic-userland-check
+
 AMD64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/amd64.img
 AMD64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
-	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup $(BUILD)/bin/sysctl
+	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup $(BUILD)/bin/sysctl \
+	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/tlstest.so $(DYNAMIC_DIR)/dyntest
 AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/nettest=$(BUILD)/bin/nettest \
 	--file /bin/ping=$(BUILD)/bin/ping \
@@ -257,7 +397,11 @@ AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/route=$(BUILD)/bin/route \
 	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
 	--file /bin/nslookup=$(BUILD)/bin/nslookup \
-	--file /bin/sysctl=$(BUILD)/bin/sysctl
+	--file /bin/sysctl=$(BUILD)/bin/sysctl \
+	--file /lib/ld.so=$(DYNAMIC_DIR)/ld.so \
+	--file /lib/libc.so=$(DYNAMIC_DIR)/libc.so \
+	--file /lib/tlstest.so=$(DYNAMIC_DIR)/tlstest.so \
+	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AMD64_ARCH_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
 AMD64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/amd64.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_ARCH_UFS_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))

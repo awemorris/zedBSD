@@ -85,6 +85,8 @@ struct inode_ops {
 		      struct inode **);
 	int (*mkdir)(struct inode *, const struct componentname *, mode_t,
 		     struct inode **);
+	int (*mknod)(struct inode *, const struct componentname *,
+		     enum inode_type, mode_t, dev_t, struct inode **);
 	int (*unlink)(struct inode *, const struct componentname *);
 	int (*rmdir)(struct inode *, const struct componentname *);
 	int (*rename)(struct inode *, const struct componentname *,
@@ -107,6 +109,14 @@ struct inode {
 	const struct inode_ops *i_op;
 	const struct file_ops *i_fop;
 	void *i_data;
+	/*
+	 * Generic state must not be stored in i_data: that pointer belongs to
+	 * the filesystem.  i_special is used by FIFO/socket nodes and the
+	 * record-lock pointer is independent of either special-node type.
+	 */
+	void *i_special;
+	void (*i_special_destroy)(void *);
+	void *i_record_locks;
 	refcount_t i_refs;
 	struct mutex i_lock;
 	nlink_t i_linkcount;
@@ -145,6 +155,8 @@ int inode_create(struct inode *, const struct componentname *, mode_t,
 		 struct inode **);
 int inode_mkdir(struct inode *, const struct componentname *, mode_t,
 		struct inode **);
+int inode_mknod(struct inode *, const struct componentname *, enum inode_type,
+		mode_t, dev_t, struct inode **);
 int inode_unlink(struct inode *, const struct componentname *);
 int inode_rmdir(struct inode *, const struct componentname *);
 int inode_rename(struct inode *, const struct componentname *, struct inode *,

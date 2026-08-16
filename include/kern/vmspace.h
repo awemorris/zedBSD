@@ -90,6 +90,9 @@ struct vmspace {
 	uintptr_t stack_guard_bottom;
 	uintptr_t stack_bottom;
 	uintptr_t stack_top;
+	uint64_t address_limit;
+	uint64_t mapped_virtual_bytes;
+	uint64_t stack_limit;
 };
 
 extern struct vmspace kernel_vmspace;
@@ -111,6 +114,8 @@ int vmspace_map_stack(struct vmspace *, uintptr_t, size_t, size_t);
 int vmspace_set_brk_start(struct vmspace *, uintptr_t);
 int vmspace_brk(struct vmspace *, uintptr_t, uintptr_t *);
 struct vm_region *vmspace_find_region(struct vmspace *, uintptr_t, size_t);
+int vmspace_find_free_range(struct vmspace *, uintptr_t, size_t, size_t,
+			    uintptr_t *);
 int vmspace_map_find(struct vmspace *, uintptr_t, size_t, uint32_t,
 		     uintptr_t *);
 int vmspace_map_file_find(struct vmspace *, uintptr_t, size_t, uint32_t,
@@ -129,5 +134,8 @@ int vmspace_copy_to(struct vmspace *, uintptr_t, const void *, size_t);
 int vmspace_copy_from(struct vmspace *, void *, uintptr_t, size_t);
 void vmspace_free(struct vmspace *);
 unsigned vmspace_count(void);
+int vmspace_set_address_limit(struct vmspace *, uint64_t);
+void vmspace_set_stack_limit(struct vmspace *, uint64_t);
+uint64_t vmspace_address_cap(void);
 
 #endif

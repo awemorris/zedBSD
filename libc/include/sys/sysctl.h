@@ -9,4 +9,3 @@ int sysctl(const int *, unsigned int, void *, size_t *, const void *, size_t);
 int sysctlbyname(const char *, void *, size_t *, const void *, size_t);
 
 #endif
-

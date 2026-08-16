@@ -9,4 +9,3 @@ int kern_sysctl(const int *, unsigned, void *, size_t *, const void *, size_t,
 	int);
 
 #endif
-

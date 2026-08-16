@@ -19,7 +19,7 @@
 #define ELF_PT_LOAD 1U
 #define ELF_PF_X 1U
 #define FAT_CLUSTER_END 0xfff8U
-#define KERNEL_FILE_LIMIT (1024U * 1024U)
+#define KERNEL_FILE_LIMIT (2U * 1024U * 1024U)
 
 struct fat_volume {
 	ofw_cell_t disk;

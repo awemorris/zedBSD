@@ -47,7 +47,6 @@ buf_hash_key(const struct disk *disk, uint64_t block)
 	return (unsigned)((value >> 4) ^ block ^ (block >> 32)) &
 	    (BUF_HASH_BUCKETS - 1U);
 }
-
 static size_t
 slab_header_size(void)
 {
@@ -953,4 +952,3 @@ buf_reset(void)
 			break;
 	}
 }
-

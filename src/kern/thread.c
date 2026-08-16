@@ -72,6 +72,8 @@ thread_create(struct process *process, uintptr_t entry, uintptr_t user_sp,
 	refcount_init(&thread->refs, 1);
 	thread->proc = process;
 	thread->state = THREAD_NEW;
+	thread->signal_altstack_flags = SS_DISABLE;
+	waitq_init(&thread->join_waitq, "thread join");
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 	thread->task = hal_task_create(process->vmspace->space,
@@ -108,6 +110,8 @@ thread_fork(struct process *process, hal_task_t task, struct thread **result)
 	thread->proc = process;
 	thread->task = task;
 	thread->state = THREAD_NEW;
+	thread->signal_altstack_flags = SS_DISABLE;
+	waitq_init(&thread->join_waitq, "thread join");
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 	hal_task_set_private(task, thread);
@@ -147,6 +151,8 @@ kthread_create(void (*entry)(void *), void *arg, int priority,
 	refcount_init(&thread->refs, 1);
 	thread->proc = &process0;
 	thread->state = THREAD_NEW;
+	thread->signal_altstack_flags = SS_DISABLE;
+	waitq_init(&thread->join_waitq, "thread join");
 	thread->sched.priority = priority;
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 	thread->kernel_entry = entry;
@@ -204,6 +210,7 @@ thread_init_secondary(hal_cpu_id_t cpu)
 	thread->task = task;
 	thread->state = THREAD_RUNNING;
 	thread->flags = THREAD_FLAG_IDLE;
+	waitq_init(&thread->join_waitq, "idle join");
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 	thread->sched.cpu = cpu;
@@ -254,7 +261,17 @@ thread_sched_retired(struct thread *thread)
 		HAL_FATAL("invalid retired thread");
 	thread->state = THREAD_ZOMBIE;
 	thread->state_generation++;
+	{
+		unsigned long irq = spin_lock_irqsave(&thread->proc->lock);
+		waitq_wake_all(&thread->join_waitq);
+		spin_unlock_irqrestore(&thread->proc->lock, irq);
+	}
 	process_thread_retired(thread);
+	if (thread->detached) {
+		thread_ref(thread);
+		(void)thread_wait(thread, NULL);
+		thread_release(thread);
+	}
 }
 
 int

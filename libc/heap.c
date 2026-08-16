@@ -30,6 +30,9 @@ struct heap_block {
 static struct zedbsd_heap default_heap;
 static struct zedbsd_heap *active_heap = &default_heap;
 
+__attribute__((weak)) void zedbsd_libc_heap_lock(void) { }
+__attribute__((weak)) void zedbsd_libc_heap_unlock(void) { }
+
 static size_t
 aligned_size(size_t size)
 {
@@ -562,16 +565,36 @@ void zedbsd_heap_set_observer(zedbsd_heap_observer_fn observer, void *context)
 {
 	zedbsd_heap_set_observer_instance(active_heap, observer, context);
 }
-void *zedbsd_malloc(size_t size) { return zedbsd_heap_alloc(active_heap, size); }
+void *zedbsd_malloc(size_t size)
+{
+	void *result;
+	zedbsd_libc_heap_lock();
+	result = zedbsd_heap_alloc(active_heap, size);
+	zedbsd_libc_heap_unlock();
+	return result;
+}
 void *zedbsd_calloc(size_t count, size_t size)
 {
-	return zedbsd_heap_calloc(active_heap, count, size);
+	void *result;
+	zedbsd_libc_heap_lock();
+	result = zedbsd_heap_calloc(active_heap, count, size);
+	zedbsd_libc_heap_unlock();
+	return result;
 }
 void *zedbsd_realloc(void *pointer, size_t size)
 {
-	return zedbsd_heap_realloc(active_heap, pointer, size);
+	void *result;
+	zedbsd_libc_heap_lock();
+	result = zedbsd_heap_realloc(active_heap, pointer, size);
+	zedbsd_libc_heap_unlock();
+	return result;
 }
-void zedbsd_free(void *pointer) { zedbsd_heap_free(active_heap, pointer); }
+void zedbsd_free(void *pointer)
+{
+	zedbsd_libc_heap_lock();
+	zedbsd_heap_free(active_heap, pointer);
+	zedbsd_libc_heap_unlock();
+}
 size_t zedbsd_heap_current(void)
 {
 	return zedbsd_heap_current_instance(active_heap);

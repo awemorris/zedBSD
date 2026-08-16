@@ -11,15 +11,37 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <termios.h>
 #include <unistd.h>
 
 #define LINE_MAX 256
 #define ARG_MAX 20
 #define SOURCE_MAX 8192
+
+static int command_background;
+static pid_t last_job;
+
+static int
+wait_foreground(pid_t pid, int *status)
+{
+	pid_t shell_pgrp = getpgrp();
+	int terminal = isatty(0);
+	pid_t result;
+	if (terminal) (void)tcsetpgrp(0, pid);
+	result = waitpid(pid, status, WUNTRACED);
+	if (terminal) (void)tcsetpgrp(0, shell_pgrp);
+	if (result < 0) return 0;
+	if (WIFSTOPPED(*status)) {
+		last_job = pid;
+		printf("[%d] stopped\n", (int)pid);
+	}
+	return 1;
+}
 
 static int
 spawn_wait(char *const argv[], unsigned flags, char *result, size_t capacity)
@@ -31,12 +53,23 @@ spawn_wait(char *const argv[], unsigned flags, char *result, size_t capacity)
 		fprintf(stderr, "%s: %d\n", argv[0], errno);
 		return 0;
 	}
+	(void)setpgid(pid, pid);
+	if (command_background) {
+		last_job = pid;
+		printf("[%d]\n", (int)pid);
+		return 1;
+	}
 	if ((flags & ZEDBSD_SPAWN_RESULT) != 0) {
+		pid_t shell_pgrp = getpgrp();
+		int terminal = isatty(0);
+		if (terminal) (void)tcsetpgrp(0, pid);
 		if (zedbsd_wait_result(pid, &status, result, capacity) < 0) {
+			if (terminal) (void)tcsetpgrp(0, shell_pgrp);
 			fprintf(stderr, "wait: %d\n", errno);
 			return 0;
 		}
-	} else if (waitpid(pid, &status, 0) < 0) {
+		if (terminal) (void)tcsetpgrp(0, shell_pgrp);
+	} else if (!wait_foreground(pid, &status)) {
 		fprintf(stderr, "wait: %d\n", errno);
 		return 0;
 	}
@@ -50,28 +83,14 @@ spawn_wait(char *const argv[], unsigned flags, char *result, size_t capacity)
 static int
 read_line(char *buffer, size_t capacity)
 {
-	size_t length = 0;
-	for (;;) {
-		unsigned char byte;
-		if (read(0, &byte, 1) != 1)
-			return -1;
-		if (byte == 0x1b && length == 0)
-			return -1;
-		if (byte == '\r' || byte == '\n') {
-			(void)write(1, "\n", 1);
-			buffer[length] = '\0';
-			return (int)length;
-		}
-		if ((byte == 8 || byte == 0x7f) && length != 0) {
-			length--;
-			(void)write(1, "\b \b", 3);
-			continue;
-		}
-		if (byte >= 0x20 && byte < 0x7f && length + 1 < capacity) {
-			buffer[length++] = (char)byte;
-			(void)write(1, &byte, 1);
-		}
-	}
+	ssize_t length;
+	if (capacity < 2) return -1;
+	length = read(0, buffer, capacity - 1U);
+	if (length <= 0) return -1;
+	while (length > 0 && (buffer[length - 1] == '\r' ||
+	    buffer[length - 1] == '\n')) length--;
+	buffer[length] = '\0';
+	return (int)length;
 }
 
 static int
@@ -380,8 +399,25 @@ command(char *text)
 	int handled;
 	if (argc == 0)
 		return 1;
+	command_background = argc > 1 && !strcmp(argv[argc - 1], "&");
+	if (command_background) argv[--argc] = NULL;
+	if (!strcmp(argv[0], "jobs")) {
+		if (last_job > 0) printf("[%d] active or stopped\n", (int)last_job);
+		return 1;
+	}
+	if (!strcmp(argv[0], "bg")) {
+		return last_job > 0 && kill(-last_job, SIGCONT) == 0;
+	}
+	if (!strcmp(argv[0], "fg")) {
+		int status = 0;
+		pid_t job = last_job;
+		if (job <= 0) return 0;
+		(void)kill(-job, SIGCONT);
+		last_job = 0;
+		return wait_foreground(job, &status);
+	}
 	if (!strcmp(argv[0], "help")) {
-		puts("help echo pwd cd ls cp cat stat touch clear true false "
+		puts("help echo pwd cd ls cp cat stat touch clear true false jobs fg bg "
 		     "env set unset pause wait device probe-ide probe-scsi "
 		     "part source "
 		     "run noct autoexec emacs vmstat reboot halt exit");
@@ -484,6 +520,8 @@ run_startup(void)
 	}
 	if (!cancelled)
 		(void)source_file_mode("/etc/zinit.rc", 1);
+	else
+		(void)tcflush(0, TCIFLUSH);
 }
 
 int

@@ -98,6 +98,8 @@ void
 packet_buf_free(struct packet_buf *packet)
 {
 	struct net_device *device = NULL;
+	void *control = NULL;
+	void (*control_release)(void *) = NULL;
 	bool enabled;
 	unsigned index;
 
@@ -114,7 +116,11 @@ packet_buf_free(struct packet_buf *packet)
 		if (&slot->packet != packet)
 			continue;
 		device = slot->packet.device;
+		control = slot->packet.control;
+		control_release = slot->packet.control_release;
 		slot->packet.device = NULL;
+		slot->packet.control = NULL;
+		slot->packet.control_release = NULL;
 		memset(&slot->packet, 0, sizeof(slot->packet));
 		slot->used = 0;
 		if (packet_used != 0)
@@ -124,6 +130,8 @@ packet_buf_free(struct packet_buf *packet)
 	packet_unlock(enabled);
 	if (device != NULL && net_device_release != NULL)
 		net_device_release(device);
+	if (control != NULL && control_release != NULL)
+		control_release(control);
 }
 
 size_t

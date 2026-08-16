@@ -3,6 +3,7 @@
 #include "libc/heap.h"
 
 #include <zedbsd/dirent.h>
+#include <zedbsd/fcntl.h>
 #include <zedbsd/console.h>
 #include <zedbsd/syscall.h>
 #include <sys/sysctl.h>
@@ -14,14 +15,19 @@
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <limits.h>
+#include <signal.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/uio.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -34,6 +40,21 @@ char **environ;
 #define ENVIRONMENT_MAX 64U
 static char *environment_entries[ENVIRONMENT_MAX + 1U];
 static unsigned char environment_owned[ENVIRONMENT_MAX];
+extern void zedbsd_pthread_cancel_point(void) __attribute__((weak));
+extern void zedbsd_pthread_fork_prepare(void) __attribute__((weak));
+extern void zedbsd_pthread_fork_parent(void) __attribute__((weak));
+extern void zedbsd_pthread_fork_child(void) __attribute__((weak));
+extern void zedbsd_pthread_initialize_main(void) __attribute__((weak));
+extern void zedbsd_libc_environment_lock(void) __attribute__((weak));
+extern void zedbsd_libc_environment_unlock(void) __attribute__((weak));
+extern void __zedbsd_rtld_process_fini(void) __attribute__((weak));
+extern void __zedbsd_rtld_startup_init(void) __attribute__((weak));
+static void cancel_point(void)
+{ if (zedbsd_pthread_cancel_point != NULL) zedbsd_pthread_cancel_point(); }
+static void environment_lock(void)
+{ if (zedbsd_libc_environment_lock != NULL) zedbsd_libc_environment_lock(); }
+static void environment_unlock(void)
+{ if (zedbsd_libc_environment_unlock != NULL) zedbsd_libc_environment_unlock(); }
 
 static int environment_name(const char *entry, const char *name)
 {
@@ -47,12 +68,17 @@ static int environment_name(const char *entry, const char *name)
 char *getenv(const char *name)
 {
 	unsigned i;
+	char *result = NULL;
 	if (name == NULL || name[0] == '\0' || strchr(name, '=') != NULL)
 		return NULL;
+	environment_lock();
 	for (i = 0; environ != NULL && environ[i] != NULL; i++)
-		if (environment_name(environ[i], name))
-			return strchr(environ[i], '=') + 1;
-	return NULL;
+		if (environment_name(environ[i], name)) {
+			result = strchr(environ[i], '=') + 1;
+			break;
+		}
+	environment_unlock();
+	return result;
 }
 
 int setenv(const char *name, const char *value, int overwrite)
@@ -63,22 +89,31 @@ int setenv(const char *name, const char *value, int overwrite)
 	if (name == NULL || value == NULL || name[0] == '\0' || strchr(name, '=') != NULL) {
 		errno = EINVAL; return -1;
 	}
-	if (!overwrite && getenv(name) != NULL)
-		return 0;
+	environment_lock();
 	for (i = 0; i < ENVIRONMENT_MAX; i++) {
 		if (environ[i] == NULL && empty == ENVIRONMENT_MAX) empty = i;
-		if (environment_name(environ[i], name)) { empty = i; break; }
+		if (environment_name(environ[i], name)) {
+			if (!overwrite) { environment_unlock(); return 0; }
+			empty = i; break;
+		}
 	}
-	if (empty == ENVIRONMENT_MAX) { errno = ENOSPC; return -1; }
+	if (empty == ENVIRONMENT_MAX) {
+		environment_unlock(); errno = ENOSPC; return -1;
+	}
 	name_length = strlen(name); value_length = strlen(value);
-	if (name_length > SIZE_MAX - value_length - 2U) { errno = ENOMEM; return -1; }
+	if (name_length > SIZE_MAX - value_length - 2U) {
+		environment_unlock(); errno = ENOMEM; return -1;
+	}
 	entry = malloc(name_length + value_length + 2U);
-	if (entry == NULL) { errno = ENOMEM; return -1; }
+	if (entry == NULL) {
+		environment_unlock(); errno = ENOMEM; return -1;
+	}
 	memcpy(entry, name, name_length); entry[name_length] = '=';
 	memcpy(entry + name_length + 1U, value, value_length + 1U);
 	if (environment_owned[empty]) free(environ[empty]);
 	environ[empty] = entry; environment_owned[empty] = 1U;
 	environ[empty + 1U] = NULL;
+	environment_unlock();
 	return 0;
 }
 
@@ -88,6 +123,7 @@ int unsetenv(const char *name)
 	if (name == NULL || name[0] == '\0' || strchr(name, '=') != NULL) {
 		errno = EINVAL; return -1;
 	}
+	environment_lock();
 	for (i = 0; i < ENVIRONMENT_MAX && environ[i] != NULL; )
 		if (environment_name(environ[i], name)) {
 			unsigned j;
@@ -100,6 +136,7 @@ int unsetenv(const char *name)
 		} else {
 			i++;
 		}
+	environment_unlock();
 	return 0;
 }
 
@@ -150,27 +187,104 @@ int fcntl(int fd, int command, ...)
 {
 	va_list ap;
 	intptr_t argument = 0;
+	struct flock *native = NULL;
+	struct zedbsd_flock_request request;
 	if (command == F_DUPFD || command == F_DUPFD_CLOEXEC ||
 	    command == F_SETFD || command == F_SETFL) {
 		va_start(ap, command);
 		argument = va_arg(ap, int);
 		va_end(ap);
+	} else if (command == F_GETLK || command == F_SETLK ||
+	    command == F_SETLKW) {
+		va_start(ap, command);
+		native = va_arg(ap, struct flock *);
+		va_end(ap);
+		if (native == NULL) { errno = EFAULT; return -1; }
+		memset(&request, 0, sizeof(request));
+		request.type = native->l_type;
+		request.whence = native->l_whence;
+		request.start = native->l_start;
+		request.length = native->l_len;
+		request.pid = native->l_pid;
+		argument = (intptr_t)&request;
 	}
-	return (int)call(ZEDBSD_SYS_fcntl, fd, command, argument, 0, 0, 0);
+	{
+		int result = (int)call(ZEDBSD_SYS_fcntl, fd, command, argument,
+		    0, 0, 0);
+		if (result == 0 && command == F_GETLK) {
+			native->l_type = request.type;
+			native->l_whence = request.whence;
+			native->l_start = (off_t)request.start;
+			native->l_len = (off_t)request.length;
+			native->l_pid = request.pid;
+		}
+		return result;
+	}
+}
+int lockf(int fd, int command, off_t length)
+{
+	struct flock lock;
+	int operation, result;
+	memset(&lock, 0, sizeof(lock));
+	lock.l_type = command == F_ULOCK ? F_UNLCK : F_WRLCK;
+	lock.l_whence = SEEK_CUR;
+	lock.l_len = length;
+	if (command == F_LOCK) operation = F_SETLKW;
+	else if (command == F_ULOCK || command == F_TLOCK) operation = F_SETLK;
+	else if (command == F_TEST) operation = F_GETLK;
+	else { errno = EINVAL; return -1; }
+	result = fcntl(fd, operation, &lock);
+	if (result == 0 && command == F_TEST && lock.l_type != F_UNLCK) {
+		errno = EACCES;
+		return -1;
+	}
+	return result;
 }
 int pipe2(int result[2], int flags) { return (int)call(ZEDBSD_SYS_pipe2, (uintptr_t)result, flags, 0, 0, 0, 0); }
 int pipe(int result[2]) { return pipe2(result, 0); }
-ssize_t read(int fd, void *p, size_t n) { return (ssize_t)call(ZEDBSD_SYS_read, fd, (uintptr_t)p, n, 0, 0, 0); }
-ssize_t write(int fd, const void *p, size_t n) { return (ssize_t)call(ZEDBSD_SYS_write, fd, (uintptr_t)p, n, 0, 0, 0); }
+ssize_t read(int fd, void *p, size_t n) { ssize_t r; cancel_point(); r = (ssize_t)call(ZEDBSD_SYS_read, fd, (uintptr_t)p, n, 0, 0, 0); cancel_point(); return r; }
+ssize_t write(int fd, const void *p, size_t n) { ssize_t r; cancel_point(); r = (ssize_t)call(ZEDBSD_SYS_write, fd, (uintptr_t)p, n, 0, 0, 0); cancel_point(); return r; }
 ssize_t pread(int fd, void *p, size_t n, off_t offset) { return (ssize_t)call(ZEDBSD_SYS_pread, fd, (uintptr_t)p, n, offset, 0, 0); }
 ssize_t pwrite(int fd, const void *p, size_t n, off_t offset) { return (ssize_t)call(ZEDBSD_SYS_pwrite, fd, (uintptr_t)p, n, offset, 0, 0); }
 ssize_t readv(int fd, const struct iovec *iov, int count) { return (ssize_t)call(ZEDBSD_SYS_readv, fd, (uintptr_t)iov, count, 0, 0, 0); }
 ssize_t writev(int fd, const struct iovec *iov, int count) { return (ssize_t)call(ZEDBSD_SYS_writev, fd, (uintptr_t)iov, count, 0, 0, 0); }
+static ssize_t positional_vector_io(int fd, const struct iovec *iov,
+	int count, off_t offset, int writing)
+{
+	ssize_t total = 0;
+	int index;
+	if (count < 0 || count > IOV_MAX || (count != 0 && iov == NULL) ||
+	    offset < 0) { errno = EINVAL; return -1; }
+	for (index = 0; index < count; index++) {
+		ssize_t result;
+		if (iov[index].iov_len > (size_t)(SSIZE_MAX - total)) {
+			if (total != 0) return total;
+			errno = EINVAL; return -1;
+		}
+		result = writing ? pwrite(fd, iov[index].iov_base,
+		    iov[index].iov_len, offset) : pread(fd, iov[index].iov_base,
+		    iov[index].iov_len, offset);
+		if (result < 0)
+			return total != 0 ? total : -1;
+		total += result;
+		offset += result;
+		if ((size_t)result != iov[index].iov_len)
+			break;
+	}
+	return total;
+}
+int creat(const char *path, mode_t mode)
+{ return open(path, O_WRONLY | O_CREAT | O_TRUNC, mode); }
+ssize_t preadv(int fd, const struct iovec *iov, int count, off_t offset)
+{ cancel_point(); ssize_t result = positional_vector_io(fd, iov, count, offset, 0); cancel_point(); return result; }
+ssize_t pwritev(int fd, const struct iovec *iov, int count, off_t offset)
+{ cancel_point(); ssize_t result = positional_vector_io(fd, iov, count, offset, 1); cancel_point(); return result; }
 int fsync(int fd) { return (int)call(ZEDBSD_SYS_fsync, fd, 0, 0, 0, 0, 0); }
 int fdatasync(int fd) { return (int)call(ZEDBSD_SYS_fdatasync, fd, 0, 0, 0, 0, 0); }
 off_t lseek(int fd, off_t off, int whence) { return (off_t)call(ZEDBSD_SYS_lseek, fd, off, whence, 0, 0, 0); }
 int fstat(int fd, struct stat *st) { return (int)call(ZEDBSD_SYS_fstat, fd, (uintptr_t)st, 0, 0, 0, 0); }
 int chdir(const char *p) { return (int)call(ZEDBSD_SYS_chdir, (uintptr_t)p, 0, 0, 0, 0, 0); }
+int fchdir(int fd) { return (int)call(ZEDBSD_SYS_fchdir, fd, 0, 0, 0, 0, 0); }
 char *getcwd(char *p, size_t n) { return (char *)call(ZEDBSD_SYS_getcwd, (uintptr_t)p, n, 0, 0, 0, 0); }
 static int ioctl_has_argument(unsigned long request) {
 	if (((request >> 16) & 0x1fffUL) != 0)
@@ -257,13 +371,88 @@ void *sbrk(intptr_t increment) {
 	return (void *)old_break;
 }
 long sysconf(int name) {
-	if (name == _SC_PAGE_SIZE)
-		return ZEDBSD_USER_PAGE_SIZE;
+	uint32_t cpus;
+	size_t cpus_size;
+	switch (name) {
+	case _SC_PAGE_SIZE: return ZEDBSD_USER_PAGE_SIZE;
+	case _SC_OPEN_MAX: return 32;
+	case _SC_CLK_TCK: return 100;
+	case _SC_JOB_CONTROL: return _POSIX_JOB_CONTROL;
+	case _SC_THREADS: return _POSIX_THREADS;
+	case _SC_THREAD_PROCESS_SHARED: return _POSIX_THREAD_PROCESS_SHARED;
+	case _SC_REALTIME_SIGNALS: return _POSIX_REALTIME_SIGNALS;
+	case _SC_SHARED_MEMORY_OBJECTS: return _POSIX_SHARED_MEMORY_OBJECTS;
+	case _SC_SEMAPHORES: return _POSIX_SEMAPHORES;
+	case _SC_MESSAGE_PASSING: return _POSIX_MESSAGE_PASSING;
+	case _SC_VERSION: return _POSIX_VERSION;
+	case _SC_2_VERSION: return _POSIX2_VERSION;
+	case _SC_ARG_MAX: return 32;
+	case _SC_CHILD_MAX: return 64;
+	case _SC_STREAM_MAX: return 32;
+	case _SC_THREAD_KEYS_MAX: return 32;
+	case _SC_THREAD_DESTRUCTOR_ITERATIONS: return 4;
+	case _SC_THREAD_STACK_MIN: return 65536;
+	case _SC_THREAD_THREADS_MAX: return 64;
+	case _SC_SEM_NSEMS_MAX: return 64;
+	case _SC_SEM_VALUE_MAX: return 0x7fffffffL;
+	case _SC_MQ_OPEN_MAX: return 16;
+	case _SC_MQ_PRIO_MAX: return 32;
+	case _SC_TIMERS: return _POSIX_TIMERS;
+	case _SC_NPROCESSORS_CONF:
+	case _SC_NPROCESSORS_ONLN:
+		cpus_size = sizeof(cpus);
+		if (sysctlbyname(name == _SC_NPROCESSORS_CONF ? "hw.ncpu" :
+		    "hw.ncpuonline", &cpus, &cpus_size, NULL, 0) == 0 &&
+		    cpus_size == sizeof(cpus))
+			return (long)cpus;
+		return -1;
+	default: break;
+	}
 	errno = EINVAL;
 	return -1;
 }
+static long path_limit(int name) {
+	switch (name) {
+	case _PC_LINK_MAX: return 32767;
+	case _PC_MAX_CANON: return 255;
+	case _PC_MAX_INPUT: return 255;
+	case _PC_NAME_MAX: return NAME_MAX;
+	case _PC_PATH_MAX: return PATH_MAX;
+	case _PC_PIPE_BUF: return 512;
+	case _PC_CHOWN_RESTRICTED: return 1;
+	case _PC_NO_TRUNC: return 1;
+	case _PC_VDISABLE: return 0xff;
+	default: errno = EINVAL; return -1;
+	}
+}
+long pathconf(const char *path, int name) {
+	struct stat status;
+	if (path == NULL) { errno = EINVAL; return -1; }
+	if (stat(path, &status) != 0) return -1;
+	return path_limit(name);
+}
+long fpathconf(int descriptor, int name) {
+	struct stat status;
+	if (fstat(descriptor, &status) != 0) return -1;
+	return path_limit(name);
+}
+size_t confstr(int name, char *buffer, size_t size)
+{
+	static const char path[] = "/bin:/apps";
+	size_t needed;
+	if (name != _CS_PATH) { errno = EINVAL; return 0; }
+	needed = sizeof(path);
+	if (buffer != NULL && size != 0) {
+		size_t copied = needed < size ? needed : size;
+		memcpy(buffer, path, copied);
+		buffer[copied - 1U] = '\0';
+	}
+	return needed;
+}
 int mkdir(const char *path, mode_t mode) { return (int)call(ZEDBSD_SYS_mkdir, (uintptr_t)path, mode, 0, 0, 0, 0); }
 int mkdirat(int dirfd, const char *path, mode_t mode) { return (int)call(ZEDBSD_SYS_mkdirat, dirfd, (uintptr_t)path, mode, 0, 0, 0); }
+int mkfifoat(int dirfd, const char *path, mode_t mode) { return (int)call(ZEDBSD_SYS_mknodat, dirfd, (uintptr_t)path, S_IFIFO | (mode & 07777U), 0, 0, 0); }
+int mkfifo(const char *path, mode_t mode) { return mkfifoat(AT_FDCWD, path, mode); }
 int unlink(const char *path) { return (int)call(ZEDBSD_SYS_unlink, (uintptr_t)path, 0, 0, 0, 0, 0); }
 int unlinkat(int dirfd, const char *path, int flags) { return (int)call(ZEDBSD_SYS_unlinkat, dirfd, (uintptr_t)path, flags, 0, 0, 0); }
 int rmdir(const char *path) { return (int)call(ZEDBSD_SYS_rmdir, (uintptr_t)path, 0, 0, 0, 0, 0); }
@@ -282,8 +471,10 @@ int clock_gettime(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_S
 int clock_getres(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_getres, id, (uintptr_t)ts, 0, 0, 0, 0); }
 int clock_settime(clockid_t id, const struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_settime, id, (uintptr_t)ts, 0, 0, 0, 0); }
 int nanosleep(const struct timespec *request, struct timespec *remain) {
-	return (int)call(ZEDBSD_SYS_nanosleep, (uintptr_t)request,
+	int result; cancel_point();
+	result = (int)call(ZEDBSD_SYS_nanosleep, (uintptr_t)request,
 		(uintptr_t)remain, 0, 0, 0, 0);
+	cancel_point(); return result;
 }
 
 pid_t zedbsd_spawn(const char *path, char *const argv[], char *const envp[],
@@ -297,11 +488,233 @@ pid_t zedbsd_wait_result(pid_t pid, int *status, char *result,
 		0, (uintptr_t)result, capacity, 0);
 }
 pid_t waitpid(pid_t pid, int *status, int options) {
-	return (pid_t)call(ZEDBSD_SYS_waitpid, (uintptr_t)pid,
+	pid_t result; cancel_point();
+	result = (pid_t)call(ZEDBSD_SYS_waitpid, (uintptr_t)pid,
 		(uintptr_t)status, (uintptr_t)options, 0, 0, 0);
+	cancel_point(); return result;
+}
+int clock_nanosleep(clockid_t clock_id, int flags,
+	const struct timespec *request, struct timespec *remain)
+{
+	struct timespec delay, now;
+	int saved_errno = errno;
+	int result;
+	if (request == NULL || request->tv_sec < 0 || request->tv_nsec < 0 ||
+	    request->tv_nsec >= 1000000000L ||
+	    (clock_id != CLOCK_MONOTONIC && clock_id != CLOCK_REALTIME) ||
+	    (flags & ~TIMER_ABSTIME) != 0)
+		return EINVAL;
+	if ((flags & TIMER_ABSTIME) == 0) {
+		result = nanosleep(request, remain);
+		if (result == 0) { errno = saved_errno; return 0; }
+		result = errno; errno = saved_errno; return result;
+	}
+	if (clock_gettime(clock_id, &now) != 0) {
+		result = errno; errno = saved_errno; return result;
+	}
+	delay.tv_sec = request->tv_sec - now.tv_sec;
+	delay.tv_nsec = request->tv_nsec - now.tv_nsec;
+	if (delay.tv_nsec < 0) { delay.tv_nsec += 1000000000L; delay.tv_sec--; }
+	if (delay.tv_sec < 0) { errno = saved_errno; return 0; }
+	result = nanosleep(&delay, NULL);
+	if (result == 0) { errno = saved_errno; return 0; }
+	result = errno; errno = saved_errno; return result;
+}
+unsigned sleep(unsigned seconds)
+{
+	struct timespec request = { (time_t)seconds, 0 }, remain = { 0, 0 };
+	if (nanosleep(&request, &remain) == 0)
+		return 0;
+	return (unsigned)remain.tv_sec + (remain.tv_nsec != 0);
+}
+int usleep(useconds_t microseconds)
+{
+	struct timespec request;
+	if (microseconds >= 1000000U) { errno = EINVAL; return -1; }
+	request.tv_sec = 0;
+	request.tv_nsec = (long)microseconds * 1000L;
+	return nanosleep(&request, NULL);
+}
+int pause(void)
+{
+	sigset_t mask;
+	if (sigprocmask(SIG_SETMASK, NULL, &mask) != 0)
+		return -1;
+	return sigsuspend(&mask);
 }
 pid_t wait(int *status) { return waitpid(-1, status, 0); }
-pid_t fork(void) { return (pid_t)call(ZEDBSD_SYS_fork, 0, 0, 0, 0, 0, 0); }
+int waitid(idtype_t type, id_t id, siginfo_t *information, int options)
+{
+	int result;
+	cancel_point();
+	result = (int)call(ZEDBSD_SYS_waitid, type, id,
+	    (uintptr_t)information, options, 0, 0);
+	cancel_point();
+	return result;
+}
+int getrlimit(int resource, struct rlimit *limit)
+{
+	struct zedbsd_rlimit wire;
+	int result;
+	if (limit == NULL) { errno = EFAULT; return -1; }
+	result = (int)call(ZEDBSD_SYS_getrlimit, resource, (uintptr_t)&wire,
+	    0, 0, 0, 0);
+	if (result == 0) {
+		limit->rlim_cur = wire.current;
+		limit->rlim_max = wire.maximum;
+	}
+	return result;
+}
+int setrlimit(int resource, const struct rlimit *limit)
+{
+	struct zedbsd_rlimit wire;
+	if (limit == NULL) { errno = EFAULT; return -1; }
+	wire.current = limit->rlim_cur;
+	wire.maximum = limit->rlim_max;
+	return (int)call(ZEDBSD_SYS_setrlimit, resource, (uintptr_t)&wire,
+	    0, 0, 0, 0);
+}
+enum { SPAWN_ACTION_CLOSE = 1, SPAWN_ACTION_DUP2, SPAWN_ACTION_OPEN };
+int posix_spawn_file_actions_init(posix_spawn_file_actions_t *actions)
+{ if (actions == NULL) return EINVAL; memset(actions, 0, sizeof(*actions)); return 0; }
+int posix_spawn_file_actions_destroy(posix_spawn_file_actions_t *actions)
+{ if (actions == NULL) return EINVAL; memset(actions, 0, sizeof(*actions)); return 0; }
+static struct zedbsd_spawn_action *spawn_action_add(posix_spawn_file_actions_t *actions)
+{ if (actions == NULL || actions->count >= ZEDBSD_SPAWN_ACTION_MAX) return NULL; return &actions->actions[actions->count++]; }
+int posix_spawn_file_actions_addclose(posix_spawn_file_actions_t *actions, int fd)
+{ struct zedbsd_spawn_action *a; if (fd < 0) return EBADF; a = spawn_action_add(actions); if (a == NULL) return EINVAL; memset(a, 0, sizeof(*a)); a->operation = SPAWN_ACTION_CLOSE; a->descriptor = fd; return 0; }
+int posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t *actions, int fd, int newfd)
+{ struct zedbsd_spawn_action *a; if (fd < 0 || newfd < 0) return EBADF; a = spawn_action_add(actions); if (a == NULL) return EINVAL; memset(a, 0, sizeof(*a)); a->operation = SPAWN_ACTION_DUP2; a->descriptor = fd; a->new_descriptor = newfd; return 0; }
+int posix_spawn_file_actions_addopen(posix_spawn_file_actions_t *actions,
+	int fd, const char *path, int flags, mode_t mode)
+{ struct zedbsd_spawn_action *a; size_t n; if (fd < 0 || path == NULL) return EINVAL; n = strlen(path); if (n >= ZEDBSD_SPAWN_PATH_MAX) return ENAMETOOLONG; a = spawn_action_add(actions); if (a == NULL) return EINVAL; memset(a, 0, sizeof(*a)); a->operation = SPAWN_ACTION_OPEN; a->descriptor = fd; a->flags = flags; a->mode = mode; memcpy(a->path, path, n + 1U); return 0; }
+int posix_spawnattr_init(posix_spawnattr_t *attr)
+{ if (attr == NULL) return EINVAL; memset(attr, 0, sizeof(*attr)); return 0; }
+int posix_spawnattr_destroy(posix_spawnattr_t *attr)
+{ if (attr == NULL) return EINVAL; memset(attr, 0, sizeof(*attr)); return 0; }
+int posix_spawnattr_getflags(const posix_spawnattr_t *attr, short *flags)
+{ if (attr == NULL || flags == NULL) return EINVAL; *flags = attr->flags; return 0; }
+int posix_spawnattr_setflags(posix_spawnattr_t *attr, short flags)
+{ if (attr == NULL || (flags & ~(POSIX_SPAWN_RESETIDS | POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK)) != 0) return EINVAL; attr->flags = flags; return 0; }
+int posix_spawnattr_getpgroup(const posix_spawnattr_t *attr, pid_t *pgroup)
+{ if (attr == NULL || pgroup == NULL) return EINVAL; *pgroup = attr->pgroup; return 0; }
+int posix_spawnattr_setpgroup(posix_spawnattr_t *attr, pid_t pgroup)
+{ if (attr == NULL || pgroup < 0) return EINVAL; attr->pgroup = pgroup; return 0; }
+int posix_spawnattr_getsigmask(const posix_spawnattr_t *attr, sigset_t *set)
+{ if (attr == NULL || set == NULL) return EINVAL; *set = attr->sigmask; return 0; }
+int posix_spawnattr_setsigmask(posix_spawnattr_t *attr, const sigset_t *set)
+{ if (attr == NULL || set == NULL) return EINVAL; attr->sigmask = *set; return 0; }
+int posix_spawnattr_getsigdefault(const posix_spawnattr_t *attr, sigset_t *set)
+{ if (attr == NULL || set == NULL) return EINVAL; *set = attr->sigdefault; return 0; }
+int posix_spawnattr_setsigdefault(posix_spawnattr_t *attr, const sigset_t *set)
+{ if (attr == NULL || set == NULL) return EINVAL; attr->sigdefault = *set; return 0; }
+static int spawn_child_setup(const posix_spawn_file_actions_t *actions,
+	const posix_spawnattr_t *attr)
+{
+	unsigned index;
+	if (attr != NULL) {
+		if ((attr->flags & POSIX_SPAWN_RESETIDS) != 0 &&
+		    (setegid(getgid()) != 0 || seteuid(getuid()) != 0)) return errno;
+		if ((attr->flags & POSIX_SPAWN_SETPGROUP) != 0 &&
+		    setpgid(0, attr->pgroup) != 0) return errno;
+		if ((attr->flags & POSIX_SPAWN_SETSIGMASK) != 0 &&
+		    sigprocmask(SIG_SETMASK, &attr->sigmask, NULL) != 0) return errno;
+		if ((attr->flags & POSIX_SPAWN_SETSIGDEF) != 0)
+			for (index = 1; index < NSIG; index++)
+				if (sigismember(&attr->sigdefault, (int)index) == 1) {
+					struct sigaction action;
+					memset(&action, 0, sizeof(action));
+					action.sa_handler = SIG_DFL;
+					if (sigaction((int)index, &action, NULL) != 0) return errno;
+				}
+	}
+	if (actions == NULL) return 0;
+	for (index = 0; index < actions->count; index++) {
+		const struct zedbsd_spawn_action *a = &actions->actions[index];
+		if (a->operation == SPAWN_ACTION_CLOSE) {
+			if (close(a->descriptor) != 0 && errno != EBADF) return errno;
+		} else if (a->operation == SPAWN_ACTION_DUP2) {
+			if (dup2(a->descriptor, a->new_descriptor) < 0) return errno;
+		} else if (a->operation == SPAWN_ACTION_OPEN) {
+			int fd = open(a->path, a->flags, a->mode);
+			if (fd < 0) return errno;
+			if (fd != a->descriptor && dup2(fd, a->descriptor) < 0) { int e = errno; (void)close(fd); return e; }
+			if (fd != a->descriptor) (void)close(fd);
+		} else return EINVAL;
+	}
+	return 0;
+}
+int posix_spawn(pid_t *result, const char *path,
+	const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr,
+	char *const argv[], char *const envp[])
+{
+	int error_pipe[2], child_error = 0;
+	ssize_t count;
+	pid_t child;
+	if (result == NULL || path == NULL || argv == NULL) return EINVAL;
+	if (pipe2(error_pipe, O_CLOEXEC) != 0) return errno;
+	child = fork();
+	if (child < 0) { child_error = errno; (void)close(error_pipe[0]); (void)close(error_pipe[1]); return child_error; }
+	if (child == 0) {
+		(void)close(error_pipe[0]);
+		child_error = spawn_child_setup(actions, attr);
+		if (child_error == 0) {
+			execve(path, argv, envp != NULL ? envp : environ);
+			child_error = errno;
+		}
+		(void)write(error_pipe[1], &child_error, sizeof(child_error));
+		_exit(127);
+	}
+	(void)close(error_pipe[1]);
+	count = read(error_pipe[0], &child_error, sizeof(child_error));
+	(void)close(error_pipe[0]);
+	if (count > 0) { (void)waitpid(child, NULL, 0); return child_error != 0 ? child_error : EIO; }
+	if (count < 0) { child_error = errno; (void)waitpid(child, NULL, 0); return child_error; }
+	*result = child;
+	return 0;
+}
+int posix_spawnp(pid_t *result, const char *file,
+	const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr,
+	char *const argv[], char *const envp[])
+{
+	const char *path, *at;
+	char candidate[PATH_MAX];
+	if (file == NULL) return EINVAL;
+	if (strchr(file, '/') != NULL)
+		return posix_spawn(result, file, actions, attr, argv, envp);
+	path = getenv("PATH");
+	if (path == NULL || *path == '\0') path = "/bin:/apps";
+	at = path;
+	for (;;) {
+		const char *colon = strchr(at, ':');
+		size_t directory_length = colon != NULL ? (size_t)(colon - at) : strlen(at);
+		size_t file_length = strlen(file);
+		if (directory_length + file_length + 2U <= sizeof(candidate)) {
+			if (directory_length != 0) memcpy(candidate, at, directory_length);
+			else { candidate[0] = '.'; directory_length = 1; }
+			candidate[directory_length] = '/';
+			memcpy(candidate + directory_length + 1U, file, file_length + 1U);
+			if (access(candidate, X_OK) == 0)
+				return posix_spawn(result, candidate, actions, attr, argv, envp);
+		}
+		if (colon == NULL) break;
+		at = colon + 1;
+	}
+	return ENOENT;
+}
+pid_t fork(void) {
+	pid_t result;
+	if (zedbsd_pthread_fork_prepare != NULL)
+		zedbsd_pthread_fork_prepare();
+	result = (pid_t)call(ZEDBSD_SYS_fork, 0, 0, 0, 0, 0, 0);
+	if (result == 0) {
+		if (zedbsd_pthread_fork_child != NULL)
+			zedbsd_pthread_fork_child();
+	} else if (zedbsd_pthread_fork_parent != NULL) {
+		zedbsd_pthread_fork_parent();
+	}
+	return result;
+}
 int execve(const char *path, char *const argv[], char *const envp[]) {
 	return (int)call(ZEDBSD_SYS_execve, (uintptr_t)path, (uintptr_t)argv,
 		(uintptr_t)envp, 0, 0, 0);
@@ -348,6 +761,55 @@ int isatty(int fd)
 		errno = ENOTTY;
 	return 0;
 }
+char *getlogin(void)
+{
+	static char login[] = "root";
+	return login;
+}
+int getlogin_r(char *buffer, size_t size)
+{
+	static const char login[] = "root";
+	if (buffer == NULL) return EINVAL;
+	if (size < sizeof(login)) return ERANGE;
+	memcpy(buffer, login, sizeof(login));
+	return 0;
+}
+char *ttyname(int fd)
+{
+	static char name[] = "/dev/console";
+	return isatty(fd) ? name : NULL;
+}
+int ttyname_r(int fd, char *buffer, size_t size)
+{
+	static const char name[] = "/dev/console";
+	if (buffer == NULL) return EINVAL;
+	if (!isatty(fd)) return errno;
+	if (size < sizeof(name)) return ERANGE;
+	memcpy(buffer, name, sizeof(name));
+	return 0;
+}
+int uname(struct utsname *name)
+{
+#if defined(__x86_64__)
+	static const char machine[] = "x86_64";
+#elif defined(__i386__)
+	static const char machine[] = "i386";
+#elif defined(__aarch64__)
+	static const char machine[] = "aarch64";
+#elif defined(__sparc__)
+	static const char machine[] = "sparcv9";
+#else
+	static const char machine[] = "unknown";
+#endif
+	if (name == NULL) { errno = EFAULT; return -1; }
+	memset(name, 0, sizeof(*name));
+	strcpy(name->sysname, "zedBSD");
+	strcpy(name->nodename, "zedbsd");
+	strcpy(name->release, "0.0.1");
+	strcpy(name->version, "zedBSD 0.0.1");
+	strcpy(name->machine, machine);
+	return 0;
+}
 int fileno(void *stream) {
 	FILE *file = stream;
 	return file == NULL || file->context == NULL ? -1 : (int)(intptr_t)file->context - 1;
@@ -360,6 +822,22 @@ DIR *opendir(const char *path)
 	if (directory == NULL) { errno = ENOMEM; return NULL; }
 	directory->fd = open(path, O_RDONLY | O_DIRECTORY);
 	if (directory->fd < 0) { free(directory); return NULL; }
+	return directory;
+}
+DIR *fdopendir(int fd)
+{
+	DIR *directory;
+	struct stat status;
+	int flags;
+	if (fd < 0 || fstat(fd, &status) != 0)
+		return NULL;
+	if (!S_ISDIR(status.st_mode)) { errno = ENOTDIR; return NULL; }
+	flags = fcntl(fd, F_GETFL);
+	if (flags < 0)
+		return NULL;
+	directory = malloc(sizeof(*directory));
+	if (directory == NULL) { errno = ENOMEM; return NULL; }
+	directory->fd = fd;
 	return directory;
 }
 struct dirent *readdir(DIR *directory)
@@ -382,6 +860,28 @@ int closedir(DIR *directory)
 	int result;
 	if (directory == NULL) { errno = EBADF; return -1; }
 	result = close(directory->fd); free(directory); return result;
+}
+void rewinddir(DIR *directory)
+{
+	if (directory != NULL)
+		(void)lseek(directory->fd, 0, SEEK_SET);
+}
+void seekdir(DIR *directory, long location)
+{
+	if (directory != NULL && location >= 0)
+		(void)lseek(directory->fd, (off_t)location, SEEK_SET);
+}
+long telldir(DIR *directory)
+{
+	off_t location;
+	if (directory == NULL) { errno = EBADF; return -1; }
+	location = lseek(directory->fd, 0, SEEK_CUR);
+	return location < 0 || location > LONG_MAX ? -1L : (long)location;
+}
+int dirfd(DIR *directory)
+{
+	if (directory == NULL) { errno = EINVAL; return -1; }
+	return directory->fd;
 }
 
 size_t zedbsd_console_write_bytes(const char *bytes, size_t length)
@@ -452,7 +952,12 @@ int gettimeofday(struct timeval *result, void *timezone) {
 	result->tv_usec = now.tv_nsec / 1000L;
 	return 0;
 }
-void exit(int status) { (void)fflush(NULL); _exit(status); }
+void exit(int status) {
+	if (__zedbsd_rtld_process_fini != NULL)
+		__zedbsd_rtld_process_fini();
+	(void)fflush(NULL);
+	_exit(status);
+}
 void zedbsd_libc_panic(const char *message) { (void)write(2, message, strlen(message)); (void)write(2, "\n", 1); _exit(127); }
 
 static struct zedbsd_heap user_heap;
@@ -489,4 +994,10 @@ void zedbsd_user_libc_init(int argc, char **argv, char **envp)
 	zedbsd_heap_init_instance(&user_heap, arena, USER_HEAP_INITIAL);
 	zedbsd_heap_set_grow_instance(&user_heap, user_heap_grow, NULL);
 	zedbsd_heap_set_active(&user_heap);
+	/* Constructors may use pthread state and errno.  Attach the initial
+	 * thread before the runtime linker invokes any of them. */
+	if (zedbsd_pthread_initialize_main != NULL)
+		zedbsd_pthread_initialize_main();
+	if (__zedbsd_rtld_startup_init != NULL)
+		__zedbsd_rtld_startup_init();
 }

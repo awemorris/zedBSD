@@ -33,8 +33,12 @@ struct packet_buf {
 	struct net_device *device;
 	struct packet_buf *next;
 	refcount_t refcount;
-	uint8_t source_address[32];
+	/* Large enough for sockaddr_storage.  Network drivers may use only the
+	 * leading bytes; AF_UNIX datagrams retain their complete source name. */
+	uint8_t source_address[128];
 	uint8_t source_length;
+	void *control;
+	void (*control_release)(void *);
 };
 
 void packet_buf_pool_init(void);

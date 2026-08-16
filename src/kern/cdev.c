@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/cdev.h"
 #include "kern/file.h"
+#include "kern/poll.h"
 
 #include <errno.h>
 #include <string.h>
@@ -101,10 +102,27 @@ static int cdev_ioctl_file(struct file *file, unsigned long request,
 		device->ops->ioctl(file, request, argument) : EOPNOTSUPP;
 }
 
+static int cdev_poll_file(struct file *file, short events, short *revents)
+{
+	const struct cdev *device = file_cdev(file);
+	if (revents == NULL)
+		return EINVAL;
+	if (device == NULL) {
+		*revents = POLLERR | POLLHUP;
+		return 0;
+	}
+	if (device->ops->poll == NULL) {
+		*revents = 0;
+		return 0;
+	}
+	return device->ops->poll(file, events, revents);
+}
+
 const struct file_ops cdev_file_ops = {
 	.open = cdev_open_file,
 	.close = cdev_close_file,
 	.read = cdev_read_file,
 	.write = cdev_write_file,
 	.ioctl = cdev_ioctl_file,
+	.poll = cdev_poll_file,
 };

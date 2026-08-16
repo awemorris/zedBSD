@@ -9,9 +9,30 @@ The currently implemented system-call subset is documented in
 [`POSIX-R1.md`](POSIX-R1.md). It is an incremental compatibility profile,
 not a claim of complete POSIX conformance.
 
-At this moment, it can run on `IBM PC/AT` and `NEC PC-9800` with
-i386SX CPU. The disk image runs on both architecture because the boot
-sector checks the machine type.
+The supported targets are NEC PC-9800/i386, IBM PC/AT-compatible i386 and
+amd64, Raspberry Pi 4/aarch64, and sun4u/sparcv9. The PC unified image uses
+one boot sector which identifies PC-98 versus PC/AT. FAT16 remains the boot
+filesystem and the normal images carry a separate UFS1 root filesystem.
+amd64 supports APIC-based SMP with 1, 2, 4, or 8 CPUs; the other targets are
+currently uniprocessor.
+
+Common validation commands are:
+
+```sh
+./build.sh check pc98
+./build.sh check pcat
+./build.sh check amd64
+./build.sh check arm64
+./build.sh check sparcv9
+./scripts/test-posix-r1.sh all
+./scripts/test-amd64-smp.sh
+./scripts/test-amd64-smp-stress.sh
+```
+
+The UFS1 implementation intentionally accepts a conservative 4.4BSD-family
+profile. Read-write allocation is limited to the canonical single-cylinder-
+group zedBSD image; UFS2, journaling, soft updates, ACLs, and extended
+attributes are not silently accepted.
 
 ## Layout
 

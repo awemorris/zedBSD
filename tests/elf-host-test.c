@@ -89,6 +89,29 @@ vmspace_map_file(struct vmspace *vm, uintptr_t start, size_t size,
 	return 0;
 }
 
+int
+vmspace_find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
+			 size_t alignment, uintptr_t *result)
+{
+	(void)vm;
+	(void)size;
+	if (result == NULL || alignment == 0)
+		return EINVAL;
+	*result = (hint + alignment - 1U) & ~(uintptr_t)(alignment - 1U);
+	return 0;
+}
+
+int
+vmspace_unmap(struct vmspace *vm, uintptr_t start, size_t size)
+{
+	(void)vm;
+	(void)start;
+	(void)size;
+	if (map_count != 0)
+		map_count--;
+	return 0;
+}
+
 static void
 reset_mapping(void)
 {

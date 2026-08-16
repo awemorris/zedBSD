@@ -28,6 +28,7 @@
 #define ELFDATA2MSB 2
 #define EV_CURRENT 1
 #define ET_EXEC 2
+#define ET_DYN 3
 #define EM_386 3
 #define EM_SPARCV9 43
 #define EM_X86_64 62
@@ -36,6 +37,8 @@
 #define PT_LOAD 1
 #define PT_DYNAMIC 2
 #define PT_INTERP 3
+#define PT_PHDR 6
+#define PT_TLS 7
 #define PT_GNU_STACK 0x6474e551U
 #define PF_X 1U
 #define PF_W 2U
@@ -95,6 +98,16 @@ struct elf64_phdr {
 	uint64_t p_filesz;
 	uint64_t p_memsz;
 	uint64_t p_align;
+};
+
+struct elf32_dyn {
+	int32_t d_tag;
+	uint32_t d_val;
+};
+
+struct elf64_dyn {
+	int64_t d_tag;
+	uint64_t d_val;
 };
 
 #endif
