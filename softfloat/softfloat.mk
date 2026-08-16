@@ -61,6 +61,13 @@ ZEDBSD_MUSL_CPPFLAGS := \
 ZEDBSD_SOFTFLOAT_CFLAGS := $(ZEDBSD_LIBC_CFLAGS) -mlong-double-64
 ZEDBSD_MUSL_CFLAGS := $(ZEDBSD_SOFTFLOAT_CFLAGS) \
 	-Wno-error=unused-but-set-variable -Wno-error=parentheses
+ZEDBSD_SOFTFLOAT_DEPFLAGS := -MMD -MP
+
+# These objects are built by custom rules rather than the generic C rule.  Keep
+# an explicit dependency on the public errno ABI so an existing build tree is
+# rebuilt when errno changes, and emit normal compiler dependency files for
+# subsequent header changes.
+$(ZEDBSD_SOFTFLOAT_OBJECTS): libc/include/errno.h
 
 # GCC soft-fp intentionally shares a signed/unsigned conversion macro.  GCC
 # diagnoses its dead sign test for the four unsigned input translations.
@@ -75,13 +82,15 @@ $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/gcc-%.o: \
 	@mkdir -p $(ZEDBSD_SOFTFLOAT_BUILD_DIR)
 	$(ZEDBSD_SOFTFLOAT_CC) $(ZEDBSD_GCC_SOFTFP_CPPFLAGS) \
 		$(ZEDBSD_SOFTFLOAT_CFLAGS) \
-		$(ZEDBSD_SOFTFLOAT_WARNING_EXCEPTIONS) -c $< -o $@
+		$(ZEDBSD_SOFTFLOAT_WARNING_EXCEPTIONS) \
+		$(ZEDBSD_SOFTFLOAT_DEPFLAGS) -c $< -o $@
 
 $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-%.o: \
 	$(ZEDBSD_MUSL_ROOT)/src/math/%.c
 	@mkdir -p $(ZEDBSD_SOFTFLOAT_BUILD_DIR)
 	$(ZEDBSD_SOFTFLOAT_CC) $(ZEDBSD_MUSL_CPPFLAGS) \
-		$(ZEDBSD_MUSL_CFLAGS) -c $< -o $@
+		$(ZEDBSD_MUSL_CFLAGS) $(ZEDBSD_SOFTFLOAT_DEPFLAGS) \
+		-c $< -o $@
 
 $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-shgetc.o: \
 	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c \
@@ -90,6 +99,7 @@ $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-shgetc.o: \
 	$(ZEDBSD_SOFTFLOAT_CC) $(ZEDBSD_MUSL_CPPFLAGS) \
 		$(ZEDBSD_MUSL_CFLAGS) \
 		-Wno-error=parentheses \
+		$(ZEDBSD_SOFTFLOAT_DEPFLAGS) \
 		-include softfloat/musl-floatscan.h -c $< -o $@
 
 $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-floatscan.o: \
@@ -99,6 +109,7 @@ $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-floatscan.o: \
 	$(ZEDBSD_SOFTFLOAT_CC) $(ZEDBSD_MUSL_CPPFLAGS) \
 		$(ZEDBSD_MUSL_CFLAGS) \
 		-Wno-error=parentheses -Wno-error=sign-compare \
+		$(ZEDBSD_SOFTFLOAT_DEPFLAGS) \
 		-include softfloat/musl-floatscan.h -c $< -o $@
 
 $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-strtod.o: \
@@ -107,6 +118,7 @@ $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-strtod.o: \
 	@mkdir -p $(ZEDBSD_SOFTFLOAT_BUILD_DIR)
 	$(ZEDBSD_SOFTFLOAT_CC) $(ZEDBSD_MUSL_CPPFLAGS) \
 		$(ZEDBSD_MUSL_CFLAGS) \
+		$(ZEDBSD_SOFTFLOAT_DEPFLAGS) \
 		-include softfloat/musl-floatscan.h -c $< -o $@
 
 $(ZEDBSD_SOFTFLOAT_COMPAT_OBJECT): softfloat/musl-compat.c \
@@ -114,6 +126,7 @@ $(ZEDBSD_SOFTFLOAT_COMPAT_OBJECT): softfloat/musl-compat.c \
 	@mkdir -p $(ZEDBSD_SOFTFLOAT_BUILD_DIR)
 	$(ZEDBSD_SOFTFLOAT_CC) $(ZEDBSD_MUSL_CPPFLAGS) \
 		$(ZEDBSD_MUSL_CFLAGS) \
+		$(ZEDBSD_SOFTFLOAT_DEPFLAGS) \
 		-include softfloat/musl-floatscan.h -c $< -o $@
 
 softfloat-objects: $(ZEDBSD_SOFTFLOAT_OBJECTS)
