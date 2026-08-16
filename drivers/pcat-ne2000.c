@@ -195,8 +195,12 @@ zedbsd_pcat_ne2000_init(void)
 	}
 	if (ne2000.device->open_count != 0)
 		net_device_close(ne2000.device);
-	if (net_device_find("ne0") == ne2000.device)
-		net_device_gone(ne2000.device);
+	{
+		struct net_device *registered = net_device_find_ref("ne0");
+		if (registered == ne2000.device)
+			net_device_gone(ne2000.device);
+		net_device_release(registered);
+	}
 	net_device_destroy(ne2000.device);
 	ne2000.device = NULL;
 	return error;

@@ -33,6 +33,16 @@ int mutex_init(struct mutex *lock, enum lock_rank rank, const char *name)
 void mutex_lock(struct mutex *lock) { (void)lock; }
 void mutex_unlock(struct mutex *lock) { (void)lock; }
 
+void waitq_init(struct wait_queue *queue, const char *name)
+{ queue->head = queue->tail = NULL; queue->sequence = 1; queue->name = name; }
+uint64_t waitq_sequence(const struct wait_queue *queue)
+{ return queue->sequence; }
+int waitq_sleep(struct wait_queue *queue, struct spinlock *lock,
+    uint64_t sequence, uint64_t deadline, unsigned flags)
+{ (void)queue; (void)lock; (void)sequence; (void)deadline; (void)flags; return 0; }
+void waitq_wake_one(struct wait_queue *queue) { queue->sequence++; }
+void waitq_wake_all(struct wait_queue *queue) { queue->sequence++; }
+
 void
 zedbsd_clock_realtime(time_t *seconds, long *nanoseconds)
 {

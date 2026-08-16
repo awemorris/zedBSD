@@ -11,6 +11,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <kern/atomic.h>
+#include <kern/lock.h>
+#include <kern/waitq.h>
 
 #define DISK_NAME_MAX 16U
 #define DISK_MAX 80U
@@ -62,9 +65,13 @@ struct disk {
 	struct disk *d_parent;
 	uint64_t d_parent_offset;
 	unsigned d_open_count;
-	unsigned d_refcount;
+	refcount_t d_refs;
+	struct spinlock d_lock;
+	struct wait_queue d_waitq;
 	unsigned d_state;
 	unsigned d_inflight;
+	unsigned d_opening;
+	unsigned d_closing;
 	struct disk *d_next;
 };
 
@@ -80,7 +87,9 @@ struct bio {
 	int b_error;
 	void (*b_done)(struct bio *bio);
 	void *b_private;
-	struct thread *b_waiter;
+	struct spinlock b_lock;
+	struct wait_queue b_waitq;
+	unsigned b_initialized;
 	enum bio_state b_state;
 };
 

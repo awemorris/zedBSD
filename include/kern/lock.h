@@ -18,6 +18,8 @@ enum lock_rank {
 	LOCK_RANK_SOCKET_REGISTRY = 100,
 	LOCK_RANK_SOCKET = 110,
 	LOCK_RANK_NETWORK = 120,
+	/* Block I/O is an independent leaf domain; do not enter VFS/VM from it. */
+	LOCK_RANK_DISK = 130,
 	LOCK_RANK_SCHEDULER = 200
 };
 

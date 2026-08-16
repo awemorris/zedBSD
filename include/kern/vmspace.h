@@ -10,6 +10,7 @@
 #define ZEDBSD_KERN_VMSPACE_H
 
 #include <hal/hal.h>
+#include <kern/atomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -81,7 +82,7 @@ struct vm_region {
 
 struct vmspace {
 	hal_space_t space;
-	unsigned usecount;
+	refcount_t refs;
 	struct vm_region *regions;
 	uintptr_t entry;
 	uintptr_t brk_start;
@@ -93,6 +94,8 @@ struct vmspace {
 
 extern struct vmspace kernel_vmspace;
 struct vmspace *vmspace_create(void);
+int vmspace_tryref(struct vmspace *);
+void vmspace_ref(struct vmspace *);
 int vmspace_fork(struct vmspace *, struct vmspace **);
 int vmspace_map_anon(struct vmspace *, uintptr_t, size_t, uint32_t,
 		     struct vm_region **);

@@ -8,7 +8,7 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
 	-Iinclude -Iinclude/uapi -Isrc -Isrc/hal/i386 -Ilibc/include \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON
-HAL_PCAT_SOURCES := src/hal/cpu-up.c src/hal/i386/lib.c src/hal/i386/irq.c \
+HAL_PCAT_SOURCES := src/hal/cpu-up.c src/hal/x86/rtc.c src/hal/i386/lib.c src/hal/i386/irq.c \
 	src/hal/i386/page.c src/hal/i386/space.c src/hal/i386/int.c \
 	src/hal/i386/cmain.c src/hal/i386/task.c \
 	src/hal/i386/bsp-pcat/boot.c src/hal/i386/bsp-pcat/cons.c \
@@ -342,10 +342,11 @@ grub-iso: $(BUILD)/zedbsd-grub.iso
 .PHONY: hdd-image grub-iso
 
 $(BUILD)/tests/pcat-mbr-host-test: tests/pcat-mbr-host-test.c \
+	tests/disk-host-stubs.c \
 	src/kern/disk.c src/kern/partition.c src/kern/mbr-partition.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/disk.c src/kern/partition.c \
-		src/kern/mbr-partition.c $< -o $@
+		src/kern/mbr-partition.c tests/disk-host-stubs.c $< -o $@
 
 pcat-mbr-host-test: $(BUILD)/tests/pcat-mbr-host-test
 	$(BUILD)/tests/pcat-mbr-host-test

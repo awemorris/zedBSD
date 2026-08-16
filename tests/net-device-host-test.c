@@ -71,8 +71,14 @@ main(void)
 	device->ops = &fake_ops;
 	assert(net_device_create(device) == 0);
 	assert(device->ifindex == 1);
-	assert(net_device_find("ne0") == device);
-	assert(net_device_find_by_index(1) == device);
+	{
+		struct net_device *found = net_device_find_ref("ne0");
+		assert(found == device);
+		net_device_release(found);
+		found = net_device_find_by_index_ref(1);
+		assert(found == device);
+		net_device_release(found);
+	}
 
 	duplicate = net_device_alloc();
 	assert(duplicate != NULL);

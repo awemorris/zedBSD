@@ -286,6 +286,7 @@ int main(void)
 	struct fat_mount_args a = { "mem0" }, b = { "mem1" };
 	struct cwdinfo context;
 	struct path root_path;
+	struct mount *root_mount_ref, *disk1_mount;
 	struct inode *inode, *again;
 	struct file *file;
 	struct dirent entry;
@@ -300,7 +301,11 @@ int main(void)
 	CHECK(mount_rootfs() == 0);
 	CHECK(mount("mem", "/disk1", 0, &a) == 0);
 	CHECK(mount("auto", "/disk2", 0, &b) == 0);
-	path_set(&root_path, mount_root_get(), mount_root_inode());
+	root_mount_ref = mount_root_get_ref();
+	disk1_mount = mount_find_ref("/disk1");
+	CHECK(root_mount_ref != NULL && disk1_mount != NULL);
+	path_set(&root_path, root_mount_ref, mount_root_inode());
+	mount_release(root_mount_ref);
 	CHECK(cwdinfo_init(&context, &root_path) == 0);
 	path_release(&root_path);
 
@@ -311,7 +316,7 @@ int main(void)
 	CHECK(namei_at(&context, "/disk1/missing", &inode) == ENOENT);
 	CHECK(namei_at(&context, "/disk1/hello/x", &inode) == ENOTDIR);
 	CHECK(namei_at(&context, "/disk1/dir/..", &inode) == 0);
-	CHECK(inode == mount_find("/disk1")->m_root);
+	CHECK(inode == disk1_mount->m_root);
 	inode_release(inode);
 
 	/* Generic VFS hard links and relative/absolute symlink traversal. */
@@ -320,7 +325,7 @@ int main(void)
 		struct componentname hard = {
 			.cn_nameptr = "hard", .cn_namelen = 4
 		};
-		CHECK(inode_link(mount_find("/disk1")->m_root, &hard, inode) == 0);
+		CHECK(inode_link(disk1_mount->m_root, &hard, inode) == 0);
 	}
 	CHECK(namei_at(&context, "/disk1/hard", &again) == 0);
 	CHECK(again == inode && inode->i_linkcount == 2);
@@ -337,13 +342,13 @@ int main(void)
 			.cn_nameptr = "loop", .cn_namelen = 4
 		};
 		struct inode *created;
-		CHECK(inode_symlink(mount_find("/disk1")->m_root, &link,
+		CHECK(inode_symlink(disk1_mount->m_root, &link,
 		    "/disk1/dir/nested", &created) == 0);
 		inode_release(created);
 		CHECK(inode_symlink(stores[0].nodes[1].inode, &relative,
 		    "../hello", &created) == 0);
 		inode_release(created);
-		CHECK(inode_symlink(mount_find("/disk1")->m_root, &loop,
+		CHECK(inode_symlink(disk1_mount->m_root, &loop,
 		    "loop", &created) == 0);
 		inode_release(created);
 	}
@@ -377,7 +382,7 @@ int main(void)
 		struct componentname new_name = {
 			.cn_nameptr = "moved", .cn_namelen = 5
 		};
-		struct inode *root = mount_find("/disk1")->m_root;
+		struct inode *root = disk1_mount->m_root;
 		uint64_t before = root->i_dirseq;
 
 		CHECK(inode_rename(root, &old_name, root, &new_name, 0) == 0);
@@ -408,6 +413,7 @@ int main(void)
 	CHECK(file_close(file) == 0);
 
 	cwdinfo_destroy(&context);
+	mount_release(disk1_mount);
 	if (failures) {
 		printf("VFS host tests: %d failure(s)\n", failures);
 		return 1;

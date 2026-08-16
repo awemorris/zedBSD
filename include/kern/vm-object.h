@@ -10,6 +10,7 @@
 #define ZEDBSD_KERN_VM_OBJECT_H
 
 #include <hal/hal.h>
+#include <kern/atomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -34,8 +35,10 @@ struct vm_object_page {
 };
 
 struct vm_object {
-	/* usecount counts VM regions; zero is valid while writeback is retained. */
-	unsigned usecount;
+	/* One registry reference plus one reference for every mapped region. */
+	refcount_t refs;
+	/* Protected by the VM object registry lock; zero permits retention. */
+	unsigned mapping_count;
 	unsigned flags;
 	/* file is retained for reads; write_file carries write capability. */
 	struct file *file;

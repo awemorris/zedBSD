@@ -7,8 +7,6 @@
 #include <hal/hal.h>
 
 extern struct thread *thread_current(void) __attribute__((weak));
-extern void sched_sleep(uint64_t) __attribute__((weak));
-extern void sched_wakeup(struct thread *) __attribute__((weak));
 extern bool hal_irq_disable(void) __attribute__((weak));
 extern void hal_irq_enable(void) __attribute__((weak));
 
@@ -86,7 +84,9 @@ struct disk *disk_alloc(void)
 		disk_used[i] = 1;
 		zero_bytes(&disks[i], sizeof(disks[i]));
 		disks[i].d_state = DISK_ALLOCATED;
-		disks[i].d_refcount = 1;
+		refcount_init(&disks[i].d_refs, 1);
+		spin_init(&disks[i].d_lock, LOCK_RANK_DISK, "disk");
+		waitq_init(&disks[i].d_waitq, "disk state");
 		disk_unlock(enabled);
 		return &disks[i];
 	}
@@ -123,7 +123,7 @@ int disk_create(struct disk *disk)
 	disk->d_state = DISK_LIVE;
 	disk->d_next = NULL;
 	if (disk->d_parent != NULL)
-		disk->d_parent->d_refcount++;
+		refcount_get(&disk->d_parent->d_refs);
 	for (tail = &disk_head; *tail != NULL; tail = &(*tail)->d_next)
 		;
 	*tail = disk;
@@ -163,7 +163,7 @@ disk_gone_if_idle(struct disk *disk)
 		return ENXIO;
 	}
 	if (disk->d_open_count != 0 || disk->d_inflight != 0 ||
-	    disk->d_refcount != 1) {
+	    refcount_load(&disk->d_refs) != 1) {
 		disk_unlock(enabled);
 		return EBUSY;
 	}
@@ -198,13 +198,13 @@ DISK_HIGH int disk_destroy(struct disk *disk)
 		return EINVAL;
 	}
 	if (disk->d_open_count != 0 || disk->d_inflight != 0 ||
-	    disk->d_refcount != 1) {
+	    refcount_load(&disk->d_refs) != 1) {
 		disk_unlock(enabled);
 		return EBUSY;
 	}
 	parent = disk->d_parent;
 	if (disk->d_parent != NULL)
-		parent->d_refcount--;
+		(void)refcount_put_not_last(&parent->d_refs);
 	zero_bytes(disk, sizeof(*disk));
 	disk_used[i] = 0;
 	disk_unlock(enabled);
@@ -222,7 +222,7 @@ struct disk *disk_find(const char *name)
 		if (name_equal(disk->d_name, name))
 			break;
 	if (disk != NULL)
-		disk->d_refcount++;
+		refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
 	return disk;
 }
@@ -235,7 +235,7 @@ struct disk *disk_find_by_dev(dev_t dev)
 		if (disk->d_dev == dev)
 			break;
 	if (disk != NULL)
-		disk->d_refcount++;
+		refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
 	return disk;
 }
@@ -257,7 +257,7 @@ struct disk *disk_at(unsigned index)
 	     disk = disk->d_next, index--)
 		;
 	if (disk != NULL)
-		disk->d_refcount++;
+		refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
 	return disk;
 }
@@ -265,16 +265,16 @@ struct disk *disk_at(unsigned index)
 void disk_ref(struct disk *disk)
 {
 	bool enabled = disk_lock();
-	if (disk != NULL && disk_index(disk) >= 0 && disk->d_refcount != 0)
-		disk->d_refcount++;
+	if (disk != NULL && disk_index(disk) >= 0)
+		refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
 }
 
 void disk_release(struct disk *disk)
 {
 	bool enabled = disk_lock();
-	if (disk != NULL && disk_index(disk) >= 0 && disk->d_refcount > 0)
-		disk->d_refcount--;
+	if (disk != NULL && disk_index(disk) >= 0)
+		(void)refcount_put_not_last(&disk->d_refs);
 	disk_unlock(enabled);
 }
 
@@ -353,7 +353,7 @@ int disk_open(struct disk *disk)
 		disk_unlock(enabled);
 		return ENXIO;
 	}
-	disk->d_refcount++; /* Temporary lifetime reference across callback. */
+	refcount_get(&disk->d_refs); /* Temporary lifetime reference. */
 	disk_unlock(enabled);
 	if (disk->d_ops != NULL && disk->d_ops->open != NULL)
 		error = disk->d_ops->open(disk);
@@ -363,10 +363,10 @@ int disk_open(struct disk *disk)
 			error = ENXIO;
 		else {
 			disk->d_open_count++;
-			disk->d_refcount++;
+			refcount_get(&disk->d_refs);
 		}
 	}
-	disk->d_refcount--;
+	(void)refcount_put_not_last(&disk->d_refs);
 	disk_unlock(enabled);
 	if (error == ENXIO && disk->d_ops != NULL && disk->d_ops->close != NULL)
 		disk->d_ops->close(disk);
@@ -390,7 +390,7 @@ disk_open_by_dev(dev_t dev, struct disk **result)
 		disk_unlock(enabled);
 		return ENXIO;
 	}
-	disk->d_refcount++;
+	refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
 	error = disk_open(disk);
 	disk_release(disk);
@@ -421,7 +421,7 @@ int disk_ioctl(struct disk *disk, unsigned long request, void *argument)
 		disk_unlock(enabled);
 		return ENXIO;
 	}
-	disk->d_refcount++;
+	refcount_get(&disk->d_refs);
 	disk_unlock(enabled);
 	if (disk->d_ops == NULL || disk->d_ops->ioctl == NULL) {
 		disk_release(disk);
@@ -441,6 +441,11 @@ int bio_submit(struct disk *disk, struct bio *bio)
 	if (disk == NULL || bio == NULL || bio->b_state != BIO_NEW ||
 	    disk->d_state != DISK_LIVE)
 		return EINVAL;
+	if (!bio->b_initialized) {
+		spin_init(&bio->b_lock, LOCK_RANK_DISK, "bio");
+		waitq_init(&bio->b_waitq, "bio completion");
+		bio->b_initialized = 1;
+	}
 	if (bio->b_op != BIO_FLUSH) {
 		if (bio->b_block_count == 0 || bio->b_data == NULL)
 			return EINVAL;
@@ -482,11 +487,13 @@ int bio_submit(struct disk *disk, struct bio *bio)
 	bio->b_error = 0;
 	bio->b_state = BIO_SUBMITTED;
 	leaf->d_inflight++;
+	refcount_get(&leaf->d_refs);
 	disk_unlock(enabled);
 	error = leaf->d_ops->submit(leaf, bio);
 	if (error != 0) {
 		enabled = disk_lock();
 		leaf->d_inflight--;
+		(void)refcount_put_not_last(&leaf->d_refs);
 		bio->b_state = BIO_NEW;
 		bio->b_leaf_disk = NULL;
 		disk_unlock(enabled);
@@ -498,54 +505,66 @@ void bio_complete(struct bio *bio, int error, size_t transferred)
 {
 	struct disk *leaf;
 	void (*done)(struct bio *);
-	struct thread *waiter;
-	bool enabled = disk_lock();
-	if (bio == NULL || bio->b_state != BIO_SUBMITTED) {
-		disk_unlock(enabled);
+	unsigned long bio_irq;
+	bool enabled;
+	if (bio == NULL || !bio->b_initialized)
+		return;
+	bio_irq = spin_lock_irqsave(&bio->b_lock);
+	if (bio->b_state != BIO_SUBMITTED) {
+		spin_unlock_irqrestore(&bio->b_lock, bio_irq);
 		return;
 	}
 	leaf = bio->b_leaf_disk;
 	bio->b_error = error;
 	bio->b_transferred = transferred;
 	bio->b_state = BIO_COMPLETED;
+	waitq_wake_all(&bio->b_waitq);
+	spin_unlock_irqrestore(&bio->b_lock, bio_irq);
+	enabled = disk_lock();
 	if (leaf != NULL && leaf->d_inflight != 0)
 		leaf->d_inflight--;
+	if (leaf != NULL)
+		(void)refcount_put_not_last(&leaf->d_refs);
 	done = bio->b_done;
-	waiter = bio->b_waiter;
 	disk_unlock(enabled);
 	if (done != NULL)
 		done(bio);
-	if (waiter != NULL && sched_wakeup != NULL)
-		sched_wakeup(waiter);
 }
 
 int bio_wait(struct bio *bio)
 {
 	struct thread *thread;
-	bool enabled;
+	unsigned long irq;
+	int error;
 
-	if (bio == NULL)
+	if (bio == NULL || !bio->b_initialized)
 		return EINVAL;
 	thread = thread_current != NULL ? thread_current() : NULL;
-	if (thread != NULL && sched_sleep != NULL &&
-	    hal_irq_disable != NULL && hal_irq_enable != NULL) {
-		enabled = hal_irq_disable();
+	if (thread != NULL) {
+		irq = spin_lock_irqsave(&bio->b_lock);
 		while (bio->b_state == BIO_SUBMITTED) {
-			if (bio->b_waiter != NULL && bio->b_waiter != thread) {
-				if (enabled) hal_irq_enable();
-				return EBUSY;
+			uint64_t sequence = waitq_sequence(&bio->b_waitq);
+			error = waitq_sleep(&bio->b_waitq, &bio->b_lock,
+			    sequence, 0, 0);
+			if (error != 0 && error != EAGAIN) {
+				spin_unlock_irqrestore(&bio->b_lock, irq);
+				return error;
 			}
-			bio->b_waiter = thread;
-			sched_sleep(0);
 		}
-		bio->b_waiter = NULL;
-		if (enabled)
-			hal_irq_enable();
-		return bio->b_state == BIO_COMPLETED ? bio->b_error : EINVAL;
+		error = bio->b_state == BIO_COMPLETED ? bio->b_error : EINVAL;
+		spin_unlock_irqrestore(&bio->b_lock, irq);
+		return error;
 	}
-	while (bio->b_state == BIO_SUBMITTED)
+	for (;;) {
+		irq = spin_lock_irqsave(&bio->b_lock);
+		if (bio->b_state != BIO_SUBMITTED)
+			break;
+		spin_unlock_irqrestore(&bio->b_lock, irq);
 		hal_compiler_barrier();
-	return bio->b_state == BIO_COMPLETED ? bio->b_error : EINVAL;
+	}
+	error = bio->b_state == BIO_COMPLETED ? bio->b_error : EINVAL;
+	spin_unlock_irqrestore(&bio->b_lock, irq);
+	return error;
 }
 
 int bio_flush(struct disk *disk)

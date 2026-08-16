@@ -154,8 +154,12 @@ zedbsd_pc98_lgy98_init(void)
 	}
 	if (lgy_device->open_count != 0)
 		net_device_close(lgy_device);
-	if (net_device_find("ne0") == lgy_device)
-		net_device_gone(lgy_device);
+	{
+		struct net_device *registered = net_device_find_ref("ne0");
+		if (registered == lgy_device)
+			net_device_gone(lgy_device);
+		net_device_release(registered);
+	}
 	net_device_destroy(lgy_device);
 	lgy_device = NULL;
 	return error;

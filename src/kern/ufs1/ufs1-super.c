@@ -45,12 +45,16 @@ ufs1_super_decode(const void *buffer, size_t length, uint64_t sectors,
 	super->swapped = swapped;
 	if (super->inodefmt != UFS1_44INODEFMT || super->bsize != 8192U ||
 	    super->fsize != 1024U || super->frag != 8U ||
+	    super->bshift != 13U || super->fshift != 10U ||
+	    super->fragshift != 3U ||
 	    super->nindir != super->bsize / 4U ||
 	    super->inopb != super->bsize / UFS1_DINODE_SIZE ||
 	    !power2(super->bsize) || !power2(super->fsize) ||
 	    super->bsize / super->fsize != super->frag ||
 	    super->fsbtodb != 1U || super->ncg == 0 || super->ipg < 3U ||
 	    super->fpg == 0 || super->size == 0 || super->dsize > super->size ||
+	    super->sbsize < UFS1_FS_STRUCT_SIZE ||
+	    super->sbsize > UFS1_SBLOCK_SIZE ||
 	    super->cgsize == 0 || super->cgsize > super->bsize ||
 	    (uint64_t)super->size * (super->fsize / UFS1_SECTOR_SIZE) > sectors ||
 	    super->iblkno >= super->size || super->dblkno >= super->size ||

@@ -16,12 +16,34 @@
 #include <string.h>
 #include <sys/mman.h>
 
+extern bool hal_irq_disable(void) __attribute__((weak));
+extern void hal_irq_enable(void) __attribute__((weak));
+
 #define PAGE_SIZE ZEDBSD_PAGE_SIZE
 #define VM_OBJECT_DATA __attribute__((section(".vfs_bss")))
 
 static struct vm_object *shared_objects VM_OBJECT_DATA;
 static unsigned object_count VM_OBJECT_DATA;
-static unsigned object_pages VM_OBJECT_DATA;
+static atomic_uint_t object_pages VM_OBJECT_DATA;
+static atomic_uint_t object_registry_lock VM_OBJECT_DATA;
+
+static bool
+registry_lock(void)
+{
+	bool enabled = hal_irq_disable != NULL ? hal_irq_disable() : false;
+
+	while (!atomic_try_acquire_zero(&object_registry_lock))
+		hal_compiler_barrier();
+	return enabled;
+}
+
+static void
+registry_unlock(bool enabled)
+{
+	atomic_store_release(&object_registry_lock, 0);
+	if (enabled && hal_irq_enable != NULL)
+		hal_irq_enable();
+}
 
 static int
 alloc_vm_page(struct hal_pmem *memory)
@@ -60,13 +82,15 @@ vm_object_get_shared(struct file *file, struct vm_object **result)
 	struct vm_object *object;
 	struct inode *inode = file_vm_inode(file);
 	int writable;
+	bool enabled;
 	if (file == NULL || inode == NULL || result == NULL)
 		return EINVAL;
 	writable = (file->f_flags & O_ACCMODE) != O_RDONLY &&
 	    file->f_ops != NULL && file->f_ops->pwrite != NULL;
+	enabled = registry_lock();
 	for (object = shared_objects; object != NULL; object = object->next) {
 		if (object->inode == inode) {
-			if (object->usecount == 0) {
+			if (object->mapping_count == 0) {
 				if (!(object->flags & VM_OBJECT_RETAINED_WRITEBACK))
 					HAL_FATAL("reviving unretained VM object");
 				object->flags &= ~VM_OBJECT_RETAINED_WRITEBACK;
@@ -75,15 +99,19 @@ vm_object_get_shared(struct file *file, struct vm_object **result)
 				file_ref(file);
 				object->write_file = file;
 			}
-			object->usecount++;
+			object->mapping_count++;
+			refcount_get(&object->refs);
 			*result = object;
+			registry_unlock(enabled);
 			return 0;
 		}
 	}
+	registry_unlock(enabled);
 	object = kern_calloc(1, sizeof(*object));
 	if (object == NULL)
 		return ENOMEM;
-	object->usecount = 1;
+	refcount_init(&object->refs, 2); /* registry plus returned region */
+	object->mapping_count = 1;
 	object->file = file;
 	object->inode = inode;
 	file_ref(file);
@@ -91,9 +119,38 @@ vm_object_get_shared(struct file *file, struct vm_object **result)
 		object->write_file = file;
 		file_ref(file);
 	}
+	enabled = registry_lock();
+	/* Another CPU may have published the inode while allocation slept. */
+	{
+		struct vm_object *existing;
+		for (existing = shared_objects; existing != NULL;
+		     existing = existing->next) {
+			if (existing->inode != inode)
+				continue;
+			if (existing->mapping_count == 0) {
+				if (!(existing->flags & VM_OBJECT_RETAINED_WRITEBACK))
+					HAL_FATAL("reviving unretained VM object");
+				existing->flags &= ~VM_OBJECT_RETAINED_WRITEBACK;
+			}
+			existing->mapping_count++;
+			refcount_get(&existing->refs);
+			if (writable && existing->write_file == NULL) {
+				file_ref(file);
+				existing->write_file = file;
+			}
+			registry_unlock(enabled);
+			(void)file_close(object->file);
+			if (object->write_file != NULL)
+				(void)file_close(object->write_file);
+			kern_free(object);
+			*result = existing;
+			return 0;
+		}
+	}
 	object->next = shared_objects;
 	shared_objects = object;
 	object_count++;
+	registry_unlock(enabled);
 	*result = object;
 	return 0;
 }
@@ -101,8 +158,15 @@ vm_object_get_shared(struct file *file, struct vm_object **result)
 void
 vm_object_ref(struct vm_object *object)
 {
-	if (object != NULL && object->usecount != 0)
-		object->usecount++;
+	bool enabled;
+	if (object == NULL)
+		return;
+	enabled = registry_lock();
+	if (object->mapping_count == 0)
+		HAL_FATAL("referencing detached VM object");
+	object->mapping_count++;
+	refcount_get(&object->refs);
+	registry_unlock(enabled);
 }
 
 static int
@@ -193,33 +257,41 @@ free_object_page(struct vm_object_page *page)
 		HAL_FATAL("destroying mapped VM object page");
 	(void)hal_pmem_free(&page->pmem);
 	kern_free(page);
-	if (object_pages != 0)
-		object_pages--;
+	if (atomic_load_acquire(&object_pages) == 0)
+		HAL_FATAL("VM object page counter underflow");
+	(void)atomic_fetch_add_relaxed(&object_pages, (unsigned)-1);
 }
 
 static int
 object_can_destroy(struct vm_object *object)
 {
-	return object->usecount == 0 && object->writeback_error == 0 &&
+	return object->mapping_count == 0 && object->writeback_error == 0 &&
 	    !object_has_dirty_pages(object) && !object_has_busy_pages(object);
 }
 
-static void
-unlink_and_destroy_object(struct vm_object *object)
+static int
+unlink_object_locked(struct vm_object *object)
 {
 	struct vm_object **link;
-	struct vm_object_page *page;
-	int found = 0;
 	if (!object_can_destroy(object))
 		HAL_FATAL("destroying unsynchronized VM object");
 	for (link = &shared_objects; *link != NULL; link = &(*link)->next)
 		if (*link == object) {
 			*link = object->next;
-			found = 1;
-			break;
+			object->next = NULL;
+			if (object_count == 0)
+				HAL_FATAL("VM object counter underflow");
+			object_count--;
+			return 1;
 		}
-	if (!found)
-		HAL_FATAL("VM object list unlink failed");
+	return 0;
+}
+
+static void
+destroy_object(struct vm_object *object)
+{
+	struct vm_object_page *page;
+
 	while ((page = object->pages) != NULL) {
 		object->pages = page->next;
 		free_object_page(page);
@@ -228,15 +300,12 @@ unlink_and_destroy_object(struct vm_object *object)
 	if (object->write_file != NULL)
 		(void)file_close(object->write_file);
 	kern_free(object);
-	if (object_count == 0)
-		HAL_FATAL("VM object counter underflow");
-	object_count--;
 }
 
 static void
 retain_object(struct vm_object *object, int error)
 {
-	if (object->usecount != 0)
+	if (object->mapping_count != 0)
 		HAL_FATAL("retaining referenced VM object");
 	if (error == 0)
 		error = object_has_busy_pages(object) ? EBUSY : EIO;
@@ -248,13 +317,35 @@ void
 vm_object_put(struct vm_object *object)
 {
 	int error;
-	if (object == NULL || object->usecount == 0 || --object->usecount != 0)
+	int removed = 0;
+	bool enabled;
+
+	if (object == NULL)
 		return;
+	enabled = registry_lock();
+	if (object->mapping_count == 0)
+		HAL_FATAL("VM object mapping reference underflow");
+	object->mapping_count--;
+	if (object->mapping_count != 0) {
+		registry_unlock(enabled);
+		if (refcount_put(&object->refs))
+			HAL_FATAL("mapped VM object lost registry reference");
+		return;
+	}
+	registry_unlock(enabled);
 	error = vm_object_sync_range(object, 0, SIZE_MAX, MS_SYNC);
-	if (error == 0 && object_can_destroy(object))
-		unlink_and_destroy_object(object);
-	else
-		retain_object(object, error);
+	enabled = registry_lock();
+	if (object->mapping_count == 0) {
+		if (error == 0 && object_can_destroy(object))
+			removed = unlink_object_locked(object);
+		else
+			retain_object(object, error);
+	}
+	registry_unlock(enabled);
+	if (removed && refcount_put(&object->refs))
+		HAL_FATAL("VM object registry reference was last unexpectedly");
+	if (refcount_put(&object->refs))
+		destroy_object(object);
 }
 
 int
@@ -299,7 +390,7 @@ vm_object_fault(struct vm_object *object, off_t offset,
 	page->flags = 0;
 	page->next = object->pages;
 	object->pages = page;
-	object_pages++;
+	(void)atomic_fetch_add_relaxed(&object_pages, 1);
 	*result = page;
 	return 0;
 }
@@ -447,34 +538,50 @@ vm_object_sync_range(struct vm_object *object, off_t offset, size_t size,
 int
 vm_object_sync_inode(struct inode *inode)
 {
-	struct vm_object *object, *next;
-	int first_error = 0;
-	for (object = shared_objects; object != NULL; object = next) {
-		int error;
-		next = object->next;
-		if (object->inode != inode)
-			continue;
-		error = vm_object_sync_range(object, 0, SIZE_MAX, MS_SYNC);
-		if (error != 0 && first_error == 0)
-			first_error = error;
-		if (object->usecount != 0)
-			continue;
+	struct vm_object *object;
+	bool enabled;
+	int error, removed = 0;
+
+	enabled = registry_lock();
+	for (object = shared_objects; object != NULL; object = object->next)
+		if (object->inode == inode) {
+			refcount_get(&object->refs);
+			break;
+		}
+	registry_unlock(enabled);
+	if (object == NULL)
+		return 0;
+	error = vm_object_sync_range(object, 0, SIZE_MAX, MS_SYNC);
+	enabled = registry_lock();
+	if (object->mapping_count == 0) {
 		if (error == 0 && object_can_destroy(object))
-			unlink_and_destroy_object(object);
+			removed = unlink_object_locked(object);
 		else
 			retain_object(object, error);
 	}
-	return first_error;
+	registry_unlock(enabled);
+	if (removed && refcount_put(&object->refs))
+		HAL_FATAL("VM object registry reference was last unexpectedly");
+	if (refcount_put(&object->refs))
+		destroy_object(object);
+	return error;
 }
 
 void
 vm_object_truncate_inode(struct inode *inode, off_t size)
 {
 	struct vm_object *object;
-	for (object = shared_objects; object != NULL; object = object->next) {
+	bool enabled;
+
+	enabled = registry_lock();
+	for (object = shared_objects; object != NULL; object = object->next)
+		if (object->inode == inode) {
+			refcount_get(&object->refs);
+			break;
+		}
+	registry_unlock(enabled);
+	if (object != NULL) {
 		struct vm_object_page **link;
-		if (object->inode != inode)
-			continue;
 		for (link = &object->pages; *link != NULL; ) {
 			struct vm_object_page *page = *link;
 			if (page->offset >= size) {
@@ -489,20 +596,24 @@ vm_object_truncate_inode(struct inode *inode, off_t size)
 				    0, PAGE_SIZE - (size_t)(size - page->offset));
 			link = &page->next;
 		}
+		if (refcount_put(&object->refs))
+			HAL_FATAL("published VM object lost registry reference");
 	}
 }
 
 int
 vm_object_reclaim_one(void)
 {
-	struct vm_object *object, *next;
-	for (object = shared_objects; object != NULL; object = next) {
+	struct vm_object *object;
+	struct vm_object_page *candidate = NULL;
+	bool enabled;
+
+	enabled = registry_lock();
+	for (object = shared_objects; object != NULL; object = object->next) {
 		struct vm_object_page *page;
-		next = object->next;
 		for (page = object->pages; page != NULL; page = page->next) {
 			struct vm_page *mapping;
 			int wired = 0;
-			int error;
 			if (page->flags & VM_OBJECT_PAGE_BUSY)
 				continue;
 			for (mapping = page->mappings; mapping != NULL;
@@ -513,28 +624,59 @@ vm_object_reclaim_one(void)
 				}
 			if (wired)
 				continue;
-			error = vm_object_sync_range(object, page->offset, PAGE_SIZE,
-			    MS_SYNC | MS_INVALIDATE);
-			if (error != 0)
-				continue;
-			if (object->usecount == 0 && object_can_destroy(object))
-				unlink_and_destroy_object(object);
-			return 0;
+			candidate = page;
+			refcount_get(&object->refs);
+			break;
 		}
+		if (candidate != NULL)
+			break;
 	}
-	return ENOMEM;
+	registry_unlock(enabled);
+	if (candidate == NULL)
+		return ENOMEM;
+	{
+		int error = vm_object_sync_range(object, candidate->offset,
+		    PAGE_SIZE, MS_SYNC | MS_INVALIDATE);
+		int removed = 0;
+		if (error == 0) {
+			enabled = registry_lock();
+			if (object->mapping_count == 0 && object_can_destroy(object))
+				removed = unlink_object_locked(object);
+			registry_unlock(enabled);
+		}
+		if (removed && refcount_put(&object->refs))
+			HAL_FATAL("VM object registry reference was last unexpectedly");
+		if (refcount_put(&object->refs))
+			destroy_object(object);
+		/* Reclaim reports whether a page was freed; writeback retains error. */
+		return error == 0 ? 0 : ENOMEM;
+	}
 }
 
-unsigned vm_object_count(void) { return object_count; }
-unsigned vm_object_page_count(void) { return object_pages; }
+unsigned vm_object_count(void)
+{
+	bool enabled = registry_lock();
+	unsigned count = object_count;
+	registry_unlock(enabled);
+	return count;
+}
+unsigned vm_object_page_count(void)
+{
+	bool enabled = registry_lock();
+	unsigned count = atomic_load_acquire(&object_pages);
+	registry_unlock(enabled);
+	return count;
+}
 
 unsigned
 vm_object_retained_count(void)
 {
 	struct vm_object *object;
 	unsigned count = 0;
+	bool enabled = registry_lock();
 	for (object = shared_objects; object != NULL; object = object->next)
 		if (object->flags & VM_OBJECT_RETAINED_WRITEBACK)
 			count++;
+	registry_unlock(enabled);
 	return count;
 }

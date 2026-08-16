@@ -46,44 +46,53 @@ ipv4_output_common(struct net_device *device, uint32_t destination,
 		   uint8_t protocol, uint32_t source, int source_given,
 		   struct packet_buf *packet)
 {
-	const struct net_route *route;
+	struct net_route route;
 	struct ipv4_wire *header;
 	uint32_t next_hop;
 	uint16_t checksum, total;
 	uint8_t hardware[6];
-	int error;
+	int error, have_route;
 
 	if (packet == NULL)
 		return EINVAL;
-	route = route_lookup(destination);
+	have_route = route_lookup_ref(destination, &route) == 0;
 	if (device == NULL)
-		device = route != NULL ? route->device : NULL;
+		device = have_route ? route.device : NULL;
 	if (device == NULL) {
 		packet_buf_free(packet);
+		if (have_route)
+			route_release(&route);
 		return ENETUNREACH;
 	}
 	if (packet->length > device->mtu - IPV4_HEADER_MIN) {
 		packet_buf_free(packet);
+		if (have_route)
+			route_release(&route);
 		return EMSGSIZE;
 	}
 	if (!source_given) {
 		error = inet_interface_address(device, &source, NULL, NULL);
 		if (error != 0) {
 			packet_buf_free(packet);
+			if (have_route)
+				route_release(&route);
 			return error;
 		}
 	}
-	next_hop = route != NULL && route->gateway != 0 ?
-		route->gateway : destination;
+	next_hop = have_route && route.gateway != 0 ? route.gateway : destination;
 	error = arp_resolve(device, next_hop, hardware);
 	if (error != 0) {
 		(void)arp_request(device, next_hop);
 		packet_buf_free(packet);
+		if (have_route)
+			route_release(&route);
 		return EAGAIN;
 	}
 	header = packet_buf_push(packet, sizeof(*header));
 	if (header == NULL) {
 		packet_buf_free(packet);
+		if (have_route)
+			route_release(&route);
 		return ENOBUFS;
 	}
 	memset(header, 0, sizeof(*header));
@@ -99,7 +108,10 @@ ipv4_output_common(struct net_device *device, uint32_t destination,
 	checksum = net_checksum(header, sizeof(*header));
 	wire_put16(header->checksum, checksum);
 	packet->l3_offset = (uint16_t)(packet->data - packet->storage);
-	return ethernet_output(device, hardware, ETHERNET_TYPE_IPV4, packet);
+	error = ethernet_output(device, hardware, ETHERNET_TYPE_IPV4, packet);
+	if (have_route)
+		route_release(&route);
+	return error;
 }
 
 int

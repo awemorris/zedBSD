@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/net/packet-buf.h"
+#include "kern/net/net-device.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -9,6 +10,8 @@
 
 extern bool hal_irq_disable(void) __attribute__((weak));
 extern void hal_irq_enable(void) __attribute__((weak));
+extern void net_device_ref(struct net_device *) __attribute__((weak));
+extern void net_device_release(struct net_device *) __attribute__((weak));
 
 struct packet_slot {
 	struct packet_buf packet;
@@ -94,6 +97,7 @@ packet_buf_ref(struct packet_buf *packet)
 void
 packet_buf_free(struct packet_buf *packet)
 {
+	struct net_device *device = NULL;
 	bool enabled;
 	unsigned index;
 
@@ -109,6 +113,8 @@ packet_buf_free(struct packet_buf *packet)
 
 		if (&slot->packet != packet)
 			continue;
+		device = slot->packet.device;
+		slot->packet.device = NULL;
 		memset(&slot->packet, 0, sizeof(slot->packet));
 		slot->used = 0;
 		if (packet_used != 0)
@@ -116,6 +122,8 @@ packet_buf_free(struct packet_buf *packet)
 		break;
 	}
 	packet_unlock(enabled);
+	if (device != NULL && net_device_release != NULL)
+		net_device_release(device);
 }
 
 size_t
@@ -210,6 +218,8 @@ packet_buf_copy(const struct packet_buf *source)
 	copy->protocol = source->protocol;
 	copy->flags = source->flags;
 	copy->device = source->device;
+	if (copy->device != NULL && net_device_ref != NULL)
+		net_device_ref(copy->device);
 	copy->source_length = source->source_length;
 	memcpy(copy->source_address, source->source_address,
 	    sizeof(copy->source_address));
@@ -238,6 +248,8 @@ packet_buf_copy_region(const struct packet_buf *source, size_t offset,
 	copy->protocol = source->protocol;
 	copy->flags = source->flags;
 	copy->device = source->device;
+	if (copy->device != NULL && net_device_ref != NULL)
+		net_device_ref(copy->device);
 	copy->source_length = source->source_length;
 	memcpy(copy->source_address, source->source_address,
 	    sizeof(copy->source_address));

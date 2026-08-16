@@ -20,33 +20,56 @@ static struct mount *root_mount;
 static const struct filesystem_type *filesystems[FILESYSTEM_MAX]
 	__attribute__((section(".vfs_bss")));
 static unsigned filesystem_count;
+static struct spinlock namespace_lock;
 
 static struct mount *
 mount_alloc(void)
 {
+	struct mount *result = NULL;
+	unsigned long irq = spin_lock_irqsave(&namespace_lock);
 	unsigned i;
 	for (i = 0; i < MOUNT_MAX; i++) {
 		if (!mount_used[i]) {
 			mount_used[i] = 1;
 			memset(&mounts[i], 0, sizeof(mounts[i]));
-			mounts[i].m_usecount = 1;
-			return &mounts[i];
+			refcount_init(&mounts[i].m_refs, 1);
+			(void)mutex_init(&mounts[i].m_lock, LOCK_RANK_NAMESPACE,
+			    "mount");
+			waitq_init(&mounts[i].m_waitq, "mount state");
+			mounts[i].m_state = MOUNT_STATE_PREPARING;
+			result = &mounts[i];
+			break;
 		}
 	}
-	return NULL;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	return result;
 }
 
 static void
 mount_free(struct mount *mountp)
 {
+	unsigned long irq;
 	unsigned i;
+	if (mountp == NULL || refcount_load(&mountp->m_refs) != 1)
+		return;
+	irq = spin_lock_irqsave(&namespace_lock);
+	if (refcount_load(&mountp->m_refs) != 1) {
+		spin_unlock_irqrestore(&namespace_lock, irq);
+		return;
+	}
 	for (i = 0; i < MOUNT_MAX; i++) {
 		if (&mounts[i] != mountp)
 			continue;
+		mountp->m_state = MOUNT_STATE_DEAD;
+		if (!refcount_put(&mountp->m_refs)) {
+			spin_unlock_irqrestore(&namespace_lock, irq);
+			return;
+		}
 		memset(mountp, 0, sizeof(*mountp));
 		mount_used[i] = 0;
-		return;
+		break;
 	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
 }
 
 void path_init(struct path *path)
@@ -62,7 +85,7 @@ void path_set(struct path *path, struct mount *mountp, struct inode *inode)
 	path->p_mount = mountp;
 	path->p_inode = inode;
 	if (mountp != NULL)
-		mountp->m_usecount++;
+		mount_ref(mountp);
 	if (inode != NULL)
 		inode_ref(inode);
 }
@@ -79,8 +102,8 @@ void path_release(struct path *path)
 		return;
 	if (path->p_inode != NULL)
 		inode_release(path->p_inode);
-	if (path->p_mount != NULL && path->p_mount->m_usecount != 0)
-		path->p_mount->m_usecount--;
+	if (path->p_mount != NULL)
+		mount_release(path->p_mount);
 	path_init(path);
 }
 
@@ -93,15 +116,22 @@ int path_equal(const struct path *left, const struct path *right)
 int
 filesystem_register(const struct filesystem_type *type)
 {
+	unsigned long irq;
 	unsigned i;
 	if (type == NULL || type->fs_name == NULL || type->mount == NULL)
 		return EINVAL;
+	irq = spin_lock_irqsave(&namespace_lock);
 	for (i = 0; i < filesystem_count; i++)
-		if (!strcmp(filesystems[i]->fs_name, type->fs_name))
+		if (!strcmp(filesystems[i]->fs_name, type->fs_name)) {
+			spin_unlock_irqrestore(&namespace_lock, irq);
 			return EEXIST;
-	if (filesystem_count >= FILESYSTEM_MAX)
+		}
+	if (filesystem_count >= FILESYSTEM_MAX) {
+		spin_unlock_irqrestore(&namespace_lock, irq);
 		return ENOSPC;
+	}
 	filesystems[filesystem_count++] = type;
+	spin_unlock_irqrestore(&namespace_lock, irq);
 	return 0;
 }
 
@@ -111,6 +141,7 @@ mount_reset(void)
 	namecache_reset();
 	inode_cache_reset();
 	rootfs_reset();
+	spin_init(&namespace_lock, LOCK_RANK_NAMESPACE, "mount namespace");
 	memset(mounts, 0, sizeof(mounts));
 	memset(mount_used, 0, sizeof(mount_used));
 	memset(filesystems, 0, sizeof(filesystems));
@@ -202,14 +233,34 @@ mount_filesystem(struct mount *mountp, const char *type_name, int flags,
 	}
 }
 
+void
+mount_ref(struct mount *mountp)
+{
+	if (mountp != NULL)
+		refcount_get(&mountp->m_refs);
+}
+
+void
+mount_release(struct mount *mountp)
+{
+	if (mountp != NULL)
+		(void)refcount_put_not_last(&mountp->m_refs);
+}
+
 int
 mount_root_create(const char *type_name, int flags, void *data,
 		  struct mount **result)
 {
 	struct mount *mountp;
+	unsigned long irq;
 	int error;
-	if (root_mount != NULL || type_name == NULL)
-		return root_mount != NULL ? EBUSY : EINVAL;
+	if (type_name == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&namespace_lock);
+	error = root_mount != NULL ? EBUSY : 0;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (error != 0)
+		return error;
 	mountp = mount_alloc();
 	if (mountp == NULL)
 		return ENOSPC;
@@ -219,7 +270,10 @@ mount_root_create(const char *type_name, int flags, void *data,
 		mount_free(mountp);
 		return error;
 	}
+	irq = spin_lock_irqsave(&namespace_lock);
 	mount_head = root_mount = mountp;
+	mountp->m_state = MOUNT_STATE_LIVE;
+	spin_unlock_irqrestore(&namespace_lock, irq);
 	if (result != NULL)
 		*result = mountp;
 	return 0;
@@ -229,8 +283,12 @@ int
 mount_rootfs(void)
 {
 	struct mount *mountp;
+	unsigned long irq;
 	int error;
-	if (root_mount != NULL)
+	irq = spin_lock_irqsave(&namespace_lock);
+	error = root_mount != NULL ? EBUSY : 0;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (error != 0)
 		return EBUSY;
 	mountp = mount_alloc();
 	if (mountp == NULL)
@@ -243,14 +301,30 @@ mount_rootfs(void)
 		mount_free(mountp);
 		return error;
 	}
+	irq = spin_lock_irqsave(&namespace_lock);
 	mount_head = root_mount = mountp;
+	mountp->m_state = MOUNT_STATE_LIVE;
+	spin_unlock_irqrestore(&namespace_lock, irq);
 	return 0;
 }
 
-struct mount *mount_root_get(void) { return root_mount; }
+struct mount *mount_root_get_ref(void)
+{
+	unsigned long irq = spin_lock_irqsave(&namespace_lock);
+	struct mount *mountp = root_mount;
+	if (mountp != NULL && mountp->m_state == MOUNT_STATE_LIVE)
+		mount_ref(mountp);
+	else
+		mountp = NULL;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	return mountp;
+}
 struct inode *mount_root_inode(void)
 {
-	return root_mount != NULL ? root_mount->m_root : NULL;
+	unsigned long irq = spin_lock_irqsave(&namespace_lock);
+	struct inode *inode = root_mount != NULL ? root_mount->m_root : NULL;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	return inode;
 }
 
 static int
@@ -304,6 +378,7 @@ mount_at(const char *type_name, const struct path *directory,
 	 const char *name, int flags, void *data, struct mount **result)
 {
 	struct mount *mountp;
+	unsigned long irq;
 	int error;
 	if (type_name == NULL || directory == NULL || directory->p_mount == NULL ||
 	    directory->p_inode == NULL || directory->p_inode->i_type != INODE_DIR ||
@@ -328,8 +403,11 @@ mount_at(const char *type_name, const struct path *directory,
 	error = mount_filesystem(mountp, type_name, flags, data);
 	if (error != 0)
 		goto fail_cover;
+	irq = spin_lock_irqsave(&namespace_lock);
 	link_child(directory->p_mount, mountp);
 	link_global(mountp);
+	mountp->m_state = MOUNT_STATE_LIVE;
+	spin_unlock_irqrestore(&namespace_lock, irq);
 	if (result != NULL)
 		*result = mountp;
 	return 0;
@@ -345,6 +423,7 @@ mount_bind_at(const struct path *source, const struct path *directory,
 	      const char *name, struct mount **result)
 {
 	struct mount *mountp;
+	unsigned long irq;
 	int error;
 	if (source == NULL || source->p_mount == NULL || source->p_inode == NULL ||
 	    directory == NULL || directory->p_mount == NULL ||
@@ -360,14 +439,17 @@ mount_bind_at(const struct path *source, const struct path *directory,
 	path_set(&mountp->m_cover, directory->p_mount, directory->p_inode);
 	mountp->m_parent = directory->p_mount;
 	mountp->m_bind_source = source->p_mount;
-	mountp->m_bind_source->m_usecount++;
+	mount_ref(mountp->m_bind_source);
 	mountp->m_internal_flags = MOUNT_BIND_INTERNAL;
 	mountp->m_flags = source->p_mount->m_flags;
 	mountp->m_type = source->p_inode->i_mount->m_type;
 	mountp->m_root = source->p_inode;
 	inode_ref(mountp->m_root);
+	irq = spin_lock_irqsave(&namespace_lock);
 	link_child(directory->p_mount, mountp);
 	link_global(mountp);
+	mountp->m_state = MOUNT_STATE_LIVE;
+	spin_unlock_irqrestore(&namespace_lock, irq);
 	if (result != NULL)
 		*result = mountp;
 	return 0;
@@ -394,6 +476,7 @@ mount_private(const char *type_name, struct disk *disk, int flags, void *data,
 		mount_free(mountp);
 		return error;
 	}
+	mountp->m_state = MOUNT_STATE_LIVE;
 	*result = mountp;
 	return 0;
 }
@@ -459,10 +542,14 @@ int
 mount(const char *type_name, const char *dir, int flags, void *data)
 {
 	struct path root;
-	if (root_mount == NULL || dir == NULL || dir[0] != '/' || dir[1] == '\0' ||
-	    strchr(dir + 1, '/') != NULL)
+	struct mount *rootp = mount_root_get_ref();
+	if (rootp == NULL || dir == NULL || dir[0] != '/' || dir[1] == '\0' ||
+	    strchr(dir + 1, '/') != NULL) {
+		mount_release(rootp);
 		return EINVAL;
-	path_set(&root, root_mount, root_mount->m_root);
+	}
+	path_set(&root, rootp, rootp->m_root);
+	mount_release(rootp);
 	{
 		int error = mount_at(type_name, &root, dir + 1, flags, data, NULL);
 		path_release(&root);
@@ -471,14 +558,21 @@ mount(const char *type_name, const char *dir, int flags, void *data)
 }
 
 struct mount *
-mount_find(const char *path)
+mount_find_ref(const char *path)
 {
 	struct mount *mountp;
+	unsigned long irq;
 	if (path == NULL)
 		return NULL;
+	irq = spin_lock_irqsave(&namespace_lock);
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next)
-		if (!strcmp(mountp->m_path, path))
+		if (mountp->m_state == MOUNT_STATE_LIVE &&
+		    !strcmp(mountp->m_path, path)) {
+			mount_ref(mountp);
+			spin_unlock_irqrestore(&namespace_lock, irq);
 			return mountp;
+		}
+	spin_unlock_irqrestore(&namespace_lock, irq);
 	return NULL;
 }
 
@@ -492,8 +586,10 @@ mount_lookup_child(const struct path *directory,
 		   const struct componentname *component, struct path *result)
 {
 	struct mount *child;
+	unsigned long irq;
 	if (directory == NULL || component == NULL || result == NULL)
 		return EINVAL;
+	irq = spin_lock_irqsave(&namespace_lock);
 	for (child = directory->p_mount->m_children; child != NULL;
 	     child = child->m_sibling) {
 		size_t length = strlen(child->m_name);
@@ -502,22 +598,30 @@ mount_lookup_child(const struct path *directory,
 		    length == component->cn_namelen &&
 		    !memcmp(child->m_name, component->cn_nameptr, length)) {
 			path_set(result, child, child->m_root);
+			spin_unlock_irqrestore(&namespace_lock, irq);
 			return 0;
 		}
 	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
 	return ENOENT;
 }
 
 int
 mount_cross_path_parent(const struct path *current, struct path *result)
 {
+	unsigned long irq;
 	if (current == NULL || current->p_mount == NULL || result == NULL)
 		return EINVAL;
+	irq = spin_lock_irqsave(&namespace_lock);
 	if (current->p_inode != current->p_mount->m_root ||
-	    current->p_mount == root_mount || current->p_mount->m_cover.p_inode == NULL)
+	    current->p_mount == root_mount ||
+	    current->p_mount->m_cover.p_inode == NULL) {
+		spin_unlock_irqrestore(&namespace_lock, irq);
 		return ENOENT;
+	}
 	path_set(result, current->p_mount->m_cover.p_mount,
 		 current->p_mount->m_cover.p_inode);
+	spin_unlock_irqrestore(&namespace_lock, irq);
 	return 0;
 }
 
@@ -525,15 +629,20 @@ int
 mount_follow(struct inode *inode, struct inode **result)
 {
 	struct mount *mountp;
+	unsigned long irq;
 	if (inode == NULL || result == NULL)
 		return EINVAL;
+	irq = spin_lock_irqsave(&namespace_lock);
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next) {
-		if (mountp->m_mountpoint == inode) {
+		if (mountp->m_state == MOUNT_STATE_LIVE &&
+		    mountp->m_mountpoint == inode) {
 			inode_ref(mountp->m_root);
 			*result = mountp->m_root;
+			spin_unlock_irqrestore(&namespace_lock, irq);
 			return 0;
 		}
 	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
 	return ENOENT;
 }
 
@@ -541,12 +650,25 @@ int
 mount_cross_parent(struct inode *inode, struct inode **result)
 {
 	struct mount *mountp;
+	struct inode *point = NULL;
 	struct componentname dotdot = { "..", 2, COMPONENT_DOTDOT };
+	unsigned long irq;
 	if (inode == NULL || result == NULL)
 		return EINVAL;
+	irq = spin_lock_irqsave(&namespace_lock);
 	for (mountp = mount_head; mountp != NULL; mountp = mountp->m_next)
-		if (mountp->m_root == inode && mountp->m_mountpoint != NULL)
-			return inode_lookup(mountp->m_mountpoint, &dotdot, result);
+		if (mountp->m_state == MOUNT_STATE_LIVE &&
+		    mountp->m_root == inode && mountp->m_mountpoint != NULL) {
+			point = mountp->m_mountpoint;
+			inode_ref(point);
+			break;
+		}
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (point != NULL) {
+		int error = inode_lookup(point, &dotdot, result);
+		inode_release(point);
+		return error;
+	}
 	return ENOENT;
 }
 
@@ -555,9 +677,11 @@ mount_readdir_child(const struct path *directory, unsigned *cursor,
 		    struct dirent *entry)
 {
 	struct mount *child;
+	unsigned long irq;
 	unsigned index = 0;
 	if (directory == NULL || cursor == NULL || entry == NULL)
 		return EINVAL;
+	irq = spin_lock_irqsave(&namespace_lock);
 	for (child = directory->p_mount->m_children; child != NULL;
 	     child = child->m_sibling) {
 		if (child->m_cover.p_mount != directory->p_mount ||
@@ -570,8 +694,10 @@ mount_readdir_child(const struct path *directory, unsigned *cursor,
 		entry->d_type = INODE_DIR;
 		strcpy(entry->d_name, child->m_name);
 		(*cursor)++;
+		spin_unlock_irqrestore(&namespace_lock, irq);
 		return 0;
 	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
 	return ENOENT;
 }
 
@@ -605,11 +731,11 @@ unlink_child(struct mount *mountp)
 }
 
 static int
-prepare_filesystem_destroy(struct mount *mountp)
+prepare_filesystem_destroy(struct mount *mountp, unsigned expected_refs)
 {
 	int error;
 	if (mountp == NULL || mountp->m_children != NULL ||
-	    mountp->m_usecount != 1)
+	    refcount_load(&mountp->m_refs) != expected_refs)
 		return EBUSY;
 	namecache_purge_mount(mountp);
 	error = inode_cache_mount_busy(mountp);
@@ -640,9 +766,10 @@ unmount_private(struct mount *mountp)
 	int error;
 	if (!mount_is_private(mountp))
 		return EINVAL;
-	error = prepare_filesystem_destroy(mountp);
+	error = prepare_filesystem_destroy(mountp, 1);
 	if (error != 0)
 		return error;
+	mountp->m_state = MOUNT_STATE_DYING;
 	finalize_filesystem_destroy(mountp);
 	mount_free(mountp);
 	return 0;
@@ -651,33 +778,55 @@ unmount_private(struct mount *mountp)
 int
 unmount(const char *dir, int flags)
 {
-	struct mount *mountp = mount_find(dir);
+	struct mount *mountp = mount_find_ref(dir);
 	struct mount **link;
+	unsigned long irq;
 	int error;
 	(void)flags;
-	if (mountp == NULL || mountp == root_mount)
-		return mountp == NULL ? ENOENT : EBUSY;
-	if (mountp->m_children != NULL || mountp->m_usecount != 1)
+	if (mountp == NULL)
+		return ENOENT;
+	irq = spin_lock_irqsave(&namespace_lock);
+	if (mountp == root_mount || mountp->m_state != MOUNT_STATE_LIVE) {
+		spin_unlock_irqrestore(&namespace_lock, irq);
+		mount_release(mountp);
 		return EBUSY;
-	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) == 0) {
-		error = prepare_filesystem_destroy(mountp);
-		if (error != 0)
-			return error;
-	} else if (mountp->m_bind_source != NULL &&
-		   mountp->m_bind_source->m_usecount != 0) {
-		mountp->m_bind_source->m_usecount--;
 	}
+	if (mountp->m_children != NULL ||
+	    refcount_load(&mountp->m_refs) != 2) {
+		spin_unlock_irqrestore(&namespace_lock, irq);
+		mount_release(mountp);
+		return EBUSY;
+	}
+	mountp->m_state = MOUNT_STATE_DYING;
 	unlink_child(mountp);
 	for (link = &mount_head; *link != NULL; link = &(*link)->m_next)
 		if (*link == mountp) {
 			*link = mountp->m_next;
 			break;
 		}
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) == 0) {
+		error = prepare_filesystem_destroy(mountp, 2);
+		if (error != 0) {
+			irq = spin_lock_irqsave(&namespace_lock);
+			mountp->m_state = MOUNT_STATE_LIVE;
+			mountp->m_sibling = NULL;
+			mountp->m_next = NULL;
+			link_child(mountp->m_parent, mountp);
+			link_global(mountp);
+			spin_unlock_irqrestore(&namespace_lock, irq);
+			mount_release(mountp);
+			return error;
+		}
+	} else if (mountp->m_bind_source != NULL) {
+		mount_release(mountp->m_bind_source);
+	}
 	path_release(&mountp->m_cover);
 	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) == 0)
 		finalize_filesystem_destroy(mountp);
 	else if (mountp->m_root != NULL)
 		inode_release(mountp->m_root);
+	mount_release(mountp);
 	mount_free(mountp);
 	return 0;
 }

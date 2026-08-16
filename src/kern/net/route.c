@@ -2,11 +2,13 @@
 #include "kern/net/route.h"
 #include "kern/net/byteorder.h"
 #include "kern/net/net-device.h"
+#include "kern/atomic.h"
 #include "kern/uaccess.h"
 
 #include <zedbsd/netinet.h>
 #include <zedbsd/route.h>
 #include <errno.h>
+#include <stdbool.h>
 #include <string.h>
 
 #define ROUTE_MAX 16U
@@ -15,6 +17,28 @@
 
 static struct net_route routes[ROUTE_MAX];
 static uint8_t route_used[ROUTE_MAX];
+static atomic_uint_t route_guard;
+
+extern bool hal_irq_disable(void) __attribute__((weak));
+extern void hal_irq_enable(void) __attribute__((weak));
+
+static bool
+route_lock(void)
+{
+	bool enabled = hal_irq_disable != NULL ? hal_irq_disable() : false;
+
+	while (!atomic_try_acquire_zero(&route_guard))
+		__asm__ volatile("" ::: "memory");
+	return enabled;
+}
+
+static void
+route_unlock(bool enabled)
+{
+	atomic_store_release(&route_guard, 0);
+	if (enabled && hal_irq_enable != NULL)
+		hal_irq_enable();
+}
 
 static int
 mask_prefix(uint32_t mask, unsigned *result)
@@ -40,6 +64,7 @@ mask_prefix(uint32_t mask, unsigned *result)
 void
 route_init(void)
 {
+	bool enabled = route_lock();
 	unsigned index;
 
 	for (index = 0; index < ROUTE_MAX; index++)
@@ -47,12 +72,14 @@ route_init(void)
 			net_device_release(routes[index].device);
 	memset(routes, 0, sizeof(routes));
 	memset(route_used, 0, sizeof(route_used));
+	route_unlock(enabled);
 }
 
 int
 route_add_flags(uint32_t network, uint32_t netmask, uint32_t gateway,
 		struct net_device *device, unsigned flags)
 {
+	bool enabled;
 	unsigned index, free_index = ROUTE_MAX;
 
 	if (device == NULL || mask_prefix(netmask, NULL) != 0 ||
@@ -61,6 +88,7 @@ route_add_flags(uint32_t network, uint32_t netmask, uint32_t gateway,
 	    (((flags & RTF_GATEWAY) != 0) != (gateway != 0)) ||
 	    ((flags & RTF_HOST) != 0 && netmask != 0xffffffffU))
 		return EINVAL;
+	enabled = route_lock();
 	for (index = 0; index < ROUTE_MAX; index++) {
 		if (!route_used[index]) {
 			if (free_index == ROUTE_MAX)
@@ -72,11 +100,14 @@ route_add_flags(uint32_t network, uint32_t netmask, uint32_t gateway,
 		    routes[index].device == device) {
 			routes[index].gateway = gateway;
 			routes[index].flags = flags;
+			route_unlock(enabled);
 			return 0;
 		}
 	}
-	if (free_index == ROUTE_MAX)
+	if (free_index == ROUTE_MAX) {
+		route_unlock(enabled);
 		return ENOSPC;
+	}
 	route_used[free_index] = 1;
 	routes[free_index].network = network;
 	routes[free_index].netmask = netmask;
@@ -84,6 +115,7 @@ route_add_flags(uint32_t network, uint32_t netmask, uint32_t gateway,
 	routes[free_index].device = device;
 	routes[free_index].flags = flags;
 	net_device_ref(device);
+	route_unlock(enabled);
 	return 0;
 }
 
@@ -98,6 +130,7 @@ route_add(uint32_t network, uint32_t netmask, uint32_t gateway,
 int
 route_delete(uint32_t network, uint32_t netmask, struct net_device *device)
 {
+	bool enabled = route_lock();
 	unsigned index;
 
 	for (index = 0; index < ROUTE_MAX; index++)
@@ -107,50 +140,65 @@ route_delete(uint32_t network, uint32_t netmask, struct net_device *device)
 			net_device_release(routes[index].device);
 			route_used[index] = 0;
 			memset(&routes[index], 0, sizeof(routes[index]));
+			route_unlock(enabled);
 			return 0;
 		}
+	route_unlock(enabled);
 	return ENOENT;
 }
 
 void
 route_purge_device(struct net_device *device)
 {
+	bool enabled;
 	unsigned index;
 
 	if (device == NULL)
 		return;
+	enabled = route_lock();
 	for (index = 0; index < ROUTE_MAX; index++)
 		if (route_used[index] && routes[index].device == device) {
 			net_device_release(routes[index].device);
 			route_used[index] = 0;
 			memset(&routes[index], 0, sizeof(routes[index]));
 		}
+	route_unlock(enabled);
 }
 
 int
-route_get(unsigned ordinal, struct net_route *result)
+route_get_ref(unsigned ordinal, struct net_route *result)
 {
+	bool enabled;
 	unsigned index;
 
 	if (result == NULL)
 		return EINVAL;
+	enabled = route_lock();
 	for (index = 0; index < ROUTE_MAX; index++) {
 		if (!route_used[index])
 			continue;
 		if (ordinal-- == 0) {
 			*result = routes[index];
+			if (result->device != NULL)
+				net_device_ref(result->device);
+			route_unlock(enabled);
 			return 0;
 		}
 	}
+	route_unlock(enabled);
 	return ENOENT;
 }
 
-const struct net_route *
-route_lookup(uint32_t destination)
+int
+route_lookup_ref(uint32_t destination, struct net_route *result)
 {
 	const struct net_route *best = NULL;
+	bool enabled;
 	unsigned best_prefix = 0, index;
 
+	if (result == NULL)
+		return EINVAL;
+	enabled = route_lock();
 	for (index = 0; index < ROUTE_MAX; index++) {
 		unsigned prefix = 0;
 		if (!route_used[index] ||
@@ -162,7 +210,25 @@ route_lookup(uint32_t destination)
 			best_prefix = prefix;
 		}
 	}
-	return best;
+	if (best == NULL) {
+		route_unlock(enabled);
+		return ENETUNREACH;
+	}
+	*result = *best;
+	if (result->device != NULL)
+		net_device_ref(result->device);
+	route_unlock(enabled);
+	return 0;
+}
+
+void
+route_release(struct net_route *route)
+{
+	if (route == NULL)
+		return;
+	if (route->device != NULL)
+		net_device_release(route->device);
+	memset(route, 0, sizeof(*route));
 }
 
 static int
@@ -190,6 +256,7 @@ static int
 route_delete_request(uint32_t network, uint32_t netmask,
 		     struct net_device *device)
 {
+	bool enabled = route_lock();
 	unsigned index, matches = 0, selected = ROUTE_MAX;
 
 	for (index = 0; index < ROUTE_MAX; index++)
@@ -199,13 +266,18 @@ route_delete_request(uint32_t network, uint32_t netmask,
 			matches++;
 			selected = index;
 		}
-	if (matches == 0)
+	if (matches == 0) {
+		route_unlock(enabled);
 		return ENOENT;
-	if (matches != 1)
+	}
+	if (matches != 1) {
+		route_unlock(enabled);
 		return EBUSY;
+	}
 	net_device_release(routes[selected].device);
 	route_used[selected] = 0;
 	memset(&routes[selected], 0, sizeof(routes[selected]));
+	route_unlock(enabled);
 	return 0;
 }
 
@@ -227,7 +299,7 @@ route_ioctl(unsigned long request, uintptr_t argument)
 		return error;
 	if (request == SIOCGRTENTRY) {
 		ordinal = entry.rt_index;
-		error = route_get(entry.rt_index, &route);
+		error = route_get_ref(entry.rt_index, &route);
 		if (error != 0)
 			return error;
 		memset(&entry, 0, sizeof(entry));
@@ -237,7 +309,9 @@ route_ioctl(unsigned long request, uintptr_t argument)
 		set_sockaddr(&entry.rt_dst, route.network);
 		set_sockaddr(&entry.rt_genmask, route.netmask);
 		set_sockaddr(&entry.rt_gateway, route.gateway);
-		return copyout(&entry, argument, sizeof(entry));
+		error = copyout(&entry, argument, sizeof(entry));
+		route_release(&route);
+		return error;
 	}
 	if (request != SIOCADDRT && request != SIOCDELRT)
 		return EOPNOTSUPP;
@@ -246,19 +320,26 @@ route_ioctl(unsigned long request, uintptr_t argument)
 	    (error = sockaddr_address(&entry.rt_gateway, &gateway)) != 0)
 		return error;
 	device = entry.rt_ifindex != 0 ?
-	    net_device_find_by_index(entry.rt_ifindex) : NULL;
+	    net_device_find_by_index_ref(entry.rt_ifindex) : NULL;
 	if (entry.rt_ifindex != 0 && device == NULL)
 		return ENODEV;
-	if (request == SIOCDELRT)
-		return route_delete_request(network, netmask, device);
+	if (request == SIOCDELRT) {
+		error = route_delete_request(network, netmask, device);
+		net_device_release(device);
+		return error;
+	}
 	flags = entry.rt_flags;
 	if (device == NULL && gateway != 0) {
-		const struct net_route *gateway_route = route_lookup(gateway);
-		if (gateway_route == NULL)
+		struct net_route gateway_route;
+		if (route_lookup_ref(gateway, &gateway_route) != 0)
 			return ENETUNREACH;
-		device = gateway_route->device;
+		device = gateway_route.device;
+		gateway_route.device = NULL;
+		route_release(&gateway_route);
 	}
 	if (device == NULL)
 		return ENODEV;
-	return route_add_flags(network, netmask, gateway, device, flags);
+	error = route_add_flags(network, netmask, gateway, device, flags);
+	net_device_release(device);
+	return error;
 }

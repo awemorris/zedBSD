@@ -21,7 +21,7 @@
 #define PAGE_SIZE ZEDBSD_PAGE_SIZE
 struct vmspace kernel_vmspace = {
 	.space = HAL_SPACE_SYS,
-	.usecount = 1,
+	.refs = { 1 },
 };
 
 struct vm_layout vm_layout;
@@ -121,8 +121,21 @@ vmspace_create(void)
 		kern_free(vm);
 		return NULL;
 	}
-	vm->usecount = 1;
+	refcount_init(&vm->refs, 1);
 	return vm;
+}
+
+int
+vmspace_tryref(struct vmspace *vm)
+{
+	return vm != NULL && refcount_tryget(&vm->refs);
+}
+
+void
+vmspace_ref(struct vmspace *vm)
+{
+	if (vm != NULL)
+		refcount_get(&vm->refs);
 }
 
 int
@@ -1188,6 +1201,8 @@ vmspace_free(struct vmspace *vm)
 	struct vm_region *region;
 
 	if (vm == NULL || vm == &kernel_vmspace)
+		return;
+	if (!refcount_put(&vm->refs))
 		return;
 	while ((region = vm->regions) != NULL) {
 		vm->regions = region->next;

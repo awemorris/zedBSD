@@ -244,11 +244,13 @@ $(BUILD)/tests/net-device-host-test: tests/net-device-host-test.c \
 		src/kern/net/packet-buf.c src/kern/net/net-device.c $< -o $@
 
 $(BUILD)/tests/packet-socket-host-test: tests/packet-socket-host-test.c \
+	tests/net-sync-host-stubs.c \
 	src/kern/net/packet-buf.c src/kern/net/net-device.c \
 	src/kern/net/socket.c src/kern/net/packet-socket.c \
 	src/kern/net/ethernet.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
+		tests/net-sync-host-stubs.c \
 		src/kern/net/packet-buf.c src/kern/net/net-device.c \
 		src/kern/net/socket.c src/kern/net/packet-socket.c \
 		src/kern/net/ethernet.c $< -o $@
@@ -260,10 +262,10 @@ INET_HOST_SOURCES := src/kern/net/packet-buf.c src/kern/net/net-device.c \
 	src/kern/net/tcp.c
 
 $(BUILD)/tests/inet-stack-host-test: tests/inet-stack-host-test.c \
-	$(INET_HOST_SOURCES)
+	tests/net-sync-host-stubs.c $(INET_HOST_SOURCES)
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
-		$(INET_HOST_SOURCES) $< -o $@
+		tests/net-sync-host-stubs.c $(INET_HOST_SOURCES) $< -o $@
 
 $(BUILD)/tests/dhcp-host-test: tests/dhcp-host-test.c userland/net/dhcp.c
 	@mkdir -p $(dir $@)
@@ -304,12 +306,13 @@ $(BUILD)/tests/beui-host-test: $(NOCT_ROOT)/tests/testcases/beui-test.c \
 	$(BEUI_TEST_CC) $(BEUI_CORE_SOURCES) $< -o $@
 
 $(BUILD)/tests/blkdev-host-test: tests/blkdev-host-test.c \
+	tests/disk-host-stubs.c \
 	src/kern/disk.c src/kern/partition.c src/kern/pc98/partition.c \
 	src/kern/mbr-partition.c src/kern/pc98/partition-auto.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/disk.c src/kern/partition.c \
 		src/kern/pc98/partition.c src/kern/mbr-partition.c \
-		src/kern/pc98/partition-auto.c $< -o $@
+		src/kern/pc98/partition-auto.c tests/disk-host-stubs.c $< -o $@
 
 VFS_CORE_SOURCES := src/kern/disk.c src/kern/inode.c src/kern/file.c \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c src/kern/rootfs.c
@@ -323,11 +326,17 @@ $(BUILD)/tests/cred-host-test: tests/cred-host-test.c src/kern/cred.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Isrc src/kern/cred.c $< -o $@
 
+$(BUILD)/tests/clock-rtc-host-test: tests/clock-rtc-host-test.c \
+	src/hal/x86/rtc.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc src/hal/x86/rtc.c $< -o $@
+
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/blkdev-host-test \
 	$(BUILD)/tests/vfs-host-test \
 	$(BUILD)/tests/ufs1-vfs-host-test \
 	$(BUILD)/tests/cred-host-test \
+	$(BUILD)/tests/clock-rtc-host-test \
 	$(BUILD)/tests/fat-host-test \
 	$(BUILD)/tests/fat-write-host-test \
 	$(BUILD)/tests/fat32-host-test \

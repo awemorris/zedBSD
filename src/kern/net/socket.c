@@ -14,25 +14,34 @@
 #define SOCKET_FAMILY_MAX 32U
 
 static const struct socket_family_ops *families[SOCKET_FAMILY_MAX];
-static unsigned socket_count;
+static atomic_uint_t socket_count;
+static struct spinlock socket_registry_lock;
 
 void
 socket_core_init(void)
 {
 	memset(families, 0, sizeof(families));
-	socket_count = 0;
+	atomic_store_release(&socket_count, 0);
+	spin_init(&socket_registry_lock, LOCK_RANK_SOCKET_REGISTRY,
+	    "socket registry");
 }
 
 int
 socket_family_register(int family, const struct socket_family_ops *ops)
 {
+	unsigned long irq;
+	int error = 0;
+
 	if (family < 0 || family >= (int)SOCKET_FAMILY_MAX || ops == NULL ||
 	    ops->create == NULL)
 		return EINVAL;
+	irq = spin_lock_irqsave(&socket_registry_lock);
 	if (families[family] != NULL)
-		return EEXIST;
-	families[family] = ops;
-	return 0;
+		error = EEXIST;
+	else
+		families[family] = ops;
+	spin_unlock_irqrestore(&socket_registry_lock, irq);
+	return error;
 }
 
 void
@@ -44,25 +53,44 @@ socket_init_object(struct socket *socket, int family, int type, int protocol,
 	socket->type = type;
 	socket->protocol = protocol;
 	socket->ops = ops;
-	socket->refcount = 1;
+	refcount_init(&socket->refs, 1);
+	spin_init(&socket->lock, LOCK_RANK_SOCKET, "socket");
+	waitq_init(&socket->receive_waitq, "socket receive");
+	waitq_init(&socket->send_waitq, "socket send");
+	waitq_init(&socket->connect_waitq, "socket connect");
+	waitq_init(&socket->accept_waitq, "socket accept");
+	socket->lifecycle = SOCKET_OPEN;
 	socket->receive_limit = SOCKET_RECEIVE_PACKETS_MAX;
 }
 
 int
 socket_create(int family, int type, int protocol, struct socket **result)
 {
+	const struct socket_family_ops *family_ops;
+	unsigned count, expected;
+	unsigned long irq;
 	int error;
 
 	if (result == NULL || family < 0 || family >= (int)SOCKET_FAMILY_MAX ||
 	    (type != SOCK_RAW && type != SOCK_DGRAM && type != SOCK_STREAM))
 		return EINVAL;
-	if (families[family] == NULL)
+	irq = spin_lock_irqsave(&socket_registry_lock);
+	family_ops = families[family];
+	spin_unlock_irqrestore(&socket_registry_lock, irq);
+	if (family_ops == NULL)
 		return EAFNOSUPPORT;
-	if (socket_count >= SOCKET_MAX)
-		return ENFILE;
-	error = families[family]->create(type, protocol, result);
-	if (error == 0)
-		socket_count++;
+	for (;;) {
+		count = atomic_load_acquire(&socket_count);
+		if (count >= SOCKET_MAX)
+			return ENFILE;
+		expected = count;
+		if (atomic_compare_exchange(&socket_count, &expected, count + 1U))
+			break;
+	}
+	error = family_ops->create(type, protocol, result);
+	if (error != 0)
+		(void)atomic_raw_fetch_add_relaxed(&socket_count.value,
+		    (unsigned)-1);
 	return error;
 }
 
@@ -72,6 +100,7 @@ socket_setsockopt_common(struct socket *socket, int level, int option,
 {
 	struct timeval timeout;
 	uint64_t ticks;
+	unsigned long irq;
 
 	if (socket == NULL || level != SOL_SOCKET)
 		return ENOPROTOOPT;
@@ -79,7 +108,9 @@ socket_setsockopt_common(struct socket *socket, int level, int option,
 		int enabled;
 		if (value == NULL || length != sizeof(enabled)) return EINVAL;
 		memcpy(&enabled, value, sizeof(enabled));
+		irq = spin_lock_irqsave(&socket->lock);
 		socket->reuse_address = enabled != 0;
+		spin_unlock_irqrestore(&socket->lock, irq);
 		return 0;
 	}
 	if (option != SO_RCVTIMEO && option != SO_SNDTIMEO)
@@ -100,10 +131,12 @@ socket_setsockopt_common(struct socket *socket, int level, int option,
 			return EOVERFLOW;
 		ticks += fraction;
 	}
+	irq = spin_lock_irqsave(&socket->lock);
 	if (option == SO_RCVTIMEO)
 		socket->receive_timeout_ticks = ticks;
 	else
 		socket->send_timeout_ticks = ticks;
+	spin_unlock_irqrestore(&socket->lock, irq);
 	return 0;
 }
 
@@ -112,6 +145,7 @@ socket_getsockopt_common(struct socket *socket, int level, int option,
 			 void *value, socklen_t *length)
 {
 	struct timeval timeout;
+	unsigned long irq;
 
 	if (socket == NULL || level != SOL_SOCKET)
 		return ENOPROTOOPT;
@@ -125,9 +159,12 @@ socket_getsockopt_common(struct socket *socket, int level, int option,
 		return 0;
 	}
 	if (option == SO_REUSEADDR) {
-		int enabled = socket->reuse_address != 0;
+		int enabled;
 		if (value == NULL || length == NULL || *length < sizeof(enabled))
 			return EINVAL;
+		irq = spin_lock_irqsave(&socket->lock);
+		enabled = socket->reuse_address != 0;
+		spin_unlock_irqrestore(&socket->lock, irq);
 		memcpy(value, &enabled, sizeof(enabled));
 		*length = sizeof(enabled);
 		return 0;
@@ -137,8 +174,11 @@ socket_getsockopt_common(struct socket *socket, int level, int option,
 	if (value == NULL || length == NULL || *length < sizeof(timeout))
 		return EINVAL;
 	{
-		uint64_t ticks = option == SO_RCVTIMEO ?
-		    socket->receive_timeout_ticks : socket->send_timeout_ticks;
+		uint64_t ticks;
+		irq = spin_lock_irqsave(&socket->lock);
+		ticks = option == SO_RCVTIMEO ? socket->receive_timeout_ticks :
+		    socket->send_timeout_ticks;
+		spin_unlock_irqrestore(&socket->lock, irq);
 		timeout.tv_sec = (time_t)(ticks / KERN_CLOCK_HZ);
 		timeout.tv_usec = (long)((ticks % KERN_CLOCK_HZ) *
 		    (1000000U / KERN_CLOCK_HZ));
@@ -152,75 +192,91 @@ int
 socket_take_error(struct socket *socket)
 {
 	int error;
-	bool enabled;
+	unsigned long irq;
 
 	if (socket == NULL)
 		return EINVAL;
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&socket->lock);
 	error = socket->error;
 	socket->error = 0;
-	if (enabled)
-		hal_irq_enable();
+	spin_unlock_irqrestore(&socket->lock, irq);
 	return error;
 }
 
 void
 socket_set_error(struct socket *socket, int error)
 {
-	bool enabled;
+	unsigned long irq;
 
 	if (socket == NULL || error == 0)
 		return;
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&socket->lock);
 	if (socket->error == 0)
 		socket->error = error;
-	if (socket->receive_waiter != NULL) sched_wakeup(socket->receive_waiter);
-	if (socket->send_waiter != NULL) sched_wakeup(socket->send_waiter);
-	if (socket->connect_waiter != NULL) sched_wakeup(socket->connect_waiter);
-	if (socket->accept_waiter != NULL) sched_wakeup(socket->accept_waiter);
-	if (enabled)
-		hal_irq_enable();
+	waitq_wake_all(&socket->receive_waitq);
+	waitq_wake_all(&socket->send_waitq);
+	waitq_wake_all(&socket->connect_waitq);
+	waitq_wake_all(&socket->accept_waitq);
+	spin_unlock_irqrestore(&socket->lock, irq);
 }
 
 void
 socket_ref(struct socket *socket)
 {
-	if (socket != NULL && socket->refcount != 0)
-		socket->refcount++;
+	if (socket != NULL)
+		refcount_get(&socket->refs);
+}
+
+int
+socket_tryref(struct socket *socket)
+{
+	return socket != NULL && refcount_tryget(&socket->refs);
 }
 
 void
 socket_release(struct socket *socket)
 {
-	struct packet_buf *packet;
+	struct packet_buf *packet, *packets;
+	unsigned long irq;
 
-	if (socket == NULL || socket->refcount == 0 || --socket->refcount != 0)
+	if (socket == NULL || !refcount_put(&socket->refs))
 		return;
-	while ((packet = socket->receive_head) != NULL) {
-		socket->receive_head = packet->next;
+	irq = spin_lock_irqsave(&socket->lock);
+	socket->lifecycle = SOCKET_CLOSING;
+	packets = socket->receive_head;
+	socket->receive_head = socket->receive_tail = NULL;
+	socket->receive_packets = 0;
+	socket->receive_bytes = 0;
+	waitq_wake_all(&socket->receive_waitq);
+	waitq_wake_all(&socket->send_waitq);
+	waitq_wake_all(&socket->connect_waitq);
+	waitq_wake_all(&socket->accept_waitq);
+	spin_unlock_irqrestore(&socket->lock, irq);
+	while ((packet = packets) != NULL) {
+		packets = packet->next;
 		packet_buf_free(packet);
 	}
-	if (socket_count != 0)
-		socket_count--;
 	if (socket->ops != NULL && socket->ops->close != NULL)
 		socket->ops->close(socket);
+	(void)atomic_raw_fetch_add_relaxed(&socket_count.value, (unsigned)-1);
 }
 
 int
 socket_enqueue_packet(struct socket *socket, struct packet_buf *packet)
 {
-	bool enabled;
+	unsigned long irq;
 
 	if (socket == NULL || packet == NULL) {
 		packet_buf_free(packet);
 		return EINVAL;
 	}
-	enabled = hal_irq_disable();
-	if (socket->receive_packets >= socket->receive_limit) {
-		if (enabled)
-			hal_irq_enable();
+	irq = spin_lock_irqsave(&socket->lock);
+	if (socket->lifecycle != SOCKET_OPEN ||
+	    socket->receive_packets >= socket->receive_limit) {
+		int error = socket->lifecycle != SOCKET_OPEN ? EPIPE : ENOBUFS;
+		spin_unlock_irqrestore(&socket->lock, irq);
 		packet_buf_free(packet);
-		return ENOBUFS;
+		return error;
 	}
 	packet->next = NULL;
 	if (socket->receive_tail != NULL)
@@ -230,31 +286,34 @@ socket_enqueue_packet(struct socket *socket, struct packet_buf *packet)
 	socket->receive_tail = packet;
 	socket->receive_packets++;
 	socket->receive_bytes += packet->length;
-	if (socket->receive_waiter != NULL)
-		sched_wakeup(socket->receive_waiter);
-	if (enabled)
-		hal_irq_enable();
+	waitq_wake_one(&socket->receive_waitq);
+	spin_unlock_irqrestore(&socket->lock, irq);
 	return 0;
 }
 
 int
 socket_requeue_packet_front(struct socket *socket, struct packet_buf *packet)
 {
-	bool enabled;
+	unsigned long irq;
 
 	if (socket == NULL || packet == NULL) {
 		packet_buf_free(packet);
 		return EINVAL;
 	}
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&socket->lock);
+	if (socket->lifecycle != SOCKET_OPEN) {
+		spin_unlock_irqrestore(&socket->lock, irq);
+		packet_buf_free(packet);
+		return EPIPE;
+	}
 	packet->next = socket->receive_head;
 	socket->receive_head = packet;
 	if (socket->receive_tail == NULL)
 		socket->receive_tail = packet;
 	socket->receive_packets++;
 	socket->receive_bytes += packet->length;
-	if (enabled)
-		hal_irq_enable();
+	waitq_wake_one(&socket->receive_waitq);
+	spin_unlock_irqrestore(&socket->lock, irq);
 	return 0;
 }
 
@@ -262,49 +321,50 @@ int
 socket_dequeue_packet(struct socket *socket, int flags,
 		      struct packet_buf **result)
 {
-	struct thread *thread;
 	uint64_t deadline = 0;
-	bool enabled;
+	unsigned long irq;
 
 	if (socket == NULL || result == NULL || (flags & ~MSG_DONTWAIT) != 0)
 		return EINVAL;
-	thread = thread_current();
+	irq = spin_lock_irqsave(&socket->lock);
 	if (socket->receive_timeout_ticks != 0 &&
 	    kern_deadline_after(sched_ticks(), socket->receive_timeout_ticks,
 	    &deadline) != 0)
+	{
+		spin_unlock_irqrestore(&socket->lock, irq);
 		return EOVERFLOW;
-	enabled = hal_irq_disable();
+	}
 	while (socket->receive_head == NULL) {
 		if (socket->error != 0) {
-			int error = socket_take_error(socket);
-			if (enabled)
-				hal_irq_enable();
+			int error = socket->error;
+			socket->error = 0;
+			spin_unlock_irqrestore(&socket->lock, irq);
 			return error;
 		}
-		if ((flags & MSG_DONTWAIT) != 0 || thread == NULL) {
-			if (enabled)
-				hal_irq_enable();
+		if (socket->lifecycle != SOCKET_OPEN) {
+			spin_unlock_irqrestore(&socket->lock, irq);
+			return EPIPE;
+		}
+		if ((flags & MSG_DONTWAIT) != 0 || thread_current() == NULL) {
+			spin_unlock_irqrestore(&socket->lock, irq);
 			return EAGAIN;
 		}
 		if (deadline != 0 && sched_ticks() >= deadline) {
-			socket->receive_waiter = NULL;
-			if (enabled)
-				hal_irq_enable();
+			spin_unlock_irqrestore(&socket->lock, irq);
 			return EAGAIN;
 		}
-		if (socket->receive_waiter != NULL &&
-		    socket->receive_waiter != thread) {
-			if (enabled)
-				hal_irq_enable();
-			return EBUSY;
-		}
-		socket->receive_waiter = thread;
-		sched_sleep(deadline);
-		if (signal_pending_unblocked(thread)) {
-			socket->receive_waiter = NULL;
-			if (enabled)
-				hal_irq_enable();
-			return EINTR;
+		{
+			uint64_t sequence = waitq_sequence(&socket->receive_waitq);
+			int error = waitq_sleep(&socket->receive_waitq, &socket->lock,
+			    sequence, deadline, WAITQ_INTERRUPTIBLE);
+			if (error == EINTR) {
+				spin_unlock_irqrestore(&socket->lock, irq);
+				return EINTR;
+			}
+			if (error == ETIMEDOUT) {
+				spin_unlock_irqrestore(&socket->lock, irq);
+				return EAGAIN;
+			}
 		}
 	}
 	*result = socket->receive_head;
@@ -316,8 +376,27 @@ socket_dequeue_packet(struct socket *socket, int flags,
 		socket->receive_packets--;
 	if (socket->receive_bytes >= (*result)->length)
 		socket->receive_bytes -= (*result)->length;
-	socket->receive_waiter = NULL;
-	if (enabled)
-		hal_irq_enable();
+	spin_unlock_irqrestore(&socket->lock, irq);
 	return 0;
 }
+
+static void
+socket_wake_queue(struct socket *socket, struct wait_queue *queue)
+{
+	unsigned long irq;
+
+	if (socket == NULL)
+		return;
+	irq = spin_lock_irqsave(&socket->lock);
+	waitq_wake_all(queue);
+	spin_unlock_irqrestore(&socket->lock, irq);
+}
+
+void socket_wake_receive(struct socket *socket)
+{ if (socket != NULL) socket_wake_queue(socket, &socket->receive_waitq); }
+void socket_wake_send(struct socket *socket)
+{ if (socket != NULL) socket_wake_queue(socket, &socket->send_waitq); }
+void socket_wake_connect(struct socket *socket)
+{ if (socket != NULL) socket_wake_queue(socket, &socket->connect_waitq); }
+void socket_wake_accept(struct socket *socket)
+{ if (socket != NULL) socket_wake_queue(socket, &socket->accept_waitq); }

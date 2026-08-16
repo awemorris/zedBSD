@@ -24,6 +24,7 @@ struct udp_endpoint {
 
 static struct udp_endpoint *udp_sockets;
 static uint16_t next_ephemeral;
+static struct spinlock udp_registry_lock;
 
 static struct udp_endpoint *udp_endpoint(struct socket *socket)
 {
@@ -31,7 +32,7 @@ static struct udp_endpoint *udp_endpoint(struct socket *socket)
 }
 
 static int
-udp_port_in_use(const struct udp_endpoint *skip, uint32_t address,
+udp_port_in_use_locked(const struct udp_endpoint *skip, uint32_t address,
 		uint16_t port)
 {
 	const struct udp_endpoint *endpoint;
@@ -45,7 +46,7 @@ udp_port_in_use(const struct udp_endpoint *skip, uint32_t address,
 }
 
 static int
-udp_allocate_port(struct udp_endpoint *endpoint)
+udp_allocate_port_locked(struct udp_endpoint *endpoint)
 {
 	unsigned attempts;
 
@@ -54,7 +55,8 @@ udp_allocate_port(struct udp_endpoint *endpoint)
 		uint16_t port = next_ephemeral++;
 		if (next_ephemeral < UDP_EPHEMERAL_FIRST)
 			next_ephemeral = UDP_EPHEMERAL_FIRST;
-		if (!udp_port_in_use(endpoint, endpoint->inet.local_address, port)) {
+		if (!udp_port_in_use_locked(endpoint,
+		    endpoint->inet.local_address, port)) {
 			endpoint->inet.local_port = port;
 			endpoint->inet.inet_flags |= INET_SOCKET_BOUND;
 			return 0;
@@ -64,20 +66,33 @@ udp_allocate_port(struct udp_endpoint *endpoint)
 }
 
 static int
+udp_allocate_port(struct udp_endpoint *endpoint)
+{
+	unsigned long irq = spin_lock_irqsave(&udp_registry_lock);
+	int error = udp_allocate_port_locked(endpoint);
+	spin_unlock_irqrestore(&udp_registry_lock, irq);
+	return error;
+}
+
+static int
 udp_bind(struct socket *socket, const struct sockaddr *address,
 	 socklen_t length)
 {
 	struct udp_endpoint *endpoint = udp_endpoint(socket);
+	unsigned long irq = spin_lock_irqsave(&udp_registry_lock);
 	int error = inet_socket_bind(&endpoint->inet, address, length);
 
-	if (error != 0)
+	if (error != 0) {
+		spin_unlock_irqrestore(&udp_registry_lock, irq);
 		return error;
+	}
 	if (endpoint->inet.local_port == 0)
-		return udp_allocate_port(endpoint);
-	if (udp_port_in_use(endpoint, endpoint->inet.local_address,
+		error = udp_allocate_port_locked(endpoint);
+	else if (udp_port_in_use_locked(endpoint, endpoint->inet.local_address,
 	    endpoint->inet.local_port))
-		return EADDRINUSE;
-	return 0;
+		error = EADDRINUSE;
+	spin_unlock_irqrestore(&udp_registry_lock, irq);
+	return error;
 }
 
 static int
@@ -85,13 +100,15 @@ udp_connect(struct socket *socket, const struct sockaddr *address,
 	    socklen_t length, unsigned io_flags)
 {
 	struct udp_endpoint *endpoint = udp_endpoint(socket);
+	unsigned long irq = spin_lock_irqsave(&udp_registry_lock);
 	int error = inet_socket_connect(&endpoint->inet, address, length);
 	(void)io_flags;
 
 	if (error == 0 && endpoint->inet.remote_port == 0)
 		error = EADDRNOTAVAIL;
 	if (error == 0 && endpoint->inet.local_port == 0)
-		error = udp_allocate_port(endpoint);
+		error = udp_allocate_port_locked(endpoint);
+	spin_unlock_irqrestore(&udp_registry_lock, irq);
 	return error;
 }
 
@@ -101,14 +118,14 @@ udp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 {
 	struct udp_endpoint *endpoint = udp_endpoint(socket);
 	struct sockaddr_in output;
-	const struct net_route *route;
+	struct net_route route;
 	struct net_device *device;
 	struct packet_buf *packet;
 	struct udp_wire *udp;
 	uint32_t destination, source, broadcast;
 	uint16_t destination_port, checksum;
 	void *payload;
-	int error;
+	int error, have_route;
 
 	if ((flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL)) != 0 ||
 	    (buffer == NULL && length != 0))
@@ -130,10 +147,14 @@ udp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 	if (endpoint->inet.local_port == 0 &&
 	    (error = udp_allocate_port(endpoint)) != 0)
 		return -error;
-	route = route_lookup(destination);
+	have_route = route_lookup_ref(destination, &route) == 0;
 	device = endpoint->inet.ifindex != 0 ?
-	    net_device_find_by_index(endpoint->inet.ifindex) :
-	    (route != NULL ? route->device : NULL);
+	    net_device_find_by_index_ref(endpoint->inet.ifindex) :
+	    (have_route ? route.device : NULL);
+	if (endpoint->inet.ifindex == 0 && device != NULL)
+		route.device = NULL;
+	if (have_route)
+		route_release(&route);
 	if (device == NULL)
 		return -ENETUNREACH;
 	error = inet_interface_address(device, &source, NULL, &broadcast);
@@ -149,22 +170,29 @@ udp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 		    (device->flags & (NET_DEVICE_UP | NET_DEVICE_RUNNING |
 		     NET_DEVICE_BROADCAST)) != (NET_DEVICE_UP |
 		     NET_DEVICE_RUNNING | NET_DEVICE_BROADCAST))
-			return -error;
+			goto fail;
 		source = 0;
 	}
 	if ((destination == INADDR_BROADCAST || destination == broadcast) &&
-	    !(endpoint->inet.inet_flags & INET_SOCKET_BROADCAST))
-		return -EACCES;
-	if (length > device->mtu - sizeof(struct ipv4_wire) - sizeof(*udp))
-		return -EMSGSIZE;
+	    !(endpoint->inet.inet_flags & INET_SOCKET_BROADCAST)) {
+		error = EACCES;
+		goto fail;
+	}
+	if (length > device->mtu - sizeof(struct ipv4_wire) - sizeof(*udp)) {
+		error = EMSGSIZE;
+		goto fail;
+	}
 	packet = packet_buf_alloc(PACKET_BUF_DEFAULT_HEADROOM);
-	if (packet == NULL)
-		return -ENOBUFS;
+	if (packet == NULL) {
+		error = ENOBUFS;
+		goto fail;
+	}
 	udp = packet_buf_append(packet, sizeof(*udp));
 	payload = packet_buf_append(packet, length);
 	if (udp == NULL || payload == NULL) {
 		packet_buf_free(packet);
-		return -ENOBUFS;
+		error = ENOBUFS;
+		goto fail;
 	}
 	memset(udp, 0, sizeof(*udp));
 	if (length != 0)
@@ -180,7 +208,12 @@ udp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 	error = source == 0 ?
 	    ipv4_output_source(device, destination, IPPROTO_UDP, source, packet) :
 	    ipv4_output(device, destination, IPPROTO_UDP, packet);
+	net_device_release(device);
 	return error == 0 ? (ssize_t)length : -error;
+
+fail:
+	net_device_release(device);
+	return -error;
 }
 
 static ssize_t
@@ -263,12 +296,14 @@ udp_close(struct socket *socket)
 {
 	struct udp_endpoint *endpoint = udp_endpoint(socket);
 	struct udp_endpoint **link;
+	unsigned long irq = spin_lock_irqsave(&udp_registry_lock);
 
 	for (link = &udp_sockets; *link != NULL; link = &(*link)->next)
 		if (*link == endpoint) {
 			*link = endpoint->next;
 			break;
 		}
+	spin_unlock_irqrestore(&udp_registry_lock, irq);
 	kern_free(endpoint);
 }
 
@@ -289,6 +324,7 @@ int
 udp_socket_create(int protocol, struct socket **result)
 {
 	struct udp_endpoint *endpoint;
+	unsigned long irq;
 
 	if (result == NULL || (protocol != 0 && protocol != IPPROTO_UDP))
 		return EPROTONOSUPPORT;
@@ -297,8 +333,10 @@ udp_socket_create(int protocol, struct socket **result)
 		return ENOMEM;
 	inet_socket_object_init(&endpoint->inet, SOCK_DGRAM, IPPROTO_UDP,
 	    &udp_ops);
+	irq = spin_lock_irqsave(&udp_registry_lock);
 	endpoint->next = udp_sockets;
 	udp_sockets = endpoint;
+	spin_unlock_irqrestore(&udp_registry_lock, irq);
 	*result = &endpoint->inet.socket;
 	return 0;
 }
@@ -308,6 +346,7 @@ udp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 {
 	const struct udp_wire *udp;
 	struct udp_endpoint *endpoint, *best = NULL;
+	unsigned long irq;
 	uint16_t source_port, destination_port, udp_length, checksum;
 
 	if (packet == NULL || packet->length < sizeof(*udp)) {
@@ -328,6 +367,7 @@ udp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 	}
 	source_port = wire_get16(udp->source);
 	destination_port = wire_get16(udp->destination);
+	irq = spin_lock_irqsave(&udp_registry_lock);
 	for (endpoint = udp_sockets; endpoint != NULL; endpoint = endpoint->next) {
 		if (endpoint->inet.local_port != destination_port ||
 		    (endpoint->inet.local_address != 0 &&
@@ -343,6 +383,9 @@ udp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 		if (best == NULL)
 			best = endpoint;
 	}
+	if (best != NULL && !socket_tryref(&best->inet.socket))
+		best = NULL;
+	spin_unlock_irqrestore(&udp_registry_lock, irq);
 	if (best == NULL) {
 		packet_buf_free(packet);
 		return 0;
@@ -361,7 +404,11 @@ udp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 		memcpy(packet->source_address, &address, sizeof(address));
 		packet->source_length = sizeof(address);
 	}
-	return socket_enqueue_packet(&best->inet.socket, packet);
+	{
+		int error = socket_enqueue_packet(&best->inet.socket, packet);
+		socket_release(&best->inet.socket);
+		return error;
+	}
 }
 
 int
@@ -369,5 +416,7 @@ udp_init(void)
 {
 	udp_sockets = NULL;
 	next_ephemeral = UDP_EPHEMERAL_FIRST;
+	spin_init(&udp_registry_lock, LOCK_RANK_SOCKET_REGISTRY,
+	    "UDP socket registry");
 	return ipv4_protocol_register(IPPROTO_UDP, udp_input);
 }

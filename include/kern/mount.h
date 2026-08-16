@@ -9,6 +9,9 @@
 #define ZEDBSD_KERN_MOUNT_H
 
 #include "kern/disk.h"
+#include "kern/atomic.h"
+#include "kern/lock.h"
+#include "kern/waitq.h"
 #include <limits.h>
 
 #ifndef PATH_MAX
@@ -36,6 +39,14 @@ struct path {
 	struct inode *p_inode;
 };
 
+enum mount_state {
+	MOUNT_STATE_FREE = 0,
+	MOUNT_STATE_PREPARING,
+	MOUNT_STATE_LIVE,
+	MOUNT_STATE_DYING,
+	MOUNT_STATE_DEAD,
+};
+
 struct filesystem_type {
 	const char *fs_name;
 	unsigned fs_flags;
@@ -51,7 +62,10 @@ struct mount {
 	char m_path[ZEDBSD_PATH_MAX];
 	char m_name[NAME_MAX + 1U];
 	unsigned m_flags;
-	unsigned m_usecount;
+	refcount_t m_refs;
+	struct mutex m_lock;
+	struct wait_queue m_waitq;
+	enum mount_state m_state;
 	unsigned m_internal_flags;
 	struct disk *m_disk;
 	const struct filesystem_type *m_type;
@@ -71,6 +85,8 @@ struct fat_mount_args { const char *fspec; };
 int filesystem_register(const struct filesystem_type *);
 void mount_reset(void);
 void path_init(struct path *);
+void mount_ref(struct mount *);
+void mount_release(struct mount *);
 void path_set(struct path *, struct mount *, struct inode *);
 void path_ref(struct path *);
 void path_release(struct path *);
@@ -78,7 +94,7 @@ int path_equal(const struct path *, const struct path *);
 int mount_rootfs(void);
 struct inode *mount_root_inode(void);
 int mount_root_create(const char *, int, void *, struct mount **);
-struct mount *mount_root_get(void);
+struct mount *mount_root_get_ref(void);
 int mount_at(const char *, const struct path *, const char *, int, void *,
 	     struct mount **);
 int mount_bind_at(const struct path *, const struct path *, const char *,
@@ -90,7 +106,7 @@ int mount_is_private(const struct mount *);
 int mount_sync(struct mount *);
 int mount(const char *, const char *, int, void *);
 int unmount(const char *, int);
-struct mount *mount_find(const char *);
+struct mount *mount_find_ref(const char *);
 struct mount *mount_for_inode(const struct inode *);
 int mount_follow(struct inode *, struct inode **);
 int mount_cross_parent(struct inode *, struct inode **);

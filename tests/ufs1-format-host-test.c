@@ -52,6 +52,33 @@ main(void)
 	assert(super.swapped && super.inodefmt == UFS1_44INODEFMT);
 	ufs1_put32(data, UFS1_FS_BSIZE, 4096, 1);
 	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_NINDIR, 1024, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_INOPB, 63, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_OLD_DSIZE, 4097, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_OLD_SIZE, 4097, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_IBLKNO, 56, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_CGSIZE, 8193, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_BSHIFT, 12, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_SBSIZE, UFS1_SBLOCK_SIZE + 1U, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
+	assert(ufs1_super_decode(data, UFS1_FS_STRUCT_SIZE - 1U, 8192,
+	    &super) == EINVAL);
 	memset(data, 0, sizeof(data));
 	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) ==
 	    EOPNOTSUPP);

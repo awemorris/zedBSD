@@ -7,6 +7,7 @@
 #include "kern/disk.h"
 #include "kern/file.h"
 #include "kern/inode.h"
+#include "kern/lock.h"
 #include "kern/mount.h"
 #include "kern/namei.h"
 
@@ -34,13 +35,7 @@ struct loop_device {
 
 static struct loop_device loops[LOOP_MAX_DEVICES]
 	__attribute__((section(".vfs_bss")));
-
-static void
-loop_unlock(bool enabled)
-{
-	if (enabled)
-		hal_irq_enable();
-}
+static struct spinlock loop_lock;
 
 static int
 loop_open(struct disk *disk)
@@ -116,6 +111,7 @@ int
 loop_init(void)
 {
 	unsigned i;
+	spin_init(&loop_lock, LOCK_RANK_DISK, "loop registry");
 	memset(loops, 0, sizeof(loops));
 	for (i = 0; i < LOOP_MAX_DEVICES; i++)
 		loops[i].index = i;
@@ -126,13 +122,17 @@ int
 loop_get_index(const struct disk *disk, unsigned *index_out)
 {
 	unsigned i;
+	unsigned long irq;
 	if (disk == NULL || index_out == NULL)
 		return EINVAL;
+	irq = spin_lock_irqsave(&loop_lock);
 	for (i = 0; i < LOOP_MAX_DEVICES; i++)
 		if (loops[i].attached && loops[i].disk == disk) {
 			*index_out = i;
+			spin_unlock_irqrestore(&loop_lock, irq);
 			return 0;
 		}
+	spin_unlock_irqrestore(&loop_lock, irq);
 	return ENODEV;
 }
 
@@ -174,7 +174,7 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	struct disk *disk;
 	unsigned i;
 	int error;
-	bool enabled;
+	unsigned long irq;
 
 	if (disk_out == NULL)
 		return EINVAL;
@@ -183,9 +183,9 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	if (error != 0)
 		return error;
 	backing_inode = backing->f_inode;
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&loop_lock);
 	if ((backing->f_inode->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
-		loop_unlock(enabled);
+		spin_unlock_irqrestore(&loop_lock, irq);
 		return EBUSY;
 	}
 	for (i = 0; i < LOOP_MAX_DEVICES; i++)
@@ -195,11 +195,11 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 			break;
 		}
 	if (loop == NULL) {
-		loop_unlock(enabled);
+		spin_unlock_irqrestore(&loop_lock, irq);
 		return ENOSPC;
 	}
 	backing->f_inode->i_flags |= INODE_LOOPFILE;
-	loop_unlock(enabled);
+	spin_unlock_irqrestore(&loop_lock, irq);
 
 	file_ref(backing);
 	inode_ref(backing->f_inode);
@@ -228,23 +228,23 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 		(void)disk_destroy(disk);
 		goto fail_refs;
 	}
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&loop_lock);
 	loop->attached = true;
 	loop->reserved = false;
-	loop_unlock(enabled);
+	spin_unlock_irqrestore(&loop_lock, irq);
 	*disk_out = disk;
 	return 0;
 
 fail_refs:
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&loop_lock);
 	backing_inode->i_flags &= ~INODE_LOOPFILE;
-	loop_unlock(enabled);
+	spin_unlock_irqrestore(&loop_lock, irq);
 	inode_release(backing_inode);
 	(void)file_close(backing);
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&loop_lock);
 	memset(loop, 0, sizeof(*loop));
 	loop->index = i;
-	loop_unlock(enabled);
+	spin_unlock_irqrestore(&loop_lock, irq);
 	return error;
 }
 
@@ -275,19 +275,18 @@ loop_detach(struct disk *disk)
 {
 	struct loop_device *loop;
 	int error;
-	bool enabled;
+	unsigned long irq;
 	unsigned index;
 	if (loop_get_index(disk, &index) != 0)
 		return ENODEV;
 	loop = &loops[index];
-	enabled = hal_irq_disable();
-	if (loop->detaching || disk->d_open_count != 0 ||
-	    disk->d_inflight != 0 || disk->d_refcount != 1) {
-		loop_unlock(enabled);
+	irq = spin_lock_irqsave(&loop_lock);
+	if (loop->detaching) {
+		spin_unlock_irqrestore(&loop_lock, irq);
 		return EBUSY;
 	}
 	loop->detaching = true;
-	loop_unlock(enabled);
+	spin_unlock_irqrestore(&loop_lock, irq);
 	if ((loop->flags & LOOP_READ_WRITE) != 0) {
 		error = file_fsync(loop->backing);
 		if (error != 0)
@@ -299,9 +298,9 @@ loop_detach(struct disk *disk)
 	error = disk_destroy(disk);
 	if (error != 0)
 		return error; /* Invariant failure: keep the slot pinned for diagnosis. */
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&loop_lock);
 	loop->backing_inode->i_flags &= ~INODE_LOOPFILE;
-	loop_unlock(enabled);
+	spin_unlock_irqrestore(&loop_lock, irq);
 	inode_release(loop->backing_inode);
 	(void)file_close(loop->backing);
 	memset(loop, 0, sizeof(*loop));
@@ -309,8 +308,8 @@ loop_detach(struct disk *disk)
 	return 0;
 
 retryable:
-	enabled = hal_irq_disable();
+	irq = spin_lock_irqsave(&loop_lock);
 	loop->detaching = false;
-	loop_unlock(enabled);
+	spin_unlock_irqrestore(&loop_lock, irq);
 	return error;
 }

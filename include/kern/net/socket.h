@@ -8,6 +8,9 @@
 #ifndef ZEDBSD_KERN_NET_SOCKET_H
 #define ZEDBSD_KERN_NET_SOCKET_H
 
+#include <kern/atomic.h>
+#include <kern/lock.h>
+#include <kern/waitq.h>
 #include <zedbsd/socket.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -21,6 +24,12 @@ struct filedesc;
 struct packet_buf;
 struct socket;
 struct thread;
+
+enum socket_lifecycle {
+	SOCKET_OPEN = 1,
+	SOCKET_CLOSING,
+	SOCKET_CLOSED
+};
 
 struct socket_ops {
 	int (*bind)(struct socket *, const struct sockaddr *, socklen_t);
@@ -47,7 +56,13 @@ struct socket {
 	int state;
 	int error;
 	unsigned flags;
-	unsigned refcount;
+	refcount_t refs;
+	struct spinlock lock;
+	struct wait_queue receive_waitq;
+	struct wait_queue send_waitq;
+	struct wait_queue connect_waitq;
+	struct wait_queue accept_waitq;
+	enum socket_lifecycle lifecycle;
 	const struct socket_ops *ops;
 	void *private_data;
 	struct packet_buf *receive_head;
@@ -60,10 +75,6 @@ struct socket {
 	unsigned reuse_address;
 	unsigned read_shutdown;
 	unsigned write_shutdown;
-	struct thread *receive_waiter;
-	struct thread *send_waiter;
-	struct thread *connect_waiter;
-	struct thread *accept_waiter;
 };
 
 #define SOCKET_IO_NONBLOCK 0x0001U
@@ -88,6 +99,7 @@ int socket_getsockopt_common(struct socket *, int level, int option,
 void socket_init_object(struct socket *socket, int family, int type,
 			int protocol, const struct socket_ops *ops);
 void socket_ref(struct socket *socket);
+int socket_tryref(struct socket *socket);
 void socket_release(struct socket *socket);
 int socket_enqueue_packet(struct socket *socket, struct packet_buf *packet);
 int socket_requeue_packet_front(struct socket *socket,
@@ -101,6 +113,10 @@ void socket_file_ref_put(struct socket_file_ref *);
 unsigned socket_file_effective_flags(const struct socket_file_ref *, int);
 int socket_take_error(struct socket *);
 void socket_set_error(struct socket *, int);
+void socket_wake_receive(struct socket *);
+void socket_wake_send(struct socket *);
+void socket_wake_connect(struct socket *);
+void socket_wake_accept(struct socket *);
 
 int packet_socket_init(void);
 void packet_socket_deliver(const struct packet_buf *packet,

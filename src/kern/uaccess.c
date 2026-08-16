@@ -66,11 +66,13 @@ uaccess_pin(uintptr_t address, size_t size, uint32_t prot,
 	if (size == 0)
 		return 0;
 	vm = current_vmspace();
-	if (vm == NULL)
+	if (!vmspace_tryref(vm))
 		return EFAULT;
 	error = vmspace_wire_range(vm, address, size, prot);
-	if (error != 0)
+	if (error != 0) {
+		vmspace_free(vm);
 		return error == ENOMEM ? ENOMEM : EFAULT;
+	}
 	pin->vm = vm;
 	pin->address = address;
 	pin->size = size;
@@ -85,6 +87,7 @@ uaccess_unpin(struct uaccess_pin *pin)
 	if (pin == NULL || !pin->active)
 		return;
 	vmspace_unwire_range(pin->vm, pin->address, pin->size);
+	vmspace_free(pin->vm);
 	memset(pin, 0, sizeof(*pin));
 }
 

@@ -17,6 +17,7 @@ struct packet_endpoint {
 };
 
 static struct packet_endpoint *packet_sockets;
+static struct spinlock packet_registry_lock;
 
 static struct packet_endpoint *
 packet_endpoint(struct socket *socket)
@@ -30,14 +31,18 @@ packet_bind(struct socket *socket, const struct sockaddr *address,
 {
 	const struct sockaddr_l2 *l2 = (const struct sockaddr_l2 *)address;
 	struct packet_endpoint *endpoint = packet_endpoint(socket);
+	struct net_device *device;
 	uint16_t protocol;
 
 	if (address == NULL || length < sizeof(*l2) ||
 	    l2->sl2_family != AF_PACKET)
 		return EINVAL;
-	if (l2->sl2_ifindex != 0 &&
-	    net_device_find_by_index(l2->sl2_ifindex) == NULL)
-		return ENODEV;
+	if (l2->sl2_ifindex != 0) {
+		device = net_device_find_by_index_ref(l2->sl2_ifindex);
+		if (device == NULL)
+			return ENODEV;
+		net_device_release(device);
+	}
 	protocol = net_ntohs(l2->sl2_protocol);
 	if (endpoint->protocol != 0 && protocol != 0 &&
 	    endpoint->protocol != protocol)
@@ -70,21 +75,27 @@ packet_sendto(struct socket *socket, const void *buffer, size_t length,
 	} else {
 		ifindex = endpoint->ifindex;
 	}
-	device = net_device_find_by_index(ifindex);
+	device = net_device_find_by_index_ref(ifindex);
 	if (device == NULL)
 		return -ENODEV;
-	if (length > device->mtu + ETHERNET_HEADER_LENGTH)
+	if (length > device->mtu + ETHERNET_HEADER_LENGTH) {
+		net_device_release(device);
 		return -EMSGSIZE;
+	}
 	packet = packet_buf_alloc(0);
-	if (packet == NULL)
+	if (packet == NULL) {
+		net_device_release(device);
 		return -ENOBUFS;
+	}
 	data = packet_buf_append(packet, length);
 	if (data == NULL) {
 		packet_buf_free(packet);
+		net_device_release(device);
 		return -EMSGSIZE;
 	}
 	memcpy(data, buffer, length);
 	error = net_device_transmit(device, packet);
+	net_device_release(device);
 	return error == 0 ? (ssize_t)length : -error;
 }
 
@@ -120,6 +131,7 @@ packet_close(struct socket *socket)
 {
 	struct packet_endpoint *endpoint = packet_endpoint(socket);
 	struct packet_endpoint **link;
+	unsigned long irq = spin_lock_irqsave(&packet_registry_lock);
 
 	for (link = &packet_sockets; *link != NULL; link = &(*link)->next) {
 		if (*link != endpoint)
@@ -127,6 +139,7 @@ packet_close(struct socket *socket)
 		*link = endpoint->next;
 		break;
 	}
+	spin_unlock_irqrestore(&packet_registry_lock, irq);
 	kern_free(endpoint);
 }
 
@@ -141,6 +154,7 @@ static int
 packet_create(int type, int protocol, struct socket **result)
 {
 	struct packet_endpoint *endpoint;
+	unsigned long irq;
 
 	if (type != SOCK_RAW)
 		return EPROTONOSUPPORT;
@@ -150,8 +164,10 @@ packet_create(int type, int protocol, struct socket **result)
 	socket_init_object(&endpoint->socket, AF_PACKET, type, protocol,
 			   &packet_ops);
 	endpoint->protocol = net_ntohs((uint16_t)protocol);
+	irq = spin_lock_irqsave(&packet_registry_lock);
 	endpoint->next = packet_sockets;
 	packet_sockets = endpoint;
+	spin_unlock_irqrestore(&packet_registry_lock, irq);
 	*result = &endpoint->socket;
 	return 0;
 }
@@ -164,6 +180,8 @@ int
 packet_socket_init(void)
 {
 	packet_sockets = NULL;
+	spin_init(&packet_registry_lock, LOCK_RANK_SOCKET_REGISTRY,
+	    "packet socket registry");
 	return socket_family_register(AF_PACKET, &packet_family);
 }
 
@@ -171,23 +189,37 @@ void
 packet_socket_deliver(const struct packet_buf *packet,
 		      const uint8_t source[6], uint8_t packet_type)
 {
-	struct packet_endpoint *endpoint;
+	struct packet_endpoint *endpoint, *snapshot[SOCKET_MAX];
+	unsigned count = 0, index;
+	unsigned long irq;
 
+	irq = spin_lock_irqsave(&packet_registry_lock);
 	for (endpoint = packet_sockets; endpoint != NULL;
-	     endpoint = endpoint->next) {
+	     endpoint = endpoint->next)
+		if (count < SOCKET_MAX && socket_tryref(&endpoint->socket))
+			snapshot[count++] = endpoint;
+	spin_unlock_irqrestore(&packet_registry_lock, irq);
+	for (index = 0; index < count; index++) {
 		struct packet_buf *copy;
 		struct sockaddr_l2 address;
+		endpoint = snapshot[index];
 
 		if (endpoint->ifindex != 0 &&
-		    endpoint->ifindex != packet->device->ifindex)
+		    endpoint->ifindex != packet->device->ifindex) {
+			socket_release(&endpoint->socket);
 			continue;
+		}
 		if (endpoint->protocol != 0 &&
 		    endpoint->protocol != ETHERNET_TYPE_ALL &&
-		    endpoint->protocol != packet->protocol)
+		    endpoint->protocol != packet->protocol) {
+			socket_release(&endpoint->socket);
 			continue;
+		}
 		copy = packet_buf_copy(packet);
-		if (copy == NULL)
+		if (copy == NULL) {
+			socket_release(&endpoint->socket);
 			continue;
+		}
 		memset(&address, 0, sizeof(address));
 		address.sl2_family = AF_PACKET;
 		address.sl2_protocol = net_htons(packet->protocol);
@@ -199,5 +231,6 @@ packet_socket_deliver(const struct packet_buf *packet,
 		memcpy(copy->source_address, &address, sizeof(address));
 		copy->source_length = sizeof(address);
 		(void)socket_enqueue_packet(&endpoint->socket, copy);
+		socket_release(&endpoint->socket);
 	}
 }

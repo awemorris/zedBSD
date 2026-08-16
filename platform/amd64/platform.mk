@@ -15,7 +15,7 @@ AMD64_CFLAGS := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
 	-Os -Wall -Wextra -Werror
 AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
 
-AMD64_HAL_SOURCES := src/hal/amd64/asm.c src/hal/amd64/lib.c \
+AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/amd64/asm.c src/hal/amd64/lib.c \
 	src/hal/amd64/page.c src/hal/amd64/space.c src/hal/amd64/cmain.c \
 	src/hal/amd64/descriptor.c src/hal/amd64/int.c src/hal/amd64/irq.c \
 	src/hal/amd64/task.c src/hal/amd64/percpu.c src/hal/amd64/smp.c \
@@ -73,6 +73,12 @@ $(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.S
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -D_ASM_SRC_ -c $< -o $@
 
 $(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
+
+# Shared x86 HAL sources must use the amd64 flags as well.  Without this
+# rule the generic i386 pattern can leave a 32-bit object in build/amd64.
+$(BUILD)/src/hal/x86/%.o: src/hal/x86/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
 
