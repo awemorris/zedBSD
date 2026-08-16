@@ -249,8 +249,11 @@ int console_device_register(void)
 		return error;
 	}
 	error = cdev_register("console", 0x00010000U, &console_ops, NULL);
-
-	if (error == 0)
-		hal_cons_set_mode(HAL_CONS_TERMINAL);
-	return error;
+	if (error != 0) {
+		input_started = 0;
+		return error;
+	}
+	thread_start(worker);
+	hal_cons_set_mode(HAL_CONS_TERMINAL);
+	return 0;
 }

@@ -720,10 +720,7 @@ pc98_keyboard_is_down(const struct pc98_keyboard *kb, int key)
 #define KBD_DATA 0x41U
 #define KBD_STATUS 0x43U
 #define KBD_RXRDY 0x02U
-#define KBD_ERROR 0x38U
-#define PC98_IO_WAIT 0x5fU
 #define QUEUE_SIZE 32U
-#define KBD_DRAIN_LIMIT 256U
 
 static struct pc98_keyboard keyboard;
 static unsigned events[QUEUE_SIZE];
@@ -736,52 +733,6 @@ static uint8_t inb(uint16_t port)
 	return value;
 }
 
-static void outb(uint16_t port, uint8_t value)
-{
-	__asm__ volatile ("outb %0, %w1" : : "a"(value), "Nd"(port));
-}
-
-/* Port 0x5f is the PC-98's hardware I/O-delay port.  Two accesses take a
- * couple of microseconds even before the kernel clock is initialized. */
-static void pc98_keyboard_delay(unsigned usec)
-{
-	while (usec-- != 0) {
-		outb(PC98_IO_WAIT, 0);
-		outb(PC98_IO_WAIT, 0);
-	}
-}
-
-static void pc98_keyboard_control(uint8_t value)
-{
-	outb(KBD_STATUS, value);
-	pc98_keyboard_delay(20);
-}
-
-/* Reset the uPD8251 from an arbitrary firmware state.  QEMU deliberately
- * resets it with reception disabled, and real machines require the delays
- * between command writes.  This is the sequence used by the working Linux
- * PC-98 keyboard driver (derived from NetBSD/pc98). */
-static void pc98_keyboard_hw_init(void)
-{
-	pc98_keyboard_control(0x00);
-	pc98_keyboard_control(0x00);
-	pc98_keyboard_control(0x00);
-	pc98_keyboard_control(0x40);
-	pc98_keyboard_control(0x5e);
-	pc98_keyboard_control(0x3a);
-	pc98_keyboard_control(0x32);
-	pc98_keyboard_control(0x16);
-
-	pc98_keyboard_delay(5000);
-	if ((inb(KBD_STATUS) & KBD_RXRDY) != 0)
-		(void)inb(KBD_DATA);
-	pc98_keyboard_control(0x17);
-	outb(KBD_DATA, 0x00);
-	pc98_keyboard_delay(20);
-	pc98_keyboard_control(0x16);
-	pc98_keyboard_delay(50000);
-}
-
 unsigned hal_cons_modifiers(void)
 {
 	return (keyboard.shift ? HAL_KEY_EVENT_SHIFT : 0) |
@@ -791,28 +742,10 @@ unsigned hal_cons_modifiers(void)
 
 static void pump(void)
 {
-	unsigned count;
-
-	for (count = 0; count < KBD_DRAIN_LIMIT; count++) {
-		uint8_t status = inb(KBD_STATUS);
-		uint8_t raw;
-		int key;
+	while ((inb(KBD_STATUS) & KBD_RXRDY) != 0) {
+		uint8_t raw = inb(KBD_DATA);
+		int key = pc98_keyboard_feed(&keyboard, raw);
 		unsigned next;
-
-		if ((status & (KBD_RXRDY | KBD_ERROR)) == 0)
-			break;
-		if ((status & KBD_ERROR) != 0) {
-			/* Clear parity, overrun, and framing errors.  A missing break
-			 * byte may otherwise leave modifiers permanently pressed. */
-			pc98_keyboard_control(0x16);
-			pc98_keyboard_reset(&keyboard);
-		}
-		if ((status & KBD_RXRDY) == 0)
-			continue;
-		raw = inb(KBD_DATA);
-		if ((status & KBD_ERROR) != 0)
-			continue;
-		key = pc98_keyboard_feed(&keyboard, raw);
 
 		if (key == 0)
 			continue;
@@ -861,8 +794,5 @@ void i386_bsp_cons_init(void)
 {
 	pc98_keyboard_reset(&keyboard);
 	head = tail = 0;
-	pc98_keyboard_hw_init();
-	pump();
-	tail = head;
 	hal_cons_reset();
 }
