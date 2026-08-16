@@ -211,10 +211,10 @@ $(BUILD)/tests/ufs1-vfs-host-test: tests/ufs1-vfs-host-test.c \
 		$(VFS_CORE_SOURCES) $(KERN_UFS1_SOURCES) tests/vfs-host-stubs.c $< -o $@
 
 $(BUILD)/tests/vmspace-host-test: tests/vmspace-host-test.c \
-	src/kern/vmspace.c src/kern/vm-object.c
+	src/kern/vmspace.c src/kern/vm-object.c tests/vm-sync-host-stubs.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vmspace.c \
-		src/kern/vm-object.c $< -o $@
+		src/kern/vm-object.c tests/vm-sync-host-stubs.c $< -pthread -o $@
 
 $(BUILD)/tests/vm-commit-host-test: tests/vm-commit-host-test.c \
 	src/kern/vm-commit.c

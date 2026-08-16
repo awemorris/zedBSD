@@ -38,8 +38,8 @@ struct task_info {
 	void *private_data;
 	uintptr_t tls;
 	void *active_user_frame;
-	struct interrupt_frame signal_frame;
-	uint32 signal_token;
+	struct interrupt_frame signal_frame[HAL_SIGNAL_NEST_MAX];
+	uint32 signal_token[HAL_SIGNAL_NEST_MAX];
 	unsigned signal_depth;
 };
 

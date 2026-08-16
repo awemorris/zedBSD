@@ -18,6 +18,15 @@
 struct process;
 
 #define THREAD_FLAG_IDLE 0x00000001U
+#define SIGNAL_NEST_MAX HAL_SIGNAL_NEST_MAX
+
+struct thread_signal_level {
+	uint32_t token;
+	uint32_t saved_mask;
+	uint32_t restart_number;
+	uintptr_t restart_args[HAL_SYSCALL_ARGS];
+	unsigned restart_on_return;
+};
 
 enum thread_state {
 	THREAD_NEW = 0,
@@ -48,9 +57,11 @@ struct thread {
 	void *kernel_arg;
 	uint32_t signal_mask;
 	uint32_t signal_pending;
-	uint32_t signal_saved_mask;
 	uint32_t signal_suspend_mask;
 	uint32_t signal_token;
+	uint32_t signal_token_counter;
+	unsigned signal_depth;
+	struct thread_signal_level signal_levels[SIGNAL_NEST_MAX];
 	unsigned signal_suspended;
 	uint32_t syscall_restart_number;
 	uintptr_t syscall_restart_args[HAL_SYSCALL_ARGS];

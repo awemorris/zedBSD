@@ -26,6 +26,67 @@ static struct spinlock process_tree_lock = {
 };
 #define PROCESS_EXT __attribute__((section(".hightext")))
 
+/* Caller holds process_tree_lock. */
+static void
+process_group_recheck_locked(pid_t session, pid_t pgrp, int notify)
+{
+	struct process *member;
+	int have_member = 0, was_orphaned = 1, orphaned = 1, stopped = 0;
+
+	if (pgrp <= 0)
+		return;
+	for (member = all_processes; member != NULL; member = member->all_next) {
+		struct process *parent;
+		if (member->state == PROCESS_DEAD || member->session != session ||
+		    member->pgrp != pgrp)
+			continue;
+		have_member = 1;
+		if ((member->flags & PROCESS_PGRP_ORPHANED) == 0)
+			was_orphaned = 0;
+		if (member->state == PROCESS_STOPPED)
+			stopped = 1;
+		parent = member->parent;
+		if (parent != NULL && parent != &process0 &&
+		    parent->session == session && parent->pgrp != pgrp)
+			orphaned = 0;
+	}
+	if (!have_member)
+		return;
+	for (member = all_processes; member != NULL; member = member->all_next) {
+		if (member->state == PROCESS_DEAD || member->session != session ||
+		    member->pgrp != pgrp)
+			continue;
+		if (orphaned)
+			member->flags |= PROCESS_PGRP_ORPHANED;
+		else
+			member->flags &= ~PROCESS_PGRP_ORPHANED;
+		if (notify && !was_orphaned && orphaned && stopped)
+			member->flags |= PROCESS_PGRP_NOTIFY;
+	}
+}
+
+static void
+process_group_deliver_notifications(void)
+{
+	struct process *process;
+	pid_t cursor = -1;
+
+	while ((process = process_find_next_ref(cursor)) != NULL) {
+		unsigned long irq;
+		int notify;
+		cursor = process->pid;
+		irq = spin_lock_irqsave(&process_tree_lock);
+		notify = (process->flags & PROCESS_PGRP_NOTIFY) != 0;
+		process->flags &= ~PROCESS_PGRP_NOTIFY;
+		spin_unlock_irqrestore(&process_tree_lock, irq);
+		if (notify) {
+			(void)signal_send_process(process, SIGHUP);
+			(void)signal_send_process(process, SIGCONT);
+		}
+		process_release(process);
+	}
+}
+
 static PROCESS_EXT void
 child_waiters_wake(struct process *parent)
 {
@@ -40,6 +101,9 @@ reparent_children(struct process *process)
 	int wake_reaper = 0;
 
 	while ((child = process->children) != NULL) {
+		pid_t child_session = child->session;
+		pid_t child_pgrp = child->pgrp;
+		process_group_recheck_locked(child_session, child_pgrp, 0);
 		process->children = child->sibling;
 		child->parent = &process0;
 		child->flags |= PROCESS_AUTOREAP;
@@ -47,6 +111,7 @@ reparent_children(struct process *process)
 		process0.children = child;
 		if (child->state == PROCESS_ZOMBIE)
 			wake_reaper = 1;
+		process_group_recheck_locked(child_session, child_pgrp, 1);
 	}
 	if (wake_reaper && reaper_thread != NULL)
 		sched_wakeup(reaper_thread);
@@ -239,10 +304,17 @@ process_setpgid(struct process *caller, pid_t pid, pid_t pgid)
 		if (member == NULL)
 			error = EPERM;
 	}
-	if (error == 0)
+	if (error == 0) {
+		pid_t old_pgrp = target->pgrp;
+		process_group_recheck_locked(target->session, old_pgrp, 0);
+		process_group_recheck_locked(target->session, pgid, 0);
 		target->pgrp = pgid;
+		process_group_recheck_locked(target->session, old_pgrp, 1);
+		process_group_recheck_locked(target->session, pgid, 1);
+	}
 out:
 	spin_unlock_irqrestore(&process_tree_lock, irq);
+	process_group_deliver_notifications();
 	if (target != caller)
 		process_release(target);
 	return error;
@@ -261,9 +333,17 @@ process_setsid(struct process *process)
 			spin_unlock_irqrestore(&process_tree_lock, irq);
 			return -EPERM;
 		}
-	process->session = process->pid;
-	process->pgrp = process->pid;
+	process_group_recheck_locked(process->session, process->pgrp, 0);
+	{
+		pid_t old_session = process->session;
+		pid_t old_pgrp = process->pgrp;
+		process->session = process->pid;
+		process->pgrp = process->pid;
+		process_group_recheck_locked(old_session, old_pgrp, 1);
+	}
+	process_group_recheck_locked(process->session, process->pgrp, 0);
 	spin_unlock_irqrestore(&process_tree_lock, irq);
+	process_group_deliver_notifications();
 	return process->pid;
 }
 
@@ -392,8 +472,10 @@ process_publish(struct process *process)
 	process->sibling = process->parent->children;
 	process->parent->children = process;
 	process->state = PROCESS_RUNNING;
+	process_group_recheck_locked(process->session, process->pgrp, 0);
 	waitq_wake_all(&process->parent->child_waitq);
 	spin_unlock_irqrestore(&process_tree_lock, irq);
+	process_group_deliver_notifications();
 }
 
 void
@@ -412,6 +494,7 @@ process_free_mem(struct process *process)
 	struct filedesc *fd;
 	struct ucred *cred;
 	struct cwdinfo *cwdi;
+	pid_t old_session, old_pgrp;
 
 	if (process == NULL || process == &process0 ||
 	    (curthread != NULL && process == curthread->proc))
@@ -432,6 +515,9 @@ process_free_mem(struct process *process)
 	spin_unlock_irqrestore(&process->lock, process_irq);
 
 	tree_irq = spin_lock_irqsave(&process_tree_lock);
+	old_session = process->session;
+	old_pgrp = process->pgrp;
+	process_group_recheck_locked(old_session, old_pgrp, 0);
 	if (process->children != NULL)
 		HAL_FATAL("freeing process with children");
 	link = &all_processes;
@@ -447,7 +533,9 @@ process_free_mem(struct process *process)
 			*child_link = process->sibling;
 	}
 	process->state = PROCESS_DEAD;
+	process_group_recheck_locked(old_session, old_pgrp, 1);
 	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
+	process_group_deliver_notifications();
 	if (vmspace != NULL)
 		vmspace_free(vmspace);
 	filedesc_destroy(fd);
@@ -781,6 +869,7 @@ process_exit_final(int thread_status, int wait_status)
 			process->flags |= PROCESS_AUTOREAP;
 	}
 	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
+	process_group_deliver_notifications();
 	if (parent != NULL)
 		process_release(parent);
 	thread_exit(thread_status);

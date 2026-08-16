@@ -31,6 +31,10 @@ _Static_assert(LONG_MAX == INT_MAX, "ILP32 LONG_MAX");
 #endif
 
 static volatile unsigned int caught_signals;
+static volatile unsigned int nested_signal_depth;
+static volatile unsigned int nested_signal_max_depth;
+static volatile unsigned int nested_signal_error;
+static pid_t nested_signal_pid;
 
 static void
 report_stage(unsigned int stage)
@@ -45,6 +49,22 @@ static void
 catch_signal(int signo)
 {
 	caught_signals |= 1U << (unsigned int)signo;
+}
+
+static void
+catch_nested_signal(int signo)
+{
+	unsigned int depth = ++nested_signal_depth;
+
+	if (signo != SIGUSR1 || depth > 8U)
+		nested_signal_error = 1;
+	if (depth > nested_signal_max_depth)
+		nested_signal_max_depth = depth;
+	if (depth < 8U && kill(nested_signal_pid, SIGUSR1) != 0)
+		nested_signal_error = 1;
+	if (nested_signal_depth != depth)
+		nested_signal_error = 1;
+	nested_signal_depth--;
 }
 
 static int
@@ -196,6 +216,24 @@ run_test(int argc, char **argv, char **envp)
 	if (kill(getpid(), SIGUSR1) != 0 ||
 	    (caught_signals & (1U << SIGUSR1)) == 0)
 		return 10;
+	/* A signal may interrupt a handler; kernel and HAL frames must be LIFO. */
+	{
+		struct sigaction nested;
+
+		memset(&nested, 0, sizeof(nested));
+		nested.sa_handler = (uint64_t)(uintptr_t)catch_nested_signal;
+		nested.sa_flags = SA_NODEFER;
+		nested_signal_pid = getpid();
+		nested_signal_depth = 0;
+		nested_signal_max_depth = 0;
+		nested_signal_error = 0;
+		if (sigaction(SIGUSR1, &nested, NULL) != 0 ||
+		    kill(nested_signal_pid, SIGUSR1) != 0 ||
+		    nested_signal_depth != 0 || nested_signal_max_depth != 8U ||
+		    nested_signal_error != 0 ||
+		    signal(SIGUSR1, catch_signal) == SIG_ERR)
+			return 258;
+	}
 	report_stage(3);
 	{
 		sigset_t blocked = 1U << (SIGUSR2 - 1);
@@ -271,6 +309,41 @@ run_test(int argc, char **argv, char **envp)
 	    !WIFCONTINUED(status) || waitpid(child, &status, 0) != child ||
 	    !WIFEXITED(status) || WEXITSTATUS(status) != 0)
 		return 15;
+	/* An orphaned stopped process group receives SIGHUP followed by SIGCONT. */
+	if (pipe(descriptors) != 0)
+		return 259;
+	child = fork();
+	if (child < 0)
+		return 259;
+	if (child == 0) {
+		pid_t member = fork();
+		if (member < 0)
+			_exit(1);
+		if (member == 0) {
+			char result;
+			(void)close(descriptors[0]);
+			caught_signals = 0;
+			if (setpgid(0, 0) != 0 ||
+			    signal(SIGHUP, catch_signal) == SIG_ERR)
+				_exit(2);
+			(void)kill(getpid(), SIGSTOP);
+			result = (caught_signals & (1U << SIGHUP)) != 0 ? 'h' : 'x';
+			(void)write(descriptors[1], &result, 1);
+			_exit(result == 'h' ? 0 : 3);
+		}
+		(void)close(descriptors[0]);
+		(void)close(descriptors[1]);
+		if (waitpid(member, &status, WUNTRACED) != member ||
+		    !WIFSTOPPED(status))
+			_exit(4);
+		/* Exiting reparents member and makes its process group orphaned. */
+		_exit(0);
+	}
+	(void)close(descriptors[1]);
+	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+	    WEXITSTATUS(status) != 0 || read(descriptors[0], received, 1) != 1 ||
+	    received[0] != 'h' || close(descriptors[0]) != 0)
+		return 259;
 	report_stage(7);
 	{
 		unsigned char *mapping = mmap(NULL, 3U * TEST_PAGE_SIZE,

@@ -17,6 +17,7 @@
 
 static unsigned char *image;
 static size_t image_size;
+static unsigned write_operations, fail_write_at, short_write_at;
 static unsigned get32(size_t offset)
 { return (unsigned)image[offset]|(unsigned)image[offset+1]<<8|
 	(unsigned)image[offset+2]<<16|(unsigned)image[offset+3]<<24; }
@@ -29,7 +30,12 @@ static int submit(struct disk *disk,struct bio *bio)
 	if(bio->b_op==BIO_FLUSH){bio_complete(bio,0,0);return 0;}
 	if(offset>image_size||length>image_size-offset)return EIO;
 	if(bio->b_op==BIO_READ)memcpy(bio->b_data,image+offset,length);
-	else if(bio->b_op==BIO_WRITE)memcpy(image+offset,bio->b_data,length);
+	else if(bio->b_op==BIO_WRITE){
+		write_operations++;
+		if(write_operations==fail_write_at){bio_complete(bio,EIO,0);return 0;}
+		memcpy(image+offset,bio->b_data,length);
+		if(write_operations==short_write_at){bio_complete(bio,0,length-1U);return 0;}
+	}
 	else return EOPNOTSUPP;
 	bio_complete(bio,0,length);return 0;
 }
@@ -41,8 +47,10 @@ int main(void)
 	struct componentname etc_name={"etc",3,0}, marker_name={"zedbsd-root",11,0};
 	struct componentname fresh_name={"fresh",5,0},moved_name={"moved",5,0};
 	struct componentname hard_name={"hard",4,0},sym_name={"sym",3,0};
+	struct componentname iofail_name={"iofail",6,0};
+	struct componentname full_name={"full",4,0};
 	struct componentname sub_name={"sub",3,0},child_name={"child",5,0};
-	struct inode *etc,*marker,*fresh,*found,*sym,*sub,*child;
+	struct inode *etc,*marker,*fresh,*found,*sym,*sub,*child,*iofail,*full;
 	struct path path; struct file *file; char text[32]={0};
 	unsigned char *large;size_t index;
 	unsigned initial_nbfree,initial_nifree,initial_ndir;
@@ -63,6 +71,25 @@ int main(void)
 	assert(file_pread(file,text,1,9000)==1&&text[0]=='Z');
 	assert(inode_truncate(marker,7)==0);
 	assert(file_close(file)==0); path_release(&path); inode_release(marker);
+
+	/* Allocation and metadata failures must leave a retryable, reachable FS. */
+	assert(inode_create(etc,&iofail_name,0644,&iofail)==0);
+	path_init(&path);path_set(&path,mountp,iofail);
+	assert(file_open_resolved(&path,O_RDWR,&file)==0);
+	fail_write_at=write_operations+1U;
+	assert(file_write(file,"A",1)==-EIO&&iofail->i_size==0);
+	short_write_at=write_operations+1U;
+	assert(file_write(file,"B",1)==-EIO&&iofail->i_size==0);
+	fail_write_at=write_operations+3U; /* newly allocated block zeroing */
+	assert(file_write(file,"C",1)==-EIO&&iofail->i_size==0);
+	fail_write_at=write_operations+4U; /* inode pointer publication */
+	assert(file_write(file,"D",1)==-EIO&&iofail->i_size==0);
+	fail_write_at=write_operations+5U; /* data write after durable allocation */
+	assert(file_write(file,"E",1)==-EIO&&iofail->i_size==0);
+	assert(file_write(file,"ok",2)==2&&iofail->i_size==2);
+	assert(file_close(file)==0);path_release(&path);
+	assert(inode_unlink(etc,&iofail_name)==0);
+	inode_release(iofail);
 
 	assert(inode_create(etc,&fresh_name,0644,&fresh)==0);
 	large=malloc(200000U);assert(large!=NULL);
@@ -95,6 +122,27 @@ int main(void)
 	inode_release(found);
 	assert(inode_unlink(etc,&hard_name)==0);
 	assert(fresh->i_linkcount==1);
+
+	/* Exhaust all allocatable blocks, report ENOSPC, then recover every block. */
+	assert(inode_create(etc,&full_name,0600,&full)==0);
+	path_init(&path);path_set(&path,mountp,full);
+	assert(file_open_resolved(&path,O_RDWR,&file)==0);
+	{
+		unsigned char block[8192];
+		ssize_t count=0;
+		unsigned attempts;
+		memset(block,0xa7,sizeof(block));
+		for(attempts=0;attempts<10000U;attempts++) {
+			count=file_write(file,block,sizeof(block));
+			if(count<0)
+				break;
+			assert(count>0);
+		}
+		assert(count==-ENOSPC&&attempts<10000U);
+	}
+	assert(file_close(file)==0);path_release(&path);
+	assert(inode_unlink(etc,&full_name)==0);
+	inode_release(full);
 	inode_release(sym);
 	inode_release(fresh);
 	inode_release(etc);

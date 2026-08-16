@@ -51,6 +51,7 @@ static const struct file_ops ufs1_regular_ops;
 static const struct file_ops ufs1_directory_ops;
 static int ufs1_lookup(struct inode *,const struct componentname *,
 	struct inode **);
+static int persist_inode(struct inode *);
 
 static struct ufs1_mount_state *state(const struct mount *mountp)
 { return mountp != NULL ? mountp->m_data : NULL; }
@@ -125,6 +126,16 @@ write_cg(struct mount *mountp)
 	return error!=0?error:write_super_summaries(mountp);
 }
 
+/* Caller holds ms->lock and has already restored the in-memory CG image. */
+static int
+write_cg_rollback(struct mount *mountp, int original_error)
+{
+	struct ufs1_mount_state *ms = state(mountp);
+	if (write_cg(mountp) != 0)
+		ms->writable = 0;
+	return original_error;
+}
+
 static int
 adjust_directory_count(struct mount *mountp,int delta)
 {
@@ -167,7 +178,7 @@ allocate_block(struct mount *mountp,uint32_t *result)
 		}
 		error=write_cg(mountp);
 		if(error==0){uint8_t *zero=kern_calloc(1,ms->super.bsize);if(zero==NULL)error=ENOMEM;else{error=write_block(mountp,fragment,zero);kern_free(zero);}}
-		if(error!=0){for(n=0;n<ms->super.frag;n++)bit_set(map,fragment+n);ufs1_put32(ms->cg,UFS1_CG_NBFREE,ufs1_get32(ms->cg,UFS1_CG_NBFREE,ms->super.swapped)+1U,ms->super.swapped);(void)write_cg(mountp);}else *result=fragment;
+		if(error!=0){for(n=0;n<ms->super.frag;n++)bit_set(map,fragment+n);ufs1_put32(ms->cg,UFS1_CG_NBFREE,ufs1_get32(ms->cg,UFS1_CG_NBFREE,ms->super.swapped)+1U,ms->super.swapped);error=write_cg_rollback(mountp,error);}else *result=fragment;
 		break;
 	}
 	mutex_unlock(&ms->lock); return error;
@@ -176,13 +187,17 @@ allocate_block(struct mount *mountp,uint32_t *result)
 static int
 free_block(struct mount *mountp,uint32_t fragment)
 {
-	struct ufs1_mount_state *ms=state(mountp);uint8_t *map;uint32_t n;int error;
+	struct ufs1_mount_state *ms=state(mountp);uint8_t *map;uint32_t n,free;int error;
 	if(fragment<ms->super.dblkno||fragment+ms->super.frag>ms->super.size)return EIO;
 	mutex_lock(&ms->lock);map=ms->cg+ms->cg_freeoff;
 	for(n=0;n<ms->super.frag;n++)if(bit_test(map,fragment+n)){mutex_unlock(&ms->lock);return EIO;}
+	free=ufs1_get32(ms->cg,UFS1_CG_NBFREE,ms->super.swapped);
+	if(free==UINT32_MAX){mutex_unlock(&ms->lock);return EIO;}
 	for(n=0;n<ms->super.frag;n++)bit_set(map,fragment+n);
-	ufs1_put32(ms->cg,UFS1_CG_NBFREE,ufs1_get32(ms->cg,UFS1_CG_NBFREE,ms->super.swapped)+1U,ms->super.swapped);
-	error=write_cg(mountp);mutex_unlock(&ms->lock);return error;
+	ufs1_put32(ms->cg,UFS1_CG_NBFREE,free+1U,ms->super.swapped);
+	error=write_cg(mountp);
+	if(error!=0){for(n=0;n<ms->super.frag;n++)bit_clear(map,fragment+n);ufs1_put32(ms->cg,UFS1_CG_NBFREE,free,ms->super.swapped);error=write_cg_rollback(mountp,error);}
+	mutex_unlock(&ms->lock);return error;
 }
 
 static int
@@ -196,7 +211,7 @@ allocate_inode_number(struct mount *mountp,uint32_t *number)
 			break;
 		bit_set(map,ino);
 		ufs1_put32(ms->cg,UFS1_CG_NIFREE,free-1U,ms->super.swapped);
-		error=write_cg(mountp);if(error!=0){bit_clear(map,ino);ufs1_put32(ms->cg,UFS1_CG_NIFREE,free,ms->super.swapped);}else *number=ino;break;
+		error=write_cg(mountp);if(error!=0){bit_clear(map,ino);ufs1_put32(ms->cg,UFS1_CG_NIFREE,free,ms->super.swapped);error=write_cg_rollback(mountp,error);}else *number=ino;break;
 	}
 	mutex_unlock(&ms->lock);return error;
 }
@@ -204,12 +219,16 @@ allocate_inode_number(struct mount *mountp,uint32_t *number)
 static int
 free_inode_number(struct mount *mountp,uint32_t number)
 {
-	struct ufs1_mount_state *ms=state(mountp);uint8_t *map;int error;
+	struct ufs1_mount_state *ms=state(mountp);uint8_t *map;uint32_t free;int error;
 	if(number<=UFS1_ROOT_INO||number>=ms->super.ipg)return EIO;
 	mutex_lock(&ms->lock);map=ms->cg+ms->cg_iusedoff;
 	if(!bit_test(map,number)){mutex_unlock(&ms->lock);return EIO;}
-	bit_clear(map,number);ufs1_put32(ms->cg,UFS1_CG_NIFREE,ufs1_get32(ms->cg,UFS1_CG_NIFREE,ms->super.swapped)+1U,ms->super.swapped);
-	error=write_cg(mountp);mutex_unlock(&ms->lock);return error;
+	free=ufs1_get32(ms->cg,UFS1_CG_NIFREE,ms->super.swapped);
+	if(free==UINT32_MAX){mutex_unlock(&ms->lock);return EIO;}
+	bit_clear(map,number);ufs1_put32(ms->cg,UFS1_CG_NIFREE,free+1U,ms->super.swapped);
+	error=write_cg(mountp);
+	if(error!=0){bit_set(map,number);ufs1_put32(ms->cg,UFS1_CG_NIFREE,free,ms->super.swapped);error=write_cg_rollback(mountp,error);}
+	mutex_unlock(&ms->lock);return error;
 }
 
 static int
@@ -282,10 +301,26 @@ bmap_ensure(struct inode *inode,uint64_t logical,uint32_t *result)
 
 	if(logical<UFS1_NDADDR) {
 		if(ui->direct[logical]==0) {
-			error=allocate_block(inode->i_mount,&ui->direct[logical]);
+			uint32_t allocated;
+			error=allocate_block(inode->i_mount,&allocated);
 			if(error!=0)
 				return error;
+			ui->direct[logical]=allocated;
 			ui->blocks+=s->bsize/UFS1_SECTOR_SIZE;
+			/* Make the allocation reachable before user data I/O. */
+			error=persist_inode(inode);
+			if(error!=0) {
+				int free_error;
+				ui->direct[logical]=0;
+				ui->blocks-=s->bsize/UFS1_SECTOR_SIZE;
+				free_error=free_block(inode->i_mount,allocated);
+				if(free_error!=0) {
+					ui->direct[logical]=allocated;
+					ui->blocks+=s->bsize/UFS1_SECTOR_SIZE;
+					(void)persist_inode(inode);
+				}
+				return error;
+			}
 		}
 		*result=ui->direct[logical];
 		return 0;
@@ -303,10 +338,25 @@ bmap_ensure(struct inode *inode,uint64_t logical,uint32_t *result)
 		return EFBIG;
 	root=&ui->indirect[level];
 	if(*root==0) {
-		error=allocate_block(inode->i_mount,root);
+		uint32_t allocated;
+		error=allocate_block(inode->i_mount,&allocated);
 		if(error!=0)
 			return error;
+		*root=allocated;
 		ui->blocks+=s->bsize/UFS1_SECTOR_SIZE;
+		error=persist_inode(inode);
+		if(error!=0) {
+			int free_error;
+			*root=0;
+			ui->blocks-=s->bsize/UFS1_SECTOR_SIZE;
+			free_error=free_block(inode->i_mount,allocated);
+			if(free_error!=0) {
+				*root=allocated;
+				ui->blocks+=s->bsize/UFS1_SECTOR_SIZE;
+				(void)persist_inode(inode);
+			}
+			return error;
+		}
 	}
 	fragment=*root;
 	for(depth=level+1U;depth!=0;depth--) {

@@ -534,8 +534,10 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 		if (error != 0)
 			return error;
 		page = kern_calloc(1, sizeof(*page));
-		if (page == NULL)
+		if (page == NULL) {
+			vm_object_fault_release(object_page);
 			return ENOMEM;
+		}
 		page->swap_slot = SWAP_SLOT_NONE;
 		page->vm = vm;
 		page->region = region;
@@ -545,6 +547,7 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 		mapped = hal_page_map(vm->space, (void *)page_address,
 		    object_page->pmem.paddr, PAGE_SIZE, region->prot);
 		if (mapped != HAL_OK) {
+			vm_object_fault_release(object_page);
 			kern_free(page);
 			return ENOMEM;
 		}

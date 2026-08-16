@@ -151,6 +151,7 @@ bool hal_rtc_read(uint64 *unix_seconds);
  */
 
 #define HAL_SYSCALL_ARGS	(6)
+#define HAL_SIGNAL_NEST_MAX	(8)
 
 typedef intptr_t (*hal_syscall_handler_t)(uint32_t number,
 					  const uintptr_t args[HAL_SYSCALL_ARGS]);

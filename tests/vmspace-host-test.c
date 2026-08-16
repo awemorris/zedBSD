@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <threads.h>
 
 struct fake_space { unsigned maps; };
 static unsigned spaces_created, spaces_destroyed;
@@ -21,8 +22,19 @@ static unsigned page_ins, swap_reads, swap_slots_freed;
 static struct swap_backend fake_swap;
 static size_t commit_used;
 static int fail_commit;
-static unsigned pwrite_calls, fsync_calls;
-static int fail_pwrite_count, short_pwrite_count, fail_fsync_count;
+static unsigned pread_calls, pwrite_calls, fsync_calls;
+static int fail_pread_count, fail_pwrite_count, short_pwrite_count;
+static int fail_fsync_count;
+static int redirty_during_pwrite;
+static int redirty_hardware_during_pwrite;
+static int hardware_dirty;
+static struct vm_object_page *redirty_page;
+static mtx_t pread_checkpoint_lock;
+static cnd_t pread_checkpoint_condition;
+static int block_pread, pread_entered, release_pread;
+
+unsigned vm_test_waitq_sleep_count(void);
+void vm_test_waitq_wait_for_sleep(unsigned);
 
 void *kern_malloc(size_t size) { return malloc(size); }
 void *kern_calloc(size_t count, size_t size) { return calloc(count, size); }
@@ -74,6 +86,20 @@ struct inode *file_vm_inode(struct file *file)
 ssize_t file_pread(struct file *file, void *buffer, size_t length, off_t offset)
 {
 	const uint8_t *data = file->f_data;
+	pread_calls++;
+	if (block_pread) {
+		assert(mtx_lock(&pread_checkpoint_lock) == thrd_success);
+		pread_entered++;
+		assert(cnd_broadcast(&pread_checkpoint_condition) == thrd_success);
+		while (!release_pread)
+			assert(cnd_wait(&pread_checkpoint_condition,
+			    &pread_checkpoint_lock) == thrd_success);
+		assert(mtx_unlock(&pread_checkpoint_lock) == thrd_success);
+	}
+	if (fail_pread_count != 0) {
+		fail_pread_count--;
+		return -EIO;
+	}
 	memcpy(buffer, data + offset, length);
 	return (ssize_t)length;
 }
@@ -93,6 +119,14 @@ ssize_t file_pwrite(struct file *file, const void *buffer, size_t length,
 		return (ssize_t)length - 1;
 	}
 	memcpy(data + offset, buffer, length);
+	if (redirty_during_pwrite != 0) {
+		redirty_during_pwrite = 0;
+		vm_object_mark_dirty(redirty_page);
+	}
+	if (redirty_hardware_during_pwrite != 0) {
+		redirty_hardware_during_pwrite = 0;
+		hardware_dirty = 1;
+	}
 	return (ssize_t)length;
 }
 int file_fsync(struct file *file)
@@ -119,6 +153,32 @@ fake_pwrite_op(struct file *file, const void *buffer, size_t length,
 static const struct file_ops shared_file_ops = {
 	.pwrite = fake_pwrite_op,
 };
+
+struct fault_thread_args {
+	struct vmspace *vm;
+	uintptr_t address;
+	int result;
+};
+
+static int
+fault_thread(void *opaque)
+{
+	struct fault_thread_args *args = opaque;
+	args->result = vmspace_fault(args->vm, args->address, HAL_SPACE_READ);
+	return 0;
+}
+
+struct truncate_thread_args {
+	struct inode *inode;
+};
+
+static int
+truncate_thread(void *opaque)
+{
+	struct truncate_thread_args *args = opaque;
+	vm_object_truncate_inode(args->inode, 0);
+	return 0;
+}
 
 hal_space_t hal_mem_create_space(void)
 {
@@ -195,12 +255,14 @@ int hal_page_query(hal_space_t handle, void *address, uint32_t *flags)
 {
 	(void)handle; (void)address;
 	if (flags != NULL)
-		*flags = 0;
+		*flags = hardware_dirty ? HAL_PAGE_DIRTY : 0;
 	return HAL_OK;
 }
 int hal_page_clear_flags(hal_space_t handle, void *address, uint32_t flags)
 {
-	(void)handle; (void)address; (void)flags;
+	(void)handle; (void)address;
+	if ((flags & HAL_PAGE_DIRTY) != 0)
+		hardware_dirty = 0;
 	return HAL_OK;
 }
 
@@ -222,6 +284,8 @@ int main(void)
 		.f_ops = &shared_file_ops, .f_flags = O_RDWR
 	};
 
+	assert(mtx_init(&pread_checkpoint_lock, mtx_plain) == thrd_success);
+	assert(cnd_init(&pread_checkpoint_condition) == thrd_success);
 	refcount_init(&file.f_refs,1);
 	refcount_init(&shared_file.f_refs,1);
 	vm = vmspace_create();
@@ -299,6 +363,112 @@ int main(void)
 		&region) == 0);
 	assert(region->commit_size == 4096 && commit_used == 8192);
 
+	/* A failed PTE publication releases its transient object-page hold. */
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	{
+		unsigned before_reads = pread_calls;
+		fail_map = 1;
+		assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == ENOMEM);
+		fail_map = 0;
+		assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+		assert(pread_calls == before_reads + 1);
+	}
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+	assert(vm_object_count() == 0 && vm_object_page_count() == 0);
+
+	/* A failed object read is published as ERROR and retried without UAF. */
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	{
+		unsigned before_reads = pread_calls;
+		fail_pread_count = 1;
+		assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == EIO);
+		assert(vm_object_page_count() == 1 && region->pages == NULL);
+		assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+		assert(pread_calls == before_reads + 2U);
+	}
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+	assert(vm_object_count() == 0 && vm_object_page_count() == 0);
+
+	/* Two CPUs faulting one object offset issue exactly one backend read. */
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), NULL) == 0);
+	assert(vmspace_map_file_shared(vm, 0x00a01000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), NULL) == 0);
+	{
+		struct fault_thread_args first = { vm, 0x00a00000, -1 };
+		struct fault_thread_args second = { vm, 0x00a01000, -1 };
+		thrd_t first_thread, second_thread;
+		unsigned before_reads = pread_calls;
+		unsigned before_sleeps = vm_test_waitq_sleep_count();
+
+		block_pread = 1;
+		pread_entered = release_pread = 0;
+		assert(thrd_create(&first_thread, fault_thread, &first) ==
+		    thrd_success);
+		assert(mtx_lock(&pread_checkpoint_lock) == thrd_success);
+		while (pread_entered == 0)
+			assert(cnd_wait(&pread_checkpoint_condition,
+			    &pread_checkpoint_lock) == thrd_success);
+		assert(mtx_unlock(&pread_checkpoint_lock) == thrd_success);
+		assert(thrd_create(&second_thread, fault_thread, &second) ==
+		    thrd_success);
+		vm_test_waitq_wait_for_sleep(before_sleeps + 1U);
+		assert(mtx_lock(&pread_checkpoint_lock) == thrd_success);
+		release_pread = 1;
+		assert(cnd_broadcast(&pread_checkpoint_condition) == thrd_success);
+		assert(mtx_unlock(&pread_checkpoint_lock) == thrd_success);
+		assert(thrd_join(first_thread, NULL) == thrd_success);
+		assert(thrd_join(second_thread, NULL) == thrd_success);
+		block_pread = 0;
+		assert(first.result == 0 && second.result == 0);
+		assert(pread_calls == before_reads + 1U);
+	}
+	assert(vmspace_unmap(vm, 0x00a00000, 8192) == 0);
+	assert(vm_object_count() == 0 && vm_object_page_count() == 0);
+
+	/* Truncate waits for fault I/O and for the fault-to-map transient hold. */
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	{
+		struct fault_thread_args fault = { vm, 0x00a00000, -1 };
+		struct truncate_thread_args truncate = { &shared_inode };
+		thrd_t fault_handle, truncate_handle;
+		unsigned before_sleeps = vm_test_waitq_sleep_count();
+
+		block_pread = 1;
+		pread_entered = release_pread = 0;
+		assert(thrd_create(&fault_handle, fault_thread, &fault) ==
+		    thrd_success);
+		assert(mtx_lock(&pread_checkpoint_lock) == thrd_success);
+		while (pread_entered == 0)
+			assert(cnd_wait(&pread_checkpoint_condition,
+			    &pread_checkpoint_lock) == thrd_success);
+		assert(mtx_unlock(&pread_checkpoint_lock) == thrd_success);
+		shared_inode.i_size = 0;
+		assert(thrd_create(&truncate_handle, truncate_thread, &truncate) ==
+		    thrd_success);
+		vm_test_waitq_wait_for_sleep(before_sleeps + 1U);
+		assert(mtx_lock(&pread_checkpoint_lock) == thrd_success);
+		release_pread = 1;
+		assert(cnd_broadcast(&pread_checkpoint_condition) == thrd_success);
+		assert(mtx_unlock(&pread_checkpoint_lock) == thrd_success);
+		assert(thrd_join(fault_handle, NULL) == thrd_success);
+		assert(thrd_join(truncate_handle, NULL) == thrd_success);
+		block_pread = 0;
+		assert(fault.result == 0);
+		assert(region->pages == NULL && vm_object_page_count() == 0);
+		shared_inode.i_size = sizeof(shared_data);
+	}
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+	assert(vm_object_count() == 0 && vm_object_page_count() == 0);
+
 	/* MAP_SHARED mappings of one inode use one physical object page. */
 	memcpy(shared_data, "shared", 7);
 	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
@@ -372,6 +542,44 @@ int main(void)
 		assert(pwrite_calls == before_writes + 2);
 	}
 	assert(!memcmp(shared_data, "retry2", 6));
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+
+	/* A write racing successful writeback advances the dirty generation. */
+	memcpy(shared_data, "before", 7);
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+	assert(vmspace_copy_to(vm, 0x00a00000, "first1", 6) == 0);
+	redirty_page = region->pages->object_page;
+	redirty_during_pwrite = 1;
+	{
+		unsigned before_writes = pwrite_calls;
+		assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == 0);
+		assert(pwrite_calls == before_writes + 1);
+		/* The first success must not clear the racing dirty generation. */
+		assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == 0);
+		assert(pwrite_calls == before_writes + 2);
+	}
+	redirty_page = NULL;
+	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
+
+	/* A userspace/PTE-only dirty event during writeback is also retained. */
+	memcpy(shared_data, "before", 7);
+	assert(vmspace_map_file_shared(vm, 0x00a00000, 4096,
+		HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
+		sizeof(shared_data), &region) == 0);
+	assert(vmspace_fault(vm, 0x00a00000, HAL_SPACE_READ) == 0);
+	assert(vmspace_copy_to(vm, 0x00a00000, "first2", 6) == 0);
+	redirty_hardware_during_pwrite = 1;
+	{
+		unsigned before_writes = pwrite_calls;
+		assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == 0);
+		assert(pwrite_calls == before_writes + 1);
+		assert(vmspace_sync(vm, 0x00a00000, 4096, MS_SYNC) == 0);
+		assert(pwrite_calls == before_writes + 2);
+	}
+	assert(!hardware_dirty);
 	assert(vmspace_unmap(vm, 0x00a00000, 4096) == 0);
 
 	/* Final put retains data and file references until an inode retry. */

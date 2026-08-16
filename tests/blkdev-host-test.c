@@ -34,6 +34,7 @@ struct fake_disk {
 	uint8_t data[FAKE_SECTORS * 512U];
 	unsigned read_calls;
 	unsigned write_calls;
+	unsigned short_next;
 };
 
 static struct fake_disk fake;
@@ -54,6 +55,11 @@ fake_submit(struct disk *dev, struct bio *bio)
 		memcpy(where, bio->b_data, bytes);
 	} else if (bio->b_op != BIO_FLUSH) {
 		return EOPNOTSUPP;
+	}
+	if (store->short_next != 0 && bio->b_op != BIO_FLUSH) {
+		store->short_next = 0;
+		bio_complete(bio, 0, bytes - 1U);
+		return 0;
 	}
 	bio_complete(bio, 0, bytes);
 	return 0;
@@ -133,6 +139,8 @@ test_registry(void)
 
 	CHECK(disk_read(dev, 0, 1, buffer) == 0);
 	CHECK(fake.read_calls == 1);
+	fake.short_next = 1;
+	CHECK(disk_read(dev, 0, 1, buffer) == EIO);
 	CHECK(disk_read(dev, FAKE_SECTORS, 1, buffer) == EOVERFLOW);
 	CHECK(disk_read(dev, FAKE_SECTORS - 1U, 2, buffer) == EOVERFLOW);
 	CHECK(disk_read(dev, 0, 0, buffer) == EINVAL);
@@ -144,6 +152,8 @@ test_registry(void)
 	CHECK(disk_write(dev, 3, 1, buffer) == 0);
 	CHECK(fake.write_calls == 1);
 	CHECK(fake.data[3U * 512U] == 0x5a);
+	fake.short_next = 1;
+	CHECK(disk_write(dev, 4, 1, buffer) == EIO);
 	CHECK(bio_flush(dev) == 0);
 
 	CHECK(disk_open(dev) == 0);

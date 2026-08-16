@@ -2065,23 +2065,24 @@ static intptr_t
 sys_sigreturn_call(const uintptr_t args[6])
 {
 	intptr_t restored;
-	uint32_t restart_number;
-	uintptr_t restart_args[6];
-	unsigned restart;
+	struct thread_signal_level *level;
 
 	if (curthread == NULL || args[0] == 0 ||
+	    curthread->signal_depth == 0 ||
 	    (uint32_t)args[0] != curthread->signal_token)
 		return -EINVAL;
-	restart = curthread->syscall_restart_on_return;
-	restart_number = curthread->syscall_restart_number;
-	memcpy(restart_args, curthread->syscall_restart_args,
-	    sizeof(restart_args));
-	if ((restart ? hal_task_signal_restart((uint32_t)args[0],
-	    restart_number, restart_args, &restored) :
+	level = &curthread->signal_levels[curthread->signal_depth - 1U];
+	if (level->token != (uint32_t)args[0])
+		return -EINVAL;
+	if ((level->restart_on_return ? hal_task_signal_restart(
+	    level->token, level->restart_number, level->restart_args, &restored) :
 	    hal_task_signal_return((uint32_t)args[0], &restored)) != 0)
 		return -EINVAL;
-	curthread->signal_mask = curthread->signal_saved_mask;
-	curthread->signal_token = 0;
+	curthread->signal_mask = level->saved_mask;
+	memset(level, 0, sizeof(*level));
+	curthread->signal_depth--;
+	curthread->signal_token = curthread->signal_depth == 0 ? 0 :
+	    curthread->signal_levels[curthread->signal_depth - 1U].token;
 	curthread->syscall_restart_on_return = 0;
 	curthread->syscall_restart_valid = 0;
 	return restored;

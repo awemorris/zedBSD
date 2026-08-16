@@ -82,14 +82,14 @@ int hal_task_exec_current(hal_space_t new_space,uintptr_t entry,uintptr_t user_s
 	frame->user_sp=(uint64)user_sp;
 	running_task->space=new_space;
 	running_task->tls=0;
-	running_task->signal_depth=0;running_task->signal_token=0;
+	running_task->signal_depth=0;
 	hal_page_switch_space(new_space);
 	return 0;
 }
 uintptr_t hal_task_user_stack(void){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;return f!=NULL?(uintptr_t)f->user_sp:0;}
-int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t rest,uint32_t token){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;if(f==NULL||running_task->signal_depth!=0||h==0||sp==0||token==0)return-1;running_task->signal_frame=*f;running_task->signal_token=token;running_task->signal_depth=1;f->elr=h;f->user_sp=sp;f->x[0]=(uint64)sig;f->x[30]=rest;return 0;}
-int hal_task_signal_return(uint32_t token,intptr_t*value){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;if(f==NULL||value==NULL||running_task->signal_depth!=1||token==0||token!=running_task->signal_token)return-1;*f=running_task->signal_frame;*value=(intptr_t)f->x[0];running_task->signal_depth=0;running_task->signal_token=0;return 0;}
-int hal_task_signal_restart(uint32_t token,uint32_t number,const uintptr_t args[HAL_SYSCALL_ARGS],intptr_t*value){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;unsigned i;if(f==NULL||args==NULL||value==NULL||running_task->signal_depth!=1||token==0||token!=running_task->signal_token)return-1;*f=running_task->signal_frame;if(f->elr<4U)return-1;f->elr-=4U;f->x[8]=number;for(i=0;i<HAL_SYSCALL_ARGS;i++)f->x[i]=args[i];*value=(intptr_t)args[0];running_task->signal_depth=0;running_task->signal_token=0;return 0;}
+int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t rest,uint32_t token){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;unsigned d;if(f==NULL||running_task->signal_depth>=HAL_SIGNAL_NEST_MAX||h==0||sp==0||token==0)return-1;d=running_task->signal_depth;running_task->signal_frame[d]=*f;running_task->signal_token[d]=token;running_task->signal_depth=d+1U;f->elr=h;f->user_sp=sp;f->x[0]=(uint64)sig;f->x[30]=rest;return 0;}
+int hal_task_signal_return(uint32_t token,intptr_t*value){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;unsigned d;if(f==NULL||value==NULL||running_task->signal_depth==0||token==0)return-1;d=running_task->signal_depth-1U;if(token!=running_task->signal_token[d])return-1;*f=running_task->signal_frame[d];*value=(intptr_t)f->x[0];running_task->signal_token[d]=0;running_task->signal_depth=d;return 0;}
+int hal_task_signal_restart(uint32_t token,uint32_t number,const uintptr_t args[HAL_SYSCALL_ARGS],intptr_t*value){struct arm64_exception_frame*f=running_task!=NULL?running_task->active_user_frame:NULL;unsigned i,d;if(f==NULL||args==NULL||value==NULL||running_task->signal_depth==0||token==0)return-1;d=running_task->signal_depth-1U;if(token!=running_task->signal_token[d])return-1;*f=running_task->signal_frame[d];if(f->elr<4U)return-1;f->elr-=4U;f->x[8]=number;for(i=0;i<HAL_SYSCALL_ARGS;i++)f->x[i]=args[i];*value=(intptr_t)args[0];running_task->signal_token[d]=0;running_task->signal_depth=d;return 0;}
 void hal_task_destroy(hal_task_t h)
 {
 	struct arm64_task *t=h;if(!t)return;if(t==running_task)HAL_FATAL("destroy current arm64 task");task_del(t);

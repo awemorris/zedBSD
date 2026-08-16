@@ -198,7 +198,6 @@ hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
 	running_task->space = new_space;
 	running_task->tls = 0;
 	running_task->signal_depth = 0;
-	running_task->signal_token = 0;
 	hal_page_switch_space(new_space);
 	return 0;
 }
@@ -211,24 +210,31 @@ uintptr_t hal_task_user_stack(void)
 int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t rest,uint32_t token)
 {
 	struct interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
+	unsigned depth;
 	(void)sig;(void)rest;
-	if(f==NULL||running_task->signal_depth!=0||h==0||sp==0||h>UINT32_MAX||sp>UINT32_MAX||token==0)return -1;
-	running_task->signal_frame=*f;running_task->signal_token=token;
-	running_task->signal_depth=1;f->eip=(uint32)h;f->user_esp=(uint32)sp;return 0;
+	if(f==NULL||running_task->signal_depth>=HAL_SIGNAL_NEST_MAX||h==0||sp==0||h>UINT32_MAX||sp>UINT32_MAX||token==0)return -1;
+	depth=running_task->signal_depth;running_task->signal_frame[depth]=*f;
+	running_task->signal_token[depth]=token;running_task->signal_depth=depth+1U;
+	f->eip=(uint32)h;f->user_esp=(uint32)sp;return 0;
 }
 int hal_task_signal_return(uint32_t token,intptr_t *value)
 {
 	struct interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
-	if(f==NULL||value==NULL||running_task->signal_depth!=1||token==0||token!=running_task->signal_token)return -1;
-	*f=running_task->signal_frame;*value=(intptr_t)(int32)f->regs.eax;running_task->signal_depth=0;running_task->signal_token=0;return 0;
+	unsigned depth;
+	if(f==NULL||value==NULL||running_task->signal_depth==0||token==0)return -1;
+	depth=running_task->signal_depth-1U;if(token!=running_task->signal_token[depth])return -1;
+	*f=running_task->signal_frame[depth];*value=(intptr_t)(int32)f->regs.eax;
+	running_task->signal_token[depth]=0;running_task->signal_depth=depth;return 0;
 }
 int hal_task_signal_restart(uint32_t token,uint32_t number,const uintptr_t args[HAL_SYSCALL_ARGS],intptr_t *value)
 {
 	struct interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
-	if(f==NULL||args==NULL||value==NULL||running_task->signal_depth!=1||token==0||token!=running_task->signal_token)return -1;
-	*f=running_task->signal_frame;if(f->eip<2U)return -1;f->eip-=2U;
+	unsigned depth;
+	if(f==NULL||args==NULL||value==NULL||running_task->signal_depth==0||token==0)return -1;
+	depth=running_task->signal_depth-1U;if(token!=running_task->signal_token[depth])return -1;
+	*f=running_task->signal_frame[depth];if(f->eip<2U)return -1;f->eip-=2U;
 	f->regs.eax=number;f->regs.ebx=(uint32)args[0];f->regs.ecx=(uint32)args[1];f->regs.edx=(uint32)args[2];f->regs.esi=(uint32)args[3];f->regs.edi=(uint32)args[4];f->regs.ebp=(uint32)args[5];
-	*value=(intptr_t)(int32)number;running_task->signal_depth=0;running_task->signal_token=0;return 0;
+	*value=(intptr_t)(int32)number;running_task->signal_token[depth]=0;running_task->signal_depth=depth;return 0;
 }
 
 void

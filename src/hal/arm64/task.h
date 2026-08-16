@@ -16,8 +16,8 @@ struct arm64_task {
 	void *private_data;
 	uintptr_t tls;
 	void *active_user_frame;
-	struct arm64_exception_frame signal_frame;
-	uint32 signal_token;
+	struct arm64_exception_frame signal_frame[HAL_SIGNAL_NEST_MAX];
+	uint32 signal_token[HAL_SIGNAL_NEST_MAX];
 	unsigned signal_depth;
 };
 void asm_task_dispatch(uintptr_t *save,const uintptr_t *load);

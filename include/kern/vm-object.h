@@ -11,6 +11,8 @@
 
 #include <hal/hal.h>
 #include <kern/atomic.h>
+#include <kern/lock.h>
+#include <kern/waitq.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -22,14 +24,22 @@ struct vm_page;
 #define VM_OBJECT_PAGE_DIRTY 0x0001U
 #define VM_OBJECT_PAGE_BUSY  0x0002U
 #define VM_OBJECT_PAGE_WRITEBACK 0x0004U
+#define VM_OBJECT_PAGE_ERROR 0x0008U
 
 #define VM_OBJECT_RETAINED_WRITEBACK 0x00000001U
 
 struct vm_object_page {
+	struct vm_object *owner;
 	off_t offset;
 	struct hal_pmem pmem;
 	unsigned flags;
+	int error;
 	unsigned mapping_count;
+	/* Pins the page between fault lookup and page-table publication. */
+	unsigned hold_count;
+	uint64_t dirty_generation;
+	uint64_t write_generation;
+	uint64_t write_dirty_generation;
 	struct vm_page *mappings;
 	struct vm_object_page *next;
 };
@@ -39,6 +49,9 @@ struct vm_object {
 	refcount_t refs;
 	/* Protected by the VM object registry lock; zero permits retention. */
 	unsigned mapping_count;
+	struct spinlock lock;
+	struct wait_queue page_waitq;
+	uint64_t generation;
 	unsigned flags;
 	/* file is retained for reads; write_file carries write capability. */
 	struct file *file;
@@ -53,6 +66,7 @@ int vm_object_get_shared(struct file *, struct vm_object **);
 void vm_object_ref(struct vm_object *);
 void vm_object_put(struct vm_object *);
 int vm_object_fault(struct vm_object *, off_t, struct vm_object_page **);
+void vm_object_fault_release(struct vm_object_page *);
 void vm_object_mapping_add(struct vm_object_page *, struct vm_page *);
 void vm_object_mapping_remove(struct vm_object_page *, struct vm_page *);
 void vm_object_mark_dirty(struct vm_object_page *);

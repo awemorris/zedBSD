@@ -582,7 +582,17 @@ static int disk_transfer(struct disk *disk, enum bio_op op, uint64_t block,
 		.b_data = data,
 	};
 	int error = bio_submit(disk, &bio);
-	return error != 0 ? error : bio_wait(&bio);
+	size_t expected;
+	if (error != 0)
+		return error;
+	error = bio_wait(&bio);
+	if (error != 0)
+		return error;
+	if (disk == NULL || disk->d_block_size == 0 ||
+	    (size_t)count > SIZE_MAX / disk->d_block_size)
+		return EOVERFLOW;
+	expected = (size_t)count * disk->d_block_size;
+	return bio.b_transferred == expected ? 0 : EIO;
 }
 
 int disk_read(struct disk *disk, uint64_t block, uint32_t count, void *data)

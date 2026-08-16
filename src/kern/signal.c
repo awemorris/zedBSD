@@ -142,6 +142,11 @@ signal_fork(struct process *child, const struct process *parent,
 	child->signal_pending = 0;
 	child_thread->signal_mask = parent_thread->signal_mask;
 	child_thread->signal_pending = 0;
+	child_thread->signal_token = 0;
+	child_thread->signal_token_counter = 0;
+	child_thread->signal_depth = 0;
+	memset(child_thread->signal_levels, 0,
+	    sizeof(child_thread->signal_levels));
 	child_thread->syscall_restart_valid = 0;
 	child_thread->syscall_restart_on_return = 0;
 }
@@ -160,6 +165,10 @@ signal_exec(struct process *process)
 	if (curthread != NULL) {
 		curthread->signal_pending = 0;
 		curthread->signal_token = 0;
+		curthread->signal_token_counter = 0;
+		curthread->signal_depth = 0;
+		memset(curthread->signal_levels, 0,
+		    sizeof(curthread->signal_levels));
 		curthread->signal_suspended = 0;
 		curthread->syscall_restart_valid = 0;
 		curthread->syscall_restart_on_return = 0;
@@ -172,14 +181,16 @@ signal_deliver_on_user_return(void)
 	struct thread *thread = curthread;
 	struct process *process;
 	struct signal_action *action;
+	struct thread_signal_level *level;
 	sigset_t pending;
 	uintptr_t sp, restorer;
 	uint32_t token;
 	int signo;
 
 	if (thread == NULL || (process = thread->proc) == NULL ||
-	    process == &process0 || thread->signal_token != 0)
+	    process == &process0)
 		return;
+retry:
 	pending = (thread->signal_pending | process->signal_pending) &
 	    ~thread->signal_mask;
 	pending |= (thread->signal_pending | process->signal_pending) &
@@ -203,15 +214,30 @@ signal_deliver_on_user_return(void)
 			process_note_stopped(process, signo);
 			thread->state = THREAD_SLEEPING;
 			sched_yield();
-			return;
+			/* SIGCONT may have made SIGHUP or another signal deliverable. */
+			goto retry;
 		}
 		exit1_signal(signo);
 	}
+	if (thread->signal_depth >= SIGNAL_NEST_MAX)
+		exit1_signal(SIGSEGV);
 	sp = hal_task_user_stack();
 	restorer = action->restorer;
-	token = ++thread->signal_token;
+	token = ++thread->signal_token_counter;
 	if (token == 0)
-		token = ++thread->signal_token;
+		token = ++thread->signal_token_counter;
+	level = &thread->signal_levels[thread->signal_depth];
+	memset(level, 0, sizeof(*level));
+	level->token = token;
+	level->saved_mask = thread->signal_suspended ?
+	    thread->signal_suspend_mask : thread->signal_mask;
+	level->restart_number = thread->syscall_restart_number;
+	memcpy(level->restart_args, thread->syscall_restart_args,
+	    sizeof(level->restart_args));
+	level->restart_on_return = thread->syscall_restart_valid &&
+	    (action->flags & SA_RESTART) != 0;
+	thread->signal_depth++;
+	thread->signal_token = token;
 #if defined(HAL_ARCH_ARM64)
 	sp = (sp - 16U) & ~(uintptr_t)15U;
 	if (copyout(&token, sp, sizeof(token)) != 0)
@@ -227,10 +253,14 @@ signal_deliver_on_user_return(void)
 	}
 #elif defined(HAL_ARCH_SPARCV9)
 	{
-		uint64_t frame[2];
+		/*
+		 * A SPARC V9 caller frame is 176 bytes.  Offsets 0..127 are the
+		 * register-window spill area, so keep the private token at 128.
+		 */
+		uint64_t frame[22];
+		memset(frame, 0, sizeof(frame));
 		sp = (sp - sizeof(frame)) & ~(uintptr_t)15U;
-		frame[0] = token;
-		frame[1] = 0;
+		frame[16] = token;
 		if (copyout(frame, sp, sizeof(frame)) != 0)
 			exit1_signal(SIGSEGV);
 	}
@@ -245,15 +275,11 @@ signal_deliver_on_user_return(void)
 			exit1_signal(SIGSEGV);
 	}
 #endif
-	thread->signal_saved_mask = thread->signal_mask;
 	if (thread->signal_suspended) {
-		thread->signal_saved_mask = thread->signal_suspend_mask;
 		thread->signal_mask = thread->signal_suspend_mask;
 		thread->signal_suspended = 0;
 	}
-	thread->syscall_restart_on_return =
-	    thread->syscall_restart_valid &&
-	    (action->flags & SA_RESTART) != 0;
+	thread->syscall_restart_on_return = level->restart_on_return;
 	thread->signal_mask |= action->mask;
 	if ((action->flags & SA_NODEFER) == 0)
 		thread->signal_mask |= SIGNAL_BIT(signo);

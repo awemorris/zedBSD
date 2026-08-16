@@ -65,6 +65,16 @@ find_page(struct vm_object *object, off_t offset)
 	return NULL;
 }
 
+/* Called with object->lock held.  Generation zero is reserved for "none". */
+static uint64_t
+next_generation(struct vm_object *object)
+{
+	object->generation++;
+	if (object->generation == 0)
+		object->generation++;
+	return object->generation;
+}
+
 static int
 page_overlaps(const struct vm_object_page *page, uint64_t start, uint64_t end)
 {
@@ -112,6 +122,9 @@ vm_object_get_shared(struct file *file, struct vm_object **result)
 		return ENOMEM;
 	refcount_init(&object->refs, 2); /* registry plus returned region */
 	object->mapping_count = 1;
+	spin_init(&object->lock, LOCK_RANK_VM_OBJECT, "VM object");
+	waitq_init(&object->page_waitq, "VM object page");
+	object->generation = 1;
 	object->file = file;
 	object->inode = inode;
 	file_ref(file);
@@ -170,45 +183,65 @@ vm_object_ref(struct vm_object *object)
 }
 
 static int
-page_is_dirty(struct vm_object_page *page)
+page_hardware_dirty_locked(struct vm_object_page *page)
 {
 	struct vm_page *mapping;
-	if (page->flags & VM_OBJECT_PAGE_DIRTY)
-		return 1;
 	for (mapping = page->mappings; mapping != NULL;
 	     mapping = mapping->object_next) {
 		uint32_t flags = 0;
 		if (hal_page_query(mapping->vm->space, (void *)mapping->address,
-		    &flags) == HAL_OK && (flags & HAL_PAGE_DIRTY) != 0) {
-			page->flags |= VM_OBJECT_PAGE_DIRTY;
+		    &flags) == HAL_OK && (flags & HAL_PAGE_DIRTY) != 0)
 			return 1;
-		}
 	}
 	return 0;
 }
 
 static int
-object_has_dirty_pages(struct vm_object *object)
+page_is_dirty_locked(struct vm_object_page *page)
+{
+	if (page->flags & VM_OBJECT_PAGE_DIRTY)
+		return 1;
+	if (page_hardware_dirty_locked(page)) {
+		page->flags |= VM_OBJECT_PAGE_DIRTY;
+		page->dirty_generation = next_generation(page->owner);
+		return 1;
+	}
+	return 0;
+}
+
+static int
+object_has_dirty_pages_locked(struct vm_object *object)
 {
 	struct vm_object_page *page;
 	for (page = object->pages; page != NULL; page = page->next)
-		if (page_is_dirty(page))
+		if (page_is_dirty_locked(page))
 			return 1;
 	return 0;
 }
 
 static int
-object_has_busy_pages(const struct vm_object *object)
+object_has_busy_pages_locked(const struct vm_object *object)
 {
 	const struct vm_object_page *page;
 	for (page = object->pages; page != NULL; page = page->next)
-		if (page->flags & VM_OBJECT_PAGE_BUSY)
+		if (page->flags & (VM_OBJECT_PAGE_BUSY | VM_OBJECT_PAGE_WRITEBACK))
+			return 1;
+		else if (page->hold_count != 0)
 			return 1;
 	return 0;
 }
 
+static int
+object_has_busy_pages(struct vm_object *object)
+{
+	unsigned long irq = spin_lock_irqsave(&object->lock);
+	int busy = object_has_busy_pages_locked(object);
+	spin_unlock_irqrestore(&object->lock, irq);
+	return busy;
+}
+
 static void
-object_record_writeback_error(struct vm_object *object, int error)
+object_record_writeback_error_locked(struct vm_object *object, int error)
 {
 	if (object->writeback_error == 0 && error != 0)
 		object->writeback_error = error;
@@ -219,8 +252,6 @@ write_page_data(struct vm_object *object, struct vm_object_page *page)
 {
 	size_t length;
 	ssize_t count;
-	if (page->flags & VM_OBJECT_PAGE_BUSY)
-		return EBUSY;
 	if (object->write_file == NULL)
 		return EACCES;
 	if (page->offset < 0)
@@ -231,18 +262,15 @@ write_page_data(struct vm_object *object, struct vm_object_page *page)
 	length = (size_t)(object->inode->i_size - page->offset);
 	if (length > PAGE_SIZE)
 		length = PAGE_SIZE;
-	page->flags |= VM_OBJECT_PAGE_BUSY;
 	count = file_pwrite(object->write_file,
 	    (const void *)page->pmem.vaddr, length, page->offset);
-	page->flags &= ~VM_OBJECT_PAGE_BUSY;
 	return count == (ssize_t)length ? 0 : count < 0 ? (int)-count : EIO;
 }
 
 static void
-clear_page_dirty(struct vm_object_page *page)
+clear_hardware_dirty_locked(struct vm_object_page *page)
 {
 	struct vm_page *mapping;
-	page->flags &= ~VM_OBJECT_PAGE_DIRTY;
 	for (mapping = page->mappings; mapping != NULL;
 	     mapping = mapping->object_next)
 		(void)hal_page_clear_flags(mapping->vm->space,
@@ -250,10 +278,17 @@ clear_page_dirty(struct vm_object_page *page)
 }
 
 static void
+clear_page_dirty_locked(struct vm_object_page *page)
+{
+	page->flags &= ~VM_OBJECT_PAGE_DIRTY;
+	page->dirty_generation = 0;
+}
+
+static void
 free_object_page(struct vm_object_page *page)
 {
 	/* Region teardown must remove every mapping before the final object ref. */
-	if (page->mapping_count != 0)
+	if (page->mapping_count != 0 || page->hold_count != 0)
 		HAL_FATAL("destroying mapped VM object page");
 	(void)hal_pmem_free(&page->pmem);
 	kern_free(page);
@@ -265,8 +300,15 @@ free_object_page(struct vm_object_page *page)
 static int
 object_can_destroy(struct vm_object *object)
 {
-	return object->mapping_count == 0 && object->writeback_error == 0 &&
-	    !object_has_dirty_pages(object) && !object_has_busy_pages(object);
+	unsigned long irq;
+	int result;
+	if (object->mapping_count != 0 || object->writeback_error != 0)
+		return 0;
+	irq = spin_lock_irqsave(&object->lock);
+	result = !object_has_dirty_pages_locked(object) &&
+	    !object_has_busy_pages_locked(object);
+	spin_unlock_irqrestore(&object->lock, irq);
+	return result;
 }
 
 static int
@@ -305,11 +347,14 @@ destroy_object(struct vm_object *object)
 static void
 retain_object(struct vm_object *object, int error)
 {
+	unsigned long irq;
 	if (object->mapping_count != 0)
 		HAL_FATAL("retaining referenced VM object");
 	if (error == 0)
 		error = object_has_busy_pages(object) ? EBUSY : EIO;
-	object_record_writeback_error(object, error);
+	irq = spin_lock_irqsave(&object->lock);
+	object_record_writeback_error_locked(object, error);
+	spin_unlock_irqrestore(&object->lock, irq);
 	object->flags |= VM_OBJECT_RETAINED_WRITEBACK;
 }
 
@@ -355,78 +400,165 @@ vm_object_fault(struct vm_object *object, off_t offset,
 	struct vm_object_page *page;
 	size_t length;
 	ssize_t count;
+	unsigned long irq;
+	int error;
 	if (object == NULL || result == NULL || offset < 0 ||
 	    (offset & (PAGE_SIZE - 1U)) != 0)
 		return EINVAL;
-	if (offset >= object->inode->i_size)
-		return ENXIO;
+	retry:
+	irq = spin_lock_irqsave(&object->lock);
 	page = find_page(object, offset);
 	if (page != NULL) {
+		while ((page->flags & VM_OBJECT_PAGE_BUSY) != 0) {
+			uint64_t sequence = waitq_sequence(&object->page_waitq);
+			error = waitq_sleep(&object->page_waitq, &object->lock,
+			    sequence, 0, 0);
+			if (error != 0 && error != EAGAIN) {
+				spin_unlock_irqrestore(&object->lock, irq);
+				return error;
+			}
+		}
+		if ((page->flags & VM_OBJECT_PAGE_ERROR) != 0) {
+			if (offset >= object->inode->i_size) {
+				error = page->error != 0 ? page->error : ENXIO;
+				spin_unlock_irqrestore(&object->lock, irq);
+				return error;
+			}
+			page->flags &= ~VM_OBJECT_PAGE_ERROR;
+			page->flags |= VM_OBJECT_PAGE_BUSY;
+			page->error = 0;
+			spin_unlock_irqrestore(&object->lock, irq);
+			goto read_page;
+		}
+		page->hold_count++;
 		*result = page;
+		spin_unlock_irqrestore(&object->lock, irq);
 		return 0;
 	}
+	spin_unlock_irqrestore(&object->lock, irq);
+	if (offset >= object->inode->i_size)
+		return ENXIO;
 	page = kern_calloc(1, sizeof(*page));
 	if (page == NULL)
 		return ENOMEM;
 	page->offset = offset;
 	page->flags = VM_OBJECT_PAGE_BUSY;
+	page->owner = object;
 	if (alloc_vm_page(&page->pmem) != HAL_OK &&
 	    (vm_reclaim_one(NULL) != 0 ||
 	     alloc_vm_page(&page->pmem) != HAL_OK)) {
 		kern_free(page);
 		return ENOMEM;
 	}
+	irq = spin_lock_irqsave(&object->lock);
+	if (find_page(object, offset) != NULL) {
+		spin_unlock_irqrestore(&object->lock, irq);
+		(void)hal_pmem_free(&page->pmem);
+		kern_free(page);
+		goto retry;
+	}
+	page->next = object->pages;
+	object->pages = page;
+	(void)atomic_fetch_add_relaxed(&object_pages, 1);
+	spin_unlock_irqrestore(&object->lock, irq);
+
+read_page:
 	memset((void *)page->pmem.vaddr, 0, PAGE_SIZE);
 	length = (size_t)(object->inode->i_size - offset);
 	if (length > PAGE_SIZE)
 		length = PAGE_SIZE;
 	count = file_pread(object->file, (void *)page->pmem.vaddr,
 	    length, offset);
+	irq = spin_lock_irqsave(&object->lock);
 	if (count != (ssize_t)length) {
-		(void)hal_pmem_free(&page->pmem);
-		kern_free(page);
-		return count < 0 ? (int)-count : EIO;
+		error = count < 0 ? (int)-count : EIO;
+		page->flags = VM_OBJECT_PAGE_ERROR;
+		page->error = error;
+		waitq_wake_all(&object->page_waitq);
+		spin_unlock_irqrestore(&object->lock, irq);
+		return error;
 	}
 	page->flags = 0;
-	page->next = object->pages;
-	object->pages = page;
-	(void)atomic_fetch_add_relaxed(&object_pages, 1);
+	page->error = 0;
+	page->hold_count = 1;
+	waitq_wake_all(&object->page_waitq);
 	*result = page;
+	spin_unlock_irqrestore(&object->lock, irq);
 	return 0;
+}
+
+void
+vm_object_fault_release(struct vm_object_page *page)
+{
+	unsigned long irq;
+	if (page == NULL || page->owner == NULL)
+		return;
+	irq = spin_lock_irqsave(&page->owner->lock);
+	if (page->hold_count == 0)
+		HAL_FATAL("VM object fault hold underflow");
+	page->hold_count--;
+	waitq_wake_all(&page->owner->page_waitq);
+	spin_unlock_irqrestore(&page->owner->lock, irq);
 }
 
 void
 vm_object_mapping_add(struct vm_object_page *object_page,
 		      struct vm_page *mapping)
 {
+	unsigned long irq;
+	if (object_page == NULL || mapping == NULL || object_page->owner == NULL)
+		return;
+	irq = spin_lock_irqsave(&object_page->owner->lock);
+	if (object_page->hold_count == 0)
+		HAL_FATAL("mapping VM object page without fault hold");
 	mapping->object_next = object_page->mappings;
 	object_page->mappings = mapping;
 	object_page->mapping_count++;
+	object_page->hold_count--;
+	waitq_wake_all(&object_page->owner->page_waitq);
+	spin_unlock_irqrestore(&object_page->owner->lock, irq);
+}
+
+/* Called with object_page->owner->lock held. */
+static void
+mapping_remove_locked(struct vm_object_page *object_page,
+		      struct vm_page *mapping)
+{
+	struct vm_page **link;
+	for (link = &object_page->mappings; *link != NULL;
+	     link = &(*link)->object_next)
+		if (*link == mapping) {
+			*link = mapping->object_next;
+			mapping->object_next = NULL;
+			if (object_page->mapping_count == 0)
+				HAL_FATAL("VM object mapping counter underflow");
+			object_page->mapping_count--;
+			return;
+		}
 }
 
 void
 vm_object_mapping_remove(struct vm_object_page *object_page,
 			 struct vm_page *mapping)
 {
-	struct vm_page **link;
-	if (object_page == NULL || mapping == NULL)
+	unsigned long irq;
+	if (object_page == NULL || mapping == NULL || object_page->owner == NULL)
 		return;
-	for (link = &object_page->mappings; *link != NULL;
-	     link = &(*link)->object_next)
-		if (*link == mapping) {
-			*link = mapping->object_next;
-			mapping->object_next = NULL;
-			if (object_page->mapping_count != 0)
-				object_page->mapping_count--;
-			return;
-		}
+	irq = spin_lock_irqsave(&object_page->owner->lock);
+	mapping_remove_locked(object_page, mapping);
+	spin_unlock_irqrestore(&object_page->owner->lock, irq);
 }
 
 void
 vm_object_mark_dirty(struct vm_object_page *page)
 {
-	if (page != NULL)
-		page->flags |= VM_OBJECT_PAGE_DIRTY;
+	unsigned long irq;
+	if (page == NULL || page->owner == NULL)
+		return;
+	irq = spin_lock_irqsave(&page->owner->lock);
+	page->flags |= VM_OBJECT_PAGE_DIRTY;
+	page->dirty_generation = next_generation(page->owner);
+	spin_unlock_irqrestore(&page->owner->lock, irq);
 }
 
 static int
@@ -445,8 +577,9 @@ range_has_wired_mapping(struct vm_object *object, uint64_t start, uint64_t end)
 	return 0;
 }
 
+/* Called with page->owner->lock held and with no BUSY/WRITEBACK owner. */
 static void
-invalidate_page(struct vm_object_page *page)
+invalidate_page_locked(struct vm_object_page *page)
 {
 	struct vm_page *mapping;
 	while ((mapping = page->mappings) != NULL) {
@@ -457,7 +590,7 @@ invalidate_page(struct vm_object_page *page)
 			*map_link = mapping->next;
 		(void)hal_page_unmap(mapping->vm->space,
 		    (void *)mapping->address, PAGE_SIZE);
-		vm_object_mapping_remove(page, mapping);
+		mapping_remove_locked(page, mapping);
 		kern_free(mapping);
 	}
 }
@@ -466,11 +599,13 @@ int
 vm_object_sync_range(struct vm_object *object, off_t offset, size_t size,
 		     int flags)
 {
-	struct vm_object_page *page;
-	struct vm_object_page **link;
+	struct vm_object_page *page, **link;
 	uint64_t start, end;
+	uint64_t sync_generation;
+	unsigned long irq;
 	int first_error = 0;
 	int selected = 0;
+	int retry_writeback;
 	if (object == NULL || offset < 0 || size == 0 ||
 	    (flags & ~(MS_ASYNC | MS_INVALIDATE | MS_SYNC)) != 0 ||
 	    (flags & (MS_ASYNC | MS_SYNC)) == 0 ||
@@ -485,54 +620,134 @@ vm_object_sync_range(struct vm_object *object, off_t offset, size_t size,
 		if (end < start)
 			end = UINT64_MAX;
 	}
+	irq = spin_lock_irqsave(&object->lock);
+	sync_generation = next_generation(object);
 	if ((flags & MS_INVALIDATE) != 0 &&
-	    range_has_wired_mapping(object, start, end))
+	    range_has_wired_mapping(object, start, end)) {
+		spin_unlock_irqrestore(&object->lock, irq);
 		return EBUSY;
-
-	for (page = object->pages; page != NULL; page = page->next) {
-		int error;
-		if (!page_overlaps(page, start, end) || !page_is_dirty(page))
-			continue;
-		page->flags |= VM_OBJECT_PAGE_WRITEBACK;
-		selected = 1;
-		error = write_page_data(object, page);
-		if (error != 0 && first_error == 0)
-			first_error = error;
 	}
-	if (selected || object->writeback_error != 0) {
+
+	/*
+	 * Only one writer owns a page at a time.  The object lock publishes BUSY
+	 * before I/O starts; dirty_generation detects a write which races the I/O.
+	 */
+	for (;;) {
+		struct vm_object_page *candidate = NULL;
+		int wait_for_page = 0;
+
+		for (page = object->pages; page != NULL; page = page->next) {
+			if (!page_overlaps(page, start, end))
+				continue;
+			if ((page->flags & (VM_OBJECT_PAGE_BUSY |
+			    VM_OBJECT_PAGE_WRITEBACK)) != 0 &&
+			    page->write_generation != sync_generation) {
+				wait_for_page = 1;
+				break;
+			}
+			if ((flags & MS_INVALIDATE) != 0 && page->hold_count != 0) {
+				wait_for_page = 1;
+				break;
+			}
+			if ((page->flags & VM_OBJECT_PAGE_WRITEBACK) != 0)
+				continue; /* Already selected by this sync operation. */
+			if (page_is_dirty_locked(page)) {
+				candidate = page;
+				break;
+			}
+		}
+		if (wait_for_page) {
+			uint64_t sequence = waitq_sequence(&object->page_waitq);
+			int error = waitq_sleep(&object->page_waitq, &object->lock,
+			    sequence, 0, 0);
+			if (error != 0 && error != EAGAIN) {
+				first_error = error;
+				break;
+			}
+			continue;
+		}
+		if (candidate == NULL)
+			break;
+		candidate->flags |= VM_OBJECT_PAGE_BUSY |
+		    VM_OBJECT_PAGE_WRITEBACK;
+		candidate->write_generation = sync_generation;
+		candidate->write_dirty_generation =
+		    candidate->dirty_generation;
+		/* Writes after this point re-set the PTE bit and survive completion. */
+		clear_hardware_dirty_locked(candidate);
+		selected = 1;
+		spin_unlock_irqrestore(&object->lock, irq);
+		{
+			int error = write_page_data(object, candidate);
+			irq = spin_lock_irqsave(&object->lock);
+			candidate->flags &= ~VM_OBJECT_PAGE_BUSY;
+			waitq_wake_all(&object->page_waitq);
+			if (error != 0) {
+				first_error = error;
+				break;
+			}
+		}
+	}
+	retry_writeback = object->writeback_error != 0;
+	spin_unlock_irqrestore(&object->lock, irq);
+
+	if (selected || retry_writeback) {
 		int error = object->write_file != NULL ?
 		    file_fsync(object->write_file) : EACCES;
 		if (error != 0 && first_error == 0)
 			first_error = error;
 	}
-	if (first_error != 0) {
-		object_record_writeback_error(object, first_error);
-		for (page = object->pages; page != NULL; page = page->next)
-			page->flags &= ~VM_OBJECT_PAGE_WRITEBACK;
-		return first_error;
-	}
 
+	irq = spin_lock_irqsave(&object->lock);
+	if (first_error != 0)
+		object_record_writeback_error_locked(object, first_error);
 	for (page = object->pages; page != NULL; page = page->next) {
-		if (!(page->flags & VM_OBJECT_PAGE_WRITEBACK))
+		if ((page->flags & VM_OBJECT_PAGE_WRITEBACK) == 0 ||
+		    page->write_generation != sync_generation)
 			continue;
-		clear_page_dirty(page);
-		page->flags &= ~VM_OBJECT_PAGE_WRITEBACK;
+		if (first_error == 0) {
+			if (page_hardware_dirty_locked(page)) {
+				page->flags |= VM_OBJECT_PAGE_DIRTY;
+				page->dirty_generation = next_generation(object);
+			} else if (page->dirty_generation ==
+			    page->write_dirty_generation)
+				clear_page_dirty_locked(page);
+		}
+		page->flags &= ~(VM_OBJECT_PAGE_BUSY | VM_OBJECT_PAGE_WRITEBACK);
+		page->write_generation = 0;
+		page->write_dirty_generation = 0;
 	}
+	waitq_wake_all(&object->page_waitq);
 	if ((flags & MS_INVALIDATE) != 0) {
+	invalidate_retry:
 		for (link = &object->pages; *link != NULL; ) {
 			page = *link;
-			if (!page_overlaps(page, start, end) || page_is_dirty(page)) {
+			if (!page_overlaps(page, start, end) ||
+			    page_is_dirty_locked(page)) {
 				link = &page->next;
 				continue;
 			}
-			invalidate_page(page);
+			if (page->hold_count != 0 ||
+			    (page->flags & (VM_OBJECT_PAGE_BUSY |
+			    VM_OBJECT_PAGE_WRITEBACK)) != 0) {
+				uint64_t sequence = waitq_sequence(&object->page_waitq);
+				int error = waitq_sleep(&object->page_waitq,
+				    &object->lock, sequence, 0, 0);
+				if (error == 0 || error == EAGAIN)
+					goto invalidate_retry;
+				if (first_error == 0)
+					first_error = error;
+				break;
+			}
+			invalidate_page_locked(page);
 			*link = page->next;
 			free_object_page(page);
 		}
 	}
-	if (!object_has_dirty_pages(object))
+	if (first_error == 0 && !object_has_dirty_pages_locked(object))
 		object->writeback_error = 0;
-	return 0;
+	spin_unlock_irqrestore(&object->lock, irq);
+	return first_error;
 }
 
 int
@@ -581,11 +796,26 @@ vm_object_truncate_inode(struct inode *inode, off_t size)
 		}
 	registry_unlock(enabled);
 	if (object != NULL) {
+		unsigned long irq;
 		struct vm_object_page **link;
+	retry:
+		irq = spin_lock_irqsave(&object->lock);
 		for (link = &object->pages; *link != NULL; ) {
 			struct vm_object_page *page = *link;
+			if ((page->flags & (VM_OBJECT_PAGE_BUSY |
+			    VM_OBJECT_PAGE_WRITEBACK)) != 0 ||
+			    page->hold_count != 0) {
+				uint64_t sequence = waitq_sequence(&object->page_waitq);
+				int error = waitq_sleep(&object->page_waitq,
+				    &object->lock, sequence, 0, 0);
+				if (error == 0 || error == EAGAIN)
+					goto retry_locked;
+				/* A non-interruptible wait should not otherwise fail. */
+				spin_unlock_irqrestore(&object->lock, irq);
+				goto out;
+			}
 			if (page->offset >= size) {
-				invalidate_page(page);
+				invalidate_page_locked(page);
 				*link = page->next;
 				free_object_page(page);
 				continue;
@@ -596,6 +826,12 @@ vm_object_truncate_inode(struct inode *inode, off_t size)
 				    0, PAGE_SIZE - (size_t)(size - page->offset));
 			link = &page->next;
 		}
+		spin_unlock_irqrestore(&object->lock, irq);
+		goto out;
+	retry_locked:
+		spin_unlock_irqrestore(&object->lock, irq);
+		goto retry;
+	out:
 		if (refcount_put(&object->refs))
 			HAL_FATAL("published VM object lost registry reference");
 	}
@@ -605,16 +841,20 @@ int
 vm_object_reclaim_one(void)
 {
 	struct vm_object *object;
-	struct vm_object_page *candidate = NULL;
+	off_t candidate_offset = 0;
+	int found = 0;
 	bool enabled;
 
 	enabled = registry_lock();
 	for (object = shared_objects; object != NULL; object = object->next) {
 		struct vm_object_page *page;
+		unsigned long irq = spin_lock_irqsave(&object->lock);
 		for (page = object->pages; page != NULL; page = page->next) {
 			struct vm_page *mapping;
 			int wired = 0;
-			if (page->flags & VM_OBJECT_PAGE_BUSY)
+			if ((page->flags & (VM_OBJECT_PAGE_BUSY |
+			    VM_OBJECT_PAGE_WRITEBACK)) != 0 ||
+			    page->hold_count != 0)
 				continue;
 			for (mapping = page->mappings; mapping != NULL;
 			     mapping = mapping->object_next)
@@ -624,18 +864,20 @@ vm_object_reclaim_one(void)
 				}
 			if (wired)
 				continue;
-			candidate = page;
+			candidate_offset = page->offset;
+			found = 1;
 			refcount_get(&object->refs);
 			break;
 		}
-		if (candidate != NULL)
+		spin_unlock_irqrestore(&object->lock, irq);
+		if (found)
 			break;
 	}
 	registry_unlock(enabled);
-	if (candidate == NULL)
+	if (!found)
 		return ENOMEM;
 	{
-		int error = vm_object_sync_range(object, candidate->offset,
+		int error = vm_object_sync_range(object, candidate_offset,
 		    PAGE_SIZE, MS_SYNC | MS_INVALIDATE);
 		int removed = 0;
 		if (error == 0) {
