@@ -12,6 +12,7 @@
 #include <kern/sched.h>
 #include <kern/waitq.h>
 #include <kern/atomic.h>
+#include <uapi/zedbsd/signal.h>
 #include <sys/types.h>
 #include <stdint.h>
 
@@ -26,6 +27,8 @@ struct thread_signal_level {
 	uint32_t restart_number;
 	uintptr_t restart_args[HAL_SYSCALL_ARGS];
 	unsigned restart_on_return;
+	uintptr_t user_ucontext;
+	ucontext_t saved_ucontext;
 };
 
 enum thread_state {

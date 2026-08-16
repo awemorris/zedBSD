@@ -759,9 +759,10 @@ process_waitpid(struct process *parent, pid_t selector, int *status,
 }
 
 static void
-notify_parent_event(struct process *process, int stopped_or_continued)
+notify_parent_event(struct process *process, int code, int status)
 {
 	const struct signal_action *action;
+	struct signal_info info;
 	struct process *parent;
 	unsigned long irq;
 
@@ -770,9 +771,15 @@ notify_parent_event(struct process *process, int stopped_or_continued)
 		return;
 	parent = process->parent;
 	process_ref(parent);
+	memset(&info, 0, sizeof(info));
+	info.code = code;
+	info.pid = process->pid;
+	info.uid = process->cred != NULL ? process->cred->ruid : 0;
+	info.status = status;
 	action = &parent->signal_actions[SIGCHLD];
-	if (!stopped_or_continued || (action->flags & SA_NOCLDSTOP) == 0)
-		(void)signal_send_process(parent, SIGCHLD);
+	if ((code != CLD_STOPPED && code != CLD_CONTINUED) ||
+	    (action->flags & SA_NOCLDSTOP) == 0)
+		(void)signal_send_process_info(parent, SIGCHLD, &info);
 	irq = spin_lock_irqsave(&process_tree_lock);
 	child_waiters_wake(parent);
 	spin_unlock_irqrestore(&process_tree_lock, irq);
@@ -790,7 +797,7 @@ process_note_stopped(struct process *process, int signo)
 	process->wait_stopped = 1;
 	process->wait_continued = 0;
 	spin_unlock_irqrestore(&process->lock, irq);
-	notify_parent_event(process, 1);
+	notify_parent_event(process, CLD_STOPPED, signo);
 }
 
 void
@@ -803,7 +810,7 @@ process_note_continued(struct process *process)
 	process->wait_continued = 1;
 	process->wait_stopped = 0;
 	spin_unlock_irqrestore(&process->lock, irq);
-	notify_parent_event(process, 1);
+	notify_parent_event(process, CLD_CONTINUED, SIGCONT);
 }
 
 void
@@ -827,8 +834,18 @@ process_thread_retired(struct thread *thread)
 		autoreap = (process->flags & PROCESS_AUTOREAP) != 0;
 	}
 	spin_unlock_irqrestore(&process_tree_lock, irq);
-	if (notify)
-		(void)signal_send_process(parent, SIGCHLD);
+	if (notify) {
+		struct signal_info info;
+		memset(&info, 0, sizeof(info));
+		info.code = (process->exit_status & 0x7f) == 0 ?
+		    CLD_EXITED : CLD_KILLED;
+		info.pid = process->pid;
+		info.uid = process->cred != NULL ? process->cred->ruid : 0;
+		info.status = info.code == CLD_EXITED ?
+		    (process->exit_status >> 8) & 0xff :
+		    process->exit_status & 0x7f;
+		(void)signal_send_process_info(parent, SIGCHLD, &info);
+	}
 	if (parent != NULL)
 		process_release(parent);
 	if (autoreap && reaper_thread != NULL)

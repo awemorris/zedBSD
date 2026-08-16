@@ -56,6 +56,7 @@ zedbsd_signal_restorer:
 	/* Token follows the 128-byte register-window spill area. */
 	add	%sp, 2175, %o1
 	ldx	[%o1], %o1
+	ldx	[%sp + 2183], %o2
 	mov	80, %o0
 	call	zedbsd_syscall6
 	 nop

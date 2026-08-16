@@ -12,6 +12,7 @@
 
 #include <errno.h>
 #include <hal/hal.h>
+#include <string.h>
 
 volatile struct user_int_probe user_int_probe;
 volatile struct user_fault_probe user_fault_probe;
@@ -44,6 +45,7 @@ kernel_user_fault_handler(uint32 vector, uint32 privilege, uintptr_t pc,
 	uintptr_t error_code, uintptr_t fault_address)
 {
 	struct thread *thread = curthread;
+	struct signal_info info;
 	int signo;
 	int page_fault_error = 0;
 	if (thread == NULL || thread->proc == NULL)
@@ -81,7 +83,20 @@ kernel_user_fault_handler(uint32 vector, uint32 privilege, uintptr_t pc,
 		signo = SIGSEGV; break;
 	default: signo = SIGBUS; break;
 	}
-	if (signal_send_process(thread->proc, signo) != 0)
+	memset(&info, 0, sizeof(info));
+	info.address = vector == 14U ? fault_address : pc;
+	switch (signo) {
+	case SIGFPE: info.code = FPE_INTDIV; break;
+	case SIGTRAP: info.code = TRAP_BRKPT; break;
+	case SIGILL: info.code = ILL_ILLOPC; break;
+	case SIGSEGV:
+		info.code = page_fault_error == EACCES ? SEGV_ACCERR :
+		    SEGV_MAPERR;
+		break;
+	case SIGBUS: info.code = BUS_ADRERR; break;
+	default: info.code = SI_KERNEL; break;
+	}
+	if (signal_send_process_info(thread->proc, signo, &info) != 0)
 		return HAL_TRAP_RET_FAILED;
 	return HAL_TRAP_RET_SUCCESS;
 }

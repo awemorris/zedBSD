@@ -285,15 +285,23 @@ uintptr_t hal_task_user_stack(void)
 	struct amd64_interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
 	return f!=NULL&&(f->cs&3U)==3U?(uintptr_t)f->rsp:0;
 }
-int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t rest,uint32_t token)
+int hal_task_user_context(struct hal_user_context *context)
+{
+	struct amd64_interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
+	if(f==NULL||context==NULL||(f->cs&3U)!=3U)return -1;
+	context->pc=(uintptr_t)f->rip;context->stack_pointer=(uintptr_t)f->rsp;
+	context->return_value=(intptr_t)f->rax;return 0;
+}
+int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t info,
+	uintptr_t context,uintptr_t rest,uint32_t token)
 {
 	struct amd64_interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
 	unsigned depth;
-	(void)sig;(void)rest;
+	(void)rest;
 	if(f==NULL||running_task->signal_depth>=HAL_SIGNAL_NEST_MAX||h==0||sp==0||token==0)return -1;
 	depth=running_task->signal_depth;running_task->signal_frame[depth]=*f;
 	running_task->signal_token[depth]=token;running_task->signal_depth=depth+1U;
-	f->rip=h;f->rsp=sp;f->rdi=(uint64)(uint32)sig;return 0;
+	f->rip=h;f->rsp=sp;f->rdi=(uint64)(uint32)sig;f->rsi=info;f->rdx=context;return 0;
 }
 int hal_task_signal_return(uint32_t token,intptr_t *value)
 {

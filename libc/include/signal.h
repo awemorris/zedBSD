@@ -4,6 +4,7 @@
 #include <zedbsd/signal.h>
 #include <sys/types.h>
 typedef void (*sighandler_t)(int);
+typedef void (*siginfo_handler_t)(int, siginfo_t *, void *);
 #define SIG_ERR ((sighandler_t)-1)
 int sigaction(int, const struct sigaction *, struct sigaction *);
 int sigprocmask(int, const sigset_t *, sigset_t *);

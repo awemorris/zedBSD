@@ -333,7 +333,14 @@ hal_task_t hal_task_fork_current(hal_space_t child_space,
 int hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
 			  uintptr_t user_stack_pointer);
 uintptr_t hal_task_user_stack(void);
+struct hal_user_context {
+	uintptr_t pc;
+	uintptr_t stack_pointer;
+	intptr_t return_value;
+};
+int hal_task_user_context(struct hal_user_context *context);
 int hal_task_signal_enter(uintptr_t handler, uintptr_t stack, int signo,
+			  uintptr_t siginfo, uintptr_t ucontext,
 			  uintptr_t restorer, uint32_t token);
 int hal_task_signal_return(uint32_t token, intptr_t *return_value);
 int hal_task_signal_restart(uint32_t token, uint32_t number,

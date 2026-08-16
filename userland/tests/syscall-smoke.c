@@ -35,6 +35,14 @@ static volatile unsigned int nested_signal_depth;
 static volatile unsigned int nested_signal_max_depth;
 static volatile unsigned int nested_signal_error;
 static pid_t nested_signal_pid;
+static volatile unsigned int siginfo_error;
+static volatile unsigned int siginfo_count;
+static pid_t siginfo_pid;
+static uintptr_t expected_fault_address;
+static volatile unsigned int sigchld_count;
+static volatile int sigchld_code;
+static volatile int sigchld_status;
+static volatile pid_t sigchld_pid;
 
 static void
 report_stage(unsigned int stage)
@@ -65,6 +73,46 @@ catch_nested_signal(int signo)
 	if (nested_signal_depth != depth)
 		nested_signal_error = 1;
 	nested_signal_depth--;
+}
+
+static void
+catch_siginfo(int signo, siginfo_t *info, void *opaque_context)
+{
+	ucontext_t *context = opaque_context;
+
+	if (signo != SIGUSR1 || info == NULL || context == NULL ||
+	    info->si_signo != SIGUSR1 || info->si_code != SI_USER ||
+	    info->si_pid != siginfo_pid || context->uc_mcontext.mc_pc == 0 ||
+	    context->uc_mcontext.mc_sp == 0)
+		siginfo_error = 1;
+	else
+		context->uc_sigmask |= 1U << (SIGUSR2 - 1);
+	siginfo_count++;
+}
+
+static void
+catch_fault_siginfo(int signo, siginfo_t *info, void *opaque_context)
+{
+	ucontext_t *context = opaque_context;
+	int valid = signo == SIGBUS && info != NULL && context != NULL &&
+	    info->si_signo == SIGBUS && info->si_code == BUS_ADRERR &&
+	    info->si_addr == expected_fault_address &&
+	    context->uc_mcontext.mc_pc != 0 &&
+	    context->uc_mcontext.mc_sp != 0;
+
+	_exit(valid ? 0 : 1);
+}
+
+static void
+catch_sigchld_info(int signo, siginfo_t *info, void *opaque_context)
+{
+	(void)opaque_context;
+	if (signo == SIGCHLD && info != NULL) {
+		sigchld_code = info->si_code;
+		sigchld_status = info->si_status;
+		sigchld_pid = info->si_pid;
+	}
+	sigchld_count++;
 }
 
 static int
@@ -234,6 +282,59 @@ run_test(int argc, char **argv, char **envp)
 		    signal(SIGUSR1, catch_signal) == SIG_ERR)
 			return 258;
 	}
+	/* SA_SIGINFO carries a fixed-width record and an editable signal mask. */
+	{
+		struct sigaction action;
+		sigset_t current, unblock = 1U << (SIGUSR2 - 1);
+
+		memset(&action, 0, sizeof(action));
+		action.sa_handler = (uint64_t)(uintptr_t)catch_siginfo;
+		action.sa_flags = SA_SIGINFO;
+		siginfo_pid = getpid();
+		siginfo_error = 0;
+		siginfo_count = 0;
+		if (sigaction(SIGUSR1, &action, NULL) != 0 ||
+		    kill(siginfo_pid, SIGUSR1) != 0 || siginfo_count != 1U ||
+		    siginfo_error != 0 ||
+		    sigprocmask(SIG_SETMASK, NULL, &current) != 0 ||
+		    (current & unblock) == 0 ||
+		    sigprocmask(SIG_UNBLOCK, &unblock, NULL) != 0 ||
+		    signal(SIGUSR1, catch_signal) == SIG_ERR)
+			return 260;
+	}
+	/* SIGCHLD identifies the child and reports its unencoded exit status. */
+	{
+		struct sigaction action;
+		memset(&action, 0, sizeof(action));
+		action.sa_handler = (uint64_t)(uintptr_t)catch_sigchld_info;
+		action.sa_flags = SA_SIGINFO | SA_RESTART;
+		sigchld_count = 0;
+		sigchld_pid = -1;
+		sigchld_code = 0;
+		sigchld_status = -1;
+		if (sigaction(SIGCHLD, &action, NULL) != 0)
+			return 262;
+		child = fork();
+		if (child < 0)
+			return 262;
+		if (child == 0)
+			_exit(47);
+		if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+		    WEXITSTATUS(status) != 47)
+			return 263;
+		if (sigchld_count != 1U)
+			return 264;
+		if (sigchld_pid != child)
+			return 265;
+		if (sigchld_code != CLD_EXITED)
+			return 266;
+		if (sigchld_status != 47)
+			return 267;
+		memset(&action, 0, sizeof(action));
+		action.sa_handler = SIG_DFL;
+		if (sigaction(SIGCHLD, &action, NULL) != 0)
+			return 262;
+	}
 	report_stage(3);
 	{
 		sigset_t blocked = 1U << (SIGUSR2 - 1);
@@ -389,6 +490,41 @@ run_test(int argc, char **argv, char **envp)
 		if (waitpid(child, &status, 0) != child || !WIFSIGNALED(status) ||
 		    WTERMSIG(status) != SIGBUS || munmap(mapping, TEST_PAGE_SIZE) != 0)
 			return 257;
+	}
+	/* A synchronous VM fault reports BUS_ADRERR and the exact address. */
+	{
+		struct stat image_status;
+		struct sigaction action;
+		int image = open("/init.elf", O_RDONLY);
+		off_t past_eof;
+		unsigned char *mapping;
+		if (image < 0 || fstat(image, &image_status) != 0)
+			return 261;
+		past_eof = (image_status.st_size + TEST_PAGE_SIZE - 1) &
+		    ~(off_t)(TEST_PAGE_SIZE - 1);
+		mapping = mmap(NULL, TEST_PAGE_SIZE, PROT_READ, MAP_PRIVATE,
+		    image, past_eof);
+		if (mapping == MAP_FAILED || close(image) != 0)
+			return 261;
+		child = fork();
+		if (child < 0)
+			return 261;
+		if (child == 0) {
+			volatile unsigned char value;
+			memset(&action, 0, sizeof(action));
+			action.sa_handler =
+			    (uint64_t)(uintptr_t)catch_fault_siginfo;
+			action.sa_flags = SA_SIGINFO;
+			expected_fault_address = (uintptr_t)mapping;
+			if (sigaction(SIGBUS, &action, NULL) != 0)
+				_exit(2);
+			value = mapping[0];
+			(void)value;
+			_exit(3);
+		}
+		if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+		    WEXITSTATUS(status) != 0 || munmap(mapping, TEST_PAGE_SIZE) != 0)
+			return 261;
 	}
 	report_stage(8);
 	{

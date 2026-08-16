@@ -62,6 +62,7 @@ struct process {
 	struct ucred *cred;
 	struct signal_action signal_actions[NSIG];
 	sigset_t signal_pending;
+	struct signal_info signal_info[NSIG];
 	enum process_state state;
 	unsigned flags;
 	unsigned did_exec;

@@ -44,6 +44,7 @@ zedbsd_syscall6:
 .type zedbsd_signal_restorer, @function
 zedbsd_signal_restorer:
 	movq (%rsp), %rbx
+	movq 8(%rsp), %rcx
 	movq $80, %rax
 	int $0xc2
 	ud2

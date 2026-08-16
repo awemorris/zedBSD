@@ -51,7 +51,8 @@ zedbsd_syscall6:
 .globl zedbsd_signal_restorer
 .type zedbsd_signal_restorer, @function
 zedbsd_signal_restorer:
-	movl 4(%esp), %ebx
+	movl 12(%esp), %ebx
+	movl 8(%esp), %ecx
 	movl $80, %eax
 	int $0xc2
 	ud2

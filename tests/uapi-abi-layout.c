@@ -43,5 +43,10 @@ _Static_assert(sizeof(struct zedbsd_graphics_glyph) == 48,
 
 _Static_assert(sizeof(struct ifconf) == 16, "ifconf fixed ABI");
 _Static_assert(sizeof(struct sigaction) == 24, "sigaction legacy ABI");
+_Static_assert(sizeof(siginfo_t) == 128, "siginfo fixed ABI");
+_Static_assert(sizeof(mcontext_t) == 64, "mcontext fixed ABI");
+_Static_assert(sizeof(ucontext_t) == 128, "ucontext fixed ABI");
+_Static_assert(offsetof(ucontext_t, uc_mcontext) == 24,
+    "ucontext machine-context offset");
 
 int main(void) { return 0; }

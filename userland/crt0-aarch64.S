@@ -42,6 +42,7 @@ zedbsd_syscall6:
 	.type zedbsd_signal_restorer, %function
 zedbsd_signal_restorer:
 	ldr w0, [sp]
+	ldr x1, [sp, #8]
 	mov x8, #80
 	svc #0
 	brk #0

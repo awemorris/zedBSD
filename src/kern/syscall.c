@@ -1974,8 +1974,10 @@ sys_sigaction_call(const uintptr_t args[6])
 			return -error;
 		if (signo == SIGKILL || signo == SIGSTOP)
 			return -EINVAL;
-		if ((action.sa_flags & ~(SA_RESTART | SA_NOCLDSTOP |
-		    SA_NOCLDWAIT | SA_NODEFER | SA_RESETHAND)) != 0 ||
+		if ((action.sa_flags & SA_ONSTACK) != 0 ||
+		    (action.sa_flags & ~(SA_RESTART | SA_NOCLDSTOP |
+		    SA_NOCLDWAIT | SA_NODEFER | SA_RESETHAND |
+		    SA_SIGINFO)) != 0 ||
 		    (signo != SIGCHLD && (action.sa_flags &
 		    (SA_NOCLDSTOP | SA_NOCLDWAIT)) != 0) ||
 		    (action.sa_handler > 1U &&
@@ -2066,19 +2068,33 @@ sys_sigreturn_call(const uintptr_t args[6])
 {
 	intptr_t restored;
 	struct thread_signal_level *level;
+	ucontext_t context;
+	sigset_t restored_mask;
+	int error;
 
-	if (curthread == NULL || args[0] == 0 ||
+	if (curthread == NULL || args[0] == 0 || args[1] == 0 ||
 	    curthread->signal_depth == 0 ||
 	    (uint32_t)args[0] != curthread->signal_token)
 		return -EINVAL;
 	level = &curthread->signal_levels[curthread->signal_depth - 1U];
-	if (level->token != (uint32_t)args[0])
+	if (level->token != (uint32_t)args[0] ||
+	    level->user_ucontext != args[1])
+		return -EINVAL;
+	error = copyin(args[1], &context, sizeof(context));
+	if (error != 0)
+		return -error;
+	/* The first signal ABI exposes machine state for diagnosis but does not
+	 * yet permit userland to replace it.  Only the signal mask is mutable. */
+	restored_mask = context.uc_sigmask & ~(1U << (SIGKILL - 1)) &
+	    ~(1U << (SIGSTOP - 1));
+	context.uc_sigmask = level->saved_ucontext.uc_sigmask;
+	if (memcmp(&context, &level->saved_ucontext, sizeof(context)) != 0)
 		return -EINVAL;
 	if ((level->restart_on_return ? hal_task_signal_restart(
 	    level->token, level->restart_number, level->restart_args, &restored) :
 	    hal_task_signal_return((uint32_t)args[0], &restored)) != 0)
 		return -EINVAL;
-	curthread->signal_mask = level->saved_mask;
+	curthread->signal_mask = restored_mask;
 	memset(level, 0, sizeof(*level));
 	curthread->signal_depth--;
 	curthread->signal_token = curthread->signal_depth == 0 ? 0 :
