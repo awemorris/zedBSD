@@ -8,6 +8,7 @@
 #include "drivers/pcat-ide.h"
 #include <errno.h>
 #include <hal/hal.h>
+#include <kern/lock.h>
 
 #define ATA_DATA 0U
 #define ATA_ERROR 1U
@@ -38,6 +39,8 @@ struct ata_unit {
 
 static struct ata_unit units[ATA_UNIT_MAX];
 static struct ata_unit *order[ATA_UNIT_MAX];
+/* ATA task-file registers are shared by master and slave on each channel. */
+static struct mutex channel_locks[2];
 static unsigned present_count;
 
 static uint8_t inb(uint16_t port)
@@ -138,7 +141,9 @@ static int flush(struct ata_unit *unit)
 static int ata_submit(struct disk *disk, struct bio *bio)
 {
 	struct ata_unit *unit = disk->d_data;
+	struct mutex *channel_lock = &channel_locks[unit->slot / 2U];
 	int error;
+	mutex_lock(channel_lock);
 	if (bio->b_op == BIO_READ)
 		error = transfer(unit, 0, bio->b_mapped_block,
 		    bio->b_block_count, bio->b_data);
@@ -153,6 +158,7 @@ static int ata_submit(struct disk *disk, struct bio *bio)
 		    disk->d_name, (unsigned)bio->b_op,
 		    (uint32_t)bio->b_mapped_block, bio->b_block_count, error,
 		    inb(unit->io + ATA_STATUS));
+	mutex_unlock(channel_lock);
 	bio_complete(bio, error, error == 0 ?
 	    (size_t)bio->b_block_count * disk->d_block_size : 0);
 	return 0;
@@ -193,6 +199,8 @@ static int identify(struct ata_unit *unit, uint16_t data[256])
 unsigned zedbsd_ide_pcat_init(void)
 {
 	static uint16_t data[256];
+	(void)mutex_init(&channel_locks[0], LOCK_RANK_DISK, "ata-primary");
+	(void)mutex_init(&channel_locks[1], LOCK_RANK_DISK, "ata-secondary");
 	present_count = 0;
 	for (unsigned slot = 0; slot < ATA_UNIT_MAX; slot++) {
 		struct ata_unit *unit = &units[slot];

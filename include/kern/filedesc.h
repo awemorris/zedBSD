@@ -45,5 +45,6 @@ int filedesc_dup2(struct filedesc *, int, int, unsigned, int);
 int filedesc_install_pair(struct filedesc *, struct file *, unsigned,
 			  struct file *, unsigned, int [2]);
 void filedesc_close_on_exec(struct filedesc *);
+unsigned filedesc_count(void);
 
 #endif

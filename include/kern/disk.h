@@ -101,6 +101,7 @@ int disk_destroy(struct disk *disk);
 struct disk *disk_find(const char *name);
 struct disk *disk_find_by_dev(dev_t dev);
 unsigned disk_count(void);
+unsigned disk_inflight_count(void);
 struct disk *disk_at(unsigned index);
 void disk_ref(struct disk *disk);
 void disk_release(struct disk *disk);
@@ -118,6 +119,13 @@ int bio_submit(struct disk *disk, struct bio *bio);
 void bio_complete(struct bio *bio, int error, size_t transferred);
 int bio_wait(struct bio *bio);
 int bio_flush(struct disk *disk);
+
+/* Uncached synchronous primitives for cache fill/writeback and swap only. */
+int disk_read_direct(struct disk *, uint64_t, uint32_t, void *);
+int disk_write_direct(struct disk *, uint64_t, uint32_t, const void *);
+int disk_resolve_range(struct disk *, uint64_t, uint32_t, struct disk **,
+	uint64_t *);
+int disk_sync(struct disk *);
 
 int disk_read(struct disk *disk, uint64_t block, uint32_t count, void *data);
 int disk_write(struct disk *disk, uint64_t block, uint32_t count,

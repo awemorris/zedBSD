@@ -3,6 +3,7 @@
 #include "kern/vmspace.h"
 #include "kern/swap.h"
 #include "kern/kmem.h"
+#include "kern/lock.h"
 #include "kern/page.h"
 
 #include <errno.h>
@@ -12,6 +13,7 @@
 #define PAGE_SIZE ZEDBSD_PAGE_SIZE
 
 static struct vm_page *page_queue;
+static struct mutex reclaim_lock;
 struct vm_reclaim_stats vm_reclaim_counters;
 #define stats vm_reclaim_counters
 
@@ -19,16 +21,14 @@ struct vm_reclaim_stats vm_reclaim_counters;
 __attribute__((weak)) int vm_object_reclaim_one(void) { return ENOMEM; }
 __attribute__((weak)) unsigned vm_object_page_count(void) { return 0; }
 
-void vm_page_track(struct vm_page *page)
+void vm_reclaim_init(void)
 {
-	if (page == NULL)
-		return;
-	page->queue_next = page_queue;
-	page_queue = page;
-	if (page->flags & VM_PAGE_RESIDENT) stats.resident++;
+	page_queue = NULL;
+	memset(&stats, 0, sizeof(stats));
+	(void)mutex_init(&reclaim_lock, LOCK_RANK_VMSPACE, "VM reclaim");
 }
 
-void vm_page_untrack(struct vm_page *page)
+static void vm_page_untrack_locked(struct vm_page *page)
 {
 	struct vm_page **link = &page_queue;
 	while (*link != NULL && *link != page)
@@ -39,6 +39,24 @@ void vm_page_untrack(struct vm_page *page)
 		stats.resident--;
 	if (page != NULL && (page->flags & VM_PAGE_SWAPPED) && stats.swapped)
 		stats.swapped--;
+}
+
+void vm_page_track(struct vm_page *page)
+{
+	if (page == NULL)
+		return;
+	mutex_lock(&reclaim_lock);
+	page->queue_next = page_queue;
+	page_queue = page;
+	if (page->flags & VM_PAGE_RESIDENT) stats.resident++;
+	mutex_unlock(&reclaim_lock);
+}
+
+void vm_page_untrack(struct vm_page *page)
+{
+	mutex_lock(&reclaim_lock);
+	vm_page_untrack_locked(page);
+	mutex_unlock(&reclaim_lock);
 }
 
 static void unlink_region_page(struct vm_page *page)
@@ -56,7 +74,7 @@ static int discard_page(struct vm_page *page)
 			   PAGE_SIZE) != HAL_OK)
 		return EIO;
 	unlink_region_page(page);
-	vm_page_untrack(page);
+	vm_page_untrack_locked(page);
 	(void)hal_pmem_free(&page->pmem);
 	kern_free(page);
 	stats.reclaims++;
@@ -105,6 +123,9 @@ static int swap_out_page(struct vm_page *page)
 int vm_reclaim_one(struct vm_page *avoid)
 {
 	unsigned pass;
+	int result = ENOMEM;
+
+	mutex_lock(&reclaim_lock);
 
 	for (pass = 0; pass < 2; pass++) {
 		struct vm_page *page = page_queue;
@@ -129,33 +150,42 @@ int vm_reclaim_one(struct vm_page *avoid)
 				continue;
 			}
 			if ((flags & HAL_PAGE_DIRTY) || (page->flags & VM_PAGE_DIRTY)) {
-				if (swap_out_page(page) == 0)
-					return 0;
+				if (swap_out_page(page) == 0) {
+					result = 0;
+					goto out;
+				}
 			} else if (discard_page(page) == 0) {
-				return 0;
+				result = 0;
+				goto out;
 			}
 			page = next;
 		}
 	}
 	if (vm_object_reclaim_one() == 0) {
 		stats.reclaims++;
-		return 0;
+		result = 0;
 	}
-	return ENOMEM;
+out:
+	mutex_unlock(&reclaim_lock);
+	return result;
 }
 
 void vm_page_note_in(struct vm_page *page)
 {
 	if (page == NULL)
 		return;
+	mutex_lock(&reclaim_lock);
 	if (stats.swapped) stats.swapped--;
 	stats.resident++;
 	stats.page_ins++;
+	mutex_unlock(&reclaim_lock);
 }
 
 void vm_reclaim_note_fault(void)
 {
+	mutex_lock(&reclaim_lock);
 	stats.faults++;
+	mutex_unlock(&reclaim_lock);
 }
 
 void vm_reclaim_get_stats(struct vm_reclaim_stats *output)
@@ -163,6 +193,7 @@ void vm_reclaim_get_stats(struct vm_reclaim_stats *output)
 	struct vm_page *page;
 	if (output == NULL)
 		return;
+	mutex_lock(&reclaim_lock);
 	memcpy(output, &stats, sizeof(*output));
 	output->anonymous_resident = output->file_resident = 0;
 	output->wired = output->busy = output->dirty = output->clean = 0;
@@ -187,4 +218,5 @@ void vm_reclaim_get_stats(struct vm_reclaim_stats *output)
 	}
 	output->file_resident += vm_object_page_count();
 	output->resident += vm_object_page_count();
+	mutex_unlock(&reclaim_lock);
 }

@@ -67,6 +67,7 @@ int main(void)
 	struct vm_page *page;
 	struct vm_reclaim_stats stats;
 
+	vm_reclaim_init();
 	page = make_page(&vm, &clean, 0, 0x11);
 	query_flags = HAL_PAGE_PRESENT | HAL_PAGE_ACCESSED;
 	assert(vm_reclaim_one(NULL) == 0);

@@ -8,6 +8,9 @@
 #include <zedbsd/graphics.h>
 #include <zedbsd/netif.h>
 #include <zedbsd/signal.h>
+#include <zedbsd/syscall.h>
+#include <zedbsd/sysctl.h>
+#include <zedbsd/system.h>
 
 #ifdef ZEDBSD_USER_ABI_LP64
 _Static_assert(sizeof(void *) == 8, "LP64 pointer");
@@ -48,5 +51,10 @@ _Static_assert(sizeof(mcontext_t) == 64, "mcontext fixed ABI");
 _Static_assert(sizeof(ucontext_t) == 128, "ucontext fixed ABI");
 _Static_assert(offsetof(ucontext_t, uc_mcontext) == 24,
     "ucontext machine-context offset");
+_Static_assert(sizeof(struct zedbsd_bufcache_stats) == 104,
+    "bufcache stats fixed ABI");
+_Static_assert(sizeof(struct zedbsd_system_resources) == 136,
+    "resource snapshot fixed ABI");
+_Static_assert(ZEDBSD_SYS_sysctl == 103, "sysctl syscall ABI");
 
 int main(void) { return 0; }

@@ -5,6 +5,7 @@
  */
 
 #include "kern/disk.h"
+#include "kern/buf.h"
 #include "kern/partition.h"
 #include "kern/mbr-partition.h"
 #include "kern/pc98/partition.h"
@@ -139,8 +140,12 @@ test_registry(void)
 
 	CHECK(disk_read(dev, 0, 1, buffer) == 0);
 	CHECK(fake.read_calls == 1);
+	/* Re-reading the same block must hit the buffer cache.  Use the direct
+	 * path below to keep the short-bio contract test deterministic. */
+	CHECK(disk_read(dev, 0, 1, buffer) == 0);
+	CHECK(fake.read_calls == 1);
 	fake.short_next = 1;
-	CHECK(disk_read(dev, 0, 1, buffer) == EIO);
+	CHECK(disk_read_direct(dev, 0, 1, buffer) == EIO);
 	CHECK(disk_read(dev, FAKE_SECTORS, 1, buffer) == EOVERFLOW);
 	CHECK(disk_read(dev, FAKE_SECTORS - 1U, 2, buffer) == EOVERFLOW);
 	CHECK(disk_read(dev, 0, 0, buffer) == EINVAL);
@@ -153,7 +158,7 @@ test_registry(void)
 	CHECK(fake.write_calls == 1);
 	CHECK(fake.data[3U * 512U] == 0x5a);
 	fake.short_next = 1;
-	CHECK(disk_write(dev, 4, 1, buffer) == EIO);
+	CHECK(disk_write_direct(dev, 4, 1, buffer) == EIO);
 	CHECK(bio_flush(dev) == 0);
 
 	CHECK(disk_open(dev) == 0);
@@ -278,6 +283,7 @@ test_pc98_partition_auto(void)
 	raw[4] = 0x0e;
 	put_le32(raw + 8, 128);
 	put_le32(raw + 12, 256);
+	CHECK(buf_invalidate(dev, 0, 2, BUF_INVALIDATE_DISCARD) == 0);
 	count = partition_scan(dev, entries, PARTITION_MAX);
 	CHECK(count == 4);
 	CHECK(entries[0].p_start_block == 128);
@@ -289,6 +295,7 @@ test_pc98_partition_auto(void)
 	memset(native, 0, 512);
 	put_entry(native, 0, 0x80, 0, 0, 1, 0, 0, 1,
 	    16, 7, 1, "DUAL");
+	CHECK(buf_invalidate(dev, 0, 2, BUF_INVALIDATE_DISCARD) == 0);
 	count = partition_scan(dev, entries, PARTITION_MAX);
 	CHECK(count == 16);
 	CHECK(entries[0].p_start_block == 136);
@@ -296,6 +303,7 @@ test_pc98_partition_auto(void)
 
 	/* A partial or misplaced IPL marker must not override a signed MBR. */
 	mbr[7] = 'X';
+	CHECK(buf_invalidate(dev, 0, 2, BUF_INVALIDATE_DISCARD) == 0);
 	count = partition_scan(dev, entries, PARTITION_MAX);
 	CHECK(count == 4);
 	CHECK(entries[0].p_start_block == 128);
@@ -307,6 +315,7 @@ test_pc98_partition_auto(void)
 	memset(native, 0, 512);
 	put_entry(native, 0, 0x80, 0, 0, 1, 0, 0, 1,
 	    16, 7, 1, "NATIVE");
+	CHECK(buf_invalidate(dev, 0, 2, BUF_INVALIDATE_DISCARD) == 0);
 	count = partition_scan(dev, entries, PARTITION_MAX);
 	CHECK(count == 16);
 	CHECK(entries[0].p_start_block == 136);
@@ -315,6 +324,7 @@ test_pc98_partition_auto(void)
 	/* The legacy unsigned native form remains accepted. */
 	mbr[510] = 0;
 	mbr[511] = 0;
+	CHECK(buf_invalidate(dev, 0, 2, BUF_INVALIDATE_DISCARD) == 0);
 	count = partition_scan(dev, entries, PARTITION_MAX);
 	CHECK(count == 16);
 	CHECK(entries[0].p_start_block == 136);
@@ -325,6 +335,7 @@ test_pc98_partition_auto(void)
 	memset(mbr, 0, 512);
 	mbr[510] = 0x55;
 	mbr[511] = 0xaa;
+	CHECK(buf_invalidate(dev, 0, 2, BUF_INVALIDATE_DISCARD) == 0);
 	count = partition_scan(dev, entries, PARTITION_MAX);
 	CHECK(count == 4);
 	CHECK(entries[0].p_block_count == 0);
@@ -333,6 +344,7 @@ test_pc98_partition_auto(void)
 int
 main(void)
 {
+	CHECK(buf_init() == 0);
 	test_registry();
 	test_pc98_partitions();
 	test_pc98_partition_auto();

@@ -741,7 +741,12 @@ prepare_filesystem_destroy(struct mount *mountp, unsigned expected_refs)
 	error = inode_cache_mount_busy(mountp);
 	if (error != 0)
 		return error;
-	return mount_sync(mountp);
+	error = mount_sync(mountp);
+	if (error != 0)
+		return error;
+	return mountp->m_type != NULL &&
+	    mountp->m_type->prepare_unmount != NULL ?
+		mountp->m_type->prepare_unmount(mountp) : 0;
 }
 
 static void
@@ -773,6 +778,17 @@ unmount_private(struct mount *mountp)
 	finalize_filesystem_destroy(mountp);
 	mount_free(mountp);
 	return 0;
+}
+
+unsigned
+mount_count(void)
+{
+	unsigned i, count = 0;
+	unsigned long irq = spin_lock_irqsave(&namespace_lock);
+	for (i = 0; i < MOUNT_MAX; i++)
+		count += mount_used[i] != 0;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	return count;
 }
 
 int

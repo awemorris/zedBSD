@@ -1,5 +1,6 @@
 /* zedBSD inode/namei/mount host tests. SPDX-License-Identifier: Zlib */
 #include "kern/disk.h"
+#include "kern/buf.h"
 #include "kern/file.h"
 #include "kern/mount.h"
 #include "kern/namecache.h"
@@ -283,6 +284,7 @@ static struct disk *add_disk(const char *name, struct mem_fs *store)
 
 int main(void)
 {
+	CHECK(buf_init() == 0);
 	struct fat_mount_args a = { "mem0" }, b = { "mem1" };
 	struct cwdinfo context;
 	struct path root_path;

@@ -53,6 +53,8 @@ struct filesystem_type {
 	int (*probe)(struct disk *);
 	int (*mount)(struct mount *);
 	int (*sync)(struct mount *);
+	/* Last failure-capable step before namespace/inode state is destroyed. */
+	int (*prepare_unmount)(struct mount *);
 	void (*unmount)(struct mount *);
 	struct inode *(*alloc_inode)(struct mount *);
 	void (*free_inode)(struct inode *);
@@ -115,5 +117,6 @@ int mount_lookup_child(const struct path *, const struct componentname *,
 int mount_cross_path_parent(const struct path *, struct path *);
 int mount_readdir_child(const struct path *, unsigned *, struct dirent *);
 int mount_child_shadows(const struct path *, const char *);
+unsigned mount_count(void);
 
 #endif

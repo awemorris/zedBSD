@@ -39,3 +39,29 @@ void spin_unlock_irqrestore(struct spinlock *lock, unsigned long irq)
 	(void)irq;
 	spin_unlock(lock);
 }
+
+int mutex_init(struct mutex *lock, enum lock_rank rank, const char *name)
+{
+	spin_init(&lock->guard, rank, name);
+	lock->owner = NULL;
+	lock->locked = 0;
+	return 0;
+}
+
+int mutex_lock_interruptible(struct mutex *lock)
+{
+	spin_lock(&lock->guard);
+	lock->locked = 1;
+	return 0;
+}
+
+void mutex_lock(struct mutex *lock)
+{
+	(void)mutex_lock_interruptible(lock);
+}
+
+void mutex_unlock(struct mutex *lock)
+{
+	lock->locked = 0;
+	spin_unlock(&lock->guard);
+}

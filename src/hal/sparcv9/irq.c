@@ -98,8 +98,10 @@ hal_irq_get_affinity(int irq, struct hal_irq_affinity *result)
 void
 hal_cpu_idle(void)
 {
+	/* sun4u has no halt instruction in this HAL contract.  Keep the
+	 * interrupt window short so a wakeup published by the timer is observed
+	 * on the next scheduler pass instead of after an arbitrary busy delay. */
 	hal_irq_enable();
-	for (unsigned i = 0; i < 10000U; i++)
-		__asm__ volatile("nop");
+	__asm__ volatile("nop" : : : "memory");
 	(void)hal_irq_disable();
 }

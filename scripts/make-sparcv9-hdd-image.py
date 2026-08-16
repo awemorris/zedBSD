@@ -172,6 +172,10 @@ def create(args: argparse.Namespace) -> None:
         if args.shell is not None:
             run("mmd", "-i", fat_spec, "::/bin")
             run("mcopy", "-i", fat_spec, str(args.shell), "::/bin/sh")
+        if args.sysctl is not None:
+            if args.shell is None:
+                run("mmd", "-i", fat_spec, "::/bin")
+            run("mcopy", "-i", fat_spec, str(args.sysctl), "::/bin/sysctl")
         if args.ufs_root is not None:
             with temporary.open("r+b") as image:
                 image.seek(root_lba * SECTOR_SIZE)
@@ -186,6 +190,8 @@ def create(args: argparse.Namespace) -> None:
         ]
         if args.shell is not None:
             command += ["--shell", str(args.shell)]
+        if args.sysctl is not None:
+            command += ["--sysctl", str(args.sysctl)]
         if args.ufs_root is not None:
             command += ["--ufs-root", str(args.ufs_root)]
         command.append(str(temporary))
@@ -202,6 +208,7 @@ def main() -> None:
     parser.add_argument("--stage2", type=Path, required=True)
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
+    parser.add_argument("--sysctl", type=Path)
     parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("output", type=Path)

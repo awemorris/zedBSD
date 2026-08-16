@@ -30,6 +30,7 @@ struct vm_reclaim_stats {
 
 extern struct vm_reclaim_stats vm_reclaim_counters;
 
+void vm_reclaim_init(void);
 void vm_page_track(struct vm_page *);
 void vm_page_untrack(struct vm_page *);
 int vm_reclaim_one(struct vm_page *avoid);

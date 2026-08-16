@@ -5,6 +5,7 @@
 #include <kern/sched.h>
 #include <kern/signal.h>
 #include <kern/thread.h>
+#include <kern/test-checkpoint.h>
 
 #include <errno.h>
 
@@ -35,6 +36,7 @@ int waitq_sleep(struct wait_queue *queue, struct spinlock *condition_lock,
 	if (queue == NULL || condition_lock == NULL || thread == NULL ||
 	    (flags & ~WAITQ_INTERRUPTIBLE) != 0) return EINVAL;
 	if (waitq_sequence(queue) != observed) return EAGAIN;
+	KERN_TEST_CHECKPOINT(KERN_TEST_WAIT_BEFORE_REGISTER, queue);
 	token = &thread->wait_token;
 	if (token->queue != NULL) return EBUSY;
 	token->thread = thread; token->next = NULL; token->queue = queue;

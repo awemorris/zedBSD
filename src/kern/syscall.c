@@ -16,6 +16,7 @@
 #include "kern/page.h"
 #include "kern/sched.h"
 #include "kern/signal.h"
+#include "kern/sysctl.h"
 #include "kern/thread.h"
 #include "kern/uaccess.h"
 #include "kern/vm-object.h"
@@ -33,6 +34,7 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -43,6 +45,58 @@
 
 static intptr_t syscall_dispatch(uint32_t, const uintptr_t [6]);
 static intptr_t syscall_dispatch_body(uint32_t, const uintptr_t [6]);
+static struct process *current_process(void);
+
+#define SYSCALL_SYSCTL_VALUE_MAX 256U
+
+static intptr_t
+sys_sysctl_call(const uintptr_t args[6])
+{
+	int name[CTL_MAXNAME];
+	uint8_t old_value[SYSCALL_SYSCTL_VALUE_MAX];
+	uint8_t new_value[SYSCALL_SYSCTL_VALUE_MAX];
+	size_t old_length = 0;
+	unsigned namelen = (unsigned)args[1];
+	struct process *process = current_process();
+	int error;
+	if (args[0] == 0 || namelen == 0 || namelen > CTL_MAXNAME ||
+	    args[5] > sizeof(new_value))
+		return -EINVAL;
+	error = copyin(args[0], name, namelen * sizeof(name[0]));
+	if (error != 0)
+		return -error;
+	if (args[2] != 0 && args[3] == 0)
+		return -EINVAL;
+	if (args[3] != 0) {
+		error = copyin(args[3], &old_length, sizeof(old_length));
+		if (error != 0)
+			return -error;
+		if (args[2] != 0 && old_length > sizeof(old_value))
+			old_length = sizeof(old_value);
+	}
+	if (args[4] != 0) {
+		error = copyin(args[4], new_value, (size_t)args[5]);
+		if (error != 0)
+			return -error;
+	} else if (args[5] != 0) {
+		return -EINVAL;
+	}
+	error = kern_sysctl(name, namelen, args[2] != 0 ? old_value : NULL,
+	    args[3] != 0 ? &old_length : NULL,
+	    args[4] != 0 ? new_value : NULL, (size_t)args[5],
+	    process != NULL && cred_is_superuser(process->cred));
+	if (args[3] != 0) {
+		int copy_error = copyout(&old_length, args[3], sizeof(old_length));
+		if (copy_error != 0)
+			return -copy_error;
+	}
+	if (error == 0 && args[2] != 0 && old_length != 0) {
+		error = copyout(old_value, args[2], old_length);
+		if (error != 0)
+			return -error;
+	}
+	return error == 0 ? 0 : -error;
+}
 
 static struct process *current_process(void)
 {
@@ -2450,6 +2504,7 @@ syscall_dispatch_body(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_munmap: return sys_munmap_call(args);
 	case ZEDBSD_SYS_mprotect: return sys_mprotect_call(args);
 	case ZEDBSD_SYS_ioctl: return sys_ioctl_call(args);
+	case ZEDBSD_SYS_sysctl: return sys_sysctl_call(args);
 	case ZEDBSD_SYS_clock_gettime: return sys_clock_gettime_call(args);
 	case ZEDBSD_SYS_clock_getres: return sys_clock_getres_call(args);
 	case ZEDBSD_SYS_clock_settime: return sys_clock_settime_call(args);

@@ -32,15 +32,16 @@ ZEDBSD_LIBC_CFLAGS := \
 ZEDBSD_HOST_TEST_CFLAGS := \
 	-m32 -O2 -fno-builtin -fno-stack-protector \
 	-Wall -Wextra -Werror \
-	-I. -Iinclude -Isrc -Ilibc/include
+	-I. -Iinclude -Iinclude/uapi -Isrc -Ilibc/include
 
 $(BUILD)/tests/libc-host-test: tests/libc-host-test.c \
 	$(ZEDBSD_LIBC_SOURCES) src/kern/fs.c src/kern/namespace.c src/kern/env.c \
+	src/kern/disk.c src/kern/buf.c \
 	tests/vfs-host-stubs.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) $(ZEDBSD_HOST_TEST_CFLAGS) \
 		src/kern/fs.c src/kern/namespace.c src/kern/env.c \
-		src/kern/disk.c src/kern/inode.c src/kern/file.c \
+		src/kern/disk.c src/kern/buf.c src/kern/inode.c src/kern/file.c \
 		src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
 		src/kern/rootfs.c \
 		tests/vfs-host-stubs.c \

@@ -128,5 +128,6 @@ void vmspace_unwire_range(struct vmspace *, uintptr_t, size_t);
 int vmspace_copy_to(struct vmspace *, uintptr_t, const void *, size_t);
 int vmspace_copy_from(struct vmspace *, void *, uintptr_t, size_t);
 void vmspace_free(struct vmspace *);
+unsigned vmspace_count(void);
 
 #endif

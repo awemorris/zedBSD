@@ -20,5 +20,6 @@ void namecache_remove(struct inode *, const struct componentname *);
 void namecache_purge_inode(struct inode *);
 void namecache_purge_mount(struct mount *);
 void namecache_reset(void);
+unsigned namecache_count(void);
 
 #endif

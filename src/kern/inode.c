@@ -674,3 +674,15 @@ int inode_sync(struct inode *i)
 	if (i == NULL) return EINVAL;
 	return i->i_op != NULL && i->i_op->sync != NULL ? i->i_op->sync(i) : 0;
 }
+
+unsigned
+inode_cache_count(void)
+{
+	unsigned i, count = 0;
+	unsigned long irq = spin_lock_irqsave(&inode_cache_lock);
+	for (i = 0; i < INODE_CACHE_MAX; i++)
+		count += inode_cache[i] != NULL &&
+		    inode_cache[i] != INODE_CACHE_RESERVED;
+	spin_unlock_irqrestore(&inode_cache_lock, irq);
+	return count;
+}

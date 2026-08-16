@@ -34,7 +34,8 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
 	src/kern/mount.c src/kern/rootfs.c src/kern/overlayfs.c \
 	src/kern/vfs.c src/kern/swap.c \
-	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/disk.c \
+	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/buf.c \
+	src/kern/sysctl.c src/kern/resource.c src/kern/disk.c \
 	drivers/loop.c \
 	src/kern/partition.c src/kern/mbr-partition.c src/kern/rpi4/platform.c \
 	drivers/rpi4-sdhci.c \
@@ -73,7 +74,8 @@ ARM64_USER_SH_OBJS := \
 ARM64_USER_OBJS := $(BUILD)/user/userland/crt0-aarch64.o \
 	$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_SH_OBJS)
 
-all: $(BUILD)/vmunix $(BUILD)/VMUNIX.A64 $(BUILD)/bin/sh
+all: $(BUILD)/vmunix $(BUILD)/VMUNIX.A64 $(BUILD)/bin/sh \
+	$(BUILD)/bin/sysctl
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
 POSIX-R1.ELF: $(BUILD)/POSIX-R1.ELF
@@ -134,6 +136,18 @@ $(BUILD)/bin/sh: $(ARM64_USER_OBJS) $(ARM64_PLATFORM)/user.ld \
 	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
 
+ARM64_USER_SYSCTL_OBJ := $(BUILD)/user/userland/sysctl/main.o
+$(BUILD)/bin/sysctl: $(BUILD)/user/userland/crt0-aarch64.o \
+	$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_SYSCTL_OBJ) \
+	$(ARM64_PLATFORM)/user.ld scripts/check-user-elf.py
+	@mkdir -p $(dir $@)
+	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
+		$(BUILD)/user/userland/crt0-aarch64.o \
+		$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_SYSCTL_OBJ) -o $@
+	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
+
 $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-aarch64.o \
 	$(ARM64_USER_RUNTIME_OBJS) \
 	$(BUILD)/user/userland/tests/syscall-smoke.o \
@@ -147,10 +161,12 @@ $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-aarch64.o \
 	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
 
 AARCH64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.img
-AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh
-$(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AARCH64_ARCH_IMAGE),aarch64,$(BUILD)/bin/sh,$(AARCH64_ARCH_FILES)))
+AARCH64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/sysctl
+AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
+	--file /bin/sysctl=$(BUILD)/bin/sysctl
+$(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AARCH64_ARCH_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
 AARCH64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.ufs
-$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AARCH64_ARCH_UFS_IMAGE),aarch64,$(BUILD)/bin/sh,$(AARCH64_ARCH_FILES)))
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AARCH64_ARCH_UFS_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
 arch-image: $(AARCH64_ARCH_IMAGE)
 arch-image-check: $(AARCH64_ARCH_IMAGE)-check
 arch-image-ufs: $(AARCH64_ARCH_UFS_IMAGE)

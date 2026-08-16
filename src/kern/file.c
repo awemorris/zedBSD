@@ -481,3 +481,14 @@ file_pool_reset(void)
 			(void)file_close(&files[i]);
 	}
 }
+
+unsigned
+file_count(void)
+{
+	unsigned i, count = 0;
+	unsigned long irq = spin_lock_irqsave(&file_pool_lock);
+	for (i = 0; i < FILE_MAX; i++)
+		count += file_used[i] != 0;
+	spin_unlock_irqrestore(&file_pool_lock, irq);
+	return count;
+}

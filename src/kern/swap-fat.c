@@ -74,9 +74,11 @@ static int fat_swap_io(struct fat_swap_data *data, uint32_t slot, void *page,
 		if (data->disk->d_max_transfer_blocks != 0 &&
 		    count > data->disk->d_max_transfer_blocks)
 			count = data->disk->d_max_transfer_blocks;
-		if ((write ? disk_write(data->disk, extent->disk_block + offset,
-					 count, bytes) :
-		     disk_read(data->disk, extent->disk_block + offset,
+		/* Swap is the backing store for pageable memory; routing it through
+		 * pageable buffer-cache pages would create a reclaim recursion. */
+		if ((write ? disk_write_direct(data->disk,
+				 extent->disk_block + offset, count, bytes) :
+		     disk_read_direct(data->disk, extent->disk_block + offset,
 			       count, bytes)) != 0)
 			return EIO;
 		file_block += count;

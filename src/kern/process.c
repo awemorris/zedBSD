@@ -219,6 +219,23 @@ process_release(struct process *process)
 	kern_free(process);
 }
 
+void
+process_resource_count(uint64_t *processes, uint64_t *threads)
+{
+	struct process *process;
+	uint64_t pc = 0, tc = 0;
+	unsigned long irq = spin_lock_irqsave(&process_tree_lock);
+	for (process = all_processes; process != NULL; process = process->all_next) {
+		pc++;
+		tc += process->thread_count;
+	}
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	if (processes != NULL)
+		*processes = pc;
+	if (threads != NULL)
+		*threads = tc;
+}
+
 struct process *
 process_find_ref(pid_t pid)
 {

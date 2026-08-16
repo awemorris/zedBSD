@@ -43,7 +43,8 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
 	src/kern/mount.c src/kern/rootfs.c src/kern/overlayfs.c \
 	src/kern/vfs.c src/kern/swap.c \
-	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/disk.c \
+	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/buf.c \
+	src/kern/sysctl.c src/kern/resource.c src/kern/disk.c \
 	drivers/loop.c \
 	src/kern/partition.c src/kern/sun-disklabel.c src/kern/sun4u/platform.c \
 	drivers/sun4u-cmd646.c src/kern/image.c src/kern/panic.c \
@@ -86,7 +87,8 @@ SPARCV9_USER_SH_OBJS := \
 SPARCV9_USER_OBJS := $(BUILD)/user/userland/crt0-sparcv9.o \
 	$(SPARCV9_USER_RUNTIME_OBJS) $(SPARCV9_USER_SH_OBJS)
 
-all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/hdd-image.img
+all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
+	$(BUILD)/hdd-image.img
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
 POSIX-R1.ELF: $(BUILD)/POSIX-R1.ELF
@@ -170,6 +172,20 @@ $(BUILD)/bin/sh: $(SPARCV9_USER_OBJS) $(SPARCV9_PLATFORM)/user.ld \
 	@test -z "$$($(SPARCV9_NM) -u $@)" || { $(SPARCV9_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine sparcv9 $@
 
+SPARCV9_USER_SYSCTL_OBJ := $(BUILD)/user/userland/sysctl/main.o
+$(BUILD)/bin/sysctl: $(BUILD)/user/userland/crt0-sparcv9.o \
+	$(SPARCV9_USER_RUNTIME_OBJS) $(SPARCV9_USER_SYSCTL_OBJ) \
+	$(SPARCV9_PLATFORM)/user.ld scripts/check-user-elf.py
+	@mkdir -p $(dir $@)
+	$(SPARCV9_CC) $(SPARCV9_USER_CFLAGS) -nostdlib -static \
+		-Wl,--gc-sections -Wl,-z,max-page-size=8192 \
+		-Wl,-T,$(SPARCV9_PLATFORM)/user.ld \
+		$(BUILD)/user/userland/crt0-sparcv9.o \
+		$(SPARCV9_USER_RUNTIME_OBJS) $(SPARCV9_USER_SYSCTL_OBJ) \
+		-lgcc -o $@
+	@test -z "$$($(SPARCV9_NM) -u $@)" || { $(SPARCV9_NM) -u $@; exit 1; }
+	$(PYTHON) scripts/check-user-elf.py --machine sparcv9 $@
+
 $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-sparcv9.o \
 	$(SPARCV9_USER_RUNTIME_OBJS) \
 	$(BUILD)/user/userland/tests/syscall-smoke.o \
@@ -205,21 +221,25 @@ sparcv9-bootloader: $(BUILD)/boot/stage1.bin $(BUILD)/boot/stage2.bin
 		--stage1 $(BUILD)/boot/stage1.bin \
 		--stage2 $(BUILD)/boot/stage2.bin
 
-$(BUILD)/hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh \
+$(BUILD)/hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
 	$(BUILD)/boot/stage1.bin \
 	$(BUILD)/boot/stage2.bin scripts/make-sparcv9-hdd-image.py \
 	scripts/check-sparcv9-hdd-image.py
 	$(PYTHON) scripts/make-sparcv9-hdd-image.py --force \
 		--stage1 $(BUILD)/boot/stage1.bin \
 		--stage2 $(BUILD)/boot/stage2.bin \
-		--kernel $(BUILD)/vmunix --shell $(BUILD)/bin/sh $@
+		--kernel $(BUILD)/vmunix --shell $(BUILD)/bin/sh \
+		--sysctl $(BUILD)/bin/sysctl $@
 
-$(BUILD)/ufs-root.img: $(BUILD)/bin/sh scripts/make-ufs1-root-image.py \
+$(BUILD)/ufs-root.img: $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
+	scripts/make-ufs1-root-image.py \
 	scripts/ufs1_format.py
 	$(PYTHON) scripts/make-ufs1-root-image.py --force \
-		--arch-profile sparcv9 --native-shell $(BUILD)/bin/sh $@
+		--arch-profile sparcv9 --native-shell $(BUILD)/bin/sh \
+		--native-sysctl $(BUILD)/bin/sysctl $@
 
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh \
+	$(BUILD)/bin/sysctl \
 	$(BUILD)/boot/stage1.bin $(BUILD)/boot/stage2.bin \
 	$(BUILD)/ufs-root.img scripts/make-sparcv9-hdd-image.py \
 	scripts/check-sparcv9-hdd-image.py scripts/check-ufs1-image.py
@@ -227,6 +247,7 @@ $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh \
 		--stage1 $(BUILD)/boot/stage1.bin \
 		--stage2 $(BUILD)/boot/stage2.bin \
 		--kernel $(BUILD)/vmunix --shell $(BUILD)/bin/sh \
+		--sysctl $(BUILD)/bin/sysctl \
 		--ufs-root $(BUILD)/ufs-root.img $@
 
 ufs-root-image: $(BUILD)/ufs-root-hdd-image.img
@@ -237,7 +258,8 @@ sparcv9-disk-check: $(BUILD)/hdd-image.img
 	$(PYTHON) scripts/check-sparcv9-hdd-image.py \
 		--stage1 $(BUILD)/boot/stage1.bin \
 		--stage2 $(BUILD)/boot/stage2.bin \
-		--kernel $(BUILD)/vmunix --shell $(BUILD)/bin/sh $<
+		--kernel $(BUILD)/vmunix --shell $(BUILD)/bin/sh \
+		--sysctl $(BUILD)/bin/sysctl $<
 
 sparcv9-entry-qemu-test: $(BUILD)/hdd-image.img
 	bash scripts/test-sparcv9-entry-qemu.sh

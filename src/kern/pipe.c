@@ -22,6 +22,8 @@ struct pipe {
 	struct wait_queue write_waitq;
 };
 
+static atomic_uint_t pipe_live;
+
 static ssize_t
 pipe_read_file(struct file *file, void *buffer, size_t length)
 {
@@ -124,8 +126,10 @@ pipe_close_file(struct file *file)
 	}
 	destroy = refcount_put(&pipe->endpoints);
 	spin_unlock_irqrestore(&pipe->lock, irq);
-	if (destroy)
+	if (destroy) {
+		(void)atomic_raw_fetch_add_relaxed(&pipe_live.value, (unsigned)-1);
 		kern_free(pipe);
+	}
 	return 0;
 }
 
@@ -149,12 +153,14 @@ pipe_create(int flags, struct file **read_file, struct file **write_file)
 		return ENOMEM;
 	pipe->readers = pipe->writers = 1;
 	refcount_init(&pipe->endpoints, 2);
+	(void)atomic_fetch_add_relaxed(&pipe_live, 1U);
 	spin_init(&pipe->lock, LOCK_RANK_FILE, "pipe");
 	waitq_init(&pipe->read_waitq, "pipe readers");
 	waitq_init(&pipe->write_waitq, "pipe writers");
 	error = file_create_pseudo(&pipe_file_ops,
 	    O_RDONLY | (flags & O_NONBLOCK), pipe, read_file);
 	if (error != 0) {
+		(void)atomic_raw_fetch_add_relaxed(&pipe_live.value, (unsigned)-1);
 		kern_free(pipe);
 		return error;
 	}
@@ -168,3 +174,6 @@ pipe_create(int flags, struct file **read_file, struct file **write_file)
 	}
 	return 0;
 }
+
+unsigned pipe_count(void)
+{ return atomic_load_acquire(&pipe_live); }

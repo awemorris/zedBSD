@@ -206,7 +206,7 @@ $(BUILD)/tests/ufs1-test.img: scripts/make-ufs1-image.py scripts/ufs1_format.py
 $(BUILD)/tests/ufs1-vfs-host-test: tests/ufs1-vfs-host-test.c \
 	$(BUILD)/tests/ufs1-test.img $(VFS_CORE_SOURCES) $(KERN_UFS1_SOURCES)
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Isrc \
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc \
 		-DUFS1_TEST_IMAGE='"$(BUILD)/tests/ufs1-test.img"' \
 		$(VFS_CORE_SOURCES) $(KERN_UFS1_SOURCES) tests/vfs-host-stubs.c $< -o $@
 
@@ -283,11 +283,11 @@ $(BUILD)/tests/dns-host-test: tests/dns-host-test.c \
 $(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
 	tests/vfs-host-stubs.c \
 	src/kern/fs.c src/kern/namespace.c src/kern/env.c $(ZEDBSD_LIBC_SOURCES) \
-	src/kern/disk.c src/kern/inode.c src/kern/file.c src/kern/namecache.c \
+	src/kern/buf.c src/kern/disk.c src/kern/inode.c src/kern/file.c src/kern/namecache.c \
 	src/kern/namei.c src/kern/mount.c src/kern/rootfs.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) $(ZEDBSD_HOST_TEST_CFLAGS) -Iinclude -Isrc src/kern/fs.c \
-		src/kern/namespace.c src/kern/env.c src/kern/disk.c \
+	$(HOSTCC) $(ZEDBSD_HOST_TEST_CFLAGS) -Iinclude -Iinclude/uapi -Isrc src/kern/fs.c \
+		src/kern/namespace.c src/kern/env.c src/kern/buf.c src/kern/disk.c \
 		src/kern/inode.c src/kern/file.c src/kern/namecache.c \
 		src/kern/namei.c src/kern/mount.c src/kern/rootfs.c \
 		tests/vfs-host-stubs.c \
@@ -309,19 +309,33 @@ $(BUILD)/tests/beui-host-test: $(NOCT_ROOT)/tests/testcases/beui-test.c \
 
 $(BUILD)/tests/blkdev-host-test: tests/blkdev-host-test.c \
 	tests/disk-host-stubs.c \
-	src/kern/disk.c src/kern/partition.c src/kern/pc98/partition.c \
+	src/kern/buf.c src/kern/disk.c src/kern/partition.c src/kern/pc98/partition.c \
 	src/kern/mbr-partition.c src/kern/pc98/partition-auto.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/disk.c src/kern/partition.c \
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc src/kern/buf.c src/kern/disk.c src/kern/partition.c \
 		src/kern/pc98/partition.c src/kern/mbr-partition.c \
 		src/kern/pc98/partition-auto.c tests/disk-host-stubs.c $< -o $@
 
-VFS_CORE_SOURCES := src/kern/disk.c src/kern/inode.c src/kern/file.c \
+$(BUILD)/tests/bufcache-host-test: tests/bufcache-host-test.c \
+	tests/disk-host-stubs.c src/kern/buf.c src/kern/sysctl.c src/kern/disk.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -pthread -Iinclude -Iinclude/uapi -Isrc src/kern/buf.c \
+		src/kern/sysctl.c src/kern/disk.c tests/disk-host-stubs.c $< -o $@
+
+$(BUILD)/tests/checkpoint-host-test: tests/checkpoint-host-test.c \
+	tests/disk-host-stubs.c src/kern/test-checkpoint.c src/kern/buf.c \
+	src/kern/disk.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -pthread -DZEDBSD_TEST_CHECKPOINTS \
+		-Iinclude -Iinclude/uapi -Isrc src/kern/test-checkpoint.c \
+		src/kern/buf.c src/kern/disk.c tests/disk-host-stubs.c $< -o $@
+
+VFS_CORE_SOURCES := src/kern/buf.c src/kern/disk.c src/kern/inode.c src/kern/file.c \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c src/kern/rootfs.c
 
 $(BUILD)/tests/vfs-host-test: tests/vfs-host-test.c $(VFS_CORE_SOURCES)
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Isrc $(VFS_CORE_SOURCES) \
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc $(VFS_CORE_SOURCES) \
 		tests/vfs-host-stubs.c $< -o $@
 
 $(BUILD)/tests/cred-host-test: tests/cred-host-test.c src/kern/cred.c
@@ -335,6 +349,8 @@ $(BUILD)/tests/clock-rtc-host-test: tests/clock-rtc-host-test.c \
 
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/blkdev-host-test \
+	$(BUILD)/tests/bufcache-host-test \
+	$(BUILD)/tests/checkpoint-host-test \
 	$(BUILD)/tests/vfs-host-test \
 	$(BUILD)/tests/ufs1-vfs-host-test \
 	$(BUILD)/tests/cred-host-test \
@@ -394,7 +410,8 @@ distclean:
 	rm -rf build
 
 -include $(wildcard $(BUILD)/*.d $(BUILD)/*/*.d $(BUILD)/*/*/*.d \
-	$(BUILD)/*/*/*/*.d)
+	$(BUILD)/*/*/*/*.d $(BUILD)/*/*/*/*/*.d \
+	$(BUILD)/*/*/*/*/*/*.d $(BUILD)/*/*/*/*/*/*/*.d)
 
 .PHONY: all check clean distclean messages stdio-fs-host-test \
 	overlay-journal-format-host-test uapi-abi-layout-check \

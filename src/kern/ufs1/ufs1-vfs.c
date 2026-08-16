@@ -749,6 +749,16 @@ static uint8_t dir_type(enum inode_type type)
 { return type==INODE_DIR?4U:type==INODE_REG?8U:type==INODE_SYMLINK?10U:0U; }
 
 static int
+restore_directory_block(struct inode *directory, uint32_t fragment,
+	const uint8_t *original, int original_error)
+{
+	struct ufs1_mount_state *ms=state(directory->i_mount);
+	if(write_block(directory->i_mount,fragment,original)!=0)
+		ms->writable=0;
+	return original_error;
+}
+
+static int
 dir_find_record(struct inode *directory,const struct componentname *name,
 	uint8_t *block,uint32_t *offset,uint32_t *previous,uint32_t *number)
 {
@@ -768,17 +778,19 @@ dir_find_record(struct inode *directory,const struct componentname *name,
 static int
 dir_add(struct inode *directory,const struct componentname *name,uint32_t number,uint8_t type)
 {
-	struct ufs1_mount_state *ms=state(directory->i_mount);struct ufs1_inode_info *ui=info(directory);uint8_t *block;uint16_t need;uint32_t pos=0;int error;
+	struct ufs1_mount_state *ms=state(directory->i_mount);struct ufs1_inode_info *ui=info(directory);uint8_t *block,*original;uint16_t need;uint32_t pos=0,old_direct,allocated=0;uint32_t old_blocks;off_t old_size;int error,rollback;
 	if(name->cn_namelen==0||name->cn_namelen>255U)
 		return EINVAL;
 	for(pos=0;pos<name->cn_namelen;pos++)
 		if(name->cn_nameptr[pos]=='/')
 			return EINVAL;
 	pos=0;
-	need=dir_minimum((uint8_t)name->cn_namelen);block=kern_calloc(1,ms->super.bsize);if(block==NULL)return ENOMEM;
+	need=dir_minimum((uint8_t)name->cn_namelen);block=kern_calloc(1,ms->super.bsize);original=kern_malloc(ms->super.bsize);if(block==NULL||original==NULL){kern_free(block);kern_free(original);return ENOMEM;}
 	mutex_lock(&directory->i_lock);
-	if(ui->direct[0]==0){error=allocate_block(directory->i_mount,&ui->direct[0]);if(error)goto out;ui->blocks+=ms->super.bsize/UFS1_SECTOR_SIZE;}
+	old_size=directory->i_size;old_direct=ui->direct[0];old_blocks=ui->blocks;
+	if(ui->direct[0]==0){error=allocate_block(directory->i_mount,&ui->direct[0]);if(error)goto out;allocated=ui->direct[0];ui->blocks+=ms->super.bsize/UFS1_SECTOR_SIZE;}
 	error=read_block(directory->i_mount,ui->direct[0],block);if(error)goto out;
+	memcpy(original,block,ms->super.bsize);
 	while(pos<(uint32_t)directory->i_size){uint16_t reclen=ufs1_get16(block,pos+4U,ms->super.swapped);uint8_t nlen=block[pos+7U];uint16_t minimum=dir_minimum(nlen);
 		if(reclen<minimum||pos%UFS1_DIRBLKSIZ+reclen>UFS1_DIRBLKSIZ){error=EIO;goto out;}
 		if(reclen-minimum>=need){uint32_t at=pos+minimum;ufs1_put16(block,pos+4U,minimum,ms->super.swapped);ufs1_put32(block,at,number,ms->super.swapped);ufs1_put16(block,at+4U,reclen-minimum,ms->super.swapped);block[at+6U]=type;block[at+7U]=(uint8_t)name->cn_namelen;memcpy(block+at+8U,name->cn_nameptr,name->cn_namelen);error=write_block(directory->i_mount,ui->direct[0],block);goto commit;}
@@ -787,7 +799,19 @@ dir_add(struct inode *directory,const struct componentname *name,uint32_t number
 	if((uint64_t)directory->i_size+UFS1_DIRBLKSIZ>ms->super.bsize){error=ENOSPC;goto out;}
 	pos=(uint32_t)directory->i_size;ufs1_put32(block,pos,number,ms->super.swapped);ufs1_put16(block,pos+4U,UFS1_DIRBLKSIZ,ms->super.swapped);block[pos+6U]=type;block[pos+7U]=(uint8_t)name->cn_namelen;memcpy(block+pos+8U,name->cn_nameptr,name->cn_namelen);directory->i_size+=UFS1_DIRBLKSIZ;error=write_block(directory->i_mount,ui->direct[0],block);
 commit:	if(error==0)error=persist_inode(directory);
-out:	mutex_unlock(&directory->i_lock);kern_free(block);return error;
+	if(error!=0){
+		rollback=restore_directory_block(directory,ui->direct[0],original,error);
+		directory->i_size=old_size;ui->direct[0]=old_direct;ui->blocks=old_blocks;
+		if(persist_inode(directory)!=0)ms->writable=0;
+		if(allocated!=0&&free_block(directory->i_mount,allocated)!=0)ms->writable=0;
+		error=rollback;
+	}
+out:	if(error!=0&&allocated!=0&&ui->direct[0]==allocated){
+		directory->i_size=old_size;ui->direct[0]=old_direct;ui->blocks=old_blocks;
+		if(persist_inode(directory)!=0)ms->writable=0;
+		if(free_block(directory->i_mount,allocated)!=0)ms->writable=0;
+	}
+	mutex_unlock(&directory->i_lock);kern_free(original);kern_free(block);return error;
 }
 
 static int
@@ -795,14 +819,18 @@ dir_remove(struct inode *directory,const struct componentname *name,uint32_t *nu
 {
 	struct ufs1_mount_state *ms=state(directory->i_mount);
 	uint8_t *block=kern_malloc(ms->super.bsize);
+	uint8_t *original=kern_malloc(ms->super.bsize);
 	uint32_t offset,previous;
 	int error;
 
-	if(block==NULL)
+	if(block==NULL||original==NULL) {
+		kern_free(block);kern_free(original);
 		return ENOMEM;
+	}
 	mutex_lock(&directory->i_lock);
 	error=dir_find_record(directory,name,block,&offset,&previous,number);
 	if(error==0) {
+		memcpy(original,block,ms->super.bsize);
 		uint16_t reclen=ufs1_get16(block,offset+4U,
 			ms->super.swapped);
 		if(previous!=UINT32_MAX &&
@@ -816,8 +844,12 @@ dir_remove(struct inode *directory,const struct componentname *name,uint32_t *nu
 		}
 		error=write_block(directory->i_mount,
 			info(directory)->direct[0],block);
+		if(error!=0)
+			error=restore_directory_block(directory,
+				info(directory)->direct[0],original,error);
 	}
 	mutex_unlock(&directory->i_lock);
+	kern_free(original);
 	kern_free(block);
 	return error;
 }
@@ -828,22 +860,30 @@ dir_replace(struct inode *directory,const struct componentname *name,
 {
 	struct ufs1_mount_state *ms=state(directory->i_mount);
 	uint8_t *block=kern_malloc(ms->super.bsize);
+	uint8_t *original=kern_malloc(ms->super.bsize);
 	uint32_t offset,previous;
 	int error;
 
-	if(block==NULL)
+	if(block==NULL||original==NULL) {
+		kern_free(block);kern_free(original);
 		return ENOMEM;
+	}
 	mutex_lock(&directory->i_lock);
 	error=dir_find_record(directory,name,block,&offset,&previous,old_number);
 	if(error==0) {
+		memcpy(original,block,ms->super.bsize);
 		(void)previous;
 		*old_type=block[offset+6U];
 		ufs1_put32(block,offset,number,ms->super.swapped);
 		block[offset+6U]=type;
 		error=write_block(directory->i_mount,
 			info(directory)->direct[0],block);
+		if(error!=0)
+			error=restore_directory_block(directory,
+				info(directory)->direct[0],original,error);
 	}
 	mutex_unlock(&directory->i_lock);
+	kern_free(original);
 	kern_free(block);
 	return error;
 }
@@ -1002,13 +1042,19 @@ static int
 ufs1_unlink(struct inode *directory,const struct componentname *name)
 {
 	struct ufs1_mount_state *ms=state(directory->i_mount);
-	struct inode *target=NULL;uint32_t number;int error;
+	struct inode *target=NULL;uint32_t number=0;int error,rollback_error;
+	int removed=0;
+	nlink_t old_links=0;
+	unsigned old_flags=0;
 	mutex_lock(&ms->namespace_lock);
 	error=ufs1_lookup(directory,name,&target);
 	if(error)goto out;
 	if(target->i_type==INODE_DIR){error=EISDIR;goto out;}
+	old_links=target->i_linkcount;
+	old_flags=target->i_flags;
 	error=dir_remove(directory,name,&number);
 	if(error==0) {
+		removed=1;
 		mutex_lock(&target->i_lock);
 		if(target->i_linkcount==0) {
 			error=EIO;
@@ -1019,6 +1065,18 @@ ufs1_unlink(struct inode *directory,const struct componentname *name)
 				target->i_flags|=INODE_DEAD;
 		}
 		mutex_unlock(&target->i_lock);
+	}
+	if(error!=0&&removed) {
+		mutex_lock(&target->i_lock);
+		target->i_linkcount=old_links;
+		target->i_flags=old_flags;
+		rollback_error=persist_inode(target);
+		mutex_unlock(&target->i_lock);
+		if(rollback_error==0)
+			rollback_error=dir_add(directory,name,number,
+				dir_type(target->i_type));
+		if(rollback_error!=0)
+			ms->writable=0;
 	}
 out:
 	inode_release(target);
@@ -1039,15 +1097,22 @@ static int
 ufs1_rmdir(struct inode *directory,const struct componentname *name)
 {
 	struct ufs1_mount_state *ms=state(directory->i_mount);
-	struct inode *target=NULL;uint32_t number;int empty,error;
+	struct inode *target=NULL;uint32_t number=0;int empty,error,rollback_error;
+	int removed=0;
+	nlink_t old_target_links=0,old_directory_links=0;
+	unsigned old_target_flags=0;
 	mutex_lock(&ms->namespace_lock);
 	error=ufs1_lookup(directory,name,&target);
 	if(error)goto out;
 	if(target->i_type!=INODE_DIR){error=ENOTDIR;goto out;}
 	empty=directory_empty(target);
 	if(empty<=0){error=empty==0?ENOTEMPTY:-empty;goto out;}
+	old_target_links=target->i_linkcount;
+	old_target_flags=target->i_flags;
+	old_directory_links=directory->i_linkcount;
 	error=dir_remove(directory,name,&number);
 	if(error==0) {
+		removed=1;
 		mutex_lock(&target->i_lock);
 		target->i_linkcount=0;
 		target->i_flags|=INODE_DEAD;
@@ -1059,6 +1124,22 @@ ufs1_rmdir(struct inode *directory,const struct componentname *name)
 		if(error==0)
 			error=persist_inode(directory);
 		mutex_unlock(&directory->i_lock);
+	}
+	if(error!=0&&removed) {
+		mutex_lock(&target->i_lock);
+		target->i_linkcount=old_target_links;
+		target->i_flags=old_target_flags;
+		rollback_error=persist_inode(target);
+		mutex_unlock(&target->i_lock);
+		mutex_lock(&directory->i_lock);
+		directory->i_linkcount=old_directory_links;
+		if(rollback_error==0)
+			rollback_error=persist_inode(directory);
+		mutex_unlock(&directory->i_lock);
+		if(rollback_error==0)
+			rollback_error=dir_add(directory,name,number,4);
+		if(rollback_error!=0)
+			ms->writable=0;
 	}
 out:
 	inode_release(target);
@@ -1073,9 +1154,13 @@ ufs1_rename(struct inode *old_directory,const struct componentname *old_name,
 {
 	struct ufs1_mount_state *ms=state(old_directory->i_mount);
 	struct inode *source=NULL,*target=NULL;
-	uint32_t removed,replaced=0;
+	uint32_t removed=0,replaced=0;
 	uint8_t replaced_type=0;
-	int target_exists=0,empty,error;
+	nlink_t old_target_links=0,old_old_directory_links=0;
+	nlink_t old_new_directory_links=0;
+	unsigned old_target_flags=0;
+	int target_exists=0,namespace_committed=0,dotdot_changed=0;
+	int empty,error,rollback_error=0;
 
 	if(flags!=0)
 		return EINVAL;
@@ -1120,6 +1205,12 @@ ufs1_rename(struct inode *old_directory,const struct componentname *old_name,
 	} else {
 		goto out;
 	}
+	old_old_directory_links=old_directory->i_linkcount;
+	old_new_directory_links=new_directory->i_linkcount;
+	if(target_exists) {
+		old_target_links=target->i_linkcount;
+		old_target_flags=target->i_flags;
+	}
 	if(source->i_type==INODE_DIR && old_directory!=new_directory) {
 		error=directory_is_descendant(new_directory,source);
 		if(error!=0)
@@ -1152,6 +1243,7 @@ ufs1_rename(struct inode *old_directory,const struct componentname *old_name,
 		error=EIO;
 		goto out;
 	}
+	namespace_committed=1;
 
 	if(source->i_type==INODE_DIR && old_directory!=new_directory) {
 		static const struct componentname dotdot={"..",2,0};
@@ -1161,6 +1253,7 @@ ufs1_rename(struct inode *old_directory,const struct componentname *old_name,
 			&old_parent,&old_parent_type);
 		if(error!=0)
 			goto out;
+		dotdot_changed=1;
 		(void)old_parent;
 		(void)old_parent_type;
 	}
@@ -1204,6 +1297,49 @@ ufs1_rename(struct inode *old_directory,const struct componentname *old_name,
 		}
 	}
 out:
+	if(error!=0&&namespace_committed) {
+		static const struct componentname dotdot={"..",2,0};
+		uint32_t ignored;
+		uint8_t ignored_type;
+
+		if(dotdot_changed&&dir_replace(source,&dotdot,
+		    (uint32_t)old_directory->i_ino,4,&ignored,
+		    &ignored_type)!=0)
+			rollback_error=EIO;
+		if(target_exists) {
+			if(dir_replace(new_directory,new_name,
+			    (uint32_t)target->i_ino,dir_type(target->i_type),
+			    &ignored,&ignored_type)!=0)
+				rollback_error=EIO;
+		} else if(dir_remove(new_directory,new_name,&ignored)!=0) {
+			rollback_error=EIO;
+		}
+		if(dir_add(old_directory,old_name,(uint32_t)source->i_ino,
+		    dir_type(source->i_type))!=0)
+			rollback_error=EIO;
+		if(target_exists) {
+			mutex_lock(&target->i_lock);
+			target->i_linkcount=old_target_links;
+			target->i_flags=old_target_flags;
+			if(persist_inode(target)!=0)
+				rollback_error=EIO;
+			mutex_unlock(&target->i_lock);
+		}
+		mutex_lock(&old_directory->i_lock);
+		old_directory->i_linkcount=old_old_directory_links;
+		if(persist_inode(old_directory)!=0)
+			rollback_error=EIO;
+		mutex_unlock(&old_directory->i_lock);
+		if(new_directory!=old_directory) {
+			mutex_lock(&new_directory->i_lock);
+			new_directory->i_linkcount=old_new_directory_links;
+			if(persist_inode(new_directory)!=0)
+				rollback_error=EIO;
+			mutex_unlock(&new_directory->i_lock);
+		}
+		if(rollback_error!=0)
+			ms->writable=0;
+	}
 	inode_release(target);
 	inode_release(source);
 	mutex_unlock(&ms->namespace_lock);
@@ -1214,7 +1350,7 @@ static int
 ufs1_link(struct inode *directory,const struct componentname *name,struct inode *target)
 {
 	struct ufs1_mount_state *ms=state(directory->i_mount);
-	struct inode *existing;int error;
+	struct inode *existing;uint32_t removed;int error,rollback_error;
 	if(target==NULL||target->i_mount!=directory->i_mount)return EXDEV;
 	if(target->i_type==INODE_DIR)return EPERM;
 	mutex_lock(&ms->namespace_lock);
@@ -1232,6 +1368,15 @@ ufs1_link(struct inode *directory,const struct componentname *name,struct inode 
 		error=persist_inode(target);
 		target->i_linkcount--;
 		mutex_unlock(&target->i_lock);
+		if(error!=0) {
+			mutex_lock(&target->i_lock);
+			rollback_error=persist_inode(target);
+			mutex_unlock(&target->i_lock);
+			if(rollback_error==0)
+				rollback_error=dir_remove(directory,name,&removed);
+			if(rollback_error!=0)
+				ms->writable=0;
+		}
 	}
 out:
 	mutex_unlock(&ms->namespace_lock);
@@ -1412,7 +1557,7 @@ static int ufs1_file_sync(struct file *file)
 	int error;
 	if(file==NULL)return EINVAL;
 	error=inode_sync(file->f_inode);
-	return error!=0?error:bio_flush(file->f_inode->i_mount->m_disk);
+	return error!=0?error:disk_sync(file->f_inode->i_mount->m_disk);
 }
 static const struct file_ops ufs1_regular_ops={.read=ufs1_read,.write=ufs1_write,.pread=ufs1_pread,.pwrite=ufs1_pwrite,.fsync=ufs1_file_sync};
 static const struct file_ops ufs1_directory_ops={.readdir=ufs1_readdir};
@@ -1438,7 +1583,7 @@ ufs1_write_clean(struct mount *mountp,uint8_t clean)
 	error=disk_read(mountp->m_disk,UFS1_SBLOCK_OFFSET/UFS1_SECTOR_SIZE,UFS1_SBLOCK_SIZE/UFS1_SECTOR_SIZE,buffer);
 	if(error==0){buffer[UFS1_FS_CLEAN]=clean;error=disk_write(mountp->m_disk,UFS1_SBLOCK_OFFSET/UFS1_SECTOR_SIZE,UFS1_SBLOCK_SIZE/UFS1_SECTOR_SIZE,buffer);}
 	if(error==0)
-		error=bio_flush(mountp->m_disk);
+		error=disk_sync(mountp->m_disk);
 	if(error==0)
 		ms->super.clean=clean;
 	kern_free(buffer);
@@ -1506,10 +1651,12 @@ static int ufs1_mount_impl(struct mount *mountp)
 	if(ms->writable){error=ufs1_write_clean(mountp,0);if(error){root->i_flags|=INODE_DEAD;inode_release(root);mountp->m_data=NULL;kern_free(ms->cg);kern_free(ms);return error;}}
 	root->i_flags|=INODE_ROOT; mountp->m_root=root; return 0;
 }
-static int ufs1_sync(struct mount *mountp) { return mountp==NULL?EINVAL:bio_flush(mountp->m_disk); }
-static void ufs1_unmount(struct mount *mountp) { if(mountp&&mountp->m_data){struct ufs1_mount_state *ms=state(mountp);if(ms->writable&&ufs1_sync(mountp)==0)(void)ufs1_write_clean(mountp,1);kern_free(ms->cg);kern_free(ms);mountp->m_data=NULL;} }
+static int ufs1_sync(struct mount *mountp) { return mountp==NULL?EINVAL:disk_sync(mountp->m_disk); }
+static int ufs1_prepare_unmount(struct mount *mountp) { struct ufs1_mount_state *ms=state(mountp);return ms!=NULL&&ms->writable?ufs1_write_clean(mountp,1):0; }
+static void ufs1_unmount(struct mount *mountp) { if(mountp&&mountp->m_data){struct ufs1_mount_state *ms=state(mountp);kern_free(ms->cg);kern_free(ms);mountp->m_data=NULL;} }
 
 const struct filesystem_type ufs1_filesystem_type={
 	.fs_name="ufs1",.probe=ufs1_probe,.mount=ufs1_mount_impl,.sync=ufs1_sync,
+	.prepare_unmount=ufs1_prepare_unmount,
 	.unmount=ufs1_unmount,.alloc_inode=ufs1_alloc_inode,.free_inode=ufs1_free_inode,
 };

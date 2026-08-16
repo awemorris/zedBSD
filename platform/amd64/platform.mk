@@ -35,7 +35,9 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
 	src/kern/rootfs.c src/kern/overlayfs.c src/kern/vfs.c \
 	src/kern/swap.c src/kern/swap-fat.c \
-	src/kern/vm-reclaim.c src/kern/disk.c src/kern/partition.c \
+	src/kern/vm-reclaim.c src/kern/buf.c src/kern/sysctl.c \
+	src/kern/resource.c \
+	src/kern/disk.c src/kern/partition.c \
 	drivers/loop.c \
 	drivers/pcat-ide.c drivers/dp8390.c drivers/pcat-ne2000.c \
 	src/kern/mbr-partition.c src/kern/pcat/platform.c \
@@ -61,12 +63,13 @@ AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS) \
 
 all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
-	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup \
+	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup $(BUILD)/bin/sysctl \
 	$(BUILD)/hdd-image.img
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
 POSIX-R1.ELF: $(BUILD)/POSIX-R1.ELF
-.PHONY: POSIX-R1.ELF
+SMP-STRESS.ELF: $(BUILD)/SMP-STRESS.ELF
+.PHONY: POSIX-R1.ELF SMP-STRESS.ELF
 
 $(BUILD)/src/hal/amd64/%.o: src/hal/amd64/%.S
 	@mkdir -p $(dir $@)
@@ -186,6 +189,27 @@ $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
+$(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
+	$(BUILD)/user64/userland/tests/smp-resource-stress.o \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+		$(BUILD)/user64/userland/tests/smp-resource-stress.o -o $@
+	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+AMD64_USER_SYSCTL_OBJ := $(BUILD)/user64/userland/sysctl/main.o
+$(BUILD)/bin/sysctl: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SYSCTL_OBJ) \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+		$(AMD64_USER_SYSCTL_OBJ) -o $@
+	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
 $(BUILD)/bin/nettest: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(AMD64_USER_NETTEST_OBJS) $(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
@@ -225,14 +249,15 @@ network-tools: $(USER_NET_COMMAND_TARGETS)
 AMD64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/amd64.img
 AMD64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
-	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup
+	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup $(BUILD)/bin/sysctl
 AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/nettest=$(BUILD)/bin/nettest \
 	--file /bin/ping=$(BUILD)/bin/ping \
 	--file /bin/ifconfig=$(BUILD)/bin/ifconfig \
 	--file /bin/route=$(BUILD)/bin/route \
 	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
-	--file /bin/nslookup=$(BUILD)/bin/nslookup
+	--file /bin/nslookup=$(BUILD)/bin/nslookup \
+	--file /bin/sysctl=$(BUILD)/bin/sysctl
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AMD64_ARCH_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
 AMD64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/amd64.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_ARCH_UFS_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))

@@ -5,6 +5,7 @@
 #include <zedbsd/dirent.h>
 #include <zedbsd/console.h>
 #include <zedbsd/syscall.h>
+#include <sys/sysctl.h>
 #include <zedbsd/process.h>
 #include <zedbsd/netif.h>
 #include <zedbsd/route.h>
@@ -186,6 +187,31 @@ int ioctl(int fd, unsigned long request, ...) {
 		va_start(ap, request); arg = va_arg(ap, uintptr_t); va_end(ap);
 	}
 	return (int)call(ZEDBSD_SYS_ioctl, fd, request, arg, 0, 0, 0);
+}
+
+int
+sysctl(const int *name, unsigned int namelen, void *oldp, size_t *oldlenp,
+	const void *newp, size_t newlen)
+{
+	return (int)call(ZEDBSD_SYS_sysctl, (uintptr_t)name, namelen,
+	    (uintptr_t)oldp, (uintptr_t)oldlenp, (uintptr_t)newp, newlen);
+}
+
+int
+sysctlbyname(const char *name, void *oldp, size_t *oldlenp,
+	const void *newp, size_t newlen)
+{
+	int query[2] = { CTL_SYSCTL, CTL_SYSCTL_NAME2OID };
+	int oid[CTL_MAXNAME];
+	size_t oidlen = sizeof(oid);
+	if (name == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (sysctl(query, 2, oid, &oidlen, name, strlen(name) + 1U) != 0)
+		return -1;
+	return sysctl(oid, (unsigned)(oidlen / sizeof(oid[0])), oldp,
+	    oldlenp, newp, newlen);
 }
 void *mmap(void *address, size_t length, int prot, int flags, int fd, off_t offset) {
 	intptr_t value = call(ZEDBSD_SYS_mmap, (uintptr_t)address, length, prot,

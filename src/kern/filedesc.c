@@ -3,8 +3,11 @@
 #include "kern/filedesc.h"
 #include "kern/file.h"
 #include "kern/kmem.h"
+#include "kern/test-checkpoint.h"
 
 #include <errno.h>
+
+static atomic_uint_t filedesc_live;
 
 struct filedesc *
 filedesc_create(void)
@@ -13,6 +16,7 @@ filedesc_create(void)
 	if (fd != NULL) {
 		refcount_init(&fd->refs, 1);
 		spin_init(&fd->lock, LOCK_RANK_FILEDESC, "file descriptor table");
+		(void)atomic_fetch_add_relaxed(&filedesc_live, 1U);
 	}
 	return fd;
 }
@@ -43,8 +47,12 @@ filedesc_destroy(struct filedesc *fd)
 	spin_unlock_irqrestore(&fd->lock, irq);
 	for (descriptor = 0; descriptor < count; descriptor++)
 		(void)file_close(detached[descriptor]);
+	(void)atomic_raw_fetch_add_relaxed(&filedesc_live.value, (unsigned)-1);
 	kern_free(fd);
 }
+
+unsigned filedesc_count(void)
+{ return atomic_load_acquire(&filedesc_live); }
 
 struct file *
 filedesc_get_ref(struct filedesc *fd, int descriptor)
@@ -56,8 +64,10 @@ filedesc_get_ref(struct filedesc *fd, int descriptor)
 		return NULL;
 	irq = spin_lock_irqsave(&fd->lock);
 	file = fd->entries[descriptor].file;
-	if (file != NULL)
+	if (file != NULL) {
+		KERN_TEST_CHECKPOINT(KERN_TEST_FD_LOOKUP_BEFORE_REF, file);
 		file_ref(file);
+	}
 	spin_unlock_irqrestore(&fd->lock, irq);
 	return file;
 }

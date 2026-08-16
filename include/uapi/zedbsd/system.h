@@ -43,10 +43,20 @@ struct zedbsd_system_vmstat {
 	uint64_t vm_commit_limit, vm_commit_used, vm_commit_available;
 };
 
+/* Debug/validation snapshot.  Counts are live kernel objects, not capacity. */
+struct zedbsd_system_resources {
+	uint64_t process, thread, filedesc, file, pipe;
+	uint64_t mount, inode, namecache;
+	uint64_t vmspace, vm_object, vm_page, swap_slot;
+	uint64_t disk, bio, socket, packet, net_device;
+};
+
 #define ZEDBSD_SYSTEM_GET_INFO _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 1, struct zedbsd_system_info)
 #define ZEDBSD_SYSTEM_GET_DEVICE _IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 2, struct zedbsd_system_device)
 #define ZEDBSD_SYSTEM_GET_VMSTAT _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 3, struct zedbsd_system_vmstat)
 #define ZEDBSD_SYSTEM_HALT _IO(ZEDBSD_SYSTEM_IOC_GROUP, 4)
 #define ZEDBSD_SYSTEM_REBOOT _IO(ZEDBSD_SYSTEM_IOC_GROUP, 5)
+#define ZEDBSD_SYSTEM_GET_RESOURCES _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 6, \
+	struct zedbsd_system_resources)
 
 #endif

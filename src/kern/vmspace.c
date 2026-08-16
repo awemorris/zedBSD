@@ -26,6 +26,7 @@ struct vmspace kernel_vmspace = {
 
 struct vm_layout vm_layout;
 static int vm_layout_initialized;
+static atomic_uint_t vmspace_live;
 
 static int
 alloc_vm_page(struct hal_pmem *memory)
@@ -122,6 +123,7 @@ vmspace_create(void)
 		return NULL;
 	}
 	refcount_init(&vm->refs, 1);
+	(void)atomic_fetch_add_relaxed(&vmspace_live, 1U);
 	return vm;
 }
 
@@ -1219,5 +1221,9 @@ vmspace_free(struct vmspace *vm)
 		kern_free(region);
 	}
 	hal_page_destroy_space(vm->space);
+	(void)atomic_raw_fetch_add_relaxed(&vmspace_live.value, (unsigned)-1);
 	kern_free(vm);
 }
+
+unsigned vmspace_count(void)
+{ return atomic_load_acquire(&vmspace_live); }

@@ -111,6 +111,7 @@ enum zedbsd_syscall_number {
 	ZEDBSD_SYS_sigsuspend = 100,
 	ZEDBSD_SYS_clock_getres = 101,
 	ZEDBSD_SYS_clock_settime = 102,
+	ZEDBSD_SYS_sysctl = 103,
 };
 
 #endif

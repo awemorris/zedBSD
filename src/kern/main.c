@@ -14,6 +14,7 @@
 #include "kern/init.h"
 #include "kern/sched.h"
 #include "kern/vm-commit.h"
+#include "kern/vm-reclaim.h"
 
 #ifndef ZEDBSD_INIT_PATH
 #define ZEDBSD_INIT_PATH "/bin/sh"
@@ -133,6 +134,7 @@ void kernel_main(const struct zedbsd_handoff *h,
 	device_count = platform_device_count;
 	devs = platform_devices;
 	zedbsd_env_init(&boot_environment);
+	vm_reclaim_init();
 	hal_printf("boot: VFS initialization\n");
 	error = kern_vfs_init(h, platform_devices, platform_device_count);
 	if (error != 0)

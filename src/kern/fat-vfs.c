@@ -22,6 +22,7 @@
 
 struct fat_mount_state {
 	struct zedbsd_filesystem legacy;
+	struct mutex lock;
 	uint8_t used;
 };
 
@@ -43,6 +44,9 @@ static struct fat_inode_slot fat_inodes[FAT_INODE_MAX]
 	__attribute__((section(".vfs_bss")));
 static struct fat_file_state fat_files[FAT_FILE_MAX]
 	__attribute__((section(".vfs_bss")));
+static struct spinlock fat_pool_lock = {
+	{ 0 }, LOCK_RANK_INODE, "FAT object pools", 0, 0
+};
 
 static int
 fs_error(enum zedbsd_fs_result result)
@@ -114,16 +118,20 @@ static struct inode *
 fat_alloc_inode(struct mount *mountp)
 {
 	unsigned i;
+	unsigned long irq;
 	(void)mountp;
+	irq = spin_lock_irqsave(&fat_pool_lock);
 	for (i = 0; i < FAT_INODE_MAX; i++) {
 		if (!fat_inodes[i].used) {
 			fat_inodes[i].used = 1;
 			memset(&fat_inodes[i].info, 0,
 			       sizeof(fat_inodes[i].info));
 			fat_inodes[i].path[0] = '\0';
+			spin_unlock_irqrestore(&fat_pool_lock, irq);
 			return &fat_inodes[i].info.fi_inode;
 		}
 	}
+	spin_unlock_irqrestore(&fat_pool_lock, irq);
 	return NULL;
 }
 
@@ -131,8 +139,12 @@ static void
 fat_free_inode(struct inode *inode)
 {
 	struct fat_inode_slot *slot = fat_slot(inode);
-	if (slot != NULL)
+	unsigned long irq;
+	if (slot != NULL) {
+		irq = spin_lock_irqsave(&fat_pool_lock);
 		memset(slot, 0, sizeof(*slot));
+		spin_unlock_irqrestore(&fat_pool_lock, irq);
+	}
 }
 
 static int
@@ -419,8 +431,8 @@ fat_stat_path_casefold(struct mount *mountp, const char *path,
 }
 
 static int
-fat_lookup(struct inode *directory, const struct componentname *name,
-	   struct inode **result)
+fat_lookup_unlocked(struct inode *directory, const struct componentname *name,
+		    struct inode **result)
 {
 	char path[ZEDBSD_PATH_MAX];
 	const char *parent = fat_path(directory);
@@ -452,8 +464,21 @@ fat_lookup(struct inode *directory, const struct componentname *name,
 }
 
 static int
-fat_lookup_casefold(struct inode *directory,
-		    const struct componentname *name, struct inode **result)
+fat_lookup(struct inode *directory, const struct componentname *name,
+	   struct inode **result)
+{
+	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
+	int error;
+	mutex_lock(&state->lock);
+	error = fat_lookup_unlocked(directory, name, result);
+	mutex_unlock(&state->lock);
+	return error;
+}
+
+static int
+fat_lookup_casefold_unlocked(struct inode *directory,
+			     const struct componentname *name,
+			     struct inode **result)
 {
 	char path[ZEDBSD_PATH_MAX];
 	const char *parent = fat_path(directory);
@@ -494,7 +519,8 @@ fat_put16(uint8_t *bytes, uint16_t value)
 }
 
 static FAT_MUTATION int
-fat_setattr(struct inode *inode, const struct stat *status, unsigned mask)
+fat_setattr_unlocked(struct inode *inode, const struct stat *status,
+		     unsigned mask)
 {
 	struct fat_mount_state *state = fat_mount_state(inode->i_mount);
 	struct fat_inode_info *info = fat_inode(inode);
@@ -571,50 +597,75 @@ fat_setattr(struct inode *inode, const struct stat *status, unsigned mask)
 	return 0;
 }
 
+static FAT_MUTATION int
+fat_setattr(struct inode *inode, const struct stat *status, unsigned mask)
+{
+	struct fat_mount_state *state = fat_mount_state(inode->i_mount);
+	int error;
+	mutex_lock(&state->lock);
+	error = fat_setattr_unlocked(inode, status, mask);
+	mutex_unlock(&state->lock);
+	return error;
+}
+
 static struct fat_file_state *
 fat_file_get(struct file *file)
 {
+	struct fat_file_state *slot = NULL;
+	struct fat_mount_state *mount_state;
 	unsigned i;
+	unsigned long irq;
 	if (file->f_data != NULL)
 		return file->f_data;
+	irq = spin_lock_irqsave(&fat_pool_lock);
 	for (i = 0; i < FAT_FILE_MAX; i++) {
 		if (!fat_files[i].used) {
-			struct fat_mount_state *mount_state =
-				fat_mount_state(file->f_inode->i_mount);
 			fat_files[i].used = 1;
 			fat_files[i].owner = file->f_inode;
 			memset(&fat_files[i].legacy, 0,
 			       sizeof(fat_files[i].legacy));
-			if (zedbsd_fs_open_result(&mount_state->legacy,
-						 fat_path(file->f_inode),
-						 &fat_files[i].legacy) !=
-			    ZEDBSD_FS_OK) {
-				fat_files[i].used = 0;
-				return NULL;
-			}
-			/*
-			 * Another open file may have extended this inode without yet
-			 * flushing its FAT directory entry.  The inode is the coherent
-			 * in-memory size/cluster authority for every open description.
-			 */
-			fat_files[i].legacy.size = (uint64_t)file->f_inode->i_size;
-			zedbsd_fat_file_state(&fat_files[i].legacy)->first_cluster =
-				fat_inode(file->f_inode)->fi_first_cluster;
-			file->f_data = &fat_files[i];
-			return &fat_files[i];
+			slot = &fat_files[i];
+			break;
 		}
 	}
-	return NULL;
+	spin_unlock_irqrestore(&fat_pool_lock, irq);
+	if (slot == NULL)
+		return NULL;
+	mount_state = fat_mount_state(file->f_inode->i_mount);
+	if (zedbsd_fs_open_result(&mount_state->legacy,
+				  fat_path(file->f_inode), &slot->legacy) !=
+	    ZEDBSD_FS_OK) {
+		irq = spin_lock_irqsave(&fat_pool_lock);
+		memset(slot, 0, sizeof(*slot));
+		spin_unlock_irqrestore(&fat_pool_lock, irq);
+		return NULL;
+	}
+	/*
+	 * Another open file may have extended this inode without yet flushing
+	 * its FAT directory entry.  The inode is the coherent in-memory
+	 * size/cluster authority for every open description.
+	 */
+	slot->legacy.size = (uint64_t)file->f_inode->i_size;
+	zedbsd_fat_file_state(&slot->legacy)->first_cluster =
+		fat_inode(file->f_inode)->fi_first_cluster;
+	file->f_data = slot;
+	return slot;
 }
 
 static int
 fat_open_file(struct file *file)
 {
-	return fat_file_get(file) != NULL ? 0 : EIO;
+	struct fat_mount_state *state = fat_mount_state(file->f_inode->i_mount);
+	int error;
+	mutex_lock(&state->lock);
+	error = fat_file_get(file) != NULL ? 0 : EIO;
+	mutex_unlock(&state->lock);
+	return error;
 }
 
 static ssize_t
-fat_pread_file(struct file *file, void *buffer, size_t length, off_t offset)
+fat_pread_file_unlocked(struct file *file, void *buffer, size_t length,
+			off_t offset)
 {
 	struct fat_file_state *state = fat_file_get(file);
 	uint32_t count;
@@ -639,6 +690,7 @@ fat_sync_inode_state(struct inode *inode, const struct zedbsd_file *file)
 	struct fat_inode_info *info;
 	const struct zedbsd_fat_file_state *state;
 	unsigned i;
+	unsigned long irq;
 
 	if (inode == NULL || file == NULL)
 		return;
@@ -646,6 +698,7 @@ fat_sync_inode_state(struct inode *inode, const struct zedbsd_file *file)
 	state = (const struct zedbsd_fat_file_state *)file->private_data;
 	info->fi_first_cluster = state->first_cluster;
 	inode->i_size = (off_t)file->size;
+	irq = spin_lock_irqsave(&fat_pool_lock);
 	for (i = 0; i < FAT_FILE_MAX; i++) {
 		struct zedbsd_fat_file_state *open_state;
 		if (!fat_files[i].used || fat_files[i].owner != inode)
@@ -654,20 +707,36 @@ fat_sync_inode_state(struct inode *inode, const struct zedbsd_file *file)
 		open_state = zedbsd_fat_file_state(&fat_files[i].legacy);
 		open_state->first_cluster = state->first_cluster;
 	}
+	spin_unlock_irqrestore(&fat_pool_lock, irq);
+}
+
+static ssize_t
+fat_pread_file(struct file *file, void *buffer, size_t length, off_t offset)
+{
+	struct fat_mount_state *state = fat_mount_state(file->f_inode->i_mount);
+	ssize_t count;
+	mutex_lock(&state->lock);
+	count = fat_pread_file_unlocked(file, buffer, length, offset);
+	mutex_unlock(&state->lock);
+	return count;
 }
 
 static ssize_t
 fat_read_file(struct file *file, void *buffer, size_t length)
 {
-	ssize_t count = fat_pread_file(file, buffer, length, file->f_offset);
+	struct fat_mount_state *state = fat_mount_state(file->f_inode->i_mount);
+	ssize_t count;
+	mutex_lock(&state->lock);
+	count = fat_pread_file_unlocked(file, buffer, length, file->f_offset);
 	if (count > 0)
 		file->f_offset += count;
+	mutex_unlock(&state->lock);
 	return count;
 }
 
 static ssize_t
-fat_pwrite_file(struct file *file, const void *buffer, size_t length,
-		off_t offset)
+fat_pwrite_file_unlocked(struct file *file, const void *buffer, size_t length,
+			 off_t offset)
 {
 	struct fat_file_state *state = fat_file_get(file);
 	uint32_t count = length > UINT32_MAX ? UINT32_MAX : (uint32_t)length;
@@ -688,18 +757,35 @@ fat_pwrite_file(struct file *file, const void *buffer, size_t length,
 }
 
 static ssize_t
+fat_pwrite_file(struct file *file, const void *buffer, size_t length,
+		off_t offset)
+{
+	struct fat_mount_state *state = fat_mount_state(file->f_inode->i_mount);
+	ssize_t count;
+	mutex_lock(&state->lock);
+	count = fat_pwrite_file_unlocked(file, buffer, length, offset);
+	mutex_unlock(&state->lock);
+	return count;
+}
+
+static ssize_t
 fat_write_file(struct file *file, const void *buffer, size_t length)
 {
-	off_t offset = (file->f_flags & O_APPEND) != 0 ?
-	    file->f_inode->i_size : file->f_offset;
-	ssize_t count = fat_pwrite_file(file, buffer, length, offset);
+	struct fat_mount_state *state = fat_mount_state(file->f_inode->i_mount);
+	off_t offset;
+	ssize_t count;
+	mutex_lock(&state->lock);
+	offset = (file->f_flags & O_APPEND) != 0 ?
+		file->f_inode->i_size : file->f_offset;
+	count = fat_pwrite_file_unlocked(file, buffer, length, offset);
 	if (count > 0)
 		file->f_offset = offset + count;
+	mutex_unlock(&state->lock);
 	return count;
 }
 
 static int
-fat_readdir(struct file *file, struct dirent *entry, int *eof)
+fat_readdir_unlocked(struct file *file, struct dirent *entry, int *eof)
 {
 	struct fat_mount_state *state = fat_mount_state(file->f_inode->i_mount);
 	struct zedbsd_dirent legacy;
@@ -734,10 +820,26 @@ fat_readdir(struct file *file, struct dirent *entry, int *eof)
 }
 
 static int
+fat_readdir(struct file *file, struct dirent *entry, int *eof)
+{
+	struct fat_mount_state *state = fat_mount_state(file->f_inode->i_mount);
+	int error;
+	mutex_lock(&state->lock);
+	error = fat_readdir_unlocked(file, entry, eof);
+	mutex_unlock(&state->lock);
+	return error;
+}
+
+static int
 fat_close_file(struct file *file)
 {
 	struct fat_file_state *state = file->f_data;
+	struct fat_mount_state *mount_state = file->f_inode != NULL ?
+		fat_mount_state(file->f_inode->i_mount) : NULL;
+	unsigned long irq;
 	int error = 0;
+	if (mount_state != NULL)
+		mutex_lock(&mount_state->lock);
 	if (state != NULL) {
 		if ((file->f_flags & O_ACCMODE) != O_RDONLY &&
 		    file->f_inode != NULL &&
@@ -749,25 +851,48 @@ fat_close_file(struct file *file)
 			 (file->f_inode->i_flags & INODE_DEAD) != 0)
 			error = fs_error(zedbsd_fat_flush(
 				&fat_mount_state(file->f_inode->i_mount)->legacy));
+		irq = spin_lock_irqsave(&fat_pool_lock);
 		memset(state, 0, sizeof(*state));
+		spin_unlock_irqrestore(&fat_pool_lock, irq);
 		file->f_data = NULL;
 	}
+	if (mount_state != NULL)
+		mutex_unlock(&mount_state->lock);
 	return error;
 }
 
 static int
 fat_fsync(struct file *file)
 {
-	struct fat_file_state *state = fat_file_get(file);
+	struct fat_mount_state *mount_state =
+		fat_mount_state(file->f_inode->i_mount);
+	struct fat_file_state *state;
 	int error;
+	mutex_lock(&mount_state->lock);
+	state = fat_file_get(file);
 	if (state == NULL)
-		return EIO;
-	if (file->f_inode != NULL && (file->f_inode->i_flags & INODE_DEAD) != 0)
-		error = fs_error(zedbsd_fat_flush(
-			&fat_mount_state(file->f_inode->i_mount)->legacy));
+		error = EIO;
+	else if (file->f_inode != NULL &&
+	    (file->f_inode->i_flags & INODE_DEAD) != 0)
+		error = fs_error(zedbsd_fat_flush(&mount_state->legacy));
 	else
 		error = fs_error(zedbsd_file_flush_result(&state->legacy));
-	return error != 0 ? error : bio_flush(file->f_inode->i_mount->m_disk);
+	if (error == 0)
+		error = disk_sync(file->f_inode->i_mount->m_disk);
+	mutex_unlock(&mount_state->lock);
+	return error;
+}
+
+static int
+fat_lookup_casefold(struct inode *directory,
+		    const struct componentname *name, struct inode **result)
+{
+	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
+	int error;
+	mutex_lock(&state->lock);
+	error = fat_lookup_casefold_unlocked(directory, name, result);
+	mutex_unlock(&state->lock);
+	return error;
 }
 
 static int
@@ -780,6 +905,7 @@ fat_truncate(struct inode *inode, off_t size)
 		return EINVAL;
 	if ((uint64_t)size > UINT32_MAX)
 		return EFBIG;
+	mutex_lock(&state->lock);
 	result = zedbsd_fs_open_result(&state->legacy, fat_path(inode), &file);
 	if (result == ZEDBSD_FS_OK)
 		result = zedbsd_file_truncate_result(&file, (uint64_t)size);
@@ -787,12 +913,13 @@ fat_truncate(struct inode *inode, off_t size)
 		result = zedbsd_file_flush_result(&file);
 	if (result == ZEDBSD_FS_OK)
 		fat_sync_inode_state(inode, &file);
+	mutex_unlock(&state->lock);
 	return fs_error(result);
 }
 
 static int
-fat_create(struct inode *directory, const struct componentname *name,
-	   mode_t mode, struct inode **result)
+fat_create_unlocked(struct inode *directory, const struct componentname *name,
+		    mode_t mode, struct inode **result)
 {
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
 	struct zedbsd_file file;
@@ -811,6 +938,18 @@ fat_create(struct inode *directory, const struct componentname *name,
 		return fs_error(fsresult);
 	namecache_remove(directory, name);
 	return fat_stat_path(directory->i_mount, path, result);
+}
+
+static int
+fat_create(struct inode *directory, const struct componentname *name,
+	   mode_t mode, struct inode **result)
+{
+	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
+	int error;
+	mutex_lock(&state->lock);
+	error = fat_create_unlocked(directory, name, mode, result);
+	mutex_unlock(&state->lock);
+	return error;
 }
 
 static FAT_MUTATION void
@@ -835,8 +974,8 @@ fat_release_orphan(struct inode *inode)
 }
 
 static FAT_MUTATION int
-fat_mkdir(struct inode *directory, const struct componentname *name,
-	  mode_t mode, struct inode **result)
+fat_mkdir_unlocked(struct inode *directory, const struct componentname *name,
+		   mode_t mode, struct inode **result)
 {
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
 	char path[ZEDBSD_PATH_MAX];
@@ -854,8 +993,21 @@ fat_mkdir(struct inode *directory, const struct componentname *name,
 }
 
 static FAT_MUTATION int
-fat_remove_inode(struct inode *directory, const struct componentname *name,
-		 int remove_directory)
+fat_mkdir(struct inode *directory, const struct componentname *name,
+	  mode_t mode, struct inode **result)
+{
+	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
+	int error;
+	mutex_lock(&state->lock);
+	error = fat_mkdir_unlocked(directory, name, mode, result);
+	mutex_unlock(&state->lock);
+	return error;
+}
+
+static FAT_MUTATION int
+fat_remove_inode_unlocked(struct inode *directory,
+			  const struct componentname *name,
+			  int remove_directory, struct inode **orphaned)
 {
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
 	struct inode *victim = NULL;
@@ -865,7 +1017,8 @@ fat_remove_inode(struct inode *directory, const struct componentname *name,
 	error = join_path(fat_path(directory), name, path);
 	if (error != 0)
 		return error;
-	error = fat_lookup(directory, name, &victim);
+	*orphaned = NULL;
+	error = fat_lookup_unlocked(directory, name, &victim);
 	if (error != 0)
 		return error;
 	error = fs_error(remove_directory ?
@@ -874,10 +1027,9 @@ fat_remove_inode(struct inode *directory, const struct componentname *name,
 	if (error == 0) {
 		namecache_remove(directory, name);
 		fat_orphan(victim);
+		*orphaned = victim;
 	}
-	if (error == 0)
-		fat_release_orphan(victim);
-	else
+	if (error != 0)
 		inode_release(victim);
 	return error;
 }
@@ -885,13 +1037,29 @@ fat_remove_inode(struct inode *directory, const struct componentname *name,
 static FAT_MUTATION int
 fat_unlink(struct inode *directory, const struct componentname *name)
 {
-	return fat_remove_inode(directory, name, 0);
+	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
+	struct inode *orphaned;
+	int error;
+	mutex_lock(&state->lock);
+	error = fat_remove_inode_unlocked(directory, name, 0, &orphaned);
+	mutex_unlock(&state->lock);
+	if (orphaned != NULL)
+		fat_release_orphan(orphaned);
+	return error;
 }
 
 static FAT_MUTATION int
 fat_rmdir(struct inode *directory, const struct componentname *name)
 {
-	return fat_remove_inode(directory, name, 1);
+	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
+	struct inode *orphaned;
+	int error;
+	mutex_lock(&state->lock);
+	error = fat_remove_inode_unlocked(directory, name, 1, &orphaned);
+	mutex_unlock(&state->lock);
+	if (orphaned != NULL)
+		fat_release_orphan(orphaned);
+	return error;
 }
 
 static FAT_MUTATION int
@@ -908,6 +1076,7 @@ fat_repath_descendants(struct mount *mountp, const char *old_path,
 {
 	size_t old_length = strlen(old_path), new_length = strlen(new_path);
 	unsigned i;
+	unsigned long irq = spin_lock_irqsave(&fat_pool_lock);
 
 	for (i = 0; i < FAT_INODE_MAX; i++) {
 		char replacement[ZEDBSD_PATH_MAX];
@@ -924,12 +1093,15 @@ fat_repath_descendants(struct mount *mountp, const char *old_path,
 			suffix + 1U);
 		strcpy(fat_inodes[i].path, replacement);
 	}
+	spin_unlock_irqrestore(&fat_pool_lock, irq);
 }
 
 static FAT_MUTATION int
-fat_rename(struct inode *old_directory, const struct componentname *old_name,
-	   struct inode *new_directory, const struct componentname *new_name,
-	   unsigned flags)
+fat_rename_unlocked(struct inode *old_directory,
+		    const struct componentname *old_name,
+		    struct inode *new_directory,
+		    const struct componentname *new_name,
+		    unsigned flags, struct inode **orphaned)
 {
 	struct fat_mount_state *state = fat_mount_state(old_directory->i_mount);
 	struct inode *source = NULL, *target = NULL;
@@ -940,8 +1112,10 @@ fat_rename(struct inode *old_directory, const struct componentname *old_name,
 	uint16_t offset;
 	uint8_t attributes;
 	unsigned i;
+	unsigned long irq;
 	int error;
 
+	*orphaned = NULL;
 	if (flags != 0)
 		return EINVAL;
 	error = join_path(fat_path(old_directory), old_name, old_path);
@@ -949,7 +1123,7 @@ fat_rename(struct inode *old_directory, const struct componentname *old_name,
 		error = join_path(fat_path(new_directory), new_name, new_path);
 	if (error != 0)
 		return error;
-	error = fat_lookup(old_directory, old_name, &source);
+	error = fat_lookup_unlocked(old_directory, old_name, &source);
 	if (error != 0)
 		return error;
 	if (source->i_type == INODE_DIR &&
@@ -958,7 +1132,8 @@ fat_rename(struct inode *old_directory, const struct componentname *old_name,
 		inode_release(source);
 		return EINVAL;
 	}
-	if (fat_lookup(new_directory, new_name, &target) == 0 && target == source) {
+	if (fat_lookup_unlocked(new_directory, new_name, &target) == 0 &&
+	    target == source) {
 		inode_release(target);
 		inode_release(source);
 		return 0;
@@ -1006,6 +1181,7 @@ fat_rename(struct inode *old_directory, const struct componentname *old_name,
 			}
 		}
 		source->i_ino = fat_ino(lba, offset);
+		irq = spin_lock_irqsave(&fat_pool_lock);
 		for (i = 0; i < FAT_FILE_MAX; i++) {
 			struct zedbsd_fat_file_state *open_state;
 			if (!fat_files[i].used || fat_files[i].owner != source)
@@ -1014,21 +1190,41 @@ fat_rename(struct inode *old_directory, const struct componentname *old_name,
 			open_state->directory_lba = lba;
 			open_state->directory_offset = offset;
 		}
+		spin_unlock_irqrestore(&fat_pool_lock, irq);
 		if (source->i_type == INODE_DIR)
 			fat_repath_descendants(old_directory->i_mount,
 				old_path, new_path);
+		irq = spin_lock_irqsave(&fat_pool_lock);
 		strcpy(fat_slot(source)->path, new_path);
+		spin_unlock_irqrestore(&fat_pool_lock, irq);
 	}
 	namecache_remove(old_directory, old_name);
 	namecache_remove(new_directory, new_name);
 	if (target != NULL)
-		fat_release_orphan(target);
+		*orphaned = target;
 	inode_release(source);
 	return error;
 }
 
+static FAT_MUTATION int
+fat_rename(struct inode *old_directory, const struct componentname *old_name,
+	   struct inode *new_directory, const struct componentname *new_name,
+	   unsigned flags)
+{
+	struct fat_mount_state *state = fat_mount_state(old_directory->i_mount);
+	struct inode *orphaned;
+	int error;
+	mutex_lock(&state->lock);
+	error = fat_rename_unlocked(old_directory, old_name, new_directory,
+		new_name, flags, &orphaned);
+	mutex_unlock(&state->lock);
+	if (orphaned != NULL)
+		fat_release_orphan(orphaned);
+	return error;
+}
+
 static void
-fat_reclaim(struct inode *inode)
+fat_reclaim_unlocked(struct inode *inode)
 {
 	struct fat_inode_info *info = fat_inode(inode);
 	struct fat_mount_state *state = fat_mount_state(inode->i_mount);
@@ -1038,6 +1234,20 @@ fat_reclaim(struct inode *inode)
 			info->fi_first_cluster);
 		info->fi_first_cluster = 0;
 	}
+}
+
+static void
+fat_reclaim(struct inode *inode)
+{
+	struct fat_inode_info *info = fat_inode(inode);
+	struct fat_mount_state *state = fat_mount_state(inode->i_mount);
+	if (state == NULL || info == NULL ||
+	    (info->fi_flags & FAT_INODE_ORPHANED) == 0 ||
+	    info->fi_first_cluster == 0)
+		return;
+	mutex_lock(&state->lock);
+	fat_reclaim_unlocked(inode);
+	mutex_unlock(&state->lock);
 }
 
 static int
@@ -1067,16 +1277,20 @@ fat_mount_impl(struct mount *mountp)
 	struct inode *root;
 	struct fat_inode_info *info;
 	unsigned i;
+	unsigned long irq;
 	enum zedbsd_fs_result result;
+	irq = spin_lock_irqsave(&fat_pool_lock);
 	for (i = 0; i < FAT_MOUNT_MAX; i++)
 		if (!fat_mounts[i].used) {
 			state = &fat_mounts[i];
+			memset(state, 0, sizeof(*state));
+			state->used = 1;
 			break;
 		}
+	spin_unlock_irqrestore(&fat_pool_lock, irq);
 	if (state == NULL)
 		return ENOSPC;
-	memset(state, 0, sizeof(*state));
-	state->used = 1;
+	(void)mutex_init(&state->lock, LOCK_RANK_INODE, "FAT mount");
 	result = zedbsd_fs_mount_result(&state->legacy,
 				       &(struct zedbsd_volume){
 					.context = mountp->m_disk,
@@ -1087,13 +1301,17 @@ fat_mount_impl(struct mount *mountp)
 				       }, drivers,
 				       sizeof(drivers) / sizeof(drivers[0]));
 	if (result != ZEDBSD_FS_OK) {
+		irq = spin_lock_irqsave(&fat_pool_lock);
 		memset(state, 0, sizeof(*state));
+		spin_unlock_irqrestore(&fat_pool_lock, irq);
 		return fs_error(result);
 	}
 	mountp->m_data = state;
 	root = inode_alloc(mountp);
 	if (root == NULL) {
+		irq = spin_lock_irqsave(&fat_pool_lock);
 		memset(state, 0, sizeof(*state));
+		spin_unlock_irqrestore(&fat_pool_lock, irq);
 		mountp->m_data = NULL;
 		return ENOSPC;
 	}
@@ -1116,18 +1334,27 @@ fat_sync_mount(struct mount *mountp)
 	int error;
 	if (state == NULL)
 		return EINVAL;
+	mutex_lock(&state->lock);
 	error = fs_error(zedbsd_fat_flush(&state->legacy));
-	return error != 0 ? error : bio_flush(mountp->m_disk);
+	if (error == 0)
+		error = disk_sync(mountp->m_disk);
+	mutex_unlock(&state->lock);
+	return error;
 }
 
 static void
 fat_unmount_impl(struct mount *mountp)
 {
 	struct fat_mount_state *state = fat_mount_state(mountp);
+	unsigned long irq;
 	if (state == NULL)
 		return;
+	mutex_lock(&state->lock);
 	zedbsd_fat_invalidate(&state->legacy);
+	mutex_unlock(&state->lock);
+	irq = spin_lock_irqsave(&fat_pool_lock);
 	memset(state, 0, sizeof(*state));
+	spin_unlock_irqrestore(&fat_pool_lock, irq);
 	mountp->m_data = NULL;
 }
 
@@ -1144,16 +1371,23 @@ const struct filesystem_type fat_filesystem_type = {
 int
 fat_file_extents(struct file *file, fat_extent_cb callback, void *context)
 {
+	struct fat_mount_state *mount_state;
 	struct fat_file_state *state;
+	int error;
 	if (file == NULL || callback == NULL || file->f_inode == NULL ||
 	    file->f_inode->i_type != INODE_REG ||
 	    file->f_inode->i_mount->m_type != &fat_filesystem_type)
 		return EINVAL;
+	mount_state = fat_mount_state(file->f_inode->i_mount);
+	mutex_lock(&mount_state->lock);
 	state = fat_file_get(file);
 	if (state == NULL)
-		return EIO;
-	return zedbsd_fat_file_extents(&state->legacy, callback, context) == 0 ?
-		0 : EIO;
+		error = EIO;
+	else
+		error = zedbsd_fat_file_extents(&state->legacy, callback,
+			context) == 0 ? 0 : EIO;
+	mutex_unlock(&mount_state->lock);
+	return error;
 }
 
 struct contiguous_context {

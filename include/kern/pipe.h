@@ -8,5 +8,6 @@ struct file;
 #define KERN_PIPE_BUF 512U
 
 int pipe_create(int flags, struct file **read_file, struct file **write_file);
+unsigned pipe_count(void);
 
 #endif

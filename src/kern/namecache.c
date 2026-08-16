@@ -2,6 +2,7 @@
 #include "kern/namecache.h"
 #include "kern/namei.h"
 #include "kern/lock.h"
+#include "kern/test-checkpoint.h"
 
 #include <errno.h>
 #include <string.h>
@@ -64,6 +65,8 @@ namecache_lookup(struct inode *parent, const struct componentname *name,
 				detach(&entries[i], &old_parent, &old_child);
 				break;
 			}
+			KERN_TEST_CHECKPOINT(KERN_TEST_NAMECACHE_HIT_BEFORE_REF,
+			    entries[i].child);
 			inode_ref(entries[i].child);
 			*result = entries[i].child;
 			spin_unlock_irqrestore(&namecache_lock, irq);
@@ -179,3 +182,14 @@ void namecache_purge_mount(struct mount *mountp)
 
 void namecache_reset(void)
 { purge_matching(NULL, NULL, 1); }
+
+unsigned
+namecache_count(void)
+{
+	unsigned i, count = 0;
+	unsigned long irq = spin_lock_irqsave(&namecache_lock);
+	for (i = 0; i < NAMECACHE_MAX; i++)
+		count += entries[i].parent != NULL;
+	spin_unlock_irqrestore(&namecache_lock, irq);
+	return count;
+}

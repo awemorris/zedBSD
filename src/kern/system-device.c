@@ -10,6 +10,7 @@
 #include "kern/uaccess.h"
 #include "kern/vm-reclaim.h"
 #include "kern/vm-commit.h"
+#include "kern/resource.h"
 
 #include <zedbsd/system.h>
 #include <errno.h>
@@ -86,6 +87,11 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 		output.vm_commit_used = cs.used_pages * VM_COMMIT_PAGE_SIZE;
 		output.vm_commit_available =
 			(cs.limit_pages - cs.used_pages) * VM_COMMIT_PAGE_SIZE;
+		return copyout(&output, argument, sizeof(output));
+	}
+	case ZEDBSD_SYSTEM_GET_RESOURCES: {
+		struct zedbsd_system_resources output;
+		kern_resource_snapshot(&output);
 		return copyout(&output, argument, sizeof(output));
 	}
 	case ZEDBSD_SYSTEM_HALT:

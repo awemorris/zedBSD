@@ -36,6 +36,8 @@ ZEDBSD_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-Iinclude -Iinclude/uapi -Isrc -I. -Ilibc/include
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/waitq.o \
+	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/sysctl.o \
+	$(BUILD)/src/kern/resource.o \
 	$(BUILD)/src/kern/process.o $(BUILD)/src/kern/thread.o \
 	$(BUILD)/src/kern/sched.o $(BUILD)/src/kern/vmspace.o \
 	$(BUILD)/src/kern/vm-object.o $(BUILD)/src/kern/vm-commit.o \
@@ -238,7 +240,8 @@ bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 I386_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/i386.img
 I386_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/noct \
 	$(BUILD)/bin/nettest $(BUILD)/bin/ping $(BUILD)/bin/ifconfig \
-	$(BUILD)/bin/route $(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup
+	$(BUILD)/bin/route $(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup \
+	$(BUILD)/bin/sysctl
 I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/noct=$(BUILD)/bin/noct \
 	--file /bin/nettest=$(BUILD)/bin/nettest \
@@ -246,7 +249,8 @@ I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/ifconfig=$(BUILD)/bin/ifconfig \
 	--file /bin/route=$(BUILD)/bin/route \
 	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
-	--file /bin/nslookup=$(BUILD)/bin/nslookup
+	--file /bin/nslookup=$(BUILD)/bin/nslookup \
+	--file /bin/sysctl=$(BUILD)/bin/sysctl
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(I386_ARCH_UFS_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
@@ -412,6 +416,19 @@ $(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
+USER_SYSCTL_OBJ := $(BUILD)/userland/sysctl/main.o
+$(USER_SYSCTL_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(USER_SYSCTL_OBJ): OBJ_CFLAGS = $(USER_CFLAGS)
+$(BUILD)/bin/sysctl: $(USER_LIBC_OBJS) $(USER_SYSCTL_OBJ) \
+	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
+		$(USER_LIBC_OBJS) $(USER_SYSCTL_OBJ) \
+		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+	$(PYTHON) $(USER_ELF_CHECK) $@
+
 USER_NETTEST_OBJS := $(BUILD)/userland/nettest/main.o
 $(USER_NETTEST_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_NETTEST_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
@@ -560,6 +577,7 @@ $(BUILD)/tests/noct-host-test: tests/noct-host-test.c \
 	apps/ls.nct apps/cp.nct userland/noct/integration/noct-m6-script.h \
 	$(NOCT_GLUE_OBJS) $(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
 	$(BUILD)/src/kern/namespace.o \
+	$(BUILD)/src/kern/buf.o \
 	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/inode.o \
 	$(BUILD)/src/kern/file.o $(BUILD)/src/kern/namecache.o \
 	$(BUILD)/src/kern/namei.o $(BUILD)/src/kern/mount.o \
@@ -572,6 +590,7 @@ $(BUILD)/tests/noct-host-test: tests/noct-host-test.c \
 		tests/noct-host-test.c tests/vfs-host-stubs.c $(NOCT_GLUE_OBJS) \
 		$(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
 		$(BUILD)/src/kern/namespace.o $(NOCT_OBJECTS) \
+		$(BUILD)/src/kern/buf.o \
 		$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/inode.o \
 		$(BUILD)/src/kern/file.o $(BUILD)/src/kern/namecache.o \
 		$(BUILD)/src/kern/namei.o $(BUILD)/src/kern/mount.o \

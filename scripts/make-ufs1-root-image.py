@@ -17,6 +17,8 @@ def build(args: argparse.Namespace) -> None:
     if native:
         if args.native_shell is None or not args.native_shell.is_file():
             raise SystemExit("sparcv9 root requires --native-shell")
+        if args.native_sysctl is None or not args.native_sysctl.is_file():
+            raise SystemExit("sparcv9 root requires --native-sysctl")
     elif args.arch_image is None or not args.arch_image.is_file():
         raise SystemExit(f"missing architecture image: {args.arch_image}")
     if args.output.exists() and not args.force:
@@ -31,6 +33,7 @@ def build(args: argparse.Namespace) -> None:
             (root / directory).mkdir()
         if native:
             shutil.copy2(args.native_shell, root / "bin" / "sh")
+            shutil.copy2(args.native_sysctl, root / "bin" / "sysctl")
         else:
             shutil.copyfile(args.arch_image,
                             root / "arch" / f"{args.arch_profile}.ufs")
@@ -51,6 +54,7 @@ def main() -> None:
                         required=True)
     parser.add_argument("--arch-image", type=Path)
     parser.add_argument("--native-shell", type=Path)
+    parser.add_argument("--native-sysctl", type=Path)
     # The canonical writer intentionally uses one cylinder group.  With 1 KiB
     # fragments its free-fragment bitmap fits in the 8 KiB CG block through
     # 60 MiB, leaving a small margin for the fixed CG header.

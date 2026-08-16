@@ -117,6 +117,7 @@ void socket_wake_receive(struct socket *);
 void socket_wake_send(struct socket *);
 void socket_wake_connect(struct socket *);
 void socket_wake_accept(struct socket *);
+unsigned socket_count_current(void);
 
 int packet_socket_init(void);
 void packet_socket_deliver(const struct packet_buf *packet,

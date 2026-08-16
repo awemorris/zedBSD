@@ -261,6 +261,9 @@ socket_release(struct socket *socket)
 	(void)atomic_raw_fetch_add_relaxed(&socket_count.value, (unsigned)-1);
 }
 
+unsigned socket_count_current(void)
+{ return atomic_load_acquire(&socket_count); }
+
 int
 socket_enqueue_packet(struct socket *socket, struct packet_buf *packet)
 {

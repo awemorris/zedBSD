@@ -82,5 +82,6 @@ int file_close(struct file *);
 void file_ref(struct file *);
 struct inode *file_vm_inode(struct file *);
 void file_pool_reset(void);
+unsigned file_count(void);
 
 #endif

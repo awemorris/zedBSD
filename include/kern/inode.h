@@ -133,6 +133,7 @@ void inode_release(struct inode *inode);
 void inode_cache_purge_mount(struct mount *mount);
 int inode_cache_mount_busy(struct mount *mount);
 unsigned inode_cache_mount_count(struct mount *mount);
+unsigned inode_cache_count(void);
 void inode_cache_reset(void);
 
 int inode_lookup(struct inode *, const struct componentname *, struct inode **);

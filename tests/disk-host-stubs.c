@@ -4,11 +4,43 @@
 #include <hal/hal.h>
 
 #include <errno.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 bool hal_irq_disable(void) { return false; }
 void hal_irq_enable(void) { }
 hal_cpu_id_t hal_cpu_current(void) { return 0; }
 struct thread *thread_current(void) { return NULL; }
+
+int
+hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *desc)
+{
+	void *memory;
+	if (request == NULL || desc == NULL || request->size == 0)
+		return HAL_ERR_INVALID;
+	memory = calloc(1, request->size);
+	if (memory == NULL)
+		return HAL_ERR_NOMEM;
+	desc->vaddr = memory;
+	desc->paddr = (hal_physaddr_t)(uintptr_t)memory;
+	desc->size = request->size;
+	desc->type = request->type;
+	desc->attr = request->attr;
+	return HAL_OK;
+}
+
+int
+hal_pmem_free(struct hal_pmem *desc)
+{
+	if (desc == NULL || desc->vaddr == NULL)
+		return HAL_ERR_INVALID;
+	free(desc->vaddr);
+	desc->vaddr = NULL;
+	desc->size = 0;
+	return HAL_OK;
+}
+
+size_t hal_pmem_get_total_size(void) { return 64U * 1024U * 1024U; }
 
 void spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
 {
@@ -31,6 +63,13 @@ void spin_unlock_irqrestore(struct spinlock *lock, unsigned long irq)
 	(void)irq;
 	atomic_store_release(&lock->held, 0);
 }
+
+int mutex_init(struct mutex *lock, enum lock_rank rank, const char *name)
+{ spin_init(&lock->guard, rank, name); lock->locked = 0; return 0; }
+int mutex_lock_interruptible(struct mutex *lock)
+{ lock->locked = 1; return 0; }
+void mutex_lock(struct mutex *lock) { lock->locked = 1; }
+void mutex_unlock(struct mutex *lock) { lock->locked = 0; }
 
 void waitq_init(struct wait_queue *queue, const char *name)
 {

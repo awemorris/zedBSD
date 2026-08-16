@@ -1,6 +1,7 @@
 /* zedBSD PC/AT MBR partition parser host tests.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/disk.h"
+#include "kern/buf.h"
 #include "kern/partition.h"
 #include "kern/mbr-partition.h"
 
@@ -49,6 +50,7 @@ static struct disk *setup(void)
 {
 	struct disk *disk;
 	memset(medium,0,sizeof(medium));
+	buf_reset();
 	disk_registry_reset(); partition_reset();
 	disk=disk_alloc(); CHECK(disk != NULL);
 	if (disk == NULL) return NULL;
@@ -84,6 +86,7 @@ static void test_rejections(void)
 	medium[511]=0xaa;
 	entry(0,0x7f,0x0e,10,10); entry(1,0,0x0e,10,0);
 	entry(2,0,0x0e,SECTORS-2U,4); entry(3,0,0,10,10);
+	CHECK(buf_invalidate_disk(disk, BUF_INVALIDATE_DISCARD) == 0);
 	CHECK(partition_scan(disk,part,4) == 4);
 	for (unsigned i=0;i<4;i++) CHECK(part[i].p_block_count == 0);
 	disk->d_block_size=1024; CHECK(partition_scan(disk,part,4) == -1);
@@ -91,6 +94,7 @@ static void test_rejections(void)
 
 int main(void)
 {
+	CHECK(buf_init() == 0);
 	test_valid(); test_rejections();
 	if (failures) { printf("PC/AT MBR tests: %d failure(s)\n",failures); return 1; }
 	puts("zedBSD PC/AT MBR host tests: OK"); return 0;

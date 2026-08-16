@@ -1,10 +1,13 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/disk.h"
+#include "kern/buf.h"
 #include "kern/sched.h"
 #include "kern/atomic.h"
+#include "kern/test-checkpoint.h"
 
 #include <errno.h>
 #include <hal/hal.h>
+#include <string.h>
 
 extern struct thread *thread_current(void) __attribute__((weak));
 extern bool hal_irq_disable(void) __attribute__((weak));
@@ -162,6 +165,23 @@ disk_gone_if_idle(struct disk *disk)
 		disk_unlock(enabled);
 		return ENXIO;
 	}
+	if (disk->d_open_count != 0 || disk->d_inflight != 0) {
+		disk_unlock(enabled);
+		return EBUSY;
+	}
+	disk_unlock(enabled);
+	/* Resident buffers pin their leaf disk.  Flush and invalidate them before
+	 * applying the final external-reference test. */
+	{
+		int error = buf_invalidate_disk(disk, 0);
+		if (error != 0)
+			return error;
+	}
+	enabled = disk_lock();
+	if (disk_index(disk) < 0 || disk->d_state != DISK_LIVE) {
+		disk_unlock(enabled);
+		return ENXIO;
+	}
 	if (disk->d_open_count != 0 || disk->d_inflight != 0 ||
 	    refcount_load(&disk->d_refs) != 1) {
 		disk_unlock(enabled);
@@ -221,8 +241,10 @@ struct disk *disk_find(const char *name)
 	for (disk = disk_head; disk != NULL; disk = disk->d_next)
 		if (name_equal(disk->d_name, name))
 			break;
-	if (disk != NULL)
+	if (disk != NULL) {
+		KERN_TEST_CHECKPOINT(KERN_TEST_DISK_LOOKUP_BEFORE_REF, disk);
 		refcount_get(&disk->d_refs);
+	}
 	disk_unlock(enabled);
 	return disk;
 }
@@ -245,6 +267,21 @@ unsigned disk_count(void)
 	unsigned count;
 	bool enabled = disk_lock();
 	count = live_count;
+	disk_unlock(enabled);
+	return count;
+}
+
+unsigned
+disk_inflight_count(void)
+{
+	struct disk *disk;
+	unsigned count = 0;
+	bool enabled = disk_lock();
+	for (disk = disk_head; disk != NULL; disk = disk->d_next) {
+		unsigned long irq = spin_lock_irqsave(&disk->d_lock);
+		count += disk->d_inflight;
+		spin_unlock_irqrestore(&disk->d_lock, irq);
+	}
 	disk_unlock(enabled);
 	return count;
 }
@@ -281,6 +318,7 @@ void disk_release(struct disk *disk)
 void disk_registry_reset(void)
 {
 	unsigned i;
+	buf_reset();
 	bool enabled = disk_lock();
 	zero_bytes(disks, sizeof(disks));
 	for (i = 0; i < DISK_MAX; i++)
@@ -531,6 +569,39 @@ void bio_complete(struct bio *bio, int error, size_t transferred)
 		done(bio);
 }
 
+int
+disk_resolve_range(struct disk *disk, uint64_t block, uint32_t count,
+	struct disk **leaf_out, uint64_t *mapped_out)
+{
+	struct disk *leaf;
+	uint64_t mapped;
+	if (disk == NULL || leaf_out == NULL || mapped_out == NULL || count == 0)
+		return EINVAL;
+	if (disk->d_state != DISK_LIVE)
+		return ENXIO;
+	if (block >= disk->d_block_count ||
+	    count > disk->d_block_count - block)
+		return EOVERFLOW;
+	leaf = disk;
+	mapped = block;
+	while (leaf->d_parent != NULL) {
+		struct disk *parent = leaf->d_parent;
+		if (parent->d_state != DISK_LIVE)
+			return ENXIO;
+		if (parent->d_block_size != leaf->d_block_size)
+			return EOPNOTSUPP;
+		if (mapped > UINT64_MAX - leaf->d_parent_offset)
+			return EOVERFLOW;
+		mapped += leaf->d_parent_offset;
+		leaf = parent;
+	}
+	if (mapped >= leaf->d_block_count || count > leaf->d_block_count - mapped)
+		return EOVERFLOW;
+	*leaf_out = leaf;
+	*mapped_out = mapped;
+	return 0;
+}
+
 int bio_wait(struct bio *bio)
 {
 	struct thread *thread;
@@ -574,34 +645,67 @@ int bio_flush(struct disk *disk)
 	return error != 0 ? error : bio_wait(&bio);
 }
 
-static int disk_transfer(struct disk *disk, enum bio_op op, uint64_t block,
-			 uint32_t count, void *data)
+static int disk_transfer_direct(struct disk *disk, enum bio_op op,
+	uint64_t block, uint32_t count, void *data)
 {
-	struct bio bio = {
-		.b_op = op, .b_block = block, .b_block_count = count,
-		.b_data = data,
-	};
-	int error = bio_submit(disk, &bio);
-	size_t expected;
-	if (error != 0)
-		return error;
-	error = bio_wait(&bio);
-	if (error != 0)
-		return error;
-	if (disk == NULL || disk->d_block_size == 0 ||
+	uint8_t *bytes = data;
+	if (disk == NULL || data == NULL || count == 0 || disk->d_block_size == 0 ||
 	    (size_t)count > SIZE_MAX / disk->d_block_size)
-		return EOVERFLOW;
-	expected = (size_t)count * disk->d_block_size;
-	return bio.b_transferred == expected ? 0 : EIO;
+		return EINVAL;
+	while (count != 0) {
+		uint32_t chunk = count;
+		struct bio bio;
+		size_t expected;
+		int error;
+		if (disk->d_max_transfer_blocks != 0 &&
+		    chunk > disk->d_max_transfer_blocks)
+			chunk = disk->d_max_transfer_blocks;
+		memset(&bio, 0, sizeof(bio));
+		bio.b_op = op;
+		bio.b_block = block;
+		bio.b_block_count = chunk;
+		bio.b_data = bytes;
+		error = bio_submit(disk, &bio);
+		if (error != 0)
+			return error;
+		error = bio_wait(&bio);
+		if (error != 0)
+			return error;
+		expected = (size_t)chunk * disk->d_block_size;
+		if (bio.b_transferred != expected)
+			return EIO;
+		block += chunk;
+		count -= chunk;
+		bytes += expected;
+	}
+	return 0;
+}
+
+int disk_read_direct(struct disk *disk, uint64_t block, uint32_t count,
+	void *data)
+{
+	return disk_transfer_direct(disk, BIO_READ, block, count, data);
+}
+
+int disk_write_direct(struct disk *disk, uint64_t block, uint32_t count,
+	const void *data)
+{
+	return disk_transfer_direct(disk, BIO_WRITE, block, count, (void *)data);
+}
+
+int disk_sync(struct disk *disk)
+{
+	int error = buf_sync(disk);
+	return error != 0 ? error : bio_flush(disk);
 }
 
 int disk_read(struct disk *disk, uint64_t block, uint32_t count, void *data)
 {
-	return disk_transfer(disk, BIO_READ, block, count, data);
+	return buf_read(disk, block, count, data);
 }
 
 int disk_write(struct disk *disk, uint64_t block, uint32_t count,
 	       const void *data)
 {
-	return disk_transfer(disk, BIO_WRITE, block, count, (void *)data);
+	return buf_write(disk, block, count, data);
 }

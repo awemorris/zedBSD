@@ -112,6 +112,7 @@ void process_wait_abort(struct process_wait_event *);
 void process_note_stopped(struct process *, int);
 void process_note_continued(struct process *);
 void process_thread_retired(struct thread *);
+void process_resource_count(uint64_t *processes, uint64_t *threads);
 void exit1(int status) __attribute__((noreturn));
 void exit1_signal(int signo) __attribute__((noreturn));
 

@@ -54,6 +54,15 @@ report_stage(unsigned int stage)
 }
 
 static void
+report_checkpoint(const char *name)
+{
+	static const char prefix[] = "POSIX_R1_CHECK:";
+	(void)write(1, prefix, sizeof(prefix) - 1U);
+	(void)write(1, name, strlen(name));
+	(void)write(1, "\n", 1);
+}
+
+static void
 catch_signal(int signo)
 {
 	caught_signals |= 1U << (unsigned int)signo;
@@ -144,6 +153,7 @@ run_test(int argc, char **argv, char **envp)
 	}
 	free(allocation);
 	report_stage(1);
+	report_checkpoint("pipe-fork-exec-begin");
 	if (pipe(descriptors) != 0)
 		return 4;
 	if (fcntl(descriptors[0], F_SETFD, FD_CLOEXEC) != 0 ||
@@ -161,14 +171,17 @@ run_test(int argc, char **argv, char **envp)
 		execve(child_argv[0], child_argv, envp);
 		_exit(26);
 	}
+	report_checkpoint("pipe-fork-exec-parent-read");
 	(void)close(descriptors[1]);
 	if (read(descriptors[0], received, sizeof(child_message) - 1U) !=
 	    (ssize_t)(sizeof(child_message) - 1U) ||
 	    memcmp(received, child_message, sizeof(child_message) - 1U) != 0)
 		return 7;
+	report_checkpoint("pipe-fork-exec-parent-wait");
 	if (close(descriptors[0]) != 0 || waitpid(child, &status, 0) != child ||
 	    !WIFEXITED(status) || WEXITSTATUS(status) != 23)
 		return 8;
+	report_checkpoint("pipe-fork-exec-done");
 	/* Only the console character device has terminal capability. */
 	if (!isatty(1))
 		return 251;
@@ -181,6 +194,7 @@ run_test(int argc, char **argv, char **envp)
 		    close(system_fd) != 0)
 			return 253;
 	}
+	report_checkpoint("terminal-done");
 	/* A bad status pointer must not consume the zombie. */
 	child = fork();
 	if (child < 0)
@@ -192,6 +206,7 @@ run_test(int argc, char **argv, char **envp)
 	    waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
 	    WEXITSTATUS(status) != 42)
 		return 240;
+	report_checkpoint("bad-wait-done");
 	/* Invalid read and readv output must not advance or consume input. */
 	{
 		char byte = 0;
@@ -213,6 +228,7 @@ run_test(int argc, char **argv, char **envp)
 		    read(image, &byte, 1) != 1 || byte != 0x7f || close(image) != 0)
 			return 243;
 	}
+	report_checkpoint("bad-read-done");
 	if (pipe(descriptors) != 0 || write(descriptors[1], "p", 1) != 1)
 		return 244;
 	errno = 0;
@@ -221,6 +237,7 @@ run_test(int argc, char **argv, char **envp)
 	    received[0] != 'p' || close(descriptors[0]) != 0 ||
 	    close(descriptors[1]) != 0)
 		return 245;
+	report_checkpoint("pipe-efault-done");
 	/* Orphans are reparented to process0 and eventually auto-reaped. */
 	if (pipe(descriptors) != 0)
 		return 246;
@@ -235,7 +252,9 @@ run_test(int argc, char **argv, char **envp)
 			struct timespec delay = { 0, 20000000 };
 			char value;
 			(void)close(descriptors[0]);
+			(void)write(1, "POSIX_R1_ORPHAN_SLEEP\n", 22);
 			(void)nanosleep(&delay, NULL);
+			(void)write(1, "POSIX_R1_ORPHAN_WAKE\n", 21);
 			value = getppid() == 0 ? 'o' : 'x';
 			(void)write(descriptors[1], &value, 1);
 			_exit(value == 'o' ? 0 : 1);
@@ -243,10 +262,12 @@ run_test(int argc, char **argv, char **envp)
 		_exit(0);
 	}
 	(void)close(descriptors[1]);
+	report_checkpoint("orphan-parent-wait");
 	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
 	    WEXITSTATUS(status) != 0 || read(descriptors[0], received, 1) != 1 ||
 	    received[0] != 'o' || close(descriptors[0]) != 0)
 		return 248;
+	report_checkpoint("orphan-done");
 	/* Exercise the child-exit/wait registration edge repeatedly. */
 	for (offset = 0; offset < 64; offset++) {
 		child = fork();
@@ -256,7 +277,10 @@ run_test(int argc, char **argv, char **envp)
 			_exit(0);
 		if (waitpid(child, &status, 0) != child || !WIFEXITED(status))
 			return 250;
+		if ((offset & 7U) == 7U)
+			report_checkpoint("wait-race-progress");
 	}
+	report_checkpoint("wait-race-done");
 	report_stage(2);
 	if (signal(SIGUSR1, catch_signal) == SIG_ERR ||
 	    signal(SIGUSR2, catch_signal) == SIG_ERR)

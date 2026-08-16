@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <time.h>
 
 /* Isolated host VFS tests are single-threaded and have no HAL interrupt
@@ -22,6 +23,38 @@ hal_irq_enable(void)
 }
 
 hal_cpu_id_t hal_cpu_current(void) { return 0; }
+struct thread *thread_current(void) { return NULL; }
+
+int
+hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *desc)
+{
+	void *memory;
+	if (request == NULL || desc == NULL || request->size == 0)
+		return HAL_ERR_INVALID;
+	memory = calloc(1, request->size);
+	if (memory == NULL)
+		return HAL_ERR_NOMEM;
+	desc->vaddr = memory;
+	desc->paddr = (hal_physaddr_t)(uintptr_t)memory;
+	desc->size = request->size;
+	desc->type = request->type;
+	desc->attr = request->attr;
+	return HAL_OK;
+}
+
+int
+hal_pmem_free(struct hal_pmem *desc)
+{
+	if (desc == NULL || desc->vaddr == NULL)
+		return HAL_ERR_INVALID;
+	free(desc->vaddr);
+	desc->vaddr = NULL;
+	desc->size = 0;
+	return HAL_OK;
+}
+
+size_t hal_pmem_get_total_size(void) { return 64U * 1024U * 1024U; }
+
 void spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
 { lock->held.value = 0; lock->rank = rank; lock->name = name; }
 unsigned long spin_lock_irqsave(struct spinlock *lock)

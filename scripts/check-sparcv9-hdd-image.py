@@ -135,6 +135,8 @@ def check(args: argparse.Namespace) -> None:
         fail("/VMUNIX.S9 is not EM_SPARCV9")
     if args.shell is not None:
         same_file(args.image, "bin/sh", args.shell)
+    if args.sysctl is not None:
+        same_file(args.image, "bin/sysctl", args.sysctl)
     if args.ufs_root is not None:
         with args.image.open("rb") as image:
             image.seek(root_lba * SECTOR_SIZE)
@@ -154,6 +156,7 @@ def main() -> None:
     parser.add_argument("--stage2", type=Path, required=True)
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
+    parser.add_argument("--sysctl", type=Path)
     parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("image", type=Path)
     check(parser.parse_args())

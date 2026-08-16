@@ -300,7 +300,7 @@ block_write(struct file *file, const void *buffer, size_t length)
 static DEVFS_HIGH int
 block_fsync(struct file *file)
 {
-	return file->f_data != NULL ? bio_flush(file->f_data) : ENXIO;
+	return file->f_data != NULL ? disk_sync(file->f_data) : ENXIO;
 }
 
 static DEVFS_HIGH int

@@ -11,6 +11,7 @@
 #include "libc/heap.h"
 #include "hal/hal.h"
 #include "kern/boot.h"
+#include "kern/buf.h"
 #include "kern/clock.h"
 #include "kern/kernel.h"
 #include "kern/kmem.h"
@@ -21,6 +22,7 @@
 #include "kern/sched.h"
 #include "kern/user-probe.h"
 #include "kern/syscall.h"
+#include "kern/sysctl.h"
 #include "kern/thread.h"
 
 #define KERNEL_HEAP_SIZE (512U * 1024U)
@@ -122,6 +124,9 @@ kernel_entry(const void *handoff)
 	user_probe_init();
 	syscall_init();
 	sched_init();
+	sysctl_init();
+	if (buf_init() != 0)
+		hal_fatal(__FILE__, __LINE__, "buffer cache initialization failed");
 	if (thread_prepare_secondaries(hal_cpu_count()) != 0)
 		hal_fatal(__FILE__, __LINE__, "secondary thread allocation failed");
 	if (hal_cpu_start_others() != HAL_OK)
