@@ -7,7 +7,15 @@ arch="${1:?usage: $0 pcat|pc98}"
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 build="$repo/build/$arch"
 work="$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-sh-builtins-$arch.XXXXXX")"
-trap 'rm -rf "$work"' EXIT
+keyboard_pid=
+cleanup()
+{
+	if test -n "$keyboard_pid"; then
+		kill "$keyboard_pid" 2>/dev/null || true
+	fi
+	rm -rf "$work"
+}
+trap cleanup EXIT
 offset=$((2048 * 512))
 
 case "$arch" in
@@ -72,6 +80,74 @@ pc98)
 		-nic none -display none -serial none -monitor none -no-reboot \
 		-drive "if=ide,bus=0,unit=0,format=raw,file=$work/test.img" \
 		>/dev/null 2>&1 || test "$?" -eq 124
+
+	# The scripted zinit.rc path above does not exercise the keyboard.  Boot
+	# an unmodified image, type a command through QMP, and verify its FAT
+	# side effect so a missing console-input worker cannot pass unnoticed.
+	cp --reflink=auto "$build/bios-hdd-image.img" "$work/keyboard.img"
+	keyboard_qmp="$work/keyboard.qmp"
+	timeout 22 "$qemu" -M pc9821 -cpu 486 -m 64 -accel tcg -L "$bios" \
+		-nic none -display none -serial none -monitor none -no-reboot \
+		-qmp "unix:$keyboard_qmp,server=on,wait=off" \
+		-drive "if=ide,bus=0,unit=0,format=raw,file=$work/keyboard.img" \
+		>/dev/null 2>&1 &
+	keyboard_pid=$!
+	python3 - "$keyboard_qmp" <<'PY'
+import json
+import socket
+import sys
+import time
+
+stream = socket.socket(socket.AF_UNIX)
+deadline = time.monotonic() + 10
+while True:
+    try:
+        stream.connect(sys.argv[1])
+        break
+    except (FileNotFoundError, ConnectionRefusedError):
+        if time.monotonic() >= deadline:
+            raise
+        time.sleep(.05)
+file = stream.makefile("rw")
+json.loads(file.readline())
+
+def qmp(execute, arguments=None, reply=True):
+    request = {"execute": execute}
+    if arguments is not None:
+        request["arguments"] = arguments
+    file.write(json.dumps(request) + "\n")
+    file.flush()
+    if not reply:
+        return
+    while True:
+        response = json.loads(file.readline())
+        if "return" in response:
+            return response["return"]
+        if "error" in response:
+            raise SystemExit(f"QMP {execute}: {response['error']}")
+
+def key(qcode):
+    qmp("input-send-event", {"events": [
+        {"type": "key", "data": {"down": True,
+         "key": {"type": "qcode", "data": qcode}}},
+        {"type": "key", "data": {"down": False,
+         "key": {"type": "qcode", "data": qcode}}},
+    ]})
+
+qmp("qmp_capabilities")
+time.sleep(12)
+for qcode in ("t", "o", "u", "c", "h", "spc", "slash", "k", "b",
+              "d", "minus", "o", "k"):
+    key(qcode)
+    time.sleep(.08)
+key("ret")
+time.sleep(3)
+qmp("quit", reply=False)
+file.close()
+PY
+	wait "$keyboard_pid" 2>/dev/null || true
+	keyboard_pid=
+	mdir -i "$work/keyboard.img@@$offset" ::/kbd-ok >/dev/null
 	;;
 esac
 
