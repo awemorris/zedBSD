@@ -87,6 +87,14 @@ static void bit_clear(uint8_t *map,uint32_t bit)
 { map[bit>>3]&=(uint8_t)~(1U<<(bit&7U)); }
 
 static int
+valid_inode_fragment(const struct ufs1_super *super, uint32_t fragment)
+{
+	return fragment == 0 ||
+	    (fragment >= super->dblkno && fragment < super->size &&
+	    super->frag <= super->size - fragment);
+}
+
+static int
 write_super_summaries(struct mount *mountp)
 {
 	struct ufs1_mount_state *ms=state(mountp);
@@ -658,6 +666,37 @@ load_inode(struct mount *mountp, uint32_t number, struct inode **result)
 	ui->disk_flags=ufs1_get32(raw,UFS1_DI_FLAGS,s->swapped);
 	ui->blocks=ufs1_get32(raw,UFS1_DI_BLOCKS,s->swapped);
 	ui->generation=ufs1_get32(raw,UFS1_DI_GEN,s->swapped);
+	if (inode->i_linkcount == 0 || inode->i_size < 0 ||
+	    (uint64_t)inode->i_size > s->maxfilesize ||
+	    inode->i_atime.tv_nsec >= 1000000000L ||
+	    inode->i_mtime.tv_nsec >= 1000000000L ||
+	    inode->i_ctime.tv_nsec >= 1000000000L ||
+	    (inode->i_type == INODE_DIR &&
+	    ((uint64_t)inode->i_size < UFS1_DIRBLKSIZ ||
+	    (uint64_t)inode->i_size % UFS1_DIRBLKSIZ != 0))) {
+		inode->i_flags |= INODE_DEAD;
+		inode_release(inode);
+		kern_free(block);
+		return EIO;
+	}
+	if (!(inode->i_type == INODE_SYMLINK &&
+	    (uint64_t)inode->i_size <= s->maxsymlinklen &&
+	    inode->i_size <= 60)) {
+		for (n = 0; n < UFS1_NDADDR; n++)
+			if (!valid_inode_fragment(s, ui->direct[n])) {
+				inode->i_flags |= INODE_DEAD;
+				inode_release(inode);
+				kern_free(block);
+				return EIO;
+			}
+		for (n = 0; n < UFS1_NIADDR; n++)
+			if (!valid_inode_fragment(s, ui->indirect[n])) {
+				inode->i_flags |= INODE_DEAD;
+				inode_release(inode);
+				kern_free(block);
+				return EIO;
+			}
+	}
 	inode->i_op=&ufs1_inode_ops;
 	inode->i_fop=inode->i_type==INODE_DIR?&ufs1_directory_ops:&ufs1_regular_ops;
 	kern_free(block); *result=inode; return 0;
@@ -1391,6 +1430,10 @@ static int ufs1_probe(struct disk *disk) { struct ufs1_super s; return ufs1_read
 static int ufs1_mount_impl(struct mount *mountp)
 {
 	struct ufs1_mount_state *ms; struct inode *root; int error;
+	off_t cursor=0;
+	uint32_t number;
+	uint8_t type;
+	char name[NAME_MAX+1U];
 	if(mountp==NULL||mountp->m_disk==NULL)return EINVAL;
 	ms=kern_calloc(1,sizeof(*ms)); if(ms==NULL)return ENOMEM;
 	error=ufs1_read_super(mountp->m_disk,&ms->super); if(error){kern_free(ms);return error;}
@@ -1404,13 +1447,45 @@ static int ufs1_mount_impl(struct mount *mountp)
 	ms->cg=kern_malloc(ms->super.bsize);if(ms->cg==NULL){kern_free(ms);return ENOMEM;}
 	error=disk_read(mountp->m_disk,(uint64_t)ms->super.cblkno<<ms->super.fsbtodb,ms->super.bsize/UFS1_SECTOR_SIZE,ms->cg);
 	if(error==0&&ufs1_get32(ms->cg,UFS1_CG_MAGIC,ms->super.swapped)!=UFS1_CG_MAGIC_VALUE)error=EINVAL;
-	if(error==0){ms->cg_iusedoff=ufs1_get32(ms->cg,UFS1_CG_IUSEDOFF,ms->super.swapped);ms->cg_freeoff=ufs1_get32(ms->cg,UFS1_CG_FREEOFF,ms->super.swapped);ms->cg_nextfreeoff=ufs1_get32(ms->cg,UFS1_CG_NEXTFREEOFF,ms->super.swapped);if(ms->cg_iusedoff>=ms->super.bsize||ms->cg_freeoff>=ms->super.bsize||ms->cg_nextfreeoff>ms->super.bsize||ms->cg_freeoff+(ms->super.fpg+7U)/8U>ms->cg_nextfreeoff)error=EINVAL;}
+	if(error==0){
+		uint32_t inode_map_bytes=(ms->super.ipg+7U)/8U;
+		uint32_t free_map_bytes=(ms->super.fpg+7U)/8U;
+		uint32_t ndir=ufs1_get32(ms->cg,UFS1_CG_NDIR,ms->super.swapped);
+		uint32_t nbfree=ufs1_get32(ms->cg,UFS1_CG_NBFREE,ms->super.swapped);
+		uint32_t nifree=ufs1_get32(ms->cg,UFS1_CG_NIFREE,ms->super.swapped);
+		uint32_t nffree=ufs1_get32(ms->cg,UFS1_CG_NFFREE,ms->super.swapped);
+		ms->cg_iusedoff=ufs1_get32(ms->cg,UFS1_CG_IUSEDOFF,ms->super.swapped);
+		ms->cg_freeoff=ufs1_get32(ms->cg,UFS1_CG_FREEOFF,ms->super.swapped);
+		ms->cg_nextfreeoff=ufs1_get32(ms->cg,UFS1_CG_NEXTFREEOFF,ms->super.swapped);
+		if(ms->cg_iusedoff>=ms->super.bsize||
+		    ms->cg_freeoff>ms->super.bsize||
+		    ms->cg_nextfreeoff>ms->super.cgsize||
+		    ms->cg_iusedoff>ms->cg_freeoff||
+		    inode_map_bytes>ms->cg_freeoff-ms->cg_iusedoff||
+		    ms->cg_freeoff>ms->cg_nextfreeoff||
+		    free_map_bytes>ms->cg_nextfreeoff-ms->cg_freeoff||
+		    ndir>ms->super.ipg||nifree>ms->super.ipg||
+		    nbfree>ms->super.fpg/ms->super.frag||
+		    nffree>ms->super.fpg||
+		    (uint64_t)nbfree*ms->super.frag+nffree>ms->super.fpg||
+		    !bit_test(ms->cg+ms->cg_iusedoff,UFS1_ROOT_INO))
+			error=EINVAL;
+	}
 	if(error!=0){kern_free(ms->cg);kern_free(ms);return error;}
 	if((mountp->m_flags&MOUNT_READ_ONLY)==0){if((mountp->m_disk->d_flags&DISK_READ_ONLY)!=0||ms->super.clean==0){kern_free(ms->cg);kern_free(ms);return EROFS;}ms->writable=1;}
 	mountp->m_data=ms;
-	if(ms->writable){error=ufs1_write_clean(mountp,0);if(error){mountp->m_data=NULL;kern_free(ms->cg);kern_free(ms);return error;}}
 	error=load_inode(mountp,UFS1_ROOT_INO,&root);
-	if(error||root->i_type!=INODE_DIR){if(!error)inode_release(root);mountp->m_data=NULL;kern_free(ms->cg);kern_free(ms);return error?error:EIO;}
+	if(error||root->i_type!=INODE_DIR){if(!error){root->i_flags|=INODE_DEAD;inode_release(root);}mountp->m_data=NULL;kern_free(ms->cg);kern_free(ms);return error?error:EIO;}
+	/* A malformed root must not become the namespace anchor.  Validate the
+	 * mandatory entries while the mount is still private and unpublished. */
+	error=next_dirent(root,&cursor,&number,&type,name);
+	if(error==0&&(number!=UFS1_ROOT_INO||strcmp(name,".")!=0))error=EIO;
+	if(error==0)error=next_dirent(root,&cursor,&number,&type,name);
+	if(error==0&&(number!=UFS1_ROOT_INO||strcmp(name,"..")!=0))error=EIO;
+	if(error!=0){root->i_flags|=INODE_DEAD;inode_release(root);mountp->m_data=NULL;kern_free(ms->cg);kern_free(ms);return error;}
+	/* Do not dirty an image until every read-only mount validation, including
+	 * the root inode, has succeeded. */
+	if(ms->writable){error=ufs1_write_clean(mountp,0);if(error){root->i_flags|=INODE_DEAD;inode_release(root);mountp->m_data=NULL;kern_free(ms->cg);kern_free(ms);return error;}}
 	root->i_flags|=INODE_ROOT; mountp->m_root=root; return 0;
 }
 static int ufs1_sync(struct mount *mountp) { return mountp==NULL?EINVAL:bio_flush(mountp->m_disk); }

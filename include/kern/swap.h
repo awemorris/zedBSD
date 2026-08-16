@@ -33,6 +33,8 @@ struct swap_backend {
 	uint32_t slot_count;
 	uint32_t free_slots;
 	uint8_t *bitmap;
+	uint32_t *slot_inflight;
+	uint8_t *slot_pending_free;
 	unsigned enabled;
 	unsigned shutting_down;
 	unsigned inflight;
@@ -50,5 +52,6 @@ int swap_shutdown(struct swap_backend *);
 
 void swap_set_system_backend(struct swap_backend *);
 struct swap_backend *swap_system_backend(void);
+int swap_get_stats(struct swap_backend *, uint32_t *, uint32_t *);
 
 #endif

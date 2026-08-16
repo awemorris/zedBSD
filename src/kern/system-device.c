@@ -55,11 +55,14 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 		struct vm_reclaim_stats vs;
 		struct vm_commit_stats cs;
 		struct swap_backend *swap = swap_system_backend();
+		uint32_t swap_total = 0, swap_free = 0;
 		memset(&output, 0, sizeof(output));
 		hal_memory_get_stats(&hs);
 		kern_memory_get_stats(&ks);
 		vm_reclaim_get_stats(&vs);
 		vm_commit_get_stats(&cs);
+		if (swap != NULL)
+			(void)swap_get_stats(swap, &swap_total, &swap_free);
 		output.physical_total = hs.physical_total;
 		output.physical_reserved = hs.physical_reserved;
 		output.physical_allocated = hs.physical_allocated;
@@ -76,8 +79,8 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 		output.vm_swapped = vs.swapped; output.vm_faults = vs.faults;
 		output.vm_page_in = vs.page_ins; output.vm_page_out = vs.page_outs;
 		output.vm_reclaims = vs.reclaims; output.vm_io_errors = vs.io_errors;
-		output.swap_total = swap != NULL ? swap->slot_count : 0;
-		output.swap_free = swap != NULL ? swap->free_slots : 0;
+		output.swap_total = swap_total;
+		output.swap_free = swap_free;
 		output.swap_extents = swap_fat_extent_count();
 		output.vm_commit_limit = cs.limit_pages * VM_COMMIT_PAGE_SIZE;
 		output.vm_commit_used = cs.used_pages * VM_COMMIT_PAGE_SIZE;

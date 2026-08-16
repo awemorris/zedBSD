@@ -3,6 +3,7 @@
 #include "kern/graphics-driver.h"
 #include "kern/cdev.h"
 #include "kern/file.h"
+#include "kern/lock.h"
 #include "kern/uaccess.h"
 
 #include <zedbsd/graphics.h>
@@ -26,35 +27,50 @@ static void *graphics_driver_context __attribute__((section(".vfs_bss")));
 static struct kern_graphics_mode graphics_mode __attribute__((section(".vfs_bss")));
 static uint8_t row_buffer[GRAPHICS_ROW_MAX] __attribute__((section(".vfs_bss")));
 static uint32_t palette_buffer[256] __attribute__((section(".vfs_bss")));
+static struct mutex graphics_lock __attribute__((section(".vfs_bss")));
+static int graphics_lock_ready __attribute__((section(".vfs_bss")));
+
+/* Registration happens serially on the boot CPU.  Once this flag is
+ * published, every open/close/ioctl operation uses the sleepable mutex so
+ * driver callbacks and user-memory faults never run under a spinlock. */
+static void
+graphics_lock_init_once(void)
+{
+	if (!graphics_lock_ready) {
+		(void)mutex_init(&graphics_lock,LOCK_RANK_DEVICE,"graphics device");
+		graphics_lock_ready=1;
+	}
+}
 
 static int graphics_open(struct file *file)
 {
-	bool enabled = hal_irq_disable();
+	int error=0;
+	mutex_lock(&graphics_lock);
 	if (graphics_driver == NULL) {
-		if (enabled) hal_irq_enable();
-		return ENODEV;
+		error=ENODEV;
+	} else if (graphics_owner != NULL) {
+		error=EBUSY;
+	} else {
+		graphics_owner = file;
+		graphics_entered = 0;
+		memset(&graphics_mode, 0, sizeof(graphics_mode));
 	}
-	if (graphics_owner != NULL) {
-		if (enabled) hal_irq_enable();
-		return EBUSY;
-	}
-	graphics_owner = file;
-	graphics_entered = 0;
-	memset(&graphics_mode, 0, sizeof(graphics_mode));
-	if (enabled) hal_irq_enable();
-	return 0;
+	mutex_unlock(&graphics_lock);
+	return error;
 }
 
 static int graphics_close(struct file *file)
 {
-	if (graphics_owner != file)
-		return 0;
-	if (graphics_entered) {
-		graphics_driver->leave(graphics_driver_context);
-		hal_cons_resume();
-		graphics_entered = 0;
+	mutex_lock(&graphics_lock);
+	if (graphics_owner == file) {
+		if (graphics_entered) {
+			graphics_driver->leave(graphics_driver_context);
+			hal_cons_resume();
+			graphics_entered = 0;
+		}
+		graphics_owner = NULL;
 	}
-	graphics_owner = NULL;
+	mutex_unlock(&graphics_lock);
 	return 0;
 }
 
@@ -273,7 +289,7 @@ static int graphics_glyph(uintptr_t argument)
 	return error;
 }
 
-static int graphics_ioctl(struct file *file, unsigned long request,
+static int graphics_ioctl_locked(struct file *file, unsigned long request,
 			  uintptr_t argument)
 {
 	int error;
@@ -309,6 +325,16 @@ static int graphics_ioctl(struct file *file, unsigned long request,
 	}
 }
 
+static int
+graphics_ioctl(struct file *file,unsigned long request,uintptr_t argument)
+{
+	int error;
+	mutex_lock(&graphics_lock);
+	error=graphics_ioctl_locked(file,request,argument);
+	mutex_unlock(&graphics_lock);
+	return error;
+}
+
 static const struct cdev_ops graphics_ops = {
 	.open = graphics_open,
 	.close = graphics_close,
@@ -317,38 +343,48 @@ static const struct cdev_ops graphics_ops = {
 
 int graphics_device_register(void)
 {
+	graphics_lock_init_once();
+	mutex_lock(&graphics_lock);
 	graphics_owner = NULL;
 	graphics_entered = 0;
+	mutex_unlock(&graphics_lock);
 	return cdev_register("graphics", 0x00010001U, &graphics_ops, NULL);
 }
 
 int
 graphics_driver_register(const struct graphics_driver_ops *ops, void *context)
 {
-	bool enabled;
+	int error=0;
 
 	if (ops == NULL || ops->enter == NULL || ops->clear == NULL ||
 	    ops->leave == NULL || ops->fill == NULL || ops->line == NULL ||
 	    ops->pattern_fill == NULL || ops->blit == NULL ||
 	    ops->flush == NULL || ops->get_glyph == NULL)
 		return EINVAL;
-	enabled = hal_irq_disable();
+	graphics_lock_init_once();
+	mutex_lock(&graphics_lock);
 	if (graphics_driver != NULL) {
-		if (enabled) hal_irq_enable();
-		return EBUSY;
+		error=EBUSY;
+	} else {
+		graphics_driver = ops;
+		graphics_driver_context = context;
 	}
-	graphics_driver = ops;
-	graphics_driver_context = context;
-	if (enabled) hal_irq_enable();
-	return 0;
+	mutex_unlock(&graphics_lock);
+	return error;
 }
 
 void
 graphics_device_restore_text(void)
 {
+	if (!graphics_lock_ready) {
+		hal_cons_resume();
+		return;
+	}
+	mutex_lock(&graphics_lock);
 	if (graphics_entered && graphics_driver != NULL) {
 		graphics_driver->leave(graphics_driver_context);
 		graphics_entered = 0;
 	}
 	hal_cons_resume();
+	mutex_unlock(&graphics_lock);
 }

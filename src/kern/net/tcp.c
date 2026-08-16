@@ -4,6 +4,7 @@
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
 #include "kern/net/route.h"
+#include "kern/clock.h"
 #include "kern/kmem.h"
 #include "kern/sched.h"
 #include "kern/signal.h"
@@ -39,6 +40,14 @@ static struct spinlock tcp_registry_lock;
 static struct tcp_endpoint *tcp_endpoint(struct socket *socket)
 {
 	return (struct tcp_endpoint *)socket;
+}
+
+static void
+tcp_forget_peer(struct tcp_endpoint *endpoint)
+{
+	endpoint->tcp.inet.remote_address = 0;
+	endpoint->tcp.inet.remote_port = 0;
+	endpoint->tcp.inet.inet_flags &= ~INET_SOCKET_CONNECTED;
 }
 
 static void
@@ -108,15 +117,18 @@ tcp_listener_established(struct tcp_endpoint *child)
 }
 
 static int
-tcp_port_in_use(const struct tcp_endpoint *skip, uint32_t address,
-		uint16_t port)
+tcp_port_in_use(const struct tcp_endpoint *candidate, int strict)
 {
 	const struct tcp_endpoint *endpoint;
 
 	for (endpoint = tcp_sockets; endpoint != NULL; endpoint = endpoint->next)
-		if (endpoint != skip && endpoint->tcp.inet.local_port == port &&
-		    (endpoint->tcp.inet.local_address == 0 || address == 0 ||
-		     endpoint->tcp.inet.local_address == address))
+		if (endpoint != candidate &&
+		    (strict ? inet_socket_local_conflict(&endpoint->tcp.inet, 0,
+		    &candidate->tcp.inet, 0) :
+		    inet_socket_local_conflict(&endpoint->tcp.inet,
+		    endpoint->tcp.inet.bind_reuse_address,
+		    &candidate->tcp.inet,
+		    candidate->tcp.inet.bind_reuse_address)))
 			return 1;
 	return 0;
 }
@@ -131,11 +143,12 @@ tcp_allocate_port_locked(struct tcp_endpoint *endpoint)
 		uint16_t port = next_ephemeral++;
 		if (next_ephemeral < TCP_EPHEMERAL_FIRST)
 			next_ephemeral = TCP_EPHEMERAL_FIRST;
-		if (!tcp_port_in_use(endpoint, endpoint->tcp.inet.local_address, port)) {
-			endpoint->tcp.inet.local_port = port;
+		endpoint->tcp.inet.local_port = port;
+		if (!tcp_port_in_use(endpoint, 1)) {
 			endpoint->tcp.inet.inet_flags |= INET_SOCKET_BOUND;
 			return 0;
 		}
+		endpoint->tcp.inet.local_port = 0;
 	}
 	return EADDRINUSE;
 }
@@ -234,15 +247,44 @@ tcp_send_segment(struct tcp_endpoint *endpoint, uint8_t flags,
 }
 
 static void
-tcp_retransmit_clear(struct tcp_endpoint *endpoint)
+tcp_retransmit_reset(struct tcp_endpoint *endpoint,
+	struct packet_buf **packet)
 {
-	struct socket *socket = &endpoint->tcp.inet.socket;
-
-	packet_buf_free(endpoint->tcp.retransmit);
+	*packet = endpoint->tcp.retransmit;
 	endpoint->tcp.retransmit = NULL;
 	endpoint->tcp.retransmit_deadline = 0;
 	endpoint->tcp.retransmit_count = 0;
+}
+
+static void
+tcp_retransmit_clear(struct tcp_endpoint *endpoint)
+{
+	struct socket *socket = &endpoint->tcp.inet.socket;
+	struct packet_buf *packet;
+
+	tcp_retransmit_reset(endpoint, &packet);
+	packet_buf_free(packet);
 	socket_wake_send(socket);
+}
+
+/* Caller holds socket->lock.  The generation check prevents a waiter from
+ * cancelling a later attempt which reused the same socket. */
+static struct packet_buf *
+tcp_connect_cancel_locked(struct tcp_endpoint *endpoint, uint32_t generation)
+{
+	struct socket *socket = &endpoint->tcp.inet.socket;
+	struct packet_buf *packet;
+
+	if (endpoint->tcp.state != TCP_SYN_SENT ||
+	    endpoint->tcp.active_connect_generation != generation)
+		return NULL;
+	tcp_retransmit_reset(endpoint, &packet);
+	endpoint->tcp.state = TCP_CLOSED;
+	endpoint->tcp.active_connect_generation = 0;
+	tcp_forget_peer(endpoint);
+	waitq_wake_all(&socket->connect_waitq);
+	waitq_wake_all(&socket->send_waitq);
+	return packet;
 }
 
 static int
@@ -284,20 +326,27 @@ tcp_bind(struct socket *socket, const struct sockaddr *address,
 	 socklen_t length)
 {
 	struct tcp_endpoint *endpoint = tcp_endpoint(socket);
-	int error = inet_socket_bind(&endpoint->tcp.inet, address, length);
-	unsigned long irq;
+	int error;
+	unsigned long irq, socket_irq;
 
+	if ((endpoint->tcp.inet.inet_flags & INET_SOCKET_BOUND) != 0)
+		return EINVAL;
+	socket_irq = spin_lock_irqsave(&socket->lock);
+	endpoint->tcp.inet.bind_reuse_address = socket->reuse_address;
+	spin_unlock_irqrestore(&socket->lock, socket_irq);
+	error = inet_socket_bind(&endpoint->tcp.inet, address, length);
 	if (error != 0)
 		return error;
 	irq = spin_lock_irqsave(&tcp_registry_lock);
 	if (endpoint->tcp.inet.local_port == 0)
 		error = tcp_allocate_port_locked(endpoint);
-	else if (tcp_port_in_use(endpoint, endpoint->tcp.inet.local_address,
-	    endpoint->tcp.inet.local_port))
+	else if (tcp_port_in_use(endpoint, 0))
 		error = EADDRINUSE;
 	if (error != 0) {
 		endpoint->tcp.inet.local_address = 0;
 		endpoint->tcp.inet.local_port = 0;
+		endpoint->tcp.inet.ifindex = 0;
+		endpoint->tcp.inet.bind_reuse_address = 0;
 		endpoint->tcp.inet.inet_flags &= ~INET_SOCKET_BOUND;
 	}
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
@@ -308,6 +357,9 @@ static int
 tcp_listen(struct socket *socket, int backlog)
 {
 	struct tcp_endpoint *endpoint = tcp_endpoint(socket);
+	struct tcp_endpoint *other;
+	unsigned long irq;
+	int conflict = 0;
 
 	if (endpoint->tcp.state != TCP_CLOSED)
 		return endpoint->tcp.state == TCP_LISTEN ? 0 : EISCONN;
@@ -318,8 +370,22 @@ tcp_listen(struct socket *socket, int backlog)
 		backlog = 0;
 	if ((unsigned)backlog > TCP_LISTEN_BACKLOG_MAX)
 		backlog = TCP_LISTEN_BACKLOG_MAX;
-	endpoint->tcp.listen_backlog = backlog == 0 ? 1U : (unsigned)backlog;
-	endpoint->tcp.state = TCP_LISTEN;
+	irq = spin_lock_irqsave(&tcp_registry_lock);
+	for (other = tcp_sockets; other != NULL; other = other->next)
+		if (other != endpoint && other->tcp.state == TCP_LISTEN &&
+		    inet_socket_local_conflict(&other->tcp.inet, 0,
+		    &endpoint->tcp.inet, 0)) {
+			conflict = 1;
+			break;
+		}
+	if (!conflict) {
+		endpoint->tcp.listen_backlog = backlog == 0 ?
+		    1U : (unsigned)backlog;
+		endpoint->tcp.state = TCP_LISTEN;
+	}
+	spin_unlock_irqrestore(&tcp_registry_lock, irq);
+	if (conflict)
+		return EADDRINUSE;
 	return 0;
 }
 
@@ -390,6 +456,9 @@ tcp_connect(struct socket *socket, const struct sockaddr *address,
 {
 	struct tcp_endpoint *endpoint = tcp_endpoint(socket);
 	struct thread *thread = thread_current();
+	struct packet_buf *cancelled = NULL;
+	uint64_t deadline = 0, timeout;
+	uint32_t generation;
 	unsigned long irq;
 	unsigned attempt;
 	int error;
@@ -401,28 +470,48 @@ tcp_connect(struct socket *socket, const struct sockaddr *address,
 	error = inet_socket_connect(&endpoint->tcp.inet, address, length);
 	if (error != 0)
 		return error;
-	if (endpoint->tcp.inet.remote_port == 0)
+	if (endpoint->tcp.inet.remote_port == 0) {
+		tcp_forget_peer(endpoint);
 		return EADDRNOTAVAIL;
+	}
 	if (endpoint->tcp.inet.local_port == 0 &&
-	    (error = tcp_allocate_port(endpoint)) != 0)
+	    (error = tcp_allocate_port(endpoint)) != 0) {
+		tcp_forget_peer(endpoint);
 		return error;
+	}
 	endpoint->tcp.send_next = (uint32_t)sched_ticks() * 1103515245U +
 	    endpoint->tcp.inet.local_port;
+	irq = spin_lock_irqsave(&socket->lock);
+	endpoint->tcp.connect_generation++;
+	if (endpoint->tcp.connect_generation == 0)
+		endpoint->tcp.connect_generation++;
+	generation = endpoint->tcp.connect_generation;
+	endpoint->tcp.active_connect_generation = generation;
+	/* Make distinct attempts use distinct wire sequence spaces even when the
+	 * scheduler tick did not advance between them. */
+	endpoint->tcp.send_next ^= generation * 2654435761U;
 	endpoint->tcp.send_unacknowledged = endpoint->tcp.send_next;
 	endpoint->tcp.state = TCP_SYN_SENT;
+	spin_unlock_irqrestore(&socket->lock, irq);
 	for (attempt = 0; attempt < 4U; attempt++) {
 		error = tcp_send_reliable(endpoint, TCP_SYN, NULL, 0);
 		if (error == 0)
 			break;
 		if (error != EAGAIN && error != EBUSY && error != ENOBUFS) {
-			endpoint->tcp.state = TCP_CLOSED;
+			irq = spin_lock_irqsave(&socket->lock);
+			cancelled = tcp_connect_cancel_locked(endpoint, generation);
+			spin_unlock_irqrestore(&socket->lock, irq);
+			packet_buf_free(cancelled);
 			return error;
 		}
 		if (thread != NULL)
 			sched_sleep(sched_ticks() + 25U);
 	}
 	if (error != 0) {
-		endpoint->tcp.state = TCP_CLOSED;
+		irq = spin_lock_irqsave(&socket->lock);
+		cancelled = tcp_connect_cancel_locked(endpoint, generation);
+		spin_unlock_irqrestore(&socket->lock, irq);
+		packet_buf_free(cancelled);
 		return error;
 	}
 	endpoint->tcp.send_next++;
@@ -431,13 +520,25 @@ tcp_connect(struct socket *socket, const struct sockaddr *address,
 	if (thread == NULL)
 		return EAGAIN;
 	irq = spin_lock_irqsave(&socket->lock);
-	while (endpoint->tcp.state == TCP_SYN_SENT && socket->error == 0) {
+	timeout = socket->send_timeout_ticks;
+	if (timeout != 0 &&
+	    (error = kern_deadline_after(sched_ticks(), timeout, &deadline)) != 0) {
+		cancelled = tcp_connect_cancel_locked(endpoint, generation);
+		spin_unlock_irqrestore(&socket->lock, irq);
+		packet_buf_free(cancelled);
+		return error;
+	}
+	while (endpoint->tcp.state == TCP_SYN_SENT &&
+	    endpoint->tcp.active_connect_generation == generation &&
+	    socket->error == 0) {
 		uint64_t sequence = waitq_sequence(&socket->connect_waitq);
 		error = waitq_sleep(&socket->connect_waitq, &socket->lock,
-		    sequence, 0, WAITQ_INTERRUPTIBLE);
-		if (error == EINTR) {
+		    sequence, deadline, WAITQ_INTERRUPTIBLE);
+		if (error == EINTR || error == ETIMEDOUT) {
+			cancelled = tcp_connect_cancel_locked(endpoint, generation);
 			spin_unlock_irqrestore(&socket->lock, irq);
-			return EINTR;
+			packet_buf_free(cancelled);
+			return error;
 		}
 	}
 	if (socket->error != 0) {
@@ -725,6 +826,8 @@ tcp_passive_syn(struct tcp_endpoint *listener, uint32_t source,
 	    listener->tcp.inet.socket.send_timeout_ticks;
 	child->tcp.inet.socket.reuse_address =
 	    listener->tcp.inet.socket.reuse_address;
+	child->tcp.inet.bind_reuse_address =
+	    listener->tcp.inet.bind_reuse_address;
 	child->tcp.queue_next = listener->tcp.half_open_head;
 	listener->tcp.half_open_head = &child->tcp;
 	listener->tcp.half_open_count++;
@@ -780,8 +883,11 @@ tcp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 		return 0;
 	}
 	if (flags & TCP_RST) {
+		tcp_retransmit_clear(endpoint);
 		socket_set_error(&endpoint->tcp.inet.socket, ECONNRESET);
 		endpoint->tcp.state = TCP_CLOSED;
+		endpoint->tcp.active_connect_generation = 0;
+		tcp_forget_peer(endpoint);
 		if (endpoint->tcp.listener != NULL) {
 			tcp_listener_remove(endpoint);
 			packet_buf_free(packet);
@@ -796,6 +902,11 @@ tcp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 		return 0;
 	}
 	if (endpoint->tcp.state == TCP_SYN_RECEIVED) {
+		if ((flags & (TCP_SYN | TCP_ACK | TCP_RST)) == TCP_SYN &&
+		    sequence + 1U == endpoint->tcp.receive_next)
+			(void)tcp_send_segment_at(endpoint,
+			    endpoint->tcp.retransmit_sequence,
+			    TCP_SYN | TCP_ACK, NULL, 0);
 		if ((flags & TCP_ACK) != 0 &&
 		    acknowledgement == endpoint->tcp.send_next) {
 			endpoint->tcp.send_unacknowledged = acknowledgement;
@@ -808,16 +919,28 @@ tcp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 		return 0;
 	}
 	if (endpoint->tcp.state == TCP_SYN_SENT) {
+		struct packet_buf *retransmit = NULL;
+		unsigned long socket_irq;
+		int established = 0;
+
+		socket_irq = spin_lock_irqsave(&endpoint->tcp.inet.socket.lock);
 		if ((flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK) &&
+		    endpoint->tcp.active_connect_generation != 0 &&
 		    acknowledgement == endpoint->tcp.send_next) {
 			endpoint->tcp.send_unacknowledged = acknowledgement;
-			tcp_retransmit_clear(endpoint);
+			tcp_retransmit_reset(endpoint, &retransmit);
 			endpoint->tcp.receive_next = sequence + 1U;
 			endpoint->tcp.peer_window = wire_get16(tcp->window);
 			endpoint->tcp.state = TCP_ESTABLISHED;
-			(void)tcp_send_segment(endpoint, TCP_ACK, NULL, 0);
-			socket_wake_connect(&endpoint->tcp.inet.socket);
+			endpoint->tcp.active_connect_generation = 0;
+			waitq_wake_all(&endpoint->tcp.inet.socket.connect_waitq);
+			waitq_wake_all(&endpoint->tcp.inet.socket.send_waitq);
+			established = 1;
 		}
+		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
+		packet_buf_free(retransmit);
+		if (established)
+			(void)tcp_send_segment(endpoint, TCP_ACK, NULL, 0);
 		packet_buf_free(packet);
 		socket_release(&endpoint->tcp.inet.socket);
 		return 0;
@@ -910,6 +1033,8 @@ tcp_timer_run(void)
 		if (endpoint->tcp.retransmit_count >= TCP_RETRANSMIT_MAX) {
 			tcp_retransmit_clear(endpoint);
 			endpoint->tcp.state = TCP_CLOSED;
+			endpoint->tcp.active_connect_generation = 0;
+			tcp_forget_peer(endpoint);
 			socket_set_error(socket, ETIMEDOUT);
 			if (endpoint->tcp.listener != NULL) {
 				tcp_listener_remove(endpoint);
@@ -932,6 +1057,8 @@ tcp_timer_run(void)
 		if (error != 0 && error != EAGAIN && error != ENOBUFS) {
 			tcp_retransmit_clear(endpoint);
 			endpoint->tcp.state = TCP_CLOSED;
+			endpoint->tcp.active_connect_generation = 0;
+			tcp_forget_peer(endpoint);
 			socket_set_error(socket, error);
 			if (endpoint->tcp.listener != NULL) {
 				tcp_listener_remove(endpoint);

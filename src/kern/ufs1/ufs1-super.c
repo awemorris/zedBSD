@@ -11,6 +11,7 @@ int
 ufs1_super_decode(const void *buffer, size_t length, uint64_t sectors,
 	struct ufs1_super *super)
 {
+	uint64_t inode_fragments, covered_fragments;
 	uint32_t magic;
 	int swapped;
 	if (buffer == NULL || super == NULL || length < UFS1_FS_STRUCT_SIZE)
@@ -43,6 +44,9 @@ ufs1_super_decode(const void *buffer, size_t length, uint64_t sectors,
 #undef GET32
 	super->clean = *((const uint8_t *)buffer + UFS1_FS_CLEAN);
 	super->swapped = swapped;
+	inode_fragments = ((uint64_t)super->ipg + super->inopb - 1U) /
+	    super->inopb * super->frag;
+	covered_fragments = (uint64_t)super->ncg * super->fpg;
 	if (super->inodefmt != UFS1_44INODEFMT || super->bsize != 8192U ||
 	    super->fsize != 1024U || super->frag != 8U ||
 	    super->bshift != 13U || super->fshift != 10U ||
@@ -57,8 +61,14 @@ ufs1_super_decode(const void *buffer, size_t length, uint64_t sectors,
 	    super->sbsize > UFS1_SBLOCK_SIZE ||
 	    super->cgsize == 0 || super->cgsize > super->bsize ||
 	    (uint64_t)super->size * (super->fsize / UFS1_SECTOR_SIZE) > sectors ||
+	    super->sblkno >= super->size || super->cblkno >= super->size ||
 	    super->iblkno >= super->size || super->dblkno >= super->size ||
-	    super->iblkno >= super->dblkno)
+	    super->sblkno >= super->cblkno || super->cblkno >= super->iblkno ||
+	    super->iblkno >= super->dblkno ||
+	    inode_fragments > super->dblkno - super->iblkno ||
+	    covered_fragments < super->size ||
+	    (super->ncg > 1U &&
+	    (uint64_t)(super->ncg - 1U) * super->fpg >= super->size))
 		return EINVAL;
 	return 0;
 }

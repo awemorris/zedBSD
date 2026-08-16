@@ -183,7 +183,7 @@ $(BUILD)/tests/sched-host-test: tests/sched-host-test.c src/kern/sched.c
 $(BUILD)/tests/concurrency-host-test: tests/concurrency-host-test.c \
 	src/kern/lock.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -pthread -Dtid_t=int -Iinclude -Isrc \
+	$(HOST_TEST_CC) -pthread -Dtid_t=int -DZEDBSD_LOCKDEP -Iinclude -Isrc \
 	src/kern/lock.c $< -o $@
 
 $(BUILD)/tests/smp-contract-host-test: tests/smp-contract-host-test.c
@@ -219,17 +219,19 @@ $(BUILD)/tests/vmspace-host-test: tests/vmspace-host-test.c \
 $(BUILD)/tests/vm-commit-host-test: tests/vm-commit-host-test.c \
 	src/kern/vm-commit.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vm-commit.c $< -o $@
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vm-commit.c $< -pthread -o $@
 
-$(BUILD)/tests/swap-host-test: tests/swap-host-test.c src/kern/swap.c
+$(BUILD)/tests/swap-host-test: tests/swap-host-test.c src/kern/swap.c \
+	tests/spin-host-stubs.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/swap.c $< -o $@
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/swap.c \
+		tests/spin-host-stubs.c $< -pthread -o $@
 
 $(BUILD)/tests/vm-reclaim-host-test: tests/vm-reclaim-host-test.c \
-	src/kern/vm-reclaim.c src/kern/swap.c
+	src/kern/vm-reclaim.c src/kern/swap.c tests/spin-host-stubs.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vm-reclaim.c \
-		src/kern/swap.c $< -o $@
+		src/kern/swap.c tests/spin-host-stubs.c $< -pthread -o $@
 
 $(BUILD)/tests/packet-buf-host-test: tests/packet-buf-host-test.c \
 	src/kern/net/packet-buf.c

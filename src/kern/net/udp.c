@@ -32,15 +32,17 @@ static struct udp_endpoint *udp_endpoint(struct socket *socket)
 }
 
 static int
-udp_port_in_use_locked(const struct udp_endpoint *skip, uint32_t address,
-		uint16_t port)
+udp_port_in_use_locked(const struct udp_endpoint *candidate, int strict)
 {
 	const struct udp_endpoint *endpoint;
 
 	for (endpoint = udp_sockets; endpoint != NULL; endpoint = endpoint->next)
-		if (endpoint != skip && endpoint->inet.local_port == port &&
-		    (endpoint->inet.local_address == 0 || address == 0 ||
-		     endpoint->inet.local_address == address))
+		if (endpoint != candidate &&
+		    (strict ? inet_socket_local_conflict(&endpoint->inet, 0,
+		    &candidate->inet, 0) :
+		    inet_socket_local_conflict(&endpoint->inet,
+		    endpoint->inet.bind_reuse_address, &candidate->inet,
+		    candidate->inet.bind_reuse_address)))
 			return 1;
 	return 0;
 }
@@ -55,12 +57,12 @@ udp_allocate_port_locked(struct udp_endpoint *endpoint)
 		uint16_t port = next_ephemeral++;
 		if (next_ephemeral < UDP_EPHEMERAL_FIRST)
 			next_ephemeral = UDP_EPHEMERAL_FIRST;
-		if (!udp_port_in_use_locked(endpoint,
-		    endpoint->inet.local_address, port)) {
-			endpoint->inet.local_port = port;
+		endpoint->inet.local_port = port;
+		if (!udp_port_in_use_locked(endpoint, 1)) {
 			endpoint->inet.inet_flags |= INET_SOCKET_BOUND;
 			return 0;
 		}
+		endpoint->inet.local_port = 0;
 	}
 	return EADDRINUSE;
 }
@@ -79,18 +81,30 @@ udp_bind(struct socket *socket, const struct sockaddr *address,
 	 socklen_t length)
 {
 	struct udp_endpoint *endpoint = udp_endpoint(socket);
-	unsigned long irq = spin_lock_irqsave(&udp_registry_lock);
-	int error = inet_socket_bind(&endpoint->inet, address, length);
+	unsigned long irq, socket_irq;
+	int error;
 
-	if (error != 0) {
-		spin_unlock_irqrestore(&udp_registry_lock, irq);
+	if ((endpoint->inet.inet_flags & INET_SOCKET_BOUND) != 0)
+		return EINVAL;
+	socket_irq = spin_lock_irqsave(&socket->lock);
+	endpoint->inet.bind_reuse_address = socket->reuse_address;
+	spin_unlock_irqrestore(&socket->lock, socket_irq);
+	error = inet_socket_bind(&endpoint->inet, address, length);
+
+	if (error != 0)
 		return error;
-	}
+	irq = spin_lock_irqsave(&udp_registry_lock);
 	if (endpoint->inet.local_port == 0)
 		error = udp_allocate_port_locked(endpoint);
-	else if (udp_port_in_use_locked(endpoint, endpoint->inet.local_address,
-	    endpoint->inet.local_port))
+	else if (udp_port_in_use_locked(endpoint, 0))
 		error = EADDRINUSE;
+	if (error != 0) {
+		endpoint->inet.local_address = 0;
+		endpoint->inet.local_port = 0;
+		endpoint->inet.ifindex = 0;
+		endpoint->inet.bind_reuse_address = 0;
+		endpoint->inet.inet_flags &= ~INET_SOCKET_BOUND;
+	}
 	spin_unlock_irqrestore(&udp_registry_lock, irq);
 	return error;
 }
@@ -108,6 +122,11 @@ udp_connect(struct socket *socket, const struct sockaddr *address,
 		error = EADDRNOTAVAIL;
 	if (error == 0 && endpoint->inet.local_port == 0)
 		error = udp_allocate_port_locked(endpoint);
+	if (error != 0) {
+		endpoint->inet.remote_address = 0;
+		endpoint->inet.remote_port = 0;
+		endpoint->inet.inet_flags &= ~INET_SOCKET_CONNECTED;
+	}
 	spin_unlock_irqrestore(&udp_registry_lock, irq);
 	return error;
 }

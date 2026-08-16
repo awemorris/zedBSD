@@ -26,6 +26,7 @@ struct inet_socket {
 	uint16_t remote_port;
 	unsigned ifindex;
 	unsigned inet_flags;
+	unsigned bind_reuse_address;
 };
 
 int inet_socket_init(void);
@@ -34,6 +35,8 @@ void inet_socket_object_init(struct inet_socket *, int type, int protocol,
 int inet_socket_bind(struct inet_socket *, const struct sockaddr *, socklen_t);
 int inet_socket_connect(struct inet_socket *, const struct sockaddr *,
 			socklen_t);
+int inet_socket_local_conflict(const struct inet_socket *, unsigned,
+			       const struct inet_socket *, unsigned);
 int inet_socket_getsockname(struct inet_socket *, struct sockaddr *, socklen_t *);
 int inet_socket_getpeername(struct inet_socket *, struct sockaddr *, socklen_t *);
 int inet_socket_ioctl(struct socket *, unsigned long, uintptr_t);

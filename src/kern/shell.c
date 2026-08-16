@@ -40,10 +40,13 @@ print_vmstat(void)
 	struct kern_memory_stats kern_stats;
 	struct vm_reclaim_stats vm_stats;
 	struct swap_backend *swap = swap_system_backend();
+	uint32_t swap_total = 0, swap_free = 0;
 
 	hal_memory_get_stats(&hal_stats);
 	kern_memory_get_stats(&kern_stats);
 	vm_reclaim_get_stats(&vm_stats);
+	if (swap != NULL)
+		(void)swap_get_stats(swap, &swap_total, &swap_free);
 	print_stat("physical.total", hal_stats.physical_total);
 	print_stat("physical.reserved", hal_stats.physical_reserved);
 	print_stat("physical.allocated", hal_stats.physical_allocated);
@@ -71,8 +74,8 @@ print_vmstat(void)
 	print_stat("vm.page-out", vm_stats.page_outs);
 	print_stat("vm.reclaims", vm_stats.reclaims);
 	print_stat("vm.io-errors", vm_stats.io_errors);
-	print_stat("swap.total", swap != NULL ? swap->slot_count : 0);
-	print_stat("swap.free", swap != NULL ? swap->free_slots : 0);
+	print_stat("swap.total", swap_total);
+	print_stat("swap.free", swap_free);
 	print_stat("swap.extents", swap_fat_extent_count());
 }
 

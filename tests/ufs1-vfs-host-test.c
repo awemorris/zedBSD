@@ -21,6 +21,13 @@ static unsigned write_operations, fail_write_at, short_write_at;
 static unsigned get32(size_t offset)
 { return (unsigned)image[offset]|(unsigned)image[offset+1]<<8|
 	(unsigned)image[offset+2]<<16|(unsigned)image[offset+3]<<24; }
+static void put32(size_t offset,unsigned value)
+{ image[offset]=(unsigned char)value;image[offset+1]=(unsigned char)(value>>8);
+	image[offset+2]=(unsigned char)(value>>16);image[offset+3]=(unsigned char)(value>>24); }
+static unsigned get16(size_t offset)
+{ return (unsigned)image[offset]|(unsigned)image[offset+1]<<8; }
+static void put16(size_t offset,unsigned value)
+{ image[offset]=(unsigned char)value;image[offset+1]=(unsigned char)(value>>8); }
 void *kern_malloc(size_t n){return malloc(n);} void *kern_calloc(size_t n,size_t s){return calloc(n,s);} void kern_free(void *p){free(p);}
 
 static int submit(struct disk *disk,struct bio *bio)
@@ -41,6 +48,22 @@ static int submit(struct disk *disk,struct bio *bio)
 }
 static const struct disk_ops ops={.submit=submit};
 
+static void
+expect_mount_error(int expected)
+{
+	struct disk *disk;
+	struct mount *mountp=NULL;
+
+	disk_registry_reset();mount_reset();disk=disk_alloc();assert(disk);
+	strcpy(disk->d_name,"badufs");disk->d_block_size=512;
+	disk->d_block_count=image_size/512;disk->d_ops=&ops;
+	assert(disk_create(disk)==0);
+	assert(filesystem_register(&ufs1_filesystem_type)==0);
+	assert(mount_private("ufs1",disk,MOUNT_READ_ONLY,NULL,&mountp)==expected);
+	assert(mountp==NULL);
+	assert(disk_gone_if_idle(disk)==0);assert(disk_destroy(disk)==0);
+}
+
 int main(void)
 {
 	FILE *fp=fopen(UFS1_TEST_IMAGE,"rb"); struct disk *disk; struct mount *mountp;
@@ -56,6 +79,27 @@ int main(void)
 	unsigned initial_nbfree,initial_nifree,initial_ndir;
 	assert(fp); fseek(fp,0,SEEK_END); image_size=(size_t)ftell(fp); rewind(fp);
 	image=malloc(image_size); assert(image&&fread(image,1,image_size,fp)==image_size); fclose(fp);
+	/* Kernel mount parser rejects corrupt CG geometry, allocation state, root
+	 * type, and root data pointers before publishing a mount. */
+	{
+		size_t cg=(size_t)get32(8192+12)*1024U;
+		size_t root=(size_t)get32(8192+16)*1024U+2U*128U;
+		unsigned saved;
+		saved=get32(cg+4);put32(cg+4,0);expect_mount_error(EINVAL);put32(cg+4,saved);
+		saved=get32(cg+92);put32(cg+92,get32(cg+96)+1U);
+		expect_mount_error(EINVAL);put32(cg+92,saved);
+		saved=image[cg+get32(cg+92)];image[cg+get32(cg+92)]&=(unsigned char)~(1U<<2);
+		expect_mount_error(EINVAL);image[cg+get32(cg+92)]=(unsigned char)saved;
+		saved=get16(root);put16(root,0100644);expect_mount_error(EIO);put16(root,saved);
+		saved=get32(root+40);put32(root+40,1);expect_mount_error(EIO);put32(root+40,saved);
+		{
+			size_t root_data=(size_t)get32(root+40)*1024U;
+			saved=get16(root_data+4);put16(root_data+4,0);
+			expect_mount_error(EIO);put16(root_data+4,saved);
+			saved=get32(root_data);put32(root_data,3);
+			expect_mount_error(EIO);put32(root_data,saved);
+		}
+	}
 	initial_ndir=get32(8192+192);initial_nbfree=get32(8192+196);
 	initial_nifree=get32(8192+200);
 	disk_registry_reset(); mount_reset(); disk=disk_alloc(); assert(disk);

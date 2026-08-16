@@ -68,6 +68,15 @@ main(void)
 	ufs1_put32(data, UFS1_FS_IBLKNO, 56, 0);
 	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
 	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_CBLKNO, 24, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_DBLKNO, 25, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_FPG, 2048, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
+	make_super(data, 0);
 	ufs1_put32(data, UFS1_FS_CGSIZE, 8193, 0);
 	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == EINVAL);
 	make_super(data, 0);

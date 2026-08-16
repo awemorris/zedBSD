@@ -140,6 +140,26 @@ inet_socket_connect(struct inet_socket *inet, const struct sockaddr *address,
 	return 0;
 }
 
+int
+inet_socket_local_conflict(const struct inet_socket *existing,
+	unsigned existing_reuse, const struct inet_socket *candidate,
+	unsigned candidate_reuse)
+{
+	if (existing == NULL || candidate == NULL ||
+	    existing->local_port == 0 || candidate->local_port == 0 ||
+	    existing->local_port != candidate->local_port)
+		return 0;
+	if (existing->local_address != 0 && candidate->local_address != 0 &&
+	    existing->local_address != candidate->local_address)
+		return 0;
+	/* SO_REUSEADDR permits wildcard/specific coexistence only when every
+	 * participant opted in.  Exact duplicate local endpoints still require
+	 * a future SO_REUSEPORT and are therefore rejected. */
+	if (existing->local_address == candidate->local_address)
+		return 1;
+	return existing_reuse == 0 || candidate_reuse == 0;
+}
+
 static int
 inet_socket_name(struct inet_socket *inet, struct sockaddr *address,
 		 socklen_t *length, int peer)

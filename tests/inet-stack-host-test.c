@@ -281,6 +281,45 @@ int main(void)
 	assert(count == 5 && transmitted != NULL);
 	assert(transmitted->data[23] == IPPROTO_UDP);
 	packet_buf_free(transmitted); transmitted = NULL;
+	/* Bind publication is atomic and SO_REUSEADDR requires both endpoints.
+	 * Exact duplicate locals remain reserved for a future SO_REUSEPORT. */
+	{
+		struct socket *a, *b, *c;
+		int reuse = 1;
+		assert(socket_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &a) == 0);
+		assert(socket_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &b) == 0);
+		memset(&address, 0, sizeof(address));
+		address.sin_family = AF_INET;
+		address.sin_port = net_htons(9000);
+		assert(a->ops->bind(a, (struct sockaddr *)&address,
+		    sizeof(address)) == 0);
+		address.sin_addr.s_addr = net_htonl(local_ip);
+		assert(b->ops->bind(b, (struct sockaddr *)&address,
+		    sizeof(address)) == EADDRINUSE);
+		assert(((struct inet_socket *)b)->local_port == 0 &&
+		    (((struct inet_socket *)b)->inet_flags & INET_SOCKET_BOUND) == 0);
+		socket_release(b); socket_release(a);
+
+		assert(socket_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &a) == 0);
+		assert(socket_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &b) == 0);
+		assert(socket_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &c) == 0);
+		assert(socket_setsockopt_common(a, SOL_SOCKET, SO_REUSEADDR,
+		    &reuse, sizeof(reuse)) == 0);
+		assert(socket_setsockopt_common(b, SOL_SOCKET, SO_REUSEADDR,
+		    &reuse, sizeof(reuse)) == 0);
+		assert(socket_setsockopt_common(c, SOL_SOCKET, SO_REUSEADDR,
+		    &reuse, sizeof(reuse)) == 0);
+		address.sin_addr.s_addr = 0;
+		assert(a->ops->bind(a, (struct sockaddr *)&address,
+		    sizeof(address)) == 0);
+		address.sin_addr.s_addr = net_htonl(local_ip);
+		assert(b->ops->bind(b, (struct sockaddr *)&address,
+		    sizeof(address)) == 0);
+		address.sin_addr.s_addr = 0;
+		assert(c->ops->bind(c, (struct sockaddr *)&address,
+		    sizeof(address)) == EADDRINUSE);
+		socket_release(c); socket_release(b); socket_release(a);
+	}
 
 	assert(socket_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &tcp_socket) == 0);
 	address.sin_port = net_htons(80); address.sin_addr.s_addr = net_htonl(peer_ip);
@@ -319,6 +358,35 @@ int main(void)
 	assert(tcp_socket->ops->sendto(tcp_socket, "x", 1, MSG_NOSIGNAL,
 	    NULL, 0) == -EPIPE);
 
+	/* SO_SNDTIMEO commits a connect failure.  The cancelled generation is
+	 * removed from the wire state, so its late SYN-ACK cannot resurrect it. */
+	{
+		struct socket *timed;
+		struct timeval timeout = { .tv_sec = 0, .tv_usec = 10000 };
+		uint32_t old_sequence;
+		uint16_t old_port;
+		assert(socket_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &timed) == 0);
+		assert(socket_setsockopt_common(timed, SOL_SOCKET, SO_SNDTIMEO,
+		    &timeout, sizeof(timeout)) == 0);
+		current_thread = (struct thread *)(uintptr_t)1;
+		address.sin_port = net_htons(81);
+		address.sin_addr.s_addr = net_htonl(peer_ip);
+		assert(timed->ops->connect(timed, (struct sockaddr *)&address,
+		    sizeof(address), 0) == ETIMEDOUT);
+		current_thread = NULL;
+		assert(transmitted != NULL);
+		old_sequence = wire_get32(transmitted->data + 38);
+		old_port = wire_get16(transmitted->data + 34);
+		packet_buf_free(transmitted); transmitted = NULL;
+		assert(((struct tcp_socket *)timed)->state == TCP_CLOSED);
+		assert(((struct tcp_socket *)timed)->active_connect_generation == 0);
+		input_tcp(device, peer_mac, peer_ip, local_ip, 81, old_port,
+		    peer_sequence, old_sequence + 1U, 0x12, NULL);
+		assert(((struct tcp_socket *)timed)->state == TCP_CLOSED);
+		assert(transmitted == NULL);
+		socket_release(timed);
+	}
+
 	assert(socket_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &listener) == 0);
 	memset(&address, 0, sizeof(address)); address.sin_family = AF_INET;
 	address.sin_port = net_htons(8080);
@@ -330,14 +398,67 @@ int main(void)
 	assert(transmitted != NULL && (transmitted->data[47] & 0x12) == 0x12);
 	syn_sequence = wire_get32(transmitted->data + 38);
 	packet_buf_free(transmitted); transmitted = NULL;
+	/* A duplicate SYN reuses the half-open child and retransmits SYN-ACK. */
+	assert(((struct tcp_socket *)listener)->half_open_count == 1);
+	input_tcp(device, peer_mac, peer_ip, local_ip, 50000, 8080,
+	    0x55667788U, 0, 0x02, NULL);
+	assert(((struct tcp_socket *)listener)->half_open_count == 1);
+	assert(transmitted != NULL && (transmitted->data[47] & 0x12) == 0x12 &&
+	    wire_get32(transmitted->data + 38) == syn_sequence);
+	packet_buf_free(transmitted); transmitted = NULL;
 	input_tcp(device, peer_mac, peer_ip, local_ip, 50000, 8080,
 	    0x55667789U, syn_sequence + 1U, 0x10, NULL);
 	assert(listener->ops->accept(listener, &accepted, NULL, NULL,
 	    SOCKET_IO_NONBLOCK) == 0);
 	assert(((struct tcp_socket *)accepted)->state == TCP_ESTABLISHED);
-	socket_release(accepted);
 	if (transmitted != NULL) { packet_buf_free(transmitted); transmitted = NULL; }
 	socket_release(listener);
+	/* An accepted child no longer belongs to the listener and survives it. */
+	assert(((struct tcp_socket *)accepted)->state == TCP_ESTABLISHED);
+	socket_release(accepted);
+	if (transmitted != NULL) { packet_buf_free(transmitted); transmitted = NULL; }
+
+	/* A full backlog does not allocate another half-open child. */
+	assert(socket_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &listener) == 0);
+	memset(&address, 0, sizeof(address)); address.sin_family = AF_INET;
+	address.sin_port = net_htons(8082);
+	assert(listener->ops->bind(listener, (struct sockaddr *)&address,
+	    sizeof(address)) == 0);
+	assert(listener->ops->listen(listener, 1) == 0);
+	input_tcp(device, peer_mac, peer_ip, local_ip, 50001, 8082,
+	    0x1000U, 0, 0x02, NULL);
+	assert(((struct tcp_socket *)listener)->half_open_count == 1);
+	assert(transmitted != NULL);
+	packet_buf_free(transmitted); transmitted = NULL;
+	input_tcp(device, peer_mac, peer_ip, local_ip, 50002, 8082,
+	    0x2000U, 0, 0x02, NULL);
+	assert(((struct tcp_socket *)listener)->half_open_count == 1);
+	assert(transmitted == NULL);
+	socket_release(listener);
+
+	/* TCP permits a reusable wildcard/specific bind pair, but rejects an
+	 * ambiguous second listener on the overlapping local endpoint. */
+	{
+		struct socket *a, *b;
+		int reuse = 1;
+		assert(socket_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &a) == 0);
+		assert(socket_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &b) == 0);
+		assert(socket_setsockopt_common(a, SOL_SOCKET, SO_REUSEADDR,
+		    &reuse, sizeof(reuse)) == 0);
+		assert(socket_setsockopt_common(b, SOL_SOCKET, SO_REUSEADDR,
+		    &reuse, sizeof(reuse)) == 0);
+		memset(&address, 0, sizeof(address));
+		address.sin_family = AF_INET;
+		address.sin_port = net_htons(8081);
+		assert(a->ops->bind(a, (struct sockaddr *)&address,
+		    sizeof(address)) == 0);
+		address.sin_addr.s_addr = net_htonl(local_ip);
+		assert(b->ops->bind(b, (struct sockaddr *)&address,
+		    sizeof(address)) == 0);
+		assert(a->ops->listen(a, 1) == 0);
+		assert(b->ops->listen(b, 1) == EADDRINUSE);
+		socket_release(b); socket_release(a);
+	}
 
 	socket_release(tcp_socket); socket_release(udp_socket); socket_release(control);
 	if (transmitted != NULL) { packet_buf_free(transmitted); transmitted = NULL; }
