@@ -80,7 +80,7 @@ ARM64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c userla
 	libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
 ARM64_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
-	userland/sh/builtins.c
+	userland/sh/builtins.c userland/sh/lexer.c
 ARM64_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(ARM64_USER_RUNTIME_SOURCES))
 ARM64_USER_SH_OBJS := \

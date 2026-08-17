@@ -55,7 +55,7 @@ X68K_USER_RUNTIME_SOURCES := \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c libc/format.c libc/stdio.c
 X68K_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
-	userland/sh/builtins.c
+	userland/sh/builtins.c userland/sh/lexer.c
 X68K_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(X68K_USER_RUNTIME_SOURCES))
 X68K_USER_SH_OBJS := \

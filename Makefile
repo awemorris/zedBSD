@@ -529,7 +529,13 @@ $(BUILD)/tests/clock-rtc-host-test: tests/clock-rtc-host-test.c \
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc src/hal/x86/rtc.c $< -o $@
 
+$(BUILD)/tests/sh-lexer-host-test: tests/sh-lexer-host-test.c \
+	userland/sh/lexer.c userland/sh/lexer.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) userland/sh/lexer.c $< -o $@
+
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
+	$(BUILD)/tests/sh-lexer-host-test \
 	$(BUILD)/tests/blkdev-host-test \
 	$(BUILD)/tests/bufcache-host-test \
 	$(BUILD)/tests/checkpoint-host-test \

@@ -58,6 +58,18 @@ printf '%s\n' \
 	'/bin/touch /cmdmov' \
 	'/bin/truncate -s 4 /cmdemp' \
 	'/bin/stat /cmdemp' \
+	'set PATH /apps:/bin' \
+	'basename /test/SHELL_PATH_PASS' \
+	'echo "SHELL QUOTE PASS"' \
+	'true && echo SHELL_AND_PASS' \
+	'false || echo SHELL_OR_PASS' \
+	'false && echo SHELL_BAD_AND || true' \
+	'true || echo SHELL_BAD_OR' \
+	'echo ignored; echo SHELL_SEMI_PASS' \
+	'echo SHELL_PIPE_PASS | /bin/cat' \
+	'echo SHELL_REDIR_PASS > /redir' \
+	'echo SHELL_APPEND_PASS >> /redir' \
+	'/bin/cat < /redir' \
 	'echo USER_COMMANDS_PASS' \
 	'clear' \
 	'true' \
@@ -76,7 +88,10 @@ pcat)
 		-debugcon "file:$work/debug.log" -global isa-debugcon.iobase=0xe9 \
 		-drive "if=ide,index=0,media=disk,format=raw,file=$work/test.img" \
 		>/dev/null 2>&1 || test "$?" -eq 124
-	for marker in 'zedBSD shell builtin copy fixture' USER_COMMANDS_PASS \
+	for marker in 'zedBSD shell builtin copy fixture' SHELL_PATH_PASS \
+	    'SHELL QUOTE PASS' \
+	    SHELL_AND_PASS SHELL_OR_PASS SHELL_SEMI_PASS SHELL_PIPE_PASS \
+	    SHELL_REDIR_PASS SHELL_APPEND_PASS USER_COMMANDS_PASS \
 	    SH_BUILTINS_PASS; do
 		if ! grep -Fq "$marker" "$work/debug.log"; then
 			cat "$work/debug.log" >&2
@@ -84,6 +99,8 @@ pcat)
 			exit 1
 		fi
 	done
+	! grep -Fq SHELL_BAD_AND "$work/debug.log"
+	! grep -Fq SHELL_BAD_OR "$work/debug.log"
 	grep -Fq '/bin' "$work/debug.log"
 	grep -Fq 'type=regular' "$work/debug.log"
 	if grep -Fq 'command failed' "$work/debug.log"; then

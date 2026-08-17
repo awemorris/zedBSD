@@ -4,6 +4,7 @@
 #include <zedbsd/system.h>
 #include "userland/sh/applet.h"
 #include "userland/sh/builtins.h"
+#include "userland/sh/lexer.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -20,10 +21,12 @@
 #include <unistd.h>
 
 #define LINE_MAX 256
-#define ARG_MAX 20
+#define ARG_MAX 64
 #define SOURCE_MAX 8192
+#define PIPELINE_MAX 16
 
 static int command_background;
+static int command_subshell;
 static pid_t last_job;
 
 static int
@@ -53,7 +56,8 @@ spawn_wait(char *const argv[], unsigned flags, char *result, size_t capacity)
 		fprintf(stderr, "%s: %d\n", argv[0], errno);
 		return 0;
 	}
-	(void)setpgid(pid, pid);
+	if (!command_subshell)
+		(void)setpgid(pid, pid);
 	if (command_background) {
 		last_job = pid;
 		printf("[%d]\n", (int)pid);
@@ -61,7 +65,7 @@ spawn_wait(char *const argv[], unsigned flags, char *result, size_t capacity)
 	}
 	if ((flags & ZEDBSD_SPAWN_RESULT) != 0) {
 		pid_t shell_pgrp = getpgrp();
-		int terminal = isatty(0);
+		int terminal = !command_subshell && isatty(0);
 		if (terminal) (void)tcsetpgrp(0, pid);
 		if (zedbsd_wait_result(pid, &status, result, capacity) < 0) {
 			if (terminal) (void)tcsetpgrp(0, shell_pgrp);
@@ -69,6 +73,11 @@ spawn_wait(char *const argv[], unsigned flags, char *result, size_t capacity)
 			return 0;
 		}
 		if (terminal) (void)tcsetpgrp(0, shell_pgrp);
+	} else if (command_subshell) {
+		if (waitpid(pid, &status, 0) < 0) {
+			fprintf(stderr, "wait: %d\n", errno);
+			return 0;
+		}
 	} else if (!wait_foreground(pid, &status)) {
 		fprintf(stderr, "wait: %d\n", errno);
 		return 0;
@@ -91,32 +100,6 @@ read_line(char *buffer, size_t capacity)
 	    buffer[length - 1] == '\n')) length--;
 	buffer[length] = '\0';
 	return (int)length;
-}
-
-static int
-split(char *text, char **argv, int maximum)
-{
-	int argc = 0;
-	while (*text != '\0') {
-		while (*text == ' ' || *text == '\t')
-			text++;
-		if (*text == '\0' || *text == '#' || *text == ';')
-			break;
-		if (argc == maximum)
-			break;
-		argv[argc++] = text;
-		if (*text == '"') {
-			argv[argc - 1] = ++text;
-			while (*text != '\0' && *text != '"')
-				text++;
-		} else {
-			while (*text != '\0' && *text != ' ' && *text != '\t')
-				text++;
-		}
-		if (*text != '\0')
-			*text++ = '\0';
-	}
-	return argc;
 }
 
 static int command(char *);
@@ -342,33 +325,75 @@ is_elf(const char *path)
 }
 
 static int
+path_candidate(const char *path, size_t *position, const char *name,
+    const char *suffix, char *candidate, size_t capacity, int *last)
+{
+	size_t start = *position;
+	size_t length;
+	size_t name_length = strlen(name);
+	size_t suffix_length = strlen(suffix);
+	while (path[*position] != '\0' && path[*position] != ':')
+		(*position)++;
+	length = *position - start;
+	*last = path[*position] == '\0';
+	if (!*last)
+		(*position)++;
+	if (length == 0) {
+		if (2U + name_length + suffix_length > capacity)
+			return -1;
+		candidate[0] = '.';
+		candidate[1] = '/';
+		memcpy(candidate + 2, name, name_length);
+		memcpy(candidate + 2 + name_length, suffix, suffix_length + 1U);
+		return 1;
+	}
+	if (length + 1U + name_length + suffix_length + 1U > capacity)
+		return -1;
+	memcpy(candidate, path + start, length);
+	candidate[length] = '/';
+	memcpy(candidate + length + 1U, name, name_length);
+	memcpy(candidate + length + 1U + name_length, suffix,
+	    suffix_length + 1U);
+	return 1;
+}
+
+static int
+search_path(const char *name, const char *suffix, int elf,
+    char *candidate, size_t capacity)
+{
+	const char *path = getenv("PATH");
+	size_t position = 0;
+	if (path == NULL)
+		path = "/bin:/apps";
+	for (;;) {
+		int last;
+		int result = path_candidate(path, &position, name, suffix,
+		    candidate, capacity, &last);
+		if (result > 0 && (elf ? is_elf(candidate) :
+		    access(candidate, F_OK) == 0))
+			return 1;
+		if (last)
+			break;
+	}
+	return 0;
+}
+
+static int
 run_search_path(int argc, char **argv)
 {
-	static const char *const directories[] = { "/bin", "/apps" };
 	char candidate[256];
 	char *child[ARG_MAX + 1];
 	char *script[ARG_MAX + 1];
-	unsigned directory;
 	int i;
 
-	for (directory = 0; directory < sizeof(directories) /
-	    sizeof(directories[0]); directory++) {
-		snprintf(candidate, sizeof(candidate), "%s/%s",
-		    directories[directory], argv[0]);
-		if (!is_elf(candidate))
-			continue;
+	if (search_path(argv[0], "", 1, candidate, sizeof(candidate))) {
 		child[0] = candidate;
 		for (i = 1; i < argc; i++)
 			child[i] = argv[i];
 		child[argc] = NULL;
 		return run_external(child);
 	}
-	for (directory = 0; directory < sizeof(directories) /
-	    sizeof(directories[0]); directory++) {
-		snprintf(candidate, sizeof(candidate), "%s/%s.nct",
-		    directories[directory], argv[0]);
-		if (access(candidate, F_OK) != 0)
-			continue;
+	if (search_path(argv[0], ".nct", 0, candidate, sizeof(candidate))) {
 		script[0] = candidate;
 		for (i = 1; i < argc; i++)
 			script[i] = argv[i];
@@ -376,12 +401,7 @@ run_search_path(int argc, char **argv)
 		return run_noct(argc, script);
 	}
 	/* Compiled Noct applications remain executable by command name. */
-	for (directory = 0; directory < sizeof(directories) /
-	    sizeof(directories[0]); directory++) {
-		snprintf(candidate, sizeof(candidate), "%s/%s.nap",
-		    directories[directory], argv[0]);
-		if (access(candidate, F_OK) != 0)
-			continue;
+	if (search_path(argv[0], ".nap", 0, candidate, sizeof(candidate))) {
 		script[0] = candidate;
 		for (i = 1; i < argc; i++)
 			script[i] = argv[i];
@@ -392,15 +412,11 @@ run_search_path(int argc, char **argv)
 }
 
 static int
-command(char *text)
+command_argv(int argc, char **argv)
 {
-	char *argv[ARG_MAX];
-	int argc = split(text, argv, ARG_MAX);
 	int handled;
 	if (argc == 0)
 		return 1;
-	command_background = argc > 1 && !strcmp(argv[argc - 1], "&");
-	if (command_background) argv[--argc] = NULL;
 	if (!strcmp(argv[0], "jobs")) {
 		if (last_job > 0) printf("[%d] active or stopped\n", (int)last_job);
 		return 1;
@@ -492,6 +508,233 @@ command(char *text)
 	return run_search_path(argc, argv);
 }
 
+struct pipeline_command {
+	char *argv[ARG_MAX + 1];
+	int argc;
+	const char *input;
+	const char *output;
+	int append;
+};
+
+static int
+pipeline_child(struct pipeline_command *item)
+{
+	int descriptor;
+	if (item->input != NULL) {
+		descriptor = open(item->input, O_RDONLY);
+		if (descriptor < 0 || dup2(descriptor, STDIN_FILENO) < 0) {
+			fprintf(stderr, "%s: %s\n", item->input, strerror(errno));
+			if (descriptor >= 0) (void)close(descriptor);
+			return 0;
+		}
+		if (descriptor != STDIN_FILENO) (void)close(descriptor);
+	}
+	if (item->output != NULL) {
+		descriptor = open(item->output, O_WRONLY | O_CREAT |
+		    (item->append ? O_APPEND : O_TRUNC), 0666);
+		if (descriptor < 0 || dup2(descriptor, STDOUT_FILENO) < 0) {
+			fprintf(stderr, "%s: %s\n", item->output, strerror(errno));
+			if (descriptor >= 0) (void)close(descriptor);
+			return 0;
+		}
+		if (descriptor != STDOUT_FILENO) (void)close(descriptor);
+	}
+	command_subshell = 1;
+	command_background = 0;
+	return command_argv(item->argc, item->argv);
+}
+
+static int
+execute_pipeline(struct pipeline_command *items, int count, int background)
+{
+	pid_t children[PIPELINE_MAX];
+	pid_t group = 0;
+	pid_t shell_group = getpgrp();
+	int terminal = isatty(STDIN_FILENO);
+	int input = -1;
+	int index, created = 0;
+	int last_status = 0;
+
+	if (count == 1 && !background && items[0].input == NULL &&
+	    items[0].output == NULL) {
+		command_background = background;
+		return command_argv(items[0].argc, items[0].argv);
+	}
+	(void)fflush(NULL);
+	for (index = 0; index < count; index++) {
+		int descriptors[2] = { -1, -1 };
+		pid_t child;
+		if (index + 1 < count && pipe(descriptors) != 0)
+			goto failed;
+		child = fork();
+		if (child < 0) {
+			if (descriptors[0] >= 0) (void)close(descriptors[0]);
+			if (descriptors[1] >= 0) (void)close(descriptors[1]);
+			goto failed;
+		}
+		if (child == 0) {
+			(void)setpgid(0, group == 0 ? 0 : group);
+			if (input >= 0 && dup2(input, STDIN_FILENO) < 0)
+				_exit(126);
+			if (descriptors[1] >= 0 &&
+			    dup2(descriptors[1], STDOUT_FILENO) < 0)
+				_exit(126);
+			if (input >= 0) (void)close(input);
+			if (descriptors[0] >= 0) (void)close(descriptors[0]);
+			if (descriptors[1] >= 0) (void)close(descriptors[1]);
+			if (!pipeline_child(&items[index])) {
+				(void)fflush(NULL);
+				_exit(1);
+			}
+			(void)fflush(NULL);
+			_exit(0);
+		}
+		if (group == 0) group = child;
+		(void)setpgid(child, group);
+		children[created++] = child;
+		if (input >= 0) (void)close(input);
+		if (descriptors[1] >= 0) (void)close(descriptors[1]);
+		input = descriptors[0];
+	}
+	if (input >= 0) (void)close(input);
+	if (background) {
+		last_job = group;
+		printf("[%d]\n", (int)group);
+		return 1;
+	}
+	if (terminal) (void)tcsetpgrp(STDIN_FILENO, group);
+	for (index = 0; index < created; index++) {
+		int status = 0;
+		pid_t waited = waitpid(children[index], &status, WUNTRACED);
+		if (waited < 0) {
+			last_status = 1;
+			continue;
+		}
+		if (children[index] == children[created - 1])
+			last_status = status;
+		if (WIFSTOPPED(status)) {
+			last_job = group;
+			printf("[%d] stopped\n", (int)group);
+		}
+	}
+	if (terminal) (void)tcsetpgrp(STDIN_FILENO, shell_group);
+	return WIFEXITED(last_status) && WEXITSTATUS(last_status) == 0;
+failed:
+	if (input >= 0) (void)close(input);
+	while (created-- > 0)
+		(void)waitpid(children[created], NULL, 0);
+	fprintf(stderr, "sh: pipeline: %s\n", strerror(errno));
+	return 0;
+}
+
+static int
+parse_pipeline(const struct sh_token_list *list, size_t *position,
+    struct pipeline_command *items, int *item_count,
+    enum sh_token_type *following)
+{
+	int count = 1;
+	struct pipeline_command *item = &items[0];
+	memset(items, 0, PIPELINE_MAX * sizeof(*items));
+	for (;;) {
+		enum sh_token_type type = list->tokens[*position].type;
+		if (type == SH_TOKEN_WORD) {
+			if (item->argc == ARG_MAX) {
+				fprintf(stderr, "sh: too many arguments\n");
+				return 0;
+			}
+			item->argv[item->argc++] = list->tokens[(*position)++].text;
+			continue;
+		}
+		if (type == SH_TOKEN_INPUT || type == SH_TOKEN_OUTPUT ||
+		    type == SH_TOKEN_APPEND) {
+			const char *path;
+			(*position)++;
+			if (list->tokens[*position].type != SH_TOKEN_WORD) {
+				fprintf(stderr, "sh: redirection requires a path\n");
+				return 0;
+			}
+			path = list->tokens[(*position)++].text;
+			if (type == SH_TOKEN_INPUT) item->input = path;
+			else { item->output = path; item->append = type == SH_TOKEN_APPEND; }
+			continue;
+		}
+		if (item->argc == 0) {
+			fprintf(stderr, "sh: empty pipeline command\n");
+			return 0;
+		}
+		item->argv[item->argc] = NULL;
+		if (type != SH_TOKEN_PIPE) {
+			*following = type;
+			*item_count = count;
+			return 1;
+		}
+		if (count == PIPELINE_MAX) {
+			fprintf(stderr, "sh: pipeline is too long\n");
+			return 0;
+		}
+		(*position)++;
+		item = &items[count++];
+	}
+}
+
+static int
+command(char *text)
+{
+	struct sh_token_list list;
+	const char *error_text;
+	enum sh_token_type connector = SH_TOKEN_SEMI;
+	size_t index = 0;
+	int result = 1;
+	int any = 0;
+
+	if (!sh_lex(text, &list, &error_text)) {
+		fprintf(stderr, "sh: syntax error: %s\n", error_text);
+		return 0;
+	}
+	while (list.tokens[index].type != SH_TOKEN_END) {
+		struct pipeline_command items[PIPELINE_MAX];
+		enum sh_token_type next;
+		int item_count;
+		int execute;
+
+		if (!parse_pipeline(&list, &index, items, &item_count, &next)) {
+			result = 0;
+			goto done;
+		}
+		if (next != SH_TOKEN_END && next != SH_TOKEN_SEMI &&
+		    next != SH_TOKEN_AMP && next != SH_TOKEN_AND_IF &&
+		    next != SH_TOKEN_OR_IF) {
+			fprintf(stderr, "sh: invalid operator\n");
+			result = 0;
+			goto done;
+		}
+		execute = connector == SH_TOKEN_SEMI || connector == SH_TOKEN_AMP ||
+		    (connector == SH_TOKEN_AND_IF && result) ||
+		    (connector == SH_TOKEN_OR_IF && !result);
+		if (execute) {
+			result = execute_pipeline(items, item_count,
+			    next == SH_TOKEN_AMP);
+			any = 1;
+		}
+		connector = next;
+		if (next == SH_TOKEN_END)
+			break;
+		index++;
+		if (list.tokens[index].type == SH_TOKEN_END &&
+		    (next == SH_TOKEN_AND_IF || next == SH_TOKEN_OR_IF)) {
+			fprintf(stderr, "sh: syntax error after operator\n");
+			result = 0;
+			goto done;
+		}
+	}
+	if (!any)
+		result = 1;
+done:
+	command_background = 0;
+	sh_tokens_free(&list);
+	return result;
+}
+
 static void
 run_startup(void)
 {
@@ -528,6 +771,8 @@ int
 main(void)
 {
 	char line[LINE_MAX];
+	if (getenv("PATH") == NULL)
+		(void)setenv("PATH", "/bin:/apps", 0);
 	run_startup();
 	for (;;) {
 		char cwd[256];

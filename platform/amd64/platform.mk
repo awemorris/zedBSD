@@ -171,7 +171,8 @@ AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS) \
 AMD64_USER_NETTEST_OBJS := $(BUILD)/user64/userland/nettest/main.o
 AMD64_USER_SH_OBJS := $(BUILD)/user64/userland/sh/main.o \
 	$(BUILD)/user64/userland/sh/applet.o \
-	$(BUILD)/user64/userland/sh/builtins.o
+	$(BUILD)/user64/userland/sh/builtins.o \
+	$(BUILD)/user64/userland/sh/lexer.o
 AMD64_USER_ELF_CHECK := scripts/check-user-elf.py
 
 $(BUILD)/user64/%.o: %.c
