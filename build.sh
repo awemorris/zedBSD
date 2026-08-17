@@ -113,8 +113,22 @@ app)
 		fail "unknown platform: $platform_name"
 	fi
 	case "$command_name" in
-		vmunix|root|rootufs|clean)
+		vmunix|clean)
 			target="$command_name"
+			;;
+		root)
+			case "$platform_name" in
+				i386|amd64|pc98|rpi4) target=arch-image ;;
+				sun4u) target="build/sparcv9/ufs-root.img" ;;
+				x68k) fail "x68k does not yet provide a separate rootfs image" ;;
+			esac
+			;;
+		rootufs)
+			case "$platform_name" in
+				i386|amd64|pc98|rpi4) target=arch-image-ufs ;;
+				sun4u) target="build/sparcv9/ufs-root.img" ;;
+				x68k) fail "x68k does not yet provide a UFS root image" ;;
+			esac
 			;;
 		bootdisk)
 			target=hdd-image

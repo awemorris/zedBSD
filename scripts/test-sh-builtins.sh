@@ -19,11 +19,12 @@ trap cleanup EXIT
 offset=$((2048 * 512))
 
 case "$arch" in
-pcat|pc98) ;;
+pcat) build_platform=i386 ;;
+pc98) build_platform=pc98 ;;
 *) echo "unsupported platform: $arch" >&2; exit 2 ;;
 esac
 
-"$repo/build.sh" bios-hdd-image "$arch"
+"$repo/build.sh" bios-hdd-image "$build_platform"
 cp --reflink=auto "$build/bios-hdd-image.img" "$work/test.img"
 printf '%s\n' 'zedBSD shell builtin copy fixture' >"$work/source.txt"
 printf '%s\n' \
@@ -40,6 +41,24 @@ printf '%s\n' \
 	'cp ../copy.txt ../copy2.txt' \
 	'cp /source.txt /bin/overlay.txt' \
 	'stat /bin/overlay.txt' \
+	'/bin/basename /usr/bin/tool' \
+	'/bin/dirname /usr/bin/tool' \
+	'/bin/uname -a' \
+	'/bin/cp /source.txt /cmdcpy' \
+	'/bin/cp /source.txt /cmdemp' \
+	'/bin/cmp /source.txt /cmdcpy' \
+	'/bin/mv /cmdcpy /cmdmov' \
+	'/bin/head -n 1 /cmdmov' \
+	'/bin/tail -n 1 /cmdmov' \
+	'/bin/wc -l /cmdmov' \
+	'/bin/cksum /cmdmov' \
+	'/bin/df /' \
+	'/bin/id' \
+	'/bin/kill -l' \
+	'/bin/touch /cmdmov' \
+	'/bin/truncate -s 4 /cmdemp' \
+	'/bin/stat /cmdemp' \
+	'echo USER_COMMANDS_PASS' \
 	'clear' \
 	'true' \
 	'echo SH_BUILTINS_PASS' \
@@ -57,7 +76,8 @@ pcat)
 		-debugcon "file:$work/debug.log" -global isa-debugcon.iobase=0xe9 \
 		-drive "if=ide,index=0,media=disk,format=raw,file=$work/test.img" \
 		>/dev/null 2>&1 || test "$?" -eq 124
-	for marker in 'zedBSD shell builtin copy fixture' SH_BUILTINS_PASS; do
+	for marker in 'zedBSD shell builtin copy fixture' USER_COMMANDS_PASS \
+	    SH_BUILTINS_PASS; do
 		if ! grep -Fq "$marker" "$work/debug.log"; then
 			cat "$work/debug.log" >&2
 			echo "missing shell test marker: $marker" >&2
@@ -157,6 +177,13 @@ for name in copy.txt copy2.txt; do
 done
 mcopy -i "$work/test.img@@$offset" ::/touch.txt "$work/touch.txt"
 test ! -s "$work/touch.txt"
+
+mcopy -i "$work/test.img@@$offset" ::/cmdmov \
+	"$work/command-moved.txt"
+cmp "$work/source.txt" "$work/command-moved.txt"
+mcopy -i "$work/test.img@@$offset" ::/cmdemp \
+	"$work/command-empty.txt"
+test "$(stat -c %s "$work/command-empty.txt")" -eq 4
 
 # /bin is a direct overlay: the write must persist inside the selected inner
 # FAT image and must never leak into the outer lower /bin directory.

@@ -250,6 +250,9 @@ $(BUILD)/bootloader/payload32.elf: $(BUILD)/bootloader/payload32.o \
 bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin
 
+USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink truncate chmod chown chgrp mkfifo stat uname df tty sleep head tail wc tee cmp cksum strings id kill
+USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
+
 I386_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/i386.img
 I386_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/noct \
 	$(BUILD)/bin/nettest $(BUILD)/bin/ping $(BUILD)/bin/ifconfig \
@@ -278,6 +281,8 @@ I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /lib/verstest.so=$(BUILD)/dynamic/verstest.so \
 	--file /lib/versuse.so=$(BUILD)/dynamic/versuse.so \
 	--file /bin/dyntest=$(BUILD)/dynamic/dyntest
+I386_ARCH_INPUTS += $(USER_BASIC_TARGETS)
+I386_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(I386_ARCH_UFS_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
@@ -552,6 +557,29 @@ $(foreach command,$(USER_NET_COMMANDS),\
 	$(eval $(call PC98_USER_NET_COMMAND,$(command))))
 network-tools: $(USER_NET_COMMAND_TARGETS)
 .PHONY: network-tools
+
+USER_BASIC_COMMON_OBJ := $(BUILD)/userland/common/command.o
+USER_BASIC_COMMAND_OBJS := $(addsuffix /main.o, \
+	$(addprefix $(BUILD)/userland/,$(USER_BASIC_COMMANDS)))
+$(USER_BASIC_COMMON_OBJ) $(USER_BASIC_COMMAND_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(USER_BASIC_COMMON_OBJ) $(USER_BASIC_COMMAND_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
+
+define PC98_USER_BASIC_COMMAND
+$(BUILD)/bin/$(1): $(USER_LIBC_OBJS) $(USER_BASIC_COMMON_OBJ) \
+	$(BUILD)/userland/$(1)/main.o $(ZEDBSD_SOFTFLOAT_OBJECTS) \
+	$(PC98)/noct-user.ld $(USER_ELF_CHECK)
+	@mkdir -p $$(dir $$@)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
+		$(USER_LIBC_OBJS) $(USER_BASIC_COMMON_OBJ) \
+		$(BUILD)/userland/$(1)/main.o $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
+	@test -z "$$$$($(NOCT_NM) -u $$@)" || { $(NOCT_NM) -u $$@; exit 1; }
+	$(PYTHON) $(USER_ELF_CHECK) $$@
+endef
+$(foreach command,$(USER_BASIC_COMMANDS),\
+	$(eval $(call PC98_USER_BASIC_COMMAND,$(command))))
+basic-tools: $(USER_BASIC_TARGETS)
+.PHONY: basic-tools
 
 # ELF32 runtime linker and shared libc.  PC-98 and PC/AT intentionally use
 # the same i386 user ABI; only their HAL and boot paths differ.

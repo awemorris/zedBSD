@@ -218,6 +218,30 @@ $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
 
+USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink truncate chmod chown chgrp mkfifo stat uname df tty sleep head tail wc tee cmp cksum strings id kill
+USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
+SPARCV9_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/common/command.o
+
+define SPARCV9_USER_BASIC_COMMAND
+$(BUILD)/bin/$(1): $(BUILD)/user/userland/crt0-sparcv9.o \
+	$(SPARCV9_USER_RUNTIME_OBJS) $(SPARCV9_USER_BASIC_COMMON_OBJ) \
+	$(BUILD)/user/userland/$(1)/main.o $(SPARCV9_PLATFORM)/user.ld \
+	scripts/check-user-elf.py
+	@mkdir -p $$(dir $$@)
+	$(SPARCV9_CC) $(SPARCV9_USER_CFLAGS) -nostdlib -static \
+		-Wl,--gc-sections -Wl,-z,max-page-size=8192 \
+		-Wl,-T,$(SPARCV9_PLATFORM)/user.ld \
+		$(BUILD)/user/userland/crt0-sparcv9.o \
+		$(SPARCV9_USER_RUNTIME_OBJS) $(SPARCV9_USER_BASIC_COMMON_OBJ) \
+		$(BUILD)/user/userland/$(1)/main.o -lgcc -o $$@
+	@test -z "$$$$($(SPARCV9_NM) -u $$@)" || { $(SPARCV9_NM) -u $$@; exit 1; }
+	$(PYTHON) scripts/check-user-elf.py --machine sparcv9 $$@
+endef
+$(foreach command,$(USER_BASIC_COMMANDS),\
+	$(eval $(call SPARCV9_USER_BASIC_COMMAND,$(command))))
+basic-tools: $(USER_BASIC_TARGETS)
+.PHONY: basic-tools
+
 $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-sparcv9.o \
 	$(SPARCV9_USER_RUNTIME_OBJS) \
 	$(BUILD)/user/userland/tests/syscall-smoke.o \

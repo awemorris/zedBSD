@@ -293,6 +293,28 @@ $(foreach command,$(USER_NET_COMMANDS),\
 network-tools: $(USER_NET_COMMAND_TARGETS)
 .PHONY: network-tools
 
+USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink truncate chmod chown chgrp mkfifo stat uname df tty sleep head tail wc tee cmp cksum strings id kill
+USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
+AMD64_USER_BASIC_COMMON_OBJ := $(BUILD)/user64/userland/common/command.o
+
+define AMD64_USER_BASIC_COMMAND
+$(BUILD)/bin/$(1): $(AMD64_USER_LIBC_OBJS) \
+	$(AMD64_USER_BASIC_COMMON_OBJ) $(BUILD)/user64/userland/$(1)/main.o \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	@mkdir -p $$(dir $$@)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+		$(AMD64_USER_BASIC_COMMON_OBJ) \
+		$(BUILD)/user64/userland/$(1)/main.o -o $$@
+	@test -z "$$$$(nm -u $$@)" || { nm -u $$@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
+endef
+$(foreach command,$(USER_BASIC_COMMANDS),\
+	$(eval $(call AMD64_USER_BASIC_COMMAND,$(command))))
+basic-tools: $(USER_BASIC_TARGETS)
+.PHONY: basic-tools
+
 # ELF64 runtime linker and shared libc.
 DYNAMIC_DIR := $(BUILD)/dynamic
 DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Iinclude/uapi -Ilibc/include \
@@ -477,6 +499,8 @@ AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /lib/verstest.so=$(DYNAMIC_DIR)/verstest.so \
 	--file /lib/versuse.so=$(DYNAMIC_DIR)/versuse.so \
 	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
+AMD64_ARCH_INPUTS += $(USER_BASIC_TARGETS)
+AMD64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AMD64_ARCH_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
 AMD64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/amd64.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_ARCH_UFS_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))

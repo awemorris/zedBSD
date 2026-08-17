@@ -13,6 +13,10 @@
 #define W_OK 2
 #define R_OK 4
 
+#define STDIN_FILENO 0
+#define STDOUT_FILENO 1
+#define STDERR_FILENO 2
+
 #define _SC_PAGE_SIZE 1
 #define _SC_PAGESIZE _SC_PAGE_SIZE
 #define _SC_OPEN_MAX 2

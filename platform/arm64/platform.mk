@@ -179,6 +179,29 @@ $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
 
+USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink truncate chmod chown chgrp mkfifo stat uname df tty sleep head tail wc tee cmp cksum strings id kill
+USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
+ARM64_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/common/command.o
+
+define ARM64_USER_BASIC_COMMAND
+$(BUILD)/bin/$(1): $(BUILD)/user/userland/crt0-aarch64.o \
+	$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_BASIC_COMMON_OBJ) \
+	$(BUILD)/user/userland/$(1)/main.o $(ARM64_PLATFORM)/user.ld \
+	scripts/check-user-elf.py
+	@mkdir -p $$(dir $$@)
+	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
+		$(BUILD)/user/userland/crt0-aarch64.o $(ARM64_USER_RUNTIME_OBJS) \
+		$(ARM64_USER_BASIC_COMMON_OBJ) \
+		$(BUILD)/user/userland/$(1)/main.o -o $$@
+	@test -z "$$$$($(ARM64_NM) -u $$@)" || { $(ARM64_NM) -u $$@; exit 1; }
+	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $$@
+endef
+$(foreach command,$(USER_BASIC_COMMANDS),\
+	$(eval $(call ARM64_USER_BASIC_COMMAND,$(command))))
+basic-tools: $(USER_BASIC_TARGETS)
+.PHONY: basic-tools
+
 $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-aarch64.o \
 	$(ARM64_USER_RUNTIME_OBJS) \
 	$(BUILD)/user/userland/tests/syscall-smoke.o \
@@ -364,6 +387,8 @@ AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /lib/verstest.so=$(DYNAMIC_DIR)/verstest.so \
 	--file /lib/versuse.so=$(DYNAMIC_DIR)/versuse.so \
 	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
+AARCH64_ARCH_INPUTS += $(USER_BASIC_TARGETS)
+AARCH64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AARCH64_ARCH_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
 AARCH64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AARCH64_ARCH_UFS_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))

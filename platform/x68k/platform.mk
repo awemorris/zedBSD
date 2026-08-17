@@ -258,6 +258,28 @@ $(BUILD)/bin/sh: $(X68K_USER_OBJS) $(X68K_PLATFORM)/user.ld \
 		exit 1; \
 	fi
 
+USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink truncate chmod chown chgrp mkfifo stat uname df tty sleep head tail wc tee cmp cksum strings id kill
+USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
+X68K_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/common/command.o
+
+define X68K_USER_BASIC_COMMAND
+$(BUILD)/bin/$(1): $(X68K_CRT0_OBJ) $(X68K_USER_RUNTIME_OBJS) \
+	$(X68K_USER_BASIC_COMMON_OBJ) $(BUILD)/user/userland/$(1)/main.o \
+	$(X68K_PLATFORM)/user.ld scripts/check-user-elf.py
+	@mkdir -p $$(dir $$@)
+	$(M68K_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-z stack-size=0x100000 -T $(X68K_PLATFORM)/user.ld \
+		$(X68K_CRT0_OBJ) $(X68K_USER_RUNTIME_OBJS) \
+		$(X68K_USER_BASIC_COMMON_OBJ) \
+		$(BUILD)/user/userland/$(1)/main.o -o $$@
+	@test -z "$$$$($(M68K_NM) -u $$@)" || { $(M68K_NM) -u $$@; exit 1; }
+	$(PYTHON) scripts/check-user-elf.py --machine m68k $$@
+endef
+$(foreach command,$(USER_BASIC_COMMANDS),\
+	$(eval $(call X68K_USER_BASIC_COMMAND,$(command))))
+basic-tools: $(USER_BASIC_TARGETS)
+.PHONY: basic-tools
+
 $(BUILD)/boot/x68k/%.o: boot/x68k/%.S boot/x68k/boot-layout.h
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_CPPFLAGS) -m68030 -msoft-float -ffreestanding \
