@@ -48,3 +48,10 @@ rpi4_boot_set_framebuffer(uint64 phys,uint64 size,uint32 width,uint32 height,
 const struct rpi4_fdt_info *rpi4_boot_info(void) { return &boot_info; }
 uintptr_t rpi4_boot_fdt_phys(void) { return boot_fdt; }
 const void *rpi4_kernel_handoff(void){return &kernel_handoff;}
+
+void *
+hal_get_arch_handoff(const char *name)
+{
+	(void)name;
+	return NULL;
+}

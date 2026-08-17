@@ -1,18 +1,27 @@
 #!/usr/bin/env bash
-# zedBSD build driver: ./build.sh <command> <platform> [make options...]
+# zedBSD build driver
 # Copyright (C) 2026 Awe Morris
 # SPDX-License-Identifier: Zlib
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")" && pwd)"
 
-available_platforms()
+fail()
 {
-	local mk
-	for mk in "$repo"/platform/*/platform.mk; do
-		test -f "$mk" || continue
-		basename "$(dirname "$mk")"
-	done
+	echo "$*" >&2
+	exit 2
+}
+
+platform_arch()
+{
+	case "$1" in
+		i386)  echo pcat ;;
+		amd64) echo amd64 ;;
+		pc98)  echo pc98 ;;
+		rpi4)  echo arm64 ;;
+		sun4u) echo sparcv9 ;;
+		*) return 1 ;;
+	esac
 }
 
 usage()
@@ -21,87 +30,28 @@ usage()
 usage: $0 <command> <platform> [make options or additional targets...]
        $0 help [platform]
 
-Platform roles:
-  pcat          i386 PC/AT BIOS kernel and image
-  pc98          i386 PC-98 BIOS kernel and image
-  amd64         amd64 PC/AT BIOS kernel and image
-  arm64         arm64 Raspberry Pi 4 kernel and SD image
-  sparcv9       SPARC V9 sun4u kernel and OpenBoot disk image
-  unified       PC-98/PC-AT BIOS + amd64 UEFI + Raspberry Pi 4 image
-
 Common commands:
-  all             Build the platform's normal artifacts
-  hdd-image       Build its installable HDD image
-  check           Build and run its host tests
-  messages        Generate the kernel message header
-  arch-image PROFILE  Build i386, amd64, or aarch64 inner FAT16 userland
-  arch-images all     Build all three inner FAT16 userland images
-  arch-image-ufs PROFILE Build an architecture-specific UFS1 userland image
-  arch-images-ufs all Build all three inner UFS1 userland images
-  ufs-root-image    Build a FAT16-boot/UFS1-root image
-
-Native kernel commands (pcat, pc98, amd64, arm64, sparcv9):
-  vmunix          Build the zedBSD kernel
-  SH              Build /bin/sh
-  NOCT.ELF        Build the Noct user program
-  network-tools   Build ping, ifconfig, route, dhcpcd, and nslookup
-  bios-bootloader Build the native BIOS Stage 1/2 loader
-  bios-hdd-image  Build the native MBR/FAT16 image
-
-Unified and special image commands:
-  unified-bootloader Build the PC-98/PC/AT BIOS dispatcher and loaders
-  unified-hdd-image  Build the BIOS/UEFI/Pi 4 multi-platform image
-  uefi-loader        Build EFI/BOOT/BOOTX64.EFI
-  legacy-pc98-hdd-image Build the legacy NEC98-partition image
-  grub-iso           Build the PC/AT GRUB test ISO
-
-QEMU and image checks:
-  hdd-boot-qemu-test         Test a native HDD boot
-  bios-loader-host-check     Verify a native BIOS image
-  bios-loader-qemu-test      Test native BIOS ELF payloads
-  unified-loader-host-check  Verify the unified disk layout and files
-  unified-loader-qemu-test   Test its three BIOS loader paths
-  uefi-loader-host-check     Verify the PE32+ UEFI application
-  uefi-entry-qemu-test       Test OVMF, amd64 HAL, IDE root, and userland
-  arm64-image-check          Verify the AArch64 ELF and Raspberry Pi Image
-  rpi4-entry-qemu-test       Test EL1/high-VMA/UART entry on QEMU raspi4b
-  rpi4-qemu-test             Test the Raspberry Pi 4 kernel and SD root
-  sparcv9-image-check        Verify the SPARC V9 ELF and disk layout
-  sparcv9-entry-qemu-test    Test sun4u entry, traps, and MMU
-  sparcv9-qemu-test          Test the sun4u disk root and userland
-  sparcv9-ufs-qemu-test      Test the sun4u UFS1 root and userland
-  sh-builtins-qemu-test      Test /bin/sh filesystem builtins in QEMU
-  pcat-beui-qemu-test        Test PC/AT Cirrus and VGA BeUI backends
-  network-qemu-test          Test the platform NIC with ARP, ICMP, UDP, and TCP
+  vmunix    [platform]         Build a kernel
+  root      [platform]         Build a rootfs tree
+  rootufs   [platform]         Build a rootfs UFS image
+  bootdisk  [platform]         Build a boot disk image
+  unified                      Build a unified boot disk image
+  loader    [platform]         Build a boot loader
+  app       [name] [platform]  Build a specific userland program
+  test      [platform]         Build and run its host tests
 
 Maintenance:
   clean           Remove build/<platform>
   distclean       Remove the complete build directory
   help            Show this help
 
-Examples:
-  $0 all pcat
-  $0 all pc98
-  $0 all amd64
-  $0 all arm64
-  $0 all sparcv9
-  $0 hdd-image unified
-  $0 arch-image i386
-  $0 arch-images all
-  $0 check amd64
-  $0 unified-loader-qemu-test unified
-  $0 uefi-entry-qemu-test unified
-  $0 rpi4-entry-qemu-test arm64
-
-Any Make target may be used as <command>.
-
-Additional targets and Make variable assignments may follow the platform:
-  $0 all pc98 check
-  $0 messages pc98 PYTHON=python3
-
 Available platforms:
+  i386            PC/AT i386
+  amd64           PC/AT x86_64
+  pc98            NEC PC-9800
+  rpi4            Raspberry Pi 4 Arm64
+  sun4u           sun4u SPARC V9 64-bit
 EOF
-	available_platforms | sed 's/^/  /'
 }
 
 if test "$#" -eq 0; then
@@ -112,66 +62,85 @@ fi
 command_name="$1"
 shift
 
-if test "$command_name" = help || test "$command_name" = -h || \
-   test "$command_name" = --help; then
+case "$command_name" in
+help|-h|--help)
 	if test "$#" -gt 1; then
-		echo "help accepts at most one platform" >&2
-		exit 2
+		fail "help accepts at most one platform"
 	fi
-	if test "$#" -eq 1 && ! test -f "$repo/platform/$1/platform.mk"; then
-		echo "unknown platform: $1" >&2
-		usage >&2
-		exit 2
+	if test "$#" -eq 1 && ! platform_arch "$1" >/dev/null; then
+		fail "unknown platform: $1"
 	fi
 	usage
 	exit 0
-fi
-
-if test "$command_name" = arch-image || test "$command_name" = arch-image-ufs; then
-	if test "$#" -ne 1; then
-		echo "usage: $0 $command_name i386|amd64|aarch64" >&2
-		exit 2
+	;;
+distclean)
+	if test "$#" -ne 0; then
+		fail "usage: $0 distclean"
 	fi
-	case "$1" in
-		i386) platform=pcat ;;
-		amd64) platform=amd64 ;;
-		aarch64) platform=arm64 ;;
-		*) echo "unknown architecture image profile: $1" >&2; exit 2 ;;
-	esac
 	jobs="${ZEDBSD_JOBS:-$(nproc)}"
-	make -C "$repo" "ARCH=$platform" "-j$jobs" messages
-	exec make -C "$repo" "ARCH=$platform" "-j$jobs" "$command_name"
-fi
-
-if test "$command_name" = arch-images || test "$command_name" = arch-images-ufs; then
-	if test "$#" -ne 1 || test "$1" != all; then
-		echo "usage: $0 $command_name all" >&2
-		exit 2
+	exec make -C "$repo" ARCH=pc98 "-j$jobs" distclean
+	;;
+unified)
+	platform=unified
+	target=hdd-image
+	;;
+app)
+	if test "$#" -lt 2; then
+		fail "usage: $0 app <name> <platform> [make options...]"
 	fi
-	for profile in i386 amd64 aarch64; do
-		if test "$command_name" = arch-images-ufs; then
-			"$0" arch-image-ufs "$profile"
-		else
-			"$0" arch-image "$profile"
-		fi
-	done
-	exit 0
-fi
-
-if test "$#" -lt 1; then
-	echo "missing platform for command '$command_name'" >&2
-	usage >&2
-	exit 2
-fi
-
-platform="$1"
-shift
-
-if ! test -f "$repo/platform/$platform/platform.mk"; then
-	echo "unknown platform: $platform" >&2
-	usage >&2
-	exit 2
-fi
+	app_name="$1"
+	platform_name="$2"
+	shift 2
+	case "$app_name" in
+		""|*[!a-zA-Z0-9._-]*)
+			fail "invalid app name: $app_name"
+			;;
+	esac
+	if ! platform="$(platform_arch "$platform_name")"; then
+		fail "unknown platform: $platform_name"
+	fi
+	target="build/$platform/bin/$app_name"
+	;;
+*)
+	if test "$#" -lt 1; then
+		fail "missing platform for command '$command_name'"
+	fi
+	platform_name="$1"
+	shift
+	if ! platform="$(platform_arch "$platform_name")"; then
+		fail "unknown platform: $platform_name"
+	fi
+	case "$command_name" in
+		vmunix|root|rootufs|clean)
+			target="$command_name"
+			;;
+		bootdisk)
+			target=hdd-image
+			;;
+		test)
+			target=check
+			;;
+		loader)
+			case "$platform_name" in
+				i386|amd64|pc98)
+					target=bios-bootloader
+					;;
+				sun4u)
+					target=sparcv9-bootloader
+					;;
+				rpi4)
+					fail "rpi4 has no zedBSD boot loader"
+					;;
+			esac
+			;;
+		*)
+			# Maintenance and diagnostic Make targets remain
+			# available even when they are not listed by help.
+			target="$command_name"
+			;;
+	esac
+	;;
+esac
 
 jobs="${ZEDBSD_JOBS:-$(nproc)}"
 make_command=(make -C "$repo" "ARCH=$platform" "-j$jobs")
@@ -180,9 +149,9 @@ make_command=(make -C "$repo" "ARCH=$platform" "-j$jobs")
 # header.  Generate it in a separate Make process: multiple goals passed to a
 # parallel Make invocation are not ordered, so compilation could otherwise
 # start before messages.h exists.
-case "$command_name" in
-	clean|distclean)
-		exec "${make_command[@]}" "$command_name" "$@"
+case "$target" in
+clean)
+	exec "${make_command[@]}" clean "$@"
 		;;
 	messages)
 		exec "${make_command[@]}" messages "$@"
@@ -195,6 +164,6 @@ case "$command_name" in
 			esac
 		done
 		"${make_command[@]}" messages "${message_options[@]}"
-		exec "${make_command[@]}" "$command_name" "$@"
+	exec "${make_command[@]}" "$target" "$@"
 		;;
 esac

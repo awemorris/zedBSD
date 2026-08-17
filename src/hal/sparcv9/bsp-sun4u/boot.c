@@ -7,3 +7,10 @@ void sun4u_boot_init(const struct zedbsd_sun4u_handoff *handoff)
 { hal_memcpy(&boot_handoff,handoff,sizeof(boot_handoff)); }
 const struct zedbsd_sun4u_handoff *sun4u_boot_handoff(void)
 { return &boot_handoff; }
+
+void *
+hal_get_arch_handoff(const char *name)
+{
+	(void)name;
+	return NULL;
+}

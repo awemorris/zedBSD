@@ -1,6 +1,5 @@
 /* PC/AT ZBL6 handoff and memory discovery for amd64. */
 #include <hal/hal.h>
-#include <hal/pcat/boot-font.h>
 #include <kern/boot.h>
 #include "bootloader/include/amd64-handoff.h"
 #include "../bsp.h"
@@ -8,6 +7,8 @@
 #define VGA_FONT_HANDOFF 0x00007000U
 #define VGA_FONT_MAGIC   0x3854465aU
 #define MAX_BOOT_MEMORY_RANGES 256U
+#define PCAT_BOOT_FONT_GLYPHS 128U
+#define PCAT_BOOT_FONT_HEIGHT 16U
 
 struct vga_font_handoff {
 	uint32_t magic;
@@ -15,7 +16,7 @@ struct vga_font_handoff {
 	uint16_t height;
 	uint16_t glyphs;
 	uint16_t reserved[3];
-	uint8_t data[BSP_PCAT_ASCII_GLYPHS][BSP_PCAT_GLYPH_HEIGHT];
+	uint8_t data[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 } __attribute__((packed));
 
 static struct zbl6_handoff boot_info;
@@ -24,8 +25,20 @@ static struct zbl6_memory_range boot_memory_range[MAX_BOOT_MEMORY_RANGES];
 static uint32 boot_memory_range_count;
 static struct zedbsd_handoff kernel_handoff;
 static uint64 total_memory;
-static uint8_t boot_font[BSP_PCAT_ASCII_GLYPHS][BSP_PCAT_GLYPH_HEIGHT];
+static uint8_t boot_font[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 static int boot_font_valid;
+
+static int
+handoff_name_is(const char *name, const char *expected)
+{
+	if (name == NULL)
+		return 0;
+	while (*name != '\0' && *name == *expected) {
+		name++;
+		expected++;
+	}
+	return *name == *expected;
+}
 
 void
 bsp_boot_init(const void *raw_boot_info)
@@ -117,8 +130,8 @@ bsp_boot_init(const void *raw_boot_info)
 	if (total_memory < 0x00400000ULL)
 		HAL_FATAL("too little amd64 memory");
 	boot_font_valid = font->magic == VGA_FONT_MAGIC && font->version == 1 &&
-	    font->height == BSP_PCAT_GLYPH_HEIGHT &&
-	    font->glyphs == BSP_PCAT_ASCII_GLYPHS;
+	    font->height == PCAT_BOOT_FONT_HEIGHT &&
+	    font->glyphs == PCAT_BOOT_FONT_GLYPHS;
 	if (boot_font_valid)
 		hal_memcpy(boot_font, font->data, sizeof(boot_font));
 
@@ -139,14 +152,12 @@ bsp_boot_init(const void *raw_boot_info)
 	}
 }
 
-int
-bsp_pcat_get_boot_font(
-	uint8_t font[BSP_PCAT_ASCII_GLYPHS][BSP_PCAT_GLYPH_HEIGHT])
+void *
+hal_get_arch_handoff(const char *name)
 {
-	if (!boot_font_valid || font == NULL)
-		return 0;
-	hal_memcpy(font, boot_font, sizeof(boot_font));
-	return 1;
+	if (!boot_font_valid || !handoff_name_is(name, "pcat.boot-font"))
+		return NULL;
+	return boot_font;
 }
 
 uint64 bsp_mem_probe(void) { return total_memory; }

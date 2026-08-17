@@ -1,7 +1,6 @@
 /* PC/AT VGA 8x16 ASCII font preservation.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/pcat/font.h"
-#include <hal/pcat/boot-font.h>
 
 #include <hal/hal.h>
 #include <string.h>
@@ -88,9 +87,13 @@ static void capture_plane2(void)
 
 void pcat_font_init(void)
 {
+	const uint8_t (*boot_font)[GLYPH_HEIGHT];
+
 	if (font_valid)
 		return;
-	if (bsp_pcat_get_boot_font(ascii_font)) {
+	boot_font = hal_get_arch_handoff("pcat.boot-font");
+	if (boot_font != NULL) {
+		memcpy(ascii_font, boot_font, sizeof(ascii_font));
 		font_valid = 1;
 		hal_printf("graphics: BIOS 8x16 ASCII font handoff accepted\n");
 		return;

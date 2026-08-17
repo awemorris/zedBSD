@@ -5,10 +5,11 @@
 #include "../bsp.h"
 #include "../multiboot.h"
 #include "../i386.h"
-#include "boot-font.h"
 
 #define VGA_FONT_HANDOFF 0x00007000U
 #define VGA_FONT_MAGIC 0x3854465aU
+#define PCAT_BOOT_FONT_GLYPHS 128U
+#define PCAT_BOOT_FONT_HEIGHT 16U
 
 struct vga_font_handoff {
 	uint32_t magic;
@@ -16,7 +17,7 @@ struct vga_font_handoff {
 	uint16_t height;
 	uint16_t glyphs;
 	uint16_t reserved[3];
-	uint8_t data[BSP_PCAT_ASCII_GLYPHS][BSP_PCAT_GLYPH_HEIGHT];
+	uint8_t data[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 } __attribute__((packed));
 
 static const struct multiboot_info *mbi;
@@ -26,8 +27,20 @@ static uint32_t total_memory;
 static uint8_t root_bios_id;
 static uint8_t root_partition;
 static int boot_info_valid;
-static uint8_t boot_font[BSP_PCAT_ASCII_GLYPHS][BSP_PCAT_GLYPH_HEIGHT];
+static uint8_t boot_font[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 static int boot_font_valid;
+
+static int
+handoff_name_is(const char *name, const char *expected)
+{
+	if (name == NULL)
+		return 0;
+	while (*name != '\0' && *name == *expected) {
+		name++;
+		expected++;
+	}
+	return *name == *expected;
+}
 
 static int
 hex_digit(char c)
@@ -99,8 +112,8 @@ bsp_boot_init(const void *raw_boot_info)
 	uint32_t upper;
 
 	boot_font_valid = font->magic == VGA_FONT_MAGIC && font->version == 1 &&
-		font->height == BSP_PCAT_GLYPH_HEIGHT &&
-		font->glyphs == BSP_PCAT_ASCII_GLYPHS;
+		font->height == PCAT_BOOT_FONT_HEIGHT &&
+		font->glyphs == PCAT_BOOT_FONT_GLYPHS;
 	if (boot_font_valid)
 		hal_memcpy(boot_font, font->data, sizeof(boot_font));
 	mbi = raw_boot_info;
@@ -123,14 +136,12 @@ bsp_boot_init(const void *raw_boot_info)
 		parse_command_line((const char *)(uintptr_t)mbi->cmdline);
 }
 
-int
-bsp_pcat_get_boot_font(
-	uint8_t font[BSP_PCAT_ASCII_GLYPHS][BSP_PCAT_GLYPH_HEIGHT])
+void *
+hal_get_arch_handoff(const char *name)
 {
-	if (!boot_font_valid || font == NULL)
-		return 0;
-	hal_memcpy(font, boot_font, sizeof(boot_font));
-	return 1;
+	if (!boot_font_valid || !handoff_name_is(name, "pcat.boot-font"))
+		return NULL;
+	return boot_font;
 }
 
 uint32_t
