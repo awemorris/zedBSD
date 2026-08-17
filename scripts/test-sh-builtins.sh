@@ -60,6 +60,13 @@ printf '%s\n' \
 	'/bin/stat /cmdemp' \
 	'set PATH /apps:/bin' \
 	'basename /test/SHELL_PATH_PASS' \
+	'set SHVAR SHELL_VAR_PASS' \
+	'echo "$SHVAR"' \
+	'echo ${SHVAR}' \
+	'false; echo SHELL_STATUS_$?' \
+	'set OUT /varexp' \
+	'echo SHELL_EXPAND_REDIR > "$OUT"' \
+	'/bin/cat "$OUT"' \
 	'echo "SHELL QUOTE PASS"' \
 	'true && echo SHELL_AND_PASS' \
 	'false || echo SHELL_OR_PASS' \
@@ -89,6 +96,7 @@ pcat)
 		-drive "if=ide,index=0,media=disk,format=raw,file=$work/test.img" \
 		>/dev/null 2>&1 || test "$?" -eq 124
 	for marker in 'zedBSD shell builtin copy fixture' SHELL_PATH_PASS \
+	    SHELL_VAR_PASS SHELL_STATUS_1 SHELL_EXPAND_REDIR \
 	    'SHELL QUOTE PASS' \
 	    SHELL_AND_PASS SHELL_OR_PASS SHELL_SEMI_PASS SHELL_PIPE_PASS \
 	    SHELL_REDIR_PASS SHELL_APPEND_PASS USER_COMMANDS_PASS \

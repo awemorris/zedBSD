@@ -453,7 +453,8 @@ $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
 USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o \
-	$(BUILD)/userland/sh/builtins.o $(BUILD)/userland/sh/lexer.o
+	$(BUILD)/userland/sh/builtins.o $(BUILD)/userland/sh/lexer.o \
+	$(BUILD)/userland/sh/expand.o
 $(USER_SH_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_SH_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 

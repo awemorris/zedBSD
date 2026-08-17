@@ -17,9 +17,18 @@ enum sh_token_type {
 	SH_TOKEN_END
 };
 
+enum sh_quote_type {
+	SH_QUOTE_UNQUOTED,
+	SH_QUOTE_SINGLE,
+	SH_QUOTE_DOUBLE,
+	SH_QUOTE_ESCAPED
+};
+
 struct sh_token {
 	enum sh_token_type type;
 	char *text;
+	unsigned char *quote;
+	size_t length;
 };
 
 struct sh_token_list {

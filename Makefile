@@ -534,8 +534,15 @@ $(BUILD)/tests/sh-lexer-host-test: tests/sh-lexer-host-test.c \
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) userland/sh/lexer.c $< -o $@
 
+$(BUILD)/tests/sh-expand-host-test: tests/sh-expand-host-test.c \
+	userland/sh/expand.c userland/sh/expand.h userland/sh/lexer.c \
+	userland/sh/lexer.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) userland/sh/lexer.c userland/sh/expand.c $< -o $@
+
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/sh-lexer-host-test \
+	$(BUILD)/tests/sh-expand-host-test \
 	$(BUILD)/tests/blkdev-host-test \
 	$(BUILD)/tests/bufcache-host-test \
 	$(BUILD)/tests/checkpoint-host-test \

@@ -4,6 +4,7 @@
 #include <zedbsd/system.h>
 #include "userland/sh/applet.h"
 #include "userland/sh/builtins.h"
+#include "userland/sh/expand.h"
 #include "userland/sh/lexer.h"
 
 #include <dirent.h>
@@ -511,10 +512,22 @@ command_argv(int argc, char **argv)
 struct pipeline_command {
 	char *argv[ARG_MAX + 1];
 	int argc;
-	const char *input;
-	const char *output;
+	char *input;
+	char *output;
 	int append;
 };
+
+static void
+pipeline_free(struct pipeline_command *items, int count)
+{
+	int command_index, argument;
+	for (command_index = 0; command_index < count; command_index++) {
+		for (argument = 0; argument < items[command_index].argc; argument++)
+			free(items[command_index].argv[argument]);
+		free(items[command_index].input);
+		free(items[command_index].output);
+	}
+}
 
 static int
 pipeline_child(struct pipeline_command *item)
@@ -630,36 +643,59 @@ failed:
 static int
 parse_pipeline(const struct sh_token_list *list, size_t *position,
     struct pipeline_command *items, int *item_count,
-    enum sh_token_type *following)
+    enum sh_token_type *following, const struct sh_expand_context *context)
 {
 	int count = 1;
 	struct pipeline_command *item = &items[0];
+	const char *error_text;
 	memset(items, 0, PIPELINE_MAX * sizeof(*items));
 	for (;;) {
 		enum sh_token_type type = list->tokens[*position].type;
 		if (type == SH_TOKEN_WORD) {
 			if (item->argc == ARG_MAX) {
 				fprintf(stderr, "sh: too many arguments\n");
+				pipeline_free(items, count);
 				return 0;
 			}
-			item->argv[item->argc++] = list->tokens[(*position)++].text;
+			if (!sh_expand_word(&list->tokens[*position], context,
+			    &item->argv[item->argc], &error_text)) {
+				fprintf(stderr, "sh: expansion: %s\n", error_text);
+				pipeline_free(items, count);
+				return 0;
+			}
+			item->argc++;
+			(*position)++;
 			continue;
 		}
 		if (type == SH_TOKEN_INPUT || type == SH_TOKEN_OUTPUT ||
 		    type == SH_TOKEN_APPEND) {
-			const char *path;
+			char *path;
 			(*position)++;
 			if (list->tokens[*position].type != SH_TOKEN_WORD) {
 				fprintf(stderr, "sh: redirection requires a path\n");
+				pipeline_free(items, count);
 				return 0;
 			}
-			path = list->tokens[(*position)++].text;
-			if (type == SH_TOKEN_INPUT) item->input = path;
-			else { item->output = path; item->append = type == SH_TOKEN_APPEND; }
+			if (!sh_expand_word(&list->tokens[*position], context, &path,
+			    &error_text)) {
+				fprintf(stderr, "sh: expansion: %s\n", error_text);
+				pipeline_free(items, count);
+				return 0;
+			}
+			(*position)++;
+			if (type == SH_TOKEN_INPUT) {
+				free(item->input);
+				item->input = path;
+			} else {
+				free(item->output);
+				item->output = path;
+				item->append = type == SH_TOKEN_APPEND;
+			}
 			continue;
 		}
 		if (item->argc == 0) {
 			fprintf(stderr, "sh: empty pipeline command\n");
+			pipeline_free(items, count);
 			return 0;
 		}
 		item->argv[item->argc] = NULL;
@@ -670,6 +706,7 @@ parse_pipeline(const struct sh_token_list *list, size_t *position,
 		}
 		if (count == PIPELINE_MAX) {
 			fprintf(stderr, "sh: pipeline is too long\n");
+			pipeline_free(items, count);
 			return 0;
 		}
 		(*position)++;
@@ -693,11 +730,16 @@ command(char *text)
 	}
 	while (list.tokens[index].type != SH_TOKEN_END) {
 		struct pipeline_command items[PIPELINE_MAX];
+		struct sh_expand_context context;
 		enum sh_token_type next;
 		int item_count;
 		int execute;
 
-		if (!parse_pipeline(&list, &index, items, &item_count, &next)) {
+		context.status = result ? 0 : 1;
+		context.shell_pid = (long)getpid();
+		context.last_job = (long)last_job;
+		if (!parse_pipeline(&list, &index, items, &item_count, &next,
+		    &context)) {
 			result = 0;
 			goto done;
 		}
@@ -705,6 +747,7 @@ command(char *text)
 		    next != SH_TOKEN_AMP && next != SH_TOKEN_AND_IF &&
 		    next != SH_TOKEN_OR_IF) {
 			fprintf(stderr, "sh: invalid operator\n");
+			pipeline_free(items, item_count);
 			result = 0;
 			goto done;
 		}
@@ -716,6 +759,7 @@ command(char *text)
 			    next == SH_TOKEN_AMP);
 			any = 1;
 		}
+		pipeline_free(items, item_count);
 		connector = next;
 		if (next == SH_TOKEN_END)
 			break;

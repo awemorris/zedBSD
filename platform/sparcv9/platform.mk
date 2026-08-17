@@ -91,7 +91,7 @@ SPARCV9_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c user
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
 SPARCV9_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
-	userland/sh/builtins.c userland/sh/lexer.c
+	userland/sh/builtins.c userland/sh/lexer.c userland/sh/expand.c
 SPARCV9_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(SPARCV9_USER_RUNTIME_SOURCES))
 SPARCV9_USER_SH_OBJS := \

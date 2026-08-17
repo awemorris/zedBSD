@@ -6,19 +6,19 @@
 
 struct word_buffer {
 	char *data;
+	unsigned char *quote;
 	size_t length;
 	size_t capacity;
 };
 
 static int
-word_append(struct word_buffer *word, char value)
+word_reserve(struct word_buffer *word)
 {
 	char *larger;
+	unsigned char *quote;
 	size_t capacity;
-	if (word->length + 1U < word->capacity) {
-		word->data[word->length++] = value;
+	if (word->length + 1U < word->capacity)
 		return 1;
-	}
 	capacity = word->capacity == 0 ? 16U : word->capacity * 2U;
 	if (capacity <= word->capacity)
 		return 0;
@@ -26,13 +26,28 @@ word_append(struct word_buffer *word, char value)
 	if (larger == NULL)
 		return 0;
 	word->data = larger;
+	quote = realloc(word->quote, capacity);
+	if (quote == NULL)
+		return 0;
+	word->data = larger;
+	word->quote = quote;
 	word->capacity = capacity;
-	word->data[word->length++] = value;
 	return 1;
 }
 
 static int
-token_append(struct sh_token_list *list, enum sh_token_type type, char *text)
+word_append(struct word_buffer *word, char value, enum sh_quote_type quote)
+{
+	if (!word_reserve(word))
+		return 0;
+	word->data[word->length++] = value;
+	word->quote[word->length - 1U] = (unsigned char)quote;
+	return 1;
+}
+
+static int
+token_append(struct sh_token_list *list, enum sh_token_type type, char *text,
+    unsigned char *quote, size_t length)
 {
 	struct sh_token *larger;
 	if (list->count == (size_t)-1 / sizeof(*list->tokens))
@@ -44,6 +59,8 @@ token_append(struct sh_token_list *list, enum sh_token_type type, char *text)
 	list->tokens = larger;
 	list->tokens[list->count].type = type;
 	list->tokens[list->count].text = text;
+	list->tokens[list->count].quote = quote;
+	list->tokens[list->count].length = length;
 	list->count++;
 	return 1;
 }
@@ -70,9 +87,10 @@ lex_word(const char **cursor, struct sh_token_list *list,
 			if (*text == '\0') {
 				*error_text = "trailing backslash";
 				free(word.data);
+				free(word.quote);
 				return 0;
 			}
-			if (!word_append(&word, *text++))
+			if (!word_append(&word, *text++, SH_QUOTE_ESCAPED))
 				goto no_memory;
 			produced = 1;
 			continue;
@@ -81,41 +99,50 @@ lex_word(const char **cursor, struct sh_token_list *list,
 			char quote = *text++;
 			quoted = 1;
 			while (*text != '\0' && *text != quote) {
+				int escaped = 0;
 				if (quote == '"' && *text == '\\') {
 					text++;
+					escaped = 1;
 					if (*text == '\0')
 						break;
 				}
-				if (!word_append(&word, *text++))
+				if (!word_append(&word, *text++, escaped ?
+				    SH_QUOTE_ESCAPED : quote == '\'' ?
+				    SH_QUOTE_SINGLE : SH_QUOTE_DOUBLE))
 					goto no_memory;
 				produced = 1;
 			}
 			if (*text != quote) {
 				*error_text = "unterminated quote";
 				free(word.data);
+				free(word.quote);
 				return 0;
 			}
 			text++;
 			continue;
 		}
-		if (!word_append(&word, *text++))
+		if (!word_append(&word, *text++, SH_QUOTE_UNQUOTED))
 			goto no_memory;
 		produced = 1;
 	}
 	if (!produced && !quoted) {
 		*error_text = "empty word";
 		free(word.data);
+		free(word.quote);
 		return 0;
 	}
-	if (!word_append(&word, '\0'))
+	if (!word_reserve(&word))
 		goto no_memory;
-	if (!token_append(list, SH_TOKEN_WORD, word.data))
+	word.data[word.length] = '\0';
+	if (!token_append(list, SH_TOKEN_WORD, word.data, word.quote,
+	    word.length))
 		goto no_memory;
 	*cursor = text;
 	return 1;
 no_memory:
 	*error_text = "out of memory";
 	free(word.data);
+	free(word.quote);
 	return 0;
 }
 
@@ -151,12 +178,12 @@ sh_lex(const char *text, struct sh_token_list *list, const char **error_text)
 			else type = SH_TOKEN_OUTPUT;
 			break;
 		}
-		if (!token_append(list, type, NULL)) {
+		if (!token_append(list, type, NULL, NULL, 0)) {
 			*error_text = "out of memory";
 			goto failed;
 		}
 	}
-	if (!token_append(list, SH_TOKEN_END, NULL)) {
+	if (!token_append(list, SH_TOKEN_END, NULL, NULL, 0)) {
 		*error_text = "out of memory";
 		goto failed;
 	}
@@ -172,6 +199,8 @@ sh_tokens_free(struct sh_token_list *list)
 	size_t index;
 	for (index = 0; index < list->count; index++)
 		free(list->tokens[index].text);
+	for (index = 0; index < list->count; index++)
+		free(list->tokens[index].quote);
 	free(list->tokens);
 	list->tokens = NULL;
 	list->count = 0;
