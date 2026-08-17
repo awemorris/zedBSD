@@ -1,6 +1,6 @@
 /*
- * Kernel HAL
- * Copyright (C) 2026, Awe Morris.
+ * HAL: Historical Architecture Library
+ * Copyright (C) 2026 Awe Morris
  *
  * This header defines a kernel porting HAL. A HAL is implemented for
  * a combination of a CPU architecture and a machine/board type. A HAL
@@ -11,8 +11,8 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#ifndef SYS_KERN_HAL_H
-#define SYS_KERN_HAL_H
+#ifndef HAL_HAL_H
+#define HAL_HAL_H
 
 #include <hal/types.h>
 

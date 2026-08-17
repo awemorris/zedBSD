@@ -1,4 +1,7 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+ */
+
 #include "kern/devfs.h"
 #include "kern/cdev.h"
 #include "kern/disk.h"

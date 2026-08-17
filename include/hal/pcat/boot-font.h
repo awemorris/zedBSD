@@ -1,6 +1,9 @@
-/* PC/AT BIOS font handoff shared by the i386 and amd64 BSPs. */
-#ifndef ZEDBSD_HAL_PCAT_BOOT_FONT_H
-#define ZEDBSD_HAL_PCAT_BOOT_FONT_H
+/*
+ * PC/AT BIOS font handoff shared by the i386 and amd64 BSPs.
+ */
+
+#ifndef HAL_PCAT_BOOT_FONT_H
+#define HAL_PCAT_BOOT_FONT_H
 
 #include <stdint.h>
 

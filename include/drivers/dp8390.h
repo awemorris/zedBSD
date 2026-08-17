@@ -4,6 +4,7 @@
  *
  * SPDX-License-Identifier: Zlib
  */
+
 #ifndef ZEDBSD_DRIVERS_DP8390_H
 #define ZEDBSD_DRIVERS_DP8390_H
 

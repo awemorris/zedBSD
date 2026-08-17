@@ -1,10 +1,10 @@
 /*
- * Kernel HAL compatibility aliases.
- * Copyright (C) 2026, Awe Morris.
+ * HAL: Historical Architecture Library
+ * Copyright (C) 2026 Awe Morris
  */
 
-#ifndef ZEDBSD_HAL_TYPES_H
-#define ZEDBSD_HAL_TYPES_H
+#ifndef HAL_TYPES_H
+#define HAL_TYPES_H
 
 #include <stdbool.h>
 #include <stddef.h>
