@@ -20,6 +20,7 @@ platform_arch()
 		pc98)  echo pc98 ;;
 		rpi4)  echo arm64 ;;
 		sun4u) echo sparcv9 ;;
+		x68k)  echo x68k ;;
 		*) return 1 ;;
 	esac
 }
@@ -51,6 +52,7 @@ Available platforms:
   pc98            NEC PC-9800
   rpi4            Raspberry Pi 4 Arm64
   sun4u           sun4u SPARC V9 64-bit
+  x68k            Sharp X68000 MC68030
 EOF
 }
 
@@ -124,6 +126,9 @@ app)
 			case "$platform_name" in
 				i386|amd64|pc98)
 					target=bios-bootloader
+					;;
+				x68k)
+					target=x68k-bootloader
 					;;
 				sun4u)
 					target=sparcv9-bootloader

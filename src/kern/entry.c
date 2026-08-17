@@ -110,7 +110,8 @@ kernel_entry(const void *handoff)
 	if (h == NULL || h->magic != ZEDBSD_HANDOFF_MAGIC ||
 	    (h->version != ZEDBSD_HANDOFF_VERSION_PC98 &&
 	     h->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT &&
-	     h->version != ZEDBSD_HANDOFF_VERSION_SUN4U) ||
+	     h->version != ZEDBSD_HANDOFF_VERSION_SUN4U &&
+	     h->version != ZEDBSD_HANDOFF_VERSION_X68K) ||
 	    h->size < sizeof(*h))
 		hal_fatal(__FILE__, __LINE__, "invalid zedBSD handoff");
 	hal_printf("boot: kernel heap, process, and scheduler initialization\n");

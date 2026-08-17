@@ -43,7 +43,7 @@ static inline int atomic_try_acquire_zero(atomic_uint_t *value)
 
 static inline unsigned atomic_raw_load_acquire(const volatile unsigned *value)
 {
-#if defined(__i386__)
+#if defined(__i386__) || defined(__m68k__)
 	bool enabled = hal_irq_disable();
 	unsigned result = *value;
 	if (enabled) hal_irq_enable();
@@ -55,7 +55,7 @@ static inline unsigned atomic_raw_load_acquire(const volatile unsigned *value)
 static inline void atomic_raw_store_release(volatile unsigned *value,
 	unsigned next)
 {
-#if defined(__i386__)
+#if defined(__i386__) || defined(__m68k__)
 	bool enabled = hal_irq_disable();
 	*value = next;
 	if (enabled) hal_irq_enable();
@@ -66,7 +66,7 @@ static inline void atomic_raw_store_release(volatile unsigned *value,
 static inline unsigned atomic_raw_fetch_add_relaxed(volatile unsigned *value,
 	unsigned add)
 {
-#if defined(__i386__)
+#if defined(__i386__) || defined(__m68k__)
 	bool enabled = hal_irq_disable();
 	unsigned previous = *value;
 	*value = previous + add;
@@ -79,7 +79,7 @@ static inline unsigned atomic_raw_fetch_add_relaxed(volatile unsigned *value,
 static inline unsigned atomic_raw_fetch_or_release(volatile unsigned *value,
 	unsigned bits)
 {
-#if defined(__i386__)
+#if defined(__i386__) || defined(__m68k__)
 	bool enabled = hal_irq_disable();
 	unsigned previous = *value;
 	*value = previous | bits;
@@ -92,7 +92,7 @@ static inline unsigned atomic_raw_fetch_or_release(volatile unsigned *value,
 static inline int atomic_raw_compare_exchange(volatile unsigned *value,
 	unsigned *expected, unsigned desired)
 {
-#if defined(__i386__)
+#if defined(__i386__) || defined(__m68k__)
 	bool enabled = hal_irq_disable();
 	unsigned current = *value;
 	int exchanged = current == *expected;
@@ -117,7 +117,7 @@ static inline int atomic_compare_exchange(atomic_uint_t *value,
 
 static inline uint64_t atomic_u64_load_acquire(const volatile uint64_t *value)
 {
-#if defined(__i386__)
+#if defined(__i386__) || defined(__m68k__)
 	bool enabled = hal_irq_disable();
 	uint64_t result = *value;
 	if (enabled) hal_irq_enable();
@@ -129,7 +129,7 @@ static inline uint64_t atomic_u64_load_acquire(const volatile uint64_t *value)
 static inline void atomic_u64_store_release(volatile uint64_t *value,
 	uint64_t next)
 {
-#if defined(__i386__)
+#if defined(__i386__) || defined(__m68k__)
 	bool enabled = hal_irq_disable();
 	*value = next;
 	if (enabled) hal_irq_enable();
@@ -140,7 +140,7 @@ static inline void atomic_u64_store_release(volatile uint64_t *value,
 static inline uint64_t atomic_u64_fetch_add_relaxed(volatile uint64_t *value,
 	uint64_t add)
 {
-#if defined(__i386__)
+#if defined(__i386__) || defined(__m68k__)
 	bool enabled = hal_irq_disable();
 	uint64_t previous = *value;
 	*value = previous + add;
@@ -153,7 +153,7 @@ static inline uint64_t atomic_u64_fetch_add_relaxed(volatile uint64_t *value,
 static inline uint64_t atomic_u64_fetch_or_release(volatile uint64_t *value,
 	uint64_t bits)
 {
-#if defined(__i386__)
+#if defined(__i386__) || defined(__m68k__)
 	bool enabled = hal_irq_disable();
 	uint64_t previous = *value;
 	*value = previous | bits;
@@ -170,8 +170,8 @@ static inline unsigned refcount_load(const refcount_t *count)
 { return atomic_raw_load_acquire(&count->value); }
 static inline int refcount_tryget(refcount_t *count)
 {
-#if defined(__i386__)
-	/* zedBSD i386 targets pre-CMPXCHG CPUs and is strictly uniprocessor. */
+#if defined(__i386__) || defined(__m68k__)
+	/* zedBSD i386 and m68k targets are strictly uniprocessor. */
 	bool enabled = hal_irq_disable();
 	unsigned value = count->value;
 	if (value == 0 || value == UINT_MAX) {
@@ -194,7 +194,7 @@ static inline void refcount_get(refcount_t *count)
 { if (!refcount_tryget(count)) __builtin_trap(); }
 static inline int refcount_put(refcount_t *count)
 {
-#if defined(__i386__)
+#if defined(__i386__) || defined(__m68k__)
 	bool enabled = hal_irq_disable();
 	unsigned value = count->value;
 	if (value == 0) __builtin_trap();
@@ -219,7 +219,7 @@ static inline int refcount_put(refcount_t *count)
  * dropped because only the permanent reference remains. */
 static inline unsigned refcount_put_not_last(refcount_t *count)
 {
-#if defined(__i386__)
+#if defined(__i386__) || defined(__m68k__)
 	bool enabled = hal_irq_disable();
 	unsigned value = count->value;
 	if (value <= 1U) { if (enabled) hal_irq_enable(); return 0; }
