@@ -22,5 +22,7 @@ char *strrchr(const char *string, int character);
 char *strstr(const char *haystack, const char *needle);
 char *strdup(const char *string);
 char *strerror(int error);
+int strcoll(const char *, const char *);
+size_t strxfrm(char *, const char *, size_t);
 
 #endif

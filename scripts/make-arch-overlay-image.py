@@ -20,7 +20,8 @@ PROFILES = {
     "amd64": ("ZEDAMD64", 2, 62),
     "aarch64": ("ZEDAARCH64", 2, 183),
 }
-DESTINATION = re.compile(r"/(bin|lib)/[a-z0-9_]{1,8}(?:\.[a-z0-9_]{1,3})?")
+FAT_COMPONENT = r"[a-z0-9_]{1,8}(?:\.[a-z0-9_]{1,3})?"
+DESTINATION = re.compile(rf"/(bin|lib)(?:/{FAT_COMPONENT}){{1,4}}")
 TEMP_NAME = re.compile(r"ov[0-9a-f]{4}\.tmp")
 
 
@@ -38,7 +39,8 @@ def parse_files(specifications: list[str]) -> dict[str, Path]:
         source = Path(source_text)
         if not DESTINATION.fullmatch(destination):
             raise SystemExit(f"invalid FAT16 destination: {destination}")
-        if TEMP_NAME.fullmatch(destination.rsplit("/", 1)[1]):
+        if any(TEMP_NAME.fullmatch(component)
+               for component in destination.split("/")[1:]):
             raise SystemExit(f"reserved overlay temporary name: {destination}")
         key = destination.casefold()
         if key in folded:
@@ -75,6 +77,14 @@ def create(args: argparse.Namespace) -> None:
             "-v", label, "::")
         for directory in ("bin", "lib", "zedovl"):
             run("mmd", "-i", str(temporary), f"::/{directory}")
+        parents = set()
+        for destination in files:
+            parent = str(Path(destination).parent).replace("\\", "/")
+            while parent not in ("/", "/bin", "/lib"):
+                parents.add(parent)
+                parent = str(Path(parent).parent).replace("\\", "/")
+        for directory in sorted(parents, key=lambda value: value.count("/")):
+            run("mmd", "-i", str(temporary), f"::{directory}")
         with tempfile.TemporaryDirectory(prefix="zedbsd-arch-files-") as work_text:
             work = Path(work_text)
             marker = work / "arch.id"

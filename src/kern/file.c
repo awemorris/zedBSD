@@ -88,7 +88,7 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 	if (context == NULL || path == NULL || result == NULL)
 		return EINVAL;
 	if ((flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND |
-		       O_DIRECTORY | O_NONBLOCK)) != 0 ||
+		       O_DIRECTORY | O_NONBLOCK | O_NOCTTY)) != 0 ||
 	    (flags & O_ACCMODE) > O_RDWR ||
 	    ((flags & O_EXCL) != 0 && (flags & O_CREAT) == 0))
 		return EINVAL;
@@ -200,7 +200,8 @@ file_open_resolved(const struct path *resolved, int flags,
 	    resolved->p_inode == NULL || result == NULL)
 		return EINVAL;
 	if ((flags & (O_CREAT | O_EXCL | O_TRUNC)) != 0 ||
-	    (flags & ~(O_ACCMODE | O_APPEND | O_DIRECTORY | O_NONBLOCK)) != 0 ||
+	    (flags & ~(O_ACCMODE | O_APPEND | O_DIRECTORY | O_NONBLOCK |
+	    O_NOCTTY)) != 0 ||
 	    (flags & O_ACCMODE) > O_RDWR)
 		return EINVAL;
 	if ((flags & O_DIRECTORY) != 0 && resolved->p_inode->i_type != INODE_DIR)

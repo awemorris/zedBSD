@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <poll.h>
+#include <pty.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <string.h>
@@ -11,14 +12,20 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <mqueue.h>
+#include <langinfo.h>
+#include <locale.h>
 #include <stdlib.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/resource.h>
+#include <sys/mount.h>
+#include <sys/statvfs.h>
 #include <sys/utsname.h>
 #include <time.h>
+#include <wchar.h>
+#include <wctype.h>
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_rwlock_t rwlock = PTHREAD_RWLOCK_INITIALIZER;
@@ -33,6 +40,9 @@ static int cleanup_called;
 static int atfork_prepare_called;
 static int atfork_parent_called;
 static int atfork_child_called;
+#define PTY_STRESS_SIZE 6000U
+static char pty_stress_input[PTY_STRESS_SIZE];
+static char pty_stress_output[PTY_STRESS_SIZE];
 
 static void atfork_prepare(void) { atfork_prepare_called++; }
 static void atfork_parent(void) { atfork_parent_called++; }
@@ -107,6 +117,14 @@ static void *worker(void *argument)
 	return (void *)7;
 }
 
+static void *locale_worker(void *argument)
+{
+	locale_t locale = argument;
+	if (uselocale(locale) == NULL || MB_CUR_MAX != 1U)
+		return (void *)1;
+	return (void *)0;
+}
+
 int main(void)
 {
 	char *exec_argv[] = { "/bin/sh", NULL };
@@ -117,6 +135,7 @@ int main(void)
 	void *thread_result = NULL;
 	struct pollfd event;
 	int pipefd[2], pair[2], listener, client, accepted, poll_result;
+	int pty_master, pty_slave;
 	int datagram_server, datagram_client;
 	int rights_pipe[2], received_fd;
 	struct msghdr message;
@@ -140,11 +159,19 @@ int main(void)
 	struct timespec now;
 	struct timespec signal_timeout = { 1, 0 };
 	struct rlimit saved_limit, small_limit;
+	struct statvfs filesystem_status, descriptor_status;
 	struct flock file_lock;
+	size_t pty_received;
 	struct sigevent notification;
+	struct itimerspec timer_value, timer_current;
+	timer_t process_timer;
 	sigset_t notify_set, old_mask;
 	siginfo_t notify_info;
-	char path_buffer[64], file_buffer[4], login_buffer[16], tty_buffer[32];
+	char path_buffer[64], file_buffer[8], login_buffer[16], tty_buffer[32];
+	mbstate_t multibyte_state;
+	wchar_t wide_character;
+	char encoded[4];
+	locale_t c_locale;
 
 	if (getenv("R2_EXEC_FINAL") != NULL) {
 		(void)write(1, "R2:01-06:PASS\n", 15);
@@ -356,6 +383,120 @@ int main(void)
 	if (clock_gettime(CLOCK_MONOTONIC, &now) != 0 ||
 	    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &now, NULL) != 0)
 		return fail_errno("conformance-clock-nanosleep");
+	(void)sigemptyset(&notify_set);
+	(void)sigaddset(&notify_set, SIGALRM);
+	if (pthread_sigmask(SIG_BLOCK, &notify_set, &old_mask) != 0)
+		return fail("timer-signal-mask");
+	memset(&notification, 0, sizeof(notification));
+	notification.sigev_notify = SIGEV_SIGNAL;
+	notification.sigev_signo = SIGALRM;
+	notification.sigev_value.sival_int = 91;
+	memset(&timer_value, 0, sizeof(timer_value));
+	timer_value.it_value.tv_nsec = 20000000L;
+	if (timer_create(CLOCK_MONOTONIC, &notification, &process_timer) != 0)
+		return fail_errno("process-timer-create");
+	if (timer_settime(process_timer, 0, &timer_value, NULL) != 0)
+		return fail_errno("process-timer-settime");
+	if (sigtimedwait(&notify_set, &notify_info, &signal_timeout) != SIGALRM ||
+	    notify_info.si_code != SI_TIMER || notify_info.si_value.sival_int != 91)
+		return fail_errno("process-timer-signal");
+	if (timer_gettime(process_timer, &timer_current) != 0 ||
+	    timer_current.it_value.tv_sec != 0 ||
+	    timer_current.it_value.tv_nsec != 0)
+		return fail_errno("process-timer-gettime");
+	if (timer_getoverrun(process_timer) != 0)
+		return fail_errno("process-timer-overrun");
+	if (timer_delete(process_timer) != 0)
+		return fail_errno("process-timer-delete");
+	(void)pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+	if (statvfs("/", &filesystem_status) != 0 ||
+	    filesystem_status.f_bsize == 0 || filesystem_status.f_namemax == 0)
+		return fail_errno("statvfs-root");
+	if (mkdir("/mnt", 0755) != 0 && errno != EEXIST)
+		return fail_errno("mount-mkdir");
+	if (mount("tmpfs", "/mnt", 0, NULL) != 0 ||
+	    statvfs("/mnt", &filesystem_status) != 0 ||
+	    filesystem_status.f_blocks == 0 || filesystem_status.f_bfree == 0)
+		return fail_errno("mount-tmpfs");
+	directory_fd = open("/mnt", O_RDONLY | O_DIRECTORY);
+	if (directory_fd < 0 || fstatvfs(directory_fd, &descriptor_status) != 0 ||
+	    descriptor_status.f_bsize != filesystem_status.f_bsize)
+		return fail_errno("fstatvfs-tmpfs");
+	errno = 0;
+	if (unmount("/mnt", 0) != -1 || errno != EBUSY)
+		return fail("unmount-busy");
+	(void)close(directory_fd);
+	if (unmount("/mnt", 0) != 0 || rmdir("/mnt") != 0)
+		return fail_errno("unmount-tmpfs");
+	pty_master = posix_openpt(O_RDWR | O_NOCTTY);
+	if (pty_master < 0 || ptsname_r(pty_master, path_buffer,
+	    sizeof(path_buffer)) != 0)
+		return fail_errno("ptmx-open");
+	errno = 0;
+	if (open(path_buffer, O_RDWR | O_NOCTTY) != -1 || errno != EACCES)
+		return fail("ptmx-lock");
+	if (grantpt(pty_master) != 0 || unlockpt(pty_master) != 0 ||
+	    (pty_slave = open(path_buffer, O_RDWR | O_NOCTTY)) < 0)
+		return fail_errno("pty-slave-open");
+	if (write(pty_master, "pty\n", 4) != 4 ||
+	    read(pty_slave, file_buffer, 4) != 4 ||
+	    memcmp(file_buffer, "pty\n", 4) != 0 ||
+	    read(pty_master, file_buffer, 5) != 5 ||
+	    memcmp(file_buffer, "pty\r\n", 5) != 0)
+		return fail_errno("pty-input-echo");
+	if (write(pty_slave, "out\n", 4) != 4 ||
+	    read(pty_master, file_buffer, 5) != 5 ||
+	    memcmp(file_buffer, "out\r\n", 5) != 0)
+		return fail_errno("pty-output");
+	memset(pty_stress_input, 'q', sizeof(pty_stress_input));
+	child = fork();
+	if (child < 0)
+		return fail_errno("pty-backpressure-fork");
+	if (child == 0)
+		_exit(write(pty_slave, pty_stress_input,
+		    sizeof(pty_stress_input)) == (ssize_t)sizeof(pty_stress_input) ?
+		    0 : 42);
+	pty_received = 0;
+	while (pty_received < sizeof(pty_stress_output)) {
+		ssize_t count = read(pty_master, pty_stress_output + pty_received,
+		    sizeof(pty_stress_output) - pty_received);
+		if (count <= 0)
+			return fail_errno("pty-backpressure-read");
+		pty_received += (size_t)count;
+	}
+	if (memcmp(pty_stress_input, pty_stress_output,
+	    sizeof(pty_stress_input)) != 0 ||
+	    waitpid(child, &child_status, 0) != child ||
+	    !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)
+		return fail_errno("pty-backpressure-data");
+	(void)close(pty_slave);
+	if (read(pty_master, file_buffer, sizeof(file_buffer)) != 0)
+		return fail_errno("pty-hangup");
+	(void)close(pty_master);
+	if (setlocale(LC_ALL, "C.UTF-8") == NULL || MB_CUR_MAX != 4U ||
+	    strcmp(nl_langinfo(CODESET), "UTF-8") != 0)
+		return fail_errno("locale-utf8");
+	memset(&multibyte_state, 0, sizeof(multibyte_state));
+	if (mbrtowc(&wide_character, "\xe2", 1, &multibyte_state) !=
+	    (size_t)-2 || mbrtowc(&wide_character, "\x82\xac", 2,
+	    &multibyte_state) != 2 || wide_character != (wchar_t)0x20acU)
+		return fail_errno("locale-split-utf8");
+	memset(&multibyte_state, 0, sizeof(multibyte_state));
+	errno = 0;
+	if (mbrtowc(&wide_character, "\xc0\x80", 2, &multibyte_state) !=
+	    (size_t)-1 || errno != EILSEQ)
+		return fail("locale-overlong");
+	if (wcrtomb(encoded, (wchar_t)0x3042U, NULL) != 3 ||
+	    (unsigned char)encoded[0] != 0xe3U || wcwidth((wchar_t)0x3042U) != 2 ||
+	    !iswalpha((wint_t)0x3042U))
+		return fail_errno("locale-wide");
+	c_locale = newlocale(LC_ALL_MASK, "C", NULL);
+	if (c_locale == NULL || pthread_create(&thread, NULL, locale_worker,
+	    c_locale) != 0 || pthread_join(thread, &thread_result) != 0 ||
+	    thread_result != NULL || MB_CUR_MAX != 4U)
+		return fail_errno("locale-thread");
+	freelocale(c_locale);
+	(void)write(1, "R2:TIMER:PASS\n", 14);
 	/* WNOWAIT must report without consuming the child event. */
 	child = fork();
 	if (child < 0) return fail_errno("waitid-nowait-fork");

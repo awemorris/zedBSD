@@ -116,6 +116,8 @@ int vmspace_brk(struct vmspace *, uintptr_t, uintptr_t *);
 struct vm_region *vmspace_find_region(struct vmspace *, uintptr_t, size_t);
 int vmspace_find_free_range(struct vmspace *, uintptr_t, size_t, size_t,
 			    uintptr_t *);
+int vmspace_find_free_range_bounded(struct vmspace *, uintptr_t, uintptr_t,
+				    size_t, size_t, uintptr_t *);
 int vmspace_map_find(struct vmspace *, uintptr_t, size_t, uint32_t,
 		     uintptr_t *);
 int vmspace_map_file_find(struct vmspace *, uintptr_t, size_t, uint32_t,

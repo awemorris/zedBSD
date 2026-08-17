@@ -1,7 +1,7 @@
 # zedBSD SPARC V9/sun4u bootstrap rules.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
-SPARCV9_PREFIX ?= $(HOME)/opt/sparcv9
+SPARCV9_PREFIX ?= $(if $(wildcard $(HOME)/opt/sparcv9/bin/sparc64-unknown-elf-gcc),$(HOME)/opt/sparcv9,$(HOME)/opt/sparc64)
 SPARCV9_TARGET ?= sparc64-unknown-elf
 SPARCV9_CC ?= $(SPARCV9_PREFIX)/bin/$(SPARCV9_TARGET)-gcc
 SPARCV9_LD ?= $(SPARCV9_PREFIX)/bin/$(SPARCV9_TARGET)-ld
@@ -49,7 +49,8 @@ SPARCV9_KERNEL_SOURCES := \
 	drivers/loop.c \
 	src/kern/partition.c src/kern/sun-disklabel.c src/kern/sun4u/platform.c \
 	drivers/sun4u-cmd646.c src/kern/image.c src/kern/panic.c \
-	src/kern/entry.c src/kern/clock.c src/kern/lock.c src/kern/waitq.c \
+	src/kern/entry.c src/kern/clock.c src/kern/process-timer.c \
+	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c \
 	src/kern/sched.c src/kern/vmspace.c src/kern/vm-object.c \
 	src/kern/vm-commit.c src/kern/filedesc.c src/kern/pipe.c \
@@ -60,7 +61,10 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c src/kern/tty.c \
 	src/kern/graphics-device.c src/kern/system-device.c \
 	src/kern/init.c
-SPARCV9_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES)
+SPARCV9_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
+	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)
+SPARCV9_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
+SPARCV9_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
 SPARCV9_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(SPARCV9_KERNEL_SOURCES))
 SPARCV9_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURCES))
 SPARCV9_VMUNIX_OBJS := $(SPARCV9_EARLY_OBJS) $(SPARCV9_KERNEL_OBJS) \
@@ -84,7 +88,7 @@ SPARCV9_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c user
 	userland/libc/mqueue.c \
 	userland/libc/socket.c \
 	userland/libc/signal.c \
-	libc/heap.c libc/string.c libc/ctype.c libc/int64.c libc/strto.c \
+	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
 SPARCV9_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
 	userland/sh/builtins.c
@@ -96,6 +100,7 @@ SPARCV9_USER_OBJS := $(BUILD)/user/userland/crt0-sparcv9.o \
 	$(SPARCV9_USER_RUNTIME_OBJS) $(SPARCV9_USER_SH_OBJS)
 
 all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
+	$(BUILD)/bin/mount $(BUILD)/bin/umount \
 	$(BUILD)/hdd-image.img
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
@@ -196,6 +201,23 @@ $(BUILD)/bin/sysctl: $(BUILD)/user/userland/crt0-sparcv9.o \
 	@test -z "$$($(SPARCV9_NM) -u $@)" || { $(SPARCV9_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine sparcv9 $@
 
+SPARCV9_USER_MOUNT_OBJ := $(BUILD)/user/userland/mount/main.o
+$(BUILD)/bin/mount: $(BUILD)/user/userland/crt0-sparcv9.o \
+	$(SPARCV9_USER_RUNTIME_OBJS) $(SPARCV9_USER_MOUNT_OBJ) \
+	$(SPARCV9_PLATFORM)/user.ld scripts/check-user-elf.py
+	@mkdir -p $(dir $@)
+	$(SPARCV9_CC) $(SPARCV9_USER_CFLAGS) -nostdlib -static \
+		-Wl,--gc-sections -Wl,-z,max-page-size=8192 \
+		-Wl,-T,$(SPARCV9_PLATFORM)/user.ld \
+		$(BUILD)/user/userland/crt0-sparcv9.o \
+		$(SPARCV9_USER_RUNTIME_OBJS) $(SPARCV9_USER_MOUNT_OBJ) \
+		-lgcc -o $@
+	@test -z "$$($(SPARCV9_NM) -u $@)" || { $(SPARCV9_NM) -u $@; exit 1; }
+	$(PYTHON) scripts/check-user-elf.py --machine sparcv9 $@
+$(BUILD)/bin/umount: $(BUILD)/bin/mount
+	@mkdir -p $(dir $@)
+	cp -f $< $@
+
 $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-sparcv9.o \
 	$(SPARCV9_USER_RUNTIME_OBJS) \
 	$(BUILD)/user/userland/tests/syscall-smoke.o \
@@ -244,16 +266,30 @@ SPARCV9_DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Iinclude/uapi \
 SPARCV9_DYNAMIC_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias \
 	-mcmodel=medany -msoft-float -mno-app-regs -Os -ffreestanding -fPIC \
 	-fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables \
-	-fno-unwind-tables -ftls-model=global-dynamic -Wall -Wextra -Werror
+	-fno-unwind-tables -fno-plt -ftls-model=global-dynamic \
+	-Wall -Wextra -Werror
 SPARCV9_DYNAMIC_LIBC_SOURCES := userland/libc/posix.c \
 	userland/libc/poll.c userland/libc/termios.c userland/libc/pthread.c \
 	userland/libc/shm.c userland/libc/semaphore.c userland/libc/mqueue.c \
-	userland/libc/dlfcn.c userland/libc/socket.c userland/libc/signal.c \
-	libc/heap.c libc/string.c libc/ctype.c libc/int64.c libc/strto.c \
+	userland/libc/dlfcn.c \
+	userland/libc/socket.c userland/libc/signal.c \
+	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
 SPARCV9_DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(SPARCV9_DYNAMIC_DIR)/obj/%.o,\
 	$(SPARCV9_DYNAMIC_LIBC_SOURCES)) \
-	$(SPARCV9_DYNAMIC_DIR)/obj/userland/libc/syscall.o
+	$(SPARCV9_DYNAMIC_DIR)/obj/userland/libc/syscall.o \
+	$(SPARCV9_DYNAMIC_DIR)/obj/softfloat/sparcv9/libgcc-runtime.o
+
+# The bare-metal SPARC toolchain does not provide the soft-float arithmetic
+# entry points in libgcc.a.  Build the exact GCC soft-fp operations required by
+# libc, including the 128-bit long-double helpers used by musl's scanner.
+SPARCV9_DYNAMIC_SOFTFP_REL := $(ZEDBSD_GCC_SOFTFP_REL) \
+	addtf3.c divtf3.c eqtf2.c extenddftf2.c extendsftf2.c \
+	floatsitf.c floatunsitf.c getf2.c letf2.c multf3.c subtf3.c \
+	trunctfdf2.c trunctfsf2.c unordtf2.c
+SPARCV9_DYNAMIC_SOFTFP_OBJS := $(addprefix \
+	$(SPARCV9_DYNAMIC_DIR)/softfp/gcc-,\
+	$(SPARCV9_DYNAMIC_SOFTFP_REL:.c=.o))
 SPARCV9_DYNAMIC_RTLD_OBJS := \
 	$(SPARCV9_DYNAMIC_DIR)/obj/userland/rtld/entry.o \
 	$(SPARCV9_DYNAMIC_DIR)/obj/userland/rtld/rtld.o \
@@ -267,7 +303,17 @@ SPARCV9_DYNAMIC_MUSL_SCAN_OBJS := \
 	$(SPARCV9_DYNAMIC_FLOAT_DIR)/musl-strtod.o \
 	$(SPARCV9_DYNAMIC_FLOAT_DIR)/musl-compat.o
 SPARCV9_DYNAMIC_LIBC_OBJS += $(SPARCV9_DYNAMIC_MUSL_MATH_OBJS) \
-	$(SPARCV9_DYNAMIC_MUSL_SCAN_OBJS)
+	$(SPARCV9_DYNAMIC_MUSL_SCAN_OBJS) $(SPARCV9_DYNAMIC_SOFTFP_OBJS)
+
+$(SPARCV9_DYNAMIC_DIR)/softfp/gcc-%.o: \
+	$(ZEDBSD_GCC_ROOT)/libgcc/soft-fp/%.c
+	@mkdir -p $(dir $@)
+	$(SPARCV9_CC) -nostdinc -Ilibc/include -I. \
+		-Isoftfloat/sparcv9 -I$(ZEDBSD_GCC_ROOT)/include \
+		-I$(ZEDBSD_GCC_ROOT)/libgcc \
+		-I$(ZEDBSD_GCC_ROOT)/libgcc/soft-fp -D_SOFT_FLOAT \
+		$(SPARCV9_DYNAMIC_CFLAGS) -Wno-error=type-limits \
+		-MMD -MP -c $< -o $@
 
 $(SPARCV9_DYNAMIC_DIR)/obj/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -330,42 +376,98 @@ $(SPARCV9_DYNAMIC_DIR)/ld.so: $(SPARCV9_DYNAMIC_RTLD_OBJS)
 		-z max-page-size=8192 $^ -o $@
 
 $(SPARCV9_DYNAMIC_DIR)/libc.so: $(SPARCV9_DYNAMIC_LIBC_OBJS)
-	$(SPARCV9_CC) $(SPARCV9_DYNAMIC_CFLAGS) -nostdlib -shared \
-		-static-libgcc \
-		-Wl,-soname,libc.so,--hash-style=sysv,-z,now,-z,relro \
-		-Wl,-z,separate-code,-z,max-page-size=8192,-z,stack-size=0x100000 \
-		$^ -lgcc -o $@
+	$(SPARCV9_LD) -m elf64_sparc -shared -Bsymbolic-functions \
+		-T $(SPARCV9_PLATFORM)/dynamic-plt.ld \
+		-z undefs -z noexecstack \
+		-soname libc.so --hash-style=both -z now -z relro \
+		-z separate-code -z max-page-size=8192 -z stack-size=0x100000 \
+		$^ -o $@
+
+$(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so: \
+	$(SPARCV9_DYNAMIC_DIR)/obj/userland/tests/rpathdep.o \
+	$(SPARCV9_DYNAMIC_DIR)/ld.so
+	@mkdir -p $(dir $@)
+	$(SPARCV9_LD) -m elf64_sparc -shared -Bsymbolic-functions \
+		-T $(SPARCV9_PLATFORM)/dynamic-plt.ld \
+		-soname rpathdep.so --hash-style=gnu -z now -z relro \
+		-z separate-code -z max-page-size=8192 $(filter %.o,$^) -o $@
 
 $(SPARCV9_DYNAMIC_DIR)/tlstest.so: \
 	$(SPARCV9_DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+	$(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so \
 	$(SPARCV9_DYNAMIC_DIR)/ld.so
-	$(SPARCV9_LD) -m elf64_sparc -shared -soname tlstest.so \
-		--hash-style=sysv -z now -z relro -z separate-code \
-		-z max-page-size=8192 $< -o $@
+	$(SPARCV9_LD) -m elf64_sparc -shared -Bsymbolic-functions \
+		-T $(SPARCV9_PLATFORM)/dynamic-plt.ld \
+		-soname tlstest.so \
+		--hash-style=gnu -z now -z relro -z separate-code \
+		-z max-page-size=8192 --enable-new-dtags -rpath '$$ORIGIN/alt' \
+		$(SPARCV9_DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+		-L$(SPARCV9_DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
+
+$(SPARCV9_DYNAMIC_DIR)/rpathtest.so: \
+	$(SPARCV9_DYNAMIC_DIR)/obj/userland/tests/rpathtest.o \
+	$(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so \
+	$(SPARCV9_DYNAMIC_DIR)/ld.so
+	$(SPARCV9_LD) -m elf64_sparc -shared -Bsymbolic-functions \
+		-T $(SPARCV9_PLATFORM)/dynamic-plt.ld -soname rpthtest.so \
+		--hash-style=gnu -z now -z relro -z separate-code \
+		-z max-page-size=8192 --disable-new-dtags -rpath '$$ORIGIN/alt' \
+		$(SPARCV9_DYNAMIC_DIR)/obj/userland/tests/rpathtest.o \
+		-L$(SPARCV9_DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
+
+$(SPARCV9_DYNAMIC_DIR)/verstest.so: \
+	$(SPARCV9_DYNAMIC_DIR)/obj/userland/tests/versiontest.o \
+	userland/tests/versiontest.map $(SPARCV9_DYNAMIC_DIR)/ld.so
+	$(SPARCV9_LD) -m elf64_sparc -shared -Bsymbolic-functions \
+		-T $(SPARCV9_PLATFORM)/dynamic-plt.ld -soname verstest.so \
+		--hash-style=gnu -z now -z relro -z separate-code \
+		-z max-page-size=8192 \
+		--version-script=userland/tests/versiontest.map \
+		$(SPARCV9_DYNAMIC_DIR)/obj/userland/tests/versiontest.o -o $@
+
+$(SPARCV9_DYNAMIC_DIR)/versuse.so: \
+	$(SPARCV9_DYNAMIC_DIR)/obj/userland/tests/versionuse.o \
+	$(SPARCV9_DYNAMIC_DIR)/verstest.so $(SPARCV9_DYNAMIC_DIR)/ld.so
+	$(SPARCV9_LD) -m elf64_sparc -shared -Bsymbolic-functions \
+		-T $(SPARCV9_PLATFORM)/dynamic-plt.ld -soname versuse.so \
+		--hash-style=gnu -z now -z relro -z separate-code \
+		-z max-page-size=8192 \
+		$(SPARCV9_DYNAMIC_DIR)/obj/userland/tests/versionuse.o \
+		-L$(SPARCV9_DYNAMIC_DIR) -l:verstest.so -o $@
 
 $(SPARCV9_DYNAMIC_DIR)/dyntest: \
 	$(SPARCV9_DYNAMIC_DIR)/obj/userland/crt1.o \
 	$(SPARCV9_DYNAMIC_DIR)/obj/userland/tests/dyntest.o \
 	$(SPARCV9_DYNAMIC_DIR)/libc.so $(SPARCV9_DYNAMIC_DIR)/ld.so \
-	$(SPARCV9_DYNAMIC_DIR)/tlstest.so
-	$(SPARCV9_CC) $(SPARCV9_DYNAMIC_CFLAGS) -nostdlib -no-pie \
-		-Wl,--no-relax,--hash-style=sysv,-z,now,-z,relro \
-		-Wl,-z,separate-code,-z,max-page-size=8192,-z,stack-size=0x100000 \
-		-Wl,--allow-shlib-undefined,--dynamic-linker=/lib/ld.so \
+	$(SPARCV9_DYNAMIC_DIR)/tlstest.so $(SPARCV9_DYNAMIC_DIR)/versuse.so
+	$(SPARCV9_LD) -m elf64_sparc -pie -e _start --no-relax \
+		-T $(SPARCV9_PLATFORM)/dynamic-plt.ld \
+		--hash-style=sysv -z now -z relro -z noexecstack \
+		-z separate-code -z max-page-size=8192 -z stack-size=0x100000 \
+		--allow-shlib-undefined --dynamic-linker=/lib/ld.so \
 		$(SPARCV9_DYNAMIC_DIR)/obj/userland/crt1.o \
 		$(SPARCV9_DYNAMIC_DIR)/obj/userland/tests/dyntest.o \
-		-L$(SPARCV9_DYNAMIC_DIR) -Wl,-rpath-link,$(SPARCV9_DYNAMIC_DIR) \
-		-l:libc.so -static-libgcc -lgcc -o $@
+		-L$(SPARCV9_DYNAMIC_DIR) -rpath-link $(SPARCV9_DYNAMIC_DIR) \
+		-l:libc.so -o $@
 
 dynamic-userland-check: $(SPARCV9_DYNAMIC_DIR)/ld.so \
 	$(SPARCV9_DYNAMIC_DIR)/libc.so $(SPARCV9_DYNAMIC_DIR)/dyntest \
-	$(SPARCV9_DYNAMIC_DIR)/tlstest.so scripts/check-dynamic-elf.py
+	$(SPARCV9_DYNAMIC_DIR)/tlstest.so \
+	$(SPARCV9_DYNAMIC_DIR)/rpathtest.so \
+	$(SPARCV9_DYNAMIC_DIR)/verstest.so \
+	$(SPARCV9_DYNAMIC_DIR)/versuse.so scripts/check-dynamic-elf.py
 	$(PYTHON) scripts/check-dynamic-elf.py --machine sparcv9 \
 		--role interpreter $(SPARCV9_DYNAMIC_DIR)/ld.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine sparcv9 \
 		--role libc $(SPARCV9_DYNAMIC_DIR)/libc.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine sparcv9 \
 		--role module $(SPARCV9_DYNAMIC_DIR)/tlstest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine sparcv9 \
+		--role rpath-module $(SPARCV9_DYNAMIC_DIR)/rpathtest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine sparcv9 \
+		--role version-definition $(SPARCV9_DYNAMIC_DIR)/verstest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine sparcv9 \
+		--role version-consumer $(SPARCV9_DYNAMIC_DIR)/versuse.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine sparcv9 \
 		--role program $(SPARCV9_DYNAMIC_DIR)/dyntest
 	@echo "zedBSD SPARC V9 dynamic userland artifacts: PASS"
@@ -397,6 +499,10 @@ sparcv9-bootloader: $(BUILD)/boot/stage1.bin $(BUILD)/boot/stage2.bin
 $(BUILD)/hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
 	$(SPARCV9_DYNAMIC_DIR)/ld.so $(SPARCV9_DYNAMIC_DIR)/libc.so \
 	$(SPARCV9_DYNAMIC_DIR)/tlstest.so $(SPARCV9_DYNAMIC_DIR)/dyntest \
+	$(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so \
+	$(SPARCV9_DYNAMIC_DIR)/rpathtest.so \
+	$(SPARCV9_DYNAMIC_DIR)/verstest.so \
+	$(SPARCV9_DYNAMIC_DIR)/versuse.so \
 	$(BUILD)/boot/stage1.bin \
 	$(BUILD)/boot/stage2.bin scripts/make-sparcv9-hdd-image.py \
 	scripts/check-sparcv9-hdd-image.py
@@ -408,11 +514,19 @@ $(BUILD)/hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
 		--rtld $(SPARCV9_DYNAMIC_DIR)/ld.so \
 		--libc $(SPARCV9_DYNAMIC_DIR)/libc.so \
 		--tlstest $(SPARCV9_DYNAMIC_DIR)/tlstest.so \
+		--rpathdep $(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so \
+		--rpathtest $(SPARCV9_DYNAMIC_DIR)/rpathtest.so \
+		--verstest $(SPARCV9_DYNAMIC_DIR)/verstest.so \
+		--versuse $(SPARCV9_DYNAMIC_DIR)/versuse.so \
 		--dyntest $(SPARCV9_DYNAMIC_DIR)/dyntest $@
 
 $(BUILD)/ufs-root.img: $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
 	$(SPARCV9_DYNAMIC_DIR)/ld.so $(SPARCV9_DYNAMIC_DIR)/libc.so \
 	$(SPARCV9_DYNAMIC_DIR)/tlstest.so $(SPARCV9_DYNAMIC_DIR)/dyntest \
+	$(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so \
+	$(SPARCV9_DYNAMIC_DIR)/rpathtest.so \
+	$(SPARCV9_DYNAMIC_DIR)/verstest.so \
+	$(SPARCV9_DYNAMIC_DIR)/versuse.so \
 	scripts/make-ufs1-root-image.py \
 	scripts/ufs1_format.py
 	$(PYTHON) scripts/make-ufs1-root-image.py --force \
@@ -421,6 +535,10 @@ $(BUILD)/ufs-root.img: $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
 		--native-rtld $(SPARCV9_DYNAMIC_DIR)/ld.so \
 		--native-libc $(SPARCV9_DYNAMIC_DIR)/libc.so \
 		--native-tlstest $(SPARCV9_DYNAMIC_DIR)/tlstest.so \
+		--native-rpathdep $(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so \
+		--native-rpathtest $(SPARCV9_DYNAMIC_DIR)/rpathtest.so \
+		--native-verstest $(SPARCV9_DYNAMIC_DIR)/verstest.so \
+		--native-versuse $(SPARCV9_DYNAMIC_DIR)/versuse.so \
 		--native-dyntest $(SPARCV9_DYNAMIC_DIR)/dyntest $@
 
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh \
@@ -448,6 +566,10 @@ sparcv9-disk-check: $(BUILD)/hdd-image.img
 		--rtld $(SPARCV9_DYNAMIC_DIR)/ld.so \
 		--libc $(SPARCV9_DYNAMIC_DIR)/libc.so \
 		--tlstest $(SPARCV9_DYNAMIC_DIR)/tlstest.so \
+		--rpathdep $(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so \
+		--rpathtest $(SPARCV9_DYNAMIC_DIR)/rpathtest.so \
+		--verstest $(SPARCV9_DYNAMIC_DIR)/verstest.so \
+		--versuse $(SPARCV9_DYNAMIC_DIR)/versuse.so \
 		--dyntest $(SPARCV9_DYNAMIC_DIR)/dyntest $<
 
 sparcv9-entry-qemu-test: $(BUILD)/hdd-image.img

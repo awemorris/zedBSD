@@ -5,9 +5,14 @@
 #include "kern/namei.h"
 #include "kern/clock.h"
 #include "kern/record-lock.h"
+#include "kern/posix-acl.h"
 
 #include <errno.h>
 #include <string.h>
+
+extern int posix_acl_chmod(struct inode *, mode_t) __attribute__((weak));
+extern int posix_acl_inherit(struct inode *, struct inode *, mode_t *)
+    __attribute__((weak));
 
 #define INODE_COMMON_MAX 256U
 #define INODE_CACHE_MAX 512U
@@ -457,6 +462,11 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 	error = i->i_op->setattr(i, &requested, mask);
 	if (error != 0)
 		return error;
+	if ((mask & INODE_ATTR_MODE) != 0 && posix_acl_chmod != NULL) {
+		error = posix_acl_chmod(i, requested.st_mode);
+		if (error != 0)
+			return error;
+	}
 	if (mask & INODE_ATTR_MODE)
 		i->i_mode = (i->i_mode & S_IFMT) |
 			(requested.st_mode & ~S_IFMT);
@@ -502,6 +512,21 @@ int inode_create(struct inode *i, const struct componentname *n, mode_t m,
 	if (readonly(i)) return EROFS;
 	error = i->i_op != NULL && i->i_op->create != NULL ?
 		i->i_op->create(i, n, m, r) : EOPNOTSUPP;
+	if (error == 0 && posix_acl_inherit != NULL) {
+		mode_t inherited = (*r)->i_mode;
+		error = posix_acl_inherit(i, *r, &inherited);
+		if (error == 0 && inherited != (*r)->i_mode) {
+			struct stat status;
+			memset(&status, 0, sizeof(status));status.st_mode = inherited;
+			error = inode_setattr(*r, &status, INODE_ATTR_MODE);
+		}
+		if (error != 0) {
+			if (i->i_op != NULL && i->i_op->unlink != NULL)
+				(void)i->i_op->unlink(i, n);
+			(*r)->i_flags |= INODE_DEAD;
+			inode_release(*r);*r = NULL;
+		}
+	}
 	if (error == 0) {
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
@@ -518,6 +543,21 @@ int inode_mkdir(struct inode *i, const struct componentname *n, mode_t m,
 	if (readonly(i)) return EROFS;
 	error = i->i_op != NULL && i->i_op->mkdir != NULL ?
 		i->i_op->mkdir(i, n, m, r) : EOPNOTSUPP;
+	if (error == 0 && posix_acl_inherit != NULL) {
+		mode_t inherited = (*r)->i_mode;
+		error = posix_acl_inherit(i, *r, &inherited);
+		if (error == 0 && inherited != (*r)->i_mode) {
+			struct stat status;
+			memset(&status, 0, sizeof(status));status.st_mode = inherited;
+			error = inode_setattr(*r, &status, INODE_ATTR_MODE);
+		}
+		if (error != 0) {
+			if (i->i_op != NULL && i->i_op->rmdir != NULL)
+				(void)i->i_op->rmdir(i, n);
+			(*r)->i_flags |= INODE_DEAD;
+			inode_release(*r);*r = NULL;
+		}
+	}
 	if (error == 0) {
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
@@ -706,6 +746,73 @@ int inode_truncate(struct inode *i, off_t size)
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	return error;
 }
+
+static int
+xattr_name_valid(const char *name)
+{
+	size_t length;
+	if (name == NULL)
+		return 0;
+	for (length = 0; length <= INODE_XATTR_NAME_MAX && name[length] != '\0';
+	    length++) ;
+	return length != 0 && length <= INODE_XATTR_NAME_MAX;
+}
+
+ssize_t
+inode_getxattr(struct inode *inode, const char *name, void *value, size_t size)
+{
+	if (inode == NULL || !xattr_name_valid(name) ||
+	    (value == NULL && size != 0) || size > INODE_XATTR_SIZE_MAX)
+		return -EINVAL;
+	return inode->i_op != NULL && inode->i_op->getxattr != NULL ?
+		inode->i_op->getxattr(inode, name, value, size) : -EOPNOTSUPP;
+}
+
+int
+inode_setxattr(struct inode *inode, const char *name, const void *value,
+	size_t size, unsigned flags)
+{
+	int error;
+	if (inode == NULL || !xattr_name_valid(name) ||
+	    (value == NULL && size != 0) || size > INODE_XATTR_SIZE_MAX ||
+	    (flags & ~(INODE_XATTR_CREATE | INODE_XATTR_REPLACE)) != 0 ||
+	    flags == (INODE_XATTR_CREATE | INODE_XATTR_REPLACE))
+		return EINVAL;
+	if (readonly(inode))
+		return EROFS;
+	error = inode->i_op != NULL && inode->i_op->setxattr != NULL ?
+		inode->i_op->setxattr(inode, name, value, size, flags) :
+		EOPNOTSUPP;
+	if (error == 0)
+		inode_touch(inode, INODE_ATTR_CTIME);
+	return error;
+}
+
+ssize_t
+inode_listxattr(struct inode *inode, char *list, size_t size)
+{
+	if (inode == NULL || (list == NULL && size != 0) ||
+	    size > INODE_XATTR_SIZE_MAX)
+		return -EINVAL;
+	return inode->i_op != NULL && inode->i_op->listxattr != NULL ?
+		inode->i_op->listxattr(inode, list, size) : -EOPNOTSUPP;
+}
+
+int
+inode_removexattr(struct inode *inode, const char *name)
+{
+	int error;
+	if (inode == NULL || !xattr_name_valid(name))
+		return EINVAL;
+	if (readonly(inode))
+		return EROFS;
+	error = inode->i_op != NULL && inode->i_op->removexattr != NULL ?
+		inode->i_op->removexattr(inode, name) : EOPNOTSUPP;
+	if (error == 0)
+		inode_touch(inode, INODE_ATTR_CTIME);
+	return error;
+}
+
 int inode_sync(struct inode *i)
 {
 	if (i == NULL) return EINVAL;

@@ -7,6 +7,7 @@
 #include "kern/cred.h"
 #include "kern/file.h"
 #include "kern/process.h"
+#include "kern/process-timer.h"
 #include "kern/thread.h"
 #include "kern/tty.h"
 #include "kern/vmspace.h"
@@ -470,6 +471,7 @@ process_execve(struct process *process, const char *path, char *const argv[],
 	if (error != 0)
 		goto out;
 	filedesc_close_on_exec(process->fd);
+	process_timer_cleanup(process);
 	signal_exec(process);
 	process->did_exec = 1;
 	vmspace_free(old_vm);

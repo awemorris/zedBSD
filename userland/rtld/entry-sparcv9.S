@@ -5,6 +5,8 @@
 _rtld_start:
 	clr %fp
 	add %sp, 2047, %l0
+	/* Keep the register-window spill area below argc/argv/envp. */
+	sub %sp, 176, %sp
 	mov %l0, %o0
 	call rtld_main
 	 nop

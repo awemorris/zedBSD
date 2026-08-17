@@ -22,6 +22,7 @@ ZEDBSD_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
 	-Iinclude -Iinclude/uapi -Isrc -I. -Ilibc/include
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
+	$(BUILD)/src/kern/process-timer.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/waitq.o \
 	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/sysctl.o \
 	$(BUILD)/src/kern/resource.o \
@@ -34,6 +35,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/filedesc.o \
 	$(BUILD)/src/kern/record-lock.o \
 	$(BUILD)/src/kern/pipe.o $(BUILD)/src/kern/cred.o \
+	$(KERN_ACL_OBJS) \
+	$(KERN_QUOTA_OBJS) \
 	$(BUILD)/src/kern/signal.o \
 	$(BUILD)/src/kern/cwdinfo.o $(BUILD)/src/kern/elf.o \
 	$(BUILD)/src/kern/exec.o $(BUILD)/src/kern/user-probe.o \
@@ -64,12 +67,14 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/mbr-partition.o \
 	$(BUILD)/src/kern/pcat/platform.o $(BUILD)/src/kern/image.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \
-	$(HAL_PCAT_OBJS) $(KERN_OBJS) $(KERN_UFS1_OBJS)
+	$(HAL_PCAT_OBJS) $(KERN_OBJS) $(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS) \
+	$(KERN_UFS_CONSISTENCY_OBJS)
 
 all: $(BUILD)/bootsect.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
 	$(BUILD)/bin/noct $(BUILD)/bin/nettest $(BUILD)/bin/ping \
 	$(BUILD)/bin/ifconfig $(BUILD)/bin/route $(BUILD)/bin/dhcpcd \
-	$(BUILD)/bin/nslookup $(BUILD)/hdd-image.img \
+	$(BUILD)/bin/nslookup $(BUILD)/bin/sysctl $(BUILD)/bin/mount \
+	$(BUILD)/bin/umount $(BUILD)/hdd-image.img \
 	$(BUILD)/zedbsd-grub.iso
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
@@ -148,8 +153,11 @@ I386_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/i386.img
 I386_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/noct \
 	$(BUILD)/bin/nettest $(BUILD)/bin/ping $(BUILD)/bin/ifconfig \
 	$(BUILD)/bin/route $(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup \
-	$(BUILD)/bin/sysctl $(BUILD)/dynamic/ld.so $(BUILD)/dynamic/libc.so \
-	$(BUILD)/dynamic/dyntest $(BUILD)/dynamic/tlstest.so
+	$(BUILD)/bin/sysctl $(BUILD)/bin/mount $(BUILD)/bin/umount \
+	$(BUILD)/dynamic/ld.so $(BUILD)/dynamic/libc.so \
+	$(BUILD)/dynamic/dyntest $(BUILD)/dynamic/tlstest.so \
+	$(BUILD)/dynamic/alt/rpathdep.so $(BUILD)/dynamic/rpathtest.so \
+	$(BUILD)/dynamic/verstest.so $(BUILD)/dynamic/versuse.so
 I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/noct=$(BUILD)/bin/noct \
 	--file /bin/nettest=$(BUILD)/bin/nettest \
@@ -159,9 +167,15 @@ I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
 	--file /bin/nslookup=$(BUILD)/bin/nslookup \
 	--file /bin/sysctl=$(BUILD)/bin/sysctl \
+	--file /bin/mount=$(BUILD)/bin/mount \
+	--file /bin/umount=$(BUILD)/bin/umount \
 	--file /lib/ld.so=$(BUILD)/dynamic/ld.so \
 	--file /lib/libc.so=$(BUILD)/dynamic/libc.so \
 	--file /lib/tlstest.so=$(BUILD)/dynamic/tlstest.so \
+	--file /lib/alt/rpathdep.so=$(BUILD)/dynamic/alt/rpathdep.so \
+	--file /lib/rpthtest.so=$(BUILD)/dynamic/rpathtest.so \
+	--file /lib/verstest.so=$(BUILD)/dynamic/verstest.so \
+	--file /lib/versuse.so=$(BUILD)/dynamic/versuse.so \
 	--file /bin/dyntest=$(BUILD)/dynamic/dyntest
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
@@ -242,7 +256,8 @@ USER_LIBC_OBJS := $(BUILD)/userland/crt0.o \
 	$(BUILD)/userland/libc/resolver.o $(BUILD)/userland/libc/resolver-dns.o \
 	$(BUILD)/userland/libc/signal.o \
 	$(BUILD)/libc/heap.o \
-	$(BUILD)/libc/string.o $(BUILD)/libc/ctype.o $(BUILD)/libc/int64.o \
+	$(BUILD)/libc/string.o $(BUILD)/libc/ctype.o $(BUILD)/libc/locale.o \
+	$(BUILD)/libc/wide.o $(BUILD)/libc/int64.o \
 	$(BUILD)/libc/strto.o $(BUILD)/libc/format.o $(BUILD)/libc/stdio.o
 USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-fdata-sections -msoft-float -mno-80387 -mno-fp-ret-in-387 \
@@ -259,25 +274,29 @@ $(BUILD)/userland/tests/posix-r2-remaining.o: OBJ_CFLAGS = $(USER_CFLAGS)
 
 $(BUILD)/POSIX-R1.ELF: $(USER_LIBC_OBJS) \
 	$(BUILD)/userland/tests/syscall-smoke.o $(PCAT)/user.ld \
-	$(USER_ELF_CHECK)
+	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
 		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
-		$(BUILD)/userland/tests/syscall-smoke.o -o $@
+		$(BUILD)/userland/tests/syscall-smoke.o \
+		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
 $(BUILD)/POSIX-R2.ELF: $(USER_LIBC_OBJS) \
-	$(BUILD)/userland/tests/posix-r2.o $(PCAT)/user.ld $(USER_ELF_CHECK)
+	$(BUILD)/userland/tests/posix-r2.o $(ZEDBSD_SOFTFLOAT_OBJECTS) \
+	$(PCAT)/user.ld $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
 		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
-		$(BUILD)/userland/tests/posix-r2.o -o $@
+		$(BUILD)/userland/tests/posix-r2.o \
+		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
 $(BUILD)/POSIX-R2-REMAINING.ELF: $(USER_LIBC_OBJS) \
 	$(BUILD)/userland/tests/posix-r2-remaining.o $(PCAT)/user.ld \
-	$(USER_ELF_CHECK)
+	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
 		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
-		$(BUILD)/userland/tests/posix-r2-remaining.o -o $@
+		$(BUILD)/userland/tests/posix-r2-remaining.o \
+		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
 USER_SYSCTL_OBJ := $(BUILD)/userland/sysctl/main.o
@@ -291,6 +310,21 @@ $(BUILD)/bin/sysctl: $(USER_LIBC_OBJS) $(USER_SYSCTL_OBJ) \
 		$(USER_SYSCTL_OBJ) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(USER_ELF_CHECK) $@
+
+USER_MOUNT_OBJ := $(BUILD)/userland/mount/main.o
+$(USER_MOUNT_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(USER_MOUNT_OBJ): OBJ_CFLAGS = $(USER_CFLAGS)
+$(BUILD)/bin/mount: $(USER_LIBC_OBJS) $(USER_MOUNT_OBJ) \
+	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PCAT)/user.ld $(USER_ELF_CHECK)
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
+		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
+		$(USER_MOUNT_OBJ) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
+	$(PYTHON) $(USER_ELF_CHECK) $@
+$(BUILD)/bin/umount: $(BUILD)/bin/mount
+	@mkdir -p $(dir $@)
+	cp -f $< $@
 
 USER_NOCT_GLUE_OBJS := $(BUILD)/userland/noct/runtime/main.o \
 	$(BUILD)/userland/noct/runtime/memory.o \
@@ -400,6 +434,7 @@ DYNAMIC_LIBC_SOURCES := userland/libc/posix.c userland/libc/poll.c \
 	userland/libc/socket.c \
 	userland/libc/resolver.c userland/libc/resolver-dns.c \
 	userland/libc/signal.c libc/heap.c libc/string.c libc/ctype.c \
+	libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c libc/format.c libc/stdio.c
 DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
 	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/libc/syscall.o
@@ -473,7 +508,7 @@ $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
 		-z now -z relro -z separate-code $(DYNAMIC_RTLD_OBJS) -o $@
 
 $(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
-	$(LD) -m elf_i386 -shared -soname libc.so --hash-style=sysv -z now \
+	$(LD) -m elf_i386 -shared -soname libc.so --hash-style=both -z now \
 		-z relro -z separate-code $(USER_STACK_LDFLAGS) \
 		$(DYNAMIC_LIBC_OBJS) -o $@
 
@@ -481,16 +516,48 @@ $(DYNAMIC_DIR)/obj/userland/crt1.o: userland/crt1-i386.S
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -c $< -o $@
 
+$(DYNAMIC_DIR)/alt/rpathdep.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_i386 -shared -soname rpathdep.so --hash-style=gnu \
+		-z now -z relro -z separate-code $< -o $@
+
 $(DYNAMIC_DIR)/tlstest.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o $(DYNAMIC_DIR)/ld.so
-	$(LD) -m elf_i386 -shared -soname tlstest.so --hash-style=sysv \
+	$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_i386 -shared -soname tlstest.so --hash-style=gnu \
+		-z now -z relro -z separate-code --enable-new-dtags \
+		-rpath '$$ORIGIN/alt' \
+		$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+		-L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
+
+$(DYNAMIC_DIR)/rpathtest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/rpathtest.o \
+	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_i386 -shared -soname rpthtest.so --hash-style=gnu \
+		-z now -z relro -z separate-code --disable-new-dtags \
+		-rpath '$$ORIGIN/alt' $< -L$(DYNAMIC_DIR)/alt \
+		-l:rpathdep.so -o $@
+
+$(DYNAMIC_DIR)/verstest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/versiontest.o \
+	userland/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_i386 -shared -soname verstest.so --hash-style=gnu \
 		-z now -z relro -z separate-code \
-		$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o -o $@
+		--version-script=userland/tests/versiontest.map $< -o $@
+
+$(DYNAMIC_DIR)/versuse.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/versionuse.o \
+	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_i386 -shared -soname versuse.so --hash-style=gnu \
+		-z now -z relro -z separate-code $< -L$(DYNAMIC_DIR) \
+		-l:verstest.so -o $@
 
 $(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/userland/crt1.o \
 	$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
-	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so
-	$(CC) -m32 -nostdlib -no-pie -Wl,--no-relax,--hash-style=sysv,-z,now,-z,relro \
+	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so \
+	$(DYNAMIC_DIR)/versuse.so
+	$(CC) -m32 -nostdlib -pie -Wl,--no-relax,--hash-style=sysv,-z,now,-z,relro \
 		-Wl,-z,separate-code,-z,stack-size=0x100000,--allow-shlib-undefined \
 		-Wl,--dynamic-linker=/lib/ld.so \
 		$(DYNAMIC_DIR)/obj/userland/crt1.o \
@@ -498,10 +565,15 @@ $(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/userland/crt1.o \
 		-L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) -l:libc.so -o $@
 
 dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
-	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so scripts/check-dynamic-elf.py
+	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so \
+	$(DYNAMIC_DIR)/rpathtest.so $(DYNAMIC_DIR)/verstest.so \
+	$(DYNAMIC_DIR)/versuse.so scripts/check-dynamic-elf.py
 	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role interpreter $(DYNAMIC_DIR)/ld.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role libc $(DYNAMIC_DIR)/libc.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role module $(DYNAMIC_DIR)/tlstest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role rpath-module $(DYNAMIC_DIR)/rpathtest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role version-definition $(DYNAMIC_DIR)/verstest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role version-consumer $(DYNAMIC_DIR)/versuse.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role program $(DYNAMIC_DIR)/dyntest
 	@echo "zedBSD i386 dynamic userland artifacts: PASS"
 .PHONY: dynamic-userland-check

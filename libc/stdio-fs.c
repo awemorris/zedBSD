@@ -18,6 +18,7 @@
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
+#include "libc/stdio-internal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>

@@ -4,6 +4,7 @@
 #include "kern/fat-vfs.h"
 #include "kern/file.h"
 #include "kern/ufs1.h"
+#include "kern/ufs2.h"
 #include "kern/mount.h"
 #include "kern/partition.h"
 #include "kern/platform.h"
@@ -356,6 +357,9 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	error = filesystem_register(&ufs1_filesystem_type);
 	if (error != 0)
 		return vfs_fail("register UFS1", error);
+	error = filesystem_register(&ufs2_filesystem_type);
+	if (error != 0)
+		return vfs_fail("register UFS2", error);
 	error = filesystem_register(&devfs_type);
 	if (error != 0)
 		return vfs_fail("register devfs", error);

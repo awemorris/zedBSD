@@ -28,3 +28,19 @@ void *rtld_memset(void *destination, int value, size_t size)
 	while (size-- != 0) *d++ = (unsigned char)value;
 	return destination;
 }
+
+/*
+ * GCC may lower aggregate copies and clears to the conventional libc entry
+ * points even when the runtime linker itself only calls the rtld_* helpers.
+ * The interpreter is self-contained, so provide those compiler libcalls here
+ * rather than leaving a bootstrap dependency on libc.so.
+ */
+void *memcpy(void *destination, const void *source, size_t size)
+{
+	return rtld_memcpy(destination, source, size);
+}
+
+void *memset(void *destination, int value, size_t size)
+{
+	return rtld_memset(destination, value, size);
+}

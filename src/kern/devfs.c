@@ -7,16 +7,20 @@
 #include "kern/kmem.h"
 #include "kern/mount.h"
 #include "kern/namei.h"
+#include "kern/tty.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/statvfs.h>
 
 #define DEVFS_BLOCK_INO_BASE 0x100000000ULL
 #define DEVFS_NAME_MAX 32U
-#define DEVFS_ENTRY_MAX (CDEV_MAX + DISK_MAX + 1U)
+#define DEVFS_ENTRY_MAX (CDEV_MAX + DISK_MAX + 10U)
 #define DEVFS_SHM_INO 2U
+#define DEVFS_PTS_INO 3U
+#define DEVFS_PTS_INO_BASE 0x200000000ULL
 #define DEVFS_HIGH __attribute__((section(".hightext")))
 
 typedef char devfs_ino_must_be_64_bit[(sizeof(ino_t) >= 8) ? 1 : -1];
@@ -42,6 +46,7 @@ static struct devfs_node nodes[CDEV_MAX] __attribute__((section(".vfs_bss")));
 static unsigned node_count __attribute__((section(".vfs_bss")));
 static struct inode *devfs_root __attribute__((section(".vfs_bss")));
 static struct inode *devfs_shm __attribute__((section(".vfs_bss")));
+static struct inode *devfs_pts __attribute__((section(".vfs_bss")));
 static const struct file_ops devfs_block_ops;
 
 static DEVFS_HIGH int
@@ -62,13 +67,50 @@ devfs_lookup(struct inode *directory, const struct componentname *component,
 	unsigned i;
 
 	if (component_equal(component, ".") || component_equal(component, "..")) {
-		inode_ref(directory);
-		*result = directory;
+		struct inode *target = component_equal(component, "..") &&
+		    directory == devfs_pts ? devfs_root : directory;
+		inode_ref(target);
+		*result = target;
+		return 0;
+	}
+	if (directory == devfs_pts) {
+		uint64_t number = 0;
+		if (component->cn_namelen == 0 || component->cn_namelen > 3U)
+			return ENOENT;
+		for (i = 0; i < component->cn_namelen; i++) {
+			unsigned char digit =
+			    (unsigned char)component->cn_nameptr[i];
+			if (digit < '0' || digit > '9')
+				return ENOENT;
+			number = number * 10U + (digit - '0');
+		}
+		if (number > UINT32_MAX || !tty_pty_exists((unsigned)number))
+			return ENOENT;
+		if (inode_get(directory->i_mount,
+		    (ino_t)(DEVFS_PTS_INO_BASE + number), &inode) != 0) {
+			inode = inode_alloc(directory->i_mount);
+			if (inode == NULL)
+				return ENOSPC;
+			inode->i_type = INODE_CHAR;
+			inode->i_ino = (ino_t)(DEVFS_PTS_INO_BASE + number);
+			inode->i_op = directory->i_op;
+			inode->i_fop = &tty_pty_slave_file_ops;
+			inode->i_data = (void *)(uintptr_t)(number + 1U);
+			inode->i_linkcount = 1;
+			inode->i_mode = S_IFCHR | 0620U;
+			inode->i_rdev = (dev_t)(0x00020000U + number);
+		}
+		*result = inode;
 		return 0;
 	}
 	if (component_equal(component, "shm")) {
 		inode_ref(devfs_shm);
 		*result = devfs_shm;
+		return 0;
+	}
+	if (component_equal(component, "pts")) {
+		inode_ref(devfs_pts);
+		*result = devfs_pts;
 		return 0;
 	}
 	for (i = 0; i < node_count; i++)
@@ -136,8 +178,34 @@ devfs_dir_open(struct file *file)
 	if (state == NULL)
 		return ENFILE;
 	memset(state, 0, sizeof(*state));
+	if (file->f_inode == devfs_pts) {
+		unsigned indices[8];
+		unsigned count = tty_pty_snapshot(indices,
+		    sizeof(indices) / sizeof(indices[0]));
+		for (i = 0; i < count && i < sizeof(indices) / sizeof(indices[0]);
+		    i++) {
+			struct devfs_dir_entry *entry =
+			    &state->entries[state->count++];
+			unsigned value = indices[i];
+			char digits[4];
+			unsigned used = 0, j;
+			do { digits[used++] = (char)('0' + value % 10U);
+			    value /= 10U; } while (value != 0);
+			for (j = 0; j < used; j++)
+				entry->name[j] = digits[used - j - 1U];
+			entry->name[used] = '\0';
+			entry->ino = (ino_t)(DEVFS_PTS_INO_BASE + indices[i]);
+			entry->type = INODE_CHAR;
+		}
+		file->f_data = state;
+		return 0;
+	}
 	strcpy(state->entries[state->count].name, "shm");
 	state->entries[state->count].ino = DEVFS_SHM_INO;
+	state->entries[state->count].type = INODE_DIR;
+	state->count++;
+	strcpy(state->entries[state->count].name, "pts");
+	state->entries[state->count].ino = DEVFS_PTS_INO;
 	state->entries[state->count].type = INODE_DIR;
 	state->count++;
 	for (i = 0; i < node_count; i++) {
@@ -369,6 +437,16 @@ devfs_mount_impl(struct mount *mountp)
 	devfs_shm->i_linkcount = 2;
 	devfs_shm->i_mode = S_IFDIR | 0555U;
 	devfs_shm->i_flags = INODE_NOCACHE_CHILDREN;
+	devfs_pts = inode_alloc(mountp);
+	if (devfs_pts == NULL)
+		return ENOSPC;
+	devfs_pts->i_type = INODE_DIR;
+	devfs_pts->i_ino = DEVFS_PTS_INO;
+	devfs_pts->i_op = &devfs_inode_ops;
+	devfs_pts->i_fop = &devfs_directory_ops;
+	devfs_pts->i_linkcount = 2;
+	devfs_pts->i_mode = S_IFDIR | 0555U;
+	devfs_pts->i_flags = INODE_NOCACHE_CHILDREN;
 	for (i = 0; i < node_count; i++) {
 		struct inode *inode = inode_alloc(mountp);
 		if (inode == NULL)
@@ -376,7 +454,7 @@ devfs_mount_impl(struct mount *mountp)
 		nodes[i].device = cdev_at(i);
 		nodes[i].inode = inode;
 		inode->i_type = INODE_CHAR;
-		inode->i_ino = 3U + i;
+		inode->i_ino = 4U + i;
 		inode->i_op = &devfs_inode_ops;
 		inode->i_fop = &cdev_file_ops;
 		inode->i_data = (void *)nodes[i].device;
@@ -388,8 +466,25 @@ devfs_mount_impl(struct mount *mountp)
 	return 0;
 }
 
+static DEVFS_HIGH int
+devfs_statvfs(struct mount *mountp, struct statvfs *result)
+{
+	(void)mountp;
+	if (result == NULL)
+		return EINVAL;
+	memset(result, 0, sizeof(*result));
+	result->f_bsize = result->f_frsize = 1U;
+	result->f_files = DEVFS_ENTRY_MAX;
+	result->f_ffree = node_count < DEVFS_ENTRY_MAX ?
+	    DEVFS_ENTRY_MAX - node_count : 0;
+	result->f_favail = result->f_ffree;
+	result->f_namemax = DEVFS_NAME_MAX - 1U;
+	return 0;
+}
+
 const struct filesystem_type devfs_type = {
 	.fs_name = "devfs",
 	.fs_flags = FILESYSTEM_NODEV,
 	.mount = devfs_mount_impl,
+	.statvfs = devfs_statvfs,
 };

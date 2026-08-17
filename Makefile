@@ -84,6 +84,20 @@ KERN_UFS1_SOURCES := \
 	src/kern/ufs1/ufs1-super.c \
 	src/kern/ufs1/ufs1-vfs.c
 KERN_UFS1_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_UFS1_SOURCES))
+KERN_UFS2_SOURCES := \
+	src/kern/ufs2/ufs2-super.c \
+	src/kern/ufs2/ufs2-vfs.c
+KERN_UFS2_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_UFS2_SOURCES))
+KERN_UFS_CONSISTENCY_SOURCES := \
+	src/kern/ufs/ufs-journal.c \
+	src/kern/ufs/ufs-softdep.c \
+	src/kern/ufs/ufs-snapshot.c
+KERN_UFS_CONSISTENCY_OBJS := $(patsubst %.c,$(BUILD)/%.o,\
+	$(KERN_UFS_CONSISTENCY_SOURCES))
+KERN_ACL_SOURCES := src/kern/posix-acl.c
+KERN_ACL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_ACL_SOURCES))
+KERN_QUOTA_SOURCES := src/kern/quota.c
+KERN_QUOTA_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_QUOTA_SOURCES))
 
 # ----------------------------------------------------------------------
 # Generic compile rules.  Per-object flag overrides use target-specific
@@ -151,6 +165,15 @@ posix-api-matrix-check: tests/posix-r2-api.csv \
 	scripts/check-posix-api-matrix.py
 	$(PYTHON) scripts/check-posix-api-matrix.py
 
+toolchain-info:
+	bash scripts/collect-toolchain-info.sh
+
+regression-matrix-build:
+	bash scripts/run-regression-matrix.sh build
+
+regression-matrix-runtime:
+	bash scripts/run-regression-matrix.sh runtime
+
 $(BUILD)/tests/fat-host-test: tests/fat-host-test.c \
 	src/kern/fs.c src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c
 	@mkdir -p $(dir $@)
@@ -217,9 +240,34 @@ $(BUILD)/tests/ufs1-format-host-test: tests/ufs1-format-host-test.c \
 ufs1-format-host-test: $(BUILD)/tests/ufs1-format-host-test
 	@$(BUILD)/tests/ufs1-format-host-test
 
+$(BUILD)/tests/ufs2-format-host-test: tests/ufs2-format-host-test.c \
+	src/kern/ufs1/ufs1-endian.c src/kern/ufs2/ufs2-super.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/ufs1/ufs1-endian.c \
+		src/kern/ufs2/ufs2-super.c $< -o $@
+
+ufs2-format-host-test: $(BUILD)/tests/ufs2-format-host-test
+	@$(BUILD)/tests/ufs2-format-host-test
+
+$(BUILD)/tests/ufs-consistency-host-test: tests/ufs-consistency-host-test.c \
+	$(KERN_UFS_CONSISTENCY_SOURCES)
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Isrc $(KERN_UFS_CONSISTENCY_SOURCES) $< -o $@
+
 $(BUILD)/tests/ufs1-test.img: scripts/make-ufs1-image.py scripts/ufs1_format.py
 	@mkdir -p $(dir $@)
 	PYTHONPATH=scripts $(PYTHON) scripts/make-ufs1-image.py --size-mib 4 $@
+
+$(BUILD)/tests/ufs1-multicg-test.img: scripts/make-ufs1-image.py scripts/ufs1_format.py
+	@mkdir -p $(dir $@)
+	PYTHONPATH=scripts $(PYTHON) scripts/make-ufs1-image.py --size-mib 16 \
+		--cylinder-groups 4 $@
+
+$(BUILD)/tests/ufs2-multicg-test.img: scripts/make-ufs2-image.py \
+	scripts/ufs2_format.py scripts/ufs1_format.py
+	@mkdir -p $(dir $@)
+	PYTHONPATH=scripts $(PYTHON) scripts/make-ufs2-image.py --size-mib 16 \
+		--cylinder-groups 4 --journal-mib 1 --snapshot-mib 2 $@
 
 $(BUILD)/tests/ufs1-vfs-host-test: tests/ufs1-vfs-host-test.c \
 	$(BUILD)/tests/ufs1-test.img $(VFS_CORE_SOURCES) $(KERN_UFS1_SOURCES)
@@ -227,6 +275,25 @@ $(BUILD)/tests/ufs1-vfs-host-test: tests/ufs1-vfs-host-test.c \
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc \
 		-DUFS1_TEST_IMAGE='"$(BUILD)/tests/ufs1-test.img"' \
 		$(VFS_CORE_SOURCES) $(KERN_UFS1_SOURCES) tests/vfs-host-stubs.c $< -o $@
+
+$(BUILD)/tests/ufs1-multicg-vfs-host-test: tests/ufs1-vfs-host-test.c \
+	$(BUILD)/tests/ufs1-multicg-test.img $(VFS_CORE_SOURCES) $(KERN_UFS1_SOURCES)
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc \
+		-DUFS1_TEST_IMAGE='"$(BUILD)/tests/ufs1-multicg-test.img"' \
+		$(VFS_CORE_SOURCES) $(KERN_UFS1_SOURCES) tests/vfs-host-stubs.c $< -o $@
+
+$(BUILD)/tests/ufs2-multicg-vfs-host-test: tests/ufs1-vfs-host-test.c \
+	$(BUILD)/tests/ufs2-multicg-test.img $(VFS_CORE_SOURCES) \
+	$(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES) \
+	$(KERN_UFS_CONSISTENCY_SOURCES) $(KERN_QUOTA_SOURCES)
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc \
+		-DUFS2_TEST_IMAGE='"$(BUILD)/tests/ufs2-multicg-test.img"' \
+		$(VFS_CORE_SOURCES) src/kern/ufs1/ufs1-endian.c \
+		src/kern/ufs2/ufs2-super.c src/kern/ufs2/ufs2-vfs.c \
+		$(KERN_UFS_CONSISTENCY_SOURCES) $(KERN_QUOTA_SOURCES) \
+		tests/vfs-host-stubs.c $< -o $@
 
 $(BUILD)/tests/vmspace-host-test: tests/vmspace-host-test.c \
 	src/kern/vmspace.c src/kern/vm-object.c tests/vm-sync-host-stubs.c
@@ -348,6 +415,12 @@ $(BUILD)/tests/checkpoint-host-test: tests/checkpoint-host-test.c \
 		-Iinclude -Iinclude/uapi -Isrc src/kern/test-checkpoint.c \
 		src/kern/buf.c src/kern/disk.c tests/disk-host-stubs.c $< -o $@
 
+$(BUILD)/tests/fault-injection-host-test: tests/fault-injection-host-test.c \
+	src/kern/test-fault.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -pthread -DZEDBSD_TEST_FAULTS -Iinclude -Isrc \
+		src/kern/test-fault.c $< -o $@
+
 VFS_CORE_SOURCES := src/kern/buf.c src/kern/disk.c src/kern/inode.c src/kern/file.c \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c src/kern/rootfs.c
 
@@ -356,9 +429,21 @@ $(BUILD)/tests/vfs-host-test: tests/vfs-host-test.c $(VFS_CORE_SOURCES)
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc $(VFS_CORE_SOURCES) \
 		tests/vfs-host-stubs.c $< -o $@
 
-$(BUILD)/tests/cred-host-test: tests/cred-host-test.c src/kern/cred.c
+$(BUILD)/tests/cred-host-test: tests/cred-host-test.c src/kern/cred.c \
+	$(KERN_ACL_SOURCES)
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Iinclude/uapi -Isrc src/kern/cred.c $< -o $@
+	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Iinclude/uapi -Isrc src/kern/cred.c \
+		$(KERN_ACL_SOURCES) $< -o $@
+
+$(BUILD)/tests/quota-host-test: tests/quota-host-test.c $(KERN_QUOTA_SOURCES)
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc $(KERN_QUOTA_SOURCES) $< -o $@
+
+$(BUILD)/tests/ufs-snapshot-host-test: tests/ufs-snapshot-host-test.c \
+	src/kern/ufs/ufs-snapshot.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc \
+		src/kern/ufs/ufs-snapshot.c $< -o $@
 
 $(BUILD)/tests/clock-rtc-host-test: tests/clock-rtc-host-test.c \
 	src/hal/x86/rtc.c
@@ -369,9 +454,15 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/blkdev-host-test \
 	$(BUILD)/tests/bufcache-host-test \
 	$(BUILD)/tests/checkpoint-host-test \
+	$(BUILD)/tests/fault-injection-host-test \
 	$(BUILD)/tests/vfs-host-test \
 	$(BUILD)/tests/ufs1-vfs-host-test \
+	$(BUILD)/tests/ufs1-multicg-vfs-host-test \
+	$(BUILD)/tests/ufs2-multicg-vfs-host-test \
+	$(BUILD)/tests/ufs-consistency-host-test \
 	$(BUILD)/tests/cred-host-test \
+	$(BUILD)/tests/quota-host-test \
+	$(BUILD)/tests/ufs-snapshot-host-test \
 	$(BUILD)/tests/clock-rtc-host-test \
 	$(BUILD)/tests/fat-host-test \
 	$(BUILD)/tests/fat-write-host-test \
@@ -396,7 +487,7 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/dns-host-test
 CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test \
 	uapi-abi-layout-check posix-header-check posix-api-matrix-check \
-	ufs1-format-host-test
+	ufs1-format-host-test ufs2-format-host-test
 
 overlay-journal-format-host-test: tests/overlay-journal-format-host-test.py \
 	scripts/overlay_journal_format.py
@@ -409,6 +500,13 @@ ufs1-format-python-test: tests/ufs1-format-host-test.py \
 	PYTHONPATH=scripts $(PYTHON) tests/ufs1-format-host-test.py
 
 CHECK_RUN_TARGETS += ufs1-format-python-test
+
+ufs2-format-python-test: tests/ufs2-format-host-test.py \
+	scripts/ufs1_format.py scripts/ufs2_format.py scripts/check-ufs1-image.py \
+	scripts/check-ufs2-image.py
+	PYTHONPATH=scripts $(PYTHON) tests/ufs2-format-host-test.py
+
+CHECK_RUN_TARGETS += ufs2-format-python-test
 
 # ----------------------------------------------------------------------
 # Architecture-specific rules (artifacts, disk images, QEMU tests,
@@ -435,4 +533,6 @@ distclean:
 .PHONY: all check clean distclean messages stdio-fs-host-test \
 	overlay-journal-format-host-test uapi-abi-layout-check \
 	posix-header-check posix-api-matrix-check ufs1-format-host-test \
-	ufs1-format-python-test
+	ufs2-format-host-test ufs1-format-python-test ufs2-format-python-test \
+	toolchain-info regression-matrix-build \
+	regression-matrix-runtime

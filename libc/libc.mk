@@ -11,6 +11,8 @@ ZEDBSD_LIBC_SOURCES := \
 	libc/heap.c \
 	libc/string.c \
 	libc/ctype.c \
+	libc/locale.c \
+	libc/wide.c \
 	libc/int64.c \
 	libc/strto.c \
 	libc/format.c \

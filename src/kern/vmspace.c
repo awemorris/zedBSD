@@ -775,22 +775,25 @@ vmspace_copy_from(struct vmspace *vm, void *destination,
 }
 
 int
-vmspace_find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
-			 size_t alignment, uintptr_t *mapped)
+vmspace_find_free_range_bounded(struct vmspace *vm, uintptr_t minimum,
+	uintptr_t maximum, size_t size, size_t alignment, uintptr_t *mapped)
 {
 	uintptr_t start, limit;
 	struct vm_region *region;
 
+	vmspace_layout_init();
 	if (vm == NULL || mapped == NULL || size == 0 ||
 	    alignment < PAGE_SIZE || (alignment & (alignment - 1U)) != 0 ||
-	    size > (size_t)(vm_layout.user_limit - vm_layout.mmap_base))
+	    minimum < vm_layout.user_minimum || maximum > vm_layout.user_limit ||
+	    minimum >= maximum || size > (size_t)(maximum - minimum))
 		return EINVAL;
 	if (size > SIZE_MAX - (PAGE_SIZE - 1U))
 		return EOVERFLOW;
 	size = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
-	limit = vm->stack_guard_bottom != 0 ?
-		vm->stack_guard_bottom : vm_layout.user_limit;
-	start = hint >= vm_layout.mmap_base ? hint : vm_layout.mmap_base;
+	limit = maximum;
+	if (vm->stack_guard_bottom != 0 && vm->stack_guard_bottom < limit)
+		limit = vm->stack_guard_bottom;
+	start = minimum;
 	if (start > UINTPTR_MAX - (alignment - 1U))
 		return ENOMEM;
 	start = (start + alignment - 1U) & ~(uintptr_t)(alignment - 1U);
@@ -818,6 +821,19 @@ vmspace_find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
 	}
 	*mapped = start;
 	return 0;
+}
+
+int
+vmspace_find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
+			 size_t alignment, uintptr_t *mapped)
+{
+	vmspace_layout_init();
+	if (hint < vm_layout.mmap_base)
+		hint = vm_layout.mmap_base;
+	if (hint >= vm_layout.user_limit)
+		return ENOMEM;
+	return vmspace_find_free_range_bounded(vm, hint, vm_layout.user_limit,
+	    size, alignment, mapped);
 }
 
 int

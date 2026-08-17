@@ -3,6 +3,8 @@
 
 #include "kern/clock.h"
 #include "kern/file.h"
+#include "kern/cdev.h"
+#include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/poll.h"
 #include "kern/process.h"
@@ -42,6 +44,7 @@ struct tty {
 	unsigned record_head, record_tail, record_used;
 	uint8_t input[TTY_INPUT_MAX];
 	unsigned input_head, input_tail, input_used;
+	unsigned hungup;
 };
 
 static struct tty console_tty;
@@ -246,6 +249,10 @@ tty_read_canonical(struct tty *tty, void *buffer, size_t size,
 	while (tty->record_used == 0) {
 		uint64_t sequence;
 		int error;
+		if (tty->hungup) {
+			spin_unlock_irqrestore(&tty->lock, irq);
+			return 0;
+		}
 		if (nonblocking) {
 			spin_unlock_irqrestore(&tty->lock, irq);
 			return -EAGAIN;
@@ -296,6 +303,10 @@ tty_read_noncanonical(struct tty *tty, void *buffer, size_t size,
 	    (minimum == 0 && tty->input_used == 0 && deciseconds != 0)) {
 		uint64_t sequence = waitq_sequence(&tty->read_waitq);
 		int error;
+		if (tty->hungup) {
+			spin_unlock_irqrestore(&tty->lock, irq);
+			return 0;
+		}
 		if (nonblocking) {
 			spin_unlock_irqrestore(&tty->lock, irq);
 			return -EAGAIN;
@@ -386,11 +397,11 @@ tty_termios_valid(const struct termios *value)
 	     value->c_ospeed == B19200 || value->c_ospeed == B38400);
 }
 
-int
-tty_console_ioctl(struct file *file, unsigned long request, uintptr_t argument)
+static int
+tty_ioctl_instance(struct tty *tty, struct file *file,
+	unsigned long request, uintptr_t argument)
 {
 	struct process *process = curthread != NULL ? curthread->proc : NULL;
-	struct tty *tty = &console_tty;
 	unsigned long irq;
 	int error = 0;
 	(void)file;
@@ -473,6 +484,12 @@ tty_console_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 }
 
 int
+tty_console_ioctl(struct file *file, unsigned long request, uintptr_t argument)
+{
+	return tty_ioctl_instance(&console_tty, file, request, argument);
+}
+
+int
 tty_console_poll(struct file *file, short events, short *revents)
 {
 	short result = events & (POLLOUT | POLLWRNORM);
@@ -506,20 +523,675 @@ tty_attach_console(struct process *process)
 void
 tty_detach_process(struct process *process)
 {
+	struct tty *tty;
 	pid_t session = 0, pgrp = 0;
 	unsigned long irq;
-	if (process == NULL || process->controlling_tty != &console_tty)
+	if (process == NULL || process->controlling_tty == NULL)
 		return;
-	irq = spin_lock_irqsave(&console_tty.lock);
+	tty = process->controlling_tty;
+	irq = spin_lock_irqsave(&tty->lock);
 	process->controlling_tty = NULL;
-	if (console_tty.session == process->pid) {
-		session = console_tty.session;
-		pgrp = console_tty.foreground_pgrp;
-		console_tty.session = console_tty.foreground_pgrp = 0;
+	if (tty->session == process->pid) {
+		session = tty->session;
+		pgrp = tty->foreground_pgrp;
+		tty->session = tty->foreground_pgrp = 0;
 	}
-	spin_unlock_irqrestore(&console_tty.lock, irq);
+	spin_unlock_irqrestore(&tty->lock, irq);
 	if (session > 0 && pgrp > 0) {
 		(void)process_signal_pgrp(session, pgrp, SIGHUP);
 		(void)process_signal_pgrp(session, pgrp, SIGCONT);
 	}
+}
+
+
+/* UNIX98-style pseudo terminals.  The slave uses the same termios and
+ * background-process checks as the physical console; only its byte transport
+ * is different. */
+#define PTY_MAX 8U
+#define PTY_OUTPUT_MAX 4096U
+
+struct pty_pair {
+	struct spinlock lock;
+	struct wait_queue output_waitq;
+	struct tty slave;
+	uint8_t output[PTY_OUTPUT_MAX];
+	unsigned output_head, output_tail, output_used;
+	unsigned index, generation;
+	unsigned active, locked, master_open;
+	unsigned slave_opens, slave_ever_opened;
+};
+
+struct pty_handle {
+	struct pty_pair *pair;
+	unsigned generation;
+	unsigned master;
+};
+
+static struct spinlock pty_registry_lock;
+static struct pty_pair pty_pairs[PTY_MAX];
+static const struct file_ops pty_master_file_ops;
+
+static int
+pty_handle_valid_locked(const struct pty_handle *handle)
+{
+	return handle != NULL && handle->pair->active &&
+	    handle->generation == handle->pair->generation;
+}
+
+static ssize_t
+pty_output_bytes(struct pty_pair *pair, const uint8_t *bytes, size_t length,
+	int nonblocking)
+{
+	size_t done = 0;
+	unsigned long irq = spin_lock_irqsave(&pair->lock);
+	while (done < length) {
+		if (nonblocking && done == 0 &&
+		    PTY_OUTPUT_MAX - pair->output_used < length) {
+			spin_unlock_irqrestore(&pair->lock, irq);
+			return -EAGAIN;
+		}
+		while (done < length && pair->output_used < PTY_OUTPUT_MAX) {
+			pair->output[pair->output_head] = bytes[done++];
+			pair->output_head = (pair->output_head + 1U) % PTY_OUTPUT_MAX;
+			pair->output_used++;
+		}
+		if (done != 0) {
+			waitq_wake_all(&pair->output_waitq);
+			poll_notify();
+		}
+		if (done == length)
+			break;
+		if (!pair->active || !pair->master_open) {
+			spin_unlock_irqrestore(&pair->lock, irq);
+			return done != 0 ? (ssize_t)done : -EIO;
+		}
+		if (nonblocking) {
+			spin_unlock_irqrestore(&pair->lock, irq);
+			return done != 0 ? (ssize_t)done : -EAGAIN;
+		}
+		{
+			uint64_t sequence = waitq_sequence(&pair->output_waitq);
+			int error = waitq_sleep(&pair->output_waitq, &pair->lock,
+			    sequence, 0, WAITQ_INTERRUPTIBLE);
+			if (error != 0) {
+				spin_unlock_irqrestore(&pair->lock, irq);
+				return done != 0 ? (ssize_t)done : -error;
+			}
+		}
+	}
+	spin_unlock_irqrestore(&pair->lock, irq);
+	return (ssize_t)done;
+}
+
+static void
+pty_input_byte(struct pty_pair *pair, uint8_t byte)
+{
+	struct tty *tty = &pair->slave;
+	uint8_t echo[3];
+	size_t echo_length = 0;
+	pid_t signal_session = 0, signal_pgrp = 0;
+	int signal_number = 0;
+	unsigned output_flags = 0;
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&tty->lock);
+	if (byte == '\r') {
+		if ((tty->termios.c_iflag & IGNCR) != 0)
+			goto out;
+		if ((tty->termios.c_iflag & ICRNL) != 0)
+			byte = '\n';
+	} else if (byte == '\n' && (tty->termios.c_iflag & INLCR) != 0) {
+		byte = '\r';
+	}
+	if ((tty->termios.c_iflag & ISTRIP) != 0)
+		byte &= 0x7fU;
+	if ((tty->termios.c_lflag & ISIG) != 0) {
+		if (byte == tty->termios.c_cc[VINTR])
+			signal_number = SIGINT;
+		else if (byte == tty->termios.c_cc[VQUIT])
+			signal_number = SIGQUIT;
+		else if (byte == tty->termios.c_cc[VSUSP])
+			signal_number = SIGTSTP;
+		if (signal_number != 0) {
+			signal_session = tty->session;
+			signal_pgrp = tty->foreground_pgrp;
+			if ((tty->termios.c_lflag & NOFLSH) == 0)
+				tty_flush_input_locked(tty);
+			goto changed;
+		}
+	}
+	if ((tty->termios.c_lflag & ICANON) != 0) {
+		if (byte == tty->termios.c_cc[VERASE]) {
+			if (tty->edit_used != 0) {
+				tty->edit_used--;
+				if ((tty->termios.c_lflag & ECHOE) != 0) {
+					echo[0] = '\b'; echo[1] = ' '; echo[2] = '\b';
+					echo_length = 3;
+				}
+			}
+		} else if (byte == tty->termios.c_cc[VKILL]) {
+			tty->edit_used = 0;
+			if ((tty->termios.c_lflag & ECHOK) != 0) {
+				echo[0] = '\n';
+				echo_length = 1;
+			}
+		} else if (byte == tty->termios.c_cc[VEOF]) {
+			tty_commit_locked(tty, 1);
+		} else if (byte == '\n' ||
+		    (tty->termios.c_cc[VEOL] != 0 &&
+		    byte == tty->termios.c_cc[VEOL])) {
+			if (tty->edit_used < TTY_LINE_MAX)
+				tty->edit[tty->edit_used++] = byte;
+			tty_commit_locked(tty, 0);
+			if ((tty->termios.c_lflag & (ECHO | ECHONL)) != 0) {
+				echo[0] = byte;
+				echo_length = 1;
+			}
+		} else if (tty->edit_used < TTY_LINE_MAX) {
+			tty->edit[tty->edit_used++] = byte;
+			if ((tty->termios.c_lflag & ECHO) != 0) {
+				echo[0] = byte;
+				echo_length = 1;
+			}
+		}
+	} else if (tty->input_used < TTY_INPUT_MAX) {
+		tty->input[tty->input_head] = byte;
+		tty->input_head = (tty->input_head + 1U) % TTY_INPUT_MAX;
+		tty->input_used++;
+		waitq_wake_all(&tty->read_waitq);
+		if ((tty->termios.c_lflag & ECHO) != 0) {
+			echo[0] = byte;
+			echo_length = 1;
+		}
+	}
+changed:
+	output_flags = tty->termios.c_oflag;
+	poll_notify();
+out:
+	spin_unlock_irqrestore(&tty->lock, irq);
+	if (echo_length == 1 && echo[0] == '\n' &&
+	    (output_flags & (OPOST | ONLCR)) == (OPOST | ONLCR))
+		(void)pty_output_bytes(pair, (const uint8_t *)"\r\n", 2, 0);
+	else
+		(void)pty_output_bytes(pair, echo, echo_length, 0);
+	if (signal_number != 0 && signal_session > 0 && signal_pgrp > 0)
+		(void)process_signal_pgrp(signal_session, signal_pgrp,
+		    signal_number);
+}
+
+static int
+pty_master_open(struct file *file)
+{
+	struct pty_handle *handle;
+	struct pty_pair *pair = NULL;
+	unsigned i;
+	unsigned long irq;
+
+	handle = kern_malloc(sizeof(*handle));
+	if (handle == NULL)
+		return ENFILE;
+	irq = spin_lock_irqsave(&pty_registry_lock);
+	for (i = 0; i < PTY_MAX; i++)
+		if (!pty_pairs[i].active) {
+			pair = &pty_pairs[i];
+			pair->active = 1;
+			pair->locked = 1;
+			pair->master_open = 1;
+			pair->slave_opens = 0;
+			pair->slave_ever_opened = 0;
+			pair->output_head = pair->output_tail = pair->output_used = 0;
+			if (++pair->generation == 0)
+				pair->generation = 1;
+			break;
+		}
+	spin_unlock_irqrestore(&pty_registry_lock, irq);
+	if (pair == NULL) {
+		kern_free(handle);
+		return ENOSPC;
+	}
+	irq = spin_lock_irqsave(&pair->slave.lock);
+	tty_flush_input_locked(&pair->slave);
+	tty_default_termios(&pair->slave.termios);
+	pair->slave.session = pair->slave.foreground_pgrp = 0;
+	pair->slave.hungup = 0;
+	spin_unlock_irqrestore(&pair->slave.lock, irq);
+	handle->pair = pair;
+	handle->generation = pair->generation;
+	handle->master = 1;
+	file->f_data = handle;
+	file->f_ops = &pty_master_file_ops;
+	return 0;
+}
+
+static int
+pty_master_close(struct file *file)
+{
+	struct pty_handle *handle = file->f_data;
+	struct pty_pair *pair;
+	unsigned deactivate = 0;
+	unsigned long irq;
+	pid_t session = 0, pgrp = 0;
+
+	if (handle == NULL)
+		return 0;
+	pair = handle->pair;
+	irq = spin_lock_irqsave(&pair->lock);
+	if (pty_handle_valid_locked(handle)) {
+		pair->master_open = 0;
+		deactivate = pair->slave_opens == 0;
+		waitq_wake_all(&pair->output_waitq);
+	}
+	spin_unlock_irqrestore(&pair->lock, irq);
+	irq = spin_lock_irqsave(&pair->slave.lock);
+	pair->slave.hungup = 1;
+	session = pair->slave.session;
+	pgrp = pair->slave.foreground_pgrp;
+	waitq_wake_all(&pair->slave.read_waitq);
+	spin_unlock_irqrestore(&pair->slave.lock, irq);
+	if (session > 0 && pgrp > 0) {
+		(void)process_signal_pgrp(session, pgrp, SIGHUP);
+		(void)process_signal_pgrp(session, pgrp, SIGCONT);
+	}
+	if (deactivate) {
+		irq = spin_lock_irqsave(&pty_registry_lock);
+		pair->active = 0;
+		spin_unlock_irqrestore(&pty_registry_lock, irq);
+	}
+	kern_free(handle);
+	file->f_data = NULL;
+	poll_notify();
+	return 0;
+}
+
+static ssize_t
+pty_master_read(struct file *file, void *buffer, size_t size)
+{
+	struct pty_handle *handle = file->f_data;
+	struct pty_pair *pair;
+	uint8_t *output = buffer;
+	unsigned long irq;
+	size_t count, i;
+
+	if (handle == NULL || buffer == NULL)
+		return -EINVAL;
+	if (size == 0)
+		return 0;
+	pair = handle->pair;
+	irq = spin_lock_irqsave(&pair->lock);
+	while (pty_handle_valid_locked(handle) && pair->output_used == 0 &&
+	    (!pair->slave_ever_opened || pair->slave_opens != 0)) {
+		uint64_t sequence;
+		int error;
+		if ((file->f_flags & O_NONBLOCK) != 0) {
+			spin_unlock_irqrestore(&pair->lock, irq);
+			return -EAGAIN;
+		}
+		sequence = waitq_sequence(&pair->output_waitq);
+		error = waitq_sleep(&pair->output_waitq, &pair->lock, sequence, 0,
+		    WAITQ_INTERRUPTIBLE);
+		if (error != 0) {
+			spin_unlock_irqrestore(&pair->lock, irq);
+			return -error;
+		}
+	}
+	if (!pty_handle_valid_locked(handle)) {
+		spin_unlock_irqrestore(&pair->lock, irq);
+		return -EIO;
+	}
+	if (pair->output_used == 0) {
+		spin_unlock_irqrestore(&pair->lock, irq);
+		return 0;
+	}
+	count = pair->output_used < size ? pair->output_used : size;
+	for (i = 0; i < count; i++) {
+		output[i] = pair->output[pair->output_tail];
+		pair->output_tail = (pair->output_tail + 1U) % PTY_OUTPUT_MAX;
+		pair->output_used--;
+	}
+	waitq_wake_all(&pair->output_waitq);
+	spin_unlock_irqrestore(&pair->lock, irq);
+	poll_notify();
+	return (ssize_t)count;
+}
+
+static ssize_t
+pty_master_write(struct file *file, const void *buffer, size_t size)
+{
+	struct pty_handle *handle = file->f_data;
+	const uint8_t *input = buffer;
+	struct pty_pair *pair;
+	unsigned long irq;
+	size_t i;
+
+	if (handle == NULL || buffer == NULL)
+		return -EINVAL;
+	pair = handle->pair;
+	irq = spin_lock_irqsave(&pair->lock);
+	if (!pty_handle_valid_locked(handle) || !pair->master_open ||
+	    (pair->slave_ever_opened && pair->slave_opens == 0)) {
+		spin_unlock_irqrestore(&pair->lock, irq);
+		return -EIO;
+	}
+	spin_unlock_irqrestore(&pair->lock, irq);
+	for (i = 0; i < size; i++)
+		pty_input_byte(pair, input[i]);
+	return (ssize_t)size;
+}
+
+static int
+pty_master_ioctl(struct file *file, unsigned long request, uintptr_t argument)
+{
+	struct pty_handle *handle = file->f_data;
+	struct pty_pair *pair;
+	unsigned long irq;
+	int error = 0;
+
+	if (handle == NULL)
+		return EINVAL;
+	pair = handle->pair;
+	switch (request) {
+	case TIOCGPTN: {
+		uint32_t number = pair->index;
+		return copyout(&number, argument, sizeof(number));
+	}
+	case TIOCSPTLCK: {
+		int32_t locked;
+		error = copyin(argument, &locked, sizeof(locked));
+		if (error != 0)
+			return error;
+		irq = spin_lock_irqsave(&pair->lock);
+		if (!pty_handle_valid_locked(handle))
+			error = EIO;
+		else
+			pair->locked = locked != 0;
+		spin_unlock_irqrestore(&pair->lock, irq);
+		return error;
+	}
+	default:
+		return tty_ioctl_instance(&pair->slave, file, request, argument);
+	}
+}
+
+static int
+pty_master_poll(struct file *file, short events, short *revents)
+{
+	struct pty_handle *handle = file->f_data;
+	struct pty_pair *pair;
+	short result = 0;
+	unsigned long irq;
+	if (handle == NULL || revents == NULL)
+		return EINVAL;
+	pair = handle->pair;
+	irq = spin_lock_irqsave(&pair->lock);
+	if (!pty_handle_valid_locked(handle))
+		result = POLLERR | POLLHUP;
+	else {
+		if (pair->output_used != 0)
+			result |= events & (POLLIN | POLLRDNORM);
+		if (pair->master_open &&
+		    (!pair->slave_ever_opened || pair->slave_opens != 0))
+			result |= events & (POLLOUT | POLLWRNORM);
+		if (pair->slave_ever_opened && pair->slave_opens == 0)
+			result |= POLLHUP;
+	}
+	spin_unlock_irqrestore(&pair->lock, irq);
+	*revents = result;
+	return 0;
+}
+
+static const struct file_ops pty_master_file_ops = {
+	.read = pty_master_read,
+	.write = pty_master_write,
+	.ioctl = pty_master_ioctl,
+	.poll = pty_master_poll,
+	.close = pty_master_close,
+};
+
+static const struct cdev_ops pty_ptmx_ops = {
+	.open = pty_master_open,
+};
+
+static int
+pty_slave_open(struct file *file)
+{
+	uintptr_t encoded = (uintptr_t)file->f_inode->i_data;
+	struct pty_handle *handle;
+	struct pty_pair *pair;
+	struct process *process;
+	unsigned index;
+	unsigned long irq;
+
+	if (encoded == 0)
+		return ENXIO;
+	index = (unsigned)(encoded - 1U);
+	if (index >= PTY_MAX)
+		return ENXIO;
+	handle = kern_malloc(sizeof(*handle));
+	if (handle == NULL)
+		return ENFILE;
+	pair = &pty_pairs[index];
+	irq = spin_lock_irqsave(&pair->lock);
+	if (!pair->active || !pair->master_open || pair->locked) {
+		spin_unlock_irqrestore(&pair->lock, irq);
+		kern_free(handle);
+		return pair->locked ? EACCES : ENXIO;
+	}
+	pair->slave_opens++;
+	pair->slave_ever_opened = 1;
+	handle->pair = pair;
+	handle->generation = pair->generation;
+	handle->master = 0;
+	spin_unlock_irqrestore(&pair->lock, irq);
+	file->f_data = handle;
+	process = curthread != NULL ? curthread->proc : NULL;
+	if (process != NULL && (file->f_flags & O_NOCTTY) == 0 &&
+	    process->session == process->pid && process->controlling_tty == NULL) {
+		irq = spin_lock_irqsave(&pair->slave.lock);
+		if (pair->slave.session == 0) {
+			pair->slave.session = process->session;
+			pair->slave.foreground_pgrp = process->pgrp;
+			process->controlling_tty = &pair->slave;
+		}
+		spin_unlock_irqrestore(&pair->slave.lock, irq);
+	}
+	poll_notify();
+	return 0;
+}
+
+static int
+pty_slave_close(struct file *file)
+{
+	struct pty_handle *handle = file->f_data;
+	struct pty_pair *pair;
+	unsigned deactivate = 0;
+	unsigned long irq;
+	if (handle == NULL)
+		return 0;
+	pair = handle->pair;
+	irq = spin_lock_irqsave(&pair->lock);
+	if (pty_handle_valid_locked(handle) && pair->slave_opens != 0) {
+		pair->slave_opens--;
+		if (pair->slave_opens == 0) {
+			waitq_wake_all(&pair->output_waitq);
+			deactivate = !pair->master_open;
+		}
+	}
+	spin_unlock_irqrestore(&pair->lock, irq);
+	if (deactivate) {
+		irq = spin_lock_irqsave(&pty_registry_lock);
+		pair->active = 0;
+		spin_unlock_irqrestore(&pty_registry_lock, irq);
+	}
+	kern_free(handle);
+	file->f_data = NULL;
+	poll_notify();
+	return 0;
+}
+
+static ssize_t
+pty_slave_read(struct file *file, void *buffer, size_t size)
+{
+	struct pty_handle *handle = file->f_data;
+	struct tty *tty;
+	struct process *process = curthread != NULL ? curthread->proc : NULL;
+	unsigned canonical;
+	unsigned long irq;
+	int error;
+	if (handle == NULL)
+		return -EIO;
+	tty = &handle->pair->slave;
+	error = tty_background(tty, process, 0);
+	if (error != 0)
+		return -error;
+	irq = spin_lock_irqsave(&tty->lock);
+	canonical = tty->termios.c_lflag & ICANON;
+	spin_unlock_irqrestore(&tty->lock, irq);
+	return canonical ? tty_read_canonical(tty, buffer, size,
+	    (file->f_flags & O_NONBLOCK) != 0) :
+	    tty_read_noncanonical(tty, buffer, size,
+	    (file->f_flags & O_NONBLOCK) != 0);
+}
+
+static ssize_t
+pty_slave_write(struct file *file, const void *buffer, size_t size)
+{
+	struct pty_handle *handle = file->f_data;
+	struct pty_pair *pair;
+	struct tty *tty;
+	struct process *process = curthread != NULL ? curthread->proc : NULL;
+	const uint8_t *bytes = buffer;
+	unsigned oflag;
+	unsigned long irq;
+	size_t done = 0;
+	int error;
+
+	if (handle == NULL || buffer == NULL)
+		return -EINVAL;
+	pair = handle->pair;
+	irq = spin_lock_irqsave(&pair->lock);
+	if (!pty_handle_valid_locked(handle) || !pair->master_open) {
+		spin_unlock_irqrestore(&pair->lock, irq);
+		return -EIO;
+	}
+	spin_unlock_irqrestore(&pair->lock, irq);
+	tty = &pair->slave;
+	error = tty_background(tty, process, 1);
+	if (error != 0)
+		return -error;
+	irq = spin_lock_irqsave(&tty->lock);
+	oflag = tty->termios.c_oflag;
+	spin_unlock_irqrestore(&tty->lock, irq);
+	while (done < size) {
+		const uint8_t *output = bytes + done;
+		size_t output_length = 1;
+		ssize_t written;
+		if (bytes[done] == '\n' &&
+		    (oflag & (OPOST | ONLCR)) == (OPOST | ONLCR)) {
+			output = (const uint8_t *)"\r\n";
+			output_length = 2;
+		}
+		written = pty_output_bytes(pair, output, output_length,
+		    (file->f_flags & O_NONBLOCK) != 0);
+		if (written != (ssize_t)output_length) {
+			/* A transformed byte is emitted atomically for nonblocking
+			 * files; blocking writes complete it before returning. */
+			if (written > 0 && (file->f_flags & O_NONBLOCK) == 0)
+				continue;
+			return done != 0 ? (ssize_t)done :
+			    (written < 0 ? written : -EAGAIN);
+		}
+		done++;
+	}
+	return (ssize_t)done;
+}
+
+static int
+pty_slave_ioctl(struct file *file, unsigned long request, uintptr_t argument)
+{
+	struct pty_handle *handle = file->f_data;
+	return handle != NULL ?
+	    tty_ioctl_instance(&handle->pair->slave, file, request, argument) :
+	    EIO;
+}
+
+static int
+pty_slave_poll(struct file *file, short events, short *revents)
+{
+	struct pty_handle *handle = file->f_data;
+	struct pty_pair *pair;
+	struct tty *tty;
+	short result = 0;
+	unsigned long irq;
+	if (handle == NULL || revents == NULL)
+		return EINVAL;
+	pair = handle->pair;
+	tty = &pair->slave;
+	irq = spin_lock_irqsave(&tty->lock);
+	if ((tty->termios.c_lflag & ICANON) != 0 ?
+	    tty->record_used != 0 : tty->input_used != 0)
+		result |= events & (POLLIN | POLLRDNORM);
+	spin_unlock_irqrestore(&tty->lock, irq);
+	irq = spin_lock_irqsave(&pair->lock);
+	if (pair->master_open)
+		result |= events & (POLLOUT | POLLWRNORM);
+	else
+		result |= POLLHUP;
+	spin_unlock_irqrestore(&pair->lock, irq);
+	*revents = result;
+	return 0;
+}
+
+const struct file_ops tty_pty_slave_file_ops = {
+	.open = pty_slave_open,
+	.read = pty_slave_read,
+	.write = pty_slave_write,
+	.ioctl = pty_slave_ioctl,
+	.poll = pty_slave_poll,
+	.close = pty_slave_close,
+};
+
+int
+tty_pty_exists(unsigned index)
+{
+	unsigned result;
+	unsigned long irq;
+	if (index >= PTY_MAX)
+		return 0;
+	irq = spin_lock_irqsave(&pty_pairs[index].lock);
+	result = pty_pairs[index].active;
+	spin_unlock_irqrestore(&pty_pairs[index].lock, irq);
+	return (int)result;
+}
+
+unsigned
+tty_pty_snapshot(unsigned *indices, unsigned capacity)
+{
+	unsigned count = 0, i;
+	for (i = 0; i < PTY_MAX; i++)
+		if (tty_pty_exists(i)) {
+			if (indices != NULL && count < capacity)
+				indices[count] = i;
+			count++;
+		}
+	return count;
+}
+
+int
+tty_pty_register(void)
+{
+	unsigned i;
+	spin_init(&pty_registry_lock, LOCK_RANK_TTY, "pty registry");
+	for (i = 0; i < PTY_MAX; i++) {
+		struct pty_pair *pair = &pty_pairs[i];
+		memset(pair, 0, sizeof(*pair));
+		pair->index = i;
+		spin_init(&pair->lock, LOCK_RANK_TTY, "pty pair");
+		waitq_init(&pair->output_waitq, "pty master output");
+		spin_init(&pair->slave.lock, LOCK_RANK_TTY, "pty slave");
+		waitq_init(&pair->slave.read_waitq, "pty slave input");
+		tty_default_termios(&pair->slave.termios);
+		pair->slave.winsize.ws_row = HAL_CONS_ROWS;
+		pair->slave.winsize.ws_col = HAL_CONS_COLUMNS;
+	}
+	return cdev_register("ptmx", 0x00010001U, &pty_ptmx_ops, NULL);
 }

@@ -22,6 +22,10 @@ struct mem_node {
 	char owned_name[NAME_MAX + 1U];
 	const char *contents;
 	char link_target[64];
+	char xattr_name[32];
+	unsigned char xattr_value[64];
+	size_t xattr_size;
+	int xattr_exists;
 };
 
 #define MEM_NODE_MAX 8U
@@ -194,12 +198,61 @@ static ssize_t mem_readlink(struct inode *inode, char *buffer, size_t capacity)
 	return (ssize_t)length;
 }
 
+static ssize_t mem_getxattr(struct inode *inode, const char *name, void *value,
+	size_t size)
+{
+	struct mem_node *node = inode->i_data;
+	if (!node->xattr_exists || strcmp(node->xattr_name, name) != 0)
+		return -ENODATA;
+	if (value != NULL && size < node->xattr_size)
+		return -ERANGE;
+	if (value != NULL && node->xattr_size != 0)
+		memcpy(value, node->xattr_value, node->xattr_size);
+	return (ssize_t)node->xattr_size;
+}
+
+static int mem_setxattr(struct inode *inode, const char *name,
+	const void *value, size_t size, unsigned flags)
+{
+	struct mem_node *node = inode->i_data;
+	if (strlen(name) >= sizeof(node->xattr_name) ||
+	    size > sizeof(node->xattr_value)) return E2BIG;
+	if ((flags & INODE_XATTR_CREATE) != 0 && node->xattr_exists) return EEXIST;
+	if ((flags & INODE_XATTR_REPLACE) != 0 && !node->xattr_exists)
+		return ENODATA;
+	strcpy(node->xattr_name, name);
+	if (size != 0) memcpy(node->xattr_value, value, size);
+	node->xattr_size = size;node->xattr_exists = 1;return 0;
+}
+
+static ssize_t mem_listxattr(struct inode *inode, char *list, size_t size)
+{
+	struct mem_node *node = inode->i_data;
+	size_t needed = node->xattr_exists ? strlen(node->xattr_name) + 1U : 0;
+	if (list != NULL && size < needed) return -ERANGE;
+	if (list != NULL && needed != 0) memcpy(list, node->xattr_name, needed);
+	return (ssize_t)needed;
+}
+
+static int mem_removexattr(struct inode *inode, const char *name)
+{
+	struct mem_node *node = inode->i_data;
+	if (!node->xattr_exists || strcmp(node->xattr_name, name) != 0)
+		return ENODATA;
+	node->xattr_exists = 0;node->xattr_size = 0;node->xattr_name[0] = '\0';
+	return 0;
+}
+
 static const struct inode_ops mem_iops = {
 	.lookup = mem_lookup,
 	.rename = mem_rename,
 	.link = mem_link,
 	.symlink = mem_symlink,
 	.readlink = mem_readlink,
+	.getxattr = mem_getxattr,
+	.setxattr = mem_setxattr,
+	.listxattr = mem_listxattr,
+	.removexattr = mem_removexattr,
 };
 static const struct file_ops mem_dir_fops = { .readdir = mem_readdir };
 static const struct file_ops mem_file_fops = { .read = mem_read };
@@ -233,10 +286,10 @@ static int mem_mount(struct mount *mountp)
 		inode->i_ino = i + 1U;
 		inode->i_data = &fs->nodes[i];
 		inode->i_linkcount = 1;
+		inode->i_op = &mem_iops;
 		if (i < 2) {
 			inode->i_type = INODE_DIR;
 			inode->i_mode = S_IFDIR | 0555U;
-			inode->i_op = &mem_iops;
 			inode->i_fop = &mem_dir_fops;
 		} else {
 			inode->i_type = INODE_REG;
@@ -323,6 +376,30 @@ int main(void)
 
 	/* Generic VFS hard links and relative/absolute symlink traversal. */
 	CHECK(namei_at(&context, "/disk1/hello", &inode) == 0);
+	{
+		char value[8] = {0}, names[32] = {0};
+		unsigned saved_flags = disk1_mount->m_flags;
+		CHECK(inode_getxattr(inode, "user.note", NULL, 0) == -ENODATA);
+		CHECK(inode_setxattr(inode, "user.note", "zed", 4,
+		    INODE_XATTR_CREATE) == 0);
+		CHECK(inode_setxattr(inode, "user.note", "bad", 4,
+		    INODE_XATTR_CREATE) == EEXIST);
+		CHECK(inode_getxattr(inode, "user.note", NULL, 0) == 4);
+		CHECK(inode_getxattr(inode, "user.note", value, 3) == -ERANGE);
+		CHECK(inode_getxattr(inode, "user.note", value, sizeof(value)) == 4);
+		CHECK(memcmp(value, "zed", 4) == 0);
+		CHECK(inode_listxattr(inode, NULL, 0) == 10);
+		CHECK(inode_listxattr(inode, names, sizeof(names)) == 10);
+		CHECK(strcmp(names, "user.note") == 0);
+		CHECK(inode_setxattr(inode, "user.note", NULL, 0,
+		    INODE_XATTR_REPLACE) == 0);
+		CHECK(inode_getxattr(inode, "user.note", NULL, 0) == 0);
+		disk1_mount->m_flags |= MOUNT_READ_ONLY;
+		CHECK(inode_removexattr(inode, "user.note") == EROFS);
+		disk1_mount->m_flags = saved_flags;
+		CHECK(inode_removexattr(inode, "user.note") == 0);
+		CHECK(inode_removexattr(inode, "user.note") == ENODATA);
+	}
 	{
 		struct componentname hard = {
 			.cn_nameptr = "hard", .cn_namelen = 4

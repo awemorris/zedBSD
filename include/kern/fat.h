@@ -77,6 +77,8 @@ enum zedbsd_fs_result zedbsd_fat_mark_sector_dirty(
 	struct zedbsd_filesystem *filesystem);
 enum zedbsd_fs_result zedbsd_fat_flush(
 	struct zedbsd_filesystem *filesystem);
+enum zedbsd_fs_result zedbsd_fat_count_free_clusters(
+	struct zedbsd_filesystem *filesystem, uint32_t *free_clusters);
 void zedbsd_fat_invalidate(struct zedbsd_filesystem *filesystem);
 enum zedbsd_fs_result zedbsd_fat_cluster_lba(
 	struct zedbsd_filesystem *filesystem, uint32_t cluster,

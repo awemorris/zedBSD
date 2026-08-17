@@ -33,5 +33,11 @@ int vfs_may_rename(const struct inode *, const struct inode *,
 		   const struct ucred *);
 int vfs_may_chown(const struct inode *, const struct ucred *, uid_t, gid_t);
 int vfs_clear_setid_on_write(struct inode *, const struct ucred *);
+ssize_t vfs_getxattr(struct inode *, const struct ucred *, const char *,
+	void *, size_t);
+int vfs_setxattr(struct inode *, const struct ucred *, const char *,
+	const void *, size_t, unsigned);
+ssize_t vfs_listxattr(struct inode *, const struct ucred *, char *, size_t);
+int vfs_removexattr(struct inode *, const struct ucred *, const char *);
 
 #endif

@@ -1,0 +1,5 @@
+ZEDBSD_1.0 {
+};
+
+ZEDBSD_2.0 {
+} ZEDBSD_1.0;

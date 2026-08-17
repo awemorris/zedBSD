@@ -22,6 +22,8 @@ char *strdup(const char *string);
 char *getenv(const char *name);
 int setenv(const char *, const char *, int);
 int unsetenv(const char *);
+int putenv(char *);
+int clearenv(void);
 extern char **environ;
 
 int atoi(const char *string);
@@ -39,5 +41,10 @@ int rand(void);
 void srand(unsigned int seed);
 void abort(void) __attribute__((noreturn));
 void exit(int status) __attribute__((noreturn));
+int posix_openpt(int);
+int grantpt(int);
+int unlockpt(int);
+char *ptsname(int);
+int ptsname_r(int, char *, size_t);
 
 #endif

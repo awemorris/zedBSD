@@ -46,6 +46,7 @@
 #define DT_PLTRELSZ 2
 #define DT_PLTGOT 3
 #define DT_HASH 4
+#define DT_GNU_HASH 0x6ffffef5
 #define DT_STRTAB 5
 #define DT_SYMTAB 6
 #define DT_RELA 7
@@ -74,6 +75,19 @@
 #define DT_FLAGS 30
 #define DT_PREINIT_ARRAY 32
 #define DT_PREINIT_ARRAYSZ 33
+#define DT_VERSYM 0x6ffffff0
+#define DT_VERDEF 0x6ffffffc
+#define DT_VERDEFNUM 0x6ffffffd
+#define DT_VERNEED 0x6ffffffe
+#define DT_VERNEEDNUM 0x6fffffff
+
+#define VER_DEF_CURRENT 1
+#define VER_NEED_CURRENT 1
+#define VER_FLG_BASE 0x1U
+#define VER_NDX_LOCAL 0
+#define VER_NDX_GLOBAL 1
+#define VER_NDX_HIDDEN 0x8000U
+#define VER_NDX_MASK 0x7fffU
 
 #define SHN_UNDEF 0
 #define STN_UNDEF 0
@@ -134,6 +148,27 @@ struct elf64_sym {
 struct elf64_rel { uint64_t r_offset, r_info; };
 struct elf64_rela { uint64_t r_offset, r_info; int64_t r_addend; };
 
+/* The GNU/Solaris symbol-version records have the same layout in ELF32/64. */
+struct elf_verdef {
+	uint16_t vd_version, vd_flags, vd_ndx, vd_cnt;
+	uint32_t vd_hash, vd_aux, vd_next;
+};
+struct elf_verdaux { uint32_t vda_name, vda_next; };
+struct elf_verneed {
+	uint16_t vn_version, vn_cnt;
+	uint32_t vn_file, vn_aux, vn_next;
+};
+struct elf_vernaux {
+	uint32_t vna_hash;
+	uint16_t vna_flags, vna_other;
+	uint32_t vna_name, vna_next;
+};
+typedef struct elf_verdef Elf_Verdef;
+typedef struct elf_verdaux Elf_Verdaux;
+typedef struct elf_verneed Elf_Verneed;
+typedef struct elf_vernaux Elf_Vernaux;
+typedef uint16_t Elf_Versym;
+
 #if defined(ZEDBSD_USER_ABI_LP64)
 typedef struct elf64_ehdr Elf_Ehdr;
 typedef struct elf64_phdr Elf_Phdr;
@@ -169,6 +204,7 @@ typedef uint32_t Elf_Off;
 #define R_386_RELATIVE 8
 #define R_386_TLS_DTPMOD32 35
 #define R_386_TLS_DTPOFF32 36
+#define R_386_TLS_DESC 41
 
 /* AMD64 */
 #define R_X86_64_NONE 0
@@ -178,6 +214,7 @@ typedef uint32_t Elf_Off;
 #define R_X86_64_RELATIVE 8
 #define R_X86_64_DTPMOD64 16
 #define R_X86_64_DTPOFF64 17
+#define R_X86_64_TLSDESC 36
 
 /* AArch64 */
 #define R_AARCH64_NONE 0
@@ -187,6 +224,7 @@ typedef uint32_t Elf_Off;
 #define R_AARCH64_RELATIVE 1027
 #define R_AARCH64_TLS_DTPMOD64 1028
 #define R_AARCH64_TLS_DTPREL64 1029
+#define R_AARCH64_TLSDESC 1031
 
 /* SPARC V9 */
 #define R_SPARC_NONE 0

@@ -3,16 +3,19 @@
 
 import csv
 import pathlib
+import re
 import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MATRIX = ROOT / "tests" / "posix-r2-api.csv"
 FIELDS = [
-    "standard_section", "header", "symbol", "option_group", "mandatory",
-    "kernel_entry", "libc_source", "runtime_test", "status", "notes",
+    "standard", "option", "header", "symbol", "libc_source", "syscall",
+    "kernel_source", "positive_test", "errno_test", "boundary_test",
+    "thread_test", "arch_status", "status", "notes",
 ]
 STATUSES = {"implemented", "optional-disabled", "future"}
+ARCHITECTURES = {"i386", "amd64", "aarch64", "sparcv9"}
 
 
 def fail(message: str) -> None:
@@ -37,19 +40,37 @@ for line, row in enumerate(rows, 2):
     seen.add(key)
     if row["status"] not in STATUSES:
         fail(f"line {line}: invalid status {row['status']!r}")
-    if row["mandatory"] not in {"yes", "no"}:
-        fail(f"line {line}: mandatory must be yes or no")
-    for field in ("header", "runtime_test"):
+    for field in ("header",):
         value = row[field]
         if not value or not (ROOT / value).is_file():
             fail(f"line {line}: missing {field} file {value!r}")
     if row["status"] == "implemented":
-        for field in ("kernel_entry", "libc_source"):
+        for field in ("libc_source", "positive_test"):
             value = row[field]
             if not value or not (ROOT / value).is_file():
                 fail(f"line {line}: implemented symbol lacks {field} file")
-    elif row["status"] == "optional-disabled" and row["mandatory"] != "no":
-        fail(f"line {line}: a mandatory interface cannot be optional-disabled")
+        declaration = re.compile(
+            r"\b" + re.escape(row["symbol"]) + r"\s*\(")
+        public_headers = list((ROOT / "libc/include").rglob("*.h")) + list(
+            (ROOT / "include/uapi").rglob("*.h"))
+        if not any(declaration.search(path.read_text(encoding="utf-8"))
+                   for path in public_headers):
+            fail(f"line {line}: {row['symbol']} is not declared by its header")
+    for field in ("kernel_source", "errno_test", "boundary_test",
+                  "thread_test"):
+        value = row[field]
+        if value and not (ROOT / value).is_file():
+            fail(f"line {line}: missing {field} file {value!r}")
+    arches = set(filter(None, row["arch_status"].split("|")))
+    if row["status"] == "implemented" and not arches:
+        fail(f"line {line}: implemented symbol has no architecture evidence")
+    if not arches.issubset(ARCHITECTURES):
+        fail(f"line {line}: invalid architecture set {row['arch_status']!r}")
+    if row["syscall"]:
+        syscall_header = (ROOT / "include/uapi/zedbsd/syscall.h").read_text(
+            encoding="utf-8")
+        if row["syscall"] not in syscall_header:
+            fail(f"line {line}: unknown syscall {row['syscall']!r}")
 
 implemented = sum(row["status"] == "implemented" for row in rows)
 disabled = sum(row["status"] == "optional-disabled" for row in rows)

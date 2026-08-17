@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/net/packet-buf.h"
 #include "kern/net/net-device.h"
+#include "kern/test-fault.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -54,10 +55,14 @@ struct packet_buf *
 packet_buf_alloc(size_t headroom)
 {
 	struct packet_buf *packet = NULL;
+	struct kern_test_fault_result fault;
 	bool enabled;
 	unsigned index;
 
 	if (headroom > PACKET_BUF_STORAGE_SIZE)
+		return NULL;
+	if (KERN_TEST_FAULT(KERN_TEST_FAULT_NET_PACKET_ALLOC, UINT32_MAX,
+	    UINT32_MAX, &fault))
 		return NULL;
 	enabled = packet_lock();
 	for (index = 0; index < PACKET_BUF_POOL_COUNT; index++) {

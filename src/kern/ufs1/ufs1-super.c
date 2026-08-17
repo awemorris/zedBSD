@@ -11,7 +11,7 @@ int
 ufs1_super_decode(const void *buffer, size_t length, uint64_t sectors,
 	struct ufs1_super *super)
 {
-	uint64_t inode_fragments, covered_fragments;
+	uint64_t inode_fragments, last_cg_start;
 	uint32_t magic;
 	int swapped;
 	if (buffer == NULL || super == NULL || length < UFS1_FS_STRUCT_SIZE)
@@ -27,6 +27,8 @@ ufs1_super_decode(const void *buffer, size_t length, uint64_t sectors,
 #define GET32(field, offset) super->field = ufs1_get32(buffer, offset, swapped)
 	GET32(sblkno, UFS1_FS_SBLKNO); GET32(cblkno, UFS1_FS_CBLKNO);
 	GET32(iblkno, UFS1_FS_IBLKNO); GET32(dblkno, UFS1_FS_DBLKNO);
+	GET32(cgoffset, UFS1_FS_OLD_CGOFFSET);
+	GET32(cgmask, UFS1_FS_OLD_CGMASK);
 	GET32(size, UFS1_FS_OLD_SIZE); GET32(dsize, UFS1_FS_OLD_DSIZE);
 	GET32(ncg, UFS1_FS_NCG); GET32(bsize, UFS1_FS_BSIZE);
 	GET32(fsize, UFS1_FS_FSIZE); GET32(frag, UFS1_FS_FRAG);
@@ -36,6 +38,10 @@ ufs1_super_decode(const void *buffer, size_t length, uint64_t sectors,
 	GET32(inopb, UFS1_FS_INOPB); GET32(csaddr, UFS1_FS_OLD_CSADDR);
 	GET32(cssize, UFS1_FS_CSSIZE); GET32(cgsize, UFS1_FS_CGSIZE);
 	GET32(ipg, UFS1_FS_IPG); GET32(fpg, UFS1_FS_FPG);
+	GET32(cstotal_ndir, UFS1_FS_CSTOTAL_NDIR);
+	GET32(cstotal_nbfree, UFS1_FS_CSTOTAL_NBFREE);
+	GET32(cstotal_nifree, UFS1_FS_CSTOTAL_NIFREE);
+	GET32(cstotal_nffree, UFS1_FS_CSTOTAL_NFFREE);
 	GET32(maxsymlinklen, UFS1_FS_MAXSYMLINKLEN);
 	super->inodefmt = (int32_t)ufs1_get32(buffer, UFS1_FS_INODEFMT,
 	    swapped);
@@ -46,7 +52,9 @@ ufs1_super_decode(const void *buffer, size_t length, uint64_t sectors,
 	super->swapped = swapped;
 	inode_fragments = ((uint64_t)super->ipg + super->inopb - 1U) /
 	    super->inopb * super->frag;
-	covered_fragments = (uint64_t)super->ncg * super->fpg;
+	last_cg_start = (uint64_t)(super->ncg - 1U) * super->fpg +
+	    (uint64_t)super->cgoffset *
+	    ((super->ncg - 1U) & ~super->cgmask);
 	if (super->inodefmt != UFS1_44INODEFMT || super->bsize != 8192U ||
 	    super->fsize != 1024U || super->frag != 8U ||
 	    super->bshift != 13U || super->fshift != 10U ||
@@ -65,10 +73,15 @@ ufs1_super_decode(const void *buffer, size_t length, uint64_t sectors,
 	    super->iblkno >= super->size || super->dblkno >= super->size ||
 	    super->sblkno >= super->cblkno || super->cblkno >= super->iblkno ||
 	    super->iblkno >= super->dblkno ||
+	    super->cgoffset > super->fpg ||
+	    super->cstotal_ndir > (uint64_t)super->ncg * super->ipg ||
+	    super->cstotal_nifree > (uint64_t)super->ncg * super->ipg ||
+	    (uint64_t)super->cstotal_nbfree * super->frag +
+	    super->cstotal_nffree > super->dsize ||
 	    inode_fragments > super->dblkno - super->iblkno ||
-	    covered_fragments < super->size ||
-	    (super->ncg > 1U &&
-	    (uint64_t)(super->ncg - 1U) * super->fpg >= super->size))
+	    last_cg_start >= super->size ||
+	    super->size - last_cg_start > super->fpg ||
+	    last_cg_start + super->dblkno >= super->size)
 		return EINVAL;
 	return 0;
 }

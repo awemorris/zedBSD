@@ -22,6 +22,8 @@
 #define UFS1_FS_CBLKNO 12U
 #define UFS1_FS_IBLKNO 16U
 #define UFS1_FS_DBLKNO 20U
+#define UFS1_FS_OLD_CGOFFSET 24U
+#define UFS1_FS_OLD_CGMASK 28U
 #define UFS1_FS_OLD_SIZE 36U
 #define UFS1_FS_OLD_DSIZE 40U
 #define UFS1_FS_NCG 44U
@@ -71,6 +73,8 @@
 
 #define UFS1_CG_MAGIC_VALUE 0x00090255U
 #define UFS1_CG_MAGIC 4U
+#define UFS1_CG_CGX 12U
+#define UFS1_CG_NDBLK 20U
 #define UFS1_CG_NDIR 24U
 #define UFS1_CG_NBFREE 28U
 #define UFS1_CG_NIFREE 32U
@@ -81,11 +85,13 @@
 
 struct ufs1_super {
 	uint32_t sblkno, cblkno, iblkno, dblkno;
+	uint32_t cgoffset, cgmask;
 	uint32_t size, dsize, ncg;
 	uint32_t bsize, fsize, frag;
 	uint32_t bshift, fshift, fragshift, fsbtodb;
 	uint32_t sbsize, nindir, inopb, ipg, fpg;
 	uint32_t csaddr, cssize, cgsize;
+	uint32_t cstotal_ndir, cstotal_nbfree, cstotal_nifree, cstotal_nffree;
 	uint32_t maxsymlinklen;
 	uint64_t maxfilesize;
 	int32_t inodefmt;

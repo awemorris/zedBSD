@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the canonical, single-cylinder-group zedBSD UFS1 profile."""
+"""Validate the canonical zedBSD UFS1 profile, including multiple CGs."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
@@ -23,19 +23,16 @@ class UFS1:
         self.inopb=self.u32(self.sb,120); self.ipg=self.u32(self.sb,184)
         self.fpg=self.u32(self.sb,188); self.iblk=self.u32(self.sb,16)
         self.dblk=self.u32(self.sb,20); self.cblk=self.u32(self.sb,12)
+        self.sblk=self.u32(self.sb,8); self.cgoffset=self.u32(self.sb,24)
+        self.cgmask=self.u32(self.sb,28)
         self.fragments=self.u32(self.sb,36); self.ncg=self.u32(self.sb,44)
         self.cgsize=self.u32(self.sb,160)
-        if (self.bsize,self.fsize,self.frag,self.nindir,self.inopb,self.ncg)!=(8192,1024,8,2048,64,1):
+        if (self.bsize,self.fsize,self.frag,self.nindir,self.inopb)!=(8192,1024,8,2048,64):
             raise ValueError('unsupported UFS1 profile')
+        if self.ncg<1 or self.fpg<self.dblk:
+            raise ValueError('bad cylinder group geometry')
         if self.fragments*self.fsize>len(data): raise ValueError('truncated image')
-        self.cg=memoryview(data)[self.cblk*self.fsize:(self.cblk+self.frag)*self.fsize]
-        if self.u32(self.cg,4)!=0x090255: raise ValueError('bad cylinder group magic')
-        self.iusedoff=self.u32(self.cg,92); self.freeoff=self.u32(self.cg,96)
-        self.nextfreeoff=self.u32(self.cg,100)
-        if not (0<self.iusedoff<self.freeoff<self.nextfreeoff<=len(self.cg)):
-            raise ValueError('bad cylinder group bitmap offsets')
-        if self.cgsize!=self.nextfreeoff:
-            raise ValueError('superblock/cylinder-group size mismatch')
+        self.cgs=[self._read_cg(index) for index in range(self.ncg)]
 
     @staticmethod
     def u16(data,offset): return struct.unpack_from('<H',data,offset)[0]
@@ -44,9 +41,36 @@ class UFS1:
     @staticmethod
     def u64(data,offset): return struct.unpack_from('<Q',data,offset)[0]
 
+    def cgstart(self,index):
+        return index*self.fpg+self.cgoffset*(index & ~self.cgmask)
+
+    def cg_ndblk(self,index):
+        return min(self.fpg,self.fragments-self.cgstart(index))
+
+    def _read_cg(self,index):
+        base=self.cgstart(index)+self.cblk
+        cg=memoryview(self.data)[base*self.fsize:(base+self.frag)*self.fsize]
+        if len(cg)!=self.bsize or self.u32(cg,4)!=0x090255:
+            raise ValueError(f'cylinder group {index}: bad magic')
+        if self.u32(cg,12)!=index or self.u32(cg,20)!=self.cg_ndblk(index):
+            raise ValueError(f'cylinder group {index}: bad identity/size')
+        iusedoff=self.u32(cg,92); freeoff=self.u32(cg,96)
+        nextfreeoff=self.u32(cg,100)
+        if not (0<iusedoff<freeoff<nextfreeoff<=len(cg)):
+            raise ValueError(f'cylinder group {index}: bad bitmap offsets')
+        if self.cgsize!=nextfreeoff:
+            raise ValueError(f'cylinder group {index}: size mismatch')
+        if index:
+            backup=memoryview(self.data)[(self.cgstart(index)+self.sblk)*self.fsize:
+                                         (self.cgstart(index)+self.sblk)*self.fsize+8192]
+            if bytes(backup[:1376])!=bytes(self.sb[:1376]):
+                raise ValueError(f'cylinder group {index}: stale backup superblock')
+        return (cg,iusedoff,freeoff,nextfreeoff)
+
     def inode(self,number):
-        if number<0 or number>=self.ipg: raise ValueError('inode out of range')
-        offset=self.iblk*self.fsize+number*INODE_SIZE
+        if number<0 or number>=self.ncg*self.ipg: raise ValueError('inode out of range')
+        cg,index=divmod(number,self.ipg)
+        offset=(self.cgstart(cg)+self.iblk)*self.fsize+index*INODE_SIZE
         raw=memoryview(self.data)[offset:offset+INODE_SIZE]
         if len(raw)!=INODE_SIZE: raise ValueError('truncated inode table')
         return raw
@@ -106,15 +130,23 @@ class UFS1:
         return inode
 
     def _own(self,fragment,owned,kind):
-        if fragment<self.dblk or fragment+self.frag>self.fragments or fragment%self.frag:
+        group=None
+        for index in range(self.ncg):
+            start=self.cgstart(index); ndblk=self.cg_ndblk(index)
+            if fragment>=start+self.dblk and fragment+self.frag<=start+ndblk:
+                group=index; local=fragment-start; break
+        if group is None or local%self.frag:
             raise ValueError(f'{kind}: invalid block {fragment}')
         for part in range(fragment,fragment+self.frag):
             if part in owned: raise ValueError(f'duplicate block ownership: fragment {part}')
             owned.add(part)
 
     def validate(self):
-        iused=self.cg[self.iusedoff:self.freeoff]
-        allocated={ino for ino in range(self.ipg) if iused[ino//8]&(1<<(ino&7))}
+        allocated=set()
+        for index,(cg,iusedoff,freeoff,_) in enumerate(self.cgs):
+            iused=cg[iusedoff:freeoff]
+            allocated.update(index*self.ipg+ino for ino in range(self.ipg)
+                             if iused[ino//8]&(1<<(ino&7)))
         reachable=set(); references={}; owned=set(); pending=[ROOT]
         while pending:
             ino=pending.pop()
@@ -137,19 +169,43 @@ class UFS1:
             nlink=self.u16(self.inode(ino),2)
             if references.get(ino,0)!=nlink:
                 raise ValueError(f'inode {ino}: nlink {nlink}, references {references.get(ino,0)}')
-        free=self.cg[self.freeoff:self.nextfreeoff]
-        for fragment in range(self.dblk,self.fragments):
-            marked_free=bool(free[fragment//8]&(1<<(fragment&7)))
-            if marked_free==(fragment in owned):
-                raise ValueError(f'fragment bitmap mismatch: {fragment}')
-        nbfree=sum(1 for fragment in range((self.dblk+self.frag-1)//self.frag*self.frag,
-                                           self.fragments-self.frag+1,self.frag)
-                   if all(free[part//8]&(1<<(part&7)) for part in range(fragment,fragment+self.frag)))
-        nifree=self.ipg-len(allocated)
-        ndir=sum(1 for ino in reachable if self.u16(self.inode(ino),0)&IFMT==IFDIR)
-        if self.u32(self.cg,28)!=nbfree or self.u32(self.cg,32)!=nifree:
-            raise ValueError('cylinder group free counters mismatch')
-        if (self.u32(self.sb,192),self.u32(self.sb,196),self.u32(self.sb,200))!=(ndir,nbfree,nifree):
+        total_nbfree=0; total_nifree=0; total_nffree=0; total_ndir=0
+        for index,(cg,iusedoff,freeoff,nextfreeoff) in enumerate(self.cgs):
+            start=self.cgstart(index); ndblk=self.cg_ndblk(index)
+            free=cg[freeoff:nextfreeoff]
+            for local in range(ndblk):
+                marked_free=bool(free[local//8]&(1<<(local&7)))
+                absolute=start+local
+                if local<self.dblk and marked_free:
+                    raise ValueError(f'cylinder group {index}: metadata marked free')
+                if local>=self.dblk and marked_free==(absolute in owned):
+                    raise ValueError(f'fragment bitmap mismatch: {absolute}')
+            for local in range(ndblk,self.fpg):
+                if free[local//8]&(1<<(local&7)):
+                    raise ValueError(f'cylinder group {index}: tail marked free')
+            nbfree=sum(1 for local in range((self.dblk+self.frag-1)//self.frag*self.frag,
+                                           ndblk-self.frag+1,self.frag)
+                       if all(free[part//8]&(1<<(part&7))
+                              for part in range(local,local+self.frag)))
+            free_count=sum(1 for local in range(self.dblk,ndblk)
+                           if free[local//8]&(1<<(local&7)))
+            nffree=free_count-nbfree*self.frag
+            local_allocated=sum(1 for ino in range(self.ipg)
+                                if index*self.ipg+ino in allocated)
+            nifree=self.ipg-local_allocated
+            ndir=sum(1 for ino in reachable
+                     if ino//self.ipg==index and
+                     self.u16(self.inode(ino),0)&IFMT==IFDIR)
+            if (self.u32(cg,24),self.u32(cg,28),self.u32(cg,32),self.u32(cg,36))!=(ndir,nbfree,nifree,nffree):
+                raise ValueError(f'cylinder group {index}: summary mismatch')
+            total_ndir+=ndir; total_nbfree+=nbfree
+            total_nifree+=nifree; total_nffree+=nffree
+        self._check_global_summaries(
+            (total_ndir,total_nbfree,total_nifree,total_nffree))
+
+    def _check_global_summaries(self, totals):
+        if (self.u32(self.sb,192),self.u32(self.sb,196),
+            self.u32(self.sb,200),self.u32(self.sb,204))!=totals:
             raise ValueError('superblock summary counters mismatch')
 
 

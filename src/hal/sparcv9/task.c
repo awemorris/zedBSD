@@ -16,8 +16,8 @@ static void restore_trap_state(const struct sparcv9_task*t){__asm__ volatile("wr
 void hal_task_context_switch(hal_task_t h){struct sparcv9_task*to=h,*from=running;if(!to||!from)HAL_FATAL("invalid SPARC V9 task switch");if(to==from)return;if(to->run_cpu>=0)HAL_FATAL("SPARC V9 HAL task already running");from->run_cpu=-1;to->run_cpu=0;save_trap_state(from);running=to;sparcv9_current_trap_sp=to->trap_sp;sparcv9_current_user_windows=&to->trap_windows;hal_page_switch_space(to->space);restore_trap_state(to);sparcv9_task_dispatch(&from->windows,&to->windows);}
 void sparcv9_task_returned(void){HAL_FATAL("SPARC V9 task returned");for(;;)__asm__ volatile("nop");}
 hal_task_t hal_task_get_current(void){return running;}
-void hal_task_set_tls(hal_task_t h,uintptr_t v){struct sparcv9_task*t=h;if(t){t->tls=v;t->windows.global[7]=v;if(t==running)sparcv9_tls_write(v);}}
-uintptr_t hal_task_get_tls(hal_task_t h){if(h==running)return sparcv9_tls_read();return h?((struct sparcv9_task*)h)->tls:0;}
+void hal_task_set_tls(hal_task_t h,uintptr_t v){struct sparcv9_task*t=h;if(t){t->tls=v;t->windows.global[7]=v;t->trap_windows.global[7]=v;if(t==running)sparcv9_tls_write(v);}}
+uintptr_t hal_task_get_tls(hal_task_t h){return h?((struct sparcv9_task*)h)->tls:0;}
 void hal_task_set_private(hal_task_t h,void*p){if(h)((struct sparcv9_task*)h)->private_data=p;}
 void *hal_task_get_private(hal_task_t h){return h?((struct sparcv9_task*)h)->private_data:NULL;}
 hal_space_t hal_task_get_space(hal_task_t h){return h?((struct sparcv9_task*)h)->space:HAL_SPACE_SYS;}

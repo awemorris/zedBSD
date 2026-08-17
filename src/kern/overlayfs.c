@@ -2020,6 +2020,15 @@ overlay_sync_mount(struct mount *mountp)
 	return error;
 }
 
+static OVERLAY_HIGH int
+overlay_statvfs(struct mount *mountp, struct statvfs *result)
+{
+	struct overlay_mount_state *state = mountp != NULL ? mountp->m_data : NULL;
+	if (state == NULL || result == NULL || state->upper_root.p_mount == NULL)
+		return EINVAL;
+	return mount_statvfs(state->upper_root.p_mount, result);
+}
+
 static OVERLAY_HIGH void
 overlay_unmount_impl(struct mount *mountp)
 {
@@ -2042,6 +2051,7 @@ static const struct filesystem_type overlay_filesystem_type = {
 	.fs_flags = FILESYSTEM_NODEV,
 	.mount = overlay_mount_impl,
 	.sync = overlay_sync_mount,
+	.statvfs = overlay_statvfs,
 	.unmount = overlay_unmount_impl,
 	.alloc_inode = overlay_alloc_inode,
 	.free_inode = overlay_free_inode,

@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "userland/libc/syscall.h"
 #include "libc/heap.h"
+#include "libc/stdio-internal.h"
 
 #include <zedbsd/dirent.h>
 #include <zedbsd/fcntl.h>
@@ -10,12 +11,14 @@
 #include <zedbsd/process.h>
 #include <zedbsd/netif.h>
 #include <zedbsd/route.h>
+#include <zedbsd/rtld-abi.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <limits.h>
+#include <pthread.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
@@ -23,8 +26,12 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/mount.h>
 #include <sys/resource.h>
+#include <sys/quota.h>
+#include <sys/snapshot.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/time.h>
 #include <sys/uio.h>
 #include <sys/utsname.h>
@@ -47,14 +54,34 @@ extern void zedbsd_pthread_fork_child(void) __attribute__((weak));
 extern void zedbsd_pthread_initialize_main(void) __attribute__((weak));
 extern void zedbsd_libc_environment_lock(void) __attribute__((weak));
 extern void zedbsd_libc_environment_unlock(void) __attribute__((weak));
+extern char *zedbsd_pthread_environment_exchange(char *)
+	__attribute__((weak));
+#if !defined(ZEDBSD_DYNAMIC_LIBC)
 extern void __zedbsd_rtld_process_fini(void) __attribute__((weak));
 extern void __zedbsd_rtld_startup_init(void) __attribute__((weak));
+#endif
 static void cancel_point(void)
 { if (zedbsd_pthread_cancel_point != NULL) zedbsd_pthread_cancel_point(); }
 static void environment_lock(void)
 { if (zedbsd_libc_environment_lock != NULL) zedbsd_libc_environment_lock(); }
 static void environment_unlock(void)
 { if (zedbsd_libc_environment_unlock != NULL) zedbsd_libc_environment_unlock(); }
+
+static char *bootstrap_environment_value;
+
+static void
+environment_value_replace(char *replacement)
+{
+	char *previous;
+
+	if (zedbsd_pthread_environment_exchange != NULL)
+		previous = zedbsd_pthread_environment_exchange(replacement);
+	else {
+		previous = bootstrap_environment_value;
+		bootstrap_environment_value = replacement;
+	}
+	free(previous);
+}
 
 static int environment_name(const char *entry, const char *name)
 {
@@ -68,17 +95,21 @@ static int environment_name(const char *entry, const char *name)
 char *getenv(const char *name)
 {
 	unsigned i;
-	char *result = NULL;
+	char *result = NULL, *snapshot = NULL;
 	if (name == NULL || name[0] == '\0' || strchr(name, '=') != NULL)
 		return NULL;
 	environment_lock();
 	for (i = 0; environ != NULL && environ[i] != NULL; i++)
 		if (environment_name(environ[i], name)) {
 			result = strchr(environ[i], '=') + 1;
+			snapshot = strdup(result);
 			break;
 		}
 	environment_unlock();
-	return result;
+	/* Replacing the calling thread's snapshot, including on a miss, defines
+	 * the lifetime as lasting until its next environment operation. */
+	environment_value_replace(snapshot);
+	return snapshot;
 }
 
 int setenv(const char *name, const char *value, int overwrite)
@@ -114,6 +145,7 @@ int setenv(const char *name, const char *value, int overwrite)
 	environ[empty] = entry; environment_owned[empty] = 1U;
 	environ[empty + 1U] = NULL;
 	environment_unlock();
+	environment_value_replace(NULL);
 	return 0;
 }
 
@@ -137,6 +169,65 @@ int unsetenv(const char *name)
 			i++;
 		}
 	environment_unlock();
+	environment_value_replace(NULL);
+	return 0;
+}
+
+int
+putenv(char *entry)
+{
+	char *equal;
+	size_t name_length;
+	unsigned i, empty = ENVIRONMENT_MAX;
+
+	if (entry == NULL || entry[0] == '\0' ||
+	    (equal = strchr(entry, '=')) == NULL || equal == entry) {
+		errno = EINVAL;
+		return -1;
+	}
+	name_length = (size_t)(equal - entry);
+	environment_lock();
+	for (i = 0; i < ENVIRONMENT_MAX; i++) {
+		if (environ[i] == NULL && empty == ENVIRONMENT_MAX)
+			empty = i;
+		if (environ[i] != NULL &&
+		    !strncmp(environ[i], entry, name_length) &&
+		    environ[i][name_length] == '=') {
+			empty = i;
+			break;
+		}
+	}
+	if (empty == ENVIRONMENT_MAX) {
+		environment_unlock();
+		errno = ENOSPC;
+		return -1;
+	}
+	if (environment_owned[empty])
+		free(environ[empty]);
+	environ[empty] = entry;
+	environment_owned[empty] = 0;
+	environ[empty + 1U] = NULL;
+	environment_unlock();
+	environment_value_replace(NULL);
+	return 0;
+}
+
+int
+clearenv(void)
+{
+	unsigned i;
+
+	environment_lock();
+	for (i = 0; i < ENVIRONMENT_MAX && environ[i] != NULL; i++) {
+		if (environment_owned[i])
+			free(environ[i]);
+		environ[i] = NULL;
+		environment_owned[i] = 0;
+	}
+	environment_entries[0] = NULL;
+	environ = environment_entries;
+	environment_unlock();
+	environment_value_replace(NULL);
 	return 0;
 }
 
@@ -470,6 +561,29 @@ mode_t umask(mode_t mask) { return (mode_t)call(ZEDBSD_SYS_umask, mask, 0, 0, 0,
 int clock_gettime(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_gettime, id, (uintptr_t)ts, 0, 0, 0, 0); }
 int clock_getres(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_getres, id, (uintptr_t)ts, 0, 0, 0, 0); }
 int clock_settime(clockid_t id, const struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_settime, id, (uintptr_t)ts, 0, 0, 0, 0); }
+int timer_create(clockid_t id, const struct sigevent *event, timer_t *timer) { return (int)call(ZEDBSD_SYS_timer_create, id, (uintptr_t)event, (uintptr_t)timer, 0, 0, 0); }
+int timer_delete(timer_t timer) { return (int)call(ZEDBSD_SYS_timer_delete, timer, 0, 0, 0, 0, 0); }
+int timer_settime(timer_t timer, int flags, const struct itimerspec *value, struct itimerspec *old_value) { return (int)call(ZEDBSD_SYS_timer_settime, timer, flags, (uintptr_t)value, (uintptr_t)old_value, 0, 0); }
+int timer_gettime(timer_t timer, struct itimerspec *value) { return (int)call(ZEDBSD_SYS_timer_gettime, timer, (uintptr_t)value, 0, 0, 0, 0); }
+int timer_getoverrun(timer_t timer) { return (int)call(ZEDBSD_SYS_timer_getoverrun, timer, 0, 0, 0, 0, 0); }
+int mount(const char *type, const char *dir, int flags, void *data) { return (int)call(ZEDBSD_SYS_mount, (uintptr_t)type, (uintptr_t)dir, flags, (uintptr_t)data, 0, 0); }
+int unmount(const char *dir, int flags) { return (int)call(ZEDBSD_SYS_unmount, (uintptr_t)dir, flags, 0, 0, 0, 0); }
+int statvfs(const char *path, struct statvfs *status) { return (int)call(ZEDBSD_SYS_statvfs, (uintptr_t)path, (uintptr_t)status, 0, 0, 0, 0); }
+int fstatvfs(int fd, struct statvfs *status) { return (int)call(ZEDBSD_SYS_fstatvfs, fd, (uintptr_t)status, 0, 0, 0, 0); }
+int quotactl(const char *path, struct zedbsd_quota_ctl *request) { return (int)call(ZEDBSD_SYS_quotactl, (uintptr_t)path, (uintptr_t)request, 0, 0, 0, 0); }
+int snapshotctl(const char *path, struct zedbsd_snapshot_ctl *request) { return (int)call(ZEDBSD_SYS_snapshotctl, (uintptr_t)path, (uintptr_t)request, 0, 0, 0, 0); }
+ssize_t getxattr(const char *path, const char *name, void *value, size_t size) { return (ssize_t)call(ZEDBSD_SYS_getxattr, (uintptr_t)path, (uintptr_t)name, (uintptr_t)value, size, 0, 0); }
+ssize_t lgetxattr(const char *path, const char *name, void *value, size_t size) { return (ssize_t)call(ZEDBSD_SYS_lgetxattr, (uintptr_t)path, (uintptr_t)name, (uintptr_t)value, size, 0, 0); }
+ssize_t fgetxattr(int fd, const char *name, void *value, size_t size) { return (ssize_t)call(ZEDBSD_SYS_fgetxattr, fd, (uintptr_t)name, (uintptr_t)value, size, 0, 0); }
+int setxattr(const char *path, const char *name, const void *value, size_t size, int flags) { return (int)call(ZEDBSD_SYS_setxattr, (uintptr_t)path, (uintptr_t)name, (uintptr_t)value, size, flags, 0); }
+int lsetxattr(const char *path, const char *name, const void *value, size_t size, int flags) { return (int)call(ZEDBSD_SYS_lsetxattr, (uintptr_t)path, (uintptr_t)name, (uintptr_t)value, size, flags, 0); }
+int fsetxattr(int fd, const char *name, const void *value, size_t size, int flags) { return (int)call(ZEDBSD_SYS_fsetxattr, fd, (uintptr_t)name, (uintptr_t)value, size, flags, 0); }
+ssize_t listxattr(const char *path, char *list, size_t size) { return (ssize_t)call(ZEDBSD_SYS_listxattr, (uintptr_t)path, (uintptr_t)list, size, 0, 0, 0); }
+ssize_t llistxattr(const char *path, char *list, size_t size) { return (ssize_t)call(ZEDBSD_SYS_llistxattr, (uintptr_t)path, (uintptr_t)list, size, 0, 0, 0); }
+ssize_t flistxattr(int fd, char *list, size_t size) { return (ssize_t)call(ZEDBSD_SYS_flistxattr, fd, (uintptr_t)list, size, 0, 0, 0); }
+int removexattr(const char *path, const char *name) { return (int)call(ZEDBSD_SYS_removexattr, (uintptr_t)path, (uintptr_t)name, 0, 0, 0, 0); }
+int lremovexattr(const char *path, const char *name) { return (int)call(ZEDBSD_SYS_lremovexattr, (uintptr_t)path, (uintptr_t)name, 0, 0, 0, 0); }
+int fremovexattr(int fd, const char *name) { return (int)call(ZEDBSD_SYS_fremovexattr, fd, (uintptr_t)name, 0, 0, 0, 0); }
 int nanosleep(const struct timespec *request, struct timespec *remain) {
 	int result; cancel_point();
 	result = (int)call(ZEDBSD_SYS_nanosleep, (uintptr_t)request,
@@ -891,6 +1005,135 @@ size_t zedbsd_console_write_bytes(const char *bytes, size_t length)
 }
 
 static int stream_fd(FILE *stream) { return fileno(stream); }
+static volatile uint32_t stream_registry_lock;
+static FILE *stream_registry;
+
+static void
+stream_registry_acquire(void)
+{
+	while (__atomic_exchange_n(&stream_registry_lock, 1U,
+	    __ATOMIC_ACQUIRE) != 0)
+		;
+}
+
+static void
+stream_registry_release(void)
+{
+	__atomic_store_n(&stream_registry_lock, 0U, __ATOMIC_RELEASE);
+}
+
+static void
+stream_register(FILE *stream)
+{
+	stream_registry_acquire();
+	stream->registry_next = stream_registry;
+	stream_registry = stream;
+	stream_registry_release();
+}
+
+static void
+stream_unregister_locked(FILE *stream)
+{
+	FILE **link;
+	for (link = &stream_registry; *link != NULL;
+	    link = &(*link)->registry_next)
+		if (*link == stream) {
+			*link = stream->registry_next;
+			stream->registry_next = NULL;
+			return;
+		}
+}
+
+void
+zedbsd_stdio_fork_child(void)
+{
+	FILE *stream;
+	stream_registry_lock = 0;
+	for (stream = stream_registry; stream != NULL;
+	    stream = stream->registry_next) {
+		stream->lock = 0;
+		stream->lock_owner = 0;
+		stream->lock_depth = 0;
+	}
+}
+
+static void
+stream_enter(FILE *stream, int *cancel_state)
+{
+	(void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, cancel_state);
+	flockfile(stream);
+}
+
+static void
+stream_leave(FILE *stream, int cancel_state)
+{
+	funlockfile(stream);
+	(void)pthread_setcancelstate(cancel_state, NULL);
+}
+
+static int
+stream_write_direct(FILE *stream, const unsigned char *buffer, size_t length,
+	size_t *written)
+{
+	*written = 0;
+	while (*written < length) {
+		ssize_t result = write(stream_fd(stream), buffer + *written,
+		    length - *written);
+		if (result > 0) {
+			*written += (size_t)result;
+			continue;
+		}
+		if (result < 0 && errno == EINTR)
+			continue;
+		stream->error = 1;
+		return EOF;
+	}
+	return 0;
+}
+
+static int
+stream_flush_locked(FILE *stream)
+{
+	if (stream->last_operation == 2 && stream->buffer_length != 0) {
+		size_t written;
+		if (stream_write_direct(stream, stream->buffer,
+		    stream->buffer_length, &written) == EOF) {
+			if (written != 0) {
+				memmove(stream->buffer, stream->buffer + written,
+				    stream->buffer_length - written);
+				stream->buffer_length -= written;
+			}
+			return EOF;
+		}
+		stream->buffer_length = 0;
+	} else if (stream->last_operation == 1 &&
+	    stream->buffer_length > stream->buffer_start) {
+		off_t unread = (off_t)(stream->buffer_length - stream->buffer_start);
+		if (lseek(stream_fd(stream), -unread, SEEK_CUR) < 0) {
+			stream->error = 1;
+			return EOF;
+		}
+		stream->buffer_start = stream->buffer_length = 0;
+	}
+	return 0;
+}
+
+static int
+stream_ensure_buffer(FILE *stream)
+{
+	if (stream->buffering_mode == _IONBF || stream->buffer != NULL)
+		return 0;
+	stream->buffer = malloc(BUFSIZ);
+	if (stream->buffer == NULL) {
+		stream->error = 1;
+		errno = ENOMEM;
+		return -1;
+	}
+	stream->buffer_size = BUFSIZ;
+	stream->buffer_owned = 1;
+	return 0;
+}
+
 FILE *fopen(const char *path, const char *mode)
 {
 	FILE *stream;
@@ -906,36 +1149,124 @@ FILE *fopen(const char *path, const char *mode)
 	flags = open(path, flags, 0666);
 	if (flags < 0) { free(stream); return NULL; }
 	stream->context = (void *)(intptr_t)(flags + 1);
+	stream->mode = (unsigned)(mode[0] == 'r' ? 1U : 2U);
+	if (strchr(mode, '+') != NULL)
+		stream->mode = 3U;
+	stream->buffering_mode = _IOFBF;
+	stream->ungot_character = EOF;
+	stream->heap_allocated = 1;
+	{
+		off_t position = lseek(flags, 0, SEEK_CUR);
+		if (position >= 0)
+			stream->position = (uint64_t)position;
+	}
+	stream_register(stream);
 	return stream;
 }
-int fclose(FILE *stream) { int result; if (stream == NULL) return EOF; result = close(stream_fd(stream)); free(stream); return result == 0 ? 0 : EOF; }
-int fflush(FILE *stream) { (void)stream; return 0; }
+int fclose(FILE *stream) { int result, flush_result, old; unsigned allocated; if (stream == NULL) { errno = EINVAL; return EOF; } (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old); stream_registry_acquire(); stream_unregister_locked(stream); flockfile(stream); stream_registry_release(); flush_result = stream_flush_locked(stream); result = close(stream_fd(stream)); allocated = stream->heap_allocated; if (stream->buffer_owned) free(stream->buffer); stream->buffer = NULL; stream->context = NULL; funlockfile(stream); if (allocated) free(stream); (void)pthread_setcancelstate(old, NULL); return result == 0 && flush_result == 0 ? 0 : EOF; }
+int fflush(FILE *stream) { int old, result = 0; if (stream != NULL) { stream_enter(stream, &old); result = stream_flush_locked(stream); stream_leave(stream, old); return result; } (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old); stream_registry_acquire(); for (stream = stream_registry; stream != NULL; stream = stream->registry_next) { flockfile(stream); if (stream_flush_locked(stream) == EOF) result = EOF; funlockfile(stream); } stream_registry_release(); (void)pthread_setcancelstate(old, NULL); return result; }
 size_t fread(void *buffer, size_t size, size_t count, FILE *stream) {
-	size_t total; ssize_t result;
-	if (size != 0 && count > SIZE_MAX / size) { errno = EINVAL; return 0; }
-	total = size * count; result = read(stream_fd(stream), buffer, total);
-	if (result < 0) { stream->error = 1; return 0; }
-	if ((size_t)result < total) stream->eof = 1;
-	return size == 0 ? 0 : (size_t)result / size;
+	size_t total, done = 0; int old;
+	if (stream == NULL || (buffer == NULL && size != 0 && count != 0)) { errno = EINVAL; return 0; }
+	if (size != 0 && count > SIZE_MAX / size) { errno = EOVERFLOW; return 0; }
+	total = size * count; if (total == 0) return 0;
+	stream_enter(stream, &old);
+	stream->io_started = 1;
+	if (stream->last_operation == 2 && stream_flush_locked(stream) == EOF)
+		goto read_done;
+	stream->last_operation = 1;
+	if (stream->ungot_character != EOF) {
+		((unsigned char *)buffer)[done++] =
+		    (unsigned char)stream->ungot_character;
+		stream->ungot_character = EOF;
+	}
+	while (done < total) {
+		ssize_t result;
+		if (stream->buffer_start < stream->buffer_length) {
+			size_t available = stream->buffer_length - stream->buffer_start;
+			size_t take = available < total - done ? available : total - done;
+			memcpy((unsigned char *)buffer + done,
+			    stream->buffer + stream->buffer_start, take);
+			stream->buffer_start += take;
+			done += take;
+			continue;
+		}
+		stream->buffer_start = stream->buffer_length = 0;
+		if (stream->buffering_mode == _IONBF) {
+			result = read(stream_fd(stream), (unsigned char *)buffer + done,
+			    total - done);
+			if (result > 0) { done += (size_t)result; continue; }
+		} else {
+			if (stream_ensure_buffer(stream) != 0)
+				break;
+			result = read(stream_fd(stream), stream->buffer,
+			    stream->buffer_size);
+			if (result > 0) {
+				stream->buffer_length = (size_t)result;
+				continue;
+			}
+		}
+		if (result == 0) { stream->eof = 1; break; }
+		if (errno == EINTR) continue;
+		stream->error = 1; break;
+	}
+	read_done:
+	stream->position += done;
+	stream_leave(stream, old);
+	return done / size;
 }
 size_t fwrite(const void *buffer, size_t size, size_t count, FILE *stream) {
-	size_t total; ssize_t result;
-	if (size != 0 && count > SIZE_MAX / size) { errno = EINVAL; return 0; }
-	total = size * count; result = write(stream_fd(stream), buffer, total);
-	if (result < 0) { stream->error = 1; return 0; }
-	return size == 0 ? 0 : (size_t)result / size;
+	size_t total, done = 0; int old;
+	if (stream == NULL || (buffer == NULL && size != 0 && count != 0)) { errno = EINVAL; return 0; }
+	if (size != 0 && count > SIZE_MAX / size) { errno = EOVERFLOW; return 0; }
+	total = size * count; if (total == 0) return 0;
+	stream_enter(stream, &old);
+	stream->io_started = 1;
+	if (stream->last_operation == 1 && stream_flush_locked(stream) == EOF)
+		goto write_done;
+	stream->last_operation = 2;
+	if (stream->buffering_mode == _IONBF) {
+		(void)stream_write_direct(stream, buffer, total, &done);
+	} else if (stream_ensure_buffer(stream) == 0) {
+		while (done < total) {
+			size_t space = stream->buffer_size - stream->buffer_length;
+			size_t put = space < total - done ? space : total - done;
+			const unsigned char *source =
+			    (const unsigned char *)buffer + done;
+			memcpy(stream->buffer + stream->buffer_length, source, put);
+			stream->buffer_length += put;
+			done += put;
+			if (stream->buffer_length == stream->buffer_size ||
+			    (stream->buffering_mode == _IOLBF &&
+			    memchr(source, '\n', put) != NULL))
+				if (stream_flush_locked(stream) == EOF)
+					break;
+		}
+	}
+	write_done:
+	stream->position += done;
+	stream_leave(stream, old);
+	return done / size;
 }
 int getc(FILE *stream) { unsigned char byte; return fread(&byte, 1, 1, stream) == 1 ? byte : EOF; }
+int ungetc(int character, FILE *stream) { int old, result = EOF; if (stream == NULL || character == EOF) return EOF; stream_enter(stream, &old); if (stream->last_operation != 2 && stream->ungot_character == EOF) { stream->ungot_character = (unsigned char)character; stream->eof = 0; if (stream->position != 0) stream->position--; result = (unsigned char)character; } stream_leave(stream, old); return result; }
 char *fgets(char *buffer, int size, FILE *stream) {
-	int c, i = 0; if (buffer == NULL || size <= 0) return NULL;
+	int c, i = 0, old; if (buffer == NULL || stream == NULL || size <= 0) return NULL;
+	stream_enter(stream, &old);
 	while (i + 1 < size && (c = getc(stream)) != EOF) { buffer[i++] = (char)c; if (c == '\n') break; }
-	if (i == 0)
+	if (i == 0) {
+		stream_leave(stream, old);
 		return NULL;
+	}
 	buffer[i] = '\0';
+	stream_leave(stream, old);
 	return buffer;
 }
-int fseek(FILE *stream, long offset, int whence) { off_t at = lseek(stream_fd(stream), offset, whence); if (at < 0) return -1; stream->position = (uint64_t)at; stream->eof = 0; return 0; }
-long ftell(FILE *stream) { off_t at = lseek(stream_fd(stream), 0, SEEK_CUR); return at < 0 ? -1L : (long)at; }
+int fseek(FILE *stream, long offset, int whence) { off_t at; int old; if (stream == NULL || (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END)) { errno = EINVAL; return -1; } stream_enter(stream, &old); if (stream->last_operation == 2 && stream_flush_locked(stream) == EOF) { stream_leave(stream, old); return -1; } if (whence == SEEK_CUR) { if ((offset < 0 && (uint64_t)(-(offset + 1L)) + 1U > stream->position) || (offset > 0 && (uint64_t)offset > UINT64_MAX - stream->position)) { stream_leave(stream, old); errno = EINVAL; return -1; } at = lseek(stream_fd(stream), (off_t)(offset < 0 ? stream->position - ((uint64_t)(-(offset + 1L)) + 1U) : stream->position + (uint64_t)offset), SEEK_SET); } else at = lseek(stream_fd(stream), offset, whence); if (at >= 0) { stream->position = (uint64_t)at; stream->eof = 0; stream->ungot_character = EOF; stream->buffer_start = stream->buffer_length = 0; stream->last_operation = 0; } else stream->error = 1; stream_leave(stream, old); return at < 0 ? -1 : 0; }
+long ftell(FILE *stream) { uint64_t position; int old; if (stream == NULL) { errno = EINVAL; return -1L; } stream_enter(stream, &old); position = stream->position; stream_leave(stream, old); if (position > LONG_MAX) { errno = EOVERFLOW; return -1L; } return (long)position; }
+
+int setvbuf(FILE *stream, char *buffer, int mode, size_t size) { int old; if (stream == NULL || (mode != _IOFBF && mode != _IOLBF && mode != _IONBF) || (mode != _IONBF && size == 0)) { errno = EINVAL; return -1; } stream_enter(stream, &old); if (stream->io_started) { stream_leave(stream, old); errno = EBUSY; return -1; } if (stream->buffer_owned) free(stream->buffer); stream->buffer = mode == _IONBF ? NULL : (unsigned char *)buffer; stream->buffer_size = mode == _IONBF ? 0 : size; stream->buffer_owned = 0; if (mode != _IONBF && buffer == NULL) { stream->buffer = malloc(size); if (stream->buffer == NULL) { stream->buffer_size = 0; stream->buffering_mode = _IONBF; stream_leave(stream, old); errno = ENOMEM; return -1; } stream->buffer_owned = 1; } stream->buffering_mode = mode; stream_leave(stream, old); return 0; }
+void setbuf(FILE *stream, char *buffer) { (void)setvbuf(stream, buffer, buffer != NULL ? _IOFBF : _IONBF, buffer != NULL ? BUFSIZ : 0); }
 
 time_t time(time_t *result) {
 	struct timespec ts; time_t value = clock_gettime(CLOCK_REALTIME, &ts) == 0 ? ts.tv_sec : (time_t)-1;
@@ -953,8 +1284,12 @@ int gettimeofday(struct timeval *result, void *timezone) {
 	return 0;
 }
 void exit(int status) {
+#if defined(ZEDBSD_DYNAMIC_LIBC)
+	__zedbsd_rtld_exports.process_fini();
+#else
 	if (__zedbsd_rtld_process_fini != NULL)
 		__zedbsd_rtld_process_fini();
+#endif
 	(void)fflush(NULL);
 	_exit(status);
 }
@@ -988,6 +1323,16 @@ void zedbsd_user_libc_init(int argc, char **argv, char **envp)
 	stdin->context = (void *)(intptr_t)1;
 	stdout->context = (void *)(intptr_t)2;
 	stderr->context = (void *)(intptr_t)3;
+	stdin->mode = 1U;
+	stdout->mode = stderr->mode = 2U;
+	stdin->buffering_mode = _IOFBF;
+	stdout->buffering_mode = _IOLBF;
+	stderr->buffering_mode = _IONBF;
+	stdin->ungot_character = stdout->ungot_character =
+	    stderr->ungot_character = EOF;
+	stream_register(stdin);
+	stream_register(stdout);
+	stream_register(stderr);
 	arena = sbrk((intptr_t)USER_HEAP_INITIAL);
 	if (arena == (void *)-1)
 		zedbsd_libc_panic("unable to initialize user heap");
@@ -998,6 +1343,10 @@ void zedbsd_user_libc_init(int argc, char **argv, char **envp)
 	 * thread before the runtime linker invokes any of them. */
 	if (zedbsd_pthread_initialize_main != NULL)
 		zedbsd_pthread_initialize_main();
+#if defined(ZEDBSD_DYNAMIC_LIBC)
+	__zedbsd_rtld_exports.startup_init();
+#else
 	if (__zedbsd_rtld_startup_init != NULL)
 		__zedbsd_rtld_startup_init();
+#endif
 }

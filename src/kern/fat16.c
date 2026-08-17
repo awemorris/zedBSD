@@ -195,6 +195,31 @@ static enum zedbsd_fs_result fat16_next_cluster(
 	return ZEDBSD_FS_OK;
 }
 
+enum zedbsd_fs_result
+zedbsd_fat_count_free_clusters(struct zedbsd_filesystem *filesystem,
+	uint32_t *free_clusters)
+{
+	struct zedbsd_fat_state *fat;
+	uint32_t cluster, count = 0;
+
+	if (filesystem == NULL || free_clusters == NULL)
+		return ZEDBSD_FS_INVALID_PATH;
+	fat = zedbsd_fat_state(filesystem);
+	if (fat == NULL || fat->cluster_count == 0)
+		return ZEDBSD_FS_CORRUPT;
+	for (cluster = 2U; cluster < fat->cluster_count + 2U; cluster++) {
+		uint32_t value;
+		enum zedbsd_fs_result result =
+		    fat16_next_cluster(filesystem, cluster, &value);
+		if (result != ZEDBSD_FS_OK)
+			return result;
+		if (value == 0)
+			count++;
+	}
+	*free_clusters = count;
+	return ZEDBSD_FS_OK;
+}
+
 static enum zedbsd_fs_result fat16_set_entry_byte(
 	struct zedbsd_filesystem *filesystem, uint32_t copy_start,
 	uint32_t offset, uint8_t keep_mask, uint8_t merge_value)

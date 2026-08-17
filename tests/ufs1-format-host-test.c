@@ -47,6 +47,18 @@ main(void)
 	make_super(data, 0);
 	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == 0);
 	assert(super.bsize == 8192 && super.fsize == 1024 && !super.swapped);
+	make_super(data, 0);
+	ufs1_put32(data, UFS1_FS_OLD_SIZE, 10000, 0);
+	ufs1_put32(data, UFS1_FS_OLD_DSIZE, 9800, 0);
+	ufs1_put32(data, UFS1_FS_NCG, 3, 0);
+	ufs1_put32(data, UFS1_FS_FPG, 4096, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 20000, &super) == 0);
+	assert(super.ncg == 3 && super.fpg == 4096);
+	ufs1_put32(data, UFS1_FS_OLD_CGOFFSET, 64, 0);
+	ufs1_put32(data, UFS1_FS_OLD_CGMASK, 0, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 20000, &super) == 0);
+	ufs1_put32(data, UFS1_FS_OLD_CGOFFSET, 1024, 0);
+	assert(ufs1_super_decode(data, sizeof(data), 20000, &super) == EINVAL);
 	make_super(data, 1);
 	assert(ufs1_super_decode(data, sizeof(data), 8192, &super) == 0);
 	assert(super.swapped && super.inodefmt == UFS1_44INODEFMT);

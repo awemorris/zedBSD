@@ -48,6 +48,7 @@ typedef uint32_t sigset_t;
  * fields so their layout is identical in the ILP32 and LP64 ABIs. */
 #define SI_USER 0
 #define SI_QUEUE (-1)
+#define SI_TIMER (-2)
 #define SI_KERNEL 0x80
 #define ILL_ILLOPC 1
 #define FPE_INTDIV 1
@@ -67,6 +68,16 @@ union sigval {
 	int32_t sival_int;
 	void *sival_ptr;
 	uint64_t __sival_pad;
+};
+
+#define SIGEV_NONE 0
+#define SIGEV_SIGNAL 1
+#define SIGEV_THREAD 2
+struct sigevent {
+	int32_t sigev_notify;
+	int32_t sigev_signo;
+	union sigval sigev_value;
+	uint64_t sigev_reserved[2];
 };
 
 typedef struct siginfo {

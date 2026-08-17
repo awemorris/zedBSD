@@ -253,6 +253,11 @@ int console_device_register(void)
 		input_started = 0;
 		return error;
 	}
+	error = tty_pty_register();
+	if (error != 0) {
+		input_started = 0;
+		return error;
+	}
 	thread_start(worker);
 	hal_cons_set_mode(HAL_CONS_TERMINAL);
 	return 0;

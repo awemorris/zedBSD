@@ -9,6 +9,7 @@
 
 void *dlopen(const char *, int);
 void *dlsym(void *, const char *);
+void *dlvsym(void *, const char *, const char *);
 int dlclose(void *);
 char *dlerror(void);
 

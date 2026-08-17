@@ -102,6 +102,16 @@ vmspace_find_free_range(struct vmspace *vm, uintptr_t hint, size_t size,
 }
 
 int
+vmspace_find_free_range_bounded(struct vmspace *vm, uintptr_t minimum,
+	uintptr_t maximum, size_t size, size_t alignment, uintptr_t *result)
+{
+	int error = vmspace_find_free_range(vm, minimum, size, alignment, result);
+	if (error == 0 && (*result >= maximum || size > maximum - *result))
+		return ENOMEM;
+	return error;
+}
+
+int
 vmspace_unmap(struct vmspace *vm, uintptr_t start, size_t size)
 {
 	(void)vm;

@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/statvfs.h>
 
 #define FAT_MOUNT_MAX MOUNT_MAX
 #define FAT_INODE_MAX 256U
@@ -1358,11 +1359,44 @@ fat_unmount_impl(struct mount *mountp)
 	mountp->m_data = NULL;
 }
 
+static int
+fat_statvfs(struct mount *mountp, struct statvfs *result)
+{
+	struct fat_mount_state *state = fat_mount_state(mountp);
+	struct zedbsd_fat_state *fat;
+	uint32_t free_clusters;
+	int error;
+
+	if (state == NULL || result == NULL)
+		return EINVAL;
+	mutex_lock(&state->lock);
+	fat = zedbsd_fat_state(&state->legacy);
+	error = fs_error(zedbsd_fat_count_free_clusters(&state->legacy,
+	    &free_clusters));
+	if (error == 0) {
+		memset(result, 0, sizeof(*result));
+		result->f_bsize = (uint64_t)fat->sectors_per_cluster * 512U;
+		result->f_frsize = result->f_bsize;
+		result->f_blocks = fat->cluster_count;
+		result->f_bfree = free_clusters;
+		result->f_bavail = free_clusters;
+		/* FAT has no fixed inode table.  Use clusters as the capacity
+		 * unit for the advisory file counts as well. */
+		result->f_files = fat->cluster_count;
+		result->f_ffree = free_clusters;
+		result->f_favail = free_clusters;
+		result->f_namemax = NAME_MAX;
+	}
+	mutex_unlock(&state->lock);
+	return error;
+}
+
 const struct filesystem_type fat_filesystem_type = {
 	.fs_name = "fat",
 	.probe = fat_probe,
 	.mount = fat_mount_impl,
 	.sync = fat_sync_mount,
+	.statvfs = fat_statvfs,
 	.unmount = fat_unmount_impl,
 	.alloc_inode = fat_alloc_inode,
 	.free_inode = fat_free_inode,

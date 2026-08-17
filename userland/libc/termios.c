@@ -1,8 +1,15 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <errno.h>
+#include <fcntl.h>
+#include <pty.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#include <unistd.h>
+
+extern char *zedbsd_pthread_ptsname_buffer(size_t *) __attribute__((weak));
 
 int
 tcgetattr(int descriptor, struct termios *termios)
@@ -91,4 +98,133 @@ ctermid(char *buffer)
 	if (buffer == NULL) return path;
 	memcpy(buffer, path, sizeof(path));
 	return buffer;
+}
+
+int
+posix_openpt(int flags)
+{
+	if ((flags & O_ACCMODE) != O_RDWR ||
+	    (flags & ~(O_ACCMODE | O_NOCTTY | O_CLOEXEC | O_NONBLOCK)) != 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	return open("/dev/ptmx", flags);
+}
+
+int
+grantpt(int descriptor)
+{
+	uint32_t number;
+	return ioctl(descriptor, TIOCGPTN, &number);
+}
+
+int
+unlockpt(int descriptor)
+{
+	int unlocked = 0;
+	return ioctl(descriptor, TIOCSPTLCK, &unlocked);
+}
+
+int
+ptsname_r(int descriptor, char *buffer, size_t size)
+{
+	uint32_t number;
+	int length;
+	if (buffer == NULL || size == 0) {
+		errno = EINVAL;
+		return EINVAL;
+	}
+	if (ioctl(descriptor, TIOCGPTN, &number) != 0)
+		return errno;
+	length = snprintf(buffer, size, "/dev/pts/%u", number);
+	if (length < 0 || (size_t)length >= size) {
+		errno = ERANGE;
+		return ERANGE;
+	}
+	return 0;
+}
+
+char *
+ptsname(int descriptor)
+{
+	static char bootstrap_buffer[32];
+	size_t size = sizeof(bootstrap_buffer);
+	char *buffer = zedbsd_pthread_ptsname_buffer != NULL ?
+	    zedbsd_pthread_ptsname_buffer(&size) : bootstrap_buffer;
+	if (buffer == NULL)
+		buffer = bootstrap_buffer;
+	return ptsname_r(descriptor, buffer, size) == 0 ? buffer : NULL;
+}
+
+int
+openpty(int *master, int *slave, char *name, const struct termios *termios,
+	const struct winsize *winsize)
+{
+	char path[32];
+	int m, s, error = 0;
+	if (master == NULL || slave == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	m = posix_openpt(O_RDWR | O_NOCTTY);
+	if (m < 0)
+		return -1;
+	if (grantpt(m) != 0 || unlockpt(m) != 0 ||
+	    (error = ptsname_r(m, path, sizeof(path))) != 0) {
+		if (error != 0) errno = error;
+		(void)close(m);
+		return -1;
+	}
+	s = open(path, O_RDWR | O_NOCTTY);
+	if (s < 0) {
+		(void)close(m);
+		return -1;
+	}
+	if ((termios != NULL && tcsetattr(s, TCSANOW, termios) != 0) ||
+	    (winsize != NULL && ioctl(s, TIOCSWINSZ, winsize) != 0)) {
+		(void)close(s);
+		(void)close(m);
+		return -1;
+	}
+	if (name != NULL)
+		strcpy(name, path);
+	*master = m;
+	*slave = s;
+	return 0;
+}
+
+int
+login_tty(int descriptor)
+{
+	if (setsid() < 0 || ioctl(descriptor, TIOCSCTTY, 0) != 0 ||
+	    dup2(descriptor, 0) < 0 || dup2(descriptor, 1) < 0 ||
+	    dup2(descriptor, 2) < 0)
+		return -1;
+	if (descriptor > 2)
+		(void)close(descriptor);
+	return 0;
+}
+
+pid_t
+forkpty(int *master, char *name, const struct termios *termios,
+	const struct winsize *winsize)
+{
+	int slave;
+	pid_t child;
+	if (openpty(master, &slave, name, termios, winsize) != 0)
+		return -1;
+	child = fork();
+	if (child < 0) {
+		(void)close(slave);
+		(void)close(*master);
+		return -1;
+	}
+	if (child == 0) {
+		(void)close(*master);
+		if (login_tty(slave) != 0)
+			_exit(127);
+		return 0;
+	}
+	(void)close(slave);
+	return child;
 }

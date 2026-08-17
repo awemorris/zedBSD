@@ -1,5 +1,11 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+﻿/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+#ifdef UFS2_TEST_IMAGE
+#include "kern/ufs2.h"
+#include "kern/ufs2/ufs2-disk.h"
+#else
 #include "kern/ufs1.h"
+#include "kern/ufs1/ufs1-disk.h"
+#endif
 #include "kern/disk.h"
 #include "kern/buf.h"
 #include "kern/file.h"
@@ -7,15 +13,56 @@
 #include "kern/mount.h"
 #include "kern/namecache.h"
 #include "kern/namei.h"
-#include "kern/ufs1/ufs1-disk.h"
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef UFS2_TEST_IMAGE
+#include <zedbsd/quota.h>
+#include <zedbsd/snapshot.h>
+#endif
 
 #ifndef UFS1_TEST_IMAGE
 #define UFS1_TEST_IMAGE "build/ufs1-test.img"
+#endif
+
+#ifdef UFS2_TEST_IMAGE
+#define TEST_IMAGE UFS2_TEST_IMAGE
+#define TEST_FS_TYPE ufs2_filesystem_type
+#define TEST_FS_NAME "ufs2"
+#define TEST_SBLOCK_OFFSET UFS2_SBLOCK_OFFSET
+#define TEST_FS_CSTOTAL_NDIR UFS2_FS_CSTOTAL_NDIR
+#define TEST_FS_CSTOTAL_NBFREE UFS2_FS_CSTOTAL_NBFREE
+#define TEST_FS_CSTOTAL_NIFREE UFS2_FS_CSTOTAL_NIFREE
+#define TEST_FS_BSIZE UFS2_FS_BSIZE
+#define TEST_FS_NINDIR UFS2_FS_NINDIR
+#define TEST_FS_CLEAN UFS2_FS_CLEAN
+#define TEST_NDADDR UFS2_NDADDR
+#define TEST_DINODE_SIZE UFS2_DINODE_SIZE
+#define TEST_DI_DB UFS2_DI_DB
+#define TEST_MARKER "zedBSD ufs2 root v1\n"
+#define TEST_MARKER_SIZE 20U
+#define TEST_LABEL "UFS2"
+#define TEST_FAILURE_BOUNDARIES 1024U
+#else
+#define TEST_IMAGE UFS1_TEST_IMAGE
+#define TEST_FS_TYPE ufs1_filesystem_type
+#define TEST_FS_NAME "ufs1"
+#define TEST_SBLOCK_OFFSET UFS1_SBLOCK_OFFSET
+#define TEST_FS_CSTOTAL_NDIR UFS1_FS_CSTOTAL_NDIR
+#define TEST_FS_CSTOTAL_NBFREE UFS1_FS_CSTOTAL_NBFREE
+#define TEST_FS_CSTOTAL_NIFREE UFS1_FS_CSTOTAL_NIFREE
+#define TEST_FS_BSIZE UFS1_FS_BSIZE
+#define TEST_FS_NINDIR UFS1_FS_NINDIR
+#define TEST_FS_CLEAN UFS1_FS_CLEAN
+#define TEST_NDADDR UFS1_NDADDR
+#define TEST_DINODE_SIZE UFS1_DINODE_SIZE
+#define TEST_DI_DB UFS1_DI_DB
+#define TEST_MARKER "zedBSD ufs1 root v1\n"
+#define TEST_MARKER_SIZE 20U
+#define TEST_LABEL "UFS1"
+#define TEST_FAILURE_BOUNDARIES 128U
 #endif
 
 static unsigned char *image;
@@ -26,6 +73,18 @@ static uint64_t last_injected_block;
 static unsigned get32(size_t offset)
 { return (unsigned)image[offset]|(unsigned)image[offset+1]<<8|
 	(unsigned)image[offset+2]<<16|(unsigned)image[offset+3]<<24; }
+#ifdef UFS2_TEST_IMAGE
+static uint64_t get64(size_t offset)
+{ return (uint64_t)get32(offset)|((uint64_t)get32(offset+4U)<<32); }
+#endif
+static unsigned get_summary(size_t offset)
+{
+#ifdef UFS2_TEST_IMAGE
+	return (unsigned)get64(TEST_SBLOCK_OFFSET+offset);
+#else
+	return get32(TEST_SBLOCK_OFFSET+offset);
+#endif
+}
 static void put32(size_t offset,unsigned value)
 { image[offset]=(unsigned char)value;image[offset+1]=(unsigned char)(value>>8);
 	image[offset+2]=(unsigned char)(value>>16);image[offset+3]=(unsigned char)(value>>24); }
@@ -33,6 +92,21 @@ static unsigned get16(size_t offset)
 { return (unsigned)image[offset]|(unsigned)image[offset+1]<<8; }
 static void put16(size_t offset,unsigned value)
 { image[offset]=(unsigned char)value;image[offset+1]=(unsigned char)(value>>8); }
+static uint64_t get_pointer(size_t offset)
+{
+#ifdef UFS2_TEST_IMAGE
+	return get64(offset);
+#else
+	return get32(offset);
+#endif
+}
+static void put_pointer(size_t offset,uint64_t value)
+{
+	put32(offset,(unsigned)value);
+#ifdef UFS2_TEST_IMAGE
+	put32(offset+4U,(unsigned)(value>>32));
+#endif
+}
 void *kern_malloc(size_t n){return malloc(n);} void *kern_calloc(size_t n,size_t s){return calloc(n,s);} void kern_free(void *p){free(p);}
 
 static int submit(struct disk *disk,struct bio *bio)
@@ -56,9 +130,9 @@ static const struct disk_ops ops={.submit=submit};
 static void
 expect_summary(unsigned ndir,unsigned nbfree,unsigned nifree)
 {
-	assert(get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NDIR)==ndir);
-	assert(get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NBFREE)==nbfree);
-	assert(get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NIFREE)==nifree);
+	assert(get_summary(TEST_FS_CSTOTAL_NDIR)==ndir);
+	assert(get_summary(TEST_FS_CSTOTAL_NBFREE)==nbfree);
+	assert(get_summary(TEST_FS_CSTOTAL_NIFREE)==nifree);
 }
 
 static void
@@ -69,13 +143,13 @@ test_sparse_failure_boundary(struct mount *mountp,struct inode *directory,
 	unsigned attempt;
 	int reached_end=0;
 
-	for(attempt=1;attempt<=64U;attempt++) {
+	for(attempt=1;attempt<=TEST_FAILURE_BOUNDARIES;attempt++) {
 		struct inode *inode;
 		struct file *file;
 		struct path path;
-		unsigned ndir=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NDIR);
-		unsigned nbfree=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NBFREE);
-		unsigned nifree=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NIFREE);
+		unsigned ndir=get_summary(TEST_FS_CSTOTAL_NDIR);
+		unsigned nbfree=get_summary(TEST_FS_CSTOTAL_NBFREE);
+		unsigned nifree=get_summary(TEST_FS_CSTOTAL_NIFREE);
 		unsigned before_injected=injected_writes;
 		char value=(char)(0x40U+(attempt&31U)),readback=0;
 		ssize_t result;
@@ -107,36 +181,36 @@ test_sparse_failure_boundary(struct mount *mountp,struct inode *directory,
 		assert(file_close(file)==0);path_release(&path);
 		assert(inode_unlink(directory,&name)==0);
 		inode_release(inode);
-		if(get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NDIR)!=ndir||
-		    get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NBFREE)!=nbfree||
-		    get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NIFREE)!=nifree)
+		if(get_summary(TEST_FS_CSTOTAL_NDIR)!=ndir||
+		    get_summary(TEST_FS_CSTOTAL_NBFREE)!=nbfree||
+		    get_summary(TEST_FS_CSTOTAL_NIFREE)!=nifree)
 			fprintf(stderr,"UFS1 rollback mismatch: offset=%lld %s attempt=%u result=%lld injected=%u block=%llu counters=%u/%u/%u expected=%u/%u/%u\n",
 			    (long long)offset,short_io?"short":"hard",attempt,
 			    (long long)result,injected_writes-before_injected,
 			    (unsigned long long)last_injected_block,
-			    get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NDIR),
-			    get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NBFREE),
-			    get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NIFREE),
+			    get_summary(TEST_FS_CSTOTAL_NDIR),
+			    get_summary(TEST_FS_CSTOTAL_NBFREE),
+			    get_summary(TEST_FS_CSTOTAL_NIFREE),
 			    ndir,nbfree,nifree);
 		expect_summary(ndir,nbfree,nifree);
 		if(reached_end)
 			break;
 	}
-	assert(reached_end&&attempt<=64U);
+	assert(reached_end&&attempt<=TEST_FAILURE_BOUNDARIES);
 }
 
 static void
 test_indirect_failure_matrix(struct mount *mountp,struct inode *directory)
 {
-	uint64_t bsize=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_BSIZE);
-	uint64_t nindir=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_NINDIR);
+	uint64_t bsize=get32(TEST_SBLOCK_OFFSET+TEST_FS_BSIZE);
+	uint64_t nindir=get32(TEST_SBLOCK_OFFSET+TEST_FS_NINDIR);
 	uint64_t logical[4];
 	unsigned depth,short_io;
 
-	logical[0]=UFS1_NDADDR-1U;
-	logical[1]=UFS1_NDADDR;
-	logical[2]=UFS1_NDADDR+nindir;
-	logical[3]=UFS1_NDADDR+nindir+nindir*nindir;
+	logical[0]=TEST_NDADDR-1U;
+	logical[1]=TEST_NDADDR;
+	logical[2]=TEST_NDADDR+nindir;
+	logical[3]=TEST_NDADDR+nindir+nindir*nindir;
 	for(depth=0;depth<4U;depth++)
 		for(short_io=0;short_io<2U;short_io++)
 			test_sparse_failure_boundary(mountp,directory,
@@ -149,9 +223,9 @@ static struct mutation_counts
 mutation_counts(void)
 {
 	struct mutation_counts counts;
-	counts.ndir=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NDIR);
-	counts.nbfree=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NBFREE);
-	counts.nifree=get32(UFS1_SBLOCK_OFFSET+UFS1_FS_CSTOTAL_NIFREE);
+	counts.ndir=get_summary(TEST_FS_CSTOTAL_NDIR);
+	counts.nbfree=get_summary(TEST_FS_CSTOTAL_NBFREE);
+	counts.nifree=get_summary(TEST_FS_CSTOTAL_NIFREE);
 	return counts;
 }
 
@@ -187,7 +261,7 @@ test_create_failure_boundary(struct inode *directory,int make_directory,
 	unsigned attempt;
 	int reached_end=0;
 
-	for(attempt=1;attempt<=48U;attempt++) {
+	for(attempt=1;attempt<=TEST_FAILURE_BOUNDARIES;attempt++) {
 		struct mutation_counts before=mutation_counts();
 		struct inode *created=NULL,*found=NULL;
 		unsigned before_injected=injected_writes;
@@ -215,7 +289,7 @@ test_create_failure_boundary(struct inode *directory,int make_directory,
 		if(reached_end)
 			break;
 	}
-	assert(reached_end&&attempt<=48U);
+	assert(reached_end&&attempt<=TEST_FAILURE_BOUNDARIES);
 }
 
 static void
@@ -228,7 +302,7 @@ test_remove_failure_boundary(struct inode *directory,int remove_directory,
 	unsigned attempt;
 	int reached_end=0;
 
-	for(attempt=1;attempt<=48U;attempt++) {
+	for(attempt=1;attempt<=TEST_FAILURE_BOUNDARIES;attempt++) {
 		struct mutation_counts before=mutation_counts();
 		struct inode *held=NULL,*found=NULL;
 		unsigned before_injected;
@@ -259,7 +333,7 @@ test_remove_failure_boundary(struct inode *directory,int remove_directory,
 		if(reached_end)
 			break;
 	}
-	assert(reached_end&&attempt<=48U);
+	assert(reached_end&&attempt<=TEST_FAILURE_BOUNDARIES);
 }
 
 static void
@@ -271,7 +345,7 @@ test_rename_failure_boundary(struct inode *old_directory,
 	unsigned attempt;
 	int reached_end=0;
 
-	for(attempt=1;attempt<=64U;attempt++) {
+	for(attempt=1;attempt<=TEST_FAILURE_BOUNDARIES;attempt++) {
 		struct mutation_counts before=mutation_counts();
 		struct inode *source=NULL,*target=NULL,*old_found=NULL,*new_found=NULL;
 		unsigned before_injected;
@@ -343,7 +417,7 @@ test_rename_failure_boundary(struct inode *old_directory,
 		if(reached_end)
 			break;
 	}
-	assert(reached_end&&attempt<=64U);
+	assert(reached_end&&attempt<=TEST_FAILURE_BOUNDARIES);
 }
 
 static void
@@ -354,7 +428,7 @@ test_link_failure_boundary(struct inode *directory,int symbolic,int short_io)
 	unsigned attempt;
 	int reached_end=0;
 
-	for(attempt=1;attempt<=48U;attempt++) {
+	for(attempt=1;attempt<=TEST_FAILURE_BOUNDARIES;attempt++) {
 		struct mutation_counts before=mutation_counts();
 		struct inode *source=NULL,*link_inode=NULL,*found=NULL;
 		unsigned before_injected;
@@ -396,7 +470,7 @@ test_link_failure_boundary(struct inode *directory,int symbolic,int short_io)
 		if(reached_end)
 			break;
 	}
-	assert(reached_end&&attempt<=48U);
+	assert(reached_end&&attempt<=TEST_FAILURE_BOUNDARIES);
 }
 
 static void
@@ -407,7 +481,7 @@ test_truncate_failure_boundary(struct mount *mountp,struct inode *directory,
 	unsigned attempt;
 	int reached_end=0;
 
-	for(attempt=1;attempt<=96U;attempt++) {
+	for(attempt=1;attempt<=TEST_FAILURE_BOUNDARIES;attempt++) {
 		struct mutation_counts before=mutation_counts();
 		struct inode *inode=NULL;
 		struct file *file=NULL;
@@ -439,7 +513,7 @@ test_truncate_failure_boundary(struct mount *mountp,struct inode *directory,
 		if(reached_end)
 			break;
 	}
-	assert(reached_end&&attempt<=96U);
+	assert(reached_end&&attempt<=TEST_FAILURE_BOUNDARIES);
 }
 
 static void
@@ -476,8 +550,8 @@ expect_mount_error(int expected)
 	strcpy(disk->d_name,"badufs");disk->d_block_size=512;
 	disk->d_block_count=image_size/512;disk->d_ops=&ops;
 	assert(disk_create(disk)==0);
-	assert(filesystem_register(&ufs1_filesystem_type)==0);
-	assert(mount_private("ufs1",disk,MOUNT_READ_ONLY,NULL,&mountp)==expected);
+	assert(filesystem_register(&TEST_FS_TYPE)==0);
+	assert(mount_private(TEST_FS_NAME,disk,MOUNT_READ_ONLY,NULL,&mountp)==expected);
 	assert(mountp==NULL);
 	assert(disk_gone_if_idle(disk)==0);assert(disk_destroy(disk)==0);
 }
@@ -493,22 +567,22 @@ expect_mount_dirty_write_error(int short_io)
 	strcpy(disk->d_name,"badclean");disk->d_block_size=512;
 	disk->d_block_count=image_size/512;disk->d_ops=&ops;
 	assert(disk_create(disk)==0);
-	assert(filesystem_register(&ufs1_filesystem_type)==0);
+	assert(filesystem_register(&TEST_FS_TYPE)==0);
 	inject_mutation_write(1,short_io);
-	assert(mount_private("ufs1",disk,0,NULL,&mountp)==EIO);
+	assert(mount_private(TEST_FS_NAME,disk,0,NULL,&mountp)==EIO);
 	assert(mutation_was_injected(before));
 	assert(mountp==NULL);
 	assert(buf_invalidate_disk(disk,BUF_INVALIDATE_DISCARD)==0);
 	/* A successful-but-short fake write copied the complete request before
 	 * reporting its residual; restore the pristine fixture for the next case. */
-	image[UFS1_SBLOCK_OFFSET+UFS1_FS_CLEAN]=1;
+	image[TEST_SBLOCK_OFFSET+TEST_FS_CLEAN]=1;
 	assert(disk_gone_if_idle(disk)==0);assert(disk_destroy(disk)==0);
 }
 
 int main(void)
 {
 	assert(buf_init() == 0);
-	FILE *fp=fopen(UFS1_TEST_IMAGE,"rb"); struct disk *disk; struct mount *mountp;
+	FILE *fp=fopen(TEST_IMAGE,"rb"); struct disk *disk; struct mount *mountp;
 	struct componentname etc_name={"etc",3,0}, marker_name={"zedbsd-root",11,0};
 	struct componentname fresh_name={"fresh",5,0},moved_name={"moved",5,0};
 	struct componentname hard_name={"hard",4,0},sym_name={"sym",3,0};
@@ -519,13 +593,18 @@ int main(void)
 	struct path path; struct file *file; char text[32]={0};
 	unsigned char *large;size_t index;
 	unsigned initial_nbfree,initial_nifree,initial_ndir;
+	#ifdef UFS2_TEST_IMAGE
+	struct mount *snapshot_mount=NULL;
+	struct zedbsd_snapshot_ctl snapshot_request;
+	#endif
 	assert(fp); fseek(fp,0,SEEK_END); image_size=(size_t)ftell(fp); rewind(fp);
 	image=malloc(image_size); assert(image&&fread(image,1,image_size,fp)==image_size); fclose(fp);
 	/* Kernel mount parser rejects corrupt CG geometry, allocation state, root
 	 * type, and root data pointers before publishing a mount. */
 	{
-		size_t cg=(size_t)get32(8192+12)*1024U;
-		size_t root=(size_t)get32(8192+16)*1024U+2U*128U;
+		size_t cg=(size_t)get32(TEST_SBLOCK_OFFSET+12U)*1024U;
+		size_t root=(size_t)get32(TEST_SBLOCK_OFFSET+16U)*1024U+
+		    2U*TEST_DINODE_SIZE;
 		unsigned saved;
 		saved=get32(cg+4);put32(cg+4,0);expect_mount_error(EINVAL);put32(cg+4,saved);
 		saved=get32(cg+92);put32(cg+92,get32(cg+96)+1U);
@@ -533,9 +612,13 @@ int main(void)
 		saved=image[cg+get32(cg+92)];image[cg+get32(cg+92)]&=(unsigned char)~(1U<<2);
 		expect_mount_error(EINVAL);image[cg+get32(cg+92)]=(unsigned char)saved;
 		saved=get16(root);put16(root,0100644);expect_mount_error(EIO);put16(root,saved);
-		saved=get32(root+40);put32(root+40,1);expect_mount_error(EIO);put32(root+40,saved);
 		{
-			size_t root_data=(size_t)get32(root+40)*1024U;
+			uint64_t saved_pointer=get_pointer(root+TEST_DI_DB);
+			put_pointer(root+TEST_DI_DB,1);expect_mount_error(EIO);
+			put_pointer(root+TEST_DI_DB,saved_pointer);
+		}
+		{
+			size_t root_data=(size_t)get_pointer(root+TEST_DI_DB)*1024U;
 			saved=get16(root_data+4);put16(root_data+4,0);
 			expect_mount_error(EIO);put16(root_data+4,saved);
 			saved=get32(root_data);put32(root_data,3);
@@ -544,20 +627,106 @@ int main(void)
 	}
 	expect_mount_dirty_write_error(0);
 	expect_mount_dirty_write_error(1);
-	initial_ndir=get32(8192+192);initial_nbfree=get32(8192+196);
-	initial_nifree=get32(8192+200);
+	initial_ndir=get_summary(TEST_FS_CSTOTAL_NDIR);
+	initial_nbfree=get_summary(TEST_FS_CSTOTAL_NBFREE);
+	initial_nifree=get_summary(TEST_FS_CSTOTAL_NIFREE);
 	disk_registry_reset(); mount_reset(); disk=disk_alloc(); assert(disk);
 	strcpy(disk->d_name,"ufs0"); disk->d_block_size=512; disk->d_block_count=image_size/512; disk->d_ops=&ops;
-	assert(disk_create(disk)==0); assert(filesystem_register(&ufs1_filesystem_type)==0);
-	assert(mount_private("ufs1",disk,0,NULL,&mountp)==0);
+	assert(disk_create(disk)==0); assert(filesystem_register(&TEST_FS_TYPE)==0);
+	assert(mount_private(TEST_FS_NAME,disk,0,NULL,&mountp)==0);
+	#ifdef UFS2_TEST_IMAGE
+	{
+		struct zedbsd_quota_ctl quota;
+		memset(&quota,0,sizeof(quota));quota.size=sizeof(quota);
+		quota.version=ZEDBSD_QUOTA_VERSION;quota.command=ZEDBSD_QUOTA_SET;
+		quota.type=ZEDBSD_QUOTA_USER;quota.id=0;
+		quota.block_soft=100000;quota.block_hard=110000;
+		quota.inode_soft=10000;quota.inode_hard=11000;
+		quota.grace_seconds=12345;
+		assert(mount_quotactl(mountp,&quota)==0);
+		quota.command=ZEDBSD_QUOTA_ENABLE;
+		assert(mount_quotactl(mountp,&quota)==0);
+		memset(&quota,0,sizeof(quota));quota.size=sizeof(quota);
+		quota.version=ZEDBSD_QUOTA_VERSION;quota.command=ZEDBSD_QUOTA_GET;
+		quota.type=ZEDBSD_QUOTA_USER;quota.id=0;
+		assert(mount_quotactl(mountp,&quota)==0);
+		assert((quota.flags&ZEDBSD_QUOTA_F_ENABLED)!=0&&
+		    quota.block_hard==110000&&quota.grace_seconds==12345&&
+		    quota.inodes>=2);
+		{
+			static const struct componentname quota_name={"qlimit",6,0};
+			struct inode *denied=NULL,*found_quota=NULL;
+			uint64_t used_inodes=quota.inodes;
+			quota.command=ZEDBSD_QUOTA_SET;
+			quota.inode_soft=quota.inode_hard=used_inodes;
+			assert(mount_quotactl(mountp,&quota)==0);
+			assert(inode_create(mountp->m_root,&quota_name,0600,&denied)==EDQUOT);
+			assert(denied==NULL&&inode_lookup(mountp->m_root,&quota_name,
+			    &found_quota)==ENOENT);
+			quota.inode_soft=10000;quota.inode_hard=11000;
+			assert(mount_quotactl(mountp,&quota)==0);
+		}
+	}
+	#endif
+	#ifdef UFS2_TEST_IMAGE
+	memset(&snapshot_request,0,sizeof(snapshot_request));
+	snapshot_request.size=sizeof(snapshot_request);
+	snapshot_request.version=ZEDBSD_SNAPSHOT_VERSION;
+	snapshot_request.command=ZEDBSD_SNAPSHOT_CREATE;
+	assert(mount_snapshotctl(mountp,&snapshot_request)==0);
+	assert((snapshot_request.flags&ZEDBSD_SNAPSHOT_F_ACTIVE)!=0&&
+	    snapshot_request.device[0]!='\0');
+	{
+		struct disk *snapshot_device=disk_find(snapshot_request.device);
+		assert(snapshot_device!=NULL);
+		assert(mount_private(TEST_FS_NAME,snapshot_device,MOUNT_READ_ONLY,NULL,
+		    &snapshot_mount)==0);
+		disk_release(snapshot_device);
+	}
+	#endif
 	assert(inode_lookup(mountp->m_root,&etc_name,&etc)==0);
 	assert(inode_lookup(etc,&marker_name,&marker)==0);
 	path_init(&path); path_set(&path,mountp,marker); assert(file_open_resolved(&path,O_RDWR,&file)==0);
-	assert(file_read(file,text,sizeof(text))==20); assert(memcmp(text,"zedBSD ufs1 root v1\n",20)==0);
+	assert(file_read(file,text,sizeof(text))==20); assert(memcmp(text,TEST_MARKER,TEST_MARKER_SIZE)==0);
 	assert(file_pwrite(file,"changed",7,0)==7);
 	assert(file_pwrite(file,"Z",1,9000)==1);
 	assert(file_pread(file,text,1,9000)==1&&text[0]=='Z');
 	assert(inode_truncate(marker,7)==0);
+	#ifdef UFS2_TEST_IMAGE
+	{
+		struct inode *snapshot_etc,*snapshot_marker;struct file *snapshot_file;
+		struct path snapshot_path;char snapshot_text[32]={0};
+		assert(inode_lookup(snapshot_mount->m_root,&etc_name,&snapshot_etc)==0);
+		assert(inode_lookup(snapshot_etc,&marker_name,&snapshot_marker)==0);
+		path_init(&snapshot_path);path_set(&snapshot_path,snapshot_mount,
+		    snapshot_marker);
+		assert(file_open_resolved(&snapshot_path,O_RDONLY,&snapshot_file)==0);
+		assert(file_read(snapshot_file,snapshot_text,sizeof(snapshot_text))==20);
+		assert(memcmp(snapshot_text,TEST_MARKER,TEST_MARKER_SIZE)==0);
+		assert(file_close(snapshot_file)==0);path_release(&snapshot_path);
+		inode_release(snapshot_marker);inode_release(snapshot_etc);
+		assert(unmount_private(snapshot_mount)==0);snapshot_mount=NULL;
+		snapshot_request.command=ZEDBSD_SNAPSHOT_DELETE;
+		assert(mount_snapshotctl(mountp,&snapshot_request)==0);
+		assert((snapshot_request.flags&ZEDBSD_SNAPSHOT_F_ACTIVE)==0);
+	}
+	#endif
+	#ifdef UFS2_TEST_IMAGE
+	{
+		char value[16]={0},names[32]={0};
+		assert(inode_getxattr(marker,"user.note",NULL,0)==-ENODATA);
+		assert(inode_setxattr(marker,"user.note","zed",4,
+		    INODE_XATTR_CREATE)==0);
+		assert(inode_setxattr(marker,"user.note","bad",4,
+		    INODE_XATTR_CREATE)==EEXIST);
+		assert(inode_setxattr(marker,"user.note","persist",8,
+		    INODE_XATTR_REPLACE)==0);
+		assert(inode_getxattr(marker,"user.note",value,sizeof(value))==8);
+		assert(memcmp(value,"persist",8)==0);
+		assert(inode_listxattr(marker,names,sizeof(names))==10);
+		assert(strcmp(names,"user.note")==0);
+	}
+	#endif
 	assert(file_close(file)==0); path_release(&path); inode_release(marker);
 
 	/* Allocation and metadata failures must leave a retryable, reachable FS. */
@@ -650,12 +819,31 @@ int main(void)
 		assert(mutation_was_injected(before_injected));
 		assert(unmount_private(mountp)==0);
 	}
-	assert(mount_private("ufs1",disk,MOUNT_READ_ONLY,NULL,&mountp)==0);
+	assert(mount_private(TEST_FS_NAME,disk,MOUNT_READ_ONLY,NULL,&mountp)==0);
+	#ifdef UFS2_TEST_IMAGE
+	{
+		struct zedbsd_quota_ctl quota;
+		memset(&quota,0,sizeof(quota));quota.size=sizeof(quota);
+		quota.version=ZEDBSD_QUOTA_VERSION;quota.command=ZEDBSD_QUOTA_GET;
+		quota.type=ZEDBSD_QUOTA_USER;quota.id=0;
+		assert(mount_quotactl(mountp,&quota)==0);
+		assert((quota.flags&ZEDBSD_QUOTA_F_ENABLED)!=0&&
+		    quota.block_hard==110000&&quota.grace_seconds==12345&&
+		    quota.blocks!=0&&quota.inodes>=2);
+	}
+	#endif
 	assert(inode_lookup(mountp->m_root,&etc_name,&etc)==0);
 	assert(inode_lookup(etc,&marker_name,&marker)==0);
 	path_init(&path);path_set(&path,mountp,marker);assert(file_open_resolved(&path,O_RDONLY,&file)==0);
 	memset(text,0,sizeof(text));assert(file_read(file,text,sizeof(text))==7);assert(memcmp(text,"changed",7)==0);
 	assert(file_close(file)==0);path_release(&path);inode_release(marker);
+	#ifdef UFS2_TEST_IMAGE
+	assert(inode_lookup(etc,&marker_name,&marker)==0);
+	memset(text,0,sizeof(text));
+	assert(inode_getxattr(marker,"user.note",text,sizeof(text))==8);
+	assert(memcmp(text,"persist",8)==0);
+	inode_release(marker);
+	#endif
 	assert(inode_lookup(etc,&moved_name,&fresh)==0);
 	path_init(&path);path_set(&path,mountp,fresh);
 	assert(file_open_resolved(&path,O_RDONLY,&file)==0);
@@ -670,8 +858,25 @@ int main(void)
 	assert(memcmp(text,"moved",5)==0);
 	inode_release(sym);inode_release(etc);
 	assert(unmount_private(mountp)==0);
-	assert(mount_private("ufs1",disk,0,NULL,&mountp)==0);
+	assert(mount_private(TEST_FS_NAME,disk,0,NULL,&mountp)==0);
 	assert(inode_lookup(mountp->m_root,&etc_name,&etc)==0);
+	#ifdef UFS2_TEST_IMAGE
+	{
+		struct zedbsd_quota_ctl quota;
+		memset(&quota,0,sizeof(quota));quota.size=sizeof(quota);
+		quota.version=ZEDBSD_QUOTA_VERSION;quota.type=ZEDBSD_QUOTA_USER;
+		quota.command=ZEDBSD_QUOTA_DISABLE;
+		assert(mount_quotactl(mountp,&quota)==0);
+		quota.command=ZEDBSD_QUOTA_SET;
+		assert(mount_quotactl(mountp,&quota)==0);
+		assert(inode_removexattr(mountp->m_root,
+		    "system.zedbsd.quota")==0);
+	}
+	assert(inode_lookup(etc,&marker_name,&marker)==0);
+	assert(inode_removexattr(marker,"user.note")==0);
+	assert(inode_getxattr(marker,"user.note",NULL,0)==-ENODATA);
+	inode_release(marker);
+	#endif
 	assert(inode_unlink(etc,&sym_name)==0);
 	assert(inode_unlink(etc,&moved_name)==0);
 	inode_release(etc);
@@ -682,10 +887,10 @@ int main(void)
 		assert(mutation_was_injected(before_injected));
 		assert(unmount_private(mountp)==0);
 	}
-	assert(image[8192+209]==1);
-	assert(get32(8192+192)==initial_ndir);
-	assert(get32(8192+196)==initial_nbfree);
-	assert(get32(8192+200)==initial_nifree);
+	assert(image[TEST_SBLOCK_OFFSET+TEST_FS_CLEAN]==1);
+	assert(get_summary(TEST_FS_CSTOTAL_NDIR)==initial_ndir);
+	assert(get_summary(TEST_FS_CSTOTAL_NBFREE)==initial_nbfree);
+	assert(get_summary(TEST_FS_CSTOTAL_NIFREE)==initial_nifree);
 	assert(disk_gone_if_idle(disk)==0); assert(disk_destroy(disk)==0);
-	free(large);free(image); puts("zedBSD UFS1 VFS read/write/remount tests: PASS"); return 0;
+	free(large);free(image); puts("zedBSD " TEST_LABEL " VFS read/write/remount tests: PASS"); return 0;
 }

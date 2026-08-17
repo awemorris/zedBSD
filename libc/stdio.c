@@ -13,6 +13,74 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include "libc/stdio-internal.h"
+
+extern uintptr_t zedbsd_stdio_thread_token(void) __attribute__((weak));
+extern void zedbsd_stdio_lock_wait(volatile uint32_t *) __attribute__((weak));
+extern void zedbsd_stdio_lock_wake(volatile uint32_t *) __attribute__((weak));
+
+static uintptr_t
+stdio_owner(void)
+{
+	uintptr_t owner = zedbsd_stdio_thread_token != NULL ?
+	    zedbsd_stdio_thread_token() : 1U;
+	return owner != 0 ? owner : 1U;
+}
+
+void
+flockfile(FILE *stream)
+{
+	uintptr_t owner;
+
+	if (stream == NULL)
+		return;
+	owner = stdio_owner();
+	if (__atomic_load_n(&stream->lock, __ATOMIC_ACQUIRE) != 0 &&
+	    stream->lock_owner == owner) {
+		stream->lock_depth++;
+		return;
+	}
+	while (__atomic_exchange_n(&stream->lock, 1U, __ATOMIC_ACQUIRE) != 0) {
+		if (zedbsd_stdio_lock_wait != NULL)
+			zedbsd_stdio_lock_wait(&stream->lock);
+	}
+	stream->lock_owner = owner;
+	stream->lock_depth = 1;
+}
+
+int
+ftrylockfile(FILE *stream)
+{
+	uintptr_t owner;
+
+	if (stream == NULL)
+		return -1;
+	owner = stdio_owner();
+	if (__atomic_load_n(&stream->lock, __ATOMIC_ACQUIRE) != 0 &&
+	    stream->lock_owner == owner) {
+		stream->lock_depth++;
+		return 0;
+	}
+	if (__atomic_exchange_n(&stream->lock, 1U, __ATOMIC_ACQUIRE) != 0)
+		return -1;
+	stream->lock_owner = owner;
+	stream->lock_depth = 1;
+	return 0;
+}
+
+void
+funlockfile(FILE *stream)
+{
+	if (stream == NULL || stream->lock_owner != stdio_owner() ||
+	    stream->lock_depth == 0)
+		return;
+	if (--stream->lock_depth != 0)
+		return;
+	stream->lock_owner = 0;
+	__atomic_store_n(&stream->lock, 0U, __ATOMIC_RELEASE);
+	if (zedbsd_stdio_lock_wake != NULL)
+		zedbsd_stdio_lock_wake(&stream->lock);
+}
 
 static int zedbsd_global_errno;
 __attribute__((weak)) int *
@@ -38,35 +106,55 @@ zedbsd_console_write_bytes(const char *bytes, size_t length)
 int
 printf(const char *format, ...)
 {
-	char buffer[256];
+	char stack_buffer[256];
+	char *buffer = stack_buffer;
 	va_list arguments;
 	int length;
-	size_t write_length;
+	size_t written;
 
+	flockfile(stdout);
 	va_start(arguments, format);
-	length = vsnprintf(buffer, sizeof(buffer), format, arguments);
+	length = vsnprintf(stack_buffer, sizeof(stack_buffer), format, arguments);
 	va_end(arguments);
-	write_length = length < 0 ? 0U : (size_t)length;
-	if (write_length >= sizeof(buffer))
-		write_length = sizeof(buffer) - 1U;
-	zedbsd_console_write_bytes(buffer, write_length);
-	return length;
+	if (length < 0)
+		goto failed;
+	if ((size_t)length >= sizeof(stack_buffer)) {
+		buffer = malloc((size_t)length + 1U);
+		if (buffer == NULL) {
+			errno = ENOMEM;
+			goto failed;
+		}
+		va_start(arguments, format);
+		(void)vsnprintf(buffer, (size_t)length + 1U, format, arguments);
+		va_end(arguments);
+	}
+	written = fwrite(buffer, 1, (size_t)length, stdout);
+	if (buffer != stack_buffer)
+		free(buffer);
+	funlockfile(stdout);
+	return written == (size_t)length ? length : EOF;
+failed:
+	funlockfile(stdout);
+	return EOF;
 }
 
 int
 putchar(int character)
 {
-	char byte = (char)character;
-	return zedbsd_console_write_bytes(&byte, 1) == 1 ?
-		(unsigned char)byte : EOF;
+	return fputc(character, stdout);
 }
 
 int
 puts(const char *string)
 {
 	size_t length = strlen(string);
-	if (zedbsd_console_write_bytes(string, length) != length ||
-	    zedbsd_console_write_bytes("\n", 1) != 1)
+	int result = 0;
+	flockfile(stdout);
+	if (fwrite(string, 1, length, stdout) != length ||
+	    fwrite("\n", 1, 1, stdout) != 1)
+		result = EOF;
+	funlockfile(stdout);
+	if (result == EOF)
 		return EOF;
 	return 0;
 }
@@ -127,13 +215,16 @@ fgetc(FILE *stream)
 	return getc(stream);
 }
 
-int ferror(FILE *stream) { return stream == NULL ? 1 : stream->error; }
+int ferror(FILE *stream) { int value; if (stream == NULL) return 1; flockfile(stream); value = stream->error; funlockfile(stream); return value; }
+int feof(FILE *stream) { int value; if (stream == NULL) return 0; flockfile(stream); value = stream->eof; funlockfile(stream); return value; }
 void
 clearerr(FILE *stream)
 {
 	if (stream != NULL) {
+		flockfile(stream);
 		stream->error = 0;
 		stream->eof = 0;
+		funlockfile(stream);
 	}
 }
 
@@ -145,17 +236,22 @@ fprintf(FILE *stream, const char *format, ...)
 	va_list arguments;
 	int length;
 	size_t written;
+	if (stream == NULL) {
+		errno = EINVAL;
+		return EOF;
+	}
+	flockfile(stream);
 
 	va_start(arguments, format);
 	length = vsnprintf(stack_buffer, sizeof(stack_buffer), format, arguments);
 	va_end(arguments);
 	if (length < 0)
-		return EOF;
+		goto failed;
 	if ((size_t)length >= sizeof(stack_buffer)) {
 		buffer = malloc((size_t)length + 1U);
 		if (buffer == NULL) {
 			errno = ENOMEM;
-			return EOF;
+			goto failed;
 		}
 		va_start(arguments, format);
 		(void)vsnprintf(buffer, (size_t)length + 1U, format, arguments);
@@ -164,7 +260,11 @@ fprintf(FILE *stream, const char *format, ...)
 	written = fwrite(buffer, 1, (size_t)length, stream);
 	if (buffer != stack_buffer)
 		free(buffer);
+	funlockfile(stream);
 	return written == (size_t)length ? length : EOF;
+failed:
+	funlockfile(stream);
+	return EOF;
 }
 
 int

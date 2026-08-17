@@ -1,11 +1,13 @@
 /* UltraSPARC tick/tick_cmpr scheduler timer. */
 #include <hal/hal.h>
 #include "asi.h"
+#include "irq.h"
 
 static uint64 tick_frequency;
 static uint64 tick_interval;
 static uint64 tick_deadline;
 static uint64 timer_ticks;
+static unsigned deferred_ticks;
 
 void
 sparcv9_timer_init(uint64 frequency)
@@ -25,6 +27,7 @@ void
 sun4u_timer_interrupt(hal_irq_ack_t acknowledge)
 {
 	uint64 now = sparcv9_tick();
+	uint64 trap_level;
 
 	sparcv9_clear_tick_interrupt();
 	timer_ticks++;
@@ -34,7 +37,24 @@ sun4u_timer_interrupt(hal_irq_ack_t acknowledge)
 	sparcv9_tick_compare(tick_deadline);
 	if (timer_ticks == 1)
 		hal_puts("SPARCV9 TIMER TICK\n");
+	/*
+	 * A timer may interrupt a user syscall trap at TL2.  The scheduler may
+	 * only switch the saved outer TL1 context, so acknowledge and account the
+	 * nested tick here, then replay it through the kernel contract at the next
+	 * TL1 timer boundary.
+	 */
+	__asm__ volatile("rdpr %%tl,%0" : "=r"(trap_level));
+	if (trap_level > 1) {
+		hal_irq_send_eoi(acknowledge);
+		if (deferred_ticks != ~0U)
+			deferred_ticks++;
+		return;
+	}
 	kernel_timer_handler(0, acknowledge);
+	while (deferred_ticks != 0) {
+		deferred_ticks--;
+		kernel_timer_handler(0, sparcv9_irq_begin(0));
+	}
 }
 
 bool

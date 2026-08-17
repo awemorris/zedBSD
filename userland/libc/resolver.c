@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,12 +15,16 @@
 #include <unistd.h>
 
 static uint32_t resolver_counter;
+static pthread_mutex_t resolver_counter_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static uint16_t
 query_id(const char *name)
 {
 	struct timespec now;
-	uint32_t hash = ++resolver_counter;
+	uint32_t hash;
+	(void)pthread_mutex_lock(&resolver_counter_lock);
+	hash = ++resolver_counter;
+	(void)pthread_mutex_unlock(&resolver_counter_lock);
 	while (*name != '\0') hash = hash * 33U ^ (uint8_t)*name++;
 	if (clock_gettime(CLOCK_MONOTONIC, &now) == 0)
 		hash ^= (uint32_t)now.tv_nsec ^ (uint32_t)now.tv_sec;

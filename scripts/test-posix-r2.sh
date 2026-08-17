@@ -26,6 +26,7 @@ install_test_elf()
 {
 	local platform="$1" image="$2" profile inner spec
 	case "$platform" in
+	pc98) profile=i386 ;;
 	pcat) profile=i386 ;;
 	amd64) profile=amd64 ;;
 	arm64) profile=aarch64 ;;
@@ -37,6 +38,37 @@ install_test_elf()
 	mcopy -i "$spec" ::/arch/"$profile.img" "$inner"
 	mcopy -o -i "$inner" "$repo/build/$platform/$test_elf" ::/bin/sh
 	mcopy -o -i "$spec" "$inner" ::/arch/"$profile.img"
+}
+
+run_pc98()
+{
+	local image="$work/pc98.img" log="$work/pc98.log"
+	local qmp="$work/pc98.qmp" dump="$work/pc98-tvram.bin"
+	local qemu="${QEMU_PC98:-$HOME/qemu-pc98/build/qemu-system-i386}"
+	local bios="${PC98_BIOS_DIR:-$HOME/qemu-pc98/roms/pc98bios}"
+	test -x "$qemu" || { echo "PC-98 QEMU not found: $qemu" >&2; exit 1; }
+	test -d "$bios" || { echo "PC-98 BIOS directory not found: $bios" >&2; exit 1; }
+	"$repo/build.sh" hdd-image pc98
+	"$repo/build.sh" "$test_elf" pc98
+	cp --reflink=auto "$repo/build/pc98/hdd-image.img" "$image"
+	install_test_elf pc98 "$image"
+	"$qemu" -M pc9821 -cpu 486 -m 64 -accel tcg -L "$bios" \
+		-nic none -display none -serial none -monitor none -snapshot \
+		-no-reboot -no-shutdown -qmp "unix:$qmp,server=on,wait=off" \
+		-drive "if=ide,bus=0,unit=0,format=raw,file=$image" \
+		>"$log" 2>&1 &
+	qemu_pid=$!
+	if ! python3 "$repo/scripts/wait-pc98-screen-marker.py" --qmp "$qmp" \
+	    --dump "$dump" --marker "$test_marker" \
+	    --timeout-ms "${ZEDBSD_POSIX_TIMEOUT_MS:-60000}"; then
+		cat "$log" >&2
+		echo "$test_label QEMU failed: pc98" >&2
+		exit 1
+	fi
+	kill "$qemu_pid" 2>/dev/null || true
+	wait "$qemu_pid" 2>/dev/null || true
+	qemu_pid=
+	echo "$test_label QEMU: PASS (pc98)"
 }
 
 wait_for_marker()
@@ -120,15 +152,17 @@ run_sparcv9()
 }
 
 case "$arch" in
+pc98) run_pc98 ;;
 pcat) run_x86 pcat "${QEMU_SYSTEM_I386:-qemu-system-i386}" 486 ;;
 amd64) run_x86 amd64 "${QEMU_PCAT_X86_64:-qemu-system-x86_64}" qemu64 ;;
 arm64) run_arm64 ;;
 sparcv9) run_sparcv9 ;;
 all)
+	run_pc98
 	run_x86 pcat "${QEMU_SYSTEM_I386:-qemu-system-i386}" 486
 	run_x86 amd64 "${QEMU_PCAT_X86_64:-qemu-system-x86_64}" qemu64
 	run_arm64
 	run_sparcv9
 	;;
-*) echo "usage: $0 [all|pcat|amd64|arm64|sparcv9]" >&2; exit 2 ;;
+*) echo "usage: $0 [all|pc98|pcat|amd64|arm64|sparcv9]" >&2; exit 2 ;;
 esac

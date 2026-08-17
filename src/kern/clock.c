@@ -2,6 +2,7 @@
 #include "kern/clock.h"
 #include "kern/atomic.h"
 #include "kern/cred.h"
+#include "kern/process-timer.h"
 #include "kern/sched.h"
 
 #include <errno.h>
@@ -40,6 +41,7 @@ void kern_clock_init(void)
 	realtime_offset.tv_sec=ZEDBSD_REALTIME_EPOCH_2026;
 	realtime_offset.tv_nsec=0;
 	atomic_raw_store_release((volatile unsigned *)&realtime_synchronized,0);
+	process_timer_init();
 	if(hal_rtc_read(&seconds)){
 		realtime_offset.tv_sec=(int64_t)seconds;
 		atomic_raw_store_release((volatile unsigned *)&realtime_synchronized,1);
@@ -55,6 +57,8 @@ kernel_timer_handler(hal_cpu_id_t cpu, hal_irq_ack_t acknowledge)
 	if (cpu == 0)
 		(void)atomic_u64_fetch_add_relaxed(&kernel_ticks, 1U);
 	now = atomic_u64_load_acquire(&kernel_ticks);
+	if (cpu == 0)
+		process_timer_tick(now);
 	sched_clock_cpu(cpu, now);
 }
 

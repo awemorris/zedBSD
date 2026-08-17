@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/statvfs.h>
 
 #define TMPFS_DEFAULT_NODES 1024U
 #define TMPFS_DEFAULT_BYTES (32U * 1024U * 1024U)
@@ -37,6 +38,14 @@ struct tmpfs_dirent {
 	char name[NAME_MAX + 1U];
 };
 
+struct tmpfs_xattr {
+	struct tmpfs_xattr *next;
+	size_t name_length;
+	size_t value_length;
+	char *name;
+	void *value;
+};
+
 struct tmpfs_state;
 struct tmpfs_node {
 	struct tmpfs_state *state;
@@ -44,6 +53,7 @@ struct tmpfs_node {
 	struct inode *parent;
 	struct tmpfs_dirent *children;
 	struct tmpfs_page *pages;
+	struct tmpfs_xattr *xattrs;
 	char *symlink;
 	size_t symlink_length;
 	size_t allocated_pages;
@@ -68,6 +78,139 @@ static struct tmpfs_node *
 tmpfs_node(struct inode *inode)
 {
 	return inode != NULL ? inode->i_data : NULL;
+}
+
+static struct tmpfs_xattr **
+tmpfs_find_xattr(struct tmpfs_node *node, const char *name)
+{
+	struct tmpfs_xattr **link;
+	for (link = &node->xattrs; *link != NULL; link = &(*link)->next)
+		if (strcmp((*link)->name, name) == 0)
+			break;
+	return link;
+}
+
+static ssize_t
+tmpfs_getxattr(struct inode *inode, const char *name, void *value, size_t size)
+{
+	struct tmpfs_node *node = tmpfs_node(inode);
+	struct tmpfs_xattr *attribute;
+	size_t length;
+	if (node == NULL)
+		return -EIO;
+	mutex_lock(&inode->i_lock);
+	attribute = *tmpfs_find_xattr(node, name);
+	if (attribute == NULL) {
+		mutex_unlock(&inode->i_lock);
+		return -ENODATA;
+	}
+	length = attribute->value_length;
+	if (value != NULL && size < length) {
+		mutex_unlock(&inode->i_lock);
+		return -ERANGE;
+	}
+	if (value != NULL && length != 0)
+		memcpy(value, attribute->value, length);
+	mutex_unlock(&inode->i_lock);
+	return (ssize_t)length;
+}
+
+static void
+tmpfs_free_xattr(struct tmpfs_xattr *attribute)
+{
+	if (attribute != NULL) {
+		kern_free(attribute->value);
+		kern_free(attribute->name);
+		kern_free(attribute);
+	}
+}
+
+static int
+tmpfs_setxattr(struct inode *inode, const char *name, const void *value,
+	size_t size, unsigned flags)
+{
+	struct tmpfs_node *node = tmpfs_node(inode);
+	struct tmpfs_xattr **link, *old, *replacement;
+	size_t name_length = strlen(name);
+	if (node == NULL)
+		return EIO;
+	replacement = kern_calloc(1, sizeof(*replacement));
+	if (replacement == NULL)
+		return ENOMEM;
+	replacement->name = kern_malloc(name_length + 1U);
+	replacement->value = size != 0 ? kern_malloc(size) : NULL;
+	if (replacement->name == NULL || (size != 0 && replacement->value == NULL)) {
+		tmpfs_free_xattr(replacement);
+		return ENOMEM;
+	}
+	memcpy(replacement->name, name, name_length + 1U);
+	if (size != 0)
+		memcpy(replacement->value, value, size);
+	replacement->name_length = name_length;
+	replacement->value_length = size;
+	mutex_lock(&inode->i_lock);
+	link = tmpfs_find_xattr(node, name);
+	old = *link;
+	if ((flags & INODE_XATTR_CREATE) != 0 && old != NULL) {
+		mutex_unlock(&inode->i_lock);
+		tmpfs_free_xattr(replacement);
+		return EEXIST;
+	}
+	if ((flags & INODE_XATTR_REPLACE) != 0 && old == NULL) {
+		mutex_unlock(&inode->i_lock);
+		tmpfs_free_xattr(replacement);
+		return ENODATA;
+	}
+	replacement->next = old != NULL ? old->next : NULL;
+	*link = replacement;
+	mutex_unlock(&inode->i_lock);
+	tmpfs_free_xattr(old);
+	return 0;
+}
+
+static ssize_t
+tmpfs_listxattr(struct inode *inode, char *list, size_t size)
+{
+	struct tmpfs_node *node = tmpfs_node(inode);
+	struct tmpfs_xattr *attribute;
+	size_t needed = 0;
+	if (node == NULL)
+		return -EIO;
+	mutex_lock(&inode->i_lock);
+	for (attribute = node->xattrs; attribute != NULL;
+	    attribute = attribute->next)
+		needed += attribute->name_length + 1U;
+	if (list != NULL && size < needed) {
+		mutex_unlock(&inode->i_lock);
+		return -ERANGE;
+	}
+	if (list != NULL)
+		for (attribute = node->xattrs; attribute != NULL;
+		    attribute = attribute->next) {
+			memcpy(list, attribute->name, attribute->name_length + 1U);
+			list += attribute->name_length + 1U;
+		}
+	mutex_unlock(&inode->i_lock);
+	return (ssize_t)needed;
+}
+
+static int
+tmpfs_removexattr(struct inode *inode, const char *name)
+{
+	struct tmpfs_node *node = tmpfs_node(inode);
+	struct tmpfs_xattr **link, *attribute;
+	if (node == NULL)
+		return EIO;
+	mutex_lock(&inode->i_lock);
+	link = tmpfs_find_xattr(node, name);
+	attribute = *link;
+	if (attribute != NULL)
+		*link = attribute->next;
+	mutex_unlock(&inode->i_lock);
+	if (attribute == NULL)
+		return ENODATA;
+	tmpfs_free_xattr(attribute);
+	return 0;
 }
 
 static int
@@ -771,6 +914,7 @@ tmpfs_reclaim(struct inode *inode)
 {
 	struct tmpfs_node *node = tmpfs_node(inode);
 	struct tmpfs_page *page;
+	struct tmpfs_xattr *attribute;
 	if (node == NULL)
 		return;
 	page = node->pages;
@@ -779,6 +923,12 @@ tmpfs_reclaim(struct inode *inode)
 		kern_free(page);
 		uncharge_page(node->state);
 		page = next;
+	}
+	attribute = node->xattrs;
+	while (attribute != NULL) {
+		struct tmpfs_xattr *next = attribute->next;
+		tmpfs_free_xattr(attribute);
+		attribute = next;
 	}
 	kern_free(node->symlink);
 	uncharge_node(node->state);
@@ -800,6 +950,10 @@ static const struct inode_ops tmpfs_inode_ops = {
 	.getattr = tmpfs_getattr,
 	.setattr = tmpfs_setattr,
 	.truncate = tmpfs_truncate,
+	.getxattr = tmpfs_getxattr,
+	.setxattr = tmpfs_setxattr,
+	.listxattr = tmpfs_listxattr,
+	.removexattr = tmpfs_removexattr,
 	.reclaim = tmpfs_reclaim,
 };
 
@@ -866,9 +1020,32 @@ tmpfs_unmount(struct mount *mountp)
 	mountp->m_data = NULL;
 }
 
+static int
+tmpfs_statvfs(struct mount *mountp, struct statvfs *result)
+{
+	struct tmpfs_state *state = mountp != NULL ? mountp->m_data : NULL;
+	if (state == NULL || result == NULL)
+		return EINVAL;
+	mutex_lock(&state->quota_lock);
+	memset(result, 0, sizeof(*result));
+	result->f_bsize = ZEDBSD_PAGE_SIZE;
+	result->f_frsize = ZEDBSD_PAGE_SIZE;
+	result->f_blocks = state->max_bytes / ZEDBSD_PAGE_SIZE;
+	result->f_bfree = result->f_blocks -
+	    state->used_bytes / ZEDBSD_PAGE_SIZE;
+	result->f_bavail = result->f_bfree;
+	result->f_files = state->max_nodes;
+	result->f_ffree = state->max_nodes - state->used_nodes;
+	result->f_favail = result->f_ffree;
+	result->f_namemax = NAME_MAX;
+	mutex_unlock(&state->quota_lock);
+	return 0;
+}
+
 const struct filesystem_type tmpfs_type = {
 	.fs_name = "tmpfs",
 	.fs_flags = FILESYSTEM_NODEV,
 	.mount = tmpfs_mount_impl,
+	.statvfs = tmpfs_statvfs,
 	.unmount = tmpfs_unmount,
 };

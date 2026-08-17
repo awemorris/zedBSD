@@ -8,6 +8,9 @@
 
 #include <errno.h>
 #include <string.h>
+#include <sys/statvfs.h>
+#include <zedbsd/quota.h>
+#include <zedbsd/snapshot.h>
 
 #define FILESYSTEM_MAX 8U
 #define MOUNT_BIND_INTERNAL 0x00000001U
@@ -536,6 +539,69 @@ mount_sync(struct mount *mountp)
 	if (mountp == NULL || mountp->m_type == NULL)
 		return EINVAL;
 	return mountp->m_type->sync != NULL ? mountp->m_type->sync(mountp) : 0;
+}
+
+int
+mount_statvfs(struct mount *mountp, struct statvfs *result)
+{
+	int error = 0;
+	if (mountp == NULL || result == NULL || mountp->m_type == NULL)
+		return EINVAL;
+	if (mountp->m_bind_source != NULL) {
+		error = mount_statvfs(mountp->m_bind_source, result);
+		if (error != 0)
+			return error;
+		goto flags;
+	}
+	memset(result, 0, sizeof(*result));
+	if (mountp->m_type->statvfs != NULL)
+		error = mountp->m_type->statvfs(mountp, result);
+	else {
+		result->f_bsize = mountp->m_disk != NULL ?
+		    mountp->m_disk->d_block_size : 1U;
+		result->f_frsize = result->f_bsize;
+		result->f_blocks = mountp->m_disk != NULL ?
+		    mountp->m_disk->d_block_count : 0;
+		result->f_namemax = NAME_MAX;
+	}
+	if (error != 0)
+		return error;
+	result->f_fsid = mountp->m_disk != NULL ? mountp->m_disk->d_dev :
+	    (uint64_t)(1U + (unsigned)(mountp - mounts));
+flags:
+	result->f_flag &= ~(uint64_t)ST_RDONLY;
+	result->f_flag |= ((mountp->m_flags & MOUNT_READ_ONLY) != 0 ||
+	    (mountp->m_disk != NULL &&
+	    (mountp->m_disk->d_flags & DISK_READ_ONLY) != 0)) ? ST_RDONLY : 0U;
+	if (result->f_namemax == 0)
+		result->f_namemax = NAME_MAX;
+	return 0;
+}
+
+int
+mount_quotactl(struct mount *mountp, struct zedbsd_quota_ctl *request)
+{
+	if (mountp == NULL || request == NULL)
+		return EINVAL;
+	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) != 0 &&
+	    mountp->m_bind_source != NULL)
+		return mount_quotactl(mountp->m_bind_source, request);
+	if (mountp->m_type == NULL || mountp->m_type->quotactl == NULL)
+		return EOPNOTSUPP;
+	return mountp->m_type->quotactl(mountp, request);
+}
+
+int
+mount_snapshotctl(struct mount *mountp, struct zedbsd_snapshot_ctl *request)
+{
+	if (mountp == NULL || request == NULL)
+		return EINVAL;
+	if ((mountp->m_internal_flags & MOUNT_BIND_INTERNAL) != 0 &&
+	    mountp->m_bind_source != NULL)
+		return mount_snapshotctl(mountp->m_bind_source, request);
+	if (mountp->m_type == NULL || mountp->m_type->snapshotctl == NULL)
+		return EOPNOTSUPP;
+	return mountp->m_type->snapshotctl(mountp, request);
 }
 
 int

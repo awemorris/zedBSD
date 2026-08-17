@@ -18,6 +18,8 @@
 #include <zedbsd/sysctl.h>
 #include <zedbsd/system.h>
 #include <zedbsd/resource.h>
+#include <zedbsd/quota.h>
+#include <zedbsd/snapshot.h>
 
 #ifdef ZEDBSD_USER_ABI_LP64
 _Static_assert(sizeof(void *) == 8, "LP64 pointer");
@@ -83,6 +85,10 @@ _Static_assert(offsetof(struct zedbsd_flock_request, start) == 8,
 _Static_assert(sizeof(struct zedbsd_rlimit) == 16,
     "rlimit fixed ABI");
 _Static_assert(sizeof(struct winsize) == 8, "winsize fixed ABI");
+_Static_assert(sizeof(struct zedbsd_quota_ctl) == 96,
+    "quota control fixed ABI");
+_Static_assert(sizeof(struct zedbsd_snapshot_ctl) == 48,
+    "snapshot control fixed ABI");
 _Static_assert(ZEDBSD_SYS_sysctl == 103, "sysctl syscall ABI");
 _Static_assert(ZEDBSD_SYS_ppoll == 104, "ppoll syscall ABI");
 _Static_assert(ZEDBSD_SYS_pselect == 105, "pselect syscall ABI");
@@ -99,6 +105,8 @@ _Static_assert(ZEDBSD_SYS_mknodat == 121, "mknodat syscall ABI");
 _Static_assert(ZEDBSD_SYS_getrlimit == 122, "getrlimit syscall ABI");
 _Static_assert(ZEDBSD_SYS_setrlimit == 123, "setrlimit syscall ABI");
 _Static_assert(ZEDBSD_SYS_waitid == 124, "waitid syscall ABI");
+_Static_assert(ZEDBSD_SYS_quotactl == 146, "quotactl syscall ABI");
+_Static_assert(ZEDBSD_SYS_snapshotctl == 147, "snapshotctl syscall ABI");
 _Static_assert(AT_PHDR == 3 && AT_BASE == 7 && AT_ENTRY == 9,
     "ELF auxv ABI");
 

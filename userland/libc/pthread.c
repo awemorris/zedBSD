@@ -34,6 +34,10 @@ struct pthread_tcb {
 	int cancel_state;
 	int cancel_type;
 	int error;
+	char *environment_value;
+	const void *locale_value;
+	uint32_t multibyte_state[4];
+	char ptsname_buffer[32];
 	unsigned detached;
 	unsigned detached_queued;
 	unsigned owns_stack;
@@ -60,12 +64,23 @@ static struct atfork_handler atfork_handlers[ATFORK_MAX];
 static unsigned atfork_count;
 static unsigned atfork_active_count;
 
+extern void zedbsd_stdio_fork_child(void) __attribute__((weak));
+
+static void ensure_main(void);
+static struct pthread_tcb *self_tcb(void);
+
 static intptr_t
 call(uint32_t number, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d,
 	uintptr_t e, uintptr_t f)
 {
 	return zedbsd_syscall_result(zedbsd_syscall6(number, a, b, c, d, e, f));
 }
+
+#if defined(ZEDBSD_DYNAMIC_LIBC)
+#define RTLD_CALL(name) (__zedbsd_rtld_exports.name)
+#else
+#define RTLD_CALL(name) (__zedbsd_rtld_##name)
+#endif
 
 static int
 usync_wait_word_flags(volatile uint32_t *address, uint32_t value,
@@ -110,11 +125,82 @@ void zedbsd_libc_heap_lock(void) { word_lock(&heap_lock); }
 void zedbsd_libc_heap_unlock(void) { word_unlock(&heap_lock); }
 void zedbsd_libc_environment_lock(void) { word_lock(&environment_lock); }
 void zedbsd_libc_environment_unlock(void) { word_unlock(&environment_lock); }
+uintptr_t zedbsd_stdio_thread_token(void)
+{
+	struct pthread_tcb *tcb = self_tcb();
+	return (uintptr_t)(tcb != NULL ? tcb : &main_tcb);
+}
+void zedbsd_stdio_lock_wait(volatile uint32_t *word)
+{ (void)usync_wait_word(word, 1U, NULL); }
+void zedbsd_stdio_lock_wake(volatile uint32_t *word)
+{ usync_wake_word(word, 1U); }
 
 static struct pthread_tcb *
 self_tcb(void)
 {
-	return (struct pthread_tcb *)__zedbsd_rtld_pthread_private();
+	return (struct pthread_tcb *)RTLD_CALL(pthread_private)();
+}
+
+/* getenv() returns a pointer whose lifetime must not be ended by another
+ * thread mutating environ.  The environment implementation installs a
+ * private value snapshot here and replaces it only on this thread's next
+ * environment operation.  Keeping this in the TCB also gives thread exit a
+ * well-defined reclamation point without exposing pthread internals. */
+char *
+zedbsd_pthread_environment_exchange(char *replacement)
+{
+	struct pthread_tcb *tcb;
+	char *previous;
+
+	ensure_main();
+	tcb = self_tcb();
+	if (tcb == NULL)
+		return NULL;
+	previous = tcb->environment_value;
+	tcb->environment_value = replacement;
+	return previous;
+}
+
+const void *
+zedbsd_pthread_locale_exchange(const void *replacement, int change)
+{
+	struct pthread_tcb *tcb;
+	const void *previous;
+
+	ensure_main();
+	tcb = self_tcb();
+	if (tcb == NULL)
+		return NULL;
+	previous = tcb->locale_value;
+	if (change)
+		tcb->locale_value = replacement;
+	return previous;
+}
+
+void *
+zedbsd_pthread_mbstate(unsigned which)
+{
+	struct pthread_tcb *tcb;
+
+	ensure_main();
+	tcb = self_tcb();
+	if (tcb == NULL || which > 1U)
+		return NULL;
+	return &tcb->multibyte_state[which * 2U];
+}
+
+char *
+zedbsd_pthread_ptsname_buffer(size_t *size)
+{
+	struct pthread_tcb *tcb;
+
+	ensure_main();
+	tcb = self_tcb();
+	if (tcb == NULL)
+		return NULL;
+	if (size != NULL)
+		*size = sizeof(tcb->ptsname_buffer);
+	return tcb->ptsname_buffer;
 }
 
 int *
@@ -213,7 +299,7 @@ detached_reaper(void *argument)
 		}
 		(void)call(ZEDBSD_SYS_thread_join, tcb->tid, 0, 0, 0, 0, 0);
 		(void)registry_remove(tcb->tid);
-		__zedbsd_rtld_thread_free(tcb->runtime_tcb);
+		RTLD_CALL(thread_free)(tcb->runtime_tcb);
 		if (tcb->owns_stack)
 			(void)munmap(tcb->stack, tcb->stack_size);
 		free(tcb);
@@ -245,7 +331,7 @@ ensure_main(void)
 		return;
 	memset(&main_tcb, 0, sizeof(main_tcb));
 	main_tcb.tid = (pthread_t)call(ZEDBSD_SYS_thread_self, 0, 0, 0, 0, 0, 0);
-	if (__zedbsd_rtld_thread_attach(&main_tcb) != 0)
+	if (RTLD_CALL(thread_attach)(&main_tcb) != 0)
 		for (;;)
 			;
 	main_tcb.runtime_tcb = (struct zedbsd_rtld_tcb *)(uintptr_t)
@@ -318,7 +404,7 @@ pthread_create(pthread_t *result, const pthread_attr_t *attributes,
 	tcb->owns_stack = (unsigned)owns_stack;
 	tcb->start = start;
 	tcb->argument = argument;
-	if (__zedbsd_rtld_thread_alloc(tcb, &tcb->runtime_tcb) != 0) {
+	if (RTLD_CALL(thread_alloc)(tcb, &tcb->runtime_tcb) != 0) {
 		free(tcb);
 		if (owns_stack)
 			(void)munmap(stack, mapping_size);
@@ -329,7 +415,7 @@ pthread_create(pthread_t *result, const pthread_attr_t *attributes,
 	    (uintptr_t)&tcb->tid);
 	if (error < 0) {
 		error = errno;
-		__zedbsd_rtld_thread_free(tcb->runtime_tcb);
+		RTLD_CALL(thread_free)(tcb->runtime_tcb);
 		free(tcb);
 		if (owns_stack)
 			(void)munmap(stack, mapping_size);
@@ -379,6 +465,10 @@ pthread_exit(void *value)
 		cleanup->routine(cleanup->argument);
 	}
 	run_destructors(tcb);
+	if (tcb != NULL) {
+		free(tcb->environment_value);
+		tcb->environment_value = NULL;
+	}
 	if (tcb != NULL && tcb->detached)
 		detached_enqueue(tcb);
 	(void)zedbsd_syscall6(ZEDBSD_SYS_thread_exit, (uintptr_t)value,
@@ -402,7 +492,7 @@ pthread_join(pthread_t thread, void **value)
 		return errno;
 	tcb = registry_remove(thread);
 	if (tcb != NULL && tcb != &main_tcb) {
-		__zedbsd_rtld_thread_free(tcb->runtime_tcb);
+		RTLD_CALL(thread_free)(tcb->runtime_tcb);
 		if (tcb->owns_stack)
 			(void)munmap(tcb->stack, tcb->stack_size);
 		free(tcb);
@@ -465,7 +555,7 @@ zedbsd_pthread_fork_prepare(void)
 	unsigned index;
 
 	ensure_main();
-	__zedbsd_rtld_fork_prepare();
+	RTLD_CALL(fork_prepare)();
 	word_lock(&atfork_lock);
 	atfork_active_count = atfork_count;
 	for (index = atfork_active_count; index != 0; index--)
@@ -483,7 +573,7 @@ zedbsd_pthread_fork_parent(void)
 			atfork_handlers[index].parent();
 	atfork_active_count = 0;
 	word_unlock(&atfork_lock);
-	__zedbsd_rtld_fork_parent();
+	RTLD_CALL(fork_parent)();
 }
 
 void
@@ -518,7 +608,9 @@ zedbsd_pthread_fork_child(void)
 			atfork_handlers[index].child();
 	atfork_active_count = 0;
 	atfork_lock = 0;
-	__zedbsd_rtld_fork_child();
+	if (zedbsd_stdio_fork_child != NULL)
+		zedbsd_stdio_fork_child();
+	RTLD_CALL(fork_child)();
 }
 pthread_t pthread_self(void) { ensure_main(); return self_tcb()->tid; }
 int pthread_equal(pthread_t left, pthread_t right) { return left == right; }

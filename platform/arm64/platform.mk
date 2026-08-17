@@ -41,6 +41,7 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/partition.c src/kern/mbr-partition.c src/kern/rpi4/platform.c \
 	drivers/rpi4-sdhci.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
+	src/kern/process-timer.c \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/vmspace.c \
 	src/kern/vm-object.c src/kern/vm-commit.c src/kern/filedesc.c \
@@ -52,7 +53,10 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/uaccess.c src/kern/cdev.c src/kern/devfs.c \
 	src/kern/console-device.c src/kern/tty.c src/kern/graphics-device.c \
 	src/kern/system-device.c src/kern/init.c
-ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES)
+ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
+	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)
+ARM64_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
+ARM64_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
 ARM64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ARM64_KERNEL_SOURCES))
 ARM64_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURCES))
 ARM64_VMUNIX_OBJS := $(ARM64_BOOT_OBJS) $(ARM64_KERNEL_OBJS) $(ARM64_KERNEL_LIBC_OBJS)
@@ -72,7 +76,8 @@ ARM64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c userla
 	userland/libc/mqueue.c \
 	userland/libc/socket.c \
 	userland/libc/signal.c \
-	libc/heap.c libc/string.c libc/ctype.c libc/int64.c libc/strto.c \
+	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
+	libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
 ARM64_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
 	userland/sh/builtins.c
@@ -84,7 +89,7 @@ ARM64_USER_OBJS := $(BUILD)/user/userland/crt0-aarch64.o \
 	$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_SH_OBJS)
 
 all: $(BUILD)/vmunix $(BUILD)/VMUNIX.A64 $(BUILD)/bin/sh \
-	$(BUILD)/bin/sysctl
+	$(BUILD)/bin/sysctl $(BUILD)/bin/mount $(BUILD)/bin/umount
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
 POSIX-R1.ELF: $(BUILD)/POSIX-R1.ELF
@@ -159,6 +164,21 @@ $(BUILD)/bin/sysctl: $(BUILD)/user/userland/crt0-aarch64.o \
 	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
 
+ARM64_USER_MOUNT_OBJ := $(BUILD)/user/userland/mount/main.o
+$(BUILD)/bin/mount: $(BUILD)/user/userland/crt0-aarch64.o \
+	$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_MOUNT_OBJ) \
+	$(ARM64_PLATFORM)/user.ld scripts/check-user-elf.py
+	@mkdir -p $(dir $@)
+	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
+		-z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
+		$(BUILD)/user/userland/crt0-aarch64.o \
+		$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_MOUNT_OBJ) -o $@
+	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
+	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
+$(BUILD)/bin/umount: $(BUILD)/bin/mount
+	@mkdir -p $(dir $@)
+	cp -f $< $@
+
 $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/userland/crt0-aarch64.o \
 	$(ARM64_USER_RUNTIME_OBJS) \
 	$(BUILD)/user/userland/tests/syscall-smoke.o \
@@ -208,10 +228,12 @@ DYNAMIC_LIBC_SOURCES := userland/libc/posix.c userland/libc/poll.c \
 	userland/libc/termios.c userland/libc/pthread.c userland/libc/shm.c \
 	userland/libc/semaphore.c userland/libc/mqueue.c userland/libc/dlfcn.c \
 	userland/libc/socket.c userland/libc/signal.c libc/heap.c libc/string.c \
-	libc/ctype.c libc/int64.c libc/strto.c libc/format.c libc/stdio.c
+	libc/ctype.c libc/locale.c libc/wide.c libc/int64.c libc/strto.c \
+	libc/format.c libc/stdio.c
 DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
 	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/libc/syscall.o
 DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/rtld/entry.o \
+	$(DYNAMIC_DIR)/obj/userland/rtld/tlsdesc.o \
 	$(DYNAMIC_DIR)/obj/userland/rtld/rtld.o \
 	$(DYNAMIC_DIR)/obj/userland/rtld/string.o
 DYNAMIC_FLOAT_DIR := $(DYNAMIC_DIR)/float
@@ -231,6 +253,10 @@ $(DYNAMIC_DIR)/obj/userland/libc/syscall.o: userland/libc/syscall-aarch64.S
 $(DYNAMIC_DIR)/obj/userland/rtld/entry.o: userland/rtld/entry-aarch64.S
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) -c $< -o $@
+$(DYNAMIC_DIR)/obj/userland/rtld/tlsdesc.o: userland/rtld/tlsdesc-arm64.S
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) -c $< -o $@
+$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialect=desc
 $(DYNAMIC_DIR)/obj/userland/crt1.o: userland/crt1-aarch64.S
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) -c $< -o $@
@@ -262,38 +288,81 @@ $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
 		-z now -z relro -z separate-code -z max-page-size=4096 $^ -o $@
 $(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
 	$(ARM64_CC) $(DYNAMIC_CFLAGS) -nostdlib -shared -static-libgcc \
-		-Wl,-soname,libc.so,--hash-style=sysv,-z,now,-z,relro \
+		-Wl,-soname,libc.so,--hash-style=both,-z,now,-z,relro \
 		-Wl,-z,separate-code,-z,max-page-size=4096,-z,stack-size=0x100000 \
 		$^ -lgcc -o $@
-$(DYNAMIC_DIR)/tlstest.so: $(DYNAMIC_DIR)/obj/userland/tests/tlstest.o $(DYNAMIC_DIR)/ld.so
-	$(ARM64_LD) -shared -soname tlstest.so --hash-style=sysv \
+$(DYNAMIC_DIR)/alt/rpathdep.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
+	@mkdir -p $(dir $@)
+	$(ARM64_LD) -shared -soname rpathdep.so --hash-style=gnu \
 		-z now -z relro -z separate-code -z max-page-size=4096 $< -o $@
+$(DYNAMIC_DIR)/tlstest.so: $(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
+	$(ARM64_LD) -shared -soname tlstest.so --hash-style=gnu \
+		-z now -z relro -z separate-code -z max-page-size=4096 \
+		--enable-new-dtags -rpath '$$ORIGIN/alt' \
+		$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+		-L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
+$(DYNAMIC_DIR)/rpathtest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/rpathtest.o \
+	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
+	$(ARM64_LD) -shared -soname rpthtest.so --hash-style=gnu \
+		-z now -z relro -z separate-code -z max-page-size=4096 \
+		--disable-new-dtags -rpath '$$ORIGIN/alt' $< \
+		-L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
+$(DYNAMIC_DIR)/verstest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/versiontest.o \
+	userland/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
+	$(ARM64_LD) -shared -soname verstest.so --hash-style=gnu \
+		-z now -z relro -z separate-code -z max-page-size=4096 \
+		--version-script=userland/tests/versiontest.map $< -o $@
+$(DYNAMIC_DIR)/versuse.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/versionuse.o \
+	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/ld.so
+	$(ARM64_LD) -shared -soname versuse.so --hash-style=gnu \
+		-z now -z relro -z separate-code -z max-page-size=4096 \
+		$< -L$(DYNAMIC_DIR) -l:verstest.so -o $@
 $(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/userland/crt1.o \
 	$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
-	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so
-	$(ARM64_CC) -nostdlib -no-pie -Wl,--no-relax,--hash-style=sysv,-z,now,-z,relro \
+	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so \
+	$(DYNAMIC_DIR)/versuse.so
+	$(ARM64_CC) -nostdlib -pie -Wl,--no-relax,--hash-style=sysv,-z,now,-z,relro \
 		-Wl,-z,separate-code,-z,stack-size=0x100000,--allow-shlib-undefined \
 		-Wl,--dynamic-linker=/lib/ld.so $(DYNAMIC_DIR)/obj/userland/crt1.o \
 		$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o -L$(DYNAMIC_DIR) \
 		-Wl,-rpath-link,$(DYNAMIC_DIR) -l:libc.so -static-libgcc -lgcc -o $@
 dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
-	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so scripts/check-dynamic-elf.py
+	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so \
+	$(DYNAMIC_DIR)/rpathtest.so $(DYNAMIC_DIR)/verstest.so \
+	$(DYNAMIC_DIR)/versuse.so scripts/check-dynamic-elf.py
 	$(PYTHON) scripts/check-dynamic-elf.py --machine aarch64 --role interpreter $(DYNAMIC_DIR)/ld.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine aarch64 --role libc $(DYNAMIC_DIR)/libc.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine aarch64 --role module $(DYNAMIC_DIR)/tlstest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine aarch64 --role rpath-module $(DYNAMIC_DIR)/rpathtest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine aarch64 --role version-definition $(DYNAMIC_DIR)/verstest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine aarch64 --role version-consumer $(DYNAMIC_DIR)/versuse.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine aarch64 --role program $(DYNAMIC_DIR)/dyntest
 	@echo "zedBSD aarch64 dynamic userland artifacts: PASS"
 .PHONY: dynamic-userland-check
 
 AARCH64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.img
 AARCH64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
+	$(BUILD)/bin/mount $(BUILD)/bin/umount \
 	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
-	$(DYNAMIC_DIR)/tlstest.so $(DYNAMIC_DIR)/dyntest
+	$(DYNAMIC_DIR)/tlstest.so $(DYNAMIC_DIR)/dyntest \
+	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/rpathtest.so \
+	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/versuse.so
 AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/sysctl=$(BUILD)/bin/sysctl \
+	--file /bin/mount=$(BUILD)/bin/mount \
+	--file /bin/umount=$(BUILD)/bin/umount \
 	--file /lib/ld.so=$(DYNAMIC_DIR)/ld.so \
 	--file /lib/libc.so=$(DYNAMIC_DIR)/libc.so \
 	--file /lib/tlstest.so=$(DYNAMIC_DIR)/tlstest.so \
+	--file /lib/alt/rpathdep.so=$(DYNAMIC_DIR)/alt/rpathdep.so \
+	--file /lib/rpthtest.so=$(DYNAMIC_DIR)/rpathtest.so \
+	--file /lib/verstest.so=$(DYNAMIC_DIR)/verstest.so \
+	--file /lib/versuse.so=$(DYNAMIC_DIR)/versuse.so \
 	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AARCH64_ARCH_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
 AARCH64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.ufs

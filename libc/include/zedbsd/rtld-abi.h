@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define ZEDBSD_RTLD_ABI_VERSION 1U
+#define ZEDBSD_RTLD_ABI_VERSION 3U
 #define ZEDBSD_RTLD_DLERROR_SIZE 192U
 
 struct zedbsd_tls_index {
@@ -20,13 +20,44 @@ struct zedbsd_rtld_tcb {
 	void *pthread_private;
 	char dlerror_buf[ZEDBSD_RTLD_DLERROR_SIZE];
 	int dlerror_pending;
+	/* Runtime-linker private thread registry link. */
+	struct zedbsd_rtld_tcb *rtld_next;
 };
+
+/*
+ * Data-based import table used by libc.so.  Function relocations on SPARC V9
+ * require a writable/executable PLT, while a read-only table needs only data
+ * relocations.  Keeping the table in the ABI also gives the private contract
+ * an explicit version and size for future extension.
+ */
+struct zedbsd_rtld_exports {
+	uint32_t abi_version;
+	size_t struct_size;
+	void (*startup_init)(void);
+	void (*process_fini)(void);
+	void *(*dlopen)(const char *, int);
+	void *(*dlsym)(void *, const char *);
+	void *(*dlvsym)(void *, const char *, const char *);
+	int (*dlclose)(void *);
+	char *(*dlerror)(void);
+	int (*thread_alloc)(void *, struct zedbsd_rtld_tcb **);
+	void (*thread_free)(struct zedbsd_rtld_tcb *);
+	int (*thread_attach)(void *);
+	void *(*pthread_private)(void);
+	void (*fork_prepare)(void);
+	void (*fork_parent)(void);
+	void (*fork_child)(void);
+	void *(*tls_get_addr)(const struct zedbsd_tls_index *);
+};
+
+extern const struct zedbsd_rtld_exports __zedbsd_rtld_exports;
 
 unsigned __zedbsd_rtld_abi_version(void);
 void __zedbsd_rtld_startup_init(void);
 void __zedbsd_rtld_process_fini(void);
 void *__zedbsd_rtld_dlopen(const char *, int);
 void *__zedbsd_rtld_dlsym(void *, const char *);
+void *__zedbsd_rtld_dlvsym(void *, const char *, const char *);
 int __zedbsd_rtld_dlclose(void *);
 char *__zedbsd_rtld_dlerror(void);
 int __zedbsd_rtld_thread_alloc(void *, struct zedbsd_rtld_tcb **);

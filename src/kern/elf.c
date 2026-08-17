@@ -65,6 +65,32 @@ struct normalized_program {
 	uint64_t align;
 };
 
+static uint32_t segment_prot(uint32_t flags);
+
+static int
+temporary_writable_plt(const struct normalized_program *program)
+{
+#if defined(HAL_ARCH_SPARCV9)
+	return program->flags == (PF_R | PF_W | PF_X) &&
+	    program->filesz == program->memsz && program->memsz != 0 &&
+	    program->memsz <= PAGE_SIZE &&
+	    (program->vaddr & (PAGE_SIZE - 1U)) == 0 &&
+	    (program->offset & (PAGE_SIZE - 1U)) == 0;
+#else
+	(void)program;
+	return 0;
+#endif
+}
+
+static uint32_t
+initial_segment_prot(const struct normalized_program *program)
+{
+	uint32_t prot = segment_prot(program->flags);
+	if (temporary_writable_plt(program))
+		prot &= ~HAL_SPACE_EXEC;
+	return prot;
+}
+
 struct normalized_image {
 	uintptr_t entry;
 	uintptr_t brk_start;
@@ -234,10 +260,11 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 	uintptr_t mapped_start[ELF_PHNUM_MAX];
 	size_t mapped_size[ELF_PHNUM_MAX];
 	uint64_t file_size, minimum = UINT64_MAX, maximum = 0, maximum_align = PAGE_SIZE;
-	uint64_t phdr_file_end;
+	uint64_t phdr_file_end, phdr_vaddr = 0;
 	uintptr_t load_bias = 0;
 	unsigned i, j, mapped_count = 0, loads = 0, dynamic_count = 0;
-	unsigned interp_count = 0, stack_count = 0;
+	unsigned interp_count = 0, stack_count = 0, phdr_count = 0;
+	int position_independent;
 	int entry_ok = 0, phdr_ok = 0;
 	int error;
 
@@ -249,9 +276,11 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 	error = read_headers(file, elf_class, &header, &programs, &file_size);
 	if (error != 0)
 		return error;
-	if ((role == ELF_LOAD_MAIN && header.type != ET_EXEC) ||
+	if ((role == ELF_LOAD_MAIN && header.type != ET_EXEC &&
+	    header.type != ET_DYN) ||
 	    (role == ELF_LOAD_INTERPRETER && header.type != ET_DYN))
 		goto invalid;
+	position_independent = role == ELF_LOAD_MAIN && header.type == ET_DYN;
 	if (header.phnum > UINT64_MAX / header.phentsize)
 		goto invalid;
 	phdr_file_end = header.phoff +
@@ -262,6 +291,20 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 	for (i = 0; i < header.phnum; i++) {
 		struct normalized_program *program = &programs[i];
 		uint64_t start, end;
+
+		if (program->type == PT_PHDR) {
+			uint64_t expected_size =
+			    (uint64_t)header.phnum * header.phentsize;
+			if (++phdr_count != 1 || program->offset != header.phoff ||
+			    program->filesz != expected_size ||
+			    program->memsz < program->filesz ||
+			    (program->flags & PF_R) == 0 ||
+			    (program->flags & (PF_W | PF_X)) != 0 ||
+			    program->vaddr > UINT64_MAX - program->memsz)
+				goto invalid;
+			phdr_vaddr = program->vaddr;
+			continue;
+		}
 
 		if (program->type == PT_INTERP) {
 			if (role != ELF_LOAD_MAIN || ++interp_count != 1 ||
@@ -303,7 +346,8 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 		loads++;
 		if (program->memsz == 0 || program->filesz > program->memsz ||
 		    (program->flags & ~(PF_R | PF_W | PF_X)) != 0 ||
-		    (program->flags & (PF_W | PF_X)) == (PF_W | PF_X) ||
+		    ((program->flags & (PF_W | PF_X)) == (PF_W | PF_X) &&
+		    !temporary_writable_plt(program)) ||
 		    segment_prot(program->flags) == 0 ||
 		    program->offset > file_size ||
 		    program->filesz > file_size - program->offset ||
@@ -358,7 +402,11 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 	    (role == ELF_LOAD_INTERPRETER &&
 	    (interp_count != 0 || dynamic_count != 1)))
 		goto invalid;
-	if (role == ELF_LOAD_MAIN) {
+	if (position_independent &&
+	    (interp_count != 1 || phdr_count != 1 || !phdr_ok ||
+	    phdr_vaddr != image->program_headers))
+		goto invalid;
+	if (role == ELF_LOAD_MAIN && !position_independent) {
 		if (minimum < vm_layout.user_minimum || maximum > vm_layout.user_limit ||
 		    header.entry < vm_layout.user_minimum ||
 		    header.entry >= vm_layout.user_limit)
@@ -371,8 +419,13 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 			goto invalid;
 		if (maximum_align < PAGE_SIZE)
 			maximum_align = PAGE_SIZE;
-		error = vmspace_find_free_range(vm, vm_layout.mmap_base, (size_t)span,
-		    (size_t)maximum_align, &base);
+		if (position_independent)
+			error = vmspace_find_free_range_bounded(vm,
+			    vm_layout.user_minimum, vm_layout.brk_limit,
+			    (size_t)span, (size_t)maximum_align, &base);
+		else
+			error = vmspace_find_free_range(vm, vm_layout.mmap_base,
+			    (size_t)span, (size_t)maximum_align, &base);
 		if (error != 0)
 			goto out;
 		if (base < (uintptr_t)minimum)
@@ -396,7 +449,7 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 		end = load_bias + (uintptr_t)((program->vaddr + program->memsz +
 		    PAGE_SIZE - 1U) & ~(uint64_t)(PAGE_SIZE - 1U));
 		error = vmspace_map_file(vm, start, end - start,
-		    segment_prot(program->flags), file, (off_t)program->offset,
+		    initial_segment_prot(program), file, (off_t)program->offset,
 		    data_start, (size_t)program->filesz, &region);
 		if (error != 0)
 			goto rollback;

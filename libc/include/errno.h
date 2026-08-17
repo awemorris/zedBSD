@@ -69,6 +69,9 @@ int *zedbsd_errno_location(void);
 #define EDEADLK 58
 #define ECANCELED 59
 #define ENOTSOCK 60
+#define EILSEQ 61
+#define ENODATA 62
+#define EDQUOT 63
 #define ENOTSUP EOPNOTSUPP
 
 #define EWOULDBLOCK EAGAIN

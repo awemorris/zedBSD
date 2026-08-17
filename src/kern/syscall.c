@@ -12,6 +12,7 @@
 #include "kern/net/packet-buf.h"
 #include "kern/net/socket.h"
 #include "kern/process.h"
+#include "kern/process-timer.h"
 #include "kern/record-lock.h"
 #include "kern/resource-limit.h"
 #include "kern/pipe.h"
@@ -32,6 +33,8 @@
 #include <zedbsd/syscall.h>
 #include <zedbsd/process.h>
 #include <zedbsd/poll.h>
+#include <zedbsd/quota.h>
+#include <zedbsd/snapshot.h>
 #include <zedbsd/select.h>
 #include <zedbsd/usync.h>
 #include <zedbsd/thread.h>
@@ -42,9 +45,11 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/mount.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/sysctl.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -1538,6 +1543,223 @@ static intptr_t sys_clock_settime_call(const uintptr_t args[6])
 	return error == 0 ? 0 : -error;
 }
 
+static intptr_t sys_timer_create_call(const uintptr_t args[6])
+{
+	struct process *process = current_process();
+	struct sigevent event;
+	const struct sigevent *eventp = NULL;
+	timer_t id;
+	int error;
+
+	if (process == NULL || args[2] == 0)
+		return -EINVAL;
+	if (args[1] != 0) {
+		error = copyin(args[1], &event, sizeof(event));
+		if (error != 0)
+			return -error;
+		eventp = &event;
+	}
+	error = process_timer_create(process, (clockid_t)args[0], eventp, &id);
+	if (error != 0)
+		return -error;
+	error = copyout(&id, args[2], sizeof(id));
+	if (error != 0) {
+		(void)process_timer_delete(process, id);
+		return -error;
+	}
+	return 0;
+}
+
+static intptr_t sys_timer_delete_call(const uintptr_t args[6])
+{
+	struct process *process = current_process();
+	int error = process == NULL ? EINVAL :
+	    process_timer_delete(process, (timer_t)args[0]);
+	return error == 0 ? 0 : -error;
+}
+
+static intptr_t sys_timer_settime_call(const uintptr_t args[6])
+{
+	struct process *process = current_process();
+	struct itimerspec requested, previous;
+	int error;
+
+	if (process == NULL || args[2] == 0)
+		return -EINVAL;
+	error = copyin(args[2], &requested, sizeof(requested));
+	if (error == 0)
+		error = process_timer_settime(process, (timer_t)args[0],
+		    (int)args[1], &requested, args[3] == 0 ? NULL : &previous);
+	if (error == 0 && args[3] != 0)
+		error = copyout(&previous, args[3], sizeof(previous));
+	return error == 0 ? 0 : -error;
+}
+
+static intptr_t sys_timer_gettime_call(const uintptr_t args[6])
+{
+	struct process *process = current_process();
+	struct itimerspec current;
+	int error;
+
+	if (process == NULL || args[1] == 0)
+		return -EINVAL;
+	error = process_timer_gettime(process, (timer_t)args[0], &current);
+	if (error == 0)
+		error = copyout(&current, args[1], sizeof(current));
+	return error == 0 ? 0 : -error;
+}
+
+static intptr_t sys_timer_getoverrun_call(const uintptr_t args[6])
+{
+	struct process *process = current_process();
+	int overrun, error;
+
+	if (process == NULL)
+		return -EINVAL;
+	error = process_timer_getoverrun(process, (timer_t)args[0], &overrun);
+	return error == 0 ? overrun : -error;
+}
+
+static intptr_t sys_mount_call(const uintptr_t args[6])
+{
+	struct process *process = current_process();
+	struct zedbsd_mount_args requested;
+	struct fat_mount_args internal;
+	char type[NAME_MAX + 1U], directory[PATH_MAX];
+	int flags = (int)args[2];
+	int error;
+
+	if (process == NULL || process->cred == NULL)
+		return -EINVAL;
+	if (!cred_is_superuser(process->cred))
+		return -EPERM;
+	if ((flags & ~(int)MNT_RDONLY) != 0)
+		return -EINVAL;
+	error = copyinstr(args[0], type, sizeof(type), NULL);
+	if (error == 0)
+		error = copyinstr(args[1], directory, sizeof(directory), NULL);
+	memset(&requested, 0, sizeof(requested));
+	memset(&internal, 0, sizeof(internal));
+	if (error == 0 && args[3] != 0) {
+		error = copyin(args[3], &requested, sizeof(requested));
+		if (error == 0 && (requested.size != sizeof(requested) ||
+		    requested.version != ZEDBSD_MOUNT_ARGS_VERSION ||
+		    memchr(requested.fspec, '\0', sizeof(requested.fspec)) == NULL))
+			error = EINVAL;
+		if (error == 0 && requested.fspec[0] != '\0')
+			internal.fspec = requested.fspec;
+	}
+	if (error == 0)
+		error = mount(type, directory,
+		    (flags & MNT_RDONLY) != 0 ? MOUNT_READ_ONLY : 0,
+		    internal.fspec != NULL ? &internal : NULL);
+	return error == 0 ? 0 : -error;
+}
+
+static intptr_t sys_unmount_call(const uintptr_t args[6])
+{
+	struct process *process = current_process();
+	char directory[PATH_MAX];
+	int error;
+
+	if (process == NULL || process->cred == NULL)
+		return -EINVAL;
+	if (!cred_is_superuser(process->cred))
+		return -EPERM;
+	if (args[1] != 0)
+		return -EINVAL;
+	error = copyinstr(args[0], directory, sizeof(directory), NULL);
+	if (error == 0)
+		error = unmount(directory, 0);
+	return error == 0 ? 0 : -error;
+}
+
+static intptr_t sys_statvfs_call(const uintptr_t args[6], int by_fd)
+{
+	struct process *process = current_process();
+	struct statvfs status;
+	struct path path;
+	struct file *file = NULL;
+	char pathname[PATH_MAX];
+	int error;
+
+	if (process == NULL || process->cwdi == NULL)
+		return -EINVAL;
+	if (by_fd) {
+		file = filedesc_get_ref(process->fd, (int)args[0]);
+		if (file == NULL)
+			return -EBADF;
+		error = mount_statvfs(file->f_path.p_mount, &status);
+	} else {
+		error = copyinstr(args[0], pathname, sizeof(pathname), NULL);
+		if (error == 0)
+			error = namei_path_at(process->cwdi, pathname, &path);
+		if (error == 0) {
+			error = mount_statvfs(path.p_mount, &status);
+			path_release(&path);
+		}
+	}
+	if (file != NULL)
+		(void)file_close(file);
+	if (error == 0)
+		error = copyout(&status, args[1], sizeof(status));
+	return error == 0 ? 0 : -error;
+}
+
+static intptr_t
+sys_quotactl_call(const uintptr_t args[6])
+{
+	struct process *process=current_process();
+	struct zedbsd_quota_ctl request;
+	struct path path;
+	char pathname[PATH_MAX];
+	int error,allowed=0;
+	if(process==NULL||process->cred==NULL||process->cwdi==NULL||args[1]==0)
+		return -EINVAL;
+	error=copyinstr(args[0],pathname,sizeof(pathname),NULL);
+	if(error==0)error=copyin(args[1],&request,sizeof(request));
+	if(error==0&&(request.size!=sizeof(request)||
+	    request.version!=ZEDBSD_QUOTA_VERSION||
+	    request.type>ZEDBSD_QUOTA_GROUP||
+	    request.command<ZEDBSD_QUOTA_GET||
+	    request.command>ZEDBSD_QUOTA_SYNC))error=EINVAL;
+	if(error==0) {
+		allowed=cred_is_superuser(process->cred);
+		if(request.command==ZEDBSD_QUOTA_GET&&!allowed) {
+			if(request.type==ZEDBSD_QUOTA_USER)
+				allowed=request.id==process->cred->ruid||
+				    request.id==process->cred->euid||
+				    request.id==process->cred->suid;
+			else allowed=cred_in_group(process->cred,(gid_t)request.id);
+		}
+		if(!allowed)error=EPERM;
+	}
+	if(error==0)error=namei_path_at(process->cwdi,pathname,&path);
+	if(error==0){error=mount_quotactl(path.p_mount,&request);path_release(&path);}
+	if(error==0)error=copyout(&request,args[1],sizeof(request));
+	return error==0?0:-error;
+}
+
+static intptr_t
+sys_snapshotctl_call(const uintptr_t args[6])
+{
+	struct process *process=current_process();struct zedbsd_snapshot_ctl request;
+	struct path path;char pathname[PATH_MAX];int error;
+	if(process==NULL||process->cred==NULL||process->cwdi==NULL||args[1]==0)
+		return -EINVAL;
+	if(!cred_is_superuser(process->cred))return -EPERM;
+	error=copyinstr(args[0],pathname,sizeof(pathname),NULL);
+	if(error==0)error=copyin(args[1],&request,sizeof(request));
+	if(error==0&&(request.size!=sizeof(request)||
+	    request.version!=ZEDBSD_SNAPSHOT_VERSION||
+	    request.command<ZEDBSD_SNAPSHOT_CREATE||
+	    request.command>ZEDBSD_SNAPSHOT_STATUS))error=EINVAL;
+	if(error==0)error=namei_path_at(process->cwdi,pathname,&path);
+	if(error==0){error=mount_snapshotctl(path.p_mount,&request);path_release(&path);}
+	if(error==0)error=copyout(&request,args[1],sizeof(request));
+	return error==0?0:-error;
+}
+
 static intptr_t sys_nanosleep_call(const uintptr_t args[6])
 {
 	struct timespec request;
@@ -2159,6 +2381,179 @@ sys_resolve_path_at(struct process *process, int dirfd, uintptr_t address,
 		*held = NULL;
 	}
 	return error;
+}
+
+struct syscall_inode_ref {
+	struct inode *inode;
+	struct file *file;
+	struct file *held;
+	struct path path;
+	int has_path;
+};
+
+static int
+sys_inode_ref_acquire(struct process *process, uintptr_t object, int by_fd,
+	int nofollow, struct syscall_inode_ref *reference)
+{
+	int error;
+	memset(reference, 0, sizeof(*reference));
+	if (process == NULL || process->fd == NULL || process->cwdi == NULL)
+		return EINVAL;
+	if (by_fd) {
+		reference->file = filedesc_get_ref(process->fd, (int)object);
+		if (reference->file == NULL || reference->file->f_inode == NULL) {
+			if (reference->file != NULL)
+				(void)file_close(reference->file);
+			memset(reference, 0, sizeof(*reference));
+			return EBADF;
+		}
+		reference->inode = reference->file->f_inode;
+		return 0;
+	}
+	error = sys_resolve_path_at(process, AT_FDCWD, object,
+		nofollow ? NAMEI_NOFOLLOW_FINAL : 0, &reference->path,
+		&reference->held);
+	if (error == 0) {
+		reference->inode = reference->path.p_inode;
+		reference->has_path = 1;
+	}
+	return error;
+}
+
+static void
+sys_inode_ref_release(struct syscall_inode_ref *reference)
+{
+	if (reference->has_path)
+		path_release(&reference->path);
+	if (reference->held != NULL)
+		(void)file_close(reference->held);
+	if (reference->file != NULL)
+		(void)file_close(reference->file);
+}
+
+static SYSCALL_EXT intptr_t
+sys_getxattr_call(const uintptr_t args[6], int by_fd, int nofollow)
+{
+	struct process *process = current_process();
+	struct syscall_inode_ref reference;
+	char name[INODE_XATTR_NAME_MAX + 1U];
+	void *value = NULL;
+	ssize_t result;
+	size_t size = (size_t)args[3];
+	int error;
+	if (process == NULL || process->cred == NULL ||
+	    size > INODE_XATTR_SIZE_MAX || (size != 0 && args[2] == 0))
+		return -EINVAL;
+	error = copyinstr(args[1], name, sizeof(name), NULL);
+	if (error == 0)
+		error = sys_inode_ref_acquire(process, args[0], by_fd, nofollow,
+			&reference);
+	if (error != 0)
+		return -error;
+	if (size != 0) {
+		value = kern_malloc(size);
+		if (value == NULL) {
+			sys_inode_ref_release(&reference);
+			return -ENOMEM;
+		}
+	}
+	result = vfs_getxattr(reference.inode, process->cred, name, value, size);
+	if (result >= 0 && size != 0 && (size_t)result > size)
+		error = EIO;
+	else if (result >= 0 && result != 0 && size != 0)
+		error = copyout(value, args[2], (size_t)result);
+	else
+		error = result < 0 ? (int)-result : 0;
+	kern_free(value);
+	sys_inode_ref_release(&reference);
+	return error == 0 ? result : -error;
+}
+
+static SYSCALL_EXT intptr_t
+sys_setxattr_call(const uintptr_t args[6], int by_fd, int nofollow)
+{
+	struct process *process = current_process();
+	struct syscall_inode_ref reference;
+	char name[INODE_XATTR_NAME_MAX + 1U];
+	void *value = NULL;
+	size_t size = (size_t)args[3];
+	int error;
+	if (process == NULL || process->cred == NULL ||
+	    size > INODE_XATTR_SIZE_MAX || (size != 0 && args[2] == 0))
+		return -EINVAL;
+	error = copyinstr(args[1], name, sizeof(name), NULL);
+	if (error == 0 && size != 0) {
+		value = kern_malloc(size);
+		if (value == NULL)
+			error = ENOMEM;
+		else
+			error = copyin(args[2], value, size);
+	}
+	if (error == 0)
+		error = sys_inode_ref_acquire(process, args[0], by_fd, nofollow,
+			&reference);
+	if (error == 0) {
+		error = vfs_setxattr(reference.inode, process->cred, name, value,
+			size, (unsigned)args[4]);
+		sys_inode_ref_release(&reference);
+	}
+	kern_free(value);
+	return error == 0 ? 0 : -error;
+}
+
+static SYSCALL_EXT intptr_t
+sys_listxattr_call(const uintptr_t args[6], int by_fd, int nofollow)
+{
+	struct process *process = current_process();
+	struct syscall_inode_ref reference;
+	void *list = NULL;
+	ssize_t result;
+	size_t size = (size_t)args[2];
+	int error;
+	if (process == NULL || process->cred == NULL ||
+	    size > INODE_XATTR_SIZE_MAX || (size != 0 && args[1] == 0))
+		return -EINVAL;
+	error = sys_inode_ref_acquire(process, args[0], by_fd, nofollow,
+		&reference);
+	if (error != 0)
+		return -error;
+	if (size != 0) {
+		list = kern_malloc(size);
+		if (list == NULL) {
+			sys_inode_ref_release(&reference);
+			return -ENOMEM;
+		}
+	}
+	result = vfs_listxattr(reference.inode, process->cred, list, size);
+	if (result >= 0 && size != 0 && (size_t)result > size)
+		error = EIO;
+	else if (result >= 0 && result != 0 && size != 0)
+		error = copyout(list, args[1], (size_t)result);
+	else
+		error = result < 0 ? (int)-result : 0;
+	kern_free(list);
+	sys_inode_ref_release(&reference);
+	return error == 0 ? result : -error;
+}
+
+static SYSCALL_EXT intptr_t
+sys_removexattr_call(const uintptr_t args[6], int by_fd, int nofollow)
+{
+	struct process *process = current_process();
+	struct syscall_inode_ref reference;
+	char name[INODE_XATTR_NAME_MAX + 1U];
+	int error;
+	if (process == NULL || process->cred == NULL)
+		return -EINVAL;
+	error = copyinstr(args[1], name, sizeof(name), NULL);
+	if (error == 0)
+		error = sys_inode_ref_acquire(process, args[0], by_fd, nofollow,
+			&reference);
+	if (error == 0) {
+		error = vfs_removexattr(reference.inode, process->cred, name);
+		sys_inode_ref_release(&reference);
+	}
+	return error == 0 ? 0 : -error;
 }
 
 static int
@@ -3525,6 +3920,29 @@ syscall_dispatch_body(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_clock_gettime: return sys_clock_gettime_call(args);
 	case ZEDBSD_SYS_clock_getres: return sys_clock_getres_call(args);
 	case ZEDBSD_SYS_clock_settime: return sys_clock_settime_call(args);
+	case ZEDBSD_SYS_timer_create: return sys_timer_create_call(args);
+	case ZEDBSD_SYS_timer_delete: return sys_timer_delete_call(args);
+	case ZEDBSD_SYS_timer_settime: return sys_timer_settime_call(args);
+	case ZEDBSD_SYS_timer_gettime: return sys_timer_gettime_call(args);
+	case ZEDBSD_SYS_timer_getoverrun: return sys_timer_getoverrun_call(args);
+	case ZEDBSD_SYS_mount: return sys_mount_call(args);
+	case ZEDBSD_SYS_unmount: return sys_unmount_call(args);
+	case ZEDBSD_SYS_statvfs: return sys_statvfs_call(args, 0);
+	case ZEDBSD_SYS_fstatvfs: return sys_statvfs_call(args, 1);
+	case ZEDBSD_SYS_getxattr: return sys_getxattr_call(args, 0, 0);
+	case ZEDBSD_SYS_lgetxattr: return sys_getxattr_call(args, 0, 1);
+	case ZEDBSD_SYS_fgetxattr: return sys_getxattr_call(args, 1, 0);
+	case ZEDBSD_SYS_setxattr: return sys_setxattr_call(args, 0, 0);
+	case ZEDBSD_SYS_lsetxattr: return sys_setxattr_call(args, 0, 1);
+	case ZEDBSD_SYS_fsetxattr: return sys_setxattr_call(args, 1, 0);
+	case ZEDBSD_SYS_listxattr: return sys_listxattr_call(args, 0, 0);
+	case ZEDBSD_SYS_llistxattr: return sys_listxattr_call(args, 0, 1);
+	case ZEDBSD_SYS_flistxattr: return sys_listxattr_call(args, 1, 0);
+	case ZEDBSD_SYS_removexattr: return sys_removexattr_call(args, 0, 0);
+	case ZEDBSD_SYS_lremovexattr: return sys_removexattr_call(args, 0, 1);
+	case ZEDBSD_SYS_fremovexattr: return sys_removexattr_call(args, 1, 0);
+	case ZEDBSD_SYS_quotactl: return sys_quotactl_call(args);
+	case ZEDBSD_SYS_snapshotctl: return sys_snapshotctl_call(args);
 	case ZEDBSD_SYS_nanosleep: return sys_nanosleep_call(args);
 	case ZEDBSD_SYS_spawn: return sys_spawn_call(args);
 	case ZEDBSD_SYS_wait: return sys_wait_call(args);

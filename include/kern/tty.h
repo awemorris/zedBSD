@@ -8,6 +8,7 @@
 
 struct file;
 struct process;
+struct file_ops;
 
 int tty_console_init(void);
 void tty_console_input_event(uint32_t);
@@ -17,5 +18,9 @@ int tty_console_ioctl(struct file *, unsigned long, uintptr_t);
 int tty_console_poll(struct file *, short, short *);
 void tty_attach_console(struct process *);
 void tty_detach_process(struct process *);
+int tty_pty_register(void);
+int tty_pty_exists(unsigned);
+unsigned tty_pty_snapshot(unsigned *, unsigned);
+extern const struct file_ops tty_pty_slave_file_ops;
 
 #endif

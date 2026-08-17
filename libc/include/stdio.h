@@ -11,14 +11,12 @@
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
+#define _IOFBF 0
+#define _IOLBF 1
+#define _IONBF 2
+#define BUFSIZ 4096
 
-typedef struct zedbsd_stdio_file {
-	void *context;
-	uint64_t position;
-	int error;
-	int eof;
-	unsigned mode;
-} FILE;
+typedef struct zedbsd_stdio_file FILE;
 
 extern FILE *stdin;
 extern FILE *stdout;
@@ -42,10 +40,17 @@ int fprintf(FILE *stream, const char *format, ...);
 int fputc(int character, FILE *stream);
 int fgetc(FILE *stream);
 int getc(FILE *stream);
+int ungetc(int character, FILE *stream);
 size_t fread(void *buffer, size_t size, size_t count, FILE *stream);
 size_t fwrite(const void *buffer, size_t size, size_t count, FILE *stream);
 int ferror(FILE *stream);
+int feof(FILE *stream);
 void clearerr(FILE *stream);
+void flockfile(FILE *stream);
+int ftrylockfile(FILE *stream);
+void funlockfile(FILE *stream);
+int setvbuf(FILE *stream, char *buffer, int mode, size_t size);
+void setbuf(FILE *stream, char *buffer);
 int rename(const char *, const char *);
 
 #endif

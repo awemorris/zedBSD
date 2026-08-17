@@ -10,6 +10,8 @@ _start:
 	sllx %l1, 3, %l3
 	add %l2, %l3, %l3
 	add %l3, 8, %l3
+	/* Reserve the ABI caller frame before the first non-leaf call. */
+	sub %sp, 176, %sp
 	mov %l1, %o0
 	mov %l2, %o1
 	call zedbsd_user_libc_init

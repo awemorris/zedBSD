@@ -11,14 +11,6 @@ typedef struct {
 	size_t ss_size;
 	int ss_flags;
 } stack_t;
-struct sigevent {
-	int sigev_notify;
-	int sigev_signo;
-	union sigval sigev_value;
-};
-#define SIGEV_NONE 0
-#define SIGEV_SIGNAL 1
-#define SIGEV_THREAD 2
 #define SIG_ERR ((sighandler_t)-1)
 int sigaction(int, const struct sigaction *, struct sigaction *);
 int sigprocmask(int, const sigset_t *, sigset_t *);

@@ -4,6 +4,7 @@
  */
 
 #include "kern/process.h"
+#include "kern/process-timer.h"
 #include "kern/thread.h"
 #include "kern/tty.h"
 #include "kern/vmspace.h"
@@ -582,6 +583,7 @@ process_free_mem(struct process *process)
 	process->cred = NULL;
 	process->cwdi = NULL;
 	spin_unlock_irqrestore(&process->lock, process_irq);
+	process_timer_cleanup(process);
 
 	tree_irq = spin_lock_irqsave(&process_tree_lock);
 	old_session = process->session;
@@ -971,6 +973,7 @@ process_exit_final(int thread_status, int wait_status)
 	process->state = PROCESS_EXITING;
 	process->exit_status = wait_status;
 	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
+	process_timer_cleanup(process);
 
 	/* _exit terminates the process, not only the calling POSIX thread. */
 	for (;;) {

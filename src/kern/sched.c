@@ -415,10 +415,13 @@ sched_clock_cpu(hal_cpu_id_t id, uint64_t now)
 		thread = next;
 	}
 	thread = curthread;
-	if (thread != NULL && thread->state == THREAD_RUNNING &&
-	    (thread->flags & THREAD_FLAG_IDLE) == 0 &&
-	    thread->sched.quantum != 0 && --thread->sched.quantum == 0)
-		preempt = 1;
+	if (thread != NULL && thread->state == THREAD_RUNNING) {
+		if ((thread->flags & THREAD_FLAG_IDLE) != 0)
+			preempt = cpu->need_resched != 0;
+		else if (thread->sched.quantum != 0 &&
+		    --thread->sched.quantum == 0)
+			preempt = 1;
+	}
 	spin_unlock_irqrestore(&cpu->lock, irq);
 	if (preempt)
 		sched_yield();

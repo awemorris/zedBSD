@@ -123,7 +123,9 @@ def create(args: argparse.Namespace) -> None:
         require(path)
     if args.shell is not None:
         require(args.shell)
-    dynamic = (args.rtld, args.libc, args.tlstest, args.dyntest)
+    dynamic = (args.rtld, args.libc, args.tlstest, args.rpathdep,
+               args.rpathtest, args.verstest, args.versuse,
+               args.dyntest)
     if any(path is not None for path in dynamic):
         if not all(path is not None for path in dynamic):
             raise SystemExit("SPARC V9 dynamic userland inputs must be complete")
@@ -188,6 +190,15 @@ def create(args: argparse.Namespace) -> None:
             run("mcopy", "-i", fat_spec, str(args.libc), "::/lib/libc.so")
             run("mcopy", "-i", fat_spec, str(args.tlstest),
                 "::/lib/tlstest.so")
+            run("mmd", "-i", fat_spec, "::/lib/alt")
+            run("mcopy", "-i", fat_spec, str(args.rpathdep),
+                "::/lib/alt/rpathdep.so")
+            run("mcopy", "-i", fat_spec, str(args.rpathtest),
+                "::/lib/rpthtest.so")
+            run("mcopy", "-i", fat_spec, str(args.verstest),
+                "::/lib/verstest.so")
+            run("mcopy", "-i", fat_spec, str(args.versuse),
+                "::/lib/versuse.so")
             if args.shell is None:
                 run("mmd", "-i", fat_spec, "::/bin")
             run("mcopy", "-i", fat_spec, str(args.dyntest),
@@ -211,6 +222,10 @@ def create(args: argparse.Namespace) -> None:
         if args.rtld is not None:
             command += ["--rtld", str(args.rtld), "--libc", str(args.libc),
                         "--tlstest", str(args.tlstest),
+                        "--rpathdep", str(args.rpathdep),
+                        "--rpathtest", str(args.rpathtest),
+                        "--verstest", str(args.verstest),
+                        "--versuse", str(args.versuse),
                         "--dyntest", str(args.dyntest)]
         if args.ufs_root is not None:
             command += ["--ufs-root", str(args.ufs_root)]
@@ -232,6 +247,10 @@ def main() -> None:
     parser.add_argument("--rtld", type=Path)
     parser.add_argument("--libc", type=Path)
     parser.add_argument("--tlstest", type=Path)
+    parser.add_argument("--rpathdep", type=Path)
+    parser.add_argument("--rpathtest", type=Path)
+    parser.add_argument("--verstest", type=Path)
+    parser.add_argument("--versuse", type=Path)
     parser.add_argument("--dyntest", type=Path)
     parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("--force", action="store_true")

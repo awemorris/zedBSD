@@ -137,13 +137,19 @@ def check(args: argparse.Namespace) -> None:
         same_file(args.image, "bin/sh", args.shell)
     if args.sysctl is not None:
         same_file(args.image, "bin/sysctl", args.sysctl)
-    dynamic = (args.rtld, args.libc, args.tlstest, args.dyntest)
+    dynamic = (args.rtld, args.libc, args.tlstest, args.rpathdep,
+               args.rpathtest, args.verstest, args.versuse,
+               args.dyntest)
     if any(path is not None for path in dynamic):
         if not all(path is not None for path in dynamic):
             fail("dynamic userland checker inputs are incomplete")
         same_file(args.image, "lib/ld.so", args.rtld)
         same_file(args.image, "lib/libc.so", args.libc)
         same_file(args.image, "lib/tlstest.so", args.tlstest)
+        same_file(args.image, "lib/alt/rpathdep.so", args.rpathdep)
+        same_file(args.image, "lib/rpthtest.so", args.rpathtest)
+        same_file(args.image, "lib/verstest.so", args.verstest)
+        same_file(args.image, "lib/versuse.so", args.versuse)
         same_file(args.image, "bin/dyntest", args.dyntest)
     if args.ufs_root is not None:
         with args.image.open("rb") as image:
@@ -168,6 +174,10 @@ def main() -> None:
     parser.add_argument("--rtld", type=Path)
     parser.add_argument("--libc", type=Path)
     parser.add_argument("--tlstest", type=Path)
+    parser.add_argument("--rpathdep", type=Path)
+    parser.add_argument("--rpathtest", type=Path)
+    parser.add_argument("--verstest", type=Path)
+    parser.add_argument("--versuse", type=Path)
     parser.add_argument("--dyntest", type=Path)
     parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("image", type=Path)

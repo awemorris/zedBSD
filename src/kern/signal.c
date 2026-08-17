@@ -23,6 +23,22 @@ static int signal_stop(int s)
 { return s==SIGSTOP||s==SIGTSTP||s==SIGTTIN||s==SIGTTOU; }
 static int signal_ignored_default(int s) { return s==SIGCHLD||s==SIGCONT; }
 
+/* Caller holds process->lock.  A process-directed signal selected by
+ * sigtimedwait() must not be consumed by another thread's ordinary return to
+ * user mode before the waiter runs. */
+static sigset_t
+signal_wait_claims_locked(const struct process *process)
+{
+	const struct thread *thread;
+	sigset_t claims = 0;
+
+	for (thread = process->threads; thread != NULL;
+	    thread = thread->proc_next)
+		if (thread->signal_waiting)
+			claims |= thread->signal_wait_set;
+	return claims;
+}
+
 /* Caller holds process->lock. */
 static void
 signal_take_process_locked(struct process *process, int signo,
@@ -58,7 +74,8 @@ signal_pending_unblocked(const struct thread *thread)
 	int signo;
 	if (thread == NULL || (process = thread->proc) == NULL)
 		return 0;
-	pending = (thread->signal_pending | process->signal_pending) &
+	pending = (thread->signal_pending |
+	    (process->signal_pending & ~signal_wait_claims_locked(process))) &
 	    ~thread->signal_mask;
 	pending |= (thread->signal_pending | process->signal_pending) &
 	    (SIGNAL_BIT(SIGKILL) | SIGNAL_BIT(SIGSTOP));
@@ -124,12 +141,13 @@ signal_send_process_info(struct process *process, int signo,
 	}
 	process->signal_pending |= SIGNAL_BIT(signo);
 	for (thread = process->threads; thread != NULL;
-	     thread = thread->proc_next)
+	     thread = thread->proc_next) {
 		if (thread->state == THREAD_SLEEPING &&
 		    (signal_pending_unblocked(thread) ||
 		     (thread->signal_waiting &&
 		      (thread->signal_wait_set & SIGNAL_BIT(signo)) != 0)))
 			sched_wakeup(thread);
+	}
 	if ((signo == SIGCONT || signo == SIGKILL) &&
 	    process->state == PROCESS_STOPPED) {
 		process->state = PROCESS_RUNNING;
@@ -278,7 +296,8 @@ signal_deliver_on_user_return(void)
 		return;
 retry:
 	irq = spin_lock_irqsave(&process->lock);
-	pending = (thread->signal_pending | process->signal_pending) &
+	pending = (thread->signal_pending |
+	    (process->signal_pending & ~signal_wait_claims_locked(process))) &
 	    ~thread->signal_mask;
 	pending |= (thread->signal_pending | process->signal_pending) &
 	    (SIGNAL_BIT(SIGKILL) | SIGNAL_BIT(SIGSTOP));

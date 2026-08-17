@@ -7,6 +7,7 @@
 
 #include <errno.h>
 #include <string.h>
+#include <sys/statvfs.h>
 
 #define ROOTFS_NODE_MAX (MOUNT_MAX + 1U)
 
@@ -129,9 +130,25 @@ rootfs_mount_impl(struct mount *mountp)
 	return 0;
 }
 
+static int
+rootfs_statvfs(struct mount *mountp, struct statvfs *result)
+{
+	(void)mountp;
+	if (result == NULL)
+		return EINVAL;
+	memset(result, 0, sizeof(*result));
+	result->f_bsize = result->f_frsize = 1U;
+	result->f_files = ROOTFS_NODE_MAX;
+	result->f_ffree = ROOTFS_NODE_MAX - node_count;
+	result->f_favail = result->f_ffree;
+	result->f_namemax = NAME_MAX;
+	return 0;
+}
+
 const struct filesystem_type rootfs_type = {
 	.fs_name = "rootfs",
 	.mount = rootfs_mount_impl,
+	.statvfs = rootfs_statvfs,
 };
 
 int

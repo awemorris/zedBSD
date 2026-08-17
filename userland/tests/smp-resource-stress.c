@@ -84,6 +84,8 @@ worker_main(unsigned worker)
 	file_descriptor = open(path, O_CREAT | O_TRUNC | O_RDWR, 0600);
 	if (file_descriptor < 0)
 		return 10;
+	if (ftruncate(file_descriptor, PAGE_SIZE) != 0)
+		return 18;
 
 	for (iteration = 0; iteration < ITERATIONS; iteration++) {
 		volatile unsigned char *mapping;
@@ -108,6 +110,16 @@ worker_main(unsigned worker)
 		    pwrite(file_descriptor, &value, 1,
 			   (off_t)(iteration & (PAGE_SIZE - 1U))) != 1)
 			return 17;
+		if ((iteration & 511U) == 0) {
+			volatile unsigned char *shared = mmap(NULL, PAGE_SIZE,
+			    PROT_READ | PROT_WRITE, MAP_SHARED, file_descriptor, 0);
+			if (shared == MAP_FAILED)
+				return 19;
+			shared[(worker * 37U + iteration) & (PAGE_SIZE - 1U)] = value;
+			if (msync((void *)shared, PAGE_SIZE, MS_SYNC) != 0 ||
+			    munmap((void *)shared, PAGE_SIZE) != 0)
+				return 20;
+		}
 
 		socket_descriptor = socket(AF_INET, SOCK_DGRAM, 0);
 		if (socket_descriptor < 0) {
@@ -117,6 +129,16 @@ worker_main(unsigned worker)
 		}
 		if (close(socket_descriptor) != 0)
 			return 15;
+		if ((iteration & 255U) == 0) {
+			unsigned char received = 0;
+			int pair[2];
+			if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0)
+				return 21;
+			if (write(pair[0], &value, 1) != 1 ||
+			    read(pair[1], &received, 1) != 1 || received != value ||
+			    close(pair[0]) != 0 || close(pair[1]) != 0)
+				return 22;
+		}
 	}
 
 	if (close(file_descriptor) != 0) {

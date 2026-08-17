@@ -69,6 +69,11 @@ enum inode_type {
 #define INODE_ATTR_ATIME_NOW  0x00000080U
 #define INODE_ATTR_MTIME_NOW  0x00000100U
 
+#define INODE_XATTR_CREATE    0x00000001U
+#define INODE_XATTR_REPLACE   0x00000002U
+#define INODE_XATTR_NAME_MAX  255U
+#define INODE_XATTR_SIZE_MAX  (64U * 1024U)
+
 struct inode;
 
 struct inode_time {
@@ -98,6 +103,11 @@ struct inode_ops {
 	int (*getattr)(struct inode *, struct stat *);
 	int (*setattr)(struct inode *, const struct stat *, unsigned);
 	int (*truncate)(struct inode *, off_t);
+	ssize_t (*getxattr)(struct inode *, const char *, void *, size_t);
+	int (*setxattr)(struct inode *, const char *, const void *, size_t,
+	    unsigned);
+	ssize_t (*listxattr)(struct inode *, char *, size_t);
+	int (*removexattr)(struct inode *, const char *);
 	int (*sync)(struct inode *);
 	void (*reclaim)(struct inode *);
 };
@@ -166,6 +176,11 @@ int inode_symlink(struct inode *, const struct componentname *, const char *,
 		  struct inode **);
 ssize_t inode_readlink(struct inode *, char *, size_t);
 int inode_truncate(struct inode *, off_t);
+ssize_t inode_getxattr(struct inode *, const char *, void *, size_t);
+int inode_setxattr(struct inode *, const char *, const void *, size_t,
+	unsigned);
+ssize_t inode_listxattr(struct inode *, char *, size_t);
+int inode_removexattr(struct inode *, const char *);
 int inode_sync(struct inode *);
 void inode_touch(struct inode *, unsigned);
 void inode_dir_changed(struct inode *);

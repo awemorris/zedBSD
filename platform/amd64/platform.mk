@@ -43,6 +43,7 @@ AMD64_KERNEL_SOURCES := \
 	drivers/pcat-ide.c drivers/dp8390.c drivers/pcat-ne2000.c \
 	src/kern/mbr-partition.c src/kern/pcat/platform.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
+	src/kern/process-timer.c \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c \
 	src/kern/vmspace.c src/kern/vm-object.c src/kern/vm-commit.c \
@@ -55,7 +56,10 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/graphics-device.c src/kern/system-device.c \
 	src/kern/pcat/font.c drivers/pcat-graphics.c \
 	src/kern/init.c
-AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES)
+AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
+	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)
+AMD64_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
+AMD64_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
 AMD64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
 	$(AMD64_KERNEL_SOURCES))
 AMD64_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
@@ -66,6 +70,7 @@ AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS) \
 all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
 	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup $(BUILD)/bin/sysctl \
+	$(BUILD)/bin/mount $(BUILD)/bin/umount \
 	$(BUILD)/hdd-image.img
 vmunix: $(BUILD)/vmunix
 SH: $(BUILD)/bin/sh
@@ -155,6 +160,7 @@ AMD64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c userla
 	userland/libc/semaphore.c \
 	userland/libc/mqueue.c \
 	userland/libc/signal.c libc/heap.c libc/string.c libc/ctype.c \
+	libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c libc/format.c libc/stdio.c
 AMD64_USER_LIBC_OBJS := $(BUILD)/user64/userland/crt0-amd64.o \
 	$(patsubst %.c,$(BUILD)/user64/%.o,$(AMD64_USER_RUNTIME_SOURCES))
@@ -237,6 +243,20 @@ $(BUILD)/bin/sysctl: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SYSCTL_OBJ) \
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
+AMD64_USER_MOUNT_OBJ := $(BUILD)/user64/userland/mount/main.o
+$(BUILD)/bin/mount: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_MOUNT_OBJ) \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+		$(AMD64_USER_MOUNT_OBJ) -o $@
+	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+$(BUILD)/bin/umount: $(BUILD)/bin/mount
+	@mkdir -p $(dir $@)
+	cp -f $< $@
+
 $(BUILD)/bin/nettest: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(AMD64_USER_NETTEST_OBJS) $(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
@@ -286,11 +306,13 @@ DYNAMIC_LIBC_SOURCES := userland/libc/posix.c userland/libc/poll.c \
 	userland/libc/semaphore.c userland/libc/mqueue.c userland/libc/dlfcn.c \
 	userland/libc/socket.c userland/libc/resolver.c \
 	userland/libc/resolver-dns.c userland/libc/signal.c libc/heap.c \
-	libc/string.c libc/ctype.c libc/int64.c libc/strto.c libc/format.c \
+	libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c \
+	libc/strto.c libc/format.c \
 	libc/stdio.c
 DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
 	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/libc/syscall.o
 DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/rtld/entry.o \
+	$(DYNAMIC_DIR)/obj/userland/rtld/tlsdesc.o \
 	$(DYNAMIC_DIR)/obj/userland/rtld/rtld.o \
 	$(DYNAMIC_DIR)/obj/userland/rtld/string.o
 DYNAMIC_FLOAT_DIR := $(DYNAMIC_DIR)/float
@@ -313,6 +335,12 @@ $(DYNAMIC_DIR)/obj/userland/libc/syscall.o: userland/libc/syscall-amd64.S
 $(DYNAMIC_DIR)/obj/userland/rtld/entry.o: userland/rtld/entry-amd64.S
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/userland/rtld/tlsdesc.o: userland/rtld/tlsdesc-amd64.S
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -c $< -o $@
+
+$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialect=gnu2
 
 $(DYNAMIC_FLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
 	@mkdir -p $(dir $@)
@@ -355,18 +383,51 @@ $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
 		--hash-style=sysv -z now -z relro -z separate-code $^ -o $@
 
 $(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
-	$(LD) -m elf_x86_64 -shared -soname libc.so --hash-style=sysv \
+	$(LD) -m elf_x86_64 -shared -soname libc.so --hash-style=both \
 		-z now -z relro -z separate-code -z stack-size=0x100000 $^ -o $@
 
-$(DYNAMIC_DIR)/tlstest.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o $(DYNAMIC_DIR)/ld.so
-	$(LD) -m elf_x86_64 -shared -soname tlstest.so --hash-style=sysv \
+$(DYNAMIC_DIR)/alt/rpathdep.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_x86_64 -shared -soname rpathdep.so --hash-style=gnu \
 		-z now -z relro -z separate-code $< -o $@
+
+$(DYNAMIC_DIR)/tlstest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_x86_64 -shared -soname tlstest.so --hash-style=gnu \
+		-z now -z relro -z separate-code --enable-new-dtags \
+		-rpath '$$ORIGIN/alt' \
+		$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+		-L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
+
+$(DYNAMIC_DIR)/rpathtest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/rpathtest.o \
+	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_x86_64 -shared -soname rpthtest.so --hash-style=gnu \
+		-z now -z relro -z separate-code --disable-new-dtags \
+		-rpath '$$ORIGIN/alt' $< -L$(DYNAMIC_DIR)/alt \
+		-l:rpathdep.so -o $@
+
+$(DYNAMIC_DIR)/verstest.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/versiontest.o \
+	userland/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_x86_64 -shared -soname verstest.so --hash-style=gnu \
+		-z now -z relro -z separate-code \
+		--version-script=userland/tests/versiontest.map $< -o $@
+
+$(DYNAMIC_DIR)/versuse.so: \
+	$(DYNAMIC_DIR)/obj/userland/tests/versionuse.o \
+	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/ld.so
+	$(LD) -m elf_x86_64 -shared -soname versuse.so --hash-style=gnu \
+		-z now -z relro -z separate-code $< -L$(DYNAMIC_DIR) \
+		-l:verstest.so -o $@
 
 $(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/userland/crt1.o \
 	$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
-	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so
-	$(CC) -m64 -nostdlib -no-pie -Wl,--no-relax \
+	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so \
+	$(DYNAMIC_DIR)/versuse.so
+	$(CC) -m64 -nostdlib -pie -Wl,--no-relax \
 		-Wl,--hash-style=sysv,-z,now,-z,relro,-z,separate-code \
 		-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
 		-Wl,--dynamic-linker=/lib/ld.so \
@@ -376,10 +437,15 @@ $(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/userland/crt1.o \
 		-l:libc.so -o $@
 
 dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
-	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so scripts/check-dynamic-elf.py
+	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so \
+	$(DYNAMIC_DIR)/rpathtest.so $(DYNAMIC_DIR)/verstest.so \
+	$(DYNAMIC_DIR)/versuse.so scripts/check-dynamic-elf.py
 	$(PYTHON) scripts/check-dynamic-elf.py --machine amd64 --role interpreter $(DYNAMIC_DIR)/ld.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine amd64 --role libc $(DYNAMIC_DIR)/libc.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine amd64 --role module $(DYNAMIC_DIR)/tlstest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine amd64 --role rpath-module $(DYNAMIC_DIR)/rpathtest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine amd64 --role version-definition $(DYNAMIC_DIR)/verstest.so
+	$(PYTHON) scripts/check-dynamic-elf.py --machine amd64 --role version-consumer $(DYNAMIC_DIR)/versuse.so
 	$(PYTHON) scripts/check-dynamic-elf.py --machine amd64 --role program $(DYNAMIC_DIR)/dyntest
 	@echo "zedBSD amd64 dynamic userland artifacts: PASS"
 .PHONY: dynamic-userland-check
@@ -388,8 +454,11 @@ AMD64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/amd64.img
 AMD64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
 	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup $(BUILD)/bin/sysctl \
+	$(BUILD)/bin/mount $(BUILD)/bin/umount \
 	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
-	$(DYNAMIC_DIR)/tlstest.so $(DYNAMIC_DIR)/dyntest
+	$(DYNAMIC_DIR)/tlstest.so $(DYNAMIC_DIR)/dyntest \
+	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/rpathtest.so \
+	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/versuse.so
 AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/nettest=$(BUILD)/bin/nettest \
 	--file /bin/ping=$(BUILD)/bin/ping \
@@ -398,9 +467,15 @@ AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
 	--file /bin/nslookup=$(BUILD)/bin/nslookup \
 	--file /bin/sysctl=$(BUILD)/bin/sysctl \
+	--file /bin/mount=$(BUILD)/bin/mount \
+	--file /bin/umount=$(BUILD)/bin/umount \
 	--file /lib/ld.so=$(DYNAMIC_DIR)/ld.so \
 	--file /lib/libc.so=$(DYNAMIC_DIR)/libc.so \
 	--file /lib/tlstest.so=$(DYNAMIC_DIR)/tlstest.so \
+	--file /lib/alt/rpathdep.so=$(DYNAMIC_DIR)/alt/rpathdep.so \
+	--file /lib/rpthtest.so=$(DYNAMIC_DIR)/rpathtest.so \
+	--file /lib/verstest.so=$(DYNAMIC_DIR)/verstest.so \
+	--file /lib/versuse.so=$(DYNAMIC_DIR)/versuse.so \
 	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AMD64_ARCH_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
 AMD64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/amd64.ufs

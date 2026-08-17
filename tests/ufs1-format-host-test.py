@@ -14,6 +14,19 @@ with tempfile.TemporaryDirectory() as d:
  fs=checker.UFS1(p.read_bytes())
  assert fs.read_file(fs.lookup('/bin/large'))==payload
  assert fs.read_file(fs.lookup('/bin/f099'))==b'99'
+
+ # Exercise power-of-two and odd CG counts, a shortened last CG, and a file
+ # whose blocks cross a CG boundary.  The default remains the byte-compatible
+ # single-CG profile above.
+ crossing=bytes((index*19)&0xff for index in range(3*1024*1024))
+ (root/'bin'/'crossing').write_bytes(crossing)
+ for groups,size_mib in ((2,9),(3,17),(16,32)):
+  multi=pathlib.Path(d)/f'test-{groups}cg.ufs'
+  multi.write_bytes(create(size_mib*1024*1024,root,groups))
+  check(multi)
+  fs=checker.UFS1(multi.read_bytes())
+  assert fs.ncg==groups
+  assert fs.read_file(fs.lookup('/bin/crossing'))==crossing
  b=bytearray(p.read_bytes()); b[8192+1372]=0; p.write_bytes(b)
  try: check(p); raise AssertionError('corrupt magic accepted')
  except ValueError: pass
