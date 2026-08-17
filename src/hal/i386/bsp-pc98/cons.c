@@ -137,21 +137,19 @@ void hal_cons_putc(int character)
 
 	if (byte == '\n') {
 		newline();
-		return;
-	}
-	if (byte == '\r') {
+	} else if (byte == '\r') {
 		cursor_column = 0;
-		return;
-	}
-	if (byte == '\b') {
+	} else if (byte == '\b') {
 		if (cursor_column) {
 			cursor_column--;
 			write_cell(cursor_row, cursor_column, ' ',
 				   HAL_CONS_NORMAL_ATTRIBUTE);
 		}
-		return;
+	} else {
+		put_single_cell(byte);
 	}
-	put_single_cell(byte);
+	if (console_mode == HAL_CONS_TERMINAL)
+		hal_cons_update_cursor();
 }
 
 /* HAL-owned JIS X 0208 rows 1-84; Noct is not part of this dependency. */
@@ -267,6 +265,9 @@ void hal_cons_write_n(const char *string, unsigned length)
 			write_cell(cursor_row, cursor_column++, code | 0x8000U,
 				   HAL_CONS_NORMAL_ATTRIBUTE);
 	}
+	/* TTY echo writes through this HAL entry point rather than /dev/console. */
+	if (console_mode == HAL_CONS_TERMINAL)
+		hal_cons_update_cursor();
 }
 
 /* Positional writes deliberately leave the logical cursor after the string. */
