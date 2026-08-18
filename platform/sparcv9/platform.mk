@@ -101,6 +101,8 @@ SPARCV9_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(SPARCV9_USER_RUNTIME_SOURCES))
 SPARCV9_USER_SH_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(SPARCV9_USER_SH_SOURCES))
+SPARCV9_USER_READLINE_OBJ := $(BUILD)/user/userland/libedit/readline.o
+SPARCV9_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 SPARCV9_USER_OBJS := $(BUILD)/user/userland/crt0-sparcv9.o \
 	$(SPARCV9_USER_RUNTIME_OBJS) $(SPARCV9_USER_SH_OBJS)
 
@@ -171,6 +173,12 @@ $(BUILD)/user/userland/crt0-sparcv9.o: userland/crt0-sparcv9.S
 	$(SPARCV9_CC) $(SPARCV9_CPPFLAGS) $(SPARCV9_USER_CFLAGS) \
 		-c $< -o $@
 
+$(SPARCV9_USER_SH_OBJS) $(SPARCV9_USER_READLINE_OBJ): \
+	SPARCV9_CPPFLAGS += -Iuserland/libedit
+$(SPARCV9_USER_READLINE_LIB): $(SPARCV9_USER_READLINE_OBJ)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
 $(BUILD)/vmunix: $(SPARCV9_VMUNIX_OBJS) $(SPARCV9_PLATFORM)/vmunix.ld \
 	scripts/check-sparcv9-vmunix.py
 	$(SPARCV9_LD) -m elf64_sparc --gc-sections \
@@ -182,13 +190,14 @@ $(BUILD)/vmunix: $(SPARCV9_VMUNIX_OBJS) $(SPARCV9_PLATFORM)/vmunix.ld \
 sparcv9-image-check: $(BUILD)/vmunix
 	$(PYTHON) scripts/check-sparcv9-vmunix.py $<
 
-$(BUILD)/bin/sh: $(SPARCV9_USER_OBJS) $(SPARCV9_PLATFORM)/user.ld \
+$(BUILD)/bin/sh: $(SPARCV9_USER_OBJS) $(SPARCV9_USER_READLINE_LIB) \
+	$(SPARCV9_PLATFORM)/user.ld \
 	scripts/check-user-elf.py
 	@mkdir -p $(dir $@)
 	$(SPARCV9_CC) $(SPARCV9_USER_CFLAGS) -nostdlib -static \
 		-Wl,--gc-sections -Wl,-z,max-page-size=8192 \
 		-Wl,-T,$(SPARCV9_PLATFORM)/user.ld \
-		$(SPARCV9_USER_OBJS) -lgcc -o $@
+		$(SPARCV9_USER_OBJS) $(SPARCV9_USER_READLINE_LIB) -lgcc -o $@
 	@test -z "$$($(SPARCV9_NM) -u $@)" || { $(SPARCV9_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine sparcv9 $@
 

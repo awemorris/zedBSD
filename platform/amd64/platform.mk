@@ -178,6 +178,8 @@ AMD64_USER_SH_OBJS := $(BUILD)/user64/userland/sh/main.o \
 	$(BUILD)/user64/userland/sh/vars.o \
 	$(BUILD)/user64/userland/sh/arithmetic.o \
 	$(BUILD)/user64/userland/sh/alias.o
+AMD64_USER_READLINE_OBJ := $(BUILD)/user64/userland/libedit/readline.o
+AMD64_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 AMD64_USER_ELF_CHECK := scripts/check-user-elf.py
 
 $(BUILD)/user64/%.o: %.c
@@ -188,6 +190,12 @@ $(BUILD)/user64/%.o: %.c
 $(BUILD)/user64/userland/crt0-amd64.o: userland/crt0-amd64.S
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) -c $< -o $@
+
+$(AMD64_USER_READLINE_OBJ): AMD64_USER_CPPFLAGS += -Iuserland/libedit
+$(AMD64_USER_SH_OBJS): AMD64_USER_CPPFLAGS += -Iuserland/libedit
+$(AMD64_USER_READLINE_LIB): $(AMD64_USER_READLINE_OBJ)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
 
 $(BUILD)/POSIX-R1.ELF: $(AMD64_USER_LIBC_OBJS) \
 	$(BUILD)/user64/userland/tests/syscall-smoke.o $(AMD64_PLATFORM)/user.ld \
@@ -218,13 +226,14 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
+	$(AMD64_USER_READLINE_LIB) \
 	$(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
-		$(AMD64_USER_SH_OBJS) -o $@
+		$(AMD64_USER_SH_OBJS) $(AMD64_USER_READLINE_LIB) -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 

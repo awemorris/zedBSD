@@ -64,9 +64,9 @@ grep -Fq 'ata: ide1 blocks=' "$work/two-drives-64M.log" || {
 	echo "PC/AT QEMU two-drives-64M did not enumerate ide1" >&2; exit 1;
 }
 
-# Exercise the 8042 path and prove that the two aliases of the boot volume
-# are usable by the ring-3 shell.  QMP only injects ordinary keyboard events;
-# the commands still travel through the PC/AT keyboard ISR and /dev/console.
+# Exercise the 8042 path, line editing, and the root namespace from the
+# ring-3 shell.  The injected keys still travel through the PC/AT keyboard
+# ISR, the TTY input normalizer, and /dev/console.
 interactive_log="$work/interactive.log"
 interactive_qmp="$work/interactive.qmp"
 rm -f "$interactive_log" "$interactive_qmp"
@@ -135,14 +135,29 @@ def type_command(keys):
 command("qmp_capabilities")
 wait_for(b"/ $ ")
 type_command(list("pwd"))
-wait_for(b"pwd\n/\r\n/ $ ")
+wait_for(b"\n/\r\n/ $ ")
+type_command(["e", "c", "o", "left", "h", "end", "spc", "e", "d", "i", "t"])
+wait_for(b"\nedit\r\n/ $ ")
+before_history = log_bytes().count(b"\nedit\r\n")
+type_command(["up"])
+limit = time.time() + 15
+while time.time() < limit:
+    if log_bytes().count(b"\nedit\r\n") > before_history:
+        break
+    time.sleep(0.05)
+else:
+    raise SystemExit("shell history recall was not observed")
+type_command(list("missingzed"))
+wait_for(b"sh: missingzed: not found")
+if b"\nerror\r\n" in log_bytes():
+    raise SystemExit("legacy generic shell error diagnostic was observed")
 type_command(["l", "s", "spc", "slash", "d", "i", "s", "k", "1"])
-wait_for(b"ls /disk1\nls: /disk1:")
+wait_for(b"ls: /disk1:")
 PY
 kill "$interactive_pid" 2>/dev/null || true
 wait "$interactive_pid" 2>/dev/null || true
 trap - EXIT
 rm -f "$interactive_qmp"
-echo "PC/AT QEMU keyboard and root namespace test: PASS"
+echo "PC/AT QEMU keyboard, line editor, and root namespace test: PASS"
 
 echo "PC/AT QEMU boot matrix: PASS"

@@ -91,7 +91,8 @@ while time.monotonic() < deadline:
     time.sleep(.5)
 else:
     raise SystemExit("/bin/sh prompt was not observed")
-for key in ("n", "o", "c", "t", "ret"):
+# Enter "noctt", then exercise cursor motion and deletion to obtain "noct".
+for key in ("n", "o", "c", "t", "t", "left", "backspace", "ret"):
     press(key)
 deadline = time.monotonic() + 40
 while time.monotonic() < deadline:

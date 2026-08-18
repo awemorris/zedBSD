@@ -90,6 +90,8 @@ ARM64_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(ARM64_USER_RUNTIME_SOURCES))
 ARM64_USER_SH_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(ARM64_USER_SH_SOURCES))
+ARM64_USER_READLINE_OBJ := $(BUILD)/user/userland/libedit/readline.o
+ARM64_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 ARM64_USER_OBJS := $(BUILD)/user/userland/crt0-aarch64.o \
 	$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_SH_OBJS)
 
@@ -148,12 +150,19 @@ $(BUILD)/user/userland/crt0-aarch64.o: userland/crt0-aarch64.S
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(ARM64_USER_CPPFLAGS) $(ARM64_USER_CFLAGS) -c $< -o $@
 
-$(BUILD)/bin/sh: $(ARM64_USER_OBJS) $(ARM64_PLATFORM)/user.ld \
+$(ARM64_USER_SH_OBJS) $(ARM64_USER_READLINE_OBJ): \
+	ARM64_USER_CPPFLAGS += -Iuserland/libedit
+$(ARM64_USER_READLINE_LIB): $(ARM64_USER_READLINE_OBJ)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+$(BUILD)/bin/sh: $(ARM64_USER_OBJS) $(ARM64_USER_READLINE_LIB) \
+	$(ARM64_PLATFORM)/user.ld \
 	scripts/check-user-elf.py
 	@mkdir -p $(dir $@)
 	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
 		-z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
-		$(ARM64_USER_OBJS) -o $@
+		$(ARM64_USER_OBJS) $(ARM64_USER_READLINE_LIB) -o $@
 	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine aarch64 $@
 

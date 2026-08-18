@@ -65,6 +65,8 @@ X68K_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(X68K_USER_RUNTIME_SOURCES))
 X68K_USER_SH_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(X68K_USER_SH_SOURCES))
+X68K_USER_READLINE_OBJ := $(BUILD)/user/userland/libedit/readline.o
+X68K_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 X68K_USER_OBJS := $(X68K_CRT0_OBJ) $(X68K_USER_RUNTIME_OBJS) \
 	$(X68K_USER_SH_OBJS)
 X68K_STAGE1_OBJ := $(BUILD)/boot/x68k/stage1.o
@@ -242,6 +244,12 @@ $(X68K_CRT0_OBJ): userland/crt0-m68k.S
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_USER_CPPFLAGS) $(M68K_USER_CFLAGS) -c $< -o $@
 
+$(X68K_USER_SH_OBJS) $(X68K_USER_READLINE_OBJ): \
+	M68K_USER_CPPFLAGS += -Iuserland/libedit
+$(X68K_USER_READLINE_LIB): $(X68K_USER_READLINE_OBJ)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
 x68k-user-abi-check: $(X68K_CRT0_OBJ)
 	@$(M68K_OBJDUMP) -dr $< | grep -q 'trap #0' || { \
 		echo "ERROR: m68k syscall veneer has no TRAP #0" >&2; exit 1; }
@@ -249,12 +257,13 @@ x68k-user-abi-check: $(X68K_CRT0_OBJ)
 		echo "ERROR: m68k signal restorer syscall number mismatch" >&2; \
 		exit 1; }
 
-$(BUILD)/bin/sh: $(X68K_USER_OBJS) $(X68K_PLATFORM)/user.ld \
+$(BUILD)/bin/sh: $(X68K_USER_OBJS) $(X68K_USER_READLINE_LIB) \
+	$(X68K_PLATFORM)/user.ld \
 	scripts/check-user-elf.py
 	@mkdir -p $(dir $@)
 	$(M68K_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
 		-z stack-size=0x100000 -T $(X68K_PLATFORM)/user.ld \
-		$(X68K_USER_OBJS) -o $@
+		$(X68K_USER_OBJS) $(X68K_USER_READLINE_LIB) -o $@
 	@test -z "$$($(M68K_NM) -u $@)" || { $(M68K_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine m68k $@
 	@if $(M68K_OBJDUMP) -d --no-show-raw-insn $@ | \

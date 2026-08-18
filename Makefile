@@ -566,6 +566,12 @@ $(BUILD)/tests/sh-glob-host-test: tests/sh-glob-host-test.c \
 		userland/sh/expand.c \
 		userland/sh/glob.c $< -o $@
 
+$(BUILD)/tests/libedit-host-test: tests/libedit-host-test.c \
+	userland/libedit/readline.c userland/libedit/readline/readline.h \
+	userland/libedit/readline/history.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iuserland/libedit userland/libedit/readline.c $< -o $@
+
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/sh-lexer-host-test \
 	$(BUILD)/tests/sh-expand-host-test \
@@ -573,6 +579,7 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/sh-alias-host-test \
 	$(BUILD)/tests/sh-vars-host-test \
 	$(BUILD)/tests/sh-glob-host-test \
+	$(BUILD)/tests/libedit-host-test \
 	$(BUILD)/tests/blkdev-host-test \
 	$(BUILD)/tests/bufcache-host-test \
 	$(BUILD)/tests/checkpoint-host-test \

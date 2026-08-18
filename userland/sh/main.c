@@ -13,6 +13,8 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <readline/history.h>
+#include <readline/readline.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -41,6 +43,27 @@ static char *trap_action[SHELL_SIGNAL_MAX];
 static volatile int trap_pending[SHELL_SIGNAL_MAX];
 static int getopts_offset = 1;
 static long getopts_last_index = 1;
+
+static const char *
+signal_message(int number)
+{
+	switch (number) {
+	case SIGHUP: return "Hangup";
+	case SIGINT: return "Interrupt";
+	case SIGQUIT: return "Quit";
+	case SIGILL: return "Illegal instruction";
+	case SIGTRAP: return "Trace/BPT trap";
+	case SIGABRT: return "Abort trap";
+	case SIGFPE: return "Floating point exception";
+	case SIGKILL: return "Killed";
+	case SIGBUS: return "Bus error";
+	case SIGSEGV: return "Segmentation fault";
+	case SIGPIPE: return "Broken pipe";
+	case SIGALRM: return "Alarm clock";
+	case SIGTERM: return "Terminated";
+	default: return "Terminated by signal";
+	}
+}
 
 static const char *
 shell_lookup(void *context, const char *name)
@@ -81,7 +104,7 @@ spawn_wait(char *const argv[], unsigned flags, char *result, size_t capacity)
 	int status = 0;
 	pid = zedbsd_spawn(argv[0], argv, environ, flags);
 	if (pid < 0) {
-		fprintf(stderr, "%s: %d\n", argv[0], errno);
+		fprintf(stderr, "sh: %s: %s\n", argv[0], strerror(errno));
 		return 0;
 	}
 	if (!command_subshell)
@@ -116,11 +139,11 @@ spawn_wait(char *const argv[], unsigned flags, char *result, size_t capacity)
 		fprintf(stderr, "wait: %d\n", errno);
 		return 0;
 	}
-	if (status != 0) {
-		fprintf(stderr, "%s: status %d\n", argv[0], status);
+	if (WIFSIGNALED(status)) {
+		fprintf(stderr, "%s\n", signal_message(WTERMSIG(status)));
 		return 0;
 	}
-	return 1;
+	return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 static int
@@ -601,6 +624,7 @@ run_search_path(int argc, char **argv)
 		script[argc] = NULL;
 		return run_noct(argc, script);
 	}
+	fprintf(stderr, "sh: %s: not found\n", argv[0]);
 	return 0;
 }
 
@@ -1562,7 +1586,6 @@ run_startup(void)
 int
 main(int argc, char **argv)
 {
-	char line[LINE_MAX];
 	if (sh_var_get("PATH") == NULL)
 		(void)sh_var_set("PATH", "/bin:/apps", 1);
 	if (argc > 1) {
@@ -1574,15 +1597,20 @@ main(int argc, char **argv)
 	if (argc > 0 && argv[0] != NULL)
 		shell_name = argv[0];
 	run_startup();
+	using_history();
 	for (;;) {
 		char cwd[256];
+		char prompt[sizeof(cwd) + 4U];
+		char *line;
 		if (getcwd(cwd, sizeof(cwd)) == NULL)
 			strcpy(cwd, "/");
-		printf("%s $ ", cwd);
-		fflush(stdout);
-		if (read_line(line, sizeof(line)) < 0)
+		(void)snprintf(prompt, sizeof(prompt), "%s $ ", cwd);
+		line = readline(prompt);
+		if (line == NULL)
 			continue;
-		if (!command(line))
-			puts("error");
+		if (line[0] != '\0')
+			add_history(line);
+		(void)command(line);
+		free(line);
 	}
 }

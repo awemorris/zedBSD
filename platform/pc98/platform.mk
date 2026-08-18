@@ -458,16 +458,23 @@ USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o \
 	$(BUILD)/userland/sh/expand.o $(BUILD)/userland/sh/glob.o \
 	$(BUILD)/userland/sh/vars.o $(BUILD)/userland/sh/arithmetic.o \
 	$(BUILD)/userland/sh/alias.o
-$(USER_SH_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(USER_SH_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
+USER_READLINE_OBJ := $(BUILD)/userland/libedit/readline.o
+USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
+$(USER_SH_OBJS) $(USER_READLINE_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS) \
+	-Iuserland/libedit
+$(USER_SH_OBJS) $(USER_READLINE_OBJ): OBJ_CFLAGS = $(USER_CFLAGS)
 
-$(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
+$(USER_READLINE_LIB): $(USER_READLINE_OBJ)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+$(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) $(USER_READLINE_LIB) \
 	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
 		$(USER_STACK_LDFLAGS) \
 		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) $(USER_SH_OBJS) \
-		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
+		$(USER_READLINE_LIB) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(USER_ELF_CHECK) $@
 

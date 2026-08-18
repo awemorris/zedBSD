@@ -126,6 +126,45 @@ tty_console_input_event(uint32_t event)
 	int signal_number = 0;
 	unsigned long irq;
 	uint8_t byte;
+	const char *sequence = NULL;
+	size_t sequence_length = 0;
+
+	/*
+	 * Expose machine-independent ANSI key sequences to noncanonical readers.
+	 * Canonical input keeps its historical behavior and ignores navigation.
+	 */
+	switch (key) {
+	case HAL_KEY_UP: sequence = "\033[A"; sequence_length = 3; break;
+	case HAL_KEY_DOWN: sequence = "\033[B"; sequence_length = 3; break;
+	case HAL_KEY_RIGHT: sequence = "\033[C"; sequence_length = 3; break;
+	case HAL_KEY_LEFT: sequence = "\033[D"; sequence_length = 3; break;
+	case HAL_KEY_HOME: sequence = "\033[H"; sequence_length = 3; break;
+	case HAL_KEY_END: sequence = "\033[F"; sequence_length = 3; break;
+	case HAL_KEY_INSERT: sequence = "\033[2~"; sequence_length = 4; break;
+	case HAL_KEY_DELETE: sequence = "\033[3~"; sequence_length = 4; break;
+	case HAL_KEY_PAGE_UP: sequence = "\033[5~"; sequence_length = 4; break;
+	case HAL_KEY_PAGE_DOWN: sequence = "\033[6~"; sequence_length = 4; break;
+	default: break;
+	}
+	if (sequence != NULL) {
+		int accepted = 0;
+		irq = spin_lock_irqsave(&tty->lock);
+		if ((tty->termios.c_lflag & ICANON) == 0 &&
+		    TTY_INPUT_MAX - tty->input_used >= sequence_length) {
+			size_t index;
+			for (index = 0; index < sequence_length; index++) {
+				tty->input[tty->input_head] = (uint8_t)sequence[index];
+				tty->input_head = (tty->input_head + 1U) % TTY_INPUT_MAX;
+			}
+			tty->input_used += sequence_length;
+			waitq_wake_all(&tty->read_waitq);
+			accepted = 1;
+		}
+		spin_unlock_irqrestore(&tty->lock, irq);
+		if (accepted)
+			poll_notify();
+		return;
+	}
 
 	if (key == HAL_KEY_ENTER)
 		byte = '\n';
