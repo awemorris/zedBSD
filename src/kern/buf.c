@@ -9,6 +9,9 @@
 #define BUF_HASH_BUCKETS 64U
 #define BUF_MIN_BYTES (64U * 1024U)
 #define BUF_MAX_DEFAULT (16U * 1024U * 1024U)
+#ifndef CONFIG_BUF_CACHE_KIB
+#define CONFIG_BUF_CACHE_KIB 0
+#endif
 #define BUF_SLAB_BYTES ZEDBSD_PAGE_SIZE
 
 struct thread;
@@ -472,7 +475,10 @@ acquire_line(struct disk *disk, uint64_t block, int read_data,
 int
 buf_init(void)
 {
-	uint64_t total, value;
+	uint64_t value;
+#if CONFIG_BUF_CACHE_KIB == 0
+	uint64_t total;
+#endif
 	if (cache_initialized)
 		return 0;
 	spin_init(&cache_lock, LOCK_RANK_BUFCACHE, "buffer cache");
@@ -480,8 +486,12 @@ buf_init(void)
 	    "buffer cache control") != 0)
 		return ENOMEM;
 	memset(cache_hash, 0, sizeof(cache_hash));
+#if CONFIG_BUF_CACHE_KIB > 0
+	value = (uint64_t)CONFIG_BUF_CACHE_KIB * 1024U;
+#else
 	total = hal_pmem_get_total_size();
 	value = total / 16U;
+#endif
 	if (value < BUF_MIN_BYTES)
 		value = BUF_MIN_BYTES;
 	if (value > BUF_MAX_DEFAULT)

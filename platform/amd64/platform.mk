@@ -9,6 +9,7 @@ AMD64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-DZEDBSD_USER_ABI_LP64 \
 	-DPCAT_VGA_APERTURE_ADDRESS=0xffffffff800a0000ULL \
 	-DPCAT_CIRRUS_APERTURE_ADDRESS=0xffffffffc0000000ULL
+AMD64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 AMD64_CFLAGS := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
 	-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \
@@ -44,6 +45,7 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/mbr-partition.c src/kern/pcat/platform.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process-timer.c src/kern/klog.c \
+	src/kern/test-checkpoint.c \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c \
 	src/kern/vmspace.c src/kern/vm-object.c src/kern/vm-commit.c \
@@ -523,12 +525,14 @@ AMD64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(comma
 AMD64_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 AMD64_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AMD64_ARCH_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
+$(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
 AMD64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/amd64.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_ARCH_UFS_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
 arch-image: $(AMD64_ARCH_IMAGE)
 arch-image-check: $(AMD64_ARCH_IMAGE)-check
 arch-image-ufs: $(AMD64_ARCH_UFS_IMAGE)
 arch-image-ufs-check: $(AMD64_ARCH_UFS_IMAGE)-check
+rootfs-tar: $(BUILD)/rootfs.tar.gz
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_IMAGE) \

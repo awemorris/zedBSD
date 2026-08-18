@@ -4,8 +4,12 @@
 #include "kern/partition.h"
 #include "kern/mbr-partition.h"
 #include "drivers/pcat-ide.h"
+#if CONFIG_DRIVER_NE2000
 #include "drivers/pcat-ne2000.h"
+#endif
+#if CONFIG_DRIVER_GRAPHICS
 #include "drivers/pcat-graphics.h"
+#endif
 #include <errno.h>
 #include <hal/hal.h>
 
@@ -34,6 +38,7 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 		for (unsigned i=0;i<sizeof(device->reserved);i++) device->reserved[i]=0;
 		count++;
 	}
+#if CONFIG_DRIVER_NE2000
 	{
 		int network_error = zedbsd_pcat_ne2000_init();
 
@@ -44,8 +49,11 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 			hal_printf("net: ISA NE2000 initialization failed (%d)\n",
 			    network_error);
 	}
+#endif
+#if CONFIG_DRIVER_GRAPHICS
 	if (!zedbsd_pcat_graphics_init())
 		hal_printf("graphics: PC/AT driver unavailable\n");
+#endif
 	return count;
 }
 

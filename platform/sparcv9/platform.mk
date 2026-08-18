@@ -18,6 +18,7 @@ SPARCV9_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-DZEDBSD_USER_PAGE_SIZE=8192 \
 	-DZEDBSD_NO_PRINTF_FLOAT \
 	-DZEDBSD_INIT_PATH='"/bin/sh"'
+SPARCV9_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 SPARCV9_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias -mcmodel=medany \
 	-msoft-float -mno-app-regs -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables \
@@ -536,6 +537,27 @@ sparcv9-bootloader: $(BUILD)/boot/stage1.bin $(BUILD)/boot/stage2.bin
 		--stage1 $(BUILD)/boot/stage1.bin \
 		--stage2 $(BUILD)/boot/stage2.bin
 
+$(BUILD)/rootfs.tar.gz: $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
+	$(SPARCV9_DYNAMIC_DIR)/ld.so $(SPARCV9_DYNAMIC_DIR)/libc.so \
+	$(SPARCV9_DYNAMIC_DIR)/tlstest.so $(SPARCV9_DYNAMIC_DIR)/dyntest \
+	$(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so \
+	$(SPARCV9_DYNAMIC_DIR)/rpathtest.so \
+	$(SPARCV9_DYNAMIC_DIR)/verstest.so \
+	$(SPARCV9_DYNAMIC_DIR)/versuse.so scripts/make-rootfs-tar.py
+	$(PYTHON) scripts/make-rootfs-tar.py --output $@ \
+		--file /bin/sh=$(BUILD)/bin/sh \
+		--file /bin/sysctl=$(BUILD)/bin/sysctl \
+		--file /lib/ld.so=$(SPARCV9_DYNAMIC_DIR)/ld.so \
+		--file /lib/libc.so=$(SPARCV9_DYNAMIC_DIR)/libc.so \
+		--file /lib/tlstest.so=$(SPARCV9_DYNAMIC_DIR)/tlstest.so \
+		--file /bin/dyntest=$(SPARCV9_DYNAMIC_DIR)/dyntest \
+		--file /lib/alt/rpathdep.so=$(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so \
+		--file /lib/rpthtest.so=$(SPARCV9_DYNAMIC_DIR)/rpathtest.so \
+		--file /lib/verstest.so=$(SPARCV9_DYNAMIC_DIR)/verstest.so \
+		--file /lib/versuse.so=$(SPARCV9_DYNAMIC_DIR)/versuse.so
+
+rootfs-tar: $(BUILD)/rootfs.tar.gz
+
 $(BUILD)/hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
 	$(SPARCV9_DYNAMIC_DIR)/ld.so $(SPARCV9_DYNAMIC_DIR)/libc.so \
 	$(SPARCV9_DYNAMIC_DIR)/tlstest.so $(SPARCV9_DYNAMIC_DIR)/dyntest \
@@ -621,7 +643,7 @@ sparcv9-qemu-test: $(BUILD)/hdd-image.img
 sparcv9-ufs-qemu-test: $(BUILD)/ufs-root-hdd-image.img
 	bash scripts/test-sparcv9-ufs-qemu.sh
 
-.PHONY: all vmunix SH POSIX-R1.ELF POSIX-R2.ELF POSIX-R2-REMAINING.ELF hdd-image ufs-root-image sparcv9-toolchain sparcv9-image-check \
+.PHONY: all vmunix SH POSIX-R1.ELF POSIX-R2.ELF POSIX-R2-REMAINING.ELF hdd-image rootfs-tar ufs-root-image sparcv9-toolchain sparcv9-image-check \
 	sparcv9-bootloader sparcv9-disk-check sparcv9-entry-qemu-test \
 	sparcv9-qemu-test sparcv9-ufs-qemu-test
 

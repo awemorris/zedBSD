@@ -13,6 +13,7 @@ M68K_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-DZEDBSD_USER_ABI_M68K -DZEDBSD_PAGE_SIZE=4096 \
 	-DZEDBSD_USER_PAGE_SIZE=4096 -DZEDBSD_NO_PRINTF_FLOAT \
 	-DZEDBSD_INIT_PATH='"/x68k/bin/sh"'
+M68K_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 M68K_KERNEL_CFLAGS := -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror
@@ -363,6 +364,12 @@ $(BUILD)/zedbsd-x68k.hd: $(BUILD)/stage1.bin $(BUILD)/stage2.bin \
 
 x68k-boot-image hdd-image: $(BUILD)/zedbsd-x68k.hd
 
+$(BUILD)/rootfs.tar.gz: $(BUILD)/bin/sh scripts/make-rootfs-tar.py
+	$(PYTHON) scripts/make-rootfs-tar.py --output $@ \
+		--file /bin/sh=$(BUILD)/bin/sh
+
+rootfs-tar: $(BUILD)/rootfs.tar.gz
+
 x68k-bootloader: $(BUILD)/stage1.bin $(BUILD)/stage2.bin
 
 x68k-image-check: $(BUILD)/zedbsd-x68k.hd
@@ -376,7 +383,7 @@ x68k-image-check: $(BUILD)/zedbsd-x68k.hd
 
 .PHONY: vmunix SH x68k-contract x68k-user-abi-check x68k-target-audit \
 	x68k-emulator-rom-host-test \
-	x68k-bootloader x68k-boot-image hdd-image x68k-image-check
+	x68k-bootloader x68k-boot-image hdd-image rootfs-tar x68k-image-check
 
 -include $(X68K_EARLY_OBJS:.o=.d) $(X68K_KERNEL_OBJS:.o=.d) \
 	$(X68K_KERNEL_LIBC_OBJS:.o=.d) $(X68K_STAGE2_OBJS:.o=.d)

@@ -31,7 +31,11 @@ usage()
 usage: $0 <command> <platform> [make options or additional targets...]
        $0 help [platform]
 
-Common commands:
+Main commands:
+  menuconfig                   Configure an interactive build
+  make                         Build the configured release artifacts
+
+Commands for specific artifacts:
   vmunix    [platform]         Build a kernel
   root      [platform]         Build a rootfs tree
   rootufs   [platform]         Build a rootfs UFS image
@@ -56,6 +60,59 @@ Available platforms:
 EOF
 }
 
+config_value()
+{
+	local key="$1"
+	awk -v key="$key" '
+		$1 == key && ($2 == ":=" || $2 == "=") {
+			$1 = ""; $2 = ""; sub(/^[[:space:]]+/, ""); print; exit
+		}' "$repo/config.mk"
+}
+
+configured_build()
+{
+	local config="$repo/config.mk"
+	local platform_name platform target_jobs vmunix rootfs bootdisk stamp value key
+
+	test -f "$config" || fail "config.mk is missing; run '$0 menuconfig' first"
+	platform_name="$(config_value ZEDBSD_PLATFORM)"
+	test -n "$platform_name" || fail "config.mk does not define ZEDBSD_PLATFORM"
+	platform="$(platform_arch "$platform_name")" ||
+		fail "config.mk selects an unknown platform: $platform_name"
+	for key in CONFIG_DRIVER_NE2000 CONFIG_DRIVER_LGY98 \
+	    CONFIG_DRIVER_GRAPHICS CONFIG_KERNEL_LOCKDEP \
+	    CONFIG_KERNEL_TEST_CHECKPOINTS; do
+		value="$(config_value "$key")"
+		case "$value" in y|n) ;; *) fail "config.mk has invalid $key: $value" ;; esac
+	done
+	value="$(config_value CONFIG_BUF_CACHE_KIB)"
+	case "$value" in ""|*[!0-9]*) fail "config.mk has invalid CONFIG_BUF_CACHE_KIB: $value" ;; esac
+	target_jobs="${ZEDBSD_JOBS:-$(nproc)}"
+	stamp="$repo/build/$platform/.zedbsd-config"
+	if ! test -f "$stamp" || ! cmp -s "$config" "$stamp"; then
+		make -C "$repo" ARCH="$platform" "-j$target_jobs" clean
+		mkdir -p "$(dirname "$stamp")"
+		cp "$config" "$stamp"
+	fi
+	make -C "$repo" ARCH="$platform" ZEDBSD_CONFIG="$config" \
+		"-j$target_jobs" messages
+	make -C "$repo" ARCH="$platform" ZEDBSD_CONFIG="$config" \
+		"-j$target_jobs" vmunix rootfs-tar hdd-image "$@"
+
+	vmunix="$repo/build/$platform/vmunix"
+	rootfs="$repo/build/$platform/rootfs.tar.gz"
+	case "$platform" in
+		x68k) bootdisk="$repo/build/x68k/zedbsd-x68k.hd" ;;
+		*) bootdisk="$repo/build/$platform/hdd-image.img" ;;
+	esac
+	for artifact in "$vmunix" "$rootfs" "$bootdisk"; do
+		test -f "$artifact" || fail "configured build did not produce $artifact"
+	done
+	printf '\nBuild completed.\n\nVMLINUX=%s\nROOTFS=%s\nBOOTDISK=%s\n' \
+		"$(realpath "$vmunix")" "$(realpath "$rootfs")" \
+		"$(realpath "$bootdisk")"
+}
+
 if test "$#" -eq 0; then
 	usage >&2
 	exit 2
@@ -65,6 +122,13 @@ command_name="$1"
 shift
 
 case "$command_name" in
+menuconfig)
+	exec python3 "$repo/scripts/menuconfig.py" --output "$repo/config.mk" "$@"
+	;;
+make)
+	configured_build "$@"
+	exit 0
+	;;
 help|-h|--help)
 	if test "$#" -gt 1; then
 		fail "help accepts at most one platform"

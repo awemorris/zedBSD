@@ -26,7 +26,30 @@ HOSTCC ?= cc
 PYTHON ?= python3
 .DEFAULT_GOAL := all
 
-ARCH ?= pc98
+ifneq ($(strip $(ZEDBSD_CONFIG)),)
+include $(ZEDBSD_CONFIG)
+endif
+
+CONFIG_DRIVER_NE2000 ?= y
+CONFIG_DRIVER_LGY98 ?= y
+CONFIG_DRIVER_GRAPHICS ?= y
+CONFIG_KERNEL_LOCKDEP ?= n
+CONFIG_KERNEL_TEST_CHECKPOINTS ?= n
+CONFIG_BUF_CACHE_KIB ?= 0
+
+ZEDBSD_CONFIG_CPPFLAGS := \
+	-DCONFIG_DRIVER_NE2000=$(if $(filter y,$(CONFIG_DRIVER_NE2000)),1,0) \
+	-DCONFIG_DRIVER_LGY98=$(if $(filter y,$(CONFIG_DRIVER_LGY98)),1,0) \
+	-DCONFIG_DRIVER_GRAPHICS=$(if $(filter y,$(CONFIG_DRIVER_GRAPHICS)),1,0) \
+	-DCONFIG_BUF_CACHE_KIB=$(CONFIG_BUF_CACHE_KIB)
+ifeq ($(CONFIG_KERNEL_LOCKDEP),y)
+ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_LOCKDEP
+endif
+ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
+ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_TEST_CHECKPOINTS
+endif
+
+ARCH ?= $(if $(ZEDBSD_MAKE_ARCH),$(ZEDBSD_MAKE_ARCH),pc98)
 PLATFORM_MK := platform/$(ARCH)/platform.mk
 ifeq ($(wildcard $(PLATFORM_MK)),)
 $(error Unknown ARCH '$(ARCH)'; available: \
@@ -42,7 +65,8 @@ export ZEDBSD_ARCH := $(ARCH)
 export ZEDBSD_BUILD_DIR := $(CURDIR)/$(BUILD)
 
 ASFLAGS := --32
-ZEDBSD_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. -I$(BUILD) -Ilibc/include
+ZEDBSD_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. -I$(BUILD) -Ilibc/include \
+	$(ZEDBSD_CONFIG_CPPFLAGS)
 ifneq ($(filter $(ARCH),pc98 pcat),)
 ZEDBSD_CPPFLAGS += -DHAL_ARCH_I386
 else ifeq ($(ARCH),amd64)

@@ -7,6 +7,7 @@ ARCH_IMAGE_TOOLS := scripts/make-arch-overlay-image.py \
 ARCH_UFS_IMAGE_TOOLS := scripts/make-arch-overlay-ufs.py \
 	scripts/check-arch-overlay-ufs.py scripts/check-ufs1-image.py \
 	scripts/check_ufs1_import.py scripts/ufs1_format.py
+ROOTFS_TAR_TOOL := scripts/make-rootfs-tar.py
 ZEDBSD_ACCOUNT_INPUTS := userland/etc/passwd userland/etc/group \
 	userland/etc/shadow
 ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/etc/passwd \
@@ -39,3 +40,9 @@ $(1)-check: $(1)
 		--image $$< $(4)
 endef
 
+# $(1): output, $(2): prerequisites, $(3): repeated --file/--mode args.
+define ZEDBSD_ROOTFS_TAR_RULE
+$(1): $(2) $(ROOTFS_TAR_TOOL)
+	@mkdir -p $$(dir $$@)
+	$$(PYTHON) $$(ROOTFS_TAR_TOOL) --output $$@ $(3)
+endef

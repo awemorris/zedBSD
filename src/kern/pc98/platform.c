@@ -5,8 +5,12 @@
 #include "kern/pc98/partition.h"
 #include "kern/pc98/partition-auto.h"
 #include "drivers/pc98-ide.h"
+#if CONFIG_DRIVER_LGY98
 #include "drivers/pc98-lgy98.h"
+#endif
+#if CONFIG_DRIVER_GRAPHICS
 #include "drivers/pc98-graphics.h"
+#endif
 #include <errno.h>
 #include <hal/hal.h>
 
@@ -45,6 +49,7 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 	partition_set_scheme(&partition_scheme_pc98_auto);
 	disk_registry_reset();
 	(void)zedbsd_ide_pc98_init(devices, (unsigned)count);
+#if CONFIG_DRIVER_LGY98
 	{
 		int network_error = zedbsd_pc98_lgy98_init();
 
@@ -57,8 +62,11 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 			hal_printf("net: LGY-98 initialization failed (%d)\n",
 			    network_error);
 	}
+#endif
+#if CONFIG_DRIVER_GRAPHICS
 	if (!zedbsd_pc98_graphics_init())
 		hal_printf("graphics: PC-98 driver unavailable\n");
+#endif
 	return count;
 }
 

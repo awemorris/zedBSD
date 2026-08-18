@@ -21,6 +21,7 @@ HAL_PCAT_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(HAL_PCAT_SOURCES)) \
 ZEDBSD_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
 	-Iinclude -Iinclude/uapi -Isrc -I. -Ilibc/include
+ZEDBSD_KERN_CC += $(ZEDBSD_CONFIG_CPPFLAGS)
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/process-timer.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/klog.o $(BUILD)/src/kern/waitq.o \
@@ -186,12 +187,14 @@ I386_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(comman
 I386_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 I386_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
+$(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(I386_ARCH_UFS_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 arch-image: $(I386_ARCH_IMAGE)
 arch-image-check: $(I386_ARCH_IMAGE)-check
 arch-image-ufs: $(I386_ARCH_UFS_IMAGE)
 arch-image-ufs-check: $(I386_ARCH_UFS_IMAGE)-check
+rootfs-tar: $(BUILD)/rootfs.tar.gz
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(I386_ARCH_IMAGE) \
@@ -230,7 +233,7 @@ bios-loader-qemu-test: bios-bootloader \
 	$(BUILD)/bootloader/payload32.elf $(BUILD)/bootloader/payload64.elf
 	bash $(SCRIPTS_DIR)/test-bios-bootloader-qemu.sh pcat
 
-.PHONY: arch-image arch-image-check arch-image-ufs arch-image-ufs-check \
+.PHONY: arch-image arch-image-check arch-image-ufs arch-image-ufs-check rootfs-tar \
 	ufs-root-image bios-bootloader bios-hdd-image bios-loader-host-check \
 	bios-loader-qemu-test
 

@@ -10,6 +10,7 @@ ARM64_PLATFORM := platform/arm64
 ARM64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -Isrc/hal/arm64 -DHAL_ARCH_ARM64 -DHAL_BOARD_RPI4 \
 	-DZEDBSD_USER_ABI_AARCH64 -DZEDBSD_USER_ABI_LP64
+ARM64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 ARM64_CFLAGS := -march=armv8-a -mno-outline-atomics -mgeneral-regs-only -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werror
@@ -408,12 +409,14 @@ AARCH64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(com
 AARCH64_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 AARCH64_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AARCH64_ARCH_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
+$(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
 AARCH64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AARCH64_ARCH_UFS_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
 arch-image: $(AARCH64_ARCH_IMAGE)
 arch-image-check: $(AARCH64_ARCH_IMAGE)-check
 arch-image-ufs: $(AARCH64_ARCH_UFS_IMAGE)
 arch-image-ufs-check: $(AARCH64_ARCH_UFS_IMAGE)-check
+rootfs-tar: $(BUILD)/rootfs.tar.gz
 
 $(BUILD)/ufs-root.img: $(AARCH64_ARCH_UFS_IMAGE) \
 	scripts/make-ufs1-root-image.py scripts/ufs1_format.py
