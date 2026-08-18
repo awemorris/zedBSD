@@ -49,7 +49,7 @@ SPARCV9_KERNEL_SOURCES := \
 	drivers/loop.c \
 	src/kern/partition.c src/kern/sun-disklabel.c src/kern/sun4u/platform.c \
 	drivers/sun4u-cmd646.c src/kern/image.c src/kern/panic.c \
-	src/kern/entry.c src/kern/clock.c src/kern/process-timer.c \
+	src/kern/entry.c src/kern/clock.c src/kern/process-timer.c src/kern/klog.c \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c \
 	src/kern/sched.c src/kern/vmspace.c src/kern/vm-object.c \
@@ -87,7 +87,8 @@ SPARCV9_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c user
 	userland/libc/semaphore.c \
 	userland/libc/mqueue.c \
 	userland/libc/socket.c \
-	userland/libc/signal.c \
+	userland/libc/signal.c userland/libc/account.c userland/libc/crypt.c \
+	userland/libc/utmpx.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
 SPARCV9_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
@@ -232,9 +233,10 @@ $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
 
-USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink realpath pathchk truncate ls chmod chown chgrp mkfifo stat file uname date df du tty stty sleep head tail wc tee cmp cksum od strings tr cut paste sort uniq join comm split csplit fold fmt pr nl expand unexpand grep sed awk xargs iconv diff patch id logname kill nohup time timeout mesg
+USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink realpath pathchk truncate ls dd more less dmesg chmod chown chgrp mkfifo stat file uname date df du tty stty sleep head tail wc tee cmp cksum od strings tr cut paste sort uniq join comm split csplit fold fmt pr nl expand unexpand grep sed awk xargs iconv diff patch id logname kill nohup time timeout mesg
+USER_BASIC_COMMANDS += who login
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
-SPARCV9_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/common/command.o
+SPARCV9_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/common/command.o $(BUILD)/user/userland/common/pager.o
 
 define SPARCV9_USER_BASIC_COMMAND
 $(BUILD)/bin/$(1): $(BUILD)/user/userland/crt0-sparcv9.o \

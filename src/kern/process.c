@@ -621,7 +621,7 @@ process_wait(struct process *process, int *status, char *result,
 {
 	struct thread *thread;
 	unsigned long irq;
-	int error;
+	int error, thread_status;
 
 	if (process == NULL || process == &process0 || curthread == NULL ||
 	    process->parent != curthread->proc)
@@ -642,10 +642,13 @@ process_wait(struct process *process, int *status, char *result,
 	spin_unlock_irqrestore(&process_tree_lock, irq);
 	if (thread == NULL)
 		return ECHILD;
-	error = thread_wait(thread, status);
+	error = thread_wait(thread, &thread_status);
 	thread_release(thread);
 	if (error != 0)
 		return error;
+	(void)thread_status;
+	if (status != NULL)
+		*status = process->exit_status;
 	if (result != NULL && result_capacity != 0) {
 		size_t length = process->result_length;
 		if (length >= result_capacity)

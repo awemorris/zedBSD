@@ -8,6 +8,7 @@
 
 #define CTL_SYSCTL 0
 #define CTL_HW     1
+#define CTL_KERN   2
 #define CTL_VFS    3
 
 #define CTL_SYSCTL_NAME2OID 1
@@ -22,6 +23,10 @@
 
 #define HW_NCPU        1
 #define HW_NCPUONLINE  2
+
+#define KERN_MSGBUF         1
+#define KERN_MSGBUF_SIZE    2
+#define KERN_MSGBUF_DROPPED 3
 
 struct zedbsd_bufcache_stats {
 	uint64_t max_bytes;

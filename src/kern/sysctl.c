@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/sysctl.h"
 #include "kern/buf.h"
+#include "kern/klog.h"
 
 #include <errno.h>
 #include <hal/hal.h>
@@ -19,6 +20,9 @@ struct sysctl_leaf {
 static const struct sysctl_leaf leaves[] = {
 	{{ CTL_HW, HW_NCPU, 0 }, 2, "hw.ncpu"},
 	{{ CTL_HW, HW_NCPUONLINE, 0 }, 2, "hw.ncpuonline"},
+	{{ CTL_KERN, KERN_MSGBUF, 0 }, 2, "kern.msgbuf"},
+	{{ CTL_KERN, KERN_MSGBUF_SIZE, 0 }, 2, "kern.msgbuf_size"},
+	{{ CTL_KERN, KERN_MSGBUF_DROPPED, 0 }, 2, "kern.msgbuf_dropped"},
 	{{ CTL_VFS, VFS_BUFCACHE, VFS_BUFCACHE_MAX_BYTES }, 3,
 	 "vfs.bufcache.max_bytes"},
 	{{ CTL_VFS, VFS_BUFCACHE, VFS_BUFCACHE_CURRENT_BYTES }, 3,
@@ -130,6 +134,34 @@ kern_sysctl(const int *name, unsigned namelen, void *oldp, size_t *oldlenp,
 		if (newp != NULL || newlen != 0)
 			return EPERM;
 		return sysctl_output(oldp, oldlenp, &cpus, sizeof(cpus));
+	}
+	if (namelen == 2 && name[0] == CTL_KERN) {
+		if (newp != NULL || newlen != 0)
+			return EPERM;
+		if (name[1] == KERN_MSGBUF_SIZE) {
+			value = kern_log_capacity();
+			return sysctl_output(oldp, oldlenp, &value, sizeof(value));
+		}
+		if (name[1] == KERN_MSGBUF_DROPPED) {
+			(void)kern_log_snapshot(NULL, 0, &value);
+			return sysctl_output(oldp, oldlenp, &value, sizeof(value));
+		}
+		if (name[1] == KERN_MSGBUF) {
+			size_t capacity, needed;
+			if (oldlenp == NULL)
+				return oldp == NULL ? 0 : EINVAL;
+			capacity = *oldlenp;
+			needed = kern_log_snapshot(NULL, 0, NULL);
+			*oldlenp = needed;
+			if (oldp == NULL)
+				return 0;
+			if (capacity < needed)
+				return ENOMEM;
+			needed = kern_log_snapshot(oldp, capacity, NULL);
+			*oldlenp = needed;
+			return needed <= capacity ? 0 : ENOMEM;
+		}
+		return ENOENT;
 	}
 	if (namelen != 3 || name[0] != CTL_VFS ||
 	    name[1] != VFS_BUFCACHE || find_oid(name, namelen) == NULL)

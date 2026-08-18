@@ -42,12 +42,18 @@ def check(args):
             raise SystemExit(f'manifest hash mismatch: {destination}')
         if source.stat().st_mode&0o111 and fs.u16(fs.inode(ino),0)&0o111==0:
             raise SystemExit(f'executable mode lost: {destination}')
+    for item in args.mode:
+        destination, mode_text = item.split('=', 1)
+        actual = fs.u16(fs.inode(fs.lookup(destination)), 0) & 0o7777
+        if actual != int(mode_text, 8):
+            raise SystemExit(f'mode mismatch: {destination}')
     print(f'{args.image}: {args.profile} UFS1 root OK')
 
 
 def main():
     parser=argparse.ArgumentParser(); parser.add_argument('--profile',choices=PROFILES,required=True)
     parser.add_argument('--image',type=Path,required=True); parser.add_argument('--file',action='append',default=[])
+    parser.add_argument('--mode',action='append',default=[])
     check(parser.parse_args())
 
 

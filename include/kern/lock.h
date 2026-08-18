@@ -29,7 +29,8 @@ enum lock_rank {
 	LOCK_RANK_TTY = 135,
 	LOCK_RANK_POLL = 140,
 	LOCK_RANK_USYNC = 145,
-	LOCK_RANK_SCHEDULER = 200
+	LOCK_RANK_SCHEDULER = 200,
+	LOCK_RANK_KLOG = 250
 };
 
 struct spinlock {

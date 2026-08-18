@@ -54,6 +54,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #define SYSCALL_IO_CHUNK 512U
 #define SYSCALL_SOCKET_OPTION_MAX 128U
@@ -298,6 +299,7 @@ out:
 }
 
 #define SYSCALL_SYSCTL_VALUE_MAX 256U
+#define SYSCALL_SYSCTL_OUTPUT_MAX (1024U * 1024U)
 
 static intptr_t
 sys_sysctl_call(const uintptr_t args[6])
@@ -305,6 +307,7 @@ sys_sysctl_call(const uintptr_t args[6])
 	int name[CTL_MAXNAME];
 	uint8_t old_value[SYSCALL_SYSCTL_VALUE_MAX];
 	uint8_t new_value[SYSCALL_SYSCTL_VALUE_MAX];
+	uint8_t *old_output = old_value;
 	size_t old_length = 0;
 	unsigned namelen = (unsigned)args[1];
 	struct process *process = current_process();
@@ -321,30 +324,40 @@ sys_sysctl_call(const uintptr_t args[6])
 		error = copyin(args[3], &old_length, sizeof(old_length));
 		if (error != 0)
 			return -error;
-		if (args[2] != 0 && old_length > sizeof(old_value))
-			old_length = sizeof(old_value);
+		if (args[2] != 0 && old_length > sizeof(old_value)) {
+			if (old_length > SYSCALL_SYSCTL_OUTPUT_MAX)
+				return -ENOMEM;
+			old_output = malloc(old_length);
+			if (old_output == NULL)
+				return -ENOMEM;
+		}
 	}
 	if (args[4] != 0) {
 		error = copyin(args[4], new_value, (size_t)args[5]);
 		if (error != 0)
-			return -error;
+			goto out;
 	} else if (args[5] != 0) {
-		return -EINVAL;
+		error = EINVAL;
+		goto out;
 	}
-	error = kern_sysctl(name, namelen, args[2] != 0 ? old_value : NULL,
+	error = kern_sysctl(name, namelen, args[2] != 0 ? old_output : NULL,
 	    args[3] != 0 ? &old_length : NULL,
 	    args[4] != 0 ? new_value : NULL, (size_t)args[5],
 	    process != NULL && cred_is_superuser(process->cred));
 	if (args[3] != 0) {
 		int copy_error = copyout(&old_length, args[3], sizeof(old_length));
-		if (copy_error != 0)
-			return -copy_error;
+		if (copy_error != 0) {
+			error = copy_error;
+			goto out;
+		}
 	}
 	if (error == 0 && args[2] != 0 && old_length != 0) {
-		error = copyout(old_value, args[2], old_length);
-		if (error != 0)
-			return -error;
+		error = copyout(old_output, args[2], old_length);
 	}
+
+out:
+	if (old_output != old_value)
+		free(old_output);
 	return error == 0 ? 0 : -error;
 }
 

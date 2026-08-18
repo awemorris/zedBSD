@@ -15,6 +15,7 @@
 #include "kern/clock.h"
 #include "kern/kernel.h"
 #include "kern/kmem.h"
+#include "kern/klog.h"
 #include "kern/net.h"
 #include "kern/page.h"
 #include "kern/platform.h"
@@ -114,7 +115,8 @@ kernel_entry(const void *handoff)
 	     h->version != ZEDBSD_HANDOFF_VERSION_X68K) ||
 	    h->size < sizeof(*h))
 		hal_fatal(__FILE__, __LINE__, "invalid zedBSD handoff");
-	hal_printf("boot: kernel heap, process, and scheduler initialization\n");
+	kern_log_init();
+	kern_logf("boot: kernel heap, process, and scheduler initialization\n");
 	zedbsd_heap_init_instance(&kernel_heap, kernel_heap_storage,
 				 KERNEL_HEAP_SIZE);
 	(void)zedbsd_heap_set_active(&kernel_heap);
@@ -140,17 +142,17 @@ kernel_entry(const void *handoff)
 	    ZEDBSD_PAGE_SIZE);
 	if (kern_cpu_notify_probe() != HAL_OK)
 		hal_fatal(__FILE__, __LINE__, "secondary CPU notification failed");
-	hal_printf("boot: CPUs ready: %u\n", hal_cpu_count());
+	kern_logf("boot: CPUs ready: %u\n", hal_cpu_count());
 	if (process_reaper_start() != 0)
 		hal_fatal(__FILE__, __LINE__, "process reaper initialization failed");
 	if (net_init() != 0)
 		hal_fatal(__FILE__, __LINE__, "network subsystem initialization failed");
 
-	hal_printf("boot: platform device discovery\n");
+	kern_logf("boot: platform device discovery\n");
 	device_count = kern_platform_init(h, devices, KERN_PLATFORM_MAX_DEVICES);
 	if (device_count == 0)
 		hal_fatal(__FILE__, __LINE__, "no boot devices");
-	hal_printf("boot: platform devices detected: %u\n",
+	kern_logf("boot: platform devices detected: %u\n",
 	    (unsigned)device_count);
 	hal_irq_enable();
 	kernel_main(h, devices, (unsigned)device_count);

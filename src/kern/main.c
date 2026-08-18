@@ -12,6 +12,7 @@
 #include "kern/vfs.h"
 #include "kern/exec.h"
 #include "kern/init.h"
+#include "kern/klog.h"
 #include "kern/sched.h"
 #include "kern/vm-commit.h"
 #include "kern/vm-reclaim.h"
@@ -135,22 +136,22 @@ void kernel_main(const struct zedbsd_handoff *h,
 	devs = platform_devices;
 	zedbsd_env_init(&boot_environment);
 	vm_reclaim_init();
-	hal_printf("boot: VFS initialization\n");
+	kern_logf("boot: VFS initialization\n");
 	error = kern_vfs_init(h, platform_devices, platform_device_count);
 	if (error != 0)
-		hal_printf("VFS initialization failed (%d); entering idle.\n",
+		kern_logf("VFS initialization failed (%d); entering idle.\n",
 		    error);
 	else {
 		error = vm_commit_init();
 		if (error != 0)
-			hal_printf("VM commit initialization failed (%d); "
+			kern_logf("VM commit initialization failed (%d); "
 			    "entering idle.\n", error);
 		else {
-			hal_printf("boot: starting init %s\n\n", ZEDBSD_INIT_PATH);
+			kern_logf("boot: starting init %s\n\n", ZEDBSD_INIT_PATH);
 			{
 				int init_error = kern_init_start();
 				if (init_error != 0)
-					hal_printf("init not started (%d); entering idle.\n",
+					kern_logf("init not started (%d); entering idle.\n",
 					    init_error);
 			}
 		}

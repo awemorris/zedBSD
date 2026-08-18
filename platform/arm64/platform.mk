@@ -41,7 +41,7 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/partition.c src/kern/mbr-partition.c src/kern/rpi4/platform.c \
 	drivers/rpi4-sdhci.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
-	src/kern/process-timer.c \
+	src/kern/process-timer.c src/kern/klog.c \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/vmspace.c \
 	src/kern/vm-object.c src/kern/vm-commit.c src/kern/filedesc.c \
@@ -75,7 +75,8 @@ ARM64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c userla
 	userland/libc/semaphore.c \
 	userland/libc/mqueue.c \
 	userland/libc/socket.c \
-	userland/libc/signal.c \
+	userland/libc/signal.c userland/libc/account.c userland/libc/crypt.c \
+	userland/libc/utmpx.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
@@ -193,9 +194,10 @@ $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
 
-USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink realpath pathchk truncate ls chmod chown chgrp mkfifo stat file uname date df du tty stty sleep head tail wc tee cmp cksum od strings tr cut paste sort uniq join comm split csplit fold fmt pr nl expand unexpand grep sed awk xargs iconv diff patch id logname kill nohup time timeout mesg
+USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink realpath pathchk truncate ls dd more less dmesg chmod chown chgrp mkfifo stat file uname date df du tty stty sleep head tail wc tee cmp cksum od strings tr cut paste sort uniq join comm split csplit fold fmt pr nl expand unexpand grep sed awk xargs iconv diff patch id logname kill nohup time timeout mesg
+USER_BASIC_COMMANDS += who login
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
-ARM64_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/common/command.o
+ARM64_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/common/command.o $(BUILD)/user/userland/common/pager.o
 
 define ARM64_USER_BASIC_COMMAND
 $(BUILD)/bin/$(1): $(BUILD)/user/userland/crt0-aarch64.o \
@@ -403,6 +405,8 @@ AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
 AARCH64_ARCH_INPUTS += $(USER_BASIC_TARGETS)
 AARCH64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
+AARCH64_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
+AARCH64_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AARCH64_ARCH_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
 AARCH64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AARCH64_ARCH_UFS_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))

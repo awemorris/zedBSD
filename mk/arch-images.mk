@@ -7,6 +7,13 @@ ARCH_IMAGE_TOOLS := scripts/make-arch-overlay-image.py \
 ARCH_UFS_IMAGE_TOOLS := scripts/make-arch-overlay-ufs.py \
 	scripts/check-arch-overlay-ufs.py scripts/check-ufs1-image.py \
 	scripts/check_ufs1_import.py scripts/ufs1_format.py
+ZEDBSD_ACCOUNT_INPUTS := userland/etc/passwd userland/etc/group \
+	userland/etc/shadow
+ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/etc/passwd \
+	--file /etc/group=userland/etc/group \
+	--file /etc/shadow=userland/etc/shadow \
+	--mode /etc/passwd=0644 --mode /etc/group=0644 \
+	--mode /etc/shadow=0400
 
 # $(1): output, $(2): profile, $(3): prerequisites, $(4): repeated --file args.
 define ZEDBSD_ARCH_IMAGE_RULE

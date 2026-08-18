@@ -87,6 +87,15 @@ def check(args: argparse.Namespace) -> None:
             machine = struct.unpack_from("<H", actual, 18)[0]
             if elf_class != expected_class or machine != expected_machine:
                 raise SystemExit(f"wrong ELF ABI for {destination}: class={elf_class} machine={machine}")
+    if args.mode:
+        metadata = extract(args.image, "/etc/unixmode").decode("ascii")
+        expected = set()
+        for item in args.mode:
+            destination, mode_text = item.split("=", 1)
+            expected.add(f"{destination.lstrip('/')}:{int(mode_text, 8):04o}:0:0")
+        expected.add("etc/unixmode:0400:0:0")
+        if set(metadata.splitlines()) != expected:
+            raise SystemExit("/etc/unixmode does not match the mode manifest")
     listing = capture("mdir", "-i", str(args.image), "::").decode(
         "utf-8", "replace")
     match = re.search(r"([0-9 ,]+) bytes free", listing)
@@ -105,6 +114,7 @@ def main() -> None:
     parser.add_argument("--size-mib", type=int, default=16)
     parser.add_argument("--min-free-bytes", type=int, default=4 * 1024 * 1024)
     parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--mode", action="append", default=[])
     check(parser.parse_args())
 
 

@@ -126,7 +126,32 @@ def wait_for(marker):
         time.sleep(0.05)
     raise SystemExit("console marker not observed: " + repr(marker))
 
+def wait_for_new_prompt(previous):
+    limit = time.time() + 15
+    while time.time() < limit:
+        if log_bytes().count(b"/ $ ") > previous:
+            return
+        time.sleep(0.05)
+    raise SystemExit("new shell prompt was not observed")
+
+def wait_for_after(first, second):
+    limit = time.time() + 15
+    while time.time() < limit:
+        data = log_bytes()
+        position = data.rfind(first)
+        if position >= 0 and second in data[position + len(first):]:
+            return
+        time.sleep(0.05)
+    raise SystemExit("console sequence not observed: " + repr((first, second)))
+
 def type_command(keys):
+    # The prompt is emitted just before readline has restored canonical input;
+    # leave a short handoff interval after an external foreground process.
+    time.sleep(0.25)
+    if isinstance(keys, str):
+        names = {" ": "spc", "/": "slash", "=": "equal",
+                 "-": "minus", ".": "dot"}
+        keys = [names.get(key, key) for key in keys]
     for key in keys:
         command("human-monitor-command", {"command-line": "sendkey " + key})
         time.sleep(0.025)
@@ -153,6 +178,36 @@ if b"\nerror\r\n" in log_bytes():
     raise SystemExit("legacy generic shell error diagnostic was observed")
 type_command(["l", "s", "spc", "slash", "d", "i", "s", "k", "1"])
 wait_for(b"ls: /disk1:")
+type_command("ls -l /etc/shadow")
+wait_for(b"-r--------")
+type_command("dmesg")
+wait_for(b"boot: kernel heap, process, and scheduler initialization")
+wait_for_after(b"boot: starting init /bin/sh", b"/ $ ")
+type_command("ls -lh /bin/noct")
+wait_for_after(b"noct", b"/ $ ")
+type_command("dd if=/etc/passwd of=/home/passwd bs=16")
+wait_for(b"records out")
+if b"dd: /home/passwd:" in log_bytes():
+    raise SystemExit("dd failed to create its output")
+type_command("cmp /etc/passwd /home/passwd")
+wait_for_after(b"cmp /etc/passwd /home/passwd", b"/ $ ")
+if b"cmp: /home/passwd:" in log_bytes():
+    raise SystemExit("dd output differs from its input")
+type_command("who")
+wait_for_after(b"who", b"/ $ ")
+type_command("more /etc/passwd")
+wait_for(b"root:x:0:0:")
+wait_for_after(b"root:x:0:0:", b"/ $ ")
+type_command("less /etc/passwd")
+wait_for_after(b"root:x:0:0:", b"/etc/passwd  1/1")
+command("human-monitor-command", {"command-line": "sendkey q"})
+time.sleep(0.1)
+command("human-monitor-command", {"command-line": "sendkey ret"})
+wait_for_after(b"/etc/passwd  1/1", b"/ $ ")
+type_command("login root")
+wait_for(b"Password: ")
+type_command("incorrect")
+wait_for(b"Login incorrect")
 PY
 kill "$interactive_pid" 2>/dev/null || true
 wait "$interactive_pid" 2>/dev/null || true

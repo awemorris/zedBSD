@@ -17,6 +17,7 @@
 #include "kern/tmpfs.h"
 #include "kern/overlayfs.h"
 #include "kern/loop.h"
+#include "kern/klog.h"
 #include "kern/swap-fat.h"
 
 #include <errno.h>
@@ -44,7 +45,7 @@ struct cwdinfo kern_cwdinfo __attribute__((section(".vfs_bss")));
 static int
 vfs_fail(const char *stage, int error)
 {
-	hal_printf("vfs: %s failed (error %d)\n", stage, error);
+	kern_logf("vfs: %s failed (error %d)\n", stage, error);
 	return error;
 }
 
@@ -153,19 +154,19 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	if (handoff == NULL)
 		return vfs_fail("handoff", EINVAL);
 	if (handoff->version == ZEDBSD_HANDOFF_VERSION_SUN4U)
-		hal_printf("vfs: boot BIOS=%02x Sun slice=%u devices=%u\n",
+		kern_logf("vfs: boot BIOS=%02x Sun slice=%u devices=%u\n",
 		    handoff->boot_bios_id, handoff->boot_partition_index,
 		    device_count);
 	else if (handoff->version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT)
-		hal_printf("vfs: boot BIOS=%02x MBR partition=%u devices=%u\n",
+		kern_logf("vfs: boot BIOS=%02x MBR partition=%u devices=%u\n",
 		    handoff->boot_bios_id, handoff->boot_partition_index,
 		    device_count);
 	else if (handoff->version == ZEDBSD_HANDOFF_VERSION_X68K)
-		hal_printf("vfs: boot SCSI=%u X68k partition=%u devices=%u\n",
+		kern_logf("vfs: boot SCSI=%u X68k partition=%u devices=%u\n",
 		    handoff->boot_bios_id, handoff->boot_partition_index,
 		    device_count);
 	else
-		hal_printf("vfs: boot BIOS=%02X partition LBA=%u devices=%u\n",
+		kern_logf("vfs: boot BIOS=%02X partition LBA=%u devices=%u\n",
 		    handoff->boot_bios_id, handoff->boot_partition_lba,
 		    device_count);
 	for (i = 0; i < device_count; i++)
@@ -178,7 +179,7 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		if (disk != NULL && !(disk->d_flags & DISK_PARTITION))
 			physical[physical_count++] = disk;
 	}
-	hal_printf("vfs: native boot disk=%s physical disks=%u\n",
+	kern_logf("vfs: native boot disk=%s physical disks=%u\n",
 	    boot_physical != NULL ? boot_physical->d_name : "none",
 	    physical_count);
 	mount_reset();
@@ -220,12 +221,12 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		int count = partition_scan(physical[i], entries, PARTITION_MAX);
 		int slot;
 		if (geometry_error == 0)
-			hal_printf("vfs: scan %s H/S=%u/%u blocks=%u: %d entries\n",
+			kern_logf("vfs: scan %s H/S=%u/%u blocks=%u: %d entries\n",
 			    physical[i]->d_name, geometry.heads,
 			    geometry.sectors_per_track,
 			    (uint32_t)physical[i]->d_block_count, count);
 		else
-			hal_printf("vfs: scan %s geometry error=%d: %d entries\n",
+			kern_logf("vfs: scan %s geometry error=%d: %d entries\n",
 			    physical[i]->d_name, geometry_error, count);
 		if (count < 0) {
 			disk_release(physical[i]);
@@ -235,7 +236,7 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 			if (entries[slot].p_block_count == 0 ||
 			    partition_create_disk(&entries[slot]) != 0)
 				continue;
-			hal_printf("vfs: %s partition %u start=%u data=%u blocks=%u\n",
+			kern_logf("vfs: %s partition %u start=%u data=%u blocks=%u\n",
 			    physical[i]->d_name, (unsigned)slot + 1U,
 			    (uint32_t)entries[slot].p_start_block,
 			    (uint32_t)entries[slot].p_data_block,
@@ -312,7 +313,7 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 			error = mount_root_create("auto", 0, &args, &root_mount);
 			if (error == 0) {
 				separate_boot = 1;
-				hal_printf("vfs: root=image disk=%s boot=%s\n",
+				kern_logf("vfs: root=image disk=%s boot=%s\n",
 				    root_loop->d_name, boot_partition->d_name);
 			}
 		} else if (error == ENOENT) {
@@ -366,12 +367,12 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 			goto out_root;
 		path_set(&boot_path,boot_mount,boot_mount->m_root);
 		if (root_partition != NULL)
-			hal_printf("vfs: root=ufs1 disk=%s boot=%s\n",
+			kern_logf("vfs: root=ufs1 disk=%s boot=%s\n",
 			    root_partition->d_name,boot_partition->d_name);
 	} else {
 		boot_mount=root_mount;
 		path_set(&boot_path,boot_mount,boot_mount->m_root);
-		hal_printf("vfs: root=legacy-fat disk=%s\n",boot_partition->d_name);
+		kern_logf("vfs: root=legacy-fat disk=%s\n",boot_partition->d_name);
 	}
 	failure_stage = "mount /dev";
 	error = mount_at("devfs", &root_path, "dev", 0, NULL, NULL);
@@ -415,7 +416,7 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	}
 	error = swap_fat_activate(&kern_cwdinfo, separate_boot ? "/boot" : "/");
 	if (error != 0 && error != ENOENT)
-		hal_printf("swap: /swapfile disabled (%d)\n", error);
+		kern_logf("swap: /swapfile disabled (%d)\n", error);
 	path_release(&boot_path);
 	path_release(&root_path);
 	return 0;

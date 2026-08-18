@@ -18,7 +18,7 @@ PROFILES = {
     "aarch64": ("ZEDAARCH64", 2, 183),
 }
 FAT_COMPONENT = r"[a-z0-9_]{1,8}(?:\.[a-z0-9_]{1,3})?"
-DESTINATION = re.compile(rf"/(bin|lib)(?:/{FAT_COMPONENT}){{1,4}}")
+DESTINATION = re.compile(rf"/(bin|lib|etc|var)(?:/{FAT_COMPONENT}){{1,4}}")
 
 
 def run(*arguments: str) -> None:
@@ -49,9 +49,28 @@ def parse_files(specifications: list[str]) -> dict[str, Path]:
     return files
 
 
+def parse_modes(specifications: list[str], files: dict[str, Path]) -> dict[str, int]:
+    modes: dict[str, int] = {}
+    for specification in specifications:
+        if "=" not in specification:
+            raise SystemExit("--mode requires /PATH=OCTAL")
+        destination, mode_text = specification.split("=", 1)
+        if destination not in files:
+            raise SystemExit(f"mode destination is not a manifest file: {destination}")
+        try:
+            mode = int(mode_text, 8)
+        except ValueError as error:
+            raise SystemExit(f"invalid mode: {specification}") from error
+        if mode < 0 or mode > 0o7777:
+            raise SystemExit(f"invalid mode: {specification}")
+        modes[destination] = mode
+    return modes
+
+
 def create(args: argparse.Namespace) -> None:
     label, _, _ = PROFILES[args.profile]
     files = parse_files(args.file)
+    modes = parse_modes(args.mode, files)
     if args.size_mib < 16:
         raise SystemExit("architecture image must be at least 16 MiB")
     if args.output.exists() and not args.force:
@@ -67,13 +86,13 @@ def create(args: argparse.Namespace) -> None:
         # -h/-s select a geometry whose 16-MiB default formats as FAT16.
         run("mformat", "-i", str(temporary), "-h", "16", "-s", "32",
             "-v", label, "::")
-        for directory in ("bin", "lib", "etc", "home", "apps", "dev",
-                          "boot"):
+        for directory in ("bin", "lib", "etc", "var", "var/run", "root",
+                          "home", "apps", "dev", "boot"):
             run("mmd", "-i", str(temporary), f"::/{directory}")
         parents = set()
         for destination in files:
             parent = str(Path(destination).parent).replace("\\", "/")
-            while parent not in ("/", "/bin", "/lib"):
+            while parent not in ("/", "/bin", "/lib", "/etc", "/var"):
                 parents.add(parent)
                 parent = str(Path(parent).parent).replace("\\", "/")
         for directory in sorted(parents, key=lambda value: value.count("/")):
@@ -85,12 +104,22 @@ def create(args: argparse.Namespace) -> None:
             run("mcopy", "-i", str(temporary), str(marker), "::/lib/arch.id")
         for destination, source in sorted(files.items()):
             run("mcopy", "-i", str(temporary), str(source), f"::{destination}")
+        if modes:
+            with tempfile.TemporaryDirectory(prefix="zedbsd-metadata-") as metadata_text:
+                metadata = Path(metadata_text) / "unixmode"
+                metadata.write_text("".join(
+                    f"{destination.lstrip('/')}:{mode:04o}:0:0\n"
+                    for destination, mode in sorted(modes.items())) +
+                    "etc/unixmode:0400:0:0\n", encoding="ascii")
+                run("mcopy", "-i", str(temporary), str(metadata), "::/etc/unixmode")
         checker = Path(__file__).with_name("check-arch-overlay-image.py")
         command = ["python3", str(checker), "--profile", args.profile,
                    "--image", str(temporary), "--size-mib", str(args.size_mib),
                    "--min-free-bytes", str(args.min_free_bytes)]
         for destination, source in sorted(files.items()):
             command += ["--file", f"{destination}={source}"]
+        for destination, mode in sorted(modes.items()):
+            command += ["--mode", f"{destination}={mode:04o}"]
         run(*command)
         os.replace(temporary, args.output)
     finally:
@@ -105,6 +134,7 @@ def main() -> None:
     parser.add_argument("--size-mib", type=int, default=16)
     parser.add_argument("--min-free-bytes", type=int, default=4 * 1024 * 1024)
     parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--mode", action="append", default=[])
     parser.add_argument("--force", action="store_true")
     create(parser.parse_args())
 

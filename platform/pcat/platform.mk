@@ -23,7 +23,7 @@ ZEDBSD_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-Iinclude -Iinclude/uapi -Isrc -I. -Ilibc/include
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/process-timer.o \
-	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/waitq.o \
+	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/klog.o $(BUILD)/src/kern/waitq.o \
 	$(BUILD)/src/kern/buf.o $(BUILD)/src/kern/sysctl.o \
 	$(BUILD)/src/kern/resource.o \
 	$(BUILD)/src/kern/resource-limit.o \
@@ -149,7 +149,7 @@ $(BUILD)/bootloader/payload64.elf: $(BUILD)/bootloader/payload64.o \
 bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin
 
-USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink realpath pathchk truncate ls chmod chown chgrp mkfifo stat file uname date df du tty stty sleep head tail wc tee cmp cksum od strings tr cut paste sort uniq join comm split csplit fold fmt pr nl expand unexpand grep sed awk xargs iconv diff patch id logname kill nohup time timeout mesg
+USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink realpath pathchk truncate ls dd more less dmesg who login chmod chown chgrp mkfifo stat file uname date df du tty stty sleep head tail wc tee cmp cksum od strings tr cut paste sort uniq join comm split csplit fold fmt pr nl expand unexpand grep sed awk xargs iconv diff patch id logname kill nohup time timeout mesg
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
 
 I386_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/i386.img
@@ -183,6 +183,8 @@ I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/dyntest=$(BUILD)/dynamic/dyntest
 I386_ARCH_INPUTS += $(USER_BASIC_TARGETS)
 I386_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
+I386_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
+I386_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(I386_ARCH_UFS_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
@@ -261,6 +263,8 @@ USER_LIBC_OBJS := $(BUILD)/userland/crt0.o \
 	$(BUILD)/userland/libc/socket.o \
 	$(BUILD)/userland/libc/resolver.o $(BUILD)/userland/libc/resolver-dns.o \
 	$(BUILD)/userland/libc/signal.o \
+	$(BUILD)/userland/libc/account.o $(BUILD)/userland/libc/crypt.o \
+	$(BUILD)/userland/libc/utmpx.o \
 	$(BUILD)/libc/heap.o \
 	$(BUILD)/libc/string.o $(BUILD)/libc/ctype.o $(BUILD)/libc/locale.o \
 	$(BUILD)/libc/wide.o $(BUILD)/libc/int64.o \
@@ -431,7 +435,7 @@ $(foreach command,$(USER_NET_COMMANDS),\
 network-tools: $(USER_NET_COMMAND_TARGETS)
 .PHONY: network-tools
 
-USER_BASIC_COMMON_OBJ := $(BUILD)/userland/common/command.o
+USER_BASIC_COMMON_OBJ := $(BUILD)/userland/common/command.o $(BUILD)/userland/common/pager.o
 USER_BASIC_COMMAND_OBJS := $(addsuffix /main.o, \
 	$(addprefix $(BUILD)/userland/,$(USER_BASIC_COMMANDS)))
 $(USER_BASIC_COMMON_OBJ) $(USER_BASIC_COMMAND_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
@@ -472,7 +476,8 @@ DYNAMIC_LIBC_SOURCES := userland/libc/posix.c userland/libc/poll.c \
 	userland/libc/semaphore.c userland/libc/mqueue.c userland/libc/dlfcn.c \
 	userland/libc/socket.c \
 	userland/libc/resolver.c userland/libc/resolver-dns.c \
-	userland/libc/signal.c libc/heap.c libc/string.c libc/ctype.c \
+	userland/libc/signal.c userland/libc/account.c userland/libc/crypt.c \
+	userland/libc/utmpx.c libc/heap.c libc/string.c libc/ctype.c \
 	libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c libc/format.c libc/stdio.c
 DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\

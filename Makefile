@@ -460,6 +460,13 @@ $(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
 stdio-fs-host-test: $(BUILD)/tests/stdio-fs-host-test
 	$(BUILD)/tests/stdio-fs-host-test
 
+$(BUILD)/tests/crypt-host-test: tests/crypt-host-test.c userland/libc/crypt.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -O2 -Wall -Wextra -Werror userland/libc/crypt.c $< -o $@
+
+crypt-host-test: $(BUILD)/tests/crypt-host-test
+	$(BUILD)/tests/crypt-host-test
+
 # BeUI lives upstream in the Noct submodule, but zedBSD links it, so the
 # upstream host tests run here against the very sources this tree builds.
 BEUI_TEST_CC := $(HOST_TEST_CC) -I$(NOCT_ROOT)/include -I$(NOCT_ROOT)/src/api

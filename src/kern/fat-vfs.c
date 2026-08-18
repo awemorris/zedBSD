@@ -20,10 +20,20 @@
 #define FAT_INODE_ORPHANED 0x01U
 #define FAT_MUTATION __attribute__((section(".hightext")))
 #define FAT_EPOCH_1980 315532800L
+#define FAT_METADATA_MAX 32
+
+struct fat_metadata {
+	char path[ZEDBSD_PATH_MAX];
+	mode_t mode;
+	uid_t uid;
+	gid_t gid;
+};
 
 struct fat_mount_state {
 	struct zedbsd_filesystem legacy;
 	struct mutex lock;
+	struct fat_metadata metadata[FAT_METADATA_MAX];
+	unsigned metadata_count;
 	uint8_t used;
 };
 
@@ -97,6 +107,80 @@ static struct fat_mount_state *
 fat_mount_state(struct mount *mountp)
 {
 	return mountp != NULL ? mountp->m_data : NULL;
+}
+
+static int
+fat_metadata_number(const char *text, unsigned base, uint32_t *value)
+{
+	uint32_t result = 0;
+	if (*text == '\0') return EINVAL;
+	while (*text != '\0') {
+		unsigned digit = (unsigned)(*text++ - '0');
+		if (digit >= base || result > (UINT32_MAX - digit) / base)
+			return EINVAL;
+		result = result * base + digit;
+	}
+	*value = result;
+	return 0;
+}
+
+static void
+fat_metadata_load(struct fat_mount_state *state)
+{
+	struct zedbsd_file file;
+	char buffer[4096];
+	uint32_t length, offset = 0;
+
+	memset(&file, 0, sizeof(file));
+	if (zedbsd_fs_open_result(&state->legacy, "etc/unixmode", &file) !=
+	    ZEDBSD_FS_OK)
+		return;
+	length = file.size < sizeof(buffer) - 1U ? (uint32_t)file.size :
+	    (uint32_t)sizeof(buffer) - 1U;
+	if (zedbsd_file_read_result(&file, 0, buffer, length, NULL, NULL) !=
+	    ZEDBSD_FS_OK)
+		return;
+	buffer[length] = '\0';
+	while (offset < length && state->metadata_count < FAT_METADATA_MAX) {
+		struct fat_metadata *metadata =
+		    &state->metadata[state->metadata_count];
+		char *line = buffer + offset, *mode, *uid, *gid, *end;
+		uint32_t mode_value, uid_value, gid_value;
+
+		end = strchr(line, '\n');
+		if (end != NULL) *end = '\0';
+		offset += (uint32_t)strlen(line) + (end != NULL ? 1U : 0U);
+		mode = strchr(line, ':'); if (mode == NULL) continue; *mode++ = '\0';
+		uid = strchr(mode, ':'); if (uid == NULL) continue; *uid++ = '\0';
+		gid = strchr(uid, ':'); if (gid == NULL) continue; *gid++ = '\0';
+		if (strchr(gid, ':') != NULL || line[0] == '/' || line[0] == '\0' ||
+		    strlen(line) >= sizeof(metadata->path) ||
+		    fat_metadata_number(mode, 8, &mode_value) != 0 ||
+		    fat_metadata_number(uid, 10, &uid_value) != 0 ||
+		    fat_metadata_number(gid, 10, &gid_value) != 0 ||
+		    mode_value > 07777U)
+			continue;
+		strcpy(metadata->path, line);
+		metadata->mode = (mode_t)mode_value;
+		metadata->uid = (uid_t)uid_value;
+		metadata->gid = (gid_t)gid_value;
+		state->metadata_count++;
+	}
+}
+
+static void
+fat_metadata_apply(struct mount *mountp, const char *path, struct inode *inode)
+{
+	struct fat_mount_state *state = fat_mount_state(mountp);
+	unsigned i;
+	for (i = 0; state != NULL && i < state->metadata_count; i++)
+		if (!strcmp(state->metadata[i].path, path)) {
+			inode->i_mode = (inode->i_mode & S_IFMT) |
+			    state->metadata[i].mode;
+			inode->i_uid = state->metadata[i].uid;
+			inode->i_gid = state->metadata[i].gid;
+			break;
+		}
 }
 
 static struct fat_inode_slot *
@@ -304,6 +388,7 @@ fat_make_inode(struct mount *mountp, const char *path,
 	}
 	if (attributes & FAT_ATTRIBUTE_READ_ONLY)
 		inode->i_mode &= ~(mode_t)0222U;
+	fat_metadata_apply(mountp, path, inode);
 	fat_load_inode_times(mountp, inode, lba, offset);
 	*result = inode;
 	return 0;
@@ -1307,6 +1392,7 @@ fat_mount_impl(struct mount *mountp)
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
 		return fs_error(result);
 	}
+	fat_metadata_load(state);
 	mountp->m_data = state;
 	root = inode_alloc(mountp);
 	if (root == NULL) {
