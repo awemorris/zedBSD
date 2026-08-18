@@ -1,4 +1,4 @@
-# zedBSD BIOS bootloaders
+﻿# zedBSD BIOS bootloaders
 
 The native BIOS loaders use the same on-disk layout on PC/AT and PC-98:
 
@@ -11,10 +11,6 @@ Stage 2 loads the root-directory file `VMUNIX` through its FAT16 cluster
 chain.  The PC/AT loader accepts ELF32/i386 and ELF64/x86-64.  The PC-98
 loader accepts ELF32/i386 only.
 
-The old native NEC98 image path remains under `bootsectors/pc98`.  Its LBA 0
-carries both `IPL1` and the firmware-compatible `55 aa` signature; `IPL1`
-distinguishes its NEC98 partition table at LBA 1 from a PC/AT MBR.
-
 Build and test the loaders with the repository build driver:
 
 ```text
@@ -26,7 +22,6 @@ Build and test the loaders with the repository build driver:
 ./build.sh unified-loader-qemu-test unified
 ./build.sh uefi-loader-host-check unified
 ./build.sh uefi-entry-qemu-test unified
-./build.sh legacy-pc98-hdd-image pc98
 ```
 
 `hdd-image` now selects the native MBR/FAT16 loader on both platforms.  The

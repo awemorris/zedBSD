@@ -1,4 +1,4 @@
-# zedBSD arm64/Raspberry Pi 4 bootstrap rules.
+﻿# zedBSD arm64/Raspberry Pi 4 bootstrap rules.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 ARM64_CC ?= aarch64-linux-gnu-gcc
@@ -81,7 +81,7 @@ ARM64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c userla
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
-ARM64_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
+ARM64_USER_SH_SOURCES := userland/sh/main.c \
 	userland/sh/builtins.c userland/sh/lexer.c userland/sh/expand.c
 
 ARM64_USER_SH_SOURCES += userland/sh/glob.c userland/sh/vars.c \
@@ -305,23 +305,23 @@ $(DYNAMIC_FLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
 	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \
 		-Wno-error=unused-but-set-variable \
 		-Wno-error=parentheses -c $< -o $@
-$(DYNAMIC_FLOAT_DIR)/musl-shgetc.o: $(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c softfloat/musl-floatscan.h
+$(DYNAMIC_FLOAT_DIR)/musl-shgetc.o: $(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \
-		-Wno-error=parentheses -include softfloat/musl-floatscan.h -c $< -o $@
-$(DYNAMIC_FLOAT_DIR)/musl-floatscan.o: $(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c softfloat/musl-floatscan.h
+		-Wno-error=parentheses -include src/softfloat/musl-floatscan.h -c $< -o $@
+$(DYNAMIC_FLOAT_DIR)/musl-floatscan.o: $(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \
 		-Wno-error=parentheses -Wno-error=sign-compare \
-		-include softfloat/musl-floatscan.h -c $< -o $@
-$(DYNAMIC_FLOAT_DIR)/musl-strtod.o: $(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c softfloat/musl-floatscan.h
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
+$(DYNAMIC_FLOAT_DIR)/musl-strtod.o: $(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \
-		-include softfloat/musl-floatscan.h -c $< -o $@
-$(DYNAMIC_FLOAT_DIR)/musl-compat.o: softfloat/musl-compat.c softfloat/musl-floatscan.h
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
+$(DYNAMIC_FLOAT_DIR)/musl-compat.o: src/softfloat/musl-compat.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \
-		-include softfloat/musl-floatscan.h -c $< -o $@
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
 	$(ARM64_LD) -shared -Bsymbolic -e _rtld_start --hash-style=sysv \

@@ -1,4 +1,4 @@
-zedBSD
+﻿zedBSD
 ======
 
 `zedBSD` is a small BSD re-implementation for retro and contemporary
@@ -43,9 +43,8 @@ attributes are not silently accepted.
 | `src/kern/`      | Platform-neutral kernel services                                                    |
 | `userland/`      | crt0, libc glue, shell, network tools, and Noct runtime                             |
 | `libc/`          | Freestanding libc subset                                                            |
-| `softfloat/`     | Soft-float support compiled from the vendor GCC/musl sources                        |
-| `platform/pc98/` | PC-9800 target: IPLs, stage 1/2, console, timer, Noct target adapter, DOS installer |
-| `apps/`          | Generic Noct programs (`ls.nct`, `cp.nct`, `hello.nct`, `bmpview.nct`)              |
+| `src/softfloat/` | Soft-float support compiled from the vendor GCC/musl sources                        |
+| `platform/pc98/` | PC-9800 target support                                                               |
 | `userland/noct/noct-upstream/` | NoctLang submodule                                                    |
 | `vendor/`        | GCC and musl source submodules, used only by the softfloat build                    |
 | `scripts/`       | Build helpers, image installer, QEMU tests                                          |

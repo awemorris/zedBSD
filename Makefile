@@ -1,4 +1,4 @@
-# zedBSD — a scriptable bootstrap environment.
+﻿# zedBSD — a scriptable bootstrap environment.
 # Copyright (C) 2026 Awe Morris
 # SPDX-License-Identifier: Zlib
 #
@@ -9,9 +9,8 @@
 #   userland/        statically linked user programs and their libc glue
 #   userland/noct/   zedBSD Noct runtime, integration, and upstream submodule
 #   libc/             freestanding libc subset
-#   softfloat/        soft-float support built from vendor GCC/musl sources
+#   src/softfloat/    soft-float support built from vendor GCC/musl sources
 #   platform/<arch>/  per-architecture targets (IPLs, stages, console)
-#   apps/             generic Noct programs shipped on the boot volume
 #
 # Architecture selection: `make ARCH=pc98` or `./build.sh all pc98`.  Each
 # architecture provides platform/<arch>/platform.mk and its artifacts land
@@ -83,7 +82,7 @@ ZEDBSD_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fno-pic -fno-pie \
 	-fno-unwind-tables -Wall -Wextra -Werror
 
 include libc/libc.mk
-include softfloat/softfloat.mk
+include src/softfloat/softfloat.mk
 include noct.mk
 
 KERN_NET_SOURCES := \
@@ -689,7 +688,7 @@ CHECK_RUN_TARGETS += ufs2-format-python-test
 # Architecture-specific rules (artifacts, disk images, QEMU tests,
 # milestone verification chains).
 
-include mk/arch-images.mk
+include scripts/arch-images.mk
 include $(PLATFORM_MK)
 include bootloader/unified/unified.mk
 

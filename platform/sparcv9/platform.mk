@@ -1,4 +1,4 @@
-# zedBSD SPARC V9/sun4u bootstrap rules.
+﻿# zedBSD SPARC V9/sun4u bootstrap rules.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 SPARCV9_PREFIX ?= $(if $(wildcard $(HOME)/opt/sparcv9/bin/sparc64-unknown-elf-gcc),$(HOME)/opt/sparcv9,$(HOME)/opt/sparc64)
@@ -92,7 +92,7 @@ SPARCV9_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c user
 	userland/libc/utmpx.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
-SPARCV9_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
+SPARCV9_USER_SH_SOURCES := userland/sh/main.c \
 	userland/sh/builtins.c userland/sh/lexer.c userland/sh/expand.c
 
 SPARCV9_USER_SH_SOURCES += userland/sh/glob.c userland/sh/vars.c \
@@ -319,7 +319,7 @@ SPARCV9_DYNAMIC_LIBC_SOURCES := userland/libc/posix.c \
 SPARCV9_DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(SPARCV9_DYNAMIC_DIR)/obj/%.o,\
 	$(SPARCV9_DYNAMIC_LIBC_SOURCES)) \
 	$(SPARCV9_DYNAMIC_DIR)/obj/userland/libc/syscall.o \
-	$(SPARCV9_DYNAMIC_DIR)/obj/softfloat/sparcv9/libgcc-runtime.o
+	$(SPARCV9_DYNAMIC_DIR)/obj/src/softfloat/sparcv9/libgcc-runtime.o
 
 # The bare-metal SPARC toolchain does not provide the soft-float arithmetic
 # entry points in libgcc.a.  Build the exact GCC soft-fp operations required by
@@ -350,7 +350,7 @@ $(SPARCV9_DYNAMIC_DIR)/softfp/gcc-%.o: \
 	$(ZEDBSD_GCC_ROOT)/libgcc/soft-fp/%.c
 	@mkdir -p $(dir $@)
 	$(SPARCV9_CC) -nostdinc -Ilibc/include -I. \
-		-Isoftfloat/sparcv9 -I$(ZEDBSD_GCC_ROOT)/include \
+		-Isrc/softfloat/sparcv9 -I$(ZEDBSD_GCC_ROOT)/include \
 		-I$(ZEDBSD_GCC_ROOT)/libgcc \
 		-I$(ZEDBSD_GCC_ROOT)/libgcc/soft-fp -D_SOFT_FLOAT \
 		$(SPARCV9_DYNAMIC_CFLAGS) -Wno-error=type-limits \
@@ -383,32 +383,32 @@ $(SPARCV9_DYNAMIC_FLOAT_DIR)/musl-%.o: \
 		-Wno-error=parentheses -c $< -o $@
 
 $(SPARCV9_DYNAMIC_FLOAT_DIR)/musl-shgetc.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(SPARCV9_CC) $(ZEDBSD_MUSL_CPPFLAGS) \
 		$(SPARCV9_DYNAMIC_CFLAGS) -Wno-error=parentheses \
-		-include softfloat/musl-floatscan.h -c $< -o $@
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
 
 $(SPARCV9_DYNAMIC_FLOAT_DIR)/musl-floatscan.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(SPARCV9_CC) $(ZEDBSD_MUSL_CPPFLAGS) \
 		$(SPARCV9_DYNAMIC_CFLAGS) -Wno-error=parentheses \
-		-Wno-error=sign-compare -include softfloat/musl-floatscan.h \
+		-Wno-error=sign-compare -include src/softfloat/musl-floatscan.h \
 		-c $< -o $@
 
 $(SPARCV9_DYNAMIC_FLOAT_DIR)/musl-strtod.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(SPARCV9_CC) $(ZEDBSD_MUSL_CPPFLAGS) \
-		$(SPARCV9_DYNAMIC_CFLAGS) -include softfloat/musl-floatscan.h \
+		$(SPARCV9_DYNAMIC_CFLAGS) -include src/softfloat/musl-floatscan.h \
 		-c $< -o $@
 
 $(SPARCV9_DYNAMIC_FLOAT_DIR)/musl-compat.o: \
-	softfloat/musl-compat.c softfloat/musl-floatscan.h
+	src/softfloat/musl-compat.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(SPARCV9_CC) $(ZEDBSD_MUSL_CPPFLAGS) \
-		$(SPARCV9_DYNAMIC_CFLAGS) -include softfloat/musl-floatscan.h \
+		$(SPARCV9_DYNAMIC_CFLAGS) -include src/softfloat/musl-floatscan.h \
 		-c $< -o $@
 
 $(SPARCV9_DYNAMIC_DIR)/ld.so: $(SPARCV9_DYNAMIC_RTLD_OBJS)

@@ -1,4 +1,4 @@
-# zedBSD MC68030/X68000 build rules.
+﻿# zedBSD MC68030/X68000 build rules.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 M68K_CC ?= m68k-linux-gnu-gcc
@@ -56,7 +56,7 @@ X68K_USER_RUNTIME_SOURCES := \
 	userland/libc/account.c userland/libc/crypt.c userland/libc/utmpx.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c libc/format.c libc/stdio.c
-X68K_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
+X68K_USER_SH_SOURCES := userland/sh/main.c \
 	userland/sh/builtins.c userland/sh/lexer.c userland/sh/expand.c
 
 X68K_USER_SH_SOURCES += userland/sh/glob.c userland/sh/vars.c \
@@ -71,10 +71,10 @@ X68K_USER_READLINE_OBJ := $(BUILD)/user/userland/libedit/readline.o
 X68K_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 X68K_USER_OBJS := $(X68K_CRT0_OBJ) $(X68K_USER_RUNTIME_OBJS) \
 	$(X68K_USER_SH_OBJS)
-X68K_STAGE1_OBJ := $(BUILD)/boot/x68k/stage1.o
-X68K_STAGE2_OBJS := $(BUILD)/boot/x68k/stage2-start.o \
-	$(BUILD)/boot/x68k/iocs.o $(BUILD)/boot/x68k/stage2.o \
-	$(BUILD)/boot/x68k/mb89352.o
+X68K_STAGE1_OBJ := $(BUILD)/bootloader/x68k/stage1.o
+X68K_STAGE2_OBJS := $(BUILD)/bootloader/x68k/stage2-start.o \
+	$(BUILD)/bootloader/x68k/iocs.o $(BUILD)/bootloader/x68k/stage2.o \
+	$(BUILD)/bootloader/x68k/mb89352.o
 X68K_EARLY_C_SOURCES := \
 	src/hal/cpu-up.c \
 	src/hal/m68k/runtime.c \
@@ -297,17 +297,17 @@ $(foreach command,$(USER_BASIC_COMMANDS),\
 basic-tools: $(USER_BASIC_TARGETS)
 .PHONY: basic-tools
 
-$(BUILD)/boot/x68k/%.o: boot/x68k/%.S boot/x68k/boot-layout.h
+$(BUILD)/bootloader/x68k/%.o: bootloader/x68k/%.S bootloader/x68k/boot-layout.h
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_CPPFLAGS) -m68030 -msoft-float -ffreestanding \
 		-fno-pic -fno-pie -c $< -o $@
 
-$(BUILD)/boot/x68k/%.o: boot/x68k/%.c boot/x68k/boot-layout.h
+$(BUILD)/bootloader/x68k/%.o: bootloader/x68k/%.c bootloader/x68k/boot-layout.h
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_CPPFLAGS) $(M68K_KERNEL_CFLAGS) -fno-builtin \
 		-fno-strict-aliasing -MMD -MP -c $< -o $@
 
-$(BUILD)/boot/x68k/mb89352.o: drivers/x68k-mb89352.c \
+$(BUILD)/bootloader/x68k/mb89352.o: drivers/x68k-mb89352.c \
 	drivers/x68k-mb89352.h
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_CPPFLAGS) $(M68K_KERNEL_CFLAGS) -fno-builtin \
@@ -333,8 +333,8 @@ $(BUILD)/contract-user.elf: $(X68K_USER_CONTRACT_OBJ) \
 	@test -z "$$($(M68K_NM) -u $@)" || { $(M68K_NM) -u $@; exit 1; }
 	$(PYTHON) scripts/check-user-elf.py --machine m68k $@
 
-$(BUILD)/stage1.elf: $(X68K_STAGE1_OBJ) boot/x68k/stage1.ld
-	$(M68K_LD) -N -static -T boot/x68k/stage1.ld -nostdlib \
+$(BUILD)/stage1.elf: $(X68K_STAGE1_OBJ) bootloader/x68k/stage1.ld
+	$(M68K_LD) -N -static -T bootloader/x68k/stage1.ld -nostdlib \
 		$(X68K_STAGE1_OBJ) -o $@
 
 $(BUILD)/stage1.bin: $(BUILD)/stage1.elf
@@ -342,8 +342,8 @@ $(BUILD)/stage1.bin: $(BUILD)/stage1.elf
 	@test "$$(stat -c %s $@)" -le 1024 || { \
 		echo "ERROR: X68k stage 1 exceeds 1024 bytes" >&2; exit 1; }
 
-$(BUILD)/stage2.elf: $(X68K_STAGE2_OBJS) boot/x68k/stage2.ld
-	$(M68K_LD) -N -static -T boot/x68k/stage2.ld -nostdlib \
+$(BUILD)/stage2.elf: $(X68K_STAGE2_OBJS) bootloader/x68k/stage2.ld
+	$(M68K_LD) -N -static -T bootloader/x68k/stage2.ld -nostdlib \
 		$(X68K_STAGE2_OBJS) -o $@
 	@test -z "$$($(M68K_NM) -u $@)" || { $(M68K_NM) -u $@; exit 1; }
 

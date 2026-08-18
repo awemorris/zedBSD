@@ -1,8 +1,8 @@
-/*
+﻿/*
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  *
- * Interactive shell and applet/Noct command dispatch.
+ * Interactive shell and Noct command dispatch.
  * This will be removed.
  */
 #include "kern/internal.h"
@@ -98,10 +98,6 @@ static uint32_t raw_key(void)
 int key(void)
 {
 	return (int)raw_key();
-}
-static uint32_t applet_key(void)
-{
-	return (uint32_t)key();
 }
 int poll(void)
 {
@@ -303,50 +299,6 @@ static int catfile(const char *n)
 			putc(sec[i]);
 	(void)file_close(file);
 	return count == 0;
-}
-static uint32_t crc32_image(const uint8_t *p, uint32_t n)
-{
-	uint32_t c = 0xffffffff;
-	for (uint32_t i = 0; i < n; i++) {
-		uint8_t b = (i >= 16 && i < 20) ? 0 : p[i];
-		c ^= b;
-		for (int j = 0; j < 8; j++)
-			c = (c >> 1) ^ ((0 - (c & 1)) & 0xedb88320);
-	}
-	return ~c;
-}
-static int run_applet(const char *n, int argc, char **argv)
-{
-	struct file *file;
-	uint8_t *image = (uint8_t *)0x50000;
-	off_t size;
-	if (file_openat(&kern_cwdinfo, n, O_RDONLY, 0, &file) != 0)
-		return 0;
-	size = file->f_inode->i_size;
-	if (size < (off_t)sizeof(struct zedbsd_applet_header) ||
-	    size > 0x10000 || file_read(file, image, (size_t)size) != size) {
-		(void)file_close(file);
-		return 0;
-	}
-	(void)file_close(file);
-	struct zedbsd_applet_header *h = (struct zedbsd_applet_header *)image;
-	if (h->magic != ZEDBSD_APPLET_MAGIC || h->abi_version != 1 ||
-	    h->header_size != sizeof(*h) || h->image_size != (uint32_t)size ||
-	    h->entry_offset < h->header_size || h->entry_offset >= (uint32_t)size ||
-	    crc32_image(image, (uint32_t)size) != h->crc32)
-		return 0;
-	struct zedbsd_applet_services s = {1, sizeof(s), putc, puts,
-	                                   applet_key};
-	zedbsd_applet_entry_t entry =
-	        (zedbsd_applet_entry_t)(image + h->entry_offset);
-	uint32_t r = entry(&s, (uint32_t)argc, (const char *const *)argv);
-	if (r) {
-		puts("applet status ");
-		dec(r);
-		putc('\n');
-		return 0;
-	}
-	return 1;
 }
 static int open_noct_application(const char *prefix, const char *name,
 				 const char *extension,
@@ -644,8 +596,6 @@ int command(char *s)
 	if (streq(v[0], "reboot")) {
 		kern_platform_reboot();
 	}
-	if (streq(v[0], "run"))
-		return n >= 2 && run_applet(v[1], n - 2, &v[2]);
 	if (streq(v[0], "noct")) {
 		if (n == 1)
 			return run_noct_user("--repl", 0, NULL, 0, NULL, 0);

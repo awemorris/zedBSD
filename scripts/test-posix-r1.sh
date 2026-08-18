@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # POSIX R1 user/kernel integration test for every supported user ABI.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -euo pipefail
@@ -128,9 +128,6 @@ run_sparcv9()
 }
 
 case "$arch" in
-pc98)
-	ZEDBSD_USER_TEST_MODE=int "$repo/scripts/test-user-init.sh"
-	;;
 pcat)
 	run_x86 pcat "${QEMU_SYSTEM_I386:-qemu-system-i386}" 486
 	;;
@@ -144,14 +141,13 @@ sparcv9)
 	run_sparcv9
 	;;
 all)
-	ZEDBSD_USER_TEST_MODE=int "$repo/scripts/test-user-init.sh"
 	run_x86 pcat "${QEMU_SYSTEM_I386:-qemu-system-i386}" 486
 	run_x86 amd64 "${QEMU_PCAT_X86_64:-qemu-system-x86_64}" qemu64
 	run_arm64
 	run_sparcv9
 	;;
 *)
-	echo "usage: $0 [all|pc98|pcat|amd64|arm64|sparcv9]" >&2
+	echo "usage: $0 [all|pcat|amd64|arm64|sparcv9]" >&2
 	exit 2
 	;;
 esac

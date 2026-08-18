@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Boot handoff and BIOS call
  * Copyright (C) 2026 Awe Morris
  *
@@ -10,36 +10,8 @@
 
 /* Shared data contract between the real-mode Stage 1 and 32-bit Stage 2. */
 #include <stdint.h>
-#include <uapi/zedbsd/applet.h>
-
 #define ZEDBSD_STAGE2_MAGIC 0x53383942U  /* "B98S" */
 #define ZEDBSD_HANDOFF_MAGIC 0x48323842U /* "B82H" */
-#define ZEDBSD_BOOTSTRAP_MAGIC 0x4839384cU /* "L98H" */
-
-enum zedbsd_bootstrap_filesystem {
-	ZEDBSD_BOOTSTRAP_FS_FAT16 = 1,
-};
-
-enum zedbsd_bootstrap_flags {
-	ZEDBSD_BOOTSTRAP_HAS_GEOMETRY = 1U << 0,
-};
-
-/* Versioned PBR -> IO.SYS contract at physical address 0000:0700. */
-struct zedbsd_bootstrap_handoff {
-	uint32_t magic;
-	uint16_t version;
-	uint16_t size;
-	uint32_t partition_lba;
-	uint8_t boot_bios_id;
-	uint8_t heads;
-	uint8_t sectors;
-	uint8_t filesystem_hint;
-	uint16_t sector_size;
-	uint16_t flags;
-	uint16_t saved_si;
-	uint16_t saved_di;
-} __attribute__((packed));
-
 struct zedbsd_stage2_header {
 	uint32_t magic;
 	uint16_t version;
@@ -141,8 +113,6 @@ typedef uint32_t (*zedbsd_bios_gateway_t)(struct zedbsd_bios_request *request);
 
 _Static_assert(sizeof(struct zedbsd_stage2_header) == 20,
                "zedBSD Stage 2 header must remain 20 bytes");
-_Static_assert(sizeof(struct zedbsd_bootstrap_handoff) == 24,
-               "zedBSD bootstrap handoff must remain 24 bytes");
 _Static_assert(sizeof(struct zedbsd_handoff) == 24,
 	       "zedBSD handoff version 2 must remain 24 bytes");
 _Static_assert(sizeof(struct zedbsd_bios_request) == 16,

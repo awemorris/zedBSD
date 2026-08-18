@@ -1,4 +1,4 @@
-# zedBSD amd64/PC-AT bootstrap rules.
+﻿# zedBSD amd64/PC-AT bootstrap rules.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 AMD64_PLATFORM := platform/amd64
@@ -173,7 +173,6 @@ AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS) \
 	$(BUILD)/user64/userland/libc/resolver-dns.o
 AMD64_USER_NETTEST_OBJS := $(BUILD)/user64/userland/nettest/main.o
 AMD64_USER_SH_OBJS := $(BUILD)/user64/userland/sh/main.o \
-	$(BUILD)/user64/userland/sh/applet.o \
 	$(BUILD)/user64/userland/sh/builtins.o \
 	$(BUILD)/user64/userland/sh/lexer.o \
 	$(BUILD)/user64/userland/sh/expand.o \
@@ -391,30 +390,30 @@ $(DYNAMIC_FLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
 		-c $< -o $@
 
 $(DYNAMIC_FLOAT_DIR)/musl-shgetc.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-Wno-error=parentheses -include softfloat/musl-floatscan.h \
+		-Wno-error=parentheses -include src/softfloat/musl-floatscan.h \
 		-c $< -o $@
 
 $(DYNAMIC_FLOAT_DIR)/musl-floatscan.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
 		-Wno-error=parentheses -Wno-error=sign-compare \
-		-include softfloat/musl-floatscan.h -c $< -o $@
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
 
 $(DYNAMIC_FLOAT_DIR)/musl-strtod.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-include softfloat/musl-floatscan.h -c $< -o $@
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
 
-$(DYNAMIC_FLOAT_DIR)/musl-compat.o: softfloat/musl-compat.c \
-	softfloat/musl-floatscan.h
+$(DYNAMIC_FLOAT_DIR)/musl-compat.o: src/softfloat/musl-compat.c \
+	src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-include softfloat/musl-floatscan.h -c $< -o $@
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
 
 $(DYNAMIC_DIR)/obj/userland/crt1.o: userland/crt1-amd64.S
 	@mkdir -p $(dir $@)

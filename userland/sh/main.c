@@ -1,8 +1,7 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+﻿/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <zedbsd/process.h>
 #include <zedbsd/console.h>
 #include <zedbsd/system.h>
-#include "userland/sh/applet.h"
 #include "userland/sh/alias.h"
 #include "userland/sh/builtins.h"
 #include "userland/sh/expand.h"
@@ -599,7 +598,6 @@ run_search_path(int argc, char **argv)
 {
 	char candidate[256];
 	char *child[ARG_MAX + 1];
-	char *script[ARG_MAX + 1];
 	int i;
 
 	if (search_path(argv[0], "", 1, candidate, sizeof(candidate))) {
@@ -609,15 +607,9 @@ run_search_path(int argc, char **argv)
 		child[argc] = NULL;
 		return run_external(child);
 	}
-	if (search_path(argv[0], ".nct", 0, candidate, sizeof(candidate))) {
-		script[0] = candidate;
-		for (i = 1; i < argc; i++)
-			script[i] = argv[i];
-		script[argc] = NULL;
-		return run_noct(argc, script);
-	}
 	/* Compiled Noct applications remain executable by command name. */
 	if (search_path(argv[0], ".nap", 0, candidate, sizeof(candidate))) {
+		char *script[ARG_MAX + 1];
 		script[0] = candidate;
 		for (i = 1; i < argc; i++)
 			script[i] = argv[i];
@@ -1072,9 +1064,6 @@ command_dispatch(int argc, char **argv)
 		for (i = 1; i < argc && i < ARG_MAX; i++)
 			args[i] = argv[i];
 		return run_noct(argc, args);
-	}
-	if (!strcmp(argv[0], "run")) {
-		return argc >= 2 && sh_run_applet(argv[1], argc - 1, argv + 1);
 	}
 	if (!strcmp(argv[0], "exit"))
 		exit(argc == 2 ? atoi(argv[1]) : 0);

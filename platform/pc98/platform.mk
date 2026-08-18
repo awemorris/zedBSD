@@ -1,4 +1,4 @@
-# zedBSD NEC PC-9800 architecture rules.
+﻿# zedBSD NEC PC-9800 architecture rules.
 # Copyright (C) 2026 Awe Morris
 # SPDX-License-Identifier: Zlib
 #
@@ -6,7 +6,6 @@
 # builds into $(BUILD) = build/pc98.
 
 PC98 := platform/pc98
-BOOTSECT := bootsectors/pc98
 BIOS_LOADER := bootloader/pc98
 
 CIRRUS_NOCT_CFLAGS = $(filter-out -Os,$(NOCT_CFLAGS)) -O2
@@ -122,22 +121,16 @@ M9_STAGE2_OBJS = $(filter-out $(BUILD)/src/kern/main.o \
 	$(BUILD)/$(PC98)/shell-m9-test.o \
 	$(BUILD)/$(PC98)/device-m9-test.o
 
-all: $(BUILD)/ipl-lba0.bin $(BUILD)/ipl-lba2.bin \
-	$(BUILD)/ipl-lba0.img $(BUILD)/ipl-lba2.img $(BUILD)/ipl-part.img \
-	$(BUILD)/IO.SYS $(BUILD)/vmunix \
+all: $(BUILD)/vmunix \
 	$(BUILD)/INIT.ELF $(BUILD)/bin/noct $(BUILD)/bin/sh \
 	$(BUILD)/bin/nettest $(BUILD)/bin/ping \
 	$(BUILD)/bin/ifconfig $(BUILD)/bin/route $(BUILD)/bin/dhcpcd \
 	$(BUILD)/bin/nslookup $(BUILD)/bin/host $(BUILD)/bin/sysctl $(BUILD)/bin/mount \
-	$(BUILD)/bin/umount \
-	$(BUILD)/partition-pbr.bin \
-	$(BUILD)/chain-test.bin $(BUILD)/fdd-ipl.bin \
-	$(BUILD)/BOOTAPP.BIN
+	$(BUILD)/bin/umount
 
 # Convenience aliases for the primary artifacts.
 vmunix: $(BUILD)/vmunix
 vmunix-m9: $(BUILD)/vmunix-m9
-BOOTAPP.BIN: $(BUILD)/BOOTAPP.BIN
 INIT.ELF: $(BUILD)/INIT.ELF
 NOCT.ELF: $(BUILD)/NOCT.ELF
 SH: $(BUILD)/bin/sh
@@ -147,7 +140,7 @@ USER-STACK.ELF: $(BUILD)/USER-STACK.ELF
 USER-STACK-GUARD.ELF: $(BUILD)/USER-STACK-GUARD.ELF
 POSIX-R2.ELF: $(BUILD)/POSIX-R2.ELF
 POSIX-R2-REMAINING.ELF: $(BUILD)/POSIX-R2-REMAINING.ELF
-.PHONY: vmunix vmunix-m9 BOOTAPP.BIN INIT.ELF NOCT.ELF SH \
+.PHONY: vmunix vmunix-m9 INIT.ELF NOCT.ELF SH \
 	USER-FAULT.ELF USER-SWAP.ELF USER-STACK.ELF USER-STACK-GUARD.ELF \
 	POSIX-R2.ELF POSIX-R2-REMAINING.ELF
 
@@ -185,27 +178,6 @@ $(BUILD)/$(PC98)/device-m9-test.o: src/kern/device.c
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_CPPFLAGS) $(ZEDBSD_CFLAGS) -DZEDBSD_M9_WRITE_TEST \
 		-MMD -MP -c $< -o $@
-
-# ----------------------------------------------------------------------
-# Flat binaries from the 16-bit boot-sector world.
-# link-flat: name, object, text address.
-
-define link-flat
-$(BUILD)/$(1).elf: $(BUILD)/$(BOOTSECT)/$(2).o
-	$$(LD) -m elf_i386 -Ttext=$(3) -e _start $$< -o $$@
-endef
-
-$(eval $(call link-flat,disk-ipl,disk-ipl,0))
-$(eval $(call link-flat,lba2,lba2,0))
-$(eval $(call link-flat,partition-pbr,partition-pbr,0))
-$(eval $(call link-flat,stage1,stage1,0))
-$(eval $(call link-flat,chain-test,chain-test,0))
-$(eval $(call link-flat,fdd-ipl,fdd-ipl,0))
-
-$(BUILD)/ipl-lba0.bin: $(BUILD)/disk-ipl.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 512
-	@test "$$(od -An -tx1 -j508 -N4 $@ | tr -d ' \n')" = 090055aa
 
 # Native PC-98 BIOS code using a PC/AT-compatible MBR disk layout.
 $(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
@@ -342,47 +314,9 @@ network-qemu-test: $(BUILD)/bootloader/stage1.bin \
 $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
 	cp -f $< $@
 
-$(BUILD)/legacy-nec98-hdd-image.img: $(BUILD)/hdd-test.img
-	cp -f $< $@
-
-legacy-pc98-hdd-image: $(BUILD)/legacy-nec98-hdd-image.img
-
 .PHONY: arch-image arch-image-check arch-image-ufs arch-image-ufs-check \
 	ufs-root-image bios-bootloader bios-hdd-image bios-loader-host-check \
-	bios-loader-qemu-test \
-	legacy-pc98-hdd-image
-
-$(BUILD)/ipl-lba2.bin: $(BUILD)/lba2.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 7168
-
-$(BUILD)/partition-pbr.bin: $(BUILD)/partition-pbr.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 1024
-
-
-$(BUILD)/IO.SYS: $(BUILD)/stage1.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@sz=$$(stat -c%s $@); echo "IO.SYS: $$sz bytes"; test $$sz -le 65024
-
-$(BUILD)/chain-test.bin: $(BUILD)/chain-test.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 512
-
-$(BUILD)/fdd-ipl.bin: $(BUILD)/fdd-ipl.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 512
-
-# Staging copies used by disk-image tooling.
-$(BUILD)/ipl-lba0.img: $(BUILD)/ipl-lba0.bin
-	cp $< $@
-$(BUILD)/ipl-lba2.img: $(BUILD)/ipl-lba2.bin
-	cp $< $@
-$(BUILD)/ipl-part.img: $(BUILD)/partition-pbr.bin
-	cp $< $@
-
-# ----------------------------------------------------------------------
-# Stage 2 (vmunix) and the applet container.
+	bios-loader-qemu-test
 
 USER_LIBC_OBJS := $(BUILD)/userland/crt0.o $(BUILD)/userland/libc/posix.o \
 	$(BUILD)/userland/libc/dlfcn.o \
@@ -461,7 +395,7 @@ $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 	cp $< $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o \
+USER_SH_OBJS := $(BUILD)/userland/sh/main.o \
 	$(BUILD)/userland/sh/builtins.o $(BUILD)/userland/sh/lexer.o \
 	$(BUILD)/userland/sh/expand.o $(BUILD)/userland/sh/glob.o \
 	$(BUILD)/userland/sh/vars.o $(BUILD)/userland/sh/arithmetic.o \
@@ -659,30 +593,30 @@ $(DYNAMIC_SOFTFLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
 		-c $< -o $@
 
 $(DYNAMIC_SOFTFLOAT_DIR)/musl-shgetc.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-Wno-error=parentheses -include softfloat/musl-floatscan.h \
+		-Wno-error=parentheses -include src/softfloat/musl-floatscan.h \
 		-c $< -o $@
 
 $(DYNAMIC_SOFTFLOAT_DIR)/musl-floatscan.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
 		-Wno-error=parentheses -Wno-error=sign-compare \
-		-include softfloat/musl-floatscan.h -c $< -o $@
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
 
 $(DYNAMIC_SOFTFLOAT_DIR)/musl-strtod.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-include softfloat/musl-floatscan.h -c $< -o $@
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
 
-$(DYNAMIC_SOFTFLOAT_DIR)/musl-compat.o: softfloat/musl-compat.c \
-	softfloat/musl-floatscan.h
+$(DYNAMIC_SOFTFLOAT_DIR)/musl-compat.o: src/softfloat/musl-compat.c \
+	src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-include softfloat/musl-floatscan.h -c $< -o $@
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
 	$(LD) -m elf_i386 -shared -Bsymbolic -e _rtld_start --hash-style=sysv \
@@ -818,27 +752,9 @@ $(BUILD)/vmunix-m9: $(BUILD)/stage2-m9-test.elf $(SCRIPTS_DIR)/patch-stage2.py
 	cp $< $@
 	$(PYTHON) $(SCRIPTS_DIR)/patch-stage2.py $@
 
-$(BUILD)/applet-test.elf: $(BUILD)/$(BOOTSECT)/applet-test.o $(PC98)/applet.ld
-	$(LD) -m elf_i386 -T $(PC98)/applet.ld -nostdlib $< -o $@
-
-$(BUILD)/BOOTAPP.BIN: $(BUILD)/applet-test.elf $(SCRIPTS_DIR)/patch-applet.py
-	$(OBJCOPY) -O binary $< $@
-	$(PYTHON) $(SCRIPTS_DIR)/patch-applet.py $@
-
-# ----------------------------------------------------------------------
-# Test disk images.
-
-$(BUILD)/hdd-test.img: all $(SCRIPTS_DIR)/make-hdd-image.sh \
-	$(SCRIPTS_DIR)/install-image.sh
-	rm -f $@
-	$(SCRIPTS_DIR)/make-hdd-image.sh $@
-
 hdd-image: $(BUILD)/hdd-image.img
 
-hdd-boot-qemu-test:
-	$(SCRIPTS_DIR)/test-hdd-bare.sh
-
-.PHONY: hdd-image hdd-boot-qemu-test
+.PHONY: hdd-image
 
 # ----------------------------------------------------------------------
 # PC-98 host tests.
@@ -856,40 +772,6 @@ $(BUILD)/tests/beui-pc98-cirrus-host-test: \
 	$(NOCT_ROOT)/src/api/beui-pc98-cirrus.c
 	@mkdir -p $(dir $@)
 	$(BEUI_TEST_CC) $(NOCT_ROOT)/src/api/beui-pc98-cirrus.c $< -o $@
-
-$(BUILD)/tests/noct-host-test: tests/noct-host-test.c \
-	tests/vfs-host-stubs.c \
-	apps/ls.nct apps/cp.nct userland/noct/integration/noct-m6-script.h \
-	$(NOCT_GLUE_OBJS) $(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
-	$(BUILD)/src/kern/namespace.o \
-	$(BUILD)/src/kern/buf.o \
-	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/inode.o \
-	$(BUILD)/src/kern/file.o $(BUILD)/src/kern/namecache.o \
-	$(BUILD)/src/kern/namei.o $(BUILD)/src/kern/mount.o \
-	$(BUILD)/src/kern/rootfs.o \
-	$(NOCT_OBJECTS) $(ZEDBSD_LIBC_OBJECTS) $(ZEDBSD_SOFTFLOAT_OBJECTS)
-	@mkdir -p $(dir $@)
-	$(HOSTCC) -m32 -no-pie -fno-builtin -fno-stack-protector -Wall -Wextra \
-		-Werror -I. -Iinclude -Isrc -Ilibc/include -I$(NOCT_ROOT)/include \
-		-DZEDBSD_NOCT_JIT_CODE_MAX=$(NOCT_JIT_CODE_MAX) \
-		tests/noct-host-test.c tests/vfs-host-stubs.c $(NOCT_GLUE_OBJS) \
-		$(BUILD)/src/kern/env.o $(BUILD)/src/kern/fs.o \
-		$(BUILD)/src/kern/namespace.o $(NOCT_OBJECTS) \
-		$(BUILD)/src/kern/buf.o \
-		$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/inode.o \
-		$(BUILD)/src/kern/file.o $(BUILD)/src/kern/namecache.o \
-		$(BUILD)/src/kern/namei.o $(BUILD)/src/kern/mount.o \
-		$(BUILD)/src/kern/rootfs.o \
-		$(ZEDBSD_LIBC_OBJECTS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-
-NOCT_M6_JIT_CODE := $(BUILD)/logs/m6-jit-code.bin
-NOCT_TEST_JIT_CODE_SIZE := 98304
-
-noct-host-test: $(BUILD)/tests/noct-host-test
-	@mkdir -p $(dir $(NOCT_M6_JIT_CODE))
-	$(BUILD)/tests/noct-host-test $(NOCT_M6_JIT_CODE) apps/ls.nct apps/cp.nct
-	@test $$(stat -c%s $(NOCT_M6_JIT_CODE)) -eq $(NOCT_TEST_JIT_CODE_SIZE)
-	@echo "zedBSD Noct interpreter/JIT lifecycle host tests: PASS"
 
 # Compile-check the i386 HAL and PC-98 BSP under the same freestanding
 # target flags used by the vmunix link.
@@ -925,159 +807,12 @@ $(BUILD)/tests/hal-pc98-keyboard-host-test: \
 HOST_TEST_BINARIES += $(BUILD)/tests/beui-pc98-gdc-host-test \
 	$(BUILD)/tests/beui-pc98-cirrus-host-test \
 	$(BUILD)/tests/hal-pc98-keyboard-host-test
-CHECK_RUN_TARGETS += noct-host-test hal-pc98-compile kern-compile
+CHECK_RUN_TARGETS += hal-pc98-compile kern-compile
 
 # ----------------------------------------------------------------------
-# Milestone and QEMU verification chains.
-
-noct-m4-opcode-check: $(BUILD)/userland/noct/integration/noct.o $(BUILD)/userland/noct/integration/platform.o
-	@if $(NOCT_OBJDUMP) -d --no-show-raw-insn $^ | \
-		grep -E '(^[[:space:]]*[0-9a-f]+:[[:space:]]+f[a-z0-9]+[[:space:]])|\b(bswap|cmpxchg|xadd|cmov[a-z]*|rdtsc|ud2|cpuid|fx[a-z]+|movaps|movups|xmm[0-9]|ymm[0-9]|zmm[0-9])\b'; then \
-		echo "ERROR: M4 glue contains a post-i386 opcode" >&2; \
-		exit 1; \
-	fi
-	@echo "zedBSD Noct M4 glue i386 opcode check: PASS"
-
-noct-m4-verify: noct-m3-verify noct-host-test noct-m4-opcode-check \
-	$(BUILD)/vmunix
-	@echo "zedBSD M4 historical lifecycle checks: PASS"
-
-NOCT_M5_DISASSEMBLY := $(BUILD)/logs/m5.disassembly
-NOCT_M5_REJECTED := $(BUILD)/logs/m5-rejected.txt
-
-noct-m5-final-opcode-check: $(BUILD)/stage2.elf softfloat-opcode-check
-	@mkdir -p $(dir $(NOCT_M5_DISASSEMBLY))
-	@$(NOCT_OBJDUMP) -d --no-show-raw-insn $(BUILD)/stage2.elf > \
-		$(NOCT_M5_DISASSEMBLY)
-	@# i486DX task switching legitimately uses the 80387-compatible
-	@# fnsave/frstor pair. SSE, FXSR, XMM and all other x87 instructions
-	@# remain forbidden in the linked image.
-	@grep -E '(^[[:space:]]*[0-9a-f]+:[[:space:]]+f[a-z0-9]+[[:space:]])|\b(bswap|cmpxchg|xadd|cmov[a-z]*|rdtsc|ud2|cpuid|fx[a-z]+|movaps|movups|xmm[0-9]|ymm[0-9]|zmm[0-9])\b' \
-		$(NOCT_M5_DISASSEMBLY) | \
-		grep -Ev '^[[:space:]]*[0-9a-f]+:[[:space:]]+(fnsave|frstor)[[:space:]]' \
-		> $(NOCT_M5_REJECTED) || true
-	@if test -s $(NOCT_M5_REJECTED); then \
-		echo "ERROR: final vmunix ELF contains a forbidden opcode" >&2; \
-		cat $(NOCT_M5_REJECTED) >&2; \
-		exit 1; \
-	fi
-	@echo "zedBSD M5 final i386 opcode check: PASS"
-
-noct-m5-verify: noct-m4-verify softfloat-host-test noct-m5-final-opcode-check
-	@echo "zedBSD M5 historical soft-float checks: PASS"
-
-noct-m6-verify: noct-m5-verify noct-host-test $(BUILD)/vmunix
-	@echo "zedBSD M6 verification: PASS (forced i386 JIT)"
-
-noct-m7-verify: noct-m6-verify noct-host-test $(BUILD)/vmunix
-	@echo "zedBSD M7 host/build verification: PASS (arguments and main signature)"
-
-noct-m8-verify: noct-m7-verify noct-host-test $(BUILD)/vmunix \
-	noct-m5-final-opcode-check
-	@echo "zedBSD M8 host/build verification: PASS (safe native APIs)"
-
-bios-write-qemu-test: $(BUILD)/vmunix-m9
-	$(SCRIPTS_DIR)/test-bios-write.sh all
-
-noct-m9-verify: noct-m8-verify check $(BUILD)/vmunix $(BUILD)/vmunix-m9 \
-	bios-write-qemu-test
-	@echo "zedBSD M9 verification: PASS (IDE/SCSI BIOS write/read/restore)"
-
-noct-file-qemu-test: $(BUILD)/vmunix
-	$(SCRIPTS_DIR)/test-noct-file.sh
-
-ide-multidrive-qemu-test: $(BUILD)/vmunix
-	$(SCRIPTS_DIR)/test-ide-multidrive.sh
-
-noct-m10-verify: noct-m9-verify check $(BUILD)/vmunix \
-	noct-m5-final-opcode-check noct-file-qemu-test
-	@echo "zedBSD M10 verification: PASS (FAT16 writer and Noct File API)"
-
-noct-utilities-qemu-test: $(BUILD)/vmunix apps/ls.nct apps/cp.nct
-	$(SCRIPTS_DIR)/test-noct-utilities.sh
+# Current QEMU verification.
 
 sh-builtins-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/sh bios-bootloader
 	$(SCRIPTS_DIR)/test-sh-builtins.sh pc98
 
-noct-m11-verify: noct-m10-verify check $(BUILD)/vmunix \
-	noct-m5-final-opcode-check noct-utilities-qemu-test
-	@echo "zedBSD M11 safe utilities verification: PASS (ls.nct and cp.nct)"
-
-noct-env-qemu-test: $(BUILD)/vmunix
-	$(SCRIPTS_DIR)/test-noct-env.sh
-
-noct-m14-verify: noct-m11-verify check $(BUILD)/vmunix \
-	noct-m5-final-opcode-check noct-env-qemu-test
-	@echo "zedBSD M14 verification: PASS (environment and intrinsic APIs)"
-
-noct-repl-qemu-test: $(BUILD)/vmunix
-	$(SCRIPTS_DIR)/test-noct-repl.sh
-
-term-japanese-qemu-test: $(BUILD)/vmunix
-	$(SCRIPTS_DIR)/test-term-japanese.sh
-
-noct-m15-verify: noct-m14-verify check $(BUILD)/vmunix \
-	noct-m5-final-opcode-check noct-repl-qemu-test
-	@echo "zedBSD M15 REPL verification: PASS (keyboard/error/Ctrl-C on i386)"
-
-noct-m17-verify: noct-m15-verify check $(BUILD)/vmunix \
-	noct-m5-final-opcode-check
-	@for memory in 5 8 16 32 64 96; do \
-		echo "Testing zedBSD Noct RAM profile: $${memory} MiB"; \
-		ZEDBSD_TEST_MEMORY_MIB=$$memory \
-			$(SCRIPTS_DIR)/test-noct-repl.sh || exit $$?; \
-	done
-	@echo "zedBSD M17 verification: PASS (5/8/16/32/64/>64 MiB profiles)"
-
-beui-g1-verify: check $(BUILD)/vmunix noct-m5-final-opcode-check
-	@echo "zedBSD BeUI G1 verification: PASS (lifecycle and HAL boundary)"
-
-beui-gdc-qemu-test: $(BUILD)/vmunix
-	$(SCRIPTS_DIR)/test-beui-gdc.sh
-
-beui-g2a-verify: check $(BUILD)/vmunix noct-m5-final-opcode-check \
-	beui-gdc-qemu-test
-	@echo "zedBSD BeUI G2a verification: PASS (GDC and BMP image path)"
-
-beui-cirrus-qemu-test: $(BUILD)/vmunix
-	$(SCRIPTS_DIR)/test-beui-cirrus.sh
-
-beui-g2b-verify: beui-g2a-verify
-	$(SCRIPTS_DIR)/test-beui-cirrus.sh
-	@echo "zedBSD BeUI G2b verification: PASS (Core-Graph/Cirrus and GDC fallback)"
-
-beui-menu-cirrus-qemu-test: $(BUILD)/vmunix
-	$(SCRIPTS_DIR)/test-beui-menu.sh
-
-beui-menu-gdc-qemu-test: $(BUILD)/vmunix
-	ZEDBSD_BEUI_MACHINE=pc9801 ZEDBSD_BEUI_TEST_TAG=menu-gdc \
-		$(SCRIPTS_DIR)/test-beui-menu.sh
-
-beui-g2c-verify: beui-g2b-verify \
-	beui-menu-cirrus-qemu-test beui-menu-gdc-qemu-test
-	@echo "zedBSD BeUI G2c verification: PASS (CGROM text and keyboard menu)"
-
-beui-g4-verify: beui-g2c-verify term-japanese-qemu-test
-	@echo "zedBSD BeUI G4 verification: PASS (user-process menu and Japanese text)"
-
-beui-input-qemu-test: $(BUILD)/vmunix
-	$(SCRIPTS_DIR)/test-beui-input.sh
-
-swap-lowmem-qemu-test: $(BUILD)/vmunix $(BUILD)/USER-SWAP.ELF
-	$(SCRIPTS_DIR)/test-swap-lowmem.sh
-
-beui-g5-verify: beui-g4-verify beui-input-qemu-test
-	@echo "zedBSD BeUI G5 verification: PASS (BeUI-only input)"
-
-.PHONY: noct-host-test noct-m4-opcode-check noct-m4-verify \
-	ide-multidrive-qemu-test \
-	noct-m5-final-opcode-check noct-m5-verify noct-m6-verify \
-	noct-m7-verify noct-m8-verify bios-write-qemu-test noct-m9-verify \
-	noct-file-qemu-test noct-m10-verify noct-utilities-qemu-test \
-	sh-builtins-qemu-test \
-	noct-m11-verify noct-env-qemu-test noct-m14-verify \
-	noct-repl-qemu-test term-japanese-qemu-test noct-m15-verify \
-	noct-m17-verify beui-g1-verify beui-gdc-qemu-test beui-g2a-verify \
-	beui-cirrus-qemu-test beui-g2b-verify beui-menu-cirrus-qemu-test \
-	beui-menu-gdc-qemu-test beui-g2c-verify beui-g4-verify \
-	beui-input-qemu-test beui-g5-verify swap-lowmem-qemu-test
+.PHONY: sh-builtins-qemu-test

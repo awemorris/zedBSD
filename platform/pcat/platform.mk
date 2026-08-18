@@ -1,7 +1,6 @@
-# zedBSD IBM PC/AT i386 platform rules.
+﻿# zedBSD IBM PC/AT i386 platform rules.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 PCAT := platform/pcat
-BOOTSECT := bootsectors/pcat
 BIOS_LOADER := bootloader/pcat
 
 HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
@@ -71,7 +70,7 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(HAL_PCAT_OBJS) $(KERN_OBJS) $(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS) \
 	$(KERN_UFS_CONSISTENCY_OBJS)
 
-all: $(BUILD)/bootsect.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
+all: $(BUILD)/vmunix $(BUILD)/bin/sh \
 	$(BUILD)/bin/noct $(BUILD)/bin/nettest $(BUILD)/bin/ping \
 	$(BUILD)/bin/ifconfig $(BUILD)/bin/route $(BUILD)/bin/dhcpcd \
 	$(BUILD)/bin/nslookup $(BUILD)/bin/host $(BUILD)/bin/sysctl $(BUILD)/bin/mount \
@@ -85,19 +84,7 @@ POSIX-R2.ELF: $(BUILD)/POSIX-R2.ELF
 POSIX-R2-REMAINING.ELF: $(BUILD)/POSIX-R2-REMAINING.ELF
 .PHONY: vmunix SH NOCT.ELF POSIX-R1.ELF POSIX-R2.ELF POSIX-R2-REMAINING.ELF
 
-$(BUILD)/$(BOOTSECT)/bootsect.o: $(BOOTSECT)/bootsect.S
-	@mkdir -p $(dir $@)
-	$(CC) -m32 -c $< -o $@
-$(BUILD)/bootsect.elf: $(BUILD)/$(BOOTSECT)/bootsect.o \
-	$(BOOTSECT)/bootsect.ld
-	$(LD) -m elf_i386 -T $(BOOTSECT)/bootsect.ld $< -o $@
-$(BUILD)/bootsect.bin: $(BUILD)/bootsect.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 512
-	@test "$$(od -An -tx1 -j510 -N2 $@ | tr -d ' \n')" = 55aa
-
-# Native two-stage MBR/FAT16 loader.  Keep the historical raw-LBA loader
-# above until the new path has completed its regression matrix.
+# Native two-stage MBR/FAT16 loader.
 $(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
 	@mkdir -p $(dir $@)
@@ -369,7 +356,7 @@ $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 	cp $< $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o \
+USER_SH_OBJS := $(BUILD)/userland/sh/main.o \
 	$(BUILD)/userland/sh/builtins.o $(BUILD)/userland/sh/lexer.o \
 	$(BUILD)/userland/sh/expand.o $(BUILD)/userland/sh/glob.o \
 	$(BUILD)/userland/sh/vars.o $(BUILD)/userland/sh/arithmetic.o \
@@ -525,30 +512,30 @@ $(DYNAMIC_SOFTFLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
 		-c $< -o $@
 
 $(DYNAMIC_SOFTFLOAT_DIR)/musl-shgetc.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-Wno-error=parentheses -include softfloat/musl-floatscan.h \
+		-Wno-error=parentheses -include src/softfloat/musl-floatscan.h \
 		-c $< -o $@
 
 $(DYNAMIC_SOFTFLOAT_DIR)/musl-floatscan.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
 		-Wno-error=parentheses -Wno-error=sign-compare \
-		-include softfloat/musl-floatscan.h -c $< -o $@
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
 
 $(DYNAMIC_SOFTFLOAT_DIR)/musl-strtod.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c softfloat/musl-floatscan.h
+	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-include softfloat/musl-floatscan.h -c $< -o $@
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
 
-$(DYNAMIC_SOFTFLOAT_DIR)/musl-compat.o: softfloat/musl-compat.c \
-	softfloat/musl-floatscan.h
+$(DYNAMIC_SOFTFLOAT_DIR)/musl-compat.o: src/softfloat/musl-compat.c \
+	src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-include softfloat/musl-floatscan.h -c $< -o $@
+		-include src/softfloat/musl-floatscan.h -c $< -o $@
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
 	$(LD) -m elf_i386 -shared -Bsymbolic -e _rtld_start --hash-style=sysv \
@@ -624,11 +611,6 @@ dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
 	$(PYTHON) scripts/check-dynamic-elf.py --machine i386 --role program $(DYNAMIC_DIR)/dyntest
 	@echo "zedBSD i386 dynamic userland artifacts: PASS"
 .PHONY: dynamic-userland-check
-
-$(BUILD)/legacy-pcat-hdd-image.img: $(BUILD)/bootsect.bin $(BUILD)/vmunix $(BUILD)/bin/sh \
-	$(SCRIPTS_DIR)/make-pcat-hdd-image.sh
-	$(SCRIPTS_DIR)/make-pcat-hdd-image.sh $@ $(BUILD)/bootsect.bin \
-		$(BUILD)/vmunix $(BUILD)/bin/sh
 
 $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
 	cp -f $< $@
