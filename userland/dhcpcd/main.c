@@ -113,7 +113,7 @@ write_resolver(const char *interface, const struct dhcp_lease *lease)
 		    "nameserver %s\n", address);
 	}
 	if (used >= sizeof(buffer)) return -1;
-	descriptor = open("/etc/resolv.cfg", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	descriptor = open("/etc/resolv.conf", O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (descriptor < 0) return -1;
 	{ size_t offset = 0; while (offset < used) { ssize_t count = write(descriptor, buffer + offset, used - offset); if (count <= 0) { close(descriptor); return -1; } offset += (size_t)count; } }
 	return close(descriptor);
@@ -183,7 +183,7 @@ main(int argc, char **argv)
 	if (lease.router_count != 0) { struct rtentry route; memset(&route, 0, sizeof(route)); route.rt_flags = RTF_UP | RTF_GATEWAY | RTF_DYNAMIC; route.rt_ifindex = ifindex; sockaddr_value(&route.rt_dst, 0); sockaddr_value(&route.rt_genmask, 0); sockaddr_value(&route.rt_gateway, lease.routers[0]); if (ioctl(control, SIOCADDRT, &route) != 0) goto socket_fail; }
 	{ struct in_addr value = { lease.address }; unsigned prefix = 0; struct in_addr mask = { lease.netmask }; netutil_mask_prefix(mask, &prefix); inet_ntop(AF_INET, &value, text, sizeof(text)); printf("dhcpcd: %s: address %s/%u\n", interface, text, prefix); }
 	if (lease.router_count != 0) { struct in_addr value = { lease.routers[0] }; inet_ntop(AF_INET, &value, text, sizeof(text)); printf("dhcpcd: %s: default route %s\n", interface, text); }
-	if (lease.dns_count != 0) { unsigned i; for (i = 0; i < lease.dns_count; i++) { struct in_addr value = { lease.dns_servers[i] }; inet_ntop(AF_INET, &value, text, sizeof(text)); printf("dhcpcd: %s: dns %s\n", interface, text); } if (write_resolver(interface, &lease) != 0) printf("dhcpcd: warning: cannot write /etc/resolv.cfg: %s\n", strerror(errno)); }
+	if (lease.dns_count != 0) { unsigned i; for (i = 0; i < lease.dns_count; i++) { struct in_addr value = { lease.dns_servers[i] }; inet_ntop(AF_INET, &value, text, sizeof(text)); printf("dhcpcd: %s: dns %s\n", interface, text); } if (write_resolver(interface, &lease) != 0) printf("dhcpcd: warning: cannot write /etc/resolv.conf: %s\n", strerror(errno)); }
 	printf("dhcpcd: %s: lease %u seconds\n", interface, lease.lease_time);
 	close(socket_); close(control); return 0;
 socket_fail:

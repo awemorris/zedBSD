@@ -3,6 +3,10 @@
 #include "kern/net/inet-socket.h"
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
+#include "kern/clock.h"
+#include "kern/lock.h"
+#include "kern/sched.h"
+#include "kern/thread.h"
 #include "internal.h"
 #include "wire.h"
 
@@ -14,6 +18,8 @@
 #define ARP_HARDWARE_ETHERNET 1U
 #define ARP_OPERATION_REQUEST 1U
 #define ARP_OPERATION_REPLY 2U
+#define ARP_RETRY_COUNT 4U
+#define ARP_RETRY_TICKS (KERN_CLOCK_HZ / 4U)
 
 struct arp_entry {
 	struct net_device *device;
@@ -24,14 +30,33 @@ struct arp_entry {
 
 static struct arp_entry cache[ARP_CACHE_MAX];
 static unsigned replacement;
+static struct spinlock cache_lock;
+static struct wait_queue cache_waitq;
+
+static int
+arp_lookup_locked(struct net_device *device, uint32_t address,
+		  uint8_t hardware[6])
+{
+	unsigned index;
+
+	for (index = 0; index < ARP_CACHE_MAX; index++)
+		if (cache[index].valid && cache[index].device == device &&
+		    cache[index].address == address) {
+			memcpy(hardware, cache[index].hardware, 6);
+			return 0;
+		}
+	return ENOENT;
+}
 
 static void
 arp_learn(struct net_device *device, uint32_t address, const uint8_t hardware[6])
 {
 	unsigned index, slot = ARP_CACHE_MAX;
+	unsigned long irq;
 
 	if (address == 0)
 		return;
+	irq = spin_lock_irqsave(&cache_lock);
 	for (index = 0; index < ARP_CACHE_MAX; index++) {
 		if (cache[index].valid && cache[index].device == device &&
 		    cache[index].address == address) {
@@ -48,13 +73,16 @@ arp_learn(struct net_device *device, uint32_t address, const uint8_t hardware[6]
 	cache[slot].address = address;
 	memcpy(cache[slot].hardware, hardware, 6);
 	cache[slot].valid = 1;
+	waitq_wake_all(&cache_waitq);
+	spin_unlock_irqrestore(&cache_lock, irq);
 }
 
 int
 arp_resolve(struct net_device *device, uint32_t address, uint8_t hardware[6])
 {
-	unsigned index;
 	uint32_t local, mask, broadcast;
+	unsigned long irq;
+	int error;
 
 	if (device == NULL || hardware == NULL)
 		return EINVAL;
@@ -64,13 +92,56 @@ arp_resolve(struct net_device *device, uint32_t address, uint8_t hardware[6])
 		memset(hardware, 0xff, 6);
 		return 0;
 	}
-	for (index = 0; index < ARP_CACHE_MAX; index++)
-		if (cache[index].valid && cache[index].device == device &&
-		    cache[index].address == address) {
-			memcpy(hardware, cache[index].hardware, 6);
+	irq = spin_lock_irqsave(&cache_lock);
+	error = arp_lookup_locked(device, address, hardware);
+	spin_unlock_irqrestore(&cache_lock, irq);
+	return error;
+}
+
+int
+arp_resolve_wait(struct net_device *device, uint32_t address,
+		 uint8_t hardware[6])
+{
+	unsigned attempt;
+
+	if (device == NULL || hardware == NULL)
+		return EINVAL;
+	if (arp_resolve(device, address, hardware) == 0)
+		return 0;
+	if (thread_current() == NULL)
+		return EAGAIN;
+	for (attempt = 0; attempt < ARP_RETRY_COUNT; attempt++) {
+		uint64_t sequence, deadline;
+		unsigned long irq;
+		int error;
+
+		irq = spin_lock_irqsave(&cache_lock);
+		if (arp_lookup_locked(device, address, hardware) == 0) {
+			spin_unlock_irqrestore(&cache_lock, irq);
 			return 0;
 		}
-	return ENOENT;
+		sequence = waitq_sequence(&cache_waitq);
+		spin_unlock_irqrestore(&cache_lock, irq);
+		error = arp_request(device, address);
+		if (error != 0)
+			return error;
+		irq = spin_lock_irqsave(&cache_lock);
+		if (arp_lookup_locked(device, address, hardware) == 0) {
+			spin_unlock_irqrestore(&cache_lock, irq);
+			return 0;
+		}
+		deadline = sched_ticks() + ARP_RETRY_TICKS;
+		error = waitq_sleep(&cache_waitq, &cache_lock, sequence,
+		    deadline, WAITQ_INTERRUPTIBLE);
+		if (arp_lookup_locked(device, address, hardware) == 0) {
+			spin_unlock_irqrestore(&cache_lock, irq);
+			return 0;
+		}
+		spin_unlock_irqrestore(&cache_lock, irq);
+		if (error == EINTR)
+			return EINTR;
+	}
+	return EHOSTUNREACH;
 }
 
 static int
@@ -152,5 +223,7 @@ arp_init(void)
 {
 	memset(cache, 0, sizeof(cache));
 	replacement = 0;
+	spin_init(&cache_lock, LOCK_RANK_NETWORK, "ARP cache");
+	waitq_init(&cache_waitq, "ARP resolution");
 	return ethernet_protocol_register(ETHERNET_TYPE_ARP, arp_input);
 }

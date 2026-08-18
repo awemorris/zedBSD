@@ -39,7 +39,7 @@ resolver_load_config(struct resolver_config *config)
 
 	if (config == NULL) return EAI_FAIL;
 	memset(config, 0, sizeof(*config));
-	file = fopen("/etc/resolv.cfg", "r");
+	file = fopen("/etc/resolv.conf", "r");
 	if (file == NULL) return EAI_AGAIN;
 	while (config->count < DNS_MAX_NAMESERVERS &&
 	    fgets(line, sizeof(line), file) != NULL) {

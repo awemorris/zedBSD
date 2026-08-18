@@ -226,7 +226,9 @@ udp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 	wire_put16(udp->checksum, checksum);
 	error = source == 0 ?
 	    ipv4_output_source(device, destination, IPPROTO_UDP, source, packet) :
-	    ipv4_output(device, destination, IPPROTO_UDP, packet);
+	    ((flags & MSG_DONTWAIT) != 0 ?
+	    ipv4_output(device, destination, IPPROTO_UDP, packet) :
+	    ipv4_output_wait(device, destination, IPPROTO_UDP, packet));
 	net_device_release(device);
 	return error == 0 ? (ssize_t)length : -error;
 

@@ -44,7 +44,7 @@ ipv4_protocol_register(uint8_t protocol, ipv4_input_fn input)
 static int
 ipv4_output_common(struct net_device *device, uint32_t destination,
 		   uint8_t protocol, uint32_t source, int source_given,
-		   struct packet_buf *packet)
+		   int wait_for_neighbor, struct packet_buf *packet)
 {
 	struct net_route route;
 	struct ipv4_wire *header;
@@ -80,13 +80,16 @@ ipv4_output_common(struct net_device *device, uint32_t destination,
 		}
 	}
 	next_hop = have_route && route.gateway != 0 ? route.gateway : destination;
-	error = arp_resolve(device, next_hop, hardware);
+	error = wait_for_neighbor ?
+	    arp_resolve_wait(device, next_hop, hardware) :
+	    arp_resolve(device, next_hop, hardware);
 	if (error != 0) {
-		(void)arp_request(device, next_hop);
+		if (!wait_for_neighbor)
+			(void)arp_request(device, next_hop);
 		packet_buf_free(packet);
 		if (have_route)
 			route_release(&route);
-		return EAGAIN;
+		return wait_for_neighbor ? error : EAGAIN;
 	}
 	header = packet_buf_push(packet, sizeof(*header));
 	if (header == NULL) {
@@ -118,7 +121,14 @@ int
 ipv4_output(struct net_device *device, uint32_t destination, uint8_t protocol,
 	    struct packet_buf *packet)
 {
-	return ipv4_output_common(device, destination, protocol, 0, 0, packet);
+	return ipv4_output_common(device, destination, protocol, 0, 0, 0, packet);
+}
+
+int
+ipv4_output_wait(struct net_device *device, uint32_t destination,
+		 uint8_t protocol, struct packet_buf *packet)
+{
+	return ipv4_output_common(device, destination, protocol, 0, 0, 1, packet);
 }
 
 int
@@ -129,7 +139,7 @@ ipv4_output_source(struct net_device *device, uint32_t destination,
 		packet_buf_free(packet);
 		return EINVAL;
 	}
-	return ipv4_output_common(device, destination, protocol, source, 1,
+	return ipv4_output_common(device, destination, protocol, source, 1, 0,
 	    packet);
 }
 

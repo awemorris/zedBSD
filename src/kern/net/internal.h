@@ -20,12 +20,16 @@ uint16_t net_checksum_pseudo(uint32_t source, uint32_t destination,
 
 int arp_init(void);
 int arp_resolve(struct net_device *, uint32_t address, uint8_t hardware[6]);
+int arp_resolve_wait(struct net_device *, uint32_t address,
+		     uint8_t hardware[6]);
 int arp_request(struct net_device *, uint32_t address);
 
 int ipv4_init(void);
 int ipv4_protocol_register(uint8_t protocol, ipv4_input_fn input);
 int ipv4_output(struct net_device *, uint32_t destination, uint8_t protocol,
 		struct packet_buf *);
+int ipv4_output_wait(struct net_device *, uint32_t destination,
+		     uint8_t protocol, struct packet_buf *);
 int ipv4_output_source(struct net_device *, uint32_t destination,
 		       uint8_t protocol, uint32_t source,
 		       struct packet_buf *);
