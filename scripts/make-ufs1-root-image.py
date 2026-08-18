@@ -36,9 +36,18 @@ def build(args: argparse.Namespace) -> None:
     if args.size_mib < 16:
         raise SystemExit("UFS1 root image must be at least 16 MiB")
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    if not native:
+        temporary = args.output.with_name(args.output.name + ".tmp")
+        try:
+            shutil.copyfile(args.arch_image, temporary)
+            temporary.replace(args.output)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+        return
     with tempfile.TemporaryDirectory(prefix="zedbsd-ufs-root-") as work_text:
         root = Path(work_text)
-        for directory in ("bin", "lib", "etc", "home", "apps", "arch",
+        for directory in ("bin", "lib", "etc", "home", "apps",
                           "dev", "boot"):
             (root / directory).mkdir()
         if native:
@@ -60,9 +69,8 @@ def build(args: argparse.Namespace) -> None:
                              root / "lib" / "versuse.so")
                 shutil.copy2(args.native_dyntest,
                              root / "bin" / "dyntest")
-        else:
-            shutil.copyfile(args.arch_image,
-                            root / "arch" / f"{args.arch_profile}.ufs")
+        (root / "etc" / "zedbsd-root").write_text(
+            "zedBSD ufs1 root v1\n", encoding="ascii")
         data = create(args.size_mib * 1024 * 1024, root)
         temporary = args.output.with_name(args.output.name + ".tmp")
         try:

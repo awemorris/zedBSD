@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate an architecture-specific zedBSD UFS1 overlay image."""
+"""Validate an architecture-specific zedBSD UFS1 root image."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ import struct
 from pathlib import Path
 
 from check_ufs1_import import load_checker
-from overlay_journal_format import JOURNAL_BYTES, validate_empty_active_slot
 
 PROFILES={"i386":(1,3),"amd64":(2,62),"aarch64":(2,183)}
 
@@ -27,6 +26,9 @@ def check(args):
     fs=checker.UFS1(args.image.read_bytes()); files=parse_files(args.file)
     if fs.read_file(fs.lookup('/lib/arch.id'))!=(args.profile+'\n').encode():
         raise SystemExit('wrong /lib/arch.id')
+    if fs.read_file(fs.lookup('/etc/zedbsd-root')) != \
+            b'zedBSD ufs1 root v1\n':
+        raise SystemExit('wrong /etc/zedbsd-root marker')
     expected_class,expected_machine=PROFILES[args.profile]
     shell_ino=fs.lookup('/bin/sh')
     shell=fs.read_file(shell_ino)
@@ -34,17 +36,13 @@ def check(args):
         raise SystemExit('/bin/sh has the wrong ELF ABI')
     if fs.u16(fs.inode(shell_ino),0)&0o111==0:
         raise SystemExit('/bin/sh is not executable')
-    for base in ('bin','lib'):
-        validate_empty_active_slot(fs.read_file(fs.lookup(f'/zedovl/{base}0.log')),base)
-        inactive=fs.read_file(fs.lookup(f'/zedovl/{base}1.log'))
-        if len(inactive)!=JOURNAL_BYTES or any(inactive): raise SystemExit('bad inactive overlay journal')
     for destination,source in files.items():
         ino=fs.lookup(destination); actual=fs.read_file(ino); expected=source.read_bytes()
         if hashlib.sha256(actual).digest()!=hashlib.sha256(expected).digest():
             raise SystemExit(f'manifest hash mismatch: {destination}')
         if source.stat().st_mode&0o111 and fs.u16(fs.inode(ino),0)&0o111==0:
             raise SystemExit(f'executable mode lost: {destination}')
-    print(f'{args.image}: {args.profile} UFS1 profile OK')
+    print(f'{args.image}: {args.profile} UFS1 root OK')
 
 
 def main():

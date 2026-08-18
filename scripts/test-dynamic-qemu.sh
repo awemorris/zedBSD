@@ -81,9 +81,9 @@ prepare_pc_overlay()
 	local spec
 	cp --reflink=auto "$source" "$image"
 	spec="$image@@$((2048 * 512))"
-	mcopy -i "$spec" "::/arch/$profile.img" "$inner"
+	mcopy -i "$spec" "::/rootfs.img" "$inner"
 	mcopy -o -i "$inner" "$repo/build/$build_arch/dynamic/dyntest" ::/bin/sh
-	mcopy -o -i "$spec" "$inner" "::/arch/$profile.img"
+	mcopy -o -i "$spec" "$inner" "::/rootfs.img"
 }
 
 run_pcat()
@@ -154,9 +154,9 @@ run_arm64()
 	"$repo/build.sh" hdd-image arm64
 	cp --reflink=auto "$repo/build/arm64/hdd-image.img" "$image"
 	spec="$image@@$((2048 * 512))"
-	mcopy -i "$spec" ::/arch/aarch64.img "$inner"
+	mcopy -i "$spec" ::/rootfs.img "$inner"
 	mcopy -o -i "$inner" "$repo/build/arm64/dynamic/dyntest" ::/bin/sh
-	mcopy -o -i "$spec" "$inner" ::/arch/aarch64.img
+	mcopy -o -i "$spec" "$inner" ::/rootfs.img
 	qemu-system-aarch64 -M raspi4b -smp 4 -m 2G \
 		-kernel "$repo/build/arm64/VMUNIX.A64" \
 		-drive "file=$image,if=sd,format=raw" -serial "file:$log" \

@@ -131,15 +131,30 @@ write_all(const char *bytes, size_t size)
 }
 
 static void
+cursor_left(size_t columns)
+{
+	char sequence[3U * sizeof(size_t) + 4U];
+	size_t at = sizeof(sequence);
+
+	if (columns == 0U)
+		return;
+	sequence[--at] = 'D';
+	do {
+		sequence[--at] = (char)('0' + columns % 10U);
+		columns /= 10U;
+	} while (columns != 0U);
+	sequence[--at] = '[';
+	sequence[--at] = '\033';
+	(void)write_all(sequence + at, sizeof(sequence) - at);
+}
+
+static void
 redraw(const char *prompt, const char *line, size_t length, size_t point)
 {
-	size_t back = length - point + 1U;
-	(void)write_all("\r", 1);
+	(void)write_all("\r\033[2K", 5);
 	(void)write_all(prompt, strlen(prompt));
 	(void)write_all(line, length);
-	(void)write_all(" ", 1);
-	while (back-- != 0)
-		(void)write_all("\b", 1);
+	cursor_left(length - point);
 }
 
 static int

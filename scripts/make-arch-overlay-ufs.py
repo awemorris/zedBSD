@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create an architecture-specific UFS1 userland overlay image."""
+"""Create an architecture-specific UFS1 root filesystem image."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
@@ -11,10 +11,10 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from overlay_journal_format import JOURNAL_BYTES, empty_active_slot, self_test
 from ufs1_format import create
 
-DESTINATION=re.compile(r"/(bin|lib)/[a-z0-9_][a-z0-9_.-]{0,254}")
+DESTINATION=re.compile(
+    r"/(bin|lib)(?:/[a-z0-9_][a-z0-9_.-]{0,254}){1,4}")
 
 
 def parse_files(specifications: list[str]) -> dict[str,Path]:
@@ -31,17 +31,17 @@ def parse_files(specifications: list[str]) -> dict[str,Path]:
 
 
 def build(args: argparse.Namespace) -> None:
-    self_test(); files=parse_files(args.file)
+    files=parse_files(args.file)
     if args.output.exists() and not args.force: raise SystemExit(f"output exists: {args.output}")
     if args.size_mib<16: raise SystemExit("architecture image must be at least 16 MiB")
     args.output.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="zedbsd-arch-ufs-") as work_text:
         root=Path(work_text)
-        for directory in ("bin","lib","zedovl"): (root/directory).mkdir()
+        for directory in ("bin", "lib", "etc", "home", "apps", "dev",
+                          "boot"): (root/directory).mkdir()
         (root/"lib"/"arch.id").write_text(args.profile+"\n",encoding="ascii")
-        for base in ("bin","lib"):
-            (root/"zedovl"/f"{base}0.log").write_bytes(empty_active_slot(base))
-            (root/"zedovl"/f"{base}1.log").write_bytes(bytes(JOURNAL_BYTES))
+        (root/"etc"/"zedbsd-root").write_text(
+            "zedBSD ufs1 root v1\n", encoding="ascii")
         for destination,source in files.items():
             target=root/destination.lstrip("/"); target.parent.mkdir(parents=True,exist_ok=True)
             shutil.copy2(source,target)

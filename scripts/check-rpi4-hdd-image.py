@@ -56,7 +56,7 @@ def check(args: argparse.Namespace) -> None:
             fail("partition 1 is not FAT16")
 
     same_file(args.image, "VMUNIX.A64", args.kernel)
-    same_file(args.image, "arch/aarch64.img", args.arch_image)
+    same_file(args.image, "rootfs.img", args.arch_image)
     same_file(args.image, "config.txt", args.config)
     for name in ("start4.elf", "fixup4.dat", "bcm2711-rpi-4-b.dtb",
                  "overlays/disable-bt.dtbo", "LICENCE.broadcom"):
@@ -65,9 +65,9 @@ def check(args: argparse.Namespace) -> None:
     kernel = extract(args.image, "VMUNIX.A64")
     if len(kernel) < 64 or kernel[56:60] != b"ARM\x64":
         fail("VMUNIX.A64 has no Linux arm64 Image header")
-    with tempfile.TemporaryDirectory(prefix="zedbsd-rpi4-arch-check-") as work:
+    with tempfile.TemporaryDirectory(prefix="zedbsd-rpi4-root-check-") as work:
         inner = Path(work) / "aarch64.img"
-        inner.write_bytes(extract(args.image, "arch/aarch64.img"))
+        inner.write_bytes(extract(args.image, "rootfs.img"))
         checker = Path(__file__).with_name("check-arch-overlay-image.py")
         subprocess.run(["python3", str(checker), "--profile", "aarch64",
                         "--image", str(inner)], check=True)

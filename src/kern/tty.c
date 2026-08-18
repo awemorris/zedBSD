@@ -48,6 +48,10 @@ struct tty {
 };
 
 static struct tty console_tty;
+static struct spinlock console_output_lock;
+static unsigned console_escape_state;
+static unsigned console_escape_parameter;
+static unsigned console_escape_has_parameter;
 
 static void
 tty_flush_input_locked(struct tty *tty)
@@ -84,6 +88,7 @@ tty_console_init(void)
 {
 	memset(&console_tty, 0, sizeof(console_tty));
 	spin_init(&console_tty.lock, LOCK_RANK_TTY, "console tty");
+	spin_init(&console_output_lock, LOCK_RANK_TTY, "console output");
 	waitq_init(&console_tty.read_waitq, "console tty input");
 	tty_default_termios(&console_tty.termios);
 	console_tty.winsize.ws_row = HAL_CONS_ROWS;
@@ -92,10 +97,101 @@ tty_console_init(void)
 }
 
 static void
+tty_console_csi(unsigned command)
+{
+	/* Minimal ANSI cursor/erase baseline shared by every HAL console. */
+	struct hal_cons_state state;
+	unsigned amount = console_escape_has_parameter ?
+		console_escape_parameter : 1U;
+
+	hal_cons_save_state(&state);
+	switch (command) {
+	case 'A':
+		state.row = amount < state.row ? state.row - amount : 0U;
+		(void)hal_cons_set_cursor(state.row, state.column);
+		break;
+	case 'B':
+		state.row += amount;
+		if (state.row >= HAL_CONS_ROWS)
+			state.row = HAL_CONS_ROWS - 1U;
+		(void)hal_cons_set_cursor(state.row, state.column);
+		break;
+	case 'C':
+		state.column += amount;
+		if (state.column >= HAL_CONS_COLUMNS)
+			state.column = HAL_CONS_COLUMNS - 1U;
+		(void)hal_cons_set_cursor(state.row, state.column);
+		break;
+	case 'D':
+		state.column = amount < state.column ? state.column - amount : 0U;
+		(void)hal_cons_set_cursor(state.row, state.column);
+		break;
+	case 'G':
+		state.column = amount == 0U ? 0U : amount - 1U;
+		if (state.column >= HAL_CONS_COLUMNS)
+			state.column = HAL_CONS_COLUMNS - 1U;
+		(void)hal_cons_set_cursor(state.row, state.column);
+		break;
+	case 'K':
+		if (amount == 2U) {
+			hal_cons_clear_row(state.row);
+			(void)hal_cons_set_cursor(state.row, state.column);
+		} else if (!console_escape_has_parameter || amount == 0U) {
+			hal_cons_clear_to_eol();
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+static void
 tty_echo(const char *bytes, size_t length)
 {
-	if (length != 0)
-		hal_cons_write_n(bytes, (unsigned)length);
+	size_t index = 0;
+	unsigned long irq;
+
+	if (length == 0)
+		return;
+	irq = spin_lock_irqsave(&console_output_lock);
+	while (index < length) {
+		if (console_escape_state == 0U) {
+			size_t start = index;
+			while (index < length && (unsigned char)bytes[index] != 0x1bU)
+				index++;
+			if (index != start)
+				hal_cons_write_n(bytes + start, (unsigned)(index - start));
+			if (index < length) {
+				console_escape_state = 1U;
+				index++;
+			}
+			continue;
+		}
+		if (console_escape_state == 1U) {
+			if (bytes[index++] == '[') {
+				console_escape_state = 2U;
+				console_escape_parameter = 0U;
+				console_escape_has_parameter = 0U;
+			} else {
+				static const char escape = '\033';
+				hal_cons_write_n(&escape, 1U);
+				hal_cons_write_n(bytes + index - 1U, 1U);
+				console_escape_state = 0U;
+			}
+			continue;
+		}
+		if (bytes[index] >= '0' && bytes[index] <= '9') {
+			console_escape_has_parameter = 1U;
+			if (console_escape_parameter < 1000U)
+				console_escape_parameter = console_escape_parameter * 10U +
+				    (unsigned)(bytes[index] - '0');
+			index++;
+			continue;
+		}
+		tty_console_csi((unsigned char)bytes[index++]);
+		console_escape_state = 0U;
+	}
+	spin_unlock_irqrestore(&console_output_lock, irq);
 }
 
 static void

@@ -25,9 +25,11 @@ for cpus in 1 2 4 8; do
 	image="$work/amd64-${cpus}.img"
 	log="$work/amd64-${cpus}.log"
 	cp --reflink=auto "$repo/build/amd64/hdd-image.img" "$image"
-	mmd -i "$image@@$((2048 * 512))" ::/etc 2>/dev/null || true
-	mcopy -o -i "$image@@$((2048 * 512))" "$work/zinit.rc" \
-		::/etc/zinit.rc
+	rootfs="$work/rootfs-${cpus}.img"
+	mcopy -i "$image@@$((2048 * 512))" ::/rootfs.img "$rootfs"
+	mmd -i "$rootfs" ::/etc 2>/dev/null || true
+	mcopy -o -i "$rootfs" "$work/zinit.rc" ::/etc/zinit.rc
+	mcopy -o -i "$image@@$((2048 * 512))" "$rootfs" ::/rootfs.img
 	"$qemu" -M pc -cpu qemu64 -smp "$cpus" -m 128M -accel tcg \
 		-nic none -display none -serial none -monitor none -snapshot \
 		-no-reboot -no-shutdown \

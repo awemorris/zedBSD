@@ -168,13 +168,16 @@ printf '%s\n' \
 	'echo SH_BUILTINS_PASS' \
 	'halt' >"$work/zinit.rc"
 
-mmd -i "$work/test.img@@$offset" ::/etc 2>/dev/null || true
-mcopy -i "$work/test.img@@$offset" "$work/source.txt" ::/source.txt
-mcopy -i "$work/test.img@@$offset" "$work/argtest" ::/argtest
-mcopy -i "$work/test.img@@$offset" "$work/sourced" ::/sourced
-mcopy -i "$work/test.img@@$offset" "$work/rdinput" ::/rdinput
-mcopy -i "$work/test.img@@$offset" "$work/xarginput" ::/xarg
-mcopy -i "$work/test.img@@$offset" "$work/zinit.rc" ::/etc/zinit.rc
+rootfs="$work/rootfs.img"
+mcopy -i "$work/test.img@@$offset" ::/rootfs.img "$rootfs"
+mmd -i "$rootfs" ::/etc 2>/dev/null || true
+mcopy -i "$rootfs" "$work/source.txt" ::/source.txt
+mcopy -i "$rootfs" "$work/argtest" ::/argtest
+mcopy -i "$rootfs" "$work/sourced" ::/sourced
+mcopy -i "$rootfs" "$work/rdinput" ::/rdinput
+mcopy -i "$rootfs" "$work/xarginput" ::/xarg
+mcopy -i "$rootfs" "$work/zinit.rc" ::/etc/zinit.rc
+mcopy -o -i "$work/test.img@@$offset" "$rootfs" ::/rootfs.img
 
 case "$arch" in
 pcat)
@@ -300,32 +303,30 @@ file.close()
 PY
 	wait "$keyboard_pid" 2>/dev/null || true
 	keyboard_pid=
-	mdir -i "$work/keyboard.img@@$offset" ::/kbd-ok >/dev/null
+	mcopy -i "$work/keyboard.img@@$offset" ::/rootfs.img \
+		"$work/keyboard-rootfs.img"
+	mdir -i "$work/keyboard-rootfs.img" ::/kbd-ok >/dev/null
 	;;
 esac
 
+result_rootfs="$work/result-rootfs.img"
+mcopy -i "$work/test.img@@$offset" ::/rootfs.img "$result_rootfs"
 for name in copy.txt copy2.txt; do
-	mcopy -i "$work/test.img@@$offset" "::/$name" "$work/$name"
+	mcopy -i "$result_rootfs" "::/$name" "$work/$name"
 	cmp "$work/source.txt" "$work/$name"
 done
-mcopy -i "$work/test.img@@$offset" ::/touch.txt "$work/touch.txt"
+mcopy -i "$result_rootfs" ::/touch.txt "$work/touch.txt"
 test ! -s "$work/touch.txt"
 
-mcopy -i "$work/test.img@@$offset" ::/cmdmov \
+mcopy -i "$result_rootfs" ::/cmdmov \
 	"$work/command-moved.txt"
 cmp "$work/source.txt" "$work/command-moved.txt"
-mcopy -i "$work/test.img@@$offset" ::/cmdemp \
+mcopy -i "$result_rootfs" ::/cmdemp \
 	"$work/command-empty.txt"
 test "$(stat -c %s "$work/command-empty.txt")" -eq 4
 
-# /bin is a direct overlay: the write must persist inside the selected inner
-# FAT image and must never leak into the outer lower /bin directory.
-if mdir -i "$work/test.img@@$offset" ::/bin/overlay.txt >/dev/null 2>&1; then
-	echo "overlay write leaked into the outer FAT /bin" >&2
-	exit 1
-fi
-mcopy -i "$work/test.img@@$offset" ::/arch/i386.img "$work/i386.img"
-mcopy -i "$work/i386.img" ::/bin/overlay.txt "$work/overlay.txt"
+# /bin belongs directly to the selected root filesystem image.
+mcopy -i "$result_rootfs" ::/bin/overlay.txt "$work/overlay.txt"
 cmp "$work/source.txt" "$work/overlay.txt"
 
 echo "zedBSD /bin/sh builtin QEMU test: PASS ($arch)"

@@ -74,16 +74,19 @@ printf '%s\n' \
 
 "$repo/build.sh" bios-hdd-image pc98 build/pc98/bin/noct
 cp --reflink=auto "$build/bios-hdd-image.img" "$image"
-mmd -i "$image@@$offset" ::/apps
-mmd -i "$image@@$offset" ::/etc
-mmd -i "$image@@$offset" ::/home
-mcopy -o -i "$image@@$offset" "$build/bin/noct" ::/bin/noct
-mcopy -o -i "$image@@$offset" "$repo/apps/ls.nct" ::/apps/ls.nct
-mcopy -o -i "$image@@$offset" "$repo/apps/cp.nct" ::/apps/cp.nct
-mcopy -o -i "$image@@$offset" "$search_file" ::/apps/search.nct
-mcopy -o -i "$image@@$offset" "$cwd_script" ::/apps/cwdcheck.nct
-mcopy -o -i "$image@@$offset" "$source_file" ::/source.bin
-mcopy -o -i "$image@@$offset" "$cfg" ::/etc/zinit.rc
+rootfs="$work/rootfs.img"
+mcopy -i "$image@@$offset" ::/rootfs.img "$rootfs"
+mmd -i "$rootfs" ::/apps 2>/dev/null || true
+mmd -i "$rootfs" ::/etc 2>/dev/null || true
+mmd -i "$rootfs" ::/home 2>/dev/null || true
+mcopy -o -i "$rootfs" "$build/bin/noct" ::/bin/noct
+mcopy -o -i "$rootfs" "$repo/apps/ls.nct" ::/apps/ls.nct
+mcopy -o -i "$rootfs" "$repo/apps/cp.nct" ::/apps/cp.nct
+mcopy -o -i "$rootfs" "$search_file" ::/apps/search.nct
+mcopy -o -i "$rootfs" "$cwd_script" ::/apps/cwdcheck.nct
+mcopy -o -i "$rootfs" "$source_file" ::/source.bin
+mcopy -o -i "$rootfs" "$cfg" ::/etc/zinit.rc
+mcopy -o -i "$image@@$offset" "$rootfs" ::/rootfs.img
 
 set +e
 timeout --signal=INT --kill-after=5 45 \

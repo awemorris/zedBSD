@@ -27,46 +27,16 @@
 #define PHYSICAL_DISK_MAX 4U
 #define VFS_HIGH __attribute__((section(".hightext")))
 
-struct userland_profile_desc {
-	const char *name;
-	const char *fat_image_path;
-	const char *ufs_image_path;
-	const char *init_path;
-};
-
-struct arch_userland_state {
-	struct disk *loop_disk;
-	struct mount *private_mount;
-	struct mount *bin_overlay;
-	struct mount *lib_overlay;
-	struct path lower_bin;
-	struct path lower_lib;
-	struct path upper_bin;
-	struct path upper_lib;
-	struct path metadata_root;
-	int active;
-};
-
 #if defined(HAL_ARCH_I386)
-static const struct userland_profile_desc userland_profile = {
-	"i386", "/arch/i386.img", "/arch/i386.ufs", "/bin/sh"
-};
-#define ZEDBSD_HAS_ARCH_USERLAND 1
+#define ROOTFS_IMAGE_PRIMARY "/rootfs.img"
+#define ROOTFS_IMAGE_UNIFIED_PC98 "/rootfs.98"
+#define ROOTFS_IMAGE_UNIFIED_OTHER "/rootfs.x86"
 #elif defined(HAL_ARCH_AMD64)
-static const struct userland_profile_desc userland_profile = {
-	"amd64", "/arch/amd64.img", "/arch/amd64.ufs", "/bin/sh"
-};
-#define ZEDBSD_HAS_ARCH_USERLAND 1
+#define ROOTFS_IMAGE_PRIMARY "/rootfs.img"
+#define ROOTFS_IMAGE_UNIFIED_OTHER "/rootfs.x64"
 #elif defined(HAL_ARCH_ARM64)
-static const struct userland_profile_desc userland_profile = {
-	"aarch64", "/arch/aarch64.img", "/arch/aarch64.ufs", "/bin/sh"
-};
-#define ZEDBSD_HAS_ARCH_USERLAND 1
-#endif
-
-#ifdef ZEDBSD_HAS_ARCH_USERLAND
-static struct arch_userland_state arch_userland
-	__attribute__((section(".vfs_bss")));
+#define ROOTFS_IMAGE_PRIMARY "/rootfs.img"
+#define ROOTFS_IMAGE_UNIFIED_OTHER "/rootfs.rp4"
 #endif
 
 struct cwdinfo kern_cwdinfo __attribute__((section(".vfs_bss")));
@@ -160,151 +130,6 @@ out:
 	return error;
 }
 
-#ifdef ZEDBSD_HAS_ARCH_USERLAND
-static VFS_HIGH void
-vfs_arch_userland_cleanup(void)
-{
-	if (arch_userland.lib_overlay != NULL) {
-		(void)unmount("/lib", 0);
-		arch_userland.lib_overlay = NULL;
-	}
-	if (arch_userland.bin_overlay != NULL) {
-		(void)unmount("/bin", 0);
-		arch_userland.bin_overlay = NULL;
-	}
-	path_release(&arch_userland.metadata_root);
-	path_release(&arch_userland.upper_lib);
-	path_release(&arch_userland.upper_bin);
-	if (arch_userland.private_mount != NULL) {
-		(void)unmount_private(arch_userland.private_mount);
-		arch_userland.private_mount = NULL;
-	}
-	if (arch_userland.loop_disk != NULL) {
-		(void)loop_detach(arch_userland.loop_disk);
-		arch_userland.loop_disk = NULL;
-	}
-	path_release(&arch_userland.lower_lib);
-	path_release(&arch_userland.lower_bin);
-	arch_userland.active = 0;
-}
-
-static VFS_HIGH int
-vfs_check_profile_marker(const struct userland_profile_desc *profile)
-{
-	struct path marker;
-	struct file *file;
-	char value[32];
-	ssize_t count;
-	size_t expected = strlen(profile->name);
-	int error;
-	path_init(&marker);
-	error = mount_private_lookup(arch_userland.private_mount,
-		"lib/arch.id", &marker);
-	if (error != 0)
-		return error;
-	error = file_open_resolved(&marker, O_RDONLY, &file);
-	path_release(&marker);
-	if (error != 0)
-		return error;
-	count = file_read(file, value, sizeof(value));
-	(void)file_close(file);
-	if (count < 0)
-		return (int)-count;
-	if ((size_t)count != expected + 1U || value[expected] != '\n' ||
-	    memcmp(value, profile->name, expected))
-		return EINVAL;
-	return 0;
-}
-
-static VFS_HIGH int
-vfs_mount_arch_userland(const struct userland_profile_desc *profile,
-			const struct path *root, int ufs_profile)
-{
-	struct overlay_mount_args args;
-	struct path shell;
-	const char *image_path = ufs_profile ? profile->ufs_image_path :
-		profile->fat_image_path;
-	const char *filesystem = ufs_profile ? "ufs1" : "fat";
-	const char *stage = "capture lower /bin";
-	int error;
-	memset(&arch_userland, 0, sizeof(arch_userland));
-	path_init(&arch_userland.lower_bin);
-	path_init(&arch_userland.lower_lib);
-	path_init(&arch_userland.upper_bin);
-	path_init(&arch_userland.upper_lib);
-	path_init(&arch_userland.metadata_root);
-	error = namei_path_at(&kern_cwdinfo, "/bin", &arch_userland.lower_bin);
-	if (error != 0) goto fail;
-	stage = "capture lower /lib";
-	error = namei_path_at(&kern_cwdinfo, "/lib", &arch_userland.lower_lib);
-	if (error != 0) goto fail;
-	stage = "attach profile loop";
-	error = loop_attach_path(root, image_path, LOOP_READ_WRITE,
-		&arch_userland.loop_disk);
-	if (error != 0) goto fail;
-	stage = "mount private profile filesystem";
-	error = mount_private(filesystem, arch_userland.loop_disk, 0, NULL,
-		&arch_userland.private_mount);
-	if (error != 0) goto fail;
-	stage = "lookup private /bin";
-	error = mount_private_lookup(arch_userland.private_mount, "bin",
-		&arch_userland.upper_bin);
-	if (error != 0) goto fail;
-	stage = "lookup private /lib";
-	error = mount_private_lookup(arch_userland.private_mount, "lib",
-		&arch_userland.upper_lib);
-	if (error != 0) goto fail;
-	stage = "lookup private metadata";
-	error = mount_private_lookup(arch_userland.private_mount, "zedovl",
-		&arch_userland.metadata_root);
-	if (error != 0) goto fail;
-	if (arch_userland.upper_bin.p_inode->i_type != INODE_DIR ||
-	    arch_userland.upper_lib.p_inode->i_type != INODE_DIR ||
-	    arch_userland.metadata_root.p_inode->i_type != INODE_DIR) {
-		error = ENOTDIR;
-		goto fail;
-	}
-	stage = "validate profile marker";
-	error = vfs_check_profile_marker(profile);
-	if (error != 0) goto fail;
-	memset(&args, 0, sizeof(args));
-	args.upper = arch_userland.upper_bin;
-	args.lower = arch_userland.lower_bin;
-	args.metadata_root = arch_userland.metadata_root;
-	args.journal_base = "bin";
-	args.flags = OVERLAY_READ_WRITE;
-	stage = "mount /bin overlay";
-	error = overlay_mount_at(root->p_mount, "bin", &args,
-		&arch_userland.bin_overlay);
-	if (error != 0) goto fail;
-	args.upper = arch_userland.upper_lib;
-	args.lower = arch_userland.lower_lib;
-	args.journal_base = "lib";
-	stage = "mount /lib overlay";
-	error = overlay_mount_at(root->p_mount, "lib", &args,
-		&arch_userland.lib_overlay);
-	if (error != 0) goto fail;
-	path_init(&shell);
-	stage = "resolve /bin/sh";
-	error = namei_path_at(&kern_cwdinfo, profile->init_path, &shell);
-	if (error == 0 && shell.p_inode->i_type != INODE_REG)
-		error = ENOEXEC;
-	path_release(&shell);
-	if (error != 0) goto fail;
-	arch_userland.active = 1;
-	hal_printf("vfs: userland profile=%s image=%s loop=%s "
-	    "source=private fs=%s overlay=rw\n", profile->name, image_path,
-	    arch_userland.loop_disk->d_name, filesystem);
-	return 0;
-fail:
-	hal_printf("vfs: userland stage=%s profile=%s image=%s "
-	    "failed (error %d)\n", stage, profile->name, image_path,
-	    error);
-	vfs_arch_userland_cleanup();
-	return error;
-}
-#endif
-
 int
 kern_vfs_init(const struct zedbsd_handoff *handoff,
 	      const struct zedbsd_device *devices, unsigned device_count)
@@ -313,10 +138,15 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	struct disk *boot_physical = NULL;
 	struct disk *boot_partition = NULL;
 	struct disk *root_partition = NULL;
+	struct disk *root_loop = NULL;
 	struct mount *boot_mount,*root_mount;
+#ifdef ROOTFS_IMAGE_PRIMARY
+	struct mount *boot_private = NULL;
+#endif
 	struct path boot_path;
 	struct path root_path;
 	const char *failure_stage = "initialize root cwd";
+	int separate_boot = 0;
 	unsigned physical_count = 0, next_number = 1, i;
 	int error;
 
@@ -456,17 +286,56 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		root_partition=partition->p_disk;
 	}
 	path_init(&boot_path);
-	{
-		struct fat_mount_args args = {
-			root_partition!=NULL?root_partition->d_name:
-			boot_partition->d_name
-		};
-		error = mount_root_create(root_partition!=NULL?"ufs1":"auto", 0,
-			&args, &root_mount);
+#ifdef ROOTFS_IMAGE_PRIMARY
+	if (root_partition == NULL) {
+		struct path private_root;
+		path_init(&private_root);
+		error = mount_private("auto", boot_partition, 0, NULL,
+		    &boot_private);
+		if (error == 0) {
+			path_set(&private_root, boot_private, boot_private->m_root);
+			error = loop_attach_path(&private_root, ROOTFS_IMAGE_PRIMARY,
+			    LOOP_READ_WRITE, &root_loop);
+			if (error == ENOENT) {
+				const char *unified = ROOTFS_IMAGE_UNIFIED_OTHER;
+#ifdef ROOTFS_IMAGE_UNIFIED_PC98
+				if (handoff->version == ZEDBSD_HANDOFF_VERSION_PC98)
+					unified = ROOTFS_IMAGE_UNIFIED_PC98;
+#endif
+				error = loop_attach_path(&private_root,
+				    unified, LOOP_READ_WRITE, &root_loop);
+			}
+			path_release(&private_root);
+		}
+		if (error == 0) {
+			struct fat_mount_args args = { root_loop->d_name };
+			error = mount_root_create("auto", 0, &args, &root_mount);
+			if (error == 0) {
+				separate_boot = 1;
+				hal_printf("vfs: root=image disk=%s boot=%s\n",
+				    root_loop->d_name, boot_partition->d_name);
+			}
+		} else if (error == ENOENT) {
+			(void)unmount_private(boot_private);
+			boot_private = NULL;
+			error = 0;
+		}
+		if (error != 0)
+			return vfs_fail("attach rootfs image", error);
+	}
+#endif
+	if (root_partition != NULL) {
+		struct fat_mount_args args = { root_partition->d_name };
+		error = mount_root_create("ufs1", 0, &args, &root_mount);
+		separate_boot = error == 0;
+	} else if (root_loop == NULL) {
+		struct fat_mount_args args = { boot_partition->d_name };
+		error = mount_root_create("auto", 0, &args, &root_mount);
 	}
 	if (error != 0)
-		return vfs_fail(root_partition!=NULL?"mount UFS1 root":
-			"mount boot FAT root", error);
+		return vfs_fail(root_partition != NULL ? "mount UFS1 root" :
+		    root_loop != NULL ? "mount rootfs image" :
+		    "mount boot FAT root", error);
 	path_set(&root_path, root_mount, root_mount->m_root);
 	error = cwdinfo_init(&kern_cwdinfo, &root_path);
 	if (error != 0)
@@ -489,15 +358,16 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	error = mount_at("tmpfs", &root_path, "run", 0, NULL, NULL);
 	if (error != 0)
 		goto out_root;
-	if(root_partition!=NULL) {
+	if(separate_boot) {
 		struct fat_mount_args args={boot_partition->d_name};
 		failure_stage="mount boot FAT at /boot";
 		error=mount_at("auto",&root_path,"boot",0,&args,&boot_mount);
 		if(error!=0)
 			goto out_root;
 		path_set(&boot_path,boot_mount,boot_mount->m_root);
-		hal_printf("vfs: root=ufs1 disk=%s boot=%s\n",
-			root_partition->d_name,boot_partition->d_name);
+		if (root_partition != NULL)
+			hal_printf("vfs: root=ufs1 disk=%s boot=%s\n",
+			    root_partition->d_name,boot_partition->d_name);
 	} else {
 		boot_mount=root_mount;
 		path_set(&boot_path,boot_mount,boot_mount->m_root);
@@ -543,15 +413,7 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		if (error == 0)
 			next_number++;
 	}
-#ifdef ZEDBSD_HAS_ARCH_USERLAND
-	failure_stage = "mount architecture userland";
-	error = vfs_mount_arch_userland(&userland_profile, &root_path,
-		root_partition != NULL);
-	if (error != 0)
-		goto out_root;
-#endif
-	error = swap_fat_activate(&kern_cwdinfo,
-		root_partition!=NULL?"/boot":"/");
+	error = swap_fat_activate(&kern_cwdinfo, separate_boot ? "/boot" : "/");
 	if (error != 0 && error != ENOENT)
 		hal_printf("swap: /swapfile disabled (%d)\n", error);
 	path_release(&boot_path);

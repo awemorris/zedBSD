@@ -29,8 +29,10 @@ command -v "$qemu" >/dev/null
 cp --reflink=auto "$source_image" "$work/test.img"
 printf '%s\n' 'echo A64 UEFI USER32 PASS' 'halt' >"$work/zinit.rc"
 offset=$((2048 * 512))
-mmd -i "$work/test.img@@$offset" ::/etc 2>/dev/null || true
-mcopy -o -i "$work/test.img@@$offset" "$work/zinit.rc" ::/etc/zinit.rc
+mcopy -i "$work/test.img@@$offset" ::/rootfs.x64 "$work/rootfs.x64"
+mmd -i "$work/rootfs.x64" ::/etc 2>/dev/null || true
+mcopy -o -i "$work/rootfs.x64" "$work/zinit.rc" ::/etc/zinit.rc
+mcopy -o -i "$work/test.img@@$offset" "$work/rootfs.x64" ::/rootfs.x64
 
 run_one()
 {

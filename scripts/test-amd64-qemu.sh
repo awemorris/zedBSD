@@ -23,8 +23,11 @@ cp --reflink=auto "$source_image" "$work/test.img"
 cp --reflink=auto "$fragmented_image" "$work/fragmented.img"
 printf '%s\n' 'echo AMD64 USER64 PASS' 'halt' >"$work/zinit.rc"
 for image in "$work/test.img" "$work/fragmented.img"; do
-	mmd -i "$image@@$offset" ::/etc 2>/dev/null || true
-	mcopy -o -i "$image@@$offset" "$work/zinit.rc" ::/etc/zinit.rc
+	inner="$work/$(basename "$image").rootfs"
+	mcopy -i "$image@@$offset" ::/rootfs.img "$inner"
+	mmd -i "$inner" ::/etc 2>/dev/null || true
+	mcopy -o -i "$inner" "$work/zinit.rc" ::/etc/zinit.rc
+	mcopy -o -i "$image@@$offset" "$inner" ::/rootfs.img
 done
 
 qemu="${QEMU_PCAT_X86_64:-qemu-system-x86_64}"

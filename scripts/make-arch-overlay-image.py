@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create an architecture-specific raw FAT16 userland overlay image."""
+"""Create an architecture-specific raw FAT16 root filesystem image."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
@@ -12,9 +12,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from overlay_journal_format import JOURNAL_BYTES, empty_active_slot, self_test
-
-
 PROFILES = {
     "i386": ("ZEDI386", 1, 3),
     "amd64": ("ZEDAMD64", 2, 62),
@@ -22,7 +19,6 @@ PROFILES = {
 }
 FAT_COMPONENT = r"[a-z0-9_]{1,8}(?:\.[a-z0-9_]{1,3})?"
 DESTINATION = re.compile(rf"/(bin|lib)(?:/{FAT_COMPONENT}){{1,4}}")
-TEMP_NAME = re.compile(r"ov[0-9a-f]{4}\.tmp")
 
 
 def run(*arguments: str) -> None:
@@ -39,9 +35,6 @@ def parse_files(specifications: list[str]) -> dict[str, Path]:
         source = Path(source_text)
         if not DESTINATION.fullmatch(destination):
             raise SystemExit(f"invalid FAT16 destination: {destination}")
-        if any(TEMP_NAME.fullmatch(component)
-               for component in destination.split("/")[1:]):
-            raise SystemExit(f"reserved overlay temporary name: {destination}")
         key = destination.casefold()
         if key in folded:
             raise SystemExit(f"case-insensitive destination collision: {destination}")
@@ -57,7 +50,6 @@ def parse_files(specifications: list[str]) -> dict[str, Path]:
 
 
 def create(args: argparse.Namespace) -> None:
-    self_test()
     label, _, _ = PROFILES[args.profile]
     files = parse_files(args.file)
     if args.size_mib < 16:
@@ -75,7 +67,8 @@ def create(args: argparse.Namespace) -> None:
         # -h/-s select a geometry whose 16-MiB default formats as FAT16.
         run("mformat", "-i", str(temporary), "-h", "16", "-s", "32",
             "-v", label, "::")
-        for directory in ("bin", "lib", "zedovl"):
+        for directory in ("bin", "lib", "etc", "home", "apps", "dev",
+                          "boot"):
             run("mmd", "-i", str(temporary), f"::/{directory}")
         parents = set()
         for destination in files:
@@ -90,15 +83,6 @@ def create(args: argparse.Namespace) -> None:
             marker = work / "arch.id"
             marker.write_text(args.profile + "\n", encoding="ascii")
             run("mcopy", "-i", str(temporary), str(marker), "::/lib/arch.id")
-            for base in ("bin", "lib"):
-                active = work / f"{base}0.log"
-                inactive = work / f"{base}1.log"
-                active.write_bytes(empty_active_slot(base))
-                inactive.write_bytes(bytes(JOURNAL_BYTES))
-                run("mcopy", "-i", str(temporary), str(active),
-                    f"::/zedovl/{base}0.log")
-                run("mcopy", "-i", str(temporary), str(inactive),
-                    f"::/zedovl/{base}1.log")
         for destination, source in sorted(files.items()):
             run("mcopy", "-i", str(temporary), str(source), f"::{destination}")
         checker = Path(__file__).with_name("check-arch-overlay-image.py")

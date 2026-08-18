@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate an architecture-specific raw FAT16 userland overlay image."""
+"""Validate an architecture-specific raw FAT16 root filesystem image."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
@@ -10,9 +10,6 @@ import re
 import struct
 import subprocess
 from pathlib import Path
-
-from overlay_journal_format import JOURNAL_BYTES, validate_empty_active_slot
-
 
 PROFILES = {
     "i386": ("ZEDI386", 1, 3),
@@ -80,12 +77,6 @@ def check(args: argparse.Namespace) -> None:
         raise SystemExit("/bin/sh is missing or is not ELF")
     if shell[4] != expected_class or struct.unpack_from("<H", shell, 18)[0] != expected_machine:
         raise SystemExit("/bin/sh has the wrong profile ABI")
-    for base in ("bin", "lib"):
-        active = extract(args.image, f"/zedovl/{base}0.log")
-        inactive = extract(args.image, f"/zedovl/{base}1.log")
-        validate_empty_active_slot(active, base)
-        if len(inactive) != JOURNAL_BYTES or any(inactive):
-            raise SystemExit(f"{base} inactive journal is not 128 KiB of zeroes")
     for destination, source in files.items():
         actual = extract(args.image, destination)
         expected = source.read_bytes()
@@ -104,7 +95,7 @@ def check(args: argparse.Namespace) -> None:
     free_bytes = int(match.group(1).replace(",", "").replace(" ", ""))
     if free_bytes < args.min_free_bytes:
         raise SystemExit(f"inner image free reserve is too small: {free_bytes}")
-    print(f"{args.image}: {args.profile} FAT16 profile OK, {free_bytes} bytes free")
+    print(f"{args.image}: {args.profile} FAT16 root OK, {free_bytes} bytes free")
 
 
 def main() -> None:

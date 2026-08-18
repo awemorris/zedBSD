@@ -40,10 +40,13 @@ run_backend()
 	local vga="$1" marker="$2"
 	local disk="$work/$vga.img" monitor="$work/$vga.sock"
 	local log="$work/$vga.log" shot="$work/$vga.ppm"
+	local rootfs="$work/$vga-rootfs.img"
 	cp --reflink=auto -f "$image" "$disk"
-	mmd -i "$disk@@$offset" ::/etc 2>/dev/null || true
-	mcopy -o -i "$disk@@$offset" "$work/files/GFX.NCT" ::/GFX.NCT
-	mcopy -o -i "$disk@@$offset" "$work/files/ZINIT.RC" ::/etc/zinit.rc
+	mcopy -i "$disk@@$offset" ::/rootfs.x86 "$rootfs"
+	mmd -i "$rootfs" ::/etc 2>/dev/null || true
+	mcopy -o -i "$rootfs" "$work/files/GFX.NCT" ::/GFX.NCT
+	mcopy -o -i "$rootfs" "$work/files/ZINIT.RC" ::/etc/zinit.rc
+	mcopy -o -i "$disk@@$offset" "$rootfs" ::/rootfs.x86
 	rm -f -- "$monitor" "$log" "$shot"
 	"$qemu" -M pc -cpu 486 -m 64 -accel tcg -nic none -vga "$vga" \
 		-display none -serial none -monitor none -no-reboot \

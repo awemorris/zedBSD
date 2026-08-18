@@ -4,6 +4,7 @@
 
 import argparse
 import os
+import shutil
 import struct
 import subprocess
 import tempfile
@@ -148,6 +149,7 @@ def create(args: argparse.Namespace) -> None:
                                            dir=args.output.parent)
     os.close(fd)
     temporary = Path(temporary_name)
+    rootfs_work = tempfile.TemporaryDirectory(prefix="zedbsd-rootfs-")
     try:
         with temporary.open("r+b") as stream:
             stream.truncate(total_sectors * SECTOR_SIZE)
@@ -174,21 +176,23 @@ def create(args: argparse.Namespace) -> None:
                     args.fragment_kernels)
         copy_kernel(temporary, offset, args.arm64_kernel, "VMUNIX.A64",
                     args.fragment_kernels)
-        for directory in ("bin", "lib", "arch"):
-            run("mmd", "-i", f"{temporary}@@{offset}", f"::/{directory}")
-        for profile, source in (("i386", args.i386_arch_image),
-                                ("amd64", args.amd64_arch_image),
-                                ("aarch64", args.aarch64_arch_image)):
-            run("mcopy", "-i", f"{temporary}@@{offset}", str(source),
-                f"::/arch/{profile}.img")
-        if args.holoris or args.remacs:
-            run("mmd", "-i", f"{temporary}@@{offset}", "::/apps")
-        if args.holoris:
-            run("mcopy", "-i", f"{temporary}@@{offset}",
-                str(args.holoris), "::/apps/holoris.nct")
-        if args.remacs:
-            run("mcopy", "-i", f"{temporary}@@{offset}",
-                str(args.remacs), "::/apps/remacs.nap")
+        for profile, source in (("98", args.i386_arch_image),
+                                ("x86", args.i386_arch_image),
+                                ("x64", args.amd64_arch_image),
+                                ("rp4", args.aarch64_arch_image)):
+            installed = source
+            if profile in ("98", "x86") and \
+                    (args.holoris is not None or args.remacs is not None):
+                installed = Path(rootfs_work.name) / f"rootfs.{profile}"
+                shutil.copyfile(source, installed)
+                if args.holoris is not None:
+                    run("mcopy", "-o", "-i", str(installed),
+                        str(args.holoris), "::/apps/holoris.nct")
+                if args.remacs is not None:
+                    run("mcopy", "-o", "-i", str(installed),
+                        str(args.remacs), "::/apps/remacs.nap")
+            run("mcopy", "-i", f"{temporary}@@{offset}", str(installed),
+                f"::/rootfs.{profile}")
         run("mmd", "-i", f"{temporary}@@{offset}", "::/overlays")
         run("mcopy", "-i", f"{temporary}@@{offset}",
             str(args.rpi4_config), "::/config.txt")
@@ -223,6 +227,7 @@ def create(args: argparse.Namespace) -> None:
             str(temporary))
         os.replace(temporary, args.output)
     finally:
+        rootfs_work.cleanup()
         if temporary.exists():
             temporary.unlink()
 

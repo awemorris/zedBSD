@@ -5,6 +5,7 @@
 import argparse
 import os
 import re
+import shutil
 import struct
 import subprocess
 import tempfile
@@ -141,10 +142,16 @@ def create(args: argparse.Namespace) -> None:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.kernel),
                 "::VMUNIX")
         if args.arch_image is not None:
-            for directory in ("bin", "lib", "arch"):
-                run("mmd", "-i", f"{temporary}@@{offset}", f"::/{directory}")
+            rootfs = args.arch_image
+            if args.holoris is not None:
+                rootfs = Path(str(temporary) + ".rootfs")
+                shutil.copyfile(args.arch_image, rootfs)
+                run("mcopy", "-o", "-i", str(rootfs),
+                    str(args.holoris), "::/apps/holoris.nct")
             run("mcopy", "-i", f"{temporary}@@{offset}",
-                str(args.arch_image), f"::/arch/{args.arch_profile}.img")
+                str(rootfs), "::/ROOTFS.IMG")
+            if rootfs != args.arch_image:
+                rootfs.unlink()
         elif args.shell or args.noct or args.nettest or bin_files:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/bin")
         run("mmd", "-i", f"{temporary}@@{offset}", "::/etc")
@@ -160,7 +167,7 @@ def create(args: argparse.Namespace) -> None:
         for name, source in bin_files.items():
             run("mcopy", "-i", f"{temporary}@@{offset}", str(source),
                 f"::/bin/{name}")
-        if args.holoris:
+        if args.holoris and args.arch_image is None:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/apps")
             run("mcopy", "-i", f"{temporary}@@{offset}",
                 str(args.holoris), "::/apps/holoris.nct")

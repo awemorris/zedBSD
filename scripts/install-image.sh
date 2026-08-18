@@ -283,8 +283,7 @@ if test -n "$arch_profile" || test -n "$arch_image"; then
 		echo "Architecture profile image not found: $arch_image" >&2
 		exit 1
 	}
-	ensure_directory ::ARCH
-	mcopy -o -i "$image@@$offset" "$arch_image" ::ARCH/"${arch_profile^^}.IMG"
+	mcopy -o -i "$image@@$offset" "$arch_image" ::ROOTFS.IMG
 fi
 test -s "$shell_image" || { echo "Shell ELF not found: $shell_image" >&2; exit 1; }
 test -s "$build/bin/noct" || { echo "Noct ELF not found: $build/bin/noct" >&2; exit 1; }

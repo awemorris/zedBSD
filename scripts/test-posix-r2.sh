@@ -35,9 +35,9 @@ install_test_elf()
 	spec="$image@@$((2048 * 512))"
 	inner="$work/$platform-profile.img"
 	mcopy -o -i "$spec" "$repo/build/$platform/$test_elf" ::/init.elf
-	mcopy -i "$spec" ::/arch/"$profile.img" "$inner"
+	mcopy -i "$spec" ::/rootfs.img "$inner"
 	mcopy -o -i "$inner" "$repo/build/$platform/$test_elf" ::/bin/sh
-	mcopy -o -i "$spec" "$inner" ::/arch/"$profile.img"
+	mcopy -o -i "$spec" "$inner" ::/rootfs.img
 }
 
 run_pc98()

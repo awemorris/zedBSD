@@ -144,7 +144,8 @@ def check(args: argparse.Namespace) -> None:
 
     expected_files = (("VMUNIX", args.kernel, "VMUNIX"),
                       ("bin/noct", args.noct, "/bin/noct"),
-                      ("apps/holoris.nct", args.holoris,
+                      ("apps/holoris.nct",
+                       args.holoris if args.arch_image is None else None,
                        "/apps/holoris.nct")) + tuple(bin_files)
     with tempfile.TemporaryDirectory() as directory:
         for image_name, source, label in expected_files:
@@ -159,23 +160,31 @@ def check(args: argparse.Namespace) -> None:
                     hashlib.sha256(source.read_bytes()).digest():
                 fail(f"{label} content differs from the input file")
         if args.arch_image is not None:
-            extracted = Path(directory) / f"{args.arch_profile}.img"
+            extracted = Path(directory) / "rootfs.img"
             subprocess.run(["mcopy", "-n", "-i",
                             f"{image}@@{start * 512}",
-                            f"::arch/{args.arch_profile}.img", str(extracted)],
+                            "::rootfs.img", str(extracted)],
                            check=True, stdout=subprocess.DEVNULL)
-            if hashlib.sha256(extracted.read_bytes()).digest() != \
+            if args.holoris is None and \
+                    hashlib.sha256(extracted.read_bytes()).digest() != \
                     hashlib.sha256(args.arch_image.read_bytes()).digest():
                 fail("architecture image content differs from the input")
             checker = Path(__file__).with_name("check-arch-overlay-image.py")
             subprocess.run(["python3", str(checker), "--profile",
                             args.arch_profile, "--image", str(extracted)], check=True)
-            direct_shell = subprocess.run(
-                ["mcopy", "-n", "-i", f"{image}@@{start * 512}",
-                 "::bin/sh", str(Path(directory) / "outer-sh")],
+            if args.holoris is not None:
+                installed = Path(directory) / "holoris.nct"
+                subprocess.run(["mcopy", "-n", "-i", str(extracted),
+                                "::/apps/holoris.nct", str(installed)],
+                               check=True, stdout=subprocess.DEVNULL)
+                if hashlib.sha256(installed.read_bytes()).digest() != \
+                        hashlib.sha256(args.holoris.read_bytes()).digest():
+                    fail("rootfs /apps/holoris.nct differs from the input")
+            direct_arch = subprocess.run(
+                ["mdir", "-i", f"{image}@@{start * 512}", "::arch"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if direct_shell.returncode == 0:
-                fail("architecture-specific /bin/sh leaked into the outer FAT")
+            if direct_arch.returncode == 0:
+                fail("obsolete /arch directory exists in the boot FAT")
     if args.ufs_root is not None:
         expected_hash = hashlib.sha256(args.ufs_root.read_bytes()).digest()
         digest = hashlib.sha256()

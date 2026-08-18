@@ -31,9 +31,9 @@ install_test_elf()
 	esac
 	inner="$work/$platform-profile.img"
 	mcopy -o -i "$spec" "$repo/build/$platform/POSIX-R1.ELF" ::/init.elf
-	mcopy -i "$spec" ::/arch/"$profile.img" "$inner"
+	mcopy -i "$spec" ::/rootfs.img "$inner"
 	mcopy -o -i "$inner" "$repo/build/$platform/POSIX-R1.ELF" ::/bin/sh
-	mcopy -o -i "$spec" "$inner" ::/arch/"$profile.img"
+	mcopy -o -i "$spec" "$inner" ::/rootfs.img
 	# Keep the argument for callers documenting the historical injection
 	# point; direct /bin overlays now come from the nested profile image.
 	: "$destination"

@@ -56,8 +56,6 @@ def create(args: argparse.Namespace) -> None:
         run("mformat", "-i", spec, "-T", str(PARTITION_BLOCKS),
             "-v", "ZEDRPI4", "::")
         run("mmd", "-i", spec, "::/overlays")
-        for directory in ("arch", "bin", "lib"):
-            run("mmd", "-i", spec, f"::/{directory}")
         for name in FIRMWARE_FILES:
             run("mcopy", "-i", spec, str(args.firmware_dir / name),
                 f"::/{name}")
@@ -66,7 +64,7 @@ def create(args: argparse.Namespace) -> None:
         run("mcopy", "-i", spec, str(args.config), "::/config.txt")
         run("mcopy", "-i", spec, str(args.kernel), "::/VMUNIX.A64")
         run("mcopy", "-i", spec, str(args.arch_image),
-            "::/arch/aarch64.img")
+            "::/rootfs.img")
 
         checker = Path(__file__).with_name("check-rpi4-hdd-image.py")
         run("python3", str(checker), "--kernel", str(args.kernel),

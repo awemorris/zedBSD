@@ -26,9 +26,9 @@ inner="$work/amd64-profile.img"
 log="$work/amd64-stress.log"
 spec="$image@@$((2048 * 512))"
 cp --reflink=auto "$repo/build/amd64/hdd-image.img" "$image"
-mcopy -i "$spec" ::/arch/amd64.img "$inner"
+mcopy -i "$spec" ::/rootfs.img "$inner"
 mcopy -o -i "$inner" "$repo/build/amd64/SMP-STRESS.ELF" ::/bin/sh
-mcopy -o -i "$spec" "$inner" ::/arch/amd64.img
+mcopy -o -i "$spec" "$inner" ::/rootfs.img
 
 "$qemu" -M pc -cpu qemu64 -smp 8 -m 128M -accel tcg -nic none \
 	-display none -serial none -monitor none -snapshot -no-reboot \
