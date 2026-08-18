@@ -591,7 +591,7 @@ invalidate_page_locked(struct vm_object_page *page)
 		(void)hal_page_unmap(mapping->vm->space,
 		    (void *)mapping->address, PAGE_SIZE);
 		mapping_remove_locked(page, mapping);
-		kern_free(mapping);
+		vm_page_free_metadata(mapping);
 	}
 }
 

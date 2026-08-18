@@ -8,6 +8,7 @@
 #include "kern/vmspace.h"
 #include "kern/file.h"
 #include "kern/kmem.h"
+#include "kern/lock.h"
 #include "kern/page.h"
 #include "kern/swap.h"
 #include "kern/vm-commit.h"
@@ -19,6 +20,21 @@
 #include <sys/mman.h>
 
 #define PAGE_SIZE ZEDBSD_PAGE_SIZE
+#define VM_PAGE_SLAB_SLOTS 32U
+
+struct vm_page_slab {
+	struct hal_pmem memory;
+	struct vm_page_slab *next;
+	uint32_t free_mask;
+	unsigned used;
+	struct vm_page slots[VM_PAGE_SLAB_SLOTS];
+};
+
+_Static_assert(sizeof(struct vm_page_slab) <= PAGE_SIZE,
+	"VM page metadata slab exceeds one physical page");
+
+static struct spinlock vm_page_slab_lock;
+static struct vm_page_slab *vm_page_slabs;
 struct vmspace kernel_vmspace = {
 	.space = HAL_SPACE_SYS,
 	.refs = { 1 },
@@ -44,6 +60,9 @@ vmspace_layout_init(void)
 	uintptr_t minimum, limit;
 	if (vm_layout_initialized)
 		return;
+	spin_init(&vm_page_slab_lock, LOCK_RANK_VM_OBJECT,
+	    "VM page metadata");
+	vm_page_slabs = NULL;
 	hal_page_get_user_range(&minimum, &limit);
 	if (minimum < PAGE_SIZE || (minimum & (PAGE_SIZE - 1U)) != 0 ||
 	    limit <= minimum || (limit & (PAGE_SIZE - 1U)) != 0)
@@ -62,6 +81,97 @@ vmspace_layout_init(void)
 		HAL_FATAL("user address range too small");
 	vm_layout.stack_top = limit - PAGE_SIZE;
 	vm_layout_initialized = 1;
+}
+
+static struct vm_page *
+vm_page_slab_take_locked(void)
+{
+	struct vm_page_slab *slab;
+	unsigned slot;
+
+	for (slab = vm_page_slabs; slab != NULL; slab = slab->next) {
+		if (slab->free_mask == 0)
+			continue;
+		for (slot = 0; slot < VM_PAGE_SLAB_SLOTS; slot++)
+			if ((slab->free_mask & (1U << slot)) != 0)
+				break;
+		if (slot == VM_PAGE_SLAB_SLOTS)
+			HAL_FATAL("invalid VM page slab bitmap");
+		slab->free_mask &= ~(1U << slot);
+		slab->used++;
+		memset(&slab->slots[slot], 0, sizeof(slab->slots[slot]));
+		return &slab->slots[slot];
+	}
+	return NULL;
+}
+
+struct vm_page *
+vm_page_alloc_metadata(void)
+{
+	const struct hal_pmem_request request = {
+		HAL_PMEM_PADDR_ANY, PAGE_SIZE, PAGE_SIZE,
+		HAL_PMEM_TYPE_RAM, 0
+	};
+	struct hal_pmem memory;
+	struct vm_page_slab *fresh;
+	struct vm_page *page;
+	unsigned long irq;
+
+	vmspace_layout_init();
+	irq = spin_lock_irqsave(&vm_page_slab_lock);
+	page = vm_page_slab_take_locked();
+	spin_unlock_irqrestore(&vm_page_slab_lock, irq);
+	if (page != NULL)
+		return page;
+	if (hal_pmem_alloc(&request, &memory) != HAL_OK)
+		return NULL;
+	fresh = memory.vaddr;
+	memset(fresh, 0, PAGE_SIZE);
+	fresh->memory = memory;
+	fresh->free_mask = UINT32_MAX;
+	irq = spin_lock_irqsave(&vm_page_slab_lock);
+	page = vm_page_slab_take_locked();
+	if (page == NULL) {
+		fresh->next = vm_page_slabs;
+		vm_page_slabs = fresh;
+		page = vm_page_slab_take_locked();
+		fresh = NULL;
+	}
+	spin_unlock_irqrestore(&vm_page_slab_lock, irq);
+	if (fresh != NULL)
+		(void)hal_pmem_free(&memory);
+	return page;
+}
+
+void
+vm_page_free_metadata(struct vm_page *page)
+{
+	struct vm_page_slab *slab;
+	uintptr_t address;
+	unsigned long irq;
+
+	if (page == NULL)
+		return;
+	address = (uintptr_t)page;
+	irq = spin_lock_irqsave(&vm_page_slab_lock);
+	for (slab = vm_page_slabs; slab != NULL; slab = slab->next) {
+		uintptr_t first = (uintptr_t)&slab->slots[0];
+		uintptr_t end = (uintptr_t)&slab->slots[VM_PAGE_SLAB_SLOTS];
+		unsigned slot;
+		if (address < first || address >= end ||
+		    (address - first) % sizeof(struct vm_page) != 0)
+			continue;
+		slot = (unsigned)((address - first) / sizeof(struct vm_page));
+		if ((slab->free_mask & (1U << slot)) != 0 || slab->used == 0)
+			HAL_FATAL("invalid VM page metadata free");
+		memset(page, 0, sizeof(*page));
+		slab->free_mask |= 1U << slot;
+		slab->used--;
+		spin_unlock_irqrestore(&vm_page_slab_lock, irq);
+		return;
+	}
+	spin_unlock_irqrestore(&vm_page_slab_lock, irq);
+	HAL_FATAL("foreign VM page metadata free");
 }
 
 static int
@@ -186,7 +296,7 @@ vmspace_fork(struct vmspace *source, struct vmspace **result)
 				if (error != 0)
 					goto fail;
 			}
-			copy_page = kern_calloc(1, sizeof(*copy_page));
+			copy_page = vm_page_alloc_metadata();
 			if (copy_page == NULL) {
 				error = ENOMEM;
 				goto fail;
@@ -198,7 +308,7 @@ vmspace_fork(struct vmspace *source, struct vmspace **result)
 			copy_page->flags = VM_PAGE_BUSY;
 			error = allocate_page_frame(copy_page);
 			if (error != 0) {
-				kern_free(copy_page);
+				vm_page_free_metadata(copy_page);
 				goto fail;
 			}
 			memcpy((void *)copy_page->pmem.vaddr,
@@ -215,7 +325,7 @@ vmspace_fork(struct vmspace *source, struct vmspace **result)
 			    PAGE_SIZE, copy_region->prot);
 			if (mapped != HAL_OK) {
 				(void)hal_pmem_free(&copy_page->pmem);
-				kern_free(copy_page);
+				vm_page_free_metadata(copy_page);
 				error = ENOMEM;
 				goto fail;
 			}
@@ -550,7 +660,7 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 		    &object_page);
 		if (error != 0)
 			return error;
-		page = kern_calloc(1, sizeof(*page));
+		page = vm_page_alloc_metadata();
 		if (page == NULL) {
 			vm_object_fault_release(object_page);
 			return ENOMEM;
@@ -565,7 +675,7 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 		    object_page->pmem.paddr, PAGE_SIZE, region->prot);
 		if (mapped != HAL_OK) {
 			vm_object_fault_release(object_page);
-			kern_free(page);
+			vm_page_free_metadata(page);
 			return ENOMEM;
 		}
 		page->flags = VM_PAGE_RESIDENT;
@@ -574,7 +684,7 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 		vm_object_mapping_add(object_page, page);
 		return 0;
 	}
-	page = kern_calloc(1, sizeof(*page));
+	page = vm_page_alloc_metadata();
 	if (page == NULL)
 		return ENOMEM;
 	page->swap_slot = SWAP_SLOT_NONE;
@@ -582,7 +692,7 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 	page->region = region;
 	page->flags = VM_PAGE_BUSY;
 	if (allocate_page_frame(page) != 0) {
-		kern_free(page);
+		vm_page_free_metadata(page);
 		return ENOMEM;
 	}
 	page->address = page_address;
@@ -603,7 +713,7 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 	}
 	if (error != 0) {
 		(void)hal_pmem_free(&page->pmem);
-		kern_free(page);
+		vm_page_free_metadata(page);
 		return error;
 	}
 	page->flags = VM_PAGE_RESIDENT;
@@ -896,7 +1006,7 @@ free_vm_page(struct vmspace *vm, struct vm_page *page)
 	if (page->object_page != NULL) {
 		(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
 		vm_object_mapping_remove(page->object_page, page);
-		kern_free(page);
+		vm_page_free_metadata(page);
 		return;
 	}
 	vm_page_untrack(page);
@@ -906,7 +1016,7 @@ free_vm_page(struct vmspace *vm, struct vm_page *page)
 	}
 	if ((page->flags & VM_PAGE_SWAPPED) && swap_system_backend() != NULL)
 		swap_free_slot(swap_system_backend(), page->swap_slot);
-	kern_free(page);
+	vm_page_free_metadata(page);
 }
 
 static void

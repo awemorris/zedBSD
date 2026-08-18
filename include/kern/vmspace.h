@@ -97,6 +97,8 @@ struct vmspace {
 
 extern struct vmspace kernel_vmspace;
 struct vmspace *vmspace_create(void);
+struct vm_page *vm_page_alloc_metadata(void);
+void vm_page_free_metadata(struct vm_page *);
 int vmspace_tryref(struct vmspace *);
 void vmspace_ref(struct vmspace *);
 int vmspace_fork(struct vmspace *, struct vmspace **);

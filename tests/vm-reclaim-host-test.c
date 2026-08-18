@@ -15,6 +15,7 @@ static uint8_t swap_data[SWAP_PAGE_SIZE];
 
 void *kern_calloc(size_t n, size_t s) { return calloc(n, s); }
 void kern_free(void *p) { free(p); }
+void vm_page_free_metadata(struct vm_page *page) { free(page); }
 
 int hal_page_query(hal_space_t s, void *v, uint32_t *flags)
 { (void)s; (void)v; *flags = query_flags; return HAL_OK; }
@@ -87,7 +88,7 @@ int main(void)
 	assert(stats.page_outs == 1 && stats.swapped == 1);
 	vm_page_untrack(page);
 	swap_free_slot(&backend, page->swap_slot);
-	free(page);
+	vm_page_free_metadata(page);
 	assert(swap_shutdown(&backend) == 0);
 	puts("zedBSD VM reclaim/swap host tests: PASS");
 	return 0;

@@ -296,9 +296,10 @@ int main(void)
 	assert(region->start == 0x400000 && region->size == 8192);
 	assert(region->pages == NULL && pages_allocated == 0);
 	assert(vmspace_fault(vm, 0x400123, HAL_SPACE_READ) == 0);
-	assert(pages_allocated == 1 && region->pages != NULL);
+	/* One persistent physical page backs the vm_page metadata slab. */
+	assert(pages_allocated == 2 && region->pages != NULL);
 	assert(vmspace_copy_to(vm, 0x400ffe, "abcd", 4) == 0);
-	assert(pages_allocated == 2);
+	assert(pages_allocated == 3);
 	memset(buffer, 0, sizeof(buffer));
 	assert(vmspace_copy_from(vm, buffer, 0x400ffe, 4) == 0);
 	assert(!memcmp(buffer, "abcd", 4));
@@ -721,7 +722,7 @@ int main(void)
 	/* A page-in whose slot is released must remain reclaimable as dirty. */
 	assert(vmspace_map_anon(vm, 0x700000, 4096,
 		HAL_SPACE_READ | HAL_SPACE_WRITE, &region) == 0);
-	page = calloc(1, sizeof(*page));
+	page = vm_page_alloc_metadata();
 	assert(page != NULL);
 	page->address = region->start;
 	page->vm = vm;
@@ -740,7 +741,7 @@ int main(void)
 	vmspace_free(vm);
 	assert(refcount_load(&file.f_refs) == 1);
 	assert(spaces_created == spaces_destroyed);
-	assert(pages_allocated == pages_freed);
+	assert(pages_allocated == pages_freed + 1);
 	assert(commit_used == 0);
 
 	fail_space = 1;

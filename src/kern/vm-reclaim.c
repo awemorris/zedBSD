@@ -76,7 +76,7 @@ static int discard_page(struct vm_page *page)
 	unlink_region_page(page);
 	vm_page_untrack_locked(page);
 	(void)hal_pmem_free(&page->pmem);
-	kern_free(page);
+	vm_page_free_metadata(page);
 	stats.reclaims++;
 	return 0;
 }
