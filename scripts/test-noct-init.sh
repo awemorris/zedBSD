@@ -13,11 +13,11 @@ test -x "$qemu" || { echo "QEMU not found: $qemu" >&2; exit 1; }
 test -d "$bios" || { echo "BIOS directory not found: $bios" >&2; exit 1; }
 rm -rf -- "$work"
 mkdir -p "$work"
-ZEDBSD_ZINIT_DISABLE=1 \
-ZEDBSD_SWAP_SIZE_MIB="${ZEDBSD_SWAP_SIZE_MIB:-32}" \
-	"$repo/scripts/make-hdd-image.sh" "$image"
+test -f "$build/bios-hdd-image.img"
+cp --reflink=auto "$build/bios-hdd-image.img" "$image"
 
-"$qemu" -M pc9821 -cpu 486 -m "${ZEDBSD_QEMU_MEMORY:-8}" -accel tcg -L "$bios" -nic none \
+"$qemu" -M pc9821 -cpu 486 -m "${ZEDBSD_QEMU_MEMORY:-64}" -accel tcg -L "$bios" \
+	-netdev user,id=net0 -device pc98-lgy98,netdev=net0 \
 	-drive "if=ide,bus=0,unit=0,format=raw,file=$image" \
 	-display none -serial none \
 	-qmp "unix:$monitor,server=on,wait=off" -no-reboot \

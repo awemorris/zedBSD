@@ -317,7 +317,7 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	struct path boot_path;
 	struct path root_path;
 	const char *failure_stage = "initialize root cwd";
-	unsigned physical_count = 0, next_number = 2, i;
+	unsigned physical_count = 0, next_number = 1, i;
 	int error;
 
 	if (handoff == NULL)
@@ -496,24 +496,11 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		if(error!=0)
 			goto out_root;
 		path_set(&boot_path,boot_mount,boot_mount->m_root);
-		failure_stage="bind boot FAT at /disk1";
-		error=mount_bind_at(&boot_path,&root_path,"disk1",NULL);
-		if(error!=0)
-			goto out_root;
-		failure_stage="bind UFS1 root at /disk2";
-		error=mount_bind_at(&root_path,&root_path,"disk2",NULL);
-		if(error!=0)
-			goto out_root;
-		next_number=3;
 		hal_printf("vfs: root=ufs1 disk=%s boot=%s\n",
 			root_partition->d_name,boot_partition->d_name);
 	} else {
 		boot_mount=root_mount;
 		path_set(&boot_path,boot_mount,boot_mount->m_root);
-		failure_stage = "bind /disk1";
-		error = mount_bind_at(&root_path, &root_path, "disk1", NULL);
-		if (error != 0)
-			goto out_root;
 		hal_printf("vfs: root=legacy-fat disk=%s\n",boot_partition->d_name);
 	}
 	failure_stage = "mount /dev";

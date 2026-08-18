@@ -10,8 +10,6 @@
 #include "drivers/pc98-lgy98.h"
 #include "drivers/dp8390.h"
 #include "kern/net/net-device.h"
-#include "kern/thread.h"
-#include "kern/sched.h"
 
 #include <errno.h>
 #include <hal/hal.h>
@@ -31,7 +29,6 @@
 
 static struct dp8390 lgy_dp;
 static struct net_device *lgy_device;
-static struct thread *lgy_irq_thread;
 
 static uint8_t lgy_read_reg(void *cookie, unsigned reg)
 {
@@ -102,17 +99,13 @@ lgy_board_present(void)
 }
 
 static void
-lgy_irq_service(void *argument)
+lgy_irq_handler(int irq, hal_irq_ack_t acknowledge, void *argument)
 {
 	struct dp8390 *dp = argument;
 
-	for (;;) {
-		hal_irq_ack_t acknowledge;
-		if (hal_irq_service_wait(LGY_IRQ, &acknowledge) != HAL_OK)
-			HAL_FATAL("LGY-98 IRQ service wait failed");
-		dp8390_interrupt(dp);
-		hal_irq_send_eoi(acknowledge);
-	}
+	(void)irq;
+	dp8390_interrupt(dp);
+	hal_irq_send_eoi(acknowledge);
 }
 
 int
@@ -120,6 +113,7 @@ zedbsd_pc98_lgy98_init(void)
 {
 	uint8_t prom[16];
 	int error;
+	int irq_registered = 0;
 
 	if (!lgy_board_present())
 		return ENODEV;
@@ -143,15 +137,22 @@ zedbsd_pc98_lgy98_init(void)
 	error = dp8390_attach(&lgy_dp, lgy_device);
 	if (error == 0)
 		error = net_device_create(lgy_device);
+	if (error == 0) {
+		if (hal_irq_set_handler(LGY_IRQ, lgy_irq_handler, &lgy_dp) ==
+		    HAL_OK)
+			irq_registered = 1;
+		else
+			error = EBUSY;
+	}
 	if (error == 0)
 		error = net_device_open(lgy_device);
-	if (error == 0)
-		error = kthread_create(lgy_irq_service, &lgy_dp,
-		    SCHED_PRIORITY_DEFAULT, &lgy_irq_thread);
 	if (error == 0) {
-		thread_start(lgy_irq_thread);
+		hal_irq_unmask(LGY_IRQ);
 		return 0;
 	}
+	hal_irq_mask(LGY_IRQ);
+	if (irq_registered)
+		(void)hal_irq_set_handler(LGY_IRQ, NULL, NULL);
 	if (lgy_device->open_count != 0)
 		net_device_close(lgy_device);
 	{

@@ -39,7 +39,7 @@ def build(args: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory(prefix="zedbsd-ufs-root-") as work_text:
         root = Path(work_text)
         for directory in ("bin", "lib", "etc", "home", "apps", "arch",
-                          "dev", "boot", "disk1", "disk2"):
+                          "dev", "boot"):
             (root / directory).mkdir()
         if native:
             shutil.copy2(args.native_shell, root / "bin" / "sh")

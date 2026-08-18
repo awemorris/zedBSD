@@ -135,16 +135,14 @@ def type_command(keys):
 command("qmp_capabilities")
 wait_for(b"/ $ ")
 type_command(list("pwd"))
-wait_for(b"pwd\n/\n/ $ ")
-type_command(["c", "d", "spc", "slash", "d", "i", "s", "k", "1"])
-wait_for(b"/disk1 $ ")
-type_command(list("pwd"))
-wait_for(b"pwd\n/disk1\n/disk1 $ ")
+wait_for(b"pwd\n/\r\n/ $ ")
+type_command(["l", "s", "spc", "slash", "d", "i", "s", "k", "1"])
+wait_for(b"ls /disk1\nls: /disk1:")
 PY
 kill "$interactive_pid" 2>/dev/null || true
 wait "$interactive_pid" 2>/dev/null || true
 trap - EXIT
 rm -f "$interactive_qmp"
-echo "PC/AT QEMU keyboard and /disk1 shell test: PASS"
+echo "PC/AT QEMU keyboard and root namespace test: PASS"
 
 echo "PC/AT QEMU boot matrix: PASS"

@@ -125,7 +125,7 @@ static int directory_read(void *context, const char *path, unsigned index,
 		entry->name[sizeof(entry->name) - 1U] = '\0';
 		/* FAT 8.3 directory entries are conventionally returned in upper
 		 * case, while zedBSD paths are case-insensitive and the user-facing
-		 * namespace is written as /disk1/home/file.  Present one stable,
+		 * namespace is rooted directly at /.  Present one stable,
 		 * lower-case spelling so POSIX clients can perform case-sensitive
 		 * completion on the names they typed. */
 		for (char *name = entry->name; *name != '\0'; name++)

@@ -8,8 +8,6 @@
 #include "drivers/pcat-ne2000.h"
 #include "drivers/dp8390.h"
 #include "kern/net/net-device.h"
-#include "kern/sched.h"
-#include "kern/thread.h"
 
 #include <errno.h>
 #include <hal/hal.h>
@@ -33,7 +31,6 @@ struct pcat_ne2000 {
 	unsigned irq;
 	struct dp8390 dp;
 	struct net_device *device;
-	struct thread *irq_thread;
 };
 
 static struct pcat_ne2000 ne2000;
@@ -141,17 +138,13 @@ static const struct dp8390_bus_ops ne2000_bus_ops = {
 };
 
 static void
-ne2000_irq_service(void *argument)
+ne2000_irq_handler(int irq, hal_irq_ack_t acknowledge, void *argument)
 {
 	struct pcat_ne2000 *state = argument;
 
-	for (;;) {
-		hal_irq_ack_t acknowledge;
-		if (hal_irq_service_wait((int)state->irq, &acknowledge) != HAL_OK)
-			HAL_FATAL("NE2000 IRQ service wait failed");
-		dp8390_interrupt(&state->dp);
-		hal_irq_send_eoi(acknowledge);
-	}
+	(void)irq;
+	dp8390_interrupt(&state->dp);
+	hal_irq_send_eoi(acknowledge);
 }
 
 int
@@ -159,6 +152,7 @@ zedbsd_pcat_ne2000_init(void)
 {
 	uint8_t prom[16];
 	int error;
+	int irq_registered = 0;
 
 	memset(&ne2000, 0, sizeof(ne2000));
 	ne2000.io_base = NE2000_IO_BASE;
@@ -184,15 +178,22 @@ zedbsd_pcat_ne2000_init(void)
 	error = dp8390_attach(&ne2000.dp, ne2000.device);
 	if (error == 0)
 		error = net_device_create(ne2000.device);
+	if (error == 0) {
+		if (hal_irq_set_handler((int)ne2000.irq, ne2000_irq_handler,
+		    &ne2000) == HAL_OK)
+			irq_registered = 1;
+		else
+			error = EBUSY;
+	}
 	if (error == 0)
 		error = net_device_open(ne2000.device);
-	if (error == 0)
-		error = kthread_create(ne2000_irq_service, &ne2000,
-		    SCHED_PRIORITY_DEFAULT, &ne2000.irq_thread);
 	if (error == 0) {
-		thread_start(ne2000.irq_thread);
+		hal_irq_unmask((int)ne2000.irq);
 		return 0;
 	}
+	hal_irq_mask((int)ne2000.irq);
+	if (irq_registered)
+		(void)hal_irq_set_handler((int)ne2000.irq, NULL, NULL);
 	if (ne2000.device->open_count != 0)
 		net_device_close(ne2000.device);
 	{

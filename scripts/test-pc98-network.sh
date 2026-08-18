@@ -24,10 +24,12 @@ trap cleanup EXIT
 
 test -x "$qemu"
 test -d "$bios"
+cp --reflink=auto "$repo/build/arch-images/i386.img" "$tmp/i386.img"
+mcopy -o -i "$tmp/i386.img" "$build/bin/nettest" ::/bin/sh
 python3 "$repo/scripts/make-bios-hdd-image.py" --force \
 	--machine pc98 --stage1 "$build/bootloader/stage1.bin" \
 	--stage2 "$build/bootloader/stage2.bin" --kernel "$build/vmunix" \
-	--shell "$build/bin/nettest" "$tmp/network.img"
+	--arch-profile i386 --arch-image "$tmp/i386.img" "$tmp/network.img"
 
 python3 "$repo/scripts/network-test-peer.py" --log "$tmp/peer.log" &
 peer_pid=$!

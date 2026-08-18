@@ -431,8 +431,8 @@ sockaddr_output_pin(uintptr_t address, uintptr_t length_address,
 		return 0;
 	if (address == 0 || length_address == 0)
 		return EINVAL;
-	error = uaccess_pin(length_address, sizeof(pin->capacity), PROT_WRITE,
-	    &pin->length);
+	error = uaccess_pin(length_address, sizeof(pin->capacity),
+	    HAL_SPACE_READ | HAL_SPACE_WRITE, &pin->length);
 	if (error != 0)
 		return error;
 	error = copyin_pinned(&pin->length, 0, &pin->capacity,

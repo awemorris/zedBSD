@@ -61,7 +61,7 @@ print_resource_delta(const struct zedbsd_system_resources *before,
 static int
 warm_path(unsigned worker)
 {
-	char path[] = "/disk1/s0";
+	char path[] = "/tmp/s0";
 	int descriptor;
 
 	path[sizeof(path) - 2U] = (char)('0' + worker);
@@ -76,7 +76,7 @@ warm_path(unsigned worker)
 static int
 worker_main(unsigned worker)
 {
-	char path[] = "/disk1/s0";
+	char path[] = "/tmp/s0";
 	unsigned iteration;
 	int file_descriptor;
 
