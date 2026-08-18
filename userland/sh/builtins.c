@@ -507,11 +507,186 @@ builtin_touch(int argc, char **argv)
 	return 1;
 }
 
+static int
+printf_escape(const char **cursor, int *stop)
+{
+	const char *text = *cursor;
+	int value;
+	if (*text == '\0') return '\\';
+	switch (*text++) {
+	case 'a': value = '\a'; break;
+	case 'b': value = '\b'; break;
+	case 'c': *stop = 1; value = 0; break;
+	case 'f': value = '\f'; break;
+	case 'n': value = '\n'; break;
+	case 'r': value = '\r'; break;
+	case 't': value = '\t'; break;
+	case 'v': value = '\v'; break;
+	case '\\': value = '\\'; break;
+	case '0': {
+		int count = 0;
+		value = 0;
+		while (count < 3 && *text >= '0' && *text <= '7') {
+			value = value * 8 + (*text++ - '0');
+			count++;
+		}
+		break;
+	}
+	default: putchar('\\'); value = (unsigned char)text[-1]; break;
+	}
+	*cursor = text;
+	return value;
+}
+
+static int
+builtin_printf(int argc, char **argv)
+{
+	const char *format;
+	int argument = 2;
+	if (argc < 2) {
+		fprintf(stderr, "usage: printf FORMAT [ARGUMENT...]\n");
+		return 0;
+	}
+	format = argv[1];
+	do {
+		const char *cursor = format;
+		int stop = 0;
+		int argument_before = argument;
+		while (*cursor != '\0' && !stop) {
+			if (*cursor == '\\') {
+				cursor++;
+				{
+					int value = printf_escape(&cursor, &stop);
+					if (!stop) putchar(value);
+				}
+				continue;
+			}
+			if (*cursor != '%') {
+				putchar((unsigned char)*cursor++);
+				continue;
+			}
+			cursor++;
+			if (*cursor == '%') {
+				putchar('%');
+				cursor++;
+				continue;
+			}
+			{
+				const char *value = argument < argc ? argv[argument++] : "";
+				char *end;
+				long number;
+				switch (*cursor++) {
+				case 's': printf("%s", value); break;
+				case 'b': {
+					const char *bytes = value;
+					while (*bytes != '\0' && !stop) {
+						if (*bytes == '\\') {
+							bytes++;
+							{
+								int byte = printf_escape(&bytes, &stop);
+								if (!stop) putchar(byte);
+							}
+						} else putchar((unsigned char)*bytes++);
+					}
+					break;
+				}
+				case 'c': if (*value != '\0') putchar((unsigned char)*value); break;
+				case 'd': case 'i':
+					number = strtol(value, &end, 0);
+					if (*value == '\0' || *end != '\0') return 0;
+					printf("%ld", number); break;
+				case 'u':
+					number = strtol(value, &end, 0);
+					if (*value == '\0' || *end != '\0') return 0;
+					printf("%lu", (unsigned long)number); break;
+				case 'o':
+					number = strtol(value, &end, 0);
+					if (*value == '\0' || *end != '\0') return 0;
+					printf("%lo", (unsigned long)number); break;
+				case 'x':
+					number = strtol(value, &end, 0);
+					if (*value == '\0' || *end != '\0') return 0;
+					printf("%lx", (unsigned long)number); break;
+				default:
+					fprintf(stderr, "printf: unsupported conversion\n");
+					return 0;
+				}
+			}
+		}
+		if (stop) break;
+		if (argument == argument_before) break;
+	} while (argument < argc);
+	return ferror(stdout) == 0;
+}
+
+static int
+test_integer(const char *left, const char *operation, const char *right,
+    int *valid)
+{
+	char *end;
+	long a = strtol(left, &end, 10);
+	long b;
+	if (*left == '\0' || *end != '\0') { *valid = 0; return 0; }
+	b = strtol(right, &end, 10);
+	if (*right == '\0' || *end != '\0') { *valid = 0; return 0; }
+	*valid = 1;
+	if (!strcmp(operation, "-eq")) return a == b;
+	if (!strcmp(operation, "-ne")) return a != b;
+	if (!strcmp(operation, "-lt")) return a < b;
+	if (!strcmp(operation, "-le")) return a <= b;
+	if (!strcmp(operation, "-gt")) return a > b;
+	if (!strcmp(operation, "-ge")) return a >= b;
+	*valid = 0;
+	return 0;
+}
+
+static int
+builtin_test(int argc, char **argv)
+{
+	struct stat status;
+	int valid;
+	if (!strcmp(argv[0], "[")) {
+		if (argc < 2 || strcmp(argv[argc - 1], "]") != 0) {
+			fprintf(stderr, "[: missing ]\n");
+			return 0;
+		}
+		argc--;
+	}
+	argc--;
+	argv++;
+	if (argc == 0) return 0;
+	if (argc == 1) return argv[0][0] != '\0';
+	if (argc == 2) {
+		if (!strcmp(argv[0], "!")) return argv[1][0] == '\0';
+		if (!strcmp(argv[0], "-n")) return argv[1][0] != '\0';
+		if (!strcmp(argv[0], "-z")) return argv[1][0] == '\0';
+		if (!strcmp(argv[0], "-e")) return stat(argv[1], &status) == 0;
+		if (!strcmp(argv[0], "-f")) return stat(argv[1], &status) == 0 && S_ISREG(status.st_mode);
+		if (!strcmp(argv[0], "-d")) return stat(argv[1], &status) == 0 && S_ISDIR(status.st_mode);
+		if (!strcmp(argv[0], "-r")) return access(argv[1], R_OK) == 0;
+		if (!strcmp(argv[0], "-w")) return access(argv[1], W_OK) == 0;
+		if (!strcmp(argv[0], "-x")) return access(argv[1], X_OK) == 0;
+		return 0;
+	}
+	if (argc == 3) {
+		int result;
+		if (!strcmp(argv[1], "=")) return strcmp(argv[0], argv[2]) == 0;
+		if (!strcmp(argv[1], "!=")) return strcmp(argv[0], argv[2]) != 0;
+		result = test_integer(argv[0], argv[1], argv[2], &valid);
+		if (valid) return result;
+	}
+	fprintf(stderr, "test: invalid expression\n");
+	return 0;
+}
+
 int
 sh_builtin_dispatch(int argc, char **argv, int *handled)
 {
 	*handled = 1;
 	if (!strcmp(argv[0], "echo")) return builtin_echo(argc, argv);
+	if (!strcmp(argv[0], "printf")) return builtin_printf(argc, argv);
+	if (!strcmp(argv[0], "test") || !strcmp(argv[0], "["))
+		return builtin_test(argc, argv);
 	if (!strcmp(argv[0], "pwd")) return builtin_pwd(argc, argv);
 	if (!strcmp(argv[0], "cd")) return builtin_cd(argc, argv);
 	if (!strcmp(argv[0], "cat")) return builtin_cat(argc, argv);

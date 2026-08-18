@@ -536,13 +536,43 @@ $(BUILD)/tests/sh-lexer-host-test: tests/sh-lexer-host-test.c \
 
 $(BUILD)/tests/sh-expand-host-test: tests/sh-expand-host-test.c \
 	userland/sh/expand.c userland/sh/expand.h userland/sh/lexer.c \
+	userland/sh/lexer.h userland/sh/arithmetic.c userland/sh/arithmetic.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) userland/sh/lexer.c userland/sh/arithmetic.c \
+		userland/sh/expand.c $< -o $@
+
+$(BUILD)/tests/sh-arithmetic-host-test: tests/sh-arithmetic-host-test.c \
+	userland/sh/arithmetic.c userland/sh/arithmetic.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) userland/sh/arithmetic.c $< -o $@
+
+$(BUILD)/tests/sh-alias-host-test: tests/sh-alias-host-test.c \
+	userland/sh/alias.c userland/sh/alias.h userland/sh/lexer.c \
 	userland/sh/lexer.h
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) userland/sh/lexer.c userland/sh/expand.c $< -o $@
+	$(HOST_TEST_CC) userland/sh/lexer.c userland/sh/alias.c $< -o $@
+
+$(BUILD)/tests/sh-vars-host-test: tests/sh-vars-host-test.c \
+	userland/sh/vars.c userland/sh/vars.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) userland/sh/vars.c $< -o $@
+
+$(BUILD)/tests/sh-glob-host-test: tests/sh-glob-host-test.c \
+	userland/sh/glob.c userland/sh/glob.h userland/sh/expand.c \
+	userland/sh/expand.h userland/sh/lexer.c userland/sh/lexer.h \
+	userland/sh/arithmetic.c userland/sh/arithmetic.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) userland/sh/lexer.c userland/sh/arithmetic.c \
+		userland/sh/expand.c \
+		userland/sh/glob.c $< -o $@
 
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/sh-lexer-host-test \
 	$(BUILD)/tests/sh-expand-host-test \
+	$(BUILD)/tests/sh-arithmetic-host-test \
+	$(BUILD)/tests/sh-alias-host-test \
+	$(BUILD)/tests/sh-vars-host-test \
+	$(BUILD)/tests/sh-glob-host-test \
 	$(BUILD)/tests/blkdev-host-test \
 	$(BUILD)/tests/bufcache-host-test \
 	$(BUILD)/tests/checkpoint-host-test \
@@ -592,6 +622,11 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test \
 	uapi-abi-layout-check posix-header-check posix-api-matrix-check \
 	ufs1-format-host-test ufs2-format-host-test
+
+userland-command-host-test: scripts/test-userland-commands-host.sh
+	./scripts/test-userland-commands-host.sh
+
+CHECK_RUN_TARGETS += userland-command-host-test
 
 overlay-journal-format-host-test: tests/overlay-journal-format-host-test.py \
 	scripts/overlay_journal_format.py

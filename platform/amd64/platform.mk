@@ -69,7 +69,7 @@ AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS) \
 
 all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
-	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup $(BUILD)/bin/sysctl \
+	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup $(BUILD)/bin/host $(BUILD)/bin/sysctl \
 	$(BUILD)/bin/mount $(BUILD)/bin/umount \
 	$(BUILD)/hdd-image.img
 vmunix: $(BUILD)/vmunix
@@ -173,7 +173,11 @@ AMD64_USER_SH_OBJS := $(BUILD)/user64/userland/sh/main.o \
 	$(BUILD)/user64/userland/sh/applet.o \
 	$(BUILD)/user64/userland/sh/builtins.o \
 	$(BUILD)/user64/userland/sh/lexer.o \
-	$(BUILD)/user64/userland/sh/expand.o
+	$(BUILD)/user64/userland/sh/expand.o \
+	$(BUILD)/user64/userland/sh/glob.o \
+	$(BUILD)/user64/userland/sh/vars.o \
+	$(BUILD)/user64/userland/sh/arithmetic.o \
+	$(BUILD)/user64/userland/sh/alias.o
 AMD64_USER_ELF_CHECK := scripts/check-user-elf.py
 
 $(BUILD)/user64/%.o: %.c
@@ -270,7 +274,7 @@ $(BUILD)/bin/nettest: $(AMD64_USER_NET_LIBC_OBJS) \
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
-USER_NET_COMMANDS := ping ifconfig route dhcpcd nslookup
+USER_NET_COMMANDS := ping ifconfig route dhcpcd nslookup host
 USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
 AMD64_USER_NET_COMMON_OBJS := $(BUILD)/user64/userland/net/netutil.o \
 	$(BUILD)/user64/userland/net/dhcp.o
@@ -295,7 +299,7 @@ $(foreach command,$(USER_NET_COMMANDS),\
 network-tools: $(USER_NET_COMMAND_TARGETS)
 .PHONY: network-tools
 
-USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink truncate chmod chown chgrp mkfifo stat uname df tty sleep head tail wc tee cmp cksum strings id kill
+USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink realpath pathchk truncate ls chmod chown chgrp mkfifo stat file uname date df du tty stty sleep head tail wc tee cmp cksum od strings tr cut paste sort uniq join comm split csplit fold fmt pr nl expand unexpand grep sed awk xargs iconv diff patch id logname kill nohup time timeout mesg
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
 AMD64_USER_BASIC_COMMON_OBJ := $(BUILD)/user64/userland/common/command.o
 
@@ -477,7 +481,7 @@ dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
 AMD64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/amd64.img
 AMD64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
-	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup $(BUILD)/bin/sysctl \
+	$(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup $(BUILD)/bin/host $(BUILD)/bin/sysctl \
 	$(BUILD)/bin/mount $(BUILD)/bin/umount \
 	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
 	$(DYNAMIC_DIR)/tlstest.so $(DYNAMIC_DIR)/dyntest \
@@ -490,6 +494,7 @@ AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/route=$(BUILD)/bin/route \
 	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
 	--file /bin/nslookup=$(BUILD)/bin/nslookup \
+	--file /bin/host=$(BUILD)/bin/host \
 	--file /bin/sysctl=$(BUILD)/bin/sysctl \
 	--file /bin/mount=$(BUILD)/bin/mount \
 	--file /bin/umount=$(BUILD)/bin/umount \

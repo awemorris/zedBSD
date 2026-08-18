@@ -55,6 +55,9 @@ main(void)
 	assert(list.count == 2);
 	word(&list, 0, "value#suffix");
 	sh_tokens_free(&list);
+	assert(sh_lex("\"a\\n\"", &list, &error));
+	word(&list, 0, "a\\n");
+	sh_tokens_free(&list);
 
 	operators();
 	assert(!sh_lex("echo 'unterminated", &list, &error));

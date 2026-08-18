@@ -82,6 +82,39 @@ lex_word(const char **cursor, struct sh_token_list *list,
 	int produced = 0;
 	while (*text != '\0' && *text != ' ' && *text != '\t' &&
 	    !is_operator(*text)) {
+		if (text[0] == '$' && text[1] == '(') {
+			int depth = 1;
+			char inner_quote = '\0';
+			if (!word_append(&word, *text++, SH_QUOTE_UNQUOTED) ||
+			    !word_append(&word, *text++, SH_QUOTE_UNQUOTED))
+				goto no_memory;
+			while (*text != '\0' && depth != 0) {
+				char value = *text++;
+				if (value == '\\' && *text != '\0') {
+					if (!word_append(&word, value, SH_QUOTE_UNQUOTED) ||
+					    !word_append(&word, *text++, SH_QUOTE_UNQUOTED))
+						goto no_memory;
+					continue;
+				}
+				if ((value == '\'' || value == '"') &&
+				    (inner_quote == '\0' || inner_quote == value))
+					inner_quote = inner_quote == '\0' ? value : '\0';
+				if (inner_quote == '\0') {
+					if (value == '(') depth++;
+					if (value == ')') depth--;
+				}
+				if (!word_append(&word, value, SH_QUOTE_UNQUOTED))
+					goto no_memory;
+			}
+			if (depth != 0) {
+				*error_text = "unterminated command substitution";
+				free(word.data);
+				free(word.quote);
+				return 0;
+			}
+			produced = 1;
+			continue;
+		}
 		if (*text == '\\') {
 			text++;
 			if (*text == '\0') {
@@ -101,10 +134,20 @@ lex_word(const char **cursor, struct sh_token_list *list,
 			while (*text != '\0' && *text != quote) {
 				int escaped = 0;
 				if (quote == '"' && *text == '\\') {
-					text++;
-					escaped = 1;
-					if (*text == '\0')
-						break;
+					if (text[1] == '$' || text[1] == '`' ||
+					    text[1] == '"' || text[1] == '\\') {
+						text++;
+						escaped = 1;
+					} else if (text[1] == '\n') {
+						text += 2;
+						continue;
+					} else {
+						if (!word_append(&word, *text++,
+						    SH_QUOTE_DOUBLE))
+							goto no_memory;
+						produced = 1;
+						continue;
+					}
 				}
 				if (!word_append(&word, *text++, escaped ?
 				    SH_QUOTE_ESCAPED : quote == '\'' ?

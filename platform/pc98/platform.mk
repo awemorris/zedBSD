@@ -127,7 +127,7 @@ all: $(BUILD)/ipl-lba0.bin $(BUILD)/ipl-lba2.bin \
 	$(BUILD)/INIT.ELF $(BUILD)/bin/noct $(BUILD)/bin/sh \
 	$(BUILD)/bin/nettest $(BUILD)/bin/ping \
 	$(BUILD)/bin/ifconfig $(BUILD)/bin/route $(BUILD)/bin/dhcpcd \
-	$(BUILD)/bin/nslookup $(BUILD)/bin/sysctl $(BUILD)/bin/mount \
+	$(BUILD)/bin/nslookup $(BUILD)/bin/host $(BUILD)/bin/sysctl $(BUILD)/bin/mount \
 	$(BUILD)/bin/umount \
 	$(BUILD)/partition-pbr.bin \
 	$(BUILD)/chain-test.bin $(BUILD)/fdd-ipl.bin \
@@ -250,13 +250,13 @@ $(BUILD)/bootloader/payload32.elf: $(BUILD)/bootloader/payload32.o \
 bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin
 
-USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink truncate chmod chown chgrp mkfifo stat uname df tty sleep head tail wc tee cmp cksum strings id kill
+USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink realpath pathchk truncate ls chmod chown chgrp mkfifo stat file uname date df du tty stty sleep head tail wc tee cmp cksum od strings tr cut paste sort uniq join comm split csplit fold fmt pr nl expand unexpand grep sed awk xargs iconv diff patch id logname kill nohup time timeout mesg
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
 
 I386_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/i386.img
 I386_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/noct \
 	$(BUILD)/bin/nettest $(BUILD)/bin/ping $(BUILD)/bin/ifconfig \
-	$(BUILD)/bin/route $(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup \
+	$(BUILD)/bin/route $(BUILD)/bin/dhcpcd $(BUILD)/bin/nslookup $(BUILD)/bin/host \
 	$(BUILD)/bin/sysctl $(BUILD)/bin/mount $(BUILD)/bin/umount \
 	$(BUILD)/dynamic/ld.so $(BUILD)/dynamic/libc.so \
 	$(BUILD)/dynamic/tlstest.so $(BUILD)/dynamic/dyntest \
@@ -270,6 +270,7 @@ I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/route=$(BUILD)/bin/route \
 	--file /bin/dhcpcd=$(BUILD)/bin/dhcpcd \
 	--file /bin/nslookup=$(BUILD)/bin/nslookup \
+	--file /bin/host=$(BUILD)/bin/host \
 	--file /bin/sysctl=$(BUILD)/bin/sysctl \
 	--file /bin/mount=$(BUILD)/bin/mount \
 	--file /bin/umount=$(BUILD)/bin/umount \
@@ -454,7 +455,9 @@ $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 
 USER_SH_OBJS := $(BUILD)/userland/sh/main.o $(BUILD)/userland/sh/applet.o \
 	$(BUILD)/userland/sh/builtins.o $(BUILD)/userland/sh/lexer.o \
-	$(BUILD)/userland/sh/expand.o
+	$(BUILD)/userland/sh/expand.o $(BUILD)/userland/sh/glob.o \
+	$(BUILD)/userland/sh/vars.o $(BUILD)/userland/sh/arithmetic.o \
+	$(BUILD)/userland/sh/alias.o
 $(USER_SH_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_SH_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 
@@ -529,7 +532,7 @@ $(BUILD)/bin/nettest: $(USER_LIBC_OBJS) $(USER_NETTEST_OBJS) \
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_NET_COMMANDS := ping ifconfig route dhcpcd nslookup
+USER_NET_COMMANDS := ping ifconfig route dhcpcd nslookup host
 USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
 USER_NET_COMMON_OBJS := $(BUILD)/userland/net/netutil.o \
 	$(BUILD)/userland/net/dhcp.o

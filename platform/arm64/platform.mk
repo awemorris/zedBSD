@@ -81,6 +81,11 @@ ARM64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c userla
 	libc/format.c libc/stdio.c
 ARM64_USER_SH_SOURCES := userland/sh/main.c userland/sh/applet.c \
 	userland/sh/builtins.c userland/sh/lexer.c userland/sh/expand.c
+
+ARM64_USER_SH_SOURCES += userland/sh/glob.c userland/sh/vars.c \
+	userland/sh/arithmetic.c
+
+ARM64_USER_SH_SOURCES += userland/sh/alias.c
 ARM64_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(ARM64_USER_RUNTIME_SOURCES))
 ARM64_USER_SH_OBJS := \
@@ -179,7 +184,7 @@ $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
 
-USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink truncate chmod chown chgrp mkfifo stat uname df tty sleep head tail wc tee cmp cksum strings id kill
+USER_BASIC_COMMANDS := basename dirname cat mkdir rmdir cp mv rm unlink ln link touch readlink realpath pathchk truncate ls chmod chown chgrp mkfifo stat file uname date df du tty stty sleep head tail wc tee cmp cksum od strings tr cut paste sort uniq join comm split csplit fold fmt pr nl expand unexpand grep sed awk xargs iconv diff patch id logname kill nohup time timeout mesg
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
 ARM64_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/common/command.o
 
