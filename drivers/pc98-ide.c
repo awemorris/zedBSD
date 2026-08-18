@@ -44,6 +44,10 @@
 #define IDE_DEVCTL_NIEN   0x02U
 #define IDE_DEVCTL_SRST   0x04U
 
+#define IDE_ID_CONFIG        0U
+#define IDE_ID_COMMAND_SET_2 83U
+#define IDE_ID_CFA_FEATURE   0x4004U
+
 #define IDE_UNIT_MAX      4U
 
 /*
@@ -420,6 +424,18 @@ static const struct disk_ops pc98_ide_disk_ops = {
 	.ioctl = pc98_ide_ioctl,
 };
 
+/* CompactFlash in True IDE mode executes ATA IDENTIFY DEVICE, but its
+ * general-configuration word is allowed to have bit 15 set.  Linux libata
+ * recognizes the two traditional values as well as newer cards which report
+ * the CFA feature set in word 83. */
+static int
+identify_is_cfa(const uint16_t data[256])
+{
+	return data[IDE_ID_CONFIG] == 0x848aU ||
+	    data[IDE_ID_CONFIG] == 0x844aU ||
+	    (data[IDE_ID_COMMAND_SET_2] & 0xc004U) == IDE_ID_CFA_FEATURE;
+}
+
 static int
 identify(uint8_t bank, uint8_t drive, uint16_t data[256])
 {
@@ -451,8 +467,10 @@ identify(uint8_t bank, uint8_t drive, uint16_t data[256])
 	failure_stage = "read IDENTIFY data";
 	for (word = 0; word < 256; word++)
 		data[word] = inw(IDE_DATA);
-	/* Word 0 bit 15 clear identifies an ATA (not ATAPI) device. */
-	if (data[0] & 0x8000U)
+	/* ATA disks clear word 0 bit 15.  CFA devices are the intentional
+	 * exception; IDENTIFY PACKET devices are not block disks here. */
+	failure_stage = "validate IDENTIFY device type";
+	if ((data[IDE_ID_CONFIG] & 0x8000U) && !identify_is_cfa(data))
 		return 0;
 	return 1;
 }
