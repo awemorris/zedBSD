@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #define _POSIX_C_SOURCE 200809L
-#include "userland/sh/glob.h"
-#include "userland/sh/lexer.h"
+#include "userland/base/sh/glob.h"
+#include "userland/base/sh/lexer.h"
 
 #include <assert.h>
 #include <fcntl.h>

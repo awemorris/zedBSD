@@ -69,30 +69,30 @@ ARM64_USER_CFLAGS := -march=armv8-a -mno-outline-atomics \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-builtin -fno-common -ffunction-sections -fdata-sections \
 	-Os -Wall -Wextra -Werror
-ARM64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c userland/libc/static-tls.c userland/libc/poll.c \
-	userland/libc/termios.c \
-	userland/libc/pthread.c \
-	userland/libc/shm.c \
-	userland/libc/semaphore.c \
-	userland/libc/mqueue.c \
-	userland/libc/socket.c \
-	userland/libc/signal.c userland/libc/account.c userland/libc/crypt.c \
-	userland/libc/utmpx.c \
+ARM64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfcn.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
+	userland/base/libc/termios.c \
+	userland/base/libc/pthread.c \
+	userland/base/libc/shm.c \
+	userland/base/libc/semaphore.c \
+	userland/base/libc/mqueue.c \
+	userland/base/libc/socket.c \
+	userland/base/libc/signal.c userland/base/libc/account.c userland/base/libc/crypt.c \
+	userland/base/libc/utmpx.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
-ARM64_USER_SH_SOURCES := userland/sh/main.c \
-	userland/sh/builtins.c userland/sh/lexer.c userland/sh/expand.c
+ARM64_USER_SH_SOURCES := userland/base/sh/main.c \
+	userland/base/sh/builtins.c userland/base/sh/lexer.c userland/base/sh/expand.c
 
-ARM64_USER_SH_SOURCES += userland/sh/glob.c userland/sh/vars.c \
-	userland/sh/arithmetic.c
+ARM64_USER_SH_SOURCES += userland/base/sh/glob.c userland/base/sh/vars.c \
+	userland/base/sh/arithmetic.c
 
-ARM64_USER_SH_SOURCES += userland/sh/alias.c
+ARM64_USER_SH_SOURCES += userland/base/sh/alias.c
 ARM64_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(ARM64_USER_RUNTIME_SOURCES))
 ARM64_USER_SH_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(ARM64_USER_SH_SOURCES))
-ARM64_USER_READLINE_OBJ := $(BUILD)/user/userland/libedit/readline.o
+ARM64_USER_READLINE_OBJ := $(BUILD)/user/userland/base/libedit/readline.o
 ARM64_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 ARM64_USER_OBJS := $(BUILD)/user/src/crt/crt0-aarch64.o \
 	$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_SH_OBJS)
@@ -153,7 +153,7 @@ $(BUILD)/user/src/crt/crt0-aarch64.o: src/crt/crt0-aarch64.S
 	$(ARM64_CC) $(ARM64_USER_CPPFLAGS) $(ARM64_USER_CFLAGS) -c $< -o $@
 
 $(ARM64_USER_SH_OBJS) $(ARM64_USER_READLINE_OBJ): \
-	ARM64_USER_CPPFLAGS += -Iuserland/libedit
+	ARM64_USER_CPPFLAGS += -Iuserland/base/libedit
 $(ARM64_USER_READLINE_LIB): $(ARM64_USER_READLINE_OBJ)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
@@ -168,7 +168,7 @@ $(BUILD)/bin/sh: $(ARM64_USER_OBJS) $(ARM64_USER_READLINE_LIB) \
 	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
 
-ARM64_USER_SYSCTL_OBJ := $(BUILD)/user/userland/sysctl/main.o
+ARM64_USER_SYSCTL_OBJ := $(BUILD)/user/userland/base/sysctl/main.o
 $(BUILD)/bin/sysctl: $(BUILD)/user/src/crt/crt0-aarch64.o \
 	$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_SYSCTL_OBJ) \
 	$(ARM64_PLATFORM)/user.ld tools/build/check-user-elf.py
@@ -180,7 +180,7 @@ $(BUILD)/bin/sysctl: $(BUILD)/user/src/crt/crt0-aarch64.o \
 	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
 
-ARM64_USER_MOUNT_OBJ := $(BUILD)/user/userland/mount/main.o
+ARM64_USER_MOUNT_OBJ := $(BUILD)/user/userland/base/mount/main.o
 $(BUILD)/bin/mount: $(BUILD)/user/src/crt/crt0-aarch64.o \
 	$(ARM64_USER_RUNTIME_OBJS) $(ARM64_USER_MOUNT_OBJ) \
 	$(ARM64_PLATFORM)/user.ld tools/build/check-user-elf.py
@@ -197,7 +197,7 @@ $(BUILD)/bin/umount: $(BUILD)/bin/mount
 
 USER_BASIC_COMMANDS := $(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_BASIC_PROGRAMS))
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
-ARM64_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/common/command.o $(BUILD)/user/userland/common/pager.o
+ARM64_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/base/common/command.o $(BUILD)/user/userland/base/common/pager.o
 
 define ARM64_USER_BASIC_COMMAND
 $(BUILD)/bin/$(1): $(BUILD)/user/src/crt/crt0-aarch64.o \
@@ -220,37 +220,37 @@ basic-tools: $(USER_BASIC_TARGETS)
 
 $(BUILD)/POSIX-R1.ELF: $(BUILD)/user/src/crt/crt0-aarch64.o \
 	$(ARM64_USER_RUNTIME_OBJS) \
-	$(BUILD)/user/userland/tests/syscall-smoke.o \
+	$(BUILD)/user/userland/base/tests/syscall-smoke.o \
 	$(ARM64_PLATFORM)/user.ld tools/build/check-user-elf.py
 	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
 		-z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
 		$(BUILD)/user/src/crt/crt0-aarch64.o \
 		$(ARM64_USER_RUNTIME_OBJS) \
-		$(BUILD)/user/userland/tests/syscall-smoke.o -o $@
+		$(BUILD)/user/userland/base/tests/syscall-smoke.o -o $@
 	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
 
 $(BUILD)/POSIX-R2.ELF: $(BUILD)/user/src/crt/crt0-aarch64.o \
 	$(ARM64_USER_RUNTIME_OBJS) \
-	$(BUILD)/user/userland/tests/posix-r2.o \
+	$(BUILD)/user/userland/base/tests/posix-r2.o \
 	$(ARM64_PLATFORM)/user.ld tools/build/check-user-elf.py
 	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
 		-z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
 		$(BUILD)/user/src/crt/crt0-aarch64.o \
 		$(ARM64_USER_RUNTIME_OBJS) \
-		$(BUILD)/user/userland/tests/posix-r2.o -o $@
+		$(BUILD)/user/userland/base/tests/posix-r2.o -o $@
 	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
 
 $(BUILD)/POSIX-R2-REMAINING.ELF: \
 	$(BUILD)/user/src/crt/crt0-aarch64.o $(ARM64_USER_RUNTIME_OBJS) \
-	$(BUILD)/user/userland/tests/posix-r2-remaining.o \
+	$(BUILD)/user/userland/base/tests/posix-r2-remaining.o \
 	$(ARM64_PLATFORM)/user.ld tools/build/check-user-elf.py
 	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
 		-z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
 		$(BUILD)/user/src/crt/crt0-aarch64.o \
 		$(ARM64_USER_RUNTIME_OBJS) \
-		$(BUILD)/user/userland/tests/posix-r2-remaining.o -o $@
+		$(BUILD)/user/userland/base/tests/posix-r2-remaining.o -o $@
 	@test -z "$$($(ARM64_NM) -u $@)" || { $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
 
@@ -263,18 +263,18 @@ DYNAMIC_CFLAGS := -march=armv8-a -mno-outline-atomics -Os -ffreestanding \
 	-fPIC -fno-builtin -fno-stack-protector \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-ftls-model=global-dynamic -mtls-dialect=trad -Wall -Wextra -Werror
-DYNAMIC_LIBC_SOURCES := userland/libc/posix.c userland/libc/poll.c \
-	userland/libc/termios.c userland/libc/pthread.c userland/libc/shm.c \
-	userland/libc/semaphore.c userland/libc/mqueue.c userland/libc/dlfcn.c \
-	userland/libc/socket.c userland/libc/signal.c libc/heap.c libc/string.c \
+DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c userland/base/libc/poll.c \
+	userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/shm.c \
+	userland/base/libc/semaphore.c userland/base/libc/mqueue.c userland/base/libc/dlfcn.c \
+	userland/base/libc/socket.c userland/base/libc/signal.c libc/heap.c libc/string.c \
 	libc/ctype.c libc/locale.c libc/wide.c libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c
 DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
-	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/libc/syscall.o
-DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/rtld/entry.o \
-	$(DYNAMIC_DIR)/obj/userland/rtld/tlsdesc.o \
-	$(DYNAMIC_DIR)/obj/userland/rtld/rtld.o \
-	$(DYNAMIC_DIR)/obj/userland/rtld/string.o
+	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o
+DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o \
+	$(DYNAMIC_DIR)/obj/userland/base/rtld/tlsdesc.o \
+	$(DYNAMIC_DIR)/obj/userland/base/rtld/rtld.o \
+	$(DYNAMIC_DIR)/obj/userland/base/rtld/string.o
 DYNAMIC_FLOAT_DIR := $(DYNAMIC_DIR)/float
 DYNAMIC_MUSL_MATH_OBJS := $(addprefix $(DYNAMIC_FLOAT_DIR)/musl-,\
 	$(ZEDBSD_MUSL_MATH_REL:.c=.o))
@@ -286,16 +286,16 @@ DYNAMIC_LIBC_OBJS += $(DYNAMIC_MUSL_MATH_OBJS) $(DYNAMIC_MUSL_SCAN_OBJS)
 $(DYNAMIC_DIR)/obj/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
-$(DYNAMIC_DIR)/obj/userland/libc/syscall.o: userland/libc/syscall-aarch64.S
+$(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o: userland/base/libc/syscall-aarch64.S
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) -c $< -o $@
-$(DYNAMIC_DIR)/obj/userland/rtld/entry.o: userland/rtld/entry-aarch64.S
+$(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o: userland/base/rtld/entry-aarch64.S
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) -c $< -o $@
-$(DYNAMIC_DIR)/obj/userland/rtld/tlsdesc.o: userland/rtld/tlsdesc-arm64.S
+$(DYNAMIC_DIR)/obj/userland/base/rtld/tlsdesc.o: userland/base/rtld/tlsdesc-arm64.S
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) -c $< -o $@
-$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialect=desc
+$(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialect=desc
 $(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-aarch64.S
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) -c $< -o $@
@@ -331,44 +331,44 @@ $(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
 		-Wl,-z,separate-code,-z,max-page-size=4096,-z,stack-size=0x100000 \
 		$^ -lgcc -o $@
 $(DYNAMIC_DIR)/alt/rpathdep.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
+	$(DYNAMIC_DIR)/obj/userland/base/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
 	@mkdir -p $(dir $@)
 	$(ARM64_LD) -shared -soname rpathdep.so --hash-style=gnu \
 		-z now -z relro -z separate-code -z max-page-size=4096 $< -o $@
-$(DYNAMIC_DIR)/tlstest.so: $(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+$(DYNAMIC_DIR)/tlstest.so: $(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
 	$(ARM64_LD) -shared -soname tlstest.so --hash-style=gnu \
 		-z now -z relro -z separate-code -z max-page-size=4096 \
 		--enable-new-dtags -rpath '$$ORIGIN/alt' \
-		$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+		$(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
 		-L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
 $(DYNAMIC_DIR)/rpathtest.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/rpathtest.o \
+	$(DYNAMIC_DIR)/obj/userland/base/tests/rpathtest.o \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
 	$(ARM64_LD) -shared -soname rpthtest.so --hash-style=gnu \
 		-z now -z relro -z separate-code -z max-page-size=4096 \
 		--disable-new-dtags -rpath '$$ORIGIN/alt' $< \
 		-L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
 $(DYNAMIC_DIR)/verstest.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/versiontest.o \
-	userland/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
+	$(DYNAMIC_DIR)/obj/userland/base/tests/versiontest.o \
+	userland/base/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
 	$(ARM64_LD) -shared -soname verstest.so --hash-style=gnu \
 		-z now -z relro -z separate-code -z max-page-size=4096 \
-		--version-script=userland/tests/versiontest.map $< -o $@
+		--version-script=userland/base/tests/versiontest.map $< -o $@
 $(DYNAMIC_DIR)/versuse.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/versionuse.o \
+	$(DYNAMIC_DIR)/obj/userland/base/tests/versionuse.o \
 	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/ld.so
 	$(ARM64_LD) -shared -soname versuse.so --hash-style=gnu \
 		-z now -z relro -z separate-code -z max-page-size=4096 \
 		$< -L$(DYNAMIC_DIR) -l:verstest.so -o $@
 $(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/src/crt/crt1.o \
-	$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
 	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so \
 	$(DYNAMIC_DIR)/versuse.so
 	$(ARM64_CC) -nostdlib -pie -Wl,--no-relax,--hash-style=sysv,-z,now,-z,relro \
 		-Wl,-z,separate-code,-z,stack-size=0x100000,--allow-shlib-undefined \
 		-Wl,--dynamic-linker=/lib/ld.so $(DYNAMIC_DIR)/obj/src/crt/crt1.o \
-		$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o -L$(DYNAMIC_DIR) \
+		$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o -L$(DYNAMIC_DIR) \
 		-Wl,-rpath-link,$(DYNAMIC_DIR) -l:libc.so -static-libgcc -lgcc -o $@
 dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
 	$(DYNAMIC_DIR)/dyntest $(DYNAMIC_DIR)/tlstest.so \

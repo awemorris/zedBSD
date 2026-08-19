@@ -149,15 +149,15 @@ POSIX-R2-REMAINING.ELF: $(BUILD)/POSIX-R2-REMAINING.ELF
 
 $(NOCT_BUILD_DIR)/beui-pc98-cirrus.o: NOCT_CFLAGS := $(CIRRUS_NOCT_CFLAGS)
 
-NOCT_GLUE_OBJS := $(BUILD)/userland/noct/integration/noct.o $(BUILD)/userland/noct/integration/napi.o \
-	$(BUILD)/userland/noct/integration/target.o
+NOCT_GLUE_OBJS := $(BUILD)/userland/packages/lang/noct/integration/noct.o $(BUILD)/userland/packages/lang/noct/integration/napi.o \
+	$(BUILD)/userland/packages/lang/noct/integration/target.o
 $(NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
 $(NOCT_GLUE_OBJS): OBJ_CFLAGS = $(NOCT_CFLAGS)
 $(BUILD)/drivers/pc98-graphics.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
 $(BUILD)/drivers/pc98-graphics.o: OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
-$(BUILD)/userland/noct/integration/platform.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) \
+$(BUILD)/userland/packages/lang/noct/integration/platform.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) \
 	$(ZEDBSD_LIBC_CPPFLAGS)
-$(BUILD)/userland/noct/integration/platform.o: OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
+$(BUILD)/userland/packages/lang/noct/integration/platform.o: OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
 
 STAGE2_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 
@@ -227,7 +227,7 @@ USER_BASIC_COMMANDS := $(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_BASIC_PROGRAM
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
 
 I386_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/i386.img
-I386_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/noct \
+I386_ARCH_INPUTS := $(BUILD)/bin/sh \
 	$(BUILD)/bin/nettest \
 	$(BUILD)/bin/sysctl $(BUILD)/bin/mount $(BUILD)/bin/umount \
 	$(BUILD)/dynamic/ld.so $(BUILD)/dynamic/libc.so \
@@ -235,7 +235,6 @@ I386_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/noct \
 	$(BUILD)/dynamic/alt/rpathdep.so $(BUILD)/dynamic/rpathtest.so \
 	$(BUILD)/dynamic/verstest.so $(BUILD)/dynamic/versuse.so
 I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
-	--file /bin/noct=$(BUILD)/bin/noct \
 	--file /bin/nettest=$(BUILD)/bin/nettest \
 	--file /bin/sysctl=$(BUILD)/bin/sysctl \
 	--file /bin/mount=$(BUILD)/bin/mount \
@@ -254,8 +253,6 @@ I386_ARCH_INPUTS += $(USER_BASIC_TARGETS)
 I386_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
 I386_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 I386_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
-I386_ARCH_INPUTS += $(HOLORIS_NOCT)
-I386_ARCH_FILES += --file /apps/holoris.nct=$(HOLORIS_NOCT)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 $(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
@@ -315,18 +312,18 @@ $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
 	ufs-root-image bios-bootloader bios-hdd-image bios-loader-host-check \
 	bios-loader-qemu-test
 
-USER_LIBC_OBJS := $(BUILD)/src/crt/crt0.o $(BUILD)/userland/libc/posix.o \
-	$(BUILD)/userland/libc/dlfcn.o \
-	$(BUILD)/userland/libc/static-tls.o \
-	$(BUILD)/userland/libc/poll.o $(BUILD)/userland/libc/termios.o \
-	$(BUILD)/userland/libc/pthread.o \
-	$(BUILD)/userland/libc/shm.o \
-	$(BUILD)/userland/libc/semaphore.o \
-	$(BUILD)/userland/libc/mqueue.o \
-	$(BUILD)/userland/libc/socket.o $(BUILD)/userland/libc/resolver.o \
-	$(BUILD)/userland/libc/resolver-dns.o $(BUILD)/userland/libc/signal.o \
-	$(BUILD)/userland/libc/account.o $(BUILD)/userland/libc/crypt.o \
-	$(BUILD)/userland/libc/utmpx.o \
+USER_LIBC_OBJS := $(BUILD)/src/crt/crt0.o $(BUILD)/userland/base/libc/posix.o \
+	$(BUILD)/userland/base/libc/dlfcn.o \
+	$(BUILD)/userland/base/libc/static-tls.o \
+	$(BUILD)/userland/base/libc/poll.o $(BUILD)/userland/base/libc/termios.o \
+	$(BUILD)/userland/base/libc/pthread.o \
+	$(BUILD)/userland/base/libc/shm.o \
+	$(BUILD)/userland/base/libc/semaphore.o \
+	$(BUILD)/userland/base/libc/mqueue.o \
+	$(BUILD)/userland/base/libc/socket.o $(BUILD)/userland/base/libc/resolver.o \
+	$(BUILD)/userland/base/libc/resolver-dns.o $(BUILD)/userland/base/libc/signal.o \
+	$(BUILD)/userland/base/libc/account.o $(BUILD)/userland/base/libc/crypt.o \
+	$(BUILD)/userland/base/libc/utmpx.o \
 	$(BUILD)/libc/heap.o $(BUILD)/libc/string.o $(BUILD)/libc/ctype.o \
 	$(BUILD)/libc/locale.o $(BUILD)/libc/wide.o \
 	$(BUILD)/libc/int64.o $(BUILD)/libc/strto.o $(BUILD)/libc/format.o \
@@ -336,44 +333,44 @@ USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-mno-mmx -mno-sse -mno-sse2
 USER_STACK_LDFLAGS := -z stack-size=0x100000
 USER_ELF_CHECK := $(BUILD_TOOLS_DIR)/check-user-elf.py
-$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/poll.o \
-	$(BUILD)/userland/libc/termios.o \
-	$(BUILD)/userland/libc/pthread.o \
-	$(BUILD)/userland/libc/socket.o \
-	$(BUILD)/userland/tests/syscall-smoke.o \
-	$(BUILD)/userland/tests/posix-r2.o \
-	$(BUILD)/userland/tests/posix-r2-remaining.o: \
+$(BUILD)/userland/base/libc/posix.o $(BUILD)/userland/base/libc/poll.o \
+	$(BUILD)/userland/base/libc/termios.o \
+	$(BUILD)/userland/base/libc/pthread.o \
+	$(BUILD)/userland/base/libc/socket.o \
+	$(BUILD)/userland/base/tests/syscall-smoke.o \
+	$(BUILD)/userland/base/tests/posix-r2.o \
+	$(BUILD)/userland/base/tests/posix-r2-remaining.o: \
 	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(BUILD)/userland/libc/posix.o $(BUILD)/userland/libc/poll.o \
-	$(BUILD)/userland/libc/termios.o \
-	$(BUILD)/userland/libc/pthread.o \
-	$(BUILD)/userland/libc/socket.o \
-	$(BUILD)/userland/tests/syscall-smoke.o \
-	$(BUILD)/userland/tests/posix-r2.o \
-	$(BUILD)/userland/tests/posix-r2-remaining.o: \
+$(BUILD)/userland/base/libc/posix.o $(BUILD)/userland/base/libc/poll.o \
+	$(BUILD)/userland/base/libc/termios.o \
+	$(BUILD)/userland/base/libc/pthread.o \
+	$(BUILD)/userland/base/libc/socket.o \
+	$(BUILD)/userland/base/tests/syscall-smoke.o \
+	$(BUILD)/userland/base/tests/posix-r2.o \
+	$(BUILD)/userland/base/tests/posix-r2-remaining.o: \
 	OBJ_CFLAGS = $(USER_CFLAGS)
 
-$(BUILD)/INIT.ELF: $(USER_LIBC_OBJS) $(BUILD)/userland/tests/syscall-smoke.o \
+$(BUILD)/INIT.ELF: $(USER_LIBC_OBJS) $(BUILD)/userland/base/tests/syscall-smoke.o \
 	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(PC98)/noct-user.ld $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
 		$(USER_STACK_LDFLAGS) \
 		-T $(PC98)/noct-user.ld $(USER_LIBC_OBJS) \
-		$(BUILD)/userland/tests/syscall-smoke.o \
+		$(BUILD)/userland/base/tests/syscall-smoke.o \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_NOCT_GLUE_OBJS := $(BUILD)/userland/noct/runtime/main.o \
-	$(BUILD)/userland/noct/runtime/memory.o \
-	$(BUILD)/userland/noct/runtime/platform.o \
-	$(BUILD)/userland/noct/runtime/env.o \
-	$(BUILD)/userland/noct/integration/napi.o \
-	$(BUILD)/userland/noct/integration/target.o
+USER_NOCT_GLUE_OBJS := $(BUILD)/userland/packages/lang/noct/runtime/main.o \
+	$(BUILD)/userland/packages/lang/noct/runtime/memory.o \
+	$(BUILD)/userland/packages/lang/noct/runtime/platform.o \
+	$(BUILD)/userland/packages/lang/noct/runtime/env.o \
+	$(BUILD)/userland/packages/lang/noct/integration/napi.o \
+	$(BUILD)/userland/packages/lang/noct/integration/target.o
 $(USER_NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
 $(USER_NOCT_GLUE_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
-$(BUILD)/userland/noct/integration/napi.o: userland/noct/integration/napi.c
+$(BUILD)/userland/packages/lang/noct/integration/napi.o: userland/packages/lang/noct/integration/napi.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
-$(BUILD)/userland/noct/integration/target.o: userland/noct/integration/target.c
+$(BUILD)/userland/packages/lang/noct/integration/target.o: userland/packages/lang/noct/integration/target.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
@@ -392,15 +389,15 @@ $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 	cp $< $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_SH_OBJS := $(BUILD)/userland/sh/main.o \
-	$(BUILD)/userland/sh/builtins.o $(BUILD)/userland/sh/lexer.o \
-	$(BUILD)/userland/sh/expand.o $(BUILD)/userland/sh/glob.o \
-	$(BUILD)/userland/sh/vars.o $(BUILD)/userland/sh/arithmetic.o \
-	$(BUILD)/userland/sh/alias.o
-USER_READLINE_OBJ := $(BUILD)/userland/libedit/readline.o
+USER_SH_OBJS := $(BUILD)/userland/base/sh/main.o \
+	$(BUILD)/userland/base/sh/builtins.o $(BUILD)/userland/base/sh/lexer.o \
+	$(BUILD)/userland/base/sh/expand.o $(BUILD)/userland/base/sh/glob.o \
+	$(BUILD)/userland/base/sh/vars.o $(BUILD)/userland/base/sh/arithmetic.o \
+	$(BUILD)/userland/base/sh/alias.o
+USER_READLINE_OBJ := $(BUILD)/userland/base/libedit/readline.o
 USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 $(USER_SH_OBJS) $(USER_READLINE_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS) \
-	-Iuserland/libedit
+	-Iuserland/base/libedit
 $(USER_SH_OBJS) $(USER_READLINE_OBJ): OBJ_CFLAGS = $(USER_CFLAGS)
 
 $(USER_READLINE_LIB): $(USER_READLINE_OBJ)
@@ -418,24 +415,24 @@ $(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) $(USER_READLINE_LIB) \
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
 $(BUILD)/POSIX-R2.ELF: $(USER_LIBC_OBJS) \
-	$(BUILD)/userland/tests/posix-r2.o $(PC98)/noct-user.ld \
+	$(BUILD)/userland/base/tests/posix-r2.o $(PC98)/noct-user.ld \
 	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
 		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
-		$(USER_LIBC_OBJS) $(BUILD)/userland/tests/posix-r2.o \
+		$(USER_LIBC_OBJS) $(BUILD)/userland/base/tests/posix-r2.o \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
 $(BUILD)/POSIX-R2-REMAINING.ELF: $(USER_LIBC_OBJS) \
-	$(BUILD)/userland/tests/posix-r2-remaining.o $(PC98)/noct-user.ld \
+	$(BUILD)/userland/base/tests/posix-r2-remaining.o $(PC98)/noct-user.ld \
 	$(ZEDBSD_SOFTFLOAT_OBJECTS) $(USER_ELF_CHECK)
 	$(LD) -m elf_i386 --gc-sections -nostdlib -static -z max-page-size=4096 \
 		$(USER_STACK_LDFLAGS) -T $(PC98)/noct-user.ld \
-		$(USER_LIBC_OBJS) $(BUILD)/userland/tests/posix-r2-remaining.o \
+		$(USER_LIBC_OBJS) $(BUILD)/userland/base/tests/posix-r2-remaining.o \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_SYSCTL_OBJ := $(BUILD)/userland/sysctl/main.o
+USER_SYSCTL_OBJ := $(BUILD)/userland/base/sysctl/main.o
 $(USER_SYSCTL_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_SYSCTL_OBJ): OBJ_CFLAGS = $(USER_CFLAGS)
 $(BUILD)/bin/sysctl: $(USER_LIBC_OBJS) $(USER_SYSCTL_OBJ) \
@@ -448,7 +445,7 @@ $(BUILD)/bin/sysctl: $(USER_LIBC_OBJS) $(USER_SYSCTL_OBJ) \
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_MOUNT_OBJ := $(BUILD)/userland/mount/main.o
+USER_MOUNT_OBJ := $(BUILD)/userland/base/mount/main.o
 $(USER_MOUNT_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_MOUNT_OBJ): OBJ_CFLAGS = $(USER_CFLAGS)
 $(BUILD)/bin/mount: $(USER_LIBC_OBJS) $(USER_MOUNT_OBJ) \
@@ -464,7 +461,7 @@ $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
 
-USER_NETTEST_OBJS := $(BUILD)/userland/nettest/main.o
+USER_NETTEST_OBJS := $(BUILD)/userland/base/nettest/main.o
 $(USER_NETTEST_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(USER_NETTEST_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
 
@@ -480,14 +477,14 @@ $(BUILD)/bin/nettest: $(USER_LIBC_OBJS) $(USER_NETTEST_OBJS) \
 
 USER_NET_COMMANDS := $(USERLAND_SELECTED_NETWORK_PROGRAMS)
 USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
-USER_NET_COMMON_OBJS := $(BUILD)/userland/net/netutil.o \
-	$(BUILD)/userland/net/dhcp.o
+USER_NET_COMMON_OBJS := $(BUILD)/userland/base/net/netutil.o \
+	$(BUILD)/userland/base/net/dhcp.o
 USER_NET_COMMAND_OBJS := $(addsuffix /main.o, \
 	$(addprefix $(BUILD)/userland/,$(USER_NET_COMMANDS)))
-$(BUILD)/userland/libc/resolver.o $(BUILD)/userland/libc/resolver-dns.o \
+$(BUILD)/userland/base/libc/resolver.o $(BUILD)/userland/base/libc/resolver-dns.o \
 	$(USER_NET_COMMON_OBJS) $(USER_NET_COMMAND_OBJS): \
 	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(BUILD)/userland/libc/resolver.o $(BUILD)/userland/libc/resolver-dns.o \
+$(BUILD)/userland/base/libc/resolver.o $(BUILD)/userland/base/libc/resolver-dns.o \
 	$(USER_NET_COMMON_OBJS) $(USER_NET_COMMAND_OBJS): \
 	OBJ_CFLAGS = $(USER_CFLAGS)
 
@@ -508,7 +505,7 @@ $(foreach command,$(USER_NET_COMMANDS),\
 network-tools: $(USER_NET_COMMAND_TARGETS)
 .PHONY: network-tools
 
-USER_BASIC_COMMON_OBJ := $(BUILD)/userland/common/command.o $(BUILD)/userland/common/pager.o
+USER_BASIC_COMMON_OBJ := $(BUILD)/userland/base/common/command.o $(BUILD)/userland/base/common/pager.o
 USER_BASIC_COMMAND_OBJS := $(addsuffix /main.o, \
 	$(addprefix $(BUILD)/userland/,$(USER_BASIC_COMMANDS)))
 $(USER_BASIC_COMMON_OBJ) $(USER_BASIC_COMMAND_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
@@ -540,20 +537,20 @@ DYNAMIC_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fPIC -fno-builtin \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-ftls-model=global-dynamic -Wall -Wextra -Werror -msoft-float \
 	-mno-80387 -mno-fp-ret-in-387 -mno-mmx -mno-sse -mno-sse2
-DYNAMIC_LIBC_SOURCES := userland/libc/posix.c userland/libc/poll.c \
-	userland/libc/termios.c userland/libc/pthread.c userland/libc/shm.c \
-	userland/libc/semaphore.c userland/libc/mqueue.c userland/libc/dlfcn.c \
-	userland/libc/socket.c userland/libc/resolver.c \
-	userland/libc/resolver-dns.c userland/libc/signal.c \
-	userland/libc/account.c userland/libc/crypt.c userland/libc/utmpx.c libc/heap.c \
+DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c userland/base/libc/poll.c \
+	userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/shm.c \
+	userland/base/libc/semaphore.c userland/base/libc/mqueue.c userland/base/libc/dlfcn.c \
+	userland/base/libc/socket.c userland/base/libc/resolver.c \
+	userland/base/libc/resolver-dns.c userland/base/libc/signal.c \
+	userland/base/libc/account.c userland/base/libc/crypt.c userland/base/libc/utmpx.c libc/heap.c \
 	libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c \
 	libc/strto.c libc/format.c \
 	libc/stdio.c
 DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
-	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/libc/syscall.o
-DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/rtld/entry.o \
-	$(DYNAMIC_DIR)/obj/userland/rtld/rtld.o \
-	$(DYNAMIC_DIR)/obj/userland/rtld/string.o
+	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o
+DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o \
+	$(DYNAMIC_DIR)/obj/userland/base/rtld/rtld.o \
+	$(DYNAMIC_DIR)/obj/userland/base/rtld/string.o
 DYNAMIC_SOFTFLOAT_DIR := $(DYNAMIC_DIR)/softfloat
 DYNAMIC_GCC_SOFTFLOAT_OBJS := $(addprefix $(DYNAMIC_SOFTFLOAT_DIR)/gcc-,\
 	$(ZEDBSD_GCC_SOFTFP_REL:.c=.o))
@@ -570,11 +567,11 @@ $(DYNAMIC_DIR)/obj/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
 
-$(DYNAMIC_DIR)/obj/userland/libc/syscall.o: userland/libc/syscall-i386.S
+$(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o: userland/base/libc/syscall-i386.S
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -c $< -o $@
 
-$(DYNAMIC_DIR)/obj/userland/rtld/entry.o: userland/rtld/entry-i386.S
+$(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o: userland/base/rtld/entry-i386.S
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -c $< -o $@
 
@@ -628,22 +625,22 @@ $(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-i386.S
 	$(CC) -m32 -c $< -o $@
 
 $(DYNAMIC_DIR)/alt/rpathdep.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
+	$(DYNAMIC_DIR)/obj/userland/base/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_i386 -shared -soname rpathdep.so --hash-style=gnu \
 		-z now -z relro -z separate-code $< -o $@
 
 $(DYNAMIC_DIR)/tlstest.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+	$(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_i386 -shared -soname tlstest.so --hash-style=gnu \
 		-z now -z relro -z separate-code --enable-new-dtags \
 		-rpath '$$ORIGIN/alt' \
-		$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+		$(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
 		-L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
 
 $(DYNAMIC_DIR)/rpathtest.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/rpathtest.o \
+	$(DYNAMIC_DIR)/obj/userland/base/tests/rpathtest.o \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_i386 -shared -soname rpthtest.so --hash-style=gnu \
 		-z now -z relro -z separate-code --disable-new-dtags \
@@ -651,28 +648,28 @@ $(DYNAMIC_DIR)/rpathtest.so: \
 		-l:rpathdep.so -o $@
 
 $(DYNAMIC_DIR)/verstest.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/versiontest.o \
-	userland/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
+	$(DYNAMIC_DIR)/obj/userland/base/tests/versiontest.o \
+	userland/base/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_i386 -shared -soname verstest.so --hash-style=gnu \
 		-z now -z relro -z separate-code \
-		--version-script=userland/tests/versiontest.map $< -o $@
+		--version-script=userland/base/tests/versiontest.map $< -o $@
 
 $(DYNAMIC_DIR)/versuse.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/versionuse.o \
+	$(DYNAMIC_DIR)/obj/userland/base/tests/versionuse.o \
 	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_i386 -shared -soname versuse.so --hash-style=gnu \
 		-z now -z relro -z separate-code $< -L$(DYNAMIC_DIR) \
 		-l:verstest.so -o $@
 
 $(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/src/crt/crt1.o \
-	$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
 	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so \
 	$(DYNAMIC_DIR)/versuse.so
 	$(CC) -m32 -nostdlib -pie -Wl,--no-relax,--hash-style=sysv,-z,now,-z,relro \
 		-Wl,-z,separate-code,-z,stack-size=0x100000,--allow-shlib-undefined \
 		-Wl,--dynamic-linker=/lib/ld.so \
 		$(DYNAMIC_DIR)/obj/src/crt/crt1.o \
-		$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o \
+		$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o \
 		-L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) -l:libc.so -o $@
 
 dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \

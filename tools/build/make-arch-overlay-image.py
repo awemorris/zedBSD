@@ -18,7 +18,7 @@ PROFILES = {
     "aarch64": ("ZEDAARCH64", 2, 183),
 }
 FAT_COMPONENT = r"[a-z0-9_]{1,8}(?:\.[a-z0-9_]{1,3})?"
-DESTINATION = re.compile(rf"/(bin|lib|etc|var)(?:/{FAT_COMPONENT}){{1,4}}")
+DESTINATION = re.compile(rf"/(bin|lib|etc|var|usr)(?:/{FAT_COMPONENT}){{1,4}}")
 
 
 def run(*arguments: str) -> None:
@@ -87,12 +87,12 @@ def create(args: argparse.Namespace) -> None:
         run("mformat", "-i", str(temporary), "-h", "16", "-s", "32",
             "-v", label, "::")
         for directory in ("bin", "lib", "etc", "var", "var/run", "root",
-                          "home", "apps", "dev", "boot"):
+                          "home", "usr", "usr/bin", "dev", "boot"):
             run("mmd", "-i", str(temporary), f"::/{directory}")
         parents = set()
         for destination in files:
             parent = str(Path(destination).parent).replace("\\", "/")
-            while parent not in ("/", "/bin", "/lib", "/etc", "/var"):
+            while parent not in ("/", "/bin", "/lib", "/etc", "/var", "/usr"):
                 parents.add(parent)
                 parent = str(Path(parent).parent).replace("\\", "/")
         for directory in sorted(parents, key=lambda value: value.count("/")):

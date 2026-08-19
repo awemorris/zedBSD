@@ -151,7 +151,7 @@ def create(args: argparse.Namespace) -> None:
                 rootfs = Path(str(temporary) + ".rootfs")
                 shutil.copyfile(args.arch_image, rootfs)
                 run("mcopy", "-o", "-i", str(rootfs),
-                    str(args.holoris), "::/apps/holoris.nct")
+                    str(args.holoris), "::/usr/bin/holoris.nct")
             run("mcopy", "-i", f"{temporary}@@{offset}",
                 str(rootfs), "::/ROOTFS.IMG")
             if rootfs != args.arch_image:
@@ -159,12 +159,15 @@ def create(args: argparse.Namespace) -> None:
         elif args.shell or args.noct or args.nettest or bin_files:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/bin")
         run("mmd", "-i", f"{temporary}@@{offset}", "::/etc")
+        if args.noct or (args.holoris and args.arch_image is None):
+            run("mmd", "-i", f"{temporary}@@{offset}", "::/usr")
+            run("mmd", "-i", f"{temporary}@@{offset}", "::/usr/bin")
         if args.shell:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.shell),
                 "::/bin/sh")
         if args.noct:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.noct),
-                "::/bin/noct")
+                "::/usr/bin/noct")
         if args.nettest:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(args.nettest),
                 "::/bin/nettest")
@@ -172,9 +175,8 @@ def create(args: argparse.Namespace) -> None:
             run("mcopy", "-i", f"{temporary}@@{offset}", str(source),
                 f"::/bin/{name}")
         if args.holoris and args.arch_image is None:
-            run("mmd", "-i", f"{temporary}@@{offset}", "::/apps")
             run("mcopy", "-i", f"{temporary}@@{offset}",
-                str(args.holoris), "::/apps/holoris.nct")
+                str(args.holoris), "::/usr/bin/holoris.nct")
         checker = Path(__file__).with_name("check-bios-hdd-image.py")
         run("python3", str(checker), "--machine", args.machine,
             "--kernel", str(args.kernel),

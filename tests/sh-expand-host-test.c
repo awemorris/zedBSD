@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #define _POSIX_C_SOURCE 200809L
-#include "userland/sh/expand.h"
+#include "userland/base/sh/expand.h"
 
 #include <assert.h>
 #include <stdio.h>

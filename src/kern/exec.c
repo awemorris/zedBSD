@@ -499,7 +499,7 @@ process_spawn_init(const char *path, struct process **result)
 	char *argv[2];
 	char *envp[] = {
 		"HOME=/home",
-		"PATH=/bin:/apps",
+		"PATH=/bin:/usr/bin",
 		"REMACS_SKK_DICT=/home/skkjisyo.dic",
 		NULL
 	};

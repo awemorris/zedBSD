@@ -49,25 +49,25 @@ X68K_CONTRACT_OBJ := $(BUILD)/src/hal/m68k/bsp-x68k/contract.o
 X68K_USER_CONTRACT_OBJ := $(BUILD)/user/userland/x68k-contract.o
 X68K_CRT0_OBJ := $(BUILD)/user/src/crt/crt0-m68k.o
 X68K_USER_RUNTIME_SOURCES := \
-	userland/libc/posix.c userland/libc/static-tls.c userland/libc/poll.c \
-	userland/libc/termios.c \
-	userland/libc/pthread.c userland/libc/shm.c userland/libc/semaphore.c \
-	userland/libc/mqueue.c userland/libc/socket.c userland/libc/signal.c \
-	userland/libc/account.c userland/libc/crypt.c userland/libc/utmpx.c \
+	userland/base/libc/posix.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
+	userland/base/libc/termios.c \
+	userland/base/libc/pthread.c userland/base/libc/shm.c userland/base/libc/semaphore.c \
+	userland/base/libc/mqueue.c userland/base/libc/socket.c userland/base/libc/signal.c \
+	userland/base/libc/account.c userland/base/libc/crypt.c userland/base/libc/utmpx.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c libc/format.c libc/stdio.c
-X68K_USER_SH_SOURCES := userland/sh/main.c \
-	userland/sh/builtins.c userland/sh/lexer.c userland/sh/expand.c
+X68K_USER_SH_SOURCES := userland/base/sh/main.c \
+	userland/base/sh/builtins.c userland/base/sh/lexer.c userland/base/sh/expand.c
 
-X68K_USER_SH_SOURCES += userland/sh/glob.c userland/sh/vars.c \
-	userland/sh/arithmetic.c
+X68K_USER_SH_SOURCES += userland/base/sh/glob.c userland/base/sh/vars.c \
+	userland/base/sh/arithmetic.c
 
-X68K_USER_SH_SOURCES += userland/sh/alias.c
+X68K_USER_SH_SOURCES += userland/base/sh/alias.c
 X68K_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(X68K_USER_RUNTIME_SOURCES))
 X68K_USER_SH_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(X68K_USER_SH_SOURCES))
-X68K_USER_READLINE_OBJ := $(BUILD)/user/userland/libedit/readline.o
+X68K_USER_READLINE_OBJ := $(BUILD)/user/userland/base/libedit/readline.o
 X68K_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 X68K_USER_OBJS := $(X68K_CRT0_OBJ) $(X68K_USER_RUNTIME_OBJS) \
 	$(X68K_USER_SH_OBJS)
@@ -238,7 +238,7 @@ x68k-target-audit: $(X68K_AUDIT_C_OBJS) $(X68K_AUDIT_S_OBJS) \
 		exit 1; \
 	fi
 
-$(BUILD)/user/userland/x68k-contract.o: userland/x68k-contract.S
+$(BUILD)/user/userland/x68k-contract.o: userland/base/x68k-contract.S
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_USER_CPPFLAGS) $(M68K_USER_CFLAGS) -c $< -o $@
 
@@ -247,7 +247,7 @@ $(X68K_CRT0_OBJ): src/crt/crt0-m68k.S
 	$(M68K_CC) $(M68K_USER_CPPFLAGS) $(M68K_USER_CFLAGS) -c $< -o $@
 
 $(X68K_USER_SH_OBJS) $(X68K_USER_READLINE_OBJ): \
-	M68K_USER_CPPFLAGS += -Iuserland/libedit
+	M68K_USER_CPPFLAGS += -Iuserland/base/libedit
 $(X68K_USER_READLINE_LIB): $(X68K_USER_READLINE_OBJ)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
@@ -276,7 +276,7 @@ $(BUILD)/bin/sh: $(X68K_USER_OBJS) $(X68K_USER_READLINE_LIB) \
 
 USER_BASIC_COMMANDS := $(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_BASIC_PROGRAMS))
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
-X68K_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/common/command.o $(BUILD)/user/userland/common/pager.o
+X68K_USER_BASIC_COMMON_OBJ := $(BUILD)/user/userland/base/common/command.o $(BUILD)/user/userland/base/common/pager.o
 
 define X68K_USER_BASIC_COMMAND
 $(BUILD)/bin/$(1): $(X68K_CRT0_OBJ) $(X68K_USER_RUNTIME_OBJS) \

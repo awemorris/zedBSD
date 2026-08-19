@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #define _POSIX_C_SOURCE 200809L
-#include "userland/sh/vars.h"
+#include "userland/base/sh/vars.h"
 
 #include <assert.h>
 #include <errno.h>

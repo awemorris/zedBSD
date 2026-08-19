@@ -155,32 +155,32 @@ AMD64_USER_CFLAGS := -m64 -march=x86-64 -mno-red-zone -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-builtin -fno-common -ffunction-sections \
 	-fdata-sections -Os -Wall -Wextra -Werror
-AMD64_USER_RUNTIME_SOURCES := userland/libc/posix.c userland/libc/dlfcn.c userland/libc/static-tls.c userland/libc/poll.c \
-	userland/libc/termios.c \
-	userland/libc/pthread.c \
-	userland/libc/shm.c \
-	userland/libc/semaphore.c \
-	userland/libc/mqueue.c \
-	userland/libc/signal.c userland/libc/account.c userland/libc/crypt.c \
-	userland/libc/utmpx.c libc/heap.c libc/string.c libc/ctype.c \
+AMD64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfcn.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
+	userland/base/libc/termios.c \
+	userland/base/libc/pthread.c \
+	userland/base/libc/shm.c \
+	userland/base/libc/semaphore.c \
+	userland/base/libc/mqueue.c \
+	userland/base/libc/signal.c userland/base/libc/account.c userland/base/libc/crypt.c \
+	userland/base/libc/utmpx.c libc/heap.c libc/string.c libc/ctype.c \
 	libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c libc/format.c libc/stdio.c
 AMD64_USER_LIBC_OBJS := $(BUILD)/user64/src/crt/crt0-amd64.o \
 	$(patsubst %.c,$(BUILD)/user64/%.o,$(AMD64_USER_RUNTIME_SOURCES))
 AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS) \
-	$(BUILD)/user64/userland/libc/socket.o \
-	$(BUILD)/user64/userland/libc/resolver.o \
-	$(BUILD)/user64/userland/libc/resolver-dns.o
-AMD64_USER_NETTEST_OBJS := $(BUILD)/user64/userland/nettest/main.o
-AMD64_USER_SH_OBJS := $(BUILD)/user64/userland/sh/main.o \
-	$(BUILD)/user64/userland/sh/builtins.o \
-	$(BUILD)/user64/userland/sh/lexer.o \
-	$(BUILD)/user64/userland/sh/expand.o \
-	$(BUILD)/user64/userland/sh/glob.o \
-	$(BUILD)/user64/userland/sh/vars.o \
-	$(BUILD)/user64/userland/sh/arithmetic.o \
-	$(BUILD)/user64/userland/sh/alias.o
-AMD64_USER_READLINE_OBJ := $(BUILD)/user64/userland/libedit/readline.o
+	$(BUILD)/user64/userland/base/libc/socket.o \
+	$(BUILD)/user64/userland/base/libc/resolver.o \
+	$(BUILD)/user64/userland/base/libc/resolver-dns.o
+AMD64_USER_NETTEST_OBJS := $(BUILD)/user64/userland/base/nettest/main.o
+AMD64_USER_SH_OBJS := $(BUILD)/user64/userland/base/sh/main.o \
+	$(BUILD)/user64/userland/base/sh/builtins.o \
+	$(BUILD)/user64/userland/base/sh/lexer.o \
+	$(BUILD)/user64/userland/base/sh/expand.o \
+	$(BUILD)/user64/userland/base/sh/glob.o \
+	$(BUILD)/user64/userland/base/sh/vars.o \
+	$(BUILD)/user64/userland/base/sh/arithmetic.o \
+	$(BUILD)/user64/userland/base/sh/alias.o
+AMD64_USER_READLINE_OBJ := $(BUILD)/user64/userland/base/libedit/readline.o
 AMD64_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 AMD64_USER_ELF_CHECK := tools/build/check-user-elf.py
 
@@ -193,38 +193,38 @@ $(BUILD)/user64/src/crt/crt0-amd64.o: src/crt/crt0-amd64.S
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) -c $< -o $@
 
-$(AMD64_USER_READLINE_OBJ): AMD64_USER_CPPFLAGS += -Iuserland/libedit
-$(AMD64_USER_SH_OBJS): AMD64_USER_CPPFLAGS += -Iuserland/libedit
+$(AMD64_USER_READLINE_OBJ): AMD64_USER_CPPFLAGS += -Iuserland/base/libedit
+$(AMD64_USER_SH_OBJS): AMD64_USER_CPPFLAGS += -Iuserland/base/libedit
 $(AMD64_USER_READLINE_LIB): $(AMD64_USER_READLINE_OBJ)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
 $(BUILD)/POSIX-R1.ELF: $(AMD64_USER_LIBC_OBJS) \
-	$(BUILD)/user64/userland/tests/syscall-smoke.o $(AMD64_PLATFORM)/user.ld \
+	$(BUILD)/user64/userland/base/tests/syscall-smoke.o $(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld \
 		$(AMD64_USER_LIBC_OBJS) \
-		$(BUILD)/user64/userland/tests/syscall-smoke.o -o $@
+		$(BUILD)/user64/userland/base/tests/syscall-smoke.o -o $@
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/POSIX-R2.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
-	$(BUILD)/user64/userland/tests/posix-r2.o $(AMD64_PLATFORM)/user.ld \
+	$(BUILD)/user64/userland/base/tests/posix-r2.o $(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(BUILD)/user64/userland/tests/posix-r2.o -o $@
+		$(BUILD)/user64/userland/base/tests/posix-r2.o -o $@
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/POSIX-R2-REMAINING.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
-	$(BUILD)/user64/userland/tests/posix-r2-remaining.o \
+	$(BUILD)/user64/userland/base/tests/posix-r2-remaining.o \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(BUILD)/user64/userland/tests/posix-r2-remaining.o -o $@
+		$(BUILD)/user64/userland/base/tests/posix-r2-remaining.o -o $@
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
@@ -240,16 +240,16 @@ $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
-	$(BUILD)/user64/userland/tests/smp-resource-stress.o \
+	$(BUILD)/user64/userland/base/tests/smp-resource-stress.o \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
-		$(BUILD)/user64/userland/tests/smp-resource-stress.o -o $@
+		$(BUILD)/user64/userland/base/tests/smp-resource-stress.o -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
-AMD64_USER_SYSCTL_OBJ := $(BUILD)/user64/userland/sysctl/main.o
+AMD64_USER_SYSCTL_OBJ := $(BUILD)/user64/userland/base/sysctl/main.o
 $(BUILD)/bin/sysctl: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SYSCTL_OBJ) \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
@@ -260,7 +260,7 @@ $(BUILD)/bin/sysctl: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SYSCTL_OBJ) \
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
-AMD64_USER_MOUNT_OBJ := $(BUILD)/user64/userland/mount/main.o
+AMD64_USER_MOUNT_OBJ := $(BUILD)/user64/userland/base/mount/main.o
 $(BUILD)/bin/mount: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_MOUNT_OBJ) \
 	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
 	@mkdir -p $(dir $@)
@@ -287,8 +287,8 @@ $(BUILD)/bin/nettest: $(AMD64_USER_NET_LIBC_OBJS) \
 
 USER_NET_COMMANDS := $(USERLAND_SELECTED_NETWORK_PROGRAMS)
 USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
-AMD64_USER_NET_COMMON_OBJS := $(BUILD)/user64/userland/net/netutil.o \
-	$(BUILD)/user64/userland/net/dhcp.o
+AMD64_USER_NET_COMMON_OBJS := $(BUILD)/user64/userland/base/net/netutil.o \
+	$(BUILD)/user64/userland/base/net/dhcp.o
 AMD64_USER_NET_COMMAND_OBJS := $(addsuffix /main.o, \
 	$(addprefix $(BUILD)/user64/userland/,$(USER_NET_COMMANDS)))
 
@@ -312,7 +312,7 @@ network-tools: $(USER_NET_COMMAND_TARGETS)
 
 USER_BASIC_COMMANDS := $(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_BASIC_PROGRAMS))
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
-AMD64_USER_BASIC_COMMON_OBJ := $(BUILD)/user64/userland/common/command.o $(BUILD)/user64/userland/common/pager.o
+AMD64_USER_BASIC_COMMON_OBJ := $(BUILD)/user64/userland/base/common/command.o $(BUILD)/user64/userland/base/common/pager.o
 
 define AMD64_USER_BASIC_COMMAND
 $(BUILD)/bin/$(1): $(AMD64_USER_LIBC_OBJS) \
@@ -340,21 +340,21 @@ DYNAMIC_CFLAGS := -m64 -march=x86-64 -mno-red-zone -Os -ffreestanding \
 	-fPIC -fno-builtin -fno-stack-protector \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-ftls-model=global-dynamic -Wall -Wextra -Werror
-DYNAMIC_LIBC_SOURCES := userland/libc/posix.c userland/libc/poll.c \
-	userland/libc/termios.c userland/libc/pthread.c userland/libc/shm.c \
-	userland/libc/semaphore.c userland/libc/mqueue.c userland/libc/dlfcn.c \
-	userland/libc/socket.c userland/libc/resolver.c \
-	userland/libc/resolver-dns.c userland/libc/signal.c \
-	userland/libc/account.c userland/libc/crypt.c userland/libc/utmpx.c libc/heap.c \
+DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c userland/base/libc/poll.c \
+	userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/shm.c \
+	userland/base/libc/semaphore.c userland/base/libc/mqueue.c userland/base/libc/dlfcn.c \
+	userland/base/libc/socket.c userland/base/libc/resolver.c \
+	userland/base/libc/resolver-dns.c userland/base/libc/signal.c \
+	userland/base/libc/account.c userland/base/libc/crypt.c userland/base/libc/utmpx.c libc/heap.c \
 	libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c \
 	libc/strto.c libc/format.c \
 	libc/stdio.c
 DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
-	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/libc/syscall.o
-DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/rtld/entry.o \
-	$(DYNAMIC_DIR)/obj/userland/rtld/tlsdesc.o \
-	$(DYNAMIC_DIR)/obj/userland/rtld/rtld.o \
-	$(DYNAMIC_DIR)/obj/userland/rtld/string.o
+	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o
+DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o \
+	$(DYNAMIC_DIR)/obj/userland/base/rtld/tlsdesc.o \
+	$(DYNAMIC_DIR)/obj/userland/base/rtld/rtld.o \
+	$(DYNAMIC_DIR)/obj/userland/base/rtld/string.o
 DYNAMIC_FLOAT_DIR := $(DYNAMIC_DIR)/float
 DYNAMIC_MUSL_MATH_OBJS := $(addprefix $(DYNAMIC_FLOAT_DIR)/musl-,\
 	$(ZEDBSD_MUSL_MATH_REL:.c=.o))
@@ -368,19 +368,19 @@ $(DYNAMIC_DIR)/obj/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
 
-$(DYNAMIC_DIR)/obj/userland/libc/syscall.o: userland/libc/syscall-amd64.S
+$(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o: userland/base/libc/syscall-amd64.S
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -c $< -o $@
 
-$(DYNAMIC_DIR)/obj/userland/rtld/entry.o: userland/rtld/entry-amd64.S
+$(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o: userland/base/rtld/entry-amd64.S
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -c $< -o $@
 
-$(DYNAMIC_DIR)/obj/userland/rtld/tlsdesc.o: userland/rtld/tlsdesc-amd64.S
+$(DYNAMIC_DIR)/obj/userland/base/rtld/tlsdesc.o: userland/base/rtld/tlsdesc-amd64.S
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -c $< -o $@
 
-$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialect=gnu2
+$(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialect=gnu2
 
 $(DYNAMIC_FLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
 	@mkdir -p $(dir $@)
@@ -427,22 +427,22 @@ $(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
 		-z now -z relro -z separate-code -z stack-size=0x100000 $^ -o $@
 
 $(DYNAMIC_DIR)/alt/rpathdep.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
+	$(DYNAMIC_DIR)/obj/userland/base/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
 	@mkdir -p $(dir $@)
 	$(LD) -m elf_x86_64 -shared -soname rpathdep.so --hash-style=gnu \
 		-z now -z relro -z separate-code $< -o $@
 
 $(DYNAMIC_DIR)/tlstest.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+	$(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_x86_64 -shared -soname tlstest.so --hash-style=gnu \
 		-z now -z relro -z separate-code --enable-new-dtags \
 		-rpath '$$ORIGIN/alt' \
-		$(DYNAMIC_DIR)/obj/userland/tests/tlstest.o \
+		$(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o \
 		-L$(DYNAMIC_DIR)/alt -l:rpathdep.so -o $@
 
 $(DYNAMIC_DIR)/rpathtest.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/rpathtest.o \
+	$(DYNAMIC_DIR)/obj/userland/base/tests/rpathtest.o \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_x86_64 -shared -soname rpthtest.so --hash-style=gnu \
 		-z now -z relro -z separate-code --disable-new-dtags \
@@ -450,21 +450,21 @@ $(DYNAMIC_DIR)/rpathtest.so: \
 		-l:rpathdep.so -o $@
 
 $(DYNAMIC_DIR)/verstest.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/versiontest.o \
-	userland/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
+	$(DYNAMIC_DIR)/obj/userland/base/tests/versiontest.o \
+	userland/base/tests/versiontest.map $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_x86_64 -shared -soname verstest.so --hash-style=gnu \
 		-z now -z relro -z separate-code \
-		--version-script=userland/tests/versiontest.map $< -o $@
+		--version-script=userland/base/tests/versiontest.map $< -o $@
 
 $(DYNAMIC_DIR)/versuse.so: \
-	$(DYNAMIC_DIR)/obj/userland/tests/versionuse.o \
+	$(DYNAMIC_DIR)/obj/userland/base/tests/versionuse.o \
 	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/ld.so
 	$(LD) -m elf_x86_64 -shared -soname versuse.so --hash-style=gnu \
 		-z now -z relro -z separate-code $< -L$(DYNAMIC_DIR) \
 		-l:verstest.so -o $@
 
 $(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/src/crt/crt1.o \
-	$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
 	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so \
 	$(DYNAMIC_DIR)/versuse.so
 	$(CC) -m64 -nostdlib -pie -Wl,--no-relax \
@@ -472,7 +472,7 @@ $(DYNAMIC_DIR)/dyntest: $(DYNAMIC_DIR)/obj/src/crt/crt1.o \
 		-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
 		-Wl,--dynamic-linker=/lib/ld.so \
 		$(DYNAMIC_DIR)/obj/src/crt/crt1.o \
-		$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o \
+		$(DYNAMIC_DIR)/obj/userland/base/tests/dyntest.o \
 		-L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
 		-l:libc.so -o $@
 

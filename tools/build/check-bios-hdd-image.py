@@ -145,10 +145,10 @@ def check(args: argparse.Namespace) -> None:
             fail("volume is not FAT12/16")
 
     expected_files = (("VMUNIX", args.kernel, "VMUNIX"),
-                      ("bin/noct", args.noct, "/bin/noct"),
-                      ("apps/holoris.nct",
+                      ("usr/bin/noct", args.noct, "/usr/bin/noct"),
+                      ("usr/bin/holoris.nct",
                        args.holoris if args.arch_image is None else None,
-                       "/apps/holoris.nct")) + tuple(bin_files)
+                       "/usr/bin/holoris.nct")) + tuple(bin_files)
     with tempfile.TemporaryDirectory() as directory:
         for image_name, source, label in expected_files:
             if source is None:
@@ -180,11 +180,11 @@ def check(args: argparse.Namespace) -> None:
             if args.holoris is not None:
                 installed = Path(directory) / "holoris.nct"
                 subprocess.run(["mcopy", "-n", "-i", str(extracted),
-                                "::/apps/holoris.nct", str(installed)],
+                                "::/usr/bin/holoris.nct", str(installed)],
                                check=True, stdout=subprocess.DEVNULL)
                 if hashlib.sha256(installed.read_bytes()).digest() != \
                         hashlib.sha256(args.holoris.read_bytes()).digest():
-                    fail("rootfs /apps/holoris.nct differs from the input")
+                    fail("rootfs /usr/bin/holoris.nct differs from the input")
             direct_arch = subprocess.run(
                 ["mdir", "-i", f"{image}@@{start * 512}", "::arch"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

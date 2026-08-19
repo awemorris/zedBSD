@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "userland/sh/alias.h"
+#include "userland/base/sh/alias.h"
 
 #include <assert.h>
 #include <stdio.h>

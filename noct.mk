@@ -6,7 +6,7 @@
 # Generated lexer/parser C sources are imported and used directly, so flex and
 # bison are not build dependencies.
 
-NOCT_ROOT ?= userland/noct/noct-upstream
+NOCT_ROOT ?= build/sources/noct
 HOLORIS_NOCT := $(NOCT_ROOT)/apps/holoris/holoris.noct
 NOCT_ENABLE_JIT ?= 1
 NOCT_OPTIMIZE_LEVEL ?= 1
@@ -38,6 +38,8 @@ NOCT_SOURCE_REL := \
 	src/core/gpu_glsl.c \
 	src/core/lir.c \
 	src/core/noct.c \
+	src/core/noct-api.c \
+	src/core/dynlib.c \
 	src/core/runtime.c \
 	src/core/module.c \
 	src/core/interpreter.c \
@@ -46,6 +48,7 @@ NOCT_SOURCE_REL := \
 	src/core/gc.c \
 	src/core/intrinsics.c \
 	src/core/objectmodel-st.c \
+	src/core/objectmodel-dispatch.c \
 	src/core/sha256.c \
 	src/repl/repl.c \
 	src/api/accel.c \
@@ -59,6 +62,12 @@ NOCT_SOURCE_REL := \
 	src/api/jisx0208.c
 
 NOCT_SOURCES := $(addprefix $(NOCT_ROOT)/,$(NOCT_SOURCE_REL))
+$(NOCT_SOURCES): | $(NOCT_SOURCE_STAMP)
+	@test -e $@ || { echo "Noct source is missing after clone: $@" >&2; exit 1; }
+
+# Host/graphics tests use files outside NOCT_SOURCE_REL.
+$(NOCT_ROOT)/tests/%: | $(NOCT_SOURCE_STAMP)
+	@test -e $@ || { echo "Noct test source is missing after clone: $@" >&2; exit 1; }
 NOCT_CORE_SOURCES := $(filter $(NOCT_ROOT)/src/core/%,$(NOCT_SOURCES))
 NOCT_REPL_SOURCES := $(filter $(NOCT_ROOT)/src/repl/%,$(NOCT_SOURCES))
 NOCT_API_SOURCES := $(filter $(NOCT_ROOT)/src/api/%,$(NOCT_SOURCES))
@@ -110,6 +119,8 @@ $(NOCT_BUILD_DIR)/noct.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=unused-parameter
 $(NOCT_BUILD_DIR)/runtime.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=maybe-uninitialized
+$(NOCT_BUILD_DIR)/dynlib.o: NOCT_WARNING_EXCEPTIONS := \
+	-Wno-error=unused-function
 $(NOCT_BUILD_DIR)/jit.o: NOCT_WARNING_EXCEPTIONS := \
 	-Wno-error=unused-parameter -Wno-error=sign-compare
 $(NOCT_BUILD_DIR)/intrinsics.o: NOCT_WARNING_EXCEPTIONS := \
@@ -222,6 +233,7 @@ USER_NOCT_CFLAGS := $(NOCT_CFLAGS)
 
 $(USER_NOCT_BUILD_DIR)/noct.o: USER_NOCT_WARN := -Wno-error=unused-parameter
 $(USER_NOCT_BUILD_DIR)/runtime.o: USER_NOCT_WARN := -Wno-error=maybe-uninitialized
+$(USER_NOCT_BUILD_DIR)/dynlib.o: USER_NOCT_WARN := -Wno-error=unused-function
 $(USER_NOCT_BUILD_DIR)/jit.o: USER_NOCT_WARN := -Wno-error=unused-parameter -Wno-error=sign-compare
 $(USER_NOCT_BUILD_DIR)/intrinsics.o: USER_NOCT_WARN := -Wno-error=type-limits
 $(USER_NOCT_BUILD_DIR)/objectmodel-st.o: USER_NOCT_WARN := -Wno-error=maybe-uninitialized

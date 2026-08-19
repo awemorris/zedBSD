@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "userland/net/dhcp.h"
+#include "userland/base/net/dhcp.h"
 #include <stdio.h>
 #include <string.h>
 int main(void)

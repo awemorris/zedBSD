@@ -1,7 +1,0 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "userland/common/command.h"
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-int main(int argc,char**argv){FILE*p=stdin,*out=NULL;char*l=NULL,target[512]={0},temp[520];size_t cap=0;long n;int hunk=0;if(argc>2){fprintf(stderr,"usage: patch [patch-file]\n");return 2;}if(argc==2&&(p=fopen(argv[1],"r"))==NULL){command_error("patch",argv[1]);return 1;}while((n=command_read_line(p,&l,&cap))>0){if(!strncmp(l,"+++ ",4)){char*e=l+4,*q=e;while(*q&&*q!='\t'&&*q!='\n'&&*q!=' ')q++;if((size_t)(q-e)>=sizeof(target)){fprintf(stderr,"patch: path too long\n");return 1;}memcpy(target,e,(size_t)(q-e));target[q-e]=0;if(!strncmp(target,"b/",2))memmove(target,target+2,strlen(target+2)+1);if(target[0]=='/'||strstr(target,"../")){fprintf(stderr,"patch: unsafe path\n");return 1;}snprintf(temp,sizeof(temp),"%s.patch.tmp",target);out=fopen(temp,"w");if(!out){command_error("patch",temp);return 1;}}else if(!strncmp(l,"@@ ",3))hunk=1;else if(hunk&&out&&(l[0]=='+'||l[0]==' ')){if(fwrite(l+1,1,(size_t)n-1,out)!=(size_t)n-1){command_error("patch",temp);return 1;}}else if(hunk&&out&&l[0]=='-'){} }if(!out){fprintf(stderr,"patch: no unified patch found\n");return 1;}if(fclose(out)){command_error("patch",temp);return 1;}if(rename(temp,target)){command_error("patch",target);return 1;}free(l);if(p!=stdin)fclose(p);return 0;}

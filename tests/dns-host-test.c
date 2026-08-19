@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "userland/libc/resolver-internal.h"
+#include "userland/base/libc/resolver-internal.h"
 #include <stdio.h>
 #include <string.h>
 static void w16(uint8_t*p,unsigned v){p[0]=v>>8;p[1]=v;}

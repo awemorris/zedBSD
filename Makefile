@@ -6,8 +6,10 @@
 #   include/          public HAL and kernel interfaces
 #   src/hal/          HAL and board support implementation
 #   src/kern/         platform-neutral kernel services
-#   userland/        statically linked user programs and their libc glue
-#   userland/noct/   zedBSD Noct runtime, integration, and upstream submodule
+#   userland/base/       base-system programs and libc glue
+#   userland/comp/       compilers
+#   userland/X11/        X11 servers
+#   userland/packages/   optional language runtimes, editors, and packages
 #   libc/             freestanding libc subset
 #   src/softfloat/    soft-float support built from vendor GCC/musl sources
 #   platform/<arch>/  per-architecture targets (IPLs, stages, console)
@@ -30,12 +32,23 @@ ifneq ($(strip $(ZEDBSD_CONFIG)),)
 include $(ZEDBSD_CONFIG)
 endif
 
+ARCH ?= $(if $(ZEDBSD_MAKE_ARCH),$(ZEDBSD_MAKE_ARCH),pc98)
+KERNEL_MK := platform/$(ARCH)/kernel.mk
+ifeq ($(wildcard $(KERNEL_MK)),)
+$(error Unknown ARCH '$(ARCH)'; available: \
+	$(patsubst platform/%/kernel.mk,%,$(wildcard platform/*/kernel.mk)))
+endif
+BUILD := build/$(ARCH)
+
 CONFIG_DRIVER_NE2000 ?= y
 CONFIG_DRIVER_LGY98 ?= y
 CONFIG_DRIVER_GRAPHICS ?= y
 CONFIG_KERNEL_LOCKDEP ?= n
 CONFIG_KERNEL_TEST_CHECKPOINTS ?= n
 CONFIG_BUF_CACHE_KIB ?= 0
+
+# Optional packages install commands and directly executable payloads here.
+ZEDBSD_PACKAGE_BINDIR := /usr/bin
 
 # Userland packages register themselves from userland/**/Makefile.  Kernel
 # makefiles provide ABI-specific link rules, while package ownership, source
@@ -49,8 +62,14 @@ USERLAND_$(1)_DEFAULT := $(4)
 USERLAND_$(1)_CLASS := $(5)
 USERLAND_$(1)_SOURCES := $(6)
 USERLAND_$(1)_SELECTABLE := $(7)
+USERLAND_$(1)_MENU := $(8)
+USERLAND_$(1)_PACKAGE := $(9)
+USERLAND_$(1)_REQUIRE := $(10)
 endef
-USERLAND_PACKAGE_MAKEFILES := $(sort $(wildcard userland/*/Makefile))
+USERLAND_PACKAGE_MAKEFILES := $(sort \
+	$(wildcard userland/*/Makefile) \
+	$(wildcard userland/*/*/Makefile) \
+	$(wildcard userland/*/*/*/Makefile))
 include $(USERLAND_PACKAGE_MAKEFILES)
 ZEDBSD_ALL_USER_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
 	$(if $(filter y,$(USERLAND_$(program)_SELECTABLE)),$(program)))
@@ -59,6 +78,33 @@ USERLAND_BASIC_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
 USERLAND_NETWORK_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
 	$(if $(filter network,$(USERLAND_$(program)_CLASS)),$(program)))
 ZEDBSD_USER_PROGRAMS ?= $(ZEDBSD_ALL_USER_PROGRAMS)
+
+# Package dependencies are named by their stable path below
+# userland/packages (for example, editors/remacs -> lang/noct).  Resolve the
+# paths back to registered program names even when config.mk was hand-edited.
+zedbsd_dependency_names = $(strip $(foreach program,$(1),\
+	$(foreach requirement,$(USERLAND_$(program)_REQUIRE),\
+		$(foreach candidate,$(USERLAND_PACKAGES),\
+			$(if $(filter $(requirement),$(USERLAND_$(candidate)_PACKAGE)),\
+				$(candidate))))))
+ZEDBSD_USER_PROGRAMS_DEPS_1 := $(sort $(ZEDBSD_USER_PROGRAMS) \
+	$(call zedbsd_dependency_names,$(ZEDBSD_USER_PROGRAMS)))
+ZEDBSD_USER_PROGRAMS_DEPS_2 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_1) \
+	$(call zedbsd_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_1)))
+ZEDBSD_USER_PROGRAMS_DEPS_3 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_2) \
+	$(call zedbsd_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_2)))
+override ZEDBSD_USER_PROGRAMS := $(ZEDBSD_USER_PROGRAMS_DEPS_3)
+ZEDBSD_MISSING_PACKAGE_REQUIREMENTS := $(sort \
+	$(foreach program,$(ZEDBSD_USER_PROGRAMS),\
+		$(foreach requirement,$(USERLAND_$(program)_REQUIRE),\
+			$(if $(filter $(requirement),\
+				$(foreach candidate,$(USERLAND_PACKAGES),\
+					$(USERLAND_$(candidate)_PACKAGE))),,\
+				$(requirement)))))
+ifneq ($(strip $(ZEDBSD_MISSING_PACKAGE_REQUIREMENTS)),)
+$(error Unknown userland package dependencies: \
+	$(ZEDBSD_MISSING_PACKAGE_REQUIREMENTS))
+endif
 USERLAND_SELECTED_BASIC_PROGRAMS = $(filter $(ZEDBSD_USER_PROGRAMS),\
 	$(USERLAND_BASIC_PROGRAMS))
 USERLAND_SELECTED_NETWORK_PROGRAMS = $(filter $(ZEDBSD_USER_PROGRAMS),\
@@ -72,10 +118,13 @@ endef
 
 .PHONY: list-user-programs
 list-user-programs:
-	@$(foreach program,$(ZEDBSD_ALL_USER_PROGRAMS),printf '%s|%s|%s|%s\n' \
+	@$(foreach program,$(ZEDBSD_ALL_USER_PROGRAMS),printf '%s|%s|%s|%s|%s|%s|%s\n' \
 		'$(program)' '$(USERLAND_$(program)_LABEL)' \
 		'$(USERLAND_$(program)_PLATFORMS)' \
-		'$(USERLAND_$(program)_DEFAULT)';)
+		'$(USERLAND_$(program)_DEFAULT)' \
+		'$(USERLAND_$(program)_MENU)' \
+		'$(USERLAND_$(program)_PACKAGE)' \
+		'$(USERLAND_$(program)_REQUIRE)';)
 
 .PHONY: menu
 menu:
@@ -93,14 +142,6 @@ ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
 ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_TEST_CHECKPOINTS
 endif
 
-ARCH ?= $(if $(ZEDBSD_MAKE_ARCH),$(ZEDBSD_MAKE_ARCH),pc98)
-KERNEL_MK := platform/$(ARCH)/kernel.mk
-ifeq ($(wildcard $(KERNEL_MK)),)
-$(error Unknown ARCH '$(ARCH)'; available: \
-	$(patsubst platform/%/kernel.mk,%,$(wildcard platform/*/kernel.mk)))
-endif
-
-BUILD := build/$(ARCH)
 SCRIPTS_DIR := scripts
 BUILD_TOOLS_DIR := tools/build
 
@@ -270,15 +311,15 @@ $(BUILD)/tests/env-host-test: tests/env-host-test.c src/kern/env.c
 	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc src/kern/env.c $< -o $@
 
 $(BUILD)/tests/noct-memory-host-test: tests/noct-memory-host-test.c \
-	userland/noct/integration/memory.c
+	userland/packages/lang/noct/integration/memory.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc userland/noct/integration/memory.c $< -o $@
+	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc userland/packages/lang/noct/integration/memory.c $< -o $@
 
 $(BUILD)/tests/user-noct-memory-host-test: \
-	tests/user-noct-memory-host-test.c userland/noct/runtime/memory.c
+	tests/user-noct-memory-host-test.c userland/packages/lang/noct/runtime/memory.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc \
-		userland/noct/runtime/memory.c $< -o $@
+		userland/packages/lang/noct/runtime/memory.c $< -o $@
 
 $(BUILD)/tests/heap-context-host-test: tests/heap-context-host-test.c \
 	libc/heap.c
@@ -502,16 +543,16 @@ $(BUILD)/tests/inet-stack-host-test: tests/inet-stack-host-test.c \
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
 		tests/net-sync-host-stubs.c $(INET_HOST_SOURCES) $< -o $@
 
-$(BUILD)/tests/dhcp-host-test: tests/dhcp-host-test.c userland/net/dhcp.c
+$(BUILD)/tests/dhcp-host-test: tests/dhcp-host-test.c userland/base/net/dhcp.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
-		userland/net/dhcp.c $< -o $@
+		userland/base/net/dhcp.c $< -o $@
 
 $(BUILD)/tests/dns-host-test: tests/dns-host-test.c \
-	userland/libc/resolver-dns.c
+	userland/base/libc/resolver-dns.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
-		userland/libc/resolver-dns.c $< -o $@
+		userland/base/libc/resolver-dns.c $< -o $@
 
 $(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
 	tests/vfs-host-stubs.c \
@@ -529,9 +570,9 @@ $(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
 stdio-fs-host-test: $(BUILD)/tests/stdio-fs-host-test
 	$(BUILD)/tests/stdio-fs-host-test
 
-$(BUILD)/tests/crypt-host-test: tests/crypt-host-test.c userland/libc/crypt.c
+$(BUILD)/tests/crypt-host-test: tests/crypt-host-test.c userland/base/libc/crypt.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) -O2 -Wall -Wextra -Werror userland/libc/crypt.c $< -o $@
+	$(HOSTCC) -O2 -Wall -Wextra -Werror userland/base/libc/crypt.c $< -o $@
 
 crypt-host-test: $(BUILD)/tests/crypt-host-test
 	$(BUILD)/tests/crypt-host-test
@@ -606,47 +647,47 @@ $(BUILD)/tests/clock-rtc-host-test: tests/clock-rtc-host-test.c \
 	$(HOST_TEST_CC) -Iinclude -Isrc src/hal/x86/rtc.c $< -o $@
 
 $(BUILD)/tests/sh-lexer-host-test: tests/sh-lexer-host-test.c \
-	userland/sh/lexer.c userland/sh/lexer.h
+	userland/base/sh/lexer.c userland/base/sh/lexer.h
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) userland/sh/lexer.c $< -o $@
+	$(HOST_TEST_CC) userland/base/sh/lexer.c $< -o $@
 
 $(BUILD)/tests/sh-expand-host-test: tests/sh-expand-host-test.c \
-	userland/sh/expand.c userland/sh/expand.h userland/sh/lexer.c \
-	userland/sh/lexer.h userland/sh/arithmetic.c userland/sh/arithmetic.h
+	userland/base/sh/expand.c userland/base/sh/expand.h userland/base/sh/lexer.c \
+	userland/base/sh/lexer.h userland/base/sh/arithmetic.c userland/base/sh/arithmetic.h
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) userland/sh/lexer.c userland/sh/arithmetic.c \
-		userland/sh/expand.c $< -o $@
+	$(HOST_TEST_CC) userland/base/sh/lexer.c userland/base/sh/arithmetic.c \
+		userland/base/sh/expand.c $< -o $@
 
 $(BUILD)/tests/sh-arithmetic-host-test: tests/sh-arithmetic-host-test.c \
-	userland/sh/arithmetic.c userland/sh/arithmetic.h
+	userland/base/sh/arithmetic.c userland/base/sh/arithmetic.h
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) userland/sh/arithmetic.c $< -o $@
+	$(HOST_TEST_CC) userland/base/sh/arithmetic.c $< -o $@
 
 $(BUILD)/tests/sh-alias-host-test: tests/sh-alias-host-test.c \
-	userland/sh/alias.c userland/sh/alias.h userland/sh/lexer.c \
-	userland/sh/lexer.h
+	userland/base/sh/alias.c userland/base/sh/alias.h userland/base/sh/lexer.c \
+	userland/base/sh/lexer.h
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) userland/sh/lexer.c userland/sh/alias.c $< -o $@
+	$(HOST_TEST_CC) userland/base/sh/lexer.c userland/base/sh/alias.c $< -o $@
 
 $(BUILD)/tests/sh-vars-host-test: tests/sh-vars-host-test.c \
-	userland/sh/vars.c userland/sh/vars.h
+	userland/base/sh/vars.c userland/base/sh/vars.h
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) userland/sh/vars.c $< -o $@
+	$(HOST_TEST_CC) userland/base/sh/vars.c $< -o $@
 
 $(BUILD)/tests/sh-glob-host-test: tests/sh-glob-host-test.c \
-	userland/sh/glob.c userland/sh/glob.h userland/sh/expand.c \
-	userland/sh/expand.h userland/sh/lexer.c userland/sh/lexer.h \
-	userland/sh/arithmetic.c userland/sh/arithmetic.h
+	userland/base/sh/glob.c userland/base/sh/glob.h userland/base/sh/expand.c \
+	userland/base/sh/expand.h userland/base/sh/lexer.c userland/base/sh/lexer.h \
+	userland/base/sh/arithmetic.c userland/base/sh/arithmetic.h
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) userland/sh/lexer.c userland/sh/arithmetic.c \
-		userland/sh/expand.c \
-		userland/sh/glob.c $< -o $@
+	$(HOST_TEST_CC) userland/base/sh/lexer.c userland/base/sh/arithmetic.c \
+		userland/base/sh/expand.c \
+		userland/base/sh/glob.c $< -o $@
 
 $(BUILD)/tests/libedit-host-test: tests/libedit-host-test.c \
-	userland/libedit/readline.c userland/libedit/readline/readline.h \
-	userland/libedit/readline/history.h
+	userland/base/libedit/readline.c userland/base/libedit/readline/readline.h \
+	userland/base/libedit/readline/history.h
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iuserland/libedit userland/libedit/readline.c $< -o $@
+	$(HOST_TEST_CC) -Iuserland/base/libedit userland/base/libedit/readline.c $< -o $@
 
 HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/sh-lexer-host-test \
@@ -745,48 +786,48 @@ ARCH_UFS_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.py \
 	$(BUILD_TOOLS_DIR)/check-ufs1-image.py \
 	$(BUILD_TOOLS_DIR)/check_ufs1_import.py \
 	$(BUILD_TOOLS_DIR)/ufs1_format.py
-ZEDBSD_ACCOUNT_INPUTS := userland/etc/passwd userland/etc/group \
-	userland/etc/shadow
-ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/etc/passwd \
-	--file /etc/group=userland/etc/group \
-	--file /etc/shadow=userland/etc/shadow \
+ZEDBSD_ACCOUNT_INPUTS := userland/base/etc/passwd userland/base/etc/group \
+	userland/base/etc/shadow
+ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \
+	--file /etc/group=userland/base/etc/group \
+	--file /etc/shadow=userland/base/etc/shadow \
 	--mode /etc/passwd=0644 --mode /etc/group=0644 \
 	--mode /etc/shadow=0400
 
 # $(1): output, $(2): profile, $(3): prerequisites, $(4): --file arguments.
 define ZEDBSD_ARCH_IMAGE_RULE
-$(1): $(3) $(ARCH_IMAGE_TOOLS)
+$(1): $(3) $(ZEDBSD_PACKAGE_INPUTS) $(ARCH_IMAGE_TOOLS)
 	@mkdir -p $$(dir $$@)
 	$$(PYTHON) $$(BUILD_TOOLS_DIR)/make-arch-overlay-image.py --force \
-		--profile $(2) --output $$@ $(4)
+		--profile $(2) --output $$@ $(4) $(ZEDBSD_PACKAGE_FILES)
 
 $(1)-check: $(1)
 	$$(PYTHON) $$(BUILD_TOOLS_DIR)/check-arch-overlay-image.py \
-		--profile $(2) --image $$< $(4)
+		--profile $(2) --image $$< $(4) $(ZEDBSD_PACKAGE_FILES)
 endef
 
 # $(1): output, $(2): profile, $(3): prerequisites, $(4): --file arguments.
 define ZEDBSD_ARCH_UFS_IMAGE_RULE
-$(1): $(3) $(ARCH_UFS_IMAGE_TOOLS)
+$(1): $(3) $(ZEDBSD_PACKAGE_INPUTS) $(ARCH_UFS_IMAGE_TOOLS)
 	@mkdir -p $$(dir $$@)
 	PYTHONPATH=$$(BUILD_TOOLS_DIR) $$(PYTHON) \
 		$$(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.py --force \
-		--profile $(2) --output $$@ $(4)
+		--profile $(2) --output $$@ $(4) $(ZEDBSD_PACKAGE_FILES)
 
 $(1)-check: $(1)
 	PYTHONPATH=$$(BUILD_TOOLS_DIR) $$(PYTHON) \
 		$$(BUILD_TOOLS_DIR)/check-arch-overlay-ufs.py \
-		--profile $(2) --image $$< $(4)
+		--profile $(2) --image $$< $(4) $(ZEDBSD_PACKAGE_FILES)
 endef
 
 # $(1): tar output, $(2): prerequisites, $(3): --file/--mode arguments.
 # The staging tree is the canonical rootfs artifact.  The tarball is retained
 # as a packaging artifact and is produced from that tree.
 define ZEDBSD_ROOTFS_TAR_RULE
-$(BUILD)/rootfs/.stamp: $(2)
+$(BUILD)/rootfs/.stamp: $(2) $(ZEDBSD_PACKAGE_INPUTS)
 	@rm -rf $(BUILD)/rootfs
 	@mkdir -p $(BUILD)/rootfs
-	@set -- $(3); while test $$$$# -gt 0; do \
+	@set -- $(3) $(ZEDBSD_PACKAGE_FILES); while test $$$$# -gt 0; do \
 		option=$$$$1; specification=$$$$2; shift 2; \
 		path=$$$${specification%%=*}; value=$$$${specification#*=}; \
 		path=$$$${path#/}; destination=$(BUILD)/rootfs/$$$$path; \
@@ -813,18 +854,26 @@ KERNEL_ARTIFACT ?= $(BUILD)/vmunix
 ROOTFS_ARTIFACT ?= $(BUILD)/rootfs
 ROOTFS_IMAGE_ARTIFACT ?=
 BOOT_DISK_ARTIFACT ?= $(BUILD)/hdd-image.img
+ZEDBSD_BUILD_LAYOUT := external-package-sources-v2
 
 .PHONY: config-prepare build-kernel build-rootfs build-rootfs-image \
 	build-boot-disk-image build-release build-toolchain \
 	print-kernel-artifact print-rootfs-artifact \
 	print-rootfs-image-artifact print-boot-disk-artifact
 config-prepare:
-	@if test -n "$(ZEDBSD_CONFIG)"; then \
+	@if ! test -f $(BUILD)/.zedbsd-layout || \
+	    ! grep -qx '$(ZEDBSD_BUILD_LAYOUT)' $(BUILD)/.zedbsd-layout; then \
+		echo "Build layout changed; cleaning $(BUILD)"; \
+		rm -rf $(BUILD); mkdir -p $(BUILD); \
+		printf '%s\n' '$(ZEDBSD_BUILD_LAYOUT)' > $(BUILD)/.zedbsd-layout; \
+	fi; \
+	if test -n "$(ZEDBSD_CONFIG)"; then \
 		mkdir -p $(BUILD); \
 		if ! test -f $(BUILD)/.zedbsd-config || \
 		    ! cmp -s "$(ZEDBSD_CONFIG)" $(BUILD)/.zedbsd-config; then \
 			echo "Configuration changed; cleaning $(BUILD)"; \
 			rm -rf $(BUILD); mkdir -p $(BUILD); \
+			printf '%s\n' '$(ZEDBSD_BUILD_LAYOUT)' > $(BUILD)/.zedbsd-layout; \
 			cp "$(ZEDBSD_CONFIG)" $(BUILD)/.zedbsd-config; \
 		fi; \
 	fi

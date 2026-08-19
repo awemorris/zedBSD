@@ -48,11 +48,15 @@ attributes are not silently accepted.
 | `src/hal/`       | HAL and PC-98 board support                                                         |
 | `src/kern/`      | Platform-neutral kernel services                                                    |
 | `src/crt/`       | Architecture-specific crt0/crt1 startup code                                      |
-| `userland/`      | Package Makefiles, libc glue, shell, network tools, and Noct runtime                |
+| `userland/base/` | Base-system commands, libc glue, shell, and network tools                           |
+| `userland/comp/` | Compiler packages                                                                    |
+| `userland/X11/`  | X11 server packages                                                                   |
+| `userland/packages/` | Optional language runtimes, editors, and other packages                        |
 | `libc/`          | Freestanding libc subset                                                            |
 | `src/softfloat/` | Soft-float support compiled from the vendor GCC/musl sources                        |
 | `platform/pc98/` | PC-9800 target support                                                               |
-| `userland/noct/noct-upstream/` | NoctLang submodule                                                    |
+| `userland/packages/lang/noct/` | Noct package metadata and zedBSD integration; sources are cloned when needed |
+| `userland/packages/editors/remacs/` | Remacs package metadata; sources are cloned only when selected          |
 | `vendor/`        | GCC and musl source submodules, used only by the softfloat build                    |
 | `tools/`         | Build-menu and binary-format build tools                                            |
 | `scripts/`       | Legacy, maintenance, and QEMU test scripts                                          |
