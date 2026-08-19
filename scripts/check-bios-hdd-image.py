@@ -41,6 +41,8 @@ def check(args: argparse.Namespace) -> None:
     image = args.image
     if (args.arch_profile is None) != (args.arch_image is None):
         fail("--arch-profile and --arch-image must be used together")
+    if args.arch_image is None and args.arch_format != "fat":
+        fail("--arch-format requires --arch-image")
     size = image.stat().st_size
     if size == 0 or size % 512:
         fail("image size is not a positive sector multiple")
@@ -169,7 +171,10 @@ def check(args: argparse.Namespace) -> None:
                     hashlib.sha256(extracted.read_bytes()).digest() != \
                     hashlib.sha256(args.arch_image.read_bytes()).digest():
                 fail("architecture image content differs from the input")
-            checker = Path(__file__).with_name("check-arch-overlay-image.py")
+            checker_name = ("check-arch-overlay-ufs.py"
+                            if args.arch_format == "ufs"
+                            else "check-arch-overlay-image.py")
+            checker = Path(__file__).with_name(checker_name)
             subprocess.run(["python3", str(checker), "--profile",
                             args.arch_profile, "--image", str(extracted)], check=True)
             if args.holoris is not None:
@@ -214,6 +219,7 @@ def main() -> None:
     parser.add_argument("--holoris", type=Path)
     parser.add_argument("--arch-profile", choices=("i386", "amd64", "aarch64"))
     parser.add_argument("--arch-image", type=Path)
+    parser.add_argument("--arch-format", choices=("fat", "ufs"), default="fat")
     parser.add_argument("--bin-file", action="append", default=[])
     parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("image", type=Path)

@@ -534,12 +534,13 @@ arch-image-ufs-check: $(AMD64_ARCH_UFS_IMAGE)-check
 rootfs-tar: $(BUILD)/rootfs.tar.gz
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_IMAGE) \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
 	scripts/make-bios-hdd-image.py scripts/check-bios-hdd-image.py
 	$(PYTHON) scripts/make-bios-hdd-image.py --force --machine pcat \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
-		--arch-profile amd64 --arch-image $(AMD64_ARCH_IMAGE) $@
+		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+		--arch-format ufs $@
 
 $(BUILD)/ufs-root.img: $(AMD64_ARCH_UFS_IMAGE) \
 	$(SCRIPTS_DIR)/make-ufs1-root-image.py scripts/ufs1_format.py
@@ -557,12 +558,13 @@ $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 ufs-root-image: $(BUILD)/ufs-root-hdd-image.img
 
 $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_IMAGE) \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
 	scripts/make-bios-hdd-image.py scripts/check-bios-hdd-image.py
 	$(PYTHON) scripts/make-bios-hdd-image.py --force --machine pcat \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
-		--arch-profile amd64 --arch-image $(AMD64_ARCH_IMAGE) \
+		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+		--arch-format ufs \
 		--fragment-kernel $@
 
 $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
@@ -573,7 +575,7 @@ hdd-image: $(BUILD)/hdd-image.img
 bios-loader-host-check: $(BUILD)/bios-hdd-image.img
 	$(PYTHON) scripts/check-bios-hdd-image.py --machine pcat \
 		--kernel $(BUILD)/vmunix --arch-profile amd64 \
-		--arch-image $(AMD64_ARCH_IMAGE) $<
+		--arch-image $(AMD64_ARCH_UFS_IMAGE) --arch-format ufs $<
 
 amd64-hal-compile: $(AMD64_HAL_OBJS)
 	@echo "HAL amd64/PCAT compile check: PASS"

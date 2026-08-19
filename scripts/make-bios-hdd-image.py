@@ -50,8 +50,12 @@ def create(args: argparse.Namespace) -> None:
             raise SystemExit(f"missing input: {path}")
     if (args.arch_profile is None) != (args.arch_image is None):
         raise SystemExit("--arch-profile and --arch-image must be used together")
+    if args.arch_image is None and args.arch_format != "fat":
+        raise SystemExit("--arch-format requires --arch-image")
     if args.arch_image is not None and not args.arch_image.is_file():
         raise SystemExit(f"missing architecture image: {args.arch_image}")
+    if args.arch_format == "ufs" and args.holoris is not None:
+        raise SystemExit("--holoris cannot modify a UFS rootfs; include it when building the rootfs")
     if args.ufs_root is not None and (not args.ufs_root.is_file() or
                                      args.ufs_root.stat().st_size % SECTOR_SIZE):
         raise SystemExit("--ufs-root must be a sector-aligned image")
@@ -175,7 +179,8 @@ def create(args: argparse.Namespace) -> None:
         run("python3", str(checker), "--machine", args.machine,
             "--kernel", str(args.kernel),
             *(["--arch-profile", args.arch_profile,
-               "--arch-image", str(args.arch_image)]
+               "--arch-image", str(args.arch_image),
+               "--arch-format", args.arch_format]
               if args.arch_image is not None else []),
             *(["--noct", str(args.noct)] if args.noct else []),
             *(["--holoris", str(args.holoris)] if args.holoris else []),
@@ -201,6 +206,7 @@ def main() -> None:
     parser.add_argument("--holoris", type=Path)
     parser.add_argument("--arch-profile", choices=("i386", "amd64", "aarch64"))
     parser.add_argument("--arch-image", type=Path)
+    parser.add_argument("--arch-format", choices=("fat", "ufs"), default="fat")
     parser.add_argument("--bin-file", action="append", default=[])
     parser.add_argument("--size-mib", type=int, default=129)
     parser.add_argument("--fat-size-mib", type=int, default=128)

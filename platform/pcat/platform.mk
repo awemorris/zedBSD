@@ -173,6 +173,8 @@ I386_ARCH_INPUTS += $(USER_BASIC_TARGETS)
 I386_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
 I386_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 I386_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
+I386_ARCH_INPUTS += $(HOLORIS_NOCT)
+I386_ARCH_FILES += --file /apps/holoris.nct=$(HOLORIS_NOCT)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 $(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
@@ -184,15 +186,15 @@ arch-image-ufs-check: $(I386_ARCH_UFS_IMAGE)-check
 rootfs-tar: $(BUILD)/rootfs.tar.gz
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(I386_ARCH_IMAGE) \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(I386_ARCH_UFS_IMAGE) \
 	$(HOLORIS_NOCT) \
 	$(SCRIPTS_DIR)/make-bios-hdd-image.py \
 	$(SCRIPTS_DIR)/check-bios-hdd-image.py
 	$(PYTHON) $(SCRIPTS_DIR)/make-bios-hdd-image.py --force \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
-		--arch-profile i386 --arch-image $(I386_ARCH_IMAGE) \
-		--holoris $(HOLORIS_NOCT) $@
+		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) \
+		--arch-format ufs $@
 
 $(BUILD)/ufs-root.img: $(I386_ARCH_UFS_IMAGE) \
 	$(SCRIPTS_DIR)/make-ufs1-root-image.py scripts/ufs1_format.py
@@ -213,8 +215,7 @@ bios-hdd-image: $(BUILD)/bios-hdd-image.img
 bios-loader-host-check: $(BUILD)/bios-hdd-image.img
 	$(PYTHON) $(SCRIPTS_DIR)/check-bios-hdd-image.py --machine pcat \
 		--kernel $(BUILD)/vmunix --arch-profile i386 \
-		--arch-image $(I386_ARCH_IMAGE) \
-		--holoris $(HOLORIS_NOCT) $<
+		--arch-image $(I386_ARCH_UFS_IMAGE) --arch-format ufs $<
 
 bios-loader-qemu-test: bios-bootloader \
 	$(BUILD)/bootloader/payload32.elf $(BUILD)/bootloader/payload64.elf

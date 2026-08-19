@@ -14,7 +14,7 @@ from pathlib import Path
 from ufs1_format import create
 
 DESTINATION=re.compile(
-    r"/(bin|lib|etc|var)(?:/[a-z0-9_][a-z0-9_.-]{0,254}){1,4}")
+    r"/(bin|lib|etc|var|apps)(?:/[a-z0-9_][a-z0-9_.-]{0,254}){1,4}")
 
 
 def parse_files(specifications: list[str]) -> dict[str,Path]:
