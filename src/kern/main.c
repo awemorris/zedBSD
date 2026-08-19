@@ -136,17 +136,23 @@ void kernel_main(const struct zedbsd_handoff *h,
 	devs = platform_devices;
 	zedbsd_env_init(&boot_environment);
 	vm_reclaim_init();
+	hal_printf("boot: VFS initialization\n");
 	kern_logf("boot: VFS initialization\n");
 	error = kern_vfs_init(h, platform_devices, platform_device_count);
-	if (error != 0)
+	if (error != 0) {
+		hal_printf("VFS initialization failed (%d); entering idle.\n",
+		    error);
 		kern_logf("VFS initialization failed (%d); entering idle.\n",
 		    error);
-	else {
+	} else {
 		error = vm_commit_init();
-		if (error != 0)
+		if (error != 0) {
+			hal_printf("VM commit initialization failed (%d); "
+			    "entering idle.\n", error);
 			kern_logf("VM commit initialization failed (%d); "
 			    "entering idle.\n", error);
-		else {
+		} else {
+			hal_printf("boot: starting init %s\n", ZEDBSD_INIT_PATH);
 			kern_logf("boot: starting init %s\n\n", ZEDBSD_INIT_PATH);
 			{
 				int init_error = kern_init_start();

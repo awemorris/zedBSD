@@ -1786,7 +1786,10 @@ static int ufs1_mount_impl(struct mount *mountp)
 	    total_nffree!=ms->super.cstotal_nffree))error=EINVAL;
 	if(error==0)error=load_cg_locked(mountp,0);
 	if(error!=0){mountp->m_data=NULL;kern_free(ms->cg);kern_free(ms);return error;}
-	if((mountp->m_flags&MOUNT_READ_ONLY)==0){if((mountp->m_disk->d_flags&DISK_READ_ONLY)!=0||ms->super.clean==0){mountp->m_data=NULL;kern_free(ms->cg);kern_free(ms);return EROFS;}ms->writable=1;}
+	/* The structural and allocation-summary checks above are the recovery
+	 * gate for an unclean filesystem.  A power loss must not make a valid
+	 * persistent upper permanently unmountable merely because fs_clean is 0. */
+	if((mountp->m_flags&MOUNT_READ_ONLY)==0){if((mountp->m_disk->d_flags&DISK_READ_ONLY)!=0){mountp->m_data=NULL;kern_free(ms->cg);kern_free(ms);return EROFS;}ms->writable=1;}
 	error=load_inode(mountp,UFS1_ROOT_INO,&root);
 	if(error||root->i_type!=INODE_DIR){if(!error){root->i_flags|=INODE_DEAD;inode_release(root);}mountp->m_data=NULL;kern_free(ms->cg);kern_free(ms);return error?error:EIO;}
 	/* A malformed root must not become the namespace anchor.  Validate the

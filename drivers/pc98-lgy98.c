@@ -20,7 +20,6 @@
 #define LGY_IO_BASE       0x00d0U
 #define LGY_DATA_PORT     0x02d0U
 #define LGY_RESET_PORT    0x03d0U
-#define LGY_ID_PORT       0x03daU
 #define LGY_IRQ           6
 #define LGY_TX_START      0x40U
 #define LGY_RX_START      0x46U
@@ -29,6 +28,7 @@
 
 static struct dp8390 lgy_dp;
 static struct net_device *lgy_device;
+static const struct net_device_ops *lgy_dp_ops;
 
 static uint8_t lgy_read_reg(void *cookie, unsigned reg)
 {
@@ -86,18 +86,6 @@ static const struct dp8390_bus_ops lgy_bus_ops = {
 	.reset = lgy_reset,
 };
 
-static int
-lgy_board_present(void)
-{
-	static const uint8_t identifier[4] = { 0x00U, 0x40U, 0x26U, 0x0bU };
-	unsigned index;
-
-	for (index = 0; index < sizeof(identifier); index++)
-		if (asm_inb((uint16_t)(LGY_ID_PORT + index)) != identifier[index])
-			return 0;
-	return 1;
-}
-
 static void
 lgy_irq_handler(int irq, hal_irq_ack_t acknowledge, void *argument)
 {
@@ -108,6 +96,44 @@ lgy_irq_handler(int irq, hal_irq_ack_t acknowledge, void *argument)
 	hal_irq_send_eoi(acknowledge);
 }
 
+static int
+lgy_open(struct net_device *device)
+{
+	int error = lgy_dp_ops->open != NULL ? lgy_dp_ops->open(device) : 0;
+
+	if (error == 0)
+		hal_irq_unmask(LGY_IRQ);
+	return error;
+}
+
+static void
+lgy_close(struct net_device *device)
+{
+	hal_irq_mask(LGY_IRQ);
+	if (lgy_dp_ops->close != NULL)
+		lgy_dp_ops->close(device);
+}
+
+static int
+lgy_transmit(struct net_device *device, struct packet_buf *packet)
+{
+	return lgy_dp_ops->transmit(device, packet);
+}
+
+static unsigned
+lgy_poll_receive(struct net_device *device, unsigned budget)
+{
+	return lgy_dp_ops->poll_receive != NULL ?
+		lgy_dp_ops->poll_receive(device, budget) : 0;
+}
+
+static const struct net_device_ops lgy_net_ops = {
+	.open = lgy_open,
+	.close = lgy_close,
+	.transmit = lgy_transmit,
+	.poll_receive = lgy_poll_receive,
+};
+
 int
 zedbsd_pc98_lgy98_init(void)
 {
@@ -115,7 +141,8 @@ zedbsd_pc98_lgy98_init(void)
 	int error;
 	int irq_registered = 0;
 
-	if (!lgy_board_present())
+	/* An unused C-bus port reads as 0xff.  Avoid modifying unrelated ports. */
+	if (asm_inb(LGY_IO_BASE) == 0xffU)
 		return ENODEV;
 	memset(&lgy_dp, 0, sizeof(lgy_dp));
 	lgy_dp.bus = &lgy_bus_ops;
@@ -135,9 +162,14 @@ zedbsd_pc98_lgy98_init(void)
 	lgy_device->flags = NET_DEVICE_BROADCAST;
 	memcpy(lgy_device->hwaddr, prom, 6);
 	error = dp8390_attach(&lgy_dp, lgy_device);
+	if (error == 0) {
+		lgy_dp_ops = lgy_device->ops;
+		lgy_device->ops = &lgy_net_ops;
+	}
 	if (error == 0)
 		error = net_device_create(lgy_device);
 	if (error == 0) {
+		hal_irq_mask(LGY_IRQ);
 		if (hal_irq_set_handler(LGY_IRQ, lgy_irq_handler, &lgy_dp) ==
 		    HAL_OK)
 			irq_registered = 1;
@@ -145,11 +177,7 @@ zedbsd_pc98_lgy98_init(void)
 			error = EBUSY;
 	}
 	if (error == 0)
-		error = net_device_open(lgy_device);
-	if (error == 0) {
-		hal_irq_unmask(LGY_IRQ);
 		return 0;
-	}
 	hal_irq_mask(LGY_IRQ);
 	if (irq_registered)
 		(void)hal_irq_set_handler(LGY_IRQ, NULL, NULL);

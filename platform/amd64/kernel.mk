@@ -531,12 +531,14 @@ rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
+	$(DATA_IMAGE) $(SWAP_IMAGE) \
 	tools/build/make-bios-hdd-image.py tools/build/check-bios-hdd-image.py
 	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
-		--arch-format ufs $@
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
 
 $(BUILD)/ufs-root.img: $(AMD64_ARCH_UFS_IMAGE) \
 	$(BUILD_TOOLS_DIR)/make-ufs1-root-image.py tools/build/ufs1_format.py
@@ -571,7 +573,8 @@ hdd-image: $(BUILD)/hdd-image.img
 bios-loader-host-check: $(BUILD)/bios-hdd-image.img
 	$(PYTHON) tools/build/check-bios-hdd-image.py --machine pcat \
 		--kernel $(BUILD)/vmunix --arch-profile amd64 \
-		--arch-image $(AMD64_ARCH_UFS_IMAGE) --arch-format ufs $<
+		--arch-image $(AMD64_ARCH_UFS_IMAGE) --arch-format ufs \
+		--data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) $<
 
 amd64-hal-compile: $(AMD64_HAL_OBJS)
 	@echo "HAL amd64/PCAT compile check: PASS"

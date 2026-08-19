@@ -142,6 +142,11 @@ kernel_entry(const void *handoff)
 	    ZEDBSD_PAGE_SIZE);
 	if (kern_cpu_notify_probe() != HAL_OK)
 		hal_fatal(__FILE__, __LINE__, "secondary CPU notification failed");
+	hal_printf("boot: HAL initialized successfully. "
+	    "[cpu %u, memory %uMB, timer %ums]\n",
+	    hal_cpu_count(),
+	    (unsigned)(hal_pmem_get_total_size() / (1024U * 1024U)),
+	    (unsigned)(1000U / HAL_TIMER_FREQUENCY));
 	kern_logf("boot: CPUs ready: %u\n", hal_cpu_count());
 	if (process_reaper_start() != 0)
 		hal_fatal(__FILE__, __LINE__, "process reaper initialization failed");

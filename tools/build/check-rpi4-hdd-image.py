@@ -57,6 +57,8 @@ def check(args: argparse.Namespace) -> None:
 
     same_file(args.image, "VMUNIX.A64", args.kernel)
     same_file(args.image, "rootfs.img", args.arch_image)
+    same_file(args.image, "data.img", args.data_image)
+    same_file(args.image, "swapfile", args.swapfile)
     same_file(args.image, "config.txt", args.config)
     for name in ("start4.elf", "fixup4.dat", "bcm2711-rpi-4-b.dtb",
                  "overlays/disable-bt.dtbo", "LICENCE.broadcom"):
@@ -78,6 +80,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--arch-image", type=Path, required=True)
+    parser.add_argument("--data-image", type=Path, required=True)
+    parser.add_argument("--swapfile", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("image", type=Path)
     check(parser.parse_args())

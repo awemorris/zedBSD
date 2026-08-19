@@ -16,8 +16,6 @@ enum overlay_mount_flags {
 struct overlay_mount_args {
 	struct path upper;
 	struct path lower;
-	struct path metadata_root;
-	const char *journal_base;
 	unsigned flags;
 };
 

@@ -18,7 +18,6 @@
 #include "kern/overlayfs.h"
 #include "kern/loop.h"
 #include "kern/klog.h"
-#include "kern/swap-fat.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -27,6 +26,10 @@
 
 #define PHYSICAL_DISK_MAX 4U
 #define VFS_HIGH __attribute__((section(".hightext")))
+#define VFS_LOG(...) do { \
+	hal_printf(__VA_ARGS__); \
+	kern_logf(__VA_ARGS__); \
+} while (0)
 
 #if defined(HAL_ARCH_I386)
 #define ROOTFS_IMAGE_PRIMARY "/rootfs.img"
@@ -45,7 +48,7 @@ struct cwdinfo kern_cwdinfo __attribute__((section(".vfs_bss")));
 static int
 vfs_fail(const char *stage, int error)
 {
-	kern_logf("vfs: %s failed (error %d)\n", stage, error);
+	VFS_LOG("vfs: %s failed (error %d)\n", stage, error);
 	return error;
 }
 
@@ -140,33 +143,34 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	struct disk *boot_partition = NULL;
 	struct disk *root_partition = NULL;
 	struct disk *root_loop = NULL;
-	struct mount *boot_mount,*root_mount;
+	struct mount *root_mount;
 #ifdef ROOTFS_IMAGE_PRIMARY
 	struct mount *boot_private = NULL;
+	struct disk *data_loop = NULL;
+	struct mount *root_private = NULL;
+	struct mount *data_private = NULL;
 #endif
-	struct path boot_path;
 	struct path root_path;
 	const char *failure_stage = "initialize root cwd";
-	int separate_boot = 0;
 	unsigned physical_count = 0, next_number = 1, i;
 	int error;
 
 	if (handoff == NULL)
 		return vfs_fail("handoff", EINVAL);
 	if (handoff->version == ZEDBSD_HANDOFF_VERSION_SUN4U)
-		kern_logf("vfs: boot BIOS=%02x Sun slice=%u devices=%u\n",
+		VFS_LOG("vfs: boot BIOS=%02x Sun slice=%u devices=%u\n",
 		    handoff->boot_bios_id, handoff->boot_partition_index,
 		    device_count);
 	else if (handoff->version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT)
-		kern_logf("vfs: boot BIOS=%02x MBR partition=%u devices=%u\n",
+		VFS_LOG("vfs: boot BIOS=%02x MBR partition=%u devices=%u\n",
 		    handoff->boot_bios_id, handoff->boot_partition_index,
 		    device_count);
 	else if (handoff->version == ZEDBSD_HANDOFF_VERSION_X68K)
-		kern_logf("vfs: boot SCSI=%u X68k partition=%u devices=%u\n",
+		VFS_LOG("vfs: boot SCSI=%u X68k partition=%u devices=%u\n",
 		    handoff->boot_bios_id, handoff->boot_partition_index,
 		    device_count);
 	else
-		kern_logf("vfs: boot BIOS=%02X partition LBA=%u devices=%u\n",
+		VFS_LOG("vfs: boot BIOS=%02X partition LBA=%u devices=%u\n",
 		    handoff->boot_bios_id, handoff->boot_partition_lba,
 		    device_count);
 	for (i = 0; i < device_count; i++)
@@ -179,7 +183,7 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		if (disk != NULL && !(disk->d_flags & DISK_PARTITION))
 			physical[physical_count++] = disk;
 	}
-	kern_logf("vfs: native boot disk=%s physical disks=%u\n",
+	VFS_LOG("vfs: native boot disk=%s physical disks=%u\n",
 	    boot_physical != NULL ? boot_physical->d_name : "none",
 	    physical_count);
 	mount_reset();
@@ -221,12 +225,12 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		int count = partition_scan(physical[i], entries, PARTITION_MAX);
 		int slot;
 		if (geometry_error == 0)
-			kern_logf("vfs: scan %s H/S=%u/%u blocks=%u: %d entries\n",
+			VFS_LOG("vfs: scan %s H/S=%u/%u blocks=%u: %d entries\n",
 			    physical[i]->d_name, geometry.heads,
 			    geometry.sectors_per_track,
 			    (uint32_t)physical[i]->d_block_count, count);
 		else
-			kern_logf("vfs: scan %s geometry error=%d: %d entries\n",
+			VFS_LOG("vfs: scan %s geometry error=%d: %d entries\n",
 			    physical[i]->d_name, geometry_error, count);
 		if (count < 0) {
 			disk_release(physical[i]);
@@ -236,7 +240,7 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 			if (entries[slot].p_block_count == 0 ||
 			    partition_create_disk(&entries[slot]) != 0)
 				continue;
-			kern_logf("vfs: %s partition %u start=%u data=%u blocks=%u\n",
+			VFS_LOG("vfs: %s partition %u start=%u data=%u blocks=%u\n",
 			    physical[i]->d_name, (unsigned)slot + 1U,
 			    (uint32_t)entries[slot].p_start_block,
 			    (uint32_t)entries[slot].p_data_block,
@@ -286,49 +290,83 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 			return vfs_fail("ambiguous UFS1 root candidates",EINVAL);
 		root_partition=partition->p_disk;
 	}
-	path_init(&boot_path);
 #ifdef ROOTFS_IMAGE_PRIMARY
 	if (root_partition == NULL) {
+		struct overlay_mount_args overlay_args;
 		struct path private_root;
+		struct path lower;
+		struct path upper;
 		path_init(&private_root);
+		path_init(&lower);
+		path_init(&upper);
 		error = mount_private("auto", boot_partition, 0, NULL,
 		    &boot_private);
 		if (error == 0) {
 			path_set(&private_root, boot_private, boot_private->m_root);
 			error = loop_attach_path(&private_root, ROOTFS_IMAGE_PRIMARY,
-			    LOOP_READ_WRITE, &root_loop);
+			    LOOP_READ_ONLY, &root_loop);
 			if (error == ENOENT) {
 				const char *unified = ROOTFS_IMAGE_UNIFIED_OTHER;
 #ifdef ROOTFS_IMAGE_UNIFIED_PC98
 				if (handoff->version == ZEDBSD_HANDOFF_VERSION_PC98)
 					unified = ROOTFS_IMAGE_UNIFIED_PC98;
 #endif
-				error = loop_attach_path(&private_root,
-				    unified, LOOP_READ_WRITE, &root_loop);
+					error = loop_attach_path(&private_root,
+				    unified, LOOP_READ_ONLY, &root_loop);
 			}
-			path_release(&private_root);
+			if (error == 0)
+				error = loop_attach_path(&private_root, "/data.img",
+				    LOOP_READ_WRITE, &data_loop);
 		}
-		if (error == 0) {
-			struct fat_mount_args args = { root_loop->d_name };
-			error = mount_root_create("auto", 0, &args, &root_mount);
-			if (error == 0) {
-				separate_boot = 1;
-				kern_logf("vfs: root=image disk=%s boot=%s\n",
-				    root_loop->d_name, boot_partition->d_name);
-			}
-		} else if (error == ENOENT) {
+		path_release(&private_root);
+		if (error == ENOENT && root_loop == NULL) {
 			(void)unmount_private(boot_private);
 			boot_private = NULL;
 			error = 0;
 		}
 		if (error != 0)
-			return vfs_fail("attach rootfs image", error);
+			return vfs_fail(root_loop != NULL ? "attach data image" :
+			    "attach rootfs image", error);
+		if (root_loop != NULL && data_loop != NULL) {
+			VFS_LOG("vfs: %s <- rootfs image (private, read-only)\n",
+			    root_loop->d_name);
+			VFS_LOG("vfs: %s <- data.img (private, read-write)\n",
+			    data_loop->d_name);
+			VFS_LOG("vfs: %s filesystem consistency check...\n",
+			    root_loop->d_name);
+			error = mount_private("auto", root_loop, MOUNT_READ_ONLY,
+			    NULL, &root_private);
+			if (error == 0) {
+				VFS_LOG("vfs: %s UFS consistency check...\n",
+				    data_loop->d_name);
+				error = mount_private("auto", data_loop, 0, NULL,
+				    &data_private);
+			}
+			if (error == 0)
+				path_set(&lower, root_private, root_private->m_root);
+			if (error == 0)
+				path_set(&upper, data_private, data_private->m_root);
+			memset(&overlay_args, 0, sizeof(overlay_args));
+			overlay_args.upper = upper;
+			overlay_args.lower = lower;
+			overlay_args.flags = OVERLAY_READ_WRITE;
+			if (error == 0) {
+				VFS_LOG("vfs: mounting overlay filesystem at /...\n");
+				error = mount_root_create("overlay", 0,
+				    &overlay_args, &root_mount);
+			}
+			path_release(&upper);
+			path_release(&lower);
+			if (error != 0)
+				return vfs_fail("mount root overlay", error);
+			VFS_LOG("vfs: root=overlay lower=%s upper=%s\n",
+			    root_loop->d_name, data_loop->d_name);
+		}
 	}
 #endif
 	if (root_partition != NULL) {
 		struct fat_mount_args args = { root_partition->d_name };
 		error = mount_root_create("ufs1", 0, &args, &root_mount);
-		separate_boot = error == 0;
 	} else if (root_loop == NULL) {
 		struct fat_mount_args args = { boot_partition->d_name };
 		error = mount_root_create("auto", 0, &args, &root_mount);
@@ -342,6 +380,7 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	if (error != 0)
 		goto out_root;
 	process_attach_boot_cwd(&kern_cwdinfo);
+	VFS_LOG("vfs: mounting runtime filesystems...\n");
 	error = vfs_ensure_root_directory(&root_path, "shm", 01777U);
 	if (error != 0 && error != EROFS && error != EOPNOTSUPP)
 		goto out_root;
@@ -359,21 +398,6 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	error = mount_at("tmpfs", &root_path, "run", 0, NULL, NULL);
 	if (error != 0)
 		goto out_root;
-	if(separate_boot) {
-		struct fat_mount_args args={boot_partition->d_name};
-		failure_stage="mount boot FAT at /boot";
-		error=mount_at("auto",&root_path,"boot",0,&args,&boot_mount);
-		if(error!=0)
-			goto out_root;
-		path_set(&boot_path,boot_mount,boot_mount->m_root);
-		if (root_partition != NULL)
-			kern_logf("vfs: root=ufs1 disk=%s boot=%s\n",
-			    root_partition->d_name,boot_partition->d_name);
-	} else {
-		boot_mount=root_mount;
-		path_set(&boot_path,boot_mount,boot_mount->m_root);
-		kern_logf("vfs: root=legacy-fat disk=%s\n",boot_partition->d_name);
-	}
 	failure_stage = "mount /dev";
 	error = mount_at("devfs", &root_path, "dev", 0, NULL, NULL);
 	if (error != 0)
@@ -400,6 +424,7 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		if (error != 0)
 			goto out_root;
 	}
+	VFS_LOG("vfs: runtime filesystems mounted\n");
 	for (i = 0; i < partition_count(); i++) {
 		const struct partition *partition = partition_at(i);
 		struct fat_mount_args args;
@@ -414,15 +439,10 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 		if (error == 0)
 			next_number++;
 	}
-	error = swap_fat_activate(&kern_cwdinfo, separate_boot ? "/boot" : "/");
-	if (error != 0 && error != ENOENT)
-		kern_logf("swap: /swapfile disabled (%d)\n", error);
-	path_release(&boot_path);
 	path_release(&root_path);
 	return 0;
 
 out_root:
-	path_release(&boot_path);
 	path_release(&root_path);
 	return vfs_fail(failure_stage, error);
 }

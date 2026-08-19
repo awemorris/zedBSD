@@ -53,8 +53,6 @@ struct overlay_metadata {
 struct overlay_mount_state {
 	struct path upper_root;
 	struct path lower_root;
-	struct path metadata_root;
-	char journal_base[4];
 	unsigned flags;
 	ino_t next_ino;
 	struct overlay_identity identities[OVERLAY_IDENTITY_MAX];
@@ -187,9 +185,9 @@ overlay_all_zero(const uint8_t *data, size_t length)
 static OVERLAY_HIGH const uint8_t *
 overlay_id(const struct overlay_mount_state *state)
 {
-	static const uint8_t bin_id[4] = { 'B', 'I', 'N', 0 };
-	static const uint8_t lib_id[4] = { 'L', 'I', 'B', 0 };
-	return !strcmp(state->journal_base, "bin") ? bin_id : lib_id;
+	static const uint8_t overlay_id[4] = { 'Z', 'O', 'V', 'L' };
+	(void)state;
+	return overlay_id;
 }
 
 static OVERLAY_HIGH int
@@ -436,17 +434,14 @@ overlay_open_journal(struct overlay_mount_state *state, unsigned slot)
 	struct componentname component;
 	struct inode *inode;
 	struct path path;
-	char name[9];
+	char name[7];
 	int error, flags;
-	name[0] = state->journal_base[0];
-	name[1] = state->journal_base[1];
-	name[2] = state->journal_base[2];
-	name[3] = (char)('0' + slot);
-	strcpy(name + 4, ".log");
+	strcpy(name, ".zovl0");
+	name[5] = (char)('0' + slot);
 	component.cn_nameptr = name;
 	component.cn_namelen = strlen(name);
 	component.cn_flags = 0;
-	error = inode_lookup(state->metadata_root.p_inode, &component, &inode);
+	error = inode_lookup(state->upper_root.p_inode, &component, &inode);
 	if (error != 0)
 		return error;
 	if (inode->i_type != INODE_REG || inode->i_size != OVERLAY_JOURNAL_BYTES) {
@@ -454,7 +449,7 @@ overlay_open_journal(struct overlay_mount_state *state, unsigned slot)
 		return EINVAL;
 	}
 	path_init(&path);
-	path_set(&path, state->metadata_root.p_mount, inode);
+	path_set(&path, state->upper_root.p_mount, inode);
 	inode_release(inode);
 	flags = state->flags == OVERLAY_READ_WRITE ? O_RDWR : O_RDONLY;
 	error = file_open_resolved(&path, flags, &state->journal[slot]);
@@ -628,7 +623,7 @@ overlay_journal_compact(struct overlay_mount_state *state)
 	if (error == 0)
 		error = file_fsync(state->journal[target]);
 	if (error == 0)
-		error = mount_sync(state->metadata_root.p_mount);
+		error = mount_sync(state->upper_root.p_mount);
 	if (error != 0)
 		return error;
 	state->active_slot = target;
@@ -741,7 +736,7 @@ overlay_visible(const struct overlay_inode_info *info)
 }
 
 static OVERLAY_HIGH int
-overlay_reserved_name(const char *name)
+overlay_temporary_name(const char *name)
 {
 	unsigned i;
 	if (name == NULL || strlen(name) != 10U || name[0] != 'o' ||
@@ -752,6 +747,13 @@ overlay_reserved_name(const char *name)
 		      (name[i] >= 'a' && name[i] <= 'f')))
 			return 0;
 	return 1;
+}
+
+static OVERLAY_HIGH int
+overlay_reserved_name(const char *name)
+{
+	return name != NULL && (!strcmp(name, ".zovl0") ||
+	    !strcmp(name, ".zovl1") || overlay_temporary_name(name));
 }
 
 static OVERLAY_HIGH int
@@ -1880,7 +1882,7 @@ overlay_cleanup_temps(struct path *directory, unsigned depth,
 			error = file_readdir(file, &entry, &eof);
 			if (error != 0 || eof)
 				break;
-			if (!overlay_reserved_name(entry.d_name))
+			if (!overlay_temporary_name(entry.d_name))
 				continue;
 			component.cn_nameptr = entry.d_name;
 			component.cn_namelen = strlen(entry.d_name);
@@ -1955,23 +1957,17 @@ overlay_mount_impl(struct mount *mountp)
 	unsigned visited = 0, deleted = 0;
 	int error;
 	if (args == NULL || args->upper.p_inode == NULL ||
-	    args->lower.p_inode == NULL || args->metadata_root.p_inode == NULL ||
+	    args->lower.p_inode == NULL ||
 	    args->upper.p_inode->i_type != INODE_DIR ||
 	    args->lower.p_inode->i_type != INODE_DIR ||
-	    args->metadata_root.p_inode->i_type != INODE_DIR ||
 	    (args->flags != OVERLAY_READ_ONLY &&
-	     args->flags != OVERLAY_READ_WRITE) || args->journal_base == NULL ||
-	    (strcmp(args->journal_base, "bin") &&
-	     strcmp(args->journal_base, "lib")))
+	     args->flags != OVERLAY_READ_WRITE))
 		return EINVAL;
 	state = kern_calloc(1, sizeof(*state));
 	if (state == NULL)
 		return ENOMEM;
 	path_set(&state->upper_root, args->upper.p_mount, args->upper.p_inode);
 	path_set(&state->lower_root, args->lower.p_mount, args->lower.p_inode);
-	path_set(&state->metadata_root, args->metadata_root.p_mount,
-		 args->metadata_root.p_inode);
-	strcpy(state->journal_base, args->journal_base);
 	state->flags = args->flags;
 	state->next_ino = 2;
 	state->identities[0].state = OVERLAY_ID_ACTIVE;
@@ -1979,13 +1975,15 @@ overlay_mount_impl(struct mount *mountp)
 	state->identities[0].path[0] = '\0';
 	mountp->m_data = state;
 	error = overlay_journal_load(state);
-	if (error != 0)
+	if (error != 0) {
 		goto fail_state;
+	}
 	error = overlay_cleanup_temps(&state->upper_root, 0, &visited, &deleted);
 	if (error == 0 && deleted != 0)
 		error = mount_sync(state->upper_root.p_mount);
-	if (error != 0)
+	if (error != 0) {
 		goto fail_state;
+	}
 	error = overlay_make_inode(mountp, "", &state->upper_root,
 		&state->lower_root, &root);
 	if (error != 0) {
@@ -1999,7 +1997,6 @@ fail_state:
 		(void)file_close(state->journal[0]);
 	if (state->journal[1] != NULL)
 		(void)file_close(state->journal[1]);
-	path_release(&state->metadata_root);
 	path_release(&state->lower_root);
 	path_release(&state->upper_root);
 	kern_free(state);
@@ -2039,7 +2036,6 @@ overlay_unmount_impl(struct mount *mountp)
 		(void)file_close(state->journal[0]);
 	if (state->journal[1] != NULL)
 		(void)file_close(state->journal[1]);
-	path_release(&state->metadata_root);
 	path_release(&state->lower_root);
 	path_release(&state->upper_root);
 	kern_free(state);

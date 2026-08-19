@@ -27,7 +27,8 @@ def require_file(path: Path) -> None:
 
 
 def create(args: argparse.Namespace) -> None:
-    for path in (args.kernel, args.arch_image, args.config):
+    for path in (args.kernel, args.arch_image, args.data_image, args.swapfile,
+                 args.config):
         require_file(path)
     for name in FIRMWARE_FILES:
         require_file(args.firmware_dir / name)
@@ -65,10 +66,14 @@ def create(args: argparse.Namespace) -> None:
         run("mcopy", "-i", spec, str(args.kernel), "::/VMUNIX.A64")
         run("mcopy", "-i", spec, str(args.arch_image),
             "::/rootfs.img")
+        run("mcopy", "-i", spec, str(args.data_image), "::/data.img")
+        run("mcopy", "-i", spec, str(args.swapfile), "::/swapfile")
 
         checker = Path(__file__).with_name("check-rpi4-hdd-image.py")
         run("python3", str(checker), "--kernel", str(args.kernel),
-            "--arch-image", str(args.arch_image), "--config", str(args.config),
+            "--arch-image", str(args.arch_image),
+            "--data-image", str(args.data_image),
+            "--swapfile", str(args.swapfile), "--config", str(args.config),
             str(temporary))
         os.replace(temporary, args.output)
     finally:
@@ -80,6 +85,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--arch-image", type=Path, required=True)
+    parser.add_argument("--data-image", type=Path, required=True)
+    parser.add_argument("--swapfile", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--firmware-dir", type=Path, required=True)
     parser.add_argument("--force", action="store_true")

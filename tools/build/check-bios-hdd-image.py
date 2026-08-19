@@ -116,31 +116,37 @@ def check(args: argparse.Namespace) -> None:
         first = stream.read(512)
         if len(first) != 512:
             fail("missing Stage 2")
-        magic, version, header_size, image_size = struct.unpack_from(
-            "<IHHI", first, 0)
-        sectors, machine, entry = struct.unpack_from("<HHI", first, 12)
-        if (magic, version, header_size) != (0x324C425A, 1, 32):
-            fail("invalid ZBL2 header")
-        if machine != MACHINES[args.machine]:
-            fail("ZBL2 machine mismatch")
-        if not 1 <= sectors <= 127 or stage2_lba + sectors > 2048:
-            fail("invalid ZBL2 sector count")
-        if not 32 <= entry < image_size <= sectors * 512:
-            fail("invalid ZBL2 size or entry")
-        stream.seek(stage2_lba * 512)
-        stage2 = stream.read(sectors * 512)
-        total = sum(struct.unpack_from("<I", stage2, offset)[0]
-                    for offset in range(0, len(stage2), 4)) & 0xFFFFFFFF
-        if total:
-            fail("ZBL2 checksum mismatch")
+        if args.machine == "pc98":
+            if first[510:512] != b"\x55\xaa":
+                fail("invalid PC-98 LBA2 selector")
+            sectors = 14
+        else:
+            magic, version, header_size, image_size = struct.unpack_from(
+                "<IHHI", first, 0)
+            sectors, machine, entry = struct.unpack_from("<HHI", first, 12)
+            if (magic, version, header_size) != (0x324C425A, 1, 32):
+                fail("invalid ZBL2 header")
+            if machine != MACHINES[args.machine]:
+                fail("ZBL2 machine mismatch")
+            if not 1 <= sectors <= 127 or stage2_lba + sectors > 2048:
+                fail("invalid ZBL2 sector count")
+            if not 32 <= entry < image_size <= sectors * 512:
+                fail("invalid ZBL2 size or entry")
+            stream.seek(stage2_lba * 512)
+            stage2 = stream.read(sectors * 512)
+            total = sum(struct.unpack_from("<I", stage2, offset)[0]
+                        for offset in range(0, len(stage2), 4)) & 0xFFFFFFFF
+            if total:
+                fail("ZBL2 checksum mismatch")
         stream.seek((stage2_lba + sectors) * 512)
         gap = stream.read((2048 - stage2_lba - sectors) * 512)
         if any(gap):
             fail("reserved pre-partition gap is not zero")
         stream.seek(start * 512)
         bpb = stream.read(512)
-        if struct.unpack_from("<H", bpb, 11)[0] != 512:
-            fail("FAT bytes/sector is not 512")
+        expected_sector = 1024 if args.machine == "pc98" else 512
+        if struct.unpack_from("<H", bpb, 11)[0] != expected_sector:
+            fail(f"FAT bytes/sector is not {expected_sector}")
         if struct.unpack_from("<H", bpb, 22)[0] == 0:
             fail("volume is not FAT12/16")
 
@@ -190,6 +196,24 @@ def check(args: argparse.Namespace) -> None:
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if direct_arch.returncode == 0:
                 fail("obsolete /arch directory exists in the boot FAT")
+        if args.data_image is not None:
+            extracted = Path(directory) / "data.img"
+            subprocess.run(["mcopy", "-n", "-i",
+                            f"{image}@@{start * 512}",
+                            "::data.img", str(extracted)], check=True,
+                           stdout=subprocess.DEVNULL)
+            if hashlib.sha256(extracted.read_bytes()).digest() != \
+                    hashlib.sha256(args.data_image.read_bytes()).digest():
+                fail("data image content differs from the input")
+        if args.swapfile is not None:
+            extracted = Path(directory) / "swapfile"
+            subprocess.run(["mcopy", "-n", "-i",
+                            f"{image}@@{start * 512}",
+                            "::swapfile", str(extracted)], check=True,
+                           stdout=subprocess.DEVNULL)
+            if hashlib.sha256(extracted.read_bytes()).digest() != \
+                    hashlib.sha256(args.swapfile.read_bytes()).digest():
+                fail("swapfile content differs from the input")
     if args.ufs_root is not None:
         expected_hash = hashlib.sha256(args.ufs_root.read_bytes()).digest()
         digest = hashlib.sha256()
@@ -219,6 +243,8 @@ def main() -> None:
     parser.add_argument("--holoris", type=Path)
     parser.add_argument("--arch-profile", choices=("i386", "amd64", "aarch64"))
     parser.add_argument("--arch-image", type=Path)
+    parser.add_argument("--data-image", type=Path)
+    parser.add_argument("--swapfile", type=Path)
     parser.add_argument("--arch-format", choices=("fat", "ufs"), default="fat")
     parser.add_argument("--bin-file", action="append", default=[])
     parser.add_argument("--ufs-root", type=Path)

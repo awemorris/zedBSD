@@ -104,8 +104,6 @@ amd64_page_init(void)
 	reserve_range((uintptr_t)__kernel_phys_start,
 	    (size_t)(__kernel_phys_end - __kernel_phys_start));
 	hal_memset(fixed_claims, 0, sizeof(fixed_claims));
-	hal_printf("boot: amd64 physical memory: %u KiB\n",
-	    (uint32)((uint64)phys_pages * PAGE_SIZE / 1024U));
 }
 
 static int

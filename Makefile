@@ -753,8 +753,8 @@ userland-command-host-test: scripts/test-userland-commands-host.sh
 CHECK_RUN_TARGETS += userland-command-host-test
 
 overlay-journal-format-host-test: tests/overlay-journal-format-host-test.py \
-	scripts/overlay_journal_format.py
-	PYTHONPATH=$(BUILD_TOOLS_DIR):scripts $(PYTHON) tests/overlay-journal-format-host-test.py
+	$(BUILD_TOOLS_DIR)/overlay_journal_format.py
+	PYTHONPATH=$(BUILD_TOOLS_DIR) $(PYTHON) tests/overlay-journal-format-host-test.py
 
 CHECK_RUN_TARGETS += overlay-journal-format-host-test
 
@@ -779,6 +779,11 @@ CHECK_RUN_TARGETS += ufs2-format-python-test
 # validators remain small standalone tools under tools/build; no normal build
 # target depends on the legacy scripts directory.
 ARCH_IMAGE_DIR := build/arch-images
+DATA_IMAGE := build/data.img
+SWAP_IMAGE := build/swapfile
+DATA_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-data-image.py \
+	$(BUILD_TOOLS_DIR)/overlay_journal_format.py \
+	$(BUILD_TOOLS_DIR)/ufs1_format.py
 ARCH_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-image.py \
 	$(BUILD_TOOLS_DIR)/check-arch-overlay-image.py
 ARCH_UFS_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.py \
@@ -793,6 +798,15 @@ ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \
 	--file /etc/shadow=userland/base/etc/shadow \
 	--mode /etc/passwd=0644 --mode /etc/group=0644 \
 	--mode /etc/shadow=0400
+
+$(DATA_IMAGE): $(DATA_IMAGE_TOOLS)
+	@mkdir -p $(dir $@)
+	PYTHONPATH=$(BUILD_TOOLS_DIR) $(PYTHON) \
+		$(BUILD_TOOLS_DIR)/make-data-image.py --output $@
+
+$(SWAP_IMAGE): $(BUILD_TOOLS_DIR)/make-swapfile.py
+	@mkdir -p $(dir $@)
+	$(PYTHON) $(BUILD_TOOLS_DIR)/make-swapfile.py --size-mib 64 --output $@
 
 # $(1): output, $(2): profile, $(3): prerequisites, $(4): --file arguments.
 define ZEDBSD_ARCH_IMAGE_RULE

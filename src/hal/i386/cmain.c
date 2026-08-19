@@ -30,11 +30,8 @@ cmain(const void *raw_boot_info)
 	    "Copyright (C) 2005, 2026, Awe Morris.\n\n");
 #endif
 
-	hal_printf("boot: HAL physical-memory initialization\n");
 	i386_page_init();
-	hal_printf("boot: HAL address-space initialization\n");
 	i386_space_init();
-	hal_printf("boot: HAL interrupt and timer initialization\n");
 	i386_int_init();
 	irq_init();
 	bsp_timer_init();

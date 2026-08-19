@@ -38,7 +38,10 @@ def build(args: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory(prefix="zedbsd-arch-ufs-") as work_text:
         root=Path(work_text)
         for directory in ("bin", "lib", "etc", "var/run", "root", "home",
-                          "usr/bin", "dev", "boot"): (root/directory).mkdir(parents=True, exist_ok=True)
+                          "usr/bin", "dev", "boot", "tmp", "run", "shm"):
+            (root/directory).mkdir(parents=True, exist_ok=True)
+        (root/"tmp").chmod(0o1777)
+        (root/"shm").chmod(0o1777)
         (root/"lib"/"arch.id").write_text(args.profile+"\n",encoding="ascii")
         (root/"etc"/"zedbsd-root").write_text(
             "zedBSD ufs1 root v1\n", encoding="ascii")

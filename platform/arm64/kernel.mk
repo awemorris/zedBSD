@@ -436,11 +436,13 @@ $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/VMUNIX.A64 \
 
 ufs-root-image: $(BUILD)/ufs-root-hdd-image.img
 
-$(BUILD)/hdd-image.img: $(BUILD)/VMUNIX.A64 $(AARCH64_ARCH_IMAGE) \
+$(BUILD)/hdd-image.img: $(BUILD)/VMUNIX.A64 $(AARCH64_ARCH_IMAGE) $(DATA_IMAGE) $(SWAP_IMAGE) \
 	$(ARM64_PLATFORM)/config.txt tools/build/make-rpi4-hdd-image.py \
 	tools/build/check-rpi4-hdd-image.py
 	$(PYTHON) tools/build/make-rpi4-hdd-image.py --force \
 		--kernel $(BUILD)/VMUNIX.A64 --arch-image $(AARCH64_ARCH_IMAGE) \
+		--data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) \
 		--config $(ARM64_PLATFORM)/config.txt \
 		--firmware-dir vendor/raspberrypi-firmware/boot $@
 
@@ -448,6 +450,8 @@ hdd-image: $(BUILD)/hdd-image.img
 rpi4-image-check: $(BUILD)/hdd-image.img
 	$(PYTHON) tools/build/check-rpi4-hdd-image.py --kernel $(BUILD)/VMUNIX.A64 \
 		--arch-image $(AARCH64_ARCH_IMAGE) \
+		--data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) \
 		--config $(ARM64_PLATFORM)/config.txt $<
 
 $(BUILD)/vmunix: $(ARM64_VMUNIX_OBJS) $(ARM64_PLATFORM)/vmunix.ld \

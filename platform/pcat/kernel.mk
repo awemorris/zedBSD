@@ -180,7 +180,7 @@ rootfs-tar: $(BUILD)/rootfs.tar.gz
 rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(I386_ARCH_UFS_IMAGE) \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(I386_ARCH_UFS_IMAGE) $(DATA_IMAGE) $(SWAP_IMAGE) \
 	$(HOLORIS_NOCT) \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.py \
 	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.py
@@ -188,7 +188,8 @@ $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
 		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) \
-		--arch-format ufs $@
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
 
 $(BUILD)/ufs-root.img: $(I386_ARCH_UFS_IMAGE) \
 	$(BUILD_TOOLS_DIR)/make-ufs1-root-image.py tools/build/ufs1_format.py
@@ -209,7 +210,8 @@ bios-hdd-image: $(BUILD)/bios-hdd-image.img
 bios-loader-host-check: $(BUILD)/bios-hdd-image.img
 	$(PYTHON) $(BUILD_TOOLS_DIR)/check-bios-hdd-image.py --machine pcat \
 		--kernel $(BUILD)/vmunix --arch-profile i386 \
-		--arch-image $(I386_ARCH_UFS_IMAGE) --arch-format ufs $<
+		--arch-image $(I386_ARCH_UFS_IMAGE) --arch-format ufs \
+		--data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) $<
 
 bios-loader-qemu-test: bios-bootloader \
 	$(BUILD)/bootloader/payload32.elf $(BUILD)/bootloader/payload64.elf

@@ -143,6 +143,7 @@ dp8390_read_prom(struct dp8390 *dp, uint8_t prom[16])
 {
 	uint8_t raw[32];
 	unsigned index;
+	int error;
 
 	if (dp == NULL || dp->bus == NULL || prom == NULL)
 		return EINVAL;
@@ -159,7 +160,12 @@ dp8390_read_prom(struct dp8390 *dp, uint8_t prom[16])
 	dma_begin(dp, 0, sizeof(raw), DP_CR_RREAD);
 	for (index = 0; index < sizeof(raw); index++)
 		raw[index] = dp->bus->read_data8(dp->bus_cookie);
-	(void)wait_rdc(dp);
+	error = wait_rdc(dp);
+	/* Probing must not leave an unconfigured adapter running. */
+	wr(dp, DP_IMR, 0);
+	wr(dp, DP_CR, DP_CR_STOP | DP_CR_NODMA | DP_CR_PAGE0);
+	if (error != 0)
+		return error;
 	for (index = 0; index < 16U; index++) {
 		if (raw[index * 2U] != raw[index * 2U + 1U])
 			return ENODEV;

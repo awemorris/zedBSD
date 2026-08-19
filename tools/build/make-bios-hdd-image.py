@@ -45,6 +45,11 @@ def create(args: argparse.Namespace) -> None:
     for path in (args.stage1, args.stage2, args.kernel):
         if not path.is_file():
             raise SystemExit(f"missing input: {path}")
+    if args.machine == "pc98":
+        if args.partition_pbr is None or args.io_sys is None:
+            raise SystemExit("PC-98 requires --partition-pbr and --io-sys")
+        if not args.partition_pbr.is_file() or not args.io_sys.is_file():
+            raise SystemExit("missing PC-98 partition loader input")
     for path in (args.shell, args.noct, args.nettest, args.holoris):
         if path is not None and not path.is_file():
             raise SystemExit(f"missing input: {path}")
@@ -54,6 +59,10 @@ def create(args: argparse.Namespace) -> None:
         raise SystemExit("--arch-format requires --arch-image")
     if args.arch_image is not None and not args.arch_image.is_file():
         raise SystemExit(f"missing architecture image: {args.arch_image}")
+    if args.data_image is not None and not args.data_image.is_file():
+        raise SystemExit(f"missing data image: {args.data_image}")
+    if args.swapfile is not None and not args.swapfile.is_file():
+        raise SystemExit(f"missing swapfile: {args.swapfile}")
     if args.arch_format == "ufs" and args.holoris is not None:
         raise SystemExit("--holoris cannot modify a UFS rootfs; include it when building the rootfs")
     if args.ufs_root is not None and (not args.ufs_root.is_file() or
@@ -126,8 +135,30 @@ def create(args: argparse.Namespace) -> None:
                 stream.seek(root_start * SECTOR_SIZE)
                 stream.write(args.ufs_root.read_bytes())
         offset = start * 512
-        run("mformat", "-i", f"{temporary}@@{offset}", "-T", str(blocks),
-            "-v", "BOOT", "::")
+        if args.machine == "pc98":
+            logical_blocks = blocks // 2
+            cluster = 1
+            while logical_blocks // cluster >= 65525:
+                cluster *= 2
+            run("mformat", "-i", f"{temporary}@@{offset}", "-S", "3",
+                "-c", str(cluster), "-h", str(heads), "-s", "17",
+                "-H", str(start), "-T", str(logical_blocks),
+                "-v", "BOOT", "::")
+            bpb = temporary.read_bytes()[offset:offset + 1024]
+            pbr = bytearray(args.partition_pbr.read_bytes())
+            if len(pbr) != 1024:
+                raise SystemExit("PC-98 partition PBR must be 1024 bytes")
+            pbr[3:0x3e] = bpb[3:0x3e]
+            with temporary.open("r+b") as stream:
+                stream.seek(offset)
+                stream.write(pbr)
+            run("mcopy", "-i", f"{temporary}@@{offset}",
+                str(args.io_sys), "::IO.SYS")
+            run("mattrib", "-i", f"{temporary}@@{offset}",
+                "+r", "+h", "+s", "::IO.SYS")
+        else:
+            run("mformat", "-i", f"{temporary}@@{offset}", "-T", str(blocks),
+                "-v", "BOOT", "::")
         if args.fragment_kernel:
             with tempfile.TemporaryDirectory(prefix="zedbsd-fragment-") as work:
                 hole = Path(work) / "hole.bin"
@@ -156,6 +187,12 @@ def create(args: argparse.Namespace) -> None:
                 str(rootfs), "::/ROOTFS.IMG")
             if rootfs != args.arch_image:
                 rootfs.unlink()
+        if args.data_image is not None:
+            run("mcopy", "-i", f"{temporary}@@{offset}",
+                str(args.data_image), "::/DATA.IMG")
+        if args.swapfile is not None:
+            run("mcopy", "-i", f"{temporary}@@{offset}",
+                str(args.swapfile), "::/SWAPFILE")
         elif args.shell or args.noct or args.nettest or bin_files:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/bin")
         run("mmd", "-i", f"{temporary}@@{offset}", "::/etc")
@@ -188,6 +225,8 @@ def create(args: argparse.Namespace) -> None:
             *(["--holoris", str(args.holoris)] if args.holoris else []),
             *(sum((["--bin-file", f"{name}={source}"]
                    for name, source in bin_files.items()), [])),
+            *(["--data-image", str(args.data_image)] if args.data_image else []),
+            *(["--swapfile", str(args.swapfile)] if args.swapfile else []),
             *(["--ufs-root", str(args.ufs_root)] if args.ufs_root else []),
             str(temporary))
         os.replace(temporary, args.output)
@@ -201,6 +240,8 @@ def main() -> None:
     parser.add_argument("--machine", choices=("pcat", "pc98"), required=True)
     parser.add_argument("--stage1", type=Path, required=True)
     parser.add_argument("--stage2", type=Path, required=True)
+    parser.add_argument("--partition-pbr", type=Path)
+    parser.add_argument("--io-sys", type=Path)
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
     parser.add_argument("--noct", type=Path)
@@ -208,6 +249,8 @@ def main() -> None:
     parser.add_argument("--holoris", type=Path)
     parser.add_argument("--arch-profile", choices=("i386", "amd64", "aarch64"))
     parser.add_argument("--arch-image", type=Path)
+    parser.add_argument("--data-image", type=Path)
+    parser.add_argument("--swapfile", type=Path)
     parser.add_argument("--arch-format", choices=("fat", "ufs"), default="fat")
     parser.add_argument("--bin-file", action="append", default=[])
     parser.add_argument("--size-mib", type=int, default=129)

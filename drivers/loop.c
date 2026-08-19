@@ -96,6 +96,11 @@ loop_submit(struct disk *disk, struct bio *bio)
 		error = (int)-done;
 	else if ((uint64_t)done != bytes64)
 		error = bio->b_op == BIO_WRITE ? ENOSPC : EIO;
+	if (error != 0)
+		hal_printf("loop%u: %s block=%u count=%u flags=%x error=%d\n",
+		    loop->index, bio->b_op == BIO_READ ? "read" : "write",
+		    (uint32_t)bio->b_mapped_block, bio->b_block_count,
+		    (unsigned)loop->backing->f_flags, error);
 	bio_complete(bio, error, done > 0 ? (size_t)done : 0);
 	return 0;
 }
@@ -264,8 +269,17 @@ loop_attach_path(const struct path *root, const char *path, unsigned flags,
 	error = file_openat(&context, path, open_flags, 0, &file);
 	if (error == 0) {
 		error = loop_attach_file(file, flags, disk_out);
+		if (error != 0)
+			hal_printf("loop: attach %s mode=%s file-flags=%x "
+			    "size=%u failed (%d)\n", path,
+			    flags == LOOP_READ_WRITE ? "rw" : "ro",
+			    (unsigned)file->f_flags,
+			    file->f_inode != NULL ?
+			    (uint32_t)file->f_inode->i_size : 0U, error);
 		(void)file_close(file);
-	}
+	} else
+		hal_printf("loop: open %s flags=%x failed (%d)\n", path,
+		    (unsigned)open_flags, error);
 	cwdinfo_destroy(&context);
 	return error;
 }

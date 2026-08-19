@@ -16,7 +16,7 @@ def rejected(data: bytes, name: str) -> None:
 
 def main() -> None:
     self_test()
-    for name in ("bin", "lib"):
+    for name in ("overlay",):
         golden = empty_active_slot(name)
         assert len(golden) == JOURNAL_BYTES
         validate_empty_active_slot(golden, name)
@@ -33,4 +33,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -87,7 +87,8 @@ def create(args: argparse.Namespace) -> None:
         run("mformat", "-i", str(temporary), "-h", "16", "-s", "32",
             "-v", label, "::")
         for directory in ("bin", "lib", "etc", "var", "var/run", "root",
-                          "home", "usr", "usr/bin", "dev", "boot"):
+                          "home", "usr", "usr/bin", "dev", "boot", "tmp",
+                          "run", "shm"):
             run("mmd", "-i", str(temporary), f"::/{directory}")
         parents = set()
         for destination in files:

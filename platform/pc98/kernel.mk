@@ -179,9 +179,8 @@ $(BUILD)/$(PC98)/device-m9-test.o: src/kern/device.c
 	$(CC) $(ZEDBSD_CPPFLAGS) $(ZEDBSD_CFLAGS) -DZEDBSD_M9_WRITE_TEST \
 		-MMD -MP -c $< -o $@
 
-# Native PC-98 BIOS code using a PC/AT-compatible MBR disk layout.
-$(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
-	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
+# Native four-stage PC-98 boot chain.
+$(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/disk-ipl.S
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
 
@@ -194,23 +193,40 @@ $(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
 	@test $$(stat -c%s $@) -eq 512
 	@test "$$(od -An -tx1 -j510 -N2 $@ | tr -d ' \n')" = 55aa
 
-$(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2.S \
+$(BUILD)/bootloader/io-sys.o: $(BIOS_LOADER)/io-sys.S \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
 	bootloader/include/elf.inc
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
 
-$(BUILD)/bootloader/stage2.elf: $(BUILD)/bootloader/stage2.o \
+$(BUILD)/bootloader/io-sys.elf: $(BUILD)/bootloader/io-sys.o \
 	$(BIOS_LOADER)/stage2.ld
 	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
 
-$(BUILD)/bootloader/stage2.raw: $(BUILD)/bootloader/stage2.elf
+$(BUILD)/bootloader/io-sys.raw: $(BUILD)/bootloader/io-sys.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 
-$(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.raw \
+$(BUILD)/bootloader/IO.SYS: $(BUILD)/bootloader/io-sys.raw \
 	$(BUILD_TOOLS_DIR)/finalize-bios-stage2.py
 	$(PYTHON) $(BUILD_TOOLS_DIR)/finalize-bios-stage2.py --machine pc98 $< $@
+
+$(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/lba2.S
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+$(BUILD)/bootloader/stage2.elf: $(BUILD)/bootloader/stage2.o
+	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
+$(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+	@test $$(stat -c%s $@) -eq 7168
+
+$(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S $(BIOS_LOADER)/bootstrap.inc
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+$(BUILD)/bootloader/partition-pbr.elf: $(BUILD)/bootloader/partition-pbr.o
+	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
+$(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
+	$(OBJCOPY) -O binary -j .text $< $@
 
 $(BUILD)/bootloader/payload32.o: bootloader/tests/payload32-pc98.S
 	@mkdir -p $(dir $@)
@@ -221,7 +237,8 @@ $(BUILD)/bootloader/payload32.elf: $(BUILD)/bootloader/payload32.o \
 	$(LD) -m elf_i386 -T bootloader/tests/payload32-pc98.ld $< -o $@
 
 bios-bootloader: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/IO.SYS
 
 USER_BASIC_COMMANDS := $(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_BASIC_PROGRAMS))
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
@@ -266,15 +283,17 @@ rootfs-tar: $(BUILD)/rootfs.tar.gz
 rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(I386_ARCH_UFS_IMAGE) \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/IO.SYS $(BUILD)/vmunix $(I386_ARCH_UFS_IMAGE) $(DATA_IMAGE) $(SWAP_IMAGE) \
 	$(HOLORIS_NOCT) \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.py \
 	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.py
 	$(PYTHON) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.py --force \
 		--machine pc98 --stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--io-sys $(BUILD)/bootloader/IO.SYS --kernel $(BUILD)/vmunix \
 		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) \
-		--arch-format ufs $@
+		--arch-format ufs --data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) $@
 
 $(BUILD)/ufs-root.img: $(I386_ARCH_UFS_IMAGE) \
 	$(BUILD_TOOLS_DIR)/make-ufs1-root-image.py tools/build/ufs1_format.py
