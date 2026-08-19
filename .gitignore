@@ -2,3 +2,6 @@
 /config.mk
 __pycache__/
 plan/
+.scripts/
+config.mk
+
