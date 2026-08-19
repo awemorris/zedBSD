@@ -23,6 +23,8 @@
 #define TTY_LINE_MAX 256U
 #define TTY_RECORDS 8U
 #define TTY_INPUT_MAX 512U
+#define TTY_VT_COUNT 4U
+#define TTY_VT_HISTORY 8192U
 
 struct tty_record {
 	uint8_t data[TTY_LINE_MAX];
@@ -47,11 +49,14 @@ struct tty {
 	unsigned hungup;
 };
 
-static struct tty console_tty;
+static struct tty console_ttys[TTY_VT_COUNT];
 static struct spinlock console_output_lock;
-static unsigned console_escape_state;
-static unsigned console_escape_parameter;
-static unsigned console_escape_has_parameter;
+static unsigned active_vt;
+static unsigned console_escape_state[TTY_VT_COUNT];
+static unsigned console_escape_parameter[TTY_VT_COUNT];
+static unsigned console_escape_has_parameter[TTY_VT_COUNT];
+static char vt_history[TTY_VT_COUNT][TTY_VT_HISTORY];
+static size_t vt_history_used[TTY_VT_COUNT];
 
 static void
 tty_flush_input_locked(struct tty *tty)
@@ -86,23 +91,27 @@ tty_default_termios(struct termios *termios)
 int
 tty_console_init(void)
 {
-	memset(&console_tty, 0, sizeof(console_tty));
-	spin_init(&console_tty.lock, LOCK_RANK_TTY, "console tty");
+	memset(console_ttys, 0, sizeof(console_ttys));
+	memset(vt_history_used, 0, sizeof(vt_history_used));
+	active_vt = 0;
 	spin_init(&console_output_lock, LOCK_RANK_TTY, "console output");
-	waitq_init(&console_tty.read_waitq, "console tty input");
-	tty_default_termios(&console_tty.termios);
-	console_tty.winsize.ws_row = HAL_CONS_ROWS;
-	console_tty.winsize.ws_col = HAL_CONS_COLUMNS;
+	for (unsigned i = 0; i < TTY_VT_COUNT; i++) {
+		spin_init(&console_ttys[i].lock, LOCK_RANK_TTY, "virtual tty");
+		waitq_init(&console_ttys[i].read_waitq, "virtual tty input");
+		tty_default_termios(&console_ttys[i].termios);
+		console_ttys[i].winsize.ws_row = HAL_CONS_ROWS;
+		console_ttys[i].winsize.ws_col = HAL_CONS_COLUMNS;
+	}
 	return 0;
 }
 
 static void
-tty_console_csi(unsigned command)
+tty_console_csi(unsigned vt, unsigned command)
 {
 	/* Minimal ANSI cursor/erase baseline shared by every HAL console. */
 	struct hal_cons_state state;
-	unsigned amount = console_escape_has_parameter ?
-		console_escape_parameter : 1U;
+	unsigned amount = console_escape_has_parameter[vt] ?
+		console_escape_parameter[vt] : 1U;
 
 	hal_cons_save_state(&state);
 	switch (command) {
@@ -136,7 +145,7 @@ tty_console_csi(unsigned command)
 		if (amount == 2U) {
 			hal_cons_clear_row(state.row);
 			(void)hal_cons_set_cursor(state.row, state.column);
-		} else if (!console_escape_has_parameter || amount == 0U) {
+		} else if (!console_escape_has_parameter[vt] || amount == 0U) {
 			hal_cons_clear_to_eol();
 		}
 		break;
@@ -146,52 +155,88 @@ tty_console_csi(unsigned command)
 }
 
 static void
-tty_echo(const char *bytes, size_t length)
+tty_render(unsigned vt, const char *bytes, size_t length)
 {
 	size_t index = 0;
-	unsigned long irq;
 
 	if (length == 0)
 		return;
-	irq = spin_lock_irqsave(&console_output_lock);
 	while (index < length) {
-		if (console_escape_state == 0U) {
+		if (console_escape_state[vt] == 0U) {
 			size_t start = index;
 			while (index < length && (unsigned char)bytes[index] != 0x1bU)
 				index++;
 			if (index != start)
 				hal_cons_write_n(bytes + start, (unsigned)(index - start));
 			if (index < length) {
-				console_escape_state = 1U;
+				console_escape_state[vt] = 1U;
 				index++;
 			}
 			continue;
 		}
-		if (console_escape_state == 1U) {
+		if (console_escape_state[vt] == 1U) {
 			if (bytes[index++] == '[') {
-				console_escape_state = 2U;
-				console_escape_parameter = 0U;
-				console_escape_has_parameter = 0U;
+				console_escape_state[vt] = 2U;
+				console_escape_parameter[vt] = 0U;
+				console_escape_has_parameter[vt] = 0U;
 			} else {
 				static const char escape = '\033';
 				hal_cons_write_n(&escape, 1U);
 				hal_cons_write_n(bytes + index - 1U, 1U);
-				console_escape_state = 0U;
+				console_escape_state[vt] = 0U;
 			}
 			continue;
 		}
 		if (bytes[index] >= '0' && bytes[index] <= '9') {
-			console_escape_has_parameter = 1U;
-			if (console_escape_parameter < 1000U)
-				console_escape_parameter = console_escape_parameter * 10U +
+			console_escape_has_parameter[vt] = 1U;
+			if (console_escape_parameter[vt] < 1000U)
+				console_escape_parameter[vt] = console_escape_parameter[vt] * 10U +
 				    (unsigned)(bytes[index] - '0');
 			index++;
 			continue;
 		}
-		tty_console_csi((unsigned char)bytes[index++]);
-		console_escape_state = 0U;
+		tty_console_csi(vt, (unsigned char)bytes[index++]);
+		console_escape_state[vt] = 0U;
 	}
+}
+
+static void
+tty_echo(struct tty *tty, const char *bytes, size_t length)
+{
+	unsigned vt = (unsigned)(tty - console_ttys);
+	unsigned long irq;
+	if (vt >= TTY_VT_COUNT || length == 0) return;
+	irq = spin_lock_irqsave(&console_output_lock);
+	if (length >= TTY_VT_HISTORY) {
+		bytes += length - TTY_VT_HISTORY;
+		length = TTY_VT_HISTORY;
+		vt_history_used[vt] = 0;
+	} else if (vt_history_used[vt] + length > TTY_VT_HISTORY) {
+		size_t drop = vt_history_used[vt] + length - TTY_VT_HISTORY;
+		memmove(vt_history[vt], vt_history[vt] + drop,
+		    vt_history_used[vt] - drop);
+		vt_history_used[vt] -= drop;
+	}
+	memcpy(vt_history[vt] + vt_history_used[vt], bytes, length);
+	vt_history_used[vt] += length;
+	if (vt == active_vt) tty_render(vt, bytes, length);
 	spin_unlock_irqrestore(&console_output_lock, irq);
+}
+
+unsigned tty_vt_count(void) { return TTY_VT_COUNT; }
+unsigned tty_vt_active(void) { return active_vt; }
+int tty_vt_activate(unsigned vt)
+{
+	unsigned long irq;
+	if (vt >= TTY_VT_COUNT) return EINVAL;
+	irq = spin_lock_irqsave(&console_output_lock);
+	active_vt = vt;
+	console_escape_state[vt] = 0;
+	hal_cons_clear();
+	tty_render(vt, vt_history[vt], vt_history_used[vt]);
+	hal_cons_update_cursor();
+	spin_unlock_irqrestore(&console_output_lock, irq);
+	return 0;
 }
 
 static void
@@ -214,7 +259,7 @@ tty_commit_locked(struct tty *tty, unsigned eof)
 void
 tty_console_input_event(uint32_t event)
 {
-	struct tty *tty = &console_tty;
+	struct tty *tty;
 	unsigned key = event & HAL_KEY_EVENT_KEY_MASK;
 	char echo[3];
 	size_t echo_length = 0;
@@ -224,6 +269,12 @@ tty_console_input_event(uint32_t event)
 	uint8_t byte;
 	const char *sequence = NULL;
 	size_t sequence_length = 0;
+	if ((event & HAL_KEY_EVENT_GRAPH) != 0 &&
+	    key >= HAL_KEY_F1 && key <= HAL_KEY_F4) {
+		(void)tty_vt_activate(key - HAL_KEY_F1);
+		return;
+	}
+	tty = &console_ttys[active_vt];
 
 	/*
 	 * Expose machine-independent ANSI key sequences to noncanonical readers.
@@ -344,7 +395,7 @@ changed:
 	poll_notify();
 out:
 	spin_unlock_irqrestore(&tty->lock, irq);
-	tty_echo(echo, echo_length);
+	tty_echo(tty, echo, echo_length);
 	if (signal_number != 0 && signal_session > 0 && signal_pgrp > 0)
 		(void)process_signal_pgrp(signal_session, signal_pgrp, signal_number);
 }
@@ -472,8 +523,9 @@ tty_read_noncanonical(struct tty *tty, void *buffer, size_t size,
 }
 
 ssize_t
-tty_console_read(struct file *file, void *buffer, size_t size)
+tty_vt_read(unsigned vt, struct file *file, void *buffer, size_t size)
 {
+	struct tty *tty;
 	struct process *process = curthread != NULL ? curthread->proc : NULL;
 	unsigned canonical;
 	unsigned long irq;
@@ -481,46 +533,57 @@ tty_console_read(struct file *file, void *buffer, size_t size)
 
 	if (buffer == NULL) return -EINVAL;
 	if (size == 0) return 0;
-	error = tty_background(&console_tty, process, 0);
+	if (vt >= TTY_VT_COUNT) return -ENODEV;
+	tty = &console_ttys[vt];
+	error = tty_background(tty, process, 0);
 	if (error != 0) return -error;
-	irq = spin_lock_irqsave(&console_tty.lock);
-	canonical = console_tty.termios.c_lflag & ICANON;
-	spin_unlock_irqrestore(&console_tty.lock, irq);
-	return canonical ? tty_read_canonical(&console_tty, buffer, size,
+	irq = spin_lock_irqsave(&tty->lock);
+	canonical = tty->termios.c_lflag & ICANON;
+	spin_unlock_irqrestore(&tty->lock, irq);
+	return canonical ? tty_read_canonical(tty, buffer, size,
 	    (file->f_flags & O_NONBLOCK) != 0) :
-	    tty_read_noncanonical(&console_tty, buffer, size,
+	    tty_read_noncanonical(tty, buffer, size,
 	    (file->f_flags & O_NONBLOCK) != 0);
 }
 
 ssize_t
-tty_console_write(struct file *file, const void *buffer, size_t size)
+tty_vt_write(unsigned vt, struct file *file, const void *buffer, size_t size)
 {
+	struct tty *tty;
 	struct process *process = curthread != NULL ? curthread->proc : NULL;
 	const char *bytes = buffer;
 	unsigned oflag;
 	unsigned long irq;
-	int error = tty_background(&console_tty, process, 1);
+	int error;
 	(void)file;
 
+	if (vt >= TTY_VT_COUNT) return -ENODEV;
+	tty = &console_ttys[vt];
+	error = tty_background(tty, process, 1);
 	if (error != 0) return -error;
 	if (buffer == NULL) return -EINVAL;
-	irq = spin_lock_irqsave(&console_tty.lock);
-	oflag = console_tty.termios.c_oflag;
-	spin_unlock_irqrestore(&console_tty.lock, irq);
+	irq = spin_lock_irqsave(&tty->lock);
+	oflag = tty->termios.c_oflag;
+	spin_unlock_irqrestore(&tty->lock, irq);
 	if ((oflag & (OPOST | ONLCR)) == (OPOST | ONLCR)) {
 		size_t start = 0;
 		for (size_t i = 0; i < size; i++)
 			if (bytes[i] == '\n') {
-				if (i != start) tty_echo(bytes + start, i - start);
-				tty_echo("\r\n", 2);
+				if (i != start) tty_echo(tty, bytes + start, i - start);
+				tty_echo(tty, "\r\n", 2);
 				start = i + 1U;
 			}
-		if (start < size) tty_echo(bytes + start, size - start);
+		if (start < size) tty_echo(tty, bytes + start, size - start);
 	} else {
-		tty_echo(bytes, size);
+		tty_echo(tty, bytes, size);
 	}
 	return (ssize_t)size;
 }
+
+ssize_t tty_console_read(struct file *f, void *b, size_t n)
+{ return tty_vt_read(0, f, b, n); }
+ssize_t tty_console_write(struct file *f, const void *b, size_t n)
+{ return tty_vt_write(0, f, b, n); }
 
 static int
 tty_termios_valid(const struct termios *value)
@@ -621,21 +684,36 @@ tty_ioctl_instance(struct tty *tty, struct file *file,
 int
 tty_console_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 {
-	return tty_ioctl_instance(&console_tty, file, request, argument);
+	return tty_vt_ioctl(0, file, request, argument);
+}
+
+int tty_vt_ioctl(unsigned vt, struct file *file, unsigned long request,
+	uintptr_t argument)
+{
+	return vt < TTY_VT_COUNT ?
+	    tty_ioctl_instance(&console_ttys[vt], file, request, argument) : ENODEV;
 }
 
 int
 tty_console_poll(struct file *file, short events, short *revents)
 {
+	return tty_vt_poll(0, file, events, revents);
+}
+
+int tty_vt_poll(unsigned vt, struct file *file, short events, short *revents)
+{
 	short result = events & (POLLOUT | POLLWRNORM);
+	struct tty *tty;
 	unsigned long irq;
 	(void)file;
+	if (vt >= TTY_VT_COUNT) return ENODEV;
+	tty = &console_ttys[vt];
 	if (revents == NULL) return EINVAL;
-	irq = spin_lock_irqsave(&console_tty.lock);
-	if ((console_tty.termios.c_lflag & ICANON) != 0 ?
-	    console_tty.record_used != 0 : console_tty.input_used != 0)
+	irq = spin_lock_irqsave(&tty->lock);
+	if ((tty->termios.c_lflag & ICANON) != 0 ?
+	    tty->record_used != 0 : tty->input_used != 0)
 		result |= events & (POLLIN | POLLRDNORM);
-	spin_unlock_irqrestore(&console_tty.lock, irq);
+	spin_unlock_irqrestore(&tty->lock, irq);
 	*revents = result;
 	return 0;
 }
@@ -646,13 +724,13 @@ tty_attach_console(struct process *process)
 	unsigned long irq;
 	if (process == NULL || process == &process0 || process->session != process->pid)
 		return;
-	irq = spin_lock_irqsave(&console_tty.lock);
-	if (console_tty.session == 0 || console_tty.session == process->session) {
-		console_tty.session = process->session;
-		console_tty.foreground_pgrp = process->pgrp;
-		process->controlling_tty = &console_tty;
+	irq = spin_lock_irqsave(&console_ttys[0].lock);
+	if (console_ttys[0].session == 0 || console_ttys[0].session == process->session) {
+		console_ttys[0].session = process->session;
+		console_ttys[0].foreground_pgrp = process->pgrp;
+		process->controlling_tty = &console_ttys[0];
 	}
-	spin_unlock_irqrestore(&console_tty.lock, irq);
+	spin_unlock_irqrestore(&console_ttys[0].lock, irq);
 }
 
 void

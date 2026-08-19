@@ -12,6 +12,13 @@ struct file_ops;
 
 int tty_console_init(void);
 void tty_console_input_event(uint32_t);
+unsigned tty_vt_count(void);
+unsigned tty_vt_active(void);
+int tty_vt_activate(unsigned);
+ssize_t tty_vt_read(unsigned, struct file *, void *, size_t);
+ssize_t tty_vt_write(unsigned, struct file *, const void *, size_t);
+int tty_vt_ioctl(unsigned, struct file *, unsigned long, uintptr_t);
+int tty_vt_poll(unsigned, struct file *, short, short *);
 ssize_t tty_console_read(struct file *, void *, size_t);
 ssize_t tty_console_write(struct file *, const void *, size_t);
 int tty_console_ioctl(struct file *, unsigned long, uintptr_t);

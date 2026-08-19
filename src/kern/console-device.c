@@ -102,12 +102,16 @@ console_input_worker(void *argument)
 
 static ssize_t console_read(struct file *file, void *buffer, size_t size)
 {
-	return tty_console_read(file, buffer, size);
+	unsigned vt = file->f_data != NULL ?
+	    (unsigned)((uintptr_t)file->f_data - 1U) : 0U;
+	return tty_vt_read(vt, file, buffer, size);
 }
 
 static ssize_t console_write(struct file *file, const void *buffer, size_t size)
 {
-	ssize_t result = tty_console_write(file, buffer, size);
+	unsigned vt = file->f_data != NULL ?
+	    (unsigned)((uintptr_t)file->f_data - 1U) : 0U;
+	ssize_t result = tty_vt_write(vt, file, buffer, size);
 	if (result < 0)
 		return result;
 	hal_cons_update_cursor();
@@ -214,15 +218,30 @@ static int console_ioctl(struct file *file, unsigned long request,
 	case ZEDBSD_CONSOLE_ISATTY:
 		return 0;
 	default:
-		return tty_console_ioctl(file, request, argument);
+		return tty_vt_ioctl(file->f_data != NULL ?
+		    (unsigned)((uintptr_t)file->f_data - 1U) : 0U,
+		    file, request, argument);
 	}
 }
 
 static int
 console_poll(struct file *file, short events, short *revents)
 {
-	return tty_console_poll(file, events, revents);
+	unsigned vt = file->f_data != NULL ?
+	    (unsigned)((uintptr_t)file->f_data - 1U) : 0U;
+	return tty_vt_poll(vt, file, events, revents);
 }
+
+static int vt_ioctl(struct file *file, unsigned long request, uintptr_t argument)
+{
+	unsigned vt = (unsigned)((uintptr_t)file->f_data - 1U);
+	return tty_vt_ioctl(vt, file, request, argument);
+}
+
+static const struct cdev_ops vt_ops = {
+	.read = console_read, .write = console_write,
+	.ioctl = vt_ioctl, .poll = console_poll,
+};
 
 static const struct cdev_ops console_ops = {
 	.read = console_read,
@@ -248,10 +267,18 @@ int console_device_register(void)
 		input_started = 0;
 		return error;
 	}
-	error = cdev_register("console", 0x00010000U, &console_ops, NULL);
+	error = cdev_register("console", 0x00010000U, &console_ops,
+	    (void *)(uintptr_t)1U);
 	if (error != 0) {
 		input_started = 0;
 		return error;
+	}
+	for (unsigned i = 0; i < tty_vt_count(); i++) {
+		char name[] = "ttyv0";
+		name[4] = (char)('0' + i);
+		error = cdev_register(name, (dev_t)(0x00010010U + i), &vt_ops,
+		    (void *)(uintptr_t)(i + 1U));
+		if (error != 0) { input_started = 0; return error; }
 	}
 	error = tty_pty_register();
 	if (error != 0) {
