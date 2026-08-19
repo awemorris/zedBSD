@@ -21,6 +21,7 @@ struct vga_font_handoff {
 
 static struct zbl6_handoff boot_info;
 static struct zbl6_handoff_v2 boot_info_v2;
+static struct zbl6_framebuffer boot_framebuffer;
 static struct zbl6_memory_range boot_memory_range[MAX_BOOT_MEMORY_RANGES];
 static uint32 boot_memory_range_count;
 static struct zedbsd_handoff kernel_handoff;
@@ -66,11 +67,14 @@ bsp_boot_init(const void *raw_boot_info)
 		boot_memory_range[0].size = total_memory;
 		boot_memory_range[0].type = ZBL6_MEMORY_USABLE;
 		boot_memory_range[0].flags = 0;
-	} else if (raw->version == ZBL6_HANDOFF_V2_VERSION) {
+	} else if (raw->version == ZBL6_HANDOFF_V2_VERSION ||
+	    raw->version == ZBL6_HANDOFF_V3_VERSION) {
 		const struct zbl6_memory_range *source;
+		const struct zbl6_handoff_v3 *raw_v3 = raw_boot_info;
 		uint64 previous_end = 0;
 
-		if (raw_v2->size < sizeof(*raw_v2) ||
+		if (raw_v2->size < (raw->version == ZBL6_HANDOFF_V3_VERSION ?
+		    sizeof(*raw_v3) : sizeof(*raw_v2)) ||
 		    (raw_v2->flags & (ZBL6_HANDOFF_FLAG_UEFI |
 		    ZBL6_HANDOFF_FLAG_MEMORY_MAP |
 		    ZBL6_HANDOFF_FLAG_ACPI_RSDP)) !=
@@ -99,6 +103,30 @@ bsp_boot_init(const void *raw_boot_info)
 		    raw_v2->rsdp == 0 || raw_v2->rsdp >= 0x40000000ULL)
 			HAL_FATAL("invalid amd64 ZBL6 v2 handoff");
 		boot_info_v2 = *raw_v2;
+		if (raw->version == ZBL6_HANDOFF_V3_VERSION) {
+			uint64 offset = raw_v3->framebuffer_base & 0x1fffffULL;
+			if ((raw_v3->flags & ZBL6_HANDOFF_FLAG_FRAMEBUFFER) == 0 ||
+			    raw_v3->framebuffer_size == 0 ||
+			    raw_v3->framebuffer_base > UINT64_MAX -
+			    raw_v3->framebuffer_size ||
+			    raw_v3->framebuffer_width == 0 ||
+			    raw_v3->framebuffer_height == 0 ||
+			    raw_v3->framebuffer_stride <
+			    raw_v3->framebuffer_width ||
+			    (raw_v3->framebuffer_format !=
+			    ZBL6_FRAMEBUFFER_RGBX8888 &&
+			    raw_v3->framebuffer_format !=
+			    ZBL6_FRAMEBUFFER_BGRX8888) ||
+			    raw_v3->framebuffer_size > 0x3e000000ULL - offset)
+				HAL_FATAL("invalid amd64 framebuffer handoff");
+			boot_framebuffer.physical_base =
+			    raw_v3->framebuffer_base;
+			boot_framebuffer.size = raw_v3->framebuffer_size;
+			boot_framebuffer.width = raw_v3->framebuffer_width;
+			boot_framebuffer.height = raw_v3->framebuffer_height;
+			boot_framebuffer.stride = raw_v3->framebuffer_stride;
+			boot_framebuffer.format = raw_v3->framebuffer_format;
+		}
 		source = (const void *)(uintptr_t)raw_v2->memory_ranges;
 		boot_memory_range_count = raw_v2->memory_range_count;
 		for (index = 0; index < boot_memory_range_count; index++) {
@@ -155,9 +183,12 @@ bsp_boot_init(const void *raw_boot_info)
 void *
 hal_get_arch_handoff(const char *name)
 {
-	if (!boot_font_valid || !handoff_name_is(name, "pcat.boot-font"))
-		return NULL;
-	return boot_font;
+	if (boot_font_valid && handoff_name_is(name, "pcat.boot-font"))
+		return boot_font;
+	if (boot_framebuffer.size != 0 &&
+	    handoff_name_is(name, "pcat.framebuffer"))
+		return &boot_framebuffer;
+	return NULL;
 }
 
 uint64 bsp_mem_probe(void) { return total_memory; }

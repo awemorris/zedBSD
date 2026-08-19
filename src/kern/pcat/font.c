@@ -1,6 +1,7 @@
 /* PC/AT VGA 8x16 ASCII font preservation.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/pcat/font.h"
+#include "kern/pcat/vgafont.h"
 
 #include <hal/hal.h>
 #include <string.h>
@@ -71,20 +72,6 @@ static void plane2_access_end(const uint8_t saved[5])
 	indexed_write(0x3ceU, 0x3cfU, 0x06U, saved[4]);
 }
 
-static void capture_plane2(void)
-{
-	uint8_t saved[5];
-	unsigned glyph, row;
-
-	plane2_access_begin(saved, 0);
-	for (glyph = 0; glyph < ASCII_GLYPHS; glyph++)
-		for (row = 0; row < GLYPH_HEIGHT; row++)
-			ascii_font[glyph][row] =
-				VGA_FONT_MEMORY[glyph * VGA_GLYPH_SLOT + row];
-	plane2_access_end(saved);
-	font_valid = 1;
-}
-
 void pcat_font_init(void)
 {
 	const uint8_t (*boot_font)[GLYPH_HEIGHT];
@@ -98,8 +85,10 @@ void pcat_font_init(void)
 		hal_printf("graphics: BIOS 8x16 ASCII font handoff accepted\n");
 		return;
 	}
-	capture_plane2();
-	hal_printf("graphics: VGA plane-2 ASCII font captured\n");
+	/* UEFI has no VGA BIOS font handoff and may not expose VGA plane 2. */
+	memcpy(ascii_font, pcat_vgafont16, sizeof(ascii_font));
+	font_valid = 1;
+	hal_printf("graphics: built-in VGA 8x16 font selected\n");
 }
 
 void pcat_font_restore_ascii(void)

@@ -1,6 +1,8 @@
 /* PC/AT VGA text console and polled 8042 keyboard.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <hal/hal.h>
+#include "bootloader/include/amd64-handoff.h"
+#include "kern/pcat/vgafont.h"
 #include "../asm.h"
 #include "../defs.h"
 
@@ -20,12 +22,68 @@ static enum hal_cons_mode console_mode = HAL_CONS_TERMINAL;
 static unsigned events[EVENT_COUNT], event_head, event_tail;
 static uint8_t key_down[32];
 static int shift_down, ctrl_down, alt_down, caps_lock, e0_prefix;
+static const struct zbl6_framebuffer *framebuffer;
+static volatile uint32_t *framebuffer_pixels;
+static uint16_t framebuffer_cells[HAL_CONS_ROWS * HAL_CONS_COLUMNS];
+static unsigned framebuffer_x, framebuffer_y;
+static unsigned drawn_cursor_row, drawn_cursor_column;
+static int framebuffer_cursor_drawn;
+
+static const uint32_t vga_palette[16] = {
+	0x000000U, 0x0000aaU, 0x00aa00U, 0x00aaaaU,
+	0xaa0000U, 0xaa00aaU, 0xaa5500U, 0xaaaaaaU,
+	0x555555U, 0x5555ffU, 0x55ff55U, 0x55ffffU,
+	0xff5555U, 0xff55ffU, 0xffff55U, 0xffffffU
+};
+
+static uint32_t
+framebuffer_color(unsigned color)
+{
+	uint32_t rgb = vga_palette[color & 15U];
+	if (framebuffer->format == ZBL6_FRAMEBUFFER_RGBX8888)
+		return ((rgb & 0xff0000U) >> 16) | (rgb & 0x00ff00U) |
+		    ((rgb & 0x0000ffU) << 16);
+	return rgb;
+}
+
+static void
+framebuffer_draw_cell(unsigned row, unsigned column, uint16_t cell,
+	int cursor)
+{
+	uint8_t character = (uint8_t)cell;
+	uint8_t attribute = (uint8_t)(cell >> 8);
+	uint32_t foreground, background;
+	unsigned glyph_row, glyph_column;
+
+	if (cursor) {
+		attribute = (uint8_t)((attribute << 4) | (attribute >> 4));
+	}
+	foreground = framebuffer_color(attribute & 15U);
+	background = framebuffer_color((attribute >> 4) & 15U);
+	for (glyph_row = 0; glyph_row < PCAT_VGAFONT_HEIGHT; glyph_row++) {
+		uint8_t bits = pcat_vgafont16[(unsigned)character *
+		    PCAT_VGAFONT_HEIGHT + glyph_row];
+		volatile uint32_t *out = framebuffer_pixels +
+		    (framebuffer_y + row * PCAT_VGAFONT_HEIGHT + glyph_row) *
+		    framebuffer->stride + framebuffer_x + column * 8U;
+		for (glyph_column = 0; glyph_column < 8U; glyph_column++)
+			out[glyph_column] = bits & (0x80U >> glyph_column) ?
+			    foreground : background;
+	}
+}
 
 static void
 write_cell(unsigned row, unsigned column, int character, uint8_t attribute)
 {
 	if (console_suspended)
 		return;
+	if (framebuffer_pixels != NULL) {
+		uint16_t cell = (uint16_t)((uint8_t)character |
+		    ((uint16_t)attribute << 8));
+		framebuffer_cells[row * HAL_CONS_COLUMNS + column] = cell;
+		framebuffer_draw_cell(row, column, cell, 0);
+		return;
+	}
 	VGA_MEMORY[row * HAL_CONS_COLUMNS + column] =
 	    (uint16_t)((uint8_t)character | ((uint16_t)attribute << 8));
 }
@@ -36,6 +94,24 @@ hal_cons_update_cursor(void)
 	unsigned position = cursor_row * HAL_CONS_COLUMNS + cursor_column;
 	if (console_suspended)
 		return;
+	if (framebuffer_pixels != NULL) {
+		if (framebuffer_cursor_drawn)
+			framebuffer_draw_cell(drawn_cursor_row,
+			    drawn_cursor_column,
+			    framebuffer_cells[drawn_cursor_row *
+			    HAL_CONS_COLUMNS + drawn_cursor_column], 0);
+		framebuffer_cursor_drawn = cursor_visible &&
+		    cursor_row < HAL_CONS_ROWS &&
+		    cursor_column < HAL_CONS_COLUMNS;
+		if (framebuffer_cursor_drawn) {
+			drawn_cursor_row = cursor_row;
+			drawn_cursor_column = cursor_column;
+			framebuffer_draw_cell(cursor_row, cursor_column,
+			    framebuffer_cells[cursor_row * HAL_CONS_COLUMNS +
+			    cursor_column], 1);
+		}
+		return;
+	}
 
 	asm_outb(VGA_INDEX, 0x0aU);
 	asm_outb(VGA_DATA, cursor_visible ? 0x0dU : 0x20U);
@@ -74,7 +150,17 @@ hal_cons_reset(void)
 static void
 scroll(void)
 {
-	if (!console_suspended)
+	if (!console_suspended && framebuffer_pixels != NULL) {
+		for (unsigned row = 1; row < HAL_CONS_ROWS; row++)
+			for (unsigned column = 0; column < HAL_CONS_COLUMNS;
+			    column++) {
+				uint16_t cell = framebuffer_cells[row *
+				    HAL_CONS_COLUMNS + column];
+				framebuffer_cells[(row - 1U) * HAL_CONS_COLUMNS +
+				    column] = cell;
+				framebuffer_draw_cell(row - 1U, column, cell, 0);
+			}
+	} else if (!console_suspended)
 		for (unsigned row = 1; row < HAL_CONS_ROWS; row++)
 			for (unsigned column = 0; column < HAL_CONS_COLUMNS; column++)
 				VGA_MEMORY[(row - 1U) * HAL_CONS_COLUMNS + column] =
@@ -236,8 +322,10 @@ void hal_cons_suspend(void)
 {
 	if (console_suspended)
 		return;
-	asm_outb(VGA_INDEX, 0x0aU);
-	asm_outb(VGA_DATA, 0x20U);
+	if (framebuffer_pixels == NULL) {
+		asm_outb(VGA_INDEX, 0x0aU);
+		asm_outb(VGA_DATA, 0x20U);
+	}
 	console_suspended = 1;
 }
 
@@ -349,6 +437,23 @@ void hal_cons_drain_input(void) { pump_keyboard(); event_tail = event_head; }
 
 void pcat_cons_init(void)
 {
+	framebuffer = hal_get_arch_handoff("pcat.framebuffer");
+	framebuffer_pixels = NULL;
+	framebuffer_cursor_drawn = 0;
+	if (framebuffer != NULL && framebuffer->width >=
+	    HAL_CONS_COLUMNS * 8U && framebuffer->height >=
+	    HAL_CONS_ROWS * PCAT_VGAFONT_HEIGHT) {
+		uint64_t aligned = framebuffer->physical_base & ~0x1fffffULL;
+		uint64_t offset = framebuffer->physical_base - aligned;
+		framebuffer_pixels = (volatile uint32_t *)(uintptr_t)
+		    (ZBL6_FRAMEBUFFER_VIRTUAL_BASE + offset);
+		framebuffer_x = (framebuffer->width - HAL_CONS_COLUMNS * 8U) / 2U;
+		framebuffer_y = (framebuffer->height - HAL_CONS_ROWS *
+		    PCAT_VGAFONT_HEIGHT) / 2U;
+		for (uint64_t pixel = 0; pixel <
+		    (uint64_t)framebuffer->stride * framebuffer->height; pixel++)
+			framebuffer_pixels[pixel] = 0;
+	}
 	event_head = event_tail = 0; shift_down = ctrl_down = alt_down = 0;
 	caps_lock = e0_prefix = 0;
 	for (unsigned i = 0; i < sizeof(key_down); i++) key_down[i] = 0;

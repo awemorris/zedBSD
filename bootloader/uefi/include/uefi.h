@@ -89,6 +89,7 @@ struct efi_simple_text_output_protocol;
 struct efi_boot_services;
 struct efi_system_table;
 struct efi_file_protocol;
+struct efi_graphics_output_protocol;
 
 typedef EFI_STATUS (EFIAPI *EFI_TEXT_STRING)(
 	struct efi_simple_text_output_protocol *, const CHAR16 *);
@@ -116,6 +117,8 @@ typedef EFI_STATUS (EFIAPI *EFI_FREE_POOL)(void *);
 typedef EFI_STATUS (EFIAPI *EFI_HANDLE_PROTOCOL)(EFI_HANDLE,
 	const EFI_GUID *, void **);
 typedef EFI_STATUS (EFIAPI *EFI_EXIT_BOOT_SERVICES)(EFI_HANDLE, UINTN);
+typedef EFI_STATUS (EFIAPI *EFI_LOCATE_PROTOCOL)(const EFI_GUID *, void *,
+	void **);
 
 typedef struct efi_boot_services {
 	EFI_TABLE_HEADER Hdr;
@@ -156,7 +159,7 @@ typedef struct efi_boot_services {
 	void *OpenProtocolInformation;
 	void *ProtocolsPerHandle;
 	void *LocateHandleBuffer;
-	void *LocateProtocol;
+	EFI_LOCATE_PROTOCOL LocateProtocol;
 	void *InstallMultipleProtocolInterfaces;
 	void *UninstallMultipleProtocolInterfaces;
 	void *CalculateCrc32;
@@ -229,6 +232,46 @@ typedef struct {
 	EFI_OPEN_VOLUME OpenVolume;
 } EFI_SIMPLE_FILE_SYSTEM_PROTOCOL;
 
+enum efi_graphics_pixel_format {
+	PixelRedGreenBlueReserved8BitPerColor,
+	PixelBlueGreenRedReserved8BitPerColor,
+	PixelBitMask,
+	PixelBltOnly,
+	PixelFormatMax
+};
+
+typedef struct {
+	UINT32 RedMask;
+	UINT32 GreenMask;
+	UINT32 BlueMask;
+	UINT32 ReservedMask;
+} EFI_PIXEL_BITMASK;
+
+typedef struct {
+	UINT32 Version;
+	UINT32 HorizontalResolution;
+	UINT32 VerticalResolution;
+	UINT32 PixelFormat;
+	EFI_PIXEL_BITMASK PixelInformation;
+	UINT32 PixelsPerScanLine;
+} EFI_GRAPHICS_OUTPUT_MODE_INFORMATION;
+
+typedef struct {
+	UINT32 MaxMode;
+	UINT32 Mode;
+	EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *Info;
+	UINTN SizeOfInfo;
+	EFI_PHYSICAL_ADDRESS FrameBufferBase;
+	UINTN FrameBufferSize;
+} EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE;
+
+typedef struct efi_graphics_output_protocol {
+	void *QueryMode;
+	void *SetMode;
+	void *Blt;
+	EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *Mode;
+} EFI_GRAPHICS_OUTPUT_PROTOCOL;
+
 static const EFI_GUID EFI_LOADED_IMAGE_PROTOCOL_GUID = {
 	0x5b1b31a1, 0x9562, 0x11d2,
 	{ 0x8e, 0x3f, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b }
@@ -244,6 +287,10 @@ static const EFI_GUID EFI_ACPI_TABLE_GUID = {
 static const EFI_GUID EFI_ACPI_20_TABLE_GUID = {
 	0x8868e871, 0xe4f1, 0x11d3,
 	{ 0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81 }
+};
+static const EFI_GUID EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID = {
+	0x9042a9de, 0x23dc, 0x4a38,
+	{ 0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a }
 };
 
 #endif

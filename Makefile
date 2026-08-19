@@ -94,6 +94,13 @@ ZEDBSD_USER_PROGRAMS_DEPS_2 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_1) \
 ZEDBSD_USER_PROGRAMS_DEPS_3 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_2) \
 	$(call zedbsd_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_2)))
 override ZEDBSD_USER_PROGRAMS := $(ZEDBSD_USER_PROGRAMS_DEPS_3)
+# A saved configuration may be reused after changing targets.  Do not let
+# packages selected for another ABI become impossible prerequisites of the
+# current root filesystem (PC/AT i386 is named "pcat" by the build system).
+ZEDBSD_USER_PLATFORM := $(if $(filter pcat,$(ARCH)),i386,$(ARCH))
+override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
+	$(if $(filter * $(ZEDBSD_USER_PLATFORM),\
+		$(USERLAND_$(program)_PLATFORMS)),$(program)))
 ZEDBSD_MISSING_PACKAGE_REQUIREMENTS := $(sort \
 	$(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 		$(foreach requirement,$(USERLAND_$(program)_REQUIRE),\

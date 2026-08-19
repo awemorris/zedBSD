@@ -9,11 +9,18 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import uuid
+import zlib
 from pathlib import Path
 
 
 SECTOR_SIZE = 512
 PC98_SECTORS = 17
+GPT_STAGE2_LBA = 34
+GPT_ENTRY_COUNT = 128
+GPT_ENTRY_SIZE = 128
+ESP_TYPE = uuid.UUID("c12a7328-f81f-11d2-ba4b-00a0c93ec93b")
+BIOS_BOOT_TYPE = uuid.UUID("21686148-6449-6e6f-744e-656564454649")
 
 
 def run(*arguments: str) -> None:
@@ -26,6 +33,25 @@ def pc98_chs(lba: int, heads: int) -> bytes:
     if cylinder > 0xFFFF:
         raise SystemExit("partition exceeds the PC-98 CHS range")
     return bytes((sector, head)) + struct.pack("<H", cylinder)
+
+
+def gpt_entry(type_guid: uuid.UUID, unique_guid: uuid.UUID, first: int,
+              last: int, name: str) -> bytes:
+    return (type_guid.bytes_le + unique_guid.bytes_le +
+            struct.pack("<QQQ", first, last, 0) +
+            name.encode("utf-16le")[:72].ljust(72, b"\0"))
+
+
+def gpt_header(current: int, backup: int, entries_lba: int, first_usable: int,
+               last_usable: int, disk_guid: uuid.UUID,
+               entries_crc: int) -> bytes:
+    header = bytearray(92)
+    struct.pack_into("<8sIIIIQQQQ16sQIII", header, 0, b"EFI PART",
+                     0x00010000, 92, 0, 0, current, backup, first_usable,
+                     last_usable, disk_guid.bytes_le, entries_lba,
+                     GPT_ENTRY_COUNT, GPT_ENTRY_SIZE, entries_crc)
+    struct.pack_into("<I", header, 16, zlib.crc32(header) & 0xffffffff)
+    return bytes(header).ljust(SECTOR_SIZE, b"\0")
 
 
 def create(args: argparse.Namespace) -> None:
@@ -45,6 +71,10 @@ def create(args: argparse.Namespace) -> None:
     for path in (args.stage1, args.stage2, args.kernel):
         if not path.is_file():
             raise SystemExit(f"missing input: {path}")
+    if args.gpt and (args.machine != "pcat" or args.bootx64 is None):
+        raise SystemExit("--gpt requires --machine pcat and --bootx64")
+    if args.bootx64 is not None and not args.bootx64.is_file():
+        raise SystemExit(f"missing input: {args.bootx64}")
     if args.machine == "pc98":
         if args.partition_pbr is None or args.io_sys is None:
             raise SystemExit("PC-98 requires --partition-pbr and --io-sys")
@@ -75,11 +105,13 @@ def create(args: argparse.Namespace) -> None:
         raise SystemExit(f"output exists (use --force): {args.output}")
     total_sectors = args.size_mib * 2048
     start = 2048
-    blocks = args.fat_size_mib * 2048 if args.ufs_root is not None else total_sectors - start
+    blocks = args.fat_size_mib * 2048 if args.ufs_root is not None else \
+        total_sectors - start - (33 if args.gpt else 0)
     root_start = start + blocks
     root_blocks = (args.ufs_root.stat().st_size // SECTOR_SIZE
                    if args.ufs_root is not None else 0)
-    stage2_lba = 1 if args.machine == "pcat" else 2
+    stage2_lba = GPT_STAGE2_LBA if args.gpt else \
+        (1 if args.machine == "pcat" else 2)
     if blocks <= 0:
         raise SystemExit("image is too small for the LBA 2048 partition")
     if args.ufs_root is not None and root_start + root_blocks > total_sectors:
@@ -101,6 +133,10 @@ def create(args: argparse.Namespace) -> None:
             stage1[0x1BE:0x1CE] = struct.pack(
                 "<BBBBBBBBII", 0x80, 0xFE, 0xFF, 0xFF,
                 0x0E, 0xFE, 0xFF, 0xFF, start, blocks)
+            if args.gpt:
+                stage1[0x1CE:0x1DE] = struct.pack(
+                    "<BBBBBBBBII", 0, 0, 2, 0, 0xEE, 0xFE, 0xFF, 0xFF,
+                    1, min(total_sectors - 1, 0xffffffff))
             if args.ufs_root is not None:
                 stage1[0x1CE:0x1DE] = struct.pack(
                     "<BBBBBBBBII", 0x00, 0xFE, 0xFF, 0xFF,
@@ -131,6 +167,30 @@ def create(args: argparse.Namespace) -> None:
                     stream.write(root_entry)
             stream.seek(stage2_lba * SECTOR_SIZE)
             stream.write(stage2)
+            if args.gpt:
+                entries = bytearray(GPT_ENTRY_COUNT * GPT_ENTRY_SIZE)
+                entries[:GPT_ENTRY_SIZE] = gpt_entry(
+                    ESP_TYPE, uuid.uuid4(), start, start + blocks - 1,
+                    "zedBSD EFI System")
+                entries[GPT_ENTRY_SIZE:2 * GPT_ENTRY_SIZE] = gpt_entry(
+                    BIOS_BOOT_TYPE, uuid.uuid4(), GPT_STAGE2_LBA,
+                    start - 1, "zedBSD BIOS loader")
+                entries_crc = zlib.crc32(entries) & 0xffffffff
+                disk_guid = uuid.uuid4()
+                backup_entries_lba = total_sectors - 33
+                stream.seek(2 * SECTOR_SIZE)
+                stream.write(entries)
+                stream.seek(SECTOR_SIZE)
+                stream.write(gpt_header(1, total_sectors - 1, 2, 34,
+                                        total_sectors - 34, disk_guid,
+                                        entries_crc))
+                stream.seek(backup_entries_lba * SECTOR_SIZE)
+                stream.write(entries)
+                stream.seek((total_sectors - 1) * SECTOR_SIZE)
+                stream.write(gpt_header(total_sectors - 1, 1,
+                                        backup_entries_lba, 34,
+                                        total_sectors - 34, disk_guid,
+                                        entries_crc))
             if args.ufs_root is not None:
                 stream.seek(root_start * SECTOR_SIZE)
                 stream.write(args.ufs_root.read_bytes())
@@ -159,6 +219,13 @@ def create(args: argparse.Namespace) -> None:
         else:
             run("mformat", "-i", f"{temporary}@@{offset}", "-T", str(blocks),
                 "-v", "BOOT", "::")
+        if args.gpt:
+            run("mmd", "-i", f"{temporary}@@{offset}", "::/EFI")
+            run("mmd", "-i", f"{temporary}@@{offset}", "::/EFI/BOOT")
+            run("mcopy", "-i", f"{temporary}@@{offset}",
+                str(args.bootx64), "::/EFI/BOOT/BOOTX64.EFI")
+            run("mcopy", "-i", f"{temporary}@@{offset}",
+                str(args.kernel), "::/VMUNIX.X64")
         if args.fragment_kernel:
             with tempfile.TemporaryDirectory(prefix="zedbsd-fragment-") as work:
                 hole = Path(work) / "hole.bin"
@@ -214,9 +281,12 @@ def create(args: argparse.Namespace) -> None:
         if args.holoris and args.arch_image is None:
             run("mcopy", "-i", f"{temporary}@@{offset}",
                 str(args.holoris), "::/usr/bin/holoris.nct")
-        checker = Path(__file__).with_name("check-bios-hdd-image.py")
+        checker = Path(__file__).with_name(
+            "check-amd64-gpt-image.py" if args.gpt else
+            "check-bios-hdd-image.py")
         run("python3", str(checker), "--machine", args.machine,
             "--kernel", str(args.kernel),
+            *( ["--bootx64", str(args.bootx64)] if args.gpt else []),
             *(["--arch-profile", args.arch_profile,
                "--arch-image", str(args.arch_image),
                "--arch-format", args.arch_format]
@@ -238,6 +308,8 @@ def create(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--machine", choices=("pcat", "pc98"), required=True)
+    parser.add_argument("--gpt", action="store_true")
+    parser.add_argument("--bootx64", type=Path)
     parser.add_argument("--stage1", type=Path, required=True)
     parser.add_argument("--stage2", type=Path, required=True)
     parser.add_argument("--partition-pbr", type=Path)

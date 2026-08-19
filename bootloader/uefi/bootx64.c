@@ -18,6 +18,7 @@
 #define HIGH_PD_OFFSET          0x5000U
 #define HANDOFF_OFFSET          0x6000U
 #define MEMORY_RANGES_OFFSET    0x7000U
+#define FRAMEBUFFER_PD_OFFSET   0x9000U
 #define TRANSITION_STACK_TOP    0x10000U
 
 #define PTE_PRESENT             0x001ULL
@@ -247,8 +248,42 @@ normalize_memory_map(const void *raw_map, UINTN map_size,
 	return count != 0;
 }
 
+static int
+framebuffer_from_gop(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop,
+	struct zbl6_framebuffer *framebuffer)
+{
+	EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *mode;
+	EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info;
+	uint64_t required;
+
+	if (gop == 0 || gop->Mode == 0 || gop->Mode->Info == 0)
+		return 0;
+	mode = gop->Mode;
+	info = mode->Info;
+	if (info->HorizontalResolution == 0 || info->VerticalResolution == 0 ||
+	    info->PixelsPerScanLine < info->HorizontalResolution ||
+	    (info->PixelFormat != PixelRedGreenBlueReserved8BitPerColor &&
+	    info->PixelFormat != PixelBlueGreenRedReserved8BitPerColor))
+		return 0;
+	required = (uint64_t)info->PixelsPerScanLine *
+	    info->VerticalResolution * 4U;
+	if (required == 0 || required > mode->FrameBufferSize ||
+	    mode->FrameBufferBase > UINT64_MAX - required)
+		return 0;
+	framebuffer->physical_base = mode->FrameBufferBase;
+	framebuffer->size = mode->FrameBufferSize;
+	framebuffer->width = info->HorizontalResolution;
+	framebuffer->height = info->VerticalResolution;
+	framebuffer->stride = info->PixelsPerScanLine;
+	framebuffer->format = info->PixelFormat ==
+	    PixelRedGreenBlueReserved8BitPerColor ?
+	    ZBL6_FRAMEBUFFER_RGBX8888 : ZBL6_FRAMEBUFFER_BGRX8888;
+	return 1;
+}
+
 static void
-build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan)
+build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
+	const struct zbl6_framebuffer *framebuffer)
 {
 	uint8_t *low = (void *)(uintptr_t)low_base;
 	uint64_t *pml4 = (void *)(low + LOW_PML4_OFFSET);
@@ -256,10 +291,13 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan)
 	uint64_t *low_pd = (void *)(low + LOW_PD_OFFSET);
 	uint64_t *high_pdpt = (void *)(low + HIGH_PDPT_OFFSET);
 	uint64_t *high_pd = (void *)(low + HIGH_PD_OFFSET);
-	struct zbl6_handoff_v2 *handoff = (void *)(low + HANDOFF_OFFSET);
+	uint64_t *framebuffer_pd = (void *)(low + FRAMEBUFFER_PD_OFFSET);
+	struct zbl6_handoff_v3 *handoff = (void *)(low + HANDOFF_OFFSET);
 	UINTN transition_size = (UINTN)(zbl_transition_end -
 	    zbl_transition_start);
 	unsigned index;
+	uint64_t framebuffer_aligned, framebuffer_end;
+	unsigned framebuffer_pages;
 
 	byte_zero(low, LOW_BLOCK_PAGES * PAGE_SIZE);
 	if (transition_size == 0 || transition_size > PAGE_SIZE)
@@ -277,11 +315,23 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan)
 		low_pd[index] = entry;
 		high_pd[index] = entry;
 	}
+	framebuffer_aligned = framebuffer->physical_base & ~0x1fffffULL;
+	framebuffer_end = framebuffer->physical_base + framebuffer->size;
+	framebuffer_pages = (unsigned)((framebuffer_end - framebuffer_aligned +
+	    0x1fffffULL) / 0x200000ULL);
+	if (framebuffer_pages == 0 || framebuffer_pages > 496U)
+		halt();
+	high_pdpt[511] = (low_base + FRAMEBUFFER_PD_OFFSET) |
+	    PTE_PRESENT | PTE_WRITE;
+	for (index = 0; index < framebuffer_pages; index++)
+		framebuffer_pd[16U + index] = (framebuffer_aligned +
+		    (uint64_t)index * 0x200000ULL) | PTE_PRESENT | PTE_WRITE |
+		    PTE_LARGE;
 	handoff->magic = ZBL6_HANDOFF_MAGIC;
-	handoff->version = ZBL6_HANDOFF_V2_VERSION;
+	handoff->version = ZBL6_HANDOFF_V3_VERSION;
 	handoff->size = sizeof(*handoff);
 	handoff->flags = ZBL6_HANDOFF_FLAG_UEFI |
-	    ZBL6_HANDOFF_FLAG_MEMORY_MAP;
+	    ZBL6_HANDOFF_FLAG_MEMORY_MAP | ZBL6_HANDOFF_FLAG_FRAMEBUFFER;
 	handoff->boot_drive = 0x80;
 	handoff->root_partition_scheme = 1;
 	handoff->root_partition_index = 1;
@@ -291,6 +341,12 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan)
 	handoff->kernel_phys_start = plan->physical_start;
 	handoff->kernel_phys_end = plan->physical_end;
 	handoff->bootstrap_cr3 = low_base + LOW_PML4_OFFSET;
+	handoff->framebuffer_base = framebuffer->physical_base;
+	handoff->framebuffer_size = framebuffer->size;
+	handoff->framebuffer_width = framebuffer->width;
+	handoff->framebuffer_height = framebuffer->height;
+	handoff->framebuffer_stride = framebuffer->stride;
+	handoff->framebuffer_format = framebuffer->format;
 }
 
 EFI_STATUS EFIAPI
@@ -299,6 +355,7 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	struct loader_context context;
 	EFI_LOADED_IMAGE_PROTOCOL *loaded;
 	EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *filesystem;
+	EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
 	EFI_FILE_PROTOCOL *root, *kernel;
 	EFI_BOOT_SERVICES *boot;
 	EFI_STATUS status;
@@ -309,7 +366,8 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	UINTN descriptor_size;
 	UINT32 descriptor_version;
 	EFI_MEMORY_DESCRIPTOR *map;
-	struct zbl6_handoff_v2 *handoff;
+	struct zbl6_handoff_v3 *handoff;
+	struct zbl6_framebuffer framebuffer;
 	struct zbl6_memory_range *ranges;
 	uint32_t range_count;
 	unsigned index, attempt;
@@ -321,6 +379,12 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	context.boot = system->BootServices;
 	boot = context.boot;
 	console_ascii(&context, "A64 UEFI ENTRY\n");
+	status = boot->LocateProtocol(&EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID, 0,
+	    (void **)&gop);
+	if (EFI_ERROR(status))
+		fail_status(&context, "Locate GOP", status);
+	if (!framebuffer_from_gop(gop, &framebuffer))
+		fail_status(&context, "Validate GOP", EFI_UNSUPPORTED);
 
 	status = boot->HandleProtocol(image,
 	    &EFI_LOADED_IMAGE_PROTOCOL_GUID, (void **)&loaded);
@@ -376,7 +440,7 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	    low_address + LOW_BLOCK_PAGES * PAGE_SIZE > 0x00200000ULL)
 		fail_status(&context, "Allocate bootstrap", EFI_ERROR(status) ?
 		    status : EFI_LOAD_ERROR);
-	build_bootstrap(low_address, &plan);
+	build_bootstrap(low_address, &plan, &framebuffer);
 	handoff = (void *)(uintptr_t)(low_address + HANDOFF_OFFSET);
 	ranges = (void *)(uintptr_t)(low_address + MEMORY_RANGES_OFFSET);
 	handoff->rsdp = find_acpi_rsdp(system);

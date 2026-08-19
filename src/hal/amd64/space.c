@@ -6,6 +6,7 @@
 #include "space.h"
 #include "smp.h"
 #include "bsp-pcat/lapic.h"
+#include "bootloader/include/amd64-handoff.h"
 
 static uint64 system_pml4[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64 system_pdpt[512] __attribute__((aligned(PAGE_SIZE)));
@@ -71,6 +72,8 @@ uintptr_t amd64_system_cr3(void) { return system_cr3; }
 void
 amd64_space_init(void)
 {
+	const struct zbl6_framebuffer *framebuffer =
+	    hal_get_arch_handoff("pcat.framebuffer");
 	uintptr_t kernel_start = (uintptr_t)__kernel_phys_start;
 	uintptr_t kernel_end = (uintptr_t)__kernel_phys_end;
 	unsigned index, first_chunk, chunks, chunk;
@@ -121,6 +124,20 @@ amd64_space_init(void)
 	system_mmio_pd[9] = 0xfec00000ULL | AMD64_PTE_PRESENT |
 	    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
 	    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+	if (framebuffer != NULL) {
+		uint64 base = framebuffer->physical_base & ~0x1fffffULL;
+		uint64 end = framebuffer->physical_base + framebuffer->size;
+		unsigned count = (unsigned)((end - base + 0x1fffffULL) /
+		    0x200000ULL);
+		if (count == 0 || count > 496U)
+			HAL_FATAL("amd64 framebuffer MMIO window exceeded");
+		for (index = 0; index < count; index++)
+			system_mmio_pd[16U + index] = (base +
+			    (uint64)index * 0x200000ULL) |
+			    AMD64_PTE_PRESENT | AMD64_PTE_WRITE |
+			    AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
+			    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+	}
 	/* APs enter long mode at the low trampoline before jumping high. */
 	system_pd[0] &= ~AMD64_PTE_NX;
 	system_pdpt[0] = amd64_direct_to_phys(system_pd) |

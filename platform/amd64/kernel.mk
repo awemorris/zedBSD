@@ -3,6 +3,14 @@
 
 AMD64_PLATFORM := platform/amd64
 BIOS_LOADER := bootloader/pcat
+UEFI_LOADER := bootloader/uefi
+EFI_CC ?= x86_64-w64-mingw32-gcc
+EFI_LD ?= x86_64-w64-mingw32-ld
+EFI_NM ?= x86_64-w64-mingw32-nm
+EFI_CFLAGS := -std=c11 -ffreestanding -fshort-wchar -mno-red-zone \
+	-fno-stack-protector -fno-builtin -fno-asynchronous-unwind-tables \
+	-fno-unwind-tables -fno-ident -ffunction-sections -fdata-sections \
+	-Os -Wall -Wextra -Werror -I.
 
 AMD64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -DHAL_ARCH_AMD64 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON \
@@ -56,7 +64,7 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
 	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c src/kern/tty.c \
 	src/kern/graphics-device.c src/kern/system-device.c \
-	src/kern/pcat/font.c drivers/pcat-graphics.c \
+	src/kern/pcat/font.c src/kern/pcat/vgafont.c drivers/pcat-graphics.c \
 	src/kern/init.c
 AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
 	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)
@@ -118,7 +126,8 @@ $(BUILD)/vmunix: $(AMD64_VMUNIX_OBJS) $(AMD64_PLATFORM)/vmunix.ld \
 $(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
 	@mkdir -p $(dir $@)
-	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+	$(CC) -m32 -I. -DZBL_STAGE2_LBA_OVERRIDE=34 \
+		-x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/stage1.elf: $(BUILD)/bootloader/stage1.o \
 	$(BIOS_LOADER)/stage1.ld
@@ -148,6 +157,33 @@ $(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.raw \
 
 bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin
+
+$(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c \
+	$(UEFI_LOADER)/include/uefi.h $(UEFI_LOADER)/elf64.h \
+	bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/elf64.o: $(UEFI_LOADER)/elf64.c $(UEFI_LOADER)/elf64.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/transition.o: $(UEFI_LOADER)/transition.S
+	@mkdir -p $(dir $@)
+	$(EFI_CC) -m64 -mno-red-zone -c $< -o $@
+
+$(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
+	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/transition.o \
+	tools/build/check-bootx64.py
+	$(EFI_LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \
+		--gc-sections --enable-reloc-section --no-insert-timestamp \
+		$(filter %.o,$^) -o $@
+	@test -z "$$($(EFI_NM) -u $@ | grep -Ev \
+		' (__bss_start__|__bss_end__|__end__|___tls_start__|___tls_end__)$$')" \
+		|| { $(EFI_NM) -u $@; exit 1; }
+	$(PYTHON) tools/build/check-bootx64.py $@
+
+uefi-loader: $(BUILD)/uefi/BOOTX64.EFI
 
 AMD64_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64
@@ -531,11 +567,12 @@ rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
-	$(DATA_IMAGE) $(SWAP_IMAGE) \
-	tools/build/make-bios-hdd-image.py tools/build/check-bios-hdd-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat \
+	$(DATA_IMAGE) $(SWAP_IMAGE) $(BUILD)/uefi/BOOTX64.EFI \
+	tools/build/make-bios-hdd-image.py tools/build/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -557,10 +594,12 @@ ufs-root-image: $(BUILD)/ufs-root-hdd-image.img
 
 $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
-	tools/build/make-bios-hdd-image.py tools/build/check-bios-hdd-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	tools/build/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
 		--arch-format ufs \
 		--fragment-kernel $@
@@ -571,8 +610,9 @@ $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
 bios-hdd-image: $(BUILD)/bios-hdd-image.img
 hdd-image: $(BUILD)/hdd-image.img
 bios-loader-host-check: $(BUILD)/bios-hdd-image.img
-	$(PYTHON) tools/build/check-bios-hdd-image.py --machine pcat \
+	$(PYTHON) tools/build/check-amd64-gpt-image.py --machine pcat \
 		--kernel $(BUILD)/vmunix --arch-profile amd64 \
+		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
 		--arch-image $(AMD64_ARCH_UFS_IMAGE) --arch-format ufs \
 		--data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) $<
 
@@ -593,6 +633,6 @@ network-qemu-test: bios-bootloader $(BUILD)/vmunix \
 	bash scripts/test-pcat-ne2000.sh amd64
 
 .PHONY: all vmunix SH arch-image arch-image-check arch-image-ufs \
-	arch-image-ufs-check ufs-root-image bios-bootloader bios-hdd-image hdd-image \
+	arch-image-ufs-check ufs-root-image bios-bootloader uefi-loader bios-hdd-image hdd-image \
 	bios-loader-host-check amd64-hal-compile amd64-entry-qemu-test \
 	hdd-boot-qemu-test amd64-qemu-test network-qemu-test
