@@ -1,4 +1,4 @@
-﻿# zedBSD — a scriptable bootstrap environment.
+# zedBSD — a scriptable bootstrap environment.
 # Copyright (C) 2026 Awe Morris
 # SPDX-License-Identifier: Zlib
 #
@@ -12,8 +12,8 @@
 #   src/softfloat/    soft-float support built from vendor GCC/musl sources
 #   platform/<arch>/  per-architecture targets (IPLs, stages, console)
 #
-# Architecture selection: `make ARCH=pc98` or `./build.sh all pc98`.  Each
-# architecture provides platform/<arch>/platform.mk and its artifacts land
+# Architecture selection: `make ARCH=pc98` or `./build.sh vmunix pc98`.  Each
+# architecture provides platform/<arch>/kernel.mk and its artifacts land
 # in build/<arch>/.  Architecture-neutral host artifacts stay shared at the
 # top of build/ (build/host-noct, build/releases).
 
@@ -23,8 +23,9 @@ OBJCOPY := objcopy
 CC := gcc
 HOSTCC ?= cc
 PYTHON ?= python3
-.DEFAULT_GOAL := all
+.DEFAULT_GOAL := menu
 
+ZEDBSD_CONFIG ?= $(if $(wildcard config.mk),config.mk,)
 ifneq ($(strip $(ZEDBSD_CONFIG)),)
 include $(ZEDBSD_CONFIG)
 endif
@@ -35,6 +36,50 @@ CONFIG_DRIVER_GRAPHICS ?= y
 CONFIG_KERNEL_LOCKDEP ?= n
 CONFIG_KERNEL_TEST_CHECKPOINTS ?= n
 CONFIG_BUF_CACHE_KIB ?= 0
+
+# Userland packages register themselves from userland/**/Makefile.  Kernel
+# makefiles provide ABI-specific link rules, while package ownership, source
+# paths and menu metadata live with each program.
+USERLAND_PACKAGES :=
+define ZEDBSD_USERLAND_PACKAGE
+USERLAND_PACKAGES += $(1)
+USERLAND_$(1)_LABEL := $(2)
+USERLAND_$(1)_PLATFORMS := $(3)
+USERLAND_$(1)_DEFAULT := $(4)
+USERLAND_$(1)_CLASS := $(5)
+USERLAND_$(1)_SOURCES := $(6)
+USERLAND_$(1)_SELECTABLE := $(7)
+endef
+USERLAND_PACKAGE_MAKEFILES := $(sort $(wildcard userland/*/Makefile))
+include $(USERLAND_PACKAGE_MAKEFILES)
+ZEDBSD_ALL_USER_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
+	$(if $(filter y,$(USERLAND_$(program)_SELECTABLE)),$(program)))
+USERLAND_BASIC_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
+	$(if $(filter basic,$(USERLAND_$(program)_CLASS)),$(program)))
+USERLAND_NETWORK_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
+	$(if $(filter network,$(USERLAND_$(program)_CLASS)),$(program)))
+ZEDBSD_USER_PROGRAMS ?= $(ZEDBSD_ALL_USER_PROGRAMS)
+USERLAND_SELECTED_BASIC_PROGRAMS = $(filter $(ZEDBSD_USER_PROGRAMS),\
+	$(USERLAND_BASIC_PROGRAMS))
+USERLAND_SELECTED_NETWORK_PROGRAMS = $(filter $(ZEDBSD_USER_PROGRAMS),\
+	$(USERLAND_NETWORK_PROGRAMS))
+
+# $(1): object tree prefix, $(2): registered package name.
+define ZEDBSD_USERLAND_OBJECTS
+$(patsubst %.c,$(1)/%.o,$(filter %.c,$(USERLAND_$(2)_SOURCES))) \
+$(patsubst %.S,$(1)/%.o,$(filter %.S,$(USERLAND_$(2)_SOURCES)))
+endef
+
+.PHONY: list-user-programs
+list-user-programs:
+	@$(foreach program,$(ZEDBSD_ALL_USER_PROGRAMS),printf '%s|%s|%s|%s\n' \
+		'$(program)' '$(USERLAND_$(program)_LABEL)' \
+		'$(USERLAND_$(program)_PLATFORMS)' \
+		'$(USERLAND_$(program)_DEFAULT)';)
+
+.PHONY: menu
+menu:
+	@$(PYTHON) tools/menuconfig.py --output config.mk
 
 ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_NE2000=$(if $(filter y,$(CONFIG_DRIVER_NE2000)),1,0) \
@@ -49,14 +94,15 @@ ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_TEST_CHECKPOINTS
 endif
 
 ARCH ?= $(if $(ZEDBSD_MAKE_ARCH),$(ZEDBSD_MAKE_ARCH),pc98)
-PLATFORM_MK := platform/$(ARCH)/platform.mk
-ifeq ($(wildcard $(PLATFORM_MK)),)
+KERNEL_MK := platform/$(ARCH)/kernel.mk
+ifeq ($(wildcard $(KERNEL_MK)),)
 $(error Unknown ARCH '$(ARCH)'; available: \
-	$(patsubst platform/%/platform.mk,%,$(wildcard platform/*/platform.mk)))
+	$(patsubst platform/%/kernel.mk,%,$(wildcard platform/*/kernel.mk)))
 endif
 
 BUILD := build/$(ARCH)
 SCRIPTS_DIR := scripts
+BUILD_TOOLS_DIR := tools/build
 
 # Scripts invoked from make must resolve the same architecture and build
 # tree; direct invocations default to pc98 on their own.
@@ -144,9 +190,9 @@ $(ZEDBSD_LIBC_OBJECTS): OBJ_CC = $(ZEDBSD_LIBC_CC)
 $(ZEDBSD_LIBC_OBJECTS): OBJ_CPPFLAGS = $(ZEDBSD_LIBC_CPPFLAGS)
 $(ZEDBSD_LIBC_OBJECTS): OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
 
-$(BUILD)/kern/messages.h: src/kern/messages.txt $(SCRIPTS_DIR)/generate-messages.py
+$(BUILD)/kern/messages.h: src/kern/messages.txt $(BUILD_TOOLS_DIR)/generate-messages.py
 	@mkdir -p $(dir $@)
-	$(PYTHON) $(SCRIPTS_DIR)/generate-messages.py $< $@
+	$(PYTHON) $(BUILD_TOOLS_DIR)/generate-messages.py $< $@
 
 messages: $(BUILD)/kern/messages.h
 
@@ -356,17 +402,17 @@ $(BUILD)/tests/ufs-consistency-host-test: tests/ufs-consistency-host-test.c \
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc $(KERN_UFS_CONSISTENCY_SOURCES) $< -o $@
 
-$(BUILD)/tests/ufs1-test.img: scripts/make-ufs1-image.py scripts/ufs1_format.py
+$(BUILD)/tests/ufs1-test.img: scripts/make-ufs1-image.py tools/build/ufs1_format.py
 	@mkdir -p $(dir $@)
 	PYTHONPATH=scripts $(PYTHON) scripts/make-ufs1-image.py --size-mib 4 $@
 
-$(BUILD)/tests/ufs1-multicg-test.img: scripts/make-ufs1-image.py scripts/ufs1_format.py
+$(BUILD)/tests/ufs1-multicg-test.img: scripts/make-ufs1-image.py tools/build/ufs1_format.py
 	@mkdir -p $(dir $@)
 	PYTHONPATH=scripts $(PYTHON) scripts/make-ufs1-image.py --size-mib 16 \
 		--cylinder-groups 4 $@
 
 $(BUILD)/tests/ufs2-multicg-test.img: scripts/make-ufs2-image.py \
-	scripts/ufs2_format.py scripts/ufs1_format.py
+	tools/build/ufs2_format.py tools/build/ufs1_format.py
 	@mkdir -p $(dir $@)
 	PYTHONPATH=scripts $(PYTHON) scripts/make-ufs2-image.py --size-mib 16 \
 		--cylinder-groups 4 --journal-mib 1 --snapshot-mib 2 $@
@@ -667,20 +713,20 @@ CHECK_RUN_TARGETS += userland-command-host-test
 
 overlay-journal-format-host-test: tests/overlay-journal-format-host-test.py \
 	scripts/overlay_journal_format.py
-	PYTHONPATH=scripts $(PYTHON) tests/overlay-journal-format-host-test.py
+	PYTHONPATH=$(BUILD_TOOLS_DIR):scripts $(PYTHON) tests/overlay-journal-format-host-test.py
 
 CHECK_RUN_TARGETS += overlay-journal-format-host-test
 
 ufs1-format-python-test: tests/ufs1-format-host-test.py \
-	scripts/ufs1_format.py scripts/check-ufs1-image.py
-	PYTHONPATH=scripts $(PYTHON) tests/ufs1-format-host-test.py
+	tools/build/ufs1_format.py tools/build/check-ufs1-image.py
+	PYTHONPATH=$(BUILD_TOOLS_DIR) $(PYTHON) tests/ufs1-format-host-test.py
 
 CHECK_RUN_TARGETS += ufs1-format-python-test
 
 ufs2-format-python-test: tests/ufs2-format-host-test.py \
-	scripts/ufs1_format.py scripts/ufs2_format.py scripts/check-ufs1-image.py \
-	scripts/check-ufs2-image.py
-	PYTHONPATH=scripts $(PYTHON) tests/ufs2-format-host-test.py
+	tools/build/ufs1_format.py tools/build/ufs2_format.py tools/build/check-ufs1-image.py \
+	tools/build/check-ufs2-image.py
+	PYTHONPATH=$(BUILD_TOOLS_DIR) $(PYTHON) tests/ufs2-format-host-test.py
 
 CHECK_RUN_TARGETS += ufs2-format-python-test
 
@@ -688,9 +734,145 @@ CHECK_RUN_TARGETS += ufs2-format-python-test
 # Architecture-specific rules (artifacts, disk images, QEMU tests,
 # milestone verification chains).
 
-include scripts/arch-images.mk
-include $(PLATFORM_MK)
-include bootloader/unified/unified.mk
+# Root filesystem assembly is Make-controlled.  Format-specific encoders and
+# validators remain small standalone tools under tools/build; no normal build
+# target depends on the legacy scripts directory.
+ARCH_IMAGE_DIR := build/arch-images
+ARCH_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-image.py \
+	$(BUILD_TOOLS_DIR)/check-arch-overlay-image.py
+ARCH_UFS_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.py \
+	$(BUILD_TOOLS_DIR)/check-arch-overlay-ufs.py \
+	$(BUILD_TOOLS_DIR)/check-ufs1-image.py \
+	$(BUILD_TOOLS_DIR)/check_ufs1_import.py \
+	$(BUILD_TOOLS_DIR)/ufs1_format.py
+ZEDBSD_ACCOUNT_INPUTS := userland/etc/passwd userland/etc/group \
+	userland/etc/shadow
+ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/etc/passwd \
+	--file /etc/group=userland/etc/group \
+	--file /etc/shadow=userland/etc/shadow \
+	--mode /etc/passwd=0644 --mode /etc/group=0644 \
+	--mode /etc/shadow=0400
+
+# $(1): output, $(2): profile, $(3): prerequisites, $(4): --file arguments.
+define ZEDBSD_ARCH_IMAGE_RULE
+$(1): $(3) $(ARCH_IMAGE_TOOLS)
+	@mkdir -p $$(dir $$@)
+	$$(PYTHON) $$(BUILD_TOOLS_DIR)/make-arch-overlay-image.py --force \
+		--profile $(2) --output $$@ $(4)
+
+$(1)-check: $(1)
+	$$(PYTHON) $$(BUILD_TOOLS_DIR)/check-arch-overlay-image.py \
+		--profile $(2) --image $$< $(4)
+endef
+
+# $(1): output, $(2): profile, $(3): prerequisites, $(4): --file arguments.
+define ZEDBSD_ARCH_UFS_IMAGE_RULE
+$(1): $(3) $(ARCH_UFS_IMAGE_TOOLS)
+	@mkdir -p $$(dir $$@)
+	PYTHONPATH=$$(BUILD_TOOLS_DIR) $$(PYTHON) \
+		$$(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.py --force \
+		--profile $(2) --output $$@ $(4)
+
+$(1)-check: $(1)
+	PYTHONPATH=$$(BUILD_TOOLS_DIR) $$(PYTHON) \
+		$$(BUILD_TOOLS_DIR)/check-arch-overlay-ufs.py \
+		--profile $(2) --image $$< $(4)
+endef
+
+# $(1): tar output, $(2): prerequisites, $(3): --file/--mode arguments.
+# The staging tree is the canonical rootfs artifact.  The tarball is retained
+# as a packaging artifact and is produced from that tree.
+define ZEDBSD_ROOTFS_TAR_RULE
+$(BUILD)/rootfs/.stamp: $(2)
+	@rm -rf $(BUILD)/rootfs
+	@mkdir -p $(BUILD)/rootfs
+	@set -- $(3); while test $$$$# -gt 0; do \
+		option=$$$$1; specification=$$$$2; shift 2; \
+		path=$$$${specification%%=*}; value=$$$${specification#*=}; \
+		path=$$$${path#/}; destination=$(BUILD)/rootfs/$$$$path; \
+		case $$$$option in \
+		--file) mkdir -p "$$$${destination%/*}"; cp -f "$$$$value" "$$$$destination" ;; \
+		--mode) chmod "$$$$value" "$$$$destination" ;; \
+		*) echo "unknown rootfs option: $$$$option" >&2; exit 2 ;; \
+		esac; \
+	done
+	@touch $$@
+
+$(1): $(BUILD)/rootfs/.stamp
+	@rm -f $$@
+	@tar -C $(BUILD)/rootfs -czf $$@ .
+endef
+
+include $(KERNEL_MK)
+
+KERNEL_BUILD_TARGET ?= vmunix
+ROOTFS_BUILD_TARGET ?= rootfs
+ROOTFS_IMAGE_BUILD_TARGET ?= arch-image-ufs
+BOOT_DISK_BUILD_TARGET ?= hdd-image
+KERNEL_ARTIFACT ?= $(BUILD)/vmunix
+ROOTFS_ARTIFACT ?= $(BUILD)/rootfs
+ROOTFS_IMAGE_ARTIFACT ?=
+BOOT_DISK_ARTIFACT ?= $(BUILD)/hdd-image.img
+
+.PHONY: config-prepare build-kernel build-rootfs build-rootfs-image \
+	build-boot-disk-image build-release build-toolchain \
+	print-kernel-artifact print-rootfs-artifact \
+	print-rootfs-image-artifact print-boot-disk-artifact
+config-prepare:
+	@if test -n "$(ZEDBSD_CONFIG)"; then \
+		mkdir -p $(BUILD); \
+		if ! test -f $(BUILD)/.zedbsd-config || \
+		    ! cmp -s "$(ZEDBSD_CONFIG)" $(BUILD)/.zedbsd-config; then \
+			echo "Configuration changed; cleaning $(BUILD)"; \
+			rm -rf $(BUILD); mkdir -p $(BUILD); \
+			cp "$(ZEDBSD_CONFIG)" $(BUILD)/.zedbsd-config; \
+		fi; \
+	fi
+
+define ZEDBSD_CONFIGURED_BUILD
+	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" messages
+	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" $(1)
+	@test -e "$(2)" || { echo "missing build artifact: $(2)" >&2; exit 1; }
+	@printf '%s\n' "$(abspath $(2))"
+endef
+
+build-kernel: config-prepare
+	$(call ZEDBSD_CONFIGURED_BUILD,$(KERNEL_BUILD_TARGET),$(KERNEL_ARTIFACT))
+
+build-rootfs: config-prepare
+	$(call ZEDBSD_CONFIGURED_BUILD,$(ROOTFS_BUILD_TARGET),$(ROOTFS_ARTIFACT))
+
+build-rootfs-image: config-prepare
+	@if test -z "$(ROOTFS_IMAGE_ARTIFACT)"; then \
+		echo "$(ARCH) does not define a standalone rootfs image" >&2; exit 2; \
+	fi
+	$(call ZEDBSD_CONFIGURED_BUILD,$(ROOTFS_IMAGE_BUILD_TARGET),$(ROOTFS_IMAGE_ARTIFACT))
+
+build-boot-disk-image: config-prepare
+	$(call ZEDBSD_CONFIGURED_BUILD,$(BOOT_DISK_BUILD_TARGET),$(BOOT_DISK_ARTIFACT))
+
+build-release: config-prepare
+	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" build-kernel
+	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" build-rootfs
+	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" build-rootfs-image
+	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" build-boot-disk-image
+
+build-toolchain:
+	@echo "Build toolchain is not implemented yet."
+
+print-kernel-artifact:
+	@printf '%s\n' "$(abspath $(KERNEL_ARTIFACT))"
+
+print-rootfs-artifact:
+	@printf '%s\n' "$(abspath $(ROOTFS_ARTIFACT))"
+
+print-rootfs-image-artifact:
+	@if test -n "$(ROOTFS_IMAGE_ARTIFACT)"; then \
+		printf '%s\n' "$(abspath $(ROOTFS_IMAGE_ARTIFACT))"; \
+	fi
+
+print-boot-disk-artifact:
+	@printf '%s\n' "$(abspath $(BOOT_DISK_ARTIFACT))"
 
 check: $(HOST_TEST_BINARIES) $(CHECK_RUN_TARGETS)
 	@set -e; for test in $(HOST_TEST_BINARIES); do \

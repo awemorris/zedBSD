@@ -1,0 +1,2 @@
+# key|kind|label|platforms|default|choices
+CONFIG_DRIVER_NE2000|bool|NE2000 Ethernet adapter|i386,amd64|y|

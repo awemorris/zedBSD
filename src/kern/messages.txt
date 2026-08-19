@@ -1,4 +1,4 @@
-# Identifier<TAB>UTF-8 text.  scripts/generate-messages.py converts
+# Identifier<TAB>UTF-8 text.  tools/build/generate-messages.py converts
 # these strings to deterministic CP932 byte arrays for the freestanding loader.
 machine	NEC PC-9800 ｼﾘｰｽﾞ ﾊﾟｰｿﾅﾙ ｺﾝﾋﾟｭｰﾀ
 loader	UNIX ﾌﾞｰﾄﾛｰﾀﾞ ﾊﾞｰｼﾞｮﾝ 1.00

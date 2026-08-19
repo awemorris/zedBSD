@@ -130,7 +130,7 @@ $(NOCT_BUILD_DIR)/api-%.o: $(NOCT_ROOT)/src/api/api-%.c
 		$(NOCT_WARNING_EXCEPTIONS) -MMD -MP -c $< -o $@
 
 # BeUI's core and its display backends.  The backends a target selects are
-# listed by that target's platform.mk; the rule is shared because they are
+# listed by that target's kernel.mk; the rule is shared because they are
 # ordinary upstream API sources.
 $(NOCT_BUILD_DIR)/beui-%.o: $(NOCT_ROOT)/src/api/beui-%.c
 	@mkdir -p $(NOCT_BUILD_DIR)

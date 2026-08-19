@@ -1,0 +1,4 @@
+# key|kind|label|platforms|default|choices
+-|fixed|PC-98 IDE controller|pc98|y|
+-|fixed|PC-98 keyboard and text console|pc98|y|
+CONFIG_DRIVER_LGY98|bool|LGY-98 Ethernet adapter|pc98|n|

@@ -40,7 +40,6 @@ Commands for specific artifacts:
   root      [platform]         Build a rootfs tree
   rootufs   [platform]         Build a rootfs UFS image
   bootdisk  [platform]         Build a boot disk image
-  unified                      Build a unified boot disk image
   loader    [platform]         Build a boot loader
   app       [name] [platform]  Build a specific userland program
   test      [platform]         Build and run its host tests
@@ -72,7 +71,7 @@ config_value()
 configured_build()
 {
 	local config="$repo/config.mk"
-	local platform_name platform target_jobs vmunix rootfs bootdisk stamp value key
+	local platform_name platform target_jobs value key
 
 	test -f "$config" || fail "config.mk is missing; run '$0 menuconfig' first"
 	platform_name="$(config_value ZEDBSD_PLATFORM)"
@@ -88,29 +87,8 @@ configured_build()
 	value="$(config_value CONFIG_BUF_CACHE_KIB)"
 	case "$value" in ""|*[!0-9]*) fail "config.mk has invalid CONFIG_BUF_CACHE_KIB: $value" ;; esac
 	target_jobs="${ZEDBSD_JOBS:-$(nproc)}"
-	stamp="$repo/build/$platform/.zedbsd-config"
-	if ! test -f "$stamp" || ! cmp -s "$config" "$stamp"; then
-		make -C "$repo" ARCH="$platform" "-j$target_jobs" clean
-		mkdir -p "$(dirname "$stamp")"
-		cp "$config" "$stamp"
-	fi
-	make -C "$repo" ARCH="$platform" ZEDBSD_CONFIG="$config" \
-		"-j$target_jobs" messages
-	make -C "$repo" ARCH="$platform" ZEDBSD_CONFIG="$config" \
-		"-j$target_jobs" vmunix rootfs-tar hdd-image "$@"
-
-	vmunix="$repo/build/$platform/vmunix"
-	rootfs="$repo/build/$platform/rootfs.tar.gz"
-	case "$platform" in
-		x68k) bootdisk="$repo/build/x68k/zedbsd-x68k.hd" ;;
-		*) bootdisk="$repo/build/$platform/hdd-image.img" ;;
-	esac
-	for artifact in "$vmunix" "$rootfs" "$bootdisk"; do
-		test -f "$artifact" || fail "configured build did not produce $artifact"
-	done
-	printf '\nBuild completed.\n\nVMLINUX=%s\nROOTFS=%s\nBOOTDISK=%s\n' \
-		"$(realpath "$vmunix")" "$(realpath "$rootfs")" \
-		"$(realpath "$bootdisk")"
+	exec make -C "$repo" ARCH="$platform" ZEDBSD_CONFIG="$config" \
+		"-j$target_jobs" build-release "$@"
 }
 
 if test "$#" -eq 0; then
@@ -123,7 +101,7 @@ shift
 
 case "$command_name" in
 menuconfig)
-	exec python3 "$repo/scripts/menuconfig.py" --output "$repo/config.mk" "$@"
+	exec python3 "$repo/tools/menuconfig.py" --output "$repo/config.mk" "$@"
 	;;
 make)
 	configured_build "$@"
@@ -145,10 +123,6 @@ distclean)
 	fi
 	jobs="${ZEDBSD_JOBS:-$(nproc)}"
 	exec make -C "$repo" ARCH=pc98 "-j$jobs" distclean
-	;;
-unified)
-	platform=unified
-	target=hdd-image
 	;;
 app)
 	if test "$#" -lt 2; then
@@ -181,21 +155,13 @@ app)
 			target="$command_name"
 			;;
 		root)
-			case "$platform_name" in
-				i386|amd64|pc98|rpi4) target=arch-image ;;
-				sun4u) target="build/sparcv9/ufs-root.img" ;;
-				x68k) fail "x68k does not yet provide a separate rootfs image" ;;
-			esac
+			target=build-rootfs
 			;;
 		rootufs)
-			case "$platform_name" in
-				i386|amd64|pc98|rpi4) target=arch-image-ufs ;;
-				sun4u) target="build/sparcv9/ufs-root.img" ;;
-				x68k) fail "x68k does not yet provide a UFS root image" ;;
-			esac
+			target=build-rootfs-image
 			;;
 		bootdisk)
-			target=hdd-image
+			target=build-boot-disk-image
 			;;
 		test)
 			target=check

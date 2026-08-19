@@ -1,0 +1,4 @@
+# key|kind|label|platforms|default|choices
+CONFIG_KERNEL_LOCKDEP|bool|Kernel lock-order diagnostics|*|n|
+CONFIG_KERNEL_TEST_CHECKPOINTS|bool|Kernel test checkpoints|amd64|n|
+CONFIG_BUF_CACHE_KIB|choice|Buffer cache limit|*|0|0:automatic,256:256 KiB,1024:1 MiB,4096:4 MiB,16384:16 MiB
