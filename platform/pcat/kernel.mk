@@ -88,7 +88,7 @@ POSIX-R2.ELF: $(BUILD)/POSIX-R2.ELF
 POSIX-R2-REMAINING.ELF: $(BUILD)/POSIX-R2-REMAINING.ELF
 .PHONY: vmunix SH NOCT.ELF POSIX-R1.ELF POSIX-R2.ELF POSIX-R2-REMAINING.ELF
 
-# Native two-stage MBR/FAT16 loader.
+# Native four-stage MBR/FAT16 loader.
 $(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
 	@mkdir -p $(dir $@)
@@ -103,16 +103,14 @@ $(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
 	@test $$(stat -c%s $@) -eq 512
 	@test "$$(od -An -tx1 -j510 -N2 $@ | tr -d ' \n')" = 55aa
 
-$(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2.S \
-	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
-	bootloader/include/mbr.inc bootloader/include/fat16.inc \
-	bootloader/include/elf.inc bootloader/include/amd64-handoff.h
+$(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2-chain.S \
+	bootloader/include/stage2-header.inc
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/stage2.elf: $(BUILD)/bootloader/stage2.o \
 	$(BIOS_LOADER)/stage2.ld
-	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
+	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage2.ld $< -o $@
 
 $(BUILD)/bootloader/stage2.raw: $(BUILD)/bootloader/stage2.elf
 	$(OBJCOPY) -O binary -j .text $< $@
@@ -120,6 +118,32 @@ $(BUILD)/bootloader/stage2.raw: $(BUILD)/bootloader/stage2.elf
 $(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.raw \
 	$(BUILD_TOOLS_DIR)/finalize-bios-stage2.py
 	$(PYTHON) $(BUILD_TOOLS_DIR)/finalize-bios-stage2.py --machine pcat $< $@
+
+$(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+$(BUILD)/bootloader/partition-pbr.elf: $(BUILD)/bootloader/partition-pbr.o
+	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
+$(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+	@test $$(stat -c%s $@) -eq 1024
+
+$(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
+	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
+	bootloader/include/mbr.inc bootloader/include/fat16.inc \
+	bootloader/include/elf.inc bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
+$(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o $(BIOS_LOADER)/stage2.ld
+	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
+$(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+$(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw \
+	$(BUILD_TOOLS_DIR)/finalize-bios-stage2.py
+	$(PYTHON) $(BUILD_TOOLS_DIR)/finalize-bios-stage2.py --machine pcat $< $@
+$(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin \
+	$(BUILD_TOOLS_DIR)/make-mz-exe.py
+	$(PYTHON) $(BUILD_TOOLS_DIR)/make-mz-exe.py --entry 0x20 $< $@
 
 $(BUILD)/bootloader/payload32.o: bootloader/tests/payload32-pcat.S
 	@mkdir -p $(dir $@)
@@ -139,7 +163,8 @@ $(BUILD)/bootloader/payload64.elf: $(BUILD)/bootloader/payload64.o \
 	$(LD) -m elf_x86_64 -T bootloader/tests/payload64-pcat.ld $< -o $@
 
 bios-bootloader: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE
 
 USER_BASIC_COMMANDS := $(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_BASIC_PROGRAMS))
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
@@ -184,13 +209,15 @@ rootfs-tar: $(BUILD)/rootfs.tar.gz
 rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(I386_ARCH_UFS_IMAGE) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(I386_ARCH_UFS_IMAGE) $(DATA_IMAGE) $(SWAP_IMAGE) \
 	$(HOLORIS_NOCT) \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.py \
 	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.py
 	$(PYTHON) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.py --force \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
 		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -201,11 +228,13 @@ $(BUILD)/ufs-root.img: $(I386_ARCH_UFS_IMAGE) \
 		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) $@
 
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/ufs-root.img \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(BUILD)/ufs-root.img \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.py
 	$(PYTHON) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.py --force \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
 		--ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
 
 ufs-root-image: $(BUILD)/ufs-root-hdd-image.img

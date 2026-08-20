@@ -1,36 +1,33 @@
-﻿# zedBSD BIOS bootloaders
+# zedBSD BIOS bootloaders
 
-The native BIOS loaders use the same on-disk layout on PC/AT and PC-98:
+The PC/AT and PC-98 BIOS loaders now share the same four-stage contract while
+retaining machine-specific firmware I/O:
 
-- LBA 0: machine-specific Stage 1 and a PC/AT MBR partition table
-- LBA 1..N: machine-specific ZBL2 Stage 2
-- LBA N+1..2047: reserved and zero filled
-- LBA 2048: the first active primary FAT16 partition
+1. Stage 1 is the MBR/disk IPL.  It loads the reserved-area Stage 2.
+2. Stage 2 selects the active FAT16 partition and chain-loads its PBR.
+3. Stage 3 is the FAT16 PBR plus its reserved continuation sector.  It loads
+   the contiguous root-directory file `BOOTZBSD.EXE`.
+4. Stage 4 is a DOS MZ system loader.  It loads `VMUNIX`, constructs the
+   architecture handoff, changes CPU mode, and enters the kernel.
 
-Stage 2 loads the root-directory file `VMUNIX` through its FAT16 cluster
-chain.  The PC/AT loader accepts ELF32/i386 and ELF64/x86-64.  The PC-98
-loader accepts ELF32/i386 only.
+On PC/AT, Stage 2 begins at LBA 1.  On PC-98, LBA 1 remains the native NEC
+partition table and the 14-sector Stage 2 area occupies LBA 2 through 15.
+The first active FAT16 partition begins at LBA 2048 in repository-generated
+images.  PC-98 Stage 2 may also be replaced by a compatible NEC fixed-disk
+menu because Stage 3 observes the ordinary partition-IPL entry contract.
 
-Build and test the loaders with the repository build driver:
+`BOOTZBSD.EXE` has a conventional MZ header.  Stage 3 strips the 64-byte
+header by arranging for the loader body to remain at physical `0x10000`.
+When DOS loads the executable elsewhere, its entry stub records the current
+DOS drive and relocates the body to the same address before taking over the
+machine.  The PC/AT loader accepts ELF32/i386 and ELF64/x86-64 kernels; the
+PC-98 loader accepts ELF32/i386.
+
+Build the native loaders and images with:
 
 ```text
-./build.sh bios-bootloader pcat
-./build.sh bios-loader-qemu-test pcat
-./build.sh bios-bootloader pc98
-./build.sh bios-loader-qemu-test pc98
-./build.sh hdd-image unified
-./build.sh unified-loader-qemu-test unified
-./build.sh uefi-loader-host-check unified
-./build.sh uefi-entry-qemu-test unified
+./build.sh loader i386
+./build.sh loader pc98
+./build.sh bootdisk i386
+./build.sh bootdisk pc98
 ```
-
-`hdd-image` now selects the native MBR/FAT16 loader on both platforms.  The
-PC-98 QEMU test covers normal H=8 geometry, a sub-20-MiB H=4 image, and a
-fragmented `VMUNIX` cluster chain.  The PC/AT test covers ELF32 and ELF64,
-including fragmented variants.
-
-The unified image additionally contains an MBR type `0xEF` FAT32 ESP after a
-fixed 128-MiB FAT16 root partition. PC/AT BIOS chooses the i386 or amd64 kernel
-from CPUID capabilities, while x64 UEFI loads the amd64 kernel through
-`EFI/BOOT/BOOTX64.EFI`. PC-98 continues to see only the FAT16 mirror in its
-LBA 1 partition table.

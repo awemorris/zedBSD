@@ -193,23 +193,27 @@ $(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
 	@test $$(stat -c%s $@) -eq 512
 	@test "$$(od -An -tx1 -j510 -N2 $@ | tr -d ' \n')" = 55aa
 
-$(BUILD)/bootloader/io-sys.o: $(BIOS_LOADER)/io-sys.S \
+$(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
 	bootloader/include/elf.inc
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
 
-$(BUILD)/bootloader/io-sys.elf: $(BUILD)/bootloader/io-sys.o \
+$(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
 	$(BIOS_LOADER)/stage2.ld
 	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
 
-$(BUILD)/bootloader/io-sys.raw: $(BUILD)/bootloader/io-sys.elf
+$(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 
-$(BUILD)/bootloader/IO.SYS: $(BUILD)/bootloader/io-sys.raw \
+$(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw \
 	$(BUILD_TOOLS_DIR)/finalize-bios-stage2.py
 	$(PYTHON) $(BUILD_TOOLS_DIR)/finalize-bios-stage2.py --machine pc98 $< $@
+
+$(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin \
+	$(BUILD_TOOLS_DIR)/make-mz-exe.py
+	$(PYTHON) $(BUILD_TOOLS_DIR)/make-mz-exe.py --entry 0x20 $< $@
 
 $(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/lba2.S
 	@mkdir -p $(dir $@)
@@ -238,7 +242,7 @@ $(BUILD)/bootloader/payload32.elf: $(BUILD)/bootloader/payload32.o \
 
 bios-bootloader: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
-	$(BUILD)/bootloader/IO.SYS
+	$(BUILD)/bootloader/BOOTZBSD.EXE
 
 USER_BASIC_COMMANDS := $(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_BASIC_PROGRAMS))
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
@@ -284,14 +288,14 @@ rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
-	$(BUILD)/bootloader/IO.SYS $(BUILD)/vmunix $(I386_ARCH_UFS_IMAGE) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(I386_ARCH_UFS_IMAGE) $(DATA_IMAGE) $(SWAP_IMAGE) \
 	$(HOLORIS_NOCT) \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.py \
 	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.py
 	$(PYTHON) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.py --force \
 		--machine pc98 --stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
-		--io-sys $(BUILD)/bootloader/IO.SYS --kernel $(BUILD)/vmunix \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
 		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) \
 		--arch-format ufs --data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) $@
 
@@ -301,11 +305,13 @@ $(BUILD)/ufs-root.img: $(I386_ARCH_UFS_IMAGE) \
 		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) $@
 
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/ufs-root.img \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(BUILD)/ufs-root.img \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.py
 	$(PYTHON) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.py --force \
 		--machine pc98 --stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
 		--ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
 
 ufs-root-image: $(BUILD)/ufs-root-hdd-image.img

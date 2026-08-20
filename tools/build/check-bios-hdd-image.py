@@ -150,7 +150,8 @@ def check(args: argparse.Namespace) -> None:
         if struct.unpack_from("<H", bpb, 22)[0] == 0:
             fail("volume is not FAT12/16")
 
-    expected_files = (("VMUNIX", args.kernel, "VMUNIX"),
+    expected_files = (("BOOTZBSD.EXE", args.bootzbsd, "BOOTZBSD.EXE"),
+                      ("VMUNIX", args.kernel, "VMUNIX"),
                       ("usr/bin/noct", args.noct, "/usr/bin/noct"),
                       ("usr/bin/holoris.nct",
                        args.holoris if args.arch_image is None else None,
@@ -239,6 +240,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--machine", choices=sorted(MACHINES), required=True)
     parser.add_argument("--kernel", type=Path)
+    parser.add_argument("--bootzbsd", type=Path)
     parser.add_argument("--noct", type=Path)
     parser.add_argument("--holoris", type=Path)
     parser.add_argument("--arch-profile", choices=("i386", "amd64", "aarch64"))

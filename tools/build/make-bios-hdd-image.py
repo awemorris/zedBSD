@@ -75,11 +75,10 @@ def create(args: argparse.Namespace) -> None:
         raise SystemExit("--gpt requires --machine pcat and --bootx64")
     if args.bootx64 is not None and not args.bootx64.is_file():
         raise SystemExit(f"missing input: {args.bootx64}")
-    if args.machine == "pc98":
-        if args.partition_pbr is None or args.io_sys is None:
-            raise SystemExit("PC-98 requires --partition-pbr and --io-sys")
-        if not args.partition_pbr.is_file() or not args.io_sys.is_file():
-            raise SystemExit("missing PC-98 partition loader input")
+    if args.partition_pbr is None or args.bootzbsd is None:
+        raise SystemExit("BIOS images require --partition-pbr and --bootzbsd")
+    if not args.partition_pbr.is_file() or not args.bootzbsd.is_file():
+        raise SystemExit("missing partition or system loader input")
     for path in (args.shell, args.noct, args.nettest, args.holoris):
         if path is not None and not path.is_file():
             raise SystemExit(f"missing input: {path}")
@@ -219,12 +218,25 @@ def create(args: argparse.Namespace) -> None:
                 stream.seek(offset)
                 stream.write(pbr)
             run("mcopy", "-i", f"{temporary}@@{offset}",
-                str(args.io_sys), "::IO.SYS")
+                str(args.bootzbsd), "::BOOTZBSD.EXE")
             run("mattrib", "-i", f"{temporary}@@{offset}",
-                "+r", "+h", "+s", "::IO.SYS")
+                "+r", "+h", "+s", "::BOOTZBSD.EXE")
         else:
-            run("mformat", "-i", f"{temporary}@@{offset}", "-T", str(blocks),
+            run("mformat", "-i", f"{temporary}@@{offset}", "-R", "2",
+                "-H", str(start), "-T", str(blocks),
                 "-v", "BOOT", "::")
+            bpb = temporary.read_bytes()[offset:offset + 1024]
+            pbr = bytearray(args.partition_pbr.read_bytes())
+            if len(pbr) != 1024:
+                raise SystemExit("PC/AT partition PBR must be 1024 bytes")
+            pbr[3:0x3e] = bpb[3:0x3e]
+            with temporary.open("r+b") as stream:
+                stream.seek(offset)
+                stream.write(pbr)
+            run("mcopy", "-i", f"{temporary}@@{offset}",
+                str(args.bootzbsd), "::BOOTZBSD.EXE")
+            run("mattrib", "-i", f"{temporary}@@{offset}",
+                "+r", "+h", "+s", "::BOOTZBSD.EXE")
         if args.gpt:
             run("mmd", "-i", f"{temporary}@@{offset}", "::/EFI")
             run("mmd", "-i", f"{temporary}@@{offset}", "::/EFI/BOOT")
@@ -292,6 +304,7 @@ def create(args: argparse.Namespace) -> None:
             "check-bios-hdd-image.py")
         run("python3", str(checker), "--machine", args.machine,
             "--kernel", str(args.kernel),
+            "--bootzbsd", str(args.bootzbsd),
             *( ["--bootx64", str(args.bootx64)] if args.gpt else []),
             *(["--arch-profile", args.arch_profile,
                "--arch-image", str(args.arch_image),
@@ -319,7 +332,7 @@ def main() -> None:
     parser.add_argument("--stage1", type=Path, required=True)
     parser.add_argument("--stage2", type=Path, required=True)
     parser.add_argument("--partition-pbr", type=Path)
-    parser.add_argument("--io-sys", type=Path)
+    parser.add_argument("--bootzbsd", type=Path)
     parser.add_argument("--kernel", type=Path, required=True)
     parser.add_argument("--shell", type=Path)
     parser.add_argument("--noct", type=Path)

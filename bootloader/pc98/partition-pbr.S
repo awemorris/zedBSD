@@ -5,7 +5,7 @@
  *
  * PC-98 FAT16 uses a 1024-byte logical reserved sector.  Firmware need only
  * load its first physical 512 bytes, so that half explicitly reads the second
- * half before parsing FAT.  IO.SYS is an ordinary contiguous FAT root file;
+ * half before parsing FAT.  BOOTZBSD.EXE is an ordinary contiguous FAT root file;
  * INST.EXE and the image builder enforce the historical SYS-file constraint.
  */
 
@@ -15,7 +15,7 @@
 
 #include "bootstrap.inc"
 
-	.set LOAD_SEG,          0x1000
+	.set LOAD_SEG,          0x0ffc   /* MZ header ends at physical 0x10000. */
 	.set TABLE_SEG,         0x0800
 	.set STACK_SEG,         0x9000
 
@@ -178,7 +178,7 @@ pbr_continue:
 	addl	%ecx, %eax
 	movl	%eax, data_lba
 
-	/* Locate IO.SYS in the FAT16 root directory. */
+	/* Locate BOOTZBSD.EXE in the FAT16 root directory. */
 	movl	root_lba, %eax
 	movw	root_sectors, %dx
 root_sector_loop:
@@ -200,7 +200,7 @@ root_entry_loop:
 	je	next_root_entry
 	pushw	%cx
 	pushw	%di
-	movw	$io_name, %si
+	movw	$loader_name, %si
 	movw	$11, %cx
 	repe cmpsb
 	popw	%di
@@ -229,7 +229,7 @@ io_found:
 	cmpw	$127, %cx
 	ja	boot_failure
 
-	/* IO.SYS is contiguous; load it in full and enter its file entry point. */
+	/* The system loader is contiguous.  Load and enter its DOS MZ image. */
 	movw	$LOAD_SEG, %dx
 	movw	%dx, %es
 	xorw	%bp, %bp
@@ -239,7 +239,17 @@ load_io:
 	incl	%eax
 	addw	$512, %bp
 	loop	load_io
-	ljmp	$LOAD_SEG, $0
+	cmpw	$0x5a4d, %es:0
+	jne	boot_failure
+	movw	%es:0x08, %ax
+	addw	%es:0x16, %ax
+	addw	$LOAD_SEG, %ax
+	movw	%ax, mz_entry_seg
+	movw	%es:0x14, %ax
+	movw	%ax, mz_entry_off
+	pushw	mz_entry_seg
+	pushw	mz_entry_off
+	lret
 
 write_handoff:
 	pushw	%es
@@ -263,7 +273,9 @@ write_handoff:
 	popw	%es
 	ret
 
-io_name:         .ascii "IO      SYS"
+loader_name:     .ascii "BOOTZBSDEXE"
+mz_entry_off:    .word 0
+mz_entry_seg:    .word 0
 root_lba:        .long 0
 data_lba:        .long 0
 root_entries:    .word 0

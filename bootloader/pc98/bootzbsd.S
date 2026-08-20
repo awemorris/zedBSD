@@ -29,6 +29,36 @@ stage2_entry:
 	cli
 	cld
 	mov ax, cs
+	cmp ax, 0x1000
+	je stage2_resident
+	/* DOS MZ entry: preserve the current drive and relocate the loader to
+	 * the physical address used by its protected-mode handoff tables. */
+	mov ds, ax
+	sti
+	mov ah, 0x19
+	int 0x21
+	add al, 0x80                  /* NEC DOS fixed disk A:=00 -> BIOS 80h. */
+	cli
+	mov dx, cs
+	mov ds, dx
+	push ds
+	xor dx, dx
+	mov ds, dx
+	mov dword ptr [0x0700], 0x3150395a
+	mov byte ptr [0x0704], al
+	mov byte ptr [0x0705], 8
+	mov byte ptr [0x0706], 17
+	mov dword ptr [0x0714], 0x31534f44 /* DOS1: discover native table. */
+	pop ds
+	mov ax, 0x1000
+	mov es, ax
+	xor si, si
+	xor di, di
+	mov cx, word ptr [ZBL2_SECTOR_COUNT]
+	shl cx, 8
+	rep movsw
+	ljmp 0x1000, stage2_entry
+stage2_resident:
 	mov ds, ax
 	movzx ecx, word ptr [ZBL2_SECTOR_COUNT]
 	shl ecx, 7
@@ -66,7 +96,13 @@ stage2_checksum_loop:
 	xor ax, ax
 	mov ds, ax
 	cmp dword ptr [0x0714], 0x31545250
+	je 3f
+	cmp dword ptr [0x0714], 0x31534f44
 	jne 1f
+	pop ds
+	mov byte ptr [dos_boot], 1
+	jmp 2f
+3:
 	mov eax, dword ptr [0x0710]
 	pop ds
 	mov dword ptr [partition_lba], eax
@@ -81,6 +117,8 @@ stage2_checksum_loop:
 
 	cmp byte ptr [pbr_boot], 0
 	jne partition_ready
+	cmp byte ptr [dos_boot], 0
+	jne native_partition
 
 	xor eax, eax
 	call disk_read_one
@@ -128,6 +166,32 @@ mbr_status_ok:
 	loop mbr_loop
 	test bx, bx
 	jz fatal_partition
+	jmp partition_ready
+
+native_partition:
+	/* NEC HDD table is always the physical sector at LBA 1.  DOS drive C:
+	 * denotes its first allocated partition, which is the first live entry. */
+	mov eax, 1
+	call disk_read_one
+	xor si, si
+	mov cx, 16
+native_loop:
+	cmp byte ptr es:[si], 0
+	jne native_found
+	add si, 32
+	loop native_loop
+	jmp fatal_partition
+native_found:
+	movzx eax, word ptr es:[si + 10] /* data-start cylinder */
+	movzx edx, byte ptr es:[si + 9] /* head */
+	imul eax, 8
+	add eax, edx
+	imul eax, 17
+	movzx edx, byte ptr es:[si + 8] /* sector */
+	add eax, edx
+	mov dword ptr [partition_lba], eax
+	mov dword ptr [partition_blocks], 0xffffffff
+	mov byte ptr [partition_index], 1
 partition_ready:
 	mov si, offset msg_partition
 	call puts
@@ -1129,7 +1193,7 @@ fatal:
 1:	hlt
 	jmp 1b
 
-msg_start:     .asciz "S2 "
+msg_start:     .asciz "S4 "
 msg_mbr:       .asciz "MB "
 msg_partition: .asciz "P1 "
 msg_vmunix:    .asciz "VF "
@@ -1177,6 +1241,7 @@ fat_spc:          .byte 0
 fat_sector_scale: .byte 1
 disk_retry:       .byte 0
 pbr_boot:         .byte 0
+dos_boot:         .byte 0
 file_cache_valid: .byte 0
 fat_cache_valid:  .byte 0
 device_count:     .byte 0
