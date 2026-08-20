@@ -78,6 +78,8 @@ int drv_dma_alloc_coherent(struct drv_dma_device *device, size_t size,
 	memset(allocation, 0, sizeof(*allocation));
 	request.paddr = HAL_PMEM_PADDR_ANY;
 	request.size = size;
+	if (alignment < hal_page_get_page_size(1))
+		alignment = hal_page_get_page_size(1);
 	request.alignment = alignment;
 	request.type = HAL_PMEM_TYPE_RAM;
 	request.attr = 0;

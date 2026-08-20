@@ -10,6 +10,7 @@
 
 static volatile unsigned config_lock;
 static struct drv_dma_device *pcat_dma;
+static uint32_t pci_small_mmio_next = 0xf0800000U;
 
 static uint32_t port_read32(uint16_t port)
 {
@@ -113,17 +114,31 @@ static int pcat_map_bar(void *context, struct drv_pci_device *device,
 	request.attr = (flags & DRV_PCI_MAP_WRITETHROUGH) ?
 	    HAL_PMEM_ATTR_WRITETHRU : HAL_PMEM_ATTR_NOCACHE;
 	if (hal_pmem_alloc(&request, memory) != HAL_OK) {
+		uint32_t assigned;
 		/* The initial PC/AT HAL exposes one 16-MiB PCI MMIO window. */
-		if (bar->type != DRV_PCI_BAR_MEMORY32 || bar->size > 0x01000000U ||
-		    drv_pci_device_assign_bar(device, bar->index, 0xf0000000U) != 0) {
+		if (bar->type != DRV_PCI_BAR_MEMORY32 || bar->size > 0x01000000U) {
 			hal_free(memory); return ENOMEM;
 		}
-		request.paddr = 0xf0000000U;
+		if (bar->size >= 0x00400000U) {
+			assigned = 0xf0000000U;
+		} else {
+			uint32_t alignment = (uint32_t)bar->size;
+			assigned = (pci_small_mmio_next + alignment - 1U) &
+			    ~(alignment - 1U);
+			if (assigned > 0xf1000000U - bar->size) {
+				hal_free(memory); return ENOMEM;
+			}
+			pci_small_mmio_next = assigned + (uint32_t)bar->size;
+		}
+		if (drv_pci_device_assign_bar(device, bar->index, assigned) != 0) {
+			hal_free(memory); return ENOMEM;
+		}
+		request.paddr = assigned;
 		if (hal_pmem_alloc(&request, memory) != HAL_OK) {
 			hal_free(memory); return ENOMEM;
 		}
-		hal_printf("pci: BAR%u assigned to f0000000 (%u KiB)\n",
-		    bar->index, (unsigned)(bar->size / 1024U));
+		hal_printf("pci: BAR%u assigned to %08x (%u KiB)\n",
+		    bar->index, assigned, (unsigned)(bar->size / 1024U));
 	}
 	mapping->address = memory->vaddr; mapping->size = memory->size;
 	mapping->type = bar->type; mapping->private_data[0] = (uintptr_t)memory;

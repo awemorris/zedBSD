@@ -160,6 +160,8 @@ kernel_entry(const void *handoff)
 	kern_logf("boot: platform devices detected: %u\n",
 	    (unsigned)device_count);
 	hal_irq_enable();
+	/* Deferred device work may submit interrupt-driven I/O. */
+	kern_platform_refresh_devices(devices, device_count);
 	kernel_main(h, devices, (unsigned)device_count);
 }
 

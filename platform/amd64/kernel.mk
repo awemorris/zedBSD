@@ -49,6 +49,7 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/resource-limit.c \
 	src/kern/disk.c src/kern/partition.c \
 	drivers/loop.c drivers/dma.c drivers/pci.c drivers/pci-pcat.c \
+	drivers/usb.c drivers/pci-uhci.c drivers/pci-ehci.c \
 	drivers/pcat-ide.c drivers/dp8390.c drivers/pcat-ne2000.c \
 	src/kern/mbr-partition.c src/kern/pcat/platform.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
