@@ -4,6 +4,7 @@
 #include "kern/pcat/font.h"
 #include "drivers/pcat-graphics.h"
 
+#include <drivers/pci.h>
 #include <hal/hal.h>
 #include <string.h>
 
@@ -13,19 +14,17 @@
 #define VGA_APERTURE vga_aperture
 #define CIRRUS_STRIDE8 WIDTH
 #define CIRRUS_STRIDE24 (WIDTH * 3U)
-#define PCI_CONFIG_ADDRESS 0x0cf8U
-#define PCI_CONFIG_DATA 0x0cfcU
 #define PCI_CIRRUS_VENDOR 0x1013U
-#define PCI_CIRRUS_LFB 0xf0000000U
 
 enum display_backend { DISPLAY_NONE, DISPLAY_CIRRUS, DISPLAY_VGA };
 
 static enum display_backend active_backend;
 static uint8_t active_bpp;
-static uint8_t cirrus_bus, cirrus_device, cirrus_function;
 static int cirrus_present;
+static struct drv_pci_device *cirrus_device;
+static struct drv_pci_mapping cirrus_mapping;
 static int vga_color_cache = -1;
-static struct hal_pmem vga_memory, cirrus_memory;
+static struct hal_pmem vga_memory;
 static volatile uint8_t *vga_aperture, *cirrus_aperture;
 
 static int pcat_graphics_clear(void *);
@@ -49,18 +48,6 @@ static uint8_t in8(uint16_t port)
 static void out8(uint16_t port, uint8_t value)
 {
 	__asm__ volatile ("outb %0,%w1" : : "a"(value), "Nd"(port));
-}
-
-static uint32_t in32(uint16_t port)
-{
-	uint32_t value;
-	__asm__ volatile ("inl %w1,%0" : "=a"(value) : "Nd"(port));
-	return value;
-}
-
-static void out32(uint16_t port, uint32_t value)
-{
-	__asm__ volatile ("outl %0,%w1" : : "a"(value), "Nd"(port));
 }
 
 static void seq_write(uint8_t index, uint8_t value)
@@ -93,72 +80,6 @@ static uint8_t crtc_read(uint8_t index)
 	uint16_t port = (in8(0x3ccU) & 1U) ? 0x3d4U : 0x3b4U;
 	out8(port, index);
 	return in8((uint16_t)(port + 1U));
-}
-
-static uint32_t pci_address(uint8_t bus, uint8_t device, uint8_t function,
-			    uint8_t offset)
-{
-	return 0x80000000U | ((uint32_t)bus << 16) |
-		((uint32_t)device << 11) | ((uint32_t)function << 8) |
-		(offset & 0xfcU);
-}
-
-static uint32_t pci_read32(uint8_t bus, uint8_t device, uint8_t function,
-			   uint8_t offset)
-{
-	out32(PCI_CONFIG_ADDRESS, pci_address(bus, device, function, offset));
-	return in32(PCI_CONFIG_DATA);
-}
-
-static void pci_write32(uint8_t bus, uint8_t device, uint8_t function,
-			uint8_t offset, uint32_t value)
-{
-	out32(PCI_CONFIG_ADDRESS, pci_address(bus, device, function, offset));
-	out32(PCI_CONFIG_DATA, value);
-}
-
-static void find_cirrus(void)
-{
-	unsigned bus, device, function;
-
-	cirrus_present = 0;
-	for (bus = 0; bus < 256U; bus++)
-		for (device = 0; device < 32U; device++)
-			for (function = 0; function < 8U; function++) {
-				uint32_t id = pci_read32((uint8_t)bus,
-					(uint8_t)device, (uint8_t)function, 0);
-				if ((id & 0xffffU) == 0xffffU) {
-					if (function == 0)
-						break;
-					continue;
-				}
-				if ((id & 0xffffU) != PCI_CIRRUS_VENDOR ||
-				    (pci_read32((uint8_t)bus, (uint8_t)device,
-				    (uint8_t)function, 0x08U) >> 16) != 0x0300U)
-					continue;
-				cirrus_bus = (uint8_t)bus;
-				cirrus_device = (uint8_t)device;
-				cirrus_function = (uint8_t)function;
-				cirrus_present = 1;
-				hal_printf("graphics: PCI Cirrus %04x:%04x at %u:%u.%u\n",
-				    (unsigned)(id & 0xffffU), (unsigned)(id >> 16),
-				    bus, device, function);
-				return;
-			}
-}
-
-static void configure_cirrus_pci(void)
-{
-	uint32_t command;
-
-	command = pci_read32(cirrus_bus, cirrus_device, cirrus_function, 0x04U);
-	pci_write32(cirrus_bus, cirrus_device, cirrus_function, 0x04U,
-		command & ~0x00000002U);
-	pci_write32(cirrus_bus, cirrus_device, cirrus_function, 0x10U,
-		PCI_CIRRUS_LFB);
-	command |= 0x00000003U;
-	pci_write32(cirrus_bus, cirrus_device, cirrus_function, 0x04U, command);
-	hal_printf("graphics: Cirrus LFB BAR0=%08x\n", PCI_CIRRUS_LFB);
 }
 
 static void hidden_dac_write(uint8_t value)
@@ -259,7 +180,8 @@ static int cirrus_enter(unsigned bits_per_pixel)
 	unsigned bytes, i;
 	uint8_t chip;
 
-	configure_cirrus_pci();
+	if (drv_pci_device_enable(cirrus_device) != 0)
+		return 0;
 	seq_write(0x06U, 0x12U);
 	chip = crtc_read(0x27U);
 	if (chip == 0 || chip == 0xffU)
@@ -418,15 +340,17 @@ static int pcat_graphics_prepare(void)
 		return 0;
 	vga_aperture = (volatile uint8_t *)vga_memory.vaddr;
 	pcat_font_init();
-	find_cirrus();
 	if (cirrus_present) {
-		request.paddr = PCI_CIRRUS_LFB;
-		request.size = 4U * 1024U * 1024U;
-		if (hal_pmem_alloc(&request, &cirrus_memory) == HAL_OK)
-			cirrus_aperture =
-			    (volatile uint8_t *)cirrus_memory.vaddr;
-		else
+		if (drv_pci_device_claim_bar(cirrus_device, 0) == 0 &&
+		    drv_pci_device_map_bar_region(cirrus_device, 0, 0,
+		    4U * 1024U * 1024U,
+		    DRV_PCI_MAP_READ | DRV_PCI_MAP_WRITE | DRV_PCI_MAP_NOCACHE,
+		    &cirrus_mapping) == 0)
+			cirrus_aperture = (volatile uint8_t *)cirrus_mapping.address;
+		else {
+			drv_pci_device_release_bar(cirrus_device, 0);
 			cirrus_present = 0;
+		}
 	}
 	if (!cirrus_present)
 		hal_printf("graphics: PCI Cirrus absent; VGA fallback ready\n");
@@ -620,6 +544,51 @@ static const struct graphics_driver_ops pcat_graphics_ops = {
 	.flush = pcat_graphics_flush,
 	.get_glyph = pcat_graphics_get_glyph,
 };
+
+static int cirrus_attach(struct drv_pci_device *device,
+	const struct drv_pci_id *id)
+{
+	struct drv_pci_address address;
+	struct drv_pci_bar bar;
+	(void)id;
+	cirrus_device = device;
+	cirrus_present = 1;
+	drv_pci_device_address(device, &address);
+	hal_printf("graphics: PCI Cirrus %04x:%04x at %u:%u.%u\n",
+	    drv_pci_device_vendor(device), drv_pci_device_product(device),
+	    address.bus, address.device, address.function);
+	if (drv_pci_device_bar(device, 0, &bar) == 0)
+		hal_printf("graphics: Cirrus BAR0=%08x size=%u KiB\n",
+		    (unsigned)bar.bus_address, (unsigned)(bar.size / 1024U));
+	return 0;
+}
+
+static int cirrus_detach(struct drv_pci_device *device, unsigned flags)
+{
+	(void)flags;
+	if (device != cirrus_device) return 0;
+	if (cirrus_mapping.address != NULL)
+		drv_pci_device_unmap_bar(device, &cirrus_mapping);
+	drv_pci_device_release_bar(device, 0);
+	cirrus_device = NULL; cirrus_present = 0;
+	return 0;
+}
+
+static const struct drv_pci_id cirrus_ids[] = {
+	{ PCI_CIRRUS_VENDOR, DRV_PCI_ANY_ID, DRV_PCI_ANY_ID, DRV_PCI_ANY_ID,
+	  0x030000U, 0xffff00U, 0 }
+};
+
+static struct drv_pci_driver cirrus_driver = {
+	.name = "cirrus-gd54xx", .ids = cirrus_ids,
+	.id_count = sizeof(cirrus_ids) / sizeof(cirrus_ids[0]),
+	.attach = cirrus_attach, .detach = cirrus_detach
+};
+
+int zedbsd_pcat_graphics_driver_register(void)
+{
+	return drv_pci_driver_register(&cirrus_driver);
+}
 
 int
 zedbsd_pcat_graphics_init(void)

@@ -4,6 +4,8 @@
 #include "kern/partition.h"
 #include "kern/mbr-partition.h"
 #include "drivers/pcat-ide.h"
+#include "drivers/pci-pcat.h"
+#include <drivers/pci.h>
 #if CONFIG_DRIVER_NE2000
 #include "drivers/pcat-ne2000.h"
 #endif
@@ -23,6 +25,14 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 	    handoff->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT) return 0;
 	partition_set_scheme(&partition_scheme_mbr);
 	disk_registry_reset();
+	if (drv_pci_init() != 0)
+		hal_printf("pci: core initialization failed\n");
+#if CONFIG_DRIVER_GRAPHICS
+	else if (zedbsd_pcat_graphics_driver_register() != 0)
+		hal_printf("graphics: PCI driver registration failed\n");
+#endif
+	if (drv_pci_pcat_init() != 0)
+		hal_printf("pci: PC/AT host initialization failed\n");
 	(void)zedbsd_ide_pcat_init();
 	for (unsigned slot = 0; slot < 4U && count < capacity; slot++) {
 		struct disk *disk = zedbsd_ide_pcat_bios_unit((uint8_t)(0x80U+slot));

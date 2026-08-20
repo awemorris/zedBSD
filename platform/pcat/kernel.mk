@@ -45,7 +45,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/console-device.o $(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/graphics-device.o \
 	$(BUILD)/src/kern/system-device.o \
-	$(BUILD)/src/kern/pcat/font.o $(BUILD)/drivers/pcat-graphics.o \
+	$(BUILD)/src/kern/pcat/font.o $(BUILD)/src/kern/pcat/vgafont.o \
+	$(BUILD)/drivers/pcat-graphics.o \
 	$(BUILD)/src/kern/init.o \
 	$(KERN_NET_OBJS)
 
@@ -61,7 +62,8 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/swap.o \
 	$(BUILD)/src/kern/swap-fat.o $(BUILD)/src/kern/vm-reclaim.o \
 	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/partition.o \
-	$(BUILD)/drivers/loop.o \
+	$(BUILD)/drivers/loop.o $(BUILD)/drivers/dma.o \
+	$(BUILD)/drivers/pci.o $(BUILD)/drivers/pci-pcat.o \
 	$(BUILD)/drivers/pcat-ide.o $(BUILD)/drivers/dp8390.o \
 	$(BUILD)/drivers/pcat-ne2000.o \
 	$(BUILD)/src/kern/mbr-partition.o \
