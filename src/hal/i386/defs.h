@@ -35,7 +35,7 @@
 #define ADDR_INIT_STACK		(0x00003000)	/* Startup Stack */
 #define ADDR_TEMP_PPAGE_MAP	(0x00004000)	/* pmem.c: work area */
 #define ADDR_INIT_PDT		(0x00005000)	/* Initial PDT */
-#define ADDR_FREE_TOP		(0x00006000)	/* Free Top (<1MB)  */
+#define ADDR_FREE_TOP		(0x00007000)	/* includes AP trampoline */
 #define ADDR_INIT_PT		(0x00020000)	/* Initial PT */
 #define SIZE_INIT_STACK		(0x1000)	/* Startup Stack Size */
 
@@ -65,6 +65,8 @@
 #define INT_GPE			(0x0d)
 #define INT_PAGEFAULT		(0x0e)
 #define INT_SYSCALL		(0xc2)
+#define INT_CPU_NOTIFY		(0xd0)
+#define INT_CPU_PANIC		(0xd1)
 #define INT_IRQ_BASE		(0xe0)
 #define INT_UNDEF		(0xffffffff)
 

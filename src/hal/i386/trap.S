@@ -204,6 +204,15 @@ irq_15:
 	movl $(INT_IRQ_BASE+15), -8(%esp)
 	jmp general_int_handler
 
+.global EXT_C(_asm_cpu_notify_handler)
+EXT_C(_asm_cpu_notify_handler):
+	movl $(INT_CPU_NOTIFY), -8(%esp)
+	jmp general_int_handler
+.global EXT_C(_asm_cpu_panic_handler)
+EXT_C(_asm_cpu_panic_handler):
+	movl $(INT_CPU_PANIC), -8(%esp)
+	jmp general_int_handler
+
 /*
  * "syscall" Handler
  */

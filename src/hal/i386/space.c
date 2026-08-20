@@ -7,7 +7,8 @@
 #include <hal/hal.h>
 #include "space.h"
 
-static hal_space_t current_space;
+static hal_space_t current_spaces[HAL_CPU_MAX];
+#define current_space current_spaces[hal_cpu_current()]
 static uint32 system_cr3;
 static int next_space_id;
 static uint32 space_count;
@@ -38,6 +39,13 @@ i386_space_init(void)
 	current_space = HAL_SPACE_SYS;
 	next_space_id = 1;
 	space_count = page_table_count = 0;
+}
+
+void
+i386_space_init_secondary(void)
+{
+	current_space = HAL_SPACE_SYS;
+	asm_load_cr3(system_cr3);
 }
 
 static struct i386_page_table *

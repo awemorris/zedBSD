@@ -11,6 +11,7 @@
 #include "irq.h"
 #include "asm.h"
 #include "pic.h"
+#include "interrupt-controller.h"
 #include <errno.h>
 
 static hal_syscall_handler_t syscall_handler;
@@ -44,6 +45,12 @@ void i386_int_init(void)
 }
 
 void
+i386_int_load(void)
+{
+	load_idt();
+}
+
+void
 hal_syscall_set_handler(hal_syscall_handler_t handler)
 {
 	syscall_handler = handler;
@@ -71,7 +78,7 @@ void int_handler(struct interrupt_frame *fp)
 		/* ソフトウェアによるINT命令である場合、例外0Dとして処理する */
 
 		int irq_num = int_num - INT_IRQ_BASE;
-		int in_service = pic_get_irq_in_service();
+		int in_service = i386_interrupt_validate(irq_num);
 
 		if(in_service == -1) {
 			is_handled = 1;
@@ -104,6 +111,13 @@ void int_handler(struct interrupt_frame *fp)
 		kernel_user_return_handler();
 		i386_task_leave_user_frame();
 		is_handled = 1;
+	}
+	else if (int_num == INT_CPU_NOTIFY) {
+		kernel_cpu_notify_handler(hal_cpu_current(), IRQ_MAX + 2U);
+		is_handled = 1;
+	}
+	else if (int_num == INT_CPU_PANIC) {
+		hal_cpu_park();
 	}
 	else if(int_num >= 0 && int_num <= 0x1f) {
 		handle_fault(fp);
@@ -140,6 +154,8 @@ static void create_idt()
 
 	/* システムコールハンドラをセットする */
 	set_idt_entry(INT_SYSCALL, 3, _asm_syscall_int_handler);
+	set_idt_entry(INT_CPU_NOTIFY, 0, _asm_cpu_notify_handler);
+	set_idt_entry(INT_CPU_PANIC, 0, _asm_cpu_panic_handler);
 }
 
 /* IDTのエントリをセットする */

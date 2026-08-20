@@ -44,6 +44,7 @@ struct task_info {
 };
 
 void i386_task_init(void);
+void i386_task_init_secondary(hal_cpu_id_t, uintptr_t);
 void asm_task_entrypoint(void);
 void asm_task_dispatch(struct task_resume_frame **save,
 			struct task_resume_frame **load);

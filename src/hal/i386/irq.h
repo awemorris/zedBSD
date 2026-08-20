@@ -23,8 +23,8 @@ struct irq_service_info {
 	hal_task_t waiter;
 	hal_irq_ack_t acknowledge;
 	unsigned pending;
-	unsigned in_flight;
-	unsigned in_handler;
+	unsigned in_flight[HAL_CPU_MAX];
+	unsigned in_handler[HAL_CPU_MAX];
 	struct hal_cpu_mask requested;
 };
 

@@ -43,6 +43,7 @@
 NUM_HIGH_PDE   = 32		/* 32 * 4MB = 128MB */
 NUM_PTE_TOTAL  = 32 * 1024      /* 128MB / 4KB */
 NUM_APERTURE_PDE = 4		/* 16MB at 0xf0000000 */
+APIC_PDE = 1019			/* 0xfec00000-0xfeffffff */
 PDE_SYS = PTE_PRESENT | PTE_WRITE
 PTE_SYS = PTE_PRESENT | PTE_WRITE
 PTE_APERTURE = PTE_PRESENT | PTE_WRITE | PTE_NOCACHE
@@ -232,6 +233,18 @@ init_paging:
 	addl    $4, %edi
 	addl    $0x1000, %eax
 	loop    .L_fill_aperture_pde
+
+	/* Map the architectural LAPIC and I/O APIC MMIO window uncached. */
+	movl    $(apic_pts - SYS_START), %edi
+	movl    $(0xfec00000 + PTE_APERTURE), %eax
+	movl    $1024, %ecx
+  .L_fill_apic_pte:
+	stosl
+	addl    $0x1000, %eax
+	loop    .L_fill_apic_pte
+	movl    $(initial_pdt - SYS_START + APIC_PDE * 4), %edi
+	movl    $(apic_pts - SYS_START + PDE_SYS), %eax
+	movl    %eax, (%edi)
 
 	/*
 	* Load CR3 with the physical address of PDT.
@@ -599,6 +612,8 @@ initial_pts:
 	.space NUM_HIGH_PDE * 4096
 aperture_pts:
 	.space NUM_APERTURE_PDE * 4096
+apic_pts:
+	.space 4096
 
 	.balign 16
 __kernel_stack:

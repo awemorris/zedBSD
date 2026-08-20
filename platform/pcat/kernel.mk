@@ -7,12 +7,14 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
 	-Iinclude -Iinclude/uapi -Isrc -Isrc/hal/i386 -Ilibc/include \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON
-HAL_PCAT_SOURCES := src/hal/cpu-up.c src/hal/x86/rtc.c src/hal/i386/lib.c src/hal/i386/irq.c \
+HAL_PCAT_SOURCES := src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/x86/rtc.c src/hal/i386/lib.c src/hal/i386/irq.c \
+	src/hal/i386/mps.c src/hal/i386/acpi.c src/hal/i386/lapic.c \
+	src/hal/i386/ioapic.c src/hal/i386/interrupt-controller.c \
 	src/hal/i386/page.c src/hal/i386/space.c src/hal/i386/int.c \
 	src/hal/i386/cmain.c src/hal/i386/task.c \
 	src/hal/i386/bsp-pcat/boot.c src/hal/i386/bsp-pcat/cons.c \
-	src/hal/i386/bsp-pcat/pic.c src/hal/i386/bsp-pcat/clock.c
-HAL_PCAT_ASM := src/hal/i386/locore.S src/hal/i386/trap.S \
+	src/hal/i386/bsp-pcat/pic.c src/hal/i386/bsp-pcat/pit.c
+HAL_PCAT_ASM := src/hal/i386/locore.S src/hal/i386/ap-trampoline.S src/hal/i386/trap.S \
 	src/hal/i386/dispatch.S
 HAL_PCAT_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(HAL_PCAT_SOURCES)) \
 	$(patsubst %.S,$(BUILD)/%.o,$(HAL_PCAT_ASM))

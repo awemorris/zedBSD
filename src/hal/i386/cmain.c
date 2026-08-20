@@ -7,6 +7,7 @@
 #include "asm.h"
 #include "space.h"
 #include "bsp.h"
+#include "interrupt-controller.h"
 
 void i386_page_init(void);
 void i386_int_init(void);
@@ -35,6 +36,7 @@ cmain(const void *raw_boot_info)
 	i386_int_init();
 	irq_init();
 	bsp_timer_init();
+	(void)i386_interrupt_select();
 
 	handoff = bsp_kernel_handoff(raw_boot_info);
 	kernel_entry(handoff);

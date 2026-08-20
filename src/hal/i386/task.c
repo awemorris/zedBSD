@@ -9,11 +9,13 @@
 #include "task.h"
 #include "asm.h"
 #include "int.h"
+#include "percpu.h"
 
 extern uint32 tss_area[26];
 
 static struct task_info *task_list;
-static struct task_info *running_task;
+static struct task_info *running_tasks[HAL_CPU_MAX];
+#define running_task running_tasks[hal_cpu_current()]
 static uint32 task_count;
 static size_t task_stack_bytes;
 
@@ -51,9 +53,7 @@ i386_task_init(void)
 
 	if (running_task != NULL)
 		HAL_FATAL("hal_task_init called twice");
-	/* Preserve the TSS descriptor installed by locore; initialize its body. */
-	hal_memset(tss_area, 0, 104U);
-	tss_area[2] = SEG_SYS_DATA;
+	i386_percpu_init(0, (uintptr_t)asm_get_esp());
 	task = hal_malloc(sizeof(*task));
 	if (task == NULL)
 		HAL_FATAL("initial HAL task allocation failed");
@@ -61,6 +61,22 @@ i386_task_init(void)
 	task->space = HAL_SPACE_SYS;
 	task->run_cpu = 0;
 	tasklist_add(task);
+	running_task = task;
+}
+
+void
+i386_task_init_secondary(hal_cpu_id_t cpu, uintptr_t stack)
+{
+	struct task_info *task;
+	if (cpu == 0 || cpu >= hal_cpu_count() || running_task != NULL)
+		HAL_FATAL("invalid secondary HAL task initialization");
+	task = hal_malloc(sizeof(*task));
+	if (task == NULL)
+		HAL_FATAL("secondary HAL task allocation failed");
+	hal_memset(task, 0, sizeof(*task));
+	task->space = HAL_SPACE_SYS;
+	task->run_cpu = (int)cpu;
+	task->sys_stack = (void *)(stack - SYS_STACK_SIZE);
 	running_task = task;
 }
 
@@ -275,11 +291,12 @@ hal_task_context_switch(hal_task_t handle)
 	if (to->run_cpu >= 0)
 		HAL_FATAL("i386 HAL task already running");
 	from->run_cpu = -1;
-	to->run_cpu = 0;
+	to->run_cpu = (int)hal_cpu_current();
 	running_task = to;
 	hal_page_switch_space(to->space);
 	if (to->sys_stack != NULL)
-		tss_area[1] = (uint32)to->sys_stack + SYS_STACK_SIZE;
+		i386_percpu_set_kernel_stack(hal_cpu_current(),
+		    (uint32)to->sys_stack + SYS_STACK_SIZE);
 	asm_fnsave(from->fpregs);
 	if (to->resume_esp->ret_eip != (uint32)asm_task_entrypoint)
 		asm_frstor(to->fpregs);
@@ -329,7 +346,7 @@ int
 hal_task_transfer(hal_task_t handle, hal_cpu_id_t target_cpu)
 {
 	struct task_info *task = handle;
-	if (task == NULL || target_cpu != 0)
+	if (task == NULL || target_cpu >= hal_cpu_count())
 		return HAL_ERR_INVALID;
 	if (task->run_cpu >= 0)
 		return HAL_ERR_BUSY;

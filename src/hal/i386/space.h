@@ -29,5 +29,6 @@ struct i386_space {
 };
 
 void i386_space_init(void);
+void i386_space_init_secondary(void);
 
 #endif

@@ -18,14 +18,16 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-Iinclude -Iinclude/uapi -Isrc -Isrc/hal/i386 -Ilibc/include \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PC98
 HAL_PC98_SOURCES := \
-	src/hal/cpu-up.c src/hal/i386/lib.c src/hal/i386/irq.c src/hal/i386/page.c \
+	src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/i386/lib.c src/hal/i386/irq.c src/hal/i386/page.c \
+	src/hal/i386/mps.c src/hal/i386/acpi.c src/hal/i386/lapic.c \
+	src/hal/i386/ioapic.c src/hal/i386/interrupt-controller.c \
 	src/hal/i386/space.c src/hal/i386/int.c src/hal/i386/cmain.c \
 	src/hal/i386/task.c \
 	src/hal/i386/bsp-pc98/boot.c \
 	src/hal/i386/bsp-pc98/cons.c src/hal/i386/bsp-pc98/pic.c \
-	src/hal/i386/bsp-pc98/clock.c src/hal/i386/bsp-pc98/display.c \
+	src/hal/i386/bsp-pc98/pit.c src/hal/i386/bsp-pc98/display.c \
 	src/hal/i386/bsp-pc98/jisx0208.c
-HAL_PC98_ASM := src/hal/i386/locore.S src/hal/i386/trap.S \
+HAL_PC98_ASM := src/hal/i386/locore.S src/hal/i386/ap-trampoline.S src/hal/i386/trap.S \
 	src/hal/i386/dispatch.S
 HAL_PC98_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(HAL_PC98_SOURCES)) \
 	$(patsubst %.S,$(BUILD)/%.o,$(HAL_PC98_ASM))

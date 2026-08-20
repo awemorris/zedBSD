@@ -43,6 +43,7 @@ struct interrupt_frame {
  */
 void int_init(void);
 void int_handler(struct interrupt_frame *fp);	/* called from trap.s */
+void i386_int_load(void);
 
 /*
  * trap.S
@@ -50,6 +51,8 @@ void int_handler(struct interrupt_frame *fp);	/* called from trap.s */
 extern void *_asm_fault_int_handler_tbl[32];
 extern void *_asm_irq_int_handler_tbl[16];
 extern void *_asm_syscall_int_handler();
+extern void *_asm_cpu_notify_handler();
+extern void *_asm_cpu_panic_handler();
 extern void *_asm_undefined_int_handler();
 
 #endif
