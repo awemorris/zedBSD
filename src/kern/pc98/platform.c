@@ -73,7 +73,13 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 void
 kern_platform_refresh_devices(const struct zedbsd_device *devices, size_t count)
 {
-	(void)zedbsd_ide_pc98_init(devices, (unsigned)count);
+	/*
+	 * The polled PC-98 IDE driver is fully initialized by
+	 * kern_platform_init().  Reinitializing it here would register the same
+	 * physical units a second time after interrupts are enabled.
+	 */
+	(void)devices;
+	(void)count;
 }
 
 struct disk *
