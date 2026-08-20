@@ -126,7 +126,7 @@ $(BUILD)/bootloader/partition-pbr.elf: $(BUILD)/bootloader/partition-pbr.o
 	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
 $(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
 	$(OBJCOPY) -O binary -j .text $< $@
-	@test $$(stat -c%s $@) -eq 1024
+	@test $$(stat -c%s $@) -eq 2048
 
 $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \

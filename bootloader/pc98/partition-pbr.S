@@ -16,7 +16,7 @@
 #include "bootstrap.inc"
 
 	.set LOAD_SEG,          0x0ffc   /* MZ header ends at physical 0x10000. */
-	.set TABLE_SEG,         0x0800
+	.set TABLE_SEG,         0x0a00
 	.set STACK_SEG,         0x9000
 
 _start:
@@ -49,14 +49,25 @@ pbr_start:
 	movb	%al, boot_drive
 	call	bios_sense
 	jc	boot_failure
-	/* Firmware may load only 512 bytes; fetch the rest of the 1 KiB PBR. */
+	/* Firmware may load only 512 bytes; fetch the remaining reserved Stage 3
+	 * sectors.  zedBSD formats at least four physical reserved sectors. */
 	movl	partition_lba, %eax
-	incl	%eax
+	cmpw	$0, 0x0016
+	jne	1f
+	addl	$4, %eax             /* FAT32 FSInfo occupies logical sector 1. */
+	jmp	2f
+1:	incl	%eax
+2:
 	movw	%cs, %dx
 	movw	%dx, %es
 	movw	$0x0200, %bp
+	movw	$3, %cx
+3:
 	call	bios_read
 	jc	boot_failure
+	incl	%eax
+	addw	$512, %bp
+	loop	3b
 	pushw	%cs
 	pushw	$pbr_continue
 	lret
@@ -149,23 +160,36 @@ disk_flags:      .byte 0
 	.org	0x01fe
 	.word	0xaa55
 
-	/* Second half of the one-logical-sector (1024-byte) PBR. */
+	/* Reserved-sector continuation of Stage 3. */
 	.org	0x0200
 pbr_continue:
 	call	write_handoff
 	cmpw	$1024, 0x000b
+	je	1f
+	cmpw	$512, 0x000b
 	jne	boot_failure
+	movb	$1, sector_scale
+	cmpw	$2, 0x000e
+	jb	boot_failure
+	jmp	2f
+1:	movb	$2, sector_scale
 	cmpw	$1, 0x000e
 	jb	boot_failure
+2:
 
-	/* Convert the 1024-byte FAT BPB layout to physical 512-byte LBAs. */
+	/* Convert the BPB layout to physical 512-byte LBAs. */
 	movl	partition_lba, %eax
 	movzwl	0x000e, %ecx
-	shll	$1, %ecx
+	movzbl	sector_scale, %edx
+	imull	%edx, %ecx
 	addl	%ecx, %eax
+	movl	%eax, fat_lba
 	movzbl	0x0010, %ecx
 	movzwl	0x0016, %edx
-	shll	$1, %edx
+	testl	%edx, %edx
+	jz	fat32_layout
+	movzbl	sector_scale, %ebx
+	imull	%ebx, %edx
 	imull	%edx, %ecx
 	addl	%ecx, %eax
 	movl	%eax, root_lba
@@ -177,13 +201,39 @@ pbr_continue:
 	movw	%cx, root_sectors
 	addl	%ecx, %eax
 	movl	%eax, data_lba
+	jmp	root_layout_ready
+
+fat32_layout:
+	movl	0x0024, %edx
+	testl	%edx, %edx
+	jz	boot_failure
+	movzbl	sector_scale, %ebx
+	imull	%ebx, %edx
+	imull	%edx, %ecx
+	addl	%ecx, %eax
+	movl	%eax, data_lba
+	movl	0x002c, %edx
+	andl	$0x0fffffff, %edx
+	cmpl	$2, %edx
+	jb	boot_failure
+	movl	%edx, root_cluster
+	subl	$2, %edx
+	movzbl	0x000d, %ecx
+	movzbl	sector_scale, %ebx
+	imull	%ebx, %ecx
+	imull	%ecx, %edx
+	addl	%edx, %eax
+	movl	%eax, root_lba
+	movw	%cx, root_sectors
+	movb	$1, fat32_volume
+root_layout_ready:
 
 	/* Locate BOOTZBSD.EXE in the FAT16 root directory. */
 	movl	root_lba, %eax
 	movw	root_sectors, %dx
 root_sector_loop:
 	testw	%dx, %dx
-	jz	boot_failure
+	jz	root_cluster_next
 	movw	$TABLE_SEG, %cx
 	movw	%cx, %es
 	xorw	%bp, %bp
@@ -213,13 +263,61 @@ next_root_entry:
 	decw	%dx
 	jmp	root_sector_loop
 
+root_cluster_next:
+	cmpb	$0, fat32_volume
+	je	boot_failure
+	movl	root_cluster, %eax
+	call	pbr_fat32_next
+	cmpl	$0x0ffffff8, %eax
+	jae	boot_failure
+	movl	%eax, root_cluster
+	subl	$2, %eax
+	movzbl	0x000d, %ecx
+	movzbl	sector_scale, %edx
+	imull	%edx, %ecx
+	imull	%ecx, %eax
+	addl	data_lba, %eax
+	movw	%cx, %dx
+	jmp	root_sector_loop
+
+pbr_fat32_next:
+	pushl	%ebx
+	pushl	%ecx
+	pushl	%edx
+	shll	$2, %eax
+	movl	%eax, %ebx
+	andl	$511, %ebx
+	movw	%bx, fat_entry_offset
+	shrl	$9, %eax
+	addl	fat_lba, %eax
+	movw	$TABLE_SEG, %cx
+	movw	%cx, %es
+	xorw	%bp, %bp
+	call	bios_read
+	jc	boot_failure
+	movzwl	fat_entry_offset, %ebx
+	movl	%es:(%bx), %eax
+	andl	$0x0fffffff, %eax
+	popl	%edx
+	popl	%ecx
+	popl	%ebx
+	ret
+
 io_found:
 	movzwl	%es:0x1a(%di), %eax
+	cmpb	$0, fat32_volume
+	je	1f
+	movzwl	%es:0x14(%di), %edx
+	shll	$16, %edx
+	orl	%edx, %eax
+	andl	$0x0fffffff, %eax
+1:
 	cmpl	$2, %eax
 	jb	boot_failure
 	subl	$2, %eax
 	movzbl	0x000d, %ecx
-	shll	$1, %ecx
+	movzbl	sector_scale, %edx
+	imull	%edx, %ecx
 	imull	%ecx, %eax
 	addl	data_lba, %eax
 	movl	%es:0x1c(%di), %ecx
@@ -278,8 +376,13 @@ mz_entry_off:    .word 0
 mz_entry_seg:    .word 0
 root_lba:        .long 0
 data_lba:        .long 0
+fat_lba:         .long 0
+root_cluster:    .long 0
+fat_entry_offset: .word 0
 root_entries:    .word 0
 root_sectors:    .word 0
+sector_scale:    .byte 2
+fat32_volume:    .byte 0
 
-	.org	0x03fe
+	.org	0x07fe
 	.word	0xaa55

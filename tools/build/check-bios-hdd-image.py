@@ -147,8 +147,24 @@ def check(args: argparse.Namespace) -> None:
         expected_sector = 1024 if args.machine == "pc98" else 512
         if struct.unpack_from("<H", bpb, 11)[0] != expected_sector:
             fail(f"FAT bytes/sector is not {expected_sector}")
-        if struct.unpack_from("<H", bpb, 22)[0] == 0:
-            fail("volume is not FAT12/16")
+        if (struct.unpack_from("<H", bpb, 22)[0] == 0 and
+                struct.unpack_from("<I", bpb, 36)[0] == 0):
+            fail("volume has no FAT12/16/32 allocation table")
+        bps = struct.unpack_from("<H", bpb, 11)[0]
+        spc = bpb[13]
+        reserved = struct.unpack_from("<H", bpb, 14)[0]
+        fats = bpb[16]
+        roots = struct.unpack_from("<H", bpb, 17)[0]
+        total = (struct.unpack_from("<H", bpb, 19)[0] or
+                 struct.unpack_from("<I", bpb, 32)[0])
+        fat_size = (struct.unpack_from("<H", bpb, 22)[0] or
+                    struct.unpack_from("<I", bpb, 36)[0])
+        root_sectors = (roots * 32 + bps - 1) // bps
+        clusters = (total - reserved - fats * fat_size - root_sectors) // spc
+        actual_fat = ("fat12" if clusters < 4085 else
+                      "fat16" if clusters < 65525 else "fat32")
+        if args.fat_type != "auto" and actual_fat != args.fat_type:
+            fail(f"requested {args.fat_type}, formatted {actual_fat}")
 
     expected_files = (("BOOTZBSD.EXE", args.bootzbsd, "BOOTZBSD.EXE"),
                       ("VMUNIX", args.kernel, "VMUNIX"),
@@ -248,6 +264,8 @@ def main() -> None:
     parser.add_argument("--data-image", type=Path)
     parser.add_argument("--swapfile", type=Path)
     parser.add_argument("--arch-format", choices=("fat", "ufs"), default="fat")
+    parser.add_argument("--fat-type", choices=("auto", "fat12", "fat16", "fat32"),
+                        default="auto")
     parser.add_argument("--bin-file", action="append", default=[])
     parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("image", type=Path)

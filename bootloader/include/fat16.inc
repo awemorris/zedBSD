@@ -6,4 +6,9 @@
 .set BPB_TOTAL16,          19
 .set BPB_SECTORS_FAT16,    22
 .set BPB_TOTAL32,          32
+.set BPB_SECTORS_FAT32,    36
+.set BPB_ROOT_CLUSTER32,   44
 
+.set FAT_TYPE_12,          12
+.set FAT_TYPE_16,          16
+.set FAT_TYPE_32,          32

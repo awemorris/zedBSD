@@ -203,36 +203,51 @@ def create(args: argparse.Namespace) -> None:
         if args.machine == "pc98":
             logical_blocks = blocks // 2
             cluster = 1
-            while logical_blocks // cluster >= 65525:
+            while (args.fat_type != "fat32" and
+                   logical_blocks // cluster >= 65525):
                 cluster *= 2
-            run("mformat", "-i", f"{temporary}@@{offset}", "-S", "3",
+            run("mformat", "-i", f"{temporary}@@{offset}", "-S", "3", "-R",
+                "32" if args.fat_type == "fat32" else "4",
+                *(["-F"] if args.fat_type == "fat32" else []),
                 "-c", str(cluster), "-h", str(heads), "-s", "17",
                 "-H", str(start), "-T", str(logical_blocks),
                 "-v", "BOOT", "::")
-            bpb = temporary.read_bytes()[offset:offset + 1024]
+            bpb = temporary.read_bytes()[offset:offset + 2048]
             pbr = bytearray(args.partition_pbr.read_bytes())
-            if len(pbr) != 1024:
-                raise SystemExit("PC-98 partition PBR must be 1024 bytes")
+            if len(pbr) != 2048:
+                raise SystemExit("PC-98 partition PBR must be 2048 bytes")
             pbr[3:0x3e] = bpb[3:0x3e]
             with temporary.open("r+b") as stream:
                 stream.seek(offset)
-                stream.write(pbr)
+                if args.fat_type == "fat32":
+                    stream.write(pbr[:512])
+                    stream.seek(offset + 4 * 512)
+                    stream.write(pbr[512:])
+                else:
+                    stream.write(pbr)
             run("mcopy", "-i", f"{temporary}@@{offset}",
                 str(args.bootzbsd), "::BOOTZBSD.EXE")
             run("mattrib", "-i", f"{temporary}@@{offset}",
                 "+r", "+h", "+s", "::BOOTZBSD.EXE")
         else:
-            run("mformat", "-i", f"{temporary}@@{offset}", "-R", "2",
+            run("mformat", "-i", f"{temporary}@@{offset}", "-R",
+                "32" if args.fat_type == "fat32" else "4",
+                *(["-F"] if args.fat_type == "fat32" else []),
                 "-H", str(start), "-T", str(blocks),
                 "-v", "BOOT", "::")
-            bpb = temporary.read_bytes()[offset:offset + 1024]
+            bpb = temporary.read_bytes()[offset:offset + 2048]
             pbr = bytearray(args.partition_pbr.read_bytes())
-            if len(pbr) != 1024:
-                raise SystemExit("PC/AT partition PBR must be 1024 bytes")
+            if len(pbr) != 2048:
+                raise SystemExit("PC/AT partition PBR must be 2048 bytes")
             pbr[3:0x3e] = bpb[3:0x3e]
             with temporary.open("r+b") as stream:
                 stream.seek(offset)
-                stream.write(pbr)
+                if args.fat_type == "fat32":
+                    stream.write(pbr[:512])
+                    stream.seek(offset + 2 * 512)
+                    stream.write(pbr[512:])
+                else:
+                    stream.write(pbr)
             run("mcopy", "-i", f"{temporary}@@{offset}",
                 str(args.bootzbsd), "::BOOTZBSD.EXE")
             run("mattrib", "-i", f"{temporary}@@{offset}",
@@ -305,6 +320,7 @@ def create(args: argparse.Namespace) -> None:
         run("python3", str(checker), "--machine", args.machine,
             "--kernel", str(args.kernel),
             "--bootzbsd", str(args.bootzbsd),
+            "--fat-type", args.fat_type,
             *( ["--bootx64", str(args.bootx64)] if args.gpt else []),
             *(["--arch-profile", args.arch_profile,
                "--arch-image", str(args.arch_image),
@@ -346,6 +362,8 @@ def main() -> None:
     parser.add_argument("--bin-file", action="append", default=[])
     parser.add_argument("--size-mib", type=int, default=129)
     parser.add_argument("--fat-size-mib", type=int, default=128)
+    parser.add_argument("--fat-type", choices=("auto", "fat12", "fat16", "fat32"),
+                        default="fat16")
     parser.add_argument("--ufs-root", type=Path)
     parser.add_argument("--fragment-kernel", action="store_true")
     parser.add_argument("--force", action="store_true")

@@ -435,7 +435,7 @@ fat16_mount:
 	mov dword ptr [fat_lba], eax
 	movzx eax, word ptr es:[BPB_SECTORS_FAT16]
 	test eax, eax
-	jz fatal_fat
+	jz fat32_mount
 	mov dword ptr [fat_sectors], eax
 	movzx ecx, byte ptr es:[BPB_FAT_COUNT]
 	test ecx, ecx
@@ -455,11 +455,53 @@ fat16_mount:
 	add eax, dword ptr [root_lba]
 	jc fatal_fat
 	mov dword ptr [data_lba], eax
+	/* FAT12 and FAT16 share the fixed-root BPB.  Classify by the Microsoft
+	 * data-cluster thresholds instead of trusting the cosmetic type string. */
+	movzx eax, word ptr es:[BPB_TOTAL16]
+	test eax, eax
+	jnz 1f
+	mov eax, dword ptr es:[BPB_TOTAL32]
+1:	mov edx, dword ptr [data_lba]
+	sub edx, dword ptr [partition_lba]
+	cmp eax, edx
+	jbe fatal_fat
+	sub eax, edx
+	movzx ecx, byte ptr [fat_spc]
+	xor edx, edx
+	div ecx
+	mov byte ptr [fat_type], FAT_TYPE_16
+	cmp eax, 4085
+	jae 2f
+	mov byte ptr [fat_type], FAT_TYPE_12
+2:
+	ret
+
+fat32_mount:
+	mov eax, dword ptr es:[BPB_SECTORS_FAT32]
+	test eax, eax
+	jz fatal_fat
+	mov dword ptr [fat_sectors], eax
+	movzx ecx, byte ptr es:[BPB_FAT_COUNT]
+	test ecx, ecx
+	jz fatal_fat
+	mul ecx
+	add eax, dword ptr [fat_lba]
+	jc fatal_fat
+	mov dword ptr [data_lba], eax
+	mov eax, dword ptr es:[BPB_ROOT_CLUSTER32]
+	and eax, 0x0fffffff
+	cmp eax, 2
+	jb fatal_fat
+	mov dword ptr [root_cluster32], eax
+	mov dword ptr [root_entries], 0
+	mov byte ptr [fat_type], FAT_TYPE_32
 	ret
 
 fat16_find_vmunix:
 	mov byte ptr [file_cache_valid], 0
 	mov byte ptr [fat_cache_valid], 0
+	cmp byte ptr [fat_type], FAT_TYPE_32
+	je fat32_find_vmunix
 	mov eax, dword ptr [root_lba]
 	mov dword ptr [scan_lba], eax
 	mov eax, dword ptr [root_entries]
@@ -514,8 +556,77 @@ fat_root_next:
 	inc dword ptr [scan_lba]
 	jmp fat_root_sector
 
+fat32_find_vmunix:
+	mov eax, dword ptr [root_cluster32]
+	mov dword ptr [dir_cluster32], eax
+fat32_root_cluster:
+	mov byte ptr [dir_sector], 0
+fat32_root_sector:
+	mov eax, dword ptr [dir_cluster32]
+	sub eax, 2
+	movzx ecx, byte ptr [fat_spc]
+	mul ecx
+	add eax, dword ptr [data_lba]
+	movzx edx, byte ptr [dir_sector]
+	add eax, edx
+	call disk_read_one
+	xor bx, bx
+	mov cx, 16
+fat32_root_entry:
+	mov al, byte ptr es:[bx]
+	test al, al
+	jz fatal_vmunix
+	cmp al, 0xe5
+	je fat32_root_next
+	cmp byte ptr es:[bx + 11], 0x0f
+	je fat32_root_next
+	push bx
+	push cx
+	mov si, word ptr [vmunix_name_pointer]
+	mov di, bx
+	mov cx, 11
+fat32_name_loop:
+	mov al, byte ptr [si]
+	cmp al, byte ptr es:[di]
+	jne fat32_name_no
+	inc si
+	inc di
+	loop fat32_name_loop
+	pop cx
+	pop bx
+	movzx eax, word ptr es:[bx + 20]
+	shl eax, 16
+	mov ax, word ptr es:[bx + 26]
+	and eax, 0x0fffffff
+	cmp eax, 2
+	jb fatal_vmunix
+	mov dword ptr [file_first_cluster32], eax
+	mov eax, dword ptr es:[bx + 28]
+	test eax, eax
+	jz fatal_vmunix
+	mov dword ptr [file_size], eax
+	ret
+fat32_name_no:
+	pop cx
+	pop bx
+fat32_root_next:
+	add bx, 32
+	loop fat32_root_entry
+	inc byte ptr [dir_sector]
+	mov al, byte ptr [dir_sector]
+	cmp al, byte ptr [fat_spc]
+	jb fat32_root_sector
+	mov eax, dword ptr [dir_cluster32]
+	call fat32_next_cluster
+	cmp eax, 0x0ffffff8
+	jae fatal_vmunix
+	mov dword ptr [dir_cluster32], eax
+	jmp fat32_root_cluster
+
 /* EAX=file-relative sector; returns it in ES:0000. */
 fat16_read_file_sector:
+	cmp byte ptr [fat_type], FAT_TYPE_32
+	je fat32_read_file_sector
 	mov dword ptr [desired_sector], eax
 fat_file_next_request:
 	cmp byte ptr [file_cache_valid], 0
@@ -594,10 +705,99 @@ fat_cluster_cached:
 fat_file_read_done:
 	ret
 
+fat32_read_file_sector:
+	mov dword ptr [desired_sector], eax
+	cmp byte ptr [file_cache_valid], 0
+	je fat32_file_from_start
+	mov edx, dword ptr [cached_file_sector]
+	inc edx
+	cmp eax, edx
+	jne fat32_file_from_start
+	mov eax, dword ptr [cached_cluster32]
+	mov bl, byte ptr [cached_sector_in_cluster]
+	inc bl
+	cmp bl, byte ptr [fat_spc]
+	jb fat32_file_cache_ready
+	xor bl, bl
+	call fat32_next_cluster
+	cmp eax, 0x0ffffff8
+	jae fatal_fat_chain
+fat32_file_cache_ready:
+	mov dword ptr [cached_cluster32], eax
+	mov byte ptr [cached_sector_in_cluster], bl
+	movzx edx, bl
+	mov dword ptr [sector_in_cluster], edx
+	mov edx, dword ptr [desired_sector]
+	mov dword ptr [cached_file_sector], edx
+	jmp fat32_file_cluster_cached
+fat32_file_from_start:
+	mov eax, dword ptr [desired_sector]
+	movzx ecx, byte ptr [fat_spc]
+	xor edx, edx
+	div ecx
+	mov dword ptr [cluster_steps], eax
+	mov dword ptr [sector_in_cluster], edx
+	mov eax, dword ptr [file_first_cluster32]
+fat32_file_walk:
+	cmp dword ptr [cluster_steps], 0
+	je fat32_file_cluster_ready
+	call fat32_next_cluster
+	cmp eax, 0x0ffffff8
+	jae fatal_fat_chain
+	dec dword ptr [cluster_steps]
+	jmp fat32_file_walk
+fat32_file_cluster_ready:
+	cmp eax, 2
+	jb fatal_fat_chain
+	mov dword ptr [cached_cluster32], eax
+	mov edx, dword ptr [sector_in_cluster]
+	mov byte ptr [cached_sector_in_cluster], dl
+	mov edx, dword ptr [desired_sector]
+	mov dword ptr [cached_file_sector], edx
+	mov byte ptr [file_cache_valid], 1
+fat32_file_cluster_cached:
+	sub eax, 2
+	movzx ecx, byte ptr [fat_spc]
+	mul ecx
+	add eax, dword ptr [data_lba]
+	add eax, dword ptr [sector_in_cluster]
+	jc fatal_fat_chain
+	call disk_read_one
+	mov eax, dword ptr [desired_sector]
+	ret
+
+fat32_next_cluster:
+	push ebx
+	push edx
+	mov edx, eax
+	shl eax, 2
+	mov ebx, eax
+	and ebx, 511
+	mov word ptr [fat_offset32], bx
+	shr eax, 9
+	add eax, dword ptr [fat_lba]
+	call disk_read_one
+	movzx ebx, word ptr [fat_offset32]
+	mov eax, dword ptr es:[bx]
+	and eax, 0x0fffffff
+	pop edx
+	pop ebx
+	ret
+
 /* AX=current cluster, AX=next cluster. */
 fat16_next_cluster:
+	mov byte ptr [fat_cluster_odd], al
+	and byte ptr [fat_cluster_odd], 1
 	movzx eax, ax
+	cmp byte ptr [fat_type], FAT_TYPE_12
+	je fat12_next_cluster
 	shl eax, 1
+	jmp fat_entry_offset_ready
+fat12_next_cluster:
+	mov edx, eax
+	shr edx, 1
+	add eax, edx
+fat_entry_offset_ready:
 	mov dx, ax
 	and dx, 511
 	mov word ptr [fat_offset], dx
@@ -621,10 +821,34 @@ fat_cache_copy:
 	add di, 4
 	dec ecx
 	jnz fat_cache_copy
+	mov eax, dword ptr [fat_cache_lba]
+	inc eax
+	call disk_read_one
+	xor bx, bx
+	mov di, offset fat_cache + 512
+	mov ecx, 512 / 4
+fat_cache_copy_second:
+	mov eax, dword ptr es:[bx]
+	mov dword ptr [di], eax
+	add bx, 4
+	add di, 4
+	dec ecx
+	jnz fat_cache_copy_second
 	mov byte ptr [fat_cache_valid], 1
 fat_cache_ready:
 	movzx ebx, word ptr [fat_offset]
 	mov ax, word ptr [bx + fat_cache]
+	cmp byte ptr [fat_type], FAT_TYPE_12
+	jne fat_next_value_ready
+	cmp byte ptr [fat_cluster_odd], 0
+	jz 1f
+	shr ax, 4
+	jmp 2f
+1:	and ax, 0x0fff
+2:	cmp ax, 0x0ff8
+	jb fat_next_value_ready
+	mov ax, 0xfff8
+fat_next_value_ready:
 	cmp ax, 2
 	jb fatal_fat_chain
 	ret
@@ -926,6 +1150,9 @@ boot_drive:       .byte 0
 partition_index:  .byte 0
 elf_class:        .byte 0
 fat_spc:          .byte 0
+fat_type:         .byte FAT_TYPE_16
+fat_cluster_odd:  .byte 0
+dir_sector:       .byte 0
 disk_retry:       .byte 0
 file_cache_valid: .byte 0
 fat_cache_valid:  .byte 0
@@ -935,11 +1162,16 @@ cached_sector_in_cluster: .byte 0
 .balign 2
 file_first_cluster: .word 0
 fat_offset:         .word 0
+fat_offset32:       .word 0
 ph_load_count:      .word 0
 ph_cursor:          .word 0
 ph_remaining:       .word 0
 .balign 4
 partition_lba:      .long 0
+root_cluster32:     .long 0
+dir_cluster32:      .long 0
+file_first_cluster32: .long 0
+cached_cluster32:   .long 0
 partition_blocks:   .long 0
 fat_lba:            .long 0
 fat_sectors:        .long 0
@@ -981,7 +1213,7 @@ long_handoff:
 	.long 0                         /* extended memory, KiB */
 	.long 0
 
-fat_cache: .space 512
+fat_cache: .space 1024
 
 .balign 4
 stage2_end:

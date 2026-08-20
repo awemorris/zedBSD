@@ -6,7 +6,7 @@
 .global _start
 
 .set LOAD_SEG,  0x0ffc             /* MZ header ends at physical 0x10000. */
-.set TABLE_SEG, 0x0800
+.set TABLE_SEG, 0x0a00
 
 _start:
 	jmp pbr_start
@@ -26,12 +26,22 @@ pbr_rebased:
 	sti
 	mov byte ptr [boot_drive], dl
 
-	/* Fetch the second reserved sector containing the remainder of stage 3. */
+	/* Fetch the remaining three reserved sectors containing Stage 3. */
 	mov eax, dword ptr [0x001c]
-	inc eax
+	cmp word ptr [0x0016], 0
+	jne 1f
+	add eax, 2                    /* Keep FAT32 FSInfo in reserved sector 1. */
+	jmp 2f
+1:	inc eax
+2:
 	mov word ptr [dap_offset], 0x0200
 	mov word ptr [dap_segment], 0x07c0
+	mov cx, 3
+3:
 	call read_one
+	inc eax
+	add word ptr [dap_offset], 512
+	loop 3b
 	push cs
 	push offset pbr_continue
 	retf
@@ -91,8 +101,11 @@ pbr_continue:
 	mov eax, dword ptr [0x001c]
 	movzx ecx, word ptr [0x000e]
 	add eax, ecx
+	mov dword ptr [fat_lba], eax
 	movzx ecx, byte ptr [0x0010]
 	movzx edx, word ptr [0x0016]
+	test edx, edx
+	jz fat32_layout
 	imul ecx, edx
 	add eax, ecx
 	mov dword ptr [root_lba], eax
@@ -103,12 +116,35 @@ pbr_continue:
 	mov word ptr [root_sectors], cx
 	add eax, ecx
 	mov dword ptr [data_lba], eax
+	jmp root_layout_ready
+
+fat32_layout:
+	mov edx, dword ptr [0x0024]
+	test edx, edx
+	jz fatal
+	imul ecx, edx
+	add eax, ecx
+	mov dword ptr [data_lba], eax
+	mov edx, dword ptr [0x002c]
+	and edx, 0x0fffffff
+	cmp edx, 2
+	jb fatal
+	mov dword ptr [root_cluster], edx
+	sub edx, 2
+	movzx ecx, byte ptr [0x000d]
+	imul edx, ecx
+	add eax, edx
+	mov dword ptr [root_lba], eax
+	movzx ecx, byte ptr [0x000d]
+	mov word ptr [root_sectors], cx
+	mov byte ptr [fat32_volume], 1
+root_layout_ready:
 
 	mov eax, dword ptr [root_lba]
 	mov dx, word ptr [root_sectors]
 root_sector:
 	test dx, dx
-	jz fatal
+	jz root_cluster_next
 	mov word ptr [dap_offset], 0
 	mov word ptr [dap_segment], TABLE_SEG
 	call read_one
@@ -138,8 +174,53 @@ next_entry:
 	dec dx
 	jmp root_sector
 
+root_cluster_next:
+	cmp byte ptr [fat32_volume], 0
+	je fatal
+	mov eax, dword ptr [root_cluster]
+	call pbr_fat32_next
+	cmp eax, 0x0ffffff8
+	jae fatal
+	mov dword ptr [root_cluster], eax
+	sub eax, 2
+	movzx ecx, byte ptr [0x000d]
+	imul eax, ecx
+	add eax, dword ptr [data_lba]
+	movzx edx, byte ptr [0x000d]
+	jmp root_sector
+
+pbr_fat32_next:
+	push ebx
+	push ecx
+	push edx
+	shl eax, 2
+	mov ebx, eax
+	and ebx, 511
+	mov word ptr [fat_entry_offset], bx
+	shr eax, 9
+	add eax, dword ptr [fat_lba]
+	mov word ptr [dap_offset], 0
+	mov word ptr [dap_segment], TABLE_SEG
+	call read_one
+	mov ax, TABLE_SEG
+	mov es, ax
+	movzx ebx, word ptr [fat_entry_offset]
+	mov eax, dword ptr es:[bx]
+	and eax, 0x0fffffff
+	pop edx
+	pop ecx
+	pop ebx
+	ret
+
 loader_found:
 	movzx eax, word ptr es:[di + 26]
+	cmp byte ptr [fat32_volume], 0
+	je 1f
+	movzx edx, word ptr es:[di + 20]
+	shl edx, 16
+	or eax, edx
+	and eax, 0x0fffffff
+1:
 	cmp eax, 2
 	jb fatal
 	sub eax, 2
@@ -178,9 +259,13 @@ load_file:
 loader_name: .ascii "BOOTZBSDEXE"
 root_lba: .long 0
 data_lba: .long 0
+fat_lba: .long 0
+root_cluster: .long 0
+fat_entry_offset: .word 0
 root_sectors: .word 0
 entry_off: .word 0
 entry_seg: .word 0
+fat32_volume: .byte 0
 
-.org 0x03fe
+.org 0x07fe
 	.word 0xaa55
