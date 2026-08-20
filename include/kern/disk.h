@@ -17,6 +17,7 @@
 
 #define DISK_NAME_MAX 16U
 #define DISK_MAX 80U
+#define DISK_IDENTITY_TEXT_MAX 64U
 
 #define DISK_READ_ONLY 0x00000001U
 #define DISK_REMOVABLE 0x00000002U
@@ -72,6 +73,13 @@ struct disk {
 	unsigned d_inflight;
 	unsigned d_opening;
 	unsigned d_closing;
+	unsigned d_identity_valid;
+	uint32_t d_identity_flags;
+	char d_identity_type[16];
+	char d_identity_uuid[DISK_IDENTITY_TEXT_MAX];
+	char d_identity_label[DISK_IDENTITY_TEXT_MAX];
+	char d_identity_partuuid[DISK_IDENTITY_TEXT_MAX];
+	char d_identity_partlabel[DISK_IDENTITY_TEXT_MAX];
 	struct disk *d_next;
 };
 

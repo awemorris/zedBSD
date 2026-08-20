@@ -69,6 +69,7 @@ pc98_scan(const struct partition_scheme *scheme,
 		entry->p_block_count = 0;
 		entry->p_flags = 0;
 		entry->p_label[0] = '\0';
+		entry->p_uuid[0] = '\0';
 		if (p[0] == 0)
 			continue;
 		if (!chs_to_lba(&geometry, p + 4, &entry->p_start_block) ||
@@ -88,6 +89,7 @@ pc98_scan(const struct partition_scheme *scheme,
 			entry->p_label[j] = c;
 		}
 		entry->p_label[j] = '\0';
+		if (j != 0) entry->p_flags |= PARTITION_HAS_LABEL;
 	}
 	return (int)count;
 }

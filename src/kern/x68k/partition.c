@@ -69,6 +69,7 @@ x68k_partition_decode(const uint8_t *boot_area, size_t size,
 		entry->p_data_block = start;
 		entry->p_block_count = 0;
 		entry->p_flags = 0;
+		entry->p_uuid[0] = '\0';
 		for (character = 0; character < 8U && at <
 		    PARTITION_LABEL_MAX - 1U; character++) {
 			uint8_t c = raw[character];
@@ -78,6 +79,7 @@ x68k_partition_decode(const uint8_t *boot_area, size_t size,
 				(char)c : '?';
 		}
 		entry->p_label[at] = '\0';
+		if (at != 0) entry->p_flags |= PARTITION_HAS_LABEL;
 		/* Bit zero marks an unused/disabled entry. */
 		if ((raw[8] & 1U) != 0 || count1024 == 0)
 			continue;

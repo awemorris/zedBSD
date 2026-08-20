@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import pathlib
+import secrets
 import struct
 
 from ufs1_format import Image as TreeImage, IFDIR, p32, p64
@@ -44,6 +45,7 @@ class Image(TreeImage):
         ]
         for offset, value in values:
             p32(sb, offset, value)
+        sb[144:152] = secrets.token_bytes(8)
         p64(sb, 1000, self.super_offset)
         p64(sb, 1080, self.fragments)
         p64(sb, 1088, dsize)

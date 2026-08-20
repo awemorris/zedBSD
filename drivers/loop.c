@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Zlib
  */
 #include "kern/loop.h"
+#include "kern/block-identity.h"
 #include "kern/disk.h"
 #include "kern/file.h"
 #include "kern/inode.h"
@@ -237,6 +238,13 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	loop->attached = true;
 	loop->reserved = false;
 	spin_unlock_irqrestore(&loop_lock, irq);
+	/* Probe before the backing filesystem is hidden below a mounted loop.
+	 * Runtime BLKGETIDENTITY then reads the immutable cached identity and
+	 * never re-enters the mounted backing file. */
+	{
+		struct zedbsd_block_identity identity;
+		(void)block_identity_get(disk, &identity);
+	}
 	*disk_out = disk;
 	return 0;
 

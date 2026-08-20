@@ -12,8 +12,11 @@
 
 #define PARTITION_MAX 16U
 #define PARTITION_POOL_MAX 64U
-#define PARTITION_LABEL_MAX 17U
+#define PARTITION_LABEL_MAX 64U
+#define PARTITION_UUID_MAX 64U
 #define PARTITION_BOOTABLE 0x0001U
+#define PARTITION_HAS_LABEL 0x0002U
+#define PARTITION_HAS_UUID 0x0004U
 
 struct partition {
 	struct disk *p_parent;
@@ -24,6 +27,7 @@ struct partition {
 	uint64_t p_block_count;
 	unsigned p_flags;
 	char p_label[PARTITION_LABEL_MAX];
+	char p_uuid[PARTITION_UUID_MAX];
 };
 
 struct partition_scheme {

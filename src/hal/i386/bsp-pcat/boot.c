@@ -29,6 +29,7 @@ static uint8_t root_partition;
 static int boot_info_valid;
 static uint8_t boot_font[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 static int boot_font_valid;
+static const char *boot_command_line;
 
 static int
 handoff_name_is(const char *name, const char *expected)
@@ -133,12 +134,16 @@ bsp_boot_init(const void *raw_boot_info)
 			root_partition = (uint8_t)(partition + 1U);
 	}
 	if ((mbi->flags & MBINFO_FLAG_CMDLINE) && mbi->cmdline != 0)
-		parse_command_line((const char *)(uintptr_t)mbi->cmdline);
+		boot_command_line = (const char *)(uintptr_t)mbi->cmdline;
+	if (boot_command_line != NULL)
+		parse_command_line(boot_command_line);
 }
 
 void *
 hal_get_arch_handoff(const char *name)
 {
+	if (handoff_name_is(name, "boot.command-line"))
+		return (void *)boot_command_line;
 	if (!boot_font_valid || !handoff_name_is(name, "pcat.boot-font"))
 		return NULL;
 	return boot_font;

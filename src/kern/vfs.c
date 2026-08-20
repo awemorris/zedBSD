@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/vfs.h"
 #include "kern/disk.h"
+#include "kern/block-identity.h"
 #include "kern/fat-vfs.h"
 #include "kern/file.h"
 #include "kern/ufs1.h"
@@ -64,6 +65,42 @@ disk_name(unsigned number, char name[NAME_MAX + 1U])
 	name[at++] = (char)('0' + number % 10);
 	name[at] = '\0';
 	return 0;
+}
+
+static int
+boot_root_selector(char output[ZEDBSD_BLKID_TEXT_MAX], unsigned *mount_flags)
+{
+	const char *line = hal_get_arch_handoff("boot.command-line");
+	if (line == NULL) return ENOENT;
+	while (*line != '\0') {
+		const char *start;
+		size_t length;
+		while (*line == ' ') line++;
+		start = line;
+		while (*line != '\0' && *line != ' ') line++;
+		length = (size_t)(line - start);
+		if (length > 5U && memcmp(start, "root=", 5U) == 0) {
+			start += 5U; length -= 5U;
+			/* ro/rw is a mount option, not part of the identity. */
+			for (size_t i = 0; i < length; i++)
+				if (start[i] == ',') {
+					const char *option = start + i + 1U;
+					size_t option_length = length - i - 1U;
+					if (option_length == 2U &&
+					    memcmp(option, "ro", 2U) == 0)
+						*mount_flags = MOUNT_READ_ONLY;
+					else if (!(option_length == 2U &&
+					    memcmp(option, "rw", 2U) == 0))
+						return EINVAL;
+					length = i; break;
+				}
+			if (length == 0 || length >= ZEDBSD_BLKID_TEXT_MAX)
+				return EINVAL;
+			memcpy(output, start, length); output[length] = '\0';
+			return 0;
+		}
+	}
+	return ENOENT;
 }
 
 static int
@@ -154,6 +191,9 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	const char *failure_stage = "initialize root cwd";
 	unsigned physical_count = 0, next_number = 1, i;
 	int error;
+	char root_selector[ZEDBSD_BLKID_TEXT_MAX];
+	int explicit_root = 0;
+	unsigned root_mount_flags = 0;
 
 	if (handoff == NULL)
 		return vfs_fail("handoff", EINVAL);
@@ -274,10 +314,18 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 	}
 	if (boot_partition == NULL)
 		return vfs_fail("find boot partition", ENXIO);
+	error = boot_root_selector(root_selector, &root_mount_flags);
+	if (error == 0) {
+		error = block_identity_resolve(root_selector, &root_partition);
+		if (error != 0) return vfs_fail("resolve root selector", error);
+		explicit_root = 1;
+		VFS_LOG("vfs: root selector %s resolved to /dev/%s\n",
+		    root_selector, root_partition->d_name);
+	} else if (error != ENOENT) return vfs_fail("parse root selector", error);
 	for(i=0;i<partition_count();i++) {
 		const struct partition *partition=partition_at(i);
 		int matches=0;
-		if(partition==NULL || partition->p_disk==NULL ||
+		if(explicit_root || partition==NULL || partition->p_disk==NULL ||
 		    partition->p_disk==boot_partition ||
 		    partition->p_parent!=boot_physical)
 			continue;
@@ -366,7 +414,8 @@ kern_vfs_init(const struct zedbsd_handoff *handoff,
 #endif
 	if (root_partition != NULL) {
 		struct fat_mount_args args = { root_partition->d_name };
-		error = mount_root_create("ufs1", 0, &args, &root_mount);
+		error = mount_root_create("auto", root_mount_flags, &args,
+		    &root_mount);
 	} else if (root_loop == NULL) {
 		struct fat_mount_args args = { boot_partition->d_name };
 		error = mount_root_create("auto", 0, &args, &root_mount);

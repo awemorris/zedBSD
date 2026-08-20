@@ -101,6 +101,9 @@ ZEDBSD_USER_PLATFORM := $(if $(filter pcat,$(ARCH)),i386,$(ARCH))
 override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 	$(if $(filter * $(ZEDBSD_USER_PLATFORM),\
 		$(USERLAND_$(program)_PLATFORMS)),$(program)))
+# Essential administrative tools are present even when an older config.mk
+# predates their package registration.
+override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) blkid)
 ZEDBSD_MISSING_PACKAGE_REQUIREMENTS := $(sort \
 	$(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 		$(foreach requirement,$(USERLAND_$(program)_REQUIRE),\
@@ -199,6 +202,7 @@ KERN_NET_SOURCES := \
 KERN_NET_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_NET_SOURCES))
 
 KERN_UFS1_SOURCES := \
+	src/kern/block-identity.c \
 	src/kern/ufs1/ufs1-endian.c \
 	src/kern/ufs1/ufs1-super.c \
 	src/kern/ufs1/ufs1-vfs.c

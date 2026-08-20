@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import secrets
 import struct
 
 SECTOR = 512
@@ -103,6 +104,11 @@ class Image:
                   (1320, 60), (1324, 2), (1352, 0), (1372, MAGIC)]
         for offset, value in values:
             p32(superblock, offset, value)
+        # Canonical 4.4BSD fs_id[2].  Like newfs, each newly created
+        # filesystem receives a persistent identity rather than deriving one
+        # from its mutable contents.
+        fs_id = secrets.token_bytes(8)
+        superblock[144:152] = fs_id
         p64(superblock, 1328, 0x7fffffffffffffff)
         superblock[209] = 1
 

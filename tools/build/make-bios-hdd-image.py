@@ -130,6 +130,12 @@ def create(args: argparse.Namespace) -> None:
     try:
         with temporary.open("r+b") as stream:
             stream.truncate(total_sectors * 512)
+            if args.machine == "pcat":
+                signature = zlib.crc32(stage2)
+                signature = zlib.crc32(args.kernel.read_bytes(), signature)
+                if signature == 0:
+                    signature = 1
+                struct.pack_into("<I", stage1, 0x1B8, signature)
             stage1[0x1BE:0x1CE] = struct.pack(
                 "<BBBBBBBBII", 0x80, 0xFE, 0xFF, 0xFF,
                 0x0E, 0xFE, 0xFF, 0xFF, start, blocks)
