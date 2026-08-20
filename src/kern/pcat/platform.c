@@ -7,6 +7,7 @@
 #include "drivers/pci-pcat.h"
 #include "drivers/pci-uhci.h"
 #include "drivers/pci-ehci.h"
+#include "drivers/usb-storage.h"
 #include <drivers/pci.h>
 #include <drivers/usb.h>
 #if CONFIG_DRIVER_NE2000
@@ -32,6 +33,8 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 		hal_printf("pci: core initialization failed\n");
 	if (drv_usb_init() != 0)
 		hal_printf("usb: core initialization failed\n");
+	if (drv_usb_storage_driver_register() != 0)
+		hal_printf("usb: mass-storage driver registration failed\n");
 	if (drv_pci_uhci_driver_register() != 0)
 		hal_printf("usb: UHCI PCI driver registration failed\n");
 	if (drv_pci_ehci_driver_register() != 0)

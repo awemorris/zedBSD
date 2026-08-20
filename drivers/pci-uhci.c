@@ -50,6 +50,7 @@ struct uhci_request {
 	struct uhci_qh *qh;
 	struct uhci_td *tds;
 	unsigned td_count, data_first, data_count;
+	unsigned final_toggle;
 	bool input;
 };
 
@@ -183,10 +184,11 @@ static int uhci_build_request(struct uhci_controller*c,struct drv_usb_urb*urb,
 		while(offset<length){unsigned chunk=length-offset>packet?packet:(unsigned)(length-offset);error=uhci_add_td(r,r->input?UHCI_PID_IN:UHCI_PID_OUT,address,0,toggle,chunk,(uint32_t)(r->bounce.device_address+8U+offset));if(error)goto fail;offset+=chunk;toggle^=1U;r->data_count++;}
 		error=uhci_add_td(r,r->input?UHCI_PID_OUT:UHCI_PID_IN,address,0,1,0,0);if(error)goto fail;
 	}else{
-		r->input=drv_usb_endpoint_is_input(ep);r->data_first=0;toggle=0;
+		r->input=drv_usb_endpoint_is_input(ep);r->data_first=0;
+		toggle=(unsigned)drv_usb_endpoint_hcd_data(ep,0)&1U;
 		if(!r->input&&length)memcpy((uint8_t*)r->bounce.address+8U,drv_usb_urb_buffer(urb),length);
 		while(offset<length){unsigned chunk=length-offset>packet?packet:(unsigned)(length-offset);error=uhci_add_td(r,r->input?UHCI_PID_IN:UHCI_PID_OUT,address,endpoint,toggle,chunk,(uint32_t)(r->bounce.device_address+8U+offset));if(error)goto fail;offset+=chunk;toggle^=1U;r->data_count++;}
-		if(length==0){error=uhci_add_td(r,r->input?UHCI_PID_IN:UHCI_PID_OUT,address,endpoint,toggle,0,0);if(error)goto fail;}r->data_count=r->td_count;
+		if(length==0){error=uhci_add_td(r,r->input?UHCI_PID_IN:UHCI_PID_OUT,address,endpoint,toggle,0,0);if(error)goto fail;toggle^=1U;}r->data_count=r->td_count;r->final_toggle=toggle;
 	}
 	r->tds[r->td_count-1U].status|=UHCI_TD_IOC;r->qh->head=UHCI_LINK_TERM;
 	r->qh->element=(uint32_t)r->schedule.device_address+16U;*result=r;return 0;
@@ -222,6 +224,8 @@ static int uhci_irq(void *argument)
 	for(i=0;i<r->td_count;i++)if(r->tds[i].status&UHCI_TD_ACTIVE)return 1;
 	for(i=0;i<r->td_count;i++)if(r->tds[i].status&UHCI_TD_ERRORS){result=(r->tds[i].status&UHCI_TD_STALLED)?DRV_USB_URB_STALL:DRV_USB_URB_IO_ERROR;break;}
 	for(i=0;i<r->data_count;i++){uint32_t n=r->tds[r->data_first+i].status&0x7ffU;if(n!=0x7ffU)actual+=n+1U;}
+	if(result==DRV_USB_URB_COMPLETE&&drv_usb_urb_control_request(r->urb)==NULL)
+		(void)drv_usb_endpoint_set_hcd_data(drv_usb_urb_endpoint(r->urb),0,r->final_toggle);
 	if(r->input&&actual)memcpy(drv_usb_urb_buffer(r->urb),(uint8_t*)r->bounce.address+8U,actual);
 	frames=c->frame_list.address;for(i=0;i<1024U;i++)frames[i]=UHCI_LINK_TERM;
 	urb=r->urb;c->active=NULL;drv_usb_urb_set_hcd_data(urb,NULL);uhci_request_free(c,r);

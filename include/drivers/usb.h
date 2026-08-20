@@ -317,6 +317,10 @@ enum drv_usb_transfer_type drv_usb_endpoint_type(
 uint8_t drv_usb_endpoint_address(const struct drv_usb_endpoint *);
 uint16_t drv_usb_endpoint_max_packet_size(const struct drv_usb_endpoint *);
 bool drv_usb_endpoint_is_input(const struct drv_usb_endpoint *);
+uintptr_t drv_usb_endpoint_hcd_data(const struct drv_usb_endpoint *,
+	unsigned);
+int drv_usb_endpoint_set_hcd_data(struct drv_usb_endpoint *, unsigned,
+	uintptr_t);
 
 /* Asynchronous USB Request Block (URB) allocation and submission. */
 struct drv_usb_urb *drv_usb_urb_alloc(struct drv_usb_device *,
