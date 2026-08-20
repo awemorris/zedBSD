@@ -238,10 +238,11 @@ test_pc98_partitions(void)
 	CHECK(entries[2].p_block_count == 136);
 	CHECK(strcmp(entries[2].p_label, "DATA") == 0);
 
+	strcpy(dev->d_name, "sda");
 	CHECK(partition_create_disk(&entries[0]) == 0);
 	slice = entries[0].p_disk;
 	CHECK(slice != NULL);
-	CHECK(strcmp(slice->d_name, "fake0p1") == 0);
+	CHECK(strcmp(slice->d_name, "sda1") == 0);
 	CHECK(slice->d_parent == dev);
 	CHECK(slice->d_parent_offset == 292);
 	CHECK(slice->d_block_count == 116);

@@ -61,8 +61,6 @@ struct usb_storage {
 	uint8_t lun;
 };
 
-static unsigned next_disk_number;
-
 static uint32_t get_le32(const uint8_t value[4])
 {
 	return (uint32_t)value[0] | ((uint32_t)value[1] << 8) |
@@ -263,19 +261,6 @@ static const struct disk_ops storage_disk_ops = {
 	.submit = storage_submit
 };
 
-static void storage_name(char name[DISK_NAME_MAX], unsigned number)
-{
-	name[0] = 's'; name[1] = 'd';
-	if (number >= 10U) {
-		name[2] = (char)('0' + number / 10U);
-		name[3] = (char)('0' + number % 10U);
-		name[4] = '\0';
-	} else {
-		name[2] = (char)('0' + number);
-		name[3] = '\0';
-	}
-}
-
 static int storage_attach(struct drv_usb_interface *interface,
 	const struct drv_usb_id *id)
 {
@@ -318,7 +303,12 @@ static int storage_attach(struct drv_usb_interface *interface,
 		hal_free(storage);
 		return ENOSPC;
 	}
-	storage_name(disk->d_name, next_disk_number++);
+	error = disk_alloc_sd_name(disk);
+	if (error != 0) {
+		(void)disk_destroy(disk);
+		hal_free(storage);
+		return error;
+	}
 	disk->d_flags = DISK_REMOVABLE;
 	disk->d_block_size = storage->block_size;
 	disk->d_block_count = storage->block_count;

@@ -94,6 +94,8 @@ struct bio {
 };
 
 struct disk *disk_alloc(void);
+/* Allocate the next Linux-compatible sd name: sda, ..., sdz, sdaa, ... . */
+int disk_alloc_sd_name(struct disk *disk);
 int disk_create(struct disk *disk);
 void disk_gone(struct disk *disk);
 int disk_gone_if_idle(struct disk *disk);

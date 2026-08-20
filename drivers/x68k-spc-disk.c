@@ -221,11 +221,12 @@ probe_target(unsigned target_id)
 	unit->disk = disk_alloc();
 	if (unit->disk == NULL)
 		return 0;
+	if (disk_alloc_sd_name(unit->disk) != 0) {
+		(void)disk_destroy(unit->disk);
+		unit->disk = NULL;
+		return 0;
+	}
 	unit->ordinal = present_count;
-	unit->disk->d_name[0] = 's';
-	unit->disk->d_name[1] = 'd';
-	unit->disk->d_name[2] = (char)('0' + present_count);
-	unit->disk->d_name[3] = '\0';
 	unit->disk->d_flags = (inquiry[1] & 0x80U) != 0 ? DISK_REMOVABLE : 0;
 	unit->disk->d_block_size = block_size;
 	unit->disk->d_block_count = blocks;

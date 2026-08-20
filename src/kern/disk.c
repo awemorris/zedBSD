@@ -97,6 +97,68 @@ struct disk *disk_alloc(void)
 	return NULL;
 }
 
+static int
+sd_name(char name[DISK_NAME_MAX], unsigned number)
+{
+	char reverse[DISK_NAME_MAX];
+	unsigned count = 0, at = 2, i;
+
+	name[0] = 's';
+	name[1] = 'd';
+	do {
+		if (count >= sizeof(reverse))
+			return ENAMETOOLONG;
+		reverse[count++] = (char)('a' + number % 26U);
+		number /= 26U;
+		if (number != 0)
+			number--;
+	} while (number != 0);
+	if (at + count >= DISK_NAME_MAX)
+		return ENAMETOOLONG;
+	for (i = 0; i < count; i++)
+		name[at++] = reverse[count - i - 1U];
+	name[at] = '\0';
+	return 0;
+}
+
+int
+disk_alloc_sd_name(struct disk *disk)
+{
+	char candidate[DISK_NAME_MAX];
+	unsigned number, i;
+	bool enabled;
+
+	if (disk == NULL)
+		return EINVAL;
+	enabled = disk_lock();
+	if (disk_index(disk) < 0 || disk->d_state != DISK_ALLOCATED) {
+		disk_unlock(enabled);
+		return EINVAL;
+	}
+	for (number = 0; number < DISK_MAX; number++) {
+		int used = 0;
+		if (sd_name(candidate, number) != 0)
+			break;
+		for (i = 0; i < DISK_MAX; i++)
+			if (disk_used[i] && &disks[i] != disk &&
+			    name_equal(disks[i].d_name, candidate)) {
+				used = 1;
+				break;
+			}
+		if (!used) {
+			for (i = 0; i < DISK_NAME_MAX; i++) {
+				disk->d_name[i] = candidate[i];
+				if (candidate[i] == '\0')
+					break;
+			}
+			disk_unlock(enabled);
+			return 0;
+		}
+	}
+	disk_unlock(enabled);
+	return ENOSPC;
+}
+
 int disk_create(struct disk *disk)
 {
 	struct disk **tail;

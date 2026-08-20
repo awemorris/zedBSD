@@ -503,17 +503,6 @@ report_probe_failure(unsigned slot)
 	    inb(IDE_BANK_SELECT));
 }
 
-static void
-set_name(struct ide_unit *unit, unsigned ordinal)
-{
-	unit->disk->d_name[0] = 'i';
-	unit->disk->d_name[1] = 'd';
-	unit->disk->d_name[2] = 'e';
-	unit->disk->d_name[3] = (char)('0' + ordinal);
-	unit->disk->d_name[4] = '\0';
-	unit->disk->d_name[DISK_NAME_MAX - 1U] = '\0';
-}
-
 unsigned
 zedbsd_ide_pc98_init(const struct zedbsd_device *bios_devices,
 		     unsigned bios_device_count)
@@ -587,12 +576,16 @@ zedbsd_ide_pc98_init(const struct zedbsd_device *bios_devices,
 			unit->disk = disk_alloc();
 			if (unit->disk == NULL)
 				continue;
+			if (disk_alloc_sd_name(unit->disk) != 0) {
+				(void)disk_destroy(unit->disk);
+				unit->disk = NULL;
+				continue;
+			}
 			unit->disk->d_block_count = sector_count;
 			unit->disk->d_block_size = 512;
 			unit->disk->d_max_transfer_blocks = 255;
 			unit->disk->d_ops = &pc98_ide_disk_ops;
 			unit->disk->d_data = unit;
-			set_name(unit, unit_count);
 			/*
 			 * Partition tables are written in the firmware-sensed
 			 * geometry, so prefer it over IDENTIFY.  The firmware

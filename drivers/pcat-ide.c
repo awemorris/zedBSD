@@ -213,10 +213,11 @@ unsigned zedbsd_ide_pcat_init(void)
 		sectors = (uint32_t)data[60] | ((uint32_t)data[61] << 16);
 		if (sectors == 0) continue;
 		unit->disk = disk_alloc(); if (unit->disk == 0) continue;
+		if (disk_alloc_sd_name(unit->disk) != 0) {
+			(void)disk_destroy(unit->disk); unit->disk = 0; continue;
+		}
 		unit->cylinders = data[1]; unit->heads = data[3]; unit->sectors = data[6];
-		unit->disk->d_name[0]='i'; unit->disk->d_name[1]='d';
-		unit->disk->d_name[2]='e'; unit->disk->d_name[3]=(char)('0'+slot);
-		unit->disk->d_name[4]='\0'; unit->disk->d_block_size=512;
+		unit->disk->d_block_size=512;
 		unit->disk->d_block_count=sectors; unit->disk->d_max_transfer_blocks=255;
 		unit->disk->d_ops=&ata_ops; unit->disk->d_data=unit;
 		if (disk_create(unit->disk) != 0) continue;

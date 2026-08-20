@@ -32,9 +32,15 @@ static int partition_name(struct partition *partition, char name[DISK_NAME_MAX])
 	const char *parent = partition->p_parent->d_name;
 	while (parent[at] != '\0' && at + 1U < DISK_NAME_MAX)
 		name[at] = parent[at], at++;
-	if (at + 2U >= DISK_NAME_MAX)
+	if (at == 0)
+		return EINVAL;
+	if (parent[at - 1U] >= '0' && parent[at - 1U] <= '9') {
+		if (at + 1U >= DISK_NAME_MAX)
+			return ENAMETOOLONG;
+		name[at++] = 'p';
+	}
+	if (at + 1U >= DISK_NAME_MAX)
 		return ENAMETOOLONG;
-	name[at++] = 'p';
 	if (number >= 10U) {
 		if (at + 2U >= DISK_NAME_MAX)
 			return ENAMETOOLONG;

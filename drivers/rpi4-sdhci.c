@@ -224,13 +224,16 @@ int rpi4_sdhci_init(uintptr_t physical_base)
 	error=controller_init();if(error){hal_printf("sdhci: init error=%u status=%x present=%x\n",
 		(unsigned)error,r32(REG_INT_STATUS),r32(REG_PRESENT));return error;}
 	unit.disk=disk_alloc();if(!unit.disk)return ENOMEM;
-	unit.disk->d_name[0]='s';unit.disk->d_name[1]='d';unit.disk->d_name[2]='0';
-	unit.disk->d_name[3]='\0';unit.disk->d_flags=DISK_REMOVABLE;
+	unit.disk->d_name[0]='m';unit.disk->d_name[1]='m';
+	unit.disk->d_name[2]='c';unit.disk->d_name[3]='b';
+	unit.disk->d_name[4]='l';unit.disk->d_name[5]='k';
+	unit.disk->d_name[6]='0';unit.disk->d_name[7]='\0';
+	unit.disk->d_flags=DISK_REMOVABLE;
 	unit.disk->d_block_size=512;unit.disk->d_block_count=0xffffffffULL;
 	unit.disk->d_max_transfer_blocks=1;unit.disk->d_ops=&sd_ops;
 	unit.disk->d_data=&unit;
 	error=disk_create(unit.disk);if(error){unit.disk=0;return error;}
-	hal_printf("sdhci: sd0 ready (%s addressing)\n",
+	hal_printf("sdhci: mmcblk0 ready (%s addressing)\n",
 		unit.high_capacity?"block":"byte");
 	return 0;
 }
