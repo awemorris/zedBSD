@@ -24,7 +24,6 @@ struct vmspace;
 struct ucred;
 struct tty;
 
-#define PROCESS_RESULT_MAX 256U
 #define PROCESS_AUTOREAP 0x00000001U
 #define PROCESS_PGRP_ORPHANED 0x00000002U
 #define PROCESS_PGRP_NOTIFY 0x00000004U
@@ -95,8 +94,6 @@ struct process {
 	struct filedesc *fd;
 	struct cwdinfo *cwdi;
 	struct tty *controlling_tty;
-	char result[PROCESS_RESULT_MAX];
-	size_t result_length;
 	char command[64];
 };
 
@@ -118,8 +115,7 @@ int process_fork(struct process *, struct process **);
 void process_publish(struct process *process);
 void process_attach_boot_cwd(struct cwdinfo *cwd);
 void process_free_mem(struct process *process);
-int process_wait(struct process *, int *status, char *result,
-		 size_t result_capacity);
+int process_wait(struct process *, int *status);
 pid_t process_waitpid(struct process *, pid_t, int *, int);
 pid_t process_wait_select(struct process *, pid_t, int,
 			  struct process_wait_event *);

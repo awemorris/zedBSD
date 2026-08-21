@@ -30,7 +30,7 @@ enum startup_auto_kind {
 	STARTUP_AUTO_NONE, STARTUP_AUTO_CONFIG, STARTUP_AUTO_PBR,
 };
 enum startup_config_kind {
-	STARTUP_CONFIG_NONE, STARTUP_CONFIG_AUTOEXEC, STARTUP_CONFIG_BOOTCFG,
+	STARTUP_CONFIG_NONE, STARTUP_CONFIG_BOOTCFG,
 };
 struct startup_state {
 	enum startup_phase phase;
@@ -88,8 +88,7 @@ int kern_m9_write_test(uint32_t lba);
 int kern_command(char *line);
 
 const char *startup_config_file(void);
-int run_autoexec(void);
-int run_noct_user(const char *, int, char *const [], unsigned, char *, size_t);
+int run_noct_user(const char *, int, char *const []);
 extern int kern_noct_last_status;
 int startup_menu(struct startup_state *state);
 

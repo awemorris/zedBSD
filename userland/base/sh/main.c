@@ -97,60 +97,29 @@ wait_foreground(pid_t pid, int *status)
 }
 
 static int
-spawn_wait(char *const argv[], int capture, char *result, size_t capacity)
+spawn_wait(char *const argv[])
 {
-	posix_spawn_file_actions_t actions;
-	posix_spawn_file_actions_t *action_pointer = NULL;
 	posix_spawnattr_t attributes;
 	posix_spawnattr_t *attribute_pointer = NULL;
-	int output_pipe[2] = { -1, -1 };
 	pid_t pid;
 	int error;
 	int status = 0;
 
-	if (result != NULL && capacity != 0)
-		result[0] = '\0';
-	capture = capture && !command_background && result != NULL && capacity != 0;
-	if (capture) {
-		if (pipe2(output_pipe, O_CLOEXEC) != 0) {
-			fprintf(stderr, "sh: pipe: %s\n", strerror(errno));
-			return 0;
-		}
-		if (posix_spawn_file_actions_init(&actions) != 0 ||
-		    posix_spawn_file_actions_adddup2(&actions, output_pipe[1], 1) != 0 ||
-		    posix_spawn_file_actions_addclose(&actions, output_pipe[0]) != 0 ||
-		    posix_spawn_file_actions_addclose(&actions, output_pipe[1]) != 0) {
-			(void)close(output_pipe[0]);
-			(void)close(output_pipe[1]);
-			fprintf(stderr, "sh: unable to prepare command output\n");
-			return 0;
-		}
-		action_pointer = &actions;
-	}
 	if (!command_subshell) {
 		if (posix_spawnattr_init(&attributes) != 0 ||
 		    posix_spawnattr_setflags(&attributes,
 		    POSIX_SPAWN_SETPGROUP) != 0 ||
 		    posix_spawnattr_setpgroup(&attributes, 0) != 0) {
-			if (action_pointer != NULL)
-				(void)posix_spawn_file_actions_destroy(action_pointer);
-			if (output_pipe[0] >= 0) (void)close(output_pipe[0]);
-			if (output_pipe[1] >= 0) (void)close(output_pipe[1]);
 			fprintf(stderr, "sh: unable to prepare process group\n");
 			return 0;
 		}
 		attribute_pointer = &attributes;
 	}
-	error = posix_spawn(&pid, argv[0], action_pointer, attribute_pointer,
+	error = posix_spawn(&pid, argv[0], NULL, attribute_pointer,
 	    argv, environ);
-	if (action_pointer != NULL)
-		(void)posix_spawn_file_actions_destroy(action_pointer);
 	if (attribute_pointer != NULL)
 		(void)posix_spawnattr_destroy(attribute_pointer);
-	if (output_pipe[1] >= 0)
-		(void)close(output_pipe[1]);
 	if (error != 0) {
-		if (output_pipe[0] >= 0) (void)close(output_pipe[0]);
 		fprintf(stderr, "sh: %s: %s\n", argv[0], strerror(error));
 		return 0;
 	}
@@ -161,35 +130,7 @@ spawn_wait(char *const argv[], int capture, char *result, size_t capacity)
 		printf("[%d]\n", (int)pid);
 		return 1;
 	}
-	if (capture) {
-		pid_t shell_pgrp = getpgrp();
-		int terminal = !command_subshell && isatty(0);
-		size_t used = 0;
-		char discard[128];
-		ssize_t count;
-		if (terminal) (void)tcsetpgrp(0, pid);
-		for (;;) {
-			void *buffer = used + 1U < capacity ?
-			    (void *)(result + used) : (void *)discard;
-			size_t available = used + 1U < capacity ?
-			    capacity - used - 1U : sizeof(discard);
-			do count = read(output_pipe[0], buffer, available);
-			while (count < 0 && errno == EINTR);
-			if (count <= 0)
-				break;
-			if (buffer != discard)
-				used += (size_t)count;
-		}
-		(void)close(output_pipe[0]);
-		result[used] = '\0';
-		do error = (int)waitpid(pid, &status, 0);
-		while (error < 0 && errno == EINTR);
-		if (terminal) (void)tcsetpgrp(0, shell_pgrp);
-		if (error < 0) {
-			fprintf(stderr, "wait: %d\n", errno);
-			return 0;
-		}
-	} else if (command_subshell) {
+	if (command_subshell) {
 		pid_t waited;
 		do waited = waitpid(pid, &status, 0);
 		while (waited < 0 && errno == EINTR);
@@ -461,7 +402,7 @@ run_noct(int argc, char **argv)
 	child[0] = "/usr/bin/noct";
 	if (argc == 0) {
 		child[1] = NULL;
-		return spawn_wait(child, 0, NULL, 0);
+		return spawn_wait(child);
 	}
 	if (argv[0][0] == '/' || strchr(argv[0], '/') != NULL) {
 		strncpy(resolved, argv[0], sizeof(resolved) - 1U);
@@ -481,7 +422,7 @@ run_noct(int argc, char **argv)
 	for (i = 1; i < argc && i + 1 < ARG_MAX + 1; i++)
 		child[i + 1] = argv[i];
 	child[i + 1] = NULL;
-	return spawn_wait(child, 0, NULL, 0);
+	return spawn_wait(child);
 }
 
 static int
@@ -565,41 +506,9 @@ system_power(unsigned long request)
 }
 
 static int
-run_autoexec(const char *path)
-{
-	char result[256] = {0};
-	char action[sizeof(result)];
-	char *argv[] = { "/usr/bin/noct", (char *)path, NULL };
-	if (!spawn_wait(argv, 1, result, sizeof(result)))
-		return 0;
-	if (result[0] == '\0')
-		return 1;
-	strncpy(action, result, sizeof(action) - 1U);
-	action[sizeof(action) - 1U] = '\0';
-	if (!command(result)) {
-		fprintf(stderr, "BOOT_ACTION failed: %s\n", action);
-		return 0;
-	}
-	return 1;
-}
-
-static int
 run_external(char *const argv[])
 {
-	char result[256] = {0};
-	char action[sizeof(result)];
-
-	if (!spawn_wait(argv, 1, result, sizeof(result)))
-		return 0;
-	if (result[0] == '\0')
-		return 1;
-	strncpy(action, result, sizeof(action) - 1U);
-	action[sizeof(action) - 1U] = '\0';
-	if (!command(result)) {
-		fprintf(stderr, "command result failed: %s\n", action);
-		return 0;
-	}
-	return 1;
+	return spawn_wait(argv);
 }
 
 static int
@@ -935,7 +844,7 @@ command_dispatch(int argc, char **argv)
 		puts("help echo pwd cd ls cp cat stat touch clear true false jobs fg bg "
 		     "env set export readonly unset pause wait device probe-ide probe-scsi "
 		     "part source "
-		     "run noct autoexec emacs vmstat reboot halt exit");
+		     "run noct emacs vmstat reboot halt exit");
 		return 1;
 	}
 	if (!strcmp(argv[0], "alias")) {
@@ -1146,9 +1055,6 @@ command_dispatch(int argc, char **argv)
 		return argc == 1 && system_power(ZEDBSD_SYSTEM_HALT);
 	if (!strcmp(argv[0], "reboot"))
 		return argc == 1 && system_power(ZEDBSD_SYSTEM_REBOOT);
-	if (!strcmp(argv[0], "autoexec"))
-		return argc <= 2 && run_autoexec(argc == 2 ? argv[1] :
-		    "/autoexec.nct");
 	if (!strcmp(argv[0], "emacs")) {
 		char *args[ARG_MAX];
 		int i;

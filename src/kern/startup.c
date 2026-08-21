@@ -7,8 +7,6 @@
 
 #include "kern/internal.h"
 #include "kern/clock.h"
-#include "kern/exec.h"
-#include "kern/graphics-device.h"
 #include "kern/messages.h"
 #include "kern/platform.h"
 #include "kern/vfs.h"
@@ -45,12 +43,6 @@ const char *startup_config_file(void)
 
 static enum startup_config_kind boot_volume_startup_kind(void)
 {
-	struct inode *inode;
-
-	if (namei_at(&kern_cwdinfo, "AUTOEXEC.NCT", &inode) == 0) {
-		inode_release(inode);
-		return STARTUP_CONFIG_AUTOEXEC;
-	}
 	if (startup_config_file())
 		return STARTUP_CONFIG_BOOTCFG;
 	return STARTUP_CONFIG_NONE;
@@ -121,74 +113,6 @@ static int activate_automatic_target(const struct startup_state *state)
 	return 1;
 }
 
-/* AUTOEXEC.NCT may select one action, but it cannot inject a second shell
- * line or leave a stale action behind for a later VM invocation. */
-static int valid_boot_action(const char *action)
-{
-	unsigned length = 0;
-	int non_space = 0;
-
-	if (action == 0)
-		return 0;
-	while (action[length] != 0) {
-		unsigned char ch = (unsigned char)action[length++];
-
-		if (length >= LINE_MAX || ch < 0x20U || ch == 0x7fU)
-			return 0;
-		if (ch != ' ' && ch != '\t')
-			non_space = 1;
-	}
-	return non_space;
-}
-
-/* Return zero when no graphical startup script exists, one after executing
- * its selected action, and -1 when the script/action failed validation. */
-int run_autoexec(void)
-{
-	struct inode *inode;
-	char action[LINE_MAX];
-	int script_ok;
-
-	if (namei_at(&kern_cwdinfo, "AUTOEXEC.NCT", &inode) != 0)
-		return 0;
-	inode_release(inode);
-	action[0] = '\0';
-	script_ok = run_noct_user("AUTOEXEC.NCT", 0, NULL,
-				  PROCESS_SPAWN_RESULT, action, sizeof(action));
-	/* A graphical script may have owned Cirrus or GDC graphics.  Restore the
-	 * firmware text display and erase every GDC graphics plane before its
-	 * selected zedBSD command runs.  Real Cirrus-equipped machines retain the
-	 * old graphics VRAM contents when the display is switched back to GDC. */
-	graphics_device_restore_text();
-	hal_cons_reset();
-	hal_cons_set_mode(HAL_CONS_TERMINAL);
-	if (!script_ok) {
-		puts("AUTOEXEC.NCT failed (status ");
-		dec((unsigned)(kern_noct_last_status < 0 ?
-			-kern_noct_last_status : kern_noct_last_status));
-		puts(kern_noct_last_status < 0 ?
-			", launch error); returning to the text shell.\n" :
-			"); returning to the text shell.\n");
-		if (action[0] != '\0') {
-			puts("NOCT.ELF: ");
-			puts(action);
-			putc('\n');
-		}
-		return -1;
-	}
-	if (!valid_boot_action(action)) {
-		puts("AUTOEXEC.NCT did not select a valid BOOT_ACTION.\n");
-		return -1;
-	}
-	if (!command(action)) {
-		puts("BOOT_ACTION failed: ");
-		puts(action);
-		putc('\n');
-		return -1;
-	}
-	return 1;
-}
-
 static void draw_startup_header(void)
 {
 	hal_cons_write_at(0, 0, boot_message_machine);
@@ -244,9 +168,7 @@ static void draw_automatic_status(const struct startup_state *state)
 	draw_probe_bar(state->probe_total, state->probe_total);
 	hal_cons_clear_row(5);
 	hal_cons_write_at(5, 0, boot_message_automatic_run);
-	if (state->auto_config_kind == STARTUP_CONFIG_AUTOEXEC)
-		puts(" AUTOEXEC.NCT");
-	else if (state->auto_config_kind == STARTUP_CONFIG_BOOTCFG)
+	if (state->auto_config_kind == STARTUP_CONFIG_BOOTCFG)
 		puts(" ZEDBSD.CFG");
 }
 
@@ -268,10 +190,7 @@ static void draw_startup_menu(const struct startup_state *state)
 		puts((const char *)boot_message_partition);
 		dec((unsigned)state->auto_partition + 1);
 		if (state->auto_kind == STARTUP_AUTO_CONFIG) {
-			if (state->auto_config_kind == STARTUP_CONFIG_AUTOEXEC)
-				puts((const char *)boot_message_run_autoexec);
-			else
-				puts((const char *)boot_message_run_cfg);
+			puts((const char *)boot_message_run_cfg);
 		}
 	} else {
 		puts((const char *)boot_message_unavailable);

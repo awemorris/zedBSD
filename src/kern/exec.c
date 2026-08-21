@@ -242,77 +242,24 @@ setup_standard_files(struct process *parent, struct process *process)
 	return 0;
 }
 
-static ssize_t
-result_write(struct file *file, const void *buffer, size_t length)
-{
-	struct process *process = file != NULL ? file->f_data : NULL;
-	size_t available;
-
-	if (process == NULL || buffer == NULL)
-		return -EINVAL;
-	available = (PROCESS_RESULT_MAX - 1U) - process->result_length;
-	if (length > available)
-		length = available;
-	if (length == 0)
-		return -ENOSPC;
-	memcpy(process->result + process->result_length, buffer, length);
-	process->result_length += length;
-	process->result[process->result_length] = '\0';
-	return (ssize_t)length;
-}
-
-static const struct file_ops result_ops = {
-	.write = result_write,
-};
-
-static int
-setup_result_file(struct process *process)
-{
-	struct file *file;
-	int error = file_create_pseudo(&result_ops, O_WRONLY, process, &file);
-
-	if (error != 0)
-		return error;
-	error = filedesc_install_at(process->fd, file, 3);
-	if (error != 0)
-		(void)file_close(file);
-	return error;
-}
-
 int
 process_spawn_from(struct process *parent, const char *path,
-		   char *const argv[], char *const envp[], unsigned flags,
+		   char *const argv[], char *const envp[],
 		   struct process **result)
 {
 	struct file *file = NULL;
 	struct process *process = NULL;
 	struct thread *thread;
-	char *result_envp[EXEC_ENV_MAX + 1U];
-	char *const *effective_envp = envp;
 	EXEC_IMAGE_INFO image;
 	struct exec_auxv_info aux;
 	uintptr_t sp;
 	uintptr_t execution_entry, interpreter_base;
 	int error;
 	const char *stage = "open executable";
-	unsigned env_count = 0;
 
 	if (parent == NULL || path == NULL || argv == NULL || argv[0] == NULL ||
 	    parent->cwdi == NULL)
 		return EINVAL;
-	if ((flags & ~PROCESS_SPAWN_RESULT) != 0)
-		return EINVAL;
-	if ((flags & PROCESS_SPAWN_RESULT) != 0) {
-		while (envp != NULL && envp[env_count] != NULL) {
-			if (env_count + 1U >= EXEC_ENV_MAX)
-				return E2BIG;
-			result_envp[env_count] = envp[env_count];
-			env_count++;
-		}
-		result_envp[env_count++] = "ZEDBSD_RESULT_FD=3";
-		result_envp[env_count] = NULL;
-		effective_envp = result_envp;
-	}
 	error = file_openat_cred(parent->cwdi, parent->cred, path, O_RDONLY, 0,
 	    &file);
 	if (error != 0)
@@ -345,7 +292,7 @@ process_spawn_from(struct process *parent, const char *path,
 	stage = "build initial stack";
 	fill_auxv_info(&aux, &image, interpreter_base, process->cred, path);
 	error = exec_build_initial_stack(process->vmspace, image.stack_size, argv,
-		effective_envp, &aux, &sp);
+		envp, &aux, &sp);
 	if (error != 0)
 		goto out;
 	stage = "open standard files";
@@ -353,12 +300,6 @@ process_spawn_from(struct process *parent, const char *path,
 	if (error != 0)
 		goto out;
 	tty_attach_console(process);
-	if ((flags & PROCESS_SPAWN_RESULT) != 0) {
-		stage = "open result file";
-		error = setup_result_file(process);
-		if (error != 0)
-			goto out;
-	}
 	stage = "create initial thread";
 	strncpy(process->command, argv[0], sizeof(process->command) - 1U);
 	process->command[sizeof(process->command) - 1U] = '\0';
@@ -492,9 +433,9 @@ out:
 
 int
 process_spawn(const char *path, char *const argv[], char *const envp[],
-	      unsigned flags, struct process **result)
+	      struct process **result)
 {
-	return process_spawn_from(&process0, path, argv, envp, flags, result);
+	return process_spawn_from(&process0, path, argv, envp, result);
 }
 
 int
@@ -509,5 +450,5 @@ process_spawn_init(const char *path, struct process **result)
 	};
 	argv[0] = (char *)path;
 	argv[1] = NULL;
-	return process_spawn(path, argv, envp, 0, result);
+	return process_spawn(path, argv, envp, result);
 }

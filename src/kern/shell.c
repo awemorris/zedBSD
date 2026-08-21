@@ -340,8 +340,7 @@ static int open_noct_application(const char *prefix, const char *name,
  * volumes.  Unqualified names then fall back to precompiled NAME.NAP
  * bytecode in APPS/ (then CMD/ and the root), so applications too large
  * for the small-memory source compiler still launch as shell commands. */
-int run_noct_user(const char *path, int argc, char *const argv[],
-		  unsigned flags, char *result, size_t result_capacity)
+int run_noct_user(const char *path, int argc, char *const argv[])
 {
 	char executable[ZEDBSD_PATH_MAX];
 	char home[ZEDBSD_PATH_MAX + 6U];
@@ -396,17 +395,12 @@ int run_noct_user(const char *path, int argc, char *const argv[],
 		strcpy(dictionary + 16, value);
 		child_env[slot] = dictionary;
 	}
-	if ((flags & PROCESS_SPAWN_RESULT) != 0) {
-		unsigned slot = child_env[0] == NULL ? 0U :
-			(child_env[1] == NULL ? 1U : 2U);
-		child_env[slot] = "ZEDBSD_RESULT_FD=3";
-	}
-	error = process_spawn(executable, child_argv, child_env, flags, &child);
+	error = process_spawn(executable, child_argv, child_env, &child);
 	if (error != 0) {
 		kern_noct_last_status = -error;
 		return 0;
 	}
-	error = process_wait(child, &status, result, result_capacity);
+	error = process_wait(child, &status);
 	kern_noct_last_status = error != 0 ? -error : status;
 	return error == 0 && status == 0;
 }
@@ -424,7 +418,7 @@ static int run_noct_application(const char *name, const char *extension,
 	      !open_noct_application("CMD/", name, ".NAP", path) &&
 	      !open_noct_application("", name, ".NAP", path))))
 		return 0;
-	return run_noct_user(path, argc, argv, 0, NULL, 0);
+	return run_noct_user(path, argc, argv);
 }
 
 int command(char *s)
@@ -598,7 +592,7 @@ int command(char *s)
 	}
 	if (streq(v[0], "noct")) {
 		if (n == 1)
-			return run_noct_user("--repl", 0, NULL, 0, NULL, 0);
+			return run_noct_user("--repl", 0, NULL);
 		return run_noct_application(v[1], "", 0, n - 2, &v[2]);
 	}
 	if (streq(v[0], "emacs")) {

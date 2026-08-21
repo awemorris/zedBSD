@@ -616,8 +616,7 @@ process_free_mem(struct process *process)
 }
 
 int
-process_wait(struct process *process, int *status, char *result,
-	     size_t result_capacity)
+process_wait(struct process *process, int *status)
 {
 	struct thread *thread;
 	unsigned long irq;
@@ -649,13 +648,6 @@ process_wait(struct process *process, int *status, char *result,
 	(void)thread_status;
 	if (status != NULL)
 		*status = process->exit_status;
-	if (result != NULL && result_capacity != 0) {
-		size_t length = process->result_length;
-		if (length >= result_capacity)
-			length = result_capacity - 1U;
-		memcpy(result, process->result, length);
-		result[length] = '\0';
-	}
 	process_free_mem(process);
 	return 0;
 }

@@ -17,7 +17,6 @@ struct process;
 struct ucred;
 struct vmspace;
 
-#define PROCESS_SPAWN_RESULT 0x00000001U
 #define EXEC_STACK_DEFAULT_SIZE (1024U * 1024U)
 #define EXEC_STACK_HARD_MAX     (1024U * 1024U)
 #define EXEC_STACK_GUARD_SIZE   ZEDBSD_PAGE_SIZE
@@ -67,10 +66,10 @@ int elf64_load_interpreter(struct file *, struct vmspace *,
 int exec_build_initial_stack(struct vmspace *, size_t, char *const [],
 			     char *const [], const struct exec_auxv_info *,
 			     uintptr_t *sp);
-int process_spawn(const char *, char *const [], char *const [], unsigned,
+int process_spawn(const char *, char *const [], char *const [],
 		  struct process **);
 int process_spawn_from(struct process *, const char *, char *const [],
-		       char *const [], unsigned, struct process **);
+		       char *const [], struct process **);
 int process_spawn_init(const char *, struct process **);
 int process_execve(struct process *, const char *, char *const [],
 		   char *const []);

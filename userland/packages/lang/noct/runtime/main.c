@@ -288,20 +288,6 @@ int main(int argc, char **argv, char **envp)
 		&return_value)) {
 		status = 14; print_error(env, "Noct runtime error"); goto out;
 	}
-	{
-		const char *action = env_get(&environment, "BOOT_ACTION");
-		const char *result_fd = env_get(&environment,
-						      "ZEDBSD_RESULT_FD");
-		if (action != NULL && result_fd != NULL &&
-		    result_fd[0] == '3' && result_fd[1] == '\0') {
-			size_t length = strlen(action);
-			if (length == 0 || write(3, action, length) != (ssize_t)length) {
-				fprintf(stderr, "NOCT.ELF: unable to return BOOT_ACTION\n");
-				status = 15;
-				goto out;
-			}
-		}
-	}
 	status = 0;
 	if (noct_get_value_type(env, &return_value, &type) && type == NOCT_VALUE_INT)
 		(void)noct_get_int(env, &return_value, &status);

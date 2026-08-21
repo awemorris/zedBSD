@@ -114,9 +114,11 @@ struct disk *kern_platform_block_device(const struct boot_device *device)
 void kern_platform_debug_write(const char *text)
 {
 	while (text != 0 && *text != '\0') {
-		uint8_t c=(uint8_t)*text++; hal_cons_putc(c);
+		uint8_t c = (uint8_t)*text++;
 #ifdef HAL_PCAT_DEBUGCON
 		__asm__ volatile("outb %0,$0xe9" : : "a"(c));
+#else
+		(void)c;
 #endif
 	}
 }
