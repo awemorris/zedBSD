@@ -459,18 +459,32 @@ show_vmstat(void)
 	}
 	close(fd);
 	printf("physical.total=%llu\nphysical.free=%llu\n"
-	       "heap.current=%llu\nheap.peak=%llu\n"
-	       "hal.tasks=%llu\nvm.resident=%llu\nvm.swapped=%llu\n"
-	       "swap.total=%llu\nswap.free=%llu\n",
+	       "heap.fixed=%llu\nheap.current=%llu\nheap.peak=%llu\n"
+	       "heap.largest_free=%llu\nheap.largest_failed=%llu\n"
+	       "hal.tasks=%llu\nhal.task_stack_bytes=%llu\n"
+	       "hal.spaces=%llu\nhal.page_tables=%llu\n"
+	       "vm.resident=%llu\nvm.swapped=%llu\n"
+	       "swap.total=%llu\nswap.free=%llu\n"
+	       "vm.commit.limit=%llu\nvm.commit.used=%llu\n"
+	       "vm.commit.available=%llu\n",
 	    (unsigned long long)s.physical_total,
 	    (unsigned long long)s.physical_free,
+	    (unsigned long long)s.heap_fixed,
 	    (unsigned long long)s.heap_current,
 	    (unsigned long long)s.heap_peak,
+	    (unsigned long long)s.heap_largest_free,
+	    (unsigned long long)s.heap_largest_failed,
 	    (unsigned long long)s.hal_tasks,
+	    (unsigned long long)s.hal_task_stack_bytes,
+	    (unsigned long long)s.hal_spaces,
+	    (unsigned long long)s.hal_page_tables,
 	    (unsigned long long)s.vm_resident,
 	    (unsigned long long)s.vm_swapped,
 	    (unsigned long long)s.swap_total,
-	    (unsigned long long)s.swap_free);
+	    (unsigned long long)s.swap_free,
+	    (unsigned long long)s.vm_commit_limit,
+	    (unsigned long long)s.vm_commit_used,
+	    (unsigned long long)s.vm_commit_available);
 	return 1;
 }
 

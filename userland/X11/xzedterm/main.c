@@ -621,8 +621,14 @@ initialize(struct terminal *terminal)
 	}
 	if (terminal->child == 0) {
 		char *arguments[] = { "/bin/sh", NULL };
+		char message[96];
+		int saved;
 		close(ConnectionNumber(terminal->display));
 		execve(arguments[0], arguments, environ);
+		saved = errno;
+		snprintf(message, sizeof(message),
+		    "xzedterm: exec /bin/sh: %s\r\n", strerror(saved));
+		(void)write(STDERR_FILENO, message, strlen(message));
 		_exit(127);
 	}
 	damage_all(terminal);

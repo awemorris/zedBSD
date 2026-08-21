@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "libc/heap.h"
 #include "hal/hal.h"
@@ -27,10 +28,19 @@
 #include "kern/thread.h"
 
 #define KERNEL_HEAP_SIZE (512U * 1024U)
+#define KERNEL_LARGE_THRESHOLD (2U * ZEDBSD_PAGE_SIZE)
 static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
 	__attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
 static struct zedbsd_heap kernel_heap;
 static volatile unsigned kernel_heap_lock;
+
+struct kernel_large_allocation {
+	struct kernel_large_allocation *next;
+	void *pointer;
+	struct hal_pmem memory;
+};
+
+static struct kernel_large_allocation *kernel_large_allocations;
 
 extern char __kernel_vma_start[], __kernel_vma_end[];
 
@@ -55,10 +65,39 @@ kernel_heap_lock_leave(bool enabled)
 void *
 kern_malloc(size_t size)
 {
+	struct kernel_large_allocation *large;
+	struct hal_pmem_request request;
+	struct hal_pmem memory;
 	void *result;
-	bool enabled = kernel_heap_lock_enter();
-	result = zedbsd_heap_alloc(&kernel_heap, size);
+	bool enabled;
+
+	if (size < KERNEL_LARGE_THRESHOLD) {
+		enabled = kernel_heap_lock_enter();
+		result = zedbsd_heap_alloc(&kernel_heap, size);
+		kernel_heap_lock_leave(enabled);
+		return result;
+	}
+	memset(&request, 0, sizeof(request));
+	request.paddr = HAL_PMEM_PADDR_ANY;
+	request.size = size;
+	request.alignment = ZEDBSD_PAGE_SIZE;
+	request.type = HAL_PMEM_TYPE_RAM;
+	if (hal_pmem_alloc(&request, &memory) != HAL_OK)
+		return NULL;
+	enabled = kernel_heap_lock_enter();
+	large = zedbsd_heap_alloc(&kernel_heap, sizeof(*large));
+	if (large != NULL) {
+		large->pointer = memory.vaddr;
+		large->memory = memory;
+		large->next = kernel_large_allocations;
+		kernel_large_allocations = large;
+	}
 	kernel_heap_lock_leave(enabled);
+	if (large == NULL) {
+		(void)hal_pmem_free(&memory);
+		return NULL;
+	}
+	result = memory.vaddr;
 	return result;
 }
 
@@ -66,18 +105,49 @@ void *
 kern_calloc(size_t count, size_t size)
 {
 	void *result;
-	bool enabled = kernel_heap_lock_enter();
-	result = zedbsd_heap_calloc(&kernel_heap, count, size);
-	kernel_heap_lock_leave(enabled);
+	size_t total;
+	if (count != 0 && size > SIZE_MAX / count)
+		return NULL;
+	total = count * size;
+	result = kern_malloc(total);
+	if (result != NULL)
+		memset(result, 0, total);
 	return result;
 }
 
 void
 kern_free(void *pointer)
 {
-	bool enabled = kernel_heap_lock_enter();
-	zedbsd_heap_free(&kernel_heap, pointer);
+	struct kernel_large_allocation **link, *large = NULL;
+	struct hal_pmem memory;
+	bool enabled;
+	uintptr_t address = (uintptr_t)pointer;
+
+	if (pointer == NULL)
+		return;
+	enabled = kernel_heap_lock_enter();
+	if (address >= (uintptr_t)kernel_heap.begin &&
+	    address < (uintptr_t)kernel_heap.end) {
+		zedbsd_heap_free(&kernel_heap, pointer);
+		kernel_heap_lock_leave(enabled);
+		return;
+	}
+	for (link = &kernel_large_allocations; *link != NULL;
+	    link = &(*link)->next)
+		if ((*link)->pointer == pointer) {
+			large = *link;
+			*link = large->next;
+			break;
+		}
+	if (large != NULL) {
+		memory = large->memory;
+		zedbsd_heap_free(&kernel_heap, large);
+	}
 	kernel_heap_lock_leave(enabled);
+	if (large == NULL)
+		HAL_FATAL("invalid kernel allocation free");
+	if (hal_pmem_free(&memory) != HAL_OK)
+		HAL_FATAL("kernel large allocation free failed");
 }
 
 void

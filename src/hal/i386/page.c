@@ -21,12 +21,30 @@
 static uint32 phys_pages;
 static uint32 reserved_pages;
 static uint32 allocated_pages;
+static volatile unsigned pmem_lock;
 
 /* Page usage bitmap. */
 static uint32 pagemap_tbl[PAGEMAP_WORDS];
 
 #define FIXED_CLAIMS 8U
 static struct hal_pmem fixed_claims[FIXED_CLAIMS];
+
+static bool
+pmem_lock_enter(void)
+{
+	bool enabled = hal_irq_disable();
+	while (__atomic_exchange_n(&pmem_lock, 1U, __ATOMIC_ACQUIRE) != 0)
+		__asm__ volatile("pause");
+	return enabled;
+}
+
+static void
+pmem_lock_leave(bool enabled)
+{
+	__atomic_store_n(&pmem_lock, 0U, __ATOMIC_RELEASE);
+	if (enabled)
+		hal_irq_enable();
+}
 
 /* Provided by the BSP: total RAM in bytes. */
 uint32 bsp_mem_probe(void);
@@ -124,7 +142,7 @@ reserve_range(hal_physaddr_t paddr, size_t size)
 
 /*
  * Allocate contiguous physical pages from the direct-mapped low area
- * (< 1GB); accessible without pmem_lock().
+ * (< 1GB).  The public allocator holds pmem_lock while this runs.
  */
 static int
 alloc_ram(size_t size, size_t alignment, struct hal_pmem *desc)
@@ -227,8 +245,9 @@ claim_fixed(const struct hal_pmem_request *request, struct hal_pmem *desc)
 	return HAL_OK;
 }
 
-int
-hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *desc)
+static int
+pmem_alloc_unlocked(const struct hal_pmem_request *request,
+		    struct hal_pmem *desc)
 {
 	struct hal_pmem result;
 	size_t alignment;
@@ -257,6 +276,15 @@ hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *desc)
 	return claim_fixed(request, desc);
 }
 
+int
+hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *desc)
+{
+	bool enabled = pmem_lock_enter();
+	int error = pmem_alloc_unlocked(request, desc);
+	pmem_lock_leave(enabled);
+	return error;
+}
+
 size_t
 hal_pmem_get_total_size(void)
 {
@@ -269,22 +297,25 @@ void hal_i386_space_memory_stats(uint32_t *, uint32_t *);
 void
 hal_memory_get_stats(struct hal_memory_stats *stats)
 {
+	bool enabled;
 	if (stats == NULL)
 		return;
 	hal_memset(stats, 0, sizeof(*stats));
+	enabled = pmem_lock_enter();
 	stats->physical_total = (size_t)phys_pages * PAGE_SIZE;
 	stats->physical_reserved = (size_t)reserved_pages * PAGE_SIZE;
 	stats->physical_allocated = (size_t)allocated_pages * PAGE_SIZE;
 	stats->physical_free = stats->physical_total -
 		stats->physical_reserved - stats->physical_allocated;
+	pmem_lock_leave(enabled);
 	hal_i386_task_memory_stats(&stats->task_count,
 				   &stats->task_stack_bytes);
 	hal_i386_space_memory_stats(&stats->space_count,
 				    &stats->page_table_count);
 }
 
-int
-hal_pmem_free(struct hal_pmem *desc)
+static int
+pmem_free_unlocked(struct hal_pmem *desc)
 {
 	uint32 start_page, end_page, i;
 	unsigned slot;
@@ -340,4 +371,13 @@ hal_pmem_free(struct hal_pmem *desc)
 	if (irq_enabled) hal_irq_enable();
 	hal_memset(desc, 0, sizeof(*desc));
 	return HAL_OK;
+}
+
+int
+hal_pmem_free(struct hal_pmem *desc)
+{
+	bool enabled = pmem_lock_enter();
+	int error = pmem_free_unlocked(desc);
+	pmem_lock_leave(enabled);
+	return error;
 }
