@@ -41,6 +41,7 @@ typedef unsigned long Mask;
 #define ConfigureNotify 22
 #define ConfigureRequest 23
 #define CWStackMode (1U<<6)
+#define CWCursor (1U<<14)
 #define KeyPressMask (1L<<0)
 #define KeyReleaseMask (1L<<1)
 #define ButtonPressMask (1L<<2)

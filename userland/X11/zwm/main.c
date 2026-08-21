@@ -1,6 +1,7 @@
 /* zwm - minimal reparenting window manager. SPDX-License-Identifier: Zlib */
 #include <X11/Xlib.h>
 #include <X11/Xzed.h>
+#include <X11/cursorfont.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -38,6 +39,7 @@ struct frame {
 	int y;
 	unsigned width;
 	unsigned height;
+	Cursor cursor;
 	char title[64];
 };
 
@@ -53,6 +55,11 @@ static GC background_gc;
 static unsigned background_width;
 static unsigned background_height;
 static XFontStruct *title_font;
+static Cursor cursor_normal;
+static Cursor cursor_horizontal;
+static Cursor cursor_vertical;
+static Cursor cursor_bottom_left;
+static Cursor cursor_bottom_right;
 
 static unsigned
 frame_width(const struct frame *frame)
@@ -64,6 +71,49 @@ static unsigned
 frame_height(const struct frame *frame)
 {
 	return frame->height + TITLE_HEIGHT + FRAME_BORDER;
+}
+
+static unsigned
+resize_edges_at(const struct frame *frame, int x, int y)
+{
+	unsigned edges = 0;
+	unsigned fw = frame_width(frame);
+	unsigned fh = frame_height(frame);
+
+	if (y >= (int)TITLE_HEIGHT && x < RESIZE_HIT)
+		edges |= EDGE_LEFT;
+	if (y >= (int)TITLE_HEIGHT && x >= (int)fw - RESIZE_HIT)
+		edges |= EDGE_RIGHT;
+	if (y >= (int)fh - RESIZE_HIT)
+		edges |= EDGE_BOTTOM;
+	return edges;
+}
+
+static Cursor
+cursor_for_edges(unsigned edges)
+{
+	if ((edges & (EDGE_LEFT | EDGE_BOTTOM)) ==
+	    (EDGE_LEFT | EDGE_BOTTOM))
+		return cursor_bottom_left;
+	if ((edges & (EDGE_RIGHT | EDGE_BOTTOM)) ==
+	    (EDGE_RIGHT | EDGE_BOTTOM))
+		return cursor_bottom_right;
+	if (edges & (EDGE_LEFT | EDGE_RIGHT))
+		return cursor_horizontal;
+	if (edges & EDGE_BOTTOM)
+		return cursor_vertical;
+	return cursor_normal;
+}
+
+static void
+set_resize_cursor(Display *display, struct frame *frame, int x, int y)
+{
+	Cursor cursor = cursor_for_edges(resize_edges_at(frame, x, y));
+
+	if (cursor != frame->cursor) {
+		XDefineCursor(display, frame->frame, cursor);
+		frame->cursor = cursor;
+	}
 }
 
 static char *
@@ -642,6 +692,10 @@ manage(Display *display, Window root, Window client)
 	XFree(title);
 	frame->frame = XCreateSimpleWindow(display, root, x, y,
 	    frame_width(frame), frame_height(frame), 0, 0, FRAME_FACE);
+	frame->cursor = cursor_normal;
+	XDefineCursor(display, frame->frame, cursor_normal);
+	/* Do not inherit a resize cursor after crossing into the client. */
+	XDefineCursor(display, client, cursor_normal);
 	XStoreName(display, frame->frame, frame->title);
 	frame->gc = XCreateGC(display, frame->frame, 0, NULL);
 	if (title_font != NULL)
@@ -677,6 +731,17 @@ main(int argc, char **argv)
 		return 1;
 	}
 	root = DefaultRootWindow(display);
+	cursor_normal = XCreateFontCursor(display, XC_left_ptr);
+	cursor_horizontal = XCreateFontCursor(display, XC_sb_h_double_arrow);
+	cursor_vertical = XCreateFontCursor(display, XC_sb_v_double_arrow);
+	cursor_bottom_left = XCreateFontCursor(display, XC_bottom_left_corner);
+	cursor_bottom_right = XCreateFontCursor(display, XC_bottom_right_corner);
+	if (!cursor_normal || !cursor_horizontal || !cursor_vertical ||
+	    !cursor_bottom_left || !cursor_bottom_right) {
+		fprintf(stderr, "zwm: cannot create resize cursors\n");
+		XCloseDisplay(display);
+		return 1;
+	}
 	title_font = XLoadQueryFont(display, "zed-unicode");
 	XSelectInput(display, root,
 	    SubstructureRedirectMask | SubstructureNotifyMask | ExposureMask);
@@ -712,7 +777,6 @@ main(int argc, char **argv)
 				int local_x = event.xbutton.x_root - frame->x;
 				int local_y = event.xbutton.y_root - frame->y;
 				unsigned fw = frame_width(frame);
-				unsigned fh = frame_height(frame);
 
 				activate(display, frame);
 				if (local_y >= 2 && local_y < (int)TITLE_HEIGHT &&
@@ -725,16 +789,16 @@ main(int argc, char **argv)
 				drag_start_y = event.xbutton.y_root;
 				drag_frame_x = frame->x; drag_frame_y = frame->y;
 				drag_width = frame->width; drag_height = frame->height;
-				drag_edges = 0;
-				/* The title bar has no left, right, or top resize frame. */
-				if (local_y >= (int)TITLE_HEIGHT && local_x < RESIZE_HIT)
-					drag_edges |= EDGE_LEFT;
-				if (local_y >= (int)TITLE_HEIGHT &&
-				    local_x >= (int)fw - RESIZE_HIT)
-					drag_edges |= EDGE_RIGHT;
-				if (local_y >= (int)fh - RESIZE_HIT) drag_edges |= EDGE_BOTTOM;
+				drag_edges = resize_edges_at(frame, local_x, local_y);
 			}
-		} else if (event.type == MotionNotify && drag != NULL) {
+		} else if (event.type == MotionNotify && drag == NULL) {
+			struct frame *frame = by_frame(event.xmotion.window);
+
+			if (frame != NULL)
+				set_resize_cursor(display, frame,
+				    event.xmotion.x_root - frame->x,
+				    event.xmotion.y_root - frame->y);
+		} else if (event.type == MotionNotify) {
 			int dx = event.xmotion.x_root - drag_start_x;
 			int dy = event.xmotion.y_root - drag_start_y;
 			int x = drag_frame_x, y = drag_frame_y;
@@ -763,12 +827,21 @@ main(int argc, char **argv)
 				    drag->x + CLIENT_X, drag->y + CLIENT_Y,
 				    drag->width, drag->height);
 		} else if (event.type == ButtonRelease) {
-			if (drag != NULL)
+			if (drag != NULL) {
 				decorate(display, drag);
+				set_resize_cursor(display, drag,
+				    event.xbutton.x_root - drag->x,
+				    event.xbutton.y_root - drag->y);
+			}
 			drag = NULL;
 		}
 	}
 
+	XFreeCursor(display, cursor_bottom_right);
+	XFreeCursor(display, cursor_bottom_left);
+	XFreeCursor(display, cursor_vertical);
+	XFreeCursor(display, cursor_horizontal);
+	XFreeCursor(display, cursor_normal);
 	XCloseDisplay(display);
 	return 0;
 }
