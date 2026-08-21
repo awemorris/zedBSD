@@ -25,6 +25,10 @@ int hal_page_unmap(hal_space_t s, void *v, size_t z)
 { (void)s; (void)v; (void)z; unmaps++; return HAL_OK; }
 int hal_page_map(hal_space_t s, void *v, hal_physaddr_t p, size_t z, uint32_t a)
 { (void)s; (void)v; (void)p; (void)z; (void)a; return HAL_OK; }
+int hal_page_prot(hal_space_t s, void *v, size_t z, uint32_t a)
+{ (void)s; (void)v; (void)z; (void)a; return HAL_OK; }
+void hal_fatal(const char *file, int line, const char *message)
+{ fprintf(stderr, "%s:%d: %s\n", file, line, message); abort(); }
 int hal_pmem_free(struct hal_pmem *p)
 { free((void *)p->vaddr); memset(p, 0, sizeof(*p)); frees++; return 0; }
 
@@ -37,17 +41,23 @@ static struct vm_page *make_page(struct vmspace *vm, struct vm_region *region,
 				 unsigned flags, uint8_t fill)
 {
 	struct vm_page *page = calloc(1, sizeof(*page));
-	page->pmem.vaddr = malloc(4096);
-	page->pmem.paddr = (hal_physaddr_t)(uintptr_t)page->pmem.vaddr &
+	struct vm_private_page *backing = calloc(1, sizeof(*backing));
+	assert(page != NULL && backing != NULL);
+	refcount_init(&backing->refs, 1);
+	backing->pmem.vaddr = malloc(4096);
+	backing->pmem.paddr = (hal_physaddr_t)(uintptr_t)backing->pmem.vaddr &
 	    ~(hal_physaddr_t)4095U;
-	page->pmem.size = 4096;
-	page->pmem.type = HAL_PMEM_TYPE_RAM;
-	memset(page->pmem.vaddr, fill, 4096);
+	backing->pmem.size = 4096;
+	backing->pmem.type = HAL_PMEM_TYPE_RAM;
+	backing->flags = flags | VM_PAGE_RESIDENT;
+	backing->swap_slot = SWAP_SLOT_NONE;
+	memset(backing->pmem.vaddr, fill, 4096);
 	page->address = region->start;
 	page->vm = vm;
 	page->region = region;
-	page->flags = flags | VM_PAGE_RESIDENT;
-	page->swap_slot = SWAP_SLOT_NONE;
+	page->flags = VM_MAPPING_MAPPED;
+	page->private_page = backing;
+	backing->mappings = page;
 	region->pages = page;
 	vm_page_track(page);
 	return page;
@@ -81,13 +91,13 @@ int main(void)
 	page = make_page(&vm, &dirty, VM_PAGE_DIRTY, 0x5a);
 	query_flags = HAL_PAGE_PRESENT;
 	assert(vm_reclaim_one(NULL) == 0);
-	assert((page->flags & VM_PAGE_SWAPPED) != 0);
-	assert((page->flags & VM_PAGE_RESIDENT) == 0);
-	assert(page->swap_slot != SWAP_SLOT_NONE && swap_data[123] == 0x5a);
+	assert((page->private_page->flags & VM_PAGE_SWAPPED) != 0);
+	assert((page->private_page->flags & VM_PAGE_RESIDENT) == 0);
+	assert(page->private_page->swap_slot != SWAP_SLOT_NONE &&
+	    swap_data[123] == 0x5a);
 	vm_reclaim_get_stats(&stats);
 	assert(stats.page_outs == 1 && stats.swapped == 1);
 	vm_page_untrack(page);
-	swap_free_slot(&backend, page->swap_slot);
 	vm_page_free_metadata(page);
 	assert(swap_shutdown(&backend) == 0);
 	puts("zedBSD VM reclaim/swap host tests: PASS");

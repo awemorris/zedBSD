@@ -38,6 +38,9 @@ struct vmspace;
 #define VM_PAGE_BUSY     0x0004U
 #define VM_PAGE_SWAPPED  0x0008U
 
+#define VM_MAPPING_COW    0x0100U
+#define VM_MAPPING_MAPPED 0x0200U
+
 #define VM_REGION_STACK     0x0001U
 #define VM_REGION_GUARD     0x0002U
 #define VM_REGION_IMMUTABLE 0x0004U
@@ -50,18 +53,26 @@ enum vm_region_backing {
 	VM_BACKING_FILE,
 };
 
-struct vm_page {
-	uintptr_t address;
+struct vm_private_page {
+	refcount_t refs;
 	struct hal_pmem pmem;
-	unsigned wire_count;
 	unsigned flags;
 	uint32_t swap_slot;
+	struct vm_page *mappings;
+	struct vm_private_page *queue_next;
+};
+
+struct vm_page {
+	uintptr_t address;
+	unsigned wire_count;
+	unsigned flags;
 	struct vmspace *vm;
 	struct vm_region *region;
+	struct vm_private_page *private_page;
+	struct vm_page *private_next;
 	struct vm_object_page *object_page;
 	struct vm_page *object_next;
 	struct vm_page *next;
-	struct vm_page *queue_next;
 };
 
 struct vm_region {
@@ -141,5 +152,12 @@ unsigned vmspace_count(void);
 int vmspace_set_address_limit(struct vmspace *, uint64_t);
 void vmspace_set_stack_limit(struct vmspace *, uint64_t);
 uint64_t vmspace_address_cap(void);
+
+uint32_t vm_page_effective_prot(const struct vm_page *);
+int vm_private_page_is_resident(const struct vm_page *);
+uintptr_t vm_private_page_vaddr(const struct vm_page *);
+void vm_page_replace_private(struct vm_page *, struct vm_private_page *);
+int vm_page_share_private(struct vm_page *, struct vm_page *);
+int vm_page_cow_reuse(struct vm_page *);
 
 #endif

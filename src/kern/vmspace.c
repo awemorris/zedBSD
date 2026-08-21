@@ -216,8 +216,51 @@ insert_region(struct vmspace *vm, struct vm_region *region)
 static int map_region(struct vmspace *, uintptr_t, size_t, uint32_t,
 		      enum vm_region_backing, struct file *, off_t, uintptr_t,
 		      size_t, unsigned, size_t, struct vm_region **);
-static int allocate_page_frame(struct vm_page *);
+static int allocate_page_frame(struct vm_private_page *, struct vm_page *);
 static int page_in(struct vm_page *);
+
+static struct vm_private_page *
+private_page_alloc(void)
+{
+	struct vm_private_page *backing = kern_calloc(1, sizeof(*backing));
+	if (backing == NULL)
+		return NULL;
+	refcount_init(&backing->refs, 1);
+	backing->swap_slot = SWAP_SLOT_NONE;
+	return backing;
+}
+
+static void
+private_page_attach_new(struct vm_page *page,
+	struct vm_private_page *backing)
+{
+	page->private_page = backing;
+	page->private_next = backing->mappings;
+	backing->mappings = page;
+}
+
+uint32_t
+vm_page_effective_prot(const struct vm_page *page)
+{
+	uint32_t prot = page->region->prot;
+	if ((page->flags & VM_MAPPING_COW) != 0)
+		prot &= ~HAL_SPACE_WRITE;
+	return prot;
+}
+
+int
+vm_private_page_is_resident(const struct vm_page *page)
+{
+	return page != NULL && page->private_page != NULL &&
+	    (page->private_page->flags & VM_PAGE_RESIDENT) != 0;
+}
+
+uintptr_t
+vm_private_page_vaddr(const struct vm_page *page)
+{
+	return page != NULL && page->private_page != NULL ?
+	    (uintptr_t)page->private_page->pmem.vaddr : 0;
+}
 
 struct vmspace *
 vmspace_create(void)
@@ -288,52 +331,48 @@ vmspace_fork(struct vmspace *source, struct vmspace **result)
 		for (source_page = source_region->pages; source_page != NULL;
 		     source_page = source_page->next) {
 			struct vm_page *copy_page;
-			uint32_t page_flags;
-			int mapped;
+			int mapped = HAL_OK;
 
-			if (source_page->flags & VM_PAGE_SWAPPED) {
-				error = page_in(source_page);
-				if (error != 0)
-					goto fail;
-			}
 			copy_page = vm_page_alloc_metadata();
 			if (copy_page == NULL) {
 				error = ENOMEM;
 				goto fail;
 			}
-			copy_page->swap_slot = SWAP_SLOT_NONE;
 			copy_page->vm = copy;
 			copy_page->region = copy_region;
 			copy_page->address = source_page->address;
-			copy_page->flags = VM_PAGE_BUSY;
-			error = allocate_page_frame(copy_page);
+			if (source_page->object_page != NULL) {
+				/* MAP_SHARED pages remain lazy in the child. */
+				vm_page_free_metadata(copy_page);
+				continue;
+			}
+			if (source_page->private_page == NULL) {
+				vm_page_free_metadata(copy_page);
+				error = EFAULT;
+				goto fail;
+			}
+			/* Read-only private mappings also need COW for later mprotect. */
+			error = vm_page_share_private(source_page, copy_page);
 			if (error != 0) {
 				vm_page_free_metadata(copy_page);
 				goto fail;
 			}
-			memcpy((void *)copy_page->pmem.vaddr,
-			    (const void *)source_page->pmem.vaddr, PAGE_SIZE);
-			page_flags = 0;
-			if (hal_page_query(source->space,
-			    (void *)source_page->address, &page_flags) ==
-			    HAL_OK && (page_flags & HAL_PAGE_DIRTY) != 0)
-				copy_page->flags |= VM_PAGE_DIRTY;
-			if (source_page->flags & VM_PAGE_DIRTY)
-				copy_page->flags |= VM_PAGE_DIRTY;
-			mapped = hal_page_map(copy->space,
-			    (void *)copy_page->address, copy_page->pmem.paddr,
-			    PAGE_SIZE, copy_region->prot);
+			if ((source_page->private_page->flags & VM_PAGE_RESIDENT) != 0 &&
+			    (source_page->flags & VM_MAPPING_MAPPED) != 0)
+				mapped = hal_page_map(copy->space,
+				    (void *)copy_page->address,
+				    source_page->private_page->pmem.paddr, PAGE_SIZE,
+				    vm_page_effective_prot(copy_page));
 			if (mapped != HAL_OK) {
-				(void)hal_pmem_free(&copy_page->pmem);
+				vm_page_untrack(copy_page);
 				vm_page_free_metadata(copy_page);
 				error = ENOMEM;
 				goto fail;
 			}
-			copy_page->flags &= ~VM_PAGE_BUSY;
-			copy_page->flags |= VM_PAGE_RESIDENT;
+			if ((source_page->flags & VM_MAPPING_MAPPED) != 0)
+				copy_page->flags |= VM_MAPPING_MAPPED;
 			copy_page->next = copy_region->pages;
 			copy_region->pages = copy_page;
-			vm_page_track(copy_page);
 		}
 	}
 	copy->entry = source->entry;
@@ -347,6 +386,19 @@ vmspace_fork(struct vmspace *source, struct vmspace **result)
 
 fail:
 	vmspace_free(copy);
+	/* Undo read-only COW downgrades that no surviving child still needs. */
+	for (source_region = source->regions; source_region != NULL;
+	     source_region = source_region->next) {
+		struct vm_page *source_page;
+		for (source_page = source_region->pages; source_page != NULL;
+		     source_page = source_page->next) {
+			if (source_page->private_page == NULL ||
+			    !(source_page->flags & VM_MAPPING_COW))
+				continue;
+			if (vm_page_cow_reuse(source_page) == ENOMEM)
+				HAL_FATAL("COW fork rollback protection failed");
+		}
+	}
 	return error;
 }
 
@@ -542,13 +594,34 @@ find_page(struct vm_region *region, uintptr_t address)
 }
 
 static int
-allocate_page_frame(struct vm_page *page)
+allocate_page_frame(struct vm_private_page *backing, struct vm_page *avoid)
 {
-	if (alloc_vm_page(&page->pmem) == HAL_OK)
+	if (alloc_vm_page(&backing->pmem) == HAL_OK)
 		return 0;
-	if (vm_reclaim_one(page) != 0 ||
-	    alloc_vm_page(&page->pmem) != HAL_OK)
+	if (vm_reclaim_one(avoid) != 0 ||
+	    alloc_vm_page(&backing->pmem) != HAL_OK)
 		return ENOMEM;
+	return 0;
+}
+
+static int
+map_private_page(struct vm_page *page)
+{
+	struct vm_private_page *backing = page->private_page;
+	int mapped;
+	if (backing == NULL || !(backing->flags & VM_PAGE_RESIDENT))
+		return EFAULT;
+	if (page->flags & VM_MAPPING_MAPPED)
+		return 0;
+	mapped = hal_page_map(page->vm->space, (void *)page->address,
+	    backing->pmem.paddr, PAGE_SIZE, vm_page_effective_prot(page));
+	if (mapped == HAL_ERR_NOMEM && vm_reclaim_one(page) == 0)
+		mapped = hal_page_map(page->vm->space, (void *)page->address,
+		    backing->pmem.paddr, PAGE_SIZE,
+		    vm_page_effective_prot(page));
+	if (mapped != HAL_OK)
+		return ENOMEM;
+	page->flags |= VM_MAPPING_MAPPED;
 	return 0;
 }
 
@@ -556,35 +629,26 @@ static int
 page_in(struct vm_page *page)
 {
 	struct swap_backend *backend = swap_system_backend();
+	struct vm_private_page *backing = page->private_page;
 	int error;
 
-	if (backend == NULL || !(page->flags & VM_PAGE_SWAPPED))
+	if (backing == NULL || backend == NULL ||
+	    !(backing->flags & VM_PAGE_SWAPPED))
 		return EIO;
-	page->flags |= VM_PAGE_BUSY;
-	error = allocate_page_frame(page);
+	backing->flags |= VM_PAGE_BUSY;
+	error = allocate_page_frame(backing, page);
 	if (error == 0)
-		error = swap_read_page(backend, page->swap_slot,
-				       (void *)page->pmem.vaddr);
-	if (error == 0) {
-		int mapped = hal_page_map(page->vm->space,
-			(void *)page->address, page->pmem.paddr, PAGE_SIZE,
-			page->region->prot);
-		if (mapped == HAL_ERR_NOMEM && vm_reclaim_one(page) == 0)
-			mapped = hal_page_map(page->vm->space,
-				(void *)page->address, page->pmem.paddr, PAGE_SIZE,
-				page->region->prot);
-		if (mapped != HAL_OK)
-			error = ENOMEM;
-	}
+		error = swap_read_page(backend, backing->swap_slot,
+				       (void *)backing->pmem.vaddr);
 	if (error != 0) {
-		if (page->pmem.size != 0)
-			(void)hal_pmem_free(&page->pmem);
-		page->flags &= ~VM_PAGE_BUSY;
+		if (backing->pmem.size != 0)
+			(void)hal_pmem_free(&backing->pmem);
+		backing->flags &= ~VM_PAGE_BUSY;
 		return error;
 	}
-	swap_free_slot(backend, page->swap_slot);
-	page->swap_slot = SWAP_SLOT_NONE;
-	page->flags &= ~(VM_PAGE_SWAPPED | VM_PAGE_BUSY);
+	swap_free_slot(backend, backing->swap_slot);
+	backing->swap_slot = SWAP_SLOT_NONE;
+	backing->flags &= ~(VM_PAGE_SWAPPED | VM_PAGE_BUSY);
 	/*
 	 * The swap slot was the only backing store for this page.  Once it is
 	 * released, a clean-looking resident page must not be discarded: CPU
@@ -592,9 +656,9 @@ page_in(struct vm_page *page)
 	 * anonymous memory as zero-filled data.  Treat the page as dirty until
 	 * it has been written to swap again.
 	 */
-	page->flags |= VM_PAGE_RESIDENT | VM_PAGE_DIRTY;
+	backing->flags |= VM_PAGE_RESIDENT | VM_PAGE_DIRTY;
 	vm_page_note_in(page);
-	return 0;
+	return map_private_page(page);
 }
 
 static int
@@ -609,7 +673,7 @@ fill_file_page(struct vm_region *region, struct vm_page *page)
 	off_t offset;
 	ssize_t count;
 
-	memset((void *)page->pmem.vaddr, 0, PAGE_SIZE);
+	memset((void *)page->private_page->pmem.vaddr, 0, PAGE_SIZE);
 	if (read_start >= read_end)
 		return (region->flags & VM_REGION_ELF_ZERO_TAIL) != 0 ? 0 : ENXIO;
 	length = read_end - read_start;
@@ -621,9 +685,63 @@ fill_file_page(struct vm_region *region, struct vm_page *page)
 	offset = region->file_offset +
 		(off_t)(read_start - region->data_start);
 	count = file_pread(region->file,
-		(void *)(page->pmem.vaddr + read_start - page->address),
+		(void *)(page->private_page->pmem.vaddr +
+		    read_start - page->address),
 		length, offset);
 	return count == (ssize_t)length ? 0 : EIO;
+}
+
+static int
+break_cow(struct vm_page *page)
+{
+	struct vm_private_page *old = page->private_page;
+	struct vm_private_page *fresh;
+	int mapped, was_mapped;
+
+	if ((page->flags & VM_MAPPING_COW) == 0)
+		return 0;
+	{
+		int reuse = vm_page_cow_reuse(page);
+		if (reuse != EAGAIN)
+			return reuse;
+	}
+	if ((old->flags & VM_PAGE_SWAPPED) != 0) {
+		int error = page_in(page);
+		if (error != 0)
+			return error;
+	}
+	fresh = private_page_alloc();
+	if (fresh == NULL)
+		return ENOMEM;
+	fresh->flags = VM_PAGE_BUSY;
+	if (allocate_page_frame(fresh, page) != 0) {
+		kern_free(fresh);
+		return ENOMEM;
+	}
+	memcpy((void *)fresh->pmem.vaddr, (const void *)old->pmem.vaddr,
+	    PAGE_SIZE);
+	fresh->flags = VM_PAGE_RESIDENT | VM_PAGE_DIRTY;
+	was_mapped = (page->flags & VM_MAPPING_MAPPED) != 0;
+	if (was_mapped) {
+		(void)hal_page_unmap(page->vm->space, (void *)page->address,
+		    PAGE_SIZE);
+		page->flags &= ~VM_MAPPING_MAPPED;
+	}
+	mapped = hal_page_map(page->vm->space, (void *)page->address,
+	    fresh->pmem.paddr, PAGE_SIZE, page->region->prot);
+	if (mapped != HAL_OK) {
+		if (was_mapped && hal_page_map(page->vm->space,
+		    (void *)page->address, old->pmem.paddr, PAGE_SIZE,
+		    vm_page_effective_prot(page)) == HAL_OK)
+			page->flags |= VM_MAPPING_MAPPED;
+		(void)hal_pmem_free(&fresh->pmem);
+		kern_free(fresh);
+		return ENOMEM;
+	}
+	vm_page_replace_private(page, fresh);
+	page->flags &= ~VM_MAPPING_COW;
+	page->flags |= VM_MAPPING_MAPPED;
+	return 0;
 }
 
 int
@@ -642,8 +760,22 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 	if (region == NULL || (region->prot & required) == 0)
 		return EFAULT;
 	page = find_page(region, page_address);
-	if (page != NULL)
-		return page->flags & VM_PAGE_SWAPPED ? page_in(page) : 0;
+	if (page != NULL) {
+		if (page->object_page != NULL)
+			return 0;
+		if (page->private_page == NULL)
+			return EFAULT;
+		if ((page->private_page->flags & VM_PAGE_SWAPPED) != 0) {
+			error = page_in(page);
+			if (error != 0)
+				return error;
+		} else if ((page->flags & VM_MAPPING_MAPPED) == 0) {
+			error = map_private_page(page);
+			if (error != 0)
+				return error;
+		}
+		return required == HAL_SPACE_WRITE ? break_cow(page) : 0;
+	}
 	if (region->object != NULL) {
 		struct vm_object_page *object_page;
 		off_t object_offset;
@@ -665,12 +797,10 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 			vm_object_fault_release(object_page);
 			return ENOMEM;
 		}
-		page->swap_slot = SWAP_SLOT_NONE;
 		page->vm = vm;
 		page->region = region;
 		page->address = page_address;
 		page->object_page = object_page;
-		page->pmem = object_page->pmem;
 		mapped = hal_page_map(vm->space, (void *)page_address,
 		    object_page->pmem.paddr, PAGE_SIZE, region->prot);
 		if (mapped != HAL_OK) {
@@ -678,7 +808,7 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 			vm_page_free_metadata(page);
 			return ENOMEM;
 		}
-		page->flags = VM_PAGE_RESIDENT;
+		page->flags = VM_PAGE_RESIDENT | VM_MAPPING_MAPPED;
 		page->next = region->pages;
 		region->pages = page;
 		vm_object_mapping_add(object_page, page);
@@ -687,11 +817,17 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 	page = vm_page_alloc_metadata();
 	if (page == NULL)
 		return ENOMEM;
-	page->swap_slot = SWAP_SLOT_NONE;
 	page->vm = vm;
 	page->region = region;
-	page->flags = VM_PAGE_BUSY;
-	if (allocate_page_frame(page) != 0) {
+	page->private_page = private_page_alloc();
+	if (page->private_page == NULL) {
+		vm_page_free_metadata(page);
+		return ENOMEM;
+	}
+	private_page_attach_new(page, page->private_page);
+	page->private_page->flags = VM_PAGE_BUSY;
+	if (allocate_page_frame(page->private_page, page) != 0) {
+		kern_free(page->private_page);
 		vm_page_free_metadata(page);
 		return ENOMEM;
 	}
@@ -699,24 +835,27 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 	if (region->backing == VM_BACKING_FILE)
 		error = fill_file_page(region, page);
 	else {
-		memset((void *)page->pmem.vaddr, 0, PAGE_SIZE);
+		memset((void *)page->private_page->pmem.vaddr, 0, PAGE_SIZE);
 		error = 0;
 	}
 	if (error == 0) {
+		page->private_page->flags = VM_PAGE_RESIDENT;
 		int mapped = hal_page_map(vm->space, (void *)page_address,
-			page->pmem.paddr, PAGE_SIZE, region->prot);
+			page->private_page->pmem.paddr, PAGE_SIZE, region->prot);
 		if (mapped == HAL_ERR_NOMEM && vm_reclaim_one(page) == 0)
 			mapped = hal_page_map(vm->space, (void *)page_address,
-				page->pmem.paddr, PAGE_SIZE, region->prot);
+				page->private_page->pmem.paddr, PAGE_SIZE, region->prot);
 		if (mapped != HAL_OK)
 			error = ENOMEM;
 	}
 	if (error != 0) {
-		(void)hal_pmem_free(&page->pmem);
+		(void)hal_pmem_free(&page->private_page->pmem);
+		kern_free(page->private_page);
 		vm_page_free_metadata(page);
 		return error;
 	}
-	page->flags = VM_PAGE_RESIDENT;
+	page->private_page->flags = VM_PAGE_RESIDENT;
+	page->flags = VM_MAPPING_MAPPED;
 	page->next = region->pages;
 	region->pages = page;
 	vm_page_track(page);
@@ -781,7 +920,8 @@ vmspace_wire_range(struct vmspace *vm, uintptr_t address, size_t size,
 			break;
 		region = vmspace_find_region(vm, page, 1);
 		entry = region != NULL ? find_page(region, page) : NULL;
-		if (entry == NULL || !(entry->flags & VM_PAGE_RESIDENT)) {
+		if (entry == NULL || (entry->object_page == NULL &&
+		    !vm_private_page_is_resident(entry))) {
 			error = EFAULT;
 			break;
 		}
@@ -850,14 +990,16 @@ copy_backing(struct vmspace *vm, uintptr_t user_address, void *kernel,
 		}
 		if (chunk > size)
 			chunk = size;
-		mapped = (void *)(page->pmem.vaddr + offset);
+		mapped = (void *)((page->object_page != NULL ?
+		    (uintptr_t)page->object_page->pmem.vaddr :
+		    vm_private_page_vaddr(page)) + offset);
 		if (to_user)
 		{
 			memcpy(mapped, bytes, chunk);
 			if (page->object_page != NULL)
 				vm_object_mark_dirty(page->object_page);
 			else
-				page->flags |= VM_PAGE_DIRTY;
+				page->private_page->flags |= VM_PAGE_DIRTY;
 		} else
 			memcpy(bytes, mapped, chunk);
 		bytes += chunk;
@@ -1004,18 +1146,15 @@ static void
 free_vm_page(struct vmspace *vm, struct vm_page *page)
 {
 	if (page->object_page != NULL) {
-		(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
+		if (page->flags & VM_MAPPING_MAPPED)
+			(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
 		vm_object_mapping_remove(page->object_page, page);
 		vm_page_free_metadata(page);
 		return;
 	}
-	vm_page_untrack(page);
-	if (page->flags & VM_PAGE_RESIDENT) {
+	if (page->flags & VM_MAPPING_MAPPED)
 		(void)hal_page_unmap(vm->space, (void *)page->address, PAGE_SIZE);
-		(void)hal_pmem_free(&page->pmem);
-	}
-	if ((page->flags & VM_PAGE_SWAPPED) && swap_system_backend() != NULL)
-		swap_free_slot(swap_system_backend(), page->swap_slot);
+	vm_page_untrack(page);
 	vm_page_free_metadata(page);
 }
 
@@ -1309,9 +1448,10 @@ vmspace_protect(struct vmspace *vm, uintptr_t start, size_t size,
 	for (region = first; region != NULL && region->start < end;
 	     region = region->next) {
 		for (page = region->pages; page != NULL; page = page->next)
-			if ((page->flags & VM_PAGE_RESIDENT) &&
+			if ((page->flags & VM_MAPPING_MAPPED) &&
 			    hal_page_prot(vm->space, (void *)page->address,
-				PAGE_SIZE, prot) != HAL_OK) {
+				PAGE_SIZE, (page->flags & VM_MAPPING_COW) ?
+				(prot & ~HAL_SPACE_WRITE) : prot) != HAL_OK) {
 				failed_region = region;
 				failed_page = page;
 				goto rollback;
@@ -1336,9 +1476,9 @@ rollback:
 		     rollback = rollback->next) {
 			if (region == failed_region && rollback == failed_page)
 				break;
-			if ((rollback->flags & VM_PAGE_RESIDENT) &&
+			if ((rollback->flags & VM_MAPPING_MAPPED) &&
 			    hal_page_prot(vm->space, (void *)rollback->address,
-				PAGE_SIZE, region->prot) != HAL_OK)
+				PAGE_SIZE, vm_page_effective_prot(rollback)) != HAL_OK)
 				HAL_FATAL("VM protection rollback failed");
 		}
 		if (region == failed_region)

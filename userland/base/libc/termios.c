@@ -166,7 +166,7 @@ openpty(int *master, int *slave, char *name, const struct termios *termios,
 		errno = EINVAL;
 		return -1;
 	}
-	m = posix_openpt(O_RDWR | O_NOCTTY);
+	m = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
 	if (m < 0)
 		return -1;
 	if (grantpt(m) != 0 || unlockpt(m) != 0 ||
@@ -175,7 +175,7 @@ openpty(int *master, int *slave, char *name, const struct termios *termios,
 		(void)close(m);
 		return -1;
 	}
-	s = open(path, O_RDWR | O_NOCTTY);
+	s = open(path, O_RDWR | O_NOCTTY | O_CLOEXEC);
 	if (s < 0) {
 		(void)close(m);
 		return -1;
@@ -198,7 +198,9 @@ login_tty(int descriptor)
 {
 	if (setsid() < 0 || ioctl(descriptor, TIOCSCTTY, 0) != 0 ||
 	    dup2(descriptor, 0) < 0 || dup2(descriptor, 1) < 0 ||
-	    dup2(descriptor, 2) < 0)
+	    dup2(descriptor, 2) < 0 ||
+	    fcntl(0, F_SETFD, 0) < 0 || fcntl(1, F_SETFD, 0) < 0 ||
+	    fcntl(2, F_SETFD, 0) < 0)
 		return -1;
 	if (descriptor > 2)
 		(void)close(descriptor);

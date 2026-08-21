@@ -59,7 +59,76 @@ void hal_fatal(const char *file, int line, const char *message)
 }
 
 void vm_page_track(struct vm_page *page) { (void)page; }
-void vm_page_untrack(struct vm_page *page) { (void)page; }
+void vm_page_untrack(struct vm_page *page)
+{
+	struct vm_private_page *backing = page->private_page;
+	struct vm_page **link;
+	if (backing == NULL)
+		return;
+	for (link = &backing->mappings; *link != NULL;
+	     link = &(*link)->private_next)
+		if (*link == page) {
+			*link = page->private_next;
+			break;
+		}
+	page->private_page = NULL;
+	if (!refcount_put(&backing->refs))
+		return;
+	if (backing->flags & VM_PAGE_RESIDENT)
+		(void)hal_pmem_free(&backing->pmem);
+	free(backing);
+}
+void vm_page_replace_private(struct vm_page *page,
+	struct vm_private_page *fresh)
+{
+	struct vm_private_page *old = page->private_page;
+	struct vm_page **link = &old->mappings;
+	while (*link != NULL && *link != page)
+		link = &(*link)->private_next;
+	assert(*link == page);
+	*link = page->private_next;
+	page->private_page = fresh;
+	page->private_next = fresh->mappings;
+	fresh->mappings = page;
+	if (refcount_put(&old->refs)) {
+		if (old->flags & VM_PAGE_RESIDENT)
+			(void)hal_pmem_free(&old->pmem);
+		free(old);
+	}
+}
+int vm_page_share_private(struct vm_page *source, struct vm_page *copy)
+{
+	struct vm_private_page *backing = source->private_page;
+	refcount_get(&backing->refs);
+	copy->private_page = backing;
+	copy->private_next = backing->mappings;
+	backing->mappings = copy;
+	source->flags |= VM_MAPPING_COW;
+	copy->flags |= VM_MAPPING_COW;
+	if ((source->flags & VM_MAPPING_MAPPED) != 0 &&
+	    hal_page_prot(source->vm->space, (void *)source->address, 4096,
+	    vm_page_effective_prot(source)) != HAL_OK) {
+		backing->mappings = copy->private_next;
+		copy->private_page = NULL;
+		copy->private_next = NULL;
+		(void)refcount_put(&backing->refs);
+		return ENOMEM;
+	}
+	return 0;
+}
+int vm_page_cow_reuse(struct vm_page *page)
+{
+	if (refcount_load(&page->private_page->refs) != 1)
+		return EAGAIN;
+	page->flags &= ~VM_MAPPING_COW;
+	if ((page->flags & VM_MAPPING_MAPPED) != 0 &&
+	    hal_page_prot(page->vm->space, (void *)page->address, 4096,
+	    vm_page_effective_prot(page)) != HAL_OK) {
+		page->flags |= VM_MAPPING_COW;
+		return ENOMEM;
+	}
+	return 0;
+}
 void vm_page_note_in(struct vm_page *page) { (void)page; page_ins++; }
 void vm_reclaim_note_fault(void) { }
 int vm_reclaim_one(struct vm_page *page) { (void)page; return ENOMEM; }
@@ -312,12 +381,14 @@ int main(void)
 	     page = page->next)
 		assert(page->wire_count == 0);
 	/* A swapped page has no PTE to protect; its region policy still changes. */
-	region->pages->flags &= ~VM_PAGE_RESIDENT;
-	region->pages->flags |= VM_PAGE_SWAPPED;
+	region->pages->flags &= ~VM_MAPPING_MAPPED;
+	region->pages->private_page->flags &= ~VM_PAGE_RESIDENT;
+	region->pages->private_page->flags |= VM_PAGE_SWAPPED;
 	assert(vmspace_protect(vm, 0x400000, 8192, HAL_SPACE_READ) == 0);
 	assert(pages_protected == 1);
-	region->pages->flags &= ~VM_PAGE_SWAPPED;
-	region->pages->flags |= VM_PAGE_RESIDENT;
+	region->pages->private_page->flags &= ~VM_PAGE_SWAPPED;
+	region->pages->private_page->flags |= VM_PAGE_RESIDENT;
+	region->pages->flags |= VM_MAPPING_MAPPED;
 	fail_protect = 1;
 	assert(vmspace_protect(vm, 0x400000, 8192,
 		HAL_SPACE_READ | HAL_SPACE_WRITE) == EINVAL);
@@ -727,15 +798,19 @@ int main(void)
 	page->address = region->start;
 	page->vm = vm;
 	page->region = region;
-	page->flags = VM_PAGE_SWAPPED;
-	page->swap_slot = 7;
+	page->private_page = calloc(1, sizeof(*page->private_page));
+	assert(page->private_page != NULL);
+	refcount_init(&page->private_page->refs, 1);
+	page->private_page->mappings = page;
+	page->private_page->flags = VM_PAGE_SWAPPED;
+	page->private_page->swap_slot = 7;
 	region->pages = page;
 	assert(vmspace_fault(vm, region->start, HAL_SPACE_READ) == 0);
-	assert((page->flags & VM_PAGE_RESIDENT) != 0);
-	assert((page->flags & VM_PAGE_DIRTY) != 0);
-	assert((page->flags & VM_PAGE_SWAPPED) == 0);
-	assert(page->swap_slot == SWAP_SLOT_NONE);
-	assert(((uint8_t *)page->pmem.vaddr)[123] == 0x6d);
+	assert((page->private_page->flags & VM_PAGE_RESIDENT) != 0);
+	assert((page->private_page->flags & VM_PAGE_DIRTY) != 0);
+	assert((page->private_page->flags & VM_PAGE_SWAPPED) == 0);
+	assert(page->private_page->swap_slot == SWAP_SLOT_NONE);
+	assert(((uint8_t *)page->private_page->pmem.vaddr)[123] == 0x6d);
 	assert(page_ins == 1 && swap_reads == 1 && swap_slots_freed == 1);
 
 	vmspace_free(vm);
@@ -743,6 +818,34 @@ int main(void)
 	assert(spaces_created == spaces_destroyed);
 	assert(pages_allocated == pages_freed + 1);
 	assert(commit_used == 0);
+
+	/* fork shares private storage read-only and separates it on first write. */
+	{
+		struct vmspace *parent = vmspace_create();
+		struct vmspace *child = NULL;
+		struct vm_region *parent_region;
+		struct vm_page *parent_page, *child_page;
+		char parent_value = 0, child_value = 0;
+		assert(parent != NULL);
+		assert(vmspace_map_anon(parent, 0x600000, 4096,
+		    HAL_SPACE_READ | HAL_SPACE_WRITE, &parent_region) == 0);
+		assert(vmspace_copy_to(parent, 0x600000, "P", 1) == 0);
+		parent_page = parent_region->pages;
+		assert(vmspace_fork(parent, &child) == 0 && child != NULL);
+		child_page = vmspace_find_region(child, 0x600000, 1)->pages;
+		assert(child_page->private_page == parent_page->private_page);
+		assert(refcount_load(&parent_page->private_page->refs) == 2);
+		assert((parent_page->flags & VM_MAPPING_COW) != 0);
+		assert((child_page->flags & VM_MAPPING_COW) != 0);
+		assert(vmspace_copy_to(child, 0x600000, "C", 1) == 0);
+		assert(child_page->private_page != parent_page->private_page);
+		assert(vmspace_copy_from(parent, &parent_value, 0x600000, 1) == 0);
+		assert(vmspace_copy_from(child, &child_value, 0x600000, 1) == 0);
+		assert(parent_value == 'P' && child_value == 'C');
+		vmspace_free(child);
+		vmspace_free(parent);
+		assert(commit_used == 0);
+	}
 
 	fail_space = 1;
 	assert(vmspace_create() == NULL);
