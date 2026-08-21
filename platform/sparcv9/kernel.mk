@@ -22,7 +22,7 @@ SPARCV9_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 SPARCV9_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias -mcmodel=medany \
 	-msoft-float -mno-app-regs -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables \
-	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werro
+	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werror
 
 SPARCV9_EARLY_SOURCES := src/hal/sparcv9/locore.S \
 	src/hal/sparcv9/trap-table.S src/hal/sparcv9/trap-entry.S \
@@ -308,7 +308,7 @@ SPARCV9_DYNAMIC_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias \
 	-mcmodel=medany -msoft-float -mno-app-regs -Os -ffreestanding -fPIC \
 	-fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-plt -ftls-model=global-dynamic \
-	-Wall -Wextra -Werro
+	-Wall -Wextra -Werror
 SPARCV9_DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c \
 	userland/base/libc/poll.c userland/base/libc/termios.c userland/base/libc/pthread.c \
 	userland/base/libc/shm.c userland/base/libc/semaphore.c userland/base/libc/mqueue.c \

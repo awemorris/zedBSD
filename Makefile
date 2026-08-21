@@ -103,7 +103,7 @@ override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 		$(USERLAND_$(program)_PLATFORMS)),$(program)))
 # Essential administrative tools are present even when an older config.mk
 # predates their package registration.
-override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) blkid)
+override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) blkid hostname)
 ZEDBSD_MISSING_PACKAGE_REQUIREMENTS := $(sort \
 	$(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 		$(foreach requirement,$(USERLAND_$(program)_REQUIRE),\

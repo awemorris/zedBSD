@@ -888,6 +888,21 @@ int getlogin_r(char *buffer, size_t size)
 	memcpy(buffer, login, sizeof(login));
 	return 0;
 }
+int gethostname(char *buffer, size_t size)
+{
+	size_t length = size;
+	if (buffer == NULL) { errno = EFAULT; return -1; }
+	if (size == 0) { errno = EINVAL; return -1; }
+	if (sysctlbyname("kern.hostname", buffer, &length, NULL, 0) != 0)
+		return -1;
+	buffer[size - 1U] = '\0';
+	return 0;
+}
+int sethostname(const char *name, size_t length)
+{
+	if (name == NULL) { errno = EFAULT; return -1; }
+	return sysctlbyname("kern.hostname", NULL, NULL, name, length);
+}
 char *ttyname(int fd)
 {
 	static char name[] = "/dev/console";
@@ -918,7 +933,8 @@ int uname(struct utsname *name)
 	if (name == NULL) { errno = EFAULT; return -1; }
 	memset(name, 0, sizeof(*name));
 	strcpy(name->sysname, "zedBSD");
-	strcpy(name->nodename, "zedbsd");
+	if (gethostname(name->nodename, sizeof(name->nodename)) != 0)
+		return -1;
 	strcpy(name->release, "0.0.1");
 	strcpy(name->version, "zedBSD 0.0.1");
 	strcpy(name->machine, machine);

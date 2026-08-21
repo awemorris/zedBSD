@@ -13,7 +13,7 @@ ARM64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 ARM64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 ARM64_CFLAGS := -march=armv8-a -mno-outline-atomics -mgeneral-regs-only -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
-	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werro
+	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werror
 
 ARM64_BOOT_C := src/hal/cpu-up.c src/hal/arm64/asm.c src/hal/arm64/lib.c \
 	src/hal/arm64/page.c src/hal/arm64/space.c \
@@ -69,7 +69,7 @@ ARM64_USER_CFLAGS := -march=armv8-a -mno-outline-atomics \
 	-ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-builtin -fno-common -ffunction-sections -fdata-sections \
-	-Os -Wall -Wextra -Werro
+	-Os -Wall -Wextra -Werror
 ARM64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfcn.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
 	userland/base/libc/termios.c \
 	userland/base/libc/pthread.c \
@@ -263,7 +263,7 @@ DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude -Iinclude/uapi -Ilibc/include \
 DYNAMIC_CFLAGS := -march=armv8-a -mno-outline-atomics -Os -ffreestanding \
 	-fPIC -fno-builtin -fno-stack-protector \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \
-	-ftls-model=global-dynamic -mtls-dialect=trad -Wall -Wextra -Werro
+	-ftls-model=global-dynamic -mtls-dialect=trad -Wall -Wextra -Werror
 DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c userland/base/libc/poll.c \
 	userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/shm.c \
 	userland/base/libc/semaphore.c userland/base/libc/mqueue.c userland/base/libc/dlfcn.c \

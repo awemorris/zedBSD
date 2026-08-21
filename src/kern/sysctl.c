@@ -2,6 +2,7 @@
 #include "kern/sysctl.h"
 #include "kern/buf.h"
 #include "kern/klog.h"
+#include "kern/lock.h"
 
 #include <errno.h>
 #include <hal/hal.h>
@@ -23,6 +24,7 @@ static const struct sysctl_leaf leaves[] = {
 	{{ CTL_KERN, KERN_MSGBUF, 0 }, 2, "kern.msgbuf"},
 	{{ CTL_KERN, KERN_MSGBUF_SIZE, 0 }, 2, "kern.msgbuf_size"},
 	{{ CTL_KERN, KERN_MSGBUF_DROPPED, 0 }, 2, "kern.msgbuf_dropped"},
+	{{ CTL_KERN, KERN_HOSTNAME, 0 }, 2, "kern.hostname"},
 	{{ CTL_VFS, VFS_BUFCACHE, VFS_BUFCACHE_MAX_BYTES }, 3,
 	 "vfs.bufcache.max_bytes"},
 	{{ CTL_VFS, VFS_BUFCACHE, VFS_BUFCACHE_CURRENT_BYTES }, 3,
@@ -33,7 +35,13 @@ static const struct sysctl_leaf leaves[] = {
 	 "vfs.bufcache.stats"},
 };
 
-void sysctl_init(void) { }
+static struct spinlock hostname_lock;
+static char hostname[ZEDBSD_HOST_NAME_MAX + 1U] = "zedbsd";
+
+void sysctl_init(void)
+{
+	spin_init(&hostname_lock, LOCK_RANK_DEVICE, "hostname");
+}
 
 static int
 oid_compare(const int *a, unsigned alen, const int *b, unsigned blen)
@@ -136,6 +144,33 @@ kern_sysctl(const int *name, unsigned namelen, void *oldp, size_t *oldlenp,
 		return sysctl_output(oldp, oldlenp, &cpus, sizeof(cpus));
 	}
 	if (namelen == 2 && name[0] == CTL_KERN) {
+		if (name[1] == KERN_HOSTNAME) {
+			unsigned long irq;
+			size_t length;
+			if (newp != NULL) {
+				const char *value = newp;
+				if (!superuser)
+					return EPERM;
+				if (newlen == 0 || newlen > ZEDBSD_HOST_NAME_MAX)
+					return EINVAL;
+				for (size_t i = 0; i < newlen; i++)
+					if (value[i] == '\0' || value[i] == '/' ||
+					    value[i] == ' ' || value[i] == '\t' ||
+					    value[i] == '\n')
+						return EINVAL;
+				irq = spin_lock_irqsave(&hostname_lock);
+				memcpy(hostname, value, newlen);
+				hostname[newlen] = '\0';
+				spin_unlock_irqrestore(&hostname_lock, irq);
+			} else if (newlen != 0) {
+				return EINVAL;
+			}
+			irq = spin_lock_irqsave(&hostname_lock);
+			length = strlen(hostname) + 1U;
+			error = sysctl_output(oldp, oldlenp, hostname, length);
+			spin_unlock_irqrestore(&hostname_lock, irq);
+			return error;
+		}
 		if (newp != NULL || newlen != 0)
 			return EPERM;
 		if (name[1] == KERN_MSGBUF_SIZE) {

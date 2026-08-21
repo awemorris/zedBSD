@@ -67,6 +67,8 @@ int usleep(useconds_t microseconds);
 int pause(void);
 char *getlogin(void);
 int getlogin_r(char *, size_t);
+int gethostname(char *, size_t);
+int sethostname(const char *, size_t);
 char *ttyname(int);
 int ttyname_r(int, char *, size_t);
 int isatty(int descriptor);

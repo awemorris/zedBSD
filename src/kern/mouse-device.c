@@ -24,6 +24,26 @@ static unsigned event_head, event_tail, event_used, event_sequence;
 static struct spinlock event_lock;
 static struct wait_queue event_waitq;
 static int mouse_ready;
+static int (*backend_start)(void);
+static void (*backend_stop)(void);
+static unsigned open_count;
+
+int
+mouse_device_set_backend(int (*start)(void), void (*stop)(void))
+{
+	unsigned long irq;
+	if (start == NULL || stop == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&event_lock);
+	if (backend_start != NULL || open_count != 0) {
+		spin_unlock_irqrestore(&event_lock, irq);
+		return EBUSY;
+	}
+	backend_start = start;
+	backend_stop = stop;
+	spin_unlock_irqrestore(&event_lock, irq);
+	return 0;
+}
 
 void
 mouse_input_report(uint32_t device_id, int32_t dx, int32_t dy,
@@ -35,6 +55,10 @@ mouse_input_report(uint32_t device_id, int32_t dx, int32_t dy,
 	if (!mouse_ready)
 		return;
 	irq = spin_lock_irqsave(&event_lock);
+	if (open_count == 0) {
+		spin_unlock_irqrestore(&event_lock, irq);
+		return;
+	}
 	if (event_used == MOUSE_EVENT_COUNT) {
 		event_tail = (event_tail + 1U) % MOUSE_EVENT_COUNT;
 		event_used--;
@@ -59,7 +83,43 @@ mouse_input_report(uint32_t device_id, int32_t dx, int32_t dy,
 static int
 mouse_open(struct file *file)
 {
-	return (file->f_flags & O_ACCMODE) == O_WRONLY ? EACCES : 0;
+	unsigned long irq;
+	int activate, error;
+	if ((file->f_flags & O_ACCMODE) == O_WRONLY)
+		return EACCES;
+	irq = spin_lock_irqsave(&event_lock);
+	if (backend_start == NULL) {
+		spin_unlock_irqrestore(&event_lock, irq);
+		return ENODEV;
+	}
+	activate = open_count++ == 0;
+	spin_unlock_irqrestore(&event_lock, irq);
+	if (!activate)
+		return 0;
+	error = backend_start();
+	if (error == 0)
+		return 0;
+	irq = spin_lock_irqsave(&event_lock);
+	open_count--;
+	spin_unlock_irqrestore(&event_lock, irq);
+	return error;
+}
+
+static int
+mouse_close(struct file *file)
+{
+	unsigned long irq;
+	int deactivate = 0;
+	(void)file;
+	irq = spin_lock_irqsave(&event_lock);
+	if (open_count != 0 && --open_count == 0) {
+		event_head = event_tail = event_used = 0;
+		deactivate = 1;
+	}
+	spin_unlock_irqrestore(&event_lock, irq);
+	if (deactivate)
+		backend_stop();
+	return 0;
 }
 
 static ssize_t
@@ -113,6 +173,7 @@ mouse_poll(struct file *file, short requested, short *returned)
 
 static const struct cdev_ops mouse_ops = {
 	.open = mouse_open,
+	.close = mouse_close,
 	.read = mouse_read,
 	.poll = mouse_poll,
 };
@@ -123,6 +184,9 @@ mouse_device_register(void)
 	spin_init(&event_lock, LOCK_RANK_DEVICE, "mouse input");
 	waitq_init(&event_waitq, "mouse input");
 	event_head = event_tail = event_used = event_sequence = 0;
+	backend_start = NULL;
+	backend_stop = NULL;
+	open_count = 0;
 	mouse_ready = 1;
 	return cdev_register("mouse", 0x00010002U, &mouse_ops, NULL);
 }

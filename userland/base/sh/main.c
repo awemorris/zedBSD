@@ -1589,11 +1589,15 @@ main(int argc, char **argv)
 	using_history();
 	for (;;) {
 		char cwd[256];
-		char prompt[sizeof(cwd) + 4U];
+		char hostname[65];
+		char prompt[sizeof(cwd) + sizeof(hostname) + 16U];
 		char *line;
 		if (getcwd(cwd, sizeof(cwd)) == NULL)
 			strcpy(cwd, "/");
-		(void)snprintf(prompt, sizeof(prompt), "%s $ ", cwd);
+		if (gethostname(hostname, sizeof(hostname)) != 0)
+			strcpy(hostname, "zedbsd");
+		(void)snprintf(prompt, sizeof(prompt), "root@%s:%s$ ", hostname,
+		    cwd);
 		line = readline(prompt);
 		if (line == NULL)
 			continue;

@@ -27,6 +27,8 @@
 #define KERN_MSGBUF         1
 #define KERN_MSGBUF_SIZE    2
 #define KERN_MSGBUF_DROPPED 3
+#define KERN_HOSTNAME       4
+#define ZEDBSD_HOST_NAME_MAX 64U
 
 struct zedbsd_bufcache_stats {
 	uint64_t max_bytes;

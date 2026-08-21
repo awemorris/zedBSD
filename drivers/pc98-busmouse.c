@@ -31,6 +31,7 @@
 #define PORTA_RIGHT_RELEASED 0x20U
 
 static uint32_t last_buttons;
+static int worker_started;
 
 static uint8_t
 inb(uint16_t port)
@@ -97,22 +98,36 @@ mouse_service(void *argument)
 	}
 }
 
-int
-zedbsd_pc98_busmouse_init(void)
+static int
+mouse_start(void)
 {
 	struct thread *worker;
 	int error;
-
-	/* Port A/B input, upper Port C output; keep IRQ disabled initially. */
-	outb(MOUSE_CONTROL, PPI_MODE);
-	outb(MOUSE_PORT_C, 0x10U);
 	last_buttons = 0;
-	error = kthread_create(mouse_service, NULL, SCHED_PRIORITY_DEFAULT,
-	    &worker);
-	if (error != 0)
-		return error;
-	thread_start(worker);
+	if (!worker_started) {
+		error = kthread_create(mouse_service, NULL, SCHED_PRIOR_LOW, &worker);
+		if (error != 0)
+			return error;
+		worker_started = 1;
+		thread_start(worker);
+	}
 	/* The task IRQ service unmasks IRQ13 when it first waits. */
 	outb(MOUSE_PORT_C, 0x00U);
 	return 0;
+}
+
+static void
+mouse_stop(void)
+{
+	outb(MOUSE_PORT_C, 0x10U);
+}
+
+int
+zedbsd_pc98_busmouse_init(void)
+{
+	/* Leave the periodic IRQ masked until /dev/mouse is opened. */
+	outb(MOUSE_CONTROL, PPI_MODE);
+	outb(MOUSE_PORT_C, 0x10U);
+	worker_started = 0;
+	return mouse_device_set_backend(mouse_start, mouse_stop);
 }

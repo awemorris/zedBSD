@@ -16,11 +16,11 @@ M68K_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 M68K_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 M68K_KERNEL_CFLAGS := -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
-	-fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werro
+	-fno-common -ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror
 M68K_USER_CFLAGS := -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-builtin -fno-common -ffunction-sections -fdata-sections \
-	-Os -Wall -Wextra -Werro
+	-Os -Wall -Wextra -Werror
 M68K_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -DZEDBSD_USER_ABI_M68K -DZEDBSD_USER_PAGE_SIZE=4096 \
 	-DZEDBSD_NO_PRINTF_FLOAT
