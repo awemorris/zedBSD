@@ -41,6 +41,7 @@
 #define XZED_KEYCODE_PAGE_DOWN 0xe7U
 #define XZED_KEYCODE_INSERT 0xe8U
 #define XZED_KEYCODE_DELETE 0xe9U
+#define XZED_ICON_PATH_ATOM 0x5a000001U
 #define CURSOR_WIDTH 16
 #define CURSOR_HEIGHT 16
 
@@ -78,6 +79,7 @@ struct window {
 	int mapped;
 	uint32_t *pixels;
 	char name[64];
+	char icon_path[160];
 };
 struct graphics_context { uint32_t id,foreground,font; int owner; };
 struct font_resource { uint32_t id; int owner; };
@@ -257,10 +259,10 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 		if((w=find_window(s,rd32(q+4,c->order)))!=NULL){uint8_t r[32];memset(r,0,32);r[1]=24;wr32(r+8,ROOT_XID,c->order);wr16(r+12,(uint16_t)w->x,c->order);wr16(r+14,(uint16_t)w->y,c->order);wr16(r+16,w->width,c->order);wr16(r+18,w->height,c->order);wr16(r+20,w->border,c->order);simple_reply(c,r,32);return 0;}break;
 	case 15: /* QueryTree: return mapped direct children in stacking order. */
 		if((w=find_window(s,rd32(q+4,c->order)))!=NULL){uint8_t r[32+MAX_WINDOWS*4];unsigned i,count=0;memset(r,0,sizeof(r));wr32(r+8,ROOT_XID,c->order);wr32(r+12,w->parent,c->order);for(i=1;i<s->window_count;i++)if(s->windows[i].id&&s->windows[i].mapped&&s->windows[i].parent==w->id){wr32(r+32+count*4,s->windows[i].id,c->order);count++;}wr16(r+16,(uint16_t)count,c->order);simple_reply(c,r,32+count*4);return 0;}break;
-	case 18: /* ChangeProperty: retain the standard WM_NAME string. */
-		if(n>=24&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){uint32_t property=rd32(q+8,c->order),type=rd32(q+12,c->order),count=rd32(q+20,c->order);if(property==39&&type==31&&q[16]==8&&count<=n-24){size_t copy=count<sizeof(w->name)-1?count:sizeof(w->name)-1;memcpy(w->name,q+24,copy);w->name[copy]=0;}return 0;}break;
-	case 20: /* GetProperty: enough for WM_NAME/XA_STRING. */
-		if(n>=24&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){uint8_t r[32+64];size_t count=0,padded=0;memset(r,0,sizeof(r));if(rd32(q+8,c->order)==39&&w->name[0]&&(rd32(q+12,c->order)==0||rd32(q+12,c->order)==31)){count=strlen(w->name);padded=(count+3U)&~3U;r[1]=8;wr32(r+8,31,c->order);wr32(r+16,(uint32_t)count,c->order);memcpy(r+32,w->name,count);}simple_reply(c,r,32+padded);return 0;}break;
+	case 18: /* ChangeProperty: retain desktop string properties. */
+		if(n>=24&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){uint32_t property=rd32(q+8,c->order),type=rd32(q+12,c->order),count=rd32(q+20,c->order);char*target=NULL;size_t capacity=0;if(property==39){target=w->name;capacity=sizeof(w->name);}else if(property==XZED_ICON_PATH_ATOM){target=w->icon_path;capacity=sizeof(w->icon_path);}if(target&&type==31&&q[16]==8&&count<=n-24){size_t copy=count<capacity-1?count:capacity-1;memcpy(target,q+24,copy);target[copy]=0;}return 0;}break;
+	case 20: /* GetProperty: WM_NAME and Xzed desktop strings. */
+		if(n>=24&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){uint8_t r[32+160];uint32_t property=rd32(q+8,c->order);const char*value=NULL;size_t count=0,padded=0;memset(r,0,sizeof(r));if(property==39)value=w->name;else if(property==XZED_ICON_PATH_ATOM)value=w->icon_path;if(value&&value[0]&&(rd32(q+12,c->order)==0||rd32(q+12,c->order)==31)){count=strlen(value);padded=(count+3U)&~3U;r[1]=8;wr32(r+8,31,c->order);wr32(r+16,(uint32_t)count,c->order);memcpy(r+32,value,count);}simple_reply(c,r,32+padded);return 0;}break;
 	case 38: /* QueryPointer */
 		{uint8_t r[32];struct window *h=hit(s,s->pointer_x,s->pointer_y);memset(r,0,32);r[1]=1;wr32(r+8,ROOT_XID,c->order);wr32(r+12,h->id==ROOT_XID?0:h->id,c->order);wr16(r+16,(uint16_t)s->pointer_x,c->order);wr16(r+18,(uint16_t)s->pointer_y,c->order);wr16(r+20,(uint16_t)(s->pointer_x-h->x),c->order);wr16(r+22,(uint16_t)(s->pointer_y-h->y),c->order);wr16(r+24,(uint16_t)s->key_state,c->order);simple_reply(c,r,32);return 0;}
 	case 42: s->focus=rd32(q+4,c->order);return 0;

@@ -14,16 +14,16 @@
 #define MAX_XPM_COLORS 64
 /* Keep each PolyFillRectangle request within zedBSD's 2 KiB AF_UNIX packet. */
 #define XPM_RECT_BATCH 128
-#define FRAME_BORDER 6U
-#define TITLE_HEIGHT 30U
-#define TITLE_BUTTON_SIZE 24U
+#define FRAME_BORDER 2U
+#define TITLE_HEIGHT 26U
 #define CLIENT_X ((int)FRAME_BORDER)
 #define CLIENT_Y ((int)TITLE_HEIGHT)
 
-/* Exact three-color palette sampled from the CDE reference decoration. */
-#define CDE_FACE 0xb24d7aUL
-#define CDE_HIGHLIGHT 0xdcadc2UL
-#define CDE_SHADOW 0x57253bUL
+/* Flat, dark decoration used by the zedBSD desktop. */
+#define FRAME_FACE 0x202833UL
+#define FRAME_HIGHLIGHT 0x394450UL
+#define FRAME_EDGE 0x090d11UL
+#define FRAME_SYMBOL 0xd3d9dfUL
 
 struct frame {
 	Window client;
@@ -47,7 +47,7 @@ static Pixmap background_pixmap;
 static GC background_gc;
 static unsigned background_width;
 static unsigned background_height;
-static Font title_font;
+static XFontStruct *title_font;
 
 static unsigned
 frame_width(const struct frame *frame)
@@ -354,125 +354,65 @@ decorate(Display *display, struct frame *frame)
 {
 	unsigned fw = frame_width(frame);
 	unsigned fh = frame_height(frame);
-	unsigned menu_x = 6U;
-	unsigned minimize_x = fw - 54U;
-	unsigned maximize_x = fw - 30U;
-	unsigned title_panel_width = fw - 84U;
 	size_t title_length = strlen(frame->title);
-	unsigned title_capacity = title_panel_width > 16U ?
-	    (title_panel_width - 16U) / 8U : 0;
+	unsigned title_capacity = fw > 176U ? (fw - 176U) / 8U : 0;
+	int minimize_x = (int)fw - 72;
+	int maximize_x = (int)fw - 44;
+	int close_x = (int)fw - 16;
 	int title_x;
-	XRectangle highlights[24];
-	XRectangle shadows[28];
-	int nh = 0;
-	int ns = 0;
+	XRectangle symbols[24];
+	int symbol_count = 0;
+	int offset;
 
-	if (fw < 96U || fh < TITLE_HEIGHT + FRAME_BORDER)
+	if (fw < 112U || fh < TITLE_HEIGHT + FRAME_BORDER)
 		return;
 
 	if (title_length > title_capacity)
 		title_length = title_capacity;
 
-	/* Repaint the base first.  The remaining rectangles reproduce the
-	 * reference's one-pixel bevels at the same relative coordinates. */
-	XSetForeground(display, frame->gc, CDE_FACE);
+	/* A black one-pixel outer edge encloses the title and client window. */
+	XSetForeground(display, frame->gc, FRAME_EDGE);
 	XFillRectangle(display, frame->frame, frame->gc, 0, 0, fw, fh);
+	XSetForeground(display, frame->gc, FRAME_FACE);
+	XFillRectangle(display, frame->frame, frame->gc, 1, 1, fw - 2U,
+	    TITLE_HEIGHT - 2U);
+	XSetForeground(display, frame->gc, FRAME_HIGHLIGHT);
+	XFillRectangle(display, frame->frame, frame->gc, 2, 1, fw - 4U, 1);
+	XSync(display, False);
 
-	/* Outer top/left highlight and the upper resize-handle divisions. */
-	highlights[nh++] = (XRectangle){ 0, 0, (unsigned short)fw, 1 };
-	highlights[nh++] = (XRectangle){ 0, 0, 1, (unsigned short)fh };
-	highlights[nh++] = (XRectangle){ 1, 0, 1, (unsigned short)(fh - 1U) };
-	highlights[nh++] = (XRectangle){ 2, 1, 27, 1 };
-	highlights[nh++] = (XRectangle){ 30, 1,
-	    (unsigned short)(fw - 61U), 1 };
-	highlights[nh++] = (XRectangle){ (short)(fw - 30U), 1, 29, 1 };
-	highlights[nh++] = (XRectangle){ 30, 1, 1, 5 };
-	highlights[nh++] = (XRectangle){ (short)(fw - 30U), 1, 1, 5 };
-
-	/* Four 24-pixel title panels: menu, title, minimize, maximize. */
-	highlights[nh++] = (XRectangle){ 6, 6,
-	    (unsigned short)(fw - 11U), 1 };
-	highlights[nh++] = (XRectangle){ 6, 6, 1, TITLE_BUTTON_SIZE };
-	highlights[nh++] = (XRectangle){ 30, 6, 1, TITLE_BUTTON_SIZE };
-	highlights[nh++] = (XRectangle){ (short)minimize_x, 6, 1,
-	    TITLE_BUTTON_SIZE };
-	highlights[nh++] = (XRectangle){ (short)maximize_x, 6, 1,
-	    TITLE_BUTTON_SIZE };
-
-	/* Inner right/bottom edge and the lower resize-handle divisions. */
-	highlights[nh++] = (XRectangle){ (short)(fw - 6U), 6, 1,
-	    (unsigned short)(fh - 11U) };
-	highlights[nh++] = (XRectangle){ 6, (short)(fh - 6U),
-	    (unsigned short)(fw - 11U), 1 };
-	highlights[nh++] = (XRectangle){ 30, (short)(fh - 5U), 1, 4 };
-	highlights[nh++] = (XRectangle){ (short)(fw - 30U),
-	    (short)(fh - 5U), 1, 4 };
-
-	/* Exact raised symbols from the reference image. */
-	highlights[nh++] = (XRectangle){ (short)(menu_x + 4U), 16, 16, 1 };
-	highlights[nh++] = (XRectangle){ (short)(menu_x + 4U), 16, 1, 4 };
-	highlights[nh++] = (XRectangle){ (short)(minimize_x + 10U), 16, 4, 1 };
-	highlights[nh++] = (XRectangle){ (short)(minimize_x + 10U), 16, 1, 4 };
-	highlights[nh++] = (XRectangle){ (short)(maximize_x + 4U), 10, 16, 1 };
-	highlights[nh++] = (XRectangle){ (short)(maximize_x + 4U), 10, 1, 16 };
-	XSetForeground(display, frame->gc, CDE_HIGHLIGHT);
-	XFillRectangles(display, frame->frame, frame->gc, highlights, nh);
-
-	/* Outer right/bottom shadow. */
-	shadows[ns++] = (XRectangle){ (short)(fw - 1U), 1, 1,
-	    (unsigned short)(fh - 1U) };
-	shadows[ns++] = (XRectangle){ (short)(fw - 2U), 2, 1,
-	    (unsigned short)(fh - 2U) };
-	shadows[ns++] = (XRectangle){ 1, (short)(fh - 1U),
-	    (unsigned short)(fw - 1U), 1 };
-	shadows[ns++] = (XRectangle){ 2, (short)(fh - 2U), 28, 1 };
-	shadows[ns++] = (XRectangle){ 31, (short)(fh - 2U),
-	    (unsigned short)(fw - 61U), 1 };
-	shadows[ns++] = (XRectangle){ (short)(fw - 29U),
-	    (short)(fh - 2U), 29, 1 };
-
-	/* Inner left/top shadow and upper resize-handle divisions. */
-	shadows[ns++] = (XRectangle){ 5, 5, 1,
-	    (unsigned short)(fh - 10U) };
-	shadows[ns++] = (XRectangle){ 5, 5, 25, 1 };
-	shadows[ns++] = (XRectangle){ 31, 5,
-	    (unsigned short)(fw - 61U), 1 };
-	shadows[ns++] = (XRectangle){ (short)(fw - 29U), 5, 24, 1 };
-	shadows[ns++] = (XRectangle){ 29, 1, 1, 5 };
-	shadows[ns++] = (XRectangle){ (short)(fw - 31U), 1, 1, 5 };
-
-	/* Right and bottom edge of each title panel. */
-	shadows[ns++] = (XRectangle){ 29, 7, 1, 23 };
-	shadows[ns++] = (XRectangle){ (short)(fw - 55U), 7, 1, 23 };
-	shadows[ns++] = (XRectangle){ (short)(fw - 31U), 7, 1, 23 };
-	shadows[ns++] = (XRectangle){ (short)(fw - 7U), 7, 1, 23 };
-	shadows[ns++] = (XRectangle){ 7, 29, 23, 1 };
-	shadows[ns++] = (XRectangle){ 31, 29,
-	    (unsigned short)(fw - 85U), 1 };
-	shadows[ns++] = (XRectangle){ (short)(fw - 53U), 29, 23, 1 };
-	shadows[ns++] = (XRectangle){ (short)(fw - 29U), 29, 23, 1 };
-
-	/* Lower resize-handle divisions. */
-	shadows[ns++] = (XRectangle){ 29, (short)(fh - 5U), 1, 4 };
-	shadows[ns++] = (XRectangle){ (short)(fw - 31U),
-	    (short)(fh - 5U), 1, 4 };
-
-	/* Exact dark edges of the three title-bar symbols. */
-	shadows[ns++] = (XRectangle){ (short)(menu_x + 19U), 17, 1, 3 };
-	shadows[ns++] = (XRectangle){ (short)(menu_x + 5U), 19, 15, 1 };
-	shadows[ns++] = (XRectangle){ (short)(minimize_x + 13U), 17, 1, 3 };
-	shadows[ns++] = (XRectangle){ (short)(minimize_x + 11U), 19, 3, 1 };
-	shadows[ns++] = (XRectangle){ (short)(maximize_x + 19U), 11, 1, 15 };
-	shadows[ns++] = (XRectangle){ (short)(maximize_x + 5U), 25, 15, 1 };
-	XSetForeground(display, frame->gc, CDE_SHADOW);
-	XFillRectangles(display, frame->frame, frame->gc, shadows, ns);
+	/* Flat monochrome controls: minimize, maximize, and close. */
+	XSetForeground(display, frame->gc, FRAME_SYMBOL);
+	symbols[symbol_count++] = (XRectangle) {
+	    (short)(minimize_x - 4), 15, 9, 1
+	};
+	symbols[symbol_count++] = (XRectangle) {
+	    (short)(maximize_x - 4), 9, 9, 1
+	};
+	symbols[symbol_count++] = (XRectangle) {
+	    (short)(maximize_x - 4), 9, 1, 9
+	};
+	symbols[symbol_count++] = (XRectangle) {
+	    (short)(maximize_x + 4), 9, 1, 9
+	};
+	symbols[symbol_count++] = (XRectangle) {
+	    (short)(maximize_x - 4), 17, 9, 1
+	};
+	for (offset = -4; offset <= 4; offset++) {
+		symbols[symbol_count++] = (XRectangle) {
+		    (short)(close_x + offset), (short)(13 + offset), 1, 1
+		};
+		symbols[symbol_count++] = (XRectangle) {
+		    (short)(close_x + offset), (short)(13 - offset), 1, 1
+		};
+	}
+	XFillRectangles(display, frame->frame, frame->gc, symbols,
+	    symbol_count);
 	XSync(display, False);
 
 	if (title_length != 0) {
-		title_x = 30 +
-		    ((int)title_panel_width - (int)title_length * 8) / 2;
+		title_x = ((int)fw - (int)title_length * 8) / 2;
 		XSetForeground(display, frame->gc, WhitePixel(display, 0));
-		XDrawString(display, frame->frame, frame->gc, title_x, 26,
+		XDrawString(display, frame->frame, frame->gc, title_x, 20,
 		    frame->title, (int)title_length);
 	}
 	XSync(display, False);
@@ -516,11 +456,11 @@ manage(Display *display, Window root, Window client)
 	}
 	XFree(title);
 	frame->frame = XCreateSimpleWindow(display, root, x, y,
-	    frame_width(frame), frame_height(frame), 0, 0, CDE_FACE);
+	    frame_width(frame), frame_height(frame), 0, 0, FRAME_EDGE);
 	XStoreName(display, frame->frame, frame->title);
 	frame->gc = XCreateGC(display, frame->frame, 0, NULL);
-	if (title_font != 0)
-		XSetFont(display, frame->gc, title_font);
+	if (title_font != NULL)
+		XSetFont(display, frame->gc, title_font->fid);
 	XSelectInput(display, frame->frame,
 	    ExposureMask | ButtonPressMask | ButtonReleaseMask |
 	    PointerMotionMask | StructureNotifyMask);
@@ -550,7 +490,7 @@ main(int argc, char **argv)
 		return 1;
 	}
 	root = DefaultRootWindow(display);
-	title_font = XLoadFont(display, "zed-unicode");
+	title_font = XLoadQueryFont(display, "zed-unicode");
 	XSelectInput(display, root,
 	    SubstructureRedirectMask | SubstructureNotifyMask | ExposureMask);
 	load_background(display, root);

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Zlib
  */
 #include <X11/Xlib.h>
+#include <X11/Xzed.h>
 #include <X11/keysym.h>
 
 #include <errno.h>
@@ -547,6 +548,8 @@ initialize(struct terminal *terminal)
 	terminal->window = XCreateSimpleWindow(terminal->display, root, 20, 8,
 	    width, height, 0, 0, 0x000000);
 	XStoreName(terminal->display, terminal->window, "xzedterm");
+	XzedSetIconPath(terminal->display, terminal->window,
+	    "/usr/share/xzedterm/icons/app-icon.xpm");
 	terminal->gc = XCreateGC(terminal->display, terminal->window, 0, NULL);
 	terminal->font = XLoadQueryFont(terminal->display, "zed-unicode");
 	if (terminal->font == NULL)
