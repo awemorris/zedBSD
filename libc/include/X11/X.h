@@ -18,6 +18,9 @@ typedef unsigned long Mask;
 #define True 1
 #define None 0L
 #define CurrentTime 0L
+#define PropModeReplace 0
+#define XA_STRING ((Atom)31)
+#define XA_WM_NAME ((Atom)39)
 #define KeyPress 2
 #define KeyRelease 3
 #define ButtonPress 4
