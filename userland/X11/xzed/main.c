@@ -157,7 +157,7 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 	case 43: {uint8_t r[32];memset(r,0,32);r[1]=0;wr32(r+8,s->focus,c->order);simple_reply(c,r,32);return 0;}
 	case 55: case 56: case 60: return 0; /* GC bookkeeping is not yet visible. */
 	case 65: /* PolyLine */
-		if(n>=16){struct zedbsd_graphics_line l;size_t off;int x=0,y=0;memset(&l,0,sizeof(l));for(off=12;off+4<=n;off+=4){int nx=(int16_t)rd16(q+off,c->order),ny=(int16_t)rd16(q+off+2,c->order);if(off!=12){l.x0=(uint32_t)x;l.y0=(uint32_t)y;l.x1=(uint32_t)nx;l.y1=(uint32_t)ny;l.color=0xffffff;(void)ioctl(s->graphics,ZEDBSD_GRAPHICS_DRAW_LINE,&l);}x=nx;y=ny;}(void)flush_rect(s,0,0,s->mode.width,s->mode.height);}return 0;
+		if(n>=16&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){struct zedbsd_graphics_line l;size_t off;int x=0,y=0;memset(&l,0,sizeof(l));for(off=12;off+4<=n;off+=4){int nx=w->x+(int16_t)rd16(q+off,c->order),ny=w->y+(int16_t)rd16(q+off+2,c->order);if(off!=12){l.x0=(uint32_t)x;l.y0=(uint32_t)y;l.x1=(uint32_t)nx;l.y1=(uint32_t)ny;l.color=0xffffff;(void)ioctl(s->graphics,ZEDBSD_GRAPHICS_DRAW_LINE,&l);}x=nx;y=ny;}(void)flush_rect(s,0,0,s->mode.width,s->mode.height);}return 0;
 	case 70: /* PolyFillRectangle */
 		if(n>=12&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){size_t off;for(off=12;off+8<=n;off+=8)fill(s,w->x+(int16_t)rd16(q+off,c->order),w->y+(int16_t)rd16(q+off+2,c->order),rd16(q+off+4,c->order),rd16(q+off+6,c->order),0xffffff);(void)flush_rect(s,0,0,s->mode.width,s->mode.height);}return 0;
 	case 101: /* GetKeyboardMapping */ {uint8_t r[32+4*248];unsigned i;memset(r,0,sizeof(r));r[1]=1;for(i=0;i<q[5]&&i<248;i++){uint32_t ks=(uint32_t)(q[4]+i);wr32(r+32+i*4,ks,c->order);}simple_reply(c,r,32+(size_t)q[5]*4);return 0;}
@@ -173,11 +173,9 @@ static void close_client(struct server *s,unsigned i)
 static void read_client(struct server *s,unsigned i)
 {
 	struct client *c=&s->clients[i];uint8_t temp[4096];ssize_t nr;
-	while((nr=read(c->fd,temp,sizeof(temp)))>0){if(c->used+(size_t)nr>INPUT_CAP){close_client(s,i);return;}if(c->used+(size_t)nr>c->capacity){size_t z=c->capacity?c->capacity*2:4096;while(z<c->used+(size_t)nr)z*=2;c->input=realloc(c->input,z);if(!c->input){close_client(s,i);return;}c->capacity=z;}memcpy(c->input+c->used,temp,(size_t)nr);c->used+=(size_t)nr;}
-	/* zedBSD nonblocking local sockets may report an empty read while the
-	 * connection is still live.  POLLHUP owns peer teardown; zero here only
-	 * means that no complete input is available in this drain pass. */
-	if(nr<0)return;
+	while((nr=recv(c->fd,temp,sizeof(temp),MSG_DONTWAIT))>0){if(c->used+(size_t)nr>INPUT_CAP){close_client(s,i);return;}if(c->used+(size_t)nr>c->capacity){size_t z=c->capacity?c->capacity*2:4096;while(z<c->used+(size_t)nr)z*=2;c->input=realloc(c->input,z);if(!c->input){close_client(s,i);return;}c->capacity=z;}memcpy(c->input+c->used,temp,(size_t)nr);c->used+=(size_t)nr;}
+	if(nr==0){close_client(s,i);return;}
+	if(nr<0&&errno!=EAGAIN&&errno!=EINTR){close_client(s,i);return;}
 	for(;;){size_t need;if(!c->setup){uint16_t authn,authd;if(c->used<12)return;if(c->input[0]!='l'&&c->input[0]!='B'){close_client(s,i);return;}c->order=c->input[0]=='B';authn=rd16(c->input+6,c->order);authd=rd16(c->input+8,c->order);need=12+((authn+3)&~3U)+((authd+3)&~3U);if(c->used<need)return;if(setup_reply(s,c)){close_client(s,i);return;}c->setup=1;}else{uint16_t units;if(c->used<4)return;units=rd16(c->input+2,c->order);if(!units){close_client(s,i);return;}need=(size_t)units*4;if(c->used<need)return;(void)request(s,i,c->input,need);}memmove(c->input,c->input+need,c->used-need);c->used-=need;}
 }
 

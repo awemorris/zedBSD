@@ -773,6 +773,7 @@ unix_connect_resolved(struct socket *socket, struct socket *listener_socket,
 	refcount_init(&connection->refs, 2);
 	spin_init(&connection->lock, LOCK_RANK_UNIX_CONNECTION,
 	    "unix connection");
+	error = 0;
 	irq = spin_lock_irqsave(&listener->socket.lock);
 	if (!listener->listening) {
 		error = ECONNREFUSED;
