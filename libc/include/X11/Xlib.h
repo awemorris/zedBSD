@@ -1,0 +1,37 @@
+#ifndef _X11_XLIB_H_
+#define _X11_XLIB_H_
+#include <X11/X.h>
+typedef struct _XDisplay Display;
+typedef struct _XGC *GC;
+typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window window; } XAnyEvent;
+typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window window; int x,y,width,height,count; } XExposeEvent;
+typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window window,root,subwindow; Time time; int x,y,x_root,y_root; unsigned int state,keycode; Bool same_screen; } XKeyEvent;
+typedef XKeyEvent XButtonEvent;
+typedef XKeyEvent XMotionEvent;
+typedef union _XEvent { int type; XAnyEvent xany; XExposeEvent xexpose; XKeyEvent xkey; XButtonEvent xbutton; XMotionEvent xmotion; long pad[24]; } XEvent;
+Display *XOpenDisplay(const char *);
+int XCloseDisplay(Display *);
+int XDefaultScreen(Display *);
+Window XRootWindow(Display *,int);
+unsigned long XBlackPixel(Display *,int);
+unsigned long XWhitePixel(Display *,int);
+Window XCreateSimpleWindow(Display *,Window,int,int,unsigned int,unsigned int,unsigned int,unsigned long,unsigned long);
+int XSelectInput(Display *,Window,long);
+int XMapWindow(Display *,Window);
+int XUnmapWindow(Display *,Window);
+int XDestroyWindow(Display *,Window);
+GC XCreateGC(Display *,Drawable,unsigned long,void *);
+int XFreeGC(Display *,GC);
+int XSetForeground(Display *,GC,unsigned long);
+int XFillRectangle(Display *,Drawable,GC,int,int,unsigned int,unsigned int);
+int XDrawLine(Display *,Drawable,GC,int,int,int,int);
+int XNextEvent(Display *,XEvent *);
+int XPending(Display *);
+int XFlush(Display *);
+int XSync(Display *,Bool);
+#define DefaultScreen(d) XDefaultScreen(d)
+#define RootWindow(d,s) XRootWindow((d),(s))
+#define DefaultRootWindow(d) XRootWindow((d),XDefaultScreen(d))
+#define BlackPixel(d,s) XBlackPixel((d),(s))
+#define WhitePixel(d,s) XWhitePixel((d),(s))
+#endif
