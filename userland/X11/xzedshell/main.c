@@ -63,6 +63,7 @@ struct desktop_shell {
 	unsigned task_count;
 	struct icon icons[ICON_CACHE_SIZE];
 	unsigned icon_count;
+	char clock[6];
 	int request_budget;
 };
 
@@ -292,7 +293,7 @@ window_icon_path(struct desktop_shell *shell, Window window, char **path)
 	return 0;
 }
 
-static void
+static int
 refresh_tasks(struct desktop_shell *shell)
 {
 	Window root_return;
@@ -300,12 +301,15 @@ refresh_tasks(struct desktop_shell *shell)
 	Window *children = NULL;
 	unsigned count = 0;
 	unsigned index;
+	struct task next[MAX_TASKS];
+	unsigned next_count = 0;
+	int changed;
 
-	shell->task_count = 0;
+	memset(next, 0, sizeof(next));
 	if (!XQueryTree(shell->display, shell->root, &root_return,
 	    &parent_return, &children, &count))
-		return;
-	for (index = 0; index < count && shell->task_count < MAX_TASKS;
+		return 0;
+	for (index = 0; index < count && next_count < MAX_TASKS;
 	    index++) {
 		struct task *task;
 		char *name = NULL;
@@ -318,8 +322,7 @@ refresh_tasks(struct desktop_shell *shell)
 			XFree(name);
 			continue;
 		}
-		task = &shell->tasks[shell->task_count++];
-		memset(task, 0, sizeof(*task));
+		task = &next[next_count++];
 		strncpy(task->name, name, sizeof(task->name) - 1U);
 		if (window_icon_path(shell, children[index], &path)) {
 			task->icon = cached_icon(shell, path);
@@ -328,6 +331,19 @@ refresh_tasks(struct desktop_shell *shell)
 		XFree(name);
 	}
 	XFree(children);
+	changed = next_count != shell->task_count;
+	if (!changed)
+		for (index = 0; index < next_count; index++)
+			if (strcmp(next[index].name, shell->tasks[index].name) != 0 ||
+			    next[index].icon != shell->tasks[index].icon) {
+				changed = 1;
+				break;
+			}
+	if (changed) {
+		memcpy(shell->tasks, next, sizeof(next));
+		shell->task_count = next_count;
+	}
+	return changed;
 }
 
 static void
@@ -448,6 +464,19 @@ draw_monitor(struct desktop_shell *shell, int x)
 }
 
 static void
+draw_clock(struct desktop_shell *shell, const char *clock)
+{
+	unsigned status_x = shell->width > STATUS_WIDTH ?
+	    shell->width - STATUS_WIDTH : shell->width;
+
+	if (status_x >= shell->width)
+		return;
+	fill(shell, BAR_BACKGROUND, (int)status_x + 49, 2,
+	    shell->width - status_x - 49U, TASKBAR_HEIGHT - 2U);
+	draw_text(shell, (int)status_x + 60, 20, clock, 5);
+}
+
+static void
 redraw(struct desktop_shell *shell)
 {
 	char clock[32];
@@ -483,8 +512,24 @@ redraw(struct desktop_shell *shell)
 		draw_monitor(shell, (int)status_x + 28);
 		fill(shell, BAR_BORDER, (int)status_x + 48, 2, 1,
 		    TASKBAR_HEIGHT - 2U);
-		draw_text(shell, (int)status_x + 60, 20, clock, 5);
+		draw_clock(shell, clock);
 	}
+	strncpy(shell->clock, clock, sizeof(shell->clock));
+	shell->clock[sizeof(shell->clock) - 1U] = '\0';
+	x_finish(shell);
+}
+
+static void
+update_clock(struct desktop_shell *shell)
+{
+	char clock[32];
+
+	clock_text(clock, sizeof(clock));
+	if (strcmp(clock, shell->clock) == 0)
+		return;
+	draw_clock(shell, clock);
+	strncpy(shell->clock, clock, sizeof(shell->clock));
+	shell->clock[sizeof(shell->clock) - 1U] = '\0';
 	x_finish(shell);
 }
 
@@ -532,7 +577,12 @@ main(void)
 		    strerror(errno));
 		return 1;
 	}
+	(void)refresh_tasks(&shell);
+	redraw(&shell);
 	while (running) {
+		int exposed = 0;
+		int tasks_changed;
+
 		descriptor = (struct pollfd){ ConnectionNumber(shell.display),
 		    POLLIN, 0 };
 		(void)poll(&descriptor, 1, 1000);
@@ -542,11 +592,16 @@ main(void)
 				running = 0;
 				break;
 			}
+			if (event.type == Expose)
+				exposed = 1;
 		}
 		if (!running)
 			break;
-		refresh_tasks(&shell);
-		redraw(&shell);
+		tasks_changed = refresh_tasks(&shell);
+		if (exposed || tasks_changed)
+			redraw(&shell);
+		else
+			update_clock(&shell);
 	}
 	XDestroyWindow(shell.display, shell.window);
 	XFreeGC(shell.display, shell.gc);

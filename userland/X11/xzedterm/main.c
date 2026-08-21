@@ -48,6 +48,11 @@ struct terminal {
 	uint32_t background;
 	struct cell cells[MAX_COLUMNS * MAX_ROWS];
 	uint8_t dirty[MAX_ROWS];
+	uint16_t dirty_first[MAX_ROWS];
+	uint16_t dirty_last[MAX_ROWS];
+	unsigned drawn_cursor_column;
+	unsigned drawn_cursor_row;
+	int cursor_drawn;
 	int parser_state;
 	int parameters[CSI_PARAMETERS];
 	int parameter_index;
@@ -100,6 +105,34 @@ blank_cell(struct terminal *terminal, unsigned column, unsigned row)
 }
 
 static void
+damage(struct terminal *terminal, unsigned row, unsigned first, unsigned last)
+{
+	if (row >= terminal->rows || first >= terminal->columns)
+		return;
+	if (last >= terminal->columns)
+		last = terminal->columns - 1U;
+	if (!terminal->dirty[row]) {
+		terminal->dirty[row] = 1;
+		terminal->dirty_first[row] = (uint16_t)first;
+		terminal->dirty_last[row] = (uint16_t)last;
+	} else {
+		if (first < terminal->dirty_first[row])
+			terminal->dirty_first[row] = (uint16_t)first;
+		if (last > terminal->dirty_last[row])
+			terminal->dirty_last[row] = (uint16_t)last;
+	}
+}
+
+static void
+damage_all(struct terminal *terminal)
+{
+	unsigned row;
+
+	for (row = 0; row < terminal->rows; row++)
+		damage(terminal, row, 0, terminal->columns - 1U);
+}
+
+static void
 erase_range(struct terminal *terminal, unsigned row, unsigned first,
     unsigned last)
 {
@@ -111,7 +144,7 @@ erase_range(struct terminal *terminal, unsigned row, unsigned first,
 		last = terminal->columns - 1U;
 	for (column = first; column <= last; column++)
 		blank_cell(terminal, column, row);
-	terminal->dirty[row] = 1;
+	damage(terminal, row, first, last);
 }
 
 static void
@@ -129,7 +162,7 @@ scroll_up(struct terminal *terminal)
 	memmove(terminal->cells, terminal->cells + terminal->columns,
 	    (terminal->rows - 1U) * terminal->columns * sizeof(terminal->cells[0]));
 	erase_range(terminal, terminal->rows - 1U, 0, terminal->columns - 1U);
-	memset(terminal->dirty, 1, terminal->rows);
+	damage_all(terminal);
 }
 
 static void
@@ -180,7 +213,8 @@ put_codepoint(struct terminal *terminal, uint32_t codepoint)
 		cell->background = terminal->background;
 		cell->continuation = 1;
 	}
-	terminal->dirty[terminal->cursor_row] = 1;
+	damage(terminal, terminal->cursor_row, terminal->cursor_column,
+	    terminal->cursor_column + width - 1U);
 	terminal->cursor_column += width;
 	if (terminal->cursor_column >= terminal->columns) {
 		terminal->cursor_column = 0;
@@ -391,21 +425,29 @@ terminal_message(struct terminal *terminal, const char *message)
 }
 
 static void
-draw_row(struct terminal *terminal, unsigned row)
+draw_row(struct terminal *terminal, unsigned row, unsigned first,
+    unsigned last)
 {
 	unsigned column;
 	XChar2b text[MAX_COLUMNS];
 
+	if (first != 0U && cell_at(terminal, first, row)->continuation)
+		first--;
+	if (last + 1U < terminal->columns &&
+	    cell_at(terminal, last + 1U, row)->continuation)
+		last++;
+
 	XSetForeground(terminal->display, terminal->gc, 0x000000);
 	x_request(terminal);
-	XFillRectangle(terminal->display, terminal->window, terminal->gc, 0,
-	    (int)(row * CELL_HEIGHT), terminal->columns * CELL_WIDTH, CELL_HEIGHT);
+	XFillRectangle(terminal->display, terminal->window, terminal->gc,
+	    (int)(first * CELL_WIDTH), (int)(row * CELL_HEIGHT),
+	    (last - first + 1U) * CELL_WIDTH, CELL_HEIGHT);
 	x_request(terminal);
 
-	for (column = 0; column < terminal->columns;) {
+	for (column = first; column <= last;) {
 		unsigned first = column;
 		uint32_t background = cell_at(terminal, column, row)->background;
-		while (column < terminal->columns &&
+		while (column <= last &&
 		    cell_at(terminal, column, row)->background == background)
 			column++;
 		if (background != 0) {
@@ -418,7 +460,7 @@ draw_row(struct terminal *terminal, unsigned row)
 		}
 	}
 
-	for (column = 0; column < terminal->columns;) {
+	for (column = first; column <= last;) {
 		unsigned first;
 		unsigned scan;
 		int count = 0;
@@ -436,7 +478,7 @@ draw_row(struct terminal *terminal, unsigned row)
 		first = column;
 		foreground = cell_at(terminal, column, row)->foreground;
 		scan = column;
-		while (scan < terminal->columns) {
+		while (scan <= last) {
 			struct cell *cell = cell_at(terminal, scan, row);
 			if (!cell->continuation &&
 			    (cell->codepoint == ' ' || cell->foreground != foreground))
@@ -464,9 +506,13 @@ redraw(struct terminal *terminal)
 {
 	unsigned row;
 
+	if (terminal->cursor_drawn)
+		damage(terminal, terminal->drawn_cursor_row,
+		    terminal->drawn_cursor_column, terminal->drawn_cursor_column);
 	for (row = 0; row < terminal->rows; row++)
 		if (terminal->dirty[row])
-			draw_row(terminal, row);
+			draw_row(terminal, row, terminal->dirty_first[row],
+			    terminal->dirty_last[row]);
 	XSetForeground(terminal->display, terminal->gc, 0xffffff);
 	x_request(terminal);
 	XFillRectangle(terminal->display, terminal->window, terminal->gc,
@@ -474,6 +520,9 @@ redraw(struct terminal *terminal)
 	    (int)((terminal->cursor_row + 1U) * CELL_HEIGHT - 2U),
 	    CELL_WIDTH, 2);
 	x_request(terminal);
+	terminal->drawn_cursor_column = terminal->cursor_column;
+	terminal->drawn_cursor_row = terminal->cursor_row;
+	terminal->cursor_drawn = 1;
 	x_finish(terminal);
 }
 
@@ -521,7 +570,6 @@ initialize(struct terminal *terminal)
 	unsigned width, height;
 	int x, y;
 	struct winsize winsize;
-	unsigned row;
 	extern char **environ;
 
 	memset(terminal, 0, sizeof(*terminal));
@@ -568,8 +616,7 @@ initialize(struct terminal *terminal)
 		snprintf(message, sizeof(message),
 		    "xzedterm: cannot start /bin/sh: %s\r\n", strerror(errno));
 		terminal_message(terminal, message);
-		for (row = 0; row < terminal->rows; row++)
-			terminal->dirty[row] = 1;
+		damage_all(terminal);
 		return 0;
 	}
 	if (terminal->child == 0) {
@@ -578,8 +625,7 @@ initialize(struct terminal *terminal)
 		execve(arguments[0], arguments, environ);
 		_exit(127);
 	}
-	for (row = 0; row < terminal->rows; row++)
-		terminal->dirty[row] = 1;
+	damage_all(terminal);
 	return 0;
 }
 
@@ -627,7 +673,7 @@ main(void)
 				break;
 			}
 			if (event.type == Expose) {
-				memset(terminal.dirty, 1, terminal.rows);
+				damage_all(&terminal);
 				redraw(&terminal);
 			} else if (event.type == KeyPress)
 				(void)send_key(&terminal, &event.xkey);

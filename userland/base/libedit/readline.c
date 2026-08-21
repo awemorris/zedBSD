@@ -149,12 +149,51 @@ cursor_left(size_t columns)
 }
 
 static void
-redraw(const char *prompt, const char *line, size_t length, size_t point)
+cursor_right(size_t columns)
 {
-	(void)write_all("\r\033[2K", 5);
-	(void)write_all(prompt, strlen(prompt));
-	(void)write_all(line, length);
-	cursor_left(length - point);
+	char sequence[3U * sizeof(size_t) + 4U];
+	size_t at = sizeof(sequence);
+
+	if (columns == 0U)
+		return;
+	sequence[--at] = 'C';
+	do {
+		sequence[--at] = (char)('0' + columns % 10U);
+		columns /= 10U;
+	} while (columns != 0U);
+	sequence[--at] = '[';
+	sequence[--at] = '\033';
+	(void)write_all(sequence + at, sizeof(sequence) - at);
+}
+
+static void
+move_cursor(size_t from, size_t to)
+{
+	if (to < from)
+		cursor_left(from - to);
+	else
+		cursor_right(to - from);
+}
+
+static void
+update_display(const char *line, size_t old_length, size_t old_point,
+    size_t length, size_t point, size_t changed_from)
+{
+	size_t drawn_to;
+
+	if (changed_from == (size_t)-1) {
+		move_cursor(old_point, point);
+		return;
+	}
+	move_cursor(old_point, changed_from);
+	(void)write_all(line + changed_from, length - changed_from);
+	if (old_length > length) {
+		size_t spaces = old_length - length;
+		while (spaces-- != 0U)
+			(void)write_all(" ", 1);
+	}
+	drawn_to = old_length > length ? old_length : length;
+	move_cursor(drawn_to, point);
 }
 
 static int
@@ -249,6 +288,9 @@ readline(const char *prompt)
 		ssize_t count = read(STDIN_FILENO, &byte, 1);
 		enum edit_key key = EDIT_NONE;
 		HIST_ENTRY *entry;
+		size_t old_length = length;
+		size_t old_point = point;
+		size_t changed_from = (size_t)-1;
 		if (count < 0 && errno == EINTR)
 			continue;
 		if (count <= 0) {
@@ -273,20 +315,25 @@ readline(const char *prompt)
 		else if (key == EDIT_DELETE && point < length) {
 			memmove(line + point, line + point + 1U, length - point);
 			length--;
+			changed_from = point;
 		} else if (key == EDIT_UP) {
 			entry = previous_history();
 			if (entry != NULL && !replace_line(&line, &capacity, &length,
 			    &point, entry->line))
 				break;
+			if (entry != NULL)
+				changed_from = 0;
 		} else if (key == EDIT_DOWN) {
 			entry = next_history();
 			if (entry != NULL) {
 				if (!replace_line(&line, &capacity, &length, &point,
 				    entry->line))
 					break;
+				changed_from = 0;
 			} else if (history_position == history_length) {
 				length = point = 0;
 				line[0] = '\0';
+				changed_from = 0;
 			}
 		} else if (key != EDIT_NONE) {
 			/* Cursor-only key. */
@@ -309,24 +356,29 @@ readline(const char *prompt)
 			if (point < length) {
 				memmove(line + point, line + point + 1U, length - point);
 				length--;
+				changed_from = point;
 			}
 		} else if (byte == 8 || byte == 0x7f) {
 			if (point != 0) {
 				memmove(line + point - 1U, line + point, length - point + 1U);
 				point--;
 				length--;
+				changed_from = point;
 			}
 		} else if (byte == 11) {
 			length = point;
 			line[length] = '\0';
+			changed_from = point;
 		} else if (byte == 21) {
 			memmove(line, line + point, length - point + 1U);
 			length -= point;
 			point = 0;
+			changed_from = 0;
 		} else if (byte >= 0x20 && byte != 0x7f) {
 			if (!grow(&line, &capacity, length + 2U))
 				break;
 			memmove(line + point + 1U, line + point, length - point + 1U);
+			changed_from = point;
 			line[point++] = (char)byte;
 			length++;
 		} else {
@@ -335,7 +387,8 @@ readline(const char *prompt)
 		rl_line_buffer = line;
 		rl_point = (int)point;
 		rl_end = (int)length;
-		redraw(prompt, line, length, point);
+		update_display(line, old_length, old_point, length, point,
+		    changed_from);
 	}
 	if (terminal)
 		(void)tcsetattr(STDIN_FILENO, TCSANOW, &saved);
