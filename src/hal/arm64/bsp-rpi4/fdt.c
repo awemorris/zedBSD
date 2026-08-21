@@ -173,7 +173,11 @@ commit_node(struct fdt_node *node, const struct fdt_node *parent,
 		if (error != FDT_OK || size == 0) return FDT_E_CELLS;
 		error = translate(parent, base, &base);
 		if (error != FDT_OK) return error;
-		if (node->is_uart && info->uart_base == 0) info->uart_base = base;
+		if (node->is_uart && info->uart_base == 0) {
+			info->uart_base = base;
+			info->uart_irq = decode_irq(node->interrupts,
+			    node->interrupt_count);
+		}
 		if (node->is_mailbox && info->mailbox_base == 0) info->mailbox_base = base;
 		if (node->is_sdhci && info->sdhci_base == 0) {
 			info->sdhci_base = base;

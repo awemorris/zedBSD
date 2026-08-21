@@ -427,7 +427,88 @@ sched_clock_cpu(hal_cpu_id_t id, uint64_t now)
 		sched_yield();
 }
 
-void kernel_yield(void) { sched_yield(); }
+void kernel_yield_task(void) { sched_yield(); }
+
+void
+sched_wait_task(void)
+{
+	bool enabled = hal_irq_disable();
+	struct thread *thread = curthread;
+	struct sched_cpu *cpu;
+	unsigned long ignored;
+
+	if (thread == NULL || (thread->flags & THREAD_FLAG_IDLE) != 0 ||
+	    thread->sched.cpu != hal_cpu_current())
+		HAL_FATAL("invalid task wait");
+	cpu = sched_cpu_state(thread->sched.cpu);
+	ignored = spin_lock_irqsave(&cpu->lock);
+	(void)ignored;
+	if (thread->notify_pending != 0) {
+		thread->notify_pending = 0;
+		spin_unlock(&cpu->lock);
+		if (enabled)
+			hal_irq_enable();
+		return;
+	}
+	if (thread->state != THREAD_RUNNING)
+		HAL_FATAL("waiting task is not running");
+	thread->state = THREAD_SLEEPING;
+	thread->sched.wakeup_tick = 0;
+	spin_unlock(&cpu->lock);
+	switch_without_enqueue();
+	if (enabled)
+		hal_irq_enable();
+}
+
+void
+sched_notify_task(hal_task_t task)
+{
+	struct thread *thread;
+	struct sched_cpu *cpu;
+	unsigned long irq;
+	hal_cpu_id_t id;
+	int runnable = 0;
+
+	if (task == NULL)
+		return;
+	thread = hal_task_get_private(task);
+	if (thread == NULL)
+		return;
+	for (;;) {
+		id = (hal_cpu_id_t)atomic_raw_load_acquire(
+		    (volatile unsigned *)&thread->sched.cpu);
+		if (id >= scheduler_cpu_count)
+			return;
+		cpu = sched_cpu_state(id);
+		irq = spin_lock_irqsave(&cpu->lock);
+		if (id == thread->sched.cpu)
+			break;
+		spin_unlock_irqrestore(&cpu->lock, irq);
+	}
+	if ((thread->sched.need_migrate & SCHED_MIGRATING) != 0) {
+		thread->sched.need_migrate |= SCHED_WAKE_PENDING;
+		thread->notify_pending = 1;
+	} else if (thread->state == THREAD_SLEEPING) {
+		queue_remove_thread(cpu, thread);
+		thread->state = THREAD_RUNNABLE;
+		thread->sched.wakeup_tick = 0;
+		thread->sched.quantum = SCHED_QUANTUM_TICKS;
+		queue_append(&cpu->run[thread->sched.priority], thread,
+		    SCHED_QUEUE_RUN);
+		cpu->need_resched = 1;
+		runnable = 1;
+	} else if (thread->state == THREAD_RUNNING ||
+	    thread->state == THREAD_RUNNABLE) {
+		/* Preserve a notification delivered before kernel_wait_task(). */
+		thread->notify_pending = 1;
+	}
+	spin_unlock_irqrestore(&cpu->lock, irq);
+	if (runnable)
+		notify_cpu(id);
+}
+
+void kernel_wait_task(void) { sched_wait_task(); }
+void kernel_notify_task(hal_task_t task) { sched_notify_task(task); }
 
 void
 sched_sleep(uint64_t timeout_tick)

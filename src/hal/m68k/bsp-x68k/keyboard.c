@@ -5,6 +5,7 @@
 #include "keyboard.h"
 #include "keyboard-map.h"
 #include "mmio.h"
+#include "../../cons-wait.h"
 
 #define X68K_KEYBOARD_VECTOR 0x4c
 #define X68K_KEYBOARD_QUEUE  64U
@@ -30,6 +31,7 @@ static struct x68k_keyboard_state keyboard;
 static unsigned events[X68K_KEYBOARD_QUEUE];
 static unsigned event_head, event_tail;
 static uint32_t overflow_count, receive_error_count;
+static struct hal_cons_wait_queue input_waiters;
 
 static void
 enqueue_raw(uint8_t raw)
@@ -62,9 +64,17 @@ receive_one(void)
 static void
 keyboard_interrupt(int irq, hal_irq_ack_t acknowledge, void *argument)
 {
+	struct hal_cons_wait_entry *waiters = NULL;
+	bool enabled;
+
 	(void)irq;
 	(void)argument;
+	enabled = hal_cons_wait_queue_lock(&input_waiters);
 	receive_one();
+	if (event_head != event_tail)
+		waiters = hal_cons_wait_queue_detach_all(&input_waiters);
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
+	hal_cons_wait_queue_notify_all(waiters);
 	hal_irq_send_eoi(acknowledge);
 }
 
@@ -80,19 +90,6 @@ send_command(uint8_t command)
 	return -1;
 }
 
-static void
-poll_receiver(void)
-{
-	/* The MFP has a one-byte receive register.  A small bound also protects
-	 * a broken emulator/device that leaves BF asserted after UDR is read. */
-	unsigned count;
-	for (count = 0; count < 4U; count++) {
-		if ((x68k_mfp_read(MFP_RSR) & MFP_RSR_BF) == 0)
-			break;
-		receive_one();
-	}
-}
-
 void
 x68k_keyboard_init(void)
 {
@@ -101,6 +98,7 @@ x68k_keyboard_init(void)
 	x68k_keyboard_state_reset(&keyboard);
 	event_head = event_tail = 0;
 	overflow_count = receive_error_count = 0;
+	hal_cons_wait_queue_init(&input_waiters);
 	/* System port 3 bit 3 enables keyboard data transmission. */
 	x68k_sysport_write(3U, 0x08U);
 	enabled = x68k_mfp_read(MFP_IERA);
@@ -126,49 +124,62 @@ x68k_keyboard_init(void)
 unsigned
 hal_cons_modifiers(void)
 {
-	return x68k_keyboard_modifiers(&keyboard);
+	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
+	unsigned modifiers = x68k_keyboard_modifiers(&keyboard);
+
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
+	return modifiers;
 }
 
 int
 hal_cons_poll_event(void)
 {
-	bool enabled = hal_irq_disable();
-	int event;
-	poll_receiver();
-	event = event_tail == event_head ? -1 : (int)events[event_tail];
-	if (enabled)
-		hal_irq_enable();
+	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
+	int event = event_tail == event_head ? -1 : (int)events[event_tail];
+
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
 	return event;
 }
 
 int
 hal_cons_read_event(void)
 {
-	int event;
-	while ((event = hal_cons_poll_event()) < 0)
-		;
-	event_tail = (event_tail + 1U) % X68K_KEYBOARD_QUEUE;
-	return event;
+	struct hal_cons_wait_entry waiter;
+
+	waiter.task = hal_task_get_current();
+	waiter.next = NULL;
+	waiter.queued = 0;
+	for (;;) {
+		bool enabled = hal_cons_wait_queue_lock(&input_waiters);
+
+		if (event_tail != event_head) {
+			int event = (int)events[event_tail];
+
+			event_tail = (event_tail + 1U) % X68K_KEYBOARD_QUEUE;
+			hal_cons_wait_queue_unlock(&input_waiters, enabled);
+			return event;
+		}
+		hal_cons_wait_queue_add(&input_waiters, &waiter);
+		hal_cons_wait_queue_unlock(&input_waiters, enabled);
+		kernel_wait_task();
+	}
 }
 
 int
 hal_cons_key_state(int key)
 {
-	bool enabled = hal_irq_disable();
-	int down;
-	poll_receiver();
-	down = x68k_keyboard_key_state(&keyboard, key);
-	if (enabled)
-		hal_irq_enable();
+	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
+	int down = x68k_keyboard_key_state(&keyboard, key);
+
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
 	return down;
 }
 
 void
 hal_cons_drain_input(void)
 {
-	bool enabled = hal_irq_disable();
-	poll_receiver();
+	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
+
 	event_tail = event_head;
-	if (enabled)
-		hal_irq_enable();
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
 }

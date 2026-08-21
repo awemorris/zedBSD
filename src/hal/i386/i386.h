@@ -34,5 +34,6 @@ void asm_lidt(void *idt_desc);
 void asm_load_cr3(uint32_t addr);
 void asm_flash_tlb(void);
 void i386_bsp_cons_init(void);
+void i386_bsp_cons_irq_init(void);
 
 #endif

@@ -8,5 +8,6 @@ uint32 bsp_mem_range_count(void);
 int bsp_mem_range(uint32 index, uint64 *base, uint64 *size, uint32 *type);
 uint64 bsp_acpi_rsdp(void);
 void pcat_cons_init(void);
+void pcat_cons_irq_init(void);
 
 #endif

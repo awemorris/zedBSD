@@ -51,6 +51,8 @@ void sched_unlink(struct thread *thread);
 void sched_wakeup(struct thread *thread);
 void sched_switch(void);
 void sched_yield(void);
+void sched_wait_task(void);
+void sched_notify_task(hal_task_t task);
 void sched_exit_current(void) __attribute__((noreturn));
 void sched_clock_cpu(hal_cpu_id_t cpu, uint64_t now);
 void sched_sleep(uint64_t timeout_tick);

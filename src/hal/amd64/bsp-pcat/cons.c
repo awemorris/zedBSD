@@ -1,10 +1,12 @@
-/* PC/AT VGA text console and polled 8042 keyboard.
+/* PC/AT VGA text console and interrupt-driven 8042 keyboard.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <hal/hal.h>
 #include "bootloader/include/amd64-handoff.h"
 #include "kern/pcat/vgafont.h"
 #include "../asm.h"
 #include "../defs.h"
+#include "../irq.h"
+#include "../../cons-wait.h"
 
 #define VGA_MEMORY ((volatile uint16_t *)((uintptr_t)AMD64_DIRECT_BASE + \
 	0x000b8000U))
@@ -22,6 +24,7 @@ static enum hal_cons_mode console_mode = HAL_CONS_TERMINAL;
 static unsigned events[EVENT_COUNT], event_head, event_tail;
 static uint8_t key_down[32];
 static int shift_down, ctrl_down, alt_down, caps_lock, e0_prefix;
+static struct hal_cons_wait_queue input_waiters;
 static const struct zbl6_framebuffer *framebuffer;
 static volatile uint32_t *framebuffer_pixels;
 static uint16_t framebuffer_cells[HAL_CONS_ROWS * HAL_CONS_COLUMNS];
@@ -358,6 +361,18 @@ static const char shift_map[128] = {
 
 unsigned hal_cons_modifiers(void)
 {
+	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
+	unsigned modifiers = (shift_down ? HAL_KEY_EVENT_SHIFT : 0U) |
+	    (ctrl_down ? HAL_KEY_EVENT_CTRL : 0U) |
+	    (alt_down ? HAL_KEY_EVENT_GRAPH : 0U);
+
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
+	return modifiers;
+}
+
+static unsigned
+keyboard_modifiers_locked(void)
+{
 	return (shift_down ? HAL_KEY_EVENT_SHIFT : 0U) |
 	    (ctrl_down ? HAL_KEY_EVENT_CTRL : 0U) |
 	    (alt_down ? HAL_KEY_EVENT_GRAPH : 0U);
@@ -388,7 +403,7 @@ scan_to_key(uint8_t scan, int extended)
 }
 
 static void
-pump_keyboard(void)
+pump_keyboard_locked(void)
 {
 	while (asm_inb(KBD_STATUS) & 1U) {
 		uint8_t raw = asm_inb(KBD_DATA), scan;
@@ -408,32 +423,76 @@ pump_keyboard(void)
 		next = (event_head + 1U) % EVENT_COUNT;
 		if (next == event_tail) continue;
 		events[event_head] = ((unsigned)key & HAL_KEY_EVENT_KEY_MASK) |
-		    hal_cons_modifiers();
+		    keyboard_modifiers_locked();
 		event_head = next;
 	}
 }
 
+static void
+keyboard_interrupt(int irq, hal_irq_ack_t acknowledge, void *argument)
+{
+	struct hal_cons_wait_entry *waiters = NULL;
+	bool enabled;
+
+	(void)irq;
+	(void)argument;
+	enabled = hal_cons_wait_queue_lock(&input_waiters);
+	pump_keyboard_locked();
+	if (event_head != event_tail)
+		waiters = hal_cons_wait_queue_detach_all(&input_waiters);
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
+	hal_cons_wait_queue_notify_all(waiters);
+	hal_irq_send_eoi(acknowledge);
+}
+
 int hal_cons_poll_event(void)
 {
-	pump_keyboard();
-	return event_head == event_tail ? -1 : (int)events[event_tail];
+	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
+	int event = event_head == event_tail ? -1 : (int)events[event_tail];
+
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
+	return event;
 }
 
 int hal_cons_read_event(void)
 {
-	int event;
-	while ((event = hal_cons_poll_event()) < 0) ;
-	event_tail = (event_tail + 1U) % EVENT_COUNT;
-	return event;
+	struct hal_cons_wait_entry waiter;
+
+	waiter.task = hal_task_get_current();
+	waiter.next = NULL;
+	waiter.queued = 0;
+	for (;;) {
+		bool enabled = hal_cons_wait_queue_lock(&input_waiters);
+
+		if (event_head != event_tail) {
+			int event = (int)events[event_tail];
+
+			event_tail = (event_tail + 1U) % EVENT_COUNT;
+			hal_cons_wait_queue_unlock(&input_waiters, enabled);
+			return event;
+		}
+		hal_cons_wait_queue_add(&input_waiters, &waiter);
+		hal_cons_wait_queue_unlock(&input_waiters, enabled);
+		kernel_wait_task();
+	}
 }
 
 int hal_cons_getc(void) { return hal_cons_read_event() & HAL_KEY_EVENT_KEY_MASK; }
 int hal_cons_key_state(int key)
 {
-	(void)key; pump_keyboard();
-	return key == HAL_KEY_SHIFT ? shift_down : 0;
+	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
+	int down = key == HAL_KEY_SHIFT ? shift_down : 0;
+
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
+	return down;
 }
-void hal_cons_drain_input(void) { pump_keyboard(); event_tail = event_head; }
+void hal_cons_drain_input(void)
+{
+	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
+
+	event_tail = event_head;
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
+}
 
 void pcat_cons_init(void)
 {
@@ -457,5 +516,14 @@ void pcat_cons_init(void)
 	event_head = event_tail = 0; shift_down = ctrl_down = alt_down = 0;
 	caps_lock = e0_prefix = 0;
 	for (unsigned i = 0; i < sizeof(key_down); i++) key_down[i] = 0;
+	hal_cons_wait_queue_init(&input_waiters);
 	hal_cons_reset();
+}
+
+void
+pcat_cons_irq_init(void)
+{
+	if (hal_irq_set_handler(IRQ_KEYBOARD, keyboard_interrupt, NULL) != HAL_OK)
+		HAL_FATAL("PC/AT keyboard IRQ registration failed");
+	hal_irq_unmask(IRQ_KEYBOARD);
 }

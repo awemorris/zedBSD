@@ -485,7 +485,7 @@ void hal_cons_update_cursor(void)
 	gdc_write(0x60, (uint8_t)(address >> 8));
 }
 
-/* PC-98 keyboard scan translation and polled input. */
+/* PC-98 keyboard scan translation and interrupt-driven input. */
 struct pc98_keyboard {
 	uint8_t shift;
 	uint8_t ctrl;
@@ -715,8 +715,10 @@ pc98_keyboard_is_down(const struct pc98_keyboard *kb, int key)
 	return (kb->down[scan >> 3] >> (scan & 7)) & 1;
 }
 
-/* NEC PC-98 polled keyboard driver.  SPDX-License-Identifier: Zlib */
+/* NEC PC-98 interrupt-driven keyboard driver.  SPDX-License-Identifier: Zlib */
 
+#include "../irq.h"
+#include "../../cons-wait.h"
 
 #define KBD_DATA 0x41U
 #define KBD_STATUS 0x43U
@@ -726,6 +728,7 @@ pc98_keyboard_is_down(const struct pc98_keyboard *kb, int key)
 static struct pc98_keyboard keyboard;
 static unsigned events[QUEUE_SIZE];
 static unsigned head, tail;
+static struct hal_cons_wait_queue input_waiters;
 
 static uint8_t inb(uint16_t port)
 {
@@ -736,12 +739,38 @@ static uint8_t inb(uint16_t port)
 
 unsigned hal_cons_modifiers(void)
 {
+	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
+	unsigned modifiers;
+
+	modifiers = (keyboard.shift ? HAL_KEY_EVENT_SHIFT : 0) |
+		(keyboard.ctrl ? HAL_KEY_EVENT_CTRL : 0) |
+		(keyboard.graph ? HAL_KEY_EVENT_GRAPH : 0);
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
+	return modifiers;
+}
+
+static unsigned
+keyboard_modifiers_locked(void)
+{
 	return (keyboard.shift ? HAL_KEY_EVENT_SHIFT : 0) |
 		(keyboard.ctrl ? HAL_KEY_EVENT_CTRL : 0) |
 		(keyboard.graph ? HAL_KEY_EVENT_GRAPH : 0);
 }
 
-static void pump(void)
+static bool
+input_lock_acquire(void)
+{
+	return hal_cons_wait_queue_lock(&input_waiters);
+}
+
+static void
+input_lock_release(bool enabled)
+{
+	hal_cons_wait_queue_unlock(&input_waiters, enabled);
+}
+
+static void
+pump_locked(void)
 {
 	while ((inb(KBD_STATUS) & KBD_RXRDY) != 0) {
 		uint8_t raw = inb(KBD_DATA);
@@ -754,24 +783,58 @@ static void pump(void)
 		if (next == tail)
 			continue;
 		events[head] = ((unsigned)key & HAL_KEY_EVENT_KEY_MASK) |
-			hal_cons_modifiers();
+			keyboard_modifiers_locked();
 		head = next;
 	}
 }
 
+static void
+keyboard_interrupt(int irq, hal_irq_ack_t acknowledge, void *argument)
+{
+	struct hal_cons_wait_entry *waiters = NULL;
+	bool enabled;
+
+	(void)irq;
+	(void)argument;
+	enabled = input_lock_acquire();
+	pump_locked();
+	if (tail != head)
+		waiters = hal_cons_wait_queue_detach_all(&input_waiters);
+	input_lock_release(enabled);
+	hal_cons_wait_queue_notify_all(waiters);
+	hal_irq_send_eoi(acknowledge);
+}
+
 int hal_cons_poll_event(void)
 {
-	pump();
-	return tail == head ? -1 : (int)events[tail];
+	bool enabled = input_lock_acquire();
+	int event = tail == head ? -1 : (int)events[tail];
+
+	input_lock_release(enabled);
+	return event;
 }
 
 int hal_cons_read_event(void)
 {
-	int event;
-	while ((event = hal_cons_poll_event()) < 0)
-		;
-	tail = (tail + 1U) % QUEUE_SIZE;
-	return event;
+	struct hal_cons_wait_entry waiter;
+
+	waiter.task = hal_task_get_current();
+	waiter.next = NULL;
+	waiter.queued = 0;
+	for (;;) {
+		bool enabled = input_lock_acquire();
+
+		if (tail != head) {
+			int event = (int)events[tail];
+
+			tail = (tail + 1U) % QUEUE_SIZE;
+			input_lock_release(enabled);
+			return event;
+		}
+		hal_cons_wait_queue_add(&input_waiters, &waiter);
+		input_lock_release(enabled);
+		kernel_wait_task();
+	}
 }
 
 int hal_cons_getc(void)
@@ -781,19 +844,33 @@ int hal_cons_getc(void)
 
 int hal_cons_key_state(int key)
 {
-	pump();
-	return pc98_keyboard_is_down(&keyboard, key);
+	bool enabled = input_lock_acquire();
+	int down = pc98_keyboard_is_down(&keyboard, key);
+
+	input_lock_release(enabled);
+	return down;
 }
 
 void hal_cons_drain_input(void)
 {
-	pump();
+	bool enabled = input_lock_acquire();
+
 	tail = head;
+	input_lock_release(enabled);
 }
 
 void i386_bsp_cons_init(void)
 {
 	pc98_keyboard_reset(&keyboard);
 	head = tail = 0;
+	hal_cons_wait_queue_init(&input_waiters);
 	hal_cons_reset();
+}
+
+void
+i386_bsp_cons_irq_init(void)
+{
+	if (hal_irq_set_handler(IRQ_KEYBOARD, keyboard_interrupt, NULL) != HAL_OK)
+		HAL_FATAL("PC-98 keyboard IRQ registration failed");
+	hal_irq_unmask(IRQ_KEYBOARD);
 }

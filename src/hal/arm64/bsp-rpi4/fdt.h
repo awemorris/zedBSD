@@ -19,6 +19,7 @@ struct rpi4_fdt_info {
 	struct rpi4_fdt_range memory[RPI4_FDT_MAX_MEMORY];
 	struct rpi4_fdt_range reserved[RPI4_FDT_MAX_RESERVED];
 	uint64 uart_base;
+	uint32 uart_irq;
 	uint64 mailbox_base;
 	uint64 gic_dist_base;
 	uint64 gic_cpu_base;

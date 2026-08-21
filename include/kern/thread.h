@@ -50,6 +50,7 @@ struct thread {
 	hal_task_t task;
 	enum thread_state state;
 	unsigned flags;
+	unsigned notify_pending;
 	unsigned state_generation;
 	int exit_status;
 	uintptr_t user_exit_value;

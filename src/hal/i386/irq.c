@@ -128,8 +128,7 @@ hal_irq_service_wait(int irq, hal_irq_ack_t *acknowledge)
 		}
 		i386_interrupt_unmask(irq);
 		if (enabled) hal_irq_enable();
-		hal_cpu_idle();
-		kernel_yield();
+		kernel_wait_task();
 	}
 }
 
@@ -184,9 +183,11 @@ irq_handler(int irq)
 		return;
 	}
 	if (service->mode == IRQ_MODE_TASK && service->waiter != NULL) {
+		hal_task_t waiter = service->waiter;
 		i386_interrupt_mask(irq);
 		service->acknowledge = acknowledge;
 		service->pending = 1;
+		kernel_notify_task(waiter);
 		return;
 	}
 	i386_interrupt_mask(irq);

@@ -63,4 +63,13 @@ void rpi4_gic_eoi(uint32 value)
 	hal_io_mb();
 }
 void rpi4_gic_mask(uint32 id){if(id<irq_count)dist[GICD_ICENABLER/4+id/32]=1U<<(id&31);}
-void rpi4_gic_unmask(uint32 id){if(id<irq_count)dist[GICD_ISENABLER/4+id/32]=1U<<(id&31);}
+void rpi4_gic_unmask(uint32 id)
+{
+	if(id<irq_count){
+		/* Direct QEMU boot enters secure EL1, where the primary IAR serves
+		 * Group 0.  Firmware normally enters non-secure EL1; there this
+		 * group write is ignored and the primary IAR aliases Group 1. */
+		dist[GICD_IGROUPR/4+id/32]&=~(1U<<(id&31));
+		dist[GICD_ISENABLER/4+id/32]=1U<<(id&31);
+	}
+}

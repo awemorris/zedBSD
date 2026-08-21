@@ -38,6 +38,7 @@ amd64_cmain(const void *raw_boot_info)
 	amd64_int_init();
 	irq_init(&acpi);
 	bsp_timer_init();
+	pcat_cons_irq_init();
 	hal_puts("A64 IRQ READY\n");
 	kernel_entry(bsp_kernel_handoff(raw_boot_info));
 	HAL_FATAL("amd64 kernel_entry returned");

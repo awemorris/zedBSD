@@ -15,6 +15,8 @@
 #define UART_ICR 0x44
 #define UART_FR_RXFE (1U << 4)
 #define UART_FR_TXFF (1U << 5)
+#define UART_IRQ_RX  (1U << 4)
+#define UART_IRQ_RT  (1U << 6)
 
 static volatile uint32 *const gpio = MMIO32(RPI4_GPIO_BASE);
 static volatile uint32 *const uart = MMIO32(RPI4_PL011_BASE);
@@ -36,6 +38,7 @@ rpi4_uart_init(void)
 	/* config.txt fixes the PL011 clock at the usual 48 MHz. */
 	uart[UART_IBRD / 4] = 26;
 	uart[UART_FBRD / 4] = 3;
+	/* RX timeout IRQ handles a lone byte; the FIFO preserves burst input. */
 	uart[UART_LCRH / 4] = (3U << 5) | (1U << 4);
 	uart[UART_IMSC / 4] = 0;
 	uart[UART_CR / 4] = (1U << 9) | (1U << 8) | 1U;
@@ -63,4 +66,17 @@ rpi4_uart_getc(void)
 	while (!rpi4_uart_poll())
 		;
 	return (int)(uart[UART_DR / 4] & 0xff);
+}
+
+void
+rpi4_uart_enable_rx_irq(void)
+{
+	uart[UART_ICR / 4] = UART_IRQ_RX | UART_IRQ_RT;
+	uart[UART_IMSC / 4] = UART_IRQ_RX | UART_IRQ_RT;
+}
+
+void
+rpi4_uart_clear_rx_irq(void)
+{
+	uart[UART_ICR / 4] = UART_IRQ_RX | UART_IRQ_RT;
 }

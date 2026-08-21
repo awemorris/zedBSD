@@ -68,35 +68,23 @@ console_input_worker(void *argument)
 {
 	(void)argument;
 	for (;;) {
-		int notify = 0;
-		for (;;) {
-			int event;
-			unsigned long irq = spin_lock_irqsave(&input_lock);
-			if (hal_cons_poll_event() < 0) {
-				spin_unlock_irqrestore(&input_lock, irq);
-				break;
-			}
-			event = hal_cons_read_event();
-			if (event < 0)
-				{
-					spin_unlock_irqrestore(&input_lock, irq);
-					break;
-				}
-			if (input_used == CONSOLE_INPUT_EVENTS) {
-				input_tail = (input_tail + 1U) % CONSOLE_INPUT_EVENTS;
-				input_used--;
-			}
-			input_events[input_head] = (uint32_t)event;
-			input_head = (input_head + 1U) % CONSOLE_INPUT_EVENTS;
-			input_used++;
-			notify = 1;
-			waitq_wake_all(&input_waitq);
-			spin_unlock_irqrestore(&input_lock, irq);
-			tty_console_input_event((uint32_t)event);
+		int event = hal_cons_read_event();
+		unsigned long irq;
+
+		if (event < 0)
+			continue;
+		irq = spin_lock_irqsave(&input_lock);
+		if (input_used == CONSOLE_INPUT_EVENTS) {
+			input_tail = (input_tail + 1U) % CONSOLE_INPUT_EVENTS;
+			input_used--;
 		}
-		if (notify)
-			poll_notify();
-		sched_sleep(sched_ticks() + 1U);
+		input_events[input_head] = (uint32_t)event;
+		input_head = (input_head + 1U) % CONSOLE_INPUT_EVENTS;
+		input_used++;
+		waitq_wake_all(&input_waitq);
+		spin_unlock_irqrestore(&input_lock, irq);
+		tty_console_input_event((uint32_t)event);
+		poll_notify();
 	}
 }
 

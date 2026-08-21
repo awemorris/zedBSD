@@ -40,6 +40,7 @@ arm64_cmain(uintptr_t fdt_phys)
 	arm64_space_init();
 	arm64_context_selftest();
 	arm64_int_init();
+	rpi4_cons_irq_init();
 	hal_irq_enable();
 	kernel_entry(rpi4_kernel_handoff());
 	for (;;) arm64_wfi();

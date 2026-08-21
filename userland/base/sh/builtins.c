@@ -5,11 +5,14 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #define COPY_BUFFER_SIZE 512U
@@ -21,6 +24,12 @@ struct ls_entry {
 	uint8_t type;
 	struct stat status;
 	int status_valid;
+};
+
+struct ls_options {
+	int all;
+	int human;
+	int long_format;
 };
 
 static int
@@ -189,7 +198,8 @@ mode_text(mode_t mode, char result[11])
 }
 
 static int
-load_directory(const char *path, int long_format, struct ls_entry **result,
+load_directory(const char *path, const struct ls_options *options,
+	       struct ls_entry **result,
 	       size_t *result_count)
 {
 	DIR *directory = opendir(path);
@@ -203,8 +213,25 @@ load_directory(const char *path, int long_format, struct ls_entry **result,
 		(void)closedir(directory);
 		return 0;
 	}
+	if (options->all) {
+		static const char *const dot_names[] = { ".", ".." };
+		unsigned dot;
+		for (dot = 0; dot < 2U; dot++) {
+			char child[PATH_BUFFER_SIZE];
+			struct ls_entry *item = &entries[count++];
+			strcpy(item->name, dot_names[dot]);
+			item->type = DT_DIR;
+			item->status_valid = join_path(path, item->name, child,
+			    sizeof(child)) && lstat(child, &item->status) == 0;
+		}
+	}
 	while ((entry = readdir(directory)) != NULL) {
 		struct ls_entry *item;
+		if (!options->all && entry->d_name[0] == '.')
+			continue;
+		if (options->all && (!strcmp(entry->d_name, ".") ||
+		    !strcmp(entry->d_name, "..")))
+			continue;
 		if (count == capacity) {
 			struct ls_entry *larger;
 			if (capacity > (size_t)-1 / 2U / sizeof(*entries)) {
@@ -227,10 +254,10 @@ load_directory(const char *path, int long_format, struct ls_entry **result,
 		item->name[sizeof(item->name) - 1U] = '\0';
 		item->type = entry->d_type;
 		item->status_valid = 0;
-		if (long_format) {
+		if (options->long_format) {
 			char child[PATH_BUFFER_SIZE];
 			if (join_path(path, item->name, child, sizeof(child)) &&
-			    stat(child, &item->status) == 0)
+			    lstat(child, &item->status) == 0)
 				item->status_valid = 1;
 		}
 	}
@@ -264,22 +291,217 @@ print_entry_name(const struct ls_entry *entry)
 }
 
 static void
-print_long_entries(const struct ls_entry *entries, size_t count)
+human_size(off_t value, char result[24])
+{
+	static const char suffixes[] = "BKMGTPE";
+	unsigned unit = 0;
+	unsigned long long magnitude, scale = 1;
+
+	if (value < 0) {
+		snprintf(result, 24, "%lld", (long long)value);
+		return;
+	}
+	magnitude = (unsigned long long)value;
+	while (unit + 1U < sizeof(suffixes) - 1U &&
+	    magnitude >= scale * 1024ULL) {
+		scale *= 1024ULL;
+		unit++;
+	}
+	if (unit == 0) {
+		snprintf(result, 24, "%llu", magnitude);
+		return;
+	}
+	if (magnitude / scale < 10ULL) {
+		unsigned long long whole = magnitude / scale;
+		unsigned long long tenth =
+		    ((magnitude % scale) * 10ULL + scale / 2ULL) / scale;
+		if (tenth == 10ULL) {
+			whole++;
+			tenth = 0;
+		}
+		snprintf(result, 24, "%llu.%llu%c", whole, tenth,
+		    suffixes[unit]);
+	} else {
+		snprintf(result, 24, "%llu%c",
+		    (magnitude + scale / 2ULL) / scale, suffixes[unit]);
+	}
+}
+
+static int
+leap_year(long long year)
+{
+	return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+}
+
+static void
+long_time_text(time_t value, char result[32])
+{
+	static const int month_days[] =
+	    { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+	static const char *const month_names[] =
+	    { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+	      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+	long long days = value / 86400;
+	long long seconds = value % 86400;
+	long long year = 1970;
+	time_t now = time(NULL);
+	int month = 0;
+
+	if (seconds < 0) {
+		seconds += 86400;
+		days--;
+	}
+	while (days >= 365 + leap_year(year)) {
+		days -= 365 + leap_year(year);
+		year++;
+	}
+	while (days < 0) {
+		year--;
+		days += 365 + leap_year(year);
+	}
+	while (month < 11 && days >= month_days[month] +
+	    (month == 1 && leap_year(year))) {
+		days -= month_days[month] + (month == 1 && leap_year(year));
+		month++;
+	}
+	if (now != (time_t)-1 &&
+	    (value < now - 15552000 || value > now + 3600))
+		snprintf(result, 32, "%s %2d  %4lld", month_names[month],
+		    (int)days + 1, year);
+	else
+		snprintf(result, 32, "%s %2d %02lld:%02lld",
+		    month_names[month], (int)days + 1, seconds / 3600,
+		    (seconds / 60) % 60);
+}
+
+static const char *
+user_name(uid_t id, char result[24])
+{
+	struct passwd entry, *found = NULL;
+	char buffer[512];
+
+	if (getpwuid_r(id, &entry, buffer, sizeof(buffer), &found) == 0 &&
+	    found != NULL && found->pw_name != NULL) {
+		snprintf(result, 24, "%s", found->pw_name);
+		return result;
+	}
+	snprintf(result, 24, "%u", (unsigned)id);
+	return result;
+}
+
+static const char *
+group_name(gid_t id, char result[24])
+{
+	struct group entry, *found = NULL;
+	char buffer[512];
+
+	if (getgrgid_r(id, &entry, buffer, sizeof(buffer), &found) == 0 &&
+	    found != NULL && found->gr_name != NULL) {
+		snprintf(result, 24, "%s", found->gr_name);
+		return result;
+	}
+	snprintf(result, 24, "%u", (unsigned)id);
+	return result;
+}
+
+struct ls_widths {
+	size_t links;
+	size_t user;
+	size_t group;
+	size_t size;
+};
+
+static void
+long_widths(const struct ls_entry *entries, size_t count,
+	    const struct ls_options *options, struct ls_widths *widths)
 {
 	size_t index;
+	memset(widths, 0, sizeof(*widths));
 	for (index = 0; index < count; index++) {
-		char mode[11];
-		if (entries[index].status_valid) {
-			mode_text(entries[index].status.st_mode, mode);
-			printf("%s %10lld ", mode,
+		char links[24], size[24], user_buffer[24], group_buffer[24];
+		const char *user, *group;
+		if (!entries[index].status_valid)
+			continue;
+		snprintf(links, sizeof(links), "%lu",
+		    (unsigned long)entries[index].status.st_nlink);
+		if (options->human)
+			human_size(entries[index].status.st_size, size);
+		else
+			snprintf(size, sizeof(size), "%lld",
 			    (long long)entries[index].status.st_size);
-		} else {
-			strcpy(mode, "??????????");
-			printf("%s %10s ", mode, "?");
-		}
-		print_entry_name(&entries[index]);
-		putchar('\n');
+		user = user_name(entries[index].status.st_uid, user_buffer);
+		group = group_name(entries[index].status.st_gid, group_buffer);
+		if (strlen(links) > widths->links) widths->links = strlen(links);
+		if (strlen(user) > widths->user) widths->user = strlen(user);
+		if (strlen(group) > widths->group) widths->group = strlen(group);
+		if (strlen(size) > widths->size) widths->size = strlen(size);
 	}
+}
+
+static void
+print_long_entry(const char *directory, const struct ls_entry *entry,
+	    const struct ls_options *options, const struct ls_widths *widths)
+{
+	char mode[11], size[24], when[32], user_buffer[24], group_buffer[24];
+	char path[PATH_BUFFER_SIZE];
+	const char *user, *group;
+
+	if (!entry->status_valid) {
+		printf("?????????? %*s %-*s %-*s %*s %12s %s\n",
+		    (int)widths->links, "?", (int)widths->user, "?",
+		    (int)widths->group, "?", (int)widths->size, "?", "?",
+		    entry->name);
+		return;
+	}
+	mode_text(entry->status.st_mode, mode);
+	if (options->human)
+		human_size(entry->status.st_size, size);
+	else
+		snprintf(size, sizeof(size), "%lld",
+		    (long long)entry->status.st_size);
+	long_time_text(entry->status.st_mtime, when);
+	user = user_name(entry->status.st_uid, user_buffer);
+	group = group_name(entry->status.st_gid, group_buffer);
+	printf("%s %*lu %-*s %-*s %*s %s %s", mode, (int)widths->links,
+	    (unsigned long)entry->status.st_nlink, (int)widths->user, user,
+	    (int)widths->group, group, (int)widths->size, size, when,
+	    entry->name);
+	if (S_ISLNK(entry->status.st_mode) &&
+	    join_path(directory, entry->name, path, sizeof(path))) {
+		char target[PATH_BUFFER_SIZE];
+		ssize_t length = readlink(path, target, sizeof(target) - 1U);
+		if (length >= 0) {
+			target[length] = '\0';
+			printf(" -> %s", target);
+		}
+	}
+	putchar('\n');
+}
+
+static void
+print_long_entries(const char *directory, const struct ls_entry *entries,
+	    size_t count, const struct ls_options *options, int show_total)
+{
+	struct ls_widths widths;
+	unsigned long long blocks = 0;
+	size_t index;
+
+	long_widths(entries, count, options, &widths);
+	if (show_total) {
+		char total[24];
+		for (index = 0; index < count; index++)
+			if (entries[index].status_valid &&
+			    entries[index].status.st_blocks > 0)
+				blocks += (unsigned long long)
+				    entries[index].status.st_blocks;
+		if (options->human)
+			human_size((off_t)(blocks * 512ULL), total);
+		else
+			snprintf(total, sizeof(total), "%llu", (blocks + 1ULL) / 2ULL);
+		printf("total %s\n", total);
+	}
+	for (index = 0; index < count; index++)
+		print_long_entry(directory, &entries[index], options, &widths);
 }
 
 static void
@@ -325,45 +547,66 @@ static int
 builtin_ls(int argc, char **argv)
 {
 	const char *path = ".";
-	int long_format = 0, path_set = 0, argument;
+	struct ls_options options = { 0, 0, 0 };
+	int path_set = 0, argument;
 	struct stat status;
 	struct ls_entry *entries;
 	size_t count;
 	for (argument = 1; argument < argc; argument++) {
-		if (!strcmp(argv[argument], "-l"))
-			long_format = 1;
-		else if (!path_set) {
+		const char *option;
+		if (!strcmp(argv[argument], "--")) {
+			argument++;
+			break;
+		}
+		if (argv[argument][0] != '-' || argv[argument][1] == '\0')
+			break;
+		for (option = argv[argument] + 1; *option != '\0'; option++) {
+			switch (*option) {
+			case 'a': options.all = 1; break;
+			case 'h': options.human = 1; break;
+			case 'l': options.long_format = 1; break;
+			default:
+				fprintf(stderr,
+				    "ls: invalid option -- '%c'\n"
+				    "Try 'ls --help' for more information.\n",
+				    *option);
+				return 0;
+			}
+		}
+	}
+	for (; argument < argc; argument++) {
+		if (!path_set) {
 			path = argv[argument];
 			path_set = 1;
 		} else {
-			fprintf(stderr, "usage: ls [-l] [PATH]\n");
+			fprintf(stderr, "usage: ls [-ahl] [PATH]\n");
 			return 0;
 		}
 	}
-	if (stat(path, &status) != 0) {
+	if (lstat(path, &status) != 0) {
 		fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
 		return 0;
 	}
 	if (!S_ISDIR(status.st_mode)) {
 		struct ls_entry single;
 		memset(&single, 0, sizeof(single));
-		strncpy(single.name, path_basename(path), sizeof(single.name) - 1U);
+		strncpy(single.name, path, sizeof(single.name) - 1U);
 		single.status = status;
 		single.status_valid = 1;
-		if (long_format)
-			print_long_entries(&single, 1);
+		if (options.long_format)
+			print_long_entries("", &single, 1, &options, 0);
 		else {
 			print_entry_name(&single);
 			putchar('\n');
 		}
 		return 1;
 	}
-	if (!load_directory(path, long_format, &entries, &count)) {
+	if (!load_directory(path, &options, &entries, &count)) {
 		fprintf(stderr, "ls: %s: %s\n", path, strerror(errno));
 		return 0;
 	}
-	if (long_format)
-		print_long_entries(entries, count);
+	if (options.long_format)
+		print_long_entries(path, entries, count, &options, 1);
 	else
 		print_column_entries(entries, count);
 	free(entries);

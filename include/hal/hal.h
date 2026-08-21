@@ -910,9 +910,22 @@ void
 kernel_secondary_entry(
 	hal_cpu_id_t cpu);
 
-/* Do task yielding. */
+/* Yield the current task while keeping it runnable. */
 void
-kernel_yield(void);
+kernel_yield_task(void);
+
+/*
+ * Wait/notify protocol used by blocking HAL services.  A notification that
+ * arrives immediately before kernel_wait_task() is retained, so the wait
+ * returns without sleeping.
+ */
+void
+kernel_wait_task(void);
+
+/* Make a waiting task runnable.  Safe to call from a real-time ISR. */
+void
+kernel_notify_task(
+	hal_task_t task);
 
 /* Scheduling timer callback. */
 void

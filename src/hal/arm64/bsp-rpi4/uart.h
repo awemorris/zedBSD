@@ -5,5 +5,7 @@ void rpi4_uart_init(void);
 void rpi4_uart_putc(int c);
 int rpi4_uart_getc(void);
 int rpi4_uart_poll(void);
+void rpi4_uart_enable_rx_irq(void);
+void rpi4_uart_clear_rx_irq(void);
 
 #endif

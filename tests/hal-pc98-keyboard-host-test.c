@@ -7,7 +7,21 @@
 /* Exercise the exact implementation embedded in the PC-98 HAL console.
  * Keeping the mapper private prevents a board-specific API from leaking out
  * of HAL solely for testing. */
+#include <hal/hal.h>
+
 #include "../src/hal/i386/bsp-pc98/jisx0208.c"
+
+bool hal_irq_disable(void) { return false; }
+void hal_irq_enable(void) {}
+void hal_irq_unmask(int irq) { (void)irq; }
+void hal_irq_send_eoi(hal_irq_ack_t acknowledge) { (void)acknowledge; }
+int hal_irq_set_handler(int irq, hal_irq_handler_t handler, void *argument)
+{ (void)irq; (void)handler; (void)argument; return HAL_OK; }
+hal_task_t hal_task_get_current(void) { return (hal_task_t)1; }
+void kernel_wait_task(void) {}
+void kernel_notify_task(hal_task_t task) { (void)task; }
+void hal_fatal(const char *file, int line, const char *message)
+{ (void)file; (void)line; (void)message; }
 #include "../src/hal/i386/bsp-pc98/cons.c"
 
 static int failures;

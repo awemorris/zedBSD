@@ -1,12 +1,18 @@
 #include <hal/hal.h>
+#include "../bsp.h"
 #include "uart.h"
 #include "framebuffer.h"
+#include "../../cons-wait.h"
+
+#define INPUT_EVENT_COUNT 64U
 
 struct cell{uint8 character,attribute;};
 static struct cell shadow[HAL_CONS_ROWS][HAL_CONS_COLUMNS];
 static struct hal_cons_state state={HAL_CONS_TERMINAL,0,0,1};
 static uint8 current_attribute=HAL_CONS_NORMAL_ATTRIBUTE;
-static int input_peek=-1;
+static unsigned input_events[INPUT_EVENT_COUNT];
+static unsigned input_head, input_tail;
+static struct hal_cons_wait_queue input_waiters;
 
 static void draw(unsigned row,unsigned column)
 {struct cell*c=&shadow[row][column];rpi4_framebuffer_cell(row,column,c->character,c->attribute);}
@@ -38,7 +44,7 @@ static void scroll(void)
 static void newline(void)
 {state.column=0;if(++state.row>=HAL_CONS_ROWS){scroll();state.row=HAL_CONS_ROWS-1;}}
 
-void rpi4_cons_init(void){rpi4_uart_init();for(unsigned r=0;r<HAL_CONS_ROWS;r++)for(unsigned c=0;c<HAL_CONS_COLUMNS;c++){shadow[r][c].character=' ';shadow[r][c].attribute=current_attribute;}}
+void rpi4_cons_init(void){rpi4_uart_init();input_head=input_tail=0;hal_cons_wait_queue_init(&input_waiters);for(unsigned r=0;r<HAL_CONS_ROWS;r++)for(unsigned c=0;c<HAL_CONS_COLUMNS;c++){shadow[r][c].character=' ';shadow[r][c].attribute=current_attribute;}}
 static void console_putc(int character)
 {
 	rpi4_uart_putc(character);erase_cursor();
@@ -79,10 +85,29 @@ int hal_cons_set_cursor(unsigned r,unsigned c){if(r>=HAL_CONS_ROWS||c>=HAL_CONS_
 void hal_cons_show_cursor(int visible){erase_cursor();state.cursor_visible=visible!=0;hal_cons_update_cursor();}
 void hal_cons_save_state(struct hal_cons_state*out){if(out)*out=state;}
 void hal_cons_restore_terminal(const struct hal_cons_state*in){erase_cursor();state.mode=HAL_CONS_TERMINAL;if(in&&in->row<HAL_CONS_ROWS&&in->column<HAL_CONS_COLUMNS)state=*in;hal_cons_update_cursor();}
-int hal_cons_poll_event(void){if(input_peek<0&&rpi4_uart_poll())input_peek=console_getc();return input_peek;}
-int hal_cons_read_event(void){int event;while((event=hal_cons_poll_event())<0);input_peek=-1;return event;}
+static void rpi4_console_interrupt(int irq,hal_irq_ack_t acknowledge,void*argument)
+{
+	struct hal_cons_wait_entry*waiters=NULL;bool enabled;
+	(void)irq;(void)argument;enabled=hal_cons_wait_queue_lock(&input_waiters);
+	while(rpi4_uart_poll()){
+		unsigned next=(input_head+1U)%INPUT_EVENT_COUNT;
+		int event=console_getc();if(next==input_tail)continue;
+		input_events[input_head]=(unsigned)event;input_head=next;
+	}
+	if(input_head!=input_tail)waiters=hal_cons_wait_queue_detach_all(&input_waiters);
+	hal_cons_wait_queue_unlock(&input_waiters,enabled);rpi4_uart_clear_rx_irq();
+	hal_cons_wait_queue_notify_all(waiters);hal_irq_send_eoi(acknowledge);
+}
+void rpi4_cons_irq_init(void)
+{
+	const struct rpi4_fdt_info*info=rpi4_boot_info();
+	if(info==NULL||info->uart_irq==0||hal_irq_set_handler((int)info->uart_irq,rpi4_console_interrupt,NULL)!=HAL_OK)HAL_FATAL("Raspberry Pi UART IRQ registration failed");
+	rpi4_uart_enable_rx_irq();hal_irq_unmask((int)info->uart_irq);
+}
+int hal_cons_poll_event(void){bool enabled=hal_cons_wait_queue_lock(&input_waiters);int event=input_head==input_tail?-1:(int)input_events[input_tail];hal_cons_wait_queue_unlock(&input_waiters,enabled);return event;}
+int hal_cons_read_event(void){struct hal_cons_wait_entry waiter={hal_task_get_current(),NULL,0};for(;;){bool enabled=hal_cons_wait_queue_lock(&input_waiters);if(input_head!=input_tail){int event=(int)input_events[input_tail];input_tail=(input_tail+1U)%INPUT_EVENT_COUNT;hal_cons_wait_queue_unlock(&input_waiters,enabled);return event;}hal_cons_wait_queue_add(&input_waiters,&waiter);hal_cons_wait_queue_unlock(&input_waiters,enabled);kernel_wait_task();}}
 int hal_cons_key_state(int key){(void)key;return 0;}
-void hal_cons_drain_input(void){input_peek=-1;while(rpi4_uart_poll())(void)console_getc();}
+void hal_cons_drain_input(void){bool enabled=hal_cons_wait_queue_lock(&input_waiters);input_tail=input_head;hal_cons_wait_queue_unlock(&input_waiters,enabled);}
 unsigned hal_cons_modifiers(void){return 0;}
 void hal_cons_suspend(void){}
 void hal_cons_resume(void){}

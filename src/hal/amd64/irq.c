@@ -187,10 +187,8 @@ hal_irq_service_wait(int irq, hal_irq_ack_t *acknowledge)
 		}
 		service->masked = 0;
 		amd64_ioapic_unmask(irq);
-		/* Keep local IRQs disabled through the atomic sti/hlt sequence. */
-		service_unlock(service, false);
-		hal_cpu_idle();
-		kernel_yield();
+		service_unlock(service, enabled);
+		kernel_wait_task();
 	}
 }
 
@@ -296,12 +294,14 @@ irq_handler(int irq)
 	}
 	if (!service->removing && service->mode == IRQ_MODE_TASK &&
 	    service->waiter != NULL) {
+		hal_task_t waiter = service->waiter;
 		amd64_ioapic_mask(irq);
 		service->masked = 1;
 		service->acknowledge = acknowledge;
 		service->pending = 1;
 		__atomic_store_n(&service->in_flight, 0U, __ATOMIC_RELEASE);
 		service_unlock(service, false);
+		kernel_notify_task(waiter);
 		return;
 	}
 	amd64_ioapic_mask(irq);

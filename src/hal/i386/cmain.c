@@ -37,6 +37,7 @@ cmain(const void *raw_boot_info)
 	irq_init();
 	bsp_timer_init();
 	(void)i386_interrupt_select();
+	i386_bsp_cons_irq_init();
 
 	handoff = bsp_kernel_handoff(raw_boot_info);
 	kernel_entry(handoff);
