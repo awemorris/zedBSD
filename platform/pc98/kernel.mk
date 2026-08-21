@@ -57,6 +57,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/user-probe.o $(BUILD)/src/kern/syscall.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
 	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/console-device.o \
+	$(BUILD)/src/kern/mouse-device.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
 	$(BUILD)/src/kern/system-device.o \
@@ -107,6 +108,7 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/partition.o \
 	$(BUILD)/drivers/loop.o \
 	$(BUILD)/drivers/pc98-ide.o \
+	$(BUILD)/drivers/pc98-busmouse.o \
 	$(BUILD)/drivers/dp8390.o \
 	$(BUILD)/drivers/pc98-lgy98.o \
 	$(BUILD)/src/kern/mbr-partition.o \
@@ -833,7 +835,7 @@ CHECK_RUN_TARGETS += hal-pc98-compile kern-compile
 # ----------------------------------------------------------------------
 # Current QEMU verification.
 
-sh-builtins-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/sh bios-bootloader
+sh-builtins-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/sh bios-bootloade
 	$(SCRIPTS_DIR)/test-sh-builtins.sh pc98
 
 .PHONY: sh-builtins-qemu-test

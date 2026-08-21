@@ -44,7 +44,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/exec.o $(BUILD)/src/kern/user-probe.o \
 	$(BUILD)/src/kern/syscall.o $(BUILD)/src/kern/uaccess.o \
 	$(BUILD)/src/kern/cdev.o $(BUILD)/src/kern/devfs.o \
-	$(BUILD)/src/kern/console-device.o $(BUILD)/src/kern/tty.o \
+	$(BUILD)/src/kern/console-device.o $(BUILD)/src/kern/mouse-device.o \
+	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/graphics-device.o \
 	$(BUILD)/src/kern/system-device.o \
 	$(BUILD)/src/kern/pcat/font.o $(BUILD)/src/kern/pcat/vgafont.o \
@@ -670,7 +671,7 @@ hdd-boot-qemu-test: $(BUILD)/vmunix $(BUILD)/hdd-image.img \
 	$(SCRIPTS_DIR)/test-pcat-qemu.sh $(BUILD)/vmunix \
 		$(BUILD)/hdd-image.img $(BUILD)/zedbsd-grub.iso
 
-sh-builtins-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/sh bios-bootloader
+sh-builtins-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/sh bios-bootloade
 	$(SCRIPTS_DIR)/test-sh-builtins.sh pcat
 
 pcat-beui-qemu-test: $(BUILD)/vmunix $(BUILD)/bin/noct \

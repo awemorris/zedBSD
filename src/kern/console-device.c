@@ -1,7 +1,9 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/console-device.h"
 #include "kern/cdev.h"
+#include "kern/clock.h"
 #include "kern/file.h"
+#include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/poll.h"
 #include "kern/sched.h"
@@ -24,6 +26,62 @@ static unsigned input_head, input_tail, input_used;
 static unsigned input_started;
 static struct spinlock input_lock;
 static struct wait_queue input_waitq;
+
+#define CONSOLE_EVENT_RECORDS 64U
+
+struct console_open {
+	unsigned vt;
+	unsigned input_mode;
+};
+
+static struct console_open *event_owner;
+static struct zedbsd_console_input_event event_records[CONSOLE_EVENT_RECORDS];
+static unsigned event_head, event_tail, event_used, event_sequence;
+
+static struct console_open *
+console_open_state(struct file *file)
+{
+	return file != NULL ? file->f_data : NULL;
+}
+
+static unsigned
+console_file_vt(struct file *file)
+{
+	struct console_open *state = console_open_state(file);
+	return state != NULL ? state->vt : 0U;
+}
+
+static int
+console_open_file(struct file *file)
+{
+	struct console_open *state = kern_malloc(sizeof(*state));
+	if (state == NULL)
+		return ENOMEM;
+	state->vt = 0;
+	state->input_mode = ZEDBSD_CONSOLE_INPUT_TEXT;
+	file->f_data = state;
+	return 0;
+}
+
+static int
+console_close_file(struct file *file)
+{
+	struct console_open *state = console_open_state(file);
+	unsigned long irq;
+	if (state == NULL)
+		return 0;
+	irq = spin_lock_irqsave(&input_lock);
+	if (event_owner == state) {
+		event_owner = NULL;
+		event_head = event_tail = event_used = 0;
+		waitq_wake_all(&input_waitq);
+	}
+	spin_unlock_irqrestore(&input_lock, irq);
+	kern_free(state);
+	file->f_data = NULL;
+	poll_notify();
+	return 0;
+}
 
 static int
 console_input_take(int consume, int wait)
@@ -74,32 +132,95 @@ console_input_worker(void *argument)
 		if (event < 0)
 			continue;
 		irq = spin_lock_irqsave(&input_lock);
-		if (input_used == CONSOLE_INPUT_EVENTS) {
-			input_tail = (input_tail + 1U) % CONSOLE_INPUT_EVENTS;
-			input_used--;
+		if (event_owner != NULL) {
+			struct zedbsd_console_input_event *record;
+			unsigned flags = 0;
+			if (event_used == CONSOLE_EVENT_RECORDS) {
+				event_tail = (event_tail + 1U) % CONSOLE_EVENT_RECORDS;
+				event_used--;
+				flags = ZEDBSD_CONSOLE_INPUT_FLAG_OVERFLOW;
+			}
+			record = &event_records[event_head];
+			memset(record, 0, sizeof(*record));
+			record->timestamp_ns = zedbsd_kernel_milliseconds(NULL) *
+			    1000000ULL;
+			record->sequence = ++event_sequence;
+			record->type = ZEDBSD_CONSOLE_INPUT_EVENT_KEY;
+			record->flags = (uint16_t)flags;
+			record->device_id = 0;
+			record->key = (uint32_t)event & HAL_KEY_EVENT_KEY_MASK;
+			record->modifiers = (uint32_t)event &
+			    (HAL_KEY_EVENT_SHIFT | HAL_KEY_EVENT_CTRL |
+			     HAL_KEY_EVENT_GRAPH);
+			record->state = ((uint32_t)event & HAL_KEY_EVENT_RELEASE) != 0 ?
+			    ZEDBSD_CONSOLE_KEY_RELEASE : ZEDBSD_CONSOLE_KEY_PRESS;
+			event_head = (event_head + 1U) % CONSOLE_EVENT_RECORDS;
+			event_used++;
+			waitq_wake_all(&input_waitq);
+			spin_unlock_irqrestore(&input_lock, irq);
+		} else if (((uint32_t)event & HAL_KEY_EVENT_RELEASE) == 0) {
+			if (input_used == CONSOLE_INPUT_EVENTS) {
+				input_tail = (input_tail + 1U) % CONSOLE_INPUT_EVENTS;
+				input_used--;
+			}
+			input_events[input_head] = (uint32_t)event;
+			input_head = (input_head + 1U) % CONSOLE_INPUT_EVENTS;
+			input_used++;
+			waitq_wake_all(&input_waitq);
+			spin_unlock_irqrestore(&input_lock, irq);
+			tty_console_input_event((uint32_t)event);
+		} else {
+			spin_unlock_irqrestore(&input_lock, irq);
 		}
-		input_events[input_head] = (uint32_t)event;
-		input_head = (input_head + 1U) % CONSOLE_INPUT_EVENTS;
-		input_used++;
-		waitq_wake_all(&input_waitq);
-		spin_unlock_irqrestore(&input_lock, irq);
-		tty_console_input_event((uint32_t)event);
 		poll_notify();
 	}
 }
 
+static ssize_t
+console_event_read(struct file *file, void *buffer, size_t size)
+{
+	size_t capacity, count = 0;
+	unsigned long irq;
+	if (size < sizeof(struct zedbsd_console_input_event))
+		return -EINVAL;
+	capacity = size / sizeof(struct zedbsd_console_input_event);
+	irq = spin_lock_irqsave(&input_lock);
+	while (event_used == 0) {
+		uint64_t sequence;
+		int error;
+		if ((file->f_flags & O_NONBLOCK) != 0) {
+			spin_unlock_irqrestore(&input_lock, irq);
+			return -EAGAIN;
+		}
+		sequence = waitq_sequence(&input_waitq);
+		error = waitq_sleep(&input_waitq, &input_lock, sequence, 0,
+		    WAITQ_INTERRUPTIBLE);
+		if (error == EINTR) {
+			spin_unlock_irqrestore(&input_lock, irq);
+			return -EINTR;
+		}
+	}
+	while (count < capacity && event_used != 0) {
+		((struct zedbsd_console_input_event *)buffer)[count++] =
+		    event_records[event_tail];
+		event_tail = (event_tail + 1U) % CONSOLE_EVENT_RECORDS;
+		event_used--;
+	}
+	spin_unlock_irqrestore(&input_lock, irq);
+	return (ssize_t)(count * sizeof(struct zedbsd_console_input_event));
+}
+
 static ssize_t console_read(struct file *file, void *buffer, size_t size)
 {
-	unsigned vt = file->f_data != NULL ?
-	    (unsigned)((uintptr_t)file->f_data - 1U) : 0U;
-	return tty_vt_read(vt, file, buffer, size);
+	struct console_open *state = console_open_state(file);
+	if (state != NULL && state->input_mode == ZEDBSD_CONSOLE_INPUT_EVENT)
+		return console_event_read(file, buffer, size);
+	return tty_vt_read(console_file_vt(file), file, buffer, size);
 }
 
 static ssize_t console_write(struct file *file, const void *buffer, size_t size)
 {
-	unsigned vt = file->f_data != NULL ?
-	    (unsigned)((uintptr_t)file->f_data - 1U) : 0U;
-	ssize_t result = tty_vt_write(vt, file, buffer, size);
+	ssize_t result = tty_vt_write(console_file_vt(file), file, buffer, size);
 	if (result < 0)
 		return result;
 	hal_cons_update_cursor();
@@ -129,7 +250,6 @@ static int console_ioctl(struct file *file, unsigned long request,
 {
 	struct hal_cons_state state;
 	int error;
-	(void)file;
 	switch (request) {
 	case ZEDBSD_CONSOLE_GET_SIZE: {
 		const struct zedbsd_console_size size = {
@@ -187,6 +307,41 @@ static int console_ioctl(struct file *file, unsigned long request,
 		event.value = (uint32_t)value;
 		return copyout(&event, argument, sizeof(event));
 	}
+	case ZEDBSD_CONSOLE_GET_INPUT_MODE: {
+		struct console_open *open = console_open_state(file);
+		struct zedbsd_console_input_mode mode;
+		if (open == NULL) return ENODEV;
+		mode.mode = open->input_mode;
+		mode.flags = 0;
+		return copyout(&mode, argument, sizeof(mode));
+	}
+	case ZEDBSD_CONSOLE_SET_INPUT_MODE: {
+		struct console_open *open = console_open_state(file);
+		struct zedbsd_console_input_mode mode;
+		unsigned long irq;
+		if (open == NULL) return ENODEV;
+		error = copyin(argument, &mode, sizeof(mode));
+		if (error != 0) return error;
+		if ((mode.mode != ZEDBSD_CONSOLE_INPUT_TEXT &&
+		     mode.mode != ZEDBSD_CONSOLE_INPUT_EVENT) || mode.flags != 0)
+			return EINVAL;
+		irq = spin_lock_irqsave(&input_lock);
+		if (mode.mode == ZEDBSD_CONSOLE_INPUT_EVENT &&
+		    event_owner != NULL && event_owner != open) {
+			spin_unlock_irqrestore(&input_lock, irq);
+			return EBUSY;
+		}
+		if (mode.mode == ZEDBSD_CONSOLE_INPUT_EVENT)
+			event_owner = open;
+		else if (event_owner == open)
+			event_owner = NULL;
+		open->input_mode = mode.mode;
+		event_head = event_tail = event_used = 0;
+		waitq_wake_all(&input_waitq);
+		spin_unlock_irqrestore(&input_lock, irq);
+		poll_notify();
+		return 0;
+	}
 	case ZEDBSD_CONSOLE_KEY_STATE: {
 		struct zedbsd_console_key_state key;
 		error = copyin(argument, &key, sizeof(key));
@@ -198,6 +353,7 @@ static int console_ioctl(struct file *file, unsigned long request,
 		{
 			unsigned long irq = spin_lock_irqsave(&input_lock);
 			input_head = input_tail = input_used = 0;
+			event_head = event_tail = event_used = 0;
 			hal_cons_drain_input();
 			spin_unlock_irqrestore(&input_lock, irq);
 			poll_notify();
@@ -206,17 +362,44 @@ static int console_ioctl(struct file *file, unsigned long request,
 	case ZEDBSD_CONSOLE_ISATTY:
 		return 0;
 	default:
-		return tty_vt_ioctl(file->f_data != NULL ?
-		    (unsigned)((uintptr_t)file->f_data - 1U) : 0U,
-		    file, request, argument);
+		return tty_vt_ioctl(console_file_vt(file), file, request, argument);
 	}
 }
 
 static int
 console_poll(struct file *file, short events, short *revents)
 {
-	unsigned vt = file->f_data != NULL ?
-	    (unsigned)((uintptr_t)file->f_data - 1U) : 0U;
+	struct console_open *state = console_open_state(file);
+	if (state != NULL && state->input_mode == ZEDBSD_CONSOLE_INPUT_EVENT) {
+		unsigned long irq;
+		short result = events & (POLLOUT | POLLWRNORM);
+		irq = spin_lock_irqsave(&input_lock);
+		if (event_used != 0)
+			result |= events & (POLLIN | POLLRDNORM);
+		spin_unlock_irqrestore(&input_lock, irq);
+		*revents = result;
+		return 0;
+	}
+	return tty_vt_poll(console_file_vt(file), file, events, revents);
+}
+
+static ssize_t vt_read(struct file *file, void *buffer, size_t size)
+{
+	unsigned vt = (unsigned)((uintptr_t)file->f_data - 1U);
+	return tty_vt_read(vt, file, buffer, size);
+}
+
+static ssize_t vt_write(struct file *file, const void *buffer, size_t size)
+{
+	unsigned vt = (unsigned)((uintptr_t)file->f_data - 1U);
+	ssize_t result = tty_vt_write(vt, file, buffer, size);
+	if (result >= 0) hal_cons_update_cursor();
+	return result;
+}
+
+static int vt_poll(struct file *file, short events, short *revents)
+{
+	unsigned vt = (unsigned)((uintptr_t)file->f_data - 1U);
 	return tty_vt_poll(vt, file, events, revents);
 }
 
@@ -227,11 +410,13 @@ static int vt_ioctl(struct file *file, unsigned long request, uintptr_t argument
 }
 
 static const struct cdev_ops vt_ops = {
-	.read = console_read, .write = console_write,
-	.ioctl = vt_ioctl, .poll = console_poll,
+	.read = vt_read, .write = vt_write,
+	.ioctl = vt_ioctl, .poll = vt_poll,
 };
 
 static const struct cdev_ops console_ops = {
+	.open = console_open_file,
+	.close = console_close_file,
 	.read = console_read,
 	.write = console_write,
 	.ioctl = console_ioctl,
@@ -248,6 +433,8 @@ int console_device_register(void)
 	spin_init(&input_lock, LOCK_RANK_DEVICE, "console input");
 	waitq_init(&input_waitq, "console input");
 	input_head = input_tail = input_used = 0;
+	event_head = event_tail = event_used = event_sequence = 0;
+	event_owner = NULL;
 	input_started = 1;
 	error = kthread_create(console_input_worker, NULL,
 	    SCHED_PRIORITY_DEFAULT, &worker);

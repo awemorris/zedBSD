@@ -23,6 +23,7 @@ static int console_suspended;
 static enum hal_cons_mode console_mode = HAL_CONS_TERMINAL;
 static unsigned events[EVENT_COUNT], event_head, event_tail;
 static uint8_t key_down[32];
+static uint16_t last_key[256];
 static int shift_down, ctrl_down, alt_down, caps_lock, e0_prefix;
 static struct hal_cons_wait_queue input_waiters;
 static const struct zbl6_framebuffer *framebuffer;
@@ -396,7 +397,6 @@ scan_to_key(uint8_t scan, int extended)
 		int upper = shift_down ^ caps_lock;
 		int key = normal_map[scan];
 		if (upper) key -= 'a' - 'A';
-		if (ctrl_down) key = (key | 0x20) - 'a' + 1;
 		return key;
 	}
 	return shift_down && shift_map[scan] ? shift_map[scan] : normal_map[scan];
@@ -407,23 +407,39 @@ pump_keyboard_locked(void)
 {
 	while (asm_inb(KBD_STATUS) & 1U) {
 		uint8_t raw = asm_inb(KBD_DATA), scan;
-		int released, key;
+		int released, key, extended;
+		unsigned index;
 		unsigned next;
 		if (raw == 0xe0U) { e0_prefix = 1; continue; }
 		released = (raw & 0x80U) != 0; scan = raw & 0x7fU;
+		extended = e0_prefix; e0_prefix = 0;
+		index = scan | (extended ? 0x80U : 0U);
 		if (released) key_down[scan >> 3] &= (uint8_t)~(1U << (scan & 7));
 		else key_down[scan >> 3] |= (uint8_t)(1U << (scan & 7));
 		if (scan == 0x2aU || scan == 0x36U) shift_down = !released;
 		else if (scan == 0x1dU) ctrl_down = !released;
 		else if (scan == 0x38U) alt_down = !released;
 		else if (scan == 0x3aU && !released) caps_lock = !caps_lock;
-		if (released) { e0_prefix = 0; continue; }
-		key = scan_to_key(scan, e0_prefix); e0_prefix = 0;
+		if (released) {
+			key = last_key[index];
+			last_key[index] = 0;
+		} else if (!extended && (scan == 0x2aU || scan == 0x36U))
+			key = HAL_KEY_SHIFT;
+		else if (!extended && scan == 0x1dU)
+			key = HAL_KEY_CTRL;
+		else if (!extended && scan == 0x38U)
+			key = HAL_KEY_GRAPH;
+		else if (!extended && scan == 0x3aU)
+			key = HAL_KEY_CAPS_LOCK;
+		else
+			key = scan_to_key(scan, extended);
 		if (key == 0) continue;
+		if (!released) last_key[index] = (uint16_t)key;
 		next = (event_head + 1U) % EVENT_COUNT;
 		if (next == event_tail) continue;
 		events[event_head] = ((unsigned)key & HAL_KEY_EVENT_KEY_MASK) |
-		    keyboard_modifiers_locked();
+		    keyboard_modifiers_locked() |
+		    (released ? HAL_KEY_EVENT_RELEASE : 0U);
 		event_head = next;
 	}
 }
@@ -516,6 +532,8 @@ void pcat_cons_init(void)
 	event_head = event_tail = 0; shift_down = ctrl_down = alt_down = 0;
 	caps_lock = e0_prefix = 0;
 	for (unsigned i = 0; i < sizeof(key_down); i++) key_down[i] = 0;
+	for (unsigned i = 0; i < sizeof(last_key) / sizeof(last_key[0]); i++)
+		last_key[i] = 0;
 	hal_cons_wait_queue_init(&input_waiters);
 	hal_cons_reset();
 }

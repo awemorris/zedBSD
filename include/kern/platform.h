@@ -21,6 +21,7 @@ size_t kern_platform_init(const struct zedbsd_handoff *handoff,
 			  struct zedbsd_device *devices, size_t capacity);
 void kern_platform_refresh_devices(const struct zedbsd_device *devices,
 				   size_t count);
+int kern_platform_input_init(void);
 struct disk *kern_platform_block_device(
 	const struct zedbsd_device *device);
 void kern_platform_debug_write(const char *text);

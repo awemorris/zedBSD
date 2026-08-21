@@ -2,10 +2,10 @@
  * HAL: Historical Architecture Library
  * Copyright (C) 2026 Awe Morris
  *
- * This header defines a kernel porting HAL. A HAL is implemented for
+ * This header defines a kernel porting HAL. A HAL is implemented fo
  * a combination of a CPU architecture and a machine/board type. A HAL
  * doesn't implement basic kernel features such as scheduling
- * algorithm, and only implements low level operations required for
+ * algorithm, and only implements low level operations required fo
  * contemporary 32-bit and 64-bit POSIX-compatible kernels.
  *
  * SPDX-License-Identifier: Zlib
@@ -93,7 +93,7 @@ hal_fatal(
 /*
  * SMP
  *
- * Secondary processors are initialized inside HAL, and waiting for
+ * Secondary processors are initialized inside HAL, and waiting fo
  * IPI at the moment kernel_main() called.
  */
 
@@ -241,7 +241,7 @@ hal_irq_service_wait(
 	hal_irq_ack_t *acknowledge);
 
 /*
- * Interval Timer
+ * Interval Time
  *
  * Do not consider timers other than local scheduling ticks.
  */
@@ -494,7 +494,7 @@ hal_task_create(
 
 /*
  * Duplicate/replace the active return-to-user context.  These
- * operations are valid only while the current task is handling a user
+ * operations are valid only while the current task is handling a use
  * system call.
  */
 hal_task_t
@@ -749,6 +749,10 @@ enum hal_key {
 	HAL_KEY_F8 = 0x169,
 	HAL_KEY_F9 = 0x16a,
 	HAL_KEY_F10 = 0x16b,
+	HAL_KEY_CAPS_LOCK = 0x171,
+	HAL_KEY_KANA = 0x172,
+	HAL_KEY_GRAPH = 0x173,
+	HAL_KEY_CTRL = 0x174,
 	HAL_KEY_SHIFT = 0x170,
 };
 
@@ -756,6 +760,7 @@ enum hal_key {
 #define HAL_KEY_EVENT_SHIFT    (0x00010000U)
 #define HAL_KEY_EVENT_CTRL     (0x00020000U)
 #define HAL_KEY_EVENT_GRAPH    (0x00040000U)
+#define HAL_KEY_EVENT_RELEASE  (0x00080000U)
 
 struct hal_cons_state {
 	enum hal_cons_mode mode;

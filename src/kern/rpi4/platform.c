@@ -39,6 +39,7 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 	return 1;
 }
 void kern_platform_refresh_devices(const struct zedbsd_device*d,size_t n){(void)d;(void)n;}
+int kern_platform_input_init(void){return 0;}
 struct disk *kern_platform_block_device(const struct zedbsd_device*d)
 {return d&&d->device_class==ZEDBSD_DEV_SD?rpi4_sdhci_disk():NULL;}
 void kern_platform_debug_write(const char*s){if(s)hal_cons_write(s);}

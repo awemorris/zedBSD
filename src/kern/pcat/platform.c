@@ -87,6 +87,8 @@ void kern_platform_refresh_devices(const struct zedbsd_device *d, size_t n)
 	drv_pci_ehci_probe_roots();
 }
 
+int kern_platform_input_init(void) { return 0; }
+
 struct disk *kern_platform_block_device(const struct zedbsd_device *device)
 {
 	if (device == 0 || device->device_class != ZEDBSD_DEV_IDE) return 0;

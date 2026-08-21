@@ -5,6 +5,7 @@
 #include "kern/pc98/partition.h"
 #include "kern/pc98/partition-auto.h"
 #include "drivers/pc98-ide.h"
+#include "drivers/pc98-busmouse.h"
 #if CONFIG_DRIVER_LGY98
 #include "drivers/pc98-lgy98.h"
 #endif
@@ -80,6 +81,12 @@ kern_platform_refresh_devices(const struct zedbsd_device *devices, size_t count)
 	 */
 	(void)devices;
 	(void)count;
+}
+
+int
+kern_platform_input_init(void)
+{
+	return zedbsd_pc98_busmouse_init();
 }
 
 struct disk *

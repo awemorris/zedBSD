@@ -493,6 +493,7 @@ struct pc98_keyboard {
 	uint8_t caps;
 	uint8_t kana;
 	uint8_t down[16];
+	uint16_t last_key[128];
 };
 /*
  * NEC PC-98 keyboard scancode translation
@@ -610,6 +611,10 @@ key_to_scan(int key)
 	case HAL_KEY_PAGE_UP: return 0x36;
 	case HAL_KEY_PAGE_DOWN: return 0x37;
 	case HAL_KEY_SHIFT: return SCAN_SHIFT_L;
+	case HAL_KEY_CTRL: return SCAN_CTRL;
+	case HAL_KEY_GRAPH: return SCAN_GRAPH;
+	case HAL_KEY_CAPS_LOCK: return SCAN_CAPS;
+	case HAL_KEY_KANA: return SCAN_KANA;
 	default: break;
 	}
 	if (key >= HAL_KEY_F1 && key <= HAL_KEY_F10)
@@ -628,6 +633,8 @@ pc98_keyboard_reset(struct pc98_keyboard *kb)
 	kb->shift = kb->ctrl = kb->graph = kb->caps = kb->kana = 0;
 	for (i = 0; i < sizeof(kb->down); i++)
 		kb->down[i] = 0;
+	for (i = 0; i < sizeof(kb->last_key) / sizeof(kb->last_key[0]); i++)
+		kb->last_key[i] = 0;
 }
 
 static void
@@ -641,12 +648,33 @@ set_down(struct pc98_keyboard *kb, uint8_t scan, int pressed)
 		kb->down[scan >> 3] &= (uint8_t)~mask;
 }
 
+static unsigned keyboard_modifiers_locked(void);
+
 static int
-pc98_keyboard_feed(struct pc98_keyboard *kb, uint8_t raw)
+modifier_key(uint8_t scan)
+{
+	switch (scan) {
+	case SCAN_SHIFT_L:
+	case SCAN_SHIFT_R: return HAL_KEY_SHIFT;
+	case SCAN_CTRL: return HAL_KEY_CTRL;
+	case SCAN_GRAPH: return HAL_KEY_GRAPH;
+	case SCAN_CAPS: return HAL_KEY_CAPS_LOCK;
+	case SCAN_KANA: return HAL_KEY_KANA;
+	default: return 0;
+	}
+}
+
+static int
+pc98_keyboard_feed(struct pc98_keyboard *kb, uint8_t raw, unsigned *result)
 {
 	uint8_t scan = raw & 0x7fU;
 	int pressed = (raw & 0x80U) == 0;
 	uint8_t ch;
+	int key;
+
+	if (result == NULL)
+		return 0;
+	key = pressed ? modifier_key(scan) : kb->last_key[scan];
 
 	set_down(kb, scan, pressed);
 
@@ -654,35 +682,47 @@ pc98_keyboard_feed(struct pc98_keyboard *kb, uint8_t raw)
 	case SCAN_SHIFT_L:
 	case SCAN_SHIFT_R:
 		kb->shift = (uint8_t)pressed;
-		return 0;
+		break;
 	case SCAN_CTRL:
 		kb->ctrl = (uint8_t)pressed;
-		return 0;
+		break;
 	case SCAN_GRAPH:
 		kb->graph = (uint8_t)pressed;
-		return 0;
+		break;
 	case SCAN_CAPS:
 		/* Caps and kana are locking keys: toggle on the make. */
 		if (pressed)
 			kb->caps ^= 1U;
-		return 0;
+		break;
 	case SCAN_KANA:
 		if (pressed)
 			kb->kana ^= 1U;
-		return 0;
+		break;
 	default:
 		break;
 	}
 
-	/* Releases and modifiers produce no key. */
-	if (!pressed)
-		return 0;
+	if (!pressed) {
+		kb->last_key[scan] = 0;
+		if (key == 0)
+			key = modifier_key(scan);
+		if (key == 0)
+			return 0;
+		*result = ((unsigned)key & HAL_KEY_EVENT_KEY_MASK) |
+		    keyboard_modifiers_locked() | HAL_KEY_EVENT_RELEASE;
+		return 1;
+	}
+
+	if (key != 0)
+		goto emit;
 
 	{
 		int special = special_key(scan);
 
-		if (special != 0)
-			return special;
+		if (special != 0) {
+			key = special;
+			goto emit;
+		}
 	}
 
 	ch = kb->shift ? shift_table[scan] : base_table[scan];
@@ -695,14 +735,12 @@ pc98_keyboard_feed(struct pc98_keyboard *kb, uint8_t raw)
 	else if (kb->caps && ch >= 'A' && ch <= 'Z')
 		ch = (uint8_t)(ch - 'A' + 'a');
 
-	/* Control collapses a letter to its control code. */
-	if (kb->ctrl) {
-		if (ch >= 'a' && ch <= 'z')
-			return ch - 'a' + 1;
-		if (ch >= 'A' && ch <= 'Z')
-			return ch - 'A' + 1;
-	}
-	return ch;
+	key = ch;
+emit:
+	kb->last_key[scan] = (uint16_t)key;
+	*result = ((unsigned)key & HAL_KEY_EVENT_KEY_MASK) |
+	    keyboard_modifiers_locked();
+	return 1;
 }
 
 static int
@@ -774,16 +812,15 @@ pump_locked(void)
 {
 	while ((inb(KBD_STATUS) & KBD_RXRDY) != 0) {
 		uint8_t raw = inb(KBD_DATA);
-		int key = pc98_keyboard_feed(&keyboard, raw);
+		unsigned event;
 		unsigned next;
 
-		if (key == 0)
+		if (!pc98_keyboard_feed(&keyboard, raw, &event))
 			continue;
 		next = (head + 1U) % QUEUE_SIZE;
 		if (next == tail)
 			continue;
-		events[head] = ((unsigned)key & HAL_KEY_EVENT_KEY_MASK) |
-			keyboard_modifiers_locked();
+		events[head] = event;
 		head = next;
 	}
 }

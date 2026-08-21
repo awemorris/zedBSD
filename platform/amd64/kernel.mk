@@ -64,7 +64,8 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/pipe.c src/kern/cred.c src/kern/signal.c \
 	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
-	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c src/kern/tty.c \
+	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
+	src/kern/mouse-device.c src/kern/tty.c \
 	src/kern/graphics-device.c src/kern/system-device.c \
 	src/kern/pcat/font.c src/kern/pcat/vgafont.c drivers/pcat-graphics.c \
 	src/kern/init.c
@@ -622,7 +623,7 @@ amd64-hal-compile: $(AMD64_HAL_OBJS)
 	@echo "HAL amd64/PCAT compile check: PASS"
 CHECK_RUN_TARGETS += amd64-hal-compile
 
-amd64-entry-qemu-test: $(BUILD)/vmunix bios-bootloader
+amd64-entry-qemu-test: $(BUILD)/vmunix bios-bootloade
 	bash scripts/test-amd64-entry-qemu.sh
 
 hdd-boot-qemu-test amd64-qemu-test: $(BUILD)/hdd-image.img \

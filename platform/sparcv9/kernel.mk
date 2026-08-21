@@ -22,7 +22,7 @@ SPARCV9_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 SPARCV9_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias -mcmodel=medany \
 	-msoft-float -mno-app-regs -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables \
-	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werror
+	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werro
 
 SPARCV9_EARLY_SOURCES := src/hal/sparcv9/locore.S \
 	src/hal/sparcv9/trap-table.S src/hal/sparcv9/trap-entry.S \
@@ -59,7 +59,8 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/cred.c src/kern/signal.c src/kern/cwdinfo.c \
 	src/kern/elf.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
-	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c src/kern/tty.c \
+	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
+	src/kern/mouse-device.c src/kern/tty.c \
 	src/kern/graphics-device.c src/kern/system-device.c \
 	src/kern/init.c
 SPARCV9_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
@@ -307,7 +308,7 @@ SPARCV9_DYNAMIC_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias \
 	-mcmodel=medany -msoft-float -mno-app-regs -Os -ffreestanding -fPIC \
 	-fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables \
 	-fno-unwind-tables -fno-plt -ftls-model=global-dynamic \
-	-Wall -Wextra -Werror
+	-Wall -Wextra -Werro
 SPARCV9_DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c \
 	userland/base/libc/poll.c userland/base/libc/termios.c userland/base/libc/pthread.c \
 	userland/base/libc/shm.c userland/base/libc/semaphore.c userland/base/libc/mqueue.c \

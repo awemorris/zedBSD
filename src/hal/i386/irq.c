@@ -8,6 +8,8 @@
 
 enum irq_mode { IRQ_MODE_NONE, IRQ_MODE_REALTIME, IRQ_MODE_TASK };
 
+#define IRQ_ACK_TASK 0x100U
+
 static struct irq_service_info irq_service[IRQ_MAX + 1];
 
 static int
@@ -55,6 +57,8 @@ void
 hal_irq_send_eoi(hal_irq_ack_t acknowledge)
 {
 	unsigned irq;
+	int task_acknowledge = (acknowledge & IRQ_ACK_TASK) != 0;
+	acknowledge &= ~IRQ_ACK_TASK;
 	if (acknowledge == IRQ_MAX + 2U && i386_interrupt_uses_apic()) {
 		i386_interrupt_eoi(0);
 		return;
@@ -66,6 +70,8 @@ hal_irq_send_eoi(hal_irq_ack_t acknowledge)
 		HAL_FATAL("stale i386 IRQ acknowledgement");
 	irq_service[irq].in_flight[hal_cpu_current()] = 0;
 	i386_interrupt_eoi((int)irq);
+	if (task_acknowledge)
+		hal_irq_enable();
 }
 
 int
@@ -123,7 +129,7 @@ hal_irq_service_wait(int irq, hal_irq_ack_t *acknowledge)
 		service->waiter = hal_task_get_current();
 		if (service->pending) {
 			service->pending = 0;
-			*acknowledge = service->acknowledge;
+			*acknowledge = service->acknowledge | IRQ_ACK_TASK;
 			return HAL_OK;
 		}
 		i386_interrupt_unmask(irq);

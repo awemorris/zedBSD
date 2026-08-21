@@ -51,6 +51,8 @@ kern_platform_init(const struct zedbsd_handoff *common,
 void kern_platform_refresh_devices(const struct zedbsd_device *d, size_t n)
 { (void)d; (void)n; }
 
+int kern_platform_input_init(void) { return 0; }
+
 struct disk *
 kern_platform_block_device(const struct zedbsd_device *device)
 {
