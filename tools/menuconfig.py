@@ -453,8 +453,8 @@ def user_program_rows() -> list[list[str]]:
 def build(screen, values: dict[str, object], output: Path,
           make_target: str, artifact_target: str) -> None:
     answer = choose(screen, "Are you sure you want to build?",
-                    ["No", "Yes"], target_label(values))
-    if answer != 1:
+                    ["Yes", "No"], target_label(values))
+    if answer != 0:
         return
     save(output, values)
     curses.def_prog_mode()
