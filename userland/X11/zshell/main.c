@@ -1,5 +1,5 @@
 /*
- * xzedshell - lightweight Xzed desktop taskbar
+ * zshell - lightweight Xzed desktop taskbar
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -49,6 +49,8 @@ struct icon {
 struct task {
 	char name[TASK_NAME];
 	struct icon *icon;
+	Window window;
+	Window client;
 };
 
 struct desktop_shell {
@@ -293,6 +295,20 @@ window_icon_path(struct desktop_shell *shell, Window window, char **path)
 	return 0;
 }
 
+static Window
+window_client(struct desktop_shell *shell, Window window)
+{
+	Window root_return, parent_return, *children = NULL;
+	unsigned count = 0;
+	Window client = window;
+
+	if (XQueryTree(shell->display, window, &root_return, &parent_return,
+	    &children, &count) && count != 0)
+		client = children[0];
+	XFree(children);
+	return client;
+}
+
 static int
 refresh_tasks(struct desktop_shell *shell)
 {
@@ -324,6 +340,8 @@ refresh_tasks(struct desktop_shell *shell)
 		}
 		task = &next[next_count++];
 		strncpy(task->name, name, sizeof(task->name) - 1U);
+		task->window = children[index];
+		task->client = window_client(shell, children[index]);
 		if (window_icon_path(shell, children[index], &path)) {
 			task->icon = cached_icon(shell, path);
 			XFree(path);
@@ -334,7 +352,9 @@ refresh_tasks(struct desktop_shell *shell)
 	changed = next_count != shell->task_count;
 	if (!changed)
 		for (index = 0; index < next_count; index++)
-			if (strcmp(next[index].name, shell->tasks[index].name) != 0 ||
+			if (next[index].window != shell->tasks[index].window ||
+			    next[index].client != shell->tasks[index].client ||
+			    strcmp(next[index].name, shell->tasks[index].name) != 0 ||
 			    next[index].icon != shell->tasks[index].icon) {
 				changed = 1;
 				break;
@@ -480,12 +500,15 @@ static void
 redraw(struct desktop_shell *shell)
 {
 	char clock[32];
+	Window focus = None;
+	int revert;
 	unsigned status_x = shell->width > STATUS_WIDTH ?
 	    shell->width - STATUS_WIDTH : shell->width;
 	unsigned x = LAUNCHER_WIDTH;
 	unsigned index;
 
 	clock_text(clock, sizeof(clock));
+	(void)XGetInputFocus(shell->display, &focus, &revert);
 	fill(shell, BAR_BACKGROUND, 0, 0, shell->width, TASKBAR_HEIGHT);
 	fill(shell, BAR_BORDER, 0, 0, shell->width, 2);
 	draw_launcher(shell);
@@ -496,7 +519,8 @@ redraw(struct desktop_shell *shell)
 		unsigned width = TASK_WIDTH;
 		if (x + width > status_x)
 			width = status_x - x;
-		fill(shell, index == 0 ? BAR_PANEL_ACTIVE : BAR_PANEL,
+		fill(shell, focus == shell->tasks[index].client ||
+		    focus == shell->tasks[index].window ? BAR_PANEL_ACTIVE : BAR_PANEL,
 		    (int)x, 2, width, TASKBAR_HEIGHT - 2U);
 		fill(shell, BAR_BORDER, (int)(x + width - 1U), 2, 1,
 		    TASKBAR_HEIGHT - 2U);
@@ -517,6 +541,34 @@ redraw(struct desktop_shell *shell)
 	strncpy(shell->clock, clock, sizeof(shell->clock));
 	shell->clock[sizeof(shell->clock) - 1U] = '\0';
 	x_finish(shell);
+}
+
+static void
+task_click(struct desktop_shell *shell, int x)
+{
+	unsigned status_x = shell->width > STATUS_WIDTH ?
+	    shell->width - STATUS_WIDTH : shell->width;
+	unsigned index;
+	Window focus = None;
+	int revert;
+
+	if (x < (int)LAUNCHER_WIDTH || (unsigned)x >= status_x)
+		return;
+	index = ((unsigned)x - LAUNCHER_WIDTH) / TASK_WIDTH;
+	if (index >= shell->task_count)
+		return;
+	(void)XGetInputFocus(shell->display, &focus, &revert);
+	if (focus == shell->tasks[index].client || focus == shell->tasks[index].window) {
+		XUnmapWindow(shell->display, shell->tasks[index].window);
+		XSetInputFocus(shell->display, shell->root, RevertToParent, CurrentTime);
+	} else {
+		XMapWindow(shell->display, shell->tasks[index].window);
+		XRaiseWindow(shell->display, shell->tasks[index].window);
+		XSetInputFocus(shell->display, shell->tasks[index].client,
+		    RevertToParent, CurrentTime);
+	}
+	XSync(shell->display, False);
+	redraw(shell);
 }
 
 static void
@@ -559,7 +611,8 @@ initialize(struct desktop_shell *shell)
 	if (shell->font == NULL)
 		return -1;
 	XSetFont(shell->display, shell->gc, shell->font->fid);
-	XSelectInput(shell->display, shell->window, ExposureMask);
+	XSelectInput(shell->display, shell->window,
+	    ExposureMask | ButtonPressMask);
 	XMapWindow(shell->display, shell->window);
 	XSync(shell->display, False);
 	return 0;
@@ -573,7 +626,7 @@ main(void)
 	int running = 1;
 
 	if (initialize(&shell) != 0) {
-		fprintf(stderr, "xzedshell: initialization failed: %s\n",
+		fprintf(stderr, "zshell: initialization failed: %s\n",
 		    strerror(errno));
 		return 1;
 	}
@@ -594,6 +647,8 @@ main(void)
 			}
 			if (event.type == Expose)
 				exposed = 1;
+			else if (event.type == ButtonPress && event.xbutton.keycode == 1)
+				task_click(&shell, event.xbutton.x_root);
 		}
 		if (!running)
 			break;

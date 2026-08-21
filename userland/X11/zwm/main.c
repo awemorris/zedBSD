@@ -19,11 +19,15 @@
 #define TITLE_HEIGHT 26U
 #define CLIENT_X ((int)FRAME_BORDER)
 #define CLIENT_Y ((int)TITLE_HEIGHT)
+#define RESIZE_HIT 4
+#define MIN_CLIENT_WIDTH 120U
+#define MIN_CLIENT_HEIGHT 64U
+#define EDGE_LEFT 1U
+#define EDGE_RIGHT 2U
+#define EDGE_BOTTOM 8U
 
 /* Flat, dark decoration used by the zedBSD desktop. */
-#define FRAME_FACE 0x202833UL
-#define FRAME_HIGHLIGHT 0x394450UL
-#define FRAME_EDGE 0x090d11UL
+#define FRAME_FACE 0x222932UL
 #define FRAME_SYMBOL 0xd3d9dfUL
 
 struct frame {
@@ -496,6 +500,33 @@ by_frame(Window window)
 	return NULL;
 }
 
+static struct frame *
+by_client(Window window)
+{
+	unsigned i;
+
+	for (i = 0; i < frame_count; i++)
+		if (frames[i].client == window)
+			return &frames[i];
+	return NULL;
+}
+
+static void
+activate(Display *display, struct frame *frame)
+{
+	XMapWindow(display, frame->client);
+	XMapWindow(display, frame->frame);
+	XRaiseWindow(display, frame->frame);
+	XSetInputFocus(display, frame->client, RevertToParent, CurrentTime);
+}
+
+static void
+minimize(Display *display, Window root, struct frame *frame)
+{
+	XUnmapWindow(display, frame->frame);
+	XSetInputFocus(display, root, RevertToParent, CurrentTime);
+}
+
 static void
 decorate(Display *display, struct frame *frame)
 {
@@ -517,14 +548,13 @@ decorate(Display *display, struct frame *frame)
 	if (title_length > title_capacity)
 		title_length = title_capacity;
 
-	/* A black one-pixel outer edge encloses the title and client window. */
-	XSetForeground(display, frame->gc, FRAME_EDGE);
-	XFillRectangle(display, frame->frame, frame->gc, 0, 0, fw, fh);
+	/*
+	 * The title bar itself is the top edge: do not surround it with a
+	 * separate frame.  The exposed two-pixel strips beside and below the
+	 * client use the exact same face color as the title bar.
+	 */
 	XSetForeground(display, frame->gc, FRAME_FACE);
-	XFillRectangle(display, frame->frame, frame->gc, 1, 1, fw - 2U,
-	    TITLE_HEIGHT - 2U);
-	XSetForeground(display, frame->gc, FRAME_HIGHLIGHT);
-	XFillRectangle(display, frame->frame, frame->gc, 2, 1, fw - 4U, 1);
+	XFillRectangle(display, frame->frame, frame->gc, 0, 0, fw, fh);
 	XSync(display, False);
 
 	/* Flat monochrome controls: minimize, maximize, and close. */
@@ -578,6 +608,14 @@ manage(Display *display, Window root, Window client)
 	struct frame *frame;
 	char *title = NULL;
 
+	frame = by_client(client);
+	if (frame == NULL)
+		frame = by_frame(client);
+	if (frame != NULL) {
+		activate(display, frame);
+		return;
+	}
+
 	if (frame_count == MAX_FRAMES ||
 	    !XGetGeometry(display, client, &root_return, &x, &y, &width, &height,
 	    &border, &depth))
@@ -603,7 +641,7 @@ manage(Display *display, Window root, Window client)
 	}
 	XFree(title);
 	frame->frame = XCreateSimpleWindow(display, root, x, y,
-	    frame_width(frame), frame_height(frame), 0, 0, FRAME_EDGE);
+	    frame_width(frame), frame_height(frame), 0, 0, FRAME_FACE);
 	XStoreName(display, frame->frame, frame->title);
 	frame->gc = XCreateGC(display, frame->frame, 0, NULL);
 	if (title_font != NULL)
@@ -618,7 +656,7 @@ manage(Display *display, Window root, Window client)
 	XMapWindow(display, frame->frame);
 	XSync(display, False);
 	decorate(display, frame);
-	XSetInputFocus(display, client, RevertToParent, CurrentTime);
+	activate(display, frame);
 }
 
 int
@@ -628,8 +666,10 @@ main(int argc, char **argv)
 	Window root;
 	XEvent event;
 	struct frame *drag = NULL;
-	int drag_x = 0;
-	int drag_y = 0;
+	unsigned drag_edges = 0;
+	int drag_start_x = 0, drag_start_y = 0;
+	int drag_frame_x = 0, drag_frame_y = 0;
+	unsigned drag_width = 0, drag_height = 0;
 	extern char **environ;
 
 	if (display == NULL) {
@@ -669,18 +709,62 @@ main(int argc, char **argv)
 			struct frame *frame = by_frame(event.xbutton.window);
 
 			if (frame != NULL && event.xbutton.keycode == 1) {
-				XSetInputFocus(display, frame->client, RevertToParent,
-				    CurrentTime);
+				int local_x = event.xbutton.x_root - frame->x;
+				int local_y = event.xbutton.y_root - frame->y;
+				unsigned fw = frame_width(frame);
+				unsigned fh = frame_height(frame);
+
+				activate(display, frame);
+				if (local_y >= 2 && local_y < (int)TITLE_HEIGHT &&
+				    local_x >= (int)fw - 84 && local_x < (int)fw - 60) {
+					minimize(display, root, frame);
+					continue;
+				}
 				drag = frame;
-				drag_x = event.xbutton.x_root - frame->x;
-				drag_y = event.xbutton.y_root - frame->y;
+				drag_start_x = event.xbutton.x_root;
+				drag_start_y = event.xbutton.y_root;
+				drag_frame_x = frame->x; drag_frame_y = frame->y;
+				drag_width = frame->width; drag_height = frame->height;
+				drag_edges = 0;
+				/* The title bar has no left, right, or top resize frame. */
+				if (local_y >= (int)TITLE_HEIGHT && local_x < RESIZE_HIT)
+					drag_edges |= EDGE_LEFT;
+				if (local_y >= (int)TITLE_HEIGHT &&
+				    local_x >= (int)fw - RESIZE_HIT)
+					drag_edges |= EDGE_RIGHT;
+				if (local_y >= (int)fh - RESIZE_HIT) drag_edges |= EDGE_BOTTOM;
 			}
 		} else if (event.type == MotionNotify && drag != NULL) {
-			drag->x = event.xmotion.x_root - drag_x;
-			drag->y = event.xmotion.y_root - drag_y;
+			int dx = event.xmotion.x_root - drag_start_x;
+			int dy = event.xmotion.y_root - drag_start_y;
+			int x = drag_frame_x, y = drag_frame_y;
+			int width = (int)drag_width, height = (int)drag_height;
+
+			if (drag_edges == 0) {
+				x += dx; y += dy;
+			} else {
+				if (drag_edges & EDGE_LEFT) { x += dx; width -= dx; }
+				if (drag_edges & EDGE_RIGHT) width += dx;
+				if (drag_edges & EDGE_BOTTOM) height += dy;
+				if (width < (int)MIN_CLIENT_WIDTH) {
+					if (drag_edges & EDGE_LEFT) x -= (int)MIN_CLIENT_WIDTH - width;
+					width = MIN_CLIENT_WIDTH;
+				}
+				if (height < (int)MIN_CLIENT_HEIGHT) {
+					height = MIN_CLIENT_HEIGHT;
+				}
+			}
+			drag->x = x; drag->y = y;
+			drag->width = (unsigned)width; drag->height = (unsigned)height;
 			XMoveResizeWindow(display, drag->frame, drag->x, drag->y,
 			    frame_width(drag), frame_height(drag));
+			if (drag_edges != 0)
+				XMoveResizeWindow(display, drag->client,
+				    drag->x + CLIENT_X, drag->y + CLIENT_Y,
+				    drag->width, drag->height);
 		} else if (event.type == ButtonRelease) {
+			if (drag != NULL)
+				decorate(display, drag);
 			drag = NULL;
 		}
 	}

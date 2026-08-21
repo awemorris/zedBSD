@@ -36,13 +36,28 @@ struct zedbsd_graphics_caps {
 };
 
 struct zedbsd_graphics_mode {
+	uint32_t preferred_width;
+	uint32_t preferred_height;
 	uint32_t preferred_bits_per_pixel;
 	uint32_t width;
 	uint32_t height;
 	uint32_t bits_per_pixel;
 	uint32_t stride;
 	uint32_t capabilities;
-	uint32_t reserved[2];
+};
+
+struct zedbsd_graphics_mode_info {
+	uint32_t width;
+	uint32_t height;
+	uint32_t bits_per_pixel;
+	uint32_t stride;
+};
+
+struct zedbsd_graphics_mode_list {
+	uapi_ptr_t modes;
+	uint32_t capacity;
+	uint32_t count;
+	uint32_t reserved;
 };
 
 struct zedbsd_graphics_rect {
@@ -130,5 +145,7 @@ struct zedbsd_graphics_glyph {
 	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 9, struct zedbsd_graphics_flush)
 #define ZEDBSD_GRAPHICS_GET_GLYPH \
 	_IOWR(ZEDBSD_GRAPHICS_IOC_GROUP, 10, struct zedbsd_graphics_glyph)
+#define ZEDBSD_GRAPHICS_GET_MODES \
+	_IOWR(ZEDBSD_GRAPHICS_IOC_GROUP, 11, struct zedbsd_graphics_mode_list)
 
 #endif

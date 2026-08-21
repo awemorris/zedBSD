@@ -12,7 +12,13 @@
 #include <stdint.h>
 
 struct kern_graphics_mode {
+	unsigned preferred_width;
+	unsigned preferred_height;
 	unsigned preferred_bits_per_pixel;
+	unsigned width, height, bits_per_pixel, stride;
+};
+
+struct kern_graphics_mode_info {
 	unsigned width, height, bits_per_pixel, stride;
 };
 
@@ -29,6 +35,7 @@ struct kern_graphics_image {
 };
 
 struct graphics_driver_ops {
+	size_t (*get_modes)(void *, struct kern_graphics_mode_info *, size_t);
 	int (*enter)(void *, struct kern_graphics_mode *);
 	int (*clear)(void *);
 	void (*leave)(void *);

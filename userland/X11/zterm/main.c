@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -562,6 +563,47 @@ send_key(struct terminal *terminal, XKeyEvent *event)
 }
 
 static int
+resize_terminal(struct terminal *terminal, unsigned width, unsigned height)
+{
+	struct cell *old;
+	unsigned old_columns = terminal->columns, old_rows = terminal->rows;
+	unsigned columns = width / CELL_WIDTH, rows = height / CELL_HEIGHT;
+	unsigned row, column, copy_columns, copy_rows;
+	struct winsize winsize;
+
+	if (columns == 0) columns = 1;
+	if (rows == 0) rows = 1;
+	if (columns > MAX_COLUMNS) columns = MAX_COLUMNS;
+	if (rows > MAX_ROWS) rows = MAX_ROWS;
+	if (columns == old_columns && rows == old_rows)
+		return 0;
+	old = malloc((size_t)old_columns * old_rows * sizeof(*old));
+	if (old == NULL)
+		return -1;
+	memcpy(old, terminal->cells,
+	    (size_t)old_columns * old_rows * sizeof(*old));
+	terminal->columns = columns; terminal->rows = rows;
+	for (row = 0; row < rows; row++)
+		for (column = 0; column < columns; column++)
+			blank_cell(terminal, column, row);
+	copy_columns = columns < old_columns ? columns : old_columns;
+	copy_rows = rows < old_rows ? rows : old_rows;
+	for (row = 0; row < copy_rows; row++)
+		memcpy(&terminal->cells[row * columns], &old[row * old_columns],
+		    (size_t)copy_columns * sizeof(*old));
+	free(old);
+	if (terminal->cursor_column >= columns) terminal->cursor_column = columns - 1U;
+	if (terminal->cursor_row >= rows) terminal->cursor_row = rows - 1U;
+	memset(&winsize, 0, sizeof(winsize));
+	winsize.ws_row = (unsigned short)rows;
+	winsize.ws_col = (unsigned short)columns;
+	if (terminal->master >= 0)
+		(void)ioctl(terminal->master, TIOCSWINSZ, &winsize);
+	damage_all(terminal);
+	return 0;
+}
+
+static int
 initialize(struct terminal *terminal)
 {
 	Window root_return;
@@ -604,7 +646,7 @@ initialize(struct terminal *terminal)
 		return -1;
 	XSetFont(terminal->display, terminal->gc, terminal->font->fid);
 	XSelectInput(terminal->display, terminal->window,
-	    ExposureMask | KeyPressMask | ButtonPressMask);
+	    ExposureMask | KeyPressMask | ButtonPressMask | StructureNotifyMask);
 	XMapWindow(terminal->display, terminal->window);
 	XSync(terminal->display, False);
 	memset(&winsize, 0, sizeof(winsize));
@@ -681,6 +723,11 @@ main(void)
 			if (event.type == Expose) {
 				damage_all(&terminal);
 				redraw(&terminal);
+			} else if (event.type == ConfigureNotify) {
+				if (resize_terminal(&terminal,
+				    (unsigned)event.xconfigure.width,
+				    (unsigned)event.xconfigure.height) == 0)
+					redraw(&terminal);
 			} else if (event.type == KeyPress)
 				(void)send_key(&terminal, &event.xkey);
 		}

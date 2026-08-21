@@ -95,6 +95,24 @@ static int pc98_graphics_clear(void *context)
 	return noct_beui_pc98_gdc_clear_graphics(&display.gdc);
 }
 
+static size_t
+pc98_graphics_get_modes(void *context, struct kern_graphics_mode_info *modes,
+	size_t capacity)
+{
+	static const struct kern_graphics_mode_info available[] = {
+		{ 640U, 480U, 24U, 640U * 3U },
+		{ 640U, 480U, 8U, 640U },
+		{ 640U, 400U, 4U, 80U },
+	};
+	size_t i;
+
+	(void)context;
+	if (modes != NULL)
+		for (i = 0; i < capacity && i < sizeof(available) / sizeof(available[0]); i++)
+			modes[i] = available[i];
+	return sizeof(available) / sizeof(available[0]);
+}
+
 static int pc98_graphics_enter(void *context, struct kern_graphics_mode *mode)
 {
 	struct noct_beui_display_info info;
@@ -212,6 +230,7 @@ pc98_graphics_get_glyph(void *context, uint32_t codepoint, uint8_t font[32],
 }
 
 static const struct graphics_driver_ops pc98_graphics_ops = {
+	.get_modes = pc98_graphics_get_modes,
 	.enter = pc98_graphics_enter,
 	.clear = pc98_graphics_clear,
 	.leave = pc98_graphics_leave,

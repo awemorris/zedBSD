@@ -18,6 +18,7 @@
 	ZEDBSD_GRAPHICS_CAP_GLYPH)
 #define GRAPHICS_MAX_RECTS 32U
 #define GRAPHICS_ROW_MAX 4096U
+#define GRAPHICS_MAX_MODES 16U
 
 static struct file *graphics_owner __attribute__((section(".vfs_bss")));
 static int graphics_entered __attribute__((section(".vfs_bss")));
@@ -100,13 +101,17 @@ static int graphics_enter(uintptr_t argument)
 	int error = copyin(argument, &request, sizeof(request));
 	if (error != 0)
 		return error;
-	if (graphics_entered || request.reserved[0] != 0 ||
-	    request.reserved[1] != 0 ||
+	if (graphics_entered ||
+	    ((request.preferred_width == 0) != (request.preferred_height == 0)) ||
+	    request.preferred_width > 16384U || request.preferred_height > 16384U ||
 	    (request.preferred_bits_per_pixel != 0 &&
+	     request.preferred_bits_per_pixel != 4 &&
 	     request.preferred_bits_per_pixel != 8 &&
 	     request.preferred_bits_per_pixel != 24))
 		return EINVAL;
 	memset(&graphics_mode, 0, sizeof(graphics_mode));
+	graphics_mode.preferred_width = request.preferred_width;
+	graphics_mode.preferred_height = request.preferred_height;
 	graphics_mode.preferred_bits_per_pixel = request.preferred_bits_per_pixel;
 	hal_cons_suspend();
 	if (!graphics_driver->enter(graphics_driver_context, &graphics_mode)) {
@@ -127,6 +132,38 @@ static int graphics_enter(uintptr_t argument)
 		graphics_entered = 0;
 	}
 	return error;
+}
+
+static int
+graphics_get_modes(uintptr_t argument)
+{
+	struct zedbsd_graphics_mode_list request;
+	struct kern_graphics_mode_info native[GRAPHICS_MAX_MODES];
+	struct zedbsd_graphics_mode_info result;
+	size_t total, returned, i;
+	int error;
+
+	error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+	if (request.reserved != 0 || request.capacity > GRAPHICS_MAX_MODES ||
+	    (request.capacity != 0 && request.modes == 0))
+		return EINVAL;
+	total = graphics_driver->get_modes(graphics_driver_context, native,
+	    request.capacity);
+	returned = total < request.capacity ? total : request.capacity;
+	for (i = 0; i < returned; i++) {
+		result.width = native[i].width;
+		result.height = native[i].height;
+		result.bits_per_pixel = native[i].bits_per_pixel;
+		result.stride = native[i].stride;
+		error = copyout(&result,
+		    request.modes + i * sizeof(result), sizeof(result));
+		if (error != 0)
+			return error;
+	}
+	request.count = (uint32_t)total;
+	return copyout(&request, argument, sizeof(request));
 }
 
 static int graphics_fill(uintptr_t argument, int patterned)
@@ -296,11 +333,23 @@ static int graphics_ioctl_locked(struct file *file, unsigned long request,
 	if (file != graphics_owner)
 		return EBADF;
 	if (request == ZEDBSD_GRAPHICS_GET_CAPS) {
-		const struct zedbsd_graphics_caps caps = {
-			GRAPHICS_CAPABILITIES, 640U, 480U, 0U
-		};
+		struct kern_graphics_mode_info modes[GRAPHICS_MAX_MODES];
+		struct zedbsd_graphics_caps caps = { GRAPHICS_CAPABILITIES, 0, 0, 0 };
+		size_t count, i;
+		count = graphics_driver->get_modes(graphics_driver_context, modes,
+		    GRAPHICS_MAX_MODES);
+		if (count > GRAPHICS_MAX_MODES)
+			count = GRAPHICS_MAX_MODES;
+		for (i = 0; i < count; i++) {
+			if (modes[i].width > caps.maximum_width)
+				caps.maximum_width = modes[i].width;
+			if (modes[i].height > caps.maximum_height)
+				caps.maximum_height = modes[i].height;
+		}
 		return copyout(&caps, argument, sizeof(caps));
 	}
+	if (request == ZEDBSD_GRAPHICS_GET_MODES)
+		return graphics_get_modes(argument);
 	if (request == ZEDBSD_GRAPHICS_ENTER)
 		return graphics_enter(argument);
 	error = require_entered(file);
@@ -308,9 +357,14 @@ static int graphics_ioctl_locked(struct file *file, unsigned long request,
 	switch (request) {
 	case ZEDBSD_GRAPHICS_GET_MODE: {
 		const struct zedbsd_graphics_mode mode = {
-			graphics_mode.preferred_bits_per_pixel, graphics_mode.width,
-			graphics_mode.height, graphics_mode.bits_per_pixel,
-			graphics_mode.stride, GRAPHICS_CAPABILITIES, { 0, 0 }
+			.preferred_width = graphics_mode.preferred_width,
+			.preferred_height = graphics_mode.preferred_height,
+			.preferred_bits_per_pixel = graphics_mode.preferred_bits_per_pixel,
+			.width = graphics_mode.width,
+			.height = graphics_mode.height,
+			.bits_per_pixel = graphics_mode.bits_per_pixel,
+			.stride = graphics_mode.stride,
+			.capabilities = GRAPHICS_CAPABILITIES,
 		};
 		return copyout(&mode, argument, sizeof(mode));
 	}
@@ -356,7 +410,8 @@ graphics_driver_register(const struct graphics_driver_ops *ops, void *context)
 {
 	int error=0;
 
-	if (ops == NULL || ops->enter == NULL || ops->clear == NULL ||
+	if (ops == NULL || ops->get_modes == NULL || ops->enter == NULL ||
+	    ops->clear == NULL ||
 	    ops->leave == NULL || ops->fill == NULL || ops->line == NULL ||
 	    ops->pattern_fill == NULL || ops->blit == NULL ||
 	    ops->flush == NULL || ops->get_glyph == NULL)

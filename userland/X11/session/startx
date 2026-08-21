@@ -1,2 +1,2 @@
 #!/bin/sh
-/bin/Xzed -- /bin/sh /etc/Xzed/Xzedrc
+/bin/Xzed --size 800x600 -- /bin/sh /etc/Xzed/Xzedrc

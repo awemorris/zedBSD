@@ -42,6 +42,7 @@
 #define XZED_KEYCODE_INSERT 0xe8U
 #define XZED_KEYCODE_DELETE 0xe9U
 #define XZED_ICON_PATH_ATOM 0x5a000001U
+#define Above 0U
 #define CURSOR_WIDTH 16
 #define CURSOR_HEIGHT 16
 #define CURSOR_HOT_X 3
@@ -102,6 +103,7 @@ struct server {
 	int pointer_grab_owner;uint32_t pointer_grab_window;
 };
 static volatile int stopped;
+static void mark_dirty(struct server *, int, int, int, int);
 
 static uint16_t rd16(const uint8_t *p, int msb)
 { return msb ? (uint16_t)((p[0] << 8) | p[1]) : (uint16_t)(p[0] | (p[1] << 8)); }
@@ -119,6 +121,18 @@ static void on_signal(int sig){(void)sig;stopped=1;}
 
 static struct window *find_window(struct server *s,uint32_t id)
 { unsigned i;for(i=0;i<s->window_count;i++)if(s->windows[i].id==id)return &s->windows[i];return NULL; }
+static struct window *top_level_window(struct server*s,struct window*w)
+{struct window*p;while(w&&w->parent!=ROOT_XID){p=find_window(s,w->parent);if(!p||p==w)break;w=p;}return w;}
+static void raise_window(struct server*s,struct window*w)
+{
+	struct window saved;size_t index;if(!w||w==&s->windows[0])return;
+	index=(size_t)(w-s->windows);if(index>=s->window_count||index+1U==s->window_count)return;
+	mark_dirty(s,w->x,w->y,w->width,w->height);saved=*w;
+	memmove(&s->windows[index],&s->windows[index+1],
+	    (s->window_count-index-1U)*sizeof(s->windows[0]));
+	s->windows[s->window_count-1U]=saved;
+	mark_dirty(s,saved.x,saved.y,saved.width,saved.height);
+}
 static struct client *owner_client(struct server *s,uint32_t owner)
 { return owner<MAX_CLIENTS && s->clients[owner].fd>=0?&s->clients[owner]:NULL; }
 static struct graphics_context *find_gc(struct server*s,uint32_t id)
@@ -214,8 +228,10 @@ static void expose_area(struct server*s,struct window*w,int x,int y,int width,in
 {
 	struct client*c=owner_client(s,w->owner);uint8_t e[32];if(!c||!(w->event_mask&(1U<<15)))return;if(x<0){width+=x;x=0;}if(y<0){height+=y;y=0;}if(x+width>w->width)width=w->width-x;if(y+height>w->height)height=w->height-y;if(width<=0||height<=0)return;memset(e,0,sizeof(e));e[0]=12;wr16(e+2,c->sequence,c->order);wr32(e+4,w->id,c->order);wr16(e+8,(uint16_t)x,c->order);wr16(e+10,(uint16_t)y,c->order);wr16(e+12,(uint16_t)width,c->order);wr16(e+14,(uint16_t)height,c->order);(void)write_all(c->fd,e,32);
 }
+static void configure_notify(struct server*s,struct window*w)
+{struct client*c=owner_client(s,w->owner);uint8_t e[32];if(!c||!(w->event_mask&(1U<<17)))return;memset(e,0,sizeof(e));e[0]=22;wr16(e+2,c->sequence,c->order);wr32(e+4,w->id,c->order);wr32(e+8,w->id,c->order);wr32(e+12,0,c->order);wr16(e+16,(uint16_t)w->x,c->order);wr16(e+18,(uint16_t)w->y,c->order);wr16(e+20,w->width,c->order);wr16(e+22,w->height,c->order);wr16(e+24,w->border,c->order);(void)write_all(c->fd,e,sizeof(e));}
 static void expose(struct server*s,struct window*w)
-{expose_area(s,w,0,0,w->width,w->height);}
+{expose_area(s,w,0,0,w->width,w->height);configure_notify(s,w);}
 static void map_request(struct server*s,struct window*parent,struct window*w)
 {struct client*c=owner_client(s,parent->owner);uint8_t e[32];if(!c)return;memset(e,0,sizeof(e));e[0]=20;wr16(e+2,c->sequence,c->order);wr32(e+4,parent->id,c->order);wr32(e+8,w->id,c->order);(void)write_all(c->fd,e,sizeof(e));}
 static struct window *hit(struct server *s,int x,int y)
@@ -254,11 +270,11 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 	case 7: /* ReparentWindow */ if(n>=16&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){struct window*p=find_window(s,rd32(q+8,c->order));if(p){w->parent=p->id;w->x=(int16_t)(p->x+(int16_t)rd16(q+12,c->order));w->y=(int16_t)(p->y+(int16_t)rd16(q+14,c->order));return 0;}}break;
 	case 8: /* MapWindow */ if((w=find_window(s,rd32(q+4,c->order)))!=NULL){struct window*p=find_window(s,w->parent);if(p&&(p->event_mask&(1U<<20))&&p->owner!=ci){map_request(s,p,w);return 0;}w->mapped=1;mark_dirty(s,w->x,w->y,w->width,w->height);expose(s,w);return 0;}break;
 	case 10: /* UnmapWindow */ if((w=find_window(s,rd32(q+4,c->order)))!=NULL){int x=w->x,y=w->y,wi=w->width,he=w->height;w->mapped=0;mark_dirty(s,x,y,wi,he);return 0;}break;
-	case 12: /* ConfigureWindow */ if(n>=12&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){uint16_t mask=rd16(q+8,c->order);size_t off=12;unsigned bit;int oldx=w->x,oldy=w->y,oldw=w->width,oldh=w->height,newx=w->x,newy=w->y;uint16_t neww=w->width,newh=w->height,newborder=w->border;for(bit=0;bit<7&&off+4<=n;bit++)if(mask&(1U<<bit)){uint32_t v=rd32(q+off,c->order);if(bit==0)newx=(int16_t)v;else if(bit==1)newy=(int16_t)v;else if(bit==2)neww=(uint16_t)v;else if(bit==3)newh=(uint16_t)v;else if(bit==4)newborder=(uint16_t)v;off+=4;}if((neww!=w->width||newh!=w->height)&&window_pixels_resize(w,neww,newh)){error_reply(c,11,w->id,op);return 0;}w->x=(int16_t)newx;w->y=(int16_t)newy;w->width=neww;w->height=newh;w->border=newborder;if(w->x!=oldx||w->y!=oldy){unsigned j;for(j=1;j<s->window_count;j++)if(s->windows[j].parent==w->id){s->windows[j].x+=(int16_t)(w->x-oldx);s->windows[j].y+=(int16_t)(w->y-oldy);}}mark_dirty(s,oldx,oldy,oldw,oldh);mark_dirty(s,w->x,w->y,w->width,w->height);if(neww!=(uint16_t)oldw||newh!=(uint16_t)oldh)expose(s,w);return 0;}break;
+	case 12: /* ConfigureWindow */ if(n>=12&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){uint16_t mask=rd16(q+8,c->order);size_t off=12;unsigned bit;int oldx=w->x,oldy=w->y,oldw=w->width,oldh=w->height,newx=w->x,newy=w->y,raise=0;uint16_t neww=w->width,newh=w->height,newborder=w->border;for(bit=0;bit<7&&off+4<=n;bit++)if(mask&(1U<<bit)){uint32_t v=rd32(q+off,c->order);if(bit==0)newx=(int16_t)v;else if(bit==1)newy=(int16_t)v;else if(bit==2)neww=(uint16_t)v;else if(bit==3)newh=(uint16_t)v;else if(bit==4)newborder=(uint16_t)v;else if(bit==6&&v==Above)raise=1;off+=4;}if((neww!=w->width||newh!=w->height)&&window_pixels_resize(w,neww,newh)){error_reply(c,11,w->id,op);return 0;}w->x=(int16_t)newx;w->y=(int16_t)newy;w->width=neww;w->height=newh;w->border=newborder;if(w->x!=oldx||w->y!=oldy){unsigned j;for(j=1;j<s->window_count;j++)if(s->windows[j].parent==w->id){s->windows[j].x+=(int16_t)(w->x-oldx);s->windows[j].y+=(int16_t)(w->y-oldy);}}mark_dirty(s,oldx,oldy,oldw,oldh);mark_dirty(s,w->x,w->y,w->width,w->height);if(neww!=(uint16_t)oldw||newh!=(uint16_t)oldh)expose(s,w);if(raise)raise_window(s,top_level_window(s,w));return 0;}break;
 	case 14: /* GetGeometry */
 		if((w=find_window(s,rd32(q+4,c->order)))!=NULL){uint8_t r[32];memset(r,0,32);r[1]=24;wr32(r+8,ROOT_XID,c->order);wr16(r+12,(uint16_t)w->x,c->order);wr16(r+14,(uint16_t)w->y,c->order);wr16(r+16,w->width,c->order);wr16(r+18,w->height,c->order);wr16(r+20,w->border,c->order);simple_reply(c,r,32);return 0;}break;
-	case 15: /* QueryTree: return mapped direct children in stacking order. */
-		if((w=find_window(s,rd32(q+4,c->order)))!=NULL){uint8_t r[32+MAX_WINDOWS*4];unsigned i,count=0;memset(r,0,sizeof(r));wr32(r+8,ROOT_XID,c->order);wr32(r+12,w->parent,c->order);for(i=1;i<s->window_count;i++)if(s->windows[i].id&&s->windows[i].mapped&&s->windows[i].parent==w->id){wr32(r+32+count*4,s->windows[i].id,c->order);count++;}wr16(r+16,(uint16_t)count,c->order);simple_reply(c,r,32+count*4);return 0;}break;
+	case 15: /* QueryTree: return all direct children in stacking order. */
+		if((w=find_window(s,rd32(q+4,c->order)))!=NULL){uint8_t r[32+MAX_WINDOWS*4];unsigned i,count=0;memset(r,0,sizeof(r));wr32(r+8,ROOT_XID,c->order);wr32(r+12,w->parent,c->order);for(i=1;i<s->window_count;i++)if(s->windows[i].id&&s->windows[i].parent==w->id){wr32(r+32+count*4,s->windows[i].id,c->order);count++;}wr16(r+16,(uint16_t)count,c->order);simple_reply(c,r,32+count*4);return 0;}break;
 	case 18: /* ChangeProperty: retain desktop string properties. */
 		if(n>=24&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){uint32_t property=rd32(q+8,c->order),type=rd32(q+12,c->order),count=rd32(q+20,c->order);char*target=NULL;size_t capacity=0;if(property==39){target=w->name;capacity=sizeof(w->name);}else if(property==XZED_ICON_PATH_ATOM){target=w->icon_path;capacity=sizeof(w->icon_path);}if(target&&type==31&&q[16]==8&&count<=n-24){size_t copy=count<capacity-1?count:capacity-1;memcpy(target,q+24,copy);target[copy]=0;}return 0;}break;
 	case 20: /* GetProperty: WM_NAME and Xzed desktop strings. */
@@ -326,15 +342,130 @@ static void keyboard(struct server *s)
 }
 static void mouse(struct server *s)
 {
-	struct zedbsd_mouse_event ev[16];ssize_t n;int redraw=0,oldx=s->pointer_x,oldy=s->pointer_y;while((n=read(s->mouse,ev,sizeof(ev)))>0){size_t i;if((size_t)n%sizeof(ev[0])){stopped=1;return;}for(i=0;i<(size_t)n/sizeof(ev[0]);i++){uint32_t changed=s->buttons^ev[i].buttons;int moved=ev[i].dx!=0||ev[i].dy!=0;struct window*w;struct client*c;unsigned b;s->pointer_x+=ev[i].dx;s->pointer_y+=ev[i].dy;if(s->pointer_x<0)s->pointer_x=0;if(s->pointer_y<0)s->pointer_y=0;if(s->pointer_x>=(int)s->mode.width)s->pointer_x=(int)s->mode.width-1;if(s->pointer_y>=(int)s->mode.height)s->pointer_y=(int)s->mode.height-1;w=s->pointer_grab_owner>=0?find_window(s,s->pointer_grab_window):hit(s,s->pointer_x,s->pointer_y);if(!w)w=hit(s,s->pointer_x,s->pointer_y);c=s->pointer_grab_owner>=0?owner_client(s,(uint32_t)s->pointer_grab_owner):owner_client(s,w->owner);if(moved&&c&&(w->event_mask&(1U<<6)))send_event(c,6,w->id,0,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->buttons);for(b=0;b<3;b++)if(changed&(1U<<b)){if(c)send_event(c,(ev[i].buttons&(1U<<b))?4:5,w->id,b+1,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->buttons);if(ev[i].buttons&(1U<<b))s->focus=w->id;if((ev[i].buttons&(1U<<b))&&s->pointer_grab_owner<0&&c){s->pointer_grab_owner=w->owner;s->pointer_grab_window=w->id;}}s->buttons=ev[i].buttons;if(!s->buttons){s->pointer_grab_owner=-1;s->pointer_grab_window=0;}if(moved)redraw=1;}}if(redraw){mark_dirty(s,oldx-CURSOR_HOT_X,oldy-CURSOR_HOT_Y,CURSOR_WIDTH,CURSOR_HEIGHT);present(s);mark_dirty(s,s->pointer_x-CURSOR_HOT_X,s->pointer_y-CURSOR_HOT_Y,CURSOR_WIDTH,CURSOR_HEIGHT);present(s);}if(n<0&&errno!=EAGAIN&&errno!=EINTR)stopped=1;
+	struct zedbsd_mouse_event ev[16];
+	ssize_t n;
+	int redraw = 0, oldx = s->pointer_x, oldy = s->pointer_y;
+
+	while ((n = read(s->mouse, ev, sizeof(ev))) > 0) {
+		size_t i;
+		if ((size_t)n % sizeof(ev[0])) { stopped = 1; return; }
+		for (i = 0; i < (size_t)n / sizeof(ev[0]); i++) {
+			uint32_t changed = s->buttons ^ ev[i].buttons;
+			int moved = ev[i].dx != 0 || ev[i].dy != 0;
+			struct window *w;
+			struct client *c;
+			unsigned b;
+			s->pointer_x += ev[i].dx; s->pointer_y += ev[i].dy;
+			if (s->pointer_x < 0) s->pointer_x = 0;
+			if (s->pointer_y < 0) s->pointer_y = 0;
+			if (s->pointer_x >= (int)s->mode.width) s->pointer_x = (int)s->mode.width - 1;
+			if (s->pointer_y >= (int)s->mode.height) s->pointer_y = (int)s->mode.height - 1;
+			w = s->pointer_grab_owner >= 0 ? find_window(s, s->pointer_grab_window) :
+			    hit(s, s->pointer_x, s->pointer_y);
+			if (!w) w = hit(s, s->pointer_x, s->pointer_y);
+			c = s->pointer_grab_owner >= 0 ?
+			    owner_client(s, (uint32_t)s->pointer_grab_owner) : owner_client(s, w->owner);
+			if (moved && c && (w->event_mask & (1U << 6)))
+				send_event(c, 6, w->id, 0, (uint32_t)(ev[i].timestamp_ns / 1000000),
+				    s->pointer_x, s->pointer_y, (uint16_t)s->buttons);
+			for (b = 0; b < 3; b++) if (changed & (1U << b)) {
+				uint32_t window_id = w->id;
+				if (c) send_event(c, (ev[i].buttons & (1U << b)) ? 4 : 5,
+				    window_id, b + 1, (uint32_t)(ev[i].timestamp_ns / 1000000),
+				    s->pointer_x, s->pointer_y, (uint16_t)s->buttons);
+				if (ev[i].buttons & (1U << b)) {
+					struct window *top = top_level_window(s, w);
+					/* A desktop panel must be clickable without stealing the
+					 * application's focus used for toggle-minimize semantics. */
+					if (top == NULL || strcmp(top->name, "_XZED_SHELL") != 0) {
+						s->focus = window_id;
+						raise_window(s, top);
+					}
+					w = find_window(s, window_id);
+				}
+				if ((ev[i].buttons & (1U << b)) && s->pointer_grab_owner < 0 && c) {
+					s->pointer_grab_owner = w->owner;
+					s->pointer_grab_window = w->id;
+				}
+			}
+			s->buttons = ev[i].buttons;
+			if (!s->buttons) { s->pointer_grab_owner = -1; s->pointer_grab_window = 0; }
+			if (moved) redraw = 1;
+		}
+	}
+	if (redraw) {
+		mark_dirty(s, oldx - CURSOR_HOT_X, oldy - CURSOR_HOT_Y,
+		    CURSOR_WIDTH, CURSOR_HEIGHT); present(s);
+		mark_dirty(s, s->pointer_x - CURSOR_HOT_X, s->pointer_y - CURSOR_HOT_Y,
+		    CURSOR_WIDTH, CURSOR_HEIGHT); present(s);
+	}
+	if (n < 0 && errno != EAGAIN && errno != EINTR) stopped = 1;
 }
 
-static int initialize(struct server *s)
+static int parse_size(const char *text, unsigned *width, unsigned *height)
+{
+	char *end;
+	unsigned long w, h;
+
+	w = strtoul(text, &end, 10);
+	if (end == text || (*end != 'x' && *end != 'X') || w == 0 || w > 16384U)
+		return 0;
+	h = strtoul(end + 1, &end, 10);
+	if (*end != '\0' || h == 0 || h > 16384U)
+		return 0;
+	*width = (unsigned)w; *height = (unsigned)h;
+	return 1;
+}
+
+static int choose_mode(int fd, unsigned preferred_width,
+	unsigned preferred_height, unsigned preferred_depth,
+	struct zedbsd_graphics_mode *chosen)
+{
+	struct zedbsd_graphics_mode_info modes[16];
+	struct zedbsd_graphics_mode_list list;
+	int best = -1;
+	unsigned pass, i;
+
+	memset(&list, 0, sizeof(list));
+	list.modes = (uapi_ptr_t)(uintptr_t)modes;
+	list.capacity = sizeof(modes) / sizeof(modes[0]);
+	if (ioctl(fd, ZEDBSD_GRAPHICS_GET_MODES, &list) != 0 || list.count == 0)
+		return -1;
+	if (list.count > list.capacity)
+		list.count = list.capacity;
+	/* Exact depth and a mode no larger than the request win.  If either is
+	 * unavailable, relax depth first and size second. */
+	for (pass = 0; pass < 4 && best < 0; pass++) {
+		uint64_t best_area = 0;
+		for (i = 0; i < list.count; i++) {
+			uint64_t area = (uint64_t)modes[i].width * modes[i].height;
+			int depth_ok = preferred_depth == 0 ||
+			    modes[i].bits_per_pixel == preferred_depth;
+			int size_ok = preferred_width == 0 ||
+			    (modes[i].width <= preferred_width &&
+			     modes[i].height <= preferred_height);
+			if ((pass < 2 && !size_ok) || ((pass == 0 || pass == 2) && !depth_ok))
+				continue;
+			if (best < 0 || (size_ok ? area > best_area : area < best_area)) {
+				best = (int)i; best_area = area;
+			}
+		}
+	}
+	if (best < 0) { errno = ENODEV; return -1; }
+	memset(chosen, 0, sizeof(*chosen));
+	chosen->preferred_width = modes[best].width;
+	chosen->preferred_height = modes[best].height;
+	chosen->preferred_bits_per_pixel = modes[best].bits_per_pixel;
+	return 0;
+}
+
+static int initialize(struct server *s, unsigned preferred_width,
+	unsigned preferred_height, unsigned preferred_depth)
 {
 	struct sockaddr_un a;struct zedbsd_graphics_caps caps;struct zedbsd_console_input_mode m={ZEDBSD_CONSOLE_INPUT_EVENT,0};unsigned i;memset(s,0,sizeof(*s));s->listener=s->console=s->mouse=s->graphics=-1;s->pointer_grab_owner=-1;for(i=0;i<MAX_CLIENTS;i++)s->clients[i].fd=-1;
 	s->console=open("/dev/console",O_RDONLY|O_NONBLOCK);if(s->console<0)return -1;if(ioctl(s->console,ZEDBSD_CONSOLE_GET_INPUT_MODE,&s->old_console_mode)||ioctl(s->console,ZEDBSD_CONSOLE_SET_INPUT_MODE,&m))return -1;
 	s->mouse=open("/dev/mouse",O_RDONLY|O_NONBLOCK);
-	s->graphics=open("/dev/graphics",O_RDWR);if(s->graphics<0)return -1;if(ioctl(s->graphics,ZEDBSD_GRAPHICS_GET_CAPS,&caps))return -1;if(!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_FLUSH)||!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_GLYPH)||!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_BLIT_RGB24)){errno=ENOTSUP;return -1;}memset(&s->mode,0,sizeof(s->mode));s->mode.preferred_bits_per_pixel=24;if(ioctl(s->graphics,ZEDBSD_GRAPHICS_ENTER,&s->mode))return -1;
+	s->graphics=open("/dev/graphics",O_RDWR);if(s->graphics<0)return -1;if(ioctl(s->graphics,ZEDBSD_GRAPHICS_GET_CAPS,&caps))return -1;if(!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_FLUSH)||!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_GLYPH)||!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_BLIT_RGB24)){errno=ENOTSUP;return -1;}if(choose_mode(s->graphics,preferred_width,preferred_height,preferred_depth,&s->mode))return -1;if(ioctl(s->graphics,ZEDBSD_GRAPHICS_ENTER,&s->mode))return -1;
 	(void)mkdir("/tmp/.X11-unix",0777);(void)unlink("/tmp/.X11-unix/X0");s->listener=socket(AF_UNIX,SOCK_STREAM,0);if(s->listener<0)return -1;memset(&a,0,sizeof(a));a.sun_family=AF_UNIX;strcpy(a.sun_path,"/tmp/.X11-unix/X0");if(bind(s->listener,(struct sockaddr*)&a,sizeof(a))||listen(s->listener,8))return -1;(void)fcntl(s->listener,F_SETFL,fcntl(s->listener,F_GETFL)|O_NONBLOCK);
 	s->windows[0]=(struct window){.id=ROOT_XID,.owner=MAX_CLIENTS,.background=0x203040,.width=(uint16_t)s->mode.width,.height=(uint16_t)s->mode.height,.mapped=1};s->window_count=1;s->focus=ROOT_XID;s->pointer_x=(int)s->mode.width/2;s->pointer_y=(int)s->mode.height/2;
 	s->windows[0].pixels=window_pixels_alloc(s->windows[0].width,s->windows[0].height,s->windows[0].background);s->screen=malloc((size_t)s->mode.width*s->mode.height*sizeof(*s->screen));s->transfer=malloc((size_t)s->mode.width*s->mode.height*3U);if(!s->windows[0].pixels||!s->screen||!s->transfer){errno=ENOMEM;return -1;}repaint(s);present(s);return 0;
@@ -345,11 +476,18 @@ static void cleanup(struct server *s)
 }
 int main(int argc,char **argv)
 {
-	struct server s;struct pollfd p[3+MAX_CLIENTS];unsigned i,count;int arg=1;extern char **environ;
-	if(arg<argc&&strcmp(argv[arg],":0")==0)arg++;
-	if(arg<argc&&strcmp(argv[arg],"--")==0)arg++;
-	else if(arg<argc){fprintf(stderr,"usage: Xzed [:0] [-- command [argument ...]]\n");return 2;}
-	signal(SIGINT,on_signal);signal(SIGTERM,on_signal);if(initialize(&s)){fprintf(stderr,"Xzed: %s\n",strerror(errno));cleanup(&s);return 1;}
+	struct server s;struct pollfd p[3+MAX_CLIENTS];unsigned i,count;int arg=1;
+	unsigned preferred_width=0,preferred_height=0,preferred_depth=24;
+	extern char **environ;
+	while(arg<argc){
+		if(strcmp(argv[arg],":0")==0){arg++;continue;}
+		if(strcmp(argv[arg],"--")==0){arg++;break;}
+		if(strcmp(argv[arg],"--size")==0&&arg+1<argc&&
+		    parse_size(argv[arg+1],&preferred_width,&preferred_height)){arg+=2;continue;}
+		if(strcmp(argv[arg],"--depth")==0&&arg+1<argc){char*end;unsigned long d=strtoul(argv[arg+1],&end,10);if(*end=='\0'&&(d==4||d==8||d==24)){preferred_depth=(unsigned)d;arg+=2;continue;}}
+		fprintf(stderr,"usage: Xzed [:0] [--size WIDTHxHEIGHT] [--depth 4|8|24] [-- command [argument ...]]\n");return 2;
+	}
+	signal(SIGINT,on_signal);signal(SIGTERM,on_signal);if(initialize(&s,preferred_width,preferred_height,preferred_depth)){fprintf(stderr,"Xzed: %s\n",strerror(errno));cleanup(&s);return 1;}
 	if(arg<argc){pid_t pid=fork();if(pid<0){fprintf(stderr,"Xzed: fork: %s\n",strerror(errno));cleanup(&s);return 1;}if(pid==0){execve(argv[arg],&argv[arg],environ);fprintf(stderr,"Xzed: %s: %s\n",argv[arg],strerror(errno));_exit(127);}}
 	while(!stopped){int ready;count=0;p[count++]=(struct pollfd){s.listener,POLLIN,0};p[count++]=(struct pollfd){s.console,POLLIN,0};if(s.mouse>=0)p[count++]=(struct pollfd){s.mouse,POLLIN,0};for(i=0;i<MAX_CLIENTS;i++)if(s.clients[i].fd>=0)p[count++]=(struct pollfd){s.clients[i].fd,POLLIN,0};ready=poll(p,count,20);if(ready<0){if(errno==EINTR)continue;break;}count=0;if(p[count++].revents&POLLIN){int fd=accept(s.listener,NULL,NULL);if(fd>=0){for(i=0;i<MAX_CLIENTS&&s.clients[i].fd>=0;i++);if(i==MAX_CLIENTS)close(fd);else{s.clients[i].fd=fd;s.clients[i].base=(i+1U)<<22;(void)fcntl(fd,F_SETFL,fcntl(fd,F_GETFL)|O_NONBLOCK);}}}if(p[count++].revents&POLLIN)keyboard(&s);if(s.mouse>=0&&p[count++].revents&POLLIN)mouse(&s);for(i=0;i<MAX_CLIENTS;i++)if(s.clients[i].fd>=0)read_client(&s,i);present(&s);}
 	cleanup(&s);return 0;

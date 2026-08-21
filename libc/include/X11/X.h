@@ -19,6 +19,7 @@ typedef unsigned long Mask;
 #define None 0L
 #define CurrentTime 0L
 #define RevertToParent 2
+#define Above 0
 #define ShiftMask (1U<<0)
 #define LockMask (1U<<1)
 #define ControlMask (1U<<2)
@@ -39,6 +40,7 @@ typedef unsigned long Mask;
 #define ReparentNotify 21
 #define ConfigureNotify 22
 #define ConfigureRequest 23
+#define CWStackMode (1U<<6)
 #define KeyPressMask (1L<<0)
 #define KeyReleaseMask (1L<<1)
 #define ButtonPressMask (1L<<2)

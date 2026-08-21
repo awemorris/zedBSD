@@ -386,6 +386,24 @@ static int pcat_graphics_enter(void *context, struct kern_graphics_mode *mode)
 	return 1;
 }
 
+static size_t
+pcat_graphics_get_modes(void *context, struct kern_graphics_mode_info *modes,
+	size_t capacity)
+{
+	static const struct kern_graphics_mode_info available[] = {
+		{ WIDTH, HEIGHT, 24U, CIRRUS_STRIDE24 },
+		{ WIDTH, HEIGHT, 8U, CIRRUS_STRIDE8 },
+		{ WIDTH, HEIGHT, 4U, WIDTH / 8U },
+	};
+	size_t i;
+
+	(void)context;
+	if (modes != NULL)
+		for (i = 0; i < capacity && i < sizeof(available) / sizeof(available[0]); i++)
+			modes[i] = available[i];
+	return sizeof(available) / sizeof(available[0]);
+}
+
 static int pcat_graphics_clear(void *context)
 {
 	const struct kern_graphics_rect screen = { 0, 0, WIDTH, HEIGHT };
@@ -534,6 +552,7 @@ static int pcat_graphics_get_glyph(void *context, uint32_t codepoint,
 }
 
 static const struct graphics_driver_ops pcat_graphics_ops = {
+	.get_modes = pcat_graphics_get_modes,
 	.enter = pcat_graphics_enter,
 	.clear = pcat_graphics_clear,
 	.leave = pcat_graphics_leave,
