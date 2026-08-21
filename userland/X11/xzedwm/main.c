@@ -1,22 +1,443 @@
 /* xzedwm - minimal reparenting window manager. SPDX-License-Identifier: Zlib */
 #include <X11/Xlib.h>
+
 #include <errno.h>
+#include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
 #define MAX_FRAMES 32
 #define MAX_XPM_COLORS 64
-struct frame { Window client,frame; GC gc; int x,y; unsigned width,height; };
-static struct frame frames[MAX_FRAMES];static unsigned frame_count;
-struct xpm_color { char key;unsigned long pixel; };
-static char*quoted(char*line){char*a=strchr(line,'"'),*b;if(!a)return 0;b=strrchr(a+1,'"');if(!b)return 0;*b=0;return a+1;}
-static int xpm_header(char*s,unsigned*w,unsigned*h,unsigned*n,unsigned*cpp){unsigned*v[4]={w,h,n,cpp};unsigned i;char*end;for(i=0;i<4;i++){unsigned long value;while(*s==' '||*s=='\t')s++;value=strtoul(s,&end,10);if(end==s)return 0;*v[i]=(unsigned)value;s=end;}return 1;}
-static int load_xpm(Display*d,Window root,const char*path){FILE*f=fopen(path,"r");char line[1024],*q,*pixels=0;unsigned w=0,h=0,n=0,cpp=0,i,y,rw=0,rh=0,b=0,depth=0;int rx=0,ry=0,ok=0;Window rr;struct xpm_color colors[MAX_XPM_COLORS];XRectangle*rects=0;GC gc=0;if(!f)return 0;while(fgets(line,sizeof(line),f)&&(q=quoted(line))==0);if(!q||!xpm_header(q,&w,&h,&n,&cpp)||!w||!h||!n||n>MAX_XPM_COLORS||cpp!=1||w>256||h>256)goto out;for(i=0;i<n;i++){char*hash;if(!fgets(line,sizeof(line),f)||(q=quoted(line))==0)goto out;colors[i].key=q[0];hash=strchr(q,'#');colors[i].pixel=hash?strtoul(hash+1,0,16):0;}pixels=malloc((size_t)w*h);rects=malloc((size_t)w*h*sizeof(*rects));if(!pixels||!rects)goto out;for(y=0;y<h;y++){if(!fgets(line,sizeof(line),f)||(q=quoted(line))==0||strlen(q)<w)goto out;memcpy(pixels+(size_t)y*w,q,w);}if(!XGetGeometry(d,root,&rr,&rx,&ry,&rw,&rh,&b,&depth))goto out;gc=XCreateGC(d,root,0,0);XSetForeground(d,gc,colors[0].pixel);XFillRectangle(d,root,gc,0,0,rw,rh);for(i=0;i<n;i++){int count=0;for(y=0;y<h;y++){unsigned x=0;while(x<w){unsigned start=x;if(pixels[(size_t)y*w+x]!=colors[i].key){x++;continue;}while(x<w&&pixels[(size_t)y*w+x]==colors[i].key)x++;rects[count++]=(XRectangle){(short)(start*rw/w),(short)(y*rh/h),(unsigned short)(x*rw/w-start*rw/w),(unsigned short)((y+1)*rh/h-y*rh/h)};}}if(count){XSetForeground(d,gc,colors[i].pixel);XFillRectangles(d,root,gc,rects,count);}}ok=1;out:if(gc)XFreeGC(d,gc);free(rects);free(pixels);fclose(f);return ok;}
-static void load_background(Display*d,Window root){FILE*f=fopen("/etc/Xzed/xzedwm.conf","r");char line[512],path[400]={0};if(!f)return;while(fgets(line,sizeof(line),f)){char*p=line;while(*p==' '||*p=='\t')p++;if(!strncmp(p,"background=",11)){size_t n;strncpy(path,p+11,sizeof(path)-1);n=strlen(path);while(n&&(path[n-1]=='\n'||path[n-1]=='\r'||path[n-1]==' '||path[n-1]=='\t'))path[--n]=0;break;}}fclose(f);if(path[0]&&!load_xpm(d,root,path))fprintf(stderr,"xzedwm: cannot load background %s\n",path);}
-static struct frame*by_frame(Window w){unsigned i;for(i=0;i<frame_count;i++)if(frames[i].frame==w)return &frames[i];return 0;}
-static void decorate(Display*d,struct frame*f){XSetForeground(d,f->gc,0x182838);XFillRectangle(d,f->frame,f->gc,0,0,f->width+4,20);XSetForeground(d,f->gc,0xa0b8c8);XFillRectangle(d,f->frame,f->gc,0,0,f->width+4,2);XFillRectangle(d,f->frame,f->gc,0,0,2,f->height+22);XFillRectangle(d,f->frame,f->gc,f->width+2,0,2,f->height+22);XFillRectangle(d,f->frame,f->gc,0,f->height+20,f->width+4,2);}
-static void manage(Display*d,Window root,Window client){Window r;int x,y;unsigned w,h,b,depth;struct frame*f;if(frame_count==MAX_FRAMES||!XGetGeometry(d,client,&r,&x,&y,&w,&h,&b,&depth))return;f=&frames[frame_count++];memset(f,0,sizeof(*f));f->client=client;f->x=x;f->y=y;f->width=w;f->height=h;f->frame=XCreateSimpleWindow(d,root,x,y,w+4,h+22,0,0,0x304858);f->gc=XCreateGC(d,f->frame,0,0);XSelectInput(d,f->frame,ExposureMask|ButtonPressMask|ButtonReleaseMask|PointerMotionMask|StructureNotifyMask);XReparentWindow(d,client,f->frame,2,20);XMapWindow(d,client);XMapWindow(d,f->frame);decorate(d,f);}
-int main(int argc,char**argv){Display*d=XOpenDisplay(0);Window root;XEvent e;struct frame*drag=0;int dx=0,dy=0;extern char**environ;if(!d){fprintf(stderr,"xzedwm: cannot open display\n");return 1;}root=DefaultRootWindow(d);XSelectInput(d,root,SubstructureRedirectMask|SubstructureNotifyMask);load_background(d,root);if(argc>1){pid_t p=fork();if(p==0){execve(argv[1],argv+1,environ);_exit(127);}}
-	for(;;){if(XNextEvent(d,&e)<0)break;if(e.type==MapRequest)manage(d,root,e.xmaprequest.window);else if(e.type==Expose){struct frame*f=by_frame(e.xexpose.window);if(f)decorate(d,f);}else if(e.type==ButtonPress){struct frame*f=by_frame(e.xbutton.window);if(f&&e.xbutton.keycode==1){drag=f;dx=e.xbutton.x_root-f->x;dy=e.xbutton.y_root-f->y;}}else if(e.type==MotionNotify&&drag){drag->x=e.xmotion.x_root-dx;drag->y=e.xmotion.y_root-dy;XMoveResizeWindow(d,drag->frame,drag->x,drag->y,drag->width+4,drag->height+22);}else if(e.type==ButtonRelease)drag=0;}
-	XCloseDisplay(d);return 0;}
+/* Keep each PolyFillRectangle request within zedBSD's 2 KiB AF_UNIX packet. */
+#define XPM_RECT_BATCH 128
+
+struct frame {
+	Window client;
+	Window frame;
+	GC gc;
+	int x;
+	int y;
+	unsigned width;
+	unsigned height;
+};
+
+struct xpm_color {
+	char key;
+	unsigned long pixel;
+};
+
+static struct frame frames[MAX_FRAMES];
+static unsigned frame_count;
+static Pixmap background_pixmap;
+static GC background_gc;
+static unsigned background_width;
+static unsigned background_height;
+
+static char *
+next_quoted(char **cursor, char *end)
+{
+	char *a = *cursor;
+	char *b;
+
+	while (a < end && *a != '"')
+		a++;
+	if (a == end)
+		return NULL;
+	b = ++a;
+	while (b < end && *b != '"')
+		b++;
+	if (b == end)
+		return NULL;
+	*b = '\0';
+	*cursor = b + 1;
+	return a;
+}
+
+static int
+xpm_header(char *s, unsigned *width, unsigned *height, unsigned *ncolors,
+    unsigned *cpp)
+{
+	unsigned *values[4] = { width, height, ncolors, cpp };
+	unsigned i;
+	char *end;
+
+	for (i = 0; i < 4; i++) {
+		unsigned long value;
+
+		while (*s == ' ' || *s == '\t')
+			s++;
+		value = strtoul(s, &end, 10);
+		if (end == s)
+			return 0;
+		*values[i] = (unsigned)value;
+		s = end;
+	}
+	return 1;
+}
+
+static int
+read_entire_file(const char *path, char **result, size_t *result_size)
+{
+	struct stat st;
+	char *data;
+	size_t got = 0;
+	int fd;
+
+	fd = open(path, O_RDONLY);
+	if (fd < 0)
+		return 0;
+	if (fstat(fd, &st) != 0 || st.st_size <= 0 ||
+	    (uint64_t)st.st_size > (uint64_t)SIZE_MAX - 1) {
+		close(fd);
+		return 0;
+	}
+	data = malloc((size_t)st.st_size + 1);
+	if (data == NULL) {
+		close(fd);
+		return 0;
+	}
+	while (got < (size_t)st.st_size) {
+		ssize_t nread = read(fd, data + got, (size_t)st.st_size - got);
+
+		if (nread < 0 && errno == EINTR)
+			continue;
+		if (nread <= 0) {
+			free(data);
+			close(fd);
+			return 0;
+		}
+		got += (size_t)nread;
+	}
+	close(fd);
+	data[got] = '\0';
+	*result = data;
+	*result_size = got;
+	return 1;
+}
+
+static int
+load_xpm(Display *display, Window root, const char *path)
+{
+	struct xpm_color colors[MAX_XPM_COLORS];
+	XRectangle *rectangles = NULL;
+	char *file = NULL;
+	char *cursor;
+	char *end;
+	char *quoted;
+	char *pixels = NULL;
+	size_t file_size;
+	size_t pixel_count;
+	unsigned width = 0;
+	unsigned height = 0;
+	unsigned ncolors = 0;
+	unsigned cpp = 0;
+	unsigned root_width = 0;
+	unsigned root_height = 0;
+	unsigned border = 0;
+	unsigned depth = 0;
+	unsigned i;
+	unsigned y;
+	int root_x = 0;
+	int root_y = 0;
+	Window root_return;
+	Pixmap pixmap = 0;
+	GC gc = 0;
+	int ok = 0;
+
+	if (!read_entire_file(path, &file, &file_size))
+		goto out;
+	cursor = file;
+	end = file + file_size;
+	quoted = next_quoted(&cursor, end);
+	if (quoted == NULL ||
+	    !xpm_header(quoted, &width, &height, &ncolors, &cpp) ||
+	    width == 0 || height == 0 || ncolors == 0 ||
+	    ncolors > MAX_XPM_COLORS || cpp != 1)
+		goto out;
+
+	for (i = 0; i < ncolors; i++) {
+		char *hash;
+
+		quoted = next_quoted(&cursor, end);
+		if (quoted == NULL)
+			goto out;
+		colors[i].key = quoted[0];
+		hash = strchr(quoted, '#');
+		colors[i].pixel = hash != NULL ? strtoul(hash + 1, NULL, 16) : 0;
+	}
+
+	if ((size_t)width > SIZE_MAX / (size_t)height)
+		goto out;
+	pixel_count = (size_t)width * (size_t)height;
+	pixels = malloc(pixel_count);
+	rectangles = malloc(XPM_RECT_BATCH * sizeof(*rectangles));
+	if (pixels == NULL || rectangles == NULL)
+		goto out;
+	for (y = 0; y < height; y++) {
+		quoted = next_quoted(&cursor, end);
+		if (quoted == NULL || strlen(quoted) < width)
+			goto out;
+		memcpy(pixels + (size_t)y * width, quoted, width);
+	}
+
+	if (!XGetGeometry(display, root, &root_return, &root_x, &root_y,
+	    &root_width, &root_height, &border, &depth) ||
+	    width != root_width || height != root_height)
+		goto out;
+
+	pixmap = XCreatePixmap(display, root, width, height, depth);
+	if (pixmap == 0)
+		goto out;
+	gc = XCreateGC(display, pixmap, 0, NULL);
+	if (gc == NULL)
+		goto out;
+
+	/*
+	 * Build the complete background off screen.  Drawing these runs must not
+	 * expose partially rendered color planes on /dev/graphics.
+	 */
+	for (i = 0; i < ncolors; i++) {
+		int count = 0;
+
+		XSetForeground(display, gc, colors[i].pixel);
+		for (y = 0; y < height; y++) {
+			unsigned x = 0;
+
+			while (x < width) {
+				unsigned start;
+
+				if (pixels[(size_t)y * width + x] != colors[i].key) {
+					x++;
+					continue;
+				}
+				start = x;
+				while (x < width &&
+				    pixels[(size_t)y * width + x] == colors[i].key)
+					x++;
+				rectangles[count++] = (XRectangle) {
+					(short)start, (short)y,
+					(unsigned short)(x - start), 1
+				};
+				if (count == XPM_RECT_BATCH) {
+					if (XFillRectangles(display, pixmap, gc,
+					    rectangles, count) != 0)
+						goto out;
+					if (XSync(display, False) != 0)
+						goto out;
+					count = 0;
+				}
+			}
+		}
+		if (count != 0 && XFillRectangles(display, pixmap, gc,
+		    rectangles, count) != 0)
+			goto out;
+		if (count != 0 && XSync(display, False) != 0)
+			goto out;
+	}
+
+	/* One CopyArea is the only operation that changes the visible root. */
+	XCopyArea(display, pixmap, root, gc, 0, 0, width, height, 0, 0);
+	XFlush(display);
+
+	if (background_gc != NULL)
+		XFreeGC(display, background_gc);
+	if (background_pixmap != 0)
+		XFreePixmap(display, background_pixmap);
+	background_pixmap = pixmap;
+	background_gc = gc;
+	background_width = width;
+	background_height = height;
+	pixmap = 0;
+	gc = NULL;
+	ok = 1;
+
+out:
+	if (gc != NULL)
+		XFreeGC(display, gc);
+	if (pixmap != 0)
+		XFreePixmap(display, pixmap);
+	free(rectangles);
+	free(pixels);
+	free(file);
+	return ok;
+}
+
+static void
+load_background(Display *display, Window root)
+{
+	FILE *file;
+	char line[512];
+	char path[400] = { 0 };
+
+	file = fopen("/etc/Xzed/xzedwm.conf", "r");
+	if (file == NULL)
+		return;
+	while (fgets(line, sizeof(line), file) != NULL) {
+		char *p = line;
+		size_t length;
+
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (strncmp(p, "background=", 11) != 0)
+			continue;
+		strncpy(path, p + 11, sizeof(path) - 1);
+		length = strlen(path);
+		while (length != 0 &&
+		    (path[length - 1] == '\n' || path[length - 1] == '\r' ||
+		    path[length - 1] == ' ' || path[length - 1] == '\t'))
+			path[--length] = '\0';
+		break;
+	}
+	fclose(file);
+	if (path[0] != '\0' && !load_xpm(display, root, path))
+		fprintf(stderr, "xzedwm: cannot load background %s\n", path);
+}
+
+static void
+restore_background(Display *display, Window root, int x, int y,
+    unsigned width, unsigned height)
+{
+	if (background_pixmap == 0 || background_gc == NULL ||
+	    x < 0 || y < 0 || (unsigned)x >= background_width ||
+	    (unsigned)y >= background_height)
+		return;
+	if (width > background_width - (unsigned)x)
+		width = background_width - (unsigned)x;
+	if (height > background_height - (unsigned)y)
+		height = background_height - (unsigned)y;
+	XCopyArea(display, background_pixmap, root, background_gc,
+	    x, y, width, height, x, y);
+}
+
+static struct frame *
+by_frame(Window window)
+{
+	unsigned i;
+
+	for (i = 0; i < frame_count; i++) {
+		if (frames[i].frame == window)
+			return &frames[i];
+	}
+	return NULL;
+}
+
+static void
+decorate(Display *display, struct frame *frame)
+{
+	XSetForeground(display, frame->gc, 0x182838);
+	XFillRectangle(display, frame->frame, frame->gc, 0, 0,
+	    frame->width + 4, 20);
+	XSetForeground(display, frame->gc, 0xa0b8c8);
+	XFillRectangle(display, frame->frame, frame->gc, 0, 0,
+	    frame->width + 4, 2);
+	XFillRectangle(display, frame->frame, frame->gc, 0, 0, 2,
+	    frame->height + 22);
+	XFillRectangle(display, frame->frame, frame->gc, frame->width + 2, 0, 2,
+	    frame->height + 22);
+	XFillRectangle(display, frame->frame, frame->gc, 0, frame->height + 20,
+	    frame->width + 4, 2);
+}
+
+static void
+manage(Display *display, Window root, Window client)
+{
+	Window root_return;
+	int x;
+	int y;
+	unsigned width;
+	unsigned height;
+	unsigned border;
+	unsigned depth;
+	struct frame *frame;
+
+	if (frame_count == MAX_FRAMES ||
+	    !XGetGeometry(display, client, &root_return, &x, &y, &width, &height,
+	    &border, &depth))
+		return;
+	frame = &frames[frame_count++];
+	memset(frame, 0, sizeof(*frame));
+	frame->client = client;
+	frame->x = x;
+	frame->y = y;
+	frame->width = width;
+	frame->height = height;
+	frame->frame = XCreateSimpleWindow(display, root, x, y, width + 4,
+	    height + 22, 0, 0, 0x304858);
+	frame->gc = XCreateGC(display, frame->frame, 0, NULL);
+	XSelectInput(display, frame->frame,
+	    ExposureMask | ButtonPressMask | ButtonReleaseMask |
+	    PointerMotionMask | StructureNotifyMask);
+	XReparentWindow(display, client, frame->frame, 2, 20);
+	XMapWindow(display, client);
+	XMapWindow(display, frame->frame);
+	decorate(display, frame);
+}
+
+int
+main(int argc, char **argv)
+{
+	Display *display = XOpenDisplay(NULL);
+	Window root;
+	XEvent event;
+	struct frame *drag = NULL;
+	int drag_x = 0;
+	int drag_y = 0;
+	extern char **environ;
+
+	if (display == NULL) {
+		fprintf(stderr, "xzedwm: cannot open display\n");
+		return 1;
+	}
+	root = DefaultRootWindow(display);
+	XSelectInput(display, root,
+	    SubstructureRedirectMask | SubstructureNotifyMask | ExposureMask);
+	load_background(display, root);
+	if (argc > 1) {
+		pid_t pid = fork();
+
+		if (pid == 0) {
+			execve(argv[1], argv + 1, environ);
+			_exit(127);
+		}
+	}
+
+	for (;;) {
+		if (XNextEvent(display, &event) < 0)
+			break;
+		if (event.type == MapRequest) {
+			manage(display, root, event.xmaprequest.window);
+		} else if (event.type == Expose) {
+			struct frame *frame = by_frame(event.xexpose.window);
+
+			if (event.xexpose.window == root) {
+				restore_background(display, root, event.xexpose.x,
+				    event.xexpose.y, (unsigned)event.xexpose.width,
+				    (unsigned)event.xexpose.height);
+			} else if (frame != NULL) {
+				decorate(display, frame);
+			}
+		} else if (event.type == ButtonPress) {
+			struct frame *frame = by_frame(event.xbutton.window);
+
+			if (frame != NULL && event.xbutton.keycode == 1) {
+				drag = frame;
+				drag_x = event.xbutton.x_root - frame->x;
+				drag_y = event.xbutton.y_root - frame->y;
+			}
+		} else if (event.type == MotionNotify && drag != NULL) {
+			drag->x = event.xmotion.x_root - drag_x;
+			drag->y = event.xmotion.y_root - drag_y;
+			XMoveResizeWindow(display, drag->frame, drag->x, drag->y,
+			    drag->width + 4, drag->height + 22);
+		} else if (event.type == ButtonRelease) {
+			drag = NULL;
+		}
+	}
+
+	XCloseDisplay(display);
+	return 0;
+}
