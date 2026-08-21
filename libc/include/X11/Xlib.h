@@ -3,6 +3,9 @@
 #include <X11/X.h>
 typedef struct _XDisplay Display;
 typedef struct _XGC *GC;
+typedef struct { short lbearing,rbearing,width,ascent,descent; unsigned short attributes; } XCharStruct;
+typedef struct { Font fid; unsigned direction,min_char_or_byte2,max_char_or_byte2,min_byte1,max_byte1; Bool all_chars_exist; unsigned default_char; int n_properties; void *properties; XCharStruct min_bounds,max_bounds; void *per_char; int ascent,descent; } XFontStruct;
+typedef struct { unsigned char byte1,byte2; } XChar2b;
 typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window window; } XAnyEvent;
 typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window window; int x,y,width,height,count; } XExposeEvent;
 typedef struct { int type; unsigned long serial; Bool send_event; Display *display; Window window,root,subwindow; Time time; int x,y,x_root,y_root; unsigned int state,keycode; Bool same_screen; } XKeyEvent;
@@ -23,8 +26,16 @@ int XDestroyWindow(Display *,Window);
 GC XCreateGC(Display *,Drawable,unsigned long,void *);
 int XFreeGC(Display *,GC);
 int XSetForeground(Display *,GC,unsigned long);
+int XSetFont(Display *,GC,Font);
+Font XLoadFont(Display *,const char *);
+XFontStruct *XLoadQueryFont(Display *,const char *);
+int XFreeFont(Display *,XFontStruct *);
+char **XListFonts(Display *,const char *,int,int *);
+int XFreeFontNames(char **);
 int XFillRectangle(Display *,Drawable,GC,int,int,unsigned int,unsigned int);
 int XDrawLine(Display *,Drawable,GC,int,int,int,int);
+int XDrawString(Display *,Drawable,GC,int,int,const char *,int);
+int XDrawString16(Display *,Drawable,GC,int,int,const XChar2b *,int);
 int XNextEvent(Display *,XEvent *);
 int XPending(Display *);
 int XFlush(Display *);

@@ -24,6 +24,8 @@
 
 #define MAX_CLIENTS 8
 #define MAX_WINDOWS 64
+#define MAX_GCS 64
+#define MAX_FONTS 32
 #define INPUT_CAP (1024U * 1024U)
 #define ROOT_XID 1U
 #define COLORMAP_XID 2U
@@ -42,6 +44,8 @@ struct window {
 	uint16_t width, height, border;
 	int mapped;
 };
+struct graphics_context { uint32_t id,foreground,font; int owner; };
+struct font_resource { uint32_t id; int owner; };
 struct server {
 	int listener, console, mouse, graphics;
 	struct zedbsd_console_input_mode old_console_mode;
@@ -49,6 +53,8 @@ struct server {
 	struct client clients[MAX_CLIENTS];
 	struct window windows[MAX_WINDOWS];
 	unsigned window_count;
+	struct graphics_context gcs[MAX_GCS];unsigned gc_count;
+	struct font_resource fonts[MAX_FONTS];unsigned font_count;
 	int pointer_x, pointer_y;
 	uint32_t buttons, key_state;
 	uint32_t focus;
@@ -73,6 +79,8 @@ static struct window *find_window(struct server *s,uint32_t id)
 { unsigned i;for(i=0;i<s->window_count;i++)if(s->windows[i].id==id)return &s->windows[i];return NULL; }
 static struct client *owner_client(struct server *s,uint32_t owner)
 { return owner<MAX_CLIENTS && s->clients[owner].fd>=0?&s->clients[owner]:NULL; }
+static struct graphics_context *find_gc(struct server*s,uint32_t id)
+{unsigned i;for(i=0;i<s->gc_count;i++)if(s->gcs[i].id==id)return &s->gcs[i];return NULL;}
 
 static int flush_rect(struct server *s,uint32_t x,uint32_t y,uint32_t w,uint32_t h)
 {
@@ -90,6 +98,12 @@ static void fill(struct server *s,int x,int y,int w,int h,uint32_t color)
 	memset(&f,0,sizeof(f));f.rect.x=(uint32_t)x;f.rect.y=(uint32_t)y;
 	f.rect.width=(uint32_t)w;f.rect.height=(uint32_t)h;f.color=color;
 	(void)ioctl(s->graphics,ZEDBSD_GRAPHICS_FILL_RECT,&f);
+}
+static int draw_text(struct server*s,struct window*w,struct graphics_context*g,int x,int y,const uint8_t*text,size_t count,int wide)
+{
+	uint8_t bitmap[32];size_t i;uint32_t color=g?g->foreground:0xffffff;
+	for(i=0;i<count;i++){struct zedbsd_graphics_glyph q;struct zedbsd_graphics_blit b;uint32_t cp=wide?((uint32_t)text[i*2]<<8)|text[i*2+1]:text[i];memset(&q,0,sizeof(q));q.codepoint=cp;q.bitmap=(uapi_ptr_t)(uintptr_t)bitmap;q.bitmap_capacity=sizeof(bitmap);if(ioctl(s->graphics,ZEDBSD_GRAPHICS_GET_GLYPH,&q))continue;memset(&b,0,sizeof(b));b.x=(uint32_t)(w->x+x);b.y=(uint32_t)(w->y+y-(int)q.height);b.width=q.width;b.height=q.height;b.format=ZEDBSD_GRAPHICS_FORMAT_MONO1;b.stride=q.stride;b.pixels=(uapi_ptr_t)(uintptr_t)bitmap;b.foreground=color;b.background=w->background;(void)ioctl(s->graphics,ZEDBSD_GRAPHICS_BLIT,&b);x+=(int)(q.advance?q.advance:q.width);}
+	return flush_rect(s,0,0,s->mode.width,s->mode.height);
 }
 static void repaint(struct server *s)
 {
@@ -155,11 +169,24 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 		{uint8_t r[32];struct window *h=hit(s,s->pointer_x,s->pointer_y);memset(r,0,32);r[1]=1;wr32(r+8,ROOT_XID,c->order);wr32(r+12,h->id==ROOT_XID?0:h->id,c->order);wr16(r+16,(uint16_t)s->pointer_x,c->order);wr16(r+18,(uint16_t)s->pointer_y,c->order);wr16(r+20,(uint16_t)(s->pointer_x-h->x),c->order);wr16(r+22,(uint16_t)(s->pointer_y-h->y),c->order);wr16(r+24,(uint16_t)s->key_state,c->order);simple_reply(c,r,32);return 0;}
 	case 42: s->focus=rd32(q+4,c->order);return 0;
 	case 43: {uint8_t r[32];memset(r,0,32);r[1]=0;wr32(r+8,s->focus,c->order);simple_reply(c,r,32);return 0;}
-	case 55: case 56: case 60: return 0; /* GC bookkeeping is not yet visible. */
+	case 45: /* OpenFont */
+		if(n>=12&&s->font_count<MAX_FONTS){uint16_t ln=rd16(q+8,c->order);if(12U+ln<=n){s->fonts[s->font_count++]=(struct font_resource){rd32(q+4,c->order),(int)ci};return 0;}}break;
+	case 46: return 0; /* CloseFont */
+	case 47: /* QueryFont: the font is Unicode BMP, with 1- or 2-cell glyphs. */
+		{uint8_t r[60];memset(r,0,sizeof(r));wr16(r+8,0,c->order);wr16(r+10,255,c->order);wr16(r+12,0,c->order);wr16(r+14,255,c->order);r[16]=0;r[17]=0;wr16(r+18,0,c->order);wr16(r+20,16,c->order);wr32(r+56,0,c->order);simple_reply(c,r,sizeof(r));return 0;}
+	case 49: /* ListFonts */
+		{static const char name[]="zed-unicode";uint8_t r[44];memset(r,0,sizeof(r));wr16(r+8,1,c->order);r[32]=(uint8_t)(sizeof(name)-1);memcpy(r+33,name,sizeof(name)-1);simple_reply(c,r,sizeof(r));return 0;}
+	case 55: /* CreateGC */
+		if(n>=16&&s->gc_count<MAX_GCS){struct graphics_context*g=&s->gcs[s->gc_count++];uint32_t mask=rd32(q+12,c->order);size_t off=16;unsigned bit;memset(g,0,sizeof(*g));g->id=rd32(q+4,c->order);g->owner=(int)ci;g->foreground=0xffffff;for(bit=0;bit<32&&off+4<=n;bit++)if(mask&(1U<<bit)){uint32_t v=rd32(q+off,c->order);if(bit==2)g->foreground=v;if(bit==14)g->font=v;off+=4;}return 0;}break;
+	case 56: /* ChangeGC */
+		{struct graphics_context*g=find_gc(s,rd32(q+4,c->order));if(g&&n>=12){uint32_t mask=rd32(q+8,c->order);size_t off=12;unsigned bit;for(bit=0;bit<32&&off+4<=n;bit++)if(mask&(1U<<bit)){uint32_t v=rd32(q+off,c->order);if(bit==2)g->foreground=v;if(bit==14)g->font=v;off+=4;}return 0;}}break;
+	case 60: return 0; /* FreeGC */
 	case 65: /* PolyLine */
 		if(n>=16&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){struct zedbsd_graphics_line l;size_t off;int x=0,y=0;memset(&l,0,sizeof(l));for(off=12;off+4<=n;off+=4){int nx=w->x+(int16_t)rd16(q+off,c->order),ny=w->y+(int16_t)rd16(q+off+2,c->order);if(off!=12){l.x0=(uint32_t)x;l.y0=(uint32_t)y;l.x1=(uint32_t)nx;l.y1=(uint32_t)ny;l.color=0xffffff;(void)ioctl(s->graphics,ZEDBSD_GRAPHICS_DRAW_LINE,&l);}x=nx;y=ny;}(void)flush_rect(s,0,0,s->mode.width,s->mode.height);}return 0;
 	case 70: /* PolyFillRectangle */
-		if(n>=12&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){size_t off;for(off=12;off+8<=n;off+=8)fill(s,w->x+(int16_t)rd16(q+off,c->order),w->y+(int16_t)rd16(q+off+2,c->order),rd16(q+off+4,c->order),rd16(q+off+6,c->order),0xffffff);(void)flush_rect(s,0,0,s->mode.width,s->mode.height);}return 0;
+		if(n>=12&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){struct graphics_context*g=find_gc(s,rd32(q+8,c->order));size_t off;for(off=12;off+8<=n;off+=8)fill(s,w->x+(int16_t)rd16(q+off,c->order),w->y+(int16_t)rd16(q+off+2,c->order),rd16(q+off+4,c->order),rd16(q+off+6,c->order),g?g->foreground:0xffffff);(void)flush_rect(s,0,0,s->mode.width,s->mode.height);}return 0;
+	case 76: case 77: /* ImageText8 / ImageText16 */
+		if(n>=16&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){struct graphics_context*g=find_gc(s,rd32(q+8,c->order));size_t chars=q[1];if(16+chars*(op==77?2U:1U)<=n)(void)draw_text(s,w,g,(int16_t)rd16(q+12,c->order),(int16_t)rd16(q+14,c->order),q+16,chars,op==77);return 0;}break;
 	case 101: /* GetKeyboardMapping */ {uint8_t r[32+4*248];unsigned i;memset(r,0,sizeof(r));r[1]=1;for(i=0;i<q[5]&&i<248;i++){uint32_t ks=(uint32_t)(q[4]+i);wr32(r+32+i*4,ks,c->order);}simple_reply(c,r,32+(size_t)q[5]*4);return 0;}
 	case 117: {uint8_t r[32+4];memset(r,0,sizeof(r));r[1]=3;r[32]=1;r[33]=2;r[34]=3;simple_reply(c,r,36);return 0;}
 	case 127:return 0;
@@ -194,7 +221,7 @@ static int initialize(struct server *s)
 	struct sockaddr_un a;struct zedbsd_graphics_caps caps;struct zedbsd_console_input_mode m={ZEDBSD_CONSOLE_INPUT_EVENT,0};unsigned i;memset(s,0,sizeof(*s));s->listener=s->console=s->mouse=s->graphics=-1;for(i=0;i<MAX_CLIENTS;i++)s->clients[i].fd=-1;
 	s->console=open("/dev/console",O_RDONLY|O_NONBLOCK);if(s->console<0)return -1;if(ioctl(s->console,ZEDBSD_CONSOLE_GET_INPUT_MODE,&s->old_console_mode)||ioctl(s->console,ZEDBSD_CONSOLE_SET_INPUT_MODE,&m))return -1;
 	s->mouse=open("/dev/mouse",O_RDONLY|O_NONBLOCK);
-	s->graphics=open("/dev/graphics",O_RDWR);if(s->graphics<0)return -1;if(ioctl(s->graphics,ZEDBSD_GRAPHICS_GET_CAPS,&caps))return -1;if(!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_FILL)||!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_FLUSH)){errno=ENOTSUP;return -1;}memset(&s->mode,0,sizeof(s->mode));s->mode.preferred_bits_per_pixel=24;if(ioctl(s->graphics,ZEDBSD_GRAPHICS_ENTER,&s->mode))return -1;
+	s->graphics=open("/dev/graphics",O_RDWR);if(s->graphics<0)return -1;if(ioctl(s->graphics,ZEDBSD_GRAPHICS_GET_CAPS,&caps))return -1;if(!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_FILL)||!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_FLUSH)||!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_GLYPH)||!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_BLIT_MONO1)){errno=ENOTSUP;return -1;}memset(&s->mode,0,sizeof(s->mode));s->mode.preferred_bits_per_pixel=24;if(ioctl(s->graphics,ZEDBSD_GRAPHICS_ENTER,&s->mode))return -1;
 	(void)mkdir("/tmp/.X11-unix",0777);(void)unlink("/tmp/.X11-unix/X0");s->listener=socket(AF_UNIX,SOCK_STREAM,0);if(s->listener<0)return -1;memset(&a,0,sizeof(a));a.sun_family=AF_UNIX;strcpy(a.sun_path,"/tmp/.X11-unix/X0");if(bind(s->listener,(struct sockaddr*)&a,sizeof(a))||listen(s->listener,8))return -1;(void)fcntl(s->listener,F_SETFL,fcntl(s->listener,F_GETFL)|O_NONBLOCK);
 	s->windows[0]=(struct window){ROOT_XID,0,0,0,0x203040,0,0,(uint16_t)s->mode.width,(uint16_t)s->mode.height,0,1};s->window_count=1;s->focus=ROOT_XID;s->pointer_x=(int)s->mode.width/2;s->pointer_y=(int)s->mode.height/2;repaint(s);return 0;
 }
