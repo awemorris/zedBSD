@@ -11,6 +11,9 @@
 #include "kern/vm-reclaim.h"
 #include "kern/vm-commit.h"
 #include "kern/resource.h"
+#include "kern/process.h"
+#include "kern/cred.h"
+#include "kern/vmspace.h"
 
 #include <zedbsd/system.h>
 #include <errno.h>
@@ -92,6 +95,31 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 	case ZEDBSD_SYSTEM_GET_RESOURCES: {
 		struct zedbsd_system_resources output;
 		kern_resource_snapshot(&output);
+		return copyout(&output, argument, sizeof(output));
+	}
+	case ZEDBSD_SYSTEM_GET_PROCESS: {
+		struct zedbsd_system_process output;
+		struct process *process;
+		unsigned long irq;
+		int error = copyin(argument, &output, sizeof(output));
+		if (error != 0)
+			return error;
+		process = process_find_next_ref(output.pid);
+		if (process == NULL)
+			return ENOENT;
+		memset(&output, 0, sizeof(output));
+		irq = spin_lock_irqsave(&process->lock);
+		output.pid = process->pid;
+		output.ppid = process->parent != NULL ? process->parent->pid : 0;
+		output.uid = process->cred != NULL ? process->cred->euid : 0;
+		output.state = process->state;
+		output.threads = process->thread_count;
+		output.virtual_bytes = process->vmspace != NULL ?
+		    process->vmspace->mapped_virtual_bytes : 0;
+		memcpy(output.command, process->command, sizeof(output.command));
+		output.command[sizeof(output.command) - 1U] = '\0';
+		spin_unlock_irqrestore(&process->lock, irq);
+		process_release(process);
 		return copyout(&output, argument, sizeof(output));
 	}
 	case ZEDBSD_SYSTEM_HALT:

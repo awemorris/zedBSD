@@ -115,6 +115,17 @@ tty_console_csi(unsigned vt, unsigned command)
 
 	hal_cons_save_state(&state);
 	switch (command) {
+	case 'H':
+		(void)hal_cons_set_cursor(0U, 0U);
+		break;
+	case 'J':
+		if (amount == 2U) {
+			unsigned row;
+			for (row = 0; row < HAL_CONS_ROWS; row++)
+				hal_cons_clear_row(row);
+			(void)hal_cons_set_cursor(0U, 0U);
+		}
+		break;
 	case 'A':
 		state.row = amount < state.row ? state.row - amount : 0U;
 		(void)hal_cons_set_cursor(state.row, state.column);

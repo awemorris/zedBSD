@@ -65,6 +65,10 @@ static int interactive(struct document*d,struct terminal*t,enum pager_style styl
 int pager_main(enum pager_style style,int argc,char**argv)
 {
 	int index=1,numbers=0,failed=0,data_stdin=0;size_t first=0;struct terminal terminal;struct sigaction action;while(index<argc&&argv[index][0]=='-'&&argv[index][1]){if(style==PAGER_LESS&&!strcmp(argv[index],"-N"))numbers=1;else break;index++;}if(index<argc&&argv[index][0]=='+'&&argv[index][1]){first=(size_t)strtoul(argv[index]+1,NULL,10);if(first)first--;index++;}if(index==argc)data_stdin=1;else{int i;for(i=index;i<argc;i++)if(!strcmp(argv[i],"-"))data_stdin=1;}
+	if(index==argc&&isatty(STDIN_FILENO)){
+		fprintf(stderr,"%s: missing file operand\n",style==PAGER_MORE?"more":"less");
+		return 1;
+	}
 	memset(&action,0,sizeof(action));action.sa_handler=(uint64_t)(uintptr_t)stop_handler;sigemptyset(&action.sa_mask);sigaction(SIGINT,&action,NULL);sigaction(SIGTERM,&action,NULL);sigaction(SIGHUP,&action,NULL);
 	if(!terminal_open(&terminal,data_stdin)){do{const char*name=index==argc?"-":argv[index];int fd=!strcmp(name,"-")?STDIN_FILENO:open(name,O_RDONLY);if(fd<0||copy_fd(fd)){command_error(style==PAGER_MORE?"more":"less",name);failed=1;}if(fd>=0&&fd!=STDIN_FILENO)close(fd);index++;}while(index<argc);return failed;}
 	do{const char*name=index==argc?"-":argv[index];struct document d;if(load_document(&d,name)){command_error(style==PAGER_MORE?"more":"less",name);failed=1;close_document(&d);}else{if(interactive(&d,&terminal,style,numbers,first))failed=1;close_document(&d);}index++;if(stopped)break;}while(index<argc);terminal_close(&terminal);return stopped?128+stopped:failed;

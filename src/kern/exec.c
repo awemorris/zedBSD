@@ -360,6 +360,8 @@ process_spawn_from(struct process *parent, const char *path,
 			goto out;
 	}
 	stage = "create initial thread";
+	strncpy(process->command, argv[0], sizeof(process->command) - 1U);
+	process->command[sizeof(process->command) - 1U] = '\0';
 	error = thread_create(process, execution_entry, sp, &thread);
 	if (error != 0)
 		goto out;
@@ -474,6 +476,8 @@ process_execve(struct process *process, const char *path, char *const argv[],
 	process_timer_cleanup(process);
 	signal_exec(process);
 	process->did_exec = 1;
+	strncpy(process->command, argv[0], sizeof(process->command) - 1U);
+	process->command[sizeof(process->command) - 1U] = '\0';
 	vmspace_free(old_vm);
 out:
 	process_irq = spin_lock_irqsave(&process->lock);

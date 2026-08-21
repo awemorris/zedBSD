@@ -97,6 +97,7 @@ struct process {
 	struct tty *controlling_tty;
 	char result[PROCESS_RESULT_MAX];
 	size_t result_length;
+	char command[64];
 };
 
 extern struct process process0;

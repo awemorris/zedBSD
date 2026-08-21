@@ -51,6 +51,18 @@ struct zedbsd_system_resources {
 	uint64_t disk, bio, socket, packet, net_device;
 };
 
+#define ZEDBSD_SYSTEM_PROCESS_COMMAND_MAX 64U
+struct zedbsd_system_process {
+	int32_t pid;
+	int32_t ppid;
+	uint32_t uid;
+	uint32_t state;
+	uint32_t threads;
+	uint32_t reserved;
+	uint64_t virtual_bytes;
+	char command[ZEDBSD_SYSTEM_PROCESS_COMMAND_MAX];
+};
+
 #define ZEDBSD_SYSTEM_GET_INFO _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 1, struct zedbsd_system_info)
 #define ZEDBSD_SYSTEM_GET_DEVICE _IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 2, struct zedbsd_system_device)
 #define ZEDBSD_SYSTEM_GET_VMSTAT _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 3, struct zedbsd_system_vmstat)
@@ -58,5 +70,7 @@ struct zedbsd_system_resources {
 #define ZEDBSD_SYSTEM_REBOOT _IO(ZEDBSD_SYSTEM_IOC_GROUP, 5)
 #define ZEDBSD_SYSTEM_GET_RESOURCES _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 6, \
 	struct zedbsd_system_resources)
+#define ZEDBSD_SYSTEM_GET_PROCESS _IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 7, \
+	struct zedbsd_system_process)
 
 #endif
