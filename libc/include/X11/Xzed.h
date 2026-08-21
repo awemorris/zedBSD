@@ -18,5 +18,9 @@ int XzedGetIconPath(Display *, Window, char **);
 int XzedPutImageRGB24(Display *, Drawable, int, int, unsigned, unsigned,
     const unsigned char *, unsigned);
 int XzedSetCursorShape(Display *, Window, unsigned);
+int XzedSetInputMargins(Display *, Window, unsigned, unsigned, unsigned,
+    unsigned);
+int XzedMoveResizeWindowBuffered(Display *, Window, int, int, unsigned,
+    unsigned);
 
 #endif

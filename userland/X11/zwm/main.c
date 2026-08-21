@@ -19,11 +19,12 @@
 #define TITLE_HEIGHT 26U
 #define CLIENT_X ((int)FRAME_BORDER)
 #define CLIENT_Y ((int)TITLE_HEIGHT)
-#define RESIZE_HIT 4
+#define RESIZE_MARGIN 2
 #define MIN_CLIENT_WIDTH 120U
 #define MIN_CLIENT_HEIGHT 64U
 #define EDGE_LEFT 1U
 #define EDGE_RIGHT 2U
+#define EDGE_TOP 4U
 #define EDGE_BOTTOM 8U
 
 /* Flat, dark decoration used by the zedBSD desktop. */
@@ -73,12 +74,20 @@ resize_edges_at(const struct frame *frame, int x, int y)
 	unsigned edges = 0;
 	unsigned fw = frame_width(frame);
 	unsigned fh = frame_height(frame);
+	int left = x >= -RESIZE_MARGIN && x < RESIZE_MARGIN;
+	int right = x >= (int)fw - RESIZE_MARGIN &&
+	    x < (int)fw + RESIZE_MARGIN;
+	int top = y >= -RESIZE_MARGIN && y < RESIZE_MARGIN;
+	int bottom = y >= (int)fh - RESIZE_MARGIN &&
+	    y < (int)fh + RESIZE_MARGIN;
 
-	if (y >= (int)TITLE_HEIGHT && x < RESIZE_HIT)
+	if (left && y >= -RESIZE_MARGIN && y < (int)fh + RESIZE_MARGIN)
 		edges |= EDGE_LEFT;
-	if (y >= (int)TITLE_HEIGHT && x >= (int)fw - RESIZE_HIT)
+	if (right && y >= -RESIZE_MARGIN && y < (int)fh + RESIZE_MARGIN)
 		edges |= EDGE_RIGHT;
-	if (y >= (int)fh - RESIZE_HIT)
+	if (top && x >= -RESIZE_MARGIN && x < (int)fw + RESIZE_MARGIN)
+		edges |= EDGE_TOP;
+	if (bottom && x >= -RESIZE_MARGIN && x < (int)fw + RESIZE_MARGIN)
 		edges |= EDGE_BOTTOM;
 	return edges;
 }
@@ -92,9 +101,13 @@ cursor_for_edges(unsigned edges)
 	if ((edges & (EDGE_RIGHT | EDGE_BOTTOM)) ==
 	    (EDGE_RIGHT | EDGE_BOTTOM))
 		return XZED_CURSOR_BOTTOM_RIGHT;
+	if ((edges & (EDGE_LEFT | EDGE_TOP)) == (EDGE_LEFT | EDGE_TOP))
+		return XZED_CURSOR_BOTTOM_RIGHT;
+	if ((edges & (EDGE_RIGHT | EDGE_TOP)) == (EDGE_RIGHT | EDGE_TOP))
+		return XZED_CURSOR_BOTTOM_LEFT;
 	if (edges & (EDGE_LEFT | EDGE_RIGHT))
 		return XZED_CURSOR_HORIZONTAL;
-	if (edges & EDGE_BOTTOM)
+	if (edges & (EDGE_TOP | EDGE_BOTTOM))
 		return XZED_CURSOR_VERTICAL;
 	return XZED_CURSOR_LEFT_PTR;
 }
@@ -688,6 +701,8 @@ manage(Display *display, Window root, Window client)
 	    frame_width(frame), frame_height(frame), 0, 0, FRAME_FACE);
 	frame->cursor_shape = XZED_CURSOR_LEFT_PTR;
 	XzedSetCursorShape(display, frame->frame, XZED_CURSOR_LEFT_PTR);
+	XzedSetInputMargins(display, frame->frame, RESIZE_MARGIN,
+	    RESIZE_MARGIN, RESIZE_MARGIN, RESIZE_MARGIN);
 	/* Do not inherit a resize cursor after crossing into the client. */
 	XzedSetCursorShape(display, client, XZED_CURSOR_LEFT_PTR);
 	XStoreName(display, frame->frame, frame->title);
@@ -792,25 +807,36 @@ main(int argc, char **argv)
 			} else {
 				if (drag_edges & EDGE_LEFT) { x += dx; width -= dx; }
 				if (drag_edges & EDGE_RIGHT) width += dx;
+				if (drag_edges & EDGE_TOP) { y += dy; height -= dy; }
 				if (drag_edges & EDGE_BOTTOM) height += dy;
 				if (width < (int)MIN_CLIENT_WIDTH) {
 					if (drag_edges & EDGE_LEFT) x -= (int)MIN_CLIENT_WIDTH - width;
 					width = MIN_CLIENT_WIDTH;
 				}
 				if (height < (int)MIN_CLIENT_HEIGHT) {
+					if (drag_edges & EDGE_TOP)
+						y -= (int)MIN_CLIENT_HEIGHT - height;
 					height = MIN_CLIENT_HEIGHT;
 				}
 			}
+			if (x == drag->x && y == drag->y &&
+			    width == (int)drag->width && height == (int)drag->height)
+				continue;
 			drag->x = x; drag->y = y;
 			drag->width = (unsigned)width; drag->height = (unsigned)height;
-			XMoveResizeWindow(display, drag->frame, drag->x, drag->y,
-			    frame_width(drag), frame_height(drag));
-			if (drag_edges != 0)
-				XMoveResizeWindow(display, drag->client,
-				    drag->x + CLIENT_X, drag->y + CLIENT_Y,
-				    drag->width, drag->height);
+			if (drag_edges == 0)
+				XMoveResizeWindow(display, drag->frame, drag->x, drag->y,
+				    frame_width(drag), frame_height(drag));
+			else
+				XzedMoveResizeWindowBuffered(display, drag->frame,
+				    drag->x, drag->y, frame_width(drag),
+				    frame_height(drag));
 		} else if (event.type == ButtonRelease) {
 			if (drag != NULL) {
+				if (drag_edges != 0)
+					XMoveResizeWindow(display, drag->client,
+					    drag->x + CLIENT_X, drag->y + CLIENT_Y,
+					    drag->width, drag->height);
 				decorate(display, drag);
 				set_resize_cursor(display, drag,
 				    event.xbutton.x_root - drag->x,

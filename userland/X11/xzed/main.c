@@ -83,6 +83,7 @@ struct window {
 	uint16_t width, height, border;
 	int mapped;
 	uint16_t cursor_shape;
+	uint16_t input_left, input_top, input_right, input_bottom;
 	uint32_t *pixels;
 	char name[64];
 	char icon_path[160];
@@ -166,9 +167,33 @@ static struct window*top_at(struct server*s,int x,int y)
 {
 	struct window*w=top_at_parent(s,ROOT_XID,x,y);return w?w:&s->windows[0];
 }
+static struct window*input_at_parent(struct server*s,uint32_t parent,int x,int y)
+{
+	unsigned i=s->window_count;
+	while(i-->1){
+		struct window*w=&s->windows[i];int inside;
+		if(!w->mapped||w->parent!=parent)continue;
+		inside=x>=w->x-(int)w->input_left&&
+		    y>=w->y-(int)w->input_top&&
+		    x<w->x+w->width+(int)w->input_right&&
+		    y<w->y+w->height+(int)w->input_bottom;
+		if(inside){
+			if(x>=w->x&&y>=w->y&&x<w->x+w->width&&y<w->y+w->height){
+				struct window*child=input_at_parent(s,w->id,x,y);
+				if(child)return child;
+			}
+			return w;
+		}
+	}
+	return NULL;
+}
+static struct window*input_at(struct server*s,int x,int y)
+{struct window*w=input_at_parent(s,ROOT_XID,x,y);return w?w:&s->windows[0];}
 static uint16_t pointer_shape(struct server*s)
 {
-	struct window*w=top_at(s,s->pointer_x,s->pointer_y);
+	struct window*w=s->pointer_grab_owner>=0?
+	    find_window(s,s->pointer_grab_window):
+	    input_at(s,s->pointer_x,s->pointer_y);
 	while(w&&!w->cursor_shape&&w->parent)w=find_window(s,w->parent);
 	return w&&w->cursor_shape?w->cursor_shape:XC_LEFT_PTR;
 }
@@ -208,6 +233,23 @@ static uint32_t*window_pixels_alloc(uint16_t width,uint16_t height,uint32_t colo
 static int window_pixels_resize(struct window*w,uint16_t width,uint16_t height)
 {
 	uint32_t*p;unsigned copy_width,copy_height,row;if(width==w->width&&height==w->height)return 0;p=window_pixels_alloc(width,height,w->background);if(!p)return -1;copy_width=width<w->width?width:w->width;copy_height=height<w->height?height:w->height;for(row=0;row<copy_height;row++)memcpy(p+(size_t)row*width,w->pixels+(size_t)row*w->width,(size_t)copy_width*sizeof(*p));free(w->pixels);w->pixels=p;return 0;
+}
+static int window_pixels_resize_buffered(struct window*w,uint16_t width,
+	uint16_t height,int x_offset,int y_offset)
+{
+	uint32_t*p;int source_x=0,source_y=0,dest_x=x_offset,dest_y=y_offset;
+	int copy_width=w->width,copy_height=w->height,row;
+	if(width==w->width&&height==w->height&&x_offset==0&&y_offset==0)return 0;
+	p=window_pixels_alloc(width,height,w->background);if(!p)return -1;
+	if(dest_x<0){source_x=-dest_x;copy_width-=source_x;dest_x=0;}
+	if(dest_y<0){source_y=-dest_y;copy_height-=source_y;dest_y=0;}
+	if(dest_x+copy_width>(int)width)copy_width=(int)width-dest_x;
+	if(dest_y+copy_height>(int)height)copy_height=(int)height-dest_y;
+	if(copy_width>0&&copy_height>0)for(row=0;row<copy_height;row++)
+		memcpy(p+(size_t)(dest_y+row)*width+(unsigned)dest_x,
+		    w->pixels+(size_t)(source_y+row)*w->width+(unsigned)source_x,
+		    (size_t)copy_width*sizeof(*p));
+	free(w->pixels);w->pixels=p;return 0;
 }
 static void composite_region(struct server*s,int x,int y,int width,int height)
 {
@@ -263,6 +305,12 @@ static void send_event(struct client *c,uint8_t type,uint32_t window,uint32_t de
 	wr16(e+20,(uint16_t)rx,c->order);wr16(e+22,(uint16_t)ry,c->order);wr16(e+24,(uint16_t)rx,c->order);wr16(e+26,(uint16_t)ry,c->order);wr16(e+28,state,c->order);e[30]=1;
 	(void)write_all(c->fd,e,sizeof(e));
 }
+static void send_motion_event(struct client*c,struct window*w,uint64_t time,
+	int x,int y,uint16_t buttons)
+{
+	if(c&&w&&(w->event_mask&(1U<<6)))
+		send_event(c,6,w->id,0,(uint32_t)(time/1000000),x,y,buttons);
+}
 static void expose_area(struct server*s,struct window*w,int x,int y,int width,int height)
 {
 	struct client*c=owner_client(s,w->owner);uint8_t e[32];if(!c||!(w->event_mask&(1U<<15)))return;if(x<0){width+=x;x=0;}if(y<0){height+=y;y=0;}if(x+width>w->width)width=w->width-x;if(y+height>w->height)height=w->height-y;if(width<=0||height<=0)return;memset(e,0,sizeof(e));e[0]=12;wr16(e+2,c->sequence,c->order);wr32(e+4,w->id,c->order);wr16(e+8,(uint16_t)x,c->order);wr16(e+10,(uint16_t)y,c->order);wr16(e+12,(uint16_t)width,c->order);wr16(e+14,(uint16_t)height,c->order);(void)write_all(c->fd,e,32);
@@ -274,7 +322,7 @@ static void expose(struct server*s,struct window*w)
 static void map_request(struct server*s,struct window*parent,struct window*w)
 {struct client*c=owner_client(s,parent->owner);uint8_t e[32];if(!c)return;memset(e,0,sizeof(e));e[0]=20;wr16(e+2,c->sequence,c->order);wr32(e+4,parent->id,c->order);wr32(e+8,w->id,c->order);(void)write_all(c->fd,e,sizeof(e));}
 static struct window *hit(struct server *s,int x,int y)
-{return top_at(s,x,y);}
+{return input_at(s,x,y);}
 
 static int setup_reply(struct server *s,struct client *c)
 {
@@ -352,6 +400,10 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 		if(n>=16){uint32_t drawable=rd32(q+4,c->order);struct pixmap*p=find_pixmap(s,drawable);int x=(int16_t)rd16(q+8,c->order),y=(int16_t)rd16(q+10,c->order);unsigned wi=rd16(q+12,c->order),he=rd16(q+14,c->order);size_t count=(size_t)wi*he;unsigned row,column;w=find_window(s,drawable);if((!w&&!p)||!wi||!he||(wi&&count/wi!=he)||count>(n-16U)/3U)break;for(row=0;row<he;row++)for(column=0;column<wi;column++){const uint8_t*rgb=q+16U+((size_t)row*wi+column)*3U;int dx=x+(int)column,dy=y+(int)row;uint32_t color=((uint32_t)rgb[0]<<16)|((uint32_t)rgb[1]<<8)|rgb[2];if(w){if(dx>=0&&dy>=0&&dx<w->width&&dy<w->height)w->pixels[(size_t)dy*w->width+(unsigned)dx]=color;}else if(dx>=0&&dy>=0&&dx<p->width&&dy<p->height)p->pixels[(size_t)dy*p->width+(unsigned)dx]=color;}if(w)mark_dirty(s,w->x+x,w->y+y,(int)wi,(int)he);return 0;}break;
 	case 129: /* XzedSetCursorShape */
 		if(n>=12&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){uint16_t shape=(uint16_t)rd32(q+8,c->order);if(shape!=XC_LEFT_PTR&&shape!=XC_BOTTOM_LEFT_CORNER&&shape!=XC_BOTTOM_RIGHT_CORNER&&shape!=XC_SB_H_DOUBLE_ARROW&&shape!=XC_SB_V_DOUBLE_ARROW)break;w->cursor_shape=shape;mark_dirty(s,s->pointer_x-16,s->pointer_y-16,32,32);return 0;}break;
+	case 130: /* XzedSetInputMargins */
+		if(n>=16&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){w->input_left=rd16(q+8,c->order);w->input_top=rd16(q+10,c->order);w->input_right=rd16(q+12,c->order);w->input_bottom=rd16(q+14,c->order);return 0;}break;
+	case 131: /* XzedMoveResizeWindowBuffered: no child move or Expose. */
+		if(n>=24&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){int32_t newx=(int32_t)rd32(q+8,c->order),newy=(int32_t)rd32(q+12,c->order);uint32_t width=rd32(q+16,c->order),height=rd32(q+20,c->order);int oldx=w->x,oldy=w->y,oldw=w->width,oldh=w->height;if(newx<INT16_MIN||newx>INT16_MAX||newy<INT16_MIN||newy>INT16_MAX||!width||width>UINT16_MAX||!height||height>UINT16_MAX)break;if(window_pixels_resize_buffered(w,(uint16_t)width,(uint16_t)height,oldx-(int)newx,oldy-(int)newy)){error_reply(c,11,w->id,op);return 0;}w->x=(int16_t)newx;w->y=(int16_t)newy;w->width=(uint16_t)width;w->height=(uint16_t)height;mark_dirty(s,oldx,oldy,oldw,oldh);mark_dirty(s,w->x,w->y,w->width,w->height);return 0;}break;
 	case 127:return 0;
 	default:error_reply(c,1,0,op);return 0;
 	}
@@ -389,6 +441,13 @@ static void mouse(struct server *s)
 
 	while ((n = read(s->mouse, ev, sizeof(ev))) > 0) {
 		size_t i;
+		struct window *pending_window = NULL;
+		struct client *pending_client = NULL;
+		uint64_t pending_time = 0;
+		int pending_x = 0, pending_y = 0;
+		uint16_t pending_buttons = 0;
+		int pending_motion = 0;
+
 		if ((size_t)n % sizeof(ev[0])) { stopped = 1; return; }
 		for (i = 0; i < (size_t)n / sizeof(ev[0]); i++) {
 			uint32_t changed = s->buttons ^ ev[i].buttons;
@@ -406,9 +465,24 @@ static void mouse(struct server *s)
 			if (!w) w = hit(s, s->pointer_x, s->pointer_y);
 			c = s->pointer_grab_owner >= 0 ?
 			    owner_client(s, (uint32_t)s->pointer_grab_owner) : owner_client(s, w->owner);
-			if (moved && c && (w->event_mask & (1U << 6)))
-				send_event(c, 6, w->id, 0, (uint32_t)(ev[i].timestamp_ns / 1000000),
+			/* Compress consecutive pointer motion.  A resize must follow the
+			 * newest pointer position, not replay a stale queue after the
+			 * physical mouse has stopped.  Preserve ordering at button edges. */
+			if (changed && pending_motion) {
+				send_motion_event(pending_client, pending_window,
+				    pending_time, pending_x, pending_y, pending_buttons);
+				pending_motion = 0;
+			}
+			if (moved && changed)
+				send_motion_event(c, w, ev[i].timestamp_ns,
 				    s->pointer_x, s->pointer_y, (uint16_t)s->buttons);
+			else if (moved) {
+				pending_client = c; pending_window = w;
+				pending_time = ev[i].timestamp_ns;
+				pending_x = s->pointer_x; pending_y = s->pointer_y;
+				pending_buttons = (uint16_t)s->buttons;
+				pending_motion = 1;
+			}
 			for (b = 0; b < 3; b++) if (changed & (1U << b)) {
 				uint32_t window_id = w->id;
 				if (c) send_event(c, (ev[i].buttons & (1U << b)) ? 4 : 5,
@@ -433,6 +507,9 @@ static void mouse(struct server *s)
 			if (!s->buttons) { s->pointer_grab_owner = -1; s->pointer_grab_window = 0; }
 			if (moved) redraw = 1;
 		}
+		if (pending_motion)
+			send_motion_event(pending_client, pending_window, pending_time,
+			    pending_x, pending_y, pending_buttons);
 	}
 	if (redraw) {
 		mark_dirty(s, oldx - CURSOR_WIDTH, oldy - CURSOR_HEIGHT,
