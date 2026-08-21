@@ -1,4 +1,4 @@
-/* xzedwm - minimal reparenting window manager. SPDX-License-Identifier: Zlib */
+/* zwm - minimal reparenting window manager. SPDX-License-Identifier: Zlib */
 #include <X11/Xlib.h>
 #include <X11/Xzed.h>
 
@@ -409,7 +409,7 @@ load_background(Display *display, Window root)
 {
 	FILE *file;
 	char line[512];
-	char directory[320] = "/usr/share/xzedwm/background";
+	char directory[320] = "/usr/share/zwm/backgrounds";
 	char fallback[400] = { 0 };
 	char path[400];
 	unsigned width;
@@ -421,7 +421,7 @@ load_background(Display *display, Window root)
 	int path_length;
 	Window root_return;
 
-	file = fopen("/etc/Xzed/xzedwm.conf", "r");
+	file = fopen("/etc/Xzed/zwm.conf", "r");
 	while (file != NULL && fgets(line, sizeof(line), file) != NULL) {
 		char *p = line;
 		char *destination;
@@ -464,7 +464,7 @@ load_background(Display *display, Window root)
 		return;
 	if (fallback[0] != '\0' && load_xpm(display, root, fallback))
 		return;
-	fprintf(stderr, "xzedwm: cannot load %ux%u background from %s\n",
+	fprintf(stderr, "zwm: cannot load %ux%u background from %s\n",
 	    width, height, directory);
 }
 
@@ -633,7 +633,7 @@ main(int argc, char **argv)
 	extern char **environ;
 
 	if (display == NULL) {
-		fprintf(stderr, "xzedwm: cannot open display\n");
+		fprintf(stderr, "zwm: cannot open display\n");
 		return 1;
 	}
 	root = DefaultRootWindow(display);

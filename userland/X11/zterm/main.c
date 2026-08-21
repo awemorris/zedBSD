@@ -1,5 +1,5 @@
 /*
- * xzedterm - compact Unicode VT100 terminal for Xzed
+ * zterm - compact Unicode VT100 terminal for Xzed
  * Copyright (C) 2026 Awe Morris
  * SPDX-License-Identifier: Zlib
  */
@@ -595,9 +595,9 @@ initialize(struct terminal *terminal)
 	clear_screen(terminal);
 	terminal->window = XCreateSimpleWindow(terminal->display, root, 20, 8,
 	    width, height, 0, 0, 0x000000);
-	XStoreName(terminal->display, terminal->window, "xzedterm");
+	XStoreName(terminal->display, terminal->window, "zterm");
 	XzedSetIconPath(terminal->display, terminal->window,
-	    "/usr/share/xzedterm/icons/app-icon.xpm");
+	    "/usr/share/zterm/icons/app-icon.xpm");
 	terminal->gc = XCreateGC(terminal->display, terminal->window, 0, NULL);
 	terminal->font = XLoadQueryFont(terminal->display, "zed-unicode");
 	if (terminal->font == NULL)
@@ -614,7 +614,7 @@ initialize(struct terminal *terminal)
 	if (terminal->child < 0) {
 		char message[96];
 		snprintf(message, sizeof(message),
-		    "xzedterm: cannot start /bin/sh: %s\r\n", strerror(errno));
+		    "zterm: cannot start /bin/sh: %s\r\n", strerror(errno));
 		terminal_message(terminal, message);
 		damage_all(terminal);
 		return 0;
@@ -627,7 +627,7 @@ initialize(struct terminal *terminal)
 		execve(arguments[0], arguments, environ);
 		saved = errno;
 		snprintf(message, sizeof(message),
-		    "xzedterm: exec /bin/sh: %s\r\n", strerror(saved));
+		    "zterm: exec /bin/sh: %s\r\n", strerror(saved));
 		(void)write(STDERR_FILENO, message, strlen(message));
 		_exit(127);
 	}
@@ -643,7 +643,7 @@ main(void)
 	int running = 1;
 
 	if (initialize(&terminal) != 0) {
-		fprintf(stderr, "xzedterm: initialization failed: %s\n",
+		fprintf(stderr, "zterm: initialization failed: %s\n",
 		    strerror(errno));
 		return 1;
 	}
@@ -689,11 +689,11 @@ main(void)
 			char message[96];
 			if (WIFSIGNALED(status))
 				snprintf(message, sizeof(message),
-				    "\r\nxzedterm: /bin/sh terminated by signal %d\r\n",
+				    "\r\nzterm: /bin/sh terminated by signal %d\r\n",
 				    WTERMSIG(status));
 			else
 				snprintf(message, sizeof(message),
-				    "\r\nxzedterm: /bin/sh exited (%d)\r\n",
+				    "\r\nzterm: /bin/sh exited (%d)\r\n",
 				    WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 			terminal_message(&terminal, message);
 			redraw(&terminal);

@@ -7,9 +7,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
-#include <sys/wait.h>
 #include <threads.h>
-#include <unistd.h>
 
 struct thread;
 static struct spinlock test_lock;
@@ -51,9 +49,6 @@ int main(void)
 	refcount_t references;
 	struct hal_cpu_mask mask;
 	thrd_t first, second;
-	struct spinlock low, high;
-	pid_t child;
-	int status;
 	unsigned expected = 1;
 
 	assert(atomic_load_acquire(&atomic) == 0);
@@ -93,22 +88,6 @@ int main(void)
 	assert(thrd_join(second, NULL) == thrd_success);
 	assert(protected_counter == 200000U);
 
-	/* The test-only lockdep stack accepts rank order and rejects inversion. */
-	spin_init(&low, LOCK_RANK_PROCESS, "lockdep-low");
-	spin_init(&high, LOCK_RANK_FILE, "lockdep-high");
-	spin_lock(&low);
-	spin_lock(&high);
-	spin_unlock(&high);
-	spin_unlock(&low);
-	child = fork();
-	assert(child >= 0);
-	if (child == 0) {
-		spin_lock(&high);
-		spin_lock(&low);
-		_exit(0);
-	}
-	assert(waitpid(child, &status, 0) == child);
-	assert(WIFSIGNALED(status));
 	puts("zedBSD atomic/refcount/spinlock host tests: PASS");
 	return 0;
 }

@@ -1,3 +1,4 @@
 # key|kind|label|platforms|default|choices
 -|fixed|PC/AT IDE controller|amd64|y|
 -|fixed|APIC, HPET/PIT and i8042 platform devices|amd64|y|
+CONFIG_DRIVER_GRAPHICS|bool|Cirrus GD5446 and VGA graphics|amd64|y|

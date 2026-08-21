@@ -5,9 +5,15 @@
 #include "kern/mbr-partition.h"
 #include "drivers/pcat-ide.h"
 #include "drivers/pci-pcat.h"
+#if CONFIG_DRIVER_PCI_UHCI
 #include "drivers/pci-uhci.h"
+#endif
+#if CONFIG_DRIVER_PCI_EHCI
 #include "drivers/pci-ehci.h"
+#endif
+#if CONFIG_DRIVER_USB_STORAGE
 #include "drivers/usb-storage.h"
+#endif
 #include <drivers/pci.h>
 #include <drivers/usb.h>
 #if CONFIG_DRIVER_NE2000
@@ -33,12 +39,18 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 		hal_printf("pci: core initialization failed\n");
 	if (drv_usb_init() != 0)
 		hal_printf("usb: core initialization failed\n");
+#if CONFIG_DRIVER_USB_STORAGE
 	if (drv_usb_storage_driver_register() != 0)
 		hal_printf("usb: mass-storage driver registration failed\n");
+#endif
+#if CONFIG_DRIVER_PCI_UHCI
 	if (drv_pci_uhci_driver_register() != 0)
 		hal_printf("usb: UHCI PCI driver registration failed\n");
+#endif
+#if CONFIG_DRIVER_PCI_EHCI
 	if (drv_pci_ehci_driver_register() != 0)
 		hal_printf("usb: EHCI PCI driver registration failed\n");
+#endif
 #if CONFIG_DRIVER_GRAPHICS
 	if (zedbsd_pcat_graphics_driver_register() != 0)
 		hal_printf("graphics: PCI driver registration failed\n");
@@ -83,8 +95,12 @@ void kern_platform_refresh_devices(const struct zedbsd_device *d, size_t n)
 {
 	(void)d;
 	(void)n;
+#if CONFIG_DRIVER_PCI_UHCI
 	drv_pci_uhci_probe_roots();
+#endif
+#if CONFIG_DRIVER_PCI_EHCI
 	drv_pci_ehci_probe_roots();
+#endif
 }
 
 int kern_platform_input_init(void) { return 0; }

@@ -1,1 +1,2 @@
-# No USB drivers are implemented yet.
+# key|kind|label|platforms|default|choices
+CONFIG_DRIVER_USB_STORAGE|bool|USB Mass Storage|i386,amd64|y|

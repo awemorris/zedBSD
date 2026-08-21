@@ -8,7 +8,7 @@
 #   src/kern/         platform-neutral kernel services
 #   userland/base/       base-system programs and libc glue
 #   userland/comp/       compilers
-#   userland/X11/        X11 servers
+#   userland/X11/        X11 servers and applications
 #   userland/packages/   optional language runtimes, editors, and packages
 #   libc/             freestanding libc subset
 #   src/softfloat/    soft-float support built from vendor GCC/musl sources
@@ -43,7 +43,9 @@ BUILD := build/$(ARCH)
 CONFIG_DRIVER_NE2000 ?= y
 CONFIG_DRIVER_LGY98 ?= y
 CONFIG_DRIVER_GRAPHICS ?= y
-CONFIG_KERNEL_LOCKDEP ?= n
+CONFIG_DRIVER_PCI_UHCI ?= y
+CONFIG_DRIVER_PCI_EHCI ?= y
+CONFIG_DRIVER_USB_STORAGE ?= y
 CONFIG_KERNEL_TEST_CHECKPOINTS ?= n
 CONFIG_BUF_CACHE_KIB ?= 0
 
@@ -144,10 +146,10 @@ ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_NE2000=$(if $(filter y,$(CONFIG_DRIVER_NE2000)),1,0) \
 	-DCONFIG_DRIVER_LGY98=$(if $(filter y,$(CONFIG_DRIVER_LGY98)),1,0) \
 	-DCONFIG_DRIVER_GRAPHICS=$(if $(filter y,$(CONFIG_DRIVER_GRAPHICS)),1,0) \
+	-DCONFIG_DRIVER_PCI_UHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_UHCI)),1,0) \
+	-DCONFIG_DRIVER_PCI_EHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_EHCI)),1,0) \
+	-DCONFIG_DRIVER_USB_STORAGE=$(if $(filter y,$(CONFIG_DRIVER_USB_STORAGE)),1,0) \
 	-DCONFIG_BUF_CACHE_KIB=$(CONFIG_BUF_CACHE_KIB)
-ifeq ($(CONFIG_KERNEL_LOCKDEP),y)
-ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_LOCKDEP
-endif
 ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
 ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_TEST_CHECKPOINTS
 endif
@@ -424,7 +426,7 @@ $(BUILD)/tests/sched-host-test: tests/sched-host-test.c src/kern/sched.c
 $(BUILD)/tests/concurrency-host-test: tests/concurrency-host-test.c \
 	src/kern/lock.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -pthread -Dtid_t=int -DZEDBSD_LOCKDEP -Iinclude -Isrc \
+	$(HOST_TEST_CC) -pthread -Dtid_t=int -Iinclude -Isrc \
 	src/kern/lock.c $< -o $@
 
 $(BUILD)/tests/smp-contract-host-test: tests/smp-contract-host-test.c
@@ -810,11 +812,11 @@ ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \
 	--mode /etc/passwd=0644 --mode /etc/group=0644 \
 	--mode /etc/shadow=0400
 ZEDBSD_XZED_SESSION_INPUTS := userland/X11/session/startx \
-	userland/X11/session/Xzedrc userland/X11/session/xzedwm.conf
-ZEDBSD_XZED_SESSION_FILES := $(if $(filter Xzed xzedwm,$(ZEDBSD_USER_PROGRAMS)),\
+	userland/X11/session/Xzedrc userland/X11/session/zwm.conf
+ZEDBSD_XZED_SESSION_FILES := $(if $(filter zwm,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /bin/startx=userland/X11/session/startx \
 	--file /etc/Xzed/Xzedrc=userland/X11/session/Xzedrc \
-	--file /etc/Xzed/xzedwm.conf=userland/X11/session/xzedwm.conf \
+	--file /etc/Xzed/zwm.conf=userland/X11/session/zwm.conf \
 	--mode /bin/startx=0755 --mode /etc/Xzed/Xzedrc=0755)
 ZEDBSD_PACKAGE_INPUTS += $(ZEDBSD_XZED_SESSION_INPUTS)
 ZEDBSD_PACKAGE_FILES += $(ZEDBSD_XZED_SESSION_FILES)
@@ -893,7 +895,8 @@ ZEDBSD_BUILD_LAYOUT := external-package-sources-v2
 .PHONY: config-prepare build-kernel build-rootfs build-rootfs-image \
 	build-boot-disk-image build-release build-toolchain \
 	print-kernel-artifact print-rootfs-artifact \
-	print-rootfs-image-artifact print-boot-disk-artifact
+	print-rootfs-image-artifact print-boot-disk-artifact \
+	print-release-artifacts
 config-prepare:
 	@if ! test -f $(BUILD)/.zedbsd-layout || \
 	    ! grep -qx '$(ZEDBSD_BUILD_LAYOUT)' $(BUILD)/.zedbsd-layout; then \
@@ -955,6 +958,14 @@ print-rootfs-image-artifact:
 	fi
 
 print-boot-disk-artifact:
+	@printf '%s\n' "$(abspath $(BOOT_DISK_ARTIFACT))"
+
+print-release-artifacts:
+	@printf '%s\n' "$(abspath $(KERNEL_ARTIFACT))"
+	@printf '%s\n' "$(abspath $(ROOTFS_ARTIFACT))"
+	@if test -n "$(ROOTFS_IMAGE_ARTIFACT)"; then \
+		printf '%s\n' "$(abspath $(ROOTFS_IMAGE_ARTIFACT))"; \
+	fi
 	@printf '%s\n' "$(abspath $(BOOT_DISK_ARTIFACT))"
 
 check: $(HOST_TEST_BINARIES) $(CHECK_RUN_TARGETS)

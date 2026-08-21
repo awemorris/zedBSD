@@ -37,6 +37,18 @@ AMD64_HAL_ASM := src/hal/amd64/locore.S src/hal/amd64/trap.S \
 AMD64_HAL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AMD64_HAL_SOURCES)) \
 	$(patsubst %.S,$(BUILD)/%.o,$(AMD64_HAL_ASM))
 
+AMD64_USB_HCD_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_UHCI),y)
+AMD64_USB_HCD_SOURCES += drivers/pci-uhci.c
+endif
+ifeq ($(CONFIG_DRIVER_PCI_EHCI),y)
+AMD64_USB_HCD_SOURCES += drivers/pci-ehci.c
+endif
+AMD64_USB_CLASS_SOURCES :=
+ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
+AMD64_USB_CLASS_SOURCES += drivers/usb-storage.c
+endif
+
 AMD64_KERNEL_SOURCES := \
 	src/kern/main.c src/kern/env.c src/kern/fs.c src/kern/namespace.c \
 	src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c \
@@ -49,8 +61,8 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/resource-limit.c \
 	src/kern/disk.c src/kern/partition.c \
 	drivers/loop.c drivers/dma.c drivers/pci.c drivers/pci-pcat.c \
-	drivers/usb.c drivers/pci-uhci.c drivers/pci-ehci.c \
-	drivers/usb-storage.c \
+	drivers/usb.c $(AMD64_USB_HCD_SOURCES) \
+	$(AMD64_USB_CLASS_SOURCES) \
 	drivers/pcat-ide.c drivers/dp8390.c drivers/pcat-ne2000.c \
 	src/kern/mbr-partition.c src/kern/pcat/platform.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \

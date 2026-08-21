@@ -51,7 +51,8 @@ DRIVER_CATEGORIES = [
 PROGRAM_CATEGORIES = [
     ("Base", "base"),
     ("Compilers", "comp"),
-    ("X11 servers", "x11"),
+    ("X11 servers", "x11-servers"),
+    ("X11 applications", "x11-applications"),
     ("Packages", "packages"),
 ]
 
@@ -226,11 +227,14 @@ def draw_title(screen, title: str, target: str) -> None:
 
 def choose(screen, title: str, labels: list[str], target: str,
            selected: int = 0) -> int | None:
-    if not labels:
+    selectable = [index for index, label in enumerate(labels) if label]
+    if not selectable:
         message(screen, title, ["No entries are available for this target."], target)
         return None
     offset = 0
     selected = max(0, min(selected, len(labels) - 1))
+    if selected not in selectable:
+        selected = min(selectable, key=lambda index: abs(index - selected))
     while True:
         screen.erase()
         height, width = screen.getmaxyx()
@@ -247,9 +251,11 @@ def choose(screen, title: str, labels: list[str], target: str,
         screen.refresh()
         key = screen.getch()
         if key in (curses.KEY_UP, ord("k")):
-            selected = (selected - 1) % len(labels)
+            position = selectable.index(selected)
+            selected = selectable[(position - 1) % len(selectable)]
         elif key in (curses.KEY_DOWN, ord("j")):
-            selected = (selected + 1) % len(labels)
+            position = selectable.index(selected)
+            selected = selectable[(position + 1) % len(selectable)]
         elif key in (10, 13, curses.KEY_RIGHT, ord(" ")):
             return selected
         elif key in (27, ord("q"), ord("Q"), curses.KEY_LEFT):
@@ -489,38 +495,57 @@ def tui(screen, values: dict[str, object], output: Path) -> None:
     curses.curs_set(0)
     screen.keypad(True)
     while True:
-        labels = ["Select target", "Select kernel option", "Select drivers",
-                  "Select user programs", "Build toolchain", "Build kernel",
-                  "Build rootfs", "Build rootfs image",
-                  "Build boot disk image", "Save and exit"]
+        entries = [
+            ("Build all", "build-all"),
+            ("", ""),
+            ("Select target", "target"),
+            ("Select kernel option", "kernel-options"),
+            ("Select drivers", "drivers"),
+            ("Select user programs", "user-programs"),
+            ("Build toolchain", "build-toolchain"),
+            ("Build kernel", "build-kernel"),
+            ("Build rootfs", "build-rootfs"),
+            ("Build rootfs image", "build-rootfs-image"),
+            ("Build boot disk image", "build-boot-disk"),
+            ("", ""),
+            ("Save and exit", "save"),
+        ]
+        labels = [label for label, _action in entries]
         selected = choose(screen, "Main menu", labels, target_label(values))
-        if selected is None or selected == 9:
+        if selected is None:
             save(output, values)
             return
-        if selected == 0:
+        action = entries[selected][1]
+        if action == "save":
+            save(output, values)
+            return
+        if action == "build-all":
+            build(screen, values, output, "build-release",
+                  "print-release-artifacts")
+        elif action == "target":
             select_target(screen, values)
-        elif selected == 1:
+        elif action == "kernel-options":
             edit_options(screen, "Select kernel option",
                          option_rows(CONFIG_DIR / "kernel-options.list",
                                      str(values["ZEDBSD_PLATFORM"])), values)
-        elif selected == 2:
+        elif action == "drivers":
             select_drivers(screen, values)
-        elif selected == 3:
+        elif action == "user-programs":
             select_programs(screen, values)
-        elif selected == 4:
+        elif action == "build-toolchain":
             message(screen, "Build toolchain",
                     ["Build toolchain is not implemented yet."],
                     target_label(values))
-        elif selected == 5:
+        elif action == "build-kernel":
             build(screen, values, output, "build-kernel",
                   "print-kernel-artifact")
-        elif selected == 6:
+        elif action == "build-rootfs":
             build(screen, values, output, "build-rootfs",
                   "print-rootfs-artifact")
-        elif selected == 7:
+        elif action == "build-rootfs-image":
             build(screen, values, output, "build-rootfs-image",
                   "print-rootfs-image-artifact")
-        elif selected == 8:
+        elif action == "build-boot-disk":
             build(screen, values, output, "build-boot-disk-image",
                   "print-boot-disk-artifact")
 

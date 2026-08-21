@@ -53,6 +53,18 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/init.o \
 	$(KERN_NET_OBJS)
 
+PCAT_USB_HCD_OBJS :=
+ifeq ($(CONFIG_DRIVER_PCI_UHCI),y)
+PCAT_USB_HCD_OBJS += $(BUILD)/drivers/pci-uhci.o
+endif
+ifeq ($(CONFIG_DRIVER_PCI_EHCI),y)
+PCAT_USB_HCD_OBJS += $(BUILD)/drivers/pci-ehci.o
+endif
+PCAT_USB_CLASS_OBJS :=
+ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
+PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-storage.o
+endif
+
 VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/fs.o $(BUILD)/src/kern/namespace.o \
 	$(BUILD)/src/kern/fat.o $(BUILD)/src/kern/fat-lfn.o \
@@ -67,8 +79,8 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/partition.o \
 	$(BUILD)/drivers/loop.o $(BUILD)/drivers/dma.o \
 	$(BUILD)/drivers/pci.o $(BUILD)/drivers/pci-pcat.o \
-	$(BUILD)/drivers/usb.o $(BUILD)/drivers/pci-uhci.o \
-	$(BUILD)/drivers/pci-ehci.o $(BUILD)/drivers/usb-storage.o \
+	$(BUILD)/drivers/usb.o $(PCAT_USB_HCD_OBJS) \
+	$(PCAT_USB_CLASS_OBJS) \
 	$(BUILD)/drivers/pcat-ide.o $(BUILD)/drivers/dp8390.o \
 	$(BUILD)/drivers/pcat-ne2000.o \
 	$(BUILD)/src/kern/mbr-partition.o \

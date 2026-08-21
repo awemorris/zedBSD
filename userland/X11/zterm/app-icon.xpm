@@ -1,5 +1,5 @@
 /* XPM */
-static const char *xzedterm_app_icon[] = {
+static const char *zterm_app_icon[] = {
 "16 16 4 1",
 "  c None",
 ". c #111922",

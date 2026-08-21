@@ -1,2 +1,3 @@
 # key|kind|label|platforms|default|choices
-CONFIG_DRIVER_GRAPHICS|bool|PCI Cirrus graphics adapter|i386,amd64|y|
+CONFIG_DRIVER_PCI_UHCI|bool|UHCI USB host controller|i386,amd64|y|
+CONFIG_DRIVER_PCI_EHCI|bool|EHCI USB host controller|i386,amd64|y|
