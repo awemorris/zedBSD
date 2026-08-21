@@ -18,6 +18,11 @@ typedef unsigned long Mask;
 #define True 1
 #define None 0L
 #define CurrentTime 0L
+#define RevertToParent 2
+#define ShiftMask (1U<<0)
+#define LockMask (1U<<1)
+#define ControlMask (1U<<2)
+#define Mod1Mask (1U<<3)
 #define PropModeReplace 0
 #define XA_STRING ((Atom)31)
 #define XA_WM_NAME ((Atom)39)

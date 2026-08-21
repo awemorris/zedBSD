@@ -1,2 +1,3 @@
 #!/bin/sh
-/bin/xzedwm /bin/xzed-demo
+/bin/xzedwm /bin/xzedterm &
+/bin/xzedshell

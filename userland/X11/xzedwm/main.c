@@ -466,6 +466,7 @@ decorate(Display *display, struct frame *frame)
 	shadows[ns++] = (XRectangle){ (short)(maximize_x + 5U), 25, 15, 1 };
 	XSetForeground(display, frame->gc, CDE_SHADOW);
 	XFillRectangles(display, frame->frame, frame->gc, shadows, ns);
+	XSync(display, False);
 
 	if (title_length != 0) {
 		title_x = 30 +
@@ -474,6 +475,7 @@ decorate(Display *display, struct frame *frame)
 		XDrawString(display, frame->frame, frame->gc, title_x, 26,
 		    frame->title, (int)title_length);
 	}
+	XSync(display, False);
 }
 
 static void
@@ -493,6 +495,12 @@ manage(Display *display, Window root, Window client)
 	    !XGetGeometry(display, client, &root_return, &x, &y, &width, &height,
 	    &border, &depth))
 		return;
+	(void)XFetchName(display, client, &title);
+	if (title != NULL && strcmp(title, "_XZED_SHELL") == 0) {
+		XMapWindow(display, client);
+		XFree(title);
+		return;
+	}
 	frame = &frames[frame_count++];
 	memset(frame, 0, sizeof(*frame));
 	frame->client = client;
@@ -500,7 +508,7 @@ manage(Display *display, Window root, Window client)
 	frame->y = y;
 	frame->width = width;
 	frame->height = height;
-	if (XFetchName(display, client, &title) && title[0] != '\0') {
+	if (title != NULL && title[0] != '\0') {
 		strncpy(frame->title, title, sizeof(frame->title) - 1U);
 		frame->title[sizeof(frame->title) - 1U] = '\0';
 	} else {
@@ -509,6 +517,7 @@ manage(Display *display, Window root, Window client)
 	XFree(title);
 	frame->frame = XCreateSimpleWindow(display, root, x, y,
 	    frame_width(frame), frame_height(frame), 0, 0, CDE_FACE);
+	XStoreName(display, frame->frame, frame->title);
 	frame->gc = XCreateGC(display, frame->frame, 0, NULL);
 	if (title_font != 0)
 		XSetFont(display, frame->gc, title_font);
@@ -517,10 +526,12 @@ manage(Display *display, Window root, Window client)
 	    PointerMotionMask | StructureNotifyMask);
 	XReparentWindow(display, client, frame->frame, CLIENT_X, CLIENT_Y);
 	XMapWindow(display, client);
+	/* Drain the seven setup requests before mapping and decorating. */
+	XSync(display, False);
 	XMapWindow(display, frame->frame);
-	/* Drain structural requests before the eight-request decoration batch. */
 	XSync(display, False);
 	decorate(display, frame);
+	XSetInputFocus(display, client, RevertToParent, CurrentTime);
 }
 
 int
@@ -571,6 +582,8 @@ main(int argc, char **argv)
 			struct frame *frame = by_frame(event.xbutton.window);
 
 			if (frame != NULL && event.xbutton.keycode == 1) {
+				XSetInputFocus(display, frame->client, RevertToParent,
+				    CurrentTime);
 				drag = frame;
 				drag_x = event.xbutton.x_root - frame->x;
 				drag_y = event.xbutton.y_root - frame->y;

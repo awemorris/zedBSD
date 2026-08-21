@@ -17,6 +17,7 @@ typedef union _XEvent { int type; XAnyEvent xany; XExposeEvent xexpose; XKeyEven
 Display *XOpenDisplay(const char *);
 int XCloseDisplay(Display *);
 int XDefaultScreen(Display *);
+int XConnectionNumber(Display *);
 Window XRootWindow(Display *,int);
 unsigned long XBlackPixel(Display *,int);
 unsigned long XWhitePixel(Display *,int);
@@ -30,7 +31,9 @@ int XUnmapWindow(Display *,Window);
 int XDestroyWindow(Display *,Window);
 int XReparentWindow(Display *,Window,Window,int,int);
 int XMoveResizeWindow(Display *,Window,int,int,unsigned int,unsigned int);
+int XSetInputFocus(Display *,Window,int,Time);
 int XGetGeometry(Display *,Drawable,Window *,int *,int *,unsigned int *,unsigned int *,unsigned int *,unsigned int *);
+int XQueryTree(Display *,Window,Window *,Window *,Window **,unsigned int *);
 int XStoreName(Display *,Window,const char *);
 int XFetchName(Display *,Window,char **);
 int XFree(void *);
@@ -52,9 +55,11 @@ int XNextEvent(Display *,XEvent *);
 int XPending(Display *);
 int XFlush(Display *);
 int XSync(Display *,Bool);
+KeySym XLookupKeysym(XKeyEvent *,int);
 #define DefaultScreen(d) XDefaultScreen(d)
 #define RootWindow(d,s) XRootWindow((d),(s))
 #define DefaultRootWindow(d) XRootWindow((d),XDefaultScreen(d))
 #define BlackPixel(d,s) XBlackPixel((d),(s))
 #define WhitePixel(d,s) XWhitePixel((d),(s))
+#define ConnectionNumber(d) XConnectionNumber(d)
 #endif

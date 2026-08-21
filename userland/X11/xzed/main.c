@@ -31,6 +31,16 @@
 #define ROOT_XID 1U
 #define COLORMAP_XID 2U
 #define VISUAL_XID 3U
+#define XZED_KEYCODE_UP 0xe0U
+#define XZED_KEYCODE_DOWN 0xe1U
+#define XZED_KEYCODE_LEFT 0xe2U
+#define XZED_KEYCODE_RIGHT 0xe3U
+#define XZED_KEYCODE_HOME 0xe4U
+#define XZED_KEYCODE_END 0xe5U
+#define XZED_KEYCODE_PAGE_UP 0xe6U
+#define XZED_KEYCODE_PAGE_DOWN 0xe7U
+#define XZED_KEYCODE_INSERT 0xe8U
+#define XZED_KEYCODE_DELETE 0xe9U
 #define CURSOR_WIDTH 16
 #define CURSOR_HEIGHT 16
 
@@ -245,6 +255,8 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 	case 12: /* ConfigureWindow */ if(n>=12&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){uint16_t mask=rd16(q+8,c->order);size_t off=12;unsigned bit;int oldx=w->x,oldy=w->y,oldw=w->width,oldh=w->height,newx=w->x,newy=w->y;uint16_t neww=w->width,newh=w->height,newborder=w->border;for(bit=0;bit<7&&off+4<=n;bit++)if(mask&(1U<<bit)){uint32_t v=rd32(q+off,c->order);if(bit==0)newx=(int16_t)v;else if(bit==1)newy=(int16_t)v;else if(bit==2)neww=(uint16_t)v;else if(bit==3)newh=(uint16_t)v;else if(bit==4)newborder=(uint16_t)v;off+=4;}if((neww!=w->width||newh!=w->height)&&window_pixels_resize(w,neww,newh)){error_reply(c,11,w->id,op);return 0;}w->x=(int16_t)newx;w->y=(int16_t)newy;w->width=neww;w->height=newh;w->border=newborder;if(w->x!=oldx||w->y!=oldy){unsigned j;for(j=1;j<s->window_count;j++)if(s->windows[j].parent==w->id){s->windows[j].x+=(int16_t)(w->x-oldx);s->windows[j].y+=(int16_t)(w->y-oldy);}}mark_dirty(s,oldx,oldy,oldw,oldh);mark_dirty(s,w->x,w->y,w->width,w->height);if(neww!=(uint16_t)oldw||newh!=(uint16_t)oldh)expose(s,w);return 0;}break;
 	case 14: /* GetGeometry */
 		if((w=find_window(s,rd32(q+4,c->order)))!=NULL){uint8_t r[32];memset(r,0,32);r[1]=24;wr32(r+8,ROOT_XID,c->order);wr16(r+12,(uint16_t)w->x,c->order);wr16(r+14,(uint16_t)w->y,c->order);wr16(r+16,w->width,c->order);wr16(r+18,w->height,c->order);wr16(r+20,w->border,c->order);simple_reply(c,r,32);return 0;}break;
+	case 15: /* QueryTree: return mapped direct children in stacking order. */
+		if((w=find_window(s,rd32(q+4,c->order)))!=NULL){uint8_t r[32+MAX_WINDOWS*4];unsigned i,count=0;memset(r,0,sizeof(r));wr32(r+8,ROOT_XID,c->order);wr32(r+12,w->parent,c->order);for(i=1;i<s->window_count;i++)if(s->windows[i].id&&s->windows[i].mapped&&s->windows[i].parent==w->id){wr32(r+32+count*4,s->windows[i].id,c->order);count++;}wr16(r+16,(uint16_t)count,c->order);simple_reply(c,r,32+count*4);return 0;}break;
 	case 18: /* ChangeProperty: retain the standard WM_NAME string. */
 		if(n>=24&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){uint32_t property=rd32(q+8,c->order),type=rd32(q+12,c->order),count=rd32(q+20,c->order);if(property==39&&type==31&&q[16]==8&&count<=n-24){size_t copy=count<sizeof(w->name)-1?count:sizeof(w->name)-1;memcpy(w->name,q+24,copy);w->name[copy]=0;}return 0;}break;
 	case 20: /* GetProperty: enough for WM_NAME/XA_STRING. */
@@ -277,7 +289,7 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 		if(n>=12){struct pixmap*p;struct graphics_context*g=find_gc(s,rd32(q+8,c->order));size_t off;uint32_t color=g?g->foreground:0xffffff;w=find_window(s,rd32(q+4,c->order));p=find_pixmap(s,rd32(q+4,c->order));if(!w&&!p)break;for(off=12;off+8<=n;off+=8){int16_t x=(int16_t)rd16(q+off,c->order),y=(int16_t)rd16(q+off+2,c->order);uint16_t wi=rd16(q+off+4,c->order),he=rd16(q+off+6,c->order);if(w)window_fill(s,w,x,y,wi,he,color);else pixmap_fill(p,x,y,wi,he,color);if(w==&s->windows[0]&&x==0&&y==0&&wi>=w->width&&he>=w->height)s->windows[0].background=color;}return 0;}break;
 	case 76: case 77: /* ImageText8 / ImageText16 */
 		if(n>=16&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){struct graphics_context*g=find_gc(s,rd32(q+8,c->order));size_t chars=q[1];if(16+chars*(op==77?2U:1U)<=n)(void)draw_text(s,w,g,(int16_t)rd16(q+12,c->order),(int16_t)rd16(q+14,c->order),q+16,chars,op==77);return 0;}break;
-	case 101: /* GetKeyboardMapping */ {uint8_t r[32+4*248];unsigned i;memset(r,0,sizeof(r));r[1]=1;for(i=0;i<q[5]&&i<248;i++){uint32_t ks=(uint32_t)(q[4]+i);wr32(r+32+i*4,ks,c->order);}simple_reply(c,r,32+(size_t)q[5]*4);return 0;}
+	case 101: /* GetKeyboardMapping */ {uint8_t r[32+4*248];unsigned i;memset(r,0,sizeof(r));r[1]=1;for(i=0;i<q[5]&&i<248;i++){uint32_t kc=(uint32_t)(q[4]+i),ks=kc>=8?kc-8:0;switch(kc){case XZED_KEYCODE_UP:ks=0xff52;break;case XZED_KEYCODE_DOWN:ks=0xff54;break;case XZED_KEYCODE_LEFT:ks=0xff51;break;case XZED_KEYCODE_RIGHT:ks=0xff53;break;case XZED_KEYCODE_HOME:ks=0xff50;break;case XZED_KEYCODE_END:ks=0xff57;break;case XZED_KEYCODE_PAGE_UP:ks=0xff55;break;case XZED_KEYCODE_PAGE_DOWN:ks=0xff56;break;case XZED_KEYCODE_INSERT:ks=0xff63;break;case XZED_KEYCODE_DELETE:ks=0xffff;break;}wr32(r+32+i*4,ks,c->order);}simple_reply(c,r,32+(size_t)q[5]*4);return 0;}
 	case 117: {uint8_t r[32+4];memset(r,0,sizeof(r));r[1]=3;r[32]=1;r[33]=2;r[34]=3;simple_reply(c,r,36);return 0;}
 	case 127:return 0;
 	default:error_reply(c,1,0,op);return 0;
@@ -296,14 +308,21 @@ static void read_client(struct server *s,unsigned i)
 	for(;;){size_t need;if(!c->setup){uint16_t authn,authd;if(c->used<12)return;if(c->input[0]!='l'&&c->input[0]!='B'){close_client(s,i);return;}c->order=c->input[0]=='B';authn=rd16(c->input+6,c->order);authd=rd16(c->input+8,c->order);need=12+((authn+3)&~3U)+((authd+3)&~3U);if(c->used<need)return;if(setup_reply(s,c)){close_client(s,i);return;}c->setup=1;}else{uint16_t units;if(c->used<4)return;units=rd16(c->input+2,c->order);if(!units){close_client(s,i);return;}need=(size_t)units*4;if(c->used<need)return;(void)request(s,i,c->input,need);}memmove(c->input,c->input+need,c->used-need);c->used-=need;}
 }
 
-static uint32_t keycode(uint32_t key){return key<248?key+8:0;}
+static uint32_t keycode(uint32_t key)
+{
+	switch(key){case ZEDBSD_CONSOLE_KEY_UP:return XZED_KEYCODE_UP;case ZEDBSD_CONSOLE_KEY_DOWN:return XZED_KEYCODE_DOWN;case ZEDBSD_CONSOLE_KEY_LEFT:return XZED_KEYCODE_LEFT;case ZEDBSD_CONSOLE_KEY_RIGHT:return XZED_KEYCODE_RIGHT;case ZEDBSD_CONSOLE_KEY_HOME:return XZED_KEYCODE_HOME;case ZEDBSD_CONSOLE_KEY_END:return XZED_KEYCODE_END;case ZEDBSD_CONSOLE_KEY_PAGE_UP:return XZED_KEYCODE_PAGE_UP;case ZEDBSD_CONSOLE_KEY_PAGE_DOWN:return XZED_KEYCODE_PAGE_DOWN;case ZEDBSD_CONSOLE_KEY_INSERT:return XZED_KEYCODE_INSERT;case ZEDBSD_CONSOLE_KEY_DELETE:return XZED_KEYCODE_DELETE;default:return key<248?key+8:0;}
+}
+static uint16_t x_modifier_state(uint32_t modifiers)
+{
+	uint16_t state=0;if(modifiers&ZEDBSD_CONSOLE_EVENT_SHIFT)state|=1U<<0;if(modifiers&ZEDBSD_CONSOLE_EVENT_CTRL)state|=1U<<2;if(modifiers&ZEDBSD_CONSOLE_EVENT_GRAPH)state|=1U<<3;return state;
+}
 static void keyboard(struct server *s)
 {
-	struct zedbsd_console_input_event ev[16];ssize_t n;while((n=read(s->console,ev,sizeof(ev)))>0){size_t i;if((size_t)n%sizeof(ev[0])){stopped=1;return;}for(i=0;i<(size_t)n/sizeof(ev[0]);i++){struct window *w=find_window(s,s->focus);struct client *c;uint32_t kc;if(!w)w=hit(s,s->pointer_x,s->pointer_y);c=owner_client(s,w->owner);kc=keycode(ev[i].key);if(!c||!kc)continue;if(ev[i].state==ZEDBSD_CONSOLE_KEY_PRESS){s->key_state|=ev[i].modifiers;send_event(c,2,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->key_state);}else if(ev[i].state==ZEDBSD_CONSOLE_KEY_RELEASE){send_event(c,3,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->key_state);s->key_state=ev[i].modifiers;}else{send_event(c,3,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->key_state);send_event(c,2,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->key_state);}}}if(n<0&&errno!=EAGAIN&&errno!=EINTR)stopped=1;
+	struct zedbsd_console_input_event ev[16];ssize_t n;while((n=read(s->console,ev,sizeof(ev)))>0){size_t i;if((size_t)n%sizeof(ev[0])){stopped=1;return;}for(i=0;i<(size_t)n/sizeof(ev[0]);i++){struct window *w=find_window(s,s->focus);struct client *c;uint32_t kc;uint16_t state=x_modifier_state(ev[i].modifiers);if(!w)w=hit(s,s->pointer_x,s->pointer_y);c=owner_client(s,w->owner);kc=keycode(ev[i].key);s->key_state=state;if(!c||!kc)continue;if(ev[i].state==ZEDBSD_CONSOLE_KEY_PRESS){send_event(c,2,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);}else if(ev[i].state==ZEDBSD_CONSOLE_KEY_RELEASE){send_event(c,3,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);}else{send_event(c,3,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);send_event(c,2,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);}}}if(n<0&&errno!=EAGAIN&&errno!=EINTR)stopped=1;
 }
 static void mouse(struct server *s)
 {
-	struct zedbsd_mouse_event ev[16];ssize_t n;int redraw=0,oldx=s->pointer_x,oldy=s->pointer_y;while((n=read(s->mouse,ev,sizeof(ev)))>0){size_t i;if((size_t)n%sizeof(ev[0])){stopped=1;return;}for(i=0;i<(size_t)n/sizeof(ev[0]);i++){uint32_t changed=s->buttons^ev[i].buttons;int moved=ev[i].dx!=0||ev[i].dy!=0;struct window*w;struct client*c;unsigned b;s->pointer_x+=ev[i].dx;s->pointer_y+=ev[i].dy;if(s->pointer_x<0)s->pointer_x=0;if(s->pointer_y<0)s->pointer_y=0;if(s->pointer_x>=(int)s->mode.width)s->pointer_x=(int)s->mode.width-1;if(s->pointer_y>=(int)s->mode.height)s->pointer_y=(int)s->mode.height-1;w=s->pointer_grab_owner>=0?find_window(s,s->pointer_grab_window):hit(s,s->pointer_x,s->pointer_y);if(!w)w=hit(s,s->pointer_x,s->pointer_y);c=s->pointer_grab_owner>=0?owner_client(s,(uint32_t)s->pointer_grab_owner):owner_client(s,w->owner);if(moved&&c&&(w->event_mask&(1U<<6)))send_event(c,6,w->id,0,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->buttons);for(b=0;b<3;b++)if(changed&(1U<<b)){if(c)send_event(c,(ev[i].buttons&(1U<<b))?4:5,w->id,b+1,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->buttons);if((ev[i].buttons&(1U<<b))&&s->pointer_grab_owner<0&&c){s->pointer_grab_owner=w->owner;s->pointer_grab_window=w->id;}}s->buttons=ev[i].buttons;if(!s->buttons){s->pointer_grab_owner=-1;s->pointer_grab_window=0;}if(moved)redraw=1;}}if(redraw){mark_dirty(s,oldx,oldy,CURSOR_WIDTH,CURSOR_HEIGHT);present(s);mark_dirty(s,s->pointer_x,s->pointer_y,CURSOR_WIDTH,CURSOR_HEIGHT);present(s);}if(n<0&&errno!=EAGAIN&&errno!=EINTR)stopped=1;
+	struct zedbsd_mouse_event ev[16];ssize_t n;int redraw=0,oldx=s->pointer_x,oldy=s->pointer_y;while((n=read(s->mouse,ev,sizeof(ev)))>0){size_t i;if((size_t)n%sizeof(ev[0])){stopped=1;return;}for(i=0;i<(size_t)n/sizeof(ev[0]);i++){uint32_t changed=s->buttons^ev[i].buttons;int moved=ev[i].dx!=0||ev[i].dy!=0;struct window*w;struct client*c;unsigned b;s->pointer_x+=ev[i].dx;s->pointer_y+=ev[i].dy;if(s->pointer_x<0)s->pointer_x=0;if(s->pointer_y<0)s->pointer_y=0;if(s->pointer_x>=(int)s->mode.width)s->pointer_x=(int)s->mode.width-1;if(s->pointer_y>=(int)s->mode.height)s->pointer_y=(int)s->mode.height-1;w=s->pointer_grab_owner>=0?find_window(s,s->pointer_grab_window):hit(s,s->pointer_x,s->pointer_y);if(!w)w=hit(s,s->pointer_x,s->pointer_y);c=s->pointer_grab_owner>=0?owner_client(s,(uint32_t)s->pointer_grab_owner):owner_client(s,w->owner);if(moved&&c&&(w->event_mask&(1U<<6)))send_event(c,6,w->id,0,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->buttons);for(b=0;b<3;b++)if(changed&(1U<<b)){if(c)send_event(c,(ev[i].buttons&(1U<<b))?4:5,w->id,b+1,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->buttons);if(ev[i].buttons&(1U<<b))s->focus=w->id;if((ev[i].buttons&(1U<<b))&&s->pointer_grab_owner<0&&c){s->pointer_grab_owner=w->owner;s->pointer_grab_window=w->id;}}s->buttons=ev[i].buttons;if(!s->buttons){s->pointer_grab_owner=-1;s->pointer_grab_window=0;}if(moved)redraw=1;}}if(redraw){mark_dirty(s,oldx,oldy,CURSOR_WIDTH,CURSOR_HEIGHT);present(s);mark_dirty(s,s->pointer_x,s->pointer_y,CURSOR_WIDTH,CURSOR_HEIGHT);present(s);}if(n<0&&errno!=EAGAIN&&errno!=EINTR)stopped=1;
 }
 
 static int initialize(struct server *s)

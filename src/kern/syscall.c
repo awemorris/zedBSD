@@ -3532,10 +3532,10 @@ sys_fcntl_call(const uintptr_t args[6])
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
 			return -EBADF;
-		if (((int)args[2] & ~(O_APPEND | O_NONBLOCK)) != 0) {
-			(void)file_close(file);
-			return -EINVAL;
-		}
+		/* F_GETFL returns the access mode and immutable open flags as well
+		 * as the flags F_SETFL may change.  Applications conventionally
+		 * pass that value back after toggling O_NONBLOCK or O_APPEND; ignore
+		 * the immutable bits rather than rejecting the standard idiom. */
 		file->f_flags = (file->f_flags & ~(O_APPEND | O_NONBLOCK)) |
 		    ((int)args[2] & (O_APPEND | O_NONBLOCK));
 		(void)file_close(file);
