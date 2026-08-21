@@ -1,5 +1,6 @@
 /* xzedwm - minimal reparenting window manager. SPDX-License-Identifier: Zlib */
 #include <X11/Xlib.h>
+#include <X11/Xzed.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -290,35 +291,181 @@ out:
 	return ok;
 }
 
+static int
+ppm_token(char **cursor, char *end, char *token, size_t capacity)
+{
+	char *p = *cursor;
+	size_t length = 0;
+
+	for (;;) {
+		while (p < end && (*p == ' ' || *p == '\t' || *p == '\r' ||
+		    *p == '\n'))
+			p++;
+		if (p >= end || *p != '#')
+			break;
+		while (p < end && *p != '\n')
+			p++;
+	}
+	while (p < end && *p != ' ' && *p != '\t' && *p != '\r' &&
+	    *p != '\n' && *p != '#') {
+		if (length + 1U >= capacity)
+			return 0;
+		token[length++] = *p++;
+	}
+	if (length == 0)
+		return 0;
+	token[length] = '\0';
+	*cursor = p;
+	return 1;
+}
+
+static int
+load_ppm(Display *display, Window root, const char *path)
+{
+	char *file = NULL;
+	char *cursor;
+	char *end;
+	char token[32];
+	size_t file_size;
+	size_t pixel_bytes;
+	unsigned width;
+	unsigned height;
+	unsigned root_width;
+	unsigned root_height;
+	unsigned border;
+	unsigned depth;
+	int root_x;
+	int root_y;
+	Window root_return;
+	Pixmap pixmap = 0;
+	GC gc = NULL;
+	int ok = 0;
+
+	if (!read_entire_file(path, &file, &file_size))
+		goto out;
+	cursor = file;
+	end = file + file_size;
+	if (!ppm_token(&cursor, end, token, sizeof(token)) ||
+	    strcmp(token, "P6") != 0 ||
+	    !ppm_token(&cursor, end, token, sizeof(token)))
+		goto out;
+	width = (unsigned)strtoul(token, NULL, 10);
+	if (!ppm_token(&cursor, end, token, sizeof(token)))
+		goto out;
+	height = (unsigned)strtoul(token, NULL, 10);
+	if (!ppm_token(&cursor, end, token, sizeof(token)) ||
+	    strtoul(token, NULL, 10) != 255UL || width == 0 || height == 0 ||
+	    width > 65535U || height > 65535U)
+		goto out;
+	if (cursor >= end || (*cursor != ' ' && *cursor != '\t' &&
+	    *cursor != '\r' && *cursor != '\n'))
+		goto out;
+	if (*cursor++ == '\r' && cursor < end && *cursor == '\n')
+		cursor++;
+	if ((size_t)width > SIZE_MAX / (size_t)height ||
+	    (size_t)width * height > SIZE_MAX / 3U)
+		goto out;
+	pixel_bytes = (size_t)width * height * 3U;
+	if ((size_t)(end - cursor) < pixel_bytes)
+		goto out;
+	if (!XGetGeometry(display, root, &root_return, &root_x, &root_y,
+	    &root_width, &root_height, &border, &depth) ||
+	    width != root_width || height != root_height)
+		goto out;
+	pixmap = XCreatePixmap(display, root, width, height, depth);
+	if (pixmap == 0)
+		goto out;
+	gc = XCreateGC(display, pixmap, 0, NULL);
+	if (gc == NULL || XzedPutImageRGB24(display, pixmap, 0, 0, width,
+	    height, (const unsigned char *)cursor, width * 3U) != 0 ||
+	    XSync(display, False) != 0)
+		goto out;
+	XCopyArea(display, pixmap, root, gc, 0, 0, width, height, 0, 0);
+	XSync(display, False);
+
+	if (background_gc != NULL)
+		XFreeGC(display, background_gc);
+	if (background_pixmap != 0)
+		XFreePixmap(display, background_pixmap);
+	background_pixmap = pixmap;
+	background_gc = gc;
+	background_width = width;
+	background_height = height;
+	pixmap = 0;
+	gc = NULL;
+	ok = 1;
+
+out:
+	if (gc != NULL)
+		XFreeGC(display, gc);
+	if (pixmap != 0)
+		XFreePixmap(display, pixmap);
+	free(file);
+	return ok;
+}
+
 static void
 load_background(Display *display, Window root)
 {
 	FILE *file;
 	char line[512];
-	char path[400] = { 0 };
+	char directory[320] = "/usr/share/xzedwm/background";
+	char fallback[400] = { 0 };
+	char path[400];
+	unsigned width;
+	unsigned height;
+	unsigned border;
+	unsigned depth;
+	int x;
+	int y;
+	int path_length;
+	Window root_return;
 
 	file = fopen("/etc/Xzed/xzedwm.conf", "r");
-	if (file == NULL)
-		return;
-	while (fgets(line, sizeof(line), file) != NULL) {
+	while (file != NULL && fgets(line, sizeof(line), file) != NULL) {
 		char *p = line;
+		char *destination;
+		size_t capacity;
 		size_t length;
 
 		while (*p == ' ' || *p == '\t')
 			p++;
-		if (strncmp(p, "background=", 11) != 0)
+		if (strncmp(p, "background_dir=", 15) == 0) {
+			destination = directory;
+			capacity = sizeof(directory);
+			p += 15;
+		} else if (strncmp(p, "background=", 11) == 0) {
+			destination = fallback;
+			capacity = sizeof(fallback);
+			p += 11;
+		} else {
 			continue;
-		strncpy(path, p + 11, sizeof(path) - 1);
-		length = strlen(path);
+		}
+		strncpy(destination, p, capacity - 1U);
+		destination[capacity - 1U] = '\0';
+		length = strlen(destination);
 		while (length != 0 &&
-		    (path[length - 1] == '\n' || path[length - 1] == '\r' ||
-		    path[length - 1] == ' ' || path[length - 1] == '\t'))
-			path[--length] = '\0';
-		break;
+		    (destination[length - 1] == '\n' ||
+		    destination[length - 1] == '\r' ||
+		    destination[length - 1] == ' ' ||
+		    destination[length - 1] == '\t'))
+			destination[--length] = '\0';
 	}
-	fclose(file);
-	if (path[0] != '\0' && !load_xpm(display, root, path))
-		fprintf(stderr, "xzedwm: cannot load background %s\n", path);
+	if (file != NULL)
+		fclose(file);
+	if (!XGetGeometry(display, root, &root_return, &x, &y, &width, &height,
+	    &border, &depth))
+		return;
+	path_length = snprintf(path, sizeof(path), "%s/%ux%u.ppm", directory,
+	    width, height);
+	if (path_length < 0 || (size_t)path_length >= sizeof(path))
+		return;
+	if (load_ppm(display, root, path))
+		return;
+	if (fallback[0] != '\0' && load_xpm(display, root, fallback))
+		return;
+	fprintf(stderr, "xzedwm: cannot load %ux%u background from %s\n",
+	    width, height, directory);
 }
 
 static void

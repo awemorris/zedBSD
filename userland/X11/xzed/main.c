@@ -44,25 +44,24 @@
 #define XZED_ICON_PATH_ATOM 0x5a000001U
 #define CURSOR_WIDTH 16
 #define CURSOR_HEIGHT 16
+#define CURSOR_HOT_X 3
+#define CURSOR_HOT_Y 1
 
-/* Monochrome X-style left pointer. B is black, W is white, . transparent. */
-static const char pointer_shape[CURSOR_HEIGHT][CURSOR_WIDTH + 1] = {
-	"B...............",
-	"BB..............",
-	"BWB.............",
-	"BWWB............",
-	"BWWWB...........",
-	"BWWWWB..........",
-	"BWWWWWB.........",
-	"BWWWWWWB........",
-	"BWWWWWWWB.......",
-	"BWWBBBBBBB......",
-	"BWB..BWB........",
-	"BB...BWWB.......",
-	"B....BWWB.......",
-	".....BWWB.......",
-	".....BWWB.......",
-	"......BB........"
+/*
+ * Standard X11 left_ptr source and mask bitmaps.  A source bit is black; a
+ * mask-only bit is white.  The bitmap's defined hot spot is (3, 1).
+ */
+static const uint16_t pointer_source[CURSOR_HEIGHT] = {
+	0x0000, 0x0008, 0x0018, 0x0038,
+	0x0078, 0x00f8, 0x01f8, 0x03f8,
+	0x07f8, 0x00f8, 0x00d8, 0x0188,
+	0x0180, 0x0300, 0x0300, 0x0000
+};
+static const uint16_t pointer_mask[CURSOR_HEIGHT] = {
+	0x000c, 0x001c, 0x003c, 0x007c,
+	0x00fc, 0x01fc, 0x03fc, 0x07fc,
+	0x0ffc, 0x0ffc, 0x01fc, 0x03dc,
+	0x03cc, 0x0780, 0x0780, 0x0300
 };
 
 struct client {
@@ -179,13 +178,14 @@ static void present(struct server*s)
 	composite_region(s,x,y,w,h);
 	for(int row=0;row<h;row++)for(int column=0;column<w;column++){
 		int ax=x+column,ay=y+row;
-		int cx=ax-s->pointer_x,cy=ay-s->pointer_y;
+		int cx=ax-(s->pointer_x-CURSOR_HOT_X);
+		int cy=ay-(s->pointer_y-CURSOR_HOT_Y);
 		uint32_t color=s->screen[(size_t)ay*s->mode.width+ax];
 		size_t off=((size_t)row*w+column)*3;
 		if(cx>=0&&cx<CURSOR_WIDTH&&cy>=0&&cy<CURSOR_HEIGHT){
-			char pixel=pointer_shape[cy][cx];
-			if(pixel=='B')color=0x000000;
-			else if(pixel=='W')color=0xffffff;
+			uint16_t bit=(uint16_t)(1U<<(unsigned)cx);
+			if(pointer_mask[cy]&bit)
+				color=(pointer_source[cy]&bit)?0x000000:0xffffff;
 		}
 		s->transfer[off]=(uint8_t)(color>>16);s->transfer[off+1]=(uint8_t)(color>>8);s->transfer[off+2]=(uint8_t)color;
 	}
@@ -293,6 +293,8 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 		if(n>=16&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){struct graphics_context*g=find_gc(s,rd32(q+8,c->order));size_t chars=q[1];if(16+chars*(op==77?2U:1U)<=n)(void)draw_text(s,w,g,(int16_t)rd16(q+12,c->order),(int16_t)rd16(q+14,c->order),q+16,chars,op==77);return 0;}break;
 	case 101: /* GetKeyboardMapping */ {uint8_t r[32+4*248];unsigned i;memset(r,0,sizeof(r));r[1]=1;for(i=0;i<q[5]&&i<248;i++){uint32_t kc=(uint32_t)(q[4]+i),ks=kc>=8?kc-8:0;switch(kc){case XZED_KEYCODE_UP:ks=0xff52;break;case XZED_KEYCODE_DOWN:ks=0xff54;break;case XZED_KEYCODE_LEFT:ks=0xff51;break;case XZED_KEYCODE_RIGHT:ks=0xff53;break;case XZED_KEYCODE_HOME:ks=0xff50;break;case XZED_KEYCODE_END:ks=0xff57;break;case XZED_KEYCODE_PAGE_UP:ks=0xff55;break;case XZED_KEYCODE_PAGE_DOWN:ks=0xff56;break;case XZED_KEYCODE_INSERT:ks=0xff63;break;case XZED_KEYCODE_DELETE:ks=0xffff;break;}wr32(r+32+i*4,ks,c->order);}simple_reply(c,r,32+(size_t)q[5]*4);return 0;}
 	case 117: {uint8_t r[32+4];memset(r,0,sizeof(r));r[1]=3;r[32]=1;r[33]=2;r[34]=3;simple_reply(c,r,36);return 0;}
+	case 128: /* XzedPutImageRGB24: compact private RGB24 image upload. */
+		if(n>=16){uint32_t drawable=rd32(q+4,c->order);struct pixmap*p=find_pixmap(s,drawable);int x=(int16_t)rd16(q+8,c->order),y=(int16_t)rd16(q+10,c->order);unsigned wi=rd16(q+12,c->order),he=rd16(q+14,c->order);size_t count=(size_t)wi*he;unsigned row,column;w=find_window(s,drawable);if((!w&&!p)||!wi||!he||(wi&&count/wi!=he)||count>(n-16U)/3U)break;for(row=0;row<he;row++)for(column=0;column<wi;column++){const uint8_t*rgb=q+16U+((size_t)row*wi+column)*3U;int dx=x+(int)column,dy=y+(int)row;uint32_t color=((uint32_t)rgb[0]<<16)|((uint32_t)rgb[1]<<8)|rgb[2];if(w){if(dx>=0&&dy>=0&&dx<w->width&&dy<w->height)w->pixels[(size_t)dy*w->width+(unsigned)dx]=color;}else if(dx>=0&&dy>=0&&dx<p->width&&dy<p->height)p->pixels[(size_t)dy*p->width+(unsigned)dx]=color;}if(w)mark_dirty(s,w->x+x,w->y+y,(int)wi,(int)he);return 0;}break;
 	case 127:return 0;
 	default:error_reply(c,1,0,op);return 0;
 	}
@@ -324,7 +326,7 @@ static void keyboard(struct server *s)
 }
 static void mouse(struct server *s)
 {
-	struct zedbsd_mouse_event ev[16];ssize_t n;int redraw=0,oldx=s->pointer_x,oldy=s->pointer_y;while((n=read(s->mouse,ev,sizeof(ev)))>0){size_t i;if((size_t)n%sizeof(ev[0])){stopped=1;return;}for(i=0;i<(size_t)n/sizeof(ev[0]);i++){uint32_t changed=s->buttons^ev[i].buttons;int moved=ev[i].dx!=0||ev[i].dy!=0;struct window*w;struct client*c;unsigned b;s->pointer_x+=ev[i].dx;s->pointer_y+=ev[i].dy;if(s->pointer_x<0)s->pointer_x=0;if(s->pointer_y<0)s->pointer_y=0;if(s->pointer_x>=(int)s->mode.width)s->pointer_x=(int)s->mode.width-1;if(s->pointer_y>=(int)s->mode.height)s->pointer_y=(int)s->mode.height-1;w=s->pointer_grab_owner>=0?find_window(s,s->pointer_grab_window):hit(s,s->pointer_x,s->pointer_y);if(!w)w=hit(s,s->pointer_x,s->pointer_y);c=s->pointer_grab_owner>=0?owner_client(s,(uint32_t)s->pointer_grab_owner):owner_client(s,w->owner);if(moved&&c&&(w->event_mask&(1U<<6)))send_event(c,6,w->id,0,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->buttons);for(b=0;b<3;b++)if(changed&(1U<<b)){if(c)send_event(c,(ev[i].buttons&(1U<<b))?4:5,w->id,b+1,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->buttons);if(ev[i].buttons&(1U<<b))s->focus=w->id;if((ev[i].buttons&(1U<<b))&&s->pointer_grab_owner<0&&c){s->pointer_grab_owner=w->owner;s->pointer_grab_window=w->id;}}s->buttons=ev[i].buttons;if(!s->buttons){s->pointer_grab_owner=-1;s->pointer_grab_window=0;}if(moved)redraw=1;}}if(redraw){mark_dirty(s,oldx,oldy,CURSOR_WIDTH,CURSOR_HEIGHT);present(s);mark_dirty(s,s->pointer_x,s->pointer_y,CURSOR_WIDTH,CURSOR_HEIGHT);present(s);}if(n<0&&errno!=EAGAIN&&errno!=EINTR)stopped=1;
+	struct zedbsd_mouse_event ev[16];ssize_t n;int redraw=0,oldx=s->pointer_x,oldy=s->pointer_y;while((n=read(s->mouse,ev,sizeof(ev)))>0){size_t i;if((size_t)n%sizeof(ev[0])){stopped=1;return;}for(i=0;i<(size_t)n/sizeof(ev[0]);i++){uint32_t changed=s->buttons^ev[i].buttons;int moved=ev[i].dx!=0||ev[i].dy!=0;struct window*w;struct client*c;unsigned b;s->pointer_x+=ev[i].dx;s->pointer_y+=ev[i].dy;if(s->pointer_x<0)s->pointer_x=0;if(s->pointer_y<0)s->pointer_y=0;if(s->pointer_x>=(int)s->mode.width)s->pointer_x=(int)s->mode.width-1;if(s->pointer_y>=(int)s->mode.height)s->pointer_y=(int)s->mode.height-1;w=s->pointer_grab_owner>=0?find_window(s,s->pointer_grab_window):hit(s,s->pointer_x,s->pointer_y);if(!w)w=hit(s,s->pointer_x,s->pointer_y);c=s->pointer_grab_owner>=0?owner_client(s,(uint32_t)s->pointer_grab_owner):owner_client(s,w->owner);if(moved&&c&&(w->event_mask&(1U<<6)))send_event(c,6,w->id,0,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->buttons);for(b=0;b<3;b++)if(changed&(1U<<b)){if(c)send_event(c,(ev[i].buttons&(1U<<b))?4:5,w->id,b+1,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,(uint16_t)s->buttons);if(ev[i].buttons&(1U<<b))s->focus=w->id;if((ev[i].buttons&(1U<<b))&&s->pointer_grab_owner<0&&c){s->pointer_grab_owner=w->owner;s->pointer_grab_window=w->id;}}s->buttons=ev[i].buttons;if(!s->buttons){s->pointer_grab_owner=-1;s->pointer_grab_window=0;}if(moved)redraw=1;}}if(redraw){mark_dirty(s,oldx-CURSOR_HOT_X,oldy-CURSOR_HOT_Y,CURSOR_WIDTH,CURSOR_HEIGHT);present(s);mark_dirty(s,s->pointer_x-CURSOR_HOT_X,s->pointer_y-CURSOR_HOT_Y,CURSOR_WIDTH,CURSOR_HEIGHT);present(s);}if(n<0&&errno!=EAGAIN&&errno!=EINTR)stopped=1;
 }
 
 static int initialize(struct server *s)

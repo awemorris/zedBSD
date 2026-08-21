@@ -9,5 +9,7 @@
 
 int XzedSetIconPath(Display *, Window, const char *);
 int XzedGetIconPath(Display *, Window, char **);
+int XzedPutImageRGB24(Display *, Drawable, int, int, unsigned, unsigned,
+    const unsigned char *, unsigned);
 
 #endif
