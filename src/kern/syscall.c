@@ -184,7 +184,7 @@ sys_ppoll_call(const uintptr_t args[6])
 
 static int
 pselect_pin(uintptr_t address, struct uaccess_pin *pin,
-	zedbsd_fd_set_t *value)
+	fd_set *value)
 {
 	int error;
 	memset(pin, 0, sizeof(*pin));
@@ -202,8 +202,8 @@ sys_pselect_call(const uintptr_t args[6])
 {
 	struct pollfd fds[KERN_OPEN_MAX];
 	struct uaccess_pin read_pin, write_pin, except_pin;
-	zedbsd_fd_set_t input_read, input_write, input_except;
-	zedbsd_fd_set_t output_read, output_write, output_except;
+	fd_set input_read, input_write, input_except;
+	fd_set output_read, output_write, output_except;
 	struct poll_mask_guard guard;
 	struct process *process = current_process();
 	uint64_t deadline;
@@ -812,7 +812,7 @@ static intptr_t
 sys_sendmsg_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct zedbsd_sendmsg_request request;
+	struct sendmsg_args request;
 	struct socket_file_ref reference;
 	struct sockaddr_storage address;
 	struct sockaddr *destination = NULL;
@@ -890,7 +890,7 @@ static intptr_t
 sys_recvmsg_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct zedbsd_recvmsg_request request;
+	struct recvmsg_args request;
 	struct socket_file_ref reference;
 	struct sockaddr_storage address;
 	struct unix_recv_transaction transaction;
@@ -1299,7 +1299,7 @@ static intptr_t sys_getdents_call(const uintptr_t args[6])
 	struct file *file = process != NULL ?
 	    filedesc_get_ref(process->fd, (int)args[0]) : NULL;
 	struct uaccess_pin pin;
-	struct zedbsd_dirent output;
+	struct dirent_record output;
 	struct dirent entry;
 	int eof, error;
 	if (file == NULL) return -EBADF;
@@ -1636,7 +1636,7 @@ static intptr_t sys_timer_getoverrun_call(const uintptr_t args[6])
 static intptr_t sys_mount_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct zedbsd_mount_args requested;
+	struct mount_args requested;
 	struct fat_mount_args internal;
 	char type[NAME_MAX + 1U], directory[PATH_MAX];
 	int flags = (int)args[2];
@@ -1723,7 +1723,7 @@ static intptr_t
 sys_quotactl_call(const uintptr_t args[6])
 {
 	struct process *process=current_process();
-	struct zedbsd_quota_ctl request;
+	struct quota_control request;
 	struct path path;
 	char pathname[PATH_MAX];
 	int error,allowed=0;
@@ -1756,7 +1756,7 @@ sys_quotactl_call(const uintptr_t args[6])
 static intptr_t
 sys_snapshotctl_call(const uintptr_t args[6])
 {
-	struct process *process=current_process();struct zedbsd_snapshot_ctl request;
+	struct process *process=current_process();struct snapshot_control request;
 	struct path path;char pathname[PATH_MAX];int error;
 	if(process==NULL||process->cred==NULL||process->cwdi==NULL||args[1]==0)
 		return -EINVAL;
@@ -3077,7 +3077,7 @@ sys_fchdir_call(const uintptr_t args[6])
 static intptr_t
 sys_sigaltstack_call(const uintptr_t args[6])
 {
-	struct zedbsd_sigaltstack requested, old;
+	struct sigaltstack_record requested, old;
 	int error;
 	if (curthread == NULL)
 		return -EINVAL;
@@ -3543,7 +3543,7 @@ sys_fcntl_call(const uintptr_t args[6])
 	case F_GETLK:
 	case F_SETLK:
 	case F_SETLKW: {
-		struct zedbsd_flock_request request;
+		struct flock_record request;
 		error = copyin(args[2], &request, sizeof(request));
 		if (error != 0)
 			return -error;
@@ -3740,7 +3740,7 @@ static SYSCALL_EXT intptr_t
 sys_resource_limit_call(const uintptr_t args[6], int setting)
 {
 	struct process *process = current_process();
-	struct zedbsd_rlimit limit;
+	struct rlimit_record limit;
 	int error;
 	if (process == NULL || args[2] != 0 || args[3] != 0 || args[4] != 0 ||
 	    args[5] != 0)
@@ -3805,97 +3805,6 @@ sys_process_identity_call(uint32_t number, const uintptr_t args[6])
 }
 
 static intptr_t
-sys_spawn_call(const uintptr_t args[6])
-{
-	struct process *parent = current_process();
-	struct process *child;
-	struct syscall_exec_args *copy;
-	char path[PATH_MAX];
-	int error;
-	if (parent == NULL || args[4] != 0 || args[5] != 0 ||
-	    (args[3] & ~ZEDBSD_SPAWN_RESULT) != 0)
-		return -EINVAL;
-	error = copyinstr(args[0], path, sizeof(path), NULL);
-	if (error != 0)
-		return -error;
-	copy = kern_calloc(1, sizeof(*copy));
-	if (copy == NULL)
-		return -ENOMEM;
-	error = copy_exec_vector(args[1], copy->argv, ZEDBSD_SPAWN_ARG_MAX,
-				 copy, 0);
-	if (error == 0)
-		error = copy_exec_vector(args[2], copy->envp, ZEDBSD_SPAWN_ENV_MAX,
-					 copy, 1);
-	if (error == 0)
-		error = process_spawn_from(parent, path, copy->argv, copy->envp,
-			(args[3] & ZEDBSD_SPAWN_RESULT) ? PROCESS_SPAWN_RESULT : 0,
-			&child);
-	kern_free(copy);
-	return error == 0 ? child->pid : -error;
-}
-
-static SYSCALL_EXT intptr_t
-sys_wait_call(const uintptr_t args[6])
-{
-	struct process *parent = current_process();
-	struct process *child;
-	struct uaccess_pin status_pin, result_pin;
-	char result[PROCESS_RESULT_MAX];
-	size_t capacity;
-	pid_t pid = (pid_t)args[0];
-	int status, error;
-	if (parent == NULL || pid <= 0 || args[2] != 0 || args[5] != 0 ||
-	    (args[3] == 0) != (args[4] == 0))
-		return -EINVAL;
-	child = process_find_ref(pid);
-	if (child == NULL)
-		return -ECHILD;
-	if (child->parent != parent) {
-		process_release(child);
-		return -ECHILD;
-	}
-	capacity = args[4] > sizeof(result) ? sizeof(result) : (size_t)args[4];
-	memset(&status_pin, 0, sizeof(status_pin));
-	memset(&result_pin, 0, sizeof(result_pin));
-	if (args[1] != 0) {
-		error = uaccess_pin(args[1], sizeof(status), HAL_SPACE_WRITE,
-		    &status_pin);
-		if (error != 0)
-		{
-			process_release(child);
-			return -error;
-		}
-	}
-	if (capacity != 0) {
-		error = uaccess_pin(args[3], capacity, HAL_SPACE_WRITE, &result_pin);
-		if (error != 0) {
-			uaccess_unpin(&status_pin);
-			process_release(child);
-			return -error;
-		}
-	}
-	memset(result, 0, sizeof(result));
-	error = process_wait(child, &status, capacity != 0 ? result : NULL,
-			     capacity);
-	if (error != 0) {
-		uaccess_unpin(&result_pin);
-		uaccess_unpin(&status_pin);
-		process_release(child);
-		return -error;
-	}
-	if (args[1] != 0)
-		error = copyout_pinned(&status_pin, 0, &status, sizeof(status));
-	if (error == 0 && capacity != 0)
-		error = copyout_pinned(&result_pin, 0, result, capacity);
-	uaccess_unpin(&result_pin);
-	uaccess_unpin(&status_pin);
-	process_release(child);
-	if (error != 0)
-		return -error;
-	return pid;
-}
-
-static intptr_t
 syscall_dispatch_body(uint32_t number, const uintptr_t args[6])
 {
 	switch (number) {
@@ -3957,8 +3866,6 @@ syscall_dispatch_body(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_quotactl: return sys_quotactl_call(args);
 	case ZEDBSD_SYS_snapshotctl: return sys_snapshotctl_call(args);
 	case ZEDBSD_SYS_nanosleep: return sys_nanosleep_call(args);
-	case ZEDBSD_SYS_spawn: return sys_spawn_call(args);
-	case ZEDBSD_SYS_wait: return sys_wait_call(args);
 	case ZEDBSD_SYS_brk: return sys_brk_call(args);
 	case ZEDBSD_SYS_socket: return sys_socket_call(args);
 	case ZEDBSD_SYS_socketpair: return sys_socketpair_call(args);

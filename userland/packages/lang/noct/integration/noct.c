@@ -21,7 +21,7 @@
 #include <string.h>
 
 struct active_console {
-	zedbsd_noct_write_fn write;
+	noct_write_fn write;
 	void *context;
 };
 
@@ -37,7 +37,7 @@ static int lifecycle_active;
 
 static void
 observe_heap(void *context, void *pointer, size_t size,
-	     enum zedbsd_heap_event event)
+	     enum heap_event event)
 {
 	struct jit_observation *jit = context;
 
@@ -89,8 +89,8 @@ emit_noct_error(NoctEnv *env, const char *kind)
 static int
 run_program_args(const char *program_name, void *program, uint32_t program_size,
 		 int bytecode, int argc, char *const argv[],
-		 const struct zedbsd_noct_options *options,
-		 struct zedbsd_noct_result *result)
+		 const struct noct_options *options,
+		 struct noct_result *result)
 {
 	NoctConfig config;
 	NoctVM *vm = NULL;
@@ -101,9 +101,9 @@ run_program_args(const char *program_name, void *program, uint32_t program_size,
 	NoctValue argument_value;
 	NoctFunc *main_function = NULL;
 	struct jit_observation jit;
-	struct zedbsd_heap noct_heap;
-	struct zedbsd_heap *previous_heap = NULL;
-	enum zedbsd_noct_status status = ZEDBSD_NOCT_INVALID_ARGUMENT;
+	struct heap_allocator noct_heap;
+	struct heap_allocator *previous_heap = NULL;
+	enum noct_status status = ZEDBSD_NOCT_INVALID_ARGUMENT;
 	int vm_created = 0;
 	int arguments_pinned = 0;
 	size_t parameter_count = 0;
@@ -138,13 +138,13 @@ run_program_args(const char *program_name, void *program, uint32_t program_size,
 	lifecycle_active = 1;
 	active_console.write = options->write;
 	active_console.context = options->write_context;
-	zedbsd_heap_init_instance(&noct_heap, options->arena, options->arena_size);
-	previous_heap = zedbsd_heap_set_active(&noct_heap);
-	zedbsd_stdio_set_filesystem(options->filesystem);
-	zedbsd_stdio_set_environment(options->environment);
-	zedbsd_heap_set_observer(observe_heap, &jit);
+	heap_allocator_init(&noct_heap, options->arena, options->arena_size);
+	previous_heap = heap_active_set(&noct_heap);
+	__stdio_set_filesystem(options->filesystem);
+	__stdio_set_environment(options->environment);
+	heap_active_set_observer(observe_heap, &jit);
 	if (options->fail_after != ZEDBSD_NOCT_NO_FAILURE)
-		zedbsd_heap_set_failure_after(options->fail_after);
+		heap_active_set_failure_after(options->fail_after);
 
 	noct_set_default_config(&config);
 	if (options->memory != NULL) {
@@ -161,12 +161,12 @@ run_program_args(const char *program_name, void *program, uint32_t program_size,
 		goto cleanup;
 	}
 	vm_created = 1;
-	if (!zedbsd_noct_napi_register(env, options)) {
+	if (!noct_napi_register(env, options)) {
 		status = ZEDBSD_NOCT_API_ERROR;
 		emit_noct_error(env, "Noct API error");
 		goto cleanup;
 	}
-	if (!zedbsd_noct_target_register(env, options->services)) {
+	if (!noct_target_register(env, options->services)) {
 		status = ZEDBSD_NOCT_API_ERROR;
 		emit_noct_error(env, "Noct target API error");
 		goto cleanup;
@@ -243,19 +243,19 @@ cleanup:
 					  jit.size);
 	if (vm_created && !noct_destroy_vm(vm) && status == ZEDBSD_NOCT_OK)
 		status = ZEDBSD_NOCT_CLEANUP_ERROR;
-	if (zedbsd_stdio_close_all() != 0 && status == ZEDBSD_NOCT_OK)
+	if (__stdio_close_all() != 0 && status == ZEDBSD_NOCT_OK)
 		status = ZEDBSD_NOCT_CLEANUP_ERROR;
-	zedbsd_stdio_set_filesystem(NULL);
-	zedbsd_stdio_set_environment(NULL);
-	zedbsd_noct_target_cleanup();
-	zedbsd_noct_napi_cleanup();
-	peak = zedbsd_heap_peak();
-	before_reset = zedbsd_heap_current();
-	errors = zedbsd_heap_error_count();
-	zedbsd_heap_set_observer(NULL, NULL);
-	zedbsd_heap_reset();
-	after_reset = zedbsd_heap_current();
-	(void)zedbsd_heap_set_active(previous_heap);
+	__stdio_set_filesystem(NULL);
+	__stdio_set_environment(NULL);
+	noct_target_cleanup();
+	noct_napi_cleanup();
+	peak = heap_active_peak();
+	before_reset = heap_active_current();
+	errors = heap_active_error_count();
+	heap_active_set_observer(NULL, NULL);
+	heap_active_reset();
+	after_reset = heap_active_current();
+	(void)heap_active_set(previous_heap);
 	if ((after_reset != 0 || errors != 0) && status == ZEDBSD_NOCT_OK)
 		status = ZEDBSD_NOCT_CLEANUP_ERROR;
 	active_console.write = NULL;
@@ -277,48 +277,48 @@ finish_without_heap:
 }
 
 int
-zedbsd_noct_run_args(const char *source_name, const char *source,
+noct_run_args(const char *source_name, const char *source,
 		    int argc, char *const argv[],
-		    const struct zedbsd_noct_options *options,
-		    struct zedbsd_noct_result *result)
+		    const struct noct_options *options,
+		    struct noct_result *result)
 {
 	return run_program_args(source_name, (void *)source, 0, 0, argc, argv,
 				options, result);
 }
 
 int
-zedbsd_noct_run_bytecode_args(const char *program_name, uint8_t *bytecode,
+noct_run_bytecode_args(const char *program_name, uint8_t *bytecode,
 			      uint32_t bytecode_size, int argc,
 			      char *const argv[],
-			      const struct zedbsd_noct_options *options,
-			      struct zedbsd_noct_result *result)
+			      const struct noct_options *options,
+			      struct noct_result *result)
 {
 	return run_program_args(program_name, bytecode, bytecode_size, 1, argc,
 				argv, options, result);
 }
 
 int
-zedbsd_noct_run(const char *source_name, const char *source,
-		const struct zedbsd_noct_options *options,
-		struct zedbsd_noct_result *result)
+noct_run(const char *source_name, const char *source,
+		const struct noct_options *options,
+		struct noct_result *result)
 {
-	return zedbsd_noct_run_args(source_name, source, 0, NULL, options,
+	return noct_run_args(source_name, source, 0, NULL, options,
 				    result);
 }
 
 int
-zedbsd_noct_repl(const struct zedbsd_noct_options *options,
-		 zedbsd_noct_repl_read_fn read_line, void *read_context,
-		 struct zedbsd_noct_result *result)
+noct_repl(const struct noct_options *options,
+		 noct_repl_read_fn read_line, void *read_context,
+		 struct noct_result *result)
 {
 	NoctConfig config;
 	NoctVM *vm = NULL;
 	NoctEnv *env = NULL;
 	NoctReplSession *session = NULL;
 	struct jit_observation jit;
-	struct zedbsd_heap noct_heap;
-	struct zedbsd_heap *previous_heap = NULL;
-	enum zedbsd_noct_status status = ZEDBSD_NOCT_INVALID_ARGUMENT;
+	struct heap_allocator noct_heap;
+	struct heap_allocator *previous_heap = NULL;
+	enum noct_status status = ZEDBSD_NOCT_INVALID_ARGUMENT;
 	char line[ZEDBSD_NOCT_REPL_LINE_MAX];
 	int vm_created = 0;
 	int continuation = 0;
@@ -344,13 +344,13 @@ zedbsd_noct_repl(const struct zedbsd_noct_options *options,
 	lifecycle_active = 1;
 	active_console.write = options->write;
 	active_console.context = options->write_context;
-	zedbsd_heap_init_instance(&noct_heap, options->arena, options->arena_size);
-	previous_heap = zedbsd_heap_set_active(&noct_heap);
-	zedbsd_stdio_set_filesystem(options->filesystem);
-	zedbsd_stdio_set_environment(options->environment);
-	zedbsd_heap_set_observer(observe_heap, &jit);
+	heap_allocator_init(&noct_heap, options->arena, options->arena_size);
+	previous_heap = heap_active_set(&noct_heap);
+	__stdio_set_filesystem(options->filesystem);
+	__stdio_set_environment(options->environment);
+	heap_active_set_observer(observe_heap, &jit);
 	if (options->fail_after != ZEDBSD_NOCT_NO_FAILURE)
-		zedbsd_heap_set_failure_after(options->fail_after);
+		heap_active_set_failure_after(options->fail_after);
 
 	noct_set_default_config(&config);
 	if (options->memory != NULL) {
@@ -366,12 +366,12 @@ zedbsd_noct_repl(const struct zedbsd_noct_options *options,
 		goto cleanup;
 	}
 	vm_created = 1;
-	if (!zedbsd_noct_napi_register(env, options)) {
+	if (!noct_napi_register(env, options)) {
 		status = ZEDBSD_NOCT_API_ERROR;
 		emit_noct_error(env, "Noct API error");
 		goto cleanup;
 	}
-	if (!zedbsd_noct_target_register(env, options->services)) {
+	if (!noct_target_register(env, options->services)) {
 		status = ZEDBSD_NOCT_API_ERROR;
 		emit_noct_error(env, "Noct target API error");
 		goto cleanup;
@@ -385,7 +385,7 @@ zedbsd_noct_repl(const struct zedbsd_noct_options *options,
 	}
 
 	for (;;) {
-		enum zedbsd_noct_repl_input_result input_result;
+		enum noct_repl_input_result input_result;
 		enum NoctReplResult repl_result;
 
 		line[0] = '\0';
@@ -431,19 +431,19 @@ cleanup:
 					  jit.size);
 	if (vm_created && !noct_destroy_vm(vm) && status == ZEDBSD_NOCT_OK)
 		status = ZEDBSD_NOCT_CLEANUP_ERROR;
-	if (zedbsd_stdio_close_all() != 0 && status == ZEDBSD_NOCT_OK)
+	if (__stdio_close_all() != 0 && status == ZEDBSD_NOCT_OK)
 		status = ZEDBSD_NOCT_CLEANUP_ERROR;
-	zedbsd_stdio_set_filesystem(NULL);
-	zedbsd_stdio_set_environment(NULL);
-	zedbsd_noct_target_cleanup();
-	zedbsd_noct_napi_cleanup();
-	peak = zedbsd_heap_peak();
-	before_reset = zedbsd_heap_current();
-	errors = zedbsd_heap_error_count();
-	zedbsd_heap_set_observer(NULL, NULL);
-	zedbsd_heap_reset();
-	after_reset = zedbsd_heap_current();
-	(void)zedbsd_heap_set_active(previous_heap);
+	__stdio_set_filesystem(NULL);
+	__stdio_set_environment(NULL);
+	noct_target_cleanup();
+	noct_napi_cleanup();
+	peak = heap_active_peak();
+	before_reset = heap_active_current();
+	errors = heap_active_error_count();
+	heap_active_set_observer(NULL, NULL);
+	heap_active_reset();
+	after_reset = heap_active_current();
+	(void)heap_active_set(previous_heap);
 	if ((after_reset != 0 || errors != 0) && status == ZEDBSD_NOCT_OK)
 		status = ZEDBSD_NOCT_CLEANUP_ERROR;
 	active_console.write = NULL;
@@ -465,7 +465,7 @@ finish_without_heap:
 }
 
 const char *
-zedbsd_noct_status_string(enum zedbsd_noct_status status)
+noct_status_string(enum noct_status status)
 {
 	switch (status) {
 	case ZEDBSD_NOCT_OK:

@@ -2,6 +2,6 @@
 #ifndef ZEDBSD_DRIVERS_PC98_GRAPHICS_H
 #define ZEDBSD_DRIVERS_PC98_GRAPHICS_H
 
-int zedbsd_pc98_graphics_init(void);
+int pc98_graphics_init(void);
 
 #endif

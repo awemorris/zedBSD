@@ -13,9 +13,9 @@ void sparcv9_io_init(uint64 base);
 void sparcv9_timer_init(uint64 frequency);
 
 static int
-handoff_valid(const struct zedbsd_sun4u_handoff *handoff)
+handoff_valid(const struct sun4u_boot_handoff *handoff)
 {
-	return handoff != (const struct zedbsd_sun4u_handoff *)0 &&
+	return handoff != (const struct sun4u_boot_handoff *)0 &&
 	    handoff->common.magic == ZEDBSD_HANDOFF_MAGIC &&
 	    handoff->common.version == ZEDBSD_HANDOFF_VERSION_SUN4U &&
 	    handoff->common.size == sizeof(*handoff) &&
@@ -33,7 +33,7 @@ handoff_valid(const struct zedbsd_sun4u_handoff *handoff)
 }
 
 void
-sparcv9_cmain(const struct zedbsd_sun4u_handoff *handoff)
+sparcv9_cmain(const struct sun4u_boot_handoff *handoff)
 {
 	if (!handoff_valid(handoff))
 		for (;;)

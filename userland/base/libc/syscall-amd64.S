@@ -1,8 +1,8 @@
 .code64
 .text
-.globl zedbsd_syscall6
-.type zedbsd_syscall6, @function
-zedbsd_syscall6:
+.globl __syscall6
+.type __syscall6, @function
+__syscall6:
 	pushq %rbx
 	pushq %rbp
 	movq %rdi, %rax
@@ -18,14 +18,14 @@ zedbsd_syscall6:
 	popq %rbp
 	popq %rbx
 	ret
-.size zedbsd_syscall6, .-zedbsd_syscall6
+.size __syscall6, .-__syscall6
 
-.globl zedbsd_signal_restorer
-.type zedbsd_signal_restorer, @function
-zedbsd_signal_restorer:
+.globl __signal_restorer
+.type __signal_restorer, @function
+__signal_restorer:
 	movq (%rsp), %rbx
 	movq 8(%rsp), %rcx
 	movq $80, %rax
 	int $0xc2
 	ud2
-.size zedbsd_signal_restorer, .-zedbsd_signal_restorer
+.size __signal_restorer, .-__signal_restorer

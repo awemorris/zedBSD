@@ -10,7 +10,7 @@
 
 #include "kern/disk.h"
 
-struct zedbsd_device;
+struct boot_device;
 
 /*
  * Probe both banks and register every present ATA disk with the block
@@ -19,13 +19,13 @@ struct zedbsd_device;
  * list fall back to their IDENTIFY geometry.  Returns the number of
  * disks registered.
  */
-unsigned zedbsd_ide_pc98_init(const struct zedbsd_device *bios_devices,
+unsigned pc98_ide_init(const struct boot_device *bios_devices,
 			      unsigned bios_device_count);
 
 /* The ordinal-th registered IDE disk, in probe (bank-major) order. */
-struct disk *zedbsd_ide_pc98_unit(unsigned ordinal);
+struct disk *pc98_ide_unit(unsigned ordinal);
 
 /* Look up the physical IDE slot corresponding to BIOS unit 80h..83h. */
-struct disk *zedbsd_ide_pc98_bios_unit(uint8_t bios_id);
+struct disk *pc98_ide_bios_unit(uint8_t bios_id);
 
 #endif

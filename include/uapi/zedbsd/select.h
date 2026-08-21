@@ -5,8 +5,8 @@
 #include <stdint.h>
 
 #define ZEDBSD_FD_SETSIZE 32
-typedef struct zedbsd_fd_set {
+typedef struct fd_set {
 	uint32_t bits[1];
-} zedbsd_fd_set_t;
+} fd_set;
 
 #endif

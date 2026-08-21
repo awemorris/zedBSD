@@ -35,13 +35,13 @@ static void port_out8(void *context, uint16_t port, uint8_t value)
 static int display_reset(void *context)
 {
 	(void)context;
-	return zedbsd_pc98_display_graphics_start();
+	return pc98_display_graphics_start();
 }
 
 static int display_stop(void *context)
 {
 	(void)context;
-	return zedbsd_pc98_display_graphics_stop();
+	return pc98_display_graphics_stop();
 }
 
 static int pc98_graphics_prepare(void)
@@ -243,7 +243,7 @@ static const struct graphics_driver_ops pc98_graphics_ops = {
 };
 
 int
-zedbsd_pc98_graphics_init(void)
+pc98_graphics_init(void)
 {
 	if (!pc98_graphics_prepare())
 		return 0;

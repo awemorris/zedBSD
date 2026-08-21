@@ -12,7 +12,7 @@ static int
 show_name(const char *name)
 {
 	if (strcmp(name, "vfs.bufcache.stats") == 0) {
-		struct zedbsd_bufcache_stats stats;
+		struct bufcache_stats stats;
 		size_t length = sizeof(stats);
 		if (sysctlbyname(name, &stats, &length, NULL, 0) != 0)
 			return -1;

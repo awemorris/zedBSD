@@ -50,9 +50,9 @@ struct mq_descriptor {
 
 static struct mq_descriptor descriptors[MQ_MAX_DESCRIPTORS];
 static volatile uint32_t descriptor_guard;
-extern void zedbsd_pthread_cancel_point(void) __attribute__((weak));
+extern void __pthread_cancel_point(void) __attribute__((weak));
 static void cancel_point(void)
-{ if (zedbsd_pthread_cancel_point != NULL) zedbsd_pthread_cancel_point(); }
+{ if (__pthread_cancel_point != NULL) __pthread_cancel_point(); }
 
 static int
 mq_storage_name(const char *name, char storage[PATH_MAX])
@@ -77,7 +77,7 @@ static intptr_t
 mq_call(uint32_t number, uintptr_t a, uintptr_t b, uintptr_t c,
 	uintptr_t d, uintptr_t e, uintptr_t f)
 {
-	return zedbsd_syscall_result(zedbsd_syscall6(number, a, b, c, d, e, f));
+	return syscall_result(__syscall6(number, a, b, c, d, e, f));
 }
 
 static int

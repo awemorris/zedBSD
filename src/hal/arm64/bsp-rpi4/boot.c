@@ -4,7 +4,7 @@
 
 static struct rpi4_fdt_info boot_info;
 static uintptr_t boot_fdt;
-static struct zedbsd_rpi4_handoff kernel_handoff;
+static struct rpi4_boot_handoff kernel_handoff;
 
 void
 rpi4_boot_set_info(const struct rpi4_fdt_info *info, uintptr_t fdt_phys)

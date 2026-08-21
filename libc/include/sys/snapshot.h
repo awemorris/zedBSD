@@ -2,5 +2,5 @@
 #ifndef ZEDBSD_SYS_SNAPSHOT_H
 #define ZEDBSD_SYS_SNAPSHOT_H
 #include <zedbsd/snapshot.h>
-int snapshotctl(const char *,struct zedbsd_snapshot_ctl *);
+int snapshotctl(const char *,struct snapshot_control *);
 #endif

@@ -17,8 +17,8 @@ static void clear_bytes(void *pointer, uint32_t length)
 		*bytes++ = 0;
 }
 
-enum zedbsd_fs_result zedbsd_volume_read_result(
-	const struct zedbsd_volume *volume, uint32_t lba, void *buffer)
+enum bootfs_result boot_volume_read_result(
+	const struct boot_volume *volume, uint32_t lba, void *buffer)
 {
 	if (!volume || !buffer || volume->sector_size != 512)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
@@ -30,14 +30,14 @@ enum zedbsd_fs_result zedbsd_volume_read_result(
 		ZEDBSD_FS_OK : ZEDBSD_FS_IO_ERROR;
 }
 
-int zedbsd_volume_read(const struct zedbsd_volume *volume, uint32_t lba,
+int boot_volume_read(const struct boot_volume *volume, uint32_t lba,
 		       void *buffer)
 {
-	return zedbsd_volume_read_result(volume, lba, buffer) == ZEDBSD_FS_OK;
+	return boot_volume_read_result(volume, lba, buffer) == ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result zedbsd_volume_write_result(
-	struct zedbsd_volume *volume, uint32_t lba, const void *buffer)
+enum bootfs_result boot_volume_write_result(
+	struct boot_volume *volume, uint32_t lba, const void *buffer)
 {
 	if (!volume || !buffer || volume->sector_size != 512)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
@@ -49,30 +49,30 @@ enum zedbsd_fs_result zedbsd_volume_write_result(
 		ZEDBSD_FS_OK : ZEDBSD_FS_IO_ERROR;
 }
 
-int zedbsd_volume_write(struct zedbsd_volume *volume, uint32_t lba,
+int boot_volume_write(struct boot_volume *volume, uint32_t lba,
 			const void *buffer)
 {
-	return zedbsd_volume_write_result(volume, lba, buffer) == ZEDBSD_FS_OK;
+	return boot_volume_write_result(volume, lba, buffer) == ZEDBSD_FS_OK;
 }
 
-void zedbsd_fs_reset(struct zedbsd_filesystem *filesystem)
+void bootfs_reset(struct bootfs *filesystem)
 {
 	if (filesystem)
 		clear_bytes(filesystem, sizeof(*filesystem));
 }
 
-enum zedbsd_fs_result zedbsd_fs_mount_result(
-	struct zedbsd_filesystem *filesystem, const struct zedbsd_volume *volume,
-	const struct zedbsd_filesystem_driver *const *drivers,
+enum bootfs_result bootfs_mount_result(
+	struct bootfs *filesystem, const struct boot_volume *volume,
+	const struct bootfs_driver *const *drivers,
 	unsigned driver_count)
 {
-	enum zedbsd_fs_result last = ZEDBSD_FS_UNSUPPORTED;
+	enum bootfs_result last = ZEDBSD_FS_UNSUPPORTED;
 
 	if (!filesystem || !volume || !drivers || !volume->read)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
 	for (unsigned i = 0; i < driver_count; i++) {
-		const struct zedbsd_filesystem_driver *driver = drivers[i];
-		enum zedbsd_fs_result result;
+		const struct bootfs_driver *driver = drivers[i];
+		enum bootfs_result result;
 
 		if (!driver || !driver->probe || !driver->mount || !driver->open ||
 		    !driver->read || !driver->readdir)
@@ -84,7 +84,7 @@ enum zedbsd_fs_result zedbsd_fs_mount_result(
 				last = result;
 			continue;
 		}
-		zedbsd_fs_reset(filesystem);
+		bootfs_reset(filesystem);
 		filesystem->driver = driver;
 		filesystem->volume = *volume;
 		result = driver->mount(filesystem);
@@ -92,24 +92,24 @@ enum zedbsd_fs_result zedbsd_fs_mount_result(
 			return result;
 		last = result;
 	}
-	zedbsd_fs_reset(filesystem);
+	bootfs_reset(filesystem);
 	return last;
 }
 
-int zedbsd_fs_mount(struct zedbsd_filesystem *filesystem,
-		    const struct zedbsd_volume *volume,
-		    const struct zedbsd_filesystem_driver *const *drivers,
+int bootfs_mount(struct bootfs *filesystem,
+		    const struct boot_volume *volume,
+		    const struct bootfs_driver *const *drivers,
 		    unsigned driver_count)
 {
-	return zedbsd_fs_mount_result(filesystem, volume, drivers,
+	return bootfs_mount_result(filesystem, volume, drivers,
 				      driver_count) == ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result zedbsd_fs_open_result(
-	struct zedbsd_filesystem *filesystem, const char *path,
-	struct zedbsd_file *file)
+enum bootfs_result bootfs_open_result(
+	struct bootfs *filesystem, const char *path,
+	struct bootfs_file *file)
 {
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!filesystem || !filesystem->driver || !path || !*path || !file)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
@@ -122,17 +122,17 @@ enum zedbsd_fs_result zedbsd_fs_open_result(
 	return result;
 }
 
-int zedbsd_fs_open(struct zedbsd_filesystem *filesystem, const char *path,
-		   struct zedbsd_file *file)
+int bootfs_open(struct bootfs *filesystem, const char *path,
+		   struct bootfs_file *file)
 {
-	return zedbsd_fs_open_result(filesystem, path, file) == ZEDBSD_FS_OK;
+	return bootfs_open_result(filesystem, path, file) == ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result zedbsd_fs_create_result(
-	struct zedbsd_filesystem *filesystem, const char *path,
-	struct zedbsd_file *file)
+enum bootfs_result bootfs_create_result(
+	struct bootfs *filesystem, const char *path,
+	struct bootfs_file *file)
 {
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!filesystem || !filesystem->driver || !path || !*path || !file)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
@@ -147,9 +147,9 @@ enum zedbsd_fs_result zedbsd_fs_create_result(
 	return result;
 }
 
-static enum zedbsd_fs_result
-path_operation(struct zedbsd_filesystem *filesystem, const char *path,
-	       enum zedbsd_fs_result (*operation)(struct zedbsd_filesystem *,
+static enum bootfs_result
+path_operation(struct bootfs *filesystem, const char *path,
+	       enum bootfs_result (*operation)(struct bootfs *,
 						    const char *))
 {
 	if (filesystem == NULL || filesystem->driver == NULL || path == NULL ||
@@ -160,32 +160,32 @@ path_operation(struct zedbsd_filesystem *filesystem, const char *path,
 	return operation(filesystem, path);
 }
 
-enum zedbsd_fs_result
-zedbsd_fs_mkdir_result(struct zedbsd_filesystem *filesystem, const char *path)
+enum bootfs_result
+bootfs_mkdir_result(struct bootfs *filesystem, const char *path)
 {
 	return path_operation(filesystem, path,
 		filesystem != NULL && filesystem->driver != NULL ?
 		filesystem->driver->mkdir : NULL);
 }
 
-enum zedbsd_fs_result
-zedbsd_fs_unlink_result(struct zedbsd_filesystem *filesystem, const char *path)
+enum bootfs_result
+bootfs_unlink_result(struct bootfs *filesystem, const char *path)
 {
 	return path_operation(filesystem, path,
 		filesystem != NULL && filesystem->driver != NULL ?
 		filesystem->driver->unlink : NULL);
 }
 
-enum zedbsd_fs_result
-zedbsd_fs_rmdir_result(struct zedbsd_filesystem *filesystem, const char *path)
+enum bootfs_result
+bootfs_rmdir_result(struct bootfs *filesystem, const char *path)
 {
 	return path_operation(filesystem, path,
 		filesystem != NULL && filesystem->driver != NULL ?
 		filesystem->driver->rmdir : NULL);
 }
 
-enum zedbsd_fs_result
-zedbsd_fs_rename_result(struct zedbsd_filesystem *filesystem,
+enum bootfs_result
+bootfs_rename_result(struct bootfs *filesystem,
 			const char *old_path, const char *new_path)
 {
 	if (filesystem == NULL || filesystem->driver == NULL || old_path == NULL ||
@@ -196,9 +196,9 @@ zedbsd_fs_rename_result(struct zedbsd_filesystem *filesystem,
 	return filesystem->driver->rename(filesystem, old_path, new_path);
 }
 
-enum zedbsd_fs_result zedbsd_file_read_result(
-	struct zedbsd_file *file, uint64_t offset, void *buffer, uint32_t length,
-	zedbsd_read_progress_t progress, void *progress_context)
+enum bootfs_result bootfs_file_read_result(
+	struct bootfs_file *file, uint64_t offset, void *buffer, uint32_t length,
+	bootfs_read_progress_fn progress, void *progress_context)
 {
 	if (!file || !file->filesystem || !file->filesystem->driver || !buffer ||
 	    offset > file->size || length > file->size - offset)
@@ -209,23 +209,23 @@ enum zedbsd_fs_result zedbsd_file_read_result(
 					     progress, progress_context);
 }
 
-int zedbsd_file_read_progress(struct zedbsd_file *file, uint64_t offset,
+int bootfs_file_read_progress(struct bootfs_file *file, uint64_t offset,
 			      void *buffer, uint32_t length,
-			      zedbsd_read_progress_t progress,
+			      bootfs_read_progress_fn progress,
 			      void *progress_context)
 {
-	return zedbsd_file_read_result(file, offset, buffer, length, progress,
+	return bootfs_file_read_result(file, offset, buffer, length, progress,
 				       progress_context) == ZEDBSD_FS_OK;
 }
 
-int zedbsd_file_read(struct zedbsd_file *file, uint64_t offset, void *buffer,
+int bootfs_file_read(struct bootfs_file *file, uint64_t offset, void *buffer,
 		     uint32_t length)
 {
-	return zedbsd_file_read_progress(file, offset, buffer, length, 0, 0);
+	return bootfs_file_read_progress(file, offset, buffer, length, 0, 0);
 }
 
-enum zedbsd_fs_result zedbsd_file_write_result(
-	struct zedbsd_file *file, uint64_t offset, const void *buffer,
+enum bootfs_result bootfs_file_write_result(
+	struct bootfs_file *file, uint64_t offset, const void *buffer,
 	uint32_t length)
 {
 	if (!file || !file->filesystem || !file->filesystem->driver || !buffer ||
@@ -236,7 +236,7 @@ enum zedbsd_fs_result zedbsd_file_write_result(
 	return file->filesystem->driver->write(file, offset, buffer, length);
 }
 
-enum zedbsd_fs_result zedbsd_file_truncate_result(struct zedbsd_file *file,
+enum bootfs_result bootfs_file_truncate_result(struct bootfs_file *file,
 						  uint64_t size)
 {
 	if (!file || !file->filesystem || !file->filesystem->driver)
@@ -246,7 +246,7 @@ enum zedbsd_fs_result zedbsd_file_truncate_result(struct zedbsd_file *file,
 	return file->filesystem->driver->truncate(file, size);
 }
 
-enum zedbsd_fs_result zedbsd_file_flush_result(struct zedbsd_file *file)
+enum bootfs_result bootfs_file_flush_result(struct bootfs_file *file)
 {
 	if (!file || !file->filesystem || !file->filesystem->driver)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
@@ -255,9 +255,9 @@ enum zedbsd_fs_result zedbsd_file_flush_result(struct zedbsd_file *file)
 	return file->filesystem->driver->flush(file);
 }
 
-enum zedbsd_fs_result zedbsd_fs_readdir_result(
-	struct zedbsd_filesystem *filesystem, const char *path, unsigned index,
-	struct zedbsd_dirent *entry)
+enum bootfs_result bootfs_readdir_result(
+	struct bootfs *filesystem, const char *path, unsigned index,
+	struct bootfs_dirent *entry)
 {
 	if (!filesystem || !filesystem->driver || !entry)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
@@ -266,16 +266,16 @@ enum zedbsd_fs_result zedbsd_fs_readdir_result(
 					   entry);
 }
 
-int zedbsd_fs_readdir(struct zedbsd_filesystem *filesystem, const char *path,
-		      unsigned index, struct zedbsd_dirent *entry)
+int bootfs_readdir(struct bootfs *filesystem, const char *path,
+		      unsigned index, struct bootfs_dirent *entry)
 {
-	return zedbsd_fs_readdir_result(filesystem, path, index, entry) ==
+	return bootfs_readdir_result(filesystem, path, index, entry) ==
 		ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result zedbsd_fs_stat_result(
-	struct zedbsd_filesystem *filesystem, const char *path,
-	struct zedbsd_dirent *entry)
+enum bootfs_result bootfs_stat_result(
+	struct bootfs *filesystem, const char *path,
+	struct bootfs_dirent *entry)
 {
 	if (!filesystem || !filesystem->driver || !path || !*path || !entry)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
@@ -285,8 +285,8 @@ enum zedbsd_fs_result zedbsd_fs_stat_result(
 	return filesystem->driver->stat(filesystem, path, entry);
 }
 
-enum zedbsd_fs_result zedbsd_file_contiguous_lba_result(
-	struct zedbsd_file *file, uint32_t *absolute_lba)
+enum bootfs_result bootfs_file_contiguous_lba_result(
+	struct bootfs_file *file, uint32_t *absolute_lba)
 {
 	if (!file || !file->filesystem || !file->filesystem->driver ||
 	    !absolute_lba)
@@ -296,9 +296,9 @@ enum zedbsd_fs_result zedbsd_file_contiguous_lba_result(
 	return file->filesystem->driver->contiguous_lba(file, absolute_lba);
 }
 
-int zedbsd_file_contiguous_lba(struct zedbsd_file *file,
+int bootfs_file_contiguous_lba(struct bootfs_file *file,
 			       uint32_t *absolute_lba)
 {
-	return zedbsd_file_contiguous_lba_result(file, absolute_lba) ==
+	return bootfs_file_contiguous_lba_result(file, absolute_lba) ==
 		ZEDBSD_FS_OK;
 }

@@ -7,7 +7,7 @@
 #define PROPERTY_BUFFER_SIZE 512U
 
 struct discovery {
-	struct zedbsd_sun4u_handoff *handoff;
+	struct sun4u_boot_handoff *handoff;
 	int have_cpu;
 	int have_memory;
 	int have_pci_io;
@@ -88,7 +88,7 @@ address_cells(ofw_cell_t node, const char *name, unsigned int fallback)
 
 static int
 memory_ranges(ofw_cell_t node, const char *name,
-	    struct zedbsd_sun4u_memory_range *ranges, unsigned char *count)
+	    struct sun4u_memory_range *ranges, unsigned char *count)
 {
 	unsigned char bytes[PROPERTY_BUFFER_SIZE];
 	ofw_scell_t parent = ofw_parent(node);
@@ -281,7 +281,7 @@ copy_bootpath(char *destination, const char *source)
 }
 
 int
-sparcv9_handoff_build(struct zedbsd_sun4u_handoff *handoff,
+sparcv9_handoff_build(struct sun4u_boot_handoff *handoff,
 	    const char *bootpath)
 {
 	struct discovery state;

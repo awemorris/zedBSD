@@ -173,8 +173,8 @@ out:
 }
 
 int
-kern_vfs_init(const struct zedbsd_handoff *handoff,
-	      const struct zedbsd_device *devices, unsigned device_count)
+kern_vfs_init(const struct boot_handoff *handoff,
+	      const struct boot_device *devices, unsigned device_count)
 {
 	struct disk *physical[PHYSICAL_DISK_MAX];
 	struct disk *boot_physical = NULL;

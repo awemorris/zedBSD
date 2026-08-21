@@ -24,7 +24,7 @@ typedef struct rt_env NoctEnv;
 #define ZEDBSD_NOCT_PATH_MAX 256U
 #define ZEDBSD_NOCT_SOURCE_MAX (256U * 1024U)
 
-struct zedbsd_noct_dirent {
+struct noct_dirent {
 	char name[ZEDBSD_NOCT_PATH_MAX];
 	uint64_t size;
 	uint8_t attributes;
@@ -35,7 +35,7 @@ struct zedbsd_noct_dirent {
  * to the GDC, BIOS keyboard gateway, and the selected filesystem.  Host tests
  * supply deterministic in-memory implementations.
  */
-struct zedbsd_noct_services {
+struct noct_services {
 	void *context;
 	/*
 	 * Optional.  Binding this pointer does not touch graphical hardware.
@@ -63,16 +63,16 @@ struct zedbsd_noct_services {
 			 void *buffer, uint32_t length);
 	/* Return 1 for an entry, 0 at end, and -1 for an invalid path/I/O. */
 	int (*directory_read)(void *context, const char *path, unsigned index,
-			      struct zedbsd_noct_dirent *entry);
+			      struct noct_dirent *entry);
 };
 
-struct zedbsd_noct_options;
+struct noct_options;
 
 /* Convert the PC-98 BIOS AX pair to the stable BE key namespace. */
-int zedbsd_key_normalize_bios_ax(uint16_t bios_ax);
+int key_normalize_bios_ax(uint16_t bios_ax);
 
-int zedbsd_noct_napi_register(NoctEnv *env,
-			      const struct zedbsd_noct_options *options);
-void zedbsd_noct_napi_cleanup(void);
+int noct_napi_register(NoctEnv *env,
+			      const struct noct_options *options);
+void noct_napi_cleanup(void);
 
 #endif

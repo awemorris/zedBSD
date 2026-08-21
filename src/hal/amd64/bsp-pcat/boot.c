@@ -24,7 +24,7 @@ static struct zbl6_handoff_v2 boot_info_v2;
 static struct zbl6_framebuffer boot_framebuffer;
 static struct zbl6_memory_range boot_memory_range[MAX_BOOT_MEMORY_RANGES];
 static uint32 boot_memory_range_count;
-static struct zedbsd_handoff kernel_handoff;
+static struct boot_handoff kernel_handoff;
 static uint64 total_memory;
 static uint8_t boot_font[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 static int boot_font_valid;

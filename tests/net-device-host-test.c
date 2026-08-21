@@ -9,7 +9,7 @@
 #include <string.h>
 
 void
-zedbsd_assert_fail(const char *expression, const char *file, int line)
+__libc_assert_fail(const char *expression, const char *file, int line)
 {
 	fprintf(stderr, "%s:%d: assertion failed: %s\n", file, line, expression);
 	abort();

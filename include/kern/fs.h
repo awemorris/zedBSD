@@ -16,19 +16,19 @@
 #define ZEDBSD_FS_PRIVATE_WORDS 160
 #define ZEDBSD_FILE_PRIVATE_WORDS 8
 
-struct zedbsd_volume;
-struct zedbsd_filesystem;
-struct zedbsd_file;
+struct boot_volume;
+struct bootfs;
+struct bootfs_file;
 
-typedef int (*zedbsd_volume_read_t)(const void *context, uint32_t lba,
+typedef int (*boot_volume_read_fn)(const void *context, uint32_t lba,
 				    void *buffer);
-typedef int (*zedbsd_volume_write_t)(void *context, uint32_t lba,
+typedef int (*boot_volume_write_fn)(void *context, uint32_t lba,
 				     const void *buffer);
-typedef void (*zedbsd_read_progress_t)(void *context, uint32_t bytes);
+typedef void (*bootfs_read_progress_fn)(void *context, uint32_t bytes);
 
 /* Stable internal results.  The public Boolean entry points below are kept as
  * compatibility wrappers while vmunix callers are migrated incrementally. */
-enum zedbsd_fs_result {
+enum bootfs_result {
 	ZEDBSD_FS_OK = 0,
 	ZEDBSD_FS_NOT_FOUND,
 	ZEDBSD_FS_INVALID_PATH,
@@ -46,128 +46,128 @@ enum zedbsd_fs_result {
 /* A partition-sized view of a BIOS block device. LBA values passed to the
  * generic helpers are relative to start_lba; callbacks receive absolute
  * physical LBAs.  A NULL write callback makes the volume read-only. */
-struct zedbsd_volume {
+struct boot_volume {
 	void *context;
 	uint32_t start_lba;
 	uint16_t sector_size;
-	zedbsd_volume_read_t read;
-	zedbsd_volume_write_t write;
+	boot_volume_read_fn read;
+	boot_volume_write_fn write;
 };
 
-struct zedbsd_dirent {
+struct bootfs_dirent {
 	char name[ZEDBSD_PATH_MAX];
 	uint64_t size;
 	uint8_t attributes;
 };
 
-struct zedbsd_filesystem_driver {
+struct bootfs_driver {
 	const char *name;
-	enum zedbsd_fs_result (*probe)(const struct zedbsd_volume *volume);
-	enum zedbsd_fs_result (*mount)(struct zedbsd_filesystem *filesystem);
-	enum zedbsd_fs_result (*create)(struct zedbsd_filesystem *filesystem,
+	enum bootfs_result (*probe)(const struct boot_volume *volume);
+	enum bootfs_result (*mount)(struct bootfs *filesystem);
+	enum bootfs_result (*create)(struct bootfs *filesystem,
 					const char *path,
-					struct zedbsd_file *file);
-	enum zedbsd_fs_result (*mkdir)(struct zedbsd_filesystem *filesystem,
+					struct bootfs_file *file);
+	enum bootfs_result (*mkdir)(struct bootfs *filesystem,
 				       const char *path);
-	enum zedbsd_fs_result (*unlink)(struct zedbsd_filesystem *filesystem,
+	enum bootfs_result (*unlink)(struct bootfs *filesystem,
 				        const char *path);
-	enum zedbsd_fs_result (*rmdir)(struct zedbsd_filesystem *filesystem,
+	enum bootfs_result (*rmdir)(struct bootfs *filesystem,
 				       const char *path);
-	enum zedbsd_fs_result (*rename)(struct zedbsd_filesystem *filesystem,
+	enum bootfs_result (*rename)(struct bootfs *filesystem,
 				        const char *old_path,
 				        const char *new_path);
-	enum zedbsd_fs_result (*open)(struct zedbsd_filesystem *filesystem,
+	enum bootfs_result (*open)(struct bootfs *filesystem,
 				      const char *path,
-				      struct zedbsd_file *file);
-	enum zedbsd_fs_result (*read)(struct zedbsd_file *file, uint64_t offset,
+				      struct bootfs_file *file);
+	enum bootfs_result (*read)(struct bootfs_file *file, uint64_t offset,
 				      void *buffer, uint32_t length,
-				      zedbsd_read_progress_t progress,
+				      bootfs_read_progress_fn progress,
 				      void *progress_context);
-	enum zedbsd_fs_result (*write)(struct zedbsd_file *file, uint64_t offset,
+	enum bootfs_result (*write)(struct bootfs_file *file, uint64_t offset,
 				       const void *buffer, uint32_t length);
-	enum zedbsd_fs_result (*truncate)(struct zedbsd_file *file, uint64_t size);
-	enum zedbsd_fs_result (*flush)(struct zedbsd_file *file);
-	enum zedbsd_fs_result (*readdir)(struct zedbsd_filesystem *filesystem,
+	enum bootfs_result (*truncate)(struct bootfs_file *file, uint64_t size);
+	enum bootfs_result (*flush)(struct bootfs_file *file);
+	enum bootfs_result (*readdir)(struct bootfs *filesystem,
 					 const char *path, unsigned index,
-					 struct zedbsd_dirent *entry);
-	enum zedbsd_fs_result (*stat)(struct zedbsd_filesystem *filesystem,
+					 struct bootfs_dirent *entry);
+	enum bootfs_result (*stat)(struct bootfs *filesystem,
 				      const char *path,
-				      struct zedbsd_dirent *entry);
-	enum zedbsd_fs_result (*contiguous_lba)(struct zedbsd_file *file,
+				      struct bootfs_dirent *entry);
+	enum bootfs_result (*contiguous_lba)(struct bootfs_file *file,
 						uint32_t *absolute_lba);
 };
 
-struct zedbsd_filesystem {
-	const struct zedbsd_filesystem_driver *driver;
-	struct zedbsd_volume volume;
+struct bootfs {
+	const struct bootfs_driver *driver;
+	struct boot_volume volume;
 	uint32_t private_data[ZEDBSD_FS_PRIVATE_WORDS];
 };
 
-struct zedbsd_file {
-	struct zedbsd_filesystem *filesystem;
+struct bootfs_file {
+	struct bootfs *filesystem;
 	uint64_t size;
 	uint32_t private_data[ZEDBSD_FILE_PRIVATE_WORDS];
 };
 
-int zedbsd_volume_read(const struct zedbsd_volume *volume, uint32_t lba,
+int boot_volume_read(const struct boot_volume *volume, uint32_t lba,
 		       void *buffer);
-enum zedbsd_fs_result zedbsd_volume_read_result(
-	const struct zedbsd_volume *volume, uint32_t lba, void *buffer);
-int zedbsd_volume_write(struct zedbsd_volume *volume, uint32_t lba,
+enum bootfs_result boot_volume_read_result(
+	const struct boot_volume *volume, uint32_t lba, void *buffer);
+int boot_volume_write(struct boot_volume *volume, uint32_t lba,
 			const void *buffer);
-enum zedbsd_fs_result zedbsd_volume_write_result(
-	struct zedbsd_volume *volume, uint32_t lba, const void *buffer);
-int zedbsd_fs_mount(struct zedbsd_filesystem *filesystem,
-		    const struct zedbsd_volume *volume,
-		    const struct zedbsd_filesystem_driver *const *drivers,
+enum bootfs_result boot_volume_write_result(
+	struct boot_volume *volume, uint32_t lba, const void *buffer);
+int bootfs_mount(struct bootfs *filesystem,
+		    const struct boot_volume *volume,
+		    const struct bootfs_driver *const *drivers,
 		    unsigned driver_count);
-enum zedbsd_fs_result zedbsd_fs_mount_result(
-	struct zedbsd_filesystem *filesystem, const struct zedbsd_volume *volume,
-	const struct zedbsd_filesystem_driver *const *drivers,
+enum bootfs_result bootfs_mount_result(
+	struct bootfs *filesystem, const struct boot_volume *volume,
+	const struct bootfs_driver *const *drivers,
 	unsigned driver_count);
-void zedbsd_fs_reset(struct zedbsd_filesystem *filesystem);
-int zedbsd_fs_open(struct zedbsd_filesystem *filesystem, const char *path,
-		   struct zedbsd_file *file);
-enum zedbsd_fs_result zedbsd_fs_open_result(
-	struct zedbsd_filesystem *filesystem, const char *path,
-	struct zedbsd_file *file);
-enum zedbsd_fs_result zedbsd_fs_create_result(
-	struct zedbsd_filesystem *filesystem, const char *path,
-	struct zedbsd_file *file);
-enum zedbsd_fs_result zedbsd_fs_mkdir_result(
-	struct zedbsd_filesystem *, const char *);
-enum zedbsd_fs_result zedbsd_fs_unlink_result(
-	struct zedbsd_filesystem *, const char *);
-enum zedbsd_fs_result zedbsd_fs_rmdir_result(
-	struct zedbsd_filesystem *, const char *);
-enum zedbsd_fs_result zedbsd_fs_rename_result(
-	struct zedbsd_filesystem *, const char *, const char *);
-int zedbsd_file_read(struct zedbsd_file *file, uint64_t offset, void *buffer,
+void bootfs_reset(struct bootfs *filesystem);
+int bootfs_open(struct bootfs *filesystem, const char *path,
+		   struct bootfs_file *file);
+enum bootfs_result bootfs_open_result(
+	struct bootfs *filesystem, const char *path,
+	struct bootfs_file *file);
+enum bootfs_result bootfs_create_result(
+	struct bootfs *filesystem, const char *path,
+	struct bootfs_file *file);
+enum bootfs_result bootfs_mkdir_result(
+	struct bootfs *, const char *);
+enum bootfs_result bootfs_unlink_result(
+	struct bootfs *, const char *);
+enum bootfs_result bootfs_rmdir_result(
+	struct bootfs *, const char *);
+enum bootfs_result bootfs_rename_result(
+	struct bootfs *, const char *, const char *);
+int bootfs_file_read(struct bootfs_file *file, uint64_t offset, void *buffer,
 		     uint32_t length);
-int zedbsd_file_read_progress(struct zedbsd_file *file, uint64_t offset,
+int bootfs_file_read_progress(struct bootfs_file *file, uint64_t offset,
 			      void *buffer, uint32_t length,
-			      zedbsd_read_progress_t progress,
+			      bootfs_read_progress_fn progress,
 			      void *progress_context);
-enum zedbsd_fs_result zedbsd_file_read_result(
-	struct zedbsd_file *file, uint64_t offset, void *buffer, uint32_t length,
-	zedbsd_read_progress_t progress, void *progress_context);
-enum zedbsd_fs_result zedbsd_file_write_result(
-	struct zedbsd_file *file, uint64_t offset, const void *buffer,
+enum bootfs_result bootfs_file_read_result(
+	struct bootfs_file *file, uint64_t offset, void *buffer, uint32_t length,
+	bootfs_read_progress_fn progress, void *progress_context);
+enum bootfs_result bootfs_file_write_result(
+	struct bootfs_file *file, uint64_t offset, const void *buffer,
 	uint32_t length);
-enum zedbsd_fs_result zedbsd_file_truncate_result(struct zedbsd_file *file,
+enum bootfs_result bootfs_file_truncate_result(struct bootfs_file *file,
 						  uint64_t size);
-enum zedbsd_fs_result zedbsd_file_flush_result(struct zedbsd_file *file);
-int zedbsd_fs_readdir(struct zedbsd_filesystem *filesystem, const char *path,
-		      unsigned index, struct zedbsd_dirent *entry);
-enum zedbsd_fs_result zedbsd_fs_readdir_result(
-	struct zedbsd_filesystem *filesystem, const char *path, unsigned index,
-	struct zedbsd_dirent *entry);
-enum zedbsd_fs_result zedbsd_fs_stat_result(
-	struct zedbsd_filesystem *filesystem, const char *path,
-	struct zedbsd_dirent *entry);
-int zedbsd_file_contiguous_lba(struct zedbsd_file *file,
+enum bootfs_result bootfs_file_flush_result(struct bootfs_file *file);
+int bootfs_readdir(struct bootfs *filesystem, const char *path,
+		      unsigned index, struct bootfs_dirent *entry);
+enum bootfs_result bootfs_readdir_result(
+	struct bootfs *filesystem, const char *path, unsigned index,
+	struct bootfs_dirent *entry);
+enum bootfs_result bootfs_stat_result(
+	struct bootfs *filesystem, const char *path,
+	struct bootfs_dirent *entry);
+int bootfs_file_contiguous_lba(struct bootfs_file *file,
 			       uint32_t *absolute_lba);
-enum zedbsd_fs_result zedbsd_file_contiguous_lba_result(
-	struct zedbsd_file *file, uint32_t *absolute_lba);
+enum bootfs_result bootfs_file_contiguous_lba_result(
+	struct bootfs_file *file, uint32_t *absolute_lba);
 
 #endif

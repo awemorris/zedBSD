@@ -16,7 +16,7 @@ struct dirent {
 	uint8_t d_type;
 	char d_name[256];
 };
-typedef struct zedbsd_directory DIR;
+typedef struct __dir_stream DIR;
 DIR *opendir(const char *);
 DIR *fdopendir(int);
 struct dirent *readdir(DIR *);

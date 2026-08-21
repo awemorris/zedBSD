@@ -193,7 +193,7 @@ process_timer_gettime(struct process *owner, timer_t id,
 	error = timer_lookup_locked(owner, id, &slot);
 	if (error == 0) {
 		struct process_timer *timer = &process_timers[slot];
-		(void)timer_remaining_locked(timer, zedbsd_kernel_ticks(),
+		(void)timer_remaining_locked(timer, clock_ticks(),
 		    now_realtime, &remaining);
 		units_to_timespec(remaining, timer->realtime_absolute ?
 		    KERN_NSEC_PER_SEC : KERN_CLOCK_HZ, &result->it_value);
@@ -252,7 +252,7 @@ process_timer_settime(struct process *owner, timer_t id, int flags,
 			error = timespec_to_units(&requested->it_interval,
 			    KERN_CLOCK_HZ, &interval);
 		process_timers[slot].realtime_absolute = 0;
-		now = zedbsd_kernel_ticks();
+		now = clock_ticks();
 		if (error == 0 && (flags & TIMER_ABSTIME) != 0)
 			deadline = value;
 		else if (error == 0)

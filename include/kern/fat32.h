@@ -10,6 +10,6 @@
 
 #include "kern/fs.h"
 
-extern const struct zedbsd_filesystem_driver zedbsd_fat32_driver;
+extern const struct bootfs_driver bootfat32_driver;
 
 #endif

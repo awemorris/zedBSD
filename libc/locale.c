@@ -14,22 +14,22 @@
 #include <wchar.h>
 #include <wctype.h>
 
-struct __zedbsd_locale {
+struct __locale {
 	const char *name;
 	unsigned utf8;
 };
 
-static struct __zedbsd_locale locale_c = { "C", 0 };
-static struct __zedbsd_locale locale_utf8 = { "C.UTF-8", 1 };
-static struct __zedbsd_locale *global_category[6] = {
+static struct __locale locale_c = { "C", 0 };
+static struct __locale locale_utf8 = { "C.UTF-8", 1 };
+static struct __locale *global_category[6] = {
 	&locale_c, &locale_c, &locale_c, &locale_c, &locale_c, &locale_c
 };
 static volatile uint32_t locale_lock_word;
 static mbstate_t bootstrap_states[2];
 
-extern const void *zedbsd_pthread_locale_exchange(const void *, int)
+extern const void *__pthread_locale_exchange(const void *, int)
 	__attribute__((weak));
-extern void *zedbsd_pthread_mbstate(unsigned) __attribute__((weak));
+extern void *__pthread_mbstate(unsigned) __attribute__((weak));
 extern char *getenv(const char *) __attribute__((weak));
 
 static void
@@ -46,7 +46,7 @@ locale_unlock(void)
 	__atomic_store_n(&locale_lock_word, 0U, __ATOMIC_RELEASE);
 }
 
-static struct __zedbsd_locale *
+static struct __locale *
 locale_named(const char *name)
 {
 	if (name == NULL)
@@ -69,20 +69,20 @@ locale_named(const char *name)
 	return NULL;
 }
 
-static struct __zedbsd_locale *
+static struct __locale *
 effective_locale(void)
 {
 	const void *local = NULL;
-	if (zedbsd_pthread_locale_exchange != NULL)
-		local = zedbsd_pthread_locale_exchange(NULL, 0);
-	return local != NULL ? (struct __zedbsd_locale *)local :
+	if (__pthread_locale_exchange != NULL)
+		local = __pthread_locale_exchange(NULL, 0);
+	return local != NULL ? (struct __locale *)local :
 	    __atomic_load_n(&global_category[LC_CTYPE], __ATOMIC_ACQUIRE);
 }
 
 char *
 setlocale(int category, const char *name)
 {
-	struct __zedbsd_locale *locale;
+	struct __locale *locale;
 	unsigned first, last, i;
 
 	if (category < LC_CTYPE || category > LC_ALL) {
@@ -115,7 +115,7 @@ setlocale(int category, const char *name)
 locale_t
 newlocale(int mask, const char *name, locale_t base)
 {
-	struct __zedbsd_locale *wanted;
+	struct __locale *wanted;
 	if (mask < 0 || ((unsigned)mask & ~LC_ALL_MASK) != 0 ||
 	    name == NULL || base == LC_GLOBAL_LOCALE) {
 		errno = EINVAL;
@@ -157,20 +157,20 @@ locale_t
 uselocale(locale_t locale)
 {
 	const void *previous;
-	if (zedbsd_pthread_locale_exchange == NULL) {
+	if (__pthread_locale_exchange == NULL) {
 		if (locale != NULL && locale != LC_GLOBAL_LOCALE) {
 			errno = ENOSYS;
 			return NULL;
 		}
 		return LC_GLOBAL_LOCALE;
 	}
-	previous = zedbsd_pthread_locale_exchange(
+	previous = __pthread_locale_exchange(
 	    locale == LC_GLOBAL_LOCALE ? NULL : locale, locale != NULL);
 	return previous != NULL ? (locale_t)previous : LC_GLOBAL_LOCALE;
 }
 
 size_t
-__zedbsd_mb_cur_max(void)
+__libc_mb_cur_max(void)
 {
 	return effective_locale()->utf8 ? 4U : 1U;
 }
@@ -218,8 +218,8 @@ strxfrm(char *destination, const char *source, size_t count)
 static mbstate_t *
 internal_state(unsigned which)
 {
-	void *state = zedbsd_pthread_mbstate != NULL ?
-	    zedbsd_pthread_mbstate(which) : NULL;
+	void *state = __pthread_mbstate != NULL ?
+	    __pthread_mbstate(which) : NULL;
 	return state != NULL ? (mbstate_t *)state : &bootstrap_states[which];
 }
 

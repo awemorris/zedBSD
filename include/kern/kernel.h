@@ -10,7 +10,7 @@
 
 #include "kern/boot.h"
 
-void kernel_main(const struct zedbsd_handoff *handoff,
-		 const struct zedbsd_device *devices, unsigned device_count);
+void kernel_main(const struct boot_handoff *handoff,
+		 const struct boot_device *devices, unsigned device_count);
 
 #endif

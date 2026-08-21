@@ -84,17 +84,17 @@ ZEDBSD_USER_PROGRAMS ?= $(ZEDBSD_ALL_USER_PROGRAMS)
 # Package dependencies are named by their stable path below
 # userland/packages (for example, editors/remacs -> lang/noct).  Resolve the
 # paths back to registered program names even when config.mk was hand-edited.
-zedbsd_dependency_names = $(strip $(foreach program,$(1),\
+user_program_dependency_names = $(strip $(foreach program,$(1),\
 	$(foreach requirement,$(USERLAND_$(program)_REQUIRE),\
 		$(foreach candidate,$(USERLAND_PACKAGES),\
 			$(if $(filter $(requirement),$(USERLAND_$(candidate)_PACKAGE)),\
 				$(candidate))))))
 ZEDBSD_USER_PROGRAMS_DEPS_1 := $(sort $(ZEDBSD_USER_PROGRAMS) \
-	$(call zedbsd_dependency_names,$(ZEDBSD_USER_PROGRAMS)))
+	$(call user_program_dependency_names,$(ZEDBSD_USER_PROGRAMS)))
 ZEDBSD_USER_PROGRAMS_DEPS_2 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_1) \
-	$(call zedbsd_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_1)))
+	$(call user_program_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_1)))
 ZEDBSD_USER_PROGRAMS_DEPS_3 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_2) \
-	$(call zedbsd_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_2)))
+	$(call user_program_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_2)))
 override ZEDBSD_USER_PROGRAMS := $(ZEDBSD_USER_PROGRAMS_DEPS_3)
 # A saved configuration may be reused after changing targets.  Do not let
 # packages selected for another ABI become impossible prerequisites of the

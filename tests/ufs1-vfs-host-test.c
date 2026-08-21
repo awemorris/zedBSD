@@ -595,7 +595,7 @@ int main(void)
 	unsigned initial_nbfree,initial_nifree,initial_ndir;
 	#ifdef UFS2_TEST_IMAGE
 	struct mount *snapshot_mount=NULL;
-	struct zedbsd_snapshot_ctl snapshot_request;
+	struct snapshot_control snapshot_request;
 	#endif
 	assert(fp); fseek(fp,0,SEEK_END); image_size=(size_t)ftell(fp); rewind(fp);
 	image=malloc(image_size); assert(image&&fread(image,1,image_size,fp)==image_size); fclose(fp);
@@ -636,7 +636,7 @@ int main(void)
 	assert(mount_private(TEST_FS_NAME,disk,0,NULL,&mountp)==0);
 	#ifdef UFS2_TEST_IMAGE
 	{
-		struct zedbsd_quota_ctl quota;
+		struct quota_control quota;
 		memset(&quota,0,sizeof(quota));quota.size=sizeof(quota);
 		quota.version=ZEDBSD_QUOTA_VERSION;quota.command=ZEDBSD_QUOTA_SET;
 		quota.type=ZEDBSD_QUOTA_USER;quota.id=0;
@@ -822,7 +822,7 @@ int main(void)
 	assert(mount_private(TEST_FS_NAME,disk,MOUNT_READ_ONLY,NULL,&mountp)==0);
 	#ifdef UFS2_TEST_IMAGE
 	{
-		struct zedbsd_quota_ctl quota;
+		struct quota_control quota;
 		memset(&quota,0,sizeof(quota));quota.size=sizeof(quota);
 		quota.version=ZEDBSD_QUOTA_VERSION;quota.command=ZEDBSD_QUOTA_GET;
 		quota.type=ZEDBSD_QUOTA_USER;quota.id=0;
@@ -862,7 +862,7 @@ int main(void)
 	assert(inode_lookup(mountp->m_root,&etc_name,&etc)==0);
 	#ifdef UFS2_TEST_IMAGE
 	{
-		struct zedbsd_quota_ctl quota;
+		struct quota_control quota;
 		memset(&quota,0,sizeof(quota));quota.size=sizeof(quota);
 		quota.version=ZEDBSD_QUOTA_VERSION;quota.type=ZEDBSD_QUOTA_USER;
 		quota.command=ZEDBSD_QUOTA_DISABLE;

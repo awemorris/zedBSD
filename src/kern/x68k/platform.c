@@ -12,10 +12,10 @@
 #include "hal/m68k/bsp-x68k/scsi.h"
 
 size_t
-kern_platform_init(const struct zedbsd_handoff *common,
-	struct zedbsd_device *devices, size_t capacity)
+kern_platform_init(const struct boot_handoff *common,
+	struct boot_device *devices, size_t capacity)
 {
-	const struct zedbsd_x68k_handoff *handoff = (const void *)common;
+	const struct x68k_boot_handoff *handoff = (const void *)common;
 	struct x68k_spc_bus bus;
 	unsigned initiator, target;
 	size_t count = 0;
@@ -30,7 +30,7 @@ kern_platform_init(const struct zedbsd_handoff *common,
 	    handoff->common.boot_bios_id) == 0)
 		return 0;
 	for (target = 0; target < 7U && count < capacity; target++) {
-		struct zedbsd_device *device;
+		struct boot_device *device;
 		if (x68k_spc_disk_target(target) == NULL)
 			continue;
 		device = &devices[count];
@@ -48,13 +48,13 @@ kern_platform_init(const struct zedbsd_handoff *common,
 	return count;
 }
 
-void kern_platform_refresh_devices(const struct zedbsd_device *d, size_t n)
+void kern_platform_refresh_devices(const struct boot_device *d, size_t n)
 { (void)d; (void)n; }
 
 int kern_platform_input_init(void) { return 0; }
 
 struct disk *
-kern_platform_block_device(const struct zedbsd_device *device)
+kern_platform_block_device(const struct boot_device *device)
 {
 	return device != NULL && device->device_class == ZEDBSD_DEV_SCSI ?
 	    x68k_spc_disk_target(device->bios_id) : NULL;

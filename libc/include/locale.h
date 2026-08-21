@@ -21,8 +21,8 @@
 #define LC_MESSAGES_MASK (1U << LC_MESSAGES)
 #define LC_ALL_MASK      ((1U << 6) - 1U)
 
-struct __zedbsd_locale;
-typedef struct __zedbsd_locale *locale_t;
+struct __locale;
+typedef struct __locale *locale_t;
 #define LC_GLOBAL_LOCALE ((locale_t)(intptr_t)-1)
 
 struct lconv {
@@ -53,7 +53,7 @@ locale_t duplocale(locale_t);
 void freelocale(locale_t);
 locale_t uselocale(locale_t);
 
-size_t __zedbsd_mb_cur_max(void);
-#define MB_CUR_MAX (__zedbsd_mb_cur_max())
+size_t __libc_mb_cur_max(void);
+#define MB_CUR_MAX (__libc_mb_cur_max())
 
 #endif

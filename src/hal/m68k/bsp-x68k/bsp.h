@@ -6,9 +6,9 @@
 
 #include <kern/boot.h>
 
-void x68k_boot_init(const struct zedbsd_x68k_handoff *handoff);
-const struct zedbsd_x68k_handoff *x68k_boot_handoff(void);
-int x68k_boot_handoff_valid(const struct zedbsd_x68k_handoff *handoff);
+void x68k_boot_init(const struct x68k_boot_handoff *handoff);
+const struct x68k_boot_handoff *x68k_boot_handoff(void);
+int x68k_boot_handoff_valid(const struct x68k_boot_handoff *handoff);
 void x68k_cons_init(void);
 
 #endif

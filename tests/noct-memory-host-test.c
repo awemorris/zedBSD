@@ -15,13 +15,13 @@
 
 static int
 check_profile_reserved(uint32_t low, uint32_t high, uint32_t reserved,
-	      enum zedbsd_noct_memory_class expected_class,
+	      enum noct_memory_class expected_class,
 	      uint32_t expected_installed, uintptr_t expected_base,
 	      size_t expected_arena)
 {
-	struct zedbsd_noct_memory_profile profile;
+	struct noct_memory_profile profile;
 
-	CHECK(zedbsd_noct_select_memory(low, high, reserved, &profile));
+	CHECK(noct_select_memory(low, high, reserved, &profile));
 	CHECK(profile.memory_class == expected_class);
 	CHECK(profile.installed_mib == expected_installed);
 	CHECK(profile.arena_base == expected_base);
@@ -35,7 +35,7 @@ check_profile_reserved(uint32_t low, uint32_t high, uint32_t reserved,
 
 static int
 check_profile(uint32_t low, uint32_t high,
-	      enum zedbsd_noct_memory_class expected_class,
+	      enum noct_memory_class expected_class,
 	      uint32_t expected_installed, uintptr_t expected_base,
 	      size_t expected_arena)
 {
@@ -47,7 +47,7 @@ check_profile(uint32_t low, uint32_t high,
 int
 main(void)
 {
-	struct zedbsd_noct_memory_profile profile;
+	struct noct_memory_profile profile;
 	int result;
 
 	result = check_profile(4U * MIB, 0, ZEDBSD_NOCT_MEMORY_5, 5,
@@ -92,8 +92,8 @@ main(void)
 				       16U * MIB - 64U * KIB);
 	CHECK(result == 0);
 	/* A reservation covering all of low extended memory fails. */
-	CHECK(!zedbsd_noct_select_memory(4U * MIB, 0, 4U * MIB, &profile));
-	CHECK(!zedbsd_noct_select_memory(64U * KIB, 0, 0, &profile));
-	CHECK(!zedbsd_noct_select_memory(4U * MIB, 0, 0, NULL));
+	CHECK(!noct_select_memory(4U * MIB, 0, 4U * MIB, &profile));
+	CHECK(!noct_select_memory(64U * KIB, 0, 0, &profile));
+	CHECK(!noct_select_memory(4U * MIB, 0, 0, NULL));
 	return 0;
 }

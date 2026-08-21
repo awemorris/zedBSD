@@ -1,5 +1,4 @@
 ﻿/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include <zedbsd/process.h>
 #include <zedbsd/console.h>
 #include <zedbsd/system.h>
 #include "userland/base/sh/alias.h"
@@ -19,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <spawn.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -97,13 +97,61 @@ wait_foreground(pid_t pid, int *status)
 }
 
 static int
-spawn_wait(char *const argv[], unsigned flags, char *result, size_t capacity)
+spawn_wait(char *const argv[], int capture, char *result, size_t capacity)
 {
+	posix_spawn_file_actions_t actions;
+	posix_spawn_file_actions_t *action_pointer = NULL;
+	posix_spawnattr_t attributes;
+	posix_spawnattr_t *attribute_pointer = NULL;
+	int output_pipe[2] = { -1, -1 };
 	pid_t pid;
+	int error;
 	int status = 0;
-	pid = zedbsd_spawn(argv[0], argv, environ, flags);
-	if (pid < 0) {
-		fprintf(stderr, "sh: %s: %s\n", argv[0], strerror(errno));
+
+	if (result != NULL && capacity != 0)
+		result[0] = '\0';
+	capture = capture && !command_background && result != NULL && capacity != 0;
+	if (capture) {
+		if (pipe2(output_pipe, O_CLOEXEC) != 0) {
+			fprintf(stderr, "sh: pipe: %s\n", strerror(errno));
+			return 0;
+		}
+		if (posix_spawn_file_actions_init(&actions) != 0 ||
+		    posix_spawn_file_actions_adddup2(&actions, output_pipe[1], 1) != 0 ||
+		    posix_spawn_file_actions_addclose(&actions, output_pipe[0]) != 0 ||
+		    posix_spawn_file_actions_addclose(&actions, output_pipe[1]) != 0) {
+			(void)close(output_pipe[0]);
+			(void)close(output_pipe[1]);
+			fprintf(stderr, "sh: unable to prepare command output\n");
+			return 0;
+		}
+		action_pointer = &actions;
+	}
+	if (!command_subshell) {
+		if (posix_spawnattr_init(&attributes) != 0 ||
+		    posix_spawnattr_setflags(&attributes,
+		    POSIX_SPAWN_SETPGROUP) != 0 ||
+		    posix_spawnattr_setpgroup(&attributes, 0) != 0) {
+			if (action_pointer != NULL)
+				(void)posix_spawn_file_actions_destroy(action_pointer);
+			if (output_pipe[0] >= 0) (void)close(output_pipe[0]);
+			if (output_pipe[1] >= 0) (void)close(output_pipe[1]);
+			fprintf(stderr, "sh: unable to prepare process group\n");
+			return 0;
+		}
+		attribute_pointer = &attributes;
+	}
+	error = posix_spawn(&pid, argv[0], action_pointer, attribute_pointer,
+	    argv, environ);
+	if (action_pointer != NULL)
+		(void)posix_spawn_file_actions_destroy(action_pointer);
+	if (attribute_pointer != NULL)
+		(void)posix_spawnattr_destroy(attribute_pointer);
+	if (output_pipe[1] >= 0)
+		(void)close(output_pipe[1]);
+	if (error != 0) {
+		if (output_pipe[0] >= 0) (void)close(output_pipe[0]);
+		fprintf(stderr, "sh: %s: %s\n", argv[0], strerror(error));
 		return 0;
 	}
 	if (!command_subshell)
@@ -113,19 +161,34 @@ spawn_wait(char *const argv[], unsigned flags, char *result, size_t capacity)
 		printf("[%d]\n", (int)pid);
 		return 1;
 	}
-	if ((flags & ZEDBSD_SPAWN_RESULT) != 0) {
+	if (capture) {
 		pid_t shell_pgrp = getpgrp();
 		int terminal = !command_subshell && isatty(0);
+		size_t used = 0;
+		char discard[128];
+		ssize_t count;
 		if (terminal) (void)tcsetpgrp(0, pid);
-		int waited;
-		do waited = zedbsd_wait_result(pid, &status, result, capacity);
-		while (waited < 0 && errno == EINTR);
-		if (waited < 0) {
-			if (terminal) (void)tcsetpgrp(0, shell_pgrp);
+		for (;;) {
+			void *buffer = used + 1U < capacity ?
+			    (void *)(result + used) : (void *)discard;
+			size_t available = used + 1U < capacity ?
+			    capacity - used - 1U : sizeof(discard);
+			do count = read(output_pipe[0], buffer, available);
+			while (count < 0 && errno == EINTR);
+			if (count <= 0)
+				break;
+			if (buffer != discard)
+				used += (size_t)count;
+		}
+		(void)close(output_pipe[0]);
+		result[used] = '\0';
+		do error = (int)waitpid(pid, &status, 0);
+		while (error < 0 && errno == EINTR);
+		if (terminal) (void)tcsetpgrp(0, shell_pgrp);
+		if (error < 0) {
 			fprintf(stderr, "wait: %d\n", errno);
 			return 0;
 		}
-		if (terminal) (void)tcsetpgrp(0, shell_pgrp);
 	} else if (command_subshell) {
 		pid_t waited;
 		do waited = waitpid(pid, &status, 0);
@@ -425,14 +488,14 @@ static int
 show_devices(void)
 {
 	int fd = open("/dev/system", O_RDONLY);
-	struct zedbsd_system_info info;
+	struct system_info info;
 	uint32_t index;
 	if (fd < 0 || ioctl(fd, ZEDBSD_SYSTEM_GET_INFO, &info) != 0) {
 		if (fd >= 0) close(fd);
 		return 0;
 	}
 	for (index = 0; index < info.device_count; index++) {
-		struct zedbsd_system_device device;
+		struct system_device_info device;
 		memset(&device, 0, sizeof(device));
 		device.index = index;
 		if (ioctl(fd, ZEDBSD_SYSTEM_GET_DEVICE, &device) != 0)
@@ -452,7 +515,7 @@ static int
 show_vmstat(void)
 {
 	int fd = open("/dev/system", O_RDONLY);
-	struct zedbsd_system_vmstat s;
+	struct vm_statistics s;
 	if (fd < 0 || ioctl(fd, ZEDBSD_SYSTEM_GET_VMSTAT, &s) != 0) {
 		if (fd >= 0) close(fd);
 		return 0;
@@ -507,7 +570,7 @@ run_autoexec(const char *path)
 	char result[256] = {0};
 	char action[sizeof(result)];
 	char *argv[] = { "/usr/bin/noct", (char *)path, NULL };
-	if (!spawn_wait(argv, ZEDBSD_SPAWN_RESULT, result, sizeof(result)))
+	if (!spawn_wait(argv, 1, result, sizeof(result)))
 		return 0;
 	if (result[0] == '\0')
 		return 1;
@@ -526,7 +589,7 @@ run_external(char *const argv[])
 	char result[256] = {0};
 	char action[sizeof(result)];
 
-	if (!spawn_wait(argv, ZEDBSD_SPAWN_RESULT, result, sizeof(result)))
+	if (!spawn_wait(argv, 1, result, sizeof(result)))
 		return 0;
 	if (result[0] == '\0')
 		return 1;
@@ -1575,7 +1638,7 @@ done:
 static void
 run_startup(void)
 {
-	struct zedbsd_console_event event;
+	struct console_event event;
 	struct timespec start, now, delay = { 0, 10000000L };
 	int cancelled = 0;
 

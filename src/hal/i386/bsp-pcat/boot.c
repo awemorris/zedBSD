@@ -21,8 +21,8 @@ struct vga_font_handoff {
 } __attribute__((packed));
 
 static const struct multiboot_info *mbi;
-static struct zedbsd_handoff handoff;
-static struct zedbsd_device boot_device;
+static struct boot_handoff handoff;
+static struct boot_device boot_device;
 static uint32_t total_memory;
 static uint8_t root_bios_id;
 static uint8_t root_partition;

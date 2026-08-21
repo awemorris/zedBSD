@@ -13,7 +13,7 @@ _start:
 	move.l %a4,-(%sp)
 	move.l %a3,-(%sp)
 	move.l %d2,-(%sp)
-	jsr zedbsd_user_libc_init
+	jsr __libc_init
 	lea 12(%sp),%sp
 	move.l %a4,-(%sp)
 	move.l %a3,-(%sp)
@@ -28,9 +28,9 @@ _start:
 	/* Public C ABI takes seven stack arguments.  The kernel ABI is D0 =
 	 * number, D1-D5/A0 = arguments.  D2-D5 are callee-saved by the GNU m68k
 	 * ABI and therefore must survive the trap veneer. */
-	.globl zedbsd_syscall6
-	.type zedbsd_syscall6,@function
-zedbsd_syscall6:
+	.globl __syscall6
+	.type __syscall6,@function
+__syscall6:
 	movem.l %d2-%d5,-(%sp)
 	move.l 20(%sp),%d0
 	move.l 24(%sp),%d1
@@ -42,13 +42,13 @@ zedbsd_syscall6:
 	trap #0
 	movem.l (%sp)+,%d2-%d5
 	rts
-	.size zedbsd_syscall6,.-zedbsd_syscall6
+	.size __syscall6,.-__syscall6
 
-	.globl zedbsd_signal_restorer
-	.type zedbsd_signal_restorer,@function
-zedbsd_signal_restorer:
+	.globl __signal_restorer
+	.type __signal_restorer,@function
+__signal_restorer:
 	move.l 4(%sp),%d1               /* opaque context token */
 	moveq #80,%d0                   /* ZEDBSD_SYS_sigreturn */
 	trap #0
 	illegal
-	.size zedbsd_signal_restorer,.-zedbsd_signal_restorer
+	.size __signal_restorer,.-__signal_restorer

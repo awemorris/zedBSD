@@ -242,7 +242,7 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	 * Runtime BLKGETIDENTITY then reads the immutable cached identity and
 	 * never re-enters the mounted backing file. */
 	{
-		struct zedbsd_block_identity identity;
+		struct block_identity identity;
 		(void)block_identity_get(disk, &identity);
 	}
 	*disk_out = disk;

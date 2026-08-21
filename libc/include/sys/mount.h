@@ -8,7 +8,7 @@
 #define ZEDBSD_MOUNT_ARGS_VERSION 1U
 #define ZEDBSD_MOUNT_FSPEC_MAX 32U
 
-struct zedbsd_mount_args {
+struct mount_args {
 	uint32_t size;
 	uint32_t version;
 	char fspec[ZEDBSD_MOUNT_FSPEC_MAX];

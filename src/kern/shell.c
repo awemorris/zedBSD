@@ -143,7 +143,7 @@ void noct_key_drain(void *context)
  * least useful. */
 int clock_second(void)
 {
-	return (int)((zedbsd_kernel_ticks() / 100U) % 60U);
+	return (int)((clock_ticks() / 100U) % 60U);
 }
 
 int noct_clock_second(void *context)
@@ -304,7 +304,7 @@ static int open_noct_application(const char *prefix, const char *name,
 				 const char *extension,
 				 char path[ZEDBSD_PATH_MAX])
 {
-	struct zedbsd_file file;
+	struct bootfs_file file;
 	unsigned source = 0;
 	unsigned position = 0;
 	unsigned base_length = 0;
@@ -332,7 +332,7 @@ static int open_noct_application(const char *prefix, const char *name,
 		path[position++] = extension[extension_length++];
 	}
 	path[position] = '\0';
-	return zedbsd_fs_open(&mounted_fs, path, &file) ? 1 : 0;
+	return bootfs_open(&mounted_fs, path, &file) ? 1 : 0;
 }
 
 /* Execute one already-tokenized shell command against the current state.
@@ -383,13 +383,13 @@ int run_noct_user(const char *path, int argc, char *const argv[],
 		child_argv[i + 2] = argv[i];
 	child_argv[argc + 2] = NULL;
 	memset(child_env, 0, sizeof(child_env));
-	value = zedbsd_env_get(&boot_environment, "HOME");
+	value = env_get(&boot_environment, "HOME");
 	if (value != NULL && strlen(value) + 6U <= sizeof(home)) {
 		memcpy(home, "HOME=", 5);
 		strcpy(home + 5, value);
 		child_env[0] = home;
 	}
-	value = zedbsd_env_get(&boot_environment, "REMACS_SKK_DICT");
+	value = env_get(&boot_environment, "REMACS_SKK_DICT");
 	if (value != NULL && strlen(value) + 17U <= sizeof(dictionary)) {
 		unsigned slot = child_env[0] != NULL ? 1U : 0U;
 		memcpy(dictionary, "REMACS_SKK_DICT=", 16);
@@ -456,11 +456,11 @@ int command(char *s)
 		if (n != 1)
 			return 0;
 		for (size_t index = 0;
-		     index < zedbsd_env_count(&boot_environment); index++) {
+		     index < env_count(&boot_environment); index++) {
 			const char *name;
 			const char *value;
 
-			if (!zedbsd_env_at(&boot_environment, index, &name, &value))
+			if (!env_at(&boot_environment, index, &name, &value))
 				return 0;
 			puts(name);
 			putc('=');
@@ -471,11 +471,11 @@ int command(char *s)
 	}
 	if (streq(v[0], "set"))
 		return n == 3 &&
-		       zedbsd_env_set(&boot_environment, v[1], v[2]);
+		       env_set(&boot_environment, v[1], v[2]);
 	if (streq(v[0], "unset")) {
-		if (n != 2 || !zedbsd_env_name_valid(v[1]))
+		if (n != 2 || !env_name_valid(v[1]))
 			return 0;
-		(void)zedbsd_env_unset(&boot_environment, v[1]);
+		(void)env_unset(&boot_environment, v[1]);
 		return 1;
 	}
 	if (streq(v[0], "echo")) {
@@ -546,7 +546,7 @@ int command(char *s)
 		puts(cwd); putc('\n'); return 1;
 	}
 	if (streq(v[0], "cd")) {
-		const char *path = n == 1 ? zedbsd_env_get(&boot_environment, "HOME") :
+		const char *path = n == 1 ? env_get(&boot_environment, "HOME") :
 			(n == 2 ? v[1] : NULL);
 		return path != NULL && fs_chdir(&kern_cwdinfo, path) == 0;
 	}
@@ -602,12 +602,12 @@ int command(char *s)
 		return run_noct_application(v[1], "", 0, n - 2, &v[2]);
 	}
 	if (streq(v[0], "emacs")) {
-		const char *dictionary = zedbsd_env_get(&boot_environment,
+		const char *dictionary = env_get(&boot_environment,
 						      "REMACS_SKK_DICT");
 
 		/* The 8.3 path is present in linux-pc98 product image with EMACS.NAP. */
 		if (dictionary == NULL || dictionary[0] == '\0')
-			(void)zedbsd_env_set(&boot_environment, "REMACS_SKK_DICT",
+			(void)env_set(&boot_environment, "REMACS_SKK_DICT",
 					     "HOME/SKKJISYO.DIC");
 		return run_noct_application("EMACS", ".NAP", 0, n - 1, &v[1]);
 	}

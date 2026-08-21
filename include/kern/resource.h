@@ -4,8 +4,8 @@
 
 #include <zedbsd/system.h>
 
-void kern_resource_snapshot(struct zedbsd_system_resources *);
-int kern_resource_equal(const struct zedbsd_system_resources *,
-	const struct zedbsd_system_resources *);
+void kern_resource_snapshot(struct system_resource_info *);
+int kern_resource_equal(const struct system_resource_info *,
+	const struct system_resource_info *);
 
 #endif

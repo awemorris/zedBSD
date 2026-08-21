@@ -93,8 +93,8 @@ struct font_resource { uint32_t id; int owner; };
 struct pixmap { uint32_t id;int owner;uint16_t width,height;uint32_t*pixels; };
 struct server {
 	int listener, console, mouse, graphics;
-	struct zedbsd_console_input_mode old_console_mode;
-	struct zedbsd_graphics_mode mode;
+	struct console_input_mode old_console_mode;
+	struct graphics_mode mode;
 	struct client clients[MAX_CLIENTS];
 	struct window windows[MAX_WINDOWS];
 	unsigned window_count;
@@ -270,7 +270,7 @@ static void pixmap_fill(struct pixmap*p,int x,int y,int width,int height,uint32_
 }
 static void present(struct server*s)
 {
-	struct zedbsd_graphics_blit b;struct zedbsd_graphics_rect r;struct zedbsd_graphics_flush f;
+	struct graphics_blit b;struct graphics_rect r;struct graphics_flush f;
 	uint16_t shape=pointer_shape(s);int hot_x=shape==XC_LEFT_PTR?CURSOR_HOT_X:7,hot_y=shape==XC_LEFT_PTR?CURSOR_HOT_Y:7;
 	int x,y,w,h;if(!s->dirty)return;x=s->dirty_x0;y=s->dirty_y0;w=s->dirty_x1-x;h=s->dirty_y1-y;s->dirty=0;
 	composite_region(s,x,y,w,h);
@@ -285,12 +285,12 @@ static void present(struct server*s)
 		s->transfer[off]=(uint8_t)(color>>16);s->transfer[off+1]=(uint8_t)(color>>8);s->transfer[off+2]=(uint8_t)color;
 	}
 	memset(&b,0,sizeof(b));b.x=(uint32_t)x;b.y=(uint32_t)y;b.width=(uint32_t)w;b.height=(uint32_t)h;b.format=ZEDBSD_GRAPHICS_FORMAT_RGB24;b.stride=(uint32_t)w*3;b.pixels=(uapi_ptr_t)(uintptr_t)s->transfer;(void)ioctl(s->graphics,ZEDBSD_GRAPHICS_BLIT,&b);
-	r=(struct zedbsd_graphics_rect){(uint32_t)x,(uint32_t)y,(uint32_t)w,(uint32_t)h};f=(struct zedbsd_graphics_flush){(uapi_ptr_t)(uintptr_t)&r,1};(void)ioctl(s->graphics,ZEDBSD_GRAPHICS_FLUSH,&f);
+	r=(struct graphics_rect){(uint32_t)x,(uint32_t)y,(uint32_t)w,(uint32_t)h};f=(struct graphics_flush){(uapi_ptr_t)(uintptr_t)&r,1};(void)ioctl(s->graphics,ZEDBSD_GRAPHICS_FLUSH,&f);
 }
 static int draw_text(struct server*s,struct window*w,struct graphics_context*g,int x,int y,const uint8_t*text,size_t count,int wide)
 {
 	uint8_t bitmap[32];size_t i;uint32_t color=g?g->foreground:0xffffff;
-	for(i=0;i<count;i++){struct zedbsd_graphics_glyph q;uint32_t cp=wide?((uint32_t)text[i*2]<<8)|text[i*2+1]:text[i];int gx,gy,top;memset(&q,0,sizeof(q));q.codepoint=cp;q.bitmap=(uapi_ptr_t)(uintptr_t)bitmap;q.bitmap_capacity=sizeof(bitmap);if(ioctl(s->graphics,ZEDBSD_GRAPHICS_GET_GLYPH,&q))continue;top=y-(int)q.height;for(gy=0;gy<(int)q.height;gy++)for(gx=0;gx<(int)q.width;gx++)if(x+gx>=0&&x+gx<w->width&&top+gy>=0&&top+gy<w->height&&(bitmap[(size_t)gy*q.stride+(unsigned)gx/8]&(0x80U>>((unsigned)gx&7))))w->pixels[(size_t)(top+gy)*w->width+(x+gx)]=color;mark_dirty(s,w->x+x,w->y+top,(int)q.width,(int)q.height);x+=(int)(q.advance?q.advance:q.width);}
+	for(i=0;i<count;i++){struct graphics_glyph q;uint32_t cp=wide?((uint32_t)text[i*2]<<8)|text[i*2+1]:text[i];int gx,gy,top;memset(&q,0,sizeof(q));q.codepoint=cp;q.bitmap=(uapi_ptr_t)(uintptr_t)bitmap;q.bitmap_capacity=sizeof(bitmap);if(ioctl(s->graphics,ZEDBSD_GRAPHICS_GET_GLYPH,&q))continue;top=y-(int)q.height;for(gy=0;gy<(int)q.height;gy++)for(gx=0;gx<(int)q.width;gx++)if(x+gx>=0&&x+gx<w->width&&top+gy>=0&&top+gy<w->height&&(bitmap[(size_t)gy*q.stride+(unsigned)gx/8]&(0x80U>>((unsigned)gx&7))))w->pixels[(size_t)(top+gy)*w->width+(x+gx)]=color;mark_dirty(s,w->x+x,w->y+top,(int)q.width,(int)q.height);x+=(int)(q.advance?q.advance:q.width);}
 	return 0;
 }
 static void repaint(struct server *s)
@@ -431,11 +431,11 @@ static uint16_t x_modifier_state(uint32_t modifiers)
 }
 static void keyboard(struct server *s)
 {
-	struct zedbsd_console_input_event ev[16];ssize_t n;while((n=read(s->console,ev,sizeof(ev)))>0){size_t i;if((size_t)n%sizeof(ev[0])){stopped=1;return;}for(i=0;i<(size_t)n/sizeof(ev[0]);i++){struct window *w=find_window(s,s->focus);struct client *c;uint32_t kc;uint16_t state=x_modifier_state(ev[i].modifiers);if(!w)w=hit(s,s->pointer_x,s->pointer_y);c=owner_client(s,w->owner);kc=keycode(ev[i].key);s->key_state=state;if(!c||!kc)continue;if(ev[i].state==ZEDBSD_CONSOLE_KEY_PRESS){send_event(c,2,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);}else if(ev[i].state==ZEDBSD_CONSOLE_KEY_RELEASE){send_event(c,3,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);}else{send_event(c,3,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);send_event(c,2,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);}}}if(n<0&&errno!=EAGAIN&&errno!=EINTR)stopped=1;
+	struct console_input_event ev[16];ssize_t n;while((n=read(s->console,ev,sizeof(ev)))>0){size_t i;if((size_t)n%sizeof(ev[0])){stopped=1;return;}for(i=0;i<(size_t)n/sizeof(ev[0]);i++){struct window *w=find_window(s,s->focus);struct client *c;uint32_t kc;uint16_t state=x_modifier_state(ev[i].modifiers);if(!w)w=hit(s,s->pointer_x,s->pointer_y);c=owner_client(s,w->owner);kc=keycode(ev[i].key);s->key_state=state;if(!c||!kc)continue;if(ev[i].state==ZEDBSD_CONSOLE_KEY_PRESS){send_event(c,2,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);}else if(ev[i].state==ZEDBSD_CONSOLE_KEY_RELEASE){send_event(c,3,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);}else{send_event(c,3,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);send_event(c,2,w->id,kc,(uint32_t)(ev[i].timestamp_ns/1000000),s->pointer_x,s->pointer_y,state);}}}if(n<0&&errno!=EAGAIN&&errno!=EINTR)stopped=1;
 }
 static void mouse(struct server *s)
 {
-	struct zedbsd_mouse_event ev[16];
+	struct mouse_event ev[16];
 	ssize_t n;
 	int redraw = 0, oldx = s->pointer_x, oldy = s->pointer_y;
 
@@ -538,10 +538,10 @@ static int parse_size(const char *text, unsigned *width, unsigned *height)
 
 static int choose_mode(int fd, unsigned preferred_width,
 	unsigned preferred_height, unsigned preferred_depth,
-	struct zedbsd_graphics_mode *chosen)
+	struct graphics_mode *chosen)
 {
-	struct zedbsd_graphics_mode_info modes[16];
-	struct zedbsd_graphics_mode_list list;
+	struct graphics_mode_info modes[16];
+	struct graphics_mode_list list;
 	int best = -1;
 	unsigned pass, i;
 
@@ -581,7 +581,7 @@ static int choose_mode(int fd, unsigned preferred_width,
 static int initialize(struct server *s, unsigned preferred_width,
 	unsigned preferred_height, unsigned preferred_depth)
 {
-	struct sockaddr_un a;struct zedbsd_graphics_caps caps;struct zedbsd_console_input_mode m={ZEDBSD_CONSOLE_INPUT_EVENT,0};unsigned i;memset(s,0,sizeof(*s));s->listener=s->console=s->mouse=s->graphics=-1;s->pointer_grab_owner=-1;for(i=0;i<MAX_CLIENTS;i++)s->clients[i].fd=-1;
+	struct sockaddr_un a;struct graphics_caps caps;struct console_input_mode m={ZEDBSD_CONSOLE_INPUT_EVENT,0};unsigned i;memset(s,0,sizeof(*s));s->listener=s->console=s->mouse=s->graphics=-1;s->pointer_grab_owner=-1;for(i=0;i<MAX_CLIENTS;i++)s->clients[i].fd=-1;
 	s->console=open("/dev/console",O_RDONLY|O_NONBLOCK);if(s->console<0)return -1;if(ioctl(s->console,ZEDBSD_CONSOLE_GET_INPUT_MODE,&s->old_console_mode)||ioctl(s->console,ZEDBSD_CONSOLE_SET_INPUT_MODE,&m))return -1;
 	s->mouse=open("/dev/mouse",O_RDONLY|O_NONBLOCK);
 	s->graphics=open("/dev/graphics",O_RDWR);if(s->graphics<0)return -1;if(ioctl(s->graphics,ZEDBSD_GRAPHICS_GET_CAPS,&caps))return -1;if(!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_FLUSH)||!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_GLYPH)||!(caps.capabilities&ZEDBSD_GRAPHICS_CAP_BLIT_RGB24)){errno=ENOTSUP;return -1;}if(choose_mode(s->graphics,preferred_width,preferred_height,preferred_depth,&s->mode))return -1;if(ioctl(s->graphics,ZEDBSD_GRAPHICS_ENTER,&s->mode))return -1;

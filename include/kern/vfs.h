@@ -12,7 +12,7 @@
 #include "kern/namei.h"
 
 extern struct cwdinfo kern_cwdinfo;
-int kern_vfs_init(const struct zedbsd_handoff *, const struct zedbsd_device *,
+int kern_vfs_init(const struct boot_handoff *, const struct boot_device *,
 		  unsigned);
 
 #endif

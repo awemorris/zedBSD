@@ -14,7 +14,7 @@ _start:
 	sub %sp, 176, %sp
 	mov %l1, %o0
 	mov %l2, %o1
-	call zedbsd_user_libc_init
+	call __libc_init
 	 mov %l3, %o2
 	mov %l1, %o0
 	mov %l2, %o1

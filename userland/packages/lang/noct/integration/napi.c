@@ -30,13 +30,13 @@ struct imported_source {
 };
 
 struct active_napi {
-	const struct zedbsd_noct_services *services;
-	zedbsd_noct_write_fn write;
+	const struct noct_services *services;
+	noct_write_fn write;
 	void *write_context;
 	size_t arena_size;
 	size_t source_max;
 	struct imported_source *imports;
-	struct zedbsd_environment *environment;
+	struct environment *environment;
 };
 
 struct api_item {
@@ -575,7 +575,7 @@ out:
 
 static bool
 make_directory_entry(NoctEnv *env, NoctValue *dictionary,
-		     NoctValue *scratch, const struct zedbsd_noct_dirent *entry)
+		     NoctValue *scratch, const struct noct_dirent *entry)
 {
 	return noct_make_empty_dict(env, dictionary) &&
 	       noct_set_dict_elem_make_string(env, dictionary, "name", scratch,
@@ -595,7 +595,7 @@ cfunc_directory_list(NoctEnv *env)
 	NoctValue array;
 	NoctValue dictionary;
 	NoctValue scratch;
-	struct zedbsd_noct_dirent entry;
+	struct noct_dirent entry;
 	const char *path;
 	unsigned index;
 	int status;
@@ -662,7 +662,7 @@ cfunc_directory_stat(NoctEnv *env)
 	NoctValue argument;
 	NoctValue dictionary;
 	NoctValue scratch;
-	struct zedbsd_noct_dirent entry;
+	struct noct_dirent entry;
 	const char *path;
 	const char *name;
 	unsigned index;
@@ -787,9 +787,9 @@ cfunc_system_get_env(NoctEnv *env)
 	if (!noct_pin_local(env, 1, &argument))
 		return false;
 	if (!noct_get_arg_check_string(env, 0, &argument, &name) ||
-	    active.environment == NULL || !zedbsd_env_name_valid(name))
+	    active.environment == NULL || !env_name_valid(name))
 		goto error;
-	value = zedbsd_env_get(active.environment, name);
+	value = env_get(active.environment, name);
 	ok = return_string(env, value != NULL ? value : "");
 	goto out;
 error:
@@ -815,7 +815,7 @@ cfunc_system_set_env(NoctEnv *env)
 	if (!noct_get_arg_check_string(env, 0, &name_value, &name) ||
 	    !noct_get_arg_check_string(env, 1, &string_value, &value) ||
 	    active.environment == NULL ||
-	    !zedbsd_env_set(active.environment, name, value))
+	    !env_set(active.environment, name, value))
 		goto error;
 	ok = return_int(env, 0);
 	goto out;
@@ -837,9 +837,9 @@ cfunc_system_unset_env(NoctEnv *env)
 	if (!noct_pin_local(env, 1, &argument))
 		return false;
 	if (!noct_get_arg_check_string(env, 0, &argument, &name) ||
-	    active.environment == NULL || !zedbsd_env_name_valid(name))
+	    active.environment == NULL || !env_name_valid(name))
 		goto error;
-	(void)zedbsd_env_unset(active.environment, name);
+	(void)env_unset(active.environment, name);
 	ok = return_int(env, 0);
 	goto out;
 error:
@@ -864,11 +864,11 @@ cfunc_system_list_env(NoctEnv *env)
 		return false;
 	if (!noct_make_empty_dict(env, &dictionary))
 		goto out;
-	for (index = 0; index < zedbsd_env_count(active.environment); index++) {
+	for (index = 0; index < env_count(active.environment); index++) {
 		const char *name;
 		const char *value;
 
-		if (!zedbsd_env_at(active.environment, index, &name, &value) ||
+		if (!env_at(active.environment, index, &name, &value) ||
 		    !noct_set_dict_elem_make_string(env, &dictionary, name,
 						 &scratch, value))
 			goto out;
@@ -892,9 +892,9 @@ cfunc_system_memory_usage(NoctEnv *env)
 		return false;
 	if (noct_make_empty_dict(env, &dictionary) &&
 	    noct_set_dict_elem_make_long(env, &dictionary, "current", &scratch,
-					 (int64_t)zedbsd_heap_current()) &&
+					 (int64_t)heap_active_current()) &&
 	    noct_set_dict_elem_make_long(env, &dictionary, "peak", &scratch,
-					 (int64_t)zedbsd_heap_peak()) &&
+					 (int64_t)heap_active_peak()) &&
 	    noct_set_dict_elem_make_long(env, &dictionary, "arenaSize", &scratch,
 					 (int64_t)active.arena_size) &&
 	    noct_set_return(env, &dictionary))
@@ -954,7 +954,7 @@ out:
 }
 
 int
-zedbsd_key_normalize_bios_ax(uint16_t bios_ax)
+key_normalize_bios_ax(uint16_t bios_ax)
 {
 	unsigned ascii = bios_ax & 0xffU;
 	unsigned scan = bios_ax >> 8;
@@ -970,8 +970,8 @@ zedbsd_key_normalize_bios_ax(uint16_t bios_ax)
 }
 
 int
-zedbsd_noct_napi_register(NoctEnv *env,
-			  const struct zedbsd_noct_options *options)
+noct_napi_register(NoctEnv *env,
+			  const struct noct_options *options)
 {
 	static struct api_item console[] = {
 		{ "Console.print", "print", 1, { "value" }, cfunc_console_print },
@@ -1055,14 +1055,14 @@ zedbsd_noct_napi_register(NoctEnv *env,
 			     sizeof(directory) / sizeof(directory[0])) ||
 	    !register_module(env, "System", system,
 			     sizeof(system) / sizeof(system[0]))) {
-		zedbsd_noct_napi_cleanup();
+		noct_napi_cleanup();
 		return 0;
 	}
 	return 1;
 }
 
 void
-zedbsd_noct_napi_cleanup(void)
+noct_napi_cleanup(void)
 {
 	struct imported_source *source = active.imports;
 

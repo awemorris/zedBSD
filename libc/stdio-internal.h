@@ -8,7 +8,7 @@
 /* FILE is deliberately opaque outside libc.  The first five fields retain
  * the legacy kernel-mode adapter layout while that adapter is being retired;
  * no application ABI depends on them. */
-struct zedbsd_stdio_file {
+struct __stdio_file {
 	void *context;
 	uint64_t position;
 	int error;
@@ -28,7 +28,7 @@ struct zedbsd_stdio_file {
 	unsigned heap_allocated;
 	unsigned io_started;
 	int orientation;
-	struct zedbsd_stdio_file *registry_next;
+	struct __stdio_file *registry_next;
 };
 
 #endif

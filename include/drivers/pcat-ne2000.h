@@ -7,6 +7,6 @@
 #ifndef ZEDBSD_DRIVERS_PCAT_NE2000_H
 #define ZEDBSD_DRIVERS_PCAT_NE2000_H
 
-int zedbsd_pcat_ne2000_init(void);
+int pcat_ne2000_init(void);
 
 #endif

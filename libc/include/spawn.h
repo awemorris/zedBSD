@@ -13,7 +13,7 @@
 
 #define ZEDBSD_SPAWN_ACTION_MAX 16
 #define ZEDBSD_SPAWN_PATH_MAX 256
-struct zedbsd_spawn_action {
+struct __spawn_action {
 	int operation;
 	int descriptor;
 	int new_descriptor;
@@ -23,7 +23,7 @@ struct zedbsd_spawn_action {
 };
 typedef struct {
 	unsigned count;
-	struct zedbsd_spawn_action actions[ZEDBSD_SPAWN_ACTION_MAX];
+	struct __spawn_action actions[ZEDBSD_SPAWN_ACTION_MAX];
 } posix_spawn_file_actions_t;
 typedef struct {
 	short flags;

@@ -7,14 +7,14 @@
 
 #include "kern/image.h"
 
-int zedbsd_image_boot(const struct zedbsd_image_loader *loader,
-		      struct zedbsd_filesystem *filesystem, const char *path,
+int boot_image_load(const struct boot_image_loader *loader,
+		      struct bootfs *filesystem, const char *path,
 		      const char *arguments)
 {
-	struct zedbsd_file file;
+	struct bootfs_file file;
 
 	if (!loader || !loader->probe || !loader->load ||
-	    !zedbsd_fs_open(filesystem, path, &file) || !loader->probe(&file))
+	    !bootfs_open(filesystem, path, &file) || !loader->probe(&file))
 		return 0;
 	return loader->load(&file, arguments ? arguments : "");
 }

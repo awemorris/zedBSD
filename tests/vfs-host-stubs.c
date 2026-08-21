@@ -78,7 +78,7 @@ void waitq_wake_one(struct wait_queue *queue) { queue->sequence++; }
 void waitq_wake_all(struct wait_queue *queue) { queue->sequence++; }
 
 void
-zedbsd_clock_realtime(time_t *seconds, long *nanoseconds)
+clock_realtime(time_t *seconds, long *nanoseconds)
 {
 	if (seconds != NULL)
 		*seconds = 1;

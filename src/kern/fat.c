@@ -11,11 +11,11 @@
 
 static uint8_t bpb_cache[512];
 
-_Static_assert(sizeof(struct zedbsd_fat_state) <=
-	       sizeof(((struct zedbsd_filesystem *)0)->private_data),
+_Static_assert(sizeof(struct bootfat_state) <=
+	       sizeof(((struct bootfs *)0)->private_data),
 	       "FAT state exceeds generic filesystem storage");
-_Static_assert(sizeof(struct zedbsd_fat_file_state) <=
-	       sizeof(((struct zedbsd_file *)0)->private_data),
+_Static_assert(sizeof(struct bootfat_file_state) <=
+	       sizeof(((struct bootfs_file *)0)->private_data),
 	       "FAT file state exceeds generic file storage");
 
 static void copy_bytes(void *destination, const void *source, uint32_t length)
@@ -27,52 +27,52 @@ static void copy_bytes(void *destination, const void *source, uint32_t length)
 		*output++ = *input++;
 }
 
-uint16_t zedbsd_fat_get16(const uint8_t *bytes)
+uint16_t bootfat_get16(const uint8_t *bytes)
 {
 	return bytes[0] | ((uint16_t)bytes[1] << 8);
 }
 
-uint32_t zedbsd_fat_get32(const uint8_t *bytes)
+uint32_t bootfat_get32(const uint8_t *bytes)
 {
-	return zedbsd_fat_get16(bytes) |
-	       ((uint32_t)zedbsd_fat_get16(bytes + 2) << 16);
+	return bootfat_get16(bytes) |
+	       ((uint32_t)bootfat_get16(bytes + 2) << 16);
 }
 
-struct zedbsd_fat_state *zedbsd_fat_state(
-	struct zedbsd_filesystem *filesystem)
+struct bootfat_state *bootfat_state(
+	struct bootfs *filesystem)
 {
-	return (struct zedbsd_fat_state *)filesystem->private_data;
+	return (struct bootfat_state *)filesystem->private_data;
 }
 
-struct zedbsd_fat_file_state *zedbsd_fat_file_state(
-	struct zedbsd_file *file)
+struct bootfat_file_state *bootfat_file_state(
+	struct bootfs_file *file)
 {
-	return (struct zedbsd_fat_file_state *)file->private_data;
+	return (struct bootfat_file_state *)file->private_data;
 }
 
-const uint8_t *zedbsd_fat_read_sector(struct zedbsd_filesystem *filesystem,
+const uint8_t *bootfat_read_sector(struct bootfs *filesystem,
 				      uint32_t lba)
 {
 	const uint8_t *sector;
 
-	if (zedbsd_fat_read_sector_result(filesystem, lba, &sector) !=
+	if (bootfat_read_sector_result(filesystem, lba, &sector) !=
 	    ZEDBSD_FS_OK)
 		return 0;
 	return sector;
 }
 
-enum zedbsd_fs_result zedbsd_fat_flush(
-	struct zedbsd_filesystem *filesystem)
+enum bootfs_result bootfat_flush(
+	struct bootfs *filesystem)
 {
-	struct zedbsd_fat_state *fat;
-	enum zedbsd_fs_result result;
+	struct bootfat_state *fat;
+	enum bootfs_result result;
 
 	if (!filesystem)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
-	fat = zedbsd_fat_state(filesystem);
+	fat = bootfat_state(filesystem);
 	if (!fat->sector_cache_dirty)
 		return ZEDBSD_FS_OK;
-	result = zedbsd_volume_write_result(&filesystem->volume,
+	result = boot_volume_write_result(&filesystem->volume,
 					    fat->sector_cache_lba,
 					    fat->sector_cache);
 	if (result == ZEDBSD_FS_OK)
@@ -80,26 +80,26 @@ enum zedbsd_fs_result zedbsd_fat_flush(
 	return result;
 }
 
-void zedbsd_fat_invalidate(struct zedbsd_filesystem *filesystem)
+void bootfat_invalidate(struct bootfs *filesystem)
 {
-	struct zedbsd_fat_state *fat;
+	struct bootfat_state *fat;
 	if (!filesystem)
 		return;
-	fat = zedbsd_fat_state(filesystem);
+	fat = bootfat_state(filesystem);
 	fat->sector_cache_valid = 0;
 	fat->sector_cache_dirty = 0;
 }
 
-enum zedbsd_fs_result zedbsd_fat_read_sector_result(
-	struct zedbsd_filesystem *filesystem, uint32_t lba,
+enum bootfs_result bootfat_read_sector_result(
+	struct bootfs *filesystem, uint32_t lba,
 	const uint8_t **sector)
 {
-	enum zedbsd_fs_result result;
-	struct zedbsd_fat_state *fat;
+	enum bootfs_result result;
+	struct bootfat_state *fat;
 
 	if (!filesystem || !sector)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
-	fat = zedbsd_fat_state(filesystem);
+	fat = bootfat_state(filesystem);
 	if (lba >= fat->total_sectors)
 		return ZEDBSD_FS_CORRUPT;
 	if (fat->sector_cache_valid && fat->sector_cache_lba == lba) {
@@ -107,13 +107,13 @@ enum zedbsd_fs_result zedbsd_fat_read_sector_result(
 		return ZEDBSD_FS_OK;
 	}
 	if (fat->sector_cache_dirty) {
-		result = zedbsd_fat_flush(filesystem);
+		result = bootfat_flush(filesystem);
 		if (result != ZEDBSD_FS_OK)
 			return result;
 	}
 	fat->sector_cache_valid = 0;
 	fat->sector_cache_dirty = 0;
-	result = zedbsd_volume_read_result(&filesystem->volume, lba,
+	result = boot_volume_read_result(&filesystem->volume, lba,
 					  fat->sector_cache);
 	if (result != ZEDBSD_FS_OK)
 		return result;
@@ -123,44 +123,44 @@ enum zedbsd_fs_result zedbsd_fat_read_sector_result(
 	return ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result zedbsd_fat_write_sector_result(
-	struct zedbsd_filesystem *filesystem, uint32_t lba, uint8_t **sector)
+enum bootfs_result bootfat_write_sector_result(
+	struct bootfs *filesystem, uint32_t lba, uint8_t **sector)
 {
 	const uint8_t *read_sector;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!filesystem || !sector)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
 	if (!filesystem->volume.write)
 		return ZEDBSD_FS_READ_ONLY;
-	result = zedbsd_fat_read_sector_result(filesystem, lba, &read_sector);
+	result = bootfat_read_sector_result(filesystem, lba, &read_sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	*sector = (uint8_t *)read_sector;
 	return ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result zedbsd_fat_mark_sector_dirty(
-	struct zedbsd_filesystem *filesystem)
+enum bootfs_result bootfat_mark_sector_dirty(
+	struct bootfs *filesystem)
 {
 	if (!filesystem || !filesystem->volume.write)
 		return ZEDBSD_FS_READ_ONLY;
-	if (!zedbsd_fat_state(filesystem)->sector_cache_valid)
+	if (!bootfat_state(filesystem)->sector_cache_valid)
 		return ZEDBSD_FS_CORRUPT;
-	zedbsd_fat_state(filesystem)->sector_cache_dirty = 1;
+	bootfat_state(filesystem)->sector_cache_dirty = 1;
 	return ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result zedbsd_fat_cluster_lba(
-	struct zedbsd_filesystem *filesystem, uint32_t cluster,
+enum bootfs_result bootfat_cluster_lba(
+	struct bootfs *filesystem, uint32_t cluster,
 	uint32_t sector_in_cluster, uint32_t *lba)
 {
-	struct zedbsd_fat_state *fat;
+	struct bootfat_state *fat;
 	uint32_t cluster_offset;
 
 	if (!filesystem || !lba)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
-	fat = zedbsd_fat_state(filesystem);
+	fat = bootfat_state(filesystem);
 	if (cluster < 2 || cluster >= fat->cluster_count + 2 ||
 	    sector_in_cluster >= fat->sectors_per_cluster)
 		return ZEDBSD_FS_CORRUPT;
@@ -177,27 +177,27 @@ enum zedbsd_fs_result zedbsd_fat_cluster_lba(
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result parse_bpb(const struct zedbsd_volume *volume,
-				       struct zedbsd_fat_state *fat)
+static enum bootfs_result parse_bpb(const struct boot_volume *volume,
+				       struct bootfat_state *fat)
 {
 	uint32_t reserved, fat_sectors, fat32_sectors, root_sectors, metadata;
 	uint32_t total, total_physical, data_sectors;
 	uint16_t bytes, fat16_sectors;
 	uint8_t sectors_per_cluster;
 
-	if (!zedbsd_volume_read(volume, 0, bpb_cache))
+	if (!boot_volume_read(volume, 0, bpb_cache))
 		return ZEDBSD_FS_IO_ERROR;
-	bytes = zedbsd_fat_get16(bpb_cache + 11);
+	bytes = bootfat_get16(bpb_cache + 11);
 	fat->sector_scale = bytes == 512 ? 1 : bytes == 1024 ? 2 : 0;
 	sectors_per_cluster = bpb_cache[13];
-	reserved = zedbsd_fat_get16(bpb_cache + 14);
+	reserved = bootfat_get16(bpb_cache + 14);
 	fat->number_of_fats = bpb_cache[16];
-	fat->root_entries = zedbsd_fat_get16(bpb_cache + 17);
-	total = zedbsd_fat_get16(bpb_cache + 19);
+	fat->root_entries = bootfat_get16(bpb_cache + 17);
+	total = bootfat_get16(bpb_cache + 19);
 	if (!total)
-		total = zedbsd_fat_get32(bpb_cache + 32);
-	fat16_sectors = zedbsd_fat_get16(bpb_cache + 22);
-	fat32_sectors = zedbsd_fat_get32(bpb_cache + 36);
+		total = bootfat_get32(bpb_cache + 32);
+	fat16_sectors = bootfat_get16(bpb_cache + 22);
+	fat32_sectors = bootfat_get32(bpb_cache + 36);
 	fat_sectors = fat16_sectors;
 	if (!fat_sectors)
 		fat_sectors = fat32_sectors;
@@ -234,8 +234,8 @@ static enum zedbsd_fs_result parse_bpb(const struct zedbsd_volume *volume,
 	fat->fat16_layout = fat16_sectors != 0 && fat->root_entries != 0;
 	fat->fat32_layout = fat16_sectors == 0 && fat32_sectors != 0 &&
 		fat->root_entries == 0;
-	fat->root_cluster = zedbsd_fat_get32(bpb_cache + 44) & 0x0fffffffU;
-	fat->fsinfo_sector = zedbsd_fat_get16(bpb_cache + 48);
+	fat->root_cluster = bootfat_get32(bpb_cache + 44) & 0x0fffffffU;
+	fat->fsinfo_sector = bootfat_get16(bpb_cache + 48);
 	if (fat->type == ZEDBSD_FAT32 &&
 	    (!fat->fat32_layout || fat->root_cluster < 2U ||
 	     fat->root_cluster >= fat->cluster_count + 2U))
@@ -243,11 +243,11 @@ static enum zedbsd_fs_result parse_bpb(const struct zedbsd_volume *volume,
 	return ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result zedbsd_fat_probe(
-	const struct zedbsd_volume *volume, enum zedbsd_fat_type required_type)
+enum bootfs_result bootfat_probe(
+	const struct boot_volume *volume, enum bootfat_type required_type)
 {
-	struct zedbsd_fat_state candidate = { 0 };
-	enum zedbsd_fs_result result = parse_bpb(volume, &candidate);
+	struct bootfat_state candidate = { 0 };
+	enum bootfs_result result = parse_bpb(volume, &candidate);
 
 	if (result != ZEDBSD_FS_OK)
 		return result;
@@ -258,11 +258,11 @@ enum zedbsd_fs_result zedbsd_fat_probe(
 	return ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result zedbsd_fat_mount(
-	struct zedbsd_filesystem *filesystem, enum zedbsd_fat_type required_type)
+enum bootfs_result bootfat_mount(
+	struct bootfs *filesystem, enum bootfat_type required_type)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
-	enum zedbsd_fs_result result = parse_bpb(&filesystem->volume, fat);
+	struct bootfat_state *fat = bootfat_state(filesystem);
+	enum bootfs_result result = parse_bpb(&filesystem->volume, fat);
 
 	if (result != ZEDBSD_FS_OK)
 		return result;
@@ -271,7 +271,7 @@ enum zedbsd_fs_result zedbsd_fat_mount(
 	    (required_type == ZEDBSD_FAT32 && !fat->fat32_layout))
 		return ZEDBSD_FS_UNSUPPORTED;
 	fat->allocation_hint = 2;
-	zedbsd_fat_invalidate(filesystem);
+	bootfat_invalidate(filesystem);
 	return ZEDBSD_FS_OK;
 }
 
@@ -326,7 +326,7 @@ int fat_sfn_equal(const uint8_t entry[32], const char name[11])
 }
 
 void fat_sfn_decode_lower(const uint8_t raw[32],
-			      struct zedbsd_dirent *entry)
+			      struct bootfs_dirent *entry)
 {
 	unsigned output = 0;
 
@@ -346,7 +346,7 @@ void fat_sfn_decode_lower(const uint8_t raw[32],
 		}
 	}
 	entry->name[output] = 0;
-	entry->size = zedbsd_fat_get32(raw + 28);
+	entry->size = bootfat_get32(raw + 28);
 	entry->attributes = raw[11];
 }
 
@@ -355,14 +355,14 @@ static int valid_cluster(uint32_t cluster, uint32_t end_of_chain)
 	return cluster >= 2 && cluster < end_of_chain;
 }
 
-enum zedbsd_fs_result zedbsd_fat_read_chain(
-	struct zedbsd_file *file, uint64_t offset, void *buffer, uint32_t length,
-	zedbsd_read_progress_t progress, void *progress_context,
-	zedbsd_fat_next_cluster_t next_cluster, uint32_t end_of_chain)
+enum bootfs_result bootfat_read_chain(
+	struct bootfs_file *file, uint64_t offset, void *buffer, uint32_t length,
+	bootfs_read_progress_fn progress, void *progress_context,
+	bootfat_next_cluster_fn next_cluster, uint32_t end_of_chain)
 {
-	struct zedbsd_filesystem *filesystem = file->filesystem;
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
-	struct zedbsd_fat_file_state *fat_file = zedbsd_fat_file_state(file);
+	struct bootfs *filesystem = file->filesystem;
+	struct bootfat_state *fat = bootfat_state(filesystem);
+	struct bootfat_file_state *fat_file = bootfat_file_state(file);
 	uint32_t cluster = fat_file->first_cluster;
 	uint32_t position, skip, within, since_update = 0;
 	uint8_t *output = buffer;
@@ -375,7 +375,7 @@ enum zedbsd_fs_result zedbsd_fat_read_chain(
 	skip = position / 512;
 	within = position & 511;
 	while (skip >= fat->sectors_per_cluster) {
-		enum zedbsd_fs_result result = next_cluster(filesystem, cluster,
+		enum bootfs_result result = next_cluster(filesystem, cluster,
 							     &cluster);
 
 		if (result != ZEDBSD_FS_OK)
@@ -388,12 +388,12 @@ enum zedbsd_fs_result zedbsd_fat_read_chain(
 		uint32_t lba;
 		uint32_t chunk = 512 - within;
 		const uint8_t *input;
-		enum zedbsd_fs_result result;
+		enum bootfs_result result;
 
-		result = zedbsd_fat_cluster_lba(filesystem, cluster, skip, &lba);
+		result = bootfat_cluster_lba(filesystem, cluster, skip, &lba);
 		if (result != ZEDBSD_FS_OK)
 			return result;
-		result = zedbsd_fat_read_sector_result(filesystem, lba, &input);
+		result = bootfat_read_sector_result(filesystem, lba, &input);
 		if (result != ZEDBSD_FS_OK)
 			return result;
 		if (chunk > length)
@@ -410,7 +410,7 @@ enum zedbsd_fs_result zedbsd_fat_read_chain(
 		}
 		within = 0;
 		if (++skip >= fat->sectors_per_cluster && length) {
-			enum zedbsd_fs_result result;
+			enum bootfs_result result;
 
 			skip = 0;
 			result = next_cluster(filesystem, cluster, &cluster);
@@ -423,13 +423,13 @@ enum zedbsd_fs_result zedbsd_fat_read_chain(
 	return ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result zedbsd_fat_contiguous_lba(
-	struct zedbsd_file *file, uint32_t *absolute_lba,
-	zedbsd_fat_next_cluster_t next_cluster)
+enum bootfs_result bootfat_contiguous_lba(
+	struct bootfs_file *file, uint32_t *absolute_lba,
+	bootfat_next_cluster_fn next_cluster)
 {
-	struct zedbsd_filesystem *filesystem = file->filesystem;
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
-	struct zedbsd_fat_file_state *fat_file = zedbsd_fat_file_state(file);
+	struct bootfs *filesystem = file->filesystem;
+	struct bootfat_state *fat = bootfat_state(filesystem);
+	struct bootfat_file_state *fat_file = bootfat_file_state(file);
 	uint32_t cluster = fat_file->first_cluster;
 	uint32_t cluster_lba;
 	uint64_t left = file->size;
@@ -440,7 +440,7 @@ enum zedbsd_fs_result zedbsd_fat_contiguous_lba(
 		return ZEDBSD_FS_CORRUPT;
 	while (left > (uint32_t)fat->sectors_per_cluster * 512) {
 		uint32_t next;
-		enum zedbsd_fs_result result = next_cluster(filesystem, cluster,
+		enum bootfs_result result = next_cluster(filesystem, cluster,
 							     &next);
 
 		if (result != ZEDBSD_FS_OK)
@@ -450,7 +450,7 @@ enum zedbsd_fs_result zedbsd_fat_contiguous_lba(
 		cluster = next;
 		left -= (uint32_t)fat->sectors_per_cluster * 512;
 	}
-	if (zedbsd_fat_cluster_lba(filesystem, fat_file->first_cluster, 0,
+	if (bootfat_cluster_lba(filesystem, fat_file->first_cluster, 0,
 				   &cluster_lba) != ZEDBSD_FS_OK)
 		return ZEDBSD_FS_CORRUPT;
 	if (cluster_lba > 0xffffffffU - filesystem->volume.start_lba)

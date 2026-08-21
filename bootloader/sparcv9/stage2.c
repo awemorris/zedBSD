@@ -49,7 +49,7 @@ struct load_segment {
 
 static unsigned char sector_buffer[SECTOR_SIZE];
 static unsigned char kernel_image[KERNEL_FILE_LIMIT];
-static struct zedbsd_sun4u_handoff handoff_image;
+static struct sun4u_boot_handoff handoff_image;
 
 void sparcv9_loader_enable_mmu(void);
 
@@ -327,7 +327,7 @@ flush_instruction_cache(unsigned long long start, unsigned long long end)
 
 static int
 load_kernel(const unsigned char *image, unsigned long image_size,
-	    const struct zedbsd_sun4u_handoff *handoff,
+	    const struct sun4u_boot_handoff *handoff,
 	    unsigned long long *entry_out)
 {
 	const unsigned char *header = image;

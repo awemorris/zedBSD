@@ -28,10 +28,10 @@ static const struct memory_limits limits[] = {
 };
 
 int
-zedbsd_user_noct_select_memory(
+user_noct_select_memory(
 	uint64_t capacity_bytes,
 	uint64_t available_bytes,
-	struct zedbsd_user_noct_memory_profile *profile)
+	struct user_noct_memory_profile *profile)
 {
 	struct memory_limits selected;
 	uint64_t arena_bytes;

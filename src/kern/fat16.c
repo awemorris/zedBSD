@@ -86,22 +86,22 @@ static void put32(uint8_t *bytes, uint32_t value)
 	put16(bytes + 2, (uint16_t)(value >> 16));
 }
 
-static enum zedbsd_fs_result fat16_probe(const struct zedbsd_volume *volume)
+static enum bootfs_result fat16_probe(const struct boot_volume *volume)
 {
-	return zedbsd_fat_probe(volume, ZEDBSD_FAT16);
+	return bootfat_probe(volume, ZEDBSD_FAT16);
 }
 
-static enum zedbsd_fs_result fat16_mount(
-	struct zedbsd_filesystem *filesystem)
+static enum bootfs_result fat16_mount(
+	struct bootfs *filesystem)
 {
-	struct zedbsd_fat_state *fat;
-	enum zedbsd_fs_result result;
+	struct bootfat_state *fat;
+	enum bootfs_result result;
 	uint32_t fat_entries;
 
-	result = zedbsd_fat_mount(filesystem, ZEDBSD_FAT16);
+	result = bootfat_mount(filesystem, ZEDBSD_FAT16);
 	if (result != ZEDBSD_FS_OK)
 		return result;
-	fat = zedbsd_fat_state(filesystem);
+	fat = bootfat_state(filesystem);
 	if (!fat->root_entries || !fat->fat_sectors ||
 	    fat->fat_sectors > 0xffffffffU / 512U)
 		return ZEDBSD_FS_CORRUPT;
@@ -112,63 +112,63 @@ static enum zedbsd_fs_result fat16_mount(
 	return ZEDBSD_FS_OK;
 }
 
-static int fat16_valid_cluster(const struct zedbsd_fat_state *fat,
+static int fat16_valid_cluster(const struct bootfat_state *fat,
 			       uint32_t cluster)
 {
 	return cluster >= 2U && cluster < fat->cluster_count + 2U;
 }
 
-static int fat16_is_end(const struct zedbsd_fat_state *fat, uint32_t cluster)
+static int fat16_is_end(const struct bootfat_state *fat, uint32_t cluster)
 {
 	return cluster >= (fat->type == ZEDBSD_FAT12 ? 0xff8U :
 		fat->type == ZEDBSD_FAT16 ? 0xfff8U : 0x0ffffff8U);
 }
 
-static uint32_t fat16_reserved_limit(const struct zedbsd_fat_state *fat)
+static uint32_t fat16_reserved_limit(const struct bootfat_state *fat)
 {
 	return fat->type == ZEDBSD_FAT12 ? FAT12_RESERVED_CLUSTER :
 		fat->type == ZEDBSD_FAT16 ? FAT16_RESERVED_CLUSTER :
 		FAT32_RESERVED_CLUSTER;
 }
 
-static uint32_t fat16_end_of_chain(const struct zedbsd_fat_state *fat)
+static uint32_t fat16_end_of_chain(const struct bootfat_state *fat)
 {
 	return fat->type == ZEDBSD_FAT12 ? FAT12_END_OF_CHAIN :
 		fat->type == ZEDBSD_FAT16 ? FAT16_END_OF_CHAIN :
 		FAT32_END_OF_CHAIN;
 }
 
-static uint32_t fat16_entry_offset(const struct zedbsd_fat_state *fat,
+static uint32_t fat16_entry_offset(const struct bootfat_state *fat,
 				   uint32_t cluster)
 {
 	return fat->type == ZEDBSD_FAT12 ? cluster + cluster / 2U :
 		fat->type == ZEDBSD_FAT16 ? cluster * 2U : cluster * 4U;
 }
 
-static enum zedbsd_fs_result fat16_next_cluster(
-	struct zedbsd_filesystem *filesystem, uint32_t cluster,
+static enum bootfs_result fat16_next_cluster(
+	struct bootfs *filesystem, uint32_t cluster,
 	uint32_t *next_cluster)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	uint32_t offset;
 	const uint8_t *sector;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!next_cluster || !fat16_valid_cluster(fat, cluster))
 		return ZEDBSD_FS_CORRUPT;
 	offset = fat16_entry_offset(fat, cluster);
-	result = zedbsd_fat_read_sector_result(filesystem,
+	result = bootfat_read_sector_result(filesystem,
 					       fat->fat_start + (offset >> 9),
 					       &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	if (fat->type == ZEDBSD_FAT32) {
-		*next_cluster = zedbsd_fat_get32(sector + (offset & 511U)) &
+		*next_cluster = bootfat_get32(sector + (offset & 511U)) &
 			0x0fffffffU;
 		return ZEDBSD_FS_OK;
 	}
 	if (fat->type == ZEDBSD_FAT16) {
-		*next_cluster = zedbsd_fat_get16(sector + (offset & 511U));
+		*next_cluster = bootfat_get16(sector + (offset & 511U));
 		return ZEDBSD_FS_OK;
 	}
 	{
@@ -180,7 +180,7 @@ static enum zedbsd_fs_result fat16_next_cluster(
 		uint32_t value;
 
 		if ((offset & 511U) == 511U) {
-			result = zedbsd_fat_read_sector_result(
+			result = bootfat_read_sector_result(
 				filesystem,
 				fat->fat_start + (offset >> 9) + 1U, &sector);
 			if (result != ZEDBSD_FS_OK)
@@ -195,21 +195,21 @@ static enum zedbsd_fs_result fat16_next_cluster(
 	return ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result
-zedbsd_fat_count_free_clusters(struct zedbsd_filesystem *filesystem,
+enum bootfs_result
+bootfat_count_free_clusters(struct bootfs *filesystem,
 	uint32_t *free_clusters)
 {
-	struct zedbsd_fat_state *fat;
+	struct bootfat_state *fat;
 	uint32_t cluster, count = 0;
 
 	if (filesystem == NULL || free_clusters == NULL)
 		return ZEDBSD_FS_INVALID_PATH;
-	fat = zedbsd_fat_state(filesystem);
+	fat = bootfat_state(filesystem);
 	if (fat == NULL || fat->cluster_count == 0)
 		return ZEDBSD_FS_CORRUPT;
 	for (cluster = 2U; cluster < fat->cluster_count + 2U; cluster++) {
 		uint32_t value;
-		enum zedbsd_fs_result result =
+		enum bootfs_result result =
 		    fat16_next_cluster(filesystem, cluster, &value);
 		if (result != ZEDBSD_FS_OK)
 			return result;
@@ -220,31 +220,31 @@ zedbsd_fat_count_free_clusters(struct zedbsd_filesystem *filesystem,
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result fat16_set_entry_byte(
-	struct zedbsd_filesystem *filesystem, uint32_t copy_start,
+static enum bootfs_result fat16_set_entry_byte(
+	struct bootfs *filesystem, uint32_t copy_start,
 	uint32_t offset, uint8_t keep_mask, uint8_t merge_value)
 {
 	uint8_t *sector;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if ((offset >> 9) > 0xffffffffU - copy_start)
 		return ZEDBSD_FS_CORRUPT;
-	result = zedbsd_fat_write_sector_result(
+	result = bootfat_write_sector_result(
 		filesystem, copy_start + (offset >> 9), &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	sector[offset & 511U] =
 		(uint8_t)((sector[offset & 511U] & keep_mask) | merge_value);
-	result = zedbsd_fat_mark_sector_dirty(filesystem);
+	result = bootfat_mark_sector_dirty(filesystem);
 	if (result == ZEDBSD_FS_OK)
-		result = zedbsd_fat_flush(filesystem);
+		result = bootfat_flush(filesystem);
 	return result;
 }
 
-static enum zedbsd_fs_result fat16_set_cluster(
-	struct zedbsd_filesystem *filesystem, uint32_t cluster, uint32_t value)
+static enum bootfs_result fat16_set_cluster(
+	struct bootfs *filesystem, uint32_t cluster, uint32_t value)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	uint32_t offset;
 	unsigned copy;
 
@@ -253,7 +253,7 @@ static enum zedbsd_fs_result fat16_set_cluster(
 	offset = fat16_entry_offset(fat, cluster);
 	for (copy = 0; copy < fat->number_of_fats; copy++) {
 		uint32_t copy_start;
-		enum zedbsd_fs_result result;
+		enum bootfs_result result;
 
 		if (copy > (0xffffffffU - fat->fat_start) / fat->fat_sectors)
 			return ZEDBSD_FS_CORRUPT;
@@ -263,22 +263,22 @@ static enum zedbsd_fs_result fat16_set_cluster(
 
 			if ((offset >> 9) > 0xffffffffU - copy_start)
 				return ZEDBSD_FS_CORRUPT;
-			result = zedbsd_fat_write_sector_result(
+			result = bootfat_write_sector_result(
 				filesystem, copy_start + (offset >> 9),
 				&sector);
 			if (result != ZEDBSD_FS_OK)
 				return result;
 			if (fat->type == ZEDBSD_FAT32) {
 				uint8_t *entry = sector + (offset & 511U);
-				uint32_t old = zedbsd_fat_get32(entry);
+				uint32_t old = bootfat_get32(entry);
 				put32(entry, (old & 0xf0000000U) |
 				      (value & 0x0fffffffU));
 			} else {
 				put16(sector + (offset & 511U), (uint16_t)value);
 			}
-			result = zedbsd_fat_mark_sector_dirty(filesystem);
+			result = bootfat_mark_sector_dirty(filesystem);
 			if (result == ZEDBSD_FS_OK)
-				result = zedbsd_fat_flush(filesystem);
+				result = bootfat_flush(filesystem);
 			if (result != ZEDBSD_FS_OK)
 				return result;
 			continue;
@@ -308,17 +308,17 @@ static enum zedbsd_fs_result fat16_set_cluster(
 	return ZEDBSD_FS_OK;
 }
 
-static uint32_t fat16_dir_cluster(const struct zedbsd_fat_state *fat,
+static uint32_t fat16_dir_cluster(const struct bootfat_state *fat,
 				  const uint8_t raw[32])
 {
-	uint32_t cluster = zedbsd_fat_get16(raw + 26);
+	uint32_t cluster = bootfat_get16(raw + 26);
 
 	if (fat->type == ZEDBSD_FAT32)
-		cluster |= (uint32_t)zedbsd_fat_get16(raw + 20) << 16;
+		cluster |= (uint32_t)bootfat_get16(raw + 20) << 16;
 	return cluster & 0x0fffffffU;
 }
 
-static void fat16_put_dir_cluster(const struct zedbsd_fat_state *fat,
+static void fat16_put_dir_cluster(const struct bootfat_state *fat,
 				  uint8_t raw[32], uint32_t cluster)
 {
 	put16(raw + 26, (uint16_t)cluster);
@@ -326,15 +326,15 @@ static void fat16_put_dir_cluster(const struct zedbsd_fat_state *fat,
 		put16(raw + 20, (uint16_t)(cluster >> 16));
 }
 
-static uint32_t fat16_root_cluster(const struct zedbsd_fat_state *fat)
+static uint32_t fat16_root_cluster(const struct bootfat_state *fat)
 {
 	return fat->type == ZEDBSD_FAT32 ? fat->root_cluster : 0;
 }
 
-static enum zedbsd_fs_result fat16_validate_chain(
-	struct zedbsd_filesystem *filesystem, uint32_t first_cluster)
+static enum bootfs_result fat16_validate_chain(
+	struct bootfs *filesystem, uint32_t first_cluster)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	uint32_t slow = first_cluster, fast = first_cluster;
 	uint32_t steps;
 
@@ -342,7 +342,7 @@ static enum zedbsd_fs_result fat16_validate_chain(
 		return ZEDBSD_FS_CORRUPT;
 	for (steps = 0; steps <= fat->cluster_count; steps++) {
 		uint32_t next;
-		enum zedbsd_fs_result result;
+		enum bootfs_result result;
 
 		result = fat16_next_cluster(filesystem, slow, &next);
 		if (result != ZEDBSD_FS_OK)
@@ -375,13 +375,13 @@ static enum zedbsd_fs_result fat16_validate_chain(
 	return ZEDBSD_FS_CORRUPT;
 }
 
-static enum zedbsd_fs_result fat16_free_chain(
-	struct zedbsd_filesystem *filesystem, uint32_t first_cluster)
+static enum bootfs_result fat16_free_chain(
+	struct bootfs *filesystem, uint32_t first_cluster)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	uint32_t cluster = first_cluster;
 	uint32_t steps;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!first_cluster)
 		return ZEDBSD_FS_OK;
@@ -404,10 +404,10 @@ static enum zedbsd_fs_result fat16_free_chain(
 	return ZEDBSD_FS_CORRUPT;
 }
 
-static enum zedbsd_fs_result fat16_find_free_cluster(
-	struct zedbsd_filesystem *filesystem, uint32_t *free_cluster)
+static enum bootfs_result fat16_find_free_cluster(
+	struct bootfs *filesystem, uint32_t *free_cluster)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	uint32_t start = fat->allocation_hint;
 	uint32_t index;
 
@@ -419,7 +419,7 @@ static enum zedbsd_fs_result fat16_find_free_cluster(
 		uint32_t cluster = 2U +
 			((start - 2U + index) % fat->cluster_count);
 		uint32_t value;
-		enum zedbsd_fs_result result;
+		enum bootfs_result result;
 
 		result = fat16_next_cluster(filesystem, cluster, &value);
 		if (result != ZEDBSD_FS_OK)
@@ -435,37 +435,37 @@ static enum zedbsd_fs_result fat16_find_free_cluster(
 	return ZEDBSD_FS_NO_SPACE;
 }
 
-static enum zedbsd_fs_result fat16_zero_cluster(
-	struct zedbsd_filesystem *filesystem, uint32_t cluster)
+static enum bootfs_result fat16_zero_cluster(
+	struct bootfs *filesystem, uint32_t cluster)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	uint32_t index;
 
 	for (index = 0; index < fat->sectors_per_cluster; index++) {
 		uint32_t lba;
 		uint8_t *sector;
-		enum zedbsd_fs_result result;
+		enum bootfs_result result;
 
-		result = zedbsd_fat_cluster_lba(filesystem, cluster, index, &lba);
+		result = bootfat_cluster_lba(filesystem, cluster, index, &lba);
 		if (result != ZEDBSD_FS_OK)
 			return result;
-		result = zedbsd_fat_write_sector_result(filesystem, lba, &sector);
+		result = bootfat_write_sector_result(filesystem, lba, &sector);
 		if (result != ZEDBSD_FS_OK)
 			return result;
 		clear_bytes(sector, 512);
-		result = zedbsd_fat_mark_sector_dirty(filesystem);
+		result = bootfat_mark_sector_dirty(filesystem);
 		if (result == ZEDBSD_FS_OK)
-			result = zedbsd_fat_flush(filesystem);
+			result = bootfat_flush(filesystem);
 		if (result != ZEDBSD_FS_OK)
 			return result;
 	}
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result fat16_allocate_cluster(
-	struct zedbsd_filesystem *filesystem, uint32_t *cluster)
+static enum bootfs_result fat16_allocate_cluster(
+	struct bootfs *filesystem, uint32_t *cluster)
 {
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	result = fat16_find_free_cluster(filesystem, cluster);
 	if (result != ZEDBSD_FS_OK)
@@ -474,19 +474,19 @@ static enum zedbsd_fs_result fat16_allocate_cluster(
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	return fat16_set_cluster(filesystem, *cluster,
-				 fat16_end_of_chain(zedbsd_fat_state(filesystem)));
+				 fat16_end_of_chain(bootfat_state(filesystem)));
 }
 
-static enum zedbsd_fs_result fat16_directory_entry(
-	struct zedbsd_filesystem *filesystem,
+static enum bootfs_result fat16_directory_entry(
+	struct bootfs *filesystem,
 	const struct fat16_directory *directory, uint32_t index,
 	uint32_t *entry_lba, uint16_t *entry_offset, const uint8_t **raw)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	uint32_t lba;
 	uint16_t offset;
 	const uint8_t *sector;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (directory->first_cluster == 0) {
 		if (index >= fat->root_entries)
@@ -519,14 +519,14 @@ static enum zedbsd_fs_result fat16_directory_entry(
 			cluster = next;
 		}
 		sector_index = index / FAT16_ENTRIES_PER_SECTOR;
-		result = zedbsd_fat_cluster_lba(filesystem, cluster,
+		result = bootfat_cluster_lba(filesystem, cluster,
 					       sector_index, &lba);
 		if (result != ZEDBSD_FS_OK)
 			return result;
 		offset = (uint16_t)((index % FAT16_ENTRIES_PER_SECTOR) *
 				    FAT16_DIRECTORY_ENTRY_SIZE);
 	}
-	result = zedbsd_fat_read_sector_result(filesystem, lba, &sector);
+	result = bootfat_read_sector_result(filesystem, lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	*entry_lba = lba;
@@ -535,15 +535,15 @@ static enum zedbsd_fs_result fat16_directory_entry(
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result fat16_find_entry(
-	struct zedbsd_filesystem *filesystem,
+static enum bootfs_result fat16_find_entry(
+	struct bootfs *filesystem,
 	const struct fat16_directory *directory,
 	const struct fat_component *component, enum fat_name_match match,
 	uint32_t *entry_lba, uint16_t *entry_offset,
 	uint32_t *free_lba, uint16_t *free_offset,
 	char found_name[ZEDBSD_PATH_MAX])
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	struct fat_lfn_state lfn;
 	uint32_t limit = directory->first_cluster == 0 ? fat->root_entries :
 		fat->cluster_count * (uint32_t)fat->sectors_per_cluster *
@@ -557,7 +557,7 @@ static enum zedbsd_fs_result fat16_find_entry(
 		uint32_t lba;
 		uint16_t offset;
 		const uint8_t *raw;
-		enum zedbsd_fs_result result;
+		enum bootfs_result result;
 
 		result = fat16_directory_entry(filesystem, directory, index,
 					       &lba, &offset, &raw);
@@ -614,13 +614,13 @@ static enum zedbsd_fs_result fat16_find_entry(
 	return have_free ? ZEDBSD_FS_NOT_FOUND : ZEDBSD_FS_NO_SPACE;
 }
 
-static enum zedbsd_fs_result fat16_resolve_parent(
-	struct zedbsd_filesystem *filesystem, const char *path,
+static enum bootfs_result fat16_resolve_parent(
+	struct bootfs *filesystem, const char *path,
 	struct fat16_directory *parent, struct fat_component *component)
 {
 	const char *cursor = path;
 
-	parent->first_cluster = fat16_root_cluster(zedbsd_fat_state(filesystem));
+	parent->first_cluster = fat16_root_cluster(bootfat_state(filesystem));
 	if (*cursor == '/')
 		cursor++;
 	if (!*cursor)
@@ -631,7 +631,7 @@ static enum zedbsd_fs_result fat16_resolve_parent(
 		uint32_t lba = 0, free_lba = 0;
 		uint16_t offset = 0, free_offset = 0;
 		const uint8_t *sector;
-		enum zedbsd_fs_result result;
+		enum bootfs_result result;
 
 		separator = cursor;
 		while (*separator && *separator != '/')
@@ -641,7 +641,7 @@ static enum zedbsd_fs_result fat16_resolve_parent(
 			return ZEDBSD_FS_INVALID_PATH;
 		copy_bytes(component->text, cursor, length);
 		component->text[length] = '\0';
-		if (zedbsd_fat_state(filesystem)->type != ZEDBSD_FAT32 &&
+		if (bootfat_state(filesystem)->type != ZEDBSD_FAT32 &&
 		    !fat_sfn_encode(component->text, component->sfn))
 			return ZEDBSD_FS_INVALID_PATH;
 		if (!*separator)
@@ -655,21 +655,21 @@ static enum zedbsd_fs_result fat16_resolve_parent(
 		if (result != ZEDBSD_FS_OK)
 			return result == ZEDBSD_FS_NO_SPACE ?
 				ZEDBSD_FS_NOT_FOUND : result;
-		result = zedbsd_fat_read_sector_result(filesystem, lba, &sector);
+		result = bootfat_read_sector_result(filesystem, lba, &sector);
 		if (result != ZEDBSD_FS_OK)
 			return result;
 		if (!(sector[offset + 11] & 0x10U))
 			return ZEDBSD_FS_NOT_FOUND;
 		parent->first_cluster = fat16_dir_cluster(
-			zedbsd_fat_state(filesystem), sector + offset);
-		if (!fat16_valid_cluster(zedbsd_fat_state(filesystem),
+			bootfat_state(filesystem), sector + offset);
+		if (!fat16_valid_cluster(bootfat_state(filesystem),
 					 parent->first_cluster))
 			return ZEDBSD_FS_CORRUPT;
 	}
 }
 
-static enum zedbsd_fs_result fat16_resolve_entry(
-	struct zedbsd_filesystem *filesystem, const char *path,
+static enum bootfs_result fat16_resolve_entry(
+	struct bootfs *filesystem, const char *path,
 	uint32_t *lba, uint16_t *offset, const uint8_t **raw,
 	enum fat_name_match match, char found_name[ZEDBSD_PATH_MAX])
 {
@@ -678,7 +678,7 @@ static enum zedbsd_fs_result fat16_resolve_entry(
 	uint32_t free_lba = 0;
 	uint16_t free_offset = 0;
 	const uint8_t *sector;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	result = fat16_resolve_parent(filesystem, path, &parent, &component);
 	if (result != ZEDBSD_FS_OK)
@@ -688,39 +688,39 @@ static enum zedbsd_fs_result fat16_resolve_entry(
 				  found_name);
 	if (result != ZEDBSD_FS_OK)
 		return result == ZEDBSD_FS_NO_SPACE ? ZEDBSD_FS_NOT_FOUND : result;
-	result = zedbsd_fat_read_sector_result(filesystem, *lba, &sector);
+	result = bootfat_read_sector_result(filesystem, *lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	*raw = sector + *offset;
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result fat16_populate_file(
-	struct zedbsd_file *file, uint32_t lba, uint16_t offset,
+static enum bootfs_result fat16_populate_file(
+	struct bootfs_file *file, uint32_t lba, uint16_t offset,
 	const uint8_t raw[32])
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(file->filesystem);
-	struct zedbsd_fat_file_state *state = zedbsd_fat_file_state(file);
+	struct bootfat_state *fat = bootfat_state(file->filesystem);
+	struct bootfat_file_state *state = bootfat_file_state(file);
 
 	state->first_cluster = fat16_dir_cluster(fat, raw);
 	state->directory_lba = lba;
 	state->directory_offset = offset;
 	state->directory_dirty = 0;
-	file->size = zedbsd_fat_get32(raw + 28);
+	file->size = bootfat_get32(raw + 28);
 	if (!file->size && !state->first_cluster)
 		return ZEDBSD_FS_OK;
 	return fat16_valid_cluster(fat, state->first_cluster) ?
 		ZEDBSD_FS_OK : ZEDBSD_FS_CORRUPT;
 }
 
-static enum zedbsd_fs_result fat16_open(
-	struct zedbsd_filesystem *filesystem, const char *path,
-	struct zedbsd_file *file)
+static enum bootfs_result fat16_open(
+	struct bootfs *filesystem, const char *path,
+	struct bootfs_file *file)
 {
 	uint32_t lba = 0;
 	uint16_t offset = 0;
 	const uint8_t *raw;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	result = fat16_resolve_entry(filesystem, path, &lba, &offset, &raw,
 				     FAT_NAME_EXACT, 0);
@@ -731,44 +731,44 @@ static enum zedbsd_fs_result fat16_open(
 	return fat16_populate_file(file, lba, offset, raw);
 }
 
-static enum zedbsd_fs_result fat16_flush_file(struct zedbsd_file *file)
+static enum bootfs_result fat16_flush_file(struct bootfs_file *file)
 {
-	struct zedbsd_fat_file_state *state = zedbsd_fat_file_state(file);
+	struct bootfat_file_state *state = bootfat_file_state(file);
 	uint8_t *sector;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!file->filesystem->volume.write)
 		return ZEDBSD_FS_READ_ONLY;
-	result = zedbsd_fat_flush(file->filesystem);
+	result = bootfat_flush(file->filesystem);
 	if (result != ZEDBSD_FS_OK || !state->directory_dirty)
 		return result;
 	if (file->size > 0xffffffffU)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
-	result = zedbsd_fat_write_sector_result(file->filesystem,
+	result = bootfat_write_sector_result(file->filesystem,
 						state->directory_lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
-	fat16_put_dir_cluster(zedbsd_fat_state(file->filesystem),
+	fat16_put_dir_cluster(bootfat_state(file->filesystem),
 			      sector + state->directory_offset,
 			      state->first_cluster);
 	put32(sector + state->directory_offset + 28, (uint32_t)file->size);
-	result = zedbsd_fat_mark_sector_dirty(file->filesystem);
+	result = bootfat_mark_sector_dirty(file->filesystem);
 	if (result == ZEDBSD_FS_OK)
-		result = zedbsd_fat_flush(file->filesystem);
+		result = bootfat_flush(file->filesystem);
 	if (result == ZEDBSD_FS_OK)
 		state->directory_dirty = 0;
 	return result;
 }
 
-static enum zedbsd_fs_result fat16_cluster_at(
-	struct zedbsd_file *file, uint32_t cluster_index, int allocate,
+static enum bootfs_result fat16_cluster_at(
+	struct bootfs_file *file, uint32_t cluster_index, int allocate,
 	uint32_t *found_cluster)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(file->filesystem);
-	struct zedbsd_fat_file_state *state = zedbsd_fat_file_state(file);
+	struct bootfat_state *fat = bootfat_state(file->filesystem);
+	struct bootfat_file_state *state = bootfat_file_state(file);
 	uint32_t cluster = state->first_cluster;
 	uint32_t index;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!cluster) {
 		if (!allocate)
@@ -807,11 +807,11 @@ static enum zedbsd_fs_result fat16_cluster_at(
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result fat16_write_bytes(
-	struct zedbsd_file *file, uint32_t offset, const uint8_t *input,
+static enum bootfs_result fat16_write_bytes(
+	struct bootfs_file *file, uint32_t offset, const uint8_t *input,
 	uint32_t length, int zero)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(file->filesystem);
+	struct bootfat_state *fat = bootfat_state(file->filesystem);
 	uint32_t cluster_bytes = (uint32_t)fat->sectors_per_cluster * 512U;
 	uint32_t position = offset;
 
@@ -823,18 +823,18 @@ static enum zedbsd_fs_result fat16_write_bytes(
 		uint32_t chunk = 512U - within;
 		uint32_t cluster, lba;
 		uint8_t *sector;
-		enum zedbsd_fs_result result;
+		enum bootfs_result result;
 
 		if (chunk > length)
 			chunk = length;
 		result = fat16_cluster_at(file, cluster_index, 1, &cluster);
 		if (result != ZEDBSD_FS_OK)
 			return result;
-		result = zedbsd_fat_cluster_lba(file->filesystem, cluster,
+		result = bootfat_cluster_lba(file->filesystem, cluster,
 						sector_index, &lba);
 		if (result != ZEDBSD_FS_OK)
 			return result;
-		result = zedbsd_fat_write_sector_result(file->filesystem, lba,
+		result = bootfat_write_sector_result(file->filesystem, lba,
 						  &sector);
 		if (result != ZEDBSD_FS_OK)
 			return result;
@@ -842,9 +842,9 @@ static enum zedbsd_fs_result fat16_write_bytes(
 			clear_bytes(sector + within, chunk);
 		else
 			copy_bytes(sector + within, input, chunk);
-		result = zedbsd_fat_mark_sector_dirty(file->filesystem);
+		result = bootfat_mark_sector_dirty(file->filesystem);
 		if (result == ZEDBSD_FS_OK)
-			result = zedbsd_fat_flush(file->filesystem);
+			result = bootfat_flush(file->filesystem);
 		if (result != ZEDBSD_FS_OK)
 			return result;
 		if (!zero)
@@ -855,12 +855,12 @@ static enum zedbsd_fs_result fat16_write_bytes(
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result fat16_write(
-	struct zedbsd_file *file, uint64_t offset, const void *buffer,
+static enum bootfs_result fat16_write(
+	struct bootfs_file *file, uint64_t offset, const void *buffer,
 	uint32_t length)
 {
 	uint64_t end;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!file->filesystem->volume.write)
 		return ZEDBSD_FS_READ_ONLY;
@@ -869,9 +869,9 @@ static enum zedbsd_fs_result fat16_write(
 		return ZEDBSD_FS_INVALID_ARGUMENT;
 	if (!length)
 		return ZEDBSD_FS_OK;
-	if (zedbsd_fat_file_state(file)->first_cluster) {
+	if (bootfat_file_state(file)->first_cluster) {
 		result = fat16_validate_chain(file->filesystem,
-			zedbsd_fat_file_state(file)->first_cluster);
+			bootfat_file_state(file)->first_cluster);
 		if (result != ZEDBSD_FS_OK)
 			return result;
 	}
@@ -887,19 +887,19 @@ static enum zedbsd_fs_result fat16_write(
 		return result;
 	if (end > file->size) {
 		file->size = end;
-		zedbsd_fat_file_state(file)->directory_dirty = 1;
+		bootfat_file_state(file)->directory_dirty = 1;
 	}
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result fat16_truncate(
-	struct zedbsd_file *file, uint64_t size)
+static enum bootfs_result fat16_truncate(
+	struct bootfs_file *file, uint64_t size)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(file->filesystem);
-	struct zedbsd_fat_file_state *state = zedbsd_fat_file_state(file);
+	struct bootfat_state *fat = bootfat_state(file->filesystem);
+	struct bootfat_file_state *state = bootfat_file_state(file);
 	uint32_t old_first = state->first_cluster;
 	uint64_t old_size = file->size;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!file->filesystem->volume.write)
 		return ZEDBSD_FS_READ_ONLY;
@@ -965,11 +965,11 @@ static enum zedbsd_fs_result fat16_truncate(
 	}
 }
 
-static enum zedbsd_fs_result fat16_sfn_in_use(
-	struct zedbsd_filesystem *filesystem,
+static enum bootfs_result fat16_sfn_in_use(
+	struct bootfs *filesystem,
 	const struct fat16_directory *directory, const uint8_t sfn[11])
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	uint32_t limit = fat->cluster_count *
 		(uint32_t)fat->sectors_per_cluster * FAT16_ENTRIES_PER_SECTOR;
 	uint32_t index;
@@ -978,7 +978,7 @@ static enum zedbsd_fs_result fat16_sfn_in_use(
 		uint32_t lba;
 		uint16_t offset;
 		const uint8_t *raw;
-		enum zedbsd_fs_result result = fat16_directory_entry(
+		enum bootfs_result result = fat16_directory_entry(
 			filesystem, directory, index, &lba, &offset, &raw);
 		(void)lba;
 		(void)offset;
@@ -995,14 +995,14 @@ static enum zedbsd_fs_result fat16_sfn_in_use(
 	return ZEDBSD_FS_CORRUPT;
 }
 
-static enum zedbsd_fs_result fat16_extend_directory(
-	struct zedbsd_filesystem *filesystem,
+static enum bootfs_result fat16_extend_directory(
+	struct bootfs *filesystem,
 	const struct fat16_directory *directory)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	uint32_t last = directory->first_cluster;
 	uint32_t steps, next, added;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (fat->type != ZEDBSD_FAT32 || !fat16_valid_cluster(fat, last))
 		return ZEDBSD_FS_NO_SPACE;
@@ -1029,12 +1029,12 @@ static enum zedbsd_fs_result fat16_extend_directory(
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result fat16_find_free_run(
-	struct zedbsd_filesystem *filesystem,
+static enum bootfs_result fat16_find_free_run(
+	struct bootfs *filesystem,
 	const struct fat16_directory *directory, unsigned needed,
 	uint32_t *first_index)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	uint32_t maximum = fat->cluster_count *
 		(uint32_t)fat->sectors_per_cluster * FAT16_ENTRIES_PER_SECTOR;
 	uint32_t index = 0, run_start = 0;
@@ -1045,7 +1045,7 @@ static enum zedbsd_fs_result fat16_find_free_run(
 		uint32_t lba;
 		uint16_t offset;
 		const uint8_t *raw;
-		enum zedbsd_fs_result result = fat16_directory_entry(
+		enum bootfs_result result = fat16_directory_entry(
 			filesystem, directory, index, &lba, &offset, &raw);
 		(void)lba;
 		(void)offset;
@@ -1074,8 +1074,8 @@ static enum zedbsd_fs_result fat16_find_free_run(
 	return ZEDBSD_FS_NO_SPACE;
 }
 
-static enum zedbsd_fs_result fat16_write_directory_entry(
-	struct zedbsd_filesystem *filesystem,
+static enum bootfs_result fat16_write_directory_entry(
+	struct bootfs *filesystem,
 	const struct fat16_directory *directory, uint32_t index,
 	const uint8_t entry[32], uint32_t *written_lba,
 	uint16_t *written_offset)
@@ -1084,18 +1084,18 @@ static enum zedbsd_fs_result fat16_write_directory_entry(
 	uint16_t offset;
 	const uint8_t *raw;
 	uint8_t *sector;
-	enum zedbsd_fs_result result = fat16_directory_entry(
+	enum bootfs_result result = fat16_directory_entry(
 		filesystem, directory, index, &lba, &offset, &raw);
 	(void)raw;
 	if (result != ZEDBSD_FS_OK)
 		return result;
-	result = zedbsd_fat_write_sector_result(filesystem, lba, &sector);
+	result = bootfat_write_sector_result(filesystem, lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	copy_bytes(sector + offset, entry, 32);
-	result = zedbsd_fat_mark_sector_dirty(filesystem);
+	result = bootfat_mark_sector_dirty(filesystem);
 	if (result == ZEDBSD_FS_OK)
-		result = zedbsd_fat_flush(filesystem);
+		result = bootfat_flush(filesystem);
 	if (result == ZEDBSD_FS_OK) {
 		if (written_lba != 0) *written_lba = lba;
 		if (written_offset != 0) *written_offset = offset;
@@ -1104,7 +1104,7 @@ static enum zedbsd_fs_result fat16_write_directory_entry(
 }
 
 static void fat16_rollback_directory_entries(
-	struct zedbsd_filesystem *filesystem,
+	struct bootfs *filesystem,
 	const struct fat16_directory *directory, uint32_t first, unsigned count)
 {
 	unsigned i;
@@ -1118,17 +1118,17 @@ static void fat16_rollback_directory_entries(
 					  &lba, &offset, &raw) != ZEDBSD_FS_OK)
 			continue;
 		(void)raw;
-		if (zedbsd_fat_write_sector_result(filesystem, lba, &sector) !=
+		if (bootfat_write_sector_result(filesystem, lba, &sector) !=
 		    ZEDBSD_FS_OK)
 			continue;
 		sector[offset] = 0xe5;
-		(void)zedbsd_fat_mark_sector_dirty(filesystem);
-		(void)zedbsd_fat_flush(filesystem);
+		(void)bootfat_mark_sector_dirty(filesystem);
+		(void)bootfat_flush(filesystem);
 	}
 }
 
-static FAT_MUTATION enum zedbsd_fs_result fat32_create_entry(
-	struct zedbsd_filesystem *filesystem,
+static FAT_MUTATION enum bootfs_result fat32_create_entry(
+	struct bootfs *filesystem,
 	const struct fat16_directory *parent,
 	const struct fat_component *component, uint8_t attributes,
 	uint32_t first_cluster, uint32_t size, uint32_t *entry_lba,
@@ -1139,7 +1139,7 @@ static FAT_MUTATION enum zedbsd_fs_result fat32_create_entry(
 	unsigned unit_count, lfn_count, serial, written = 0, i;
 	uint32_t first_index = 0, sfn_lba = 0;
 	uint16_t sfn_offset = 0;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!fat_utf8_to_utf16(component->text, units, &unit_count))
 		return ZEDBSD_FS_INVALID_PATH;
@@ -1172,7 +1172,7 @@ static FAT_MUTATION enum zedbsd_fs_result fat32_create_entry(
 	clear_bytes(raw, sizeof(raw));
 	copy_bytes(raw, sfn, 11);
 	raw[11] = attributes;
-	fat16_put_dir_cluster(zedbsd_fat_state(filesystem), raw, first_cluster);
+	fat16_put_dir_cluster(bootfat_state(filesystem), raw, first_cluster);
 	put32(raw + 28, size);
 	written++;
 	result = fat16_write_directory_entry(filesystem, parent,
@@ -1190,8 +1190,8 @@ rollback:
 	return result;
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_insert_entry(struct zedbsd_filesystem *filesystem,
+static FAT_MUTATION enum bootfs_result
+fat16_insert_entry(struct bootfs *filesystem,
 		   const struct fat16_directory *parent,
 		   const struct fat_component *component, uint8_t attributes,
 		   uint32_t first_cluster, uint32_t size, uint32_t *entry_lba,
@@ -1200,7 +1200,7 @@ fat16_insert_entry(struct zedbsd_filesystem *filesystem,
 	uint32_t lba = 0, free_lba = 0;
 	uint16_t offset = 0, free_offset = 0;
 	uint8_t *sector;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	result = fat16_find_entry(filesystem, parent, component, FAT_NAME_EXACT,
 		&lba, &offset, &free_lba, &free_offset, 0);
@@ -1208,7 +1208,7 @@ fat16_insert_entry(struct zedbsd_filesystem *filesystem,
 		return ZEDBSD_FS_EXISTS;
 	if (result != ZEDBSD_FS_NOT_FOUND && result != ZEDBSD_FS_NO_SPACE)
 		return result;
-	if (zedbsd_fat_state(filesystem)->type == ZEDBSD_FAT32) {
+	if (bootfat_state(filesystem)->type == ZEDBSD_FAT32) {
 		result = fat16_find_entry(filesystem, parent, component,
 			FAT_NAME_CASEFOLD, &lba, &offset, &free_lba,
 			&free_offset, 0);
@@ -1221,18 +1221,18 @@ fat16_insert_entry(struct zedbsd_filesystem *filesystem,
 	}
 	if (result == ZEDBSD_FS_NO_SPACE)
 		return result;
-	result = zedbsd_fat_write_sector_result(filesystem, free_lba, &sector);
+	result = bootfat_write_sector_result(filesystem, free_lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	clear_bytes(sector + free_offset, 32);
 	copy_bytes(sector + free_offset, component->sfn, 11);
 	sector[free_offset + 11] = attributes;
-	fat16_put_dir_cluster(zedbsd_fat_state(filesystem),
+	fat16_put_dir_cluster(bootfat_state(filesystem),
 		sector + free_offset, first_cluster);
 	put32(sector + free_offset + 28, size);
-	result = zedbsd_fat_mark_sector_dirty(filesystem);
+	result = bootfat_mark_sector_dirty(filesystem);
 	if (result == ZEDBSD_FS_OK)
-		result = zedbsd_fat_flush(filesystem);
+		result = bootfat_flush(filesystem);
 	if (result == ZEDBSD_FS_OK) {
 		if (entry_lba != 0)
 			*entry_lba = free_lba;
@@ -1242,16 +1242,16 @@ fat16_insert_entry(struct zedbsd_filesystem *filesystem,
 	return result;
 }
 
-static FAT_MUTATION enum zedbsd_fs_result fat16_create(
-	struct zedbsd_filesystem *filesystem, const char *path,
-	struct zedbsd_file *file)
+static FAT_MUTATION enum bootfs_result fat16_create(
+	struct bootfs *filesystem, const char *path,
+	struct bootfs_file *file)
 {
 	struct fat16_directory parent;
 	struct fat_component component;
 	uint32_t lba = 0, free_lba = 0;
 	uint16_t offset = 0, free_offset = 0;
 	const uint8_t *sector;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!filesystem->volume.write)
 		return ZEDBSD_FS_READ_ONLY;
@@ -1262,7 +1262,7 @@ static FAT_MUTATION enum zedbsd_fs_result fat16_create(
 				  FAT_NAME_EXACT, &lba, &offset,
 				  &free_lba, &free_offset, 0);
 	if (result == ZEDBSD_FS_OK) {
-		result = zedbsd_fat_read_sector_result(filesystem, lba,
+		result = bootfat_read_sector_result(filesystem, lba,
 						       &sector);
 		if (result != ZEDBSD_FS_OK)
 			return result;
@@ -1275,40 +1275,40 @@ static FAT_MUTATION enum zedbsd_fs_result fat16_create(
 		return fat16_truncate(file, 0);
 	}
 	if (result != ZEDBSD_FS_NOT_FOUND &&
-	    !(zedbsd_fat_state(filesystem)->type == ZEDBSD_FAT32 &&
+	    !(bootfat_state(filesystem)->type == ZEDBSD_FAT32 &&
 	      result == ZEDBSD_FS_NO_SPACE))
 		return result;
 	result = fat16_insert_entry(filesystem, &parent, &component, 0x20U,
 		0, 0, &lba, &offset);
 	if (result != ZEDBSD_FS_OK)
 		return result;
-	result = zedbsd_fat_read_sector_result(filesystem, lba, &sector);
+	result = bootfat_read_sector_result(filesystem, lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	return fat16_populate_file(file, lba, offset, sector + offset);
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_mark_deleted(struct zedbsd_filesystem *filesystem, uint32_t lba,
+static FAT_MUTATION enum bootfs_result
+fat16_mark_deleted(struct bootfs *filesystem, uint32_t lba,
 		   uint16_t offset)
 {
 	uint8_t *sector;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
-	result = zedbsd_fat_write_sector_result(filesystem, lba, &sector);
+	result = bootfat_write_sector_result(filesystem, lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	sector[offset] = 0xe5;
-	result = zedbsd_fat_mark_sector_dirty(filesystem);
-	return result == ZEDBSD_FS_OK ? zedbsd_fat_flush(filesystem) : result;
+	result = bootfat_mark_sector_dirty(filesystem);
+	return result == ZEDBSD_FS_OK ? bootfat_flush(filesystem) : result;
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_delete_location(struct zedbsd_filesystem *filesystem,
+static FAT_MUTATION enum bootfs_result
+fat16_delete_location(struct bootfs *filesystem,
 		      const struct fat16_directory *parent, uint32_t target_lba,
 		      uint16_t target_offset)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	uint32_t limit = parent->first_cluster == 0 ? fat->root_entries :
 		fat->cluster_count * (uint32_t)fat->sectors_per_cluster *
 		FAT16_ENTRIES_PER_SECTOR;
@@ -1318,7 +1318,7 @@ fat16_delete_location(struct zedbsd_filesystem *filesystem,
 		uint32_t lba;
 		uint16_t offset;
 		const uint8_t *raw;
-		enum zedbsd_fs_result result = fat16_directory_entry(
+		enum bootfs_result result = fat16_directory_entry(
 			filesystem, parent, index, &lba, &offset, &raw);
 		if (result != ZEDBSD_FS_OK)
 			return result;
@@ -1347,11 +1347,11 @@ fat16_delete_location(struct zedbsd_filesystem *filesystem,
 	return ZEDBSD_FS_NOT_FOUND;
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_directory_empty(struct zedbsd_filesystem *filesystem,
+static FAT_MUTATION enum bootfs_result
+fat16_directory_empty(struct bootfs *filesystem,
 		      uint32_t first_cluster)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	struct fat16_directory directory = { .first_cluster = first_cluster };
 	uint32_t limit = fat->cluster_count *
 		(uint32_t)fat->sectors_per_cluster * FAT16_ENTRIES_PER_SECTOR;
@@ -1361,7 +1361,7 @@ fat16_directory_empty(struct zedbsd_filesystem *filesystem,
 		uint32_t lba;
 		uint16_t offset;
 		const uint8_t *raw;
-		enum zedbsd_fs_result result = fat16_directory_entry(
+		enum bootfs_result result = fat16_directory_entry(
 			filesystem, &directory, index, &lba, &offset, &raw);
 		(void)lba;
 		(void)offset;
@@ -1379,19 +1379,19 @@ fat16_directory_empty(struct zedbsd_filesystem *filesystem,
 	return ZEDBSD_FS_CORRUPT;
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_initialize_directory(struct zedbsd_filesystem *filesystem,
+static FAT_MUTATION enum bootfs_result
+fat16_initialize_directory(struct bootfs *filesystem,
 			   uint32_t cluster, uint32_t parent_cluster)
 {
 	uint32_t lba;
 	uint8_t *sector;
 	uint8_t *raw;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
-	result = zedbsd_fat_cluster_lba(filesystem, cluster, 0, &lba);
+	result = bootfat_cluster_lba(filesystem, cluster, 0, &lba);
 	if (result != ZEDBSD_FS_OK)
 		return result;
-	result = zedbsd_fat_write_sector_result(filesystem, lba, &sector);
+	result = bootfat_write_sector_result(filesystem, lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	clear_bytes(sector, 512);
@@ -1400,25 +1400,25 @@ fat16_initialize_directory(struct zedbsd_filesystem *filesystem,
 		raw[i] = ' ';
 	raw[0] = '.';
 	raw[11] = 0x10U;
-	fat16_put_dir_cluster(zedbsd_fat_state(filesystem), raw, cluster);
+	fat16_put_dir_cluster(bootfat_state(filesystem), raw, cluster);
 	raw += 32;
 	for (unsigned i = 0; i < 11; i++)
 		raw[i] = ' ';
 	raw[0] = raw[1] = '.';
 	raw[11] = 0x10U;
-	fat16_put_dir_cluster(zedbsd_fat_state(filesystem), raw, parent_cluster);
-	result = zedbsd_fat_mark_sector_dirty(filesystem);
-	return result == ZEDBSD_FS_OK ? zedbsd_fat_flush(filesystem) : result;
+	fat16_put_dir_cluster(bootfat_state(filesystem), raw, parent_cluster);
+	result = bootfat_mark_sector_dirty(filesystem);
+	return result == ZEDBSD_FS_OK ? bootfat_flush(filesystem) : result;
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_mkdir(struct zedbsd_filesystem *filesystem, const char *path)
+static FAT_MUTATION enum bootfs_result
+fat16_mkdir(struct bootfs *filesystem, const char *path)
 {
 	struct fat16_directory parent;
 	struct fat_component component;
 	uint32_t cluster, lba;
 	uint16_t offset;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!filesystem->volume.write)
 		return ZEDBSD_FS_READ_ONLY;
@@ -1438,8 +1438,8 @@ fat16_mkdir(struct zedbsd_filesystem *filesystem, const char *path)
 	return result;
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_remove(struct zedbsd_filesystem *filesystem, const char *path,
+static FAT_MUTATION enum bootfs_result
+fat16_remove(struct bootfs *filesystem, const char *path,
 	     int directory)
 {
 	struct fat16_directory parent;
@@ -1448,7 +1448,7 @@ fat16_remove(struct zedbsd_filesystem *filesystem, const char *path,
 	uint16_t offset = 0, free_offset = 0;
 	uint8_t raw[32];
 	const uint8_t *sector;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!filesystem->volume.write)
 		return ZEDBSD_FS_READ_ONLY;
@@ -1459,16 +1459,16 @@ fat16_remove(struct zedbsd_filesystem *filesystem, const char *path,
 		FAT_NAME_EXACT, &lba, &offset, &free_lba, &free_offset, 0);
 	if (result != ZEDBSD_FS_OK)
 		return result == ZEDBSD_FS_NO_SPACE ? ZEDBSD_FS_NOT_FOUND : result;
-	result = zedbsd_fat_read_sector_result(filesystem, lba, &sector);
+	result = bootfat_read_sector_result(filesystem, lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	copy_bytes(raw, sector + offset, sizeof(raw));
 	if (directory != ((raw[11] & 0x10U) != 0))
 		return directory ? ZEDBSD_FS_INVALID_PATH :
 			ZEDBSD_FS_IS_DIRECTORY;
-	cluster = fat16_dir_cluster(zedbsd_fat_state(filesystem), raw);
+	cluster = fat16_dir_cluster(bootfat_state(filesystem), raw);
 	if (directory) {
-		if (!fat16_valid_cluster(zedbsd_fat_state(filesystem), cluster))
+		if (!fat16_valid_cluster(bootfat_state(filesystem), cluster))
 			return ZEDBSD_FS_CORRUPT;
 		result = fat16_directory_empty(filesystem, cluster);
 		if (result != ZEDBSD_FS_OK)
@@ -1477,20 +1477,20 @@ fat16_remove(struct zedbsd_filesystem *filesystem, const char *path,
 	return fat16_delete_location(filesystem, &parent, lba, offset);
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_unlink(struct zedbsd_filesystem *filesystem, const char *path)
+static FAT_MUTATION enum bootfs_result
+fat16_unlink(struct bootfs *filesystem, const char *path)
 {
 	return fat16_remove(filesystem, path, 0);
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_rmdir(struct zedbsd_filesystem *filesystem, const char *path)
+static FAT_MUTATION enum bootfs_result
+fat16_rmdir(struct bootfs *filesystem, const char *path)
 {
 	return fat16_remove(filesystem, path, 1);
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_update_dotdot(struct zedbsd_filesystem *filesystem,
+static FAT_MUTATION enum bootfs_result
+fat16_update_dotdot(struct bootfs *filesystem,
 		    uint32_t directory_cluster, uint32_t parent_cluster)
 {
 	struct fat16_directory directory = { .first_cluster = directory_cluster };
@@ -1498,41 +1498,41 @@ fat16_update_dotdot(struct zedbsd_filesystem *filesystem,
 	uint16_t offset;
 	const uint8_t *raw;
 	uint8_t *sector;
-	enum zedbsd_fs_result result = fat16_directory_entry(
+	enum bootfs_result result = fat16_directory_entry(
 		filesystem, &directory, 1, &lba, &offset, &raw);
 	(void)raw;
 	if (result != ZEDBSD_FS_OK)
 		return result;
-	result = zedbsd_fat_write_sector_result(filesystem, lba, &sector);
+	result = bootfat_write_sector_result(filesystem, lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
-	fat16_put_dir_cluster(zedbsd_fat_state(filesystem), sector + offset,
+	fat16_put_dir_cluster(bootfat_state(filesystem), sector + offset,
 		parent_cluster);
-	result = zedbsd_fat_mark_sector_dirty(filesystem);
-	return result == ZEDBSD_FS_OK ? zedbsd_fat_flush(filesystem) : result;
+	result = bootfat_mark_sector_dirty(filesystem);
+	return result == ZEDBSD_FS_OK ? bootfat_flush(filesystem) : result;
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_restore_entry_payload(struct zedbsd_filesystem *filesystem,
+static FAT_MUTATION enum bootfs_result
+fat16_restore_entry_payload(struct bootfs *filesystem,
 			    uint32_t lba, uint16_t offset,
 			    const uint8_t raw[32])
 {
 	uint8_t *sector;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
-	result = zedbsd_fat_write_sector_result(filesystem, lba, &sector);
+	result = bootfat_write_sector_result(filesystem, lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	sector[offset + 11] = raw[11];
-	fat16_put_dir_cluster(zedbsd_fat_state(filesystem), sector + offset,
-		fat16_dir_cluster(zedbsd_fat_state(filesystem), raw));
-	put32(sector + offset + 28, zedbsd_fat_get32(raw + 28));
-	result = zedbsd_fat_mark_sector_dirty(filesystem);
-	return result == ZEDBSD_FS_OK ? zedbsd_fat_flush(filesystem) : result;
+	fat16_put_dir_cluster(bootfat_state(filesystem), sector + offset,
+		fat16_dir_cluster(bootfat_state(filesystem), raw));
+	put32(sector + offset + 28, bootfat_get32(raw + 28));
+	result = bootfat_mark_sector_dirty(filesystem);
+	return result == ZEDBSD_FS_OK ? bootfat_flush(filesystem) : result;
 }
 
 static FAT_MUTATION void
-fat16_rename_rollback_destination(struct zedbsd_filesystem *filesystem,
+fat16_rename_rollback_destination(struct bootfs *filesystem,
 				  const struct fat16_directory *parent,
 				  uint32_t lba, uint16_t offset,
 				  int replacing, const uint8_t target[32])
@@ -1543,8 +1543,8 @@ fat16_rename_rollback_destination(struct zedbsd_filesystem *filesystem,
 		(void)fat16_delete_location(filesystem, parent, lba, offset);
 }
 
-static FAT_MUTATION enum zedbsd_fs_result
-fat16_rename(struct zedbsd_filesystem *filesystem, const char *old_path,
+static FAT_MUTATION enum bootfs_result
+fat16_rename(struct bootfs *filesystem, const char *old_path,
 	     const char *new_path)
 {
 	struct fat16_directory old_parent, new_parent;
@@ -1557,7 +1557,7 @@ fat16_rename(struct zedbsd_filesystem *filesystem, const char *old_path,
 	uint8_t *write_sector;
 	uint32_t source_cluster;
 	int replacing = 0;
-	enum zedbsd_fs_result result, target_result;
+	enum bootfs_result result, target_result;
 
 	if (!filesystem->volume.write)
 		return ZEDBSD_FS_READ_ONLY;
@@ -1570,7 +1570,7 @@ fat16_rename(struct zedbsd_filesystem *filesystem, const char *old_path,
 		&old_free_offset, 0);
 	if (result != ZEDBSD_FS_OK)
 		return result == ZEDBSD_FS_NO_SPACE ? ZEDBSD_FS_NOT_FOUND : result;
-	result = zedbsd_fat_read_sector_result(filesystem, old_lba, &sector);
+	result = bootfat_read_sector_result(filesystem, old_lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return result;
 	copy_bytes(source, sector + old_offset, sizeof(source));
@@ -1584,7 +1584,7 @@ fat16_rename(struct zedbsd_filesystem *filesystem, const char *old_path,
 	if (target_result == ZEDBSD_FS_OK) {
 		if (old_lba == new_lba && old_offset == new_offset)
 			return ZEDBSD_FS_OK;
-		result = zedbsd_fat_read_sector_result(filesystem, new_lba,
+		result = bootfat_read_sector_result(filesystem, new_lba,
 			&sector);
 		if (result != ZEDBSD_FS_OK)
 			return result;
@@ -1593,26 +1593,26 @@ fat16_rename(struct zedbsd_filesystem *filesystem, const char *old_path,
 			return ZEDBSD_FS_INVALID_PATH;
 		if ((target[11] & 0x10U) != 0) {
 			result = fat16_directory_empty(filesystem,
-				fat16_dir_cluster(zedbsd_fat_state(filesystem), target));
+				fat16_dir_cluster(bootfat_state(filesystem), target));
 			if (result != ZEDBSD_FS_OK)
 				return result;
 		}
 		/* Preserve the destination's spelling/LFN run and replace only its
 		 * payload.  Open references to the old target keep their own cluster
 		 * state and the VFS marks that inode orphaned after this succeeds. */
-		result = zedbsd_fat_write_sector_result(filesystem, new_lba,
+		result = bootfat_write_sector_result(filesystem, new_lba,
 			&write_sector);
 		if (result != ZEDBSD_FS_OK)
 			return result;
 		write_sector[new_offset + 11] = source[11];
-		fat16_put_dir_cluster(zedbsd_fat_state(filesystem),
+		fat16_put_dir_cluster(bootfat_state(filesystem),
 			write_sector + new_offset,
-			fat16_dir_cluster(zedbsd_fat_state(filesystem), source));
+			fat16_dir_cluster(bootfat_state(filesystem), source));
 		put32(write_sector + new_offset + 28,
-			zedbsd_fat_get32(source + 28));
-		result = zedbsd_fat_mark_sector_dirty(filesystem);
+			bootfat_get32(source + 28));
+		result = bootfat_mark_sector_dirty(filesystem);
 		if (result == ZEDBSD_FS_OK)
-			result = zedbsd_fat_flush(filesystem);
+			result = bootfat_flush(filesystem);
 		if (result != ZEDBSD_FS_OK)
 			return result;
 		replacing = 1;
@@ -1620,10 +1620,10 @@ fat16_rename(struct zedbsd_filesystem *filesystem, const char *old_path,
 		   target_result != ZEDBSD_FS_NO_SPACE) {
 		return target_result;
 	}
-	source_cluster = fat16_dir_cluster(zedbsd_fat_state(filesystem), source);
+	source_cluster = fat16_dir_cluster(bootfat_state(filesystem), source);
 	if (!replacing) {
 		result = fat16_insert_entry(filesystem, &new_parent, &new_component,
-			source[11], source_cluster, zedbsd_fat_get32(source + 28),
+			source[11], source_cluster, bootfat_get32(source + 28),
 			&new_lba, &new_offset);
 		if (result != ZEDBSD_FS_OK)
 			return result;
@@ -1651,21 +1651,21 @@ fat16_rename(struct zedbsd_filesystem *filesystem, const char *old_path,
 	return result;
 }
 
-static enum zedbsd_fs_result fat16_read(
-	struct zedbsd_file *file, uint64_t offset, void *buffer, uint32_t length,
-	zedbsd_read_progress_t progress, void *progress_context)
+static enum bootfs_result fat16_read(
+	struct bootfs_file *file, uint64_t offset, void *buffer, uint32_t length,
+	bootfs_read_progress_fn progress, void *progress_context)
 {
-	return zedbsd_fat_read_chain(
+	return bootfat_read_chain(
 		file, offset, buffer, length, progress, progress_context,
 		fat16_next_cluster,
-		fat16_reserved_limit(zedbsd_fat_state(file->filesystem)));
+		fat16_reserved_limit(bootfat_state(file->filesystem)));
 }
 
-static enum zedbsd_fs_result fat16_readdir(
-	struct zedbsd_filesystem *filesystem, const char *path, unsigned wanted,
-	struct zedbsd_dirent *entry)
+static enum bootfs_result fat16_readdir(
+	struct bootfs *filesystem, const char *path, unsigned wanted,
+	struct bootfs_dirent *entry)
 {
-	struct zedbsd_fat_state *fat = zedbsd_fat_state(filesystem);
+	struct bootfat_state *fat = bootfat_state(filesystem);
 	struct fat16_directory directory = {
 		.first_cluster = fat16_root_cluster(fat),
 	};
@@ -1678,7 +1678,7 @@ static enum zedbsd_fs_result fat16_readdir(
 		uint32_t lba;
 		uint16_t offset;
 		const uint8_t *raw;
-		enum zedbsd_fs_result result = fat16_resolve_entry(
+		enum bootfs_result result = fat16_resolve_entry(
 			filesystem, path, &lba, &offset, &raw,
 			FAT_NAME_EXACT, 0);
 
@@ -1698,7 +1698,7 @@ static enum zedbsd_fs_result fat16_readdir(
 		uint32_t lba;
 		uint16_t offset;
 		const uint8_t *raw;
-		enum zedbsd_fs_result result;
+		enum bootfs_result result;
 
 		result = fat16_directory_entry(filesystem, &directory, index,
 					       &lba, &offset, &raw);
@@ -1737,30 +1737,30 @@ static enum zedbsd_fs_result fat16_readdir(
 			else
 				fat_sfn_decode_lower(raw, entry);
 		}
-		entry->size = zedbsd_fat_get32(raw + 28);
+		entry->size = bootfat_get32(raw + 28);
 		entry->attributes = raw[11];
 		return ZEDBSD_FS_OK;
 	}
 	return ZEDBSD_FS_NOT_FOUND;
 }
 
-static enum zedbsd_fs_result fat16_stat(
-	struct zedbsd_filesystem *filesystem, const char *path,
-	struct zedbsd_dirent *entry)
+static enum bootfs_result fat16_stat(
+	struct bootfs *filesystem, const char *path,
+	struct bootfs_dirent *entry)
 {
 	uint32_t lba = 0;
 	uint16_t offset = 0;
 	const uint8_t *raw;
 	char found_name[ZEDBSD_PATH_MAX];
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	result = fat16_resolve_entry(filesystem, path, &lba, &offset, &raw,
 				     FAT_NAME_EXACT, found_name);
 	if (result != ZEDBSD_FS_OK)
 		return result;
-	if (zedbsd_fat_state(filesystem)->type == ZEDBSD_FAT32) {
+	if (bootfat_state(filesystem)->type == ZEDBSD_FAT32) {
 		text_copy(entry->name, found_name, sizeof(entry->name));
-		entry->size = zedbsd_fat_get32(raw + 28);
+		entry->size = bootfat_get32(raw + 28);
 		entry->attributes = raw[11];
 	} else {
 		fat_sfn_decode_lower(raw, entry);
@@ -1768,15 +1768,15 @@ static enum zedbsd_fs_result fat16_stat(
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result fat_stat_location_mode(
-	struct zedbsd_filesystem *filesystem, const char *path,
-	struct zedbsd_dirent *entry, uint32_t *lba, uint16_t *offset,
+static enum bootfs_result fat_stat_location_mode(
+	struct bootfs *filesystem, const char *path,
+	struct bootfs_dirent *entry, uint32_t *lba, uint16_t *offset,
 	uint32_t *first_cluster, uint8_t *attributes,
 	enum fat_name_match match)
 {
 	const uint8_t *raw;
 	char found_name[ZEDBSD_PATH_MAX];
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (!filesystem || !path || !entry || !lba || !offset ||
 	    !first_cluster || !attributes)
@@ -1785,21 +1785,21 @@ static enum zedbsd_fs_result fat_stat_location_mode(
 				     match, found_name);
 	if (result != ZEDBSD_FS_OK)
 		return result;
-	if (zedbsd_fat_state(filesystem)->type == ZEDBSD_FAT32) {
+	if (bootfat_state(filesystem)->type == ZEDBSD_FAT32) {
 		text_copy(entry->name, found_name, sizeof(entry->name));
-		entry->size = zedbsd_fat_get32(raw + 28);
+		entry->size = bootfat_get32(raw + 28);
 		entry->attributes = raw[11];
 	} else {
 		fat_sfn_decode_lower(raw, entry);
 	}
-	*first_cluster = fat16_dir_cluster(zedbsd_fat_state(filesystem), raw);
+	*first_cluster = fat16_dir_cluster(bootfat_state(filesystem), raw);
 	*attributes = raw[11];
 	return ZEDBSD_FS_OK;
 }
 
-enum zedbsd_fs_result
-zedbsd_fat_stat_location(struct zedbsd_filesystem *filesystem,
-			  const char *path, struct zedbsd_dirent *entry,
+enum bootfs_result
+bootfat_stat_location(struct bootfs *filesystem,
+			  const char *path, struct bootfs_dirent *entry,
 			  uint32_t *lba, uint16_t *offset,
 			  uint32_t *first_cluster, uint8_t *attributes)
 {
@@ -1808,44 +1808,44 @@ zedbsd_fat_stat_location(struct zedbsd_filesystem *filesystem,
 				      FAT_NAME_EXACT);
 }
 
-enum zedbsd_fs_result
-zedbsd_fat_stat_location_casefold(struct zedbsd_filesystem *filesystem,
+enum bootfs_result
+bootfat_stat_location_casefold(struct bootfs *filesystem,
 				  const char *path,
-				  struct zedbsd_dirent *entry,
+				  struct bootfs_dirent *entry,
 				  uint32_t *lba, uint16_t *offset,
 				  uint32_t *first_cluster,
 				  uint8_t *attributes)
 {
 	if (filesystem == 0 ||
-	    zedbsd_fat_state(filesystem)->type != ZEDBSD_FAT32)
+	    bootfat_state(filesystem)->type != ZEDBSD_FAT32)
 		return ZEDBSD_FS_UNSUPPORTED;
 	return fat_stat_location_mode(filesystem, path, entry, lba, offset,
 				      first_cluster, attributes,
 				      FAT_NAME_CASEFOLD);
 }
 
-static enum zedbsd_fs_result fat16_contiguous_lba(
-	struct zedbsd_file *file, uint32_t *absolute_lba)
+static enum bootfs_result fat16_contiguous_lba(
+	struct bootfs_file *file, uint32_t *absolute_lba)
 {
-	return zedbsd_fat_contiguous_lba(file, absolute_lba,
+	return bootfat_contiguous_lba(file, absolute_lba,
 					 fat16_next_cluster);
 }
 
 int
-zedbsd_fat_file_extents(struct zedbsd_file *file, zedbsd_fat_extent_cb callback,
+bootfat_file_extents(struct bootfs_file *file, bootfat_extent_fn callback,
 			void *context)
 {
-	struct zedbsd_filesystem *filesystem;
-	struct zedbsd_fat_state *fat;
-	struct zedbsd_fat_file_state *state;
+	struct bootfs *filesystem;
+	struct bootfat_state *fat;
+	struct bootfat_file_state *state;
 	uint64_t remaining, file_block = 0, run_file = 0, run_disk = 0;
 	uint32_t run_count = 0, cluster, steps;
 
 	if (file == 0 || callback == 0 || file->filesystem == 0)
 		return -1;
 	filesystem = file->filesystem;
-	fat = zedbsd_fat_state(filesystem);
-	state = zedbsd_fat_file_state(file);
+	fat = bootfat_state(filesystem);
+	state = bootfat_file_state(file);
 	if (fat->type != ZEDBSD_FAT12 && fat->type != ZEDBSD_FAT16)
 		return -1;
 	remaining = file->size;
@@ -1857,11 +1857,11 @@ zedbsd_fat_file_extents(struct zedbsd_file *file, zedbsd_fat_extent_cb callback,
 	for (steps = 0; steps < fat->cluster_count && remaining != 0; steps++) {
 		uint32_t disk_block, blocks = fat->sectors_per_cluster;
 		uint32_t next;
-		enum zedbsd_fs_result result;
+		enum bootfs_result result;
 
 		if ((uint64_t)blocks * 512U > remaining)
 			blocks = (uint32_t)((remaining + 511U) / 512U);
-		result = zedbsd_fat_cluster_lba(filesystem, cluster, 0,
+		result = bootfat_cluster_lba(filesystem, cluster, 0,
 					       &disk_block);
 		if (result != ZEDBSD_FS_OK)
 			return -1;
@@ -1896,8 +1896,8 @@ zedbsd_fat_file_extents(struct zedbsd_file *file, zedbsd_fat_extent_cb callback,
 	return callback(run_file, run_disk, run_count, context) == 0 ? 0 : -1;
 }
 
-enum zedbsd_fs_result
-zedbsd_fat_discard_chain_result(struct zedbsd_filesystem *filesystem,
+enum bootfs_result
+bootfat_discard_chain_result(struct bootfs *filesystem,
 				uint32_t first_cluster)
 {
 	if (filesystem == NULL)
@@ -1905,22 +1905,22 @@ zedbsd_fat_discard_chain_result(struct zedbsd_filesystem *filesystem,
 	return fat16_free_chain(filesystem, first_cluster);
 }
 
-static enum zedbsd_fs_result fat12_probe(const struct zedbsd_volume *volume)
+static enum bootfs_result fat12_probe(const struct boot_volume *volume)
 {
-	return zedbsd_fat_probe(volume, ZEDBSD_FAT12);
+	return bootfat_probe(volume, ZEDBSD_FAT12);
 }
 
-static enum zedbsd_fs_result fat12_mount(
-	struct zedbsd_filesystem *filesystem)
+static enum bootfs_result fat12_mount(
+	struct bootfs *filesystem)
 {
-	struct zedbsd_fat_state *fat;
-	enum zedbsd_fs_result result;
+	struct bootfat_state *fat;
+	enum bootfs_result result;
 	uint32_t fat_entries;
 
-	result = zedbsd_fat_mount(filesystem, ZEDBSD_FAT12);
+	result = bootfat_mount(filesystem, ZEDBSD_FAT12);
 	if (result != ZEDBSD_FS_OK)
 		return result;
-	fat = zedbsd_fat_state(filesystem);
+	fat = bootfat_state(filesystem);
 	if (!fat->root_entries || !fat->fat_sectors ||
 	    fat->fat_sectors > 0xffffffffU / 512U)
 		return ZEDBSD_FS_CORRUPT;
@@ -1932,22 +1932,22 @@ static enum zedbsd_fs_result fat12_mount(
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result fat32_probe(const struct zedbsd_volume *volume)
+static enum bootfs_result fat32_probe(const struct boot_volume *volume)
 {
-	return zedbsd_fat_probe(volume, ZEDBSD_FAT32);
+	return bootfat_probe(volume, ZEDBSD_FAT32);
 }
 
-static enum zedbsd_fs_result fat32_mount(
-	struct zedbsd_filesystem *filesystem)
+static enum bootfs_result fat32_mount(
+	struct bootfs *filesystem)
 {
-	struct zedbsd_fat_state *fat;
-	enum zedbsd_fs_result result;
+	struct bootfat_state *fat;
+	enum bootfs_result result;
 	uint32_t fat_entries;
 
-	result = zedbsd_fat_mount(filesystem, ZEDBSD_FAT32);
+	result = bootfat_mount(filesystem, ZEDBSD_FAT32);
 	if (result != ZEDBSD_FS_OK)
 		return result;
-	fat = zedbsd_fat_state(filesystem);
+	fat = bootfat_state(filesystem);
 	if (!fat->fat32_layout || !fat->fat_sectors ||
 	    fat->fat_sectors > 0xffffffffU / 512U)
 		return ZEDBSD_FS_CORRUPT;
@@ -1959,7 +1959,7 @@ static enum zedbsd_fs_result fat32_mount(
 		ZEDBSD_FS_OK : ZEDBSD_FS_CORRUPT;
 }
 
-const struct zedbsd_filesystem_driver zedbsd_fat12_driver = {
+const struct bootfs_driver bootfat12_driver = {
 	.name = "fat12",
 	.probe = fat12_probe,
 	.mount = fat12_mount,
@@ -1978,7 +1978,7 @@ const struct zedbsd_filesystem_driver zedbsd_fat12_driver = {
 	.contiguous_lba = fat16_contiguous_lba,
 };
 
-const struct zedbsd_filesystem_driver zedbsd_fat16_driver = {
+const struct bootfs_driver bootfat16_driver = {
 	.name = "fat16",
 	.probe = fat16_probe,
 	.mount = fat16_mount,
@@ -1997,7 +1997,7 @@ const struct zedbsd_filesystem_driver zedbsd_fat16_driver = {
 	.contiguous_lba = fat16_contiguous_lba,
 };
 
-const struct zedbsd_filesystem_driver zedbsd_fat32_driver = {
+const struct bootfs_driver bootfat32_driver = {
 	.name = "fat32",
 	.probe = fat32_probe,
 	.mount = fat32_mount,

@@ -25,7 +25,7 @@ static uint64_t ticks;
 static struct thread *current_thread;
 struct process;
 
-void zedbsd_assert_fail(const char *e, const char *f, int l)
+void __libc_assert_fail(const char *e, const char *f, int l)
 { fprintf(stderr, "%s:%d: assertion failed: %s\n", f, l, e); abort(); }
 void *kern_calloc(size_t n, size_t s) { return calloc(n, s); }
 void kern_free(void *p) { free(p); }

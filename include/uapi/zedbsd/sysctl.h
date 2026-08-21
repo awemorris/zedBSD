@@ -30,7 +30,7 @@
 #define KERN_HOSTNAME       4
 #define ZEDBSD_HOST_NAME_MAX 64U
 
-struct zedbsd_bufcache_stats {
+struct bufcache_stats {
 	uint64_t max_bytes;
 	uint64_t current_bytes;
 	uint64_t data_bytes;

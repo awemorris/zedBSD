@@ -98,7 +98,7 @@ typedef struct siginfo {
 #define SS_DISABLE 0x0002
 #define MINSIGSTKSZ 8192U
 #define SIGSTKSZ 32768U
-struct zedbsd_sigaltstack {
+struct sigaltstack_record {
 	uapi_ptr_t ss_sp;
 #ifndef ZEDBSD_USER_ABI_LP64
 	uint32_t ss_pointer_pad;
@@ -112,7 +112,7 @@ struct zedbsd_sigaltstack {
  * first ABI revision deliberately permits sigreturn to adopt only
  * uc_sigmask; changing machine-context fields makes sigreturn fail with
  * EINVAL.  This keeps privileged architecture state opaque to userland. */
-typedef struct zedbsd_mcontext {
+typedef struct mcontext {
 	uint64_t mc_pc;
 	uint64_t mc_sp;
 	int64_t mc_retval;

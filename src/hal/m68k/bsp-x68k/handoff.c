@@ -5,7 +5,7 @@
 #include <stddef.h>
 
 int
-x68k_boot_handoff_valid(const struct zedbsd_x68k_handoff *handoff)
+x68k_boot_handoff_valid(const struct x68k_boot_handoff *handoff)
 {
 	unsigned index;
 
@@ -32,7 +32,7 @@ x68k_boot_handoff_valid(const struct zedbsd_x68k_handoff *handoff)
 	    handoff->memory_region_count > ZEDBSD_X68K_MAX_MEMORY_REGIONS)
 		return 0;
 	for (index = 0; index < handoff->memory_region_count; index++) {
-		const struct zedbsd_memory_region32 *region =
+		const struct boot_memory_region32 *region =
 			&handoff->memory_regions[index];
 		if (region->size == 0 ||
 		    (region->type != ZEDBSD_MEMORY_AVAILABLE &&

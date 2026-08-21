@@ -196,7 +196,7 @@ static int identify(struct ata_unit *unit, uint16_t data[256])
 	return !(data[0] & 0x8000U) && (data[49] & 0x0200U);
 }
 
-unsigned zedbsd_ide_pcat_init(void)
+unsigned pcat_ide_init(void)
 {
 	static uint16_t data[256];
 	(void)mutex_init(&channel_locks[0], LOCK_RANK_DISK, "ata-primary");
@@ -228,12 +228,12 @@ unsigned zedbsd_ide_pcat_init(void)
 	return present_count;
 }
 
-struct disk *zedbsd_ide_pcat_unit(unsigned ordinal)
+struct disk *pcat_ide_unit(unsigned ordinal)
 {
 	return ordinal < present_count ? order[ordinal]->disk : 0;
 }
 
-struct disk *zedbsd_ide_pcat_bios_unit(uint8_t bios_id)
+struct disk *pcat_ide_bios_unit(uint8_t bios_id)
 {
 	unsigned slot;
 	if (bios_id < 0x80U || bios_id >= 0x84U) return 0;

@@ -10,13 +10,13 @@
 #include <sys/uio.h>
 #include <stdlib.h>
 
-extern intptr_t zedbsd_syscall_result(intptr_t);
+extern intptr_t syscall_result(intptr_t);
 
 static intptr_t
 socket_call(uint32_t number, uintptr_t a0, uintptr_t a1, uintptr_t a2,
 	    uintptr_t a3, uintptr_t a4, uintptr_t a5)
 {
-	return zedbsd_syscall_result(zedbsd_syscall6(number, a0, a1, a2, a3,
+	return syscall_result(__syscall6(number, a0, a1, a2, a3,
 	    a4, a5));
 }
 
@@ -85,7 +85,7 @@ ssize_t recv(int descriptor, void *buffer, size_t length, int flags)
 ssize_t
 sendmsg(int descriptor, const struct msghdr *message, int flags)
 {
-	struct zedbsd_sendmsg_request request;
+	struct sendmsg_args request;
 	const struct cmsghdr *control = NULL;
 	const int *descriptors = NULL;
 	unsigned descriptor_count = 0;
@@ -147,7 +147,7 @@ sendmsg(int descriptor, const struct msghdr *message, int flags)
 ssize_t
 recvmsg(int descriptor, struct msghdr *message, int flags)
 {
-	struct zedbsd_recvmsg_request request;
+	struct recvmsg_args request;
 	int descriptors[ZEDBSD_MSG_FD_MAX];
 	unsigned descriptor_capacity = 0;
 	unsigned char *buffer;

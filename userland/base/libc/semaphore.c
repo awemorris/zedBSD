@@ -14,14 +14,14 @@
 #include <unistd.h>
 
 #define SEM_MAGIC 0x5a53454dU
-extern void zedbsd_pthread_cancel_point(void) __attribute__((weak));
+extern void __pthread_cancel_point(void) __attribute__((weak));
 static void cancel_point(void)
-{ if (zedbsd_pthread_cancel_point != NULL) zedbsd_pthread_cancel_point(); }
+{ if (__pthread_cancel_point != NULL) __pthread_cancel_point(); }
 
 static int
 sem_usync_wait(sem_t *sem, const struct timespec *timeout)
 {
-	intptr_t result = zedbsd_syscall_result(zedbsd_syscall6(ZEDBSD_SYS_usync,
+	intptr_t result = syscall_result(__syscall6(ZEDBSD_SYS_usync,
 	    (uintptr_t)&sem->value, ZEDBSD_USYNC_WAIT, 0, (uintptr_t)timeout,
 	    0, sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE));
 	return result < 0 ? -1 : 0;
@@ -30,7 +30,7 @@ sem_usync_wait(sem_t *sem, const struct timespec *timeout)
 static void
 sem_usync_wake(sem_t *sem)
 {
-	(void)zedbsd_syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->value,
+	(void)__syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->value,
 	    ZEDBSD_USYNC_WAKE, 0, 0, 1,
 	    sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
 }
@@ -39,7 +39,7 @@ static void
 sem_lock(sem_t *sem)
 {
 	while (__atomic_exchange_n(&sem->guard, 1, __ATOMIC_ACQUIRE) != 0) {
-		(void)zedbsd_syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->guard,
+		(void)__syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->guard,
 		    ZEDBSD_USYNC_WAIT, 1, 0, 0,
 		    sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
 	}
@@ -49,7 +49,7 @@ static void
 sem_unlock(sem_t *sem)
 {
 	__atomic_store_n(&sem->guard, 0, __ATOMIC_RELEASE);
-	(void)zedbsd_syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->guard,
+	(void)__syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->guard,
 	    ZEDBSD_USYNC_WAKE, 0, 0, 1,
 	    sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
 }

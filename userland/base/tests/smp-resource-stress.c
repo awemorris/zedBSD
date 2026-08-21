@@ -23,22 +23,22 @@
 #define EVENTS_PER_ITERATION 3U
 
 static int
-resource_snapshot(int system_fd, struct zedbsd_system_resources *resources)
+resource_snapshot(int system_fd, struct system_resource_info *resources)
 {
 	memset(resources, 0, sizeof(*resources));
 	return ioctl(system_fd, ZEDBSD_SYSTEM_GET_RESOURCES, resources);
 }
 
 static int
-resources_equal(const struct zedbsd_system_resources *left,
-		const struct zedbsd_system_resources *right)
+resources_equal(const struct system_resource_info *left,
+		const struct system_resource_info *right)
 {
 	return memcmp(left, right, sizeof(*left)) == 0;
 }
 
 static void
-print_resource_delta(const struct zedbsd_system_resources *before,
-		     const struct zedbsd_system_resources *after)
+print_resource_delta(const struct system_resource_info *before,
+		     const struct system_resource_info *after)
 {
 	const uint64_t *a = (const uint64_t *)before;
 	const uint64_t *b = (const uint64_t *)after;
@@ -155,7 +155,7 @@ worker_main(unsigned worker)
 int
 main(void)
 {
-	struct zedbsd_system_resources before, after;
+	struct system_resource_info before, after;
 	pid_t children[WORKERS];
 	unsigned worker;
 	int system_fd;

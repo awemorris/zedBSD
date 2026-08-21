@@ -507,7 +507,7 @@ print_long_entries(const char *directory, const struct ls_entry *entries,
 static void
 print_column_entries(const struct ls_entry *entries, size_t count)
 {
-	struct zedbsd_console_size size = { 0, 80 };
+	struct console_size size = { 0, 80 };
 	size_t maximum = 0, column_width, columns, rows, row, column;
 	if (count == 0)
 		return;

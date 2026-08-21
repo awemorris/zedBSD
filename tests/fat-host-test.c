@@ -125,14 +125,14 @@ static void make_disk(struct test_disk *disk, uint16_t logical_sector_size)
 
 static void test_fat16(uint16_t logical_sector_size)
 {
-	const struct zedbsd_filesystem_driver *const drivers[] = {
-		&zedbsd_fat16_driver,
+	const struct bootfs_driver *const drivers[] = {
+		&bootfat16_driver,
 	};
 	struct test_disk disk;
-	struct zedbsd_volume volume;
-	struct zedbsd_filesystem filesystem;
-	struct zedbsd_file file;
-	struct zedbsd_dirent entry;
+	struct boot_volume volume;
+	struct bootfs filesystem;
+	struct bootfs_file file;
+	struct bootfs_dirent entry;
 	uint32_t lba = 0;
 	char buffer[6] = { 0 };
 	uint8_t scale = logical_sector_size / 512;
@@ -145,46 +145,46 @@ static void test_fat16(uint16_t logical_sector_size)
 	/* Keep this regression focused on the legacy read-only contract.  The
 	 * writable FAT16 path has its own destructive host-side test image. */
 	volume.write = 0;
-	assert(zedbsd_fs_mount(&filesystem, &volume, drivers, 1));
+	assert(bootfs_mount(&filesystem, &volume, drivers, 1));
 	assert(!strcmp(filesystem.driver->name, "fat16"));
-	assert(zedbsd_fs_open_result(&filesystem, "/missing.bin", &file) ==
+	assert(bootfs_open_result(&filesystem, "/missing.bin", &file) ==
 	       ZEDBSD_FS_NOT_FOUND);
-	assert(zedbsd_fs_open_result(&filesystem, "/bad/path", &file) ==
+	assert(bootfs_open_result(&filesystem, "/bad/path", &file) ==
 	       ZEDBSD_FS_NOT_FOUND);
-	assert(zedbsd_fs_create_result(&filesystem, "/new.bin", &file) ==
+	assert(bootfs_create_result(&filesystem, "/new.bin", &file) ==
 	       ZEDBSD_FS_READ_ONLY);
-	assert(zedbsd_fs_open(&filesystem, "/kernel.bin", &file));
+	assert(bootfs_open(&filesystem, "/kernel.bin", &file));
 	assert(file.size == 5);
-	assert(zedbsd_file_read(&file, 0, buffer, 5));
+	assert(bootfs_file_read(&file, 0, buffer, 5));
 	assert(!strcmp(buffer, "hello"));
 	memset(buffer, 0, sizeof(buffer));
-	assert(zedbsd_fs_open(&filesystem, "/cmd/remacs.nap", &file));
+	assert(bootfs_open(&filesystem, "/cmd/remacs.nap", &file));
 	assert(file.size == 5);
-	assert(zedbsd_file_read(&file, 0, buffer, 5));
+	assert(bootfs_file_read(&file, 0, buffer, 5));
 	assert(!strcmp(buffer, "remac"));
-	assert(zedbsd_fs_readdir(&filesystem, "/", 0, &entry));
+	assert(bootfs_readdir(&filesystem, "/", 0, &entry));
 	assert(!strcmp(entry.name, "kernel.bin"));
 	assert(entry.size == 5 && entry.attributes == 0x20);
-	assert(zedbsd_fs_readdir(&filesystem, "/cmd", 0, &entry));
+	assert(bootfs_readdir(&filesystem, "/cmd", 0, &entry));
 	assert(!strcmp(entry.name, "remacs.nap"));
-	assert(!zedbsd_fs_readdir(&filesystem, "/subdir", 0, &entry));
-	assert(zedbsd_fs_readdir_result(&filesystem, "/subdir", 0, &entry) ==
+	assert(!bootfs_readdir(&filesystem, "/subdir", 0, &entry));
+	assert(bootfs_readdir_result(&filesystem, "/subdir", 0, &entry) ==
 	       ZEDBSD_FS_NOT_FOUND);
-	assert(zedbsd_file_write_result(&file, 0, "x", 1) ==
+	assert(bootfs_file_write_result(&file, 0, "x", 1) ==
 	       ZEDBSD_FS_READ_ONLY);
-	assert(zedbsd_file_truncate_result(&file, 0) == ZEDBSD_FS_READ_ONLY);
-	assert(zedbsd_file_flush_result(&file) == ZEDBSD_FS_READ_ONLY);
-	assert(zedbsd_fs_stat_result(&filesystem, "/cmd/remacs.nap", &entry) ==
+	assert(bootfs_file_truncate_result(&file, 0) == ZEDBSD_FS_READ_ONLY);
+	assert(bootfs_file_flush_result(&file) == ZEDBSD_FS_READ_ONLY);
+	assert(bootfs_stat_result(&filesystem, "/cmd/remacs.nap", &entry) ==
 	       ZEDBSD_FS_OK);
 	assert(!strcmp(entry.name, "remacs.nap") && entry.size == 5);
-	assert(zedbsd_file_contiguous_lba(&file, &lba));
+	assert(bootfs_file_contiguous_lba(&file, &lba));
 	assert(lba == TEST_BASE_LBA + disk.data_lba + 2U * scale);
 }
 
 static void test_volume_write_contract(void)
 {
 	struct test_disk disk;
-	struct zedbsd_volume volume;
+	struct boot_volume volume;
 	uint8_t original[512], replacement[512], observed[512];
 
 	make_disk(&disk, 512);
@@ -195,29 +195,29 @@ static void test_volume_write_contract(void)
 	volume.sector_size = 512;
 	volume.read = test_read;
 	volume.write = test_write;
-	assert(zedbsd_volume_write_result(&volume, disk.data_lba,
+	assert(boot_volume_write_result(&volume, disk.data_lba,
 					  replacement) == ZEDBSD_FS_OK);
 	assert(disk.write_count == 1);
-	assert(zedbsd_volume_read_result(&volume, disk.data_lba, observed) ==
+	assert(boot_volume_read_result(&volume, disk.data_lba, observed) ==
 	       ZEDBSD_FS_OK);
 	assert(!memcmp(observed, replacement, sizeof(observed)));
-	assert(zedbsd_volume_write(&volume, disk.data_lba, original));
+	assert(boot_volume_write(&volume, disk.data_lba, original));
 	assert(!memcmp(disk.data[0], original, sizeof(original)));
 
 	volume.write = 0;
-	assert(zedbsd_volume_write_result(&volume, disk.data_lba,
+	assert(boot_volume_write_result(&volume, disk.data_lba,
 					  replacement) == ZEDBSD_FS_READ_ONLY);
 	volume.write = test_write;
 	disk.fail_writes = 1;
-	assert(zedbsd_volume_write_result(&volume, disk.data_lba,
+	assert(boot_volume_write_result(&volume, disk.data_lba,
 					  replacement) == ZEDBSD_FS_IO_ERROR);
 	disk.fail_writes = 0;
 	volume.start_lba = UINT32_MAX;
-	assert(zedbsd_volume_write_result(&volume, 1, replacement) ==
+	assert(boot_volume_write_result(&volume, 1, replacement) ==
 	       ZEDBSD_FS_INVALID_ARGUMENT);
 	volume.start_lba = TEST_BASE_LBA;
 	volume.sector_size = 1024;
-	assert(zedbsd_volume_write_result(&volume, disk.data_lba,
+	assert(boot_volume_write_result(&volume, disk.data_lba,
 					  replacement) ==
 	       ZEDBSD_FS_INVALID_ARGUMENT);
 }
@@ -267,14 +267,14 @@ static void make_fat12_disk(struct test_disk *disk)
 
 static void test_fat12(void)
 {
-	const struct zedbsd_filesystem_driver *const drivers[] = {
-		&zedbsd_fat12_driver,
+	const struct bootfs_driver *const drivers[] = {
+		&bootfat12_driver,
 	};
 	struct test_disk disk;
-	struct zedbsd_volume volume;
-	struct zedbsd_filesystem filesystem;
-	struct zedbsd_file file;
-	struct zedbsd_dirent entry;
+	struct boot_volume volume;
+	struct bootfs filesystem;
+	struct bootfs_file file;
+	struct bootfs_dirent entry;
 	uint32_t lba = 0;
 	char buffer[6] = { 0 };
 	uint8_t long_buffer[600];
@@ -285,37 +285,37 @@ static void test_fat12(void)
 	volume.sector_size = 512;
 	volume.read = test_read;
 	volume.write = 0;
-	assert(zedbsd_fs_mount(&filesystem, &volume, drivers, 1));
+	assert(bootfs_mount(&filesystem, &volume, drivers, 1));
 	assert(!strcmp(filesystem.driver->name, "fat12"));
-	assert(zedbsd_fs_open(&filesystem, "/KeRnEl.BiN", &file));
+	assert(bootfs_open(&filesystem, "/KeRnEl.BiN", &file));
 	assert(file.size == 5);
-	assert(zedbsd_file_read(&file, 0, buffer, 5));
+	assert(bootfs_file_read(&file, 0, buffer, 5));
 	assert(!strcmp(buffer, "hello"));
 	memset(buffer, 0, sizeof(buffer));
-	assert(zedbsd_fs_open(&filesystem, "/cmd/remacs.nap", &file));
-	assert(zedbsd_file_read(&file, 0, buffer, 5));
+	assert(bootfs_open(&filesystem, "/cmd/remacs.nap", &file));
+	assert(bootfs_file_read(&file, 0, buffer, 5));
 	assert(!strcmp(buffer, "remac"));
-	assert(zedbsd_fs_readdir(&filesystem, "/", 0, &entry));
+	assert(bootfs_readdir(&filesystem, "/", 0, &entry));
 	assert(!strcmp(entry.name, "kernel.bin"));
-	assert(zedbsd_file_write_result(&file, 0, "x", 1) ==
+	assert(bootfs_file_write_result(&file, 0, "x", 1) ==
 	       ZEDBSD_FS_READ_ONLY);
 	/* The 341 -> 342 chain exercises the sector-straddling entry. */
-	assert(zedbsd_fs_open(&filesystem, "/long.bin", &file));
+	assert(bootfs_open(&filesystem, "/long.bin", &file));
 	assert(file.size == 600);
-	assert(zedbsd_file_read(&file, 0, long_buffer, 600));
-	assert(zedbsd_file_contiguous_lba(&file, &lba));
+	assert(bootfs_file_read(&file, 0, long_buffer, 600));
+	assert(bootfs_file_contiguous_lba(&file, &lba));
 	assert(lba == TEST_BASE_LBA + disk.data_lba + (341U - 2U));
 }
 
 static void test_fat12_write(void)
 {
-	const struct zedbsd_filesystem_driver *const drivers[] = {
-		&zedbsd_fat12_driver,
+	const struct bootfs_driver *const drivers[] = {
+		&bootfat12_driver,
 	};
 	struct test_disk disk;
-	struct zedbsd_volume volume;
-	struct zedbsd_filesystem filesystem;
-	struct zedbsd_file file;
+	struct boot_volume volume;
+	struct bootfs filesystem;
+	struct bootfs_file file;
 	char buffer[7] = { 0 };
 
 	make_fat12_disk(&disk);
@@ -324,36 +324,36 @@ static void test_fat12_write(void)
 	volume.sector_size = 512;
 	volume.read = test_read;
 	volume.write = test_write;
-	assert(zedbsd_fs_mount(&filesystem, &volume, drivers, 1));
-	assert(zedbsd_fs_create_result(&filesystem, "/new.txt", &file) ==
+	assert(bootfs_mount(&filesystem, &volume, drivers, 1));
+	assert(bootfs_create_result(&filesystem, "/new.txt", &file) ==
 	       ZEDBSD_FS_OK);
-	assert(zedbsd_file_write_result(&file, 0, "fat12!", 6) ==
+	assert(bootfs_file_write_result(&file, 0, "fat12!", 6) ==
 	       ZEDBSD_FS_OK);
-	assert(zedbsd_file_flush_result(&file) == ZEDBSD_FS_OK);
+	assert(bootfs_file_flush_result(&file) == ZEDBSD_FS_OK);
 	/* The first free cluster is 5; its packed entry must now be an
 	 * end-of-chain marker and the neighbours must be untouched. */
 	assert(fat12_get(disk.fat, 5) == 0xfff);
 	assert(fat12_get(disk.fat, 4) == 0xfff);
 	assert(fat12_get(disk.fat, 6) == 0);
-	assert(zedbsd_fs_open(&filesystem, "/new.txt", &file));
+	assert(bootfs_open(&filesystem, "/new.txt", &file));
 	assert(file.size == 6);
-	assert(zedbsd_file_read(&file, 0, buffer, 6));
+	assert(bootfs_file_read(&file, 0, buffer, 6));
 	assert(!strcmp(buffer, "fat12!"));
 	/* Truncation must free the chain again through the 12-bit
 	 * read-modify-write path. */
-	assert(zedbsd_file_truncate_result(&file, 0) == ZEDBSD_FS_OK);
-	assert(zedbsd_file_flush_result(&file) == ZEDBSD_FS_OK);
+	assert(bootfs_file_truncate_result(&file, 0) == ZEDBSD_FS_OK);
+	assert(bootfs_file_flush_result(&file) == ZEDBSD_FS_OK);
 	assert(fat12_get(disk.fat, 5) == 0);
 }
 
 static void test_probe_io_error(void)
 {
-	const struct zedbsd_filesystem_driver *const drivers[] = {
-		&zedbsd_fat16_driver,
+	const struct bootfs_driver *const drivers[] = {
+		&bootfat16_driver,
 	};
 	struct test_disk disk;
-	struct zedbsd_volume volume;
-	struct zedbsd_filesystem filesystem;
+	struct boot_volume volume;
+	struct bootfs filesystem;
 
 	make_disk(&disk, 512);
 	disk.fail_reads = 1;
@@ -362,18 +362,18 @@ static void test_probe_io_error(void)
 	volume.sector_size = 512;
 	volume.read = test_read;
 	volume.write = 0;
-	assert(zedbsd_fs_mount_result(&filesystem, &volume, drivers, 1) ==
+	assert(bootfs_mount_result(&filesystem, &volume, drivers, 1) ==
 	       ZEDBSD_FS_IO_ERROR);
 }
 
 static void test_fat32_bpb_layout_rejected_for_fat16(void)
 {
-	const struct zedbsd_filesystem_driver *const drivers[] = {
-		&zedbsd_fat16_driver,
+	const struct bootfs_driver *const drivers[] = {
+		&bootfat16_driver,
 	};
 	struct test_disk disk;
-	struct zedbsd_volume volume;
-	struct zedbsd_filesystem filesystem;
+	struct boot_volume volume;
+	struct bootfs filesystem;
 
 	make_disk(&disk, 512);
 	put16(disk.bpb + 22, 0);
@@ -383,7 +383,7 @@ static void test_fat32_bpb_layout_rejected_for_fat16(void)
 	volume.sector_size = 512;
 	volume.read = test_read;
 	volume.write = 0;
-	assert(!zedbsd_fs_mount(&filesystem, &volume, drivers, 1));
+	assert(!bootfs_mount(&filesystem, &volume, drivers, 1));
 }
 
 int main(void)

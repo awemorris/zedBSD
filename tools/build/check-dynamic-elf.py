@@ -27,15 +27,15 @@ MACHINES = {
 }
 
 PRIVATE_RTLD = {
-	"__zedbsd_rtld_exports",
-    "__zedbsd_rtld_dlclose", "__zedbsd_rtld_dlerror",
-    "__zedbsd_rtld_dlopen", "__zedbsd_rtld_dlsym",
-    "__zedbsd_rtld_dlvsym",
-    "__zedbsd_rtld_fork_child", "__zedbsd_rtld_fork_parent",
-    "__zedbsd_rtld_fork_prepare", "__zedbsd_rtld_process_fini",
-    "__zedbsd_rtld_pthread_private", "__zedbsd_rtld_startup_init",
-    "__zedbsd_rtld_thread_alloc", "__zedbsd_rtld_thread_attach",
-    "__zedbsd_rtld_thread_free", "__tls_get_addr", "___tls_get_addr",
+	"__rtld_exports",
+    "__rtld_dlclose", "__rtld_dlerror",
+    "__rtld_dlopen", "__rtld_dlsym",
+    "__rtld_dlvsym",
+    "__rtld_fork_child", "__rtld_fork_parent",
+    "__rtld_fork_prepare", "__rtld_process_fini",
+    "__rtld_pthread_private", "__rtld_startup_init",
+    "__rtld_thread_alloc", "__rtld_thread_attach",
+    "__rtld_thread_free", "__tls_get_addr", "___tls_get_addr",
 }
 
 
@@ -278,7 +278,7 @@ def check(path, machine_name, role):
                 name = cstring(strings, name_offset, path, "symbol")
                 if role in ("module", "rpath-module") and name not in {
                     "__tls_get_addr", "___tls_get_addr",
-                    "__zedbsd_rtld_exports", "dlopen", "dlclose",
+                    "__rtld_exports", "dlopen", "dlclose",
                     "rpath_dependency_value",
                 }:
                     fail(path, f"unexpected module undefined symbol {name}")

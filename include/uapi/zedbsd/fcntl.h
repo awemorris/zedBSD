@@ -4,7 +4,7 @@
 
 #include <stdint.h>
 
-struct zedbsd_flock_request {
+struct flock_record {
 	int16_t type;
 	int16_t whence;
 	int32_t reserved0;

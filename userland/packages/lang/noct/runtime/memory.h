@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-struct zedbsd_user_noct_memory_profile {
+struct user_noct_memory_profile {
 	uint64_t capacity_bytes;
 	uint64_t available_bytes;
 	uint32_t profile_mib;
@@ -16,9 +16,9 @@ struct zedbsd_user_noct_memory_profile {
 	size_t gc_tenure_size;
 };
 
-int zedbsd_user_noct_select_memory(
+int user_noct_select_memory(
 	uint64_t capacity_bytes,
 	uint64_t available_bytes,
-	struct zedbsd_user_noct_memory_profile *profile);
+	struct user_noct_memory_profile *profile);
 
 #endif

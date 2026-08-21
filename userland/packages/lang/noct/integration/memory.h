@@ -10,7 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-enum zedbsd_noct_memory_class {
+enum noct_memory_class {
 	ZEDBSD_NOCT_MEMORY_5,
 	ZEDBSD_NOCT_MEMORY_8,
 	ZEDBSD_NOCT_MEMORY_16,
@@ -19,8 +19,8 @@ enum zedbsd_noct_memory_class {
 	ZEDBSD_NOCT_MEMORY_LARGE,
 };
 
-struct zedbsd_noct_memory_profile {
-	enum zedbsd_noct_memory_class memory_class;
+struct noct_memory_profile {
+	enum noct_memory_class memory_class;
 	const char *name;
 	uint32_t installed_mib;
 	uintptr_t arena_base;
@@ -38,9 +38,9 @@ struct zedbsd_noct_memory_profile {
  * 1 MiB, the resident vmunix high segment occupies; the arena starts
  * above it, rounded up to 64 KiB.
  */
-int zedbsd_noct_select_memory(uint32_t low_extended_bytes,
+int noct_select_memory(uint32_t low_extended_bytes,
 			      uint32_t high_memory_mib,
 			      uint32_t low_reserved_bytes,
-			      struct zedbsd_noct_memory_profile *profile);
+			      struct noct_memory_profile *profile);
 
 #endif

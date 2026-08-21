@@ -11,7 +11,7 @@
 #define ZEDBSD_SNAPSHOT_F_ACTIVE 0x00000001U
 #define ZEDBSD_SNAPSHOT_DEVICE_MAX 16U
 
-struct zedbsd_snapshot_ctl {
+struct snapshot_control {
 	uint32_t size;
 	uint32_t version;
 	uint32_t command;

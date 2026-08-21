@@ -11,13 +11,13 @@
 #define ZEDBSD_SUN4U_MAX_MEMORY_RANGES 16U
 #define ZEDBSD_SUN4U_BOOTPATH_SIZE 256U
 
-struct zedbsd_sun4u_memory_range {
+struct sun4u_memory_range {
 	uint64_t base;
 	uint64_t size;
 } __attribute__((packed));
 
-struct zedbsd_sun4u_handoff {
-	struct zedbsd_handoff common;
+struct sun4u_boot_handoff {
+	struct boot_handoff common;
 	uint32_t extension_magic;
 	uint16_t extension_version;
 	uint16_t extension_size;
@@ -26,9 +26,9 @@ struct zedbsd_sun4u_handoff {
 	uint8_t available_count;
 	uint8_t boot_channel;
 	uint8_t boot_drive;
-	struct zedbsd_sun4u_memory_range
+	struct sun4u_memory_range
 	    installed[ZEDBSD_SUN4U_MAX_MEMORY_RANGES];
-	struct zedbsd_sun4u_memory_range
+	struct sun4u_memory_range
 	    available[ZEDBSD_SUN4U_MAX_MEMORY_RANGES];
 	uint64_t pci_io_base;
 	uint32_t serial_io_offset;
@@ -41,9 +41,9 @@ struct zedbsd_sun4u_handoff {
 	char bootpath[ZEDBSD_SUN4U_BOOTPATH_SIZE];
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct zedbsd_sun4u_memory_range) == 16,
+_Static_assert(sizeof(struct sun4u_memory_range) == 16,
     "sun4u memory ranges must remain 16 bytes");
-_Static_assert(sizeof(struct zedbsd_sun4u_handoff) < 8192,
+_Static_assert(sizeof(struct sun4u_boot_handoff) < 8192,
     "sun4u handoff must fit in one 8 KiB page");
 
 #endif

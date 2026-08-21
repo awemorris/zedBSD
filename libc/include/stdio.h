@@ -16,13 +16,13 @@
 #define _IONBF 2
 #define BUFSIZ 4096
 
-typedef struct zedbsd_stdio_file FILE;
+typedef struct __stdio_file FILE;
 
 extern FILE *stdin;
 extern FILE *stdout;
 extern FILE *stderr;
 
-size_t zedbsd_console_write_bytes(const char *bytes, size_t length);
+size_t __stdio_console_write(const char *bytes, size_t length);
 
 int printf(const char *format, ...);
 int snprintf(char *buffer, size_t size, const char *format, ...);

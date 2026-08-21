@@ -16,10 +16,10 @@
 #include <hal/hal.h>
 
 size_t
-kern_platform_init(const struct zedbsd_handoff *handoff,
-		   struct zedbsd_device *devices, size_t capacity)
+kern_platform_init(const struct boot_handoff *handoff,
+		   struct boot_device *devices, size_t capacity)
 {
-	const struct zedbsd_device *initial;
+	const struct boot_device *initial;
 	size_t count = 0;
 
 	if (handoff == NULL || devices == NULL || capacity == 0 ||
@@ -34,7 +34,7 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 	     handoff->boot_partition_index < 1 ||
 	     handoff->boot_partition_index > 4))
 		return 0;
-	initial = (const struct zedbsd_device *)handoff->device_table;
+	initial = (const struct boot_device *)handoff->device_table;
 	for (size_t index = 0; index < handoff->device_count && count < capacity;
 	     index++) {
 		if ((initial[index].device_class != ZEDBSD_DEV_FDD &&
@@ -49,10 +49,10 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 
 	partition_set_scheme(&partition_scheme_pc98_auto);
 	disk_registry_reset();
-	(void)zedbsd_ide_pc98_init(devices, (unsigned)count);
+	(void)pc98_ide_init(devices, (unsigned)count);
 #if CONFIG_DRIVER_LGY98
 	{
-		int network_error = zedbsd_pc98_lgy98_init();
+		int network_error = pc98_lgy98_init();
 
 		if (network_error == 0)
 		{
@@ -65,14 +65,14 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 	}
 #endif
 #if CONFIG_DRIVER_GRAPHICS
-	if (!zedbsd_pc98_graphics_init())
+	if (!pc98_graphics_init())
 		hal_printf("graphics: PC-98 driver unavailable\n");
 #endif
 	return count;
 }
 
 void
-kern_platform_refresh_devices(const struct zedbsd_device *devices, size_t count)
+kern_platform_refresh_devices(const struct boot_device *devices, size_t count)
 {
 	/*
 	 * The polled PC-98 IDE driver is fully initialized by
@@ -86,15 +86,15 @@ kern_platform_refresh_devices(const struct zedbsd_device *devices, size_t count)
 int
 kern_platform_input_init(void)
 {
-	return zedbsd_pc98_busmouse_init();
+	return pc98_busmouse_init();
 }
 
 struct disk *
-kern_platform_block_device(const struct zedbsd_device *device)
+kern_platform_block_device(const struct boot_device *device)
 {
 	if (device == NULL || device->device_class != ZEDBSD_DEV_IDE)
 		return NULL;
-	return zedbsd_ide_pc98_bios_unit(device->bios_id);
+	return pc98_ide_bios_unit(device->bios_id);
 }
 
 void

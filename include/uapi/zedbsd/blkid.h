@@ -15,7 +15,7 @@
 #define ZEDBSD_BLKID_PARTUUID  0x0008U
 #define ZEDBSD_BLKID_PARTLABEL 0x0010U
 
-struct zedbsd_block_identity {
+struct block_identity {
 	uint32_t flags;
 	uint32_t reserved;
 	char type[16];
@@ -26,6 +26,6 @@ struct zedbsd_block_identity {
 };
 
 #define BLKGETIDENTITY _IOR(ZEDBSD_BLKID_IOC_GROUP, 1, \
-	struct zedbsd_block_identity)
+	struct block_identity)
 
 #endif

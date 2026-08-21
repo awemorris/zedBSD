@@ -72,7 +72,7 @@ reserve_range(uintptr_t base, size_t size)
 void
 m68k030_page_init(void)
 {
-	const struct zedbsd_x68k_handoff *handoff = x68k_boot_handoff();
+	const struct x68k_boot_handoff *handoff = x68k_boot_handoff();
 	uint32_t bytes = handoff->ram_bytes;
 	unsigned index;
 
@@ -89,7 +89,7 @@ m68k030_page_init(void)
 
 	for (index = 0; index < handoff->memory_region_count &&
 	    index < ZEDBSD_X68K_MAX_MEMORY_REGIONS; index++) {
-		const struct zedbsd_memory_region32 *region =
+		const struct boot_memory_region32 *region =
 			&handoff->memory_regions[index];
 		if (region->type == ZEDBSD_MEMORY_AVAILABLE &&
 		    region->base <= UINT32_MAX - region->size)
@@ -109,7 +109,7 @@ m68k030_page_init(void)
 			handoff->kernel_phys_end - handoff->kernel_phys_start);
 	for (index = 0; index < handoff->memory_region_count &&
 	    index < ZEDBSD_X68K_MAX_MEMORY_REGIONS; index++) {
-		const struct zedbsd_memory_region32 *region =
+		const struct boot_memory_region32 *region =
 			&handoff->memory_regions[index];
 		if (region->type == ZEDBSD_MEMORY_RESERVED &&
 		    region->base <= UINT32_MAX - region->size)

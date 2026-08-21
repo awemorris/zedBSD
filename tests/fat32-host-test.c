@@ -140,15 +140,15 @@ static void make_disk(struct test_disk *disk)
 
 int main(void)
 {
-	static const struct zedbsd_filesystem_driver *const drivers[] = {
-		&zedbsd_fat32_driver,
+	static const struct bootfs_driver *const drivers[] = {
+		&bootfat32_driver,
 	};
 	struct test_disk disk;
-	struct zedbsd_volume volume = { 0 };
-	struct zedbsd_filesystem filesystem;
-	struct zedbsd_file file;
-	struct zedbsd_file created;
-	struct zedbsd_dirent entry;
+	struct boot_volume volume = { 0 };
+	struct bootfs filesystem;
+	struct bootfs_file file;
+	struct bootfs_file created;
+	struct bootfs_dirent entry;
 	char data[6] = { 0 };
 	uint16_t units[FAT_LFN_MAX_UNITS];
 	unsigned unit_count;
@@ -172,46 +172,46 @@ int main(void)
 	volume.sector_size = 512;
 	volume.read = read_sector;
 	volume.write = write_sector;
-	assert(zedbsd_fs_mount(&filesystem, &volume, drivers, 1));
+	assert(bootfs_mount(&filesystem, &volume, drivers, 1));
 	assert(!strcmp(filesystem.driver->name, "fat32"));
-	assert(zedbsd_fs_open(&filesystem, "/hello.txt", &file));
+	assert(bootfs_open(&filesystem, "/hello.txt", &file));
 	assert(file.size == 5);
-	assert(zedbsd_file_read(&file, 0, data, 5));
+	assert(bootfs_file_read(&file, 0, data, 5));
 	assert(!strcmp(data, "hello"));
-	assert(!zedbsd_fs_open(&filesystem, "/HELLO.TXT", &file));
-	assert(zedbsd_fs_readdir(&filesystem, "/", 0, &entry));
+	assert(!bootfs_open(&filesystem, "/HELLO.TXT", &file));
+	assert(bootfs_readdir(&filesystem, "/", 0, &entry));
 	assert(!strcmp(entry.name, "hello.txt"));
-	assert(zedbsd_fs_readdir(&filesystem, "/", 1, &entry));
+	assert(bootfs_readdir(&filesystem, "/", 1, &entry));
 	assert(!strcmp(entry.name, "Read Me.txt"));
-	assert(zedbsd_fs_open(&filesystem, "/Read Me.txt", &file));
-	assert(!zedbsd_fs_open(&filesystem, "/read me.txt", &file));
-	assert(zedbsd_fs_create_result(&filesystem, "/read me.txt", &created) ==
+	assert(bootfs_open(&filesystem, "/Read Me.txt", &file));
+	assert(!bootfs_open(&filesystem, "/read me.txt", &file));
+	assert(bootfs_create_result(&filesystem, "/read me.txt", &created) ==
 	       ZEDBSD_FS_EXISTS);
-	assert(zedbsd_fs_create_result(&filesystem, "/Camel Name.txt", &created) ==
+	assert(bootfs_create_result(&filesystem, "/Camel Name.txt", &created) ==
 	       ZEDBSD_FS_OK);
-	assert(zedbsd_file_write_result(&created, 0, "created", 7) ==
+	assert(bootfs_file_write_result(&created, 0, "created", 7) ==
 	       ZEDBSD_FS_OK);
-	assert(zedbsd_file_flush_result(&created) == ZEDBSD_FS_OK);
-	assert(zedbsd_fs_readdir(&filesystem, "/", 2, &entry));
+	assert(bootfs_file_flush_result(&created) == ZEDBSD_FS_OK);
+	assert(bootfs_readdir(&filesystem, "/", 2, &entry));
 	assert(!strcmp(entry.name, "Camel Name.txt"));
-	assert(zedbsd_fs_create_result(&filesystem,
+	assert(bootfs_create_result(&filesystem,
 		"/\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e.txt", &created) ==
 	       ZEDBSD_FS_OK);
-	assert(zedbsd_fs_readdir(&filesystem, "/", 3, &entry));
+	assert(bootfs_readdir(&filesystem, "/", 3, &entry));
 	assert(!strcmp(entry.name,
 		       "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e.txt"));
-	assert(zedbsd_fs_create_result(&filesystem, "/\xc3\x85.txt", &created) ==
+	assert(bootfs_create_result(&filesystem, "/\xc3\x85.txt", &created) ==
 	       ZEDBSD_FS_OK);
-	assert(zedbsd_fs_create_result(&filesystem, "/\xc3\xa5.txt", &created) ==
+	assert(bootfs_create_result(&filesystem, "/\xc3\xa5.txt", &created) ==
 	       ZEDBSD_FS_EXISTS);
-	zedbsd_fs_reset(&filesystem);
-	assert(zedbsd_fs_mount(&filesystem, &volume, drivers, 1));
-	assert(zedbsd_fs_open(&filesystem, "/Camel Name.txt", &file));
+	bootfs_reset(&filesystem);
+	assert(bootfs_mount(&filesystem, &volume, drivers, 1));
+	assert(bootfs_open(&filesystem, "/Camel Name.txt", &file));
 	memset(data, 0, sizeof(data));
-	assert(zedbsd_file_read(&file, 0, data, 6));
+	assert(bootfs_file_read(&file, 0, data, 6));
 	assert(!memcmp(data, "create", 6));
-	assert(!zedbsd_fs_open(&filesystem, "/camel name.txt", &file));
-	assert(zedbsd_fs_open(&filesystem,
+	assert(!bootfs_open(&filesystem, "/camel name.txt", &file));
+	assert(bootfs_open(&filesystem,
 		"/\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e.txt", &file));
 	puts("zedBSD FAT32 host tests: OK");
 	return 0;

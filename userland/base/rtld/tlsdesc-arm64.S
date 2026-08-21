@@ -1,9 +1,9 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 	.text
-	.globl __zedbsd_tlsdesc_resolver
-	.hidden __zedbsd_tlsdesc_resolver
-	.type __zedbsd_tlsdesc_resolver,%function
-__zedbsd_tlsdesc_resolver:
+	.globl d_tlsdesc_resolver
+	.hidden d_tlsdesc_resolver
+	.type d_tlsdesc_resolver,%function
+d_tlsdesc_resolver:
 	/* AArch64 TLSDESC may clobber x0 only.  x0 already holds the descriptor. */
 	sub sp, sp, #160
 	stp x1, x2, [sp, #0]
@@ -16,7 +16,7 @@ __zedbsd_tlsdesc_resolver:
 	stp x15, x16, [sp, #112]
 	stp x17, x18, [sp, #128]
 	stp x29, x30, [sp, #144]
-	bl __zedbsd_tlsdesc_resolve
+	bl d_tlsdesc_resolve
 	ldp x1, x2, [sp, #0]
 	ldp x3, x4, [sp, #16]
 	ldp x5, x6, [sp, #32]
@@ -29,5 +29,5 @@ __zedbsd_tlsdesc_resolver:
 	ldp x29, x30, [sp, #144]
 	add sp, sp, #160
 	ret
-	.size __zedbsd_tlsdesc_resolver,.-__zedbsd_tlsdesc_resolver
+	.size d_tlsdesc_resolver,.-d_tlsdesc_resolver
 	.section .note.GNU-stack,"",%progbits

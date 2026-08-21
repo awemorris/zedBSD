@@ -4,6 +4,6 @@
 
 #include <zedbsd/quota.h>
 
-int quotactl(const char *, struct zedbsd_quota_ctl *);
+int quotactl(const char *, struct quota_control *);
 
 #endif

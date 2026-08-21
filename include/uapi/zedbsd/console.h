@@ -36,7 +36,7 @@
  * keys use their Unicode/ASCII value; non-printable keys use the normalized
  * ZEDBSD_CONSOLE_KEY_* values below.
  */
-struct zedbsd_console_input_event {
+struct console_input_event {
 	uint64_t timestamp_ns;
 	uint32_t sequence;
 	uint16_t type;
@@ -47,7 +47,7 @@ struct zedbsd_console_input_event {
 	int32_t state;
 };
 
-struct zedbsd_console_input_mode {
+struct console_input_mode {
 	uint32_t mode;
 	uint32_t flags;
 };
@@ -70,27 +70,27 @@ struct zedbsd_console_input_mode {
 #define ZEDBSD_CONSOLE_KEY_GRAPH     0x173U
 #define ZEDBSD_CONSOLE_KEY_CTRL      0x174U
 
-struct zedbsd_console_size {
+struct console_size {
 	uint32_t rows;
 	uint32_t columns;
 };
 
-struct zedbsd_console_cursor {
+struct console_cursor {
 	uint32_t row;
 	uint32_t column;
 	uint32_t visible;
 };
 
-struct zedbsd_console_row {
+struct console_row {
 	uint32_t row;
 };
 
-struct zedbsd_console_position {
+struct console_position {
 	uint32_t row;
 	uint32_t column;
 };
 
-struct zedbsd_console_write_at {
+struct console_write_at {
 	uint32_t row;
 	uint32_t column;
 	uint32_t attribute;
@@ -98,42 +98,42 @@ struct zedbsd_console_write_at {
 	uint32_t length;
 };
 
-struct zedbsd_console_event {
+struct console_event {
 	uint32_t value;
 };
 
-struct zedbsd_console_key_state {
+struct console_key_state {
 	uint32_t key;
 	int32_t down;
 };
 
 #define ZEDBSD_CONSOLE_GET_SIZE \
-	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 1, struct zedbsd_console_size)
+	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 1, struct console_size)
 #define ZEDBSD_CONSOLE_CLEAR _IO(ZEDBSD_CONSOLE_IOC_GROUP, 2)
 #define ZEDBSD_CONSOLE_CLEAR_ROW \
-	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 3, struct zedbsd_console_row)
+	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 3, struct console_row)
 #define ZEDBSD_CONSOLE_CLEAR_TO_EOL \
-	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 4, struct zedbsd_console_position)
+	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 4, struct console_position)
 #define ZEDBSD_CONSOLE_GET_CURSOR \
-	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 5, struct zedbsd_console_cursor)
+	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 5, struct console_cursor)
 #define ZEDBSD_CONSOLE_SET_CURSOR \
-	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 6, struct zedbsd_console_cursor)
+	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 6, struct console_cursor)
 #define ZEDBSD_CONSOLE_SHOW_CURSOR \
-	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 7, struct zedbsd_console_cursor)
+	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 7, struct console_cursor)
 #define ZEDBSD_CONSOLE_WRITE_AT \
-	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 8, struct zedbsd_console_write_at)
+	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 8, struct console_write_at)
 #define ZEDBSD_CONSOLE_POLL_EVENT \
-	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 9, struct zedbsd_console_event)
+	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 9, struct console_event)
 #define ZEDBSD_CONSOLE_READ_EVENT \
-	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 10, struct zedbsd_console_event)
+	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 10, struct console_event)
 #define ZEDBSD_CONSOLE_KEY_STATE \
-	_IOWR(ZEDBSD_CONSOLE_IOC_GROUP, 11, struct zedbsd_console_key_state)
+	_IOWR(ZEDBSD_CONSOLE_IOC_GROUP, 11, struct console_key_state)
 #define ZEDBSD_CONSOLE_DRAIN_INPUT _IO(ZEDBSD_CONSOLE_IOC_GROUP, 12)
 /* Terminal-capability probe used by isatty(). */
 #define ZEDBSD_CONSOLE_ISATTY _IO(ZEDBSD_CONSOLE_IOC_GROUP, 13)
 #define ZEDBSD_CONSOLE_GET_INPUT_MODE \
-	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 14, struct zedbsd_console_input_mode)
+	_IOR(ZEDBSD_CONSOLE_IOC_GROUP, 14, struct console_input_mode)
 #define ZEDBSD_CONSOLE_SET_INPUT_MODE \
-	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 15, struct zedbsd_console_input_mode)
+	_IOW(ZEDBSD_CONSOLE_IOC_GROUP, 15, struct console_input_mode)
 
 #endif

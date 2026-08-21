@@ -19,10 +19,10 @@ typedef struct { unsigned pshared; } pthread_rwlockattr_t;
 typedef struct { volatile uint32_t guard, sequence; unsigned count, trip, pshared; } pthread_barrier_t;
 typedef struct { unsigned pshared; } pthread_barrierattr_t;
 typedef volatile uint32_t pthread_spinlock_t;
-struct zedbsd_pthread_cleanup {
+struct __pthread_cleanup {
 	void (*routine)(void *);
 	void *argument;
-	struct zedbsd_pthread_cleanup *previous;
+	struct __pthread_cleanup *previous;
 };
 #define PTHREAD_MUTEX_INITIALIZER {0,0,0,0,0}
 #define PTHREAD_COND_INITIALIZER {0,0,CLOCK_REALTIME}
@@ -81,13 +81,13 @@ int pthread_sigmask(int,const sigset_t *,sigset_t *); int pthread_kill(pthread_t
 int pthread_cancel(pthread_t); int pthread_setcancelstate(int,int *);
 int pthread_setcanceltype(int,int *); void pthread_testcancel(void);
 int pthread_atfork(void (*)(void),void (*)(void),void (*)(void));
-void zedbsd_pthread_cleanup_push(struct zedbsd_pthread_cleanup *,
+void __pthread_cleanup_push(struct __pthread_cleanup *,
 	void (*)(void *),void *);
-void zedbsd_pthread_cleanup_pop(struct zedbsd_pthread_cleanup *,int);
+void __pthread_cleanup_pop(struct __pthread_cleanup *,int);
 #define pthread_cleanup_push(routine,argument) do { \
-	struct zedbsd_pthread_cleanup __zedbsd_cleanup; \
-	zedbsd_pthread_cleanup_push(&__zedbsd_cleanup,(routine),(argument));
+	struct __pthread_cleanup __pthread_cleanup_record; \
+	__pthread_cleanup_push(&__pthread_cleanup_record,(routine),(argument));
 #define pthread_cleanup_pop(execute) \
-	zedbsd_pthread_cleanup_pop(&__zedbsd_cleanup,(execute)); \
+	__pthread_cleanup_pop(&__pthread_cleanup_record,(execute)); \
 } while (0)
 #endif

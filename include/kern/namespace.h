@@ -13,37 +13,37 @@
 #define ZEDBSD_NAMESPACE_MAX_MOUNTS 12U
 #define ZEDBSD_NAMESPACE_NAME_MAX 16U
 
-struct zedbsd_namespace_mount {
+struct bootfs_namespace_mount {
 	char name[ZEDBSD_NAMESPACE_NAME_MAX];
-	struct zedbsd_filesystem filesystem;
+	struct bootfs filesystem;
 };
 
-struct zedbsd_namespace {
-	struct zedbsd_namespace_mount mounts[ZEDBSD_NAMESPACE_MAX_MOUNTS];
+struct bootfs_namespace {
+	struct bootfs_namespace_mount mounts[ZEDBSD_NAMESPACE_MAX_MOUNTS];
 	unsigned count;
 	int default_mount;
 };
 
-void zedbsd_namespace_init(struct zedbsd_namespace *namespace);
-int zedbsd_namespace_mount(struct zedbsd_namespace *namespace,
+void bootfs_namespace_init(struct bootfs_namespace *namespace);
+int bootfs_namespace_mount(struct bootfs_namespace *namespace,
 			   const char *name,
-			   const struct zedbsd_filesystem *filesystem);
-int zedbsd_namespace_set_default(struct zedbsd_namespace *namespace,
+			   const struct bootfs *filesystem);
+int bootfs_namespace_set_default(struct bootfs_namespace *namespace,
 				 const char *name);
-const char *zedbsd_namespace_default_name(
-	const struct zedbsd_namespace *namespace);
+const char *bootfs_namespace_default_name(
+	const struct bootfs_namespace *namespace);
 
-enum zedbsd_fs_result zedbsd_namespace_open_result(
-	struct zedbsd_namespace *namespace, const char *path,
-	struct zedbsd_file *file);
-enum zedbsd_fs_result zedbsd_namespace_create_result(
-	struct zedbsd_namespace *namespace, const char *path,
-	struct zedbsd_file *file);
-enum zedbsd_fs_result zedbsd_namespace_stat_result(
-	struct zedbsd_namespace *namespace, const char *path,
-	struct zedbsd_dirent *entry);
-enum zedbsd_fs_result zedbsd_namespace_readdir_result(
-	struct zedbsd_namespace *namespace, const char *path, unsigned index,
-	struct zedbsd_dirent *entry);
+enum bootfs_result bootfs_namespace_open_result(
+	struct bootfs_namespace *namespace, const char *path,
+	struct bootfs_file *file);
+enum bootfs_result bootfs_namespace_create_result(
+	struct bootfs_namespace *namespace, const char *path,
+	struct bootfs_file *file);
+enum bootfs_result bootfs_namespace_stat_result(
+	struct bootfs_namespace *namespace, const char *path,
+	struct bootfs_dirent *entry);
+enum bootfs_result bootfs_namespace_readdir_result(
+	struct bootfs_namespace *namespace, const char *path, unsigned index,
+	struct bootfs_dirent *entry);
 
 #endif

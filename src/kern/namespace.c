@@ -12,11 +12,11 @@
 #define ZEDBSD_DIRECTORY_ATTRIBUTE 0x10U
 
 struct resolved_path {
-	struct zedbsd_filesystem *filesystem;
+	struct bootfs *filesystem;
 	const char *relative;
 };
 
-static int mount_index(const struct zedbsd_namespace *namespace,
+static int mount_index(const struct bootfs_namespace *namespace,
 		       const char *name, size_t length)
 {
 	unsigned index;
@@ -30,7 +30,7 @@ static int mount_index(const struct zedbsd_namespace *namespace,
 	return -1;
 }
 
-static enum zedbsd_fs_result resolve(struct zedbsd_namespace *namespace,
+static enum bootfs_result resolve(struct bootfs_namespace *namespace,
 				     const char *path,
 				     struct resolved_path *resolved)
 {
@@ -90,7 +90,7 @@ static const char *directory_path(const char *path,
 	return normalized;
 }
 
-void zedbsd_namespace_init(struct zedbsd_namespace *namespace)
+void bootfs_namespace_init(struct bootfs_namespace *namespace)
 {
 	if (namespace == NULL)
 		return;
@@ -98,9 +98,9 @@ void zedbsd_namespace_init(struct zedbsd_namespace *namespace)
 	namespace->default_mount = -1;
 }
 
-int zedbsd_namespace_mount(struct zedbsd_namespace *namespace,
+int bootfs_namespace_mount(struct bootfs_namespace *namespace,
 			   const char *name,
-			   const struct zedbsd_filesystem *filesystem)
+			   const struct bootfs *filesystem)
 {
 	size_t length;
 	int existing;
@@ -129,7 +129,7 @@ int zedbsd_namespace_mount(struct zedbsd_namespace *namespace,
 	return 1;
 }
 
-int zedbsd_namespace_set_default(struct zedbsd_namespace *namespace,
+int bootfs_namespace_set_default(struct bootfs_namespace *namespace,
 				 const char *name)
 {
 	int index;
@@ -143,8 +143,8 @@ int zedbsd_namespace_set_default(struct zedbsd_namespace *namespace,
 	return 1;
 }
 
-const char *zedbsd_namespace_default_name(
-	const struct zedbsd_namespace *namespace)
+const char *bootfs_namespace_default_name(
+	const struct bootfs_namespace *namespace)
 {
 	if (namespace == NULL || namespace->default_mount < 0 ||
 	    (unsigned)namespace->default_mount >= namespace->count)
@@ -152,37 +152,37 @@ const char *zedbsd_namespace_default_name(
 	return namespace->mounts[namespace->default_mount].name;
 }
 
-enum zedbsd_fs_result zedbsd_namespace_open_result(
-	struct zedbsd_namespace *namespace, const char *path,
-	struct zedbsd_file *file)
+enum bootfs_result bootfs_namespace_open_result(
+	struct bootfs_namespace *namespace, const char *path,
+	struct bootfs_file *file)
 {
 	struct resolved_path resolved;
-	enum zedbsd_fs_result result = resolve(namespace, path, &resolved);
+	enum bootfs_result result = resolve(namespace, path, &resolved);
 
 	return result != ZEDBSD_FS_OK ? result :
-		zedbsd_fs_open_result(resolved.filesystem, resolved.relative, file);
+		bootfs_open_result(resolved.filesystem, resolved.relative, file);
 }
 
-enum zedbsd_fs_result zedbsd_namespace_create_result(
-	struct zedbsd_namespace *namespace, const char *path,
-	struct zedbsd_file *file)
+enum bootfs_result bootfs_namespace_create_result(
+	struct bootfs_namespace *namespace, const char *path,
+	struct bootfs_file *file)
 {
 	struct resolved_path resolved;
-	enum zedbsd_fs_result result = resolve(namespace, path, &resolved);
+	enum bootfs_result result = resolve(namespace, path, &resolved);
 
 	return result != ZEDBSD_FS_OK ? result :
-		zedbsd_fs_create_result(resolved.filesystem, resolved.relative,
+		bootfs_create_result(resolved.filesystem, resolved.relative,
 					file);
 }
 
-enum zedbsd_fs_result zedbsd_namespace_stat_result(
-	struct zedbsd_namespace *namespace, const char *path,
-	struct zedbsd_dirent *entry)
+enum bootfs_result bootfs_namespace_stat_result(
+	struct bootfs_namespace *namespace, const char *path,
+	struct bootfs_dirent *entry)
 {
 	struct resolved_path resolved;
 	char normalized[ZEDBSD_PATH_MAX];
 	const char *relative;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (namespace == NULL || path == NULL || entry == NULL)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
@@ -202,20 +202,20 @@ enum zedbsd_fs_result zedbsd_namespace_stat_result(
 	relative = directory_path(resolved.relative, normalized);
 	if (relative == NULL)
 		return ZEDBSD_FS_INVALID_PATH;
-	result = zedbsd_fs_stat_result(resolved.filesystem, relative, entry);
+	result = bootfs_stat_result(resolved.filesystem, relative, entry);
 	if (result == ZEDBSD_FS_OK)
 		lower_ascii(entry->name);
 	return result;
 }
 
-enum zedbsd_fs_result zedbsd_namespace_readdir_result(
-	struct zedbsd_namespace *namespace, const char *path, unsigned index,
-	struct zedbsd_dirent *entry)
+enum bootfs_result bootfs_namespace_readdir_result(
+	struct bootfs_namespace *namespace, const char *path, unsigned index,
+	struct bootfs_dirent *entry)
 {
 	struct resolved_path resolved;
 	char normalized[ZEDBSD_PATH_MAX];
 	const char *relative;
-	enum zedbsd_fs_result result;
+	enum bootfs_result result;
 
 	if (namespace == NULL || path == NULL || entry == NULL)
 		return ZEDBSD_FS_INVALID_ARGUMENT;
@@ -234,7 +234,7 @@ enum zedbsd_fs_result zedbsd_namespace_readdir_result(
 	relative = directory_path(resolved.relative, normalized);
 	if (relative == NULL)
 		return ZEDBSD_FS_INVALID_PATH;
-	result = zedbsd_fs_readdir_result(resolved.filesystem, relative, index,
+	result = bootfs_readdir_result(resolved.filesystem, relative, index,
 					  entry);
 	if (result == ZEDBSD_FS_OK)
 		lower_ascii(entry->name);

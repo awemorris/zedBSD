@@ -135,7 +135,7 @@ static const struct net_device_ops lgy_net_ops = {
 };
 
 int
-zedbsd_pc98_lgy98_init(void)
+pc98_lgy98_init(void)
 {
 	uint8_t prom[16];
 	int error;

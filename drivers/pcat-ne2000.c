@@ -148,7 +148,7 @@ ne2000_irq_handler(int irq, hal_irq_ack_t acknowledge, void *argument)
 }
 
 int
-zedbsd_pcat_ne2000_init(void)
+pcat_ne2000_init(void)
 {
 	uint8_t prom[16];
 	int error;

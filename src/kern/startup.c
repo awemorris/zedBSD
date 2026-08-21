@@ -191,10 +191,10 @@ int run_autoexec(void)
 
 static void draw_startup_header(void)
 {
-	hal_cons_write_at(0, 0, zedbsd_msg_machine);
-	hal_cons_write_at(2, 0, zedbsd_msg_loader);
-	hal_cons_write_at(3, 0, zedbsd_msg_copyright);
-	hal_cons_write_at(5, 0, zedbsd_msg_probing);
+	hal_cons_write_at(0, 0, boot_message_machine);
+	hal_cons_write_at(2, 0, boot_message_loader);
+	hal_cons_write_at(3, 0, boot_message_copyright);
+	hal_cons_write_at(5, 0, boot_message_probing);
 }
 
 static void draw_probe_bar(unsigned current, unsigned total)
@@ -226,7 +226,7 @@ static void draw_probe_progress(unsigned current, unsigned total,
 {
 
 	hal_cons_clear_row(5);
-	hal_cons_write_at(5, 0, zedbsd_msg_probing);
+	hal_cons_write_at(5, 0, boot_message_probing);
 	putc(' ');
 	puts(device_class == ZEDBSD_DEV_IDE ? "IDE " : "SCSI ");
 	dec((unsigned)bios_id -
@@ -243,7 +243,7 @@ static void draw_automatic_status(const struct startup_state *state)
 {
 	draw_probe_bar(state->probe_total, state->probe_total);
 	hal_cons_clear_row(5);
-	hal_cons_write_at(5, 0, zedbsd_msg_automatic_run);
+	hal_cons_write_at(5, 0, boot_message_automatic_run);
 	if (state->auto_config_kind == STARTUP_CONFIG_AUTOEXEC)
 		puts(" AUTOEXEC.NCT");
 	else if (state->auto_config_kind == STARTUP_CONFIG_BOOTCFG)
@@ -256,25 +256,25 @@ static void draw_startup_menu(const struct startup_state *state)
 		hal_cons_clear_row(menu_row);
 	hal_cons_write_at(6, 0, "");
 	dec(state->fixed_count);
-	puts((const char *)zedbsd_msg_found_suffix);
-	hal_cons_write_at(8, 0, zedbsd_msg_boot_from);
-	hal_cons_write_at(9, 0, zedbsd_msg_auto_prefix);
+	puts((const char *)boot_message_found_suffix);
+	hal_cons_write_at(8, 0, boot_message_boot_from);
+	hal_cons_write_at(9, 0, boot_message_auto_prefix);
 	if (state->phase == STARTUP_DRAW || state->phase == STARTUP_PROBE) {
-		puts((const char *)zedbsd_msg_searching);
+		puts((const char *)boot_message_searching);
 	} else if (state->auto_kind != STARTUP_AUTO_NONE) {
 		puts(devs[state->auto_device].device_class == ZEDBSD_DEV_FDD ?
 		     "FDD " : "HDD ");
 		dec(fixed_device_ordinal(state->auto_device));
-		puts((const char *)zedbsd_msg_partition);
+		puts((const char *)boot_message_partition);
 		dec((unsigned)state->auto_partition + 1);
 		if (state->auto_kind == STARTUP_AUTO_CONFIG) {
 			if (state->auto_config_kind == STARTUP_CONFIG_AUTOEXEC)
-				puts((const char *)zedbsd_msg_run_autoexec);
+				puts((const char *)boot_message_run_autoexec);
 			else
-				puts((const char *)zedbsd_msg_run_cfg);
+				puts((const char *)boot_message_run_cfg);
 		}
 	} else {
-		puts((const char *)zedbsd_msg_unavailable);
+		puts((const char *)boot_message_unavailable);
 	}
 	putc(')');
 
@@ -284,11 +284,11 @@ static void draw_startup_menu(const struct startup_state *state)
 		hal_cons_write_at(9 + ordinal, 0,
 					"  ");
 		putc((char)('1' + ordinal));
-		puts((const char *)zedbsd_msg_fixed_disk_prefix);
+		puts((const char *)boot_message_fixed_disk_prefix);
 		dec(ordinal);
 	}
-	hal_cons_write_at(15, 0, zedbsd_msg_esc_shell);
-	hal_cons_write_at(17, 0, zedbsd_msg_select);
+	hal_cons_write_at(15, 0, boot_message_esc_shell);
+	hal_cons_write_at(17, 0, boot_message_select);
 	update_cursor();
 }
 
@@ -403,7 +403,7 @@ static void probe_next_startup_device(struct startup_state *state)
 int startup_menu(struct startup_state *state)
 {
 	curdev = curpart = -1;
-	zedbsd_namespace_init(&mounted_namespace);
+	bootfs_namespace_init(&mounted_namespace);
 	state->phase = STARTUP_DRAW;
 	state->next_candidate = 0;
 	state->ide_bitmap = ide_reported_drives();

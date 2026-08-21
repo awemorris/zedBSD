@@ -43,12 +43,12 @@ struct startup_state {
 	unsigned timeout_budget;
 };
 
-extern const struct zedbsd_handoff *kern_handoff;
-extern const struct zedbsd_device *kern_devices;
+extern const struct boot_handoff *kern_handoff;
+extern const struct boot_device *kern_devices;
 extern unsigned kern_device_count;
-extern struct zedbsd_filesystem kern_mounted_fs;
-extern struct zedbsd_namespace kern_mounted_namespace;
-extern struct zedbsd_environment kern_environment;
+extern struct bootfs kern_mounted_fs;
+extern struct bootfs_namespace kern_mounted_namespace;
+extern struct environment kern_environment;
 extern struct part kern_parts[MAX_PARTS];
 extern int kern_current_device, kern_current_partition;
 

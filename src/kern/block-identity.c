@@ -76,7 +76,7 @@ static int read_bytes(struct disk *disk, uint64_t offset, size_t length,
 	return 0;
 }
 
-static int probe_fat(struct disk *disk, struct zedbsd_block_identity *id)
+static int probe_fat(struct disk *disk, struct block_identity *id)
 {
 	uint8_t boot[512];
 	uint32_t clusters, sectors, fatsz, root_sectors, data_sectors;
@@ -114,7 +114,7 @@ static int probe_fat(struct disk *disk, struct zedbsd_block_identity *id)
 }
 
 static int probe_ufs_at(struct disk *disk, uint64_t offset,
-	struct zedbsd_block_identity *id)
+	struct block_identity *id)
 {
 	uint8_t super[UFS_SUPER_SIZE];
 	uint32_t magic, first, second;
@@ -141,7 +141,7 @@ static int probe_ufs_at(struct disk *disk, uint64_t offset,
 	return 1;
 }
 
-int block_identity_get(struct disk *disk, struct zedbsd_block_identity *id)
+int block_identity_get(struct disk *disk, struct block_identity *id)
 {
 	unsigned i;
 	if (disk == NULL || id == NULL) return EINVAL;
@@ -221,7 +221,7 @@ int block_identity_resolve(const char *selector, struct disk **result)
 	else return EINVAL;
 	if (*value == '\0') return EINVAL;
 	for (i = 0; i < disk_count(); i++) {
-		struct zedbsd_block_identity id;
+		struct block_identity id;
 		struct disk *candidate = disk_at(i);
 		const char *candidate_value;
 		if (candidate == NULL || block_identity_get(candidate, &id) != 0) {

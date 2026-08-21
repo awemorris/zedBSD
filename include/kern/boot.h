@@ -12,7 +12,7 @@
 #include <stdint.h>
 #define ZEDBSD_STAGE2_MAGIC 0x53383942U  /* "B98S" */
 #define ZEDBSD_HANDOFF_MAGIC 0x48323842U /* "B82H" */
-struct zedbsd_stage2_header {
+struct boot_stage2_header {
 	uint32_t magic;
 	uint16_t version;
 	uint16_t header_size;
@@ -21,7 +21,7 @@ struct zedbsd_stage2_header {
 	uint32_t payload_checksum;
 } __attribute__((packed));
 
-struct zedbsd_handoff {
+struct boot_handoff {
 	uint32_t magic;
 	uint16_t version;
 	uint16_t size;
@@ -53,14 +53,14 @@ struct zedbsd_handoff {
 #define ZEDBSD_MEMORY_AVAILABLE 1U
 #define ZEDBSD_MEMORY_RESERVED 2U
 
-struct zedbsd_memory_region32 {
+struct boot_memory_region32 {
 	uint32_t base;
 	uint32_t size;
 	uint32_t type;
 } __attribute__((packed));
 
-struct zedbsd_x68k_handoff {
-	struct zedbsd_handoff common;
+struct x68k_boot_handoff {
+	struct boot_handoff common;
 	uint32_t extension_magic;
 	uint16_t extension_version;
 	uint16_t extension_size;
@@ -70,14 +70,14 @@ struct zedbsd_x68k_handoff {
 	uint32_t loader_phys_start;
 	uint32_t loader_phys_end;
 	uint32_t memory_region_count;
-	struct zedbsd_memory_region32
+	struct boot_memory_region32
 		memory_regions[ZEDBSD_X68K_MAX_MEMORY_REGIONS];
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct zedbsd_x68k_handoff) == 104,
+_Static_assert(sizeof(struct x68k_boot_handoff) == 104,
 	       "zedBSD X68k handoff ABI must remain 104 bytes");
 
-enum zedbsd_bios_service {
+enum bios_service {
 	ZEDBSD_BIOS_DISK_READ = 1,
 	ZEDBSD_BIOS_KEY_READ = 2,
 	ZEDBSD_BIOS_KEY_POLL = 3,
@@ -98,7 +98,7 @@ enum zedbsd_bios_service {
 	ZEDBSD_BIOS_KEY_STATE = 13,
 };
 
-struct zedbsd_bios_request {
+struct bios_request {
 	uint16_t service;
 	uint16_t status;
 	uint8_t bios_id;
@@ -109,29 +109,29 @@ struct zedbsd_bios_request {
 	uint32_t buffer;
 } __attribute__((packed));
 
-typedef uint32_t (*zedbsd_bios_gateway_t)(struct zedbsd_bios_request *request);
+typedef uint32_t (*bios_gateway_fn)(struct bios_request *request);
 
-_Static_assert(sizeof(struct zedbsd_stage2_header) == 20,
+_Static_assert(sizeof(struct boot_stage2_header) == 20,
                "zedBSD Stage 2 header must remain 20 bytes");
-_Static_assert(sizeof(struct zedbsd_handoff) == 24,
+_Static_assert(sizeof(struct boot_handoff) == 24,
 	       "zedBSD handoff version 2 must remain 24 bytes");
-_Static_assert(sizeof(struct zedbsd_bios_request) == 16,
+_Static_assert(sizeof(struct bios_request) == 16,
                "zedBSD BIOS request must remain 16 bytes");
-enum zedbsd_device_class {
+enum boot_device_class {
 	ZEDBSD_DEV_FDD = 1,
 	ZEDBSD_DEV_IDE = 2,
 	ZEDBSD_DEV_SCSI = 3,
 	ZEDBSD_DEV_SD = 4,
 };
 
-enum zedbsd_device_flags {
+enum boot_device_flags {
 	ZEDBSD_DEV_PRESENT = 1U << 0,
 	ZEDBSD_DEV_HAS_GEOMETRY = 1U << 1,
 	ZEDBSD_DEV_BOOT_ORIGIN = 1U << 2,
 };
 
 /* Firmware-discovered boot device descriptor shared with the kernel. */
-struct zedbsd_device {
+struct boot_device {
 	uint8_t device_class;
 	uint8_t display_index;
 	uint8_t bios_id;
@@ -144,7 +144,7 @@ struct zedbsd_device {
 	uint8_t reserved[5];
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct zedbsd_device) == 16,
+_Static_assert(sizeof(struct boot_device) == 16,
                "zedBSD device descriptor ABI must remain 16 bytes");
 
 #endif

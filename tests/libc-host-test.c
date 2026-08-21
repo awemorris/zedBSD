@@ -18,7 +18,7 @@ static char console_output[512];
 static size_t console_length;
 
 size_t
-zedbsd_console_write_bytes(const char *bytes, size_t length)
+__stdio_console_write(const char *bytes, size_t length)
 {
 	size_t index;
 	for (index = 0; index < length && console_length < sizeof(console_output);
@@ -158,44 +158,44 @@ test_heap(void)
 	size_t initial_largest;
 	size_t index;
 
-	zedbsd_heap_init(arena + 1, sizeof(arena) - 1);
-	CHECK(zedbsd_heap_validate());
-	initial_largest = zedbsd_heap_largest_free();
-	a = zedbsd_malloc(13);
-	b = zedbsd_malloc(257);
-	c = zedbsd_calloc(17, 3);
+	heap_active_init(arena + 1, sizeof(arena) - 1);
+	CHECK(heap_active_validate());
+	initial_largest = heap_active_largest_free();
+	a = heap_alloc_active(13);
+	b = heap_alloc_active(257);
+	c = heap_calloc_active(17, 3);
 	CHECK(a != NULL && b != NULL && c != NULL);
 	CHECK(((uintptr_t)a & 7U) == 0 && ((uintptr_t)b & 7U) == 0);
 	for (index = 0; index < 51; index++)
 		CHECK(((unsigned char *)c)[index] == 0);
 	memset(b, 0x5a, 257);
-	b = zedbsd_realloc(b, 600);
+	b = heap_realloc_active(b, 600);
 	CHECK(b != NULL);
 	for (index = 0; index < 257; index++)
 		CHECK(((unsigned char *)b)[index] == 0x5a);
-	b = zedbsd_realloc(b, 64);
-	CHECK(b != NULL && zedbsd_heap_validate());
-	copy = zedbsd_strdup("Noct zedBSD");
+	b = heap_realloc_active(b, 64);
+	CHECK(b != NULL && heap_active_validate());
+	copy = heap_strdup_active("Noct zedBSD");
 	CHECK(copy != NULL && strcmp(copy, "Noct zedBSD") == 0);
-	CHECK(zedbsd_heap_current() == 13 + 64 + 51 + 12);
-	CHECK(zedbsd_heap_peak() >= zedbsd_heap_current());
-	CHECK(zedbsd_calloc((size_t)-1, 2) == NULL);
-	CHECK(zedbsd_heap_largest_failed_instance(zedbsd_heap_get_active()) ==
+	CHECK(heap_active_current() == 13 + 64 + 51 + 12);
+	CHECK(heap_active_peak() >= heap_active_current());
+	CHECK(heap_calloc_active((size_t)-1, 2) == NULL);
+	CHECK(heap_allocator_largest_failed(heap_active_get()) ==
 	      (size_t)-1);
-	zedbsd_free(a);
-	zedbsd_free(b);
-	zedbsd_free(c);
-	zedbsd_free(copy);
-	CHECK(zedbsd_heap_current() == 0 && zedbsd_heap_validate());
-	CHECK(zedbsd_heap_largest_free() == initial_largest);
-	a = zedbsd_malloc(32);
+	heap_free_active(a);
+	heap_free_active(b);
+	heap_free_active(c);
+	heap_free_active(copy);
+	CHECK(heap_active_current() == 0 && heap_active_validate());
+	CHECK(heap_active_largest_free() == initial_largest);
+	a = heap_alloc_active(32);
 	CHECK(a != NULL);
-	zedbsd_free(a);
-	zedbsd_free(a);
-	CHECK(zedbsd_heap_error_count() == 1 && zedbsd_heap_validate());
-	zedbsd_heap_reset();
-	CHECK(zedbsd_heap_current() == 0 && zedbsd_heap_peak() == 0);
-	CHECK(zedbsd_heap_error_count() == 0 && zedbsd_heap_validate());
+	heap_free_active(a);
+	heap_free_active(a);
+	CHECK(heap_active_error_count() == 1 && heap_active_validate());
+	heap_active_reset();
+	CHECK(heap_active_current() == 0 && heap_active_peak() == 0);
+	CHECK(heap_active_error_count() == 0 && heap_active_validate());
 	return 0;
 }
 
@@ -208,18 +208,18 @@ test_fault_injection(void)
 	for (fail_after = 0; fail_after < 8; fail_after++) {
 		void *items[8];
 		size_t index;
-		zedbsd_heap_init(arena, sizeof(arena));
-		zedbsd_heap_set_failure_after(fail_after);
+		heap_active_init(arena, sizeof(arena));
+		heap_active_set_failure_after(fail_after);
 		for (index = 0; index < 8; index++)
-			items[index] = zedbsd_malloc(24 + index);
+			items[index] = heap_alloc_active(24 + index);
 		for (index = 0; index < fail_after; index++)
 			CHECK(items[index] != NULL);
 		for (index = fail_after; index < 8; index++)
 			CHECK(items[index] == NULL);
-		CHECK(zedbsd_heap_validate());
+		CHECK(heap_active_validate());
 		for (index = 0; index < fail_after; index++)
-			zedbsd_free(items[index]);
-		CHECK(zedbsd_heap_current() == 0 && zedbsd_heap_validate());
+			heap_free_active(items[index]);
+		CHECK(heap_active_current() == 0 && heap_active_validate());
 	}
 	return 0;
 }
@@ -233,27 +233,27 @@ test_heap_boundaries(void)
 	void *replacement;
 	size_t index;
 
-	zedbsd_heap_init(NULL, sizeof(arena));
-	CHECK(zedbsd_malloc(1) == NULL && zedbsd_heap_validate());
-	zedbsd_heap_init(arena, 1);
-	CHECK(zedbsd_malloc(1) == NULL && zedbsd_heap_validate());
+	heap_active_init(NULL, sizeof(arena));
+	CHECK(heap_alloc_active(1) == NULL && heap_active_validate());
+	heap_active_init(arena, 1);
+	CHECK(heap_alloc_active(1) == NULL && heap_active_validate());
 
-	zedbsd_heap_init(arena, sizeof(arena));
-	first = zedbsd_malloc(64);
-	guard = zedbsd_malloc(64);
+	heap_active_init(arena, sizeof(arena));
+	first = heap_alloc_active(64);
+	guard = heap_alloc_active(64);
 	CHECK(first != NULL && guard != NULL);
 	for (index = 0; index < 64; index++)
 		first[index] = (unsigned char)index;
-	zedbsd_heap_set_failure_after(0);
-	replacement = zedbsd_realloc(first, 512);
-	CHECK(replacement == NULL && zedbsd_heap_validate());
+	heap_active_set_failure_after(0);
+	replacement = heap_realloc_active(first, 512);
+	CHECK(replacement == NULL && heap_active_validate());
 	for (index = 0; index < 64; index++)
 		CHECK(first[index] == (unsigned char)index);
-	zedbsd_free(first + 8);
-	CHECK(zedbsd_heap_error_count() == 1 && zedbsd_heap_validate());
-	zedbsd_free(first);
-	zedbsd_free(guard);
-	CHECK(zedbsd_heap_current() == 0 && zedbsd_heap_validate());
+	heap_free_active(first + 8);
+	CHECK(heap_active_error_count() == 1 && heap_active_validate());
+	heap_free_active(first);
+	heap_free_active(guard);
+	CHECK(heap_active_current() == 0 && heap_active_validate());
 	return 0;
 }
 
@@ -287,17 +287,17 @@ test_heap_growth(void)
 	grow.end = arena + 512;
 	grow.remaining = sizeof(arena) - 512U;
 	grow.calls = 0;
-	zedbsd_heap_init(arena, 512);
-	zedbsd_heap_set_grow_instance(zedbsd_heap_get_active(), grow_test_heap,
+	heap_active_init(arena, 512);
+	heap_allocator_set_grow(heap_active_get(), grow_test_heap,
 		&grow);
-	allocation = zedbsd_malloc(2048);
+	allocation = heap_alloc_active(2048);
 	CHECK(allocation != NULL);
 	CHECK(grow.calls == 1 && grow.remaining == 0);
-	CHECK(zedbsd_heap_validate());
-	zedbsd_free(allocation);
-	CHECK(zedbsd_heap_current() == 0 && zedbsd_heap_validate());
-	zedbsd_heap_reset();
-	CHECK(zedbsd_heap_validate());
+	CHECK(heap_active_validate());
+	heap_free_active(allocation);
+	CHECK(heap_active_current() == 0 && heap_active_validate());
+	heap_active_reset();
+	CHECK(heap_active_validate());
 	return 0;
 }
 

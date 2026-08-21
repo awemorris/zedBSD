@@ -52,7 +52,7 @@ static const struct profile_limits limits[] = {
 	},
 };
 
-static enum zedbsd_noct_memory_class
+static enum noct_memory_class
 classify(uint32_t installed_mib)
 {
 	if (installed_mib < 8U)
@@ -69,10 +69,10 @@ classify(uint32_t installed_mib)
 }
 
 int
-zedbsd_noct_select_memory(uint32_t low_extended_bytes,
+noct_select_memory(uint32_t low_extended_bytes,
 			  uint32_t high_memory_mib,
 			  uint32_t low_reserved_bytes,
-			  struct zedbsd_noct_memory_profile *profile)
+			  struct noct_memory_profile *profile)
 {
 	const struct profile_limits *selected;
 	uint64_t high_bytes;
@@ -81,7 +81,7 @@ zedbsd_noct_select_memory(uint32_t low_extended_bytes,
 	uintptr_t arena_base;
 	size_t available;
 	size_t arena_size;
-	enum zedbsd_noct_memory_class memory_class;
+	enum noct_memory_class memory_class;
 
 	if (profile == NULL)
 		return 0;

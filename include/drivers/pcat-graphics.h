@@ -2,7 +2,7 @@
 #ifndef ZEDBSD_DRIVERS_PCAT_GRAPHICS_H
 #define ZEDBSD_DRIVERS_PCAT_GRAPHICS_H
 
-int zedbsd_pcat_graphics_driver_register(void);
-int zedbsd_pcat_graphics_init(void);
+int pcat_graphics_driver_register(void);
+int pcat_graphics_init(void);
 
 #endif

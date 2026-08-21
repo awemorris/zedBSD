@@ -28,7 +28,7 @@ run_unmount(int argc, char **argv)
 int
 main(int argc, char **argv)
 {
-	struct zedbsd_mount_args arguments;
+	struct mount_args arguments;
 	const char *type = NULL, *source = NULL, *target = NULL;
 	int flags = 0, i;
 

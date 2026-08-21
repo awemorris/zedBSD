@@ -8,7 +8,7 @@ _start:
 	movq (%r12), %rdi
 	leaq 8(%r12), %rsi
 	leaq 16(%r12,%rdi,8), %rdx
-	call zedbsd_user_libc_init
+	call __libc_init
 	movq (%r12), %rdi
 	leaq 8(%r12), %rsi
 	leaq 16(%r12,%rdi,8), %rdx
@@ -20,9 +20,9 @@ _start:
 	jmp 1b
 .size _start, .-_start
 
-.globl zedbsd_syscall6
-.type zedbsd_syscall6, @function
-zedbsd_syscall6:
+.globl __syscall6
+.type __syscall6, @function
+__syscall6:
 	pushq %rbx
 	pushq %rbp
 	movq %rdi, %rax
@@ -38,14 +38,14 @@ zedbsd_syscall6:
 	popq %rbp
 	popq %rbx
 	ret
-.size zedbsd_syscall6, .-zedbsd_syscall6
+.size __syscall6, .-__syscall6
 
-.globl zedbsd_signal_restorer
-.type zedbsd_signal_restorer, @function
-zedbsd_signal_restorer:
+.globl __signal_restorer
+.type __signal_restorer, @function
+__signal_restorer:
 	movq (%rsp), %rbx
 	movq 8(%rsp), %rcx
 	movq $80, %rax
 	int $0xc2
 	ud2
-.size zedbsd_signal_restorer, .-zedbsd_signal_restorer
+.size __signal_restorer, .-__signal_restorer

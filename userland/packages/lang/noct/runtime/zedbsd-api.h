@@ -6,34 +6,34 @@
 #include <stdint.h>
 
 typedef struct rt_env NoctEnv;
-typedef size_t (*zedbsd_noct_write_fn)(void *, const char *, size_t);
+typedef size_t (*noct_write_fn)(void *, const char *, size_t);
 
 #define ZEDBSD_ENV_STORAGE_SIZE 4096U
 #define ZEDBSD_ENV_MAX_ENTRIES 32U
 #define ZEDBSD_ENV_NAME_MAX 31U
 #define ZEDBSD_ENV_VALUE_MAX 255U
 
-struct zedbsd_environment {
+struct environment {
 	uint16_t used;
 	uint8_t count;
 	uint8_t reserved;
 	char storage[ZEDBSD_ENV_STORAGE_SIZE];
 };
-void zedbsd_env_init(struct zedbsd_environment *);
-int zedbsd_env_name_valid(const char *);
-const char *zedbsd_env_get(const struct zedbsd_environment *, const char *);
-int zedbsd_env_set(struct zedbsd_environment *, const char *, const char *);
-int zedbsd_env_unset(struct zedbsd_environment *, const char *);
-size_t zedbsd_env_count(const struct zedbsd_environment *);
-int zedbsd_env_at(const struct zedbsd_environment *, size_t,
+void env_init(struct environment *);
+int env_name_valid(const char *);
+const char *env_get(const struct environment *, const char *);
+int env_set(struct environment *, const char *, const char *);
+int env_unset(struct environment *, const char *);
+size_t env_count(const struct environment *);
+int env_at(const struct environment *, size_t,
 		  const char **, const char **);
 
-struct zedbsd_noct_dirent {
+struct noct_dirent {
 	char name[256];
 	uint64_t size;
 	uint8_t attributes;
 };
-struct zedbsd_noct_services {
+struct noct_services {
 	void *context;
 	const struct noct_beui_hal *beui;
 	int (*screen_clear)(void *);
@@ -48,27 +48,27 @@ struct zedbsd_noct_services {
 	int (*clock_second)(void *);
 	int (*file_size)(void *, const char *, uint32_t *);
 	int (*file_read)(void *, const char *, uint32_t, void *, uint32_t);
-	int (*directory_read)(void *, const char *, unsigned, struct zedbsd_noct_dirent *);
+	int (*directory_read)(void *, const char *, unsigned, struct noct_dirent *);
 };
-struct zedbsd_noct_options {
+struct noct_options {
 	void *arena;
 	size_t arena_size;
 	size_t fail_after;
 	int jit_enable;
 	int jit_threshold;
-	zedbsd_noct_write_fn write;
+	noct_write_fn write;
 	void *write_context;
 	void (*observe_jit_code)(void *, const void *, size_t);
 	void *jit_context;
-	const struct zedbsd_noct_services *services;
+	const struct noct_services *services;
 	void *filesystem;
 	void *environment;
 	const void *memory;
 };
 
-int zedbsd_noct_napi_register(NoctEnv *, const struct zedbsd_noct_options *);
-void zedbsd_noct_napi_cleanup(void);
-int zedbsd_noct_target_register(NoctEnv *, const struct zedbsd_noct_services *);
-void zedbsd_noct_target_cleanup(void);
-const struct zedbsd_noct_services *zedbsd_user_noct_services(void);
+int noct_napi_register(NoctEnv *, const struct noct_options *);
+void noct_napi_cleanup(void);
+int noct_target_register(NoctEnv *, const struct noct_services *);
+void noct_target_cleanup(void);
+const struct noct_services *user_noct_services(void);
 #endif

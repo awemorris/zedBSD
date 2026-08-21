@@ -33,7 +33,7 @@ def main() -> int:
     ]
     for identifier, encoded in entries:
         values = ", ".join(f"0x{byte:02x}" for byte in encoded + b"\0")
-        lines.append(f"static const char zedbsd_msg_{identifier}[] = {{ {values} }};")
+        lines.append(f"static const char boot_message_{identifier}[] = {{ {values} }};")
     lines.extend(["", "#endif", ""])
     contents = "\n".join(lines)
     if not output.exists() or output.read_text(encoding="ascii") != contents:

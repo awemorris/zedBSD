@@ -9,10 +9,10 @@
 	fprintf(stderr, "FAIL:%d: %s\n", __LINE__, #x); return 1; \
 } } while (0)
 
-static struct zedbsd_x68k_handoff
+static struct x68k_boot_handoff
 valid_handoff(void)
 {
-	struct zedbsd_x68k_handoff h;
+	struct x68k_boot_handoff h;
 	memset(&h, 0, sizeof(h));
 	h.common.magic = ZEDBSD_HANDOFF_MAGIC;
 	h.common.version = ZEDBSD_HANDOFF_VERSION_X68K;
@@ -38,7 +38,7 @@ valid_handoff(void)
 int
 main(void)
 {
-	struct zedbsd_x68k_handoff h = valid_handoff();
+	struct x68k_boot_handoff h = valid_handoff();
 	CHECK(x68k_boot_handoff_valid(&h));
 	h.loader_phys_end = h.loader_phys_start - 1U;
 	CHECK(!x68k_boot_handoff_valid(&h));

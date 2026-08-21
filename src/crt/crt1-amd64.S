@@ -8,7 +8,7 @@ _start:
 	movq (%r12), %rdi
 	leaq 8(%r12), %rsi
 	leaq 16(%r12,%rdi,8), %rdx
-	call zedbsd_user_libc_init
+	call __libc_init
 	movq (%r12), %rdi
 	leaq 8(%r12), %rsi
 	leaq 16(%r12,%rdi,8), %rdx

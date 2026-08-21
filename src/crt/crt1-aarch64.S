@@ -13,7 +13,7 @@ _start:
 	mov x0, x20
 	mov x1, x21
 	mov x2, x22
-	bl zedbsd_user_libc_init
+	bl __libc_init
 	mov x0, x20
 	mov x1, x21
 	mov x2, x22

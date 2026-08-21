@@ -14,14 +14,14 @@
 #define ZEDBSD_SYSTEM_IOC_GROUP 's'
 #define ZEDBSD_SYSTEM_SWAP_PAGE_SIZE 4096U
 
-struct zedbsd_system_info {
+struct system_info {
 	uint32_t boot_bios_id;
 	uint32_t device_count;
 	uint32_t partition_count;
 	uint32_t reserved;
 };
 
-struct zedbsd_system_device {
+struct system_device_info {
 	uint32_t index;
 	uint32_t device_class;
 	uint32_t flags;
@@ -32,7 +32,7 @@ struct zedbsd_system_device {
 	uint32_t reserved;
 };
 
-struct zedbsd_system_vmstat {
+struct vm_statistics {
 	uint64_t physical_total, physical_reserved, physical_allocated, physical_free;
 	uint64_t image, heap_fixed, heap_current, heap_peak;
 	uint64_t heap_largest_free, heap_largest_failed;
@@ -44,7 +44,7 @@ struct zedbsd_system_vmstat {
 };
 
 /* Debug/validation snapshot.  Counts are live kernel objects, not capacity. */
-struct zedbsd_system_resources {
+struct system_resource_info {
 	uint64_t process, thread, filedesc, file, pipe;
 	uint64_t mount, inode, namecache;
 	uint64_t vmspace, vm_object, vm_page, swap_slot;
@@ -52,7 +52,7 @@ struct zedbsd_system_resources {
 };
 
 #define ZEDBSD_SYSTEM_PROCESS_COMMAND_MAX 64U
-struct zedbsd_system_process {
+struct process_info {
 	int32_t pid;
 	int32_t ppid;
 	uint32_t uid;
@@ -63,14 +63,14 @@ struct zedbsd_system_process {
 	char command[ZEDBSD_SYSTEM_PROCESS_COMMAND_MAX];
 };
 
-#define ZEDBSD_SYSTEM_GET_INFO _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 1, struct zedbsd_system_info)
-#define ZEDBSD_SYSTEM_GET_DEVICE _IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 2, struct zedbsd_system_device)
-#define ZEDBSD_SYSTEM_GET_VMSTAT _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 3, struct zedbsd_system_vmstat)
+#define ZEDBSD_SYSTEM_GET_INFO _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 1, struct system_info)
+#define ZEDBSD_SYSTEM_GET_DEVICE _IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 2, struct system_device_info)
+#define ZEDBSD_SYSTEM_GET_VMSTAT _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 3, struct vm_statistics)
 #define ZEDBSD_SYSTEM_HALT _IO(ZEDBSD_SYSTEM_IOC_GROUP, 4)
 #define ZEDBSD_SYSTEM_REBOOT _IO(ZEDBSD_SYSTEM_IOC_GROUP, 5)
 #define ZEDBSD_SYSTEM_GET_RESOURCES _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 6, \
-	struct zedbsd_system_resources)
+	struct system_resource_info)
 #define ZEDBSD_SYSTEM_GET_PROCESS _IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 7, \
-	struct zedbsd_system_process)
+	struct process_info)
 
 #endif

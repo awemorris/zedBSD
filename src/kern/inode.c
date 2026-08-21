@@ -396,7 +396,7 @@ inode_touch(struct inode *inode, unsigned mask)
 	struct inode_time now;
 	if (inode == NULL)
 		return;
-	zedbsd_clock_realtime(&now.tv_sec, &now.tv_nsec);
+	clock_realtime(&now.tv_sec, &now.tv_nsec);
 	if (mask & INODE_ATTR_ATIME)
 		inode->i_atime = now;
 	if (mask & INODE_ATTR_MTIME)
@@ -436,7 +436,7 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 		return EROFS;
 	requested = *s;
 	if (mask & (INODE_ATTR_ATIME_NOW | INODE_ATTR_MTIME_NOW)) {
-		zedbsd_clock_realtime(&now.tv_sec, &now.tv_nsec);
+		clock_realtime(&now.tv_sec, &now.tv_nsec);
 		if (mask & INODE_ATTR_ATIME_NOW) {
 			requested.st_atime = now.tv_sec;
 #ifdef ZEDBSD_SYS_STAT_H

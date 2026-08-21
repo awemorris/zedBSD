@@ -11,7 +11,7 @@ void m68k_int_init(void);
 void x68k_timer_init(uint32 frequency);
 
 void
-m68k_x68k_cmain(const struct zedbsd_x68k_handoff *handoff)
+m68k_x68k_cmain(const struct x68k_boot_handoff *handoff)
 {
 	x68k_cons_init();
 	hal_puts("X68K MC68030 ENTRY\n");

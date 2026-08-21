@@ -80,7 +80,7 @@ static int require_entered(struct file *file)
 	return file == graphics_owner && graphics_entered ? 0 : ENXIO;
 }
 
-static int valid_rect(const struct zedbsd_graphics_rect *rect)
+static int valid_rect(const struct graphics_rect *rect)
 {
 	return rect->width != 0 && rect->height != 0 &&
 		rect->x <= graphics_mode.width && rect->y <= graphics_mode.height &&
@@ -89,7 +89,7 @@ static int valid_rect(const struct zedbsd_graphics_rect *rect)
 }
 
 static void convert_rect(struct kern_graphics_rect *to,
-			 const struct zedbsd_graphics_rect *from)
+			 const struct graphics_rect *from)
 {
 	to->x = from->x; to->y = from->y;
 	to->width = from->width; to->height = from->height;
@@ -97,7 +97,7 @@ static void convert_rect(struct kern_graphics_rect *to,
 
 static int graphics_enter(uintptr_t argument)
 {
-	struct zedbsd_graphics_mode request;
+	struct graphics_mode request;
 	int error = copyin(argument, &request, sizeof(request));
 	if (error != 0)
 		return error;
@@ -137,9 +137,9 @@ static int graphics_enter(uintptr_t argument)
 static int
 graphics_get_modes(uintptr_t argument)
 {
-	struct zedbsd_graphics_mode_list request;
+	struct graphics_mode_list request;
 	struct kern_graphics_mode_info native[GRAPHICS_MAX_MODES];
-	struct zedbsd_graphics_mode_info result;
+	struct graphics_mode_info result;
 	size_t total, returned, i;
 	int error;
 
@@ -170,7 +170,7 @@ static int graphics_fill(uintptr_t argument, int patterned)
 {
 	struct kern_graphics_rect native;
 	if (patterned) {
-		struct zedbsd_graphics_pattern_fill request;
+		struct graphics_pattern_fill request;
 		int error = copyin(argument, &request, sizeof(request));
 		if (error != 0) return error;
 		if (request.reserved != 0 || !valid_rect(&request.rect)) return EINVAL;
@@ -178,7 +178,7 @@ static int graphics_fill(uintptr_t argument, int patterned)
 		return graphics_driver->pattern_fill(graphics_driver_context, &native,
 			request.color, request.pattern) ? 0 : EIO;
 	} else {
-		struct zedbsd_graphics_fill request;
+		struct graphics_fill request;
 		int error = copyin(argument, &request, sizeof(request));
 		if (error != 0) return error;
 		if (request.reserved != 0 || !valid_rect(&request.rect)) return EINVAL;
@@ -190,7 +190,7 @@ static int graphics_fill(uintptr_t argument, int patterned)
 
 static int graphics_line(uintptr_t argument)
 {
-	struct zedbsd_graphics_line request;
+	struct graphics_line request;
 	int error = copyin(argument, &request, sizeof(request));
 	if (error != 0) return error;
 	if (request.reserved != 0 || request.x0 >= graphics_mode.width ||
@@ -201,7 +201,7 @@ static int graphics_line(uintptr_t argument)
 		request.y0, request.x1, request.y1, request.color) ? 0 : EIO;
 }
 
-static int load_palette(const struct zedbsd_graphics_blit *request)
+static int load_palette(const struct graphics_blit *request)
 {
 	if (request->format == ZEDBSD_GRAPHICS_FORMAT_MONO1) {
 		palette_buffer[0] = request->background;
@@ -220,7 +220,7 @@ static int load_palette(const struct zedbsd_graphics_blit *request)
 
 static int graphics_blit(uintptr_t argument, int patterned)
 {
-	struct zedbsd_graphics_blit request;
+	struct graphics_blit request;
 	struct kern_graphics_image image;
 	uint64_t minimum_stride, source_offset;
 	unsigned row;
@@ -281,8 +281,8 @@ static int graphics_blit(uintptr_t argument, int patterned)
 
 static int graphics_flush(uintptr_t argument)
 {
-	struct zedbsd_graphics_flush request;
-	struct zedbsd_graphics_rect input[GRAPHICS_MAX_RECTS];
+	struct graphics_flush request;
+	struct graphics_rect input[GRAPHICS_MAX_RECTS];
 	struct kern_graphics_rect native[GRAPHICS_MAX_RECTS];
 	unsigned i;
 	int error = copyin(argument, &request, sizeof(request));
@@ -305,7 +305,7 @@ static int graphics_flush(uintptr_t argument)
 
 static int graphics_glyph(uintptr_t argument)
 {
-	struct zedbsd_graphics_glyph request;
+	struct graphics_glyph request;
 	uint8_t bitmap[32];
 	unsigned width, height;
 	int error = copyin(argument, &request, sizeof(request));
@@ -334,7 +334,7 @@ static int graphics_ioctl_locked(struct file *file, unsigned long request,
 		return EBADF;
 	if (request == ZEDBSD_GRAPHICS_GET_CAPS) {
 		struct kern_graphics_mode_info modes[GRAPHICS_MAX_MODES];
-		struct zedbsd_graphics_caps caps = { GRAPHICS_CAPABILITIES, 0, 0, 0 };
+		struct graphics_caps caps = { GRAPHICS_CAPABILITIES, 0, 0, 0 };
 		size_t count, i;
 		count = graphics_driver->get_modes(graphics_driver_context, modes,
 		    GRAPHICS_MAX_MODES);
@@ -356,7 +356,7 @@ static int graphics_ioctl_locked(struct file *file, unsigned long request,
 	if (error != 0) return error;
 	switch (request) {
 	case ZEDBSD_GRAPHICS_GET_MODE: {
-		const struct zedbsd_graphics_mode mode = {
+		const struct graphics_mode mode = {
 			.preferred_width = graphics_mode.preferred_width,
 			.preferred_height = graphics_mode.preferred_height,
 			.preferred_bits_per_pixel = graphics_mode.preferred_bits_per_pixel,

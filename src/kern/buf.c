@@ -891,7 +891,7 @@ buf_invalidate_disk(struct disk *disk, unsigned flags)
 }
 
 void
-buf_get_stats(struct zedbsd_bufcache_stats *stats)
+buf_get_stats(struct bufcache_stats *stats)
 {
 	unsigned long irq;
 	if (stats == NULL)

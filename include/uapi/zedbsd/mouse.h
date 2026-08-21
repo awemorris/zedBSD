@@ -16,7 +16,7 @@
 #define ZEDBSD_MOUSE_EVENT_OVERFLOW 0x0001U
 
 /* Fixed-size relative-pointer event returned by read(2). */
-struct zedbsd_mouse_event {
+struct mouse_event {
 	uint64_t timestamp_ns;
 	uint32_t sequence;
 	uint16_t flags;

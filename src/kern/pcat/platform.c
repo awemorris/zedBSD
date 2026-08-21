@@ -26,8 +26,8 @@
 #include <hal/hal.h>
 
 size_t
-kern_platform_init(const struct zedbsd_handoff *handoff,
-    struct zedbsd_device *devices, size_t capacity)
+kern_platform_init(const struct boot_handoff *handoff,
+    struct boot_device *devices, size_t capacity)
 {
 	size_t count = 0;
 	if (handoff == 0 || devices == 0 || capacity == 0 ||
@@ -52,15 +52,15 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 		hal_printf("usb: EHCI PCI driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_GRAPHICS
-	if (zedbsd_pcat_graphics_driver_register() != 0)
+	if (pcat_graphics_driver_register() != 0)
 		hal_printf("graphics: PCI driver registration failed\n");
 #endif
 	if (drv_pci_pcat_init() != 0)
 		hal_printf("pci: PC/AT host initialization failed\n");
-	(void)zedbsd_ide_pcat_init();
+	(void)pcat_ide_init();
 	for (unsigned slot = 0; slot < 4U && count < capacity; slot++) {
-		struct disk *disk = zedbsd_ide_pcat_bios_unit((uint8_t)(0x80U+slot));
-		struct zedbsd_device *device;
+		struct disk *disk = pcat_ide_bios_unit((uint8_t)(0x80U+slot));
+		struct boot_device *device;
 		if (disk == 0) continue;
 		device = &devices[count];
 		device->device_class=ZEDBSD_DEV_IDE; device->display_index=(uint8_t)count;
@@ -74,7 +74,7 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 	}
 #if CONFIG_DRIVER_NE2000
 	{
-		int network_error = zedbsd_pcat_ne2000_init();
+		int network_error = pcat_ne2000_init();
 
 		if (network_error == 0)
 			hal_printf("net: ISA NE2000 at 0x300 irq 10 registered "
@@ -85,13 +85,13 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 	}
 #endif
 #if CONFIG_DRIVER_GRAPHICS
-	if (!zedbsd_pcat_graphics_init())
+	if (!pcat_graphics_init())
 		hal_printf("graphics: PC/AT driver unavailable\n");
 #endif
 	return count;
 }
 
-void kern_platform_refresh_devices(const struct zedbsd_device *d, size_t n)
+void kern_platform_refresh_devices(const struct boot_device *d, size_t n)
 {
 	(void)d;
 	(void)n;
@@ -105,10 +105,10 @@ void kern_platform_refresh_devices(const struct zedbsd_device *d, size_t n)
 
 int kern_platform_input_init(void) { return 0; }
 
-struct disk *kern_platform_block_device(const struct zedbsd_device *device)
+struct disk *kern_platform_block_device(const struct boot_device *device)
 {
 	if (device == 0 || device->device_class != ZEDBSD_DEV_IDE) return 0;
-	return zedbsd_ide_pcat_bios_unit(device->bios_id);
+	return pcat_ide_bios_unit(device->bios_id);
 }
 
 void kern_platform_debug_write(const char *text)

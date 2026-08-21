@@ -270,10 +270,10 @@ static void
 make_handoff(const struct x68k_boot_manifest *manifest, uint32_t scsi_id,
 	uint32_t kernel_end)
 {
-	struct zedbsd_x68k_handoff *handoff =
-		(struct zedbsd_x68k_handoff *)X68K_HANDOFF_ADDRESS;
-	struct zedbsd_device *device =
-		(struct zedbsd_device *)X68K_DEVICE_TABLE_ADDRESS;
+	struct x68k_boot_handoff *handoff =
+		(struct x68k_boot_handoff *)X68K_HANDOFF_ADDRESS;
+	struct boot_device *device =
+		(struct boot_device *)X68K_DEVICE_TABLE_ADDRESS;
 	uint32_t ram_bytes = be32(&manifest->ram_bytes);
 
 	zero_bytes(handoff, sizeof(*handoff));

@@ -579,7 +579,7 @@ flags:
 }
 
 int
-mount_quotactl(struct mount *mountp, struct zedbsd_quota_ctl *request)
+mount_quotactl(struct mount *mountp, struct quota_control *request)
 {
 	if (mountp == NULL || request == NULL)
 		return EINVAL;
@@ -592,7 +592,7 @@ mount_quotactl(struct mount *mountp, struct zedbsd_quota_ctl *request)
 }
 
 int
-mount_snapshotctl(struct mount *mountp, struct zedbsd_snapshot_ctl *request)
+mount_snapshotctl(struct mount *mountp, struct snapshot_control *request)
 {
 	if (mountp == NULL || request == NULL)
 		return EINVAL;

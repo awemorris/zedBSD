@@ -28,14 +28,14 @@
 #define ZEDBSD_GRAPHICS_FORMAT_MONO1  3U
 #define ZEDBSD_GRAPHICS_GLYPH_MSB1    1U
 
-struct zedbsd_graphics_caps {
+struct graphics_caps {
 	uint32_t capabilities;
 	uint32_t maximum_width;
 	uint32_t maximum_height;
 	uint32_t reserved;
 };
 
-struct zedbsd_graphics_mode {
+struct graphics_mode {
 	uint32_t preferred_width;
 	uint32_t preferred_height;
 	uint32_t preferred_bits_per_pixel;
@@ -46,34 +46,34 @@ struct zedbsd_graphics_mode {
 	uint32_t capabilities;
 };
 
-struct zedbsd_graphics_mode_info {
+struct graphics_mode_info {
 	uint32_t width;
 	uint32_t height;
 	uint32_t bits_per_pixel;
 	uint32_t stride;
 };
 
-struct zedbsd_graphics_mode_list {
+struct graphics_mode_list {
 	uapi_ptr_t modes;
 	uint32_t capacity;
 	uint32_t count;
 	uint32_t reserved;
 };
 
-struct zedbsd_graphics_rect {
+struct graphics_rect {
 	uint32_t x;
 	uint32_t y;
 	uint32_t width;
 	uint32_t height;
 };
 
-struct zedbsd_graphics_fill {
-	struct zedbsd_graphics_rect rect;
+struct graphics_fill {
+	struct graphics_rect rect;
 	uint32_t color;
 	uint32_t reserved;
 };
 
-struct zedbsd_graphics_line {
+struct graphics_line {
 	uint32_t x0;
 	uint32_t y0;
 	uint32_t x1;
@@ -82,14 +82,14 @@ struct zedbsd_graphics_line {
 	uint32_t reserved;
 };
 
-struct zedbsd_graphics_pattern_fill {
-	struct zedbsd_graphics_rect rect;
+struct graphics_pattern_fill {
+	struct graphics_rect rect;
 	uint32_t color;
 	uint32_t reserved;
 	uint64_t pattern;
 };
 
-struct zedbsd_graphics_blit {
+struct graphics_blit {
 	uint32_t x;
 	uint32_t y;
 	uint32_t width;
@@ -105,12 +105,12 @@ struct zedbsd_graphics_blit {
 	uint64_t pattern;
 };
 
-struct zedbsd_graphics_flush {
+struct graphics_flush {
 	uapi_ptr_t rectangles;
 	uint32_t rectangle_count;
 };
 
-struct zedbsd_graphics_glyph {
+struct graphics_glyph {
 	uint32_t codepoint;
 	uapi_ptr_t bitmap;
 	uint32_t bitmap_capacity;
@@ -126,26 +126,26 @@ struct zedbsd_graphics_glyph {
 };
 
 #define ZEDBSD_GRAPHICS_GET_CAPS \
-	_IOR(ZEDBSD_GRAPHICS_IOC_GROUP, 1, struct zedbsd_graphics_caps)
+	_IOR(ZEDBSD_GRAPHICS_IOC_GROUP, 1, struct graphics_caps)
 #define ZEDBSD_GRAPHICS_ENTER \
-	_IOWR(ZEDBSD_GRAPHICS_IOC_GROUP, 2, struct zedbsd_graphics_mode)
+	_IOWR(ZEDBSD_GRAPHICS_IOC_GROUP, 2, struct graphics_mode)
 #define ZEDBSD_GRAPHICS_GET_MODE \
-	_IOR(ZEDBSD_GRAPHICS_IOC_GROUP, 3, struct zedbsd_graphics_mode)
+	_IOR(ZEDBSD_GRAPHICS_IOC_GROUP, 3, struct graphics_mode)
 #define ZEDBSD_GRAPHICS_FILL_RECT \
-	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 4, struct zedbsd_graphics_fill)
+	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 4, struct graphics_fill)
 #define ZEDBSD_GRAPHICS_DRAW_LINE \
-	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 5, struct zedbsd_graphics_line)
+	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 5, struct graphics_line)
 #define ZEDBSD_GRAPHICS_PATTERN_FILL \
-	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 6, struct zedbsd_graphics_pattern_fill)
+	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 6, struct graphics_pattern_fill)
 #define ZEDBSD_GRAPHICS_BLIT \
-	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 7, struct zedbsd_graphics_blit)
+	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 7, struct graphics_blit)
 #define ZEDBSD_GRAPHICS_BLIT_PATTERN \
-	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 8, struct zedbsd_graphics_blit)
+	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 8, struct graphics_blit)
 #define ZEDBSD_GRAPHICS_FLUSH \
-	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 9, struct zedbsd_graphics_flush)
+	_IOW(ZEDBSD_GRAPHICS_IOC_GROUP, 9, struct graphics_flush)
 #define ZEDBSD_GRAPHICS_GET_GLYPH \
-	_IOWR(ZEDBSD_GRAPHICS_IOC_GROUP, 10, struct zedbsd_graphics_glyph)
+	_IOWR(ZEDBSD_GRAPHICS_IOC_GROUP, 10, struct graphics_glyph)
 #define ZEDBSD_GRAPHICS_GET_MODES \
-	_IOWR(ZEDBSD_GRAPHICS_IOC_GROUP, 11, struct zedbsd_graphics_mode_list)
+	_IOWR(ZEDBSD_GRAPHICS_IOC_GROUP, 11, struct graphics_mode_list)
 
 #endif

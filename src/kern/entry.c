@@ -31,7 +31,7 @@
 #define KERNEL_LARGE_THRESHOLD (2U * ZEDBSD_PAGE_SIZE)
 static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
 	__attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
-static struct zedbsd_heap kernel_heap;
+static struct heap_allocator kernel_heap;
 static volatile unsigned kernel_heap_lock;
 
 struct kernel_large_allocation {
@@ -73,7 +73,7 @@ kern_malloc(size_t size)
 
 	if (size < KERNEL_LARGE_THRESHOLD) {
 		enabled = kernel_heap_lock_enter();
-		result = zedbsd_heap_alloc(&kernel_heap, size);
+		result = heap_allocator_alloc(&kernel_heap, size);
 		kernel_heap_lock_leave(enabled);
 		return result;
 	}
@@ -85,7 +85,7 @@ kern_malloc(size_t size)
 	if (hal_pmem_alloc(&request, &memory) != HAL_OK)
 		return NULL;
 	enabled = kernel_heap_lock_enter();
-	large = zedbsd_heap_alloc(&kernel_heap, sizeof(*large));
+	large = heap_allocator_alloc(&kernel_heap, sizeof(*large));
 	if (large != NULL) {
 		large->pointer = memory.vaddr;
 		large->memory = memory;
@@ -128,7 +128,7 @@ kern_free(void *pointer)
 	enabled = kernel_heap_lock_enter();
 	if (address >= (uintptr_t)kernel_heap.begin &&
 	    address < (uintptr_t)kernel_heap.end) {
-		zedbsd_heap_free(&kernel_heap, pointer);
+		heap_allocator_free(&kernel_heap, pointer);
 		kernel_heap_lock_leave(enabled);
 		return;
 	}
@@ -141,7 +141,7 @@ kern_free(void *pointer)
 		}
 	if (large != NULL) {
 		memory = large->memory;
-		zedbsd_heap_free(&kernel_heap, large);
+		heap_allocator_free(&kernel_heap, large);
 	}
 	kernel_heap_lock_leave(enabled);
 	if (large == NULL)
@@ -158,12 +158,12 @@ kern_memory_get_stats(struct kern_memory_stats *stats)
 		return;
 	enabled = kernel_heap_lock_enter();
 	stats->heap_fixed = KERNEL_HEAP_SIZE;
-	stats->heap_current = zedbsd_heap_current_instance(&kernel_heap);
-	stats->heap_peak = zedbsd_heap_peak_instance(&kernel_heap);
+	stats->heap_current = heap_allocator_current(&kernel_heap);
+	stats->heap_peak = heap_allocator_peak(&kernel_heap);
 	stats->heap_largest_free =
-		zedbsd_heap_largest_free_instance(&kernel_heap);
+		heap_allocator_largest_free(&kernel_heap);
 	stats->heap_largest_failed =
-		zedbsd_heap_largest_failed_instance(&kernel_heap);
+		heap_allocator_largest_failed(&kernel_heap);
 	stats->image_bytes = (size_t)(__kernel_vma_end - __kernel_vma_start);
 	kernel_heap_lock_leave(enabled);
 }
@@ -174,8 +174,8 @@ static void kernel_free(void *pointer) { kern_free(pointer); }
 void
 kernel_entry(const void *handoff)
 {
-	const struct zedbsd_handoff *h = handoff;
-	static struct zedbsd_device devices[KERN_PLATFORM_MAX_DEVICES];
+	const struct boot_handoff *h = handoff;
+	static struct boot_device devices[KERN_PLATFORM_MAX_DEVICES];
 	size_t device_count;
 
 	if (h == NULL || h->magic != ZEDBSD_HANDOFF_MAGIC ||
@@ -187,9 +187,9 @@ kernel_entry(const void *handoff)
 		hal_fatal(__FILE__, __LINE__, "invalid zedBSD handoff");
 	kern_log_init();
 	kern_logf("boot: kernel heap, process, and scheduler initialization\n");
-	zedbsd_heap_init_instance(&kernel_heap, kernel_heap_storage,
+	heap_allocator_init(&kernel_heap, kernel_heap_storage,
 				 KERNEL_HEAP_SIZE);
-	(void)zedbsd_heap_set_active(&kernel_heap);
+	(void)heap_active_set(&kernel_heap);
 	hal_set_allocator(kernel_alloc, kernel_free);
 	hal_task_init();
 	process_init();

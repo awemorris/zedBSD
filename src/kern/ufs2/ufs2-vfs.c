@@ -24,7 +24,7 @@
 #include <zedbsd/quota.h>
 #include <zedbsd/snapshot.h>
 
-void zedbsd_clock_realtime(time_t *,long *);
+void clock_realtime(time_t *,long *);
 
 #define UFS2_IFMT 0170000U
 #define UFS2_IFIFO 0010000U
@@ -386,7 +386,7 @@ static uint64_t
 quota_now(void)
 {
 	time_t seconds=0;long nanoseconds=0;
-	zedbsd_clock_realtime(&seconds,&nanoseconds);(void)nanoseconds;
+	clock_realtime(&seconds,&nanoseconds);(void)nanoseconds;
 	return seconds>0?(uint64_t)seconds:0;
 }
 
@@ -2391,7 +2391,7 @@ static int ufs2_statvfs(struct mount *mountp,struct statvfs *result)
 	mutex_unlock(&ms->lock);return 0;
 }
 static int
-ufs2_quotactl(struct mount *mountp,struct zedbsd_quota_ctl *request)
+ufs2_quotactl(struct mount *mountp,struct quota_control *request)
 {
 	struct ufs2_mount_state *ms=state(mountp);
 	struct quota_record record;
@@ -2460,7 +2460,7 @@ ufs2_quotactl(struct mount *mountp,struct zedbsd_quota_ctl *request)
 	kern_free(saved);return error;
 }
 static int
-ufs2_snapshotctl(struct mount *mountp,struct zedbsd_snapshot_ctl *request)
+ufs2_snapshotctl(struct mount *mountp,struct snapshot_control *request)
 {
 	struct ufs2_mount_state *ms=state(mountp);int error=0;
 	if(ms==NULL||request==NULL)return EINVAL;

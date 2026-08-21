@@ -11,7 +11,7 @@
 #define RLIMIT_NLIMITS 4
 #define RLIM_INFINITY UINT64_MAX
 
-struct zedbsd_rlimit {
+struct rlimit_record {
 	uint64_t current;
 	uint64_t maximum;
 };

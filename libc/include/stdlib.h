@@ -8,12 +8,6 @@
 #define EXIT_FAILURE 1
 #define RAND_MAX 2147483647
 
-void *zedbsd_malloc(size_t size);
-void *zedbsd_calloc(size_t count, size_t size);
-void *zedbsd_realloc(void *pointer, size_t size);
-void zedbsd_free(void *pointer);
-char *zedbsd_strdup(const char *string);
-
 void *malloc(size_t size);
 void *calloc(size_t count, size_t size);
 void *realloc(void *pointer, size_t size);

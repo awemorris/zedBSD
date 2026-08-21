@@ -35,7 +35,7 @@ struct console_open {
 };
 
 static struct console_open *event_owner;
-static struct zedbsd_console_input_event event_records[CONSOLE_EVENT_RECORDS];
+static struct console_input_event event_records[CONSOLE_EVENT_RECORDS];
 static unsigned event_head, event_tail, event_used, event_sequence;
 
 static struct console_open *
@@ -133,7 +133,7 @@ console_input_worker(void *argument)
 			continue;
 		irq = spin_lock_irqsave(&input_lock);
 		if (event_owner != NULL) {
-			struct zedbsd_console_input_event *record;
+			struct console_input_event *record;
 			unsigned flags = 0;
 			if (event_used == CONSOLE_EVENT_RECORDS) {
 				event_tail = (event_tail + 1U) % CONSOLE_EVENT_RECORDS;
@@ -142,7 +142,7 @@ console_input_worker(void *argument)
 			}
 			record = &event_records[event_head];
 			memset(record, 0, sizeof(*record));
-			record->timestamp_ns = zedbsd_kernel_milliseconds(NULL) *
+			record->timestamp_ns = clock_milliseconds(NULL) *
 			    1000000ULL;
 			record->sequence = ++event_sequence;
 			record->type = ZEDBSD_CONSOLE_INPUT_EVENT_KEY;
@@ -181,9 +181,9 @@ console_event_read(struct file *file, void *buffer, size_t size)
 {
 	size_t capacity, count = 0;
 	unsigned long irq;
-	if (size < sizeof(struct zedbsd_console_input_event))
+	if (size < sizeof(struct console_input_event))
 		return -EINVAL;
-	capacity = size / sizeof(struct zedbsd_console_input_event);
+	capacity = size / sizeof(struct console_input_event);
 	irq = spin_lock_irqsave(&input_lock);
 	while (event_used == 0) {
 		uint64_t sequence;
@@ -201,13 +201,13 @@ console_event_read(struct file *file, void *buffer, size_t size)
 		}
 	}
 	while (count < capacity && event_used != 0) {
-		((struct zedbsd_console_input_event *)buffer)[count++] =
+		((struct console_input_event *)buffer)[count++] =
 		    event_records[event_tail];
 		event_tail = (event_tail + 1U) % CONSOLE_EVENT_RECORDS;
 		event_used--;
 	}
 	spin_unlock_irqrestore(&input_lock, irq);
-	return (ssize_t)(count * sizeof(struct zedbsd_console_input_event));
+	return (ssize_t)(count * sizeof(struct console_input_event));
 }
 
 static ssize_t console_read(struct file *file, void *buffer, size_t size)
@@ -229,7 +229,7 @@ static ssize_t console_write(struct file *file, const void *buffer, size_t size)
 
 static int console_write_at(uintptr_t argument)
 {
-	struct zedbsd_console_write_at request;
+	struct console_write_at request;
 	char text[CONSOLE_WRITE_MAX + 1U];
 	int error = copyin(argument, &request, sizeof(request));
 	if (error != 0)
@@ -252,7 +252,7 @@ static int console_ioctl(struct file *file, unsigned long request,
 	int error;
 	switch (request) {
 	case ZEDBSD_CONSOLE_GET_SIZE: {
-		const struct zedbsd_console_size size = {
+		const struct console_size size = {
 			HAL_CONS_ROWS, HAL_CONS_COLUMNS
 		};
 		return copyout(&size, argument, sizeof(size));
@@ -261,7 +261,7 @@ static int console_ioctl(struct file *file, unsigned long request,
 		hal_cons_clear();
 		return 0;
 	case ZEDBSD_CONSOLE_CLEAR_ROW: {
-		struct zedbsd_console_row row;
+		struct console_row row;
 		error = copyin(argument, &row, sizeof(row));
 		if (error != 0) return error;
 		if (row.row >= HAL_CONS_ROWS) return EINVAL;
@@ -269,13 +269,13 @@ static int console_ioctl(struct file *file, unsigned long request,
 		return 0;
 	}
 	case ZEDBSD_CONSOLE_CLEAR_TO_EOL: {
-		struct zedbsd_console_position position;
+		struct console_position position;
 		error = copyin(argument, &position, sizeof(position));
 		if (error != 0) return error;
 		return hal_cons_clear_to_eol_at(position.row, position.column) ? 0 : EINVAL;
 	}
 	case ZEDBSD_CONSOLE_GET_CURSOR: {
-		struct zedbsd_console_cursor cursor;
+		struct console_cursor cursor;
 		hal_cons_save_state(&state);
 		cursor.row = state.row;
 		cursor.column = state.column;
@@ -283,13 +283,13 @@ static int console_ioctl(struct file *file, unsigned long request,
 		return copyout(&cursor, argument, sizeof(cursor));
 	}
 	case ZEDBSD_CONSOLE_SET_CURSOR: {
-		struct zedbsd_console_cursor cursor;
+		struct console_cursor cursor;
 		error = copyin(argument, &cursor, sizeof(cursor));
 		if (error != 0) return error;
 		return hal_cons_set_cursor(cursor.row, cursor.column) ? 0 : EINVAL;
 	}
 	case ZEDBSD_CONSOLE_SHOW_CURSOR: {
-		struct zedbsd_console_cursor cursor;
+		struct console_cursor cursor;
 		error = copyin(argument, &cursor, sizeof(cursor));
 		if (error != 0) return error;
 		hal_cons_show_cursor(cursor.visible != 0);
@@ -299,7 +299,7 @@ static int console_ioctl(struct file *file, unsigned long request,
 		return console_write_at(argument);
 	case ZEDBSD_CONSOLE_POLL_EVENT:
 	case ZEDBSD_CONSOLE_READ_EVENT: {
-		struct zedbsd_console_event event;
+		struct console_event event;
 		int value = request == ZEDBSD_CONSOLE_POLL_EVENT ?
 			console_input_take(0, 0) : console_input_take(1, 1);
 		if (value == -EINTR) return EINTR;
@@ -309,7 +309,7 @@ static int console_ioctl(struct file *file, unsigned long request,
 	}
 	case ZEDBSD_CONSOLE_GET_INPUT_MODE: {
 		struct console_open *open = console_open_state(file);
-		struct zedbsd_console_input_mode mode;
+		struct console_input_mode mode;
 		if (open == NULL) return ENODEV;
 		mode.mode = open->input_mode;
 		mode.flags = 0;
@@ -317,7 +317,7 @@ static int console_ioctl(struct file *file, unsigned long request,
 	}
 	case ZEDBSD_CONSOLE_SET_INPUT_MODE: {
 		struct console_open *open = console_open_state(file);
-		struct zedbsd_console_input_mode mode;
+		struct console_input_mode mode;
 		unsigned long irq;
 		if (open == NULL) return ENODEV;
 		error = copyin(argument, &mode, sizeof(mode));
@@ -343,7 +343,7 @@ static int console_ioctl(struct file *file, unsigned long request,
 		return 0;
 	}
 	case ZEDBSD_CONSOLE_KEY_STATE: {
-		struct zedbsd_console_key_state key;
+		struct console_key_state key;
 		error = copyin(argument, &key, sizeof(key));
 		if (error != 0) return error;
 		key.down = hal_cons_key_state((int)key.key);

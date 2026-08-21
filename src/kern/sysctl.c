@@ -129,7 +129,7 @@ int
 kern_sysctl(const int *name, unsigned namelen, void *oldp, size_t *oldlenp,
 	const void *newp, size_t newlen, int superuser)
 {
-	struct zedbsd_bufcache_stats stats;
+	struct bufcache_stats stats;
 	uint64_t value;
 	int error;
 	if (name == NULL || namelen == 0 || namelen > CTL_MAXNAME)

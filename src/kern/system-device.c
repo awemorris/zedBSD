@@ -26,7 +26,7 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 	(void)file;
 	switch (request) {
 	case ZEDBSD_SYSTEM_GET_INFO: {
-		struct zedbsd_system_info info;
+		struct system_info info;
 		memset(&info, 0, sizeof(info));
 		info.boot_bios_id = ho != NULL ? ho->boot_bios_id : 0;
 		info.device_count = device_count;
@@ -34,7 +34,7 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 		return copyout(&info, argument, sizeof(info));
 	}
 	case ZEDBSD_SYSTEM_GET_DEVICE: {
-		struct zedbsd_system_device output;
+		struct system_device_info output;
 		uint32_t index;
 		int error = copyin(argument, &output, sizeof(output));
 		if (error != 0)
@@ -53,7 +53,7 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 		return copyout(&output, argument, sizeof(output));
 	}
 	case ZEDBSD_SYSTEM_GET_VMSTAT: {
-		struct zedbsd_system_vmstat output;
+		struct vm_statistics output;
 		struct hal_memory_stats hs;
 		struct kern_memory_stats ks;
 		struct vm_reclaim_stats vs;
@@ -93,12 +93,12 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 		return copyout(&output, argument, sizeof(output));
 	}
 	case ZEDBSD_SYSTEM_GET_RESOURCES: {
-		struct zedbsd_system_resources output;
+		struct system_resource_info output;
 		kern_resource_snapshot(&output);
 		return copyout(&output, argument, sizeof(output));
 	}
 	case ZEDBSD_SYSTEM_GET_PROCESS: {
-		struct zedbsd_system_process output;
+		struct process_info output;
 		struct process *process;
 		unsigned long irq;
 		int error = copyin(argument, &output, sizeof(output));

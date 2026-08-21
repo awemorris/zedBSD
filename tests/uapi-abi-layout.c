@@ -28,17 +28,17 @@ _Static_assert(sizeof(off_t) == 8, "LP64 off_t");
 _Static_assert(sizeof(time_t) == 8, "LP64 time_t");
 _Static_assert(sizeof(struct timeval) == 16, "LP64 timeval");
 _Static_assert(sizeof(struct iovec) == 16, "LP64 iovec");
-_Static_assert(sizeof(struct zedbsd_sendmsg_request) == 48,
+_Static_assert(sizeof(struct sendmsg_args) == 48,
     "LP64 sendmsg request");
-_Static_assert(sizeof(struct zedbsd_recvmsg_request) == 72,
+_Static_assert(sizeof(struct recvmsg_args) == 72,
     "LP64 recvmsg request");
-_Static_assert(sizeof(struct zedbsd_console_write_at) == 32,
+_Static_assert(sizeof(struct console_write_at) == 32,
     "LP64 console write-at");
-_Static_assert(sizeof(struct zedbsd_graphics_blit) == 64,
+_Static_assert(sizeof(struct graphics_blit) == 64,
     "LP64 graphics blit");
-_Static_assert(sizeof(struct zedbsd_graphics_flush) == 16,
+_Static_assert(sizeof(struct graphics_flush) == 16,
     "LP64 graphics flush");
-_Static_assert(sizeof(struct zedbsd_graphics_glyph) == 56,
+_Static_assert(sizeof(struct graphics_glyph) == 56,
     "LP64 graphics glyph");
 #else
 _Static_assert(sizeof(void *) == 4, "ILP32 pointer");
@@ -47,17 +47,17 @@ _Static_assert(sizeof(off_t) == 4, "ILP32 off_t");
 _Static_assert(sizeof(time_t) == 8, "ILP32 time64 time_t");
 _Static_assert(sizeof(struct timeval) == 12, "ILP32 time64 timeval");
 _Static_assert(sizeof(struct iovec) == 8, "ILP32 iovec");
-_Static_assert(sizeof(struct zedbsd_sendmsg_request) == 36,
+_Static_assert(sizeof(struct sendmsg_args) == 36,
     "ILP32 sendmsg request");
-_Static_assert(sizeof(struct zedbsd_recvmsg_request) == 60,
+_Static_assert(sizeof(struct recvmsg_args) == 60,
     "ILP32 recvmsg request");
-_Static_assert(sizeof(struct zedbsd_console_write_at) == 20,
+_Static_assert(sizeof(struct console_write_at) == 20,
     "ILP32 console write-at");
-_Static_assert(sizeof(struct zedbsd_graphics_blit) == 56,
+_Static_assert(sizeof(struct graphics_blit) == 56,
     "ILP32 graphics blit");
-_Static_assert(sizeof(struct zedbsd_graphics_flush) == 8,
+_Static_assert(sizeof(struct graphics_flush) == 8,
     "ILP32 graphics flush");
-_Static_assert(sizeof(struct zedbsd_graphics_glyph) == 48,
+_Static_assert(sizeof(struct graphics_glyph) == 48,
     "ILP32 graphics glyph");
 #endif
 
@@ -65,29 +65,29 @@ _Static_assert(sizeof(struct ifconf) == 16, "ifconf fixed ABI");
 _Static_assert(sizeof(struct sigaction) == 24, "sigaction legacy ABI");
 _Static_assert(sizeof(siginfo_t) == 128, "siginfo fixed ABI");
 _Static_assert(sizeof(union sigval) == 8, "sigval fixed ABI");
-_Static_assert(sizeof(struct zedbsd_sigaltstack) == 24,
+_Static_assert(sizeof(struct sigaltstack_record) == 24,
     "sigaltstack request fixed ABI");
 _Static_assert(sizeof(mcontext_t) == 64, "mcontext fixed ABI");
 _Static_assert(sizeof(ucontext_t) == 128, "ucontext fixed ABI");
 _Static_assert(offsetof(ucontext_t, uc_mcontext) == 24,
     "ucontext machine-context offset");
-_Static_assert(sizeof(struct zedbsd_bufcache_stats) == 104,
+_Static_assert(sizeof(struct bufcache_stats) == 104,
     "bufcache stats fixed ABI");
-_Static_assert(sizeof(struct zedbsd_system_resources) == 136,
+_Static_assert(sizeof(struct system_resource_info) == 136,
     "resource snapshot fixed ABI");
 _Static_assert(sizeof(struct pollfd) == 8, "pollfd fixed ABI");
-_Static_assert(sizeof(zedbsd_fd_set_t) == 4, "fd_set fixed ABI");
+_Static_assert(sizeof(fd_set) == 4, "fd_set fixed ABI");
 _Static_assert(sizeof(struct termios) == 44, "termios fixed ABI");
-_Static_assert(sizeof(struct zedbsd_flock_request) == 32,
+_Static_assert(sizeof(struct flock_record) == 32,
     "flock request fixed ABI");
-_Static_assert(offsetof(struct zedbsd_flock_request, start) == 8,
+_Static_assert(offsetof(struct flock_record, start) == 8,
     "flock start fixed offset");
-_Static_assert(sizeof(struct zedbsd_rlimit) == 16,
+_Static_assert(sizeof(struct rlimit_record) == 16,
     "rlimit fixed ABI");
 _Static_assert(sizeof(struct winsize) == 8, "winsize fixed ABI");
-_Static_assert(sizeof(struct zedbsd_quota_ctl) == 96,
+_Static_assert(sizeof(struct quota_control) == 96,
     "quota control fixed ABI");
-_Static_assert(sizeof(struct zedbsd_snapshot_ctl) == 48,
+_Static_assert(sizeof(struct snapshot_control) == 48,
     "snapshot control fixed ABI");
 _Static_assert(ZEDBSD_SYS_sysctl == 103, "sysctl syscall ABI");
 _Static_assert(ZEDBSD_SYS_ppoll == 104, "ppoll syscall ABI");

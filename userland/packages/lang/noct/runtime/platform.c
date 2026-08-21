@@ -34,14 +34,14 @@ static int screen_clear(void *context)
 }
 static int screen_clear_row(void *context, unsigned row)
 {
-	struct zedbsd_console_row request = { row };
+	struct console_row request = { row };
 	(void)context;
 	return get_console() >= 0 && ioctl(console_fd, ZEDBSD_CONSOLE_CLEAR_ROW, &request) == 0;
 }
 static int screen_put_utf8(void *context, unsigned row, unsigned column,
 			   const char *text, unsigned length, uint8_t attribute)
 {
-	struct zedbsd_console_write_at request;
+	struct console_write_at request;
 	(void)context;
 	request.row = row; request.column = column; request.attribute = attribute;
 	request.address = (uapi_ptr_t)(uintptr_t)text; request.length = length;
@@ -55,25 +55,25 @@ static int screen_put(void *context, unsigned row, unsigned column,
 }
 static int screen_clear_to_eol(void *context, unsigned row, unsigned column)
 {
-	struct zedbsd_console_position request = { row, column };
+	struct console_position request = { row, column };
 	(void)context;
 	return get_console() >= 0 && ioctl(console_fd, ZEDBSD_CONSOLE_CLEAR_TO_EOL, &request) == 0;
 }
 static int screen_set_cursor(void *context, unsigned row, unsigned column)
 {
-	struct zedbsd_console_cursor request = { row, column, 1 };
+	struct console_cursor request = { row, column, 1 };
 	(void)context;
 	return get_console() >= 0 && ioctl(console_fd, ZEDBSD_CONSOLE_SET_CURSOR, &request) == 0;
 }
 static int screen_show_cursor(void *context, int visible)
 {
-	struct zedbsd_console_cursor request = { 0, 0, visible != 0 };
+	struct console_cursor request = { 0, 0, visible != 0 };
 	(void)context;
 	return get_console() >= 0 && ioctl(console_fd, ZEDBSD_CONSOLE_SHOW_CURSOR, &request) == 0;
 }
 static int keyboard_event(unsigned long command)
 {
-	struct zedbsd_console_event event;
+	struct console_event event;
 	if (get_console() < 0 || ioctl(console_fd, command, &event) != 0)
 		return -1;
 	return (int)event.value;
@@ -110,7 +110,7 @@ static int file_read_at(void *context, const char *path, uint32_t offset,
 	return count == (ssize_t)length;
 }
 static int directory_read(void *context, const char *path, unsigned index,
-			  struct zedbsd_noct_dirent *entry)
+			  struct noct_dirent *entry)
 {
 	DIR *directory; struct dirent *item = NULL; struct stat status;
 	char child[512]; unsigned i;
@@ -147,7 +147,7 @@ static int directory_read(void *context, const char *path, unsigned index,
 
 static int display_enter(void *context, struct noct_beui_display_info *info)
 {
-	struct zedbsd_graphics_mode request;
+	struct graphics_mode request;
 	(void)context;
 	if (info == NULL) return 0;
 	if (graphics_fd < 0) graphics_fd = open("/dev/graphics", O_RDWR);
@@ -174,31 +174,31 @@ static void display_leave(void *context)
 	memset(&display_info, 0, sizeof(display_info));
 }
 static int display_poll(void *context) { (void)context; return 1; }
-static void rect_copy(struct zedbsd_graphics_rect *to, const struct noct_beui_rect *from)
+static void rect_copy(struct graphics_rect *to, const struct noct_beui_rect *from)
 {
 	to->x = from->x; to->y = from->y; to->width = from->width; to->height = from->height;
 }
 static int display_fill(void *context, const struct noct_beui_rect *rect, uint32_t color)
 {
-	struct zedbsd_graphics_fill request;
+	struct graphics_fill request;
 	(void)context; memset(&request, 0, sizeof(request)); rect_copy(&request.rect, rect); request.color = color;
 	return graphics_fd >= 0 && ioctl(graphics_fd, ZEDBSD_GRAPHICS_FILL_RECT, &request) == 0;
 }
 static int display_line(void *context, unsigned x0, unsigned y0, unsigned x1, unsigned y1, uint32_t color)
 {
-	struct zedbsd_graphics_line request = { x0, y0, x1, y1, color, 0 };
+	struct graphics_line request = { x0, y0, x1, y1, color, 0 };
 	(void)context; return graphics_fd >= 0 && ioctl(graphics_fd, ZEDBSD_GRAPHICS_DRAW_LINE, &request) == 0;
 }
 static int display_pattern(void *context, const struct noct_beui_rect *rect, uint32_t color, uint64_t pattern)
 {
-	struct zedbsd_graphics_pattern_fill request;
+	struct graphics_pattern_fill request;
 	(void)context; memset(&request, 0, sizeof(request)); rect_copy(&request.rect, rect); request.color = color; request.pattern = pattern;
 	return graphics_fd >= 0 && ioctl(graphics_fd, ZEDBSD_GRAPHICS_PATTERN_FILL, &request) == 0;
 }
 static int display_image_common(void *context, unsigned x, unsigned y,
 				const struct noct_beui_image *image, uint64_t pattern, int patterned)
 {
-	struct zedbsd_graphics_blit request;
+	struct graphics_blit request;
 	int result;
 	(void)context;
 	if (image == NULL) return 0;
@@ -233,7 +233,7 @@ static int display_image(void *c, unsigned x, unsigned y, const struct noct_beui
 static int display_image_pattern(void *c, unsigned x, unsigned y, const struct noct_beui_image *i, uint64_t p) { return display_image_common(c, x, y, i, p, 1); }
 static int display_flush(void *context, const struct noct_beui_rect *rectangles, size_t count)
 {
-	struct zedbsd_graphics_rect converted[32]; struct zedbsd_graphics_flush request; size_t i;
+	struct graphics_rect converted[32]; struct graphics_flush request; size_t i;
 	(void)context; if (count > 32U) return 0;
 	for (i = 0; i < count; i++) rect_copy(&converted[i], &rectangles[i]);
 	request.rectangles = count == 0 ? 0U : (uapi_ptr_t)(uintptr_t)converted; request.rectangle_count = (uint32_t)count;
@@ -241,7 +241,7 @@ static int display_flush(void *context, const struct noct_beui_rect *rectangles,
 }
 static int glyph_measure(void *context, uint32_t codepoint, unsigned *width, unsigned *height)
 {
-	struct zedbsd_graphics_glyph request; uint8_t bitmap[32];
+	struct graphics_glyph request; uint8_t bitmap[32];
 	(void)context; memset(&request, 0, sizeof(request)); request.codepoint = codepoint;
 	request.bitmap = (uapi_ptr_t)(uintptr_t)bitmap; request.bitmap_capacity = sizeof(bitmap);
 	if (graphics_fd < 0 || ioctl(graphics_fd, ZEDBSD_GRAPHICS_GET_GLYPH, &request) != 0) return 0;
@@ -249,7 +249,7 @@ static int glyph_measure(void *context, uint32_t codepoint, unsigned *width, uns
 }
 static int glyph_draw(void *context, unsigned x, unsigned y, uint32_t codepoint, uint32_t foreground, uint32_t background)
 {
-	struct zedbsd_graphics_glyph glyph; struct zedbsd_graphics_blit blit; uint8_t bitmap[32];
+	struct graphics_glyph glyph; struct graphics_blit blit; uint8_t bitmap[32];
 	(void)context; memset(&glyph, 0, sizeof(glyph)); glyph.codepoint = codepoint;
 	glyph.bitmap = (uapi_ptr_t)(uintptr_t)bitmap; glyph.bitmap_capacity = sizeof(bitmap);
 	if (graphics_fd < 0 || ioctl(graphics_fd, ZEDBSD_GRAPHICS_GET_GLYPH, &glyph) != 0) return 0;
@@ -266,7 +266,7 @@ static uint64_t milliseconds(void *context)
 }
 static int key_state(void *context, int key)
 {
-	struct zedbsd_console_key_state request = { (uint32_t)key, 0 };
+	struct console_key_state request = { (uint32_t)key, 0 };
 	(void)context;
 	return get_console() >= 0 && ioctl(console_fd, ZEDBSD_CONSOLE_KEY_STATE, &request) == 0 ? request.down : -1;
 }
@@ -279,11 +279,11 @@ static struct noct_beui_hal beui = {
 	.clock = { NULL, milliseconds },
 	.input = { NULL, key_state, input_drain },
 };
-static const struct zedbsd_noct_services services = {
+static const struct noct_services services = {
 	NULL, &beui, screen_clear, screen_clear_row, screen_put, screen_put_utf8,
 	screen_clear_to_eol, screen_set_cursor, screen_show_cursor,
 	keyboard_poll, keyboard_read, clock_second, file_size, file_read_at,
 	directory_read,
 };
 
-const struct zedbsd_noct_services *zedbsd_user_noct_services(void) { return &services; }
+const struct noct_services *user_noct_services(void) { return &services; }

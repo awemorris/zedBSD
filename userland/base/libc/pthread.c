@@ -30,7 +30,7 @@ struct pthread_tcb {
 	void *(*start)(void *);
 	void *argument;
 	const void *keys[KEY_MAX];
-	struct zedbsd_pthread_cleanup *cleanup;
+	struct __pthread_cleanup *cleanup;
 	int cancel_state;
 	int cancel_type;
 	int error;
@@ -43,7 +43,7 @@ struct pthread_tcb {
 	unsigned owns_stack;
 	struct pthread_tcb *next;
 	struct pthread_tcb *detached_next;
-	struct zedbsd_rtld_tcb *runtime_tcb;
+	struct __rtld_tcb *runtime_tcb;
 };
 
 static struct pthread_tcb main_tcb;
@@ -64,7 +64,7 @@ static struct atfork_handler atfork_handlers[ATFORK_MAX];
 static unsigned atfork_count;
 static unsigned atfork_active_count;
 
-extern void zedbsd_stdio_fork_child(void) __attribute__((weak));
+extern void __stdio_fork_child(void) __attribute__((weak));
 
 static void ensure_main(void);
 static struct pthread_tcb *self_tcb(void);
@@ -73,13 +73,13 @@ static intptr_t
 call(uint32_t number, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d,
 	uintptr_t e, uintptr_t f)
 {
-	return zedbsd_syscall_result(zedbsd_syscall6(number, a, b, c, d, e, f));
+	return syscall_result(__syscall6(number, a, b, c, d, e, f));
 }
 
 #if defined(ZEDBSD_DYNAMIC_LIBC)
-#define RTLD_CALL(name) (__zedbsd_rtld_exports.name)
+#define RTLD_CALL(name) (__rtld_exports.name)
 #else
-#define RTLD_CALL(name) (__zedbsd_rtld_##name)
+#define RTLD_CALL(name) (__rtld_##name)
 #endif
 
 static int
@@ -121,18 +121,18 @@ word_unlock(volatile uint32_t *word)
 	usync_wake_word(word, 1);
 }
 
-void zedbsd_libc_heap_lock(void) { word_lock(&heap_lock); }
-void zedbsd_libc_heap_unlock(void) { word_unlock(&heap_lock); }
-void zedbsd_libc_environment_lock(void) { word_lock(&environment_lock); }
-void zedbsd_libc_environment_unlock(void) { word_unlock(&environment_lock); }
-uintptr_t zedbsd_stdio_thread_token(void)
+void __libc_heap_lock(void) { word_lock(&heap_lock); }
+void __libc_heap_unlock(void) { word_unlock(&heap_lock); }
+void __libc_environment_lock(void) { word_lock(&environment_lock); }
+void __libc_environment_unlock(void) { word_unlock(&environment_lock); }
+uintptr_t __stdio_thread_token(void)
 {
 	struct pthread_tcb *tcb = self_tcb();
 	return (uintptr_t)(tcb != NULL ? tcb : &main_tcb);
 }
-void zedbsd_stdio_lock_wait(volatile uint32_t *word)
+void __stdio_lock_wait(volatile uint32_t *word)
 { (void)usync_wait_word(word, 1U, NULL); }
-void zedbsd_stdio_lock_wake(volatile uint32_t *word)
+void __stdio_lock_wake(volatile uint32_t *word)
 { usync_wake_word(word, 1U); }
 
 static struct pthread_tcb *
@@ -147,7 +147,7 @@ self_tcb(void)
  * environment operation.  Keeping this in the TCB also gives thread exit a
  * well-defined reclamation point without exposing pthread internals. */
 char *
-zedbsd_pthread_environment_exchange(char *replacement)
+__pthread_environment_exchange(char *replacement)
 {
 	struct pthread_tcb *tcb;
 	char *previous;
@@ -162,7 +162,7 @@ zedbsd_pthread_environment_exchange(char *replacement)
 }
 
 const void *
-zedbsd_pthread_locale_exchange(const void *replacement, int change)
+__pthread_locale_exchange(const void *replacement, int change)
 {
 	struct pthread_tcb *tcb;
 	const void *previous;
@@ -178,7 +178,7 @@ zedbsd_pthread_locale_exchange(const void *replacement, int change)
 }
 
 void *
-zedbsd_pthread_mbstate(unsigned which)
+__pthread_mbstate(unsigned which)
 {
 	struct pthread_tcb *tcb;
 
@@ -190,7 +190,7 @@ zedbsd_pthread_mbstate(unsigned which)
 }
 
 char *
-zedbsd_pthread_ptsname_buffer(size_t *size)
+__pthread_ptsname_buffer(size_t *size)
 {
 	struct pthread_tcb *tcb;
 
@@ -204,7 +204,7 @@ zedbsd_pthread_ptsname_buffer(size_t *size)
 }
 
 int *
-zedbsd_errno_location(void)
+__libc_errno_location(void)
 {
 #if defined(ZEDBSD_DYNAMIC_LIBC)
 	static _Thread_local int dynamic_errno;
@@ -334,13 +334,13 @@ ensure_main(void)
 	if (RTLD_CALL(thread_attach)(&main_tcb) != 0)
 		for (;;)
 			;
-	main_tcb.runtime_tcb = (struct zedbsd_rtld_tcb *)(uintptr_t)
-	    zedbsd_syscall6(ZEDBSD_SYS_thread_self,
+	main_tcb.runtime_tcb = (struct __rtld_tcb *)(uintptr_t)
+	    __syscall6(ZEDBSD_SYS_thread_self,
 	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 }
 
 void
-zedbsd_pthread_initialize_main(void)
+__pthread_initialize_main(void)
 {
 	ensure_main();
 }
@@ -460,7 +460,7 @@ pthread_exit(void *value)
 {
 	struct pthread_tcb *tcb = self_tcb();
 	while (tcb != NULL && tcb->cleanup != NULL) {
-		struct zedbsd_pthread_cleanup *cleanup = tcb->cleanup;
+		struct __pthread_cleanup *cleanup = tcb->cleanup;
 		tcb->cleanup = cleanup->previous;
 		cleanup->routine(cleanup->argument);
 	}
@@ -471,7 +471,7 @@ pthread_exit(void *value)
 	}
 	if (tcb != NULL && tcb->detached)
 		detached_enqueue(tcb);
-	(void)zedbsd_syscall6(ZEDBSD_SYS_thread_exit, (uintptr_t)value,
+	(void)__syscall6(ZEDBSD_SYS_thread_exit, (uintptr_t)value,
 	    0, 0, 0, 0, 0);
 	for (;;)
 		;
@@ -550,7 +550,7 @@ pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(void))
 }
 
 void
-zedbsd_pthread_fork_prepare(void)
+__pthread_fork_prepare(void)
 {
 	unsigned index;
 
@@ -564,7 +564,7 @@ zedbsd_pthread_fork_prepare(void)
 }
 
 void
-zedbsd_pthread_fork_parent(void)
+__pthread_fork_parent(void)
 {
 	unsigned index;
 
@@ -577,7 +577,7 @@ zedbsd_pthread_fork_parent(void)
 }
 
 void
-zedbsd_pthread_fork_child(void)
+__pthread_fork_child(void)
 {
 	struct pthread_tcb *self = self_tcb();
 	unsigned count = atfork_active_count;
@@ -608,8 +608,8 @@ zedbsd_pthread_fork_child(void)
 			atfork_handlers[index].child();
 	atfork_active_count = 0;
 	atfork_lock = 0;
-	if (zedbsd_stdio_fork_child != NULL)
-		zedbsd_stdio_fork_child();
+	if (__stdio_fork_child != NULL)
+		__stdio_fork_child();
 	RTLD_CALL(fork_child)();
 }
 pthread_t pthread_self(void) { ensure_main(); return self_tcb()->tid; }
@@ -1160,10 +1160,10 @@ pthread_testcancel(void)
 		pthread_exit(PTHREAD_CANCELED);
 }
 
-void zedbsd_pthread_cancel_point(void) { pthread_testcancel(); }
+void __pthread_cancel_point(void) { pthread_testcancel(); }
 
 void
-zedbsd_pthread_cleanup_push(struct zedbsd_pthread_cleanup *cleanup,
+__pthread_cleanup_push(struct __pthread_cleanup *cleanup,
 	void (*routine)(void *), void *argument)
 {
 	struct pthread_tcb *tcb;
@@ -1178,7 +1178,7 @@ zedbsd_pthread_cleanup_push(struct zedbsd_pthread_cleanup *cleanup,
 }
 
 void
-zedbsd_pthread_cleanup_pop(struct zedbsd_pthread_cleanup *cleanup, int execute)
+__pthread_cleanup_pop(struct __pthread_cleanup *cleanup, int execute)
 {
 	struct pthread_tcb *tcb;
 	if (cleanup == NULL)

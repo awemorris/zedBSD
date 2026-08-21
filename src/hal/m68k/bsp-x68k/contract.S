@@ -5,7 +5,7 @@
  * Native MC68030 entry.  It builds short descriptors, loads SRP and an empty
  * CRP, enables SRE, enters the high direct map, removes the temporary identity
  * map, clears the kernel BSS, and calls the X68k C bootstrap.  Stage 2 supplies
- * A0 = struct zedbsd_x68k_handoff.
+ * A0 = struct x68k_boot_handoff.
  */
 
 #define DIRECT_BASE             0x80000000

@@ -18,7 +18,7 @@
 #define ZEDBSD_QUOTA_F_ENABLED 0x00000001U
 
 /* All quantities are filesystem blocks, inodes, or absolute UTC seconds. */
-struct zedbsd_quota_ctl {
+struct quota_control {
 	uint32_t size;
 	uint32_t version;
 	uint32_t command;

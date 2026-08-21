@@ -391,7 +391,7 @@ block_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 {
 	if (file->f_data != NULL && request == BLKGETIDENTITY)
 		return argument != 0 ? block_identity_get(file->f_data,
-		    (struct zedbsd_block_identity *)argument) : EFAULT;
+		    (struct block_identity *)argument) : EFAULT;
 	return file->f_data != NULL ?
 		disk_ioctl(file->f_data, request, (void *)argument) : ENXIO;
 }

@@ -15,15 +15,15 @@
 #include <unistd.h>
 #include "libc/stdio-internal.h"
 
-extern uintptr_t zedbsd_stdio_thread_token(void) __attribute__((weak));
-extern void zedbsd_stdio_lock_wait(volatile uint32_t *) __attribute__((weak));
-extern void zedbsd_stdio_lock_wake(volatile uint32_t *) __attribute__((weak));
+extern uintptr_t __stdio_thread_token(void) __attribute__((weak));
+extern void __stdio_lock_wait(volatile uint32_t *) __attribute__((weak));
+extern void __stdio_lock_wake(volatile uint32_t *) __attribute__((weak));
 
 static uintptr_t
 stdio_owner(void)
 {
-	uintptr_t owner = zedbsd_stdio_thread_token != NULL ?
-	    zedbsd_stdio_thread_token() : 1U;
+	uintptr_t owner = __stdio_thread_token != NULL ?
+	    __stdio_thread_token() : 1U;
 	return owner != 0 ? owner : 1U;
 }
 
@@ -41,8 +41,8 @@ flockfile(FILE *stream)
 		return;
 	}
 	while (__atomic_exchange_n(&stream->lock, 1U, __ATOMIC_ACQUIRE) != 0) {
-		if (zedbsd_stdio_lock_wait != NULL)
-			zedbsd_stdio_lock_wait(&stream->lock);
+		if (__stdio_lock_wait != NULL)
+			__stdio_lock_wait(&stream->lock);
 	}
 	stream->lock_owner = owner;
 	stream->lock_depth = 1;
@@ -78,15 +78,15 @@ funlockfile(FILE *stream)
 		return;
 	stream->lock_owner = 0;
 	__atomic_store_n(&stream->lock, 0U, __ATOMIC_RELEASE);
-	if (zedbsd_stdio_lock_wake != NULL)
-		zedbsd_stdio_lock_wake(&stream->lock);
+	if (__stdio_lock_wake != NULL)
+		__stdio_lock_wake(&stream->lock);
 }
 
-static int zedbsd_global_errno;
+static int __libc_global_errno;
 __attribute__((weak)) int *
-zedbsd_errno_location(void)
+__libc_errno_location(void)
 {
-	return &zedbsd_global_errno;
+	return &__libc_global_errno;
 }
 
 static FILE standard_input;
@@ -97,7 +97,7 @@ FILE *stdout = &standard_output;
 FILE *stderr = &standard_error;
 
 __attribute__((weak)) size_t
-zedbsd_console_write_bytes(const char *bytes, size_t length)
+__stdio_console_write(const char *bytes, size_t length)
 {
 	(void)bytes;
 	return length;
@@ -194,7 +194,7 @@ fwrite(const void *buffer, size_t size, size_t count, FILE *stream)
 	}
 	total = size * count;
 	if (stream == stdout || stream == stderr)
-		return zedbsd_console_write_bytes(buffer, total) == total ? count : 0;
+		return __stdio_console_write(buffer, total) == total ? count : 0;
 	if (stream != NULL)
 		stream->error = 1;
 	errno = EIO;
@@ -320,7 +320,7 @@ __attribute__((weak)) int fileno(void *stream) { (void)stream; return -1; }
 __attribute__((weak)) time_t time(time_t *result) { if (result != NULL) *result = 0; return 0; }
 
 __attribute__((weak, noreturn)) void
-zedbsd_libc_panic(const char *message)
+__libc_panic(const char *message)
 {
 	(void)message;
 	for (;;)
@@ -330,21 +330,21 @@ zedbsd_libc_panic(const char *message)
 __attribute__((weak)) void
 abort(void)
 {
-	zedbsd_libc_panic("abort");
+	__libc_panic("abort");
 }
 
 __attribute__((weak)) void
 exit(int status)
 {
 	(void)status;
-	zedbsd_libc_panic("exit");
+	__libc_panic("exit");
 }
 
 void
-zedbsd_assert_fail(const char *expression, const char *file, int line)
+__libc_assert_fail(const char *expression, const char *file, int line)
 {
 	char message[160];
 	snprintf(message, sizeof(message), "assertion failed: %s (%s:%d)",
 		expression, file, line);
-	zedbsd_libc_panic(message);
+	__libc_panic(message);
 }

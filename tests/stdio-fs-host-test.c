@@ -18,19 +18,19 @@ static uint64_t content_size;
 static int exists;
 static unsigned flushes;
 
-static enum zedbsd_fs_result probe(const struct zedbsd_volume *volume)
+static enum bootfs_result probe(const struct boot_volume *volume)
 {
 	(void)volume;
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result mount(struct zedbsd_filesystem *filesystem)
+static enum bootfs_result mount(struct bootfs *filesystem)
 {
 	(void)filesystem;
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result populate(const char *path, struct zedbsd_file *file)
+static enum bootfs_result populate(const char *path, struct bootfs_file *file)
 {
 	if (strcmp(path, "/TEST.TXT") && strcmp(path, "TEST.TXT"))
 		return ZEDBSD_FS_NOT_FOUND;
@@ -40,9 +40,9 @@ static enum zedbsd_fs_result populate(const char *path, struct zedbsd_file *file
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result create(struct zedbsd_filesystem *filesystem,
+static enum bootfs_result create(struct bootfs *filesystem,
 				    const char *path,
-				    struct zedbsd_file *file)
+				    struct bootfs_file *file)
 {
 	(void)filesystem;
 	if (strcmp(path, "/TEST.TXT") && strcmp(path, "TEST.TXT"))
@@ -53,17 +53,17 @@ static enum zedbsd_fs_result create(struct zedbsd_filesystem *filesystem,
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result open_file(struct zedbsd_filesystem *filesystem,
+static enum bootfs_result open_file(struct bootfs *filesystem,
 				       const char *path,
-				       struct zedbsd_file *file)
+				       struct bootfs_file *file)
 {
 	(void)filesystem;
 	return populate(path, file);
 }
 
-static enum zedbsd_fs_result read_file(struct zedbsd_file *file,
+static enum bootfs_result read_file(struct bootfs_file *file,
 		uint64_t offset, void *buffer, uint32_t length,
-		zedbsd_read_progress_t progress, void *progress_context)
+		bootfs_read_progress_fn progress, void *progress_context)
 {
 	(void)file;
 	(void)progress;
@@ -72,7 +72,7 @@ static enum zedbsd_fs_result read_file(struct zedbsd_file *file,
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result write_file(struct zedbsd_file *file,
+static enum bootfs_result write_file(struct bootfs_file *file,
 		uint64_t offset, const void *buffer, uint32_t length)
 {
 	uint64_t end = offset + length;
@@ -88,7 +88,7 @@ static enum zedbsd_fs_result write_file(struct zedbsd_file *file,
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result truncate_file(struct zedbsd_file *file,
+static enum bootfs_result truncate_file(struct bootfs_file *file,
 					   uint64_t size)
 {
 	if (size > sizeof(contents))
@@ -100,15 +100,15 @@ static enum zedbsd_fs_result truncate_file(struct zedbsd_file *file,
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result flush_file(struct zedbsd_file *file)
+static enum bootfs_result flush_file(struct bootfs_file *file)
 {
 	(void)file;
 	flushes++;
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result readdir(struct zedbsd_filesystem *filesystem,
-		const char *path, unsigned index, struct zedbsd_dirent *entry)
+static enum bootfs_result readdir(struct bootfs *filesystem,
+		const char *path, unsigned index, struct bootfs_dirent *entry)
 {
 	(void)filesystem;
 	if (index || !exists)
@@ -123,11 +123,11 @@ static enum zedbsd_fs_result readdir(struct zedbsd_filesystem *filesystem,
 	return ZEDBSD_FS_OK;
 }
 
-static enum zedbsd_fs_result stat_file(struct zedbsd_filesystem *filesystem,
-		const char *path, struct zedbsd_dirent *entry)
+static enum bootfs_result stat_file(struct bootfs *filesystem,
+		const char *path, struct bootfs_dirent *entry)
 {
-	struct zedbsd_file file;
-	enum zedbsd_fs_result result;
+	struct bootfs_file file;
+	enum bootfs_result result;
 
 	(void)filesystem;
 	if (!strcmp(path, "HOME") || !strcmp(path, "home")) {
@@ -152,7 +152,7 @@ static int dummy_read(const void *context, uint32_t lba, void *buffer)
 	return 1;
 }
 
-static const struct zedbsd_filesystem_driver driver = {
+static const struct bootfs_driver driver = {
 	.name = "memory",
 	.probe = probe,
 	.mount = mount,
@@ -168,25 +168,25 @@ static const struct zedbsd_filesystem_driver driver = {
 
 int main(void)
 {
-	const struct zedbsd_filesystem_driver *drivers[] = { &driver };
-	struct zedbsd_volume volume = {
+	const struct bootfs_driver *drivers[] = { &driver };
+	struct boot_volume volume = {
 		.sector_size = 512,
 		.read = dummy_read,
 	};
-	struct zedbsd_filesystem filesystem;
-	struct zedbsd_namespace namespace;
-	struct zedbsd_dirent entry;
-	struct zedbsd_environment environment;
+	struct bootfs filesystem;
+	struct bootfs_namespace namespace;
+	struct bootfs_dirent entry;
+	struct environment environment;
 	FILE *file;
 	char line[32];
 	char bytes[4];
 
-	zedbsd_heap_init(arena, sizeof(arena));
-	zedbsd_env_init(&environment);
-	assert(zedbsd_env_set(&environment, "HOME", "HOME"));
-	assert(zedbsd_fs_mount(&filesystem, &volume, drivers, 1));
-	zedbsd_stdio_set_filesystem(&filesystem);
-	zedbsd_stdio_set_environment(&environment);
+	heap_active_init(arena, sizeof(arena));
+	env_init(&environment);
+	assert(env_set(&environment, "HOME", "HOME"));
+	assert(bootfs_mount(&filesystem, &volume, drivers, 1));
+	__stdio_set_filesystem(&filesystem);
+	__stdio_set_environment(&environment);
 	assert(!strcmp(getenv("HOME"), "HOME"));
 	assert(getenv("MISSING") == NULL);
 	assert(access("/TEST.TXT", F_OK) == -1);
@@ -213,18 +213,18 @@ int main(void)
 	assert(fclose(file) == 0);
 
 	assert(fopen("/TEST.TXT", "rb") != NULL);
-	assert(zedbsd_stdio_close_all() == 0);
+	assert(__stdio_close_all() == 0);
 
-	zedbsd_namespace_init(&namespace);
-	assert(zedbsd_namespace_mount(&namespace, "disk1", &filesystem));
-	assert(zedbsd_namespace_set_default(&namespace, "disk1"));
-	assert(zedbsd_namespace_readdir_result(&namespace, "/disk1", 0,
+	bootfs_namespace_init(&namespace);
+	assert(bootfs_namespace_mount(&namespace, "disk1", &filesystem));
+	assert(bootfs_namespace_set_default(&namespace, "disk1"));
+	assert(bootfs_namespace_readdir_result(&namespace, "/disk1", 0,
 					       &entry) == ZEDBSD_FS_OK);
 	assert(!strcmp(entry.name, "test.txt"));
-	assert(zedbsd_namespace_readdir_result(&namespace, "/disk1/home/", 0,
+	assert(bootfs_namespace_readdir_result(&namespace, "/disk1/home/", 0,
 					       &entry) == ZEDBSD_FS_OK);
 	assert(!strcmp(entry.name, "complete.txt"));
-	zedbsd_stdio_set_namespace(&namespace);
+	__stdio_set_namespace(&namespace);
 	assert(getcwd(line, sizeof(line)) == line);
 	assert(!strcmp(line, "/disk1"));
 	assert(chdir("/disk1/home") == 0);
@@ -234,10 +234,10 @@ int main(void)
 	file = fopen("TEST.TXT", "rb");
 	assert(file != NULL);
 	assert(fclose(file) == 0);
-	zedbsd_stdio_set_namespace(NULL);
-	zedbsd_stdio_set_filesystem(NULL);
-	zedbsd_stdio_set_environment(NULL);
-	assert(zedbsd_heap_current() == 0 && zedbsd_heap_validate());
+	__stdio_set_namespace(NULL);
+	__stdio_set_filesystem(NULL);
+	__stdio_set_environment(NULL);
+	assert(heap_active_current() == 0 && heap_active_validate());
 	puts("zedBSD filesystem stdio host tests: OK");
 	return 0;
 }

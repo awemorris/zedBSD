@@ -20,22 +20,22 @@
  * Entries are stored as consecutive NAME\0VALUE\0 pairs.  The store belongs
  * to zedBSD rather than a Noct VM, so values survive script and REPL teardown.
  */
-struct zedbsd_environment {
+struct environment {
 	uint16_t used;
 	uint8_t count;
 	uint8_t reserved;
 	char storage[ZEDBSD_ENV_STORAGE_SIZE];
 };
 
-void zedbsd_env_init(struct zedbsd_environment *environment);
-int zedbsd_env_name_valid(const char *name);
-const char *zedbsd_env_get(const struct zedbsd_environment *environment,
+void env_init(struct environment *environment);
+int env_name_valid(const char *name);
+const char *env_get(const struct environment *environment,
 			   const char *name);
-int zedbsd_env_set(struct zedbsd_environment *environment, const char *name,
+int env_set(struct environment *environment, const char *name,
 		   const char *value);
-int zedbsd_env_unset(struct zedbsd_environment *environment, const char *name);
-size_t zedbsd_env_count(const struct zedbsd_environment *environment);
-int zedbsd_env_at(const struct zedbsd_environment *environment, size_t index,
+int env_unset(struct environment *environment, const char *name);
+size_t env_count(const struct environment *environment);
+int env_at(const struct environment *environment, size_t index,
 		  const char **name, const char **value);
 
 #endif

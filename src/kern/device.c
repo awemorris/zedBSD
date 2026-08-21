@@ -15,18 +15,18 @@ static uint8_t m9_original[512], m9_pattern[512], m9_observed[512];
  * directly to native IDE slots.  Non-IDE classes have no native driver yet
  * (SCSI later; floppies need a future FDC driver) and read as absent.
  */
-static struct disk *blk_for_dev(const struct zedbsd_device *d)
+static struct disk *blk_for_dev(const struct boot_device *d)
 {
 	return kern_platform_block_device(d);
 }
 /* Nonzero on failure, matching the old gateway convention. */
-static int readsec(const struct zedbsd_device *d, uint32_t lba, void *buf)
+static int readsec(const struct boot_device *d, uint32_t lba, void *buf)
 {
 	struct disk *blk = blk_for_dev(d);
 
 	return blk == 0 || disk_read(blk, lba, 1, buf) != 0;
 }
-static int writesec(const struct zedbsd_device *d, uint32_t lba,
+static int writesec(const struct boot_device *d, uint32_t lba,
 		    const void *buf)
 {
 	struct disk *blk = blk_for_dev(d);
@@ -93,14 +93,14 @@ static int disk_volume_write(void *context, uint32_t lba,
 	return !writesec(context, lba, buffer);
 }
 
-static int mountpart_into(struct zedbsd_filesystem *filesystem,
+static int mountpart_into(struct bootfs *filesystem,
 			  int device_index, int partition_index)
 {
-	const struct zedbsd_filesystem_driver *const drivers[] = {
-		&zedbsd_fat16_driver,
-		&zedbsd_fat12_driver,
+	const struct bootfs_driver *const drivers[] = {
+		&bootfat16_driver,
+		&bootfat12_driver,
 	};
-	struct zedbsd_volume volume;
+	struct boot_volume volume;
 
 	if (!parts[partition_index].valid)
 		return 0;
@@ -111,7 +111,7 @@ static int mountpart_into(struct zedbsd_filesystem *filesystem,
 	volume.sector_size = 512;
 	volume.read = disk_volume_read;
 	volume.write = disk_volume_write;
-	return zedbsd_fs_mount(filesystem, &volume, drivers,
+	return bootfs_mount(filesystem, &volume, drivers,
 			       sizeof(drivers) / sizeof(drivers[0]));
 }
 
@@ -150,16 +150,16 @@ void select_disk_home(int device_index)
 	unsigned name_length;
 
 	if (!disk_mount_name(device_index, name) ||
-	    !zedbsd_namespace_set_default(&mounted_namespace, name))
+	    !bootfs_namespace_set_default(&mounted_namespace, name))
 		return;
 	home[0] = '/';
 	name_length = slen(name);
 	memcopy(home + 1, name, name_length);
 	memcopy(home + 1 + name_length, "/home", 6);
-	(void)zedbsd_env_set(&boot_environment, "HOME", home);
+	(void)env_set(&boot_environment, "HOME", home);
 	memcopy(dictionary, home, slen(home));
 	memcopy(dictionary + slen(home), "/skkjisyo.dic", 14);
-	(void)zedbsd_env_set(&boot_environment, "REMACS_SKK_DICT", dictionary);
+	(void)env_set(&boot_environment, "REMACS_SKK_DICT", dictionary);
 }
 
 /* Mount one user-visible FAT volume per physical disk.  BOOT is preferred;
@@ -168,7 +168,7 @@ void select_disk_home(int device_index)
  * and UFS drivers can use the same UNIX path contract. */
 void register_scanned_disk(int device_index)
 {
-	struct zedbsd_filesystem filesystem;
+	struct bootfs filesystem;
 	char name[8];
 	int preferred = -1;
 	int fallback = -1;
@@ -186,14 +186,14 @@ void register_scanned_disk(int device_index)
 	}
 	if (preferred >= 0 &&
 	    mountpart_into(&filesystem, device_index, preferred)) {
-		(void)zedbsd_namespace_mount(&mounted_namespace, name, &filesystem);
+		(void)bootfs_namespace_mount(&mounted_namespace, name, &filesystem);
 		return;
 	}
 	for (partition = fallback; partition >= 0 && partition < MAX_PARTS;
 	     partition++)
 		if (parts[partition].valid &&
 		    mountpart_into(&filesystem, device_index, partition)) {
-			(void)zedbsd_namespace_mount(&mounted_namespace, name,
+			(void)bootfs_namespace_mount(&mounted_namespace, name,
 						&filesystem);
 			return;
 		}

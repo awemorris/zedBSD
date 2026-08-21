@@ -101,16 +101,16 @@ kern_cpu_notify_probe(void)
 }
 
 uint64_t
-zedbsd_kernel_ticks(void)
+clock_ticks(void)
 {
 	return atomic_u64_load_acquire(&kernel_ticks);
 }
 
 uint64_t
-zedbsd_kernel_milliseconds(void *context)
+clock_milliseconds(void *context)
 {
 	(void)context;
-	return zedbsd_kernel_ticks() * (1000U / KERN_CLOCK_HZ);
+	return clock_ticks() * (1000U / KERN_CLOCK_HZ);
 }
 
 int
@@ -227,7 +227,7 @@ kern_clock_gettime(clockid_t clock, struct timespec *result)
 		return EINVAL;
 	if (clock != CLOCK_MONOTONIC && clock != CLOCK_REALTIME)
 		return EINVAL;
-	ticks = zedbsd_kernel_ticks();
+	ticks = clock_ticks();
 	monotonic.tv_sec = (int64_t)(ticks / KERN_CLOCK_HZ);
 	monotonic.tv_nsec = (int32_t)((ticks % KERN_CLOCK_HZ) *
 	    (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ));
@@ -298,7 +298,7 @@ kern_clock_realtime_synchronized(void)
 }
 
 void
-zedbsd_clock_realtime(time_t *seconds, long *nanoseconds)
+clock_realtime(time_t *seconds, long *nanoseconds)
 {
 	struct timespec now;
 

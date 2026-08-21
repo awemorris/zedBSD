@@ -8,11 +8,11 @@
 #include "drivers/rpi4-sdhci.h"
 
 size_t
-kern_platform_init(const struct zedbsd_handoff *handoff,
-	struct zedbsd_device *devices,size_t capacity)
+kern_platform_init(const struct boot_handoff *handoff,
+	struct boot_device *devices,size_t capacity)
 {
-	const struct zedbsd_rpi4_handoff *rpi4=(const void *)handoff;
-	struct zedbsd_device *device;
+	const struct rpi4_boot_handoff *rpi4=(const void *)handoff;
+	struct boot_device *device;
 	if(!handoff||!devices||capacity==0||
 	   handoff->magic!=ZEDBSD_HANDOFF_MAGIC||
 	   handoff->version!=ZEDBSD_HANDOFF_VERSION_MULTIBOOT||
@@ -38,9 +38,9 @@ kern_platform_init(const struct zedbsd_handoff *handoff,
 	for(unsigned i=0;i<sizeof(device->reserved);i++)device->reserved[i]=0;
 	return 1;
 }
-void kern_platform_refresh_devices(const struct zedbsd_device*d,size_t n){(void)d;(void)n;}
+void kern_platform_refresh_devices(const struct boot_device*d,size_t n){(void)d;(void)n;}
 int kern_platform_input_init(void){return 0;}
-struct disk *kern_platform_block_device(const struct zedbsd_device*d)
+struct disk *kern_platform_block_device(const struct boot_device*d)
 {return d&&d->device_class==ZEDBSD_DEV_SD?rpi4_sdhci_disk():NULL;}
 void kern_platform_debug_write(const char*s){if(s)hal_cons_write(s);}
 void kern_platform_halt(void){(void)hal_irq_disable();for(;;)hal_halt();}

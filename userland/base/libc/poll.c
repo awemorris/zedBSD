@@ -7,15 +7,15 @@
 #include <stdint.h>
 #include <sys/select.h>
 
-extern void zedbsd_pthread_cancel_point(void) __attribute__((weak));
+extern void __pthread_cancel_point(void) __attribute__((weak));
 static void cancel_point(void)
-{ if (zedbsd_pthread_cancel_point != NULL) zedbsd_pthread_cancel_point(); }
+{ if (__pthread_cancel_point != NULL) __pthread_cancel_point(); }
 
 static intptr_t
 call(uint32_t number, uintptr_t a0, uintptr_t a1, uintptr_t a2,
 	uintptr_t a3, uintptr_t a4, uintptr_t a5)
 {
-	return zedbsd_syscall_result(zedbsd_syscall6(number, a0, a1, a2,
+	return syscall_result(__syscall6(number, a0, a1, a2,
 	    a3, a4, a5));
 }
 

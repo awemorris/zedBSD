@@ -111,7 +111,7 @@ add_i64(int64_t first, int64_t second, int64_t *result)
 }
 
 static int
-normalize_range(struct file *file, const struct zedbsd_flock_request *request,
+normalize_range(struct file *file, const struct flock_record *request,
 	int64_t *start, int64_t *end)
 {
 	int64_t base, point;
@@ -284,7 +284,7 @@ replace_owner_range(struct record_lock_state *state, struct process *owner,
 
 int
 record_lock_fcntl(struct process *owner, struct file *file, int command,
-	struct zedbsd_flock_request *request)
+	struct flock_record *request)
 {
 	struct record_lock_state *state;
 	int64_t start, end;

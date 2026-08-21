@@ -10,10 +10,10 @@
 static int
 check(uint64_t capacity, uint64_t available, uint32_t expected_mib)
 {
-	struct zedbsd_user_noct_memory_profile profile;
+	struct user_noct_memory_profile profile;
 	size_t reserved;
 
-	CHECK(zedbsd_user_noct_select_memory(capacity, available, &profile));
+	CHECK(user_noct_select_memory(capacity, available, &profile));
 	CHECK(profile.capacity_bytes == capacity);
 	CHECK(profile.available_bytes == available);
 	CHECK(profile.profile_mib == expected_mib);
@@ -33,8 +33,8 @@ main(void)
 {
 	int result;
 
-	CHECK(!zedbsd_user_noct_select_memory(8U * MIB - 1U,
-		UINT64_MAX, &(struct zedbsd_user_noct_memory_profile){0}));
+	CHECK(!user_noct_select_memory(8U * MIB - 1U,
+		UINT64_MAX, &(struct user_noct_memory_profile){0}));
 	result = check(8U * MIB, 1, 5); CHECK(result == 0);
 	result = check(16U * MIB - 1U, UINT64_MAX, 5); CHECK(result == 0);
 	result = check(16U * MIB, UINT64_MAX, 10); CHECK(result == 0);
@@ -45,6 +45,6 @@ main(void)
 	result = check(128U * MIB, UINT64_MAX, 64); CHECK(result == 0);
 	result = check(2048ULL * MIB, UINT64_MAX, 1024); CHECK(result == 0);
 	result = check(UINT64_MAX, UINT64_MAX, 1024); CHECK(result == 0);
-	CHECK(!zedbsd_user_noct_select_memory(8U * MIB, 0, NULL));
+	CHECK(!user_noct_select_memory(8U * MIB, 0, NULL));
 	return 0;
 }

@@ -123,7 +123,7 @@ mouse_stop(void)
 }
 
 int
-zedbsd_pc98_busmouse_init(void)
+pc98_busmouse_init(void)
 {
 	/* Leave the periodic IRQ masked until /dev/mouse is opened. */
 	outb(MOUSE_CONTROL, PPI_MODE);

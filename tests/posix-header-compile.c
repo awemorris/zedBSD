@@ -38,10 +38,10 @@ int main(void)
 	struct pollfd event = { -1, 0, 0 };
 	struct flock lock = { F_UNLCK, SEEK_SET, 0, 0, 0 };
 	struct rlimit limit = { 0, 0 };
-	struct zedbsd_quota_ctl quota = {
+	struct quota_control quota = {
 		.size = sizeof(quota), .version = ZEDBSD_QUOTA_VERSION
 	};
-	struct zedbsd_snapshot_ctl snapshot = {
+	struct snapshot_control snapshot = {
 		.size = sizeof(snapshot), .version = ZEDBSD_SNAPSHOT_VERSION
 	};
 	posix_spawnattr_t attributes;

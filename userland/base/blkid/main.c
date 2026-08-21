@@ -10,7 +10,7 @@
 
 static int identify(const char *path)
 {
-	struct zedbsd_block_identity id;
+	struct block_identity id;
 	int fd = open(path, O_RDONLY);
 	if (fd < 0) {
 		fprintf(stderr, "blkid: %s: %s\n", path, strerror(errno));

@@ -14,7 +14,7 @@
 #define EOF (-1)
 #define hidden __attribute__((__visibility__("hidden")))
 
-typedef struct zedbsd_musl_scan_file {
+typedef struct floatscan_file {
 	unsigned char *rpos;
 	unsigned char *rend;
 	unsigned char *buf;

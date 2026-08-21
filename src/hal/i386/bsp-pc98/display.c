@@ -27,16 +27,16 @@ static int command(uint16_t status, uint16_t port, uint8_t value)
 		}
 	return 0;
 }
-int zedbsd_pc98_display_graphics_start(void)
+int pc98_display_graphics_start(void)
 {
 	return command(0xa0, 0xa2, GDC_START);
 }
-int zedbsd_pc98_display_graphics_stop(void)
+int pc98_display_graphics_stop(void)
 {
 	return command(0xa0, 0xa2, GDC_STOP);
 }
-int zedbsd_pc98_display_text_restore(void)
+int pc98_display_text_restore(void)
 {
-	return zedbsd_pc98_display_graphics_stop() &&
+	return pc98_display_graphics_stop() &&
 		command(0x60, 0x62, GDC_START);
 }

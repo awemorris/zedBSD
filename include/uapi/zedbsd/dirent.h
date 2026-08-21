@@ -15,13 +15,13 @@
 #define ZEDBSD_DT_BLK 3U
 #define ZEDBSD_DT_CHR 4U
 
-struct zedbsd_dirent {
+struct dirent_record {
 	uint64_t d_ino;
 	uint32_t d_type;
 	char d_name[256];
 } __attribute__((packed, aligned(4)));
 
-_Static_assert(sizeof(struct zedbsd_dirent) == 268,
+_Static_assert(sizeof(struct dirent_record) == 268,
 	"zedBSD ELF32 dirent ABI must remain 268 bytes");
 
 #endif

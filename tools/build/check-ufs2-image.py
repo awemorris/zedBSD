@@ -10,7 +10,7 @@ import pathlib
 import sys
 
 _base_path = pathlib.Path(__file__).with_name('check-ufs1-image.py')
-_spec = importlib.util.spec_from_file_location('_zedbsd_ufs1_checker', _base_path)
+_spec = importlib.util.spec_from_file_location('_ufs1_checker', _base_path)
 _base = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_base)
 

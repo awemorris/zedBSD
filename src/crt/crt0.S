@@ -11,7 +11,7 @@ _start:
 	pushl %edx
 	pushl %ecx
 	pushl %eax
-	call zedbsd_user_libc_init
+	call __libc_init
 	addl $12, %esp
 	movl (%ebx), %eax
 	leal 4(%ebx), %ecx
@@ -26,9 +26,9 @@ _start:
 	jmp 1b
 .size _start, .-_start
 
-.globl zedbsd_syscall6
-.type zedbsd_syscall6, @function
-zedbsd_syscall6:
+.globl __syscall6
+.type __syscall6, @function
+__syscall6:
 	pushl %ebp
 	pushl %edi
 	pushl %esi
@@ -46,14 +46,14 @@ zedbsd_syscall6:
 	popl %edi
 	popl %ebp
 	ret
-.size zedbsd_syscall6, .-zedbsd_syscall6
+.size __syscall6, .-__syscall6
 
-.globl zedbsd_signal_restorer
-.type zedbsd_signal_restorer, @function
-zedbsd_signal_restorer:
+.globl __signal_restorer
+.type __signal_restorer, @function
+__signal_restorer:
 	movl 12(%esp), %ebx
 	movl 8(%esp), %ecx
 	movl $80, %eax
 	int $0xc2
 	ud2
-.size zedbsd_signal_restorer, .-zedbsd_signal_restorer
+.size __signal_restorer, .-__signal_restorer

@@ -9,10 +9,10 @@
 
 typedef struct rt_env NoctEnv;
 
-struct zedbsd_noct_services;
+struct noct_services;
 
-int zedbsd_noct_target_register(NoctEnv *env,
-				const struct zedbsd_noct_services *services);
-void zedbsd_noct_target_cleanup(void);
+int noct_target_register(NoctEnv *env,
+				const struct noct_services *services);
+void noct_target_cleanup(void);
 
 #endif

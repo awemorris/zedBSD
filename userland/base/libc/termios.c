@@ -9,7 +9,7 @@
 #include <termios.h>
 #include <unistd.h>
 
-extern char *zedbsd_pthread_ptsname_buffer(size_t *) __attribute__((weak));
+extern char *__pthread_ptsname_buffer(size_t *) __attribute__((weak));
 
 int
 tcgetattr(int descriptor, struct termios *termios)
@@ -149,8 +149,8 @@ ptsname(int descriptor)
 {
 	static char bootstrap_buffer[32];
 	size_t size = sizeof(bootstrap_buffer);
-	char *buffer = zedbsd_pthread_ptsname_buffer != NULL ?
-	    zedbsd_pthread_ptsname_buffer(&size) : bootstrap_buffer;
+	char *buffer = __pthread_ptsname_buffer != NULL ?
+	    __pthread_ptsname_buffer(&size) : bootstrap_buffer;
 	if (buffer == NULL)
 		buffer = bootstrap_buffer;
 	return ptsname_r(descriptor, buffer, size) == 0 ? buffer : NULL;

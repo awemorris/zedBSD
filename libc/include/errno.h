@@ -6,8 +6,8 @@
 #ifndef ZEDBSD_ERRNO_H
 #define ZEDBSD_ERRNO_H
 
-int *zedbsd_errno_location(void);
-#define errno (*zedbsd_errno_location())
+int *__libc_errno_location(void);
+#define errno (*__libc_errno_location())
 
 #define EDOM 1
 #define ERANGE 2

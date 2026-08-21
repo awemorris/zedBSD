@@ -31,7 +31,7 @@ valid_name(const char *name, size_t *length)
 }
 
 int
-zedbsd_env_name_valid(const char *name)
+env_name_valid(const char *name)
 {
 	size_t length;
 
@@ -39,7 +39,7 @@ zedbsd_env_name_valid(const char *name)
 }
 
 static int
-find_entry(const struct zedbsd_environment *environment, const char *name,
+find_entry(const struct environment *environment, const char *name,
 	   size_t *offset, size_t *span)
 {
 	size_t position = 0;
@@ -63,14 +63,14 @@ find_entry(const struct zedbsd_environment *environment, const char *name,
 }
 
 void
-zedbsd_env_init(struct zedbsd_environment *environment)
+env_init(struct environment *environment)
 {
 	if (environment != NULL)
 		memset(environment, 0, sizeof(*environment));
 }
 
 const char *
-zedbsd_env_get(const struct zedbsd_environment *environment, const char *name)
+env_get(const struct environment *environment, const char *name)
 {
 	size_t offset;
 
@@ -81,7 +81,7 @@ zedbsd_env_get(const struct zedbsd_environment *environment, const char *name)
 }
 
 int
-zedbsd_env_set(struct zedbsd_environment *environment, const char *name,
+env_set(struct environment *environment, const char *name,
 	       const char *value)
 {
 	size_t name_length;
@@ -124,7 +124,7 @@ zedbsd_env_set(struct zedbsd_environment *environment, const char *name,
 }
 
 int
-zedbsd_env_unset(struct zedbsd_environment *environment, const char *name)
+env_unset(struct environment *environment, const char *name)
 {
 	size_t offset;
 	size_t span;
@@ -142,13 +142,13 @@ zedbsd_env_unset(struct zedbsd_environment *environment, const char *name)
 }
 
 size_t
-zedbsd_env_count(const struct zedbsd_environment *environment)
+env_count(const struct environment *environment)
 {
 	return environment != NULL ? environment->count : 0;
 }
 
 int
-zedbsd_env_at(const struct zedbsd_environment *environment, size_t index,
+env_at(const struct environment *environment, size_t index,
 	      const char **name, const char **value)
 {
 	size_t position = 0;

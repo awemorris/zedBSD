@@ -67,7 +67,7 @@ int
 main(void)
 {
 	static struct fixture fixture;
-	struct zedbsd_bufcache_stats stats;
+	struct bufcache_stats stats;
 	struct disk *disk;
 	struct disk *slice;
 	struct buf *pinned[16];

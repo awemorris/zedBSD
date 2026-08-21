@@ -34,8 +34,8 @@ struct mount;
 struct componentname;
 struct dirent;
 struct statvfs;
-struct zedbsd_quota_ctl;
-struct zedbsd_snapshot_ctl;
+struct quota_control;
+struct snapshot_control;
 
 struct path {
 	struct mount *p_mount;
@@ -57,8 +57,8 @@ struct filesystem_type {
 	int (*mount)(struct mount *);
 	int (*sync)(struct mount *);
 	int (*statvfs)(struct mount *, struct statvfs *);
-	int (*quotactl)(struct mount *, struct zedbsd_quota_ctl *);
-	int (*snapshotctl)(struct mount *, struct zedbsd_snapshot_ctl *);
+	int (*quotactl)(struct mount *, struct quota_control *);
+	int (*snapshotctl)(struct mount *, struct snapshot_control *);
 	/* Last failure-capable step before namespace/inode state is destroyed. */
 	int (*prepare_unmount)(struct mount *);
 	void (*unmount)(struct mount *);
@@ -113,8 +113,8 @@ int unmount_private(struct mount *);
 int mount_is_private(const struct mount *);
 int mount_sync(struct mount *);
 int mount_statvfs(struct mount *, struct statvfs *);
-int mount_quotactl(struct mount *, struct zedbsd_quota_ctl *);
-int mount_snapshotctl(struct mount *, struct zedbsd_snapshot_ctl *);
+int mount_quotactl(struct mount *, struct quota_control *);
+int mount_snapshotctl(struct mount *, struct snapshot_control *);
 int mount(const char *, const char *, int, void *);
 int unmount(const char *, int);
 struct mount *mount_find_ref(const char *);

@@ -201,7 +201,7 @@ strstr(const char *haystack, const char *needle)
 char *
 strdup(const char *string)
 {
-	return zedbsd_strdup(string);
+	return heap_strdup_active(string);
 }
 
 char *

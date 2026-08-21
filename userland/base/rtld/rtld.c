@@ -102,7 +102,7 @@ struct rtld_object {
 	unsigned dependency_refs;
 	uint32_t generation;
 	struct {
-		struct zedbsd_tls_index index;
+		struct __tls_index index;
 	} tlsdesc_argument[64];
 	unsigned tlsdesc_count;
 };
@@ -152,7 +152,7 @@ static unsigned loader_error_pending;
 static struct rtld_tls_module tls_modules[RTLD_OBJECT_MAX + 1U];
 static uintptr_t tls_module_count;
 static uint64_t tls_generation;
-static struct zedbsd_rtld_tcb *rtld_threads;
+static struct __rtld_tcb *rtld_threads;
 static uint32_t next_object_generation = 1;
 
 static uintptr_t
@@ -229,8 +229,8 @@ clear_loader_error(void)
 {
 	intptr_t value = syscall6(ZEDBSD_SYS_thread_self,
 	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
-	struct zedbsd_rtld_tcb *tcb = raw_error(value) || value == 0 ? NULL :
-	    (struct zedbsd_rtld_tcb *)(uintptr_t)value;
+	struct __rtld_tcb *tcb = raw_error(value) || value == 0 ? NULL :
+	    (struct __rtld_tcb *)(uintptr_t)value;
 
 	if (tcb != NULL) {
 		tcb->dlerror_pending = 0;
@@ -247,8 +247,8 @@ set_loader_error(const char *message)
 	size_t length = 0;
 	intptr_t value = syscall6(ZEDBSD_SYS_thread_self,
 	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
-	struct zedbsd_rtld_tcb *tcb = raw_error(value) || value == 0 ? NULL :
-	    (struct zedbsd_rtld_tcb *)(uintptr_t)value;
+	struct __rtld_tcb *tcb = raw_error(value) || value == 0 ? NULL :
+	    (struct __rtld_tcb *)(uintptr_t)value;
 	char *buffer = tcb != NULL ? tcb->dlerror_buf : loader_error;
 	size_t capacity = tcb != NULL ? sizeof(tcb->dlerror_buf) :
 	    sizeof(loader_error);
@@ -1516,21 +1516,21 @@ reserved_loader_symbol(const char *name)
 	static const char *const names[] = {
 		"__tls_get_addr",
 		"___tls_get_addr",
-		"__zedbsd_rtld_abi_version",
-		"__zedbsd_rtld_thread_alloc",
-		"__zedbsd_rtld_thread_free",
-		"__zedbsd_rtld_thread_attach",
-		"__zedbsd_rtld_pthread_private",
-		"__zedbsd_rtld_startup_init",
-		"__zedbsd_rtld_fork_prepare",
-		"__zedbsd_rtld_fork_parent",
-		"__zedbsd_rtld_fork_child",
-		"__zedbsd_rtld_dlopen",
-		"__zedbsd_rtld_dlsym",
-		"__zedbsd_rtld_dlvsym",
-		"__zedbsd_rtld_dlclose",
-		"__zedbsd_rtld_dlerror",
-		"__zedbsd_rtld_process_fini"
+		"__rtld_abi_version",
+		"__rtld_thread_alloc",
+		"__rtld_thread_free",
+		"__rtld_thread_attach",
+		"__rtld_pthread_private",
+		"__rtld_startup_init",
+		"__rtld_fork_prepare",
+		"__rtld_fork_parent",
+		"__rtld_fork_child",
+		"__rtld_dlopen",
+		"__rtld_dlsym",
+		"__rtld_dlvsym",
+		"__rtld_dlclose",
+		"__rtld_dlerror",
+		"__rtld_process_fini"
 	};
 	size_t i;
 
@@ -1638,7 +1638,7 @@ resolve_tls_symbol(struct rtld_object *object, uint32_t index,
 }
 
 #if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64)
-extern uintptr_t __zedbsd_tlsdesc_resolver(void);
+extern uintptr_t d_tlsdesc_resolver(void);
 
 static void
 install_tlsdesc(struct rtld_object *object, uintptr_t address,
@@ -1646,7 +1646,7 @@ install_tlsdesc(struct rtld_object *object, uintptr_t address,
 {
 	struct rtld_object *owner = object;
 	struct rtld_tlsdesc *descriptor;
-	struct zedbsd_tls_index *index;
+	struct __tls_index *index;
 	Elf_Sym *symbol = NULL;
 	uintptr_t offset = addend;
 
@@ -1669,7 +1669,7 @@ install_tlsdesc(struct rtld_object *object, uintptr_t address,
 	index->module = owner->tls_module_id;
 	index->offset = offset;
 	descriptor = (struct rtld_tlsdesc *)address;
-	descriptor->resolver = (uintptr_t)__zedbsd_tlsdesc_resolver;
+	descriptor->resolver = (uintptr_t)d_tlsdesc_resolver;
 	descriptor->argument = (uintptr_t)index;
 }
 #endif
@@ -1976,7 +1976,7 @@ initialize_object(struct rtld_object *object)
 }
 
 __attribute__((visibility("default"))) unsigned
-__zedbsd_rtld_abi_version(void)
+__rtld_abi_version(void)
 {
 	return ZEDBSD_RTLD_ABI_VERSION;
 }
@@ -2019,10 +2019,10 @@ allocate_tls_block(const struct rtld_tls_module *module)
 }
 
 __attribute__((visibility("default"))) int
-__zedbsd_rtld_thread_alloc(void *pthread_private,
-	struct zedbsd_rtld_tcb **out)
+__rtld_thread_alloc(void *pthread_private,
+	struct __rtld_tcb **out)
 {
-	struct zedbsd_rtld_tcb *tcb;
+	struct __rtld_tcb *tcb;
 	void **dtv;
 
 	if (out == NULL)
@@ -2051,11 +2051,11 @@ __zedbsd_rtld_thread_alloc(void *pthread_private,
 }
 
 __attribute__((visibility("default"))) void
-__zedbsd_rtld_thread_free(struct zedbsd_rtld_tcb *tcb)
+__rtld_thread_free(struct __rtld_tcb *tcb)
 {
 	intptr_t current;
 	uintptr_t id;
-	struct zedbsd_rtld_tcb **link;
+	struct __rtld_tcb **link;
 
 	if (tcb == NULL)
 		return;
@@ -2081,26 +2081,26 @@ __zedbsd_rtld_thread_free(struct zedbsd_rtld_tcb *tcb)
 }
 
 __attribute__((visibility("default"))) int
-__zedbsd_rtld_thread_attach(void *pthread_private)
+__rtld_thread_attach(void *pthread_private)
 {
 	intptr_t value = syscall6(ZEDBSD_SYS_thread_self,
 	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
-	struct zedbsd_rtld_tcb *tcb;
+	struct __rtld_tcb *tcb;
 
 	if (raw_error(value))
 		return -1;
 	if (value == 0) {
-		if (__zedbsd_rtld_thread_alloc(pthread_private, &tcb) != 0)
+		if (__rtld_thread_alloc(pthread_private, &tcb) != 0)
 			return -1;
 		value = syscall6(ZEDBSD_SYS_thread_self,
 		    ZEDBSD_THREAD_SELF_SET_TLS, (uintptr_t)tcb, 0, 0, 0, 0);
 		if (raw_error(value)) {
-			__zedbsd_rtld_thread_free(tcb);
+			__rtld_thread_free(tcb);
 			return -1;
 		}
 		return 0;
 	}
-	tcb = (struct zedbsd_rtld_tcb *)(uintptr_t)value;
+	tcb = (struct __rtld_tcb *)(uintptr_t)value;
 	if (tcb->dtv == NULL || tcb->pthread_private != NULL)
 		return -1;
 	tcb->pthread_private = pthread_private;
@@ -2108,20 +2108,20 @@ __zedbsd_rtld_thread_attach(void *pthread_private)
 }
 
 __attribute__((visibility("default"))) void *
-__zedbsd_rtld_pthread_private(void)
+__rtld_pthread_private(void)
 {
 	intptr_t value = syscall6(ZEDBSD_SYS_thread_self,
 	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 	if (raw_error(value) || value == 0)
 		return NULL;
-	return ((struct zedbsd_rtld_tcb *)(uintptr_t)value)->pthread_private;
+	return ((struct __rtld_tcb *)(uintptr_t)value)->pthread_private;
 }
 
 __attribute__((visibility("default"))) void *
-__tls_get_addr(const struct zedbsd_tls_index *index)
+__tls_get_addr(const struct __tls_index *index)
 {
 	intptr_t value;
-	struct zedbsd_rtld_tcb *tcb;
+	struct __rtld_tcb *tcb;
 	struct rtld_tls_module *module;
 	void *block;
 
@@ -2132,7 +2132,7 @@ __tls_get_addr(const struct zedbsd_tls_index *index)
 	    0, 0, 0, 0, 0);
 	if (raw_error(value) || value == 0)
 		rtld_fatal("thread has no TLS control block");
-	tcb = (struct zedbsd_rtld_tcb *)(uintptr_t)value;
+	tcb = (struct __rtld_tcb *)(uintptr_t)value;
 	module = &tls_modules[index->module];
 	if (!module->active || index->offset >= module->memory_size ||
 	    tcb->dtv == NULL || index->module >= tcb->dtv_count)
@@ -2150,15 +2150,15 @@ __tls_get_addr(const struct zedbsd_tls_index *index)
 
 #if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64)
 __attribute__((visibility("hidden"))) uintptr_t
-__zedbsd_tlsdesc_resolve(const struct rtld_tlsdesc *descriptor)
+d_tlsdesc_resolve(const struct rtld_tlsdesc *descriptor)
 {
-	const struct zedbsd_tls_index *index;
+	const struct __tls_index *index;
 	intptr_t thread_pointer;
 	void *address;
 
 	if (descriptor == NULL || descriptor->argument == 0)
 		rtld_fatal("invalid TLSDESC argument");
-	index = (const struct zedbsd_tls_index *)descriptor->argument;
+	index = (const struct __tls_index *)descriptor->argument;
 	address = __tls_get_addr(index);
 	thread_pointer = syscall6(ZEDBSD_SYS_thread_self,
 	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
@@ -2170,26 +2170,26 @@ __zedbsd_tlsdesc_resolve(const struct rtld_tlsdesc *descriptor)
 
 #if defined(HAL_ARCH_I386)
 __attribute__((visibility("default"), regparm(1))) void *
-___tls_get_addr(const struct zedbsd_tls_index *index)
+___tls_get_addr(const struct __tls_index *index)
 {
 	return __tls_get_addr(index);
 }
 #endif
 
 __attribute__((visibility("default"))) void
-__zedbsd_rtld_fork_prepare(void)
+__rtld_fork_prepare(void)
 {
 	loader_lock();
 }
 
 __attribute__((visibility("default"))) void
-__zedbsd_rtld_fork_parent(void)
+__rtld_fork_parent(void)
 {
 	loader_unlock();
 }
 
 __attribute__((visibility("default"))) void
-__zedbsd_rtld_fork_child(void)
+__rtld_fork_child(void)
 {
 	loader_lock_owner = current_tid();
 	loader_lock_depth = 1;
@@ -2198,7 +2198,7 @@ __zedbsd_rtld_fork_child(void)
 }
 
 __attribute__((visibility("default"))) void
-__zedbsd_rtld_startup_init(void)
+__rtld_startup_init(void)
 {
 	size_t i;
 	if (startup_initialized)
@@ -2211,7 +2211,7 @@ __zedbsd_rtld_startup_init(void)
 }
 
 __attribute__((visibility("default"))) void
-__zedbsd_rtld_process_fini(void)
+__rtld_process_fini(void)
 {
 	if (process_finalized)
 		return;
@@ -2381,7 +2381,7 @@ finalize_object_unlocked(struct rtld_object *object)
 static void
 unload_object_locked(struct rtld_object *object)
 {
-	struct zedbsd_rtld_tcb *tcb;
+	struct __rtld_tcb *tcb;
 	struct rtld_object *dependencies[RTLD_NEEDED_MAX];
 	struct rtld_tls_module *module = NULL;
 	size_t tls_size = 0;
@@ -2437,7 +2437,7 @@ unload_object_locked(struct rtld_object *object)
 }
 
 __attribute__((visibility("default"))) void *
-__zedbsd_rtld_dlopen(const char *path, int flags)
+__rtld_dlopen(const char *path, int flags)
 {
 	struct rtld_object *object;
 	struct rtld_handle *handle;
@@ -2539,13 +2539,13 @@ rtld_dlsym_common(void *value, const char *name, const char *version)
 }
 
 __attribute__((visibility("default"))) void *
-__zedbsd_rtld_dlsym(void *value, const char *name)
+__rtld_dlsym(void *value, const char *name)
 {
 	return rtld_dlsym_common(value, name, NULL);
 }
 
 __attribute__((visibility("default"))) void *
-__zedbsd_rtld_dlvsym(void *value, const char *name, const char *version)
+__rtld_dlvsym(void *value, const char *name, const char *version)
 {
 	if (version == NULL || version[0] == '\0') {
 		clear_loader_error();
@@ -2556,7 +2556,7 @@ __zedbsd_rtld_dlvsym(void *value, const char *name, const char *version)
 }
 
 __attribute__((visibility("default"))) int
-__zedbsd_rtld_dlclose(void *value)
+__rtld_dlclose(void *value)
 {
 	struct rtld_handle *handle;
 	struct rtld_object *object;
@@ -2588,12 +2588,12 @@ __zedbsd_rtld_dlclose(void *value)
 }
 
 __attribute__((visibility("default"))) char *
-__zedbsd_rtld_dlerror(void)
+__rtld_dlerror(void)
 {
 	intptr_t value = syscall6(ZEDBSD_SYS_thread_self,
 	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
-	struct zedbsd_rtld_tcb *tcb = raw_error(value) || value == 0 ? NULL :
-	    (struct zedbsd_rtld_tcb *)(uintptr_t)value;
+	struct __rtld_tcb *tcb = raw_error(value) || value == 0 ? NULL :
+	    (struct __rtld_tcb *)(uintptr_t)value;
 
 	if (tcb != NULL) {
 		if (!tcb->dlerror_pending)
@@ -2608,23 +2608,23 @@ __zedbsd_rtld_dlerror(void)
 }
 
 __attribute__((visibility("default")))
-const struct zedbsd_rtld_exports __zedbsd_rtld_exports = {
+const struct __rtld_exports __rtld_exports = {
 	.abi_version = ZEDBSD_RTLD_ABI_VERSION,
-	.struct_size = sizeof(struct zedbsd_rtld_exports),
-	.startup_init = __zedbsd_rtld_startup_init,
-	.process_fini = __zedbsd_rtld_process_fini,
-	.dlopen = __zedbsd_rtld_dlopen,
-	.dlsym = __zedbsd_rtld_dlsym,
-	.dlvsym = __zedbsd_rtld_dlvsym,
-	.dlclose = __zedbsd_rtld_dlclose,
-	.dlerror = __zedbsd_rtld_dlerror,
-	.thread_alloc = __zedbsd_rtld_thread_alloc,
-	.thread_free = __zedbsd_rtld_thread_free,
-	.thread_attach = __zedbsd_rtld_thread_attach,
-	.pthread_private = __zedbsd_rtld_pthread_private,
-	.fork_prepare = __zedbsd_rtld_fork_prepare,
-	.fork_parent = __zedbsd_rtld_fork_parent,
-	.fork_child = __zedbsd_rtld_fork_child,
+	.struct_size = sizeof(struct __rtld_exports),
+	.startup_init = __rtld_startup_init,
+	.process_fini = __rtld_process_fini,
+	.dlopen = __rtld_dlopen,
+	.dlsym = __rtld_dlsym,
+	.dlvsym = __rtld_dlvsym,
+	.dlclose = __rtld_dlclose,
+	.dlerror = __rtld_dlerror,
+	.thread_alloc = __rtld_thread_alloc,
+	.thread_free = __rtld_thread_free,
+	.thread_attach = __rtld_thread_attach,
+	.pthread_private = __rtld_pthread_private,
+	.fork_prepare = __rtld_fork_prepare,
+	.fork_parent = __rtld_fork_parent,
+	.fork_child = __rtld_fork_child,
 	.tls_get_addr = __tls_get_addr,
 };
 
@@ -2654,7 +2654,7 @@ rtld_main(uintptr_t *initial_stack)
 	Elf_Ehdr *self_header;
 	Elf_Phdr *self_phdr;
 	unsigned i;
-	struct zedbsd_rtld_tcb *initial_tcb;
+	struct __rtld_tcb *initial_tcb;
 	intptr_t tls_result;
 	if (initial_stack == NULL)
 		rtld_fatal("missing initial stack");
@@ -2717,7 +2717,7 @@ rtld_main(uintptr_t *initial_stack)
 	for (i = 0; i < object_count; i++)
 		if (objects[i].active)
 			objects[i].permanent = 1;
-	if (__zedbsd_rtld_thread_alloc(NULL, &initial_tcb) != 0)
+	if (__rtld_thread_alloc(NULL, &initial_tcb) != 0)
 		rtld_fatal("cannot allocate initial TLS");
 	tls_result = syscall6(ZEDBSD_SYS_thread_self,
 	    ZEDBSD_THREAD_SELF_SET_TLS, (uintptr_t)initial_tcb, 0, 0, 0, 0);

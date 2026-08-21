@@ -19,7 +19,7 @@
 
 #define MOUSE_EVENT_COUNT 128U
 
-static struct zedbsd_mouse_event events[MOUSE_EVENT_COUNT];
+static struct mouse_event events[MOUSE_EVENT_COUNT];
 static unsigned event_head, event_tail, event_used, event_sequence;
 static struct spinlock event_lock;
 static struct wait_queue event_waitq;
@@ -49,7 +49,7 @@ void
 mouse_input_report(uint32_t device_id, int32_t dx, int32_t dy,
     uint32_t buttons)
 {
-	struct zedbsd_mouse_event *event;
+	struct mouse_event *event;
 	unsigned long irq;
 	unsigned overflow = 0;
 	if (!mouse_ready)
@@ -66,7 +66,7 @@ mouse_input_report(uint32_t device_id, int32_t dx, int32_t dy,
 	}
 	event = &events[event_head];
 	memset(event, 0, sizeof(*event));
-	event->timestamp_ns = zedbsd_kernel_milliseconds(NULL) * 1000000ULL;
+	event->timestamp_ns = clock_milliseconds(NULL) * 1000000ULL;
 	event->sequence = ++event_sequence;
 	event->flags = (uint16_t)overflow;
 	event->device_id = device_id;
@@ -127,9 +127,9 @@ mouse_read(struct file *file, void *buffer, size_t size)
 {
 	size_t capacity, count = 0;
 	unsigned long irq;
-	if (size < sizeof(struct zedbsd_mouse_event))
+	if (size < sizeof(struct mouse_event))
 		return -EINVAL;
-	capacity = size / sizeof(struct zedbsd_mouse_event);
+	capacity = size / sizeof(struct mouse_event);
 	irq = spin_lock_irqsave(&event_lock);
 	while (event_used == 0) {
 		uint64_t sequence;
@@ -147,12 +147,12 @@ mouse_read(struct file *file, void *buffer, size_t size)
 		}
 	}
 	while (count < capacity && event_used != 0) {
-		((struct zedbsd_mouse_event *)buffer)[count++] = events[event_tail];
+		((struct mouse_event *)buffer)[count++] = events[event_tail];
 		event_tail = (event_tail + 1U) % MOUSE_EVENT_COUNT;
 		event_used--;
 	}
 	spin_unlock_irqrestore(&event_lock, irq);
-	return (ssize_t)(count * sizeof(struct zedbsd_mouse_event));
+	return (ssize_t)(count * sizeof(struct mouse_event));
 }
 
 static int

@@ -55,7 +55,7 @@ typedef uint32_t socklen_t;
 
 /* Normalized sendmsg/recvmsg ABI.  libc flattens iovecs and validates
  * cmsghdr objects, so the kernel never follows native nested pointers. */
-struct zedbsd_sendmsg_request {
+struct sendmsg_args {
 	uapi_ptr_t data;
 	uint64_t data_length;
 	uapi_ptr_t name;
@@ -66,7 +66,7 @@ struct zedbsd_sendmsg_request {
 	uint32_t reserved;
 };
 
-struct zedbsd_recvmsg_request {
+struct recvmsg_args {
 	uapi_ptr_t data;
 	uint64_t data_capacity;
 	uapi_ptr_t name;

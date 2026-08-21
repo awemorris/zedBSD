@@ -10,20 +10,20 @@
 
 #include "kern/fs.h"
 
-extern const struct zedbsd_filesystem_driver zedbsd_fat12_driver;
-extern const struct zedbsd_filesystem_driver zedbsd_fat16_driver;
+extern const struct bootfs_driver bootfat12_driver;
+extern const struct bootfs_driver bootfat16_driver;
 
-typedef int (*zedbsd_fat_extent_cb)(uint64_t, uint64_t, uint32_t, void *);
-int zedbsd_fat_file_extents(struct zedbsd_file *, zedbsd_fat_extent_cb,
+typedef int (*bootfat_extent_fn)(uint64_t, uint64_t, uint32_t, void *);
+int bootfat_file_extents(struct bootfs_file *, bootfat_extent_fn,
 			    void *);
 
-enum zedbsd_fs_result zedbsd_fat_stat_location(
-	struct zedbsd_filesystem *, const char *, struct zedbsd_dirent *,
+enum bootfs_result bootfat_stat_location(
+	struct bootfs *, const char *, struct bootfs_dirent *,
 	uint32_t *, uint16_t *, uint32_t *, uint8_t *);
-enum zedbsd_fs_result zedbsd_fat_stat_location_casefold(
-	struct zedbsd_filesystem *, const char *, struct zedbsd_dirent *,
+enum bootfs_result bootfat_stat_location_casefold(
+	struct bootfs *, const char *, struct bootfs_dirent *,
 	uint32_t *, uint16_t *, uint32_t *, uint8_t *);
-enum zedbsd_fs_result zedbsd_fat_discard_chain_result(
-	struct zedbsd_filesystem *, uint32_t);
+enum bootfs_result bootfat_discard_chain_result(
+	struct bootfs *, uint32_t);
 
 #endif

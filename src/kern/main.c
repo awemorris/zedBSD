@@ -27,14 +27,14 @@
  * object is the sole mutable argument passed through the real-mode BIOS
  * gateway in Stage 1.
  */
-const struct zedbsd_handoff *ho;
-static struct zedbsd_handoff handoff_snapshot;
-const struct zedbsd_device *devs;
+const struct boot_handoff *ho;
+static struct boot_handoff handoff_snapshot;
+const struct boot_device *devs;
 unsigned device_count;
 
-struct zedbsd_filesystem mounted_fs;
-struct zedbsd_namespace mounted_namespace;
-struct zedbsd_environment boot_environment;
+struct bootfs mounted_fs;
+struct bootfs_namespace mounted_namespace;
+struct environment boot_environment;
 struct part parts[MAX_PARTS];
 int curdev = -1, curpart = -1;
 
@@ -118,11 +118,11 @@ void dec(unsigned v)
 		putc(b[--n]);
 }
 
-uint64_t zedbsd_kernel_ticks(void);
+uint64_t clock_ticks(void);
 
 /* Validated Stage 1 handoff and top-level Stage 2 command loop. */
-void kernel_main(const struct zedbsd_handoff *h,
-		 const struct zedbsd_device *platform_devices,
+void kernel_main(const struct boot_handoff *h,
+		 const struct boot_device *platform_devices,
 		 unsigned platform_device_count)
 {
 	int error;
@@ -134,7 +134,7 @@ void kernel_main(const struct zedbsd_handoff *h,
 	ho = &handoff_snapshot;
 	device_count = platform_device_count;
 	devs = platform_devices;
-	zedbsd_env_init(&boot_environment);
+	env_init(&boot_environment);
 	vm_reclaim_init();
 	hal_printf("boot: VFS initialization\n");
 	kern_logf("boot: VFS initialization\n");

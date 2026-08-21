@@ -13,7 +13,7 @@ _start:
 	pushl %edx
 	pushl %ecx
 	pushl %eax
-	call zedbsd_user_libc_init@PLT
+	call __libc_init@PLT
 	addl $12, %esp
 	movl (%esi), %eax
 	leal 4(%esi), %ecx

@@ -18,7 +18,7 @@
 #include <string.h>
 
 void
-kern_resource_snapshot(struct zedbsd_system_resources *out)
+kern_resource_snapshot(struct system_resource_info *out)
 {
 	struct swap_backend *swap;
 	uint32_t total = 0, free = 0;
@@ -48,8 +48,8 @@ kern_resource_snapshot(struct zedbsd_system_resources *out)
 }
 
 int
-kern_resource_equal(const struct zedbsd_system_resources *a,
-	const struct zedbsd_system_resources *b)
+kern_resource_equal(const struct system_resource_info *a,
+	const struct system_resource_info *b)
 {
 	return a != NULL && b != NULL && memcmp(a, b, sizeof(*a)) == 0;
 }

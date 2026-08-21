@@ -604,13 +604,13 @@ static struct drv_pci_driver cirrus_driver = {
 	.attach = cirrus_attach, .detach = cirrus_detach
 };
 
-int zedbsd_pcat_graphics_driver_register(void)
+int pcat_graphics_driver_register(void)
 {
 	return drv_pci_driver_register(&cirrus_driver);
 }
 
 int
-zedbsd_pcat_graphics_init(void)
+pcat_graphics_init(void)
 {
 	if (!pcat_graphics_prepare())
 		return 0;

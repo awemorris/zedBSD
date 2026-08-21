@@ -146,10 +146,10 @@ static int bytecode_path(const char *path)
 		(path[length - 1U] == 'P' || path[length - 1U] == 'p');
 }
 
-static void import_environment(struct zedbsd_environment *environment, char **envp)
+static void import_environment(struct environment *environment, char **envp)
 {
 	unsigned i;
-	zedbsd_env_init(environment);
+	env_init(environment);
 	for (i = 0; envp != NULL && envp[i] != NULL; i++) {
 		char *equals = strchr(envp[i], '=');
 		char name[32]; size_t length;
@@ -157,14 +157,14 @@ static void import_environment(struct zedbsd_environment *environment, char **en
 		length = (size_t)(equals - envp[i]);
 		if (length == 0 || length >= sizeof(name)) continue;
 		memcpy(name, envp[i], length); name[length] = '\0';
-		(void)zedbsd_env_set(environment, name, equals + 1);
+		(void)env_set(environment, name, equals + 1);
 	}
 }
 
 static int select_memory_profile(
-	struct zedbsd_user_noct_memory_profile *profile)
+	struct user_noct_memory_profile *profile)
 {
-	struct zedbsd_system_vmstat stats;
+	struct vm_statistics stats;
 	int fd;
 
 	memset(&stats, 0, sizeof(stats));
@@ -176,7 +176,7 @@ static int select_memory_profile(
 		return 0;
 	}
 	(void)close(fd);
-	return zedbsd_user_noct_select_memory(
+	return user_noct_select_memory(
 		stats.physical_total + stats.swap_total *
 		ZEDBSD_SYSTEM_SWAP_PAGE_SIZE,
 		stats.vm_commit_available, profile);
@@ -189,11 +189,11 @@ int main(int argc, char **argv, char **envp)
 	NoctEnv *env = NULL;
 	NoctValue main_value, return_value, arguments, argument_value;
 	NoctFunc *function = NULL;
-	struct zedbsd_noct_options options;
-	struct zedbsd_environment environment;
-	struct zedbsd_user_noct_memory_profile memory;
-	struct zedbsd_heap noct_heap;
-	struct zedbsd_heap *bootstrap_heap = NULL;
+	struct noct_options options;
+	struct environment environment;
+	struct user_noct_memory_profile memory;
+	struct heap_allocator noct_heap;
+	struct heap_allocator *bootstrap_heap = NULL;
 	const char *path = NULL;
 	char *source = NULL;
 	void *arena = MAP_FAILED;
@@ -229,8 +229,8 @@ int main(int argc, char **argv, char **envp)
 		status = 4;
 		goto out;
 	}
-	zedbsd_heap_init_instance(&noct_heap, arena, memory.arena_size);
-	bootstrap_heap = zedbsd_heap_set_active(&noct_heap);
+	heap_allocator_init(&noct_heap, arena, memory.arena_size);
+	bootstrap_heap = heap_active_set(&noct_heap);
 	heap_active = 1;
 	options.arena = arena;
 	options.arena_size = memory.arena_size;
@@ -238,7 +238,7 @@ int main(int argc, char **argv, char **envp)
 	options.jit_enable = 1;
 	options.jit_threshold = 32;
 	options.write = noct_write;
-	options.services = zedbsd_user_noct_services();
+	options.services = user_noct_services();
 	options.environment = &environment;
 
 	noct_set_default_config(&config);
@@ -252,8 +252,8 @@ int main(int argc, char **argv, char **envp)
 		status = 10;
 		goto out;
 	}
-	if (!zedbsd_noct_napi_register(env, &options) ||
-	    !zedbsd_noct_target_register(env, options.services)) {
+	if (!noct_napi_register(env, &options) ||
+	    !noct_target_register(env, options.services)) {
 		status = 11; print_error(env, "Noct target API error"); goto out;
 	}
 	if (path == NULL) {
@@ -289,8 +289,8 @@ int main(int argc, char **argv, char **envp)
 		status = 14; print_error(env, "Noct runtime error"); goto out;
 	}
 	{
-		const char *action = zedbsd_env_get(&environment, "BOOT_ACTION");
-		const char *result_fd = zedbsd_env_get(&environment,
+		const char *action = env_get(&environment, "BOOT_ACTION");
+		const char *result_fd = env_get(&environment,
 						      "ZEDBSD_RESULT_FD");
 		if (action != NULL && result_fd != NULL &&
 		    result_fd[0] == '3' && result_fd[1] == '\0') {
@@ -307,12 +307,12 @@ int main(int argc, char **argv, char **envp)
 		(void)noct_get_int(env, &return_value, &status);
 out:
 	if (pinned) (void)noct_unpin_local(env, 2, &arguments, &argument_value);
-	zedbsd_noct_target_cleanup();
-	zedbsd_noct_napi_cleanup();
+	noct_target_cleanup();
+	noct_napi_cleanup();
 	noct_beui_cleanup();
 	if (vm != NULL) (void)noct_destroy_vm(vm);
 	if (heap_active) {
-		(void)zedbsd_heap_set_active(bootstrap_heap);
+		(void)heap_active_set(bootstrap_heap);
 		heap_active = 0;
 	}
 	if (arena != MAP_FAILED)

@@ -40,7 +40,7 @@ resource_cap(int resource)
 
 int
 resource_limit_get(struct process *process, int resource,
-	struct zedbsd_rlimit *result)
+	struct rlimit_record *result)
 {
 	unsigned long irq;
 	if (process == NULL || result == NULL || resource < 0 ||
@@ -54,9 +54,9 @@ resource_limit_get(struct process *process, int resource,
 
 int
 resource_limit_set(struct process *process, int resource,
-	const struct zedbsd_rlimit *requested)
+	const struct rlimit_record *requested)
 {
-	struct zedbsd_rlimit old;
+	struct rlimit_record old;
 	uint64_t cap;
 	unsigned long irq;
 	int privileged, error = 0;
@@ -91,7 +91,7 @@ resource_limit_set(struct process *process, int resource,
 uint64_t
 resource_limit_current(struct process *process, int resource)
 {
-	struct zedbsd_rlimit limit;
+	struct rlimit_record limit;
 	return resource_limit_get(process, resource, &limit) == 0 ?
 	    limit.current : 0;
 }
@@ -99,7 +99,7 @@ resource_limit_current(struct process *process, int resource)
 int
 resource_limit_apply_vm(struct process *process, struct vmspace *vm)
 {
-	struct zedbsd_rlimit address, stack;
+	struct rlimit_record address, stack;
 	unsigned long irq;
 	int error;
 	if (process == NULL || vm == NULL)
