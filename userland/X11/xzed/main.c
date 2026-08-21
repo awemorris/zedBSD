@@ -27,7 +27,6 @@
 #define MAX_GCS 64
 #define MAX_FONTS 32
 #define MAX_PIXMAPS 16
-#define MAX_CURSORS 32
 #define INPUT_CAP (1024U * 1024U)
 #define ROOT_XID 1U
 #define COLORMAP_XID 2U
@@ -91,7 +90,6 @@ struct window {
 struct graphics_context { uint32_t id,foreground,font; int owner; };
 struct font_resource { uint32_t id; int owner; };
 struct pixmap { uint32_t id;int owner;uint16_t width,height;uint32_t*pixels; };
-struct cursor_resource { uint32_t id;int owner;uint16_t shape; };
 struct server {
 	int listener, console, mouse, graphics;
 	struct zedbsd_console_input_mode old_console_mode;
@@ -102,7 +100,6 @@ struct server {
 	struct graphics_context gcs[MAX_GCS];unsigned gc_count;
 	struct font_resource fonts[MAX_FONTS];unsigned font_count;
 	struct pixmap pixmaps[MAX_PIXMAPS];unsigned pixmap_count;
-	struct cursor_resource cursors[MAX_CURSORS];unsigned cursor_count;
 	uint32_t *screen;
 	uint8_t *transfer;
 	int dirty, dirty_x0, dirty_y0, dirty_x1, dirty_y1;
@@ -169,8 +166,6 @@ static struct window*top_at(struct server*s,int x,int y)
 {
 	struct window*w=top_at_parent(s,ROOT_XID,x,y);return w?w:&s->windows[0];
 }
-static struct cursor_resource*find_cursor(struct server*s,uint32_t id)
-{unsigned i;for(i=0;i<s->cursor_count;i++)if(s->cursors[i].id==id)return &s->cursors[i];return NULL;}
 static uint16_t pointer_shape(struct server*s)
 {
 	struct window*w=top_at(s,s->pointer_x,s->pointer_y);
@@ -309,7 +304,7 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 		return 0;
 	case 2: /* ChangeWindowAttributes */
 		if(n<12||(w=find_window(s,rd32(q+4,c->order)))==NULL)break;
-		{uint32_t mask=rd32(q+8,c->order);size_t off=12;unsigned bit;for(bit=0;bit<32&&off+4<=n;bit++)if(mask&(1U<<bit)){uint32_t v=rd32(q+off,c->order);if(bit==1)w->background=v;if(bit==11){w->event_mask=v;if(w==&s->windows[0])w->owner=ci;}if(bit==14){struct cursor_resource*cursor=find_cursor(s,v);w->cursor_shape=v?(cursor?cursor->shape:XC_LEFT_PTR):0;mark_dirty(s,s->pointer_x-16,s->pointer_y-16,32,32);}off+=4;}}return 0;
+		{uint32_t mask=rd32(q+8,c->order);size_t off=12;unsigned bit;for(bit=0;bit<32&&off+4<=n;bit++)if(mask&(1U<<bit)){uint32_t v=rd32(q+off,c->order);if(bit==1)w->background=v;if(bit==11){w->event_mask=v;if(w==&s->windows[0])w->owner=ci;}off+=4;}}return 0;
 	case 4: /* DestroyWindow */ if((w=find_window(s,rd32(q+4,c->order)))!=NULL&&w!=&s->windows[0]){int x=w->x,y=w->y,wi=w->width,he=w->height;w->mapped=0;mark_dirty(s,x,y,wi,he);}return 0;
 	case 7: /* ReparentWindow */ if(n>=16&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){struct window*p=find_window(s,rd32(q+8,c->order));if(p){w->parent=p->id;w->x=(int16_t)(p->x+(int16_t)rd16(q+12,c->order));w->y=(int16_t)(p->y+(int16_t)rd16(q+14,c->order));return 0;}}break;
 	case 8: /* MapWindow */ if((w=find_window(s,rd32(q+4,c->order)))!=NULL){struct window*p=find_window(s,w->parent);if(p&&(p->event_mask&(1U<<20))&&p->owner!=ci){map_request(s,p,w);return 0;}w->mapped=1;mark_dirty(s,w->x,w->y,w->width,w->height);expose(s,w);return 0;}break;
@@ -351,14 +346,12 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 		if(n>=12){struct pixmap*p;struct graphics_context*g=find_gc(s,rd32(q+8,c->order));size_t off;uint32_t color=g?g->foreground:0xffffff;w=find_window(s,rd32(q+4,c->order));p=find_pixmap(s,rd32(q+4,c->order));if(!w&&!p)break;for(off=12;off+8<=n;off+=8){int16_t x=(int16_t)rd16(q+off,c->order),y=(int16_t)rd16(q+off+2,c->order);uint16_t wi=rd16(q+off+4,c->order),he=rd16(q+off+6,c->order);if(w)window_fill(s,w,x,y,wi,he,color);else pixmap_fill(p,x,y,wi,he,color);if(w==&s->windows[0]&&x==0&&y==0&&wi>=w->width&&he>=w->height)s->windows[0].background=color;}return 0;}break;
 	case 76: case 77: /* ImageText8 / ImageText16 */
 		if(n>=16&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){struct graphics_context*g=find_gc(s,rd32(q+8,c->order));size_t chars=q[1];if(16+chars*(op==77?2U:1U)<=n)(void)draw_text(s,w,g,(int16_t)rd16(q+12,c->order),(int16_t)rd16(q+14,c->order),q+16,chars,op==77);return 0;}break;
-	case 94: /* CreateGlyphCursor: retain the standard cursor-font glyph. */
-		if(n>=32&&s->cursor_count<MAX_CURSORS){struct cursor_resource*cursor=&s->cursors[s->cursor_count++];cursor->id=rd32(q+4,c->order);cursor->owner=(int)ci;cursor->shape=rd16(q+16,c->order);return 0;}break;
-	case 95: /* FreeCursor */
-		{struct cursor_resource*cursor=find_cursor(s,rd32(q+4,c->order));if(cursor){cursor->id=0;return 0;}}break;
 	case 101: /* GetKeyboardMapping */ {uint8_t r[32+4*248];unsigned i;memset(r,0,sizeof(r));r[1]=1;for(i=0;i<q[5]&&i<248;i++){uint32_t kc=(uint32_t)(q[4]+i),ks=kc>=8?kc-8:0;switch(kc){case XZED_KEYCODE_UP:ks=0xff52;break;case XZED_KEYCODE_DOWN:ks=0xff54;break;case XZED_KEYCODE_LEFT:ks=0xff51;break;case XZED_KEYCODE_RIGHT:ks=0xff53;break;case XZED_KEYCODE_HOME:ks=0xff50;break;case XZED_KEYCODE_END:ks=0xff57;break;case XZED_KEYCODE_PAGE_UP:ks=0xff55;break;case XZED_KEYCODE_PAGE_DOWN:ks=0xff56;break;case XZED_KEYCODE_INSERT:ks=0xff63;break;case XZED_KEYCODE_DELETE:ks=0xffff;break;}wr32(r+32+i*4,ks,c->order);}simple_reply(c,r,32+(size_t)q[5]*4);return 0;}
 	case 117: {uint8_t r[32+4];memset(r,0,sizeof(r));r[1]=3;r[32]=1;r[33]=2;r[34]=3;simple_reply(c,r,36);return 0;}
 	case 128: /* XzedPutImageRGB24: compact private RGB24 image upload. */
 		if(n>=16){uint32_t drawable=rd32(q+4,c->order);struct pixmap*p=find_pixmap(s,drawable);int x=(int16_t)rd16(q+8,c->order),y=(int16_t)rd16(q+10,c->order);unsigned wi=rd16(q+12,c->order),he=rd16(q+14,c->order);size_t count=(size_t)wi*he;unsigned row,column;w=find_window(s,drawable);if((!w&&!p)||!wi||!he||(wi&&count/wi!=he)||count>(n-16U)/3U)break;for(row=0;row<he;row++)for(column=0;column<wi;column++){const uint8_t*rgb=q+16U+((size_t)row*wi+column)*3U;int dx=x+(int)column,dy=y+(int)row;uint32_t color=((uint32_t)rgb[0]<<16)|((uint32_t)rgb[1]<<8)|rgb[2];if(w){if(dx>=0&&dy>=0&&dx<w->width&&dy<w->height)w->pixels[(size_t)dy*w->width+(unsigned)dx]=color;}else if(dx>=0&&dy>=0&&dx<p->width&&dy<p->height)p->pixels[(size_t)dy*p->width+(unsigned)dx]=color;}if(w)mark_dirty(s,w->x+x,w->y+y,(int)wi,(int)he);return 0;}break;
+	case 129: /* XzedSetCursorShape */
+		if(n>=12&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){uint16_t shape=(uint16_t)rd32(q+8,c->order);if(shape!=XC_LEFT_PTR&&shape!=XC_BOTTOM_LEFT_CORNER&&shape!=XC_BOTTOM_RIGHT_CORNER&&shape!=XC_SB_H_DOUBLE_ARROW&&shape!=XC_SB_V_DOUBLE_ARROW)break;w->cursor_shape=shape;mark_dirty(s,s->pointer_x-16,s->pointer_y-16,32,32);return 0;}break;
 	case 127:return 0;
 	default:error_reply(c,1,0,op);return 0;
 	}

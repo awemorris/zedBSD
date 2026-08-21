@@ -1,7 +1,6 @@
 /* zwm - minimal reparenting window manager. SPDX-License-Identifier: Zlib */
 #include <X11/Xlib.h>
 #include <X11/Xzed.h>
-#include <X11/cursorfont.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -39,7 +38,7 @@ struct frame {
 	int y;
 	unsigned width;
 	unsigned height;
-	Cursor cursor;
+	unsigned cursor_shape;
 	char title[64];
 };
 
@@ -55,11 +54,6 @@ static GC background_gc;
 static unsigned background_width;
 static unsigned background_height;
 static XFontStruct *title_font;
-static Cursor cursor_normal;
-static Cursor cursor_horizontal;
-static Cursor cursor_vertical;
-static Cursor cursor_bottom_left;
-static Cursor cursor_bottom_right;
 
 static unsigned
 frame_width(const struct frame *frame)
@@ -89,30 +83,30 @@ resize_edges_at(const struct frame *frame, int x, int y)
 	return edges;
 }
 
-static Cursor
+static unsigned
 cursor_for_edges(unsigned edges)
 {
 	if ((edges & (EDGE_LEFT | EDGE_BOTTOM)) ==
 	    (EDGE_LEFT | EDGE_BOTTOM))
-		return cursor_bottom_left;
+		return XZED_CURSOR_BOTTOM_LEFT;
 	if ((edges & (EDGE_RIGHT | EDGE_BOTTOM)) ==
 	    (EDGE_RIGHT | EDGE_BOTTOM))
-		return cursor_bottom_right;
+		return XZED_CURSOR_BOTTOM_RIGHT;
 	if (edges & (EDGE_LEFT | EDGE_RIGHT))
-		return cursor_horizontal;
+		return XZED_CURSOR_HORIZONTAL;
 	if (edges & EDGE_BOTTOM)
-		return cursor_vertical;
-	return cursor_normal;
+		return XZED_CURSOR_VERTICAL;
+	return XZED_CURSOR_LEFT_PTR;
 }
 
 static void
 set_resize_cursor(Display *display, struct frame *frame, int x, int y)
 {
-	Cursor cursor = cursor_for_edges(resize_edges_at(frame, x, y));
+	unsigned shape = cursor_for_edges(resize_edges_at(frame, x, y));
 
-	if (cursor != frame->cursor) {
-		XDefineCursor(display, frame->frame, cursor);
-		frame->cursor = cursor;
+	if (shape != frame->cursor_shape) {
+		XzedSetCursorShape(display, frame->frame, shape);
+		frame->cursor_shape = shape;
 	}
 }
 
@@ -692,10 +686,10 @@ manage(Display *display, Window root, Window client)
 	XFree(title);
 	frame->frame = XCreateSimpleWindow(display, root, x, y,
 	    frame_width(frame), frame_height(frame), 0, 0, FRAME_FACE);
-	frame->cursor = cursor_normal;
-	XDefineCursor(display, frame->frame, cursor_normal);
+	frame->cursor_shape = XZED_CURSOR_LEFT_PTR;
+	XzedSetCursorShape(display, frame->frame, XZED_CURSOR_LEFT_PTR);
 	/* Do not inherit a resize cursor after crossing into the client. */
-	XDefineCursor(display, client, cursor_normal);
+	XzedSetCursorShape(display, client, XZED_CURSOR_LEFT_PTR);
 	XStoreName(display, frame->frame, frame->title);
 	frame->gc = XCreateGC(display, frame->frame, 0, NULL);
 	if (title_font != NULL)
@@ -731,17 +725,6 @@ main(int argc, char **argv)
 		return 1;
 	}
 	root = DefaultRootWindow(display);
-	cursor_normal = XCreateFontCursor(display, XC_left_ptr);
-	cursor_horizontal = XCreateFontCursor(display, XC_sb_h_double_arrow);
-	cursor_vertical = XCreateFontCursor(display, XC_sb_v_double_arrow);
-	cursor_bottom_left = XCreateFontCursor(display, XC_bottom_left_corner);
-	cursor_bottom_right = XCreateFontCursor(display, XC_bottom_right_corner);
-	if (!cursor_normal || !cursor_horizontal || !cursor_vertical ||
-	    !cursor_bottom_left || !cursor_bottom_right) {
-		fprintf(stderr, "zwm: cannot create resize cursors\n");
-		XCloseDisplay(display);
-		return 1;
-	}
 	title_font = XLoadQueryFont(display, "zed-unicode");
 	XSelectInput(display, root,
 	    SubstructureRedirectMask | SubstructureNotifyMask | ExposureMask);
@@ -837,11 +820,6 @@ main(int argc, char **argv)
 		}
 	}
 
-	XFreeCursor(display, cursor_bottom_right);
-	XFreeCursor(display, cursor_bottom_left);
-	XFreeCursor(display, cursor_vertical);
-	XFreeCursor(display, cursor_horizontal);
-	XFreeCursor(display, cursor_normal);
 	XCloseDisplay(display);
 	return 0;
 }
