@@ -24,10 +24,20 @@ typedef unsigned long Mask;
 #define ButtonRelease 5
 #define MotionNotify 6
 #define Expose 12
+#define DestroyNotify 17
+#define UnmapNotify 18
+#define MapNotify 19
+#define MapRequest 20
+#define ReparentNotify 21
+#define ConfigureNotify 22
+#define ConfigureRequest 23
 #define KeyPressMask (1L<<0)
 #define KeyReleaseMask (1L<<1)
 #define ButtonPressMask (1L<<2)
 #define ButtonReleaseMask (1L<<3)
 #define PointerMotionMask (1L<<6)
 #define ExposureMask (1L<<15)
+#define StructureNotifyMask (1L<<17)
+#define SubstructureNotifyMask (1L<<19)
+#define SubstructureRedirectMask (1L<<20)
 #endif

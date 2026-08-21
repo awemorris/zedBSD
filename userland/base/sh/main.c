@@ -594,6 +594,21 @@ search_path(const char *name, const char *suffix, int elf,
 }
 
 static int
+run_shell_script(int argc, char **argv, const char *path)
+{
+	char *child[ARG_MAX + 1];
+	int i;
+	if (argc + 1 >= ARG_MAX)
+		return 0;
+	child[0] = "/bin/sh";
+	child[1] = (char *)path;
+	for (i = 1; i < argc; i++)
+		child[i + 1] = argv[i];
+	child[argc + 1] = NULL;
+	return run_external(child);
+}
+
+static int
 run_search_path(int argc, char **argv)
 {
 	char candidate[256];
@@ -616,6 +631,8 @@ run_search_path(int argc, char **argv)
 		script[argc] = NULL;
 		return run_noct(argc, script);
 	}
+	if (search_path(argv[0], "", 0, candidate, sizeof(candidate)))
+		return run_shell_script(argc, argv, candidate);
 	fprintf(stderr, "sh: %s: not found\n", argv[0]);
 	return 0;
 }
@@ -1074,7 +1091,8 @@ command_dispatch(int argc, char **argv)
 		for (i = 0; i < argc; i++)
 			child[i] = argv[i];
 		child[argc] = NULL;
-		return run_external(child);
+		return is_elf(argv[0]) ? run_external(child) :
+		    run_shell_script(argc, argv, argv[0]);
 	}
 	return run_search_path(argc, argv);
 }

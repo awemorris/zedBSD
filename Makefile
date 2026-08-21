@@ -809,6 +809,17 @@ ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \
 	--file /etc/shadow=userland/base/etc/shadow \
 	--mode /etc/passwd=0644 --mode /etc/group=0644 \
 	--mode /etc/shadow=0400
+ZEDBSD_XZED_SESSION_INPUTS := userland/X11/session/startx \
+	userland/X11/session/Xzedrc userland/X11/session/xzedwm.conf \
+	userland/X11/session/background.xpm
+ZEDBSD_XZED_SESSION_FILES := $(if $(filter Xzed xzedwm,$(ZEDBSD_USER_PROGRAMS)),\
+	--file /bin/startx=userland/X11/session/startx \
+	--file /etc/Xzed/Xzedrc=userland/X11/session/Xzedrc \
+	--file /etc/Xzed/xzedwm.conf=userland/X11/session/xzedwm.conf \
+		--file /etc/Xzed/background.xpm=userland/X11/session/background.xpm \
+	--mode /bin/startx=0755 --mode /etc/Xzed/Xzedrc=0755)
+ZEDBSD_PACKAGE_INPUTS += $(ZEDBSD_XZED_SESSION_INPUTS)
+ZEDBSD_PACKAGE_FILES += $(ZEDBSD_XZED_SESSION_FILES)
 
 $(DATA_IMAGE): $(DATA_IMAGE_TOOLS)
 	@mkdir -p $(dir $@)
