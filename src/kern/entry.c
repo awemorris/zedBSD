@@ -29,6 +29,7 @@
 
 #define KERNEL_HEAP_SIZE (512U * 1024U)
 #define KERNEL_LARGE_THRESHOLD (2U * ZEDBSD_PAGE_SIZE)
+#define KERNEL_ALLOCATION_ALIGNMENT 16U
 static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
 	__attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
 static struct heap_allocator kernel_heap;
@@ -69,35 +70,41 @@ kern_malloc(size_t size)
 	struct hal_pmem_request request;
 	struct hal_pmem memory;
 	void *result;
+	size_t header_size;
 	bool enabled;
 
 	if (size < KERNEL_LARGE_THRESHOLD) {
 		enabled = kernel_heap_lock_enter();
 		result = heap_allocator_alloc(&kernel_heap, size);
 		kernel_heap_lock_leave(enabled);
-		return result;
+		if (result != NULL)
+			return result;
+		/*
+		 * The fixed heap is deliberately small and can become fragmented.
+		 * A failed sub-threshold allocation must still be allowed to use a
+		 * page-backed allocation while physical memory remains available.
+		 */
 	}
+	header_size = (sizeof(*large) + KERNEL_ALLOCATION_ALIGNMENT - 1U) &
+	    ~(size_t)(KERNEL_ALLOCATION_ALIGNMENT - 1U);
+	if (size > SIZE_MAX - header_size)
+		return NULL;
 	memset(&request, 0, sizeof(request));
 	request.paddr = HAL_PMEM_PADDR_ANY;
-	request.size = size;
+	request.size = size + header_size;
 	request.alignment = ZEDBSD_PAGE_SIZE;
 	request.type = HAL_PMEM_TYPE_RAM;
 	if (hal_pmem_alloc(&request, &memory) != HAL_OK)
 		return NULL;
+	large = memory.vaddr;
+	memset(large, 0, header_size);
+	large->pointer = (uint8_t *)memory.vaddr + header_size;
+	large->memory = memory;
 	enabled = kernel_heap_lock_enter();
-	large = heap_allocator_alloc(&kernel_heap, sizeof(*large));
-	if (large != NULL) {
-		large->pointer = memory.vaddr;
-		large->memory = memory;
-		large->next = kernel_large_allocations;
-		kernel_large_allocations = large;
-	}
+	large->next = kernel_large_allocations;
+	kernel_large_allocations = large;
 	kernel_heap_lock_leave(enabled);
-	if (large == NULL) {
-		(void)hal_pmem_free(&memory);
-		return NULL;
-	}
-	result = memory.vaddr;
+	result = large->pointer;
 	return result;
 }
 
@@ -141,7 +148,6 @@ kern_free(void *pointer)
 		}
 	if (large != NULL) {
 		memory = large->memory;
-		heap_allocator_free(&kernel_heap, large);
 	}
 	kernel_heap_lock_leave(enabled);
 	if (large == NULL)
