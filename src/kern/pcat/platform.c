@@ -5,6 +5,7 @@
 #include "kern/mbr-partition.h"
 #include "drivers/pcat-ide.h"
 #include "drivers/pci-pcat.h"
+#include "drivers/pcat-ps2-mouse.h"
 #if CONFIG_DRIVER_PCI_UHCI
 #include "drivers/pci-uhci.h"
 #endif
@@ -103,7 +104,7 @@ void kern_platform_refresh_devices(const struct boot_device *d, size_t n)
 #endif
 }
 
-int kern_platform_input_init(void) { return 0; }
+int kern_platform_input_init(void) { return pcat_ps2_mouse_init(); }
 
 struct disk *kern_platform_block_device(const struct boot_device *device)
 {

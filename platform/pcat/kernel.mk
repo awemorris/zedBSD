@@ -83,6 +83,7 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(PCAT_USB_CLASS_OBJS) \
 	$(BUILD)/drivers/pcat-ide.o $(BUILD)/drivers/dp8390.o \
 	$(BUILD)/drivers/pcat-ne2000.o \
+	$(BUILD)/drivers/pcat-ps2-mouse.o \
 	$(BUILD)/src/kern/mbr-partition.o \
 	$(BUILD)/src/kern/pcat/platform.o $(BUILD)/src/kern/image.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \

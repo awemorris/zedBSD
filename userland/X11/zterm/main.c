@@ -29,6 +29,7 @@ struct cell {
 	uint32_t codepoint;
 	uint32_t foreground;
 	uint32_t background;
+	/* The second cell occupied by a wide glyph has no glyph of its own. */
 	uint8_t continuation;
 };
 
@@ -48,6 +49,7 @@ struct terminal {
 	uint32_t foreground;
 	uint32_t background;
 	struct cell cells[MAX_COLUMNS * MAX_ROWS];
+	/* Each row tracks the smallest damaged inclusive column range. */
 	uint8_t dirty[MAX_ROWS];
 	uint16_t dirty_first[MAX_ROWS];
 	uint16_t dirty_last[MAX_ROWS];
@@ -70,6 +72,8 @@ static const uint32_t ansi_colors[16] = {
 	0x5555ff, 0xff55ff, 0x55ffff, 0xffffff
 };
 
+/* Screen model and X request accounting. */
+
 static struct cell *
 cell_at(struct terminal *terminal, unsigned column, unsigned row)
 {
@@ -79,6 +83,7 @@ cell_at(struct terminal *terminal, unsigned column, unsigned row)
 static void
 x_request(struct terminal *terminal)
 {
+	/* Bound the amount of drawing queued while processing large PTY bursts. */
 	if (++terminal->request_budget >= 5) {
 		XSync(terminal->display, False);
 		terminal->request_budget = 0;
@@ -93,6 +98,8 @@ x_finish(struct terminal *terminal)
 		terminal->request_budget = 0;
 	}
 }
+
+/* Cell mutation and damage tracking. */
 
 static void
 blank_cell(struct terminal *terminal, unsigned column, unsigned row)
@@ -194,6 +201,7 @@ put_codepoint(struct terminal *terminal, uint32_t codepoint)
 	unsigned width = wide_codepoint(codepoint) ? 2U : 1U;
 	struct cell *cell;
 
+	/* XDrawString16 limits the rendered repertoire to the Unicode BMP. */
 	if (codepoint > 0xffffU)
 		codepoint = 0xfffdU;
 	if (terminal->cursor_column + width > terminal->columns) {
@@ -223,6 +231,8 @@ put_codepoint(struct terminal *terminal, uint32_t codepoint)
 	}
 }
 
+/* VT100/ANSI and UTF-8 parsing. */
+
 static int
 parameter(const struct terminal *terminal, int index, int fallback)
 {
@@ -240,6 +250,7 @@ csi_dispatch(struct terminal *terminal, unsigned char final)
 	unsigned column;
 	int i;
 
+	/* Unsupported CSI commands are intentionally ignored. */
 	switch (final) {
 	case 'A':
 		terminal->cursor_row = value > (int)terminal->cursor_row ? 0 :
@@ -324,6 +335,7 @@ csi_dispatch(struct terminal *terminal, unsigned char final)
 static void
 utf8_byte(struct terminal *terminal, unsigned char byte)
 {
+	/* Reject overlong encodings, surrogates and values beyond Unicode. */
 	if (terminal->utf8_remaining == 0) {
 		if (byte < 0x80) {
 			put_codepoint(terminal, byte);
@@ -362,6 +374,7 @@ utf8_byte(struct terminal *terminal, unsigned char byte)
 static void
 terminal_byte(struct terminal *terminal, unsigned char byte)
 {
+	/* parser_state: 0 is text, 1 follows ESC, and 2 parses a CSI sequence. */
 	if (terminal->parser_state == 1) {
 		terminal->parser_state = 0;
 		if (byte == '[') {
@@ -425,6 +438,8 @@ terminal_message(struct terminal *terminal, const char *message)
 		terminal_byte(terminal, (unsigned char)*message++);
 }
 
+/* Rendering. */
+
 static void
 draw_row(struct terminal *terminal, unsigned row, unsigned first,
     unsigned last)
@@ -432,6 +447,7 @@ draw_row(struct terminal *terminal, unsigned row, unsigned first,
 	unsigned column;
 	XChar2b text[MAX_COLUMNS];
 
+	/* Damage touching either half of a wide glyph must repaint both cells. */
 	if (first != 0U && cell_at(terminal, first, row)->continuation)
 		first--;
 	if (last + 1U < terminal->columns &&
@@ -507,6 +523,7 @@ redraw(struct terminal *terminal)
 {
 	unsigned row;
 
+	/* First restore the old cursor cell, then draw the cursor at its new site. */
 	if (terminal->cursor_drawn)
 		damage(terminal, terminal->drawn_cursor_row,
 		    terminal->drawn_cursor_column, terminal->drawn_cursor_column);
@@ -526,6 +543,8 @@ redraw(struct terminal *terminal)
 	terminal->cursor_drawn = 1;
 	x_finish(terminal);
 }
+
+/* Keyboard translation, terminal resizing and PTY lifecycle. */
 
 static int
 send_key(struct terminal *terminal, XKeyEvent *event)
@@ -577,6 +596,7 @@ resize_terminal(struct terminal *terminal, unsigned width, unsigned height)
 	if (rows > MAX_ROWS) rows = MAX_ROWS;
 	if (columns == old_columns && rows == old_rows)
 		return 0;
+	/* Preserve the overlapping top-left region and blank newly exposed cells. */
 	old = malloc((size_t)old_columns * old_rows * sizeof(*old));
 	if (old == NULL)
 		return -1;
@@ -652,6 +672,7 @@ initialize(struct terminal *terminal)
 	memset(&winsize, 0, sizeof(winsize));
 	winsize.ws_row = (unsigned short)terminal->rows;
 	winsize.ws_col = (unsigned short)terminal->columns;
+	/* forkpty supplies both the shell's controlling terminal and our PTY master. */
 	terminal->child = forkpty(&terminal->master, NULL, NULL, &winsize);
 	if (terminal->child < 0) {
 		char message[96];
@@ -695,6 +716,7 @@ main(void)
 		uint8_t input[4096];
 		ssize_t count;
 
+		/* Drive X events and shell output from the same nonblocking loop. */
 		descriptors[0] = (struct pollfd){ ConnectionNumber(terminal.display),
 		    POLLIN, 0 };
 		descriptors[1] = (struct pollfd){ terminal.master, POLLIN, 0 };

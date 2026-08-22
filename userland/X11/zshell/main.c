@@ -36,6 +36,7 @@
 #define BAR_TEXT 0xe4eaf0UL
 #define BAR_MUTED 0xaeb8c2UL
 
+/* Icons use the deliberately small one-character-per-pixel XPM subset. */
 struct icon {
 	char path[ICON_PATH_SIZE];
 	unsigned width;
@@ -69,13 +70,14 @@ struct desktop_shell {
 	int request_budget;
 };
 
+/* X request batching. */
+
 static void
 x_request(struct desktop_shell *shell)
 {
-	if (++shell->request_budget >= 5) {
-		XSync(shell->display, False);
-		shell->request_budget = 0;
-	}
+	/* Keep a redraw as one server-side dirty batch.  Intermediate XSync
+	 * round trips make Xzed present partially drawn taskbar contents. */
+	shell->request_budget++;
 }
 
 static void
@@ -86,6 +88,8 @@ x_finish(struct desktop_shell *shell)
 		shell->request_budget = 0;
 	}
 }
+
+/* Minimal XPM loading and icon cache. */
 
 static int
 read_entire_file(const char *path, char **result, size_t *result_size)
@@ -194,6 +198,7 @@ load_icon(struct icon *icon, const char *path)
 	icon->width = header[0];
 	icon->height = header[1];
 	icon->color_count = header[2];
+	/* Xzed desktop icons require one-byte keys and #RRGGBB or None colors. */
 	for (index = 0; index < icon->color_count; index++) {
 		char *color;
 		line = next_quoted(&cursor, end);
@@ -252,6 +257,8 @@ cached_icon(struct desktop_shell *shell, const char *path)
 	return load_icon(&shell->icons[index], path) ? &shell->icons[index] : NULL;
 }
 
+/* Desktop task discovery. */
+
 static void
 clock_text(char *buffer, size_t capacity)
 {
@@ -281,6 +288,7 @@ window_icon_path(struct desktop_shell *shell, Window window, char **path)
 	unsigned count = 0;
 	unsigned index;
 
+	/* A window manager may attach the icon to its frame or to the client. */
 	if (XzedGetIconPath(shell->display, window, path))
 		return 1;
 	if (!XQueryTree(shell->display, window, &root_return, &parent_return,
@@ -349,6 +357,7 @@ refresh_tasks(struct desktop_shell *shell)
 		XFree(name);
 	}
 	XFree(children);
+	/* Preserve the existing array when the root stacking order is unchanged. */
 	changed = next_count != shell->task_count;
 	if (!changed)
 		for (index = 0; index < next_count; index++)
@@ -365,6 +374,8 @@ refresh_tasks(struct desktop_shell *shell)
 	}
 	return changed;
 }
+
+/* Taskbar drawing. */
 
 static void
 fill(struct desktop_shell *shell, unsigned long color, int x, int y,
@@ -397,6 +408,7 @@ draw_icon(struct desktop_shell *shell, const struct icon *icon, int x, int y)
 	unsigned color;
 	if (icon == NULL || !icon->valid)
 		return;
+	/* Collapse adjacent pixels into horizontal runs to reduce X requests. */
 	for (color = 0; color < icon->color_count; color++) {
 		XRectangle rectangles[ICON_MAX_SIZE * ICON_MAX_SIZE];
 		int count = 0;
@@ -507,6 +519,7 @@ redraw(struct desktop_shell *shell)
 	unsigned x = LAUNCHER_WIDTH;
 	unsigned index;
 
+	/* Build the complete taskbar in Xzed's retained window backing store. */
 	clock_text(clock, sizeof(clock));
 	(void)XGetInputFocus(shell->display, &focus, &revert);
 	fill(shell, BAR_BACKGROUND, 0, 0, shell->width, TASKBAR_HEIGHT);
@@ -558,6 +571,7 @@ task_click(struct desktop_shell *shell, int x)
 	if (index >= shell->task_count)
 		return;
 	(void)XGetInputFocus(shell->display, &focus, &revert);
+	/* Clicking the active task hides it; clicking an inactive task restores it. */
 	if (focus == shell->tasks[index].client || focus == shell->tasks[index].window) {
 		XUnmapWindow(shell->display, shell->tasks[index].window);
 		XSetInputFocus(shell->display, shell->root, RevertToParent, CurrentTime);
@@ -567,7 +581,6 @@ task_click(struct desktop_shell *shell, int x)
 		XSetInputFocus(shell->display, shell->tasks[index].client,
 		    RevertToParent, CurrentTime);
 	}
-	XSync(shell->display, False);
 	redraw(shell);
 }
 
@@ -584,6 +597,8 @@ update_clock(struct desktop_shell *shell)
 	shell->clock[sizeof(shell->clock) - 1U] = '\0';
 	x_finish(shell);
 }
+
+/* X connection setup and event loop. */
 
 static int
 initialize(struct desktop_shell *shell)
@@ -636,6 +651,7 @@ main(void)
 		int exposed = 0;
 		int tasks_changed;
 
+		/* The timeout also drives the clock and discovers root-window changes. */
 		descriptor = (struct pollfd){ ConnectionNumber(shell.display),
 		    POLLIN, 0 };
 		(void)poll(&descriptor, 1, 1000);

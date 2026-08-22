@@ -14,6 +14,7 @@
 #define VGA_DATA  0x3d5U
 #define KBD_DATA 0x60U
 #define KBD_STATUS 0x64U
+#define KBD_STATUS_AUX 0x20U
 #define EVENT_COUNT 32U
 
 static unsigned cursor_row, cursor_column;
@@ -405,7 +406,10 @@ scan_to_key(uint8_t scan, int extended)
 static void
 pump_keyboard_locked(void)
 {
-	while (asm_inb(KBD_STATUS) & 1U) {
+	for (;;) {
+		uint8_t status = asm_inb(KBD_STATUS);
+		if ((status & 1U) == 0 || (status & KBD_STATUS_AUX) != 0)
+			break;
 		uint8_t raw = asm_inb(KBD_DATA), scan;
 		int released, key, extended;
 		unsigned index;

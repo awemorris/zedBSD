@@ -634,7 +634,6 @@ decorate(Display *display, struct frame *frame)
 	 */
 	XSetForeground(display, frame->gc, FRAME_FACE);
 	XFillRectangle(display, frame->frame, frame->gc, 0, 0, fw, fh);
-	XSync(display, False);
 
 	/* Flat monochrome controls: minimize, maximize, and close. */
 	XSetForeground(display, frame->gc, FRAME_SYMBOL);
@@ -663,7 +662,6 @@ decorate(Display *display, struct frame *frame)
 	}
 	XFillRectangles(display, frame->frame, frame->gc, symbols,
 	    symbol_count);
-	XSync(display, False);
 
 	if (title_length != 0) {
 		title_x = ((int)fw - (int)title_length * 8) / 2;
