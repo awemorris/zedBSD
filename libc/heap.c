@@ -630,18 +630,6 @@ heap_strdup_active(const char *string)
 	return copy;
 }
 
-void *noct_pc98be_malloc(size_t size) { return heap_alloc_active(size); }
-void *noct_pc98be_calloc(size_t count, size_t size)
-{
-	return heap_calloc_active(count, size);
-}
-void *noct_pc98be_realloc(void *pointer, size_t size)
-{
-	return heap_realloc_active(pointer, size);
-}
-char *noct_pc98be_strdup(const char *string) { return heap_strdup_active(string); }
-void noct_pc98be_free(void *pointer) { heap_free_active(pointer); }
-
 /* Standard names are real symbols; Noct's generated sources redefine these
  * locally and therefore cannot use global preprocessor aliases. */
 void *malloc(size_t size) { return heap_alloc_active(size); }

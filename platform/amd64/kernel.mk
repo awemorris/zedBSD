@@ -458,8 +458,8 @@ AMD64_USER_NOCT_GLUE_OBJS := \
 	$(BUILD)/user64/userland/packages/lang/noct/runtime/memory.o \
 	$(BUILD)/user64/userland/packages/lang/noct/runtime/platform.o \
 	$(BUILD)/user64/userland/packages/lang/noct/runtime/env.o \
-	$(BUILD)/user64/userland/packages/lang/noct/integration/napi.o \
-	$(BUILD)/user64/userland/packages/lang/noct/integration/target.o
+	$(BUILD)/user64/userland/packages/lang/noct/runtime/napi.o \
+	$(BUILD)/user64/userland/packages/lang/noct/runtime/target.o
 $(AMD64_USER_NOCT_GLUE_OBJS): AMD64_USER_CPPFLAGS := \
 	$(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
 

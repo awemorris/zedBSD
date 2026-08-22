@@ -4,9 +4,9 @@
 #include "drivers/pc98-graphics.h"
 #include "hal/i386/bsp-pc98/display.h"
 
-#include "beui-pc98-auto.h"
+#include "drivers/pc98-display-auto.h"
 #include <hal/hal.h>
-#include <noct/beui.h>
+#include "drivers/pc98-display.h"
 #include <string.h>
 
 #define CIRRUS_PADDR 0xf0000000U
@@ -14,9 +14,9 @@
 static struct hal_pmem gdc_memory[4];
 static struct hal_pmem cirrus_memory;
 
-static struct noct_beui_pc98_auto display;
-static struct noct_beui_hal backend_hal;
-static struct noct_beui_display_hal native_display;
+static struct pc98_auto display;
+static struct pc98_display_backend backend_hal;
+static struct pc98_display_ops native_display;
 
 static uint8_t port_in8(void *context, uint16_t port)
 {
@@ -66,14 +66,14 @@ static int pc98_graphics_prepare(void)
 	request.size = 4U * 1024U * 1024U;
 	if (hal_pmem_alloc(&request, &cirrus_memory) != HAL_OK)
 		goto fail;
-	noct_beui_pc98_auto_default(&display, display_reset, display_stop, NULL,
+	pc98_auto_default(&display, display_reset, display_stop, NULL,
 		port_in8, port_out8, NULL,
 		(volatile uint8_t *)cirrus_memory.vaddr);
 	/* Kernel code may run while a user CR3 is active. */
 	for (i = 0; i < 4; i++)
 		display.gdc.planes[i] =
 		    (volatile uint8_t *)gdc_memory[i].vaddr;
-	if (!noct_beui_pc98_auto_make_hal(&backend_hal, &display))
+	if (!pc98_auto_make_hal(&backend_hal, &display))
 		goto fail;
 	native_display = backend_hal.display;
 	return 1;
@@ -92,7 +92,7 @@ fail:
 static int pc98_graphics_clear(void *context)
 {
 	(void)context;
-	return noct_beui_pc98_gdc_clear_graphics(&display.gdc);
+	return pc98_gdc_clear_graphics(&display.gdc);
 }
 
 static size_t
@@ -115,7 +115,7 @@ pc98_graphics_get_modes(void *context, struct kern_graphics_mode_info *modes,
 
 static int pc98_graphics_enter(void *context, struct kern_graphics_mode *mode)
 {
-	struct noct_beui_display_info info;
+	struct pc98_display_info info;
 	(void)context;
 	if (mode == NULL || native_display.enter == NULL)
 		return 0;
@@ -147,7 +147,7 @@ static void pc98_graphics_leave(void *context)
 static int pc98_graphics_fill(void *context,
 			     const struct kern_graphics_rect *rect, uint32_t color)
 {
-	struct noct_beui_rect native;
+	struct pc98_display_rect native;
 	(void)context;
 	if (rect == NULL || native_display.fill == NULL)
 		return 0;
@@ -167,7 +167,7 @@ static int pc98_graphics_line(void *context, unsigned x0, unsigned y0,
 static int pc98_graphics_pattern_fill(void *context,
 	const struct kern_graphics_rect *rect, uint32_t color, uint64_t pattern)
 {
-	struct noct_beui_rect native;
+	struct pc98_display_rect native;
 	(void)context;
 	if (rect == NULL || native_display.pattern_fill == NULL)
 		return 0;
@@ -180,14 +180,14 @@ static int pc98_graphics_pattern_fill(void *context,
 static int pc98_graphics_blit(void *context, unsigned x, unsigned y,
 	const struct kern_graphics_image *image, uint64_t pattern, int patterned)
 {
-	struct noct_beui_image native;
+	struct pc98_display_image native;
 	unsigned i;
 	(void)context;
 	if (image == NULL || image->palette_size > 256U)
 		return 0;
 	memset(&native, 0, sizeof(native));
-	native.format = image->format == 1U ? NOCT_BEUI_IMAGE_INDEX8 :
-		NOCT_BEUI_IMAGE_RGB24;
+	native.format = image->format == 1U ? PC98_DISPLAY_IMAGE_INDEX8 :
+		PC98_DISPLAY_IMAGE_RGB24;
 	native.width = image->width;
 	native.height = image->height;
 	native.stride = image->stride;
@@ -206,7 +206,7 @@ static int pc98_graphics_blit(void *context, unsigned x, unsigned y,
 static int pc98_graphics_flush(void *context,
 	const struct kern_graphics_rect *rectangles, size_t count)
 {
-	struct noct_beui_rect native[32];
+	struct pc98_display_rect native[32];
 	size_t i;
 	(void)context;
 	if (count > 32U || native_display.flush == NULL)

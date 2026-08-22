@@ -329,11 +329,6 @@ $(BUILD)/tests/env-host-test: tests/env-host-test.c src/kern/env.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc src/kern/env.c $< -o $@
 
-$(BUILD)/tests/noct-memory-host-test: tests/noct-memory-host-test.c \
-	userland/packages/lang/noct/integration/memory.c
-	@mkdir -p $(dir $@)
-	$(HOSTCC) -Wall -Wextra -Werror -I. -Iinclude -Isrc userland/packages/lang/noct/integration/memory.c $< -o $@
-
 $(BUILD)/tests/user-noct-memory-host-test: \
 	tests/user-noct-memory-host-test.c userland/packages/lang/noct/runtime/memory.c
 	@mkdir -p $(dir $@)
@@ -580,17 +575,6 @@ $(BUILD)/tests/crypt-host-test: tests/crypt-host-test.c userland/base/libc/crypt
 crypt-host-test: $(BUILD)/tests/crypt-host-test
 	$(BUILD)/tests/crypt-host-test
 
-# BeUI lives upstream in the Noct submodule, but zedBSD links it, so the
-# upstream host tests run here against the very sources this tree builds.
-BEUI_TEST_CC := $(HOST_TEST_CC) -I$(NOCT_ROOT)/include -I$(NOCT_ROOT)/src/api
-BEUI_CORE_SOURCES := $(NOCT_ROOT)/src/api/beui-core.c \
-	$(NOCT_ROOT)/src/api/beui-image.c
-
-$(BUILD)/tests/beui-host-test: $(NOCT_ROOT)/tests/testcases/beui-test.c \
-	$(BEUI_CORE_SOURCES)
-	@mkdir -p $(dir $@)
-	$(BEUI_TEST_CC) $(BEUI_CORE_SOURCES) $< -o $@
-
 $(BUILD)/tests/blkdev-host-test: tests/blkdev-host-test.c \
 	tests/disk-host-stubs.c \
 	src/kern/buf.c src/kern/disk.c src/kern/partition.c src/kern/pc98/partition.c \
@@ -692,8 +676,7 @@ $(BUILD)/tests/libedit-host-test: tests/libedit-host-test.c \
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iuserland/base/libedit userland/base/libedit/readline.c $< -o $@
 
-HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
-	$(BUILD)/tests/sh-lexer-host-test \
+HOST_TEST_BINARIES := $(BUILD)/tests/sh-lexer-host-test \
 	$(BUILD)/tests/sh-expand-host-test \
 	$(BUILD)/tests/sh-arithmetic-host-test \
 	$(BUILD)/tests/sh-alias-host-test \
@@ -717,7 +700,6 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/fat-write-host-test \
 	$(BUILD)/tests/fat32-host-test \
 	$(BUILD)/tests/env-host-test \
-	$(BUILD)/tests/noct-memory-host-test \
 	$(BUILD)/tests/user-noct-memory-host-test \
 	$(BUILD)/tests/heap-context-host-test \
 	$(BUILD)/tests/elf-host-test \

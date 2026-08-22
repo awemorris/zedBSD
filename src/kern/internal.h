@@ -71,12 +71,6 @@ int kern_key(void);
 int kern_poll(void);
 int kern_line(char *buffer);
 void kern_prompt(void);
-int kern_noct_key_read(void *context);
-int kern_noct_key_poll(void *context);
-int kern_noct_key_is_down(void *context, int key);
-void kern_noct_key_drain(void *context);
-int kern_noct_clock_second(void *context);
-int kern_clock_second(void);
 uint8_t kern_ide_reported_drives(void);
 uint8_t kern_scsi_reported_targets(void);
 unsigned kern_bit_count(uint8_t value);
@@ -89,7 +83,6 @@ int kern_command(char *line);
 
 const char *startup_config_file(void);
 int run_noct_user(const char *, int, char *const []);
-extern int kern_noct_last_status;
 int startup_menu(struct startup_state *state);
 
 #define ho kern_handoff
@@ -120,12 +113,6 @@ int startup_menu(struct startup_state *state);
 #define poll kern_poll
 #define line kern_line
 #define prompt kern_prompt
-#define noct_key_read kern_noct_key_read
-#define noct_key_poll kern_noct_key_poll
-#define noct_key_is_down kern_noct_key_is_down
-#define noct_key_drain kern_noct_key_drain
-#define noct_clock_second kern_noct_clock_second
-#define clock_second kern_clock_second
 #define ide_reported_drives kern_ide_reported_drives
 #define scsi_reported_targets kern_scsi_reported_targets
 #define bit_count kern_bit_count

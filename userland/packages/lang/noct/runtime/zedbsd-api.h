@@ -12,6 +12,9 @@ typedef size_t (*noct_write_fn)(void *, const char *, size_t);
 #define ZEDBSD_ENV_MAX_ENTRIES 32U
 #define ZEDBSD_ENV_NAME_MAX 31U
 #define ZEDBSD_ENV_VALUE_MAX 255U
+#define ZEDBSD_NOCT_DIRECTORY_MAX 256U
+#define ZEDBSD_NOCT_PATH_MAX 256U
+#define ZEDBSD_NOCT_SOURCE_MAX (256U * 1024U)
 
 struct environment {
 	uint16_t used;
@@ -29,7 +32,7 @@ int env_at(const struct environment *, size_t,
 		  const char **, const char **);
 
 struct noct_dirent {
-	char name[256];
+	char name[ZEDBSD_NOCT_PATH_MAX];
 	uint64_t size;
 	uint8_t attributes;
 };
@@ -63,9 +66,9 @@ struct noct_options {
 	const struct noct_services *services;
 	void *filesystem;
 	void *environment;
-	const void *memory;
 };
 
+int key_normalize_bios_ax(uint16_t);
 int noct_napi_register(NoctEnv *, const struct noct_options *);
 void noct_napi_cleanup(void);
 int noct_target_register(NoctEnv *, const struct noct_services *);

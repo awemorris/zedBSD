@@ -6,7 +6,6 @@
  * This will be removed.
  */
 #include "kern/internal.h"
-#include "kern/clock.h"
 #include "kern/console-device.h"
 #include "kern/platform.h"
 #include "kern/file.h"
@@ -23,7 +22,6 @@
 
 #define CFG_MAX 8192
 static uint8_t sec[512], cfg[CFG_MAX];
-int kern_noct_last_status;
 
 static void
 print_stat(const char *name, size_t value)
@@ -105,51 +103,6 @@ int poll(void)
 		int event = console_input_poll_event();
 		return event < 0 ? -1 : event & (int)HAL_KEY_EVENT_KEY_MASK;
 	}
-}
-
-int noct_key_read(void *context)
-{
-	(void)context;
-	return console_input_read_event();
-}
-
-int noct_key_poll(void *context)
-{
-	(void)context;
-	return console_input_poll_event();
-}
-
-int noct_key_is_down(void *context, int key)
-{
-	(void)context;
-	return hal_cons_key_state(key);
-}
-
-/* A BeUI-only program never reads the buffered Keyboard module, so the
- * type-ahead a held key fills has to be emptied as a BeUI side effect or
- * keys pressed during a game leak to the next buffered reader.  The BIOS
- * queue holds at most 16 entries; the bound keeps the drain finite
- * against a BIOS whose poll never reports an empty queue. */
-void noct_key_drain(void *context)
-{
-	(void)context;
-	hal_cons_drain_input();
-}
-
-/* Return seconds since the start of the current minute, or -1 for an
- * invalid BIOS result.  Stage 1 converts the BIOS BCD byte to binary before
- * returning it through the gateway.  INT 1Ch/AH=00h is available on the
- * early PC-9801 models for which a CPU-speed-dependent delay loop would be
- * least useful. */
-int clock_second(void)
-{
-	return (int)((clock_ticks() / 100U) % 60U);
-}
-
-int noct_clock_second(void *context)
-{
-	(void)context;
-	return clock_second();
 }
 
 int line(char *b)
@@ -354,7 +307,6 @@ int run_noct_user(const char *path, int argc, char *const argv[])
 
 	if (path == NULL || argc < 0 || argc > 20 ||
 	    (argc != 0 && argv == NULL)) {
-		kern_noct_last_status = -EINVAL;
 		return 0;
 	}
 	executable[0] = '\0';
@@ -373,7 +325,6 @@ int run_noct_user(const char *path, int argc, char *const argv[])
 		executable[0] = '\0';
 	}
 	if (executable[0] == '\0') {
-		kern_noct_last_status = -ENOENT;
 		return 0;
 	}
 	child_argv[0] = executable;
@@ -397,11 +348,9 @@ int run_noct_user(const char *path, int argc, char *const argv[])
 	}
 	error = process_spawn(executable, child_argv, child_env, &child);
 	if (error != 0) {
-		kern_noct_last_status = -error;
 		return 0;
 	}
 	error = process_wait(child, &status);
-	kern_noct_last_status = error != 0 ? -error : status;
 	return error == 0 && status == 0;
 }
 

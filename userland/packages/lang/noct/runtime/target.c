@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include <userland/packages/lang/noct/integration/target.h>
-#include <userland/packages/lang/noct/integration/napi.h>
+#include "userland/packages/lang/noct/runtime/zedbsd-api.h"
 
 #ifdef NOCT_TARGET_ZEDBSD
 #include <zedbsd/console.h>

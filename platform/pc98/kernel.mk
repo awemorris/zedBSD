@@ -8,7 +8,7 @@
 PC98 := platform/pc98
 BIOS_LOADER := bootloader/pc98
 
-CIRRUS_NOCT_CFLAGS = $(filter-out -Os,$(NOCT_CFLAGS)) -O2
+PC98_CIRRUS_CFLAGS = $(filter-out -Os,$(ZEDBSD_CFLAGS)) -O2
 
 # These object lists must be defined before the Stage 2 prerequisite list is
 # expanded below.  The compiler rules themselves may remain with the related
@@ -66,20 +66,14 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(KERN_NET_OBJS) \
 	$(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS) $(KERN_UFS_CONSISTENCY_OBJS)
 
-# Milestone verification nests QEMU tests.  Keep those chains ordered even
-# when the caller requests a highly parallel compile.
-.NOTPARALLEL: noct-m9-verify noct-m10-verify noct-m11-verify \
-	noct-m14-verify noct-m15-verify noct-m17-verify beui-g2b-verify \
-	beui-g2c-verify beui-g5-verify
-
-# BeUI display backends this target selects from upstream Noct.  The
-# Core-Graph blitter is the one hot loop in the graphical path, so it
-# trades size for speed while the rest of the image stays at -Os.
-PC98_BEUI_OBJS := \
-	$(NOCT_BUILD_DIR)/beui-pc98-gdc.o \
-	$(NOCT_BUILD_DIR)/beui-pc98-glyph.o \
-	$(NOCT_BUILD_DIR)/beui-pc98-cirrus.o \
-	$(NOCT_BUILD_DIR)/beui-pc98-auto.o
+# Native PC-98 display backends used by /dev/graphics.  The Core-Graph
+# blitter is the one hot loop in the graphical path, so it trades size for
+# speed while the rest of the image stays at -Os.
+PC98_DISPLAY_OBJS := \
+	$(BUILD)/drivers/pc98-display-gdc.o \
+	$(BUILD)/drivers/pc98-display-glyph.o \
+	$(BUILD)/drivers/pc98-display-cirrus.o \
+	$(BUILD)/drivers/pc98-display-auto.o
 
 STAGE2_OBJS = \
 	$(BUILD)/$(PC98)/boot-header.o \
@@ -87,7 +81,7 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/fs.o \
 	$(BUILD)/src/kern/namespace.o \
-	$(PC98_BEUI_OBJS) \
+	$(PC98_DISPLAY_OBJS) \
 	$(BUILD)/src/kern/fat.o \
 	$(BUILD)/src/kern/fat-lfn.o \
 	$(BUILD)/src/kern/fat16.o \
@@ -151,9 +145,9 @@ POSIX-R2-REMAINING.ELF: $(BUILD)/POSIX-R2-REMAINING.ELF
 # ----------------------------------------------------------------------
 # Per-object flag overrides.
 
-$(NOCT_BUILD_DIR)/beui-pc98-cirrus.o: NOCT_CFLAGS := $(CIRRUS_NOCT_CFLAGS)
+$(BUILD)/drivers/pc98-display-cirrus.o: OBJ_CFLAGS = $(PC98_CIRRUS_CFLAGS)
 
-$(BUILD)/drivers/pc98-graphics.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
+$(BUILD)/drivers/pc98-graphics.o $(PC98_DISPLAY_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(BUILD)/drivers/pc98-graphics.o: OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
 
 STAGE2_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
@@ -385,14 +379,14 @@ USER_NOCT_GLUE_OBJS := $(BUILD)/userland/packages/lang/noct/runtime/main.o \
 	$(BUILD)/userland/packages/lang/noct/runtime/memory.o \
 	$(BUILD)/userland/packages/lang/noct/runtime/platform.o \
 	$(BUILD)/userland/packages/lang/noct/runtime/env.o \
-	$(BUILD)/userland/packages/lang/noct/integration/napi.o \
-	$(BUILD)/userland/packages/lang/noct/integration/target.o
+	$(BUILD)/userland/packages/lang/noct/runtime/napi.o \
+	$(BUILD)/userland/packages/lang/noct/runtime/target.o
 $(USER_NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
 $(USER_NOCT_GLUE_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
-$(BUILD)/userland/packages/lang/noct/integration/napi.o: userland/packages/lang/noct/integration/napi.c
+$(BUILD)/userland/packages/lang/noct/runtime/napi.o: userland/packages/lang/noct/runtime/napi.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
-$(BUILD)/userland/packages/lang/noct/integration/target.o: userland/packages/lang/noct/integration/target.c
+$(BUILD)/userland/packages/lang/noct/runtime/target.o: userland/packages/lang/noct/runtime/target.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
 
@@ -775,20 +769,6 @@ hdd-image: $(BUILD)/hdd-image.img
 # ----------------------------------------------------------------------
 # PC-98 host tests.
 
-# Register-level backend tests, upstream with the drivers they cover.
-$(BUILD)/tests/beui-pc98-gdc-host-test: \
-	$(NOCT_ROOT)/tests/testcases/beui-pc98-gdc-test.c \
-	$(NOCT_ROOT)/src/api/beui-pc98-gdc.c $(BEUI_CORE_SOURCES)
-	@mkdir -p $(dir $@)
-	$(BEUI_TEST_CC) $(NOCT_ROOT)/src/api/beui-pc98-gdc.c \
-		$(BEUI_CORE_SOURCES) $< -o $@
-
-$(BUILD)/tests/beui-pc98-cirrus-host-test: \
-	$(NOCT_ROOT)/tests/testcases/beui-pc98-cirrus-test.c \
-	$(NOCT_ROOT)/src/api/beui-pc98-cirrus.c
-	@mkdir -p $(dir $@)
-	$(BEUI_TEST_CC) $(NOCT_ROOT)/src/api/beui-pc98-cirrus.c $< -o $@
-
 # Compile-check the i386 HAL and PC-98 BSP under the same freestanding
 # target flags used by the vmunix link.
 
@@ -820,9 +800,7 @@ $(BUILD)/tests/hal-pc98-keyboard-host-test: \
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -std=gnu11 -Iinclude -Isrc $< -o $@
 
-HOST_TEST_BINARIES += $(BUILD)/tests/beui-pc98-gdc-host-test \
-	$(BUILD)/tests/beui-pc98-cirrus-host-test \
-	$(BUILD)/tests/hal-pc98-keyboard-host-test
+HOST_TEST_BINARIES += $(BUILD)/tests/hal-pc98-keyboard-host-test
 CHECK_RUN_TARGETS += hal-pc98-compile kern-compile
 
 # ----------------------------------------------------------------------

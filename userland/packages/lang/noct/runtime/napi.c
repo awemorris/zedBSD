@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include <userland/packages/lang/noct/integration/napi.h>
-#include "kern/noct.h"
-#include <userland/packages/lang/noct/integration/memory.h>
-#include "kern/env.h"
+#include "userland/packages/lang/noct/runtime/zedbsd-api.h"
 #include "libc/heap.h"
 
 #include <noct/noct.h>
@@ -1035,8 +1032,7 @@ noct_napi_register(NoctEnv *env,
 	active.write = options->write;
 	active.write_context = options->write_context;
 	active.arena_size = options->arena_size;
-	active.source_max = options->memory != NULL ?
-		options->memory->source_max : ZEDBSD_NOCT_SOURCE_MAX;
+	active.source_max = ZEDBSD_NOCT_SOURCE_MAX;
 	active.imports = NULL;
 	active.environment = options->environment;
 	/* BeUI registers its own module, key dictionary, and image registry

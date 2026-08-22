@@ -376,14 +376,14 @@ USER_NOCT_GLUE_OBJS := $(BUILD)/userland/packages/lang/noct/runtime/main.o \
 	$(BUILD)/userland/packages/lang/noct/runtime/memory.o \
 	$(BUILD)/userland/packages/lang/noct/runtime/platform.o \
 	$(BUILD)/userland/packages/lang/noct/runtime/env.o \
-	$(BUILD)/userland/packages/lang/noct/integration/napi.o \
-	$(BUILD)/userland/packages/lang/noct/integration/target.o
+	$(BUILD)/userland/packages/lang/noct/runtime/napi.o \
+	$(BUILD)/userland/packages/lang/noct/runtime/target.o
 $(USER_NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
 $(USER_NOCT_GLUE_OBJS): OBJ_CFLAGS = $(USER_CFLAGS)
-$(BUILD)/userland/packages/lang/noct/integration/napi.o: userland/packages/lang/noct/integration/napi.c
+$(BUILD)/userland/packages/lang/noct/runtime/napi.o: userland/packages/lang/noct/runtime/napi.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
-$(BUILD)/userland/packages/lang/noct/integration/target.o: userland/packages/lang/noct/integration/target.c
+$(BUILD)/userland/packages/lang/noct/runtime/target.o: userland/packages/lang/noct/runtime/target.c
 	@mkdir -p $(dir $@)
 	$(CC) $(USER_NOCT_CPPFLAGS) -Iinclude -Isrc $(USER_CFLAGS) -MMD -MP -c $< -o $@
 

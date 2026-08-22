@@ -60,5 +60,4 @@ SECTIONS
 	       text_start < __kernel_image_end,
 	       "PC-98 entry is not file-backed")
 
-	PROVIDE(noct_jisx0208_to_ucs = hal_pc98_jisx0208_to_ucs);
 }
