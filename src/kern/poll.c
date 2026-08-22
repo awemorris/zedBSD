@@ -73,7 +73,7 @@ file_poll(struct file *file, short events, short *revents)
 		*revents = 0;
 		return 0;
 	}
-	access = file->f_flags & O_ACCMODE;
+	access = file_status_flags_get(file) & O_ACCMODE;
 	switch (file->f_inode->i_type) {
 	case INODE_REG:
 		if (access != O_WRONLY)

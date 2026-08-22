@@ -109,7 +109,9 @@ packet_recvfrom(struct socket *socket, void *buffer, size_t length,
 
 	if (buffer == NULL)
 		return -EINVAL;
-	error = socket_dequeue_packet(socket, flags, &packet);
+	if ((flags & ~(MSG_DONTWAIT | MSG_TRUNC)) != 0)
+		return -EOPNOTSUPP;
+	error = socket_dequeue_packet(socket, flags & MSG_DONTWAIT, &packet);
 	if (error != 0)
 		return -error;
 	copied = length < packet->length ? length : packet->length;
@@ -122,8 +124,12 @@ packet_recvfrom(struct socket *socket, void *buffer, size_t length,
 		memcpy(address, packet->source_address, output);
 		*address_length = source_length;
 	}
-	packet_buf_free(packet);
-	return (ssize_t)copied;
+	{
+		ssize_t result = (flags & MSG_TRUNC) != 0 ?
+		    (ssize_t)packet->length : (ssize_t)copied;
+		packet_buf_free(packet);
+		return result;
+	}
 }
 
 static void

@@ -69,7 +69,7 @@ pipe_read_file(struct file *file, void *buffer, size_t length)
 			spin_unlock_irqrestore(&pipe->lock, irq);
 			return (ssize_t)done;
 		}
-		if ((file->f_flags & O_NONBLOCK) != 0) {
+		if ((file_status_flags_get(file) & O_NONBLOCK) != 0) {
 			spin_unlock_irqrestore(&pipe->lock, irq);
 			return -EAGAIN;
 		}
@@ -117,7 +117,7 @@ pipe_write_file(struct file *file, const void *buffer, size_t length)
 			spin_unlock_irqrestore(&pipe->lock, irq);
 			return (ssize_t)done;
 		}
-		if ((file->f_flags & O_NONBLOCK) != 0) {
+		if ((file_status_flags_get(file) & O_NONBLOCK) != 0) {
 			spin_unlock_irqrestore(&pipe->lock, irq);
 			return done != 0 ? (ssize_t)done : -EAGAIN;
 		}
@@ -142,15 +142,15 @@ pipe_close_file(struct file *file)
 	unsigned long irq = spin_lock_irqsave(&pipe->lock);
 	int destroy;
 
-	if ((file->f_flags & O_ACCMODE) == O_RDONLY ||
-	    (file->f_flags & O_ACCMODE) == O_RDWR) {
+	if ((file_status_flags_get(file) & O_ACCMODE) == O_RDONLY ||
+	    (file_status_flags_get(file) & O_ACCMODE) == O_RDWR) {
 		if (pipe->readers != 0)
 			pipe->readers--;
 		waitq_wake_all(&pipe->write_waitq);
 		poll_notify();
 	}
-	if ((file->f_flags & O_ACCMODE) == O_WRONLY ||
-	    (file->f_flags & O_ACCMODE) == O_RDWR) {
+	if ((file_status_flags_get(file) & O_ACCMODE) == O_WRONLY ||
+	    (file_status_flags_get(file) & O_ACCMODE) == O_RDWR) {
 		if (pipe->writers != 0)
 			pipe->writers--;
 		waitq_wake_all(&pipe->read_waitq);
@@ -177,13 +177,13 @@ pipe_poll_file(struct file *file, short events, short *revents)
 	if (pipe == NULL || revents == NULL)
 		return EINVAL;
 	irq = spin_lock_irqsave(&pipe->lock);
-	if ((file->f_flags & O_ACCMODE) != O_WRONLY) {
+	if ((file_status_flags_get(file) & O_ACCMODE) != O_WRONLY) {
 		if (pipe->used != 0 || pipe->writers == 0)
 			result |= events & (POLLIN | POLLRDNORM);
 		if (pipe->writers == 0)
 			result |= POLLHUP;
 	}
-	if ((file->f_flags & O_ACCMODE) != O_RDONLY) {
+	if ((file_status_flags_get(file) & O_ACCMODE) != O_RDONLY) {
 		if (pipe->readers == 0)
 			result |= POLLERR;
 		else if (pipe->used < KERN_PIPE_CAPACITY)
@@ -209,7 +209,7 @@ fifo_open_file(struct file *file)
 	int access, error = 0;
 	if (inode == NULL || inode->i_type != INODE_FIFO)
 		return EINVAL;
-	access = file->f_flags & O_ACCMODE;
+	access = file_status_flags_get(file) & O_ACCMODE;
 	if (access != O_RDONLY && access != O_WRONLY && access != O_RDWR)
 		return EINVAL;
 	for (;;) {
@@ -242,7 +242,8 @@ fifo_open_file(struct file *file)
 	}
 	file->f_data = pipe;
 	irq = spin_lock_irqsave(&pipe->lock);
-	if (access == O_WRONLY && (file->f_flags & O_NONBLOCK) != 0 &&
+	if (access == O_WRONLY &&
+	    (file_status_flags_get(file) & O_NONBLOCK) != 0 &&
 	    pipe->readers == 0) {
 		error = ENXIO;
 		goto fail_locked;
@@ -253,7 +254,8 @@ fifo_open_file(struct file *file)
 		pipe->writers++;
 	waitq_wake_all(&pipe->read_waitq);
 	waitq_wake_all(&pipe->write_waitq);
-	while (access == O_RDONLY && (file->f_flags & O_NONBLOCK) == 0 &&
+	while (access == O_RDONLY &&
+	    (file_status_flags_get(file) & O_NONBLOCK) == 0 &&
 	    pipe->writers == 0) {
 		uint64_t sequence = waitq_sequence(&pipe->read_waitq);
 		error = waitq_sleep(&pipe->read_waitq, &pipe->lock, sequence, 0,
@@ -300,6 +302,13 @@ const struct file_ops fifo_file_ops = {
 	.poll = pipe_poll_file,
 	.close = pipe_close_file,
 };
+
+int
+pipe_file_is_pipe(const struct file *file)
+{
+	return file != NULL &&
+	    (file->f_ops == &pipe_file_ops || file->f_ops == &fifo_file_ops);
+}
 
 int
 pipe_create(int flags, struct file **read_file, struct file **write_file)

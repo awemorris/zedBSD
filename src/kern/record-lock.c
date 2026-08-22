@@ -297,10 +297,10 @@ record_lock_fcntl(struct process *owner, struct file *file, int command,
 	    request->type != F_UNLCK))
 		return EINVAL;
 	if (request->type == F_RDLCK &&
-	    (file->f_flags & O_ACCMODE) == O_WRONLY)
+	    (file_status_flags_get(file) & O_ACCMODE) == O_WRONLY)
 		return EBADF;
 	if (request->type == F_WRLCK &&
-	    (file->f_flags & O_ACCMODE) == O_RDONLY)
+	    (file_status_flags_get(file) & O_ACCMODE) == O_RDONLY)
 		return EBADF;
 	error = normalize_range(file, request, &start, &end);
 	if (error != 0)

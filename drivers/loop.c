@@ -101,7 +101,7 @@ loop_submit(struct disk *disk, struct bio *bio)
 		hal_printf("loop%u: %s block=%u count=%u flags=%x error=%d\n",
 		    loop->index, bio->b_op == BIO_READ ? "read" : "write",
 		    (uint32_t)bio->b_mapped_block, bio->b_block_count,
-		    (unsigned)loop->backing->f_flags, error);
+		    (unsigned)file_status_flags_get(loop->backing), error);
 	bio_complete(bio, error, done > 0 ? (size_t)done : 0);
 	return 0;
 }
@@ -158,7 +158,7 @@ loop_backing_valid(struct file *backing, unsigned flags)
 	if ((uint64_t)(uint32_t)inode->i_size > (uint64_t)INT32_MAX)
 		return EFBIG;
 	if (flags == LOOP_READ_WRITE &&
-	    (backing->f_flags & O_ACCMODE) == O_RDONLY)
+	    (file_status_flags_get(backing) & O_ACCMODE) == O_RDONLY)
 		return EBADF;
 	if ((inode->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0)
 		return EBUSY;
@@ -281,7 +281,7 @@ loop_attach_path(const struct path *root, const char *path, unsigned flags,
 			hal_printf("loop: attach %s mode=%s file-flags=%x "
 			    "size=%u failed (%d)\n", path,
 			    flags == LOOP_READ_WRITE ? "rw" : "ro",
-			    (unsigned)file->f_flags,
+			    (unsigned)file_status_flags_get(file),
 			    file->f_inode != NULL ?
 			    (uint32_t)file->f_inode->i_size : 0U, error);
 		(void)file_close(file);

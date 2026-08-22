@@ -243,7 +243,10 @@ udp_recvfrom(struct socket *socket, void *buffer, size_t length, int flags,
 {
 	struct packet_buf *packet;
 	size_t copied;
-	int error = socket_dequeue_packet(socket, flags, &packet);
+	int error;
+	if ((flags & ~(MSG_DONTWAIT | MSG_TRUNC)) != 0)
+		return -EOPNOTSUPP;
+	error = socket_dequeue_packet(socket, flags & MSG_DONTWAIT, &packet);
 
 	if (error != 0)
 		return -error;
@@ -256,8 +259,12 @@ udp_recvfrom(struct socket *socket, void *buffer, size_t length, int flags,
 		memcpy(address, packet->source_address, output);
 		*address_length = actual;
 	}
-	packet_buf_free(packet);
-	return (ssize_t)copied;
+	{
+		ssize_t result = (flags & MSG_TRUNC) != 0 ?
+		    (ssize_t)packet->length : (ssize_t)copied;
+		packet_buf_free(packet);
+		return result;
+	}
 }
 
 static int udp_getsockname(struct socket *socket, struct sockaddr *address,

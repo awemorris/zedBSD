@@ -552,9 +552,9 @@ tty_vt_read(unsigned vt, struct file *file, void *buffer, size_t size)
 	canonical = tty->termios.c_lflag & ICANON;
 	spin_unlock_irqrestore(&tty->lock, irq);
 	return canonical ? tty_read_canonical(tty, buffer, size,
-	    (file->f_flags & O_NONBLOCK) != 0) :
+	    (file_status_flags_get(file) & O_NONBLOCK) != 0) :
 	    tty_read_noncanonical(tty, buffer, size,
-	    (file->f_flags & O_NONBLOCK) != 0);
+	    (file_status_flags_get(file) & O_NONBLOCK) != 0);
 }
 
 ssize_t
@@ -1046,7 +1046,7 @@ pty_master_read(struct file *file, void *buffer, size_t size)
 	    (!pair->slave_ever_opened || pair->slave_opens != 0)) {
 		uint64_t sequence;
 		int error;
-		if ((file->f_flags & O_NONBLOCK) != 0) {
+		if ((file_status_flags_get(file) & O_NONBLOCK) != 0) {
 			spin_unlock_irqrestore(&pair->lock, irq);
 			return -EAGAIN;
 		}
@@ -1208,7 +1208,7 @@ pty_slave_open(struct file *file)
 	spin_unlock_irqrestore(&pair->lock, irq);
 	file->f_data = handle;
 	process = curthread != NULL ? curthread->proc : NULL;
-	if (process != NULL && (file->f_flags & O_NOCTTY) == 0 &&
+	if (process != NULL && (file_status_flags_get(file) & O_NOCTTY) == 0 &&
 	    process->session == process->pid && process->controlling_tty == NULL) {
 		irq = spin_lock_irqsave(&pair->slave.lock);
 		if (pair->slave.session == 0) {
@@ -1271,9 +1271,9 @@ pty_slave_read(struct file *file, void *buffer, size_t size)
 	canonical = tty->termios.c_lflag & ICANON;
 	spin_unlock_irqrestore(&tty->lock, irq);
 	return canonical ? tty_read_canonical(tty, buffer, size,
-	    (file->f_flags & O_NONBLOCK) != 0) :
+	    (file_status_flags_get(file) & O_NONBLOCK) != 0) :
 	    tty_read_noncanonical(tty, buffer, size,
-	    (file->f_flags & O_NONBLOCK) != 0);
+	    (file_status_flags_get(file) & O_NONBLOCK) != 0);
 }
 
 static ssize_t
@@ -1315,11 +1315,12 @@ pty_slave_write(struct file *file, const void *buffer, size_t size)
 			output_length = 2;
 		}
 		written = pty_output_bytes(pair, output, output_length,
-		    (file->f_flags & O_NONBLOCK) != 0);
+		    (file_status_flags_get(file) & O_NONBLOCK) != 0);
 		if (written != (ssize_t)output_length) {
 			/* A transformed byte is emitted atomically for nonblocking
 			 * files; blocking writes complete it before returning. */
-			if (written > 0 && (file->f_flags & O_NONBLOCK) == 0)
+			if (written > 0 &&
+			    (file_status_flags_get(file) & O_NONBLOCK) == 0)
 				continue;
 			return done != 0 ? (ssize_t)done :
 			    (written < 0 ? written : -EAGAIN);

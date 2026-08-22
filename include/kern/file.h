@@ -28,6 +28,23 @@ struct cwdinfo;
 struct ucred;
 struct file;
 
+enum file_io_kind {
+	FILE_IO_READ,
+	FILE_IO_WRITE,
+	FILE_IO_PREAD,
+	FILE_IO_PWRITE,
+};
+
+struct file_io {
+	struct file *file;
+	enum file_io_kind kind;
+	off_t offset;
+	unsigned internal_flags;
+	unsigned held_position;
+	unsigned held_inode_io;
+	unsigned transferred;
+};
+
 struct dirent {
 	ino_t d_ino;
 	enum inode_type d_type;
@@ -54,7 +71,7 @@ struct file {
 	struct inode *f_vm_inode;
 	const struct file_ops *f_ops;
 	off_t f_offset;
-	int f_flags;
+	atomic_uint_t f_flags;
 	refcount_t f_refs;
 	struct mutex f_lock;
 	unsigned f_mount_cursor;
@@ -67,6 +84,10 @@ int file_openat_cred(struct cwdinfo *, const struct ucred *, const char *,
 		     int, mode_t, struct file **);
 int file_open_resolved(const struct path *, int, struct file **);
 int file_create_pseudo(const struct file_ops *, int, void *, struct file **);
+int file_io_begin(struct file *, enum file_io_kind, off_t, unsigned,
+		  struct file_io *);
+ssize_t file_io_transfer(struct file_io *, void *, size_t);
+void file_io_end(struct file_io *);
 ssize_t file_read(struct file *, void *, size_t);
 ssize_t file_pread(struct file *, void *, size_t, off_t);
 ssize_t file_pwrite(struct file *, const void *, size_t, off_t);
@@ -81,6 +102,12 @@ int file_ioctl(struct file *, unsigned long, uintptr_t);
 int file_fsync(struct file *);
 int file_close(struct file *);
 void file_ref(struct file *);
+static inline int
+file_status_flags_get(const struct file *file)
+{
+	return file != NULL ? (int)atomic_load_acquire(&file->f_flags) : 0;
+}
+void file_status_flags_update(struct file *, int, int);
 struct inode *file_vm_inode(struct file *);
 void file_pool_reset(void);
 unsigned file_count(void);

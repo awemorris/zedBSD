@@ -464,6 +464,8 @@ unix_datagram_send(struct socket *socket, const void *buffer, size_t length,
 	struct socket *peer;
 	struct packet_buf *packet;
 	void *data;
+	uint64_t timeout_ticks;
+	unsigned long irq;
 	int error;
 
 	if (socket->write_shutdown || socket->lifecycle != SOCKET_OPEN) {
@@ -498,6 +500,9 @@ unix_datagram_send(struct socket *socket, const void *buffer, size_t length,
 	if (peer == NULL)
 		return unix_send_failure(rights, ECONNREFUSED);
 have_peer:
+	irq = spin_lock_irqsave(&socket->lock);
+	timeout_ticks = socket->send_timeout_ticks;
+	spin_unlock_irqrestore(&socket->lock, irq);
 	packet = packet_buf_alloc(0);
 	if (packet == NULL) {
 		socket_release(peer);
@@ -514,10 +519,9 @@ have_peer:
 	unix_store_packet_source(unix_endpoint(socket), packet);
 	packet->control = rights;
 	packet->control_release = rights != NULL ? unix_rights_release : NULL;
-	error = socket_enqueue_packet(peer, packet);
+	error = socket_enqueue_packet_wait(peer, packet,
+	    flags & MSG_DONTWAIT, timeout_ticks);
 	socket_release(peer);
-	if (error == ENOBUFS && (flags & MSG_DONTWAIT) != 0)
-		error = EAGAIN;
 	return error == 0 ? (ssize_t)length : -(ssize_t)error;
 }
 
@@ -720,6 +724,7 @@ unix_socket_receive_begin(struct socket *socket, void *buffer, size_t length,
 	if (datagram) {
 		transaction->copied = length < packet->length ?
 		    length : packet->length;
+		transaction->data_truncated = transaction->copied < packet->length;
 		if (transaction->copied != 0)
 			memcpy(buffer, packet->data, transaction->copied);
 	} else {
@@ -761,7 +766,8 @@ unix_socket_receive_begin(struct socket *socket, void *buffer, size_t length,
 	transaction->file_count = delivered;
 	transaction->control_truncated =
 	    rights != NULL && delivered < rights->count;
-	return (ssize_t)transaction->copied;
+	return datagram && (flags & MSG_TRUNC) != 0 ?
+	    (ssize_t)packet->length : (ssize_t)transaction->copied;
 }
 
 void
@@ -897,8 +903,6 @@ unix_recvfrom(struct socket *socket, void *buffer, size_t length, int flags,
 {
 	struct unix_recv_transaction transaction;
 	ssize_t result;
-	if (length == 0)
-		return 0;
 	result = unix_socket_receive_begin(socket, buffer, length, flags,
 	    address, address_length, 0, &transaction);
 	if (result < 0 || !transaction.active)
@@ -1203,9 +1207,16 @@ unix_accept(struct socket *socket, struct socket **result,
 		listener->pending_tail = NULL;
 	listener->pending_count--;
 	*result = pending->socket;
-	if (address != NULL && length != NULL)
-		unix_store_address(NULL, address, length);
 	spin_unlock_irqrestore(&socket->lock, irq);
+	if (address != NULL && length != NULL) {
+		struct socket *peer = NULL;
+		if (unix_peer_ref(unix_endpoint(*result), &peer) == 0) {
+			unix_store_address(unix_endpoint(peer), address, length);
+			socket_release(peer);
+		} else {
+			unix_store_address(NULL, address, length);
+		}
+	}
 	kern_free(pending);
 	return 0;
 }
@@ -1273,8 +1284,39 @@ unix_poll(struct socket *socket, short events, short *revents)
 		*revents = result;
 		return 0;
 	}
-	if (socket->type != SOCK_STREAM)
-		return socket_poll_common(socket, events, revents);
+	if (socket->type != SOCK_STREAM) {
+		error = socket_poll_common(socket, events, &result);
+		if (error != 0)
+			return error;
+		if ((result & (POLLOUT | POLLWRNORM)) != 0 &&
+		    (endpoint->connection != NULL || endpoint->connected)) {
+			if (endpoint->connection != NULL)
+				error = unix_peer_ref(endpoint, &peer);
+			else {
+				peer = endpoint->datagram_peer != NULL &&
+				    socket_tryref(endpoint->datagram_peer) ?
+				    endpoint->datagram_peer : NULL;
+				error = peer != NULL ? 0 : ECONNREFUSED;
+			}
+			if (error == 0) {
+				irq = spin_lock_irqsave(&peer->lock);
+				if (peer->lifecycle != SOCKET_OPEN ||
+				    peer->read_shutdown ||
+				    (peer->receive_packet_limit != 0 &&
+				     peer->receive_packets >=
+				     peer->receive_packet_limit) ||
+				    peer->receive_bytes >= peer->receive_hiwat_bytes)
+					result &= (short)~(POLLOUT | POLLWRNORM);
+				spin_unlock_irqrestore(&peer->lock, irq);
+				socket_release(peer);
+			} else {
+				result &= (short)~(POLLOUT | POLLWRNORM);
+				result |= POLLERR | POLLHUP;
+			}
+		}
+		*revents = result;
+		return 0;
+	}
 
 	irq = spin_lock_irqsave(&socket->lock);
 	if (endpoint->stream_head != NULL || socket->read_shutdown ||

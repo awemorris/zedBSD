@@ -92,6 +92,12 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 	    (flags & O_ACCMODE) > O_RDWR ||
 	    ((flags & O_EXCL) != 0 && (flags & O_CREAT) == 0))
 		return EINVAL;
+	/* Reserve the system-wide open-file object before pathname operations
+	 * which may create or truncate an inode.  ENFILE must not leave a
+	 * namespace or data side effect behind. */
+	file = file_alloc();
+	if (file == NULL)
+		return ENFILE;
 	error = namei_path_at(context, path, &found);
 	if (error == ENOENT &&
 	    ((flags & O_ACCMODE) != O_RDONLY ||
@@ -102,25 +108,27 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 		char storage[NAME_MAX + 1U];
 		error = namei_parent_path_at(context, path, &parent, &last, storage);
 		if (error != 0)
-			return error;
+			goto fail_file;
 		if (cred != NULL &&
 		    (error = vfs_access(parent.p_inode, cred, W_OK | X_OK)) != 0) {
 			path_release(&parent);
-			return error;
+			goto fail_file;
 		}
 		error = inode_lookup_casefold(parent.p_inode, &last, &collision);
 		if (error == 0) {
 			inode_release(collision);
 			path_release(&parent);
-			return EEXIST;
+			error = EEXIST;
+			goto fail_file;
 		}
 		if (error != ENOENT && error != EOPNOTSUPP) {
 			path_release(&parent);
-			return error;
+			goto fail_file;
 		}
 		if ((flags & O_CREAT) == 0) {
 			path_release(&parent);
-			return ENOENT;
+			error = ENOENT;
+			goto fail_file;
 		}
 		error = inode_create(parent.p_inode, &last, mode, &inode);
 		if (error == 0) {
@@ -129,12 +137,13 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 		}
 		path_release(&parent);
 		if (error != 0)
-			return error;
+			goto fail_file;
 	} else if (error != 0) {
-		return error;
+		goto fail_file;
 	} else if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {
 		path_release(&found);
-		return EEXIST;
+		error = EEXIST;
+		goto fail_file;
 	}
 	inode = found.p_inode;
 	if (cred != NULL) {
@@ -146,37 +155,34 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 		error = vfs_access(inode, cred, requested);
 		if (error != 0) {
 			path_release(&found);
-			return error;
+			goto fail_file;
 		}
 	}
 	if ((flags & O_DIRECTORY) && inode->i_type != INODE_DIR) {
 		path_release(&found);
-		return ENOTDIR;
+		error = ENOTDIR;
+		goto fail_file;
 	}
 	if (inode->i_type == INODE_DIR && (flags & O_ACCMODE) != O_RDONLY) {
 		path_release(&found);
-		return EISDIR;
+		error = EISDIR;
+		goto fail_file;
 	}
 	if ((flags & O_TRUNC) && inode->i_type == INODE_REG &&
 	    (flags & O_ACCMODE) != O_RDONLY) {
 		error = inode_truncate(inode, 0);
 		if (error != 0) {
 			path_release(&found);
-			return error;
+			goto fail_file;
 		}
 		if (vm_object_truncate_inode != NULL)
 			vm_object_truncate_inode(inode, 0);
-	}
-	file = file_alloc();
-	if (file == NULL) {
-		path_release(&found);
-		return ENFILE;
 	}
 	file->f_path = found;
 	file->f_inode = inode;
 	file->f_vm_inode = inode;
 	file->f_ops = inode->i_fop;
-	file->f_flags = flags;
+	atomic_store_release(&file->f_flags, (unsigned)flags);
 	file->f_offset = (flags & O_APPEND) ? inode->i_size : 0;
 	if (file->f_ops != NULL && file->f_ops->open != NULL) {
 		error = file->f_ops->open(file);
@@ -188,6 +194,10 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 	}
 	*result = file;
 	return 0;
+
+fail_file:
+	file_free(file);
+	return error;
 }
 
 FILE_HIGH int
@@ -218,7 +228,7 @@ file_open_resolved(const struct path *resolved, int flags,
 	file->f_inode = resolved->p_inode;
 	file->f_vm_inode = resolved->p_inode;
 	file->f_ops = resolved->p_inode->i_fop;
-	file->f_flags = flags;
+	atomic_store_release(&file->f_flags, (unsigned)flags);
 	file->f_offset = (flags & O_APPEND) ? resolved->p_inode->i_size : 0;
 	if (file->f_ops != NULL && file->f_ops->open != NULL) {
 		error = file->f_ops->open(file);
@@ -244,7 +254,7 @@ file_create_pseudo(const struct file_ops *ops, int flags, void *data,
 	if (file == NULL)
 		return ENFILE;
 	file->f_ops = ops;
-	file->f_flags = flags;
+	atomic_store_release(&file->f_flags, (unsigned)flags);
 	file->f_data = data;
 	*result = file;
 	return 0;
@@ -253,53 +263,186 @@ file_create_pseudo(const struct file_ops *ops, int flags, void *data,
 int
 file_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 {
-	int error;
 	if (file == NULL)
 		return EBADF;
 	if (file->f_ops == NULL || file->f_ops->ioctl == NULL)
 		return EOPNOTSUPP;
-	mutex_lock(&file->f_lock);
-	error = file->f_ops->ioctl(file, request, argument);
-	mutex_unlock(&file->f_lock);
-	return error;
+	/* ioctl backends synchronize their own state.  A blocking ioctl must not
+	 * exclude read/write on a full-duplex descriptor. */
+	return file->f_ops->ioctl(file, request, argument);
+}
+
+void
+file_status_flags_update(struct file *file, int mask, int value)
+{
+	unsigned old, updated;
+
+	if (file == NULL)
+		return;
+	old = atomic_load_acquire(&file->f_flags);
+	do {
+		updated = (old & ~(unsigned)mask) |
+		    ((unsigned)value & (unsigned)mask);
+	} while (!atomic_compare_exchange(&file->f_flags, &old, updated));
+}
+
+static int
+file_io_is_positional(enum file_io_kind kind)
+{
+	return kind == FILE_IO_PREAD || kind == FILE_IO_PWRITE;
+}
+
+static int
+file_io_is_write(enum file_io_kind kind)
+{
+	return kind == FILE_IO_WRITE || kind == FILE_IO_PWRITE;
+}
+
+int
+file_io_begin(struct file *file, enum file_io_kind kind, off_t offset,
+	unsigned internal_flags, struct file_io *io)
+{
+	int flags, writing, positional;
+
+	if (file == NULL || io == NULL || kind < FILE_IO_READ ||
+	    kind > FILE_IO_PWRITE ||
+	    (internal_flags & ~FILE_IO_LOOP_BACKING) != 0)
+		return EINVAL;
+	positional = file_io_is_positional(kind);
+	writing = file_io_is_write(kind);
+	if (positional && offset < 0)
+		return EINVAL;
+	flags = file_status_flags_get(file);
+	if (writing ? ((flags & O_ACCMODE) == O_RDONLY) :
+	    ((flags & O_ACCMODE) == O_WRONLY))
+		return EBADF;
+	if (file->f_inode != NULL && file->f_inode->i_type == INODE_DIR)
+		return EISDIR;
+	if (writing && file->f_inode != NULL &&
+	    (file->f_inode->i_flags & INODE_SWAPFILE) != 0)
+		return EBUSY;
+	if (writing && file->f_inode != NULL &&
+	    (file->f_inode->i_flags & INODE_LOOPFILE) != 0 &&
+	    (internal_flags & FILE_IO_LOOP_BACKING) == 0)
+		return EBUSY;
+	if (file->f_ops == NULL ||
+	    (kind == FILE_IO_READ && file->f_ops->read == NULL) ||
+	    (kind == FILE_IO_WRITE && file->f_ops->write == NULL) ||
+	    (kind == FILE_IO_PREAD && file->f_ops->pread == NULL) ||
+	    (kind == FILE_IO_PWRITE && file->f_ops->pwrite == NULL))
+		return EOPNOTSUPP;
+
+	memset(io, 0, sizeof(*io));
+	io->file = file;
+	io->kind = kind;
+	io->offset = offset;
+	io->internal_flags = internal_flags;
+	/* Only regular files and block devices use the generic shared position.
+	 * Stream and device backends synchronize their queues independently. */
+	if (!positional && file->f_inode != NULL &&
+	    (file->f_inode->i_type == INODE_REG ||
+	     file->f_inode->i_type == INODE_BLOCK)) {
+		mutex_lock(&file->f_lock);
+		io->held_position = 1;
+	}
+	if (file->f_inode != NULL && file->f_inode->i_type == INODE_REG) {
+		mutex_lock(&file->f_inode->i_io_lock);
+		io->held_inode_io = 1;
+	}
+	if (!positional) {
+		if (writing && (flags & O_APPEND) != 0 && file->f_inode != NULL)
+			file->f_offset = file->f_inode->i_size;
+		io->offset = io->held_position ? file->f_offset : 0;
+	}
+	return 0;
+}
+
+ssize_t
+file_io_transfer(struct file_io *io, void *buffer, size_t length)
+{
+	struct file *file;
+	ssize_t result;
+
+	if (io == NULL || io->file == NULL || (buffer == NULL && length != 0))
+		return -EINVAL;
+	file = io->file;
+	switch (io->kind) {
+	case FILE_IO_READ:
+		if (io->held_position)
+			file->f_offset = io->offset;
+		result = file->f_ops->read(file, buffer, length);
+		if (result > 0 && io->held_position)
+			io->offset = file->f_offset;
+		break;
+	case FILE_IO_WRITE:
+		if (io->held_position)
+			file->f_offset = io->offset;
+		result = file->f_ops->write(file, buffer, length);
+		if (result > 0 && io->held_position)
+			io->offset = file->f_offset;
+		break;
+	case FILE_IO_PREAD:
+		result = file->f_ops->pread(file, buffer, length, io->offset);
+		if (result > 0)
+			io->offset += result;
+		break;
+	case FILE_IO_PWRITE:
+		result = file->f_ops->pwrite(file, buffer, length, io->offset);
+		if (result > 0)
+			io->offset += result;
+		break;
+	default:
+		return -EINVAL;
+	}
+	if (result > 0)
+		io->transferred = 1;
+	return result;
+}
+
+void
+file_io_end(struct file_io *io)
+{
+	struct file *file;
+
+	if (io == NULL || io->file == NULL)
+		return;
+	file = io->file;
+	if (!file_io_is_positional(io->kind) && io->held_position)
+		file->f_offset = io->offset;
+	if (io->transferred && file->f_inode != NULL)
+		inode_touch(file->f_inode, file_io_is_write(io->kind) ?
+		    INODE_ATTR_MTIME | INODE_ATTR_CTIME : INODE_ATTR_ATIME);
+	if (io->held_inode_io)
+		mutex_unlock(&file->f_inode->i_io_lock);
+	if (io->held_position)
+		mutex_unlock(&file->f_lock);
+	memset(io, 0, sizeof(*io));
+}
+
+static ssize_t
+file_io_once(struct file *file, enum file_io_kind kind, void *buffer,
+	size_t length, off_t offset, unsigned internal_flags)
+{
+	struct file_io io;
+	ssize_t result;
+	int error = file_io_begin(file, kind, offset, internal_flags, &io);
+	if (error != 0)
+		return -error;
+	result = file_io_transfer(&io, buffer, length);
+	file_io_end(&io);
+	return result;
 }
 
 ssize_t
 file_read(struct file *file, void *buffer, size_t length)
 {
-	ssize_t result;
-	if (file == NULL || buffer == NULL)
-		return -EINVAL;
-	if ((file->f_flags & O_ACCMODE) == O_WRONLY)
-		return -EBADF;
-	if (file->f_inode != NULL && file->f_inode->i_type == INODE_DIR)
-		return -EISDIR;
-	if (file->f_ops == NULL || file->f_ops->read == NULL)
-		return -EOPNOTSUPP;
-	mutex_lock(&file->f_lock);
-	result = file->f_ops->read(file, buffer, length);
-	if (result >= 0 && file->f_inode != NULL)
-		inode_touch(file->f_inode, INODE_ATTR_ATIME);
-	mutex_unlock(&file->f_lock);
-	return result;
+	return file_io_once(file, FILE_IO_READ, buffer, length, 0, 0);
 }
 
 ssize_t
 file_pread(struct file *file, void *buffer, size_t length, off_t offset)
 {
-	ssize_t result;
-	if (file == NULL || buffer == NULL || offset < 0)
-		return -EINVAL;
-	if ((file->f_flags & O_ACCMODE) == O_WRONLY)
-		return -EBADF;
-	if (file->f_ops == NULL || file->f_ops->pread == NULL)
-		return -EOPNOTSUPP;
-	mutex_lock(&file->f_lock);
-	result = file->f_ops->pread(file, buffer, length, offset);
-	if (result >= 0 && file->f_inode != NULL)
-		inode_touch(file->f_inode, INODE_ATTR_ATIME);
-	mutex_unlock(&file->f_lock);
-	return result;
+	return file_io_once(file, FILE_IO_PREAD, buffer, length, offset, 0);
 }
 
 ssize_t
@@ -312,48 +455,14 @@ ssize_t
 file_pwrite_internal(struct file *file, const void *buffer, size_t length,
 		     off_t offset, unsigned internal_flags)
 {
-	ssize_t result;
-	if (file == NULL || buffer == NULL || offset < 0 ||
-	    (internal_flags & ~FILE_IO_LOOP_BACKING) != 0)
-		return -EINVAL;
-	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
-		return -EBADF;
-	if (file->f_inode != NULL && (file->f_inode->i_flags & INODE_SWAPFILE))
-		return -EBUSY;
-	if (file->f_inode != NULL && (file->f_inode->i_flags & INODE_LOOPFILE) &&
-	    (internal_flags & FILE_IO_LOOP_BACKING) == 0)
-		return -EBUSY;
-	if (file->f_ops == NULL || file->f_ops->pwrite == NULL)
-		return -EOPNOTSUPP;
-	mutex_lock(&file->f_lock);
-	result = file->f_ops->pwrite(file, buffer, length, offset);
-	if (result >= 0 && file->f_inode != NULL)
-		inode_touch(file->f_inode, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-	mutex_unlock(&file->f_lock);
-	return result;
+	return file_io_once(file, FILE_IO_PWRITE, (void *)buffer, length, offset,
+	    internal_flags);
 }
 
 ssize_t
 file_write(struct file *file, const void *buffer, size_t length)
 {
-	ssize_t result;
-	if (file == NULL || buffer == NULL)
-		return -EINVAL;
-	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
-		return -EBADF;
-	if (file->f_inode != NULL &&
-	    (file->f_inode->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0)
-		return -EBUSY;
-	if (file->f_inode != NULL && file->f_inode->i_type == INODE_DIR)
-		return -EISDIR;
-	if (file->f_ops == NULL || file->f_ops->write == NULL)
-		return -EOPNOTSUPP;
-	mutex_lock(&file->f_lock);
-	result = file->f_ops->write(file, buffer, length);
-	if (result >= 0 && file->f_inode != NULL)
-		inode_touch(file->f_inode, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-	mutex_unlock(&file->f_lock);
-	return result;
+	return file_io_once(file, FILE_IO_WRITE, (void *)buffer, length, 0, 0);
 }
 
 int

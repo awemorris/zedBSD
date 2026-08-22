@@ -377,6 +377,73 @@ socket_enqueue_packet(struct socket *socket, struct packet_buf *packet)
 }
 
 int
+socket_enqueue_packet_wait(struct socket *socket, struct packet_buf *packet,
+	int flags, uint64_t timeout_ticks)
+{
+	uint64_t deadline = 0;
+	unsigned long irq;
+	int error = 0;
+
+	if (socket == NULL || packet == NULL || (flags & ~MSG_DONTWAIT) != 0) {
+		packet_buf_free(packet);
+		return EINVAL;
+	}
+	if (timeout_ticks != 0 &&
+	    kern_deadline_after(sched_ticks(), timeout_ticks, &deadline) != 0) {
+		packet_buf_free(packet);
+		return EOVERFLOW;
+	}
+	irq = spin_lock_irqsave(&socket->lock);
+	for (;;) {
+		int full = (socket->receive_packet_limit != 0 &&
+		    socket->receive_packets >= socket->receive_packet_limit) ||
+		    packet->length > socket->receive_hiwat_bytes ||
+		    socket->receive_bytes >
+		    socket->receive_hiwat_bytes - packet->length;
+		if (socket->lifecycle != SOCKET_OPEN || socket->read_shutdown) {
+			error = EPIPE;
+			break;
+		}
+		if (!full) {
+			packet->next = NULL;
+			if (socket->receive_tail != NULL)
+				socket->receive_tail->next = packet;
+			else
+				socket->receive_head = packet;
+			socket->receive_tail = packet;
+			socket->receive_packets++;
+			socket->receive_bytes += packet->length;
+			waitq_wake_one(&socket->receive_waitq);
+			break;
+		}
+		if ((flags & MSG_DONTWAIT) != 0 || thread_current() == NULL) {
+			error = EAGAIN;
+			break;
+		}
+		if (deadline != 0 && sched_ticks() >= deadline) {
+			error = EAGAIN;
+			break;
+		}
+		{
+			uint64_t sequence =
+			    waitq_sequence(&socket->receive_space_waitq);
+			error = waitq_sleep(&socket->receive_space_waitq,
+			    &socket->lock, sequence, deadline, WAITQ_INTERRUPTIBLE);
+			if (error == ETIMEDOUT)
+				error = EAGAIN;
+			if (error != 0)
+				break;
+		}
+	}
+	spin_unlock_irqrestore(&socket->lock, irq);
+	if (error != 0)
+		packet_buf_free(packet);
+	else
+		poll_notify();
+	return error;
+}
+
+int
 socket_requeue_packet_front(struct socket *socket, struct packet_buf *packet)
 {
 	unsigned long irq;

@@ -9,6 +9,7 @@ struct file_ops;
 #define KERN_PIPE_BUF 512U
 
 int pipe_create(int flags, struct file **read_file, struct file **write_file);
+int pipe_file_is_pipe(const struct file *file);
 unsigned pipe_count(void);
 extern const struct file_ops fifo_file_ops;
 

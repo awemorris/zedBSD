@@ -85,7 +85,7 @@ mouse_open(struct file *file)
 {
 	unsigned long irq;
 	int activate, error;
-	if ((file->f_flags & O_ACCMODE) == O_WRONLY)
+	if ((file_status_flags_get(file) & O_ACCMODE) == O_WRONLY)
 		return EACCES;
 	irq = spin_lock_irqsave(&event_lock);
 	if (backend_start == NULL) {
@@ -134,7 +134,7 @@ mouse_read(struct file *file, void *buffer, size_t size)
 	while (event_used == 0) {
 		uint64_t sequence;
 		int error;
-		if ((file->f_flags & O_NONBLOCK) != 0) {
+		if ((file_status_flags_get(file) & O_NONBLOCK) != 0) {
 			spin_unlock_irqrestore(&event_lock, irq);
 			return -EAGAIN;
 		}

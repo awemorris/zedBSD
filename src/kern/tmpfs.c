@@ -790,9 +790,9 @@ tmpfs_write(struct file *file, const void *buffer, size_t length)
 {
 	off_t offset = file->f_offset;
 	ssize_t result = tmpfs_write_at(file->f_inode, buffer, length, offset,
-	    (file->f_flags & O_APPEND) != 0);
+	    (file_status_flags_get(file) & O_APPEND) != 0);
 	if (result > 0)
-		file->f_offset = (file->f_flags & O_APPEND) != 0 ?
+		file->f_offset = (file_status_flags_get(file) & O_APPEND) != 0 ?
 		    file->f_inode->i_size : offset + result;
 	return result;
 }

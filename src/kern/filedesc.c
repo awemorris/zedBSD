@@ -12,6 +12,33 @@
 
 static atomic_uint_t filedesc_live;
 
+static void
+slot_make_free(struct filedesc_entry *entry)
+{
+	entry->file = NULL;
+	entry->flags = 0;
+	entry->state = FILEDESC_SLOT_FREE;
+	entry->reservation_id = 0;
+}
+
+static void
+slot_make_live(struct filedesc_entry *entry, struct file *file, unsigned flags)
+{
+	entry->file = file;
+	entry->flags = flags;
+	entry->state = FILEDESC_SLOT_LIVE;
+	entry->reservation_id = 0;
+}
+
+static void
+slot_make_reserved(struct filedesc_entry *entry, uint64_t id)
+{
+	entry->file = NULL;
+	entry->flags = 0;
+	entry->state = FILEDESC_SLOT_RESERVED;
+	entry->reservation_id = id;
+}
+
 struct filedesc *
 filedesc_create(struct process *owner)
 {
@@ -19,6 +46,8 @@ filedesc_create(struct process *owner)
 	if (fd != NULL) {
 		refcount_init(&fd->refs, 1);
 		spin_init(&fd->lock, LOCK_RANK_FILEDESC, "file descriptor table");
+		waitq_init(&fd->reservation_waitq,
+		    "file descriptor reservations");
 		fd->owner = owner;
 		fd->soft_limit = KERN_OPEN_MAX;
 		fd->reservation_generation = 1;
@@ -45,11 +74,9 @@ filedesc_destroy(struct filedesc *fd)
 		return;
 	irq = spin_lock_irqsave(&fd->lock);
 	for (descriptor = 0; descriptor < KERN_OPEN_MAX; descriptor++) {
-		if (fd->entries[descriptor].file != NULL)
+		if (fd->entries[descriptor].state == FILEDESC_SLOT_LIVE)
 			detached[count++] = fd->entries[descriptor].file;
-		fd->entries[descriptor].file = NULL;
-		fd->entries[descriptor].flags = 0;
-		fd->entries[descriptor].reserved = 0;
+		slot_make_free(&fd->entries[descriptor]);
 	}
 	spin_unlock_irqrestore(&fd->lock, irq);
 	poll_notify();
@@ -75,7 +102,8 @@ filedesc_get_ref(struct filedesc *fd, int descriptor)
 	if (fd == NULL || descriptor < 0 || descriptor >= KERN_OPEN_MAX)
 		return NULL;
 	irq = spin_lock_irqsave(&fd->lock);
-	file = fd->entries[descriptor].file;
+	file = fd->entries[descriptor].state == FILEDESC_SLOT_LIVE ?
+	    fd->entries[descriptor].file : NULL;
 	if (file != NULL) {
 		KERN_TEST_CHECKPOINT(KERN_TEST_FD_LOOKUP_BEFORE_REF, file);
 		file_ref(file);
@@ -102,9 +130,8 @@ filedesc_install_from(struct filedesc *fd, struct file *file, unsigned flags,
 		return EINVAL;
 	irq = spin_lock_irqsave(&fd->lock);
 	for (i = minimum; i < (int)fd->soft_limit; i++)
-		if (fd->entries[i].file == NULL && !fd->entries[i].reserved) {
-			fd->entries[i].file = file;
-			fd->entries[i].flags = flags;
+		if (fd->entries[i].state == FILEDESC_SLOT_FREE) {
+			slot_make_live(&fd->entries[i], file, flags);
 			*descriptor = i;
 			spin_unlock_irqrestore(&fd->lock, irq);
 			poll_notify();
@@ -126,12 +153,11 @@ filedesc_install_at(struct filedesc *fd, struct file *file, int descriptor)
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EMFILE;
 	}
-	if (fd->entries[descriptor].file != NULL) {
+	if (fd->entries[descriptor].state != FILEDESC_SLOT_FREE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBUSY;
 	}
-	fd->entries[descriptor].file = file;
-	fd->entries[descriptor].flags = 0;
+	slot_make_live(&fd->entries[descriptor], file, 0);
 	spin_unlock_irqrestore(&fd->lock, irq);
 	poll_notify();
 	return 0;
@@ -145,13 +171,12 @@ filedesc_take(struct filedesc *fd, int descriptor, struct file **result)
 	    descriptor >= KERN_OPEN_MAX)
 		return EBADF;
 	irq = spin_lock_irqsave(&fd->lock);
-	if (fd->entries[descriptor].file == NULL) {
+	if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
 	*result = fd->entries[descriptor].file;
-	fd->entries[descriptor].file = NULL;
-	fd->entries[descriptor].flags = 0;
+	slot_make_free(&fd->entries[descriptor]);
 	spin_unlock_irqrestore(&fd->lock, irq);
 	poll_notify();
 	if ((*result)->f_inode != NULL)
@@ -203,11 +228,13 @@ filedesc_clone(struct filedesc *source, struct process *owner,
 	irq = spin_lock_irqsave(&source->lock);
 	copy->soft_limit = source->soft_limit;
 	for (descriptor = 0; descriptor < KERN_OPEN_MAX; descriptor++) {
-		struct file *file = source->entries[descriptor].file;
-		if (file == NULL)
+		struct file *file;
+		if (source->entries[descriptor].state != FILEDESC_SLOT_LIVE)
 			continue;
+		file = source->entries[descriptor].file;
 		file_ref(file);
-		copy->entries[descriptor] = source->entries[descriptor];
+		slot_make_live(&copy->entries[descriptor], file,
+		    source->entries[descriptor].flags);
 	}
 	spin_unlock_irqrestore(&source->lock, irq);
 	*result = copy;
@@ -222,7 +249,7 @@ filedesc_get_flags(struct filedesc *fd, int descriptor, unsigned *flags)
 	    descriptor >= KERN_OPEN_MAX)
 		return EBADF;
 	irq = spin_lock_irqsave(&fd->lock);
-	if (fd->entries[descriptor].file == NULL) {
+	if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
@@ -240,7 +267,7 @@ filedesc_set_flags(struct filedesc *fd, int descriptor, unsigned flags)
 	if (fd == NULL || descriptor < 0 || descriptor >= KERN_OPEN_MAX)
 		return EBADF;
 	irq = spin_lock_irqsave(&fd->lock);
-	if (fd->entries[descriptor].file == NULL) {
+	if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
@@ -262,22 +289,21 @@ filedesc_dup(struct filedesc *fd, int oldfd, int minimum, unsigned flags,
 	    (flags & ~FILEDESC_CLOEXEC) != 0)
 		return oldfd < 0 || oldfd >= KERN_OPEN_MAX ? EBADF : EINVAL;
 	irq = spin_lock_irqsave(&fd->lock);
-	file = fd->entries[oldfd].file;
+	file = fd->entries[oldfd].state == FILEDESC_SLOT_LIVE ?
+	    fd->entries[oldfd].file : NULL;
 	if (file == NULL) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EBADF;
 	}
 	for (descriptor = minimum; descriptor < (int)fd->soft_limit; descriptor++)
-		if (fd->entries[descriptor].file == NULL &&
-		    !fd->entries[descriptor].reserved)
+		if (fd->entries[descriptor].state == FILEDESC_SLOT_FREE)
 			break;
 	if (descriptor == (int)fd->soft_limit) {
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EMFILE;
 	}
 	file_ref(file);
-	fd->entries[descriptor].file = file;
-	fd->entries[descriptor].flags = flags;
+	slot_make_live(&fd->entries[descriptor], file, flags);
 	*result = descriptor;
 	spin_unlock_irqrestore(&fd->lock, irq);
 	poll_notify();
@@ -290,28 +316,45 @@ filedesc_dup2(struct filedesc *fd, int oldfd, int newfd, unsigned flags,
 {
 	struct file *file, *displaced;
 	unsigned long irq;
+	int error;
 
 	if (fd == NULL || oldfd < 0 || oldfd >= KERN_OPEN_MAX || newfd < 0 ||
 	    newfd >= KERN_OPEN_MAX || (flags & ~FILEDESC_CLOEXEC) != 0)
 		return EBADF;
 	irq = spin_lock_irqsave(&fd->lock);
-	file = fd->entries[oldfd].file;
-	if (file == NULL) {
-		spin_unlock_irqrestore(&fd->lock, irq);
-		return EBADF;
-	}
-	if (oldfd == newfd) {
-		spin_unlock_irqrestore(&fd->lock, irq);
-		return reject_equal ? EINVAL : 0;
-	}
-	if ((unsigned)newfd >= fd->soft_limit) {
-		spin_unlock_irqrestore(&fd->lock, irq);
-		return EBADF;
+	for (;;) {
+		uint64_t observed;
+
+		file = fd->entries[oldfd].state == FILEDESC_SLOT_LIVE ?
+		    fd->entries[oldfd].file : NULL;
+		if (file == NULL) {
+			spin_unlock_irqrestore(&fd->lock, irq);
+			return EBADF;
+		}
+		if (oldfd == newfd) {
+			spin_unlock_irqrestore(&fd->lock, irq);
+			return reject_equal ? EINVAL : 0;
+		}
+		if ((unsigned)newfd >= fd->soft_limit) {
+			spin_unlock_irqrestore(&fd->lock, irq);
+			return EBADF;
+		}
+		if (fd->entries[newfd].state != FILEDESC_SLOT_RESERVED)
+			break;
+		observed = waitq_sequence(&fd->reservation_waitq);
+		error = waitq_sleep(&fd->reservation_waitq, &fd->lock,
+		    observed, 0, WAITQ_INTERRUPTIBLE);
+		if (error == EAGAIN)
+			continue;
+		if (error != 0) {
+			spin_unlock_irqrestore(&fd->lock, irq);
+			return error;
+		}
 	}
 	file_ref(file);
-	displaced = fd->entries[newfd].file;
-	fd->entries[newfd].file = file;
-	fd->entries[newfd].flags = flags;
+	displaced = fd->entries[newfd].state == FILEDESC_SLOT_LIVE ?
+	    fd->entries[newfd].file : NULL;
+	slot_make_live(&fd->entries[newfd], file, flags);
 	spin_unlock_irqrestore(&fd->lock, irq);
 	poll_notify();
 	if (displaced != NULL && displaced->f_inode != NULL)
@@ -334,7 +377,7 @@ filedesc_install_pair(struct filedesc *fd, struct file *first,
 		return EINVAL;
 	irq = spin_lock_irqsave(&fd->lock);
 	for (i = 0; i < (int)fd->soft_limit; i++) {
-		if (fd->entries[i].file != NULL || fd->entries[i].reserved)
+		if (fd->entries[i].state != FILEDESC_SLOT_FREE)
 			continue;
 		if (a < 0)
 			a = i;
@@ -347,10 +390,8 @@ filedesc_install_pair(struct filedesc *fd, struct file *first,
 		spin_unlock_irqrestore(&fd->lock, irq);
 		return EMFILE;
 	}
-	fd->entries[a].file = first;
-	fd->entries[a].flags = first_flags;
-	fd->entries[b].file = second;
-	fd->entries[b].flags = second_flags;
+	slot_make_live(&fd->entries[a], first, first_flags);
+	slot_make_live(&fd->entries[b], second, second_flags);
 	result[0] = a;
 	result[1] = b;
 	spin_unlock_irqrestore(&fd->lock, irq);
@@ -384,8 +425,7 @@ filedesc_reserve_many(struct filedesc *fd, unsigned count, unsigned flags,
 	memset(reservation, 0, sizeof(*reservation));
 	irq = spin_lock_irqsave(&fd->lock);
 	for (index = 0; index < fd->soft_limit && found < count; index++)
-		if (fd->entries[index].file == NULL &&
-		    !fd->entries[index].reserved)
+		if (fd->entries[index].state == FILEDESC_SLOT_FREE)
 			reservation->slots[found++] = (int)index;
 	if (found != count) {
 		spin_unlock_irqrestore(&fd->lock, irq);
@@ -395,7 +435,8 @@ filedesc_reserve_many(struct filedesc *fd, unsigned count, unsigned flags,
 	if (reservation->generation == 0)
 		reservation->generation = ++fd->reservation_generation;
 	for (index = 0; index < count; index++)
-		fd->entries[reservation->slots[index]].reserved = 1;
+		slot_make_reserved(&fd->entries[reservation->slots[index]],
+		    reservation->generation);
 	reservation->table = fd;
 	reservation->count = count;
 	reservation->flags = flags;
@@ -420,19 +461,20 @@ filedesc_commit_reserved(struct filedesc_reservation *reservation,
 	for (index = 0; index < reservation->count; index++) {
 		int slot = reservation->slots[index];
 		if (slot < 0 || slot >= KERN_OPEN_MAX ||
-		    !fd->entries[slot].reserved || fd->entries[slot].file != NULL) {
+		    fd->entries[slot].state != FILEDESC_SLOT_RESERVED ||
+		    fd->entries[slot].reservation_id != reservation->generation) {
 			spin_unlock_irqrestore(&fd->lock, irq);
 			return EBUSY;
 		}
 	}
 	for (index = 0; index < reservation->count; index++) {
 		int slot = reservation->slots[index];
-		fd->entries[slot].file = files[index];
-		fd->entries[slot].flags = reservation->flags;
-		fd->entries[slot].reserved = 0;
+		slot_make_live(&fd->entries[slot], files[index],
+		    reservation->flags);
 		descriptors[index] = slot;
 	}
 	reservation->active = 0;
+	waitq_wake_all(&fd->reservation_waitq);
 	spin_unlock_irqrestore(&fd->lock, irq);
 	filedesc_destroy(fd);
 	poll_notify();
@@ -452,10 +494,12 @@ filedesc_abort_reserved(struct filedesc_reservation *reservation)
 	for (index = 0; index < reservation->count; index++) {
 		int slot = reservation->slots[index];
 		if (slot >= 0 && slot < KERN_OPEN_MAX &&
-		    fd->entries[slot].file == NULL)
-			fd->entries[slot].reserved = 0;
+		    fd->entries[slot].state == FILEDESC_SLOT_RESERVED &&
+		    fd->entries[slot].reservation_id == reservation->generation)
+			slot_make_free(&fd->entries[slot]);
 	}
 	reservation->active = 0;
+	waitq_wake_all(&fd->reservation_waitq);
 	spin_unlock_irqrestore(&fd->lock, irq);
 	filedesc_destroy(fd);
 	poll_notify();
@@ -497,12 +541,11 @@ filedesc_close_on_exec(struct filedesc *fd)
 		return;
 	irq = spin_lock_irqsave(&fd->lock);
 	for (descriptor = 0; descriptor < KERN_OPEN_MAX; descriptor++) {
-		if (fd->entries[descriptor].file == NULL ||
+		if (fd->entries[descriptor].state != FILEDESC_SLOT_LIVE ||
 		    (fd->entries[descriptor].flags & FILEDESC_CLOEXEC) == 0)
 			continue;
 		detached[count++] = fd->entries[descriptor].file;
-		fd->entries[descriptor].file = NULL;
-		fd->entries[descriptor].flags = 0;
+		slot_make_free(&fd->entries[descriptor]);
 	}
 	spin_unlock_irqrestore(&fd->lock, irq);
 	poll_notify();

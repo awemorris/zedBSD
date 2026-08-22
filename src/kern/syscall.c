@@ -57,6 +57,9 @@
 #include <stdlib.h>
 
 #define SYSCALL_IO_CHUNK 512U
+#define SYSCALL_SOCKET_BUFFER_MAX (64U * 1024U)
+#define SOCKET_SEND_FLAGS (MSG_DONTWAIT | MSG_NOSIGNAL)
+#define SOCKET_RECV_FLAGS (MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC | MSG_WAITALL)
 #define SYSCALL_SOCKET_OPTION_MAX 128U
 #define SYSCALL_PAGE_MASK (ZEDBSD_PAGE_SIZE - 1U)
 #define SYSCALL_EXT __attribute__((section(".hightext")))
@@ -512,7 +515,7 @@ sys_socket_call(const uintptr_t args[6])
 		socket_release(socket);
 		return -error;
 	}
-	file->f_flags |= file_flags;
+	file_status_flags_update(file, O_NONBLOCK, file_flags);
 	error = filedesc_install_from(process->fd, file, descriptor_flags, 0,
 	    &descriptor);
 	if (error != 0) {
@@ -559,8 +562,8 @@ sys_socketpair_call(const uintptr_t args[6])
 			socket_release(right_socket);
 		return -error;
 	}
-	left_file->f_flags |= file_flags;
-	right_file->f_flags |= file_flags;
+	file_status_flags_update(left_file, O_NONBLOCK, file_flags);
+	file_status_flags_update(right_file, O_NONBLOCK, file_flags);
 	error = filedesc_install_pair(process->fd, left_file, descriptor_flags,
 	    right_file, descriptor_flags, descriptors);
 	if (error == 0)
@@ -622,11 +625,11 @@ sys_connect_call(const uintptr_t args[6])
 		error = socket->family == AF_UNIX ?
 		    unix_socket_connect_path(socket, process->cwdi, process->cred,
 		    (struct sockaddr *)&address, (socklen_t)args[2],
-		    (reference.file->f_flags & O_NONBLOCK) != 0 ?
+		    (file_status_flags_get(reference.file) & O_NONBLOCK) != 0 ?
 		    SOCKET_IO_NONBLOCK : 0) :
 		    socket->ops->connect(socket, (struct sockaddr *)&address,
 		    (socklen_t)args[2],
-		    (reference.file->f_flags & O_NONBLOCK) != 0 ?
+		    (file_status_flags_get(reference.file) & O_NONBLOCK) != 0 ?
 		    SOCKET_IO_NONBLOCK : 0);
 	return socket_result(&reference, error == 0 ? 0 : -error);
 }
@@ -657,6 +660,8 @@ sys_accept_call(const uintptr_t args[6])
 	struct sockaddr_output_pin output;
 	struct socket *accepted = NULL;
 	struct file *file = NULL;
+	struct file *files[1];
+	struct filedesc_reservation reservation;
 	socklen_t length = sizeof(address);
 	int descriptor, error;
 
@@ -670,29 +675,43 @@ sys_accept_call(const uintptr_t args[6])
 	error = sockaddr_output_pin(args[1], args[2], &output);
 	if (error != 0)
 		return socket_result(&reference, -error);
+	memset(&reservation, 0, sizeof(reservation));
+	error = filedesc_reserve_many(process->fd, 1, 0, &reservation);
+	if (error == 0)
+		error = socket_file_reserve(&file);
+	if (error != 0) {
+		filedesc_abort_reserved(&reservation);
+		sockaddr_output_unpin(&output);
+		return socket_result(&reference, -error);
+	}
 	memset(&address, 0, sizeof(address));
 	error = socket->ops->accept(socket, &accepted,
 	    args[1] != 0 ? (struct sockaddr *)&address : NULL,
 	    args[1] != 0 ? &length : NULL,
-	    (reference.file->f_flags & O_NONBLOCK) != 0 ?
+		    (file_status_flags_get(reference.file) & O_NONBLOCK) != 0 ?
 	    SOCKET_IO_NONBLOCK : 0);
 	if (error != 0) {
+		(void)file_close(file);
+		filedesc_abort_reserved(&reservation);
 		sockaddr_output_unpin(&output);
 		return socket_result(&reference, -error);
 	}
 	if (accepted == NULL) {
+		(void)file_close(file);
+		filedesc_abort_reserved(&reservation);
 		sockaddr_output_unpin(&output);
 		return socket_result(&reference, -EIO);
 	}
 	socket_file_ref_put(&reference);
-	error = socket_file_create(accepted, &file);
+	error = socket_file_attach(file, accepted);
+	files[0] = file;
 	if (error == 0)
-		error = filedesc_install(process->fd, file, &descriptor);
+		error = filedesc_commit_reserved(&reservation, files, &descriptor);
 	if (error != 0) {
-		if (file != NULL)
-			(void)file_close(file);
-		else
+		filedesc_abort_reserved(&reservation);
+		if (file->f_data == NULL)
 			socket_release(accepted);
+		(void)file_close(file);
 		sockaddr_output_unpin(&output);
 		return -error;
 	}
@@ -722,6 +741,8 @@ sys_sendto_call(const uintptr_t args[6])
 	socket = reference.socket;
 	if (socket->ops == NULL || socket->ops->sendto == NULL)
 		return socket_result(&reference, -EOPNOTSUPP);
+	if (((int)args[3] & ~SOCKET_SEND_FLAGS) != 0)
+		return socket_result(&reference, -EOPNOTSUPP);
 	if ((args[4] == 0) != (args[5] == 0))
 		return socket_result(&reference, -EINVAL);
 	if (socket->type != SOCK_STREAM &&
@@ -744,20 +765,25 @@ sys_sendto_call(const uintptr_t args[6])
 		    destination, (socklen_t)args[5]);
 		return socket_result(&reference, result);
 	}
-	buffer = kern_malloc((size_t)args[2]);
-	if (buffer == NULL)
-		return socket_result(&reference, -ENOMEM);
-	error = copyin(args[1], buffer, (size_t)args[2]);
-	result = error != 0 ? -error :
-	    socket->family == AF_UNIX ?
-	    unix_socket_send_message_at(socket, process->cwdi, process->cred,
-	    buffer, (size_t)args[2],
-	    (int)socket_file_effective_flags(&reference, (int)args[3]),
-	    destination, (socklen_t)args[5], NULL, 0) :
-	    socket->ops->sendto(socket, buffer, (size_t)args[2],
-	    (int)socket_file_effective_flags(&reference, (int)args[3]), destination,
-	    (socklen_t)args[5]);
-	kern_free(buffer);
+	{
+		size_t amount = socket->type == SOCK_STREAM &&
+		    args[2] > SYSCALL_SOCKET_BUFFER_MAX ?
+		    SYSCALL_SOCKET_BUFFER_MAX : (size_t)args[2];
+		buffer = kern_malloc(amount);
+		if (buffer == NULL)
+			return socket_result(&reference, -ENOMEM);
+		error = copyin(args[1], buffer, amount);
+		result = error != 0 ? -error :
+		    socket->family == AF_UNIX ?
+		    unix_socket_send_message_at(socket, process->cwdi,
+		    process->cred, buffer, amount,
+		    (int)socket_file_effective_flags(&reference, (int)args[3]),
+		    destination, (socklen_t)args[5], NULL, 0) :
+		    socket->ops->sendto(socket, buffer, amount,
+		    (int)socket_file_effective_flags(&reference, (int)args[3]),
+		    destination, (socklen_t)args[5]);
+		kern_free(buffer);
+	}
 	return socket_result(&reference, result);
 }
 
@@ -772,6 +798,7 @@ sys_recvfrom_call(const uintptr_t args[6])
 	socklen_t length = sizeof(address);
 	size_t capacity;
 	void *buffer;
+	uint8_t empty = 0;
 	ssize_t result;
 	int error;
 
@@ -780,11 +807,16 @@ sys_recvfrom_call(const uintptr_t args[6])
 	socket = reference.socket;
 	if (socket->ops == NULL || socket->ops->recvfrom == NULL)
 		return socket_result(&reference, -EOPNOTSUPP);
+	if (((int)args[3] & ~SOCKET_RECV_FLAGS) != 0)
+		return socket_result(&reference, -EOPNOTSUPP);
 	if ((args[4] == 0) != (args[5] == 0))
 		return socket_result(&reference, -EINVAL);
-	if (args[2] == 0)
+	/* A zero-length stream receive is a successful no-op. */
+	if (socket->type == SOCK_STREAM && args[2] == 0)
 		return socket_result(&reference, 0);
-	capacity = socket->type == SOCK_STREAM ? (size_t)args[2] :
+	capacity = socket->type == SOCK_STREAM ?
+	    (args[2] > SYSCALL_SOCKET_BUFFER_MAX ? SYSCALL_SOCKET_BUFFER_MAX :
+	    (size_t)args[2]) :
 	    args[2] > PACKET_BUF_STORAGE_SIZE ? PACKET_BUF_STORAGE_SIZE :
 	    (size_t)args[2];
 	error = uaccess_pin(args[1], capacity, PROT_WRITE, &data_pin);
@@ -795,8 +827,8 @@ sys_recvfrom_call(const uintptr_t args[6])
 		uaccess_unpin(&data_pin);
 		return socket_result(&reference, -error);
 	}
-	buffer = kern_malloc(capacity);
-	if (buffer == NULL) {
+	buffer = capacity != 0 ? kern_malloc(capacity) : &empty;
+	if (capacity != 0 && buffer == NULL) {
 		sockaddr_output_unpin(&output);
 		uaccess_unpin(&data_pin);
 		return socket_result(&reference, -ENOMEM);
@@ -807,13 +839,16 @@ sys_recvfrom_call(const uintptr_t args[6])
 	    args[4] != 0 ? (struct sockaddr *)&address : NULL,
 	    args[4] != 0 ? &length : NULL);
 	if (result >= 0) {
-		error = copyout_pinned(&data_pin, 0, buffer, (size_t)result);
+		size_t copied = (size_t)result < capacity ?
+		    (size_t)result : capacity;
+		error = copyout_pinned(&data_pin, 0, buffer, copied);
 		if (error == 0)
 			error = copy_sockaddr_out_pinned(&output, &address, length);
 		if (error != 0)
 			result = -error;
 	}
-	kern_free(buffer);
+	if (capacity != 0)
+		kern_free(buffer);
 	sockaddr_output_unpin(&output);
 	uaccess_unpin(&data_pin);
 	return socket_result(&reference, result);
@@ -847,11 +882,16 @@ sys_sendmsg_call(const uintptr_t args[6])
 	    (request.name_length != 0 && request.name == 0) ||
 	    (request.descriptor_count != 0 && request.descriptors == 0))
 		return -EINVAL;
+	if ((request.flags & ~SOCKET_SEND_FLAGS) != 0)
+		return -EOPNOTSUPP;
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
 	if (reference.socket->type != SOCK_STREAM &&
 	    request.data_length > PACKET_BUF_STORAGE_SIZE)
 		return socket_result(&reference, -EMSGSIZE);
+	if (reference.socket->type == SOCK_STREAM &&
+	    request.data_length > SYSCALL_SOCKET_BUFFER_MAX)
+		request.data_length = SYSCALL_SOCKET_BUFFER_MAX;
 	if (request.name_length != 0) {
 		error = copy_sockaddr_in((uintptr_t)request.name,
 		    request.name_length, &address);
@@ -884,12 +924,27 @@ sys_sendmsg_call(const uintptr_t args[6])
 			}
 		}
 	}
-	result = unix_socket_send_message_at(reference.socket,
-	    process->cwdi, process->cred,
-	    request.data_length != 0 ? buffer : "",
-	    (size_t)request.data_length,
-	    (int)socket_file_effective_flags(&reference, (int)request.flags),
-	    destination, request.name_length, files, count);
+	if (reference.socket->family == AF_UNIX) {
+		result = unix_socket_send_message_at(reference.socket,
+		    process->cwdi, process->cred,
+		    request.data_length != 0 ? buffer : "",
+		    (size_t)request.data_length,
+		    (int)socket_file_effective_flags(&reference,
+		    (int)request.flags), destination, request.name_length, files,
+		    count);
+	} else if (count != 0) {
+		error = EOPNOTSUPP;
+		goto fail;
+	} else if (reference.socket->ops == NULL ||
+	    reference.socket->ops->sendto == NULL) {
+		result = -EOPNOTSUPP;
+	} else {
+		result = reference.socket->ops->sendto(reference.socket,
+		    request.data_length != 0 ? buffer : "",
+		    (size_t)request.data_length,
+		    (int)socket_file_effective_flags(&reference,
+		    (int)request.flags), destination, request.name_length);
+	}
 	kern_free(buffer);
 	return socket_result(&reference, result);
 fail:
@@ -910,6 +965,7 @@ sys_recvmsg_call(const uintptr_t args[6])
 	struct filedesc_reservation reservation;
 	int descriptors[ZEDBSD_MSG_FD_MAX];
 	void *buffer = NULL;
+	size_t buffer_capacity;
 	socklen_t name_length;
 	unsigned file_count, truncated = 0, index;
 	ssize_t result;
@@ -929,23 +985,101 @@ sys_recvmsg_call(const uintptr_t args[6])
 	    (request.name_capacity != 0 && request.name == 0) ||
 	    (request.descriptor_capacity != 0 && request.descriptors == 0))
 		return -EINVAL;
+	if ((request.flags & ~(SOCKET_RECV_FLAGS | MSG_CMSG_CLOEXEC)) != 0)
+		return -EOPNOTSUPP;
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
+	buffer_capacity = (size_t)request.data_capacity;
+	if (reference.socket->type == SOCK_STREAM &&
+	    buffer_capacity > SYSCALL_SOCKET_BUFFER_MAX)
+		buffer_capacity = SYSCALL_SOCKET_BUFFER_MAX;
 	if (reference.socket->type != SOCK_STREAM &&
-	    request.data_capacity > PACKET_BUF_STORAGE_SIZE)
-		return socket_result(&reference, -EMSGSIZE);
-	if (request.data_capacity != 0) {
-		buffer = kern_malloc((size_t)request.data_capacity);
+	    buffer_capacity > PACKET_BUF_STORAGE_SIZE)
+		buffer_capacity = PACKET_BUF_STORAGE_SIZE;
+	if (reference.socket->type == SOCK_STREAM && buffer_capacity == 0) {
+		request.data_length = 0;
+		request.name_length = 0;
+		request.descriptor_count = 0;
+		request.output_flags = 0;
+		error = copyout(&request, args[1], sizeof(request));
+		return socket_result(&reference, error != 0 ? -error : 0);
+	}
+	if (buffer_capacity != 0) {
+		buffer = kern_malloc(buffer_capacity);
 		if (buffer == NULL)
 			return socket_result(&reference, -ENOMEM);
 	}
 	name_length = request.name_capacity;
+	if (reference.socket->family != AF_UNIX) {
+		ssize_t wire_result = 0;
+		size_t copied;
+		int receive_flags, wait_all;
+		if (reference.socket->ops == NULL ||
+		    reference.socket->ops->recvfrom == NULL) {
+			kern_free(buffer);
+			return socket_result(&reference, -EOPNOTSUPP);
+		}
+		receive_flags = (int)socket_file_effective_flags(&reference,
+		    (int)request.flags);
+		/* Ancillary descriptor flags are meaningful only to AF_UNIX. */
+		receive_flags &= ~MSG_CMSG_CLOEXEC;
+		wait_all = reference.socket->type == SOCK_STREAM &&
+		    (receive_flags & MSG_WAITALL) != 0 &&
+		    (receive_flags & MSG_PEEK) == 0;
+		receive_flags &= ~MSG_WAITALL;
+		if (reference.socket->type != SOCK_STREAM)
+			receive_flags |= MSG_TRUNC;
+		memset(&address, 0, sizeof(address));
+		do {
+			ssize_t part = reference.socket->ops->recvfrom(
+			    reference.socket, buffer_capacity != 0 ?
+			    (uint8_t *)buffer + (size_t)wire_result : (uint8_t *)"",
+			    buffer_capacity - (size_t)wire_result, receive_flags,
+			    request.name_capacity != 0 ?
+			    (struct sockaddr *)&address : NULL,
+			    request.name_capacity != 0 ? &name_length : NULL);
+			if (part < 0) {
+				if (wire_result == 0)
+					wire_result = part;
+				break;
+			}
+			if (part == 0)
+				break;
+			wire_result += part;
+		} while (wait_all && (size_t)wire_result < buffer_capacity);
+		if (wire_result < 0) {
+			kern_free(buffer);
+			return socket_result(&reference, wire_result);
+		}
+		copied = (size_t)wire_result < buffer_capacity ?
+		    (size_t)wire_result : buffer_capacity;
+		error = copied != 0 ?
+		    copyout(buffer, (uintptr_t)request.data, copied) : 0;
+		if (error == 0 && request.name_capacity != 0) {
+			socklen_t amount = request.name_capacity < name_length ?
+			    request.name_capacity : name_length;
+			if (amount != 0)
+				error = copyout(&address, (uintptr_t)request.name,
+				    amount);
+		}
+		request.data_length =
+		    ((request.flags & MSG_TRUNC) != 0) ?
+		    (uint64_t)wire_result : (uint64_t)copied;
+		request.name_length = name_length;
+		request.descriptor_count = 0;
+		request.output_flags = (size_t)wire_result > copied ? MSG_TRUNC : 0;
+		if (error == 0)
+			error = copyout(&request, args[1], sizeof(request));
+		kern_free(buffer);
+		return socket_result(&reference, error != 0 ? -error :
+		    (ssize_t)request.data_length);
+	}
 	memset(&transaction, 0, sizeof(transaction));
 	memset(&reservation, 0, sizeof(reservation));
 	result = unix_socket_receive_begin(reference.socket,
-	    request.data_capacity != 0 ? buffer : "",
-	    (size_t)request.data_capacity,
-	    (int)socket_file_effective_flags(&reference, (int)request.flags),
+	    buffer_capacity != 0 ? buffer : "", buffer_capacity,
+	    (int)socket_file_effective_flags(&reference,
+	    (int)request.flags & ~MSG_CMSG_CLOEXEC),
 	    request.name_capacity != 0 ? (struct sockaddr *)&address : NULL,
 	    request.name_capacity != 0 ? &name_length : NULL,
 	    request.descriptor_capacity, &transaction);
@@ -967,8 +1101,9 @@ sys_recvmsg_call(const uintptr_t args[6])
 		for (index = 0; index < file_count; index++)
 			descriptors[index] = reservation.slots[index];
 	}
-	if (result != 0)
-		error = copyout(buffer, (uintptr_t)request.data, (size_t)result);
+	if (transaction.copied != 0)
+		error = copyout(buffer, (uintptr_t)request.data,
+		    transaction.copied);
 	else
 		error = 0;
 	if (error == 0 && request.name_capacity != 0) {
@@ -983,7 +1118,8 @@ sys_recvmsg_call(const uintptr_t args[6])
 	request.data_length = (uint64_t)result;
 	request.name_length = name_length;
 	request.descriptor_count = file_count;
-	request.output_flags = truncated ? MSG_CTRUNC : 0;
+	request.output_flags = (truncated ? MSG_CTRUNC : 0) |
+	    (transaction.data_truncated ? MSG_TRUNC : 0);
 	if (error == 0)
 		error = copyout(&request, args[1], sizeof(request));
 	if (error != 0) {
@@ -1147,6 +1283,8 @@ static intptr_t sys_open_call(const uintptr_t args[6], int at)
 	struct process *process = current_process();
 	struct cwdinfo temporary, *context;
 	struct file *file, *held;
+	struct file *files[1];
+	struct filedesc_reservation reservation;
 	char path[PATH_MAX];
 	uintptr_t path_address = at ? args[1] : args[0];
 	int flags = (int)(at ? args[2] : args[1]);
@@ -1154,6 +1292,7 @@ static intptr_t sys_open_call(const uintptr_t args[6], int at)
 	int descriptor, error;
 	if (process == NULL || process->fd == NULL || process->cwdi == NULL)
 		return -EINVAL;
+	memset(&reservation, 0, sizeof(reservation));
 	error = copyinstr(path_address, path, sizeof(path), NULL);
 	held = NULL;
 	if (error == 0 && path[0] == '/')
@@ -1162,15 +1301,22 @@ static intptr_t sys_open_call(const uintptr_t args[6], int at)
 		error = syscall_context_at(process, at ? (int)args[0] : AT_FDCWD,
 		    &temporary, &context, &held);
 	if (error == 0)
+		error = filedesc_reserve_many(process->fd, 1,
+		    (flags & O_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0,
+		    &reservation);
+	if (error == 0)
 		error = file_openat_cred(context, process->cred, path,
 		    flags & ~O_CLOEXEC, (mode & 07777U) & ~process->umask,
 		    &file);
 	if (held != NULL) (void)file_close(held);
-	if (error != 0) return -error;
-	error = filedesc_install_from(process->fd, file,
-	    (flags & O_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0,
-	    0, &descriptor);
 	if (error != 0) {
+		filedesc_abort_reserved(&reservation);
+		return -error;
+	}
+	files[0] = file;
+	error = filedesc_commit_reserved(&reservation, files, &descriptor);
+	if (error != 0) {
+		filedesc_abort_reserved(&reservation);
 		(void)file_close(file);
 		return -error;
 	}
@@ -1189,6 +1335,7 @@ static SYSCALL_EXT intptr_t sys_read_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
 	struct file *file;
+	struct file_io io;
 	struct uaccess_pin pin;
 	uint8_t buffer[SYSCALL_IO_CHUNK];
 	size_t done = 0, length = (size_t)args[2];
@@ -1202,9 +1349,15 @@ static SYSCALL_EXT intptr_t sys_read_call(const uintptr_t args[6])
 		(void)file_close(file);
 		return -error;
 	}
+	error = file_io_begin(file, FILE_IO_READ, 0, 0, &io);
+	if (error != 0) {
+		uaccess_unpin(&pin);
+		(void)file_close(file);
+		return -error;
+	}
 	while (done < length) {
 		size_t chunk = length - done > sizeof(buffer) ? sizeof(buffer) : length - done;
-		ssize_t count = file_read(file, buffer, chunk);
+		ssize_t count = file_io_transfer(&io, buffer, chunk);
 		if (count < 0) {
 			result = done != 0 ? (intptr_t)done : count;
 			goto out;
@@ -1217,9 +1370,17 @@ static SYSCALL_EXT intptr_t sys_read_call(const uintptr_t args[6])
 		}
 		done += (size_t)count;
 		if ((size_t)count < chunk) break;
+		/* A stream/device read completes after the first successful backend
+		 * transfer.  Re-entering it merely because the syscall bounce buffer
+		 * was filled can turn an available short read into a second block. */
+		if (file->f_inode == NULL ||
+		    (file->f_inode->i_type != INODE_REG &&
+		     file->f_inode->i_type != INODE_BLOCK))
+			break;
 	}
 	result = (intptr_t)done;
 out:
+	file_io_end(&io);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -1229,6 +1390,7 @@ static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
 	struct file *file;
+	struct file_io io;
 	struct uaccess_pin pin;
 	uint8_t buffer[SYSCALL_IO_CHUNK];
 	size_t done = 0, length = (size_t)args[2];
@@ -1242,6 +1404,12 @@ static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6])
 		(void)file_close(file);
 		return -error;
 	}
+	error = file_io_begin(file, FILE_IO_WRITE, 0, 0, &io);
+	if (error != 0) {
+		uaccess_unpin(&pin);
+		(void)file_close(file);
+		return -error;
+	}
 	while (done < length) {
 		size_t chunk = length - done > sizeof(buffer) ? sizeof(buffer) : length - done;
 		ssize_t count;
@@ -1250,7 +1418,7 @@ static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6])
 			result = done != 0 ? (intptr_t)done : -error;
 			goto out;
 		}
-		count = file_write(file, buffer, chunk);
+		count = file_io_transfer(&io, buffer, chunk);
 		if (count < 0) {
 			result = done != 0 ? (intptr_t)done : count;
 			goto out;
@@ -1260,6 +1428,7 @@ static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6])
 	}
 	result = (intptr_t)done;
 out:
+	file_io_end(&io);
 	if (result > 0 && file->f_inode != NULL)
 		(void)vfs_clear_setid_on_write(file->f_inode, process->cred);
 	uaccess_unpin(&pin);
@@ -1424,12 +1593,12 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 		if (file == NULL)
 			return -EBADF;
 		if (file->f_inode == NULL || file->f_inode->i_type != INODE_REG ||
-		    (file->f_flags & O_ACCMODE) == O_WRONLY) {
+		    (file_status_flags_get(file) & O_ACCMODE) == O_WRONLY) {
 			(void)file_close(file);
 			return -EACCES;
 		}
 		if (shared && (args[2] & PROT_WRITE) != 0 &&
-		    ((file->f_flags & O_ACCMODE) == O_RDONLY ||
+		    ((file_status_flags_get(file) & O_ACCMODE) == O_RDONLY ||
 		     file->f_ops == NULL || file->f_ops->pwrite == NULL)) {
 			(void)file_close(file);
 			return -EACCES;
@@ -1869,6 +2038,7 @@ sys_positional_call(const uintptr_t args[6], int writing)
 {
 	struct process *process = current_process();
 	struct file *file;
+	struct file_io io;
 	struct uaccess_pin pin;
 	uint8_t buffer[SYSCALL_IO_CHUNK];
 	size_t done = 0, length = (size_t)args[2];
@@ -1888,23 +2058,24 @@ sys_positional_call(const uintptr_t args[6], int writing)
 		(void)file_close(file);
 		return -error;
 	}
+	error = file_io_begin(file, writing ? FILE_IO_PWRITE : FILE_IO_PREAD,
+	    offset, 0, &io);
+	if (error != 0) {
+		uaccess_unpin(&pin);
+		(void)file_close(file);
+		return -error;
+	}
 	while (done < length) {
 		size_t chunk = length - done > sizeof(buffer) ?
 		    sizeof(buffer) : length - done;
 		ssize_t count;
-		off_t current;
-		error = off_add_size(offset, done, &current);
-		if (error != 0) {
-			result = done != 0 ? (intptr_t)done : -error;
-			goto out;
-		}
 		if (writing) {
 			error = copyin_pinned(&pin, done, buffer, chunk);
 			if (error != 0)
 				goto copy_error;
-			count = file_pwrite(file, buffer, chunk, current);
+			count = file_io_transfer(&io, buffer, chunk);
 		} else {
-			count = file_pread(file, buffer, chunk, current);
+			count = file_io_transfer(&io, buffer, chunk);
 		}
 		if (count < 0) {
 			result = done != 0 ? (intptr_t)done : count;
@@ -1926,6 +2097,7 @@ sys_positional_call(const uintptr_t args[6], int writing)
 copy_error:
 	result = done != 0 ? (intptr_t)done : -error;
 out:
+	file_io_end(&io);
 	if (writing && result > 0 && file->f_inode != NULL)
 		(void)vfs_clear_setid_on_write(file->f_inode, process->cred);
 	uaccess_unpin(&pin);
@@ -1944,9 +2116,16 @@ sys_vector_call(const uintptr_t args[6], int writing)
 {
 	struct syscall_iovec vectors[16];
 	struct uaccess_pin pins[16];
+	struct process *process = current_process();
+	struct file *file = NULL;
+	struct file_io io;
+	uint8_t buffer[SYSCALL_IO_CHUNK];
 	int count = (int)args[2], i, pinned = 0;
 	intptr_t total = 0;
+	int io_started = 0;
 	int error;
+	if (process == NULL || process->fd == NULL)
+		return -EBADF;
 	if (count < 0 || count > 16)
 		return -EINVAL;
 	if (count == 0)
@@ -1969,24 +2148,82 @@ sys_vector_call(const uintptr_t args[6], int writing)
 		pinned++;
 		total += (intptr_t)vectors[i].length;
 	}
+	file = filedesc_get_ref(process->fd, (int)args[0]);
+	if (file == NULL) {
+		error = EBADF;
+		goto fail;
+	}
+	error = file_io_begin(file, writing ? FILE_IO_WRITE : FILE_IO_READ,
+	    0, 0, &io);
+	if (error != 0)
+		goto fail;
+	io_started = 1;
+	/* POSIX requires a writev no larger than PIPE_BUF to be indivisible.
+	 * Coalesce it before the one and only pipe backend call. */
+	if (writing && pipe_file_is_pipe(file) &&
+	    (uint64_t)total <= KERN_PIPE_BUF) {
+		size_t amount = 0;
+		for (i = 0; i < count; i++) {
+			size_t length = (size_t)vectors[i].length;
+			error = copyin_pinned(&pins[i], 0, buffer + amount, length);
+			if (error != 0) {
+				total = -error;
+				goto out;
+			}
+			amount += length;
+		}
+		total = file_io_transfer(&io, buffer, amount);
+		goto out;
+	}
 	total = 0;
 	for (i = 0; i < count; i++) {
-		uintptr_t scalar[6] = { args[0], (uintptr_t)vectors[i].base,
-		    (uintptr_t)vectors[i].length, 0, 0, 0 };
-		intptr_t result;
-		result = writing ? sys_write_call(scalar) : sys_read_call(scalar);
-		if (result < 0) {
-			total = total != 0 ? total : result;
-			goto out;
+		size_t done = 0, length = (size_t)vectors[i].length;
+		while (done < length) {
+			size_t chunk = length - done > sizeof(buffer) ?
+			    sizeof(buffer) : length - done;
+			ssize_t result;
+			if (writing) {
+				error = copyin_pinned(&pins[i], done, buffer, chunk);
+				if (error != 0) {
+					total = total != 0 ? total : -error;
+					goto out;
+				}
+			}
+			result = file_io_transfer(&io, buffer, chunk);
+			if (result < 0) {
+				total = total != 0 ? total : result;
+				goto out;
+			}
+			if (result == 0)
+				goto out;
+			if (!writing) {
+				error = copyout_pinned(&pins[i], done, buffer,
+				    (size_t)result);
+				if (error != 0) {
+					total = total != 0 ? total : -error;
+					goto out;
+				}
+			}
+			done += (size_t)result;
+			total += result;
+			if ((size_t)result < chunk)
+				goto out;
+			if (!writing && (file->f_inode == NULL ||
+			    (file->f_inode->i_type != INODE_REG &&
+			     file->f_inode->i_type != INODE_BLOCK)))
+				goto out;
 		}
-		total += result;
-		if ((uintptr_t)result < (uintptr_t)vectors[i].length)
-			break;
 	}
 	goto out;
 fail:
 	total = -error;
 out:
+	if (io_started)
+		file_io_end(&io);
+	if (writing && total > 0 && file != NULL && file->f_inode != NULL)
+		(void)vfs_clear_setid_on_write(file->f_inode, process->cred);
+	if (file != NULL)
+		(void)file_close(file);
 	while (pinned != 0)
 		uaccess_unpin(&pins[--pinned]);
 	return total;
@@ -2064,7 +2301,7 @@ sys_truncate_call(const uintptr_t args[6], int by_fd)
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
 			return -EBADF;
-		if ((file->f_flags & O_ACCMODE) == O_RDONLY) {
+		if ((file_status_flags_get(file) & O_ACCMODE) == O_RDONLY) {
 			(void)file_close(file);
 			return -EBADF;
 		}
@@ -3541,7 +3778,7 @@ sys_fcntl_call(const uintptr_t args[6])
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
 			return -EBADF;
-		result = file->f_flags;
+		result = file_status_flags_get(file);
 		(void)file_close(file);
 		return result;
 	case F_SETFL:
@@ -3552,8 +3789,8 @@ sys_fcntl_call(const uintptr_t args[6])
 		 * as the flags F_SETFL may change.  Applications conventionally
 		 * pass that value back after toggling O_NONBLOCK or O_APPEND; ignore
 		 * the immutable bits rather than rejecting the standard idiom. */
-		file->f_flags = (file->f_flags & ~(O_APPEND | O_NONBLOCK)) |
-		    ((int)args[2] & (O_APPEND | O_NONBLOCK));
+		file_status_flags_update(file, O_APPEND | O_NONBLOCK,
+		    (int)args[2]);
 		(void)file_close(file);
 		return 0;
 	case F_GETLK:

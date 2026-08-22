@@ -10,16 +10,25 @@
 
 #include <kern/atomic.h>
 #include <kern/lock.h>
+#include <kern/waitq.h>
 
 #define KERN_OPEN_MAX 32
 #define FILEDESC_CLOEXEC 0x00000001U
 
 struct file;
 struct process;
+
+enum filedesc_slot_state {
+	FILEDESC_SLOT_FREE,
+	FILEDESC_SLOT_RESERVED,
+	FILEDESC_SLOT_LIVE,
+};
+
 struct filedesc_entry {
 	struct file *file;
 	unsigned flags;
-	unsigned reserved;
+	enum filedesc_slot_state state;
+	uint64_t reservation_id;
 };
 
 struct filedesc {
@@ -28,6 +37,7 @@ struct filedesc {
 	struct process *owner;
 	unsigned soft_limit;
 	uint64_t reservation_generation;
+	struct wait_queue reservation_waitq;
 	struct filedesc_entry entries[KERN_OPEN_MAX];
 };
 

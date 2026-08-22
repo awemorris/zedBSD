@@ -350,7 +350,7 @@ int main(void)
 	};
 	struct file shared_file = {
 		.f_data = shared_data, .f_inode = &shared_inode,
-		.f_ops = &shared_file_ops, .f_flags = O_RDWR
+		.f_ops = &shared_file_ops, .f_flags = { O_RDWR }
 	};
 
 	assert(mtx_init(&pread_checkpoint_lock, mtx_plain) == thrd_success);

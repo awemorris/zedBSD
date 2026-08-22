@@ -185,7 +185,7 @@ recvmsg(int descriptor, struct msghdr *message, int flags)
 	if (result >= 0) {
 		message->msg_namelen = request.name_length;
 		message->msg_flags = (int)request.output_flags;
-		copied = (size_t)result;
+		copied = (size_t)result < total ? (size_t)result : total;
 		for (i = 0; i < message->msg_iovlen && copied != 0; i++) {
 			size_t part = message->msg_iov[i].iov_len < copied ?
 			    message->msg_iov[i].iov_len : copied;

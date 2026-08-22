@@ -861,7 +861,7 @@ fat_write_file(struct file *file, const void *buffer, size_t length)
 	off_t offset;
 	ssize_t count;
 	mutex_lock(&state->lock);
-	offset = (file->f_flags & O_APPEND) != 0 ?
+	offset = (file_status_flags_get(file) & O_APPEND) != 0 ?
 		file->f_inode->i_size : file->f_offset;
 	count = fat_pwrite_file_unlocked(file, buffer, length, offset);
 	if (count > 0)
@@ -927,7 +927,7 @@ fat_close_file(struct file *file)
 	if (mount_state != NULL)
 		mutex_lock(&mount_state->lock);
 	if (state != NULL) {
-		if ((file->f_flags & O_ACCMODE) != O_RDONLY &&
+		if ((file_status_flags_get(file) & O_ACCMODE) != O_RDONLY &&
 		    file->f_inode != NULL &&
 		    (file->f_inode->i_flags & INODE_DEAD) == 0) {
 			error = fs_error(bootfs_file_flush_result(&state->legacy));

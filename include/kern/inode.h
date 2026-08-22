@@ -128,6 +128,8 @@ struct inode {
 	void (*i_special_destroy)(void *);
 	void *i_record_locks;
 	refcount_t i_refs;
+	/* Serializes one externally visible regular-file I/O operation. */
+	struct mutex i_io_lock;
 	struct mutex i_lock;
 	nlink_t i_linkcount;
 	mode_t i_mode;

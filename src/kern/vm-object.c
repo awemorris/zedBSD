@@ -95,7 +95,7 @@ vm_object_get_shared(struct file *file, struct vm_object **result)
 	bool enabled;
 	if (file == NULL || inode == NULL || result == NULL)
 		return EINVAL;
-	writable = (file->f_flags & O_ACCMODE) != O_RDONLY &&
+	writable = (file_status_flags_get(file) & O_ACCMODE) != O_RDONLY &&
 	    file->f_ops != NULL && file->f_ops->pwrite != NULL;
 	enabled = registry_lock();
 	for (object = shared_objects; object != NULL; object = object->next) {

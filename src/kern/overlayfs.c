@@ -1607,7 +1607,7 @@ overlay_regular_open(struct file *file)
 	int error, real_flags;
 	if (inode_info == NULL)
 		return EIO;
-	if ((file->f_flags & O_ACCMODE) != O_RDONLY) {
+	if ((file_status_flags_get(file) & O_ACCMODE) != O_RDONLY) {
 		error = overlay_copy_up_regular(file->f_inode);
 		if (error != 0)
 			return error;
@@ -1616,7 +1616,7 @@ overlay_regular_open(struct file *file)
 	info = kern_malloc(sizeof(*info));
 	if (info == NULL)
 		return ENOMEM;
-	real_flags = file->f_flags & ~(O_CREAT | O_EXCL | O_TRUNC);
+	real_flags = file_status_flags_get(file) & ~(O_CREAT | O_EXCL | O_TRUNC);
 	error = file_open_resolved(visible, real_flags, &info->real);
 	if (error != 0) {
 		kern_free(info);
@@ -1659,7 +1659,7 @@ overlay_pwrite(struct file *file, const void *buffer, size_t size, off_t offset)
 static OVERLAY_HIGH ssize_t
 overlay_write(struct file *file, const void *buffer, size_t size)
 {
-	off_t offset = (file->f_flags & O_APPEND) != 0 ?
+	off_t offset = (file_status_flags_get(file) & O_APPEND) != 0 ?
 		file->f_inode->i_size : file->f_offset;
 	ssize_t count = overlay_pwrite(file, buffer, size, offset);
 	if (count > 0)

@@ -103,6 +103,7 @@ struct unix_recv_transaction {
 	size_t copied;
 	unsigned datagram;
 	unsigned file_count;
+	unsigned data_truncated;
 	unsigned control_truncated;
 	unsigned active;
 	struct file *files[ZEDBSD_MSG_FD_MAX];
@@ -126,11 +127,15 @@ int socket_tryref(struct socket *socket);
 void socket_close_endpoint(struct socket *socket);
 void socket_release(struct socket *socket);
 int socket_enqueue_packet(struct socket *socket, struct packet_buf *packet);
+int socket_enqueue_packet_wait(struct socket *, struct packet_buf *, int,
+			       uint64_t);
 int socket_requeue_packet_front(struct socket *socket,
 				struct packet_buf *packet);
 int socket_dequeue_packet(struct socket *socket, int flags,
 			  struct packet_buf **result);
 int socket_file_create(struct socket *socket, struct file **result);
+int socket_file_reserve(struct file **result);
+int socket_file_attach(struct file *file, struct socket *socket);
 struct socket *socket_from_file(struct file *file);
 int socket_file_ref_get(struct filedesc *, int, struct socket_file_ref *);
 void socket_file_ref_put(struct socket_file_ref *);

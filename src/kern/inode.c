@@ -161,6 +161,7 @@ inode_alloc(struct mount *mountp)
 	inode->i_dirseq = 1;
 	/* One cache reference and one reference returned to the caller. */
 	refcount_init(&inode->i_refs, 2);
+	(void)mutex_init(&inode->i_io_lock, LOCK_RANK_INODE_IO, "inode I/O");
 	(void)mutex_init(&inode->i_lock, LOCK_RANK_INODE, "inode");
 	irq = spin_lock_irqsave(&inode_cache_lock);
 	inode_cache[slot] = inode;
@@ -740,10 +741,12 @@ int inode_truncate(struct inode *i, off_t size)
 	if (i == NULL || size < 0) return EINVAL;
 	if (i->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) return EBUSY;
 	if (readonly(i)) return EROFS;
+	mutex_lock(&i->i_io_lock);
 	error = i->i_op != NULL && i->i_op->truncate != NULL ?
 		i->i_op->truncate(i, size) : EOPNOTSUPP;
 	if (error == 0)
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	mutex_unlock(&i->i_io_lock);
 	return error;
 }
 
