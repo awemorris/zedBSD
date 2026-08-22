@@ -68,10 +68,11 @@ USERLAND_$(1)_MENU := $(8)
 USERLAND_$(1)_PACKAGE := $(9)
 USERLAND_$(1)_REQUIRE := $(10)
 endef
-USERLAND_PACKAGE_MAKEFILES := $(sort \
+# userland/noct is an upstream source submodule, not a zedBSD package tree.
+USERLAND_PACKAGE_MAKEFILES := $(filter-out userland/noct/%, $(sort \
 	$(wildcard userland/*/Makefile) \
 	$(wildcard userland/*/*/Makefile) \
-	$(wildcard userland/*/*/*/Makefile))
+	$(wildcard userland/*/*/*/Makefile)))
 include $(USERLAND_PACKAGE_MAKEFILES)
 ZEDBSD_ALL_USER_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
 	$(if $(filter y,$(USERLAND_$(program)_SELECTABLE)),$(program)))

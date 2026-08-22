@@ -1,6 +1,7 @@
 # Noct userland build for zedBSD.
 
-NOCT_ROOT ?= build/sources/noct
+NOCT_ROOT ?= userland/noct
+NOCT_SOURCE_SENTINEL ?= $(NOCT_ROOT)/CMakeLists.txt
 HOLORIS_NOCT := $(NOCT_ROOT)/apps/holoris/holoris.noct
 NOCT_CC ?= $(CC)
 NOCT_NM ?= nm
@@ -46,8 +47,8 @@ NOCT_SOURCE_REL := \
 	src/api/jisx0208.c
 
 NOCT_SOURCES := $(addprefix $(NOCT_ROOT)/,$(NOCT_SOURCE_REL))
-$(NOCT_SOURCES): | $(NOCT_SOURCE_STAMP)
-	@test -e $@ || { echo "Noct source is missing after clone: $@" >&2; exit 1; }
+$(NOCT_SOURCES): | $(NOCT_SOURCE_SENTINEL)
+	@test -e $@ || { echo "Noct submodule source is missing: $@" >&2; exit 1; }
 
 NOCT_CORE_SOURCES := $(filter $(NOCT_ROOT)/src/core/%,$(NOCT_SOURCES))
 NOCT_REPL_SOURCES := $(filter $(NOCT_ROOT)/src/repl/%,$(NOCT_SOURCES))
