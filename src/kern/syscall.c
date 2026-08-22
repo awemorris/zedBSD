@@ -488,15 +488,22 @@ sys_socket_call(const uintptr_t args[6])
 	struct process *process = current_process();
 	struct socket *socket;
 	struct file *file = NULL;
+	int supplied_type = (int)args[1];
+	int type = supplied_type & ~(SOCK_NONBLOCK | SOCK_CLOEXEC);
+	int file_flags = (supplied_type & SOCK_NONBLOCK) != 0 ? O_NONBLOCK : 0;
+	unsigned descriptor_flags = (supplied_type & SOCK_CLOEXEC) != 0 ?
+	    FILEDESC_CLOEXEC : 0;
 	int descriptor, error;
 
 	if (process == NULL || process->fd == NULL || args[3] != 0 ||
 	    args[4] != 0 || args[5] != 0)
 		return -EINVAL;
-	if (((int)args[0] == AF_PACKET || (int)args[1] == SOCK_RAW) &&
+	if (type != SOCK_RAW && type != SOCK_DGRAM && type != SOCK_STREAM)
+		return -EINVAL;
+	if (((int)args[0] == AF_PACKET || type == SOCK_RAW) &&
 	    !cred_is_superuser(process->cred))
 		return -EPERM;
-	error = socket_create((int)args[0], (int)args[1], (int)args[2],
+	error = socket_create((int)args[0], type, (int)args[2],
 	    &socket);
 	if (error != 0)
 		return -error;
@@ -505,7 +512,9 @@ sys_socket_call(const uintptr_t args[6])
 		socket_release(socket);
 		return -error;
 	}
-	error = filedesc_install(process->fd, file, &descriptor);
+	file->f_flags |= file_flags;
+	error = filedesc_install_from(process->fd, file, descriptor_flags, 0,
+	    &descriptor);
 	if (error != 0) {
 		(void)file_close(file);
 		return -error;
@@ -715,7 +724,8 @@ sys_sendto_call(const uintptr_t args[6])
 		return socket_result(&reference, -EOPNOTSUPP);
 	if ((args[4] == 0) != (args[5] == 0))
 		return socket_result(&reference, -EINVAL);
-	if (args[2] > PACKET_BUF_STORAGE_SIZE)
+	if (socket->type != SOCK_STREAM &&
+	    args[2] > PACKET_BUF_STORAGE_SIZE)
 		return socket_result(&reference, -EMSGSIZE);
 	if (args[4] != 0) {
 		error = copy_sockaddr_in(args[4], (socklen_t)args[5], &address);
@@ -774,8 +784,9 @@ sys_recvfrom_call(const uintptr_t args[6])
 		return socket_result(&reference, -EINVAL);
 	if (args[2] == 0)
 		return socket_result(&reference, 0);
-	capacity = args[2] > PACKET_BUF_STORAGE_SIZE ?
-		PACKET_BUF_STORAGE_SIZE : (size_t)args[2];
+	capacity = socket->type == SOCK_STREAM ? (size_t)args[2] :
+	    args[2] > PACKET_BUF_STORAGE_SIZE ? PACKET_BUF_STORAGE_SIZE :
+	    (size_t)args[2];
 	error = uaccess_pin(args[1], capacity, PROT_WRITE, &data_pin);
 	if (error != 0)
 		return socket_result(&reference, -error);
@@ -829,8 +840,7 @@ sys_sendmsg_call(const uintptr_t args[6])
 	error = copyin(args[1], &request, sizeof(request));
 	if (error != 0)
 		return -error;
-	if (request.reserved != 0 ||
-	    request.data_length > PACKET_BUF_STORAGE_SIZE ||
+	if (request.reserved != 0 || request.data_length > SIZE_MAX ||
 	    request.name_length > sizeof(address) ||
 	    request.descriptor_count > ZEDBSD_MSG_FD_MAX ||
 	    (request.data_length != 0 && request.data == 0) ||
@@ -839,6 +849,9 @@ sys_sendmsg_call(const uintptr_t args[6])
 		return -EINVAL;
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
+	if (reference.socket->type != SOCK_STREAM &&
+	    request.data_length > PACKET_BUF_STORAGE_SIZE)
+		return socket_result(&reference, -EMSGSIZE);
 	if (request.name_length != 0) {
 		error = copy_sockaddr_in((uintptr_t)request.name,
 		    request.name_length, &address);
@@ -909,7 +922,7 @@ sys_recvmsg_call(const uintptr_t args[6])
 	if (error != 0)
 		return -error;
 	if (request.reserved != 0 || request.reserved2 != 0 ||
-	    request.data_capacity > PACKET_BUF_STORAGE_SIZE ||
+	    request.data_capacity > SIZE_MAX ||
 	    request.name_capacity > sizeof(address) ||
 	    request.descriptor_capacity > ZEDBSD_MSG_FD_MAX ||
 	    (request.data_capacity != 0 && request.data == 0) ||
@@ -918,6 +931,9 @@ sys_recvmsg_call(const uintptr_t args[6])
 		return -EINVAL;
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
+	if (reference.socket->type != SOCK_STREAM &&
+	    request.data_capacity > PACKET_BUF_STORAGE_SIZE)
+		return socket_result(&reference, -EMSGSIZE);
 	if (request.data_capacity != 0) {
 		buffer = kern_malloc((size_t)request.data_capacity);
 		if (buffer == NULL)

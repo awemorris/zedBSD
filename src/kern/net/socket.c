@@ -57,11 +57,14 @@ socket_init_object(struct socket *socket, int family, int type, int protocol,
 	refcount_init(&socket->refs, 1);
 	spin_init(&socket->lock, LOCK_RANK_SOCKET, "socket");
 	waitq_init(&socket->receive_waitq, "socket receive");
+	waitq_init(&socket->receive_space_waitq, "socket receive space");
 	waitq_init(&socket->send_waitq, "socket send");
 	waitq_init(&socket->connect_waitq, "socket connect");
 	waitq_init(&socket->accept_waitq, "socket accept");
 	socket->lifecycle = SOCKET_OPEN;
-	socket->receive_limit = SOCKET_RECEIVE_PACKETS_MAX;
+	socket->receive_packet_limit = SOCKET_RECEIVE_MESSAGES_MAX;
+	socket->receive_hiwat_bytes = SOCKET_BUFFER_DEFAULT;
+	socket->send_hiwat_bytes = SOCKET_BUFFER_DEFAULT;
 }
 
 int
@@ -112,6 +115,27 @@ socket_setsockopt_common(struct socket *socket, int level, int option,
 		irq = spin_lock_irqsave(&socket->lock);
 		socket->reuse_address = enabled != 0;
 		spin_unlock_irqrestore(&socket->lock, irq);
+		return 0;
+	}
+	if (option == SO_SNDBUF || option == SO_RCVBUF) {
+		int requested;
+		if (value == NULL || length != sizeof(requested))
+			return EINVAL;
+		memcpy(&requested, value, sizeof(requested));
+		if (requested < (int)SOCKET_BUFFER_MIN ||
+		    requested > (int)SOCKET_BUFFER_MAX)
+			return EINVAL;
+		irq = spin_lock_irqsave(&socket->lock);
+		if (option == SO_SNDBUF)
+			socket->send_hiwat_bytes = (size_t)requested;
+		else
+			socket->receive_hiwat_bytes = (size_t)requested;
+		waitq_wake_all(&socket->receive_space_waitq);
+		waitq_wake_all(&socket->send_waitq);
+		spin_unlock_irqrestore(&socket->lock, irq);
+		if (socket->ops != NULL && socket->ops->buffer_changed != NULL)
+			socket->ops->buffer_changed(socket, option);
+		poll_notify();
 		return 0;
 	}
 	if (option != SO_RCVTIMEO && option != SO_SNDTIMEO)
@@ -170,6 +194,19 @@ socket_getsockopt_common(struct socket *socket, int level, int option,
 		*length = sizeof(enabled);
 		return 0;
 	}
+	if (option == SO_SNDBUF || option == SO_RCVBUF) {
+		int configured;
+		if (value == NULL || length == NULL ||
+		    *length < sizeof(configured))
+			return EINVAL;
+		irq = spin_lock_irqsave(&socket->lock);
+		configured = (int)(option == SO_SNDBUF ?
+		    socket->send_hiwat_bytes : socket->receive_hiwat_bytes);
+		spin_unlock_irqrestore(&socket->lock, irq);
+		memcpy(value, &configured, sizeof(configured));
+		*length = sizeof(configured);
+		return 0;
+	}
 	if (option != SO_RCVTIMEO && option != SO_SNDTIMEO)
 		return ENOPROTOOPT;
 	if (value == NULL || length == NULL || *length < sizeof(timeout))
@@ -215,6 +252,7 @@ socket_set_error(struct socket *socket, int error)
 	if (socket->error == 0)
 		socket->error = error;
 	waitq_wake_all(&socket->receive_waitq);
+	waitq_wake_all(&socket->receive_space_waitq);
 	waitq_wake_all(&socket->send_waitq);
 	waitq_wake_all(&socket->connect_waitq);
 	waitq_wake_all(&socket->accept_waitq);
@@ -236,6 +274,40 @@ socket_tryref(struct socket *socket)
 }
 
 void
+socket_close_endpoint(struct socket *socket)
+{
+	unsigned long irq;
+	int close = 0;
+
+	if (socket == NULL || socket->ops == NULL ||
+	    socket->ops->endpoint_close == NULL)
+		return;
+	irq = spin_lock_irqsave(&socket->lock);
+	if (socket->lifecycle == SOCKET_OPEN) {
+		socket->lifecycle = SOCKET_CLOSING;
+		socket->read_shutdown = 1;
+		socket->write_shutdown = 1;
+		waitq_wake_all(&socket->receive_waitq);
+		waitq_wake_all(&socket->receive_space_waitq);
+		waitq_wake_all(&socket->send_waitq);
+		waitq_wake_all(&socket->connect_waitq);
+		waitq_wake_all(&socket->accept_waitq);
+		close = 1;
+	}
+	spin_unlock_irqrestore(&socket->lock, irq);
+	if (!close)
+		return;
+	socket->ops->endpoint_close(socket);
+	irq = spin_lock_irqsave(&socket->lock);
+	socket->lifecycle = SOCKET_CLOSED;
+	waitq_wake_all(&socket->receive_waitq);
+	waitq_wake_all(&socket->receive_space_waitq);
+	waitq_wake_all(&socket->send_waitq);
+	spin_unlock_irqrestore(&socket->lock, irq);
+	poll_notify();
+}
+
+void
 socket_release(struct socket *socket)
 {
 	struct packet_buf *packet, *packets;
@@ -243,13 +315,16 @@ socket_release(struct socket *socket)
 
 	if (socket == NULL || !refcount_put(&socket->refs))
 		return;
+	socket_close_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
-	socket->lifecycle = SOCKET_CLOSING;
+	if (socket->lifecycle == SOCKET_OPEN)
+		socket->lifecycle = SOCKET_CLOSING;
 	packets = socket->receive_head;
 	socket->receive_head = socket->receive_tail = NULL;
 	socket->receive_packets = 0;
 	socket->receive_bytes = 0;
 	waitq_wake_all(&socket->receive_waitq);
+	waitq_wake_all(&socket->receive_space_waitq);
 	waitq_wake_all(&socket->send_waitq);
 	waitq_wake_all(&socket->connect_waitq);
 	waitq_wake_all(&socket->accept_waitq);
@@ -278,7 +353,10 @@ socket_enqueue_packet(struct socket *socket, struct packet_buf *packet)
 	}
 	irq = spin_lock_irqsave(&socket->lock);
 	if (socket->lifecycle != SOCKET_OPEN ||
-	    socket->receive_packets >= socket->receive_limit) {
+	    (socket->receive_packet_limit != 0 &&
+	    socket->receive_packets >= socket->receive_packet_limit) ||
+	    packet->length > socket->receive_hiwat_bytes ||
+	    socket->receive_bytes > socket->receive_hiwat_bytes - packet->length) {
 		int error = socket->lifecycle != SOCKET_OPEN ? EPIPE : ENOBUFS;
 		spin_unlock_irqrestore(&socket->lock, irq);
 		packet_buf_free(packet);
@@ -384,6 +462,7 @@ socket_dequeue_packet(struct socket *socket, int flags,
 		socket->receive_packets--;
 	if (socket->receive_bytes >= (*result)->length)
 		socket->receive_bytes -= (*result)->length;
+	waitq_wake_all(&socket->receive_space_waitq);
 	spin_unlock_irqrestore(&socket->lock, irq);
 	return 0;
 }

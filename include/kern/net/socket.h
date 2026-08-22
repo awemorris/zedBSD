@@ -17,7 +17,10 @@
 #include <sys/types.h>
 
 #define SOCKET_MAX 32U
-#define SOCKET_RECEIVE_PACKETS_MAX 8U
+#define SOCKET_RECEIVE_MESSAGES_MAX 8U
+#define SOCKET_BUFFER_DEFAULT (64U * 1024U)
+#define SOCKET_BUFFER_MIN 2048U
+#define SOCKET_BUFFER_MAX (1024U * 1024U)
 
 struct file;
 struct filedesc;
@@ -49,6 +52,8 @@ struct socket_ops {
 	int (*getsockopt)(struct socket *, int, int, void *, socklen_t *);
 	int (*ioctl)(struct socket *, unsigned long, uintptr_t);
 	int (*poll)(struct socket *, short, short *);
+	void (*buffer_changed)(struct socket *, int);
+	void (*endpoint_close)(struct socket *);
 	void (*close)(struct socket *);
 };
 
@@ -62,6 +67,7 @@ struct socket {
 	refcount_t refs;
 	struct spinlock lock;
 	struct wait_queue receive_waitq;
+	struct wait_queue receive_space_waitq;
 	struct wait_queue send_waitq;
 	struct wait_queue connect_waitq;
 	struct wait_queue accept_waitq;
@@ -72,7 +78,9 @@ struct socket {
 	struct packet_buf *receive_tail;
 	unsigned receive_packets;
 	size_t receive_bytes;
-	size_t receive_limit;
+	size_t receive_packet_limit;
+	size_t receive_hiwat_bytes;
+	size_t send_hiwat_bytes;
 	uint64_t receive_timeout_ticks;
 	uint64_t send_timeout_ticks;
 	unsigned reuse_address;
@@ -115,6 +123,7 @@ void socket_init_object(struct socket *socket, int family, int type,
 			int protocol, const struct socket_ops *ops);
 void socket_ref(struct socket *socket);
 int socket_tryref(struct socket *socket);
+void socket_close_endpoint(struct socket *socket);
 void socket_release(struct socket *socket);
 int socket_enqueue_packet(struct socket *socket, struct packet_buf *packet);
 int socket_requeue_packet_front(struct socket *socket,

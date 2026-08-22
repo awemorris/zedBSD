@@ -147,6 +147,7 @@ int main(void)
 	struct sockaddr_un local;
 	char byte = 0;
 	char mq_buffer[256];
+	char stream_buffer[8192], stream_readback[8192];
 	unsigned mq_priority = 0;
 	mqd_t queue;
 	pid_t child;
@@ -172,6 +173,9 @@ int main(void)
 	wchar_t wide_character;
 	char encoded[4];
 	locale_t c_locale;
+	size_t stream_queued, stream_drained, stream_index;
+	socklen_t option_length;
+	int option_value, saved_flags;
 
 	if (getenv("R2_EXEC_FINAL") != NULL) {
 		(void)write(1, "R2:01-06:PASS\n", 15);
@@ -245,7 +249,90 @@ int main(void)
 	if (send(pair[0], "u", 1, 0) != 1 || recv(pair[1], &byte, 1, 0) != 1 ||
 	    byte != 'u')
 		return fail("unix-stream");
-	(void)close(pair[0]); (void)close(pair[1]);
+	option_length = sizeof(option_value);
+	if (getsockopt(pair[0], SOL_SOCKET, SO_SNDBUF, &option_value,
+	    &option_length) != 0 || option_length != sizeof(option_value) ||
+	    option_value != 65536)
+		return fail_errno("unix-stream-default-sndbuf");
+	option_length = sizeof(option_value);
+	if (getsockopt(pair[1], SOL_SOCKET, SO_RCVBUF, &option_value,
+	    &option_length) != 0 || option_length != sizeof(option_value) ||
+	    option_value != 65536)
+		return fail_errno("unix-stream-default-rcvbuf");
+	option_value = 4096;
+	if (setsockopt(pair[0], SOL_SOCKET, SO_SNDBUF, &option_value,
+	    sizeof(option_value)) != 0)
+		return fail_errno("unix-stream-set-sndbuf");
+	option_value = 0;
+	option_length = sizeof(option_value);
+	if (getsockopt(pair[0], SOL_SOCKET, SO_SNDBUF, &option_value,
+	    &option_length) != 0 || option_value != 4096)
+		return fail_errno("unix-stream-get-sndbuf");
+	option_value = 65536;
+	if (setsockopt(pair[0], SOL_SOCKET, SO_SNDBUF, &option_value,
+	    sizeof(option_value)) != 0)
+		return fail_errno("unix-stream-restore-sndbuf");
+	option_value = 1;
+	errno = 0;
+	if (setsockopt(pair[0], SOL_SOCKET, SO_RCVBUF, &option_value,
+	    sizeof(option_value)) != -1 || errno != EINVAL)
+		return fail("unix-stream-invalid-rcvbuf");
+	for (stream_index = 0; stream_index < 16; stream_index++)
+		if (send(pair[0], "w", 1, 0) != 1)
+			return fail_errno("unix-stream-many-writes");
+	if (recv(pair[1], stream_readback, 16, MSG_WAITALL) != 16)
+		return fail_errno("unix-stream-many-writes-receive");
+	for (stream_index = 0; stream_index < sizeof(stream_buffer);
+	    stream_index++)
+		stream_buffer[stream_index] = (char)(stream_index * 29U + 7U);
+	if (send(pair[0], stream_buffer, sizeof(stream_buffer), 0) !=
+	    (ssize_t)sizeof(stream_buffer) ||
+	    recv(pair[1], stream_readback, sizeof(stream_readback), MSG_WAITALL) !=
+	    (ssize_t)sizeof(stream_readback) ||
+	    memcmp(stream_buffer, stream_readback, sizeof(stream_buffer)) != 0)
+		return fail_errno("unix-stream-fragmentation");
+	saved_flags = fcntl(pair[0], F_GETFL, 0);
+	if (saved_flags < 0 ||
+	    fcntl(pair[0], F_SETFL, saved_flags | O_NONBLOCK) != 0)
+		return fail_errno("unix-stream-nonblock");
+	stream_queued = 0;
+	while (stream_queued < 65536U) {
+		size_t amount = 65536U - stream_queued;
+		ssize_t sent;
+
+		if (amount > sizeof(stream_buffer))
+			amount = sizeof(stream_buffer);
+		sent = send(pair[0], stream_buffer, amount, 0);
+		if (sent <= 0)
+			return fail_errno("unix-stream-fill");
+		stream_queued += (size_t)sent;
+	}
+	errno = 0;
+	if (send(pair[0], "x", 1, 0) != -1 || errno != EAGAIN)
+		return fail("unix-stream-full-eagain");
+	event.fd = pair[0]; event.events = POLLOUT; event.revents = 0;
+	if (poll(&event, 1, 0) != 0)
+		return fail("unix-stream-full-poll");
+	if (recv(pair[1], &byte, 1, 0) != 1)
+		return fail_errno("unix-stream-release-byte");
+	event.revents = 0;
+	if (poll(&event, 1, 0) != 1 || (event.revents & POLLOUT) == 0)
+		return fail("unix-stream-writable-poll");
+	(void)close(pair[0]);
+	stream_drained = 1;
+	for (;;) {
+		ssize_t received = recv(pair[1], stream_readback,
+		    sizeof(stream_readback), 0);
+
+		if (received < 0)
+			return fail_errno("unix-stream-drain");
+		if (received == 0)
+			break;
+		stream_drained += (size_t)received;
+	}
+	if (stream_drained != 65536U)
+		return fail("unix-stream-eof-count");
+	(void)close(pair[1]);
 	if (pipe(rights_pipe) != 0 ||
 	    socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0)
 		return fail_errno("unix-rights-setup");

@@ -57,6 +57,7 @@ socket_file_close(struct file *file)
 	if (socket == NULL)
 		return EBADF;
 	file->f_data = NULL;
+	socket_close_endpoint(socket);
 	socket_release(socket);
 	return 0;
 }

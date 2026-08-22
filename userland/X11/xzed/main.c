@@ -321,6 +321,23 @@ static void expose(struct server*s,struct window*w)
 {expose_area(s,w,0,0,w->width,w->height);configure_notify(s,w);}
 static void map_request(struct server*s,struct window*parent,struct window*w)
 {struct client*c=owner_client(s,parent->owner);uint8_t e[32];if(!c)return;memset(e,0,sizeof(e));e[0]=20;wr16(e+2,c->sequence,c->order);wr32(e+4,parent->id,c->order);wr32(e+8,w->id,c->order);(void)write_all(c->fd,e,sizeof(e));}
+static void destroy_notify(struct client*c,uint32_t event,uint32_t window)
+{uint8_t e[32];if(!c)return;memset(e,0,sizeof(e));e[0]=17;wr16(e+2,c->sequence,c->order);wr32(e+4,event,c->order);wr32(e+8,window,c->order);(void)write_all(c->fd,e,sizeof(e));}
+static void destroy_window(struct server*s,uint32_t id)
+{
+	struct window*w,*parent;size_t index;uint32_t child;
+	if(id==ROOT_XID||(w=find_window(s,id))==NULL)return;
+	for(;;){unsigned i;child=0;for(i=1;i<s->window_count;i++)if(s->windows[i].parent==id){child=s->windows[i].id;break;}if(!child)break;destroy_window(s,child);}
+	w=find_window(s,id);if(!w)return;parent=find_window(s,w->parent);
+	if((w->event_mask&(1U<<17))!=0)destroy_notify(owner_client(s,w->owner),w->id,w->id);
+	if(parent&&(parent->event_mask&(1U<<19))!=0)destroy_notify(owner_client(s,parent->owner),parent->id,w->id);
+	mark_dirty(s,w->x,w->y,w->width,w->height);
+	if(s->focus==w->id)s->focus=ROOT_XID;
+	if(s->pointer_grab_window==w->id){s->pointer_grab_owner=-1;s->pointer_grab_window=0;}
+	free(w->pixels);w->pixels=NULL;index=(size_t)(w-s->windows);
+	if(index+1U<s->window_count)memmove(&s->windows[index],&s->windows[index+1],(s->window_count-index-1U)*sizeof(s->windows[0]));
+	s->window_count--;memset(&s->windows[s->window_count],0,sizeof(s->windows[0]));
+}
 static struct window *hit(struct server *s,int x,int y)
 {return input_at(s,x,y);}
 
@@ -353,7 +370,7 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 	case 2: /* ChangeWindowAttributes */
 		if(n<12||(w=find_window(s,rd32(q+4,c->order)))==NULL)break;
 		{uint32_t mask=rd32(q+8,c->order);size_t off=12;unsigned bit;for(bit=0;bit<32&&off+4<=n;bit++)if(mask&(1U<<bit)){uint32_t v=rd32(q+off,c->order);if(bit==1)w->background=v;if(bit==11){w->event_mask=v;if(w==&s->windows[0])w->owner=ci;}off+=4;}}return 0;
-	case 4: /* DestroyWindow */ if((w=find_window(s,rd32(q+4,c->order)))!=NULL&&w!=&s->windows[0]){int x=w->x,y=w->y,wi=w->width,he=w->height;w->mapped=0;mark_dirty(s,x,y,wi,he);}return 0;
+	case 4: /* DestroyWindow */ destroy_window(s,rd32(q+4,c->order));return 0;
 	case 7: /* ReparentWindow */ if(n>=16&&(w=find_window(s,rd32(q+4,c->order)))!=NULL){struct window*p=find_window(s,rd32(q+8,c->order));if(p){w->parent=p->id;w->x=(int16_t)(p->x+(int16_t)rd16(q+12,c->order));w->y=(int16_t)(p->y+(int16_t)rd16(q+14,c->order));return 0;}}break;
 	case 8: /* MapWindow */ if((w=find_window(s,rd32(q+4,c->order)))!=NULL){struct window*p=find_window(s,w->parent);if(p&&(p->event_mask&(1U<<20))&&p->owner!=ci){map_request(s,p,w);return 0;}w->mapped=1;mark_dirty(s,w->x,w->y,w->width,w->height);expose(s,w);return 0;}break;
 	case 10: /* UnmapWindow */ if((w=find_window(s,rd32(q+4,c->order)))!=NULL){int x=w->x,y=w->y,wi=w->width,he=w->height;w->mapped=0;mark_dirty(s,x,y,wi,he);return 0;}break;
@@ -372,7 +389,8 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 	case 43: {uint8_t r[32];memset(r,0,32);r[1]=0;wr32(r+8,s->focus,c->order);simple_reply(c,r,32);return 0;}
 	case 45: /* OpenFont */
 		if(n>=12&&s->font_count<MAX_FONTS){uint16_t ln=rd16(q+8,c->order);if(12U+ln<=n){s->fonts[s->font_count++]=(struct font_resource){rd32(q+4,c->order),(int)ci};return 0;}}break;
-	case 46: return 0; /* CloseFont */
+	case 46: /* CloseFont */
+		{id=rd32(q+4,c->order);unsigned i;for(i=0;i<s->font_count;i++)if(s->fonts[i].id==id){if(i+1U<s->font_count)memmove(&s->fonts[i],&s->fonts[i+1],(s->font_count-i-1U)*sizeof(s->fonts[0]));s->font_count--;memset(&s->fonts[s->font_count],0,sizeof(s->fonts[0]));return 0;}}break;
 	case 47: /* QueryFont: the font is Unicode BMP, with 1- or 2-cell glyphs. */
 		{uint8_t r[60];memset(r,0,sizeof(r));wr16(r+8,0,c->order);wr16(r+10,255,c->order);wr16(r+12,0,c->order);wr16(r+14,255,c->order);r[16]=0;r[17]=0;wr16(r+18,0,c->order);wr16(r+20,16,c->order);wr32(r+56,0,c->order);simple_reply(c,r,sizeof(r));return 0;}
 	case 49: /* ListFonts */
@@ -380,12 +398,13 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 	case 53: /* CreatePixmap */
 		if(n>=16&&s->pixmap_count<MAX_PIXMAPS){struct pixmap*p=&s->pixmaps[s->pixmap_count];size_t count;memset(p,0,sizeof(*p));p->id=rd32(q+4,c->order);p->owner=(int)ci;p->width=rd16(q+12,c->order);p->height=rd16(q+14,c->order);count=(size_t)p->width*p->height;if(!p->width||!p->height||(p->width&&count/p->width!=p->height)||(p->pixels=calloc(count,sizeof(*p->pixels)))==NULL){error_reply(c,11,p->id,op);return 0;}s->pixmap_count++;return 0;}break;
 	case 54: /* FreePixmap */
-		{struct pixmap*p=find_pixmap(s,rd32(q+4,c->order));if(p){free(p->pixels);p->pixels=NULL;p->id=0;return 0;}}break;
+		{struct pixmap*p=find_pixmap(s,rd32(q+4,c->order));if(p){size_t pi=(size_t)(p-s->pixmaps);free(p->pixels);if(pi+1U<s->pixmap_count)memmove(&s->pixmaps[pi],&s->pixmaps[pi+1],(s->pixmap_count-pi-1U)*sizeof(s->pixmaps[0]));s->pixmap_count--;memset(&s->pixmaps[s->pixmap_count],0,sizeof(s->pixmaps[0]));return 0;}}break;
 	case 55: /* CreateGC */
 		if(n>=16&&s->gc_count<MAX_GCS){struct graphics_context*g=&s->gcs[s->gc_count++];uint32_t mask=rd32(q+12,c->order);size_t off=16;unsigned bit;memset(g,0,sizeof(*g));g->id=rd32(q+4,c->order);g->owner=(int)ci;g->foreground=0xffffff;for(bit=0;bit<32&&off+4<=n;bit++)if(mask&(1U<<bit)){uint32_t v=rd32(q+off,c->order);if(bit==2)g->foreground=v;if(bit==14)g->font=v;off+=4;}return 0;}break;
 	case 56: /* ChangeGC */
 		{struct graphics_context*g=find_gc(s,rd32(q+4,c->order));if(g&&n>=12){uint32_t mask=rd32(q+8,c->order);size_t off=12;unsigned bit;for(bit=0;bit<32&&off+4<=n;bit++)if(mask&(1U<<bit)){uint32_t v=rd32(q+off,c->order);if(bit==2)g->foreground=v;if(bit==14)g->font=v;off+=4;}return 0;}}break;
-	case 60: return 0; /* FreeGC */
+	case 60: /* FreeGC */
+		{id=rd32(q+4,c->order);unsigned i;for(i=0;i<s->gc_count;i++)if(s->gcs[i].id==id){if(i+1U<s->gc_count)memmove(&s->gcs[i],&s->gcs[i+1],(s->gc_count-i-1U)*sizeof(s->gcs[0]));s->gc_count--;memset(&s->gcs[s->gc_count],0,sizeof(s->gcs[0]));return 0;}}break;
 	case 62: /* CopyArea: the minimal server currently supports Pixmap to Window. */
 		if(n>=28){struct pixmap*p=find_pixmap(s,rd32(q+4,c->order));struct window*dest=find_window(s,rd32(q+8,c->order));int sx=(int16_t)rd16(q+16,c->order),sy=(int16_t)rd16(q+18,c->order),dx=(int16_t)rd16(q+20,c->order),dy=(int16_t)rd16(q+22,c->order);int wi=rd16(q+24,c->order),he=rd16(q+26,c->order),row,column;if(!p||!dest)break;for(row=0;row<he;row++)for(column=0;column<wi;column++){int px=sx+column,py=sy+row,wx=dx+column,wy=dy+row;if(px>=0&&py>=0&&px<p->width&&py<p->height&&wx>=0&&wy>=0&&wx<dest->width&&wy<dest->height)dest->pixels[(size_t)wy*dest->width+wx]=p->pixels[(size_t)py*p->width+px];}mark_dirty(s,dest->x+dx,dest->y+dy,wi,he);present(s);return 0;}break;
 	case 65: /* PolyLine */
@@ -411,7 +430,17 @@ static int request(struct server *s,unsigned ci,const uint8_t *q,size_t n)
 }
 
 static void close_client(struct server *s,unsigned i)
-{if(s->clients[i].fd>=0)close(s->clients[i].fd);free(s->clients[i].input);memset(&s->clients[i],0,sizeof(s->clients[i]));s->clients[i].fd=-1;}
+{
+	unsigned j;
+	if (s->clients[i].fd >= 0)
+		close(s->clients[i].fd);
+	s->clients[i].fd = -1;
+	for(;;){uint32_t id=0;for(j=1;j<s->window_count;j++)if(s->windows[j].owner==(uint32_t)i){id=s->windows[j].id;break;}if(!id)break;destroy_window(s,id);}
+	for(j=0;j<s->pixmap_count;){if(s->pixmaps[j].owner==(int)i){free(s->pixmaps[j].pixels);if(j+1U<s->pixmap_count)memmove(&s->pixmaps[j],&s->pixmaps[j+1],(s->pixmap_count-j-1U)*sizeof(s->pixmaps[0]));s->pixmap_count--;memset(&s->pixmaps[s->pixmap_count],0,sizeof(s->pixmaps[0]));}else j++;}
+	for(j=0;j<s->gc_count;){if(s->gcs[j].owner==(int)i){if(j+1U<s->gc_count)memmove(&s->gcs[j],&s->gcs[j+1],(s->gc_count-j-1U)*sizeof(s->gcs[0]));s->gc_count--;memset(&s->gcs[s->gc_count],0,sizeof(s->gcs[0]));}else j++;}
+	for(j=0;j<s->font_count;){if(s->fonts[j].owner==(int)i){if(j+1U<s->font_count)memmove(&s->fonts[j],&s->fonts[j+1],(s->font_count-j-1U)*sizeof(s->fonts[0]));s->font_count--;memset(&s->fonts[s->font_count],0,sizeof(s->fonts[0]));}else j++;}
+	free(s->clients[i].input);memset(&s->clients[i],0,sizeof(s->clients[i]));s->clients[i].fd=-1;
+}
 static void read_client(struct server *s,unsigned i)
 {
 	struct client *c=&s->clients[i];uint8_t temp[4096];ssize_t nr;

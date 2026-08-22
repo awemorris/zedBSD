@@ -585,6 +585,28 @@ minimize(Display *display, Window root, struct frame *frame)
 }
 
 static void
+unmanage(Display *display, struct frame *frame)
+{
+	size_t index;
+
+	if (frame == NULL)
+		return;
+	index = (size_t)(frame - frames);
+	if (index >= frame_count)
+		return;
+	if (frame->gc != NULL)
+		(void)XFreeGC(display, frame->gc);
+	if (frame->frame != 0)
+		(void)XDestroyWindow(display, frame->frame);
+	if (index + 1U < frame_count)
+		memmove(&frames[index], &frames[index + 1U],
+		    (frame_count - index - 1U) * sizeof(frames[0]));
+	frame_count--;
+	memset(&frames[frame_count], 0, sizeof(frames[0]));
+	(void)XSync(display, False);
+}
+
+static void
 decorate(Display *display, struct frame *frame)
 {
 	unsigned fw = frame_width(frame);
@@ -664,6 +686,7 @@ manage(Display *display, Window root, Window client)
 	unsigned depth;
 	struct frame *frame;
 	char *title = NULL;
+	int reparent_requested = 0;
 
 	frame = by_client(client);
 	if (frame == NULL)
@@ -683,7 +706,7 @@ manage(Display *display, Window root, Window client)
 		XFree(title);
 		return;
 	}
-	frame = &frames[frame_count++];
+	frame = &frames[frame_count];
 	memset(frame, 0, sizeof(*frame));
 	frame->client = client;
 	frame->x = x;
@@ -699,27 +722,55 @@ manage(Display *display, Window root, Window client)
 	XFree(title);
 	frame->frame = XCreateSimpleWindow(display, root, x, y,
 	    frame_width(frame), frame_height(frame), 0, 0, FRAME_FACE);
+	if (frame->frame == 0)
+		goto fail;
 	frame->cursor_shape = XZED_CURSOR_LEFT_PTR;
-	XzedSetCursorShape(display, frame->frame, XZED_CURSOR_LEFT_PTR);
-	XzedSetInputMargins(display, frame->frame, RESIZE_MARGIN,
-	    RESIZE_MARGIN, RESIZE_MARGIN, RESIZE_MARGIN);
+	if (XzedSetCursorShape(display, frame->frame,
+	    XZED_CURSOR_LEFT_PTR) != 0 ||
+	    XzedSetInputMargins(display, frame->frame, RESIZE_MARGIN,
+	    RESIZE_MARGIN, RESIZE_MARGIN, RESIZE_MARGIN) != 0)
+		goto fail;
 	/* Do not inherit a resize cursor after crossing into the client. */
-	XzedSetCursorShape(display, client, XZED_CURSOR_LEFT_PTR);
-	XStoreName(display, frame->frame, frame->title);
+	if (XzedSetCursorShape(display, client, XZED_CURSOR_LEFT_PTR) != 0 ||
+	    !XStoreName(display, frame->frame, frame->title))
+		goto fail;
 	frame->gc = XCreateGC(display, frame->frame, 0, NULL);
+	if (frame->gc == NULL)
+		goto fail;
 	if (title_font != NULL)
-		XSetFont(display, frame->gc, title_font->fid);
-	XSelectInput(display, frame->frame,
+		if (XSetFont(display, frame->gc, title_font->fid) != 0)
+			goto fail;
+	if (XSelectInput(display, frame->frame,
 	    ExposureMask | ButtonPressMask | ButtonReleaseMask |
-	    PointerMotionMask | StructureNotifyMask);
-	XReparentWindow(display, client, frame->frame, CLIENT_X, CLIENT_Y);
-	XMapWindow(display, client);
+	    PointerMotionMask | StructureNotifyMask) != 0)
+		goto fail;
+	if (XReparentWindow(display, client, frame->frame, CLIENT_X,
+	    CLIENT_Y) != 0)
+		goto fail;
+	reparent_requested = 1;
 	/* Drain the seven setup requests before mapping and decorating. */
-	XSync(display, False);
-	XMapWindow(display, frame->frame);
-	XSync(display, False);
+	if (XSync(display, False) != 0 || XMapWindow(display, client) != 0 ||
+	    XMapWindow(display, frame->frame) != 0 ||
+	    XSync(display, False) != 0)
+		goto fail;
+	frame_count++;
 	decorate(display, frame);
 	activate(display, frame);
+	return;
+
+fail:
+	fprintf(stderr, "zwm: cannot manage window 0x%lx: %s\n",
+	    (unsigned long)client, strerror(errno));
+	if (reparent_requested)
+		(void)XReparentWindow(display, client, root, x, y);
+	if (frame->gc != NULL)
+		(void)XFreeGC(display, frame->gc);
+	if (frame->frame != 0) {
+		(void)XUnmapWindow(display, frame->frame);
+		(void)XDestroyWindow(display, frame->frame);
+	}
+	(void)XSync(display, False);
+	memset(frame, 0, sizeof(*frame));
 }
 
 int
@@ -758,6 +809,13 @@ main(int argc, char **argv)
 			break;
 		if (event.type == MapRequest) {
 			manage(display, root, event.xmaprequest.window);
+		} else if (event.type == DestroyNotify) {
+			struct frame *frame = by_client(event.xany.window);
+
+			if (frame != NULL) {
+				drag = NULL;
+				unmanage(display, frame);
+			}
 		} else if (event.type == Expose) {
 			struct frame *frame = by_frame(event.xexpose.window);
 

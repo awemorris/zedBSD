@@ -51,6 +51,21 @@ int mutex_init(struct mutex *mutex, enum lock_rank rank, const char *name)
 	waitq_init(&mutex->waiters, name);
 	return 0;
 }
+int mutex_trylock(struct mutex *mutex)
+{
+	unsigned long irq;
+	struct thread *thread = thread_current();
+	int acquired = 0;
+	if (mutex == NULL || thread == NULL) return 0;
+	irq = spin_lock_irqsave(&mutex->guard);
+	if (mutex->owner == thread) __builtin_trap();
+	if (!mutex->locked) {
+		mutex->locked = 1; mutex->owner = thread;
+		acquired = 1;
+	}
+	spin_unlock_irqrestore(&mutex->guard, irq);
+	return acquired;
+}
 int mutex_lock_interruptible(struct mutex *mutex)
 {
 	unsigned long irq;

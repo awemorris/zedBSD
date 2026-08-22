@@ -18,6 +18,7 @@ enum lock_rank {
 	LOCK_RANK_VM_OBJECT = 90,
 	LOCK_RANK_SWAP = 95,
 	LOCK_RANK_SOCKET_REGISTRY = 100,
+	LOCK_RANK_UNIX_STREAM_SEND = 102,
 	LOCK_RANK_UNIX_CONNECTION = 105,
 	LOCK_RANK_SOCKET = 110,
 	LOCK_RANK_NETWORK = 120,
@@ -56,6 +57,7 @@ struct mutex {
 	unsigned locked;
 };
 int mutex_init(struct mutex *, enum lock_rank, const char *);
+int mutex_trylock(struct mutex *);
 int mutex_lock_interruptible(struct mutex *);
 void mutex_lock(struct mutex *);
 void mutex_unlock(struct mutex *);
