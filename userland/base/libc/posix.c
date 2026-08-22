@@ -13,12 +13,14 @@
 #include <zedbsd/route.h>
 #include <zedbsd/rtld-abi.h>
 #include <dirent.h>
+#include <aio.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <limits.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
@@ -33,6 +35,7 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/time.h>
+#include <sys/times.h>
 #include <sys/uio.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
@@ -44,6 +47,60 @@
 #endif
 
 char **environ;
+char *optarg;
+int opterr = 1;
+int optind = 1;
+int optopt;
+
+int
+getopt(int argc, char *const argv[], const char *options)
+{
+	static const char *next;
+	const char *definition;
+	int option;
+
+	optarg = NULL;
+	if (optind == 0) { optind = 1; next = NULL; }
+	if (argc < 0 || argv == NULL || options == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (next == NULL || *next == '\0') {
+		if (optind >= argc || argv[optind] == NULL ||
+		    argv[optind][0] != '-' || argv[optind][1] == '\0')
+			return -1;
+		if (!strcmp(argv[optind], "--")) { optind++; return -1; }
+		next = argv[optind++] + 1;
+	}
+	option = (unsigned char)*next++;
+	optopt = option;
+	definition = strchr(options + (options[0] == ':'), option);
+	if (option == ':' || definition == NULL) {
+		if (*next == '\0') next = NULL;
+		if (opterr && options[0] != ':')
+			fprintf(stderr, "%s: illegal option -- %c\n",
+			    argv[0] != NULL ? argv[0] : "", option);
+		return '?';
+	}
+	if (definition[1] == ':') {
+		if (*next != '\0') {
+			optarg = (char *)(uintptr_t)next;
+			next = NULL;
+		} else if (optind < argc) {
+			optarg = argv[optind++];
+			next = NULL;
+		} else {
+			next = NULL;
+			if (opterr && options[0] != ':')
+				fprintf(stderr, "%s: option requires an argument -- %c\n",
+				    argv[0] != NULL ? argv[0] : "", option);
+			return options[0] == ':' ? ':' : '?';
+		}
+	} else if (*next == '\0') {
+		next = NULL;
+	}
+	return option;
+}
 #define ENVIRONMENT_MAX 64U
 static char *environment_entries[ENVIRONMENT_MAX + 1U];
 static unsigned char environment_owned[ENVIRONMENT_MAX];
@@ -566,6 +623,144 @@ int timer_delete(timer_t timer) { return (int)call(ZEDBSD_SYS_timer_delete, time
 int timer_settime(timer_t timer, int flags, const struct itimerspec *value, struct itimerspec *old_value) { return (int)call(ZEDBSD_SYS_timer_settime, timer, flags, (uintptr_t)value, (uintptr_t)old_value, 0, 0); }
 int timer_gettime(timer_t timer, struct itimerspec *value) { return (int)call(ZEDBSD_SYS_timer_gettime, timer, (uintptr_t)value, 0, 0, 0, 0); }
 int timer_getoverrun(timer_t timer) { return (int)call(ZEDBSD_SYS_timer_getoverrun, timer, 0, 0, 0, 0, 0); }
+
+/* zedBSD currently completes AIO requests synchronously.  POSIX permits an
+ * operation to have completed by the time the submission function returns. */
+static void
+aio_notify(const struct sigevent *event)
+{
+	if (event->sigev_notify == SIGEV_SIGNAL)
+		(void)sigqueue(getpid(), event->sigev_signo, event->sigev_value);
+}
+
+static int
+aio_submit(struct aiocb *control, int writing, int notify)
+{
+	ssize_t result;
+
+	if (control == NULL || control->aio_reqprio != 0 ||
+	    (control->aio_nbytes != 0 && control->aio_buf == NULL)) {
+		errno = EINVAL;
+		return -1;
+	}
+	control->__aio_submitted = 1;
+	control->__aio_returned = 0;
+	result = writing ?
+		pwrite(control->aio_fildes, (const void *)control->aio_buf,
+		    control->aio_nbytes, control->aio_offset) :
+		pread(control->aio_fildes, (void *)control->aio_buf,
+		    control->aio_nbytes, control->aio_offset);
+	control->__aio_result = result;
+	control->__aio_error = result < 0 ? errno : 0;
+	if (notify)
+		aio_notify(&control->aio_sigevent);
+	return 0;
+}
+
+int aio_read(struct aiocb *control) { return aio_submit(control, 0, 1); }
+int aio_write(struct aiocb *control) { return aio_submit(control, 1, 1); }
+
+int
+aio_error(const struct aiocb *control)
+{
+	return control != NULL && control->__aio_submitted ?
+		control->__aio_error : EINVAL;
+}
+
+ssize_t
+aio_return(struct aiocb *control)
+{
+	if (control == NULL || !control->__aio_submitted ||
+	    control->__aio_returned) {
+		errno = EINVAL;
+		return -1;
+	}
+	control->__aio_returned = 1;
+	if (control->__aio_error != 0) {
+		errno = control->__aio_error;
+		return -1;
+	}
+	return control->__aio_result;
+}
+
+int
+aio_cancel(int descriptor, struct aiocb *control)
+{
+	if (control != NULL && control->aio_fildes != descriptor) {
+		errno = EINVAL;
+		return -1;
+	}
+	return AIO_ALLDONE;
+}
+
+int
+aio_suspend(const struct aiocb *const controls[], int count,
+	const struct timespec *timeout)
+{
+	int index;
+
+	if (controls == NULL || count < 0 ||
+	    (timeout != NULL && (timeout->tv_sec < 0 || timeout->tv_nsec < 0 ||
+	    timeout->tv_nsec >= 1000000000L))) {
+		errno = EINVAL;
+		return -1;
+	}
+	for (index = 0; index < count; index++)
+		if (controls[index] != NULL && controls[index]->__aio_submitted)
+			return 0;
+	if (timeout != NULL && nanosleep(timeout, NULL) != 0)
+		return -1;
+	errno = EAGAIN;
+	return -1;
+}
+
+int
+aio_fsync(int operation, struct aiocb *control)
+{
+	int result;
+
+	if (control == NULL || (operation != O_SYNC && operation != O_DSYNC)) {
+		errno = EINVAL;
+		return -1;
+	}
+	control->__aio_submitted = 1;
+	control->__aio_returned = 0;
+	result = operation == O_DSYNC ? fdatasync(control->aio_fildes) :
+		fsync(control->aio_fildes);
+	control->__aio_result = result;
+	control->__aio_error = result < 0 ? errno : 0;
+	aio_notify(&control->aio_sigevent);
+	return 0;
+}
+
+int
+lio_listio(int mode, struct aiocb *restrict const controls[restrict],
+	int count, struct sigevent *restrict event)
+{
+	int index, failed = 0;
+
+	if ((mode != LIO_WAIT && mode != LIO_NOWAIT) || count < 0 ||
+	    (count != 0 && controls == NULL)) {
+		errno = EINVAL;
+		return -1;
+	}
+	for (index = 0; index < count; index++) {
+		struct aiocb *control = controls[index];
+		if (control == NULL || control->aio_lio_opcode == LIO_NOP)
+			continue;
+		if (control->aio_lio_opcode == LIO_READ) {
+			if (aio_submit(control, 0, 0) != 0) failed = 1;
+		} else if (control->aio_lio_opcode == LIO_WRITE) {
+			if (aio_submit(control, 1, 0) != 0) failed = 1;
+		} else {
+			errno = EINVAL;
+			failed = 1;
+		}
+	}
+	if (event != NULL)
+		aio_notify(event);
+	return failed ? -1 : 0;
+}
 int mount(const char *type, const char *dir, int flags, void *data) { return (int)call(ZEDBSD_SYS_mount, (uintptr_t)type, (uintptr_t)dir, flags, (uintptr_t)data, 0, 0); }
 int unmount(const char *dir, int flags) { return (int)call(ZEDBSD_SYS_unmount, (uintptr_t)dir, flags, 0, 0, 0, 0); }
 int statvfs(const char *path, struct statvfs *status) { return (int)call(ZEDBSD_SYS_statvfs, (uintptr_t)path, (uintptr_t)status, 0, 0, 0, 0); }
@@ -630,6 +825,33 @@ unsigned sleep(unsigned seconds)
 	if (nanosleep(&request, &remain) == 0)
 		return 0;
 	return (unsigned)remain.tv_sec + (remain.tv_nsec != 0);
+}
+
+unsigned
+alarm(unsigned seconds)
+{
+	static timer_t alarm_timer;
+	static pid_t alarm_owner;
+	static int alarm_created;
+	struct sigevent event;
+	struct itimerspec value, old_value;
+	pid_t owner = getpid();
+
+	if (!alarm_created || alarm_owner != owner) {
+		memset(&event, 0, sizeof(event));
+		event.sigev_notify = SIGEV_SIGNAL;
+		event.sigev_signo = SIGALRM;
+		if (timer_create(CLOCK_MONOTONIC, &event, &alarm_timer) != 0)
+			return 0;
+		alarm_created = 1;
+		alarm_owner = owner;
+	}
+	memset(&value, 0, sizeof(value));
+	value.it_value.tv_sec = (time_t)seconds;
+	if (timer_settime(alarm_timer, 0, &value, &old_value) != 0)
+		return 0;
+	return (unsigned)old_value.it_value.tv_sec +
+	    (old_value.it_value.tv_nsec != 0);
 }
 int usleep(useconds_t microseconds)
 {
@@ -823,7 +1045,135 @@ int execve(const char *path, char *const argv[], char *const envp[]) {
 	return (int)call(ZEDBSD_SYS_execve, (uintptr_t)path, (uintptr_t)argv,
 		(uintptr_t)envp, 0, 0, 0);
 }
+
+static int
+exec_with_shell(const char *path, char *const argv[], char *const envp[])
+{
+	char *shell_argv[ZEDBSD_SPAWN_ARG_MAX + 2U];
+	size_t count = 0;
+	shell_argv[count++] = (char *)"sh";
+	shell_argv[count++] = (char *)(uintptr_t)path;
+	if (argv != NULL)
+		for (size_t index = 1; argv[index] != NULL; index++) {
+			if (count == ZEDBSD_SPAWN_ARG_MAX + 1U) {
+				errno = E2BIG;
+				return -1;
+			}
+			shell_argv[count++] = argv[index];
+		}
+	shell_argv[count] = NULL;
+	return execve("/bin/sh", shell_argv, envp);
+}
+
+static int
+exec_search(const char *file, char *const argv[], char *const envp[])
+{
+	const char *path, *at;
+	char candidate[PATH_MAX];
+	int saw_access_error = 0;
+
+	if (file == NULL || *file == '\0') { errno = ENOENT; return -1; }
+	if (strchr(file, '/') != NULL) {
+		execve(file, argv, envp);
+		return errno == ENOEXEC ? exec_with_shell(file, argv, envp) : -1;
+	}
+	path = getenv("PATH");
+	if (path == NULL) path = "/bin:/usr/bin";
+	for (at = path;;) {
+		const char *colon = strchr(at, ':');
+		size_t directory_length = colon != NULL ?
+		    (size_t)(colon - at) : strlen(at);
+		size_t file_length = strlen(file);
+		if (directory_length + file_length + 2U <= sizeof(candidate)) {
+			if (directory_length != 0)
+				memcpy(candidate, at, directory_length);
+			else {
+				candidate[0] = '.';
+				directory_length = 1;
+			}
+			candidate[directory_length] = '/';
+			memcpy(candidate + directory_length + 1U, file,
+			    file_length + 1U);
+			execve(candidate, argv, envp);
+			if (errno == ENOEXEC)
+				return exec_with_shell(candidate, argv, envp);
+			if (errno == EACCES) saw_access_error = 1;
+			else if (errno != ENOENT && errno != ENOTDIR)
+				return -1;
+		}
+		if (colon == NULL) break;
+		at = colon + 1;
+	}
+	errno = saw_access_error ? EACCES : ENOENT;
+	return -1;
+}
+
+int execv(const char *path, char *const argv[])
+{ return execve(path, argv, environ); }
+int execvp(const char *file, char *const argv[])
+{ return exec_search(file, argv, environ); }
+int fexecve(int descriptor, char *const argv[], char *const envp[])
+{ return (int)call(ZEDBSD_SYS_fexecve, descriptor, (uintptr_t)argv,
+	(uintptr_t)envp, 0, 0, 0); }
+
+static int
+exec_varargs(const char *path, const char *first, va_list arguments,
+	int search, int explicit_environment)
+{
+	char *argv[ZEDBSD_SPAWN_ARG_MAX + 1U];
+	char *const *envp = environ;
+	size_t count = 0;
+	const char *argument = first;
+
+	while (argument != NULL) {
+		if (count == ZEDBSD_SPAWN_ARG_MAX) {
+			errno = E2BIG;
+			return -1;
+		}
+		argv[count++] = (char *)(uintptr_t)argument;
+		argument = va_arg(arguments, const char *);
+	}
+	argv[count] = NULL;
+	if (explicit_environment)
+		envp = va_arg(arguments, char *const *);
+	return search ? exec_search(path, argv, (char *const *)envp) :
+		execve(path, argv, (char *const *)envp);
+}
+
+int
+execl(const char *path, const char *first, ...)
+{
+	va_list arguments;
+	int result;
+	va_start(arguments, first);
+	result = exec_varargs(path, first, arguments, 0, 0);
+	va_end(arguments);
+	return result;
+}
+
+int
+execle(const char *path, const char *first, ...)
+{
+	va_list arguments;
+	int result;
+	va_start(arguments, first);
+	result = exec_varargs(path, first, arguments, 0, 1);
+	va_end(arguments);
+	return result;
+}
+
+int
+execlp(const char *file, const char *first, ...)
+{
+	va_list arguments;
+	int result;
+	va_start(arguments, first);
+	result = exec_varargs(file, first, arguments, 1, 0);
+	va_end(arguments);
+	return result;
+}
 pid_t getpid(void) { return (pid_t)call(ZEDBSD_SYS_getpid, 0, 0, 0, 0, 0, 0); }
+int sched_yield(void) { return (int)call(ZEDBSD_SYS_sched_yield, 0, 0, 0, 0, 0, 0); }
 pid_t getppid(void) { return (pid_t)call(ZEDBSD_SYS_getppid, 0, 0, 0, 0, 0, 0); }
 pid_t getpgrp(void) { return (pid_t)call(ZEDBSD_SYS_getpgrp, 0, 0, 0, 0, 0, 0); }
 pid_t getpgid(pid_t pid) { return (pid_t)call(ZEDBSD_SYS_getpgid, pid, 0, 0, 0, 0, 0); }
@@ -975,6 +1325,100 @@ struct dirent *readdir(DIR *directory)
 	directory->current.d_name[sizeof(directory->current.d_name) - 1U] = '\0';
 	return &directory->current;
 }
+int
+readdir_r(DIR *directory, struct dirent *entry, struct dirent **result)
+{
+	struct dirent *current;
+	int saved_errno;
+
+	if (directory == NULL || entry == NULL || result == NULL)
+		return EINVAL;
+	errno = 0;
+	current = readdir(directory);
+	saved_errno = errno;
+	if (current == NULL) {
+		*result = NULL;
+		return saved_errno;
+	}
+	*entry = *current;
+	*result = entry;
+	return 0;
+}
+
+int
+alphasort(const struct dirent **left, const struct dirent **right)
+{
+	return strcoll((*left)->d_name, (*right)->d_name);
+}
+
+int
+scandir(const char *path, struct dirent ***result,
+	int (*filter)(const struct dirent *),
+	int (*compare)(const struct dirent **, const struct dirent **))
+{
+	struct dirent **entries = NULL;
+	DIR *directory;
+	size_t count = 0, capacity = 0;
+	int error = 0;
+
+	if (path == NULL || result == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	directory = opendir(path);
+	if (directory == NULL)
+		return -1;
+	for (;;) {
+		struct dirent *entry, *copy;
+		errno = 0;
+		entry = readdir(directory);
+		if (entry == NULL) {
+			error = errno;
+			break;
+		}
+		if (filter != NULL && !filter(entry))
+			continue;
+		copy = malloc(sizeof(*copy));
+		if (copy == NULL) { error = ENOMEM; break; }
+		*copy = *entry;
+		if (count == capacity) {
+			size_t next = capacity != 0 ? capacity * 2U : 16U;
+			struct dirent **grown;
+			if (next < capacity || next > SIZE_MAX / sizeof(*entries)) {
+				free(copy); error = EOVERFLOW; break;
+			}
+			grown = realloc(entries, next * sizeof(*entries));
+			if (grown == NULL) { free(copy); error = ENOMEM; break; }
+			entries = grown;
+			capacity = next;
+		}
+		entries[count++] = copy;
+	}
+	if (closedir(directory) != 0 && error == 0)
+		error = errno;
+	if (error != 0) {
+		while (count != 0) free(entries[--count]);
+		free(entries);
+		errno = error;
+		return -1;
+	}
+	if (compare != NULL && count > 1) {
+		size_t index;
+		for (index = 1; index < count; index++) {
+			struct dirent *entry = entries[index];
+			size_t position = index;
+			while (position != 0 &&
+			    compare((const struct dirent **)&entries[position - 1U],
+			    (const struct dirent **)&entry) > 0) {
+				entries[position] = entries[position - 1U];
+				position--;
+			}
+			entries[position] = entry;
+		}
+	}
+	*result = entries;
+	return (int)count;
+}
 int closedir(DIR *directory)
 {
 	int result;
@@ -1083,8 +1527,16 @@ stream_write_direct(FILE *stream, const unsigned char *buffer, size_t length,
 {
 	*written = 0;
 	while (*written < length) {
-		ssize_t result = write(stream_fd(stream), buffer + *written,
-		    length - *written);
+		size_t request = length - *written;
+		ssize_t result;
+		if (stream->cookie_write != NULL) {
+			if (request > (size_t)INT_MAX)
+				request = INT_MAX;
+			result = stream->cookie_write(stream->context,
+			    (const char *)buffer + *written, (int)request);
+		} else {
+			result = write(stream_fd(stream), buffer + *written, request);
+		}
 		if (result > 0) {
 			*written += (size_t)result;
 			continue;
@@ -1095,6 +1547,17 @@ stream_write_direct(FILE *stream, const unsigned char *buffer, size_t length,
 		return EOF;
 	}
 	return 0;
+}
+
+static ssize_t
+stream_read_direct(FILE *stream, void *buffer, size_t length)
+{
+	if (stream->cookie_read != NULL) {
+		if (length > (size_t)INT_MAX)
+			length = INT_MAX;
+		return stream->cookie_read(stream->context, buffer, (int)length);
+	}
+	return read(stream_fd(stream), buffer, length);
 }
 
 static int
@@ -1115,7 +1578,10 @@ stream_flush_locked(FILE *stream)
 	} else if (stream->last_operation == 1 &&
 	    stream->buffer_length > stream->buffer_start) {
 		off_t unread = (off_t)(stream->buffer_length - stream->buffer_start);
-		if (lseek(stream_fd(stream), -unread, SEEK_CUR) < 0) {
+		off_t result = stream->cookie_seek != NULL ?
+		    stream->cookie_seek(stream->context, -unread, SEEK_CUR) :
+		    lseek(stream_fd(stream), -unread, SEEK_CUR);
+		if (result < 0) {
 			stream->error = 1;
 			return EOF;
 		}
@@ -1169,7 +1635,7 @@ FILE *fopen(const char *path, const char *mode)
 	stream_register(stream);
 	return stream;
 }
-int fclose(FILE *stream) { int result, flush_result, old; unsigned allocated; if (stream == NULL) { errno = EINVAL; return EOF; } (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old); stream_registry_acquire(); stream_unregister_locked(stream); flockfile(stream); stream_registry_release(); flush_result = stream_flush_locked(stream); result = close(stream_fd(stream)); allocated = stream->heap_allocated; if (stream->buffer_owned) free(stream->buffer); stream->buffer = NULL; stream->context = NULL; funlockfile(stream); if (allocated) free(stream); (void)pthread_setcancelstate(old, NULL); return result == 0 && flush_result == 0 ? 0 : EOF; }
+int fclose(FILE *stream) { int result, flush_result, old; unsigned allocated; if (stream == NULL) { errno = EINVAL; return EOF; } (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old); stream_registry_acquire(); stream_unregister_locked(stream); flockfile(stream); stream_registry_release(); flush_result = stream_flush_locked(stream); result = stream->cookie_close != NULL ? stream->cookie_close(stream->context) : close(stream_fd(stream)); allocated = stream->heap_allocated; if (stream->buffer_owned) free(stream->buffer); stream->buffer = NULL; stream->context = NULL; funlockfile(stream); if (allocated) free(stream); (void)pthread_setcancelstate(old, NULL); return result == 0 && flush_result == 0 ? 0 : EOF; }
 int fflush(FILE *stream) { int old, result = 0; if (stream != NULL) { stream_enter(stream, &old); result = stream_flush_locked(stream); stream_leave(stream, old); return result; } (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old); stream_registry_acquire(); for (stream = stream_registry; stream != NULL; stream = stream->registry_next) { flockfile(stream); if (stream_flush_locked(stream) == EOF) result = EOF; funlockfile(stream); } stream_registry_release(); (void)pthread_setcancelstate(old, NULL); return result; }
 size_t fread(void *buffer, size_t size, size_t count, FILE *stream) {
 	size_t total, done = 0; int old;
@@ -1199,13 +1665,13 @@ size_t fread(void *buffer, size_t size, size_t count, FILE *stream) {
 		}
 		stream->buffer_start = stream->buffer_length = 0;
 		if (stream->buffering_mode == _IONBF) {
-			result = read(stream_fd(stream), (unsigned char *)buffer + done,
-			    total - done);
+			result = stream_read_direct(stream,
+			    (unsigned char *)buffer + done, total - done);
 			if (result > 0) { done += (size_t)result; continue; }
 		} else {
 			if (stream_ensure_buffer(stream) != 0)
 				break;
-			result = read(stream_fd(stream), stream->buffer,
+			result = stream_read_direct(stream, stream->buffer,
 			    stream->buffer_size);
 			if (result > 0) {
 				stream->buffer_length = (size_t)result;
@@ -1268,11 +1734,588 @@ char *fgets(char *buffer, int size, FILE *stream) {
 	stream_leave(stream, old);
 	return buffer;
 }
-int fseek(FILE *stream, long offset, int whence) { off_t at; int old; if (stream == NULL || (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END)) { errno = EINVAL; return -1; } stream_enter(stream, &old); if (stream->last_operation == 2 && stream_flush_locked(stream) == EOF) { stream_leave(stream, old); return -1; } if (whence == SEEK_CUR) { if ((offset < 0 && (uint64_t)(-(offset + 1L)) + 1U > stream->position) || (offset > 0 && (uint64_t)offset > UINT64_MAX - stream->position)) { stream_leave(stream, old); errno = EINVAL; return -1; } at = lseek(stream_fd(stream), (off_t)(offset < 0 ? stream->position - ((uint64_t)(-(offset + 1L)) + 1U) : stream->position + (uint64_t)offset), SEEK_SET); } else at = lseek(stream_fd(stream), offset, whence); if (at >= 0) { stream->position = (uint64_t)at; stream->eof = 0; stream->ungot_character = EOF; stream->buffer_start = stream->buffer_length = 0; stream->last_operation = 0; } else stream->error = 1; stream_leave(stream, old); return at < 0 ? -1 : 0; }
+int fseek(FILE *stream, long offset, int whence) { off_t at; int old; if (stream == NULL || (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END)) { errno = EINVAL; return -1; } stream_enter(stream, &old); if (stream->last_operation == 2 && stream_flush_locked(stream) == EOF) { stream_leave(stream, old); return -1; } if (stream->cookie_seek != NULL) { at = stream->cookie_seek(stream->context, offset, whence); } else if (whence == SEEK_CUR) { if ((offset < 0 && (uint64_t)(-(offset + 1L)) + 1U > stream->position) || (offset > 0 && (uint64_t)offset > UINT64_MAX - stream->position)) { stream_leave(stream, old); errno = EINVAL; return -1; } at = lseek(stream_fd(stream), (off_t)(offset < 0 ? stream->position - ((uint64_t)(-(offset + 1L)) + 1U) : stream->position + (uint64_t)offset), SEEK_SET); } else at = lseek(stream_fd(stream), offset, whence); if (at >= 0) { stream->position = (uint64_t)at; stream->eof = 0; stream->ungot_character = EOF; stream->buffer_start = stream->buffer_length = 0; stream->last_operation = 0; } else stream->error = 1; stream_leave(stream, old); return at < 0 ? -1 : 0; }
 long ftell(FILE *stream) { uint64_t position; int old; if (stream == NULL) { errno = EINVAL; return -1L; } stream_enter(stream, &old); position = stream->position; stream_leave(stream, old); if (position > LONG_MAX) { errno = EOVERFLOW; return -1L; } return (long)position; }
 
 int setvbuf(FILE *stream, char *buffer, int mode, size_t size) { int old; if (stream == NULL || (mode != _IOFBF && mode != _IOLBF && mode != _IONBF) || (mode != _IONBF && size == 0)) { errno = EINVAL; return -1; } stream_enter(stream, &old); if (stream->io_started) { stream_leave(stream, old); errno = EBUSY; return -1; } if (stream->buffer_owned) free(stream->buffer); stream->buffer = mode == _IONBF ? NULL : (unsigned char *)buffer; stream->buffer_size = mode == _IONBF ? 0 : size; stream->buffer_owned = 0; if (mode != _IONBF && buffer == NULL) { stream->buffer = malloc(size); if (stream->buffer == NULL) { stream->buffer_size = 0; stream->buffering_mode = _IONBF; stream_leave(stream, old); errno = ENOMEM; return -1; } stream->buffer_owned = 1; } stream->buffering_mode = mode; stream_leave(stream, old); return 0; }
 void setbuf(FILE *stream, char *buffer) { (void)setvbuf(stream, buffer, buffer != NULL ? _IOFBF : _IONBF, buffer != NULL ? BUFSIZ : 0); }
+
+int
+fpurge(FILE *stream)
+{
+	int old;
+	if (stream == NULL) { errno = EINVAL; return EOF; }
+	stream_enter(stream, &old);
+	stream->buffer_start = stream->buffer_length = 0;
+	stream->ungot_character = EOF;
+	stream->eof = stream->error = 0;
+	stream_leave(stream, old);
+	return 0;
+}
+
+FILE *
+funopen(const void *cookie, int (*readfn)(void *, char *, int),
+	int (*writefn)(void *, const char *, int),
+	fpos_t (*seekfn)(void *, fpos_t, int), int (*closefn)(void *))
+{
+	FILE *stream;
+	if (readfn == NULL && writefn == NULL) { errno = EINVAL; return NULL; }
+	stream = calloc(1, sizeof(*stream));
+	if (stream == NULL) return NULL;
+	stream->context = (void *)(uintptr_t)cookie;
+	stream->mode = (readfn != NULL ? 1U : 0U) | (writefn != NULL ? 2U : 0U);
+	stream->buffering_mode = _IOFBF;
+	stream->ungot_character = EOF;
+	stream->heap_allocated = 1;
+	stream->cookie_read = readfn;
+	stream->cookie_write = writefn;
+	stream->cookie_seek = seekfn;
+	stream->cookie_close = closefn;
+	stream_register(stream);
+	return stream;
+}
+
+FILE *
+freopen(const char *path, const char *mode, FILE *stream)
+{
+	FILE *replacement;
+	unsigned allocated;
+	if (stream == NULL) { errno = EINVAL; return NULL; }
+	replacement = fopen(path, mode);
+	if (replacement == NULL) { (void)fclose(stream); return NULL; }
+	allocated = stream->heap_allocated;
+	stream_registry_acquire();
+	stream_unregister_locked(stream);
+	stream_unregister_locked(replacement);
+	stream_registry_release();
+	(void)fflush(stream);
+	if (stream->cookie_close != NULL)
+		(void)stream->cookie_close(stream->context);
+	else
+		(void)close(stream_fd(stream));
+	if (stream->buffer_owned)
+		free(stream->buffer);
+	*stream = *replacement;
+	stream->heap_allocated = allocated;
+	stream->lock = 0;
+	stream->lock_owner = 0;
+	stream->lock_depth = 0;
+	free(replacement);
+	stream_register(stream);
+	return stream;
+}
+
+static char timezone_standard[16] = "UTC";
+static char timezone_daylight[16] = "UTC";
+char *tzname[2] = { timezone_standard, timezone_daylight };
+static long timezone_east;
+static long timezone_daylight_east;
+static int timezone_has_daylight;
+
+enum timezone_rule_kind { TZ_RULE_JULIAN, TZ_RULE_DAY, TZ_RULE_MONTH };
+struct timezone_rule {
+	enum timezone_rule_kind kind;
+	int first, second, third, seconds;
+};
+static struct timezone_rule timezone_start =
+	{ TZ_RULE_MONTH, 3, 2, 0, 2 * 3600 };
+static struct timezone_rule timezone_end =
+	{ TZ_RULE_MONTH, 11, 1, 0, 2 * 3600 };
+static int calendar_leap_year(int);
+
+static int64_t
+floor_div(int64_t value, int64_t divisor)
+{
+	int64_t quotient = value / divisor;
+	if (value % divisor < 0) quotient--;
+	return quotient;
+}
+
+/* Gregorian calendar conversion, with day zero equal to 1970-01-01. */
+static int64_t
+days_from_civil(int64_t year, unsigned month, unsigned day)
+{
+	int64_t era;
+	unsigned year_of_era, day_of_year, day_of_era;
+	year -= month <= 2;
+	era = floor_div(year, 400);
+	year_of_era = (unsigned)(year - era * 400);
+	day_of_year = (153U * (month + (month > 2 ? (unsigned)-3 : 9U)) + 2U) /
+	    5U + day - 1U;
+	day_of_era = year_of_era * 365U + year_of_era / 4U -
+	    year_of_era / 100U + day_of_year;
+	return era * 146097 + (int64_t)day_of_era - 719468;
+}
+
+static void
+civil_from_days(int64_t days, int *year, unsigned *month, unsigned *day,
+	unsigned *year_day)
+{
+	int64_t era, civil_year;
+	unsigned day_of_era, year_of_era, day_of_year, month_prime;
+	days += 719468;
+	era = floor_div(days, 146097);
+	day_of_era = (unsigned)(days - era * 146097);
+	year_of_era = (day_of_era - day_of_era / 1460U +
+	    day_of_era / 36524U - day_of_era / 146096U) / 365U;
+	civil_year = (int64_t)year_of_era + era * 400;
+	day_of_year = day_of_era - (365U * year_of_era + year_of_era / 4U -
+	    year_of_era / 100U);
+	month_prime = (5U * day_of_year + 2U) / 153U;
+	*day = day_of_year - (153U * month_prime + 2U) / 5U + 1U;
+	*month = month_prime + (month_prime < 10U ? 3U : (unsigned)-9);
+	civil_year += *month <= 2U;
+	*year = (int)civil_year;
+	*year_day = (unsigned)(days_from_civil(civil_year, *month, *day) -
+	    days_from_civil(civil_year, 1, 1));
+}
+
+struct tm *
+gmtime_r(const time_t *restrict value, struct tm *restrict result)
+{
+	int64_t days, seconds;
+	int year;
+	unsigned month, day, year_day;
+	if (value == NULL || result == NULL) { errno = EINVAL; return NULL; }
+	days = floor_div(*value, 86400);
+	seconds = *value - days * 86400;
+	civil_from_days(days, &year, &month, &day, &year_day);
+	result->tm_year = year - 1900;
+	result->tm_mon = (int)month - 1;
+	result->tm_mday = (int)day;
+	result->tm_hour = (int)(seconds / 3600);
+	result->tm_min = (int)(seconds / 60 % 60);
+	result->tm_sec = (int)(seconds % 60);
+	result->tm_wday = (int)((days + 4) % 7);
+	if (result->tm_wday < 0) result->tm_wday += 7;
+	result->tm_yday = (int)year_day;
+	result->tm_isdst = 0;
+	return result;
+}
+
+struct tm *
+gmtime(const time_t *value)
+{
+	static struct tm result;
+	return gmtime_r(value, &result);
+}
+
+static const char *
+timezone_name(const char *text, char *name, size_t capacity)
+{
+	size_t length = 0;
+	int quoted = *text == '<';
+	if (quoted) text++;
+	while (*text != '\0' && (quoted ? *text != '>' :
+	    ((*text >= 'A' && *text <= 'Z') || (*text >= 'a' && *text <= 'z')))) {
+		if (length + 1U < capacity) name[length++] = *text;
+		text++;
+	}
+	if (quoted && *text == '>') text++;
+	if (length < 3U) return NULL;
+	name[length] = '\0';
+	return text;
+}
+
+static const char *
+timezone_offset(const char *text, long *east)
+{
+	long sign = 1, hours = 0, minutes = 0, seconds = 0;
+	if (*text == '+' || *text == '-') { if (*text++ == '-') sign = -1; }
+	if (*text < '0' || *text > '9') return NULL;
+	while (*text >= '0' && *text <= '9') hours = hours * 10 + (*text++ - '0');
+	if (*text == ':') {
+		text++;
+		if (*text < '0' || *text > '9') return NULL;
+		while (*text >= '0' && *text <= '9') minutes = minutes * 10 + (*text++ - '0');
+		if (*text == ':') {
+			text++;
+			if (*text < '0' || *text > '9') return NULL;
+			while (*text >= '0' && *text <= '9') seconds = seconds * 10 + (*text++ - '0');
+		}
+	}
+	if (hours > 24 || minutes > 59 || seconds > 59) return NULL;
+	*east = -sign * (hours * 3600 + minutes * 60 + seconds);
+	return text;
+}
+
+static const char *
+timezone_number(const char *text, int *number)
+{
+	int value = 0;
+	if (*text < '0' || *text > '9') return NULL;
+	while (*text >= '0' && *text <= '9') value = value * 10 + (*text++ - '0');
+	*number = value;
+	return text;
+}
+
+static const char *
+timezone_rule_parse(const char *text, struct timezone_rule *rule)
+{
+	long east;
+	if (*text == 'M') {
+		rule->kind = TZ_RULE_MONTH; text++;
+		if ((text = timezone_number(text, &rule->first)) == NULL || *text++ != '.' ||
+		    (text = timezone_number(text, &rule->second)) == NULL || *text++ != '.' ||
+		    (text = timezone_number(text, &rule->third)) == NULL ||
+		    rule->first < 1 || rule->first > 12 || rule->second < 1 ||
+		    rule->second > 5 || rule->third < 0 || rule->third > 6) return NULL;
+	} else {
+		rule->kind = *text == 'J' ? TZ_RULE_JULIAN : TZ_RULE_DAY;
+		if (*text == 'J') text++;
+		if ((text = timezone_number(text, &rule->first)) == NULL ||
+		    (rule->kind == TZ_RULE_JULIAN && (rule->first < 1 || rule->first > 365)) ||
+		    (rule->kind == TZ_RULE_DAY && (rule->first < 0 || rule->first > 365)))
+			return NULL;
+	}
+	rule->seconds = 2 * 3600;
+	if (*text == '/') {
+		text++;
+		/* Offset parsing uses the opposite sign convention from rule times. */
+		if ((text = timezone_offset(text, &east)) == NULL) return NULL;
+		rule->seconds = (int)-east;
+	}
+	return text;
+}
+
+void
+tzset(void)
+{
+	const char *text = getenv("TZ"), *at;
+	if (text == NULL || *text == '\0') text = "UTC0";
+	at = timezone_name(text, timezone_standard, sizeof(timezone_standard));
+	if (at == NULL || (at = timezone_offset(at, &timezone_east)) == NULL) {
+		strcpy(timezone_standard, "UTC");
+		strcpy(timezone_daylight, "UTC");
+		timezone_east = timezone_daylight_east = 0;
+		timezone_has_daylight = 0;
+		return;
+	}
+	strcpy(timezone_daylight, timezone_standard);
+	timezone_daylight_east = timezone_east + 3600;
+	timezone_has_daylight = 0;
+	if (*at == '\0') return;
+	at = timezone_name(at, timezone_daylight, sizeof(timezone_daylight));
+	if (at == NULL) return;
+	timezone_has_daylight = 1;
+	if (*at != ',' && *at != '\0') {
+		const char *next = timezone_offset(at, &timezone_daylight_east);
+		if (next == NULL) { timezone_has_daylight = 0; return; }
+		at = next;
+	}
+	timezone_start = (struct timezone_rule){ TZ_RULE_MONTH, 3, 2, 0, 2 * 3600 };
+	timezone_end = (struct timezone_rule){ TZ_RULE_MONTH, 11, 1, 0, 2 * 3600 };
+	if (*at == ',') {
+		at = timezone_rule_parse(at + 1, &timezone_start);
+		if (at == NULL || *at != ',' ||
+		    (at = timezone_rule_parse(at + 1, &timezone_end)) == NULL || *at != '\0')
+			timezone_has_daylight = 0;
+	}
+}
+
+static int
+timezone_rule_yday(int year, const struct timezone_rule *rule)
+{
+	if (rule->kind == TZ_RULE_DAY) return rule->first;
+	if (rule->kind == TZ_RULE_JULIAN)
+		return rule->first - 1 + (calendar_leap_year(year) && rule->first >= 60);
+	{
+		int64_t first = days_from_civil(year, (unsigned)rule->first, 1);
+		int weekday = (int)((first + 4) % 7);
+		int day;
+		if (weekday < 0) weekday += 7;
+		day = 1 + (rule->third - weekday + 7) % 7 + 7 * (rule->second - 1);
+		if (rule->second == 5) {
+			int next_month = rule->first == 12 ? 1 : rule->first + 1;
+			int next_year = rule->first == 12 ? year + 1 : year;
+			int month_days = (int)(days_from_civil(next_year, (unsigned)next_month, 1) - first);
+			while (day + 7 <= month_days) day += 7;
+		}
+		return (int)(first - days_from_civil(year, 1, 1)) + day - 1;
+	}
+}
+
+static int
+timezone_is_daylight(time_t value)
+{
+	struct tm standard;
+	time_t local_standard = value + timezone_east;
+	int year, start_yday, end_yday;
+	int64_t year_start, start, end;
+	if (!timezone_has_daylight || gmtime_r(&local_standard, &standard) == NULL)
+		return 0;
+	year = standard.tm_year + 1900;
+	year_start = days_from_civil(year, 1, 1) * 86400;
+	start_yday = timezone_rule_yday(year, &timezone_start);
+	end_yday = timezone_rule_yday(year, &timezone_end);
+	start = year_start + (int64_t)start_yday * 86400 +
+	    timezone_start.seconds - timezone_east;
+	end = year_start + (int64_t)end_yday * 86400 +
+	    timezone_end.seconds - timezone_daylight_east;
+	return start < end ? value >= start && value < end :
+	    value >= start || value < end;
+}
+
+struct tm *
+localtime_r(const time_t *restrict value, struct tm *restrict result)
+{
+	time_t local;
+	long offset;
+	if (value == NULL || result == NULL) { errno = EINVAL; return NULL; }
+	tzset();
+	offset = timezone_is_daylight(*value) ? timezone_daylight_east : timezone_east;
+	if ((offset > 0 && *value > INT64_MAX - offset) ||
+	    (offset < 0 && *value < INT64_MIN - offset)) {
+		errno = EOVERFLOW;
+		return NULL;
+	}
+	local = *value + offset;
+	if (gmtime_r(&local, result) == NULL) return NULL;
+	result->tm_isdst = offset == timezone_daylight_east && timezone_has_daylight;
+	return result;
+}
+
+struct tm *
+localtime(const time_t *value)
+{
+	static struct tm result;
+	return localtime_r(value, &result);
+}
+
+time_t
+mktime(struct tm *value)
+{
+	int64_t year, month, days, seconds;
+	time_t result;
+	struct tm normalized;
+	if (value == NULL) { errno = EINVAL; return (time_t)-1; }
+	year = (int64_t)value->tm_year + 1900;
+	month = value->tm_mon;
+	year += floor_div(month, 12);
+	month -= floor_div(month, 12) * 12;
+	days = days_from_civil(year, (unsigned)month + 1U, 1U) +
+	    (int64_t)value->tm_mday - 1;
+	seconds = days * 86400 + (int64_t)value->tm_hour * 3600 +
+	    (int64_t)value->tm_min * 60 + value->tm_sec;
+	tzset();
+	result = seconds - (value->tm_isdst > 0 ? timezone_daylight_east :
+	    timezone_east);
+	if (value->tm_isdst < 0 && timezone_is_daylight(result))
+		result = seconds - timezone_daylight_east;
+	if (localtime_r(&result, &normalized) == NULL)
+		return (time_t)-1;
+	*value = normalized;
+	return result;
+}
+
+double difftime(time_t end, time_t beginning)
+{ return (double)end - (double)beginning; }
+
+char *
+asctime_r(const struct tm *restrict value, char *restrict buffer)
+{
+	static const char *const weekdays[] =
+	    { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+	static const char *const months[] =
+	    { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+	      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+	if (value == NULL || buffer == NULL || value->tm_wday < 0 ||
+	    value->tm_wday > 6 || value->tm_mon < 0 || value->tm_mon > 11) {
+		errno = EINVAL;
+		return NULL;
+	}
+	if (snprintf(buffer, 26, "%.3s %.3s %2d %02d:%02d:%02d %04d\n",
+	    weekdays[value->tm_wday], months[value->tm_mon], value->tm_mday,
+	    value->tm_hour, value->tm_min, value->tm_sec,
+	    value->tm_year + 1900) != 25) {
+		errno = EOVERFLOW;
+		return NULL;
+	}
+	return buffer;
+}
+
+char *
+asctime(const struct tm *value)
+{
+	static char buffer[26];
+	return asctime_r(value, buffer);
+}
+
+char *
+ctime_r(const time_t *restrict value, char *restrict buffer)
+{
+	struct tm local;
+	return localtime_r(value, &local) != NULL ? asctime_r(&local, buffer) : NULL;
+}
+
+char *
+ctime(const time_t *value)
+{
+	static char buffer[26];
+	return ctime_r(value, buffer);
+}
+
+static int
+strftime_append(char **output, size_t *remaining, const char *text)
+{
+	size_t length = strlen(text);
+	if (length >= *remaining) return -1;
+	memcpy(*output, text, length);
+	*output += length;
+	*remaining -= length;
+	return 0;
+}
+
+static int
+strftime_number(char **output, size_t *remaining, int value, int width,
+	char padding)
+{
+	char buffer[32];
+	int length = snprintf(buffer, sizeof(buffer), padding == '0' ? "%0*d" : "%*d",
+	    width, value);
+	return length < 0 ? -1 : strftime_append(output, remaining, buffer);
+}
+
+static int
+calendar_leap_year(int year)
+{
+	return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+}
+
+static int
+iso_weeks_in_year(int year)
+{
+	int64_t first_day = days_from_civil(year, 1, 1);
+	int weekday = (int)((first_day + 4) % 7);
+	if (weekday < 0) weekday += 7;
+	return weekday == 4 || (weekday == 3 && calendar_leap_year(year)) ? 53 : 52;
+}
+
+static void
+iso_week(const struct tm *value, int *year, int *week)
+{
+	int iso_weekday = value->tm_wday == 0 ? 7 : value->tm_wday;
+	*year = value->tm_year + 1900;
+	*week = (value->tm_yday + 10 - iso_weekday) / 7;
+	if (*week < 1) {
+		(*year)--;
+		*week = iso_weeks_in_year(*year);
+	} else if (*week > iso_weeks_in_year(*year)) {
+		(*year)++;
+		*week = 1;
+	}
+}
+
+size_t
+strftime_l(char *restrict destination, size_t capacity,
+	const char *restrict format, const struct tm *restrict value,
+	locale_t locale)
+{
+	static const char *const weekday_short[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+	static const char *const weekday_long[] = {"Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"};
+	static const char *const month_short[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+	static const char *const month_long[] = {"January","February","March","April","May","June","July","August","September","October","November","December"};
+	char *output = destination;
+	size_t remaining = capacity;
+	(void)locale;
+	if (destination == NULL || format == NULL || value == NULL || capacity == 0)
+		return 0;
+	tzset();
+	while (*format != '\0') {
+		char conversion;
+		if (*format != '%') {
+			char literal[2] = { *format++, '\0' };
+			if (strftime_append(&output, &remaining, literal) != 0) return 0;
+			continue;
+		}
+		format++;
+		if (*format == 'E' || *format == 'O') format++;
+		conversion = *format++;
+		switch (conversion) {
+		case '%': if (strftime_append(&output,&remaining,"%")) return 0; break;
+		case 'a': if (value->tm_wday<0||value->tm_wday>6||strftime_append(&output,&remaining,weekday_short[value->tm_wday])) return 0; break;
+		case 'A': if (value->tm_wday<0||value->tm_wday>6||strftime_append(&output,&remaining,weekday_long[value->tm_wday])) return 0; break;
+		case 'b': case 'h': if (value->tm_mon<0||value->tm_mon>11||strftime_append(&output,&remaining,month_short[value->tm_mon])) return 0; break;
+		case 'B': if (value->tm_mon<0||value->tm_mon>11||strftime_append(&output,&remaining,month_long[value->tm_mon])) return 0; break;
+		case 'C': if (strftime_number(&output,&remaining,(value->tm_year+1900)/100,2,'0')) return 0; break;
+		case 'd': if (strftime_number(&output,&remaining,value->tm_mday,2,'0')) return 0; break;
+		case 'e': if (strftime_number(&output,&remaining,value->tm_mday,2,' ')) return 0; break;
+		case 'H': if (strftime_number(&output,&remaining,value->tm_hour,2,'0')) return 0; break;
+		case 'I': { int hour=value->tm_hour%12; if(!hour)hour=12; if(strftime_number(&output,&remaining,hour,2,'0'))return 0; break; }
+		case 'j': if (strftime_number(&output,&remaining,value->tm_yday+1,3,'0')) return 0; break;
+		case 'm': if (strftime_number(&output,&remaining,value->tm_mon+1,2,'0')) return 0; break;
+		case 'M': if (strftime_number(&output,&remaining,value->tm_min,2,'0')) return 0; break;
+		case 'n': if (strftime_append(&output,&remaining,"\n")) return 0; break;
+		case 'p': if (strftime_append(&output,&remaining,value->tm_hour<12?"AM":"PM")) return 0; break;
+		case 'S': if (strftime_number(&output,&remaining,value->tm_sec,2,'0')) return 0; break;
+		case 't': if (strftime_append(&output,&remaining,"\t")) return 0; break;
+		case 'u': if (strftime_number(&output,&remaining,value->tm_wday?value->tm_wday:7,1,'0')) return 0; break;
+		case 'w': if (strftime_number(&output,&remaining,value->tm_wday,1,'0')) return 0; break;
+		case 'y': if (strftime_number(&output,&remaining,(value->tm_year+1900)%100,2,'0')) return 0; break;
+		case 'Y': if (strftime_number(&output,&remaining,value->tm_year+1900,4,'0')) return 0; break;
+		case 'z': { long z=value->tm_isdst>0?timezone_daylight_east:timezone_east; char b[8]; snprintf(b,sizeof(b),"%c%02ld%02ld",z<0?'-':'+',(z<0?-z:z)/3600,((z<0?-z:z)%3600)/60); if(strftime_append(&output,&remaining,b))return 0; break; }
+		case 'Z': if (strftime_append(&output,&remaining,tzname[value->tm_isdst>0])) return 0; break;
+		case 'D': case 'x': { char b[16]; snprintf(b,sizeof(b),"%02d/%02d/%02d",value->tm_mon+1,value->tm_mday,(value->tm_year+1900)%100); if(strftime_append(&output,&remaining,b))return 0; break; }
+		case 'F': { char b[16]; snprintf(b,sizeof(b),"%04d-%02d-%02d",value->tm_year+1900,value->tm_mon+1,value->tm_mday); if(strftime_append(&output,&remaining,b))return 0; break; }
+		case 'g': { int y,w;iso_week(value,&y,&w);(void)w;if(strftime_number(&output,&remaining,y%100,2,'0'))return 0;break; }
+		case 'G': { int y,w;iso_week(value,&y,&w);(void)w;if(strftime_number(&output,&remaining,y,4,'0'))return 0;break; }
+		case 'R': { char b[8]; snprintf(b,sizeof(b),"%02d:%02d",value->tm_hour,value->tm_min); if(strftime_append(&output,&remaining,b))return 0; break; }
+		case 'T': case 'X': { char b[12]; snprintf(b,sizeof(b),"%02d:%02d:%02d",value->tm_hour,value->tm_min,value->tm_sec); if(strftime_append(&output,&remaining,b))return 0; break; }
+		case 'r': { char b[16]; int h=value->tm_hour%12;if(!h)h=12;snprintf(b,sizeof(b),"%02d:%02d:%02d %s",h,value->tm_min,value->tm_sec,value->tm_hour<12?"AM":"PM");if(strftime_append(&output,&remaining,b))return 0;break; }
+		case 'c': { char b[32]; if(strftime_l(b,sizeof(b),"%a %b %e %T %Y",value,locale)==0||strftime_append(&output,&remaining,b))return 0;break; }
+		case 'U': if (strftime_number(&output,&remaining,(value->tm_yday+7-value->tm_wday)/7,2,'0')) return 0; break;
+		case 'V': { int y,w;iso_week(value,&y,&w);(void)y;if(strftime_number(&output,&remaining,w,2,'0'))return 0;break; }
+		case 'W': { int wd=value->tm_wday?value->tm_wday-1:6;if(strftime_number(&output,&remaining,(value->tm_yday+7-wd)/7,2,'0'))return 0;break; }
+		default: return 0;
+		}
+	}
+	*output = '\0';
+	return (size_t)(output - destination);
+}
+
+size_t
+strftime(char *restrict destination, size_t capacity,
+	const char *restrict format, const struct tm *restrict value)
+{
+	return strftime_l(destination, capacity, format, value, LC_GLOBAL_LOCALE);
+}
+
+clock_t
+clock(void)
+{
+	struct process_times_record record;
+	uint64_t value;
+	if (call(ZEDBSD_SYS_times, (uintptr_t)&record, 0, 0, 0, 0, 0) < 0)
+		return (clock_t)-1;
+	if (record.self_ticks > UINT64_MAX / (CLOCKS_PER_SEC / 100L)) {
+		errno = EOVERFLOW;
+		return (clock_t)-1;
+	}
+	value = record.self_ticks * (CLOCKS_PER_SEC / 100L);
+	if (value > (uint64_t)LONG_MAX) { errno = EOVERFLOW; return (clock_t)-1; }
+	return (clock_t)value;
+}
+
+clock_t
+times(struct tms *result)
+{
+	struct process_times_record record;
+	if (call(ZEDBSD_SYS_times, (uintptr_t)&record, 0, 0, 0, 0, 0) < 0)
+		return (clock_t)-1;
+	if (record.self_ticks > (uint64_t)LONG_MAX ||
+	    record.child_ticks > (uint64_t)LONG_MAX ||
+	    record.elapsed_ticks > (uint64_t)LONG_MAX) {
+		errno = EOVERFLOW;
+		return (clock_t)-1;
+	}
+	if (result != NULL) {
+		result->tms_utime = (clock_t)record.self_ticks;
+		result->tms_stime = 0;
+		result->tms_cutime = (clock_t)record.child_ticks;
+		result->tms_cstime = 0;
+	}
+	return (clock_t)record.elapsed_ticks;
+}
 
 time_t time(time_t *result) {
 	struct timespec ts; time_t value = clock_gettime(CLOCK_REALTIME, &ts) == 0 ? ts.tv_sec : (time_t)-1;
@@ -1290,6 +2333,8 @@ int gettimeofday(struct timeval *result, void *timezone) {
 	return 0;
 }
 void exit(int status) {
+	extern void __libc_run_exit_handlers(void);
+	__libc_run_exit_handlers();
 #if defined(ZEDBSD_DYNAMIC_LIBC)
 	__rtld_exports.process_fini();
 #else
@@ -1320,7 +2365,8 @@ void __libc_init(int argc, char **argv, char **envp)
 	#define USER_HEAP_INITIAL (64U * 1024U)
 	void *arena;
 	size_t env_count;
-	(void)argc; (void)argv;
+	if (argc > 0 && argv != NULL)
+		setprogname(argv[0]);
 	for (env_count = 0; env_count < ENVIRONMENT_MAX && envp != NULL &&
 	     envp[env_count] != NULL; env_count++)
 		environment_entries[env_count] = envp[env_count];

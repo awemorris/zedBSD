@@ -1,11 +1,13 @@
 /* POSIX R2 public-header compile fixture.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <dirent.h>
+#include <aio.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <mqueue.h>
 #include <netdb.h>
 #include <poll.h>
+#include <sched.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <signal.h>
@@ -21,6 +23,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/times.h>
 #include <sys/uio.h>
 #include <sys/un.h>
 #include <sys/utsname.h>

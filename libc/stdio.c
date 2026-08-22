@@ -268,7 +268,7 @@ failed:
 }
 
 int
-sscanf(const char *string, const char *format, ...)
+__stdio_legacy_sscanf(const char *string, const char *format, ...)
 {
 	va_list arguments;
 	char *end;
@@ -336,6 +336,8 @@ abort(void)
 __attribute__((weak)) void
 exit(int status)
 {
+	extern void __libc_run_exit_handlers(void);
+	__libc_run_exit_handlers();
 	(void)status;
 	__libc_panic("exit");
 }

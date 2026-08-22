@@ -5,6 +5,7 @@
 #include <zedbsd/thread.h>
 #include <zedbsd/rtld-abi.h>
 #include <errno.h>
+#include <fenv.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -37,6 +38,7 @@ struct pthread_tcb {
 	char *environment_value;
 	const void *locale_value;
 	uint32_t multibyte_state[4];
+	fenv_t floating_environment;
 	char ptsname_buffer[32];
 	unsigned detached;
 	unsigned detached_queued;
@@ -187,6 +189,21 @@ __pthread_mbstate(unsigned which)
 	if (tcb == NULL || which > 1U)
 		return NULL;
 	return &tcb->multibyte_state[which * 2U];
+}
+
+fenv_t *
+__libc_fenv_location(void)
+{
+#if defined(ZEDBSD_DYNAMIC_LIBC)
+	static _Thread_local fenv_t environment = { 0U, FE_TONEAREST };
+	return &environment;
+#else
+	static fenv_t bootstrap = { 0U, FE_TONEAREST };
+	struct pthread_tcb *tcb = self_tcb();
+	if (tcb != NULL && tcb->floating_environment.rounding == 0)
+		tcb->floating_environment.rounding = FE_TONEAREST;
+	return tcb != NULL ? &tcb->floating_environment : &bootstrap;
+#endif
 }
 
 char *
@@ -634,18 +651,30 @@ int pthread_attr_setstack(pthread_attr_t *a, void *stack, size_t size)
 { if (a == NULL || stack == NULL || size < PTHREAD_STACK_MIN) return EINVAL; a->stackaddr = stack; a->stacksize = size; a->guardsize = 0; a->stackset = 1; return 0; }
 int pthread_attr_getstack(const pthread_attr_t *a, void **stack, size_t *size)
 { if (a == NULL || stack == NULL || size == NULL) return EINVAL; *stack = a->stackaddr; *size = a->stacksize; return 0; }
+int pthread_attr_getschedparam(const pthread_attr_t *a, struct sched_param *p)
+{ if (a == NULL || p == NULL) return EINVAL; *p = a->schedparam; return 0; }
+int pthread_attr_setschedparam(pthread_attr_t *a, const struct sched_param *p)
+{ if (a == NULL || p == NULL) return EINVAL; if (p->sched_priority != 0) return ENOTSUP; a->schedparam = *p; return 0; }
 
 int pthread_mutex_init(pthread_mutex_t *m, const pthread_mutexattr_t *a)
-{ if (m == NULL) return EINVAL; memset(m, 0, sizeof(*m)); if (a != NULL) { m->type = a->type; m->pshared = a->pshared; } return 0; }
+{ if (m == NULL) return EINVAL; memset(m, 0, sizeof(*m)); if (a != NULL) { m->type = a->type; m->pshared = a->pshared; m->robust = a->robust; } return 0; }
 int pthread_mutex_destroy(pthread_mutex_t *m)
 { return m == NULL ? EINVAL : (__atomic_load_n(&m->locked, __ATOMIC_ACQUIRE) ? EBUSY : 0); }
 int pthread_mutexattr_init(pthread_mutexattr_t *a)
-{ if (a == NULL) return EINVAL; a->type = PTHREAD_MUTEX_NORMAL; a->pshared = PTHREAD_PROCESS_PRIVATE; return 0; }
+{ if (a == NULL) return EINVAL; a->type = PTHREAD_MUTEX_NORMAL; a->pshared = PTHREAD_PROCESS_PRIVATE; a->robust = PTHREAD_MUTEX_STALLED; return 0; }
 int pthread_mutexattr_destroy(pthread_mutexattr_t *a) { return a != NULL ? 0 : EINVAL; }
+int pthread_mutexattr_gettype(const pthread_mutexattr_t *a, int *type)
+{ if (a == NULL || type == NULL) return EINVAL; *type = (int)a->type; return 0; }
 int pthread_mutexattr_settype(pthread_mutexattr_t *a, int type)
 { if (a == NULL || type < PTHREAD_MUTEX_NORMAL || type > PTHREAD_MUTEX_ERRORCHECK) return EINVAL; a->type = (unsigned)type; return 0; }
 int pthread_mutexattr_setpshared(pthread_mutexattr_t *a, int shared)
 { if (a == NULL || (shared != PTHREAD_PROCESS_PRIVATE && shared != PTHREAD_PROCESS_SHARED)) return EINVAL; a->pshared = (unsigned)shared; return 0; }
+int pthread_mutexattr_getrobust(const pthread_mutexattr_t *a, int *robust)
+{ if (a == NULL || robust == NULL) return EINVAL; *robust = (int)a->robust; return 0; }
+int pthread_mutexattr_setrobust(pthread_mutexattr_t *a, int robust)
+{ if (a == NULL || (robust != PTHREAD_MUTEX_STALLED && robust != PTHREAD_MUTEX_ROBUST)) return EINVAL; if (robust == PTHREAD_MUTEX_ROBUST) return ENOTSUP; a->robust = (unsigned)robust; return 0; }
+int pthread_mutex_consistent(pthread_mutex_t *m)
+{ return m == NULL || m->robust != PTHREAD_MUTEX_ROBUST ? EINVAL : ENOTSUP; }
 int
 pthread_mutex_trylock(pthread_mutex_t *m)
 {

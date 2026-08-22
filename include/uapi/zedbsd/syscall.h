@@ -156,6 +156,9 @@ enum syscall_number {
 	ZEDBSD_SYS_fremovexattr = 145,
 	ZEDBSD_SYS_quotactl = 146,
 	ZEDBSD_SYS_snapshotctl = 147,
+	ZEDBSD_SYS_sched_yield = 148,
+	ZEDBSD_SYS_fexecve = 149,
+	ZEDBSD_SYS_times = 150,
 };
 
 #endif

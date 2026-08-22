@@ -81,7 +81,7 @@ ARM64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfc
 	userland/base/libc/utmpx.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c \
-	libc/format.c libc/stdio.c
+	libc/format.c libc/stdio.c $(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
 ARM64_USER_SH_SOURCES := userland/base/sh/main.c \
 	userland/base/sh/builtins.c userland/base/sh/lexer.c userland/base/sh/expand.c
 
@@ -269,7 +269,7 @@ DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c userland/base/libc/poll.c \
 	userland/base/libc/semaphore.c userland/base/libc/mqueue.c userland/base/libc/dlfcn.c \
 	userland/base/libc/socket.c userland/base/libc/signal.c libc/heap.c libc/string.c \
 	libc/ctype.c libc/locale.c libc/wide.c libc/int64.c libc/strto.c \
-	libc/format.c libc/stdio.c
+	libc/format.c libc/stdio.c $(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
 DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(DYNAMIC_DIR)/obj/%.o,\
 	$(DYNAMIC_LIBC_SOURCES)) $(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o
 DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o \
@@ -278,7 +278,7 @@ DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o \
 	$(DYNAMIC_DIR)/obj/userland/base/rtld/string.o
 DYNAMIC_FLOAT_DIR := $(DYNAMIC_DIR)/float
 DYNAMIC_MUSL_MATH_OBJS := $(addprefix $(DYNAMIC_FLOAT_DIR)/musl-,\
-	$(ZEDBSD_MUSL_MATH_REL:.c=.o))
+	$(ZEDBSD_MUSL_MATH_REL:.c=.o)) $(DYNAMIC_FLOAT_DIR)/musl-math-errors.o
 DYNAMIC_MUSL_SCAN_OBJS := $(DYNAMIC_FLOAT_DIR)/musl-shgetc.o \
 	$(DYNAMIC_FLOAT_DIR)/musl-floatscan.o \
 	$(DYNAMIC_FLOAT_DIR)/musl-strtod.o $(DYNAMIC_FLOAT_DIR)/musl-compat.o
@@ -304,7 +304,11 @@ $(DYNAMIC_FLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \
 		-Wno-error=unused-but-set-variable \
-		-Wno-error=parentheses -c $< -o $@
+		-Wno-error=parentheses -Wno-error=unknown-pragmas \
+		-Wno-error=maybe-uninitialized -Wno-error=unused-parameter -c $< -o $@
+$(DYNAMIC_FLOAT_DIR)/musl-math-errors.o: src/softfloat/musl-math-errors.c
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/musl-shgetc.o: $(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c src/softfloat/musl-floatscan.h
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) \

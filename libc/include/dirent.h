@@ -20,6 +20,11 @@ typedef struct __dir_stream DIR;
 DIR *opendir(const char *);
 DIR *fdopendir(int);
 struct dirent *readdir(DIR *);
+int readdir_r(DIR *, struct dirent *, struct dirent **);
+int alphasort(const struct dirent **, const struct dirent **);
+int scandir(const char *, struct dirent ***,
+	int (*)(const struct dirent *),
+	int (*)(const struct dirent **, const struct dirent **));
 int closedir(DIR *);
 void rewinddir(DIR *);
 void seekdir(DIR *, long);

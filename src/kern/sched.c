@@ -3,6 +3,7 @@
 #include "kern/sched.h"
 #include "kern/atomic.h"
 #include "kern/thread.h"
+#include "kern/process.h"
 #include "kern/lock.h"
 #include "kern/kmem.h"
 
@@ -416,6 +417,9 @@ sched_clock_cpu(hal_cpu_id_t id, uint64_t now)
 	}
 	thread = curthread;
 	if (thread != NULL && thread->state == THREAD_RUNNING) {
+		if ((thread->flags & THREAD_FLAG_IDLE) == 0 &&
+		    thread->proc != NULL && thread->proc != &process0)
+			(void)atomic_u64_fetch_add_relaxed(&thread->proc->cpu_ticks, 1U);
 		if ((thread->flags & THREAD_FLAG_IDLE) != 0)
 			preempt = cpu->need_resched != 0;
 		else if (thread->sched.quantum != 0 &&

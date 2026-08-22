@@ -99,5 +99,7 @@ struct winsize {
 #define TIOCFLUSH  _IOW(ZEDBSD_TTY_IOC_GROUP, 11, int32_t)
 #define TIOCGPTN   _IOR(ZEDBSD_TTY_IOC_GROUP, 12, uint32_t)
 #define TIOCSPTLCK _IOW(ZEDBSD_TTY_IOC_GROUP, 13, int32_t)
+#define TIOCGSID   _IOR(ZEDBSD_TTY_IOC_GROUP, 14, int32_t)
+#define TCSBRK     _IOW(ZEDBSD_TTY_IOC_GROUP, 15, int32_t)
 
 #endif

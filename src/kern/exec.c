@@ -323,12 +323,12 @@ out:
 	return error;
 }
 
-int
-process_execve(struct process *process, const char *path, char *const argv[],
-	       char *const envp[])
+static int
+process_exec_file(struct process *process, const char *path,
+	struct file *provided_file, char *const argv[], char *const envp[])
 {
 	struct vmspace *new_vm = NULL, *old_vm;
-	struct file *file = NULL;
+	struct file *file = provided_file;
 	EXEC_IMAGE_INFO image;
 	struct exec_auxv_info aux;
 	uintptr_t sp;
@@ -348,10 +348,18 @@ process_execve(struct process *process, const char *path, char *const argv[],
 	}
 	process->execing = 1;
 	spin_unlock_irqrestore(&process->lock, process_irq);
-	error = file_openat_cred(process->cwdi, process->cred, path, O_RDONLY, 0,
-	    &file);
-	if (error != 0)
+	if (file != NULL)
+		file_ref(file);
+	else {
+		error = file_openat_cred(process->cwdi, process->cred, path,
+		    O_RDONLY, 0, &file);
+		if (error != 0)
+			goto out;
+	}
+	if (file->f_inode == NULL || file->f_inode->i_type != INODE_REG) {
+		error = EACCES;
 		goto out;
+	}
 	error = vfs_access(file->f_inode, process->cred, X_OK);
 	if (error != 0)
 		goto out;
@@ -429,6 +437,21 @@ out:
 	if (new_vm != NULL)
 		vmspace_free(new_vm);
 	return error;
+}
+
+int
+process_execve(struct process *process, const char *path, char *const argv[],
+	char *const envp[])
+{
+	return process_exec_file(process, path, NULL, argv, envp);
+}
+
+int
+process_fexecve(struct process *process, struct file *file,
+	char *const argv[], char *const envp[])
+{
+	const char *label = argv != NULL && argv[0] != NULL ? argv[0] : "fexecve";
+	return process_exec_file(process, label, file, argv, envp);
 }
 
 int

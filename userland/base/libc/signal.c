@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 extern void __signal_restorer(void);
@@ -27,4 +28,50 @@ int sigwaitinfo(const sigset_t*s,siginfo_t*i){return sigtimedwait(s,i,NULL);}
 int sigwait(const sigset_t*s,int*n){int r;if(n==NULL){errno=EINVAL;return EINVAL;}r=sigtimedwait(s,NULL,NULL);if(r<0)return errno;*n=r;return 0;}
 int sigqueue(pid_t p,int n,const union sigval v){uint64_t raw=0;memcpy(&raw,&v,sizeof(raw));return(int)call(ZEDBSD_SYS_sigqueue,p,n,(uintptr_t)raw);}
 int raise(int n){return kill(getpid(),n);}
+
+static const char *
+signal_description(int number)
+{
+	switch (number) {
+	case SIGHUP: return "Hangup";
+	case SIGINT: return "Interrupt";
+	case SIGQUIT: return "Quit";
+	case SIGILL: return "Illegal instruction";
+	case SIGABRT: return "Aborted";
+	case SIGFPE: return "Arithmetic exception";
+	case SIGKILL: return "Killed";
+	case SIGSEGV: return "Segmentation fault";
+	case SIGPIPE: return "Broken pipe";
+	case SIGALRM: return "Alarm clock";
+	case SIGTERM: return "Terminated";
+	case SIGCHLD: return "Child status changed";
+	case SIGCONT: return "Continued";
+	case SIGSTOP: return "Stopped";
+	case SIGTSTP: return "Stopped (tty)";
+	case SIGTTIN: return "Stopped (tty input)";
+	case SIGTTOU: return "Stopped (tty output)";
+	case SIGBUS: return "Bus error";
+	case SIGTRAP: return "Trace trap";
+	default: return "Unknown signal";
+	}
+}
+
+void
+psignal(int number, const char *prefix)
+{
+	if (prefix != NULL && *prefix != '\0')
+		fprintf(stderr, "%s: %s\n", prefix, signal_description(number));
+	else
+		fprintf(stderr, "%s\n", signal_description(number));
+}
+
+void
+psiginfo(const siginfo_t *information, const char *prefix)
+{
+	if (information == NULL) {
+		errno = EINVAL;
+		return;
+	}
+	psignal(information->si_signo, prefix);
+}
 void abort(void){(void)raise(SIGABRT);_exit(128+SIGABRT);}

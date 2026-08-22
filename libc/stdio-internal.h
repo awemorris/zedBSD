@@ -28,6 +28,10 @@ struct __stdio_file {
 	unsigned heap_allocated;
 	unsigned io_started;
 	int orientation;
+	int (*cookie_read)(void *, char *, int);
+	int (*cookie_write)(void *, const char *, int);
+	fpos_t (*cookie_seek)(void *, fpos_t, int);
+	int (*cookie_close)(void *);
 	struct __stdio_file *registry_next;
 };
 

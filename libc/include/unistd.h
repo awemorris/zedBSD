@@ -106,7 +106,18 @@ long pathconf(const char *, int);
 long fpathconf(int, int);
 size_t confstr(int, char *, size_t);
 pid_t fork(void);
+unsigned alarm(unsigned);
+int execl(const char *, const char *, ...);
+int execle(const char *, const char *, ...);
+int execlp(const char *, const char *, ...);
+int execv(const char *, char *const []);
 int execve(const char *, char *const [], char *const []);
+int execvp(const char *, char *const []);
+int fexecve(int, char *const [], char *const []);
+extern char **environ;
+extern char *optarg;
+extern int opterr, optind, optopt;
+int getopt(int, char *const [], const char *);
 pid_t getpid(void);
 pid_t getppid(void);
 pid_t getpgrp(void);
@@ -131,10 +142,11 @@ int fchown(int, uid_t, gid_t);
 int lchown(const char *, uid_t, gid_t);
 int fchownat(int, const char *, uid_t, gid_t, int);
 
-#endif
 #define F_ULOCK 0
 #define F_LOCK  1
 #define F_TLOCK 2
 #define F_TEST  3
 
 int lockf(int, int, off_t);
+
+#endif

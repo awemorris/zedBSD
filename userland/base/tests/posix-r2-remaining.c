@@ -1,7 +1,11 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <errno.h>
+#include <aio.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sched.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,9 +14,12 @@
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/times.h>
 #include <sys/un.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
+#include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 static int
@@ -315,14 +322,91 @@ test_integration(void)
 	return 0;
 }
 
-int
-main(void)
+static int
+test_new_required_apis(void)
 {
+	char *arguments[] = { (char *)"options", (char *)"-ab", (char *)"value", NULL };
+	char formatted[32], byte = 0;
+	struct aiocb control;
+	struct dirent **entries = NULL;
+	struct sched_param parameter;
+	struct tm calendar;
+	struct tms process_times;
+	time_t epoch = 0, iso_date = 1609459200;
+	pthread_attr_t attributes;
+	pid_t child;
+	int count, descriptor, pair[2], status;
+
+	optind = 0;
+	opterr = 0;
+	if (getopt(3, arguments, "ab:") != 'a' ||
+	    getopt(3, arguments, "ab:") != 'b' || strcmp(optarg, "value") ||
+	    getopt(3, arguments, "ab:") != -1)
+		return failure("getopt");
+	if (gmtime_r(&epoch, &calendar) == NULL || calendar.tm_year != 70 ||
+	    calendar.tm_mon != 0 || calendar.tm_mday != 1 ||
+	    calendar.tm_wday != 4 || gmtime_r(&iso_date, &calendar) == NULL ||
+	    strftime(formatted, sizeof(formatted), "%G-W%V-%u", &calendar) != 10 ||
+	    strcmp(formatted, "2020-W53-5"))
+		return failure("calendar");
+	if (pthread_attr_init(&attributes) != 0 ||
+	    pthread_attr_getschedparam(&attributes, &parameter) != 0 ||
+	    parameter.sched_priority != 0 || sched_yield() != 0 ||
+	    times(&process_times) == (clock_t)-1)
+		return failure("scheduler-apis");
+	count = scandir("/tmp", &entries, NULL, alphasort);
+	if (count < 0)
+		return failure("scandir");
+	while (count != 0) free(entries[--count]);
+	free(entries);
+	descriptor = open("/tmp/r2r-aio", O_CREAT | O_TRUNC | O_RDWR, 0600);
+	memset(&control, 0, sizeof(control));
+	control.aio_fildes = descriptor;
+	control.aio_buf = (void *)"a";
+	control.aio_nbytes = 1;
+	if (descriptor < 0 || aio_write(&control) != 0 ||
+	    aio_error(&control) != 0 || aio_return(&control) != 1 ||
+	    pread(descriptor, &byte, 1, 0) != 1 || byte != 'a')
+		return failure("aio");
+	(void)close(descriptor);
+	(void)unlink("/tmp/r2r-aio");
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0 ||
+	    sockatmark(pair[0]) != 0)
+		return failure("sockatmark");
+	(void)close(pair[0]); (void)close(pair[1]);
+	if (isatty(0) && (tcgetsid(0) != getsid(0) || tcsendbreak(0, 0) != 0))
+		return failure("terminal-required");
+	descriptor = open("/bin/posix-r2-remaining", O_RDONLY);
+	child = fork();
+	if (descriptor < 0 || child < 0)
+		return failure("fexecve-setup");
+	if (child == 0) {
+		char *const exec_arguments[] = {
+			(char *)"posix-r2-remaining",
+			(char *)"--fexec-child", NULL
+		};
+		fexecve(descriptor, exec_arguments, environ);
+		_exit(127);
+	}
+	(void)close(descriptor);
+	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+	    WEXITSTATUS(status) != 0)
+		return failure("fexecve");
+	marker("R2R:09:REQUIRED-APIS\n");
+	return 0;
+}
+
+int
+main(int argc, char **argv)
+{
+	if (argc == 2 && strcmp(argv[1], "--fexec-child") == 0)
+		return 0;
 	if (test_tmpfs() != 0 || test_unix_vfs() != 0 ||
 	    test_scm_rights() != 0 || test_fifo() != 0 ||
 	    test_record_lock() != 0 || test_rlimit() != 0 ||
-	    test_waitid() != 0 || test_integration() != 0)
+	    test_waitid() != 0 || test_integration() != 0 ||
+	    test_new_required_apis() != 0)
 		return 1;
-	marker("R2R:01-08:PASS\n");
+	marker("R2R:01-09:PASS\n");
 	return 0;
 }

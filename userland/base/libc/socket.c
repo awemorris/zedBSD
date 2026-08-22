@@ -26,6 +26,15 @@ int socket(int domain, int type, int protocol)
 	    0, 0, 0);
 }
 
+int
+sockatmark(int descriptor)
+{
+	int at_mark;
+	socklen_t length = sizeof(at_mark);
+	return getsockopt(descriptor, SOL_SOCKET, SO_ATMARK, &at_mark, &length) == 0 ?
+		at_mark : -1;
+}
+
 int socketpair(int domain, int type, int protocol, int descriptors[2])
 {
 	return (int)socket_call(ZEDBSD_SYS_socketpair, domain, type, protocol,

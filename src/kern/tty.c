@@ -654,6 +654,13 @@ tty_ioctl_instance(struct tty *tty, struct file *file,
 		spin_unlock_irqrestore(&tty->lock, irq);
 		return copyout(&value, argument, sizeof(value));
 	}
+	case TIOCGSID: {
+		pid_t value;
+		if (process == NULL || process->controlling_tty != tty) return ENOTTY;
+		irq = spin_lock_irqsave(&tty->lock); value = tty->session;
+		spin_unlock_irqrestore(&tty->lock, irq);
+		return copyout(&value, argument, sizeof(value));
+	}
 	case TIOCSPGRP: {
 		pid_t value;
 		if (process == NULL || process->controlling_tty != tty) return ENOTTY;
@@ -686,6 +693,14 @@ tty_ioctl_instance(struct tty *tty, struct file *file,
 			irq = spin_lock_irqsave(&tty->lock); tty_flush_input_locked(tty);
 			spin_unlock_irqrestore(&tty->lock, irq); poll_notify();
 		}
+		return 0;
+	}
+	case TCSBRK: {
+		int duration;
+		error = copyin(argument, &duration, sizeof(duration));
+		if (error != 0) return error;
+		if (duration < 0) return EINVAL;
+		/* Virtual terminals have no serial break line to assert. */
 		return 0;
 	}
 	default: return EOPNOTSUPP;

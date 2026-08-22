@@ -55,7 +55,8 @@ X68K_USER_RUNTIME_SOURCES := \
 	userland/base/libc/mqueue.c userland/base/libc/socket.c userland/base/libc/signal.c \
 	userland/base/libc/account.c userland/base/libc/crypt.c userland/base/libc/utmpx.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
-	libc/int64.c libc/strto.c libc/format.c libc/stdio.c
+	libc/int64.c libc/strto.c libc/format.c libc/stdio.c \
+	$(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
 X68K_USER_SH_SOURCES := userland/base/sh/main.c \
 	userland/base/sh/builtins.c userland/base/sh/lexer.c userland/base/sh/expand.c
 

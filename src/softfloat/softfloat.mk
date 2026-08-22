@@ -24,20 +24,23 @@ ZEDBSD_GCC_SOFTFP_REL := \
 	gedf2.c gesf2.c ledf2.c lesf2.c muldf3.c mulsf3.c \
 	subdf3.c subsf3.c truncdfsf2.c unorddf2.c unordsf2.c
 
-ZEDBSD_MUSL_MATH_REL := \
-	sinf.c cosf.c tanf.c sqrtf.c \
-	sin.c cos.c tan.c sqrt.c fabs.c asin.c acos.c atan.c atan2.c \
-	exp.c log.c log10.c \
-	__sindf.c __cosdf.c __tandf.c __rem_pio2f.c __rem_pio2_large.c \
-	__sin.c __cos.c __tan.c __rem_pio2.c \
-	__math_invalidf.c __math_invalid.c __math_divzero.c \
-	__math_xflow.c __math_oflow.c __math_uflow.c \
-	exp_data.c log_data.c sqrt_data.c fmod.c scalbn.c floor.c
+# Each top-level source file is one architecture-neutral musl libm component.
+# The vendor subtree is pinned, and architecture-specific subdirectories are
+# deliberately excluded so the list remains portable across zedBSD HALs.
+ZEDBSD_MUSL_MATH_REL := $(filter-out \
+	exp10.c exp10f.c exp10l.c j0.c j0f.c j1.c j1f.c jn.c jnf.c \
+	finite.c finitef.c scalb.c scalbf.c significand.c significandf.c \
+	sincos.c sincosf.c sincosl.c, \
+	$(filter-out __math_divzero.c __math_divzerof.c __math_invalid.c \
+	__math_invalidf.c __math_invalidl.c __math_oflow.c __math_oflowf.c \
+	__math_uflow.c __math_uflowf.c __math_xflow.c __math_xflowf.c, \
+	$(notdir $(sort $(wildcard $(ZEDBSD_MUSL_ROOT)/src/math/*.c)))))
 
 ZEDBSD_GCC_SOFTFP_OBJECTS := $(addprefix $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/gcc-,\
 	$(ZEDBSD_GCC_SOFTFP_REL:.c=.o))
 ZEDBSD_MUSL_MATH_OBJECTS := $(addprefix $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-,\
-	$(ZEDBSD_MUSL_MATH_REL:.c=.o))
+	$(ZEDBSD_MUSL_MATH_REL:.c=.o)) \
+	$(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-math-errors.o
 ZEDBSD_MUSL_SCAN_OBJECTS := \
 	$(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-shgetc.o \
 	$(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-floatscan.o \
@@ -56,11 +59,14 @@ ZEDBSD_GCC_SOFTFP_CPPFLAGS := \
 
 ZEDBSD_MUSL_CPPFLAGS := \
 	-nostdinc -Isrc/softfloat/include -Ilibc/include -I. \
-	-I$(ZEDBSD_MUSL_ROOT)/src/internal -I$(ZEDBSD_MUSL_ROOT)/src/math
+	-I$(ZEDBSD_MUSL_ROOT)/src/internal -I$(ZEDBSD_MUSL_ROOT)/src/math \
+	-include src/softfloat/include/features.h
 
 ZEDBSD_SOFTFLOAT_CFLAGS := $(ZEDBSD_LIBC_CFLAGS) -mlong-double-64
 ZEDBSD_MUSL_CFLAGS := $(ZEDBSD_SOFTFLOAT_CFLAGS) \
-	-Wno-error=unused-but-set-variable -Wno-error=parentheses
+	-Wno-error=unused-but-set-variable -Wno-error=parentheses \
+	-Wno-error=unknown-pragmas -Wno-error=maybe-uninitialized \
+	-Wno-error=unused-parameter
 ZEDBSD_SOFTFLOAT_DEPFLAGS := -MMD -MP
 
 # These objects are built by custom rules rather than the generic C rule.  Keep
@@ -87,6 +93,13 @@ $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/gcc-%.o: \
 
 $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-%.o: \
 	$(ZEDBSD_MUSL_ROOT)/src/math/%.c
+	@mkdir -p $(ZEDBSD_SOFTFLOAT_BUILD_DIR)
+	$(ZEDBSD_SOFTFLOAT_CC) $(ZEDBSD_MUSL_CPPFLAGS) \
+		$(ZEDBSD_MUSL_CFLAGS) $(ZEDBSD_SOFTFLOAT_DEPFLAGS) \
+		-c $< -o $@
+
+$(ZEDBSD_SOFTFLOAT_BUILD_DIR)/musl-math-errors.o: \
+	src/softfloat/musl-math-errors.c
 	@mkdir -p $(ZEDBSD_SOFTFLOAT_BUILD_DIR)
 	$(ZEDBSD_SOFTFLOAT_CC) $(ZEDBSD_MUSL_CPPFLAGS) \
 		$(ZEDBSD_MUSL_CFLAGS) $(ZEDBSD_SOFTFLOAT_DEPFLAGS) \

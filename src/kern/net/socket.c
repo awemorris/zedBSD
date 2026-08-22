@@ -183,6 +183,17 @@ socket_getsockopt_common(struct socket *socket, int level, int option,
 		*length = sizeof(error);
 		return 0;
 	}
+	if (option == SO_TYPE || option == SO_ATMARK) {
+		int result;
+		if (value == NULL || length == NULL || *length < sizeof(result))
+			return EINVAL;
+		/* The current protocols do not implement out-of-band data, hence a
+		 * live socket can never be positioned at an OOB mark. */
+		result = option == SO_TYPE ? socket->type : 0;
+		memcpy(value, &result, sizeof(result));
+		*length = sizeof(result);
+		return 0;
+	}
 	if (option == SO_REUSEADDR) {
 		int enabled;
 		if (value == NULL || length == NULL || *length < sizeof(enabled))

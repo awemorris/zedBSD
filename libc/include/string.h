@@ -20,9 +20,28 @@ char *strncat(char *destination, const char *source, size_t count);
 char *strchr(const char *string, int character);
 char *strrchr(const char *string, int character);
 char *strstr(const char *haystack, const char *needle);
+size_t strcspn(const char *, const char *);
+char *strpbrk(const char *, const char *);
+size_t strspn(const char *, const char *);
+char *strtok(char *, const char *);
 char *strdup(const char *string);
 char *strerror(int error);
 int strcoll(const char *, const char *);
 size_t strxfrm(char *, const char *, size_t);
+
+void *memmem(const void *, size_t, const void *, size_t);
+void *mempcpy(void *, const void *, size_t);
+void *memrchr(const void *, int, size_t);
+void *memset_explicit(void *, int, size_t);
+char *strcasestr(const char *, const char *);
+char *strchrnul(const char *, int);
+size_t strlcat(char *, const char *, size_t);
+size_t strlcpy(char *, const char *, size_t);
+void strmode(unsigned int, char *);
+char *strnstr(const char *, const char *, size_t);
+char *strsep(char **, const char *);
+int strverscmp(const char *, const char *);
+int timingsafe_bcmp(const void *, const void *, size_t);
+int timingsafe_memcmp(const void *, const void *, size_t);
 
 #endif

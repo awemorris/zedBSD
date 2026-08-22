@@ -8,11 +8,18 @@
 #define ZEDBSD_UAPI_PROCESS_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 #define ZEDBSD_SPAWN_ARG_MAX 32U
 #define ZEDBSD_SPAWN_ENV_MAX 64U
 #define ZEDBSD_SPAWN_STRING_MAX (16U * 1024U)
+
+struct process_times_record {
+	uint64_t self_ticks;
+	uint64_t child_ticks;
+	uint64_t elapsed_ticks;
+};
 
 
 #endif

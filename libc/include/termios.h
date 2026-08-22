@@ -16,7 +16,9 @@ speed_t cfgetospeed(const struct termios *);
 int cfsetispeed(struct termios *, speed_t);
 int cfsetospeed(struct termios *, speed_t);
 pid_t tcgetpgrp(int);
+pid_t tcgetsid(int);
 int tcsetpgrp(int, pid_t);
+int tcsendbreak(int, int);
 char *ctermid(char *);
 
 #endif

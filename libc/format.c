@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <wchar.h>
 
 struct format_output {
 	char *buffer;
@@ -47,6 +48,42 @@ emit_bytes(struct format_output *output, const char *text, size_t length)
 {
 	while (length-- != 0)
 		emit_character(output, *text++);
+}
+
+static size_t
+wide_text_length(const wchar_t *text, int precision)
+{
+	mbstate_t state = { 0 };
+	char bytes[4];
+	size_t length = 0;
+
+	while (*text != 0) {
+		size_t count = wcrtomb(bytes, *text++, &state);
+		if (count == (size_t)-1)
+			return (size_t)-1;
+		if (precision >= 0 && count > (size_t)precision - length)
+			break;
+		length += count;
+	}
+	return length;
+}
+
+static int
+emit_wide_text(struct format_output *output, const wchar_t *text,
+	size_t length)
+{
+	mbstate_t state = { 0 };
+	char bytes[4];
+	size_t emitted = 0;
+
+	while (*text != 0 && emitted < length) {
+		size_t count = wcrtomb(bytes, *text++, &state);
+		if (count == (size_t)-1 || count > length - emitted)
+			return -1;
+		emit_bytes(output, bytes, count);
+		emitted += count;
+	}
+	return 0;
 }
 
 #ifndef ZEDBSD_NO_PRINTF_FLOAT
@@ -446,6 +483,22 @@ vsnprintf(char *buffer, size_t size, const char *format, va_list arguments)
 		}
 		conversion = *format == '\0' ? '\0' : *format++;
 		if (conversion == 's') {
+			if (length == LENGTH_LONG) {
+				const wchar_t *text = va_arg(arguments, const wchar_t *);
+				size_t text_length;
+				if (text == NULL)
+					text = L"(null)";
+				text_length = wide_text_length(text, precision);
+				if (text_length == (size_t)-1)
+					return -1;
+				if (!left && width > 0 && (size_t)width > text_length)
+					emit_repeat(&output, ' ', (size_t)width - text_length);
+				if (emit_wide_text(&output, text, text_length) != 0)
+					return -1;
+				if (left && width > 0 && (size_t)width > text_length)
+					emit_repeat(&output, ' ', (size_t)width - text_length);
+				continue;
+			}
 			const char *text = va_arg(arguments, const char *);
 			size_t text_length;
 			if (text == NULL)
@@ -458,6 +511,20 @@ vsnprintf(char *buffer, size_t size, const char *format, va_list arguments)
 			if (left && width > 0 && (size_t)width > text_length)
 				emit_repeat(&output, ' ', (size_t)width - text_length);
 		} else if (conversion == 'c') {
+			if (length == LENGTH_LONG) {
+				wchar_t wide = (wchar_t)va_arg(arguments, wint_t);
+				mbstate_t state = { 0 };
+				char bytes[4];
+				size_t count = wcrtomb(bytes, wide, &state);
+				if (count == (size_t)-1)
+					return -1;
+				if (!left && width > 1)
+					emit_repeat(&output, ' ', (size_t)width - 1U);
+				emit_bytes(&output, bytes, count);
+				if (left && width > 1)
+					emit_repeat(&output, ' ', (size_t)width - 1U);
+				continue;
+			}
 			if (!left && width > 1)
 				emit_repeat(&output, ' ', (size_t)width - 1U);
 			emit_character(&output, (char)va_arg(arguments, int));

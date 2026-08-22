@@ -7,16 +7,30 @@ ZEDBSD_LIBC_CC ?= $(CC)
 ZEDBSD_LIBC_NM ?= nm
 ZEDBSD_LIBC_OBJDUMP ?= objdump
 
+ZEDBSD_LIBC_USER_EXTRA_SOURCES := \
+	libc/string-extra.c libc/fenv.c libc/wide-extra.c libc/inttypes.c \
+	libc/stdlib-extra.c libc/time-extra.c libc/stdio-extra.c \
+	libc/setjmp.c libc/err.c
+
 ZEDBSD_LIBC_SOURCES := \
 	libc/heap.c \
 	libc/string.c \
+	libc/string-extra.c \
 	libc/ctype.c \
+	libc/fenv.c \
 	libc/locale.c \
 	libc/wide.c \
+	libc/wide-extra.c \
 	libc/int64.c \
+	libc/inttypes.c \
 	libc/strto.c \
+	libc/stdlib-extra.c \
+	libc/time-extra.c \
 	libc/format.c \
-	libc/stdio.c
+	libc/stdio.c \
+	libc/stdio-extra.c \
+	libc/setjmp.c \
+	libc/err.c
 
 ZEDBSD_LIBC_OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(ZEDBSD_LIBC_SOURCES))
 

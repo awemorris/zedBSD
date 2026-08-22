@@ -13,6 +13,7 @@
 
 struct thread thread0;
 struct process process0;
+static struct process accounting_process;
 static struct thread *current[TEST_CPUS];
 static hal_cpu_id_t current_cpu;
 static int irq_enabled = 1;
@@ -45,6 +46,7 @@ int hal_task_transfer(hal_task_t task, hal_cpu_id_t cpu)
 	task_targets[(unsigned)(thread - &thread0) & 31U] = cpu;
 	return HAL_OK;
 }
+void *hal_task_get_private(hal_task_t task) { return task; }
 
 bool
 hal_irq_disable(void)
@@ -110,6 +112,8 @@ main(void)
 
 	for (cpu = 0; cpu < TEST_CPUS; cpu++) {
 		init_thread(&tasks[cpu]);
+		if (cpu == 0)
+			tasks[cpu].proc = &accounting_process;
 		assert(sched_prepare_thread(&tasks[cpu]) == 0);
 		assert(tasks[cpu].sched.cpu == cpu);
 		sched_add(&tasks[cpu]);
@@ -140,6 +144,7 @@ main(void)
 	for (cpu = 1; cpu <= SCHED_QUANTUM_TICKS; cpu++)
 		sched_clock_cpu(0, cpu);
 	assert(sched_ticks() == SCHED_QUANTUM_TICKS);
+	assert(accounting_process.cpu_ticks == SCHED_QUANTUM_TICKS);
 
 	puts("zedBSD per-CPU scheduler host tests: PASS");
 	return 0;

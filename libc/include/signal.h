@@ -29,5 +29,7 @@ int sigwaitinfo(const sigset_t *, siginfo_t *);
 int sigwait(const sigset_t *, int *);
 int sigqueue(pid_t, int, const union sigval);
 int raise(int);
+void psignal(int, const char *);
+void psiginfo(const siginfo_t *, const char *);
 void abort(void) __attribute__((noreturn));
 #endif

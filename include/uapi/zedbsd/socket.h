@@ -39,6 +39,8 @@ typedef uint32_t socklen_t;
 #define SO_SNDBUF    0x1001
 #define SO_RCVBUF    0x1002
 #define SO_ERROR     0x1007
+#define SO_TYPE      0x1008
+#define SO_ATMARK    0x1009
 #define SO_SNDTIMEO  0x1005
 #define SO_BINDTODEVICE 0x0019
 #define SO_RCVTIMEO  0x1006
@@ -155,5 +157,6 @@ int setsockopt(int descriptor, int level, int option, const void *value,
 	       socklen_t length);
 int getsockopt(int descriptor, int level, int option, void *value,
 	       socklen_t *length);
+int sockatmark(int descriptor);
 
 #endif

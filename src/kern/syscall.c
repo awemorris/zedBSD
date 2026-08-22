@@ -3859,6 +3859,32 @@ sys_fork_call(const uintptr_t args[6])
 }
 
 static intptr_t
+sys_sched_yield_call(const uintptr_t args[6])
+{
+	if (args[0] != 0 || args[1] != 0 || args[2] != 0 || args[3] != 0 ||
+	    args[4] != 0 || args[5] != 0)
+		return -EINVAL;
+	sched_yield();
+	return 0;
+}
+
+static intptr_t
+sys_times_call(const uintptr_t args[6])
+{
+	struct process *process = current_process();
+	struct process_times_record result;
+	int error;
+	if (process == NULL || args[0] == 0 || args[1] != 0 || args[2] != 0 ||
+	    args[3] != 0 || args[4] != 0 || args[5] != 0)
+		return -EINVAL;
+	result.self_ticks = atomic_u64_load_acquire(&process->cpu_ticks);
+	result.child_ticks = atomic_u64_load_acquire(&process->child_cpu_ticks);
+	result.elapsed_ticks = sched_ticks();
+	error = copyout(&result, args[0], sizeof(result));
+	return error == 0 ? 0 : -error;
+}
+
+static intptr_t
 sys_execve_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
@@ -3881,6 +3907,37 @@ sys_execve_call(const uintptr_t args[6])
 	if (error == 0)
 		error = process_execve(process, path, copy->argv, copy->envp);
 	kern_free(copy);
+	return error == 0 ? 0 : -error;
+}
+
+static intptr_t
+sys_fexecve_call(const uintptr_t args[6])
+{
+	struct process *process = current_process();
+	struct syscall_exec_args *copy;
+	struct file *file;
+	int error;
+
+	if (process == NULL || process->fd == NULL || args[3] != 0 ||
+	    args[4] != 0 || args[5] != 0)
+		return -EINVAL;
+	file = filedesc_get_ref(process->fd, (int)args[0]);
+	if (file == NULL)
+		return -EBADF;
+	copy = kern_calloc(1, sizeof(*copy));
+	if (copy == NULL) {
+		(void)file_close(file);
+		return -ENOMEM;
+	}
+	error = copy_exec_vector(args[1], copy->argv, ZEDBSD_SPAWN_ARG_MAX,
+	    copy, 0);
+	if (error == 0)
+		error = copy_exec_vector(args[2], copy->envp,
+		    ZEDBSD_SPAWN_ENV_MAX, copy, 1);
+	if (error == 0)
+		error = process_fexecve(process, file, copy->argv, copy->envp);
+	kern_free(copy);
+	(void)file_close(file);
 	return error == 0 ? 0 : -error;
 }
 
@@ -4136,7 +4193,10 @@ syscall_dispatch_body(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_setsockopt: return sys_setsockopt_call(args);
 	case ZEDBSD_SYS_getsockopt: return sys_getsockopt_call(args);
 	case ZEDBSD_SYS_fork: return sys_fork_call(args);
+	case ZEDBSD_SYS_sched_yield: return sys_sched_yield_call(args);
+	case ZEDBSD_SYS_times: return sys_times_call(args);
 	case ZEDBSD_SYS_execve: return sys_execve_call(args);
+	case ZEDBSD_SYS_fexecve: return sys_fexecve_call(args);
 	case ZEDBSD_SYS_waitpid: return sys_waitpid_call(args);
 	case ZEDBSD_SYS_waitid: return sys_waitid_call(args);
 	case ZEDBSD_SYS_getrlimit: return sys_resource_limit_call(args, 0);

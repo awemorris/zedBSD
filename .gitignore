@@ -1,7 +1,12 @@
 /build/
 /config.mk
 __pycache__/
-plan/
+plan/*
+!plan/POSIX-API-AUDIT.md
+!plan/POSIX-API-FIX-PLAN.md
+!plan/posix-required-kernel-api.csv
+!plan/LIBC-API-AUDIT.md
+!plan/LIBC-API-FIX-PLAN.md
+!plan/libc-api-audit.csv
 .scripts/
 config.mk
-

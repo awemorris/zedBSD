@@ -14,6 +14,8 @@
 #define O_NONBLOCK  0x2000
 #define O_CLOEXEC   0x4000
 #define O_NOCTTY    0x8000
+#define O_DSYNC     0x10000
+#define O_SYNC      0x20000
 
 #define AT_FDCWD            (-100)
 #define AT_SYMLINK_NOFOLLOW 0x0100

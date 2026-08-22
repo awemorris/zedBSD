@@ -92,7 +92,7 @@ SPARCV9_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dl
 	userland/base/libc/signal.c userland/base/libc/account.c userland/base/libc/crypt.c \
 	userland/base/libc/utmpx.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c libc/strto.c \
-	libc/format.c libc/stdio.c
+	libc/format.c libc/stdio.c $(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
 SPARCV9_USER_SH_SOURCES := userland/base/sh/main.c \
 	userland/base/sh/builtins.c userland/base/sh/lexer.c userland/base/sh/expand.c
 
@@ -315,7 +315,7 @@ SPARCV9_DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c \
 	userland/base/libc/dlfcn.c \
 	userland/base/libc/socket.c userland/base/libc/signal.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c libc/int64.c libc/strto.c \
-	libc/format.c libc/stdio.c
+	libc/format.c libc/stdio.c $(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
 SPARCV9_DYNAMIC_LIBC_OBJS := $(patsubst %.c,$(SPARCV9_DYNAMIC_DIR)/obj/%.o,\
 	$(SPARCV9_DYNAMIC_LIBC_SOURCES)) \
 	$(SPARCV9_DYNAMIC_DIR)/obj/userland/base/libc/syscall.o \

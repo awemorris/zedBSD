@@ -87,9 +87,23 @@ tcgetpgrp(int descriptor)
 	return ioctl(descriptor, TIOCGPGRP, &pgrp) == 0 ? pgrp : (pid_t)-1;
 }
 
+pid_t
+tcgetsid(int descriptor)
+{
+	pid_t session;
+	return ioctl(descriptor, TIOCGSID, &session) == 0 ? session : (pid_t)-1;
+}
+
 int
 tcsetpgrp(int descriptor, pid_t pgrp)
 { return ioctl(descriptor, TIOCSPGRP, &pgrp); }
+
+int
+tcsendbreak(int descriptor, int duration)
+{
+	if (duration < 0) { errno = EINVAL; return -1; }
+	return ioctl(descriptor, TCSBRK, &duration);
+}
 
 char *
 ctermid(char *buffer)

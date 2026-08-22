@@ -783,8 +783,14 @@ out:
 			if (error != 0)
 				break;
 		}
-		if (error == 0)
+		if (error == 0) {
+			uint64_t child_ticks =
+			    atomic_u64_load_acquire(&child->cpu_ticks) +
+			    atomic_u64_load_acquire(&child->child_cpu_ticks);
+			(void)atomic_u64_fetch_add_relaxed(
+			    &event->parent->child_cpu_ticks, child_ticks);
 			process_free_mem(child);
+		}
 	}
 	process_release(child);
 	if (error == 0)
