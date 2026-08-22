@@ -661,6 +661,8 @@ sample_vga_font:
 	pop ax
 	ret
 
+#include "bootloader/pcat/vbe.inc"
+
 /* Give GS a flat hidden descriptor while returning to real mode. */
 unreal_gs:
 	cli
@@ -710,6 +712,7 @@ enter_long_mode:
 	and edx, 0x20100000
 	cmp edx, 0x20100000
 	jne fatal_elf64
+	call vbe_setup_framebuffer
 	mov si, offset msg_go
 	call puts
 	mov al, byte ptr [boot_drive]
@@ -722,7 +725,7 @@ enter_long_mode:
 	mov dword ptr [long_handoff + ZBL6_HANDOFF_MEM_UPPER_OFFSET], eax
 	call unreal_gs
 	mov edi, 0x00050000
-	mov ecx, 0x5000 / 4
+	mov ecx, 0x6000 / 4
 	xor eax, eax
 1:	mov dword ptr gs:[edi], eax
 	add edi, 4
@@ -753,6 +756,7 @@ enter_long_mode:
 	add ebx, 0x00200000
 	add edi, 8
 	loop 3b
+	call vbe_map_framebuffer
 	cli
 	mov eax, cr4
 	or eax, 0x20
@@ -939,13 +943,14 @@ mbi_boot_device: .long 0
 long_handoff:
 	.long ZBL6_HANDOFF_MAGIC
 	.word ZBL6_HANDOFF_VERSION
-	.word ZBL6_HANDOFF_SIZE
+	.word ZBL6_HANDOFF_FB_SIZE
 	.byte 0                         /* boot drive, populated at runtime */
 	.byte 0                         /* partition index, populated at runtime */
 	.word 0                         /* flags */
 	.long 0                         /* conventional memory, KiB */
 	.long 0                         /* extended memory, KiB */
 	.long 0
+	.space ZBL6_HANDOFF_FB_SIZE - ZBL6_HANDOFF_SIZE
 
 fat_cache: .space 512
 

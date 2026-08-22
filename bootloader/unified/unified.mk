@@ -84,7 +84,8 @@ $(UNIFIED_BUILD)/%-stage1.bin: $(UNIFIED_BUILD)/%-stage1.elf
 	@test $$(stat -c%s $@) -eq 512
 
 $(UNIFIED_BUILD)/pcat-stage2.o: $(UNIFIED)/pcat-stage2.S \
-	bootloader/pcat/stage2.S bootloader/include/disk-layout.inc \
+	bootloader/pcat/stage2.S bootloader/pcat/vbe.inc \
+	bootloader/include/disk-layout.inc \
 	bootloader/include/stage2-header.inc bootloader/include/mbr.inc \
 	bootloader/include/fat16.inc bootloader/include/elf.inc \
 	bootloader/include/amd64-handoff.h

@@ -1,6 +1,6 @@
 # zedBSD userland package
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,Noct,i386 pc98,y,package,,y,packages/lang,lang/noct,))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,Noct,i386 pc98 amd64,y,package,,y,packages/lang,lang/noct,))
 
 NOCT_REPOSITORY ?= https://github.com/awemorris/NoctLang.git
 NOCT_GIT_REF ?= main

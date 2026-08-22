@@ -89,10 +89,11 @@ def read_rows(path: Path, fields: int) -> list[list[str]]:
     return result
 
 
-def option_rows(path: Path, platform: str) -> list[dict[str, object]]:
+def option_rows(path: Path, platform: str,
+                platform_specific: bool = True) -> list[dict[str, object]]:
     result = []
     for key, kind, label, targets, default, choices in read_rows(path, 6):
-        if not applies(targets, platform):
+        if platform_specific and not applies(targets, platform):
             continue
         parsed_choices = []
         if choices:
@@ -161,20 +162,30 @@ def load(path: Path) -> dict[str, object]:
 def normalize(values: dict[str, object]) -> None:
     platform = str(values["ZEDBSD_PLATFORM"])
     supported = set()
-    for path in all_option_files():
+    platform_option_files = [CONFIG_DIR / "kernel-options.list",
+                             architecture_driver_path(platform)]
+    common_option_files = [CONFIG_DIR / "drivers" / "isa.drivers",
+                           CONFIG_DIR / "drivers" / "pci.drivers",
+                           CONFIG_DIR / "drivers" / "usb.drivers",
+                           CONFIG_DIR / "drivers" / "generic.drivers"]
+    for path in platform_option_files:
         for key, kind, _label, targets, _default, _choices in read_rows(path, 6):
             if key != "-" and kind != "fixed" and applies(targets, platform):
+                supported.add(key)
+    for path in common_option_files:
+        for key, kind, _label, _targets, _default, _choices in read_rows(path, 6):
+            if key != "-" and kind != "fixed":
                 supported.add(key)
     for key in list(values):
         if key.startswith("CONFIG_DRIVER_") and key not in supported:
             values[key] = "n"
     if platform != "amd64":
         values["CONFIG_KERNEL_TEST_CHECKPOINTS"] = "n"
-    available_programs = {
-        row[0] for row in user_program_rows() if applies(row[2], platform)
-    }
+    available_programs = {row[0] for row in user_program_rows()}
     selected_programs = values.setdefault("ZEDBSD_USER_PROGRAMS", set())
     selected_programs.intersection_update(available_programs)
+    if "Xzed" in selected_programs:
+        values["CONFIG_DRIVER_GRAPHICS"] = "y"
 
 
 def save(path: Path, values: dict[str, object]) -> None:
@@ -365,15 +376,16 @@ def select_drivers(screen, values: dict[str, object]) -> None:
         title, path = DRIVER_CATEGORIES[selected]
         if path is None:
             path = architecture_driver_path(str(values["ZEDBSD_PLATFORM"]))
-        options = option_rows(path, str(values["ZEDBSD_PLATFORM"]))
+        options = option_rows(path, str(values["ZEDBSD_PLATFORM"]),
+                              platform_specific=path == architecture_driver_path(
+                                  str(values["ZEDBSD_PLATFORM"])))
         edit_options(screen, title, options, values)
 
 
 def edit_program_group(screen, values: dict[str, object], group: str,
                        title: str) -> None:
     platform = str(values["ZEDBSD_PLATFORM"])
-    rows = [row for row in user_program_rows()
-            if applies(row[2], platform) and row[4] == group]
+    rows = [row for row in user_program_rows() if row[4] == group]
     selected_programs = values.setdefault("ZEDBSD_USER_PROGRAMS", set())
     selected = 0
     while True:

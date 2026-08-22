@@ -1,4 +1,4 @@
-/* PC/AT Cirrus GD5446 and standard VGA BeUI display backends.
+/* PC/AT boot framebuffer, Cirrus GD5446, and standard VGA backends.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/graphics-driver.h"
 #include "kern/pcat/font.h"
@@ -7,6 +7,7 @@
 #include <drivers/pci.h>
 #include <hal/hal.h>
 #include <string.h>
+#include "bootloader/include/amd64-handoff.h"
 
 #define WIDTH 640U
 #define HEIGHT 480U
@@ -16,7 +17,8 @@
 #define CIRRUS_STRIDE24 (WIDTH * 3U)
 #define PCI_CIRRUS_VENDOR 0x1013U
 
-enum display_backend { DISPLAY_NONE, DISPLAY_CIRRUS, DISPLAY_VGA };
+enum display_backend { DISPLAY_NONE, DISPLAY_LINEAR, DISPLAY_CIRRUS,
+	DISPLAY_VGA };
 
 static enum display_backend active_backend;
 static uint8_t active_bpp;
@@ -26,6 +28,8 @@ static struct drv_pci_mapping cirrus_mapping;
 static int vga_color_cache = -1;
 static struct hal_pmem vga_memory;
 static volatile uint8_t *vga_aperture, *cirrus_aperture;
+static const struct zbl6_framebuffer *linear_framebuffer;
+static volatile uint32_t *linear_pixels;
 
 static int pcat_graphics_clear(void *);
 static int pcat_graphics_fill(void *, const struct kern_graphics_rect *,
@@ -290,6 +294,15 @@ static uint8_t rgb_to_vga(uint32_t color)
 	return (uint8_t)best;
 }
 
+static uint32_t
+linear_color(uint32_t color)
+{
+	if (linear_framebuffer->format == ZBL6_FRAMEBUFFER_RGBX8888)
+		return ((color & 0xff0000U) >> 16) | (color & 0x00ff00U) |
+		    ((color & 0x0000ffU) << 16);
+	return color;
+}
+
 static void vga_write_pixel(unsigned x, unsigned y, uint8_t color)
 {
 	unsigned offset = y * (WIDTH / 8U) + x / 8U;
@@ -311,7 +324,10 @@ static void vga_write_pixel(unsigned x, unsigned y, uint8_t color)
 
 static void write_pixel(unsigned x, unsigned y, uint32_t color)
 {
-	if (active_backend == DISPLAY_VGA) {
+	if (active_backend == DISPLAY_LINEAR) {
+		linear_pixels[(size_t)y * linear_framebuffer->stride + x] =
+		    linear_color(color);
+	} else if (active_backend == DISPLAY_VGA) {
 		vga_write_pixel(x, y, rgb_to_vga(color));
 	} else if (active_bpp == 8U) {
 		CIRRUS_APERTURE[y * CIRRUS_STRIDE8 + x] = rgb332(color);
@@ -336,10 +352,19 @@ static int pcat_graphics_prepare(void)
 		0x000a0000U, 0x00020000U, 0x1000U,
 		HAL_PMEM_TYPE_VRAM, HAL_PMEM_ATTR_NOCACHE
 	};
+	pcat_font_init();
+	linear_framebuffer = hal_get_arch_handoff("pcat.framebuffer");
+	linear_pixels = NULL;
+	if (linear_framebuffer != NULL) {
+		uint64_t aligned = linear_framebuffer->physical_base & ~0x1fffffULL;
+		uint64_t offset = linear_framebuffer->physical_base - aligned;
+		linear_pixels = (volatile uint32_t *)(uintptr_t)
+		    (ZBL6_FRAMEBUFFER_VIRTUAL_BASE + offset);
+		return 1;
+	}
 	if (hal_pmem_alloc(&request, &vga_memory) != HAL_OK)
 		return 0;
 	vga_aperture = (volatile uint8_t *)vga_memory.vaddr;
-	pcat_font_init();
 	if (cirrus_present) {
 		if (drv_pci_device_claim_bar(cirrus_device, 0) == 0 &&
 		    drv_pci_device_map_bar_region(cirrus_device, 0, 0,
@@ -363,6 +388,18 @@ static int pcat_graphics_enter(void *context, struct kern_graphics_mode *mode)
 	(void)context;
 	if (mode == NULL)
 		return 0;
+	if (linear_pixels != NULL) {
+		active_backend = DISPLAY_LINEAR;
+		active_bpp = 32U;
+		mode->width = linear_framebuffer->width;
+		mode->height = linear_framebuffer->height;
+		mode->bits_per_pixel = 32U;
+		mode->stride = linear_framebuffer->stride * 4U;
+		(void)pcat_graphics_clear(NULL);
+		hal_printf("graphics: boot framebuffer %ux%ux32 stride=%u\n",
+		    mode->width, mode->height, mode->stride);
+		return 1;
+	}
 	requested = mode->preferred_bits_per_pixel == 24U ? 24U : 8U;
 	if (cirrus_present && cirrus_enter(requested)) {
 		mode->width = WIDTH;
@@ -398,6 +435,15 @@ pcat_graphics_get_modes(void *context, struct kern_graphics_mode_info *modes,
 	size_t i;
 
 	(void)context;
+	if (linear_framebuffer != NULL) {
+		if (modes != NULL && capacity != 0) {
+			modes[0].width = linear_framebuffer->width;
+			modes[0].height = linear_framebuffer->height;
+			modes[0].bits_per_pixel = 32U;
+			modes[0].stride = linear_framebuffer->stride * 4U;
+		}
+		return 1;
+	}
 	if (modes != NULL)
 		for (i = 0; i < capacity && i < sizeof(available) / sizeof(available[0]); i++)
 			modes[i] = available[i];
@@ -406,10 +452,14 @@ pcat_graphics_get_modes(void *context, struct kern_graphics_mode_info *modes,
 
 static int pcat_graphics_clear(void *context)
 {
-	const struct kern_graphics_rect screen = { 0, 0, WIDTH, HEIGHT };
+	struct kern_graphics_rect screen = { 0, 0, WIDTH, HEIGHT };
 	(void)context;
 	if (active_backend == DISPLAY_NONE)
 		return 0;
+	if (active_backend == DISPLAY_LINEAR) {
+		screen.width = linear_framebuffer->width;
+		screen.height = linear_framebuffer->height;
+	}
 	return pcat_graphics_fill(NULL, &screen, 0);
 }
 
@@ -418,6 +468,11 @@ static void pcat_graphics_leave(void *context)
 	(void)context;
 	if (active_backend == DISPLAY_NONE)
 		return;
+	if (active_backend == DISPLAY_LINEAR) {
+		active_backend = DISPLAY_NONE;
+		active_bpp = 0;
+		return;
+	}
 	if (active_backend == DISPLAY_CIRRUS)
 	{
 		seq_write(0x01U, 0x21U);
@@ -439,6 +494,16 @@ static int pcat_graphics_fill(void *context,
 	(void)context;
 	if (rect == NULL || active_backend == DISPLAY_NONE)
 		return 0;
+	if (active_backend == DISPLAY_LINEAR) {
+		uint32_t pixel = linear_color(color);
+		for (y = rect->y; y < rect->y + rect->height; y++) {
+			volatile uint32_t *row = linear_pixels +
+			    (size_t)y * linear_framebuffer->stride + rect->x;
+			for (x = 0; x < rect->width; x++)
+				row[x] = pixel;
+		}
+		return 1;
+	}
 	if (active_backend == DISPLAY_CIRRUS && active_bpp == 8U) {
 		uint8_t pixel = rgb332(color);
 		for (y = rect->y; y < rect->y + rect->height; y++) {

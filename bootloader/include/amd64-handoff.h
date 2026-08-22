@@ -17,6 +17,16 @@
 #define ZBL6_HANDOFF_MEM_UPPER_OFFSET   16
 #define ZBL6_HANDOFF_RESERVED_OFFSET    20
 
+/* A legacy-BIOS loader retains the compact v1 memory description and may
+ * append a VBE linear-framebuffer descriptor when size and flags say so. */
+#define ZBL6_HANDOFF_FB_SIZE                    56
+#define ZBL6_HANDOFF_FRAMEBUFFER_BASE_OFFSET    24
+#define ZBL6_HANDOFF_FRAMEBUFFER_SIZE_OFFSET    32
+#define ZBL6_HANDOFF_FRAMEBUFFER_WIDTH_OFFSET   40
+#define ZBL6_HANDOFF_FRAMEBUFFER_HEIGHT_OFFSET  44
+#define ZBL6_HANDOFF_FRAMEBUFFER_STRIDE_OFFSET  48
+#define ZBL6_HANDOFF_FRAMEBUFFER_FORMAT_OFFSET  52
+
 #define ZBL6_HANDOFF_V2_VERSION         2
 #define ZBL6_HANDOFF_V2_SIZE            88
 #define ZBL6_HANDOFF_V3_VERSION         3
@@ -50,6 +60,16 @@ struct zbl6_handoff {
 	uint32_t mem_lower_kib;
 	uint32_t mem_upper_kib;
 	uint32_t reserved;
+} __attribute__((packed));
+
+struct zbl6_handoff_framebuffer {
+	struct zbl6_handoff common;
+	uint64_t framebuffer_base;
+	uint64_t framebuffer_size;
+	uint32_t framebuffer_width;
+	uint32_t framebuffer_height;
+	uint32_t framebuffer_stride;
+	uint32_t framebuffer_format;
 } __attribute__((packed));
 
 struct zbl6_handoff_v2 {
@@ -113,6 +133,8 @@ struct zbl6_memory_range {
 
 _Static_assert(sizeof(struct zbl6_handoff) == ZBL6_HANDOFF_SIZE,
 	"ZBL6 handoff size");
+_Static_assert(sizeof(struct zbl6_handoff_framebuffer) ==
+	ZBL6_HANDOFF_FB_SIZE, "ZBL6 BIOS framebuffer handoff size");
 _Static_assert(sizeof(struct zbl6_handoff_v2) == ZBL6_HANDOFF_V2_SIZE,
 	"ZBL6 handoff v2 size");
 _Static_assert(sizeof(struct zbl6_handoff_v3) == ZBL6_HANDOFF_V3_SIZE,

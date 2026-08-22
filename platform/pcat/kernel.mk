@@ -144,6 +144,7 @@ $(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
 	@test $$(stat -c%s $@) -eq 2048
 
 $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
+	$(BIOS_LOADER)/vbe.inc \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
 	bootloader/include/elf.inc bootloader/include/amd64-handoff.h

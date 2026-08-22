@@ -41,6 +41,29 @@ handoff_name_is(const char *name, const char *expected)
 	return *name == *expected;
 }
 
+static void
+accept_framebuffer(uint64 base, uint64 size, uint32 width, uint32 height,
+    uint32 stride, uint32 format)
+{
+	uint64 offset = base & 0x1fffffULL;
+	uint64 required;
+
+	if (size == 0 || base > UINT64_MAX - size || width == 0 || height == 0 ||
+	    stride < width || (format != ZBL6_FRAMEBUFFER_RGBX8888 &&
+	    format != ZBL6_FRAMEBUFFER_BGRX8888) ||
+	    stride > UINT64_MAX / 4U / height)
+		HAL_FATAL("invalid amd64 framebuffer handoff");
+	required = (uint64)stride * height * 4U;
+	if (required > size || size > 0x3e000000ULL - offset)
+		HAL_FATAL("invalid amd64 framebuffer extent");
+	boot_framebuffer.physical_base = base;
+	boot_framebuffer.size = size;
+	boot_framebuffer.width = width;
+	boot_framebuffer.height = height;
+	boot_framebuffer.stride = stride;
+	boot_framebuffer.format = format;
+}
+
 void
 bsp_boot_init(const void *raw_boot_info)
 {
@@ -53,11 +76,25 @@ bsp_boot_init(const void *raw_boot_info)
 
 	if (raw == NULL || raw->magic != ZBL6_HANDOFF_MAGIC)
 		HAL_FATAL("invalid amd64 ZBL6 handoff");
+	hal_memset(&boot_framebuffer, 0, sizeof(boot_framebuffer));
 	if (raw->version == ZBL6_HANDOFF_VERSION) {
+		const struct zbl6_handoff_framebuffer *raw_framebuffer =
+		    raw_boot_info;
+
 		if (raw->size < sizeof(*raw) || raw->boot_drive < 0x80U ||
 		    raw->partition_index < 1U || raw->partition_index > 4U)
 			HAL_FATAL("invalid amd64 ZBL6 v1 handoff");
 		boot_info = *raw;
+		if ((raw->flags & ZBL6_HANDOFF_FLAG_FRAMEBUFFER) != 0) {
+			if (raw->size < sizeof(*raw_framebuffer))
+				HAL_FATAL("truncated amd64 BIOS framebuffer handoff");
+			accept_framebuffer(raw_framebuffer->framebuffer_base,
+			    raw_framebuffer->framebuffer_size,
+			    raw_framebuffer->framebuffer_width,
+			    raw_framebuffer->framebuffer_height,
+			    raw_framebuffer->framebuffer_stride,
+			    raw_framebuffer->framebuffer_format);
+		}
 		total_memory = 0x100000ULL +
 		    (uint64)boot_info.mem_upper_kib * 1024ULL;
 		if (total_memory > 0x40000000ULL)
@@ -104,28 +141,12 @@ bsp_boot_init(const void *raw_boot_info)
 			HAL_FATAL("invalid amd64 ZBL6 v2 handoff");
 		boot_info_v2 = *raw_v2;
 		if (raw->version == ZBL6_HANDOFF_V3_VERSION) {
-			uint64 offset = raw_v3->framebuffer_base & 0x1fffffULL;
-			if ((raw_v3->flags & ZBL6_HANDOFF_FLAG_FRAMEBUFFER) == 0 ||
-			    raw_v3->framebuffer_size == 0 ||
-			    raw_v3->framebuffer_base > UINT64_MAX -
-			    raw_v3->framebuffer_size ||
-			    raw_v3->framebuffer_width == 0 ||
-			    raw_v3->framebuffer_height == 0 ||
-			    raw_v3->framebuffer_stride <
-			    raw_v3->framebuffer_width ||
-			    (raw_v3->framebuffer_format !=
-			    ZBL6_FRAMEBUFFER_RGBX8888 &&
-			    raw_v3->framebuffer_format !=
-			    ZBL6_FRAMEBUFFER_BGRX8888) ||
-			    raw_v3->framebuffer_size > 0x3e000000ULL - offset)
+			if ((raw_v3->flags & ZBL6_HANDOFF_FLAG_FRAMEBUFFER) == 0)
 				HAL_FATAL("invalid amd64 framebuffer handoff");
-			boot_framebuffer.physical_base =
-			    raw_v3->framebuffer_base;
-			boot_framebuffer.size = raw_v3->framebuffer_size;
-			boot_framebuffer.width = raw_v3->framebuffer_width;
-			boot_framebuffer.height = raw_v3->framebuffer_height;
-			boot_framebuffer.stride = raw_v3->framebuffer_stride;
-			boot_framebuffer.format = raw_v3->framebuffer_format;
+			accept_framebuffer(raw_v3->framebuffer_base,
+			    raw_v3->framebuffer_size, raw_v3->framebuffer_width,
+			    raw_v3->framebuffer_height, raw_v3->framebuffer_stride,
+			    raw_v3->framebuffer_format);
 		}
 		source = (const void *)(uintptr_t)raw_v2->memory_ranges;
 		boot_memory_range_count = raw_v2->memory_range_count;

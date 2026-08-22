@@ -107,7 +107,8 @@ static int graphics_enter(uintptr_t argument)
 	    (request.preferred_bits_per_pixel != 0 &&
 	     request.preferred_bits_per_pixel != 4 &&
 	     request.preferred_bits_per_pixel != 8 &&
-	     request.preferred_bits_per_pixel != 24))
+	     request.preferred_bits_per_pixel != 24 &&
+	     request.preferred_bits_per_pixel != 32))
 		return EINVAL;
 	memset(&graphics_mode, 0, sizeof(graphics_mode));
 	graphics_mode.preferred_width = request.preferred_width;

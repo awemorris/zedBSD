@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 REQUIRE = lang/noct
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,remacs,Remacs,i386 pc98,n,package,,y,packages/editors,editors/remacs,$(REQUIRE)))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,remacs,Remacs,i386 pc98 amd64,n,package,,y,packages/editors,editors/remacs,$(REQUIRE)))
 REQUIRE =
 
 REMACS_REPOSITORY ?= https://github.com/awemorris/remacs.git

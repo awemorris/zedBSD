@@ -93,7 +93,8 @@ def check(args: argparse.Namespace) -> None:
         stream.seek((total - 1) * SECTOR)
         check_header(stream.read(SECTOR), total - 1, 1,
                      backup_entries_lba, total)
-    for name, source in (("VMUNIX", args.kernel),
+    for name, source in (("BOOTZBSD.EXE", args.bootzbsd),
+                         ("VMUNIX", args.kernel),
                          ("VMUNIX.X64", args.kernel),
                          ("EFI/BOOT/BOOTX64.EFI", args.bootx64),
                          ("rootfs.img", args.arch_image),
@@ -109,6 +110,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--machine", choices=("pcat",), required=True)
     parser.add_argument("--kernel", type=Path, required=True)
+    parser.add_argument("--bootzbsd", type=Path, required=True)
+    parser.add_argument("--fat-type", choices=("auto", "fat12", "fat16", "fat32"),
+                        default="auto")
     parser.add_argument("--bootx64", type=Path, required=True)
     parser.add_argument("--arch-profile")
     parser.add_argument("--arch-image", type=Path)

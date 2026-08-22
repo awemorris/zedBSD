@@ -231,6 +231,25 @@ USER_NOCT_CPPFLAGS := -nostdinc -Iuserland/include -Iinclude/uapi -I. \
 	-DHAVE_SYS_TYPES_H=1 -DHAVE_STDBOOL_H=1 -U__linux__ -Ulinux
 USER_NOCT_CFLAGS := $(NOCT_CFLAGS)
 
+# The original zedBSD port was i386-only.  amd64 uses the same POSIX target
+# integration, but must produce a native LP64 executable because the amd64
+# kernel intentionally has no ELF32 compatibility process ABI.
+ifeq ($(ARCH),amd64)
+USER_NOCT_CPPFLAGS := -nostdinc -Iuserland/include -Iinclude/uapi -I. \
+	-I$(BUILD) -Ilibc/include -I$(NOCT_ROOT)/include \
+	-I$(NOCT_ROOT)/src/core -I$(NOCT_ROOT)/src/api \
+	-DNOCT_TARGET_POSIX -DNOCT_TARGET_ZEDBSD -DNOCT_MEMORY_SMALL \
+	-DNOCT_USE_JIT -DNOCT_FORCE_SOFT_FMAF \
+	-DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 \
+	-DHAVE_SYS_TYPES_H=1 -DHAVE_STDBOOL_H=1 \
+	-DZEDBSD_USER_ABI_LP64 -U__linux__ -Ulinux
+USER_NOCT_CFLAGS := -m64 -march=x86-64 -mno-red-zone -Os -ffreestanding \
+	-fno-builtin -ffunction-sections -fdata-sections -fno-pic -fno-pie \
+	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
+	-fno-isolate-erroneous-paths-dereference -fno-strict-aliasing \
+	-Wall -Wextra -Werror
+endif
+
 $(USER_NOCT_BUILD_DIR)/noct.o: USER_NOCT_WARN := -Wno-error=unused-parameter
 $(USER_NOCT_BUILD_DIR)/runtime.o: USER_NOCT_WARN := -Wno-error=maybe-uninitialized
 $(USER_NOCT_BUILD_DIR)/dynlib.o: USER_NOCT_WARN := -Wno-error=unused-function

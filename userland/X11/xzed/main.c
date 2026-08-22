@@ -632,8 +632,8 @@ int main(int argc,char **argv)
 		if(strcmp(argv[arg],"--")==0){arg++;break;}
 		if(strcmp(argv[arg],"--size")==0&&arg+1<argc&&
 		    parse_size(argv[arg+1],&preferred_width,&preferred_height)){arg+=2;continue;}
-		if(strcmp(argv[arg],"--depth")==0&&arg+1<argc){char*end;unsigned long d=strtoul(argv[arg+1],&end,10);if(*end=='\0'&&(d==4||d==8||d==24)){preferred_depth=(unsigned)d;arg+=2;continue;}}
-		fprintf(stderr,"usage: Xzed [:0] [--size WIDTHxHEIGHT] [--depth 4|8|24] [-- command [argument ...]]\n");return 2;
+		if(strcmp(argv[arg],"--depth")==0&&arg+1<argc){char*end;unsigned long d=strtoul(argv[arg+1],&end,10);if(*end=='\0'&&(d==4||d==8||d==24||d==32)){preferred_depth=(unsigned)d;arg+=2;continue;}}
+		fprintf(stderr,"usage: Xzed [:0] [--size WIDTHxHEIGHT] [--depth 4|8|24|32] [-- command [argument ...]]\n");return 2;
 	}
 	signal(SIGINT,on_signal);signal(SIGTERM,on_signal);if(initialize(&s,preferred_width,preferred_height,preferred_depth)){fprintf(stderr,"Xzed: %s\n",strerror(errno));cleanup(&s);return 1;}
 	if(arg<argc){pid_t pid=fork();if(pid<0){fprintf(stderr,"Xzed: fork: %s\n",strerror(errno));cleanup(&s);return 1;}if(pid==0){execve(argv[arg],&argv[arg],environ);fprintf(stderr,"Xzed: %s: %s\n",argv[arg],strerror(errno));_exit(127);}}

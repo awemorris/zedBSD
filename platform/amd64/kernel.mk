@@ -91,6 +91,9 @@ AMD64_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
 	$(ZEDBSD_LIBC_SOURCES))
 AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS) \
 	$(AMD64_KERNEL_LIBC_OBJS)
+ifneq ($(strip $(ZEDBSD_CONFIG)),)
+$(AMD64_VMUNIX_OBJS): $(ZEDBSD_CONFIG)
+endif
 
 all: $(BUILD)/vmunix $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(BUILD)/bin/ping $(BUILD)/bin/ifconfig $(BUILD)/bin/route \
@@ -153,6 +156,7 @@ $(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
 	@test $$(stat -c%s $@) -eq 512
 
 $(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2.S \
+	$(BIOS_LOADER)/vbe.inc \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
 	bootloader/include/elf.inc bootloader/include/amd64-handoff.h
@@ -170,8 +174,43 @@ $(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.raw \
 	tools/build/finalize-bios-stage2.py
 	$(PYTHON) tools/build/finalize-bios-stage2.py --machine pcat $< $@
 
+$(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/partition-pbr.elf: $(BUILD)/bootloader/partition-pbr.o
+	$(LD) -m elf_i386 -Ttext=0 -e _start $< -o $@
+
+$(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+	@test $$(stat -c%s $@) -eq 2048
+
+$(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
+	$(BIOS_LOADER)/vbe.inc \
+	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
+	bootloader/include/mbr.inc bootloader/include/fat16.inc \
+	bootloader/include/elf.inc bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
+	$(BIOS_LOADER)/stage2.ld
+	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
+
+$(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+
+$(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw \
+	tools/build/finalize-bios-stage2.py
+	$(PYTHON) tools/build/finalize-bios-stage2.py --machine pcat $< $@
+
+$(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin \
+	tools/build/make-mz-exe.py
+	$(PYTHON) tools/build/make-mz-exe.py --entry 0x20 $< $@
+
 bios-bootloader: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE
 
 $(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c \
 	$(UEFI_LOADER)/include/uefi.h $(UEFI_LOADER)/elf64.h \
@@ -212,16 +251,15 @@ AMD64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfc
 	userland/base/libc/shm.c \
 	userland/base/libc/semaphore.c \
 	userland/base/libc/mqueue.c \
+	userland/base/libc/socket.c userland/base/libc/resolver.c \
+	userland/base/libc/resolver-dns.c \
 	userland/base/libc/signal.c userland/base/libc/account.c userland/base/libc/crypt.c \
 	userland/base/libc/utmpx.c libc/heap.c libc/string.c libc/ctype.c \
 	libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c libc/format.c libc/stdio.c
 AMD64_USER_LIBC_OBJS := $(BUILD)/user64/src/crt/crt0-amd64.o \
 	$(patsubst %.c,$(BUILD)/user64/%.o,$(AMD64_USER_RUNTIME_SOURCES))
-AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS) \
-	$(BUILD)/user64/userland/base/libc/socket.o \
-	$(BUILD)/user64/userland/base/libc/resolver.o \
-	$(BUILD)/user64/userland/base/libc/resolver-dns.o
+AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS)
 AMD64_USER_NETTEST_OBJS := $(BUILD)/user64/userland/base/nettest/main.o
 AMD64_USER_SH_OBJS := $(BUILD)/user64/userland/base/sh/main.o \
 	$(BUILD)/user64/userland/base/sh/builtins.o \
@@ -415,6 +453,33 @@ DYNAMIC_MUSL_SCAN_OBJS := $(DYNAMIC_FLOAT_DIR)/musl-shgetc.o \
 	$(DYNAMIC_FLOAT_DIR)/musl-compat.o
 DYNAMIC_LIBC_OBJS += $(DYNAMIC_MUSL_MATH_OBJS) $(DYNAMIC_MUSL_SCAN_OBJS)
 
+AMD64_USER_NOCT_GLUE_OBJS := \
+	$(BUILD)/user64/userland/packages/lang/noct/runtime/main.o \
+	$(BUILD)/user64/userland/packages/lang/noct/runtime/memory.o \
+	$(BUILD)/user64/userland/packages/lang/noct/runtime/platform.o \
+	$(BUILD)/user64/userland/packages/lang/noct/runtime/env.o \
+	$(BUILD)/user64/userland/packages/lang/noct/integration/napi.o \
+	$(BUILD)/user64/userland/packages/lang/noct/integration/target.o
+$(AMD64_USER_NOCT_GLUE_OBJS): AMD64_USER_CPPFLAGS := \
+	$(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
+
+$(BUILD)/NOCT.ELF: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_NOCT_GLUE_OBJS) \
+	$(USER_NOCT_OBJECTS) $(DYNAMIC_MUSL_MATH_OBJS) \
+	$(DYNAMIC_MUSL_SCAN_OBJS) $(AMD64_PLATFORM)/user.ld \
+	$(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+		$(AMD64_USER_NOCT_GLUE_OBJS) $(USER_NOCT_OBJECTS) \
+		$(DYNAMIC_MUSL_MATH_OBJS) $(DYNAMIC_MUSL_SCAN_OBJS) -o $@
+	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+$(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
+	@mkdir -p $(dir $@)
+	cp -f $< $@
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
 $(DYNAMIC_DIR)/obj/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
@@ -581,12 +646,15 @@ rootfs-tar: $(BUILD)/rootfs.tar.gz
 rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
 	$(DATA_IMAGE) $(SWAP_IMAGE) $(BUILD)/uefi/BOOTX64.EFI \
 	tools/build/make-bios-hdd-image.py tools/build/check-amd64-gpt-image.py
 	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
 		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
@@ -598,22 +666,28 @@ $(BUILD)/ufs-root.img: $(AMD64_ARCH_UFS_IMAGE) \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) $@
 
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(BUILD)/ufs-root.img \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(BUILD)/ufs-root.img \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.py
 	$(PYTHON) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.py --force \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
 		--ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
 
 ufs-root-image: $(BUILD)/ufs-root-hdd-image.img
 
 $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
 	tools/build/check-amd64-gpt-image.py
 	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin --kernel $(BUILD)/vmunix \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
 		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
 		--arch-format ufs \
@@ -626,7 +700,8 @@ bios-hdd-image: $(BUILD)/bios-hdd-image.img
 hdd-image: $(BUILD)/hdd-image.img
 bios-loader-host-check: $(BUILD)/bios-hdd-image.img
 	$(PYTHON) tools/build/check-amd64-gpt-image.py --machine pcat \
-		--kernel $(BUILD)/vmunix --arch-profile amd64 \
+		--kernel $(BUILD)/vmunix \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --arch-profile amd64 \
 		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
 		--arch-image $(AMD64_ARCH_UFS_IMAGE) --arch-format ufs \
 		--data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) $<

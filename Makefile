@@ -106,6 +106,12 @@ override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 # Essential administrative tools are present even when an older config.mk
 # predates their package registration.
 override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) blkid hostname)
+# Xzed cannot operate without the kernel graphics character device.  Keep
+# hand-edited and older saved configurations from producing an unusable
+# userland/kernel combination.
+ifneq ($(filter Xzed,$(ZEDBSD_USER_PROGRAMS)),)
+override CONFIG_DRIVER_GRAPHICS := y
+endif
 ZEDBSD_MISSING_PACKAGE_REQUIREMENTS := $(sort \
 	$(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 		$(foreach requirement,$(USERLAND_$(program)_REQUIRE),\
