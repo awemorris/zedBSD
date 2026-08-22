@@ -573,22 +573,6 @@ $(BUILD)/tests/dns-host-test: tests/dns-host-test.c \
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Ilibc/include \
 		userland/base/libc/resolver-dns.c $< -o $@
 
-$(BUILD)/tests/stdio-fs-host-test: tests/stdio-fs-host-test.c \
-	tests/vfs-host-stubs.c \
-	src/kern/fs.c src/kern/namespace.c src/kern/env.c $(ZEDBSD_LIBC_SOURCES) \
-	src/kern/buf.c src/kern/disk.c src/kern/inode.c src/kern/file.c src/kern/namecache.c \
-	src/kern/namei.c src/kern/mount.c src/kern/rootfs.c
-	@mkdir -p $(dir $@)
-	$(HOSTCC) $(ZEDBSD_HOST_TEST_CFLAGS) -Iinclude -Iinclude/uapi -Isrc src/kern/fs.c \
-		src/kern/namespace.c src/kern/env.c src/kern/buf.c src/kern/disk.c \
-		src/kern/inode.c src/kern/file.c src/kern/namecache.c \
-		src/kern/namei.c src/kern/mount.c src/kern/rootfs.c \
-		tests/vfs-host-stubs.c \
-		$(ZEDBSD_LIBC_SOURCES) $< -o $@
-
-stdio-fs-host-test: $(BUILD)/tests/stdio-fs-host-test
-	$(BUILD)/tests/stdio-fs-host-test
-
 $(BUILD)/tests/crypt-host-test: tests/crypt-host-test.c userland/base/libc/crypt.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -O2 -Wall -Wextra -Werror userland/base/libc/crypt.c $< -o $@
@@ -762,7 +746,7 @@ HOST_TEST_BINARIES := $(BUILD)/tests/beui-host-test \
 	$(BUILD)/tests/inet-stack-host-test \
 	$(BUILD)/tests/dhcp-host-test \
 	$(BUILD)/tests/dns-host-test
-CHECK_RUN_TARGETS := stdio-fs-host-test libc-host-test softfloat-host-test \
+CHECK_RUN_TARGETS := libc-host-test softfloat-host-test \
 	uapi-abi-layout-check posix-header-check posix-api-matrix-check \
 	ufs1-format-host-test ufs2-format-host-test
 
@@ -988,7 +972,7 @@ distclean:
 	$(BUILD)/*/*/*/*.d $(BUILD)/*/*/*/*/*.d \
 	$(BUILD)/*/*/*/*/*/*.d $(BUILD)/*/*/*/*/*/*/*.d)
 
-.PHONY: all check clean distclean messages stdio-fs-host-test \
+.PHONY: all check clean distclean messages \
 	overlay-journal-format-host-test uapi-abi-layout-check \
 	posix-header-check posix-api-matrix-check ufs1-format-host-test \
 	ufs2-format-host-test ufs1-format-python-test ufs2-format-python-test \

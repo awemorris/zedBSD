@@ -16,8 +16,7 @@ ZEDBSD_LIBC_SOURCES := \
 	libc/int64.c \
 	libc/strto.c \
 	libc/format.c \
-	libc/stdio.c \
-	libc/stdio-fs.c
+	libc/stdio.c
 
 ZEDBSD_LIBC_OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(ZEDBSD_LIBC_SOURCES))
 

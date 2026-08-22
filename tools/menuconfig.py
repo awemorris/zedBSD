@@ -479,9 +479,11 @@ def build(screen, values: dict[str, object], output: Path,
     curses.endwin()
     print(f"\nBuilding {target_label(values)}...\n", flush=True)
     try:
+        jobs = os.environ.get("ZEDBSD_JOBS") or str(os.cpu_count() or 1)
         result = subprocess.run(
-            ["make", "--no-print-directory", f"ZEDBSD_CONFIG={output}",
-             make_target], cwd=REPO, check=False)
+            ["make", f"-j{jobs}", "--no-print-directory",
+             f"ZEDBSD_CONFIG={output}", make_target], cwd=REPO,
+            check=False)
     except OSError as error:
         print(f"build menu: {error}", flush=True)
         result = None
@@ -491,11 +493,13 @@ def build(screen, values: dict[str, object], output: Path,
         screen.clear()
         screen.refresh()
     if result is not None and result.returncode == 0:
-        artifact = subprocess.run(
+        artifacts = subprocess.run(
             ["make", "--no-print-directory", f"ZEDBSD_CONFIG={output}",
              artifact_target], cwd=REPO, check=False, text=True,
-            stdout=subprocess.PIPE).stdout.strip()
-        lines = ["Build succeeded.", ""] + ([artifact] if artifact else [])
+            stdout=subprocess.PIPE).stdout.splitlines()
+        lines = ["Build succeeded.", ""] + [
+            artifact for artifact in artifacts if artifact
+        ]
         message(screen, "Build result", lines, target_label(values))
     else:
         status = result.returncode if result is not None else "not started"

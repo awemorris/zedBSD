@@ -153,15 +153,8 @@ POSIX-R2-REMAINING.ELF: $(BUILD)/POSIX-R2-REMAINING.ELF
 
 $(NOCT_BUILD_DIR)/beui-pc98-cirrus.o: NOCT_CFLAGS := $(CIRRUS_NOCT_CFLAGS)
 
-NOCT_GLUE_OBJS := $(BUILD)/userland/packages/lang/noct/integration/noct.o $(BUILD)/userland/packages/lang/noct/integration/napi.o \
-	$(BUILD)/userland/packages/lang/noct/integration/target.o
-$(NOCT_GLUE_OBJS): OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
-$(NOCT_GLUE_OBJS): OBJ_CFLAGS = $(NOCT_CFLAGS)
 $(BUILD)/drivers/pc98-graphics.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) -Iinclude -Isrc
 $(BUILD)/drivers/pc98-graphics.o: OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
-$(BUILD)/userland/packages/lang/noct/integration/platform.o: OBJ_CPPFLAGS = $(NOCT_CPPFLAGS) \
-	$(ZEDBSD_LIBC_CPPFLAGS)
-$(BUILD)/userland/packages/lang/noct/integration/platform.o: OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
 
 STAGE2_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 
