@@ -999,13 +999,13 @@ unreal_fs:
 /* ------------------------------------------------------------------ */
 prepare_pc98_handoff:
 	mov dword ptr [pc98_handoff + 0], 0x48323842
-	mov word ptr [pc98_handoff + 4], 3
+	mov word ptr [pc98_handoff + 4], 2
 	mov word ptr [pc98_handoff + 6], 24
 	mov al, byte ptr [boot_drive]
 	mov byte ptr [pc98_handoff + 9], al
-	mov byte ptr [pc98_handoff + 10], 1
-	mov al, byte ptr [partition_index]
-	mov byte ptr [pc98_handoff + 11], al
+	/* Version 2 selects the native PC-98 partition by LBA.  The scheme and
+	 * index bytes are reserved and must remain zero. */
+	mov word ptr [pc98_handoff + 10], 0
 	mov eax, offset device_table
 	add eax, 0x10000
 	mov dword ptr [pc98_handoff + 12], eax
