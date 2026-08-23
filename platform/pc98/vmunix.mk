@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Awe Morris
 # SPDX-License-Identifier: Zlib
 #
-# Included from the top-level Makefile with ARCH=pc98; everything here
+# Included from the top-level Makefile for the configured PC-98 target; everything here
 # builds into $(BUILD) = build/pc98.
 
 PC98 := platform/pc98
