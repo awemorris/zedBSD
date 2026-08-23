@@ -20,6 +20,7 @@ static size_t image_size;
 static struct inode image_inode;
 static struct file image_file;
 static struct vm_region mapped_region;
+static uint8_t mapped_bytes[4096];
 static unsigned map_count;
 struct vm_layout vm_layout;
 
@@ -59,9 +60,37 @@ file_read(struct file *file, void *buffer, size_t length)
 }
 
 int
-vmspace_map_file(struct vmspace *vm, uintptr_t start, size_t size,
-	uint32_t prot, struct file *file, off_t file_offset,
-	uintptr_t data_start, size_t data_size, struct vm_region **result)
+file_content_lease_begin(struct file *file, struct file_content_lease *lease)
+{
+	memset(lease, 0, sizeof(*lease));
+	lease->file = file;
+	lease->size = (off_t)image_size;
+	lease->active = 1;
+	return 0;
+}
+
+ssize_t
+file_content_lease_pread(struct file_content_lease *lease, void *buffer,
+	size_t length, off_t offset)
+{
+	(void)lease;
+	if (offset < 0 || (size_t)offset >= image_size)
+		return 0;
+	if (length > image_size - (size_t)offset)
+		length = image_size - (size_t)offset;
+	memcpy(buffer, image + offset, length);
+	return (ssize_t)length;
+}
+
+void
+file_content_lease_end(struct file_content_lease *lease)
+{
+	memset(lease, 0, sizeof(*lease));
+}
+
+int
+vmspace_map_anon_fixed_noreplace(struct vmspace *vm, uintptr_t start,
+	size_t size, uint32_t prot, struct vm_region **result)
 {
 	(void)vm;
 	if (map_count != 0)
@@ -70,13 +99,35 @@ vmspace_map_file(struct vmspace *vm, uintptr_t start, size_t size,
 	mapped_region.start = start;
 	mapped_region.size = size;
 	mapped_region.prot = prot;
-	mapped_region.file = file;
-	mapped_region.file_offset = file_offset;
-	mapped_region.data_start = data_start;
-	mapped_region.data_size = data_size;
+	mapped_region.backing = VM_BACKING_ANON;
+	memset(mapped_bytes, 0, sizeof(mapped_bytes));
 	map_count++;
 	if (result != NULL)
 		*result = &mapped_region;
+	return 0;
+}
+
+int
+vmspace_copy_to(struct vmspace *vm, uintptr_t destination,
+	const void *source, size_t size)
+{
+	(void)vm;
+	if (destination < mapped_region.start ||
+	    destination - mapped_region.start > mapped_region.size ||
+	    size > mapped_region.size - (destination - mapped_region.start))
+		return EFAULT;
+	memcpy(mapped_bytes + destination - mapped_region.start, source, size);
+	return 0;
+}
+
+int
+vmspace_protect(struct vmspace *vm, uintptr_t start, size_t size,
+	uint32_t prot)
+{
+	(void)vm;
+	if (mapped_region.start != start || mapped_region.size != size)
+		return EINVAL;
+	mapped_region.prot = prot;
 	return 0;
 }
 
@@ -186,8 +237,9 @@ main(void)
 	assert(info.entry == LOAD_ADDRESS && vm.entry == LOAD_ADDRESS);
 	assert(mapped_region.start == LOAD_ADDRESS && mapped_region.size == 4096);
 	assert(mapped_region.prot == (HAL_SPACE_READ | HAL_SPACE_EXEC));
-	assert(mapped_region.file_offset == LOAD_OFFSET);
-	assert(mapped_region.data_size == 4);
+	assert(mapped_region.backing == VM_BACKING_ANON);
+	assert(memcmp(mapped_bytes, "68K!", 4) == 0);
+	assert(mapped_bytes[4] == 0);
 
 	make_valid_image();
 	image[EI_DATA] = ELFDATA2LSB;

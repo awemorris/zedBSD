@@ -2,8 +2,11 @@
 #include "kern/sched.h"
 #include "kern/thread.h"
 #include "kern/lock.h"
+#include "kern/test-checkpoint.h"
+#include "kern/waitq.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +22,12 @@ static hal_cpu_id_t current_cpu;
 static int irq_enabled = 1;
 static unsigned notifications[TEST_CPUS];
 static hal_cpu_id_t task_targets[32];
+static unsigned itimer_signals[NSIG];
+static unsigned cpu_limit_ticks;
+static uint64_t cpu_limit_total;
+static enum kern_test_checkpoint_id interrupt_checkpoint;
+static struct wait_queue *interrupt_queue;
+static int pending_signal;
 
 struct thread *thread_current(void) { return current[current_cpu]; }
 void thread_sched_retired(struct thread *thread)
@@ -31,7 +40,19 @@ int signal_send_process(struct process *process, int signal)
 { (void)process; (void)signal; return 0; }
 int signal_send_process_info(struct process *process, int signal,
 	const struct signal_info *info)
-{ (void)process; (void)signal; (void)info; return 0; }
+{
+	(void)process;
+	(void)info;
+	if (signal > 0 && signal < NSIG)
+		itimer_signals[signal]++;
+	return 0;
+}
+void resource_limit_cpu_tick(struct process *process, uint64_t total)
+{
+	assert(process == &accounting_process);
+	cpu_limit_ticks++;
+	cpu_limit_total = total;
+}
 int process_itimer_tick(struct process *process, int which)
 {
 	uint64_t remaining = process->itimer_remaining[which];
@@ -43,6 +64,10 @@ int process_itimer_tick(struct process *process, int which)
 }
 
 void process_itimer_real_tick_all(void) { }
+int process_stop_requested(const struct thread *thread)
+{ (void)thread; return 0; }
+int signal_pending_unblocked(const struct thread *thread)
+{ (void)thread; return pending_signal; }
 
 hal_cpu_id_t hal_cpu_current(void) { return current_cpu; }
 unsigned hal_cpu_count(void) { return TEST_CPUS; }
@@ -109,6 +134,51 @@ init_thread(struct thread *thread)
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
 }
 
+static void
+interrupt_wait_checkpoint(enum kern_test_checkpoint_id id, void *object,
+	void *argument)
+{
+	(void)argument;
+	if (id != interrupt_checkpoint || object != interrupt_queue)
+		return;
+	pending_signal = 1;
+	sched_interrupt(current[current_cpu]);
+}
+
+static void
+test_interruptible_wait_handoff(struct thread *thread)
+{
+	static const enum kern_test_checkpoint_id checkpoints[] = {
+		KERN_TEST_WAIT_BEFORE_REGISTER,
+		KERN_TEST_WAIT_AFTER_REGISTER,
+	};
+	struct wait_queue queue;
+	struct spinlock condition;
+	unsigned index;
+
+	waitq_init(&queue, "interrupt race");
+	spin_init(&condition, LOCK_RANK_PROCESS, "interrupt condition");
+	interrupt_queue = &queue;
+	for (index = 0; index < sizeof(checkpoints) / sizeof(checkpoints[0]);
+	    index++) {
+		unsigned long irq;
+		uint64_t sequence = waitq_sequence(&queue);
+
+		pending_signal = 0;
+		interrupt_checkpoint = checkpoints[index];
+		kern_test_checkpoint_set(interrupt_wait_checkpoint, NULL);
+		irq = spin_lock_irqsave(&condition);
+		assert(waitq_sleep(&queue, &condition, sequence, 0,
+		    WAITQ_INTERRUPTIBLE) == EINTR);
+		spin_unlock_irqrestore(&condition, irq);
+		assert(thread->state == THREAD_RUNNING);
+		assert(thread->wait_token.queue == NULL);
+		assert(queue.head == NULL && queue.tail == NULL);
+	}
+	kern_test_checkpoint_set(NULL, NULL);
+	pending_signal = 0;
+}
+
 int
 main(void)
 {
@@ -160,10 +230,48 @@ main(void)
 	assert(sleeper.sched.cpu == 3);
 
 	current_cpu = 0;
-	for (cpu = 1; cpu <= SCHED_QUANTUM_TICKS; cpu++)
-		sched_clock_cpu(0, cpu);
-	assert(sched_ticks() == SCHED_QUANTUM_TICKS);
-	assert(accounting_process.cpu_ticks == SCHED_QUANTUM_TICKS);
+	tasks[0].sched.quantum = 32U;
+	accounting_process.itimer_remaining[1] = 3U;
+	accounting_process.itimer_remaining[2] = 4U;
+	sched_clock_cpu(0, 1U);
+	sched_clock_cpu(0, 2U);
+	assert(accounting_process.user_ticks == 2U);
+	assert(accounting_process.system_ticks == 0U);
+	assert(accounting_process.itimer_remaining[1] == 1U);
+	assert(accounting_process.itimer_remaining[2] == 2U);
+	sched_accounting_kernel_enter();
+	sched_clock_cpu(0, 3U);
+	sched_accounting_kernel_enter();
+	sched_clock_cpu(0, 4U);
+	sched_accounting_kernel_leave();
+	sched_accounting_kernel_leave();
+	assert(accounting_process.user_ticks == 2U);
+	assert(accounting_process.system_ticks == 2U);
+	assert(accounting_process.itimer_remaining[1] == 1U);
+	assert(accounting_process.itimer_remaining[2] == 0U);
+	assert(itimer_signals[SIGPROF] == 1U);
+	sched_clock_cpu(0, 5U);
+	assert(sched_ticks() == 5U);
+	assert(accounting_process.cpu_ticks == 5U);
+	assert(accounting_process.user_ticks == 3U);
+	assert(accounting_process.system_ticks == 2U);
+	assert(accounting_process.itimer_remaining[1] == 0U);
+	assert(itimer_signals[SIGVTALRM] == 1U);
+	assert(cpu_limit_ticks == 5U && cpu_limit_total == 5U);
+
+	/* Kernel threads and the idle/process0 domain never contribute CPU time
+	 * or consume process interval timers. */
+	tasks[0].proc = &process0;
+	process0.itimer_remaining[2] = 1U;
+	sched_clock_cpu(0, 6U);
+	assert(process0.cpu_ticks == 0U && process0.user_ticks == 0U &&
+	    process0.system_ticks == 0U);
+	assert(process0.itimer_remaining[2] == 1U);
+	assert(cpu_limit_ticks == 5U);
+
+	/* A signal delivered on either side of wait-queue registration must not
+	 * vanish merely because sched_wakeup() saw the task as RUNNING. */
+	test_interruptible_wait_handoff(&tasks[0]);
 
 	puts("zedBSD per-CPU scheduler host tests: PASS");
 	return 0;

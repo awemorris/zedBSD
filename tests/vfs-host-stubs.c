@@ -5,10 +5,15 @@
 #include "kern/partition.h"
 #include <hal/hal.h>
 #include <stdbool.h>
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <time.h>
+
+int vfs_test_clear_setid_error;
+unsigned vfs_test_clear_setid_calls;
 
 /* Isolated host VFS tests are single-threaded and have no HAL interrupt
  * controller.  Keep the kernel's IRQ-save critical-section contract visible
@@ -71,6 +76,17 @@ int mutex_init(struct mutex *lock, enum lock_rank rank, const char *name)
 { (void)lock; (void)rank; (void)name; return 0; }
 void mutex_lock(struct mutex *lock) { (void)lock; }
 void mutex_unlock(struct mutex *lock) { (void)lock; }
+int mutex_trylock(struct mutex *lock) { (void)lock; return 1; }
+int mutex_owned(struct mutex *lock) { (void)lock; return 0; }
+
+void
+hal_fatal(const char *file, int line, const char *message)
+{
+	(void)file;
+	(void)line;
+	(void)message;
+	abort();
+}
 
 void waitq_init(struct wait_queue *queue, const char *name)
 { queue->head = queue->tail = NULL; queue->sequence = 1; queue->name = name; }
@@ -103,6 +119,32 @@ vfs_access(const struct inode *inode, const struct ucred *cred, int requested)
 	(void)inode;
 	(void)cred;
 	(void)requested;
+	return 0;
+}
+
+int
+vfs_clear_setid_on_write(struct inode *inode, const struct ucred *cred)
+{
+	vfs_test_clear_setid_calls++;
+	if (inode == NULL || cred == NULL)
+		return EINVAL;
+	if (vfs_test_clear_setid_error != 0)
+		return vfs_test_clear_setid_error;
+	if (cred->euid != 0 && inode->i_type == INODE_REG)
+		inode->i_mode &= ~(mode_t)(S_ISUID | S_ISGID);
+	return 0;
+}
+
+int
+vfs_clear_setid_on_content_change(struct inode *inode)
+{
+	vfs_test_clear_setid_calls++;
+	if (inode == NULL)
+		return EINVAL;
+	if (vfs_test_clear_setid_error != 0)
+		return vfs_test_clear_setid_error;
+	if (inode->i_type == INODE_REG)
+		inode->i_mode &= ~(mode_t)(S_ISUID | S_ISGID);
 	return 0;
 }
 

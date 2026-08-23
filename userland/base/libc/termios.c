@@ -33,8 +33,7 @@ tcsetattr(int descriptor, int action, const struct termios *termios)
 int
 tcdrain(int descriptor)
 {
-	struct termios termios;
-	return tcgetattr(descriptor, &termios);
+	return ioctl(descriptor, TIOCDRAIN);
 }
 
 int
@@ -49,10 +48,9 @@ tcflush(int descriptor, int queue)
 int
 tcflow(int descriptor, int action)
 {
-	struct termios termios;
 	if (action != TCOOFF && action != TCOON && action != TCIOFF &&
 	    action != TCION) { errno = EINVAL; return -1; }
-	return tcgetattr(descriptor, &termios);
+	return ioctl(descriptor, TCXONC, &action);
 }
 
 speed_t cfgetispeed(const struct termios *termios)

@@ -9,6 +9,7 @@
 #include <sys/uio.h>
 #include <termios.h>
 #include <zedbsd/poll.h>
+#include <zedbsd/process.h>
 #include <zedbsd/select.h>
 #include <zedbsd/console.h>
 #include <zedbsd/graphics.h>
@@ -65,9 +66,28 @@ _Static_assert(sizeof(struct graphics_glyph) == 48,
 #endif
 
 _Static_assert(sizeof(struct ifconf) == 16, "ifconf fixed ABI");
-_Static_assert(sizeof(struct sigaction) == 24, "sigaction legacy ABI");
+_Static_assert(sizeof(sigset_t) == 8, "64-bit signal-set ABI");
+_Static_assert(NSIG == 64, "signal namespace ABI");
+_Static_assert(SIGURG == 24 && SIGWINCH == 25 && SIGIO == 26 &&
+    SIGXCPU == 27 && SIGXFSZ == 28,
+    "classic signal numbers must remain stable");
+_Static_assert(SIGRTMAX - SIGRTMIN + 1 >= 8,
+    "POSIX realtime signal capacity");
+_Static_assert(__ZEDBSD_SIGEV_THREAD_SIGNAL > SIGRTMAX &&
+    __ZEDBSD_SIGEV_THREAD_SIGNAL < NSIG,
+    "libc timer signal is outside the public realtime range");
+_Static_assert(sizeof(struct sigaction) == 32, "sigaction fixed ABI");
+_Static_assert(offsetof(struct sigaction, sa_mask) == 8,
+    "sigaction mask fixed offset");
+_Static_assert(offsetof(struct sigaction, sa_restorer) == 24,
+    "sigaction restorer fixed offset");
 _Static_assert(sizeof(siginfo_t) == 128, "siginfo fixed ABI");
 _Static_assert(sizeof(union sigval) == 8, "sigval fixed ABI");
+_Static_assert(sizeof(struct sigevent) == 32, "sigevent fixed ABI");
+_Static_assert(offsetof(struct sigevent, sigev_notify_function) == 16,
+    "sigevent callback fixed offset");
+_Static_assert(offsetof(struct sigevent, sigev_notify_attributes) == 24,
+    "sigevent attributes fixed offset");
 _Static_assert(sizeof(struct sigaltstack_record) == 24,
     "sigaltstack request fixed ABI");
 _Static_assert(sizeof(mcontext_t) == 64, "mcontext fixed ABI");
@@ -87,6 +107,10 @@ _Static_assert(offsetof(struct flock_record, start) == 8,
     "flock start fixed offset");
 _Static_assert(sizeof(struct rlimit_record) == 16,
     "rlimit fixed ABI");
+_Static_assert(ZEDBSD_PROCESS_TIMES_V1_SIZE == 24,
+    "legacy process times record size");
+_Static_assert(sizeof(struct process_times_record) == 40,
+    "extended process times record size");
 _Static_assert(sizeof(struct winsize) == 8, "winsize fixed ABI");
 _Static_assert(sizeof(struct quota_control) == 96,
     "quota control fixed ABI");

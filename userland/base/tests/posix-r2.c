@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <mqueue.h>
 #include <langinfo.h>
+#include <limits.h>
 #include <locale.h>
 #include <stdlib.h>
 #include <spawn.h>
@@ -24,6 +25,7 @@
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
 #include <time.h>
+#include <termios.h>
 #include <wchar.h>
 #include <wctype.h>
 
@@ -34,12 +36,15 @@ static pthread_spinlock_t spin;
 static sem_t ready;
 static sem_t cancel_wait;
 static sem_t detached_ready;
+static sem_t timer_ready;
 static int shared_value;
 static int spin_value;
 static int cleanup_called;
 static int atfork_prepare_called;
 static int atfork_parent_called;
 static int atfork_child_called;
+static volatile int timer_callback_value;
+static volatile unsigned timer_callback_bits;
 #define PTY_STRESS_SIZE 6000U
 static char pty_stress_input[PTY_STRESS_SIZE];
 static char pty_stress_output[PTY_STRESS_SIZE];
@@ -53,6 +58,33 @@ static void *detached_worker(void *argument)
 	(void)argument;
 	(void)sem_post(&detached_ready);
 	return NULL;
+}
+
+static void
+thread_timer_callback(union sigval value)
+{
+	__atomic_store_n(&timer_callback_value, value.sival_int,
+	    __ATOMIC_RELEASE);
+	if (value.sival_int > 0 && value.sival_int < 32)
+		(void)__atomic_fetch_or(&timer_callback_bits,
+		    1U << (unsigned)value.sival_int, __ATOMIC_RELEASE);
+	(void)sem_post(&timer_ready);
+}
+
+static void
+public_realtime_handler(int signo)
+{
+	(void)signo;
+}
+
+static int
+same_signal_action(const struct sigaction *left,
+	const struct sigaction *right)
+{
+	return left->sa_handler == right->sa_handler &&
+	    left->sa_mask == right->sa_mask &&
+	    left->sa_flags == right->sa_flags &&
+	    left->sa_restorer == right->sa_restorer;
 }
 
 static void cancel_cleanup(void *argument)
@@ -97,6 +129,98 @@ static int fail_errno(const char *name)
 	return 1;
 }
 
+static int
+test_pty_line_discipline(int master, int slave)
+{
+	struct termios saved, settings;
+	unsigned char input[8], byte;
+	char readback[8];
+	int master_flags, slave_flags;
+	int status;
+	pid_t child;
+	struct timespec interbyte = { 0, 300000000L };
+
+	if (tcgetattr(slave, &saved) != 0)
+		return fail_errno("pty-termios-get");
+	settings = saved;
+	settings.c_iflag |= IXON;
+	settings.c_lflag |= ICANON | IEXTEN;
+	settings.c_lflag &= ~ECHO;
+	settings.c_cc[VWERASE] = 23;
+	settings.c_cc[VLNEXT] = 22;
+	settings.c_cc[VREPRINT] = 18;
+	if (tcsetattr(slave, TCSANOW, &settings) != 0)
+		return fail_errno("pty-termios-set");
+
+	/* IEXTEN word erase and literal-next are shared by console and PTY input. */
+	memcpy(input, "ab cd", 5);
+	input[5] = settings.c_cc[VWERASE];
+	input[6] = 'x';
+	input[7] = '\n';
+	if (write(master, input, sizeof(input)) != (ssize_t)sizeof(input) ||
+	    read(slave, readback, 5) != 5 || memcmp(readback, "ab x\n", 5) != 0)
+		return fail_errno("pty-ixten-werase");
+	input[0] = 'q';
+	input[1] = settings.c_cc[VLNEXT];
+	input[2] = settings.c_cc[VINTR];
+	input[3] = '\n';
+	if (write(master, input, 4) != 4 || read(slave, readback, 3) != 3 ||
+	    readback[0] != 'q' || (unsigned char)readback[1] != input[2] ||
+	    readback[2] != '\n')
+		return fail_errno("pty-ixten-lnext");
+
+	/* With MIN and TIME both nonzero, TIME restarts after every byte. */
+	settings.c_lflag &= ~ICANON;
+	settings.c_cc[VMIN] = 3;
+	settings.c_cc[VTIME] = 5;
+	if (tcsetattr(slave, TCSANOW, &settings) != 0 ||
+	    (child = fork()) < 0)
+		return fail_errno("pty-vmin-vtime-setup");
+	if (child == 0) {
+		if (write(master, "1", 1) != 1 ||
+		    nanosleep(&interbyte, NULL) != 0 ||
+		    write(master, "2", 1) != 1 ||
+		    nanosleep(&interbyte, NULL) != 0 ||
+		    write(master, "3", 1) != 1)
+			_exit(43);
+		_exit(0);
+	}
+	if (read(slave, readback, 3) != 3 || memcmp(readback, "123", 3) != 0 ||
+	    waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+	    WEXITSTATUS(status) != 0)
+		return fail_errno("pty-vmin-vtime");
+
+	master_flags = fcntl(master, F_GETFL);
+	slave_flags = fcntl(slave, F_GETFL);
+	if (master_flags < 0 || slave_flags < 0 ||
+	    fcntl(slave, F_SETFL, slave_flags | O_NONBLOCK) != 0)
+		return fail_errno("pty-flow-flags");
+	byte = settings.c_cc[VSTOP];
+	if (write(master, &byte, 1) != 1 || write(slave, "s", 1) != -1 ||
+	    errno != EAGAIN)
+		return fail_errno("pty-ixon-stop");
+	byte = settings.c_cc[VSTART];
+	if (write(master, &byte, 1) != 1 || write(slave, "f", 1) != 1 ||
+	    read(master, &byte, 1) != 1 || byte != 'f')
+		return fail_errno("pty-ixon-start");
+	if (tcflow(slave, TCOOFF) != 0 || write(slave, "s", 1) != -1 ||
+	    errno != EAGAIN || tcflow(slave, TCOON) != 0)
+		return fail_errno("pty-tcflow-local");
+	if (fcntl(slave, F_SETFL, slave_flags) != 0 ||
+	    tcflow(slave, TCIOFF) != 0 || read(master, &byte, 1) != 1 ||
+	    byte != settings.c_cc[VSTOP] || tcflow(slave, TCION) != 0 ||
+	    read(master, &byte, 1) != 1 || byte != settings.c_cc[VSTART])
+		return fail_errno("pty-tcflow-peer");
+
+	if (write(slave, "drop", 4) != 4 || tcflush(slave, TCOFLUSH) != 0 ||
+	    fcntl(master, F_SETFL, master_flags | O_NONBLOCK) != 0 ||
+	    read(master, &byte, 1) != -1 || errno != EAGAIN ||
+	    fcntl(master, F_SETFL, master_flags) != 0 || tcdrain(slave) != 0 ||
+	    tcsetattr(slave, TCSANOW, &saved) != 0)
+		return fail_errno("pty-drain-flush");
+	return 0;
+}
+
 static void *worker(void *argument)
 {
 	(void)argument;
@@ -132,6 +256,7 @@ int main(void)
 	char *spawn_envp[] = { "R2_SPAWN_CHILD=1", NULL };
 	pthread_t thread;
 	pthread_attr_t detached_attributes;
+	pthread_attr_t timer_attributes;
 	void *thread_result = NULL;
 	struct pollfd event;
 	int pipefd[2], pair[2], listener, client, accepted, poll_result;
@@ -165,9 +290,14 @@ int main(void)
 	size_t pty_received;
 	struct sigevent notification;
 	struct itimerspec timer_value, timer_current;
-	timer_t process_timer;
+	timer_t process_timer, second_timer;
 	sigset_t notify_set, old_mask;
+	sigset_t realtime_set, realtime_old_mask;
+	sigset_t public_top_set, public_top_old_mask;
+	sigset_t public_top_expected_mask, public_top_observed_mask;
 	siginfo_t notify_info;
+	struct sigaction public_top_install, public_top_saved;
+	struct sigaction public_top_expected, public_top_observed;
 	char path_buffer[64], file_buffer[8], login_buffer[16], tty_buffer[32];
 	mbstate_t multibyte_state;
 	wchar_t wide_character;
@@ -176,6 +306,7 @@ int main(void)
 	size_t stream_queued, stream_drained, stream_index;
 	socklen_t option_length;
 	int option_value, saved_flags;
+	int realtime_offset, realtime_round;
 
 	if (getenv("R2_EXEC_FINAL") != NULL) {
 		(void)write(1, "R2:01-06:PASS\n", 15);
@@ -190,6 +321,12 @@ int main(void)
 		return fail("cancel-sem-init");
 	if (sem_init(&detached_ready, 0, 0) != 0)
 		return fail("detached-sem-init");
+	if (sem_init(&timer_ready, 0, 0) != 0)
+		return fail("timer-sem-init");
+	if (sizeof(sigset_t) != 8U || RTSIG_MAX < 8 ||
+	    sysconf(_SC_RTSIG_MAX) != RTSIG_MAX ||
+	    sysconf(_SC_SIGQUEUE_MAX) < _POSIX_SIGQUEUE_MAX)
+		return fail("realtime-signal-capacity");
 	if (pthread_barrier_init(&barrier, NULL, 2) != 0)
 		return fail("barrier_init");
 	if (pthread_spin_init(&spin, PTHREAD_PROCESS_PRIVATE) != 0)
@@ -496,6 +633,152 @@ int main(void)
 	if (timer_delete(process_timer) != 0)
 		return fail_errno("process-timer-delete");
 	(void)pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+
+	/* Exercise eight distinct public realtime signals.  POSIX chooses the
+	 * lowest pending realtime number first and preserves FIFO order between
+	 * instances of the same number. */
+	{
+		union sigval probe_value;
+
+		memset(&probe_value, 0, sizeof(probe_value));
+		if (sigqueue(getpid(), 0, probe_value) != 0)
+			return fail_errno("signal-zero-probe");
+	}
+	(void)sigemptyset(&realtime_set);
+	for (realtime_offset = 0; realtime_offset < 8; realtime_offset++)
+		(void)sigaddset(&realtime_set, SIGRTMIN + realtime_offset);
+	if (pthread_sigmask(SIG_BLOCK, &realtime_set, &realtime_old_mask) != 0)
+		return fail("realtime-signal-mask");
+	for (realtime_offset = 7; realtime_offset >= 0; realtime_offset--)
+		for (realtime_round = 0; realtime_round < 2; realtime_round++) {
+			union sigval queued;
+			queued.sival_int = realtime_offset * 10 + realtime_round;
+			if (sigqueue(getpid(), SIGRTMIN + realtime_offset,
+			    queued) != 0)
+				return fail_errno("realtime-signal-queue");
+		}
+	for (realtime_offset = 0; realtime_offset < 8; realtime_offset++)
+		for (realtime_round = 0; realtime_round < 2; realtime_round++) {
+			memset(&notify_info, 0, sizeof(notify_info));
+			if (sigtimedwait(&realtime_set, &notify_info,
+			    &signal_timeout) != SIGRTMIN + realtime_offset ||
+			    notify_info.si_code != SI_QUEUE ||
+			    notify_info.si_value.sival_int !=
+			    realtime_offset * 10 + realtime_round)
+				return fail_errno("realtime-signal-fifo");
+		}
+	(void)pthread_sigmask(SIG_SETMASK, &realtime_old_mask, NULL);
+
+	/* SIGEV_THREAD uses a libc-private number, never the public RT upper end.
+	 * Preserve an application disposition and mask across all lifecycle paths. */
+	memset(&public_top_install, 0, sizeof(public_top_install));
+	public_top_install.sa_handler =
+	    (uint64_t)(uintptr_t)public_realtime_handler;
+	(void)sigemptyset(&public_top_install.sa_mask);
+	(void)sigaddset(&public_top_install.sa_mask, SIGUSR1);
+	if (sigaction(SIGRTMAX, &public_top_install, &public_top_saved) != 0 ||
+	    sigaction(SIGRTMAX, NULL, &public_top_expected) != 0)
+		return fail_errno("thread-timer-public-action-setup");
+	(void)sigemptyset(&public_top_set);
+	(void)sigaddset(&public_top_set, SIGRTMAX);
+	if (pthread_sigmask(SIG_BLOCK, &public_top_set,
+	    &public_top_old_mask) != 0 ||
+	    pthread_sigmask(SIG_SETMASK, NULL,
+	    &public_top_expected_mask) != 0)
+		return fail("thread-timer-public-mask-setup");
+
+	/* SIGEV_THREAD is backed by a kernel SIGEV_SIGNAL timer, but all unsafe
+	 * work is performed by libc's worker before this detached callback runs. */
+	if (pthread_attr_init(&timer_attributes) != 0 ||
+	    pthread_attr_setguardsize(&timer_attributes, 8192U) != 0)
+		return fail("thread-timer-attributes");
+	memset(&notification, 0, sizeof(notification));
+	notification.sigev_notify = SIGEV_THREAD;
+	notification.sigev_value.sival_int = 117;
+	notification.sigev_notify_function = thread_timer_callback;
+	notification.sigev_notify_attributes = &timer_attributes;
+	memset(&timer_value, 0, sizeof(timer_value));
+	timer_value.it_value.tv_nsec = 20000000L;
+	if (timer_create(CLOCK_MONOTONIC, &notification, &process_timer) != 0 ||
+	    (((uint32_t)process_timer & 0xffU) != 0) ||
+	    timer_settime(process_timer, 0, &timer_value, NULL) != 0)
+		return fail_errno("thread-timer-create");
+	if (sigaction(SIGRTMAX, NULL, &public_top_observed) != 0 ||
+	    pthread_sigmask(SIG_SETMASK, NULL, &public_top_observed_mask) != 0 ||
+	    !same_signal_action(&public_top_observed, &public_top_expected) ||
+	    public_top_observed_mask != public_top_expected_mask)
+		return fail("thread-timer-public-state-create");
+	(void)pthread_attr_destroy(&timer_attributes);
+	if (clock_gettime(CLOCK_REALTIME, &now) != 0)
+		return fail_errno("thread-timer-clock");
+	now.tv_sec += 2;
+	if (sem_timedwait(&timer_ready, &now) != 0 ||
+	    __atomic_load_n(&timer_callback_value, __ATOMIC_ACQUIRE) != 117 ||
+	    timer_getoverrun(process_timer) < 0 ||
+	    timer_delete(process_timer) != 0)
+		return fail_errno("thread-timer-callback");
+	if (sigaction(SIGRTMAX, NULL, &public_top_observed) != 0 ||
+	    pthread_sigmask(SIG_SETMASK, NULL, &public_top_observed_mask) != 0 ||
+	    !same_signal_action(&public_top_observed, &public_top_expected) ||
+	    public_top_observed_mask != public_top_expected_mask)
+		return fail("thread-timer-public-state-delete");
+	errno = 0;
+	if (timer_gettime(process_timer, &timer_current) != -1 || errno != EINVAL)
+		return fail("thread-timer-stale-id");
+
+	/* Independent slots retain their callback values and each expiration gets
+	 * a newly-created detached thread. */
+	__atomic_store_n(&timer_callback_bits, 0, __ATOMIC_RELEASE);
+	notification.sigev_value.sival_int = 1;
+	if (timer_create(CLOCK_MONOTONIC, &notification, &process_timer) != 0)
+		return fail_errno("thread-timer-multiple-first");
+	notification.sigev_value.sival_int = 2;
+	if (timer_create(CLOCK_MONOTONIC, &notification, &second_timer) != 0 ||
+	    timer_settime(process_timer, 0, &timer_value, NULL) != 0 ||
+	    timer_settime(second_timer, 0, &timer_value, NULL) != 0)
+		return fail_errno("thread-timer-multiple-second");
+	if (clock_gettime(CLOCK_REALTIME, &now) != 0)
+		return fail_errno("thread-timer-multiple-clock");
+	now.tv_sec += 2;
+	if (sem_timedwait(&timer_ready, &now) != 0 ||
+	    sem_timedwait(&timer_ready, &now) != 0 ||
+	    __atomic_load_n(&timer_callback_bits, __ATOMIC_ACQUIRE) !=
+	    ((1U << 1) | (1U << 2)) ||
+	    timer_delete(process_timer) != 0 ||
+	    timer_delete(second_timer) != 0)
+		return fail_errno("thread-timer-multiple-callback");
+
+	/* A libc timer handle must become invalid in the child while remaining
+	 * usable in the parent; the worker is not inherited. */
+	memset(&notification, 0, sizeof(notification));
+	notification.sigev_notify = SIGEV_THREAD;
+	notification.sigev_notify_function = thread_timer_callback;
+	if (timer_create(CLOCK_MONOTONIC, &notification, &process_timer) != 0 ||
+	    (child = fork()) < 0)
+		return fail_errno("thread-timer-fork-setup");
+	if (child == 0) {
+		errno = 0;
+		_exit(timer_gettime(process_timer, &timer_current) == -1 &&
+		    errno == EINVAL &&
+		    sigaction(SIGRTMAX, NULL, &public_top_observed) == 0 &&
+		    pthread_sigmask(SIG_SETMASK, NULL,
+		    &public_top_observed_mask) == 0 &&
+		    same_signal_action(&public_top_observed,
+		    &public_top_expected) &&
+		    public_top_observed_mask == public_top_expected_mask ? 0 : 46);
+	}
+	if (waitpid(child, &child_status, 0) != child ||
+	    !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0 ||
+	    timer_gettime(process_timer, &timer_current) != 0 ||
+	    timer_delete(process_timer) != 0)
+		return fail_errno("thread-timer-fork");
+	if (sigaction(SIGRTMAX, NULL, &public_top_observed) != 0 ||
+	    pthread_sigmask(SIG_SETMASK, NULL, &public_top_observed_mask) != 0 ||
+	    !same_signal_action(&public_top_observed, &public_top_expected) ||
+	    public_top_observed_mask != public_top_expected_mask)
+		return fail("thread-timer-public-state-fork");
+	(void)pthread_sigmask(SIG_SETMASK, &public_top_old_mask, NULL);
+	(void)sigaction(SIGRTMAX, &public_top_saved, NULL);
 	if (statvfs("/", &filesystem_status) != 0 ||
 	    filesystem_status.f_bsize == 0 || filesystem_status.f_namemax == 0)
 		return fail_errno("statvfs-root");
@@ -535,6 +818,8 @@ int main(void)
 	    read(pty_master, file_buffer, 5) != 5 ||
 	    memcmp(file_buffer, "out\r\n", 5) != 0)
 		return fail_errno("pty-output");
+	if (test_pty_line_discipline(pty_master, pty_slave) != 0)
+		return 1;
 	memset(pty_stress_input, 'q', sizeof(pty_stress_input));
 	child = fork();
 	if (child < 0)
@@ -642,6 +927,7 @@ int main(void)
 	(void)sem_destroy(&ready);
 	(void)sem_destroy(&cancel_wait);
 	(void)sem_destroy(&detached_ready);
+	(void)sem_destroy(&timer_ready);
 	(void)pthread_barrier_destroy(&barrier);
 	(void)pthread_spin_destroy(&spin);
 	(void)execve(exec_argv[0], exec_argv, exec_envp);

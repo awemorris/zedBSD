@@ -46,6 +46,8 @@ main(int argc, char **argv)
 			const char *option = argv[++i];
 			if (strcmp(option, "ro") == 0)
 				flags |= MNT_RDONLY;
+			else if (strcmp(option, "nosuid") == 0)
+				flags |= MNT_NOSUID;
 			else if (strncmp(option, "fspec=", 6) == 0)
 				source = option + 6;
 			else {
@@ -67,7 +69,7 @@ main(int argc, char **argv)
 		}
 	}
 	if (type == NULL || target == NULL) {
-		fprintf(stderr, "usage: mount -t type [-r] [-o ro|fspec=disk] "
+		fprintf(stderr, "usage: mount -t type [-r] [-o ro|nosuid|fspec=disk] "
 		    "[disk] directory\n");
 		return 2;
 	}

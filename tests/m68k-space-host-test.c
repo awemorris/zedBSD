@@ -25,6 +25,9 @@ void *hal_malloc(size_t size) { return malloc(size); }
 void hal_free(void *pointer) { free(pointer); }
 void *hal_memset(void *p, int c, size_t n) { return memset(p, c, n); }
 void *hal_memcpy(void *d, const void *s, size_t n) { return memcpy(d, s, n); }
+bool hal_irq_disable(void) { return true; }
+void hal_irq_enable(void) {}
+unsigned hal_cpu_count(void) { return 1U; }
 void hal_fatal(const char *file, int line, const char *message)
 {
 	fprintf(stderr, "fatal: %s:%d: %s\n", file, line, message);
@@ -90,6 +93,7 @@ main(void)
 {
 	struct m68k030_space *space;
 	struct m68k030_table_page *table;
+	uint32_t descriptor_before;
 	uint32_t flags;
 	unsigned before;
 
@@ -130,8 +134,22 @@ main(void)
 	CHECK(hal_page_query(space, (void *)0x01000000U, &flags) == 0);
 	CHECK(flags == (HAL_PAGE_PRESENT | HAL_PAGE_ACCESSED |
 		HAL_PAGE_DIRTY));
-	CHECK(hal_page_prot(space, (void *)0x01000000U, M68K030_PAGE_SIZE,
-		HAL_SPACE_READ | HAL_SPACE_NOCACHE) == 0);
+	/* The second page is absent.  Validation of the entire range must finish
+	 * before the first descriptor is changed. */
+	descriptor_before = table->entries[m68k030_leaf_index(0x01000000U)];
+	flags = 0x5a5a5a5aU;
+	CHECK(hal_page_prot_query(space, (void *)0x01000000U,
+		2U * M68K030_PAGE_SIZE, HAL_SPACE_READ | HAL_SPACE_NOCACHE,
+		&flags) == HAL_ERR_INVALID);
+	CHECK(table->entries[m68k030_leaf_index(0x01000000U)] ==
+		descriptor_before);
+	CHECK(flags == 0x5a5a5a5aU);
+	flags = 0;
+	CHECK(hal_page_prot_query(space, (void *)0x01000000U,
+		M68K030_PAGE_SIZE, HAL_SPACE_READ | HAL_SPACE_NOCACHE,
+		&flags) == 0);
+	CHECK(flags == (HAL_PAGE_PRESENT | HAL_PAGE_ACCESSED |
+		HAL_PAGE_DIRTY));
 	CHECK((table->entries[m68k030_leaf_index(0x01000000U)] &
 		(M68K030_DESC_WRITE_PROTECT | M68K030_PAGE_CACHE_INHIBIT |
 		 M68K030_DESC_USED | M68K030_PAGE_MODIFIED)) ==
@@ -153,6 +171,10 @@ main(void)
 	before = flushes;
 	hal_page_switch_space(space);
 	CHECK(flushes == before + 1U);
+	/* Address-space ownership belongs to the generic kernel.  It must stop
+	 * selecting a user space before asking the HAL to destroy it. */
+	hal_page_switch_space(HAL_SPACE_SYS);
+	CHECK(flushes == before + 2U);
 	hal_page_destroy_space(space);
 	CHECK(pmem_live == 0U);
 

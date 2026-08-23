@@ -108,6 +108,7 @@ extern void __pthread_cancel_point(void) __attribute__((weak));
 extern void __pthread_fork_prepare(void) __attribute__((weak));
 extern void __pthread_fork_parent(void) __attribute__((weak));
 extern void __pthread_fork_child(void) __attribute__((weak));
+extern void __timer_sigev_thread_fork_child(void) __attribute__((weak));
 extern void __pthread_initialize_main(void) __attribute__((weak));
 extern void __libc_environment_lock(void) __attribute__((weak));
 extern void __libc_environment_unlock(void) __attribute__((weak));
@@ -335,13 +336,16 @@ int fcntl(int fd, int command, ...)
 {
 	va_list ap;
 	intptr_t argument = 0;
+	int owner_result = 0;
 	struct flock *native = NULL;
 	struct flock_record request;
 	if (command == F_DUPFD || command == F_DUPFD_CLOEXEC ||
-	    command == F_SETFD || command == F_SETFL) {
+	    command == F_SETFD || command == F_SETFL || command == F_SETOWN) {
 		va_start(ap, command);
 		argument = va_arg(ap, int);
 		va_end(ap);
+	} else if (command == F_GETOWN) {
+		argument = (intptr_t)&owner_result;
 	} else if (command == F_GETLK || command == F_SETLK ||
 	    command == F_SETLKW) {
 		va_start(ap, command);
@@ -366,6 +370,8 @@ int fcntl(int fd, int command, ...)
 			native->l_len = (off_t)request.length;
 			native->l_pid = request.pid;
 		}
+		if (result == 0 && command == F_GETOWN)
+			return owner_result;
 		return result;
 	}
 }
@@ -524,7 +530,11 @@ long sysconf(int name) {
 	size_t cpus_size;
 	switch (name) {
 	case _SC_PAGE_SIZE: return ZEDBSD_USER_PAGE_SIZE;
-	case _SC_OPEN_MAX: return 32;
+	case _SC_OPEN_MAX: {
+		struct rlimit limit;
+		return getrlimit(RLIMIT_NOFILE, &limit) == 0 ?
+		    (long)limit.rlim_cur : -1;
+	}
 	case _SC_CLK_TCK: return 100;
 	case _SC_JOB_CONTROL: return _POSIX_JOB_CONTROL;
 	case _SC_THREADS: return _POSIX_THREADS;
@@ -549,6 +559,8 @@ long sysconf(int name) {
 	case _SC_TIMERS: return _POSIX_TIMERS;
 	case _SC_XOPEN_VERSION: return _XOPEN_VERSION;
 	case _SC_XOPEN_UNIX: return _XOPEN_UNIX;
+	case _SC_RTSIG_MAX: return SIGRTMAX - SIGRTMIN + 1;
+	case _SC_SIGQUEUE_MAX: return SIGQUEUE_MAX;
 	case _SC_NPROCESSORS_CONF:
 	case _SC_NPROCESSORS_ONLN:
 		cpus_size = sizeof(cpus);
@@ -630,12 +642,6 @@ mode_t umask(mode_t mask) { return (mode_t)call(ZEDBSD_SYS_umask, mask, 0, 0, 0,
 int clock_gettime(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_gettime, id, (uintptr_t)ts, 0, 0, 0, 0); }
 int clock_getres(clockid_t id, struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_getres, id, (uintptr_t)ts, 0, 0, 0, 0); }
 int clock_settime(clockid_t id, const struct timespec *ts) { return (int)call(ZEDBSD_SYS_clock_settime, id, (uintptr_t)ts, 0, 0, 0, 0); }
-int timer_create(clockid_t id, const struct sigevent *event, timer_t *timer) { return (int)call(ZEDBSD_SYS_timer_create, id, (uintptr_t)event, (uintptr_t)timer, 0, 0, 0); }
-int timer_delete(timer_t timer) { return (int)call(ZEDBSD_SYS_timer_delete, timer, 0, 0, 0, 0, 0); }
-int timer_settime(timer_t timer, int flags, const struct itimerspec *value, struct itimerspec *old_value) { return (int)call(ZEDBSD_SYS_timer_settime, timer, flags, (uintptr_t)value, (uintptr_t)old_value, 0, 0); }
-int timer_gettime(timer_t timer, struct itimerspec *value) { return (int)call(ZEDBSD_SYS_timer_gettime, timer, (uintptr_t)value, 0, 0, 0, 0); }
-int timer_getoverrun(timer_t timer) { return (int)call(ZEDBSD_SYS_timer_getoverrun, timer, 0, 0, 0, 0, 0); }
-
 /* zedBSD currently completes AIO requests synchronously.  POSIX permits an
  * operation to have completed by the time the submission function returns. */
 static void
@@ -940,12 +946,26 @@ int posix_spawnattr_setpgroup(posix_spawnattr_t *attr, pid_t pgroup)
 { if (attr == NULL || pgroup < 0) return EINVAL; attr->pgroup = pgroup; return 0; }
 int posix_spawnattr_getsigmask(const posix_spawnattr_t *attr, sigset_t *set)
 { if (attr == NULL || set == NULL) return EINVAL; *set = attr->sigmask; return 0; }
-int posix_spawnattr_setsigmask(posix_spawnattr_t *attr, const sigset_t *set)
-{ if (attr == NULL || set == NULL) return EINVAL; attr->sigmask = *set; return 0; }
+int
+posix_spawnattr_setsigmask(posix_spawnattr_t *attr, const sigset_t *set)
+{
+	sigset_t public_mask = ((sigset_t)1ULL << SIGRTMAX) - 1U;
+	if (attr == NULL || set == NULL)
+		return EINVAL;
+	attr->sigmask = *set & public_mask;
+	return 0;
+}
 int posix_spawnattr_getsigdefault(const posix_spawnattr_t *attr, sigset_t *set)
 { if (attr == NULL || set == NULL) return EINVAL; *set = attr->sigdefault; return 0; }
-int posix_spawnattr_setsigdefault(posix_spawnattr_t *attr, const sigset_t *set)
-{ if (attr == NULL || set == NULL) return EINVAL; attr->sigdefault = *set; return 0; }
+int
+posix_spawnattr_setsigdefault(posix_spawnattr_t *attr, const sigset_t *set)
+{
+	sigset_t public_mask = ((sigset_t)1ULL << SIGRTMAX) - 1U;
+	if (attr == NULL || set == NULL)
+		return EINVAL;
+	attr->sigdefault = *set & public_mask;
+	return 0;
+}
 static int spawn_child_setup(const posix_spawn_file_actions_t *actions,
 	const posix_spawnattr_t *attr)
 {
@@ -958,7 +978,7 @@ static int spawn_child_setup(const posix_spawn_file_actions_t *actions,
 		if ((attr->flags & POSIX_SPAWN_SETSIGMASK) != 0 &&
 		    sigprocmask(SIG_SETMASK, &attr->sigmask, NULL) != 0) return errno;
 		if ((attr->flags & POSIX_SPAWN_SETSIGDEF) != 0)
-			for (index = 1; index < NSIG; index++)
+			for (index = 1; index <= SIGRTMAX; index++)
 				if (sigismember(&attr->sigdefault, (int)index) == 1) {
 					struct sigaction action;
 					memset(&action, 0, sizeof(action));
@@ -1046,6 +1066,10 @@ pid_t fork(void) {
 		__pthread_fork_prepare();
 	result = (pid_t)call(ZEDBSD_SYS_fork, 0, 0, 0, 0, 0, 0);
 	if (result == 0) {
+		/* Kernel timers are not inherited.  Reset libc's SIGEV_THREAD
+		 * generation and reserved signal before user atfork handlers run. */
+		if (__timer_sigev_thread_fork_child != NULL)
+			__timer_sigev_thread_fork_child();
 		if (__pthread_fork_child != NULL)
 			__pthread_fork_child();
 	} else if (__pthread_fork_parent != NULL) {
@@ -2304,7 +2328,8 @@ clock(void)
 {
 	struct process_times_record record;
 	uint64_t value;
-	if (call(ZEDBSD_SYS_times, (uintptr_t)&record, 0, 0, 0, 0, 0) < 0)
+	if (call(ZEDBSD_SYS_times, (uintptr_t)&record, sizeof(record),
+	    0, 0, 0, 0) < 0)
 		return (clock_t)-1;
 	if (record.self_ticks > UINT64_MAX / (CLOCKS_PER_SEC / 100L)) {
 		errno = EOVERFLOW;
@@ -2319,19 +2344,24 @@ clock_t
 times(struct tms *result)
 {
 	struct process_times_record record;
-	if (call(ZEDBSD_SYS_times, (uintptr_t)&record, 0, 0, 0, 0, 0) < 0)
+	if (call(ZEDBSD_SYS_times, (uintptr_t)&record, sizeof(record),
+	    0, 0, 0, 0) < 0)
 		return (clock_t)-1;
 	if (record.self_ticks > (uint64_t)LONG_MAX ||
 	    record.child_ticks > (uint64_t)LONG_MAX ||
+	    record.system_ticks > record.self_ticks ||
+	    record.child_system_ticks > record.child_ticks ||
 	    record.elapsed_ticks > (uint64_t)LONG_MAX) {
 		errno = EOVERFLOW;
 		return (clock_t)-1;
 	}
 	if (result != NULL) {
-		result->tms_utime = (clock_t)record.self_ticks;
-		result->tms_stime = 0;
-		result->tms_cutime = (clock_t)record.child_ticks;
-		result->tms_cstime = 0;
+		result->tms_utime = (clock_t)(record.self_ticks -
+		    record.system_ticks);
+		result->tms_stime = (clock_t)record.system_ticks;
+		result->tms_cutime = (clock_t)(record.child_ticks -
+		    record.child_system_ticks);
+		result->tms_cstime = (clock_t)record.child_system_ticks;
 	}
 	return (clock_t)record.elapsed_ticks;
 }

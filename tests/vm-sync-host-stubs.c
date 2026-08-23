@@ -7,7 +7,9 @@
 #include <errno.h>
 #include <threads.h>
 
-#define HOST_WAITQ_MAX 16U
+/* ASan quarantines freed backings, so their embedded waitq addresses are not
+ * promptly reused during the long combined VM test. */
+#define HOST_WAITQ_MAX 512U
 
 struct host_waitq {
 	struct wait_queue *queue;
@@ -104,6 +106,91 @@ unsigned long spin_lock_irqsave(struct spinlock *lock)
 
 void spin_unlock_irqrestore(struct spinlock *lock, unsigned long irq)
 { (void)irq; spin_unlock(lock); }
+
+static _Thread_local unsigned host_mutex_identity;
+
+static struct thread *
+host_mutex_owner(void)
+{
+	return (struct thread *)&host_mutex_identity;
+}
+
+int
+mutex_init(struct mutex *mutex, enum lock_rank rank, const char *name)
+{
+	if (mutex == NULL)
+		return EINVAL;
+	spin_init(&mutex->guard, rank, name);
+	mutex->owner = NULL;
+	mutex->locked = 0;
+	mutex->waiters.head = mutex->waiters.tail = NULL;
+	mutex->waiters.sequence = 1;
+	mutex->waiters.name = name;
+	return 0;
+}
+
+int
+mutex_trylock(struct mutex *mutex)
+{
+	int acquired = 0;
+	spin_lock(&mutex->guard);
+	assert(mutex->owner != host_mutex_owner());
+	if (!mutex->locked) {
+		mutex->locked = 1;
+		mutex->owner = host_mutex_owner();
+		acquired = 1;
+	}
+	spin_unlock(&mutex->guard);
+	return acquired;
+}
+
+int
+mutex_owned(struct mutex *mutex)
+{
+	int owned;
+	spin_lock(&mutex->guard);
+	owned = mutex->locked && mutex->owner == host_mutex_owner();
+	spin_unlock(&mutex->guard);
+	return owned;
+}
+
+int
+mutex_lock_interruptible(struct mutex *mutex)
+{
+	while (!mutex_trylock(mutex))
+		thrd_yield();
+	return 0;
+}
+
+void
+mutex_lock(struct mutex *mutex)
+{
+	(void)mutex_lock_interruptible(mutex);
+}
+
+void
+mutex_unlock(struct mutex *mutex)
+{
+	spin_lock(&mutex->guard);
+	assert(mutex->locked && mutex->owner == host_mutex_owner());
+	mutex->owner = NULL;
+	mutex->locked = 0;
+	spin_unlock(&mutex->guard);
+}
+
+int
+mutex_wait(struct mutex *mutex, struct wait_queue *condition,
+	uint64_t observed, uint64_t deadline, unsigned flags)
+{
+	int error;
+	assert(mutex->locked && mutex->owner == host_mutex_owner());
+	mutex_unlock(mutex);
+	spin_lock(&mutex->guard);
+	error = waitq_sleep(condition, &mutex->guard, observed, deadline, flags);
+	spin_unlock(&mutex->guard);
+	mutex_lock(mutex);
+	return error;
+}
 
 void
 waitq_init(struct wait_queue *queue, const char *name)

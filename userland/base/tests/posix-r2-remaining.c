@@ -266,15 +266,50 @@ static int
 test_rlimit(void)
 {
 	struct rlimit saved, limited;
+	sighandler_t previous;
+	char bytes[8] = { 0 };
 	int fd;
 	if (getrlimit(RLIMIT_NOFILE, &saved) != 0)
 		return failure("rlimit-get");
 	limited = saved; limited.rlim_cur = 3;
 	if (setrlimit(RLIMIT_NOFILE, &limited) != 0 ||
+	    sysconf(_SC_OPEN_MAX) != 3 ||
 	    (fd = open("/tmp/r2r-limit", O_CREAT | O_RDWR, 0600)) != -1 ||
-	    errno != EMFILE || setrlimit(RLIMIT_NOFILE, &saved) != 0)
+	    errno != EMFILE || setrlimit(RLIMIT_NOFILE, &saved) != 0 ||
+	    sysconf(_SC_OPEN_MAX) != (long)saved.rlim_cur)
 		return failure("rlimit-enforce");
 	(void)unlink("/tmp/r2r-limit");
+
+	if (getrlimit(RLIMIT_FSIZE, &saved) != 0)
+		return failure("rlimit-fsize-get");
+	limited = saved;
+	limited.rlim_cur = 4;
+	previous = signal(SIGXFSZ, (sighandler_t)SIG_IGN);
+	fd = open("/tmp/r2r-fsize", O_CREAT | O_TRUNC | O_RDWR, 0600);
+	if (previous == SIG_ERR || fd < 0 ||
+	    setrlimit(RLIMIT_FSIZE, &limited) != 0 ||
+	    write(fd, bytes, sizeof(bytes)) != 4 ||
+	    write(fd, bytes, 1) != -1 || errno != EFBIG ||
+	    ftruncate(fd, 5) != -1 || errno != EFBIG ||
+	    setrlimit(RLIMIT_FSIZE, &saved) != 0 ||
+	    ftruncate(fd, 8) != 0 ||
+	    setrlimit(RLIMIT_FSIZE, &limited) != 0 ||
+	    pwrite(fd, bytes, sizeof(bytes), 0) != (ssize_t)sizeof(bytes) ||
+	    ftruncate(fd, 6) != 0 ||
+	    ftruncate(fd, 7) != -1 || errno != EFBIG ||
+	    setrlimit(RLIMIT_FSIZE, &saved) != 0 ||
+	    signal(SIGXFSZ, previous) == SIG_ERR)
+		return failure("rlimit-fsize");
+	(void)close(fd);
+	(void)unlink("/tmp/r2r-fsize");
+
+	if (getrlimit(RLIMIT_DATA, &saved) != 0)
+		return failure("rlimit-data-get");
+	limited = saved;
+	limited.rlim_cur = 0;
+	if (setrlimit(RLIMIT_DATA, &limited) != 0 || sbrk(1) != (void *)-1 ||
+	    errno != ENOMEM || setrlimit(RLIMIT_DATA, &saved) != 0)
+		return failure("rlimit-data");
 	marker("R2R:06:RLIMIT\n");
 	return 0;
 }
@@ -370,6 +405,14 @@ test_new_required_apis(void)
 		return failure("aio");
 	(void)close(descriptor);
 	(void)unlink("/tmp/r2r-aio");
+	descriptor = open("/tmp/r2r-owner", O_CREAT | O_TRUNC | O_RDWR, 0600);
+	if (descriptor < 0 || fcntl(descriptor, F_SETOWN, getpid()) != 0 ||
+	    fcntl(descriptor, F_GETOWN) != getpid() ||
+	    fcntl(descriptor, F_SETOWN, -getpgrp()) != 0 ||
+	    fcntl(descriptor, F_GETOWN) != -getpgrp())
+		return failure("fcntl-owner");
+	(void)close(descriptor);
+	(void)unlink("/tmp/r2r-owner");
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0 ||
 	    sockatmark(pair[0]) != 0)
 		return failure("sockatmark");
@@ -396,17 +439,232 @@ test_new_required_apis(void)
 	return 0;
 }
 
+static int
+write_test_file(const char *path, const char *contents, mode_t mode)
+{
+	size_t length = strlen(contents), done = 0;
+	int descriptor = open(path, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+	if (descriptor < 0)
+		return -1;
+	while (done < length) {
+		ssize_t count = write(descriptor, contents + done, length - done);
+		if (count <= 0) {
+			(void)close(descriptor);
+			return -1;
+		}
+		done += (size_t)count;
+	}
+	if (close(descriptor) != 0 || chmod(path, mode) != 0)
+		return -1;
+	return 0;
+}
+
+static int
+copy_test_executable(const char *source, const char *destination)
+{
+	char buffer[1024];
+	int input = -1, output = -1;
+	ssize_t count;
+
+	input = open(source, O_RDONLY);
+	output = open(destination, O_CREAT | O_TRUNC | O_WRONLY, 0700);
+	if (input < 0 || output < 0)
+		goto fail;
+	while ((count = read(input, buffer, sizeof(buffer))) > 0) {
+		ssize_t done = 0;
+		while (done < count) {
+			ssize_t written = write(output, buffer + done,
+			    (size_t)(count - done));
+			if (written <= 0)
+				goto fail;
+			done += written;
+		}
+	}
+	{
+		int failed = count < 0;
+		if (close(input) != 0)
+			failed = 1;
+		input = -1;
+		if (close(output) != 0)
+			failed = 1;
+		output = -1;
+		if (failed)
+			goto fail_closed;
+	}
+	return 0;
+fail:
+	if (input >= 0) (void)close(input);
+	if (output >= 0) (void)close(output);
+fail_closed:
+	(void)unlink(destination);
+	return -1;
+}
+
+static int
+wait_exec_status(const char *path, char *const arguments[], int expected)
+{
+	pid_t child = fork();
+	int status;
+
+	if (child < 0)
+		return -1;
+	if (child == 0) {
+		execve(path, arguments, environ);
+		_exit(127);
+	}
+	return waitpid(child, &status, 0) == child && WIFEXITED(status) &&
+	    WEXITSTATUS(status) == expected ? 0 : -1;
+}
+
+static int
+wait_setid_mutation(const char *path, int truncate)
+{
+	pid_t child = fork();
+	int status;
+
+	if (child < 0)
+		return -1;
+	if (child == 0) {
+		struct stat result;
+		int flags = O_WRONLY | (truncate ? O_TRUNC : 0);
+		int descriptor;
+
+		if (setgid(200) != 0 || setuid(123) != 0)
+			_exit(2);
+		descriptor = open(path, flags);
+		if (descriptor < 0 || (!truncate && write(descriptor, "W", 1) != 1) ||
+		    fstat(descriptor, &result) != 0 || close(descriptor) != 0)
+			_exit(3);
+		if ((result.st_mode & (S_ISUID | S_ISGID)) != 0 ||
+		    (truncate && result.st_size != 0))
+			_exit(4);
+		_exit(0);
+	}
+	return waitpid(child, &status, 0) == child && WIFEXITED(status) &&
+	    WEXITSTATUS(status) == 0 ? 0 : -1;
+}
+
+static int
+wait_setid_noop_chown(const char *path)
+{
+	pid_t child = fork();
+	int status;
+
+	if (child < 0)
+		return -1;
+	if (child == 0) {
+		struct stat result;
+
+		if (setgid(200) != 0 || setuid(123) != 0 ||
+		    chown(path, (uid_t)-1, (gid_t)-1) != 0 ||
+		    stat(path, &result) != 0 ||
+		    (result.st_mode & (S_ISUID | S_ISGID)) != 0)
+			_exit(5);
+		_exit(0);
+	}
+	return waitpid(child, &status, 0) == child && WIFEXITED(status) &&
+	    WEXITSTATUS(status) == 0 ? 0 : -1;
+}
+
+static int
+test_exec_scripts(void)
+{
+	static const char *const cleanup[] = {
+		"/tmp/r2r-script", "/tmp/r2r-setid-script",
+		"/tmp/r2r-setid-image", "/tmp/r2r-cycle-a",
+		"/tmp/r2r-cycle-b", "/tmp/r2r-depth-0", "/tmp/r2r-depth-1",
+		"/tmp/r2r-depth-2", "/tmp/r2r-depth-3", "/tmp/r2r-depth-4"
+	};
+	char shebang[96];
+	char *arguments[] = { (char *)"caller-zero", (char *)"tail", NULL };
+	unsigned i;
+	int descriptor;
+
+	for (i = 0; i < sizeof(cleanup) / sizeof(cleanup[0]); i++)
+		(void)unlink(cleanup[i]);
+	if (write_test_file("/tmp/r2r-script", "#!/bin/sh\nexit 37\n", 0700) !=
+	    0 || wait_exec_status("/tmp/r2r-script", arguments, 37) != 0)
+		return failure("exec-script");
+	descriptor = open("/tmp/r2r-script", O_RDONLY);
+	if (descriptor < 0 || fexecve(descriptor, arguments, environ) != -1 ||
+	    errno != ENOEXEC) {
+		if (descriptor >= 0) (void)close(descriptor);
+		return failure("fexecve-script-path");
+	}
+	(void)close(descriptor);
+
+	if (write_test_file("/tmp/r2r-cycle-a",
+	    "#!/tmp/r2r-cycle-b\n", 0700) != 0 ||
+	    write_test_file("/tmp/r2r-cycle-b",
+	    "#!/tmp/r2r-cycle-a\n", 0700) != 0 ||
+	    execve("/tmp/r2r-cycle-a", arguments, environ) != -1 ||
+	    errno != ELOOP)
+		return failure("exec-script-cycle");
+	for (i = 0; i < 4U; i++) {
+		(void)snprintf(shebang, sizeof(shebang),
+		    "#!/tmp/r2r-depth-%u\n", i + 1U);
+		{
+			char path[32];
+			(void)snprintf(path, sizeof(path), "/tmp/r2r-depth-%u", i);
+			if (write_test_file(path, shebang, 0700) != 0)
+				return failure("exec-script-depth-setup");
+		}
+	}
+	if (write_test_file("/tmp/r2r-depth-4", "#!/bin/sh\nexit 0\n", 0700) !=
+	    0 || wait_exec_status("/tmp/r2r-depth-1", arguments, 0) != 0 ||
+	    execve("/tmp/r2r-depth-0", arguments, environ) != -1 ||
+	    errno != ELOOP)
+		return failure("exec-script-depth");
+
+	if (geteuid() == 0) {
+		char *setid_arguments[] = {
+			(char *)"setid-image", (char *)"--setid-child", NULL
+		};
+		if (copy_test_executable("/bin/posix-r2-remaining",
+		    "/tmp/r2r-setid-image") != 0 ||
+		    chown("/tmp/r2r-setid-image", 123, 200) != 0 ||
+		    chmod("/tmp/r2r-setid-image", 06755) != 0 ||
+		    wait_exec_status("/tmp/r2r-setid-image", setid_arguments, 0) != 0)
+			return failure("exec-setid-binary");
+		if (write_test_file("/tmp/r2r-setid-script",
+		    "#!/bin/posix-r2-remaining --setid-script-child extra\n", 0700) !=
+		    0 || chown("/tmp/r2r-setid-script", 123, 200) != 0 ||
+		    chmod("/tmp/r2r-setid-script", 06755) != 0 ||
+		    wait_exec_status("/tmp/r2r-setid-script", arguments, 0) != 0)
+			return failure("exec-setid-script");
+		/* Both ordinary write and O_TRUNC must remove privilege bits before
+		 * mutating file contents for a non-superuser. */
+		if (chmod("/tmp/r2r-setid-image", 06755) != 0 ||
+		    wait_setid_mutation("/tmp/r2r-setid-image", 0) != 0 ||
+		    chmod("/tmp/r2r-setid-image", 06755) != 0 ||
+		    wait_setid_mutation("/tmp/r2r-setid-image", 1) != 0 ||
+		    chmod("/tmp/r2r-setid-image", 06755) != 0 ||
+		    wait_setid_noop_chown("/tmp/r2r-setid-image") != 0)
+			return failure("write-truncate-clear-setid");
+	}
+	for (i = 0; i < sizeof(cleanup) / sizeof(cleanup[0]); i++)
+		(void)unlink(cleanup[i]);
+	marker("R2R:10:EXEC-SCRIPT\n");
+	return 0;
+}
+
 int
 main(int argc, char **argv)
 {
 	if (argc == 2 && strcmp(argv[1], "--fexec-child") == 0)
 		return 0;
+	if (argc >= 2 && strcmp(argv[1], "--setid-child") == 0)
+		return getuid() == 0 && geteuid() == 123 && getgid() == 0 &&
+		    getegid() == 200 ? 0 : 1;
+	if (argc >= 2 && strcmp(argv[1], "--setid-script-child extra") == 0)
+		return getuid() == 0 && geteuid() == 0 && getgid() == 0 &&
+		    getegid() == 0 ? 0 : 1;
 	if (test_tmpfs() != 0 || test_unix_vfs() != 0 ||
 	    test_scm_rights() != 0 || test_fifo() != 0 ||
 	    test_record_lock() != 0 || test_rlimit() != 0 ||
 	    test_waitid() != 0 || test_integration() != 0 ||
-	    test_new_required_apis() != 0)
+	    test_new_required_apis() != 0 || test_exec_scripts() != 0)
 		return 1;
-	marker("R2R:01-09:PASS\n");
+	marker("R2R:01-10:PASS\n");
 	return 0;
 }

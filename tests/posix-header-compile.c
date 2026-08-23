@@ -39,8 +39,13 @@ _Static_assert(ARG_MAX == ZEDBSD_ARG_MAX,
 _Static_assert(ZEDBSD_EXEC_VECTOR_MAX ==
     ZEDBSD_ARG_MAX / sizeof(uintptr_t),
     "exec vector capacity must follow the active ABI pointer width");
+_Static_assert(sizeof(sigset_t) == sizeof(uint64_t),
+    "sigset_t must expose the 64-bit signal ABI");
+_Static_assert(RTSIG_MAX == SIGRTMAX - SIGRTMIN + 1 && RTSIG_MAX >= 8,
+    "public realtime signal capacity");
 
 static void *thread_entry(void *argument) { return argument; }
+static void timer_entry(union sigval value) { (void)value; }
 
 int main(void)
 {
@@ -55,6 +60,11 @@ int main(void)
 	struct snapshot_control snapshot = {
 		.size = sizeof(snapshot), .version = ZEDBSD_SNAPSHOT_VERSION
 	};
+	struct sigevent timer_event = {
+		.sigev_notify = SIGEV_THREAD,
+		.sigev_notify_function = timer_entry,
+		.sigev_notify_attributes = NULL
+	};
 	posix_spawnattr_t attributes;
 	(void)thread_entry;
 	(void)thread;
@@ -64,6 +74,7 @@ int main(void)
 	(void)limit;
 	(void)quota;
 	(void)snapshot;
+	(void)timer_event;
 	(void)attributes;
 	return 0;
 }

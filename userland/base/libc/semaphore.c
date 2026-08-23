@@ -15,15 +15,22 @@
 
 #define SEM_MAGIC 0x5a53454dU
 extern void __pthread_cancel_point(void) __attribute__((weak));
+extern int __pthread_cancel_enabled(void) __attribute__((weak));
 static void cancel_point(void)
 { if (__pthread_cancel_point != NULL) __pthread_cancel_point(); }
+static uintptr_t cancelable_flag(void)
+{
+	return __pthread_cancel_enabled != NULL &&
+	    __pthread_cancel_enabled() ? ZEDBSD_USYNC_CANCELABLE : 0;
+}
 
 static int
 sem_usync_wait(sem_t *sem, const struct timespec *timeout)
 {
 	intptr_t result = syscall_result(__syscall6(ZEDBSD_SYS_usync,
 	    (uintptr_t)&sem->value, ZEDBSD_USYNC_WAIT, 0, (uintptr_t)timeout,
-	    0, sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE));
+	    0, (sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE) |
+	    cancelable_flag()));
 	return result < 0 ? -1 : 0;
 }
 
@@ -92,19 +99,70 @@ sem_trywait(sem_t *sem)
 }
 
 static int
-sem_wait_relative(sem_t *sem, const struct timespec *relative)
+sem_relative_deadline(const struct timespec *absolute,
+	struct timespec *relative)
+{
+	struct timespec now;
+
+	if (absolute->tv_nsec < 0 || absolute->tv_nsec >= 1000000000L) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (clock_gettime(CLOCK_REALTIME, &now) != 0)
+		return -1;
+	if (absolute->tv_sec < now.tv_sec ||
+	    (absolute->tv_sec == now.tv_sec &&
+	    absolute->tv_nsec <= now.tv_nsec)) {
+		errno = ETIMEDOUT;
+		return -1;
+	}
+	relative->tv_sec = absolute->tv_sec - now.tv_sec;
+	relative->tv_nsec = absolute->tv_nsec - now.tv_nsec;
+	if (relative->tv_nsec < 0) {
+		relative->tv_sec--;
+		relative->tv_nsec += 1000000000L;
+	}
+	return 0;
+}
+
+static int
+sem_wait_common(sem_t *sem, const struct timespec *absolute)
 {
 	cancel_point();
 	for (;;) {
+		struct timespec relative;
+		const struct timespec *timeout = NULL;
+
 		if (sem_trywait(sem) == 0) {
 			cancel_point();
 			return 0;
 		}
 		if (errno != EAGAIN)
 			return -1;
+		/* Recompute after every collision/spurious wake.  The kernel timeout is
+		 * relative, while sem_timedwait's public deadline is absolute. */
+		if (absolute != NULL) {
+			if (sem_relative_deadline(absolute, &relative) != 0)
+				return -1;
+			timeout = &relative;
+		}
 		__atomic_add_fetch(&sem->waiters, 1, __ATOMIC_RELAXED);
-		if (sem_usync_wait(sem, relative) != 0) {
+		if (sem_usync_wait(sem, timeout) != 0) {
+			int saved_errno = errno;
+
 			__atomic_sub_fetch(&sem->waiters, 1, __ATOMIC_RELAXED);
+			if (saved_errno == EAGAIN) {
+				/* The value changed between sem_trywait and the kernel
+				 * comparison.  Retry the predicate and also honor a cancel
+				 * request which bypassed wait registration. */
+				cancel_point();
+				continue;
+			}
+			/* A cancellation request must be acted on only after waiter
+			 * accounting is rolled back.  An ordinary signal remains EINTR. */
+			if (saved_errno == EINTR)
+				cancel_point();
+			errno = saved_errno;
 			return -1;
 		}
 		__atomic_sub_fetch(&sem->waiters, 1, __ATOMIC_RELAXED);
@@ -112,25 +170,13 @@ sem_wait_relative(sem_t *sem, const struct timespec *relative)
 	}
 }
 
-int sem_wait(sem_t *sem) { return sem_wait_relative(sem, NULL); }
+int sem_wait(sem_t *sem) { return sem_wait_common(sem, NULL); }
 
 int
 sem_timedwait(sem_t *sem, const struct timespec *absolute)
 {
-	struct timespec now, relative;
-	if (absolute == NULL || absolute->tv_nsec < 0 ||
-	    absolute->tv_nsec >= 1000000000L) { errno = EINVAL; return -1; }
-	if (clock_gettime(CLOCK_REALTIME, &now) != 0)
-		return -1;
-	if (absolute->tv_sec < now.tv_sec ||
-	    (absolute->tv_sec == now.tv_sec && absolute->tv_nsec <= now.tv_nsec)) {
-		errno = ETIMEDOUT;
-		return -1;
-	}
-	relative.tv_sec = absolute->tv_sec - now.tv_sec;
-	relative.tv_nsec = absolute->tv_nsec - now.tv_nsec;
-	if (relative.tv_nsec < 0) { relative.tv_sec--; relative.tv_nsec += 1000000000L; }
-	return sem_wait_relative(sem, &relative);
+	if (absolute == NULL) { errno = EINVAL; return -1; }
+	return sem_wait_common(sem, absolute);
 }
 
 int

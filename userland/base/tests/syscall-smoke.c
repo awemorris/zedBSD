@@ -238,7 +238,7 @@ run_test(int argc, char **argv, char **envp)
 	    close(descriptors[1]) != 0)
 		return 245;
 	report_checkpoint("pipe-efault-done");
-	/* Orphans are reparented to process0 and eventually auto-reaped. */
+	/* Orphans are reparented to init (PID 1), which eventually reaps them. */
 	if (pipe(descriptors) != 0)
 		return 246;
 	child = fork();
@@ -252,10 +252,12 @@ run_test(int argc, char **argv, char **envp)
 			struct timespec delay = { 0, 20000000 };
 			char value;
 			(void)close(descriptors[0]);
-			(void)write(1, "POSIX_R1_ORPHAN_SLEEP\n", 22);
+			(void)write(1, "SYSCALL_ORPHAN_SLEEP\n",
+			    sizeof("SYSCALL_ORPHAN_SLEEP\n") - 1U);
 			(void)nanosleep(&delay, NULL);
-			(void)write(1, "POSIX_R1_ORPHAN_WAKE\n", 21);
-			value = getppid() == 0 ? 'o' : 'x';
+			(void)write(1, "SYSCALL_ORPHAN_WAKE\n",
+			    sizeof("SYSCALL_ORPHAN_WAKE\n") - 1U);
+			value = getppid() == 1 ? 'o' : 'x';
 			(void)write(descriptors[1], &value, 1);
 			_exit(value == 'o' ? 0 : 1);
 		}

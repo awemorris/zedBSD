@@ -143,6 +143,10 @@ main(void)
 	file.i_mode = S_IFREG | S_ISUID | 0755U;
 	assert(vfs_clear_setid_on_write(&file, &root) == 0);
 	assert((file.i_mode & S_ISUID) != 0);
+	/* MAP_SHARED writeback is detached from the mmap caller's credential and
+	 * must always invalidate executable privilege metadata. */
+	assert(vfs_clear_setid_on_content_change(&file) == 0);
+	assert((file.i_mode & (S_ISUID | S_ISGID)) == 0);
 
 	assert(vfs_may_chown(&file, &owner, file.i_uid, file.i_gid) == 0);
 	assert(vfs_may_chown(&file, &other, file.i_uid, file.i_gid) == EPERM);

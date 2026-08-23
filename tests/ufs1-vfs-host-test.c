@@ -589,6 +589,7 @@ int main(void)
 	struct componentname iofail_name={"iofail",6,0};
 	struct componentname full_name={"full",4,0};
 	struct componentname sub_name={"sub",3,0},child_name={"child",5,0};
+	struct componentname loop_name={"loop",4,0};
 	struct inode *etc,*marker,*fresh,*found,*sym,*sub,*child,*iofail,*full;
 	struct path path; struct file *file; char text[32]={0};
 	unsigned char *large;size_t index;
@@ -773,6 +774,9 @@ int main(void)
 	assert(inode_readlink(sym,text,sizeof(text))==5);
 	assert(memcmp(text,"moved",5)==0);
 	assert(inode_mkdir(etc,&sub_name,0755,&sub)==0);
+	mount_vfs_transaction_enter(mountp);
+	assert(inode_rename(etc,&sub_name,sub,&loop_name,0)==EINVAL);
+	mount_vfs_transaction_leave(mountp);
 	assert(inode_create(sub,&child_name,0600,&child)==0);
 	assert(inode_rmdir(etc,&sub_name)==ENOTEMPTY);
 	assert(inode_unlink(sub,&child_name)==0);

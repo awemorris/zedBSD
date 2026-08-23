@@ -85,13 +85,22 @@ call(uint32_t number, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d,
 #endif
 
 static int
-usync_wait_word_flags(volatile uint32_t *address, uint32_t value,
-	const struct timespec *timeout, int pshared)
+usync_wait_word_flags_cancelable(volatile uint32_t *address, uint32_t value,
+	const struct timespec *timeout, int pshared, int cancelable)
 {
 	intptr_t result = call(ZEDBSD_SYS_usync, (uintptr_t)address,
 	    ZEDBSD_USYNC_WAIT, value, (uintptr_t)timeout, 0,
-	    pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
+	    (pshared ? 0 : ZEDBSD_USYNC_PRIVATE) |
+	    (cancelable ? ZEDBSD_USYNC_CANCELABLE : 0));
 	return result < 0 ? errno : 0;
+}
+
+static int
+usync_wait_word_flags(volatile uint32_t *address, uint32_t value,
+	const struct timespec *timeout, int pshared)
+{
+	return usync_wait_word_flags_cancelable(address, value, timeout,
+	    pshared, 0);
 }
 
 static void
@@ -141,6 +150,28 @@ static struct pthread_tcb *
 self_tcb(void)
 {
 	return (struct pthread_tcb *)RTLD_CALL(pthread_private)();
+}
+
+int
+__pthread_cancel_enabled(void)
+{
+	struct pthread_tcb *tcb;
+
+	ensure_main();
+	tcb = self_tcb();
+	return tcb != NULL && tcb->cancel_state == PTHREAD_CANCEL_ENABLE;
+}
+
+static int
+cancel_pending(void)
+{
+	intptr_t pending;
+
+	if (!__pthread_cancel_enabled())
+		return 0;
+	pending = call(ZEDBSD_SYS_thread_cancel, 0,
+	    ZEDBSD_THREAD_CANCEL_TEST, 0, 0, 0, 0);
+	return pending > 0;
 }
 
 /* getenv() returns a pointer whose lifetime must not be ended by another
@@ -498,13 +529,22 @@ int
 pthread_join(pthread_t thread, void **value)
 {
 	struct pthread_tcb *tcb;
+	struct pthread_tcb *self;
 	intptr_t result;
 
+	pthread_testcancel();
 	tcb = registry_find(thread);
 	if (tcb != NULL && tcb->detached)
 		return EINVAL;
-	result = call(ZEDBSD_SYS_thread_join, thread,
-	    (uintptr_t)value, 0, 0, 0, 0);
+	self = self_tcb();
+	do {
+		result = call(ZEDBSD_SYS_thread_join, thread,
+		    (uintptr_t)value,
+		    self != NULL && self->cancel_state == PTHREAD_CANCEL_ENABLE ?
+		    ZEDBSD_THREAD_JOIN_CANCELABLE : 0, 0, 0, 0);
+		if (result < 0 && errno == EINTR)
+			pthread_testcancel();
+	} while (result < 0 && errno == EINTR);
 	if (result < 0)
 		return errno;
 	tcb = registry_remove(thread);
@@ -734,7 +774,7 @@ pthread_mutex_timedlock(pthread_mutex_t *m, const struct timespec *absolute)
 		if (error != 0)
 			return error;
 		error = usync_wait_word_flags(&m->locked, 1, &relative, m->pshared);
-		if (error != 0 && error != EAGAIN)
+		if (error != 0 && error != EAGAIN && error != EINTR)
 			return error;
 	}
 	return error;
@@ -766,9 +806,11 @@ int pthread_condattr_setclock(pthread_condattr_t *a, clockid_t clock)
 int pthread_condattr_getclock(const pthread_condattr_t *a, clockid_t *clock)
 { if (a == NULL || clock == NULL) return EINVAL; *clock = (clockid_t)a->clock; return 0; }
 static int
-cond_wait_relative(pthread_cond_t *c, pthread_mutex_t *m,
-	const struct timespec *relative)
+cond_wait(pthread_cond_t *c, pthread_mutex_t *m,
+	const struct timespec *absolute, clockid_t clock)
 {
+	struct timespec relative;
+	const struct timespec *timeout;
 	uint32_t sequence;
 	int error;
 	if (c == NULL || m == NULL)
@@ -778,31 +820,52 @@ cond_wait_relative(pthread_cond_t *c, pthread_mutex_t *m,
 	error = pthread_mutex_unlock(m);
 	if (error != 0)
 		return error;
-	error = usync_wait_word_flags(&c->sequence, sequence, relative,
-	    c->pshared);
-	if (error == EAGAIN)
-		error = 0;
+	for (;;) {
+		if (__atomic_load_n(&c->sequence, __ATOMIC_ACQUIRE) != sequence) {
+			error = 0;
+			break;
+		}
+		timeout = NULL;
+		if (absolute != NULL) {
+			error = absolute_to_relative(clock, absolute, &relative);
+			if (error != 0)
+				break;
+			timeout = &relative;
+		}
+		error = usync_wait_word_flags_cancelable(&c->sequence, sequence,
+		    timeout, c->pshared, __pthread_cancel_enabled());
+		if (error == 0 || error == EAGAIN) {
+			error = 0;
+			break;
+		}
+		if (error != EINTR)
+			break;
+		if (cancel_pending()) {
+			/* Do not clear/act on the request until the condition-wait
+			 * contract has reacquired the caller's mutex. */
+			error = 0;
+			break;
+		}
+		/* POSIX condition waits do not expose EINTR.  A timed wait always
+		 * recomputes from its absolute deadline so caught signals cannot extend
+		 * the timeout. */
+	}
 	{
 		int lock_error = pthread_mutex_lock(m);
-		if (error == 0 && lock_error == 0)
+		if (lock_error == 0)
 			pthread_testcancel();
 		return error != 0 ? error : lock_error;
 	}
 }
 int pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m)
-{ return cond_wait_relative(c, m, NULL); }
+{ return cond_wait(c, m, NULL, CLOCK_REALTIME); }
 int
 pthread_cond_timedwait(pthread_cond_t *c, pthread_mutex_t *m,
 	const struct timespec *absolute)
 {
-	struct timespec relative;
-	int error;
 	if (c == NULL || m == NULL)
 		return EINVAL;
-	error = absolute_to_relative((clockid_t)c->clock, absolute, &relative);
-	if (error != 0)
-		return error;
-	return cond_wait_relative(c, m, &relative);
+	return cond_wait(c, m, absolute, (clockid_t)c->clock);
 }
 int pthread_cond_signal(pthread_cond_t *c)
 { if (c == NULL) return EINVAL; __atomic_add_fetch(&c->sequence, 1, __ATOMIC_RELEASE); usync_wake_word_flags(&c->sequence, 1, c->pshared); return 0; }
@@ -873,7 +936,7 @@ pthread_rwlock_rdlock(pthread_rwlock_t *lock)
 		sequence = __atomic_load_n(&lock->sequence, __ATOMIC_ACQUIRE);
 		error = usync_wait_word_flags(&lock->sequence, sequence, NULL,
 		    lock->pshared);
-		if (error != 0 && error != EAGAIN)
+		if (error != 0 && error != EAGAIN && error != EINTR)
 			return error;
 	}
 }
@@ -897,7 +960,7 @@ pthread_rwlock_timedrdlock(pthread_rwlock_t *lock,
 		sequence = __atomic_load_n(&lock->sequence, __ATOMIC_ACQUIRE);
 		error = usync_wait_word_flags(&lock->sequence, sequence, &relative,
 		    lock->pshared);
-		if (error != 0 && error != EAGAIN)
+		if (error != 0 && error != EAGAIN && error != EINTR)
 			return error;
 	}
 }
@@ -931,7 +994,7 @@ pthread_rwlock_wrlock(pthread_rwlock_t *lock)
 		sequence = __atomic_load_n(&lock->sequence, __ATOMIC_ACQUIRE);
 		error = usync_wait_word_flags(&lock->sequence, sequence, NULL,
 		    lock->pshared);
-		if (error != 0 && error != EAGAIN)
+		if (error != 0 && error != EAGAIN && error != EINTR)
 			return error;
 	}
 }
@@ -955,7 +1018,7 @@ pthread_rwlock_timedwrlock(pthread_rwlock_t *lock,
 		sequence = __atomic_load_n(&lock->sequence, __ATOMIC_ACQUIRE);
 		error = usync_wait_word_flags(&lock->sequence, sequence, &relative,
 		    lock->pshared);
-		if (error != 0 && error != EAGAIN)
+		if (error != 0 && error != EAGAIN && error != EINTR)
 			return error;
 	}
 }
@@ -1042,12 +1105,22 @@ pthread_barrier_wait(pthread_barrier_t *barrier)
 		return PTHREAD_BARRIER_SERIAL_THREAD;
 	}
 	barrier_guard_unlock(barrier);
-	do {
+	for (;;) {
+		if (__atomic_load_n(&barrier->sequence, __ATOMIC_ACQUIRE) !=
+		    generation)
+			return 0;
 		error = usync_wait_word_flags(&barrier->sequence, generation, NULL,
 		    barrier->pshared);
-	} while (error == EAGAIN &&
-	    __atomic_load_n(&barrier->sequence, __ATOMIC_ACQUIRE) == generation);
-	return error == EAGAIN ? 0 : error;
+		/* usync buckets deliberately wake colliding addresses.  A zero return
+		 * is therefore only a hint; the generation is the barrier predicate. */
+		if (error == 0 || error == EAGAIN || error == EINTR)
+			continue;
+		barrier_guard_lock(barrier);
+		if (barrier->sequence == generation && barrier->count != 0)
+			barrier->count--;
+		barrier_guard_unlock(barrier);
+		return error;
+	}
 }
 
 int pthread_barrierattr_init(pthread_barrierattr_t *attr)
@@ -1124,8 +1197,15 @@ void *pthread_getspecific(pthread_key_t key)
 { struct pthread_tcb *tcb; ensure_main(); tcb = self_tcb(); return key < KEY_MAX && tcb != NULL ? (void *)tcb->keys[key] : NULL; }
 int pthread_sigmask(int how, const sigset_t *set, sigset_t *old)
 { return sigprocmask(how, set, old) == 0 ? 0 : errno; }
-int pthread_kill(pthread_t thread, int signal)
-{ intptr_t result = call(ZEDBSD_SYS_thread_kill, thread, signal, 0, 0, 0, 0); return result < 0 ? errno : 0; }
+int
+pthread_kill(pthread_t thread, int signo)
+{
+	intptr_t result;
+	if (signo < 0 || signo > SIGRTMAX)
+		return EINVAL;
+	result = call(ZEDBSD_SYS_thread_kill, thread, signo, 0, 0, 0, 0);
+	return result < 0 ? errno : 0;
+}
 
 int
 pthread_cancel(pthread_t thread)

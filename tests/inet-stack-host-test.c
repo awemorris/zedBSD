@@ -7,6 +7,7 @@
 #include "kern/net/route.h"
 #include "kern/net/socket.h"
 #include "kern/net/tcp-socket.h"
+#include "kern/thread.h"
 #include "kern/uaccess.h"
 #include "../src/kern/net/internal.h"
 #include "../src/kern/net/wire.h"
@@ -23,6 +24,7 @@
 static struct packet_buf *transmitted;
 static uint64_t ticks;
 static struct thread *current_thread;
+static struct thread host_thread;
 struct process;
 
 void __libc_assert_fail(const char *e, const char *f, int l)
@@ -260,7 +262,7 @@ int main(void)
 		    SO_RCVTIMEO, &returned, &option_length) == 0);
 		assert(option_length == sizeof(returned));
 		assert(returned.tv_sec == 0 && returned.tv_usec == 20000);
-		current_thread = (struct thread *)(uintptr_t)1;
+		current_thread = &host_thread;
 		count = udp_socket->ops->recvfrom(udp_socket, buffer,
 		    sizeof(buffer), 0, NULL, NULL);
 		current_thread = NULL;
@@ -368,7 +370,7 @@ int main(void)
 		assert(socket_create(AF_INET, SOCK_STREAM, IPPROTO_TCP, &timed) == 0);
 		assert(socket_setsockopt_common(timed, SOL_SOCKET, SO_SNDTIMEO,
 		    &timeout, sizeof(timeout)) == 0);
-		current_thread = (struct thread *)(uintptr_t)1;
+		current_thread = &host_thread;
 		address.sin_port = net_htons(81);
 		address.sin_addr.s_addr = net_htonl(peer_ip);
 		assert(timed->ops->connect(timed, (struct sockaddr *)&address,

@@ -8,6 +8,7 @@
 
 extern uint64_t sched_ticks(void);
 extern void sched_sleep(uint64_t);
+extern int kern_deadline_after(uint64_t, uint64_t, uint64_t *);
 extern int signal_pending_unblocked(const struct thread *);
 extern struct thread *thread_current(void);
 
@@ -15,6 +16,8 @@ extern struct thread *thread_current(void);
 void poll_notify(void) { }
 int signal_send_thread(struct thread *thread, int signo)
 { (void)thread; (void)signo; return 0; }
+int syscall_restart_deadline_after(uint64_t ticks, uint64_t *deadline)
+{ return kern_deadline_after(sched_ticks(), ticks, deadline); }
 
 void
 spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)

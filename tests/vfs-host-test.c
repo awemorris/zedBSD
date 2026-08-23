@@ -1,6 +1,7 @@
 /* zedBSD inode/namei/mount host tests. SPDX-License-Identifier: Zlib */
 #include "kern/disk.h"
 #include "kern/buf.h"
+#include "kern/cred.h"
 #include "kern/file.h"
 #include "kern/mount.h"
 #include "kern/namecache.h"
@@ -10,10 +11,15 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/statvfs.h>
 
 static int failures;
 #define CHECK(x) do { if (!(x)) { printf("FAIL %s:%d: %s\n", __FILE__, \
 	__LINE__, #x); failures++; } } while (0)
+
+extern int vfs_test_clear_setid_error;
+extern unsigned vfs_test_clear_setid_calls;
+static unsigned mem_truncate_calls;
 
 struct mem_node {
 	struct inode *inode;
@@ -28,7 +34,7 @@ struct mem_node {
 	int xattr_exists;
 };
 
-#define MEM_NODE_MAX 8U
+#define MEM_NODE_MAX 12U
 struct mem_fs {
 	struct mem_node nodes[MEM_NODE_MAX];
 	unsigned lookup_calls;
@@ -243,6 +249,15 @@ static int mem_removexattr(struct inode *inode, const char *name)
 	return 0;
 }
 
+static int
+mem_truncate(struct inode *inode, off_t size)
+{
+	(void)inode;
+	(void)size;
+	mem_truncate_calls++;
+	return 0;
+}
+
 static const struct inode_ops mem_iops = {
 	.lookup = mem_lookup,
 	.rename = mem_rename,
@@ -253,6 +268,7 @@ static const struct inode_ops mem_iops = {
 	.setxattr = mem_setxattr,
 	.listxattr = mem_listxattr,
 	.removexattr = mem_removexattr,
+	.truncate = mem_truncate,
 };
 static const struct file_ops mem_dir_fops = { .readdir = mem_readdir };
 static const struct file_ops mem_file_fops = { .read = mem_read };
@@ -279,7 +295,9 @@ static int mem_mount(struct mount *mountp)
 	fs->nodes[3].name = "nested";
 	fs->nodes[3].parent = &fs->nodes[1];
 	fs->nodes[3].contents = "nested";
-	for (i = 0; i < 4; i++) {
+	fs->nodes[4].name = "child";
+	fs->nodes[4].parent = &fs->nodes[1];
+	for (i = 0; i < 5; i++) {
 		struct inode *inode = inode_alloc(mountp);
 		if (inode == NULL) return ENOSPC;
 		fs->nodes[i].inode = inode;
@@ -287,7 +305,7 @@ static int mem_mount(struct mount *mountp)
 		inode->i_data = &fs->nodes[i];
 		inode->i_linkcount = 1;
 		inode->i_op = &mem_iops;
-		if (i < 2) {
+		if (i < 2 || i == 4) {
 			inode->i_type = INODE_DIR;
 			inode->i_mode = S_IFDIR | 0555U;
 			inode->i_fop = &mem_dir_fops;
@@ -359,6 +377,15 @@ int main(void)
 	root_mount_ref = mount_root_get_ref();
 	disk1_mount = mount_find_ref("/disk1");
 	CHECK(root_mount_ref != NULL && disk1_mount != NULL);
+	{
+		struct statvfs status;
+		unsigned saved_flags = disk1_mount->m_flags;
+		disk1_mount->m_flags |= MOUNT_READ_ONLY | MOUNT_NOSUID;
+		CHECK(mount_statvfs(disk1_mount, &status) == 0);
+		CHECK((status.f_flag & (ST_RDONLY | ST_NOSUID)) ==
+		    (ST_RDONLY | ST_NOSUID));
+		disk1_mount->m_flags = saved_flags;
+	}
 	path_set(&root_path, root_mount_ref, mount_root_inode());
 	mount_release(root_mount_ref);
 	CHECK(cwdinfo_init(&context, &root_path) == 0);
@@ -446,6 +473,37 @@ int main(void)
 	    0, &file) == 0);
 	CHECK(file->f_offset == 0);
 	CHECK(file_close(file) == 0);
+	{
+		struct inode *target = stores[0].nodes[2].inode;
+		struct ucred user;
+		off_t original_size = target->i_size;
+		unsigned open_files = file_count();
+
+		memset(&user, 0, sizeof(user));
+		user.euid = 1000;
+		target->i_mode = S_IFREG | S_ISUID | S_ISGID | 0755;
+		mem_truncate_calls = 0;
+		vfs_test_clear_setid_calls = 0;
+		vfs_test_clear_setid_error = EIO;
+		/* Metadata preparation fails before truncate and the reserved file
+		 * object/path reference must be released by the open error path. */
+		CHECK(file_openat_cred(&context, &user, "/disk1/hello",
+		    O_WRONLY | O_TRUNC, 0, &file) == EIO);
+		CHECK(mem_truncate_calls == 0);
+		CHECK(target->i_size == original_size);
+		CHECK((target->i_mode & (S_ISUID | S_ISGID)) ==
+		    (S_ISUID | S_ISGID));
+		CHECK(file_count() == open_files);
+
+		vfs_test_clear_setid_error = 0;
+		CHECK(file_openat_cred(&context, &user, "/disk1/hello",
+		    O_WRONLY | O_TRUNC, 0, &file) == 0);
+		CHECK(mem_truncate_calls == 1);
+		CHECK(vfs_test_clear_setid_calls == 2);
+		CHECK(target->i_size == 0);
+		CHECK((target->i_mode & (S_ISUID | S_ISGID)) == 0);
+		CHECK(file_close(file) == 0);
+	}
 	CHECK(file_create_pseudo(&mem_file_fops, O_RDONLY, NULL, &file) == 0);
 	CHECK(file_seek(file, 0, 0) == -ESPIPE);
 	CHECK(file_close(file) == 0);
@@ -469,13 +527,63 @@ int main(void)
 		struct componentname old_name = {
 			.cn_nameptr = "dir", .cn_namelen = 3
 		};
+		struct componentname bad_name = {
+			.cn_nameptr = "inside", .cn_namelen = 6
+		};
+		struct inode *root = disk1_mount->m_root;
+		struct inode *child = stores[0].nodes[4].inode;
+
+		/* A VFS-level guard must reject moving a directory below itself. */
+		mount_vfs_transaction_enter(disk1_mount);
+		CHECK(inode_rename(root, &old_name, child, &bad_name, 0) ==
+		    EINVAL);
+		mount_vfs_transaction_leave(disk1_mount);
+		CHECK(namei_at(&context, "/disk1/dir/child", &inode) == 0);
+		CHECK(inode == child);
+		inode_release(inode);
+	}
+	{
+		struct componentname old_name = {
+			.cn_nameptr = "child", .cn_namelen = 5
+		};
+		struct componentname new_name = {
+			.cn_nameptr = "adopted", .cn_namelen = 7
+		};
+		struct componentname dotdot = {
+			.cn_nameptr = "..", .cn_namelen = 2,
+			.cn_flags = COMPONENT_DOTDOT
+		};
+		struct inode *root = disk1_mount->m_root;
+		struct inode *directory = stores[0].nodes[1].inode;
+		struct inode *child = stores[0].nodes[4].inode;
+		uint64_t before = child->i_dirseq;
+
+		/* Cache the old parent, then verify successful reparenting
+		 * invalidates that cached ".." result. */
+		CHECK(inode_lookup(child, &dotdot, &inode) == 0);
+		CHECK(inode == directory);
+		inode_release(inode);
+		mount_vfs_transaction_enter(disk1_mount);
+		CHECK(inode_rename(directory, &old_name, root, &new_name, 0) == 0);
+		mount_vfs_transaction_leave(disk1_mount);
+		CHECK(child->i_dirseq == before + 1U);
+		CHECK(inode_lookup(child, &dotdot, &inode) == 0);
+		CHECK(inode == root);
+		inode_release(inode);
+	}
+	{
+		struct componentname old_name = {
+			.cn_nameptr = "dir", .cn_namelen = 3
+		};
 		struct componentname new_name = {
 			.cn_nameptr = "moved", .cn_namelen = 5
 		};
 		struct inode *root = disk1_mount->m_root;
 		uint64_t before = root->i_dirseq;
 
+		mount_vfs_transaction_enter(disk1_mount);
 		CHECK(inode_rename(root, &old_name, root, &new_name, 0) == 0);
+		mount_vfs_transaction_leave(disk1_mount);
 		CHECK(root->i_dirseq == before + 1U);
 		CHECK(fs_getcwd(&context, cwd, sizeof(cwd)) == 0);
 		CHECK(!strcmp(cwd, "/disk1/moved"));

@@ -3,6 +3,11 @@
 
 #include <threads.h>
 
+static _Thread_local unsigned host_mutex_identity;
+
+static struct thread *host_mutex_owner(void)
+{ return (struct thread *)&host_mutex_identity; }
+
 void spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
 {
 	lock->held.value = 0;
@@ -52,8 +57,21 @@ int mutex_lock_interruptible(struct mutex *lock)
 {
 	spin_lock(&lock->guard);
 	lock->locked = 1;
+	lock->owner = host_mutex_owner();
 	return 0;
 }
+
+int mutex_trylock(struct mutex *lock)
+{
+	if (!spin_trylock(&lock->guard))
+		return 0;
+	lock->locked = 1;
+	lock->owner = host_mutex_owner();
+	return 1;
+}
+
+int mutex_owned(struct mutex *lock)
+{ return lock->locked && lock->owner == host_mutex_owner(); }
 
 void mutex_lock(struct mutex *lock)
 {
@@ -62,6 +80,7 @@ void mutex_lock(struct mutex *lock)
 
 void mutex_unlock(struct mutex *lock)
 {
+	lock->owner = NULL;
 	lock->locked = 0;
 	spin_unlock(&lock->guard);
 }
