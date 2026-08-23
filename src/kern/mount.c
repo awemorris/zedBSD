@@ -617,10 +617,11 @@ mount_statvfs(struct mount *mountp, struct statvfs *result)
 	result->f_fsid = mountp->m_disk != NULL ? mountp->m_disk->d_dev :
 	    (uint64_t)(1U + (unsigned)(mountp - mounts));
 flags:
-	result->f_flag &= ~(uint64_t)ST_RDONLY;
+	result->f_flag &= ~((uint64_t)ST_RDONLY | (uint64_t)ST_NOSUID);
 	result->f_flag |= ((mountp->m_flags & MOUNT_READ_ONLY) != 0 ||
 	    (mountp->m_disk != NULL &&
 	    (mountp->m_disk->d_flags & DISK_READ_ONLY) != 0)) ? ST_RDONLY : 0U;
+	result->f_flag |= (mountp->m_flags & MOUNT_NOSUID) != 0 ? ST_NOSUID : 0U;
 	if (result->f_namemax == 0)
 		result->f_namemax = NAME_MAX;
 	return 0;

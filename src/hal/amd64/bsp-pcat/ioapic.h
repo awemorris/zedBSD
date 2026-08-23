@@ -5,9 +5,9 @@
 #include "acpi.h"
 
 int amd64_ioapic_init(const struct amd64_acpi_info *acpi,
-	uint32 bootstrap_apic_id);
+	uint32_t bootstrap_apic_id);
 void amd64_ioapic_mask(int irq);
 void amd64_ioapic_unmask(int irq);
-int amd64_ioapic_route(int irq, uint32 apic_id);
+int amd64_ioapic_route(int irq, uint32_t apic_id);
 
 #endif

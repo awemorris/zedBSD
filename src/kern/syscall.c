@@ -73,7 +73,83 @@ static intptr_t syscall_dispatch(uint32_t, const uintptr_t [6]);
 static intptr_t syscall_dispatch_body(uint32_t, const uintptr_t [6]);
 static struct process *current_process(void);
 
-#define POLL_SIGNAL_BIT(n) (1U << ((unsigned)(n) - 1U))
+void
+syscall_restart_state_begin(struct thread *thread)
+{
+	if (thread == NULL)
+		return;
+	thread->syscall_stop_redispatch = 0;
+	thread->syscall_wait_deadline = 0;
+	thread->syscall_wait_deadline_valid = 0;
+}
+
+void
+syscall_restart_state_finish(struct thread *thread)
+{
+	if (thread == NULL)
+		return;
+	thread->syscall_stop_redispatch = 0;
+	thread->syscall_wait_deadline = 0;
+	thread->syscall_wait_deadline_valid = 0;
+}
+
+int
+syscall_restart_deadline_rearm(uint64_t ticks, uint64_t *deadline)
+{
+	struct thread *thread = curthread;
+	int error;
+
+	if (deadline == NULL)
+		return EINVAL;
+	error = kern_deadline_after(sched_ticks(), ticks, deadline);
+	if (error == 0 && thread != NULL) {
+		thread->syscall_wait_deadline = *deadline;
+		thread->syscall_wait_deadline_valid = 1;
+	}
+	return error;
+}
+
+int
+syscall_restart_deadline_after(uint64_t ticks, uint64_t *deadline)
+{
+	struct thread *thread = curthread;
+
+	if (deadline == NULL)
+		return EINVAL;
+	if (thread != NULL && thread->syscall_stop_redispatch &&
+	    thread->syscall_wait_deadline_valid) {
+		*deadline = thread->syscall_wait_deadline;
+		return 0;
+	}
+	return syscall_restart_deadline_rearm(ticks, deadline);
+}
+
+void
+syscall_restart_prepare_stop(struct thread *thread)
+{
+	struct process *process;
+	unsigned long irq;
+
+	if (thread == NULL)
+		return;
+	process = thread->proc;
+	if (process != NULL) {
+		irq = spin_lock_irqsave(&process->lock);
+		/* ppoll()/pselect() defer restoration for an ordinary caught signal.
+		 * A transparent stop does not cross a user-handler boundary, so restore
+		 * now before re-entering the syscall. */
+		if (thread->signal_suspended) {
+			thread->signal_mask = thread->signal_suspend_mask;
+			thread->signal_suspended = 0;
+		}
+		spin_unlock_irqrestore(&process->lock, irq);
+	}
+	thread->syscall_stop_redispatch = 1;
+}
+
+#define POLL_SIGNAL_BIT(n) \
+	((sigset_t)1ULL << ((unsigned)(n) - 1U))
+#define SIGNAL_VALID_MASK ((sigset_t)(UINT64_MAX >> 1U))
 
 struct poll_mask_guard {
 	struct thread *thread;
@@ -99,7 +175,8 @@ poll_mask_enter(uintptr_t address, struct poll_mask_guard *guard)
 	process = guard->thread != NULL ? guard->thread->proc : NULL;
 	if (process == NULL)
 		return EINVAL;
-	requested &= ~(POLL_SIGNAL_BIT(SIGKILL) | POLL_SIGNAL_BIT(SIGSTOP));
+	requested &= SIGNAL_VALID_MASK &
+	    ~(POLL_SIGNAL_BIT(SIGKILL) | POLL_SIGNAL_BIT(SIGSTOP));
 	irq = spin_lock_irqsave(&process->lock);
 	guard->saved = guard->thread->signal_mask;
 	guard->thread->signal_mask = requested;
@@ -131,6 +208,29 @@ poll_mask_leave(struct poll_mask_guard *guard, int defer_restore)
 }
 
 static int
+poll_mask_defer_restore(const struct poll_mask_guard *guard, int error)
+{
+	return error == EINTR && guard != NULL && guard->thread != NULL &&
+	    !guard->thread->stop_interrupted;
+}
+
+#ifdef ZEDBSD_SYSCALL_STOP_TEST
+int
+syscall_test_poll_mask_cycle(uint64_t requested, int error,
+	unsigned stop_interrupted)
+{
+	struct poll_mask_guard guard;
+	int enter_error = poll_mask_enter((uintptr_t)&requested, &guard);
+
+	if (enter_error != 0)
+		return enter_error;
+	guard.thread->stop_interrupted = stop_interrupted;
+	poll_mask_leave(&guard, poll_mask_defer_restore(&guard, error));
+	return 0;
+}
+#endif
+
+static int
 poll_timeout(uintptr_t address, uint64_t *deadline, int *immediate)
 {
 	struct timespec timeout;
@@ -141,6 +241,11 @@ poll_timeout(uintptr_t address, uint64_t *deadline, int *immediate)
 	*immediate = 0;
 	if (address == 0)
 		return 0;
+	if (curthread != NULL && curthread->syscall_stop_redispatch &&
+	    curthread->syscall_wait_deadline_valid) {
+		*deadline = curthread->syscall_wait_deadline;
+		return 0;
+	}
 	error = copyin(address, &timeout, sizeof(timeout));
 	if (error != 0)
 		return error;
@@ -151,7 +256,7 @@ poll_timeout(uintptr_t address, uint64_t *deadline, int *immediate)
 		*immediate = 1;
 		return 0;
 	}
-	return kern_deadline_after(sched_ticks(), ticks, deadline);
+	return syscall_restart_deadline_after(ticks, deadline);
 }
 
 static intptr_t
@@ -191,7 +296,7 @@ sys_ppoll_call(const uintptr_t args[6])
 		error = kern_poll_wait(process, fds, count, deadline, immediate,
 		    &ready);
 	if (args[3] != 0)
-		poll_mask_leave(&guard, error == EINTR);
+		poll_mask_leave(&guard, poll_mask_defer_restore(&guard, error));
 	if (error == 0 && bytes != 0)
 		error = copyout_pinned(&pin, 0, fds, bytes);
 	uaccess_unpin(&pin);
@@ -268,7 +373,7 @@ sys_pselect_call(const uintptr_t args[6])
 		error = kern_poll_wait(process, fds, count, deadline, immediate,
 		    &ready);
 	if (args[5] != 0)
-		poll_mask_leave(&guard, error == EINTR);
+		poll_mask_leave(&guard, poll_mask_defer_restore(&guard, error));
 	if (error != 0)
 		goto out;
 	(void)ready;
@@ -1417,14 +1522,18 @@ static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6])
 		(void)file_close(file);
 		return -error;
 	}
-	error = file_io_begin(file, FILE_IO_WRITE, 0, 0, &io);
+	error = file_io_begin_cred(file, FILE_IO_WRITE, 0, 0, process->cred,
+	    &io);
 	if (error != 0) {
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return -error;
 	}
+	file_io_set_growth_limit(&io,
+	    resource_limit_current(process, RLIMIT_FSIZE));
 	while (done < length) {
 		size_t chunk = length - done > sizeof(buffer) ? sizeof(buffer) : length - done;
+		int limited;
 		ssize_t count;
 		error = copyin_pinned(&pin, done, buffer, chunk);
 		if (error != 0) {
@@ -1432,18 +1541,20 @@ static SYSCALL_EXT intptr_t sys_write_call(const uintptr_t args[6])
 			goto out;
 		}
 		count = file_io_transfer(&io, buffer, chunk);
+		limited = file_io_take_growth_limit_hit(&io);
+		if (limited)
+			(void)signal_send_thread(curthread, SIGXFSZ);
 		if (count < 0) {
 			result = done != 0 ? (intptr_t)done : count;
 			goto out;
 		}
 		done += (size_t)count;
+		if (limited) break;
 		if ((size_t)count < chunk) break;
 	}
 	result = (intptr_t)done;
 out:
 	file_io_end(&io);
-	if (result > 0 && file->f_inode != NULL)
-		(void)vfs_clear_setid_on_write(file->f_inode, process->cred);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -1847,7 +1958,7 @@ static intptr_t sys_mount_call(const uintptr_t args[6])
 		return -EINVAL;
 	if (!cred_is_superuser(process->cred))
 		return -EPERM;
-	if ((flags & ~(int)MNT_RDONLY) != 0)
+	if ((flags & ~(int)(MNT_RDONLY | MNT_NOSUID)) != 0)
 		return -EINVAL;
 	error = copyinstr(args[0], type, sizeof(type), NULL);
 	if (error == 0)
@@ -1865,7 +1976,8 @@ static intptr_t sys_mount_call(const uintptr_t args[6])
 	}
 	if (error == 0)
 		error = mount(type, directory,
-		    (flags & MNT_RDONLY) != 0 ? MOUNT_READ_ONLY : 0,
+		    ((flags & MNT_RDONLY) != 0 ? MOUNT_READ_ONLY : 0) |
+		    ((flags & MNT_NOSUID) != 0 ? MOUNT_NOSUID : 0),
 		    internal.fspec != NULL ? &internal : NULL);
 	return error == 0 ? 0 : -error;
 }
@@ -1976,27 +2088,49 @@ sys_snapshotctl_call(const uintptr_t args[6])
 
 static intptr_t sys_nanosleep_call(const uintptr_t args[6])
 {
+	struct process *process = current_process();
 	struct timespec request;
 	struct timespec remaining;
 	uint64_t ticks, deadline, left;
+	unsigned long irq;
 	int error = copyin(args[0], &request, sizeof(request));
+
+	if (process == NULL || curthread == NULL)
+		return -EINVAL;
 	if (error != 0) return -error;
 	error = kern_duration_to_ticks_ceil(&request, &ticks);
 	if (error != 0) return -error;
 	if (ticks == 0) return 0;
-	if (signal_pending_unblocked(curthread))
-		return -EINTR;
 	error = kern_deadline_after(sched_ticks(), ticks, &deadline);
 	if (error != 0) return -error;
+	irq = spin_lock_irqsave(&process->lock);
 	for (;;) {
 		uint64_t now;
 
-		sched_sleep(deadline);
 		now = sched_ticks();
-		if (now >= deadline)
+		if (now >= deadline) {
+			spin_unlock_irqrestore(&process->lock, irq);
 			return 0;
-		if (!signal_pending_unblocked(curthread))
+		}
+		if (curthread->terminate_requested) {
+			spin_unlock_irqrestore(&process->lock, irq);
+			return -EINTR;
+		}
+		if (process->stop_requested) {
+			spin_unlock_irqrestore(&process->lock, irq);
+			process_stop_current(0);
+			irq = spin_lock_irqsave(&process->lock);
 			continue;
+		}
+		if (!signal_pending_unblocked_locked(curthread)) {
+			sched_sleep_locked(deadline, &process->lock);
+			continue;
+		}
+		spin_unlock_irqrestore(&process->lock, irq);
+		if (signal_stop_before_return(curthread)) {
+			irq = spin_lock_irqsave(&process->lock);
+			continue;
+		}
 		left = kern_deadline_remaining(sched_ticks(), deadline);
 		if (args[1] != 0) {
 			remaining.tv_sec = (time_t)(left / KERN_CLOCK_HZ);
@@ -2080,22 +2214,30 @@ sys_positional_call(const uintptr_t args[6], int writing)
 		(void)file_close(file);
 		return -error;
 	}
-	error = file_io_begin(file, writing ? FILE_IO_PWRITE : FILE_IO_PREAD,
-	    offset, 0, &io);
+	error = file_io_begin_cred(file,
+	    writing ? FILE_IO_PWRITE : FILE_IO_PREAD, offset, 0,
+	    writing ? process->cred : NULL, &io);
 	if (error != 0) {
 		uaccess_unpin(&pin);
 		(void)file_close(file);
 		return -error;
 	}
+	if (writing)
+		file_io_set_growth_limit(&io,
+		    resource_limit_current(process, RLIMIT_FSIZE));
 	while (done < length) {
 		size_t chunk = length - done > sizeof(buffer) ?
 		    sizeof(buffer) : length - done;
+		int limited = 0;
 		ssize_t count;
 		if (writing) {
 			error = copyin_pinned(&pin, done, buffer, chunk);
 			if (error != 0)
 				goto copy_error;
 			count = file_io_transfer(&io, buffer, chunk);
+			limited = file_io_take_growth_limit_hit(&io);
+			if (limited)
+				(void)signal_send_thread(curthread, SIGXFSZ);
 		} else {
 			count = file_io_transfer(&io, buffer, chunk);
 		}
@@ -2111,6 +2253,8 @@ sys_positional_call(const uintptr_t args[6], int writing)
 				goto copy_error;
 		}
 		done += (size_t)count;
+		if (limited)
+			break;
 		if ((size_t)count < chunk)
 			break;
 	}
@@ -2120,8 +2264,6 @@ copy_error:
 	result = done != 0 ? (intptr_t)done : -error;
 out:
 	file_io_end(&io);
-	if (writing && result > 0 && file->f_inode != NULL)
-		(void)vfs_clear_setid_on_write(file->f_inode, process->cred);
 	uaccess_unpin(&pin);
 	(void)file_close(file);
 	return result;
@@ -2175,11 +2317,15 @@ sys_vector_call(const uintptr_t args[6], int writing)
 		error = EBADF;
 		goto fail;
 	}
-	error = file_io_begin(file, writing ? FILE_IO_WRITE : FILE_IO_READ,
-	    0, 0, &io);
+	error = file_io_begin_cred(file,
+	    writing ? FILE_IO_WRITE : FILE_IO_READ, 0, 0,
+	    writing ? process->cred : NULL, &io);
 	if (error != 0)
 		goto fail;
 	io_started = 1;
+	if (writing)
+		file_io_set_growth_limit(&io,
+		    resource_limit_current(process, RLIMIT_FSIZE));
 	/* POSIX requires a writev no larger than PIPE_BUF to be indivisible.
 	 * Coalesce it before the one and only pipe backend call. */
 	if (writing && pipe_file_is_pipe(file) &&
@@ -2203,6 +2349,7 @@ sys_vector_call(const uintptr_t args[6], int writing)
 		while (done < length) {
 			size_t chunk = length - done > sizeof(buffer) ?
 			    sizeof(buffer) : length - done;
+			int limited = 0;
 			ssize_t result;
 			if (writing) {
 				error = copyin_pinned(&pins[i], done, buffer, chunk);
@@ -2212,6 +2359,11 @@ sys_vector_call(const uintptr_t args[6], int writing)
 				}
 			}
 			result = file_io_transfer(&io, buffer, chunk);
+			if (writing) {
+				limited = file_io_take_growth_limit_hit(&io);
+				if (limited)
+					(void)signal_send_thread(curthread, SIGXFSZ);
+			}
 			if (result < 0) {
 				total = total != 0 ? total : result;
 				goto out;
@@ -2228,6 +2380,8 @@ sys_vector_call(const uintptr_t args[6], int writing)
 			}
 			done += (size_t)result;
 			total += result;
+			if (limited)
+				goto out;
 			if ((size_t)result < chunk)
 				goto out;
 			if (!writing && (file->f_inode == NULL ||
@@ -2242,8 +2396,6 @@ fail:
 out:
 	if (io_started)
 		file_io_end(&io);
-	if (writing && total > 0 && file != NULL && file->f_inode != NULL)
-		(void)vfs_clear_setid_on_write(file->f_inode, process->cred);
 	if (file != NULL)
 		(void)file_close(file);
 	while (pinned != 0)
@@ -2316,7 +2468,7 @@ sys_truncate_call(const uintptr_t args[6], int by_fd)
 	struct file *file = NULL;
 	char pathname[PATH_MAX];
 	off_t length = (off_t)args[1];
-	int error;
+	int error, limit_exceeded = 0;
 	if (process == NULL || length < 0)
 		return -EINVAL;
 	if (by_fd) {
@@ -2343,11 +2495,11 @@ sys_truncate_call(const uintptr_t args[6], int by_fd)
 	    (error = vfs_access(inode, process->cred, W_OK)) != 0)
 		;
 	else
-		error = inode_truncate(inode, length);
-	if (error == 0)
-		error = vfs_clear_setid_on_write(inode, process->cred);
-	if (error == 0)
-		vm_object_truncate_inode(inode, length);
+		error = inode_truncate_limited_cred(inode, length,
+		    resource_limit_current(process, RLIMIT_FSIZE),
+		    process->cred, &limit_exceeded);
+	if (limit_exceeded)
+		(void)signal_send_thread(curthread, SIGXFSZ);
 	if (!by_fd)
 		path_release(&path);
 	else
@@ -2623,9 +2775,11 @@ sys_cred_set_call(uint32_t number, const uintptr_t args[6])
 		break;
 	default: error = EINVAL; break;
 	}
-	if (error == 0)
+	if (error == 0) {
 		error = replace_cred(process, cred);
-	else
+		if (error != 0)
+			cred_release(cred);
+	} else
 		cred_release(cred);
 	cred_release(old);
 	return error == 0 ? 0 : -error;
@@ -2946,16 +3100,21 @@ sys_chown_common(int dirfd, uintptr_t pathname, int fd, uid_t uid, gid_t gid,
 	error = vfs_may_chown(inode, process->cred, uid, gid);
 	if (error == 0) {
 		error = inode_getattr(inode, &status);
-		if (error == 0 && uid != (uid_t)-1 && uid != status.st_uid) {
+		if (error == 0 && uid != (uid_t)-1) {
 			status.st_uid = uid;
 			mask |= INODE_ATTR_UID;
 		}
-		if (error == 0 && gid != (gid_t)-1 && gid != status.st_gid) {
+		if (error == 0 && gid != (gid_t)-1) {
 			status.st_gid = gid;
 			mask |= INODE_ATTR_GID;
 		}
-		if (error == 0 && mask != 0 && (status.st_mode &
-		    (S_ISUID | S_ISGID)) != 0) {
+		/* A successful unprivileged chown clears set-id even when both
+		 * requested IDs are unchanged (or both are the -1 sentinel).  A
+		 * privileged caller retains the historical behavior of clearing on an
+		 * explicit ownership request. */
+		if (error == 0 && (status.st_mode & (S_ISUID | S_ISGID)) != 0 &&
+		    (!cred_is_superuser(process->cred) || uid != (uid_t)-1 ||
+		     gid != (gid_t)-1)) {
 			status.st_mode &= ~(mode_t)(S_ISUID | S_ISGID);
 			mask |= INODE_ATTR_MODE;
 		}
@@ -3229,24 +3388,20 @@ static intptr_t
 sys_sigaction_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	int signo = (int)args[0], error;
+	int signo = (int)args[0], error, install = args[1] != 0;
 	struct sigaction action, old;
-	struct signal_action *current;
+	struct signal_action replacement, previous;
+
 	if (process == NULL || signo <= 0 || signo >= NSIG)
 		return -EINVAL;
-	current = &process->signal_actions[signo];
-	memset(&old, 0, sizeof(old));
-	old.sa_handler = current->handler;
-	old.sa_mask = current->mask;
-	old.sa_flags = current->flags;
-	old.sa_restorer = current->restorer;
-	if (args[1] != 0) {
+	if (install) {
 		error = copyin(args[1], &action, sizeof(action));
 		if (error != 0)
 			return -error;
 		if (signo == SIGKILL || signo == SIGSTOP)
 			return -EINVAL;
-		if ((action.sa_flags & ~(SA_RESTART | SA_NOCLDSTOP |
+		if (action.__sa_reserved != 0 ||
+		    (action.sa_flags & ~(SA_RESTART | SA_NOCLDSTOP |
 		    SA_NOCLDWAIT | SA_NODEFER | SA_RESETHAND |
 		    SA_SIGINFO | SA_ONSTACK)) != 0 ||
 		    (signo != SIGCHLD && (action.sa_flags &
@@ -3257,12 +3412,22 @@ sys_sigaction_call(const uintptr_t args[6])
 		    (action.sa_restorer == 0 ||
 		     !vmspace_user_range_valid((uintptr_t)action.sa_restorer, 1))))
 			return -EINVAL;
-		current->handler = (uintptr_t)action.sa_handler;
-		current->mask = action.sa_mask &
-		    ~(1U << (SIGKILL-1)) & ~(1U << (SIGSTOP-1));
-		current->flags = action.sa_flags;
-		current->restorer = (uintptr_t)action.sa_restorer;
 	}
+	if (install) {
+		replacement.handler = (uintptr_t)action.sa_handler;
+		replacement.mask = action.sa_mask;
+		replacement.flags = action.sa_flags;
+		replacement.restorer = (uintptr_t)action.sa_restorer;
+	}
+	error = signal_action_set(process, signo,
+	    install ? &replacement : NULL, &previous);
+	if (error != 0)
+		return -error;
+	memset(&old, 0, sizeof(old));
+	old.sa_handler = previous.handler;
+	old.sa_mask = previous.mask;
+	old.sa_flags = previous.flags;
+	old.sa_restorer = previous.restorer;
 	if (args[2] != 0) {
 		error = copyout(&old, args[2], sizeof(old));
 		if (error != 0)
@@ -3275,24 +3440,33 @@ static intptr_t
 sys_sigprocmask_call(const uintptr_t args[6])
 {
 	sigset_t set, old;
+	unsigned long irq;
+	int operation = (int)args[0];
 	int error;
-	if (curthread == NULL)
+
+	if (curthread == NULL || curthread->proc == NULL)
 		return -EINVAL;
-	old = curthread->signal_mask;
 	if (args[1] != 0) {
 		error = copyin(args[1], &set, sizeof(set));
 		if (error != 0)
 			return -error;
-		set &= ~(1U << (SIGKILL-1)) & ~(1U << (SIGSTOP-1));
-		if ((int)args[0] == SIG_BLOCK)
-			curthread->signal_mask |= set;
-		else if ((int)args[0] == SIG_UNBLOCK)
-			curthread->signal_mask &= ~set;
-		else if ((int)args[0] == SIG_SETMASK)
-			curthread->signal_mask = set;
-		else
+		set &= SIGNAL_VALID_MASK & ~POLL_SIGNAL_BIT(SIGKILL) &
+		    ~POLL_SIGNAL_BIT(SIGSTOP);
+		if (operation != SIG_BLOCK && operation != SIG_UNBLOCK &&
+		    operation != SIG_SETMASK)
 			return -EINVAL;
 	}
+	irq = spin_lock_irqsave(&curthread->proc->lock);
+	old = curthread->signal_mask;
+	if (args[1] != 0) {
+		if (operation == SIG_BLOCK)
+			curthread->signal_mask |= set;
+		else if (operation == SIG_UNBLOCK)
+			curthread->signal_mask &= ~set;
+		else
+			curthread->signal_mask = set;
+	}
+	spin_unlock_irqrestore(&curthread->proc->lock, irq);
 	if (args[2] != 0) {
 		error = copyout(&old, args[2], sizeof(old));
 		if (error != 0)
@@ -3430,22 +3604,22 @@ static intptr_t
 sys_sigtimedwait_call(const uintptr_t args[6])
 {
 	sigset_t set;
-	struct timespec timeout, *timeout_pointer = NULL;
 	struct signal_info selected;
 	siginfo_t info;
-	int signo, error;
+	uint64_t deadline;
+	int immediate, signo, error;
 	if (curthread == NULL || args[0] == 0)
 		return -EINVAL;
 	error = copyin(args[0], &set, sizeof(set));
 	if (error != 0) return -error;
-	if (args[2] != 0) {
-		error = copyin(args[2], &timeout, sizeof(timeout));
-		if (error != 0) return -error;
-		timeout_pointer = &timeout;
-	}
+	error = poll_timeout(args[2], &deadline, &immediate);
+	if (error != 0)
+		return -error;
+	if (immediate)
+		deadline = sched_ticks();
 	memset(&selected, 0, sizeof(selected));
-	error = signal_timedwait(curthread, set, timeout_pointer, &selected,
-	    &signo);
+	error = signal_timedwait(curthread, set, deadline, args[2] != 0,
+	    &selected, &signo);
 	if (error != 0) return -error;
 	memset(&info, 0, sizeof(info));
 	info.si_signo = signo;
@@ -3509,7 +3683,7 @@ sys_thread_create_call(const uintptr_t args[6])
 		tid = thread->tid;
 		error = copyout_pinned(&pin, 0, &tid, sizeof(tid));
 		if (error == 0) thread_start(thread);
-		else { thread->detached = 1; thread_start(thread); }
+		else (void)thread_abort_new(thread);
 	}
 	uaccess_unpin(&pin);
 	return error == 0 ? 0 : -error;
@@ -3524,48 +3698,132 @@ sys_thread_exit_call(const uintptr_t args[6])
 	thread_exit(0);
 }
 
+/* Caller holds target->proc->lock. */
+static int
+thread_join_claim_locked(struct thread *target, tid_t owner,
+	unsigned stop_redispatch)
+{
+	if (target->detached)
+		return EINVAL;
+	if (!target->join_claimed) {
+		target->join_claimed = 1;
+		target->join_owner_tid = owner;
+		return 0;
+	}
+	return stop_redispatch && target->join_owner_tid == owner ? 0 : EINVAL;
+}
+
+/* Caller holds target->proc->lock. */
+static void
+thread_join_release_locked(struct thread *target, tid_t owner)
+{
+	if (target->join_claimed && target->join_owner_tid == owner) {
+		target->join_claimed = 0;
+		target->join_owner_tid = 0;
+	}
+}
+
+#ifdef ZEDBSD_SYSCALL_STOP_TEST
+int
+syscall_test_thread_join_claim(struct thread *target, tid_t owner,
+	unsigned stop_redispatch)
+{
+	return target == NULL ? EINVAL :
+	    thread_join_claim_locked(target, owner, stop_redispatch);
+}
+
+void
+syscall_test_thread_join_release(struct thread *target, tid_t owner)
+{
+	if (target != NULL)
+		thread_join_release_locked(target, owner);
+}
+#endif
+
 static intptr_t
 sys_thread_join_call(const uintptr_t args[6])
 {
 	struct thread *target;
 	struct process *process = current_process();
+	struct uaccess_pin pin;
 	uintptr_t value;
 	unsigned long irq;
-	int error;
+	int error, pin_active = 0, retain_claim = 0;
+	unsigned cancelable;
+	tid_t owner;
+
 	if (process == NULL || (tid_t)args[0] == curthread->tid)
 		return -EDEADLK;
+	if ((args[2] & ~ZEDBSD_THREAD_JOIN_CANCELABLE) != 0 ||
+	    args[3] != 0 || args[4] != 0 || args[5] != 0)
+		return -EINVAL;
+	cancelable = (args[2] & ZEDBSD_THREAD_JOIN_CANCELABLE) != 0;
+	owner = curthread->tid;
+	memset(&pin, 0, sizeof(pin));
 	target = thread_find_ref((tid_t)args[0]);
 	if (target == NULL || target->proc != process) {
 		if (target != NULL) thread_release(target);
 		return -ESRCH;
 	}
 	irq = spin_lock_irqsave(&process->lock);
-	if (target->detached || target->join_claimed) error = EINVAL;
-	else { target->join_claimed = 1; error = 0; }
+	error = thread_join_claim_locked(target, owner,
+	    curthread->syscall_stop_redispatch);
+	spin_unlock_irqrestore(&process->lock, irq);
+	if (error != 0)
+		goto out;
+	/* Pin before waiting or observing a consumable zombie.  A failed copyout
+	 * must leave the target joinable, not reap it and report EFAULT afterward. */
+	if (args[1] != 0) {
+		error = uaccess_pin(args[1], sizeof(value), HAL_SPACE_WRITE, &pin);
+		if (error != 0)
+			goto release;
+		pin_active = 1;
+	}
+	irq = spin_lock_irqsave(&process->lock);
+	if (cancelable &&
+	    atomic_raw_load_acquire(&curthread->cancel_pending) != 0)
+		error = EINTR;
 	while (error == 0 && target->state != THREAD_ZOMBIE) {
 		uint64_t sequence = waitq_sequence(&target->join_waitq);
 		error = waitq_sleep(&target->join_waitq, &process->lock,
-		    sequence, 0, WAITQ_INTERRUPTIBLE);
+		    sequence, 0, WAITQ_INTERRUPTIBLE |
+		    (cancelable ? WAITQ_CANCELABLE : 0));
 		if (error == EAGAIN)
 			error = 0;
+		if (error == 0 && cancelable &&
+		    atomic_raw_load_acquire(&curthread->cancel_pending) != 0)
+			error = EINTR;
 	}
+	if (error == 0)
+		value = target->user_exit_value;
 	spin_unlock_irqrestore(&process->lock, irq);
-	if (error != 0 && error != EINTR) {
-		thread_release(target);
-		return -error;
-	}
-	value = target->user_exit_value;
-	if (error == 0) error = thread_wait(target, NULL);
-	if (error == 0 && args[1] != 0)
-		error = copyout(&value, args[1], sizeof(value));
-	if (error != 0 && target->state != THREAD_DEAD) {
+	/* STOP is transparent to userspace.  Keep ownership across that one
+	 * redispatch only; ordinary signal EINTR relinquishes it for another joiner. */
+	retain_claim = error == EINTR && curthread->stop_interrupted;
+	if (error == 0 && pin_active)
+		error = copyout_pinned(&pin, 0, &value, sizeof(value));
+	if (error == 0)
+		error = thread_wait(target, NULL);
+release:
+	if (error != 0 && !retain_claim) {
 		irq = spin_lock_irqsave(&process->lock);
-		target->join_claimed = 0;
+		thread_join_release_locked(target, owner);
 		spin_unlock_irqrestore(&process->lock, irq);
 	}
+out:
+	if (pin_active)
+		uaccess_unpin(&pin);
 	thread_release(target);
 	return error == 0 ? 0 : -error;
 }
+
+#ifdef ZEDBSD_SYSCALL_STOP_TEST
+intptr_t
+syscall_test_thread_join_call(const uintptr_t args[6])
+{
+	return sys_thread_join_call(args);
+}
+#endif
 
 static intptr_t
 sys_thread_detach_call(const uintptr_t args[6])
@@ -3639,49 +3897,55 @@ sys_thread_cancel_call(const uintptr_t args[6])
 			return -ESRCH;
 		}
 		irq = spin_lock_irqsave(&target->proc->lock);
-		target->cancel_pending = 1;
+		atomic_raw_store_release(&target->cancel_pending, 1U);
 		spin_unlock_irqrestore(&target->proc->lock, irq);
-		sched_wakeup(target);
+		/* This retained interrupt closes the RUNNING-to-wait-registration gap.
+		 * Non-cancelable waits treat it as a spurious wake because they do not
+		 * inspect cancel_pending. */
+		sched_interrupt(target);
 		thread_release(target);
 		return 0;
 	}
 	if (args[0] != 0 && (tid_t)args[0] != current->tid)
 		return -EINVAL;
 	irq = spin_lock_irqsave(&current->proc->lock);
-	pending = current->cancel_pending != 0;
+	pending = atomic_raw_load_acquire(&current->cancel_pending) != 0;
 	if (operation == ZEDBSD_THREAD_CANCEL_CLEAR)
-		current->cancel_pending = 0;
+		atomic_raw_store_release(&current->cancel_pending, 0U);
 	spin_unlock_irqrestore(&current->proc->lock, irq);
 	return pending;
 }
+
+#ifdef ZEDBSD_SYSCALL_STOP_TEST
+intptr_t
+syscall_test_thread_cancel_call(const uintptr_t args[6])
+{
+	return sys_thread_cancel_call(args);
+}
+#endif
 
 static intptr_t
 sys_usync_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
 	struct vm_object *shared_object = NULL;
-	struct vm_region *region;
 	struct timespec timeout;
 	uintptr_t key_object, key_offset;
 	uint64_t ticks, deadline = 0;
 	int error;
 
-	if (process == NULL || (args[5] & ~ZEDBSD_USYNC_PRIVATE) != 0)
+	if (process == NULL ||
+	    (args[5] & ~(ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE)) != 0)
 		return -EINVAL;
 	if ((args[5] & ZEDBSD_USYNC_PRIVATE) != 0) {
 		key_object = (uintptr_t)process;
 		key_offset = args[0];
 	} else {
-		region = vmspace_find_region(process->vmspace, args[0],
-		    sizeof(uint32_t));
-		if (region == NULL || (region->flags & VM_REGION_SHARED) == 0 ||
-		    region->object == NULL)
+		error = vmspace_shared_mapping_key(process->vmspace, args[0],
+		    sizeof(uint32_t), &shared_object, &key_offset);
+		if (error != 0)
 			return -EINVAL;
-		shared_object = region->object;
-		vm_object_ref(shared_object);
 		key_object = (uintptr_t)shared_object;
-		key_offset = (uintptr_t)region->file_offset +
-		    args[0] - region->start;
 	}
 	if ((unsigned)args[1] == ZEDBSD_USYNC_WAIT) {
 		if (args[4] != 0) {
@@ -3689,20 +3953,31 @@ sys_usync_call(const uintptr_t args[6])
 			goto out;
 		}
 		if (args[3] != 0) {
-			error = copyin(args[3], &timeout, sizeof(timeout));
-			if (error == 0)
-				error = kern_duration_to_ticks_ceil(&timeout, &ticks);
-			if (error == 0)
-				error = kern_deadline_after(sched_ticks(), ticks, &deadline);
+			if (curthread != NULL &&
+			    curthread->syscall_stop_redispatch &&
+			    curthread->syscall_wait_deadline_valid) {
+				deadline = curthread->syscall_wait_deadline;
+				error = 0;
+			} else {
+				error = copyin(args[3], &timeout, sizeof(timeout));
+				if (error == 0)
+					error = kern_duration_to_ticks_ceil(&timeout,
+					    &ticks);
+				if (error == 0)
+					error = syscall_restart_deadline_after(ticks,
+					    &deadline);
+			}
 			if (error != 0)
 				goto out;
 		}
 		error = usync_wait(args[0], (uint32_t)args[2],
-		    key_object, key_offset, deadline);
+		    key_object, key_offset, deadline,
+		    (args[5] & ZEDBSD_USYNC_CANCELABLE) != 0);
 		goto out;
 	}
 	if ((unsigned)args[1] == ZEDBSD_USYNC_WAKE) {
-		if (args[2] != 0 || args[3] != 0)
+		if (args[2] != 0 || args[3] != 0 ||
+		    (args[5] & ZEDBSD_USYNC_CANCELABLE) != 0)
 			error = EINVAL;
 		else
 			error = usync_wake(args[0], key_object, key_offset,
@@ -3719,19 +3994,44 @@ out:
 static intptr_t
 sys_sigsuspend_call(const uintptr_t args[6])
 {
+	struct process *process;
 	sigset_t mask;
+	unsigned long irq;
 	int error;
-	if (curthread == NULL || curthread->proc == NULL || args[0] == 0)
+
+	if (curthread == NULL || (process = curthread->proc) == NULL ||
+	    args[0] == 0)
 		return -EINVAL;
 	error = copyin(args[0], &mask, sizeof(mask));
 	if (error != 0)
 		return -error;
-	mask &= ~(1U << (SIGKILL - 1)) & ~(1U << (SIGSTOP - 1));
+	mask &= SIGNAL_VALID_MASK & ~POLL_SIGNAL_BIT(SIGKILL) &
+	    ~POLL_SIGNAL_BIT(SIGSTOP);
+	irq = spin_lock_irqsave(&process->lock);
 	curthread->signal_suspend_mask = curthread->signal_mask;
 	curthread->signal_mask = mask;
 	curthread->signal_suspended = 1;
-	while (!signal_pending_unblocked(curthread))
-		sched_sleep(0);
+	for (;;) {
+		if (curthread->terminate_requested) {
+			spin_unlock_irqrestore(&process->lock, irq);
+			return -EINTR;
+		}
+		if (process->stop_requested) {
+			spin_unlock_irqrestore(&process->lock, irq);
+			process_stop_current(0);
+			irq = spin_lock_irqsave(&process->lock);
+			continue;
+		}
+		if (signal_pending_unblocked_locked(curthread)) {
+			spin_unlock_irqrestore(&process->lock, irq);
+			if (signal_stop_before_return(curthread)) {
+				irq = spin_lock_irqsave(&process->lock);
+				continue;
+			}
+			break;
+		}
+		sched_sleep_locked(0, &process->lock);
+	}
 	/* The user-return hook restores the original mask before entering the
 	 * selected handler.  Its sigreturn therefore resumes this call at EINTR. */
 	return -EINTR;
@@ -3744,6 +4044,10 @@ sys_sigreturn_call(const uintptr_t args[6])
 	struct thread_signal_level *level;
 	ucontext_t context;
 	sigset_t restored_mask;
+	uint32_t restart_number;
+	uintptr_t restart_args[HAL_SYSCALL_ARGS];
+	unsigned long irq;
+	int restart;
 	int error;
 
 	if (curthread == NULL || args[0] == 0 || args[1] == 0 ||
@@ -3759,24 +4063,32 @@ sys_sigreturn_call(const uintptr_t args[6])
 		return -error;
 	/* The first signal ABI exposes machine state for diagnosis but does not
 	 * yet permit userland to replace it.  Only the signal mask is mutable. */
-	restored_mask = context.uc_sigmask & ~(1U << (SIGKILL - 1)) &
-	    ~(1U << (SIGSTOP - 1));
+	restored_mask = context.uc_sigmask & SIGNAL_VALID_MASK &
+	    ~POLL_SIGNAL_BIT(SIGKILL) & ~POLL_SIGNAL_BIT(SIGSTOP);
 	context.uc_sigmask = level->saved_ucontext.uc_sigmask;
 	if (memcmp(&context, &level->saved_ucontext, sizeof(context)) != 0)
 		return -EINVAL;
-	if ((level->restart_on_return ? hal_task_signal_restart(
-	    level->token, level->restart_number, level->restart_args, &restored) :
-	    hal_task_signal_return((uint32_t)args[0], &restored)) != 0)
+	restart = level->restart_on_return != 0;
+	restart_number = level->restart_number;
+	memcpy(restart_args, level->restart_args, sizeof(restart_args));
+	if (hal_task_signal_return((uint32_t)args[0], &restored) != 0)
 		return -EINVAL;
 	if (level->used_altstack && curthread->signal_on_altstack_depth != 0)
 		curthread->signal_on_altstack_depth--;
+	irq = spin_lock_irqsave(&curthread->proc->lock);
 	curthread->signal_mask = restored_mask;
+	spin_unlock_irqrestore(&curthread->proc->lock, irq);
 	memset(level, 0, sizeof(*level));
 	curthread->signal_depth--;
 	curthread->signal_token = curthread->signal_depth == 0 ? 0 :
 	    curthread->signal_levels[curthread->signal_depth - 1U].token;
-	curthread->syscall_restart_on_return = 0;
 	curthread->syscall_restart_valid = 0;
+	if (restart) {
+		curthread->syscall_restart_number = restart_number;
+		memcpy(curthread->syscall_restart_args, restart_args,
+		    sizeof(curthread->syscall_restart_args));
+		curthread->syscall_redispatch_valid = 1;
+	}
 	return restored;
 }
 
@@ -3854,6 +4166,42 @@ sys_fcntl_call(const uintptr_t args[6])
 		    (int)args[2]);
 		(void)file_close(file);
 		return 0;
+	case F_GETOWN:
+		file = filedesc_get_ref(process->fd, (int)args[0]);
+		if (file == NULL)
+			return -EBADF;
+		result = __atomic_load_n(&file->f_signal_owner,
+		    __ATOMIC_ACQUIRE);
+		(void)file_close(file);
+		error = copyout(&result, args[2], sizeof(result));
+		return error == 0 ? 0 : -error;
+	case F_SETOWN: {
+		int owner = (int)args[2];
+
+		if (owner == INT_MIN)
+			return -EINVAL;
+		if (owner > 0) {
+			struct process *target = process_find_ref((pid_t)owner);
+			if (target == NULL)
+				return -ESRCH;
+			if (target->session != process->session)
+				error = EPERM;
+			else
+				error = 0;
+			process_release(target);
+			if (error != 0)
+				return -error;
+		} else if (owner < 0 && !process_pgrp_in_session(process->session,
+		    (pid_t)-owner)) {
+			return -ESRCH;
+		}
+		file = filedesc_get_ref(process->fd, (int)args[0]);
+		if (file == NULL)
+			return -EBADF;
+		__atomic_store_n(&file->f_signal_owner, owner, __ATOMIC_RELEASE);
+		(void)file_close(file);
+		return 0;
+	}
 	case F_GETLK:
 	case F_SETLK:
 	case F_SETLKW: {
@@ -3934,14 +4282,28 @@ sys_times_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
 	struct process_times_record result;
+	size_t record_size;
+	uint64_t user_ticks, system_ticks, child_user_ticks, child_system_ticks;
 	int error;
-	if (process == NULL || args[0] == 0 || args[1] != 0 || args[2] != 0 ||
+	if (process == NULL || args[0] == 0 || args[2] != 0 ||
 	    args[3] != 0 || args[4] != 0 || args[5] != 0)
 		return -EINVAL;
-	result.self_ticks = atomic_u64_load_acquire(&process->cpu_ticks);
-	result.child_ticks = atomic_u64_load_acquire(&process->child_cpu_ticks);
+	record_size = args[1] == 0 ? ZEDBSD_PROCESS_TIMES_V1_SIZE :
+	    (size_t)args[1];
+	if (record_size != ZEDBSD_PROCESS_TIMES_V1_SIZE &&
+	    record_size != sizeof(result))
+		return -EINVAL;
+	user_ticks = atomic_u64_load_acquire(&process->user_ticks);
+	system_ticks = atomic_u64_load_acquire(&process->system_ticks);
+	child_user_ticks = atomic_u64_load_acquire(&process->child_user_ticks);
+	child_system_ticks = atomic_u64_load_acquire(
+	    &process->child_system_ticks);
+	result.self_ticks = user_ticks + system_ticks;
+	result.child_ticks = child_user_ticks + child_system_ticks;
 	result.elapsed_ticks = sched_ticks();
-	error = copyout(&result, args[0], sizeof(result));
+	result.system_ticks = system_ticks;
+	result.child_system_ticks = child_system_ticks;
+	error = copyout(&result, args[0], record_size);
 	return error == 0 ? 0 : -error;
 }
 
@@ -3998,7 +4360,7 @@ sys_setpriority_call(const uintptr_t args[6])
 {
 	struct process *caller = current_process(), *target;
 	pid_t cursor = -1;
-	int which=(int)args[0], value=(int)args[2], found=0;
+	int which=(int)args[0], value=(int)args[2], found=0, denied=0;
 	if(caller==NULL||args[3]||args[4]||args[5]||
 	    (which!=PRIO_PROCESS&&which!=PRIO_PGRP&&which!=PRIO_USER))return -EINVAL;
 	if (value < -20)
@@ -4015,15 +4377,20 @@ sys_setpriority_call(const uintptr_t args[6])
 			if(target_cred==NULL || (caller->cred->euid!=0 && caller->cred->euid!=target_cred->euid)){
 				cred_release(target_cred);
 				process_release(target);
-				return -EPERM;
+				denied=1;
+				continue;
 			}
 			cred_release(target_cred);
-			if(value<old && !cred_is_superuser(caller->cred)){process_release(target);return -EPERM;}
+			if(value<old && !cred_is_superuser(caller->cred)){
+				denied=1;
+				process_release(target);
+				continue;
+			}
 			__atomic_store_n(&target->nice_value,value,__ATOMIC_RELAXED);
 		}
 		process_release(target);
 	}
-	return found?0:-ESRCH;
+	return !found ? -ESRCH : denied ? -EPERM : 0;
 }
 
 static void
@@ -4037,14 +4404,29 @@ ticks_to_timeval(uint64_t ticks, struct timeval *value)
 static intptr_t
 sys_getrusage_call(const uintptr_t args[6])
 {
-	struct process *process=current_process();struct rusage usage;uint64_t ticks;int error;
-	if(process==NULL||args[1]==0||args[2]||args[3]||args[4]||args[5])return -EINVAL;
-	memset(&usage,0,sizeof(usage));
-	if((int)args[0]==RUSAGE_SELF)ticks=atomic_u64_load_acquire(&process->cpu_ticks);
-	else if((int)args[0]==RUSAGE_CHILDREN)ticks=atomic_u64_load_acquire(&process->child_cpu_ticks);
-	else return -EINVAL;
-	ticks_to_timeval(ticks,&usage.ru_utime);
-	error=copyout(&usage,args[1],sizeof(usage));return error?-error:0;
+	struct process *process = current_process();
+	struct rusage usage;
+	uint64_t user_ticks, system_ticks;
+	int error;
+
+	if (process == NULL || args[1] == 0 || args[2] != 0 || args[3] != 0 ||
+	    args[4] != 0 || args[5] != 0)
+		return -EINVAL;
+	memset(&usage, 0, sizeof(usage));
+	if ((int)args[0] == RUSAGE_SELF) {
+		user_ticks = atomic_u64_load_acquire(&process->user_ticks);
+		system_ticks = atomic_u64_load_acquire(&process->system_ticks);
+	} else if ((int)args[0] == RUSAGE_CHILDREN) {
+		user_ticks = atomic_u64_load_acquire(&process->child_user_ticks);
+		system_ticks = atomic_u64_load_acquire(
+		    &process->child_system_ticks);
+	} else {
+		return -EINVAL;
+	}
+	ticks_to_timeval(user_ticks, &usage.ru_utime);
+	ticks_to_timeval(system_ticks, &usage.ru_stime);
+	error = copyout(&usage, args[1], sizeof(usage));
+	return error != 0 ? -error : 0;
 }
 
 static int
@@ -4292,7 +4674,7 @@ sys_process_identity_call(uint32_t number, const uintptr_t args[6])
 	switch (number) {
 	case ZEDBSD_SYS_getpid: return process->pid;
 	case ZEDBSD_SYS_getppid:
-		return process->parent != NULL ? process->parent->pid : 0;
+		return process_parent_pid(process);
 	case ZEDBSD_SYS_getpgrp: return process->pgrp;
 	case ZEDBSD_SYS_getpgid:
 		pid = (pid_t)args[0];
@@ -4522,12 +4904,12 @@ syscall_restartable(uint32_t number)
 	case ZEDBSD_SYS_writev:
 	case ZEDBSD_SYS_open:
 	case ZEDBSD_SYS_openat:
+	case ZEDBSD_SYS_fcntl: /* F_SETLKW is an interruptible slow operation. */
 	case ZEDBSD_SYS_ioctl:
 	case ZEDBSD_SYS_fsync:
 	case ZEDBSD_SYS_fdatasync:
 	case ZEDBSD_SYS_waitpid:
 	case ZEDBSD_SYS_waitid:
-	case ZEDBSD_SYS_connect:
 	case ZEDBSD_SYS_accept:
 	case ZEDBSD_SYS_sendto:
 	case ZEDBSD_SYS_recvfrom:
@@ -4546,21 +4928,75 @@ syscall_dispatch(uint32_t number, const uintptr_t args[6])
 {
 	struct thread *thread = curthread;
 	struct process *process = thread != NULL ? thread->proc : NULL;
+	uintptr_t dispatch_args[HAL_SYSCALL_ARGS];
+	uint32_t dispatch_number = number;
+	int cred_guard = number != ZEDBSD_SYS_exit &&
+	    number != ZEDBSD_SYS_thread_exit;
 	intptr_t result;
 
-	process_cred_read_enter(process);
-	if (thread != NULL && number != ZEDBSD_SYS_sigreturn) {
-		thread->syscall_restart_number = number;
-		memcpy(thread->syscall_restart_args, args,
-		    sizeof(thread->syscall_restart_args));
-		thread->syscall_restart_valid = 0;
-		thread->syscall_restart_on_return = 0;
+	/*
+	 * HAL calls the registered dispatcher with the active user frame installed
+	 * and local IRQs masked.  Accounting and interruptibility are generic
+	 * syscall policy; HAL only owns the masked frame-commit boundaries.
+	 */
+	if (hal_irq_disable())
+		HAL_FATAL("syscall callback entered with IRQs enabled");
+	sched_accounting_kernel_enter();
+	hal_irq_enable();
+	memcpy(dispatch_args, args, sizeof(dispatch_args));
+	syscall_restart_state_begin(thread);
+	if (cred_guard)
+		process_cred_read_enter(process);
+	for (;;) {
+		if (thread != NULL && dispatch_number != ZEDBSD_SYS_sigreturn) {
+			thread->syscall_restart_number = dispatch_number;
+			memcpy(thread->syscall_restart_args, dispatch_args,
+			    sizeof(thread->syscall_restart_args));
+			thread->syscall_restart_valid = 0;
+			thread->syscall_redispatch_valid = 0;
+			thread->stop_interrupted = 0;
+		}
+		result = syscall_dispatch_body(dispatch_number, dispatch_args);
+		if (thread != NULL)
+			thread->syscall_stop_redispatch = 0;
+		if (thread != NULL && dispatch_number != ZEDBSD_SYS_sigreturn)
+			thread->syscall_restart_valid = result == -EINTR &&
+			    syscall_restartable(dispatch_number);
+		if (thread != NULL && thread->terminate_requested) {
+			if (cred_guard)
+				process_cred_read_leave(process);
+			thread_exit(0);
+		}
+		if (thread != NULL && dispatch_number == ZEDBSD_SYS_sigreturn &&
+		    thread->syscall_redispatch_valid) {
+			dispatch_number = thread->syscall_restart_number;
+			memcpy(dispatch_args, thread->syscall_restart_args,
+			    sizeof(dispatch_args));
+			thread->syscall_redispatch_valid = 0;
+			syscall_restart_state_begin(thread);
+			continue;
+		}
+		if (thread != NULL && thread->stop_interrupted) {
+			thread->stop_interrupted = 0;
+			if (process_stop_requested(thread))
+				process_stop_current(0);
+			if (result == -EINTR) {
+				syscall_restart_prepare_stop(thread);
+				continue;
+			}
+		} else if (thread != NULL && result == -EINTR &&
+		    signal_stop_before_return(thread)) {
+			syscall_restart_prepare_stop(thread);
+			continue;
+		}
+		break;
 	}
-	result = syscall_dispatch_body(number, args);
-	if (thread != NULL && number != ZEDBSD_SYS_sigreturn)
-		thread->syscall_restart_valid = result == -EINTR &&
-		    syscall_restartable(number);
-	process_cred_read_leave(process);
+	syscall_restart_state_finish(thread);
+	if (cred_guard)
+		process_cred_read_leave(process);
+	if (!hal_irq_disable())
+		HAL_FATAL("syscall callback returned with IRQs disabled");
+	sched_accounting_kernel_leave();
 	return result;
 }
 

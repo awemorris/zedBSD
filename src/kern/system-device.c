@@ -100,6 +100,7 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 	case ZEDBSD_SYSTEM_GET_PROCESS: {
 		struct process_info output;
 		struct process *process;
+		struct vmspace *vmspace;
 		unsigned long irq;
 		int error = copyin(argument, &output, sizeof(output));
 		if (error != 0)
@@ -110,15 +111,20 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 		memset(&output, 0, sizeof(output));
 		irq = spin_lock_irqsave(&process->lock);
 		output.pid = process->pid;
-		output.ppid = process->parent != NULL ? process->parent->pid : 0;
 		output.uid = process->cred != NULL ? process->cred->euid : 0;
 		output.state = process->state;
 		output.threads = process->thread_count;
-		output.virtual_bytes = process->vmspace != NULL ?
-		    process->vmspace->mapped_virtual_bytes : 0;
 		memcpy(output.command, process->command, sizeof(output.command));
 		output.command[sizeof(output.command) - 1U] = '\0';
 		spin_unlock_irqrestore(&process->lock, irq);
+		output.ppid = process_parent_pid(process);
+		vmspace = process_vmspace_ref(process);
+		if (vmspace != NULL) {
+			mutex_lock(&vmspace->lock);
+			output.virtual_bytes = vmspace->mapped_virtual_bytes;
+			mutex_unlock(&vmspace->lock);
+			vmspace_put(vmspace);
+		}
 		process_release(process);
 		return copyout(&output, argument, sizeof(output));
 	}

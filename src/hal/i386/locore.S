@@ -418,7 +418,7 @@ EXT_C(asm_sti):
 	sti
 	ret
 
-/* void asm_outb(uint16 port, uint8 data) */
+/* void asm_outb(uint16_t port, uint8_t data) */
 	.global EXT_C(asm_outb)
 EXT_C(asm_outb):
 	pushl	%ebp
@@ -432,7 +432,7 @@ EXT_C(asm_outb):
 	popl	%ebp
 	ret
 
-/* void asm_outw(uint16 port, uint8 data) */
+/* void asm_outw(uint16_t port, uint8_t data) */
 	.global EXT_C(asm_outw)
 EXT_C(asm_outw):
 	pushl	%ebp
@@ -446,7 +446,7 @@ EXT_C(asm_outw):
 	popl	%ebp
 	ret
 
-/* uint8 asm_inb(uint16 port) */
+/* uint8_t asm_inb(uint16_t port) */
 	.global EXT_C(asm_inb)
 EXT_C(asm_inb):
 	pushl	%ebp
@@ -460,7 +460,7 @@ EXT_C(asm_inb):
 	popl	%ebp
 	ret
 
-/* uint8 asm_inw(uint16 port) */
+/* uint8_t asm_inw(uint16_t port) */
 	.global EXT_C(asm_inw)
 EXT_C(asm_inw):
 	pushl	%ebp
@@ -488,14 +488,14 @@ EXT_C(asm_frstor):
 	frstor	(%eax)
 	ret
 
-/* uint32 asm_get_eflags() */
+/* uint32_t asm_get_eflags() */
 	.global EXT_C(asm_get_eflags)
 EXT_C(asm_get_eflags):
 	pushf
 	popl	%eax
 	ret
 
-/* uint32 asm_get_eip() */
+/* uint32_t asm_get_eip() */
 	.global EXT_C(asm_get_eip)
 EXT_C(asm_get_eip):
 	call .L_eip
@@ -503,26 +503,26 @@ EXT_C(asm_get_eip):
 	popl	%eax
 	ret
 
-/* uint32 asm_get_esp() */
+/* uint32_t asm_get_esp() */
 	.global EXT_C(asm_get_esp)
 EXT_C(asm_get_esp):
 	pushl	%esp
 	popl	%eax
 	ret
 
-/* uint32 asm_get_cr3() */
+/* uint32_t asm_get_cr3() */
 .global EXT_C(asm_get_cr2)
 EXT_C(asm_get_cr2):
 	movl	%cr2, %eax
 	ret
 
-/* uint32 asm_get_cr3() */
+/* uint32_t asm_get_cr3() */
 	.global EXT_C(asm_get_cr3)
 EXT_C(asm_get_cr3):
 	movl	%cr3, %eax
 	ret
 
-/* uint32 asm_set_cr3() */
+/* uint32_t asm_set_cr3() */
 	.global EXT_C(asm_set_cr3)
 EXT_C(asm_set_cr3):
 	movl	4(%esp), %eax
@@ -542,7 +542,7 @@ EXT_C(asm_lidt):
 	lidt	(%eax)
 	ret
 
-/* void asm_load_pdt(uint32 addr) */
+/* void asm_load_pdt(uint32_t addr) */
 	.global EXT_C(asm_load_cr3)
 EXT_C(asm_load_cr3):
 	movl	4(%esp), %eax

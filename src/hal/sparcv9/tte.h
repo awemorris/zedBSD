@@ -17,8 +17,8 @@
 #define SPARCV9_TTE_GLOBAL (1ULL << 0)
 #define SPARCV9_TTE_PA_MASK 0x000001ffffffe000ULL
 
-static inline uint64
-sparcv9_tte(uintptr_t physical, uint64 flags)
+static inline uint64_t
+sparcv9_tte(uintptr_t physical, uint64_t flags)
 {
 	return SPARCV9_TTE_VALID | (physical & SPARCV9_TTE_PA_MASK) | flags;
 }

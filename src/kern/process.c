@@ -4,7 +4,14 @@
  */
 
 #include "kern/process.h"
+#ifndef ZEDBSD_PROCESS_TEST
 #include "kern/process-timer.h"
+#else
+/* Targeted host lifetime tests link only the tree/interval-timer sections.
+ * Avoid importing the host's incompatible POSIX signal ABI through
+ * <signal.h>; discarded cleanup callers still need a declaration. */
+void process_timer_cleanup(struct process *);
+#endif
 #include "kern/thread.h"
 #include "kern/tty.h"
 #include "kern/vmspace.h"
@@ -14,6 +21,7 @@
 #include "kern/signal.h"
 #include "kern/sched.h"
 #include "kern/namei.h"
+#include "kern/test-checkpoint.h"
 
 #include <errno.h>
 #include <hal/hal.h>
@@ -24,6 +32,9 @@ struct process process0;
 struct process_retired_cred {
 	struct ucred *cred;
 	struct process_retired_cred *next;
+};
+struct process_cred_reservation {
+	struct process_retired_cred retired;
 };
 static struct process *all_processes;
 static struct process *creating_processes;
@@ -97,6 +108,20 @@ process_group_deliver_notifications(void)
 	}
 }
 
+int
+process_pgrp_is_orphaned(const struct process *process)
+{
+	unsigned long irq;
+	int orphaned;
+
+	if (process == NULL || process == &process0)
+		return 0;
+	irq = spin_lock_irqsave(&process_tree_lock);
+	orphaned = (process->flags & PROCESS_PGRP_ORPHANED) != 0;
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	return orphaned;
+}
+
 static PROCESS_EXT void
 child_waiters_wake(struct process *parent)
 {
@@ -104,27 +129,59 @@ child_waiters_wake(struct process *parent)
 		waitq_wake_all(&parent->child_waitq);
 }
 
+/* The scheduler latch closes the reaper's scan-to-sleep interval without
+ * acquiring the process-tree lock from VM reclaim or scheduler retirement. */
+static void
+process_vmspace_reaper_notify(void *argument)
+{
+	hal_task_t task = argument;
+
+	/* sched_notify_task() is a retained notification: if the reaper has not
+	 * entered kernel_wait_task() yet, notify_pending closes that handoff. */
+	sched_notify_task(task);
+}
+
+static void
+process_reaper_notify(void)
+{
+	if (reaper_thread != NULL)
+		process_vmspace_reaper_notify(reaper_thread->task);
+}
+
 static PROCESS_EXT void
 reparent_children(struct process *process)
 {
-	struct process *child;
+	struct process *adopter = &process0, *candidate, *child;
 	int wake_reaper = 0;
 
+	/* PID 1 is the userspace child reaper.  Falling back to process0 is only
+	 * necessary while init itself is exiting or before it has been spawned. */
+	for (candidate = all_processes; candidate != NULL;
+	    candidate = candidate->all_next)
+		if (candidate != process && candidate->pid == 1 &&
+		    candidate->state != PROCESS_EXITING &&
+		    candidate->state != PROCESS_ZOMBIE &&
+		    candidate->state != PROCESS_DEAD) {
+			adopter = candidate;
+			break;
+		}
 	while ((child = process->children) != NULL) {
 		pid_t child_session = child->session;
 		pid_t child_pgrp = child->pgrp;
 		process_group_recheck_locked(child_session, child_pgrp, 0);
 		process->children = child->sibling;
-		child->parent = &process0;
-		child->flags |= PROCESS_AUTOREAP;
-		child->sibling = process0.children;
-		process0.children = child;
-		if (child->state == PROCESS_ZOMBIE)
+		child->parent = adopter;
+		child->sibling = adopter->children;
+		adopter->children = child;
+		if (adopter == &process0)
+			child->flags |= PROCESS_AUTOREAP;
+		if (adopter == &process0 && child->state == PROCESS_ZOMBIE)
 			wake_reaper = 1;
 		process_group_recheck_locked(child_session, child_pgrp, 1);
 	}
-	if (wake_reaper && reaper_thread != NULL)
-		sched_wakeup(reaper_thread);
+	child_waiters_wake(adopter);
+	if (wake_reaper)
+		process_reaper_notify();
 }
 
 void
@@ -136,6 +193,8 @@ process_init(void)
 	memset(&thread0, 0, sizeof(thread0));
 	refcount_init(&process0.refs, 1);
 	spin_init(&process0.lock, LOCK_RANK_PROCESS, "process0");
+	(void)mutex_init(&process0.resource_lock, LOCK_RANK_PROCESS_RESOURCE,
+	    "process0 resource limits");
 	waitq_init(&process0.child_waitq, "process0 children");
 	waitq_init(&thread0.join_waitq, "thread0 join");
 	process0.pid = 0;
@@ -164,6 +223,80 @@ process_init(void)
 	all_processes = &process0;
 }
 
+/* Claim and commit use the same EXITED reservation as waitpid().  This makes
+ * the registry/list unlink, rather than a racy zombie observation, the single
+ * reap linearization point. */
+static int
+process_reap_threads(struct process *process)
+{
+	for (;;) {
+		struct thread *thread;
+		unsigned long irq;
+		int error;
+
+		/* Detached self-reap removes the list entry under process->lock.  Acquire
+		 * the reference in that same domain so the scan cannot race the final
+		 * unlink/free between loading process->threads and thread_ref(). */
+		irq = spin_lock_irqsave(&process->lock);
+		thread = process->threads;
+		if (thread != NULL)
+			thread_ref(thread);
+		spin_unlock_irqrestore(&process->lock, irq);
+		if (thread == NULL)
+			return 0;
+		error = thread_wait(thread, NULL);
+		thread_release(thread);
+		if (error != 0)
+			return error;
+	}
+}
+
+static int
+process_autoreap_claim(struct process *process)
+{
+	unsigned long irq;
+	int claimed;
+
+	irq = spin_lock_irqsave(&process_tree_lock);
+	claimed = process != NULL && process != &process0 &&
+	    (process->flags & PROCESS_AUTOREAP) != 0 &&
+	    process->state == PROCESS_ZOMBIE &&
+	    process->wait_reserved == PROCESS_WAIT_NONE;
+	if (claimed)
+		process->wait_reserved = PROCESS_WAIT_EXITED;
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	return claimed;
+}
+
+static int
+process_autoreap_commit(struct process *process)
+{
+	unsigned long irq;
+	int error;
+
+	error = process_reap_threads(process);
+	if (error == 0) {
+		process_free_mem(process);
+		return 1;
+	}
+	irq = spin_lock_irqsave(&process_tree_lock);
+	if (process->wait_reserved == PROCESS_WAIT_EXITED) {
+		process->wait_reserved = PROCESS_WAIT_NONE;
+		child_waiters_wake(process->parent);
+	}
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	return 0;
+}
+
+#ifdef ZEDBSD_PROCESS_TEST
+int
+process_test_autoreap_once(struct process *process)
+{
+	return process_autoreap_claim(process) ?
+	    process_autoreap_commit(process) : 0;
+}
+#endif
+
 static void
 process_reaper(void *argument)
 {
@@ -171,31 +304,24 @@ process_reaper(void *argument)
 	for (;;) {
 		struct process *process = NULL;
 		pid_t cursor = -1;
-		int reaped = 0;
+		int reaped;
+
+		reaped = vmspace_reap_pending() != 0;
 		while ((process = process_find_next_ref(cursor)) != NULL) {
-			int reap;
-			unsigned long irq;
 			cursor = process->pid;
-			irq = spin_lock_irqsave(&process->lock);
-			reap = process != &process0 &&
-			    (process->flags & PROCESS_AUTOREAP) != 0 &&
-			    process->state == PROCESS_ZOMBIE;
-			spin_unlock_irqrestore(&process->lock, irq);
-			if (reap) {
-				while (process->threads != NULL)
-					if (thread_wait(process->threads, NULL) != 0)
-						break;
-				if (process->threads == NULL) {
-					process_free_mem(process);
-					reaped = 1;
-				}
-			}
+			if (process_autoreap_claim(process) &&
+			    process_autoreap_commit(process))
+				reaped = 1;
 			process_release(process);
 		}
-		if (!reaped)
-			sched_sleep(0);
-		else
+		if (reaped) {
 			sched_yield();
+		} else {
+			/* The scheduler retains notifications delivered after the empty
+			 * scan but before this call, so no condition-lock inversion is
+			 * needed to close the scan-to-sleep handoff. */
+			kernel_wait_task();
+		}
 	}
 }
 
@@ -209,8 +335,11 @@ process_reaper_start(void)
 	 * reaper would starve forever while process0 remains runnable. */
 	error = kthread_create(process_reaper, NULL, SCHED_PRIORITY_DEFAULT,
 			       &reaper_thread);
-	if (error == 0)
+	if (error == 0) {
 		thread_start(reaper_thread);
+		vmspace_set_reaper_notify(process_vmspace_reaper_notify,
+		    reaper_thread->task);
+	}
 	return error;
 }
 
@@ -229,6 +358,187 @@ process_release(struct process *process)
 	if (process == &process0 || process->state != PROCESS_DEAD)
 		HAL_FATAL("releasing live process");
 	kern_free(process);
+}
+
+pid_t
+process_parent_pid(struct process *process)
+{
+	pid_t pid = 0;
+	unsigned long irq;
+
+	if (process == NULL)
+		return 0;
+	irq = spin_lock_irqsave(&process_tree_lock);
+	if (process->parent != NULL)
+		pid = process->parent->pid;
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	return pid;
+}
+
+struct process *
+process_parent_ref(struct process *process)
+{
+	struct process *parent = NULL;
+	unsigned long irq;
+
+	if (process == NULL)
+		return NULL;
+	irq = spin_lock_irqsave(&process_tree_lock);
+	parent = process->parent;
+	if (parent != NULL) {
+		/* The checkpoint deliberately runs while the tree lock still excludes
+		 * reparent/reap, proving that the reference is acquired inside the
+		 * lifetime barrier rather than after a bare pointer snapshot. */
+		KERN_TEST_CHECKPOINT(KERN_TEST_PROCESS_PARENT_BEFORE_REF, parent);
+		process_ref(parent);
+	}
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	return parent;
+}
+
+#ifdef ZEDBSD_PROCESS_TEST
+void
+process_test_reparent(struct process *child, struct process *parent)
+{
+	unsigned long irq = spin_lock_irqsave(&process_tree_lock);
+
+	child->parent = parent;
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+}
+
+void
+process_test_set_registry(struct process *head)
+{
+	unsigned long irq = spin_lock_irqsave(&process_tree_lock);
+
+	all_processes = head;
+	creating_processes = NULL;
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+}
+#endif
+
+int
+process_controlling_tty_snapshot(struct process *process, struct tty **tty,
+	uint64_t *generation)
+{
+	unsigned long irq;
+
+	if (process == NULL || tty == NULL || generation == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&process_tree_lock);
+	*tty = process->controlling_tty;
+	*generation = process->controlling_tty_generation;
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	return 0;
+}
+
+int
+process_controlling_tty_matches(struct process *process, struct tty *tty,
+	uint64_t generation)
+{
+	int matches;
+	unsigned long irq;
+
+	if (process == NULL || tty == NULL || generation == 0)
+		return 0;
+	irq = spin_lock_irqsave(&process_tree_lock);
+	matches = process->controlling_tty == tty &&
+	    process->controlling_tty_generation == generation;
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	return matches;
+}
+
+int
+process_controlling_tty_attach(struct process *process, struct tty *tty,
+	uint64_t generation)
+{
+	unsigned long irq;
+	int error = 0;
+
+	if (process == NULL || tty == NULL || generation == 0)
+		return EINVAL;
+	irq = spin_lock_irqsave(&process_tree_lock);
+	/* Exit publishes PROCESS_EXITING while holding this same tree serializer.
+	 * Refuse a late TIOCSCTTY publication after the early exit detach. */
+	if (process->state == PROCESS_EXITING ||
+	    process->state == PROCESS_ZOMBIE || process->state == PROCESS_DEAD)
+		error = ESRCH;
+	else if (process->controlling_tty != NULL &&
+	    (process->controlling_tty != tty ||
+	    process->controlling_tty_generation != generation))
+		error = EBUSY;
+	else {
+		process->controlling_tty = tty;
+		process->controlling_tty_generation = generation;
+	}
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+	return error;
+}
+
+void
+process_controlling_tty_detach_one(struct process *process, struct tty *tty,
+	uint64_t generation)
+{
+	unsigned long irq;
+
+	if (process == NULL || tty == NULL || generation == 0)
+		return;
+	irq = spin_lock_irqsave(&process_tree_lock);
+	if (process->controlling_tty == tty &&
+	    process->controlling_tty_generation == generation) {
+		process->controlling_tty = NULL;
+		process->controlling_tty_generation = 0;
+	}
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+}
+
+static void
+detach_tty_from_list_locked(struct process *list, pid_t session,
+	struct tty *tty, uint64_t generation)
+{
+	struct process *member;
+
+	for (member = list; member != NULL; member = member->all_next)
+		if (member->session == session && member->controlling_tty == tty &&
+		    member->controlling_tty_generation == generation) {
+			member->controlling_tty = NULL;
+			member->controlling_tty_generation = 0;
+		}
+}
+
+void
+process_controlling_tty_detach_session(pid_t session, struct tty *tty,
+	uint64_t generation)
+{
+	unsigned long irq;
+
+	if (session <= 0 || tty == NULL || generation == 0)
+		return;
+	irq = spin_lock_irqsave(&process_tree_lock);
+	/* Include unpublished fork children: association inheritance and detach
+	 * are one tree-lock domain, so a child can never escape with an old slot
+	 * generation while its session is being detached. */
+	detach_tty_from_list_locked(all_processes, session, tty, generation);
+	detach_tty_from_list_locked(creating_processes, session, tty, generation);
+	spin_unlock_irqrestore(&process_tree_lock, irq);
+}
+
+struct vmspace *
+process_vmspace_ref(struct process *process)
+{
+	struct vmspace *vmspace = NULL;
+	unsigned long irq;
+
+	if (process == NULL)
+		return NULL;
+	irq = spin_lock_irqsave(&process->lock);
+	vmspace = process->vmspace;
+	/* The published pointer owns a strong reference.  Taking the additional
+	 * reference while process->lock is held closes the exec/exit detach race. */
+	if (vmspace != NULL)
+		vmspace_ref(vmspace);
+	spin_unlock_irqrestore(&process->lock, irq);
+	return vmspace;
 }
 
 static void
@@ -274,17 +584,43 @@ process_cred_read_leave(struct process *process)
 }
 
 int
-process_cred_replace(struct process *process, struct ucred *replacement)
+process_cred_reserve(struct process *process,
+	struct process_cred_reservation **result)
+{
+	struct process_cred_reservation *reservation;
+
+	if (result == NULL)
+		return EINVAL;
+	*result = NULL;
+	if (process == NULL)
+		return EINVAL;
+	if (process == &process0)
+		return EPERM;
+	reservation = kern_calloc(1, sizeof(*reservation));
+	if (reservation == NULL)
+		return ENOMEM;
+	*result = reservation;
+	return 0;
+}
+
+void
+process_cred_reservation_abort(struct process_cred_reservation *reservation)
+{
+	kern_free(reservation);
+}
+
+void
+process_cred_commit_reserved(struct process *process,
+	struct ucred *replacement, struct process_cred_reservation *reservation)
 {
 	struct process_retired_cred *retired;
 	struct ucred *old;
 	unsigned long irq;
 
-	if (process == NULL || replacement == NULL || process == &process0)
-		return EPERM;
-	retired = kern_malloc(sizeof(*retired));
-	if (retired == NULL)
-		return ENOMEM;
+	if (process == NULL || replacement == NULL || reservation == NULL ||
+	    process == &process0)
+		HAL_FATAL("invalid reserved credential commit");
+	retired = &reservation->retired;
 	irq = spin_lock_irqsave(&process->lock);
 	old = process->cred;
 	process->cred = replacement;
@@ -297,7 +633,47 @@ process_cred_replace(struct process *process, struct ucred *replacement)
 	spin_unlock_irqrestore(&process->lock, irq);
 	if (retired != NULL) {
 		cred_release(old);
-		kern_free(retired);
+		kern_free(reservation);
+	}
+	/* When readers exist, reservation is now the first member of the retired
+	 * list and is reclaimed by process_cred_read_leave(). */
+}
+
+int
+process_cred_replace(struct process *process, struct ucred *replacement)
+{
+	struct process_cred_reservation *reservation;
+	struct process_retired_cred *retired;
+	struct ucred *old;
+	unsigned long irq;
+	int error;
+
+	if (process == NULL || replacement == NULL || process == &process0)
+		return EPERM;
+	error = process_cred_reserve(process, &reservation);
+	if (error != 0)
+		return error;
+	/* Once exec has taken ownership of the process image, sibling credential
+	 * syscalls must not race the prospective exec credential. */
+	irq = spin_lock_irqsave(&process->lock);
+	if (process->execing) {
+		spin_unlock_irqrestore(&process->lock, irq);
+		process_cred_reservation_abort(reservation);
+		return EBUSY;
+	}
+	retired = &reservation->retired;
+	old = process->cred;
+	process->cred = replacement;
+	if (process->cred_readers != 0) {
+		retired->cred = old;
+		retired->next = process->retired_creds;
+		process->retired_creds = retired;
+		retired = NULL;
+	}
+	spin_unlock_irqrestore(&process->lock, irq);
+	if (retired != NULL) {
+		cred_release(old);
+		kern_free(reservation);
 	}
 	return 0;
 }
@@ -511,6 +887,8 @@ process_create(struct process *parent, pid_t requested_pid,
 		return ENOMEM;
 	refcount_init(&process->refs, 1);
 	spin_init(&process->lock, LOCK_RANK_PROCESS, "process");
+	(void)mutex_init(&process->resource_lock, LOCK_RANK_PROCESS_RESOURCE,
+	    "process resource limits");
 	waitq_init(&process->child_waitq, "process children");
 	resource_limits_default(&process->limits);
 	process->fd = filedesc_create(process);
@@ -525,7 +903,6 @@ process_create(struct process *parent, pid_t requested_pid,
 	process->nice_value = parent->nice_value;
 	process->limits = parent->limits;
 	process->cred = parent->cred;
-	process->controlling_tty = parent->controlling_tty;
 	cred_ref(process->cred);
 	spin_unlock_irqrestore(&parent->lock, parent_irq);
 	(void)filedesc_set_limit(process->fd,
@@ -567,18 +944,19 @@ process_create(struct process *parent, pid_t requested_pid,
 	}
 	process->pid = assigned;
 	next_pid = assigned == INT32_MAX ? 1 : assigned + 1;
-	process->all_next = creating_processes;
-	creating_processes = process;
-	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
-	parent_irq = spin_lock_irqsave(&parent->lock);
 	if (parent == &process0) {
 		process->pgrp = process->pid;
 		process->session = process->pid;
 	} else {
 		process->pgrp = parent->pgrp;
 		process->session = parent->session;
+		process->controlling_tty = parent->controlling_tty;
+		process->controlling_tty_generation =
+		    parent->controlling_tty_generation;
 	}
-	spin_unlock_irqrestore(&parent->lock, parent_irq);
+	process->all_next = creating_processes;
+	creating_processes = process;
+	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
 	*result = process;
 	return 0;
 }
@@ -722,15 +1100,19 @@ process_free_mem(struct process *process)
 		child_link = &process->parent->children;
 		while (*child_link != NULL && *child_link != process)
 			child_link = &(*child_link)->sibling;
-		if (*child_link == process)
+		if (*child_link == process) {
 			*child_link = process->sibling;
+			/* A waiter which skipped this reserved zombie must rescan now that
+			 * removal, rather than reservation release, is the reap commit. */
+			child_waiters_wake(process->parent);
+		}
 	}
 	process->state = PROCESS_DEAD;
 	process_group_recheck_locked(old_session, old_pgrp, 1);
 	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
 	process_group_deliver_notifications();
 	if (vmspace != NULL)
-		vmspace_free(vmspace);
+		vmspace_put(vmspace);
 	filedesc_destroy(fd);
 	cred_release(cred);
 	release_retired_creds(retired);
@@ -745,10 +1127,13 @@ process_wait(struct process *process, int *status)
 	unsigned long irq;
 	int error, thread_status;
 
-	if (process == NULL || process == &process0 || curthread == NULL ||
-	    process->parent != curthread->proc)
+	if (process == NULL || process == &process0 || curthread == NULL)
 		return ECHILD;
 	irq = spin_lock_irqsave(&process_tree_lock);
+	if (process->parent != curthread->proc) {
+		spin_unlock_irqrestore(&process_tree_lock, irq);
+		return ECHILD;
+	}
 	while (process->state != PROCESS_ZOMBIE) {
 		uint64_t sequence = waitq_sequence(&process->parent->child_waitq);
 		error = waitq_sleep(&process->parent->child_waitq,
@@ -824,7 +1209,8 @@ process_wait_select_mask(struct process *parent, pid_t selector, int options,
 				goto reserve;
 			}
 			if ((event_mask & PROCESS_WAIT_EVENT_EXITED) != 0 &&
-			    child->state == PROCESS_ZOMBIE) {
+			    child->state == PROCESS_ZOMBIE &&
+			    (child->flags & PROCESS_AUTOREAP) == 0) {
 				event->kind = PROCESS_WAIT_EXITED;
 				event->status = child->exit_status;
 				goto reserve;
@@ -883,41 +1269,48 @@ process_wait_commit(struct process_wait_event *event)
 	else if (event->kind == PROCESS_WAIT_CONTINUED)
 		child->wait_continued = 0;
 	else {
-		if (child->state != PROCESS_ZOMBIE || child->threads == NULL) {
+		/* Detached threads may self-reap immediately after scheduler retirement,
+		 * leaving a fully valid zombie with an empty thread list. */
+		if (child->state != PROCESS_ZOMBIE) {
 			error = ECHILD;
 			goto out;
 		}
-		child->wait_reserved = PROCESS_WAIT_NONE;
 		reap = 1;
 		goto out;
 	}
 	child->wait_reserved = PROCESS_WAIT_NONE;
 	child_waiters_wake(event->parent);
 out:
-	if (error != 0 && child->wait_reserved == event->kind)
-		child->wait_reserved = PROCESS_WAIT_NONE;
 	spin_unlock_irqrestore(&process_tree_lock, irq);
 	if (error == 0 && reap) {
-		struct thread *thread;
-		while ((thread = child->threads) != NULL) {
-			thread_ref(thread);
-			error = thread_wait(thread, NULL);
-			thread_release(thread);
-			if (error != 0)
-				break;
-		}
+		/* Keep PROCESS_WAIT_EXITED reserved until process_free_mem() removes the
+		 * child from both the registry and the parent's list.  A second waiter
+		 * therefore sleeps instead of committing the same zombie. */
+		KERN_TEST_CHECKPOINT(KERN_TEST_PROCESS_WAIT_REAP_RESERVED, child);
+		error = process_reap_threads(child);
 		if (error == 0) {
 			uint64_t child_ticks =
 			    atomic_u64_load_acquire(&child->cpu_ticks) +
 			    atomic_u64_load_acquire(&child->child_cpu_ticks);
+			uint64_t child_user_ticks =
+			    atomic_u64_load_acquire(&child->user_ticks) +
+			    atomic_u64_load_acquire(&child->child_user_ticks);
+			uint64_t child_system_ticks =
+			    atomic_u64_load_acquire(&child->system_ticks) +
+			    atomic_u64_load_acquire(&child->child_system_ticks);
 			(void)atomic_u64_fetch_add_relaxed(
 			    &event->parent->child_cpu_ticks, child_ticks);
+			(void)atomic_u64_fetch_add_relaxed(
+			    &event->parent->child_user_ticks, child_user_ticks);
+			(void)atomic_u64_fetch_add_relaxed(
+			    &event->parent->child_system_ticks, child_system_ticks);
 			process_free_mem(child);
 		}
 	}
-	process_release(child);
-	if (error == 0)
+	if (error == 0) {
+		process_release(child);
 		memset(event, 0, sizeof(*event));
+	}
 	return error;
 }
 
@@ -959,46 +1352,68 @@ process_waitpid(struct process *parent, pid_t selector, int *status,
 	return pid;
 }
 
+/* Caller holds process_tree_lock.  Keeping the tree serializer through signal
+ * generation makes job-control transition publication and parent notification
+ * one ordered stream: process_continue() cannot overtake a validated STOP, and
+ * a new STOP callback cannot overtake CONTINUED. */
 static void
-notify_parent_event(struct process *process, int code, int status)
+notify_parent_job_event_tree_locked(struct process *process, int code,
+	int status)
 {
-	const struct signal_action *action;
 	struct signal_info info;
 	struct process *parent;
 	unsigned long irq;
+	unsigned action_flags;
 
-	if (process == NULL || process->parent == NULL ||
-	    process->parent == &process0)
+	parent = process != NULL ? process->parent : NULL;
+	if (parent == NULL || parent == &process0)
 		return;
-	parent = process->parent;
-	process_ref(parent);
 	memset(&info, 0, sizeof(info));
 	info.code = code;
 	info.pid = process->pid;
 	info.uid = process->cred != NULL ? process->cred->ruid : 0;
 	info.status = status;
-	action = &parent->signal_actions[SIGCHLD];
-	if ((code != CLD_STOPPED && code != CLD_CONTINUED) ||
-	    (action->flags & SA_NOCLDSTOP) == 0)
+	irq = spin_lock_irqsave(&parent->lock);
+	action_flags = parent->signal_actions[SIGCHLD].flags;
+	spin_unlock_irqrestore(&parent->lock, irq);
+	if ((action_flags & SA_NOCLDSTOP) == 0)
 		(void)signal_send_process_info(parent, SIGCHLD, &info);
-	irq = spin_lock_irqsave(&process_tree_lock);
 	child_waiters_wake(parent);
-	spin_unlock_irqrestore(&process_tree_lock, irq);
-	process_release(parent);
 }
+
+struct process_stop_notification {
+	struct process *process;
+	unsigned generation;
+	int signo;
+};
 
 static void
 process_stop_notify(void *argument)
 {
-	struct process *process = argument;
+	struct process_stop_notification *notification = argument;
+	struct process *process = notification->process;
+	unsigned long process_irq, tree_irq;
+	int current;
 
-	notify_parent_event(process, CLD_STOPPED, process->stop_signo);
+	KERN_TEST_CHECKPOINT(KERN_TEST_PROCESS_STOP_CALLBACK_BEFORE_NOTIFY,
+	    process);
+	tree_irq = spin_lock_irqsave(&process_tree_lock);
+	process_irq = spin_lock_irqsave(&process->lock);
+	current = process->stop_requested && process->state == PROCESS_STOPPED &&
+	    process->stop_generation == notification->generation &&
+	    process->wait_stopped;
+	spin_unlock_irqrestore(&process->lock, process_irq);
+	if (current)
+		notify_parent_job_event_tree_locked(process, CLD_STOPPED,
+		    notification->signo);
+	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
 }
 
 void
 process_stop_current(int signo)
 {
 	struct process *process = curthread != NULL ? curthread->proc : NULL;
+	struct process_stop_notification notification;
 	struct thread *member;
 	unsigned long process_irq;
 	int notify = 0;
@@ -1020,15 +1435,20 @@ process_stop_current(int signo)
 		process->stop_ack_count = 0;
 		for (member = process->threads; member != NULL;
 		    member = member->proc_next)
-			if (member->state != THREAD_EXITING &&
+			if (!member->exit_committed &&
+			    member->state != THREAD_EXITING &&
 			    member->state != THREAD_ZOMBIE &&
 			    member->state != THREAD_REAPING &&
 			    member->state != THREAD_DEAD)
 				process->stop_target_count++;
 		for (member = process->threads; member != NULL;
 		    member = member->proc_next)
-			if (member != curthread && member->state == THREAD_SLEEPING)
-				sched_wakeup(member);
+			if (member != curthread && !member->exit_committed &&
+			    member->state != THREAD_EXITING &&
+			    member->state != THREAD_ZOMBIE &&
+			    member->state != THREAD_REAPING &&
+			    member->state != THREAD_DEAD)
+				sched_interrupt(member);
 	}
 	if (curthread->stop_generation != process->stop_generation) {
 		curthread->stop_generation = process->stop_generation;
@@ -1049,8 +1469,11 @@ process_stop_current(int signo)
 		}
 		if (notify) {
 			notify = 0;
+			notification.process = process;
+			notification.generation = process->stop_generation;
+			notification.signo = process->stop_signo;
 			sched_sleep_locked_notify(0, &process->lock,
-			    process_stop_notify, process);
+			    process_stop_notify, &notification);
 		} else {
 			sched_sleep_locked(0, &process->lock);
 		}
@@ -1091,9 +1514,9 @@ process_continue(struct process *process, int report_continued)
 				sched_wakeup(thread);
 	}
 	spin_unlock_irqrestore(&process->lock, process_irq);
-	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
 	if (continued && report_continued)
-		notify_parent_event(process, CLD_CONTINUED, SIGCONT);
+		notify_parent_job_event_tree_locked(process, CLD_CONTINUED, SIGCONT);
+	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
 	return continued;
 }
 
@@ -1162,10 +1585,22 @@ process_itimer_tick(struct process *process, int which)
 
 	if (process == NULL || which < 0 || which >= 3)
 		return 0;
-	sequence = atomic_raw_load_acquire(&process->itimer_sequence[which]);
-	if ((sequence & 1U) != 0 || !atomic_raw_compare_exchange(
-	    &process->itimer_sequence[which], &sequence, sequence + 1U))
-		return 0;
+	/* A timer tick is accounting, not a best-effort notification.  Serialize
+	 * with setitimer() and ticks arriving on other CPUs until this exact tick
+	 * owns the sequence; returning on an odd/CAS conflict loses CPU time. */
+	for (;;) {
+		sequence = atomic_raw_load_acquire(
+		    &process->itimer_sequence[which]);
+		if ((sequence & 1U) != 0) {
+			KERN_TEST_CHECKPOINT(KERN_TEST_ITIMER_TICK_RETRY, process);
+			continue;
+		}
+		if (atomic_raw_compare_exchange(&process->itimer_sequence[which],
+		    &sequence, sequence + 1U))
+			break;
+		KERN_TEST_CHECKPOINT(KERN_TEST_ITIMER_TICK_RETRY, process);
+	}
+	KERN_TEST_CHECKPOINT(KERN_TEST_ITIMER_TICK_LOCKED, process);
 	remaining = atomic_u64_load_acquire(&process->itimer_remaining[which]);
 	interval = atomic_u64_load_acquire(&process->itimer_interval[which]);
 	if (remaining != 0)
@@ -1180,20 +1615,20 @@ process_itimer_real_tick_all(void)
 {
 	struct process *process;
 	struct signal_info info;
-	unsigned long irq;
+	pid_t cursor = -1;
 
 	memset(&info, 0, sizeof(info));
 	info.code = SI_TIMER;
-	/* Registry ownership makes this a single O(n) pass.  SIGALRM generation
-	 * follows the global lock order PROCESS_TREE -> PROCESS and cannot
-	 * re-enter the process tree through stop/continue handling. */
-	irq = spin_lock_irqsave(&process_tree_lock);
-	for (process = all_processes; process != NULL;
-	    process = process->all_next)
+	/* Hold a process reference, not the global tree lock, while queuing the
+	 * signal.  Delivery can wake a remote CPU and must not extend the process
+	 * registry critical section on every timer tick. */
+	while ((process = process_find_next_ref(cursor)) != NULL) {
+		cursor = process->pid;
 		if (process != &process0 && process->state != PROCESS_DEAD &&
 		    process_itimer_tick(process, 0))
 			(void)signal_send_process_info(process, SIGALRM, &info);
-	spin_unlock_irqrestore(&process_tree_lock, irq);
+		process_release(process);
+	}
 }
 
 PROCESS_EXT pid_t
@@ -1216,7 +1651,7 @@ process_thread_retired(struct thread *thread)
 	struct thread *member;
 	struct vmspace *dead_vmspace = NULL;
 	unsigned long irq, process_irq;
-	int notify = 0, autoreap = 0;
+	int notify = 0, autoreap = 0, final_cleanup = 0;
 	int last = 1;
 
 	if (thread == NULL || (process = thread->proc) == NULL)
@@ -1237,6 +1672,7 @@ process_thread_retired(struct thread *thread)
 		dead_vmspace = process->vmspace;
 		process->vmspace = NULL;
 		process->state = PROCESS_ZOMBIE;
+		final_cleanup = 1;
 		parent = process->parent;
 		if (parent != NULL)
 			process_ref(parent);
@@ -1247,8 +1683,18 @@ process_thread_retired(struct thread *thread)
 	}
 	spin_unlock_irqrestore(&process->lock, process_irq);
 	spin_unlock_irqrestore(&process_tree_lock, irq);
-	if (dead_vmspace != NULL && dead_vmspace != &kernel_vmspace)
-		vmspace_free(dead_vmspace);
+	/* Exit performs an early teardown before terminating sibling threads.  This
+	 * final idempotent pass closes any device/timer admission which was already
+	 * in flight at that point; the retired hook's process reference protects the
+	 * object across both calls. */
+	if (final_cleanup) {
+		process_timer_cleanup(process);
+		tty_detach_process(process);
+	}
+	if (dead_vmspace != NULL && dead_vmspace != &kernel_vmspace) {
+		vmspace_put_deferred(dead_vmspace);
+		/* vmspace destruction may enter VFS and is performed by the reaper. */
+	}
 	if (notify) {
 		struct signal_info info;
 		memset(&info, 0, sizeof(info));
@@ -1263,8 +1709,8 @@ process_thread_retired(struct thread *thread)
 	}
 	if (parent != NULL)
 		process_release(parent);
-	if (autoreap && reaper_thread != NULL)
-		sched_wakeup(reaper_thread);
+	if (autoreap)
+		process_reaper_notify();
 }
 
 static void
@@ -1275,7 +1721,7 @@ process_exit_cleanup(int thread_status)
 	struct thread *other;
 	struct filedesc *fd;
 	struct cwdinfo *cwdi;
-	unsigned long process_irq, tree_irq;
+	unsigned long parent_irq, process_irq, tree_irq;
 
 	process_timer_cleanup(process);
 	tty_detach_process(process);
@@ -1314,10 +1760,16 @@ process_exit_cleanup(int thread_status)
 	if (parent != NULL)
 		process_ref(parent);
 	if (parent != NULL && parent != &process0) {
-		const struct signal_action *action =
-		    &parent->signal_actions[SIGCHLD];
-		if ((action->flags & SA_NOCLDWAIT) != 0 ||
-		    action->handler == (uintptr_t)SIG_IGN)
+		struct signal_action action;
+
+		/* Disposition changes are serialized by parent->lock.  The tree lock
+		 * keeps the parent relationship stable while the snapshot decides whether
+		 * this child will be visible as a zombie. */
+		parent_irq = spin_lock_irqsave(&parent->lock);
+		action = parent->signal_actions[SIGCHLD];
+		spin_unlock_irqrestore(&parent->lock, parent_irq);
+		if ((action.flags & SA_NOCLDWAIT) != 0 ||
+		    action.handler == (uintptr_t)SIG_IGN)
 			process->flags |= PROCESS_AUTOREAP;
 	}
 	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
@@ -1328,28 +1780,77 @@ process_exit_cleanup(int thread_status)
 	sched_exit_current();
 }
 
+static int process_commit_thread_exit(struct thread *, int);
+
 void
 process_exit_if_last_thread(int status)
 {
-	struct process *process = curthread != NULL ? curthread->proc : NULL;
+	struct thread *thread = curthread;
+	int owner;
+
+	if (thread == NULL || thread->proc == NULL || thread->proc == &process0)
+		return;
+	owner = process_commit_thread_exit(thread, status);
+	if (owner)
+		process_exit_cleanup(status);
+}
+
+static void
+process_thread_exit_publish_locked(struct process *process,
+	struct thread *thread)
+{
+	struct thread *member;
+
+	if (thread->exit_committed)
+		HAL_FATAL("thread exit committed twice");
+	thread->exit_committed = 1;
+	/* A stop generation counts only threads which can still return to a
+	 * scheduler/user safe point.  Retire this member at the same process-lock
+	 * linearization point as exit_committed, whether or not it acknowledged. */
+	if (!process->stop_requested)
+		return;
+	if (process->stop_target_count == 0)
+		HAL_FATAL("process stop target underflow at thread exit");
+	process->stop_target_count--;
+	if (thread->stop_generation == process->stop_generation) {
+		if (process->stop_ack_count == 0)
+			HAL_FATAL("process stop ack underflow at thread exit");
+		process->stop_ack_count--;
+	}
+	for (member = process->threads; member != NULL;
+	    member = member->proc_next)
+		if (member != thread && member->state == THREAD_SLEEPING &&
+		    member->stop_generation == process->stop_generation)
+			sched_wakeup(member);
+}
+
+static int
+process_commit_thread_exit(struct thread *thread, int status)
+{
+	struct process *process = thread != NULL ? thread->proc : NULL;
 	struct thread *member;
 	unsigned long process_irq, tree_irq;
-	int last = 1;
+	int owner = 0;
 
 	if (process == NULL || process == &process0)
-		return;
+		return 0;
 	tree_irq = spin_lock_irqsave(&process_tree_lock);
 	process_irq = spin_lock_irqsave(&process->lock);
-	if (process->state != PROCESS_RUNNING &&
-	    process->state != PROCESS_STOPPED)
-		last = 0;
-	for (member = process->threads; last && member != NULL;
-	    member = member->proc_next)
-		if (member != curthread && member->state != THREAD_ZOMBIE &&
-		    member->state != THREAD_REAPING &&
-		    member->state != THREAD_DEAD)
-			last = 0;
-	if (last) {
+	process_thread_exit_publish_locked(process, thread);
+	if (process->state == PROCESS_RUNNING ||
+	    process->state == PROCESS_STOPPED) {
+		owner = 1;
+		for (member = process->threads; member != NULL;
+		    member = member->proc_next)
+			if (!member->exit_committed &&
+			    member->state != THREAD_ZOMBIE &&
+			    member->state != THREAD_REAPING &&
+			    member->state != THREAD_DEAD) {
+				owner = 0;
+				break;
+			}
+	}
+	if (owner) {
 		process->stop_requested = 0;
 		process->stop_target_count = 0;
 		process->stop_ack_count = 0;
@@ -1358,9 +1859,17 @@ process_exit_if_last_thread(int status)
 	}
 	spin_unlock_irqrestore(&process->lock, process_irq);
 	spin_unlock_irqrestore(&process_tree_lock, tree_irq);
-	if (last)
-		process_exit_cleanup(status);
+	KERN_TEST_CHECKPOINT(KERN_TEST_THREAD_EXIT_COMMITTED, thread);
+	return owner;
 }
+
+#ifdef ZEDBSD_PROCESS_TEST
+int
+process_test_commit_thread_exit(struct thread *thread, int status)
+{
+	return process_commit_thread_exit(thread, status);
+}
+#endif
 
 static void __attribute__((noreturn))
 process_exit_final(int thread_status, int wait_status)
@@ -1373,6 +1882,7 @@ process_exit_final(int thread_status, int wait_status)
 		HAL_FATAL("process0 exit");
 	tree_irq = spin_lock_irqsave(&process_tree_lock);
 	process_irq = spin_lock_irqsave(&process->lock);
+	process_thread_exit_publish_locked(process, curthread);
 	if (process->state != PROCESS_EXITING) {
 		process->stop_requested = 0;
 		process->stop_target_count = 0;

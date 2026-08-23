@@ -49,16 +49,31 @@ int sched_prepare_thread(struct thread *thread);
 void sched_add(struct thread *thread);
 void sched_unlink(struct thread *thread);
 void sched_wakeup(struct thread *thread);
+/* Interrupt an interruptible kernel wait, or force a running remote thread
+ * through an IRQ return safe point. */
+void sched_interrupt(struct thread *thread);
 void sched_switch(void);
 void sched_yield(void);
 void sched_wait_task(void);
 void sched_notify_task(hal_task_t task);
 void sched_exit_current(void) __attribute__((noreturn));
 void sched_clock_cpu(hal_cpu_id_t cpu, uint64_t now);
+/* Mark kernel execution entered from, and returning to, user mode.  These
+ * calls classify scheduler ticks without exposing architecture context
+ * details through the HAL task interface. */
+void sched_accounting_kernel_enter(void);
+void sched_accounting_kernel_leave(void);
 void sched_sleep(uint64_t timeout_tick);
 /* Atomically transitions the current thread to sleep, releases an IRQ-safe
  * condition lock, switches, and reacquires that lock before returning. */
 void sched_sleep_locked(uint64_t, struct spinlock *);
+/* Interruptible wait handoff.  Returns nonzero without sleeping when an
+ * interrupt newer than observed_generation was latched before the scheduler
+ * could publish THREAD_SLEEPING. */
+int sched_sleep_locked_interruptible(uint64_t, struct spinlock *, uint64_t);
+/* Like sched_sleep_locked(), then invokes notify after publishing SLEEPING.
+ * notify informs an external observer only: it must not wake the current
+ * thread itself.  A later observer action owns the corresponding wakeup. */
 void sched_sleep_locked_notify(uint64_t, struct spinlock *, void (*)(void *),
 	void *);
 void sched_awake_from_sleep(struct thread *thread);

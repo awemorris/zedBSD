@@ -3,7 +3,6 @@
 #include <kern/clock.h>
 #include <kern/process.h>
 #include <kern/process-timer.h>
-#include <kern/process-timer-notify.h>
 #include <kern/signal.h>
 #include <kern/test-checkpoint.h>
 

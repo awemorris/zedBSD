@@ -20,7 +20,7 @@ void rpi4_timer_interrupt(hal_irq_ack_t acknowledge);
 bool
 hal_irq_disable(void)
 {
-	uint64 state = arm64_irq_save();
+	uint64_t state = arm64_irq_save();
 	return (state & (1U << 7)) == 0;
 }
 
@@ -35,7 +35,7 @@ hal_irq_mask(int irq)
 {
 	if (irq < 0 || irq >= IRQ_MAX)
 		HAL_FATAL("bad IRQ mask");
-	rpi4_gic_mask((uint32)irq);
+	rpi4_gic_mask((uint32_t)irq);
 }
 
 void
@@ -43,7 +43,7 @@ hal_irq_unmask(int irq)
 {
 	if (irq < 0 || irq >= IRQ_MAX)
 		HAL_FATAL("bad IRQ unmask");
-	rpi4_gic_unmask((uint32)irq);
+	rpi4_gic_unmask((uint32_t)irq);
 }
 
 void
@@ -51,7 +51,7 @@ hal_irq_send_eoi(hal_irq_ack_t acknowledge)
 {
 	if (acknowledge == HAL_IRQ_ACK_NONE || acknowledge != active_ack)
 		HAL_FATAL("invalid AArch64 IRQ acknowledgement");
-	rpi4_gic_eoi((uint32)(acknowledge - 1U));
+	rpi4_gic_eoi((uint32_t)(acknowledge - 1U));
 	active_ack = HAL_IRQ_ACK_NONE;
 }
 
@@ -103,7 +103,7 @@ hal_irq_get_affinity(int irq, struct hal_irq_affinity *result)
 }
 
 void
-arm64_irq_dispatch(uint32 id, hal_irq_ack_t acknowledge)
+arm64_irq_dispatch(uint32_t id, hal_irq_ack_t acknowledge)
 {
 	if (active_ack != HAL_IRQ_ACK_NONE)
 		HAL_FATAL("nested AArch64 IRQ acknowledgement");

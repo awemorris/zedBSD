@@ -574,19 +574,6 @@ tmpfs_rmdir(struct inode *directory, const struct componentname *component)
 }
 
 static int
-tmpfs_is_descendant(struct inode *candidate, struct inode *ancestor)
-{
-	struct tmpfs_node *node = tmpfs_node(candidate);
-	while (node != NULL && node->parent != NULL &&
-	    node->parent != node->inode) {
-		if (node->parent == ancestor)
-			return 1;
-		node = tmpfs_node(node->parent);
-	}
-	return 0;
-}
-
-static int
 tmpfs_rename(struct inode *old_directory,
 	const struct componentname *old_component, struct inode *new_directory,
 	const struct componentname *new_component, unsigned flags)
@@ -607,12 +594,6 @@ tmpfs_rename(struct inode *old_directory,
 	}
 	entry = *old_link;
 	moved = tmpfs_node(entry->inode);
-	if (entry->inode->i_type == INODE_DIR &&
-	    (new_directory == entry->inode ||
-	    tmpfs_is_descendant(new_directory, entry->inode))) {
-		mutex_unlock(&old_parent->state->namespace_lock);
-		return EINVAL;
-	}
 	new_link = find_entry_link(new_parent, new_component);
 	if (*new_link == entry) {
 		mutex_unlock(&old_parent->state->namespace_lock);

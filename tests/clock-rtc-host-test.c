@@ -6,12 +6,12 @@
 #include <string.h>
 
 struct fake_cmos {
-	uint8 registers[128];
+	uint8_t registers[128];
 	int uip_stuck;
 };
 
-static uint8
-fake_read(uint8 index, void *argument)
+static uint8_t
+fake_read(uint8_t index, void *argument)
 {
 	struct fake_cmos *cmos = argument;
 
@@ -20,8 +20,8 @@ fake_read(uint8 index, void *argument)
 	return cmos->registers[index];
 }
 
-static uint8 bcd(unsigned value)
-{ return (uint8)(((value / 10U) << 4) | (value % 10U)); }
+static uint8_t bcd(unsigned value)
+{ return (uint8_t)(((value / 10U) << 4) | (value % 10U)); }
 
 static void
 set_bcd(struct fake_cmos *cmos, unsigned year, unsigned month, unsigned day,
@@ -41,7 +41,7 @@ int
 main(void)
 {
 	struct fake_cmos cmos;
-	uint64 seconds;
+	uint64_t seconds;
 
 	set_bcd(&cmos, 2000, 1, 1, 0, 0, 0);
 	assert(x86_cmos_rtc_read(fake_read, &cmos, &seconds));

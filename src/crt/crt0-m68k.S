@@ -1,6 +1,8 @@
 /* zedBSD m68k user entry, syscall veneer, and signal restorer. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
+#include <hal/arch.h>
+
 	.text
 	.even
 	.globl _start
@@ -47,7 +49,8 @@ __syscall6:
 	.globl __signal_restorer
 	.type __signal_restorer,@function
 __signal_restorer:
-	move.l 4(%sp),%d1               /* opaque context token */
+	move.l HAL_TASK_SIGNAL_RESTORER_TOKEN_OFFSET(%sp),%d1
+	move.l HAL_TASK_SIGNAL_RESTORER_CONTEXT_OFFSET(%sp),%d2
 	moveq #80,%d0                   /* ZEDBSD_SYS_sigreturn */
 	trap #0
 	illegal

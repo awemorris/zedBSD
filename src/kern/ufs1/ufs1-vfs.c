@@ -1011,40 +1011,6 @@ name_is_dot(const struct componentname *name)
 }
 
 static int
-directory_is_descendant(struct inode *candidate,struct inode *ancestor)
-{
-	static const struct componentname dotdot={"..",2,0};
-	struct inode *current,*parent;
-	uint32_t limit=state(candidate->i_mount)->super.ncg*
-	    state(candidate->i_mount)->super.ipg,count=0;
-	int error=0;
-
-	inode_ref(candidate);
-	current=candidate;
-	while(count++<limit) {
-		if(current->i_ino==ancestor->i_ino) {
-			error=EINVAL;
-			break;
-		}
-		if(current->i_ino==UFS1_ROOT_INO)
-			break;
-		error=ufs1_lookup(current,&dotdot,&parent);
-		if(error!=0)
-			break;
-		if(parent->i_ino==current->i_ino) {
-			inode_release(parent);
-			break;
-		}
-		inode_release(current);
-		current=parent;
-	}
-	if(count>limit && error==0)
-		error=EIO;
-	inode_release(current);
-	return error;
-}
-
-static int
 new_inode(struct mount *mountp,mode_t mode,enum inode_type type,nlink_t links,
 	struct inode **result)
 {
@@ -1363,12 +1329,6 @@ ufs1_rename(struct inode *old_directory,const struct componentname *old_name,
 		old_target_links=target->i_linkcount;
 		old_target_flags=target->i_flags;
 	}
-	if(source->i_type==INODE_DIR && old_directory!=new_directory) {
-		error=directory_is_descendant(new_directory,source);
-		if(error!=0)
-			goto out;
-	}
-
 	if(target_exists) {
 		error=dir_replace(new_directory,new_name,(uint32_t)source->i_ino,
 			dir_type(source->i_type),&replaced,&replaced_type);

@@ -1212,12 +1212,6 @@ fat_rename_unlocked(struct inode *old_directory,
 	error = fat_lookup_unlocked(old_directory, old_name, &source);
 	if (error != 0)
 		return error;
-	if (source->i_type == INODE_DIR &&
-	    (fat_path_descendant(old_path, fat_path(new_directory)) ||
-	     !strcmp(old_path, fat_path(new_directory)))) {
-		inode_release(source);
-		return EINVAL;
-	}
 	if (fat_lookup_unlocked(new_directory, new_name, &target) == 0 &&
 	    target == source) {
 		inode_release(target);

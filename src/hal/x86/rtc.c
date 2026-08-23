@@ -18,7 +18,7 @@
 #define CMOS_SNAPSHOT_RETRIES 8U
 
 struct rtc_snapshot {
-	uint8 second, minute, hour, day, month, year, status_b;
+	uint8_t second, minute, hour, day, month, year, status_b;
 };
 
 static int
@@ -50,7 +50,7 @@ snapshot_read(x86_cmos_read_fn read, void *context, struct rtc_snapshot *out)
 }
 
 static int
-bcd_value(uint8 value, unsigned *result)
+bcd_value(uint8_t value, unsigned *result)
 {
 	unsigned high = (value >> 4) & 0x0fU;
 	unsigned low = value & 0x0fU;
@@ -62,7 +62,7 @@ bcd_value(uint8 value, unsigned *result)
 }
 
 static int
-field_value(uint8 value, int binary, unsigned *result)
+field_value(uint8_t value, int binary, unsigned *result)
 {
 	if (binary) {
 		*result = value;
@@ -81,7 +81,7 @@ leap_year(unsigned year)
 static unsigned
 month_days(unsigned year, unsigned month)
 {
-	static const uint8 days[] = {
+	static const uint8_t days[] = {
 		31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
 	};
 
@@ -91,13 +91,13 @@ month_days(unsigned year, unsigned month)
 }
 
 static int
-snapshot_seconds(const struct rtc_snapshot *snapshot, uint64 *result)
+snapshot_seconds(const struct rtc_snapshot *snapshot, uint64_t *result)
 {
 	unsigned second, minute, hour, day, month, year, current;
-	uint64 days = 0;
+	uint64_t days = 0;
 	int binary = (snapshot->status_b & CMOS_BINARY) != 0;
 	int pm = (snapshot->hour & CMOS_PM) != 0;
-	uint8 raw_hour = snapshot->hour & ~CMOS_PM;
+	uint8_t raw_hour = snapshot->hour & ~CMOS_PM;
 
 	if (!field_value(snapshot->second, binary, &second) ||
 	    !field_value(snapshot->minute, binary, &minute) ||
@@ -130,7 +130,7 @@ snapshot_seconds(const struct rtc_snapshot *snapshot, uint64 *result)
 }
 
 bool
-x86_cmos_rtc_read(x86_cmos_read_fn read, void *context, uint64 *unix_seconds)
+x86_cmos_rtc_read(x86_cmos_read_fn read, void *context, uint64_t *unix_seconds)
 {
 	struct rtc_snapshot first, second;
 	unsigned retry;

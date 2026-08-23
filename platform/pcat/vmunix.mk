@@ -32,7 +32,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/poll.o \
 	$(BUILD)/src/kern/usync.o \
 	$(BUILD)/src/kern/process.o $(BUILD)/src/kern/thread.o \
-	$(BUILD)/src/kern/sched.o $(BUILD)/src/kern/vmspace.o \
+	$(BUILD)/src/kern/sched.o $(BUILD)/src/kern/vm-lock.o \
+	$(BUILD)/src/kern/vmspace.o \
 	$(BUILD)/src/kern/vm-object.o $(BUILD)/src/kern/vm-commit.o \
 	$(BUILD)/src/kern/filedesc.o \
 	$(BUILD)/src/kern/record-lock.o \
@@ -41,7 +42,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(KERN_QUOTA_OBJS) \
 	$(BUILD)/src/kern/signal.o \
 	$(BUILD)/src/kern/cwdinfo.o $(BUILD)/src/kern/elf.o \
-	$(BUILD)/src/kern/exec.o $(BUILD)/src/kern/user-probe.o \
+	$(BUILD)/src/kern/exec-prepare.o $(BUILD)/src/kern/exec.o \
+	$(BUILD)/src/kern/user-probe.o \
 	$(BUILD)/src/kern/syscall.o $(BUILD)/src/kern/uaccess.o \
 	$(BUILD)/src/kern/cdev.o $(BUILD)/src/kern/devfs.o \
 	$(BUILD)/src/kern/console-device.o $(BUILD)/src/kern/mouse-device.o \
@@ -253,6 +255,7 @@ USER_LIBC_OBJS := $(BUILD)/src/crt/crt0.o \
 	$(BUILD)/userland/base/libc/posix.o $(BUILD)/userland/base/libc/poll.o \
 	$(BUILD)/userland/base/libc/termios.o \
 	$(BUILD)/userland/base/libc/pthread.o \
+	$(BUILD)/userland/base/libc/timer.o \
 	$(BUILD)/userland/base/libc/shm.o \
 	$(BUILD)/userland/base/libc/semaphore.o \
 	$(BUILD)/userland/base/libc/mqueue.o \
@@ -273,6 +276,10 @@ USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-mno-mmx -mno-sse -mno-sse2
 USER_STACK_LDFLAGS := -z stack-size=0x100000
 USER_ELF_CHECK := $(BUILD_TOOLS_DIR)/check-user-elf.py
+$(BUILD)/src/crt/crt0.o: src/crt/crt0.S include/hal/arch.h \
+	include/hal/arch/i386.h
+	@mkdir -p $(dir $@)
+	$(CC) $(ZEDBSD_CPPFLAGS) $(USER_CFLAGS) -c $< -o $@
 $(BUILD)/userland/base/tests/syscall-smoke.o: \
 	OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(BUILD)/userland/base/tests/syscall-smoke.o: OBJ_CFLAGS = $(USER_CFLAGS)
@@ -465,7 +472,7 @@ DYNAMIC_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fPIC -fno-builtin \
 	-mno-80387 -mno-fp-ret-in-387 \
 	-mno-mmx -mno-sse -mno-sse2
 DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c userland/base/libc/poll.c \
-	userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/shm.c \
+	userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/timer.c userland/base/libc/shm.c \
 	userland/base/libc/semaphore.c userland/base/libc/mqueue.c userland/base/libc/dlfcn.c \
 	userland/base/libc/socket.c \
 	userland/base/libc/resolver.c userland/base/libc/resolver-dns.c \
@@ -492,9 +499,11 @@ $(DYNAMIC_DIR)/obj/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
 
-$(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o: userland/base/libc/syscall-i386.S
+$(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o: \
+	userland/base/libc/syscall-i386.S include/hal/arch.h \
+	include/hal/arch/i386.h
 	@mkdir -p $(dir $@)
-	$(CC) -m32 -c $< -o $@
+	$(CC) $(DYNAMIC_CPPFLAGS) -m32 -c $< -o $@
 
 $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o: userland/base/rtld/entry-i386.S
 	@mkdir -p $(dir $@)
@@ -503,18 +512,18 @@ $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o: userland/base/rtld/entry-i386.S
 $(DYNAMIC_SOFTFLOAT_DIR)/%.o: src/softfloat/%.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
 		-mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_FLOAT_PARSE_OBJ): libc/float-parse.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
 		-mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
 		-mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)

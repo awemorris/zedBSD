@@ -24,7 +24,7 @@ handle_timer(void)
 
 static int
 deliver_user_fault(uintptr_t pc, uintptr_t address, int instruction,
-	int write, uint64 value)
+	int write, uint64_t value)
 {
 	int result;
 
@@ -55,14 +55,14 @@ sparcv9_user_task_prepare(uintptr_t entry, uintptr_t stack_pointer)
 void
 sparcv9_trap_init(void)
 {
-	volatile uint64 *probe;
-	uint64 pattern = 0x5350415243563901ULL;
+	volatile uint64_t *probe;
+	uint64_t pattern = 0x5350415243563901ULL;
 
 	__asm__ volatile("wrpr %0, 0, %%tba\n\tflushw\n\tmembar #Sync" : :
 	    "r"(sparcv9_trap_table) : "memory");
 	sparcv9_window_selftest();
 	hal_puts("SPARCV9 WINDOW PASS\n");
-	probe = (volatile uint64 *)(SPARCV9_DIRECT_BASE + 0x00800000UL);
+	probe = (volatile uint64_t *)(SPARCV9_DIRECT_BASE + 0x00800000UL);
 	*probe = pattern;
 	if (*probe != pattern)
 		HAL_FATAL("SPARC V9 direct-map miss self-test failed");
@@ -70,8 +70,8 @@ sparcv9_trap_init(void)
 }
 
 int
-sparcv9_trap_dispatch(uint64 trap_type, uintptr_t pc, uintptr_t next_pc,
-	uint64 tstate)
+sparcv9_trap_dispatch(uint64_t trap_type, uintptr_t pc, uintptr_t next_pc,
+	uint64_t tstate)
 {
 	int cause, mode = HAL_TRAP_MODE_READ;
 	uintptr_t address = 0;
@@ -113,8 +113,8 @@ sparcv9_trap_dispatch(uint64 trap_type, uintptr_t pc, uintptr_t next_pc,
 }
 
 int
-sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
-	uintptr_t next_pc, uint64 tstate, struct sparcv9_user_trap_frame *frame)
+sparcv9_user_trap_dispatch(uint64_t trap_type, uintptr_t pc,
+	uintptr_t next_pc, uint64_t tstate, struct sparcv9_user_trap_frame *frame)
 {
 	uintptr_t address;
 	int instruction;
@@ -127,6 +127,7 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 	sparcv9_task_enter_user_frame(frame, pc, next_pc, tstate, trap_type);
 	if (trap_type == 0x4eU) {
 		handle_timer();
+		kernel_user_return_handler();
 		sparcv9_task_leave_user_frame();
 		return 0;
 	}
@@ -138,8 +139,9 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 		    frame->syscall_number);
 		for (i = 0; i < HAL_SYSCALL_ARGS; i++)
 			args[i] = (uintptr_t)frame->out[i];
-		frame->out[0] = (uint64)(syscall_handler != NULL ?
-		    syscall_handler((uint32)frame->syscall_number, args) : -ENOSYS);
+		/* The generic callback owns accounting and its interruptible window. */
+		frame->out[0] = (uint64_t)(syscall_handler != NULL ?
+		    syscall_handler((uint32_t)frame->syscall_number, args) : -ENOSYS);
 		kernel_user_return_handler();
 		sparcv9_task_leave_user_frame();
 		return 1;
@@ -152,6 +154,9 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 		write = !instruction &&
 		    (sparcv9_mmu_read(SPARCV9_ASI_DMMU, 0x18) & 4U) != 0;
 		if (sparcv9_resolve_miss(address, instruction, write)) {
+			/* A fast-path miss is still a user-return safe point.  An IPI or
+			 * signal may have become pending while the mapping was resolved. */
+			kernel_user_return_handler();
 			sparcv9_task_leave_user_frame();
 			return 0;
 		}
@@ -171,7 +176,7 @@ sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
 		HAL_FATAL("SPARC V9 user page fault handler returned");
 	}
 	{
-		uint32 vector;
+		uint32_t vector;
 		hal_printf("SPARCV9 user trap=%llx pc=%p npc=%p tstate=%llx o0=%llx sp=%llx\n",
 		    trap_type, (void *)pc, (void *)next_pc, tstate,
 		    frame->out[0], frame->old_sp + SPARCV9_STACK_BIAS);

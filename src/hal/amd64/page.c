@@ -14,11 +14,11 @@
 
 extern char __kernel_phys_start[], __kernel_phys_end[];
 
-static uint32 page_bitmap[BITMAP_WORDS];
-static uint32 reserved_bitmap[BITMAP_WORDS];
-static uint32 phys_pages;
-static uint32 reserved_pages;
-static uint32 allocated_pages;
+static uint32_t page_bitmap[BITMAP_WORDS];
+static uint32_t reserved_bitmap[BITMAP_WORDS];
+static uint32_t phys_pages;
+static uint32_t reserved_pages;
+static uint32_t allocated_pages;
 static struct hal_pmem fixed_claims[16];
 static volatile unsigned pmem_lock;
 
@@ -40,17 +40,17 @@ pmem_lock_leave(bool enabled)
 }
 
 static void
-release_usable_range(uint64 base, uint64 size)
+release_usable_range(uint64_t base, uint64_t size)
 {
-	uint64 limit = (uint64)phys_pages * PAGE_SIZE;
-	uint64 end;
-	uint32 first, last, index;
+	uint64_t limit = (uint64_t)phys_pages * PAGE_SIZE;
+	uint64_t end;
+	uint32_t first, last, index;
 
 	if (size == 0 || base >= limit)
 		return;
 	end = size > limit - base ? limit : base + size;
-	first = (uint32)((base + PAGE_SIZE - 1U) / PAGE_SIZE);
-	last = (uint32)(end / PAGE_SIZE);
+	first = (uint32_t)((base + PAGE_SIZE - 1U) / PAGE_SIZE);
+	last = (uint32_t)(end / PAGE_SIZE);
 	for (index = first; index < last; index++)
 		if (BIT_GET(index)) {
 			BIT_CLEAR(index);
@@ -63,14 +63,14 @@ static void
 reserve_range(uintptr_t address, size_t size)
 {
 	uintptr_t end, limit = (uintptr_t)phys_pages * PAGE_SIZE;
-	uint32 first, last, index;
+	uint32_t first, last, index;
 
 	if (size == 0 || address >= limit)
 		return;
 	end = size > limit - address ? limit : address + size;
-	first = (uint32)(address / PAGE_SIZE);
+	first = (uint32_t)(address / PAGE_SIZE);
 	last = end == limit ? phys_pages :
-	    (uint32)((end + PAGE_SIZE - 1U) / PAGE_SIZE);
+	    (uint32_t)((end + PAGE_SIZE - 1U) / PAGE_SIZE);
 	if (last > phys_pages) last = phys_pages;
 	for (index = first; index < last; index++)
 		if (!BIT_GET(index)) {
@@ -83,18 +83,18 @@ reserve_range(uintptr_t address, size_t size)
 void
 amd64_page_init(void)
 {
-	uint64 total = bsp_mem_probe();
-	uint32 index;
+	uint64_t total = bsp_mem_probe();
+	uint32_t index;
 
-	phys_pages = (uint32)(total / PAGE_SIZE);
+	phys_pages = (uint32_t)(total / PAGE_SIZE);
 	if (phys_pages > MAX_PHYS_PAGES) phys_pages = MAX_PHYS_PAGES;
 	hal_memset(page_bitmap, 0xff, sizeof(page_bitmap));
 	hal_memset(reserved_bitmap, 0xff, sizeof(reserved_bitmap));
 	reserved_pages = phys_pages;
 	allocated_pages = 0;
 	for (index = 0; index < bsp_mem_range_count(); index++) {
-		uint64 base, size;
-		uint32 type;
+		uint64_t base, size;
+		uint32_t type;
 		if (!bsp_mem_range(index, &base, &size, &type))
 			HAL_FATAL("invalid BSP memory range index");
 		if (type == ZBL6_MEMORY_USABLE)
@@ -109,16 +109,16 @@ amd64_page_init(void)
 static int
 alloc_ram(size_t size, size_t alignment, struct hal_pmem *desc)
 {
-	uint32 need, end, start, index, align_pages;
-	uint64 flags;
+	uint32_t need, end, start, index, align_pages;
+	uint64_t flags;
 	uintptr_t limit = (uintptr_t)phys_pages * PAGE_SIZE;
 
 	if (desc == NULL || size == 0 || size > SIZE_MAX - (PAGE_SIZE - 1U) ||
 	    alignment < PAGE_SIZE)
 		return HAL_ERR_INVALID;
-	need = (uint32)((size + PAGE_SIZE - 1U) / PAGE_SIZE);
-	align_pages = (uint32)(alignment / PAGE_SIZE);
-	end = (uint32)(limit / PAGE_SIZE);
+	need = (uint32_t)((size + PAGE_SIZE - 1U) / PAGE_SIZE);
+	align_pages = (uint32_t)(alignment / PAGE_SIZE);
+	end = (uint32_t)(limit / PAGE_SIZE);
 	if (need == 0 || need >= end)
 		return HAL_ERR_NOMEM;
 	flags = asm_get_rflags();
@@ -148,16 +148,16 @@ alloc_ram(size_t size, size_t alignment, struct hal_pmem *desc)
 static int
 free_ram(struct hal_pmem *desc)
 {
-	uint32 first, count, index;
-	uint64 flags;
+	uint32_t first, count, index;
+	uint64_t flags;
 
 	if (desc == NULL || desc->size == 0 ||
 	    ((uintptr_t)desc->paddr & (PAGE_SIZE - 1U)) != 0 ||
 	    (desc->size & (PAGE_SIZE - 1U)) != 0 ||
 	    desc->vaddr != amd64_phys_to_direct((uintptr_t)desc->paddr))
 		return HAL_ERR_INVALID;
-	first = (uint32)((uintptr_t)desc->paddr / PAGE_SIZE);
-	count = (uint32)(desc->size / PAGE_SIZE);
+	first = (uint32_t)((uintptr_t)desc->paddr / PAGE_SIZE);
+	count = (uint32_t)(desc->size / PAGE_SIZE);
 	if (first >= phys_pages || count > phys_pages - first)
 		return HAL_ERR_INVALID;
 	flags = asm_get_rflags();
@@ -202,7 +202,7 @@ claim_fixed(const struct hal_pmem_request *request, struct hal_pmem *desc)
 {
 	unsigned i, free_slot = 16;
 	hal_physaddr_t end = request->paddr + request->size;
-	uint64 flags = asm_get_rflags();
+	uint64_t flags = asm_get_rflags();
 	void *vaddr = fixed_vaddr(request->paddr);
 	if (vaddr == NULL || request->size > 0x01000000U ||
 	    fixed_vaddr(end - 1U) == NULL)
@@ -273,7 +273,7 @@ static int
 pmem_free_unlocked(struct hal_pmem *desc)
 {
 	unsigned i;
-	uint64 flags;
+	uint64_t flags;
 	if (desc == NULL || desc->size == 0) return HAL_ERR_INVALID;
 	if (desc->type == HAL_PMEM_TYPE_RAM) return free_ram(desc);
 	flags = asm_get_rflags(); asm_cli();
@@ -308,12 +308,12 @@ size_t hal_pmem_get_total_size(void)
 }
 
 void __attribute__((weak))
-hal_amd64_task_memory_stats(uint32 *count, size_t *stack_bytes)
+hal_amd64_task_memory_stats(uint32_t *count, size_t *stack_bytes)
 {
 	if (count != NULL) *count = 0;
 	if (stack_bytes != NULL) *stack_bytes = 0;
 }
-void hal_amd64_space_memory_stats(uint32 *, uint32 *);
+void hal_amd64_space_memory_stats(uint32_t *, uint32_t *);
 
 void
 hal_memory_get_stats(struct hal_memory_stats *stats)

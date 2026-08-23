@@ -34,26 +34,81 @@ int waitq_sleep(struct wait_queue *queue, struct spinlock *condition_lock,
 {
 	struct thread *thread = thread_current();
 	struct wait_token *token;
+	uint64_t interrupt_generation = 0;
+	int pending, interrupted = 0;
 	if (queue == NULL || condition_lock == NULL || thread == NULL ||
-	    (flags & ~WAITQ_INTERRUPTIBLE) != 0) return EINVAL;
+	    (flags & ~(WAITQ_INTERRUPTIBLE | WAITQ_CANCELABLE)) != 0 ||
+	    ((flags & WAITQ_CANCELABLE) != 0 &&
+	    (flags & WAITQ_INTERRUPTIBLE) == 0)) return EINVAL;
 	if (waitq_sequence(queue) != observed) return EAGAIN;
+	if ((flags & WAITQ_INTERRUPTIBLE) != 0) {
+		/* Snapshot before inspecting pending state.  An interrupt delivered
+		 * after this point is caught by the scheduler handoff even if its signal
+		 * is consumed by another process thread before we inspect it. */
+		interrupt_generation = atomic_u64_load_acquire(
+		    &thread->interrupt_generation);
+		spin_unlock(condition_lock);
+		pending = signal_pending_unblocked(thread);
+		spin_lock(condition_lock);
+		/* A cancellation request advances interrupt_generation before waking the
+		 * target.  Atomic pending state handles requests before this check; the
+		 * scheduler generation handles the check-to-sleep handoff. */
+		if ((flags & WAITQ_CANCELABLE) != 0 &&
+		    atomic_raw_load_acquire(&thread->cancel_pending) != 0)
+			return EINTR;
+		if (thread->terminate_requested)
+			return EINTR;
+		if (process_stop_requested(thread)) {
+			thread->stop_interrupted = 1;
+			return EINTR;
+		}
+		if (pending)
+			return EINTR;
+		if (waitq_sequence(queue) != observed)
+			return EAGAIN;
+	}
 	KERN_TEST_CHECKPOINT(KERN_TEST_WAIT_BEFORE_REGISTER, queue);
 	token = &thread->wait_token;
 	if (token->queue != NULL) return EBUSY;
 	token->thread = thread; token->next = NULL; token->queue = queue;
 	if (queue->tail != NULL) queue->tail->next = token; else queue->head = token;
 	queue->tail = token;
-	sched_sleep_locked(deadline, condition_lock);
+	KERN_TEST_CHECKPOINT(KERN_TEST_WAIT_AFTER_REGISTER, queue);
+	if ((flags & WAITQ_INTERRUPTIBLE) != 0)
+		interrupted = sched_sleep_locked_interruptible(deadline,
+		    condition_lock, interrupt_generation);
+	else
+		sched_sleep_locked(deadline, condition_lock);
 	if (token->queue == queue) waitq_remove(queue, token);
 	/* exec and process exit use an out-of-band retirement request.  Every
 	 * interruptible wait must surface it even when no ordinary signal is
 	 * pending, otherwise a target can register itself again forever. */
 	if ((flags & WAITQ_INTERRUPTIBLE) != 0 &&
 	    thread->terminate_requested) return EINTR;
+	if ((flags & WAITQ_CANCELABLE) != 0 &&
+	    atomic_raw_load_acquire(&thread->cancel_pending) != 0)
+		return EINTR;
 	if ((flags & WAITQ_INTERRUPTIBLE) != 0 &&
-	    process_stop_requested(thread)) return EINTR;
-	if ((flags & WAITQ_INTERRUPTIBLE) != 0 &&
-	    signal_pending_unblocked(thread)) return EINTR;
+	    process_stop_requested(thread)) {
+		thread->stop_interrupted = 1;
+		return EINTR;
+	}
+	if (waitq_sequence(queue) != observed)
+		return 0;
+	if ((flags & WAITQ_INTERRUPTIBLE) != 0) {
+		/* The caller's condition lock can have any rank, including the
+		 * process lock itself.  Signal inspection takes process->lock, so it
+		 * must never run while the condition lock is held.  The wait-queue
+		 * sequence closes the interval while the condition lock is dropped. */
+		spin_unlock(condition_lock);
+		pending = signal_pending_unblocked(thread);
+		spin_lock(condition_lock);
+		if (pending)
+			return EINTR;
+		if (waitq_sequence(queue) != observed)
+			return 0;
+	}
+	(void)interrupted;
 	if (deadline != 0 && sched_ticks() >= deadline) return ETIMEDOUT;
 	return 0;
 }

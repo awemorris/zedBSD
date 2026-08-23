@@ -23,12 +23,12 @@
 #define LAPIC_PERIODIC 0x20000U
 #define ICR_PENDING    0x1000U
 
-static volatile uint32 *lapic;
-static uint32 timer_initial;
+static volatile uint32_t *lapic;
+static uint32_t timer_initial;
 
-static uint32 read_reg(unsigned offset)
+static uint32_t read_reg(unsigned offset)
 { return lapic[offset / 4U]; }
-static void write_reg(unsigned offset, uint32 value)
+static void write_reg(unsigned offset, uint32_t value)
 { lapic[offset / 4U] = value; hal_io_mb(); }
 
 static int
@@ -42,14 +42,14 @@ wait_icr(void)
 }
 
 int
-amd64_lapic_init(uint32 physical_address)
+amd64_lapic_init(uint32_t physical_address)
 {
 	struct hal_pmem_request request = {
 		physical_address, 4096, 4096, HAL_PMEM_TYPE_MMIO,
 		HAL_PMEM_ATTR_NOCACHE
 	};
 	struct hal_pmem memory;
-	uint64 apic_base;
+	uint64_t apic_base;
 
 	if (hal_pmem_alloc(&request, &memory) != HAL_OK)
 		return HAL_ERR_UNSUPPORTED;
@@ -71,17 +71,17 @@ amd64_lapic_init_cpu(void)
 	write_reg(LAPIC_ESR, 0);
 }
 
-uint32 amd64_lapic_id(void) { return read_reg(LAPIC_ID) >> 24; }
+uint32_t amd64_lapic_id(void) { return read_reg(LAPIC_ID) >> 24; }
 void amd64_lapic_eoi(void) { write_reg(LAPIC_EOI, 0); }
 
 static void
 pit_wait_10ms(void)
 {
-	uint8 value = asm_inb(0x61U);
-	asm_outb(0x61U, (uint8)((value & ~2U) | 1U));
+	uint8_t value = asm_inb(0x61U);
+	asm_outb(0x61U, (uint8_t)((value & ~2U) | 1U));
 	asm_outb(0x43U, 0xb0U);
-	asm_outb(0x42U, (uint8)11932U);
-	asm_outb(0x42U, (uint8)(11932U >> 8));
+	asm_outb(0x42U, (uint8_t)11932U);
+	asm_outb(0x42U, (uint8_t)(11932U >> 8));
 	while ((asm_inb(0x61U) & 0x20U) == 0)
 		__asm__ volatile("pause");
 }
@@ -90,7 +90,7 @@ void
 amd64_lapic_timer_start(void)
 {
 	if (timer_initial == 0) {
-		uint32 elapsed;
+		uint32_t elapsed;
 		write_reg(LAPIC_TIMER_DIVIDE, 0x3U); /* divide by 16 */
 		write_reg(LAPIC_LVT_TIMER, LAPIC_MASKED | INT_IRQ_BASE);
 		write_reg(LAPIC_TIMER_INITIAL, 0xffffffffU);
@@ -114,7 +114,7 @@ amd64_lapic_timer_stop(void)
 }
 
 static int
-send_icr(uint32 apic_id, uint32 low)
+send_icr(uint32_t apic_id, uint32_t low)
 {
 	int error = wait_icr();
 	if (error != HAL_OK)
@@ -125,7 +125,7 @@ send_icr(uint32 apic_id, uint32 low)
 }
 
 int
-amd64_lapic_send_init(uint32 apic_id)
+amd64_lapic_send_init(uint32_t apic_id)
 {
 	volatile unsigned delay;
 	int error = send_icr(apic_id, 0x0000c500U); /* INIT level assert */
@@ -135,11 +135,11 @@ amd64_lapic_send_init(uint32 apic_id)
 		__asm__ volatile("pause");
 	return send_icr(apic_id, 0x00008500U); /* INIT level deassert */
 }
-int amd64_lapic_send_startup(uint32 apic_id, uint8 vector)
+int amd64_lapic_send_startup(uint32_t apic_id, uint8_t vector)
 { return send_icr(apic_id, 0x00004600U | vector); }
-int amd64_lapic_notify(uint32 apic_id)
+int amd64_lapic_notify(uint32_t apic_id)
 { return send_icr(apic_id, AMD64_VECTOR_NOTIFY); }
-int amd64_lapic_send_vector(uint32 apic_id, uint8 vector)
+int amd64_lapic_send_vector(uint32_t apic_id, uint8_t vector)
 {
 	if (vector < 0x20U)
 		return HAL_ERR_INVALID;

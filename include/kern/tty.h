@@ -30,4 +30,8 @@ int tty_pty_exists(unsigned);
 unsigned tty_pty_snapshot(unsigned *, unsigned);
 extern const struct file_ops tty_pty_slave_file_ops;
 
+#ifdef ZEDBSD_TTY_TEST
+int tty_test_vlnext_ixon(void);
+#endif
+
 #endif

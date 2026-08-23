@@ -4,6 +4,7 @@
 #include "kern/atomic.h"
 #include "kern/thread.h"
 #include "kern/process.h"
+#include "kern/resource-limit.h"
 #include "kern/signal.h"
 #include "kern/lock.h"
 #include "kern/kmem.h"
@@ -40,6 +41,32 @@ send_itimer_signal(struct process *process, int signo)
 	memset(&info, 0, sizeof(info));
 	info.code = SI_TIMER;
 	(void)signal_send_process_info(process, signo, &info);
+}
+
+void
+sched_accounting_kernel_enter(void)
+{
+	struct thread *thread = curthread;
+
+	if (thread == NULL || (thread->flags & THREAD_FLAG_IDLE) != 0 ||
+	    thread->proc == NULL || thread->proc == &process0)
+		return;
+	if (thread->accounting_kernel_depth == (unsigned)-1)
+		HAL_FATAL("kernel accounting depth overflow");
+	thread->accounting_kernel_depth++;
+}
+
+void
+sched_accounting_kernel_leave(void)
+{
+	struct thread *thread = curthread;
+
+	if (thread == NULL || (thread->flags & THREAD_FLAG_IDLE) != 0 ||
+	    thread->proc == NULL || thread->proc == &process0)
+		return;
+	if (thread->accounting_kernel_depth == 0)
+		HAL_FATAL("kernel accounting depth underflow");
+	thread->accounting_kernel_depth--;
 }
 
 static struct sched_cpu *
@@ -288,6 +315,28 @@ sched_wakeup(struct thread *thread)
 
 void sched_awake_from_sleep(struct thread *thread) { sched_wakeup(thread); }
 
+void
+sched_interrupt(struct thread *thread)
+{
+	hal_cpu_id_t cpu;
+
+	if (thread == NULL)
+		return;
+	/* Publish the interrupt before inspecting scheduler state.  A target which
+	 * is still RUNNING can subsequently register a wait; the generation check
+	 * in sched_sleep_locked_interruptible() closes that otherwise lost wakeup. */
+	(void)atomic_u64_fetch_add_release(&thread->interrupt_generation, 1U);
+	/* sched_wakeup() is deliberately a no-op for RUNNING/RUNNABLE tasks.
+	 * The explicit CPU notification below is what gives those tasks a prompt
+	 * return-to-user safe point.  A duplicate notification after a real wake
+	 * is harmless and keeps the migration race contained in the scheduler. */
+	sched_wakeup(thread);
+	cpu = (hal_cpu_id_t)atomic_raw_load_acquire(
+	    (volatile unsigned *)&thread->sched.cpu);
+	if (cpu < scheduler_cpu_count && cpu_online(cpu))
+		notify_cpu(cpu);
+}
+
 static void
 switch_without_enqueue(void)
 {
@@ -404,6 +453,8 @@ sched_clock_cpu(hal_cpu_id_t id, uint64_t now)
 	struct sched_cpu *cpu;
 	struct thread *thread;
 	struct process *expired_process = NULL;
+	struct process *accounted_process = NULL;
+	uint64_t accounted_ticks = 0;
 	unsigned expired_signals = 0;
 	unsigned long irq;
 	int preempt = 0;
@@ -431,15 +482,22 @@ sched_clock_cpu(hal_cpu_id_t id, uint64_t now)
 	thread = curthread;
 	if (thread != NULL && thread->state == THREAD_RUNNING) {
 		if ((thread->flags & THREAD_FLAG_IDLE) == 0 &&
-		    thread->proc != NULL && thread->proc != &process0)
-			(void)atomic_u64_fetch_add_relaxed(&thread->proc->cpu_ticks, 1U);
-		if ((thread->flags & THREAD_FLAG_IDLE) == 0 && thread->proc != NULL) {
-			unsigned timer;
-			for (timer = 1; timer < 3; timer++)
-				if (process_itimer_tick(thread->proc, (int)timer)) {
-					expired_process = thread->proc;
-					expired_signals |= 1U << timer;
-				}
+		    thread->proc != NULL && thread->proc != &process0) {
+			int kernel = thread->accounting_kernel_depth != 0;
+
+			accounted_ticks = atomic_u64_fetch_add_relaxed(
+			    &thread->proc->cpu_ticks, 1U) + 1U;
+			(void)atomic_u64_fetch_add_relaxed(kernel ?
+			    &thread->proc->system_ticks : &thread->proc->user_ticks, 1U);
+			accounted_process = thread->proc;
+			/* ITIMER_VIRTUAL advances in user mode only.  ITIMER_PROF
+			 * measures the complete user+system CPU time of the process. */
+			if (!kernel && process_itimer_tick(thread->proc, 1))
+				expired_signals |= 1U << 1;
+			if (process_itimer_tick(thread->proc, 2))
+				expired_signals |= 1U << 2;
+			if (expired_signals != 0)
+				expired_process = thread->proc;
 		}
 		if ((thread->flags & THREAD_FLAG_IDLE) != 0)
 			preempt = cpu->need_resched != 0;
@@ -448,6 +506,8 @@ sched_clock_cpu(hal_cpu_id_t id, uint64_t now)
 			preempt = 1;
 	}
 	spin_unlock_irqrestore(&cpu->lock, irq);
+	if (accounted_process != NULL)
+		resource_limit_cpu_tick(accounted_process, accounted_ticks);
 	if (expired_process != NULL) {
 		if (expired_signals & 2U)
 			send_itimer_signal(expired_process, SIGVTALRM);
@@ -590,6 +650,38 @@ sched_sleep_locked(uint64_t timeout_tick, struct spinlock *condition_lock)
 	spin_lock(condition_lock);
 }
 
+int
+sched_sleep_locked_interruptible(uint64_t timeout_tick,
+	struct spinlock *condition_lock, uint64_t observed_generation)
+{
+	struct thread *thread = curthread;
+	struct sched_cpu *cpu;
+
+	(void)hal_irq_disable();
+	if (thread == NULL || condition_lock == NULL ||
+	    thread->sched.cpu != hal_cpu_current())
+		HAL_FATAL("invalid interruptible locked sleep");
+	cpu = sched_cpu_state(thread->sched.cpu);
+	spin_lock(&cpu->lock);
+	/* sched_interrupt() advances the latch before attempting sched_wakeup().
+	 * Holding the scheduler lock makes this comparison and publication of the
+	 * sleeping state one atomic handoff from the waker's point of view. */
+	if (atomic_u64_load_acquire(&thread->interrupt_generation) !=
+	    observed_generation) {
+		spin_unlock(&cpu->lock);
+		return 1;
+	}
+	thread->state = THREAD_SLEEPING;
+	thread->sched.wakeup_tick = timeout_tick;
+	if (timeout_tick != 0)
+		queue_append(&cpu->sleep, thread, SCHED_QUEUE_SLEEP);
+	spin_unlock(condition_lock);
+	spin_unlock(&cpu->lock);
+	switch_without_enqueue();
+	spin_lock(condition_lock);
+	return 0;
+}
+
 void
 sched_sleep_locked_notify(uint64_t timeout_tick,
 	struct spinlock *condition_lock, void (*notify)(void *), void *argument)
@@ -610,7 +702,9 @@ sched_sleep_locked_notify(uint64_t timeout_tick,
 	spin_unlock(condition_lock);
 	spin_unlock(&cpu->lock);
 	/* The scheduler already regards this task as sleeping, so an observer
-	 * cannot see the notification while the final user thread is runnable. */
+	 * cannot see the notification while the final user thread is runnable.
+	 * This callback only publishes that fact; it must not wake thread itself,
+	 * because switch_without_enqueue() still owns the pending context switch. */
 	notify(argument);
 	switch_without_enqueue();
 	spin_lock(condition_lock);

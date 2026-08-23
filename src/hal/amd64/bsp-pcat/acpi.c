@@ -7,42 +7,42 @@
 
 struct rsdp {
 	char signature[8];
-	uint8 checksum;
+	uint8_t checksum;
 	char oem[6];
-	uint8 revision;
-	uint32 rsdt;
-	uint32 length;
-	uint64 xsdt;
-	uint8 extended_checksum;
-	uint8 reserved[3];
+	uint8_t revision;
+	uint32_t rsdt;
+	uint32_t length;
+	uint64_t xsdt;
+	uint8_t extended_checksum;
+	uint8_t reserved[3];
 } __attribute__((packed));
 
 struct sdt {
 	char signature[4];
-	uint32 length;
-	uint8 revision;
-	uint8 checksum;
+	uint32_t length;
+	uint8_t revision;
+	uint8_t checksum;
 	char oem_id[6];
 	char oem_table_id[8];
-	uint32 oem_revision;
-	uint32 creator_id;
-	uint32 creator_revision;
+	uint32_t oem_revision;
+	uint32_t creator_id;
+	uint32_t creator_revision;
 } __attribute__((packed));
 
 struct madt {
 	struct sdt header;
-	uint32 lapic_address;
-	uint32 flags;
-	uint8 entries[];
+	uint32_t lapic_address;
+	uint32_t flags;
+	uint8_t entries[];
 } __attribute__((packed));
 
 static int
 bytes_equal(const void *left, const char *right, size_t size)
 {
-	const uint8 *p = left;
+	const uint8_t *p = left;
 	size_t i;
 	for (i = 0; i < size; i++)
-		if (p[i] != (uint8)right[i])
+		if (p[i] != (uint8_t)right[i])
 			return 0;
 	return 1;
 }
@@ -50,10 +50,10 @@ bytes_equal(const void *left, const char *right, size_t size)
 static int
 checksum_ok(const void *data, size_t size)
 {
-	const uint8 *p = data;
-	uint8 sum = 0;
+	const uint8_t *p = data;
+	uint8_t sum = 0;
 	while (size-- != 0)
-		sum = (uint8)(sum + *p++);
+		sum = (uint8_t)(sum + *p++);
 	return sum == 0;
 }
 
@@ -99,7 +99,7 @@ rsdp_at(hal_physaddr_t physical)
 static const struct rsdp *
 find_rsdp(hal_physaddr_t supplied)
 {
-	const uint16 *ebda_segment = amd64_phys_to_direct(0x40eU);
+	const uint16_t *ebda_segment = amd64_phys_to_direct(0x40eU);
 	uintptr_t ebda = (uintptr_t)*ebda_segment << 4;
 	const struct rsdp *result = NULL;
 
@@ -113,7 +113,7 @@ find_rsdp(hal_physaddr_t supplied)
 }
 
 static const struct sdt *
-map_sdt(uint64 physical)
+map_sdt(uint64_t physical)
 {
 	const struct sdt *table;
 	if (physical >= AMD64_DIRECT_LIMIT ||
@@ -148,9 +148,9 @@ find_madt(const struct rsdp *rsdp)
 		return NULL;
 	count = (root->length - sizeof(*root)) / width;
 	for (index = 0; index < count; index++) {
-		const uint8 *entries = (const uint8 *)root + sizeof(*root);
-		uint64 physical = width == 8 ? ((const uint64 *)entries)[index] :
-		    ((const uint32 *)entries)[index];
+		const uint8_t *entries = (const uint8_t *)root + sizeof(*root);
+		uint64_t physical = width == 8 ? ((const uint64_t *)entries)[index] :
+		    ((const uint32_t *)entries)[index];
 		const struct sdt *table = map_sdt(physical);
 		if (table != NULL && bytes_equal(table->signature, "APIC", 4) &&
 		    table->length >= sizeof(struct madt))
@@ -160,7 +160,7 @@ find_madt(const struct rsdp *rsdp)
 }
 
 static int
-add_cpu(struct amd64_acpi_info *result, uint32 apic_id)
+add_cpu(struct amd64_acpi_info *result, uint32_t apic_id)
 {
 	unsigned i;
 	if (apic_id > 255U)
@@ -180,14 +180,14 @@ amd64_acpi_discover(struct amd64_acpi_info *result,
 {
 	const struct rsdp *rsdp;
 	const struct madt *madt;
-	const uint8 *entry, *end;
+	const uint8_t *entry, *end;
 	unsigned i;
 
 	if (result == NULL)
 		return HAL_ERR_INVALID;
 	hal_memset(result, 0, sizeof(*result));
 	for (i = 0; i < 16; i++) {
-		result->isa[i].source = (uint8)i;
+		result->isa[i].source = (uint8_t)i;
 		result->isa[i].gsi = i;
 	}
 	rsdp = find_rsdp(rsdp_address);
@@ -195,14 +195,14 @@ amd64_acpi_discover(struct amd64_acpi_info *result,
 		return HAL_ERR_UNSUPPORTED;
 	result->lapic_address = madt->lapic_address;
 	entry = madt->entries;
-	end = (const uint8 *)madt + madt->header.length;
+	end = (const uint8_t *)madt + madt->header.length;
 	while (entry + 2 <= end) {
-		uint8 type = entry[0], length = entry[1];
+		uint8_t type = entry[0], length = entry[1];
 		if (length < 2 || entry + length > end)
 			return HAL_ERR_INVALID;
 		if (type == 0 && length >= 8) {
-			uint32 flags = *(const uint32 *)(entry + 4);
-			uint8 apic_id = entry[3];
+			uint32_t flags = *(const uint32_t *)(entry + 4);
+			uint8_t apic_id = entry[3];
 			if ((flags & 3U) != 0) {
 				int error = add_cpu(result, apic_id);
 				if (error != HAL_OK)
@@ -213,23 +213,23 @@ amd64_acpi_discover(struct amd64_acpi_info *result,
 			struct amd64_acpi_ioapic *io =
 			    &result->ioapics[result->ioapic_count++];
 			io->id = entry[2];
-			io->address = *(const uint32 *)(entry + 4);
-			io->gsi_base = *(const uint32 *)(entry + 8);
+			io->address = *(const uint32_t *)(entry + 4);
+			io->gsi_base = *(const uint32_t *)(entry + 8);
 		} else if (type == 2 && length >= 10 && entry[2] == 0 &&
 		    entry[3] < 16) {
 			struct amd64_acpi_iso *iso = &result->isa[entry[3]];
 			iso->source = entry[3];
-			iso->gsi = *(const uint32 *)(entry + 4);
-			iso->flags = *(const uint16 *)(entry + 8);
+			iso->gsi = *(const uint32_t *)(entry + 4);
+			iso->flags = *(const uint16_t *)(entry + 8);
 			iso->present = 1;
 		} else if (type == 5 && length >= 12) {
-			uint64 address = *(const uint64 *)(entry + 4);
+			uint64_t address = *(const uint64_t *)(entry + 4);
 			if (address > UINT32_MAX)
 				return HAL_ERR_UNSUPPORTED;
-			result->lapic_address = (uint32)address;
+			result->lapic_address = (uint32_t)address;
 		} else if (type == 9 && length >= 16) {
-			uint32 apic_id = *(const uint32 *)(entry + 4);
-			uint32 flags = *(const uint32 *)(entry + 8);
+			uint32_t apic_id = *(const uint32_t *)(entry + 4);
+			uint32_t flags = *(const uint32_t *)(entry + 8);
 			int error;
 			if ((flags & 3U) != 0 &&
 			    (error = add_cpu(result, apic_id)) != HAL_OK)

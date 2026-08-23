@@ -8,18 +8,20 @@
 
 struct amd64_table_page {
 	struct hal_pmem memory;
-	uint64 *parent;
+	uint64_t *parent;
 	unsigned parent_index;
 	struct amd64_table_page *next;
 };
 
 struct amd64_space {
-	uint32 magic;
+	uint32_t magic;
 	int space_id;
 	volatile unsigned lock;
 	volatile unsigned destroying;
+	unsigned active_ops;
+	struct amd64_space *registry_next;
 	struct hal_pmem pml4_memory;
-	uint64 *pml4;
+	uint64_t *pml4;
 	struct amd64_table_page *tables;
 };
 

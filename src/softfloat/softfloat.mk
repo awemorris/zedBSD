@@ -30,20 +30,20 @@ $(ZEDBSD_SOFTFLOAT_OBJECTS): libc/include/errno.h
 $(ZEDBSD_SOFTFLOAT_BUILD_DIR)/%.o: src/softfloat/%.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(ZEDBSD_SOFTFLOAT_BUILD_DIR)
-	$(ZEDBSD_SOFTFLOAT_CC) -nostdinc -Ilibc/include -I. \
+	$(ZEDBSD_SOFTFLOAT_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
 		$(ZEDBSD_SOFTFLOAT_CFLAGS) \
 		$(ZEDBSD_SOFTFLOAT_DEPFLAGS) -c $< -o $@
 
 $(ZEDBSD_FLOAT_PARSE_OBJECT): libc/float-parse.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(ZEDBSD_SOFTFLOAT_BUILD_DIR)
-	$(ZEDBSD_SOFTFLOAT_CC) -nostdinc -Ilibc/include -I. \
+	$(ZEDBSD_SOFTFLOAT_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
 		$(ZEDBSD_SOFTFLOAT_CFLAGS) $(ZEDBSD_SOFTFLOAT_DEPFLAGS) \
 		-c $< -o $@
 
 $(ZEDBSD_LIBM_OBJECT): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(ZEDBSD_SOFTFLOAT_BUILD_DIR)
-	$(ZEDBSD_SOFTFLOAT_CC) -nostdinc -Ilibc/include -I. \
+	$(ZEDBSD_SOFTFLOAT_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
 		$(ZEDBSD_SOFTFLOAT_CFLAGS) $(ZEDBSD_SOFTFLOAT_DEPFLAGS) \
 		-c $< -o $@
 
@@ -65,7 +65,8 @@ softfloat-host-test: zed-softfloat-core-test zed-softfloat128-core-test \
 $(BUILD)/tests/zed-softfloat-core-test: tests/zed-softfloat-core-test.c \
 	src/softfloat/zed-softfloat.c src/softfloat/zed-softfloat.h libc/fenv.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -Ilibc/include -I. \
+	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -Ilibc/include \
+		-Iinclude/uapi -I. \
 		tests/zed-softfloat-core-test.c src/softfloat/zed-softfloat.c \
 		libc/fenv.c -o $@
 
@@ -77,7 +78,8 @@ $(BUILD)/tests/float-parse-host-test: tests/float-parse-host-test.c \
 	libc/float-parse.c src/softfloat/zed-softfloat.c \
 	src/softfloat/zed-softfloat.h libc/fenv.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -Ilibc/include -I. \
+	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -Ilibc/include \
+		-Iinclude/uapi -I. \
 		tests/float-parse-host-test.c libc/float-parse.c \
 		src/softfloat/zed-softfloat.c libc/fenv.c -o $@
 
@@ -89,7 +91,7 @@ $(BUILD)/tests/math-host-test: tests/math-host-test.c libc/math.c \
 	src/softfloat/zed-softfloat.c src/softfloat/zed-softfloat.h libc/fenv.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -std=c11 -O2 -fno-builtin -Wall -Wextra -Werror \
-		-Ilibc/include -I. tests/math-host-test.c libc/math.c \
+		-Ilibc/include -Iinclude/uapi -I. tests/math-host-test.c libc/math.c \
 		src/softfloat/zed-softfloat.c libc/fenv.c -o $@
 
 math-host-test: $(BUILD)/tests/math-host-test
@@ -101,7 +103,8 @@ $(BUILD)/tests/zed-softfloat128-core-test: \
 	src/softfloat/zed-softfloat128.h src/softfloat/zed-softfloat.c \
 	src/softfloat/zed-softfloat.h libc/fenv.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -Ilibc/include -I. \
+	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -Ilibc/include \
+		-Iinclude/uapi -I. \
 		tests/zed-softfloat128-core-test.c src/softfloat/zed-softfloat128.c \
 		src/softfloat/zed-softfloat.c libc/fenv.c -o $@
 

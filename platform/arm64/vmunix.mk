@@ -44,13 +44,13 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process-timer.c src/kern/klog.c \
 	src/kern/lock.c src/kern/waitq.c \
-	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/vmspace.c \
+	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/vm-lock.c src/kern/vmspace.c \
 	src/kern/vm-object.c src/kern/vm-commit.c src/kern/filedesc.c \
 	src/kern/record-lock.c \
 	src/kern/pipe.c src/kern/cred.c \
 	src/kern/signal.c \
 	src/kern/cwdinfo.c \
-	src/kern/elf.c src/kern/exec.c src/kern/user-probe.c src/kern/syscall.c \
+	src/kern/elf.c src/kern/exec-prepare.c src/kern/exec.c src/kern/user-probe.c src/kern/syscall.c \
 	src/kern/uaccess.c src/kern/cdev.c src/kern/devfs.c \
 	src/kern/console-device.c src/kern/mouse-device.c src/kern/tty.c \
 	src/kern/graphics-device.c \
@@ -64,7 +64,8 @@ ARM64_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURC
 ARM64_VMUNIX_OBJS := $(ARM64_BOOT_OBJS) $(ARM64_KERNEL_OBJS) $(ARM64_KERNEL_LIBC_OBJS)
 
 ARM64_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
-	-Ilibc/include -DZEDBSD_USER_ABI_AARCH64 -DZEDBSD_USER_ABI_LP64
+	-Ilibc/include -DHAL_ARCH_ARM64 -DZEDBSD_USER_ABI_AARCH64 \
+	-DZEDBSD_USER_ABI_LP64
 ARM64_USER_CFLAGS := -march=armv8-a -mno-outline-atomics \
 	-ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
@@ -73,6 +74,7 @@ ARM64_USER_CFLAGS := -march=armv8-a -mno-outline-atomics \
 ARM64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfcn.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
 	userland/base/libc/termios.c \
 	userland/base/libc/pthread.c \
+	userland/base/libc/timer.c \
 	userland/base/libc/shm.c \
 	userland/base/libc/semaphore.c \
 	userland/base/libc/mqueue.c \
@@ -137,7 +139,8 @@ $(BUILD)/user/%.o: %.c
 	$(ARM64_CC) $(ARM64_USER_CPPFLAGS) $(ARM64_USER_CFLAGS) \
 		-fno-strict-aliasing -MMD -MP -c $< -o $@
 
-$(BUILD)/user/src/crt/crt0-aarch64.o: src/crt/crt0-aarch64.S
+$(BUILD)/user/src/crt/crt0-aarch64.o: src/crt/crt0-aarch64.S \
+	include/hal/arch.h include/hal/arch/aarch64.h
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(ARM64_USER_CPPFLAGS) $(ARM64_USER_CFLAGS) -c $< -o $@
 
@@ -250,7 +253,7 @@ DYNAMIC_CFLAGS := -march=armv8-a -mno-outline-atomics -Os -ffreestanding \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-ftls-model=global-dynamic -mtls-dialect=trad -Wall -Wextra -Werror
 DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c userland/base/libc/poll.c \
-	userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/shm.c \
+	userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/timer.c userland/base/libc/shm.c \
 	userland/base/libc/semaphore.c userland/base/libc/mqueue.c userland/base/libc/dlfcn.c \
 	userland/base/libc/socket.c userland/base/libc/signal.c libc/heap.c libc/string.c \
 	libc/ctype.c libc/locale.c libc/wide.c libc/int64.c libc/strto.c \
@@ -273,9 +276,11 @@ DYNAMIC_LIBC_OBJS += $(DYNAMIC_LIBM_OBJ) $(DYNAMIC_FLOAT_PARSE_OBJS)
 $(DYNAMIC_DIR)/obj/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
-$(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o: userland/base/libc/syscall-aarch64.S
+$(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o: \
+	userland/base/libc/syscall-aarch64.S include/hal/arch.h \
+	include/hal/arch/aarch64.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -c $< -o $@
+	$(ARM64_CC) $(DYNAMIC_CPPFLAGS) -c $< -o $@
 $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o: userland/base/rtld/entry-aarch64.S
 	@mkdir -p $(dir $@)
 	$(ARM64_CC) -c $< -o $@
@@ -288,24 +293,30 @@ $(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-aarch64.S
 	$(ARM64_CC) -c $< -o $@
 $(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) -c $< -o $@
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+		$(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/zed-softfloat.o: src/softfloat/zed-softfloat.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) -c $< -o $@
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+		$(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/compiler-runtime.o: src/softfloat/compiler-runtime.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) -c $< -o $@
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+		$(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/zed-softfloat128.o: src/softfloat/zed-softfloat128.c \
 	src/softfloat/zed-softfloat128.h src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) -c $< -o $@
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+		$(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/compiler-runtime128.o: src/softfloat/compiler-runtime128.c \
 	src/softfloat/zed-softfloat128.h src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) -c $< -o $@
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+		$(DYNAMIC_CFLAGS) -c $< -o $@
 $(DYNAMIC_FLOAT_DIR)/float-parse.o: libc/float-parse.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(ARM64_CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) -c $< -o $@
+	$(ARM64_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
+		$(DYNAMIC_CFLAGS) -c $< -o $@
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
 	$(ARM64_LD) -shared -Bsymbolic -e _rtld_start --hash-style=sysv \

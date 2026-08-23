@@ -6,6 +6,7 @@
 
 #include "kern/user-probe.h"
 #include "kern/process.h"
+#include "kern/sched.h"
 #include "kern/signal.h"
 #include "kern/thread.h"
 #include "kern/vmspace.h"
@@ -23,7 +24,7 @@ _Static_assert(sizeof(user_fault_probe.fault_address) == sizeof(uintptr_t),
 	       "user fault address width must match uintptr_t");
 
 void
-kernel_user_int_handler(uint32 vector, uint32 privilege, uintptr_t pc,
+kernel_user_int_handler(uint32_t vector, uint32_t privilege, uintptr_t pc,
 	uintptr_t value)
 {
 	struct thread *thread = curthread;
@@ -41,24 +42,31 @@ kernel_user_int_handler(uint32 vector, uint32 privilege, uintptr_t pc,
 }
 
 int
-kernel_user_fault_handler(uint32 vector, uint32 privilege, uintptr_t pc,
+kernel_user_fault_handler(uint32_t vector, uint32_t privilege, uintptr_t pc,
 	uintptr_t error_code, uintptr_t fault_address)
 {
 	struct thread *thread = curthread;
 	struct signal_info info;
 	int signo;
 	int page_fault_error = 0;
+	int result = HAL_TRAP_RET_FAILED;
+
+	/* User-fault callbacks use the same masked HAL frame contract as syscalls. */
+	if (hal_irq_disable())
+		HAL_FATAL("user fault callback entered with IRQs enabled");
+	sched_accounting_kernel_enter();
+	hal_irq_enable();
 	if (thread == NULL || thread->proc == NULL)
-		return HAL_TRAP_RET_FAILED;
+		goto out;
 	if (vector == 14U && thread->proc->vmspace != NULL) {
 		uint32_t required = (error_code & 0x10U) ? HAL_SPACE_EXEC :
 			(error_code & 2U) ? HAL_SPACE_WRITE : HAL_SPACE_READ;
-		hal_irq_enable();
 		page_fault_error = vmspace_fault(thread->proc->vmspace,
 				      fault_address, required);
-		(void)hal_irq_disable();
-		if (page_fault_error == 0)
-			return HAL_TRAP_RET_SUCCESS;
+		if (page_fault_error == 0) {
+			result = HAL_TRAP_RET_SUCCESS;
+			goto out;
+		}
 	}
 	thread->fault_vector = vector;
 	thread->fault_eip = pc;
@@ -96,9 +104,13 @@ kernel_user_fault_handler(uint32 vector, uint32 privilege, uintptr_t pc,
 	case SIGBUS: info.code = BUS_ADRERR; break;
 	default: info.code = SI_KERNEL; break;
 	}
-	if (signal_send_process_info(thread->proc, signo, &info) != 0)
-		return HAL_TRAP_RET_FAILED;
-	return HAL_TRAP_RET_SUCCESS;
+	if (signal_send_process_info(thread->proc, signo, &info) == 0)
+		result = HAL_TRAP_RET_SUCCESS;
+out:
+	if (!hal_irq_disable())
+		HAL_FATAL("user fault callback returned with IRQs disabled");
+	sched_accounting_kernel_leave();
+	return result;
 }
 
 void

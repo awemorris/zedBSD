@@ -116,7 +116,7 @@ vbe_mode_loop:
 	test edx, edx
 	jz vbe_mode_loop
 
-	/* Determine the byte order represented by a little-endian uint32 pixel. */
+	/* Determine the byte order represented by a little-endian uint32_t pixel. */
 	mov ecx, 2                         /* ZBL6_FRAMEBUFFER_BGRX8888 */
 	cmp byte ptr [vbe_mode_info + 0x20], 16
 	jne 5f

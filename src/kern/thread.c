@@ -7,6 +7,7 @@
 #include "kern/process.h"
 #include "kern/vmspace.h"
 #include "kern/kmem.h"
+#include "kern/test-checkpoint.h"
 
 #include <errno.h>
 #include <hal/hal.h>
@@ -293,6 +294,49 @@ thread_prepare_secondaries(unsigned cpu_count)
 	return 0;
 }
 
+int
+thread_abort_new(struct thread *thread)
+{
+	struct process *process;
+	struct thread **link;
+	unsigned long irq;
+
+	if (thread == NULL || thread == curthread ||
+	    (process = thread->proc) == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&process->lock);
+	if (thread->state != THREAD_NEW) {
+		spin_unlock_irqrestore(&process->lock, irq);
+		return EBUSY;
+	}
+	link = &process->threads;
+	while (*link != NULL && *link != thread)
+		link = &(*link)->proc_next;
+	if (*link != thread) {
+		spin_unlock_irqrestore(&process->lock, irq);
+		return ESRCH;
+	}
+	*link = thread->proc_next;
+	thread->proc_next = NULL;
+	if (process->thread_count == 0)
+		HAL_FATAL("new thread count underflow");
+	process->thread_count--;
+	if (process->stop_requested) {
+		if (process->stop_target_count == 0)
+			HAL_FATAL("new thread stop target underflow");
+		process->stop_target_count--;
+	}
+	thread->state = THREAD_DEAD;
+	spin_unlock_irqrestore(&process->lock, irq);
+
+	hal_task_set_private(thread->task, NULL);
+	hal_task_destroy(thread->task);
+	thread->task = NULL;
+	release_tid(thread);
+	thread_release(thread);
+	return 0;
+}
+
 void
 thread_init_secondary(hal_cpu_id_t cpu)
 {
@@ -361,37 +405,53 @@ thread_exit(int status)
 void
 thread_sched_retired(struct thread *thread)
 {
+	struct process *process;
 	struct thread *member;
 	unsigned long irq;
 
-	if (thread == NULL || thread->state != THREAD_EXITING)
+	if (thread == NULL || thread->state != THREAD_EXITING) {
 		HAL_FATAL("invalid retired thread");
-	thread->state = THREAD_ZOMBIE;
+		return;
+	}
+	process = thread->proc;
+	if (process == NULL) {
+		HAL_FATAL("retired thread without process");
+		return;
+	}
+	/* EXITING cannot be reaped, so these references are acquired before the
+	 * first ZOMBIE publication.  They are the retired hook's ownership: a
+	 * remote join/reaper may claim and unlink the thread immediately after the
+	 * store below, but neither the thread nor its process can be freed until
+	 * all post-publication work in this function is complete. */
+	thread_ref(thread);
+	process_ref(process);
+	irq = spin_lock_irqsave(&process->lock);
+	atomic_raw_store_release((volatile unsigned *)&thread->state,
+	    THREAD_ZOMBIE);
 	thread->state_generation++;
-	irq = spin_lock_irqsave(&thread->proc->lock);
 	/* A stop generation counts live threads.  If a thread retires before it
 	 * acknowledges that generation, it is no longer a target; otherwise all
 	 * acknowledged waiters could sleep forever waiting for a dead task. */
-	if (thread->proc->stop_requested &&
-	    thread->stop_generation != thread->proc->stop_generation) {
-		if (thread->proc->stop_target_count == 0)
+	if (process->stop_requested && !thread->exit_committed &&
+	    thread->stop_generation != process->stop_generation) {
+		if (process->stop_target_count == 0)
 			HAL_FATAL("process stop target underflow");
-		thread->proc->stop_target_count--;
-		for (member = thread->proc->threads; member != NULL;
+		process->stop_target_count--;
+		for (member = process->threads; member != NULL;
 		    member = member->proc_next)
 			if (member != thread && member->state == THREAD_SLEEPING &&
 			    member->stop_generation ==
-			    thread->proc->stop_generation)
+			    process->stop_generation)
 				sched_wakeup(member);
 	}
 	waitq_wake_all(&thread->join_waitq);
-	spin_unlock_irqrestore(&thread->proc->lock, irq);
+	spin_unlock_irqrestore(&process->lock, irq);
+	KERN_TEST_CHECKPOINT(KERN_TEST_THREAD_RETIRED_AFTER_PUBLISH, thread);
 	process_thread_retired(thread);
-	if (thread->detached) {
-		thread_ref(thread);
+	if (thread->detached)
 		(void)thread_wait(thread, NULL);
-		thread_release(thread);
-	}
+	thread_release(thread);
+	process_release(process);
 }
 
 int
@@ -415,6 +475,8 @@ thread_wait(struct thread *thread, int *status)
 		link = &(*link)->proc_next;
 	if (*link == thread)
 		*link = thread->proc_next;
+	if (thread->proc->thread_count == 0)
+		HAL_FATAL("thread count underflow");
 	thread->proc->thread_count--;
 	atomic_raw_store_release((volatile unsigned *)&thread->state,
 	    THREAD_DEAD);

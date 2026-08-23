@@ -2,7 +2,7 @@
 #include "../defs.h"
 #include "uart.h"
 
-#define MMIO32(pa) ((volatile uint32 *)(ARM64_DIRECT_BASE + (uintptr_t)(pa)))
+#define MMIO32(pa) ((volatile uint32_t *)(ARM64_DIRECT_BASE + (uintptr_t)(pa)))
 #define GPIO_GPFSEL1 0x04
 #define GPIO_PUP_PDN_CNTRL0 0xe4
 #define UART_DR 0x00
@@ -18,13 +18,13 @@
 #define UART_IRQ_RX  (1U << 4)
 #define UART_IRQ_RT  (1U << 6)
 
-static volatile uint32 *const gpio = MMIO32(RPI4_GPIO_BASE);
-static volatile uint32 *const uart = MMIO32(RPI4_PL011_BASE);
+static volatile uint32_t *const gpio = MMIO32(RPI4_GPIO_BASE);
+static volatile uint32_t *const uart = MMIO32(RPI4_PL011_BASE);
 
 void
 rpi4_uart_init(void)
 {
-	uint32 value;
+	uint32_t value;
 
 	uart[UART_CR / 4] = 0;
 	value = gpio[GPIO_GPFSEL1 / 4];
@@ -51,7 +51,7 @@ rpi4_uart_putc(int c)
 		rpi4_uart_putc('\r');
 	while ((uart[UART_FR / 4] & UART_FR_TXFF) != 0)
 		;
-	uart[UART_DR / 4] = (uint32)c;
+	uart[UART_DR / 4] = (uint32_t)c;
 }
 
 int

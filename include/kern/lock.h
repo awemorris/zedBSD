@@ -7,6 +7,7 @@
 
 enum lock_rank {
 	LOCK_RANK_PROCESS_TREE = 10,
+	LOCK_RANK_PROCESS_RESOURCE = 15,
 	LOCK_RANK_PROCESS = 20,
 	LOCK_RANK_FILEDESC = 30,
 	LOCK_RANK_FILE = 40,
@@ -17,6 +18,8 @@ enum lock_rank {
 	LOCK_RANK_NAMECACHE = 70,
 	LOCK_RANK_RECORD_LOCK = 75,
 	LOCK_RANK_VMSPACE = 80,
+	/* Per-inode publication gate for shared-object EOF transactions. */
+	LOCK_RANK_VM_RESIZE = 85,
 	LOCK_RANK_VM_OBJECT = 90,
 	LOCK_RANK_SWAP = 95,
 	LOCK_RANK_SOCKET_REGISTRY = 100,
@@ -60,8 +63,11 @@ struct mutex {
 };
 int mutex_init(struct mutex *, enum lock_rank, const char *);
 int mutex_trylock(struct mutex *);
+int mutex_owned(struct mutex *);
 int mutex_lock_interruptible(struct mutex *);
 void mutex_lock(struct mutex *);
 void mutex_unlock(struct mutex *);
+int mutex_wait(struct mutex *, struct wait_queue *, uint64_t, uint64_t,
+	       unsigned);
 
 #endif

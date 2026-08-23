@@ -46,6 +46,8 @@
 #define _SC_TIMERS 26
 #define _SC_XOPEN_VERSION 27
 #define _SC_XOPEN_UNIX 28
+#define _SC_RTSIG_MAX 29
+#define _SC_SIGQUEUE_MAX 30
 
 #define _PC_LINK_MAX 1
 #define _PC_MAX_CANON 2

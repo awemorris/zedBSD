@@ -23,9 +23,9 @@ static struct zbl6_handoff boot_info;
 static struct zbl6_handoff_v2 boot_info_v2;
 static struct zbl6_framebuffer boot_framebuffer;
 static struct zbl6_memory_range boot_memory_range[MAX_BOOT_MEMORY_RANGES];
-static uint32 boot_memory_range_count;
+static uint32_t boot_memory_range_count;
 static struct boot_handoff kernel_handoff;
-static uint64 total_memory;
+static uint64_t total_memory;
 static uint8_t boot_font[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 static int boot_font_valid;
 
@@ -42,18 +42,18 @@ handoff_name_is(const char *name, const char *expected)
 }
 
 static void
-accept_framebuffer(uint64 base, uint64 size, uint32 width, uint32 height,
-    uint32 stride, uint32 format)
+accept_framebuffer(uint64_t base, uint64_t size, uint32_t width, uint32_t height,
+    uint32_t stride, uint32_t format)
 {
-	uint64 offset = base & 0x1fffffULL;
-	uint64 required;
+	uint64_t offset = base & 0x1fffffULL;
+	uint64_t required;
 
 	if (size == 0 || base > UINT64_MAX - size || width == 0 || height == 0 ||
 	    stride < width || (format != ZBL6_FRAMEBUFFER_RGBX8888 &&
 	    format != ZBL6_FRAMEBUFFER_BGRX8888) ||
 	    stride > UINT64_MAX / 4U / height)
 		HAL_FATAL("invalid amd64 framebuffer handoff");
-	required = (uint64)stride * height * 4U;
+	required = (uint64_t)stride * height * 4U;
 	if (required > size || size > 0x3e000000ULL - offset)
 		HAL_FATAL("invalid amd64 framebuffer extent");
 	boot_framebuffer.physical_base = base;
@@ -71,8 +71,8 @@ bsp_boot_init(const void *raw_boot_info)
 	const struct zbl6_handoff_v2 *raw_v2 = raw_boot_info;
 	const struct vga_font_handoff *font =
 	    (const struct vga_font_handoff *)(uintptr_t)VGA_FONT_HANDOFF;
-	uint64 highest = 0;
-	uint32 index;
+	uint64_t highest = 0;
+	uint32_t index;
 
 	if (raw == NULL || raw->magic != ZBL6_HANDOFF_MAGIC)
 		HAL_FATAL("invalid amd64 ZBL6 handoff");
@@ -96,7 +96,7 @@ bsp_boot_init(const void *raw_boot_info)
 			    raw_framebuffer->framebuffer_format);
 		}
 		total_memory = 0x100000ULL +
-		    (uint64)boot_info.mem_upper_kib * 1024ULL;
+		    (uint64_t)boot_info.mem_upper_kib * 1024ULL;
 		if (total_memory > 0x40000000ULL)
 			total_memory = 0x40000000ULL;
 		boot_memory_range_count = 1;
@@ -108,7 +108,7 @@ bsp_boot_init(const void *raw_boot_info)
 	    raw->version == ZBL6_HANDOFF_V3_VERSION) {
 		const struct zbl6_memory_range *source;
 		const struct zbl6_handoff_v3 *raw_v3 = raw_boot_info;
-		uint64 previous_end = 0;
+		uint64_t previous_end = 0;
 
 		if (raw_v2->size < (raw->version == ZBL6_HANDOFF_V3_VERSION ?
 		    sizeof(*raw_v3) : sizeof(*raw_v2)) ||
@@ -151,7 +151,7 @@ bsp_boot_init(const void *raw_boot_info)
 		source = (const void *)(uintptr_t)raw_v2->memory_ranges;
 		boot_memory_range_count = raw_v2->memory_range_count;
 		for (index = 0; index < boot_memory_range_count; index++) {
-			uint64 end;
+			uint64_t end;
 			boot_memory_range[index] = source[index];
 			if (boot_memory_range[index].size == 0 ||
 			    (boot_memory_range[index].base & 0xfffU) != 0 ||
@@ -212,12 +212,12 @@ hal_get_arch_handoff(const char *name)
 	return NULL;
 }
 
-uint64 bsp_mem_probe(void) { return total_memory; }
+uint64_t bsp_mem_probe(void) { return total_memory; }
 
-uint32 bsp_mem_range_count(void) { return boot_memory_range_count; }
+uint32_t bsp_mem_range_count(void) { return boot_memory_range_count; }
 
 int
-bsp_mem_range(uint32 index, uint64 *base, uint64 *size, uint32 *type)
+bsp_mem_range(uint32_t index, uint64_t *base, uint64_t *size, uint32_t *type)
 {
 	if (index >= boot_memory_range_count || base == NULL || size == NULL ||
 	    type == NULL)
@@ -228,7 +228,7 @@ bsp_mem_range(uint32 index, uint64 *base, uint64 *size, uint32 *type)
 	return 1;
 }
 
-uint64
+uint64_t
 bsp_acpi_rsdp(void)
 {
 	return boot_info_v2.magic == ZBL6_HANDOFF_MAGIC ?

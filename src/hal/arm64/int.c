@@ -19,9 +19,9 @@ void arm64_int_init(void)
 	hal_puts("ARM64 EXCEPTION PASS\nARM64 IRQ READY\n");
 }
 
-void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
+void arm64_sync_handler(struct arm64_exception_frame *f,uint64_t vector)
 {
-	uint32 ec=(uint32)((f->esr>>26)&0x3f);
+	uint32_t ec=(uint32_t)((f->esr>>26)&0x3f);
 	if (vector == 0) {
 		int cause = (ec == 0x20 || ec == 0x21 || ec == 0x24 ||
 		    ec == 0x25) ? HAL_TRAP_CAUSE_PAGE_FAULT :
@@ -48,8 +48,9 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 		for (i = 0; i < HAL_SYSCALL_ARGS; i++)
 			args[i] = (uintptr_t)f->x[i];
 		arm64_task_enter_user_frame(f);
-		f->x[0] = (uint64)(syscall_handler != NULL ?
-			syscall_handler((uint32)f->x[8], args) : -ENOSYS);
+		/* The generic callback owns accounting and its interruptible window. */
+		f->x[0] = (uint64_t)(syscall_handler != NULL ?
+			syscall_handler((uint32_t)f->x[8], args) : -ENOSYS);
 		kernel_user_return_handler();
 		arm64_task_leave_user_frame();
 		return;
@@ -85,16 +86,22 @@ void arm64_sync_handler(struct arm64_exception_frame *f,uint64 vector)
 		HAL_FATAL("AArch64 user fault handler returned");
 	}
 	hal_printf("ARM64 sync vector=%u ec=%x esr=%llx elr=%llx far=%llx\n",
-	    (uint32)vector,ec,f->esr,f->elr,f->far);
+	    (uint32_t)vector,ec,f->esr,f->elr,f->far);
 	HAL_FATAL("unhandled AArch64 synchronous exception");
 }
 
-void arm64_irq_handler(struct arm64_exception_frame *f)
+void arm64_irq_handler(struct arm64_exception_frame *f, int from_user)
 {
-	uint32 iar,id;(void)f;
+	uint32_t iar,id;
+	if (from_user)
+		arm64_task_enter_user_frame(f);
 	iar=rpi4_gic_ack();id=iar&0x3ff;
-	if(id>=1020)return;
-	arm64_irq_dispatch(id, (hal_irq_ack_t)iar + 1U);
+	if(id<1020)
+		arm64_irq_dispatch(id, (hal_irq_ack_t)iar + 1U);
+	if (from_user) {
+		kernel_user_return_handler();
+		arm64_task_leave_user_frame();
+	}
 }
 
 void hal_set_trap_handler(int trap,hal_trap_handler_t h){if(trap<0||trap>=5)HAL_FATAL("bad trap");trap_handlers[trap]=h;}

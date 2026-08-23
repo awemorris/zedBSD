@@ -68,11 +68,25 @@ m68k_exception_dispatch(struct m68k_saved_frame *frame)
 	unsigned vector = (format_vector & 0x0fffU) >> 2;
 	int user = (sr & M68K_SR_SUPERVISOR) == 0;
 
+	/*
+	 * Unlike the other trap mechanisms, a 68k user exception can preserve
+	 * IPL0 in the live supervisor SR.  Mask locally while the HAL owns the
+	 * saved-frame bookkeeping; generic callbacks open their own IRQ windows.
+	 */
+	if (user)
+		(void)hal_irq_disable();
+
 	if ((vector >= 25U && vector <= 31U) ||
 	    (vector >= 0x40U && vector <= 0x4fU)) {
 		unsigned irq = vector >= 0x40U ? vector : vector - 24U;
+		if (user)
+			m68k_task_enter_user_frame(frame);
 		if (!x68k_irq_dispatch(irq))
 			hal_printf("X68k: unhandled IRQ vector %u\n", irq);
+		if (user) {
+			kernel_user_return_handler();
+			m68k_task_leave_user_frame();
+		}
 		return;
 	}
 

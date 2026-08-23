@@ -4,8 +4,10 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <zedbsd/types.h>
-typedef uint32_t sigset_t;
-#define NSIG 32
+/* One bit per signal.  Signal 63 is reserved to libc and bit 63 is unused,
+ * leaving a fixed-width ABI with room for the classic and realtime sets. */
+typedef uint64_t sigset_t;
+#define NSIG 64
 #define SIGHUP 1
 #define SIGINT 2
 #define SIGQUIT 3
@@ -29,8 +31,18 @@ typedef uint32_t sigset_t;
 #define SIGTSTP 21
 #define SIGTTIN 22
 #define SIGTTOU 23
-#define SIGRTMIN 24
-#define SIGRTMAX 31
+#define SIGURG 24
+#define SIGWINCH 25
+#define SIGIO 26
+#define SIGPOLL SIGIO
+#define SIGXCPU 27
+#define SIGXFSZ 28
+#define SIGRTMIN 29
+#define SIGRTMAX 62
+/* Implementation namespace: this is deliberately outside the public
+ * SIGRTMIN..SIGRTMAX interval.  libc uses it to turn SIGEV_THREAD timer
+ * expiry into work for its notification thread. */
+#define __ZEDBSD_SIGEV_THREAD_SIGNAL 63
 #define SIG_BLOCK 0
 #define SIG_UNBLOCK 1
 #define SIG_SETMASK 2
@@ -72,6 +84,11 @@ union sigval {
 	uint64_t __sival_pad;
 };
 
+/* pthread_attr_t is a libc type.  Giving its implementation tag a forward
+ * declaration lets sigevent expose the standard pointer type without making
+ * the kernel UAPI depend on the pthread header. */
+struct __pthread_attr;
+
 #define SIGEV_NONE 0
 #define SIGEV_SIGNAL 1
 #define SIGEV_THREAD 2
@@ -79,7 +96,14 @@ struct sigevent {
 	int32_t sigev_notify;
 	int32_t sigev_signo;
 	union sigval sigev_value;
-	uint64_t sigev_reserved[2];
+	void (*sigev_notify_function)(union sigval);
+#ifndef ZEDBSD_USER_ABI_LP64
+	uint32_t __sigev_notify_function_pad;
+#endif
+	struct __pthread_attr *sigev_notify_attributes;
+#ifndef ZEDBSD_USER_ABI_LP64
+	uint32_t __sigev_notify_attributes_pad;
+#endif
 };
 
 typedef struct siginfo {
@@ -125,7 +149,6 @@ typedef struct ucontext {
 	uint64_t uc_flags;
 	uint64_t uc_link;
 	sigset_t uc_sigmask;
-	uint32_t uc_reserved0;
 	mcontext_t uc_mcontext;
 	uint64_t uc_reserved[5];
 } ucontext_t;
@@ -134,6 +157,7 @@ struct sigaction {
 	uint64_t sa_handler;
 	sigset_t sa_mask;
 	uint32_t sa_flags;
+	uint32_t __sa_reserved;
 	uint64_t sa_restorer;
 };
 #endif

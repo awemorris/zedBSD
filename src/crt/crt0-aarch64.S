@@ -1,3 +1,5 @@
+#include <hal/arch.h>
+
 	.text
 	.balign 16
 	.global _start
@@ -41,8 +43,8 @@ __syscall6:
 	.global __signal_restorer
 	.type __signal_restorer, %function
 __signal_restorer:
-	ldr w0, [sp]
-	ldr x1, [sp, #8]
+	ldr w0, [sp, #HAL_TASK_SIGNAL_RESTORER_TOKEN_OFFSET]
+	ldr x1, [sp, #HAL_TASK_SIGNAL_RESTORER_CONTEXT_OFFSET]
 	mov x8, #80
 	svc #0
 	brk #0

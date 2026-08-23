@@ -22,18 +22,18 @@ hal_memset(void *pointer, int value, size_t size)
 }
 
 void *
-hal_memset16(uint16 *pointer, uint16 value, size_t count)
+hal_memset16(uint16_t *pointer, uint16_t value, size_t count)
 {
-	uint16 *output = pointer;
+	uint16_t *output = pointer;
 	while (count-- != 0)
 		*output++ = value;
 	return pointer;
 }
 
 void *
-hal_memset32(uint32 *pointer, uint32 value, size_t count)
+hal_memset32(uint32_t *pointer, uint32_t value, size_t count)
 {
-	uint32 *output = pointer;
+	uint32_t *output = pointer;
 	while (count-- != 0)
 		*output++ = value;
 	return pointer;
@@ -78,10 +78,10 @@ hal_free(void *pointer)
 int hal_putchar(int character) { hal_cons_putc(character); return character; }
 int hal_puts(const char *string) { hal_cons_write(string); return 0; }
 
-static uint64
-divide_unsigned(uint64 value, unsigned base, uint64 *remainder)
+static uint64_t
+divide_unsigned(uint64_t value, unsigned base, uint64_t *remainder)
 {
-	uint64 quotient = 0, rest = 0;
+	uint64_t quotient = 0, rest = 0;
 	int bit;
 	for (bit = 63; bit >= 0; bit--) {
 		rest = (rest << 1) | ((value >> (unsigned)bit) & 1U);
@@ -95,12 +95,12 @@ divide_unsigned(uint64 value, unsigned base, uint64 *remainder)
 }
 
 static void
-put_number(uint64 value, unsigned base, int width)
+put_number(uint64_t value, unsigned base, int width)
 {
 	char digits[24];
 	int count = 0;
 	do {
-		uint64 remainder;
+		uint64_t remainder;
 		value = divide_unsigned(value, base, &remainder);
 		digits[count++] = (char)(remainder < 10 ? '0' + remainder :
 		    'a' + remainder - 10);
@@ -141,21 +141,21 @@ hal_printf(const char *format, ...)
 			break;
 		}
 		case 'u': put_number(long_argument ?
-		    __builtin_va_arg(arguments, uint64) :
-		    __builtin_va_arg(arguments, uint32), 10, width); break;
+		    __builtin_va_arg(arguments, uint64_t) :
+		    __builtin_va_arg(arguments, uint32_t), 10, width); break;
 		case 'x': put_number(long_argument ?
-		    __builtin_va_arg(arguments, uint64) :
-		    __builtin_va_arg(arguments, uint32), 16, width); break;
+		    __builtin_va_arg(arguments, uint64_t) :
+		    __builtin_va_arg(arguments, uint32_t), 16, width); break;
 		case 'd': {
-			int64 value = long_argument ?
-			    __builtin_va_arg(arguments, int64) :
-			    __builtin_va_arg(arguments, int32);
-			uint64 magnitude;
+			int64_t value = long_argument ?
+			    __builtin_va_arg(arguments, int64_t) :
+			    __builtin_va_arg(arguments, int32_t);
+			uint64_t magnitude;
 			if (value < 0) {
 				hal_cons_putc('-');
-				magnitude = (uint64)(-(value + 1)) + 1;
+				magnitude = (uint64_t)(-(value + 1)) + 1;
 			} else {
-				magnitude = (uint64)value;
+				magnitude = (uint64_t)value;
 			}
 			put_number(magnitude, 10, width);
 			break;
@@ -173,7 +173,7 @@ hal_printf(const char *format, ...)
 void
 hal_assert(const char *file, int line, const char *expression)
 {
-	hal_printf("assert: %s:%u: %s\n", file, (uint32)line, expression);
+	hal_printf("assert: %s:%u: %s\n", file, (uint32_t)line, expression);
 	(void)hal_irq_disable();
 	for (;;)
 		__asm__ volatile("stop #0x2700");
@@ -182,7 +182,7 @@ hal_assert(const char *file, int line, const char *expression)
 void
 hal_fatal(const char *file, int line, const char *message)
 {
-	hal_printf("fatal: %s:%u: %s\n", file, (uint32)line, message);
+	hal_printf("fatal: %s:%u: %s\n", file, (uint32_t)line, message);
 	(void)hal_irq_disable();
 	for (;;)
 		__asm__ volatile("stop #0x2700");

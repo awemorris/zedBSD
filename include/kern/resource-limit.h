@@ -18,5 +18,6 @@ int resource_limit_set(struct process *, int,
 	const struct rlimit_record *);
 int resource_limit_apply_vm(struct process *, struct vmspace *);
 uint64_t resource_limit_current(struct process *, int);
+void resource_limit_cpu_tick(struct process *, uint64_t total_ticks);
 
 #endif

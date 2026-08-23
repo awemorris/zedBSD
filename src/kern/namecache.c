@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/namecache.h"
+#include "kern/atomic.h"
 #include "kern/namei.h"
 #include "kern/lock.h"
 #include "kern/test-checkpoint.h"
@@ -61,7 +62,8 @@ namecache_lookup(struct inode *parent, const struct componentname *name,
 			if (entries[i].parent == NULL ||
 			    !matches(&entries[i], parent, name))
 				continue;
-			if (entries[i].parent_dirseq != parent->i_dirseq) {
+			if (entries[i].parent_dirseq !=
+			    atomic_u64_load_acquire(&parent->i_dirseq)) {
 				detach(&entries[i], &old_parent, &old_child);
 				break;
 			}
@@ -96,7 +98,8 @@ namecache_enter(struct inode *parent, const struct componentname *name,
 	for (i = 0; i < NAMECACHE_MAX; i++) {
 		if (entries[i].parent != NULL && matches(&entries[i], parent, name)) {
 			if (entries[i].child == child &&
-			    entries[i].parent_dirseq == parent->i_dirseq) {
+			    entries[i].parent_dirseq ==
+			    atomic_u64_load_acquire(&parent->i_dirseq)) {
 				spin_unlock_irqrestore(&namecache_lock, irq);
 				release_pair(parent, child);
 				return 0;
@@ -114,7 +117,8 @@ namecache_enter(struct inode *parent, const struct componentname *name,
 	}
 	entries[slot].parent = parent;
 	entries[slot].child = child;
-	entries[slot].parent_dirseq = parent->i_dirseq;
+	entries[slot].parent_dirseq =
+	    atomic_u64_load_acquire(&parent->i_dirseq);
 	entries[slot].length = name->cn_namelen;
 	memcpy(entries[slot].name, name->cn_nameptr, name->cn_namelen);
 	entries[slot].name[name->cn_namelen] = '\0';

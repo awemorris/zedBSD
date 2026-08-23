@@ -1,9 +1,9 @@
 /*
- * HAL: Historical Architecture Library
+ * Historical Architecture Library
  * Copyright (C) 2026 Awe Morris
  *
- * This header defines a kernel porting HAL. A HAL is implemented fo
- * a combination of a CPU architecture and a machine/board type. A HAL
+ * This header defines a kernel porting HAL. A HAL is implemented fo a
+ * combination of a CPU architecture and a machine/board type. A HAL
  * doesn't implement basic kernel features such as scheduling
  * algorithm, and only implements low level operations required fo
  * contemporary 32-bit and 64-bit POSIX-compatible kernels.
@@ -15,13 +15,14 @@
 #define HAL_HAL_H
 
 #include <hal/types.h>
+#include <hal/arch.h>
 
 /*
  * Kernel C runtime
  */
 
-#define HAL_ASSERT(e) ((e) ? (void)0 : hal_assert(__FILE__, __LINE__, #e))
-#define HAL_FATAL(msg) hal_fatal(__FILE__, __LINE__, msg)
+#define HAL_ASSERT(e)	((e) ? (void)0 : hal_assert(__FILE__, __LINE__, #e))
+#define HAL_FATAL(msg)	hal_fatal(__FILE__, __LINE__, msg)
 
 int
 hal_strlen(
@@ -123,7 +124,7 @@ hal_cpu_mask_fill(
 	unsigned i;
 
 	for (i = 0; i < HAL_CPU_MASK_WORDS; i++)
-		mask->bits[i] = ~(uint64)0;
+		mask->bits[i] = ~(uint64_t)0;
 }
 
 static inline void
@@ -132,7 +133,7 @@ hal_cpu_mask_set(
 	hal_cpu_id_t cpu)
 {
 	if (cpu < HAL_CPU_MAX)
-		mask->bits[cpu / 64U] |= (uint64)1 << (cpu % 64U);
+		mask->bits[cpu / 64U] |= (uint64_t)1 << (cpu % 64U);
 }
 
 static inline void
@@ -141,7 +142,7 @@ hal_cpu_mask_clear(
 	hal_cpu_id_t cpu)
 {
 	if (cpu < HAL_CPU_MAX)
-		mask->bits[cpu / 64U] &= ~((uint64)1 << (cpu % 64U));
+		mask->bits[cpu / 64U] &= ~((uint64_t)1 << (cpu % 64U));
 }
 
 static inline int
@@ -150,7 +151,7 @@ hal_cpu_mask_test(
 	hal_cpu_id_t cpu)
 {
 	return cpu < HAL_CPU_MAX &&
-	    (mask->bits[cpu / 64U] & ((uint64)1 << (cpu % 64U))) != 0;
+	    (mask->bits[cpu / 64U] & ((uint64_t)1 << (cpu % 64U))) != 0;
 }
 
 hal_cpu_id_t
@@ -259,7 +260,14 @@ hal_rtc_read(
 #define HAL_SYSCALL_ARGS	(6)
 #define HAL_SIGNAL_NEST_MAX	(8)
 
-typedef intptr_t (*hal_syscall_handler_t)(uint32_t number, const uintptr_t args[HAL_SYSCALL_ARGS]);
+/*
+ * The HAL installs the active return-to-user frame and invokes this handler
+ * with local IRQs masked.  The generic kernel owns any interruptible syscall
+ * window and must return with local IRQs masked so the HAL can commit the
+ * saved frame atomically.
+ */
+typedef intptr_t (*hal_syscall_handler_t)(uint32_t number,
+	const uintptr_t args[HAL_SYSCALL_ARGS]);
 
 void
 hal_syscall_set_handler(
@@ -301,7 +309,12 @@ hal_set_trap_handler(
 /* Address space handle. */
 typedef void *hal_space_t;
 
-/* System space. */
+/*
+ * Shared system-address selector.  Every user space created by the HAL
+ * contains the same architecture-defined system half; this value names that
+ * common mapping for system-space operations and is not a detachable task
+ * address space.
+ */
 #define HAL_SPACE_SYS		(NULL)
 
 /* Page attributes. */
@@ -317,21 +330,25 @@ typedef void *hal_space_t;
 #define HAL_PAGE_ACCESSED 0x02U
 #define HAL_PAGE_DIRTY    0x04U
 
-/* Create a user space. */
+/* Create a user space containing the shared system mapping. */
 hal_space_t
 hal_mem_create_space(void);
 
-/* Destroy a user space. */
+/*
+ * Destroy a user space.  The generic kernel must first retire every owning
+ * task and ensure that no CPU selects the space.  HAL implementations close
+ * hardware translation windows, but never change task ownership implicitly.
+ */
 void
 hal_page_destroy_space(
 	hal_space_t space);
 
-/* Switch the user space of the current task. */
+/* Select a user space on the current CPU; HAL_SPACE_SYS selects only system. */
 void
 hal_page_switch_space(
 	hal_space_t space);
 
-/* Map address. */
+/* Map an address and complete any required TLB synchronization. */
 int
 hal_page_map(
 	hal_space_t space,
@@ -340,7 +357,7 @@ hal_page_map(
 	size_t size,
 	uint32_t attr);
 
-/* Map address. Additional TLB flush is required if the current space is specified. */
+/* Change protection and complete any required TLB synchronization. */
 int
 hal_page_prot(
 	hal_space_t space,
@@ -348,7 +365,23 @@ hal_page_prot(
 	size_t size,
 	uint32_t attr);
 
-/* Unmap address. Additional TLB flush is required if the current space is specified. */
+/*
+ * Atomically publish a protection change, complete every required remote TLB
+ * invalidation, and then report the access/dirty state accumulated by the old
+ * translations.  flags is the OR of HAL_PAGE_* for the complete range.  In
+ * particular, removing HAL_SPACE_WRITE observes stores made through stale TLB
+ * entries before the shootdown acknowledgement.  Callers may therefore use
+ * this operation as the write-revoke boundary before page writeback.
+ */
+int
+hal_page_prot_query(
+	hal_space_t space,
+	void *vaddr,
+	size_t size,
+	uint32_t attr,
+	uint32_t *flags);
+
+/* Unmap an address and complete any required TLB synchronization. */
 int
 hal_page_unmap(
 	hal_space_t space,
@@ -494,7 +527,7 @@ hal_task_create(
 
 /*
  * Duplicate/replace the active return-to-user context.  These
- * operations are valid only while the current task is handling a use
+ * operations are valid only while the current task is handling a user
  * system call.
  */
 hal_task_t
@@ -540,13 +573,6 @@ hal_task_signal_enter(
 int
 hal_task_signal_return(
 	uint32_t token,
-	intptr_t *return_value);
-
-int
-hal_task_signal_restart(
-	uint32_t token,
-	uint32_t number,
-	const uintptr_t args[HAL_SYSCALL_ARGS],
 	intptr_t *return_value);
 
 /* Destroy a task. */
@@ -958,7 +984,11 @@ kernel_user_int_handler(
 	uintptr_t pc,
 	uintptr_t value);
 
-/* Fault handler callback. */
+/*
+ * Fault handler callback.  A user frame is active and local IRQs are masked
+ * on entry and normal return.  The generic kernel owns fault accounting and
+ * any interruptible fault-resolution window.
+ */
 int
 kernel_user_fault_handler(
 	uint32_t vector,
@@ -967,6 +997,14 @@ kernel_user_fault_handler(
 	uintptr_t error_code,
 	uintptr_t fault_address);
 
+/*
+ * Final return-to-user callback.  For asynchronous interrupts, the HAL has
+ * quiesced the source and either completed its acknowledgement or transferred
+ * acknowledgement ownership under the IRQ-service contract.  A user frame is
+ * active and local IRQs are masked on entry and normal return; the generic
+ * kernel may enable IRQs while applying stop/exit/signal policy.  The HAL
+ * detaches the frame only after this callback returns.
+ */
 void
 kernel_user_return_handler(void);
 

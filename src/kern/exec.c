@@ -15,6 +15,7 @@
 #include "kern/filedesc.h"
 #include "kern/signal.h"
 #include "kern/resource-limit.h"
+#include "kern/test-checkpoint.h"
 
 #include <zedbsd/auxv.h>
 #include <zedbsd/process.h>
@@ -33,15 +34,50 @@
 typedef uintptr_t exec_user_word_t;
 #define EXEC_IMAGE_INFO struct elf64_image_info
 #define exec_elf_load elf64_load
+#define exec_elf_load_content elf64_load_content
 #define exec_elf_load_interpreter elf64_load_interpreter
 #else
 typedef uint32_t exec_user_word_t;
 #define EXEC_IMAGE_INFO struct elf32_image_info
 #define exec_elf_load elf32_load
+#define exec_elf_load_content elf32_load_content
 #define exec_elf_load_interpreter elf32_load_interpreter
 #endif
 
 #define EXEC_AUXV_PAIRS 13U
+
+struct exec_target {
+	struct file *file;
+	struct file_content_lease lease;
+	char **argv;
+	unsigned argv_owned;
+	unsigned script_depth;
+	struct stat status;
+	unsigned mount_flags;
+};
+
+/*
+ * End the last failure-capable phase and publish the successful exec boundary.
+ * Test builds call this small helper directly so the wake-before-retirement
+ * ordering can be exercised without mocking the architecture image commit.
+ */
+static void
+exec_commit_release_lease(struct file_content_lease *lease,
+	struct process *process)
+{
+	(void)process;
+	file_content_lease_end(lease);
+	KERN_TEST_CHECKPOINT(KERN_TEST_EXEC_LEASE_RELEASED, process);
+	KERN_TEST_CHECKPOINT(KERN_TEST_EXEC_RETIREMENT_BEGIN, process);
+}
+
+#ifdef ZEDBSD_EXEC_COMMIT_HOST_TEST
+void
+exec_commit_host_release_lease(struct file_content_lease *lease)
+{
+	exec_commit_release_lease(lease, NULL);
+}
+#endif
 
 int
 exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
@@ -162,7 +198,7 @@ exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
 	APPEND_AUX(AT_EUID, aux->euid);
 	APPEND_AUX(AT_GID, aux->gid);
 	APPEND_AUX(AT_EGID, aux->egid);
-	APPEND_AUX(AT_SECURE, 0);
+	APPEND_AUX(AT_SECURE, aux->secure);
 	APPEND_AUX(AT_EXECFN, execfn_address);
 	APPEND_AUX(AT_NULL, 0);
 #undef APPEND_AUX
@@ -184,7 +220,8 @@ out:
 
 static int
 load_executable(struct cwdinfo *cwdi, const struct ucred *cred,
-	const char *path, struct file *file, struct vmspace *vm,
+	const char *path, struct file *file, struct file_content_lease *lease,
+	struct vmspace *vm,
 	EXEC_IMAGE_INFO *image, uintptr_t *execution_entry,
 	uintptr_t *interpreter_base)
 {
@@ -193,18 +230,22 @@ load_executable(struct cwdinfo *cwdi, const struct ucred *cred,
 	int error;
 
 	if (cwdi == NULL || cred == NULL || path == NULL || file == NULL ||
-	    vm == NULL || image == NULL || execution_entry == NULL ||
+	    lease == NULL || !lease->active || vm == NULL || image == NULL ||
 	    interpreter_base == NULL)
 		return EINVAL;
-	error = exec_elf_load(file, vm, image);
+	error = exec_elf_load_content(lease, vm, image);
 	if (error != 0)
 		return error;
 	*execution_entry = image->entry;
 	*interpreter_base = 0;
 	if (!image->has_interpreter)
 		return 0;
-	error = file_openat_cred(cwdi, cred, image->interpreter, O_RDONLY, 0,
+	/* The kernel loader needs read access to bytes, but user permission is
+	 * execute-only: an X-only image remains executable. */
+	error = file_openat(cwdi, image->interpreter, O_RDONLY, 0,
 	    &interpreter_file);
+	if (error == 0 && interpreter_file->f_inode == file->f_inode)
+		error = ELOOP;
 	if (error == 0)
 		error = vfs_access(interpreter_file->f_inode, cred, X_OK);
 	if (error == 0)
@@ -219,8 +260,172 @@ load_executable(struct cwdinfo *cwdi, const struct ucred *cred,
 }
 
 static void
+exec_target_release(struct exec_target *target)
+{
+	if (target == NULL)
+		return;
+	file_content_lease_end(&target->lease);
+	if (target->file != NULL)
+		(void)file_close(target->file);
+	if (target->argv_owned)
+		exec_script_argv_free(target->argv);
+	memset(target, 0, sizeof(*target));
+}
+
+/* Resolve the kernel-script layer before invoking the ELF loader.  Each
+ * interpreter is opened and checked with the immutable pre-exec credential;
+ * PT_INTERP remains the ELF loader's independent dynamic-linker layer. */
+static int
+exec_target_resolve(struct cwdinfo *cwdi, const struct ucred *cred,
+	const char *path, struct file *provided_file, int reopenable_path,
+	char *const argv[], struct exec_target *target)
+{
+	unsigned char header[EXEC_SHEBANG_LINE_MAX + 1U];
+	char paths[EXEC_SHEBANG_DEPTH_MAX + 1U][PATH_MAX];
+	char **rewritten;
+	unsigned path_count = 0;
+	int error;
+
+	if (cwdi == NULL || cred == NULL || path == NULL || argv == NULL ||
+	    argv[0] == NULL || target == NULL)
+		return EINVAL;
+	memset(target, 0, sizeof(*target));
+	target->argv = (char **)argv;
+	if (provided_file != NULL) {
+		file_ref(provided_file);
+		target->file = provided_file;
+	} else {
+		error = file_openat(cwdi, path, O_RDONLY, 0,
+		    &target->file);
+		if (error != 0)
+			return error;
+	}
+	error = file_content_lease_begin(target->file, &target->lease);
+	if (error != 0)
+		goto fail;
+	if (reopenable_path) {
+		if (strlen(path) >= sizeof(paths[0])) {
+			error = ENAMETOOLONG;
+			goto fail;
+		}
+		strcpy(paths[path_count++], path);
+	}
+	for (;;) {
+		struct exec_shebang shebang;
+		ssize_t count;
+		int parsed, at_eof;
+
+		if (target->file->f_inode == NULL ||
+		    target->file->f_inode->i_type != INODE_REG) {
+			error = EACCES;
+			goto fail;
+		}
+		error = vfs_access(target->file->f_inode, cred, X_OK);
+		if (error != 0)
+			goto fail;
+		error = inode_getattr(target->file->f_inode, &target->status);
+		if (error != 0)
+			goto fail;
+		target->mount_flags = target->file->f_path.p_mount != NULL ?
+		    target->file->f_path.p_mount->m_flags : 0;
+		count = file_content_lease_pread(&target->lease, header,
+		    sizeof(header), 0);
+		if (count < 0) {
+			error = (int)-count;
+			goto fail;
+		}
+		at_eof = target->status.st_size >= 0 &&
+		    (uint64_t)target->status.st_size <= (uint64_t)count;
+		parsed = exec_shebang_parse(header, (size_t)count, at_eof,
+		    &shebang);
+		if (parsed < 0) {
+			error = -parsed;
+			goto fail;
+		}
+		if (parsed == 0)
+			return 0;
+		if (!reopenable_path) {
+			/* A descriptor does not supply a stable pathname that the
+			 * interpreter can receive and reopen as argv[1]. */
+			error = ENOEXEC;
+			goto fail;
+		}
+		if (target->script_depth >= EXEC_SHEBANG_DEPTH_MAX) {
+			error = ELOOP;
+			goto fail;
+		}
+		{
+			unsigned i;
+			for (i = 0; i < path_count; i++)
+				if (!strcmp(paths[i], shebang.interpreter)) {
+					error = ELOOP;
+					goto fail;
+				}
+		}
+		error = exec_script_argv_build(target->argv, &shebang,
+		    paths[path_count - 1U], &rewritten);
+		if (error != 0)
+			goto fail;
+		if (target->argv_owned)
+			exec_script_argv_free(target->argv);
+		target->argv = rewritten;
+		target->argv_owned = 1;
+		{
+			struct file *interpreter = NULL;
+			error = file_openat(cwdi, shebang.interpreter,
+			    O_RDONLY, 0, &interpreter);
+			if (error != 0)
+				goto fail;
+			file_content_lease_end(&target->lease);
+			(void)file_close(target->file);
+			target->file = interpreter;
+			error = file_content_lease_begin(target->file,
+			    &target->lease);
+			if (error != 0)
+				goto fail;
+		}
+		strcpy(paths[path_count++], shebang.interpreter);
+		target->script_depth++;
+	}
+fail:
+	exec_target_release(target);
+	return error;
+}
+
+static int
+exec_target_revalidate(const struct exec_target *target,
+	const struct ucred *cred)
+{
+	struct stat current;
+	unsigned mount_flags;
+	int error;
+
+	if (target == NULL || target->file == NULL ||
+	    target->file->f_inode == NULL || cred == NULL)
+		return EINVAL;
+	error = vfs_access(target->file->f_inode, cred, X_OK);
+	if (error != 0)
+		return error;
+	error = inode_getattr(target->file->f_inode, &current);
+	if (error != 0)
+		return error;
+	mount_flags = target->file->f_path.p_mount != NULL ?
+	    target->file->f_path.p_mount->m_flags : 0;
+	/* The stack's auxiliary credentials were derived from this snapshot.
+	 * Refuse to commit a different privilege transition if chmod/chown or a
+	 * mount-flag change raced the potentially sleeping ELF load. */
+	if (current.st_mode != target->status.st_mode ||
+	    current.st_uid != target->status.st_uid ||
+	    current.st_gid != target->status.st_gid ||
+	    mount_flags != target->mount_flags)
+		return EAGAIN;
+	return 0;
+}
+
+static void
 fill_auxv_info(struct exec_auxv_info *aux, const EXEC_IMAGE_INFO *image,
-	uintptr_t interpreter_base, const struct ucred *cred, const char *path)
+	uintptr_t interpreter_base, const struct ucred *cred, unsigned secure,
+	const char *path)
 {
 	memset(aux, 0, sizeof(*aux));
 	aux->program_headers = image->program_headers;
@@ -232,11 +437,13 @@ fill_auxv_info(struct exec_auxv_info *aux, const EXEC_IMAGE_INFO *image,
 	aux->euid = cred->euid;
 	aux->gid = cred->rgid;
 	aux->egid = cred->egid;
+	aux->secure = secure;
 	aux->exec_path = path;
 }
 
 static int
-setup_standard_files(struct process *parent, struct process *process)
+setup_standard_files(struct process *parent, struct process *process,
+	const struct ucred *credential)
 {
 	static const int flags[3] = { O_RDONLY, O_WRONLY, O_WRONLY };
 	int descriptor;
@@ -251,7 +458,7 @@ setup_standard_files(struct process *parent, struct process *process)
 			(void)file_close(file);
 			continue;
 		}
-		error = file_openat_cred(process->cwdi, process->cred, "/dev/console",
+		error = file_openat_cred(process->cwdi, credential, "/dev/console",
 			flags[descriptor], 0, &file);
 		if (error != 0)
 			return error;
@@ -269,29 +476,45 @@ process_spawn_from(struct process *parent, const char *path,
 		   char *const argv[], char *const envp[],
 		   struct process **result)
 {
-	struct file *file = NULL;
+	struct exec_target target;
 	struct process *process = NULL;
+	struct process_cred_reservation *cred_reservation = NULL;
+	struct ucred *access_cred = NULL, *prospective_cred = NULL;
 	struct thread *thread;
 	EXEC_IMAGE_INFO image;
 	struct exec_auxv_info aux;
 	uintptr_t sp;
 	uintptr_t execution_entry, interpreter_base;
+	unsigned secure = 0;
 	int error;
-	const char *stage = "open executable";
+	const char *stage = "resolve executable";
 
+	memset(&target, 0, sizeof(target));
 	if (parent == NULL || path == NULL || argv == NULL || argv[0] == NULL ||
 	    parent->cwdi == NULL)
 		return EINVAL;
-	error = file_openat_cred(parent->cwdi, parent->cred, path, O_RDONLY, 0,
-	    &file);
+	access_cred = cred_process_ref(parent);
+	if (access_cred == NULL)
+		return EINVAL;
+	error = exec_target_resolve(parent->cwdi, access_cred, path, NULL, 1,
+	    argv, &target);
 	if (error != 0)
 		goto out;
-	stage = "check execute access";
-	error = vfs_access(file->f_inode, parent->cred, X_OK);
-	if (error != 0)
+	prospective_cred = cred_copy(access_cred);
+	if (prospective_cred == NULL) {
+		error = ENOMEM;
 		goto out;
+	}
+	/* target.status describes the final non-script image.  Script inode
+	 * set-id bits were discarded while resolving; a set-id ELF interpreter
+	 * itself retains normal executable semantics. */
+	exec_credential_prepare(prospective_cred, &target.status,
+	    target.mount_flags, 0, &secure);
 	stage = "create process";
 	error = process_create(parent, 0, &process);
+	if (error != 0)
+		goto out;
+	error = process_cred_reserve(process, &cred_reservation);
 	if (error != 0)
 		goto out;
 	process->vmspace = vmspace_create();
@@ -303,22 +526,27 @@ process_spawn_from(struct process *parent, const char *path,
 	if (error != 0)
 		goto out;
 	stage = "load ELF";
-	error = load_executable(process->cwdi, process->cred, path, file,
-	    process->vmspace, &image, &execution_entry, &interpreter_base);
+	error = exec_target_revalidate(&target, access_cred);
+	if (error == 0)
+		error = load_executable(process->cwdi, access_cred, path, target.file,
+	    &target.lease, process->vmspace, &image, &execution_entry,
+	    &interpreter_base);
 	if (error != 0)
 		goto out;
 	stage = "set brk";
-	error = vmspace_set_brk_start(process->vmspace, image.brk_start);
+	error = vmspace_set_brk_start(process->vmspace, image.brk_start,
+	    image.static_data_size);
 	if (error != 0)
 		goto out;
 	stage = "build initial stack";
-	fill_auxv_info(&aux, &image, interpreter_base, process->cred, path);
-	error = exec_build_initial_stack(process->vmspace, image.stack_size, argv,
-		envp, &aux, &sp);
+	fill_auxv_info(&aux, &image, interpreter_base, prospective_cred, secure,
+	    path);
+	error = exec_build_initial_stack(process->vmspace, image.stack_size,
+		target.argv, envp, &aux, &sp);
 	if (error != 0)
 		goto out;
 	stage = "open standard files";
-	error = setup_standard_files(parent, process);
+	error = setup_standard_files(parent, process, access_cred);
 	if (error != 0)
 		goto out;
 	tty_attach_console(process);
@@ -328,6 +556,18 @@ process_spawn_from(struct process *parent, const char *path,
 	error = thread_create(process, execution_entry, sp, &thread);
 	if (error != 0)
 		goto out;
+	error = exec_target_revalidate(&target, access_cred);
+	if (error != 0) {
+		if (thread_abort_new(thread) != 0)
+			HAL_FATAL("cannot abort unpublished exec thread");
+		goto out;
+	}
+	/* The initial thread is still private and stopped, so credential
+	 * publication cannot race userspace or fail. */
+	process_cred_commit_reserved(process, prospective_cred,
+	    cred_reservation);
+	prospective_cred = NULL;
+	cred_reservation = NULL;
 	if (result == NULL)
 		process->flags |= PROCESS_AUTOREAP;
 	process_publish(process);
@@ -338,8 +578,10 @@ process_spawn_from(struct process *parent, const char *path,
 out:
 	if (error != 0)
 		hal_printf("exec: %s failed for %s (%d)\n", stage, path, error);
-	if (file != NULL)
-		(void)file_close(file);
+	exec_target_release(&target);
+	process_cred_reservation_abort(cred_reservation);
+	cred_release(prospective_cred);
+	cred_release(access_cred);
 	if (process != NULL)
 		process_free_mem(process);
 	return error;
@@ -347,18 +589,23 @@ out:
 
 static int
 process_exec_file(struct process *process, const char *path,
-	struct file *provided_file, char *const argv[], char *const envp[])
+	struct file *provided_file, int reopenable_path, char *const argv[],
+	char *const envp[])
 {
 	struct vmspace *new_vm = NULL, *old_vm;
-	struct file *file = provided_file;
+	struct exec_target target;
+	struct process_cred_reservation *cred_reservation = NULL;
+	struct ucred *access_cred = NULL, *prospective_cred = NULL;
 	EXEC_IMAGE_INFO image;
 	struct exec_auxv_info aux;
 	uintptr_t sp;
 	uintptr_t execution_entry, interpreter_base;
+	unsigned secure = 0;
 	bool irq_enabled;
 	unsigned long process_irq;
 	int error;
 
+	memset(&target, 0, sizeof(target));
 	if (process == NULL || process == &process0 || process != curthread->proc ||
 	    process->cwdi == NULL || path == NULL ||
 	    argv == NULL || argv[0] == NULL)
@@ -370,19 +617,23 @@ process_exec_file(struct process *process, const char *path,
 	}
 	process->execing = 1;
 	spin_unlock_irqrestore(&process->lock, process_irq);
-	if (file != NULL)
-		file_ref(file);
-	else {
-		error = file_openat_cred(process->cwdi, process->cred, path,
-		    O_RDONLY, 0, &file);
-		if (error != 0)
-			goto out;
-	}
-	if (file->f_inode == NULL || file->f_inode->i_type != INODE_REG) {
-		error = EACCES;
+	access_cred = cred_process_ref(process);
+	if (access_cred == NULL) {
+		error = EINVAL;
 		goto out;
 	}
-	error = vfs_access(file->f_inode, process->cred, X_OK);
+	error = exec_target_resolve(process->cwdi, access_cred, path,
+	    provided_file, reopenable_path, argv, &target);
+	if (error != 0)
+		goto out;
+	prospective_cred = cred_copy(access_cred);
+	if (prospective_cred == NULL) {
+		error = ENOMEM;
+		goto out;
+	}
+	exec_credential_prepare(prospective_cred, &target.status,
+	    target.mount_flags, 0, &secure);
+	error = process_cred_reserve(process, &cred_reservation);
 	if (error != 0)
 		goto out;
 	new_vm = vmspace_create();
@@ -393,15 +644,23 @@ process_exec_file(struct process *process, const char *path,
 	error = resource_limit_apply_vm(process, new_vm);
 	if (error != 0)
 		goto out;
-	error = load_executable(process->cwdi, process->cred, path, file, new_vm,
-	    &image, &execution_entry, &interpreter_base);
+	error = exec_target_revalidate(&target, access_cred);
 	if (error == 0)
-		error = vmspace_set_brk_start(new_vm, image.brk_start);
+		error = load_executable(process->cwdi, access_cred, path,
+		    target.file, &target.lease, new_vm, &image, &execution_entry,
+		    &interpreter_base);
+	if (error == 0)
+		error = vmspace_set_brk_start(new_vm, image.brk_start,
+		    image.static_data_size);
 	if (error == 0) {
-		fill_auxv_info(&aux, &image, interpreter_base, process->cred, path);
-		error = exec_build_initial_stack(new_vm, image.stack_size, argv, envp,
-		    &aux, &sp);
+		fill_auxv_info(&aux, &image, interpreter_base, prospective_cred,
+		    secure, path);
+		error = exec_build_initial_stack(new_vm, image.stack_size,
+		    target.argv, envp, &aux, &sp);
 	}
+	if (error != 0)
+		goto out;
+	error = exec_target_revalidate(&target, access_cred);
 	if (error != 0)
 		goto out;
 	/* All failure-capable HAL validation precedes sibling retirement.  After
@@ -411,6 +670,17 @@ process_exec_file(struct process *process, const char *path,
 		error = EINVAL;
 		goto out;
 	}
+	/*
+	 * The final inode/mode snapshot and architecture tuple above end all
+	 * failure-capable work.  Releasing the stable-image lease below is the
+	 * successful exec linearization point; nothing afterwards may return an
+	 * exec error.  Release it before asking siblings to retire: a
+	 * sibling may itself be sleeping in write, chmod, mmap fault or unmap on
+	 * this inode, and waiting for it while retaining the lease would form a
+	 * wait cycle.  The target file reference and fully materialized new image
+	 * remain alive; later content mutations are ordered after this exec.
+	 */
+	exec_commit_release_lease(&target.lease, process);
 	/* POSIX exec keeps only the calling thread.  Publish a kernel-only
 	 * retirement request and wait until every other task has crossed a
 	 * syscall/interrupt return boundary before replacing the vmspace. */
@@ -431,19 +701,33 @@ process_exec_file(struct process *process, const char *path,
 		if (other == NULL)
 			break;
 		if (other->state != THREAD_ZOMBIE) {
-			sched_wakeup(other);
+			sched_interrupt(other);
 			while (other->state != THREAD_ZOMBIE)
 				sched_sleep(sched_ticks() + 1U);
 		}
 		(void)thread_wait(other, NULL);
 		thread_release(other);
 	}
-	old_vm = process->vmspace;
 	irq_enabled = hal_irq_disable();
 	if (hal_task_exec_current(new_vm->space, execution_entry, sp) != 0)
 		HAL_FATAL("validated HAL exec commit failed");
+	/* process->vmspace owns one strong reference.  Publish the replacement
+	 * under process->lock so out-of-process readers can safely take their own
+	 * reference without racing the final put of old_vm.  IRQs remain disabled
+	 * across the HAL switch and publication, so this thread cannot expose the
+	 * new task context through an interrupt while the old pointer is visible. */
+	process_irq = spin_lock_irqsave(&process->lock);
+	old_vm = process->vmspace;
 	process->vmspace = new_vm;
+	spin_unlock_irqrestore(&process->lock, process_irq);
 	new_vm = NULL;
+	/* Every allocation and validation has completed and sibling threads are
+	 * gone.  Publish the prospective credentials in the same one-way commit
+	 * window as the address space. */
+	process_cred_commit_reserved(process, prospective_cred,
+	    cred_reservation);
+	prospective_cred = NULL;
+	cred_reservation = NULL;
 	if (irq_enabled)
 		hal_irq_enable();
 	filedesc_close_on_exec(process->fd);
@@ -452,15 +736,17 @@ process_exec_file(struct process *process, const char *path,
 	process->did_exec = 1;
 	strncpy(process->command, argv[0], sizeof(process->command) - 1U);
 	process->command[sizeof(process->command) - 1U] = '\0';
-	vmspace_free(old_vm);
+	vmspace_put(old_vm);
 out:
 	process_irq = spin_lock_irqsave(&process->lock);
 	process->execing = 0;
 	spin_unlock_irqrestore(&process->lock, process_irq);
-	if (file != NULL)
-		(void)file_close(file);
+	exec_target_release(&target);
+	process_cred_reservation_abort(cred_reservation);
+	cred_release(prospective_cred);
+	cred_release(access_cred);
 	if (new_vm != NULL)
-		vmspace_free(new_vm);
+		vmspace_put(new_vm);
 	return error;
 }
 
@@ -468,7 +754,7 @@ int
 process_execve(struct process *process, const char *path, char *const argv[],
 	char *const envp[])
 {
-	return process_exec_file(process, path, NULL, argv, envp);
+	return process_exec_file(process, path, NULL, 1, argv, envp);
 }
 
 int
@@ -476,7 +762,7 @@ process_fexecve(struct process *process, struct file *file,
 	char *const argv[], char *const envp[])
 {
 	const char *label = argv != NULL && argv[0] != NULL ? argv[0] : "fexecve";
-	return process_exec_file(process, label, file, argv, envp);
+	return process_exec_file(process, label, file, 0, argv, envp);
 }
 
 int

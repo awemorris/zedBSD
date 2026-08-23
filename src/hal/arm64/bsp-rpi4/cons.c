@@ -6,10 +6,10 @@
 
 #define INPUT_EVENT_COUNT 64U
 
-struct cell{uint8 character,attribute;};
+struct cell{uint8_t character,attribute;};
 static struct cell shadow[HAL_CONS_ROWS][HAL_CONS_COLUMNS];
 static struct hal_cons_state state={HAL_CONS_TERMINAL,0,0,1};
-static uint8 current_attribute=HAL_CONS_NORMAL_ATTRIBUTE;
+static uint8_t current_attribute=HAL_CONS_NORMAL_ATTRIBUTE;
 static unsigned input_events[INPUT_EVENT_COUNT];
 static unsigned input_head, input_tail;
 static struct hal_cons_wait_queue input_waiters;
@@ -57,7 +57,7 @@ static void console_putc(int character)
 	}
 	if(character=='\t'){do console_putc(' ');while(state.column&7U);return;}
 	if(state.column>=HAL_CONS_COLUMNS)newline();
-	shadow[state.row][state.column].character=(uint8)(character>=0x20&&character<0x7f?character:'?');
+	shadow[state.row][state.column].character=(uint8_t)(character>=0x20&&character<0x7f?character:'?');
 	shadow[state.row][state.column].attribute=current_attribute;draw(state.row,state.column++);
 	if(state.column>=HAL_CONS_COLUMNS)newline();
 	hal_cons_update_cursor();
@@ -70,14 +70,14 @@ int hal_cons_getc(void){return hal_cons_read_event()&HAL_KEY_EVENT_KEY_MASK;}
 void hal_cons_set_mode(enum hal_cons_mode mode){state.mode=mode;}
 void hal_cons_write(const char*s){console_puts(s);}
 void hal_cons_write_n(const char*s,unsigned n){if(s)while(n--)console_putc(*s++);}
-int hal_cons_write_n_at(unsigned row,unsigned column,const char*s,unsigned n,uint8 attr)
+int hal_cons_write_n_at(unsigned row,unsigned column,const char*s,unsigned n,uint8_t attr)
 {
 	unsigned changed=0;if(!s||row>=HAL_CONS_ROWS||column>=HAL_CONS_COLUMNS)return -1;erase_cursor();
-	while(n--&&row<HAL_CONS_ROWS){uint8 c=(uint8)*s++;if(c=='\n'){row++;column=0;continue;}if(c=='\r'){column=0;continue;}if(column>=HAL_CONS_COLUMNS)break;
+	while(n--&&row<HAL_CONS_ROWS){uint8_t c=(uint8_t)*s++;if(c=='\n'){row++;column=0;continue;}if(c=='\r'){column=0;continue;}if(column>=HAL_CONS_COLUMNS)break;
 		shadow[row][column].character=c<0x80?c:'?';shadow[row][column].attribute=attr?attr:current_attribute;draw(row,column++);changed++;}
 	state.row=row<HAL_CONS_ROWS?row:HAL_CONS_ROWS-1;state.column=column<HAL_CONS_COLUMNS?column:HAL_CONS_COLUMNS-1;hal_cons_update_cursor();return(int)changed;
 }
-int hal_cons_write_at_attr(unsigned r,unsigned c,const char*s,uint8 attr){unsigned n=0;if(!s)return -1;while(s[n])n++;return hal_cons_write_n_at(r,c,s,n,attr);}
+int hal_cons_write_at_attr(unsigned r,unsigned c,const char*s,uint8_t attr){unsigned n=0;if(!s)return -1;while(s[n])n++;return hal_cons_write_n_at(r,c,s,n,attr);}
 void hal_cons_write_at(unsigned r,unsigned c,const char*s){(void)hal_cons_write_at_attr(r,c,s,current_attribute);}
 int hal_cons_clear_to_eol_at(unsigned r,unsigned c){if(r>=HAL_CONS_ROWS||c>=HAL_CONS_COLUMNS)return 0;erase_cursor();for(unsigned x=c;x<HAL_CONS_COLUMNS;x++){shadow[r][x].character=' ';shadow[r][x].attribute=current_attribute;draw(r,x);}state.row=r;state.column=c;hal_cons_update_cursor();return 1;}
 void hal_cons_clear_to_eol(void){(void)hal_cons_clear_to_eol_at(state.row,state.column);}

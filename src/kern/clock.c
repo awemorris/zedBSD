@@ -34,7 +34,7 @@ static void realtime_write_end(void)
 
 void kern_clock_init(void)
 {
-	uint64 seconds;
+	uint64_t seconds;
 	atomic_u64_store_release(&kernel_ticks,0);
 	atomic_raw_store_release(&realtime_sequence,0);
 	atomic_store_release(&realtime_writer,0);

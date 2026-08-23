@@ -5,6 +5,11 @@
 #define NAME_MAX 255
 #define PATH_MAX 256
 #define ARG_MAX 16384
+#define RTSIG_MAX 34
+#define SIGQUEUE_MAX 32
+
+#define _POSIX_RTSIG_MAX 8
+#define _POSIX_SIGQUEUE_MAX 32
 
 #define CHAR_BIT 8
 #define SCHAR_MIN (-128)

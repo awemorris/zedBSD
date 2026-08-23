@@ -13,7 +13,7 @@ static struct i386_apic_topology topology;
 static int apic_mode;
 static volatile unsigned calibration_active;
 static volatile unsigned calibration_stage;
-static uint32 timer_ticks;
+static uint32_t timer_ticks;
 
 static void imcr_to_apic(void)
 {
@@ -55,5 +55,5 @@ int i386_interrupt_validate(int irq){return apic_mode?irq:pic_get_irq_in_service
 void i386_interrupt_mask(int irq){if(apic_mode)i386_ioapic_mask(irq);else pic_set_irq_mask(irq,1);}
 void i386_interrupt_unmask(int irq){if(apic_mode)i386_ioapic_unmask(irq);else pic_set_irq_mask(irq,0);}
 void i386_interrupt_eoi(int irq){if(apic_mode){(void)irq;i386_lapic_eoi();}else pic_send_eoi(irq);}
-int i386_interrupt_route(int irq,hal_cpu_id_t cpu){uint8 apic_id;if(!apic_mode)return cpu==0?HAL_OK:HAL_ERR_UNSUPPORTED;if(i386_smp_apic_id(cpu,&apic_id)!=HAL_OK)return HAL_ERR_INVALID;return i386_ioapic_route(irq,apic_id);}
-uint32 i386_interrupt_timer_ticks(void){return timer_ticks;}
+int i386_interrupt_route(int irq,hal_cpu_id_t cpu){uint8_t apic_id;if(!apic_mode)return cpu==0?HAL_OK:HAL_ERR_UNSUPPORTED;if(i386_smp_apic_id(cpu,&apic_id)!=HAL_OK)return HAL_ERR_INVALID;return i386_ioapic_route(irq,apic_id);}
+uint32_t i386_interrupt_timer_ticks(void){return timer_ticks;}

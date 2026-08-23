@@ -24,7 +24,13 @@ struct process_times_record {
 	uint64_t self_ticks;
 	uint64_t child_ticks;
 	uint64_t elapsed_ticks;
+	/* Appended fields keep the original three-field record available to old
+	 * binaries while allowing libc times() to report system CPU time. */
+	uint64_t system_ticks;
+	uint64_t child_system_ticks;
 };
+
+#define ZEDBSD_PROCESS_TIMES_V1_SIZE (3U * sizeof(uint64_t))
 
 
 #endif

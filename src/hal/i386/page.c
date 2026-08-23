@@ -18,13 +18,13 @@
 #define PAGEMAP_WORDS	(PHYSICAL_MEGS * (1024U * 1024U / PAGE_SIZE) / 32U)
 
 /* Number of physical pages present. */
-static uint32 phys_pages;
-static uint32 reserved_pages;
-static uint32 allocated_pages;
+static uint32_t phys_pages;
+static uint32_t reserved_pages;
+static uint32_t allocated_pages;
 static volatile unsigned pmem_lock;
 
 /* Page usage bitmap. */
-static uint32 pagemap_tbl[PAGEMAP_WORDS];
+static uint32_t pagemap_tbl[PAGEMAP_WORDS];
 
 #define FIXED_CLAIMS 8U
 static struct hal_pmem fixed_claims[FIXED_CLAIMS];
@@ -47,7 +47,7 @@ pmem_lock_leave(bool enabled)
 }
 
 /* Provided by the BSP: total RAM in bytes. */
-uint32 bsp_mem_probe(void);
+uint32_t bsp_mem_probe(void);
 
 #ifdef HAL_BOARD_PC98
 extern char __kernel_phys_start[], __kernel_phys_end[];
@@ -85,9 +85,9 @@ i386_page_init(void)
 static void
 init_pagemap_tbl(void)
 {
-	uint32 total;
-	uint32 reserved_top;
-	uint32 i;
+	uint32_t total;
+	uint32_t reserved_top;
+	uint32_t i;
 
 	total = bsp_mem_probe();
 	if (total == 0)
@@ -120,9 +120,9 @@ init_pagemap_tbl(void)
 static void
 reserve_range(hal_physaddr_t paddr, size_t size)
 {
-	uint32 first = paddr / PAGE_SIZE;
-	uint32 last;
-	uint32 i;
+	uint32_t first = paddr / PAGE_SIZE;
+	uint32_t last;
+	uint32_t i;
 
 	if (size == 0)
 		return;
@@ -147,16 +147,16 @@ reserve_range(hal_physaddr_t paddr, size_t size)
 static int
 alloc_ram(size_t size, size_t alignment, struct hal_pmem *desc)
 {
-	uint32 need_pages;
-	uint32 start_index;
-	uint32 page_end;
-	uint32 i;
+	uint32_t need_pages;
+	uint32_t start_index;
+	uint32_t page_end;
+	uint32_t i;
 	bool irq_enabled;
 
-	uint32 align_pages;
+	uint32_t align_pages;
 
 	need_pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
-	align_pages = (uint32)(alignment / PAGE_SIZE);
+	align_pages = (uint32_t)(alignment / PAGE_SIZE);
 	if (need_pages == 0 || need_pages > phys_pages)
 		return HAL_ERR_NOMEM;
 	page_end = phys_pages - need_pages;
@@ -317,7 +317,7 @@ hal_memory_get_stats(struct hal_memory_stats *stats)
 static int
 pmem_free_unlocked(struct hal_pmem *desc)
 {
-	uint32 start_page, end_page, i;
+	uint32_t start_page, end_page, i;
 	unsigned slot;
 	bool irq_enabled;
 
@@ -347,7 +347,7 @@ pmem_free_unlocked(struct hal_pmem *desc)
 	    (desc->paddr & (PAGE_SIZE - 1U)) != 0 ||
 	    (desc->size & (PAGE_SIZE - 1U)) != 0)
 		return HAL_ERR_INVALID;
-	start_page = (uint32)desc->paddr >> 12;
+	start_page = (uint32_t)desc->paddr >> 12;
 	end_page = start_page + (desc->size >> 12);
 	if (start_page >= phys_pages || end_page > phys_pages)
 		return HAL_ERR_INVALID;

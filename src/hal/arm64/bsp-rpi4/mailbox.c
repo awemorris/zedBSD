@@ -9,22 +9,22 @@
 #define MBOX_EMPTY 0x40000000U
 #define MBOX_PROPERTY 8U
 
-static uint64 now(void){uint64 v;__asm__ volatile("mrs %0,cntpct_el0":"=r"(v));return v;}
-static uint64 freq(void){uint64 v;__asm__ volatile("mrs %0,cntfrq_el0":"=r"(v));return v;}
+static uint64_t now(void){uint64_t v;__asm__ volatile("mrs %0,cntpct_el0":"=r"(v));return v;}
+static uint64_t freq(void){uint64_t v;__asm__ volatile("mrs %0,cntfrq_el0":"=r"(v));return v;}
 
 int
-rpi4_mailbox_property(uintptr_t mailbox_phys,uint32 *message,size_t bytes)
+rpi4_mailbox_property(uintptr_t mailbox_phys,uint32_t *message,size_t bytes)
 {
-	volatile uint8 *base=(volatile uint8 *)(ARM64_DIRECT_BASE+mailbox_phys);
+	volatile uint8_t *base=(volatile uint8_t *)(ARM64_DIRECT_BASE+mailbox_phys);
 	uintptr_t virtual_address=(uintptr_t)message;
-	uint64 physical;
-	uint32 request;
-	uint64 deadline;
+	uint64_t physical;
+	uint32_t request;
+	uint64_t deadline;
 	if(!message||bytes<12||(virtual_address&15U)||
 	   virtual_address<ARM64_DIRECT_BASE)return -1;
 	physical=virtual_address-ARM64_DIRECT_BASE;
 	if(physical>=0x40000000ULL)return -1;
-	request=(uint32)(physical|0xc0000000U)|MBOX_PROPERTY;
+	request=(uint32_t)(physical|0xc0000000U)|MBOX_PROPERTY;
 	hal_dcache_clean_range(virtual_address,bytes);
 	deadline=now()+freq();
 	while(hal_mmio_read32(base+MBOX_STATUS)&MBOX_FULL)

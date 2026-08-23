@@ -11,5 +11,5 @@ void i386_interrupt_unmask(int);
 void i386_interrupt_eoi(int);
 int i386_interrupt_route(int,hal_cpu_id_t);
 int i386_interrupt_calibration_tick(void);
-uint32 i386_interrupt_timer_ticks(void);
+uint32_t i386_interrupt_timer_ticks(void);
 #endif

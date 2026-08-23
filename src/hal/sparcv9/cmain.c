@@ -9,8 +9,8 @@
 #include "task.h"
 #include "bsp-sun4u/uart.h"
 
-void sparcv9_io_init(uint64 base);
-void sparcv9_timer_init(uint64 frequency);
+void sparcv9_io_init(uint64_t base);
+void sparcv9_timer_init(uint64_t frequency);
 
 static int
 handoff_valid(const struct sun4u_boot_handoff *handoff)

@@ -17,23 +17,23 @@
 #define GICC_IAR 0x00c
 #define GICC_EOIR 0x010
 
-static volatile uint32 *dist;
-static volatile uint32 *cpuif;
-static uint32 irq_count;
+static volatile uint32_t *dist;
+static volatile uint32_t *cpuif;
+static uint32_t irq_count;
 
-static void write8(volatile uint32 *base, unsigned offset, uint8 value)
+static void write8(volatile uint32_t *base, unsigned offset, uint8_t value)
 {
-	volatile uint8 *p=(volatile uint8 *)base;p[offset]=value;
+	volatile uint8_t *p=(volatile uint8_t *)base;p[offset]=value;
 }
 
 void
 rpi4_gic_init(void)
 {
 	const struct rpi4_fdt_info *info=rpi4_boot_info();
-	uint32 lines,i;
+	uint32_t lines,i;
 	if(!info->gic_dist_base||!info->gic_cpu_base)HAL_FATAL("GIC missing from FDT");
-	dist=(volatile uint32 *)(ARM64_DIRECT_BASE+(uintptr_t)info->gic_dist_base);
-	cpuif=(volatile uint32 *)(ARM64_DIRECT_BASE+(uintptr_t)info->gic_cpu_base);
+	dist=(volatile uint32_t *)(ARM64_DIRECT_BASE+(uintptr_t)info->gic_dist_base);
+	cpuif=(volatile uint32_t *)(ARM64_DIRECT_BASE+(uintptr_t)info->gic_cpu_base);
 	dist[GICD_CTLR/4]=0;
 	lines=((dist[GICD_TYPER/4]&0x1f)+1)*32;if(lines>1020)lines=1020;irq_count=lines;
 	for(i=0;i<(lines+31)/32;i++){
@@ -53,17 +53,17 @@ rpi4_gic_init(void)
 	hal_io_mb();
 }
 
-uint32 rpi4_gic_ack(void)
+uint32_t rpi4_gic_ack(void)
 {
 	return cpuif[GICC_IAR/4];
 }
-void rpi4_gic_eoi(uint32 value)
+void rpi4_gic_eoi(uint32_t value)
 {
 	cpuif[GICC_EOIR/4]=value;
 	hal_io_mb();
 }
-void rpi4_gic_mask(uint32 id){if(id<irq_count)dist[GICD_ICENABLER/4+id/32]=1U<<(id&31);}
-void rpi4_gic_unmask(uint32 id)
+void rpi4_gic_mask(uint32_t id){if(id<irq_count)dist[GICD_ICENABLER/4+id/32]=1U<<(id&31);}
+void rpi4_gic_unmask(uint32_t id)
 {
 	if(id<irq_count){
 		/* Direct QEMU boot enters secure EL1, where the primary IAR serves

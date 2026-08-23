@@ -40,12 +40,12 @@ void pic_set_irq_mask(
 	int	mask)		/* 0: allow, 1: disallow */
 {
 	if(irq_num < 8) {
-		uint8 imr = asm_inb(PIC_MASTER_PORT2);
+		uint8_t imr = asm_inb(PIC_MASTER_PORT2);
 		if(mask) imr |=  (1 << irq_num);
 		else     imr &= ~(1 << irq_num);
 		asm_outb(PIC_MASTER_PORT2, imr);
 	} else {
-		uint8 imr = asm_inb(PIC_SLAVE_PORT2);
+		uint8_t imr = asm_inb(PIC_SLAVE_PORT2);
 		if(mask) imr |=  (1 << (irq_num&7));
 		else     imr &= ~(1 << (irq_num&7));
 		asm_outb(PIC_SLAVE_PORT2, imr);
@@ -57,7 +57,7 @@ void pic_set_irq_mask(
  */
 int pic_get_irq_in_service(void)
 {
-	uint8 in_service;
+	uint8_t in_service;
 	int irq_num;
 
 	/* Read ISR register to know in-service IRQ number. */
@@ -121,12 +121,12 @@ void pic_send_eoi(int irq_num)
  * below 16MB in 128KB units, word 0x594 counts memory above 16MB in MB.
  * The low megabyte is always present.
  */
-uint32
+uint32_t
 bsp_mem_probe(void)
 {
-	uint32 low_ext = (uint32)(*(volatile uint8 *)(SYS_START + 0x401))
+	uint32_t low_ext = (uint32_t)(*(volatile uint8_t *)(SYS_START + 0x401))
 		<< 17;
-	uint32 high = (uint32)(*(volatile uint16 *)(SYS_START + 0x594))
+	uint32_t high = (uint32_t)(*(volatile uint16_t *)(SYS_START + 0x594))
 		<< 20;
 
 	return 0x100000 + low_ext + high;
@@ -137,20 +137,20 @@ hal_pc98_memory_segments(uint32_t *low_extended, uint32_t *high_mib)
 {
 	if (low_extended != NULL)
 		*low_extended =
-			(uint32)(*(volatile uint8 *)(SYS_START + 0x401)) << 17;
+			(uint32_t)(*(volatile uint8_t *)(SYS_START + 0x401)) << 17;
 	if (high_mib != NULL)
-		*high_mib = (uint32)(*(volatile uint16 *)(SYS_START + 0x594));
+		*high_mib = (uint32_t)(*(volatile uint16_t *)(SYS_START + 0x594));
 }
 
 void
 hal_pc98_enable_high_memory(void)
 {
-	uint8 value;
+	uint8_t value;
 
 	asm_outb(0x00f2, 0x00);
 	asm_outb(0x00f6, 0x02);
 	value = asm_inb(0x0439);
-	asm_outb(0x0439, (uint8)(value & 0xfb));
+	asm_outb(0x0439, (uint8_t)(value & 0xfb));
 	asm_outb(0x00f8, 0x00);
 	asm_outb(0x043b, 0x04);
 }

@@ -11,12 +11,12 @@
 #include "task.h"
 #include "bsp-pcat/lapic.h"
 
-extern uint8 amd64_ap_trampoline_start[];
-extern uint8 amd64_ap_trampoline_end[];
-extern uint8 amd64_ap_trampoline_cr3[];
-extern uint8 amd64_ap_trampoline_stack[];
-extern uint8 amd64_ap_trampoline_cpu[];
-extern uint8 amd64_ap_trampoline_entry[];
+extern uint8_t amd64_ap_trampoline_start[];
+extern uint8_t amd64_ap_trampoline_end[];
+extern uint8_t amd64_ap_trampoline_cr3[];
+extern uint8_t amd64_ap_trampoline_stack[];
+extern uint8_t amd64_ap_trampoline_cpu[];
+extern uint8_t amd64_ap_trampoline_entry[];
 
 static unsigned present_count = 1;
 static struct hal_cpu_mask ready_mask;
@@ -34,7 +34,7 @@ void
 amd64_smp_init(const struct amd64_acpi_info *acpi)
 {
 	struct amd64_percpu *bsp;
-	uint32 bsp_apic = amd64_lapic_id();
+	uint32_t bsp_apic = amd64_lapic_id();
 	unsigned source, target = 1;
 
 	if (acpi == NULL || acpi->cpu_count == 0)
@@ -81,7 +81,7 @@ hal_cpu_ready_mask(struct hal_cpu_mask *result)
 		    __ATOMIC_ACQUIRE);
 }
 
-uint32
+uint32_t
 amd64_smp_apic_id(hal_cpu_id_t cpu)
 {
 	struct amd64_percpu *state = amd64_percpu_get(cpu);
@@ -95,7 +95,7 @@ start_one(struct amd64_percpu *cpu)
 		HAL_PMEM_PADDR_ANY, AMD64_AP_STACK_SIZE, 4096,
 		HAL_PMEM_TYPE_RAM, 0
 	};
-	uint8 *destination = amd64_phys_to_direct(AMD64_AP_TRAMPOLINE);
+	uint8_t *destination = amd64_phys_to_direct(AMD64_AP_TRAMPOLINE);
 	size_t image_size = (size_t)(amd64_ap_trampoline_end -
 	    amd64_ap_trampoline_start);
 	unsigned timeout;
@@ -104,15 +104,15 @@ start_one(struct amd64_percpu *cpu)
 	    hal_pmem_alloc(&stack_request, &cpu->bootstrap_stack) != HAL_OK)
 		return HAL_ERR_NOMEM;
 	hal_memcpy(destination, amd64_ap_trampoline_start, image_size);
-	*(uint32 *)(destination + (amd64_ap_trampoline_cr3 -
-	    amd64_ap_trampoline_start)) = (uint32)amd64_system_cr3();
-	*(uint64 *)(destination + (amd64_ap_trampoline_stack -
-	    amd64_ap_trampoline_start)) = (uint64)(uintptr_t)
+	*(uint32_t *)(destination + (amd64_ap_trampoline_cr3 -
+	    amd64_ap_trampoline_start)) = (uint32_t)amd64_system_cr3();
+	*(uint64_t *)(destination + (amd64_ap_trampoline_stack -
+	    amd64_ap_trampoline_start)) = (uint64_t)(uintptr_t)
 	    cpu->bootstrap_stack.vaddr + cpu->bootstrap_stack.size;
-	*(uint64 *)(destination + (amd64_ap_trampoline_cpu -
+	*(uint64_t *)(destination + (amd64_ap_trampoline_cpu -
 	    amd64_ap_trampoline_start)) = cpu->logical_id;
-	*(uint64 *)(destination + (amd64_ap_trampoline_entry -
-	    amd64_ap_trampoline_start)) = (uint64)(uintptr_t)amd64_ap_entry;
+	*(uint64_t *)(destination + (amd64_ap_trampoline_entry -
+	    amd64_ap_trampoline_start)) = (uint64_t)(uintptr_t)amd64_ap_entry;
 	hal_wmb();
 	if (amd64_lapic_send_init(cpu->apic_id) != HAL_OK)
 		return HAL_ERR_IO;
@@ -145,7 +145,7 @@ hal_cpu_start_others(void)
 }
 
 void
-amd64_ap_entry(uint64 logical_cpu)
+amd64_ap_entry(uint64_t logical_cpu)
 {
 	struct amd64_percpu *cpu = amd64_percpu_get((hal_cpu_id_t)logical_cpu);
 	if (cpu == NULL || cpu->logical_id != logical_cpu)
@@ -161,7 +161,7 @@ amd64_ap_entry(uint64 logical_cpu)
 	__atomic_store_n(&cpu->ready, 1U, __ATOMIC_RELEASE);
 	(void)__atomic_fetch_or(
 	    &ready_mask.bits[cpu->logical_id / 64U],
-	    (uint64)1U << (cpu->logical_id % 64U), __ATOMIC_RELEASE);
+	    (uint64_t)1U << (cpu->logical_id % 64U), __ATOMIC_RELEASE);
 	kernel_secondary_entry(cpu->logical_id);
 	HAL_FATAL("kernel_secondary_entry returned");
 	for (;;)

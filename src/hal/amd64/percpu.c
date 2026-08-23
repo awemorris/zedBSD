@@ -39,11 +39,11 @@ amd64_percpu_select(struct amd64_percpu *cpu)
 	if (cpu == NULL)
 		HAL_FATAL("invalid amd64 per-CPU state");
 	cpu->self = cpu;
-	asm_write_msr(AMD64_MSR_GS_BASE, (uint64)(uintptr_t)cpu);
+	asm_write_msr(AMD64_MSR_GS_BASE, (uint64_t)(uintptr_t)cpu);
 }
 
 hal_irq_ack_t
-amd64_irq_ack_begin(uint32 vector, int irq)
+amd64_irq_ack_begin(uint32_t vector, int irq)
 {
 	struct amd64_percpu *cpu = amd64_percpu_current();
 	struct amd64_irq_ack *record;
@@ -53,7 +53,7 @@ amd64_irq_ack_begin(uint32 vector, int irq)
 	if (record->active)
 		HAL_FATAL("stale amd64 IRQ acknowledgement");
 	record->vector = vector;
-	record->irq = (uint32)irq;
+	record->irq = (uint32_t)irq;
 	record->active = 1;
 	return (hal_irq_ack_t)(uintptr_t)record;
 }

@@ -266,7 +266,7 @@ irq_handler(int irq)
 	hal_irq_ack_t acknowledge;
 	if (irq < 0 || irq > IRQ_MAX)
 		HAL_FATAL("invalid amd64 APIC IRQ");
-	acknowledge = amd64_irq_ack_begin(INT_IRQ_BASE + (uint32)irq, irq);
+	acknowledge = amd64_irq_ack_begin(INT_IRQ_BASE + (uint32_t)irq, irq);
 	if (irq == IRQ_TIMER) {
 		clock_handler();
 		kernel_timer_handler(hal_cpu_current(), acknowledge);

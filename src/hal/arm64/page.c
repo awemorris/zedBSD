@@ -12,22 +12,22 @@
 #define BIT_CLEAR(map, n) ((map)[(n) >> 5] &= ~(1U << ((n) & 31U)))
 
 extern char __kernel_vma_start[], __kernel_vma_end[];
-static uint32 page_bitmap[BITMAP_WORDS];
-static uint32 reserved_bitmap[BITMAP_WORDS];
-static uint32 phys_pages;
-static uint32 reserved_pages;
-static uint32 allocated_pages;
+static uint32_t page_bitmap[BITMAP_WORDS];
+static uint32_t reserved_bitmap[BITMAP_WORDS];
+static uint32_t phys_pages;
+static uint32_t reserved_pages;
+static uint32_t allocated_pages;
 
 static void
-release_range(uint64 base, uint64 size)
+release_range(uint64_t base, uint64_t size)
 {
-	uint64 limit = (uint64)phys_pages * ARM64_PAGE_SIZE;
-	uint64 end;
-	uint32 first, last, page;
+	uint64_t limit = (uint64_t)phys_pages * ARM64_PAGE_SIZE;
+	uint64_t end;
+	uint32_t first, last, page;
 	if (size == 0 || base >= limit) return;
 	end = size > limit - base ? limit : base + size;
-	first = (uint32)((base + ARM64_PAGE_SIZE - 1) / ARM64_PAGE_SIZE);
-	last = (uint32)(end / ARM64_PAGE_SIZE);
+	first = (uint32_t)((base + ARM64_PAGE_SIZE - 1) / ARM64_PAGE_SIZE);
+	last = (uint32_t)(end / ARM64_PAGE_SIZE);
 	for (page = first; page < last; page++) {
 		if (BIT_GET(page_bitmap, page)) {
 			BIT_CLEAR(page_bitmap, page);
@@ -38,14 +38,14 @@ release_range(uint64 base, uint64 size)
 }
 
 static void
-reserve_range(uint64 base, uint64 size)
+reserve_range(uint64_t base, uint64_t size)
 {
-	uint64 limit = (uint64)phys_pages * ARM64_PAGE_SIZE, end;
-	uint32 first, last, page;
+	uint64_t limit = (uint64_t)phys_pages * ARM64_PAGE_SIZE, end;
+	uint32_t first, last, page;
 	if (size == 0 || base >= limit) return;
 	end = size > limit - base ? limit : base + size;
-	first = (uint32)(base / ARM64_PAGE_SIZE);
-	last = (uint32)((end + ARM64_PAGE_SIZE - 1) / ARM64_PAGE_SIZE);
+	first = (uint32_t)(base / ARM64_PAGE_SIZE);
+	last = (uint32_t)((end + ARM64_PAGE_SIZE - 1) / ARM64_PAGE_SIZE);
 	if (last > phys_pages) last = phys_pages;
 	for (page = first; page < last; page++) {
 		if (!BIT_GET(page_bitmap, page)) {
@@ -60,10 +60,10 @@ void
 arm64_page_init(void)
 {
 	const struct rpi4_fdt_info *info = rpi4_boot_info();
-	uint64 top = 0;
+	uint64_t top = 0;
 	unsigned i;
 	for (i = 0; i < info->memory_count; i++) {
-		uint64 end = info->memory[i].base + info->memory[i].size;
+		uint64_t end = info->memory[i].base + info->memory[i].size;
 		if (end > top) top = end;
 	}
 	/* An unpatched standalone DTB has a zero-sized memory node in QEMU. */
@@ -72,7 +72,7 @@ arm64_page_init(void)
 		hal_puts("RPI4 FDT memory unavailable; QEMU 2 GiB fallback\n");
 	}
 	if (top > ARM64_MAX_PHYS) top = ARM64_MAX_PHYS;
-	phys_pages = (uint32)(top / ARM64_PAGE_SIZE);
+	phys_pages = (uint32_t)(top / ARM64_PAGE_SIZE);
 	hal_memset(page_bitmap, 0xff, sizeof(page_bitmap));
 	hal_memset(reserved_bitmap, 0xff, sizeof(reserved_bitmap));
 	reserved_pages = phys_pages;
@@ -87,21 +87,21 @@ arm64_page_init(void)
 	for (i = 0; i < info->reserved_count; i++)
 		reserve_range(info->reserved[i].base, info->reserved[i].size);
 	hal_printf("ARM64 MEMORY MAP PASS total=%llu MiB free=%llu MiB\n",
-	    (uint64)phys_pages * ARM64_PAGE_SIZE / (1024 * 1024),
-	    ((uint64)phys_pages - reserved_pages) * ARM64_PAGE_SIZE / (1024 * 1024));
+	    (uint64_t)phys_pages * ARM64_PAGE_SIZE / (1024 * 1024),
+	    ((uint64_t)phys_pages - reserved_pages) * ARM64_PAGE_SIZE / (1024 * 1024));
 }
 
 static int
 alloc_ram(size_t size, size_t alignment, struct hal_pmem *desc)
 {
-	uint32 need, end, start, index, align_pages;
-	uint64 state;
+	uint32_t need, end, start, index, align_pages;
+	uint64_t state;
 	uintptr_t limit = (uintptr_t)phys_pages * ARM64_PAGE_SIZE;
 	if (desc == NULL || size == 0 || size > SIZE_MAX - (ARM64_PAGE_SIZE - 1) ||
 	    alignment < ARM64_PAGE_SIZE) return HAL_ERR_INVALID;
-	need = (uint32)((size + ARM64_PAGE_SIZE - 1) / ARM64_PAGE_SIZE);
-	align_pages = (uint32)(alignment / ARM64_PAGE_SIZE);
-	end = (uint32)(limit / ARM64_PAGE_SIZE);
+	need = (uint32_t)((size + ARM64_PAGE_SIZE - 1) / ARM64_PAGE_SIZE);
+	align_pages = (uint32_t)(alignment / ARM64_PAGE_SIZE);
+	end = (uint32_t)(limit / ARM64_PAGE_SIZE);
 	if (need == 0 || need >= end) return HAL_ERR_NOMEM;
 	state = arm64_irq_save();
 	for (start = 1; start + need <= end; start++) {
@@ -124,14 +124,14 @@ alloc_ram(size_t size, size_t alignment, struct hal_pmem *desc)
 static int
 free_ram(struct hal_pmem *desc)
 {
-	uint32 first, count, i;
-	uint64 state;
+	uint32_t first, count, i;
+	uint64_t state;
 	if (desc == NULL || desc->size == 0 ||
 	    ((uintptr_t)desc->paddr & (ARM64_PAGE_SIZE - 1)) != 0 ||
 	    (desc->size & (ARM64_PAGE_SIZE - 1)) != 0 ||
 	    desc->vaddr != arm64_phys_to_direct((uintptr_t)desc->paddr)) return HAL_ERR_INVALID;
-	first = (uint32)((uintptr_t)desc->paddr / ARM64_PAGE_SIZE);
-	count = (uint32)(desc->size / ARM64_PAGE_SIZE);
+	first = (uint32_t)((uintptr_t)desc->paddr / ARM64_PAGE_SIZE);
+	count = (uint32_t)(desc->size / ARM64_PAGE_SIZE);
 	if (first >= phys_pages || count > phys_pages - first) return HAL_ERR_INVALID;
 	state = arm64_irq_save();
 	for (i = 0; i < count; i++)
@@ -165,9 +165,9 @@ int hal_pmem_free(struct hal_pmem *desc)
 	return free_ram(desc);
 }
 size_t hal_pmem_get_total_size(void) { return (size_t)phys_pages * ARM64_PAGE_SIZE; }
-void __attribute__((weak)) hal_arm64_task_memory_stats(uint32 *c,size_t *s)
+void __attribute__((weak)) hal_arm64_task_memory_stats(uint32_t *c,size_t *s)
 { if(c)*c=0; if(s)*s=0; }
-void hal_arm64_space_memory_stats(uint32 *,uint32 *);
+void hal_arm64_space_memory_stats(uint32_t *,uint32_t *);
 void hal_memory_get_stats(struct hal_memory_stats *s)
 {
 	if (!s) return;

@@ -39,6 +39,7 @@
 struct componentname;
 struct file_ops;
 struct mount;
+struct ucred;
 
 enum inode_type {
 	INODE_NONE,
@@ -81,6 +82,24 @@ struct inode_time {
 	long tv_nsec;
 };
 
+/*
+ * A truncate request crosses stacking filesystems as one content
+ * transaction.  The innermost content inode is authoritative for both the
+ * growth-limit comparison and the resulting size.  `actual_size` is valid on
+ * every return, including a backend error after a partial mutation.
+ */
+struct inode_truncate_request {
+	off_t size;
+	uint64_t growth_limit;
+	const struct ucred *credential;
+	unsigned content_change;
+};
+
+struct inode_truncate_result {
+	off_t actual_size;
+	int limit_exceeded;
+};
+
 struct inode_ops {
 	int (*lookup)(struct inode *, const struct componentname *,
 		      struct inode **);
@@ -103,6 +122,9 @@ struct inode_ops {
 	int (*getattr)(struct inode *, struct stat *);
 	int (*setattr)(struct inode *, const struct stat *, unsigned);
 	int (*truncate)(struct inode *, off_t);
+	int (*truncate_limited)(struct inode *,
+	    const struct inode_truncate_request *,
+	    struct inode_truncate_result *);
 	ssize_t (*getxattr)(struct inode *, const char *, void *, size_t);
 	int (*setxattr)(struct inode *, const char *, const void *, size_t,
 	    unsigned);
@@ -130,6 +152,26 @@ struct inode {
 	refcount_t i_refs;
 	/* Serializes one externally visible regular-file I/O operation. */
 	struct mutex i_io_lock;
+	/*
+	 * Shared-VM EOF transaction state.  i_vm_lock protects the fields below
+	 * and is the condition lock for i_vm_waitq.  The VM object registry and
+	 * object lock remain responsible for object lifetime/page state; this
+	 * inode-local gate also covers the interval in which no object exists yet.
+	 */
+	struct spinlock i_vm_lock;
+	struct wait_queue i_vm_waitq;
+	unsigned i_vm_resize_active;
+	uint64_t i_vm_resize_generation;
+	off_t i_vm_resize_old_size;
+	off_t i_vm_resize_target_size;
+	/* Every regular-file content transaction, including same-EOF writes,
+	 * participates in this gate.  Odd/even is not exposed; generation merely
+	 * distinguishes a stale fault/read reservation from the current owner. */
+	unsigned i_vm_content_active;
+	unsigned i_vm_content_readers;
+	uint64_t i_vm_content_generation;
+	off_t i_vm_content_start;
+	off_t i_vm_content_end;
 	struct mutex i_lock;
 	nlink_t i_linkcount;
 	mode_t i_mode;
@@ -141,7 +183,7 @@ struct inode {
 	struct inode_time i_mtime;
 	struct inode_time i_ctime;
 	/* Changes whenever this directory's visible namespace is committed. */
-	uint64_t i_dirseq;
+	volatile uint64_t i_dirseq;
 	unsigned i_flags;
 	struct inode *i_hash_next;
 	struct inode *i_mount_next;
@@ -171,6 +213,8 @@ int inode_mknod(struct inode *, const struct componentname *, enum inode_type,
 		mode_t, dev_t, struct inode **);
 int inode_unlink(struct inode *, const struct componentname *);
 int inode_rmdir(struct inode *, const struct componentname *);
+/* The caller holds the shared mount VFS transaction lock across any
+ * permission checks and this namespace commit. */
 int inode_rename(struct inode *, const struct componentname *, struct inode *,
 		 const struct componentname *, unsigned);
 int inode_link(struct inode *, const struct componentname *, struct inode *);
@@ -178,6 +222,20 @@ int inode_symlink(struct inode *, const struct componentname *, const char *,
 		  struct inode **);
 ssize_t inode_readlink(struct inode *, char *, size_t);
 int inode_truncate(struct inode *, off_t);
+/* Internal content-owner mutation (for example an overlay upper inode).
+ * There is no originating credential at this layer, so executable set-id
+ * metadata is invalidated unconditionally in the same I/O transaction. */
+int inode_truncate_content_change(struct inode *, off_t);
+/* Apply a process growth ceiling in the same i_io transaction as the size
+ * change.  limit_exceeded distinguishes RLIMIT_FSIZE from a backend EFBIG. */
+int inode_truncate_limited(struct inode *, off_t, uint64_t, int *);
+/* Credential-aware mutation additionally clears executable set-id state
+ * while the inode content transaction excludes exec and mapped writers. */
+int inode_truncate_limited_cred(struct inode *, off_t, uint64_t,
+	const struct ucred *, int *);
+/* Stacking backends forward the complete request recursively. */
+int inode_truncate_transaction(struct inode *,
+	const struct inode_truncate_request *, struct inode_truncate_result *);
 ssize_t inode_getxattr(struct inode *, const char *, void *, size_t);
 int inode_setxattr(struct inode *, const char *, const void *, size_t,
 	unsigned);

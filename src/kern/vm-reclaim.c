@@ -5,12 +5,14 @@
 #include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/page.h"
+#include "kern/vm-lock.h"
 
 #include <errno.h>
 #include <hal/hal.h>
 #include <string.h>
 
 #define PAGE_SIZE ZEDBSD_PAGE_SIZE
+#define VM_PAGE_TRACKED 0x0010U
 
 static struct vm_private_page *page_queue;
 static struct mutex reclaim_lock;
@@ -19,6 +21,252 @@ struct vm_reclaim_stats vm_reclaim_counters;
 
 __attribute__((weak)) int vm_object_reclaim_one(void) { return ENOMEM; }
 __attribute__((weak)) unsigned vm_object_page_count(void) { return 0; }
+
+static void
+private_page_advance_locked(struct vm_private_page *backing)
+{
+	if (++backing->generation == 0)
+		backing->generation++;
+}
+
+void
+vm_private_page_init(struct vm_private_page *backing)
+{
+	if (backing == NULL)
+		return;
+	refcount_init(&backing->refs, 1);
+	spin_init(&backing->state_lock, LOCK_RANK_VM_OBJECT,
+	    "VM private backing");
+	waitq_init(&backing->state_waitq, "VM private backing");
+	backing->generation = 1;
+	backing->swap_slot = SWAP_SLOT_NONE;
+}
+
+void
+vm_private_page_ref(struct vm_private_page *backing)
+{
+	if (backing != NULL)
+		refcount_get(&backing->refs);
+}
+
+void
+vm_private_page_put(struct vm_private_page *backing)
+{
+	struct hal_pmem memory;
+	uint32_t slot;
+	unsigned long irq;
+
+	if (backing == NULL || !refcount_put(&backing->refs))
+		return;
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if (backing->mapping_count != 0 || backing->mappings != NULL ||
+	    backing->active_operations != 0 || backing->pin_count != 0 ||
+	    (backing->flags & (VM_PAGE_BUSY | VM_PAGE_TRACKED)) != 0)
+		HAL_FATAL("destroying active VM private backing");
+	memory = backing->pmem;
+	memset(&backing->pmem, 0, sizeof(backing->pmem));
+	slot = backing->swap_slot;
+	backing->swap_slot = SWAP_SLOT_NONE;
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	if (memory.size != 0)
+		(void)hal_pmem_free(&memory);
+	if (slot != SWAP_SLOT_NONE && swap_system_backend() != NULL)
+		swap_free_slot(swap_system_backend(), slot);
+	kern_free(backing);
+}
+
+static int
+private_page_wait_sequence(struct vm_private_page *backing, uint64_t sequence)
+{
+	unsigned long irq;
+	int error;
+
+	irq = spin_lock_irqsave(&backing->state_lock);
+	error = waitq_sleep(&backing->state_waitq, &backing->state_lock,
+	    sequence, 0, 0);
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	return error;
+}
+
+int
+vm_private_page_io_acquire(struct vm_private_page *backing)
+{
+	if (backing == NULL)
+		return EINVAL;
+	for (;;) {
+		uint64_t sequence;
+		unsigned long irq = spin_lock_irqsave(&backing->state_lock);
+
+		if ((backing->flags & VM_PAGE_BUSY) == 0 &&
+		    backing->active_operations == 0 && backing->pin_count == 0) {
+			backing->flags |= VM_PAGE_BUSY;
+			private_page_advance_locked(backing);
+			spin_unlock_irqrestore(&backing->state_lock, irq);
+			return 0;
+		}
+		sequence = waitq_sequence(&backing->state_waitq);
+		spin_unlock_irqrestore(&backing->state_lock, irq);
+		{
+			int error = private_page_wait_sequence(backing, sequence);
+			if (error != 0 && error != EAGAIN)
+				return error;
+		}
+	}
+}
+
+int
+vm_private_page_io_try_acquire(struct vm_private_page *backing)
+{
+	unsigned long irq;
+
+	if (backing == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if ((backing->flags & VM_PAGE_BUSY) != 0 ||
+	    backing->active_operations != 0 || backing->pin_count != 0) {
+		spin_unlock_irqrestore(&backing->state_lock, irq);
+		return EBUSY;
+	}
+	/* The returned I/O ownership includes an explicit lifetime hold. */
+	refcount_get(&backing->refs);
+	backing->flags |= VM_PAGE_BUSY;
+	private_page_advance_locked(backing);
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	return 0;
+}
+
+void
+vm_private_page_io_release(struct vm_private_page *backing)
+{
+	unsigned long irq;
+
+	if (backing == NULL)
+		return;
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if ((backing->flags & VM_PAGE_BUSY) == 0)
+		HAL_FATAL("VM private backing I/O ownership underflow");
+	backing->flags &= ~VM_PAGE_BUSY;
+	private_page_advance_locked(backing);
+	waitq_wake_all(&backing->state_waitq);
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+}
+
+int
+vm_private_page_wait_idle(struct vm_private_page *backing)
+{
+	if (backing == NULL)
+		return EINVAL;
+	for (;;) {
+		uint64_t sequence;
+		unsigned long irq = spin_lock_irqsave(&backing->state_lock);
+
+		if ((backing->flags & VM_PAGE_BUSY) == 0 &&
+		    backing->active_operations == 0 && backing->pin_count == 0) {
+			spin_unlock_irqrestore(&backing->state_lock, irq);
+			return 0;
+		}
+		sequence = waitq_sequence(&backing->state_waitq);
+		spin_unlock_irqrestore(&backing->state_lock, irq);
+		{
+			int error = private_page_wait_sequence(backing, sequence);
+			if (error != 0 && error != EAGAIN)
+				return error;
+		}
+	}
+}
+
+int
+vm_private_page_operation_try_begin(struct vm_private_page *backing)
+{
+	unsigned long irq;
+
+	if (backing == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if ((backing->flags & VM_PAGE_BUSY) != 0 || backing->pin_count != 0) {
+		spin_unlock_irqrestore(&backing->state_lock, irq);
+		return EBUSY;
+	}
+	refcount_get(&backing->refs);
+	backing->active_operations++;
+	if (backing->active_operations == 0)
+		HAL_FATAL("VM private backing operation counter overflow");
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	return 0;
+}
+
+void
+vm_private_page_operation_end(struct vm_private_page *backing)
+{
+	unsigned long irq;
+
+	if (backing == NULL)
+		return;
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if (backing->active_operations == 0)
+		HAL_FATAL("VM private backing operation counter underflow");
+	backing->active_operations--;
+	private_page_advance_locked(backing);
+	if (backing->active_operations == 0)
+		waitq_wake_all(&backing->state_waitq);
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	vm_private_page_put(backing);
+}
+
+void
+vm_private_page_mark_dirty(struct vm_private_page *backing)
+{
+	unsigned long irq;
+
+	if (backing == NULL)
+		return;
+	irq = spin_lock_irqsave(&backing->state_lock);
+	backing->flags |= VM_PAGE_DIRTY;
+	private_page_advance_locked(backing);
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+}
+
+int
+vm_private_page_pin(struct vm_private_page *backing,
+	struct hal_pmem *memory)
+{
+	unsigned long irq;
+
+	if (backing == NULL || memory == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if ((backing->flags & VM_PAGE_BUSY) != 0 ||
+	    backing->active_operations != 0 ||
+	    (backing->flags & VM_PAGE_RESIDENT) == 0) {
+		spin_unlock_irqrestore(&backing->state_lock, irq);
+		return EBUSY;
+	}
+	refcount_get(&backing->refs);
+	backing->pin_count++;
+	if (backing->pin_count == 0)
+		HAL_FATAL("VM private backing pin counter overflow");
+	*memory = backing->pmem;
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	return 0;
+}
+
+void
+vm_private_page_unpin(struct vm_private_page *backing)
+{
+	unsigned long irq;
+
+	if (backing == NULL)
+		return;
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if (backing->pin_count == 0)
+		HAL_FATAL("VM private backing pin counter underflow");
+	backing->pin_count--;
+	private_page_advance_locked(backing);
+	if (backing->pin_count == 0)
+		waitq_wake_all(&backing->state_waitq);
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	vm_private_page_put(backing);
+}
 
 static uint32_t mapping_prot(const struct vm_page *page)
 {
@@ -30,6 +278,7 @@ static uint32_t mapping_prot(const struct vm_page *page)
 
 void vm_reclaim_init(void)
 {
+	vm_metadata_init();
 	page_queue = NULL;
 	memset(&stats, 0, sizeof(stats));
 	(void)mutex_init(&reclaim_lock, LOCK_RANK_VMSPACE, "VM reclaim");
@@ -47,47 +296,65 @@ static void queue_remove(struct vm_private_page *backing)
 void vm_page_track(struct vm_page *page)
 {
 	struct vm_private_page *backing;
+	unsigned long irq;
+	int resident;
 	if (page == NULL || (backing = page->private_page) == NULL)
 		return;
+	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if (backing->mapping_count == 0 ||
+	    (backing->flags & VM_PAGE_TRACKED) != 0)
+		HAL_FATAL("invalid VM private backing track");
+	backing->flags |= VM_PAGE_TRACKED;
+	resident = (backing->flags & VM_PAGE_RESIDENT) != 0;
+	spin_unlock_irqrestore(&backing->state_lock, irq);
 	backing->queue_next = page_queue;
 	page_queue = backing;
-	if (backing->flags & VM_PAGE_RESIDENT)
+	if (resident)
 		stats.resident++;
 	mutex_unlock(&reclaim_lock);
+	vm_metadata_leave();
 }
 
 void vm_page_untrack(struct vm_page *page)
 {
 	struct vm_private_page *backing;
 	struct vm_page **link;
-	int last;
+	unsigned long irq;
+	int last_mapping, resident, swapped, tracked;
 	if (page == NULL || (backing = page->private_page) == NULL)
 		return;
+	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
 	link = &backing->mappings;
 	while (*link != NULL && *link != page)
 		link = &(*link)->private_next;
-	if (*link == page)
-		*link = page->private_next;
+	if (*link != page)
+		HAL_FATAL("VM private page reverse mapping not linked");
+	*link = page->private_next;
 	page->private_page = NULL;
 	page->private_next = NULL;
-	last = refcount_put(&backing->refs);
-	if (last) {
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if (backing->mapping_count == 0)
+		HAL_FATAL("VM private backing mapping counter underflow");
+	last_mapping = --backing->mapping_count == 0;
+	resident = (backing->flags & VM_PAGE_RESIDENT) != 0;
+	swapped = (backing->flags & VM_PAGE_SWAPPED) != 0;
+	tracked = (backing->flags & VM_PAGE_TRACKED) != 0;
+	if (last_mapping)
+		backing->flags &= ~VM_PAGE_TRACKED;
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	if (last_mapping && tracked) {
 		queue_remove(backing);
-		if ((backing->flags & VM_PAGE_RESIDENT) && stats.resident)
+		if (resident && stats.resident)
 			stats.resident--;
-		if ((backing->flags & VM_PAGE_SWAPPED) && stats.swapped)
+		if (swapped && stats.swapped)
 			stats.swapped--;
 	}
 	mutex_unlock(&reclaim_lock);
-	if (!last)
-		return;
-	if (backing->flags & VM_PAGE_RESIDENT)
-		(void)hal_pmem_free(&backing->pmem);
-	if ((backing->flags & VM_PAGE_SWAPPED) && swap_system_backend() != NULL)
-		swap_free_slot(swap_system_backend(), backing->swap_slot);
-	kern_free(backing);
+	vm_metadata_leave();
+	vm_private_page_put(backing);
 }
 
 void vm_page_replace_private(struct vm_page *page,
@@ -95,88 +362,106 @@ void vm_page_replace_private(struct vm_page *page,
 {
 	struct vm_private_page *old;
 	struct vm_page **link;
-	int last;
+	unsigned long old_irq, fresh_irq;
+	int old_last, old_resident, old_swapped, fresh_resident;
 	if (page == NULL || fresh == NULL || page->private_page == NULL)
 		HAL_FATAL("invalid private page replacement");
+	vm_metadata_enter();
 	old = page->private_page;
 	mutex_lock(&reclaim_lock);
+	old_irq = spin_lock_irqsave(&old->state_lock);
+	if ((old->flags & VM_PAGE_BUSY) == 0 || old->mapping_count == 0)
+		HAL_FATAL("replacing an unowned VM private backing");
+	spin_unlock_irqrestore(&old->state_lock, old_irq);
 	link = &old->mappings;
 	while (*link != NULL && *link != page)
 		link = &(*link)->private_next;
 	if (*link != page)
 		HAL_FATAL("private page mapping not linked");
 	*link = page->private_next;
-	last = refcount_put(&old->refs);
+	old_irq = spin_lock_irqsave(&old->state_lock);
+	old_last = --old->mapping_count == 0;
+	old_resident = (old->flags & VM_PAGE_RESIDENT) != 0;
+	old_swapped = (old->flags & VM_PAGE_SWAPPED) != 0;
+	if (old_last)
+		old->flags &= ~VM_PAGE_TRACKED;
+	spin_unlock_irqrestore(&old->state_lock, old_irq);
+	fresh_irq = spin_lock_irqsave(&fresh->state_lock);
+	if (fresh->mapping_count != 0 || fresh->mappings != NULL ||
+	    (fresh->flags & (VM_PAGE_BUSY | VM_PAGE_TRACKED)) != 0)
+		HAL_FATAL("replacement VM private backing is not fresh");
+	fresh->mapping_count = 1;
+	fresh->flags |= VM_PAGE_TRACKED;
+	fresh_resident = (fresh->flags & VM_PAGE_RESIDENT) != 0;
+	spin_unlock_irqrestore(&fresh->state_lock, fresh_irq);
 	page->private_page = fresh;
 	page->private_next = fresh->mappings;
 	fresh->mappings = page;
 	fresh->queue_next = page_queue;
 	page_queue = fresh;
-	if (fresh->flags & VM_PAGE_RESIDENT)
+	if (fresh_resident)
 		stats.resident++;
-	if (last) {
+	if (old_last) {
 		queue_remove(old);
-		if ((old->flags & VM_PAGE_RESIDENT) && stats.resident)
+		if (old_resident && stats.resident)
 			stats.resident--;
-		if ((old->flags & VM_PAGE_SWAPPED) && stats.swapped)
+		if (old_swapped && stats.swapped)
 			stats.swapped--;
 	}
 	mutex_unlock(&reclaim_lock);
-	if (!last)
-		return;
-	if (old->flags & VM_PAGE_RESIDENT)
-		(void)hal_pmem_free(&old->pmem);
-	if ((old->flags & VM_PAGE_SWAPPED) && swap_system_backend() != NULL)
-		swap_free_slot(swap_system_backend(), old->swap_slot);
-	kern_free(old);
+	vm_metadata_leave();
+	/* The fault's explicit I/O hold keeps old alive across this mapping drop. */
+	vm_private_page_put(old);
 }
 
 int vm_page_share_private(struct vm_page *source, struct vm_page *copy)
 {
 	struct vm_private_page *backing;
+	unsigned long irq;
 	int error = 0;
 	if (source == NULL || copy == NULL || source->private_page == NULL)
 		return EINVAL;
-	mutex_lock(&reclaim_lock);
 	backing = source->private_page;
+	error = vm_private_page_operation_try_begin(backing);
+	if (error != 0)
+		return error;
+	vm_metadata_enter();
+	mutex_lock(&reclaim_lock);
+	if (source->private_page != backing) {
+		error = EAGAIN;
+		goto out;
+	}
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if ((backing->flags & VM_PAGE_BUSY) != 0)
+		HAL_FATAL("VM private operation overlapped I/O owner");
 	refcount_get(&backing->refs);
+	backing->mapping_count++;
+	if (backing->mapping_count == 0)
+		HAL_FATAL("VM private backing mapping counter overflow");
+	spin_unlock_irqrestore(&backing->state_lock, irq);
 	copy->private_page = backing;
 	copy->private_next = backing->mappings;
 	backing->mappings = copy;
 	source->flags |= VM_MAPPING_COW;
 	copy->flags |= VM_MAPPING_COW;
-	if ((source->flags & VM_MAPPING_MAPPED) != 0 &&
-	    hal_page_prot(source->vm->space, (void *)source->address,
-	    PAGE_SIZE, mapping_prot(source)) != HAL_OK)
-		error = ENOMEM;
 	if (error != 0) {
 		backing->mappings = copy->private_next;
 		copy->private_page = NULL;
 		copy->private_next = NULL;
-		(void)refcount_put(&backing->refs);
+		irq = spin_lock_irqsave(&backing->state_lock);
+		if (backing->mapping_count == 0)
+			HAL_FATAL("VM private backing mapping rollback underflow");
+		backing->mapping_count--;
+		spin_unlock_irqrestore(&backing->state_lock, irq);
+		if (refcount_put(&backing->refs))
+			HAL_FATAL("shared VM private backing lost source mapping");
 	}
+out:
 	mutex_unlock(&reclaim_lock);
+	vm_metadata_leave();
+	if (error != 0)
+		vm_private_page_operation_end(backing);
 	return error;
-}
-
-int vm_page_cow_reuse(struct vm_page *page)
-{
-	int result = EAGAIN;
-	if (page == NULL || page->private_page == NULL)
-		return EINVAL;
-	mutex_lock(&reclaim_lock);
-	if (refcount_load(&page->private_page->refs) == 1) {
-		page->flags &= ~VM_MAPPING_COW;
-		if ((page->flags & VM_MAPPING_MAPPED) != 0 &&
-		    hal_page_prot(page->vm->space, (void *)page->address,
-		    PAGE_SIZE, mapping_prot(page)) != HAL_OK) {
-			page->flags |= VM_MAPPING_COW;
-			result = ENOMEM;
-		} else
-			result = 0;
-	}
-	mutex_unlock(&reclaim_lock);
-	return result;
 }
 
 static int backing_wired_or_avoided(struct vm_private_page *backing,
@@ -184,7 +469,8 @@ static int backing_wired_or_avoided(struct vm_private_page *backing,
 {
 	struct vm_page *page;
 	for (page = backing->mappings; page != NULL; page = page->private_next)
-		if (page == avoid || page->wire_count != 0)
+		if (page == avoid || page->wire_count != 0 ||
+		    (page->flags & VM_MAPPING_BUSY) != 0)
 			return 1;
 	return 0;
 }
@@ -204,165 +490,405 @@ static uint32_t backing_pte_flags(struct vm_private_page *backing)
 	return combined;
 }
 
-static void clear_accessed(struct vm_private_page *backing)
+static void
+vmspace_fault_wake(struct vmspace *vm)
 {
-	struct vm_page *page;
-	for (page = backing->mappings; page != NULL; page = page->private_next)
-		if (page->flags & VM_MAPPING_MAPPED)
-			(void)hal_page_clear_flags(page->vm->space,
-			    (void *)page->address, HAL_PAGE_ACCESSED);
+	unsigned long irq = spin_lock_irqsave(&vm->lock.guard);
+
+	waitq_wake_all(&vm->fault_waitq);
+	spin_unlock_irqrestore(&vm->lock.guard, irq);
 }
 
-static int unmap_all(struct vm_private_page *backing)
+/* Called with the global metadata and reclaim locks held. */
+static void
+pin_backing_mappings(struct vm_private_page *backing)
 {
-	struct vm_page *page, *rollback;
+	struct vm_page *page;
+
 	for (page = backing->mappings; page != NULL; page = page->private_next) {
-		if (!(page->flags & VM_MAPPING_MAPPED))
+		vmspace_ref(page->vm);
+		mutex_lock(&page->vm->lock);
+		if ((page->flags & VM_MAPPING_BUSY) != 0 ||
+		    page->region->hold_count == (unsigned)-1)
+			HAL_FATAL("VM reclaim mapping pin invariant failed");
+		page->flags |= VM_MAPPING_BUSY;
+		page->region->hold_count++;
+		mutex_unlock(&page->vm->lock);
+	}
+}
+
+/* Called with the global metadata and reclaim locks held. */
+static void
+unpin_backing_mappings(struct vm_private_page *backing)
+{
+	struct vm_page *page;
+
+	for (page = backing->mappings; page != NULL; page = page->private_next) {
+		struct vmspace *vm = page->vm;
+		mutex_lock(&vm->lock);
+		if ((page->flags & VM_MAPPING_RECLAIM_UNMAPPED) != 0) {
+			page->flags &= ~(VM_MAPPING_RECLAIM_UNMAPPED |
+			    VM_MAPPING_RECLAIM_PROTECTED | VM_MAPPING_MAPPED);
+		}
+		page->flags &= ~VM_MAPPING_RECLAIM_PROTECTED;
+		page->flags &= ~VM_MAPPING_BUSY;
+		if (page->region->hold_count == 0)
+			HAL_FATAL("VM reclaim region hold underflow");
+		page->region->hold_count--;
+		if (++vm->generation == 0)
+			vm->generation++;
+		vmspace_fault_wake(vm);
+		mutex_unlock(&vm->lock);
+		/* Never run final vmspace destruction under either VM metadata lock. */
+		vmspace_put_deferred(vm);
+	}
+}
+
+/* Mapping metadata is pinned and the backing has one exclusive I/O owner. */
+static int
+unmap_backing_ptes(struct vm_private_page *backing, uint32_t *pte_flags)
+{
+	struct vm_page *page;
+	int error = 0;
+
+	if (pte_flags == NULL)
+		return EINVAL;
+	*pte_flags = 0;
+	/*
+	 * A pre-unmap query is not a stable dirty snapshot: userspace can write
+	 * between the query and shootdown.  First make every mapping read-only and
+	 * wait for that protection change, then collect flags and remove the PTEs.
+	 */
+	for (page = backing->mappings; page != NULL; page = page->private_next) {
+		uint32_t flags = 0;
+		uint32_t readonly;
+
+		if ((page->flags & VM_MAPPING_MAPPED) == 0)
+			continue;
+		readonly = mapping_prot(page) & ~HAL_SPACE_WRITE;
+		if (readonly == 0) {
+			/* No non-writable representation exists for a write-only PTE.
+			 * Synchronous unmap is the revoke; conservatively write it back. */
+			if (hal_page_unmap(page->vm->space,
+			    (void *)page->address, PAGE_SIZE) != HAL_OK) {
+				error = EIO;
+				break;
+			}
+			page->flags |= VM_MAPPING_RECLAIM_UNMAPPED;
+			*pte_flags |= HAL_PAGE_DIRTY;
+			continue;
+		}
+		if (hal_page_prot_query(page->vm->space,
+		    (void *)page->address, PAGE_SIZE, readonly, &flags) != HAL_OK) {
+			error = EIO;
+			break;
+		}
+		page->flags |= VM_MAPPING_RECLAIM_PROTECTED;
+		*pte_flags |= flags;
+	}
+	if (error != 0)
+		goto rollback;
+	for (page = backing->mappings; page != NULL; page = page->private_next) {
+		if ((page->flags & VM_MAPPING_MAPPED) == 0 ||
+		    (page->flags & VM_MAPPING_RECLAIM_UNMAPPED) != 0)
 			continue;
 		if (hal_page_unmap(page->vm->space, (void *)page->address,
 		    PAGE_SIZE) != HAL_OK) {
-			for (rollback = backing->mappings; rollback != page;
-			     rollback = rollback->private_next)
-				if (!(rollback->flags & VM_MAPPING_MAPPED) &&
-				    hal_page_map(rollback->vm->space,
-					    (void *)rollback->address,
-					    backing->pmem.paddr, PAGE_SIZE,
-					    mapping_prot(rollback)) == HAL_OK)
-					rollback->flags |= VM_MAPPING_MAPPED;
-			return EIO;
+			error = EIO;
+			break;
 		}
-		page->flags &= ~VM_MAPPING_MAPPED;
+		page->flags |= VM_MAPPING_RECLAIM_UNMAPPED;
 	}
-	return 0;
+	if (error == 0)
+		return 0;
+
+rollback:
+	/* Roll back outside all VM locks.  A failed remap remains lazy. */
+	for (page = backing->mappings; page != NULL; page = page->private_next) {
+		if ((page->flags & VM_MAPPING_RECLAIM_UNMAPPED) != 0) {
+			if (hal_page_map(page->vm->space, (void *)page->address,
+			    backing->pmem.paddr, PAGE_SIZE,
+			    mapping_prot(page)) == HAL_OK)
+				page->flags &= ~(VM_MAPPING_RECLAIM_UNMAPPED |
+				    VM_MAPPING_RECLAIM_PROTECTED);
+			continue;
+		}
+		if ((page->flags & VM_MAPPING_RECLAIM_PROTECTED) == 0)
+			continue;
+		if (hal_page_prot(page->vm->space, (void *)page->address,
+		    PAGE_SIZE, mapping_prot(page)) == HAL_OK) {
+			page->flags &= ~VM_MAPPING_RECLAIM_PROTECTED;
+			continue;
+		}
+		/* A stale read-only PTE would livelock a later write fault. */
+		if (hal_page_unmap(page->vm->space, (void *)page->address,
+		    PAGE_SIZE) != HAL_OK)
+			HAL_FATAL("VM reclaim protection rollback failed");
+		page->flags |= VM_MAPPING_RECLAIM_UNMAPPED;
+	}
+	return error;
 }
 
-static void remap_all(struct vm_private_page *backing)
+static void
+rollback_backing_ptes(struct vm_private_page *backing)
 {
 	struct vm_page *page;
-	for (page = backing->mappings; page != NULL; page = page->private_next)
-		if (!(page->flags & VM_MAPPING_MAPPED) &&
-		    hal_page_map(page->vm->space, (void *)page->address,
-		    backing->pmem.paddr, PAGE_SIZE,
-		    mapping_prot(page)) == HAL_OK)
-			page->flags |= VM_MAPPING_MAPPED;
+
+	for (page = backing->mappings; page != NULL; page = page->private_next) {
+		if ((page->flags & VM_MAPPING_RECLAIM_UNMAPPED) != 0) {
+			if (hal_page_map(page->vm->space, (void *)page->address,
+			    backing->pmem.paddr, PAGE_SIZE,
+			    mapping_prot(page)) == HAL_OK)
+				page->flags &= ~(VM_MAPPING_RECLAIM_UNMAPPED |
+				    VM_MAPPING_RECLAIM_PROTECTED);
+			/* A failed remap remains lazy until the next fault. */
+			continue;
+		}
+		if ((page->flags & VM_MAPPING_RECLAIM_PROTECTED) == 0)
+			continue;
+		if (hal_page_prot(page->vm->space, (void *)page->address,
+		    PAGE_SIZE, mapping_prot(page)) == HAL_OK) {
+			page->flags &= ~VM_MAPPING_RECLAIM_PROTECTED;
+			continue;
+		}
+		if (hal_page_unmap(page->vm->space, (void *)page->address,
+		    PAGE_SIZE) != HAL_OK)
+			HAL_FATAL("VM reclaim PTE rollback failed");
+		page->flags |= VM_MAPPING_RECLAIM_UNMAPPED;
+	}
 }
 
-static int swap_out_backing(struct vm_private_page *backing)
+static int
+swap_out_backing_owned(struct vm_private_page *backing)
 {
 	struct swap_backend *backend = swap_system_backend();
+	struct hal_pmem memory;
 	uint32_t slot;
+	unsigned long irq;
+	int slot_allocated = 0;
 	int error;
+
 	if (PAGE_SIZE != SWAP_PAGE_SIZE || backend == NULL)
-		return ENOSPC;
-	error = swap_alloc_slot(backend, &slot);
-	if (error != 0)
-		return error;
-	backing->flags |= VM_PAGE_BUSY;
-	if (unmap_all(backing) != 0) {
-		swap_free_slot(backend, slot);
-		backing->flags &= ~VM_PAGE_BUSY;
-		return EIO;
+		error = ENOSPC;
+	else {
+		error = swap_alloc_slot(backend, &slot);
+		if (error == 0)
+			slot_allocated = 1;
 	}
-	error = swap_write_page(backend, slot, (void *)backing->pmem.vaddr);
+	if (error == 0)
+		error = swap_write_page(backend, slot,
+		    (const void *)backing->pmem.vaddr);
 	if (error != 0) {
-		remap_all(backing);
-		swap_free_slot(backend, slot);
-		backing->flags &= ~VM_PAGE_BUSY;
-		stats.io_errors++;
+		rollback_backing_ptes(backing);
+		if (slot_allocated)
+			swap_free_slot(backend, slot);
+		vm_metadata_enter();
+		mutex_lock(&reclaim_lock);
+		unpin_backing_mappings(backing);
+		if (error != ENOSPC)
+			stats.io_errors++;
+		mutex_unlock(&reclaim_lock);
+		vm_metadata_leave();
+		vm_private_page_io_release(backing);
+		vm_private_page_put(backing);
 		return error;
 	}
-	(void)hal_pmem_free(&backing->pmem);
+
+	/* PTE shootdown and swap I/O are complete before the state is published. */
+	memory = backing->pmem;
+	(void)hal_pmem_free(&memory);
+	vm_metadata_enter();
+	mutex_lock(&reclaim_lock);
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if ((backing->flags & (VM_PAGE_BUSY | VM_PAGE_RESIDENT)) !=
+	    (VM_PAGE_BUSY | VM_PAGE_RESIDENT) ||
+	    (backing->flags & VM_PAGE_SWAPPED) != 0)
+		HAL_FATAL("VM swap-out state changed under I/O owner");
+	memset(&backing->pmem, 0, sizeof(backing->pmem));
 	backing->swap_slot = slot;
-	backing->flags &= ~(VM_PAGE_RESIDENT | VM_PAGE_DIRTY | VM_PAGE_BUSY);
+	backing->flags &= ~(VM_PAGE_RESIDENT | VM_PAGE_DIRTY);
 	backing->flags |= VM_PAGE_SWAPPED;
-	if (stats.resident) stats.resident--;
+	private_page_advance_locked(backing);
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	unpin_backing_mappings(backing);
+	if (stats.resident)
+		stats.resident--;
 	stats.swapped++;
 	stats.page_outs++;
 	stats.reclaims++;
+	mutex_unlock(&reclaim_lock);
+	vm_metadata_leave();
+	vm_private_page_io_release(backing);
+	vm_private_page_put(backing);
 	return 0;
 }
 
-static int discard_file_backing(struct vm_private_page *backing)
+static int
+discard_file_backing_owned(struct vm_private_page *backing)
 {
 	struct vm_page *page, *next;
-	if (unmap_all(backing) != 0)
-		return EIO;
+	struct hal_pmem memory;
+	unsigned long irq;
+
+	vm_metadata_enter();
+	mutex_lock(&reclaim_lock);
 	for (page = backing->mappings; page != NULL; page = next) {
-		struct vm_page **link = &page->region->pages;
+		struct vm_page **link;
+		struct vmspace *vm = page->vm;
+
 		next = page->private_next;
+		mutex_lock(&vm->lock);
+		link = &page->region->pages;
 		while (*link != NULL && *link != page)
 			link = &(*link)->next;
-		if (*link == page)
-			*link = page->next;
+		if (*link != page)
+			HAL_FATAL("discarded VM page left its region");
+		*link = page->next;
+		if (page->region->hold_count == 0)
+			HAL_FATAL("VM discard region hold underflow");
+		page->region->hold_count--;
+		if (++vm->generation == 0)
+			vm->generation++;
+		vmspace_fault_wake(vm);
+		mutex_unlock(&vm->lock);
+		page->private_page = NULL;
+		page->private_next = NULL;
+		if (refcount_put(&backing->refs))
+			HAL_FATAL("VM discard lost I/O lifetime hold");
 		vm_page_free_metadata(page);
+		vmspace_put_deferred(vm);
 	}
+	backing->mappings = NULL;
 	queue_remove(backing);
-	if (stats.resident) stats.resident--;
-	(void)hal_pmem_free(&backing->pmem);
-	kern_free(backing);
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if (backing->mapping_count == 0 ||
+	    (backing->flags & (VM_PAGE_BUSY | VM_PAGE_TRACKED)) !=
+	    (VM_PAGE_BUSY | VM_PAGE_TRACKED))
+		HAL_FATAL("invalid VM file-discard backing state");
+	backing->mapping_count = 0;
+	backing->flags &= ~(VM_PAGE_TRACKED | VM_PAGE_RESIDENT |
+	    VM_PAGE_DIRTY);
+	memory = backing->pmem;
+	memset(&backing->pmem, 0, sizeof(backing->pmem));
+	private_page_advance_locked(backing);
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	if (stats.resident)
+		stats.resident--;
 	stats.reclaims++;
+	mutex_unlock(&reclaim_lock);
+	vm_metadata_leave();
+	(void)hal_pmem_free(&memory);
+	vm_private_page_io_release(backing);
+	vm_private_page_put(backing);
 	return 0;
+}
+
+static int
+reclaim_backing_owned(struct vm_private_page *backing, int file_candidate)
+{
+	uint32_t pte_flags;
+	unsigned state_flags;
+	unsigned long irq;
+	int error;
+
+	error = unmap_backing_ptes(backing, &pte_flags);
+	if (error != 0) {
+		vm_metadata_enter();
+		mutex_lock(&reclaim_lock);
+		unpin_backing_mappings(backing);
+		stats.io_errors++;
+		mutex_unlock(&reclaim_lock);
+		vm_metadata_leave();
+		vm_private_page_io_release(backing);
+		vm_private_page_put(backing);
+		return error;
+	}
+	irq = spin_lock_irqsave(&backing->state_lock);
+	state_flags = backing->flags;
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	if (file_candidate && (state_flags & VM_PAGE_DIRTY) == 0 &&
+	    (pte_flags & HAL_PAGE_DIRTY) == 0)
+		return discard_file_backing_owned(backing);
+	return swap_out_backing_owned(backing);
 }
 
 int vm_reclaim_one(struct vm_page *avoid)
 {
+	struct vm_private_page *selected = NULL;
 	unsigned pass;
-	int result = ENOMEM;
+	int file_candidate = 0;
+	int result;
+
+	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
 	for (pass = 0; pass < 2; pass++) {
 		struct vm_private_page *backing;
 		for (backing = page_queue; backing != NULL;
 		     backing = backing->queue_next) {
+			unsigned state_flags;
+			unsigned long irq;
 			uint32_t flags;
-			if (!(backing->flags & VM_PAGE_RESIDENT) ||
-			    (backing->flags & VM_PAGE_BUSY) ||
+
+			irq = spin_lock_irqsave(&backing->state_lock);
+			state_flags = backing->flags;
+			spin_unlock_irqrestore(&backing->state_lock, irq);
+			if ((state_flags & VM_PAGE_RESIDENT) == 0 ||
+			    (state_flags & VM_PAGE_BUSY) != 0 ||
 			    backing_wired_or_avoided(backing, avoid))
 				continue;
 			flags = backing_pte_flags(backing);
-			if (pass == 0 && (flags & HAL_PAGE_ACCESSED)) {
-				clear_accessed(backing);
+			if (pass == 0 && (flags & HAL_PAGE_ACCESSED))
 				continue;
-			}
-			if (!(flags & HAL_PAGE_DIRTY) &&
-			    !(backing->flags & VM_PAGE_DIRTY) &&
-			    backing->mappings != NULL &&
-			    backing->mappings->region->backing == VM_BACKING_FILE &&
-			    discard_file_backing(backing) == 0) {
-				result = 0;
-				goto out;
-			}
-			/* Shared private pages have one swap identity. */
-			if (swap_out_backing(backing) == 0) {
-				result = 0;
-				goto out;
-			}
+			file_candidate = backing->mappings != NULL &&
+			    backing->mappings->region->backing == VM_BACKING_FILE;
+			if (vm_private_page_io_try_acquire(backing) != 0)
+				continue;
+			pin_backing_mappings(backing);
+			selected = backing;
+			goto out;
 		}
-	}
-	if (vm_object_reclaim_one() == 0) {
-		stats.reclaims++;
-		result = 0;
 	}
 out:
 	mutex_unlock(&reclaim_lock);
-	return result;
+	vm_metadata_leave();
+	if (selected != NULL)
+		return reclaim_backing_owned(selected, file_candidate);
+	/*
+	 * Object writeback can sleep in VFS I/O.  It must not inherit either the
+	 * private-page queue lock or the global cross-VM metadata lock from the
+	 * candidate scan above.
+	 */
+	result = vm_object_reclaim_one();
+	if (result != 0)
+		return ENOMEM;
+	vm_metadata_enter();
+	mutex_lock(&reclaim_lock);
+	stats.reclaims++;
+	mutex_unlock(&reclaim_lock);
+	vm_metadata_leave();
+	return 0;
 }
 
 void vm_page_note_in(struct vm_page *page)
 {
 	if (page == NULL)
 		return;
+	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
 	if (stats.swapped) stats.swapped--;
 	stats.resident++;
 	stats.page_ins++;
 	mutex_unlock(&reclaim_lock);
+	vm_metadata_leave();
 }
 
 void vm_reclaim_note_fault(void)
 {
+	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
 	stats.faults++;
 	mutex_unlock(&reclaim_lock);
+	vm_metadata_leave();
 }
 
 void vm_reclaim_get_stats(struct vm_reclaim_stats *output)
@@ -370,26 +896,33 @@ void vm_reclaim_get_stats(struct vm_reclaim_stats *output)
 	struct vm_private_page *backing;
 	if (output == NULL)
 		return;
+	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
 	memcpy(output, &stats, sizeof(*output));
 	output->anonymous_resident = output->file_resident = 0;
 	output->wired = output->busy = output->dirty = output->clean = 0;
 	for (backing = page_queue; backing != NULL; backing = backing->queue_next) {
 		struct vm_page *page;
+		unsigned long irq;
+		unsigned state_flags;
 		uint32_t flags = backing_pte_flags(backing);
-		if (backing->flags & VM_PAGE_BUSY)
+
+		irq = spin_lock_irqsave(&backing->state_lock);
+		state_flags = backing->flags;
+		spin_unlock_irqrestore(&backing->state_lock, irq);
+		if (state_flags & VM_PAGE_BUSY)
 			output->busy++;
 		for (page = backing->mappings; page != NULL;
 		     page = page->private_next)
 			if (page->wire_count != 0) { output->wired++; break; }
-		if (!(backing->flags & VM_PAGE_RESIDENT))
+		if (!(state_flags & VM_PAGE_RESIDENT))
 			continue;
 		page = backing->mappings;
 		if (page != NULL && page->region->backing == VM_BACKING_ANON)
 			output->anonymous_resident++;
 		else
 			output->file_resident++;
-		if ((backing->flags & VM_PAGE_DIRTY) || (flags & HAL_PAGE_DIRTY))
+		if ((state_flags & VM_PAGE_DIRTY) || (flags & HAL_PAGE_DIRTY))
 			output->dirty++;
 		else
 			output->clean++;
@@ -397,4 +930,5 @@ void vm_reclaim_get_stats(struct vm_reclaim_stats *output)
 	output->file_resident += vm_object_page_count();
 	output->resident += vm_object_page_count();
 	mutex_unlock(&reclaim_lock);
+	vm_metadata_leave();
 }

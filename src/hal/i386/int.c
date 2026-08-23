@@ -12,6 +12,7 @@
 #include "asm.h"
 #include "pic.h"
 #include "interrupt-controller.h"
+#include "space.h"
 #include <errno.h>
 
 static hal_syscall_handler_t syscall_handler;
@@ -21,6 +22,13 @@ static void create_idt();
 static void load_idt();
 static void set_idt_entry(int index, int dpl, void *handler);
 static void handle_fault(struct interrupt_frame *fp);
+
+static int
+is_asynchronous_interrupt(int int_num)
+{
+	return (int_num >= INT_IRQ_BASE && int_num <= INT_IRQ_BASE + IRQ_MAX) ||
+	    int_num == INT_CPU_NOTIFY || int_num == INT_CPU_TLB;
+}
 
 
 /*
@@ -66,10 +74,16 @@ hal_syscall_set_handler(hal_syscall_handler_t handler)
  */
 void int_handler(struct interrupt_frame *fp)
 {
-	int is_handled, int_num;
+	int is_handled, int_num, user_interrupt;
 
 	is_handled = 0;
 	int_num    = fp->int_num;
+	user_interrupt = (fp->cs & 3U) == 3U &&
+	    is_asynchronous_interrupt(int_num);
+
+	/* Only a frame returning to ring 3 is valid for signal delivery. */
+	if (user_interrupt)
+		i386_task_enter_user_frame(fp);
 
 	/*
 	 * IRQに割り当てられた割り込みの番号である場合
@@ -96,7 +110,7 @@ void int_handler(struct interrupt_frame *fp)
 	 */
 	else if (int_num == INT_SYSCALL && (fp->cs & 3) == 3) {
 		uintptr_t args[HAL_SYSCALL_ARGS];
-		kernel_user_int_handler((uint32)int_num, fp->cs,
+		kernel_user_int_handler((uint32_t)int_num, fp->cs,
 		    fp->eip, fp->regs.eax);
 		args[0] = fp->regs.ebx;
 		args[1] = fp->regs.ecx;
@@ -105,15 +119,20 @@ void int_handler(struct interrupt_frame *fp)
 		args[4] = fp->regs.edi;
 		args[5] = fp->regs.ebp;
 		i386_task_enter_user_frame(fp);
+		/* The generic callback owns accounting and its interruptible window. */
 		fp->regs.eax = syscall_handler != NULL ?
-			(uint32)syscall_handler(fp->regs.eax, args) :
-			(uint32)-(int32)ENOSYS;
+			(uint32_t)syscall_handler(fp->regs.eax, args) :
+			(uint32_t)-(int32_t)ENOSYS;
 		kernel_user_return_handler();
 		i386_task_leave_user_frame();
 		is_handled = 1;
 	}
 	else if (int_num == INT_CPU_NOTIFY) {
 		kernel_cpu_notify_handler(hal_cpu_current(), IRQ_MAX + 2U);
+		is_handled = 1;
+	}
+	else if (int_num == INT_CPU_TLB) {
+		i386_tlb_interrupt();
 		is_handled = 1;
 	}
 	else if (int_num == INT_CPU_PANIC) {
@@ -130,6 +149,10 @@ void int_handler(struct interrupt_frame *fp)
 	if(!is_handled) {
 		hal_printf("\nIRQ handler not installed (int %02X)\n" ,int_num);
 		HAL_FATAL("IRQ error");
+	}
+	if (user_interrupt) {
+		kernel_user_return_handler();
+		i386_task_leave_user_frame();
 	}
 
 	/* 割り込み処理ハンドラ内で再スケジュールが要求された場合*/
@@ -156,15 +179,16 @@ static void create_idt()
 	set_idt_entry(INT_SYSCALL, 3, _asm_syscall_int_handler);
 	set_idt_entry(INT_CPU_NOTIFY, 0, _asm_cpu_notify_handler);
 	set_idt_entry(INT_CPU_PANIC, 0, _asm_cpu_panic_handler);
+	set_idt_entry(INT_CPU_TLB, 0, _asm_cpu_tlb_handler);
 }
 
 /* IDTのエントリをセットする */
 static void set_idt_entry(int index, int dpl, void *handler)
 {
-	uint8	*entry;
+	uint8_t	*entry;
 
 	/* エントリへのポインタを求める */
-	entry = (uint8 *)(ADDR_IDT | SYS_START) + 8*index;
+	entry = (uint8_t *)(ADDR_IDT | SYS_START) + 8*index;
 
 	/* 属性部をセットする */
 	entry[5] = 0x8e | (dpl << 5);	/* 割り込みゲート */
@@ -174,19 +198,19 @@ static void set_idt_entry(int index, int dpl, void *handler)
 	entry[4] = 0;
 
 	/* ハンドラアドレスをセットる */
-	*(uint16 *)(&entry[0]) = (uint16)((uint32)handler & 0xffff);
-	*(uint16 *)(&entry[6]) = (uint16)((uint32)handler >> 16);
-	*(uint16 *)(&entry[2]) = SEG_SYS_CODE;
+	*(uint16_t *)(&entry[0]) = (uint16_t)((uint32_t)handler & 0xffff);
+	*(uint16_t *)(&entry[6]) = (uint16_t)((uint32_t)handler >> 16);
+	*(uint16_t *)(&entry[2]) = SEG_SYS_CODE;
 }
 
 /* IDTをロードする */
 static void load_idt()
 {
-	uint8	idtr[6];
+	uint8_t	idtr[6];
 
 	/* IDTRの構造を用意する */
-	*(uint16 *)&idtr[0] = 8*256-1;				/* IDTのリミット値 */
-	*(uint32 *)&idtr[2] = ADDR_IDT + SYS_START;	/* IDTのリニアアドレス */
+	*(uint16_t *)&idtr[0] = 8*256-1;				/* IDTのリミット値 */
+	*(uint32_t *)&idtr[2] = ADDR_IDT + SYS_START;	/* IDTのリニアアドレス */
 
 	/* LIDT命令でIDTをロードする */
 	asm_lidt(idtr);
@@ -200,7 +224,7 @@ static void handle_fault(struct interrupt_frame *fp)
 	if (fp->cs & 3) {
 		int handled;
 		i386_task_enter_user_frame(fp);
-		handled = kernel_user_fault_handler((uint32)int_num, fp->cs,
+		handled = kernel_user_fault_handler((uint32_t)int_num, fp->cs,
 		    fp->eip, fp->error_code,
 		    int_num == INT_PAGEFAULT ? asm_get_cr2() : 0) ==
 		    HAL_TRAP_RET_SUCCESS;

@@ -102,6 +102,7 @@ initial_segment_prot(const struct normalized_program *program)
 struct normalized_image {
 	uintptr_t entry;
 	uintptr_t brk_start;
+	size_t static_data_size;
 	uintptr_t program_headers;
 	uintptr_t load_bias;
 	size_t stack_size;
@@ -209,12 +210,13 @@ decode_elf64_program(struct elf64_phdr *program, unsigned data)
 }
 
 static int
-read_exact(struct file *file, off_t offset, void *buffer, size_t size)
+read_exact(struct file_content_lease *lease, off_t offset, void *buffer,
+	size_t size)
 {
 	ssize_t count;
-	if (offset < 0 || file_seek(file, offset, 0) != offset)
-		return EIO;
-	count = file_read(file, buffer, size);
+	if (lease == NULL || !lease->active || offset < 0)
+		return EINVAL;
+	count = file_content_lease_pread(lease, buffer, size, offset);
 	return count == (ssize_t)size ? 0 : EIO;
 }
 
@@ -235,19 +237,20 @@ segment_prot(uint32_t flags)
 }
 
 static int
-read_headers(struct file *file, unsigned elf_class,
+read_headers(struct file_content_lease *lease, unsigned elf_class,
 	struct normalized_header *header, struct normalized_program **programs_out,
 	uint64_t *file_size_out)
 {
+	struct file *file;
 	struct normalized_program *programs;
 	uint64_t file_size;
 	unsigned i;
 
-	if (file == NULL || file->f_inode == NULL || header == NULL ||
-	    programs_out == NULL || file_size_out == NULL ||
-	    file->f_inode->i_size < 0)
+	if (lease == NULL || !lease->active ||
+	    (file = lease->file) == NULL || file->f_inode == NULL || header == NULL ||
+	    programs_out == NULL || file_size_out == NULL || lease->size < 0)
 		return EINVAL;
-	file_size = (uint64_t)file->f_inode->i_size;
+	file_size = (uint64_t)lease->size;
 	if (file_size > ELF_OFF_MAX)
 		return ENOEXEC;
 	memset(header, 0, sizeof(*header));
@@ -255,7 +258,7 @@ read_headers(struct file *file, unsigned elf_class,
 		struct elf32_ehdr raw;
 		struct elf32_phdr *raw_programs;
 		if (file_size < sizeof(raw) ||
-		    read_exact(file, 0, &raw, sizeof(raw)) != 0)
+		    read_exact(lease, 0, &raw, sizeof(raw)) != 0)
 			return ENOEXEC;
 		if (raw.e_ident[EI_MAG0] != ELFMAG0 ||
 		    raw.e_ident[EI_MAG1] != ELFMAG1 ||
@@ -277,7 +280,7 @@ read_headers(struct file *file, unsigned elf_class,
 		raw_programs = kern_malloc((size_t)raw.e_phnum * sizeof(*raw_programs));
 		if (raw_programs == NULL)
 			return ENOMEM;
-		if (read_exact(file, (off_t)raw.e_phoff, raw_programs,
+		if (read_exact(lease, (off_t)raw.e_phoff, raw_programs,
 		    (size_t)raw.e_phnum * sizeof(*raw_programs)) != 0) {
 			kern_free(raw_programs);
 			return ENOEXEC;
@@ -309,7 +312,7 @@ read_headers(struct file *file, unsigned elf_class,
 		struct elf64_ehdr raw;
 		struct elf64_phdr *raw_programs;
 		if (file_size < sizeof(raw) ||
-		    read_exact(file, 0, &raw, sizeof(raw)) != 0)
+		    read_exact(lease, 0, &raw, sizeof(raw)) != 0)
 			return ENOEXEC;
 		if (raw.e_ident[EI_MAG0] != ELFMAG0 ||
 		    raw.e_ident[EI_MAG1] != ELFMAG1 ||
@@ -330,7 +333,7 @@ read_headers(struct file *file, unsigned elf_class,
 		raw_programs = kern_malloc((size_t)raw.e_phnum * sizeof(*raw_programs));
 		if (raw_programs == NULL)
 			return ENOMEM;
-		if (read_exact(file, (off_t)raw.e_phoff, raw_programs,
+		if (read_exact(lease, (off_t)raw.e_phoff, raw_programs,
 		    (size_t)raw.e_phnum * sizeof(*raw_programs)) != 0) {
 			kern_free(raw_programs);
 			return ENOEXEC;
@@ -366,14 +369,53 @@ read_headers(struct file *file, unsigned elf_class,
 }
 
 static int
-validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
+copy_segment_snapshot(struct file_content_lease *lease, struct vmspace *vm,
+	uintptr_t destination, off_t source, size_t size)
+{
+	uint8_t *buffer;
+	size_t done = 0;
+	int error = 0;
+
+	if (size == 0)
+		return 0;
+	buffer = kern_malloc(PAGE_SIZE);
+	if (buffer == NULL)
+		return ENOMEM;
+	while (done < size) {
+		size_t chunk = size - done > PAGE_SIZE ? PAGE_SIZE : size - done;
+		ssize_t count;
+
+		if ((uint64_t)source + done > ELF_OFF_MAX) {
+			error = EOVERFLOW;
+			break;
+		}
+		count = file_content_lease_pread(lease, buffer, chunk,
+		    source + (off_t)done);
+		if (count != (ssize_t)chunk) {
+			error = count < 0 ? (int)-count : EIO;
+			break;
+		}
+		error = vmspace_copy_to(vm, destination + done, buffer, chunk);
+		if (error != 0)
+			break;
+		done += chunk;
+	}
+	kern_free(buffer);
+	return error;
+}
+
+static int
+validate_and_load(struct file_content_lease *lease, struct vmspace *vm,
+	unsigned elf_class,
 	 enum elf_load_role role, struct normalized_image *image)
 {
+	struct file *file;
 	struct normalized_header header;
 	struct normalized_program *programs = NULL;
 	uintptr_t mapped_start[ELF_PHNUM_MAX];
 	size_t mapped_size[ELF_PHNUM_MAX];
 	uint64_t file_size, minimum = UINT64_MAX, maximum = 0, maximum_align = PAGE_SIZE;
+	uint64_t data_minimum = UINT64_MAX, data_maximum = 0;
 	uint64_t phdr_file_end, phdr_vaddr = 0;
 	uintptr_t load_bias = 0;
 	unsigned i, j, mapped_count = 0, loads = 0, dynamic_count = 0;
@@ -382,12 +424,13 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 	int entry_ok = 0, phdr_ok = 0;
 	int error;
 
-	if (file == NULL || vm == NULL || image == NULL)
+	if (lease == NULL || !lease->active ||
+	    (file = lease->file) == NULL || vm == NULL || image == NULL)
 		return EINVAL;
 	vmspace_layout_init();
 	memset(image, 0, sizeof(*image));
 	image->stack_size = EXEC_STACK_DEFAULT_SIZE;
-	error = read_headers(file, elf_class, &header, &programs, &file_size);
+	error = read_headers(lease, elf_class, &header, &programs, &file_size);
 	if (error != 0)
 		return error;
 	if ((role == ELF_LOAD_MAIN && header.type != ET_EXEC &&
@@ -425,7 +468,7 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 			    program->filesz < 2 || program->filesz > EXEC_INTERP_MAX ||
 			    program->offset > file_size ||
 			    program->filesz > file_size - program->offset ||
-			    read_exact(file, (off_t)program->offset, image->interpreter,
+			    read_exact(lease, (off_t)program->offset, image->interpreter,
 			    (size_t)program->filesz) != 0 ||
 			    image->interpreter[program->filesz - 1U] != '\0' ||
 			    strlen(image->interpreter) + 1U != program->filesz ||
@@ -500,6 +543,12 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 		if ((program->flags & PF_X) && header.entry >= program->vaddr &&
 		    header.entry < program->vaddr + program->memsz)
 			entry_ok = 1;
+		if (role == ELF_LOAD_MAIN && (program->flags & PF_W) != 0) {
+			if (program->vaddr < data_minimum)
+				data_minimum = program->vaddr;
+			if (program->vaddr + program->memsz > data_maximum)
+				data_maximum = program->vaddr + program->memsz;
+		}
 		if (header.phoff >= program->offset && phdr_file_end >= header.phoff &&
 		    phdr_file_end <= program->offset + program->filesz) {
 			image->program_headers = (uintptr_t)(program->vaddr +
@@ -553,7 +602,6 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 
 	for (i = 0; i < header.phnum; i++) {
 		struct normalized_program *program = &programs[i];
-		struct vm_region *region;
 		uintptr_t start, data_start, end;
 		if (program->type != PT_LOAD)
 			continue;
@@ -562,18 +610,35 @@ validate_and_load(struct file *file, struct vmspace *vm, unsigned elf_class,
 		data_start = load_bias + (uintptr_t)program->vaddr;
 		end = load_bias + (uintptr_t)((program->vaddr + program->memsz +
 		    PAGE_SIZE - 1U) & ~(uint64_t)(PAGE_SIZE - 1U));
-		error = vmspace_map_file(vm, start, end - start,
-		    initial_segment_prot(program), file, (off_t)program->offset,
-		    data_start, (size_t)program->filesz, &region);
+		/* The executable file may be modified as soon as its content lease is
+		 * released.  Build anonymous private pages while the lease is held,
+		 * rather than leaving PT_LOAD as a later file fault which could splice
+		 * bytes from a newer image.  The temporary mapping is writable but
+		 * never executable; final protection is published after the copy. */
+		error = vmspace_map_anon_fixed_noreplace(vm, start, end - start,
+		    HAL_SPACE_READ | HAL_SPACE_WRITE, NULL);
 		if (error != 0)
 			goto rollback;
-		region->flags |= VM_REGION_ELF_ZERO_TAIL;
 		mapped_start[mapped_count] = start;
 		mapped_size[mapped_count++] = end - start;
+		error = copy_segment_snapshot(lease, vm, data_start,
+		    (off_t)program->offset, (size_t)program->filesz);
+		if (error != 0)
+			goto rollback;
+		error = vmspace_protect(vm, start, end - start,
+		    initial_segment_prot(program));
+		if (error != 0)
+			goto rollback;
 		if (role == ELF_LOAD_MAIN && end > image->brk_start)
 			image->brk_start = end;
 	}
 	image->load_bias = load_bias;
+	if (data_minimum != UINT64_MAX) {
+		if (data_maximum < data_minimum ||
+		    data_maximum - data_minimum > SIZE_MAX)
+			goto rollback;
+		image->static_data_size = (size_t)(data_maximum - data_minimum);
+	}
 	image->entry = load_bias + (uintptr_t)header.entry;
 	image->program_headers += load_bias;
 	image->program_header_size = header.phentsize;
@@ -603,6 +668,7 @@ copy_image32(struct elf32_image_info *destination,
 {
 	destination->entry = source->entry;
 	destination->brk_start = source->brk_start;
+	destination->static_data_size = source->static_data_size;
 	destination->program_headers = source->program_headers;
 	destination->load_bias = source->load_bias;
 	destination->stack_size = source->stack_size;
@@ -619,6 +685,7 @@ copy_image64(struct elf64_image_info *destination,
 {
 	destination->entry = source->entry;
 	destination->brk_start = source->brk_start;
+	destination->static_data_size = source->static_data_size;
 	destination->program_headers = source->program_headers;
 	destination->load_bias = source->load_bias;
 	destination->stack_size = source->stack_size;
@@ -630,17 +697,32 @@ copy_image64(struct elf64_image_info *destination,
 }
 
 int
-elf32_load(struct file *file, struct vmspace *vm,
+elf32_load_content(struct file_content_lease *lease, struct vmspace *vm,
 	struct elf32_image_info *image)
 {
 	struct normalized_image normalized;
 	int error;
 	if (image == NULL)
 		return EINVAL;
-	error = validate_and_load(file, vm, ELFCLASS32, ELF_LOAD_MAIN,
+	error = validate_and_load(lease, vm, ELFCLASS32, ELF_LOAD_MAIN,
 	    &normalized);
 	if (error == 0)
 		copy_image32(image, &normalized);
+	return error;
+}
+
+int
+elf32_load(struct file *file, struct vmspace *vm,
+	struct elf32_image_info *image)
+{
+	struct file_content_lease lease;
+	int error;
+
+	error = file_content_lease_begin(file, &lease);
+	if (error != 0)
+		return error;
+	error = elf32_load_content(&lease, vm, image);
+	file_content_lease_end(&lease);
 	return error;
 }
 
@@ -648,14 +730,35 @@ int
 elf32_load_interpreter(struct file *file, struct vmspace *vm,
 	struct elf32_image_info *image)
 {
+	struct file_content_lease lease;
+	struct normalized_image normalized;
+	int error;
+
+	if (image == NULL)
+		return EINVAL;
+	error = file_content_lease_begin(file, &lease);
+	if (error != 0)
+		return error;
+	error = validate_and_load(&lease, vm, ELFCLASS32,
+	    ELF_LOAD_INTERPRETER, &normalized);
+	if (error == 0)
+		copy_image32(image, &normalized);
+	file_content_lease_end(&lease);
+	return error;
+}
+
+int
+elf64_load_content(struct file_content_lease *lease, struct vmspace *vm,
+	struct elf64_image_info *image)
+{
 	struct normalized_image normalized;
 	int error;
 	if (image == NULL)
 		return EINVAL;
-	error = validate_and_load(file, vm, ELFCLASS32, ELF_LOAD_INTERPRETER,
+	error = validate_and_load(lease, vm, ELFCLASS64, ELF_LOAD_MAIN,
 	    &normalized);
 	if (error == 0)
-		copy_image32(image, &normalized);
+		copy_image64(image, &normalized);
 	return error;
 }
 
@@ -663,14 +766,14 @@ int
 elf64_load(struct file *file, struct vmspace *vm,
 	struct elf64_image_info *image)
 {
-	struct normalized_image normalized;
+	struct file_content_lease lease;
 	int error;
-	if (image == NULL)
-		return EINVAL;
-	error = validate_and_load(file, vm, ELFCLASS64, ELF_LOAD_MAIN,
-	    &normalized);
-	if (error == 0)
-		copy_image64(image, &normalized);
+
+	error = file_content_lease_begin(file, &lease);
+	if (error != 0)
+		return error;
+	error = elf64_load_content(&lease, vm, image);
+	file_content_lease_end(&lease);
 	return error;
 }
 
@@ -678,13 +781,18 @@ int
 elf64_load_interpreter(struct file *file, struct vmspace *vm,
 	struct elf64_image_info *image)
 {
+	struct file_content_lease lease;
 	struct normalized_image normalized;
 	int error;
 	if (image == NULL)
 		return EINVAL;
-	error = validate_and_load(file, vm, ELFCLASS64, ELF_LOAD_INTERPRETER,
+	error = file_content_lease_begin(file, &lease);
+	if (error != 0)
+		return error;
+	error = validate_and_load(&lease, vm, ELFCLASS64, ELF_LOAD_INTERPRETER,
 	    &normalized);
 	if (error == 0)
 		copy_image64(image, &normalized);
+	file_content_lease_end(&lease);
 	return error;
 }

@@ -205,6 +205,7 @@ ZEDBSD_SUPPORT_TARGETS := help list-targets check clean distclean
 ZEDBSD_CHECK_TARGETS := check libc-host-test softfloat-host-test \
 	check-disk-image \
 	libc-opcode-check softfloat-opcode-check uapi-abi-layout-check \
+	hal-signal-frame-layout-check \
 	posix-header-check posix-api-matrix-check susv4-header-check \
 	susv4-libc-host-test crypt-host-test userland-command-host-test \
 	ufs1-format-host-test ufs2-format-host-test ufs1-format-python-test \
@@ -320,6 +321,44 @@ $(BUILD)/tests/uapi-abi-lp64.o: tests/uapi-abi-layout.c
 uapi-abi-layout-check: $(BUILD)/tests/uapi-abi-ilp32.o \
 	$(BUILD)/tests/uapi-abi-lp64.o
 	@echo "zedBSD ILP32/LP64 UAPI layout check: PASS"
+
+HAL_SIGNAL_FRAME_HEADERS := include/hal/arch.h \
+	include/hal/arch/i386.h include/hal/arch/amd64.h \
+	include/hal/arch/aarch64.h include/hal/arch/m68030.h \
+	include/hal/arch/sparcv9.h
+
+$(BUILD)/tests/hal-signal-frame-i386.o: tests/hal-signal-frame-layout.c \
+	$(HAL_SIGNAL_FRAME_HEADERS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m32 $(UAPI_ABI_TEST_FLAGS) -DHAL_ARCH_I386 -c $< -o $@
+
+$(BUILD)/tests/hal-signal-frame-amd64.o: tests/hal-signal-frame-layout.c \
+	$(HAL_SIGNAL_FRAME_HEADERS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m64 $(UAPI_ABI_TEST_FLAGS) -DHAL_ARCH_AMD64 -c $< -o $@
+
+$(BUILD)/tests/hal-signal-frame-arm64.o: tests/hal-signal-frame-layout.c \
+	$(HAL_SIGNAL_FRAME_HEADERS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m64 $(UAPI_ABI_TEST_FLAGS) -DHAL_ARCH_ARM64 -c $< -o $@
+
+$(BUILD)/tests/hal-signal-frame-m68k.o: tests/hal-signal-frame-layout.c \
+	$(HAL_SIGNAL_FRAME_HEADERS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m32 $(UAPI_ABI_TEST_FLAGS) -DHAL_ARCH_M68K -c $< -o $@
+
+$(BUILD)/tests/hal-signal-frame-sparcv9.o: tests/hal-signal-frame-layout.c \
+	$(HAL_SIGNAL_FRAME_HEADERS)
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m64 $(UAPI_ABI_TEST_FLAGS) -DHAL_ARCH_SPARCV9 -c $< -o $@
+
+hal-signal-frame-layout-check: \
+	$(BUILD)/tests/hal-signal-frame-i386.o \
+	$(BUILD)/tests/hal-signal-frame-amd64.o \
+	$(BUILD)/tests/hal-signal-frame-arm64.o \
+	$(BUILD)/tests/hal-signal-frame-m68k.o \
+	$(BUILD)/tests/hal-signal-frame-sparcv9.o
+	@echo "zedBSD HAL signal-frame layout check: PASS"
 
 $(BUILD)/tests/posix-header-ilp32.o: tests/posix-header-compile.c
 	@mkdir -p $(dir $@)
@@ -467,10 +506,59 @@ $(BUILD)/tests/x68k-scsi-disk-host-test: \
 		src/kern/buf.c src/kern/sysctl.c src/kern/klog.c src/kern/disk.c \
 		tests/disk-host-stubs.c $< -o $@
 
-$(BUILD)/tests/sched-host-test: tests/sched-host-test.c src/kern/sched.c
+$(BUILD)/tests/sched-host-test: tests/sched-host-test.c src/kern/sched.c \
+	src/kern/waitq.c src/kern/test-checkpoint.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Dtid_t=int -DZEDBSD_SCHED_TEST -Iinclude -Isrc \
-		src/kern/sched.c $< -o $@
+	$(HOST_TEST_CC) -Dtid_t=int -DZEDBSD_SCHED_TEST \
+		-DZEDBSD_TEST_CHECKPOINTS -Iinclude -Isrc src/kern/sched.c \
+		src/kern/waitq.c src/kern/test-checkpoint.c $< -o $@
+
+$(BUILD)/tests/timer-sigev-thread-host-test: \
+	tests/timer-sigev-thread-host-test.c userland/base/libc/timer.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Ilibc/include -Iinclude \
+		tests/timer-sigev-thread-host-test.c -o $@
+
+$(BUILD)/tests/process-timer-thread-host-stubs.o: \
+	tests/process-timer-thread-host-stubs.c \
+	tests/process-timer-thread-host-stubs.h
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -pthread -Itests -c $< -o $@
+
+$(BUILD)/tests/process-timer-host-test: tests/process-timer-host-test.c \
+	$(BUILD)/tests/process-timer-thread-host-stubs.o \
+	src/kern/process-timer.c src/kern/test-checkpoint.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -pthread -DZEDBSD_USER_ABI_LP64 \
+		-DZEDBSD_TEST_CHECKPOINTS -Ilibc/include -Iinclude -Isrc \
+		src/kern/process-timer.c src/kern/test-checkpoint.c \
+		tests/process-timer-host-test.c \
+		$(BUILD)/tests/process-timer-thread-host-stubs.o -o $@
+
+$(BUILD)/tests/pthread-wait-host-test: tests/pthread-wait-host-test.c \
+	userland/base/libc/pthread.c userland/base/libc/semaphore.c libc/setjmp.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -ffunction-sections -fdata-sections \
+		-Wno-stringop-truncation \
+		-I. -Ilibc/include -Iinclude userland/base/libc/pthread.c \
+		userland/base/libc/semaphore.c libc/setjmp.c $< \
+		-Wl,--gc-sections -o $@
+
+$(BUILD)/tests/signal-restart-host-test: tests/signal-restart-host-test.c \
+	src/kern/signal.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -ffunction-sections -fdata-sections -Dtid_t=int \
+		-DZEDBSD_USER_ABI_LP64 -DHAL_ARCH_AMD64 -Iinclude -Isrc \
+		src/kern/signal.c $< -Wl,--gc-sections -o $@
+
+$(BUILD)/tests/syscall-stop-host-test: tests/syscall-stop-host-test.c \
+	src/kern/syscall.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Wno-stringop-truncation \
+		-ffunction-sections -fdata-sections -DZEDBSD_USER_ABI_LP64 \
+		-DHAL_ARCH_AMD64 -DZEDBSD_SYSCALL_STOP_TEST \
+		-Ilibc/include -Iinclude -Isrc \
+		src/kern/syscall.c $< -Wl,--gc-sections -o $@
 
 $(BUILD)/tests/concurrency-host-test: tests/concurrency-host-test.c \
 	src/kern/lock.c
@@ -481,6 +569,31 @@ $(BUILD)/tests/concurrency-host-test: tests/concurrency-host-test.c \
 $(BUILD)/tests/smp-contract-host-test: tests/smp-contract-host-test.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Isrc $< -o $@
+
+$(BUILD)/tests/process-lifetime-host-test: \
+	tests/process-lifetime-host-test.c src/kern/process.c \
+	src/kern/test-checkpoint.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -pthread -Dtid_t=int -DWCONTINUED=8 \
+		-DZEDBSD_PROCESS_TEST -DZEDBSD_TEST_CHECKPOINTS \
+		-ffunction-sections -fdata-sections -Iinclude -Isrc \
+		src/kern/process.c src/kern/test-checkpoint.c $< \
+		-Wl,--gc-sections -o $@
+
+$(BUILD)/tests/thread-lifetime-host-test: \
+	tests/thread-lifetime-host-test.c src/kern/thread.c \
+	src/kern/test-checkpoint.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -pthread -Dtid_t=int -DZEDBSD_TEST_CHECKPOINTS \
+		-ffunction-sections -fdata-sections -Iinclude -Isrc \
+		src/kern/thread.c src/kern/test-checkpoint.c $< \
+		-Wl,--gc-sections -o $@
+
+$(BUILD)/tests/tty-line-host-test: tests/tty-line-host-test.c src/kern/tty.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -DZEDBSD_TTY_TEST -DZEDBSD_USER_ABI_LP64 \
+		-ffunction-sections -fdata-sections -Iinclude -Isrc -Ilibc/include \
+		src/kern/tty.c $< -Wl,--gc-sections -o $@
 
 $(BUILD)/tests/ufs1-format-host-test: tests/ufs1-format-host-test.c \
 	src/kern/ufs1/ufs1-endian.c src/kern/ufs1/ufs1-super.c
@@ -551,10 +664,42 @@ $(BUILD)/tests/ufs2-multicg-vfs-host-test: tests/ufs1-vfs-host-test.c \
 		tests/vfs-host-stubs.c $< -o $@
 
 $(BUILD)/tests/vmspace-host-test: tests/vmspace-host-test.c \
-	src/kern/vmspace.c src/kern/vm-object.c tests/vm-sync-host-stubs.c
+	src/kern/vm-lock.c src/kern/vmspace.c src/kern/vm-object.c \
+	src/kern/uaccess.c tests/vm-sync-host-stubs.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vmspace.c \
-		src/kern/vm-object.c tests/vm-sync-host-stubs.c $< -pthread -o $@
+	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Isrc \
+		src/kern/vm-lock.c src/kern/vmspace.c \
+		src/kern/vm-object.c src/kern/uaccess.c \
+		tests/vm-sync-host-stubs.c $< -pthread -o $@
+
+$(BUILD)/tests/usync-host-test: tests/usync-host-test.c src/kern/usync.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Isrc src/kern/usync.c $< -o $@
+
+$(BUILD)/tests/vm-object-resize-host-test: \
+	tests/vm-object-resize-host-test.c src/kern/vm-lock.c \
+	src/kern/vm-object.c src/kern/file.c src/kern/inode.c \
+	src/kern/overlayfs.c src/kern/test-checkpoint.c \
+	$(BUILD)/tests/exec-commit-host.o \
+	tests/vm-sync-host-stubs.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -ffunction-sections -fdata-sections \
+		-Wno-stringop-truncation -Wno-unused-const-variable \
+		-DZEDBSD_OVERLAY_CONTENT_HOST_TEST \
+		-DZEDBSD_TEST_CHECKPOINTS -Iinclude -Isrc \
+		src/kern/vm-lock.c src/kern/vm-object.c src/kern/file.c \
+		src/kern/inode.c src/kern/overlayfs.c \
+		src/kern/test-checkpoint.c \
+		tests/vm-sync-host-stubs.c $< -pthread \
+		$(BUILD)/tests/exec-commit-host.o \
+		-Wl,--gc-sections -o $@
+
+$(BUILD)/tests/exec-commit-host.o: src/kern/exec.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -ffunction-sections -fdata-sections \
+		-DZEDBSD_USER_ABI_LP64 -DZEDBSD_EXEC_COMMIT_HOST_TEST \
+		-DZEDBSD_TEST_CHECKPOINTS -Ilibc/include -Iinclude -Isrc \
+		-c $< -o $@
 
 $(BUILD)/tests/vm-commit-host-test: tests/vm-commit-host-test.c \
 	src/kern/vm-commit.c
@@ -568,10 +713,11 @@ $(BUILD)/tests/swap-host-test: tests/swap-host-test.c src/kern/swap.c \
 		tests/spin-host-stubs.c $< -pthread -o $@
 
 $(BUILD)/tests/vm-reclaim-host-test: tests/vm-reclaim-host-test.c \
-	src/kern/vm-reclaim.c src/kern/swap.c tests/spin-host-stubs.c
+	src/kern/vm-lock.c src/kern/vm-reclaim.c src/kern/swap.c \
+	tests/vm-sync-host-stubs.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vm-reclaim.c \
-		src/kern/swap.c tests/spin-host-stubs.c $< -pthread -o $@
+	$(HOST_TEST_CC) -Iinclude -Isrc src/kern/vm-lock.c src/kern/vm-reclaim.c \
+		src/kern/swap.c tests/vm-sync-host-stubs.c $< -pthread -o $@
 
 $(BUILD)/tests/packet-buf-host-test: tests/packet-buf-host-test.c \
 	src/kern/net/packet-buf.c
@@ -682,6 +828,12 @@ $(BUILD)/tests/cred-host-test: tests/cred-host-test.c src/kern/cred.c \
 	$(HOST_TEST_CC) -Dtid_t=int -Iinclude -Iinclude/uapi -Isrc src/kern/cred.c \
 		$(KERN_ACL_SOURCES) $< -o $@
 
+$(BUILD)/tests/exec-prepare-host-test: tests/exec-prepare-host-test.c \
+	src/kern/exec-prepare.c
+	@mkdir -p $(dir $@)
+	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc \
+		src/kern/exec-prepare.c $< -o $@
+
 $(BUILD)/tests/quota-host-test: tests/quota-host-test.c $(KERN_QUOTA_SOURCES)
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc $(KERN_QUOTA_SOURCES) $< -o $@
@@ -757,6 +909,7 @@ HOST_TEST_BINARIES := $(BUILD)/tests/sh-lexer-host-test \
 	$(BUILD)/tests/ufs2-multicg-vfs-host-test \
 	$(BUILD)/tests/ufs-consistency-host-test \
 	$(BUILD)/tests/cred-host-test \
+	$(BUILD)/tests/exec-prepare-host-test \
 	$(BUILD)/tests/quota-host-test \
 	$(BUILD)/tests/ufs-snapshot-host-test \
 	$(BUILD)/tests/clock-rtc-host-test \
@@ -780,9 +933,19 @@ HOST_TEST_BINARIES := $(BUILD)/tests/sh-lexer-host-test \
 	$(BUILD)/tests/x68k-scsi-host-test \
 	$(BUILD)/tests/x68k-scsi-disk-host-test \
 	$(BUILD)/tests/sched-host-test \
+	$(BUILD)/tests/timer-sigev-thread-host-test \
+	$(BUILD)/tests/process-timer-host-test \
+	$(BUILD)/tests/pthread-wait-host-test \
+	$(BUILD)/tests/signal-restart-host-test \
+	$(BUILD)/tests/syscall-stop-host-test \
+	$(BUILD)/tests/process-lifetime-host-test \
+	$(BUILD)/tests/thread-lifetime-host-test \
+	$(BUILD)/tests/tty-line-host-test \
 	$(BUILD)/tests/smp-contract-host-test \
 	$(BUILD)/tests/concurrency-host-test \
 	$(BUILD)/tests/vmspace-host-test \
+	$(BUILD)/tests/usync-host-test \
+	$(BUILD)/tests/vm-object-resize-host-test \
 	$(BUILD)/tests/vm-commit-host-test \
 	$(BUILD)/tests/swap-host-test \
 	$(BUILD)/tests/vm-reclaim-host-test \
@@ -796,7 +959,8 @@ CHECK_RUN_TARGETS := libc-host-test softfloat-host-test \
 	zed-softfloat-core-test float-parse-host-test \
 	math-host-test \
 	zed-softfloat128-core-test \
-	uapi-abi-layout-check posix-header-check posix-api-matrix-check \
+	uapi-abi-layout-check hal-signal-frame-layout-check \
+	posix-header-check posix-api-matrix-check \
 	susv4-header-check susv4-libc-host-test crypt-host-test \
 	ufs1-format-host-test ufs2-format-host-test
 
@@ -943,6 +1107,7 @@ distclean:
 
 .PHONY: check clean distclean \
 	overlay-journal-format-host-test uapi-abi-layout-check \
+	hal-signal-frame-layout-check \
 	posix-header-check posix-api-matrix-check susv4-header-check \
 	susv4-libc-host-test crypt-host-test userland-command-host-test \
 	ufs1-format-host-test \

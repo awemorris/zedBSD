@@ -22,7 +22,8 @@ M68K_USER_CFLAGS := -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie \
 	-fno-builtin -fno-common -ffunction-sections -fdata-sections \
 	-Os -Wall -Wextra -Werror
 M68K_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
-	-Ilibc/include -DZEDBSD_USER_ABI_M68K -DZEDBSD_USER_PAGE_SIZE=4096 \
+	-Ilibc/include -DHAL_ARCH_M68K -DZEDBSD_USER_ABI_M68K \
+	-DZEDBSD_USER_PAGE_SIZE=4096 \
 	-DZEDBSD_NO_PRINTF_FLOAT
 
 # These overrides make an explicit `libc-objects` request use the m68k kernel
@@ -51,7 +52,7 @@ X68K_CRT0_OBJ := $(BUILD)/user/src/crt/crt0-m68k.o
 X68K_USER_RUNTIME_SOURCES := \
 	userland/base/libc/posix.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
 	userland/base/libc/termios.c \
-	userland/base/libc/pthread.c userland/base/libc/shm.c userland/base/libc/semaphore.c \
+	userland/base/libc/pthread.c userland/base/libc/timer.c userland/base/libc/shm.c userland/base/libc/semaphore.c \
 	userland/base/libc/mqueue.c userland/base/libc/socket.c userland/base/libc/signal.c \
 	userland/base/libc/account.c userland/base/libc/crypt.c userland/base/libc/utmpx.c \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
@@ -119,12 +120,12 @@ X68K_KERNEL_SOURCES := \
 	src/kern/process-timer.c src/kern/lock.c src/kern/klog.c src/kern/waitq.c \
 	src/kern/buf.c src/kern/sysctl.c src/kern/resource.c \
 	src/kern/resource-limit.c src/kern/poll.c src/kern/usync.c \
-	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/vmspace.c \
+	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/vm-lock.c src/kern/vmspace.c \
 	src/kern/vm-object.c src/kern/vm-commit.c src/kern/filedesc.c \
 	src/kern/record-lock.c src/kern/pipe.c src/kern/cred.c \
 	src/kern/posix-acl.c src/kern/quota.c src/kern/signal.c \
 	src/kern/cwdinfo.c \
-	src/kern/elf.c src/kern/exec.c src/kern/user-probe.c \
+	src/kern/elf.c src/kern/exec-prepare.c src/kern/exec.c src/kern/user-probe.c \
 	src/kern/syscall.c src/kern/uaccess.c src/kern/cdev.c src/kern/devfs.c \
 	src/kern/console-device.c src/kern/mouse-device.c src/kern/tty.c \
 	src/kern/graphics-device.c \
@@ -241,7 +242,8 @@ $(BUILD)/user/userland/x68k-contract.o: userland/base/x68k-contract.S
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_USER_CPPFLAGS) $(M68K_USER_CFLAGS) -c $< -o $@
 
-$(X68K_CRT0_OBJ): src/crt/crt0-m68k.S
+$(X68K_CRT0_OBJ): src/crt/crt0-m68k.S include/hal/arch.h \
+	include/hal/arch/m68030.h
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_USER_CPPFLAGS) $(M68K_USER_CFLAGS) -c $< -o $@
 

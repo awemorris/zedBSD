@@ -3,14 +3,14 @@
 #include "asi.h"
 #include "irq.h"
 
-static uint64 tick_frequency;
-static uint64 tick_interval;
-static uint64 tick_deadline;
-static uint64 timer_ticks;
+static uint64_t tick_frequency;
+static uint64_t tick_interval;
+static uint64_t tick_deadline;
+static uint64_t timer_ticks;
 static unsigned deferred_ticks;
 
 void
-sparcv9_timer_init(uint64 frequency)
+sparcv9_timer_init(uint64_t frequency)
 {
 	if (frequency == 0)
 		HAL_FATAL("invalid SPARC V9 timer frequency");
@@ -26,8 +26,8 @@ sparcv9_timer_init(uint64 frequency)
 void
 sun4u_timer_interrupt(hal_irq_ack_t acknowledge)
 {
-	uint64 now = sparcv9_tick();
-	uint64 trap_level;
+	uint64_t now = sparcv9_tick();
+	uint64_t trap_level;
 
 	sparcv9_clear_tick_interrupt();
 	timer_ticks++;
@@ -58,7 +58,7 @@ sun4u_timer_interrupt(hal_irq_ack_t acknowledge)
 }
 
 bool
-hal_rtc_read(uint64 *unix_seconds)
+hal_rtc_read(uint64_t *unix_seconds)
 {
 	(void)unix_seconds;
 	return false;

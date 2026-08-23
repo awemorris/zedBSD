@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <locale.h>
+#include <zedbsd/signal.h>
 
 typedef int64_t time_t;
 typedef int clockid_t;
@@ -23,7 +24,6 @@ struct tm {
 	int tm_sec, tm_min, tm_hour, tm_mday, tm_mon, tm_year;
 	int tm_wday, tm_yday, tm_isdst;
 };
-struct sigevent;
 extern char *tzname[2];
 extern int daylight;
 extern long timezone;

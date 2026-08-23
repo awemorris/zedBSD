@@ -6,6 +6,7 @@
 #include "kern/poll.h"
 #include "kern/sched.h"
 #include "kern/signal.h"
+#include "kern/syscall.h"
 #include "kern/thread.h"
 
 #include <errno.h>
@@ -400,7 +401,7 @@ socket_enqueue_packet_wait(struct socket *socket, struct packet_buf *packet,
 		return EINVAL;
 	}
 	if (timeout_ticks != 0 &&
-	    kern_deadline_after(sched_ticks(), timeout_ticks, &deadline) != 0) {
+	    syscall_restart_deadline_after(timeout_ticks, &deadline) != 0) {
 		packet_buf_free(packet);
 		return EOVERFLOW;
 	}
@@ -492,7 +493,7 @@ socket_dequeue_packet(struct socket *socket, int flags,
 		return EINVAL;
 	irq = spin_lock_irqsave(&socket->lock);
 	if (socket->receive_timeout_ticks != 0 &&
-	    kern_deadline_after(sched_ticks(), socket->receive_timeout_ticks,
+	    syscall_restart_deadline_after(socket->receive_timeout_ticks,
 	    &deadline) != 0)
 	{
 		spin_unlock_irqrestore(&socket->lock, irq);

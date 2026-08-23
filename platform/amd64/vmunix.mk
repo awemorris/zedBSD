@@ -71,11 +71,11 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/test-checkpoint.c \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c \
-	src/kern/vmspace.c src/kern/vm-object.c src/kern/vm-commit.c \
+	src/kern/vm-lock.c src/kern/vmspace.c src/kern/vm-object.c src/kern/vm-commit.c \
 	src/kern/filedesc.c \
 	src/kern/record-lock.c \
 	src/kern/pipe.c src/kern/cred.c src/kern/signal.c \
-	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec.c \
+	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec-prepare.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
 	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
 	src/kern/mouse-device.c src/kern/tty.c \
@@ -232,6 +232,7 @@ AMD64_USER_CFLAGS := -m64 -march=x86-64 -mno-red-zone -ffreestanding \
 AMD64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfcn.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
 	userland/base/libc/termios.c \
 	userland/base/libc/pthread.c \
+	userland/base/libc/timer.c \
 	userland/base/libc/shm.c \
 	userland/base/libc/semaphore.c \
 	userland/base/libc/mqueue.c \
@@ -263,7 +264,8 @@ $(BUILD)/user64/%.o: %.c
 	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) \
 		-fno-strict-aliasing -MMD -MP -c $< -o $@
 
-$(BUILD)/user64/src/crt/crt0-amd64.o: src/crt/crt0-amd64.S
+$(BUILD)/user64/src/crt/crt0-amd64.o: src/crt/crt0-amd64.S \
+	include/hal/arch.h include/hal/arch/amd64.h
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_USER_CPPFLAGS) $(AMD64_USER_CFLAGS) -c $< -o $@
 
@@ -421,7 +423,7 @@ DYNAMIC_CFLAGS := -m64 -march=x86-64 -mno-red-zone -Os -ffreestanding \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-ftls-model=global-dynamic -Wall -Wextra -Werror
 DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c userland/base/libc/poll.c \
-	userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/shm.c \
+	userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/timer.c userland/base/libc/shm.c \
 	userland/base/libc/semaphore.c userland/base/libc/mqueue.c userland/base/libc/dlfcn.c \
 	userland/base/libc/socket.c userland/base/libc/resolver.c \
 	userland/base/libc/resolver-dns.c userland/base/libc/signal.c \
@@ -472,9 +474,11 @@ $(DYNAMIC_DIR)/obj/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
 
-$(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o: userland/base/libc/syscall-amd64.S
+$(DYNAMIC_DIR)/obj/userland/base/libc/syscall.o: \
+	userland/base/libc/syscall-amd64.S include/hal/arch.h \
+	include/hal/arch/amd64.h
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -c $< -o $@
+	$(CC) $(DYNAMIC_CPPFLAGS) -m64 -c $< -o $@
 
 $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o: userland/base/rtld/entry-amd64.S
 	@mkdir -p $(dir $@)
@@ -488,19 +492,19 @@ $(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialec
 
 $(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
 		-mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_FLOAT_DIR)/zed-softfloat.o: src/softfloat/zed-softfloat.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
 		-mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_FLOAT_DIR)/float-parse.o: libc/float-parse.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+	$(CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. $(DYNAMIC_CFLAGS) \
 		-mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-amd64.S

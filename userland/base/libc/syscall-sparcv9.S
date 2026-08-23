@@ -1,4 +1,6 @@
-.section ".text"
+#include <hal/arch.h>
+
+	.section ".text"
 .align 4
 .global __syscall6
 .type __syscall6, #function
@@ -22,9 +24,9 @@ __syscall6:
 .global __signal_restorer
 .type __signal_restorer, #function
 __signal_restorer:
-	add %sp, 2175, %o1
+	add %sp, HAL_TASK_SIGNAL_RESTORER_TOKEN_OFFSET, %o1
 	ldx [%o1], %o1
-	ldx [%sp + 2183], %o2
+	ldx [%sp + HAL_TASK_SIGNAL_RESTORER_CONTEXT_OFFSET], %o2
 	mov 80, %o0
 	call __syscall6
 	 nop

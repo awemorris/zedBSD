@@ -1,3 +1,5 @@
+#include <hal/arch.h>
+
 .code32
 .text
 .globl _start
@@ -51,8 +53,8 @@ __syscall6:
 .globl __signal_restorer
 .type __signal_restorer, @function
 __signal_restorer:
-	movl 12(%esp), %ebx
-	movl 8(%esp), %ecx
+	movl HAL_TASK_SIGNAL_RESTORER_TOKEN_OFFSET(%esp), %ebx
+	movl HAL_TASK_SIGNAL_RESTORER_CONTEXT_OFFSET(%esp), %ecx
 	movl $80, %eax
 	int $0xc2
 	ud2

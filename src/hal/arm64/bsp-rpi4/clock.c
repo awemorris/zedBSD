@@ -4,21 +4,21 @@
 
 #define ARM64_CNTP_INTID 30U
 
-static uint64 timer_frequency;
-static uint64 timer_interval;
-static uint64 timer_deadline;
-static uint64 timer_ticks;
+static uint64_t timer_frequency;
+static uint64_t timer_interval;
+static uint64_t timer_deadline;
+static uint64_t timer_ticks;
 
-static uint64
+static uint64_t
 counter(void)
 {
-	uint64 value;
+	uint64_t value;
 	__asm__ volatile("mrs %0, cntpct_el0" : "=r"(value));
 	return value;
 }
 
 static void
-set_cval(uint64 value)
+set_cval(uint64_t value)
 {
 	__asm__ volatile("msr cntp_cval_el0, %0" : : "r"(value));
 }
@@ -35,14 +35,14 @@ rpi4_timer_init(void)
 	timer_deadline = counter() + timer_interval;
 	set_cval(timer_deadline);
 	__asm__ volatile("msr cntp_ctl_el0, %0\n\tisb" : :
-	    "r"((uint64)1) : "memory");
+	    "r"((uint64_t)1) : "memory");
 	rpi4_gic_unmask(ARM64_CNTP_INTID);
 }
 
 void
 rpi4_timer_interrupt(hal_irq_ack_t acknowledge)
 {
-	uint64 now = counter();
+	uint64_t now = counter();
 
 	timer_ticks++;
 	do
@@ -55,7 +55,7 @@ rpi4_timer_interrupt(hal_irq_ack_t acknowledge)
 }
 
 bool
-hal_rtc_read(uint64 *unix_seconds)
+hal_rtc_read(uint64_t *unix_seconds)
 {
 	(void)unix_seconds;
 	return false;

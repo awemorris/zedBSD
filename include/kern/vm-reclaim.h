@@ -11,6 +11,8 @@
 #include <stdint.h>
 
 struct vm_page;
+struct vm_private_page;
+struct hal_pmem;
 
 struct vm_reclaim_stats {
 	uint32_t resident;
@@ -31,6 +33,21 @@ struct vm_reclaim_stats {
 extern struct vm_reclaim_stats vm_reclaim_counters;
 
 void vm_reclaim_init(void);
+void vm_private_page_init(struct vm_private_page *);
+void vm_private_page_ref(struct vm_private_page *);
+void vm_private_page_put(struct vm_private_page *);
+/* The blocking acquire requires a caller-owned lifetime reference. */
+int vm_private_page_io_acquire(struct vm_private_page *);
+/* On success the nonblocking form also returns an I/O lifetime reference. */
+int vm_private_page_io_try_acquire(struct vm_private_page *);
+void vm_private_page_io_release(struct vm_private_page *);
+int vm_private_page_wait_idle(struct vm_private_page *);
+/* A successful short operation includes a backing lifetime reference. */
+int vm_private_page_operation_try_begin(struct vm_private_page *);
+void vm_private_page_operation_end(struct vm_private_page *);
+void vm_private_page_mark_dirty(struct vm_private_page *);
+int vm_private_page_pin(struct vm_private_page *, struct hal_pmem *);
+void vm_private_page_unpin(struct vm_private_page *);
 void vm_page_track(struct vm_page *);
 void vm_page_untrack(struct vm_page *);
 int vm_reclaim_one(struct vm_page *avoid);

@@ -8,7 +8,10 @@
 #define RLIMIT_STACK  1
 #define RLIMIT_AS     2
 #define RLIMIT_CORE   3
-#define RLIMIT_NLIMITS 4
+#define RLIMIT_CPU    4
+#define RLIMIT_DATA   5
+#define RLIMIT_FSIZE  6
+#define RLIMIT_NLIMITS 7
 #define RLIM_INFINITY UINT64_MAX
 
 struct rlimit_record {

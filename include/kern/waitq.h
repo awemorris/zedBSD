@@ -22,6 +22,9 @@ struct wait_queue {
 };
 
 #define WAITQ_INTERRUPTIBLE 0x0001U
+/* Cancellation uses the thread's atomic sticky request plus the scheduler's
+ * interrupt-generation handoff.  The condition lock need not be proc->lock. */
+#define WAITQ_CANCELABLE    0x0002U
 
 void waitq_init(struct wait_queue *, const char *);
 uint64_t waitq_sequence(const struct wait_queue *);

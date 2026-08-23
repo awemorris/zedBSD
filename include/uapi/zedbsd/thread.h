@@ -7,4 +7,8 @@
 #define ZEDBSD_THREAD_CANCEL_REQUEST 0U
 #define ZEDBSD_THREAD_CANCEL_TEST    1U
 #define ZEDBSD_THREAD_CANCEL_CLEAR   2U
+
+/* Internal thread_join syscall option used by the pthread cancellation
+ * wrapper.  Raw non-cancelable join users leave the option clear. */
+#define ZEDBSD_THREAD_JOIN_CANCELABLE 0x0001U
 #endif

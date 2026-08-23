@@ -31,6 +31,7 @@ struct tcp_socket {
 	uint32_t receive_next;
 	uint32_t connect_generation;
 	uint32_t active_connect_generation;
+	uint64_t connect_wait_deadline;
 	uint16_t peer_window;
 	struct packet_buf *retransmit;
 	uint32_t retransmit_sequence;

@@ -10,8 +10,8 @@
 #define SET(m,n) ((m)[(n) >> 5] |= 1U << ((n) & 31U))
 #define CLEAR(m,n) ((m)[(n) >> 5] &= ~(1U << ((n) & 31U)))
 
-static uint32 used[WORDS], reserved[WORDS];
-static uint32 phys_pages, reserved_pages, allocated_pages;
+static uint32_t used[WORDS], reserved[WORDS];
+static uint32_t phys_pages, reserved_pages, allocated_pages;
 
 uintptr_t sparcv9_direct_to_phys(const void *p)
 {
@@ -24,14 +24,14 @@ void *sparcv9_phys_to_direct(uintptr_t p)
 }
 
 static void
-release(uint64 base, uint64 size)
+release(uint64_t base, uint64_t size)
 {
-	uint64 limit = (uint64)phys_pages * SPARCV9_PAGE_SIZE, end;
-	uint32 first, last, page;
+	uint64_t limit = (uint64_t)phys_pages * SPARCV9_PAGE_SIZE, end;
+	uint32_t first, last, page;
 	if (size == 0 || base >= limit) return;
 	end = size > limit - base ? limit : base + size;
-	first = (uint32)((base + SPARCV9_PAGE_MASK) / SPARCV9_PAGE_SIZE);
-	last = (uint32)(end / SPARCV9_PAGE_SIZE);
+	first = (uint32_t)((base + SPARCV9_PAGE_MASK) / SPARCV9_PAGE_SIZE);
+	last = (uint32_t)(end / SPARCV9_PAGE_SIZE);
 	for (page = first; page < last; page++)
 		if (GET(used, page)) {
 			CLEAR(used, page); CLEAR(reserved, page); reserved_pages--;
@@ -39,14 +39,14 @@ release(uint64 base, uint64 size)
 }
 
 static void
-reserve_range(uint64 base, uint64 size)
+reserve_range(uint64_t base, uint64_t size)
 {
-	uint64 limit = (uint64)phys_pages * SPARCV9_PAGE_SIZE, end;
-	uint32 first, last, page;
+	uint64_t limit = (uint64_t)phys_pages * SPARCV9_PAGE_SIZE, end;
+	uint32_t first, last, page;
 	if (size == 0 || base >= limit) return;
 	end = size > limit - base ? limit : base + size;
-	first = (uint32)(base / SPARCV9_PAGE_SIZE);
-	last = (uint32)((end + SPARCV9_PAGE_MASK) / SPARCV9_PAGE_SIZE);
+	first = (uint32_t)(base / SPARCV9_PAGE_SIZE);
+	last = (uint32_t)((end + SPARCV9_PAGE_MASK) / SPARCV9_PAGE_SIZE);
 	if (last > phys_pages) last = phys_pages;
 	for (page = first; page < last; page++)
 		if (!GET(used, page)) {
@@ -58,14 +58,14 @@ void
 sparcv9_page_init(void)
 {
 	const struct sun4u_boot_handoff *h = sun4u_boot_handoff();
-	uint64 top = 0;
+	uint64_t top = 0;
 	unsigned i;
 	for (i = 0; i < h->installed_count; i++) {
-		uint64 end = h->installed[i].base + h->installed[i].size;
+		uint64_t end = h->installed[i].base + h->installed[i].size;
 		if (end > top) top = end;
 	}
 	if (top > 0x20000000ULL) top = 0x20000000ULL;
-	phys_pages = (uint32)(top / SPARCV9_PAGE_SIZE);
+	phys_pages = (uint32_t)(top / SPARCV9_PAGE_SIZE);
 	hal_memset(used, 0xff, sizeof(used));
 	hal_memset(reserved, 0xff, sizeof(reserved));
 	reserved_pages = phys_pages; allocated_pages = 0;
@@ -73,20 +73,20 @@ sparcv9_page_init(void)
 		release(h->available[i].base, h->available[i].size);
 	reserve_range(0, 0x00800000UL);
 	hal_printf("SPARCV9 MEMORY MAP PASS total=%llu MiB free=%llu MiB\n",
-	    (uint64)phys_pages * SPARCV9_PAGE_SIZE / (1024U * 1024U),
-	    ((uint64)phys_pages - reserved_pages) * SPARCV9_PAGE_SIZE /
+	    (uint64_t)phys_pages * SPARCV9_PAGE_SIZE / (1024U * 1024U),
+	    ((uint64_t)phys_pages - reserved_pages) * SPARCV9_PAGE_SIZE /
 	    (1024U * 1024U));
 }
 
 static int
 alloc_ram(size_t size, size_t alignment, struct hal_pmem *desc)
 {
-	uint32 need, end, start, i, align_pages;
+	uint32_t need, end, start, i, align_pages;
 	bool enabled;
 	if (desc == NULL || size == 0 || size > SIZE_MAX - SPARCV9_PAGE_MASK)
 		return HAL_ERR_INVALID;
-	need = (uint32)((size + SPARCV9_PAGE_MASK) / SPARCV9_PAGE_SIZE);
-	align_pages = (uint32)(alignment / SPARCV9_PAGE_SIZE);
+	need = (uint32_t)((size + SPARCV9_PAGE_MASK) / SPARCV9_PAGE_SIZE);
+	align_pages = (uint32_t)(alignment / SPARCV9_PAGE_SIZE);
 	end = phys_pages;
 	if (need == 0 || need >= end) return HAL_ERR_NOMEM;
 	enabled = hal_irq_disable();
@@ -130,15 +130,15 @@ hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *desc)
 int
 hal_pmem_free(struct hal_pmem *desc)
 {
-	uint32 first, count, i;
+	uint32_t first, count, i;
 	bool enabled;
 	if (desc == NULL || desc->type != HAL_PMEM_TYPE_RAM ||
 	    desc->size == 0 || (desc->paddr & SPARCV9_PAGE_MASK) != 0 ||
 	    (desc->size & SPARCV9_PAGE_MASK) != 0 ||
 	    desc->vaddr != sparcv9_phys_to_direct((uintptr_t)desc->paddr))
 		return HAL_ERR_INVALID;
-	first = (uint32)(desc->paddr / SPARCV9_PAGE_SIZE);
-	count = (uint32)(desc->size / SPARCV9_PAGE_SIZE);
+	first = (uint32_t)(desc->paddr / SPARCV9_PAGE_SIZE);
+	count = (uint32_t)(desc->size / SPARCV9_PAGE_SIZE);
 	if (first >= phys_pages || count > phys_pages - first)
 		return HAL_ERR_INVALID;
 	enabled = hal_irq_disable();
@@ -159,12 +159,12 @@ size_t hal_pmem_get_total_size(void)
 	return (size_t)phys_pages * SPARCV9_PAGE_SIZE;
 }
 
-void __attribute__((weak)) hal_sparcv9_task_memory_stats(uint32 *c, size_t *s)
+void __attribute__((weak)) hal_sparcv9_task_memory_stats(uint32_t *c, size_t *s)
 {
 	if (c) *c = 0;
 	if (s) *s = 0;
 }
-void hal_sparcv9_space_memory_stats(uint32 *, uint32 *);
+void hal_sparcv9_space_memory_stats(uint32_t *, uint32_t *);
 
 void
 hal_memory_get_stats(struct hal_memory_stats *s)

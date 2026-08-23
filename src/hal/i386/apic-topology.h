@@ -10,30 +10,30 @@
 #define I386_APIC_ROUTE_MAX 32U
 
 struct i386_apic_cpu {
-	uint8 apic_id;
-	uint8 bootstrap;
+	uint8_t apic_id;
+	uint8_t bootstrap;
 };
 
 struct i386_ioapic_desc {
-	uint8 apic_id;
-	uint32 address;
-	uint32 gsi_base;
+	uint8_t apic_id;
+	uint32_t address;
+	uint32_t gsi_base;
 };
 
 struct i386_apic_route {
-	uint8 source_irq;
-	uint8 ioapic_id;
-	uint8 ioapic_pin;
-	uint8 polarity_low;
-	uint8 level_triggered;
+	uint8_t source_irq;
+	uint8_t ioapic_id;
+	uint8_t ioapic_pin;
+	uint8_t polarity_low;
+	uint8_t level_triggered;
 };
 
 struct i386_apic_topology {
-	uint32 lapic_address;
+	uint32_t lapic_address;
 	unsigned cpu_count;
 	unsigned ioapic_count;
 	unsigned route_count;
-	uint8 imcr_present;
+	uint8_t imcr_present;
 	struct i386_apic_cpu cpus[I386_APIC_MAX_CPUS];
 	struct i386_ioapic_desc ioapics[I386_IOAPIC_MAX];
 	struct i386_apic_route routes[I386_APIC_ROUTE_MAX];

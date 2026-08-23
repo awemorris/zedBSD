@@ -187,14 +187,14 @@ vfs_may_chown(const struct inode *inode, const struct ucred *cred,
 }
 
 int
-vfs_clear_setid_on_write(struct inode *inode, const struct ucred *cred)
+vfs_clear_setid_on_content_change(struct inode *inode)
 {
 	struct stat status;
 	int error;
 
-	if (inode == NULL || cred == NULL)
+	if (inode == NULL)
 		return EINVAL;
-	if (cred_is_superuser(cred) || inode->i_type != INODE_REG ||
+	if (inode->i_type != INODE_REG ||
 	    (inode->i_mode & (S_ISUID | S_ISGID)) == 0)
 		return 0;
 	error = inode_getattr(inode, &status);
@@ -202,6 +202,16 @@ vfs_clear_setid_on_write(struct inode *inode, const struct ucred *cred)
 		return error;
 	status.st_mode &= ~(mode_t)(S_ISUID | S_ISGID);
 	return inode_setattr(inode, &status, INODE_ATTR_MODE);
+}
+
+int
+vfs_clear_setid_on_write(struct inode *inode, const struct ucred *cred)
+{
+	if (inode == NULL || cred == NULL)
+		return EINVAL;
+	if (cred_is_superuser(cred))
+		return 0;
+	return vfs_clear_setid_on_content_change(inode);
 }
 
 static int

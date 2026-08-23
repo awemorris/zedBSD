@@ -38,6 +38,9 @@ struct winsize {
 #define VSTOP 8
 #define VSUSP 9
 #define VEOL 10
+#define VWERASE 11
+#define VLNEXT 12
+#define VREPRINT 13
 
 #define IGNBRK 0x00000001U
 #define BRKINT 0x00000002U
@@ -68,6 +71,7 @@ struct winsize {
 #define ISIG   0x00000040U
 #define NOFLSH 0x00000080U
 #define TOSTOP 0x00000100U
+#define ECHOCTL 0x00000200U
 
 #define B0 0U
 #define B9600 9600U
@@ -101,5 +105,7 @@ struct winsize {
 #define TIOCSPTLCK _IOW(ZEDBSD_TTY_IOC_GROUP, 13, int32_t)
 #define TIOCGSID   _IOR(ZEDBSD_TTY_IOC_GROUP, 14, int32_t)
 #define TCSBRK     _IOW(ZEDBSD_TTY_IOC_GROUP, 15, int32_t)
+#define TCXONC     _IOW(ZEDBSD_TTY_IOC_GROUP, 16, int32_t)
+#define TIOCDRAIN  _IO(ZEDBSD_TTY_IOC_GROUP, 17)
 
 #endif

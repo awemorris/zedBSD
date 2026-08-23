@@ -46,7 +46,8 @@ ZEDBSD_LIBC_SOURCES := \
 
 ZEDBSD_LIBC_OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(ZEDBSD_LIBC_SOURCES))
 
-ZEDBSD_LIBC_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. -I$(BUILD) -Ilibc/include
+ZEDBSD_LIBC_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
+	-I$(BUILD) -Ilibc/include
 ZEDBSD_LIBC_CFLAGS := \
 	-m32 -march=i386 -Os -ffreestanding -fno-builtin \
 	-fno-pic -fno-pie -fno-stack-protector \

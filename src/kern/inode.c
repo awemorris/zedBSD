@@ -1,17 +1,31 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/inode.h"
+#include "kern/cred.h"
+#include "kern/atomic.h"
 #include "kern/mount.h"
 #include "kern/namecache.h"
 #include "kern/namei.h"
 #include "kern/clock.h"
 #include "kern/record-lock.h"
 #include "kern/posix-acl.h"
+#include "kern/vm-object.h"
 
 #include <errno.h>
 #include <string.h>
 
 extern int posix_acl_chmod(struct inode *, mode_t) __attribute__((weak));
 extern int posix_acl_inherit(struct inode *, struct inode *, mode_t *)
+    __attribute__((weak));
+extern int vm_object_inode_io_wait(struct inode *) __attribute__((weak));
+extern int vm_object_inode_resize_active(struct inode *)
+    __attribute__((weak));
+extern int vm_object_resize_begin(struct inode *, off_t,
+    struct vm_object_resize *) __attribute__((weak));
+extern int vm_object_resize_prepare(struct vm_object_resize *)
+    __attribute__((weak));
+extern void vm_object_resize_commit(struct vm_object_resize *, off_t)
+    __attribute__((weak));
+extern void vm_object_resize_abort(struct vm_object_resize *)
     __attribute__((weak));
 
 #define INODE_COMMON_MAX 256U
@@ -162,6 +176,8 @@ inode_alloc(struct mount *mountp)
 	/* One cache reference and one reference returned to the caller. */
 	refcount_init(&inode->i_refs, 2);
 	(void)mutex_init(&inode->i_io_lock, LOCK_RANK_INODE_IO, "inode I/O");
+	spin_init(&inode->i_vm_lock, LOCK_RANK_VM_RESIZE, "inode VM resize");
+	waitq_init(&inode->i_vm_waitq, "inode VM resize");
 	(void)mutex_init(&inode->i_lock, LOCK_RANK_INODE, "inode");
 	irq = spin_lock_irqsave(&inode_cache_lock);
 	inode_cache[slot] = inode;
@@ -409,15 +425,42 @@ inode_touch(struct inode *inode, unsigned mask)
 void
 inode_dir_changed(struct inode *inode)
 {
+	uint64_t sequence;
+
 	if (inode == NULL || inode->i_type != INODE_DIR)
 		return;
-	if (inode->i_dirseq == UINT64_MAX) {
+	sequence = atomic_u64_load_acquire(&inode->i_dirseq);
+	if (sequence == UINT64_MAX) {
 		namecache_purge_inode(inode);
-		inode->i_dirseq = 1;
+		atomic_u64_store_release(&inode->i_dirseq, 1);
 	} else {
-		inode->i_dirseq++;
-		if (inode->i_dirseq == 0)
-			inode->i_dirseq = 1;
+		atomic_u64_store_release(&inode->i_dirseq, sequence + 1U);
+	}
+}
+
+/* Enter the regular-file content domain before changing privilege metadata.
+ * A content/resize owner deliberately drops i_io while revoking mappings and
+ * writing old dirty data, so taking the mutex alone would enter the middle of
+ * its transaction.  Wait for the publication gate, acquire i_io, then recheck
+ * to close that hand-off window. */
+static int
+inode_content_io_lock(struct inode *inode)
+{
+	int error;
+
+	if (vm_object_inode_io_wait == NULL ||
+	    vm_object_inode_resize_active == NULL) {
+		mutex_lock(&inode->i_io_lock);
+		return 0;
+	}
+	for (;;) {
+		error = vm_object_inode_io_wait(inode);
+		if (error != 0)
+			return error;
+		mutex_lock(&inode->i_io_lock);
+		if (!vm_object_inode_resize_active(inode))
+			return 0;
+		mutex_unlock(&inode->i_io_lock);
 	}
 }
 
@@ -429,6 +472,7 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 		INODE_ATTR_ATIME_NOW | INODE_ATTR_MTIME_NOW;
 	struct stat requested;
 	struct inode_time now;
+	int held_io = 0;
 	int error;
 
 	if (i == NULL || s == NULL || (mask & ~valid) != 0)
@@ -458,15 +502,40 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 	    (requested.st_mode & S_IFMT) != 0 &&
 	    (requested.st_mode & S_IFMT) != (i->i_mode & S_IFMT))
 		return EINVAL;
-	if (i->i_op == NULL || i->i_op->setattr == NULL)
-		return EOPNOTSUPP;
+	/* EOF changes use the same VM-visible transaction as ftruncate and
+	 * extending write.  Filesystem setattr callbacks therefore never mutate
+	 * size behind an already-published shared object's generation. */
+	if ((mask & INODE_ATTR_SIZE) != 0) {
+		error = inode_truncate(i, requested.st_size);
+		if (error != 0)
+			return error;
+		mask &= ~INODE_ATTR_SIZE;
+		if (mask == 0)
+			return 0;
+	}
+	/* Mode and ownership participate in the same regular-inode I/O domain as
+	 * writes and truncate.  This prevents chmod/chown from restoring set-id
+	 * bits between a writer's privilege-bit invalidation and its backend
+	 * content mutation.  Stacked filesystems naturally acquire outer then
+	 * content-inode locks through their setattr callback. */
+	if ((mask & (INODE_ATTR_MODE | INODE_ATTR_UID | INODE_ATTR_GID)) != 0 &&
+	    !mutex_owned(&i->i_io_lock)) {
+		error = inode_content_io_lock(i);
+		if (error != 0)
+			return error;
+		held_io = 1;
+	}
+	if (i->i_op == NULL || i->i_op->setattr == NULL) {
+		error = EOPNOTSUPP;
+		goto out;
+	}
 	error = i->i_op->setattr(i, &requested, mask);
 	if (error != 0)
-		return error;
+		goto out;
 	if ((mask & INODE_ATTR_MODE) != 0 && posix_acl_chmod != NULL) {
 		error = posix_acl_chmod(i, requested.st_mode);
 		if (error != 0)
-			return error;
+			goto out;
 	}
 	if (mask & INODE_ATTR_MODE)
 		i->i_mode = (i->i_mode & S_IFMT) |
@@ -475,8 +544,6 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 		i->i_uid = requested.st_uid;
 	if (mask & INODE_ATTR_GID)
 		i->i_gid = requested.st_gid;
-	if (mask & INODE_ATTR_SIZE)
-		i->i_size = requested.st_size;
 	if (mask & INODE_ATTR_ATIME) {
 		i->i_atime.tv_sec = requested.st_atime;
 #ifdef ZEDBSD_SYS_STAT_H
@@ -503,7 +570,10 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 	} else if (mask != 0) {
 		inode_touch(i, INODE_ATTR_CTIME);
 	}
-	return 0;
+	out:
+	if (held_io)
+		mutex_unlock(&i->i_io_lock);
+	return error;
 }
 int inode_create(struct inode *i, const struct componentname *n, mode_t m,
 		 struct inode **r)
@@ -647,6 +717,105 @@ int inode_rmdir(struct inode *i, const struct componentname *n)
 	}
 	return error;
 }
+
+static int
+inode_same(const struct inode *left, const struct inode *right)
+{
+	return left == right || (left != NULL && right != NULL &&
+	    left->i_mount == right->i_mount && left->i_ino == right->i_ino);
+}
+
+/*
+ * Advance one component towards the root.  The VFS transaction lock held by
+ * the rename caller keeps every observed ".." entry stable until the final
+ * filesystem rename commits.  References are transferred through *cursor.
+ */
+static int
+inode_parent_step(struct inode **cursor, int *at_root)
+{
+	static const struct componentname dotdot = {
+		.cn_nameptr = "..",
+		.cn_namelen = 2,
+		.cn_flags = COMPONENT_DOTDOT,
+	};
+	struct inode *current, *parent;
+	int error;
+
+	if (cursor == NULL || *cursor == NULL || at_root == NULL)
+		return EINVAL;
+	current = *cursor;
+	*at_root = 0;
+	if (current->i_mount == NULL || current->i_mount->m_root == NULL)
+		return EIO;
+	if (inode_same(current, current->i_mount->m_root)) {
+		*at_root = 1;
+		return 0;
+	}
+	error = inode_lookup(current, &dotdot, &parent);
+	if (error != 0)
+		return error;
+	if (parent->i_type != INODE_DIR || parent->i_mount != current->i_mount) {
+		inode_release(parent);
+		return EIO;
+	}
+	if (inode_same(parent, current)) {
+		inode_release(parent);
+		return EIO;
+	}
+	inode_release(current);
+	*cursor = parent;
+	return 0;
+}
+
+/*
+ * A directory cannot become a child of itself.  Walk the destination parent
+ * chain in the generic layer so every filesystem gets identical semantics.
+ * The second cursor is Floyd cycle detection: a malformed pre-existing tree
+ * is reported as EIO instead of making rename loop forever.
+ */
+static int
+inode_rename_ancestor_check(struct inode *source, struct inode *new_parent)
+{
+	struct inode *current = new_parent, *fast = new_parent;
+	int error = 0, at_root;
+
+	inode_ref(current);
+	inode_ref(fast);
+	for (;;) {
+		unsigned step;
+
+		if (inode_same(current, source)) {
+			error = EINVAL;
+			break;
+		}
+		error = inode_parent_step(&current, &at_root);
+		if (error != 0 || at_root)
+			break;
+
+		if (fast == NULL)
+			continue;
+		for (step = 0; step < 2; step++) {
+			error = inode_parent_step(&fast, &at_root);
+			if (error != 0)
+				goto out;
+			if (at_root) {
+				inode_release(fast);
+				fast = NULL;
+				break;
+			}
+		}
+		if (fast != NULL && inode_same(current, fast)) {
+			error = EIO;
+			break;
+		}
+	}
+out:
+	inode_release(current);
+	if (fast != NULL)
+		inode_release(fast);
+	return error;
+}
+
 int inode_rename(struct inode *od, const struct componentname *on,
 		 struct inode *nd, const struct componentname *nn, unsigned flags)
 {
@@ -665,6 +834,13 @@ int inode_rename(struct inode *od, const struct componentname *on,
 	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 		inode_release(source);
 		return EBUSY;
+	}
+	if (source->i_type == INODE_DIR && !inode_same(od, nd)) {
+		error = inode_rename_ancestor_check(source, nd);
+		if (error != 0) {
+			inode_release(source);
+			return error;
+		}
 	}
 	error = inode_lookup(nd, nn, &target);
 	if (error == 0) {
@@ -697,17 +873,20 @@ int inode_rename(struct inode *od, const struct componentname *on,
 	}
 	error = od->i_op != NULL && od->i_op->rename != NULL ?
 		od->i_op->rename(od, on, nd, nn, flags) : EOPNOTSUPP;
-	inode_release(source);
 	if (error == 0) {
 		namecache_remove(od, on);
 		namecache_remove(nd, nn);
 		inode_dir_changed(od);
-		if (nd != od)
+		if (!inode_same(nd, od))
 			inode_dir_changed(nd);
+		/* A directory's visible ".." entry changes on reparenting. */
+		if (source->i_type == INODE_DIR && !inode_same(od, nd))
+			inode_dir_changed(source);
 		inode_touch(od, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-		if (nd != od)
+		if (!inode_same(nd, od))
 			inode_touch(nd, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
+	inode_release(source);
 	return error;
 }
 int inode_link(struct inode *directory, const struct componentname *name,
@@ -766,19 +945,192 @@ ssize_t inode_readlink(struct inode *inode, char *buffer, size_t capacity)
 	return inode->i_op != NULL && inode->i_op->readlink != NULL ?
 		inode->i_op->readlink(inode, buffer, capacity) : -EOPNOTSUPP;
 }
-int inode_truncate(struct inode *i, off_t size)
+
+static int
+inode_vm_resize_available(void)
 {
+	return vm_object_inode_io_wait != NULL &&
+	    vm_object_inode_resize_active != NULL &&
+	    vm_object_resize_begin != NULL &&
+	    vm_object_resize_prepare != NULL &&
+	    vm_object_resize_commit != NULL &&
+	    vm_object_resize_abort != NULL;
+}
+
+int
+inode_truncate_transaction(struct inode *i,
+	const struct inode_truncate_request *request,
+	struct inode_truncate_result *result)
+{
+	struct vm_object_resize resize;
+	struct inode_truncate_result local_result;
+	int delegated;
+	int vm_resize;
 	int error;
-	if (i == NULL || size < 0) return EINVAL;
+
+	if (result == NULL)
+		result = &local_result;
+	memset(result, 0, sizeof(*result));
+	result->actual_size = i != NULL ? i->i_size : 0;
+	if (i == NULL || request == NULL || request->size < 0)
+		return EINVAL;
 	if (i->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) return EBUSY;
 	if (readonly(i)) return EROFS;
+	delegated = i->i_op != NULL && i->i_op->truncate_limited != NULL;
+	retry:
+	vm_resize = inode_vm_resize_available();
+	if (vm_resize) {
+		error = vm_object_inode_io_wait(i);
+		if (error != 0)
+			return error;
+	}
 	mutex_lock(&i->i_io_lock);
-	error = i->i_op != NULL && i->i_op->truncate != NULL ?
-		i->i_op->truncate(i, size) : EOPNOTSUPP;
-	if (error == 0)
-		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	/* Close the publication-to-i_io acquisition window. */
+	if (vm_resize && vm_object_inode_resize_active(i)) {
+		mutex_unlock(&i->i_io_lock);
+		goto retry;
+	}
+	/* RLIMIT_FSIZE constrains growth, not shrinking or replacement of data in
+	 * a file which was already larger when the process limit was lowered.
+	 * Check under i_io_lock so another writer cannot change the comparison
+	 * between validation and the filesystem truncate transaction. */
+	if (!delegated && request->size > i->i_size &&
+	    (uint64_t)request->size > request->growth_limit) {
+		result->limit_exceeded = 1;
+		result->actual_size = i->i_size;
+		mutex_unlock(&i->i_io_lock);
+		return EFBIG;
+	}
+	memset(&resize, 0, sizeof(resize));
+	if (vm_resize) {
+		error = vm_object_resize_begin(i, request->size, &resize);
+		if (error == EBUSY || error == EAGAIN) {
+			mutex_unlock(&i->i_io_lock);
+			goto retry;
+		}
+		if (error != 0) {
+			mutex_unlock(&i->i_io_lock);
+			return error;
+		}
+	}
+	if (resize.active) {
+		/* Fault I/O which predates begin may already be committed to taking
+		 * i_io_lock, so preparation must wait without holding it. */
+		mutex_unlock(&i->i_io_lock);
+		error = vm_object_resize_prepare(&resize);
+		mutex_lock(&i->i_io_lock);
+		if (error != 0) {
+			vm_object_resize_abort(&resize);
+			mutex_unlock(&i->i_io_lock);
+			return error;
+		}
+	}
+	/* Exclude exec/content publication while removing privilege bits.  Doing
+	 * this immediately before the backend mutation prevents an executable
+	 * image from observing new bytes with the old set-id mode. */
+	if (!delegated &&
+	    (request->credential != NULL || request->content_change)) {
+		error = request->content_change ?
+		    vfs_clear_setid_on_content_change(i) :
+		    vfs_clear_setid_on_write(i, request->credential);
+		if (error != 0) {
+			if (resize.active)
+				vm_object_resize_abort(&resize);
+			mutex_unlock(&i->i_io_lock);
+			return error;
+		}
+	}
+	if (delegated) {
+		struct inode_truncate_result inner;
+
+		memset(&inner, 0, sizeof(inner));
+		inner.actual_size = i->i_size;
+		error = i->i_op->truncate_limited(i, request, &inner);
+		/* A stacking backend must report the final content inode's size on
+		 * every outcome.  Publish it even after EIO: the mutation may have
+		 * crossed its irreversible backend boundary before failing. */
+		if (inner.actual_size < 0) {
+			if (error == 0)
+				error = EIO;
+			inner.actual_size = i->i_size;
+		}
+		i->i_size = inner.actual_size;
+		result->actual_size = inner.actual_size;
+		result->limit_exceeded = inner.limit_exceeded;
+		if (resize.active)
+			vm_object_resize_commit(&resize, inner.actual_size);
+		if (error == 0)
+			inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+	} else {
+		error = i->i_op != NULL && i->i_op->truncate != NULL ?
+			i->i_op->truncate(i, request->size) : EOPNOTSUPP;
+		if (error == 0) {
+			i->i_size = request->size;
+			result->actual_size = request->size;
+			if (resize.active)
+				vm_object_resize_commit(&resize, request->size);
+			inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
+		} else {
+			/* Set-id removal is irreversible even if the backend reports a
+			 * later error.  The plain backend contract has not published a
+			 * changed EOF, so abort only the tentative resize state. */
+			if (resize.active) {
+				i->i_size = resize.old_size;
+				vm_object_resize_abort(&resize);
+			}
+			result->actual_size = i->i_size;
+		}
+	}
 	mutex_unlock(&i->i_io_lock);
 	return error;
+}
+
+static int
+inode_truncate_limited_impl(struct inode *i, off_t size,
+	uint64_t growth_limit, const struct ucred *cred, int content_change,
+	int *limit_exceeded)
+{
+	const struct inode_truncate_request request = {
+		.size = size,
+		.growth_limit = growth_limit,
+		.credential = cred,
+		.content_change = content_change != 0,
+	};
+	struct inode_truncate_result result;
+	int error;
+
+	error = inode_truncate_transaction(i, &request, &result);
+	if (limit_exceeded != NULL)
+		*limit_exceeded = result.limit_exceeded;
+	return error;
+}
+
+int
+inode_truncate_limited_cred(struct inode *i, off_t size,
+	uint64_t growth_limit, const struct ucred *cred, int *limit_exceeded)
+{
+	return inode_truncate_limited_impl(i, size, growth_limit, cred, 0,
+	    limit_exceeded);
+}
+
+int
+inode_truncate_limited(struct inode *i, off_t size, uint64_t growth_limit,
+	int *limit_exceeded)
+{
+	return inode_truncate_limited_impl(i, size, growth_limit, NULL, 0,
+	    limit_exceeded);
+}
+
+int
+inode_truncate(struct inode *i, off_t size)
+{
+	return inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 0, NULL);
+}
+
+int
+inode_truncate_content_change(struct inode *i, off_t size)
+{
+	return inode_truncate_limited_impl(i, size, UINT64_MAX, NULL, 1, NULL);
 }
 
 static int

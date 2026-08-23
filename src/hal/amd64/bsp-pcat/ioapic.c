@@ -6,20 +6,20 @@
 #include "../defs.h"
 
 struct ioapic_state {
-	volatile uint32 *base;
-	uint32 gsi_base;
-	uint32 redirections;
+	volatile uint32_t *base;
+	uint32_t gsi_base;
+	uint32_t redirections;
 };
 
 static struct ioapic_state controllers[AMD64_IOAPIC_MAX];
 static unsigned controller_count;
-static uint32 irq_gsi[16];
-static uint16 irq_flags[16];
-static uint32 irq_destination[16];
+static uint32_t irq_gsi[16];
+static uint16_t irq_flags[16];
+static uint32_t irq_destination[16];
 static volatile unsigned ioapic_lock;
 
-static uint32
-read_reg_unlocked(struct ioapic_state *io, uint8 reg)
+static uint32_t
+read_reg_unlocked(struct ioapic_state *io, uint8_t reg)
 {
 	io->base[0] = reg;
 	hal_io_mb();
@@ -27,7 +27,7 @@ read_reg_unlocked(struct ioapic_state *io, uint8 reg)
 }
 
 static void
-write_reg_unlocked(struct ioapic_state *io, uint8 reg, uint32 value)
+write_reg_unlocked(struct ioapic_state *io, uint8_t reg, uint32_t value)
 {
 	io->base[0] = reg;
 	hal_io_mb();
@@ -36,7 +36,7 @@ write_reg_unlocked(struct ioapic_state *io, uint8 reg, uint32 value)
 }
 
 static struct ioapic_state *
-find_gsi(uint32 gsi, unsigned *pin)
+find_gsi(uint32_t gsi, unsigned *pin)
 {
 	unsigned i;
 	for (i = 0; i < controller_count; i++)
@@ -49,12 +49,12 @@ find_gsi(uint32 gsi, unsigned *pin)
 }
 
 static int
-write_route(int irq, uint32 apic_id, int masked)
+write_route(int irq, uint32_t apic_id, int masked)
 {
 	struct ioapic_state *io;
 	unsigned pin;
-	uint32 low = INT_IRQ_BASE + (uint32)irq;
-	uint16 flags;
+	uint32_t low = INT_IRQ_BASE + (uint32_t)irq;
+	uint16_t flags;
 	bool enabled;
 
 	if (irq < 0 || irq >= 16 || apic_id > 255U)
@@ -72,8 +72,8 @@ write_route(int irq, uint32 apic_id, int masked)
 	enabled = hal_irq_disable();
 	while (__atomic_exchange_n(&ioapic_lock, 1U, __ATOMIC_ACQUIRE) != 0)
 		__asm__ volatile("pause");
-	write_reg_unlocked(io, (uint8)(0x11U + pin * 2U), apic_id << 24);
-	write_reg_unlocked(io, (uint8)(0x10U + pin * 2U), low);
+	write_reg_unlocked(io, (uint8_t)(0x11U + pin * 2U), apic_id << 24);
+	write_reg_unlocked(io, (uint8_t)(0x10U + pin * 2U), low);
 	__atomic_store_n(&ioapic_lock, 0U, __ATOMIC_RELEASE);
 	if (enabled) hal_irq_enable();
 	return HAL_OK;
@@ -81,7 +81,7 @@ write_route(int irq, uint32 apic_id, int masked)
 
 int
 amd64_ioapic_init(const struct amd64_acpi_info *acpi,
-	uint32 bootstrap_apic_id)
+	uint32_t bootstrap_apic_id)
 {
 	unsigned i;
 
@@ -94,7 +94,7 @@ amd64_ioapic_init(const struct amd64_acpi_info *acpi,
 			HAL_PMEM_TYPE_MMIO, HAL_PMEM_ATTR_NOCACHE
 		};
 		struct hal_pmem memory;
-		uint32 version;
+		uint32_t version;
 		if (hal_pmem_alloc(&request, &memory) != HAL_OK)
 			return HAL_ERR_UNSUPPORTED;
 		controllers[i].base = memory.vaddr;
@@ -125,7 +125,7 @@ void amd64_ioapic_mask(int irq)
 { if (irq >= 0 && irq < 16) (void)write_route(irq, irq_destination[irq], 1); }
 void amd64_ioapic_unmask(int irq)
 { if (irq >= 0 && irq < 16) (void)write_route(irq, irq_destination[irq], 0); }
-int amd64_ioapic_route(int irq, uint32 apic_id)
+int amd64_ioapic_route(int irq, uint32_t apic_id)
 {
 	int error = write_route(irq, apic_id, 1);
 	if (error == HAL_OK) irq_destination[irq] = apic_id;

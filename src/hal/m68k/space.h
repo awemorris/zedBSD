@@ -22,6 +22,9 @@ struct m68k030_table_page {
 struct m68k030_space {
 	uint32_t magic;
 	uint32_t space_id;
+	unsigned lock;
+	unsigned destroying;
+	struct m68k030_space *registry_next;
 	struct hal_pmem root_memory;
 	uint32_t *root;
 	struct m68k030_root_pointer root_pointer;

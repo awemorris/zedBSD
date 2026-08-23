@@ -7,19 +7,19 @@ arm64_vectors:
 	.space 124
 	.endm
 	VECTOR arm64_sync_current, 0
-	VECTOR arm64_irq_common, 1
+	VECTOR arm64_irq_current, 1
 	VECTOR arm64_sync_current, 2
 	VECTOR arm64_sync_current, 3
 	VECTOR arm64_sync_current, 4
-	VECTOR arm64_irq_common, 5
+	VECTOR arm64_irq_current, 5
 	VECTOR arm64_sync_current, 6
 	VECTOR arm64_sync_current, 7
 	VECTOR arm64_sync_lower, 8
-	VECTOR arm64_irq_common, 9
+	VECTOR arm64_irq_lower, 9
 	VECTOR arm64_sync_lower, 10
 	VECTOR arm64_sync_lower, 11
 	VECTOR arm64_sync_lower, 12
-	VECTOR arm64_irq_common, 13
+	VECTOR arm64_irq_lower, 13
 	VECTOR arm64_sync_lower, 14
 	VECTOR arm64_sync_lower, 15
 
@@ -75,12 +75,18 @@ arm64_vectors:
 	add sp,sp,#288
 	.endm
 
-arm64_irq_common:
+	.macro IRQ_ENTRY from_user
 	SAVE_FRAME
 	mov x0,sp
+	mov x1,#\from_user
 	bl arm64_irq_handler
 	RESTORE_FRAME
 	eret
+	.endm
+arm64_irq_current:
+	IRQ_ENTRY 0
+arm64_irq_lower:
+	IRQ_ENTRY 1
 arm64_sync_current:
 	SAVE_FRAME
 	mov x0,sp

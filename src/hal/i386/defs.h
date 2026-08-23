@@ -67,6 +67,7 @@
 #define INT_SYSCALL		(0xc2)
 #define INT_CPU_NOTIFY		(0xd0)
 #define INT_CPU_PANIC		(0xd1)
+#define INT_CPU_TLB		(0xd2)
 #define INT_IRQ_BASE		(0xe0)
 #define INT_UNDEF		(0xffffffff)
 

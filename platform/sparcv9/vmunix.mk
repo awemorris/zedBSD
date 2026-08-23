@@ -53,11 +53,11 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/entry.c src/kern/clock.c src/kern/process-timer.c src/kern/klog.c \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c \
-	src/kern/sched.c src/kern/vmspace.c src/kern/vm-object.c \
+	src/kern/sched.c src/kern/vm-lock.c src/kern/vmspace.c src/kern/vm-object.c \
 	src/kern/vm-commit.c src/kern/filedesc.c src/kern/pipe.c \
 	src/kern/record-lock.c \
 	src/kern/cred.c src/kern/signal.c src/kern/cwdinfo.c \
-	src/kern/elf.c src/kern/exec.c \
+	src/kern/elf.c src/kern/exec-prepare.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
 	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
 	src/kern/mouse-device.c src/kern/tty.c \
@@ -85,6 +85,7 @@ SPARCV9_USER_CFLAGS := $(SPARCV9_CFLAGS) -fno-builtin \
 SPARCV9_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfcn.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
 	userland/base/libc/termios.c \
 	userland/base/libc/pthread.c \
+	userland/base/libc/timer.c \
 	userland/base/libc/shm.c \
 	userland/base/libc/semaphore.c \
 	userland/base/libc/mqueue.c \
@@ -164,7 +165,8 @@ $(BUILD)/user/%.o: %.c
 	$(SPARCV9_CC) $(SPARCV9_CPPFLAGS) $(SPARCV9_USER_CFLAGS) \
 		-fno-strict-aliasing -MMD -MP -c $< -o $@
 
-$(BUILD)/user/src/crt/crt0-sparcv9.o: src/crt/crt0-sparcv9.S
+$(BUILD)/user/src/crt/crt0-sparcv9.o: src/crt/crt0-sparcv9.S \
+	include/hal/arch.h include/hal/arch/sparcv9.h
 	@mkdir -p $(dir $@)
 	$(SPARCV9_CC) $(SPARCV9_CPPFLAGS) $(SPARCV9_USER_CFLAGS) \
 		-c $< -o $@
@@ -295,7 +297,7 @@ SPARCV9_DYNAMIC_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias \
 	-fno-unwind-tables -fno-plt -ftls-model=global-dynamic \
 	-Wall -Wextra -Werror
 SPARCV9_DYNAMIC_LIBC_SOURCES := userland/base/libc/posix.c \
-	userland/base/libc/poll.c userland/base/libc/termios.c userland/base/libc/pthread.c \
+	userland/base/libc/poll.c userland/base/libc/termios.c userland/base/libc/pthread.c userland/base/libc/timer.c \
 	userland/base/libc/shm.c userland/base/libc/semaphore.c userland/base/libc/mqueue.c \
 	userland/base/libc/dlfcn.c \
 	userland/base/libc/socket.c userland/base/libc/signal.c \
@@ -323,7 +325,7 @@ SPARCV9_DYNAMIC_LIBC_OBJS += $(SPARCV9_DYNAMIC_LIBM_OBJ) \
 
 $(SPARCV9_DYNAMIC_DIR)/softfp/%.o: src/softfloat/%.c
 	@mkdir -p $(dir $@)
-	$(SPARCV9_CC) -nostdinc -Ilibc/include -I. \
+	$(SPARCV9_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
 		$(SPARCV9_DYNAMIC_CFLAGS) \
 		-MMD -MP -c $< -o $@
 
@@ -333,9 +335,11 @@ $(SPARCV9_DYNAMIC_DIR)/obj/%.o: %.c
 		$(SPARCV9_DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@
 
 $(SPARCV9_DYNAMIC_DIR)/obj/userland/base/libc/syscall.o: \
-	userland/base/libc/syscall-sparcv9.S
+	userland/base/libc/syscall-sparcv9.S include/hal/arch.h \
+	include/hal/arch/sparcv9.h
 	@mkdir -p $(dir $@)
-	$(SPARCV9_CC) $(SPARCV9_DYNAMIC_CFLAGS) -c $< -o $@
+	$(SPARCV9_CC) $(SPARCV9_DYNAMIC_CPPFLAGS) \
+		$(SPARCV9_DYNAMIC_CFLAGS) -c $< -o $@
 
 $(SPARCV9_DYNAMIC_DIR)/obj/userland/base/rtld/entry.o: \
 	userland/base/rtld/entry-sparcv9.S
@@ -348,13 +352,13 @@ $(SPARCV9_DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-sparcv9.S
 
 $(SPARCV9_DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(SPARCV9_CC) -nostdinc -Ilibc/include -I. \
+	$(SPARCV9_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
 		$(SPARCV9_DYNAMIC_CFLAGS) -c $< -o $@
 
 $(SPARCV9_DYNAMIC_FLOAT_PARSE_OBJ): libc/float-parse.c \
 	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(SPARCV9_CC) -nostdinc -Ilibc/include -I. \
+	$(SPARCV9_CC) -nostdinc -Ilibc/include -Iinclude/uapi -I. \
 		$(SPARCV9_DYNAMIC_CFLAGS) -c $< -o $@
 
 $(SPARCV9_DYNAMIC_DIR)/ld.so: $(SPARCV9_DYNAMIC_RTLD_OBJS)

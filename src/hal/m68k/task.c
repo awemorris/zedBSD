@@ -6,7 +6,6 @@
 #include "space.h"
 #include "task.h"
 
-#define M68K_SYSCALL_INSTRUCTION_SIZE 2U
 
 static struct m68k_task *task_list;
 static struct m68k_task *running_task;
@@ -303,41 +302,6 @@ hal_task_signal_return(uint32_t token, intptr_t *return_value)
 	hal_memcpy(frame, running_task->signal_frame[depth],
 		running_task->signal_frame_size[depth]);
 	*return_value = (intptr_t)(int32_t)frame->d[0];
-	running_task->signal_token[depth] = 0;
-	running_task->signal_depth = depth;
-	return 0;
-}
-
-int
-hal_task_signal_restart(uint32_t token, uint32_t number,
-			const uintptr_t arguments[HAL_SYSCALL_ARGS],
-			intptr_t *return_value)
-{
-	struct m68k_saved_frame *frame;
-	uint32_t pc;
-	unsigned depth;
-	if (running_task == NULL || (frame = running_task->active_user_frame) ==
-	    NULL || arguments == NULL || return_value == NULL ||
-	    running_task->signal_depth == 0 || token == 0)
-		return -1;
-	depth = running_task->signal_depth - 1U;
-	if (token != running_task->signal_token[depth])
-		return -1;
-	hal_memcpy(frame, running_task->signal_frame[depth],
-	    running_task->signal_frame_size[depth]);
-	pc = read32(frame->hardware + 2U);
-	if (pc < M68K_SYSCALL_INSTRUCTION_SIZE)
-		return -1;
-	write32(frame->hardware + 2U,
-	    pc - M68K_SYSCALL_INSTRUCTION_SIZE);
-	frame->d[0] = number;
-	frame->d[1] = (uint32_t)arguments[0];
-	frame->d[2] = (uint32_t)arguments[1];
-	frame->d[3] = (uint32_t)arguments[2];
-	frame->d[4] = (uint32_t)arguments[3];
-	frame->d[5] = (uint32_t)arguments[4];
-	frame->a[0] = (uint32_t)arguments[5];
-	*return_value = (intptr_t)(int32_t)number;
 	running_task->signal_token[depth] = 0;
 	running_task->signal_depth = depth;
 	return 0;

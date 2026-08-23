@@ -13,7 +13,7 @@
 #define MFP_TCDR 17U
 #define MFP_TIMER_C_BIT 0x20U
 
-static uint64 timer_ticks;
+static uint64_t timer_ticks;
 
 static void
 timer_interrupt(int irq, hal_irq_ack_t acknowledge, void *argument)
@@ -25,22 +25,22 @@ timer_interrupt(int irq, hal_irq_ack_t acknowledge, void *argument)
 }
 
 void
-x68k_timer_init(uint32 frequency)
+x68k_timer_init(uint32_t frequency)
 {
-	static const uint16 divisors[] = { 4, 10, 16, 50, 64, 100, 200 };
+	static const uint16_t divisors[] = { 4, 10, 16, 50, 64, 100, 200 };
 	unsigned best_control = 0, index;
-	uint32 best_data = 0, best_error = UINT32_MAX;
+	uint32_t best_data = 0, best_error = UINT32_MAX;
 	uint8_t control, enabled;
 
 	if (frequency == 0)
 		HAL_FATAL("invalid X68k timer frequency");
 	for (index = 0; index < sizeof(divisors) / sizeof(divisors[0]); index++) {
-		uint32 denominator = (uint32)divisors[index] * frequency;
-		uint32 data = (X68K_MFP_CLOCK_HZ + denominator / 2U) / denominator;
-		uint32 actual, error;
+		uint32_t denominator = (uint32_t)divisors[index] * frequency;
+		uint32_t data = (X68K_MFP_CLOCK_HZ + denominator / 2U) / denominator;
+		uint32_t actual, error;
 		if (data == 0 || data > 255U)
 			continue;
-		actual = X68K_MFP_CLOCK_HZ / ((uint32)divisors[index] * data);
+		actual = X68K_MFP_CLOCK_HZ / ((uint32_t)divisors[index] * data);
 		error = actual > frequency ? actual - frequency : frequency - actual;
 		if (error < best_error) {
 			best_error = error;

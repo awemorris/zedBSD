@@ -23,17 +23,17 @@ hal_strlen(const char *s)
 void *
 hal_memset(void *s, int c, size_t n)
 {
-	uint8 *p = s;
+	uint8_t *p = s;
 
 	while (n--)
-		*p++ = (uint8)c;
+		*p++ = (uint8_t)c;
 	return s;
 }
 
 void *
-hal_memset16(uint16 *s, uint16 c, size_t n)
+hal_memset16(uint16_t *s, uint16_t c, size_t n)
 {
-	uint16 *p = s;
+	uint16_t *p = s;
 
 	while (n--)
 		*p++ = c;
@@ -41,9 +41,9 @@ hal_memset16(uint16 *s, uint16 c, size_t n)
 }
 
 void *
-hal_memset32(uint32 *s, uint32 c, size_t n)
+hal_memset32(uint32_t *s, uint32_t c, size_t n)
 {
-	uint32 *p = s;
+	uint32_t *p = s;
 
 	while (n--)
 		*p++ = c;
@@ -53,8 +53,8 @@ hal_memset32(uint32 *s, uint32 c, size_t n)
 void *
 hal_memcpy(void *dest, const void *src, size_t n)
 {
-	uint8 *d = dest;
-	const uint8 *s = src;
+	uint8_t *d = dest;
+	const uint8_t *s = src;
 
 	while (n--)
 		*d++ = *s++;
@@ -115,7 +115,7 @@ hal_puts(const char *s)
 }
 
 static void
-put_unsigned(uint32 value, unsigned base, int upper, int width, int zero)
+put_unsigned(uint32_t value, unsigned base, int upper, int width, int zero)
 {
 	char digits[12];
 	int n = 0;
@@ -176,19 +176,19 @@ hal_printf(const char *format, ...)
 				hal_cons_putc('-');
 				v = -v;
 			}
-			put_unsigned((uint32)v, 10, 0, width, zero);
+			put_unsigned((uint32_t)v, 10, 0, width, zero);
 			break;
 		}
 		case 'u':
-			put_unsigned(__builtin_va_arg(ap, uint32), 10, 0,
+			put_unsigned(__builtin_va_arg(ap, uint32_t), 10, 0,
 				     width, zero);
 			break;
 		case 'x':
-			put_unsigned(__builtin_va_arg(ap, uint32), 16, 0,
+			put_unsigned(__builtin_va_arg(ap, uint32_t), 16, 0,
 				     width, zero);
 			break;
 		case 'X':
-			put_unsigned(__builtin_va_arg(ap, uint32), 16, 1,
+			put_unsigned(__builtin_va_arg(ap, uint32_t), 16, 1,
 				     width, zero);
 			break;
 		case '%':

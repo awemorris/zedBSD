@@ -7,24 +7,24 @@
 #define AMD64_IOAPIC_MAX 4U
 
 struct amd64_acpi_cpu {
-	uint32 apic_id;
+	uint32_t apic_id;
 };
 
 struct amd64_acpi_ioapic {
-	uint32 id;
-	uint32 address;
-	uint32 gsi_base;
+	uint32_t id;
+	uint32_t address;
+	uint32_t gsi_base;
 };
 
 struct amd64_acpi_iso {
-	uint32 gsi;
-	uint16 flags;
-	uint8 source;
-	uint8 present;
+	uint32_t gsi;
+	uint16_t flags;
+	uint8_t source;
+	uint8_t present;
 };
 
 struct amd64_acpi_info {
-	uint32 lapic_address;
+	uint32_t lapic_address;
 	unsigned cpu_count;
 	unsigned ioapic_count;
 	struct amd64_acpi_cpu cpus[AMD64_SMP_MAX_CPUS];

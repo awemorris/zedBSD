@@ -4,15 +4,15 @@
 #include <hal/types.h>
 
 void sparcv9_trap_init(void);
-int sparcv9_trap_dispatch(uint64 trap_type, uintptr_t pc, uintptr_t next_pc,
-	uint64 tstate);
+int sparcv9_trap_dispatch(uint64_t trap_type, uintptr_t pc, uintptr_t next_pc,
+	uint64_t tstate);
 struct sparcv9_user_trap_frame {
 	uintptr_t old_sp;
-	uint64 syscall_number;
-	uint64 out[6];
+	uint64_t syscall_number;
+	uint64_t out[6];
 };
-int sparcv9_user_trap_dispatch(uint64 trap_type, uintptr_t pc,
-	uintptr_t next_pc, uint64 tstate, struct sparcv9_user_trap_frame *frame);
+int sparcv9_user_trap_dispatch(uint64_t trap_type, uintptr_t pc,
+	uintptr_t next_pc, uint64_t tstate, struct sparcv9_user_trap_frame *frame);
 void sparcv9_window_selftest(void);
 
 #endif

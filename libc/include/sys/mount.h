@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #define MNT_RDONLY 0x00000001U
+#define MNT_NOSUID  0x00000002U
 #define ZEDBSD_MOUNT_ARGS_VERSION 1U
 #define ZEDBSD_MOUNT_FSPEC_MAX 32U
 

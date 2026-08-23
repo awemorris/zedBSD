@@ -9,7 +9,7 @@
 #include <sys/types.h>
 typedef tid_t pthread_t;
 typedef unsigned pthread_key_t;
-typedef struct { size_t stacksize, guardsize; void *stackaddr; int detachstate, stackset; struct sched_param schedparam; } pthread_attr_t;
+typedef struct __pthread_attr { size_t stacksize, guardsize; void *stackaddr; int detachstate, stackset; struct sched_param schedparam; } pthread_attr_t;
 typedef struct { volatile uint32_t locked; pthread_t owner; unsigned count, type, pshared, robust; } pthread_mutex_t;
 typedef struct { unsigned type, pshared, robust; } pthread_mutexattr_t;
 typedef struct { volatile uint32_t sequence; unsigned pshared, clock; } pthread_cond_t;

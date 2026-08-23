@@ -7,6 +7,11 @@
 #include <errno.h>
 #include <hal/hal.h>
 
+#if defined(__i386__)
+/* See include/kern/atomic.h: XCHG keeps pre-CMPXCHG i386 SMP-safe. */
+atomic_uint_t kern_i386_atomic_guard;
+#endif
+
 void spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
 {
 	lock->held.value = 0;
@@ -66,6 +71,17 @@ int mutex_trylock(struct mutex *mutex)
 	spin_unlock_irqrestore(&mutex->guard, irq);
 	return acquired;
 }
+int mutex_owned(struct mutex *mutex)
+{
+	unsigned long irq;
+	struct thread *thread = thread_current();
+	int owned;
+	if (mutex == NULL || thread == NULL) return 0;
+	irq = spin_lock_irqsave(&mutex->guard);
+	owned = mutex->locked && mutex->owner == thread;
+	spin_unlock_irqrestore(&mutex->guard, irq);
+	return owned;
+}
 int mutex_lock_interruptible(struct mutex *mutex)
 {
 	unsigned long irq;
@@ -97,4 +113,32 @@ void mutex_unlock(struct mutex *mutex)
 	mutex->owner = NULL; mutex->locked = 0;
 	waitq_wake_one(&mutex->waiters);
 	spin_unlock_irqrestore(&mutex->guard, irq);
+}
+
+int
+mutex_wait(struct mutex *mutex, struct wait_queue *condition,
+	uint64_t observed, uint64_t deadline, unsigned flags)
+{
+	struct thread *thread = thread_current();
+	unsigned long irq;
+	int error;
+
+	if (mutex == NULL || condition == NULL || thread == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&mutex->guard);
+	if (!mutex->locked || mutex->owner != thread)
+		__builtin_trap();
+	mutex->owner = NULL;
+	mutex->locked = 0;
+	waitq_wake_one(&mutex->waiters);
+	error = waitq_sleep(condition, &mutex->guard, observed, deadline, flags);
+	/* Reacquiring the mutex is not itself an interruptible operation. */
+	while (mutex->locked) {
+		uint64_t sequence = waitq_sequence(&mutex->waiters);
+		(void)waitq_sleep(&mutex->waiters, &mutex->guard, sequence, 0, 0);
+	}
+	mutex->locked = 1;
+	mutex->owner = thread;
+	spin_unlock_irqrestore(&mutex->guard, irq);
+	return error;
 }

@@ -16,19 +16,24 @@
 struct i386_page_table {
 	uintptr_t vaddr;
 	struct hal_pmem memory;
-	uint32 *pte;
+	uint32_t *pte;
 	struct i386_page_table *next;
 };
 
 struct i386_space {
-	uint32 magic;
+	uint32_t magic;
 	int space_id;
+	unsigned active_ops;
+	struct i386_space *registry_next;
 	struct hal_pmem directory_memory;
-	uint32 *pdt;
+	uint32_t *pdt;
 	struct i386_page_table *page_tables;
+	volatile unsigned lock;
+	volatile unsigned destroying;
 };
 
 void i386_space_init(void);
 void i386_space_init_secondary(void);
+void i386_tlb_interrupt(void);
 
 #endif

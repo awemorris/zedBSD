@@ -14,14 +14,14 @@ struct amd64_task {
 	void *sys_stack;
 	void *sys_stack_allocation;
 	uintptr_t resume_rsp;
-	uint8 fpregs[512 + 15];
+	uint8_t fpregs[512 + 15];
 	void *private_data;
 	uintptr_t tls;
 	void *active_user_frame;
 	struct amd64_interrupt_frame signal_frame[HAL_SIGNAL_NEST_MAX];
-	uint8 signal_fpregs[HAL_SIGNAL_NEST_MAX][512]
+	uint8_t signal_fpregs[HAL_SIGNAL_NEST_MAX][512]
 	    __attribute__((aligned(16)));
-	uint32 signal_token[HAL_SIGNAL_NEST_MAX];
+	uint32_t signal_token[HAL_SIGNAL_NEST_MAX];
 	unsigned signal_depth;
 };
 

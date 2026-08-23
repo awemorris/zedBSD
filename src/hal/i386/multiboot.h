@@ -16,43 +16,43 @@
 #define MBINFO_FLAG_LOADER_NAME  (1U << 9)
 
 struct multiboot_info {
-	uint32 flags;
-	uint32 mem_lower;
-	uint32 mem_upper;
-	uint32 boot_device;
-	uint32 cmdline;
-	uint32 mods_count;
-	uint32 mods_addr;
+	uint32_t flags;
+	uint32_t mem_lower;
+	uint32_t mem_upper;
+	uint32_t boot_device;
+	uint32_t cmdline;
+	uint32_t mods_count;
+	uint32_t mods_addr;
 	union {
 		struct {
-			uint32 tabsize, strsize, addr, reserved;
+			uint32_t tabsize, strsize, addr, reserved;
 		} aout;
 		struct {
-			uint32 num, size, addr, shndx;
+			uint32_t num, size, addr, shndx;
 		} elf;
 	} symbols;
-	uint32 mmap_length;
-	uint32 mmap_addr;
-	uint32 drives_length;
-	uint32 drives_addr;
-	uint32 config_table;
-	uint32 boot_loader_name;
-	uint32 apm_table;
-	uint32 vbe_control_info;
-	uint32 vbe_mode_info;
-	uint16 vbe_mode;
-	uint16 vbe_interface_seg;
-	uint16 vbe_interface_off;
-	uint16 vbe_interface_len;
+	uint32_t mmap_length;
+	uint32_t mmap_addr;
+	uint32_t drives_length;
+	uint32_t drives_addr;
+	uint32_t config_table;
+	uint32_t boot_loader_name;
+	uint32_t apm_table;
+	uint32_t vbe_control_info;
+	uint32_t vbe_mode_info;
+	uint16_t vbe_mode;
+	uint16_t vbe_interface_seg;
+	uint16_t vbe_interface_off;
+	uint16_t vbe_interface_len;
 };
 
 struct multiboot_mmap_entry {
-	uint32 size;
-	uint32 base_low;
-	uint32 base_high;
-	uint32 length_low;
-	uint32 length_high;
-	uint32 type;
+	uint32_t size;
+	uint32_t base_low;
+	uint32_t base_high;
+	uint32_t length_low;
+	uint32_t length_high;
+	uint32_t type;
 } __attribute__((packed));
 
 #endif

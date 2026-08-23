@@ -12,24 +12,26 @@
 _Static_assert(AMD64_USER_LIMIT - 1U <= (uintptr_t)INTPTR_MAX,
     "user pointers must not overlap the negative syscall errno window");
 
-static uint64 system_pml4[512] __attribute__((aligned(PAGE_SIZE)));
-static uint64 system_pdpt[512] __attribute__((aligned(PAGE_SIZE)));
-static uint64 system_pd[512] __attribute__((aligned(PAGE_SIZE)));
-static uint64 system_kernel_pt[8][512]
+static uint64_t system_pml4[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_pdpt[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_pd[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_kernel_pt[8][512]
 	__attribute__((aligned(PAGE_SIZE)));
-static uint64 system_mmio_pd[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t system_mmio_pd[512] __attribute__((aligned(PAGE_SIZE)));
 static uintptr_t system_cr3;
 #define AMD64_CURRENT_SPACE (amd64_percpu_current()->current_space)
 static int next_space_id = 1;
-static uint32 space_count;
-static uint32 page_table_count;
+static uint32_t space_count;
+static uint32_t page_table_count;
+static volatile unsigned space_registry_lock;
+static struct amd64_space *space_registry;
 
 struct amd64_shootdown_request {
 	volatile unsigned active;
 	hal_space_t space;
 	void *vaddr;
 	size_t size;
-	volatile uint64 pending;
+	volatile uint64_t pending;
 };
 #define AMD64_SHOOTDOWN_REQUESTS (AMD64_SMP_MAX_CPUS * 4U)
 static struct amd64_shootdown_request shootdowns[AMD64_SHOOTDOWN_REQUESTS];
@@ -40,7 +42,7 @@ static void service_shootdowns(hal_cpu_id_t cpu);
 static void
 table_count_drop(void)
 {
-	uint32 old = __atomic_fetch_sub(&page_table_count, 1U,
+	uint32_t old = __atomic_fetch_sub(&page_table_count, 1U,
 	    __ATOMIC_RELAXED);
 	if (old == 0)
 		HAL_FATAL("amd64 page-table counter underflow");
@@ -81,8 +83,11 @@ amd64_space_init(void)
 	uintptr_t kernel_start = (uintptr_t)__kernel_phys_start;
 	uintptr_t kernel_end = (uintptr_t)__kernel_phys_end;
 	unsigned index, first_chunk, chunks, chunk;
-	uint64 efer;
+	uint64_t efer;
 	uintptr_t cr0, cr4;
+
+	space_registry_lock = 0;
+	space_registry = NULL;
 
 	hal_memset(system_pml4, 0, sizeof(system_pml4));
 	hal_memset(system_pdpt, 0, sizeof(system_pdpt));
@@ -90,7 +95,7 @@ amd64_space_init(void)
 	hal_memset(system_kernel_pt, 0, sizeof(system_kernel_pt));
 	hal_memset(system_mmio_pd, 0, sizeof(system_mmio_pd));
 	for (index = 0; index < 512; index++)
-		system_pd[index] = (uint64)index * 0x200000ULL |
+		system_pd[index] = (uint64_t)index * 0x200000ULL |
 		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE | AMD64_PTE_LARGE |
 		    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
 	first_chunk = (unsigned)(kernel_start / 0x200000U);
@@ -102,7 +107,7 @@ amd64_space_init(void)
 		uintptr_t base = (uintptr_t)(first_chunk + chunk) * 0x200000U;
 		for (index = 0; index < 512; index++) {
 			uintptr_t physical = base + (uintptr_t)index * PAGE_SIZE;
-			uint64 flags = AMD64_PTE_PRESENT | AMD64_PTE_GLOBAL |
+			uint64_t flags = AMD64_PTE_PRESENT | AMD64_PTE_GLOBAL |
 			    AMD64_PTE_NX;
 			if (physical >= (uintptr_t)__kernel_text_phys_start &&
 			    physical < (uintptr_t)__kernel_text_phys_end)
@@ -118,7 +123,7 @@ amd64_space_init(void)
 	}
 	for (index = 0; index < 8; index++)
 		system_mmio_pd[index] = (0xf0000000ULL +
-		    (uint64)index * 0x200000ULL) | AMD64_PTE_PRESENT |
+		    (uint64_t)index * 0x200000ULL) | AMD64_PTE_PRESENT |
 		    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
 		    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
 	/* Dedicated uncached windows for the Local APIC and I/O APIC. */
@@ -129,15 +134,15 @@ amd64_space_init(void)
 	    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
 	    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
 	if (framebuffer != NULL) {
-		uint64 base = framebuffer->physical_base & ~0x1fffffULL;
-		uint64 end = framebuffer->physical_base + framebuffer->size;
+		uint64_t base = framebuffer->physical_base & ~0x1fffffULL;
+		uint64_t end = framebuffer->physical_base + framebuffer->size;
 		unsigned count = (unsigned)((end - base + 0x1fffffULL) /
 		    0x200000ULL);
 		if (count == 0 || count > 496U)
 			HAL_FATAL("amd64 framebuffer MMIO window exceeded");
 		for (index = 0; index < count; index++)
 			system_mmio_pd[16U + index] = (base +
-			    (uint64)index * 0x200000ULL) |
+			    (uint64_t)index * 0x200000ULL) |
 			    AMD64_PTE_PRESENT | AMD64_PTE_WRITE |
 			    AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
 			    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
@@ -167,19 +172,65 @@ amd64_space_init(void)
 	__atomic_store_n(&AMD64_CURRENT_SPACE, HAL_SPACE_SYS, __ATOMIC_RELEASE);
 }
 
-static int valid_space(hal_space_t handle)
+static bool
+registry_lock_enter(void)
 {
-	return handle == HAL_SPACE_SYS ||
-	    (handle != NULL && ((struct amd64_space *)handle)->magic ==
-	    AMD64_SPACE_MAGIC);
+	bool enabled = hal_irq_disable();
+
+	while (__atomic_exchange_n(&space_registry_lock, 1U,
+	    __ATOMIC_ACQUIRE) != 0)
+		__asm__ volatile("pause");
+	return enabled;
+}
+
+static void
+registry_lock_leave(bool enabled)
+{
+	__atomic_store_n(&space_registry_lock, 0U, __ATOMIC_RELEASE);
+	if (enabled)
+		hal_irq_enable();
+}
+
+/* Register an operation before touching a space which may be retired. */
+static int
+space_op_enter(struct amd64_space *space)
+{
+	struct amd64_space *item;
+	bool enabled = registry_lock_enter();
+
+	for (item = space_registry; item != NULL; item = item->registry_next)
+		if (item == space)
+			break;
+	if (item == NULL || item->destroying) {
+		registry_lock_leave(enabled);
+		return 0;
+	}
+	item->active_ops++;
+	registry_lock_leave(enabled);
+	return 1;
+}
+
+static void
+space_op_leave(struct amd64_space *space)
+{
+	bool enabled = registry_lock_enter();
+
+	if (space->active_ops == 0)
+		HAL_FATAL("amd64 space operation counter underflow");
+	space->active_ops--;
+	registry_lock_leave(enabled);
 }
 
 static bool
 space_lock_enter(struct amd64_space *space)
 {
 	bool enabled = hal_irq_disable();
-	while (__atomic_exchange_n(&space->lock, 1U, __ATOMIC_ACQUIRE) != 0)
+	while (__atomic_exchange_n(&space->lock, 1U, __ATOMIC_ACQUIRE) != 0) {
+		/* A target spinning with IRQs masked must still acknowledge a
+		 * shootdown issued by the CPU which owns this serializer. */
+		service_shootdowns(hal_cpu_current());
 		__asm__ volatile("pause");
+	}
 	return enabled;
 }
 
@@ -200,7 +251,7 @@ static int valid_user_range(uintptr_t address, size_t size)
 }
 
 static struct amd64_table_page *
-allocate_table(struct amd64_space *space, uint64 *parent,
+allocate_table(struct amd64_space *space, uint64_t *parent,
 	unsigned parent_index)
 {
 	struct amd64_table_page *page = hal_malloc(sizeof(*page));
@@ -218,16 +269,16 @@ allocate_table(struct amd64_space *space, uint64 *parent,
 	return page;
 }
 
-static uint64 *
+static uint64_t *
 walk_leaf(struct amd64_space *space, uintptr_t address, int create)
 {
 	unsigned shifts[3] = { 39, 30, 21 };
-	uint64 *table = space->pml4;
+	uint64_t *table = space->pml4;
 	unsigned level;
 
 	for (level = 0; level < 3; level++) {
 		unsigned index = (unsigned)(address >> shifts[level]) & 511U;
-		uint64 entry = table[index];
+		uint64_t entry = table[index];
 		if (!(entry & AMD64_PTE_PRESENT)) {
 			struct amd64_table_page *page;
 			if (!create) return NULL;
@@ -245,7 +296,7 @@ walk_leaf(struct amd64_space *space, uintptr_t address, int create)
 }
 
 static int
-table_is_empty(const uint64 *table)
+table_is_empty(const uint64_t *table)
 {
 	unsigned index;
 	for (index = 0; index < 512; index++)
@@ -254,36 +305,63 @@ table_is_empty(const uint64 *table)
 	return 1;
 }
 
-static void
-reclaim_empty_tables(struct amd64_space *space)
+/*
+ * Remove every empty table from the hardware tree without releasing its
+ * storage.  A remote CPU can begin a new page walk as soon as it acknowledges
+ * a leaf shootdown, so parent entries must be disconnected before that
+ * acknowledgement.  The returned pages remain valid until the caller has
+ * completed a full shootdown.
+ */
+static struct amd64_table_page *
+detach_empty_tables(struct amd64_space *space)
 {
+	struct amd64_table_page *detached = NULL;
 	int reclaimed;
+
 	do {
 		struct amd64_table_page **link = &space->tables;
 		reclaimed = 0;
 		while (*link != NULL) {
 			struct amd64_table_page *page = *link;
-			uint64 expected = (uintptr_t)page->memory.paddr;
+			uint64_t expected = (uintptr_t)page->memory.paddr;
+			uint64_t parent_entry;
+
 			if (!table_is_empty(page->memory.vaddr)) {
 				link = &page->next;
 				continue;
 			}
-			if ((page->parent[page->parent_index] &
-			    AMD64_PTE_ADDR_MASK) == expected)
-				page->parent[page->parent_index] = 0;
+			parent_entry = page->parent[page->parent_index];
+			if (!(parent_entry & AMD64_PTE_PRESENT) ||
+			    (parent_entry & AMD64_PTE_ADDR_MASK) != expected)
+				HAL_FATAL("detaching an unlinked amd64 page table");
+			page->parent[page->parent_index] = 0;
 			*link = page->next;
-			(void)hal_pmem_free(&page->memory);
-			hal_free(page);
-			table_count_drop();
+			page->next = detached;
+			detached = page;
 			reclaimed = 1;
 		}
 	} while (reclaimed);
+	return detached;
+}
+
+static void
+free_detached_tables(struct amd64_table_page *page)
+{
+	while (page != NULL) {
+		struct amd64_table_page *next = page->next;
+
+		(void)hal_pmem_free(&page->memory);
+		hal_free(page);
+		table_count_drop();
+		page = next;
+	}
 }
 
 hal_space_t
 hal_mem_create_space(void)
 {
 	struct amd64_space *space = hal_malloc(sizeof(*space));
+	bool enabled;
 	if (space == NULL) return NULL;
 	hal_memset(space, 0, sizeof(*space));
 	if (alloc_page(&space->pml4_memory) != HAL_OK) {
@@ -297,6 +375,10 @@ hal_mem_create_space(void)
 	space->space_id = __atomic_fetch_add(&next_space_id, 1,
 	    __ATOMIC_RELAXED);
 	(void)__atomic_fetch_add(&space_count, 1U, __ATOMIC_RELAXED);
+	enabled = registry_lock_enter();
+	space->registry_next = space_registry;
+	space_registry = space;
+	registry_lock_leave(enabled);
 	return space;
 }
 
@@ -304,23 +386,51 @@ void
 hal_page_destroy_space(hal_space_t handle)
 {
 	struct amd64_space *space = handle;
+	struct amd64_space **link;
 	struct amd64_table_page *page;
+	struct hal_cpu_mask ready;
+	hal_cpu_id_t cpu;
 	bool enabled;
 	if (space == NULL) return;
-	if (!valid_space(space)) HAL_FATAL("invalid amd64 space destroy");
-	if (AMD64_CURRENT_SPACE == space) hal_page_switch_space(HAL_SPACE_SYS);
-	enabled = space_lock_enter(space);
-	if (__atomic_exchange_n(&space->destroying, 1U,
-	    __ATOMIC_ACQ_REL) != 0)
-		HAL_FATAL("amd64 space destroyed twice");
-	space_lock_leave(space, enabled);
-	/*
-	 * Never wait for another CPU while holding a space lock with local
-	 * interrupts disabled: the target may be waiting for this lock and
-	 * therefore unable to acknowledge the TLB interrupt.
-	 */
+	enabled = registry_lock_enter();
+	for (link = &space_registry; *link != NULL && *link != space;
+	    link = &(*link)->registry_next)
+		;
+	if (*link == NULL || space->destroying)
+		HAL_FATAL("invalid amd64 space destroy");
+	space->destroying = 1U;
+	*link = space->registry_next;
+	registry_lock_leave(enabled);
+
+	/* Operations admitted before retirement own the storage until they leave. */
+	for (;;) {
+		unsigned active;
+
+		enabled = registry_lock_enter();
+		active = space->active_ops;
+		registry_lock_leave(enabled);
+		if (active == 0)
+			break;
+		service_shootdowns(hal_cpu_current());
+		__asm__ volatile("pause");
+	}
 	shootdown(space, NULL, 0);
-	enabled = space_lock_enter(space);
+	/*
+	 * Address-space ownership is enforced by the generic kernel.  The HAL
+	 * closes hardware translation windows but must never detach a task from
+	 * its space implicitly.  Catch a violated lifetime invariant before the
+	 * page-table storage is released.
+	 */
+	hal_cpu_ready_mask(&ready);
+	for (cpu = 0; cpu < hal_cpu_count(); cpu++) {
+		struct amd64_percpu *target;
+
+		if (!hal_cpu_mask_test(&ready, cpu))
+			continue;
+		target = amd64_percpu_get(cpu);
+		if (__atomic_load_n(&target->current_space, __ATOMIC_ACQUIRE) == space)
+			HAL_FATAL("destroying an active amd64 space");
+	}
 	while ((page = space->tables) != NULL) {
 		space->tables = page->next;
 		(void)hal_pmem_free(&page->memory);
@@ -328,7 +438,6 @@ hal_page_destroy_space(hal_space_t handle)
 		table_count_drop();
 	}
 	space->magic = 0;
-	space_lock_leave(space, enabled);
 	(void)hal_pmem_free(&space->pml4_memory);
 	hal_free(space);
 	if (__atomic_fetch_sub(&space_count, 1U, __ATOMIC_RELAXED) == 0)
@@ -338,22 +447,33 @@ hal_page_destroy_space(hal_space_t handle)
 void
 hal_page_switch_space(hal_space_t handle)
 {
+	struct amd64_space *space;
 	uintptr_t cr3;
-	if (!valid_space(handle)) HAL_FATAL("invalid amd64 space switch");
-	if (handle != HAL_SPACE_SYS && __atomic_load_n(
-	    &((struct amd64_space *)handle)->destroying,
-	    __ATOMIC_ACQUIRE) != 0)
-		HAL_FATAL("switch to destroying amd64 space");
-	if (handle == AMD64_CURRENT_SPACE) return;
-	cr3 = handle == HAL_SPACE_SYS ? system_cr3 :
-	    (uintptr_t)((struct amd64_space *)handle)->pml4_memory.paddr;
+	bool enabled;
+	if (__atomic_load_n(&AMD64_CURRENT_SPACE, __ATOMIC_ACQUIRE) == handle)
+		return;
+	if (handle == HAL_SPACE_SYS) {
+		enabled = hal_irq_disable();
+		asm_load_cr3(system_cr3);
+		__atomic_store_n(&AMD64_CURRENT_SPACE, handle, __ATOMIC_RELEASE);
+		if (enabled)
+			hal_irq_enable();
+		return;
+	}
+	space = handle;
+	if (!space_op_enter(space))
+		HAL_FATAL("invalid amd64 space switch");
+	enabled = space_lock_enter(space);
+	cr3 = (uintptr_t)space->pml4_memory.paddr;
 	asm_load_cr3(cr3);
 	__atomic_store_n(&AMD64_CURRENT_SPACE, handle, __ATOMIC_RELEASE);
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
 }
 
-static uint64 leaf_flags(uint32 attr)
+static uint64_t leaf_flags(uint32_t attr)
 {
-	uint64 flags = AMD64_PTE_PRESENT | AMD64_PTE_USER;
+	uint64_t flags = AMD64_PTE_PRESENT | AMD64_PTE_USER;
 	if (attr & HAL_SPACE_WRITE) flags |= AMD64_PTE_WRITE;
 	if (attr & HAL_SPACE_NOCACHE) flags |= AMD64_PTE_NOCACHE;
 	if (attr & HAL_SPACE_WRITETHRU) flags |= AMD64_PTE_WRITETHRU;
@@ -364,76 +484,128 @@ static uint64 leaf_flags(uint32 attr)
 
 int
 hal_page_map(hal_space_t handle, void *pointer, hal_physaddr_t physical,
-	size_t size, uint32 attr)
+	size_t size, uint32_t attr)
 {
 	struct amd64_space *space = handle;
 	uintptr_t address = (uintptr_t)pointer, offset;
 	bool enabled;
-	if (space == NULL || !valid_space(space) ||
+	if (space == NULL ||
 	    !valid_user_range(address, size) ||
 	    (physical & (PAGE_SIZE - 1U)) != 0 ||
 	    physical >= AMD64_DIRECT_LIMIT || size > AMD64_DIRECT_LIMIT - physical ||
 	    !(attr & (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)))
 		return HAL_ERR_INVALID;
-	enabled = space_lock_enter(space);
-	if (space->destroying) {
-		space_lock_leave(space, enabled);
+	if (!space_op_enter(space))
 		return HAL_ERR_STATE;
-	}
+	enabled = space_lock_enter(space);
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
-		uint64 *leaf = walk_leaf(space, address + offset, 0);
+		uint64_t *leaf = walk_leaf(space, address + offset, 0);
 		if (leaf != NULL && (*leaf & AMD64_PTE_PRESENT)) {
 			space_lock_leave(space, enabled);
+			space_op_leave(space);
 			return HAL_ERR_INVALID;
 		}
 	}
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
-		uint64 *leaf = walk_leaf(space, address + offset, 1);
+		uint64_t *leaf = walk_leaf(space, address + offset, 1);
 		if (leaf == NULL) {
+			struct amd64_table_page *detached;
 			uintptr_t rollback;
+
 			for (rollback = 0; rollback < offset; rollback += PAGE_SIZE) {
 				leaf = walk_leaf(space, address + rollback, 0);
 				if (leaf != NULL) *leaf = 0;
 			}
-			reclaim_empty_tables(space);
+			detached = detach_empty_tables(space);
+			if (detached != NULL)
+				shootdown(space, NULL, 0);
+			else if (offset != 0)
+				shootdown(space, pointer, offset);
+			free_detached_tables(detached);
 			space_lock_leave(space, enabled);
+			space_op_leave(space);
 			return HAL_ERR_NOMEM;
 		}
 		*leaf = (physical + offset) | leaf_flags(attr);
 	}
-	space_lock_leave(space, enabled);
 	/* A different CPU may currently execute in this address space. */
-	hal_page_flush_tlb_range(space, pointer, size);
+	shootdown(space, pointer, size);
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
 	return HAL_OK;
 }
 
 int
-hal_page_prot(hal_space_t handle, void *pointer, size_t size, uint32 attr)
+hal_page_prot(hal_space_t handle, void *pointer, size_t size, uint32_t attr)
+{
+	return hal_page_prot_query(handle, pointer, size, attr, NULL);
+}
+
+int
+hal_page_prot_query(hal_space_t handle, void *pointer, size_t size,
+	uint32_t attr, uint32_t *flags)
 {
 	struct amd64_space *space = handle;
 	uintptr_t address = (uintptr_t)pointer, offset;
+	uint32_t observed = 0;
 	bool enabled;
-	if (space == NULL || !valid_space(space) ||
+	if (space == NULL ||
 	    !valid_user_range(address, size) ||
 	    !(attr & (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)))
 		return HAL_ERR_INVALID;
-	enabled = space_lock_enter(space);
-	if (space->destroying) {
-		space_lock_leave(space, enabled);
+	if (!space_op_enter(space))
 		return HAL_ERR_STATE;
-	}
+	enabled = space_lock_enter(space);
+	/* Validate the complete range before publishing any permission change. */
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
-		uint64 *leaf = walk_leaf(space, address + offset, 0);
-		uint64 physical;
+		uint64_t *leaf = walk_leaf(space, address + offset, 0);
 		if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT)) {
 			space_lock_leave(space, enabled);
+			space_op_leave(space);
 			return HAL_ERR_INVALID;
 		}
-		physical = *leaf & AMD64_PTE_ADDR_MASK;
-		*leaf = physical | leaf_flags(attr);
+	}
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		uint64_t *leaf = walk_leaf(space, address + offset, 0);
+		uint64_t old = __atomic_load_n(leaf, __ATOMIC_ACQUIRE);
+		uint64_t desired;
+
+		do {
+			desired = (old & AMD64_PTE_ADDR_MASK) | leaf_flags(attr) |
+			    (old & (AMD64_PTE_ACCESSED | AMD64_PTE_DIRTY));
+		} while (!__atomic_compare_exchange_n(leaf, &old, desired, false,
+		    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+		if (old & AMD64_PTE_ACCESSED)
+			observed |= HAL_PAGE_ACCESSED;
+		if (old & AMD64_PTE_DIRTY)
+			observed |= HAL_PAGE_DIRTY;
+	}
+	shootdown(space, pointer, size);
+
+	/* A remote CPU may have set A/D through its old translation before it
+	 * acknowledged the shootdown.  The replacement is now stable with
+	 * respect to those old translations. */
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
+		uint64_t *leaf = walk_leaf(space, address + offset, 0);
+		uint64_t entry;
+
+		if (leaf == NULL ||
+		    !((entry = __atomic_load_n(leaf, __ATOMIC_ACQUIRE)) &
+		    AMD64_PTE_PRESENT)) {
+			space_lock_leave(space, enabled);
+			space_op_leave(space);
+			return HAL_ERR_STATE;
+		}
+		observed |= HAL_PAGE_PRESENT;
+		if (entry & AMD64_PTE_ACCESSED)
+			observed |= HAL_PAGE_ACCESSED;
+		if (entry & AMD64_PTE_DIRTY)
+			observed |= HAL_PAGE_DIRTY;
 	}
 	space_lock_leave(space, enabled);
-	hal_page_flush_tlb_range(space, pointer, size);
+	space_op_leave(space);
+	if (flags != NULL)
+		*flags = observed;
 	return HAL_OK;
 }
 
@@ -441,81 +613,85 @@ int
 hal_page_unmap(hal_space_t handle, void *pointer, size_t size)
 {
 	struct amd64_space *space = handle;
+	struct amd64_table_page *detached;
 	uintptr_t address = (uintptr_t)pointer, offset;
 	bool enabled;
 	if (size == 0) return HAL_OK;
-	if (space == NULL || !valid_space(space) ||
+	if (space == NULL ||
 	    !valid_user_range(address, size)) return HAL_ERR_INVALID;
-	enabled = space_lock_enter(space);
-	if (space->destroying) {
-		space_lock_leave(space, enabled);
+	if (!space_op_enter(space))
 		return HAL_ERR_STATE;
-	}
+	enabled = space_lock_enter(space);
 	for (offset = 0; offset < size; offset += PAGE_SIZE) {
-		uint64 *leaf = walk_leaf(space, address + offset, 0);
+		uint64_t *leaf = walk_leaf(space, address + offset, 0);
 		if (leaf != NULL) *leaf = 0;
 	}
-	space_lock_leave(space, enabled);
 	/*
-	 * Keep the page-table pages alive until every CPU has discarded the
-	 * leaf translations.  Reclaiming them before shootdown can turn a
-	 * remote page walk into a use-after-free.
+	 * Disconnect empty tables before the shootdown, but keep their storage
+	 * alive through acknowledgement.  This closes both stale translations
+	 * and page walks which began through the old parent entries.
 	 */
-	hal_page_flush_tlb_range(space, pointer, size);
-	enabled = space_lock_enter(space);
-	if (!space->destroying)
-		reclaim_empty_tables(space);
+	detached = detach_empty_tables(space);
+	if (detached != NULL)
+		shootdown(space, NULL, 0);
+	else
+		shootdown(space, pointer, size);
+	free_detached_tables(detached);
 	space_lock_leave(space, enabled);
+	space_op_leave(space);
 	return HAL_OK;
 }
 
 int
-hal_page_query(hal_space_t handle, void *pointer, uint32 *flags)
+hal_page_query(hal_space_t handle, void *pointer, uint32_t *flags)
 {
 	struct amd64_space *space = handle;
-	uint64 *leaf;
+	uint64_t *leaf;
 	bool enabled;
-	if (space == NULL || !valid_space(space) || flags == NULL ||
+	if (space == NULL || flags == NULL ||
 	    !valid_user_range((uintptr_t)pointer, PAGE_SIZE))
 		return HAL_ERR_INVALID;
-	enabled = space_lock_enter(space);
-	if (space->destroying) {
-		space_lock_leave(space, enabled);
+	if (!space_op_enter(space))
 		return HAL_ERR_STATE;
-	}
+	enabled = space_lock_enter(space);
 	leaf = walk_leaf(space, (uintptr_t)pointer, 0);
 	*flags = leaf != NULL && (*leaf & AMD64_PTE_PRESENT) ? HAL_PAGE_PRESENT : 0;
 	if (leaf != NULL && (*leaf & AMD64_PTE_ACCESSED)) *flags |= HAL_PAGE_ACCESSED;
 	if (leaf != NULL && (*leaf & AMD64_PTE_DIRTY)) *flags |= HAL_PAGE_DIRTY;
 	space_lock_leave(space, enabled);
+	space_op_leave(space);
 	return HAL_OK;
 }
 
 int
-hal_page_clear_flags(hal_space_t handle, void *pointer, uint32 flags)
+hal_page_clear_flags(hal_space_t handle, void *pointer, uint32_t flags)
 {
 	struct amd64_space *space = handle;
-	uint64 *leaf, mask = 0;
+	uint64_t *leaf, mask = 0, old, desired;
 	bool enabled;
-	if (space == NULL || !valid_space(space) ||
+	if (space == NULL ||
 	    !valid_user_range((uintptr_t)pointer, PAGE_SIZE) ||
 	    (flags & ~(HAL_PAGE_ACCESSED | HAL_PAGE_DIRTY)) != 0)
 		return HAL_ERR_INVALID;
-	enabled = space_lock_enter(space);
-	if (space->destroying) {
-		space_lock_leave(space, enabled);
+	if (!space_op_enter(space))
 		return HAL_ERR_STATE;
-	}
+	enabled = space_lock_enter(space);
 	leaf = walk_leaf(space, (uintptr_t)pointer, 0);
 	if (leaf == NULL || !(*leaf & AMD64_PTE_PRESENT)) {
 		space_lock_leave(space, enabled);
+		space_op_leave(space);
 		return HAL_ERR_INVALID;
 	}
 	if (flags & HAL_PAGE_ACCESSED) mask |= AMD64_PTE_ACCESSED;
 	if (flags & HAL_PAGE_DIRTY) mask |= AMD64_PTE_DIRTY;
-	*leaf &= ~mask;
+	old = __atomic_load_n(leaf, __ATOMIC_ACQUIRE);
+	do {
+		desired = old & ~mask;
+	} while (!__atomic_compare_exchange_n(leaf, &old, desired, false,
+	    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+	shootdown(space, pointer, PAGE_SIZE);
 	space_lock_leave(space, enabled);
-	hal_page_flush_tlb_range(space, pointer, PAGE_SIZE);
+	space_op_leave(space);
 	return HAL_OK;
 }
 
@@ -526,7 +702,7 @@ shootdown(hal_space_t handle, void *vaddr, size_t size)
 	struct amd64_shootdown_request *request = NULL;
 	struct hal_cpu_mask ready;
 	unsigned slot;
-	uint64 pending = 0;
+	uint64_t pending = 0;
 
 	/*
 	 * A timer interrupt may preempt a thread that is waiting here and run a
@@ -553,7 +729,7 @@ shootdown(hal_space_t handle, void *vaddr, size_t size)
 		if (handle == HAL_SPACE_SYS ||
 		    __atomic_load_n(&target->current_space, __ATOMIC_ACQUIRE) ==
 		    handle)
-			pending |= (uint64)1U << cpu;
+			pending |= (uint64_t)1U << cpu;
 	}
 	request->space = handle;
 	request->vaddr = vaddr;
@@ -561,7 +737,7 @@ shootdown(hal_space_t handle, void *vaddr, size_t size)
 	__atomic_store_n(&request->pending, pending, __ATOMIC_RELEASE);
 	__atomic_store_n(&request->active, 1U, __ATOMIC_RELEASE);
 	for (cpu = 0; cpu < hal_cpu_count(); cpu++)
-		if ((pending & ((uint64)1U << cpu)) != 0 &&
+		if ((pending & ((uint64_t)1U << cpu)) != 0 &&
 		    amd64_lapic_send_vector(amd64_smp_apic_id(cpu),
 		    AMD64_VECTOR_TLB) != HAL_OK)
 			HAL_FATAL("amd64 TLB shootdown delivery failed");
@@ -583,7 +759,7 @@ shootdown(hal_space_t handle, void *vaddr, size_t size)
 static void
 service_shootdowns(hal_cpu_id_t cpu)
 {
-	uint64 bit = (uint64)1U << cpu;
+	uint64_t bit = (uint64_t)1U << cpu;
 	unsigned slot;
 
 	for (slot = 0; slot < AMD64_SHOOTDOWN_REQUESTS; slot++) {
@@ -607,13 +783,38 @@ amd64_tlb_interrupt(void)
 
 void hal_page_flush_tlb(hal_space_t handle)
 {
-	shootdown(handle, NULL, 0);
+	struct amd64_space *space = handle;
+	bool enabled;
+
+	if (handle == HAL_SPACE_SYS) {
+		shootdown(handle, NULL, 0);
+		return;
+	}
+	if (!space_op_enter(space))
+		HAL_FATAL("invalid amd64 space flush");
+	enabled = space_lock_enter(space);
+	shootdown(space, NULL, 0);
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
 }
 
 void hal_page_flush_tlb_range(hal_space_t handle, void *vaddr, size_t size)
 {
-	if (size != 0)
+	struct amd64_space *space = handle;
+	bool enabled;
+
+	if (size == 0)
+		return;
+	if (handle == HAL_SPACE_SYS) {
 		shootdown(handle, vaddr, size);
+		return;
+	}
+	if (!space_op_enter(space))
+		HAL_FATAL("invalid amd64 space range flush");
+	enabled = space_lock_enter(space);
+	shootdown(space, vaddr, size);
+	space_lock_leave(space, enabled);
+	space_op_leave(space);
 }
 
 size_t hal_page_get_page_size(int level)
@@ -629,7 +830,7 @@ void hal_page_get_user_range(uintptr_t *minimum, uintptr_t *limit)
 	if (limit != NULL) *limit = AMD64_USER_LIMIT;
 }
 
-void hal_amd64_space_memory_stats(uint32 *spaces, uint32 *tables)
+void hal_amd64_space_memory_stats(uint32_t *spaces, uint32_t *tables)
 {
 	if (spaces != NULL)
 		*spaces = __atomic_load_n(&space_count, __ATOMIC_RELAXED);

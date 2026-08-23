@@ -11,6 +11,7 @@
 #include "kern/poll.h"
 #include "kern/sched.h"
 #include "kern/signal.h"
+#include "kern/syscall.h"
 #include "kern/test-fault.h"
 #include "kern/thread.h"
 
@@ -332,7 +333,7 @@ unix_stream_send(struct socket *socket, const void *buffer, size_t length,
 	}
 	send_hiwat = socket->send_hiwat_bytes;
 	if (socket->send_timeout_ticks != 0 &&
-	    kern_deadline_after(sched_ticks(), socket->send_timeout_ticks,
+	    syscall_restart_deadline_after(socket->send_timeout_ticks,
 	    &deadline) != 0) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return unix_send_failure(rights, EOVERFLOW);
@@ -652,7 +653,7 @@ unix_socket_receive_begin(struct socket *socket, void *buffer, size_t length,
 	endpoint = unix_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
 	if (socket->receive_timeout_ticks != 0 &&
-	    kern_deadline_after(sched_ticks(), socket->receive_timeout_ticks,
+	    syscall_restart_deadline_after(socket->receive_timeout_ticks,
 	    &deadline) != 0) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return -EOVERFLOW;

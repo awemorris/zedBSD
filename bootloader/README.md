@@ -29,11 +29,12 @@ entries that straddle physical sectors are decoded from a two-sector cache.
 The image builder accepts `--fat-type fat12`, `fat16`, or `fat32`, and its
 checker rejects an image whose computed FAT type differs from the request.
 
-Build the native loaders and images with:
+Select the target with the repository menu, then use the public make
+interface.  The selected platform Makefile owns the platform-specific loader
+and image assembly steps:
 
 ```text
-./build.sh loader i386
-./build.sh loader pc98
-./build.sh bootdisk i386
-./build.sh bootdisk pc98
+make menuconfig
+make bootloader
+make disk-image
 ```

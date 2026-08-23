@@ -29,8 +29,8 @@ rpi4_boot_set_info(const struct rpi4_fdt_info *info, uintptr_t fdt_phys)
 }
 
 void
-rpi4_boot_set_framebuffer(uint64 phys,uint64 size,uint32 width,uint32 height,
-	uint32 pitch,uint32 format)
+rpi4_boot_set_framebuffer(uint64_t phys,uint64_t size,uint32_t width,uint32_t height,
+	uint32_t pitch,uint32_t format)
 {
 	kernel_handoff.framebuffer_phys=phys;
 	kernel_handoff.framebuffer_size=size;

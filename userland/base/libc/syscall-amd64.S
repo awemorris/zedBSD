@@ -1,3 +1,5 @@
+#include <hal/arch.h>
+
 .code64
 .text
 .globl __syscall6
@@ -23,8 +25,8 @@ __syscall6:
 .globl __signal_restorer
 .type __signal_restorer, @function
 __signal_restorer:
-	movq (%rsp), %rbx
-	movq 8(%rsp), %rcx
+	movq HAL_TASK_SIGNAL_RESTORER_TOKEN_OFFSET(%rsp), %rbx
+	movq HAL_TASK_SIGNAL_RESTORER_CONTEXT_OFFSET(%rsp), %rcx
 	movq $80, %rax
 	int $0xc2
 	ud2

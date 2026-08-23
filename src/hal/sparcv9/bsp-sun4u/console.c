@@ -30,9 +30,9 @@ void hal_cons_write_at(unsigned r, unsigned c, const char *s)
 { (void)hal_cons_set_cursor(r, c); console_puts(s); }
 void hal_cons_clear_row(unsigned r) { (void)r; console_puts("\033[2K"); }
 void hal_cons_clear_to_eol(void) { console_puts("\033[K"); }
-int hal_cons_write_at_attr(unsigned r,unsigned c,const char*s,uint8 a)
+int hal_cons_write_at_attr(unsigned r,unsigned c,const char*s,uint8_t a)
 { (void)a; hal_cons_write_at(r,c,s); return s ? hal_strlen(s) : -1; }
-int hal_cons_write_n_at(unsigned r,unsigned c,const char*s,unsigned n,uint8 a)
+int hal_cons_write_n_at(unsigned r,unsigned c,const char*s,unsigned n,uint8_t a)
 { (void)a; if (!hal_cons_set_cursor(r,c)) return -1; hal_cons_write_n(s,n); return (int)n; }
 int hal_cons_clear_to_eol_at(unsigned r,unsigned c)
 { if (!hal_cons_set_cursor(r,c)) return 0; hal_cons_clear_to_eol(); return 1; }

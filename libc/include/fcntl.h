@@ -37,6 +37,8 @@ int faccessat(int, const char *, int, int);
 #define F_GETLK          6
 #define F_SETLK          7
 #define F_SETLKW         8
+#define F_GETOWN         9
+#define F_SETOWN         10
 
 #define F_RDLCK 1
 #define F_WRLCK 2

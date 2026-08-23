@@ -291,6 +291,7 @@ tcp_connect_cancel_locked(struct tcp_endpoint *endpoint, uint32_t generation)
 	tcp_retransmit_reset(endpoint, &packet);
 	endpoint->tcp.state = TCP_CLOSED;
 	endpoint->tcp.active_connect_generation = 0;
+	endpoint->tcp.connect_wait_deadline = 0;
 	tcp_forget_peer(endpoint);
 	waitq_wake_all(&socket->connect_waitq);
 	waitq_wake_all(&socket->send_waitq);
@@ -495,10 +496,43 @@ tcp_connect(struct socket *socket, const struct sockaddr *address,
 	unsigned attempt;
 	int error;
 
+	/* STOP/CONT is transparent at the syscall layer.  A redispatched connect
+	 * resumes the existing attempt; an ordinary second connect still observes
+	 * EALREADY/EISCONN as required by the socket API. */
+	if (thread != NULL && thread->syscall_stop_redispatch) {
+		irq = spin_lock_irqsave(&socket->lock);
+		if (endpoint->tcp.state == TCP_ESTABLISHED) {
+			endpoint->tcp.connect_wait_deadline = 0;
+			spin_unlock_irqrestore(&socket->lock, irq);
+			return 0;
+		}
+		if (socket->error != 0) {
+			error = socket->error;
+			socket->error = 0;
+			endpoint->tcp.connect_wait_deadline = 0;
+			spin_unlock_irqrestore(&socket->lock, irq);
+			return error;
+		}
+		if (endpoint->tcp.state != TCP_SYN_SENT ||
+		    endpoint->tcp.active_connect_generation == 0) {
+			endpoint->tcp.connect_wait_deadline = 0;
+			spin_unlock_irqrestore(&socket->lock, irq);
+			return ECONNABORTED;
+		}
+		generation = endpoint->tcp.active_connect_generation;
+		deadline = endpoint->tcp.connect_wait_deadline;
+		goto wait_for_connect;
+	}
+	irq = spin_lock_irqsave(&socket->lock);
 	if (endpoint->tcp.state == TCP_SYN_SENT)
-		return EALREADY;
-	if (endpoint->tcp.state != TCP_CLOSED)
-		return EISCONN;
+		error = EALREADY;
+	else if (endpoint->tcp.state != TCP_CLOSED)
+		error = EISCONN;
+	else
+		error = 0;
+	spin_unlock_irqrestore(&socket->lock, irq);
+	if (error != 0)
+		return error;
 	error = inet_socket_connect(&endpoint->tcp.inet, address, length);
 	if (error != 0)
 		return error;
@@ -519,6 +553,7 @@ tcp_connect(struct socket *socket, const struct sockaddr *address,
 		endpoint->tcp.connect_generation++;
 	generation = endpoint->tcp.connect_generation;
 	endpoint->tcp.active_connect_generation = generation;
+	endpoint->tcp.connect_wait_deadline = 0;
 	/* Make distinct attempts use distinct wire sequence spaces even when the
 	 * scheduler tick did not advance between them. */
 	endpoint->tcp.send_next ^= generation * 2654435761U;
@@ -559,13 +594,22 @@ tcp_connect(struct socket *socket, const struct sockaddr *address,
 		packet_buf_free(cancelled);
 		return error;
 	}
+	endpoint->tcp.connect_wait_deadline = deadline;
+wait_for_connect:
 	while (endpoint->tcp.state == TCP_SYN_SENT &&
 	    endpoint->tcp.active_connect_generation == generation &&
 	    socket->error == 0) {
 		uint64_t sequence = waitq_sequence(&socket->connect_waitq);
 		error = waitq_sleep(&socket->connect_waitq, &socket->lock,
 		    sequence, deadline, WAITQ_INTERRUPTIBLE);
-		if (error == EINTR || error == ETIMEDOUT) {
+		if (error == EINTR) {
+			/* POSIX requires an interrupted blocking connect to leave the
+			 * request in progress.  The retransmission timer owns the SYN_SENT
+			 * attempt from here; poll(POLLOUT) plus SO_ERROR observes completion. */
+			spin_unlock_irqrestore(&socket->lock, irq);
+			return EINTR;
+		}
+		if (error == ETIMEDOUT) {
 			cancelled = tcp_connect_cancel_locked(endpoint, generation);
 			spin_unlock_irqrestore(&socket->lock, irq);
 			packet_buf_free(cancelled);
@@ -575,10 +619,12 @@ tcp_connect(struct socket *socket, const struct sockaddr *address,
 	if (socket->error != 0) {
 		error = socket->error;
 		socket->error = 0;
+		endpoint->tcp.connect_wait_deadline = 0;
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return error;
 	}
 	error = endpoint->tcp.state == TCP_ESTABLISHED ? 0 : ETIMEDOUT;
+	endpoint->tcp.connect_wait_deadline = 0;
 	spin_unlock_irqrestore(&socket->lock, irq);
 	return error;
 }
@@ -1011,6 +1057,7 @@ tcp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 		tcp_retransmit_reset(endpoint, &retransmit);
 		endpoint->tcp.state = TCP_CLOSED;
 		endpoint->tcp.active_connect_generation = 0;
+		endpoint->tcp.connect_wait_deadline = 0;
 		tcp_forget_peer(endpoint);
 		spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 		packet_buf_free(retransmit);
@@ -1075,6 +1122,7 @@ tcp_input(struct packet_buf *packet, uint32_t source, uint32_t destination)
 			endpoint->tcp.peer_window = wire_get16(tcp->window);
 			endpoint->tcp.state = TCP_ESTABLISHED;
 			endpoint->tcp.active_connect_generation = 0;
+			endpoint->tcp.connect_wait_deadline = 0;
 			waitq_wake_all(&endpoint->tcp.inet.socket.connect_waitq);
 			waitq_wake_all(&endpoint->tcp.inet.socket.send_waitq);
 			poll_notify();
@@ -1219,6 +1267,7 @@ tcp_timer_run(void)
 			tcp_retransmit_reset(endpoint, &discard);
 			endpoint->tcp.state = TCP_CLOSED;
 			endpoint->tcp.active_connect_generation = 0;
+			endpoint->tcp.connect_wait_deadline = 0;
 			tcp_forget_peer(endpoint);
 			spin_unlock_irqrestore(&socket->lock, irq);
 			packet_buf_free(discard);
@@ -1243,6 +1292,7 @@ tcp_timer_run(void)
 			tcp_retransmit_reset(endpoint, &discard);
 			endpoint->tcp.state = TCP_CLOSED;
 			endpoint->tcp.active_connect_generation = 0;
+			endpoint->tcp.connect_wait_deadline = 0;
 			tcp_forget_peer(endpoint);
 			spin_unlock_irqrestore(&socket->lock, irq);
 			packet_buf_free(discard);
@@ -1267,6 +1317,7 @@ tcp_timer_run(void)
 				tcp_retransmit_reset(endpoint, &discard);
 				endpoint->tcp.state = TCP_CLOSED;
 				endpoint->tcp.active_connect_generation = 0;
+				endpoint->tcp.connect_wait_deadline = 0;
 				tcp_forget_peer(endpoint);
 				failed = 1;
 			}

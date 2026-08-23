@@ -8,7 +8,7 @@
 
 extern char m68k030_bootstrap_empty_root[];
 void m68k_int_init(void);
-void x68k_timer_init(uint32 frequency);
+void x68k_timer_init(uint32_t frequency);
 
 void
 m68k_x68k_cmain(const struct x68k_boot_handoff *handoff)

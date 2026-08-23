@@ -29,7 +29,7 @@ void usync_init(void)
 
 int
 usync_wait(uintptr_t address, uint32_t expected, uintptr_t process_key,
-	uintptr_t key_offset, uint64_t deadline)
+	uintptr_t key_offset, uint64_t deadline, int cancelable)
 {
 	struct usync_bucket *bucket;
 	struct uaccess_pin pin;
@@ -40,23 +40,31 @@ usync_wait(uintptr_t address, uint32_t expected, uintptr_t process_key,
 
 	if (process_key == 0 || address == 0 || (address & 3U) != 0)
 		return EINVAL;
+	bucket = usync_bucket_for(process_key, key_offset);
+	/*
+	 * Observe the wake generation before reading the user word.  A wake in any
+	 * later gap makes waitq_sleep() return EAGAIN instead of registering a lost
+	 * waiter.  No user backing pin is held while sleeping.
+	 */
+	irq = spin_lock_irqsave(&bucket->lock);
+	sequence = waitq_sequence(&bucket->waiters);
+	spin_unlock_irqrestore(&bucket->lock, irq);
 	error = uaccess_pin(address, sizeof(actual), HAL_SPACE_READ, &pin);
 	if (error != 0)
 		return error;
-	bucket = usync_bucket_for(process_key, key_offset);
-	irq = spin_lock_irqsave(&bucket->lock);
 	error = copyin_pinned(&pin, 0, &actual, sizeof(actual));
-	if (error == 0 && actual != expected)
-		error = EAGAIN;
-	if (error == 0) {
-		sequence = waitq_sequence(&bucket->waiters);
-		error = waitq_sleep(&bucket->waiters, &bucket->lock, sequence,
-		    deadline, WAITQ_INTERRUPTIBLE);
-		if (error == EAGAIN)
-			error = 0;
-	}
-	spin_unlock_irqrestore(&bucket->lock, irq);
 	uaccess_unpin(&pin);
+	if (error != 0)
+		return error;
+	if (actual != expected)
+		return EAGAIN;
+	irq = spin_lock_irqsave(&bucket->lock);
+	error = waitq_sleep(&bucket->waiters, &bucket->lock, sequence,
+	    deadline, WAITQ_INTERRUPTIBLE |
+	    (cancelable ? WAITQ_CANCELABLE : 0));
+	if (error == EAGAIN)
+		error = 0;
+	spin_unlock_irqrestore(&bucket->lock, irq);
 	return error;
 }
 

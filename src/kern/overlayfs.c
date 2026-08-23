@@ -22,7 +22,13 @@
 #define OVERLAY_RECORD_BYTES 512U
 #define OVERLAY_SLOT_SECTORS (OVERLAY_JOURNAL_BYTES / OVERLAY_RECORD_BYTES)
 #define OVERLAY_PATH_RECORD_MAX 468U
+#ifdef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
+/* Keep host-test functions independently discardable.  The kernel link still
+ * collects the complete overlay implementation in high memory. */
+#define OVERLAY_HIGH
+#else
 #define OVERLAY_HIGH __attribute__((section(".hightext")))
+#endif
 
 #define OVERLAY_META_WHITEOUT 0x01U
 #define OVERLAY_META_OPAQUE 0x02U
@@ -107,13 +113,29 @@ static struct overlay_inode_slot overlay_inodes[OVERLAY_INODE_MAX]
 	__attribute__((section(".vfs_bss")));
 
 static const struct inode_ops overlay_inode_ops;
+static const struct filesystem_type overlay_filesystem_type;
+
+static int
+overlay_layers_supported(const struct overlay_mount_args *args)
+{
+	if (args == NULL)
+		return 0;
+	return !((args->upper.p_mount != NULL &&
+	    args->upper.p_mount->m_type == &overlay_filesystem_type) ||
+	    (args->lower.p_mount != NULL &&
+	    args->lower.p_mount->m_type == &overlay_filesystem_type));
+}
 static const struct file_ops overlay_regular_ops;
 static const struct file_ops overlay_directory_ops;
 static void overlay_retire_inode(struct inode *) OVERLAY_HIGH;
 static int overlay_directory_empty(struct inode *) OVERLAY_HIGH;
+static int overlay_find_relative(struct mount *, const char *, struct inode **)
+	OVERLAY_HIGH;
 
+#ifndef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
 typedef char overlay_record_path_must_fit[
 	(ZEDBSD_PATH_MAX - 1U <= OVERLAY_PATH_RECORD_MAX) ? 1 : -1];
+#endif
 
 static OVERLAY_HIGH uint16_t
 overlay_get16(const uint8_t *p)
@@ -843,9 +865,11 @@ overlay_refresh(struct inode *inode)
 	inode->i_atime = visible->i_atime;
 	inode->i_mtime = visible->i_mtime;
 	inode->i_ctime = visible->i_ctime;
+#ifndef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
 	inode->i_op = &overlay_inode_ops;
 	inode->i_fop = inode->i_type == INODE_DIR ?
 		&overlay_directory_ops : &overlay_regular_ops;
+#endif
 }
 
 static OVERLAY_HIGH int
@@ -899,6 +923,30 @@ overlay_lookup(struct inode *directory, const struct componentname *component,
 	int upper_error, lower_error, error;
 	if (directory->i_type != INODE_DIR || parent == NULL)
 		return ENOTDIR;
+	if (component->cn_namelen == 1U && component->cn_nameptr[0] == '.') {
+		inode_ref(directory);
+		*result = directory;
+		return 0;
+	}
+	if (component->cn_namelen == 2U && component->cn_nameptr[0] == '.' &&
+	    component->cn_nameptr[1] == '.') {
+		char parent_path[ZEDBSD_PATH_MAX];
+		char *slash;
+
+		if (parent->path[0] == '\0') {
+			inode_ref(directory->i_mount->m_root);
+			*result = directory->i_mount->m_root;
+			return 0;
+		}
+		strcpy(parent_path, parent->path);
+		slash = strrchr(parent_path, '/');
+		if (slash == NULL)
+			parent_path[0] = '\0';
+		else
+			*slash = '\0';
+		return overlay_find_relative(directory->i_mount, parent_path,
+			result);
+	}
 	error = overlay_component_text(component, name);
 	if (error != 0)
 		return error;
@@ -1525,25 +1573,73 @@ overlay_rmdir(struct inode *directory, const struct componentname *name)
 }
 
 static OVERLAY_HIGH int
-overlay_truncate(struct inode *inode, off_t size)
+overlay_truncate_upper(struct inode *inode,
+	const struct inode_truncate_request *request,
+	struct inode_truncate_result *result)
+{
+	struct overlay_inode_info *info = overlay_info(inode);
+	struct inode_truncate_request inner_request;
+	struct inode_truncate_result inner_result;
+	int error;
+
+	if (request == NULL || result == NULL || info == NULL) {
+		return EINVAL;
+	}
+	result->actual_size = inode->i_size;
+	result->limit_exceeded = 0;
+	inner_request = *request;
+	/* A credential-less stacked mutation has already crossed a content
+	 * boundary, so the authoritative inode must conservatively remove
+	 * set-id state.  Credential-bearing UAPI calls retain normal rules. */
+	if (inner_request.credential == NULL)
+		inner_request.content_change = 1;
+	error = inode_truncate_transaction(info->upper.p_inode,
+	    &inner_request, &inner_result);
+	result->limit_exceeded = inner_result.limit_exceeded;
+	/* Refresh on every outcome.  The final inode may have cleared set-id or
+	 * partially changed EOF before a later backend/durability error. */
+	overlay_refresh(inode);
+	result->actual_size = inode->i_size;
+	if (error == 0)
+		error = mount_sync(info->upper.p_mount);
+	return error;
+}
+
+static OVERLAY_HIGH int
+overlay_truncate_limited(struct inode *inode,
+	const struct inode_truncate_request *request,
+	struct inode_truncate_result *result)
 {
 	struct overlay_mount_state *state = inode->i_mount->m_data;
-	struct overlay_inode_info *info = overlay_info(inode);
 	int error;
+
+	if (request == NULL || result == NULL)
+		return EINVAL;
+	result->actual_size = inode->i_size;
+	result->limit_exceeded = 0;
 	if (state->flags != OVERLAY_READ_WRITE)
 		return EROFS;
 	error = overlay_copy_up_regular(inode);
-	if (error == 0)
-		error = inode_truncate(info->upper.p_inode, size);
-	if (error == 0) {
-		extern void vm_object_truncate_inode(struct inode *, off_t)
-			__attribute__((weak));
-		if (vm_object_truncate_inode != NULL)
-			vm_object_truncate_inode(info->upper.p_inode, size);
+	if (error != 0) {
 		overlay_refresh(inode);
-		error = mount_sync(info->upper.p_mount);
+		result->actual_size = inode->i_size;
+		return error;
 	}
-	return error;
+	return overlay_truncate_upper(inode, request, result);
+}
+
+static OVERLAY_HIGH int
+overlay_truncate(struct inode *inode, off_t size)
+{
+	const struct inode_truncate_request request = {
+		.size = size,
+		.growth_limit = UINT64_MAX,
+		.credential = NULL,
+		.content_change = 1,
+	};
+	struct inode_truncate_result result;
+
+	return overlay_truncate_limited(inode, &request, &result);
 }
 
 static OVERLAY_HIGH int
@@ -1595,6 +1691,7 @@ static const struct inode_ops overlay_inode_ops = {
 	.getattr = overlay_getattr,
 	.setattr = overlay_setattr,
 	.truncate = overlay_truncate,
+	.truncate_limited = overlay_truncate_limited,
 	.reclaim = overlay_reclaim,
 };
 
@@ -1631,7 +1728,20 @@ static OVERLAY_HIGH ssize_t
 overlay_pread(struct file *file, void *buffer, size_t size, off_t offset)
 {
 	struct overlay_file_info *info = file->f_data;
-	return info != NULL ? file_pread(info->real, buffer, size, offset) : -EIO;
+	/* The outer file owns the shared-cache transaction for f_vm_inode.  The
+	 * lower call is backend I/O within that transaction, not a second normal
+	 * read which could wait on the outer CONTENT gate. */
+	return info != NULL ? file_pread_internal(info->real, buffer, size,
+	    offset, FILE_IO_VM_OBJECT) : -EIO;
+}
+
+static OVERLAY_HIGH ssize_t
+overlay_pread_internal(struct file *file, void *buffer, size_t size,
+	off_t offset, unsigned flags)
+{
+	struct overlay_file_info *info = file->f_data;
+	return info != NULL ? file_pread_internal(info->real, buffer, size,
+	    offset, flags) : -EIO;
 }
 
 static OVERLAY_HIGH ssize_t
@@ -1650,11 +1760,133 @@ overlay_pwrite(struct file *file, const void *buffer, size_t size, off_t offset)
 	ssize_t count;
 	if (info == NULL)
 		return -EIO;
-	count = file_pwrite(info->real, buffer, size, offset);
-	if (count >= 0)
-		overlay_refresh(file->f_inode);
+	count = file_pwrite_internal(info->real, buffer, size, offset,
+	    FILE_IO_VM_OBJECT);
+	/* The final inode may have cleared set-id before a later backend error.
+	 * Always mirror that irreversible metadata transition to the visible inode. */
+	overlay_refresh(file->f_inode);
 	return count;
 }
+
+static OVERLAY_HIGH ssize_t
+overlay_pwrite_internal(struct file *file, const void *buffer, size_t size,
+	off_t offset, unsigned flags, const struct ucred *credential)
+{
+	struct overlay_file_info *info = file->f_data;
+	ssize_t count;
+	if (info == NULL)
+		return -EIO;
+	count = file_pwrite_internal_cred(info->real, buffer, size, offset,
+	    flags | FILE_IO_VM_OBJECT, credential);
+	overlay_refresh(file->f_inode);
+	return count;
+}
+
+#ifdef ZEDBSD_OVERLAY_CONTENT_HOST_TEST
+/* Exercise the real stacking callback without exposing overlay-private state
+ * in a test ABI.  The caller owns both files for the duration of this call. */
+static int
+overlay_host_truncate_limited(struct inode *inode,
+	const struct inode_truncate_request *request,
+	struct inode_truncate_result *result)
+{
+	return overlay_truncate_upper(inode, request, result);
+}
+
+ssize_t
+overlay_content_host_pwrite(struct file *outer, struct file *real,
+	const void *buffer, size_t size, off_t offset, unsigned flags,
+	const struct ucred *credential)
+{
+	struct overlay_file_info file_info;
+	struct overlay_inode_info inode_info;
+	const struct inode_ops *saved_inode_ops;
+	const struct file_ops *saved_file_ops;
+	void *saved_file_data, *saved_inode_data;
+	ssize_t count;
+
+	if (outer == NULL || outer->f_inode == NULL || real == NULL ||
+	    real->f_inode == NULL)
+		return -EINVAL;
+	memset(&file_info, 0, sizeof(file_info));
+	memset(&inode_info, 0, sizeof(inode_info));
+	file_info.real = real;
+	inode_info.upper.p_inode = real->f_inode;
+	saved_file_data = outer->f_data;
+	saved_inode_data = outer->f_inode->i_data;
+	saved_inode_ops = outer->f_inode->i_op;
+	saved_file_ops = outer->f_inode->i_fop;
+	outer->f_data = &file_info;
+	outer->f_inode->i_data = &inode_info;
+	count = overlay_pwrite_internal(outer, buffer, size, offset, flags,
+	    credential);
+	outer->f_data = saved_file_data;
+	outer->f_inode->i_data = saved_inode_data;
+	outer->f_inode->i_op = saved_inode_ops;
+	outer->f_inode->i_fop = saved_file_ops;
+	return count;
+}
+
+int
+overlay_content_host_truncate(struct inode *outer, struct inode *real,
+	const struct inode_truncate_request *request,
+	struct inode_truncate_result *result)
+{
+	struct overlay_mount_state state;
+	struct overlay_inode_info inode_info;
+	struct filesystem_type upper_type;
+	struct mount outer_mount, upper_mount;
+	struct inode_ops host_ops;
+	const struct inode_ops *saved_ops;
+	struct mount *saved_mount;
+	void *saved_data;
+	int error;
+
+	if (outer == NULL || real == NULL || request == NULL || result == NULL)
+		return EINVAL;
+	memset(&state, 0, sizeof(state));
+	memset(&inode_info, 0, sizeof(inode_info));
+	memset(&upper_type, 0, sizeof(upper_type));
+	memset(&outer_mount, 0, sizeof(outer_mount));
+	memset(&upper_mount, 0, sizeof(upper_mount));
+	memset(&host_ops, 0, sizeof(host_ops));
+	state.flags = OVERLAY_READ_WRITE;
+	outer_mount.m_data = &state;
+	upper_mount.m_type = &upper_type;
+	inode_info.upper.p_mount = &upper_mount;
+	inode_info.upper.p_inode = real;
+	host_ops.truncate_limited = overlay_host_truncate_limited;
+	saved_ops = outer->i_op;
+	saved_mount = outer->i_mount;
+	saved_data = outer->i_data;
+	outer->i_op = &host_ops;
+	outer->i_mount = &outer_mount;
+	outer->i_data = &inode_info;
+	error = inode_truncate_transaction(outer, request, result);
+	outer->i_op = saved_ops;
+	outer->i_mount = saved_mount;
+	outer->i_data = saved_data;
+	return error;
+}
+
+int
+overlay_content_host_layers_supported(int upper_overlay, int lower_overlay)
+{
+	struct mount upper, lower;
+	struct overlay_mount_args args;
+
+	memset(&upper, 0, sizeof(upper));
+	memset(&lower, 0, sizeof(lower));
+	memset(&args, 0, sizeof(args));
+	if (upper_overlay)
+		upper.m_type = &overlay_filesystem_type;
+	if (lower_overlay)
+		lower.m_type = &overlay_filesystem_type;
+	args.upper.p_mount = &upper;
+	args.lower.p_mount = &lower;
+	return overlay_layers_supported(&args) ? 0 : EOPNOTSUPP;
+}
+#endif
 
 static OVERLAY_HIGH ssize_t
 overlay_write(struct file *file, const void *buffer, size_t size)
@@ -1696,6 +1928,8 @@ static const struct file_ops overlay_regular_ops = {
 	.write = overlay_write,
 	.pread = overlay_pread,
 	.pwrite = overlay_pwrite,
+	.pread_internal = overlay_pread_internal,
+	.pwrite_internal = overlay_pwrite_internal,
 	.fsync = overlay_regular_fsync,
 	.close = overlay_regular_close,
 };
@@ -1963,6 +2197,13 @@ overlay_mount_impl(struct mount *mountp)
 	    (args->flags != OVERLAY_READ_ONLY &&
 	     args->flags != OVERLAY_READ_WRITE))
 		return EINVAL;
+	/* The content-transaction lock chain currently has one visible wrapper
+	 * and one authoritative inode.  A recursively stacked overlay would add
+	 * a middle visible inode and introduce final->middle versus middle->final
+	 * lock ordering.  Reject that unsupported topology explicitly rather than
+	 * silently exposing stale metadata or an ABBA deadlock. */
+	if (!overlay_layers_supported(args))
+		return EOPNOTSUPP;
 	state = kern_calloc(1, sizeof(*state));
 	if (state == NULL)
 		return ENOMEM;

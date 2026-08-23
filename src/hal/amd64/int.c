@@ -8,18 +8,18 @@
 #include "space.h"
 
 struct amd64_idt_entry {
-	uint16 offset_low;
-	uint16 selector;
-	uint8 ist;
-	uint8 type_attr;
-	uint16 offset_middle;
-	uint32 offset_high;
-	uint32 reserved;
+	uint16_t offset_low;
+	uint16_t selector;
+	uint8_t ist;
+	uint8_t type_attr;
+	uint16_t offset_middle;
+	uint32_t offset_high;
+	uint32_t reserved;
 } __attribute__((packed));
 
 struct amd64_idtr {
-	uint16 limit;
-	uint64 base;
+	uint16_t limit;
+	uint64_t base;
 } __attribute__((packed));
 
 static struct amd64_idt_entry idt[256] __attribute__((aligned(16)));
@@ -28,17 +28,25 @@ static hal_trap_handler_t trap_handlers[5];
 
 _Static_assert(sizeof(struct amd64_idt_entry) == 16, "amd64 IDT entry");
 
+static int
+is_asynchronous_interrupt(int vector)
+{
+	return (vector >= INT_IRQ_BASE && vector <= INT_IRQ_BASE + IRQ_MAX) ||
+	    vector == AMD64_VECTOR_NOTIFY || vector == AMD64_VECTOR_TLB ||
+	    vector == AMD64_VECTOR_ERROR || vector == AMD64_VECTOR_SPURIOUS;
+}
+
 static void
 set_gate(unsigned vector, unsigned dpl, void *handler)
 {
 	uintptr_t address = (uintptr_t)handler;
 	struct amd64_idt_entry *entry = &idt[vector];
-	entry->offset_low = (uint16)address;
+	entry->offset_low = (uint16_t)address;
 	entry->selector = SEG_KERNEL_CODE;
 	entry->ist = 0;
-	entry->type_attr = (uint8)(0x8eU | (dpl << 5));
-	entry->offset_middle = (uint16)(address >> 16);
-	entry->offset_high = (uint32)(address >> 32);
+	entry->type_attr = (uint8_t)(0x8eU | (dpl << 5));
+	entry->offset_middle = (uint16_t)(address >> 16);
+	entry->offset_high = (uint32_t)(address >> 32);
 	entry->reserved = 0;
 }
 
@@ -95,8 +103,8 @@ handle_fault(struct amd64_interrupt_frame *frame)
 	if ((frame->cs & 3U) == 3U) {
 		int handled;
 		amd64_task_enter_user_frame(frame);
-		handled = kernel_user_fault_handler((uint32)vector,
-		    (uint32)frame->cs, frame->rip, frame->error_code, address) ==
+		handled = kernel_user_fault_handler((uint32_t)vector,
+		    (uint32_t)frame->cs, frame->rip, frame->error_code, address) ==
 		    HAL_TRAP_RET_SUCCESS;
 		if (handled) {
 			kernel_user_return_handler();
@@ -110,9 +118,9 @@ handle_fault(struct amd64_interrupt_frame *frame)
 	    trap_handlers[cause]((void *)(uintptr_t)frame->rip,
 	    (void *)address, mode) == HAL_TRAP_RET_SUCCESS) return;
 	hal_printf("amd64 fault v=%u rip=%08X:%08X err=%08X cr2=%08X:%08X\n",
-	    (uint32)vector, (uint32)(frame->rip >> 32), (uint32)frame->rip,
-	    (uint32)frame->error_code, (uint32)(address >> 32),
-	    (uint32)address);
+	    (uint32_t)vector, (uint32_t)(frame->rip >> 32), (uint32_t)frame->rip,
+	    (uint32_t)frame->error_code, (uint32_t)(address >> 32),
+	    (uint32_t)address);
 	HAL_FATAL("unhandled amd64 fault");
 }
 
@@ -120,6 +128,17 @@ void
 int_handler(struct amd64_interrupt_frame *frame)
 {
 	int vector = (int)frame->vector;
+	int user_interrupt = (frame->cs & 3U) == 3U &&
+	    is_asynchronous_interrupt(vector);
+
+	/*
+	 * Asynchronous interrupts are a user-return safe point just like syscalls
+	 * and user faults.  Register the interrupted frame only when the CPU will
+	 * actually return to ring 3; kernel-origin interrupts must not expose a
+	 * kernel frame to signal delivery.
+	 */
+	if (user_interrupt)
+		amd64_task_enter_user_frame(frame);
 	if (vector >= INT_IRQ_BASE && vector <= INT_IRQ_BASE + IRQ_MAX) {
 		irq_handler(vector - INT_IRQ_BASE);
 	} else if (vector == AMD64_VECTOR_NOTIFY) {
@@ -129,10 +148,10 @@ int_handler(struct amd64_interrupt_frame *frame)
 	} else if (vector == AMD64_VECTOR_ERROR) {
 		amd64_error_interrupt();
 	} else if (vector == AMD64_VECTOR_SPURIOUS) {
-		return;
+		/* No acknowledgement is required for the APIC spurious vector. */
 	} else if (vector == INT_SYSCALL && (frame->cs & 3U) == 3U) {
 		uintptr_t args[HAL_SYSCALL_ARGS];
-		kernel_user_int_handler((uint32)vector, (uint32)frame->cs,
+		kernel_user_int_handler((uint32_t)vector, (uint32_t)frame->cs,
 		    frame->rip, frame->rax);
 		args[0] = (uintptr_t)frame->rbx;
 		args[1] = (uintptr_t)frame->rcx;
@@ -141,14 +160,19 @@ int_handler(struct amd64_interrupt_frame *frame)
 		args[4] = (uintptr_t)frame->rdi;
 		args[5] = (uintptr_t)frame->rbp;
 		amd64_task_enter_user_frame(frame);
+		/* The generic callback owns accounting and its interruptible window. */
 		frame->rax = syscall_handler != NULL ?
-		    (uint64)syscall_handler((uint32)frame->rax, args) :
-		    (uint64)(intptr_t)-ENOSYS;
+		    (uint64_t)syscall_handler((uint32_t)frame->rax, args) :
+		    (uint64_t)(intptr_t)-ENOSYS;
 		kernel_user_return_handler();
 		amd64_task_leave_user_frame();
 	} else if (vector >= 0 && vector < 32) {
 		handle_fault(frame);
 	} else {
 		HAL_FATAL("undefined amd64 interrupt");
+	}
+	if (user_interrupt) {
+		kernel_user_return_handler();
+		amd64_task_leave_user_frame();
 	}
 }
