@@ -22,6 +22,7 @@ struct filedesc;
 struct thread;
 struct vmspace;
 struct ucred;
+struct process_retired_cred;
 struct tty;
 
 #define PROCESS_AUTOREAP 0x00000001U
@@ -67,6 +68,8 @@ struct process {
 	mode_t umask;
 	struct process_limits limits;
 	struct ucred *cred;
+	struct process_retired_cred *retired_creds;
+	unsigned cred_readers;
 	struct signal_action signal_actions[NSIG];
 	sigset_t signal_pending;
 	struct signal_info signal_info[NSIG];
@@ -78,11 +81,19 @@ struct process {
 	unsigned did_exec;
 	unsigned execing;
 	unsigned thread_count;
+	/* Stop notification is committed only after all live threads acknowledge
+	 * the same generation at scheduler safe points. */
+	volatile unsigned stop_requested;
+	unsigned stop_generation;
+	unsigned stop_target_count;
+	unsigned stop_ack_count;
+	int stop_signo;
 	volatile uint64_t cpu_ticks;
 	volatile uint64_t child_cpu_ticks;
 	int nice_value;
 	uint64_t itimer_remaining[3];
 	uint64_t itimer_interval[3];
+	volatile unsigned itimer_sequence[3];
 	int exit_status;
 	int wait_status;
 	unsigned wait_stopped;
@@ -109,10 +120,14 @@ struct process *process_find_ref(pid_t pid);
 struct process *process_find_next_ref(pid_t after);
 void process_ref(struct process *);
 void process_release(struct process *);
+void process_cred_read_enter(struct process *);
+void process_cred_read_leave(struct process *);
+int process_cred_replace(struct process *, struct ucred *);
 struct thread *thread_find_ref(tid_t tid);
 int process_setpgid(struct process *, pid_t, pid_t);
 pid_t process_setsid(struct process *);
 int process_signal_pgrp(pid_t, pid_t, int);
+int process_signal_pgrp_except(pid_t, pid_t, int, struct process *);
 int process_pgrp_in_session(pid_t, pid_t);
 int process_create(struct process *parent, pid_t requested_pid,
 		   struct process **result);
@@ -128,9 +143,17 @@ pid_t process_wait_select_mask(struct process *, pid_t, int, unsigned,
 			       struct process_wait_event *);
 int process_wait_commit(struct process_wait_event *);
 void process_wait_abort(struct process_wait_event *);
-void process_note_stopped(struct process *, int);
-void process_note_continued(struct process *);
+void process_stop_current(int);
+int process_stop_requested(const struct thread *);
+int process_continue(struct process *, int);
+int process_itimer_get(struct process *, int, uint64_t *, uint64_t *);
+int process_itimer_set(struct process *, int, uint64_t, uint64_t,
+	uint64_t *, uint64_t *);
+int process_itimer_tick(struct process *, int);
+void process_itimer_real_tick_all(void);
 void process_thread_retired(struct thread *);
+/* Returns only when other live threads keep the process alive. */
+void process_exit_if_last_thread(int status);
 void process_resource_count(uint64_t *processes, uint64_t *threads);
 void exit1(int status) __attribute__((noreturn));
 void exit1_signal(int signo) __attribute__((noreturn));

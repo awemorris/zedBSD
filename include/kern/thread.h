@@ -12,6 +12,7 @@
 #include <kern/sched.h>
 #include <kern/waitq.h>
 #include <kern/atomic.h>
+#include <kern/signal.h>
 #include <uapi/zedbsd/signal.h>
 #include <sys/types.h>
 #include <stdint.h>
@@ -58,9 +59,12 @@ struct thread {
 	unsigned join_claimed;
 	unsigned cancel_pending;
 	unsigned terminate_requested;
+	unsigned stop_generation;
 	struct wait_queue join_waitq;
 	struct sched sched;
 	struct thread *proc_next;
+	/* Protected by the thread ID registry lock. */
+	struct thread *tid_next;
 	/* Intrusive link used only while sleeping on a process child event. */
 	struct thread *wait_next;
 	struct wait_token wait_token;
@@ -68,6 +72,7 @@ struct thread {
 	void *kernel_arg;
 	uint32_t signal_mask;
 	uint32_t signal_pending;
+	struct signal_info signal_info[NSIG];
 	uint32_t signal_suspend_mask;
 	uint32_t signal_token;
 	uint32_t signal_token_counter;

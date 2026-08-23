@@ -88,7 +88,7 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 	if (context == NULL || path == NULL || result == NULL)
 		return EINVAL;
 	if ((flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND |
-		       O_DIRECTORY | O_NONBLOCK | O_NOCTTY)) != 0 ||
+		       O_DIRECTORY | O_NONBLOCK | O_NOCTTY | O_NOFOLLOW)) != 0 ||
 	    (flags & O_ACCMODE) > O_RDWR ||
 	    ((flags & O_EXCL) != 0 && (flags & O_CREAT) == 0))
 		return EINVAL;
@@ -98,7 +98,8 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 	file = file_alloc();
 	if (file == NULL)
 		return ENFILE;
-	error = namei_path_at(context, path, &found);
+	error = namei_path_flags_at(context, path,
+	    (flags & O_NOFOLLOW) != 0 ? NAMEI_NOFOLLOW_FINAL : 0, &found);
 	if (error == ENOENT &&
 	    ((flags & O_ACCMODE) != O_RDONLY ||
 	     (flags & (O_CREAT | O_TRUNC | O_APPEND)) != 0)) {
@@ -109,23 +110,28 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 		error = namei_parent_path_at(context, path, &parent, &last, storage);
 		if (error != 0)
 			goto fail_file;
+		mount_vfs_transaction_enter(parent.p_mount);
 		if (cred != NULL &&
 		    (error = vfs_access(parent.p_inode, cred, W_OK | X_OK)) != 0) {
+			mount_vfs_transaction_leave(parent.p_mount);
 			path_release(&parent);
 			goto fail_file;
 		}
 		error = inode_lookup_casefold(parent.p_inode, &last, &collision);
 		if (error == 0) {
 			inode_release(collision);
+			mount_vfs_transaction_leave(parent.p_mount);
 			path_release(&parent);
 			error = EEXIST;
 			goto fail_file;
 		}
 		if (error != ENOENT && error != EOPNOTSUPP) {
+			mount_vfs_transaction_leave(parent.p_mount);
 			path_release(&parent);
 			goto fail_file;
 		}
 		if ((flags & O_CREAT) == 0) {
+			mount_vfs_transaction_leave(parent.p_mount);
 			path_release(&parent);
 			error = ENOENT;
 			goto fail_file;
@@ -135,6 +141,7 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 			path_set(&found, parent.p_mount, inode);
 			inode_release(inode);
 		}
+		mount_vfs_transaction_leave(parent.p_mount);
 		path_release(&parent);
 		if (error != 0)
 			goto fail_file;
@@ -146,6 +153,11 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 		goto fail_file;
 	}
 	inode = found.p_inode;
+	if ((flags & O_NOFOLLOW) != 0 && inode->i_type == INODE_SYMLINK) {
+		path_release(&found);
+		error = ELOOP;
+		goto fail_file;
+	}
 	if (cred != NULL) {
 		int requested = 0;
 		if ((flags & O_ACCMODE) != O_WRONLY)
@@ -183,7 +195,9 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 	file->f_vm_inode = inode;
 	file->f_ops = inode->i_fop;
 	atomic_store_release(&file->f_flags, (unsigned)flags);
-	file->f_offset = (flags & O_APPEND) ? inode->i_size : 0;
+	/* O_APPEND controls each write operation; it does not change the
+	 * initial open-file-description offset. */
+	file->f_offset = 0;
 	if (file->f_ops != NULL && file->f_ops->open != NULL) {
 		error = file->f_ops->open(file);
 		if (error != 0) {
@@ -211,11 +225,14 @@ file_open_resolved(const struct path *resolved, int flags,
 		return EINVAL;
 	if ((flags & (O_CREAT | O_EXCL | O_TRUNC)) != 0 ||
 	    (flags & ~(O_ACCMODE | O_APPEND | O_DIRECTORY | O_NONBLOCK |
-	    O_NOCTTY)) != 0 ||
+	    O_NOCTTY | O_NOFOLLOW)) != 0 ||
 	    (flags & O_ACCMODE) > O_RDWR)
 		return EINVAL;
 	if ((flags & O_DIRECTORY) != 0 && resolved->p_inode->i_type != INODE_DIR)
 		return ENOTDIR;
+	if ((flags & O_NOFOLLOW) != 0 &&
+	    resolved->p_inode->i_type == INODE_SYMLINK)
+		return ELOOP;
 	if (resolved->p_inode->i_type == INODE_SOCKET)
 		return ENXIO;
 	if (resolved->p_inode->i_type == INODE_DIR &&
@@ -229,7 +246,7 @@ file_open_resolved(const struct path *resolved, int flags,
 	file->f_vm_inode = resolved->p_inode;
 	file->f_ops = resolved->p_inode->i_fop;
 	atomic_store_release(&file->f_flags, (unsigned)flags);
-	file->f_offset = (flags & O_APPEND) ? resolved->p_inode->i_size : 0;
+	file->f_offset = 0;
 	if (file->f_ops != NULL && file->f_ops->open != NULL) {
 		error = file->f_ops->open(file);
 		if (error != 0) {
@@ -506,33 +523,40 @@ file_seek(struct file *file, off_t offset, int whence)
 	if (file->f_ops != NULL && file->f_ops->seek != NULL)
 		base = file->f_ops->seek(file, offset, whence);
 	else {
-	if (whence == 0)
-		base = 0;
-	else if (whence == 1)
-		base = file->f_offset;
-	else if (whence == 2 && file->f_inode != NULL)
-		base = file->f_inode->i_size;
-	else
-		base = OFF_T_MIN;
-	if (base == OFF_T_MIN) {
-		mutex_unlock(&file->f_lock);
-		return -EINVAL;
-	}
-	if ((offset > 0 && base > OFF_T_MAX - offset) ||
-	    (offset < 0 && base < OFF_T_MIN - offset)) {
-		mutex_unlock(&file->f_lock);
-		return -EOVERFLOW;
-	}
-	target = base + offset;
-	if (target < 0) {
-		mutex_unlock(&file->f_lock);
-		return -EINVAL;
-	}
-	file->f_offset = target;
-	if (file->f_inode != NULL && file->f_inode->i_type == INODE_DIR &&
-	    whence == 0 && target == 0)
-		file->f_mount_cursor = 0;
-	base = target;
+		if (file->f_inode == NULL ||
+		    (file->f_inode->i_type != INODE_REG &&
+		     file->f_inode->i_type != INODE_DIR &&
+		     file->f_inode->i_type != INODE_BLOCK)) {
+			mutex_unlock(&file->f_lock);
+			return -ESPIPE;
+		}
+		if (whence == 0)
+			base = 0;
+		else if (whence == 1)
+			base = file->f_offset;
+		else if (whence == 2)
+			base = file->f_inode->i_size;
+		else
+			base = OFF_T_MIN;
+		if (base == OFF_T_MIN) {
+			mutex_unlock(&file->f_lock);
+			return -EINVAL;
+		}
+		if ((offset > 0 && base > OFF_T_MAX - offset) ||
+		    (offset < 0 && base < OFF_T_MIN - offset)) {
+			mutex_unlock(&file->f_lock);
+			return -EOVERFLOW;
+		}
+		target = base + offset;
+		if (target < 0) {
+			mutex_unlock(&file->f_lock);
+			return -EINVAL;
+		}
+		file->f_offset = target;
+		if (file->f_inode->i_type == INODE_DIR && whence == 0 &&
+		    target == 0)
+			file->f_mount_cursor = 0;
+		base = target;
 	}
 	mutex_unlock(&file->f_lock);
 	return base;

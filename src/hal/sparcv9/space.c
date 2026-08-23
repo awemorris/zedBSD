@@ -5,6 +5,9 @@
 #include "space.h"
 #include "tte.h"
 
+_Static_assert(SPARCV9_USER_LIMIT - 1U <= (uintptr_t)INTPTR_MAX,
+    "user pointers must not overlap the negative syscall errno window");
+
 static struct sparcv9_space *current_space;
 static uint32 next_context=1,space_count,page_table_count;
 static int valid(struct sparcv9_space*s){return s&&s->magic==SPARCV9_SPACE_MAGIC;}

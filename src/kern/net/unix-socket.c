@@ -6,6 +6,7 @@
 #include "kern/cred.h"
 #include "kern/inode.h"
 #include "kern/kmem.h"
+#include "kern/mount.h"
 #include "kern/namei.h"
 #include "kern/poll.h"
 #include "kern/sched.h"
@@ -245,7 +246,7 @@ unix_send_epipe(struct unix_rights *rights, int flags)
 	unix_rights_release(rights);
 	if ((flags & MSG_NOSIGNAL) == 0 && thread != NULL &&
 	    thread->proc != NULL)
-		(void)signal_send_process(thread->proc, SIGPIPE);
+		(void)signal_send_thread(thread, SIGPIPE);
 	return -(ssize_t)EPIPE;
 }
 
@@ -1012,6 +1013,8 @@ unix_socket_bind_path(struct socket *socket, struct cwdinfo *context,
 	path_init(&parent);
 	error = namei_parent_path_at(context, path, &parent, &name, storage);
 	if (error == 0)
+		mount_vfs_transaction_enter(parent.p_mount);
+	if (error == 0)
 		error = vfs_may_create(parent.p_inode, cred);
 	if (error == 0)
 		error = inode_mknod(parent.p_inode, &name, INODE_SOCKET,
@@ -1036,6 +1039,8 @@ unix_socket_bind_path(struct socket *socket, struct cwdinfo *context,
 		(void)inode_unlink(parent.p_inode, &name);
 	if (inode != NULL)
 		inode_release(inode);
+	if (parent.p_mount != NULL)
+		mount_vfs_transaction_leave(parent.p_mount);
 	path_release(&parent);
 	irq = spin_lock_irqsave(&socket->lock);
 	endpoint->binding_in_progress = 0;

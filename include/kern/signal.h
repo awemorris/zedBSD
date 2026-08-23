@@ -32,8 +32,12 @@ int signal_send_process(struct process *, int);
 int signal_send_process_info(struct process *, int,
 			     const struct signal_info *);
 int signal_send_thread(struct thread *, int);
+int signal_send_thread_info(struct thread *, int, const struct signal_info *);
 int signal_kill(struct process *, pid_t, int);
 int signal_pending_unblocked(const struct thread *);
+/* Job-control generation decision: 0=default stop, EINTR=caught, EIO=the
+ * calling thread blocks it or the process ignores it. */
+int signal_job_control_decision(const struct thread *, int);
 void signal_deliver_on_user_return(void);
 void signal_fork(struct process *, const struct process *, struct thread *,
 		 const struct thread *);

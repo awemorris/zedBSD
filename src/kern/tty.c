@@ -417,21 +417,39 @@ tty_background(struct tty *tty, struct process *process, int write)
 	pid_t session, foreground;
 	unsigned lflag;
 	unsigned long irq;
-	int signo;
+	int decision, signo;
 
 	if (process == NULL || process->controlling_tty != tty)
 		return 0;
-	irq = spin_lock_irqsave(&tty->lock);
-	session = tty->session;
-	foreground = tty->foreground_pgrp;
-	lflag = tty->termios.c_lflag;
-	spin_unlock_irqrestore(&tty->lock, irq);
-	if (process->session != session || process->pgrp == foreground ||
-	    (write && (lflag & TOSTOP) == 0))
-		return 0;
-	signo = write ? SIGTTOU : SIGTTIN;
-	(void)process_signal_pgrp(process->session, process->pgrp, signo);
-	return EINTR;
+	for (;;) {
+		irq = spin_lock_irqsave(&tty->lock);
+		session = tty->session;
+		foreground = tty->foreground_pgrp;
+		lflag = tty->termios.c_lflag;
+		spin_unlock_irqrestore(&tty->lock, irq);
+		if (process->session != session || process->pgrp == foreground ||
+		    (write && (lflag & TOSTOP) == 0))
+			return 0;
+		if ((process->flags & PROCESS_PGRP_ORPHANED) != 0)
+			return EIO;
+		signo = write ? SIGTTOU : SIGTTIN;
+		decision = signal_job_control_decision(thread_current(), signo);
+		if (decision == EIO)
+			return EIO;
+		if (decision != 0) {
+			(void)process_signal_pgrp(process->session, process->pgrp,
+			    signo);
+			return decision;
+		}
+		/* The default action consumes the signal by stopping this process.
+		 * Other members of the group receive an ordinary generated signal;
+		 * excluding self avoids leaving a duplicate pending stop after
+		 * SIGCONT. */
+		(void)process_signal_pgrp_except(process->session, process->pgrp,
+		    signo, process);
+		process_stop_current(signo);
+		/* SIGCONT does not necessarily foreground the group. */
+	}
 }
 
 static ssize_t

@@ -18,6 +18,7 @@ static hal_task_t xmm_selftest_task;
 static volatile unsigned xmm_selftest_stage;
 static volatile unsigned initial_fpregs_ready;
 static volatile unsigned task_registry_lock;
+#define AMD64_SYSCALL_INSTRUCTION_SIZE 2U
 static const uint8 xmm_main_pattern[16] = {
 	0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
 	0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01
@@ -248,8 +249,20 @@ hal_task_fork_current(hal_space_t child_space, intptr_t child_result)
 	copy->rax = (uint64)child_result;
 	child->resume_rsp = (uintptr_t)resume;
 	child->tls = running_task->tls;
+	/* The in-memory image is stale while this task is running. */
+	__asm__ volatile("fxsave64 (%0)" : :
+	    "r"(task_fpregs(running_task)) : "memory");
 	hal_memcpy(task_fpregs(child), task_fpregs(running_task), 512U);
 	return child;
+}
+
+int
+hal_task_exec_validate(hal_space_t new_space, uintptr_t entry,
+	uintptr_t user_stack_pointer)
+{
+	return running_task != NULL && new_space != HAL_SPACE_SYS &&
+	    running_task->active_user_frame != NULL && entry != 0 &&
+	    user_stack_pointer != 0 ? 0 : -1;
 }
 
 int
@@ -258,9 +271,7 @@ hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
 {
 	struct amd64_interrupt_frame *frame;
 	uint64 cs, ss, rflags;
-	if (running_task == NULL || new_space == HAL_SPACE_SYS ||
-	    running_task->active_user_frame == NULL || entry == 0 ||
-	    user_stack_pointer == 0)
+	if (hal_task_exec_validate(new_space, entry, user_stack_pointer) != 0)
 		return -1;
 	frame = running_task->active_user_frame;
 	cs = SEG_USER_CODE | 3U;
@@ -276,6 +287,10 @@ hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
 	running_task->tls = 0;
 	asm_write_msr(AMD64_MSR_FS_BASE, 0);
 	running_task->signal_depth = 0;
+	hal_memcpy(task_fpregs(running_task), initial_fpregs,
+	    sizeof(initial_fpregs));
+	__asm__ volatile("fxrstor64 (%0)" : :
+	    "r"(task_fpregs(running_task)) : "memory");
 	hal_page_switch_space(new_space);
 	return 0;
 }
@@ -300,6 +315,8 @@ int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t info,
 	(void)rest;
 	if(f==NULL||running_task->signal_depth>=HAL_SIGNAL_NEST_MAX||h==0||sp==0||token==0)return -1;
 	depth=running_task->signal_depth;running_task->signal_frame[depth]=*f;
+	__asm__ volatile("fxsave64 (%0)" : :
+	    "r"(running_task->signal_fpregs[depth]) : "memory");
 	running_task->signal_token[depth]=token;running_task->signal_depth=depth+1U;
 	f->rip=h;f->rsp=sp;f->rdi=(uint64)(uint32)sig;f->rsi=info;f->rdx=context;return 0;
 }
@@ -310,6 +327,8 @@ int hal_task_signal_return(uint32_t token,intptr_t *value)
 	if(f==NULL||value==NULL||running_task->signal_depth==0||token==0)return -1;
 	depth=running_task->signal_depth-1U;if(token!=running_task->signal_token[depth])return -1;
 	*f=running_task->signal_frame[depth];*value=(intptr_t)f->rax;
+	__asm__ volatile("fxrstor64 (%0)" : :
+	    "r"(running_task->signal_fpregs[depth]) : "memory");
 	running_task->signal_token[depth]=0;running_task->signal_depth=depth;return 0;
 }
 int hal_task_signal_restart(uint32_t token,uint32_t number,const uintptr_t args[HAL_SYSCALL_ARGS],intptr_t *value)
@@ -317,8 +336,18 @@ int hal_task_signal_restart(uint32_t token,uint32_t number,const uintptr_t args[
 	struct amd64_interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
 	unsigned depth;
 	if(f==NULL||args==NULL||value==NULL||running_task->signal_depth==0||token==0)return-1;
-	depth=running_task->signal_depth-1U;if(token!=running_task->signal_token[depth])return-1;
-	*f=running_task->signal_frame[depth];if(f->rip<2U)return-1;f->rip-=2U;f->rax=number;f->rbx=args[0];f->rcx=args[1];f->rdx=args[2];f->rsi=args[3];f->rdi=args[4];f->rbp=args[5];*value=(intptr_t)number;running_task->signal_token[depth]=0;running_task->signal_depth=depth;return 0;
+	depth=running_task->signal_depth-1U;
+	if(token!=running_task->signal_token[depth]||
+	    running_task->signal_frame[depth].rip<
+	    AMD64_SYSCALL_INSTRUCTION_SIZE)return-1;
+	*f=running_task->signal_frame[depth];
+	f->rip-=AMD64_SYSCALL_INSTRUCTION_SIZE;f->rax=number;
+	f->rbx=args[0];f->rcx=args[1];f->rdx=args[2];f->rsi=args[3];
+	f->rdi=args[4];f->rbp=args[5];*value=(intptr_t)number;
+	__asm__ volatile("fxrstor64 (%0)" : :
+	    "r"(running_task->signal_fpregs[depth]) : "memory");
+	running_task->signal_token[depth]=0;running_task->signal_depth=depth;
+	return 0;
 }
 
 void

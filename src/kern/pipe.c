@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <string.h>
 
 struct pipe {
 	uint8_t data[KERN_PIPE_CAPACITY];
@@ -59,9 +60,21 @@ pipe_read_file(struct file *file, void *buffer, size_t length)
 
 	while (done < length) {
 		while (pipe->used != 0 && done < length) {
-			out[done++] = pipe->data[pipe->read_pos];
-			pipe->read_pos = (pipe->read_pos + 1U) % KERN_PIPE_CAPACITY;
-			pipe->used--;
+			size_t count = pipe->used;
+			size_t contiguous = KERN_PIPE_CAPACITY - pipe->read_pos;
+
+			if (count > length - done)
+				count = length - done;
+			if (contiguous > count)
+				contiguous = count;
+			memcpy(out + done, pipe->data + pipe->read_pos, contiguous);
+			if (contiguous < count)
+				memcpy(out + done + contiguous, pipe->data,
+				    count - contiguous);
+			pipe->read_pos = (pipe->read_pos + count) %
+			    KERN_PIPE_CAPACITY;
+			pipe->used -= count;
+			done += count;
 		}
 		waitq_wake_all(&pipe->write_waitq);
 		poll_notify();
@@ -99,17 +112,29 @@ pipe_write_file(struct file *file, const void *buffer, size_t length)
 		size_t free_space = KERN_PIPE_CAPACITY - pipe->used;
 		if (pipe->readers == 0) {
 			spin_unlock_irqrestore(&pipe->lock, irq);
-			if (curthread != NULL && curthread->proc != NULL)
-				(void)signal_send_process(curthread->proc, SIGPIPE);
+			if (curthread != NULL)
+				(void)signal_send_thread(curthread, SIGPIPE);
 			return done != 0 ? (ssize_t)done : -EPIPE;
 		}
 		if (length <= KERN_PIPE_BUF && done == 0 && free_space < length)
 			free_space = 0;
 		while (free_space != 0 && done < length) {
-			pipe->data[pipe->write_pos] = in[done++];
-			pipe->write_pos = (pipe->write_pos + 1U) % KERN_PIPE_CAPACITY;
-			pipe->used++;
-			free_space--;
+			size_t count = free_space;
+			size_t contiguous = KERN_PIPE_CAPACITY - pipe->write_pos;
+
+			if (count > length - done)
+				count = length - done;
+			if (contiguous > count)
+				contiguous = count;
+			memcpy(pipe->data + pipe->write_pos, in + done, contiguous);
+			if (contiguous < count)
+				memcpy(pipe->data, in + done + contiguous,
+				    count - contiguous);
+			pipe->write_pos = (pipe->write_pos + count) %
+			    KERN_PIPE_CAPACITY;
+			pipe->used += count;
+			done += count;
+			free_space -= count;
 		}
 		waitq_wake_all(&pipe->read_waitq);
 		poll_notify();

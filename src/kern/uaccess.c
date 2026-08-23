@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/uaccess.h"
 #include "kern/process.h"
+#include "kern/page.h"
 #include "kern/thread.h"
 #include "kern/vmspace.h"
 
@@ -157,24 +158,32 @@ int copyout(const void *source, uintptr_t destination, size_t size)
 int copyinstr(uintptr_t source, char *destination, size_t capacity,
 	      size_t *length)
 {
-	size_t used;
+	size_t used = 0;
 
 	if (destination == NULL || capacity == 0)
 		return EINVAL;
-	for (used = 0; used < capacity; used++) {
-		char byte;
+	while (used < capacity) {
 		uintptr_t address;
-		int error = user_address_add(source, used, &address);
-		if (error == 0)
-			error = copyin(address, &byte, 1);
+		size_t chunk, index;
+		int error;
+
+		error = user_address_add(source, used, &address);
 		if (error != 0)
 			return error;
-		destination[used] = byte;
-		if (byte == '\0') {
-			if (length != NULL)
-				*length = used + 1U;
-			return 0;
-		}
+		chunk = ZEDBSD_PAGE_SIZE -
+		    (size_t)(address & (ZEDBSD_PAGE_SIZE - 1U));
+		if (chunk > capacity - used)
+			chunk = capacity - used;
+		error = copyin(address, destination + used, chunk);
+		if (error != 0)
+			return error;
+		for (index = 0; index < chunk; index++)
+			if (destination[used + index] == '\0') {
+				if (length != NULL)
+					*length = used + index + 1U;
+				return 0;
+			}
+		used += chunk;
 	}
 	destination[capacity - 1U] = '\0';
 	return ENAMETOOLONG;

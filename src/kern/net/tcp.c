@@ -602,7 +602,7 @@ tcp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 		spin_unlock_irqrestore(&socket->lock, irq);
 		if ((flags & MSG_NOSIGNAL) == 0 && thread != NULL &&
 		    thread->proc != NULL)
-			(void)signal_send_process(thread->proc, SIGPIPE);
+			(void)signal_send_thread(thread, SIGPIPE);
 		return -EPIPE;
 	}
 	if (endpoint->tcp.state != TCP_ESTABLISHED) {

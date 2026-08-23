@@ -5,7 +5,11 @@
  * i386 protected user address spaces.
  */
 #include <hal/hal.h>
+#include "defs.h"
 #include "space.h"
+
+_Static_assert((uintptr_t)(SYS_START - 1U) <= (uintptr_t)INTPTR_MAX,
+    "user pointers must not overlap the negative syscall errno window");
 
 static hal_space_t current_spaces[HAL_CPU_MAX];
 #define current_space current_spaces[hal_cpu_current()]

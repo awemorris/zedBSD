@@ -22,6 +22,37 @@ static int signal_valid(int signo) { return signo > 0 && signo < NSIG; }
 static int signal_stop(int s)
 { return s==SIGSTOP||s==SIGTSTP||s==SIGTTIN||s==SIGTTOU; }
 static int signal_ignored_default(int s) { return s==SIGCHLD||s==SIGCONT; }
+static sigset_t signal_wait_claims_locked(const struct process *);
+
+/* Caller holds process->lock. */
+static int
+signal_pending_unblocked_locked(const struct thread *thread)
+{
+	const struct process *process;
+	sigset_t pending;
+	int signo;
+
+	if (thread == NULL || (process = thread->proc) == NULL)
+		return 0;
+	pending = (thread->signal_pending |
+	    (process->signal_pending & ~signal_wait_claims_locked(process))) &
+	    ~thread->signal_mask;
+	pending |= (thread->signal_pending | process->signal_pending) &
+	    (SIGNAL_BIT(SIGKILL) | SIGNAL_BIT(SIGSTOP));
+	for (signo = 1; signo < NSIG; signo++) {
+		const struct signal_action *action;
+
+		if ((pending & SIGNAL_BIT(signo)) == 0)
+			continue;
+		action = &process->signal_actions[signo];
+		if (action->handler == (uintptr_t)SIG_IGN ||
+		    (action->handler == (uintptr_t)SIG_DFL &&
+		     signal_ignored_default(signo)))
+			continue;
+		return 1;
+	}
+	return 0;
+}
 
 /* Caller holds process->lock.  A process-directed signal selected by
  * sigtimedwait() must not be consumed by another thread's ordinary return to
@@ -69,28 +100,72 @@ signal_take_process_locked(struct process *process, int signo,
 int
 signal_pending_unblocked(const struct thread *thread)
 {
-	const struct process *process;
-	sigset_t pending;
-	int signo;
+	struct process *process;
+	unsigned long irq;
+	int pending;
+
 	if (thread == NULL || (process = thread->proc) == NULL)
 		return 0;
-	pending = (thread->signal_pending |
-	    (process->signal_pending & ~signal_wait_claims_locked(process))) &
-	    ~thread->signal_mask;
-	pending |= (thread->signal_pending | process->signal_pending) &
-	    (SIGNAL_BIT(SIGKILL) | SIGNAL_BIT(SIGSTOP));
-	for (signo = 1; signo < NSIG; signo++) {
-		const struct signal_action *action;
-		if ((pending & SIGNAL_BIT(signo)) == 0)
+	irq = spin_lock_irqsave(&process->lock);
+	pending = signal_pending_unblocked_locked(thread);
+	spin_unlock_irqrestore(&process->lock, irq);
+	return pending;
+}
+
+int
+signal_job_control_decision(const struct thread *thread, int signo)
+{
+	struct process *process;
+	struct signal_action action;
+	unsigned long irq;
+	int blocked;
+
+	if (thread == NULL || (process = thread->proc) == NULL ||
+	    !signal_stop(signo))
+		return EINVAL;
+	irq = spin_lock_irqsave(&process->lock);
+	action = process->signal_actions[signo];
+	blocked = (thread->signal_mask & SIGNAL_BIT(signo)) != 0;
+	spin_unlock_irqrestore(&process->lock, irq);
+	if (blocked || action.handler == (uintptr_t)SIG_IGN)
+		return EIO;
+	return action.handler == (uintptr_t)SIG_DFL ? 0 : EINTR;
+}
+
+/* Remove every queued and non-queued instance in set.  Caller holds the
+ * process lock; stop/continue generation uses this to implement POSIX's
+ * mutual-discard rule atomically with enqueuing the new signal. */
+static void
+signal_discard_locked(struct process *process, sigset_t set)
+{
+	struct thread *thread;
+	unsigned read_index, write_index = 0;
+	int signo;
+
+	process->signal_pending &= ~set;
+	for (signo = 1; signo < NSIG; signo++)
+		if ((set & SIGNAL_BIT(signo)) != 0)
+			memset(&process->signal_info[signo], 0,
+			    sizeof(process->signal_info[signo]));
+	for (read_index = 0; read_index < process->signal_queue_count;
+	    read_index++) {
+		if ((set & SIGNAL_BIT(
+		    process->signal_queue[read_index].signo)) != 0)
 			continue;
-		action = &process->signal_actions[signo];
-		if (action->handler == (uintptr_t)SIG_IGN ||
-		    (action->handler == (uintptr_t)SIG_DFL &&
-		     signal_ignored_default(signo)))
-			continue;
-		return 1;
+		if (write_index != read_index)
+			process->signal_queue[write_index] =
+			    process->signal_queue[read_index];
+		write_index++;
 	}
-	return 0;
+	process->signal_queue_count = write_index;
+	for (thread = process->threads; thread != NULL;
+	    thread = thread->proc_next) {
+		thread->signal_pending &= ~set;
+		for (int signo = 1; signo < NSIG; signo++)
+			if ((set & SIGNAL_BIT(signo)) != 0)
+				memset(&thread->signal_info[signo], 0,
+				    sizeof(thread->signal_info[signo]));
+	}
 }
 
 void signal_init(void) { }
@@ -100,6 +175,8 @@ kernel_user_return_handler(void)
 {
 	if (curthread != NULL && curthread->terminate_requested)
 		thread_exit(0);
+	if (process_stop_requested(curthread))
+		process_stop_current(0);
 	signal_deliver_on_user_return();
 }
 
@@ -118,10 +195,15 @@ signal_send_process_info(struct process *process, int signo,
 {
 	struct thread *thread;
 	unsigned long irq;
-	int continued = 0;
 	if (process == NULL || process == &process0 || !signal_valid(signo))
 		return EINVAL;
 	irq = spin_lock_irqsave(&process->lock);
+	if (signo == SIGCONT)
+		signal_discard_locked(process, SIGNAL_BIT(SIGSTOP) |
+		    SIGNAL_BIT(SIGTSTP) | SIGNAL_BIT(SIGTTIN) |
+		    SIGNAL_BIT(SIGTTOU));
+	else if (signal_stop(signo))
+		signal_discard_locked(process, SIGNAL_BIT(SIGCONT));
 	if (info != NULL && (info->code == SI_QUEUE || signo >= SIGRTMIN)) {
 		struct queued_signal *queued;
 		if (process->signal_queue_count == SIGNAL_QUEUE_MAX) {
@@ -143,23 +225,14 @@ signal_send_process_info(struct process *process, int signo,
 	for (thread = process->threads; thread != NULL;
 	     thread = thread->proc_next) {
 		if (thread->state == THREAD_SLEEPING &&
-		    (signal_pending_unblocked(thread) ||
+		    (signal_pending_unblocked_locked(thread) ||
 		     (thread->signal_waiting &&
 		      (thread->signal_wait_set & SIGNAL_BIT(signo)) != 0)))
 			sched_wakeup(thread);
 	}
-	if ((signo == SIGCONT || signo == SIGKILL) &&
-	    process->state == PROCESS_STOPPED) {
-		process->state = PROCESS_RUNNING;
-		continued = signo == SIGCONT;
-		for (thread = process->threads; thread != NULL;
-		     thread = thread->proc_next)
-			if (thread->state == THREAD_SLEEPING)
-				sched_wakeup(thread);
-	}
 	spin_unlock_irqrestore(&process->lock, irq);
-	if (continued)
-		process_note_continued(process);
+	if (signo == SIGCONT || signo == SIGKILL)
+		(void)process_continue(process, signo == SIGCONT);
 	return 0;
 }
 
@@ -167,21 +240,30 @@ static int
 signal_permitted(const struct process *sender, const struct process *target,
 		 int signo)
 {
-	if (sender == NULL || target == NULL || sender->cred == NULL ||
-	    target->cred == NULL || target == &process0)
+	struct ucred *sender_cred, *target_cred;
+	int permitted;
+
+	if (sender == NULL || target == NULL || target == &process0)
 		return 0;
-	return cred_is_superuser(sender->cred) ||
-	    sender->cred->ruid == target->cred->ruid ||
-	    sender->cred->euid == target->cred->ruid ||
-	    sender->cred->ruid == target->cred->suid ||
-	    sender->cred->euid == target->cred->suid ||
-	    (signo == SIGCONT && sender->session == target->session);
+	sender_cred = cred_process_ref((struct process *)sender);
+	target_cred = cred_process_ref((struct process *)target);
+	permitted = sender_cred != NULL && target_cred != NULL &&
+	    (cred_is_superuser(sender_cred) ||
+	     sender_cred->ruid == target_cred->ruid ||
+	     sender_cred->euid == target_cred->ruid ||
+	     sender_cred->ruid == target_cred->suid ||
+	     sender_cred->euid == target_cred->suid ||
+	     (signo == SIGCONT && sender->session == target->session));
+	cred_release(target_cred);
+	cred_release(sender_cred);
+	return permitted;
 }
 
 int
 signal_kill(struct process *sender, pid_t selector, int signo)
 {
 	struct process *p;
+	struct ucred *sender_cred;
 	struct signal_info info;
 	pid_t cursor = -1;
 	int found = 0, permitted = 0;
@@ -190,7 +272,9 @@ signal_kill(struct process *sender, pid_t selector, int signo)
 	memset(&info, 0, sizeof(info));
 	info.code = SI_USER;
 	info.pid = sender->pid;
-	info.uid = sender->cred != NULL ? sender->cred->euid : 0;
+	sender_cred = cred_process_ref(sender);
+	info.uid = sender_cred != NULL ? sender_cred->euid : 0;
+	cred_release(sender_cred);
 	while ((p = process_find_next_ref(cursor)) != NULL) {
 		int match = selector > 0 ? p->pid == selector :
 		    selector == 0 ? p->pgrp == sender->pgrp :
@@ -226,6 +310,7 @@ signal_fork(struct process *child, const struct process *parent,
 	memset(child->signal_info, 0, sizeof(child->signal_info));
 	child_thread->signal_mask = parent_thread->signal_mask;
 	child_thread->signal_pending = 0;
+	memset(child_thread->signal_info, 0, sizeof(child_thread->signal_info));
 	child_thread->signal_token = 0;
 	child_thread->signal_token_counter = 0;
 	child_thread->signal_depth = 0;
@@ -244,19 +329,16 @@ signal_fork(struct process *child, const struct process *parent,
 void
 signal_exec(struct process *process)
 {
+	unsigned long irq;
 	int i;
 	if (process == NULL)
 		return;
+	irq = spin_lock_irqsave(&process->lock);
 	for (i = 1; i < NSIG; i++)
 		if (process->signal_actions[i].handler != (uintptr_t)SIG_IGN)
 			memset(&process->signal_actions[i], 0,
 			    sizeof(process->signal_actions[i]));
-	process->signal_pending = 0;
-	process->signal_queue_count = 0;
-	process->signal_queue_sequence = 0;
-	memset(process->signal_info, 0, sizeof(process->signal_info));
 	if (curthread != NULL) {
-		curthread->signal_pending = 0;
 		curthread->signal_token = 0;
 		curthread->signal_token_counter = 0;
 		curthread->signal_depth = 0;
@@ -272,6 +354,7 @@ signal_exec(struct process *process)
 		curthread->syscall_restart_valid = 0;
 		curthread->syscall_restart_on_return = 0;
 	}
+	spin_unlock_irqrestore(&process->lock, irq);
 }
 
 void
@@ -302,6 +385,10 @@ retry:
 	pending |= (thread->signal_pending | process->signal_pending) &
 	    (SIGNAL_BIT(SIGKILL) | SIGNAL_BIT(SIGSTOP));
 	if (pending == 0) {
+		if (thread->signal_suspended) {
+			thread->signal_mask = thread->signal_suspend_mask;
+			thread->signal_suspended = 0;
+		}
 		spin_unlock_irqrestore(&process->lock, irq);
 		return;
 	}
@@ -311,8 +398,9 @@ retry:
 	action = process->signal_actions[signo];
 	if ((thread->signal_pending & SIGNAL_BIT(signo)) != 0) {
 		thread->signal_pending &= ~SIGNAL_BIT(signo);
-		memset(&selected_info, 0, sizeof(selected_info));
-		selected_info.code = SI_KERNEL;
+		selected_info = thread->signal_info[signo];
+		memset(&thread->signal_info[signo], 0,
+		    sizeof(thread->signal_info[signo]));
 	} else {
 		signal_take_process_locked(process, signo, &selected_info);
 	}
@@ -324,10 +412,13 @@ retry:
 		if (signal_ignored_default(signo))
 			goto retry;
 		if (signal_stop(signo)) {
-			process->state = PROCESS_STOPPED;
-			process_note_stopped(process, signo);
-			thread->state = THREAD_SLEEPING;
-			sched_yield();
+			irq = spin_lock_irqsave(&process->lock);
+			if (thread->signal_suspended) {
+				thread->signal_mask = thread->signal_suspend_mask;
+				thread->signal_suspended = 0;
+			}
+			spin_unlock_irqrestore(&process->lock, irq);
+			process_stop_current(signo);
 			/* SIGCONT may have made SIGHUP or another signal deliverable. */
 			goto retry;
 		}
@@ -493,15 +584,40 @@ retry:
 int
 signal_send_thread(struct thread *thread, int signo)
 {
+	struct signal_info info;
+
+	memset(&info, 0, sizeof(info));
+	info.code = SI_KERNEL;
+	return signal_send_thread_info(thread, signo, &info);
+}
+
+int
+signal_send_thread_info(struct thread *thread, int signo,
+	const struct signal_info *info)
+{
 	struct process *process;
 	unsigned long irq;
 	if (thread == NULL || (process = thread->proc) == NULL ||
 	    !signal_valid(signo)) return EINVAL;
 	irq = spin_lock_irqsave(&process->lock);
+	if (signo == SIGCONT)
+		signal_discard_locked(process, SIGNAL_BIT(SIGSTOP) |
+		    SIGNAL_BIT(SIGTSTP) | SIGNAL_BIT(SIGTTIN) |
+		    SIGNAL_BIT(SIGTTOU));
+	else if (signal_stop(signo))
+		signal_discard_locked(process, SIGNAL_BIT(SIGCONT));
+	if ((thread->signal_pending & SIGNAL_BIT(signo)) == 0) {
+		memset(&thread->signal_info[signo], 0,
+		    sizeof(thread->signal_info[signo]));
+		if (info != NULL)
+			thread->signal_info[signo] = *info;
+	}
 	thread->signal_pending |= SIGNAL_BIT(signo);
 	if (thread->state == THREAD_SLEEPING)
 		sched_wakeup(thread);
 	spin_unlock_irqrestore(&process->lock, irq);
+	if (signo == SIGCONT || signo == SIGKILL)
+		(void)process_continue(process, signo == SIGCONT);
 	return 0;
 }
 
@@ -554,7 +670,7 @@ signal_timedwait(struct thread *thread, sigset_t set,
 			spin_unlock_irqrestore(&process->lock, irq);
 			return EAGAIN;
 		}
-		if (signal_pending_unblocked(thread)) {
+		if (signal_pending_unblocked_locked(thread)) {
 			thread->signal_waiting = 0;
 			thread->signal_wait_set = 0;
 			spin_unlock_irqrestore(&process->lock, irq);

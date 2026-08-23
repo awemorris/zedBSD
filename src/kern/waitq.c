@@ -2,6 +2,7 @@
 #include <kern/waitq.h>
 #include <kern/atomic.h>
 #include <kern/lock.h>
+#include <kern/process.h>
 #include <kern/sched.h>
 #include <kern/signal.h>
 #include <kern/thread.h>
@@ -44,6 +45,13 @@ int waitq_sleep(struct wait_queue *queue, struct spinlock *condition_lock,
 	queue->tail = token;
 	sched_sleep_locked(deadline, condition_lock);
 	if (token->queue == queue) waitq_remove(queue, token);
+	/* exec and process exit use an out-of-band retirement request.  Every
+	 * interruptible wait must surface it even when no ordinary signal is
+	 * pending, otherwise a target can register itself again forever. */
+	if ((flags & WAITQ_INTERRUPTIBLE) != 0 &&
+	    thread->terminate_requested) return EINTR;
+	if ((flags & WAITQ_INTERRUPTIBLE) != 0 &&
+	    process_stop_requested(thread)) return EINTR;
 	if ((flags & WAITQ_INTERRUPTIBLE) != 0 &&
 	    signal_pending_unblocked(thread)) return EINTR;
 	if (deadline != 0 && sched_ticks() >= deadline) return ETIMEDOUT;

@@ -77,10 +77,15 @@ struct ucred *
 cred_current_ref(void)
 {
 	struct thread *thread = thread_current();
-	struct process *process;
+	return thread != NULL ? cred_process_ref(thread->proc) : NULL;
+}
+
+struct ucred *
+cred_process_ref(struct process *process)
+{
 	struct ucred *cred;
 	unsigned long irq;
-	if (thread == NULL || (process = thread->proc) == NULL)
+	if (process == NULL)
 		return NULL;
 	irq = spin_lock_irqsave != NULL ? spin_lock_irqsave(&process->lock) : 0;
 	cred = process->cred;

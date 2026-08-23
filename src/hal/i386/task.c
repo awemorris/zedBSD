@@ -18,32 +18,53 @@ static struct task_info *running_tasks[HAL_CPU_MAX];
 #define running_task running_tasks[hal_cpu_current()]
 static uint32 task_count;
 static size_t task_stack_bytes;
+static uint8 initial_fpregs[512] __attribute__((aligned(16)));
+static volatile unsigned task_registry_lock;
+#define I386_SYSCALL_INSTRUCTION_SIZE 2U
 
 static void
 tasklist_add(struct task_info *task)
 {
+	bool enabled = hal_irq_disable();
 	struct task_info **link = &task_list;
 
+	while (__atomic_exchange_n(&task_registry_lock, 1U,
+	    __ATOMIC_ACQUIRE) != 0)
+		__asm__ volatile("pause");
 	while (*link != NULL)
 		link = &(*link)->next;
 	*link = task;
 	task->next = NULL;
 	task_count++;
+	if (task->owns_stack)
+		task_stack_bytes += SYS_STACK_SIZE;
+	__atomic_store_n(&task_registry_lock, 0U, __ATOMIC_RELEASE);
+	if (enabled)
+		hal_irq_enable();
 }
 
 static void
 tasklist_del(struct task_info *task)
 {
+	bool enabled = hal_irq_disable();
 	struct task_info **link = &task_list;
 
+	while (__atomic_exchange_n(&task_registry_lock, 1U,
+	    __ATOMIC_ACQUIRE) != 0)
+		__asm__ volatile("pause");
 	while (*link != NULL && *link != task)
 		link = &(*link)->next;
 	if (*link == task) {
 		*link = task->next;
 		if (task_count != 0)
 			task_count--;
+		if (task->owns_stack && task_stack_bytes >= SYS_STACK_SIZE)
+			task_stack_bytes -= SYS_STACK_SIZE;
 	}
 	task->next = NULL;
+	__atomic_store_n(&task_registry_lock, 0U, __ATOMIC_RELEASE);
+	if (enabled)
+		hal_irq_enable();
 }
 
 void
@@ -60,6 +81,10 @@ i386_task_init(void)
 	hal_memset(task, 0, sizeof(*task));
 	task->space = HAL_SPACE_SYS;
 	task->run_cpu = 0;
+	task->target_cpu = 0;
+	asm_fnsave(initial_fpregs);
+	asm_frstor(initial_fpregs);
+	hal_memcpy(task->fpregs, initial_fpregs, sizeof(initial_fpregs));
 	tasklist_add(task);
 	running_task = task;
 }
@@ -76,7 +101,10 @@ i386_task_init_secondary(hal_cpu_id_t cpu, uintptr_t stack)
 	hal_memset(task, 0, sizeof(*task));
 	task->space = HAL_SPACE_SYS;
 	task->run_cpu = (int)cpu;
+	task->target_cpu = cpu;
 	task->sys_stack = (void *)(stack - SYS_STACK_SIZE);
+	hal_memcpy(task->fpregs, initial_fpregs, sizeof(initial_fpregs));
+	tasklist_add(task);
 	running_task = task;
 }
 
@@ -133,12 +161,14 @@ hal_task_create(hal_space_t space, void (*start)(void *), void *arg,
 	hal_memset(task, 0, sizeof(*task));
 	task->space = space;
 	task->run_cpu = -1;
+	task->target_cpu = hal_cpu_current();
+	hal_memcpy(task->fpregs, initial_fpregs, sizeof(initial_fpregs));
 	task->sys_stack = hal_malloc(SYS_STACK_SIZE);
 	if (task->sys_stack == NULL) {
 		hal_free(task);
 		return NULL;
 	}
-	task_stack_bytes += SYS_STACK_SIZE;
+	task->owns_stack = 1;
 	set_initial_resume_frame(task, start, arg, user_stack_pointer);
 	tasklist_add(task);
 	return task;
@@ -189,9 +219,21 @@ hal_task_fork_current(hal_space_t child_space, intptr_t child_result)
 	resume->initial.user.esp = source->user_esp;
 	resume->initial.user.ss = source->user_ss;
 	child->tls = running_task->tls;
+	asm_fnsave(running_task->fpregs);
+	asm_frstor(running_task->fpregs);
 	hal_memcpy(child->fpregs, running_task->fpregs,
 	    sizeof(child->fpregs));
 	return child;
+}
+
+int
+hal_task_exec_validate(hal_space_t new_space, uintptr_t entry,
+	uintptr_t user_stack_pointer)
+{
+	return running_task != NULL && new_space != HAL_SPACE_SYS &&
+	    running_task->active_user_frame != NULL && entry != 0 &&
+	    user_stack_pointer != 0 && entry <= UINT32_MAX &&
+	    user_stack_pointer <= UINT32_MAX ? 0 : -1;
 }
 
 int
@@ -199,10 +241,7 @@ hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
 		      uintptr_t user_stack_pointer)
 {
 	struct interrupt_frame *frame;
-	if (running_task == NULL || new_space == HAL_SPACE_SYS ||
-	    running_task->active_user_frame == NULL || entry == 0 ||
-	    user_stack_pointer == 0 || entry > UINT32_MAX ||
-	    user_stack_pointer > UINT32_MAX)
+	if (hal_task_exec_validate(new_space, entry, user_stack_pointer) != 0)
 		return -1;
 	frame = running_task->active_user_frame;
 	hal_memset(&frame->regs, 0, sizeof(frame->regs));
@@ -214,6 +253,9 @@ hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
 	running_task->space = new_space;
 	running_task->tls = 0;
 	running_task->signal_depth = 0;
+	hal_memcpy(running_task->fpregs, initial_fpregs,
+	    sizeof(initial_fpregs));
+	asm_frstor(running_task->fpregs);
 	hal_page_switch_space(new_space);
 	return 0;
 }
@@ -238,6 +280,8 @@ int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t info,
 	(void)sig;(void)info;(void)context;(void)rest;
 	if(f==NULL||running_task->signal_depth>=HAL_SIGNAL_NEST_MAX||h==0||sp==0||h>UINT32_MAX||sp>UINT32_MAX||token==0)return -1;
 	depth=running_task->signal_depth;running_task->signal_frame[depth]=*f;
+	asm_fnsave(running_task->signal_fpregs[depth]);
+	asm_frstor(running_task->signal_fpregs[depth]);
 	running_task->signal_token[depth]=token;running_task->signal_depth=depth+1U;
 	f->eip=(uint32)h;f->user_esp=(uint32)sp;return 0;
 }
@@ -248,6 +292,7 @@ int hal_task_signal_return(uint32_t token,intptr_t *value)
 	if(f==NULL||value==NULL||running_task->signal_depth==0||token==0)return -1;
 	depth=running_task->signal_depth-1U;if(token!=running_task->signal_token[depth])return -1;
 	*f=running_task->signal_frame[depth];*value=(intptr_t)(int32)f->regs.eax;
+	asm_frstor(running_task->signal_fpregs[depth]);
 	running_task->signal_token[depth]=0;running_task->signal_depth=depth;return 0;
 }
 int hal_task_signal_restart(uint32_t token,uint32_t number,const uintptr_t args[HAL_SYSCALL_ARGS],intptr_t *value)
@@ -255,10 +300,17 @@ int hal_task_signal_restart(uint32_t token,uint32_t number,const uintptr_t args[
 	struct interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
 	unsigned depth;
 	if(f==NULL||args==NULL||value==NULL||running_task->signal_depth==0||token==0)return -1;
-	depth=running_task->signal_depth-1U;if(token!=running_task->signal_token[depth])return -1;
-	*f=running_task->signal_frame[depth];if(f->eip<2U)return -1;f->eip-=2U;
+	depth=running_task->signal_depth-1U;
+	if(token!=running_task->signal_token[depth]||
+	    running_task->signal_frame[depth].eip<
+	    I386_SYSCALL_INSTRUCTION_SIZE)return -1;
+	*f=running_task->signal_frame[depth];
+	f->eip-=I386_SYSCALL_INSTRUCTION_SIZE;
 	f->regs.eax=number;f->regs.ebx=(uint32)args[0];f->regs.ecx=(uint32)args[1];f->regs.edx=(uint32)args[2];f->regs.esi=(uint32)args[3];f->regs.edi=(uint32)args[4];f->regs.ebp=(uint32)args[5];
-	*value=(intptr_t)(int32)number;running_task->signal_token[depth]=0;running_task->signal_depth=depth;return 0;
+	*value=(intptr_t)(int32)number;
+	asm_frstor(running_task->signal_fpregs[depth]);
+	running_task->signal_token[depth]=0;running_task->signal_depth=depth;
+	return 0;
 }
 
 void
@@ -271,9 +323,7 @@ hal_task_destroy(hal_task_t handle)
 	if (task == running_task)
 		HAL_FATAL("destroying current HAL task");
 	tasklist_del(task);
-	if (task->sys_stack != NULL)
-		task_stack_bytes -= SYS_STACK_SIZE;
-	if (task->sys_stack != NULL)
+	if (task->owns_stack)
 		hal_free(task->sys_stack);
 	hal_free(task);
 }
@@ -290,6 +340,8 @@ hal_task_context_switch(hal_task_t handle)
 		return;
 	if (to->run_cpu >= 0)
 		HAL_FATAL("i386 HAL task already running");
+	if (to->target_cpu != hal_cpu_current())
+		HAL_FATAL("i386 HAL task resumed on wrong CPU");
 	from->run_cpu = -1;
 	to->run_cpu = (int)hal_cpu_current();
 	running_task = to;
@@ -350,14 +402,22 @@ hal_task_transfer(hal_task_t handle, hal_cpu_id_t target_cpu)
 		return HAL_ERR_INVALID;
 	if (task->run_cpu >= 0)
 		return HAL_ERR_BUSY;
+	task->target_cpu = target_cpu;
 	return HAL_OK;
 }
 
 void
 hal_i386_task_memory_stats(uint32 *count, size_t *stack_bytes)
 {
+	bool enabled = hal_irq_disable();
+	while (__atomic_exchange_n(&task_registry_lock, 1U,
+	    __ATOMIC_ACQUIRE) != 0)
+		__asm__ volatile("pause");
 	if (count != NULL)
 		*count = task_count;
 	if (stack_bytes != NULL)
 		*stack_bytes = task_stack_bytes;
+	__atomic_store_n(&task_registry_lock, 0U, __ATOMIC_RELEASE);
+	if (enabled)
+		hal_irq_enable();
 }

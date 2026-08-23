@@ -4,6 +4,7 @@
 
 #define NAME_MAX 255
 #define PATH_MAX 256
+#define ARG_MAX 16384
 
 #define CHAR_BIT 8
 #define SCHAR_MIN (-128)

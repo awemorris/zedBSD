@@ -4,6 +4,10 @@
 #include "defs.h"
 #include "space.h"
 
+#define ARM64_USER_LIMIT 0x0001000000000000ULL
+_Static_assert(ARM64_USER_LIMIT - 1U <= (uintptr_t)INTPTR_MAX,
+    "user pointers must not overlap the negative syscall errno window");
+
 #define PTE_VALID (1ULL << 0)
 #define PTE_TABLE (1ULL << 1)
 #define PTE_ATTR(n) ((uint64)(n) << 2)
@@ -127,7 +131,7 @@ arm64_space_init(void)
 static int valid_space(hal_space_t h)
 { return h==HAL_SPACE_SYS||(h&&((struct arm64_space *)h)->magic==ARM64_SPACE_MAGIC); }
 static int valid_user(uintptr_t a,size_t n)
-{ return n&&(a&4095)==0&&(n&4095)==0&&a>=4096&&a<0x0001000000000000ULL&&n<=0x0001000000000000ULL-a; }
+{ return n&&(a&4095)==0&&(n&4095)==0&&a>=4096&&a<ARM64_USER_LIMIT&&n<=ARM64_USER_LIMIT-a; }
 
 static struct arm64_table_page *allocate_table(struct arm64_space *s,uint64 *parent,unsigned index)
 {
@@ -220,5 +224,5 @@ int hal_page_clear_flags(hal_space_t h,void *v,uint32 flags)
 void hal_page_flush_tlb(hal_space_t h){if(h==HAL_SPACE_SYS||h==current_space)arm64_flush_tlb();}
 void hal_page_flush_tlb_range(hal_space_t h,void*v,size_t n){(void)v;if(n)hal_page_flush_tlb(h);}
 size_t hal_page_get_page_size(int level){if(level==1)return 4096;if(level==2)return 0x200000;if(level==3)return 0x40000000;return 0;}
-void hal_page_get_user_range(uintptr_t *minimum,uintptr_t *limit){if(minimum)*minimum=4096;if(limit)*limit=0x0001000000000000ULL;}
+void hal_page_get_user_range(uintptr_t *minimum,uintptr_t *limit){if(minimum)*minimum=4096;if(limit)*limit=ARM64_USER_LIMIT;}
 void hal_arm64_space_memory_stats(uint32 *s,uint32 *t){if(s)*s=space_count;if(t)*t=page_table_count;}

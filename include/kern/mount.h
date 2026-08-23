@@ -72,6 +72,10 @@ struct mount {
 	unsigned m_flags;
 	refcount_t m_refs;
 	struct mutex m_lock;
+	/* Serializes generic permission/type checks with one namespace commit.
+	 * Filesystem-private namespace locks are acquired inside this lock. */
+	struct mutex m_vfs_transaction_storage;
+	struct mutex *m_vfs_transaction_lock;
 	struct wait_queue m_waitq;
 	enum mount_state m_state;
 	unsigned m_internal_flags;
@@ -127,6 +131,8 @@ int mount_lookup_child(const struct path *, const struct componentname *,
 int mount_cross_path_parent(const struct path *, struct path *);
 int mount_readdir_child(const struct path *, unsigned *, struct dirent *);
 int mount_child_shadows(const struct path *, const char *);
+void mount_vfs_transaction_enter(struct mount *);
+void mount_vfs_transaction_leave(struct mount *);
 unsigned mount_count(void);
 
 #endif

@@ -59,6 +59,8 @@ void sched_sleep(uint64_t timeout_tick);
 /* Atomically transitions the current thread to sleep, releases an IRQ-safe
  * condition lock, switches, and reacquires that lock before returning. */
 void sched_sleep_locked(uint64_t, struct spinlock *);
+void sched_sleep_locked_notify(uint64_t, struct spinlock *, void (*)(void *),
+	void *);
 void sched_awake_from_sleep(struct thread *thread);
 uint64_t sched_ticks(void);
 int sched_has_runnable(void);

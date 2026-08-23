@@ -23,6 +23,9 @@
 #ifndef O_DIRECTORY
 #define O_DIRECTORY 0x0100
 #endif
+#ifndef O_NOFOLLOW
+#define O_NOFOLLOW 0x40000
+#endif
 
 struct cwdinfo;
 struct ucred;

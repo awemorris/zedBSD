@@ -14,6 +14,10 @@
 
 struct thread thread0;
 static tid_t next_tid = 1;
+static struct thread *reserved_tids;
+static struct spinlock tid_registry_lock = {
+	{ 0 }, LOCK_RANK_PROCESS, "thread ID registry", 0, 0
+};
 static struct thread *secondary_idle_threads;
 static unsigned secondary_idle_count;
 
@@ -24,21 +28,78 @@ thread_current(void)
 	return task != NULL ? hal_task_get_private(task) : NULL;
 }
 
-static void
+static int
 attach_thread(struct process *process, struct thread *thread)
 {
 	unsigned long irq = spin_lock_irqsave(&process->lock);
+	if (process != &process0 && process->state != PROCESS_NEW &&
+	    process->state != PROCESS_RUNNING &&
+	    process->state != PROCESS_STOPPED) {
+		spin_unlock_irqrestore(&process->lock, irq);
+		return ESRCH;
+	}
+	if (process->execing) {
+		spin_unlock_irqrestore(&process->lock, irq);
+		return EBUSY;
+	}
 	thread->proc_next = process->threads;
 	process->threads = thread;
 	process->thread_count++;
+	if (process->stop_requested)
+		process->stop_target_count++;
 	spin_unlock_irqrestore(&process->lock, irq);
+	return 0;
 }
 
-static tid_t
-allocate_tid(void)
+static int
+reserve_tid(struct thread *thread)
 {
-	return (tid_t)atomic_raw_fetch_add_relaxed(
-	    (volatile unsigned *)&next_tid, 1U);
+	struct thread *candidate;
+	unsigned long irq;
+	tid_t assigned;
+
+	if (thread == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&tid_registry_lock);
+	assigned = next_tid;
+	for (;;) {
+		int collision = assigned <= 0;
+
+		for (candidate = reserved_tids; !collision && candidate != NULL;
+		    candidate = candidate->tid_next)
+			collision = candidate->tid == assigned;
+		if (!collision)
+			break;
+		assigned = assigned == INT32_MAX ? 1 : assigned + 1;
+		if (assigned == next_tid) {
+			spin_unlock_irqrestore(&tid_registry_lock, irq);
+			return EAGAIN;
+		}
+	}
+	thread->tid = assigned;
+	next_tid = assigned == INT32_MAX ? 1 : assigned + 1;
+	thread->tid_next = reserved_tids;
+	reserved_tids = thread;
+	spin_unlock_irqrestore(&tid_registry_lock, irq);
+	return 0;
+}
+
+static void
+release_tid(struct thread *thread)
+{
+	struct thread **link;
+	unsigned long irq;
+
+	if (thread == NULL || thread->tid <= 0)
+		return;
+	irq = spin_lock_irqsave(&tid_registry_lock);
+	link = &reserved_tids;
+	while (*link != NULL && *link != thread)
+		link = &(*link)->tid_next;
+	if (*link == thread)
+		*link = thread->tid_next;
+	thread->tid_next = NULL;
+	spin_unlock_irqrestore(&tid_registry_lock, irq);
 }
 
 static int
@@ -68,7 +129,13 @@ thread_create(struct process *process, uintptr_t entry, uintptr_t user_sp,
 	thread = kern_calloc(1, sizeof(*thread));
 	if (thread == NULL)
 		return ENOMEM;
-	thread->tid = allocate_tid();
+	{
+		int error = reserve_tid(thread);
+		if (error != 0) {
+			kern_free(thread);
+			return error;
+		}
+	}
 	refcount_init(&thread->refs, 1);
 	thread->proc = process;
 	thread->state = THREAD_NEW;
@@ -79,6 +146,7 @@ thread_create(struct process *process, uintptr_t entry, uintptr_t user_sp,
 	thread->task = hal_task_create(process->vmspace->space,
 		(void (*)(void *))entry, NULL, (void *)user_sp);
 	if (thread->task == NULL) {
+		release_tid(thread);
 		kern_free(thread);
 		return ENOMEM;
 	}
@@ -86,11 +154,21 @@ thread_create(struct process *process, uintptr_t entry, uintptr_t user_sp,
 	{
 		int error = prepare_created_thread(thread);
 		if (error != 0) {
+			release_tid(thread);
 			kern_free(thread);
 			return error;
 		}
 	}
-	attach_thread(process, thread);
+	{
+		int error = attach_thread(process, thread);
+		if (error != 0) {
+			hal_task_set_private(thread->task, NULL);
+			hal_task_destroy(thread->task);
+			release_tid(thread);
+			kern_free(thread);
+			return error;
+		}
+	}
 	*result = thread;
 	return 0;
 }
@@ -105,7 +183,13 @@ thread_fork(struct process *process, hal_task_t task, struct thread **result)
 	thread = kern_calloc(1, sizeof(*thread));
 	if (thread == NULL)
 		return ENOMEM;
-	thread->tid = allocate_tid();
+	{
+		int error = reserve_tid(thread);
+		if (error != 0) {
+			kern_free(thread);
+			return error;
+		}
+	}
 	refcount_init(&thread->refs, 1);
 	thread->proc = process;
 	thread->task = task;
@@ -118,11 +202,21 @@ thread_fork(struct process *process, hal_task_t task, struct thread **result)
 	{
 		int error = prepare_created_thread(thread);
 		if (error != 0) {
+			release_tid(thread);
 			kern_free(thread);
 			return error;
 		}
 	}
-	attach_thread(process, thread);
+	{
+		int error = attach_thread(process, thread);
+		if (error != 0) {
+			hal_task_set_private(thread->task, NULL);
+			hal_task_destroy(thread->task);
+			release_tid(thread);
+			kern_free(thread);
+			return error;
+		}
+	}
 	*result = thread;
 	return 0;
 }
@@ -147,7 +241,13 @@ kthread_create(void (*entry)(void *), void *arg, int priority,
 	thread = kern_calloc(1, sizeof(*thread));
 	if (thread == NULL)
 		return ENOMEM;
-	thread->tid = allocate_tid();
+	{
+		int error = reserve_tid(thread);
+		if (error != 0) {
+			kern_free(thread);
+			return error;
+		}
+	}
 	refcount_init(&thread->refs, 1);
 	thread->proc = &process0;
 	thread->state = THREAD_NEW;
@@ -160,6 +260,7 @@ kthread_create(void (*entry)(void *), void *arg, int priority,
 	thread->task = hal_task_create(HAL_SPACE_SYS, kernel_thread_trampoline,
 				       thread, NULL);
 	if (thread->task == NULL) {
+		release_tid(thread);
 		kern_free(thread);
 		return ENOMEM;
 	}
@@ -167,11 +268,12 @@ kthread_create(void (*entry)(void *), void *arg, int priority,
 	{
 		int error = prepare_created_thread(thread);
 		if (error != 0) {
+			release_tid(thread);
 			kern_free(thread);
 			return error;
 		}
 	}
-	attach_thread(&process0, thread);
+	(void)attach_thread(&process0, thread);
 	*result = thread;
 	return 0;
 }
@@ -228,7 +330,7 @@ thread_attach_secondaries(void)
 		struct thread *thread = &secondary_idle_threads[index];
 		if (thread->task == NULL || thread->proc_next != NULL)
 			HAL_FATAL("secondary idle thread not initialized");
-		attach_thread(&process0, thread);
+		(void)attach_thread(&process0, thread);
 	}
 }
 
@@ -250,6 +352,8 @@ thread_exit(int status)
 	struct thread *thread = curthread;
 	if (thread == NULL)
 		HAL_FATAL("thread_exit without current thread");
+	if (thread->proc != NULL && thread->proc != &process0)
+		process_exit_if_last_thread(status);
 	thread->exit_status = status;
 	sched_exit_current();
 }
@@ -257,15 +361,31 @@ thread_exit(int status)
 void
 thread_sched_retired(struct thread *thread)
 {
+	struct thread *member;
+	unsigned long irq;
+
 	if (thread == NULL || thread->state != THREAD_EXITING)
 		HAL_FATAL("invalid retired thread");
 	thread->state = THREAD_ZOMBIE;
 	thread->state_generation++;
-	{
-		unsigned long irq = spin_lock_irqsave(&thread->proc->lock);
-		waitq_wake_all(&thread->join_waitq);
-		spin_unlock_irqrestore(&thread->proc->lock, irq);
+	irq = spin_lock_irqsave(&thread->proc->lock);
+	/* A stop generation counts live threads.  If a thread retires before it
+	 * acknowledges that generation, it is no longer a target; otherwise all
+	 * acknowledged waiters could sleep forever waiting for a dead task. */
+	if (thread->proc->stop_requested &&
+	    thread->stop_generation != thread->proc->stop_generation) {
+		if (thread->proc->stop_target_count == 0)
+			HAL_FATAL("process stop target underflow");
+		thread->proc->stop_target_count--;
+		for (member = thread->proc->threads; member != NULL;
+		    member = member->proc_next)
+			if (member != thread && member->state == THREAD_SLEEPING &&
+			    member->stop_generation ==
+			    thread->proc->stop_generation)
+				sched_wakeup(member);
 	}
+	waitq_wake_all(&thread->join_waitq);
+	spin_unlock_irqrestore(&thread->proc->lock, irq);
 	process_thread_retired(thread);
 	if (thread->detached) {
 		thread_ref(thread);
@@ -299,6 +419,7 @@ thread_wait(struct thread *thread, int *status)
 	atomic_raw_store_release((volatile unsigned *)&thread->state,
 	    THREAD_DEAD);
 	spin_unlock_irqrestore(&thread->proc->lock, irq);
+	release_tid(thread);
 	thread_release(thread);
 	return 0;
 }

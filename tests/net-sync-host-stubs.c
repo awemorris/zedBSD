@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <kern/lock.h>
+#include <kern/signal.h>
 #include <kern/waitq.h>
 
 #include <errno.h>
@@ -12,6 +13,8 @@ extern struct thread *thread_current(void);
 
 /* Socket readiness is exercised synchronously by the host fixtures. */
 void poll_notify(void) { }
+int signal_send_thread(struct thread *thread, int signo)
+{ (void)thread; (void)signo; return 0; }
 
 void
 spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)

@@ -14,6 +14,9 @@
 #define ZEDBSD_DT_DIR 2U
 #define ZEDBSD_DT_BLK 3U
 #define ZEDBSD_DT_CHR 4U
+#define ZEDBSD_DT_FIFO 5U
+#define ZEDBSD_DT_LNK 6U
+#define ZEDBSD_DT_SOCK 7U
 
 struct dirent_record {
 	uint64_t d_ino;

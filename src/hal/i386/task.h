@@ -32,13 +32,17 @@ struct task_info {
 	struct task_info *next;
 	hal_space_t space;
 	int run_cpu;
+	hal_cpu_id_t target_cpu;
 	void *sys_stack;
+	unsigned owns_stack;
 	struct task_resume_frame *resume_esp;
-	uint8 fpregs[512];
+	uint8 fpregs[512] __attribute__((aligned(16)));
 	void *private_data;
 	uintptr_t tls;
 	void *active_user_frame;
 	struct interrupt_frame signal_frame[HAL_SIGNAL_NEST_MAX];
+	uint8 signal_fpregs[HAL_SIGNAL_NEST_MAX][512]
+	    __attribute__((aligned(16)));
 	uint32 signal_token[HAL_SIGNAL_NEST_MAX];
 	unsigned signal_depth;
 };

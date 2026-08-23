@@ -8,6 +8,7 @@
 #define KERN_NGROUPS_MAX 16U
 
 struct inode;
+struct process;
 struct ucred {
 	refcount_t refs;
 	uid_t ruid, euid, suid;
@@ -24,6 +25,7 @@ int cred_is_superuser(const struct ucred *);
 int cred_in_group(const struct ucred *, gid_t);
 const struct ucred *cred_current(void);
 struct ucred *cred_current_ref(void);
+struct ucred *cred_process_ref(struct process *);
 int vfs_access(const struct inode *, const struct ucred *, int);
 int vfs_may_create(const struct inode *, const struct ucred *);
 int vfs_may_remove(const struct inode *, const struct inode *,

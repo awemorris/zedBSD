@@ -438,6 +438,17 @@ int main(void)
 	CHECK(inode == stores[0].nodes[2].inode);
 	inode_release(inode);
 	CHECK(namei_at(&context, "/disk1/loop", &inode) == ELOOP);
+	CHECK(file_openat(&context, "/disk1/link", O_RDONLY | O_NOFOLLOW,
+	    0, &file) == ELOOP);
+	CHECK(file_openat(&context, "/disk1/link", O_RDONLY, 0, &file) == 0);
+	CHECK(file_close(file) == 0);
+	CHECK(file_openat(&context, "/disk1/hello", O_RDONLY | O_APPEND,
+	    0, &file) == 0);
+	CHECK(file->f_offset == 0);
+	CHECK(file_close(file) == 0);
+	CHECK(file_create_pseudo(&mem_file_fops, O_RDONLY, NULL, &file) == 0);
+	CHECK(file_seek(file, 0, 0) == -ESPIPE);
+	CHECK(file_close(file) == 0);
 	CHECK(namei_at(&context, "/disk1/..", &inode) == 0);
 	CHECK(inode == mount_root_inode());
 	inode_release(inode);

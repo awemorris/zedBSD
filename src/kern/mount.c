@@ -38,6 +38,10 @@ mount_alloc(void)
 			refcount_init(&mounts[i].m_refs, 1);
 			(void)mutex_init(&mounts[i].m_lock, LOCK_RANK_NAMESPACE,
 			    "mount");
+			(void)mutex_init(&mounts[i].m_vfs_transaction_storage,
+			    LOCK_RANK_VFS_TRANSACTION, "VFS namespace transaction");
+			mounts[i].m_vfs_transaction_lock =
+			    &mounts[i].m_vfs_transaction_storage;
 			waitq_init(&mounts[i].m_waitq, "mount state");
 			mounts[i].m_state = MOUNT_STATE_PREPARING;
 			result = &mounts[i];
@@ -46,6 +50,20 @@ mount_alloc(void)
 	}
 	spin_unlock_irqrestore(&namespace_lock, irq);
 	return result;
+}
+
+void
+mount_vfs_transaction_enter(struct mount *mountp)
+{
+	if (mountp != NULL)
+		mutex_lock(mountp->m_vfs_transaction_lock);
+}
+
+void
+mount_vfs_transaction_leave(struct mount *mountp)
+{
+	if (mountp != NULL)
+		mutex_unlock(mountp->m_vfs_transaction_lock);
 }
 
 static void
@@ -443,6 +461,8 @@ mount_bind_at(const struct path *source, const struct path *directory,
 	mountp->m_parent = directory->p_mount;
 	mountp->m_bind_source = source->p_mount;
 	mount_ref(mountp->m_bind_source);
+	mountp->m_vfs_transaction_lock =
+	    source->p_mount->m_vfs_transaction_lock;
 	mountp->m_internal_flags = MOUNT_BIND_INTERNAL;
 	mountp->m_flags = source->p_mount->m_flags;
 	mountp->m_type = source->p_inode->i_mount->m_type;

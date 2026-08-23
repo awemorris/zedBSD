@@ -12,8 +12,8 @@ typedef uint32_t sigset_t;
 #define SIGILL 4
 #define SIGTRAP 5
 #define SIGABRT 6
-#define SIGFPE 8
 #define SIGVTALRM 7
+#define SIGFPE 8
 #define SIGKILL 9
 #define SIGBUS 10
 #define SIGSEGV 11
@@ -40,7 +40,7 @@ typedef uint32_t sigset_t;
 #define SA_NODEFER 0x0008U
 #define SA_RESETHAND 0x0010U
 #define SA_SIGINFO 0x0020U
-/* Reserved for a future sigaltstack implementation.  sigaction rejects it. */
+/* Run the handler on the alternate stack installed by sigaltstack(2). */
 #define SA_ONSTACK 0x0040U
 #define SIG_DFL 0ULL
 #define SIG_IGN 1ULL

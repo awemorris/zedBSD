@@ -8,8 +8,11 @@
 #define DT_UNKNOWN 0U
 #define DT_REG 1U
 #define DT_DIR 2U
-#define DT_CHR 3U
-#define DT_BLK 4U
+#define DT_BLK 3U
+#define DT_CHR 4U
+#define DT_FIFO 5U
+#define DT_LNK 6U
+#define DT_SOCK 7U
 
 struct dirent {
 	ino_t d_ino;

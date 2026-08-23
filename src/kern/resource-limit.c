@@ -65,7 +65,7 @@ resource_limit_set(struct process *process, int resource,
 		return EINVAL;
 	cap = resource_cap(resource);
 	if (requested->maximum > cap)
-		return resource == RLIMIT_CORE ? ENOTSUP : EINVAL;
+		return EINVAL;
 	irq = spin_lock_irqsave(&process->lock);
 	old = process->limits.values[resource];
 	privileged = process->cred != NULL &&

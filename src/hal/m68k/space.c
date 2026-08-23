@@ -5,6 +5,10 @@
 #include "mmu030.h"
 #include "space.h"
 
+_Static_assert((uintptr_t)(M68K030_USER_LIMIT - 1U) <=
+    (uintptr_t)INTPTR_MAX,
+    "user pointers must not overlap the negative syscall errno window");
+
 static hal_space_t current_space;
 static struct m68k030_root_pointer system_crp;
 static uint32_t next_space_id = 1;

@@ -5,6 +5,7 @@
 #include "int.h"
 
 #define ARM64_SYS_STACK_SIZE 16384U
+#define ARM64_SYSCALL_INSTRUCTION_SIZE 4U
 struct arm64_task {
 	struct arm64_task *next;
 	hal_space_t space;
@@ -17,6 +18,8 @@ struct arm64_task {
 	uintptr_t tls;
 	void *active_user_frame;
 	struct arm64_exception_frame signal_frame[HAL_SIGNAL_NEST_MAX];
+	uint8 signal_fpregs[HAL_SIGNAL_NEST_MAX][528]
+	    __attribute__((aligned(16)));
 	uint32 signal_token[HAL_SIGNAL_NEST_MAX];
 	unsigned signal_depth;
 };

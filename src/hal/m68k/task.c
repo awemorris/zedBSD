@@ -6,6 +6,8 @@
 #include "space.h"
 #include "task.h"
 
+#define M68K_SYSCALL_INSTRUCTION_SIZE 2U
+
 static struct m68k_task *task_list;
 static struct m68k_task *running_task;
 static uint32_t task_count;
@@ -202,13 +204,20 @@ hal_task_fork_current(hal_space_t child_space, intptr_t child_result)
 }
 
 int
+hal_task_exec_validate(hal_space_t new_space, uintptr_t entry,
+	uintptr_t user_stack_pointer)
+{
+	return running_task != NULL && new_space != HAL_SPACE_SYS &&
+	    valid_user_pc_sp(new_space, entry, user_stack_pointer) &&
+	    running_task->active_user_frame != NULL ? 0 : -1;
+}
+
+int
 hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
 		      uintptr_t user_stack_pointer)
 {
 	struct m68k_saved_frame *frame;
-	if (running_task == NULL || new_space == HAL_SPACE_SYS ||
-	    !valid_user_pc_sp(new_space, entry, user_stack_pointer) ||
-	    running_task->active_user_frame == NULL)
+	if (hal_task_exec_validate(new_space, entry, user_stack_pointer) != 0)
 		return -1;
 	frame = running_task->active_user_frame;
 	hal_memset(frame->d, 0, sizeof(frame->d));
@@ -317,9 +326,10 @@ hal_task_signal_restart(uint32_t token, uint32_t number,
 	hal_memcpy(frame, running_task->signal_frame[depth],
 	    running_task->signal_frame_size[depth]);
 	pc = read32(frame->hardware + 2U);
-	if (pc < 2U)
+	if (pc < M68K_SYSCALL_INSTRUCTION_SIZE)
 		return -1;
-	write32(frame->hardware + 2U, pc - 2U);
+	write32(frame->hardware + 2U,
+	    pc - M68K_SYSCALL_INSTRUCTION_SIZE);
 	frame->d[0] = number;
 	frame->d[1] = (uint32_t)arguments[0];
 	frame->d[2] = (uint32_t)arguments[1];

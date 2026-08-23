@@ -8,6 +8,10 @@
 #include "bsp-pcat/lapic.h"
 #include "bootloader/include/amd64-handoff.h"
 
+#define AMD64_USER_LIMIT 0x0000800000000000ULL
+_Static_assert(AMD64_USER_LIMIT - 1U <= (uintptr_t)INTPTR_MAX,
+    "user pointers must not overlap the negative syscall errno window");
+
 static uint64 system_pml4[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64 system_pdpt[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64 system_pd[512] __attribute__((aligned(PAGE_SIZE)));
@@ -622,7 +626,7 @@ size_t hal_page_get_page_size(int level)
 void hal_page_get_user_range(uintptr_t *minimum, uintptr_t *limit)
 {
 	if (minimum != NULL) *minimum = PAGE_SIZE;
-	if (limit != NULL) *limit = 0x0000800000000000ULL;
+	if (limit != NULL) *limit = AMD64_USER_LIMIT;
 }
 
 void hal_amd64_space_memory_stats(uint32 *spaces, uint32 *tables)

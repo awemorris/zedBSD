@@ -16,6 +16,7 @@
 #define O_NOCTTY    0x8000
 #define O_DSYNC     0x10000
 #define O_SYNC      0x20000
+#define O_NOFOLLOW  0x40000
 
 #define AT_FDCWD            (-100)
 #define AT_SYMLINK_NOFOLLOW 0x0100

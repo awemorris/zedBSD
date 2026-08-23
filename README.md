@@ -50,6 +50,12 @@ make help              # show a short command summary
 | `tools/`             | Development scripts                                    |
 | `tests/`             | Tests                                                  |
 
+## Standards status
+
+The implemented POSIX/SUS surface and deliberate ABI limitations are
+described in [docs/conformance.md](docs/conformance.md).  The machine-readable
+API inventory used by `make check` is `tests/posix-r2-api.csv`.
+
 ## License
 
 - `zedBSD` is distributed under the zlib License (see `LICENSE`).

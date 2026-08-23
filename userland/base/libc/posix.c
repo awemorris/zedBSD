@@ -535,7 +535,7 @@ long sysconf(int name) {
 	case _SC_MESSAGE_PASSING: return _POSIX_MESSAGE_PASSING;
 	case _SC_VERSION: return _POSIX_VERSION;
 	case _SC_2_VERSION: return _POSIX2_VERSION;
-	case _SC_ARG_MAX: return 32;
+	case _SC_ARG_MAX: return ARG_MAX;
 	case _SC_CHILD_MAX: return 64;
 	case _SC_STREAM_MAX: return 32;
 	case _SC_THREAD_KEYS_MAX: return 32;

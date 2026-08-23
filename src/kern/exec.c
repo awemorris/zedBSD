@@ -6,6 +6,7 @@
 #include "kern/exec.h"
 #include "kern/cred.h"
 #include "kern/file.h"
+#include "kern/kmem.h"
 #include "kern/process.h"
 #include "kern/process-timer.h"
 #include "kern/thread.h"
@@ -16,6 +17,7 @@
 #include "kern/resource-limit.h"
 
 #include <zedbsd/auxv.h>
+#include <zedbsd/process.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <hal/hal.h>
@@ -23,9 +25,9 @@
 #include <string.h>
 #include <unistd.h>
 
-#define EXEC_ARG_MAX 32U
-#define EXEC_ENV_MAX 64U
-#define EXEC_STRING_MAX (16U * 1024U)
+#define EXEC_ARG_MAX ZEDBSD_SPAWN_ARG_MAX
+#define EXEC_ENV_MAX ZEDBSD_SPAWN_ENV_MAX
+#define EXEC_STRING_MAX ZEDBSD_ARG_MAX
 
 #ifdef ZEDBSD_USER_ABI_LP64
 typedef uintptr_t exec_user_word_t;
@@ -51,11 +53,11 @@ exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
 	size_t total = 0;
 	size_t table_size;
 	unsigned argc = 0, envc = 0, i;
-	exec_user_word_t argv_address[EXEC_ARG_MAX];
-	exec_user_word_t env_address[EXEC_ENV_MAX];
+	exec_user_word_t *address = NULL;
+	exec_user_word_t *argv_address;
+	exec_user_word_t *env_address;
 	exec_user_word_t execfn_address;
-	exec_user_word_t words[1U + EXEC_ARG_MAX + 1U + EXEC_ENV_MAX + 1U +
-	    EXEC_AUXV_PAIRS * 2U];
+	exec_user_word_t *words = NULL;
 	unsigned word_count = 0;
 	int error;
 
@@ -89,18 +91,31 @@ exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
 			return E2BIG;
 		total += length;
 	}
+	table_size = (1U + argc + 1U + envc + 1U +
+	    EXEC_AUXV_PAIRS * 2U) * sizeof(exec_user_word_t);
+	if (table_size > EXEC_STRING_MAX - total)
+		return E2BIG;
+	address = kern_calloc(argc + envc, sizeof(*address));
+	words = kern_calloc(1U + argc + 1U + envc + 1U +
+	    EXEC_AUXV_PAIRS * 2U, sizeof(*words));
+	if ((argc + envc != 0U && address == NULL) || words == NULL) {
+		error = ENOMEM;
+		goto out;
+	}
+	argv_address = address;
+	env_address = address + argc;
 	vmspace_layout_init();
 	error = vmspace_map_stack(vm, vm_layout.stack_top, stack_size,
 				  EXEC_STACK_GUARD_SIZE);
 	if (error != 0)
-		return error;
+		goto out;
 	sp = vm->stack_top;
 	{
 		size_t length = strlen(aux->exec_path) + 1U;
 		sp -= length;
 		error = vmspace_copy_to(vm, sp, aux->exec_path, length);
 		if (error != 0)
-			return error;
+			goto out;
 		execfn_address = (exec_user_word_t)sp;
 	}
 	for (i = envc; i != 0; i--) {
@@ -108,7 +123,7 @@ exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
 		sp -= length;
 		error = vmspace_copy_to(vm, sp, envp[i - 1U], length);
 		if (error != 0)
-			return error;
+			goto out;
 		env_address[i - 1U] = (exec_user_word_t)sp;
 	}
 	for (i = argc; i != 0; i--) {
@@ -116,16 +131,18 @@ exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
 		sp -= length;
 		error = vmspace_copy_to(vm, sp, argv[i - 1U], length);
 		if (error != 0)
-			return error;
+			goto out;
 		argv_address[i - 1U] = (exec_user_word_t)sp;
 	}
-	table_size = (1U + argc + 1U + envc + 1U +
-	    EXEC_AUXV_PAIRS * 2U) * sizeof(exec_user_word_t);
-	if (sp < table_size)
-		return EOVERFLOW;
+	if (sp < table_size) {
+		error = EOVERFLOW;
+		goto out;
+	}
 	sp = (sp - table_size) & ~(uintptr_t)15U;
-	if (sp < vm->stack_bottom)
-		return EOVERFLOW;
+	if (sp < vm->stack_bottom) {
+		error = EOVERFLOW;
+		goto out;
+	}
 	words[word_count++] = argc;
 	for (i = 0; i < argc; i++) words[word_count++] = argv_address[i];
 	words[word_count++] = 0;
@@ -150,14 +167,19 @@ exec_build_initial_stack(struct vmspace *vm, size_t stack_size,
 	APPEND_AUX(AT_NULL, 0);
 #undef APPEND_AUX
 	if (word_count != 1U + argc + 1U + envc + 1U +
-	    EXEC_AUXV_PAIRS * 2U)
-		return EOVERFLOW;
+	    EXEC_AUXV_PAIRS * 2U) {
+		error = EOVERFLOW;
+		goto out;
+	}
 	error = vmspace_copy_to(vm, sp, words,
 				word_count * sizeof(words[0]));
 	if (error != 0)
-		return error;
+		goto out;
 	*sp_out = sp;
-	return 0;
+out:
+	kern_free(words);
+	kern_free(address);
+	return error;
 }
 
 static int
@@ -382,6 +404,13 @@ process_exec_file(struct process *process, const char *path,
 	}
 	if (error != 0)
 		goto out;
+	/* All failure-capable HAL validation precedes sibling retirement.  After
+	 * this point exec is a one-way commit and the architecture must accept
+	 * the exact tuple it validated. */
+	if (hal_task_exec_validate(new_vm->space, execution_entry, sp) != 0) {
+		error = EINVAL;
+		goto out;
+	}
 	/* POSIX exec keeps only the calling thread.  Publish a kernel-only
 	 * retirement request and wait until every other task has crossed a
 	 * syscall/interrupt return boundary before replacing the vmspace. */
@@ -411,16 +440,12 @@ process_exec_file(struct process *process, const char *path,
 	}
 	old_vm = process->vmspace;
 	irq_enabled = hal_irq_disable();
-	error = hal_task_exec_current(new_vm->space, execution_entry, sp) == 0 ?
-	    0 : EINVAL;
-	if (error == 0) {
-		process->vmspace = new_vm;
-		new_vm = NULL;
-	}
+	if (hal_task_exec_current(new_vm->space, execution_entry, sp) != 0)
+		HAL_FATAL("validated HAL exec commit failed");
+	process->vmspace = new_vm;
+	new_vm = NULL;
 	if (irq_enabled)
 		hal_irq_enable();
-	if (error != 0)
-		goto out;
 	filedesc_close_on_exec(process->fd);
 	process_timer_cleanup(process);
 	signal_exec(process);

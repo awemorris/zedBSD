@@ -601,7 +601,12 @@ int inode_unlink(struct inode *i, const struct componentname *n)
 	if (readonly(i)) return EROFS;
 	error = inode_lookup(i, n, &target);
 	if (error != 0) return error;
-	if ((target->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+	if (target->i_type == INODE_DIR) {
+		inode_release(target);
+		return EPERM;
+	}
+	if ((target->i_flags & (INODE_ROOT | INODE_MOUNTPOINT |
+	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 		inode_release(target);
 		return EBUSY;
 	}
@@ -623,7 +628,12 @@ int inode_rmdir(struct inode *i, const struct componentname *n)
 	if (readonly(i)) return EROFS;
 	error = inode_lookup(i, n, &target);
 	if (error != 0) return error;
-	if ((target->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+	if (target->i_type != INODE_DIR) {
+		inode_release(target);
+		return ENOTDIR;
+	}
+	if ((target->i_flags & (INODE_ROOT | INODE_MOUNTPOINT |
+	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 		inode_release(target);
 		return EBUSY;
 	}
@@ -651,23 +661,43 @@ int inode_rename(struct inode *od, const struct componentname *on,
 	error = inode_lookup(od, on, &source);
 	if (error != 0)
 		return error;
-	if ((source->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+	if ((source->i_flags & (INODE_ROOT | INODE_MOUNTPOINT |
+	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 		inode_release(source);
 		return EBUSY;
 	}
-	inode_release(source);
 	error = inode_lookup(nd, nn, &target);
 	if (error == 0) {
-		if ((target->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+		if (target == source || (target->i_mount == source->i_mount &&
+		    target->i_ino == source->i_ino)) {
 			inode_release(target);
+			inode_release(source);
+			return 0;
+		}
+		if ((target->i_flags & (INODE_ROOT | INODE_MOUNTPOINT |
+		    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+			inode_release(target);
+			inode_release(source);
 			return EBUSY;
+		}
+		if (source->i_type == INODE_DIR && target->i_type != INODE_DIR) {
+			inode_release(target);
+			inode_release(source);
+			return ENOTDIR;
+		}
+		if (source->i_type != INODE_DIR && target->i_type == INODE_DIR) {
+			inode_release(target);
+			inode_release(source);
+			return EISDIR;
 		}
 		inode_release(target);
 	} else if (error != ENOENT) {
+		inode_release(source);
 		return error;
 	}
 	error = od->i_op != NULL && od->i_op->rename != NULL ?
 		od->i_op->rename(od, on, nd, nn, flags) : EOPNOTSUPP;
+	inode_release(source);
 	if (error == 0) {
 		namecache_remove(od, on);
 		namecache_remove(nd, nn);

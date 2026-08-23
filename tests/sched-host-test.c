@@ -29,6 +29,20 @@ struct process *process_find_next_ref(pid_t after)
 void process_release(struct process *process) { (void)process; }
 int signal_send_process(struct process *process, int signal)
 { (void)process; (void)signal; return 0; }
+int signal_send_process_info(struct process *process, int signal,
+	const struct signal_info *info)
+{ (void)process; (void)signal; (void)info; return 0; }
+int process_itimer_tick(struct process *process, int which)
+{
+	uint64_t remaining = process->itimer_remaining[which];
+	if (remaining == 0)
+		return 0;
+	process->itimer_remaining[which] = remaining == 1U ?
+	    process->itimer_interval[which] : remaining - 1U;
+	return remaining == 1U;
+}
+
+void process_itimer_real_tick_all(void) { }
 
 hal_cpu_id_t hal_cpu_current(void) { return current_cpu; }
 unsigned hal_cpu_count(void) { return TEST_CPUS; }

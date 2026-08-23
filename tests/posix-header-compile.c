@@ -4,6 +4,7 @@
 #include <aio.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <mqueue.h>
 #include <netdb.h>
 #include <poll.h>
@@ -31,6 +32,13 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <zedbsd/process.h>
+
+_Static_assert(ARG_MAX == ZEDBSD_ARG_MAX,
+    "libc and kernel exec byte limits must agree");
+_Static_assert(ZEDBSD_EXEC_VECTOR_MAX ==
+    ZEDBSD_ARG_MAX / sizeof(uintptr_t),
+    "exec vector capacity must follow the active ABI pointer width");
 
 static void *thread_entry(void *argument) { return argument; }
 

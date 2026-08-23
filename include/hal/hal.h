@@ -508,6 +508,12 @@ hal_task_exec_current(
 	uintptr_t entry,
 	uintptr_t user_stack_pointer);
 
+int
+hal_task_exec_validate(
+	hal_space_t new_space,
+	uintptr_t entry,
+	uintptr_t user_stack_pointer);
+
 uintptr_t
 hal_task_user_stack(void);
 

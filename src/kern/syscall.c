@@ -66,6 +66,9 @@
 #define SYSCALL_PAGE_MASK (ZEDBSD_PAGE_SIZE - 1U)
 #define SYSCALL_EXT __attribute__((section(".hightext")))
 
+_Static_assert(KERN_PIPE_BUF <= SYSCALL_IO_CHUNK,
+    "writev PIPE_BUF coalescing buffer is too small");
+
 static intptr_t syscall_dispatch(uint32_t, const uintptr_t [6]);
 static intptr_t syscall_dispatch_body(uint32_t, const uintptr_t [6]);
 static struct process *current_process(void);
@@ -106,7 +109,7 @@ poll_mask_enter(uintptr_t address, struct poll_mask_guard *guard)
 }
 
 static void
-poll_mask_leave(struct poll_mask_guard *guard)
+poll_mask_leave(struct poll_mask_guard *guard, int defer_restore)
 {
 	struct process *process;
 	unsigned long irq;
@@ -114,7 +117,15 @@ poll_mask_leave(struct poll_mask_guard *guard)
 	    (process = guard->thread->proc) == NULL)
 		return;
 	irq = spin_lock_irqsave(&process->lock);
-	guard->thread->signal_mask = guard->saved;
+	if (defer_restore) {
+		/* Keep the temporary mask installed until the selected handler is
+		 * entered.  Restoring it here would reopen the classic
+		 * pselect()/ppoll() lost-signal window. */
+		guard->thread->signal_suspend_mask = guard->saved;
+		guard->thread->signal_suspended = 1;
+	} else {
+		guard->thread->signal_mask = guard->saved;
+	}
 	guard->active = 0;
 	spin_unlock_irqrestore(&process->lock, irq);
 }
@@ -180,7 +191,7 @@ sys_ppoll_call(const uintptr_t args[6])
 		error = kern_poll_wait(process, fds, count, deadline, immediate,
 		    &ready);
 	if (args[3] != 0)
-		poll_mask_leave(&guard);
+		poll_mask_leave(&guard, error == EINTR);
 	if (error == 0 && bytes != 0)
 		error = copyout_pinned(&pin, 0, fds, bytes);
 	uaccess_unpin(&pin);
@@ -257,7 +268,7 @@ sys_pselect_call(const uintptr_t args[6])
 		error = kern_poll_wait(process, fds, count, deadline, immediate,
 		    &ready);
 	if (args[5] != 0)
-		poll_mask_leave(&guard);
+		poll_mask_leave(&guard, error == EINTR);
 	if (error != 0)
 		goto out;
 	(void)ready;
@@ -1476,6 +1487,9 @@ static uint32_t dirent_type(enum inode_type type)
 	case INODE_DIR: return ZEDBSD_DT_DIR;
 	case INODE_BLOCK: return ZEDBSD_DT_BLK;
 	case INODE_CHAR: return ZEDBSD_DT_CHR;
+	case INODE_FIFO: return ZEDBSD_DT_FIFO;
+	case INODE_SYMLINK: return ZEDBSD_DT_LNK;
+	case INODE_SOCKET: return ZEDBSD_DT_SOCK;
 	default: return ZEDBSD_DT_UNKNOWN;
 	}
 }
@@ -1974,8 +1988,15 @@ static intptr_t sys_nanosleep_call(const uintptr_t args[6])
 		return -EINTR;
 	error = kern_deadline_after(sched_ticks(), ticks, &deadline);
 	if (error != 0) return -error;
-	sched_sleep(deadline);
-	if (signal_pending_unblocked(curthread) && sched_ticks() < deadline) {
+	for (;;) {
+		uint64_t now;
+
+		sched_sleep(deadline);
+		now = sched_ticks();
+		if (now >= deadline)
+			return 0;
+		if (!signal_pending_unblocked(curthread))
+			continue;
 		left = kern_deadline_remaining(sched_ticks(), deadline);
 		if (args[1] != 0) {
 			remaining.tv_sec = (time_t)(left / KERN_CLOCK_HZ);
@@ -1987,7 +2008,6 @@ static intptr_t sys_nanosleep_call(const uintptr_t args[6])
 		}
 		return -EINTR;
 	}
-	return 0;
 }
 
 struct syscall_exec_args {
@@ -2305,7 +2325,7 @@ sys_truncate_call(const uintptr_t args[6], int by_fd)
 			return -EBADF;
 		if ((file_status_flags_get(file) & O_ACCMODE) == O_RDONLY) {
 			(void)file_close(file);
-			return -EBADF;
+			return -EINVAL;
 		}
 		inode = file->f_inode;
 	} else {
@@ -2366,14 +2386,17 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 	if (error != 0)
 		goto out_held;
 	if (number == ZEDBSD_SYS_mkdir) {
+		mount_vfs_transaction_enter(parent.p_mount);
 		error = vfs_may_create(parent.p_inode, process->cred);
 		if (error == 0)
 			error = inode_mkdir(parent.p_inode, &name,
 			    ((mode_t)option & 07777U) & ~process->umask, &created);
+		mount_vfs_transaction_leave(parent.p_mount);
 	} else if (number == ZEDBSD_SYS_unlink ||
 	    number == ZEDBSD_SYS_rmdir) {
 		struct inode *victim;
 
+		mount_vfs_transaction_enter(parent.p_mount);
 		error = inode_lookup(parent.p_inode, &name, &victim);
 		if (error == 0) {
 			error = vfs_may_remove(parent.p_inode, victim,
@@ -2384,6 +2407,7 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 			error = number == ZEDBSD_SYS_unlink ?
 			    inode_unlink(parent.p_inode, &name) :
 			    inode_rmdir(parent.p_inode, &name);
+		mount_vfs_transaction_leave(parent.p_mount);
 	} else {
 		struct inode *source = NULL, *target = NULL;
 
@@ -2400,6 +2424,10 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 			if (error == 0)
 				other_valid = 1;
 		}
+		if (error == 0 && parent.p_mount != other_parent.p_mount)
+			error = EXDEV;
+		if (error == 0)
+			mount_vfs_transaction_enter(parent.p_mount);
 		if (error == 0)
 			error = inode_lookup(parent.p_inode, &name, &source);
 		if (error == 0) {
@@ -2421,6 +2449,8 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 			inode_release(target);
 		if (source != NULL)
 			inode_release(source);
+		if (other_valid && parent.p_mount == other_parent.p_mount)
+			mount_vfs_transaction_leave(parent.p_mount);
 		if (other_valid)
 			path_release(&other_parent);
 		if (other_held != NULL)
@@ -2476,41 +2506,39 @@ sys_umask_call(const uintptr_t args[6])
 static int
 replace_cred(struct process *process, struct ucred *replacement)
 {
-	struct ucred *old;
-	if (process == NULL || replacement == NULL || process == &process0)
-		return EPERM;
-	old = process->cred;
-	process->cred = replacement;
-	cred_release(old);
-	return 0;
+	return process_cred_replace(process, replacement);
 }
 
 static intptr_t
 sys_cred_get_call(uint32_t number, const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct ucred *cred = process != NULL ? process->cred : NULL;
-	int error;
+	struct ucred *cred = process != NULL ? cred_current_ref() : NULL;
+	intptr_t result;
+	int error = 0;
 	if (cred == NULL)
 		return -EINVAL;
 	switch (number) {
-	case ZEDBSD_SYS_getuid: return cred->ruid;
-	case ZEDBSD_SYS_geteuid: return cred->euid;
-	case ZEDBSD_SYS_getgid: return cred->rgid;
-	case ZEDBSD_SYS_getegid: return cred->egid;
+	case ZEDBSD_SYS_getuid: result = cred->ruid; break;
+	case ZEDBSD_SYS_geteuid: result = cred->euid; break;
+	case ZEDBSD_SYS_getgid: result = cred->rgid; break;
+	case ZEDBSD_SYS_getegid: result = cred->egid; break;
 	case ZEDBSD_SYS_getgroups:
 		if ((int)args[0] < 0 ||
-		    ((unsigned)args[0] != 0 && (unsigned)args[0] < cred->ngroups))
-			return -EINVAL;
-		if (args[0] != 0) {
+		    ((unsigned)args[0] != 0 &&
+		    (unsigned)args[0] < cred->ngroups)) {
+			error = EINVAL;
+			break;
+		}
+		if (args[0] != 0)
 			error = copyout(cred->groups, args[1],
 			    cred->ngroups * sizeof(cred->groups[0]));
-			if (error != 0)
-				return -error;
-		}
-		return cred->ngroups;
-	default: return -EINVAL;
+		result = cred->ngroups;
+		break;
+	default: error = EINVAL; result = 0; break;
 	}
+	cred_release(cred);
+	return error == 0 ? result : -error;
 }
 
 static int
@@ -2531,16 +2559,20 @@ static intptr_t
 sys_cred_set_call(uint32_t number, const uintptr_t args[6])
 {
 	struct process *process = current_process();
-	struct ucred *old = process != NULL ? process->cred : NULL;
+	struct ucred *old = process != NULL ? cred_current_ref() : NULL;
 	struct ucred *cred;
 	uid_t ruid, euid;
 	gid_t rgid, egid;
 	int error;
-	if (old == NULL || process == &process0)
+	if (old == NULL || process == &process0) {
+		cred_release(old);
 		return -EPERM;
+	}
 	cred = cred_copy(old);
-	if (cred == NULL)
+	if (cred == NULL) {
+		cred_release(old);
 		return -ENOMEM;
+	}
 	switch (number) {
 	case ZEDBSD_SYS_setuid:
 		if (!uid_permitted(old, (uid_t)args[0])) { error = EPERM; break; }
@@ -2595,6 +2627,7 @@ sys_cred_set_call(uint32_t number, const uintptr_t args[6])
 		error = replace_cred(process, cred);
 	else
 		cred_release(cred);
+	cred_release(old);
 	return error == 0 ? 0 : -error;
 }
 
@@ -2727,7 +2760,7 @@ sys_getxattr_call(const uintptr_t args[6], int by_fd, int nofollow)
 	}
 	result = vfs_getxattr(reference.inode, process->cred, name, value, size);
 	if (result >= 0 && size != 0 && (size_t)result > size)
-		error = EIO;
+		error = ERANGE;
 	else if (result >= 0 && result != 0 && size != 0)
 		error = copyout(value, args[2], (size_t)result);
 	else
@@ -2794,7 +2827,7 @@ sys_listxattr_call(const uintptr_t args[6], int by_fd, int nofollow)
 	}
 	result = vfs_listxattr(reference.inode, process->cred, list, size);
 	if (result >= 0 && size != 0 && (size_t)result > size)
-		error = EIO;
+		error = ERANGE;
 	else if (result >= 0 && result != 0 && size != 0)
 		error = copyout(list, args[1], (size_t)result);
 	else
@@ -3008,7 +3041,9 @@ sys_utimens_common(int dirfd, uintptr_t pathname, int fd,
 	}
 	if (error == 0 && mask != 0 &&
 	    !inode_chmod_allowed(inode, process->cred)) {
-		if (explicit_time || vfs_access(inode, process->cred, W_OK) != 0)
+		if (explicit_time)
+			error = EPERM;
+		else if (vfs_access(inode, process->cred, W_OK) != 0)
 			error = EACCES;
 	}
 	if (error == 0 && mask != 0)
@@ -3101,11 +3136,15 @@ sys_linkat_call(const uintptr_t args[6])
 	if (error == 0)
 		parent_valid = 1;
 	if (error == 0)
+		mount_vfs_transaction_enter(parent.p_mount);
+	if (error == 0)
 		error = vfs_may_create(parent.p_inode, process->cred);
 	if (error == 0)
 		error = inode_link(parent.p_inode, &name, target.p_inode);
 	if (error == 0)
 		namecache_remove(parent.p_inode, &name);
+	if (parent_valid)
+		mount_vfs_transaction_leave(parent.p_mount);
 	if (parent_valid)
 		path_release(&parent);
 	if (new_held != NULL)
@@ -3140,6 +3179,8 @@ sys_symlinkat_call(const uintptr_t args[6])
 			parent_valid = 1;
 	}
 	if (error == 0)
+		mount_vfs_transaction_enter(parent.p_mount);
+	if (error == 0)
 		error = vfs_may_create(parent.p_inode, process->cred);
 	if (error == 0)
 		error = inode_symlink(parent.p_inode, &name, target, &created);
@@ -3147,6 +3188,8 @@ sys_symlinkat_call(const uintptr_t args[6])
 		namecache_remove(parent.p_inode, &name);
 	if (created != NULL)
 		inode_release(created);
+	if (parent_valid)
+		mount_vfs_transaction_leave(parent.p_mount);
 	if (parent_valid)
 		path_release(&parent);
 	if (held != NULL)
@@ -3262,10 +3305,14 @@ static intptr_t
 sys_sigpending_call(const uintptr_t args[6])
 {
 	sigset_t pending;
+	unsigned long irq;
 	int error;
 	if (curthread == NULL || curthread->proc == NULL || args[0] == 0)
 		return -EINVAL;
-	pending = curthread->signal_pending | curthread->proc->signal_pending;
+	irq = spin_lock_irqsave(&curthread->proc->lock);
+	pending = (curthread->signal_pending |
+	    curthread->proc->signal_pending) & curthread->signal_mask;
+	spin_unlock_irqrestore(&curthread->proc->lock, irq);
 	error = copyout(&pending, args[0], sizeof(pending));
 	return error == 0 ? 0 : -error;
 }
@@ -3306,6 +3353,8 @@ sys_mknodat_call(const uintptr_t args[6])
 	}
 	error = namei_parent_path_at(context, pathname, &parent, &name, storage);
 	if (error == 0)
+		mount_vfs_transaction_enter(parent.p_mount);
+	if (error == 0)
 		error = vfs_may_create(parent.p_inode, process->cred);
 	if (error == 0)
 		error = inode_mknod(parent.p_inode, &name, type,
@@ -3313,6 +3362,8 @@ sys_mknodat_call(const uintptr_t args[6])
 		    (dev_t)args[3], &created);
 	if (created != NULL)
 		inode_release(created);
+	if (parent.p_mount != NULL)
+		mount_vfs_transaction_leave(parent.p_mount);
 	path_release(&parent);
 	if (held != NULL)
 		(void)file_close(held);
@@ -3360,7 +3411,6 @@ sys_sigaltstack_call(const uintptr_t args[6])
 			curthread->signal_altstack_flags = SS_DISABLE;
 		} else {
 			if (requested.ss_flags != 0 || requested.ss_size < MINSIGSTKSZ ||
-			    requested.ss_size > SIZE_MAX ||
 			    user_range_check((uintptr_t)requested.ss_sp,
 			    (size_t)requested.ss_size, HAL_SPACE_WRITE) != 0)
 				return -EINVAL;
@@ -3421,10 +3471,12 @@ sys_sigqueue_call(const uintptr_t args[6])
 	struct signal_info info;
 	pid_t pid = (pid_t)args[0];
 	int signo = (int)args[1], error;
-	if (sender == NULL || pid <= 0 || signo <= 0 || signo >= NSIG)
+	if (sender == NULL || pid <= 0 || signo < 0 || signo >= NSIG)
 		return -EINVAL;
 	error = signal_kill(sender, pid, 0);
 	if (error != 0) return -error;
+	if (signo == 0)
+		return 0;
 	target = process_find_ref(pid);
 	if (target == NULL) return -ESRCH;
 	memset(&info, 0, sizeof(info));
@@ -3897,6 +3949,9 @@ static int
 priority_matches(struct process *target, struct process *caller, int which,
     id_t who)
 {
+	struct ucred *target_cred;
+	uid_t target_euid = (uid_t)-1;
+
 	if (who == 0) {
 		if (which == PRIO_PROCESS) who = (id_t)caller->pid;
 		else if (which == PRIO_PGRP) who = (id_t)caller->pgrp;
@@ -3904,7 +3959,14 @@ priority_matches(struct process *target, struct process *caller, int which,
 	}
 	if (which == PRIO_PROCESS) return target->pid == (pid_t)who;
 	if (which == PRIO_PGRP) return target->pgrp == (pid_t)who;
-	if (which == PRIO_USER) return target->cred != NULL && target->cred->euid == (uid_t)who;
+	if (which == PRIO_USER) {
+		target_cred = cred_process_ref(target);
+		if (target_cred != NULL) {
+			target_euid = target_cred->euid;
+			cred_release(target_cred);
+		}
+		return target_euid == (uid_t)who;
+	}
 	return 0;
 }
 
@@ -3944,11 +4006,18 @@ sys_setpriority_call(const uintptr_t args[6])
 	if (value > 20)
 		value = 20;
 	while((target=process_find_next_ref(cursor))!=NULL){
+		struct ucred *target_cred;
 		cursor=target->pid;
 		if(priority_matches(target,caller,which,(id_t)args[1])){
 			int old=__atomic_load_n(&target->nice_value,__ATOMIC_RELAXED);
 			found=1;
-			if(target->cred==NULL || (caller->cred->euid!=0 && caller->cred->euid!=target->cred->euid)){process_release(target);return -EPERM;}
+			target_cred = cred_process_ref(target);
+			if(target_cred==NULL || (caller->cred->euid!=0 && caller->cred->euid!=target_cred->euid)){
+				cred_release(target_cred);
+				process_release(target);
+				return -EPERM;
+			}
+			cred_release(target_cred);
 			if(value<old && !cred_is_superuser(caller->cred)){process_release(target);return -EPERM;}
 			__atomic_store_n(&target->nice_value,value,__ATOMIC_RELAXED);
 		}
@@ -3960,8 +4029,9 @@ sys_setpriority_call(const uintptr_t args[6])
 static void
 ticks_to_timeval(uint64_t ticks, struct timeval *value)
 {
-	value->tv_sec=(time_t)(ticks/100U);
-	value->tv_usec=(long)((ticks%100U)*10000U);
+	value->tv_sec = (time_t)(ticks / KERN_CLOCK_HZ);
+	value->tv_usec = (long)((ticks % KERN_CLOCK_HZ) *
+	    (1000000U / KERN_CLOCK_HZ));
 }
 
 static intptr_t
@@ -3982,8 +4052,9 @@ timeval_ticks(const struct timeval *value,uint64_t *ticks)
 {
 	uint64_t whole, fraction;
 	if(value->tv_sec<0||value->tv_usec<0||value->tv_usec>=1000000)return EINVAL;
-	if((uint64_t)value->tv_sec>UINT64_MAX/100U)return EOVERFLOW;
-	whole=(uint64_t)value->tv_sec*100U;fraction=((uint64_t)value->tv_usec+9999U)/10000U;
+	if((uint64_t)value->tv_sec>UINT64_MAX/KERN_CLOCK_HZ)return EOVERFLOW;
+	whole=(uint64_t)value->tv_sec*KERN_CLOCK_HZ;
+	fraction=((uint64_t)value->tv_usec*KERN_CLOCK_HZ+999999U)/1000000U;
 	if (whole > UINT64_MAX - fraction)
 		return EOVERFLOW;
 	*ticks = whole + fraction;
@@ -3993,8 +4064,8 @@ timeval_ticks(const struct timeval *value,uint64_t *ticks)
 static void
 timer_snapshot(struct process *process,int which,struct itimerval *value)
 {
-	uint64_t remaining=atomic_u64_load_acquire(&process->itimer_remaining[which]);
-	uint64_t interval=atomic_u64_load_acquire(&process->itimer_interval[which]);
+	uint64_t remaining, interval;
+	(void)process_itimer_get(process, which, &remaining, &interval);
 	memset(value,0,sizeof(*value));ticks_to_timeval(remaining,&value->it_value);ticks_to_timeval(interval,&value->it_interval);
 }
 
@@ -4013,9 +4084,14 @@ sys_setitimer_call(const uintptr_t args[6])
 	if(p==NULL||which<0||which>2||args[1]==0||args[3]||args[4]||args[5])return -EINVAL;
 	error=copyin(args[1],&value,sizeof(value));if(error)return -error;
 	if((error=timeval_ticks(&value.it_value,&remaining))!=0||(error=timeval_ticks(&value.it_interval,&interval))!=0)return -error;
-	timer_snapshot(p,which,&old);
-	atomic_u64_store_release(&p->itimer_interval[which],interval);
-	atomic_u64_store_release(&p->itimer_remaining[which],remaining);
+	{
+		uint64_t old_remaining, old_interval;
+		(void)process_itimer_set(p, which, remaining, interval,
+		    &old_remaining, &old_interval);
+		memset(&old, 0, sizeof(old));
+		ticks_to_timeval(old_remaining, &old.it_value);
+		ticks_to_timeval(old_interval, &old.it_interval);
+	}
 	if(args[2]){error=copyout(&old,args[2],sizeof(old));if(error)return -error;}
 	return 0;
 }
@@ -4086,7 +4162,8 @@ sys_waitpid_call(const uintptr_t args[6])
 	int status = 0;
 	pid_t result;
 	int error = 0;
-	if (args[3] != 0 || args[4] != 0 || args[5] != 0)
+	if (args[3] != 0 || args[4] != 0 || args[5] != 0 ||
+	    ((int)args[2] & ~(WNOHANG | WUNTRACED | WCONTINUED)) != 0)
 		return -EINVAL;
 	if (args[1] != 0) {
 		error = uaccess_pin(args[1], sizeof(status), HAL_SPACE_WRITE, &pin);
@@ -4439,12 +4516,24 @@ syscall_restartable(uint32_t number)
 	switch (number) {
 	case ZEDBSD_SYS_read:
 	case ZEDBSD_SYS_write:
+	case ZEDBSD_SYS_pread:
+	case ZEDBSD_SYS_pwrite:
 	case ZEDBSD_SYS_readv:
 	case ZEDBSD_SYS_writev:
+	case ZEDBSD_SYS_open:
+	case ZEDBSD_SYS_openat:
+	case ZEDBSD_SYS_ioctl:
+	case ZEDBSD_SYS_fsync:
+	case ZEDBSD_SYS_fdatasync:
 	case ZEDBSD_SYS_waitpid:
 	case ZEDBSD_SYS_waitid:
+	case ZEDBSD_SYS_connect:
 	case ZEDBSD_SYS_accept:
+	case ZEDBSD_SYS_sendto:
 	case ZEDBSD_SYS_recvfrom:
+	case ZEDBSD_SYS_sendmsg:
+	case ZEDBSD_SYS_recvmsg:
+	case ZEDBSD_SYS_thread_join:
 	case ZEDBSD_SYS_socketpair:
 		return 1;
 	default:
@@ -4456,8 +4545,10 @@ static intptr_t
 syscall_dispatch(uint32_t number, const uintptr_t args[6])
 {
 	struct thread *thread = curthread;
+	struct process *process = thread != NULL ? thread->proc : NULL;
 	intptr_t result;
 
+	process_cred_read_enter(process);
 	if (thread != NULL && number != ZEDBSD_SYS_sigreturn) {
 		thread->syscall_restart_number = number;
 		memcpy(thread->syscall_restart_args, args,
@@ -4469,6 +4560,7 @@ syscall_dispatch(uint32_t number, const uintptr_t args[6])
 	if (thread != NULL && number != ZEDBSD_SYS_sigreturn)
 		thread->syscall_restart_valid = result == -EINTR &&
 		    syscall_restartable(number);
+	process_cred_read_leave(process);
 	return result;
 }
 

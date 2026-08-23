@@ -32,6 +32,16 @@ static struct hal_cpu_mask scheduler_online_mask;
 static volatile uint64_t scheduler_ticks;
 static volatile unsigned scheduler_round_robin;
 
+static void
+send_itimer_signal(struct process *process, int signo)
+{
+	struct signal_info info;
+
+	memset(&info, 0, sizeof(info));
+	info.code = SI_TIMER;
+	(void)signal_send_process_info(process, signo, &info);
+}
+
 static struct sched_cpu *
 sched_cpu_state(hal_cpu_id_t cpu)
 {
@@ -425,21 +435,11 @@ sched_clock_cpu(hal_cpu_id_t id, uint64_t now)
 			(void)atomic_u64_fetch_add_relaxed(&thread->proc->cpu_ticks, 1U);
 		if ((thread->flags & THREAD_FLAG_IDLE) == 0 && thread->proc != NULL) {
 			unsigned timer;
-			for (timer = 1; timer < 3; timer++) {
-				uint64_t old = atomic_u64_load_acquire(
-				    &thread->proc->itimer_remaining[timer]);
-				while (old != 0 && !atomic_u64_compare_exchange(
-				    &thread->proc->itimer_remaining[timer], &old, old - 1U))
-					;
-				if (old == 1U) {
-					uint64_t reload = atomic_u64_load_acquire(
-					    &thread->proc->itimer_interval[timer]);
-					atomic_u64_store_release(
-					    &thread->proc->itimer_remaining[timer], reload);
+			for (timer = 1; timer < 3; timer++)
+				if (process_itimer_tick(thread->proc, (int)timer)) {
 					expired_process = thread->proc;
 					expired_signals |= 1U << timer;
 				}
-			}
 		}
 		if ((thread->flags & THREAD_FLAG_IDLE) != 0)
 			preempt = cpu->need_resched != 0;
@@ -449,31 +449,15 @@ sched_clock_cpu(hal_cpu_id_t id, uint64_t now)
 	}
 	spin_unlock_irqrestore(&cpu->lock, irq);
 	if (expired_process != NULL) {
-		if (expired_signals & 2U) (void)signal_send_process(expired_process, SIGVTALRM);
-		if (expired_signals & 4U) (void)signal_send_process(expired_process, SIGPROF);
+		if (expired_signals & 2U)
+			send_itimer_signal(expired_process, SIGVTALRM);
+		if (expired_signals & 4U)
+			send_itimer_signal(expired_process, SIGPROF);
 	}
-	/* ITIMER_REAL is wall-clock based, so CPU 0 advances it for every process. */
-	if (id == 0) {
-		struct process *process;
-		pid_t cursor = -1;
-		while ((process = process_find_next_ref(cursor)) != NULL) {
-			uint64_t remaining;
-			cursor = process->pid;
-			remaining = atomic_u64_load_acquire(
-			    &process->itimer_remaining[0]);
-			while (remaining != 0 && !atomic_u64_compare_exchange(
-			    &process->itimer_remaining[0], &remaining, remaining - 1U))
-				;
-			if (remaining == 1U) {
-				uint64_t reload = atomic_u64_load_acquire(
-				    &process->itimer_interval[0]);
-				atomic_u64_store_release(&process->itimer_remaining[0],
-				    reload);
-				(void)signal_send_process(process, SIGALRM);
-			}
-			process_release(process);
-		}
-	}
+	/* ITIMER_REAL is wall-clock based, so CPU 0 advances all armed state in
+	 * one registry pass rather than repeatedly searching by PID. */
+	if (id == 0)
+		process_itimer_real_tick_all();
 	if (preempt)
 		sched_yield();
 }
@@ -602,6 +586,32 @@ sched_sleep_locked(uint64_t timeout_tick, struct spinlock *condition_lock)
 		queue_append(&cpu->sleep, thread, SCHED_QUEUE_SLEEP);
 	spin_unlock(condition_lock);
 	spin_unlock(&cpu->lock);
+	switch_without_enqueue();
+	spin_lock(condition_lock);
+}
+
+void
+sched_sleep_locked_notify(uint64_t timeout_tick,
+	struct spinlock *condition_lock, void (*notify)(void *), void *argument)
+{
+	struct thread *thread = curthread;
+	struct sched_cpu *cpu;
+
+	(void)hal_irq_disable();
+	if (thread == NULL || condition_lock == NULL || notify == NULL ||
+	    thread->sched.cpu != hal_cpu_current())
+		HAL_FATAL("invalid notifying locked sleep");
+	cpu = sched_cpu_state(thread->sched.cpu);
+	spin_lock(&cpu->lock);
+	thread->state = THREAD_SLEEPING;
+	thread->sched.wakeup_tick = timeout_tick;
+	if (timeout_tick != 0)
+		queue_append(&cpu->sleep, thread, SCHED_QUEUE_SLEEP);
+	spin_unlock(condition_lock);
+	spin_unlock(&cpu->lock);
+	/* The scheduler already regards this task as sleeping, so an observer
+	 * cannot see the notification while the final user thread is runnable. */
+	notify(argument);
 	switch_without_enqueue();
 	spin_lock(condition_lock);
 }
