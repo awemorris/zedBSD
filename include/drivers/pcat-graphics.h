@@ -1,8 +1,15 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 #ifndef ZEDBSD_DRIVERS_PCAT_GRAPHICS_H
 #define ZEDBSD_DRIVERS_PCAT_GRAPHICS_H
 
-int pcat_graphics_driver_register(void);
-int pcat_graphics_init(void);
+int
+pcat_graphics_driver_register(void);
+int
+pcat_graphics_init(void);
 
 #endif

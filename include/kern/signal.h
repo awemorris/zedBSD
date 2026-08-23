@@ -2,9 +2,11 @@
  * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
- * signal
- *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * signal
  */
 
 #ifndef ZEDBSD_KERN_SIGNAL_H
@@ -42,7 +44,7 @@ struct signal_action {
 	unsigned flags;
 };
 
-#define SIGNAL_QUEUE_MAX 32U
+#define SIGNAL_QUEUE_MAX	32U
 
 struct queued_signal {
 	int signo;
@@ -98,7 +100,9 @@ int
 signal_pending_unblocked(
 	const struct thread *);
 
-/* Caller holds thread->proc->lock. */
+/*
+ * Caller holds thread->proc->lock.
+ */
 int
 signal_pending_unblocked_locked(
 	const struct thread *);

@@ -3,7 +3,7 @@
 
 #include <kern/boot.h>
 
-#define ZEDBSD_RPI4_HANDOFF_MAGIC 0x34495052U
+#define ZEDBSD_RPI4_HANDOFF_MAGIC	0x34495052U
 struct rpi4_boot_handoff {
 	struct boot_handoff common;
 	uint32_t extension_magic;
@@ -21,7 +21,9 @@ struct rpi4_boot_handoff {
 	uint32_t reserved[3];
 } __attribute__((packed));
 
-_Static_assert(__builtin_offsetof(struct rpi4_boot_handoff, extension_magic)==24,
-    "Pi 4 handoff must preserve the common 24-byte prefix");
+_Static_assert(
+	__builtin_offsetof(struct rpi4_boot_handoff,
+			   extension_magic) == 24,
+	"Pi 4 handoff must preserve the common 24-byte prefix");
 
 #endif

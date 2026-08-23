@@ -1,4 +1,10 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef ZEDBSD_KERN_TEST_CHECKPOINT_H
 #define ZEDBSD_KERN_TEST_CHECKPOINT_H
 
@@ -24,13 +30,28 @@ enum kern_test_checkpoint_id {
 };
 
 #ifdef ZEDBSD_TEST_CHECKPOINTS
-typedef void (*kern_test_checkpoint_fn)(enum kern_test_checkpoint_id,
-	void *, void *);
-void kern_test_checkpoint_set(kern_test_checkpoint_fn, void *);
-void kern_test_checkpoint(enum kern_test_checkpoint_id, void *);
-#define KERN_TEST_CHECKPOINT(id, object) kern_test_checkpoint((id), (object))
+typedef void (
+	*kern_test_checkpoint_fn)(
+	enum kern_test_checkpoint_id,
+	void *,
+	void *);
+
+void
+kern_test_checkpoint_set(
+	kern_test_checkpoint_fn,
+	void *);
+
+void
+kern_test_checkpoint(
+	enum kern_test_checkpoint_id,
+	void *);
+
+#define KERN_TEST_CHECKPOINT(id, object)	kern_test_checkpoint((id), (object))
+
 #else
-#define KERN_TEST_CHECKPOINT(id, object) ((void)0)
+
+#define KERN_TEST_CHECKPOINT(id, object)	((void)0)
+
 #endif
 
 #endif

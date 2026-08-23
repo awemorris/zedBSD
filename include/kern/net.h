@@ -1,8 +1,12 @@
 /*
- * Network stack
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Network stack
  */
 
 #ifndef ZEDBSD_KERN_NET_H
@@ -17,8 +21,14 @@ struct net_stats {
 	uint64_t input_errors;
 };
 
-int net_init(void);
-void net_shutdown_for_boot(void);
-void net_get_stats(struct net_stats *stats);
+int
+net_init(void);
+
+void
+net_shutdown_for_boot(void);
+
+void
+net_get_stats(
+	struct net_stats *stats);
 
 #endif

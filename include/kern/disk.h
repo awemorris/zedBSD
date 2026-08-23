@@ -1,8 +1,12 @@
 /*
- * Disk (block device)
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Disk (block device)
  */
 
 #ifndef ZEDBSD_KERN_DISK_H
@@ -15,18 +19,27 @@
 #include <kern/lock.h>
 #include <kern/waitq.h>
 
-#define DISK_NAME_MAX 16U
-#define DISK_MAX 80U
-#define DISK_IDENTITY_TEXT_MAX 64U
+#define DISK_NAME_MAX	16U
+#define DISK_MAX	80U
+#define DISK_IDENTITY_TEXT_MAX	64U
 
-#define DISK_READ_ONLY 0x00000001U
-#define DISK_REMOVABLE 0x00000002U
-#define DISK_PARTITION 0x00000004U
+#define DISK_READ_ONLY	0x00000001U
+#define DISK_REMOVABLE	0x00000002U
+#define DISK_PARTITION	0x00000004U
 
-#define DISK_IOCTL_GET_GEOMETRY 1UL
+#define DISK_IOCTL_GET_GEOMETRY	1UL
 
-enum bio_op { BIO_READ, BIO_WRITE, BIO_FLUSH };
-enum bio_state { BIO_NEW, BIO_SUBMITTED, BIO_COMPLETED };
+enum bio_op {
+	BIO_READ,
+	BIO_WRITE,
+	BIO_FLUSH
+};
+
+enum bio_state {
+	BIO_NEW,
+	BIO_SUBMITTED,
+	BIO_COMPLETED
+};
 
 struct disk;
 struct bio;
@@ -38,7 +51,9 @@ struct disk_geometry {
 	uint16_t sectors_per_track;
 };
 
-/* Scalar registry snapshot.  It deliberately contains no disk pointer. */
+/*
+ * Scalar registry snapshot.  It deliberately contains no disk pointer.
+ */
 struct disk_info {
 	char name[DISK_NAME_MAX];
 	dev_t dev;
@@ -101,44 +116,152 @@ struct bio {
 	enum bio_state b_state;
 };
 
-struct disk *disk_alloc(void);
-/* Allocate the next Linux-compatible sd name: sda, ..., sdz, sdaa, ... . */
-int disk_alloc_sd_name(struct disk *disk);
-int disk_create(struct disk *disk);
-void disk_gone(struct disk *disk);
-int disk_gone_if_idle(struct disk *disk);
-int disk_destroy(struct disk *disk);
-struct disk *disk_find(const char *name);
-struct disk *disk_find_by_dev(dev_t dev);
-unsigned disk_count(void);
-unsigned disk_inflight_count(void);
-struct disk *disk_at(unsigned index);
-void disk_ref(struct disk *disk);
-void disk_release(struct disk *disk);
-void disk_registry_reset(void);
-int disk_get_info(const char *name, struct disk_info *result);
-int disk_registry_snapshot(struct disk_info *entries, unsigned capacity,
-			   unsigned *count_out);
-int disk_open_by_dev(dev_t dev, struct disk **result);
+struct disk *
+disk_alloc(void);
 
-int disk_open(struct disk *disk);
-void disk_close(struct disk *disk);
-int disk_ioctl(struct disk *disk, unsigned long request, void *argument);
+/*
+ * Allocate the next Linux-compatible sd name: sda, ..., sdz, sdaa, ... .
+ */
+int
+disk_alloc_sd_name(
+	struct disk *disk);
 
-int bio_submit(struct disk *disk, struct bio *bio);
-void bio_complete(struct bio *bio, int error, size_t transferred);
-int bio_wait(struct bio *bio);
-int bio_flush(struct disk *disk);
+int
+disk_create(
+	struct disk *disk);
 
-/* Uncached synchronous primitives for cache fill/writeback and swap only. */
-int disk_read_direct(struct disk *, uint64_t, uint32_t, void *);
-int disk_write_direct(struct disk *, uint64_t, uint32_t, const void *);
-int disk_resolve_range(struct disk *, uint64_t, uint32_t, struct disk **,
+void
+disk_gone(
+	struct disk *disk);
+
+int
+disk_gone_if_idle(
+	struct disk *disk);
+
+int
+disk_destroy(
+	struct disk *disk);
+
+struct disk *
+disk_find(
+	const char *name);
+
+struct disk *
+disk_find_by_dev(
+	dev_t dev);
+
+unsigned
+disk_count(void);
+
+unsigned
+disk_inflight_count(void);
+
+struct disk *
+disk_at(
+	unsigned index);
+
+void
+disk_ref(
+	struct disk *disk);
+
+void
+disk_release(
+	struct disk *disk);
+
+void
+disk_registry_reset(void);
+
+int
+disk_get_info(
+	const char *name,
+	struct disk_info *result);
+
+int
+disk_registry_snapshot(
+	struct disk_info *entries,
+	unsigned capacity,
+	unsigned *count_out);
+
+int
+disk_open_by_dev(
+	dev_t dev,
+	struct disk **result);
+
+int
+disk_open(
+	struct disk *disk);
+
+void
+disk_close(
+	struct disk *disk);
+
+int
+disk_ioctl(
+	struct disk *disk,
+	unsigned long request,
+	void *argument);
+
+int
+bio_submit(
+	struct disk *disk,
+	struct bio *bio);
+
+void
+bio_complete(
+	struct bio *bio,
+	int error,
+	size_t transferred);
+
+int
+bio_wait(
+	struct bio *bio);
+
+int
+bio_flush(
+	struct disk *disk);
+
+/*
+ * Uncached synchronous primitives for cache fill/writeback and swap only.
+ */
+int
+disk_read_direct(
+	struct disk *,
+	uint64_t,
+	uint32_t,
+	void *);
+
+int
+disk_write_direct(
+	struct disk *,
+	uint64_t,
+	uint32_t,
+	const void *);
+
+int
+disk_resolve_range(
+	struct disk *,
+	uint64_t,
+	uint32_t,
+	struct disk **,
 	uint64_t *);
-int disk_sync(struct disk *);
 
-int disk_read(struct disk *disk, uint64_t block, uint32_t count, void *data);
-int disk_write(struct disk *disk, uint64_t block, uint32_t count,
-	       const void *data);
+int
+disk_sync(
+	struct disk *);
+
+
+int
+disk_read(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	void *data);
+
+int
+disk_write(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	const void *data);
 
 #endif

@@ -1,14 +1,18 @@
 /*
- * Historical Architecture Library
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Historical Architecture Library
  *
  * This header defines a kernel porting HAL. A HAL is implemented fo a
  * combination of a CPU architecture and a machine/board type. A HAL
  * doesn't implement basic kernel features such as scheduling
  * algorithm, and only implements low level operations required fo
  * contemporary 32-bit and 64-bit POSIX-compatible kernels.
- *
- * SPDX-License-Identifier: Zlib
  */
 
 #ifndef HAL_HAL_H
@@ -52,7 +56,9 @@ hal_memcpy(
 	const void *src,
 	size_t n);
 
-/* The embedding kernel supplies the allocator used by the HAL. */
+/*
+ * The embedding kernel supplies the allocator used by the HAL.
+ */
 void
 hal_set_allocator(
 	void *(*alloc)(size_t size),
@@ -98,7 +104,7 @@ hal_fatal(
  * IPI at the moment kernel_main() called.
  */
 
-#define HAL_CPU_MAX		512U
+#define HAL_CPU_MAX	512U
 #define HAL_CPU_MASK_WORDS	((HAL_CPU_MAX + 63U) / 64U)
 
 typedef uint32_t hal_cpu_id_t;
@@ -151,7 +157,7 @@ hal_cpu_mask_test(
 	hal_cpu_id_t cpu)
 {
 	return cpu < HAL_CPU_MAX &&
-	    (mask->bits[cpu / 64U] & ((uint64_t)1 << (cpu % 64U))) != 0;
+	       (mask->bits[cpu / 64U] & ((uint64_t)1 << (cpu % 64U))) != 0;
 }
 
 hal_cpu_id_t
@@ -185,22 +191,30 @@ hal_cpu_panic_all(void);
  * IRQ
  */
 
-#define HAL_IRQ_ACK_NONE ((hal_irq_ack_t)0)
+#define HAL_IRQ_ACK_NONE	((hal_irq_ack_t)0)
 
 typedef uintptr_t hal_irq_ack_t;
 
-typedef void (*hal_irq_handler_t)(int irq, hal_irq_ack_t acknowledge, void *argument);
+typedef void (
+	*hal_irq_handler_t)(
+	int irq,
+	hal_irq_ack_t acknowledge,
+	void *argument);
 
 struct hal_irq_affinity {
 	struct hal_cpu_mask requested;
 	struct hal_cpu_mask effective;
 };
 
-/* Disable IRQ interrupts. Returns true if currently enabled. */
+/*
+ * Disable IRQ interrupts. Returns true if currently enabled.
+ */
 bool
 hal_irq_disable(void);
 
-/* Enable IRQ interrupts. */
+/*
+ * Enable IRQ interrupts.
+ */
 void
 hal_irq_enable(void);
 
@@ -214,22 +228,30 @@ hal_irq_get_affinity(
 	int irq,
 	struct hal_irq_affinity *result);
 
-/* Set an IRQ mask. */
+/*
+ * Set an IRQ mask.
+ */
 void
 hal_irq_mask(
 	int irq_num);
 
-/* Clear an IRQ mask. */
+/*
+ * Clear an IRQ mask.
+ */
 void
 hal_irq_unmask(
 	int irq_num);
 
-/* Send EOI to the IRQ controller. */
+/*
+ * Send EOI to the IRQ controller.
+ */
 void
 hal_irq_send_eoi(
 	hal_irq_ack_t acknowledge);
 
-/* Set an IRQ handler. */
+/*
+ * Set an IRQ handler.
+ */
 int
 hal_irq_set_handler(
 	int irq_num,
@@ -266,7 +288,9 @@ hal_rtc_read(
  * window and must return with local IRQs masked so the HAL can commit the
  * saved frame atomically.
  */
-typedef intptr_t (*hal_syscall_handler_t)(uint32_t number,
+typedef intptr_t (
+	*hal_syscall_handler_t)(
+	uint32_t number,
 	const uintptr_t args[HAL_SYSCALL_ARGS]);
 
 void
@@ -285,14 +309,18 @@ struct hal_reg_set;
 #define HAL_TRAP_CAUSE_ALIGNMENT	(3)
 #define HAL_TRAP_CAUSE_MACHINE_CHECK	(4)
 
-#define HAL_TRAP_MODE_READ		(0)
-#define HAL_TRAP_MODE_WRITE		(1)
-#define HAL_TRAP_MODE_EXEC		(2)
+#define HAL_TRAP_MODE_READ	(0)
+#define HAL_TRAP_MODE_WRITE	(1)
+#define HAL_TRAP_MODE_EXEC	(2)
 
-#define HAL_TRAP_RET_SUCCESS		(0)
-#define HAL_TRAP_RET_FAILED		(1)
+#define HAL_TRAP_RET_SUCCESS	(0)
+#define HAL_TRAP_RET_FAILED	(1)
 
-typedef int (*hal_trap_handler_t)(void *pc, void *addr, int mode);
+typedef int (
+	*hal_trap_handler_t)(
+	void *pc,
+	void *addr,
+	int mode);
 
 void
 hal_set_trap_handler(
@@ -306,7 +334,9 @@ hal_set_trap_handler(
  * access to page tables directly.
  */
 
-/* Address space handle. */
+/*
+ * Address space handle.
+ */
 typedef void *hal_space_t;
 
 /*
@@ -315,22 +345,26 @@ typedef void *hal_space_t;
  * common mapping for system-space operations and is not a detachable task
  * address space.
  */
-#define HAL_SPACE_SYS		(NULL)
+#define HAL_SPACE_SYS	(NULL)
 
-/* Page attributes. */
-#define HAL_SPACE_NONE		(0)
-#define HAL_SPACE_READ		(1)
-#define HAL_SPACE_WRITE		(2)
-#define HAL_SPACE_EXEC		(4)
+/*
+ * Page attributes.
+ */
+#define HAL_SPACE_NONE	(0)
+#define HAL_SPACE_READ	(1)
+#define HAL_SPACE_WRITE	(2)
+#define HAL_SPACE_EXEC	(4)
 #define HAL_SPACE_NOCACHE	(8)
 #define HAL_SPACE_WRITETHRU	(16)
 #define HAL_SPACE_DEVICE	(32)
 
-#define HAL_PAGE_PRESENT  0x01U
-#define HAL_PAGE_ACCESSED 0x02U
-#define HAL_PAGE_DIRTY    0x04U
+#define HAL_PAGE_PRESENT	0x01U
+#define HAL_PAGE_ACCESSED	0x02U
+#define HAL_PAGE_DIRTY	0x04U
 
-/* Create a user space containing the shared system mapping. */
+/*
+ * Create a user space containing the shared system mapping.
+ */
 hal_space_t
 hal_mem_create_space(void);
 
@@ -343,12 +377,16 @@ void
 hal_page_destroy_space(
 	hal_space_t space);
 
-/* Select a user space on the current CPU; HAL_SPACE_SYS selects only system. */
+/*
+ * Select a user space on the current CPU; HAL_SPACE_SYS selects only system.
+ */
 void
 hal_page_switch_space(
 	hal_space_t space);
 
-/* Map an address and complete any required TLB synchronization. */
+/*
+ * Map an address and complete any required TLB synchronization.
+ */
 int
 hal_page_map(
 	hal_space_t space,
@@ -357,7 +395,9 @@ hal_page_map(
 	size_t size,
 	uint32_t attr);
 
-/* Change protection and complete any required TLB synchronization. */
+/*
+ * Change protection and complete any required TLB synchronization.
+ */
 int
 hal_page_prot(
 	hal_space_t space,
@@ -381,7 +421,9 @@ hal_page_prot_query(
 	uint32_t attr,
 	uint32_t *flags);
 
-/* Unmap an address and complete any required TLB synchronization. */
+/*
+ * Unmap an address and complete any required TLB synchronization.
+ */
 int
 hal_page_unmap(
 	hal_space_t space,
@@ -419,7 +461,9 @@ hal_page_flush_tlb_range(
 	void *vaddr,
 	size_t size);
 
-/* Get the page size. (level > 1 means a large page size.) */
+/*
+ * Get the page size. (level > 1 means a large page size.)
+ */
 size_t
 hal_page_get_page_size(
 	int level);
@@ -444,7 +488,7 @@ enum hal_error {
 	HAL_ERR_IO
 };
 
-#define HAL_PMEM_PADDR_ANY ((hal_physaddr_t)-1)
+#define HAL_PMEM_PADDR_ANY	((hal_physaddr_t) - 1)
 
 enum hal_pmem_type {
 	HAL_PMEM_TYPE_RAM = 1,
@@ -452,9 +496,11 @@ enum hal_pmem_type {
 	HAL_PMEM_TYPE_VRAM
 };
 
-/* Flags. */
-#define HAL_PMEM_ATTR_NOCACHE		(1)
-#define HAL_PMEM_ATTR_WRITETHRU		(2)
+/*
+ * Flags.
+ */
+#define HAL_PMEM_ATTR_NOCACHE	(1)
+#define HAL_PMEM_ATTR_WRITETHRU	(2)
 
 struct hal_pmem_request {
 	hal_physaddr_t paddr;
@@ -477,12 +523,16 @@ hal_pmem_alloc(
 	const struct hal_pmem_request *request,
 	struct hal_pmem *desc);
 
-/* Free a physical memory block. */
+/*
+ * Free a physical memory block.
+ */
 int
 hal_pmem_free(
 	struct hal_pmem *desc);
 
-/* Get the total RAM size. */
+/*
+ * Get the total RAM size.
+ */
 size_t
 hal_pmem_get_total_size(void);
 
@@ -510,14 +560,20 @@ hal_memory_get_stats(
  * scheduling using "tasks" and "spaces".
  */
 
-/* Task handle. */
+/*
+ * Task handle.
+ */
 typedef void *hal_task_t;
 
-/* Wrap the CPU context which entered kernel_entry() as the initial task. */
+/*
+ * Wrap the CPU context which entered kernel_entry() as the initial task.
+ */
 void
 hal_task_init(void);
 
-/* Create a task. */
+/*
+ * Create a task.
+ */
 hal_task_t
 hal_task_create(
 	hal_space_t space,
@@ -575,36 +631,50 @@ hal_task_signal_return(
 	uint32_t token,
 	intptr_t *return_value);
 
-/* Destroy a task. */
+/*
+ * Destroy a task.
+ */
 void
 hal_task_destroy(
 	hal_task_t t);
 
-/* Switch to a task. */
+/*
+ * Switch to a task.
+ */
 void
 hal_task_context_switch(
 	hal_task_t t);
 
-/* Atomically enable interrupts and halt, then return with IRQs disabled. */
+/*
+ * Atomically enable interrupts and halt, then return with IRQs disabled.
+ */
 void
 hal_cpu_idle(void);
 
-/* Get the current task. */
+/*
+ * Get the current task.
+ */
 hal_task_t
 hal_task_get_current(void);
 
-/* Set user TLS. */
+/*
+ * Set user TLS.
+ */
 void
 hal_task_set_tls(
 	hal_task_t t,
 	uintptr_t value);
 
-/* Get user TLS. */
+/*
+ * Get user TLS.
+ */
 uintptr_t
 hal_task_get_tls(
 	hal_task_t t);
 
-/* Opaque kernel ownership link.  HAL stores but never dereferences it. */
+/*
+ * Opaque kernel ownership link.  HAL stores but never dereferences it.
+ */
 void
 hal_task_set_private(
 	hal_task_t t,
@@ -629,7 +699,9 @@ hal_task_transfer(
 
 #define hal_compiler_barrier()	__asm__ volatile("" ::: "memory")
 
-/* Memory barrier. */
+/*
+ * Memory barrier.
+ */
 void
 hal_mb(void);
 
@@ -648,7 +720,9 @@ hal_io_rmb(void);
 void
 hal_io_wmb(void);
 
-/* Cache flush */
+/*
+ * Cache flush
+ */
 void
 hal_icache_invalidate_range(
 	uintptr_t addr,
@@ -665,14 +739,18 @@ hal_dcache_invalidate_range(
 	size_t size);
 
 void
-hal_dcache_clean_invalidate_range(uintptr_t addr, size_t size);
+hal_dcache_clean_invalidate_range(
+	uintptr_t addr,
+	size_t size);
 
 void
 hal_sync_instruction_stream(
 	void *addr,
 	size_t size);
 
-/* Halt until a next interrupt. */
+/*
+ * Halt until a next interrupt.
+ */
 void
 hal_halt(void);
 
@@ -752,9 +830,9 @@ enum hal_cons_mode {
 	HAL_CONS_TERMINAL,
 };
 
-#define HAL_CONS_COLUMNS 80U
-#define HAL_CONS_ROWS 25U
-#define HAL_CONS_NORMAL_ATTRIBUTE 0xe1U
+#define HAL_CONS_COLUMNS	80U
+#define HAL_CONS_ROWS	25U
+#define HAL_CONS_NORMAL_ATTRIBUTE	0xe1U
 
 enum hal_key {
 	HAL_KEY_ESCAPE = 0x1b,
@@ -788,11 +866,11 @@ enum hal_key {
 	HAL_KEY_SHIFT = 0x170,
 };
 
-#define HAL_KEY_EVENT_KEY_MASK (0x000001ffU)
-#define HAL_KEY_EVENT_SHIFT    (0x00010000U)
-#define HAL_KEY_EVENT_CTRL     (0x00020000U)
-#define HAL_KEY_EVENT_GRAPH    (0x00040000U)
-#define HAL_KEY_EVENT_RELEASE  (0x00080000U)
+#define HAL_KEY_EVENT_KEY_MASK	(0x000001ffU)
+#define HAL_KEY_EVENT_SHIFT	(0x00010000U)
+#define HAL_KEY_EVENT_CTRL	(0x00020000U)
+#define HAL_KEY_EVENT_GRAPH	(0x00040000U)
+#define HAL_KEY_EVENT_RELEASE	(0x00080000U)
 
 struct hal_cons_state {
 	enum hal_cons_mode mode;
@@ -801,25 +879,36 @@ struct hal_cons_state {
 	int cursor_visible;
 };
 
-/* Reset the HAL console. */
+/*
+ * Reset the HAL console.
+ */
 void
 hal_cons_reset(void);
 
-/* Put a character on the HAL console. */
+/*
+ * Put a character on the HAL console.
+ */
 void
-hal_cons_putc(int c);
+hal_cons_putc(
+	int c);
 
-/* Clear the console. */
+/*
+ * Clear the console.
+ */
 void
 hal_cons_clear(void);
 
-/* Move cursor. */
+/*
+ * Move cursor.
+ */
 void
 hal_cons_move_cursor(
 	int line,
 	int col);
 
-/* Get a character on the kernel console. */
+/*
+ * Get a character on the kernel console.
+ */
 int
 hal_cons_getc(void);
 
@@ -937,17 +1026,23 @@ hal_panic(void);
  * Kernel-side Entrypoints
  */
 
-/* Entrypoint for the primary CPU. */
+/*
+ * Entrypoint for the primary CPU.
+ */
 void
 kernel_entry(
 	const void *handoff);
 
-/* Entrypoint for the secondary CPUs. */
+/*
+ * Entrypoint for the secondary CPUs.
+ */
 void
 kernel_secondary_entry(
 	hal_cpu_id_t cpu);
 
-/* Yield the current task while keeping it runnable. */
+/*
+ * Yield the current task while keeping it runnable.
+ */
 void
 kernel_yield_task(void);
 
@@ -959,24 +1054,32 @@ kernel_yield_task(void);
 void
 kernel_wait_task(void);
 
-/* Make a waiting task runnable.  Safe to call from a real-time ISR. */
+/*
+ * Make a waiting task runnable.  Safe to call from a real-time ISR.
+ */
 void
 kernel_notify_task(
 	hal_task_t task);
 
-/* Scheduling timer callback. */
+/*
+ * Scheduling timer callback.
+ */
 void
 kernel_timer_handler(
 	hal_cpu_id_t cpu,
 	hal_irq_ack_t acknowledge);
 
-/* IPI handler callback. */
+/*
+ * IPI handler callback.
+ */
 void
 kernel_cpu_notify_handler(
 	hal_cpu_id_t cpu,
 	hal_irq_ack_t acknowledge);
 
-/* Trap handler callback. */
+/*
+ * Trap handler callback.
+ */
 void
 kernel_user_int_handler(
 	uint32_t vector,

@@ -1,4 +1,10 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef ZEDBSD_KERN_TEST_FAULT_H
 #define ZEDBSD_KERN_TEST_FAULT_H
 
@@ -21,8 +27,8 @@ struct kern_test_fault_result {
 };
 
 #ifdef ZEDBSD_TEST_FAULTS
-#define KERN_TEST_FAULT_LOG_CAPACITY 128U
-#define KERN_TEST_FAULT_ANY_CONTEXT UINT32_MAX
+#define KERN_TEST_FAULT_LOG_CAPACITY	128U
+#define KERN_TEST_FAULT_ANY_CONTEXT	UINT32_MAX
 
 struct kern_test_fault_config {
 	enum kern_test_fault_id id;
@@ -43,16 +49,31 @@ struct kern_test_fault_log_entry {
 	uint64_t short_count;
 };
 
-void kern_test_fault_reset(void);
-int kern_test_fault_configure(const struct kern_test_fault_config *);
-int kern_test_fault_hit(enum kern_test_fault_id, uint32_t, uint32_t,
+void
+kern_test_fault_reset(void);
+
+int
+kern_test_fault_configure(
+	const struct kern_test_fault_config *);
+
+int
+kern_test_fault_hit(
+	enum kern_test_fault_id,
+	uint32_t,
+	uint32_t,
 	struct kern_test_fault_result *);
-size_t kern_test_fault_log(struct kern_test_fault_log_entry *, size_t);
-#define KERN_TEST_FAULT(id, cpu, tid, result) \
-	kern_test_fault_hit((id), (cpu), (tid), (result))
+
+size_t
+kern_test_fault_log(
+	struct kern_test_fault_log_entry *,
+	size_t);
+
+#define KERN_TEST_FAULT(id, cpu, tid, result)	kern_test_fault_hit((id), (cpu), (tid), (result))
+
 #else
-#define KERN_TEST_FAULT(id, cpu, tid, result) \
-	((void)(id), (void)(cpu), (void)(tid), (void)(result), 0)
+
+#define KERN_TEST_FAULT(id, cpu, tid, result)	((void)(id), (void)(cpu), (void)(tid), (void)(result), 0)
+
 #endif
 
 #endif

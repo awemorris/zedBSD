@@ -1,15 +1,19 @@
 /*
- * Historical Architecture Library
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Historical Architecture Library
  */
 
 #ifndef HAL_HAL_ARCH_H
 #define HAL_HAL_ARCH_H
 
 #if !defined(__ASSEMBLER__) && !defined(_ASM_SRC_)
-#include <hal/types.h>
+# include <hal/types.h>
 #endif
 
 /*
@@ -33,15 +37,15 @@
  */
 
 #if defined(HAL_ARCH_I386)
-#include <hal/arch/i386.h>
+# include <hal/arch/i386.h>
 #elif defined(HAL_ARCH_AMD64)
-#include <hal/arch/amd64.h>
+# include <hal/arch/amd64.h>
 #elif defined(HAL_ARCH_ARM64)
-#include <hal/arch/aarch64.h>
+# include <hal/arch/aarch64.h>
 #elif defined(HAL_ARCH_M68K)
-#include <hal/arch/m68030.h>
+# include <hal/arch/m68030.h>
 #elif defined(HAL_ARCH_SPARCV9)
-#include <hal/arch/sparcv9.h>
+# include <hal/arch/sparcv9.h>
 #endif
 
 #endif

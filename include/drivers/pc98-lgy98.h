@@ -1,12 +1,17 @@
 /*
- * Melco LGY-98 Ethernet driver
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
  */
+
+/*
+ * Melco LGY-98 Ethernet driver
+ */
 #ifndef ZEDBSD_DRIVERS_PC98_LGY98_H
 #define ZEDBSD_DRIVERS_PC98_LGY98_H
 
-int pc98_lgy98_init(void);
+int
+pc98_lgy98_init(void);
 
 #endif

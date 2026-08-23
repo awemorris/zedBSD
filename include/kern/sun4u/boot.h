@@ -1,15 +1,23 @@
-/* zedBSD sun4u platform boot handoff extension. */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * zedBSD sun4u platform boot handoff extension.
+ */
 
 #ifndef ZEDBSD_KERN_SUN4U_BOOT_H
 #define ZEDBSD_KERN_SUN4U_BOOT_H
 
 #include <kern/boot.h>
 
-#define ZEDBSD_SUN4U_HANDOFF_MAGIC 0x53345548U /* "S4UH" */
-#define ZEDBSD_SUN4U_HANDOFF_VERSION 1U
-#define ZEDBSD_SUN4U_MAX_MEMORY_RANGES 16U
-#define ZEDBSD_SUN4U_BOOTPATH_SIZE 256U
+#define ZEDBSD_SUN4U_HANDOFF_MAGIC	0x53345548U /* "S4UH" */
+#define ZEDBSD_SUN4U_HANDOFF_VERSION	1U
+#define ZEDBSD_SUN4U_MAX_MEMORY_RANGES	16U
+#define ZEDBSD_SUN4U_BOOTPATH_SIZE	256U
 
 struct sun4u_memory_range {
 	uint64_t base;
@@ -26,10 +34,8 @@ struct sun4u_boot_handoff {
 	uint8_t available_count;
 	uint8_t boot_channel;
 	uint8_t boot_drive;
-	struct sun4u_memory_range
-	    installed[ZEDBSD_SUN4U_MAX_MEMORY_RANGES];
-	struct sun4u_memory_range
-	    available[ZEDBSD_SUN4U_MAX_MEMORY_RANGES];
+	struct sun4u_memory_range installed[ZEDBSD_SUN4U_MAX_MEMORY_RANGES];
+	struct sun4u_memory_range available[ZEDBSD_SUN4U_MAX_MEMORY_RANGES];
 	uint64_t pci_io_base;
 	uint32_t serial_io_offset;
 	uint16_t ide_vendor;
@@ -41,9 +47,11 @@ struct sun4u_boot_handoff {
 	char bootpath[ZEDBSD_SUN4U_BOOTPATH_SIZE];
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct sun4u_memory_range) == 16,
-    "sun4u memory ranges must remain 16 bytes");
-_Static_assert(sizeof(struct sun4u_boot_handoff) < 8192,
-    "sun4u handoff must fit in one 8 KiB page");
+_Static_assert(
+	sizeof(struct sun4u_memory_range) == 16,
+	"sun4u memory ranges must remain 16 bytes");
+_Static_assert(
+	sizeof(struct sun4u_boot_handoff) < 8192,
+	"sun4u handoff must fit in one 8 KiB page");
 
 #endif

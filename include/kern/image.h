@@ -1,8 +1,12 @@
 /*
- * Image-loader interface
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Image-loader interface
  */
 
 #ifndef ZEDBSD_IMAGE_H
@@ -16,8 +20,11 @@ struct boot_image_loader {
 	int (*load)(struct bootfs_file *file, const char *arguments);
 };
 
-int boot_image_load(const struct boot_image_loader *loader,
-		      struct bootfs *filesystem, const char *path,
-		      const char *arguments);
+int
+boot_image_load(
+	const struct boot_image_loader *loader,
+	struct bootfs *filesystem,
+	const char *path,
+	const char *arguments);
 
 #endif

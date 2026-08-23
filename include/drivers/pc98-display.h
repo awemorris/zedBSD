@@ -1,7 +1,12 @@
 /*
- * zedBSD PC-98 native display backend contract
+ * zedBSD
  * Copyright (C) 2025, 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * zedBSD PC-98 native display backend contract
  */
 
 #ifndef ZEDBSD_PC98_DISPLAY_H
@@ -35,24 +40,71 @@ struct pc98_display_image {
 
 struct pc98_display_ops {
 	void *context;
-	int (*enter)(void *, struct pc98_display_info *);
-	void (*leave)(void *);
-	int (*poll_events)(void *);
-	int (*fill)(void *, const struct pc98_display_rect *, uint32_t);
-	int (*line)(void *, unsigned, unsigned, unsigned, unsigned, uint32_t);
-	int (*pattern_fill)(void *, const struct pc98_display_rect *, uint32_t,
+	int (
+		*enter)(
+		void *,
+		struct pc98_display_info *);
+	void (
+		*leave)(
+		void *);
+	int (
+		*poll_events)(
+		void *);
+	int (
+		*fill)(
+		void *,
+		const struct pc98_display_rect *,
+		uint32_t);
+	int (
+		*line)(
+		void *,
+		unsigned,
+		unsigned,
+		unsigned,
+		unsigned,
+		uint32_t);
+	int (
+		*pattern_fill)(
+		void *,
+		const struct pc98_display_rect *,
+		uint32_t,
 		uint64_t);
-	int (*draw_image)(void *, unsigned, unsigned,
+	int (
+		*draw_image)(
+		void *,
+		unsigned,
+		unsigned,
 		const struct pc98_display_image *);
-	int (*draw_image_pattern)(void *, unsigned, unsigned,
-		const struct pc98_display_image *, uint64_t);
-	int (*flush)(void *, const struct pc98_display_rect *, size_t);
+	int (
+		*draw_image_pattern)(
+		void *,
+		unsigned,
+		unsigned,
+		const struct pc98_display_image *,
+		uint64_t);
+	int (
+		*flush)(
+		void *,
+		const struct pc98_display_rect *,
+		size_t);
 };
 
 struct pc98_glyph_ops {
 	void *context;
-	int (*measure)(void *, uint32_t, unsigned *, unsigned *);
-	int (*draw)(void *, unsigned, unsigned, uint32_t, uint32_t, uint32_t);
+	int (
+		*measure)(
+		void *,
+		uint32_t,
+		unsigned *,
+		unsigned *);
+	int (
+		*draw)(
+		void *,
+		unsigned,
+		unsigned,
+		uint32_t,
+		uint32_t,
+		uint32_t);
 };
 
 struct pc98_display_backend {

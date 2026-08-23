@@ -1,8 +1,12 @@
 /*
- * uaccess
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * uaccess
  */
 
 #ifndef ZEDBSD_KERN_UACCESS_H
@@ -32,18 +36,80 @@ struct uaccess_pin {
 	unsigned active;
 };
 
-int user_range_check(uintptr_t, size_t, uint32_t);
-int user_address_add(uintptr_t, size_t, uintptr_t *);
-int off_add_size(off_t, size_t, off_t *);
-int size_add_checked(size_t, size_t, size_t *);
-int uaccess_pin_vmspace(struct vmspace *, uintptr_t, size_t, uint32_t,
+int
+user_range_check(
+	uintptr_t,
+	size_t,
+	uint32_t);
+
+int
+user_address_add(
+	uintptr_t,
+	size_t,
+	uintptr_t *);
+
+int
+off_add_size(
+	off_t,
+	size_t,
+	off_t *);
+
+int
+size_add_checked(
+	size_t,
+	size_t,
+	size_t *);
+
+int
+uaccess_pin_vmspace(
+	struct vmspace *,
+	uintptr_t,
+	size_t,
+	uint32_t,
 	struct uaccess_pin *);
-int uaccess_pin(uintptr_t, size_t, uint32_t, struct uaccess_pin *);
-void uaccess_unpin(struct uaccess_pin *);
-int copyin_pinned(const struct uaccess_pin *, size_t, void *, size_t);
-int copyout_pinned(const struct uaccess_pin *, size_t, const void *, size_t);
-int copyin(uintptr_t, void *, size_t);
-int copyout(const void *, uintptr_t, size_t);
-int copyinstr(uintptr_t, char *, size_t, size_t *);
+
+int
+uaccess_pin(
+	uintptr_t,
+	size_t,
+	uint32_t,
+	struct uaccess_pin *);
+
+void
+uaccess_unpin(
+	struct uaccess_pin *);
+
+int
+copyin_pinned(
+	const struct uaccess_pin *,
+	size_t,
+	void *,
+	size_t);
+
+int
+copyout_pinned(
+	const struct uaccess_pin *,
+	size_t,
+	const void *,
+	size_t);
+
+int
+copyin(
+	uintptr_t,
+	void *,
+	size_t);
+
+int
+copyout(
+	const void *,
+	uintptr_t,
+	size_t);
+
+int
+copyinstr(
+	uintptr_t,
+	char *,
+	size_t,
+	size_t *);
 
 #endif

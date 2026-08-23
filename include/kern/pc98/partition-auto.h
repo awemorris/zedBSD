@@ -1,4 +1,5 @@
 /*
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
@@ -12,4 +13,3 @@
 extern const struct partition_scheme partition_scheme_pc98_auto;
 
 #endif
-

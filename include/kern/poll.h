@@ -1,4 +1,9 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 #ifndef ZEDBSD_KERN_POLL_H
 #define ZEDBSD_KERN_POLL_H
 
@@ -8,12 +13,34 @@
 struct file;
 struct process;
 
-void poll_init(void);
-void poll_notify(void);
-uint64_t poll_sequence(void);
-int poll_wait(uint64_t, uint64_t, unsigned);
-int file_poll(struct file *, short, short *);
-int kern_poll_wait(struct process *, struct pollfd *, nfds_t, uint64_t,
-	int, int *);
+void
+poll_init(void);
+
+void
+poll_notify(void);
+
+uint64_t
+poll_sequence(void);
+
+int
+poll_wait(
+	uint64_t,
+	uint64_t,
+	unsigned);
+
+int
+file_poll(
+	struct file *,
+	short,
+	short *);
+
+int
+kern_poll_wait(
+	struct process *,
+	struct pollfd *,
+	nfds_t,
+	uint64_t,
+	int,
+	int *);
 
 #endif

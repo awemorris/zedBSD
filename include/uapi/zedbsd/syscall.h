@@ -1,8 +1,12 @@
 /*
- * syscall
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * syscall
  */
 
 #ifndef ZEDBSD_UAPI_SYSCALL_H
@@ -25,8 +29,10 @@ enum syscall_number {
 	ZEDBSD_SYS_ioctl = 14,
 	ZEDBSD_SYS_clock_gettime = 15,
 	ZEDBSD_SYS_nanosleep = 16,
-	/* Syscall numbers 17 and 18 were pre-release process-launch extensions
-	 * and remain intentionally unused. */
+	/*
+	 * Syscall numbers 17 and 18 were pre-release process-launch extensions
+	 * and remain intentionally unused.
+	 */
 	ZEDBSD_SYS_brk = 19,
 	ZEDBSD_SYS_socket = 20,
 	ZEDBSD_SYS_bind = 21,

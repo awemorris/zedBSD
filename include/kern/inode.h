@@ -1,8 +1,12 @@
 /*
- * inode
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * inode
  */
 
 #ifndef ZEDBSD_KERN_INODE_H
@@ -15,25 +19,30 @@
 #include <kern/atomic.h>
 #include <kern/lock.h>
 
-/* Strict host C modes hide these non-POSIX feature-test spellings. */
+/*
+ * Strict host C modes hide these non-POSIX feature-test spellings.
+ */
 #ifndef S_IFMT
-#define S_IFMT   0170000U
-#define S_IFSOCK 0140000U
-#define S_IFLNK  0120000U
-#define S_IFREG  0100000U
-#define S_IFBLK  0060000U
-#define S_IFDIR  0040000U
-#define S_IFCHR  0020000U
-#define S_IFIFO  0010000U
+#define S_IFMT		0170000U
+#define S_IFSOCK	0140000U
+#define S_IFLNK		0120000U
+#define S_IFREG		0100000U
+#define S_IFBLK		0060000U
+#define S_IFDIR		0040000U
+#define S_IFCHR		0020000U
+#define S_IFIFO		0010000U
 #endif
+
 #ifndef S_ISUID
-#define S_ISUID 0004000U
+#define S_ISUID		0004000U
 #endif
+
 #ifndef S_ISGID
-#define S_ISGID 0002000U
+#define S_ISGID		0002000U
 #endif
+
 #ifndef S_ISVTX
-#define S_ISVTX 0001000U
+#define S_ISVTX		0001000U
 #endif
 
 struct componentname;
@@ -52,28 +61,28 @@ enum inode_type {
 	INODE_FIFO,
 };
 
-#define INODE_ROOT       0x00000001U
-#define INODE_DIRTY      0x00000002U
-#define INODE_DEAD       0x00000004U
-#define INODE_MOUNTPOINT 0x00000008U
-#define INODE_SWAPFILE   0x00000010U
-#define INODE_LOOPFILE   0x00000020U
-#define INODE_NOCACHE_CHILDREN 0x00000040U
+#define INODE_ROOT		0x00000001U
+#define INODE_DIRTY		0x00000002U
+#define INODE_DEAD		0x00000004U
+#define INODE_MOUNTPOINT	0x00000008U
+#define INODE_SWAPFILE		0x00000010U
+#define INODE_LOOPFILE		0x00000020U
+#define INODE_NOCACHE_CHILDREN	0x00000040U
 
-#define INODE_ATTR_MODE       0x00000001U
-#define INODE_ATTR_UID        0x00000002U
-#define INODE_ATTR_GID        0x00000004U
-#define INODE_ATTR_SIZE       0x00000008U
-#define INODE_ATTR_ATIME      0x00000010U
-#define INODE_ATTR_MTIME      0x00000020U
-#define INODE_ATTR_CTIME      0x00000040U
-#define INODE_ATTR_ATIME_NOW  0x00000080U
-#define INODE_ATTR_MTIME_NOW  0x00000100U
+#define INODE_ATTR_MODE		0x00000001U
+#define INODE_ATTR_UID		0x00000002U
+#define INODE_ATTR_GID		0x00000004U
+#define INODE_ATTR_SIZE		0x00000008U
+#define INODE_ATTR_ATIME	0x00000010U
+#define INODE_ATTR_MTIME	0x00000020U
+#define INODE_ATTR_CTIME	0x00000040U
+#define INODE_ATTR_ATIME_NOW	0x00000080U
+#define INODE_ATTR_MTIME_NOW	0x00000100U
 
-#define INODE_XATTR_CREATE    0x00000001U
-#define INODE_XATTR_REPLACE   0x00000002U
-#define INODE_XATTR_NAME_MAX  255U
-#define INODE_XATTR_SIZE_MAX  (64U * 1024U)
+#define INODE_XATTR_CREATE	0x00000001U
+#define INODE_XATTR_REPLACE	0x00000002U
+#define INODE_XATTR_NAME_MAX	255U
+#define INODE_XATTR_SIZE_MAX	(64U * 1024U)
 
 struct inode;
 
@@ -101,33 +110,23 @@ struct inode_truncate_result {
 };
 
 struct inode_ops {
-	int (*lookup)(struct inode *, const struct componentname *,
-		      struct inode **);
-	int (*lookup_casefold)(struct inode *, const struct componentname *,
-			       struct inode **);
-	int (*create)(struct inode *, const struct componentname *, mode_t,
-		      struct inode **);
-	int (*mkdir)(struct inode *, const struct componentname *, mode_t,
-		     struct inode **);
-	int (*mknod)(struct inode *, const struct componentname *,
-		     enum inode_type, mode_t, dev_t, struct inode **);
+	int (*lookup)(struct inode *, const struct componentname *, struct inode **);
+	int (*lookup_casefold)(struct inode *, const struct componentname *, struct inode **);
+	int (*create)(struct inode *, const struct componentname *, mode_t, struct inode **);
+	int (*mkdir)(struct inode *, const struct componentname *, mode_t, struct inode **);
+	int (*mknod)(struct inode *, const struct componentname *, enum inode_type, mode_t, dev_t, struct inode **);
 	int (*unlink)(struct inode *, const struct componentname *);
 	int (*rmdir)(struct inode *, const struct componentname *);
-	int (*rename)(struct inode *, const struct componentname *,
-		      struct inode *, const struct componentname *, unsigned);
+	int (*rename)(struct inode *, const struct componentname *, struct inode *, const struct componentname *, unsigned);
 	int (*link)(struct inode *, const struct componentname *, struct inode *);
-	int (*symlink)(struct inode *, const struct componentname *, const char *,
-		       struct inode **);
+	int (*symlink)(struct inode *, const struct componentname *, const char *, struct inode **);
 	ssize_t (*readlink)(struct inode *, char *, size_t);
 	int (*getattr)(struct inode *, struct stat *);
 	int (*setattr)(struct inode *, const struct stat *, unsigned);
 	int (*truncate)(struct inode *, off_t);
-	int (*truncate_limited)(struct inode *,
-	    const struct inode_truncate_request *,
-	    struct inode_truncate_result *);
+	int (*truncate_limited)(struct inode *, const struct inode_truncate_request *, struct inode_truncate_result *);
 	ssize_t (*getxattr)(struct inode *, const char *, void *, size_t);
-	int (*setxattr)(struct inode *, const char *, const void *, size_t,
-	    unsigned);
+	int (*setxattr)(struct inode *, const char *, const void *, size_t, unsigned);
 	ssize_t (*listxattr)(struct inode *, char *, size_t);
 	int (*removexattr)(struct inode *, const char *);
 	int (*sync)(struct inode *);
@@ -141,33 +140,46 @@ struct inode {
 	const struct inode_ops *i_op;
 	const struct file_ops *i_fop;
 	void *i_data;
+
 	/*
 	 * Generic state must not be stored in i_data: that pointer belongs to
 	 * the filesystem.  i_special is used by FIFO/socket nodes and the
 	 * record-lock pointer is independent of either special-node type.
 	 */
 	void *i_special;
+
 	void (*i_special_destroy)(void *);
 	void *i_record_locks;
 	refcount_t i_refs;
-	/* Serializes one externally visible regular-file I/O operation. */
+
+	/*
+	 * Serializes one externally visible regular-file I/O operation.
+	 */
 	struct mutex i_io_lock;
+
 	/*
 	 * Shared-VM EOF transaction state.  i_vm_lock protects the fields below
 	 * and is the condition lock for i_vm_waitq.  The VM object registry and
 	 * object lock remain responsible for object lifetime/page state; this
-	 * inode-local gate also covers the interval in which no object exists yet.
+	 * inode-local gate also covers the interval in which no object exists
+	 * yet.
 	 */
 	struct spinlock i_vm_lock;
+
 	struct wait_queue i_vm_waitq;
 	unsigned i_vm_resize_active;
 	uint64_t i_vm_resize_generation;
 	off_t i_vm_resize_old_size;
 	off_t i_vm_resize_target_size;
-	/* Every regular-file content transaction, including same-EOF writes,
-	 * participates in this gate.  Odd/even is not exposed; generation merely
-	 * distinguishes a stale fault/read reservation from the current owner. */
+
+	/*
+	 * Every regular-file content transaction, including same-EOF writes,
+	 * participates in this gate.  Odd/even is not exposed; generation
+	 * merely distinguishes a stale fault/read reservation from the current
+	 * owner.
+	 */
 	unsigned i_vm_content_active;
+
 	unsigned i_vm_content_readers;
 	uint64_t i_vm_content_generation;
 	off_t i_vm_content_start;
@@ -182,69 +194,229 @@ struct inode {
 	struct inode_time i_atime;
 	struct inode_time i_mtime;
 	struct inode_time i_ctime;
-	/* Changes whenever this directory's visible namespace is committed. */
+
+	/*
+	 * Changes whenever this directory's visible namespace is committed.
+	 */
 	volatile uint64_t i_dirseq;
+
 	unsigned i_flags;
 	struct inode *i_hash_next;
 	struct inode *i_mount_next;
 };
 
-struct inode *inode_alloc(struct mount *mount);
-void inode_free(struct inode *inode);
-int inode_get(struct mount *mount, ino_t ino, struct inode **result);
-void inode_ref(struct inode *inode);
-void inode_release(struct inode *inode);
-void inode_cache_purge_mount(struct mount *mount);
-int inode_cache_mount_busy(struct mount *mount);
-unsigned inode_cache_mount_count(struct mount *mount);
-unsigned inode_cache_count(void);
-void inode_cache_reset(void);
+struct inode *
+inode_alloc(
+	struct mount *mount);
 
-int inode_lookup(struct inode *, const struct componentname *, struct inode **);
-int inode_lookup_casefold(struct inode *, const struct componentname *,
-			  struct inode **);
-int inode_getattr(struct inode *, struct stat *);
-int inode_setattr(struct inode *, const struct stat *, unsigned);
-int inode_create(struct inode *, const struct componentname *, mode_t,
-		 struct inode **);
-int inode_mkdir(struct inode *, const struct componentname *, mode_t,
-		struct inode **);
-int inode_mknod(struct inode *, const struct componentname *, enum inode_type,
-		mode_t, dev_t, struct inode **);
-int inode_unlink(struct inode *, const struct componentname *);
-int inode_rmdir(struct inode *, const struct componentname *);
-/* The caller holds the shared mount VFS transaction lock across any
- * permission checks and this namespace commit. */
-int inode_rename(struct inode *, const struct componentname *, struct inode *,
-		 const struct componentname *, unsigned);
-int inode_link(struct inode *, const struct componentname *, struct inode *);
-int inode_symlink(struct inode *, const struct componentname *, const char *,
-		  struct inode **);
-ssize_t inode_readlink(struct inode *, char *, size_t);
-int inode_truncate(struct inode *, off_t);
-/* Internal content-owner mutation (for example an overlay upper inode).
- * There is no originating credential at this layer, so executable set-id
- * metadata is invalidated unconditionally in the same I/O transaction. */
-int inode_truncate_content_change(struct inode *, off_t);
-/* Apply a process growth ceiling in the same i_io transaction as the size
- * change.  limit_exceeded distinguishes RLIMIT_FSIZE from a backend EFBIG. */
-int inode_truncate_limited(struct inode *, off_t, uint64_t, int *);
-/* Credential-aware mutation additionally clears executable set-id state
- * while the inode content transaction excludes exec and mapped writers. */
-int inode_truncate_limited_cred(struct inode *, off_t, uint64_t,
-	const struct ucred *, int *);
-/* Stacking backends forward the complete request recursively. */
-int inode_truncate_transaction(struct inode *,
-	const struct inode_truncate_request *, struct inode_truncate_result *);
-ssize_t inode_getxattr(struct inode *, const char *, void *, size_t);
-int inode_setxattr(struct inode *, const char *, const void *, size_t,
+void
+inode_free(
+	struct inode *inode);
+
+int
+inode_get(
+	struct mount *mount,
+	ino_t ino,
+	struct inode **result);
+
+void
+inode_ref(
+	struct inode *inode);
+
+void
+inode_release(
+	struct inode *inode);
+
+void
+inode_cache_purge_mount(
+	struct mount *mount);
+
+int
+inode_cache_mount_busy(
+	struct mount *mount);
+
+unsigned
+inode_cache_mount_count(
+	struct mount *mount);
+
+unsigned
+inode_cache_count(void);
+
+void
+inode_cache_reset(void);
+
+int
+inode_lookup(
+	struct inode *,
+	const struct componentname *,
+	struct inode **);
+
+int
+inode_lookup_casefold(
+	struct inode *,
+	const struct componentname *,
+	struct inode **);
+
+int
+inode_getattr(
+	struct inode *,
+	struct stat *);
+
+int
+inode_setattr(
+	struct inode *,
+	const struct stat *,
 	unsigned);
-ssize_t inode_listxattr(struct inode *, char *, size_t);
-int inode_removexattr(struct inode *, const char *);
-int inode_sync(struct inode *);
-void inode_touch(struct inode *, unsigned);
-void inode_dir_changed(struct inode *);
 
-mode_t inode_type_mode(enum inode_type type);
+int
+inode_create(
+	struct inode *,
+	const struct componentname *,
+	mode_t,
+	struct inode **);
+
+int
+inode_mkdir(
+	struct inode *,
+	const struct componentname *,
+	mode_t,
+	struct inode **);
+
+int
+inode_mknod(
+	struct inode *,
+	const struct componentname *,
+	enum inode_type,
+	mode_t,
+	dev_t,
+	struct inode **);
+
+int
+inode_unlink(
+	struct inode *,
+	const struct componentname *);
+
+int
+inode_rmdir(
+	struct inode *,
+	const struct componentname *);
+/*
+ * The caller holds the shared mount VFS transaction lock across any
+ * permission checks and this namespace commit.
+ */
+int
+inode_rename(
+	struct inode *,
+	const struct componentname *,
+	struct inode *,
+	const struct componentname *,
+	unsigned);
+
+int
+inode_link(
+	struct inode *,
+	const struct componentname *,
+	struct inode *);
+
+int
+inode_symlink(
+	struct inode *,
+	const struct componentname *,
+	const char *,
+	struct inode **);
+
+ssize_t
+inode_readlink(
+	struct inode *,
+	char *,
+	size_t);
+
+int
+inode_truncate(
+	struct inode *,
+	off_t);
+/*
+ * Internal content-owner mutation (for example an overlay upper inode).
+ * There is no originating credential at this layer, so executable set-id
+ * metadata is invalidated unconditionally in the same I/O transaction.
+ */
+int
+inode_truncate_content_change(
+	struct inode *,
+	off_t);
+
+/*
+ * Apply a process growth ceiling in the same i_io transaction as the size
+ * change.  limit_exceeded distinguishes RLIMIT_FSIZE from a backend EFBIG.
+ */
+int
+inode_truncate_limited(
+	struct inode *,
+	off_t,
+	uint64_t,
+	int *);
+
+/*
+ * Credential-aware mutation additionally clears executable set-id state
+ * while the inode content transaction excludes exec and mapped writers.
+ */
+int
+inode_truncate_limited_cred(
+	struct inode *,
+	off_t,
+	uint64_t,
+	const struct ucred *,
+	int *);
+
+/*
+ * Stacking backends forward the complete request recursively.
+ */
+int
+inode_truncate_transaction(
+	struct inode *,
+	const struct inode_truncate_request *,
+	struct inode_truncate_result *);
+
+ssize_t
+inode_getxattr(
+	struct inode *,
+	const char *,
+	void *,
+	size_t);
+
+int
+inode_setxattr(
+	struct inode *,
+	const char *,
+	const void *,
+	size_t,
+	unsigned);
+
+ssize_t
+inode_listxattr(
+	struct inode *,
+	char *,
+	size_t);
+int
+inode_removexattr(
+	struct inode *,
+	const char *);
+
+int
+inode_sync(
+	struct inode *);
+
+void
+inode_touch(
+	struct inode *,
+	unsigned);
+
+void
+inode_dir_changed(
+	struct inode *);
+
+mode_t
+inode_type_mode(
+	enum inode_type type);
 
 #endif

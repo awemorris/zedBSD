@@ -1,7 +1,11 @@
 /*
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
- * SPDX-License-Identifier: Zlib
  *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
  * Cross-vmspace metadata serialization.
  */
 
@@ -14,9 +18,16 @@
  * before taking a vmspace, reclaim or object lock.  The lock is recursive
  * for calls which cross an internal public API boundary on the same thread.
  */
-void vm_metadata_init(void);
-void vm_metadata_enter(void);
-void vm_metadata_leave(void);
-int vm_metadata_owned(void);
+void
+vm_metadata_init(void);
+
+void
+vm_metadata_enter(void);
+
+void
+vm_metadata_leave(void);
+
+int
+vm_metadata_owned(void);
 
 #endif

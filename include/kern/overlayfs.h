@@ -1,7 +1,12 @@
 /*
- * Overlay filesystem
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
+ *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Overlay filesystem
  */
 #ifndef ZEDBSD_KERN_OVERLAYFS_H
 #define ZEDBSD_KERN_OVERLAYFS_H
@@ -19,8 +24,14 @@ struct overlay_mount_args {
 	unsigned flags;
 };
 
-int overlayfs_init(void);
-int overlay_mount_at(struct mount *, const char *,
-		     const struct overlay_mount_args *, struct mount **);
+int
+overlayfs_init(void);
+
+int
+overlay_mount_at(
+	struct mount *,
+	const char *,
+	const struct overlay_mount_args *,
+	struct mount **);
 
 #endif

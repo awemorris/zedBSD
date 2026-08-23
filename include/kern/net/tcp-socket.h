@@ -1,8 +1,12 @@
 /*
- * TCP socket
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * TCP socket
  */
 
 #ifndef ZEDBSD_KERN_NET_TCP_SOCKET_H
@@ -48,7 +52,11 @@ struct tcp_socket {
 	struct tcp_socket *accept_tail;
 };
 
-int tcp_init(void);
-int tcp_socket_create(int protocol, struct socket **result);
+int
+tcp_init(void);
+int
+tcp_socket_create(
+	int protocol,
+	struct socket **result);
 
 #endif

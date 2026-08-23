@@ -1,4 +1,9 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
 #ifndef ZEDBSD_KERN_LOCK_H
 #define ZEDBSD_KERN_LOCK_H
 
@@ -18,7 +23,9 @@ enum lock_rank {
 	LOCK_RANK_NAMECACHE = 70,
 	LOCK_RANK_RECORD_LOCK = 75,
 	LOCK_RANK_VMSPACE = 80,
-	/* Per-inode publication gate for shared-object EOF transactions. */
+	/*
+	 * Per-inode publication gate for shared-object EOF transactions.
+	 */
 	LOCK_RANK_VM_RESIZE = 85,
 	LOCK_RANK_VM_OBJECT = 90,
 	LOCK_RANK_SWAP = 95,
@@ -30,7 +37,9 @@ enum lock_rank {
 	LOCK_RANK_DEVICE = 125,
 	LOCK_RANK_BUFCACHE = 126,
 	LOCK_RANK_BUF = 127,
-	/* Block I/O is an independent leaf domain; do not enter VFS/VM from it. */
+	/*
+	 * Block I/O is an independent leaf domain; do not enter VFS/VM from it.
+	 */
 	LOCK_RANK_DISK = 130,
 	LOCK_RANK_TTY = 135,
 	LOCK_RANK_POLL = 140,
@@ -38,6 +47,8 @@ enum lock_rank {
 	LOCK_RANK_SCHEDULER = 200,
 	LOCK_RANK_KLOG = 250
 };
+
+struct thread;
 
 struct spinlock {
 	atomic_uint_t held;
@@ -47,27 +58,66 @@ struct spinlock {
 	unsigned owner_valid;
 };
 
-void spin_init(struct spinlock *, enum lock_rank, const char *);
-void spin_lock(struct spinlock *);
-int spin_trylock(struct spinlock *);
-void spin_unlock(struct spinlock *);
-unsigned long spin_lock_irqsave(struct spinlock *);
-void spin_unlock_irqrestore(struct spinlock *, unsigned long);
-
-struct thread;
 struct mutex {
 	struct spinlock guard;
 	struct thread *owner;
 	struct wait_queue waiters;
 	unsigned locked;
 };
-int mutex_init(struct mutex *, enum lock_rank, const char *);
-int mutex_trylock(struct mutex *);
-int mutex_owned(struct mutex *);
-int mutex_lock_interruptible(struct mutex *);
-void mutex_lock(struct mutex *);
-void mutex_unlock(struct mutex *);
-int mutex_wait(struct mutex *, struct wait_queue *, uint64_t, uint64_t,
-	       unsigned);
+
+void
+spin_init(
+	struct spinlock *,
+	enum lock_rank,
+	const char *);
+
+void
+spin_lock(
+	struct spinlock *);
+
+int
+spin_trylock(
+	struct spinlock *);
+
+void
+spin_unlock(
+	struct spinlock *);
+
+unsigned long
+spin_lock_irqsave(
+	struct spinlock *);
+
+void
+spin_unlock_irqrestore(
+	struct spinlock *,
+	unsigned long);
+
+int
+mutex_init(
+	struct mutex *,
+	enum lock_rank,
+	const char *);
+int
+mutex_trylock(
+	struct mutex *);
+int
+mutex_owned(
+	struct mutex *);
+int
+mutex_lock_interruptible(
+	struct mutex *);
+void
+mutex_lock(
+	struct mutex *);
+void
+mutex_unlock(
+	struct mutex *);
+int
+mutex_wait(
+	struct mutex *,
+	struct wait_queue *,
+	uint64_t,
+	uint64_t,
+	unsigned);
 
 #endif

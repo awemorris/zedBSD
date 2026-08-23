@@ -1,4 +1,10 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #ifndef ZEDBSD_KERN_BUF_H
 #define ZEDBSD_KERN_BUF_H
 
@@ -18,13 +24,13 @@ enum buf_io_state {
 	BUF_IO_WRITING,
 };
 
-#define BUF_VALID    0x0001U
-#define BUF_DIRTY    0x0002U
-#define BUF_ERROR    0x0004U
-#define BUF_INVALID  0x0008U
+#define BUF_VALID	0x0001U
+#define BUF_DIRTY	0x0002U
+#define BUF_ERROR	0x0004U
+#define BUF_INVALID	0x0008U
 
-#define BUF_INVALIDATE_DISCARD 0x0001U
-#define BUF_RECLAIM_WRITE      0x0001U
+#define BUF_INVALIDATE_DISCARD	0x0001U
+#define BUF_RECLAIM_WRITE	0x0001U
 
 struct buf {
 	struct disk *b_disk;
@@ -51,19 +57,58 @@ struct buf {
 	unsigned b_slab_slot;
 };
 
-int buf_init(void);
-int buf_read(struct disk *, uint64_t, uint32_t, void *);
-int buf_write(struct disk *, uint64_t, uint32_t, const void *);
-int buf_get(struct disk *, uint64_t, struct buf **);
-void buf_release(struct buf *);
-void buf_mark_dirty(struct buf *);
-int buf_writeback(struct buf *);
-int buf_sync(struct disk *);
-int buf_invalidate(struct disk *, uint64_t, uint64_t, unsigned);
-int buf_invalidate_disk(struct disk *, unsigned);
-size_t buf_reclaim(size_t, unsigned);
-void buf_get_stats(struct bufcache_stats *);
-int buf_set_max_bytes(uint64_t);
-void buf_reset(void);
+int
+buf_init(void);
+int
+buf_read(
+	struct disk *,
+	uint64_t,
+	uint32_t,
+	void *);
+int
+buf_write(
+	struct disk *,
+	uint64_t,
+	uint32_t,
+	const void *);
+int
+buf_get(
+	struct disk *,
+	uint64_t,
+	struct buf **);
+void
+buf_release(
+	struct buf *);
+void
+buf_mark_dirty(
+	struct buf *);
+int
+buf_writeback(
+	struct buf *);
+int
+buf_sync(
+	struct disk *);
+int
+buf_invalidate(
+	struct disk *,
+	uint64_t,
+	uint64_t,
+	unsigned);
+int
+buf_invalidate_disk(
+	struct disk *,
+	unsigned);
+size_t
+buf_reclaim(
+	size_t,
+	unsigned);
+void
+buf_get_stats(
+	struct bufcache_stats *);
+int
+buf_set_max_bytes(
+	uint64_t);
+void
+buf_reset(void);
 
 #endif

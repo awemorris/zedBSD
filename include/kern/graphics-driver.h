@@ -1,8 +1,12 @@
 /*
- * Kernel graphics driver contract
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Kernel graphics driver contract
  */
 
 #ifndef ZEDBSD_KERN_GRAPHICS_DRIVER_H
@@ -41,14 +45,15 @@ struct graphics_driver_ops {
 	void (*leave)(void *);
 	int (*fill)(void *, const struct kern_graphics_rect *, uint32_t);
 	int (*line)(void *, unsigned, unsigned, unsigned, unsigned, uint32_t);
-	int (*pattern_fill)(void *, const struct kern_graphics_rect *, uint32_t,
-		uint64_t);
-	int (*blit)(void *, unsigned, unsigned,
-		const struct kern_graphics_image *, uint64_t, int);
+	int (*pattern_fill)(void *, const struct kern_graphics_rect *, uint32_t, uint64_t);
+	int (*blit)(void *, unsigned, unsigned, const struct kern_graphics_image *, uint64_t, int);
 	int (*flush)(void *, const struct kern_graphics_rect *, size_t);
 	int (*get_glyph)(void *, uint32_t, uint8_t[32], unsigned *, unsigned *);
 };
 
-int graphics_driver_register(const struct graphics_driver_ops *, void *);
+int
+graphics_driver_register(
+	const struct graphics_driver_ops *,
+	void *);
 
 #endif

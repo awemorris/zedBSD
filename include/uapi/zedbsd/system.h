@@ -1,8 +1,12 @@
 /*
- * /dev/system
+ * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * /dev/system
  */
 
 #ifndef ZEDBSD_UAPI_SYSTEM_H
@@ -11,8 +15,8 @@
 #include <stdint.h>
 #include <sys/ioctl.h>
 
-#define ZEDBSD_SYSTEM_IOC_GROUP 's'
-#define ZEDBSD_SYSTEM_SWAP_PAGE_SIZE 4096U
+#define ZEDBSD_SYSTEM_IOC_GROUP	's'
+#define ZEDBSD_SYSTEM_SWAP_PAGE_SIZE	4096U
 
 struct system_info {
 	uint32_t boot_bios_id;
@@ -33,17 +37,21 @@ struct system_device_info {
 };
 
 struct vm_statistics {
-	uint64_t physical_total, physical_reserved, physical_allocated, physical_free;
+	uint64_t physical_total, physical_reserved, physical_allocated,
+		physical_free;
 	uint64_t image, heap_fixed, heap_current, heap_peak;
 	uint64_t heap_largest_free, heap_largest_failed;
 	uint64_t hal_tasks, hal_task_stack_bytes, hal_spaces, hal_page_tables;
-	uint64_t vm_resident, vm_anonymous, vm_file, vm_wired, vm_busy, vm_dirty;
+	uint64_t vm_resident, vm_anonymous, vm_file, vm_wired, vm_busy,
+		vm_dirty;
 	uint64_t vm_clean, vm_swapped, vm_faults, vm_page_in, vm_page_out;
 	uint64_t vm_reclaims, vm_io_errors, swap_total, swap_free, swap_extents;
 	uint64_t vm_commit_limit, vm_commit_used, vm_commit_available;
 };
 
-/* Debug/validation snapshot.  Counts are live kernel objects, not capacity. */
+/*
+ * Debug/validation snapshot.  Counts are live kernel objects, not capacity.
+ */
 struct system_resource_info {
 	uint64_t process, thread, filedesc, file, pipe;
 	uint64_t mount, inode, namecache;
@@ -51,7 +59,7 @@ struct system_resource_info {
 	uint64_t disk, bio, socket, packet, net_device;
 };
 
-#define ZEDBSD_SYSTEM_PROCESS_COMMAND_MAX 64U
+#define ZEDBSD_SYSTEM_PROCESS_COMMAND_MAX	64U
 struct process_info {
 	int32_t pid;
 	int32_t ppid;
@@ -63,14 +71,17 @@ struct process_info {
 	char command[ZEDBSD_SYSTEM_PROCESS_COMMAND_MAX];
 };
 
-#define ZEDBSD_SYSTEM_GET_INFO _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 1, struct system_info)
-#define ZEDBSD_SYSTEM_GET_DEVICE _IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 2, struct system_device_info)
-#define ZEDBSD_SYSTEM_GET_VMSTAT _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 3, struct vm_statistics)
-#define ZEDBSD_SYSTEM_HALT _IO(ZEDBSD_SYSTEM_IOC_GROUP, 4)
-#define ZEDBSD_SYSTEM_REBOOT _IO(ZEDBSD_SYSTEM_IOC_GROUP, 5)
-#define ZEDBSD_SYSTEM_GET_RESOURCES _IOR(ZEDBSD_SYSTEM_IOC_GROUP, 6, \
-	struct system_resource_info)
-#define ZEDBSD_SYSTEM_GET_PROCESS _IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 7, \
-	struct process_info)
+#define ZEDBSD_SYSTEM_GET_INFO	\
+	_IOR(ZEDBSD_SYSTEM_IOC_GROUP, 1, struct system_info)
+#define ZEDBSD_SYSTEM_GET_DEVICE	\
+	_IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 2, struct system_device_info)
+#define ZEDBSD_SYSTEM_GET_VMSTAT	\
+	_IOR(ZEDBSD_SYSTEM_IOC_GROUP, 3, struct vm_statistics)
+#define ZEDBSD_SYSTEM_HALT	_IO(ZEDBSD_SYSTEM_IOC_GROUP, 4)
+#define ZEDBSD_SYSTEM_REBOOT	_IO(ZEDBSD_SYSTEM_IOC_GROUP, 5)
+#define ZEDBSD_SYSTEM_GET_RESOURCES	\
+	_IOR(ZEDBSD_SYSTEM_IOC_GROUP, 6, struct system_resource_info)
+#define ZEDBSD_SYSTEM_GET_PROCESS	\
+	_IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 7, struct process_info)
 
 #endif
