@@ -7,10 +7,31 @@
 
 #include "kern/internal.h"
 #include "kern/clock.h"
-#include "kern/messages.h"
 #include "kern/platform.h"
 #include "kern/vfs.h"
 #include "hal/hal.h"
+
+/* PC-98 startup menu text lives with the code that presents it. */
+static const char boot_message_machine[] =
+	"NEC PC-9800 ｼﾘｰｽﾞ ﾊﾟｰｿﾅﾙ ｺﾝﾋﾟｭｰﾀ";
+static const char boot_message_loader[] =
+	"UNIX ﾌﾞｰﾄﾛｰﾀﾞ ﾊﾞｰｼﾞｮﾝ 1.00";
+static const char boot_message_copyright[] =
+	"Copyright (C) 2026 NEC FANS on X.com";
+static const char boot_message_probing[] = "ﾃﾞｨｽｸを検索中...";
+static const char boot_message_automatic_run[] = "自動実行します...";
+static const char boot_message_found_suffix[] = " 台みつかりました";
+static const char boot_message_boot_from[] = "ﾃﾞｨｽｸから起動:";
+static const char boot_message_auto_prefix[] = "  1) 自動起動 (";
+static const char boot_message_searching[] = "検索中...";
+static const char boot_message_unavailable[] = "利用できません";
+static const char boot_message_partition[] = " ﾊﾟｰﾃｨｼｮﾝ ";
+static const char boot_message_run_cfg[] = " / BOOT.CFG を実行";
+static const char boot_message_fixed_disk_prefix[] =
+	") 固定ﾃﾞｨｽｸ ﾄﾞﾗｲﾌﾞ ";
+static const char boot_message_esc_shell[] =
+	"ESC ｷｰ を押すとｼｪﾙを起動します";
+static const char boot_message_select[] = "選択: ";
 
 /* The startup menu exposes only the first four fixed disks. The full stable
  * discovery order remains addressable through device and disk. */

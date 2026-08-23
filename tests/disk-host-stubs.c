@@ -43,6 +43,8 @@ hal_pmem_free(struct hal_pmem *desc)
 
 size_t hal_pmem_get_total_size(void) { return 64U * 1024U * 1024U; }
 
+void kern_platform_debug_write(const char *text) { (void)text; }
+
 void spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
 {
 	lock->held.value = 0;

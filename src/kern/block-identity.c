@@ -161,13 +161,15 @@ int block_identity_get(struct disk *disk, struct block_identity *id)
 			const struct partition *part = partition_at(i);
 			if (part == NULL || part->p_disk != disk) continue;
 			if (part->p_flags & PARTITION_HAS_UUID) {
-				strncpy(id->partuuid, part->p_uuid,
-				    sizeof(id->partuuid) - 1U);
+				memcpy(id->partuuid, part->p_uuid,
+				    sizeof(id->partuuid));
+				id->partuuid[sizeof(id->partuuid) - 1U] = '\0';
 				id->flags |= ZEDBSD_BLKID_PARTUUID;
 			}
 			if (part->p_flags & PARTITION_HAS_LABEL) {
-				strncpy(id->partlabel, part->p_label,
-				    sizeof(id->partlabel) - 1U);
+				memcpy(id->partlabel, part->p_label,
+				    sizeof(id->partlabel));
+				id->partlabel[sizeof(id->partlabel) - 1U] = '\0';
 				id->flags |= ZEDBSD_BLKID_PARTLABEL;
 			}
 			break;

@@ -8,7 +8,8 @@ import tempfile
 
 from ufs2_format import create
 
-checker_path = pathlib.Path(__file__).parents[1] / 'scripts' / 'check-ufs2-image.py'
+checker_path = (pathlib.Path(__file__).parents[1] / 'tools' / 'build' /
+                'check-ufs2-image.py')
 spec = importlib.util.spec_from_file_location('_ufs2_checker', checker_path)
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
@@ -24,7 +25,21 @@ def run():
         image_path = temporary / 'ufs2.img'
         first = create(16 * 1024 * 1024, root, 4)
         second = create(16 * 1024 * 1024, root, 4)
-        assert first == second
+        # Image layout is deterministic, while each filesystem intentionally
+        # receives a fresh fs_id just like newfs(8).
+        first_layout = bytearray(first)
+        second_layout = bytearray(second)
+        fsid = slice(65536 + 144, 65536 + 152)
+        first_id = bytes(first_layout[fsid])
+        second_id = bytes(second_layout[fsid])
+        assert first_id != second_id
+        # UFS2 records the ID in every cylinder group's backup superblock.
+        # Normalize all four copies before comparing the deterministic layout.
+        assert first_layout.count(first_id) == 4
+        assert second_layout.count(second_id) == 4
+        first_layout = first_layout.replace(first_id, b'\0' * 8)
+        second_layout = second_layout.replace(second_id, b'\0' * 8)
+        assert first_layout == second_layout
         image_path.write_bytes(first)
         checker.check(image_path)
         fs = checker.UFS2(first)

@@ -10,7 +10,7 @@
 	 * B98S header, version 2.  This section leads the single kernel
 	 * PT_LOAD at file offset 512.  File size,
 	 * entry, and the payload byte-sum (file bytes from offset 532 to
-	 * the end) are patched in by tools/build/patch-stage2.py.
+	 * the end) are patched in by platform/pc98/tools/patch-stage2.py.
 	 */
 	.section .header, "a"
 	.globl __image_start

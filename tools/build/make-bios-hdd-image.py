@@ -73,6 +73,10 @@ def create(args: argparse.Namespace) -> None:
             raise SystemExit(f"missing input: {path}")
     if args.gpt and (args.machine != "pcat" or args.bootx64 is None):
         raise SystemExit("--gpt requires --machine pcat and --bootx64")
+    if args.gpt and args.checker is None:
+        raise SystemExit("--gpt requires a platform validator via --checker")
+    if args.checker is not None and not args.checker.is_file():
+        raise SystemExit(f"missing image validator: {args.checker}")
     if args.bootx64 is not None and not args.bootx64.is_file():
         raise SystemExit(f"missing input: {args.bootx64}")
     if args.partition_pbr is None or args.bootzbsd is None:
@@ -314,9 +318,8 @@ def create(args: argparse.Namespace) -> None:
         if args.holoris and args.arch_image is None:
             run("mcopy", "-i", f"{temporary}@@{offset}",
                 str(args.holoris), "::/usr/bin/holoris.nct")
-        checker = Path(__file__).with_name(
-            "check-amd64-gpt-image.py" if args.gpt else
-            "check-bios-hdd-image.py")
+        checker = (args.checker if args.checker is not None else
+                   Path(__file__).with_name("check-bios-hdd-image.py"))
         run("python3", str(checker), "--machine", args.machine,
             "--kernel", str(args.kernel),
             "--bootzbsd", str(args.bootzbsd),
@@ -344,6 +347,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--machine", choices=("pcat", "pc98"), required=True)
     parser.add_argument("--gpt", action="store_true")
+    parser.add_argument("--checker", type=Path,
+                        help="image validator to run before publishing output")
     parser.add_argument("--bootx64", type=Path)
     parser.add_argument("--stage1", type=Path, required=True)
     parser.add_argument("--stage2", type=Path, required=True)

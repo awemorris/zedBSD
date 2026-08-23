@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 import pathlib, sys, tempfile
-sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'scripts'))
+sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'tools'/'build'))
 from ufs1_format import create
 from importlib.machinery import SourceFileLoader
-checker=SourceFileLoader('check',str(pathlib.Path(__file__).resolve().parents[1]/'scripts'/'check-ufs1-image.py')).load_module()
+checker=SourceFileLoader('check',str(pathlib.Path(__file__).resolve().parents[1]/'tools'/'build'/'check-ufs1-image.py')).load_module()
 check=checker.check
 with tempfile.TemporaryDirectory() as d:
  root=pathlib.Path(d)/'root'; root.mkdir(); (root/'bin').mkdir()

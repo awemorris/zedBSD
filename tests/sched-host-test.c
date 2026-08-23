@@ -24,6 +24,11 @@ struct thread *thread_current(void) { return current[current_cpu]; }
 void thread_sched_retired(struct thread *thread)
 { thread->state = THREAD_ZOMBIE; }
 void *kern_calloc(size_t count, size_t size) { return calloc(count, size); }
+struct process *process_find_next_ref(pid_t after)
+{ (void)after; return NULL; }
+void process_release(struct process *process) { (void)process; }
+int signal_send_process(struct process *process, int signal)
+{ (void)process; (void)signal; return 0; }
 
 hal_cpu_id_t hal_cpu_current(void) { return current_cpu; }
 unsigned hal_cpu_count(void) { return TEST_CPUS; }

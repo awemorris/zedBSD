@@ -13,4 +13,5 @@ plan/
 !plan/susv4-uapi/*.md
 !plan/susv4-uapi-audit.csv
 .scripts/
+*~
 config.mk

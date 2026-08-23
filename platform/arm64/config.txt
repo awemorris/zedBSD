@@ -1,6 +1,6 @@
 [pi4]
 arm_64bit=1
-kernel=VMUNIX.A64
+kernel=vmunix
 device_tree=bcm2711-rpi-4-b.dtb
 enable_gic=1
 enable_uart=1

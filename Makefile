@@ -14,8 +14,8 @@
 #   src/softfloat/    soft-float support built from vendor GCC/musl sources
 #   platform/<arch>/  per-architecture targets (IPLs, stages, console)
 #
-# Architecture selection: `make ARCH=pc98` or `./build.sh vmunix pc98`.  Each
-# architecture provides platform/<arch>/kernel.mk and its artifacts land
+# Architecture selection: `make ARCH=pc98 disk-image`.  Each
+# architecture provides platform/<arch>/Makefile and its artifacts land
 # in build/<arch>/.  Architecture-neutral host artifacts stay shared at the
 # top of build/ (build/host-noct, build/releases).
 
@@ -25,7 +25,7 @@ OBJCOPY := objcopy
 CC := gcc
 HOSTCC ?= cc
 PYTHON ?= python3
-.DEFAULT_GOAL := menu
+.DEFAULT_GOAL := menuconfig
 
 ZEDBSD_CONFIG ?= $(if $(wildcard config.mk),config.mk,)
 ifneq ($(strip $(ZEDBSD_CONFIG)),)
@@ -33,10 +33,10 @@ include $(ZEDBSD_CONFIG)
 endif
 
 ARCH ?= $(if $(ZEDBSD_MAKE_ARCH),$(ZEDBSD_MAKE_ARCH),pc98)
-KERNEL_MK := platform/$(ARCH)/kernel.mk
-ifeq ($(wildcard $(KERNEL_MK)),)
+PLATFORM_MAKEFILE := platform/$(ARCH)/Makefile
+ifeq ($(wildcard $(PLATFORM_MAKEFILE)),)
 $(error Unknown ARCH '$(ARCH)'; available: \
-	$(patsubst platform/%/kernel.mk,%,$(wildcard platform/*/kernel.mk)))
+	$(patsubst platform/%/Makefile,%,$(wildcard platform/*/Makefile)))
 endif
 BUILD := build/$(ARCH)
 
@@ -145,9 +145,37 @@ list-user-programs:
 		'$(USERLAND_$(program)_PACKAGE)' \
 		'$(USERLAND_$(program)_REQUIRE)';)
 
-.PHONY: menu
-menu:
+.PHONY: menuconfig
+menuconfig:
 	@$(PYTHON) tools/menuconfig.py --output config.mk
+
+.PHONY: help list-targets
+help:
+	@printf '%s\n' \
+		'zedBSD build interface (ARCH=$(ARCH))' \
+		'' \
+		'  make                         Open menuconfig' \
+		'  make ARCH=$(ARCH) vmunix     Build the kernel' \
+		'  make ARCH=$(ARCH) bootloader Build the platform bootloader' \
+		'  make ARCH=$(ARCH) rootfs     Build /bin and /usr packages' \
+		'  make ARCH=$(ARCH) world      Build vmunix and rootfs' \
+		'  make ARCH=$(ARCH) disk-image Build the bootable disk image' \
+		'  make ARCH=$(ARCH) run        Build and run the disk image' \
+		'  make ARCH=$(ARCH) toolchain  Check the platform toolchain' \
+		'  make ARCH=$(ARCH) check      Run public host/compile tests' \
+		'  make ARCH=$(ARCH) list-targets' \
+		'                               Print the public targets' \
+		'' \
+		'Supported ARCH values: pc98 pcat amd64 arm64 sparcv9 x68k' \
+		'See BUILDING.md for target descriptions.'
+
+list-targets:
+	@printf 'Primary targets:\n'; \
+		for target in $(ZEDBSD_PRIMARY_TARGETS); do printf '  %s\n' "$$target"; done
+	@printf 'Support targets:\n'; \
+		for target in $(ZEDBSD_SUPPORT_TARGETS); do printf '  %s\n' "$$target"; done
+	@printf 'Focused checks:\n'; \
+		for target in $(ZEDBSD_CHECK_TARGETS); do printf '  %s\n' "$$target"; done
 
 ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_NE2000=$(if $(filter y,$(CONFIG_DRIVER_NE2000)),1,0) \
@@ -161,8 +189,17 @@ ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
 ZEDBSD_CONFIG_CPPFLAGS += -DZEDBSD_TEST_CHECKPOINTS
 endif
 
-SCRIPTS_DIR := scripts
 BUILD_TOOLS_DIR := tools/build
+ZEDBSD_PRIMARY_TARGETS := menuconfig vmunix bootloader rootfs-bin rootfs-usr \
+	rootfs world disk-image run toolchain
+ZEDBSD_SUPPORT_TARGETS := help list-targets check clean distclean
+ZEDBSD_CHECK_TARGETS := check libc-host-test softfloat-host-test \
+	check-disk-image \
+	libc-opcode-check softfloat-opcode-check uapi-abi-layout-check \
+	posix-header-check posix-api-matrix-check susv4-header-check \
+	susv4-libc-host-test crypt-host-test userland-command-host-test \
+	ufs1-format-host-test ufs2-format-host-test ufs1-format-python-test \
+	ufs2-format-python-test overlay-journal-format-host-test
 
 # Scripts invoked from make must resolve the same architecture and build
 # tree; direct invocations default to pc98 on their own.
@@ -251,12 +288,6 @@ $(ZEDBSD_LIBC_OBJECTS): OBJ_CC = $(ZEDBSD_LIBC_CC)
 $(ZEDBSD_LIBC_OBJECTS): OBJ_CPPFLAGS = $(ZEDBSD_LIBC_CPPFLAGS)
 $(ZEDBSD_LIBC_OBJECTS): OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
 
-$(BUILD)/kern/messages.h: src/kern/messages.txt $(BUILD_TOOLS_DIR)/generate-messages.py
-	@mkdir -p $(dir $@)
-	$(PYTHON) $(BUILD_TOOLS_DIR)/generate-messages.py $< $@
-
-messages: $(BUILD)/kern/messages.h
-
 # ----------------------------------------------------------------------
 # Architecture-neutral host tests.  Platform makefiles append their own
 # binaries to HOST_TEST_BINARIES and phony run targets to CHECK_RUN_TARGETS.
@@ -313,17 +344,8 @@ susv4-uapi-review-check: plan/susv4-uapi-audit.csv \
 	$(PYTHON) tools/susv4-uapi-review.py plan/susv4-uapi-audit.csv
 
 posix-api-matrix-check: tests/posix-r2-api.csv \
-	scripts/check-posix-api-matrix.py
-	$(PYTHON) scripts/check-posix-api-matrix.py
-
-toolchain-info:
-	bash scripts/collect-toolchain-info.sh
-
-regression-matrix-build:
-	bash scripts/run-regression-matrix.sh build
-
-regression-matrix-runtime:
-	bash scripts/run-regression-matrix.sh runtime
+	tools/check-posix-api-matrix.py
+	$(PYTHON) tools/check-posix-api-matrix.py
 
 $(BUILD)/tests/fat-host-test: tests/fat-host-test.c \
 	src/kern/fs.c src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c
@@ -430,11 +452,11 @@ $(BUILD)/tests/x68k-scsi-disk-host-test: \
 	tests/x68k-scsi-disk-host-test.c drivers/x68k-spc-disk.c \
 	drivers/x68k-spc-disk.h drivers/x68k-mb89352.c \
 	drivers/x68k-mb89352.h tests/disk-host-stubs.c src/kern/buf.c \
-	src/kern/sysctl.c src/kern/disk.c
+	src/kern/sysctl.c src/kern/klog.c src/kern/disk.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -pthread -Iinclude -Isrc -Ilibc/include \
 		drivers/x68k-mb89352.c drivers/x68k-spc-disk.c \
-		src/kern/buf.c src/kern/sysctl.c src/kern/disk.c \
+		src/kern/buf.c src/kern/sysctl.c src/kern/klog.c src/kern/disk.c \
 		tests/disk-host-stubs.c $< -o $@
 
 $(BUILD)/tests/sched-host-test: tests/sched-host-test.c src/kern/sched.c
@@ -475,20 +497,24 @@ $(BUILD)/tests/ufs-consistency-host-test: tests/ufs-consistency-host-test.c \
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -Iinclude -Isrc $(KERN_UFS_CONSISTENCY_SOURCES) $< -o $@
 
-$(BUILD)/tests/ufs1-test.img: scripts/make-ufs1-image.py tools/build/ufs1_format.py
+$(BUILD)/tests/ufs1-test.img: tools/build/make-ufs-test-image.py \
+	tools/build/ufs1_format.py
 	@mkdir -p $(dir $@)
-	PYTHONPATH=scripts $(PYTHON) scripts/make-ufs1-image.py --size-mib 4 $@
+	PYTHONPATH=$(BUILD_TOOLS_DIR) $(PYTHON) tools/build/make-ufs-test-image.py \
+		--format ufs1 --size-mib 4 $@
 
-$(BUILD)/tests/ufs1-multicg-test.img: scripts/make-ufs1-image.py tools/build/ufs1_format.py
+$(BUILD)/tests/ufs1-multicg-test.img: tools/build/make-ufs-test-image.py \
+	tools/build/ufs1_format.py
 	@mkdir -p $(dir $@)
-	PYTHONPATH=scripts $(PYTHON) scripts/make-ufs1-image.py --size-mib 16 \
-		--cylinder-groups 4 $@
+	PYTHONPATH=$(BUILD_TOOLS_DIR) $(PYTHON) tools/build/make-ufs-test-image.py \
+		--format ufs1 --size-mib 16 --cylinder-groups 4 $@
 
-$(BUILD)/tests/ufs2-multicg-test.img: scripts/make-ufs2-image.py \
+$(BUILD)/tests/ufs2-multicg-test.img: tools/build/make-ufs-test-image.py \
 	tools/build/ufs2_format.py tools/build/ufs1_format.py
 	@mkdir -p $(dir $@)
-	PYTHONPATH=scripts $(PYTHON) scripts/make-ufs2-image.py --size-mib 16 \
-		--cylinder-groups 4 --journal-mib 1 --snapshot-mib 2 $@
+	PYTHONPATH=$(BUILD_TOOLS_DIR) $(PYTHON) tools/build/make-ufs-test-image.py \
+		--format ufs2 --size-mib 16 --cylinder-groups 4 \
+		--journal-mib 1 --snapshot-mib 2 $@
 
 $(BUILD)/tests/ufs1-vfs-host-test: tests/ufs1-vfs-host-test.c \
 	$(BUILD)/tests/ufs1-test.img $(VFS_CORE_SOURCES) $(KERN_UFS1_SOURCES)
@@ -613,10 +639,12 @@ $(BUILD)/tests/blkdev-host-test: tests/blkdev-host-test.c \
 		src/kern/pc98/partition-auto.c tests/disk-host-stubs.c $< -o $@
 
 $(BUILD)/tests/bufcache-host-test: tests/bufcache-host-test.c \
-	tests/disk-host-stubs.c src/kern/buf.c src/kern/sysctl.c src/kern/disk.c
+	tests/disk-host-stubs.c src/kern/buf.c src/kern/sysctl.c src/kern/klog.c \
+	src/kern/disk.c
 	@mkdir -p $(dir $@)
 	$(HOST_TEST_CC) -pthread -Iinclude -Iinclude/uapi -Isrc src/kern/buf.c \
-		src/kern/sysctl.c src/kern/disk.c tests/disk-host-stubs.c $< -o $@
+		src/kern/sysctl.c src/kern/klog.c src/kern/disk.c \
+		tests/disk-host-stubs.c $< -o $@
 
 $(BUILD)/tests/checkpoint-host-test: tests/checkpoint-host-test.c \
 	tests/disk-host-stubs.c src/kern/test-checkpoint.c src/kern/buf.c \
@@ -758,10 +786,11 @@ HOST_TEST_BINARIES := $(BUILD)/tests/sh-lexer-host-test \
 	$(BUILD)/tests/dns-host-test
 CHECK_RUN_TARGETS := libc-host-test softfloat-host-test \
 	uapi-abi-layout-check posix-header-check posix-api-matrix-check \
+	susv4-header-check susv4-libc-host-test crypt-host-test \
 	ufs1-format-host-test ufs2-format-host-test
 
-userland-command-host-test: scripts/test-userland-commands-host.sh
-	./scripts/test-userland-commands-host.sh
+userland-command-host-test: tests/test-userland-commands-host.sh
+	bash tests/test-userland-commands-host.sh
 
 CHECK_RUN_TARGETS += userland-command-host-test
 
@@ -880,93 +909,10 @@ $(1): $(BUILD)/rootfs/.stamp
 	@tar -C $(BUILD)/rootfs -czf $$@ .
 endef
 
-include $(KERNEL_MK)
+include $(PLATFORM_MAKEFILE)
 
-KERNEL_BUILD_TARGET ?= vmunix
-ROOTFS_BUILD_TARGET ?= rootfs
-ROOTFS_IMAGE_BUILD_TARGET ?= arch-image-ufs
-BOOT_DISK_BUILD_TARGET ?= hdd-image
-KERNEL_ARTIFACT ?= $(BUILD)/vmunix
-ROOTFS_ARTIFACT ?= $(BUILD)/rootfs
-ROOTFS_IMAGE_ARTIFACT ?=
-BOOT_DISK_ARTIFACT ?= $(BUILD)/hdd-image.img
-ZEDBSD_BUILD_LAYOUT := external-package-sources-v2
-
-.PHONY: config-prepare build-kernel build-rootfs build-rootfs-image \
-	build-boot-disk-image build-release build-toolchain \
-	print-kernel-artifact print-rootfs-artifact \
-	print-rootfs-image-artifact print-boot-disk-artifact \
-	print-release-artifacts
-config-prepare:
-	@if ! test -f $(BUILD)/.zedbsd-layout || \
-	    ! grep -qx '$(ZEDBSD_BUILD_LAYOUT)' $(BUILD)/.zedbsd-layout; then \
-		echo "Build layout changed; cleaning $(BUILD)"; \
-		rm -rf $(BUILD); mkdir -p $(BUILD); \
-		printf '%s\n' '$(ZEDBSD_BUILD_LAYOUT)' > $(BUILD)/.zedbsd-layout; \
-	fi; \
-	if test -n "$(ZEDBSD_CONFIG)"; then \
-		mkdir -p $(BUILD); \
-		if ! test -f $(BUILD)/.zedbsd-config || \
-		    ! cmp -s "$(ZEDBSD_CONFIG)" $(BUILD)/.zedbsd-config; then \
-			echo "Configuration changed; cleaning $(BUILD)"; \
-			rm -rf $(BUILD); mkdir -p $(BUILD); \
-			printf '%s\n' '$(ZEDBSD_BUILD_LAYOUT)' > $(BUILD)/.zedbsd-layout; \
-			cp "$(ZEDBSD_CONFIG)" $(BUILD)/.zedbsd-config; \
-		fi; \
-	fi
-
-define ZEDBSD_CONFIGURED_BUILD
-	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" messages
-	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" $(1)
-	@test -e "$(2)" || { echo "missing build artifact: $(2)" >&2; exit 1; }
-	@printf '%s\n' "$(abspath $(2))"
-endef
-
-build-kernel: config-prepare
-	$(call ZEDBSD_CONFIGURED_BUILD,$(KERNEL_BUILD_TARGET),$(KERNEL_ARTIFACT))
-
-build-rootfs: config-prepare
-	$(call ZEDBSD_CONFIGURED_BUILD,$(ROOTFS_BUILD_TARGET),$(ROOTFS_ARTIFACT))
-
-build-rootfs-image: config-prepare
-	@if test -z "$(ROOTFS_IMAGE_ARTIFACT)"; then \
-		echo "$(ARCH) does not define a standalone rootfs image" >&2; exit 2; \
-	fi
-	$(call ZEDBSD_CONFIGURED_BUILD,$(ROOTFS_IMAGE_BUILD_TARGET),$(ROOTFS_IMAGE_ARTIFACT))
-
-build-boot-disk-image: config-prepare
-	$(call ZEDBSD_CONFIGURED_BUILD,$(BOOT_DISK_BUILD_TARGET),$(BOOT_DISK_ARTIFACT))
-
-build-release: config-prepare
-	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" build-kernel
-	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" build-rootfs
-	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" build-rootfs-image
-	+$(MAKE) ARCH=$(ARCH) ZEDBSD_CONFIG="$(ZEDBSD_CONFIG)" build-boot-disk-image
-
-build-toolchain:
-	@echo "Build toolchain is not implemented yet."
-
-print-kernel-artifact:
-	@printf '%s\n' "$(abspath $(KERNEL_ARTIFACT))"
-
-print-rootfs-artifact:
-	@printf '%s\n' "$(abspath $(ROOTFS_ARTIFACT))"
-
-print-rootfs-image-artifact:
-	@if test -n "$(ROOTFS_IMAGE_ARTIFACT)"; then \
-		printf '%s\n' "$(abspath $(ROOTFS_IMAGE_ARTIFACT))"; \
-	fi
-
-print-boot-disk-artifact:
-	@printf '%s\n' "$(abspath $(BOOT_DISK_ARTIFACT))"
-
-print-release-artifacts:
-	@printf '%s\n' "$(abspath $(KERNEL_ARTIFACT))"
-	@printf '%s\n' "$(abspath $(ROOTFS_ARTIFACT))"
-	@if test -n "$(ROOTFS_IMAGE_ARTIFACT)"; then \
-		printf '%s\n' "$(abspath $(ROOTFS_IMAGE_ARTIFACT))"; \
-	fi
-	@printf '%s\n' "$(abspath $(BOOT_DISK_ARTIFACT))"
+.PHONY: vmunix rootfs world
+world: vmunix rootfs
 
 check: $(HOST_TEST_BINARIES) $(CHECK_RUN_TARGETS)
 	@set -e; for test in $(HOST_TEST_BINARIES); do \
@@ -982,9 +928,9 @@ distclean:
 	$(BUILD)/*/*/*/*.d $(BUILD)/*/*/*/*/*.d \
 	$(BUILD)/*/*/*/*/*/*.d $(BUILD)/*/*/*/*/*/*/*.d)
 
-.PHONY: all check clean distclean messages \
+.PHONY: check clean distclean \
 	overlay-journal-format-host-test uapi-abi-layout-check \
-	posix-header-check posix-api-matrix-check ufs1-format-host-test \
-	ufs2-format-host-test ufs1-format-python-test ufs2-format-python-test \
-	toolchain-info regression-matrix-build \
-	regression-matrix-runtime
+	posix-header-check posix-api-matrix-check susv4-header-check \
+	susv4-libc-host-test crypt-host-test userland-command-host-test \
+	ufs1-format-host-test \
+	ufs2-format-host-test ufs1-format-python-test ufs2-format-python-test

@@ -2,6 +2,7 @@
 #include "kern/cred.h"
 #include "kern/file.h"
 #include "kern/lock.h"
+#include "kern/partition.h"
 #include <hal/hal.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -25,6 +26,10 @@ hal_irq_enable(void)
 
 hal_cpu_id_t hal_cpu_current(void) { return 0; }
 struct thread *thread_current(void) { return NULL; }
+
+unsigned partition_count(void) { return 0; }
+const struct partition *partition_at(unsigned index)
+{ (void)index; return NULL; }
 
 int
 hal_pmem_alloc(const struct hal_pmem_request *request, struct hal_pmem *desc)
