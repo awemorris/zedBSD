@@ -436,13 +436,10 @@ DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o \
 	$(DYNAMIC_DIR)/obj/userland/base/rtld/rtld.o \
 	$(DYNAMIC_DIR)/obj/userland/base/rtld/string.o
 DYNAMIC_FLOAT_DIR := $(DYNAMIC_DIR)/float
-DYNAMIC_MUSL_MATH_OBJS := $(addprefix $(DYNAMIC_FLOAT_DIR)/musl-,\
-	$(ZEDBSD_MUSL_MATH_REL:.c=.o)) $(DYNAMIC_FLOAT_DIR)/musl-math-errors.o
-DYNAMIC_MUSL_SCAN_OBJS := $(DYNAMIC_FLOAT_DIR)/musl-shgetc.o \
-	$(DYNAMIC_FLOAT_DIR)/musl-floatscan.o \
-	$(DYNAMIC_FLOAT_DIR)/musl-strtod.o \
-	$(DYNAMIC_FLOAT_DIR)/musl-compat.o
-DYNAMIC_LIBC_OBJS += $(DYNAMIC_MUSL_MATH_OBJS) $(DYNAMIC_MUSL_SCAN_OBJS)
+DYNAMIC_LIBM_OBJ := $(DYNAMIC_FLOAT_DIR)/math.o
+DYNAMIC_FLOAT_PARSE_OBJS := $(DYNAMIC_FLOAT_DIR)/zed-softfloat.o \
+	$(DYNAMIC_FLOAT_DIR)/float-parse.o
+DYNAMIC_LIBC_OBJS += $(DYNAMIC_LIBM_OBJ) $(DYNAMIC_FLOAT_PARSE_OBJS)
 
 AMD64_USER_NOCT_GLUE_OBJS := \
 	$(BUILD)/user64/userland/packages/lang/noct/runtime/main.o \
@@ -455,14 +452,14 @@ $(AMD64_USER_NOCT_GLUE_OBJS): AMD64_USER_CPPFLAGS := \
 	$(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
 
 $(BUILD)/NOCT.ELF: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_NOCT_GLUE_OBJS) \
-	$(USER_NOCT_OBJECTS) $(DYNAMIC_MUSL_MATH_OBJS) \
-	$(DYNAMIC_MUSL_SCAN_OBJS) $(AMD64_PLATFORM)/user.ld \
+	$(USER_NOCT_OBJECTS) $(DYNAMIC_LIBM_OBJ) \
+	$(DYNAMIC_FLOAT_PARSE_OBJS) $(AMD64_PLATFORM)/user.ld \
 	$(AMD64_USER_ELF_CHECK)
 	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_USER_NOCT_GLUE_OBJS) $(USER_NOCT_OBJECTS) \
-		$(DYNAMIC_MUSL_MATH_OBJS) $(DYNAMIC_MUSL_SCAN_OBJS) -o $@
+		$(DYNAMIC_LIBM_OBJ) $(DYNAMIC_FLOAT_PARSE_OBJS) -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
@@ -489,44 +486,22 @@ $(DYNAMIC_DIR)/obj/userland/base/rtld/tlsdesc.o: userland/base/rtld/tlsdesc-amd6
 
 $(DYNAMIC_DIR)/obj/userland/base/tests/tlstest.o: DYNAMIC_CFLAGS += -mtls-dialect=gnu2
 
-$(DYNAMIC_FLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
+$(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-Wno-error=unused-but-set-variable -Wno-error=parentheses \
-		-Wno-error=unknown-pragmas -Wno-error=maybe-uninitialized \
-		-Wno-error=unused-parameter \
-		-c $< -o $@
+	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+		-mlong-double-64 -c $< -o $@
 
-$(DYNAMIC_FLOAT_DIR)/musl-math-errors.o: src/softfloat/musl-math-errors.c
+$(DYNAMIC_FLOAT_DIR)/zed-softfloat.o: src/softfloat/zed-softfloat.c \
+	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-c $< -o $@
+	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+		-mlong-double-64 -c $< -o $@
 
-$(DYNAMIC_FLOAT_DIR)/musl-shgetc.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c src/softfloat/musl-floatscan.h
+$(DYNAMIC_FLOAT_DIR)/float-parse.o: libc/float-parse.c \
+	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-Wno-error=parentheses -include src/softfloat/musl-floatscan.h \
-		-c $< -o $@
-
-$(DYNAMIC_FLOAT_DIR)/musl-floatscan.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c src/softfloat/musl-floatscan.h
-	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-Wno-error=parentheses -Wno-error=sign-compare \
-		-include src/softfloat/musl-floatscan.h -c $< -o $@
-
-$(DYNAMIC_FLOAT_DIR)/musl-strtod.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c src/softfloat/musl-floatscan.h
-	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-include src/softfloat/musl-floatscan.h -c $< -o $@
-
-$(DYNAMIC_FLOAT_DIR)/musl-compat.o: src/softfloat/musl-compat.c \
-	src/softfloat/musl-floatscan.h
-	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-include src/softfloat/musl-floatscan.h -c $< -o $@
+	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+		-mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_DIR)/obj/src/crt/crt1.o: src/crt/crt1-amd64.S
 	@mkdir -p $(dir $@)

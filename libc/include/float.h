@@ -27,7 +27,7 @@
 #define DBL_MAX 1.79769313486231570815e+308
 #define DBL_EPSILON 2.22044604925031308085e-16
 
-/* zedBSD compiles imported musl conversion code with -mlong-double-64. */
+/* Describe the compiler ABI used by the selected zedBSD target. */
 #ifdef __LDBL_MANT_DIG__
 #define LDBL_MANT_DIG __LDBL_MANT_DIG__
 #define LDBL_MIN_EXP __LDBL_MIN_EXP__

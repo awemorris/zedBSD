@@ -509,16 +509,12 @@ DYNAMIC_RTLD_OBJS := $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o \
 	$(DYNAMIC_DIR)/obj/userland/base/rtld/rtld.o \
 	$(DYNAMIC_DIR)/obj/userland/base/rtld/string.o
 DYNAMIC_SOFTFLOAT_DIR := $(DYNAMIC_DIR)/softfloat
-DYNAMIC_GCC_SOFTFLOAT_OBJS := $(addprefix $(DYNAMIC_SOFTFLOAT_DIR)/gcc-,\
-	$(ZEDBSD_GCC_SOFTFP_REL:.c=.o))
-DYNAMIC_MUSL_MATH_OBJS := $(addprefix $(DYNAMIC_SOFTFLOAT_DIR)/musl-,\
-	$(ZEDBSD_MUSL_MATH_REL:.c=.o)) $(DYNAMIC_SOFTFLOAT_DIR)/musl-math-errors.o
-DYNAMIC_MUSL_SCAN_OBJS := $(DYNAMIC_SOFTFLOAT_DIR)/musl-shgetc.o \
-	$(DYNAMIC_SOFTFLOAT_DIR)/musl-floatscan.o \
-	$(DYNAMIC_SOFTFLOAT_DIR)/musl-strtod.o \
-	$(DYNAMIC_SOFTFLOAT_DIR)/musl-compat.o
-DYNAMIC_LIBC_OBJS += $(DYNAMIC_GCC_SOFTFLOAT_OBJS) \
-	$(DYNAMIC_MUSL_MATH_OBJS) $(DYNAMIC_MUSL_SCAN_OBJS)
+DYNAMIC_COMPILER_RT_OBJS := $(addprefix $(DYNAMIC_SOFTFLOAT_DIR)/,\
+	zed-softfloat.o compiler-runtime.o)
+DYNAMIC_LIBM_OBJ := $(DYNAMIC_SOFTFLOAT_DIR)/math.o
+DYNAMIC_FLOAT_PARSE_OBJ := $(DYNAMIC_SOFTFLOAT_DIR)/float-parse.o
+DYNAMIC_LIBC_OBJS += $(DYNAMIC_COMPILER_RT_OBJS) \
+	$(DYNAMIC_LIBM_OBJ) $(DYNAMIC_FLOAT_PARSE_OBJ)
 
 $(DYNAMIC_DIR)/obj/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -532,47 +528,22 @@ $(DYNAMIC_DIR)/obj/userland/base/rtld/entry.o: userland/base/rtld/entry-i386.S
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -c $< -o $@
 
-$(DYNAMIC_SOFTFLOAT_DIR)/gcc-%.o: $(ZEDBSD_GCC_ROOT)/libgcc/soft-fp/%.c
+$(DYNAMIC_SOFTFLOAT_DIR)/%.o: src/softfloat/%.c \
+	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_GCC_SOFTFP_CPPFLAGS) $(DYNAMIC_CFLAGS) \
-		-mlong-double-64 -Wno-error=type-limits -c $< -o $@
+	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+		-mlong-double-64 -c $< -o $@
 
-$(DYNAMIC_SOFTFLOAT_DIR)/musl-%.o: $(ZEDBSD_MUSL_ROOT)/src/math/%.c
+$(DYNAMIC_FLOAT_PARSE_OBJ): libc/float-parse.c \
+	src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-Wno-error=unused-but-set-variable -Wno-error=parentheses \
-		-Wno-error=unknown-pragmas -Wno-error=maybe-uninitialized \
-		-Wno-error=unused-parameter \
-		-c $< -o $@
-$(DYNAMIC_SOFTFLOAT_DIR)/musl-math-errors.o: src/softfloat/musl-math-errors.c
-	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 -c $< -o $@
+	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+		-mlong-double-64 -c $< -o $@
 
-$(DYNAMIC_SOFTFLOAT_DIR)/musl-shgetc.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/shgetc.c src/softfloat/musl-floatscan.h
+$(DYNAMIC_LIBM_OBJ): libc/math.c src/softfloat/zed-softfloat.h
 	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-Wno-error=parentheses -include src/softfloat/musl-floatscan.h \
-		-c $< -o $@
-
-$(DYNAMIC_SOFTFLOAT_DIR)/musl-floatscan.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/internal/floatscan.c src/softfloat/musl-floatscan.h
-	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-Wno-error=parentheses -Wno-error=sign-compare \
-		-include src/softfloat/musl-floatscan.h -c $< -o $@
-
-$(DYNAMIC_SOFTFLOAT_DIR)/musl-strtod.o: \
-	$(ZEDBSD_MUSL_ROOT)/src/stdlib/strtod.c src/softfloat/musl-floatscan.h
-	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-include src/softfloat/musl-floatscan.h -c $< -o $@
-
-$(DYNAMIC_SOFTFLOAT_DIR)/musl-compat.o: src/softfloat/musl-compat.c \
-	src/softfloat/musl-floatscan.h
-	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_MUSL_CPPFLAGS) $(DYNAMIC_CFLAGS) -mlong-double-64 \
-		-include src/softfloat/musl-floatscan.h -c $< -o $@
+	$(CC) -nostdinc -Ilibc/include -I. $(DYNAMIC_CFLAGS) \
+		-mlong-double-64 -c $< -o $@
 
 $(DYNAMIC_DIR)/ld.so: $(DYNAMIC_RTLD_OBJS)
 	$(LD) -m elf_i386 -shared -Bsymbolic -e _rtld_start --hash-style=sysv \

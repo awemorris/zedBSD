@@ -38,7 +38,7 @@ make help              # show a short command summary
 | `src/hal/`           | Architecture HALs and board support                    |
 | `src/kern/`          | Platform-neutral kernel                                |
 | `src/crt/`           | Architecture-specific crt0/crt1 startup code           |
-| `src/softfloat/`     | Soft-float support built from vendor GCC/musl sources  |
+| `src/softfloat/`     | zedBSD's integer-only soft-float/compiler runtime      |
 | `userland/`          | Userland programs                                      |
 | `userland/base/`     | Base programs                                          |
 | `userland/comp/`     | Compilers                                              |

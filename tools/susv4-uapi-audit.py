@@ -117,7 +117,7 @@ def definition_evidence(repo, header, symbol, defined, kind):
                      r"(?:\s|\()", text):
             return str(header_path.relative_to(repo)) + " (macro)"
     roots = [repo / "libc", repo / "userland/base/libc", repo / "src/softfloat",
-             repo / "vendor/musl/src/math"]
+             repo / "src/softfloat"]
     pattern = re.compile(r"(?m)^[A-Za-z_][^;{}]*\b" + re.escape(symbol) +
                          r"\s*\([^;]*\)\s*\{")
     data_pattern = re.compile(r"(?m)^(?!\s*(?:extern|static)\b)[A-Za-z_]"
@@ -131,8 +131,6 @@ def definition_evidence(repo, header, symbol, defined, kind):
             if (path.stem == symbol or pattern.search(contents) or
                     (kind == "data" and data_pattern.search(contents))):
                 return str(path.relative_to(repo))
-    if symbol == "signgam" and (repo / "vendor/musl/src/math/signgam.c").exists():
-        return "vendor/musl/src/math/signgam.c (weak alias)"
     return ""
 
 

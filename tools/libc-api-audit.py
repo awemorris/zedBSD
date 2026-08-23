@@ -171,7 +171,7 @@ def source_evidence(repo, symbol):
     matches = []
     roots = [
         repo / "libc", repo / "userland/base/libc",
-        repo / "src/softfloat", repo / "vendor/musl/src/math",
+        repo / "src/softfloat",
     ]
     for root in roots:
         if not root.exists():

@@ -1,9 +1,8 @@
 ﻿/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
 /*
- * PIC-safe compiler helpers needed by the SPARC V9 dynamic userland.  The
- * bare-metal libgcc archive was built without PIC and its lookup-table based
- * __clzdi2 introduces text relocations into libc.so.
+ * PIC-safe integer helpers needed by the SPARC V9 dynamic userland.  Keeping
+ * these here avoids linking the compiler toolchain's non-PIC runtime archive.
  */
 int
 __clzdi2(unsigned long long value)

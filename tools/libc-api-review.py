@@ -22,8 +22,8 @@ FINDINGS = {
                 "used data-dependent selection; both were replaced.", "fixed"),
     "exit": ("Exit-handler registration was not connected to exit and was not "
              "serialized; handlers now run LIFO with registration locking.", "fixed"),
-    "math": ("The pinned musl implementation was reviewed for zedBSD's 64-bit "
-             "long-double ABI; local error helpers now update the software fenv.", "fixed"),
+    "math": ("The independent zedBSD implementation was reviewed for its "
+             "target long-double ABIs and software-fenv propagation.", "fixed"),
 }
 
 

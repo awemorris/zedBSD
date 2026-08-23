@@ -76,9 +76,16 @@ $(BUILD)/tests/libc-host-test: tests/libc-host-test.c \
 
 libc-objects: $(ZEDBSD_LIBC_OBJECTS)
 
-libc-host-test: $(BUILD)/tests/libc-host-test
-	$(BUILD)/tests/libc-host-test
-	@echo "zedBSD libc host tests: PASS"
+libc-host-test:
+	@if printf 'int main(void){return 0;}\n' | \
+		$(HOSTCC) -m32 -x c - -o /tmp/zedbsd-libc-m32-probe >/dev/null 2>&1; then \
+		rm -f /tmp/zedbsd-libc-m32-probe; \
+		$(MAKE) --no-print-directory $(BUILD)/tests/libc-host-test; \
+		$(BUILD)/tests/libc-host-test; \
+		echo "zedBSD libc host tests: PASS"; \
+	else \
+		echo "zedBSD libc host tests: SKIP (32-bit host libc unavailable)"; \
+	fi
 
 libc-opcode-check: libc-objects
 	@if $(ZEDBSD_LIBC_OBJDUMP) -d --no-show-raw-insn $(ZEDBSD_LIBC_OBJECTS) | \
