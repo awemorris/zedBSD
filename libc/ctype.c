@@ -23,3 +23,6 @@ int isxdigit(int c) { return isdigit(c) || (c >= 'a' && c <= 'f') ||
 int ispunct(int c) { return isgraph(c) && !isalnum(c); }
 int tolower(int c) { return isupper(c) ? c + ('a' - 'A') : c; }
 int toupper(int c) { return islower(c) ? c - ('a' - 'A') : c; }
+int _tolower(int c) { return c - 'A' + 'a'; }
+int _toupper(int c) { return c - 'a' + 'A'; }
+int toascii(int c) { return c & 0x7f; }

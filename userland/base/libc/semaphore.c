@@ -218,6 +218,10 @@ sem_open(const char *name, int flags, ...)
 }
 
 int sem_close(sem_t *sem)
-{ return sem == NULL || sem == SEM_FAILED ? (errno = EINVAL, -1) : munmap(sem, sizeof(*sem)); }
+{
+	if (sem == NULL || sem == SEM_FAILED) { errno = EINVAL; return -1; }
+	(void)msync(sem, sizeof(*sem), MS_SYNC);
+	return munmap(sem, sizeof(*sem));
+}
 int sem_unlink(const char *name)
 { char object_name[PATH_MAX]; return named_sem_name(name, object_name) == 0 ? shm_unlink(object_name) : -1; }

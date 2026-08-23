@@ -1162,7 +1162,7 @@ ufs1_mknod(struct inode *directory,const struct componentname *name,
 	struct inode *existing,*inode;
 	struct ufs1_mount_state *ms=state(directory->i_mount);
 	int error;
-	if(type!=INODE_FIFO&&type!=INODE_SOCKET)
+	if(type!=INODE_FIFO&&type!=INODE_SOCKET&&type!=INODE_CHAR&&type!=INODE_BLOCK)
 		return EOPNOTSUPP;
 	if(!ms->writable)
 		return EROFS;

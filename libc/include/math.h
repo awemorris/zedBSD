@@ -5,6 +5,8 @@
 typedef float float_t;
 typedef double double_t;
 
+extern int signgam;
+
 #define INFINITY (__builtin_inff())
 #define NAN (__builtin_nanf(""))
 #define HUGE_VALF INFINITY
@@ -179,6 +181,18 @@ long double scalblnl(long double, long);
 double scalbn(double, int);
 float scalbnf(float, int);
 long double scalbnl(long double, int);
+double j0(double);
+double j1(double);
+double jn(int, double);
+double y0(double);
+double y1(double);
+double yn(int, double);
+float j0f(float);
+float j1f(float);
+float jnf(int, float);
+float y0f(float);
+float y1f(float);
+float ynf(int, float);
 
 #undef ZEDBSD_MATH_UNARY
 #undef ZEDBSD_MATH_BINARY

@@ -17,5 +17,8 @@ int isupper(int character);
 int isxdigit(int character);
 int tolower(int character);
 int toupper(int character);
+int _tolower(int character);
+int _toupper(int character);
+int toascii(int character);
 
 #endif

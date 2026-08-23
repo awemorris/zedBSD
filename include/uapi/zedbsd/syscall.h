@@ -159,6 +159,12 @@ enum syscall_number {
 	ZEDBSD_SYS_sched_yield = 148,
 	ZEDBSD_SYS_fexecve = 149,
 	ZEDBSD_SYS_times = 150,
+	ZEDBSD_SYS_sync = 151,
+	ZEDBSD_SYS_getpriority = 152,
+	ZEDBSD_SYS_setpriority = 153,
+	ZEDBSD_SYS_getrusage = 154,
+	ZEDBSD_SYS_getitimer = 155,
+	ZEDBSD_SYS_setitimer = 156,
 };
 
 #endif

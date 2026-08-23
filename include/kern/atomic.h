@@ -163,6 +163,25 @@ static inline uint64_t atomic_u64_fetch_or_release(volatile uint64_t *value,
 	return __atomic_fetch_or(value, bits, __ATOMIC_RELEASE);
 #endif
 }
+static inline int atomic_u64_compare_exchange(volatile uint64_t *value,
+	uint64_t *expected, uint64_t desired)
+{
+#if defined(__i386__) || defined(__m68k__)
+	/* These ports are uniprocessor; disabling interrupts makes the update atomic. */
+	bool enabled = hal_irq_disable();
+	uint64_t current = *value;
+	int exchanged = current == *expected;
+	if (exchanged)
+		*value = desired;
+	else
+		*expected = current;
+	if (enabled) hal_irq_enable();
+	return exchanged;
+#else
+	return __atomic_compare_exchange_n(value, expected, desired, 0,
+	    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+#endif
+}
 
 static inline void refcount_init(refcount_t *count, unsigned value)
 { atomic_raw_store_release(&count->value, value); }

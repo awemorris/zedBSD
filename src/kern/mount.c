@@ -542,6 +542,34 @@ mount_sync(struct mount *mountp)
 }
 
 int
+mount_sync_all(void)
+{
+	struct mount *snapshot[MOUNT_MAX];
+	unsigned count = 0, index;
+	unsigned long irq = spin_lock_irqsave(&namespace_lock);
+	struct mount *mountp;
+	int first_error = 0;
+
+	/* References keep the snapshot valid while slow filesystem sync runs. */
+	for (mountp = mount_head; mountp != NULL && count < MOUNT_MAX;
+	    mountp = mountp->m_next) {
+		if (mountp->m_state != MOUNT_STATE_LIVE ||
+		    mountp->m_bind_source != NULL)
+			continue;
+		mount_ref(mountp);
+		snapshot[count++] = mountp;
+	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	for (index = 0; index < count; index++) {
+		int error = mount_sync(snapshot[index]);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		mount_release(snapshot[index]);
+	}
+	return first_error;
+}
+
+int
 mount_statvfs(struct mount *mountp, struct statvfs *result)
 {
 	int error = 0;

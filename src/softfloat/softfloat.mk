@@ -28,7 +28,7 @@ ZEDBSD_GCC_SOFTFP_REL := \
 # The vendor subtree is pinned, and architecture-specific subdirectories are
 # deliberately excluded so the list remains portable across zedBSD HALs.
 ZEDBSD_MUSL_MATH_REL := $(filter-out \
-	exp10.c exp10f.c exp10l.c j0.c j0f.c j1.c j1f.c jn.c jnf.c \
+	exp10.c exp10f.c exp10l.c \
 	finite.c finitef.c scalb.c scalbf.c significand.c significandf.c \
 	sincos.c sincosf.c sincosl.c, \
 	$(filter-out __math_divzero.c __math_divzerof.c __math_invalid.c \

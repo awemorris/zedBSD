@@ -73,6 +73,8 @@ int *__libc_errno_location(void);
 #define ENODATA 62
 #define EDQUOT 63
 #define ENOTSUP EOPNOTSUPP
+#define ENOMSG 64
+#define EIDRM 65
 
 #define EWOULDBLOCK EAGAIN
 

@@ -45,6 +45,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
+#include <sys/time.h>
 #include <sys/mount.h>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -3279,11 +3281,17 @@ sys_mknodat_call(const uintptr_t args[6])
 	struct inode *created = NULL;
 	char pathname[PATH_MAX], storage[NAME_MAX + 1U];
 	mode_t mode = (mode_t)args[2];
+	enum inode_type type;
 	int error;
 	if (process == NULL || process->cwdi == NULL)
 		return -EINVAL;
-	if ((mode & S_IFMT) != S_IFIFO || args[3] != 0)
-		return -EOPNOTSUPP;
+	if ((mode & S_IFMT) == S_IFIFO) type = INODE_FIFO;
+	else if ((mode & S_IFMT) == S_IFCHR) type = INODE_CHAR;
+	else if ((mode & S_IFMT) == S_IFBLK) type = INODE_BLOCK;
+	else return -EOPNOTSUPP;
+	if (type == INODE_FIFO && args[3] != 0) return -EINVAL;
+	if ((type == INODE_CHAR || type == INODE_BLOCK) &&
+	    !cred_is_superuser(process->cred)) return -EPERM;
 	path_init(&parent);
 	error = copyinstr(args[1], pathname, sizeof(pathname), NULL);
 	if (error != 0)
@@ -3300,8 +3308,9 @@ sys_mknodat_call(const uintptr_t args[6])
 	if (error == 0)
 		error = vfs_may_create(parent.p_inode, process->cred);
 	if (error == 0)
-		error = inode_mknod(parent.p_inode, &name, INODE_FIFO,
-		    S_IFIFO | ((mode & 07777U) & ~process->umask), 0, &created);
+		error = inode_mknod(parent.p_inode, &name, type,
+		    (mode & S_IFMT) | ((mode & 07777U) & ~process->umask),
+		    (dev_t)args[3], &created);
 	if (created != NULL)
 		inode_release(created);
 	path_release(&parent);
@@ -3884,6 +3893,133 @@ sys_times_call(const uintptr_t args[6])
 	return error == 0 ? 0 : -error;
 }
 
+static int
+priority_matches(struct process *target, struct process *caller, int which,
+    id_t who)
+{
+	if (who == 0) {
+		if (which == PRIO_PROCESS) who = (id_t)caller->pid;
+		else if (which == PRIO_PGRP) who = (id_t)caller->pgrp;
+		else if (which == PRIO_USER) who = (id_t)caller->cred->euid;
+	}
+	if (which == PRIO_PROCESS) return target->pid == (pid_t)who;
+	if (which == PRIO_PGRP) return target->pgrp == (pid_t)who;
+	if (which == PRIO_USER) return target->cred != NULL && target->cred->euid == (uid_t)who;
+	return 0;
+}
+
+static intptr_t
+sys_getpriority_call(const uintptr_t args[6])
+{
+	struct process *caller = current_process(), *target;
+	pid_t cursor = -1;
+	int which = (int)args[0], found = 0, best = 20, error;
+	if (caller == NULL || args[2] == 0 || args[3] || args[4] || args[5] ||
+	    (which != PRIO_PROCESS && which != PRIO_PGRP && which != PRIO_USER))
+		return -EINVAL;
+	while ((target = process_find_next_ref(cursor)) != NULL) {
+		cursor = target->pid;
+		if (priority_matches(target, caller, which, (id_t)args[1])) {
+			int value = __atomic_load_n(&target->nice_value, __ATOMIC_RELAXED);
+			if (!found || value < best) best = value;
+			found = 1;
+		}
+		process_release(target);
+	}
+	if (!found) return -ESRCH;
+	error = copyout(&best, args[2], sizeof(best));
+	return error ? -error : 0;
+}
+
+static intptr_t
+sys_setpriority_call(const uintptr_t args[6])
+{
+	struct process *caller = current_process(), *target;
+	pid_t cursor = -1;
+	int which=(int)args[0], value=(int)args[2], found=0;
+	if(caller==NULL||args[3]||args[4]||args[5]||
+	    (which!=PRIO_PROCESS&&which!=PRIO_PGRP&&which!=PRIO_USER))return -EINVAL;
+	if (value < -20)
+		value = -20;
+	if (value > 20)
+		value = 20;
+	while((target=process_find_next_ref(cursor))!=NULL){
+		cursor=target->pid;
+		if(priority_matches(target,caller,which,(id_t)args[1])){
+			int old=__atomic_load_n(&target->nice_value,__ATOMIC_RELAXED);
+			found=1;
+			if(target->cred==NULL || (caller->cred->euid!=0 && caller->cred->euid!=target->cred->euid)){process_release(target);return -EPERM;}
+			if(value<old && !cred_is_superuser(caller->cred)){process_release(target);return -EPERM;}
+			__atomic_store_n(&target->nice_value,value,__ATOMIC_RELAXED);
+		}
+		process_release(target);
+	}
+	return found?0:-ESRCH;
+}
+
+static void
+ticks_to_timeval(uint64_t ticks, struct timeval *value)
+{
+	value->tv_sec=(time_t)(ticks/100U);
+	value->tv_usec=(long)((ticks%100U)*10000U);
+}
+
+static intptr_t
+sys_getrusage_call(const uintptr_t args[6])
+{
+	struct process *process=current_process();struct rusage usage;uint64_t ticks;int error;
+	if(process==NULL||args[1]==0||args[2]||args[3]||args[4]||args[5])return -EINVAL;
+	memset(&usage,0,sizeof(usage));
+	if((int)args[0]==RUSAGE_SELF)ticks=atomic_u64_load_acquire(&process->cpu_ticks);
+	else if((int)args[0]==RUSAGE_CHILDREN)ticks=atomic_u64_load_acquire(&process->child_cpu_ticks);
+	else return -EINVAL;
+	ticks_to_timeval(ticks,&usage.ru_utime);
+	error=copyout(&usage,args[1],sizeof(usage));return error?-error:0;
+}
+
+static int
+timeval_ticks(const struct timeval *value,uint64_t *ticks)
+{
+	uint64_t whole, fraction;
+	if(value->tv_sec<0||value->tv_usec<0||value->tv_usec>=1000000)return EINVAL;
+	if((uint64_t)value->tv_sec>UINT64_MAX/100U)return EOVERFLOW;
+	whole=(uint64_t)value->tv_sec*100U;fraction=((uint64_t)value->tv_usec+9999U)/10000U;
+	if (whole > UINT64_MAX - fraction)
+		return EOVERFLOW;
+	*ticks = whole + fraction;
+	return 0;
+}
+
+static void
+timer_snapshot(struct process *process,int which,struct itimerval *value)
+{
+	uint64_t remaining=atomic_u64_load_acquire(&process->itimer_remaining[which]);
+	uint64_t interval=atomic_u64_load_acquire(&process->itimer_interval[which]);
+	memset(value,0,sizeof(*value));ticks_to_timeval(remaining,&value->it_value);ticks_to_timeval(interval,&value->it_interval);
+}
+
+static intptr_t
+sys_getitimer_call(const uintptr_t args[6])
+{
+	struct process*p=current_process();struct itimerval value;int which=(int)args[0],error;
+	if(p==NULL||which<0||which>2||args[1]==0||args[2]||args[3]||args[4]||args[5])return -EINVAL;
+	timer_snapshot(p,which,&value);error=copyout(&value,args[1],sizeof(value));return error?-error:0;
+}
+
+static intptr_t
+sys_setitimer_call(const uintptr_t args[6])
+{
+	struct process*p=current_process();struct itimerval value,old;uint64_t remaining,interval;int which=(int)args[0],error;
+	if(p==NULL||which<0||which>2||args[1]==0||args[3]||args[4]||args[5])return -EINVAL;
+	error=copyin(args[1],&value,sizeof(value));if(error)return -error;
+	if((error=timeval_ticks(&value.it_value,&remaining))!=0||(error=timeval_ticks(&value.it_interval,&interval))!=0)return -error;
+	timer_snapshot(p,which,&old);
+	atomic_u64_store_release(&p->itimer_interval[which],interval);
+	atomic_u64_store_release(&p->itimer_remaining[which],remaining);
+	if(args[2]){error=copyout(&old,args[2],sizeof(old));if(error)return -error;}
+	return 0;
+}
+
 static intptr_t
 sys_execve_call(const uintptr_t args[6])
 {
@@ -4195,6 +4331,12 @@ syscall_dispatch_body(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_fork: return sys_fork_call(args);
 	case ZEDBSD_SYS_sched_yield: return sys_sched_yield_call(args);
 	case ZEDBSD_SYS_times: return sys_times_call(args);
+	case ZEDBSD_SYS_sync: return -(long)mount_sync_all();
+	case ZEDBSD_SYS_getpriority: return sys_getpriority_call(args);
+	case ZEDBSD_SYS_setpriority: return sys_setpriority_call(args);
+	case ZEDBSD_SYS_getrusage: return sys_getrusage_call(args);
+	case ZEDBSD_SYS_getitimer: return sys_getitimer_call(args);
+	case ZEDBSD_SYS_setitimer: return sys_setitimer_call(args);
 	case ZEDBSD_SYS_execve: return sys_execve_call(args);
 	case ZEDBSD_SYS_fexecve: return sys_fexecve_call(args);
 	case ZEDBSD_SYS_waitpid: return sys_waitpid_call(args);

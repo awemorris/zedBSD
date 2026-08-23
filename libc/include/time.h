@@ -25,6 +25,9 @@ struct tm {
 };
 struct sigevent;
 extern char *tzname[2];
+extern int daylight;
+extern long timezone;
+extern int getdate_err;
 char *asctime(const struct tm *);
 char *asctime_r(const struct tm *restrict, char *restrict);
 clock_t clock(void);
@@ -53,5 +56,7 @@ int timer_settime(timer_t, int, const struct itimerspec *, struct itimerspec *);
 int timer_gettime(timer_t, struct itimerspec *);
 int timer_getoverrun(timer_t);
 void tzset(void);
+char *strptime(const char *restrict, const char *restrict, struct tm *restrict);
+struct tm *getdate(const char *);
 
 #endif

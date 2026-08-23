@@ -295,6 +295,23 @@ posix-header-check: $(BUILD)/tests/posix-header-ilp32.o \
 	$(BUILD)/tests/posix-header-lp64.o
 	@echo "zedBSD POSIX ILP32/LP64 public-header check: PASS"
 
+$(BUILD)/tests/susv4-header-ilp32.o: tests/susv4-header-compile.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m32 $(UAPI_ABI_TEST_FLAGS) -c $< -o $@
+
+$(BUILD)/tests/susv4-header-lp64.o: tests/susv4-header-compile.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m64 $(UAPI_ABI_TEST_FLAGS) -DZEDBSD_USER_ABI_LP64 \
+		-c $< -o $@
+
+susv4-header-check: $(BUILD)/tests/susv4-header-ilp32.o \
+	$(BUILD)/tests/susv4-header-lp64.o
+	@echo "zedBSD SUSv4/XSI ILP32/LP64 public-header check: PASS"
+
+susv4-uapi-review-check: plan/susv4-uapi-audit.csv \
+	tools/susv4-uapi-review.py
+	$(PYTHON) tools/susv4-uapi-review.py plan/susv4-uapi-audit.csv
+
 posix-api-matrix-check: tests/posix-r2-api.csv \
 	scripts/check-posix-api-matrix.py
 	$(PYTHON) scripts/check-posix-api-matrix.py
@@ -575,6 +592,16 @@ $(BUILD)/tests/crypt-host-test: tests/crypt-host-test.c userland/base/libc/crypt
 
 crypt-host-test: $(BUILD)/tests/crypt-host-test
 	$(BUILD)/tests/crypt-host-test
+
+$(BUILD)/tests/susv4-libc-host-test: tests/susv4-libc-host-test.c \
+	libc/random48.c libc/random.c libc/search.c libc/xsi-crypto.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -O2 -Wall -Wextra -Werror -Ilibc/include \
+		libc/random48.c libc/random.c libc/search.c libc/xsi-crypto.c $< -o $@
+
+susv4-libc-host-test: $(BUILD)/tests/susv4-libc-host-test
+	$(BUILD)/tests/susv4-libc-host-test
+	@echo "zedBSD SUSv4 libc known-answer tests: PASS"
 
 $(BUILD)/tests/blkdev-host-test: tests/blkdev-host-test.c \
 	tests/disk-host-stubs.c \

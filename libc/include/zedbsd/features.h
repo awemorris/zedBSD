@@ -2,9 +2,11 @@
 #ifndef ZEDBSD_FEATURES_H
 #define ZEDBSD_FEATURES_H
 
-/* zedBSD currently targets the POSIX.1-2008 base API plus selected R2 work. */
+/* POSIX.1-2008 and the mandatory SUSv4/XSI System Interfaces profile. */
 #define _POSIX_VERSION 200809L
 #define _POSIX2_VERSION 200809L
+#define _XOPEN_VERSION 700
+#define _XOPEN_UNIX 1
 #define _POSIX_JOB_CONTROL 1
 #define _POSIX_THREADS 200809L
 #define _POSIX_THREAD_ATTR_STACKSIZE 200809L

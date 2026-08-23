@@ -460,7 +460,8 @@ static int
 tmpfs_mknod(struct inode *directory, const struct componentname *component,
 	enum inode_type type, mode_t mode, dev_t rdev, struct inode **result)
 {
-	if (type != INODE_FIFO && type != INODE_SOCKET)
+	if (type != INODE_FIFO && type != INODE_SOCKET &&
+	    type != INODE_CHAR && type != INODE_BLOCK)
 		return EOPNOTSUPP;
 	return tmpfs_make(directory, component, type, mode, rdev, NULL, result);
 }

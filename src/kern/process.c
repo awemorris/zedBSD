@@ -454,6 +454,7 @@ process_create(struct process *parent, pid_t requested_pid,
 	process->parent = parent;
 	parent_irq = spin_lock_irqsave(&parent->lock);
 	process->umask = parent->umask;
+	process->nice_value = parent->nice_value;
 	process->limits = parent->limits;
 	process->cred = parent->cred;
 	process->controlling_tty = parent->controlling_tty;

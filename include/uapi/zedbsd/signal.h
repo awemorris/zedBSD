@@ -13,9 +13,11 @@ typedef uint32_t sigset_t;
 #define SIGTRAP 5
 #define SIGABRT 6
 #define SIGFPE 8
+#define SIGVTALRM 7
 #define SIGKILL 9
 #define SIGBUS 10
 #define SIGSEGV 11
+#define SIGPROF 12
 #define SIGPIPE 13
 #define SIGALRM 14
 #define SIGTERM 15

@@ -318,6 +318,18 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 		$(BUILD)/user64/userland/base/tests/posix-r2-remaining.o -o $@
 	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
+$(BUILD)/SUSV4-XSI.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
+	$(BUILD)/user64/userland/base/tests/susv4-xsi.o \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+		$(BUILD)/user64/userland/base/tests/susv4-xsi.o -o $@
+	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+susv4-xsi-user-test: $(BUILD)/SUSV4-XSI.ELF
+
 $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
 	$(AMD64_USER_READLINE_LIB) \
 	$(AMD64_PLATFORM)/user.ld \

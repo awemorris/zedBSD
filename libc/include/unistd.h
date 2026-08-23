@@ -44,6 +44,8 @@
 #define _SC_MQ_OPEN_MAX 24
 #define _SC_MQ_PRIO_MAX 25
 #define _SC_TIMERS 26
+#define _SC_XOPEN_VERSION 27
+#define _SC_XOPEN_UNIX 28
 
 #define _PC_LINK_MAX 1
 #define _PC_MAX_CANON 2
@@ -123,6 +125,7 @@ pid_t getppid(void);
 pid_t getpgrp(void);
 pid_t getpgid(pid_t);
 int setpgid(pid_t, pid_t);
+int setpgrp(void);
 pid_t setsid(void);
 pid_t getsid(pid_t);
 uid_t getuid(void);
@@ -148,5 +151,11 @@ int fchownat(int, const char *, uid_t, gid_t, int);
 #define F_TEST  3
 
 int lockf(int, int, off_t);
+long gethostid(void);
+int nice(int);
+char *crypt(const char *, const char *);
+void encrypt(char [64], int);
+void swab(const void *, void *, ssize_t);
+void sync(void);
 
 #endif

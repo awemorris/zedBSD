@@ -10,6 +10,8 @@ typedef struct {
 #define setjmp(environment) \
 	(__builtin_setjmp((environment)[0].context) ? \
 	(environment)[0].result : 0)
+#define _setjmp(environment) setjmp(environment)
 void longjmp(jmp_buf, int) __attribute__((noreturn));
+void _longjmp(jmp_buf, int) __attribute__((noreturn));
 
 #endif

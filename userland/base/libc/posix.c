@@ -428,6 +428,7 @@ ssize_t preadv(int fd, const struct iovec *iov, int count, off_t offset)
 ssize_t pwritev(int fd, const struct iovec *iov, int count, off_t offset)
 { cancel_point(); ssize_t result = positional_vector_io(fd, iov, count, offset, 1); cancel_point(); return result; }
 int fsync(int fd) { return (int)call(ZEDBSD_SYS_fsync, fd, 0, 0, 0, 0, 0); }
+void sync(void) { (void)call(ZEDBSD_SYS_sync, 0, 0, 0, 0, 0, 0); }
 int fdatasync(int fd) { return (int)call(ZEDBSD_SYS_fdatasync, fd, 0, 0, 0, 0, 0); }
 off_t lseek(int fd, off_t off, int whence) { return (off_t)call(ZEDBSD_SYS_lseek, fd, off, whence, 0, 0, 0); }
 int fstat(int fd, struct stat *st) { return (int)call(ZEDBSD_SYS_fstat, fd, (uintptr_t)st, 0, 0, 0, 0); }
@@ -546,6 +547,8 @@ long sysconf(int name) {
 	case _SC_MQ_OPEN_MAX: return 16;
 	case _SC_MQ_PRIO_MAX: return 32;
 	case _SC_TIMERS: return _POSIX_TIMERS;
+	case _SC_XOPEN_VERSION: return _XOPEN_VERSION;
+	case _SC_XOPEN_UNIX: return _XOPEN_UNIX;
 	case _SC_NPROCESSORS_CONF:
 	case _SC_NPROCESSORS_ONLN:
 		cpus_size = sizeof(cpus);
@@ -601,6 +604,15 @@ int mkdir(const char *path, mode_t mode) { return (int)call(ZEDBSD_SYS_mkdir, (u
 int mkdirat(int dirfd, const char *path, mode_t mode) { return (int)call(ZEDBSD_SYS_mkdirat, dirfd, (uintptr_t)path, mode, 0, 0, 0); }
 int mkfifoat(int dirfd, const char *path, mode_t mode) { return (int)call(ZEDBSD_SYS_mknodat, dirfd, (uintptr_t)path, S_IFIFO | (mode & 07777U), 0, 0, 0); }
 int mkfifo(const char *path, mode_t mode) { return mkfifoat(AT_FDCWD, path, mode); }
+int mknodat(int dirfd,const char *path,mode_t mode,dev_t device){return(int)call(ZEDBSD_SYS_mknodat,dirfd,(uintptr_t)path,mode,device,0,0);}
+int mknod(const char *path,mode_t mode,dev_t device){return mknodat(AT_FDCWD,path,mode,device);}
+
+int getpriority(int which,id_t who){int value;if(call(ZEDBSD_SYS_getpriority,which,who,(uintptr_t)&value,0,0,0)<0)return -1;return value;}
+int setpriority(int which,id_t who,int value){return(int)call(ZEDBSD_SYS_setpriority,which,who,value,0,0,0);}
+int nice(int increment){int value;errno=0;value=getpriority(PRIO_PROCESS,0);if(value==-1&&errno!=0)return -1;if(increment>0&&value>20-increment)value=20;else if(increment<0&&value< -20-increment)value=-20;else value+=increment;if(setpriority(PRIO_PROCESS,0,value)!=0)return -1;return getpriority(PRIO_PROCESS,0);}
+int getrusage(int who,struct rusage *usage){return(int)call(ZEDBSD_SYS_getrusage,who,(uintptr_t)usage,0,0,0,0);}
+int getitimer(int which,struct itimerval *value){return(int)call(ZEDBSD_SYS_getitimer,which,(uintptr_t)value,0,0,0,0);}
+int setitimer(int which,const struct itimerval *value,struct itimerval *old){return(int)call(ZEDBSD_SYS_setitimer,which,(uintptr_t)value,(uintptr_t)old,0,0,0);}
 int unlink(const char *path) { return (int)call(ZEDBSD_SYS_unlink, (uintptr_t)path, 0, 0, 0, 0, 0); }
 int unlinkat(int dirfd, const char *path, int flags) { return (int)call(ZEDBSD_SYS_unlinkat, dirfd, (uintptr_t)path, flags, 0, 0, 0); }
 int rmdir(const char *path) { return (int)call(ZEDBSD_SYS_rmdir, (uintptr_t)path, 0, 0, 0, 0, 0); }
@@ -1811,6 +1823,8 @@ char *tzname[2] = { timezone_standard, timezone_daylight };
 static long timezone_east;
 static long timezone_daylight_east;
 static int timezone_has_daylight;
+long timezone;
+int daylight;
 
 enum timezone_rule_kind { TZ_RULE_JULIAN, TZ_RULE_DAY, TZ_RULE_MONTH };
 struct timezone_rule {
@@ -1989,18 +2003,23 @@ tzset(void)
 		strcpy(timezone_daylight, "UTC");
 		timezone_east = timezone_daylight_east = 0;
 		timezone_has_daylight = 0;
+		timezone = 0;
+		daylight = 0;
 		return;
 	}
 	strcpy(timezone_daylight, timezone_standard);
 	timezone_daylight_east = timezone_east + 3600;
 	timezone_has_daylight = 0;
+	timezone = -timezone_east;
+	daylight = 0;
 	if (*at == '\0') return;
 	at = timezone_name(at, timezone_daylight, sizeof(timezone_daylight));
 	if (at == NULL) return;
 	timezone_has_daylight = 1;
+	daylight = 1;
 	if (*at != ',' && *at != '\0') {
 		const char *next = timezone_offset(at, &timezone_daylight_east);
-		if (next == NULL) { timezone_has_daylight = 0; return; }
+		if (next == NULL) { timezone_has_daylight = 0; daylight = 0; return; }
 		at = next;
 	}
 	timezone_start = (struct timezone_rule){ TZ_RULE_MONTH, 3, 2, 0, 2 * 3600 };
@@ -2009,7 +2028,7 @@ tzset(void)
 		at = timezone_rule_parse(at + 1, &timezone_start);
 		if (at == NULL || *at != ',' ||
 		    (at = timezone_rule_parse(at + 1, &timezone_end)) == NULL || *at != '\0')
-			timezone_has_daylight = 0;
+			{ timezone_has_daylight = 0; daylight = 0; }
 	}
 }
 

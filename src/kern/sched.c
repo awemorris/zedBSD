@@ -4,6 +4,7 @@
 #include "kern/atomic.h"
 #include "kern/thread.h"
 #include "kern/process.h"
+#include "kern/signal.h"
 #include "kern/lock.h"
 #include "kern/kmem.h"
 
@@ -392,6 +393,8 @@ sched_clock_cpu(hal_cpu_id_t id, uint64_t now)
 {
 	struct sched_cpu *cpu;
 	struct thread *thread;
+	struct process *expired_process = NULL;
+	unsigned expired_signals = 0;
 	unsigned long irq;
 	int preempt = 0;
 
@@ -420,6 +423,24 @@ sched_clock_cpu(hal_cpu_id_t id, uint64_t now)
 		if ((thread->flags & THREAD_FLAG_IDLE) == 0 &&
 		    thread->proc != NULL && thread->proc != &process0)
 			(void)atomic_u64_fetch_add_relaxed(&thread->proc->cpu_ticks, 1U);
+		if ((thread->flags & THREAD_FLAG_IDLE) == 0 && thread->proc != NULL) {
+			unsigned timer;
+			for (timer = 1; timer < 3; timer++) {
+				uint64_t old = atomic_u64_load_acquire(
+				    &thread->proc->itimer_remaining[timer]);
+				while (old != 0 && !atomic_u64_compare_exchange(
+				    &thread->proc->itimer_remaining[timer], &old, old - 1U))
+					;
+				if (old == 1U) {
+					uint64_t reload = atomic_u64_load_acquire(
+					    &thread->proc->itimer_interval[timer]);
+					atomic_u64_store_release(
+					    &thread->proc->itimer_remaining[timer], reload);
+					expired_process = thread->proc;
+					expired_signals |= 1U << timer;
+				}
+			}
+		}
 		if ((thread->flags & THREAD_FLAG_IDLE) != 0)
 			preempt = cpu->need_resched != 0;
 		else if (thread->sched.quantum != 0 &&
@@ -427,6 +448,32 @@ sched_clock_cpu(hal_cpu_id_t id, uint64_t now)
 			preempt = 1;
 	}
 	spin_unlock_irqrestore(&cpu->lock, irq);
+	if (expired_process != NULL) {
+		if (expired_signals & 2U) (void)signal_send_process(expired_process, SIGVTALRM);
+		if (expired_signals & 4U) (void)signal_send_process(expired_process, SIGPROF);
+	}
+	/* ITIMER_REAL is wall-clock based, so CPU 0 advances it for every process. */
+	if (id == 0) {
+		struct process *process;
+		pid_t cursor = -1;
+		while ((process = process_find_next_ref(cursor)) != NULL) {
+			uint64_t remaining;
+			cursor = process->pid;
+			remaining = atomic_u64_load_acquire(
+			    &process->itimer_remaining[0]);
+			while (remaining != 0 && !atomic_u64_compare_exchange(
+			    &process->itimer_remaining[0], &remaining, remaining - 1U))
+				;
+			if (remaining == 1U) {
+				uint64_t reload = atomic_u64_load_acquire(
+				    &process->itimer_interval[0]);
+				atomic_u64_store_release(&process->itimer_remaining[0],
+				    reload);
+				(void)signal_send_process(process, SIGALRM);
+			}
+			process_release(process);
+		}
+	}
 	if (preempt)
 		sched_yield();
 }

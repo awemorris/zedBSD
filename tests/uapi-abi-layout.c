@@ -3,6 +3,9 @@
 #include <stdint.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/msg.h>
+#include <sys/sem.h>
+#include <sys/shm.h>
 #include <sys/uio.h>
 #include <termios.h>
 #include <zedbsd/poll.h>
@@ -107,6 +110,14 @@ _Static_assert(ZEDBSD_SYS_setrlimit == 123, "setrlimit syscall ABI");
 _Static_assert(ZEDBSD_SYS_waitid == 124, "waitid syscall ABI");
 _Static_assert(ZEDBSD_SYS_quotactl == 146, "quotactl syscall ABI");
 _Static_assert(ZEDBSD_SYS_snapshotctl == 147, "snapshotctl syscall ABI");
+_Static_assert(ZEDBSD_SYS_sync == 151, "sync syscall ABI");
+_Static_assert(ZEDBSD_SYS_getpriority == 152, "getpriority syscall ABI");
+_Static_assert(ZEDBSD_SYS_setpriority == 153, "setpriority syscall ABI");
+_Static_assert(ZEDBSD_SYS_getrusage == 154, "getrusage syscall ABI");
+_Static_assert(ZEDBSD_SYS_getitimer == 155, "getitimer syscall ABI");
+_Static_assert(ZEDBSD_SYS_setitimer == 156, "setitimer syscall ABI");
+_Static_assert(sizeof(struct sembuf) == 6, "System V sembuf ABI");
+_Static_assert(SHMLBA == 4096, "System V shared-memory alignment ABI");
 _Static_assert(AT_PHDR == 3 && AT_BASE == 7 && AT_ENTRY == 9,
     "ELF auxv ABI");
 

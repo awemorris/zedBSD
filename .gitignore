@@ -1,12 +1,16 @@
 /build/
 /config.mk
 __pycache__/
-plan/*
+plan/
 !plan/POSIX-API-AUDIT.md
 !plan/POSIX-API-FIX-PLAN.md
 !plan/posix-required-kernel-api.csv
 !plan/LIBC-API-AUDIT.md
 !plan/LIBC-API-FIX-PLAN.md
 !plan/libc-api-audit.csv
+!plan/SUSV4-UAPI-MASTER-PLAN.md
+!plan/susv4-uapi/
+!plan/susv4-uapi/*.md
+!plan/susv4-uapi-audit.csv
 .scripts/
 config.mk

@@ -12,6 +12,7 @@ typedef struct {
 	int ss_flags;
 } stack_t;
 #define SIG_ERR ((sighandler_t)-1)
+#define SIG_HOLD ((sighandler_t)2)
 int sigaction(int, const struct sigaction *, struct sigaction *);
 int sigprocmask(int, const sigset_t *, sigset_t *);
 int sigpending(sigset_t *);
@@ -32,4 +33,11 @@ int raise(int);
 void psignal(int, const char *);
 void psiginfo(const siginfo_t *, const char *);
 void abort(void) __attribute__((noreturn));
+int killpg(pid_t, int);
+int sighold(int);
+int sigignore(int);
+int siginterrupt(int, int);
+int sigpause(int);
+int sigrelse(int);
+sighandler_t sigset(int, sighandler_t);
 #endif

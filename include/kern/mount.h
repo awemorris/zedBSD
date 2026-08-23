@@ -112,6 +112,7 @@ int mount_private_lookup(struct mount *, const char *, struct path *);
 int unmount_private(struct mount *);
 int mount_is_private(const struct mount *);
 int mount_sync(struct mount *);
+int mount_sync_all(void);
 int mount_statvfs(struct mount *, struct statvfs *);
 int mount_quotactl(struct mount *, struct quota_control *);
 int mount_snapshotctl(struct mount *, struct snapshot_control *);

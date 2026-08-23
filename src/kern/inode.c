@@ -574,7 +574,8 @@ int inode_mknod(struct inode *i, const struct componentname *n,
 	mode_t expected;
 	if (i == NULL || n == NULL || r == NULL)
 		return EINVAL;
-	if (type != INODE_FIFO && type != INODE_SOCKET)
+	if (type != INODE_FIFO && type != INODE_SOCKET &&
+	    type != INODE_CHAR && type != INODE_BLOCK)
 		return EOPNOTSUPP;
 	expected = inode_type_mode(type);
 	if ((m & S_IFMT) != 0 && (m & S_IFMT) != expected)

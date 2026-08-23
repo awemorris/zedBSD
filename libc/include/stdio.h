@@ -43,6 +43,7 @@ FILE *fopen(const char *path, const char *mode);
 FILE *freopen(const char *, const char *, FILE *);
 FILE *tmpfile(void);
 char *tmpnam(char *);
+char *tempnam(const char *, const char *);
 int fclose(FILE *stream);
 int fflush(FILE *stream);
 int fseek(FILE *stream, long offset, int whence);

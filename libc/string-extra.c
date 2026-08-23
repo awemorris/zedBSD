@@ -4,6 +4,21 @@
 #include <string.h>
 #include <strings.h>
 
+void *
+memccpy(void *destination, const void *source, int character, size_t count)
+{
+	unsigned char *out = destination;
+	const unsigned char *in = source;
+	unsigned char stop = (unsigned char)character;
+
+	while (count-- != 0) {
+		*out++ = *in;
+		if (*in++ == stop)
+			return out;
+	}
+	return NULL;
+}
+
 size_t strspn(const char *s, const char *accept)
 { size_t n = 0; while (s[n] && strchr(accept, s[n])) n++; return n; }
 size_t strcspn(const char *s, const char *reject)

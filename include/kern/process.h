@@ -80,6 +80,9 @@ struct process {
 	unsigned thread_count;
 	volatile uint64_t cpu_ticks;
 	volatile uint64_t child_cpu_ticks;
+	int nice_value;
+	uint64_t itimer_remaining[3];
+	uint64_t itimer_interval[3];
 	int exit_status;
 	int wait_status;
 	unsigned wait_stopped;

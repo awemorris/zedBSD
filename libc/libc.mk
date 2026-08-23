@@ -10,7 +10,10 @@ ZEDBSD_LIBC_OBJDUMP ?= objdump
 ZEDBSD_LIBC_USER_EXTRA_SOURCES := \
 	libc/string-extra.c libc/fenv.c libc/wide-extra.c libc/inttypes.c \
 	libc/stdlib-extra.c libc/time-extra.c libc/stdio-extra.c \
-	libc/setjmp.c libc/err.c
+	libc/setjmp.c libc/err.c libc/libgen.c libc/search.c \
+	libc/random48.c libc/random.c libc/xsi-crypto.c \
+	libc/ftw.c libc/ndbm.c libc/realpath.c libc/tempnam.c \
+	libc/xsi-process.c libc/fmtmsg.c libc/syslog.c libc/sysv-ipc.c
 
 ZEDBSD_LIBC_SOURCES := \
 	libc/heap.c \
@@ -30,7 +33,16 @@ ZEDBSD_LIBC_SOURCES := \
 	libc/stdio.c \
 	libc/stdio-extra.c \
 	libc/setjmp.c \
-	libc/err.c
+	libc/err.c \
+	libc/libgen.c \
+	libc/search.c \
+	libc/random48.c \
+	libc/random.c \
+	libc/xsi-crypto.c \
+	libc/ftw.c \
+	libc/ndbm.c \
+	libc/realpath.c \
+	libc/tempnam.c
 
 ZEDBSD_LIBC_OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(ZEDBSD_LIBC_SOURCES))
 

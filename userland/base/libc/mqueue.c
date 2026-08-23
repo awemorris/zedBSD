@@ -289,6 +289,8 @@ mq_close(mqd_t descriptor)
 	if (store->notify_pid == getpid())
 		store->notify_pid = 0;
 	mq_store_unlock(store);
+	/* Keep named queues durable across the last descriptor being closed. */
+	(void)msync(store, sizeof(*store), MS_SYNC);
 	(void)munmap(store, sizeof(*store));
 	return close(descriptor);
 }

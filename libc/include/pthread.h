@@ -90,6 +90,8 @@ int pthread_sigmask(int,const sigset_t *,sigset_t *); int pthread_kill(pthread_t
 int pthread_cancel(pthread_t); int pthread_setcancelstate(int,int *);
 int pthread_setcanceltype(int,int *); void pthread_testcancel(void);
 int pthread_atfork(void (*)(void),void (*)(void),void (*)(void));
+int pthread_getconcurrency(void);
+int pthread_setconcurrency(int);
 void __pthread_cleanup_push(struct __pthread_cleanup *,
 	void (*)(void *),void *);
 void __pthread_cleanup_pop(struct __pthread_cleanup *,int);
