@@ -52,7 +52,7 @@ struct elf32_image_info {
 	uint16_t program_header_size;
 	uint16_t program_header_count;
 	unsigned has_interpreter;
-	char interpreter[EXEC_INTERP_MAX]
+	char interpreter[EXEC_INTERP_MAX];
 };
 
 struct elf64_image_info {
@@ -65,7 +65,7 @@ struct elf64_image_info {
 	uint16_t program_header_size;
 	uint16_t program_header_count;
 	unsigned has_interpreter;
-	char interpreter[EXEC_INTERP_MAX]
+	char interpreter[EXEC_INTERP_MAX];
 };
 
 struct exec_auxv_info {
