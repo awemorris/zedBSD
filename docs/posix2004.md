@@ -9,8 +9,10 @@ edition.
 
 Current cross-component status and all iterative hand-off work are maintained
 in [`docs/posix-compliance-master.md`](posix-compliance-master.md).  This file
-retains the historical phase order and acceptance policy; implementation work
-must update the master whenever a tracked fact or Phase 10 gate changes.
+retains the now-completed historical Phase 0--10 order and its acceptance
+policy.  It does not schedule Phase 11 or later work.  New phases are created
+only by selecting current unmet items from the master and defining fresh scope
+and gates.
 
 The baseline used to prepare this plan is commit `cb860a1`. The authoritative
 inventory is `tests/posix-2024-utilities.csv`; this document must not become a
@@ -465,6 +467,13 @@ are in
 Do not import replacement source, generated parsers, implementation-specific
 tables, compatibility layers, or copied upstream tests into `userland/base`.
 
+Status (2026-08-24): the local replacement milestone is complete.  Imported
+and generated sources and the m4 host compatibility layer were removed; all
+three local replacements pass provenance, host, standalone install, top-level
+amd64, and QEMU gates.  They remain `implemented-unreviewed`; their deliberately
+unimplemented POSIX behavior is tracked in
+[`docs/posix-compliance-master.md`](posix-compliance-master.md).
+
 ## 6. Source and build layout
 
 - Put each normal command in `userland/base/<command>/main.c` with its local
@@ -566,27 +575,31 @@ Large utilities (`bc`, `ed`, `find`, `m4`, `pax`, locale, and SCCS) should be
 split into parser/engine/front-end commits, but no intermediate commit should
 raise a conformance advertisement.
 
-## 9. Completion state before init/service work
+## 9. Closure of the historical Phase 0--10 series
 
-This plan is complete when:
+The Phase 0--10 series was closed as completed on 2026-08-24.  Completion here
+means that each defined implementation, audit, or replacement milestone ran
+and handed all remaining requirements to the master; it is not a declaration
+of full POSIX.1-2024 conformance.
 
-- all 43 non-service missing rows are `reviewed`;
-- `lp` is `reviewed` for the no-output-device profile;
-- the 80 previously implemented rows have been reviewed with evidence;
+At closure:
+
+- the utility matrix and the Phase 9 audit provide the current inventory and
+  explicit compatibility hand-offs;
 - `at`, `batch`, `crontab`, `logger`, and `mailx` remain visibly
   `deferred-stub`, not falsely implemented;
 - `talk` remains disabled and its installed failure command is documented;
-- all matrix, host, runtime, rootfs, ABI, platform build, and disk-image checks
-  applicable to the selected profiles pass;
 - the Phase 10 local replacement milestone has removed the imported `bc`, `ed`,
   and `m4` implementations without promoting incomplete replacements; and
-- `_POSIX2_VERSION` and `_XOPEN_VERSION` have **not** been raised past a gate
-  blocked by the deferred facilities.
+- `_POSIX2_VERSION` and `_XOPEN_VERSION` remain unchanged while the master
+  contains required unmet work.
 
-## 11. Follow-up: init and service implementation
+## 10. Archived follow-up proposal: init and service implementation
 
-The next project after this plan is an init and service-management system.
-This is a formal hand-off item, not optional cleanup.
+Earlier revisions assumed that the next project would be an init and
+service-management system.  That sequencing decision is withdrawn.  The
+requirements below remain valid master backlog, but they are not a defined
+Phase 11 and have no priority over other unmet master rows until re-planning.
 
 The follow-up must provide:
 
@@ -604,7 +617,7 @@ The follow-up must provide:
 6. service lifecycle and boot-integration tests, including crash/restart,
    malformed spool data, permissions, shutdown, and full-disk behavior.
 
-After those facilities are implemented, replace the relevant stubs, change
+If a future phase selects these facilities, replace the relevant stubs, change
 their matrix rows to `implemented-unreviewed`, perform the normal review, and
 only then consider `_POSIX2_VERSION=202405L` and `_XOPEN_VERSION=800`.
 The conformance document must describe the exact required package set and

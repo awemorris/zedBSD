@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# POSIX-UTILITY-TEST: ed positive negative
+# Exercise the Phase 10 zedBSD-local ed replacement and its failure paths.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,10 +8,9 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-posix-ed.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
 cc -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror \
-	-I"$repo/userland/base/ed" "$repo/userland/base/ed/buf.c" \
-	"$repo/userland/base/ed/glbl.c" "$repo/userland/base/ed/io.c" \
-	"$repo/userland/base/ed/main.c" "$repo/userland/base/ed/re.c" \
-	"$repo/userland/base/ed/sub.c" "$repo/userland/base/ed/undo.c" \
+	-I"$repo" "$repo/userland/base/common/command.c" \
+	"$repo/userland/base/ed/buffer.c" \
+	"$repo/userland/base/ed/main.c" \
 	-o "$work/ed"
 
 cat >"$work/script" <<EOF
@@ -48,7 +47,17 @@ if "$work/ed" -Z >/dev/null 2>&1; then
 	exit 1
 fi
 printf 'H\na\none\n.\ns/[invalid/x/\nQ\n' | "$work/ed" -s \
-	>"$work/regex-error" 2>&1 || true
-grep -q 'unbalanced brackets' "$work/regex-error"
+	>"$work/regex-error" 2>&1 && {
+	echo 'ed returned success after an invalid BRE' >&2
+	exit 1
+}
+grep -q '^?' "$work/regex-error"
 
-echo 'zedBSD POSIX ed host tests: PASS'
+printf 'a\nmodified\n.\nq\nQ\n' | "$work/ed" -s \
+	>"$work/modified-error" 2>&1 && {
+	echo 'ed returned success after refusing to discard a modified buffer' >&2
+	exit 1
+}
+grep -q '^?' "$work/modified-error"
+
+echo 'zedBSD Phase 10 local ed host tests: PASS'

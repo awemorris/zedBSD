@@ -1152,29 +1152,40 @@ posix-find-host-test: tests/test-posix-find-host.sh \
 CHECK_RUN_TARGETS += posix-find-host-test
 
 posix-ed-host-test: tests/test-posix-ed-host.sh \
-	userland/base/ed/buf.c userland/base/ed/ed.h \
-	userland/base/ed/glbl.c userland/base/ed/io.c \
-	userland/base/ed/main.c userland/base/ed/re.c \
-	userland/base/ed/sub.c userland/base/ed/undo.c
+	userland/base/ed/main.c userland/base/ed/buffer.c \
+	userland/base/ed/editor.h userland/base/common/command.c
 	bash tests/test-posix-ed-host.sh
 
 CHECK_RUN_TARGETS += posix-ed-host-test
 
 posix-m4-host-test: tests/test-posix-m4-host.sh \
-	tests/m4-host-compat.c tests/m4-host-compat.h \
-	userland/base/m4/eval.c userland/base/m4/expr.c \
-	userland/base/m4/gnum4.c userland/base/m4/look.c \
-	userland/base/m4/main.c userland/base/m4/misc.c \
-	userland/base/m4/ohash.c userland/base/m4/ohash.h \
-	userland/base/m4/parser.c userland/base/m4/parser.h \
-	userland/base/m4/tokenizer.c userland/base/m4/trace.c
+	userland/base/m4/main.c userland/base/m4/engine.c \
+	userland/base/m4/m4.h userland/base/common/command.c
 	bash tests/test-posix-m4-host.sh
 
 CHECK_RUN_TARGETS += posix-m4-host-test
 
 posix-bc-host-test: tests/test-posix-bc-host.sh \
-	userland/base/bc/Makefile userland/base/bc/config.h
+	userland/base/bc/Makefile userland/base/bc/main.c \
+	userland/base/bc/number.c userland/base/bc/number.h \
+	userland/base/common/command.c
 	bash tests/test-posix-bc-host.sh
+
+phase10-local-source-check: tests/test-phase10-local-source.sh \
+	userland/base/bc/Makefile userland/base/bc/main.c \
+	userland/base/bc/number.c userland/base/bc/number.h \
+	userland/base/ed/Makefile userland/base/ed/main.c \
+	userland/base/ed/buffer.c userland/base/ed/editor.h \
+	userland/base/m4/Makefile userland/base/m4/main.c \
+	userland/base/m4/engine.c userland/base/m4/m4.h
+	bash tests/test-phase10-local-source.sh
+
+phase10-bc-host-test: posix-bc-host-test
+phase10-ed-host-test: posix-ed-host-test
+phase10-m4-host-test: posix-m4-host-test
+
+phase10-local-host-test: phase10-local-source-check phase10-bc-host-test \
+	phase10-ed-host-test phase10-m4-host-test
 
 CHECK_RUN_TARGETS += posix-bc-host-test
 
@@ -1382,6 +1393,8 @@ distclean:
 	posix-terminal-tools-host-test \
 	posix-find-host-test posix-ed-host-test posix-m4-host-test \
 	posix-bc-host-test \
+	phase10-bc-host-test phase10-ed-host-test phase10-m4-host-test \
+	phase10-local-host-test phase10-local-source-check \
 	posix-pax-host-test \
 	regex-host-test \
 	deferred-stub-rootfs-test menuconfig-host-test \

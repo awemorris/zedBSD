@@ -36,7 +36,7 @@ state across components.
 | Artifact | Authority |
 |---|---|
 | [`tests/posix-2024-utilities.csv`](../tests/posix-2024-utilities.csv) | machine-readable utility inventory, requirement/profile, status, implementation evidence, and test evidence |
-| this master | project objectives, cross-component dependencies, subsystem/API progress, embedded unmet utility work, Phase 10 progress, and hand-off priorities |
+| this master | project objectives, cross-component dependencies, subsystem/API progress, embedded unmet utility work, completed Phase 0--10 results, and the backlog from which future phases are created |
 | [`docs/phase9-posix-2024-audit.md`](phase9-posix-2024-audit.md) | detailed evidence and rationale from the 2026-08-24 first audit pass |
 | [`docs/phase10-local-reimplementation.md`](phase10-local-reimplementation.md) | detailed removal and local reimplementation design for `bc`, `ed`, and `m4` |
 | [`docs/posix2004.md`](posix2004.md) | historical execution plan and phase acceptance policy |
@@ -85,8 +85,9 @@ passes.  `5/5` replacement gates still does not mean full POSIX conformance.
 | `implemented-unreviewed` | 111 | all were inspected by the first Phase 9 audit |
 | `deferred-stub` | 5 | service/provider blockers: `at`, `batch`, `crontab`, `logger`, `mailx` |
 | `option-disabled` | 20 | outside the selected option profile |
-| Phase 9 P0 policy conflicts | 3 | `bc`, `ed`, `m4` imported implementations |
-| Phase 9 P1 known incompatibilities | 70 | source inspection confirms missing or incorrect required behavior |
+| historical Phase 9 P0 findings | 3 | the imported `bc`, `ed`, and `m4` findings were resolved by Phase 10 on 2026-08-24 |
+| current policy conflicts | 0 | the declared `userland/base` provenance gate rejects the removed imported trees and fingerprints |
+| current P1 known incompatibilities | 73 | the original 70 findings plus the three intentionally partial local replacements |
 | Phase 9 P2 incomplete proof | 38 | no confirmed complete review; targeted evidence is missing |
 | rows promoted by Phase 9 | 0 | no pending row satisfied the review checklist |
 
@@ -102,15 +103,27 @@ providers, services, or cross-component semantics remain pending.
 | 1 | implementation milestone complete | failure-only service commands installed; providers remain pending |
 | 2 | implementation milestone complete | low-dependency tools and shell additions built/tested; Phase 9 findings remain |
 | 3 | implementation milestone complete | locale/catalog/terminal foundation built; full locale/terminal compliance remains |
-| 4 | policy correction required | features were built, but imported `bc`, `ed`, and `m4` violate base policy |
+| 4 | policy correction complete | Phase 10 removed the imported `bc`, `ed`, and `m4`; the smaller local replacements remain non-conforming |
 | 5 | implementation milestone complete | process/file-use/SysV IPC interfaces work in QEMU; full semantic review remains |
 | 6 | implementation milestone complete | development utilities exist; parser/format/option review remains |
 | 7 | implementation milestone complete | `.Z` compression path exists; Issue 8 and failure-path review remains |
 | 8 | implementation milestone complete | SCCS local format exists; classic interoperability and option coverage remain |
 | 8.5 | implementation milestone complete | standalone packages and terminal stack exist; consumer/format review remains |
 | 9 | first audit pass complete | 111/111 pending rows inspected; remediation and conformance closure remain 0/111 |
-| 10 | planned | remove imported `bc`, `ed`, `m4` and replace them locally; see section 10 |
-| 11 | deferred-provider | init and service-management work follows the local replacement milestone |
+| 10 | replacement milestone complete | local `bc`, `ed`, and `m4` pass provenance, host, standalone, `make -j16`, and amd64 QEMU gates; POSIX completion remains open |
+
+The Phase 0--10 series is closed as completed on 2026-08-24.  Here,
+"completed" means that each phase's defined implementation, audit, or
+replacement milestone was executed and its remaining work was handed off; it
+does not mean that every affected component is POSIX conforming.  There is no
+currently defined Phase 11 or later phase.
+
+Future work starts from the unmet rows in this master.  A new phase is assigned
+only after a coherent set of stable IDs has been selected and its scope,
+dependencies, acceptance gates, tests, and master-update rules have been
+written down.  The former assumption that init and service management would
+automatically be Phase 11 is withdrawn; those requirements remain unscheduled
+backlog items alongside the other unmet work.
 
 ## 5. Kernel subsystem tracker
 
@@ -134,7 +147,7 @@ may be implemented while its consuming utility remains non-conforming.
 | KERN-FSSTAT-01 | filesystem capacity/accounting | partial | `df`, `du` | provide and verify stable filesystem/device identity, portable block accounting, mount lookup, overflow behavior, and permission/error cases |
 | KERN-RSRC-01 | priorities | reviewed | `nice`, `renice` | declared current scope has reviewed utility evidence; keep regression and permission/range tests |
 | KERN-RSRC-02 | resource limits | reviewed | `ulimit`, shell | declared current scope has reviewed utility evidence; expand when new limit classes are exposed |
-| KERN-BOOT-01 | init/service lifecycle | missing | deferred providers | real PID 1, reaping, startup/shutdown order, supervision, credentials, restart, and service failure reporting are Phase 11 work |
+| KERN-BOOT-01 | init/service lifecycle | missing | deferred providers | unscheduled master backlog: real PID 1, reaping, startup/shutdown order, supervision, credentials, restart, and service failure reporting |
 
 ## 6. System call and kernel-interface tracker
 
@@ -175,7 +188,7 @@ dependency even when they are not POSIX public APIs.
 | SCCS-CORE-01 | SCCS history/p-file/locking core | partial | ten SCCS commands | classic weave/control interoperability, full flags/MRs/SIDs, preservation, stale locks, interrupted atomic updates |
 | SHELL-CORE-01 | shell lexer/parser/expansion/executor | partial | `sh` and shell builtins | full grammar, expansions, redirects/here-docs, compound commands/functions, jobs/traps, special-builtin semantics |
 | BUILD-PKG-01 | standalone base package interface | implemented-unreviewed | all base packages | retain direct build/install coverage for source lists, libraries, headers, data-only packages, `PREFIX=/`, and ordinary prefixes |
-| BUILD-PROV-01 | base source provenance gate | planned | `bc`, `ed`, `m4`, future base additions | Phase 10 shall reject the known imported trees/fingerprints and require complete source review |
+| BUILD-PROV-01 | base source provenance gate | reviewed | `bc`, `ed`, `m4` replacement scope | `make phase10-local-source-check` enforces exact local manifests, Zlib headers, removed-file references, and known external fingerprints; extend the manifest when future source is added |
 
 ## 8. Service and provider tracker
 
@@ -186,7 +199,7 @@ dependency even when they are not POSIX public APIs.
 | SVC-MAIL-01 | `mailx` | deferred-provider | explicit failure command | required mail provider and Send Mode; Receive Mode for enabled XSI/UP environment |
 | SVC-PRINT-01 | `lp` | reviewed | tested no-destination failure in the declared no-device profile | preserve provider replacement rules if CUPS is selected |
 | SVC-TALK-01 | `talk` | disabled-profile | installed failure command | local rendezvous provider and service only if UP/XSI profile is enabled |
-| SVC-INIT-01 | PID 1 and service manager | missing | current kernel/user startup path is not the planned service manager | implement Phase 11 lifecycle, supervision, shutdown, and recovery design |
+| SVC-INIT-01 | PID 1 and service manager | missing | current kernel/user startup path is not the planned service manager | unscheduled master backlog: lifecycle, supervision, shutdown, and recovery design; assign a phase only after re-planning |
 
 ## 9. Cross-cutting unmet work
 
@@ -200,22 +213,23 @@ dependency even when they are not POSIX public APIs.
 | CROSS-SHELL-01 | current-shell state | partial | shell builtins | tests inside a running zshell for environment, cwd, umask, limits, traps, descriptors, and jobs |
 | CROSS-BINARY-01 | malformed binary formats | partial | locale/catalog/terminfo/archive/ELF/SCCS/compression | truncation, invalid offsets/counts, integer overflow, fuzz corpus, bounded failure |
 | CROSS-QEMU-01 | zedBSD runtime evidence | implemented-unreviewed | kernel-, tty-, credential-, IPC-, process-, service-dependent behavior | bounded headless amd64 tests with complete markers; add a target whenever host behavior is insufficient |
-| CROSS-PROV-01 | external source exclusion | policy-conflict | current `bc`, `ed`, `m4` | execute Phase 10; do not preserve imported fallback/generated/compatibility files |
+| CROSS-PROV-01 | external source exclusion | reviewed | Phase 10 `bc`, `ed`, `m4` scope | imported production/generated trees and the m4 host compatibility layer were removed; `make phase10-local-source-check` passes |
 
 ## 10. Phase 10 local replacement progress
 
 Detailed implementation architecture and acceptance rules are defined in
 [`docs/phase10-local-reimplementation.md`](phase10-local-reimplementation.md).
-This table is the live progress summary and must be updated during each Phase
-10 work unit.
+This table is the final, closed progress record for Phase 10.  Later work may
+resolve its hand-off items through newly planned phases, but shall update the
+component and utility registers rather than reopen or renumber these gates.
 
 | ID | Utility/work item | State | Replacement gates | POSIX review | Current hand-off |
 |---|---|---|---:|---:|---|
-| P10-GATE | provenance and transition gate | planned | 0/5 | n/a | define rejected imported manifest/fingerprints, remove obsolete m4 host compatibility layer, update evidence/notes |
-| P10-BC | `bc` local reimplementation | policy-conflict | 0/5 | 0/checklist | imported Gavin D. Howard tree is still present; replace first with local arbitrary-length calculator, then add scale/language/math features |
-| P10-ED | `ed` local reimplementation | policy-conflict | 0/5 | 0/checklist | imported OpenBSD tree is still present; replace with local line store/address/command/file engine, then complete BRE/global/undo/recovery |
-| P10-M4 | `m4` local reimplementation | policy-conflict | 0/5 | 0/checklist | imported OpenBSD/generated parser tree is still present; replace with local streaming scanner/expander, then complete builtins/diversions/system behavior |
-| P10-INTEG | host, standalone, amd64, QEMU integration | planned | 0/5 | n/a | add Phase 10 source, host, install, build, and `qemu-system-x86_64` gates without weakening conformance expectations |
+| P10-GATE | provenance and transition gate | reviewed | 5/5 | n/a | resolved 2026-08-24: exact local manifests and source fingerprints are checked; imported files and obsolete m4 host compatibility files are absent |
+| P10-BC | `bc` local reimplementation | partial | 5/5 | 0/checklist | local arbitrary-length integer arithmetic, precedence, scalar assignment, files/stdin, and safe failures work; decimal scale, base conversion, comparisons/control flow, functions, arrays, strings, standard functions, and `-l` remain |
+| P10-ED | `ed` local reimplementation | partial | 5/5 | 0/checklist | local checked line vector, basic addresses/editing, BRE substitution, global selection, undo, and atomic sibling-file writes work; complete address/command grammar, backing storage, signals/recovery, newline fidelity, metadata, locale, and exact diagnostics remain |
+| P10-M4 | `m4` local reimplementation | partial | 5/5 | 0/checklist | local scanner/rescanner, definitions, conditionals, includes, string/arithmetic builtins, quoting, and memory diversions work; definition stacks, remaining standard builtins, full expression/quote/comment rules, locale, system behavior, and temporary diversions remain |
+| P10-INTEG | host, standalone, amd64, QEMU integration | reviewed | 5/5 | n/a | `make phase10-local-host-test`, three direct staged installs with `PREFIX=/`, `make -j16`, and `make posix-phase10-qemu-test` pass |
 
 The five replacement gates for each utility are:
 
@@ -225,17 +239,18 @@ The five replacement gates for each utility are:
 4. direct package build/install and top-level `make -j16` pass; and
 5. the installed local binary passes the bounded amd64 Phase 10 QEMU test.
 
-Update `state`, the fraction, and the hand-off text as soon as a gate changes.
-Do not wait for full conformance, and do not mark a gate early because an old
-imported binary or stale image satisfies a test.
+These fractions are frozen at the completed replacement milestone.  The
+remaining conformance work in the hand-off column stays active in the master
+register and may be selected when a future phase is defined.
 
 ## 11. Phase 9 unmet utility register
 
-This section embeds all 111 findings from the first Phase 9 audit.  It is the
-human-readable work register; the utility CSV remains the machine-readable
-status/evidence authority.  P0 means policy conflict, P1 means a confirmed
-incompatibility, and P2 means that useful code exists but complete compliance
-has not been proved.
+This section embeds all 111 findings from the first Phase 9 audit and carries
+their current hand-off state.  It is the human-readable work register; the
+utility CSV remains the machine-readable status/evidence authority.  The three
+historical P0 policy conflicts were resolved by Phase 10 and are now P1 because
+their independent local replacements intentionally implement only a subset.
+The current register therefore contains 0 P0, 73 P1, and 38 P2 findings.
 
 | # | Utility | Finding | Hand-off |
 |---:|---|---|---|
@@ -244,7 +259,7 @@ has not been proved.
 | 3 | [ar](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/ar.html) | P2 incomplete proof | Archive mutation and a SysV/GNU symbol index exist; complete operation/modifier interactions, `-C`, position/name edge cases, malformed archives, metadata, interruption, and output failures remain unproved. |
 | 6 | [awk](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/awk.html) | P1 known incompatibility | Only trivial `print`/`$N` processing exists.  Implement the POSIX language locally, including options, grammar, EREs, variables, records/fields, arrays, functions, control flow, I/O, and diagnostics. |
 | 7 | [basename](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/basename.html) | P2 incomplete proof | Basic suffix removal exists; `//`, root-only paths, trailing slashes, suffix-equals-result, empty results, locale, usage, and broken stdout need exact tests. |
-| 9 | [bc](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/bc.html) | P0 policy conflict | The current package is an imported upstream implementation.  Remove it from base and replace it with a project-local arbitrary-precision parser/VM before conformance review. |
+| 9 | [bc](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/bc.html) | P1 known incompatibility (P0 resolved 2026-08-24) | The independent local replacement provides arbitrary-length integer literals, scalar assignment, precedence, `+ - * / % ^`, files/stdin, and checked failures.  Decimal scale, `ibase`/`obase` conversion, comparisons and control flow, functions, arrays, strings, standard functions, and the `-l` math library remain. |
 | 13 | [cat](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/cat.html) | P2 incomplete proof | `-u` and copying exist; repeated stdin, partial reads/writes, `EINTR`, same-file/error paths, close errors, and broken stdout are not proved. |
 | 14 | [cd](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/cd.html) | P1 known incompatibility | Missing `-L`, `-P`, and `-e`, `CDPATH`, logical `..`, `PWD`/`OLDPWD` updates, correct unset-`HOME` behavior, and shell-environment tests. |
 | 15 | [cflow](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/cflow.html) | P1 known incompatibility | Uses a token heuristic rather than a conforming C preprocessing/declaration analysis; macro/include options are accepted without providing full preprocessing semantics. |
@@ -268,7 +283,7 @@ has not been proved.
 | 35 | [dirname](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/dirname.html) | P2 incomplete proof | Basic lexical reduction exists; double slash, all-slash, trailing-slash, empty/long operand, locale, usage, and broken stdout cases need proof. |
 | 36 | [du](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/du.html) | P1 known incompatibility | Only `-a` exists; `-s`/`-k`/`-x` and `-H`/`-L`, hard-link deduplication, mount/symlink/cycle rules, overflow, permissions, and traversal errors are absent. |
 | 37 | [echo](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/echo.html) | P2 incomplete proof | Simple joining/newline exists; implementation-defined `-n`/backslash cases must be documented, and NUL/locale/output-error behavior needs running-shell tests. |
-| 38 | [ed](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/ed.html) | P0 policy conflict | The current package is imported OpenBSD `ed`.  Replace it with a project-local line editor before reviewing the extensive address, BRE, global, undo, file, signal, and recovery contract. |
+| 38 | [ed](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/ed.html) | P1 known incompatibility (P0 resolved 2026-08-24) | The independent local replacement provides a checked memory line store, basic addresses and edit commands, BRE substitution, `g`/`v`, single-operation undo, reads, and atomic sibling-file writes.  Relative/mark/BRE addresses, the remaining commands, temporary backing storage, signal recovery, exact newline/byte-count/diagnostic behavior, metadata preservation, and locale remain. |
 | 39 | [env](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/env.html) | P1 known incompatibility | Implemented as a shell builtin that only prints the environment and rejects arguments; `-i`, assignments, utility execution, PATH lookup, and 126/127 statuses are absent. |
 | 41 | [expand](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/expand.html) | P1 known incompatibility | Accepts only one tab width, not a tab list; multibyte/column handling, file-boundary state, malformed options, read/write errors, and locale semantics are incomplete. |
 | 43 | [false](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/false.html) | P2 incomplete proof | Status behavior is trivial, but operand handling in the real shell, redirection failure, traps, and special-builtin execution context are not cited or tested. |
@@ -292,7 +307,7 @@ has not been proved.
 | 69 | [localedef](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/localedef.html) | P1 known incompatibility | Checked artifact writing exists, but charmap/source grammar, symbolic characters, all category keywords, collation rules, `copy`, ellipses, diagnostics, `-u`, portability, and atomic installation are incomplete. |
 | 71 | [logname](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/logname.html) | P2 incomplete proof | `getlogin()` path exists; no-login/session cases, stray operands, locale diagnostics, output failure, and QEMU login-session behavior are not tested. |
 | 73 | [ls](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/ls.html) | P1 known incompatibility | Several common options exist, but required Issue 8 option/output combinations, locale collation/character display, owner/group/time formats, symlink operands, recursion cycles, and errors are incomplete. |
-| 74 | [m4](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/m4.html) | P0 policy conflict | The current package is imported OpenBSD `m4`.  Replace it locally before reviewing standard builtins, quoting/diversions, expression grammar, locale, nesting limits, signals, and output failures. |
+| 74 | [m4](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/m4.html) | P1 known incompatibility (P0 resolved 2026-08-24) | The independent local replacement provides scanning/rescanning, positional arguments, definitions, conditionals, includes, common string/arithmetic builtins, quote changes, and memory diversions.  `changecom`, definition stacks/introspection, indirect invocation, wrapping/temp/system/trace builtins, complete checked `eval`, exact quote/comment/locale semantics, signals, and temporary-file diversions remain. |
 | 78 | [mesg](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/mesg.html) | P2 incomplete proof | Basic tty mode query/change exists; no-controlling-terminal, `y`/`n` parsing, unrelated permission-bit preservation, diagnostic/status, and QEMU tty tests remain. |
 | 79 | [mkdir](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/mkdir.html) | P2 incomplete proof | `-p` and `-m` exist; full symbolic mode grammar/umask, intermediate modes, existing paths, slash/symlink/race cases, partial failure, and diagnostics need tests. |
 | 80 | [mkfifo](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/mkfifo.html) | P2 incomplete proof | `-m` exists but numeric parsing alone is insufficient; symbolic modes/umask, multiple operands, existing paths, permissions, cleanup/error accumulation, and filesystem support need proof. |
@@ -364,7 +379,7 @@ changes the truth represented by a row.  A normal update consists of:
    work;
 4. update the corresponding subsystem/API/component row and cross-cutting row;
 5. update the utility row here and its CSV implementation/test evidence;
-6. during Phase 10, update the `P10-*` progress fraction in section 10;
+6. update any phase-local progress table if the newly defined phase has one;
 7. preserve remaining gaps as explicit hand-off text; and
 8. mark an item `reviewed` only when no applicable Issue 8 checklist item is
    left without evidence.
@@ -377,6 +392,12 @@ defensible state.
 The aggregate `make check` target is not used by this project unless the user
 changes the current instruction.  Milestone-specific host and
 `qemu-system-x86_64` targets are invoked directly.  No automatic commit is made.
+
+Before implementation begins for a new phase, select its source rows from this
+master and create a phase document that records the stable IDs, bounded scope,
+dependency decisions, acceptance gates, and intended test targets.  Phase
+numbers are planning labels assigned at that time; no Phase 11-or-later order
+is reserved by the historical `docs/posix2004.md` plan.
 
 ## 13. Completion and iteration policy
 

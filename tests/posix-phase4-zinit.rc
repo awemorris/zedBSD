@@ -1,5 +1,5 @@
 echo zedBSD-POSIX-PHASE4-QEMU-START
-test "$(echo '99999999999999999999*99999999999999999999' | bc -q)" = 9999999999999999999800000000000000000001 && echo zedBSD-POSIX-PHASE4-BC-PASS
+test "$(echo '99999999999999999999*99999999999999999999' | bc)" = 9999999999999999999800000000000000000001 && echo zedBSD-POSIX-PHASE4-BC-PASS
 ed -s < /etc/phase4.ed && test "$(head -n 1 /tmp/phase4-ed-output)" = AlphA && echo zedBSD-POSIX-PHASE4-ED-PASS
 mkdir -p /tmp/phase4-find/sub
 touch /tmp/phase4-find/sub/needle

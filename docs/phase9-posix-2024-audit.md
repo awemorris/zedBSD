@@ -59,6 +59,18 @@ They must not be treated as acceptable base implementations.  Removal and a
 local reimplementation are separate follow-up work; this audit deliberately
 does not delete them or silently replace them.
 
+#### Phase 10 resolution update (2026-08-24)
+
+The three historical P0 findings above have been resolved: the imported trees,
+generated parser sources, and obsolete m4 host compatibility layer were
+removed, and independent local `bc`, `ed`, and `m4` replacements now pass the
+Phase 10 provenance, host, package/install, top-level amd64 build, and QEMU
+gates.  Their POSIX contracts are not complete, so the live master reclassifies
+all three as P1 known incompatibilities and lists their exact remaining work.
+The P0 rows later in this file are intentionally retained as the evidence from
+the first audit pass rather than rewritten as if the conflict had never
+existed.
+
 ### Test evidence is not sufficient
 
 `tests/test-userland-commands-host.sh` is 110 lines and builds only a subset of
@@ -221,10 +233,11 @@ order.
 
 ## Required follow-up order
 
-1. Execute the local replacement plan in
-   [`docs/phase10-local-reimplementation.md`](phase10-local-reimplementation.md):
-   remove the three P0 external source trees and replace `bc`, `ed`, and `m4`
-   with honest local implementations before their conformance work continues.
+1. Completed 2026-08-24: the local replacement plan in
+   [`docs/phase10-local-reimplementation.md`](phase10-local-reimplementation.md)
+   removed the three P0 external source trees and replaced `bc`, `ed`, and `m4`
+   with honest local implementations.  Continue their P1 conformance work from
+   the live master hand-offs.
 2. Treat `awk` and `sh` as language implementation projects with grammar and
    semantic unit tests.  Do not extend their current ad-hoc parsers one syntax
    fragment at a time without an architecture review.
@@ -267,3 +280,9 @@ under `/tmp` and its host tool was placed on `PATH` for the test only.  Nothing
 from that package was installed in the repository or zedBSD image.
 
 The aggregate `make check` target was not run, as requested.
+
+Phase 10 subsequently added and passed `make phase10-local-host-test`, three
+direct package builds and staged `PREFIX=/` installs, `make -j16`, and
+`make posix-phase10-qemu-test`.  It also reran clang-format over every C source
+and header below `userland/`.  These later results are recorded in the live
+master and do not alter the historical Phase 9 promotion count.

@@ -2,10 +2,10 @@
 
 ## 1. Purpose
 
-Phase 10 removes the three imported implementations currently present below
+Phase 10 removes the three imported implementations that were present below
 `userland/base` and replaces them with zedBSD-local implementations:
 
-| Utility | Imported tree to remove | Replacement ownership |
+| Utility | Imported tree removed | Replacement ownership |
 |---|---|---|
 | `bc` | Gavin D. Howard sources under `userland/base/bc/{src,include,gen}`, `config.h`, and `LICENSE.md` | new zedBSD arithmetic, parser, and evaluator code |
 | `ed` | OpenBSD-derived `buf.c`, `ed.h`, `glbl.c`, `io.c`, `main.c`, `re.c`, `sub.c`, and `undo.c` | new zedBSD line editor code |
@@ -16,6 +16,22 @@ functionality.  A smaller, honest local implementation is acceptable as the
 first replacement.  It must fail clearly for unsupported or invalid input and
 must remain `implemented-unreviewed`; it must not claim POSIX conformance merely
 because the command builds and runs.
+
+### Implementation result (2026-08-24)
+
+The replacement milestone is complete.  The imported production and generated
+files for all three packages and `tests/m4-host-compat.[ch]` were removed.
+`bc`, `ed`, and `m4` now build only from zedBSD-local source, and the exact
+allowed manifests and known external fingerprints are enforced by
+`make phase10-local-source-check`.
+
+All five replacement gates pass for each utility: provenance/removal, strict
+host build and behavior tests, direct package build and staged `PREFIX=/`
+installation, top-level `make -j16`, and the installed-binary amd64
+`qemu-system-x86_64` test.  This is not a POSIX conformance claim.  The precise
+remaining language, editor, builtin, locale, failure, and recovery work is
+carried in `docs/posix-compliance-master.md`; all three matrix rows remain
+`implemented-unreviewed`.
 
 The target is still the complete POSIX.1-2024 behavior when that can be reached
 without importing another implementation.  The official specification may be
@@ -357,10 +373,11 @@ Phase 10's required replacement milestone is complete when:
   pass; and
 - no row has been promoted beyond its evidence.
 
-Full POSIX conformance is a subsequent completion level within the same phase.
-It is reached utility by utility only after the POSIX completion lists and the
-normal Phase 9 review checklist pass.  Phase 10 does not have to delay removal
-of external code until that higher level is reached.
+Phase 10 closes at the local replacement milestone.  Full POSIX conformance
+for these utilities remains a master backlog goal and may be reached utility by
+utility only through newly defined phases after the POSIX completion lists and
+the normal Phase 9 review checklist pass.  The completed Phase 10 gates are not
+reopened to represent that later work.
 
 ## 10. Reconsideration points
 

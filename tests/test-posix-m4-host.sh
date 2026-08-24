@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# POSIX-UTILITY-TEST: m4 positive negative grammar recursive expansion
+# Exercise the Phase 10 zedBSD-local m4 replacement.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,19 +8,9 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-posix-m4.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
 cc -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror \
-	-include "$repo/tests/m4-host-compat.h" \
-	-I"$repo/userland/base/m4" \
-	"$repo/userland/base/m4/eval.c" \
-	"$repo/userland/base/m4/expr.c" \
-	"$repo/userland/base/m4/gnum4.c" \
-	"$repo/userland/base/m4/look.c" \
-	"$repo/userland/base/m4/main.c" \
-	"$repo/userland/base/m4/misc.c" \
-	"$repo/userland/base/m4/ohash.c" \
-	"$repo/userland/base/m4/parser.c" \
-	"$repo/userland/base/m4/tokenizer.c" \
-	"$repo/userland/base/m4/trace.c" \
-	"$repo/tests/m4-host-compat.c" -o "$work/m4"
+	-I"$repo" "$repo/userland/base/common/command.c" \
+	"$repo/userland/base/m4/engine.c" \
+	"$repo/userland/base/m4/main.c" -o "$work/m4"
 
 printf 'included\n' >"$work/included.m4"
 cat >"$work/input.m4" <<EOF
@@ -65,4 +55,10 @@ if printf 'eval(1/0)\n' | "$work/m4" >"$work/divzero.out" 2>&1; then
 fi
 grep -q 'division by zero' "$work/divzero.out"
 
-echo 'zedBSD POSIX m4 host tests: PASS'
+if printf 'm4exit(0)\n' | "$work/m4" >"$work/unsupported.out" 2>&1; then
+	echo 'm4 accepted an unsupported m4exit builtin' >&2
+	exit 1
+fi
+grep -q 'not implemented locally' "$work/unsupported.out"
+
+echo 'zedBSD Phase 10 local m4 host tests: PASS'

@@ -969,6 +969,9 @@ posix-phase85-qemu-test: $(BUILD)/posix-phase85-qemu.img \
 	$(PYTHON) tests/posix-phase85-qemu-test.py \
 		--qemu $(QEMU) --image $(BUILD)/posix-phase85-qemu.img
 
+posix-phase10-qemu-test: phase10-local-source-check posix-phase4-qemu-test
+	@echo "zedBSD POSIX Phase 10 local replacements amd64 QEMU test: PASS"
+
 amd64-hal-compile: $(AMD64_HAL_OBJS)
 	@echo "HAL amd64/PCAT compile check: PASS"
 CHECK_RUN_TARGETS += amd64-hal-compile
@@ -976,4 +979,4 @@ CHECK_RUN_TARGETS += amd64-hal-compile
 .PHONY: amd64-hal-compile deferred-stub-qemu-test posix-phase2-qemu-test \
 	posix-phase3-qemu-test posix-phase4-qemu-test posix-phase5-qemu-test \
 	posix-phase6-qemu-test posix-phase7-qemu-test posix-phase8-qemu-test \
-	posix-phase85-qemu-test
+	posix-phase85-qemu-test posix-phase10-qemu-test
