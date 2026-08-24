@@ -28,6 +28,7 @@
 #include "kern/vmspace.h"
 
 #include <zedbsd/dirent.h>
+#include <zedbsd/atomic.h>
 #include <zedbsd/fcntl.h>
 #include <zedbsd/resource.h>
 #include <zedbsd/syscall.h>
@@ -64,6 +65,7 @@
 #define SOCKET_RECV_FLAGS (MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC | MSG_WAITALL)
 #define SYSCALL_SOCKET_OPTION_MAX 128U
 #define SYSCALL_PAGE_MASK (ZEDBSD_PAGE_SIZE - 1U)
+#define SYSCALL_ATOMIC_CHUNK 128U
 #define SYSCALL_EXT __attribute__((section(".hightext")))
 
 _Static_assert(KERN_PIPE_BUF <= SYSCALL_IO_CHUNK,
@@ -72,6 +74,7 @@ _Static_assert(KERN_PIPE_BUF <= SYSCALL_IO_CHUNK,
 static intptr_t syscall_dispatch(uint32_t, const uintptr_t [6]);
 static intptr_t syscall_dispatch_body(uint32_t, const uintptr_t [6]);
 static struct process *current_process(void);
+static struct mutex user_atomic_lock;
 
 void
 syscall_restart_state_begin(struct thread *thread)
@@ -215,6 +218,25 @@ poll_mask_defer_restore(const struct poll_mask_guard *guard, int error)
 }
 
 #ifdef ZEDBSD_SYSCALL_STOP_TEST
+static int
+syscall_stop_should_redispatch(enum signal_stop_return_result result)
+{
+	return result == SIGNAL_STOP_RETURN_REDISPATCH;
+}
+
+intptr_t
+syscall_test_stop_ready_cycle(enum signal_stop_return_result stop_result,
+	intptr_t redispatched_result, int *body_calls)
+{
+	if (body_calls == NULL)
+		return -EINVAL;
+	*body_calls = 1;
+	if (!syscall_stop_should_redispatch(stop_result))
+		return -EINTR;
+	(*body_calls)++;
+	return redispatched_result;
+}
+
 int
 syscall_test_poll_mask_cycle(uint64_t requested, int error,
 	unsigned stop_interrupted)
@@ -610,10 +632,12 @@ sys_socket_call(const uintptr_t args[6])
 	struct socket *socket;
 	struct file *file = NULL;
 	int supplied_type = (int)args[1];
-	int type = supplied_type & ~(SOCK_NONBLOCK | SOCK_CLOEXEC);
+	int type = supplied_type &
+	    ~(SOCK_NONBLOCK | SOCK_CLOEXEC | SOCK_CLOFORK);
 	int file_flags = (supplied_type & SOCK_NONBLOCK) != 0 ? O_NONBLOCK : 0;
-	unsigned descriptor_flags = (supplied_type & SOCK_CLOEXEC) != 0 ?
-	    FILEDESC_CLOEXEC : 0;
+	unsigned descriptor_flags =
+	    ((supplied_type & SOCK_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
+	    ((supplied_type & SOCK_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0);
 	int descriptor, error;
 
 	if (process == NULL || process->fd == NULL || args[3] != 0 ||
@@ -651,10 +675,12 @@ sys_socketpair_call(const uintptr_t args[6])
 	struct file *left_file = NULL, *right_file = NULL;
 	int descriptors[2] = { -1, -1 };
 	int supplied_type = (int)args[1];
-	int type = supplied_type & ~(SOCK_NONBLOCK | SOCK_CLOEXEC);
+	int type = supplied_type &
+	    ~(SOCK_NONBLOCK | SOCK_CLOEXEC | SOCK_CLOFORK);
 	int file_flags = (supplied_type & SOCK_NONBLOCK) != 0 ? O_NONBLOCK : 0;
-	unsigned descriptor_flags = (supplied_type & SOCK_CLOEXEC) != 0 ?
-	    FILEDESC_CLOEXEC : 0;
+	unsigned descriptor_flags =
+	    ((supplied_type & SOCK_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
+	    ((supplied_type & SOCK_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0);
 	int error;
 
 	if (process == NULL || process->fd == NULL || args[3] == 0 ||
@@ -780,9 +806,17 @@ sys_accept_call(const uintptr_t args[6])
 	struct file *file = NULL;
 	struct file *files[1];
 	struct filedesc_reservation reservation;
+	int supplied_flags = (int)args[3];
+	unsigned descriptor_flags =
+	    ((supplied_flags & SOCK_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
+	    ((supplied_flags & SOCK_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0);
 	socklen_t length = sizeof(address);
 	int descriptor, error;
 
+	if ((supplied_flags &
+	    ~(SOCK_NONBLOCK | SOCK_CLOEXEC | SOCK_CLOFORK)) != 0 ||
+	    args[4] != 0 || args[5] != 0)
+		return -EINVAL;
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
@@ -794,7 +828,8 @@ sys_accept_call(const uintptr_t args[6])
 	if (error != 0)
 		return socket_result(&reference, -error);
 	memset(&reservation, 0, sizeof(reservation));
-	error = filedesc_reserve_many(process->fd, 1, 0, &reservation);
+	error = filedesc_reserve_many(process->fd, 1, descriptor_flags,
+	    &reservation);
 	if (error == 0)
 		error = socket_file_reserve(&file);
 	if (error != 0) {
@@ -822,6 +857,8 @@ sys_accept_call(const uintptr_t args[6])
 	}
 	socket_file_ref_put(&reference);
 	error = socket_file_attach(file, accepted);
+	if (error == 0 && (supplied_flags & SOCK_NONBLOCK) != 0)
+		file_status_flags_update(file, O_NONBLOCK, O_NONBLOCK);
 	files[0] = file;
 	if (error == 0)
 		error = filedesc_commit_reserved(&reservation, files, &descriptor);
@@ -1103,7 +1140,8 @@ sys_recvmsg_call(const uintptr_t args[6])
 	    (request.name_capacity != 0 && request.name == 0) ||
 	    (request.descriptor_capacity != 0 && request.descriptors == 0))
 		return -EINVAL;
-	if ((request.flags & ~(SOCKET_RECV_FLAGS | MSG_CMSG_CLOEXEC)) != 0)
+	if ((request.flags & ~(SOCKET_RECV_FLAGS | MSG_CMSG_CLOEXEC |
+	    MSG_CMSG_CLOFORK)) != 0)
 		return -EOPNOTSUPP;
 	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
@@ -1140,7 +1178,7 @@ sys_recvmsg_call(const uintptr_t args[6])
 		receive_flags = (int)socket_file_effective_flags(&reference,
 		    (int)request.flags);
 		/* Ancillary descriptor flags are meaningful only to AF_UNIX. */
-		receive_flags &= ~MSG_CMSG_CLOEXEC;
+		receive_flags &= ~(MSG_CMSG_CLOEXEC | MSG_CMSG_CLOFORK);
 		wait_all = reference.socket->type == SOCK_STREAM &&
 		    (receive_flags & MSG_WAITALL) != 0 &&
 		    (receive_flags & MSG_PEEK) == 0;
@@ -1197,7 +1235,7 @@ sys_recvmsg_call(const uintptr_t args[6])
 	result = unix_socket_receive_begin(reference.socket,
 	    buffer_capacity != 0 ? buffer : "", buffer_capacity,
 	    (int)socket_file_effective_flags(&reference,
-	    (int)request.flags & ~MSG_CMSG_CLOEXEC),
+	    (int)request.flags & ~(MSG_CMSG_CLOEXEC | MSG_CMSG_CLOFORK)),
 	    request.name_capacity != 0 ? (struct sockaddr *)&address : NULL,
 	    request.name_capacity != 0 ? &name_length : NULL,
 	    request.descriptor_capacity, &transaction);
@@ -1209,8 +1247,10 @@ sys_recvmsg_call(const uintptr_t args[6])
 	truncated = transaction.control_truncated;
 	if (transaction.active) {
 		error = filedesc_reserve_many(process->fd, file_count,
-		    (request.flags & MSG_CMSG_CLOEXEC) != 0 ?
-		    FILEDESC_CLOEXEC : 0, &reservation);
+		    ((request.flags & MSG_CMSG_CLOEXEC) != 0 ?
+		    FILEDESC_CLOEXEC : 0) |
+		    ((request.flags & MSG_CMSG_CLOFORK) != 0 ?
+		    FILEDESC_CLOFORK : 0), &reservation);
 		if (error != 0) {
 			unix_socket_receive_abort(&transaction);
 			kern_free(buffer);
@@ -1420,11 +1460,13 @@ static intptr_t sys_open_call(const uintptr_t args[6], int at)
 		    &temporary, &context, &held);
 	if (error == 0)
 		error = filedesc_reserve_many(process->fd, 1,
-		    (flags & O_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0,
+		    ((flags & O_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
+		    ((flags & O_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0),
 		    &reservation);
 	if (error == 0)
 		error = file_openat_cred(context, process->cred, path,
-		    flags & ~O_CLOEXEC, (mode & 07777U) & ~process->umask,
+		    flags & ~(O_CLOEXEC | O_CLOFORK),
+		    (mode & 07777U) & ~process->umask,
 		    &file);
 	if (held != NULL) (void)file_close(held);
 	if (error != 0) {
@@ -1690,17 +1732,19 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 	uintptr_t mapped;
 	uint32_t prot;
 	size_t data_size = 0;
+	int fixed;
 	int shared;
 	int error;
 	if (process == NULL || process->vmspace == NULL) return -EINVAL;
-	if ((args[3] & MAP_FIXED) != 0)
-		return -EINVAL;
 	if ((args[3] & (MAP_PRIVATE | MAP_SHARED)) != MAP_PRIVATE &&
 	    (args[3] & (MAP_PRIVATE | MAP_SHARED)) != MAP_SHARED)
 		return -EINVAL;
 	if ((args[3] & ~(MAP_PRIVATE | MAP_SHARED | MAP_ANONYMOUS |
 	    MAP_FIXED_NOREPLACE)) != 0)
 		return -EOPNOTSUPP;
+	fixed = (args[3] & MAP_FIXED) != 0;
+	if (fixed && (args[3] & MAP_FIXED_NOREPLACE) != 0)
+		return -EINVAL;
 	shared = (args[3] & MAP_SHARED) != 0;
 	if (args[1] == 0 || args[1] > SIZE_MAX - SYSCALL_PAGE_MASK)
 		return -EINVAL;
@@ -1711,8 +1755,6 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 	if ((args[3] & MAP_ANONYMOUS) != 0) {
 		if ((int)args[4] != -1 || args[5] != 0)
 			return -EINVAL;
-		if (shared)
-			return -EOPNOTSUPP;
 	} else {
 		if ((args[5] & SYSCALL_PAGE_MASK) != 0 || (off_t)args[5] < 0)
 			return -EINVAL;
@@ -1737,7 +1779,19 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 			data_size = args[1];
 	}
 	error = vm_prot((int)args[2], &prot);
-	if (error == 0 && file != NULL && shared &&
+	if (error == 0 && fixed && file != NULL) {
+		size_t size = (args[1] + SYSCALL_PAGE_MASK) &
+		    ~SYSCALL_PAGE_MASK;
+		error = vmspace_map_file_fixed(process->vmspace, args[0], size,
+		    prot, file, (off_t)args[5], data_size, shared, NULL);
+		mapped = args[0];
+	} else if (error == 0 && fixed) {
+		size_t size = (args[1] + SYSCALL_PAGE_MASK) &
+		    ~SYSCALL_PAGE_MASK;
+		error = vmspace_map_anon_fixed(process->vmspace, args[0], size,
+		    prot, shared, NULL);
+		mapped = args[0];
+	} else if (error == 0 && file != NULL && shared &&
 	    (args[3] & MAP_FIXED_NOREPLACE) != 0) {
 		error = vmspace_map_file_shared(process->vmspace, args[0],
 		    (args[1] + SYSCALL_PAGE_MASK) & ~SYSCALL_PAGE_MASK, prot, file,
@@ -1755,6 +1809,9 @@ static intptr_t sys_mmap_call(const uintptr_t args[6])
 		error = vmspace_map_anon_fixed_noreplace(process->vmspace,
 			args[0], size, prot, NULL);
 		mapped = args[0];
+	} else if (error == 0 && file == NULL && shared) {
+		error = vmspace_map_anon_shared_find(process->vmspace, args[0],
+		    args[1], prot, &mapped);
 	} else if (error == 0 && file == NULL) {
 		error = vmspace_map_find(process->vmspace, args[0], args[1], prot,
 			&mapped);
@@ -2127,7 +2184,8 @@ static intptr_t sys_nanosleep_call(const uintptr_t args[6])
 			continue;
 		}
 		spin_unlock_irqrestore(&process->lock, irq);
-		if (signal_stop_before_return(curthread)) {
+		if (signal_stop_before_return(curthread) ==
+		    SIGNAL_STOP_RETURN_REDISPATCH) {
 			irq = spin_lock_irqsave(&process->lock);
 			continue;
 		}
@@ -2708,6 +2766,192 @@ gid_permitted(const struct ucred *cred, gid_t id)
 }
 
 static intptr_t
+sys_cred_getres_call(uint32_t number, const uintptr_t args[6])
+{
+	struct uaccess_pin pins[3] = {{0}};
+	struct ucred *cred;
+	uint32_t values[3];
+	size_t i;
+	int error = 0;
+
+	for (i = 0; i < 3; i++) {
+		error = uaccess_pin(args[i], sizeof(values[i]), HAL_SPACE_WRITE,
+		    &pins[i]);
+		if (error != 0)
+			break;
+	}
+	cred = error == 0 ? cred_current_ref() : NULL;
+	if (error == 0 && cred == NULL)
+		error = EINVAL;
+	if (error == 0 && number == ZEDBSD_SYS_getresuid) {
+		values[0] = cred->ruid;
+		values[1] = cred->euid;
+		values[2] = cred->suid;
+	} else if (error == 0 && number == ZEDBSD_SYS_getresgid) {
+		values[0] = cred->rgid;
+		values[1] = cred->egid;
+		values[2] = cred->sgid;
+	} else if (error == 0) {
+		error = EINVAL;
+	}
+	for (i = 0; error == 0 && i < 3; i++)
+		error = copyout_pinned(&pins[i], 0, &values[i], sizeof(values[i]));
+	cred_release(cred);
+	for (i = 0; i < 3; i++)
+		uaccess_unpin(&pins[i]);
+	return error == 0 ? 0 : -error;
+}
+
+static intptr_t
+sys_getentropy_call(const uintptr_t args[6])
+{
+	struct uaccess_pin pin = {0};
+	uint8_t entropy[GETENTROPY_MAX];
+	size_t size = (size_t)args[1];
+	int error;
+
+	if (size > GETENTROPY_MAX)
+		return -EINVAL;
+	if (size == 0U)
+		return 0;
+	error = uaccess_pin(args[0], size, HAL_SPACE_WRITE, &pin);
+	if (error != 0)
+		return -error;
+	if (!hal_entropy_fill(entropy, size))
+		error = ENOSYS;
+	else
+		error = copyout_pinned(&pin, 0, entropy, size);
+	memset_explicit(entropy, 0, sizeof(entropy));
+	uaccess_unpin(&pin);
+	return error == 0 ? 0 : -error;
+}
+
+static int
+user_atomic_copy(const struct uaccess_pin *source,
+	struct uaccess_pin *destination, size_t size)
+{
+	uint8_t bytes[SYSCALL_ATOMIC_CHUNK];
+	size_t offset = 0;
+	int error;
+
+	while (offset < size) {
+		size_t amount = size - offset;
+
+		if (amount > sizeof(bytes))
+			amount = sizeof(bytes);
+		error = copyin_pinned(source, offset, bytes, amount);
+		if (error == 0)
+			error = copyout_pinned(destination, offset, bytes, amount);
+		if (error != 0)
+			return error;
+		offset += amount;
+	}
+	return 0;
+}
+
+static int
+user_atomic_equal(const struct uaccess_pin *left,
+	const struct uaccess_pin *right, size_t size, int *equal)
+{
+	uint8_t left_bytes[SYSCALL_ATOMIC_CHUNK];
+	uint8_t right_bytes[SYSCALL_ATOMIC_CHUNK];
+	size_t offset = 0;
+	int error;
+
+	*equal = 1;
+	while (offset < size) {
+		size_t amount = size - offset;
+
+		if (amount > sizeof(left_bytes))
+			amount = sizeof(left_bytes);
+		error = copyin_pinned(left, offset, left_bytes, amount);
+		if (error == 0)
+			error = copyin_pinned(right, offset, right_bytes, amount);
+		if (error != 0)
+			return error;
+		if (memcmp(left_bytes, right_bytes, amount) != 0) {
+			*equal = 0;
+			return 0;
+		}
+		offset += amount;
+	}
+	return 0;
+}
+
+static intptr_t
+sys_atomic_call(const uintptr_t args[6])
+{
+	struct uaccess_pin object = { 0 };
+	struct uaccess_pin first = { 0 };
+	struct uaccess_pin second = { 0 };
+	size_t size = (size_t)args[3];
+	unsigned operation = (unsigned)args[4];
+	uint32_t object_prot, first_prot, second_prot = 0;
+	int equal = 0;
+	int error;
+
+	if (size == 0 || operation > ZEDBSD_ATOMIC_COMPARE_EXCHANGE ||
+	    args[0] == 0 || args[1] == 0 ||
+	    (operation >= ZEDBSD_ATOMIC_EXCHANGE && args[2] == 0))
+		return -EINVAL;
+	object_prot = operation == ZEDBSD_ATOMIC_LOAD ? HAL_SPACE_READ :
+	    operation == ZEDBSD_ATOMIC_STORE ? HAL_SPACE_WRITE :
+	    HAL_SPACE_READ | HAL_SPACE_WRITE;
+	first_prot = operation == ZEDBSD_ATOMIC_LOAD ? HAL_SPACE_WRITE :
+	    operation == ZEDBSD_ATOMIC_COMPARE_EXCHANGE ?
+	    HAL_SPACE_READ | HAL_SPACE_WRITE : HAL_SPACE_READ;
+	if (operation == ZEDBSD_ATOMIC_EXCHANGE)
+		second_prot = HAL_SPACE_WRITE;
+	else if (operation == ZEDBSD_ATOMIC_COMPARE_EXCHANGE)
+		second_prot = HAL_SPACE_READ;
+	error = uaccess_pin(args[0], size, object_prot, &object);
+	if (error == 0)
+		error = uaccess_pin(args[1], size, first_prot, &first);
+	if (error == 0 && second_prot != 0)
+		error = uaccess_pin(args[2], size, second_prot, &second);
+	if (error != 0)
+		goto out;
+
+	/*
+	 * One kernel mutex covers every non-lock-free atomic object, including
+	 * shared mappings seen at different virtual addresses by two processes.
+	 * Pins make every backing page resident before the transaction starts.
+	 */
+	mutex_lock(&user_atomic_lock);
+	switch (operation) {
+	case ZEDBSD_ATOMIC_LOAD:
+		error = user_atomic_copy(&object, &first, size);
+		break;
+	case ZEDBSD_ATOMIC_STORE:
+		error = user_atomic_copy(&first, &object, size);
+		break;
+	case ZEDBSD_ATOMIC_EXCHANGE:
+		error = user_atomic_copy(&object, &second, size);
+		if (error == 0)
+			error = user_atomic_copy(&first, &object, size);
+		break;
+	case ZEDBSD_ATOMIC_COMPARE_EXCHANGE:
+		error = user_atomic_equal(&object, &first, size, &equal);
+		if (error == 0 && equal)
+			error = user_atomic_copy(&second, &object, size);
+		else if (error == 0)
+			error = user_atomic_copy(&object, &first, size);
+		break;
+	default:
+		error = EINVAL;
+		break;
+	}
+	mutex_unlock(&user_atomic_lock);
+out:
+	uaccess_unpin(&second);
+	uaccess_unpin(&first);
+	uaccess_unpin(&object);
+	if (error != 0)
+		return -error;
+	return operation == ZEDBSD_ATOMIC_COMPARE_EXCHANGE ? equal : 0;
+}
+
+static intptr_t
 sys_cred_set_call(uint32_t number, const uintptr_t args[6])
 {
 	struct process *process = current_process();
@@ -2766,6 +3010,52 @@ sys_cred_set_call(uint32_t number, const uintptr_t args[6])
 		if (rgid != (gid_t)-1) cred->rgid = rgid;
 		if (egid != (gid_t)-1) cred->egid = egid;
 		error = 0; break;
+	case ZEDBSD_SYS_setresuid: {
+		uid_t ids[3] = {
+			(uid_t)args[0], (uid_t)args[1], (uid_t)args[2]
+		};
+		unsigned i;
+
+		for (i = 0; i < 3; i++) {
+			if (ids[i] != (uid_t)-1 && !uid_permitted(old, ids[i])) {
+				error = EPERM;
+				break;
+			}
+		}
+		if (i != 3)
+			break;
+		if (ids[0] != (uid_t)-1)
+			cred->ruid = ids[0];
+		if (ids[1] != (uid_t)-1)
+			cred->euid = ids[1];
+		if (ids[2] != (uid_t)-1)
+			cred->suid = ids[2];
+		error = 0;
+		break;
+	}
+	case ZEDBSD_SYS_setresgid: {
+		gid_t ids[3] = {
+			(gid_t)args[0], (gid_t)args[1], (gid_t)args[2]
+		};
+		unsigned i;
+
+		for (i = 0; i < 3; i++) {
+			if (ids[i] != (gid_t)-1 && !gid_permitted(old, ids[i])) {
+				error = EPERM;
+				break;
+			}
+		}
+		if (i != 3)
+			break;
+		if (ids[0] != (gid_t)-1)
+			cred->rgid = ids[0];
+		if (ids[1] != (gid_t)-1)
+			cred->egid = ids[1];
+		if (ids[2] != (gid_t)-1)
+			cred->sgid = ids[2];
+		error = 0;
+		break;
+	}
 	case ZEDBSD_SYS_setgroups:
 		if (!cred_is_superuser(old)) { error = EPERM; break; }
 		if (args[0] > KERN_NGROUPS_MAX) { error = EINVAL; break; }
@@ -3932,12 +4222,16 @@ sys_usync_call(const uintptr_t args[6])
 	struct timespec timeout;
 	uintptr_t key_object, key_offset;
 	uint64_t ticks, deadline = 0;
+	unsigned flags = (unsigned)args[5];
 	int error;
 
 	if (process == NULL ||
-	    (args[5] & ~(ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE)) != 0)
+	    (flags & ~(ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE |
+	    ZEDBSD_USYNC_ABSTIME | ZEDBSD_USYNC_CLOCK_REALTIME)) != 0 ||
+	    ((flags & ZEDBSD_USYNC_CLOCK_REALTIME) != 0 &&
+	    (flags & ZEDBSD_USYNC_ABSTIME) == 0))
 		return -EINVAL;
-	if ((args[5] & ZEDBSD_USYNC_PRIVATE) != 0) {
+	if ((flags & ZEDBSD_USYNC_PRIVATE) != 0) {
 		key_object = (uintptr_t)process;
 		key_offset = args[0];
 	} else {
@@ -3953,7 +4247,43 @@ sys_usync_call(const uintptr_t args[6])
 			goto out;
 		}
 		if (args[3] != 0) {
-			if (curthread != NULL &&
+			if ((flags & ZEDBSD_USYNC_ABSTIME) != 0) {
+				struct timespec now;
+				struct kern_timespec absolute_time, current_time;
+				struct kern_timespec duration;
+				clockid_t clock;
+
+				error = copyin(args[3], &timeout, sizeof(timeout));
+				if (error == 0)
+					error = kern_timespec_validate(&timeout);
+				clock = (flags & ZEDBSD_USYNC_CLOCK_REALTIME) != 0 ?
+				    CLOCK_REALTIME : CLOCK_MONOTONIC;
+				if (error == 0)
+					error = kern_clock_gettime(clock, &now);
+				if (error == 0) {
+					absolute_time.tv_sec = timeout.tv_sec;
+					absolute_time.tv_nsec = (int32_t)timeout.tv_nsec;
+					current_time.tv_sec = now.tv_sec;
+					current_time.tv_nsec = (int32_t)now.tv_nsec;
+					if (kern_timespec_compare(&absolute_time,
+					    &current_time) <= 0)
+						error = ETIMEDOUT;
+				}
+				if (error == 0)
+					error = kern_timespec_sub(&absolute_time,
+					    &current_time, &duration);
+				if (error == 0) {
+					struct timespec relative;
+
+					relative.tv_sec = (time_t)duration.tv_sec;
+					relative.tv_nsec = (long)duration.tv_nsec;
+					error = kern_duration_to_ticks_ceil(&relative,
+					    &ticks);
+				}
+				if (error == 0)
+					error = kern_deadline_after(clock_ticks(), ticks,
+					    &deadline);
+			} else if (curthread != NULL &&
 			    curthread->syscall_stop_redispatch &&
 			    curthread->syscall_wait_deadline_valid) {
 				deadline = curthread->syscall_wait_deadline;
@@ -3972,12 +4302,13 @@ sys_usync_call(const uintptr_t args[6])
 		}
 		error = usync_wait(args[0], (uint32_t)args[2],
 		    key_object, key_offset, deadline,
-		    (args[5] & ZEDBSD_USYNC_CANCELABLE) != 0);
+		    (flags & ZEDBSD_USYNC_CANCELABLE) != 0);
 		goto out;
 	}
 	if ((unsigned)args[1] == ZEDBSD_USYNC_WAKE) {
 		if (args[2] != 0 || args[3] != 0 ||
-		    (args[5] & ZEDBSD_USYNC_CANCELABLE) != 0)
+		    (flags & (ZEDBSD_USYNC_CANCELABLE | ZEDBSD_USYNC_ABSTIME |
+		    ZEDBSD_USYNC_CLOCK_REALTIME)) != 0)
 			error = EINVAL;
 		else
 			error = usync_wake(args[0], key_object, key_offset,
@@ -4024,7 +4355,8 @@ sys_sigsuspend_call(const uintptr_t args[6])
 		}
 		if (signal_pending_unblocked_locked(curthread)) {
 			spin_unlock_irqrestore(&process->lock, irq);
-			if (signal_stop_before_return(curthread)) {
+			if (signal_stop_before_return(curthread) ==
+			    SIGNAL_STOP_RETURN_REDISPATCH) {
 				irq = spin_lock_irqsave(&process->lock);
 				continue;
 			}
@@ -4112,10 +4444,12 @@ sys_dup2_call(const uintptr_t args[6], int is_dup3)
 	if (process == NULL || process->fd == NULL)
 		return -EBADF;
 	if (is_dup3) {
-		if (((int)args[2] & ~O_CLOEXEC) != 0)
+		if (((int)args[2] & ~(O_CLOEXEC | O_CLOFORK)) != 0)
 			return -EINVAL;
 		if (((int)args[2] & O_CLOEXEC) != 0)
-			flags = FILEDESC_CLOEXEC;
+			flags |= FILEDESC_CLOEXEC;
+		if (((int)args[2] & O_CLOFORK) != 0)
+			flags |= FILEDESC_CLOFORK;
 	}
 	error = filedesc_dup2(process->fd, (int)args[0], (int)args[1],
 	    flags, is_dup3);
@@ -4134,18 +4468,22 @@ sys_fcntl_call(const uintptr_t args[6])
 	switch (command) {
 	case F_DUPFD:
 	case F_DUPFD_CLOEXEC:
+	case F_DUPFD_CLOFORK:
 		error = filedesc_dup(process->fd, (int)args[0], (int)args[2],
-		    command == F_DUPFD_CLOEXEC ? FILEDESC_CLOEXEC : 0, &result);
+		    command == F_DUPFD_CLOEXEC ? FILEDESC_CLOEXEC :
+		    command == F_DUPFD_CLOFORK ? FILEDESC_CLOFORK : 0, &result);
 		return error == 0 ? result : -error;
 	case F_GETFD:
 		error = filedesc_get_flags(process->fd, (int)args[0], &flags);
 		return error == 0 ?
-		    ((flags & FILEDESC_CLOEXEC) != 0 ? FD_CLOEXEC : 0) : -error;
+		    (((flags & FILEDESC_CLOEXEC) != 0 ? FD_CLOEXEC : 0) |
+		    ((flags & FILEDESC_CLOFORK) != 0 ? FD_CLOFORK : 0)) : -error;
 	case F_SETFD:
-		if (((int)args[2] & ~FD_CLOEXEC) != 0)
+		if (((int)args[2] & ~(FD_CLOEXEC | FD_CLOFORK)) != 0)
 			return -EINVAL;
 		error = filedesc_set_flags(process->fd, (int)args[0],
-		    ((int)args[2] & FD_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0);
+		    (((int)args[2] & FD_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
+		    (((int)args[2] & FD_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0));
 		return error == 0 ? 0 : -error;
 	case F_GETFL:
 		file = filedesc_get_ref(process->fd, (int)args[0]);
@@ -4203,7 +4541,10 @@ sys_fcntl_call(const uintptr_t args[6])
 	}
 	case F_GETLK:
 	case F_SETLK:
-	case F_SETLKW: {
+	case F_SETLKW:
+	case F_OFD_GETLK:
+	case F_OFD_SETLK:
+	case F_OFD_SETLKW: {
 		struct flock_record request;
 		error = copyin(args[2], &request, sizeof(request));
 		if (error != 0)
@@ -4213,7 +4554,8 @@ sys_fcntl_call(const uintptr_t args[6])
 			return -EBADF;
 		error = record_lock_fcntl(process, file, command, &request);
 		(void)file_close(file);
-		if (error == 0 && command == F_GETLK)
+		if (error == 0 &&
+		    (command == F_GETLK || command == F_OFD_GETLK))
 			error = copyout(&request, args[2], sizeof(request));
 		return error == 0 ? 0 : -error;
 	}
@@ -4237,7 +4579,8 @@ sys_pipe2_call(const uintptr_t args[6], int plain)
 	error = pipe_create(flags, &read_file, &write_file);
 	if (error != 0)
 		return -error;
-	fdflags = (flags & O_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0;
+	fdflags = ((flags & O_CLOEXEC) != 0 ? FILEDESC_CLOEXEC : 0) |
+	    ((flags & O_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0);
 	error = filedesc_install_pair(process->fd, read_file, fdflags,
 	    write_file, fdflags, descriptors);
 	if (error == 0)
@@ -4839,13 +5182,19 @@ syscall_dispatch_body(uint32_t number, const uintptr_t args[6])
 	case ZEDBSD_SYS_getgid:
 	case ZEDBSD_SYS_getegid:
 	case ZEDBSD_SYS_getgroups: return sys_cred_get_call(number, args);
+	case ZEDBSD_SYS_getresuid:
+	case ZEDBSD_SYS_getresgid: return sys_cred_getres_call(number, args);
+	case ZEDBSD_SYS_getentropy: return sys_getentropy_call(args);
+	case ZEDBSD_SYS_atomic: return sys_atomic_call(args);
 	case ZEDBSD_SYS_setuid:
 	case ZEDBSD_SYS_seteuid:
 	case ZEDBSD_SYS_setgid:
 	case ZEDBSD_SYS_setegid:
 	case ZEDBSD_SYS_setgroups:
 	case ZEDBSD_SYS_setreuid:
-	case ZEDBSD_SYS_setregid: return sys_cred_set_call(number, args);
+	case ZEDBSD_SYS_setregid:
+	case ZEDBSD_SYS_setresuid:
+	case ZEDBSD_SYS_setresgid: return sys_cred_set_call(number, args);
 	case ZEDBSD_SYS_access: return sys_access_call(args);
 	case ZEDBSD_SYS_sigaction: return sys_sigaction_call(args);
 	case ZEDBSD_SYS_sigprocmask: return sys_sigprocmask_call(args);
@@ -4983,10 +5332,16 @@ syscall_dispatch(uint32_t number, const uintptr_t args[6])
 				syscall_restart_prepare_stop(thread);
 				continue;
 			}
-		} else if (thread != NULL && result == -EINTR &&
-		    signal_stop_before_return(thread)) {
-			syscall_restart_prepare_stop(thread);
-			continue;
+		} else if (thread != NULL && result == -EINTR) {
+			enum signal_stop_return_result stop_result =
+			    signal_stop_before_return(thread);
+
+			if (stop_result == SIGNAL_STOP_RETURN_INTERRUPT)
+				break;
+			if (stop_result == SIGNAL_STOP_RETURN_REDISPATCH) {
+				syscall_restart_prepare_stop(thread);
+				continue;
+			}
 		}
 		break;
 	}
@@ -5003,6 +5358,8 @@ void syscall_init(void)
 {
 	poll_init();
 	usync_init();
+	(void)mutex_init(&user_atomic_lock, LOCK_RANK_USER_ATOMIC,
+	    "user atomic");
 	hal_syscall_set_handler(syscall_dispatch);
 	signal_init();
 }

@@ -182,6 +182,10 @@ main(void)
 	assert(registered_sleeps == 2 && last_wait_flags ==
 	    (WAITQ_INTERRUPTIBLE | WAITQ_CANCELABLE));
 
+	/* A realtime adjustment invalidates every bucket deadline. */
+	usync_realtime_changed();
+	assert(wake_calls == 1 + 32);
+
 	puts("zedBSD usync pin/wake host tests: PASS");
 	return 0;
 }

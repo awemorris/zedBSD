@@ -195,6 +195,121 @@ signal_description(int number)
 	}
 }
 
+struct signal_name {
+	int number;
+	const char *name;
+};
+
+static const struct signal_name signal_names[] = {
+	{ SIGHUP, "HUP" }, { SIGINT, "INT" }, { SIGQUIT, "QUIT" },
+	{ SIGILL, "ILL" }, { SIGTRAP, "TRAP" }, { SIGABRT, "ABRT" },
+	{ SIGVTALRM, "VTALRM" }, { SIGFPE, "FPE" }, { SIGKILL, "KILL" },
+	{ SIGBUS, "BUS" }, { SIGSEGV, "SEGV" }, { SIGPROF, "PROF" },
+	{ SIGPIPE, "PIPE" }, { SIGALRM, "ALRM" }, { SIGTERM, "TERM" },
+	{ SIGUSR1, "USR1" }, { SIGUSR2, "USR2" }, { SIGCHLD, "CHLD" },
+	{ SIGCONT, "CONT" }, { SIGSTOP, "STOP" }, { SIGTSTP, "TSTP" },
+	{ SIGTTIN, "TTIN" }, { SIGTTOU, "TTOU" }, { SIGURG, "URG" },
+	{ SIGWINCH, "WINCH" }, { SIGIO, "IO" }, { SIGXCPU, "XCPU" },
+	{ SIGXFSZ, "XFSZ" },
+};
+
+static int
+decimal_signal(const char *name, int *number)
+{
+	unsigned value = 0;
+	const char *cursor;
+
+	if (name[0] == '\0')
+		return -1;
+	for (cursor = name; *cursor != '\0'; cursor++) {
+		if (*cursor < '0' || *cursor > '9')
+			return -1;
+		value = value * 10U + (unsigned)(*cursor - '0');
+		if (value > SIGRTMAX)
+			return -1;
+	}
+	if (value == 0)
+		return -1;
+	*number = (int)value;
+	return 0;
+}
+
+static int
+realtime_offset(const char *name, const char *prefix, int *offset)
+{
+	unsigned value = 0;
+	const char *cursor;
+
+	if (strncmp(name, prefix, 6) != 0 || name[6] == '\0')
+		return -1;
+	for (cursor = name + 6; *cursor != '\0'; cursor++) {
+		if (*cursor < '0' || *cursor > '9')
+			return -1;
+		value = value * 10U + (unsigned)(*cursor - '0');
+		if (value > (unsigned)(SIGRTMAX - SIGRTMIN))
+			return -1;
+	}
+	*offset = (int)value;
+	return 0;
+}
+
+int
+sig2str(int number, char *name)
+{
+	unsigned i;
+
+	for (i = 0; i < sizeof(signal_names) / sizeof(signal_names[0]); i++)
+		if (signal_names[i].number == number) {
+			strcpy(name, signal_names[i].name);
+			return 0;
+		}
+	if (number >= SIGRTMIN && number <= SIGRTMAX) {
+		if (number == SIGRTMIN)
+			strcpy(name, "RTMIN");
+		else
+			(void)snprintf(name, SIG2STR_MAX, "RTMIN+%d",
+			    number - SIGRTMIN);
+		return 0;
+	}
+	return -1;
+}
+
+int
+str2sig(const char *restrict name, int *restrict number)
+{
+	unsigned i;
+	int offset;
+
+	if (decimal_signal(name, number) == 0)
+		return 0;
+	for (i = 0; i < sizeof(signal_names) / sizeof(signal_names[0]); i++)
+		if (!strcmp(name, signal_names[i].name)) {
+			*number = signal_names[i].number;
+			return 0;
+		}
+	if (!strcmp(name, "POLL")) {
+		*number = SIGPOLL;
+		return 0;
+	}
+	if (!strcmp(name, "RTMIN")) {
+		*number = SIGRTMIN;
+		return 0;
+	}
+	if (!strcmp(name, "RTMAX")) {
+		*number = SIGRTMAX;
+		return 0;
+	}
+	if (realtime_offset(name, "RTMIN+", &offset) == 0) {
+		*number = SIGRTMIN + offset;
+		return 0;
+	}
+	if (realtime_offset(name, "RTMAX-", &offset) == 0) {
+		*number = SIGRTMAX - offset;
+		return 0;
+	}
+	return -1;
+}
+
 void
 psignal(int number, const char *prefix)
 {

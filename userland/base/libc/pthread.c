@@ -12,6 +12,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
+#include <threads.h>
 
 #define THREAD_STACK_SIZE (1024U * 1024U)
 #define KEY_MAX 32U
@@ -37,7 +38,7 @@ struct pthread_tcb {
 	int error;
 	char *environment_value;
 	const void *locale_value;
-	uint32_t multibyte_state[4];
+	uint32_t multibyte_state[6];
 	fenv_t floating_environment;
 	char ptsname_buffer[32];
 	unsigned detached;
@@ -86,12 +87,13 @@ call(uint32_t number, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d,
 
 static int
 usync_wait_word_flags_cancelable(volatile uint32_t *address, uint32_t value,
-	const struct timespec *timeout, int pshared, int cancelable)
+	const struct timespec *timeout, int pshared, int cancelable,
+	unsigned timeout_flags)
 {
 	intptr_t result = call(ZEDBSD_SYS_usync, (uintptr_t)address,
 	    ZEDBSD_USYNC_WAIT, value, (uintptr_t)timeout, 0,
 	    (pshared ? 0 : ZEDBSD_USYNC_PRIVATE) |
-	    (cancelable ? ZEDBSD_USYNC_CANCELABLE : 0));
+	    (cancelable ? ZEDBSD_USYNC_CANCELABLE : 0) | timeout_flags);
 	return result < 0 ? errno : 0;
 }
 
@@ -100,7 +102,22 @@ usync_wait_word_flags(volatile uint32_t *address, uint32_t value,
 	const struct timespec *timeout, int pshared)
 {
 	return usync_wait_word_flags_cancelable(address, value, timeout,
-	    pshared, 0);
+	    pshared, 0, 0);
+}
+
+static int
+usync_wait_word_absolute(volatile uint32_t *address, uint32_t value,
+	const struct timespec *absolute, int pshared, int cancelable,
+	clockid_t clock)
+{
+	unsigned flags = ZEDBSD_USYNC_ABSTIME;
+
+	if (clock != CLOCK_REALTIME && clock != CLOCK_MONOTONIC)
+		return EINVAL;
+	if (clock == CLOCK_REALTIME)
+		flags |= ZEDBSD_USYNC_CLOCK_REALTIME;
+	return usync_wait_word_flags_cancelable(address, value, absolute,
+	    pshared, cancelable, flags);
 }
 
 static void
@@ -217,7 +234,7 @@ __pthread_mbstate(unsigned which)
 
 	ensure_main();
 	tcb = self_tcb();
-	if (tcb == NULL || which > 1U)
+	if (tcb == NULL || which > 2U)
 		return NULL;
 	return &tcb->multibyte_state[which * 2U];
 }
@@ -740,44 +757,26 @@ pthread_mutex_lock(pthread_mutex_t *m)
 		(void)usync_wait_word_flags(&m->locked, 1, NULL, m->pshared);
 	return error;
 }
-static int
-absolute_to_relative(clockid_t clock, const struct timespec *absolute,
-	struct timespec *relative)
-{
-	struct timespec now;
-	if (absolute == NULL || absolute->tv_sec < 0 || absolute->tv_nsec < 0 ||
-	    absolute->tv_nsec >= 1000000000L ||
-	    (clock != CLOCK_REALTIME && clock != CLOCK_MONOTONIC))
-		return EINVAL;
-	if (clock_gettime(clock, &now) != 0)
-		return errno;
-	if (absolute->tv_sec < now.tv_sec || (absolute->tv_sec == now.tv_sec &&
-	    absolute->tv_nsec <= now.tv_nsec))
-		return ETIMEDOUT;
-	relative->tv_sec = absolute->tv_sec - now.tv_sec;
-	relative->tv_nsec = absolute->tv_nsec - now.tv_nsec;
-	if (relative->tv_nsec < 0) {
-		relative->tv_sec--;
-		relative->tv_nsec += 1000000000L;
-	}
-	return 0;
-}
 int
-pthread_mutex_timedlock(pthread_mutex_t *m, const struct timespec *absolute)
+pthread_mutex_clocklock(pthread_mutex_t *m, clockid_t clock,
+	const struct timespec *absolute)
 {
 	int error;
-	struct timespec relative;
 	if (m == NULL)
 		return EINVAL;
 	while ((error = pthread_mutex_trylock(m)) == EBUSY) {
-		error = absolute_to_relative(CLOCK_REALTIME, absolute, &relative);
-		if (error != 0)
-			return error;
-		error = usync_wait_word_flags(&m->locked, 1, &relative, m->pshared);
+		error = usync_wait_word_absolute(&m->locked, 1, absolute,
+		    m->pshared, 0, clock);
 		if (error != 0 && error != EAGAIN && error != EINTR)
 			return error;
 	}
 	return error;
+}
+
+int
+pthread_mutex_timedlock(pthread_mutex_t *m, const struct timespec *absolute)
+{
+	return pthread_mutex_clocklock(m, CLOCK_REALTIME, absolute);
 }
 int
 pthread_mutex_unlock(pthread_mutex_t *m)
@@ -809,8 +808,6 @@ static int
 cond_wait(pthread_cond_t *c, pthread_mutex_t *m,
 	const struct timespec *absolute, clockid_t clock)
 {
-	struct timespec relative;
-	const struct timespec *timeout;
 	uint32_t sequence;
 	int error;
 	if (c == NULL || m == NULL)
@@ -825,15 +822,13 @@ cond_wait(pthread_cond_t *c, pthread_mutex_t *m,
 			error = 0;
 			break;
 		}
-		timeout = NULL;
 		if (absolute != NULL) {
-			error = absolute_to_relative(clock, absolute, &relative);
-			if (error != 0)
-				break;
-			timeout = &relative;
+			error = usync_wait_word_absolute(&c->sequence, sequence,
+			    absolute, c->pshared, __pthread_cancel_enabled(), clock);
+		} else {
+			error = usync_wait_word_flags_cancelable(&c->sequence, sequence,
+			    NULL, c->pshared, __pthread_cancel_enabled(), 0);
 		}
-		error = usync_wait_word_flags_cancelable(&c->sequence, sequence,
-		    timeout, c->pshared, __pthread_cancel_enabled());
 		if (error == 0 || error == EAGAIN) {
 			error = 0;
 			break;
@@ -866,6 +861,15 @@ pthread_cond_timedwait(pthread_cond_t *c, pthread_mutex_t *m,
 	if (c == NULL || m == NULL)
 		return EINVAL;
 	return cond_wait(c, m, absolute, (clockid_t)c->clock);
+}
+
+int
+pthread_cond_clockwait(pthread_cond_t *c, pthread_mutex_t *m,
+	clockid_t clock, const struct timespec *absolute)
+{
+	if (c == NULL || m == NULL)
+		return EINVAL;
+	return cond_wait(c, m, absolute, clock);
 }
 int pthread_cond_signal(pthread_cond_t *c)
 { if (c == NULL) return EINVAL; __atomic_add_fetch(&c->sequence, 1, __ATOMIC_RELEASE); usync_wake_word_flags(&c->sequence, 1, c->pshared); return 0; }
@@ -942,11 +946,10 @@ pthread_rwlock_rdlock(pthread_rwlock_t *lock)
 }
 
 int
-pthread_rwlock_timedrdlock(pthread_rwlock_t *lock,
+pthread_rwlock_clockrdlock(pthread_rwlock_t *lock, clockid_t clock,
 	const struct timespec *absolute)
 {
 	uint32_t sequence;
-	struct timespec relative;
 	int error;
 	if (lock == NULL)
 		return EINVAL;
@@ -954,15 +957,19 @@ pthread_rwlock_timedrdlock(pthread_rwlock_t *lock,
 		error = pthread_rwlock_tryrdlock(lock);
 		if (error != EBUSY)
 			return error;
-		error = absolute_to_relative(CLOCK_REALTIME, absolute, &relative);
-		if (error != 0)
-			return error;
 		sequence = __atomic_load_n(&lock->sequence, __ATOMIC_ACQUIRE);
-		error = usync_wait_word_flags(&lock->sequence, sequence, &relative,
-		    lock->pshared);
+		error = usync_wait_word_absolute(&lock->sequence, sequence,
+		    absolute, lock->pshared, 0, clock);
 		if (error != 0 && error != EAGAIN && error != EINTR)
 			return error;
 	}
+}
+
+int
+pthread_rwlock_timedrdlock(pthread_rwlock_t *lock,
+	const struct timespec *absolute)
+{
+	return pthread_rwlock_clockrdlock(lock, CLOCK_REALTIME, absolute);
 }
 
 int
@@ -1000,11 +1007,10 @@ pthread_rwlock_wrlock(pthread_rwlock_t *lock)
 }
 
 int
-pthread_rwlock_timedwrlock(pthread_rwlock_t *lock,
+pthread_rwlock_clockwrlock(pthread_rwlock_t *lock, clockid_t clock,
 	const struct timespec *absolute)
 {
 	uint32_t sequence;
-	struct timespec relative;
 	int error;
 	if (lock == NULL)
 		return EINVAL;
@@ -1012,15 +1018,19 @@ pthread_rwlock_timedwrlock(pthread_rwlock_t *lock,
 		error = pthread_rwlock_trywrlock(lock);
 		if (error != EBUSY)
 			return error;
-		error = absolute_to_relative(CLOCK_REALTIME, absolute, &relative);
-		if (error != 0)
-			return error;
 		sequence = __atomic_load_n(&lock->sequence, __ATOMIC_ACQUIRE);
-		error = usync_wait_word_flags(&lock->sequence, sequence, &relative,
-		    lock->pshared);
+		error = usync_wait_word_absolute(&lock->sequence, sequence,
+		    absolute, lock->pshared, 0, clock);
 		if (error != 0 && error != EAGAIN && error != EINTR)
 			return error;
 	}
+}
+
+int
+pthread_rwlock_timedwrlock(pthread_rwlock_t *lock,
+	const struct timespec *absolute)
+{
+	return pthread_rwlock_clockwrlock(lock, CLOCK_REALTIME, absolute);
 }
 
 int
@@ -1298,4 +1308,220 @@ __pthread_cleanup_pop(struct __pthread_cleanup *cleanup, int execute)
 		tcb->cleanup = cleanup->previous;
 	if (execute)
 		cleanup->routine(cleanup->argument);
+}
+
+static int
+c11_result(int error)
+{
+	if (error == 0)
+		return thrd_success;
+	if (error == ENOMEM || error == EAGAIN)
+		return thrd_nomem;
+	if (error == ETIMEDOUT)
+		return thrd_timedout;
+	if (error == EBUSY)
+		return thrd_busy;
+	return thrd_error;
+}
+
+void
+call_once(once_flag *flag, void (*function)(void))
+{
+	(void)pthread_once(flag, function);
+}
+
+int
+cnd_broadcast(cnd_t *condition)
+{
+	return c11_result(pthread_cond_broadcast(condition));
+}
+
+void
+cnd_destroy(cnd_t *condition)
+{
+	(void)pthread_cond_destroy(condition);
+}
+
+int
+cnd_init(cnd_t *condition)
+{
+	return c11_result(pthread_cond_init(condition, NULL));
+}
+
+int
+cnd_signal(cnd_t *condition)
+{
+	return c11_result(pthread_cond_signal(condition));
+}
+
+int
+cnd_timedwait(cnd_t *condition, mtx_t *mutex,
+	const struct timespec *absolute)
+{
+	return c11_result(pthread_cond_timedwait(condition, mutex, absolute));
+}
+
+int
+cnd_wait(cnd_t *condition, mtx_t *mutex)
+{
+	return c11_result(pthread_cond_wait(condition, mutex));
+}
+
+void
+mtx_destroy(mtx_t *mutex)
+{
+	(void)pthread_mutex_destroy(mutex);
+}
+
+int
+mtx_init(mtx_t *mutex, int type)
+{
+	pthread_mutexattr_t attributes;
+	int error;
+
+	if ((type & ~(mtx_recursive | mtx_timed)) != 0)
+		return thrd_error;
+	error = pthread_mutexattr_init(&attributes);
+	if (error == 0 && (type & mtx_recursive) != 0)
+		error = pthread_mutexattr_settype(&attributes,
+		    PTHREAD_MUTEX_RECURSIVE);
+	if (error == 0)
+		error = pthread_mutex_init(mutex, &attributes);
+	(void)pthread_mutexattr_destroy(&attributes);
+	return c11_result(error);
+}
+
+int
+mtx_lock(mtx_t *mutex)
+{
+	return c11_result(pthread_mutex_lock(mutex));
+}
+
+int
+mtx_timedlock(mtx_t *mutex, const struct timespec *absolute)
+{
+	return c11_result(pthread_mutex_timedlock(mutex, absolute));
+}
+
+int
+mtx_trylock(mtx_t *mutex)
+{
+	return c11_result(pthread_mutex_trylock(mutex));
+}
+
+int
+mtx_unlock(mtx_t *mutex)
+{
+	return c11_result(pthread_mutex_unlock(mutex));
+}
+
+struct c11_start_context {
+	thrd_start_t function;
+	void *argument;
+};
+
+static void *
+c11_start(void *argument)
+{
+	struct c11_start_context *context = argument;
+	thrd_start_t function = context->function;
+	void *function_argument = context->argument;
+	int result;
+
+	free(context);
+	result = function(function_argument);
+	return (void *)(intptr_t)result;
+}
+
+int
+thrd_create(thrd_t *thread, thrd_start_t function, void *argument)
+{
+	struct c11_start_context *context;
+	int error;
+
+	if (thread == NULL || function == NULL)
+		return thrd_error;
+	context = malloc(sizeof(*context));
+	if (context == NULL)
+		return thrd_nomem;
+	context->function = function;
+	context->argument = argument;
+	error = pthread_create(thread, NULL, c11_start, context);
+	if (error != 0)
+		free(context);
+	return c11_result(error);
+}
+
+thrd_t
+thrd_current(void)
+{
+	return pthread_self();
+}
+
+int
+thrd_detach(thrd_t thread)
+{
+	return c11_result(pthread_detach(thread));
+}
+
+int
+thrd_equal(thrd_t left, thrd_t right)
+{
+	return pthread_equal(left, right);
+}
+
+_Noreturn void
+thrd_exit(int result)
+{
+	pthread_exit((void *)(intptr_t)result);
+}
+
+int
+thrd_join(thrd_t thread, int *result)
+{
+	void *value;
+	int error;
+
+	error = pthread_join(thread, &value);
+	if (error == 0 && result != NULL)
+		*result = (int)(intptr_t)value;
+	return c11_result(error);
+}
+
+int
+thrd_sleep(const struct timespec *duration, struct timespec *remaining)
+{
+	if (nanosleep(duration, remaining) == 0)
+		return 0;
+	return errno == EINTR ? -1 : -2;
+}
+
+void
+thrd_yield(void)
+{
+	(void)sched_yield();
+}
+
+int
+tss_create(tss_t *key, tss_dtor_t destructor)
+{
+	return c11_result(pthread_key_create(key, destructor));
+}
+
+void
+tss_delete(tss_t key)
+{
+	(void)pthread_key_delete(key);
+}
+
+void *
+tss_get(tss_t key)
+{
+	return pthread_getspecific(key);
+}
+
+int
+tss_set(tss_t key, void *value)
+{
+	return c11_result(pthread_setspecific(key, value));
 }

@@ -21,7 +21,7 @@ AMD64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 AMD64_CFLAGS := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
 	-ffreestanding -fno-pic -fno-pie -fno-stack-protector \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \
-	-Os -Wall -Wextra -Werror
+	-ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror
 AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
 
 AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/amd64/asm.c src/hal/amd64/lib.c \

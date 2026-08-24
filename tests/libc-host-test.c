@@ -166,6 +166,15 @@ test_heap(void)
 	c = heap_calloc_active(17, 3);
 	CHECK(a != NULL && b != NULL && c != NULL);
 	CHECK(((uintptr_t)a & 7U) == 0 && ((uintptr_t)b & 7U) == 0);
+	{
+		void *aligned = heap_aligned_alloc_active(256, 512);
+
+		CHECK(aligned != NULL && ((uintptr_t)aligned & 255U) == 0);
+		memset(aligned, 0xa5, 512);
+		CHECK(heap_active_validate());
+		heap_free_active(aligned);
+		CHECK(heap_active_validate());
+	}
 	for (index = 0; index < 51; index++)
 		CHECK(((unsigned char *)c)[index] == 0);
 	memset(b, 0x5a, 257);

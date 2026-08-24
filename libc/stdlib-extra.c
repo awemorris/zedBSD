@@ -1,4 +1,6 @@
 /* ISO C and commonly used BSD stdlib interfaces. SPDX-License-Identifier: Zlib */
+#include "libc/heap.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -46,10 +48,17 @@ void quick_exit(int status)
 
 void *aligned_alloc(size_t alignment, size_t size)
 {
-	/* The allocator's supported fundamental alignment is eight bytes. */
+	void *result;
+
 	if (alignment == 0 || (alignment & (alignment - 1)) ||
-	    alignment > 8 || size % alignment != 0) { errno = EINVAL; return NULL; }
-	return malloc(size);
+	    size % alignment != 0) {
+		errno = EINVAL;
+		return NULL;
+	}
+	result = heap_aligned_alloc_active(alignment, size);
+	if (result == NULL)
+		errno = ENOMEM;
+	return result;
 }
 
 static void swap_bytes(unsigned char *a, unsigned char *b, size_t n)

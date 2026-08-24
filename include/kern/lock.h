@@ -22,6 +22,7 @@ enum lock_rank {
 	LOCK_RANK_INODE = 60,
 	LOCK_RANK_NAMECACHE = 70,
 	LOCK_RANK_RECORD_LOCK = 75,
+	LOCK_RANK_USER_ATOMIC = 78,
 	LOCK_RANK_VMSPACE = 80,
 	/*
 	 * Per-inode publication gate for shared-object EOF transactions.

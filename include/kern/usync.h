@@ -12,6 +12,13 @@
 void
 usync_init(void);
 
+/*
+ * Wake absolute CLOCK_REALTIME waiters after the realtime offset changes.
+ * Waiters revalidate both their user-space predicate and absolute deadline.
+ */
+void
+usync_realtime_changed(void);
+
 int
 usync_wait(
 	uintptr_t address,

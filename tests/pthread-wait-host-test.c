@@ -143,10 +143,10 @@ __syscall6(uint32_t number, uintptr_t address, uintptr_t operation,
 	}
 	if (address == (uintptr_t)&timed_sem.value) {
 		assert(expected == 0 && timeout != 0 && flags ==
-		    (ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE));
+		    (ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE |
+		    ZEDBSD_USYNC_ABSTIME | ZEDBSD_USYNC_CLOCK_REALTIME));
 		sem_timed_wait_calls++;
-		assert(((const struct timespec *)timeout)->tv_sec ==
-		    (time_t)(5U - sem_timed_wait_calls));
+		assert(((const struct timespec *)timeout)->tv_sec == 6);
 		if (sem_timed_wait_calls == 1U)
 			return 0; /* Spurious/colliding bucket wake. */
 		assert(sem_timed_wait_calls == 2U);
@@ -155,18 +155,19 @@ __syscall6(uint32_t number, uintptr_t address, uintptr_t operation,
 	}
 	if (address == (uintptr_t)&expired_sem.value) {
 		assert(expected == 0 && timeout != 0 && flags ==
-		    (ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE));
+		    (ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE |
+		    ZEDBSD_USYNC_ABSTIME | ZEDBSD_USYNC_CLOCK_REALTIME));
 		sem_expired_wait_calls++;
 		assert(sem_expired_wait_calls == 1U &&
-		    ((const struct timespec *)timeout)->tv_sec == 1);
-		return 0;
+		    ((const struct timespec *)timeout)->tv_sec == 5);
+		return -ETIMEDOUT;
 	}
 	assert(address == (uintptr_t)&timed_condition.sequence);
-	assert(flags == (ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE));
+	assert(flags == (ZEDBSD_USYNC_PRIVATE | ZEDBSD_USYNC_CANCELABLE |
+	    ZEDBSD_USYNC_ABSTIME | ZEDBSD_USYNC_CLOCK_REALTIME));
 	timed_wait_calls++;
 	assert(timeout != 0);
-	assert(((const struct timespec *)timeout)->tv_sec ==
-	    (time_t)(3U - timed_wait_calls));
+	assert(((const struct timespec *)timeout)->tv_sec == 2);
 	if (timed_wait_calls == 1U)
 		return -EINTR;
 	assert(timed_wait_calls == 2U);
@@ -197,7 +198,7 @@ main(void)
 		assert(pthread_mutex_lock(&mutex) == 0);
 		assert(pthread_cond_timedwait(&timed_condition, &mutex,
 		    &deadline) == 0);
-		assert(timed_wait_calls == 2U && clock_calls == 2U);
+		assert(timed_wait_calls == 2U && clock_calls == 0U);
 		assert(pthread_mutex_unlock(&mutex) == 0);
 		assert(pthread_cond_destroy(&timed_condition) == 0);
 	}
@@ -241,26 +242,26 @@ main(void)
 	    retry_sem.value == 0);
 	assert(sem_destroy(&retry_sem) == 0);
 
-	/* Relative kernel timeouts are recomputed from the original absolute
-	 * deadline after every spurious wake or compare collision. */
+	/* The original absolute deadline is retained across spurious wakes and
+	 * compare collisions; the kernel evaluates it against the selected clock. */
 	{
 		const struct timespec deadline = { 6, 0 };
 
 		assert(sem_init(&timed_sem, 0, 0) == 0);
 		assert(sem_timedwait(&timed_sem, &deadline) == 0);
-		assert(sem_timed_wait_calls == 2U && clock_calls == 4U &&
+		assert(sem_timed_wait_calls == 2U && clock_calls == 0U &&
 		    timed_sem.waiters == 0 && timed_sem.value == 0);
 		assert(sem_destroy(&timed_sem) == 0);
 	}
 
-	/* Expiration is checked against the absolute deadline on every retry. */
+	/* Kernel expiration of an absolute deadline is returned unchanged. */
 	{
 		const struct timespec deadline = { 5, 0 };
 
 		assert(sem_init(&expired_sem, 0, 0) == 0);
 		assert(sem_timedwait(&expired_sem, &deadline) == -1 &&
 		    errno == ETIMEDOUT);
-		assert(sem_expired_wait_calls == 1U && clock_calls == 6U &&
+		assert(sem_expired_wait_calls == 1U && clock_calls == 0U &&
 		    expired_sem.waiters == 0);
 		assert(sem_destroy(&expired_sem) == 0);
 	}
@@ -273,7 +274,7 @@ main(void)
 
 		assert(sem_init(&immediate, 0, 1) == 0);
 		assert(sem_timedwait(&immediate, &invalid) == 0);
-		assert(clock_calls == 6U);
+		assert(clock_calls == 0U);
 		assert(sem_destroy(&immediate) == 0);
 	}
 	return 0;

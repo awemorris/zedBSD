@@ -65,6 +65,14 @@ int accept(int descriptor, struct sockaddr *address, socklen_t *length)
 	    (uintptr_t)address, (uintptr_t)length, 0, 0, 0);
 }
 
+int
+accept4(int descriptor, struct sockaddr *address, socklen_t *length,
+	int flags)
+{
+	return (int)socket_call(ZEDBSD_SYS_accept, descriptor,
+	    (uintptr_t)address, (uintptr_t)length, flags, 0, 0);
+}
+
 ssize_t sendto(int descriptor, const void *buffer, size_t length, int flags,
 	       const struct sockaddr *address, socklen_t address_length)
 {

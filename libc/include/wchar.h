@@ -23,6 +23,8 @@ size_t mbsrtowcs(wchar_t *, const char **, size_t, mbstate_t *);
 size_t wcsrtombs(char *, const wchar_t **, size_t, mbstate_t *);
 
 size_t wcslen(const wchar_t *);
+size_t wcslcpy(wchar_t *destination, const wchar_t *source, size_t size);
+size_t wcslcat(wchar_t *destination, const wchar_t *source, size_t size);
 int wcscmp(const wchar_t *, const wchar_t *);
 int wcsncmp(const wchar_t *, const wchar_t *, size_t);
 wchar_t *wcscpy(wchar_t *, const wchar_t *);

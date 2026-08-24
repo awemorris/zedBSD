@@ -17,6 +17,7 @@
 #define O_DSYNC     0x10000
 #define O_SYNC      0x20000
 #define O_NOFOLLOW  0x40000
+#define O_CLOFORK   0x80000
 
 #define AT_FDCWD            (-100)
 #define AT_SYMLINK_NOFOLLOW 0x0100
@@ -27,6 +28,7 @@
 int faccessat(int, const char *, int, int);
 
 #define FD_CLOEXEC  0x0001
+#define FD_CLOFORK  0x0002
 
 #define F_DUPFD         0
 #define F_GETFD         1
@@ -39,6 +41,10 @@ int faccessat(int, const char *, int, int);
 #define F_SETLKW         8
 #define F_GETOWN         9
 #define F_SETOWN         10
+#define F_DUPFD_CLOFORK  11
+#define F_OFD_GETLK      12
+#define F_OFD_SETLK      13
+#define F_OFD_SETLKW     14
 
 #define F_RDLCK 1
 #define F_WRLCK 2

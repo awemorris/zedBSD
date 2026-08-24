@@ -1,12 +1,41 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
 #include "userland/base/common/command.h"
+
+#include <limits.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
-int main(int argc, char **argv)
+
+int
+main(int argc, char **argv)
 {
-	char buffer[4096]; ssize_t size;
-	if (argc != 2) { fprintf(stderr, "usage: readlink file\n"); return 1; }
-	size = readlink(argv[1], buffer, sizeof(buffer));
-	if (size < 0 || command_write_all(STDOUT_FILENO, buffer, (size_t)size) || command_write_all(STDOUT_FILENO, "\n", 1)) { command_error("readlink", argv[1]); return 1; }
+	char buffer[PATH_MAX + 1U];
+	int newline = 1;
+	int index = 1;
+	ssize_t length;
+
+	if (index < argc && !strcmp(argv[index], "-n")) {
+		newline = 0;
+		index++;
+	}
+	if (index < argc && !strcmp(argv[index], "--"))
+		index++;
+	if (argc - index != 1) {
+		fprintf(stderr, "usage: readlink [-n] file\n");
+		return 2;
+	}
+	length = readlink(argv[index], buffer, sizeof(buffer));
+	if (length < 0 || command_write_all(STDOUT_FILENO, buffer,
+	    (size_t)length) != 0 || (newline &&
+	    command_write_all(STDOUT_FILENO, "\n", 1) != 0)) {
+		command_error("readlink", argv[index]);
+		return 1;
+	}
 	return 0;
 }

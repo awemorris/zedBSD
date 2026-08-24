@@ -149,4 +149,9 @@ vfs_clear_setid_on_content_change(struct inode *inode)
 }
 
 void record_lock_inode_destroy(struct inode *inode) { (void)inode; }
+void __attribute__((weak))
+record_lock_release_file(struct file *file)
+{
+	(void)file;
+}
 const struct file_ops fifo_file_ops = { 0 };

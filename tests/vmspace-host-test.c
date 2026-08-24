@@ -1028,6 +1028,37 @@ int main(void)
 	assert(vmspace_unmap(vm, 0x400000, 3U * TEST_PAGE_SIZE) == 0);
 	assert(commit_used == 0);
 
+	/*
+	 * MAP_FIXED prepares its replacement before removing the old pages.  A
+	 * middle-page replacement preserves both fragments and failure to reserve
+	 * the new mapping leaves the original region and contents untouched.
+	 */
+	assert(vmspace_map_anon(vm, 0x00400000, 3U * TEST_PAGE_SIZE,
+	    HAL_SPACE_READ | HAL_SPACE_WRITE, &region) == 0);
+	assert(vmspace_copy_to(vm, 0x00400000, "L", 1) == 0);
+	assert(vmspace_copy_to(vm, 0x00401000, "M", 1) == 0);
+	assert(vmspace_copy_to(vm, 0x00402000, "R", 1) == 0);
+	fail_commit = 1;
+	assert(vmspace_map_anon_fixed(vm, 0x00401000, TEST_PAGE_SIZE,
+	    HAL_SPACE_READ | HAL_SPACE_WRITE, 0, NULL) == ENOMEM);
+	fail_commit = 0;
+	memset(buffer, 0, sizeof(buffer));
+	assert(vmspace_copy_from(vm, buffer, 0x00401000, 1) == 0 &&
+	    buffer[0] == 'M');
+	assert(vmspace_find_region(vm, 0x00400000, 3U * TEST_PAGE_SIZE) ==
+	    region);
+	assert(vmspace_map_anon_fixed(vm, 0x00401000, TEST_PAGE_SIZE,
+	    HAL_SPACE_READ | HAL_SPACE_WRITE, 0, NULL) == 0);
+	memset(buffer, 0xff, sizeof(buffer));
+	assert(vmspace_copy_from(vm, buffer, 0x00400000, 1) == 0 &&
+	    buffer[0] == 'L');
+	assert(vmspace_copy_from(vm, buffer, 0x00401000, 1) == 0 &&
+	    buffer[0] == 0);
+	assert(vmspace_copy_from(vm, buffer, 0x00402000, 1) == 0 &&
+	    buffer[0] == 'R');
+	assert(vmspace_unmap(vm, 0x00400000, 3U * TEST_PAGE_SIZE) == 0);
+	assert(commit_used == 0);
+
 	/* Object-backed reverse mappings obey the same pre-publication rule. */
 	assert(vmspace_map_file_shared(vm, 0x00a00000, TEST_PAGE_SIZE,
 	    HAL_SPACE_READ | HAL_SPACE_WRITE, &shared_file, 0,
@@ -1675,6 +1706,33 @@ int main(void)
 		assert(vmspace_copy_from(child, &child_value, 0x600000, 1) == 0);
 		assert(parent_value == 'P' && child_value == 'C');
 		vmspace_put(child);
+		vmspace_put(parent);
+		assert(commit_used == 0);
+	}
+
+	/* MAP_SHARED|MAP_ANONYMOUS retains one object across fork. */
+	{
+		struct vmspace *parent = vmspace_create();
+		struct vmspace *child = NULL;
+		uintptr_t shared_address;
+		char parent_value = 0, child_value = 0;
+
+		assert(parent != NULL);
+		assert(vmspace_map_anon_shared_find(parent, 0x00600000,
+		    TEST_PAGE_SIZE, HAL_SPACE_READ | HAL_SPACE_WRITE,
+		    &shared_address) == 0);
+		assert(shared_address >= vm_layout.mmap_base &&
+		    commit_used == TEST_PAGE_SIZE);
+		assert(vmspace_copy_to(parent, shared_address, "P", 1) == 0);
+		assert(vmspace_fork(parent, &child) == 0 && child != NULL);
+		assert(commit_used == TEST_PAGE_SIZE);
+		assert(vmspace_copy_from(child, &child_value, shared_address, 1) == 0 &&
+		    child_value == 'P');
+		assert(vmspace_copy_to(child, shared_address, "C", 1) == 0);
+		assert(vmspace_copy_from(parent, &parent_value, shared_address, 1) == 0 &&
+		    parent_value == 'C');
+		vmspace_put(child);
+		assert(commit_used == TEST_PAGE_SIZE);
 		vmspace_put(parent);
 		assert(commit_used == 0);
 	}

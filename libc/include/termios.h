@@ -7,7 +7,9 @@
 
 #define L_ctermid 13
 int tcgetattr(int, struct termios *);
+int tcgetwinsize(int, struct winsize *);
 int tcsetattr(int, int, const struct termios *);
+int tcsetwinsize(int, const struct winsize *);
 int tcdrain(int);
 int tcflush(int, int);
 int tcflow(int, int);

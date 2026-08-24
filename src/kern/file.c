@@ -6,6 +6,7 @@
 #include "kern/file.h"
 #include "kern/namei.h"
 #include "kern/cred.h"
+#include "kern/record-lock.h"
 #include "kern/vm-object.h"
 
 #include <errno.h>
@@ -1219,7 +1220,23 @@ file_seek(struct file *file, off_t offset, int whence)
 	if (file == NULL)
 		return -EINVAL;
 	mutex_lock(&file->f_lock);
-	if (file->f_ops != NULL && file->f_ops->seek != NULL)
+	if (whence == SEEK_DATA || whence == SEEK_HOLE) {
+		if (file->f_inode == NULL || file->f_inode->i_type != INODE_REG) {
+			mutex_unlock(&file->f_lock);
+			return -EINVAL;
+		}
+		if (offset < 0 || offset >= file->f_inode->i_size) {
+			mutex_unlock(&file->f_lock);
+			return -ENXIO;
+		}
+		/*
+		 * The current filesystems expose a conservative dense-file view.
+		 * Reporting EOF as the only hole is permitted even when a backend
+		 * stores an all-zero extent sparsely.
+		 */
+		base = whence == SEEK_DATA ? offset : file->f_inode->i_size;
+		file->f_offset = base;
+	} else if (file->f_ops != NULL && file->f_ops->seek != NULL)
 		base = file->f_ops->seek(file, offset, whence);
 	else {
 		if (file->f_inode == NULL ||
@@ -1286,6 +1303,7 @@ file_close(struct file *file)
 		return EBADF;
 	if (!refcount_put(&file->f_refs))
 		return 0;
+	record_lock_release_file(file);
 	if (file->f_ops != NULL && file->f_ops->close != NULL)
 		error = file->f_ops->close(file);
 	if (file->f_path.p_inode != NULL)

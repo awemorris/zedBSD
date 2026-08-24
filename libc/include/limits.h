@@ -7,6 +7,8 @@
 #define ARG_MAX 16384
 #define RTSIG_MAX 34
 #define SIGQUEUE_MAX 32
+#define GETENTROPY_MAX 256
+#define TEXTDOMAIN_MAX 255
 
 #define _POSIX_RTSIG_MAX 8
 #define _POSIX_SIGQUEUE_MAX 32

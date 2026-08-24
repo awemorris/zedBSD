@@ -8,6 +8,18 @@
 #include <uchar.h>
 #include <wchar.h>
 
+extern void *__libc_internal_mbstate(unsigned) __attribute__((weak));
+
+static mbstate_t *
+uchar_internal_state(void)
+{
+	static mbstate_t bootstrap;
+	void *state = __libc_internal_mbstate != NULL ?
+	    __libc_internal_mbstate(2) : NULL;
+
+	return state != NULL ? state : &bootstrap;
+}
+
 wchar_t *wcscat(wchar_t *d, const wchar_t *s) { wcscpy(d + wcslen(d), s); return d; }
 wchar_t *wcsncat(wchar_t *d, const wchar_t *s, size_t n)
 { wchar_t *p = d + wcslen(d); while (n-- && *s) *p++ = *s++; *p = 0; return d; }
@@ -145,7 +157,8 @@ size_t c32rtomb(char *s,char32_t c,mbstate_t *state)
 { if(c>0x10ffffU||(c>=0xd800U&&c<=0xdfffU)){errno=EILSEQ;return(size_t)-1;}return wcrtomb(s,(wchar_t)c,state); }
 size_t mbrtoc16(char16_t *out,const char *s,size_t n,mbstate_t *state)
 {
-	static mbstate_t internal; if(!state)state=&internal;
+	if (!state)
+		state = uchar_internal_state();
 	if(state->needed==0xff){if(out)*out=(char16_t)state->value;state->needed=0;return(size_t)-3;}
 	wchar_t wc;size_t r=mbrtowc(&wc,s,n,state);if(r==(size_t)-1||r==(size_t)-2)return r;
 	if((uint32_t)wc<=0xffffU){if(out)*out=(char16_t)wc;return r;}
@@ -153,11 +166,53 @@ size_t mbrtoc16(char16_t *out,const char *s,size_t n,mbstate_t *state)
 }
 size_t c16rtomb(char *s,char16_t c,mbstate_t *state)
 {
-	static mbstate_t internal;if(!state)state=&internal;if(!s){memset(state,0,sizeof(*state));return 1;}
-	if(c>=0xd800U&&c<=0xdbffU){state->value=c;state->needed=0xfe;return 0;}
+	if (!state)
+		state = uchar_internal_state();
+	if(!s){memset(state,0,sizeof(*state));return 1;}
+	if(c>=0xd800U&&c<=0xdbffU){
+		if (state->needed == 0xfe) {
+			memset(state, 0, sizeof(*state));
+			errno = EILSEQ;
+			return (size_t)-1;
+		}
+		state->value=c;state->needed=0xfe;return 0;
+	}
 	if(state->needed==0xfe && !(c>=0xdc00U&&c<=0xdfffU))
 		{ memset(state,0,sizeof(*state));errno=EILSEQ;return(size_t)-1; }
 	uint32_t value=c;if(c>=0xdc00U&&c<=0xdfffU&&state->needed==0xfe){value=0x10000U+((state->value-0xd800U)<<10)+(c-0xdc00U);state->needed=0;}
 	else if(c>=0xd800U&&c<=0xdfffU){errno=EILSEQ;return(size_t)-1;}
 	return c32rtomb(s,value,state);
+}
+
+size_t
+wcslcpy(wchar_t *destination, const wchar_t *source, size_t size)
+{
+	size_t length = wcslen(source);
+	size_t copied;
+
+	if (size != 0U) {
+		copied = length < size - 1U ? length : size - 1U;
+		wmemcpy(destination, source, copied);
+		destination[copied] = L'\0';
+	}
+	return length;
+}
+
+size_t
+wcslcat(wchar_t *destination, const wchar_t *source, size_t size)
+{
+	size_t destination_length = 0;
+	size_t source_length = wcslen(source);
+	size_t available;
+	size_t copied;
+
+	while (destination_length < size && destination[destination_length] != L'\0')
+		destination_length++;
+	if (destination_length == size)
+		return size + source_length;
+	available = size - destination_length;
+	copied = source_length < available - 1U ? source_length : available - 1U;
+	wmemcpy(destination + destination_length, source, copied);
+	destination[destination_length + copied] = L'\0';
+	return destination_length + source_length;
 }

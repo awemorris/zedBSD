@@ -13,7 +13,8 @@ ARM64_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 ARM64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 ARM64_CFLAGS := -march=armv8-a -mno-outline-atomics -mgeneral-regs-only -ffreestanding \
 	-fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables \
-	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werror
+	-fno-unwind-tables -fno-common -ffunction-sections -fdata-sections \
+	-Os -Wall -Wextra -Werror
 
 ARM64_BOOT_C := src/hal/cpu-up.c src/hal/arm64/asm.c src/hal/arm64/lib.c \
 	src/hal/arm64/page.c src/hal/arm64/space.c \

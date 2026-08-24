@@ -52,6 +52,7 @@ locale_t newlocale(int, const char *, locale_t);
 locale_t duplocale(locale_t);
 void freelocale(locale_t);
 locale_t uselocale(locale_t);
+const char *getlocalename_l(int category, locale_t locale);
 
 size_t __libc_mb_cur_max(void);
 #define MB_CUR_MAX (__libc_mb_cur_max())

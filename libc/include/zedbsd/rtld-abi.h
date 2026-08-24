@@ -5,13 +5,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define ZEDBSD_RTLD_ABI_VERSION 3U
+#define ZEDBSD_RTLD_ABI_VERSION 4U
 #define ZEDBSD_RTLD_DLERROR_SIZE 192U
 
 struct __tls_index {
 	uintptr_t module;
 	uintptr_t offset;
 };
+
+struct dl_info;
 
 struct __rtld_tcb {
 	void **dtv;
@@ -48,6 +50,7 @@ struct __rtld_exports {
 	void (*fork_parent)(void);
 	void (*fork_child)(void);
 	void *(*tls_get_addr)(const struct __tls_index *);
+	int (*dladdr)(const void *, struct dl_info *);
 };
 
 extern const struct __rtld_exports __rtld_exports;
@@ -58,6 +61,7 @@ void __rtld_process_fini(void);
 void *__rtld_dlopen(const char *, int);
 void *__rtld_dlsym(void *, const char *);
 void *__rtld_dlvsym(void *, const char *, const char *);
+int __rtld_dladdr(const void *, struct dl_info *);
 int __rtld_dlclose(void *);
 char *__rtld_dlerror(void);
 int __rtld_thread_alloc(void *, struct __rtld_tcb **);

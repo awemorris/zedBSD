@@ -235,6 +235,9 @@ insert_region(struct vmspace *vm, struct vm_region *region)
 static int map_region(struct vmspace *, uintptr_t, size_t, uint32_t,
 		      enum vm_region_backing, struct file *, off_t, uintptr_t,
 		      size_t, unsigned, size_t, struct vm_region **);
+static int prepare_region(uintptr_t, size_t, uint32_t,
+		      enum vm_region_backing, struct file *, off_t, uintptr_t,
+		      size_t, unsigned, size_t, struct vm_region **);
 static int allocate_page_frame(struct vm_private_page *, struct vm_page *);
 static struct vm_page *find_page(struct vm_region *, uintptr_t);
 static void vmspace_generation_advance_locked(struct vmspace *);
@@ -676,6 +679,74 @@ map_region(struct vmspace *vm, uintptr_t start, size_t size, uint32_t prot,
 	if (result != NULL)
 		*result = region;
 	return 0;
+}
+
+/*
+ * Build a region which is not yet visible in a vmspace.  MAP_FIXED uses this
+ * to reserve every fallible resource before it detaches an old mapping.
+ */
+static int
+prepare_region(uintptr_t start, size_t size, uint32_t prot,
+	enum vm_region_backing backing, struct file *file, off_t file_offset,
+	uintptr_t data_start, size_t data_size, unsigned flags,
+	size_t commit_size, struct vm_region **result)
+{
+	struct vm_region *region;
+	uint32_t max_prot = HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC;
+	int error;
+
+	if (result == NULL || !range_valid(start, size) ||
+	    (prot & ~(HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_EXEC)) != 0)
+		return EINVAL;
+	if (backing == VM_BACKING_FILE &&
+	    (file == NULL || file_offset < 0 || data_start < start ||
+	    data_start >= start + size || data_size > start + size - data_start))
+		return EINVAL;
+	if ((flags & VM_REGION_SHARED) != 0 && file != NULL &&
+	    ((file_status_flags_get(file) & O_ACCMODE) == O_RDONLY ||
+	    file->f_ops == NULL || file->f_ops->pwrite == NULL))
+		max_prot &= ~HAL_SPACE_WRITE;
+	if ((prot & ~max_prot) != 0)
+		return EACCES;
+	region = kern_calloc(1, sizeof(*region));
+	if (region == NULL)
+		return ENOMEM;
+	if (commit_size != 0) {
+		error = vm_commit_reserve(commit_size);
+		if (error != 0) {
+			kern_free(region);
+			return error;
+		}
+	}
+	region->start = start;
+	region->size = size;
+	region->prot = prot;
+	region->max_prot = max_prot;
+	region->flags = flags;
+	region->commit_size = commit_size;
+	region->backing = backing;
+	region->file = file;
+	region->file_offset = file_offset;
+	region->data_start = data_start;
+	region->data_size = data_size;
+	if (file != NULL)
+		file_ref(file);
+	*result = region;
+	return 0;
+}
+
+static void
+discard_prepared_region(struct vm_region *region)
+{
+	if (region == NULL)
+		return;
+	if (region->file != NULL)
+		(void)file_close(region->file);
+	if (region->object != NULL)
+		vm_object_put(region->object);
+	if (region->commit_size != 0)
+		vm_commit_release(region->commit_size);
+	kern_free(region);
 }
 
 static int
@@ -1676,55 +1747,71 @@ static int
 copy_backing(struct vmspace *vm, uintptr_t user_address, void *kernel,
 	     size_t size, uint32_t required, int to_user)
 {
+	struct vmspace_pinned_page *pages;
 	uint8_t *bytes = kernel;
-	uintptr_t original_address = user_address;
-	size_t original_size = size;
+	uintptr_t first, last;
+	size_t page_count, position;
+	int error;
 
 	if (size == 0)
 		return 0;
 	if (kernel == NULL)
 		return EINVAL;
-	if (vmspace_wire_range(vm, user_address, size, required) != 0)
+	if (!vmspace_user_range_valid(user_address, size))
 		return EFAULT;
+	first = user_address & ~(uintptr_t)(PAGE_SIZE - 1U);
+	last = (user_address + size - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
+	page_count = (size_t)((last - first) / PAGE_SIZE) + 1U;
+	if (page_count > SIZE_MAX / sizeof(*pages))
+		return ENOMEM;
+	pages = kern_calloc(page_count, sizeof(*pages));
+	if (pages == NULL)
+		return ENOMEM;
+	error = vmspace_pin_user_pages(vm, user_address, size, required, pages,
+	    page_count);
+	if (error != 0) {
+		kern_free(pages);
+		return error == ENOMEM ? ENOMEM : EFAULT;
+	}
+	position = user_address - first;
 	while (size != 0) {
-		struct vm_region *region;
-		struct vm_page *page;
-		size_t offset = user_address & (PAGE_SIZE - 1U);
+		struct vmspace_pinned_page *page =
+		    &pages[position / PAGE_SIZE];
+		size_t offset = position & (PAGE_SIZE - 1U);
 		size_t chunk = PAGE_SIZE - offset;
-		void *mapped;
 
-		vm_metadata_enter();
-		mutex_lock(&vm->lock);
-		region = find_region_locked(vm, user_address, 1);
-		page = region != NULL ? find_page(region, user_address) : NULL;
-		if (page == NULL) {
-			mutex_unlock(&vm->lock);
-			vm_metadata_leave();
-			vmspace_unwire_range(vm, original_address, original_size);
-			return EFAULT;
-		}
 		if (chunk > size)
 			chunk = size;
-		mapped = (void *)((page->object_page != NULL ?
-		    (uintptr_t)page->object_page->pmem.vaddr :
-		    vm_private_page_vaddr(page)) + offset);
-		if (to_user)
-		{
-			memcpy(mapped, bytes, chunk);
-			if (page->object_page != NULL)
-				vm_object_mark_dirty(page->object_page);
+		if (page->kind == VMSPACE_PINNED_PRIVATE) {
+			void *mapped = (uint8_t *)page->memory.vaddr + offset;
+
+			if (to_user) {
+				memcpy(mapped, bytes, chunk);
+				vm_private_page_mark_dirty(
+				    page->owner.private_page);
+			} else {
+				memcpy(bytes, mapped, chunk);
+			}
+			error = 0;
+		} else if (page->kind == VMSPACE_PINNED_OBJECT) {
+			if (to_user)
+				error = vm_object_page_pin_write(
+				    page->owner.object_page, offset, bytes, chunk);
 			else
-				vm_private_page_mark_dirty(page->private_page);
-		} else
-			memcpy(bytes, mapped, chunk);
-		mutex_unlock(&vm->lock);
-		vm_metadata_leave();
+				error = vm_object_page_pin_read(
+				    page->owner.object_page, offset, bytes, chunk);
+		} else {
+			error = EFAULT;
+		}
+		if (error != 0)
+			break;
 		bytes += chunk;
-		user_address += chunk;
+		position += chunk;
 		size -= chunk;
 	}
-	vmspace_unwire_range(vm, original_address, original_size);
-	return 0;
+	vmspace_unpin_user_pages(pages, page_count);
+	kern_free(pages);
+	return error;
 }
 
 static int
@@ -1952,16 +2039,16 @@ release_detached_region_pages(struct vm_region *region)
 }
 
 static int
-split_region(struct vm_region *region, uintptr_t address)
+split_region_prepared(struct vm_region *region, uintptr_t address,
+	struct vm_region *right)
 {
-	struct vm_region *right;
 	struct vm_page **link;
 	size_t left_size, right_size;
 	uintptr_t original_data_start, original_data_end;
 	uintptr_t left_data_start, left_data_end;
 	uintptr_t right_data_start, right_data_end;
 
-	if (region == NULL || address <= region->start ||
+	if (region == NULL || right == NULL || address <= region->start ||
 	    address >= region->start + region->size ||
 	    (address & (PAGE_SIZE - 1U)) != 0)
 		return EINVAL;
@@ -1969,9 +2056,6 @@ split_region(struct vm_region *region, uintptr_t address)
 		return EBUSY;
 	if (region->flags & VM_REGION_IMMUTABLE)
 		return EACCES;
-	right = kern_calloc(1, sizeof(*right));
-	if (right == NULL)
-		return ENOMEM;
 	left_size = address - region->start;
 	right_size = region->size - left_size;
 	original_data_start = region->data_start;
@@ -2024,6 +2108,154 @@ split_region(struct vm_region *region, uintptr_t address)
 	right->next = region->next;
 	region->next = right;
 	return 0;
+}
+
+static int
+split_region(struct vm_region *region, uintptr_t address)
+{
+	struct vm_region *right = kern_calloc(1, sizeof(*right));
+	int error;
+
+	if (right == NULL)
+		return ENOMEM;
+	error = split_region_prepared(region, address, right);
+	if (error != 0)
+		kern_free(right);
+	return error;
+}
+
+static void
+release_retired_regions(struct vm_region *retired)
+{
+	struct vm_region *region;
+
+	while ((region = retired) != NULL) {
+		retired = region->next;
+		release_detached_region_pages(region);
+		if (region->file != NULL)
+			(void)file_close(region->file);
+		if (region->object != NULL)
+			vm_object_put(region->object);
+		if (region->commit_size != 0)
+			vm_commit_release(region->commit_size);
+		kern_free(region);
+	}
+}
+
+/*
+ * Publish a prepared mapping at an exact address.  Two preallocated split
+ * records make the metadata commit failure-free after the first old region
+ * is changed.
+ */
+static int
+vmspace_replace_prepared(struct vmspace *vm, struct vm_region *prepared,
+	struct vm_region **result)
+{
+	struct vm_region *split_first, *split_second;
+	struct vm_region *retired = NULL;
+	struct vm_region *region;
+	struct vm_region **link;
+	uintptr_t start, end;
+	size_t removed = 0;
+	int error = 0;
+
+	if (vm == NULL || vm == &kernel_vmspace || prepared == NULL ||
+	    !range_valid(prepared->start, prepared->size))
+		return EINVAL;
+	split_first = kern_calloc(1, sizeof(*split_first));
+	split_second = kern_calloc(1, sizeof(*split_second));
+	if (split_first == NULL || split_second == NULL) {
+		kern_free(split_first);
+		kern_free(split_second);
+		return ENOMEM;
+	}
+	start = prepared->start;
+	end = start + prepared->size;
+	vm_metadata_enter();
+	mutex_lock(&vm->lock);
+	vmspace_wait_faults_locked(vm);
+	for (region = vm->regions; region != NULL; region = region->next) {
+		struct vm_page *page;
+		uintptr_t overlap_start, overlap_end;
+
+		if (region->start >= end || region->start + region->size <= start)
+			continue;
+		if ((region->flags & VM_REGION_IMMUTABLE) != 0) {
+			error = EINVAL;
+			goto out_locked;
+		}
+		if (region->hold_count != 0) {
+			error = EAGAIN;
+			goto out_locked;
+		}
+		for (page = region->pages; page != NULL; page = page->next)
+			if (page->address < end &&
+			    page->address + PAGE_SIZE > start &&
+			    page->wire_count != 0) {
+				error = EAGAIN;
+				goto out_locked;
+			}
+		overlap_start = region->start > start ? region->start : start;
+		overlap_end = region->start + region->size < end ?
+		    region->start + region->size : end;
+		removed += overlap_end - overlap_start;
+	}
+	if (removed > vm->mapped_virtual_bytes ||
+	    (uint64_t)prepared->size > vm->address_limit -
+	    (vm->mapped_virtual_bytes - removed > vm->address_limit ?
+	    vm->address_limit : vm->mapped_virtual_bytes - removed)) {
+		error = ENOMEM;
+		goto out_locked;
+	}
+	region = find_region_locked(vm, end - 1U, 1);
+	if (region != NULL && end < region->start + region->size) {
+		error = split_region_prepared(region, end, split_first);
+		if (error != 0)
+			goto out_locked;
+		split_first = NULL;
+	}
+	region = find_region_locked(vm, start, 1);
+	if (region != NULL && start > region->start) {
+		struct vm_region *split = split_first != NULL ?
+		    split_first : split_second;
+
+		error = split_region_prepared(region, start, split);
+		if (error != 0)
+			HAL_FATAL("prepared VM split commit failed");
+		if (split == split_first)
+			split_first = NULL;
+		else
+			split_second = NULL;
+	}
+	for (region = vm->regions; region != NULL && region->start < end;
+	     region = region->next)
+		if (region->start >= start)
+			detach_region_pages_for_unmap(vm, region);
+	for (link = &vm->regions; *link != NULL; link = &(*link)->next)
+		if ((*link)->start >= start)
+			break;
+	while ((region = *link) != NULL && region->start < end) {
+		*link = region->next;
+		vm->mapped_virtual_bytes -= region->size;
+		region->next = retired;
+		retired = region;
+	}
+	insert_region(vm, prepared);
+	vm->mapped_virtual_bytes += prepared->size;
+	vmspace_generation_advance_locked(vm);
+	if (result != NULL)
+		*result = prepared;
+
+out_locked:
+	mutex_unlock(&vm->lock);
+	vm_metadata_leave();
+	kern_free(split_first);
+	kern_free(split_second);
+	if (error == 0 && retired != NULL &&
+	    vmspace_unmap_retire_checkpoint != NULL)
+		vmspace_unmap_retire_checkpoint(vm, start, prepared->size);
+	release_retired_regions(retired);
+	return error;
 }
 
 static int
@@ -2623,6 +2855,74 @@ vmspace_map_anon_fixed_noreplace(struct vmspace *vm, uintptr_t start,
 }
 
 int
+vmspace_map_anon_fixed(struct vmspace *vm, uintptr_t start, size_t size,
+	uint32_t prot, int shared, struct vm_region **result)
+{
+	struct vm_object *object = NULL;
+	struct vm_region *prepared = NULL;
+	unsigned flags = shared ? VM_REGION_SHARED : 0;
+	size_t commit_size = !shared && prot != 0 ? size : 0;
+	int error;
+
+	if (vm == NULL || vm == &kernel_vmspace ||
+	    (shared != 0 && shared != 1))
+		return EINVAL;
+	if (shared) {
+		error = vm_object_create_anonymous(size, &object);
+		if (error != 0)
+			return error;
+	}
+	error = prepare_region(start, size, prot, VM_BACKING_ANON, NULL, 0,
+	    start, shared ? size : 0, flags, commit_size, &prepared);
+	if (error != 0) {
+		if (object != NULL)
+			vm_object_put(object);
+		return error;
+	}
+	prepared->object = object;
+	error = vmspace_replace_prepared(vm, prepared, result);
+	if (error != 0)
+		discard_prepared_region(prepared);
+	return error;
+}
+
+int
+vmspace_map_anon_shared_find(struct vmspace *vm, uintptr_t hint, size_t size,
+	uint32_t prot, uintptr_t *mapped)
+{
+	struct vm_object *object;
+	struct vm_region *region = NULL;
+	uintptr_t start;
+	size_t rounded;
+	int error;
+
+	if (vm == NULL || vm == &kernel_vmspace || mapped == NULL || size == 0 ||
+	    size > SIZE_MAX - (PAGE_SIZE - 1U))
+		return EINVAL;
+	rounded = (size + PAGE_SIZE - 1U) & ~(PAGE_SIZE - 1U);
+	error = vm_object_create_anonymous(rounded, &object);
+	if (error != 0)
+		return error;
+	vm_metadata_enter();
+	mutex_lock(&vm->lock);
+	error = vmspace_find_free_range_locked(vm, hint, rounded, PAGE_SIZE,
+	    &start);
+	if (error == 0)
+		error = map_region(vm, start, rounded, prot, VM_BACKING_ANON,
+		    NULL, 0, start, rounded, VM_REGION_SHARED, 0, &region);
+	if (error == 0) {
+		region->object = object;
+		*mapped = start;
+		vmspace_generation_advance_locked(vm);
+	}
+	mutex_unlock(&vm->lock);
+	vm_metadata_leave();
+	if (error != 0)
+		vm_object_put(object);
+	return error;
+}
+
+int
 vmspace_map_file(struct vmspace *vm, uintptr_t start, size_t size,
 	uint32_t prot, struct file *file, off_t offset, uintptr_t data_start,
 	size_t data_size, struct vm_region **result)
@@ -2657,6 +2957,40 @@ vmspace_map_file_shared(struct vmspace *vm, uintptr_t start, size_t size,
 		vmspace_generation_advance_locked(vm);
 	mutex_unlock(&vm->lock);
 	vm_metadata_leave();
+	return error;
+}
+
+int
+vmspace_map_file_fixed(struct vmspace *vm, uintptr_t start, size_t size,
+	uint32_t prot, struct file *file, off_t offset, size_t data_size,
+	int shared, struct vm_region **result)
+{
+	struct vm_object *object = NULL;
+	struct vm_region *prepared = NULL;
+	unsigned flags = shared ? VM_REGION_SHARED : 0;
+	size_t commit_size = !shared && (prot & HAL_SPACE_WRITE) != 0 ?
+	    size : 0;
+	int error;
+
+	if (vm == NULL || vm == &kernel_vmspace || file == NULL ||
+	    (shared != 0 && shared != 1))
+		return EINVAL;
+	if (shared) {
+		error = vm_object_get_shared(file, &object);
+		if (error != 0)
+			return error;
+	}
+	error = prepare_region(start, size, prot, VM_BACKING_FILE, file, offset,
+	    start, data_size, flags, commit_size, &prepared);
+	if (error != 0) {
+		if (object != NULL)
+			vm_object_put(object);
+		return error;
+	}
+	prepared->object = object;
+	error = vmspace_replace_prepared(vm, prepared, result);
+	if (error != 0)
+		discard_prepared_region(prepared);
 	return error;
 }
 
@@ -2891,7 +3225,7 @@ vmspace_brk(struct vmspace *vm, uintptr_t requested, uintptr_t *result)
 int
 vmspace_unmap(struct vmspace *vm, uintptr_t start, size_t size)
 {
-	struct vm_region *region, *retired = NULL;
+	struct vm_region *retired = NULL;
 	int error;
 	if (vm == NULL || vm == &kernel_vmspace)
 		return EINVAL;
@@ -2907,17 +3241,7 @@ vmspace_unmap(struct vmspace *vm, uintptr_t start, size_t size)
 	if (error == 0 && retired != NULL &&
 	    vmspace_unmap_retire_checkpoint != NULL)
 		vmspace_unmap_retire_checkpoint(vm, start, size);
-	while ((region = retired) != NULL) {
-		retired = region->next;
-		release_detached_region_pages(region);
-		if (region->file != NULL)
-			(void)file_close(region->file);
-		if (region->object != NULL)
-			vm_object_put(region->object);
-		if (region->commit_size != 0)
-			vm_commit_release(region->commit_size);
-		kern_free(region);
-	}
+	release_retired_regions(retired);
 	return error;
 }
 

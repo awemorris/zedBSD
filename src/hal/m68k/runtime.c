@@ -195,3 +195,11 @@ hal_halt(void)
 }
 
 void hal_panic(void) { HAL_FATAL("kernel panic"); }
+
+bool
+hal_entropy_fill(void *buffer, size_t size)
+{
+	(void)buffer;
+	(void)size;
+	return false;
+}

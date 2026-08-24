@@ -2556,6 +2556,61 @@ __rtld_dlvsym(void *value, const char *name, const char *version)
 }
 
 __attribute__((visibility("default"))) int
+__rtld_dladdr(const void *value, Dl_info *information)
+{
+	struct rtld_object *object = NULL;
+	uintptr_t address = (uintptr_t)value;
+	uintptr_t best_address = 0;
+	const char *best_name = NULL;
+	unsigned i;
+
+	if (information == NULL)
+		return 0;
+	loader_lock();
+	for (i = 0; i < object_count; i++)
+		if (objects[i].active && !objects[i].unloading &&
+		    object_contains(&objects[i], address, 1, 0)) {
+			object = &objects[i];
+			break;
+		}
+	if (object == NULL) {
+		loader_unlock();
+		return 0;
+	}
+	for (i = 1; i < object->symbol_count; i++) {
+		Elf_Sym *symbol = &object->symtab[i];
+		uintptr_t symbol_address;
+		unsigned type = ELF_ST_TYPE(symbol->st_info);
+
+		if (symbol->st_shndx == SHN_UNDEF || symbol->st_name == 0 ||
+		    symbol->st_name >= object->strsz ||
+		    (type != STT_NOTYPE && type != STT_OBJECT && type != STT_FUNC))
+			continue;
+		if (!bounded_string(object->strtab + symbol->st_name,
+		    object->strsz - symbol->st_name, NULL))
+			continue;
+		if (symbol->st_shndx == SHN_ABS)
+			symbol_address = (uintptr_t)symbol->st_value;
+		else {
+			if ((uintptr_t)symbol->st_value > UINTPTR_MAX - object->base)
+				continue;
+			symbol_address = object->base + (uintptr_t)symbol->st_value;
+		}
+		if (symbol_address <= address &&
+		    (best_name == NULL || symbol_address > best_address)) {
+			best_address = symbol_address;
+			best_name = object->strtab + symbol->st_name;
+		}
+	}
+	information->dli_fname = object->path;
+	information->dli_fbase = (void *)object->base;
+	information->dli_sname = best_name;
+	information->dli_saddr = best_name != NULL ? (void *)best_address : NULL;
+	loader_unlock();
+	return 1;
+}
+
+__attribute__((visibility("default"))) int
 __rtld_dlclose(void *value)
 {
 	struct rtld_handle *handle;
@@ -2626,6 +2681,7 @@ const struct __rtld_exports __rtld_exports = {
 	.fork_parent = __rtld_fork_parent,
 	.fork_child = __rtld_fork_child,
 	.tls_get_addr = __tls_get_addr,
+	.dladdr = __rtld_dladdr,
 };
 
 static void

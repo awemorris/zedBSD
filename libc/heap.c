@@ -7,6 +7,7 @@
 
 #include "libc/heap.h"
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -318,6 +319,108 @@ heap_allocator_alloc(struct heap_allocator *heap, size_t size)
 }
 
 void *
+heap_allocator_aligned_alloc(struct heap_allocator *heap, size_t alignment,
+    size_t size)
+{
+	struct heap_block *block;
+	struct heap_block *aligned_block;
+	uint8_t *payload;
+	uintptr_t aligned_payload;
+	size_t requested = size;
+	size_t capacity;
+	size_t extension;
+
+	if (heap == NULL || alignment == 0 ||
+	    (alignment & (alignment - 1U)) != 0)
+		return NULL;
+	if (alignment <= HEAP_ALIGNMENT)
+		return heap_allocator_alloc(heap, size);
+	if (size == 0)
+		size = 1;
+	capacity = aligned_size(size);
+	if (capacity == 0 ||
+	    heap->successful_allocations >= heap->fail_after)
+		goto fail;
+
+retry:
+	for (block = heap->free_list; block != NULL; block = block->next_free) {
+		uintptr_t first;
+		uintptr_t end;
+		size_t prefix;
+
+		payload = block_payload(block);
+		if ((uintptr_t)payload > UINTPTR_MAX - (alignment - 1U))
+			continue;
+		first = ((uintptr_t)payload + alignment - 1U) &
+		    ~(uintptr_t)(alignment - 1U);
+		prefix = (size_t)(first - (uintptr_t)payload);
+		if (prefix != 0 && prefix < block_header_size() + HEAP_ALIGNMENT) {
+			if (first > UINTPTR_MAX - alignment)
+				continue;
+			first += alignment;
+		}
+		if (first > UINTPTR_MAX - capacity)
+			continue;
+		end = first + capacity;
+		if (end <= (uintptr_t)payload + block->capacity) {
+			aligned_payload = first;
+			break;
+		}
+	}
+	if (block == NULL) {
+		if (capacity > SIZE_MAX - alignment ||
+		    capacity + alignment > SIZE_MAX - block_header_size())
+			goto fail;
+		extension = capacity + alignment + block_header_size();
+		if (!extend_heap(heap, extension))
+			goto fail;
+		goto retry;
+	}
+
+	remove_free(heap, block);
+	payload = block_payload(block);
+	if (aligned_payload == (uintptr_t)payload) {
+		aligned_block = block;
+	} else {
+		struct heap_block *next = block->next_physical;
+		uint8_t *old_end = payload + block->capacity;
+
+		aligned_block = (struct heap_block *)(aligned_payload -
+		    block_header_size());
+		block->capacity = (size_t)((uint8_t *)aligned_block - payload);
+		block->next_physical = aligned_block;
+		aligned_block->magic = HEAP_MAGIC;
+		aligned_block->state = HEAP_FREE;
+		aligned_block->capacity = (size_t)(old_end -
+		    (uint8_t *)aligned_payload);
+		aligned_block->used = 0;
+		aligned_block->previous_physical = block;
+		aligned_block->next_physical = next;
+		aligned_block->previous_free = NULL;
+		aligned_block->next_free = NULL;
+		if (next != NULL)
+			next->previous_physical = aligned_block;
+		insert_free(heap, block);
+	}
+	(void)split_block(heap, aligned_block, capacity);
+	aligned_block->state = HEAP_USED;
+	aligned_block->used = requested;
+	heap->current_bytes += requested;
+	if (heap->current_bytes > heap->peak_bytes)
+		heap->peak_bytes = heap->current_bytes;
+	heap->successful_allocations++;
+	if (heap->observer != NULL)
+		heap->observer(heap->observer_context, block_payload(aligned_block),
+		    requested, ZEDBSD_HEAP_ALLOCATED);
+	return block_payload(aligned_block);
+
+fail:
+	if (requested > heap->largest_failed_allocation)
+		heap->largest_failed_allocation = requested;
+	return NULL;
+}
+
+void *
 heap_allocator_calloc(struct heap_allocator *heap, size_t count, size_t size)
 {
 	void *pointer;
@@ -573,6 +676,14 @@ void *heap_alloc_active(size_t size)
 	__libc_heap_unlock();
 	return result;
 }
+void *heap_aligned_alloc_active(size_t alignment, size_t size)
+{
+	void *result;
+	__libc_heap_lock();
+	result = heap_allocator_aligned_alloc(active_heap, alignment, size);
+	__libc_heap_unlock();
+	return result;
+}
 void *heap_calloc_active(size_t count, size_t size)
 {
 	void *result;
@@ -632,10 +743,38 @@ heap_strdup_active(const char *string)
 
 /* Standard names are real symbols; Noct's generated sources redefine these
  * locally and therefore cannot use global preprocessor aliases. */
-void *malloc(size_t size) { return heap_alloc_active(size); }
-void *calloc(size_t count, size_t size) { return heap_calloc_active(count, size); }
-void *realloc(void *pointer, size_t size)
+void *
+malloc(size_t size)
 {
-	return heap_realloc_active(pointer, size);
+	void *result = heap_alloc_active(size);
+
+	if (result == NULL && size != 0)
+		errno = ENOMEM;
+	return result;
 }
-void free(void *pointer) { heap_free_active(pointer); }
+
+void *
+calloc(size_t count, size_t size)
+{
+	void *result = heap_calloc_active(count, size);
+
+	if (result == NULL && count != 0 && size != 0)
+		errno = ENOMEM;
+	return result;
+}
+
+void *
+realloc(void *pointer, size_t size)
+{
+	void *result = heap_realloc_active(pointer, size);
+
+	if (result == NULL && size != 0)
+		errno = ENOMEM;
+	return result;
+}
+
+void
+free(void *pointer)
+{
+	heap_free_active(pointer);
+}

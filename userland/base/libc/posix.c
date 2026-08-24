@@ -3,6 +3,7 @@
 #include "libc/heap.h"
 #include "libc/stdio-internal.h"
 
+#include <zedbsd/auxv.h>
 #include <zedbsd/dirent.h>
 #include <zedbsd/fcntl.h>
 #include <zedbsd/console.h>
@@ -13,6 +14,7 @@
 #include <zedbsd/route.h>
 #include <zedbsd/rtld-abi.h>
 #include <dirent.h>
+#include <devctl.h>
 #include <aio.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -104,6 +106,7 @@ getopt(int argc, char *const argv[], const char *options)
 #define ENVIRONMENT_MAX 64U
 static char *environment_entries[ENVIRONMENT_MAX + 1U];
 static unsigned char environment_owned[ENVIRONMENT_MAX];
+static unsigned secure_execution;
 extern void __pthread_cancel_point(void) __attribute__((weak));
 extern void __pthread_fork_prepare(void) __attribute__((weak));
 extern void __pthread_fork_parent(void) __attribute__((weak));
@@ -168,6 +171,12 @@ char *getenv(const char *name)
 	 * the lifetime as lasting until its next environment operation. */
 	environment_value_replace(snapshot);
 	return snapshot;
+}
+
+char *
+secure_getenv(const char *name)
+{
+	return secure_execution ? NULL : getenv(name);
 }
 
 int setenv(const char *name, const char *value, int overwrite)
@@ -328,7 +337,30 @@ int openat(int dirfd, const char *path, int flags, ...)
 	return (int)call(ZEDBSD_SYS_openat, dirfd, (uintptr_t)path, flags,
 	    mode, 0, 0);
 }
-int close(int fd) { return (int)call(ZEDBSD_SYS_close, fd, 0, 0, 0, 0, 0); }
+int
+close(int fd)
+{
+	int result;
+
+	result = (int)call(ZEDBSD_SYS_close, fd, 0, 0, 0, 0, 0);
+	if (result < 0 && errno == EINTR)
+		errno = EINPROGRESS;
+	return result;
+}
+
+int
+posix_close(int fd, int flag)
+{
+	int result = close(fd);
+
+	if (result < 0 && errno == EINTR)
+		errno = EINPROGRESS;
+	if (result == 0 && flag != 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	return result;
+}
 int dup(int fd) { return (int)call(ZEDBSD_SYS_dup, fd, 0, 0, 0, 0, 0); }
 int dup2(int oldfd, int newfd) { return (int)call(ZEDBSD_SYS_dup2, oldfd, newfd, 0, 0, 0, 0); }
 int dup3(int oldfd, int newfd, int flags) { return (int)call(ZEDBSD_SYS_dup3, oldfd, newfd, flags, 0, 0, 0); }
@@ -340,6 +372,7 @@ int fcntl(int fd, int command, ...)
 	struct flock *native = NULL;
 	struct flock_record request;
 	if (command == F_DUPFD || command == F_DUPFD_CLOEXEC ||
+	    command == F_DUPFD_CLOFORK ||
 	    command == F_SETFD || command == F_SETFL || command == F_SETOWN) {
 		va_start(ap, command);
 		argument = va_arg(ap, int);
@@ -347,7 +380,8 @@ int fcntl(int fd, int command, ...)
 	} else if (command == F_GETOWN) {
 		argument = (intptr_t)&owner_result;
 	} else if (command == F_GETLK || command == F_SETLK ||
-	    command == F_SETLKW) {
+	    command == F_SETLKW || command == F_OFD_GETLK ||
+	    command == F_OFD_SETLK || command == F_OFD_SETLKW) {
 		va_start(ap, command);
 		native = va_arg(ap, struct flock *);
 		va_end(ap);
@@ -363,7 +397,8 @@ int fcntl(int fd, int command, ...)
 	{
 		int result = (int)call(ZEDBSD_SYS_fcntl, fd, command, argument,
 		    0, 0, 0);
-		if (result == 0 && command == F_GETLK) {
+		if (result == 0 &&
+		    (command == F_GETLK || command == F_OFD_GETLK)) {
 			native->l_type = request.type;
 			native->l_whence = request.whence;
 			native->l_start = (off_t)request.start;
@@ -459,6 +494,27 @@ int ioctl(int fd, unsigned long request, ...) {
 }
 
 int
+posix_devctl(int descriptor, int command, void *restrict data, size_t size,
+    int *restrict information)
+{
+	unsigned long request = (unsigned int)command;
+	size_t command_size = (request >> 16) & 0x1fffUL;
+	intptr_t result;
+
+	if (size > 0x1fffU || (command_size != 0 && size < command_size))
+		return EINVAL;
+	cancel_point();
+	result = __syscall6(ZEDBSD_SYS_ioctl, (uintptr_t)descriptor, request,
+	    (uintptr_t)data, 0, 0, 0);
+	cancel_point();
+	if (result < 0 && result >= -4095)
+		return result == -EOPNOTSUPP ? ENOTTY : (int)-result;
+	if (information != NULL)
+		*information = (int)result;
+	return 0;
+}
+
+int
 sysctl(const int *name, unsigned int namelen, void *oldp, size_t *oldlenp,
 	const void *newp, size_t newlen)
 {
@@ -543,6 +599,7 @@ long sysconf(int name) {
 	case _SC_SHARED_MEMORY_OBJECTS: return _POSIX_SHARED_MEMORY_OBJECTS;
 	case _SC_SEMAPHORES: return _POSIX_SEMAPHORES;
 	case _SC_MESSAGE_PASSING: return _POSIX_MESSAGE_PASSING;
+	case _SC_DEVICE_CONTROL: return _POSIX_DEVICE_CONTROL;
 	case _SC_VERSION: return _POSIX_VERSION;
 	case _SC_2_VERSION: return _POSIX2_VERSION;
 	case _SC_ARG_MAX: return ARG_MAX;
@@ -585,6 +642,7 @@ static long path_limit(int name) {
 	case _PC_CHOWN_RESTRICTED: return 1;
 	case _PC_NO_TRUNC: return 1;
 	case _PC_VDISABLE: return 0xff;
+	case _PC_TEXTDOMAIN_MAX: return TEXTDOMAIN_MAX;
 	default: errno = EINVAL; return -1;
 	}
 }
@@ -918,7 +976,13 @@ int setrlimit(int resource, const struct rlimit *limit)
 	return (int)call(ZEDBSD_SYS_setrlimit, resource, (uintptr_t)&wire,
 	    0, 0, 0, 0);
 }
-enum { SPAWN_ACTION_CLOSE = 1, SPAWN_ACTION_DUP2, SPAWN_ACTION_OPEN };
+enum {
+	SPAWN_ACTION_CLOSE = 1,
+	SPAWN_ACTION_DUP2,
+	SPAWN_ACTION_OPEN,
+	SPAWN_ACTION_CHDIR,
+	SPAWN_ACTION_FCHDIR,
+};
 int posix_spawn_file_actions_init(posix_spawn_file_actions_t *actions)
 { if (actions == NULL) return EINVAL; memset(actions, 0, sizeof(*actions)); return 0; }
 int posix_spawn_file_actions_destroy(posix_spawn_file_actions_t *actions)
@@ -932,6 +996,45 @@ int posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t *actions, int fd
 int posix_spawn_file_actions_addopen(posix_spawn_file_actions_t *actions,
 	int fd, const char *path, int flags, mode_t mode)
 { struct __spawn_action *a; size_t n; if (fd < 0 || path == NULL) return EINVAL; n = strlen(path); if (n >= ZEDBSD_SPAWN_PATH_MAX) return ENAMETOOLONG; a = spawn_action_add(actions); if (a == NULL) return EINVAL; memset(a, 0, sizeof(*a)); a->operation = SPAWN_ACTION_OPEN; a->descriptor = fd; a->flags = flags; a->mode = mode; memcpy(a->path, path, n + 1U); return 0; }
+int
+posix_spawn_file_actions_addchdir(posix_spawn_file_actions_t *actions,
+	const char *path)
+{
+	struct __spawn_action *action;
+	size_t length;
+
+	if (actions == NULL || path == NULL)
+		return EINVAL;
+	length = strlen(path);
+	if (length >= ZEDBSD_SPAWN_PATH_MAX)
+		return ENAMETOOLONG;
+	action = spawn_action_add(actions);
+	if (action == NULL)
+		return EINVAL;
+	memset(action, 0, sizeof(*action));
+	action->operation = SPAWN_ACTION_CHDIR;
+	memcpy(action->path, path, length + 1U);
+	return 0;
+}
+
+int
+posix_spawn_file_actions_addfchdir(posix_spawn_file_actions_t *actions,
+	int descriptor)
+{
+	struct __spawn_action *action;
+
+	if (actions == NULL)
+		return EINVAL;
+	if (descriptor < 0)
+		return EBADF;
+	action = spawn_action_add(actions);
+	if (action == NULL)
+		return EINVAL;
+	memset(action, 0, sizeof(*action));
+	action->operation = SPAWN_ACTION_FCHDIR;
+	action->descriptor = descriptor;
+	return 0;
+}
 int posix_spawnattr_init(posix_spawnattr_t *attr)
 { if (attr == NULL) return EINVAL; memset(attr, 0, sizeof(*attr)); return 0; }
 int posix_spawnattr_destroy(posix_spawnattr_t *attr)
@@ -939,7 +1042,7 @@ int posix_spawnattr_destroy(posix_spawnattr_t *attr)
 int posix_spawnattr_getflags(const posix_spawnattr_t *attr, short *flags)
 { if (attr == NULL || flags == NULL) return EINVAL; *flags = attr->flags; return 0; }
 int posix_spawnattr_setflags(posix_spawnattr_t *attr, short flags)
-{ if (attr == NULL || (flags & ~(POSIX_SPAWN_RESETIDS | POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK)) != 0) return EINVAL; attr->flags = flags; return 0; }
+{ if (attr == NULL || (flags & ~(POSIX_SPAWN_RESETIDS | POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSID)) != 0) return EINVAL; attr->flags = flags; return 0; }
 int posix_spawnattr_getpgroup(const posix_spawnattr_t *attr, pid_t *pgroup)
 { if (attr == NULL || pgroup == NULL) return EINVAL; *pgroup = attr->pgroup; return 0; }
 int posix_spawnattr_setpgroup(posix_spawnattr_t *attr, pid_t pgroup)
@@ -973,6 +1076,8 @@ static int spawn_child_setup(const posix_spawn_file_actions_t *actions,
 	if (attr != NULL) {
 		if ((attr->flags & POSIX_SPAWN_RESETIDS) != 0 &&
 		    (setegid(getgid()) != 0 || seteuid(getuid()) != 0)) return errno;
+		if ((attr->flags & POSIX_SPAWN_SETSID) != 0 && setsid() < 0)
+			return errno;
 		if ((attr->flags & POSIX_SPAWN_SETPGROUP) != 0 &&
 		    setpgid(0, attr->pgroup) != 0) return errno;
 		if ((attr->flags & POSIX_SPAWN_SETSIGMASK) != 0 &&
@@ -998,67 +1103,141 @@ static int spawn_child_setup(const posix_spawn_file_actions_t *actions,
 			if (fd < 0) return errno;
 			if (fd != a->descriptor && dup2(fd, a->descriptor) < 0) { int e = errno; (void)close(fd); return e; }
 			if (fd != a->descriptor) (void)close(fd);
+		} else if (a->operation == SPAWN_ACTION_CHDIR) {
+			if (chdir(a->path) != 0)
+				return errno;
+		} else if (a->operation == SPAWN_ACTION_FCHDIR) {
+			if (fchdir(a->descriptor) != 0)
+				return errno;
 		} else return EINVAL;
 	}
 	return 0;
 }
-int posix_spawn(pid_t *result, const char *path,
-	const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr,
-	char *const argv[], char *const envp[])
+static const char *
+spawn_environment_path(char *const environment[])
 {
+	unsigned index;
+
+	if (environment != NULL)
+		for (index = 0; environment[index] != NULL; index++)
+			if (strncmp(environment[index], "PATH=", 5) == 0)
+				return environment[index] + 5;
+	return "/bin:/usr/bin";
+}
+
+static int
+spawn_exec_search(const char *file, char *const argv[],
+	char *const environment[])
+{
+	const char *path, *at;
+	char candidate[PATH_MAX];
+	int saw_access_error = 0;
+
+	if (file == NULL || *file == '\0') {
+		errno = ENOENT;
+		return -1;
+	}
+	if (strchr(file, '/') != NULL)
+		return execve(file, argv, environment);
+	path = spawn_environment_path(environment);
+	for (at = path;;) {
+		const char *colon = strchr(at, ':');
+		size_t directory_length = colon != NULL ?
+		    (size_t)(colon - at) : strlen(at);
+		size_t file_length = strlen(file);
+
+		if (directory_length + file_length + 2U <= sizeof(candidate)) {
+			if (directory_length != 0)
+				memcpy(candidate, at, directory_length);
+			else {
+				candidate[0] = '.';
+				directory_length = 1;
+			}
+			candidate[directory_length] = '/';
+			memcpy(candidate + directory_length + 1U, file,
+			    file_length + 1U);
+			execve(candidate, argv, environment);
+			if (errno == EACCES)
+				saw_access_error = 1;
+			else if (errno != ENOENT && errno != ENOTDIR)
+				return -1;
+		}
+		if (colon == NULL)
+			break;
+		at = colon + 1;
+	}
+	errno = saw_access_error ? EACCES : ENOENT;
+	return -1;
+}
+
+static int
+posix_spawn_common(pid_t *result, const char *path,
+	const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr,
+	char *const argv[], char *const envp[], int search)
+{
+	char *const *environment = envp != NULL ? envp : environ;
 	int error_pipe[2], child_error = 0;
 	ssize_t count;
 	pid_t child;
-	if (result == NULL || path == NULL || argv == NULL) return EINVAL;
-	if (pipe2(error_pipe, O_CLOEXEC) != 0) return errno;
+
+	if (result == NULL || path == NULL || argv == NULL)
+		return EINVAL;
+	if (pipe2(error_pipe, O_CLOEXEC) != 0)
+		return errno;
 	child = fork();
-	if (child < 0) { child_error = errno; (void)close(error_pipe[0]); (void)close(error_pipe[1]); return child_error; }
+	if (child < 0) {
+		child_error = errno;
+		(void)close(error_pipe[0]);
+		(void)close(error_pipe[1]);
+		return child_error;
+	}
 	if (child == 0) {
 		(void)close(error_pipe[0]);
 		child_error = spawn_child_setup(actions, attr);
 		if (child_error == 0) {
-			execve(path, argv, envp != NULL ? envp : environ);
+			if (search)
+				(void)spawn_exec_search(path, argv,
+				    (char *const *)environment);
+			else
+				(void)execve(path, argv,
+				    (char *const *)environment);
 			child_error = errno;
 		}
 		(void)write(error_pipe[1], &child_error, sizeof(child_error));
 		_exit(127);
 	}
 	(void)close(error_pipe[1]);
-	count = read(error_pipe[0], &child_error, sizeof(child_error));
+	do {
+		count = read(error_pipe[0], &child_error, sizeof(child_error));
+	} while (count < 0 && errno == EINTR);
 	(void)close(error_pipe[0]);
-	if (count > 0) { (void)waitpid(child, NULL, 0); return child_error != 0 ? child_error : EIO; }
-	if (count < 0) { child_error = errno; (void)waitpid(child, NULL, 0); return child_error; }
+	if (count > 0) {
+		(void)waitpid(child, NULL, 0);
+		return child_error != 0 ? child_error : EIO;
+	}
+	if (count < 0) {
+		child_error = errno;
+		(void)waitpid(child, NULL, 0);
+		return child_error;
+	}
 	*result = child;
 	return 0;
 }
-int posix_spawnp(pid_t *result, const char *file,
+
+int
+posix_spawn(pid_t *result, const char *path,
 	const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr,
 	char *const argv[], char *const envp[])
 {
-	const char *path, *at;
-	char candidate[PATH_MAX];
-	if (file == NULL) return EINVAL;
-	if (strchr(file, '/') != NULL)
-		return posix_spawn(result, file, actions, attr, argv, envp);
-	path = getenv("PATH");
-	if (path == NULL || *path == '\0') path = "/bin:/usr/bin";
-	at = path;
-	for (;;) {
-		const char *colon = strchr(at, ':');
-		size_t directory_length = colon != NULL ? (size_t)(colon - at) : strlen(at);
-		size_t file_length = strlen(file);
-		if (directory_length + file_length + 2U <= sizeof(candidate)) {
-			if (directory_length != 0) memcpy(candidate, at, directory_length);
-			else { candidate[0] = '.'; directory_length = 1; }
-			candidate[directory_length] = '/';
-			memcpy(candidate + directory_length + 1U, file, file_length + 1U);
-			if (access(candidate, X_OK) == 0)
-				return posix_spawn(result, candidate, actions, attr, argv, envp);
-		}
-		if (colon == NULL) break;
-		at = colon + 1;
-	}
-	return ENOENT;
+	return posix_spawn_common(result, path, actions, attr, argv, envp, 0);
+}
+
+int
+posix_spawnp(pid_t *result, const char *file,
+	const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr,
+	char *const argv[], char *const envp[])
+{
+	return posix_spawn_common(result, file, actions, attr, argv, envp, 1);
 }
 pid_t fork(void) {
 	pid_t result;
@@ -1076,6 +1255,17 @@ pid_t fork(void) {
 		__pthread_fork_parent();
 	}
 	return result;
+}
+
+pid_t
+_Fork(void)
+{
+	/*
+	 * The kernel primitive already has fork semantics.  In contrast to
+	 * fork(), this async-signal-safe entry deliberately runs neither user
+	 * pthread_atfork handlers nor libc's pthread child recovery hooks.
+	 */
+	return (pid_t)call(ZEDBSD_SYS_fork, 0, 0, 0, 0, 0, 0);
 }
 int execve(const char *path, char *const argv[], char *const envp[]) {
 	return (int)call(ZEDBSD_SYS_execve, (uintptr_t)path, (uintptr_t)argv,
@@ -1217,8 +1407,10 @@ int setpgid(pid_t pid, pid_t pgid) { return (int)call(ZEDBSD_SYS_setpgid, pid, p
 pid_t setsid(void) { return (pid_t)call(ZEDBSD_SYS_setsid, 0, 0, 0, 0, 0, 0); }
 pid_t getsid(pid_t pid) { return (pid_t)call(ZEDBSD_SYS_getsid, pid, 0, 0, 0, 0, 0); }
 uid_t getuid(void) { return (uid_t)call(ZEDBSD_SYS_getuid, 0, 0, 0, 0, 0, 0); }
+int getresuid(uid_t *real, uid_t *effective, uid_t *saved) { return (int)call(ZEDBSD_SYS_getresuid, (uintptr_t)real, (uintptr_t)effective, (uintptr_t)saved, 0, 0, 0); }
 uid_t geteuid(void) { return (uid_t)call(ZEDBSD_SYS_geteuid, 0, 0, 0, 0, 0, 0); }
 gid_t getgid(void) { return (gid_t)call(ZEDBSD_SYS_getgid, 0, 0, 0, 0, 0, 0); }
+int getresgid(gid_t *real, gid_t *effective, gid_t *saved) { return (int)call(ZEDBSD_SYS_getresgid, (uintptr_t)real, (uintptr_t)effective, (uintptr_t)saved, 0, 0, 0); }
 gid_t getegid(void) { return (gid_t)call(ZEDBSD_SYS_getegid, 0, 0, 0, 0, 0, 0); }
 int getgroups(int count, gid_t groups[]) { return (int)call(ZEDBSD_SYS_getgroups, count, (uintptr_t)groups, 0, 0, 0, 0); }
 int setuid(uid_t id) { return (int)call(ZEDBSD_SYS_setuid, id, 0, 0, 0, 0, 0); }
@@ -1227,7 +1419,9 @@ int setgid(gid_t id) { return (int)call(ZEDBSD_SYS_setgid, id, 0, 0, 0, 0, 0); }
 int setegid(gid_t id) { return (int)call(ZEDBSD_SYS_setegid, id, 0, 0, 0, 0, 0); }
 int setgroups(size_t count, const gid_t groups[]) { return (int)call(ZEDBSD_SYS_setgroups, count, (uintptr_t)groups, 0, 0, 0, 0); }
 int setreuid(uid_t real, uid_t effective) { return (int)call(ZEDBSD_SYS_setreuid, real, effective, 0, 0, 0, 0); }
+int setresuid(uid_t real, uid_t effective, uid_t saved) { return (int)call(ZEDBSD_SYS_setresuid, real, effective, saved, 0, 0, 0); }
 int setregid(gid_t real, gid_t effective) { return (int)call(ZEDBSD_SYS_setregid, real, effective, 0, 0, 0, 0); }
+int setresgid(gid_t real, gid_t effective, gid_t saved) { return (int)call(ZEDBSD_SYS_setresgid, real, effective, saved, 0, 0, 0); }
 
 int stat(const char *path, struct stat *status) { return (int)call(ZEDBSD_SYS_stat, (uintptr_t)path, (uintptr_t)status, 0, 0, 0, 0); }
 int lstat(const char *path, struct stat *status) { return (int)call(ZEDBSD_SYS_lstat, (uintptr_t)path, (uintptr_t)status, 0, 0, 0, 0); }
@@ -1273,6 +1467,12 @@ int gethostname(char *buffer, size_t size)
 		return -1;
 	buffer[size - 1U] = '\0';
 	return 0;
+}
+int
+getentropy(void *buffer, size_t length)
+{
+	return (int)call(ZEDBSD_SYS_getentropy, (uintptr_t)buffer, length,
+	    0, 0, 0, 0);
 }
 int sethostname(const char *name, size_t length)
 {
@@ -1322,6 +1522,69 @@ int fileno(void *stream) {
 }
 
 struct __dir_stream { int fd; struct dirent current; };
+
+ssize_t
+posix_getdents(int fd, void *buffer, size_t size, int flags)
+{
+	const size_t alignment = _Alignof(struct posix_dent);
+	const size_t name_offset = offsetof(struct posix_dent, d_name);
+	const size_t maximum_record =
+	    (name_offset + NAME_MAX + 1U + alignment - 1U) & ~(alignment - 1U);
+	unsigned char *next = buffer;
+	size_t remaining = size;
+	size_t written = 0;
+	int single_probe = remaining < maximum_record;
+
+	if (flags != 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if ((buffer == NULL && size != 0U) ||
+	    ((uintptr_t)buffer & (alignment - 1U)) != 0U) {
+		errno = EFAULT;
+		return -1;
+	}
+
+	for (;;) {
+		struct dirent_record source;
+		struct posix_dent *destination;
+		size_t name_length;
+		size_t record_length;
+		intptr_t result;
+
+		result = call(ZEDBSD_SYS_getdents, fd, (uintptr_t)&source,
+		    sizeof(source), 0, 0, 0);
+		if (result < 0)
+			return written != 0U ? (ssize_t)written : -1;
+		if (result == 0)
+			break;
+
+		name_length = strnlen(source.d_name, NAME_MAX);
+		record_length = (name_offset + name_length + 1U + alignment - 1U) &
+		    ~(alignment - 1U);
+		if (record_length > remaining) {
+			errno = EINVAL;
+			return written != 0U ? (ssize_t)written : -1;
+		}
+		destination = (struct posix_dent *)(void *)next;
+		destination->d_ino = source.d_ino;
+		destination->d_reclen = (reclen_t)record_length;
+		destination->d_type = (unsigned char)source.d_type;
+		memcpy(destination->d_name, source.d_name, name_length);
+		destination->d_name[name_length] = '\0';
+		if (record_length > name_offset + name_length + 1U)
+			memset(next + name_offset + name_length + 1U, 0,
+			    record_length - name_offset - name_length - 1U);
+
+		next += record_length;
+		remaining -= record_length;
+		written += record_length;
+		if (single_probe || remaining < maximum_record)
+			break;
+	}
+	return (ssize_t)written;
+}
+
 DIR *opendir(const char *path)
 {
 	DIR *directory = malloc(sizeof(*directory));
@@ -2412,8 +2675,25 @@ static size_t user_heap_grow(void *context, void *end, size_t minimum)
 void __libc_init(int argc, char **argv, char **envp)
 {
 	#define USER_HEAP_INITIAL (64U * 1024U)
+	uintptr_t *auxiliary;
+	char **environment_end;
 	void *arena;
 	size_t env_count;
+	unsigned auxiliary_count;
+
+	environment_end = envp;
+	while (environment_end != NULL && *environment_end != NULL)
+		environment_end++;
+	auxiliary = environment_end != NULL ?
+	    (uintptr_t *)(environment_end + 1) : NULL;
+	secure_execution = 0;
+	for (auxiliary_count = 0; auxiliary != NULL && auxiliary_count < 64U;
+	    auxiliary_count++, auxiliary += 2) {
+		if (auxiliary[0] == AT_NULL)
+			break;
+		if (auxiliary[0] == AT_SECURE)
+			secure_execution = auxiliary[1] != 0;
+	}
 	if (argc > 0 && argv != NULL)
 		setprogname(argv[0]);
 	for (env_count = 0; env_count < ENVIRONMENT_MAX && envp != NULL &&

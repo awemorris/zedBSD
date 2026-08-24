@@ -27,6 +27,21 @@ void usync_init(void)
 	}
 }
 
+void
+usync_realtime_changed(void)
+{
+	struct usync_bucket *bucket;
+	unsigned long irq;
+	unsigned i;
+
+	for (i = 0; i < USYNC_BUCKETS; i++) {
+		bucket = &buckets[i];
+		irq = spin_lock_irqsave(&bucket->lock);
+		waitq_wake_all(&bucket->waiters);
+		spin_unlock_irqrestore(&bucket->lock, irq);
+	}
+}
+
 int
 usync_wait(uintptr_t address, uint32_t expected, uintptr_t process_key,
 	uintptr_t key_offset, uint64_t deadline, int cancelable)

@@ -17,6 +17,12 @@
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
+#define SEEK_DATA 3
+#define SEEK_HOLE 4
+
+/* zedBSD closes the descriptor before completing the close operation. */
+#define POSIX_CLOSE_RESTART 0
+
 #define _SC_PAGE_SIZE 1
 #define _SC_PAGESIZE _SC_PAGE_SIZE
 #define _SC_OPEN_MAX 2
@@ -48,6 +54,7 @@
 #define _SC_XOPEN_UNIX 28
 #define _SC_RTSIG_MAX 29
 #define _SC_SIGQUEUE_MAX 30
+#define _SC_DEVICE_CONTROL 31
 
 #define _PC_LINK_MAX 1
 #define _PC_MAX_CANON 2
@@ -58,6 +65,7 @@
 #define _PC_CHOWN_RESTRICTED 7
 #define _PC_NO_TRUNC 8
 #define _PC_VDISABLE 9
+#define _PC_TEXTDOMAIN_MAX 10
 
 #define _CS_PATH 1
 
@@ -72,6 +80,7 @@ int pause(void);
 char *getlogin(void);
 int getlogin_r(char *, size_t);
 int gethostname(char *, size_t);
+int getentropy(void *buffer, size_t length);
 int sethostname(const char *, size_t);
 char *ttyname(int);
 int ttyname_r(int, char *, size_t);
@@ -96,13 +105,14 @@ ssize_t readlinkat(int, const char *, char *, size_t);
 int truncate(const char *, off_t);
 int ftruncate(int, off_t);
 int close(int);
+int posix_close(int, int);
 int dup(int);
 int dup2(int, int);
 int dup3(int, int, int);
 int pipe(int [2]);
 int pipe2(int [2], int);
 off_t lseek(int, off_t, int);
-void _exit(int) __attribute__((noreturn));
+void _exit(int) __attribute__((__noreturn__));
 int brk(void *address);
 void *sbrk(intptr_t increment);
 long sysconf(int name);
@@ -110,6 +120,7 @@ long pathconf(const char *, int);
 long fpathconf(int, int);
 size_t confstr(int, char *, size_t);
 pid_t fork(void);
+pid_t _Fork(void);
 unsigned alarm(unsigned);
 int execl(const char *, const char *, ...);
 int execle(const char *, const char *, ...);
@@ -131,8 +142,10 @@ int setpgrp(void);
 pid_t setsid(void);
 pid_t getsid(pid_t);
 uid_t getuid(void);
+int getresuid(uid_t *real, uid_t *effective, uid_t *saved);
 uid_t geteuid(void);
 gid_t getgid(void);
+int getresgid(gid_t *real, gid_t *effective, gid_t *saved);
 gid_t getegid(void);
 int getgroups(int, gid_t []);
 int setuid(uid_t);
@@ -141,7 +154,9 @@ int setgid(gid_t);
 int setegid(gid_t);
 int setgroups(size_t, const gid_t []);
 int setreuid(uid_t, uid_t);
+int setresuid(uid_t real, uid_t effective, uid_t saved);
 int setregid(gid_t, gid_t);
+int setresgid(gid_t real, gid_t effective, gid_t saved);
 int chown(const char *, uid_t, gid_t);
 int fchown(int, uid_t, gid_t);
 int lchown(const char *, uid_t, gid_t);

@@ -28,6 +28,10 @@ record_lock_release_process_inode(
 	struct inode *inode);
 
 void
+record_lock_release_file(
+	struct file *file);
+
+void
 record_lock_inode_destroy(
 	struct inode *inode);
 

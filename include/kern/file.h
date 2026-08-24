@@ -34,6 +34,14 @@
 #define O_NOFOLLOW	0x40000
 #endif
 
+/* Public lseek() whence values used by the kernel implementation. */
+#ifndef SEEK_DATA
+#define SEEK_DATA	3
+#endif
+#ifndef SEEK_HOLE
+#define SEEK_HOLE	4
+#endif
+
 #define FILE_IO_LOOP_BACKING	0x00000001U
 #define FILE_IO_VM_OBJECT	0x00000002U
 #define FILE_IO_INODE_IO_OWNED	0x00000004U
@@ -176,6 +184,11 @@ struct file {
 	const struct file_ops *f_ops;
 	off_t f_offset;
 	atomic_uint_t f_flags;
+	/*
+	 * F_SETOWN state for asynchronous-I/O signal delivery.  The fcntl
+	 * interface validates and preserves the owner now; device and socket
+	 * O_ASYNC/SIGIO/SIGURG producers are a separate implementation step.
+	 */
 	volatile int f_signal_owner;
 	refcount_t f_refs;
 	struct mutex f_lock;

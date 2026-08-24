@@ -342,7 +342,7 @@ pipe_create(int flags, struct file **read_file, struct file **write_file)
 	int error;
 
 	if (read_file == NULL || write_file == NULL ||
-	    (flags & ~(O_NONBLOCK | O_CLOEXEC)) != 0)
+	    (flags & ~(O_NONBLOCK | O_CLOEXEC | O_CLOFORK)) != 0)
 		return EINVAL;
 	pipe = pipe_allocate(2);
 	if (pipe == NULL)

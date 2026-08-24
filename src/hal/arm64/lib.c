@@ -58,3 +58,5 @@ void hal_assert(const char *f, int l, const char *e)
 { hal_printf("assert: %s:%u: %s\n", f, (uint32_t)l, e); arm64_irq_mask(); for (;;) arm64_wfe(); }
 void hal_fatal(const char *f, int l, const char *s)
 { hal_printf("fatal: %s:%u: %s\n", f, (uint32_t)l, s); arm64_irq_mask(); for (;;) arm64_wfe(); }
+bool hal_entropy_fill(void *buffer, size_t size)
+{ (void)buffer; (void)size; return false; }

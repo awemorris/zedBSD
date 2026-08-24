@@ -1,6 +1,7 @@
 /* SUSv4 file tree walking interface. SPDX-License-Identifier: Zlib */
 #ifndef ZEDBSD_FTW_H
 #define ZEDBSD_FTW_H
+#include <zedbsd/features.h>
 #include <sys/stat.h>
 
 #define FTW_F 0
@@ -17,7 +18,9 @@
 #define FTW_CHDIR 0x08
 
 struct FTW { int base; int level; };
+#if __ZEDBSD_LEGACY_VISIBLE
 int ftw(const char *, int (*)(const char *, const struct stat *, int), int);
+#endif
 int nftw(const char *, int (*)(const char *, const struct stat *, int,
     struct FTW *), int, int);
 #endif

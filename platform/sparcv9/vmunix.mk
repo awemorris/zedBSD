@@ -22,7 +22,8 @@ SPARCV9_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
 SPARCV9_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias -mcmodel=medany \
 	-msoft-float -mno-app-regs -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables \
-	-fno-unwind-tables -fno-common -Os -Wall -Wextra -Werror
+	-fno-unwind-tables -fno-common -ffunction-sections -fdata-sections \
+	-Os -Wall -Wextra -Werror
 
 SPARCV9_EARLY_SOURCES := src/hal/sparcv9/locore.S \
 	src/hal/sparcv9/trap-table.S src/hal/sparcv9/trap-entry.S \

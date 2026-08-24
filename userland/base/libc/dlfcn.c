@@ -7,6 +7,7 @@ extern void *__rtld_dlopen(const char *, int) __attribute__((weak));
 extern void *__rtld_dlsym(void *, const char *) __attribute__((weak));
 extern void *__rtld_dlvsym(void *, const char *, const char *)
     __attribute__((weak));
+extern int __rtld_dladdr(const void *, Dl_info *) __attribute__((weak));
 extern int __rtld_dlclose(void *) __attribute__((weak));
 extern char *__rtld_dlerror(void) __attribute__((weak));
 #endif
@@ -56,6 +57,20 @@ dlsym(void *handle, const char *name)
 	(void)handle;
 	(void)name;
 	static_error_pending = 1;
+	return 0;
+#endif
+}
+
+int
+dladdr(const void *address, Dl_info *information)
+{
+#if defined(ZEDBSD_DYNAMIC_LIBC)
+	return __rtld_exports.dladdr(address, information);
+#else
+	if (__rtld_dladdr != 0)
+		return __rtld_dladdr(address, information);
+	(void)address;
+	(void)information;
 	return 0;
 #endif
 }

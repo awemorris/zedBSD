@@ -25,12 +25,19 @@ static uintptr_t cancelable_flag(void)
 }
 
 static int
-sem_usync_wait(sem_t *sem, const struct timespec *timeout)
+sem_usync_wait(sem_t *sem, const struct timespec *timeout, clockid_t clock)
 {
+	uintptr_t timeout_flags = 0;
+
+	if (timeout != NULL) {
+		timeout_flags = ZEDBSD_USYNC_ABSTIME;
+		if (clock == CLOCK_REALTIME)
+			timeout_flags |= ZEDBSD_USYNC_CLOCK_REALTIME;
+	}
 	intptr_t result = syscall_result(__syscall6(ZEDBSD_SYS_usync,
 	    (uintptr_t)&sem->value, ZEDBSD_USYNC_WAIT, 0, (uintptr_t)timeout,
 	    0, (sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE) |
-	    cancelable_flag()));
+	    cancelable_flag() | timeout_flags));
 	return result < 0 ? -1 : 0;
 }
 
@@ -99,55 +106,24 @@ sem_trywait(sem_t *sem)
 }
 
 static int
-sem_relative_deadline(const struct timespec *absolute,
-	struct timespec *relative)
+sem_wait_common(sem_t *sem, clockid_t clock,
+	const struct timespec *absolute)
 {
-	struct timespec now;
-
-	if (absolute->tv_nsec < 0 || absolute->tv_nsec >= 1000000000L) {
+	cancel_point();
+	if (absolute != NULL &&
+	    (clock != CLOCK_REALTIME && clock != CLOCK_MONOTONIC)) {
 		errno = EINVAL;
 		return -1;
 	}
-	if (clock_gettime(CLOCK_REALTIME, &now) != 0)
-		return -1;
-	if (absolute->tv_sec < now.tv_sec ||
-	    (absolute->tv_sec == now.tv_sec &&
-	    absolute->tv_nsec <= now.tv_nsec)) {
-		errno = ETIMEDOUT;
-		return -1;
-	}
-	relative->tv_sec = absolute->tv_sec - now.tv_sec;
-	relative->tv_nsec = absolute->tv_nsec - now.tv_nsec;
-	if (relative->tv_nsec < 0) {
-		relative->tv_sec--;
-		relative->tv_nsec += 1000000000L;
-	}
-	return 0;
-}
-
-static int
-sem_wait_common(sem_t *sem, const struct timespec *absolute)
-{
-	cancel_point();
 	for (;;) {
-		struct timespec relative;
-		const struct timespec *timeout = NULL;
-
 		if (sem_trywait(sem) == 0) {
 			cancel_point();
 			return 0;
 		}
 		if (errno != EAGAIN)
 			return -1;
-		/* Recompute after every collision/spurious wake.  The kernel timeout is
-		 * relative, while sem_timedwait's public deadline is absolute. */
-		if (absolute != NULL) {
-			if (sem_relative_deadline(absolute, &relative) != 0)
-				return -1;
-			timeout = &relative;
-		}
 		__atomic_add_fetch(&sem->waiters, 1, __ATOMIC_RELAXED);
-		if (sem_usync_wait(sem, timeout) != 0) {
+		if (sem_usync_wait(sem, absolute, clock) != 0) {
 			int saved_errno = errno;
 
 			__atomic_sub_fetch(&sem->waiters, 1, __ATOMIC_RELAXED);
@@ -170,13 +146,23 @@ sem_wait_common(sem_t *sem, const struct timespec *absolute)
 	}
 }
 
-int sem_wait(sem_t *sem) { return sem_wait_common(sem, NULL); }
+int sem_wait(sem_t *sem) { return sem_wait_common(sem, CLOCK_REALTIME, NULL); }
 
 int
 sem_timedwait(sem_t *sem, const struct timespec *absolute)
 {
 	if (absolute == NULL) { errno = EINVAL; return -1; }
-	return sem_wait_common(sem, absolute);
+	return sem_wait_common(sem, CLOCK_REALTIME, absolute);
+}
+
+int
+sem_clockwait(sem_t *sem, clockid_t clock, const struct timespec *absolute)
+{
+	if (absolute == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	return sem_wait_common(sem, clock, absolute);
 }
 
 int

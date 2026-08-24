@@ -28,6 +28,16 @@ main(void)
 	memset(temporary, 0xa5, 128);
 	assert(heap_allocator_current(&kernel_heap) == 64);
 	assert(heap_allocator_current(&noct_heap) == 128);
+	{
+		void *aligned = heap_aligned_alloc_active(256, 512);
+
+		assert(aligned != NULL);
+		assert(((uintptr_t)aligned & 255U) == 0);
+		memset(aligned, 0x5a, 512);
+		assert(heap_allocator_validate(&noct_heap));
+		heap_free_active(aligned);
+		assert(heap_allocator_validate(&noct_heap));
+	}
 
 	heap_allocator_reset(&noct_heap);
 	assert(heap_allocator_current(&noct_heap) == 0);

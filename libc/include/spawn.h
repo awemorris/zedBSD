@@ -10,6 +10,7 @@
 #define POSIX_SPAWN_SETPGROUP  0x0002
 #define POSIX_SPAWN_SETSIGDEF  0x0004
 #define POSIX_SPAWN_SETSIGMASK 0x0008
+#define POSIX_SPAWN_SETSID      0x0010
 
 #define ZEDBSD_SPAWN_ACTION_MAX 16
 #define ZEDBSD_SPAWN_PATH_MAX 256
@@ -42,6 +43,9 @@ int posix_spawn_file_actions_addclose(posix_spawn_file_actions_t *, int);
 int posix_spawn_file_actions_adddup2(posix_spawn_file_actions_t *, int, int);
 int posix_spawn_file_actions_addopen(posix_spawn_file_actions_t *, int,
 	const char *, int, mode_t);
+int posix_spawn_file_actions_addchdir(posix_spawn_file_actions_t *,
+	const char *);
+int posix_spawn_file_actions_addfchdir(posix_spawn_file_actions_t *, int);
 int posix_spawnattr_init(posix_spawnattr_t *);
 int posix_spawnattr_destroy(posix_spawnattr_t *);
 int posix_spawnattr_getflags(const posix_spawnattr_t *, short *);

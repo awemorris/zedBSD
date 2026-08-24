@@ -227,6 +227,38 @@ hal_fatal(const char *file, int line, const char *s)
 		asm_hlt();
 }
 
+bool
+hal_entropy_fill(void *buffer, size_t size)
+{
+	uint8_t *bytes = buffer;
+	uint32_t eax = 1;
+	uint32_t ebx, ecx, edx;
+
+	__asm__ volatile("cpuid"
+	    : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
+	(void)ebx;
+	(void)edx;
+	if ((ecx & (1U << 30)) == 0U)
+		return false;
+	while (size != 0U) {
+		uint32_t value = 0;
+		unsigned char ready = 0;
+		unsigned attempt;
+		size_t chunk;
+
+		for (attempt = 0; attempt < 10U && ready == 0U; attempt++)
+			__asm__ volatile("rdrand %0; setc %1"
+			    : "=r"(value), "=qm"(ready));
+		if (ready == 0U)
+			return false;
+		chunk = size < sizeof(value) ? size : sizeof(value);
+		hal_memcpy(bytes, &value, chunk);
+		bytes += chunk;
+		size -= chunk;
+	}
+	return true;
+}
+
 void hal_mb(void)
 {
 	unsigned value = 0;

@@ -1469,6 +1469,11 @@ process_stop_current(int signo)
 		}
 		if (notify) {
 			notify = 0;
+			/*
+			 * sched_sleep_locked_notify() calls process_stop_notify()
+			 * synchronously, so this stack-backed argument remains valid
+			 * for the complete callback and is never retained.
+			 */
 			notification.process = process;
 			notification.generation = process->stop_generation;
 			notification.signo = process->stop_signo;

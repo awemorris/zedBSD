@@ -42,6 +42,7 @@ enum timedwait_test_mode {
 	TIMEDWAIT_NONE,
 	TIMEDWAIT_TERMINATE,
 	TIMEDWAIT_STOP,
+	TIMEDWAIT_STOP_BEFORE_RETURN,
 };
 
 static enum timedwait_test_mode timedwait_mode;
@@ -123,14 +124,18 @@ spin_unlock_irqrestore(struct spinlock *lock, unsigned long irq)
 void
 process_stop_current(int signo)
 {
-	assert(timedwait_mode == TIMEDWAIT_STOP);
-	assert(signo == 0);
-	assert(test_thread.signal_waiting == 0);
-	assert(test_thread.signal_wait_set == 0);
-	assert(test_process.stop_requested);
-	test_process.stop_requested = 0;
-	test_process.state = PROCESS_RUNNING;
-	fake_ticks = 150;
+	if (timedwait_mode == TIMEDWAIT_STOP) {
+		assert(signo == 0);
+		assert(test_thread.signal_waiting == 0);
+		assert(test_thread.signal_wait_set == 0);
+		assert(test_process.stop_requested);
+		test_process.stop_requested = 0;
+		test_process.state = PROCESS_RUNNING;
+		fake_ticks = 150;
+	} else {
+		assert(timedwait_mode == TIMEDWAIT_STOP_BEFORE_RETURN);
+		assert(signo == SIGTSTP);
+	}
 	stop_calls++;
 }
 
@@ -337,6 +342,22 @@ test_kill_minimum_selector_is_not_negated(void)
 	reset_fixture();
 	assert(signal_kill(&test_process, (pid_t)INT32_MIN, 0) == ESRCH);
 	assert(test_process.signal_pending == 0);
+}
+
+static void
+test_stop_selection_preserves_independent_interrupt(void)
+{
+	reset_fixture();
+	timedwait_mode = TIMEDWAIT_STOP_BEFORE_RETURN;
+	test_process.signal_actions[SIGUSR1].handler = 0x12345000U;
+	test_thread.signal_pending = SIGNAL_BIT(SIGUSR1) |
+	    SIGNAL_BIT(SIGTSTP);
+
+	assert(signal_stop_before_return(&test_thread) ==
+	    SIGNAL_STOP_RETURN_INTERRUPT);
+	assert(stop_calls == 1);
+	assert((test_thread.signal_pending & SIGNAL_BIT(SIGTSTP)) == 0);
+	assert((test_thread.signal_pending & SIGNAL_BIT(SIGUSR1)) != 0);
 }
 
 static void
@@ -565,6 +586,7 @@ main(void)
 	test_same_boundary_restart_is_preserved();
 	test_kill_all_delivers_blocked_signal_to_self();
 	test_kill_minimum_selector_is_not_negated();
+	test_stop_selection_preserves_independent_interrupt();
 	test_timedwait_termination_interrupts();
 	test_timedwait_stop_preserves_absolute_deadline();
 	test_ignored_generation_discards_all_instances();

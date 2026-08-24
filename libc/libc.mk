@@ -8,6 +8,7 @@ ZEDBSD_LIBC_NM ?= nm
 ZEDBSD_LIBC_OBJDUMP ?= objdump
 
 ZEDBSD_LIBC_USER_EXTRA_SOURCES := \
+	userland/base/libc/atomic-runtime.c \
 	libc/string-extra.c libc/fenv.c libc/wide-extra.c libc/inttypes.c \
 	libc/stdlib-extra.c libc/time-extra.c libc/stdio-extra.c \
 	libc/setjmp.c libc/err.c libc/libgen.c libc/search.c \
@@ -55,7 +56,7 @@ ZEDBSD_LIBC_CFLAGS := \
 	-fno-isolate-erroneous-paths-dereference -fno-strict-aliasing \
 	-msoft-float -mno-80387 -mno-fp-ret-in-387 \
 	-mno-mmx -mno-sse -mno-sse2 \
-	-Wall -Wextra -Werror
+	-ffunction-sections -fdata-sections -Wall -Wextra -Werror
 
 ZEDBSD_HOST_TEST_CFLAGS := \
 	-m32 -O2 -fno-builtin -fno-stack-protector \

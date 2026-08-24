@@ -29,5 +29,6 @@ typedef int32_t pid_t;
 typedef uint32_t id_t;
 typedef int32_t tid_t;
 typedef uint32_t useconds_t;
+typedef uint32_t reclen_t;
 
 #endif

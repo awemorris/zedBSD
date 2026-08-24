@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #ifndef ZEDBSD_SIGNAL_H
 #define ZEDBSD_SIGNAL_H
+#include <zedbsd/features.h>
 #include <zedbsd/signal.h>
 #include <sys/types.h>
 #include <time.h>
@@ -13,6 +14,9 @@ typedef struct {
 } stack_t;
 #define SIG_ERR ((sighandler_t)-1)
 #define SIG_HOLD ((sighandler_t)2)
+#define SIG2STR_MAX 32
+int sig2str(int signal_number, char *name);
+int str2sig(const char *restrict name, int *restrict signal_number);
 int sigaction(int, const struct sigaction *, struct sigaction *);
 int sigprocmask(int, const sigset_t *, sigset_t *);
 int sigpending(sigset_t *);
@@ -32,12 +36,14 @@ int sigqueue(pid_t, int, const union sigval);
 int raise(int);
 void psignal(int, const char *);
 void psiginfo(const siginfo_t *, const char *);
-void abort(void) __attribute__((noreturn));
+void abort(void) __attribute__((__noreturn__));
 int killpg(pid_t, int);
+#if __ZEDBSD_LEGACY_VISIBLE
 int sighold(int);
 int sigignore(int);
 int siginterrupt(int, int);
 int sigpause(int);
 int sigrelse(int);
 sighandler_t sigset(int, sighandler_t);
+#endif
 #endif

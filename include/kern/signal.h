@@ -107,11 +107,20 @@ int
 signal_pending_unblocked_locked(
 	const struct thread *thread);
 
+enum signal_stop_return_result {
+	SIGNAL_STOP_RETURN_NONE = 0,
+	SIGNAL_STOP_RETURN_REDISPATCH,
+	SIGNAL_STOP_RETURN_INTERRUPT,
+};
+
 /*
- * Consume and perform one pending default job-control stop.  Returns
- * nonzero after the caller has resumed through SIGCONT.
+ * Consume and perform one pending default job-control stop.  After the
+ * caller resumes through SIGCONT, REDISPATCH means the stop was the only
+ * effective pending signal.  INTERRUPT means another non-stop signal must
+ * reach the user-return boundary before a ready condition can turn the
+ * interrupted syscall into a success.
  */
-int
+enum signal_stop_return_result
 signal_stop_before_return(
 	struct thread *thread);
 

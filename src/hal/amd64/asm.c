@@ -4,6 +4,7 @@
 void asm_cli(void) { __asm__ volatile("cli" ::: "memory"); }
 void asm_sti(void) { __asm__ volatile("sti" ::: "memory"); }
 void asm_hlt(void) { __asm__ volatile("hlt"); }
+void hal_halt(void) { asm_hlt(); }
 
 void hal_mb(void) { __asm__ volatile("mfence" ::: "memory"); }
 void hal_rmb(void) { __asm__ volatile("lfence" ::: "memory"); }

@@ -171,6 +171,12 @@ enum syscall_number {
 	ZEDBSD_SYS_getrusage = 154,
 	ZEDBSD_SYS_getitimer = 155,
 	ZEDBSD_SYS_setitimer = 156,
+	ZEDBSD_SYS_getresuid = 157,
+	ZEDBSD_SYS_getresgid = 158,
+	ZEDBSD_SYS_setresuid = 159,
+	ZEDBSD_SYS_setresgid = 160,
+	ZEDBSD_SYS_getentropy = 161,
+	ZEDBSD_SYS_atomic = 162,
 };
 
 #endif

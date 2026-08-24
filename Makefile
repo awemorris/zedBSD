@@ -120,7 +120,8 @@ override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 		$(USERLAND_$(program)_PLATFORMS)),$(program)))
 # Essential administrative tools are present even when an older config.mk
 # predates their package registration.
-override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) blkid hostname)
+override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) blkid gettext \
+	hostname msgfmt ngettext)
 # Xzed cannot operate without the kernel graphics character device.  Keep
 # hand-edited and older saved configurations from producing an unusable
 # userland/kernel combination.
@@ -207,7 +208,10 @@ ZEDBSD_CHECK_TARGETS := check libc-host-test softfloat-host-test \
 	libc-opcode-check softfloat-opcode-check uapi-abi-layout-check \
 	hal-signal-frame-layout-check \
 	posix-header-check posix-api-matrix-check susv4-header-check \
-	susv4-libc-host-test crypt-host-test userland-command-host-test \
+	posix2024-header-check posix2024-api-matrix-check \
+	posix2024-utility-matrix-check \
+	susv4-libc-host-test crypt-host-test gettext-catalog-host-test \
+	userland-command-host-test \
 	ufs1-format-host-test ufs2-format-host-test ufs1-format-python-test \
 	ufs2-format-python-test overlay-journal-format-host-test
 
@@ -231,7 +235,8 @@ ZEDBSD_CPPFLAGS += -DHAL_ARCH_M68K
 endif
 ZEDBSD_CFLAGS := -m32 -march=i386 -Os -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables \
-	-fno-unwind-tables -Wall -Wextra -Werror
+	-fno-unwind-tables -ffunction-sections -fdata-sections \
+	-Wall -Wextra -Werror
 
 include libc/libc.mk
 include src/softfloat/softfloat.mk
@@ -373,6 +378,21 @@ posix-header-check: $(BUILD)/tests/posix-header-ilp32.o \
 	$(BUILD)/tests/posix-header-lp64.o
 	@echo "zedBSD POSIX ILP32/LP64 public-header check: PASS"
 
+$(BUILD)/tests/posix2024-header-ilp32.o: \
+	tests/posix-2024-header-compile.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m32 $(UAPI_ABI_TEST_FLAGS) -c $< -o $@
+
+$(BUILD)/tests/posix2024-header-lp64.o: \
+	tests/posix-2024-header-compile.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -m64 $(UAPI_ABI_TEST_FLAGS) -DZEDBSD_USER_ABI_LP64 \
+		-c $< -o $@
+
+posix2024-header-check: $(BUILD)/tests/posix2024-header-ilp32.o \
+	$(BUILD)/tests/posix2024-header-lp64.o
+	@echo "zedBSD POSIX.1-2024 ILP32/LP64 public-header check: PASS"
+
 $(BUILD)/tests/susv4-header-ilp32.o: tests/susv4-header-compile.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -m32 $(UAPI_ABI_TEST_FLAGS) -c $< -o $@
@@ -393,6 +413,14 @@ susv4-uapi-review-check: plan/susv4-uapi-audit.csv \
 posix-api-matrix-check: tests/posix-r2-api.csv \
 	tools/check-posix-api-matrix.py
 	$(PYTHON) tools/check-posix-api-matrix.py
+
+posix2024-api-matrix-check: tests/posix-2024-api.csv \
+	tools/check-posix-2024-api-matrix.py
+	$(PYTHON) tools/check-posix-2024-api-matrix.py
+
+posix2024-utility-matrix-check: tests/posix-2024-utilities.csv \
+	tools/check-posix-2024-utility-matrix.py
+	$(PYTHON) tools/check-posix-2024-utility-matrix.py
 
 $(BUILD)/tests/fat-host-test: tests/fat-host-test.c \
 	src/kern/fs.c src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c
@@ -961,13 +989,34 @@ CHECK_RUN_TARGETS := libc-host-test softfloat-host-test \
 	zed-softfloat128-core-test \
 	uapi-abi-layout-check hal-signal-frame-layout-check \
 	posix-header-check posix-api-matrix-check \
+	posix2024-header-check posix2024-api-matrix-check \
+	posix2024-utility-matrix-check \
 	susv4-header-check susv4-libc-host-test crypt-host-test \
+	gettext-catalog-host-test \
 	ufs1-format-host-test ufs2-format-host-test
 
 userland-command-host-test: tests/test-userland-commands-host.sh
 	bash tests/test-userland-commands-host.sh
 
 CHECK_RUN_TARGETS += userland-command-host-test
+
+$(BUILD)/tests/msgfmt-host: userland/base/msgfmt/main.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror $< -o $@
+
+$(BUILD)/tests/gettext-catalog-host-test: \
+	tests/gettext-catalog-host-test.c libc/locale.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -O2 -Wall -Wextra -Werror -DZEDBSD_USER_ABI_LP64 \
+		-I. -Iinclude -Iinclude/uapi -Ilibc/include libc/locale.c $< -o $@
+
+gettext-catalog-host-test: $(BUILD)/tests/msgfmt-host \
+	$(BUILD)/tests/gettext-catalog-host-test tests/fixtures/messages.po
+	@mkdir -p $(BUILD)/tests/gettext-locale/C.UTF-8/LC_MESSAGES
+	$(BUILD)/tests/msgfmt-host -S \
+		-o $(BUILD)/tests/gettext-locale/C.UTF-8/LC_MESSAGES/messages.mo \
+		tests/fixtures/messages.po
+	$(BUILD)/tests/gettext-catalog-host-test $(BUILD)/tests/gettext-locale
 
 overlay-journal-format-host-test: tests/overlay-journal-format-host-test.py \
 	$(BUILD_TOOLS_DIR)/overlay_journal_format.py
@@ -1109,6 +1158,7 @@ distclean:
 	overlay-journal-format-host-test uapi-abi-layout-check \
 	hal-signal-frame-layout-check \
 	posix-header-check posix-api-matrix-check susv4-header-check \
-	susv4-libc-host-test crypt-host-test userland-command-host-test \
+	susv4-libc-host-test crypt-host-test gettext-catalog-host-test \
+	userland-command-host-test \
 	ufs1-format-host-test \
 	ufs2-format-host-test ufs1-format-python-test ufs2-format-python-test

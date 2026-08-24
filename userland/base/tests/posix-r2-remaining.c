@@ -6,7 +6,9 @@
 #include <signal.h>
 #include <sched.h>
 #include <pthread.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -241,7 +243,7 @@ test_record_lock(void)
 {
 	struct flock lock;
 	pid_t child;
-	int fd, status;
+	int duplicate, fd, status;
 	fd = open("/tmp/r2r-lock", O_CREAT | O_RDWR | O_TRUNC, 0600);
 	memset(&lock, 0, sizeof(lock));
 	lock.l_type = F_WRLCK; lock.l_whence = SEEK_SET; lock.l_len = 1;
@@ -257,7 +259,33 @@ test_record_lock(void)
 	lock.l_type = F_UNLCK;
 	if (fcntl(fd, F_SETLK, &lock) != 0)
 		return failure("record-lock-release");
-	(void)close(fd); (void)unlink("/tmp/r2r-lock");
+	lock.l_type = F_WRLCK;
+	lock.l_pid = 0;
+	if (fcntl(fd, F_OFD_SETLK, &lock) != 0 ||
+	    (duplicate = dup(fd)) < 0 || close(fd) != 0 ||
+	    (child = fork()) < 0)
+		return failure("ofd-lock-setup");
+	if (child == 0) {
+		int independent;
+		struct flock query = lock;
+
+		if (fcntl(duplicate, F_OFD_SETLK, &lock) != 0)
+			_exit(1);
+		independent = open("/tmp/r2r-lock", O_RDWR);
+		if (independent < 0 || fcntl(independent, F_OFD_GETLK, &query) != 0 ||
+		    query.l_type != F_WRLCK || query.l_pid != -1 ||
+		    fcntl(independent, F_OFD_SETLK, &lock) != -1 || errno != EAGAIN)
+			_exit(2);
+		(void)close(independent);
+		_exit(0);
+	}
+	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+	    WEXITSTATUS(status) != 0 || close(duplicate) != 0 ||
+	    (fd = open("/tmp/r2r-lock", O_RDWR)) < 0 ||
+	    fcntl(fd, F_OFD_SETLK, &lock) != 0)
+		return failure("ofd-lock-lifetime");
+	(void)close(fd);
+	(void)unlink("/tmp/r2r-lock");
 	marker("R2R:05:RECORD-LOCK\n");
 	return 0;
 }
@@ -436,6 +464,151 @@ test_new_required_apis(void)
 	    WEXITSTATUS(status) != 0)
 		return failure("fexecve");
 	marker("R2R:09:REQUIRED-APIS\n");
+	return 0;
+}
+
+static int
+test_posix2024_apis(void)
+{
+	union {
+		max_align_t alignment;
+		unsigned char bytes[512];
+	} directory_buffer;
+	char signal_name[SIG2STR_MAX];
+	unsigned char entropy[16];
+	uid_t real_uid, effective_uid, saved_uid;
+	gid_t real_gid, effective_gid, saved_gid;
+	char *shared;
+	pid_t child;
+	int descriptor, flags, pair[2], status;
+	ssize_t count;
+
+	descriptor = open("/tmp/r2r-clofork", O_CREAT | O_TRUNC | O_RDWR,
+	    0600);
+	if (descriptor < 0 || fcntl(descriptor, F_SETFD, FD_CLOFORK) != 0 ||
+	    (child = fork()) < 0)
+		return failure("clofork-setup");
+	if (child == 0)
+		_exit(fcntl(descriptor, F_GETFD) == -1 && errno == EBADF ? 0 : 1);
+	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+	    WEXITSTATUS(status) != 0 || fcntl(descriptor, F_GETFD) != FD_CLOFORK ||
+	    close(descriptor) != 0)
+		return failure("clofork-fork");
+	(void)unlink("/tmp/r2r-clofork");
+
+	if (pipe2(pair, O_CLOEXEC | O_CLOFORK) != 0 ||
+	    (fcntl(pair[0], F_GETFD) & (FD_CLOEXEC | FD_CLOFORK)) !=
+	    (FD_CLOEXEC | FD_CLOFORK) ||
+	    (fcntl(pair[1], F_GETFD) & (FD_CLOEXEC | FD_CLOFORK)) !=
+	    (FD_CLOEXEC | FD_CLOFORK))
+		return failure("pipe2-flags");
+	(void)close(pair[0]);
+	(void)close(pair[1]);
+	if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_CLOFORK, 0,
+	    pair) != 0 ||
+	    (fcntl(pair[0], F_GETFD) & (FD_CLOEXEC | FD_CLOFORK)) !=
+	    (FD_CLOEXEC | FD_CLOFORK) ||
+	    (fcntl(pair[1], F_GETFD) & (FD_CLOEXEC | FD_CLOFORK)) !=
+	    (FD_CLOEXEC | FD_CLOFORK))
+		return failure("socket-flags");
+	(void)close(pair[0]);
+	(void)close(pair[1]);
+
+	memset(entropy, 0, sizeof(entropy));
+	if (getentropy(entropy, sizeof(entropy)) != 0 ||
+	    getentropy(entropy, 257) != -1 || errno != EINVAL)
+		return failure("getentropy");
+	if (getresuid(&real_uid, &effective_uid, &saved_uid) != 0 ||
+	    real_uid != getuid() || effective_uid != geteuid() ||
+	    getresgid(&real_gid, &effective_gid, &saved_gid) != 0 ||
+	    real_gid != getgid() || effective_gid != getegid())
+		return failure("getresid");
+	if (sig2str(SIGTERM, signal_name) != 0 || strcmp(signal_name, "TERM") ||
+	    str2sig(signal_name, &flags) != 0 || flags != SIGTERM)
+		return failure("signal-names");
+
+	descriptor = open("/tmp/r2r-posix-close", O_CREAT | O_TRUNC | O_RDWR,
+	    0600);
+	if (descriptor < 0 || posix_close(descriptor, 1) != EINVAL ||
+	    fcntl(descriptor, F_GETFD) != -1 || errno != EBADF)
+		return failure("posix-close");
+	(void)unlink("/tmp/r2r-posix-close");
+	descriptor = open("/tmp", O_RDONLY | O_DIRECTORY);
+	count = descriptor >= 0 ? posix_getdents(descriptor,
+	    directory_buffer.bytes, sizeof(directory_buffer.bytes), 0) : -1;
+	if (count <= 0 || close(descriptor) != 0)
+		return failure("posix-getdents");
+
+	shared = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+	    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	if (shared == MAP_FAILED || (child = fork()) < 0)
+		return failure("shared-anonymous-setup");
+	shared[0] = 0;
+	if (child == 0) {
+		shared[0] = '8';
+		_exit(0);
+	}
+	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+	    WEXITSTATUS(status) != 0 || shared[0] != '8' ||
+	    munmap(shared, 4096) != 0)
+		return failure("shared-anonymous");
+	marker("R2R:11:POSIX-2024\n");
+	return 0;
+}
+
+struct atomic_record {
+	uint32_t counter;
+	uint32_t left;
+	uint32_t right;
+};
+
+static void
+atomic_increment(_Atomic(struct atomic_record) *record)
+{
+	struct atomic_record expected;
+	struct atomic_record desired;
+
+	expected = atomic_load_explicit(record, memory_order_relaxed);
+	do {
+		desired = expected;
+		desired.counter++;
+	} while (!atomic_compare_exchange_weak_explicit(record, &expected,
+	    desired, memory_order_seq_cst, memory_order_relaxed));
+}
+
+static int
+test_generic_atomics(void)
+{
+	_Atomic(struct atomic_record) *record;
+	struct atomic_record expected;
+	struct atomic_record initial = { 0U, 17U, 29U };
+	struct atomic_record wrong = { UINT32_MAX, 0U, 0U };
+	pid_t child;
+	int status;
+	unsigned index;
+
+	record = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+	    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	if (record == MAP_FAILED)
+		return failure("atomic-map");
+	atomic_init(record, initial);
+	expected = wrong;
+	if (atomic_compare_exchange_strong(record, &expected, initial) ||
+	    expected.counter != 0U || expected.left != 17U ||
+	    expected.right != 29U || (child = fork()) < 0)
+		return failure("atomic-compare");
+	if (child == 0) {
+		for (index = 0; index < 200U; index++)
+			atomic_increment(record);
+		_exit(0);
+	}
+	for (index = 0; index < 200U; index++)
+		atomic_increment(record);
+	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+	    WEXITSTATUS(status) != 0 ||
+	    atomic_load(record).counter != 400U || munmap(record, 4096) != 0)
+		return failure("atomic-shared");
+	marker("R2R:12:ATOMIC\n");
 	return 0;
 }
 
@@ -663,8 +836,9 @@ main(int argc, char **argv)
 	    test_scm_rights() != 0 || test_fifo() != 0 ||
 	    test_record_lock() != 0 || test_rlimit() != 0 ||
 	    test_waitid() != 0 || test_integration() != 0 ||
-	    test_new_required_apis() != 0 || test_exec_scripts() != 0)
+	    test_new_required_apis() != 0 || test_exec_scripts() != 0 ||
+	    test_posix2024_apis() != 0 || test_generic_atomics() != 0)
 		return 1;
-	marker("R2R:01-10:PASS\n");
+	marker("R2R:01-12:PASS\n");
 	return 0;
 }

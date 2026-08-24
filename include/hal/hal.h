@@ -73,6 +73,16 @@ void
 hal_free(
 	void *ptr);
 
+/*
+ * Fill a buffer from a platform cryptographic entropy source. Ports which
+ * have no such source return false. Buffer contents are unspecified when the
+ * function returns false.
+ */
+bool
+hal_entropy_fill(
+	void *buffer,
+	size_t size);
+
 int
 hal_putchar(
 	int c);

@@ -19,6 +19,16 @@ tcgetattr(int descriptor, struct termios *termios)
 }
 
 int
+tcgetwinsize(int descriptor, struct winsize *winsize)
+{
+	if (winsize == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	return ioctl(descriptor, TIOCGWINSZ, winsize);
+}
+
+int
 tcsetattr(int descriptor, int action, const struct termios *termios)
 {
 	unsigned long request;
@@ -28,6 +38,16 @@ tcsetattr(int descriptor, int action, const struct termios *termios)
 	else if (action == TCSAFLUSH) request = TCSETSF;
 	else { errno = EINVAL; return -1; }
 	return ioctl(descriptor, request, termios);
+}
+
+int
+tcsetwinsize(int descriptor, const struct winsize *winsize)
+{
+	if (winsize == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	return ioctl(descriptor, TIOCSWINSZ, winsize);
 }
 
 int

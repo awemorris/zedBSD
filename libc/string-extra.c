@@ -1,5 +1,6 @@
 /* ISO C and commonly used BSD string extensions. SPDX-License-Identifier: Zlib */
 #include <ctype.h>
+#include <endian.h>
 #include <stddef.h>
 #include <string.h>
 #include <strings.h>
@@ -218,3 +219,53 @@ void strmode(unsigned int mode, char *p)
 	if (mode & 01000U) p[9] = p[9] == 'x' ? 't' : 'T';
 	p[10] = ' '; p[11] = 0;
 }
+
+static uint16_t
+swap16(uint16_t value)
+{
+	return (uint16_t)((value << 8) | (value >> 8));
+}
+
+static uint32_t
+swap32(uint32_t value)
+{
+	return ((value & 0x000000ffU) << 24) |
+	    ((value & 0x0000ff00U) << 8) |
+	    ((value & 0x00ff0000U) >> 8) |
+	    ((value & 0xff000000U) >> 24);
+}
+
+static uint64_t
+swap64(uint64_t value)
+{
+	return ((uint64_t)swap32((uint32_t)value) << 32) |
+	    swap32((uint32_t)(value >> 32));
+}
+
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+uint16_t htobe16(uint16_t value) { return swap16(value); }
+uint32_t htobe32(uint32_t value) { return swap32(value); }
+uint64_t htobe64(uint64_t value) { return swap64(value); }
+uint16_t htole16(uint16_t value) { return value; }
+uint32_t htole32(uint32_t value) { return value; }
+uint64_t htole64(uint64_t value) { return value; }
+uint16_t be16toh(uint16_t value) { return swap16(value); }
+uint32_t be32toh(uint32_t value) { return swap32(value); }
+uint64_t be64toh(uint64_t value) { return swap64(value); }
+uint16_t le16toh(uint16_t value) { return value; }
+uint32_t le32toh(uint32_t value) { return value; }
+uint64_t le64toh(uint64_t value) { return value; }
+#else
+uint16_t htobe16(uint16_t value) { return value; }
+uint32_t htobe32(uint32_t value) { return value; }
+uint64_t htobe64(uint64_t value) { return value; }
+uint16_t htole16(uint16_t value) { return swap16(value); }
+uint32_t htole32(uint32_t value) { return swap32(value); }
+uint64_t htole64(uint64_t value) { return swap64(value); }
+uint16_t be16toh(uint16_t value) { return value; }
+uint32_t be32toh(uint32_t value) { return value; }
+uint64_t be64toh(uint64_t value) { return value; }
+uint16_t le16toh(uint16_t value) { return swap16(value); }
+uint32_t le32toh(uint32_t value) { return swap32(value); }
+uint64_t le64toh(uint64_t value) { return swap64(value); }
+#endif

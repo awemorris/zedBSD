@@ -13,6 +13,7 @@
 #include "kern/vm-reclaim.h"
 #include "kern/vm-lock.h"
 #include "kern/vmspace.h"
+#include "kern/vm-commit.h"
 
 #include <errno.h>
 #include <string.h>
@@ -378,6 +379,39 @@ retry_lookup:
 	return 0;
 }
 
+int
+vm_object_create_anonymous(size_t size, struct vm_object **result)
+{
+	struct vm_object *object;
+	int error;
+
+	if (result == NULL || size == 0 ||
+	    (size & (PAGE_SIZE - 1U)) != 0 ||
+	    size > (size_t)(sizeof(off_t) == sizeof(int64_t) ? INT64_MAX :
+	    INT32_MAX))
+		return EINVAL;
+	error = vm_commit_reserve(size);
+	if (error != 0)
+		return error;
+	object = kern_calloc(1, sizeof(*object));
+	if (object == NULL) {
+		vm_commit_release(size);
+		return ENOMEM;
+	}
+	refcount_init(&object->refs, 1);
+	object->mapping_count = 1;
+	spin_init(&object->lock, LOCK_RANK_VM_OBJECT, "anonymous VM object");
+	waitq_init(&object->page_waitq, "anonymous VM object page");
+	waitq_init(&object->registry_waitq, "anonymous VM object lifetime");
+	object->generation = 1;
+	object->size_generation = 1;
+	object->logical_size = (off_t)size;
+	object->flags = VM_OBJECT_ANONYMOUS;
+	object->commit_size = size;
+	*result = object;
+	return 0;
+}
+
 void
 vm_object_ref(struct vm_object *object)
 {
@@ -534,9 +568,12 @@ destroy_object(struct vm_object *object)
 		object->orphan_pages = page->next;
 		free_object_page(page);
 	}
-	(void)file_close(object->file);
+	if (object->file != NULL)
+		(void)file_close(object->file);
 	if (object->write_file != NULL)
 		(void)file_close(object->write_file);
+	if (object->commit_size != 0)
+		vm_commit_release(object->commit_size);
 	kern_free(object);
 }
 
@@ -559,10 +596,12 @@ vm_object_put(struct vm_object *object)
 {
 	int error;
 	int removed = 0;
+	int anonymous;
 	bool enabled;
 
 	if (object == NULL)
 		return;
+	anonymous = (object->flags & VM_OBJECT_ANONYMOUS) != 0;
 retry_mapping:
 	enabled = registry_lock();
 	if (object->mapping_count == 0)
@@ -608,10 +647,16 @@ retry_mapping:
 	    (object->flags & VM_OBJECT_DETACHING) == 0)
 		HAL_FATAL("VM object teardown state changed during writeback");
 	if (error == 0 && object_can_destroy(object)) {
-		removed = unlink_object_locked(object);
-		if (!removed)
-			HAL_FATAL("detaching VM object left registry unexpectedly");
+		if (anonymous)
+			removed = 1;
+		else {
+			removed = unlink_object_locked(object);
+			if (!removed)
+				HAL_FATAL("detaching VM object left registry unexpectedly");
+		}
 	} else {
+		if (anonymous)
+			HAL_FATAL("anonymous VM object teardown could not complete");
 		retain_object(object, error);
 		object->flags &= ~VM_OBJECT_DETACHING;
 	}
@@ -619,7 +664,7 @@ retry_mapping:
 	object_wake_registry_waiters(object);
 	if (removed)
 		object_wait_registry_waiters(object);
-	if (removed && refcount_put(&object->refs))
+	if (removed && !anonymous && refcount_put(&object->refs))
 		HAL_FATAL("VM object registry reference was last unexpectedly");
 	/* Drop the explicit teardown lifetime reference. */
 	if (refcount_put(&object->refs))
@@ -1458,23 +1503,27 @@ read_page:
 	length = (size_t)(fault_size - offset);
 	if (length > PAGE_SIZE)
 		length = PAGE_SIZE;
-	error = file_io_begin(object->file, FILE_IO_PREAD, offset,
-	    FILE_IO_VM_OBJECT, &io);
-	if (error != 0) {
-		count = -error;
+	if ((object->flags & VM_OBJECT_ANONYMOUS) != 0) {
+		count = (ssize_t)length;
 	} else {
-		/* i_io_lock is now held.  A resize published after page BUSY but
-		 * before the backend read is detected before any stale I/O starts. */
-		irq = spin_lock_irqsave(&object->lock);
-		error = (object->flags & (VM_OBJECT_RESIZING |
-		    VM_OBJECT_CONTENT)) != 0 ||
-		    object->size_generation != fault_generation ||
-		    object->content_generation != fault_content_generation ||
-		    offset >= object->logical_size ? EAGAIN : 0;
-		spin_unlock_irqrestore(&object->lock, irq);
-		count = error == 0 ? file_io_transfer(&io,
-		    (void *)page->pmem.vaddr, length) : -error;
-		file_io_end(&io);
+		error = file_io_begin(object->file, FILE_IO_PREAD, offset,
+		    FILE_IO_VM_OBJECT, &io);
+		if (error != 0) {
+			count = -error;
+		} else {
+			/* i_io_lock is now held.  A resize published after page BUSY but
+			 * before the backend read is detected before stale I/O starts. */
+			irq = spin_lock_irqsave(&object->lock);
+			error = (object->flags & (VM_OBJECT_RESIZING |
+			    VM_OBJECT_CONTENT)) != 0 ||
+			    object->size_generation != fault_generation ||
+			    object->content_generation != fault_content_generation ||
+			    offset >= object->logical_size ? EAGAIN : 0;
+			spin_unlock_irqrestore(&object->lock, irq);
+			count = error == 0 ? file_io_transfer(&io,
+			    (void *)page->pmem.vaddr, length) : -error;
+			file_io_end(&io);
+		}
 	}
 	irq = spin_lock_irqsave(&object->lock);
 	if ((object->flags & (VM_OBJECT_RESIZING | VM_OBJECT_CONTENT)) != 0 ||
@@ -1868,7 +1917,8 @@ vm_object_sync_range_internal(struct vm_object *object, off_t offset,
 		dirty = (candidate->flags & VM_OBJECT_PAGE_DIRTY) != 0;
 		candidate->write_dirty_generation = candidate->dirty_generation;
 		spin_unlock_irqrestore(&object->lock, irq);
-		if (first_error == 0 && dirty) {
+		if (first_error == 0 && dirty &&
+		    (object->flags & VM_OBJECT_ANONYMOUS) == 0) {
 			first_error = write_page_data(object, candidate, write_limit,
 			    !resize_owner);
 			selected_write = 1;

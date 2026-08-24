@@ -35,6 +35,8 @@ static int test_thread_wait_calls;
 static int test_interrupt_calls;
 
 int syscall_test_poll_mask_cycle(uint64_t, int, unsigned);
+intptr_t syscall_test_stop_ready_cycle(enum signal_stop_return_result,
+	intptr_t, int *);
 int syscall_test_thread_join_claim(struct thread *, tid_t, unsigned);
 void syscall_test_thread_join_release(struct thread *, tid_t);
 intptr_t syscall_test_thread_join_call(const uintptr_t [6]);
@@ -279,6 +281,27 @@ test_stop_selected_at_return_cancels_deferred_restore(void)
 }
 
 static void
+test_caught_signal_wins_ready_race_after_stop(void)
+{
+	int body_calls;
+
+	/*
+	 * The first body invocation has already returned EINTR with a default
+	 * stop and a caught non-SA_RESTART signal pending.  Even if the I/O is
+	 * ready after SIGCONT, the body must not run a second time and succeed
+	 * before the caught signal reaches the user-return boundary.
+	 */
+	assert(syscall_test_stop_ready_cycle(SIGNAL_STOP_RETURN_INTERRUPT, 0,
+	    &body_calls) == -EINTR);
+	assert(body_calls == 1);
+
+	/* A stop with no independent interrupt remains transparent. */
+	assert(syscall_test_stop_ready_cycle(SIGNAL_STOP_RETURN_REDISPATCH, 0,
+	    &body_calls) == 0);
+	assert(body_calls == 2);
+}
+
+static void
 test_join_claim_survives_stop_for_only_its_owner(void)
 {
 	struct thread target;
@@ -395,6 +418,7 @@ main(void)
 	test_deadline_and_mask_survive_multiple_stops();
 	test_caught_signal_keeps_deferred_restore();
 	test_stop_selected_at_return_cancels_deferred_restore();
+	test_caught_signal_wins_ready_race_after_stop();
 	test_join_claim_survives_stop_for_only_its_owner();
 	test_join_stop_redispatch_and_copyout_commit_order();
 	test_join_pin_and_copyout_failure_do_not_consume();

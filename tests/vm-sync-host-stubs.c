@@ -250,3 +250,17 @@ waitq_wake_all(struct wait_queue *queue)
 	assert(cnd_broadcast(&host->condition) == thrd_success);
 	assert(mtx_unlock(&host->mutex) == thrd_success);
 }
+
+void __attribute__((weak))
+vm_commit_release(size_t bytes)
+{
+	(void)bytes;
+}
+
+struct file;
+
+void __attribute__((weak))
+record_lock_release_file(struct file *file)
+{
+	(void)file;
+}

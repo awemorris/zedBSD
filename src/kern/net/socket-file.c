@@ -175,5 +175,7 @@ socket_file_effective_flags(const struct socket_file_ref *reference,
 		flags |= MSG_WAITALL;
 	if ((message_flags & MSG_CMSG_CLOEXEC) != 0)
 		flags |= MSG_CMSG_CLOEXEC;
+	if ((message_flags & MSG_CMSG_CLOFORK) != 0)
+		flags |= MSG_CMSG_CLOFORK;
 	return flags;
 }

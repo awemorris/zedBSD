@@ -16,7 +16,8 @@
 #define RECORD_LOCK_INFINITY INT64_MAX
 
 struct record_lock {
-	struct process *owner;
+	void *owner;
+	unsigned owner_is_file;
 	int64_t start;
 	int64_t end;
 	short type;
@@ -35,7 +36,8 @@ lock_node_free(struct record_lock *node)
 {
 	if (node == NULL)
 		return;
-	process_release(node->owner);
+	if (!node->owner_is_file)
+		process_release(node->owner);
 	kern_free(node);
 }
 
@@ -154,12 +156,14 @@ static int ranges_overlap(int64_t a, int64_t b, int64_t c, int64_t d)
 { return a < d && c < b; }
 
 static struct record_lock *
-find_conflict(struct record_lock_state *state, struct process *owner,
-	int64_t start, int64_t end, short type)
+find_conflict(struct record_lock_state *state, void *owner,
+	unsigned owner_is_file, int64_t start, int64_t end, short type)
 {
 	struct record_lock *lock;
 	for (lock = state->head; lock != NULL; lock = lock->next)
-		if (lock->owner != owner && ranges_overlap(start, end,
+		if ((lock->owner != owner ||
+		    lock->owner_is_file != owner_is_file) &&
+		    ranges_overlap(start, end,
 		    lock->start, lock->end) &&
 		    (type == F_WRLCK || lock->type == F_WRLCK))
 			return lock;
@@ -171,8 +175,8 @@ insert_sorted(struct record_lock_state *state, struct record_lock *node)
 {
 	struct record_lock **link = &state->head;
 	while (*link != NULL && ((*link)->start < node->start ||
-	    ((*link)->start == node->start && (*link)->owner->pid <=
-	    node->owner->pid)))
+	    ((*link)->start == node->start &&
+	    (uintptr_t)(*link)->owner <= (uintptr_t)node->owner)))
 		link = &(*link)->next;
 	node->next = *link;
 	*link = node;
@@ -184,7 +188,9 @@ coalesce_locked(struct record_lock_state *state)
 	struct record_lock *lock, *garbage = NULL;
 	for (lock = state->head; lock != NULL && lock->next != NULL;) {
 		struct record_lock *next = lock->next;
-		if (lock->owner == next->owner && lock->type == next->type &&
+		if (lock->owner == next->owner &&
+		    lock->owner_is_file == next->owner_is_file &&
+		    lock->type == next->type &&
 		    next->start <= lock->end) {
 			if (next->end > lock->end)
 				lock->end = next->end;
@@ -198,12 +204,15 @@ coalesce_locked(struct record_lock_state *state)
 }
 
 static struct record_lock *
-new_node(struct process *owner, int64_t start, int64_t end, short type)
+new_node(void *owner, unsigned owner_is_file, int64_t start, int64_t end,
+	short type)
 {
 	struct record_lock *node = kern_calloc(1, sizeof(*node));
 	if (node != NULL) {
-		process_ref(owner);
+		if (!owner_is_file)
+			process_ref(owner);
 		node->owner = owner;
+		node->owner_is_file = owner_is_file;
 		node->start = start;
 		node->end = end;
 		node->type = type;
@@ -212,14 +221,16 @@ new_node(struct process *owner, int64_t start, int64_t end, short type)
 }
 
 static int
-replace_owner_range(struct record_lock_state *state, struct process *owner,
-	int64_t start, int64_t end, short type, uint64_t expected, unsigned needed)
+replace_owner_range(struct record_lock_state *state, void *owner,
+	unsigned owner_is_file, int64_t start, int64_t end, short type,
+	uint64_t expected, unsigned needed)
 {
 	struct record_lock *lock, *nodes = NULL, *garbage = NULL, *merged;
 	unsigned index;
 	unsigned long irq;
 	for (index = 0; index < needed; index++) {
-		struct record_lock *node = new_node(owner, 0, 0, type);
+		struct record_lock *node = new_node(owner, owner_is_file, 0, 0,
+		    type);
 		if (node == NULL) {
 			lock_list_free(nodes);
 			return ENOMEM;
@@ -229,7 +240,8 @@ replace_owner_range(struct record_lock_state *state, struct process *owner,
 	}
 	irq = spin_lock_irqsave(&state->lock);
 	if (state->generation != expected ||
-	    (type != F_UNLCK && find_conflict(state, owner, start, end, type))) {
+	    (type != F_UNLCK && find_conflict(state, owner, owner_is_file,
+	    start, end, type))) {
 		spin_unlock_irqrestore(&state->lock, irq);
 		lock_list_free(nodes);
 		return EAGAIN;
@@ -238,7 +250,9 @@ replace_owner_range(struct record_lock_state *state, struct process *owner,
 		struct record_lock **link = &state->head;
 		while (*link != NULL) {
 			lock = *link;
-			if (lock->owner != owner || !ranges_overlap(start, end,
+			if (lock->owner != owner ||
+			    lock->owner_is_file != owner_is_file ||
+			    !ranges_overlap(start, end,
 			    lock->start, lock->end)) {
 				link = &lock->next;
 				continue;
@@ -287,6 +301,9 @@ record_lock_fcntl(struct process *owner, struct file *file, int command,
 	struct flock_record *request)
 {
 	struct record_lock_state *state;
+	void *lock_owner;
+	unsigned owner_is_file;
+	int get_command, wait_command;
 	int64_t start, end;
 	int error;
 	if (owner == NULL || file == NULL || file->f_inode == NULL ||
@@ -296,6 +313,13 @@ record_lock_fcntl(struct process *owner, struct file *file, int command,
 	    (request->type != F_RDLCK && request->type != F_WRLCK &&
 	    request->type != F_UNLCK))
 		return EINVAL;
+	owner_is_file = command == F_OFD_GETLK || command == F_OFD_SETLK ||
+	    command == F_OFD_SETLKW;
+	if (owner_is_file && request->pid != 0)
+		return EINVAL;
+	get_command = command == F_GETLK || command == F_OFD_GETLK;
+	wait_command = command == F_SETLKW || command == F_OFD_SETLKW;
+	lock_owner = owner_is_file ? (void *)file : (void *)owner;
 	if (request->type == F_RDLCK &&
 	    (file_status_flags_get(file) & O_ACCMODE) == O_WRONLY)
 		return EBADF;
@@ -305,9 +329,9 @@ record_lock_fcntl(struct process *owner, struct file *file, int command,
 	error = normalize_range(file, request, &start, &end);
 	if (error != 0)
 		return error;
-	state = record_lock_state_get(file->f_inode, command != F_GETLK);
+	state = record_lock_state_get(file->f_inode, !get_command);
 	if (state == NULL) {
-		if (command == F_GETLK) {
+		if (get_command) {
 			request->type = F_UNLCK;
 			return 0;
 		}
@@ -319,8 +343,9 @@ record_lock_fcntl(struct process *owner, struct file *file, int command,
 		unsigned needed;
 		unsigned long irq = spin_lock_irqsave(&state->lock);
 		conflict = request->type == F_UNLCK ? NULL :
-		    find_conflict(state, owner, start, end, request->type);
-		if (command == F_GETLK) {
+		    find_conflict(state, lock_owner, owner_is_file, start, end,
+		    request->type);
+		if (get_command) {
 			if (conflict == NULL)
 				request->type = F_UNLCK;
 			else {
@@ -330,13 +355,14 @@ record_lock_fcntl(struct process *owner, struct file *file, int command,
 				request->length = conflict->end ==
 				    RECORD_LOCK_INFINITY ? 0 :
 				    conflict->end - conflict->start;
-				request->pid = conflict->owner->pid;
+				request->pid = conflict->owner_is_file ? -1 :
+				    ((struct process *)conflict->owner)->pid;
 			}
 			spin_unlock_irqrestore(&state->lock, irq);
 			return 0;
 		}
 		if (conflict != NULL) {
-			if (command != F_SETLKW) {
+			if (!wait_command) {
 				spin_unlock_irqrestore(&state->lock, irq);
 				return EAGAIN;
 			}
@@ -356,7 +382,8 @@ record_lock_fcntl(struct process *owner, struct file *file, int command,
 			struct record_lock *owned;
 			for (owned = state->head; owned != NULL;
 			    owned = owned->next)
-				if (owned->owner == owner &&
+				if (owned->owner == lock_owner &&
+				    owned->owner_is_file == owner_is_file &&
 				    ranges_overlap(start, end, owned->start,
 				    owned->end)) {
 					if (owned->start < start) needed++;
@@ -364,8 +391,8 @@ record_lock_fcntl(struct process *owner, struct file *file, int command,
 				}
 		}
 		spin_unlock_irqrestore(&state->lock, irq);
-		error = replace_owner_range(state, owner, start, end,
-		    request->type, generation, needed);
+		error = replace_owner_range(state, lock_owner, owner_is_file, start,
+		    end, request->type, generation, needed);
 		if (error != EAGAIN)
 			return error;
 	}
@@ -386,7 +413,40 @@ record_lock_release_process_inode(struct process *owner, struct inode *inode)
 	irq = spin_lock_irqsave(&state->lock);
 	for (link = &state->head; *link != NULL;) {
 		struct record_lock *lock = *link;
-		if (lock->owner != owner) {
+		if (lock->owner_is_file || lock->owner != owner) {
+			link = &lock->next;
+			continue;
+		}
+		*link = lock->next;
+		lock->next = garbage;
+		garbage = lock;
+	}
+	if (garbage != NULL) {
+		state->generation++;
+		waitq_wake_all(&state->waiters);
+	}
+	spin_unlock_irqrestore(&state->lock, irq);
+	lock_list_free(garbage);
+}
+
+void
+record_lock_release_file(struct file *file)
+{
+	struct record_lock_state *state;
+	struct record_lock *garbage = NULL;
+	struct record_lock **link;
+	unsigned long irq;
+
+	if (file == NULL || file->f_inode == NULL)
+		return;
+	state = record_lock_state_get(file->f_inode, 0);
+	if (state == NULL)
+		return;
+	irq = spin_lock_irqsave(&state->lock);
+	for (link = &state->head; *link != NULL;) {
+		struct record_lock *lock = *link;
+
+		if (!lock->owner_is_file || lock->owner != file) {
 			link = &lock->next;
 			continue;
 		}

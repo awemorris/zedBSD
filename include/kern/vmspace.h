@@ -263,6 +263,23 @@ vmspace_map_anon_fixed_noreplace(
 	struct vm_region **result);
 
 int
+vmspace_map_anon_fixed(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	int shared,
+	struct vm_region **result);
+
+int
+vmspace_map_anon_shared_find(
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	uintptr_t *mapped);
+
+int
 vmspace_map_file(
 	struct vmspace *vm,
 	uintptr_t start,
@@ -283,6 +300,18 @@ vmspace_map_file_shared(
 	struct file *file,
 	off_t offset,
 	size_t data_size,
+	struct vm_region **result);
+
+int
+vmspace_map_file_fixed(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	size_t data_size,
+	int shared,
 	struct vm_region **result);
 
 int

@@ -4,6 +4,7 @@
 #include "kern/cred.h"
 #include "kern/process-timer.h"
 #include "kern/sched.h"
+#include "kern/usync.h"
 
 #include <errno.h>
 #include <hal/hal.h>
@@ -288,6 +289,8 @@ kern_clock_settime(clockid_t clock, const struct timespec *requested,
 	if (error == 0)
 		atomic_raw_store_release((volatile unsigned *)&realtime_synchronized,1);
 	realtime_write_end();
+	if (error == 0)
+		usync_realtime_changed();
 	return error;
 }
 

@@ -133,9 +133,13 @@ sched_sleep_locked_interruptible(
 	uint64_t observed_generation);
 
 /*
- * Like sched_sleep_locked(), then invokes notify after publishing SLEEPING.
- * notify informs an external observer only: it must not wake the current
- * thread itself.  A later observer action owns the corresponding wakeup.
+ * Like sched_sleep_locked(), then synchronously invokes notify after
+ * publishing THREAD_SLEEPING and before switching away.  The argument is
+ * borrowed only for the duration of that call and must not be retained.
+ *
+ * The callback informs an external observer only: it must not wake the
+ * current sleeper, block, or acquire a lock ordered before condition_lock.
+ * A later observer action owns the corresponding wakeup.
  */
 void
 sched_sleep_locked_notify(

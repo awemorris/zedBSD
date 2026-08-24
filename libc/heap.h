@@ -57,6 +57,8 @@ void heap_allocator_set_observer(struct heap_allocator *heap,
 void heap_allocator_set_grow(struct heap_allocator *heap,
 				   heap_grow_fn grow, void *context);
 void *heap_allocator_alloc(struct heap_allocator *heap, size_t size);
+void *heap_allocator_aligned_alloc(struct heap_allocator *heap,
+    size_t alignment, size_t size);
 void *heap_allocator_calloc(struct heap_allocator *heap, size_t count, size_t size);
 void *heap_allocator_realloc(struct heap_allocator *heap, void *pointer, size_t size);
 void heap_allocator_free(struct heap_allocator *heap, void *pointer);
@@ -76,6 +78,7 @@ void heap_active_reset(void);
 void heap_active_set_failure_after(size_t successful_allocations);
 void heap_active_set_observer(heap_observer_fn observer, void *context);
 void *heap_alloc_active(size_t size);
+void *heap_aligned_alloc_active(size_t alignment, size_t size);
 void *heap_calloc_active(size_t count, size_t size);
 void *heap_realloc_active(void *pointer, size_t size);
 char *heap_strdup_active(const char *string);

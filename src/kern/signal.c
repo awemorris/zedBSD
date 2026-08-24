@@ -191,14 +191,15 @@ signal_pending_unblocked(const struct thread *thread)
 	return pending;
 }
 
-int
+enum signal_stop_return_result
 signal_stop_before_return(struct thread *thread)
 {
 	struct process *process;
 	struct signal_info ignored_info;
 	sigset_t pending;
 	unsigned long irq;
-	int signo;
+	int interrupt_pending = 0;
+	int candidate, signo;
 
 	if (thread == NULL || (process = thread->proc) == NULL ||
 	    process == &process0)
@@ -210,6 +211,29 @@ signal_stop_before_return(struct thread *thread)
 	    ~thread->signal_mask;
 	pending |= (thread->signal_pending | process->signal_pending) &
 	    (SIGNAL_BIT(SIGKILL) | SIGNAL_BIT(SIGSTOP));
+	/*
+	 * Record an independently effective signal before consuming the stop.
+	 * A caught signal already made the syscall return EINTR; after SIGCONT it
+	 * must reach user mode before a newly-ready I/O condition can win a
+	 * transparent redispatch.  Fatal defaults follow the same ordering.
+	 */
+	for (candidate = 1; candidate < NSIG; candidate++) {
+		const struct signal_action *action;
+
+		if ((pending & SIGNAL_BIT(candidate)) == 0)
+			continue;
+		action = &process->signal_actions[candidate];
+		if (action->handler == (uintptr_t)SIG_IGN ||
+		    (action->handler == (uintptr_t)SIG_DFL &&
+		    signal_ignored_default(candidate)))
+			continue;
+		if (signal_stop(candidate) &&
+		    (candidate == SIGSTOP ||
+		    action->handler == (uintptr_t)SIG_DFL))
+			continue;
+		interrupt_pending = 1;
+		break;
+	}
 	for (signo = 1; signo < NSIG; signo++) {
 		if ((pending & SIGNAL_BIT(signo)) == 0 || !signal_stop(signo) ||
 		    (signo != SIGSTOP &&
@@ -227,10 +251,11 @@ signal_stop_before_return(struct thread *thread)
 	}
 	spin_unlock_irqrestore(&process->lock, irq);
 	if (signo == NSIG)
-		return 0;
+		return SIGNAL_STOP_RETURN_NONE;
 	signal_timer_complete_one(process, &ignored_info);
 	process_stop_current(signo);
-	return 1;
+	return interrupt_pending ? SIGNAL_STOP_RETURN_INTERRUPT :
+	    SIGNAL_STOP_RETURN_REDISPATCH;
 }
 
 int

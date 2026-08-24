@@ -55,4 +55,6 @@ void hal_dcache_clean_invalidate_range(uintptr_t a,size_t n){hal_icache_invalida
 void hal_sync_instruction_stream(void*a,size_t n){hal_icache_invalidate_range((uintptr_t)a,n);hal_mb();}
 void hal_halt(void){for(;;)__asm__ volatile("nop");}
 void hal_reset(void){HAL_FATAL("sun4u reset is not implemented");}void hal_poweroff(void){HAL_FATAL("sun4u poweroff is not implemented");}void hal_panic(void){HAL_FATAL("kernel panic");}
+bool hal_entropy_fill(void *buffer,size_t size)
+{(void)buffer;(void)size;return false;}
 void hal_pc98_enable_high_memory(void){}void hal_pc98_memory_segments(uint32_t*l,uint32_t*h){if(l)*l=0;if(h)*h=0;}

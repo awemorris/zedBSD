@@ -36,6 +36,7 @@ typedef uint32_t socklen_t;
 #define SOCK_RAW	3
 #define SOCK_NONBLOCK	0x2000
 #define SOCK_CLOEXEC	0x4000
+#define SOCK_CLOFORK	0x80000
 
 #define SOL_SOCKET	0xffff
 #define SO_BROADCAST	0x0020
@@ -48,6 +49,8 @@ typedef uint32_t socklen_t;
 #define SO_SNDTIMEO	0x1005
 #define SO_BINDTODEVICE	0x0019
 #define SO_RCVTIMEO	0x1006
+#define SO_DOMAIN	0x100a
+#define SO_PROTOCOL	0x100b
 
 #define MSG_DONTWAIT	0x0040
 #define MSG_NOSIGNAL	0x4000
@@ -56,6 +59,7 @@ typedef uint32_t socklen_t;
 #define MSG_CTRUNC	0x0008
 #define MSG_WAITALL	0x0100
 #define MSG_CMSG_CLOEXEC	0x8000
+#define MSG_CMSG_CLOFORK	0x10000
 
 #define SCM_RIGHTS	0x0001
 
@@ -172,6 +176,12 @@ accept(
 	int descriptor,
 	struct sockaddr *address,
 	socklen_t *length);
+int
+accept4(
+	int descriptor,
+	struct sockaddr *address,
+	socklen_t *length,
+	int flags);
 ssize_t
 send(
 	int descriptor,

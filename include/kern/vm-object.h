@@ -36,6 +36,7 @@ struct vm_page;
 #define VM_OBJECT_DETACHING	0x00000002U
 #define VM_OBJECT_RESIZING	0x00000004U
 #define VM_OBJECT_CONTENT	0x00000008U
+#define VM_OBJECT_ANONYMOUS	0x00000010U
 
 struct vm_object_page {
 	struct vm_object *owner;
@@ -101,6 +102,12 @@ struct vm_object {
 	uint64_t resize_generation;
 	uint64_t content_generation;
 	unsigned flags;
+
+	/*
+	 * Anonymous shared objects reserve their backing commitment once.  A
+	 * fork adds mapping references without charging the same object again.
+	 */
+	size_t commit_size;
 	/*
 	 * file is retained for reads; write_file carries write capability.
 	 */
@@ -153,6 +160,11 @@ struct vm_object_content {
 int
 vm_object_get_shared(
 	struct file *file,
+	struct vm_object **result);
+
+int
+vm_object_create_anonymous(
+	size_t size,
 	struct vm_object **result);
 
 void

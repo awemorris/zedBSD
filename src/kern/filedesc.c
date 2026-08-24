@@ -126,7 +126,7 @@ filedesc_install_from(struct filedesc *fd, struct file *file, unsigned flags,
 	int i;
 
 	if (fd == NULL || file == NULL || descriptor == NULL || minimum < 0 ||
-	    minimum >= KERN_OPEN_MAX || (flags & ~FILEDESC_CLOEXEC) != 0)
+	    minimum >= KERN_OPEN_MAX || (flags & ~FILEDESC_FLAG_MASK) != 0)
 		return EINVAL;
 	irq = spin_lock_irqsave(&fd->lock);
 	for (i = minimum; i < (int)fd->soft_limit; i++)
@@ -229,7 +229,8 @@ filedesc_clone(struct filedesc *source, struct process *owner,
 	copy->soft_limit = source->soft_limit;
 	for (descriptor = 0; descriptor < KERN_OPEN_MAX; descriptor++) {
 		struct file *file;
-		if (source->entries[descriptor].state != FILEDESC_SLOT_LIVE)
+		if (source->entries[descriptor].state != FILEDESC_SLOT_LIVE ||
+		    (source->entries[descriptor].flags & FILEDESC_CLOFORK) != 0)
 			continue;
 		file = source->entries[descriptor].file;
 		file_ref(file);
@@ -262,7 +263,7 @@ int
 filedesc_set_flags(struct filedesc *fd, int descriptor, unsigned flags)
 {
 	unsigned long irq;
-	if ((flags & ~FILEDESC_CLOEXEC) != 0)
+	if ((flags & ~FILEDESC_FLAG_MASK) != 0)
 		return EINVAL;
 	if (fd == NULL || descriptor < 0 || descriptor >= KERN_OPEN_MAX)
 		return EBADF;
@@ -286,7 +287,7 @@ filedesc_dup(struct filedesc *fd, int oldfd, int minimum, unsigned flags,
 
 	if (fd == NULL || result == NULL || oldfd < 0 ||
 	    oldfd >= KERN_OPEN_MAX || minimum < 0 || minimum >= KERN_OPEN_MAX ||
-	    (flags & ~FILEDESC_CLOEXEC) != 0)
+	    (flags & ~FILEDESC_FLAG_MASK) != 0)
 		return oldfd < 0 || oldfd >= KERN_OPEN_MAX ? EBADF : EINVAL;
 	irq = spin_lock_irqsave(&fd->lock);
 	file = fd->entries[oldfd].state == FILEDESC_SLOT_LIVE ?
@@ -319,7 +320,7 @@ filedesc_dup2(struct filedesc *fd, int oldfd, int newfd, unsigned flags,
 	int error;
 
 	if (fd == NULL || oldfd < 0 || oldfd >= KERN_OPEN_MAX || newfd < 0 ||
-	    newfd >= KERN_OPEN_MAX || (flags & ~FILEDESC_CLOEXEC) != 0)
+	    newfd >= KERN_OPEN_MAX || (flags & ~FILEDESC_FLAG_MASK) != 0)
 		return EBADF;
 	irq = spin_lock_irqsave(&fd->lock);
 	for (;;) {
@@ -373,7 +374,7 @@ filedesc_install_pair(struct filedesc *fd, struct file *first,
 	int a = -1, b = -1, i;
 
 	if (fd == NULL || first == NULL || second == NULL || result == NULL ||
-	    ((first_flags | second_flags) & ~FILEDESC_CLOEXEC) != 0)
+	    ((first_flags | second_flags) & ~FILEDESC_FLAG_MASK) != 0)
 		return EINVAL;
 	irq = spin_lock_irqsave(&fd->lock);
 	for (i = 0; i < (int)fd->soft_limit; i++) {
@@ -420,7 +421,7 @@ filedesc_reserve_many(struct filedesc *fd, unsigned count, unsigned flags,
 	unsigned found = 0, index;
 	unsigned long irq;
 	if (fd == NULL || reservation == NULL || count > KERN_OPEN_MAX ||
-	    (flags & ~FILEDESC_CLOEXEC) != 0)
+	    (flags & ~FILEDESC_FLAG_MASK) != 0)
 		return EINVAL;
 	memset(reservation, 0, sizeof(*reservation));
 	irq = spin_lock_irqsave(&fd->lock);

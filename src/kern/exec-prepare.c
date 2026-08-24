@@ -67,6 +67,11 @@ exec_shebang_parse(const void *contents, size_t size, int at_eof,
 		return -ENAMETOOLONG;
 	memcpy(result->interpreter, bytes + begin, path_end - begin);
 	result->interpreter[path_end - begin] = '\0';
+	/*
+	 * Historical shebang handling passes the trimmed remainder of the line
+	 * as one optional argument.  Embedded whitespace does not split it into
+	 * multiple argv entries.
+	 */
 	for (argument_begin = path_end; argument_begin < end &&
 	    (bytes[argument_begin] == ' ' || bytes[argument_begin] == '\t');
 	    argument_begin++)
