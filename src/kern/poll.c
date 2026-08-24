@@ -18,20 +18,20 @@ struct poll_channel {
 };
 
 static struct poll_channel channel;
-static unsigned channel_ready;
+static atomic_uint_t channel_ready;
 
 void
 poll_init(void)
 {
 	spin_init(&channel.lock, LOCK_RANK_POLL, "poll event channel");
 	waitq_init(&channel.waitq, "poll event channel");
-	__atomic_store_n(&channel_ready, 1U, __ATOMIC_RELEASE);
+	atomic_store_release(&channel_ready, 1U);
 }
 
 void
 poll_notify(void)
 {
-	if (__atomic_load_n(&channel_ready, __ATOMIC_ACQUIRE) == 0)
+	if (atomic_load_acquire(&channel_ready) == 0)
 		return;
 	unsigned long irq = spin_lock_irqsave(&channel.lock);
 	waitq_wake_all(&channel.waitq);
@@ -41,7 +41,7 @@ poll_notify(void)
 uint64_t
 poll_sequence(void)
 {
-	if (__atomic_load_n(&channel_ready, __ATOMIC_ACQUIRE) == 0)
+	if (atomic_load_acquire(&channel_ready) == 0)
 		return 0;
 	return waitq_sequence(&channel.waitq);
 }
@@ -50,7 +50,7 @@ int
 poll_wait(uint64_t observed, uint64_t deadline, unsigned flags)
 {
 	int error;
-	if (__atomic_load_n(&channel_ready, __ATOMIC_ACQUIRE) == 0)
+	if (atomic_load_acquire(&channel_ready) == 0)
 		return EAGAIN;
 	unsigned long irq = spin_lock_irqsave(&channel.lock);
 	error = waitq_sleep(&channel.waitq, &channel.lock, observed, deadline,

@@ -7,11 +7,6 @@
 #include <errno.h>
 #include <hal/hal.h>
 
-#if defined(__i386__)
-/* See include/kern/atomic.h: XCHG keeps pre-CMPXCHG i386 SMP-safe. */
-atomic_uint_t kern_i386_atomic_guard;
-#endif
-
 void spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
 {
 	lock->held.value = 0;
@@ -29,18 +24,18 @@ int spin_trylock(struct spinlock *lock)
 	if (!atomic_try_acquire_zero(&lock->held))
 		return 0;
 	lock->owner_cpu = cpu;
-	__atomic_store_n(&lock->owner_valid, 1U, __ATOMIC_RELEASE);
+	atomic_raw_store_release(&lock->owner_valid, 1U);
 	return 1;
 }
 void spin_lock(struct spinlock *lock)
-{ while (!spin_trylock(lock)) __asm__ volatile("" ::: "memory"); }
+{ while (!spin_trylock(lock)) hal_atomic_relax(); }
 void spin_unlock(struct spinlock *lock)
 {
 	unsigned cpu = hal_cpu_current();
 	if (atomic_load_acquire(&lock->held) == 0 || !lock->owner_valid ||
 	    lock->owner_cpu != cpu)
 		__builtin_trap();
-	__atomic_store_n(&lock->owner_valid, 0U, __ATOMIC_RELEASE);
+	atomic_raw_store_release(&lock->owner_valid, 0U);
 	atomic_store_release(&lock->held, 0);
 }
 unsigned long spin_lock_irqsave(struct spinlock *lock)

@@ -20,6 +20,7 @@
 
 #include <hal/types.h>
 #include <hal/arch.h>
+#include <hal/atomic.h>
 
 /*
  * Kernel C runtime

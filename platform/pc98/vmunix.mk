@@ -18,7 +18,7 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-Iinclude -Iinclude/uapi -Isrc -Isrc/hal/i386 -Ilibc/include \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PC98
 HAL_PC98_SOURCES := \
-	src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/i386/lib.c src/hal/i386/irq.c src/hal/i386/page.c \
+	src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c src/hal/i386/page.c \
 	src/hal/i386/mps.c src/hal/i386/acpi.c src/hal/i386/lapic.c \
 	src/hal/i386/ioapic.c src/hal/i386/interrupt-controller.c \
 	src/hal/i386/space.c src/hal/i386/int.c src/hal/i386/cmain.c \

@@ -12,6 +12,7 @@
 #include "libc/heap.h"
 #include "hal/hal.h"
 #include "kern/boot.h"
+#include "kern/atomic.h"
 #include "kern/buf.h"
 #include "kern/clock.h"
 #include "kern/kernel.h"
@@ -33,7 +34,7 @@
 static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
 	__attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
 static struct heap_allocator kernel_heap;
-static volatile unsigned kernel_heap_lock;
+static atomic_uint_t kernel_heap_lock;
 
 struct kernel_large_allocation {
 	struct kernel_large_allocation *next;
@@ -49,8 +50,7 @@ static bool
 kernel_heap_lock_enter(void)
 {
 	bool enabled = hal_irq_disable();
-	while (__atomic_exchange_n(&kernel_heap_lock, 1U,
-	    __ATOMIC_ACQUIRE) != 0)
+	while (!atomic_try_acquire_zero(&kernel_heap_lock))
 		hal_compiler_barrier();
 	return enabled;
 }
@@ -58,7 +58,7 @@ kernel_heap_lock_enter(void)
 static void
 kernel_heap_lock_leave(bool enabled)
 {
-	__atomic_store_n(&kernel_heap_lock, 0U, __ATOMIC_RELEASE);
+	atomic_store_release(&kernel_heap_lock, 0U);
 	if (enabled)
 		hal_irq_enable();
 }

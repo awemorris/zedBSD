@@ -4170,8 +4170,7 @@ sys_fcntl_call(const uintptr_t args[6])
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
 			return -EBADF;
-		result = __atomic_load_n(&file->f_signal_owner,
-		    __ATOMIC_ACQUIRE);
+		result = atomic_int_load_acquire(&file->f_signal_owner);
 		(void)file_close(file);
 		error = copyout(&result, args[2], sizeof(result));
 		return error == 0 ? 0 : -error;
@@ -4198,7 +4197,7 @@ sys_fcntl_call(const uintptr_t args[6])
 		file = filedesc_get_ref(process->fd, (int)args[0]);
 		if (file == NULL)
 			return -EBADF;
-		__atomic_store_n(&file->f_signal_owner, owner, __ATOMIC_RELEASE);
+		atomic_int_store_release(&file->f_signal_owner, owner);
 		(void)file_close(file);
 		return 0;
 	}
@@ -4344,7 +4343,7 @@ sys_getpriority_call(const uintptr_t args[6])
 	while ((target = process_find_next_ref(cursor)) != NULL) {
 		cursor = target->pid;
 		if (priority_matches(target, caller, which, (id_t)args[1])) {
-			int value = __atomic_load_n(&target->nice_value, __ATOMIC_RELAXED);
+			int value = atomic_int_load_relaxed(&target->nice_value);
 			if (!found || value < best) best = value;
 			found = 1;
 		}
@@ -4371,7 +4370,7 @@ sys_setpriority_call(const uintptr_t args[6])
 		struct ucred *target_cred;
 		cursor=target->pid;
 		if(priority_matches(target,caller,which,(id_t)args[1])){
-			int old=__atomic_load_n(&target->nice_value,__ATOMIC_RELAXED);
+			int old=atomic_int_load_relaxed(&target->nice_value);
 			found=1;
 			target_cred = cred_process_ref(target);
 			if(target_cred==NULL || (caller->cred->euid!=0 && caller->cred->euid!=target_cred->euid)){
@@ -4386,7 +4385,7 @@ sys_setpriority_call(const uintptr_t args[6])
 				process_release(target);
 				continue;
 			}
-			__atomic_store_n(&target->nice_value,value,__ATOMIC_RELAXED);
+			atomic_int_store_relaxed(&target->nice_value,value);
 		}
 		process_release(target);
 	}

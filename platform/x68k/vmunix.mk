@@ -79,6 +79,7 @@ X68K_STAGE2_OBJS := $(BUILD)/bootloader/x68k/stage2-start.o \
 	$(BUILD)/bootloader/x68k/mb89352.o
 X68K_EARLY_C_SOURCES := \
 	src/hal/cpu-up.c \
+	src/hal/m68k/atomic.c \
 	src/hal/m68k/runtime.c \
 	src/hal/m68k/cache.c \
 	src/hal/m68k/exception.c \

@@ -3,6 +3,7 @@
 
 #ifdef ZEDBSD_TEST_FAULTS
 #include <errno.h>
+#include <kern/atomic.h>
 #include <string.h>
 
 static struct kern_test_fault_config configured;
@@ -11,19 +12,19 @@ static uint64_t point_ordinals[KERN_TEST_FAULT_COUNT];
 static uint64_t sequence;
 static uint32_t log_head;
 static uint32_t log_count;
-static uint32_t guard;
+static atomic_uint_t guard;
 
 static void
 fault_lock(void)
 {
-	while (__atomic_exchange_n(&guard, 1U, __ATOMIC_ACQUIRE) != 0U)
+	while (!atomic_try_acquire_zero(&guard))
 		;
 }
 
 static void
 fault_unlock(void)
 {
-	__atomic_store_n(&guard, 0U, __ATOMIC_RELEASE);
+	atomic_store_release(&guard, 0U);
 }
 
 void
