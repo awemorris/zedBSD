@@ -29,7 +29,8 @@ interface_for_device(struct net_device *device, int create)
 	for (index = 0; index < NET_DEVICE_MAX; index++) {
 		if (interfaces[index].device == device)
 			return &interfaces[index];
-		if (interfaces[index].device == NULL && free_index == NET_DEVICE_MAX)
+		if (interfaces[index].device == NULL &&
+		    free_index == NET_DEVICE_MAX)
 			free_index = index;
 	}
 	if (!create || device == NULL || free_index == NET_DEVICE_MAX)
@@ -62,7 +63,7 @@ inet_interface_address(struct net_device *device, uint32_t *address,
 {
 	uint32_t configured;
 	int error = inet_interface_configuration(device, &configured, netmask,
-	    broadcast);
+						 broadcast);
 
 	if (error != 0 || configured == 0)
 		return error != 0 ? error : EADDRNOTAVAIL;
@@ -77,14 +78,14 @@ interface_update_route(struct inet_interface *interface, uint32_t old_address,
 {
 	if (old_address != 0 && old_netmask != 0)
 		(void)route_delete(old_address & old_netmask, old_netmask,
-		    interface->device);
+				   interface->device);
 	if (interface->address != 0 && interface->netmask != 0) {
 		(void)route_add_flags(interface->address & interface->netmask,
-		    interface->netmask, 0, interface->device,
-		    RTF_UP | RTF_CONNECTED);
+				      interface->netmask, 0, interface->device,
+				      RTF_UP | RTF_CONNECTED);
 		if (interface->broadcast == 0)
-			interface->broadcast = interface->address |
-			    ~interface->netmask;
+			interface->broadcast =
+			    interface->address | ~interface->netmask;
 	}
 }
 
@@ -142,8 +143,9 @@ inet_socket_connect(struct inet_socket *inet, const struct sockaddr *address,
 
 int
 inet_socket_local_conflict(const struct inet_socket *existing,
-	unsigned existing_reuse, const struct inet_socket *candidate,
-	unsigned candidate_reuse)
+			   unsigned existing_reuse,
+			   const struct inet_socket *candidate,
+			   unsigned candidate_reuse)
 {
 	if (existing == NULL || candidate == NULL ||
 	    existing->local_port == 0 || candidate->local_port == 0 ||
@@ -173,23 +175,26 @@ inet_socket_name(struct inet_socket *inet, struct sockaddr *address,
 		return ENOTCONN;
 	memset(&output, 0, sizeof(output));
 	output.sin_family = AF_INET;
-	output.sin_addr.s_addr = net_htonl(peer ? inet->remote_address :
-	    inet->local_address);
-	output.sin_port = net_htons(peer ? inet->remote_port : inet->local_port);
+	output.sin_addr.s_addr =
+	    net_htonl(peer ? inet->remote_address : inet->local_address);
+	output.sin_port =
+	    net_htons(peer ? inet->remote_port : inet->local_port);
 	copied = *length < sizeof(output) ? *length : sizeof(output);
 	memcpy(address, &output, copied);
 	*length = sizeof(output);
 	return 0;
 }
 
-int inet_socket_getsockname(struct inet_socket *inet, struct sockaddr *address,
-			    socklen_t *length)
+int
+inet_socket_getsockname(struct inet_socket *inet, struct sockaddr *address,
+			socklen_t *length)
 {
 	return inet_socket_name(inet, address, length, 0);
 }
 
-int inet_socket_getpeername(struct inet_socket *inet, struct sockaddr *address,
-			    socklen_t *length)
+int
+inet_socket_getpeername(struct inet_socket *inet, struct sockaddr *address,
+			socklen_t *length)
 {
 	return inet_socket_name(inet, address, length, 1);
 }
@@ -250,10 +255,16 @@ static unsigned
 device_flags(const struct net_device *device)
 {
 	unsigned flags = 0;
-	if (device->flags & NET_DEVICE_UP) flags |= IFF_UP;
-	if (device->flags & NET_DEVICE_RUNNING) flags |= IFF_RUNNING;
-	if (device->flags & NET_DEVICE_BROADCAST) flags |= IFF_BROADCAST;
-	if (device->flags & NET_DEVICE_MULTICAST) flags |= IFF_MULTICAST;
+	if (device->flags & NET_DEVICE_UP)
+		flags |= IFF_UP;
+	if (device->flags & NET_DEVICE_RUNNING)
+		flags |= IFF_RUNNING;
+	if (device->flags & NET_DEVICE_BROADCAST)
+		flags |= IFF_BROADCAST;
+	if (device->flags & NET_DEVICE_MULTICAST)
+		flags |= IFF_MULTICAST;
+	if (device->flags & NET_DEVICE_LOOPBACK)
+		flags |= IFF_LOOPBACK;
 	return flags;
 }
 
@@ -296,10 +307,11 @@ inet_ioctl_ifconf(uintptr_t argument)
 			break;
 		memset(&request, 0, sizeof(request));
 		memcpy(request.ifr_name, device->name,
-		    strnlen(device->name, sizeof(request.ifr_name) - 1U));
+		       strnlen(device->name, sizeof(request.ifr_name) - 1U));
 		request.ifr_ifindex = (int)device->ifindex;
-		error = copyout(&request,
-		    (uintptr_t)configuration.ifc_buf + copied, sizeof(request));
+		error =
+		    copyout(&request, (uintptr_t)configuration.ifc_buf + copied,
+			    sizeof(request));
 		net_device_release(device);
 		if (error != 0)
 			return error;
@@ -313,7 +325,7 @@ static int
 is_route_request(unsigned long command)
 {
 	return command == SIOCADDRT || command == SIOCDELRT ||
-	    command == SIOCGRTENTRY;
+	       command == SIOCGRTENTRY;
 }
 
 int
@@ -338,12 +350,13 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 		return error;
 	request.ifr_name[IFNAMSIZ - 1U] = '\0';
 	if (command == SIOCGIFNAME) {
-		device = net_device_find_by_index_ref((unsigned)request.ifr_ifindex);
+		device =
+		    net_device_find_by_index_ref((unsigned)request.ifr_ifindex);
 		if (device == NULL)
 			return ENODEV;
 		memset(request.ifr_name, 0, sizeof(request.ifr_name));
 		memcpy(request.ifr_name, device->name,
-		    strnlen(device->name, sizeof(request.ifr_name) - 1U));
+		       strnlen(device->name, sizeof(request.ifr_name) - 1U));
 		error = copyout(&request, argument, sizeof(request));
 		net_device_release(device);
 		return error;
@@ -372,7 +385,7 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 				return error;
 			}
 		} else if ((request.ifr_flags & IFF_UP) == 0 &&
-		    (device->flags & NET_DEVICE_UP)) {
+			   (device->flags & NET_DEVICE_UP)) {
 			net_device_close(device);
 		}
 		net_device_release(device);
@@ -418,9 +431,12 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 		value = net_ntohl(input->sin_addr.s_addr);
 		old_address = interface->address;
 		old_netmask = interface->netmask;
-		if (command == SIOCSIFADDR) interface->address = value;
-		if (command == SIOCSIFNETMASK) interface->netmask = value;
-		if (command == SIOCSIFBRDADDR) interface->broadcast = value;
+		if (command == SIOCSIFADDR)
+			interface->address = value;
+		if (command == SIOCSIFNETMASK)
+			interface->netmask = value;
+		if (command == SIOCSIFBRDADDR)
+			interface->broadcast = value;
 		interface_update_route(interface, old_address, old_netmask);
 		net_device_release(device);
 		return 0;
@@ -446,7 +462,7 @@ inet_create(int type, int protocol, struct socket **result)
 	return EPROTONOSUPPORT;
 }
 
-static const struct socket_family_ops inet_family = { .create = inet_create };
+static const struct socket_family_ops inet_family = {.create = inet_create};
 
 int
 inet_socket_init(void)
@@ -469,7 +485,8 @@ inet_interface_purge_device(struct net_device *device)
 		return;
 	for (index = 0; index < NET_DEVICE_MAX; index++)
 		if (interfaces[index].device == device) {
-			memset(&interfaces[index], 0, sizeof(interfaces[index]));
+			memset(&interfaces[index], 0,
+			       sizeof(interfaces[index]));
 			net_device_release(device);
 		}
 }

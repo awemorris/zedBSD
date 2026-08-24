@@ -1,0 +1,5 @@
+type=oneshot
+command=/sbin/ntpdate
+after=networkd
+restart=no
+required=NO

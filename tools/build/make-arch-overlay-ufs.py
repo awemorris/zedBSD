@@ -14,7 +14,7 @@ from pathlib import Path
 from ufs1_format import create
 
 DESTINATION=re.compile(
-    r"/(bin|lib|etc|var|home|usr)(?:/[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}){1,4}")
+    r"/(bin|sbin|lib|etc|var|home|usr)(?:/[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}){1,4}")
 
 
 def parse_files(specifications: list[str]) -> dict[str,Path]:
@@ -37,9 +37,10 @@ def build(args: argparse.Namespace) -> None:
     args.output.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="zedbsd-arch-ufs-") as work_text:
         root=Path(work_text)
-        for directory in ("bin", "lib", "etc", "var/run", "root", "home",
+        for directory in ("bin", "sbin", "lib", "etc", "var", "root", "home",
                           "usr/bin", "dev", "boot", "tmp", "run", "shm"):
             (root/directory).mkdir(parents=True, exist_ok=True)
+        (root/"var"/"run").symlink_to("../run")
         (root/"tmp").chmod(0o1777)
         (root/"shm").chmod(0o1777)
         (root/"lib"/"arch.id").write_text(args.profile+"\n",encoding="ascii")

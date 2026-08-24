@@ -1,6 +1,4 @@
 ﻿/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include <zedbsd/console.h>
-#include <zedbsd/system.h>
 #include "userland/base/sh/alias.h"
 #include "userland/base/sh/builtins.h"
 #include "userland/base/sh/expand.h"
@@ -8,7 +6,6 @@
 #include "userland/base/sh/lexer.h"
 #include "userland/base/sh/vars.h"
 
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <readline/history.h>
@@ -19,10 +16,8 @@
 #include <string.h>
 #include <signal.h>
 #include <spawn.h>
-#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -420,134 +415,6 @@ source_file(const char *path)
 }
 
 static int
-list_partitions(void)
-{
-	DIR *directory = opendir("/");
-	struct dirent *entry;
-	if (directory == NULL)
-		return 0;
-	while ((entry = readdir(directory)) != NULL)
-		printf("%s\n", entry->d_name);
-	closedir(directory);
-	return 1;
-}
-
-static int
-run_noct(int argc, char **argv)
-{
-	char *child[ARG_MAX + 2];
-	char resolved[256];
-	int i;
-	child[0] = "/usr/bin/noct";
-	if (argc == 0) {
-		child[1] = NULL;
-		return spawn_wait(child);
-	}
-	if (argv[0][0] == '/' || strchr(argv[0], '/') != NULL) {
-		strncpy(resolved, argv[0], sizeof(resolved) - 1U);
-		resolved[sizeof(resolved) - 1U] = '\0';
-	} else {
-		snprintf(resolved, sizeof(resolved), "/usr/bin/%s", argv[0]);
-		if (access(resolved, F_OK) != 0) {
-			snprintf(resolved, sizeof(resolved), "/bin/%s",
-				 argv[0]);
-			if (access(resolved, F_OK) != 0) {
-				snprintf(resolved, sizeof(resolved), "/%s",
-					 argv[0]);
-				if (access(resolved, F_OK) != 0)
-					return 0;
-			}
-		}
-	}
-	child[1] = resolved;
-	for (i = 1; i < argc && i + 1 < ARG_MAX + 1; i++)
-		child[i + 1] = argv[i];
-	child[i + 1] = NULL;
-	return spawn_wait(child);
-}
-
-static int
-show_devices(void)
-{
-	int fd = open("/dev/system", O_RDONLY);
-	struct system_info info;
-	uint32_t index;
-	if (fd < 0 || ioctl(fd, ZEDBSD_SYSTEM_GET_INFO, &info) != 0) {
-		if (fd >= 0)
-			close(fd);
-		return 0;
-	}
-	for (index = 0; index < info.device_count; index++) {
-		struct system_device_info device;
-		memset(&device, 0, sizeof(device));
-		device.index = index;
-		if (ioctl(fd, ZEDBSD_SYSTEM_GET_DEVICE, &device) != 0)
-			continue;
-		printf("%s%u BIOS %02x H/S %u/%u%s\n",
-		       device.device_class == 2	  ? "ide"
-		       : device.device_class == 3 ? "scsi"
-						  : "fd",
-		       device.display_index, device.bios_id, device.heads,
-		       device.sectors,
-		       device.bios_id == info.boot_bios_id ? " boot" : "");
-	}
-	close(fd);
-	return 1;
-}
-
-static int
-show_vmstat(void)
-{
-	int fd = open("/dev/system", O_RDONLY);
-	struct vm_statistics s;
-	if (fd < 0 || ioctl(fd, ZEDBSD_SYSTEM_GET_VMSTAT, &s) != 0) {
-		if (fd >= 0)
-			close(fd);
-		return 0;
-	}
-	close(fd);
-	printf(
-	    "physical.total=%llu\nphysical.free=%llu\n"
-	    "heap.fixed=%llu\nheap.current=%llu\nheap.peak=%llu\n"
-	    "heap.largest_free=%llu\nheap.largest_failed=%llu\n"
-	    "hal.tasks=%llu\nhal.task_stack_bytes=%llu\n"
-	    "hal.spaces=%llu\nhal.page_tables=%llu\n"
-	    "vm.resident=%llu\nvm.swapped=%llu\n"
-	    "swap.total=%llu\nswap.free=%llu\n"
-	    "vm.commit.limit=%llu\nvm.commit.used=%llu\n"
-	    "vm.commit.available=%llu\n",
-	    (unsigned long long)s.physical_total,
-	    (unsigned long long)s.physical_free,
-	    (unsigned long long)s.heap_fixed,
-	    (unsigned long long)s.heap_current, (unsigned long long)s.heap_peak,
-	    (unsigned long long)s.heap_largest_free,
-	    (unsigned long long)s.heap_largest_failed,
-	    (unsigned long long)s.hal_tasks,
-	    (unsigned long long)s.hal_task_stack_bytes,
-	    (unsigned long long)s.hal_spaces,
-	    (unsigned long long)s.hal_page_tables,
-	    (unsigned long long)s.vm_resident, (unsigned long long)s.vm_swapped,
-	    (unsigned long long)s.swap_total, (unsigned long long)s.swap_free,
-	    (unsigned long long)s.vm_commit_limit,
-	    (unsigned long long)s.vm_commit_used,
-	    (unsigned long long)s.vm_commit_available);
-	return 1;
-}
-
-static int
-system_power(unsigned long request)
-{
-	int fd = open("/dev/system", O_RDONLY);
-	if (fd < 0)
-		return 0;
-	if (ioctl(fd, request) != 0) {
-		close(fd);
-		return 0;
-	}
-	return 1;
-}
-
-static int
 run_external(char *const argv[])
 {
 	return spawn_wait(argv);
@@ -637,21 +504,9 @@ run_shell_script(int argc, char **argv, const char *path)
 }
 
 static int
-noct_path(const char *path)
-{
-	size_t length = strlen(path);
-
-	return length >= 4U && strcmp(path + length - 4U, ".nap") == 0;
-}
-
-static int
 resolve_command(const char *name, char *candidate, size_t capacity)
 {
-	if (search_path(name, "", 1, candidate, capacity))
-		return 1;
-	if (search_path(name, ".nap", 0, candidate, capacity))
-		return 1;
-	return search_path(name, "", 0, candidate, capacity);
+	return search_path(name, "", 1, candidate, capacity);
 }
 
 static int
@@ -661,13 +516,6 @@ run_resolved(int argc, char **argv, const char *path)
 	int index;
 
 	if (!is_elf(path)) {
-		if (noct_path(path)) {
-			child[0] = (char *)path;
-			for (index = 1; index < argc; index++)
-				child[index] = argv[index];
-			child[argc] = NULL;
-			return run_noct(argc, child);
-		}
 		return run_shell_script(argc, argv, path);
 	}
 	child[0] = (char *)path;
@@ -732,13 +580,12 @@ static int
 shell_builtin_name(const char *name)
 {
 	static const char *const names[] = {
-	    ":",       ".",	 "[",	     "alias",  "bg",	  "cd",
-	    "command", "device", "echo",     "env",    "eval",	  "exec",
-	    "exit",    "export", "false",    "fg",     "getopts", "halt",
-	    "hash",    "help",	 "jobs",     "part",   "pause",	  "printf",
-	    "pwd",     "read",	 "readonly", "reboot", "run",	  "set",
-	    "shift",   "source", "true",     "type",   "test",	  "umask",
-	    "unalias", "ulimit", "unset",    "vmstat", "wait",	  NULL};
+	    ":",       ".",	 "[",	  "alias",   "bg",	 "cd",
+	    "command", "echo",	 "env",	  "eval",    "exec",	 "exit",
+	    "export",  "false",	 "fg",	  "getopts", "hash",	 "help",
+	    "jobs",    "printf", "pwd",	  "read",    "readonly", "set",
+	    "shift",   "source", "true",  "type",    "test",	 "umask",
+	    "unalias", "ulimit", "unset", "wait",    NULL};
 	int index;
 	for (index = 0; names[index] != NULL; index++)
 		if (strcmp(name, names[index]) == 0)
@@ -932,12 +779,8 @@ command_dispatch(int argc, char **argv)
 		return wait_foreground(job, &status);
 	}
 	if (!strcmp(argv[0], "help")) {
-		puts("help echo pwd cd ls cp cat stat touch clear true false "
-		     "jobs fg bg "
-		     "env set export readonly unset pause wait device "
-		     "probe-ide probe-scsi "
-		     "part source "
-		     "run noct emacs vmstat reboot halt exit");
+		puts("help echo pwd cd true false jobs fg bg env set export "
+		     "readonly unset wait source exit");
 		return 1;
 	}
 	if (!strcmp(argv[0], "alias")) {
@@ -1190,35 +1033,6 @@ command_dispatch(int argc, char **argv)
 	}
 	if (!strcmp(argv[0], ":"))
 		return 1;
-	if (!strcmp(argv[0], "pause")) {
-		unsigned char byte;
-		int i;
-		for (i = 1; i < argc; i++)
-			printf("%s ", argv[i]);
-		return read(0, &byte, 1) == 1;
-	}
-	if (!strcmp(argv[0], "device") || !strcmp(argv[0], "probe-ide") ||
-	    !strcmp(argv[0], "probe-scsi"))
-		return show_devices();
-	if (!strcmp(argv[0], "part"))
-		return list_partitions();
-	if (!strcmp(argv[0], "vmstat"))
-		return argc == 1 && show_vmstat();
-	if (!strcmp(argv[0], "halt"))
-		return argc == 1 && system_power(ZEDBSD_SYSTEM_HALT);
-	if (!strcmp(argv[0], "reboot"))
-		return argc == 1 && system_power(ZEDBSD_SYSTEM_REBOOT);
-	if (!strcmp(argv[0], "emacs")) {
-		char *args[ARG_MAX];
-		int i;
-		if (getenv("REMACS_SKK_DICT") == NULL)
-			(void)setenv("REMACS_SKK_DICT", "/home/skkjisyo.dic",
-				     1);
-		args[0] = "/usr/bin/remacs.nap";
-		for (i = 1; i < argc && i < ARG_MAX; i++)
-			args[i] = argv[i];
-		return run_noct(argc, args);
-	}
 	if (!strcmp(argv[0], "exit"))
 		exit(argc == 2 ? atoi(argv[1]) : 0);
 	if (strchr(argv[0], '/') != NULL && access(argv[0], F_OK) == 0) {
@@ -1738,45 +1552,19 @@ done:
 	return result;
 }
 
-static void
-run_startup(void)
-{
-	struct console_event event;
-	struct timespec start, now, delay = {0, 10000000L};
-	int cancelled = 0;
-
-	if (access("/etc/zinit.rc", F_OK) != 0)
-		return;
-	(void)ioctl(0, ZEDBSD_CONSOLE_DRAIN_INPUT);
-	puts("Loading /etc/zinit.rc ... (Press any key to cancel)");
-	if (clock_gettime(CLOCK_MONOTONIC, &start) != 0)
-		return;
-	for (;;) {
-		if (ioctl(0, ZEDBSD_CONSOLE_POLL_EVENT, &event) == 0) {
-			cancelled = 1;
-			break;
-		}
-		if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
-			break;
-		if (now.tv_sec > start.tv_sec + 1 ||
-		    (now.tv_sec == start.tv_sec + 1 &&
-		     now.tv_nsec >= start.tv_nsec))
-			break;
-		(void)nanosleep(&delay, NULL);
-	}
-	if (!cancelled)
-		(void)source_file_mode("/etc/zinit.rc", 1);
-	else
-		(void)tcflush(0, TCIFLUSH);
-}
-
 int
 main(int argc, char **argv)
 {
 	if (sh_var_get("PATH") == NULL)
-		(void)sh_var_set("PATH", "/bin:/usr/bin", 1);
+		(void)sh_var_set("PATH", "/bin:/sbin:/usr/bin", 1);
 	if (sh_var_get("TERM") == NULL)
 		(void)sh_var_set("TERM", "zed", 1);
+	if (argc >= 3 && strcmp(argv[1], "-c") == 0) {
+		shell_name = argc >= 4 ? argv[3] : argv[0];
+		shell_positional_count = argc >= 4 ? argc - 4 : 0;
+		shell_positional = argc >= 4 ? argv + 4 : NULL;
+		return command(argv[2]) ? 0 : 1;
+	}
 	if (argc > 1) {
 		shell_name = argv[1];
 		shell_positional_count = argc - 2;
@@ -1785,7 +1573,6 @@ main(int argc, char **argv)
 	}
 	if (argc > 0 && argv[0] != NULL)
 		shell_name = argv[0];
-	run_startup();
 	using_history();
 	for (;;) {
 		char cwd[256];

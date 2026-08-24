@@ -389,9 +389,9 @@ AARCH64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
 	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/rpathtest.so \
 	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/versuse.so
 AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
-	--file /bin/sysctl=$(BUILD)/bin/sysctl \
-	--file /bin/mount=$(BUILD)/bin/mount \
-	--file /bin/umount=$(BUILD)/bin/umount \
+	--file /sbin/sysctl=$(BUILD)/bin/sysctl \
+	--file /sbin/mount=$(BUILD)/bin/mount \
+	--file /sbin/umount=$(BUILD)/bin/umount \
 	--file /lib/ld.so=$(DYNAMIC_DIR)/ld.so \
 	--file /lib/libc.so=$(DYNAMIC_DIR)/libc.so \
 	--file /lib/tlstest.so=$(DYNAMIC_DIR)/tlstest.so \
@@ -401,7 +401,7 @@ AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /lib/versuse.so=$(DYNAMIC_DIR)/versuse.so \
 	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
 AARCH64_ARCH_INPUTS += $(USER_BASIC_TARGETS)
-AARCH64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
+AARCH64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
 AARCH64_ARCH_FILES += $(ZEDBSD_USERLAND_FILE_MODES)
 AARCH64_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 AARCH64_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)

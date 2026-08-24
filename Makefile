@@ -88,6 +88,7 @@ USERLAND_$(1)_TYPE := $(if $(12),$(12),\
 	$(if $(filter library,$(5)),library,program))
 USERLAND_$(1)_DATA := $(13)
 USERLAND_$(1)_HEADERS := $(14)
+USERLAND_$(1)_INSTALL_DIR := $(if $(15),$(15),bin)
 endef
 # userland/noct is an upstream source submodule, not a zedBSD package tree.
 USERLAND_PACKAGE_MAKEFILES := $(filter-out userland/noct/%, $(sort \
@@ -129,7 +130,8 @@ override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 # Essential administrative tools are present even when an older config.mk
 # predates their package registration.
 override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) at batch \
-	blkid crontab gettext hostname logger lp mailx msgfmt ngettext talk)
+	blkid crontab getty gettext halt hostname init logger lp mailx msgfmt ngettext \
+	cron net networkd ntpdate poweroff reboot service shutdown syslogd talk)
 # Xzed cannot operate without the kernel graphics character device.  Keep
 # hand-edited and older saved configurations from producing an unusable
 # userland/kernel combination.
@@ -151,9 +153,10 @@ USERLAND_SELECTED_BASIC_PROGRAMS = $(filter $(ZEDBSD_USER_PROGRAMS),\
 	$(USERLAND_BASIC_PROGRAMS))
 USERLAND_SELECTED_NETWORK_PROGRAMS = $(filter $(ZEDBSD_USER_PROGRAMS),\
 	$(USERLAND_NETWORK_PROGRAMS))
+zedbsd_userland_destination = /$(USERLAND_$(1)_INSTALL_DIR)/$(1)
 ZEDBSD_USERLAND_FILE_MODES = $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 	$(if $(USERLAND_$(program)_MODE),\
-		--mode /bin/$(program)=$(USERLAND_$(program)_MODE)))
+		--mode $(call zedbsd_userland_destination,$(program))=$(USERLAND_$(program)_MODE)))
 ZEDBSD_SELECTED_DATA_PACKAGES = $(foreach package,$(ZEDBSD_USER_PROGRAMS),\
 	$(if $(strip $(USERLAND_$(package)_DATA)),$(package)))
 ZEDBSD_USERLAND_DATA_INPUTS = $(foreach package,\
@@ -1334,6 +1337,11 @@ define ZEDBSD_ROOTFS_TAR_RULE
 $(BUILD)/rootfs/.stamp: $(2) $(ZEDBSD_PACKAGE_INPUTS)
 	@rm -rf $(BUILD)/rootfs
 	@mkdir -p $(BUILD)/rootfs
+	@mkdir -p $(BUILD)/rootfs/bin $(BUILD)/rootfs/sbin \
+		$(BUILD)/rootfs/lib $(BUILD)/rootfs/etc $(BUILD)/rootfs/var \
+		$(BUILD)/rootfs/run $(BUILD)/rootfs/tmp $(BUILD)/rootfs/root \
+		$(BUILD)/rootfs/home $(BUILD)/rootfs/usr/bin
+	@ln -s ../run $(BUILD)/rootfs/var/run
 	@set -- $(3) $(ZEDBSD_PACKAGE_FILES); while test $$$$# -gt 0; do \
 		option=$$$$1; specification=$$$$2; shift 2; \
 		path=$$$${specification%%=*}; value=$$$${specification#*=}; \
@@ -1371,9 +1379,10 @@ clean:
 distclean:
 	rm -rf build
 
--include $(wildcard $(BUILD)/*.d $(BUILD)/*/*.d $(BUILD)/*/*/*.d \
-	$(BUILD)/*/*/*/*.d $(BUILD)/*/*/*/*/*.d \
-	$(BUILD)/*/*/*/*/*/*.d $(BUILD)/*/*/*/*/*/*/*.d)
+-include $(filter-out $(BUILD)/rootfs/%,$(wildcard $(BUILD)/*.d \
+	$(BUILD)/*/*.d $(BUILD)/*/*/*.d $(BUILD)/*/*/*/*.d \
+	$(BUILD)/*/*/*/*/*.d $(BUILD)/*/*/*/*/*/*.d \
+	$(BUILD)/*/*/*/*/*/*/*.d))
 
 .PHONY: check clean distclean \
 	overlay-journal-format-host-test uapi-abi-layout-check uapi-abi-lp64-check \

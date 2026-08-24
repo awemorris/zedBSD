@@ -1,6 +1,6 @@
 # zedBSD POSIX.1-2024 compliance master
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 ## 1. Project objective
 
@@ -40,6 +40,8 @@ state across components.
 | [`docs/phase9-posix-2024-audit.md`](phase9-posix-2024-audit.md) | detailed evidence and rationale from the 2026-08-24 first audit pass |
 | [`docs/phase10-local-reimplementation.md`](phase10-local-reimplementation.md) | detailed removal and local reimplementation design for `bc`, `ed`, and `m4` |
 | [`docs/posix2004.md`](posix2004.md) | historical execution plan and phase acceptance policy |
+| [`docs/system-services-roadmap.md`](system-services-roadmap.md) | active post-Phase-10 architecture and Phase 11--19 roadmap |
+| [`docs/phase11-19-execution-plan.md`](phase11-19-execution-plan.md) | active detailed scope, gates, evidence, and hand-off rules for Phases 11--19 |
 | Open Group Issue 8 pages | normative behavior to be reviewed; repository documents and tests do not replace the standard |
 
 When these artifacts disagree, do not choose the more optimistic status.
@@ -82,12 +84,12 @@ passes.  `5/5` replacement gates still does not mean full POSIX conformance.
 |---|---:|---|
 | matrix rows | 155 | complete profile inventory |
 | `reviewed` | 19 | utility-level review gate passed |
-| `implemented-unreviewed` | 111 | all were inspected by the first Phase 9 audit |
-| `deferred-stub` | 5 | service/provider blockers: `at`, `batch`, `crontab`, `logger`, `mailx` |
+| `implemented-unreviewed` | 115 | includes the new local `at`, `batch`, `crontab`, and `logger` implementations |
+| `deferred-stub` | 1 | remaining service/provider blocker: `mailx` |
 | `option-disabled` | 20 | outside the selected option profile |
 | historical Phase 9 P0 findings | 3 | the imported `bc`, `ed`, and `m4` findings were resolved by Phase 10 on 2026-08-24 |
 | current policy conflicts | 0 | the declared `userland/base` provenance gate rejects the removed imported trees and fingerprints |
-| current P1 known incompatibilities | 73 | the original 70 findings plus the three intentionally partial local replacements |
+| current P1 known incompatibilities | 77 | the prior 73 plus four intentionally partial local service utilities |
 | Phase 9 P2 incomplete proof | 38 | no confirmed complete review; targeted evidence is missing |
 | rows promoted by Phase 9 | 0 | no pending row satisfied the review checklist |
 
@@ -111,19 +113,26 @@ providers, services, or cross-component semantics remain pending.
 | 8.5 | implementation milestone complete | standalone packages and terminal stack exist; consumer/format review remains |
 | 9 | first audit pass complete | 111/111 pending rows inspected; remediation and conformance closure remain 0/111 |
 | 10 | replacement milestone complete | local `bc`, `ed`, and `m4` pass provenance, host, standalone, `make -j16`, and amd64 QEMU gates; POSIX completion remains open |
+| 11 | implementation milestone complete | administrative commands install in `/sbin`; the package interface accepts `PREFIX` and per-package install destinations |
+| 12 | implementation milestone complete | native PID 1, `rc.conf`, service definitions/client, ordered startup, supervision, and PID-1-only power control boot in QEMU |
+| 13 | implementation milestone complete | local libc syslog transport, `logger`, and `syslogd` deliver to `/var/log/messages`; live kernel streaming remains open |
+| 14 | partial | getty acquires the console; the explicitly passwordless root account authenticates and starts `/bin/sh` in production QEMU; logout/utmpx/respawn evidence remains open |
+| 15 | implementation milestone complete | kernel `lo0`, static networkd configuration, UNIX control, and `net` up/down pass QEMU; integrated DHCP/Wi-Fi remain open |
+| 16 | partial | local durable at/crontab spools and at execution pass QEMU; full time/cron grammar, batch policy, periodic-job evidence, and output delivery remain |
+| 17 | partial | bounded local `ntpdate` client exists and is boot-optional; controlled-server QEMU success/failure evidence remains open |
+| 18 | partial | zedBSD power/administration behavior and `/etc/zinit.rc` were removed and `sh -c` works; the required POSIX grammar and semantic inventory is substantially incomplete |
+| 19 | partial integration success | bounded amd64 QEMU service smoke passes through orderly poweroff initiation; the explicit hand-offs in Section 11 prevent a full integration claim |
 
 The Phase 0--10 series is closed as completed on 2026-08-24.  Here,
 "completed" means that each phase's defined implementation, audit, or
 replacement milestone was executed and its remaining work was handed off; it
-does not mean that every affected component is POSIX conforming.  There is no
-currently defined Phase 11 or later phase.
-
-Future work starts from the unmet rows in this master.  A new phase is assigned
-only after a coherent set of stable IDs has been selected and its scope,
-dependencies, acceptance gates, tests, and master-update rules have been
-written down.  The former assumption that init and service management would
-automatically be Phase 11 is withdrawn; those requirements remain unscheduled
-backlog items alongside the other unmet work.
+does not mean that every affected component is POSIX conforming.  Phases
+11--19 were defined on 2026-08-25 by the active system-services roadmap and
+detailed execution plan.  They implement a single native init/service model,
+logging, console sessions, networking, scheduled work, optional initial time,
+POSIX shell remediation, and integrated QEMU acceptance.  Any incomplete
+standards behavior discovered by those phases remains governed by this
+master's conservative hand-off policy.
 
 ## 5. Kernel subsystem tracker
 
@@ -147,7 +156,9 @@ may be implemented while its consuming utility remains non-conforming.
 | KERN-FSSTAT-01 | filesystem capacity/accounting | partial | `df`, `du` | provide and verify stable filesystem/device identity, portable block accounting, mount lookup, overflow behavior, and permission/error cases |
 | KERN-RSRC-01 | priorities | reviewed | `nice`, `renice` | declared current scope has reviewed utility evidence; keep regression and permission/range tests |
 | KERN-RSRC-02 | resource limits | reviewed | `ulimit`, shell | declared current scope has reviewed utility evidence; expand when new limit classes are exposed |
-| KERN-BOOT-01 | init/service lifecycle | missing | deferred providers | unscheduled master backlog: real PID 1, reaping, startup/shutdown order, supervision, credentials, restart, and service failure reporting |
+| KERN-BOOT-01 | init/service lifecycle | implemented-unreviewed | `/sbin/init`, service providers | native PID 1 boots and initiates ordered shutdown in QEMU; complete crash-loop, required-failure, stop-timeout, cycle, credential, and recovery evidence |
+| KERN-NET-01 | loopback and interface control | implemented-unreviewed | `networkd`, `net`, socket users | kernel `lo0` and static address/up/down work in QEMU; route effects, packet-path concurrency, counters, aliases, IPv6, and full ioctl review remain |
+| KERN-POLL-01 | UNIX listener readiness | partial | `init`, `networkd` | listener `poll()` did not wake reliably after a queued AF_UNIX stream connection in Phase 19; daemons use a bounded one-second nonblocking accept loop pending a focused kernel repair |
 
 ## 6. System call and kernel-interface tracker
 
@@ -186,7 +197,7 @@ dependency even when they are not POSIX public APIs.
 | TERM-CURSES-01 | curses library | implemented-unreviewed | future full-screen programs | expand window/input/update semantics and define the POSIX/XSI scope before any conformance claim |
 | ARCHIVE-01 | archive/ELF shared readers | implemented-unreviewed | `ar`, `nm`, `pax` | standard format variants, malformed data, overflow, metadata, symbol tables, non-ELF policy, and fuzz evidence |
 | SCCS-CORE-01 | SCCS history/p-file/locking core | partial | ten SCCS commands | classic weave/control interoperability, full flags/MRs/SIDs, preservation, stale locks, interrupted atomic updates |
-| SHELL-CORE-01 | shell lexer/parser/expansion/executor | partial | `sh` and shell builtins | full grammar, expansions, redirects/here-docs, compound commands/functions, jobs/traps, special-builtin semantics |
+| SHELL-CORE-01 | shell lexer/parser/expansion/executor | partial | `sh`, cron, login | `sh -c`, simple lists/pipelines/expansion and scripts work, and zedBSD administration paths are removed; reserved words, multiline continuation, compound commands, functions, grouping/subshell grammar, here-documents, full redirects/expansions, strict mode, `ENV`, jobs/traps, and special-builtin semantics remain |
 | BUILD-PKG-01 | standalone base package interface | implemented-unreviewed | all base packages | retain direct build/install coverage for source lists, libraries, headers, data-only packages, `PREFIX=/`, and ordinary prefixes |
 | BUILD-PROV-01 | base source provenance gate | reviewed | `bc`, `ed`, `m4` replacement scope | `make phase10-local-source-check` enforces exact local manifests, Zlib headers, removed-file references, and known external fingerprints; extend the manifest when future source is added |
 
@@ -194,12 +205,15 @@ dependency even when they are not POSIX public APIs.
 
 | ID | Facility/command | State | Current behavior | Completion requirement |
 |---|---|---|---|---|
-| SVC-SCHED-01 | `at`, `batch`, `crontab` | deferred-provider | explicit failure commands | scheduler service, durable spool, credentials/environment, process groups, output delivery, lifecycle tests |
-| SVC-LOG-01 | `logger` and system logging | deferred-provider | explicit failure command | logging endpoint/provider, libc integration, permissions, backpressure/storage failure, service tests |
+| SVC-SCHED-01 | `at`, `batch`, `crontab`, `cron` | partial | local durable spools; QEMU proves at execution and crontab persistence | complete POSIX at time grammar, queue policy, batch load gating, cron ranges/lists/steps/environment, periodic-job QEMU evidence, locking/races, and mail/output delivery |
+| SVC-LOG-01 | `logger` and system logging | implemented-unreviewed | `/run/log` datagrams reach local `syslogd` and `/var/log/messages` in QEMU | permissions/backpressure/rotation/storage failure, facility policy, live kernel stream, and durable boot-log review |
 | SVC-MAIL-01 | `mailx` | deferred-provider | explicit failure command | required mail provider and Send Mode; Receive Mode for enabled XSI/UP environment |
 | SVC-PRINT-01 | `lp` | reviewed | tested no-destination failure in the declared no-device profile | preserve provider replacement rules if CUPS is selected |
 | SVC-TALK-01 | `talk` | disabled-profile | installed failure command | local rendezvous provider and service only if UP/XSI profile is enabled |
-| SVC-INIT-01 | PID 1 and service manager | missing | current kernel/user startup path is not the planned service manager | unscheduled master backlog: lifecycle, supervision, shutdown, and recovery design; assign a phase only after re-planning |
+| SVC-INIT-01 | PID 1 and service manager | implemented-unreviewed | native `/sbin/init`, `/sbin/service`, `/etc/rc.conf`, and `/etc/service.d` | prove service restart after scheduled work, crash loops, dependency cycles, required/optional failures, malformed reload, stop timeout, persistence across reboot, and all shutdown actions |
+| SVC-GETTY-01 | getty/login session | partial | production QEMU accepts the explicitly passwordless root account and starts `/bin/sh` in `/root` without daemon churn | prove utmpx transitions, logout, hangup, getty respawn, locked-account rejection, and hashed-password authentication |
+| SVC-NET-01 | networkd/net | partial | static `lo0` and up/down pass QEMU via `/run/networkd.sock` | move DHCP lease ownership into networkd, add routes/DNS/lease renewal/link events, Wi-Fi, unprivileged read policy, and failure/recovery tests |
+| SVC-TIME-01 | ntpdate | partial | local bounded NTPv4 client, disabled by default | controlled QEMU server, malformed/spoofed/unreachable cases, DNS timeout, clock privilege/error evidence; periodic `ntpd` remains a later project |
 
 ## 9. Cross-cutting unmet work
 
@@ -243,7 +257,39 @@ These fractions are frozen at the completed replacement milestone.  The
 remaining conformance work in the hand-off column stays active in the master
 register and may be selected when a future phase is defined.
 
-## 11. Phase 9 unmet utility register
+## 11. Phase 11--19 execution result and hand-off
+
+The 2026-08-25 execution produced a bootable native service system and a
+repeatable `phase19-qemu-test` target.  The target boots the installed amd64
+image with `qemu-system-x86_64`, exercises shell `-c`/simple-list behavior,
+service list/status/policy reload, static loopback control, logger delivery,
+at-job execution, crontab persistence, and requests orderly poweroff through
+PID 1.  The production image was also booted separately and reached a stable
+`login:` prompt with syslogd, networkd, and cron resident.
+
+The following findings are deliberately not promoted to success:
+
+| ID | Component | Observed limitation | Safe current state / next unit |
+|---|---|---|---|
+| P18-SH-GRAMMAR | `/bin/sh` | `if`/`then`, `for`, `case`, functions, grouping, subshell grammar, here-documents, and multiline continuation after operators are not parsed as POSIX reserved-word grammar | Phase 18 is partial.  Keep the safe simple-command/list executor, then replace the line-at-a-time parser with a token-stream AST parser and clause-mapped tests before claiming POSIX shell compliance. |
+| P18-SH-SEMANTICS | `/bin/sh` | `ENV`, strict/extension mode separation, complete redirections and expansion ordering, special-builtin error rules, and full job control remain unproved or absent | Preserve libedit only for interactive input; implement each semantic family as a separate master-derived phase. |
+| P16-CRON | `cron`/`crontab` | QEMU proves durable crontab installation and proves the same daemon executes immediate at jobs, but periodic crontab execution and a restart attempted after scheduled work did not complete within the focused bound | Keep cron enabled as a minimal scheduler; add daemon reload/restart diagnostics, full field parser, deterministic clock fixture, locking, and periodic execution evidence. |
+| P16-AT-BATCH | `at`/`batch` | accepted time syntax is only `now`, `now + N minutes/hours`, and `HH:MM`; batch does not wait for a load threshold | Retain honest subset behavior and durable jobs; implement the POSIX operand grammar, queue policy, environment, cancellation races, and output delivery next. |
+| P13-KLOG | `syslogd` | boot messages are a snapshot, not a live kernel-log stream; rotation and storage failure policy are absent | Keep `/run/log` and `/var/log/messages`; add a pollable kernel reader and rotation/backpressure policy in a later logging phase. |
+| P14-AUTH | getty/login | at the project owner's direction, the shipped root account has an empty password; production QEMU proves empty-password authentication and shell startup in `/root`, but logout/respawn and session accounting remain unproved | Treat passwordless root as a development-image policy only; before adding remote login, lock the account or provision a hashed password, and add locked/hashed authentication plus session/utmpx assertions. |
+| P15-DHCP | networkd | DHCP currently launches the local `dhcpcd`; lease state, renewal, routes, and DNS are not owned by networkd | Static configuration is usable.  Move the existing local DHCP engine behind networkd's state machine before retiring dhcpcd. |
+| P17-NTP | ntpdate | implementation builds, is bounded, and is disabled by default, but no controlled NTP endpoint was available in the guest test | Add a deterministic QEMU network fixture for valid, malformed, spoofed, and timeout responses before enabling at boot. |
+| P19-UNIX-POLL | kernel AF_UNIX/poll | listener readiness did not reliably wake init/networkd after a connection queued | Current daemons use nonblocking accept plus a one-second bounded loop.  Repair `poll_notify()`/listener readiness and restore event-driven waits in a focused kernel phase. |
+| P19-VARRUN | overlay VFS | creating sockets through the root-image `/var/run -> ../run` symlink returned `EOPNOTSUPP` | Runtime endpoints live directly in tmpfs `/run`; repair overlay symlink traversal for create/bind, then provide `/var/run` compatibility. |
+| P19-COVERAGE | integration | passwordless root login and shell startup pass in production QEMU; DHCP, logout/respawn, ntpdate success, crash-loop/cycle/malformed-service recovery, reboot persistence, and periodic cron remain outside passing markers | Phase 19 is partial integration success.  Extend the focused QEMU target rather than weakening its current markers. |
+
+Build and evidence commands used for this result are `make -j16`,
+`make -j16 phase19-qemu-test`, and a separate bounded production-image boot
+under `qemu-system-x86_64`.  The aggregate `make check` and its ILP32 path were
+not used.  Userland/base C and header sources were formatted with
+clang-format 22.1.8.  No source commit was created.
+
+## 12. Phase 9 unmet utility register
 
 This section embeds all 111 findings from the first Phase 9 audit and carries
 their current hand-off state.  It is the human-readable work register; the
@@ -366,7 +412,7 @@ The current register therefore contains 0 P0, 73 P1, and 38 P2 findings.
 | 152 | [xargs](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/xargs.html) | P1 known incompatibility | Tokenizes input then executes exactly once; batching and size limits, quoting/escaping correctness, EOF strings, `-I`/`-L`/`-n`/`-s`/`-x`/`-p`/`-t`/`-r`/`-0`, empty input, and 123--127 statuses are absent. |
 | 155 | [zcat](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/zcat.html) | P2 incomplete proof | `.Z` stdout decoding exists; multiple operands, suffix lookup, stdin, malformed/truncated streams, read/write interruption, broken pipe, diagnostics/status, and compatibility vectors remain. |
 
-## 12. Update protocol
+## 13. Update protocol
 
 Every POSIX-related implementation turn shall update this master when it
 changes the truth represented by a row.  A normal update consists of:
@@ -399,7 +445,7 @@ dependency decisions, acceptance gates, and intended test targets.  Phase
 numbers are planning labels assigned at that time; no Phase 11-or-later order
 is reserved by the historical `docs/posix2004.md` plan.
 
-## 13. Completion and iteration policy
+## 14. Completion and iteration policy
 
 The project-level goal is reached only when:
 

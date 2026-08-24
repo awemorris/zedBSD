@@ -5,11 +5,17 @@
 #include <stddef.h>
 
 #ifndef ZEDBSD_INIT_PATH
-#define ZEDBSD_INIT_PATH "/bin/sh"
+#define ZEDBSD_INIT_PATH "/sbin/init"
 #endif
 
 int
 kern_init_start(void)
 {
-	return process_spawn_init(ZEDBSD_INIT_PATH, NULL);
+	int error = process_spawn_init(ZEDBSD_INIT_PATH, NULL);
+
+	/* A missing or corrupt init must remain diagnosable from the console.
+	 */
+	if (error != 0)
+		return process_spawn_init("/bin/sh", NULL);
+	return 0;
 }

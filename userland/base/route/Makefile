@@ -2,4 +2,4 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 
 # zedBSD userland package
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,route,route,*,y,network,userland/base/route/main.c,y,base,,))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,route,route,*,y,network,userland/base/route/main.c,y,base,,,0755,program,,,sbin))

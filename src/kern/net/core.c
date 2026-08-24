@@ -16,9 +16,9 @@
 #include <stdbool.h>
 #include <string.h>
 
-#define NET_POLL_BUDGET        16U
-#define NET_WORK_BUDGET        32U
-#define NET_INPUT_QUEUE_LIMIT  PACKET_BUF_POOL_COUNT
+#define NET_POLL_BUDGET 16U
+#define NET_WORK_BUDGET 32U
+#define NET_INPUT_QUEUE_LIMIT PACKET_BUF_POOL_COUNT
 
 extern int ethernet_input(struct packet_buf *packet);
 
@@ -29,6 +29,54 @@ static struct thread *worker_thread;
 static struct net_stats network_stats;
 static int network_stopping;
 static struct spinlock input_lock;
+static struct net_device *loopback_device;
+
+static int
+loopback_open(struct net_device *device)
+{
+	device->flags |= NET_DEVICE_RUNNING;
+	return 0;
+}
+
+static void
+loopback_close(struct net_device *device)
+{
+	device->flags &= ~NET_DEVICE_RUNNING;
+}
+
+static int
+loopback_transmit(struct net_device *device, struct packet_buf *packet)
+{
+	net_device_receive(device, packet);
+	return 0;
+}
+
+static const struct net_device_ops loopback_ops = {
+    .open = loopback_open,
+    .close = loopback_close,
+    .transmit = loopback_transmit,
+};
+
+static int
+loopback_init(void)
+{
+	int error;
+	loopback_device = net_device_alloc();
+	if (loopback_device == NULL)
+		return ENOMEM;
+	strcpy(loopback_device->name, "lo0");
+	loopback_device->mtu = 65535;
+	loopback_device->hwaddr_len = 6;
+	loopback_device->hwaddr[5] = 1;
+	loopback_device->flags = NET_DEVICE_LOOPBACK;
+	loopback_device->ops = &loopback_ops;
+	error = net_device_create(loopback_device);
+	if (error != 0) {
+		net_device_destroy(loopback_device);
+		loopback_device = NULL;
+	}
+	return error;
+}
 
 static struct packet_buf *
 input_dequeue(void)
@@ -122,7 +170,7 @@ work_pending(void)
 	spin_unlock_irqrestore(&input_lock, irq);
 	if (pending)
 		return 1;
-	for (index = 0; ; index++) {
+	for (index = 0;; index++) {
 		struct net_device *device = net_device_at_ref(index);
 
 		if (device == NULL)
@@ -182,6 +230,9 @@ net_init(void)
 	spin_init(&input_lock, LOCK_RANK_NETWORK, "network input");
 	packet_buf_pool_init();
 	net_device_registry_init();
+	error = loopback_init();
+	if (error != 0)
+		return error;
 	socket_core_init();
 	ethernet_init();
 	route_init();
@@ -243,7 +294,7 @@ net_shutdown_for_boot(void)
 	irq = spin_lock_irqsave(&input_lock);
 	network_stopping = 1;
 	spin_unlock_irqrestore(&input_lock, irq);
-	for (index = 0; ; index++) {
+	for (index = 0;; index++) {
 		struct net_device *device = net_device_at_ref(index);
 
 		if (device == NULL)

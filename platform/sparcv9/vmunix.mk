@@ -491,7 +491,7 @@ SPARCV9_ROOTFS_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
 	$(SPARCV9_DYNAMIC_DIR)/verstest.so \
 	$(SPARCV9_DYNAMIC_DIR)/versuse.so
 SPARCV9_ROOTFS_FILES := --file /bin/sh=$(BUILD)/bin/sh \
-	--file /bin/sysctl=$(BUILD)/bin/sysctl \
+	--file /sbin/sysctl=$(BUILD)/bin/sysctl \
 	--file /lib/ld.so=$(SPARCV9_DYNAMIC_DIR)/ld.so \
 	--file /lib/libc.so=$(SPARCV9_DYNAMIC_DIR)/libc.so \
 	--file /lib/tlstest.so=$(SPARCV9_DYNAMIC_DIR)/tlstest.so \

@@ -1,0 +1,5 @@
+type=daemon
+command=/sbin/cron
+after=syslogd,networkd,ntpdate
+restart=on-failure
+required=NO

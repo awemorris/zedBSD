@@ -18,9 +18,8 @@
 #include "kern/vm-reclaim.h"
 
 #ifndef ZEDBSD_INIT_PATH
-#define ZEDBSD_INIT_PATH "/bin/sh"
+#define ZEDBSD_INIT_PATH "/sbin/init"
 #endif
-
 
 /*
  * Stage 2 runs without a C library or operating-system services.  The request
@@ -39,33 +38,38 @@ struct part parts[MAX_PARTS];
 int curdev = -1, curpart = -1;
 
 /* Minimal freestanding string and memory primitives. */
-void memzero(void *p, uint32_t n)
+void
+memzero(void *p, uint32_t n)
 {
 	uint8_t *q = p;
 	while (n--)
 		*q++ = 0;
 }
-void memcopy(void *d, const void *s, uint32_t n)
+void
+memcopy(void *d, const void *s, uint32_t n)
 {
 	uint8_t *a = d;
 	const uint8_t *b = s;
 	while (n--)
 		*a++ = *b++;
 }
-int streq(const char *a, const char *b)
+int
+streq(const char *a, const char *b)
 {
 	while (*a && *a == *b)
 		a++, b++;
 	return *a == *b;
 }
-unsigned slen(const char *s)
+unsigned
+slen(const char *s)
 {
 	unsigned n = 0;
 	while (s[n])
 		n++;
 	return n;
 }
-int strcopy(char *destination, const char *source, unsigned capacity)
+int
+strcopy(char *destination, const char *source, unsigned capacity)
 {
 	unsigned i = 0;
 
@@ -83,26 +87,31 @@ int strcopy(char *destination, const char *source, unsigned capacity)
 	return 1;
 }
 
-void update_cursor(void)
+void
+update_cursor(void)
 {
 	hal_cons_update_cursor();
 }
 
-void putc(char c)
+void
+putc(char c)
 {
 	hal_cons_putc((uint8_t)c);
 }
-void puts(const char *s)
+void
+puts(const char *s)
 {
 	hal_cons_write(s);
 }
-void hex8(uint8_t v)
+void
+hex8(uint8_t v)
 {
 	const char *h = "0123456789ABCDEF";
 	putc(h[v >> 4]);
 	putc(h[v & 15]);
 }
-void dec(unsigned v)
+void
+dec(unsigned v)
 {
 	char b[11];
 	unsigned n = 0;
@@ -121,9 +130,10 @@ void dec(unsigned v)
 uint64_t clock_ticks(void);
 
 /* Validated Stage 1 handoff and top-level Stage 2 command loop. */
-void kernel_main(const struct boot_handoff *h,
-		 const struct boot_device *platform_devices,
-		 unsigned platform_device_count)
+void
+kernel_main(const struct boot_handoff *h,
+	    const struct boot_device *platform_devices,
+	    unsigned platform_device_count)
 {
 	int error;
 
@@ -141,24 +151,29 @@ void kernel_main(const struct boot_handoff *h,
 	error = kern_vfs_init(h, platform_devices, platform_device_count);
 	if (error != 0) {
 		hal_printf("VFS initialization failed (%d); entering idle.\n",
-		    error);
+			   error);
 		kern_logf("VFS initialization failed (%d); entering idle.\n",
-		    error);
+			  error);
 	} else {
 		error = vm_commit_init();
 		if (error != 0) {
 			hal_printf("VM commit initialization failed (%d); "
-			    "entering idle.\n", error);
+				   "entering idle.\n",
+				   error);
 			kern_logf("VM commit initialization failed (%d); "
-			    "entering idle.\n", error);
+				  "entering idle.\n",
+				  error);
 		} else {
-			hal_printf("boot: starting init %s\n", ZEDBSD_INIT_PATH);
-			kern_logf("boot: starting init %s\n\n", ZEDBSD_INIT_PATH);
+			hal_printf("boot: starting init %s\n",
+				   ZEDBSD_INIT_PATH);
+			kern_logf("boot: starting init %s\n\n",
+				  ZEDBSD_INIT_PATH);
 			{
 				int init_error = kern_init_start();
 				if (init_error != 0)
-					kern_logf("init not started (%d); entering idle.\n",
-					    init_error);
+					kern_logf("init not started (%d); "
+						  "entering idle.\n",
+						  init_error);
 			}
 		}
 	}

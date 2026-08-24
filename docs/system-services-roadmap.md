@@ -1,0 +1,154 @@
+# zedBSD system services roadmap
+
+Last updated: 2026-08-25
+
+## 1. Objective
+
+This roadmap defines the post-Phase-10 implementation sequence for a usable,
+shell-independent zedBSD boot and service environment.  It introduces a
+single native PID 1, declarative service definitions, console login, system
+logging, network management, job scheduling, optional boot-time clock setting,
+and a POSIX.1-2024 shell remediation phase.  The final phase boots and operates
+the complete system under `qemu-system-x86_64` and repairs integration failures
+until the documented minimum system works.
+
+The roadmap is iterative.  A Phase may leave a standards gap only when the
+implemented subset is safe and useful, the limitation is recorded in
+`docs/posix-compliance-master.md`, and the Phase acceptance result states
+whether it is complete or partially successful.  Integration defects that
+prevent the documented minimum system from booting, logging in, operating, or
+shutting down are not hand-off items: Phase 19 must repair them.
+
+No external implementation is imported into `userland/base`.  No commit is
+created by this work.
+
+## 2. Fixed architecture
+
+### 2.1 Boot and service management
+
+- zedBSD has one native `/sbin/init`; the earlier `init.sysv`/`init.bsd`
+  hard-link proposal is superseded.
+- Runlevels are not implemented.
+- PID 1 uses explicit lifecycle states: booting, running, stopping,
+  finalizing, and halt/poweroff/reboot.
+- `/etc/service.d/NAME` contains declarative service metadata, never shell
+  code.
+- `/etc/rc.conf` is parsed as data, never sourced or evaluated by a shell.
+- Enabled services are started in dependency order and active services are
+  stopped in reverse dependency/start order.
+- Daemons run in the foreground.  PID 1 owns child supervision; pidfiles are
+  not the authority.
+- `/sbin/service` edits only exact `NAME_enable` assignments and performs
+  runtime operations through `/run/init.sock`.
+- `enable` and `disable` change persistent policy but do not implicitly start
+  or stop the current instance.
+- `halt`, `poweroff`, and `reboot` request an orderly transition through PID 1.
+
+### 2.2 Configuration boundaries
+
+`/etc/rc.conf` is the single source for host settings, service enablement, and
+service options.  Structured databases remain separate where their format is
+the interface:
+
+| Data | Path |
+|---|---|
+| filesystems | `/etc/fstab` |
+| service definitions | `/etc/service.d/*` |
+| account databases | `/etc/passwd`, `/etc/group`, `/etc/shadow` |
+| user periodic jobs | cron spool/crontabs |
+| one-shot jobs | at spool |
+| resolver output | `/etc/resolv.conf` |
+
+PID 1 does not parse fstab.  A required internal oneshot invokes
+`/sbin/mount -a`; the mount utility owns fstab parsing.
+
+### 2.3 Logging
+
+- `/run/log` is the initial local AF_UNIX datagram endpoint.
+- `/var/log/messages` is the only initial persistent general log.
+- `/run/dmesg.boot` is the boot-time kernel-message snapshot.
+- `/var/log/syslog` and `/var/log/dmesg` are not created.
+- `logger` implements POSIX.1-2024 behavior.  The libc syslog family is an XSI
+  interface and is tracked separately from the non-standard `syslogd` daemon.
+
+### 2.4 Network management
+
+- `networkd` is authoritative for interfaces named in `rc.conf`.
+- `net` is the control front end and does not mutate managed interfaces behind
+  the daemon's back.
+- The first implementation supports loopback, interface up/down, static IPv4,
+  a default route, initial DHCP acquisition, DNS output, and status.
+- DHCP renewal, rebinding, expiry, and release are explicit later hand-offs.
+- The existing `dhcpcd` remains available temporarily but cannot manage an
+  interface concurrently with `networkd`; eventual integration/removal is a
+  later project.
+- Wi-Fi is a future `networkd` responsibility but is outside Phases 11--19.
+
+### 2.5 Scheduling and time
+
+- A single OpenBSD-style `/sbin/cron` owns periodic crontabs and the `at` and
+  `batch` queues.
+- Cron job command text is executed by `/bin/sh`; boot and PID 1 remain
+  independent of the shell.
+- Job output is durably spooled while no mail provider exists.
+- `ntpd`, `adjtime()`, and `adjfreq()` are outside this roadmap and are not
+  POSIX requirements.
+- An optional `/sbin/ntpdate` oneshot may set the clock once after networking
+  and before cron.  It is disabled by default.
+
+### 2.6 Shell compatibility
+
+- Phase 18 brings `/bin/sh` to the POSIX.1-2024 shell contract.
+- zedBSD-only administration builtins and direct power ioctls are removed.
+- Interactive libedit/readline-compatible editing remains an extension and
+  must not affect non-interactive execution.
+- A documented, tested whitelist of widespread bash/ksh-style extensions may
+  remain.  Strict POSIX mode disables non-standard syntax and behavior.
+- POSIX.1-2024 features such as dollar-single-quote syntax and `pipefail` are
+  core requirements, not extension credits.
+
+## 3. Phase sequence
+
+| Phase | Name | Required outcome |
+|---|---|---|
+| 11 | service foundation and layout | parsers, formats, path policy, tests, and `/sbin` classification are stable |
+| 12 | init and service lifecycle | the system boots under native PID 1, controls services, mounts filesystems, and shuts down orderly |
+| 13 | system logging | `logger`, `/run/log`, `syslogd`, kernel-log persistence, and `/var/log/messages` work |
+| 14 | console sessions | supervised `getty` reaches `login`, records sessions, and respawns safely |
+| 15 | network management | `networkd` and `net` configure static IPv4 and acquire DHCP configuration |
+| 16 | scheduled work | `cron`, `crontab`, `at`, and `batch` execute jobs with durable ownership and output state |
+| 17 | optional initial time | bounded `ntpdate` oneshot works without making boot depend on network time |
+| 18 | POSIX shell | `/bin/sh` passes the defined Issue 8 shell suite; allowed extensions remain isolated |
+| 19 | integrated acceptance | QEMU system boots, logs in, operates services/jobs/networking, and shuts down; blocking defects are fixed |
+
+## 4. Evidence policy
+
+Every Phase must:
+
+1. format new and modified userland C/header files with clang-format;
+2. build through `make -j16`;
+3. use focused host tests where they test parsers or pure logic without
+   pretending to prove kernel behavior;
+4. use bounded `qemu-system-x86_64` tests for runtime behavior;
+5. avoid the aggregate `make check` target;
+6. run `git diff --check` and the applicable provenance/matrix checks;
+7. update `docs/posix-compliance-master.md` with actual evidence and remaining
+   gaps; and
+8. leave the working tree uncommitted.
+
+Phase 19 may mark the roadmap partially successful when a newly discovered
+POSIX incompatibility is outside the planned implementation and the minimum
+system still operates safely.  It must not use that rule for ordinary
+integration bugs, boot failures, data corruption, or shutdown failures.
+
+## 5. Reconsideration boundary
+
+Stop and request direction instead of expanding the design if work requires:
+
+- importing an external base implementation;
+- changing the single-init, no-runlevel model;
+- introducing shell execution into PID 1 or service definitions;
+- replacing the single `rc.conf` service-policy model;
+- adding a material public kernel ABI not identified by the applicable Phase;
+  or
+- weakening a correct POSIX expectation or QEMU acceptance test.

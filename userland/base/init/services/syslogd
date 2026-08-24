@@ -1,0 +1,4 @@
+type=daemon
+command=/sbin/syslogd
+restart=on-failure
+required=YES

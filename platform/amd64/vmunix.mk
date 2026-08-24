@@ -592,9 +592,9 @@ AMD64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/nettest \
 	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/versuse.so
 AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/nettest=$(BUILD)/bin/nettest \
-	--file /bin/sysctl=$(BUILD)/bin/sysctl \
-	--file /bin/mount=$(BUILD)/bin/mount \
-	--file /bin/umount=$(BUILD)/bin/umount \
+	--file /sbin/sysctl=$(BUILD)/bin/sysctl \
+	--file /sbin/mount=$(BUILD)/bin/mount \
+	--file /sbin/umount=$(BUILD)/bin/umount \
 	--file /lib/ld.so=$(DYNAMIC_DIR)/ld.so \
 	--file /lib/libc.so=$(DYNAMIC_DIR)/libc.so \
 	--file /lib/tlstest.so=$(DYNAMIC_DIR)/tlstest.so \
@@ -604,9 +604,9 @@ AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /lib/versuse.so=$(DYNAMIC_DIR)/versuse.so \
 	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
 AMD64_ARCH_INPUTS += $(addprefix $(BUILD)/bin/,$(USERLAND_SELECTED_NETWORK_PROGRAMS))
-AMD64_ARCH_FILES += $(foreach command,$(USERLAND_SELECTED_NETWORK_PROGRAMS),--file /bin/$(command)=$(BUILD)/bin/$(command))
+AMD64_ARCH_FILES += $(foreach command,$(USERLAND_SELECTED_NETWORK_PROGRAMS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
 AMD64_ARCH_INPUTS += $(USER_BASIC_TARGETS)
-AMD64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
+AMD64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
 AMD64_ARCH_FILES += $(ZEDBSD_USERLAND_FILE_MODES)
 AMD64_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 AMD64_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
@@ -922,6 +922,38 @@ posix-phase8-qemu-test: $(BUILD)/posix-phase8-qemu.img \
 	tests/posix-phase8-qemu-test.py
 	$(PYTHON) tests/posix-phase8-qemu-test.py \
 		--qemu $(QEMU) --image $(BUILD)/posix-phase8-qemu.img
+
+AMD64_PHASE19_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-phase19-test.ufs
+AMD64_PHASE19_TEST_FILES := $(subst \
+	--file /etc/rc.conf=userland/base/etc/rc.conf,\
+	--file /etc/rc.conf=tests/phase19-rc.conf,$(AMD64_ARCH_FILES))
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_PHASE19_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/phase19-rc.conf tests/phase19-service \
+	tests/phase19-smoke.sh,\
+	$(AMD64_PHASE19_TEST_FILES) \
+	--file /etc/service.d/phase19_smoke=tests/phase19-service \
+	--file /etc/phase19-smoke.sh=tests/phase19-smoke.sh))
+
+$(BUILD)/phase19-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_PHASE19_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	platform/amd64/tools/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+		--stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--arch-profile amd64 --arch-image $(AMD64_PHASE19_TEST_UFS) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
+
+phase19-qemu-test: $(BUILD)/phase19-qemu.img tests/phase19-qemu-test.py
+	$(PYTHON) tests/phase19-qemu-test.py \
+		--qemu qemu-system-x86_64 --image $(BUILD)/phase19-qemu.img
 
 AMD64_POSIX_PHASE85_CURSES_SOURCES := tests/posix-phase85-curses.c \
 	userland/base/curses/curses.c userland/base/common/terminfo.c

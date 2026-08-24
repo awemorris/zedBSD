@@ -1,0 +1,2 @@
+# device                mountpoint      type    options
+# Root is mounted by the kernel.  Additional filesystems may be listed here.

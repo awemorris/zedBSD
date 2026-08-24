@@ -21,8 +21,8 @@ ZEDBSD_STANDALONE_PLATFORM_DIR = $(strip \
 	$(if $(filter rpi4,$(ZEDBSD_PLATFORM)),arm64,\
 	$(if $(filter sun4u,$(ZEDBSD_PLATFORM)),sparcv9,\
 	$(ZEDBSD_PLATFORM)))))
-ZEDBSD_STANDALONE_BINDIR = $(strip $(if $(filter /,$(PREFIX)),/bin,\
-	$(patsubst %/,%,$(PREFIX))/bin))
+ZEDBSD_STANDALONE_BINDIR = $(strip $(if $(filter /,$(PREFIX)),\
+	/$(ZEDBSD_STANDALONE_INSTALL_DIR),$(patsubst %/,%,$(PREFIX))/$(ZEDBSD_STANDALONE_INSTALL_DIR)))
 ZEDBSD_STANDALONE_TERMINFO_DIR = $(strip $(if $(filter /,$(PREFIX)),\
 	/lib/terminfo,$(patsubst %/,%,$(PREFIX))/share/terminfo))
 
@@ -35,6 +35,7 @@ ZEDBSD_STANDALONE_MODE := $(if $(11),$(11),0755)
 ZEDBSD_STANDALONE_TYPE := $(if $(12),$(12),$(if $(filter library,$(5)),library,program))
 ZEDBSD_STANDALONE_DATA := $(13)
 ZEDBSD_STANDALONE_HEADERS := $(14)
+ZEDBSD_STANDALONE_INSTALL_DIR := $(if $(15),$(15),bin)
 endef
 
 .PHONY: all install clean

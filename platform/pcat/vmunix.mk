@@ -182,9 +182,9 @@ I386_ARCH_INPUTS := $(BUILD)/bin/sh \
 	$(BUILD)/dynamic/verstest.so $(BUILD)/dynamic/versuse.so
 I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/nettest=$(BUILD)/bin/nettest \
-	--file /bin/sysctl=$(BUILD)/bin/sysctl \
-	--file /bin/mount=$(BUILD)/bin/mount \
-	--file /bin/umount=$(BUILD)/bin/umount \
+	--file /sbin/sysctl=$(BUILD)/bin/sysctl \
+	--file /sbin/mount=$(BUILD)/bin/mount \
+	--file /sbin/umount=$(BUILD)/bin/umount \
 	--file /lib/ld.so=$(BUILD)/dynamic/ld.so \
 	--file /lib/libc.so=$(BUILD)/dynamic/libc.so \
 	--file /lib/tlstest.so=$(BUILD)/dynamic/tlstest.so \
@@ -194,9 +194,9 @@ I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /lib/versuse.so=$(BUILD)/dynamic/versuse.so \
 	--file /bin/dyntest=$(BUILD)/dynamic/dyntest
 I386_ARCH_INPUTS += $(addprefix $(BUILD)/bin/,$(USERLAND_SELECTED_NETWORK_PROGRAMS))
-I386_ARCH_FILES += $(foreach command,$(USERLAND_SELECTED_NETWORK_PROGRAMS),--file /bin/$(command)=$(BUILD)/bin/$(command))
+I386_ARCH_FILES += $(foreach command,$(USERLAND_SELECTED_NETWORK_PROGRAMS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
 I386_ARCH_INPUTS += $(USER_BASIC_TARGETS)
-I386_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
+I386_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
 I386_ARCH_FILES += $(ZEDBSD_USERLAND_FILE_MODES)
 I386_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 I386_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
