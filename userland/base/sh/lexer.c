@@ -47,13 +47,13 @@ word_append(struct word_buffer *word, char value, enum sh_quote_type quote)
 
 static int
 token_append(struct sh_token_list *list, enum sh_token_type type, char *text,
-    unsigned char *quote, size_t length)
+	     unsigned char *quote, size_t length)
 {
 	struct sh_token *larger;
 	if (list->count == (size_t)-1 / sizeof(*list->tokens))
 		return 0;
-	larger = realloc(list->tokens,
-	    (list->count + 1U) * sizeof(*list->tokens));
+	larger =
+	    realloc(list->tokens, (list->count + 1U) * sizeof(*list->tokens));
 	if (larger == NULL)
 		return 0;
 	list->tokens = larger;
@@ -68,20 +68,20 @@ token_append(struct sh_token_list *list, enum sh_token_type type, char *text,
 static int
 is_operator(char value)
 {
-	return value == ';' || value == '&' || value == '|' ||
-	    value == '<' || value == '>';
+	return value == ';' || value == '&' || value == '|' || value == '<' ||
+	       value == '>';
 }
 
 static int
 lex_word(const char **cursor, struct sh_token_list *list,
-    const char **error_text)
+	 const char **error_text)
 {
 	const char *text = *cursor;
-	struct word_buffer word = { 0 };
+	struct word_buffer word = {0};
 	int quoted = 0;
 	int produced = 0;
 	while (*text != '\0' && *text != ' ' && *text != '\t' &&
-	    !is_operator(*text)) {
+	       !is_operator(*text)) {
 		if (text[0] == '$' && text[1] == '(') {
 			int depth = 1;
 			char inner_quote = '\0';
@@ -91,23 +91,31 @@ lex_word(const char **cursor, struct sh_token_list *list,
 			while (*text != '\0' && depth != 0) {
 				char value = *text++;
 				if (value == '\\' && *text != '\0') {
-					if (!word_append(&word, value, SH_QUOTE_UNQUOTED) ||
-					    !word_append(&word, *text++, SH_QUOTE_UNQUOTED))
+					if (!word_append(&word, value,
+							 SH_QUOTE_UNQUOTED) ||
+					    !word_append(&word, *text++,
+							 SH_QUOTE_UNQUOTED))
 						goto no_memory;
 					continue;
 				}
 				if ((value == '\'' || value == '"') &&
-				    (inner_quote == '\0' || inner_quote == value))
-					inner_quote = inner_quote == '\0' ? value : '\0';
+				    (inner_quote == '\0' ||
+				     inner_quote == value))
+					inner_quote =
+					    inner_quote == '\0' ? value : '\0';
 				if (inner_quote == '\0') {
-					if (value == '(') depth++;
-					if (value == ')') depth--;
+					if (value == '(')
+						depth++;
+					if (value == ')')
+						depth--;
 				}
-				if (!word_append(&word, value, SH_QUOTE_UNQUOTED))
+				if (!word_append(&word, value,
+						 SH_QUOTE_UNQUOTED))
 					goto no_memory;
 			}
 			if (depth != 0) {
-				*error_text = "unterminated command substitution";
+				*error_text =
+				    "unterminated command substitution";
 				free(word.data);
 				free(word.quote);
 				return 0;
@@ -142,16 +150,19 @@ lex_word(const char **cursor, struct sh_token_list *list,
 						text += 2;
 						continue;
 					} else {
-						if (!word_append(&word, *text++,
-						    SH_QUOTE_DOUBLE))
+						if (!word_append(
+							&word, *text++,
+							SH_QUOTE_DOUBLE))
 							goto no_memory;
 						produced = 1;
 						continue;
 					}
 				}
-				if (!word_append(&word, *text++, escaped ?
-				    SH_QUOTE_ESCAPED : quote == '\'' ?
-				    SH_QUOTE_SINGLE : SH_QUOTE_DOUBLE))
+				if (!word_append(&word, *text++,
+						 escaped ? SH_QUOTE_ESCAPED
+						 : quote == '\''
+						     ? SH_QUOTE_SINGLE
+						     : SH_QUOTE_DOUBLE))
 					goto no_memory;
 				produced = 1;
 			}
@@ -178,7 +189,7 @@ lex_word(const char **cursor, struct sh_token_list *list,
 		goto no_memory;
 	word.data[word.length] = '\0';
 	if (!token_append(list, SH_TOKEN_WORD, word.data, word.quote,
-	    word.length))
+			  word.length))
 		goto no_memory;
 	*cursor = text;
 	return 1;
@@ -206,19 +217,32 @@ sh_lex(const char *text, struct sh_token_list *list, const char **error_text)
 			continue;
 		}
 		switch (*text++) {
-		case ';': type = SH_TOKEN_SEMI; break;
+		case ';':
+			type = SH_TOKEN_SEMI;
+			break;
 		case '&':
-			if (*text == '&') { text++; type = SH_TOKEN_AND_IF; }
-			else type = SH_TOKEN_AMP;
+			if (*text == '&') {
+				text++;
+				type = SH_TOKEN_AND_IF;
+			} else
+				type = SH_TOKEN_AMP;
 			break;
 		case '|':
-			if (*text == '|') { text++; type = SH_TOKEN_OR_IF; }
-			else type = SH_TOKEN_PIPE;
+			if (*text == '|') {
+				text++;
+				type = SH_TOKEN_OR_IF;
+			} else
+				type = SH_TOKEN_PIPE;
 			break;
-		case '<': type = SH_TOKEN_INPUT; break;
+		case '<':
+			type = SH_TOKEN_INPUT;
+			break;
 		default:
-			if (*text == '>') { text++; type = SH_TOKEN_APPEND; }
-			else type = SH_TOKEN_OUTPUT;
+			if (*text == '>') {
+				text++;
+				type = SH_TOKEN_APPEND;
+			} else
+				type = SH_TOKEN_OUTPUT;
 			break;
 		}
 		if (!token_append(list, type, NULL, NULL, 0)) {

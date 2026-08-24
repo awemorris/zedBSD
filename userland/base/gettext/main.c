@@ -64,17 +64,48 @@ expand_escapes(const char *source)
 			break;
 		}
 		switch (*source) {
-		case 'a': *destination++ = '\a'; source++; continue;
-		case 'b': *destination++ = '\b'; source++; continue;
-		case 'f': *destination++ = '\f'; source++; continue;
-		case 'n': *destination++ = '\n'; source++; continue;
-		case 'r': *destination++ = '\r'; source++; continue;
-		case 't': *destination++ = '\t'; source++; continue;
-		case 'v': *destination++ = '\v'; source++; continue;
-		case '\\': *destination++ = '\\'; source++; continue;
-		case '\'': *destination++ = '\''; source++; continue;
-		case '"': *destination++ = '"'; source++; continue;
-		default: break;
+		case 'a':
+			*destination++ = '\a';
+			source++;
+			continue;
+		case 'b':
+			*destination++ = '\b';
+			source++;
+			continue;
+		case 'f':
+			*destination++ = '\f';
+			source++;
+			continue;
+		case 'n':
+			*destination++ = '\n';
+			source++;
+			continue;
+		case 'r':
+			*destination++ = '\r';
+			source++;
+			continue;
+		case 't':
+			*destination++ = '\t';
+			source++;
+			continue;
+		case 'v':
+			*destination++ = '\v';
+			source++;
+			continue;
+		case '\\':
+			*destination++ = '\\';
+			source++;
+			continue;
+		case '\'':
+			*destination++ = '\'';
+			source++;
+			continue;
+		case '"':
+			*destination++ = '"';
+			source++;
+			continue;
+		default:
+			break;
 		}
 		value = 0;
 		digits = 0;
@@ -92,7 +123,8 @@ expand_escapes(const char *source)
 			source++;
 			value = 0;
 			digits = 0;
-			while ((digit = hexadecimal_value((unsigned char)*source)) >= 0) {
+			while ((digit = hexadecimal_value(
+				    (unsigned char)*source)) >= 0) {
 				value = value * 16U + (unsigned)digit;
 				source++;
 				digits++;
@@ -114,7 +146,7 @@ expand_escapes(const char *source)
 
 static int
 parse_options(int argc, char **argv, int plural, struct options *options,
-    int *first_operand)
+	      int *first_operand)
 {
 	int index;
 
@@ -155,8 +187,10 @@ parse_options(int argc, char **argv, int plural, struct options *options,
 				break;
 			case 'd':
 				if (option[position + 1U] != '\0') {
-					options->domain = option + position + 1U;
-					position = (unsigned)strlen(option) - 1U;
+					options->domain =
+					    option + position + 1U;
+					position =
+					    (unsigned)strlen(option) - 1U;
 				} else if (++index < argc) {
 					options->domain = argv[index];
 				} else {
@@ -176,10 +210,10 @@ parse_options(int argc, char **argv, int plural, struct options *options,
 
 static const char *
 translated(const char *domain, const char *singular, const char *plural,
-    unsigned long count)
+	   unsigned long count)
 {
-	return plural == NULL ? dgettext(domain, singular) :
-	    dngettext(domain, singular, plural, count);
+	return plural == NULL ? dgettext(domain, singular)
+			      : dngettext(domain, singular, plural, count);
 }
 
 static int
@@ -194,7 +228,7 @@ main(int argc, char **argv)
 	struct options options;
 	const char *program = program_basename(argv[0]);
 	const char *directory;
-	char *allocated[2] = { NULL, NULL };
+	char *allocated[2] = {NULL, NULL};
 	int plural = !strcmp(program, "ngettext");
 	int first;
 	int operands;
@@ -208,8 +242,8 @@ main(int argc, char **argv)
 	    (!plural && !options.join && !options.newline) ||
 	    (plural && operands != 3 && operands != 4))
 		goto usage;
-	if (!options.join && ((!plural && operands == 2) ||
-	    (plural && operands == 4)))
+	if (!options.join &&
+	    ((!plural && operands == 2) || (plural && operands == 4)))
 		options.domain = argv[first++];
 	(void)setlocale(LC_ALL, "");
 	directory = getenv("TEXTDOMAINDIR");
@@ -229,7 +263,8 @@ main(int argc, char **argv)
 				message = expanded;
 			}
 			message = translated(options.domain, message, NULL, 1);
-			if ((first != argc - operands && write_message(" ") != 0) ||
+			if ((first != argc - operands &&
+			     write_message(" ") != 0) ||
 			    write_message(message) != 0) {
 				free(expanded);
 				goto failure;
@@ -249,8 +284,10 @@ main(int argc, char **argv)
 	if (plural) {
 		char *end;
 		unsigned long count;
-		const char *singular = allocated[0] != NULL ? allocated[0] : argv[first];
-		const char *multiple = allocated[1] != NULL ? allocated[1] : argv[first + 1];
+		const char *singular =
+		    allocated[0] != NULL ? allocated[0] : argv[first];
+		const char *multiple =
+		    allocated[1] != NULL ? allocated[1] : argv[first + 1];
 
 		errno = 0;
 		count = strtoul(argv[first + 2], &end, 10);
@@ -258,10 +295,12 @@ main(int argc, char **argv)
 		    argv[first + 2][0] == '-' || *end != '\0')
 			goto usage_free;
 		if (write_message(translated(options.domain, singular, multiple,
-		    count)) != 0)
+					     count)) != 0)
 			goto failure;
 	} else if (write_message(translated(options.domain,
-	    allocated[0] != NULL ? allocated[0] : argv[first], NULL, 1)) != 0) {
+					    allocated[0] != NULL ? allocated[0]
+								 : argv[first],
+					    NULL, 1)) != 0) {
 		goto failure;
 	}
 	result = 0;
@@ -275,9 +314,12 @@ usage_free:
 	free(allocated[0]);
 	free(allocated[1]);
 usage:
-	fprintf(stderr, plural ?
-	    "usage: ngettext [-e|-E] [-d textdomain] [textdomain] msgid msgid_plural n\n" :
-	    "usage: gettext [-e|-E] [-d textdomain] [textdomain] msgid\n"
-	    "       gettext [-e|-E] [-n] -s [-d textdomain] msgid ...\n");
+	fprintf(
+	    stderr,
+	    plural
+		? "usage: ngettext [-e|-E] [-d textdomain] [textdomain] msgid "
+		  "msgid_plural n\n"
+		: "usage: gettext [-e|-E] [-d textdomain] [textdomain] msgid\n"
+		  "       gettext [-e|-E] [-n] -s [-d textdomain] msgid ...\n");
 	return 2;
 }

@@ -28,7 +28,7 @@ udp_test(const struct sockaddr_in *gateway)
 {
 	static const char message[] = "zedBSD UDP echo";
 	struct sockaddr_in server = *gateway;
-	struct timespec delay = { 0, 100000000L };
+	struct timespec delay = {0, 100000000L};
 	char response[sizeof(message)];
 	ssize_t count;
 	int attempt, descriptor;
@@ -40,7 +40,7 @@ udp_test(const struct sockaddr_in *gateway)
 		return 1;
 	}
 	count = sendto(descriptor, message, sizeof(message) - 1U, 0,
-	    (const struct sockaddr *)&server, sizeof(server));
+		       (const struct sockaddr *)&server, sizeof(server));
 	if (count != (ssize_t)(sizeof(message) - 1U)) {
 		printf("nettest: UDP send failed (%d)\n", errno);
 		close(descriptor);
@@ -48,7 +48,7 @@ udp_test(const struct sockaddr_in *gateway)
 	}
 	for (attempt = 0; attempt < 30; attempt++) {
 		count = recvfrom(descriptor, response, sizeof(response),
-		    MSG_DONTWAIT, NULL, NULL);
+				 MSG_DONTWAIT, NULL, NULL);
 		if (count == (ssize_t)(sizeof(message) - 1U) &&
 		    memcmp(response, message, sizeof(message) - 1U) == 0) {
 			puts("nettest: UDP echo reply received");
@@ -84,7 +84,7 @@ http_test(const struct sockaddr_in *gateway)
 		return 1;
 	}
 	if (connect(descriptor, (const struct sockaddr *)&server,
-	    sizeof(server)) != 0) {
+		    sizeof(server)) != 0) {
 		printf("nettest: TCP connect failed (%d)\n", errno);
 		close(descriptor);
 		return 1;
@@ -92,7 +92,7 @@ http_test(const struct sockaddr_in *gateway)
 	count = send(descriptor, request, sizeof(request) - 1U, 0);
 	if (count != (ssize_t)(sizeof(request) - 1U)) {
 		printf("nettest: HTTP request failed (count=%ld errno=%d)\n",
-		    (long)count, errno);
+		       (long)count, errno);
 		close(descriptor);
 		return 1;
 	}
@@ -103,7 +103,7 @@ http_test(const struct sockaddr_in *gateway)
 		return 1;
 	}
 	printf("nettest: TCP HTTP response received (%ld bytes)\n",
-	    (long)count);
+	       (long)count);
 	close(descriptor);
 	return 0;
 }
@@ -112,9 +112,9 @@ int
 main(int argc, char **argv)
 {
 	struct sockaddr_in peer, source;
-	struct timespec delay = { 0, 100000000L };
-	uint8_t echo[16] = { 8, 0, 0, 0, 0x5a, 0x42, 0, 1,
-	    'z','e','d','B','S','D','!','!' };
+	struct timespec delay = {0, 100000000L};
+	uint8_t echo[16] = {8,	 0,   0,   0,	0x5a, 0x42, 0,	 1,
+			    'z', 'e', 'd', 'B', 'S',  'D',  '!', '!'};
 	uint8_t packet[64];
 	socklen_t source_length;
 	int descriptor, attempt;
@@ -144,7 +144,7 @@ main(int argc, char **argv)
 	}
 	for (attempt = 0; attempt < 10; attempt++) {
 		count = sendto(descriptor, echo, sizeof(echo), 0,
-		    (struct sockaddr *)&peer, sizeof(peer));
+			       (struct sockaddr *)&peer, sizeof(peer));
 		if (count == (ssize_t)sizeof(echo))
 			break;
 		if (errno != EAGAIN) {
@@ -161,8 +161,9 @@ main(int argc, char **argv)
 	}
 	for (attempt = 0; attempt < 30; attempt++) {
 		source_length = sizeof(source);
-		count = recvfrom(descriptor, packet, sizeof(packet), MSG_DONTWAIT,
-		    (struct sockaddr *)&source, &source_length);
+		count =
+		    recvfrom(descriptor, packet, sizeof(packet), MSG_DONTWAIT,
+			     (struct sockaddr *)&source, &source_length);
 		if (count >= 28 && (packet[0] >> 4) == 4 &&
 		    (packet[0] & 0x0fU) >= 5U && packet[9] == IPPROTO_ICMP &&
 		    (size_t)count >= (size_t)(packet[0] & 0x0fU) * 4U + 8U &&
@@ -170,10 +171,12 @@ main(int argc, char **argv)
 			char address[16];
 			size_t header_length = (size_t)(packet[0] & 0x0fU) * 4U;
 			if (inet_ntop(AF_INET, &source.sin_addr, address,
-			    sizeof(address)) == NULL)
+				      sizeof(address)) == NULL)
 				strcpy(address, "?");
-			printf("nettest: ICMP echo reply from %s (%ld bytes, ttl %u)\n",
-			    address, (long)(count - (ssize_t)header_length), packet[8]);
+			printf("nettest: ICMP echo reply from %s (%ld bytes, "
+			       "ttl %u)\n",
+			       address, (long)(count - (ssize_t)header_length),
+			       packet[8]);
 			close(descriptor);
 			if (udp_test(&peer) != 0)
 				return 1;

@@ -8,7 +8,8 @@
 #include <sys/ioctl.h>
 #include <zedbsd/blkid.h>
 
-static int identify(const char *path)
+static int
+identify(const char *path)
 {
 	struct block_identity id;
 	int fd = open(path, O_RDONLY);
@@ -20,15 +21,19 @@ static int identify(const char *path)
 		int error = errno;
 		close(fd);
 		if (error == ENOENT || error == ENOTTY || error == EOPNOTSUPP ||
-		    error == ENXIO) return 0;
+		    error == ENXIO)
+			return 0;
 		fprintf(stderr, "blkid: %s: %s\n", path, strerror(error));
 		return 1;
 	}
 	close(fd);
 	printf("%s:", path);
-	if (id.flags & ZEDBSD_BLKID_LABEL) printf(" LABEL=\"%s\"", id.label);
-	if (id.flags & ZEDBSD_BLKID_UUID) printf(" UUID=\"%s\"", id.uuid);
-	if (id.flags & ZEDBSD_BLKID_TYPE) printf(" TYPE=\"%s\"", id.type);
+	if (id.flags & ZEDBSD_BLKID_LABEL)
+		printf(" LABEL=\"%s\"", id.label);
+	if (id.flags & ZEDBSD_BLKID_UUID)
+		printf(" UUID=\"%s\"", id.uuid);
+	if (id.flags & ZEDBSD_BLKID_TYPE)
+		printf(" TYPE=\"%s\"", id.type);
 	if (id.flags & ZEDBSD_BLKID_PARTLABEL)
 		printf(" PARTLABEL=\"%s\"", id.partlabel);
 	if (id.flags & ZEDBSD_BLKID_PARTUUID)
@@ -37,13 +42,15 @@ static int identify(const char *path)
 	return 0;
 }
 
-int main(int argc, char **argv)
+int
+main(int argc, char **argv)
 {
 	int status = 0, index;
 	if (argc == 1) {
 		fprintf(stderr, "usage: blkid device ...\n");
 		return 2;
 	}
-	for (index = 1; index < argc; index++) status |= identify(argv[index]);
+	for (index = 1; index < argc; index++)
+		status |= identify(argv[index]);
 	return status;
 }

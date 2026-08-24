@@ -96,7 +96,7 @@ command_error(const char *command, const char *operand)
 	int saved = errno;
 	if (operand != NULL)
 		fprintf(stderr, "%s: %s: %s\n", command, operand,
-		    strerror(saved));
+			strerror(saved));
 	else
 		fprintf(stderr, "%s: %s\n", command, strerror(saved));
 }
@@ -114,7 +114,8 @@ command_read_line(FILE *stream, char **line, size_t *capacity)
 	}
 	while ((c = fgetc(stream)) != EOF) {
 		if (length + 1 >= *capacity) {
-			size_t next = *capacity > SIZE_MAX / 2 ? SIZE_MAX : *capacity * 2;
+			size_t next =
+			    *capacity > SIZE_MAX / 2 ? SIZE_MAX : *capacity * 2;
 			char *grown;
 			if (next <= *capacity) {
 				errno = EOVERFLOW;

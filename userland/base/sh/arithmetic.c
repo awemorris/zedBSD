@@ -50,7 +50,8 @@ parse_primary(struct arithmetic_parser *parser, long *result)
 	if ((*parser->cursor >= '0' && *parser->cursor <= '9')) {
 		*result = strtol(parser->cursor, &end, 0);
 		if (end == parser->cursor) {
-			parser->error = "invalid number in arithmetic expansion";
+			parser->error =
+			    "invalid number in arithmetic expansion";
 			return 0;
 		}
 		parser->cursor = end;
@@ -64,9 +65,9 @@ parse_primary(struct arithmetic_parser *parser, long *result)
 		char *name;
 		size_t length;
 		while ((*parser->cursor >= 'A' && *parser->cursor <= 'Z') ||
-		    (*parser->cursor >= 'a' && *parser->cursor <= 'z') ||
-		    (*parser->cursor >= '0' && *parser->cursor <= '9') ||
-		    *parser->cursor == '_')
+		       (*parser->cursor >= 'a' && *parser->cursor <= 'z') ||
+		       (*parser->cursor >= '0' && *parser->cursor <= '9') ||
+		       *parser->cursor == '_')
 			parser->cursor++;
 		length = (size_t)(parser->cursor - start);
 		name = malloc(length + 1U);
@@ -76,8 +77,9 @@ parse_primary(struct arithmetic_parser *parser, long *result)
 		}
 		memcpy(name, start, length);
 		name[length] = '\0';
-		value = parser->lookup == NULL ? getenv(name) :
-		    parser->lookup(parser->context, name);
+		value = parser->lookup == NULL
+			    ? getenv(name)
+			    : parser->lookup(parser->context, name);
 		free(name);
 		if (value == NULL || *value == '\0') {
 			*result = 0;
@@ -100,54 +102,77 @@ parse_unary(struct arithmetic_parser *parser, long *result)
 	if (accept(parser, "+"))
 		return parse_unary(parser, result);
 	if (accept(parser, "-")) {
-		if (!parse_unary(parser, result)) return 0;
+		if (!parse_unary(parser, result))
+			return 0;
 		*result = -*result;
 		return 1;
 	}
 	if (accept(parser, "!")) {
-		if (!parse_unary(parser, result)) return 0;
+		if (!parse_unary(parser, result))
+			return 0;
 		*result = !*result;
 		return 1;
 	}
 	if (accept(parser, "~")) {
-		if (!parse_unary(parser, result)) return 0;
+		if (!parse_unary(parser, result))
+			return 0;
 		*result = ~*result;
 		return 1;
 	}
 	return parse_primary(parser, result);
 }
 
-#define BINARY_LEVEL(name, lower, op1, op2, body1, body2) \
-static int name(struct arithmetic_parser *p, long *r) \
-{ \
-	long v; \
-	if (!lower(p, r)) return 0; \
-	for (;;) { \
-		if (accept(p, op1)) { if (!lower(p, &v)) { return 0; } body1; } \
-		else if ((op2)[0] != '\0' && accept(p, op2)) { \
-			if (!lower(p, &v)) { return 0; } body2; \
-		} else return 1; \
-	} \
-}
+#define BINARY_LEVEL(name, lower, op1, op2, body1, body2)                      \
+	static int name(struct arithmetic_parser *p, long *r)                  \
+	{                                                                      \
+		long v;                                                        \
+		if (!lower(p, r))                                              \
+			return 0;                                              \
+		for (;;) {                                                     \
+			if (accept(p, op1)) {                                  \
+				if (!lower(p, &v)) {                           \
+					return 0;                              \
+				}                                              \
+				body1;                                         \
+			} else if ((op2)[0] != '\0' && accept(p, op2)) {       \
+				if (!lower(p, &v)) {                           \
+					return 0;                              \
+				}                                              \
+				body2;                                         \
+			} else                                                 \
+				return 1;                                      \
+		}                                                              \
+	}
 
 static int
 parse_multiply(struct arithmetic_parser *p, long *r)
 {
 	long v;
-	if (!parse_unary(p, r)) return 0;
+	if (!parse_unary(p, r))
+		return 0;
 	for (;;) {
 		if (accept(p, "*")) {
-			if (!parse_unary(p, &v)) return 0;
+			if (!parse_unary(p, &v))
+				return 0;
 			*r *= v;
 		} else if (accept(p, "/")) {
-			if (!parse_unary(p, &v)) return 0;
-			if (v == 0) { p->error = "division by zero"; return 0; }
+			if (!parse_unary(p, &v))
+				return 0;
+			if (v == 0) {
+				p->error = "division by zero";
+				return 0;
+			}
 			*r /= v;
 		} else if (accept(p, "%")) {
-			if (!parse_unary(p, &v)) return 0;
-			if (v == 0) { p->error = "division by zero"; return 0; }
+			if (!parse_unary(p, &v))
+				return 0;
+			if (v == 0) {
+				p->error = "division by zero";
+				return 0;
+			}
 			*r %= v;
-		} else return 1;
+		} else
+			return 1;
 	}
 }
 
@@ -158,27 +183,45 @@ static int
 parse_relation(struct arithmetic_parser *p, long *r)
 {
 	long v;
-	if (!parse_shift(p, r)) return 0;
+	if (!parse_shift(p, r))
+		return 0;
 	for (;;) {
-		if (accept(p, "<=")) { if (!parse_shift(p, &v)) return 0; *r = *r <= v; }
-		else if (accept(p, ">=")) { if (!parse_shift(p, &v)) return 0; *r = *r >= v; }
-		else if (accept(p, "<")) { if (!parse_shift(p, &v)) return 0; *r = *r < v; }
-		else if (accept(p, ">")) { if (!parse_shift(p, &v)) return 0; *r = *r > v; }
-		else return 1;
+		if (accept(p, "<=")) {
+			if (!parse_shift(p, &v))
+				return 0;
+			*r = *r <= v;
+		} else if (accept(p, ">=")) {
+			if (!parse_shift(p, &v))
+				return 0;
+			*r = *r >= v;
+		} else if (accept(p, "<")) {
+			if (!parse_shift(p, &v))
+				return 0;
+			*r = *r < v;
+		} else if (accept(p, ">")) {
+			if (!parse_shift(p, &v))
+				return 0;
+			*r = *r > v;
+		} else
+			return 1;
 	}
 }
 
-BINARY_LEVEL(parse_equal, parse_relation, "==", "!=", *r = *r == v, *r = *r != v)
+BINARY_LEVEL(parse_equal, parse_relation, "==", "!=", *r = *r == v,
+	     *r = *r != v)
 static int
 parse_bit_and(struct arithmetic_parser *p, long *r)
 {
 	long v;
-	if (!parse_equal(p, r)) return 0;
+	if (!parse_equal(p, r))
+		return 0;
 	for (;;) {
 		skip_space(p);
-		if (p->cursor[0] != '&' || p->cursor[1] == '&') return 1;
+		if (p->cursor[0] != '&' || p->cursor[1] == '&')
+			return 1;
 		p->cursor++;
-		if (!parse_equal(p, &v)) return 0;
+		if (!parse_equal(p, &v))
+			return 0;
 		*r &= v;
 	}
 }
@@ -187,17 +230,21 @@ static int
 parse_bit_or(struct arithmetic_parser *p, long *r)
 {
 	long v;
-	if (!parse_bit_xor(p, r)) return 0;
+	if (!parse_bit_xor(p, r))
+		return 0;
 	for (;;) {
 		skip_space(p);
-		if (p->cursor[0] != '|' || p->cursor[1] == '|') return 1;
+		if (p->cursor[0] != '|' || p->cursor[1] == '|')
+			return 1;
 		p->cursor++;
-		if (!parse_bit_xor(p, &v)) return 0;
+		if (!parse_bit_xor(p, &v))
+			return 0;
 		*r |= v;
 	}
 }
 BINARY_LEVEL(parse_logical_and, parse_bit_or, "&&", "", *r = (*r && v), (void)v)
-BINARY_LEVEL(parse_logical_or, parse_logical_and, "||", "", *r = (*r || v), (void)v)
+BINARY_LEVEL(parse_logical_or, parse_logical_and, "||", "", *r = (*r || v),
+	     (void)v)
 
 static int
 parse_conditional(struct arithmetic_parser *parser, long *result)
@@ -210,7 +257,8 @@ parse_conditional(struct arithmetic_parser *parser, long *result)
 	if (!parse_conditional(parser, &true_value) || !accept(parser, ":") ||
 	    !parse_conditional(parser, &false_value)) {
 		if (parser->error == NULL)
-			parser->error = "invalid conditional arithmetic expression";
+			parser->error =
+			    "invalid conditional arithmetic expression";
 		return 0;
 	}
 	*result = *result ? true_value : false_value;
@@ -218,8 +266,9 @@ parse_conditional(struct arithmetic_parser *parser, long *result)
 }
 
 int
-sh_arithmetic_eval(const char *text, const char *(*lookup)(void *, const char *),
-    void *context, long *result, const char **error_text)
+sh_arithmetic_eval(const char *text,
+		   const char *(*lookup)(void *, const char *), void *context,
+		   long *result, const char **error_text)
 {
 	struct arithmetic_parser parser;
 	parser.cursor = text;
@@ -227,8 +276,9 @@ sh_arithmetic_eval(const char *text, const char *(*lookup)(void *, const char *)
 	parser.context = context;
 	parser.error = NULL;
 	if (!parse_conditional(&parser, result)) {
-		*error_text = parser.error == NULL ? "invalid arithmetic expression" :
-		    parser.error;
+		*error_text = parser.error == NULL
+				  ? "invalid arithmetic expression"
+				  : parser.error;
 		return 0;
 	}
 	skip_space(&parser);

@@ -59,8 +59,8 @@ join_path(const char *directory, const char *name, char *result,
 {
 	size_t directory_length = strlen(directory);
 	size_t name_length = strlen(name);
-	int slash = directory_length != 0 &&
-	    directory[directory_length - 1U] != '/';
+	int slash =
+	    directory_length != 0 && directory[directory_length - 1U] != '/';
 	if (directory_length + (size_t)slash + name_length + 1U > capacity)
 		return 0;
 	memcpy(result, directory, directory_length);
@@ -129,25 +129,26 @@ builtin_cat(int argc, char **argv)
 		int descriptor = open(argv[argument], O_RDONLY);
 		if (descriptor < 0) {
 			fprintf(stderr, "cat: %s: %s\n", argv[argument],
-			    strerror(errno));
+				strerror(errno));
 			return 0;
 		}
 		while ((count = read(descriptor, buffer, sizeof(buffer))) > 0) {
 			if (!write_all(1, buffer, (size_t)count)) {
-				fprintf(stderr, "cat: write: %s\n", strerror(errno));
+				fprintf(stderr, "cat: write: %s\n",
+					strerror(errno));
 				(void)close(descriptor);
 				return 0;
 			}
 		}
 		if (count < 0) {
 			fprintf(stderr, "cat: %s: %s\n", argv[argument],
-			    strerror(errno));
+				strerror(errno));
 			(void)close(descriptor);
 			return 0;
 		}
 		if (close(descriptor) != 0) {
 			fprintf(stderr, "cat: %s: %s\n", argv[argument],
-			    strerror(errno));
+				strerror(errno));
 			return 0;
 		}
 	}
@@ -162,7 +163,7 @@ sort_entries(struct ls_entry *entries, size_t count)
 		struct ls_entry current = entries[index];
 		size_t position = index;
 		while (position != 0 &&
-		    strcmp(entries[position - 1U].name, current.name) > 0) {
+		       strcmp(entries[position - 1U].name, current.name) > 0) {
 			entries[position] = entries[position - 1U];
 			position--;
 		}
@@ -173,34 +174,39 @@ sort_entries(struct ls_entry *entries, size_t count)
 static char
 type_character(mode_t mode)
 {
-	if (S_ISDIR(mode)) return 'd';
-	if (S_ISCHR(mode)) return 'c';
-	if (S_ISBLK(mode)) return 'b';
-	if (S_ISFIFO(mode)) return 'p';
-	if (S_ISLNK(mode)) return 'l';
-	if (S_ISSOCK(mode)) return 's';
+	if (S_ISDIR(mode))
+		return 'd';
+	if (S_ISCHR(mode))
+		return 'c';
+	if (S_ISBLK(mode))
+		return 'b';
+	if (S_ISFIFO(mode))
+		return 'p';
+	if (S_ISLNK(mode))
+		return 'l';
+	if (S_ISSOCK(mode))
+		return 's';
 	return '-';
 }
 
 static void
 mode_text(mode_t mode, char result[11])
 {
-	static const mode_t bits[9] = {
-		S_IRUSR, S_IWUSR, S_IXUSR, S_IRGRP, S_IWGRP, S_IXGRP,
-		S_IROTH, S_IWOTH, S_IXOTH
-	};
-	static const char letters[3] = { 'r', 'w', 'x' };
+	static const mode_t bits[9] = {S_IRUSR, S_IWUSR, S_IXUSR,
+				       S_IRGRP, S_IWGRP, S_IXGRP,
+				       S_IROTH, S_IWOTH, S_IXOTH};
+	static const char letters[3] = {'r', 'w', 'x'};
 	unsigned index;
 	result[0] = type_character(mode);
 	for (index = 0; index < 9; index++)
-		result[index + 1U] = mode & bits[index] ? letters[index % 3U] : '-';
+		result[index + 1U] =
+		    mode & bits[index] ? letters[index % 3U] : '-';
 	result[10] = '\0';
 }
 
 static int
 load_directory(const char *path, const struct ls_options *options,
-	       struct ls_entry **result,
-	       size_t *result_count)
+	       struct ls_entry **result, size_t *result_count)
 {
 	DIR *directory = opendir(path);
 	struct ls_entry *entries;
@@ -214,15 +220,16 @@ load_directory(const char *path, const struct ls_options *options,
 		return 0;
 	}
 	if (options->all) {
-		static const char *const dot_names[] = { ".", ".." };
+		static const char *const dot_names[] = {".", ".."};
 		unsigned dot;
 		for (dot = 0; dot < 2U; dot++) {
 			char child[PATH_BUFFER_SIZE];
 			struct ls_entry *item = &entries[count++];
 			strcpy(item->name, dot_names[dot]);
 			item->type = DT_DIR;
-			item->status_valid = join_path(path, item->name, child,
-			    sizeof(child)) && lstat(child, &item->status) == 0;
+			item->status_valid =
+			    join_path(path, item->name, child, sizeof(child)) &&
+			    lstat(child, &item->status) == 0;
 		}
 	}
 	while ((entry = readdir(directory)) != NULL) {
@@ -230,7 +237,7 @@ load_directory(const char *path, const struct ls_options *options,
 		if (!options->all && entry->d_name[0] == '.')
 			continue;
 		if (options->all && (!strcmp(entry->d_name, ".") ||
-		    !strcmp(entry->d_name, "..")))
+				     !strcmp(entry->d_name, "..")))
 			continue;
 		if (count == capacity) {
 			struct ls_entry *larger;
@@ -274,8 +281,8 @@ load_directory(const char *path, const struct ls_options *options,
 static int
 entry_is_directory(const struct ls_entry *entry)
 {
-	return entry->status_valid ? S_ISDIR(entry->status.st_mode) :
-	    entry->type == DT_DIR;
+	return entry->status_valid ? S_ISDIR(entry->status.st_mode)
+				   : entry->type == DT_DIR;
 }
 
 static size_t
@@ -303,7 +310,7 @@ human_size(off_t value, char result[24])
 	}
 	magnitude = (unsigned long long)value;
 	while (unit + 1U < sizeof(suffixes) - 1U &&
-	    magnitude >= scale * 1024ULL) {
+	       magnitude >= scale * 1024ULL) {
 		scale *= 1024ULL;
 		unit++;
 	}
@@ -320,10 +327,10 @@ human_size(off_t value, char result[24])
 			tenth = 0;
 		}
 		snprintf(result, 24, "%llu.%llu%c", whole, tenth,
-		    suffixes[unit]);
+			 suffixes[unit]);
 	} else {
 		snprintf(result, 24, "%llu%c",
-		    (magnitude + scale / 2ULL) / scale, suffixes[unit]);
+			 (magnitude + scale / 2ULL) / scale, suffixes[unit]);
 	}
 }
 
@@ -336,11 +343,11 @@ leap_year(long long year)
 static void
 long_time_text(time_t value, char result[32])
 {
-	static const int month_days[] =
-	    { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-	static const char *const month_names[] =
-	    { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-	      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+	static const int month_days[] = {31, 28, 31, 30, 31, 30,
+					 31, 31, 30, 31, 30, 31};
+	static const char *const month_names[] = {"Jan", "Feb", "Mar", "Apr",
+						  "May", "Jun", "Jul", "Aug",
+						  "Sep", "Oct", "Nov", "Dec"};
 	long long days = value / 86400;
 	long long seconds = value % 86400;
 	long long year = 1970;
@@ -359,19 +366,17 @@ long_time_text(time_t value, char result[32])
 		year--;
 		days += 365 + leap_year(year);
 	}
-	while (month < 11 && days >= month_days[month] +
-	    (month == 1 && leap_year(year))) {
+	while (month < 11 &&
+	       days >= month_days[month] + (month == 1 && leap_year(year))) {
 		days -= month_days[month] + (month == 1 && leap_year(year));
 		month++;
 	}
-	if (now != (time_t)-1 &&
-	    (value < now - 15552000 || value > now + 3600))
+	if (now != (time_t)-1 && (value < now - 15552000 || value > now + 3600))
 		snprintf(result, 32, "%s %2d  %4lld", month_names[month],
-		    (int)days + 1, year);
+			 (int)days + 1, year);
 	else
-		snprintf(result, 32, "%s %2d %02lld:%02lld",
-		    month_names[month], (int)days + 1, seconds / 3600,
-		    (seconds / 60) % 60);
+		snprintf(result, 32, "%s %2d %02lld:%02lld", month_names[month],
+			 (int)days + 1, seconds / 3600, (seconds / 60) % 60);
 }
 
 static const char *
@@ -423,24 +428,29 @@ long_widths(const struct ls_entry *entries, size_t count,
 		if (!entries[index].status_valid)
 			continue;
 		snprintf(links, sizeof(links), "%lu",
-		    (unsigned long)entries[index].status.st_nlink);
+			 (unsigned long)entries[index].status.st_nlink);
 		if (options->human)
 			human_size(entries[index].status.st_size, size);
 		else
 			snprintf(size, sizeof(size), "%lld",
-			    (long long)entries[index].status.st_size);
+				 (long long)entries[index].status.st_size);
 		user = user_name(entries[index].status.st_uid, user_buffer);
 		group = group_name(entries[index].status.st_gid, group_buffer);
-		if (strlen(links) > widths->links) widths->links = strlen(links);
-		if (strlen(user) > widths->user) widths->user = strlen(user);
-		if (strlen(group) > widths->group) widths->group = strlen(group);
-		if (strlen(size) > widths->size) widths->size = strlen(size);
+		if (strlen(links) > widths->links)
+			widths->links = strlen(links);
+		if (strlen(user) > widths->user)
+			widths->user = strlen(user);
+		if (strlen(group) > widths->group)
+			widths->group = strlen(group);
+		if (strlen(size) > widths->size)
+			widths->size = strlen(size);
 	}
 }
 
 static void
 print_long_entry(const char *directory, const struct ls_entry *entry,
-	    const struct ls_options *options, const struct ls_widths *widths)
+		 const struct ls_options *options,
+		 const struct ls_widths *widths)
 {
 	char mode[11], size[24], when[32], user_buffer[24], group_buffer[24];
 	char path[PATH_BUFFER_SIZE];
@@ -448,9 +458,9 @@ print_long_entry(const char *directory, const struct ls_entry *entry,
 
 	if (!entry->status_valid) {
 		printf("?????????? %*s %-*s %-*s %*s %12s %s\n",
-		    (int)widths->links, "?", (int)widths->user, "?",
-		    (int)widths->group, "?", (int)widths->size, "?", "?",
-		    entry->name);
+		       (int)widths->links, "?", (int)widths->user, "?",
+		       (int)widths->group, "?", (int)widths->size, "?", "?",
+		       entry->name);
 		return;
 	}
 	mode_text(entry->status.st_mode, mode);
@@ -458,14 +468,14 @@ print_long_entry(const char *directory, const struct ls_entry *entry,
 		human_size(entry->status.st_size, size);
 	else
 		snprintf(size, sizeof(size), "%lld",
-		    (long long)entry->status.st_size);
+			 (long long)entry->status.st_size);
 	long_time_text(entry->status.st_mtime, when);
 	user = user_name(entry->status.st_uid, user_buffer);
 	group = group_name(entry->status.st_gid, group_buffer);
 	printf("%s %*lu %-*s %-*s %*s %s %s", mode, (int)widths->links,
-	    (unsigned long)entry->status.st_nlink, (int)widths->user, user,
-	    (int)widths->group, group, (int)widths->size, size, when,
-	    entry->name);
+	       (unsigned long)entry->status.st_nlink, (int)widths->user, user,
+	       (int)widths->group, group, (int)widths->size, size, when,
+	       entry->name);
 	if (S_ISLNK(entry->status.st_mode) &&
 	    join_path(directory, entry->name, path, sizeof(path))) {
 		char target[PATH_BUFFER_SIZE];
@@ -480,7 +490,8 @@ print_long_entry(const char *directory, const struct ls_entry *entry,
 
 static void
 print_long_entries(const char *directory, const struct ls_entry *entries,
-	    size_t count, const struct ls_options *options, int show_total)
+		   size_t count, const struct ls_options *options,
+		   int show_total)
 {
 	struct ls_widths widths;
 	unsigned long long blocks = 0;
@@ -492,12 +503,13 @@ print_long_entries(const char *directory, const struct ls_entry *entries,
 		for (index = 0; index < count; index++)
 			if (entries[index].status_valid &&
 			    entries[index].status.st_blocks > 0)
-				blocks += (unsigned long long)
-				    entries[index].status.st_blocks;
+				blocks += (unsigned long long)entries[index]
+					      .status.st_blocks;
 		if (options->human)
 			human_size((off_t)(blocks * 512ULL), total);
 		else
-			snprintf(total, sizeof(total), "%llu", (blocks + 1ULL) / 2ULL);
+			snprintf(total, sizeof(total), "%llu",
+				 (blocks + 1ULL) / 2ULL);
 		printf("total %s\n", total);
 	}
 	for (index = 0; index < count; index++)
@@ -507,7 +519,7 @@ print_long_entries(const char *directory, const struct ls_entry *entries,
 static void
 print_column_entries(const struct ls_entry *entries, size_t count)
 {
-	struct console_size size = { 0, 80 };
+	struct console_size size = {0, 80};
 	size_t maximum = 0, column_width, columns, rows, row, column;
 	if (count == 0)
 		return;
@@ -521,8 +533,10 @@ print_column_entries(const struct ls_entry *entries, size_t count)
 	}
 	column_width = maximum + 2U;
 	columns = size.columns / column_width;
-	if (columns == 0) columns = 1;
-	if (columns > count) columns = count;
+	if (columns == 0)
+		columns = 1;
+	if (columns > count)
+		columns = count;
 	rows = (count + columns - 1U) / columns;
 	for (row = 0; row < rows; row++) {
 		for (column = 0; column < columns; column++) {
@@ -547,7 +561,7 @@ static int
 builtin_ls(int argc, char **argv)
 {
 	const char *path = ".";
-	struct ls_options options = { 0, 0, 0 };
+	struct ls_options options = {0, 0, 0};
 	int path_set = 0, argument;
 	struct stat status;
 	struct ls_entry *entries;
@@ -562,11 +576,18 @@ builtin_ls(int argc, char **argv)
 			break;
 		for (option = argv[argument] + 1; *option != '\0'; option++) {
 			switch (*option) {
-			case 'a': options.all = 1; break;
-			case 'h': options.human = 1; break;
-			case 'l': options.long_format = 1; break;
+			case 'a':
+				options.all = 1;
+				break;
+			case 'h':
+				options.human = 1;
+				break;
+			case 'l':
+				options.long_format = 1;
+				break;
 			default:
-				fprintf(stderr,
+				fprintf(
+				    stderr,
 				    "ls: invalid option -- '%c'\n"
 				    "Try 'ls --help' for more information.\n",
 				    *option);
@@ -629,7 +650,8 @@ builtin_cp(int argc, char **argv)
 	source = open(argv[1], O_RDONLY);
 	if (source < 0 || fstat(source, &source_status) != 0) {
 		fprintf(stderr, "cp: %s: %s\n", argv[1], strerror(errno));
-		if (source >= 0) (void)close(source);
+		if (source >= 0)
+			(void)close(source);
 		return 0;
 	}
 	if (!S_ISREG(source_status.st_mode)) {
@@ -642,27 +664,32 @@ builtin_cp(int argc, char **argv)
 		destination_exists = 1;
 		if (S_ISDIR(destination_status.st_mode)) {
 			if (!join_path(destination, path_basename(argv[1]),
-			    destination_path, sizeof(destination_path))) {
-				fprintf(stderr, "cp: destination path is too long\n");
+				       destination_path,
+				       sizeof(destination_path))) {
+				fprintf(stderr,
+					"cp: destination path is too long\n");
 				(void)close(source);
 				return 0;
 			}
 			destination = destination_path;
-			destination_exists = stat(destination,
-			    &destination_status) == 0;
+			destination_exists =
+			    stat(destination, &destination_status) == 0;
 		}
 	} else if (errno != ENOENT) {
 		fprintf(stderr, "cp: %s: %s\n", destination, strerror(errno));
 		(void)close(source);
 		return 0;
 	}
-	if (destination_exists && source_status.st_dev == destination_status.st_dev &&
+	if (destination_exists &&
+	    source_status.st_dev == destination_status.st_dev &&
 	    source_status.st_ino == destination_status.st_ino) {
-		fprintf(stderr, "cp: source and destination are the same file\n");
+		fprintf(stderr,
+			"cp: source and destination are the same file\n");
 		(void)close(source);
 		return 0;
 	}
-	/* Without rename/unlink syscalls a failed copy may leave a partial file. */
+	/* Without rename/unlink syscalls a failed copy may leave a partial
+	 * file. */
 	target = open(destination, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 	if (target < 0) {
 		fprintf(stderr, "cp: %s: %s\n", destination, strerror(errno));
@@ -671,7 +698,8 @@ builtin_cp(int argc, char **argv)
 	}
 	while ((count = read(source, buffer, sizeof(buffer))) > 0) {
 		if (!write_all(target, buffer, (size_t)count)) {
-			fprintf(stderr, "cp: %s: %s\n", destination, strerror(errno));
+			fprintf(stderr, "cp: %s: %s\n", destination,
+				strerror(errno));
 			goto done;
 		}
 	}
@@ -695,13 +723,20 @@ done:
 static const char *
 type_name(mode_t mode)
 {
-	if (S_ISREG(mode)) return "regular";
-	if (S_ISDIR(mode)) return "directory";
-	if (S_ISCHR(mode)) return "character";
-	if (S_ISBLK(mode)) return "block";
-	if (S_ISFIFO(mode)) return "fifo";
-	if (S_ISLNK(mode)) return "symlink";
-	if (S_ISSOCK(mode)) return "socket";
+	if (S_ISREG(mode))
+		return "regular";
+	if (S_ISDIR(mode))
+		return "directory";
+	if (S_ISCHR(mode))
+		return "character";
+	if (S_ISBLK(mode))
+		return "block";
+	if (S_ISFIFO(mode))
+		return "fifo";
+	if (S_ISLNK(mode))
+		return "symlink";
+	if (S_ISSOCK(mode))
+		return "socket";
 	return "unknown";
 }
 
@@ -717,15 +752,16 @@ builtin_stat(int argc, char **argv)
 		struct stat status;
 		if (stat(argv[argument], &status) != 0) {
 			fprintf(stderr, "stat: %s: %s\n", argv[argument],
-			    strerror(errno));
+				strerror(errno));
 			return 0;
 		}
 		printf("%s: type=%s mode=%x dev=%u ino=%u links=%u "
-		    "uid=%u gid=%u size=%lld\n", argv[argument],
-		    type_name(status.st_mode), (unsigned)status.st_mode,
-		    (unsigned)status.st_dev, (unsigned)status.st_ino,
-		    (unsigned)status.st_nlink, (unsigned)status.st_uid,
-		    (unsigned)status.st_gid, (long long)status.st_size);
+		       "uid=%u gid=%u size=%lld\n",
+		       argv[argument], type_name(status.st_mode),
+		       (unsigned)status.st_mode, (unsigned)status.st_dev,
+		       (unsigned)status.st_ino, (unsigned)status.st_nlink,
+		       (unsigned)status.st_uid, (unsigned)status.st_gid,
+		       (long long)status.st_size);
 	}
 	return 1;
 }
@@ -742,8 +778,9 @@ builtin_touch(int argc, char **argv)
 		int descriptor = open(argv[argument], O_WRONLY | O_CREAT, 0666);
 		if (descriptor < 0 || close(descriptor) != 0) {
 			fprintf(stderr, "touch: %s: %s\n", argv[argument],
-			    strerror(errno));
-			if (descriptor >= 0) (void)close(descriptor);
+				strerror(errno));
+			if (descriptor >= 0)
+				(void)close(descriptor);
 			return 0;
 		}
 	}
@@ -755,17 +792,37 @@ printf_escape(const char **cursor, int *stop)
 {
 	const char *text = *cursor;
 	int value;
-	if (*text == '\0') return '\\';
+	if (*text == '\0')
+		return '\\';
 	switch (*text++) {
-	case 'a': value = '\a'; break;
-	case 'b': value = '\b'; break;
-	case 'c': *stop = 1; value = 0; break;
-	case 'f': value = '\f'; break;
-	case 'n': value = '\n'; break;
-	case 'r': value = '\r'; break;
-	case 't': value = '\t'; break;
-	case 'v': value = '\v'; break;
-	case '\\': value = '\\'; break;
+	case 'a':
+		value = '\a';
+		break;
+	case 'b':
+		value = '\b';
+		break;
+	case 'c':
+		*stop = 1;
+		value = 0;
+		break;
+	case 'f':
+		value = '\f';
+		break;
+	case 'n':
+		value = '\n';
+		break;
+	case 'r':
+		value = '\r';
+		break;
+	case 't':
+		value = '\t';
+		break;
+	case 'v':
+		value = '\v';
+		break;
+	case '\\':
+		value = '\\';
+		break;
 	case '0': {
 		int count = 0;
 		value = 0;
@@ -775,7 +832,10 @@ printf_escape(const char **cursor, int *stop)
 		}
 		break;
 	}
-	default: putchar('\\'); value = (unsigned char)text[-1]; break;
+	default:
+		putchar('\\');
+		value = (unsigned char)text[-1];
+		break;
 	}
 	*cursor = text;
 	return value;
@@ -799,8 +859,10 @@ builtin_printf(int argc, char **argv)
 			if (*cursor == '\\') {
 				cursor++;
 				{
-					int value = printf_escape(&cursor, &stop);
-					if (!stop) putchar(value);
+					int value =
+					    printf_escape(&cursor, &stop);
+					if (!stop)
+						putchar(value);
 				}
 				continue;
 			}
@@ -815,70 +877,108 @@ builtin_printf(int argc, char **argv)
 				continue;
 			}
 			{
-				const char *value = argument < argc ? argv[argument++] : "";
+				const char *value =
+				    argument < argc ? argv[argument++] : "";
 				char *end;
 				long number;
 				switch (*cursor++) {
-				case 's': printf("%s", value); break;
+				case 's':
+					printf("%s", value);
+					break;
 				case 'b': {
 					const char *bytes = value;
 					while (*bytes != '\0' && !stop) {
 						if (*bytes == '\\') {
 							bytes++;
 							{
-								int byte = printf_escape(&bytes, &stop);
-								if (!stop) putchar(byte);
+								int byte =
+								    printf_escape(
+									&bytes,
+									&stop);
+								if (!stop)
+									putchar(
+									    byte);
 							}
-						} else putchar((unsigned char)*bytes++);
+						} else
+							putchar((
+							    unsigned char)*bytes++);
 					}
 					break;
 				}
-				case 'c': if (*value != '\0') putchar((unsigned char)*value); break;
-				case 'd': case 'i':
+				case 'c':
+					if (*value != '\0')
+						putchar((unsigned char)*value);
+					break;
+				case 'd':
+				case 'i':
 					number = strtol(value, &end, 0);
-					if (*value == '\0' || *end != '\0') return 0;
-					printf("%ld", number); break;
+					if (*value == '\0' || *end != '\0')
+						return 0;
+					printf("%ld", number);
+					break;
 				case 'u':
 					number = strtol(value, &end, 0);
-					if (*value == '\0' || *end != '\0') return 0;
-					printf("%lu", (unsigned long)number); break;
+					if (*value == '\0' || *end != '\0')
+						return 0;
+					printf("%lu", (unsigned long)number);
+					break;
 				case 'o':
 					number = strtol(value, &end, 0);
-					if (*value == '\0' || *end != '\0') return 0;
-					printf("%lo", (unsigned long)number); break;
+					if (*value == '\0' || *end != '\0')
+						return 0;
+					printf("%lo", (unsigned long)number);
+					break;
 				case 'x':
 					number = strtol(value, &end, 0);
-					if (*value == '\0' || *end != '\0') return 0;
-					printf("%lx", (unsigned long)number); break;
+					if (*value == '\0' || *end != '\0')
+						return 0;
+					printf("%lx", (unsigned long)number);
+					break;
 				default:
-					fprintf(stderr, "printf: unsupported conversion\n");
+					fprintf(
+					    stderr,
+					    "printf: unsupported conversion\n");
 					return 0;
 				}
 			}
 		}
-		if (stop) break;
-		if (argument == argument_before) break;
+		if (stop)
+			break;
+		if (argument == argument_before)
+			break;
 	} while (argument < argc);
 	return ferror(stdout) == 0;
 }
 
 static int
 test_integer(const char *left, const char *operation, const char *right,
-    int *valid)
+	     int *valid)
 {
 	char *end;
 	long a = strtol(left, &end, 10);
 	long b;
-	if (*left == '\0' || *end != '\0') { *valid = 0; return 0; }
+	if (*left == '\0' || *end != '\0') {
+		*valid = 0;
+		return 0;
+	}
 	b = strtol(right, &end, 10);
-	if (*right == '\0' || *end != '\0') { *valid = 0; return 0; }
+	if (*right == '\0' || *end != '\0') {
+		*valid = 0;
+		return 0;
+	}
 	*valid = 1;
-	if (!strcmp(operation, "-eq")) return a == b;
-	if (!strcmp(operation, "-ne")) return a != b;
-	if (!strcmp(operation, "-lt")) return a < b;
-	if (!strcmp(operation, "-le")) return a <= b;
-	if (!strcmp(operation, "-gt")) return a > b;
-	if (!strcmp(operation, "-ge")) return a >= b;
+	if (!strcmp(operation, "-eq"))
+		return a == b;
+	if (!strcmp(operation, "-ne"))
+		return a != b;
+	if (!strcmp(operation, "-lt"))
+		return a < b;
+	if (!strcmp(operation, "-le"))
+		return a <= b;
+	if (!strcmp(operation, "-gt"))
+		return a > b;
+	if (!strcmp(operation, "-ge"))
+		return a >= b;
 	*valid = 0;
 	return 0;
 }
@@ -897,26 +997,42 @@ builtin_test(int argc, char **argv)
 	}
 	argc--;
 	argv++;
-	if (argc == 0) return 0;
-	if (argc == 1) return argv[0][0] != '\0';
+	if (argc == 0)
+		return 0;
+	if (argc == 1)
+		return argv[0][0] != '\0';
 	if (argc == 2) {
-		if (!strcmp(argv[0], "!")) return argv[1][0] == '\0';
-		if (!strcmp(argv[0], "-n")) return argv[1][0] != '\0';
-		if (!strcmp(argv[0], "-z")) return argv[1][0] == '\0';
-		if (!strcmp(argv[0], "-e")) return stat(argv[1], &status) == 0;
-		if (!strcmp(argv[0], "-f")) return stat(argv[1], &status) == 0 && S_ISREG(status.st_mode);
-		if (!strcmp(argv[0], "-d")) return stat(argv[1], &status) == 0 && S_ISDIR(status.st_mode);
-		if (!strcmp(argv[0], "-r")) return access(argv[1], R_OK) == 0;
-		if (!strcmp(argv[0], "-w")) return access(argv[1], W_OK) == 0;
-		if (!strcmp(argv[0], "-x")) return access(argv[1], X_OK) == 0;
+		if (!strcmp(argv[0], "!"))
+			return argv[1][0] == '\0';
+		if (!strcmp(argv[0], "-n"))
+			return argv[1][0] != '\0';
+		if (!strcmp(argv[0], "-z"))
+			return argv[1][0] == '\0';
+		if (!strcmp(argv[0], "-e"))
+			return stat(argv[1], &status) == 0;
+		if (!strcmp(argv[0], "-f"))
+			return stat(argv[1], &status) == 0 &&
+			       S_ISREG(status.st_mode);
+		if (!strcmp(argv[0], "-d"))
+			return stat(argv[1], &status) == 0 &&
+			       S_ISDIR(status.st_mode);
+		if (!strcmp(argv[0], "-r"))
+			return access(argv[1], R_OK) == 0;
+		if (!strcmp(argv[0], "-w"))
+			return access(argv[1], W_OK) == 0;
+		if (!strcmp(argv[0], "-x"))
+			return access(argv[1], X_OK) == 0;
 		return 0;
 	}
 	if (argc == 3) {
 		int result;
-		if (!strcmp(argv[1], "=")) return strcmp(argv[0], argv[2]) == 0;
-		if (!strcmp(argv[1], "!=")) return strcmp(argv[0], argv[2]) != 0;
+		if (!strcmp(argv[1], "="))
+			return strcmp(argv[0], argv[2]) == 0;
+		if (!strcmp(argv[1], "!="))
+			return strcmp(argv[0], argv[2]) != 0;
 		result = test_integer(argv[0], argv[1], argv[2], &valid);
-		if (valid) return result;
+		if (valid)
+			return result;
 	}
 	fprintf(stderr, "test: invalid expression\n");
 	return 0;
@@ -926,17 +1042,26 @@ int
 sh_builtin_dispatch(int argc, char **argv, int *handled)
 {
 	*handled = 1;
-	if (!strcmp(argv[0], "echo")) return builtin_echo(argc, argv);
-	if (!strcmp(argv[0], "printf")) return builtin_printf(argc, argv);
+	if (!strcmp(argv[0], "echo"))
+		return builtin_echo(argc, argv);
+	if (!strcmp(argv[0], "printf"))
+		return builtin_printf(argc, argv);
 	if (!strcmp(argv[0], "test") || !strcmp(argv[0], "["))
 		return builtin_test(argc, argv);
-	if (!strcmp(argv[0], "pwd")) return builtin_pwd(argc, argv);
-	if (!strcmp(argv[0], "cd")) return builtin_cd(argc, argv);
-	if (!strcmp(argv[0], "cat")) return builtin_cat(argc, argv);
-	if (!strcmp(argv[0], "ls")) return builtin_ls(argc, argv);
-	if (!strcmp(argv[0], "cp")) return builtin_cp(argc, argv);
-	if (!strcmp(argv[0], "stat")) return builtin_stat(argc, argv);
-	if (!strcmp(argv[0], "touch")) return builtin_touch(argc, argv);
+	if (!strcmp(argv[0], "pwd"))
+		return builtin_pwd(argc, argv);
+	if (!strcmp(argv[0], "cd"))
+		return builtin_cd(argc, argv);
+	if (!strcmp(argv[0], "cat"))
+		return builtin_cat(argc, argv);
+	if (!strcmp(argv[0], "ls"))
+		return builtin_ls(argc, argv);
+	if (!strcmp(argv[0], "cp"))
+		return builtin_cp(argc, argv);
+	if (!strcmp(argv[0], "stat"))
+		return builtin_stat(argc, argv);
+	if (!strcmp(argv[0], "touch"))
+		return builtin_touch(argc, argv);
 	if (!strcmp(argv[0], "clear")) {
 		if (argc != 1) {
 			fprintf(stderr, "usage: clear\n");
@@ -944,8 +1069,10 @@ sh_builtin_dispatch(int argc, char **argv, int *handled)
 		}
 		return ioctl(1, ZEDBSD_CONSOLE_CLEAR) == 0;
 	}
-	if (!strcmp(argv[0], "true")) return 1;
-	if (!strcmp(argv[0], "false")) return 0;
+	if (!strcmp(argv[0], "true"))
+		return 1;
+	if (!strcmp(argv[0], "false"))
+		return 0;
 	*handled = 0;
 	return 0;
 }

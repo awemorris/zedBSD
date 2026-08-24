@@ -104,10 +104,10 @@ catch_fault_siginfo(int signo, siginfo_t *info, void *opaque_context)
 {
 	ucontext_t *context = opaque_context;
 	int valid = signo == SIGBUS && info != NULL && context != NULL &&
-	    info->si_signo == SIGBUS && info->si_code == BUS_ADRERR &&
-	    info->si_addr == expected_fault_address &&
-	    context->uc_mcontext.mc_pc != 0 &&
-	    context->uc_mcontext.mc_sp != 0;
+		    info->si_signo == SIGBUS && info->si_code == BUS_ADRERR &&
+		    info->si_addr == expected_fault_address &&
+		    context->uc_mcontext.mc_pc != 0 &&
+		    context->uc_mcontext.mc_sp != 0;
 
 	_exit(valid ? 0 : 1);
 }
@@ -137,7 +137,9 @@ run_test(int argc, char **argv, char **envp)
 	(void)envp;
 	if (argc > 1 && strcmp(argv[1], "fork-child") == 0)
 		return write(1, child_message, sizeof(child_message) - 1U) ==
-		    (ssize_t)(sizeof(child_message) - 1U) ? 23 : 24;
+			       (ssize_t)(sizeof(child_message) - 1U)
+			   ? 23
+			   : 24;
 	allocation = malloc(256U * 1024U);
 	if (allocation == NULL)
 		return 2;
@@ -163,7 +165,7 @@ run_test(int argc, char **argv, char **envp)
 	if (child < 0)
 		return 6;
 	if (child == 0) {
-		char *child_argv[] = { "/init.elf", "fork-child", NULL };
+		char *child_argv[] = {"/init.elf", "fork-child", NULL};
 		(void)close(descriptors[0]);
 		if (dup2(descriptors[1], 1) != 1)
 			_exit(25);
@@ -174,7 +176,7 @@ run_test(int argc, char **argv, char **envp)
 	report_checkpoint("pipe-fork-exec-parent-read");
 	(void)close(descriptors[1]);
 	if (read(descriptors[0], received, sizeof(child_message) - 1U) !=
-	    (ssize_t)(sizeof(child_message) - 1U) ||
+		(ssize_t)(sizeof(child_message) - 1U) ||
 	    memcmp(received, child_message, sizeof(child_message) - 1U) != 0)
 		return 7;
 	report_checkpoint("pipe-fork-exec-parent-wait");
@@ -215,9 +217,9 @@ run_test(int argc, char **argv, char **envp)
 		if (image < 0)
 			return 241;
 		errno = 0;
-		if (read(image, (void *)(uintptr_t)1, 1) != -1 || errno != EFAULT ||
-		    read(image, &byte, 1) != 1 || byte != 0x7f ||
-		    lseek(image, 0, SEEK_SET) != 0)
+		if (read(image, (void *)(uintptr_t)1, 1) != -1 ||
+		    errno != EFAULT || read(image, &byte, 1) != 1 ||
+		    byte != 0x7f || lseek(image, 0, SEEK_SET) != 0)
 			return 242;
 		vector[0].iov_base = &byte;
 		vector[0].iov_len = 1;
@@ -225,7 +227,8 @@ run_test(int argc, char **argv, char **envp)
 		vector[1].iov_len = 1;
 		errno = 0;
 		if (readv(image, vector, 2) != -1 || errno != EFAULT ||
-		    read(image, &byte, 1) != 1 || byte != 0x7f || close(image) != 0)
+		    read(image, &byte, 1) != 1 || byte != 0x7f ||
+		    close(image) != 0)
 			return 243;
 	}
 	report_checkpoint("bad-read-done");
@@ -238,7 +241,8 @@ run_test(int argc, char **argv, char **envp)
 	    close(descriptors[1]) != 0)
 		return 245;
 	report_checkpoint("pipe-efault-done");
-	/* Orphans are reparented to init (PID 1), which eventually reaps them. */
+	/* Orphans are reparented to init (PID 1), which eventually reaps them.
+	 */
 	if (pipe(descriptors) != 0)
 		return 246;
 	child = fork();
@@ -249,14 +253,14 @@ run_test(int argc, char **argv, char **envp)
 		if (grandchild < 0)
 			_exit(1);
 		if (grandchild == 0) {
-			struct timespec delay = { 0, 20000000 };
+			struct timespec delay = {0, 20000000};
 			char value;
 			(void)close(descriptors[0]);
 			(void)write(1, "SYSCALL_ORPHAN_SLEEP\n",
-			    sizeof("SYSCALL_ORPHAN_SLEEP\n") - 1U);
+				    sizeof("SYSCALL_ORPHAN_SLEEP\n") - 1U);
 			(void)nanosleep(&delay, NULL);
 			(void)write(1, "SYSCALL_ORPHAN_WAKE\n",
-			    sizeof("SYSCALL_ORPHAN_WAKE\n") - 1U);
+				    sizeof("SYSCALL_ORPHAN_WAKE\n") - 1U);
 			value = getppid() == 1 ? 'o' : 'x';
 			(void)write(descriptors[1], &value, 1);
 			_exit(value == 'o' ? 0 : 1);
@@ -266,8 +270,9 @@ run_test(int argc, char **argv, char **envp)
 	(void)close(descriptors[1]);
 	report_checkpoint("orphan-parent-wait");
 	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
-	    WEXITSTATUS(status) != 0 || read(descriptors[0], received, 1) != 1 ||
-	    received[0] != 'o' || close(descriptors[0]) != 0)
+	    WEXITSTATUS(status) != 0 ||
+	    read(descriptors[0], received, 1) != 1 || received[0] != 'o' ||
+	    close(descriptors[0]) != 0)
 		return 248;
 	report_checkpoint("orphan-done");
 	/* Exercise the child-exit/wait registration edge repeatedly. */
@@ -290,7 +295,8 @@ run_test(int argc, char **argv, char **envp)
 	if (kill(getpid(), SIGUSR1) != 0 ||
 	    (caught_signals & (1U << SIGUSR1)) == 0)
 		return 10;
-	/* A signal may interrupt a handler; kernel and HAL frames must be LIFO. */
+	/* A signal may interrupt a handler; kernel and HAL frames must be LIFO.
+	 */
 	{
 		struct sigaction nested;
 
@@ -308,7 +314,8 @@ run_test(int argc, char **argv, char **envp)
 		    signal(SIGUSR1, catch_signal) == SIG_ERR)
 			return 258;
 	}
-	/* SA_SIGINFO carries a fixed-width record and an editable signal mask. */
+	/* SA_SIGINFO carries a fixed-width record and an editable signal mask.
+	 */
 	{
 		struct sigaction action;
 		sigset_t current, unblock = 1U << (SIGUSR2 - 1);
@@ -328,7 +335,8 @@ run_test(int argc, char **argv, char **envp)
 		    signal(SIGUSR1, catch_signal) == SIG_ERR)
 			return 260;
 	}
-	/* SIGCHLD identifies the child and reports its unencoded exit status. */
+	/* SIGCHLD identifies the child and reports its unencoded exit status.
+	 */
 	{
 		struct sigaction action;
 		memset(&action, 0, sizeof(action));
@@ -380,15 +388,15 @@ run_test(int argc, char **argv, char **envp)
 	if (child < 0)
 		return 13;
 	if (child == 0) {
-		struct timespec delay = { 0, 20000000 };
+		struct timespec delay = {0, 20000000};
 		(void)write(1, "POSIX_R1_CHILD_SLEEP\n", 21);
 		(void)nanosleep(&delay, NULL);
 		(void)write(1, "POSIX_R1_CHILD_WAKE\n", 20);
 		_exit(kill(getppid(), SIGUSR1) == 0 ? 0 : 1);
 	}
 	{
-		struct timespec delay = { 1, 0 };
-		struct timespec remaining = { 0, 0 };
+		struct timespec delay = {1, 0};
+		struct timespec remaining = {0, 0};
 		(void)write(1, "POSIX_R1_PARENT_SLEEP\n", 22);
 		errno = 0;
 		if (nanosleep(&delay, &remaining) != -1 || errno != EINTR ||
@@ -436,7 +444,8 @@ run_test(int argc, char **argv, char **envp)
 	    !WIFCONTINUED(status) || waitpid(child, &status, 0) != child ||
 	    !WIFEXITED(status) || WEXITSTATUS(status) != 0)
 		return 15;
-	/* An orphaned stopped process group receives SIGHUP followed by SIGCONT. */
+	/* An orphaned stopped process group receives SIGHUP followed by
+	 * SIGCONT. */
 	if (pipe(descriptors) != 0)
 		return 259;
 	child = fork();
@@ -454,7 +463,8 @@ run_test(int argc, char **argv, char **envp)
 			    signal(SIGHUP, catch_signal) == SIG_ERR)
 				_exit(2);
 			(void)kill(getpid(), SIGSTOP);
-			result = (caught_signals & (1U << SIGHUP)) != 0 ? 'h' : 'x';
+			result =
+			    (caught_signals & (1U << SIGHUP)) != 0 ? 'h' : 'x';
 			(void)write(descriptors[1], &result, 1);
 			_exit(result == 'h' ? 0 : 3);
 		}
@@ -463,18 +473,21 @@ run_test(int argc, char **argv, char **envp)
 		if (waitpid(member, &status, WUNTRACED) != member ||
 		    !WIFSTOPPED(status))
 			_exit(4);
-		/* Exiting reparents member and makes its process group orphaned. */
+		/* Exiting reparents member and makes its process group
+		 * orphaned. */
 		_exit(0);
 	}
 	(void)close(descriptors[1]);
 	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
-	    WEXITSTATUS(status) != 0 || read(descriptors[0], received, 1) != 1 ||
-	    received[0] != 'h' || close(descriptors[0]) != 0)
+	    WEXITSTATUS(status) != 0 ||
+	    read(descriptors[0], received, 1) != 1 || received[0] != 'h' ||
+	    close(descriptors[0]) != 0)
 		return 259;
 	report_stage(7);
 	{
-		unsigned char *mapping = mmap(NULL, 3U * TEST_PAGE_SIZE,
-		    PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		unsigned char *mapping =
+		    mmap(NULL, 3U * TEST_PAGE_SIZE, PROT_READ | PROT_WRITE,
+			 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 		if (mapping == MAP_FAILED)
 			return 16;
 #ifdef ZEDBSD_USER_ABI_LP64
@@ -484,7 +497,8 @@ run_test(int argc, char **argv, char **envp)
 		mapping[0] = 1;
 		mapping[TEST_PAGE_SIZE] = 2;
 		mapping[2U * TEST_PAGE_SIZE] = 3;
-		if (mprotect(mapping + TEST_PAGE_SIZE, TEST_PAGE_SIZE, PROT_READ) != 0 ||
+		if (mprotect(mapping + TEST_PAGE_SIZE, TEST_PAGE_SIZE,
+			     PROT_READ) != 0 ||
 		    msync(mapping, TEST_PAGE_SIZE, MS_SYNC) != 0 ||
 		    munmap(mapping + TEST_PAGE_SIZE, TEST_PAGE_SIZE) != 0 ||
 		    munmap(mapping, TEST_PAGE_SIZE) != 0 ||
@@ -500,9 +514,9 @@ run_test(int argc, char **argv, char **envp)
 		if (image < 0 || fstat(image, &image_status) != 0)
 			return 254;
 		past_eof = (image_status.st_size + TEST_PAGE_SIZE - 1) &
-		    ~(off_t)(TEST_PAGE_SIZE - 1);
+			   ~(off_t)(TEST_PAGE_SIZE - 1);
 		mapping = mmap(NULL, TEST_PAGE_SIZE, PROT_READ, MAP_PRIVATE,
-		    image, past_eof);
+			       image, past_eof);
 		if (mapping == MAP_FAILED || close(image) != 0)
 			return 255;
 		child = fork();
@@ -513,8 +527,9 @@ run_test(int argc, char **argv, char **envp)
 			(void)value;
 			_exit(1);
 		}
-		if (waitpid(child, &status, 0) != child || !WIFSIGNALED(status) ||
-		    WTERMSIG(status) != SIGBUS || munmap(mapping, TEST_PAGE_SIZE) != 0)
+		if (waitpid(child, &status, 0) != child ||
+		    !WIFSIGNALED(status) || WTERMSIG(status) != SIGBUS ||
+		    munmap(mapping, TEST_PAGE_SIZE) != 0)
 			return 257;
 	}
 	/* A synchronous VM fault reports BUS_ADRERR and the exact address. */
@@ -527,9 +542,9 @@ run_test(int argc, char **argv, char **envp)
 		if (image < 0 || fstat(image, &image_status) != 0)
 			return 261;
 		past_eof = (image_status.st_size + TEST_PAGE_SIZE - 1) &
-		    ~(off_t)(TEST_PAGE_SIZE - 1);
+			   ~(off_t)(TEST_PAGE_SIZE - 1);
 		mapping = mmap(NULL, TEST_PAGE_SIZE, PROT_READ, MAP_PRIVATE,
-		    image, past_eof);
+			       image, past_eof);
 		if (mapping == MAP_FAILED || close(image) != 0)
 			return 261;
 		child = fork();
@@ -549,7 +564,8 @@ run_test(int argc, char **argv, char **envp)
 			_exit(3);
 		}
 		if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
-		    WEXITSTATUS(status) != 0 || munmap(mapping, TEST_PAGE_SIZE) != 0)
+		    WEXITSTATUS(status) != 0 ||
+		    munmap(mapping, TEST_PAGE_SIZE) != 0)
 			return 261;
 	}
 	report_stage(8);
@@ -587,12 +603,15 @@ run_test(int argc, char **argv, char **envp)
 			if (read_only < 0)
 				return 21;
 			read_only_shared = mmap(NULL, TEST_PAGE_SIZE, PROT_READ,
-			    MAP_SHARED, read_only, 0);
-			shared1 = mmap(NULL, TEST_PAGE_SIZE, PROT_READ | PROT_WRITE,
-			    MAP_SHARED, file, 0);
-			shared2 = mmap(NULL, TEST_PAGE_SIZE, PROT_READ | PROT_WRITE,
-			    MAP_SHARED, file, 0);
-			if (close(read_only) != 0 || read_only_shared == MAP_FAILED ||
+						MAP_SHARED, read_only, 0);
+			shared1 =
+			    mmap(NULL, TEST_PAGE_SIZE, PROT_READ | PROT_WRITE,
+				 MAP_SHARED, file, 0);
+			shared2 =
+			    mmap(NULL, TEST_PAGE_SIZE, PROT_READ | PROT_WRITE,
+				 MAP_SHARED, file, 0);
+			if (close(read_only) != 0 ||
+			    read_only_shared == MAP_FAILED ||
 			    shared1 == MAP_FAILED || shared2 == MAP_FAILED)
 				return 21;
 			shared1[0] = 'm';
@@ -603,10 +622,13 @@ run_test(int argc, char **argv, char **envp)
 				return 21;
 			if (child == 0) {
 				shared2[0] = 'c';
-				_exit(msync(shared2, TEST_PAGE_SIZE, MS_SYNC) == 0 ? 0 : 1);
+				_exit(msync(shared2, TEST_PAGE_SIZE, MS_SYNC) ==
+					      0
+					  ? 0
+					  : 1);
 			}
-			if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
-			    WEXITSTATUS(status) != 0)
+			if (waitpid(child, &status, 0) != child ||
+			    !WIFEXITED(status) || WEXITSTATUS(status) != 0)
 				return 211;
 			if (shared1[0] != 'c')
 				return 215;
@@ -620,8 +642,9 @@ run_test(int argc, char **argv, char **envp)
 			    munmap(shared1, TEST_PAGE_SIZE) != 0 ||
 			    munmap(shared2, TEST_PAGE_SIZE) != 0)
 				return 219;
-			private_map = mmap(NULL, TEST_PAGE_SIZE, PROT_READ | PROT_WRITE,
-			    MAP_PRIVATE, file, 0);
+			private_map =
+			    mmap(NULL, TEST_PAGE_SIZE, PROT_READ | PROT_WRITE,
+				 MAP_PRIVATE, file, 0);
 			if (private_map == MAP_FAILED)
 				return 212;
 			private_map[0] = 'p';
@@ -632,23 +655,25 @@ run_test(int argc, char **argv, char **envp)
 				private_map[0] = 'q';
 				_exit(private_map[0] == 'q' ? 0 : 1);
 			}
-			if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
-			    WEXITSTATUS(status) != 0 || private_map[0] != 'p')
+			if (waitpid(child, &status, 0) != child ||
+			    !WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
+			    private_map[0] != 'p')
 				return 213;
 			persisted = 0;
 			if (msync(private_map, TEST_PAGE_SIZE, MS_SYNC) != 0 ||
-			    pread(file, &persisted, 1, 0) != 1 || persisted != 'c' ||
+			    pread(file, &persisted, 1, 0) != 1 ||
+			    persisted != 'c' ||
 			    munmap(private_map, TEST_PAGE_SIZE) != 0)
 				return 214;
 		}
 		{
 			struct timespec times[2] = {
 #ifdef ZEDBSD_USER_ABI_LP64
-				{ (time_t)2208988800LL, 123456789 },
-				{ (time_t)2208988802LL, 987654321 },
+			    {(time_t)2208988800LL, 123456789},
+			    {(time_t)2208988802LL, 987654321},
 #else
-				{ 1767225600, 123456789 },
-				{ 1767225602, 987654321 },
+			    {1767225600, 123456789},
+			    {1767225602, 987654321},
 #endif
 			};
 			struct stat attributes;
@@ -709,7 +734,9 @@ run_test(int argc, char **argv, char **envp)
 	}
 	report_stage(10);
 	return write(1, message, strlen(message)) ==
-		(ssize_t)(sizeof(message) - 1U) ? 37 : 1;
+		       (ssize_t)(sizeof(message) - 1U)
+		   ? 37
+		   : 1;
 }
 
 int

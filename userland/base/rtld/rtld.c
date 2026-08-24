@@ -167,7 +167,7 @@ page_ceil(uintptr_t value)
 	if (value > UINTPTR_MAX - (RTLD_PAGE_SIZE - 1U))
 		rtld_fatal("address overflow");
 	return (value + RTLD_PAGE_SIZE - 1U) &
-	    ~(uintptr_t)(RTLD_PAGE_SIZE - 1U);
+	       ~(uintptr_t)(RTLD_PAGE_SIZE - 1U);
 }
 
 static int
@@ -178,7 +178,7 @@ raw_error(intptr_t value)
 
 static intptr_t
 syscall6(uint32_t number, uintptr_t a0, uintptr_t a1, uintptr_t a2,
-	uintptr_t a3, uintptr_t a4, uintptr_t a5)
+	 uintptr_t a3, uintptr_t a4, uintptr_t a5)
 {
 	return rtld_syscall6(number, a0, a1, a2, a3, a4, a5);
 }
@@ -187,7 +187,7 @@ static uintptr_t
 current_tid(void)
 {
 	intptr_t value = syscall6(ZEDBSD_SYS_thread_self,
-	    ZEDBSD_THREAD_SELF_TID, 0, 0, 0, 0, 0);
+				  ZEDBSD_THREAD_SELF_TID, 0, 0, 0, 0, 0);
 	return raw_error(value) ? 0 : (uintptr_t)value;
 }
 
@@ -202,10 +202,11 @@ loader_lock(void)
 	}
 	for (;;) {
 		if (__atomic_exchange_n(&loader_lock_word, 1,
-		    __ATOMIC_ACQUIRE) == 0)
+					__ATOMIC_ACQUIRE) == 0)
 			break;
 		(void)syscall6(ZEDBSD_SYS_usync, (uintptr_t)&loader_lock_word,
-		    ZEDBSD_USYNC_WAIT, 1, 0, 0, ZEDBSD_USYNC_PRIVATE);
+			       ZEDBSD_USYNC_WAIT, 1, 0, 0,
+			       ZEDBSD_USYNC_PRIVATE);
 	}
 	loader_lock_owner = tid;
 	loader_lock_depth = 1;
@@ -221,16 +222,17 @@ loader_unlock(void)
 	loader_lock_owner = 0;
 	__atomic_store_n(&loader_lock_word, 0, __ATOMIC_RELEASE);
 	(void)syscall6(ZEDBSD_SYS_usync, (uintptr_t)&loader_lock_word,
-	    ZEDBSD_USYNC_WAKE, 0, 0, 1, ZEDBSD_USYNC_PRIVATE);
+		       ZEDBSD_USYNC_WAKE, 0, 0, 1, ZEDBSD_USYNC_PRIVATE);
 }
 
 static void
 clear_loader_error(void)
 {
 	intptr_t value = syscall6(ZEDBSD_SYS_thread_self,
-	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
-	struct __rtld_tcb *tcb = raw_error(value) || value == 0 ? NULL :
-	    (struct __rtld_tcb *)(uintptr_t)value;
+				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	struct __rtld_tcb *tcb = raw_error(value) || value == 0
+				     ? NULL
+				     : (struct __rtld_tcb *)(uintptr_t)value;
 
 	if (tcb != NULL) {
 		tcb->dlerror_pending = 0;
@@ -246,17 +248,17 @@ set_loader_error(const char *message)
 {
 	size_t length = 0;
 	intptr_t value = syscall6(ZEDBSD_SYS_thread_self,
-	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
-	struct __rtld_tcb *tcb = raw_error(value) || value == 0 ? NULL :
-	    (struct __rtld_tcb *)(uintptr_t)value;
+				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	struct __rtld_tcb *tcb = raw_error(value) || value == 0
+				     ? NULL
+				     : (struct __rtld_tcb *)(uintptr_t)value;
 	char *buffer = tcb != NULL ? tcb->dlerror_buf : loader_error;
-	size_t capacity = tcb != NULL ? sizeof(tcb->dlerror_buf) :
-	    sizeof(loader_error);
+	size_t capacity =
+	    tcb != NULL ? sizeof(tcb->dlerror_buf) : sizeof(loader_error);
 
 	if (message == NULL)
 		message = "runtime linker error";
-	while (message[length] != '\0' &&
-	    length + 1U < capacity) {
+	while (message[length] != '\0' && length + 1U < capacity) {
 		buffer[length] = message[length];
 		length++;
 	}
@@ -272,7 +274,7 @@ rtld_debug(const char *message)
 {
 	if (message != NULL)
 		(void)syscall6(ZEDBSD_SYS_write, 2, (uintptr_t)message,
-		    rtld_strlen(message), 0, 0, 0);
+			       rtld_strlen(message), 0, 0, 0);
 }
 
 void
@@ -282,7 +284,8 @@ rtld_fatal(const char *message)
 	rtld_debug(message != NULL ? message : "runtime linker failure");
 	rtld_debug("\n");
 	(void)syscall6(ZEDBSD_SYS_exit, 127, 0, 0, 0, 0, 0);
-	for (;;) { }
+	for (;;) {
+	}
 }
 
 static int
@@ -295,8 +298,10 @@ valid_elf_header(const Elf_Ehdr *header, int expected_type)
 	    header->e_ident[EI_CLASS] != ELF_CLASS ||
 	    header->e_ident[EI_DATA] != RTLD_DATA ||
 	    header->e_ident[EI_VERSION] != EV_CURRENT ||
-	    header->e_type != expected_type || header->e_machine != RTLD_MACHINE ||
-	    header->e_version != EV_CURRENT || header->e_ehsize != sizeof(*header) ||
+	    header->e_type != expected_type ||
+	    header->e_machine != RTLD_MACHINE ||
+	    header->e_version != EV_CURRENT ||
+	    header->e_ehsize != sizeof(*header) ||
 	    header->e_phentsize != sizeof(Elf_Phdr) || header->e_phnum == 0 ||
 	    header->e_phnum > 64)
 		return 0;
@@ -315,10 +320,13 @@ bootstrap_relative(uintptr_t base, const Elf_Phdr *phdr, unsigned phnum)
 
 	for (i = 0; i < phnum; i++)
 		if (phdr[i].p_type == PT_DYNAMIC) {
-			if (dynamic != NULL || phdr[i].p_memsz < sizeof(Elf_Dyn))
+			if (dynamic != NULL ||
+			    phdr[i].p_memsz < sizeof(Elf_Dyn))
 				return -1;
-			dynamic = (Elf_Dyn *)(base + (uintptr_t)phdr[i].p_vaddr);
-			dynamic_count = (size_t)phdr[i].p_memsz / sizeof(Elf_Dyn);
+			dynamic =
+			    (Elf_Dyn *)(base + (uintptr_t)phdr[i].p_vaddr);
+			dynamic_count =
+			    (size_t)phdr[i].p_memsz / sizeof(Elf_Dyn);
 		}
 	if (dynamic == NULL)
 		return -1;
@@ -326,15 +334,28 @@ bootstrap_relative(uintptr_t base, const Elf_Phdr *phdr, unsigned phnum)
 		if (dynamic[i].d_tag == DT_NULL)
 			break;
 		switch ((int)dynamic[i].d_tag) {
-		case DT_REL: rel = (Elf_Rel *)(base +
-			(uintptr_t)dynamic[i].d_un.d_ptr); break;
-		case DT_RELSZ: relsz = (size_t)dynamic[i].d_un.d_val; break;
-		case DT_RELENT: relent = (size_t)dynamic[i].d_un.d_val; break;
-		case DT_RELA: rela = (Elf_Rela *)(base +
-			(uintptr_t)dynamic[i].d_un.d_ptr); break;
-		case DT_RELASZ: relasz = (size_t)dynamic[i].d_un.d_val; break;
-		case DT_RELAENT: relaent = (size_t)dynamic[i].d_un.d_val; break;
-		default: break;
+		case DT_REL:
+			rel = (Elf_Rel *)(base +
+					  (uintptr_t)dynamic[i].d_un.d_ptr);
+			break;
+		case DT_RELSZ:
+			relsz = (size_t)dynamic[i].d_un.d_val;
+			break;
+		case DT_RELENT:
+			relent = (size_t)dynamic[i].d_un.d_val;
+			break;
+		case DT_RELA:
+			rela = (Elf_Rela *)(base +
+					    (uintptr_t)dynamic[i].d_un.d_ptr);
+			break;
+		case DT_RELASZ:
+			relasz = (size_t)dynamic[i].d_un.d_val;
+			break;
+		case DT_RELAENT:
+			relaent = (size_t)dynamic[i].d_un.d_val;
+			break;
+		default:
+			break;
 		}
 	}
 	if (i == dynamic_count || (rel != NULL && relent != sizeof(Elf_Rel)) ||
@@ -362,7 +383,7 @@ bootstrap_relative(uintptr_t base, const Elf_Phdr *phdr, unsigned phnum)
 
 static int
 object_contains(const struct rtld_object *object, uintptr_t address,
-	size_t size, uint32_t required)
+		size_t size, uint32_t required)
 {
 	unsigned i;
 	if (object == NULL || size == 0 || address > UINTPTR_MAX - size)
@@ -384,7 +405,7 @@ object_contains(const struct rtld_object *object, uintptr_t address,
 
 static uintptr_t
 object_pointer(const struct rtld_object *object, Elf_Addr value, size_t size,
-	uint32_t required)
+	       uint32_t required)
 {
 	uintptr_t address;
 	if ((uintptr_t)value > UINTPTR_MAX - object->base)
@@ -465,8 +486,8 @@ static const char *
 dynamic_string(struct rtld_object *object, uint32_t offset)
 {
 	if (offset >= object->strsz ||
-	    !bounded_string(object->strtab + offset,
-	    object->strsz - offset, NULL))
+	    !bounded_string(object->strtab + offset, object->strsz - offset,
+			    NULL))
 		rtld_fatal("invalid version string");
 	return object->strtab + offset;
 }
@@ -474,7 +495,7 @@ dynamic_string(struct rtld_object *object, uint32_t offset)
 static Elf_Addr
 version_offset(Elf_Addr value, uint32_t offset)
 {
-	if ((Elf_Addr)offset > (Elf_Addr)~(Elf_Addr)0 - value)
+	if ((Elf_Addr)offset > (Elf_Addr) ~(Elf_Addr)0 - value)
 		rtld_fatal("symbol version table overflow");
 	return value + (Elf_Addr)offset;
 }
@@ -486,8 +507,8 @@ validate_verdef(struct rtld_object *object)
 	uint32_t record;
 
 	for (record = 0; record < object->verdef_count; record++) {
-		Elf_Verdef *definition = (Elf_Verdef *)object_pointer(object,
-		    cursor, sizeof(*definition), PF_R);
+		Elf_Verdef *definition = (Elf_Verdef *)object_pointer(
+		    object, cursor, sizeof(*definition), PF_R);
 		Elf_Addr auxiliary;
 		uint16_t item;
 
@@ -495,23 +516,26 @@ validate_verdef(struct rtld_object *object)
 		    definition->vd_ndx == VER_NDX_LOCAL ||
 		    (definition->vd_ndx & VER_NDX_HIDDEN) != 0 ||
 		    ((definition->vd_ndx == VER_NDX_GLOBAL) !=
-		    ((definition->vd_flags & VER_FLG_BASE) != 0)) ||
+		     ((definition->vd_flags & VER_FLG_BASE) != 0)) ||
 		    definition->vd_cnt == 0 || definition->vd_aux == 0)
 			rtld_fatal("invalid symbol version definition");
 		auxiliary = version_offset(cursor, definition->vd_aux);
 		for (item = 0; item < definition->vd_cnt; item++) {
-			Elf_Verdaux *name = (Elf_Verdaux *)object_pointer(object,
-			    auxiliary, sizeof(*name), PF_R);
+			Elf_Verdaux *name = (Elf_Verdaux *)object_pointer(
+			    object, auxiliary, sizeof(*name), PF_R);
 			(void)dynamic_string(object, name->vda_name);
 			if (item + 1U < definition->vd_cnt) {
 				if (name->vda_next == 0)
-					rtld_fatal("truncated symbol version definition");
-				auxiliary = version_offset(auxiliary, name->vda_next);
+					rtld_fatal("truncated symbol version "
+						   "definition");
+				auxiliary =
+				    version_offset(auxiliary, name->vda_next);
 			}
 		}
 		if (record + 1U < object->verdef_count) {
 			if (definition->vd_next == 0)
-				rtld_fatal("truncated symbol version definitions");
+				rtld_fatal(
+				    "truncated symbol version definitions");
 			cursor = version_offset(cursor, definition->vd_next);
 		} else if (definition->vd_next != 0) {
 			rtld_fatal("extra symbol version definitions");
@@ -526,8 +550,8 @@ validate_verneed(struct rtld_object *object)
 	uint32_t record;
 
 	for (record = 0; record < object->verneed_count; record++) {
-		Elf_Verneed *need = (Elf_Verneed *)object_pointer(object,
-		    cursor, sizeof(*need), PF_R);
+		Elf_Verneed *need = (Elf_Verneed *)object_pointer(
+		    object, cursor, sizeof(*need), PF_R);
 		Elf_Addr auxiliary;
 		uint16_t item;
 
@@ -537,20 +561,24 @@ validate_verneed(struct rtld_object *object)
 		(void)dynamic_string(object, need->vn_file);
 		auxiliary = version_offset(cursor, need->vn_aux);
 		for (item = 0; item < need->vn_cnt; item++) {
-			Elf_Vernaux *name = (Elf_Vernaux *)object_pointer(object,
-			    auxiliary, sizeof(*name), PF_R);
+			Elf_Vernaux *name = (Elf_Vernaux *)object_pointer(
+			    object, auxiliary, sizeof(*name), PF_R);
 			if ((name->vna_other & VER_NDX_MASK) <= VER_NDX_GLOBAL)
-				rtld_fatal("invalid required symbol version index");
+				rtld_fatal(
+				    "invalid required symbol version index");
 			(void)dynamic_string(object, name->vna_name);
 			if (item + 1U < need->vn_cnt) {
 				if (name->vna_next == 0)
-					rtld_fatal("truncated symbol version requirement");
-				auxiliary = version_offset(auxiliary, name->vna_next);
+					rtld_fatal("truncated symbol version "
+						   "requirement");
+				auxiliary =
+				    version_offset(auxiliary, name->vna_next);
 			}
 		}
 		if (record + 1U < object->verneed_count) {
 			if (need->vn_next == 0)
-				rtld_fatal("truncated symbol version requirements");
+				rtld_fatal(
+				    "truncated symbol version requirements");
 			cursor = version_offset(cursor, need->vn_next);
 		} else if (need->vn_next != 0) {
 			rtld_fatal("extra symbol version requirements");
@@ -569,7 +597,8 @@ register_tls_module(struct rtld_object *object)
 			size_t alignment = (size_t)object->phdr[i].p_align;
 
 			if (object->tls_module_id != 0 ||
-			    object->phdr[i].p_filesz > object->phdr[i].p_memsz ||
+			    object->phdr[i].p_filesz >
+				object->phdr[i].p_memsz ||
 			    object->phdr[i].p_memsz == 0)
 				rtld_fatal("invalid TLS segment");
 			if (alignment == 0)
@@ -595,8 +624,10 @@ register_tls_module(struct rtld_object *object)
 			module->alignment = alignment;
 			module->owner = object;
 			if (module->file_size != 0)
-				module->init_image = (const void *)object_pointer(object,
-				    object->phdr[i].p_vaddr, module->file_size, PF_R);
+				module->init_image =
+				    (const void *)object_pointer(
+					object, object->phdr[i].p_vaddr,
+					module->file_size, PF_R);
 			module->active = 1;
 			tls_generation++;
 		}
@@ -621,11 +652,11 @@ parse_dynamic(struct rtld_object *object)
 			if (object->dynamic != NULL ||
 			    object->phdr[i].p_memsz < sizeof(Elf_Dyn))
 				rtld_fatal("invalid dynamic segment");
-			object->dynamic = (Elf_Dyn *)object_pointer(object,
-			    object->phdr[i].p_vaddr,
+			object->dynamic = (Elf_Dyn *)object_pointer(
+			    object, object->phdr[i].p_vaddr,
 			    (size_t)object->phdr[i].p_memsz, PF_R);
-			object->dynamic_count = (size_t)object->phdr[i].p_memsz /
-			    sizeof(Elf_Dyn);
+			object->dynamic_count =
+			    (size_t)object->phdr[i].p_memsz / sizeof(Elf_Dyn);
 		}
 	if (object->dynamic == NULL)
 		rtld_fatal("missing dynamic segment");
@@ -640,14 +671,24 @@ parse_dynamic(struct rtld_object *object)
 			object->needed_offset[object->needed_count++] =
 			    (uint32_t)dynamic->d_un.d_val;
 			break;
-		case DT_HASH: hash_value = (uintptr_t)dynamic->d_un.d_ptr; break;
+		case DT_HASH:
+			hash_value = (uintptr_t)dynamic->d_un.d_ptr;
+			break;
 		case DT_GNU_HASH:
 			gnu_hash_value = (uintptr_t)dynamic->d_un.d_ptr;
 			break;
-		case DT_STRTAB: strtab_value = (uintptr_t)dynamic->d_un.d_ptr; break;
-		case DT_STRSZ: object->strsz = (size_t)dynamic->d_un.d_val; break;
-		case DT_SYMTAB: symtab_value = (uintptr_t)dynamic->d_un.d_ptr; break;
-		case DT_SYMENT: syment = (size_t)dynamic->d_un.d_val; break;
+		case DT_STRTAB:
+			strtab_value = (uintptr_t)dynamic->d_un.d_ptr;
+			break;
+		case DT_STRSZ:
+			object->strsz = (size_t)dynamic->d_un.d_val;
+			break;
+		case DT_SYMTAB:
+			symtab_value = (uintptr_t)dynamic->d_un.d_ptr;
+			break;
+		case DT_SYMENT:
+			syment = (size_t)dynamic->d_un.d_val;
+			break;
 		case DT_VERSYM:
 			versym_value = (uintptr_t)dynamic->d_un.d_ptr;
 			break;
@@ -656,7 +697,8 @@ parse_dynamic(struct rtld_object *object)
 			break;
 		case DT_VERDEFNUM:
 			if (dynamic->d_un.d_val > UINT32_MAX)
-				rtld_fatal("too many symbol version definitions");
+				rtld_fatal(
+				    "too many symbol version definitions");
 			object->verdef_count = (uint32_t)dynamic->d_un.d_val;
 			break;
 		case DT_VERNEED:
@@ -664,36 +706,69 @@ parse_dynamic(struct rtld_object *object)
 			break;
 		case DT_VERNEEDNUM:
 			if (dynamic->d_un.d_val > UINT32_MAX)
-				rtld_fatal("too many symbol version requirements");
+				rtld_fatal(
+				    "too many symbol version requirements");
 			object->verneed_count = (uint32_t)dynamic->d_un.d_val;
 			break;
-		case DT_REL: rel_value = (uintptr_t)dynamic->d_un.d_ptr; break;
-		case DT_RELSZ: relsz = (size_t)dynamic->d_un.d_val; break;
-		case DT_RELENT: relent = (size_t)dynamic->d_un.d_val; break;
-		case DT_RELA: rela_value = (uintptr_t)dynamic->d_un.d_ptr; break;
-		case DT_RELASZ: relasz = (size_t)dynamic->d_un.d_val; break;
-		case DT_RELAENT: relaent = (size_t)dynamic->d_un.d_val; break;
-		case DT_JMPREL: jmprel_value = (uintptr_t)dynamic->d_un.d_ptr; break;
-		case DT_PLTRELSZ: object->jmprel_size =
-			(size_t)dynamic->d_un.d_val; break;
-		case DT_PLTREL: object->pltrel = (int)dynamic->d_un.d_val; break;
-		case DT_INIT: object->init = object->base +
-			(uintptr_t)dynamic->d_un.d_ptr; break;
-		case DT_FINI: object->fini = object->base +
-			(uintptr_t)dynamic->d_un.d_ptr; break;
-		case DT_INIT_ARRAY: object->init_array = (uintptr_t *)(object->base +
-			(uintptr_t)dynamic->d_un.d_ptr); break;
-		case DT_INIT_ARRAYSZ: init_array_size =
-			(size_t)dynamic->d_un.d_val; break;
-		case DT_FINI_ARRAY: object->fini_array = (uintptr_t *)(object->base +
-			(uintptr_t)dynamic->d_un.d_ptr); break;
-		case DT_FINI_ARRAYSZ: fini_array_size =
-			(size_t)dynamic->d_un.d_val; break;
-		case DT_PREINIT_ARRAY: object->preinit_array =
-			(uintptr_t *)(object->base +
-			(uintptr_t)dynamic->d_un.d_ptr); break;
-		case DT_PREINIT_ARRAYSZ: preinit_array_size =
-			(size_t)dynamic->d_un.d_val; break;
+		case DT_REL:
+			rel_value = (uintptr_t)dynamic->d_un.d_ptr;
+			break;
+		case DT_RELSZ:
+			relsz = (size_t)dynamic->d_un.d_val;
+			break;
+		case DT_RELENT:
+			relent = (size_t)dynamic->d_un.d_val;
+			break;
+		case DT_RELA:
+			rela_value = (uintptr_t)dynamic->d_un.d_ptr;
+			break;
+		case DT_RELASZ:
+			relasz = (size_t)dynamic->d_un.d_val;
+			break;
+		case DT_RELAENT:
+			relaent = (size_t)dynamic->d_un.d_val;
+			break;
+		case DT_JMPREL:
+			jmprel_value = (uintptr_t)dynamic->d_un.d_ptr;
+			break;
+		case DT_PLTRELSZ:
+			object->jmprel_size = (size_t)dynamic->d_un.d_val;
+			break;
+		case DT_PLTREL:
+			object->pltrel = (int)dynamic->d_un.d_val;
+			break;
+		case DT_INIT:
+			object->init =
+			    object->base + (uintptr_t)dynamic->d_un.d_ptr;
+			break;
+		case DT_FINI:
+			object->fini =
+			    object->base + (uintptr_t)dynamic->d_un.d_ptr;
+			break;
+		case DT_INIT_ARRAY:
+			object->init_array =
+			    (uintptr_t *)(object->base +
+					  (uintptr_t)dynamic->d_un.d_ptr);
+			break;
+		case DT_INIT_ARRAYSZ:
+			init_array_size = (size_t)dynamic->d_un.d_val;
+			break;
+		case DT_FINI_ARRAY:
+			object->fini_array =
+			    (uintptr_t *)(object->base +
+					  (uintptr_t)dynamic->d_un.d_ptr);
+			break;
+		case DT_FINI_ARRAYSZ:
+			fini_array_size = (size_t)dynamic->d_un.d_val;
+			break;
+		case DT_PREINIT_ARRAY:
+			object->preinit_array =
+			    (uintptr_t *)(object->base +
+					  (uintptr_t)dynamic->d_un.d_ptr);
+			break;
+		case DT_PREINIT_ARRAYSZ:
+			preinit_array_size = (size_t)dynamic->d_un.d_val;
+			break;
 		case DT_RPATH:
 			rpath_offset = (uintptr_t)dynamic->d_un.d_val;
 			break;
@@ -702,7 +777,8 @@ parse_dynamic(struct rtld_object *object)
 			break;
 		case DT_TEXTREL:
 			rtld_fatal("unsupported dynamic feature");
-		default: break;
+		default:
+			break;
 		}
 	}
 	if (i == object->dynamic_count || object->strsz == 0 ||
@@ -715,14 +791,14 @@ parse_dynamic(struct rtld_object *object)
 	    fini_array_size % sizeof(uintptr_t) != 0 ||
 	    preinit_array_size % sizeof(uintptr_t) != 0)
 		rtld_fatal("malformed dynamic table");
-	object->strtab = (const char *)object_pointer(object,
-	    (Elf_Addr)strtab_value, object->strsz, PF_R);
-	object->symtab = (Elf_Sym *)object_pointer(object, (Elf_Addr)symtab_value,
-	    sizeof(Elf_Sym), PF_R);
+	object->strtab = (const char *)object_pointer(
+	    object, (Elf_Addr)strtab_value, object->strsz, PF_R);
+	object->symtab = (Elf_Sym *)object_pointer(
+	    object, (Elf_Addr)symtab_value, sizeof(Elf_Sym), PF_R);
 	if (hash_value != 0) {
 		size_t hash_words;
-		object->hash = (uint32_t *)object_pointer(object,
-		    (Elf_Addr)hash_value, 2U * sizeof(uint32_t), PF_R);
+		object->hash = (uint32_t *)object_pointer(
+		    object, (Elf_Addr)hash_value, 2U * sizeof(uint32_t), PF_R);
 		if (object->hash[0] == 0 || object->hash[1] == 0)
 			rtld_fatal("invalid SysV hash");
 		hash_words = 2U;
@@ -730,12 +806,13 @@ parse_dynamic(struct rtld_object *object)
 			rtld_fatal("invalid SysV hash size");
 		hash_words += object->hash[0];
 		if ((size_t)object->hash[1] > SIZE_MAX - hash_words ||
-		    sizeof(uint32_t) > SIZE_MAX / (hash_words + object->hash[1]))
+		    sizeof(uint32_t) >
+			SIZE_MAX / (hash_words + object->hash[1]))
 			rtld_fatal("invalid SysV hash size");
 		hash_words += object->hash[1];
 		object->symbol_count = object->hash[1];
 		(void)object_pointer(object, (Elf_Addr)hash_value,
-		    hash_words * sizeof(uint32_t), PF_R);
+				     hash_words * sizeof(uint32_t), PF_R);
 	}
 	if (gnu_hash_value != 0) {
 		uint32_t *header;
@@ -744,55 +821,63 @@ parse_dynamic(struct rtld_object *object)
 		unsigned bucket_index;
 		uint32_t gnu_symbol_count;
 
-		header = (uint32_t *)object_pointer(object,
-		    (Elf_Addr)gnu_hash_value, 4U * sizeof(uint32_t), PF_R);
+		header =
+		    (uint32_t *)object_pointer(object, (Elf_Addr)gnu_hash_value,
+					       4U * sizeof(uint32_t), PF_R);
 		object->gnu_bucket_count = header[0];
 		object->gnu_symbol_offset = header[1];
 		object->gnu_bloom_count = header[2];
 		object->gnu_bloom_shift = header[3];
-		if (object->gnu_bucket_count == 0 || object->gnu_bloom_count == 0 ||
-		    (object->gnu_bloom_count & (object->gnu_bloom_count - 1U)) != 0 ||
+		if (object->gnu_bucket_count == 0 ||
+		    object->gnu_bloom_count == 0 ||
+		    (object->gnu_bloom_count &
+		     (object->gnu_bloom_count - 1U)) != 0 ||
 		    object->gnu_bloom_shift >= sizeof(Elf_Addr) * 8U ||
 		    sizeof(Elf_Addr) > SIZE_MAX / object->gnu_bloom_count ||
 		    sizeof(uint32_t) > SIZE_MAX / object->gnu_bucket_count)
 			rtld_fatal("invalid GNU hash header");
-		bloom_bytes = (size_t)object->gnu_bloom_count * sizeof(Elf_Addr);
-		bucket_bytes = (size_t)object->gnu_bucket_count * sizeof(uint32_t);
+		bloom_bytes =
+		    (size_t)object->gnu_bloom_count * sizeof(Elf_Addr);
+		bucket_bytes =
+		    (size_t)object->gnu_bucket_count * sizeof(uint32_t);
 		if (gnu_hash_value > UINTPTR_MAX - 4U * sizeof(uint32_t))
 			rtld_fatal("GNU hash address overflow");
 		offset = gnu_hash_value + 4U * sizeof(uint32_t);
-		object->gnu_bloom = (Elf_Addr *)object_pointer(object,
-		    (Elf_Addr)offset, bloom_bytes, PF_R);
+		object->gnu_bloom = (Elf_Addr *)object_pointer(
+		    object, (Elf_Addr)offset, bloom_bytes, PF_R);
 		if (offset > UINTPTR_MAX - bloom_bytes)
 			rtld_fatal("GNU hash address overflow");
 		offset += bloom_bytes;
-		object->gnu_bucket = (uint32_t *)object_pointer(object,
-		    (Elf_Addr)offset, bucket_bytes, PF_R);
+		object->gnu_bucket = (uint32_t *)object_pointer(
+		    object, (Elf_Addr)offset, bucket_bytes, PF_R);
 		if (offset > UINTPTR_MAX - bucket_bytes)
 			rtld_fatal("GNU hash address overflow");
 		offset += bucket_bytes;
 		chain_bytes = object_readable_bytes(object, (Elf_Addr)offset);
 		chain_capacity = chain_bytes / sizeof(uint32_t);
 		if (chain_capacity != 0)
-			object->gnu_chain = (uint32_t *)object_pointer(object,
-			    (Elf_Addr)offset, sizeof(uint32_t), PF_R);
+			object->gnu_chain = (uint32_t *)object_pointer(
+			    object, (Elf_Addr)offset, sizeof(uint32_t), PF_R);
 		gnu_symbol_count = object->gnu_symbol_offset;
-		for (bucket_index = 0;
-		    bucket_index < object->gnu_bucket_count; bucket_index++) {
+		for (bucket_index = 0; bucket_index < object->gnu_bucket_count;
+		     bucket_index++) {
 			uint32_t symbol = object->gnu_bucket[bucket_index];
 			size_t chain_index;
 			if (symbol == 0)
 				continue;
 			if (symbol < object->gnu_symbol_offset)
 				rtld_fatal("invalid GNU hash bucket");
-			chain_index = (size_t)symbol - object->gnu_symbol_offset;
+			chain_index =
+			    (size_t)symbol - object->gnu_symbol_offset;
 			for (;;) {
 				if (chain_index >= chain_capacity)
-					rtld_fatal("unterminated GNU hash chain");
+					rtld_fatal(
+					    "unterminated GNU hash chain");
 				if ((object->gnu_chain[chain_index] & 1U) != 0)
 					break;
 				if (symbol == UINT32_MAX)
-					rtld_fatal("unterminated GNU hash chain");
+					rtld_fatal(
+					    "unterminated GNU hash chain");
 				symbol++;
 				chain_index++;
 			}
@@ -810,19 +895,21 @@ parse_dynamic(struct rtld_object *object)
 				rtld_fatal("empty GNU symbol table");
 			object->symbol_count = gnu_symbol_count;
 		}
-		chain_capacity = (size_t)object->symbol_count -
-		    object->gnu_symbol_offset;
+		chain_capacity =
+		    (size_t)object->symbol_count - object->gnu_symbol_offset;
 		if (chain_capacity > SIZE_MAX / sizeof(uint32_t))
 			rtld_fatal("invalid GNU hash chain size");
 		if (chain_capacity != 0)
 			(void)object_pointer(object, (Elf_Addr)offset,
-			    chain_capacity * sizeof(uint32_t), PF_R);
+					     chain_capacity * sizeof(uint32_t),
+					     PF_R);
 	}
 	if (object->symbol_count == 0 ||
 	    sizeof(Elf_Sym) > SIZE_MAX / object->symbol_count)
 		rtld_fatal("invalid dynamic symbol count");
 	(void)object_pointer(object, (Elf_Addr)symtab_value,
-	    (size_t)object->symbol_count * sizeof(Elf_Sym), PF_R);
+			     (size_t)object->symbol_count * sizeof(Elf_Sym),
+			     PF_R);
 	if ((verdef_value == 0) != (object->verdef_count == 0) ||
 	    (verneed_value == 0) != (object->verneed_count == 0) ||
 	    ((verdef_value != 0 || verneed_value != 0) && versym_value == 0))
@@ -830,8 +917,8 @@ parse_dynamic(struct rtld_object *object)
 	if (versym_value != 0) {
 		if (sizeof(Elf_Versym) > SIZE_MAX / object->symbol_count)
 			rtld_fatal("invalid symbol version table size");
-		object->versym = (Elf_Versym *)object_pointer(object,
-		    (Elf_Addr)versym_value,
+		object->versym = (Elf_Versym *)object_pointer(
+		    object, (Elf_Addr)versym_value,
 		    (size_t)object->symbol_count * sizeof(Elf_Versym), PF_R);
 	}
 	if (verdef_value != 0) {
@@ -843,22 +930,22 @@ parse_dynamic(struct rtld_object *object)
 		validate_verneed(object);
 	}
 	if (rel_value != 0) {
-		object->rel = (Elf_Rel *)object_pointer(object, (Elf_Addr)rel_value,
-		    relsz, PF_R);
+		object->rel = (Elf_Rel *)object_pointer(
+		    object, (Elf_Addr)rel_value, relsz, PF_R);
 		object->rel_count = relsz / sizeof(Elf_Rel);
 	}
 	if (rela_value != 0) {
-		object->rela = (Elf_Rela *)object_pointer(object,
-		    (Elf_Addr)rela_value, relasz, PF_R);
+		object->rela = (Elf_Rela *)object_pointer(
+		    object, (Elf_Addr)rela_value, relasz, PF_R);
 		object->rela_count = relasz / sizeof(Elf_Rela);
 	}
 	if (jmprel_value != 0) {
-		object->jmprel = (void *)object_pointer(object,
-		    (Elf_Addr)jmprel_value, object->jmprel_size, PF_R);
+		object->jmprel = (void *)object_pointer(
+		    object, (Elf_Addr)jmprel_value, object->jmprel_size, PF_R);
 		if ((object->pltrel == DT_REL &&
-		    object->jmprel_size % sizeof(Elf_Rel) != 0) ||
+		     object->jmprel_size % sizeof(Elf_Rel) != 0) ||
 		    (object->pltrel == DT_RELA &&
-		    object->jmprel_size % sizeof(Elf_Rela) != 0) ||
+		     object->jmprel_size % sizeof(Elf_Rela) != 0) ||
 		    (object->pltrel != DT_REL && object->pltrel != DT_RELA))
 			rtld_fatal("invalid PLT relocations");
 	}
@@ -866,32 +953,38 @@ parse_dynamic(struct rtld_object *object)
 	object->fini_count = fini_array_size / sizeof(uintptr_t);
 	object->preinit_count = preinit_array_size / sizeof(uintptr_t);
 	if (object->init_array != NULL)
-		(void)object_pointer(object, (Elf_Addr)((uintptr_t)object->init_array -
-		    object->base), init_array_size, PF_R);
+		(void)object_pointer(
+		    object,
+		    (Elf_Addr)((uintptr_t)object->init_array - object->base),
+		    init_array_size, PF_R);
 	if (object->fini_array != NULL)
-		(void)object_pointer(object, (Elf_Addr)((uintptr_t)object->fini_array -
-		    object->base), fini_array_size, PF_R);
+		(void)object_pointer(
+		    object,
+		    (Elf_Addr)((uintptr_t)object->fini_array - object->base),
+		    fini_array_size, PF_R);
 	if (object->preinit_array != NULL)
-		(void)object_pointer(object,
+		(void)object_pointer(
+		    object,
 		    (Elf_Addr)((uintptr_t)object->preinit_array - object->base),
 		    preinit_array_size, PF_R);
 	for (i = 0; i < object->needed_count; i++) {
 		uint32_t offset = object->needed_offset[i];
-		if (offset >= object->strsz || !bounded_string(object->strtab + offset,
-		    object->strsz - offset, NULL))
+		if (offset >= object->strsz ||
+		    !bounded_string(object->strtab + offset,
+				    object->strsz - offset, NULL))
 			rtld_fatal("invalid dependency name");
 	}
 	if (rpath_offset != UINTPTR_MAX) {
 		if (rpath_offset >= object->strsz ||
 		    !bounded_string(object->strtab + rpath_offset,
-		    object->strsz - rpath_offset, NULL))
+				    object->strsz - rpath_offset, NULL))
 			rtld_fatal("invalid RPATH");
 		object->rpath = object->strtab + rpath_offset;
 	}
 	if (runpath_offset != UINTPTR_MAX) {
 		if (runpath_offset >= object->strsz ||
 		    !bounded_string(object->strtab + runpath_offset,
-		    object->strsz - runpath_offset, NULL))
+				    object->strsz - runpath_offset, NULL))
 			rtld_fatal("invalid RUNPATH");
 		object->runpath = object->strtab + runpath_offset;
 	}
@@ -906,9 +999,12 @@ segment_prot(uint32_t flags)
 	if ((flags & (PF_W | PF_X)) == (PF_W | PF_X))
 		rtld_fatal("writable executable segment");
 #endif
-	if (flags & PF_R) prot |= PROT_READ;
-	if (flags & PF_W) prot |= PROT_WRITE;
-	if (flags & PF_X) prot |= PROT_EXEC;
+	if (flags & PF_R)
+		prot |= PROT_READ;
+	if (flags & PF_W)
+		prot |= PROT_WRITE;
+	if (flags & PF_X)
+		prot |= PROT_EXEC;
 	return prot;
 }
 
@@ -917,10 +1013,10 @@ temporary_writable_plt(const Elf_Phdr *program)
 {
 #if defined(HAL_ARCH_SPARCV9)
 	return program->p_flags == (PF_R | PF_W | PF_X) &&
-	    program->p_filesz == program->p_memsz && program->p_memsz != 0 &&
-	    program->p_memsz <= RTLD_PAGE_SIZE &&
-	    ((uintptr_t)program->p_vaddr & (RTLD_PAGE_SIZE - 1U)) == 0 &&
-	    ((uintptr_t)program->p_offset & (RTLD_PAGE_SIZE - 1U)) == 0;
+	       program->p_filesz == program->p_memsz && program->p_memsz != 0 &&
+	       program->p_memsz <= RTLD_PAGE_SIZE &&
+	       ((uintptr_t)program->p_vaddr & (RTLD_PAGE_SIZE - 1U)) == 0 &&
+	       ((uintptr_t)program->p_offset & (RTLD_PAGE_SIZE - 1U)) == 0;
 #else
 	(void)program;
 	return 0;
@@ -929,10 +1025,10 @@ temporary_writable_plt(const Elf_Phdr *program)
 
 static intptr_t
 map_call(uintptr_t address, size_t size, int prot, int flags, int fd,
-	uintptr_t offset)
+	 uintptr_t offset)
 {
 	return syscall6(ZEDBSD_SYS_mmap, address, size, (uintptr_t)prot,
-	    (uintptr_t)flags, (uintptr_t)fd, offset);
+			(uintptr_t)flags, (uintptr_t)fd, offset);
 }
 
 static void
@@ -946,7 +1042,7 @@ remember_mapping(struct rtld_object *object, uintptr_t start, size_t size)
 
 static int
 validate_file_programs(const Elf_Ehdr *header, const Elf_Phdr *phdr,
-	off_t file_size)
+		       off_t file_size)
 {
 	unsigned i, j, loads = 0, dynamics = 0;
 	for (i = 0; i < header->e_phnum; i++) {
@@ -965,10 +1061,10 @@ validate_file_programs(const Elf_Ehdr *header, const Elf_Phdr *phdr,
 		    phdr[i].p_offset > (Elf_Off)file_size ||
 		    phdr[i].p_filesz > (Elf_Off)file_size - phdr[i].p_offset ||
 		    ((phdr[i].p_offset ^ phdr[i].p_vaddr) &
-		    (RTLD_PAGE_SIZE - 1U)) != 0 ||
+		     (RTLD_PAGE_SIZE - 1U)) != 0 ||
 		    phdr[i].p_vaddr > (Elf_Addr)UINTPTR_MAX - phdr[i].p_memsz ||
 		    (((phdr[i].p_flags & (PF_W | PF_X)) == (PF_W | PF_X)) &&
-		    !temporary_writable_plt(&phdr[i])))
+		     !temporary_writable_plt(&phdr[i])))
 			return -1;
 		start = page_floor((uintptr_t)phdr[i].p_vaddr);
 		if ((uintptr_t)(phdr[i].p_vaddr + phdr[i].p_memsz) >
@@ -980,8 +1076,8 @@ validate_file_programs(const Elf_Ehdr *header, const Elf_Phdr *phdr,
 			if (phdr[j].p_type != PT_LOAD)
 				continue;
 			other_start = page_floor((uintptr_t)phdr[j].p_vaddr);
-			other_end = page_ceil((uintptr_t)(phdr[j].p_vaddr +
-			    phdr[j].p_memsz));
+			other_end = page_ceil(
+			    (uintptr_t)(phdr[j].p_vaddr + phdr[j].p_memsz));
 			if (start < other_end && other_start < end)
 				return -1;
 		}
@@ -1000,21 +1096,21 @@ preflight_dlopen_file(int fd)
 	intptr_t result;
 	size_t phdr_size;
 
-	result = syscall6(ZEDBSD_SYS_fstat, (uintptr_t)fd,
-	    (uintptr_t)&status, 0, 0, 0, 0);
+	result = syscall6(ZEDBSD_SYS_fstat, (uintptr_t)fd, (uintptr_t)&status,
+			  0, 0, 0, 0);
 	if (raw_error(result) || status.st_size < (off_t)sizeof(header))
 		return -1;
-	result = syscall6(ZEDBSD_SYS_pread, (uintptr_t)fd,
-	    (uintptr_t)&header, sizeof(header), 0, 0, 0);
+	result = syscall6(ZEDBSD_SYS_pread, (uintptr_t)fd, (uintptr_t)&header,
+			  sizeof(header), 0, 0, 0);
 	if (result != (intptr_t)sizeof(header) ||
 	    !valid_elf_header(&header, ET_DYN) ||
 	    header.e_phoff > (Elf_Off)status.st_size ||
-	    header.e_phnum > ((Elf_Off)status.st_size - header.e_phoff) /
-	    sizeof(Elf_Phdr))
+	    header.e_phnum >
+		((Elf_Off)status.st_size - header.e_phoff) / sizeof(Elf_Phdr))
 		return -1;
 	phdr_size = (size_t)header.e_phnum * sizeof(Elf_Phdr);
 	result = syscall6(ZEDBSD_SYS_pread, (uintptr_t)fd, (uintptr_t)phdr,
-	    phdr_size, (uintptr_t)header.e_phoff, 0, 0);
+			  phdr_size, (uintptr_t)header.e_phoff, 0, 0);
 	if (result != (intptr_t)phdr_size ||
 	    validate_file_programs(&header, phdr, status.st_size) != 0)
 		return -1;
@@ -1023,14 +1119,14 @@ preflight_dlopen_file(int fd)
 
 static void
 map_one_segment(struct rtld_object *object, int fd, const Elf_Phdr *program,
-	int choose_base)
+		int choose_base)
 {
 	uintptr_t virtual_page = page_floor((uintptr_t)program->p_vaddr);
 	uintptr_t page_delta = (uintptr_t)program->p_vaddr - virtual_page;
 	uintptr_t file_bytes = page_delta + (uintptr_t)program->p_filesz;
 	uintptr_t memory_bytes = page_delta + (uintptr_t)program->p_memsz;
-	size_t file_map_size = program->p_filesz != 0 ?
-	    (size_t)page_ceil(file_bytes) : 0;
+	size_t file_map_size =
+	    program->p_filesz != 0 ? (size_t)page_ceil(file_bytes) : 0;
 	size_t memory_map_size = (size_t)page_ceil(memory_bytes);
 	uintptr_t file_offset = page_floor((uintptr_t)program->p_offset);
 	uintptr_t requested = choose_base ? 0 : object->base + virtual_page;
@@ -1051,12 +1147,12 @@ map_one_segment(struct rtld_object *object, int fd, const Elf_Phdr *program,
 	}
 	if (file_map_size != 0) {
 		mapped = map_call(requested, file_map_size, map_prot, flags, fd,
-		    file_offset);
+				  file_offset);
 		if (raw_error(mapped))
 			rtld_fatal("cannot map shared object segment");
 	} else {
 		mapped = map_call(requested, memory_map_size, map_prot,
-		    flags | MAP_ANONYMOUS, -1, 0);
+				  flags | MAP_ANONYMOUS, -1, 0);
 		if (raw_error(mapped))
 			rtld_fatal("cannot map shared object BSS");
 	}
@@ -1066,11 +1162,13 @@ map_one_segment(struct rtld_object *object, int fd, const Elf_Phdr *program,
 		object->base = (uintptr_t)mapped - virtual_page;
 	}
 	remember_mapping(object, (uintptr_t)mapped,
-	    file_map_size != 0 ? file_map_size : memory_map_size);
+			 file_map_size != 0 ? file_map_size : memory_map_size);
 	if (file_map_size < memory_map_size) {
-		uintptr_t anonymous = object->base + virtual_page + file_map_size;
+		uintptr_t anonymous =
+		    object->base + virtual_page + file_map_size;
 		size_t anonymous_size = memory_map_size - file_map_size;
-		mapped = map_call(anonymous, anonymous_size, map_prot,
+		mapped = map_call(
+		    anonymous, anonymous_size, map_prot,
 		    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
 		if (raw_error(mapped) || (uintptr_t)mapped != anonymous)
 			rtld_fatal("cannot map shared object zero fill");
@@ -1078,19 +1176,23 @@ map_one_segment(struct rtld_object *object, int fd, const Elf_Phdr *program,
 	}
 	if (need_zero && program->p_filesz != 0) {
 		uintptr_t zero_start = object->base +
-		    (uintptr_t)program->p_vaddr + (uintptr_t)program->p_filesz;
+				       (uintptr_t)program->p_vaddr +
+				       (uintptr_t)program->p_filesz;
 		uintptr_t zero_end = object->base +
-		    (uintptr_t)program->p_vaddr + (uintptr_t)program->p_memsz;
-		uintptr_t file_page_end = object->base + virtual_page + file_map_size;
+				     (uintptr_t)program->p_vaddr +
+				     (uintptr_t)program->p_memsz;
+		uintptr_t file_page_end =
+		    object->base + virtual_page + file_map_size;
 		if (zero_end > file_page_end)
 			zero_end = file_page_end;
 		if (zero_end > zero_start)
-			rtld_memset((void *)zero_start, 0, zero_end - zero_start);
+			rtld_memset((void *)zero_start, 0,
+				    zero_end - zero_start);
 	}
 	if (map_prot != final_prot) {
-		intptr_t result = syscall6(ZEDBSD_SYS_mprotect,
-		    object->base + virtual_page, memory_map_size,
-		    (uintptr_t)final_prot, 0, 0, 0);
+		intptr_t result =
+		    syscall6(ZEDBSD_SYS_mprotect, object->base + virtual_page,
+			     memory_map_size, (uintptr_t)final_prot, 0, 0, 0);
 		if (raw_error(result))
 			rtld_fatal("cannot protect shared object segment");
 	}
@@ -1102,7 +1204,8 @@ find_identity(const struct stat *status)
 	unsigned i;
 	for (i = 0; i < object_count; i++)
 		if (objects[i].active && !objects[i].unloading &&
-		    objects[i].has_identity && objects[i].device == status->st_dev &&
+		    objects[i].has_identity &&
+		    objects[i].device == status->st_dev &&
 		    objects[i].inode == status->st_ino)
 			return &objects[i];
 	return NULL;
@@ -1110,10 +1213,12 @@ find_identity(const struct stat *status)
 
 static intptr_t
 open_search_candidate(const char *directory, size_t directory_length,
-	const char *name, size_t name_length, char path[RTLD_PATH_MAX])
+		      const char *name, size_t name_length,
+		      char path[RTLD_PATH_MAX])
 {
 	if (directory_length == 0 || directory_length >= RTLD_PATH_MAX ||
-	    name_length == 0 || directory_length > RTLD_PATH_MAX - name_length - 2U)
+	    name_length == 0 ||
+	    directory_length > RTLD_PATH_MAX - name_length - 2U)
 		return -1;
 	rtld_memcpy(path, directory, directory_length);
 	if (path[directory_length - 1U] != '/')
@@ -1125,7 +1230,7 @@ open_search_candidate(const char *directory, size_t directory_length,
 
 static intptr_t
 open_search_list(const char *list, const struct rtld_object *owner,
-	const char *name, size_t name_length, char path[RTLD_PATH_MAX])
+		 const char *name, size_t name_length, char path[RTLD_PATH_MAX])
 {
 	const char *component;
 
@@ -1145,15 +1250,15 @@ open_search_list(const char *list, const struct rtld_object *owner,
 			if (length < sizeof(directory)) {
 				rtld_memcpy(directory, component, length);
 				directory[length] = '\0';
-				fd = open_search_candidate(directory, length, name,
-				    name_length, path);
+				fd = open_search_candidate(
+				    directory, length, name, name_length, path);
 			}
 		} else if (length >= 7U && component[0] == '$' &&
-		    component[1] == 'O' && component[2] == 'R' &&
-		    component[3] == 'I' && component[4] == 'G' &&
-		    component[5] == 'I' && component[6] == 'N' &&
-		    (length == 7U || component[7] == '/') && owner != NULL &&
-		    owner->path[0] == '/') {
+			   component[1] == 'O' && component[2] == 'R' &&
+			   component[3] == 'I' && component[4] == 'G' &&
+			   component[5] == 'I' && component[6] == 'N' &&
+			   (length == 7U || component[7] == '/') &&
+			   owner != NULL && owner->path[0] == '/') {
 			const char *slash = owner->path;
 			const char *cursor;
 			size_t origin_length, suffix_length = length - 7U;
@@ -1164,15 +1269,18 @@ open_search_list(const char *list, const struct rtld_object *owner,
 			origin_length = (size_t)(slash - owner->path);
 			if (origin_length == 0)
 				origin_length = 1;
-			if (origin_length <= sizeof(directory) - suffix_length - 1U) {
-				rtld_memcpy(directory, owner->path, origin_length);
+			if (origin_length <=
+			    sizeof(directory) - suffix_length - 1U) {
+				rtld_memcpy(directory, owner->path,
+					    origin_length);
 				if (suffix_length != 0)
 					rtld_memcpy(directory + origin_length,
-					    component + 7U, suffix_length);
+						    component + 7U,
+						    suffix_length);
 				length = origin_length + suffix_length;
 				directory[length] = '\0';
-				fd = open_search_candidate(directory, length, name,
-				    name_length, path);
+				fd = open_search_candidate(
+				    directory, length, name, name_length, path);
 			}
 		}
 		if (!raw_error(fd))
@@ -1186,21 +1294,22 @@ open_search_list(const char *list, const struct rtld_object *owner,
 
 static intptr_t
 open_dependency(const char *name, size_t name_length,
-	const struct rtld_object *requester, char path[RTLD_PATH_MAX])
+		const struct rtld_object *requester, char path[RTLD_PATH_MAX])
 {
 	const struct rtld_object *owner;
 	intptr_t fd;
 
 	if (requester != NULL && requester->runpath != NULL) {
 		fd = open_search_list(requester->runpath, requester, name,
-		    name_length, path);
+				      name_length, path);
 		if (!raw_error(fd))
 			return fd;
 	} else {
-		for (owner = requester; owner != NULL; owner = owner->loader_parent)
+		for (owner = requester; owner != NULL;
+		     owner = owner->loader_parent)
 			if (owner->rpath != NULL) {
 				fd = open_search_list(owner->rpath, owner, name,
-				    name_length, path);
+						      name_length, path);
 				if (!raw_error(fd))
 					return fd;
 			}
@@ -1209,15 +1318,15 @@ open_dependency(const char *name, size_t name_length,
 }
 
 static struct rtld_object *load_object(const char *name,
-	struct rtld_object *requester);
+				       struct rtld_object *requester);
 
 static void
 load_dependencies(struct rtld_object *object)
 {
 	unsigned i;
 	for (i = 0; i < object->needed_count; i++) {
-		object->needed[i] = load_object(object->strtab +
-		    object->needed_offset[i], object);
+		object->needed[i] = load_object(
+		    object->strtab + object->needed_offset[i], object);
 		object->needed[i]->dependency_refs++;
 	}
 }
@@ -1247,7 +1356,7 @@ load_object(const char *name, struct rtld_object *requester)
 	if (raw_error(fd))
 		rtld_fatal("cannot open dependency");
 	result = syscall6(ZEDBSD_SYS_fstat, (uintptr_t)fd, (uintptr_t)&status,
-	    0, 0, 0, 0);
+			  0, 0, 0, 0);
 	if (raw_error(result) || status.st_size < (off_t)sizeof(header))
 		rtld_fatal("cannot stat dependency");
 	existing = find_identity(&status);
@@ -1256,15 +1365,16 @@ load_object(const char *name, struct rtld_object *requester)
 		return existing;
 	}
 	result = syscall6(ZEDBSD_SYS_pread, (uintptr_t)fd, (uintptr_t)&header,
-	    sizeof(header), 0, 0, 0);
-	if (result != (intptr_t)sizeof(header) || !valid_elf_header(&header, ET_DYN) ||
+			  sizeof(header), 0, 0, 0);
+	if (result != (intptr_t)sizeof(header) ||
+	    !valid_elf_header(&header, ET_DYN) ||
 	    header.e_phoff > (Elf_Off)status.st_size ||
-	    header.e_phnum > ((Elf_Off)status.st_size - header.e_phoff) /
-	    sizeof(Elf_Phdr))
+	    header.e_phnum >
+		((Elf_Off)status.st_size - header.e_phoff) / sizeof(Elf_Phdr))
 		rtld_fatal("invalid dependency ELF header");
 	result = syscall6(ZEDBSD_SYS_pread, (uintptr_t)fd, (uintptr_t)phdr,
-	    (size_t)header.e_phnum * sizeof(Elf_Phdr),
-	    (uintptr_t)header.e_phoff, 0, 0);
+			  (size_t)header.e_phnum * sizeof(Elf_Phdr),
+			  (uintptr_t)header.e_phoff, 0, 0);
 	if (result != (intptr_t)((size_t)header.e_phnum * sizeof(Elf_Phdr)))
 		rtld_fatal("cannot read dependency headers");
 	if (validate_file_programs(&header, phdr, status.st_size) != 0)
@@ -1281,7 +1391,8 @@ load_object(const char *name, struct rtld_object *requester)
 		if (object->phdr[i].p_type == PT_LOAD &&
 		    object->phdr[i].p_memsz != 0 &&
 		    page_floor((uintptr_t)object->phdr[i].p_vaddr) < minimum) {
-			minimum = page_floor((uintptr_t)object->phdr[i].p_vaddr);
+			minimum =
+			    page_floor((uintptr_t)object->phdr[i].p_vaddr);
 			first = i;
 		}
 	map_one_segment(object, (int)fd, &object->phdr[first], 1);
@@ -1302,7 +1413,8 @@ elf_hash(const char *name)
 	while (*name != '\0') {
 		hash = (hash << 4) + (unsigned char)*name++;
 		high = hash & 0xf0000000U;
-		if (high != 0) hash ^= high >> 24;
+		if (high != 0)
+			hash ^= high >> 24;
 		hash &= ~high;
 	}
 	return hash;
@@ -1324,13 +1436,13 @@ defined_version_name(struct rtld_object *object, uint16_t version_index)
 	uint32_t record;
 
 	for (record = 0; record < object->verdef_count; record++) {
-		Elf_Verdef *definition = (Elf_Verdef *)object_pointer(object,
-		    cursor, sizeof(*definition), PF_R);
+		Elf_Verdef *definition = (Elf_Verdef *)object_pointer(
+		    object, cursor, sizeof(*definition), PF_R);
 		if ((definition->vd_ndx & VER_NDX_MASK) == version_index) {
-			Elf_Addr auxiliary = version_offset(cursor,
-			    definition->vd_aux);
-			Elf_Verdaux *name = (Elf_Verdaux *)object_pointer(object,
-			    auxiliary, sizeof(*name), PF_R);
+			Elf_Addr auxiliary =
+			    version_offset(cursor, definition->vd_aux);
+			Elf_Verdaux *name = (Elf_Verdaux *)object_pointer(
+			    object, auxiliary, sizeof(*name), PF_R);
 			return dynamic_string(object, name->vda_name);
 		}
 		if (definition->vd_next == 0)
@@ -1347,14 +1459,14 @@ required_version_name(struct rtld_object *object, uint16_t version_index)
 	uint32_t record;
 
 	for (record = 0; record < object->verneed_count; record++) {
-		Elf_Verneed *need = (Elf_Verneed *)object_pointer(object,
-		    cursor, sizeof(*need), PF_R);
+		Elf_Verneed *need = (Elf_Verneed *)object_pointer(
+		    object, cursor, sizeof(*need), PF_R);
 		Elf_Addr auxiliary = version_offset(cursor, need->vn_aux);
 		uint16_t item;
 
 		for (item = 0; item < need->vn_cnt; item++) {
-			Elf_Vernaux *name = (Elf_Vernaux *)object_pointer(object,
-			    auxiliary, sizeof(*name), PF_R);
+			Elf_Vernaux *name = (Elf_Vernaux *)object_pointer(
+			    object, auxiliary, sizeof(*name), PF_R);
 			if ((name->vna_other & VER_NDX_MASK) == version_index)
 				return dynamic_string(object, name->vna_name);
 			if (name->vna_next == 0)
@@ -1381,9 +1493,9 @@ relocation_version_name(struct rtld_object *object, uint32_t symbol_index)
 	if (index <= VER_NDX_GLOBAL)
 		return NULL;
 	symbol = &object->symtab[symbol_index];
-	name = symbol->st_shndx == SHN_UNDEF ?
-	    required_version_name(object, index) :
-	    defined_version_name(object, index);
+	name = symbol->st_shndx == SHN_UNDEF
+		   ? required_version_name(object, index)
+		   : defined_version_name(object, index);
 	if (name == NULL)
 		rtld_fatal("unknown relocation symbol version");
 	return name;
@@ -1391,7 +1503,7 @@ relocation_version_name(struct rtld_object *object, uint32_t symbol_index)
 
 static int
 symbol_version_matches(struct rtld_object *object, uint32_t symbol_index,
-	const char *required_version)
+		       const char *required_version)
 {
 	uint16_t raw, index;
 	const char *provided;
@@ -1412,7 +1524,7 @@ symbol_version_matches(struct rtld_object *object, uint32_t symbol_index,
 
 static Elf_Sym *
 match_symbol(struct rtld_object *object, uint32_t index, const char *name,
-	const char *required_version)
+	     const char *required_version)
 {
 	Elf_Sym *symbol;
 	const char *symbol_name;
@@ -1436,7 +1548,7 @@ match_symbol(struct rtld_object *object, uint32_t index, const char *name,
 
 static Elf_Sym *
 lookup_gnu_hash(struct rtld_object *object, const char *name,
-	const char *required_version)
+		const char *required_version)
 {
 	const unsigned word_bits = sizeof(Elf_Addr) * 8U;
 	uint32_t hash = gnu_hash_name(name);
@@ -1444,8 +1556,9 @@ lookup_gnu_hash(struct rtld_object *object, const char *name,
 	uint32_t index;
 
 	bloom = object->gnu_bloom[(hash / word_bits) &
-	    (object->gnu_bloom_count - 1U)];
-	mask = ((Elf_Addr)1U << (hash % word_bits)) |
+				  (object->gnu_bloom_count - 1U)];
+	mask =
+	    ((Elf_Addr)1U << (hash % word_bits)) |
 	    ((Elf_Addr)1U << ((hash >> object->gnu_bloom_shift) % word_bits));
 	if ((bloom & mask) != mask)
 		return NULL;
@@ -1459,9 +1572,11 @@ lookup_gnu_hash(struct rtld_object *object, const char *name,
 		if (index < object->gnu_symbol_offset ||
 		    index >= object->symbol_count)
 			rtld_fatal("corrupt GNU hash chain");
-		chain_hash = object->gnu_chain[index - object->gnu_symbol_offset];
+		chain_hash =
+		    object->gnu_chain[index - object->gnu_symbol_offset];
 		if ((chain_hash | 1U) == (hash | 1U)) {
-			symbol = match_symbol(object, index, name, required_version);
+			symbol =
+			    match_symbol(object, index, name, required_version);
 			if (symbol != NULL)
 				return symbol;
 		}
@@ -1473,7 +1588,7 @@ lookup_gnu_hash(struct rtld_object *object, const char *name,
 
 static Elf_Sym *
 lookup_in_object_version(struct rtld_object *object, const char *name,
-	const char *required_version)
+			 const char *required_version)
 {
 	uint32_t buckets, index, *bucket, *chain;
 	unsigned traversed = 0;
@@ -1514,24 +1629,15 @@ static int
 reserved_loader_symbol(const char *name)
 {
 	static const char *const names[] = {
-		"__tls_get_addr",
-		"___tls_get_addr",
-		"__rtld_abi_version",
-		"__rtld_thread_alloc",
-		"__rtld_thread_free",
-		"__rtld_thread_attach",
-		"__rtld_pthread_private",
-		"__rtld_startup_init",
-		"__rtld_fork_prepare",
-		"__rtld_fork_parent",
-		"__rtld_fork_child",
-		"__rtld_dlopen",
-		"__rtld_dlsym",
-		"__rtld_dlvsym",
-		"__rtld_dlclose",
-		"__rtld_dlerror",
-		"__rtld_process_fini"
-	};
+	    "__tls_get_addr",	      "___tls_get_addr",
+	    "__rtld_abi_version",     "__rtld_thread_alloc",
+	    "__rtld_thread_free",     "__rtld_thread_attach",
+	    "__rtld_pthread_private", "__rtld_startup_init",
+	    "__rtld_fork_prepare",    "__rtld_fork_parent",
+	    "__rtld_fork_child",      "__rtld_dlopen",
+	    "__rtld_dlsym",	      "__rtld_dlvsym",
+	    "__rtld_dlclose",	      "__rtld_dlerror",
+	    "__rtld_process_fini"};
 	size_t i;
 
 	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++)
@@ -1547,7 +1653,7 @@ lookup_symbol_version(const char *name, const char *required_version, int weak)
 	unsigned i;
 	if (reserved_loader_symbol(name)) {
 		symbol = lookup_in_object_version(interpreter_object, name,
-		    required_version);
+						  required_version);
 		if (symbol != NULL)
 			return symbol_value(interpreter_object, symbol);
 		if (weak)
@@ -1562,12 +1668,13 @@ lookup_symbol_version(const char *name, const char *required_version, int weak)
 		if (!object->active || object->unloading ||
 		    object == main_object || object == interpreter_object)
 			continue;
-		symbol = lookup_in_object_version(object, name, required_version);
+		symbol =
+		    lookup_in_object_version(object, name, required_version);
 		if (symbol != NULL)
 			return symbol_value(object, symbol);
 	}
 	symbol = lookup_in_object_version(interpreter_object, name,
-	    required_version);
+					  required_version);
 	if (symbol != NULL)
 		return symbol_value(interpreter_object, symbol);
 	if (weak)
@@ -1592,13 +1699,13 @@ resolve_relocation_symbol(struct rtld_object *object, uint32_t index)
 	if (symbol->st_shndx != SHN_UNDEF && binding == STB_LOCAL)
 		return symbol_value(object, symbol);
 	name = object->strtab + symbol->st_name;
-	return lookup_symbol_version(name,
-	    relocation_version_name(object, index), binding == STB_WEAK);
+	return lookup_symbol_version(
+	    name, relocation_version_name(object, index), binding == STB_WEAK);
 }
 
 static Elf_Sym *
 resolve_tls_symbol(struct rtld_object *object, uint32_t index,
-	struct rtld_object **owner)
+		   struct rtld_object **owner)
 {
 	Elf_Sym *symbol;
 	const char *name, *version;
@@ -1642,7 +1749,7 @@ extern uintptr_t d_tlsdesc_resolver(void);
 
 static void
 install_tlsdesc(struct rtld_object *object, uintptr_t address,
-	uint32_t symbol_index, uintptr_t addend)
+		uint32_t symbol_index, uintptr_t addend)
 {
 	struct rtld_object *owner = object;
 	struct rtld_tlsdesc *descriptor;
@@ -1652,9 +1759,8 @@ install_tlsdesc(struct rtld_object *object, uintptr_t address,
 
 	if (!object_contains(object, address, sizeof(*descriptor), PF_W))
 		rtld_fatal("TLSDESC target is not writable");
-	if (object->tlsdesc_count ==
-	    sizeof(object->tlsdesc_argument) /
-	    sizeof(object->tlsdesc_argument[0]))
+	if (object->tlsdesc_count == sizeof(object->tlsdesc_argument) /
+					 sizeof(object->tlsdesc_argument[0]))
 		rtld_fatal("too many TLSDESC relocations");
 	if (symbol_index != 0) {
 		symbol = resolve_tls_symbol(object, symbol_index, &owner);
@@ -1702,7 +1808,7 @@ sparcv9_patch_jmp_slot(uint32_t *where, uintptr_t value)
 
 static void
 apply_value(struct rtld_object *object, uintptr_t offset, uint32_t type,
-	uint32_t symbol_index, uintptr_t addend, int is_rela)
+	    uint32_t symbol_index, uintptr_t addend, int is_rela)
 {
 	uintptr_t address, symbol = 0, value;
 	uintptr_t *where;
@@ -1728,9 +1834,10 @@ apply_value(struct rtld_object *object, uintptr_t offset, uint32_t type,
 	address = object->base + offset;
 	if (!object_contains(object, address,
 #if defined(HAL_ARCH_SPARCV9)
-	    type == R_SPARC_JMP_SLOT ? 8U * sizeof(uint32_t) :
+			     type == R_SPARC_JMP_SLOT ? 8U * sizeof(uint32_t) :
 #endif
-	    sizeof(uintptr_t), PF_W))
+						      sizeof(uintptr_t),
+			     PF_W))
 		rtld_fatal("relocation target is not writable");
 	where = (uintptr_t *)address;
 	if (!is_rela)
@@ -1738,108 +1845,141 @@ apply_value(struct rtld_object *object, uintptr_t offset, uint32_t type,
 
 #if defined(HAL_ARCH_I386)
 	switch (type) {
-	case R_386_NONE: return;
+	case R_386_NONE:
+		return;
 	case R_386_RELATIVE:
-		if (symbol_index != 0) rtld_fatal("invalid relative relocation");
-		value = object->base + addend; break;
+		if (symbol_index != 0)
+			rtld_fatal("invalid relative relocation");
+		value = object->base + addend;
+		break;
 	case R_386_32:
 		symbol = resolve_relocation_symbol(object, symbol_index);
-		value = symbol + addend; break;
+		value = symbol + addend;
+		break;
 	case R_386_PC32:
 		symbol = resolve_relocation_symbol(object, symbol_index);
-		value = symbol + addend - address; break;
+		value = symbol + addend - address;
+		break;
 	case R_386_GLOB_DAT:
 	case R_386_JMP_SLOT:
-		value = resolve_relocation_symbol(object, symbol_index); break;
+		value = resolve_relocation_symbol(object, symbol_index);
+		break;
 	case R_386_TLS_DTPMOD32:
 		if (symbol_index == 0)
 			tls_owner = object;
 		else
 			tls_symbol = resolve_tls_symbol(object, symbol_index,
-			    &tls_owner);
+							&tls_owner);
 		if (tls_owner == NULL || tls_owner->tls_module_id == 0)
 			rtld_fatal("TLS module is unavailable");
-		value = tls_owner->tls_module_id; break;
+		value = tls_owner->tls_module_id;
+		break;
 	case R_386_TLS_DTPOFF32:
-		tls_symbol = resolve_tls_symbol(object, symbol_index, &tls_owner);
+		tls_symbol =
+		    resolve_tls_symbol(object, symbol_index, &tls_owner);
 		if (tls_symbol == NULL || tls_owner->tls_module_id == 0)
 			rtld_fatal("TLS symbol is unavailable");
-		value = (uintptr_t)tls_symbol->st_value + addend; break;
-	default: rtld_fatal("unsupported i386 relocation");
+		value = (uintptr_t)tls_symbol->st_value + addend;
+		break;
+	default:
+		rtld_fatal("unsupported i386 relocation");
 	}
 #elif defined(HAL_ARCH_AMD64)
 	switch (type) {
-	case R_X86_64_NONE: return;
+	case R_X86_64_NONE:
+		return;
 	case R_X86_64_RELATIVE:
-		if (symbol_index != 0) rtld_fatal("invalid relative relocation");
-		value = object->base + addend; break;
+		if (symbol_index != 0)
+			rtld_fatal("invalid relative relocation");
+		value = object->base + addend;
+		break;
 	case R_X86_64_64:
 		symbol = resolve_relocation_symbol(object, symbol_index);
-		value = symbol + addend; break;
+		value = symbol + addend;
+		break;
 	case R_X86_64_GLOB_DAT:
 	case R_X86_64_JUMP_SLOT:
-		value = resolve_relocation_symbol(object, symbol_index); break;
+		value = resolve_relocation_symbol(object, symbol_index);
+		break;
 	case R_X86_64_DTPMOD64:
 		if (symbol_index == 0)
 			tls_owner = object;
 		else
 			tls_symbol = resolve_tls_symbol(object, symbol_index,
-			    &tls_owner);
+							&tls_owner);
 		if (tls_owner == NULL || tls_owner->tls_module_id == 0)
 			rtld_fatal("TLS module is unavailable");
-		value = tls_owner->tls_module_id; break;
+		value = tls_owner->tls_module_id;
+		break;
 	case R_X86_64_DTPOFF64:
-		tls_symbol = resolve_tls_symbol(object, symbol_index, &tls_owner);
+		tls_symbol =
+		    resolve_tls_symbol(object, symbol_index, &tls_owner);
 		if (tls_symbol == NULL || tls_owner->tls_module_id == 0)
 			rtld_fatal("TLS symbol is unavailable");
-		value = (uintptr_t)tls_symbol->st_value + addend; break;
+		value = (uintptr_t)tls_symbol->st_value + addend;
+		break;
 	case R_X86_64_TLSDESC:
 		install_tlsdesc(object, address, symbol_index, addend);
 		return;
-	default: rtld_fatal("unsupported amd64 relocation");
+	default:
+		rtld_fatal("unsupported amd64 relocation");
 	}
 #elif defined(HAL_ARCH_ARM64)
 	switch (type) {
-	case R_AARCH64_NONE: return;
+	case R_AARCH64_NONE:
+		return;
 	case R_AARCH64_RELATIVE:
-		if (symbol_index != 0) rtld_fatal("invalid relative relocation");
-		value = object->base + addend; break;
+		if (symbol_index != 0)
+			rtld_fatal("invalid relative relocation");
+		value = object->base + addend;
+		break;
 	case R_AARCH64_ABS64:
 		symbol = resolve_relocation_symbol(object, symbol_index);
-		value = symbol + addend; break;
+		value = symbol + addend;
+		break;
 	case R_AARCH64_GLOB_DAT:
 	case R_AARCH64_JUMP_SLOT:
-		value = resolve_relocation_symbol(object, symbol_index); break;
+		value = resolve_relocation_symbol(object, symbol_index);
+		break;
 	case R_AARCH64_TLS_DTPMOD64:
 		if (symbol_index == 0)
 			tls_owner = object;
 		else
 			tls_symbol = resolve_tls_symbol(object, symbol_index,
-			    &tls_owner);
+							&tls_owner);
 		if (tls_owner == NULL || tls_owner->tls_module_id == 0)
 			rtld_fatal("TLS module is unavailable");
-		value = tls_owner->tls_module_id; break;
+		value = tls_owner->tls_module_id;
+		break;
 	case R_AARCH64_TLS_DTPREL64:
-		tls_symbol = resolve_tls_symbol(object, symbol_index, &tls_owner);
+		tls_symbol =
+		    resolve_tls_symbol(object, symbol_index, &tls_owner);
 		if (tls_symbol == NULL || tls_owner->tls_module_id == 0)
 			rtld_fatal("TLS symbol is unavailable");
-		value = (uintptr_t)tls_symbol->st_value + addend; break;
+		value = (uintptr_t)tls_symbol->st_value + addend;
+		break;
 	case R_AARCH64_TLSDESC:
 		install_tlsdesc(object, address, symbol_index, addend);
 		return;
-	default: rtld_fatal("unsupported aarch64 relocation");
+	default:
+		rtld_fatal("unsupported aarch64 relocation");
 	}
 #elif defined(HAL_ARCH_SPARCV9)
 	switch (type) {
-	case R_SPARC_NONE: return;
+	case R_SPARC_NONE:
+		return;
 	case R_SPARC_RELATIVE:
-		if (symbol_index != 0) rtld_fatal("invalid relative relocation");
-		value = object->base + addend; break;
+		if (symbol_index != 0)
+			rtld_fatal("invalid relative relocation");
+		value = object->base + addend;
+		break;
 	case R_SPARC_64:
 		symbol = resolve_relocation_symbol(object, symbol_index);
-		value = symbol + addend; break;
+		value = symbol + addend;
+		break;
 	case R_SPARC_GLOB_DAT:
-		value = resolve_relocation_symbol(object, symbol_index); break;
+		value = resolve_relocation_symbol(object, symbol_index);
+		break;
 	case R_SPARC_JMP_SLOT:
 		value = resolve_relocation_symbol(object, symbol_index);
 		sparcv9_patch_jmp_slot((uint32_t *)where, value);
@@ -1849,16 +1989,20 @@ apply_value(struct rtld_object *object, uintptr_t offset, uint32_t type,
 			tls_owner = object;
 		else
 			tls_symbol = resolve_tls_symbol(object, symbol_index,
-			    &tls_owner);
+							&tls_owner);
 		if (tls_owner == NULL || tls_owner->tls_module_id == 0)
 			rtld_fatal("TLS module is unavailable");
-		value = tls_owner->tls_module_id; break;
+		value = tls_owner->tls_module_id;
+		break;
 	case R_SPARC_TLS_DTPOFF64:
-		tls_symbol = resolve_tls_symbol(object, symbol_index, &tls_owner);
+		tls_symbol =
+		    resolve_tls_symbol(object, symbol_index, &tls_owner);
 		if (tls_symbol == NULL || tls_owner->tls_module_id == 0)
 			rtld_fatal("TLS symbol is unavailable");
-		value = (uintptr_t)tls_symbol->st_value + addend; break;
-	default: rtld_fatal("unsupported sparcv9 relocation");
+		value = (uintptr_t)tls_symbol->st_value + addend;
+		break;
+	default:
+		rtld_fatal("unsupported sparcv9 relocation");
 	}
 #endif
 	*where = value;
@@ -1880,30 +2024,33 @@ relocate_object(struct rtld_object *object)
 		if (object->relative_done && type == RTLD_RELATIVE)
 			continue;
 		apply_value(object, (uintptr_t)object->rel[i].r_offset, type,
-		    ELF_R_SYM(object->rel[i].r_info), 0, 0);
+			    ELF_R_SYM(object->rel[i].r_info), 0, 0);
 	}
 	for (i = 0; i < object->rela_count; i++) {
 		uint32_t type = ELF_R_TYPE(object->rela[i].r_info);
 		if (object->relative_done && type == RTLD_RELATIVE)
 			continue;
 		apply_value(object, (uintptr_t)object->rela[i].r_offset, type,
-		    ELF_R_SYM(object->rela[i].r_info),
-		    (uintptr_t)object->rela[i].r_addend, 1);
+			    ELF_R_SYM(object->rela[i].r_info),
+			    (uintptr_t)object->rela[i].r_addend, 1);
 	}
 	if (object->jmprel != NULL && object->pltrel == DT_REL) {
 		Elf_Rel *rel = object->jmprel;
 		for (i = 0; i < object->jmprel_size / sizeof(*rel); i++)
 			apply_value(object, (uintptr_t)rel[i].r_offset,
-			    ELF_R_TYPE(rel[i].r_info), ELF_R_SYM(rel[i].r_info), 0, 0);
+				    ELF_R_TYPE(rel[i].r_info),
+				    ELF_R_SYM(rel[i].r_info), 0, 0);
 	} else if (object->jmprel != NULL && object->pltrel == DT_RELA) {
 		Elf_Rela *rela = object->jmprel;
 		for (i = 0; i < object->jmprel_size / sizeof(*rela); i++)
 			apply_value(object, (uintptr_t)rela[i].r_offset,
-			    ELF_R_TYPE(rela[i].r_info), ELF_R_SYM(rela[i].r_info),
-			    (uintptr_t)rela[i].r_addend, 1);
+				    ELF_R_TYPE(rela[i].r_info),
+				    ELF_R_SYM(rela[i].r_info),
+				    (uintptr_t)rela[i].r_addend, 1);
 	}
 #if defined(HAL_ARCH_SPARCV9)
-	/* SPARC PLT instructions are writable only while JMP_SLOT is applied. */
+	/* SPARC PLT instructions are writable only while JMP_SLOT is applied.
+	 */
 	for (i = 0; i < object->phnum; i++) {
 		uintptr_t start;
 		intptr_t result;
@@ -1912,7 +2059,7 @@ relocate_object(struct rtld_object *object)
 			continue;
 		start = object->base + (uintptr_t)object->phdr[i].p_vaddr;
 		result = syscall6(ZEDBSD_SYS_mprotect, start, RTLD_PAGE_SIZE,
-		    PROT_READ | PROT_EXEC, 0, 0, 0);
+				  PROT_READ | PROT_EXEC, 0, 0, 0);
 		if (raw_error(result))
 			rtld_fatal("cannot seal SPARC PLT");
 	}
@@ -1924,17 +2071,18 @@ relocate_object(struct rtld_object *object)
 		if (object->phdr[i].p_type != PT_GNU_RELRO ||
 		    object->phdr[i].p_memsz == 0)
 			continue;
-		if (object->phdr[i].p_vaddr > (Elf_Addr)UINTPTR_MAX -
-		    object->phdr[i].p_memsz)
+		if (object->phdr[i].p_vaddr >
+		    (Elf_Addr)UINTPTR_MAX - object->phdr[i].p_memsz)
 			rtld_fatal("invalid GNU_RELRO range");
 		(void)object_pointer(object, object->phdr[i].p_vaddr,
-		    (size_t)object->phdr[i].p_memsz, PF_R);
+				     (size_t)object->phdr[i].p_memsz, PF_R);
 		start = page_floor(object->base +
-		    (uintptr_t)object->phdr[i].p_vaddr);
-		end = page_ceil(object->base + (uintptr_t)object->phdr[i].p_vaddr +
-		    (uintptr_t)object->phdr[i].p_memsz);
+				   (uintptr_t)object->phdr[i].p_vaddr);
+		end = page_ceil(object->base +
+				(uintptr_t)object->phdr[i].p_vaddr +
+				(uintptr_t)object->phdr[i].p_memsz);
 		result = syscall6(ZEDBSD_SYS_mprotect, start, end - start,
-		    PROT_READ, 0, 0, 0);
+				  PROT_READ, 0, 0, 0);
 		if (raw_error(result)) {
 			rtld_debug("ld.so: GNU_RELRO mprotect failed for ");
 			rtld_debug(object->path);
@@ -1956,7 +2104,8 @@ static void
 initialize_object(struct rtld_object *object)
 {
 	size_t i;
-	if (object == NULL || object->initialized || object == interpreter_object)
+	if (object == NULL || object->initialized ||
+	    object == interpreter_object)
 		return;
 	if (object->initializing)
 		return;
@@ -1988,7 +2137,7 @@ tls_map(size_t size)
 
 	size = (size_t)page_ceil(size);
 	result = map_call(0, size, PROT_READ | PROT_WRITE,
-	    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+			  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	return raw_error(result) ? NULL : (void *)(uintptr_t)result;
 }
 
@@ -1997,7 +2146,7 @@ tls_unmap(void *address, size_t size)
 {
 	if (address != NULL)
 		(void)syscall6(ZEDBSD_SYS_munmap, (uintptr_t)address,
-		    page_ceil(size), 0, 0, 0, 0);
+			       page_ceil(size), 0, 0, 0, 0);
 }
 
 static void *
@@ -2014,13 +2163,12 @@ allocate_tls_block(const struct rtld_tls_module *module)
 		rtld_memcpy(block, module->init_image, module->file_size);
 	if (module->memory_size > module->file_size)
 		rtld_memset((unsigned char *)block + module->file_size, 0,
-		    module->memory_size - module->file_size);
+			    module->memory_size - module->file_size);
 	return block;
 }
 
 __attribute__((visibility("default"))) int
-__rtld_thread_alloc(void *pthread_private,
-	struct __rtld_tcb **out)
+__rtld_thread_alloc(void *pthread_private, struct __rtld_tcb **out)
 {
 	struct __rtld_tcb *tcb;
 	void **dtv;
@@ -2060,7 +2208,7 @@ __rtld_thread_free(struct __rtld_tcb *tcb)
 	if (tcb == NULL)
 		return;
 	current = syscall6(ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_GET_TLS,
-	    0, 0, 0, 0, 0);
+			   0, 0, 0, 0, 0);
 	if (!raw_error(current) && (uintptr_t)current == (uintptr_t)tcb)
 		rtld_fatal("attempt to free current thread TLS");
 	loader_lock();
@@ -2071,11 +2219,12 @@ __rtld_thread_free(struct __rtld_tcb *tcb)
 		}
 	loader_unlock();
 	if (tcb->dtv != NULL)
-		for (id = 1; id < tcb->dtv_count && id <= tls_module_count; id++)
+		for (id = 1; id < tcb->dtv_count && id <= tls_module_count;
+		     id++)
 			if (tcb->dtv[id] != NULL)
-				tls_unmap(tcb->dtv[id], tls_modules[id].memory_size);
-	tls_unmap(tcb->dtv,
-	    (RTLD_OBJECT_MAX + 1U) * sizeof(*tcb->dtv));
+				tls_unmap(tcb->dtv[id],
+					  tls_modules[id].memory_size);
+	tls_unmap(tcb->dtv, (RTLD_OBJECT_MAX + 1U) * sizeof(*tcb->dtv));
 	tcb->dtv = NULL;
 	tls_unmap(tcb, sizeof(*tcb));
 }
@@ -2084,7 +2233,7 @@ __attribute__((visibility("default"))) int
 __rtld_thread_attach(void *pthread_private)
 {
 	intptr_t value = syscall6(ZEDBSD_SYS_thread_self,
-	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 	struct __rtld_tcb *tcb;
 
 	if (raw_error(value))
@@ -2092,8 +2241,9 @@ __rtld_thread_attach(void *pthread_private)
 	if (value == 0) {
 		if (__rtld_thread_alloc(pthread_private, &tcb) != 0)
 			return -1;
-		value = syscall6(ZEDBSD_SYS_thread_self,
-		    ZEDBSD_THREAD_SELF_SET_TLS, (uintptr_t)tcb, 0, 0, 0, 0);
+		value =
+		    syscall6(ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_SET_TLS,
+			     (uintptr_t)tcb, 0, 0, 0, 0);
 		if (raw_error(value)) {
 			__rtld_thread_free(tcb);
 			return -1;
@@ -2111,7 +2261,7 @@ __attribute__((visibility("default"))) void *
 __rtld_pthread_private(void)
 {
 	intptr_t value = syscall6(ZEDBSD_SYS_thread_self,
-	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 	if (raw_error(value) || value == 0)
 		return NULL;
 	return ((struct __rtld_tcb *)(uintptr_t)value)->pthread_private;
@@ -2128,8 +2278,8 @@ __tls_get_addr(const struct __tls_index *index)
 	if (index == NULL || index->module == 0 ||
 	    index->module > tls_module_count)
 		rtld_fatal("invalid TLS index");
-	value = syscall6(ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_GET_TLS,
-	    0, 0, 0, 0, 0);
+	value = syscall6(ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_GET_TLS, 0,
+			 0, 0, 0, 0);
 	if (raw_error(value) || value == 0)
 		rtld_fatal("thread has no TLS control block");
 	tcb = (struct __rtld_tcb *)(uintptr_t)value;
@@ -2161,7 +2311,7 @@ d_tlsdesc_resolve(const struct rtld_tlsdesc *descriptor)
 	index = (const struct __tls_index *)descriptor->argument;
 	address = __tls_get_addr(index);
 	thread_pointer = syscall6(ZEDBSD_SYS_thread_self,
-	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 	if (raw_error(thread_pointer) || thread_pointer == 0)
 		rtld_fatal("thread has no TLSDESC base");
 	return (uintptr_t)address - (uintptr_t)thread_pointer;
@@ -2217,7 +2367,8 @@ __rtld_process_fini(void)
 		return;
 	process_finalized = 1;
 	while (initialization_count != 0) {
-		struct rtld_object *object = initialization_order[--initialization_count];
+		struct rtld_object *object =
+		    initialization_order[--initialization_count];
 		size_t i = object->fini_count;
 		while (i != 0) {
 			i--;
@@ -2299,7 +2450,7 @@ lookup_global_optional(const char *name, const char *version, int *found)
 
 static uintptr_t
 lookup_handle_graph(struct rtld_object *object, const char *name,
-	const char *version, uint32_t *visited, int *found)
+		    const char *version, uint32_t *visited, int *found)
 {
 	uintptr_t index;
 	Elf_Sym *symbol;
@@ -2319,7 +2470,7 @@ lookup_handle_graph(struct rtld_object *object, const char *name,
 	}
 	for (i = 0; i < object->needed_count; i++) {
 		uintptr_t value = lookup_handle_graph(object->needed[i], name,
-		    version, visited, found);
+						      version, visited, found);
 		if (*found)
 			return value;
 	}
@@ -2353,7 +2504,8 @@ remove_initialization_record(struct rtld_object *object)
 	for (i = 0; i < initialization_count; i++)
 		if (initialization_order[i] == object) {
 			for (; i + 1U < initialization_count; i++)
-				initialization_order[i] = initialization_order[i + 1U];
+				initialization_order[i] =
+				    initialization_order[i + 1U];
 			initialization_order[--initialization_count] = NULL;
 			break;
 		}
@@ -2409,7 +2561,8 @@ unload_object_locked(struct rtld_object *object)
 			if (tcb->dtv != NULL &&
 			    object->tls_module_id < tcb->dtv_count &&
 			    tcb->dtv[object->tls_module_id] != NULL) {
-				tls_unmap(tcb->dtv[object->tls_module_id], tls_size);
+				tls_unmap(tcb->dtv[object->tls_module_id],
+					  tls_size);
 				tcb->dtv[object->tls_module_id] = NULL;
 				tcb->dtv_generation = tls_generation + 1U;
 			}
@@ -2419,16 +2572,17 @@ unload_object_locked(struct rtld_object *object)
 		tls_generation++;
 	}
 	for (i = object->mapping_count; i != 0; i--) {
-		intptr_t result = syscall6(ZEDBSD_SYS_munmap,
-		    object->mapping_start[i - 1U], object->mapping_size[i - 1U],
-		    0, 0, 0, 0);
+		intptr_t result =
+		    syscall6(ZEDBSD_SYS_munmap, object->mapping_start[i - 1U],
+			     object->mapping_size[i - 1U], 0, 0, 0, 0);
 		if (raw_error(result))
 			rtld_fatal("cannot unmap shared object");
 	}
 	for (i = 0; i < dependency_count; i++) {
 		if (dependencies[i] == NULL ||
 		    dependencies[i]->dependency_refs == 0)
-			rtld_fatal("invalid shared-object dependency reference");
+			rtld_fatal(
+			    "invalid shared-object dependency reference");
 		dependencies[i]->dependency_refs--;
 	}
 	rtld_memset(object, 0, sizeof(*object));
@@ -2450,7 +2604,7 @@ __rtld_dlopen(const char *path, int flags)
 	clear_loader_error();
 	if ((flags & ~(RTLD_LAZY | RTLD_NOW | RTLD_GLOBAL)) != 0 ||
 	    ((flags & (RTLD_LAZY | RTLD_NOW)) != RTLD_LAZY &&
-	    (flags & (RTLD_LAZY | RTLD_NOW)) != RTLD_NOW)) {
+	     (flags & (RTLD_LAZY | RTLD_NOW)) != RTLD_NOW)) {
 		set_loader_error("invalid dlopen flags");
 		return NULL;
 	}
@@ -2472,15 +2626,15 @@ __rtld_dlopen(const char *path, int flags)
 	for (i = 0; i < object_count; i++)
 		if (objects[i].active && !objects[i].unloading &&
 		    (rtld_strcmp(objects[i].path, path) == 0 ||
-		    (objects[i].path[0] == '/' &&
-		    rtld_strcmp(objects[i].path + 5, name) == 0))) {
+		     (objects[i].path[0] == '/' &&
+		      rtld_strcmp(objects[i].path + 5, name) == 0))) {
 			object = &objects[i];
 			goto loaded;
 		}
 	rtld_memcpy(full_path, "/lib/", 5);
 	rtld_memcpy(full_path + 5, name, length + 1U);
-	fd = syscall6(ZEDBSD_SYS_open, (uintptr_t)full_path, O_RDONLY,
-	    0, 0, 0, 0);
+	fd = syscall6(ZEDBSD_SYS_open, (uintptr_t)full_path, O_RDONLY, 0, 0, 0,
+		      0);
 	if (raw_error(fd)) {
 		set_loader_error("shared object not found");
 		loader_unlock();
@@ -2529,8 +2683,8 @@ rtld_dlsym_common(void *value, const char *name, const char *version)
 	} else if (handle->main_scope) {
 		result = lookup_global_optional(name, version, &found);
 	} else {
-		result = lookup_handle_graph(handle->object, name, version, &visited,
-		    &found);
+		result = lookup_handle_graph(handle->object, name, version,
+					     &visited, &found);
 	}
 	if (handle != NULL && !found)
 		set_loader_error("symbol not found");
@@ -2584,17 +2738,20 @@ __rtld_dladdr(const void *value, Dl_info *information)
 
 		if (symbol->st_shndx == SHN_UNDEF || symbol->st_name == 0 ||
 		    symbol->st_name >= object->strsz ||
-		    (type != STT_NOTYPE && type != STT_OBJECT && type != STT_FUNC))
+		    (type != STT_NOTYPE && type != STT_OBJECT &&
+		     type != STT_FUNC))
 			continue;
 		if (!bounded_string(object->strtab + symbol->st_name,
-		    object->strsz - symbol->st_name, NULL))
+				    object->strsz - symbol->st_name, NULL))
 			continue;
 		if (symbol->st_shndx == SHN_ABS)
 			symbol_address = (uintptr_t)symbol->st_value;
 		else {
-			if ((uintptr_t)symbol->st_value > UINTPTR_MAX - object->base)
+			if ((uintptr_t)symbol->st_value >
+			    UINTPTR_MAX - object->base)
 				continue;
-			symbol_address = object->base + (uintptr_t)symbol->st_value;
+			symbol_address =
+			    object->base + (uintptr_t)symbol->st_value;
 		}
 		if (symbol_address <= address &&
 		    (best_name == NULL || symbol_address > best_address)) {
@@ -2605,7 +2762,8 @@ __rtld_dladdr(const void *value, Dl_info *information)
 	information->dli_fname = object->path;
 	information->dli_fbase = (void *)object->base;
 	information->dli_sname = best_name;
-	information->dli_saddr = best_name != NULL ? (void *)best_address : NULL;
+	information->dli_saddr =
+	    best_name != NULL ? (void *)best_address : NULL;
 	loader_unlock();
 	return 1;
 }
@@ -2633,7 +2791,8 @@ __rtld_dlclose(void *value)
 		handle->main_scope = 0;
 		if (!main_scope) {
 			if (object->direct_refs == 0)
-				rtld_fatal("invalid shared-object direct reference");
+				rtld_fatal(
+				    "invalid shared-object direct reference");
 			object->direct_refs--;
 			unload_object_locked(object);
 		}
@@ -2646,9 +2805,10 @@ __attribute__((visibility("default"))) char *
 __rtld_dlerror(void)
 {
 	intptr_t value = syscall6(ZEDBSD_SYS_thread_self,
-	    ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
-	struct __rtld_tcb *tcb = raw_error(value) || value == 0 ? NULL :
-	    (struct __rtld_tcb *)(uintptr_t)value;
+				  ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
+	struct __rtld_tcb *tcb = raw_error(value) || value == 0
+				     ? NULL
+				     : (struct __rtld_tcb *)(uintptr_t)value;
 
 	if (tcb != NULL) {
 		if (!tcb->dlerror_pending)
@@ -2664,29 +2824,29 @@ __rtld_dlerror(void)
 
 __attribute__((visibility("default")))
 const struct __rtld_exports __rtld_exports = {
-	.abi_version = ZEDBSD_RTLD_ABI_VERSION,
-	.struct_size = sizeof(struct __rtld_exports),
-	.startup_init = __rtld_startup_init,
-	.process_fini = __rtld_process_fini,
-	.dlopen = __rtld_dlopen,
-	.dlsym = __rtld_dlsym,
-	.dlvsym = __rtld_dlvsym,
-	.dlclose = __rtld_dlclose,
-	.dlerror = __rtld_dlerror,
-	.thread_alloc = __rtld_thread_alloc,
-	.thread_free = __rtld_thread_free,
-	.thread_attach = __rtld_thread_attach,
-	.pthread_private = __rtld_pthread_private,
-	.fork_prepare = __rtld_fork_prepare,
-	.fork_parent = __rtld_fork_parent,
-	.fork_child = __rtld_fork_child,
-	.tls_get_addr = __tls_get_addr,
-	.dladdr = __rtld_dladdr,
+    .abi_version = ZEDBSD_RTLD_ABI_VERSION,
+    .struct_size = sizeof(struct __rtld_exports),
+    .startup_init = __rtld_startup_init,
+    .process_fini = __rtld_process_fini,
+    .dlopen = __rtld_dlopen,
+    .dlsym = __rtld_dlsym,
+    .dlvsym = __rtld_dlvsym,
+    .dlclose = __rtld_dlclose,
+    .dlerror = __rtld_dlerror,
+    .thread_alloc = __rtld_thread_alloc,
+    .thread_free = __rtld_thread_free,
+    .thread_attach = __rtld_thread_attach,
+    .pthread_private = __rtld_pthread_private,
+    .fork_prepare = __rtld_fork_prepare,
+    .fork_parent = __rtld_fork_parent,
+    .fork_child = __rtld_fork_child,
+    .tls_get_addr = __tls_get_addr,
+    .dladdr = __rtld_dladdr,
 };
 
 static void
 setup_premapped_object(struct rtld_object *object, uintptr_t base,
-	const Elf_Phdr *phdr, unsigned phnum, int type)
+		       const Elf_Phdr *phdr, unsigned phnum, int type)
 {
 	unsigned i;
 	object->base = base;
@@ -2715,18 +2875,30 @@ rtld_main(uintptr_t *initial_stack)
 	if (initial_stack == NULL)
 		rtld_fatal("missing initial stack");
 	cursor = initial_stack + 1U + initial_stack[0] + 1U;
-	while (*cursor++ != 0) { }
+	while (*cursor++ != 0) {
+	}
 	auxv = cursor;
 	for (i = 0; i < 64; i++, auxv += 2) {
 		if (auxv[0] == AT_NULL)
 			break;
 		switch (auxv[0]) {
-		case AT_BASE: at_base = auxv[1]; break;
-		case AT_PHDR: at_phdr = auxv[1]; break;
-		case AT_PHNUM: at_phnum = auxv[1]; break;
-		case AT_PHENT: at_phent = auxv[1]; break;
-		case AT_ENTRY: at_entry = auxv[1]; break;
-		default: break;
+		case AT_BASE:
+			at_base = auxv[1];
+			break;
+		case AT_PHDR:
+			at_phdr = auxv[1];
+			break;
+		case AT_PHNUM:
+			at_phnum = auxv[1];
+			break;
+		case AT_PHENT:
+			at_phent = auxv[1];
+			break;
+		case AT_ENTRY:
+			at_entry = auxv[1];
+			break;
+		default:
+			break;
 		}
 	}
 	if (i == 64 || at_base == 0 || at_phdr == 0 || at_phnum == 0 ||
@@ -2743,7 +2915,8 @@ rtld_main(uintptr_t *initial_stack)
 			uintptr_t phdr_vaddr =
 			    (uintptr_t)((Elf_Phdr *)at_phdr)[i].p_vaddr;
 			if (phdr_vaddr > at_phdr)
-				rtld_fatal("invalid main program-header address");
+				rtld_fatal(
+				    "invalid main program-header address");
 			main_base = at_phdr - phdr_vaddr;
 			break;
 		}
@@ -2757,9 +2930,9 @@ rtld_main(uintptr_t *initial_stack)
 	main_object = new_object("<main>");
 	interpreter_object = new_object(RTLD_INTERP_PATH);
 	setup_premapped_object(main_object, main_base, (Elf_Phdr *)at_phdr,
-	    (unsigned)at_phnum, main_type);
-	setup_premapped_object(interpreter_object, at_base,
-	    self_phdr, self_header->e_phnum, ET_DYN);
+			       (unsigned)at_phnum, main_type);
+	setup_premapped_object(interpreter_object, at_base, self_phdr,
+			       self_header->e_phnum, ET_DYN);
 	interpreter_object->relative_done = 1;
 	load_dependencies(main_object);
 	if (interpreter_object->needed_count != 0)
@@ -2775,8 +2948,9 @@ rtld_main(uintptr_t *initial_stack)
 			objects[i].permanent = 1;
 	if (__rtld_thread_alloc(NULL, &initial_tcb) != 0)
 		rtld_fatal("cannot allocate initial TLS");
-	tls_result = syscall6(ZEDBSD_SYS_thread_self,
-	    ZEDBSD_THREAD_SELF_SET_TLS, (uintptr_t)initial_tcb, 0, 0, 0, 0);
+	tls_result =
+	    syscall6(ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_SET_TLS,
+		     (uintptr_t)initial_tcb, 0, 0, 0, 0);
 	if (raw_error(tls_result))
 		rtld_fatal("cannot install initial TLS");
 	return at_entry;

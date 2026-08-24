@@ -1,0 +1,31 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+ColumnLimit: 80
+IndentWidth: 8
+ContinuationIndentWidth: 4
+TabWidth: 8
+UseTab: Always
+
+DerivePointerAlignment: false
+PointerAlignment: Right
+SortIncludes: Never
+LineEnding: LF
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterStruct: false
+  AfterUnion: false
+
+AlwaysBreakAfterReturnType: AllDefinitions
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+IndentCaseLabels: false
+...

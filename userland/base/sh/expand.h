@@ -24,9 +24,9 @@ struct sh_field_list {
 };
 
 int sh_expand_word(const struct sh_token *, const struct sh_expand_context *,
-    char **, const char **);
+		   char **, const char **);
 int sh_expand_fields(const struct sh_token *, const struct sh_expand_context *,
-    struct sh_field_list *, const char **);
+		     struct sh_field_list *, const char **);
 void sh_fields_free(struct sh_field_list *);
 
 #endif

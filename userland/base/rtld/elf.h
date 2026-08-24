@@ -116,14 +116,24 @@ struct elf32_phdr {
 	uint32_t p_type, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz;
 	uint32_t p_flags, p_align;
 };
-struct elf32_dyn { int32_t d_tag; union { uint32_t d_val, d_ptr; } d_un; };
+struct elf32_dyn {
+	int32_t d_tag;
+	union {
+		uint32_t d_val, d_ptr;
+	} d_un;
+};
 struct elf32_sym {
 	uint32_t st_name, st_value, st_size;
 	uint8_t st_info, st_other;
 	uint16_t st_shndx;
 };
-struct elf32_rel { uint32_t r_offset, r_info; };
-struct elf32_rela { uint32_t r_offset, r_info; int32_t r_addend; };
+struct elf32_rel {
+	uint32_t r_offset, r_info;
+};
+struct elf32_rela {
+	uint32_t r_offset, r_info;
+	int32_t r_addend;
+};
 
 struct elf64_ehdr {
 	uint8_t e_ident[EI_NIDENT];
@@ -138,22 +148,34 @@ struct elf64_phdr {
 	uint32_t p_type, p_flags;
 	uint64_t p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align;
 };
-struct elf64_dyn { int64_t d_tag; union { uint64_t d_val, d_ptr; } d_un; };
+struct elf64_dyn {
+	int64_t d_tag;
+	union {
+		uint64_t d_val, d_ptr;
+	} d_un;
+};
 struct elf64_sym {
 	uint32_t st_name;
 	uint8_t st_info, st_other;
 	uint16_t st_shndx;
 	uint64_t st_value, st_size;
 };
-struct elf64_rel { uint64_t r_offset, r_info; };
-struct elf64_rela { uint64_t r_offset, r_info; int64_t r_addend; };
+struct elf64_rel {
+	uint64_t r_offset, r_info;
+};
+struct elf64_rela {
+	uint64_t r_offset, r_info;
+	int64_t r_addend;
+};
 
 /* The GNU/Solaris symbol-version records have the same layout in ELF32/64. */
 struct elf_verdef {
 	uint16_t vd_version, vd_flags, vd_ndx, vd_cnt;
 	uint32_t vd_hash, vd_aux, vd_next;
 };
-struct elf_verdaux { uint32_t vda_name, vda_next; };
+struct elf_verdaux {
+	uint32_t vda_name, vda_next;
+};
 struct elf_verneed {
 	uint16_t vn_version, vn_cnt;
 	uint32_t vn_file, vn_aux, vn_next;

@@ -32,7 +32,7 @@ test_message_queue(void)
 	struct message {
 		long type;
 		char text[16];
-	} sent = { 7, "zedBSD" }, received;
+	} sent = {7, "zedBSD"}, received;
 	int id = msgget(IPC_PRIVATE, 0600);
 
 	check(id >= 0, "msgget IPC_PRIVATE");
@@ -41,15 +41,16 @@ test_message_queue(void)
 	check(msgsnd(id, &sent, sizeof(sent.text), 0) == 0, "msgsnd");
 	memset(&received, 0, sizeof(received));
 	check(msgrcv(id, &received, sizeof(received.text), 7, IPC_NOWAIT) ==
-	    (ssize_t)sizeof(received.text) && received.type == 7 &&
-	    strcmp(received.text, "zedBSD") == 0, "msgrcv type selection");
+		      (ssize_t)sizeof(received.text) &&
+		  received.type == 7 && strcmp(received.text, "zedBSD") == 0,
+	      "msgrcv type selection");
 	check(msgctl(id, IPC_RMID, NULL) == 0, "msgctl IPC_RMID");
 }
 
 static void
 test_semaphore(void)
 {
-	struct sembuf operation = { 0, -1, 0 };
+	struct sembuf operation = {0, -1, 0};
 	int id = semget(IPC_PRIVATE, 1, 0600);
 
 	check(id >= 0, "semget IPC_PRIVATE");
@@ -79,7 +80,7 @@ test_shared_memory(void)
 		check(shmdt(memory) == 0, "shmdt");
 	}
 	check(shmctl(id, IPC_STAT, &status) == 0 && status.shm_segsz == 4096,
-	    "shmctl IPC_STAT");
+	      "shmctl IPC_STAT");
 	check(shmctl(id, IPC_RMID, NULL) == 0, "shmctl IPC_RMID");
 }
 
@@ -87,27 +88,29 @@ int
 main(void)
 {
 	struct rusage usage;
-	struct itimerval timer = { { 0, 0 }, { 0, 0 } }, current;
+	struct itimerval timer = {{0, 0}, {0, 0}}, current;
 	char path[256];
 	int priority;
 
 	check(_XOPEN_VERSION == 700 && _XOPEN_UNIX == 1,
-	    "compile-time XSI advertisement");
-	check(sysconf(_SC_XOPEN_VERSION) == 700 &&
-	    sysconf(_SC_XOPEN_UNIX) == 1, "runtime XSI advertisement");
+	      "compile-time XSI advertisement");
+	check(sysconf(_SC_XOPEN_VERSION) == 700 && sysconf(_SC_XOPEN_UNIX) == 1,
+	      "runtime XSI advertisement");
 	errno = 0;
 	priority = getpriority(PRIO_PROCESS, 0);
 	check(priority >= -20 && priority <= 20 && errno == 0, "getpriority");
 	check(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage");
 	check(setitimer(ITIMER_REAL, &timer, NULL) == 0 &&
-	    getitimer(ITIMER_REAL, &current) == 0, "interval timer UAPI");
-	check(realpath("/", path) == path && strcmp(path, "/") == 0, "realpath");
+		  getitimer(ITIMER_REAL, &current) == 0,
+	      "interval timer UAPI");
+	check(realpath("/", path) == path && strcmp(path, "/") == 0,
+	      "realpath");
 
 	test_message_queue();
 	test_semaphore();
 	test_shared_memory();
 	sync();
 	printf("SUSV4 RESULT: %s (%u failures)\n",
-	    failures == 0 ? "PASS" : "FAIL", failures);
+	       failures == 0 ? "PASS" : "FAIL", failures);
 	return failures == 0 ? 0 : 1;
 }

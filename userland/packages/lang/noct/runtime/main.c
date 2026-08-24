@@ -16,7 +16,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static size_t noct_write(void *context, const char *bytes, size_t length)
+static size_t
+noct_write(void *context, const char *bytes, size_t length)
 {
 	ssize_t count;
 	(void)context;
@@ -24,7 +25,8 @@ static size_t noct_write(void *context, const char *bytes, size_t length)
 	return count < 0 ? 0U : (size_t)count;
 }
 
-static void print_error(NoctEnv *env, const char *kind)
+static void
+print_error(NoctEnv *env, const char *kind)
 {
 	const char *file = "<unknown>";
 	const char *message = "Noct error";
@@ -37,7 +39,8 @@ static void print_error(NoctEnv *env, const char *kind)
 	fprintf(stderr, "%s: %s:%d: %s\n", kind, file, line, message);
 }
 
-static void return_error(NoctEnv *env)
+static void
+return_error(NoctEnv *env)
 {
 	const char *message = "Noct error";
 	if (env != NULL)
@@ -46,7 +49,8 @@ static void return_error(NoctEnv *env)
 		(void)write(3, message, strlen(message));
 }
 
-static int read_repl_line(char *line, size_t capacity, int continuation)
+static int
+read_repl_line(char *line, size_t capacity, int continuation)
 {
 	size_t length = 0;
 	const char *prompt = continuation ? "... " : "noct> ";
@@ -82,7 +86,8 @@ static int read_repl_line(char *line, size_t capacity, int continuation)
 	return -1;
 }
 
-static int run_repl(NoctEnv *env)
+static int
+run_repl(NoctEnv *env)
 {
 	NoctReplSession *session = noct_repl_create(env, 32U * 1024U);
 	char line[1024];
@@ -114,7 +119,8 @@ static int run_repl(NoctEnv *env)
 	return 0;
 }
 
-static char *read_source(const char *path, size_t *size_out)
+static char *
+read_source(const char *path, size_t *size_out)
 {
 	struct stat status;
 	FILE *file;
@@ -123,11 +129,17 @@ static char *read_source(const char *path, size_t *size_out)
 	    (uint32_t)status.st_size > 4U * 1024U * 1024U)
 		return NULL;
 	file = fopen(path, "rb");
-	if (file == NULL) return NULL;
+	if (file == NULL)
+		return NULL;
 	source = malloc((size_t)status.st_size + 1U);
-	if (source == NULL) { (void)fclose(file); return NULL; }
-	if (fread(source, 1, (size_t)status.st_size, file) != (size_t)status.st_size) {
-		free(source); source = NULL;
+	if (source == NULL) {
+		(void)fclose(file);
+		return NULL;
+	}
+	if (fread(source, 1, (size_t)status.st_size, file) !=
+	    (size_t)status.st_size) {
+		free(source);
+		source = NULL;
 	} else {
 		source[status.st_size] = '\0';
 	}
@@ -137,32 +149,38 @@ static char *read_source(const char *path, size_t *size_out)
 	return source;
 }
 
-static int bytecode_path(const char *path)
+static int
+bytecode_path(const char *path)
 {
 	size_t length = strlen(path);
 	return length >= 4U && path[length - 4U] == '.' &&
-		(path[length - 3U] == 'N' || path[length - 3U] == 'n') &&
-		(path[length - 2U] == 'A' || path[length - 2U] == 'a') &&
-		(path[length - 1U] == 'P' || path[length - 1U] == 'p');
+	       (path[length - 3U] == 'N' || path[length - 3U] == 'n') &&
+	       (path[length - 2U] == 'A' || path[length - 2U] == 'a') &&
+	       (path[length - 1U] == 'P' || path[length - 1U] == 'p');
 }
 
-static void import_environment(struct environment *environment, char **envp)
+static void
+import_environment(struct environment *environment, char **envp)
 {
 	unsigned i;
 	env_init(environment);
 	for (i = 0; envp != NULL && envp[i] != NULL; i++) {
 		char *equals = strchr(envp[i], '=');
-		char name[32]; size_t length;
-		if (equals == NULL) continue;
+		char name[32];
+		size_t length;
+		if (equals == NULL)
+			continue;
 		length = (size_t)(equals - envp[i]);
-		if (length == 0 || length >= sizeof(name)) continue;
-		memcpy(name, envp[i], length); name[length] = '\0';
+		if (length == 0 || length >= sizeof(name))
+			continue;
+		memcpy(name, envp[i], length);
+		name[length] = '\0';
 		(void)env_set(environment, name, equals + 1);
 	}
 }
 
-static int select_memory_profile(
-	struct user_noct_memory_profile *profile)
+static int
+select_memory_profile(struct user_noct_memory_profile *profile)
 {
 	struct vm_statistics stats;
 	int fd;
@@ -176,13 +194,14 @@ static int select_memory_profile(
 		return 0;
 	}
 	(void)close(fd);
-	return user_noct_select_memory(
-		stats.physical_total + stats.swap_total *
-		ZEDBSD_SYSTEM_SWAP_PAGE_SIZE,
-		stats.vm_commit_available, profile);
+	return user_noct_select_memory(stats.physical_total +
+					   stats.swap_total *
+					       ZEDBSD_SYSTEM_SWAP_PAGE_SIZE,
+				       stats.vm_commit_available, profile);
 }
 
-int main(int argc, char **argv, char **envp)
+int
+main(int argc, char **argv, char **envp)
 {
 	NoctConfig config;
 	NoctVM *vm = NULL;
@@ -217,12 +236,13 @@ int main(int argc, char **argv, char **envp)
 	memset(&memory, 0, sizeof(memory));
 	import_environment(&environment, envp);
 	if (!select_memory_profile(&memory)) {
-		fprintf(stderr, "noct: cannot determine virtual memory capacity\n");
+		fprintf(stderr,
+			"noct: cannot determine virtual memory capacity\n");
 		status = 3;
 		goto out;
 	}
 	arena = mmap(NULL, memory.arena_size, PROT_READ | PROT_WRITE,
-		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (arena == MAP_FAILED) {
 		fprintf(stderr, "noct: cannot reserve %u MiB VM heap\n",
 			memory.profile_mib);
@@ -254,24 +274,30 @@ int main(int argc, char **argv, char **envp)
 	}
 	if (!noct_napi_register(env, &options) ||
 	    !noct_target_register(env, options.services)) {
-		status = 11; print_error(env, "Noct target API error"); goto out;
+		status = 11;
+		print_error(env, "Noct target API error");
+		goto out;
 	}
 	if (path == NULL) {
 		status = run_repl(env);
 		goto out;
 	}
-	if (!(bytecode_path(path) ?
-	      noct_register_bytecode(env, (uint8_t *)source,
-				     (uint32_t)source_size) :
-	      noct_register_source(env, path, source))) {
-		status = 12; print_error(env, "Noct source error");
-		return_error(env); goto out;
+	if (!(bytecode_path(path)
+		  ? noct_register_bytecode(env, (uint8_t *)source,
+					   (uint32_t)source_size)
+		  : noct_register_source(env, path, source))) {
+		status = 12;
+		print_error(env, "Noct source error");
+		return_error(env);
+		goto out;
 	}
 	if (!noct_get_global(env, "main", &main_value) ||
 	    !noct_get_func(env, &main_value, &function) ||
 	    !noct_get_func_param_count(env, function, &parameter_count) ||
 	    parameter_count > 1U) {
-		status = 13; print_error(env, "Noct main error"); goto out;
+		status = 13;
+		print_error(env, "Noct main error");
+		goto out;
 	}
 	if (parameter_count == 1U) {
 		int i;
@@ -280,23 +306,30 @@ int main(int argc, char **argv, char **envp)
 			goto out;
 		pinned = 1;
 		for (i = 2; i < argc; i++)
-			if (!noct_set_array_elem_make_string(env, &arguments,
-				(size_t)(i - 2), &argument_value, argv[i]))
+			if (!noct_set_array_elem_make_string(
+				env, &arguments, (size_t)(i - 2),
+				&argument_value, argv[i]))
 				goto out;
 	}
-	if (!noct_enter_vm(env, "main", parameter_count, parameter_count ? &arguments : NULL,
-		&return_value)) {
-		status = 14; print_error(env, "Noct runtime error"); goto out;
+	if (!noct_enter_vm(env, "main", parameter_count,
+			   parameter_count ? &arguments : NULL,
+			   &return_value)) {
+		status = 14;
+		print_error(env, "Noct runtime error");
+		goto out;
 	}
 	status = 0;
-	if (noct_get_value_type(env, &return_value, &type) && type == NOCT_VALUE_INT)
+	if (noct_get_value_type(env, &return_value, &type) &&
+	    type == NOCT_VALUE_INT)
 		(void)noct_get_int(env, &return_value, &status);
 out:
-	if (pinned) (void)noct_unpin_local(env, 2, &arguments, &argument_value);
+	if (pinned)
+		(void)noct_unpin_local(env, 2, &arguments, &argument_value);
 	noct_target_cleanup();
 	noct_napi_cleanup();
 	noct_beui_cleanup();
-	if (vm != NULL) (void)noct_destroy_vm(vm);
+	if (vm != NULL)
+		(void)noct_destroy_vm(vm);
 	if (heap_active) {
 		(void)heap_active_set(bootstrap_heap);
 		heap_active = 0;

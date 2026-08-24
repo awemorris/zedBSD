@@ -21,8 +21,7 @@ valid_name(const char *name, size_t *length)
 		char ch = name[index];
 
 		if (index >= ZEDBSD_ENV_NAME_MAX ||
-		    !((ch >= 'A' && ch <= 'Z') ||
-		      (ch >= 'a' && ch <= 'z') ||
+		    !((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
 		      (ch >= '0' && ch <= '9') || ch == '_'))
 			return 0;
 	}
@@ -81,8 +80,7 @@ env_get(const struct environment *environment, const char *name)
 }
 
 int
-env_set(struct environment *environment, const char *name,
-	       const char *value)
+env_set(struct environment *environment, const char *name, const char *value)
 {
 	size_t name_length;
 	size_t value_length;
@@ -116,8 +114,8 @@ env_set(struct environment *environment, const char *name,
 	memcpy(environment->storage + offset, name, name_length + 1U);
 	memcpy(environment->storage + offset + name_length + 1U, value,
 	       value_length + 1U);
-	environment->used = (uint16_t)((size_t)environment->used - old_span +
-				       new_span);
+	environment->used =
+	    (uint16_t)((size_t)environment->used - old_span + new_span);
 	if (!found)
 		environment->count++;
 	return 1;
@@ -134,8 +132,8 @@ env_unset(struct environment *environment, const char *name)
 	    !find_entry(environment, name, &offset, &span))
 		return 0;
 	tail = (size_t)environment->used - offset - span;
-	memmove(environment->storage + offset, environment->storage + offset + span,
-		tail);
+	memmove(environment->storage + offset,
+		environment->storage + offset + span, tail);
 	environment->used = (uint16_t)((size_t)environment->used - span);
 	environment->count--;
 	return 1;
@@ -148,8 +146,8 @@ env_count(const struct environment *environment)
 }
 
 int
-env_at(const struct environment *environment, size_t index,
-	      const char **name, const char **value)
+env_at(const struct environment *environment, size_t index, const char **name,
+       const char **value)
 {
 	size_t position = 0;
 	size_t current = 0;

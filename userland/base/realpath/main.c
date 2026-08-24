@@ -16,7 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define SYMLINK_LIMIT	40
+#define SYMLINK_LIMIT 40
 
 static char *
 copy_string(const char *text)
@@ -81,7 +81,7 @@ absolute_pending(const char *operand)
 	pending = malloc(current_length + operand_length + 2U);
 	if (pending != NULL)
 		(void)snprintf(pending, current_length + operand_length + 2U,
-		    "%s/%s", current, operand);
+			       "%s/%s", current, operand);
 	return pending;
 }
 
@@ -124,7 +124,8 @@ resolve(const char *operand, int allow_missing_final)
 			memmove(pending, cursor, strlen(cursor) + 1U);
 			continue;
 		}
-		if (length == 2U && component[0] == '.' && component[1] == '.') {
+		if (length == 2U && component[0] == '.' &&
+		    component[1] == '.') {
 			pop_component(resolved);
 			memmove(pending, cursor, strlen(cursor) + 1U);
 			continue;
@@ -132,11 +133,13 @@ resolve(const char *operand, int allow_missing_final)
 		if (!append_component(&resolved, component, length))
 			goto failed_resolved;
 		if (lstat(resolved, &status) != 0) {
-			if (allow_missing_final && errno == ENOENT && *cursor == '\0')
+			if (allow_missing_final && errno == ENOENT &&
+			    *cursor == '\0')
 				break;
 			goto failed_resolved;
 		}
-		if (had_separator && *cursor == '\0' && !S_ISDIR(status.st_mode)) {
+		if (had_separator && *cursor == '\0' &&
+		    !S_ISDIR(status.st_mode)) {
 			errno = ENOTDIR;
 			goto failed_resolved;
 		}
@@ -150,13 +153,14 @@ resolve(const char *operand, int allow_missing_final)
 				errno = ELOOP;
 				goto failed_resolved;
 			}
-			target_length = readlink(resolved, target,
-			    sizeof(target) - 1U);
+			target_length =
+			    readlink(resolved, target, sizeof(target) - 1U);
 			if (target_length < 0)
 				goto failed_resolved;
 			target[target_length] = '\0';
 			pop_component(resolved);
-			next = malloc((size_t)target_length + (rest != 0) + rest + 1U);
+			next = malloc((size_t)target_length + (rest != 0) +
+				      rest + 1U);
 			if (next == NULL)
 				goto failed_resolved;
 			memcpy(next, target, (size_t)target_length);
@@ -196,7 +200,8 @@ main(int argc, char **argv)
 	int index = 1;
 	char *path;
 
-	while (index < argc && argv[index][0] == '-' && argv[index][1] != '\0') {
+	while (index < argc && argv[index][0] == '-' &&
+	       argv[index][1] != '\0') {
 		if (!strcmp(argv[index], "--")) {
 			index++;
 			break;

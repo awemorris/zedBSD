@@ -21,17 +21,15 @@ struct memory_limits {
  * application allocations.  These are policy, not ABI.
  */
 static const struct memory_limits limits[] = {
-	{    5U,  128U * KIB,  192U * KIB,  48U * KIB,  640U * KIB },
-	{   10U,  192U * KIB,  320U * KIB,  80U * KIB, 1280U * KIB },
-	{   20U,  384U * KIB,  640U * KIB, 160U * KIB, 2560U * KIB },
-	{   32U,  512U * KIB,    1U * MIB, 256U * KIB,    4U * MIB },
+    {5U, 128U * KIB, 192U * KIB, 48U * KIB, 640U * KIB},
+    {10U, 192U * KIB, 320U * KIB, 80U * KIB, 1280U * KIB},
+    {20U, 384U * KIB, 640U * KIB, 160U * KIB, 2560U * KIB},
+    {32U, 512U * KIB, 1U * MIB, 256U * KIB, 4U * MIB},
 };
 
 int
-user_noct_select_memory(
-	uint64_t capacity_bytes,
-	uint64_t available_bytes,
-	struct user_noct_memory_profile *profile)
+user_noct_select_memory(uint64_t capacity_bytes, uint64_t available_bytes,
+			struct user_noct_memory_profile *profile)
 {
 	struct memory_limits selected;
 	uint64_t arena_bytes;

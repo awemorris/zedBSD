@@ -43,11 +43,10 @@ print_resource_delta(const struct system_resource_info *before,
 	const uint64_t *a = (const uint64_t *)before;
 	const uint64_t *b = (const uint64_t *)after;
 	static const char *const names[] = {
-		"process", "thread", "filedesc", "file", "pipe",
-		"mount", "inode", "namecache", "vmspace", "vm_object",
-		"vm_page", "swap_slot", "disk", "bio", "socket",
-		"packet", "net_device"
-	};
+	    "process", "thread",    "filedesc",	 "file",    "pipe",
+	    "mount",   "inode",	    "namecache", "vmspace", "vm_object",
+	    "vm_page", "swap_slot", "disk",	 "bio",	    "socket",
+	    "packet",  "net_device"};
 	size_t index;
 
 	for (index = 0; index < sizeof(names) / sizeof(names[0]); index++) {
@@ -101,9 +100,10 @@ worker_main(unsigned worker)
 		if (munmap((void *)mapping, PAGE_SIZE) != 0)
 			return 12;
 
-		/* Every pass crosses the VFS/file/inode path.  Periodic writes also
-		 * exercise concurrent metadata and buffered block I/O without making
-		 * the 100k-event scheduler gate depend on PIO throughput. */
+		/* Every pass crosses the VFS/file/inode path.  Periodic writes
+		 * also exercise concurrent metadata and buffered block I/O
+		 * without making the 100k-event scheduler gate depend on PIO
+		 * throughput. */
 		if (fstat(file_descriptor, &status) != 0)
 			return 13;
 		if ((iteration & 511U) == 0 &&
@@ -111,11 +111,13 @@ worker_main(unsigned worker)
 			   (off_t)(iteration & (PAGE_SIZE - 1U))) != 1)
 			return 17;
 		if ((iteration & 511U) == 0) {
-			volatile unsigned char *shared = mmap(NULL, PAGE_SIZE,
-			    PROT_READ | PROT_WRITE, MAP_SHARED, file_descriptor, 0);
+			volatile unsigned char *shared =
+			    mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
+				 MAP_SHARED, file_descriptor, 0);
 			if (shared == MAP_FAILED)
 				return 19;
-			shared[(worker * 37U + iteration) & (PAGE_SIZE - 1U)] = value;
+			shared[(worker * 37U + iteration) & (PAGE_SIZE - 1U)] =
+			    value;
 			if (msync((void *)shared, PAGE_SIZE, MS_SYNC) != 0 ||
 			    munmap((void *)shared, PAGE_SIZE) != 0)
 				return 20;
@@ -135,8 +137,9 @@ worker_main(unsigned worker)
 			if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0)
 				return 21;
 			if (write(pair[0], &value, 1) != 1 ||
-			    read(pair[1], &received, 1) != 1 || received != value ||
-			    close(pair[0]) != 0 || close(pair[1]) != 0)
+			    read(pair[1], &received, 1) != 1 ||
+			    received != value || close(pair[0]) != 0 ||
+			    close(pair[1]) != 0)
 				return 22;
 		}
 	}
@@ -167,7 +170,8 @@ main(void)
 		return 1;
 	}
 
-	/* Stabilize the inode/namecache population before taking the baseline. */
+	/* Stabilize the inode/namecache population before taking the baseline.
+	 */
 	for (worker = 0; worker < WORKERS; worker++) {
 		if (warm_path(worker) != 0) {
 			printf("SMP_STRESS_FAIL:warm:%u:%d\n", worker, errno);

@@ -68,7 +68,7 @@ add_history(const char *line)
 	if (history_length == HISTORY_MAX) {
 		free(history_entries[0].line);
 		memmove(&history_entries[0], &history_entries[1],
-		    (HISTORY_MAX - 1U) * sizeof(history_entries[0]));
+			(HISTORY_MAX - 1U) * sizeof(history_entries[0]));
 		history_length--;
 		history_base++;
 	}
@@ -90,8 +90,9 @@ history_set_pos(int position)
 HIST_ENTRY *
 current_history(void)
 {
-	return history_position >= 0 && history_position < history_length ?
-	    &history_entries[history_position] : NULL;
+	return history_position >= 0 && history_position < history_length
+		   ? &history_entries[history_position]
+		   : NULL;
 }
 
 HIST_ENTRY *
@@ -177,7 +178,7 @@ move_cursor(size_t from, size_t to)
 
 static void
 update_display(const char *line, size_t old_length, size_t old_point,
-    size_t length, size_t point, size_t changed_from)
+	       size_t length, size_t point, size_t changed_from)
 {
 	size_t drawn_to;
 
@@ -218,7 +219,7 @@ grow(char **line, size_t *capacity, size_t need)
 
 static int
 replace_line(char **line, size_t *capacity, size_t *length, size_t *point,
-    const char *replacement)
+	     const char *replacement)
 {
 	size_t size = strlen(replacement);
 	if (!grow(line, capacity, size + 1U))
@@ -230,8 +231,14 @@ replace_line(char **line, size_t *capacity, size_t *length, size_t *point,
 }
 
 enum edit_key {
-	EDIT_NONE, EDIT_UP, EDIT_DOWN, EDIT_LEFT, EDIT_RIGHT, EDIT_HOME,
-	EDIT_END, EDIT_DELETE
+	EDIT_NONE,
+	EDIT_UP,
+	EDIT_DOWN,
+	EDIT_LEFT,
+	EDIT_RIGHT,
+	EDIT_HOME,
+	EDIT_END,
+	EDIT_DELETE
 };
 
 static enum edit_key
@@ -243,17 +250,24 @@ escape_key(void)
 	if (read(STDIN_FILENO, &byte, 1) != 1)
 		return EDIT_NONE;
 	switch (byte) {
-	case 'A': return EDIT_UP;
-	case 'B': return EDIT_DOWN;
-	case 'C': return EDIT_RIGHT;
-	case 'D': return EDIT_LEFT;
-	case 'H': return EDIT_HOME;
-	case 'F': return EDIT_END;
+	case 'A':
+		return EDIT_UP;
+	case 'B':
+		return EDIT_DOWN;
+	case 'C':
+		return EDIT_RIGHT;
+	case 'D':
+		return EDIT_LEFT;
+	case 'H':
+		return EDIT_HOME;
+	case 'F':
+		return EDIT_END;
 	case '3':
 		if (read(STDIN_FILENO, &byte, 1) == 1 && byte == '~')
 			return EDIT_DELETE;
 		return EDIT_NONE;
-	default: return EDIT_NONE;
+	default:
+		return EDIT_NONE;
 	}
 }
 
@@ -302,32 +316,44 @@ readline(const char *prompt)
 		}
 		if (byte == 0x1b)
 			key = escape_key();
-		else if (byte == 1) key = EDIT_HOME;
-		else if (byte == 2) key = EDIT_LEFT;
-		else if (byte == 5) key = EDIT_END;
-		else if (byte == 6) key = EDIT_RIGHT;
-		else if (byte == 14) key = EDIT_DOWN;
-		else if (byte == 16) key = EDIT_UP;
-		if (key == EDIT_HOME) point = 0;
-		else if (key == EDIT_END) point = length;
-		else if (key == EDIT_LEFT && point != 0) point--;
-		else if (key == EDIT_RIGHT && point < length) point++;
+		else if (byte == 1)
+			key = EDIT_HOME;
+		else if (byte == 2)
+			key = EDIT_LEFT;
+		else if (byte == 5)
+			key = EDIT_END;
+		else if (byte == 6)
+			key = EDIT_RIGHT;
+		else if (byte == 14)
+			key = EDIT_DOWN;
+		else if (byte == 16)
+			key = EDIT_UP;
+		if (key == EDIT_HOME)
+			point = 0;
+		else if (key == EDIT_END)
+			point = length;
+		else if (key == EDIT_LEFT && point != 0)
+			point--;
+		else if (key == EDIT_RIGHT && point < length)
+			point++;
 		else if (key == EDIT_DELETE && point < length) {
-			memmove(line + point, line + point + 1U, length - point);
+			memmove(line + point, line + point + 1U,
+				length - point);
 			length--;
 			changed_from = point;
 		} else if (key == EDIT_UP) {
 			entry = previous_history();
-			if (entry != NULL && !replace_line(&line, &capacity, &length,
-			    &point, entry->line))
+			if (entry != NULL &&
+			    !replace_line(&line, &capacity, &length, &point,
+					  entry->line))
 				break;
 			if (entry != NULL)
 				changed_from = 0;
 		} else if (key == EDIT_DOWN) {
 			entry = next_history();
 			if (entry != NULL) {
-				if (!replace_line(&line, &capacity, &length, &point,
-				    entry->line))
+				if (!replace_line(&line, &capacity, &length,
+						  &point, entry->line))
 					break;
 				changed_from = 0;
 			} else if (history_position == history_length) {
@@ -348,19 +374,22 @@ readline(const char *prompt)
 		} else if (byte == 4) {
 			if (length == 0) {
 				if (terminal)
-					(void)tcsetattr(STDIN_FILENO, TCSANOW, &saved);
+					(void)tcsetattr(STDIN_FILENO, TCSANOW,
+							&saved);
 				free(line);
 				rl_line_buffer = NULL;
 				return NULL;
 			}
 			if (point < length) {
-				memmove(line + point, line + point + 1U, length - point);
+				memmove(line + point, line + point + 1U,
+					length - point);
 				length--;
 				changed_from = point;
 			}
 		} else if (byte == 8 || byte == 0x7f) {
 			if (point != 0) {
-				memmove(line + point - 1U, line + point, length - point + 1U);
+				memmove(line + point - 1U, line + point,
+					length - point + 1U);
 				point--;
 				length--;
 				changed_from = point;
@@ -377,7 +406,8 @@ readline(const char *prompt)
 		} else if (byte >= 0x20 && byte != 0x7f) {
 			if (!grow(&line, &capacity, length + 2U))
 				break;
-			memmove(line + point + 1U, line + point, length - point + 1U);
+			memmove(line + point + 1U, line + point,
+				length - point + 1U);
 			changed_from = point;
 			line[point++] = (char)byte;
 			length++;
@@ -388,7 +418,7 @@ readline(const char *prompt)
 		rl_point = (int)point;
 		rl_end = (int)length;
 		update_display(line, old_length, old_point, length, point,
-		    changed_from);
+			       changed_from);
 	}
 	if (terminal)
 		(void)tcsetattr(STDIN_FILENO, TCSANOW, &saved);

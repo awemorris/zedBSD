@@ -30,7 +30,7 @@ static int
 name_start(char value)
 {
 	return (value >= 'A' && value <= 'Z') ||
-	    (value >= 'a' && value <= 'z') || value == '_';
+	       (value >= 'a' && value <= 'z') || value == '_';
 }
 
 static int
@@ -55,7 +55,8 @@ static struct shell_variable *
 find_variable(const char *name)
 {
 	struct shell_variable *variable;
-	for (variable = variables; variable != NULL; variable = variable->next) {
+	for (variable = variables; variable != NULL;
+	     variable = variable->next) {
 		if (strcmp(variable->name, name) == 0)
 			return variable;
 	}
@@ -248,12 +249,14 @@ sh_var_restore(struct sh_var_snapshot *snapshot)
 	}
 environment:
 	if (snapshot->environment_existed) {
-		if (setenv(snapshot->name == NULL ? variable->name : snapshot->name,
-		    snapshot->environment, 1) != 0)
+		if (setenv(snapshot->name == NULL ? variable->name
+						  : snapshot->name,
+			   snapshot->environment, 1) != 0)
 			result = -1;
 	} else {
-		const char *name = snapshot->name == NULL && variable != NULL ?
-		    variable->name : snapshot->name;
+		const char *name = snapshot->name == NULL && variable != NULL
+				       ? variable->name
+				       : snapshot->name;
 		if (name != NULL && unsetenv(name) != 0)
 			result = -1;
 	}

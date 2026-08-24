@@ -16,9 +16,7 @@ struct user_noct_memory_profile {
 	size_t gc_tenure_size;
 };
 
-int user_noct_select_memory(
-	uint64_t capacity_bytes,
-	uint64_t available_bytes,
-	struct user_noct_memory_profile *profile);
+int user_noct_select_memory(uint64_t capacity_bytes, uint64_t available_bytes,
+			    struct user_noct_memory_profile *profile);
 
 #endif

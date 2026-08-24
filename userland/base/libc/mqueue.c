@@ -52,12 +52,19 @@ static struct mq_descriptor descriptors[MQ_MAX_DESCRIPTORS];
 static volatile uint32_t descriptor_guard;
 extern void __pthread_cancel_point(void) __attribute__((weak));
 extern int __pthread_cancel_enabled(void) __attribute__((weak));
-static void cancel_point(void)
-{ if (__pthread_cancel_point != NULL) __pthread_cancel_point(); }
-static uintptr_t cancelable_flag(int cancellation_point)
+static void
+cancel_point(void)
+{
+	if (__pthread_cancel_point != NULL)
+		__pthread_cancel_point();
+}
+static uintptr_t
+cancelable_flag(int cancellation_point)
 {
 	return cancellation_point && __pthread_cancel_enabled != NULL &&
-	    __pthread_cancel_enabled() ? ZEDBSD_USYNC_CANCELABLE : 0;
+		       __pthread_cancel_enabled()
+		   ? ZEDBSD_USYNC_CANCELABLE
+		   : 0;
 }
 
 static int
@@ -80,27 +87,27 @@ mq_storage_name(const char *name, char storage[PATH_MAX])
 }
 
 static intptr_t
-mq_call(uint32_t number, uintptr_t a, uintptr_t b, uintptr_t c,
-	uintptr_t d, uintptr_t e, uintptr_t f)
+mq_call(uint32_t number, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d,
+	uintptr_t e, uintptr_t f)
 {
 	return syscall_result(__syscall6(number, a, b, c, d, e, f));
 }
 
 static int
 mq_usync_wait(volatile uint32_t *word, uint32_t expected,
-	const struct timespec *relative, int cancellation_point)
+	      const struct timespec *relative, int cancellation_point)
 {
-	intptr_t result = mq_call(ZEDBSD_SYS_usync, (uintptr_t)word,
-	    ZEDBSD_USYNC_WAIT, expected, (uintptr_t)relative, 0,
-	    cancelable_flag(cancellation_point));
+	intptr_t result = mq_call(
+	    ZEDBSD_SYS_usync, (uintptr_t)word, ZEDBSD_USYNC_WAIT, expected,
+	    (uintptr_t)relative, 0, cancelable_flag(cancellation_point));
 	return result < 0 ? errno : 0;
 }
 
 static void
 mq_usync_wake(volatile uint32_t *word, unsigned count)
 {
-	(void)mq_call(ZEDBSD_SYS_usync, (uintptr_t)word, ZEDBSD_USYNC_WAKE,
-	    0, 0, count, 0);
+	(void)mq_call(ZEDBSD_SYS_usync, (uintptr_t)word, ZEDBSD_USYNC_WAKE, 0,
+		      0, count, 0);
 }
 
 static void
@@ -108,7 +115,7 @@ mq_private_lock(volatile uint32_t *word)
 {
 	while (__atomic_exchange_n(word, 1, __ATOMIC_ACQUIRE) != 0) {
 		(void)mq_call(ZEDBSD_SYS_usync, (uintptr_t)word,
-		    ZEDBSD_USYNC_WAIT, 1, 0, 0, ZEDBSD_USYNC_PRIVATE);
+			      ZEDBSD_USYNC_WAIT, 1, 0, 0, ZEDBSD_USYNC_PRIVATE);
 	}
 }
 
@@ -116,8 +123,8 @@ static void
 mq_private_unlock(volatile uint32_t *word)
 {
 	__atomic_store_n(word, 0, __ATOMIC_RELEASE);
-	(void)mq_call(ZEDBSD_SYS_usync, (uintptr_t)word, ZEDBSD_USYNC_WAKE,
-	    0, 0, 1, ZEDBSD_USYNC_PRIVATE);
+	(void)mq_call(ZEDBSD_SYS_usync, (uintptr_t)word, ZEDBSD_USYNC_WAKE, 0,
+		      0, 1, ZEDBSD_USYNC_PRIVATE);
 }
 
 static void
@@ -147,7 +154,8 @@ mq_relative_deadline(const struct timespec *absolute, struct timespec *relative)
 	if (clock_gettime(CLOCK_REALTIME, &now) != 0)
 		return -1;
 	if (absolute->tv_sec < now.tv_sec ||
-	    (absolute->tv_sec == now.tv_sec && absolute->tv_nsec <= now.tv_nsec)) {
+	    (absolute->tv_sec == now.tv_sec &&
+	     absolute->tv_nsec <= now.tv_nsec)) {
 		errno = ETIMEDOUT;
 		return -1;
 	}
@@ -197,14 +205,14 @@ mq_descriptor_install(int fd, int flags, struct mq_store *store)
 mqd_t
 mq_open(const char *name, int flags, ...)
 {
-	struct mq_attr requested = { 0, 10, MQ_MAX_MESSAGE_SIZE, 0 };
+	struct mq_attr requested = {0, 10, MQ_MAX_MESSAGE_SIZE, 0};
 	struct mq_store *store;
 	char storage_name[PATH_MAX];
 	mode_t mode = 0;
 	int created = 0, fd;
 	if ((flags & O_ACCMODE) > O_RDWR ||
-	    (flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_NONBLOCK |
-	    O_CLOEXEC)) != 0) {
+	    (flags &
+	     ~(O_ACCMODE | O_CREAT | O_EXCL | O_NONBLOCK | O_CLOEXEC)) != 0) {
 		errno = EINVAL;
 		return (mqd_t)-1;
 	}
@@ -226,12 +234,15 @@ mq_open(const char *name, int flags, ...)
 			errno = EINVAL;
 			return (mqd_t)-1;
 		}
-		fd = shm_open(storage_name, (flags & ~(O_ACCMODE | O_TRUNC)) |
-		    O_RDWR | O_CREAT | O_EXCL, mode);
+		fd = shm_open(storage_name,
+			      (flags & ~(O_ACCMODE | O_TRUNC)) | O_RDWR |
+				  O_CREAT | O_EXCL,
+			      mode);
 		if (fd >= 0)
 			created = 1;
 		else if (errno == EEXIST && (flags & O_EXCL) == 0)
-			fd = shm_open(storage_name, O_RDWR | (flags & O_CLOEXEC), mode);
+			fd = shm_open(storage_name,
+				      O_RDWR | (flags & O_CLOEXEC), mode);
 	} else {
 		fd = shm_open(storage_name, O_RDWR | (flags & O_CLOEXEC), 0);
 	}
@@ -243,7 +254,7 @@ mq_open(const char *name, int flags, ...)
 		return (mqd_t)-1;
 	}
 	store = mmap(NULL, sizeof(*store), PROT_READ | PROT_WRITE, MAP_SHARED,
-	    fd, 0);
+		     fd, 0);
 	if (store == MAP_FAILED) {
 		(void)close(fd);
 		if (created)
@@ -257,7 +268,8 @@ mq_open(const char *name, int flags, ...)
 		__atomic_store_n(&store->magic, MQ_MAGIC, __ATOMIC_RELEASE);
 		mq_usync_wake(&store->magic, UINT32_MAX);
 	} else {
-		while (__atomic_load_n(&store->magic, __ATOMIC_ACQUIRE) != MQ_MAGIC) {
+		while (__atomic_load_n(&store->magic, __ATOMIC_ACQUIRE) !=
+		       MQ_MAGIC) {
 			int error = mq_usync_wait(&store->magic, 0, NULL, 0);
 			if (error != 0 && error != EAGAIN) {
 				(void)munmap(store, sizeof(*store));
@@ -306,22 +318,35 @@ int
 mq_unlink(const char *name)
 {
 	char storage_name[PATH_MAX];
-	return mq_storage_name(name, storage_name) == 0 ?
-	    shm_unlink(storage_name) : -1;
+	return mq_storage_name(name, storage_name) == 0
+		   ? shm_unlink(storage_name)
+		   : -1;
 }
 
 int
 mq_timedsend(mqd_t descriptor, const char *message, size_t length,
-	unsigned priority, const struct timespec *absolute)
+	     unsigned priority, const struct timespec *absolute)
 {
 	struct mq_descriptor *entry = mq_descriptor_get(descriptor);
 	struct mq_store *store;
 	cancel_point();
-	if (entry == NULL || message == NULL) { errno = entry == NULL ? EBADF : EINVAL; return -1; }
-	if (priority >= MQ_PRIO_MAX) { errno = EINVAL; return -1; }
-	if ((entry->flags & O_ACCMODE) == O_RDONLY) { errno = EBADF; return -1; }
+	if (entry == NULL || message == NULL) {
+		errno = entry == NULL ? EBADF : EINVAL;
+		return -1;
+	}
+	if (priority >= MQ_PRIO_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
+	if ((entry->flags & O_ACCMODE) == O_RDONLY) {
+		errno = EBADF;
+		return -1;
+	}
 	store = entry->store;
-	if (length > store->message_size) { errno = EMSGSIZE; return -1; }
+	if (length > store->message_size) {
+		errno = EMSGSIZE;
+		return -1;
+	}
 	for (;;) {
 		uint32_t sequence;
 		struct timespec relative, *timeout = NULL;
@@ -332,9 +357,12 @@ mq_timedsend(mqd_t descriptor, const char *message, size_t length,
 			int notify_signo = 0;
 			uint64_t notify_value = 0;
 			int was_empty = store->count == 0;
-			for (position = store->count; position != 0 &&
-			    store->slots[position - 1U].priority < priority; position--)
-				store->slots[position] = store->slots[position - 1U];
+			for (position = store->count;
+			     position != 0 &&
+			     store->slots[position - 1U].priority < priority;
+			     position--)
+				store->slots[position] =
+				    store->slots[position - 1U];
 			store->slots[position].length = (uint32_t)length;
 			store->slots[position].priority = priority;
 			memcpy(store->slots[position].data, message, length);
@@ -346,27 +374,34 @@ mq_timedsend(mqd_t descriptor, const char *message, size_t length,
 				notify_value = store->notify_value;
 				store->notify_pid = 0;
 			}
-			(void)__atomic_add_fetch(&store->not_empty, 1, __ATOMIC_RELEASE);
+			(void)__atomic_add_fetch(&store->not_empty, 1,
+						 __ATOMIC_RELEASE);
 			mq_store_unlock(store);
 			mq_usync_wake(&store->not_empty, 1);
 			if (notify_pid != 0 && notify_kind == SIGEV_SIGNAL) {
 				union sigval value;
-				memcpy(&value, &notify_value, sizeof(notify_value));
-				(void)sigqueue((pid_t)notify_pid, notify_signo, value);
+				memcpy(&value, &notify_value,
+				       sizeof(notify_value));
+				(void)sigqueue((pid_t)notify_pid, notify_signo,
+					       value);
 			}
 			cancel_point();
 			return 0;
 		}
 		sequence = store->not_full;
 		mq_store_unlock(store);
-		if ((entry->flags & O_NONBLOCK) != 0) { errno = EAGAIN; return -1; }
+		if ((entry->flags & O_NONBLOCK) != 0) {
+			errno = EAGAIN;
+			return -1;
+		}
 		if (absolute != NULL) {
 			if (mq_relative_deadline(absolute, &relative) != 0)
 				return -1;
 			timeout = &relative;
 		}
 		{
-			int error = mq_usync_wait(&store->not_full, sequence, timeout, 1);
+			int error = mq_usync_wait(&store->not_full, sequence,
+						  timeout, 1);
 			if (error != 0 && error != EAGAIN) {
 				if (error == EINTR)
 					cancel_point();
@@ -378,21 +413,32 @@ mq_timedsend(mqd_t descriptor, const char *message, size_t length,
 	}
 }
 
-int mq_send(mqd_t descriptor, const char *message, size_t length,
-	unsigned priority)
-{ return mq_timedsend(descriptor, message, length, priority, NULL); }
+int
+mq_send(mqd_t descriptor, const char *message, size_t length, unsigned priority)
+{
+	return mq_timedsend(descriptor, message, length, priority, NULL);
+}
 
 ssize_t
 mq_timedreceive(mqd_t descriptor, char *message, size_t length,
-	unsigned *priority, const struct timespec *absolute)
+		unsigned *priority, const struct timespec *absolute)
 {
 	struct mq_descriptor *entry = mq_descriptor_get(descriptor);
 	struct mq_store *store;
 	cancel_point();
-	if (entry == NULL || message == NULL) { errno = entry == NULL ? EBADF : EINVAL; return -1; }
-	if ((entry->flags & O_ACCMODE) == O_WRONLY) { errno = EBADF; return -1; }
+	if (entry == NULL || message == NULL) {
+		errno = entry == NULL ? EBADF : EINVAL;
+		return -1;
+	}
+	if ((entry->flags & O_ACCMODE) == O_WRONLY) {
+		errno = EBADF;
+		return -1;
+	}
 	store = entry->store;
-	if (length < store->message_size) { errno = EMSGSIZE; return -1; }
+	if (length < store->message_size) {
+		errno = EMSGSIZE;
+		return -1;
+	}
 	for (;;) {
 		uint32_t sequence, copied;
 		struct timespec relative, *timeout = NULL;
@@ -406,7 +452,8 @@ mq_timedreceive(mqd_t descriptor, char *message, size_t length,
 			for (i = 1; i < store->count; i++)
 				store->slots[i - 1U] = store->slots[i];
 			store->count--;
-			(void)__atomic_add_fetch(&store->not_full, 1, __ATOMIC_RELEASE);
+			(void)__atomic_add_fetch(&store->not_full, 1,
+						 __ATOMIC_RELEASE);
 			mq_store_unlock(store);
 			mq_usync_wake(&store->not_full, 1);
 			cancel_point();
@@ -414,14 +461,18 @@ mq_timedreceive(mqd_t descriptor, char *message, size_t length,
 		}
 		sequence = store->not_empty;
 		mq_store_unlock(store);
-		if ((entry->flags & O_NONBLOCK) != 0) { errno = EAGAIN; return -1; }
+		if ((entry->flags & O_NONBLOCK) != 0) {
+			errno = EAGAIN;
+			return -1;
+		}
 		if (absolute != NULL) {
 			if (mq_relative_deadline(absolute, &relative) != 0)
 				return -1;
 			timeout = &relative;
 		}
 		{
-			int error = mq_usync_wait(&store->not_empty, sequence, timeout, 1);
+			int error = mq_usync_wait(&store->not_empty, sequence,
+						  timeout, 1);
 			if (error != 0 && error != EAGAIN) {
 				if (error == EINTR)
 					cancel_point();
@@ -433,15 +484,20 @@ mq_timedreceive(mqd_t descriptor, char *message, size_t length,
 	}
 }
 
-ssize_t mq_receive(mqd_t descriptor, char *message, size_t length,
-	unsigned *priority)
-{ return mq_timedreceive(descriptor, message, length, priority, NULL); }
+ssize_t
+mq_receive(mqd_t descriptor, char *message, size_t length, unsigned *priority)
+{
+	return mq_timedreceive(descriptor, message, length, priority, NULL);
+}
 
 int
 mq_getattr(mqd_t descriptor, struct mq_attr *attribute)
 {
 	struct mq_descriptor *entry = mq_descriptor_get(descriptor);
-	if (entry == NULL || attribute == NULL) { errno = entry == NULL ? EBADF : EINVAL; return -1; }
+	if (entry == NULL || attribute == NULL) {
+		errno = entry == NULL ? EBADF : EINVAL;
+		return -1;
+	}
 	mq_store_lock(entry->store);
 	attribute->mq_flags = entry->flags & O_NONBLOCK;
 	attribute->mq_maxmsg = entry->store->maximum;
@@ -453,7 +509,7 @@ mq_getattr(mqd_t descriptor, struct mq_attr *attribute)
 
 int
 mq_setattr(mqd_t descriptor, const struct mq_attr *attribute,
-	struct mq_attr *old_attribute)
+	   struct mq_attr *old_attribute)
 {
 	struct mq_descriptor *entry = mq_descriptor_get(descriptor);
 	if (entry == NULL || attribute == NULL ||
@@ -464,7 +520,7 @@ mq_setattr(mqd_t descriptor, const struct mq_attr *attribute,
 	if (old_attribute != NULL && mq_getattr(descriptor, old_attribute) != 0)
 		return -1;
 	entry->flags = (entry->flags & O_ACCMODE) |
-	    ((int)attribute->mq_flags & O_NONBLOCK);
+		       ((int)attribute->mq_flags & O_NONBLOCK);
 	return 0;
 }
 
@@ -477,16 +533,21 @@ mq_notify(mqd_t descriptor, const struct sigevent *notification)
 	int immediate = 0;
 	int kind = SIGEV_NONE, signo = 0;
 	uint64_t value = 0;
-	if (entry == NULL) { errno = EBADF; return -1; }
+	if (entry == NULL) {
+		errno = EBADF;
+		return -1;
+	}
 	if (notification != NULL) {
 		if (notification->sigev_notify != SIGEV_NONE &&
 		    notification->sigev_notify != SIGEV_SIGNAL) {
-			errno = ENOTSUP; return -1;
+			errno = ENOTSUP;
+			return -1;
 		}
 		if (notification->sigev_notify == SIGEV_SIGNAL &&
 		    (notification->sigev_signo <= 0 ||
-		    notification->sigev_signo > SIGRTMAX)) {
-			errno = EINVAL; return -1;
+		     notification->sigev_signo > SIGRTMAX)) {
+			errno = EINVAL;
+			return -1;
 		}
 		kind = notification->sigev_notify;
 		signo = notification->sigev_signo;
@@ -504,11 +565,14 @@ mq_notify(mqd_t descriptor, const struct sigevent *notification)
 		pid_t owner = store->notify_pid;
 		mq_store_unlock(store);
 		if (kill(owner, 0) == 0 || errno != ESRCH) {
-			errno = EBUSY; return -1;
+			errno = EBUSY;
+			return -1;
 		}
 		mq_store_lock(store);
 		if (store->notify_pid != owner && store->notify_pid != 0) {
-			mq_store_unlock(store); errno = EBUSY; return -1;
+			mq_store_unlock(store);
+			errno = EBUSY;
+			return -1;
 		}
 	}
 	store->notify_pid = self;

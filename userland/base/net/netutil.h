@@ -12,7 +12,7 @@ int netutil_ifname(int, uint32_t, char *);
 int netutil_interfaces(int, struct ifreq **, unsigned *);
 int netutil_parse_ipv4(const char *, struct in_addr *);
 int netutil_parse_cidr(const char *, struct in_addr *, struct in_addr *,
-	unsigned *);
+		       unsigned *);
 int netutil_mask_prefix(struct in_addr, unsigned *);
 uint64_t netutil_monotonic_us(void);
 int netutil_parse_milliseconds(const char *, uint32_t *);

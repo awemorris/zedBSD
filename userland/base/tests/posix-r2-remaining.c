@@ -88,38 +88,47 @@ test_unix_vfs(void)
 	strcpy(address.sun_path, "/tmp/r2r.sock");
 	listener = socket(AF_UNIX, SOCK_STREAM, 0);
 	client = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (listener < 0 || client < 0 || bind(listener,
-	    (struct sockaddr *)&address, sizeof(address)) != 0 ||
-	    listen(listener, 1) != 0 || rename("/tmp/r2r.sock",
-	    "/tmp/r2r-renamed.sock") != 0)
+	if (listener < 0 || client < 0 ||
+	    bind(listener, (struct sockaddr *)&address, sizeof(address)) != 0 ||
+	    listen(listener, 1) != 0 ||
+	    rename("/tmp/r2r.sock", "/tmp/r2r-renamed.sock") != 0)
 		goto fail;
 	strcpy(address.sun_path, "/tmp/r2r-renamed.sock");
-	if (connect(client, (struct sockaddr *)&address, sizeof(address)) != 0 ||
+	if (connect(client, (struct sockaddr *)&address, sizeof(address)) !=
+		0 ||
 	    (accepted = accept(listener, NULL, NULL)) < 0 ||
 	    unlink(address.sun_path) != 0 || write(client, "u", 1) != 1 ||
 	    read(accepted, &byte, 1) != 1 || byte != 'u')
 		goto fail;
-	(void)close(accepted); (void)close(client); (void)close(listener);
-	/* Closing does not unlink; the surviving inode is deliberately stale. */
+	(void)close(accepted);
+	(void)close(client);
+	(void)close(listener);
+	/* Closing does not unlink; the surviving inode is deliberately stale.
+	 */
 	listener = socket(AF_UNIX, SOCK_STREAM, 0);
 	stale = socket(AF_UNIX, SOCK_STREAM, 0);
 	strcpy(address.sun_path, "/tmp/r2r.sock");
-	if (listener < 0 || stale < 0 || bind(listener,
-	    (struct sockaddr *)&address, sizeof(address)) != 0 ||
+	if (listener < 0 || stale < 0 ||
+	    bind(listener, (struct sockaddr *)&address, sizeof(address)) != 0 ||
 	    close(listener) != 0)
 		goto fail;
 	listener = -1;
-	if (connect(stale, (struct sockaddr *)&address, sizeof(address)) != -1 ||
+	if (connect(stale, (struct sockaddr *)&address, sizeof(address)) !=
+		-1 ||
 	    errno != ECONNREFUSED || unlink(address.sun_path) != 0)
 		goto fail;
 	(void)close(stale);
 	marker("R2R:02:UNIX-VFS\n");
 	return 0;
 fail:
-	if (accepted >= 0) (void)close(accepted);
-	if (client >= 0) (void)close(client);
-	if (listener >= 0) (void)close(listener);
-	if (stale >= 0) (void)close(stale);
+	if (accepted >= 0)
+		(void)close(accepted);
+	if (client >= 0)
+		(void)close(client);
+	if (listener >= 0)
+		(void)close(listener);
+	if (stale >= 0)
+		(void)close(stale);
 	(void)unlink("/tmp/r2r.sock");
 	(void)unlink("/tmp/r2r-renamed.sock");
 	return failure("unix-vfs");
@@ -137,8 +146,10 @@ send_fd(int socket_fd, int passed_fd, char byte)
 	struct cmsghdr *header;
 	memset(&message, 0, sizeof(message));
 	memset(&control, 0, sizeof(control));
-	vector.iov_base = &byte; vector.iov_len = 1;
-	message.msg_iov = &vector; message.msg_iovlen = 1;
+	vector.iov_base = &byte;
+	vector.iov_len = 1;
+	message.msg_iov = &vector;
+	message.msg_iovlen = 1;
 	message.msg_control = control.bytes;
 	message.msg_controllen = sizeof(control.bytes);
 	header = (struct cmsghdr *)control.bytes;
@@ -151,7 +162,7 @@ send_fd(int socket_fd, int passed_fd, char byte)
 
 static ssize_t
 receive_fd(int socket_fd, int *received, char *byte, void *name,
-	socklen_t name_length)
+	   socklen_t name_length)
 {
 	struct msghdr message;
 	struct iovec vector;
@@ -163,16 +174,20 @@ receive_fd(int socket_fd, int *received, char *byte, void *name,
 	ssize_t result;
 	memset(&message, 0, sizeof(message));
 	memset(&control, 0, sizeof(control));
-	vector.iov_base = byte; vector.iov_len = 1;
-	message.msg_iov = &vector; message.msg_iovlen = 1;
-	message.msg_name = name; message.msg_namelen = name_length;
+	vector.iov_base = byte;
+	vector.iov_len = 1;
+	message.msg_iov = &vector;
+	message.msg_iovlen = 1;
+	message.msg_name = name;
+	message.msg_namelen = name_length;
 	message.msg_control = control.bytes;
 	message.msg_controllen = sizeof(control.bytes);
 	result = recvmsg(socket_fd, &message, 0);
 	if (result < 0)
 		return result;
-	header = message.msg_controllen >= CMSG_LEN(sizeof(int)) ?
-	    (struct cmsghdr *)control.bytes : NULL;
+	header = message.msg_controllen >= CMSG_LEN(sizeof(int))
+		     ? (struct cmsghdr *)control.bytes
+		     : NULL;
 	if (header == NULL || header->cmsg_level != SOL_SOCKET ||
 	    header->cmsg_type != SCM_RIGHTS ||
 	    header->cmsg_len < CMSG_LEN(sizeof(int))) {
@@ -191,30 +206,38 @@ test_scm_rights(void)
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0 || pipe(data) != 0 ||
 	    send_fd(pair[0], data[1], 'm') != 1)
 		return failure("scm-setup");
-	while (fill_count < 32 && (fillers[fill_count] =
-	    open("/tmp", O_RDONLY | O_DIRECTORY)) >= 0)
+	while (fill_count < 32 && (fillers[fill_count] = open(
+				       "/tmp", O_RDONLY | O_DIRECTORY)) >= 0)
 		fill_count++;
-	if (errno != EMFILE || receive_fd(pair[1], &received, &byte,
-	    NULL, 0) != -1 || errno != EMFILE || fill_count == 0)
+	if (errno != EMFILE ||
+	    receive_fd(pair[1], &received, &byte, NULL, 0) != -1 ||
+	    errno != EMFILE || fill_count == 0)
 		return failure("scm-emfile");
 	(void)close(fillers[--fill_count]);
-	if (receive_fd(pair[1], &received, &byte, NULL, 0) != 1 || byte != 'm' ||
-	    write(received, "r", 1) != 1 || read(data[0], &byte, 1) != 1 ||
-	    byte != 'r')
+	if (receive_fd(pair[1], &received, &byte, NULL, 0) != 1 ||
+	    byte != 'm' || write(received, "r", 1) != 1 ||
+	    read(data[0], &byte, 1) != 1 || byte != 'r')
 		return failure("scm-retry");
 	(void)close(received);
-	while (fill_count != 0) (void)close(fillers[--fill_count]);
-	(void)close(data[0]); (void)close(data[1]);
-	(void)close(pair[0]); (void)close(pair[1]);
+	while (fill_count != 0)
+		(void)close(fillers[--fill_count]);
+	(void)close(data[0]);
+	(void)close(data[1]);
+	(void)close(pair[0]);
+	(void)close(pair[1]);
 	/* A copyout fault must also leave a datagram and its rights queued. */
 	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pair) != 0 || pipe(data) != 0 ||
 	    send_fd(pair[0], data[1], 'e') != 1 ||
 	    receive_fd(pair[1], &received, &byte, (void *)(uintptr_t)1,
-	    sizeof(struct sockaddr_un)) != -1 || errno != EFAULT ||
+		       sizeof(struct sockaddr_un)) != -1 ||
+	    errno != EFAULT ||
 	    receive_fd(pair[1], &received, &byte, NULL, 0) != 1 || byte != 'e')
 		return failure("scm-efault");
-	(void)close(received); (void)close(data[0]); (void)close(data[1]);
-	(void)close(pair[0]); (void)close(pair[1]);
+	(void)close(received);
+	(void)close(data[0]);
+	(void)close(data[1]);
+	(void)close(pair[0]);
+	(void)close(pair[1]);
 	marker("R2R:03:SCM-RIGHTS\n");
 	return 0;
 }
@@ -233,7 +256,8 @@ test_fifo(void)
 	    write(writer, "g", 1) != 1 || read(reader, &byte, 1) != 1 ||
 	    byte != 'g')
 		return failure("fifo");
-	(void)close(reader); (void)close(writer);
+	(void)close(reader);
+	(void)close(writer);
 	marker("R2R:04:FIFO\n");
 	return 0;
 }
@@ -246,12 +270,15 @@ test_record_lock(void)
 	int duplicate, fd, status;
 	fd = open("/tmp/r2r-lock", O_CREAT | O_RDWR | O_TRUNC, 0600);
 	memset(&lock, 0, sizeof(lock));
-	lock.l_type = F_WRLCK; lock.l_whence = SEEK_SET; lock.l_len = 1;
+	lock.l_type = F_WRLCK;
+	lock.l_whence = SEEK_SET;
+	lock.l_len = 1;
 	if (fd < 0 || fcntl(fd, F_SETLK, &lock) != 0 || (child = fork()) < 0)
 		return failure("record-lock-setup");
 	if (child == 0) {
 		int result = fcntl(fd, F_SETLK, &lock);
-		_exit(result == -1 && (errno == EAGAIN || errno == EACCES) ? 0 : 1);
+		_exit(result == -1 && (errno == EAGAIN || errno == EACCES) ? 0
+									   : 1);
 	}
 	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
 	    WEXITSTATUS(status) != 0)
@@ -261,9 +288,8 @@ test_record_lock(void)
 		return failure("record-lock-release");
 	lock.l_type = F_WRLCK;
 	lock.l_pid = 0;
-	if (fcntl(fd, F_OFD_SETLK, &lock) != 0 ||
-	    (duplicate = dup(fd)) < 0 || close(fd) != 0 ||
-	    (child = fork()) < 0)
+	if (fcntl(fd, F_OFD_SETLK, &lock) != 0 || (duplicate = dup(fd)) < 0 ||
+	    close(fd) != 0 || (child = fork()) < 0)
 		return failure("ofd-lock-setup");
 	if (child == 0) {
 		int independent;
@@ -272,9 +298,11 @@ test_record_lock(void)
 		if (fcntl(duplicate, F_OFD_SETLK, &lock) != 0)
 			_exit(1);
 		independent = open("/tmp/r2r-lock", O_RDWR);
-		if (independent < 0 || fcntl(independent, F_OFD_GETLK, &query) != 0 ||
+		if (independent < 0 ||
+		    fcntl(independent, F_OFD_GETLK, &query) != 0 ||
 		    query.l_type != F_WRLCK || query.l_pid != -1 ||
-		    fcntl(independent, F_OFD_SETLK, &lock) != -1 || errno != EAGAIN)
+		    fcntl(independent, F_OFD_SETLK, &lock) != -1 ||
+		    errno != EAGAIN)
 			_exit(2);
 		(void)close(independent);
 		_exit(0);
@@ -295,11 +323,12 @@ test_rlimit(void)
 {
 	struct rlimit saved, limited;
 	sighandler_t previous;
-	char bytes[8] = { 0 };
+	char bytes[8] = {0};
 	int fd;
 	if (getrlimit(RLIMIT_NOFILE, &saved) != 0)
 		return failure("rlimit-get");
-	limited = saved; limited.rlim_cur = 3;
+	limited = saved;
+	limited.rlim_cur = 3;
 	if (setrlimit(RLIMIT_NOFILE, &limited) != 0 ||
 	    sysconf(_SC_OPEN_MAX) != 3 ||
 	    (fd = open("/tmp/r2r-limit", O_CREAT | O_RDWR, 0600)) != -1 ||
@@ -316,15 +345,12 @@ test_rlimit(void)
 	fd = open("/tmp/r2r-fsize", O_CREAT | O_TRUNC | O_RDWR, 0600);
 	if (previous == SIG_ERR || fd < 0 ||
 	    setrlimit(RLIMIT_FSIZE, &limited) != 0 ||
-	    write(fd, bytes, sizeof(bytes)) != 4 ||
-	    write(fd, bytes, 1) != -1 || errno != EFBIG ||
-	    ftruncate(fd, 5) != -1 || errno != EFBIG ||
-	    setrlimit(RLIMIT_FSIZE, &saved) != 0 ||
-	    ftruncate(fd, 8) != 0 ||
+	    write(fd, bytes, sizeof(bytes)) != 4 || write(fd, bytes, 1) != -1 ||
+	    errno != EFBIG || ftruncate(fd, 5) != -1 || errno != EFBIG ||
+	    setrlimit(RLIMIT_FSIZE, &saved) != 0 || ftruncate(fd, 8) != 0 ||
 	    setrlimit(RLIMIT_FSIZE, &limited) != 0 ||
 	    pwrite(fd, bytes, sizeof(bytes), 0) != (ssize_t)sizeof(bytes) ||
-	    ftruncate(fd, 6) != 0 ||
-	    ftruncate(fd, 7) != -1 || errno != EFBIG ||
+	    ftruncate(fd, 6) != 0 || ftruncate(fd, 7) != -1 || errno != EFBIG ||
 	    setrlimit(RLIMIT_FSIZE, &saved) != 0 ||
 	    signal(SIGXFSZ, previous) == SIG_ERR)
 		return failure("rlimit-fsize");
@@ -378,8 +404,8 @@ test_integration(void)
 	if (mapping == MAP_FAILED)
 		return failure("integration-shm-map");
 	mapping[0] = 'z';
-	if (mapping[0] != 'z' || munmap(mapping, 4096) != 0 ||
-	    close(fd) != 0 || shm_unlink(name) != 0)
+	if (mapping[0] != 'z' || munmap(mapping, 4096) != 0 || close(fd) != 0 ||
+	    shm_unlink(name) != 0)
 		return failure("integration-shm-lifetime");
 	marker("R2R:08:INTEGRATION\n");
 	return 0;
@@ -388,7 +414,8 @@ test_integration(void)
 static int
 test_new_required_apis(void)
 {
-	char *arguments[] = { (char *)"options", (char *)"-ab", (char *)"value", NULL };
+	char *arguments[] = {(char *)"options", (char *)"-ab", (char *)"value",
+			     NULL};
 	char formatted[32], byte = 0;
 	struct aiocb control;
 	struct dirent **entries = NULL;
@@ -409,7 +436,8 @@ test_new_required_apis(void)
 	if (gmtime_r(&epoch, &calendar) == NULL || calendar.tm_year != 70 ||
 	    calendar.tm_mon != 0 || calendar.tm_mday != 1 ||
 	    calendar.tm_wday != 4 || gmtime_r(&iso_date, &calendar) == NULL ||
-	    strftime(formatted, sizeof(formatted), "%G-W%V-%u", &calendar) != 10 ||
+	    strftime(formatted, sizeof(formatted), "%G-W%V-%u", &calendar) !=
+		10 ||
 	    strcmp(formatted, "2020-W53-5"))
 		return failure("calendar");
 	if (pthread_attr_init(&attributes) != 0 ||
@@ -420,7 +448,8 @@ test_new_required_apis(void)
 	count = scandir("/tmp", &entries, NULL, alphasort);
 	if (count < 0)
 		return failure("scandir");
-	while (count != 0) free(entries[--count]);
+	while (count != 0)
+		free(entries[--count]);
 	free(entries);
 	descriptor = open("/tmp/r2r-aio", O_CREAT | O_TRUNC | O_RDWR, 0600);
 	memset(&control, 0, sizeof(control));
@@ -444,7 +473,8 @@ test_new_required_apis(void)
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0 ||
 	    sockatmark(pair[0]) != 0)
 		return failure("sockatmark");
-	(void)close(pair[0]); (void)close(pair[1]);
+	(void)close(pair[0]);
+	(void)close(pair[1]);
 	if (isatty(0) && (tcgetsid(0) != getsid(0) || tcsendbreak(0, 0) != 0))
 		return failure("terminal-required");
 	descriptor = open("/bin/posix-r2-remaining", O_RDONLY);
@@ -452,10 +482,8 @@ test_new_required_apis(void)
 	if (descriptor < 0 || child < 0)
 		return failure("fexecve-setup");
 	if (child == 0) {
-		char *const exec_arguments[] = {
-			(char *)"posix-r2-remaining",
-			(char *)"--fexec-child", NULL
-		};
+		char *const exec_arguments[] = {(char *)"posix-r2-remaining",
+						(char *)"--fexec-child", NULL};
 		fexecve(descriptor, exec_arguments, environ);
 		_exit(127);
 	}
@@ -483,33 +511,33 @@ test_posix2024_apis(void)
 	int descriptor, flags, pair[2], status;
 	ssize_t count;
 
-	descriptor = open("/tmp/r2r-clofork", O_CREAT | O_TRUNC | O_RDWR,
-	    0600);
+	descriptor = open("/tmp/r2r-clofork", O_CREAT | O_TRUNC | O_RDWR, 0600);
 	if (descriptor < 0 || fcntl(descriptor, F_SETFD, FD_CLOFORK) != 0 ||
 	    (child = fork()) < 0)
 		return failure("clofork-setup");
 	if (child == 0)
-		_exit(fcntl(descriptor, F_GETFD) == -1 && errno == EBADF ? 0 : 1);
+		_exit(fcntl(descriptor, F_GETFD) == -1 && errno == EBADF ? 0
+									 : 1);
 	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
-	    WEXITSTATUS(status) != 0 || fcntl(descriptor, F_GETFD) != FD_CLOFORK ||
-	    close(descriptor) != 0)
+	    WEXITSTATUS(status) != 0 ||
+	    fcntl(descriptor, F_GETFD) != FD_CLOFORK || close(descriptor) != 0)
 		return failure("clofork-fork");
 	(void)unlink("/tmp/r2r-clofork");
 
 	if (pipe2(pair, O_CLOEXEC | O_CLOFORK) != 0 ||
 	    (fcntl(pair[0], F_GETFD) & (FD_CLOEXEC | FD_CLOFORK)) !=
-	    (FD_CLOEXEC | FD_CLOFORK) ||
+		(FD_CLOEXEC | FD_CLOFORK) ||
 	    (fcntl(pair[1], F_GETFD) & (FD_CLOEXEC | FD_CLOFORK)) !=
-	    (FD_CLOEXEC | FD_CLOFORK))
+		(FD_CLOEXEC | FD_CLOFORK))
 		return failure("pipe2-flags");
 	(void)close(pair[0]);
 	(void)close(pair[1]);
 	if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_CLOFORK, 0,
-	    pair) != 0 ||
+		       pair) != 0 ||
 	    (fcntl(pair[0], F_GETFD) & (FD_CLOEXEC | FD_CLOFORK)) !=
-	    (FD_CLOEXEC | FD_CLOFORK) ||
+		(FD_CLOEXEC | FD_CLOFORK) ||
 	    (fcntl(pair[1], F_GETFD) & (FD_CLOEXEC | FD_CLOFORK)) !=
-	    (FD_CLOEXEC | FD_CLOFORK))
+		(FD_CLOEXEC | FD_CLOFORK))
 		return failure("socket-flags");
 	(void)close(pair[0]);
 	(void)close(pair[1]);
@@ -527,20 +555,22 @@ test_posix2024_apis(void)
 	    str2sig(signal_name, &flags) != 0 || flags != SIGTERM)
 		return failure("signal-names");
 
-	descriptor = open("/tmp/r2r-posix-close", O_CREAT | O_TRUNC | O_RDWR,
-	    0600);
+	descriptor =
+	    open("/tmp/r2r-posix-close", O_CREAT | O_TRUNC | O_RDWR, 0600);
 	if (descriptor < 0 || posix_close(descriptor, 1) != EINVAL ||
 	    fcntl(descriptor, F_GETFD) != -1 || errno != EBADF)
 		return failure("posix-close");
 	(void)unlink("/tmp/r2r-posix-close");
 	descriptor = open("/tmp", O_RDONLY | O_DIRECTORY);
-	count = descriptor >= 0 ? posix_getdents(descriptor,
-	    directory_buffer.bytes, sizeof(directory_buffer.bytes), 0) : -1;
+	count = descriptor >= 0
+		    ? posix_getdents(descriptor, directory_buffer.bytes,
+				     sizeof(directory_buffer.bytes), 0)
+		    : -1;
 	if (count <= 0 || close(descriptor) != 0)
 		return failure("posix-getdents");
 
 	shared = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
-	    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+		      MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	if (shared == MAP_FAILED || (child = fork()) < 0)
 		return failure("shared-anonymous-setup");
 	shared[0] = 0;
@@ -572,8 +602,9 @@ atomic_increment(_Atomic(struct atomic_record) *record)
 	do {
 		desired = expected;
 		desired.counter++;
-	} while (!atomic_compare_exchange_weak_explicit(record, &expected,
-	    desired, memory_order_seq_cst, memory_order_relaxed));
+	} while (!atomic_compare_exchange_weak_explicit(
+	    record, &expected, desired, memory_order_seq_cst,
+	    memory_order_relaxed));
 }
 
 static int
@@ -581,14 +612,14 @@ test_generic_atomics(void)
 {
 	_Atomic(struct atomic_record) *record;
 	struct atomic_record expected;
-	struct atomic_record initial = { 0U, 17U, 29U };
-	struct atomic_record wrong = { UINT32_MAX, 0U, 0U };
+	struct atomic_record initial = {0U, 17U, 29U};
+	struct atomic_record wrong = {UINT32_MAX, 0U, 0U};
 	pid_t child;
 	int status;
 	unsigned index;
 
 	record = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
-	    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+		      MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	if (record == MAP_FAILED)
 		return failure("atomic-map");
 	atomic_init(record, initial);
@@ -605,8 +636,8 @@ test_generic_atomics(void)
 	for (index = 0; index < 200U; index++)
 		atomic_increment(record);
 	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
-	    WEXITSTATUS(status) != 0 ||
-	    atomic_load(record).counter != 400U || munmap(record, 4096) != 0)
+	    WEXITSTATUS(status) != 0 || atomic_load(record).counter != 400U ||
+	    munmap(record, 4096) != 0)
 		return failure("atomic-shared");
 	marker("R2R:12:ATOMIC\n");
 	return 0;
@@ -620,7 +651,8 @@ write_test_file(const char *path, const char *contents, mode_t mode)
 	if (descriptor < 0)
 		return -1;
 	while (done < length) {
-		ssize_t count = write(descriptor, contents + done, length - done);
+		ssize_t count =
+		    write(descriptor, contents + done, length - done);
 		if (count <= 0) {
 			(void)close(descriptor);
 			return -1;
@@ -647,7 +679,7 @@ copy_test_executable(const char *source, const char *destination)
 		ssize_t done = 0;
 		while (done < count) {
 			ssize_t written = write(output, buffer + done,
-			    (size_t)(count - done));
+						(size_t)(count - done));
 			if (written <= 0)
 				goto fail;
 			done += written;
@@ -666,8 +698,10 @@ copy_test_executable(const char *source, const char *destination)
 	}
 	return 0;
 fail:
-	if (input >= 0) (void)close(input);
-	if (output >= 0) (void)close(output);
+	if (input >= 0)
+		(void)close(input);
+	if (output >= 0)
+		(void)close(output);
 fail_closed:
 	(void)unlink(destination);
 	return -1;
@@ -686,7 +720,9 @@ wait_exec_status(const char *path, char *const arguments[], int expected)
 		_exit(127);
 	}
 	return waitpid(child, &status, 0) == child && WIFEXITED(status) &&
-	    WEXITSTATUS(status) == expected ? 0 : -1;
+		       WEXITSTATUS(status) == expected
+		   ? 0
+		   : -1;
 }
 
 static int
@@ -705,7 +741,8 @@ wait_setid_mutation(const char *path, int truncate)
 		if (setgid(200) != 0 || setuid(123) != 0)
 			_exit(2);
 		descriptor = open(path, flags);
-		if (descriptor < 0 || (!truncate && write(descriptor, "W", 1) != 1) ||
+		if (descriptor < 0 ||
+		    (!truncate && write(descriptor, "W", 1) != 1) ||
 		    fstat(descriptor, &result) != 0 || close(descriptor) != 0)
 			_exit(3);
 		if ((result.st_mode & (S_ISUID | S_ISGID)) != 0 ||
@@ -714,7 +751,9 @@ wait_setid_mutation(const char *path, int truncate)
 		_exit(0);
 	}
 	return waitpid(child, &status, 0) == child && WIFEXITED(status) &&
-	    WEXITSTATUS(status) == 0 ? 0 : -1;
+		       WEXITSTATUS(status) == 0
+		   ? 0
+		   : -1;
 }
 
 static int
@@ -736,77 +775,85 @@ wait_setid_noop_chown(const char *path)
 		_exit(0);
 	}
 	return waitpid(child, &status, 0) == child && WIFEXITED(status) &&
-	    WEXITSTATUS(status) == 0 ? 0 : -1;
+		       WEXITSTATUS(status) == 0
+		   ? 0
+		   : -1;
 }
 
 static int
 test_exec_scripts(void)
 {
 	static const char *const cleanup[] = {
-		"/tmp/r2r-script", "/tmp/r2r-setid-script",
-		"/tmp/r2r-setid-image", "/tmp/r2r-cycle-a",
-		"/tmp/r2r-cycle-b", "/tmp/r2r-depth-0", "/tmp/r2r-depth-1",
-		"/tmp/r2r-depth-2", "/tmp/r2r-depth-3", "/tmp/r2r-depth-4"
-	};
+	    "/tmp/r2r-script",	"/tmp/r2r-setid-script", "/tmp/r2r-setid-image",
+	    "/tmp/r2r-cycle-a", "/tmp/r2r-cycle-b",	 "/tmp/r2r-depth-0",
+	    "/tmp/r2r-depth-1", "/tmp/r2r-depth-2",	 "/tmp/r2r-depth-3",
+	    "/tmp/r2r-depth-4"};
 	char shebang[96];
-	char *arguments[] = { (char *)"caller-zero", (char *)"tail", NULL };
+	char *arguments[] = {(char *)"caller-zero", (char *)"tail", NULL};
 	unsigned i;
 	int descriptor;
 
 	for (i = 0; i < sizeof(cleanup) / sizeof(cleanup[0]); i++)
 		(void)unlink(cleanup[i]);
 	if (write_test_file("/tmp/r2r-script", "#!/bin/sh\nexit 37\n", 0700) !=
-	    0 || wait_exec_status("/tmp/r2r-script", arguments, 37) != 0)
+		0 ||
+	    wait_exec_status("/tmp/r2r-script", arguments, 37) != 0)
 		return failure("exec-script");
 	descriptor = open("/tmp/r2r-script", O_RDONLY);
 	if (descriptor < 0 || fexecve(descriptor, arguments, environ) != -1 ||
 	    errno != ENOEXEC) {
-		if (descriptor >= 0) (void)close(descriptor);
+		if (descriptor >= 0)
+			(void)close(descriptor);
 		return failure("fexecve-script-path");
 	}
 	(void)close(descriptor);
 
-	if (write_test_file("/tmp/r2r-cycle-a",
-	    "#!/tmp/r2r-cycle-b\n", 0700) != 0 ||
-	    write_test_file("/tmp/r2r-cycle-b",
-	    "#!/tmp/r2r-cycle-a\n", 0700) != 0 ||
+	if (write_test_file("/tmp/r2r-cycle-a", "#!/tmp/r2r-cycle-b\n", 0700) !=
+		0 ||
+	    write_test_file("/tmp/r2r-cycle-b", "#!/tmp/r2r-cycle-a\n", 0700) !=
+		0 ||
 	    execve("/tmp/r2r-cycle-a", arguments, environ) != -1 ||
 	    errno != ELOOP)
 		return failure("exec-script-cycle");
 	for (i = 0; i < 4U; i++) {
 		(void)snprintf(shebang, sizeof(shebang),
-		    "#!/tmp/r2r-depth-%u\n", i + 1U);
+			       "#!/tmp/r2r-depth-%u\n", i + 1U);
 		{
 			char path[32];
-			(void)snprintf(path, sizeof(path), "/tmp/r2r-depth-%u", i);
+			(void)snprintf(path, sizeof(path), "/tmp/r2r-depth-%u",
+				       i);
 			if (write_test_file(path, shebang, 0700) != 0)
 				return failure("exec-script-depth-setup");
 		}
 	}
 	if (write_test_file("/tmp/r2r-depth-4", "#!/bin/sh\nexit 0\n", 0700) !=
-	    0 || wait_exec_status("/tmp/r2r-depth-1", arguments, 0) != 0 ||
+		0 ||
+	    wait_exec_status("/tmp/r2r-depth-1", arguments, 0) != 0 ||
 	    execve("/tmp/r2r-depth-0", arguments, environ) != -1 ||
 	    errno != ELOOP)
 		return failure("exec-script-depth");
 
 	if (geteuid() == 0) {
-		char *setid_arguments[] = {
-			(char *)"setid-image", (char *)"--setid-child", NULL
-		};
+		char *setid_arguments[] = {(char *)"setid-image",
+					   (char *)"--setid-child", NULL};
 		if (copy_test_executable("/bin/posix-r2-remaining",
-		    "/tmp/r2r-setid-image") != 0 ||
+					 "/tmp/r2r-setid-image") != 0 ||
 		    chown("/tmp/r2r-setid-image", 123, 200) != 0 ||
 		    chmod("/tmp/r2r-setid-image", 06755) != 0 ||
-		    wait_exec_status("/tmp/r2r-setid-image", setid_arguments, 0) != 0)
+		    wait_exec_status("/tmp/r2r-setid-image", setid_arguments,
+				     0) != 0)
 			return failure("exec-setid-binary");
 		if (write_test_file("/tmp/r2r-setid-script",
-		    "#!/bin/posix-r2-remaining --setid-script-child extra\n", 0700) !=
-		    0 || chown("/tmp/r2r-setid-script", 123, 200) != 0 ||
+				    "#!/bin/posix-r2-remaining "
+				    "--setid-script-child extra\n",
+				    0700) != 0 ||
+		    chown("/tmp/r2r-setid-script", 123, 200) != 0 ||
 		    chmod("/tmp/r2r-setid-script", 06755) != 0 ||
-		    wait_exec_status("/tmp/r2r-setid-script", arguments, 0) != 0)
+		    wait_exec_status("/tmp/r2r-setid-script", arguments, 0) !=
+			0)
 			return failure("exec-setid-script");
-		/* Both ordinary write and O_TRUNC must remove privilege bits before
-		 * mutating file contents for a non-superuser. */
+		/* Both ordinary write and O_TRUNC must remove privilege bits
+		 * before mutating file contents for a non-superuser. */
 		if (chmod("/tmp/r2r-setid-image", 06755) != 0 ||
 		    wait_setid_mutation("/tmp/r2r-setid-image", 0) != 0 ||
 		    chmod("/tmp/r2r-setid-image", 06755) != 0 ||
@@ -828,10 +875,14 @@ main(int argc, char **argv)
 		return 0;
 	if (argc >= 2 && strcmp(argv[1], "--setid-child") == 0)
 		return getuid() == 0 && geteuid() == 123 && getgid() == 0 &&
-		    getegid() == 200 ? 0 : 1;
+			       getegid() == 200
+			   ? 0
+			   : 1;
 	if (argc >= 2 && strcmp(argv[1], "--setid-script-child extra") == 0)
 		return getuid() == 0 && geteuid() == 0 && getgid() == 0 &&
-		    getegid() == 0 ? 0 : 1;
+			       getegid() == 0
+			   ? 0
+			   : 1;
 	if (test_tmpfs() != 0 || test_unix_vfs() != 0 ||
 	    test_scm_rights() != 0 || test_fifo() != 0 ||
 	    test_record_lock() != 0 || test_rlimit() != 0 ||

@@ -138,14 +138,26 @@ utility, it is part of the milestone even if it is not listed above.
 
 1. Run `git status --short`, `make posix2024-utility-matrix-check`, and
    `make check`; preserve the output as the before-state.
-2. Extend `tools/check-posix-2024-utility-matrix.py` with
+2. Apply the repository `.clang-format` to every tracked C source and header
+   under `userland/` before implementation work begins:
+
+   ```sh
+   git ls-files -z 'userland/**/*.c' 'userland/**/*.h' |
+       xargs -0 clang-format -i
+   ```
+
+   External submodules, vendored sources, and generated build artifacts are
+   not part of this formatting pass. Keep later userland changes formatted,
+   and verify the complete tracked set with `clang-format --dry-run --Werror`
+   at every milestone.
+3. Extend `tools/check-posix-2024-utility-matrix.py` with
    `deferred-stub` as described in section 3.1.
-3. Add a checker assertion that every `reviewed` row has both a real source
+4. Add a checker assertion that every `reviewed` row has both a real source
    file and utility-specific positive and negative test evidence. A common
    test file is valid only when it names and exercises that utility.
-4. Do not modify the ordering or standard URLs in the CSV. Do not rerun the
+5. Do not modify the ordering or standard URLs in the CSV. Do not rerun the
    import script over manually reviewed status/evidence fields.
-5. Keep `_POSIX2_VERSION` and `_XOPEN_VERSION` unchanged throughout this
+6. Keep `_POSIX2_VERSION` and `_XOPEN_VERSION` unchanged throughout this
    plan. The deferred rows intentionally prevent the final Issue 8 gate.
 
 ### Phase 1: install the temporary failure commands
@@ -430,6 +442,12 @@ the wrong ABI or feature flags.
 Every test must have a bounded timeout. A hang, skipped execution, or command
 name that merely exists is not a pass.
 
+Run the amd64 zedBSD runtime layer with `qemu-system-x86_64`. Use a headless,
+non-interactive invocation with captured console output and a bounded timeout;
+the test passes only after all expected completion markers have been observed.
+An interactive `make run` boot or a timeout after partial output is not test
+evidence.
+
 ### 7.2 Per-milestone gate
 
 Run, at minimum:
@@ -445,6 +463,14 @@ make world
 Use the configured platform from `config.mk`. If a test cannot run on the
 selected platform, record it as unverified and run the appropriate platform
 build before changing the matrix status.
+
+Also run the repository formatting check over the complete tracked userland
+source set:
+
+```text
+git ls-files -z 'userland/**/*.c' 'userland/**/*.h' |
+    xargs -0 clang-format --dry-run --Werror
+```
 
 For a row to become `reviewed`, evidence must cover successful behavior,
 required failures/exit statuses, and the Issue 8 semantic delta. Fuzz or

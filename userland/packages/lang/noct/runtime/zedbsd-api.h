@@ -28,8 +28,7 @@ const char *env_get(const struct environment *, const char *);
 int env_set(struct environment *, const char *, const char *);
 int env_unset(struct environment *, const char *);
 size_t env_count(const struct environment *);
-int env_at(const struct environment *, size_t,
-		  const char **, const char **);
+int env_at(const struct environment *, size_t, const char **, const char **);
 
 struct noct_dirent {
 	char name[ZEDBSD_NOCT_PATH_MAX];
@@ -42,7 +41,8 @@ struct noct_services {
 	int (*screen_clear)(void *);
 	int (*screen_clear_row)(void *, unsigned);
 	int (*screen_put)(void *, unsigned, unsigned, const char *, uint8_t);
-	int (*screen_put_utf8)(void *, unsigned, unsigned, const char *, unsigned, uint8_t);
+	int (*screen_put_utf8)(void *, unsigned, unsigned, const char *,
+			       unsigned, uint8_t);
 	int (*screen_clear_to_eol)(void *, unsigned, unsigned);
 	int (*screen_set_cursor)(void *, unsigned, unsigned);
 	int (*screen_show_cursor)(void *, int);
@@ -51,7 +51,8 @@ struct noct_services {
 	int (*clock_second)(void *);
 	int (*file_size)(void *, const char *, uint32_t *);
 	int (*file_read)(void *, const char *, uint32_t, void *, uint32_t);
-	int (*directory_read)(void *, const char *, unsigned, struct noct_dirent *);
+	int (*directory_read)(void *, const char *, unsigned,
+			      struct noct_dirent *);
 };
 struct noct_options {
 	void *arena;

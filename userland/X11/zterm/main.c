@@ -66,11 +66,9 @@ struct terminal {
 };
 
 static const uint32_t ansi_colors[16] = {
-	0x000000, 0xaa0000, 0x00aa00, 0xaa5500,
-	0x0000aa, 0xaa00aa, 0x00aaaa, 0xc0c0c0,
-	0x555555, 0xff5555, 0x55ff55, 0xffff55,
-	0x5555ff, 0xff55ff, 0x55ffff, 0xffffff
-};
+    0x000000, 0xaa0000, 0x00aa00, 0xaa5500, 0x0000aa, 0xaa00aa,
+    0x00aaaa, 0xc0c0c0, 0x555555, 0xff5555, 0x55ff55, 0xffff55,
+    0x5555ff, 0xff55ff, 0x55ffff, 0xffffff};
 
 /* Screen model and X request accounting. */
 
@@ -83,7 +81,8 @@ cell_at(struct terminal *terminal, unsigned column, unsigned row)
 static void
 x_request(struct terminal *terminal)
 {
-	/* Bound the amount of drawing queued while processing large PTY bursts. */
+	/* Bound the amount of drawing queued while processing large PTY bursts.
+	 */
 	if (++terminal->request_budget >= 5) {
 		XSync(terminal->display, False);
 		terminal->request_budget = 0;
@@ -142,7 +141,7 @@ damage_all(struct terminal *terminal)
 
 static void
 erase_range(struct terminal *terminal, unsigned row, unsigned first,
-    unsigned last)
+	    unsigned last)
 {
 	unsigned column;
 
@@ -168,7 +167,8 @@ static void
 scroll_up(struct terminal *terminal)
 {
 	memmove(terminal->cells, terminal->cells + terminal->columns,
-	    (terminal->rows - 1U) * terminal->columns * sizeof(terminal->cells[0]));
+		(terminal->rows - 1U) * terminal->columns *
+		    sizeof(terminal->cells[0]));
 	erase_range(terminal, terminal->rows - 1U, 0, terminal->columns - 1U);
 	damage_all(terminal);
 }
@@ -186,13 +186,13 @@ static int
 wide_codepoint(uint32_t codepoint)
 {
 	return (codepoint >= 0x1100 && codepoint <= 0x115f) ||
-	    codepoint == 0x2329 || codepoint == 0x232a ||
-	    (codepoint >= 0x2e80 && codepoint <= 0xa4cf) ||
-	    (codepoint >= 0xac00 && codepoint <= 0xd7a3) ||
-	    (codepoint >= 0xf900 && codepoint <= 0xfaff) ||
-	    (codepoint >= 0xfe10 && codepoint <= 0xfe6f) ||
-	    (codepoint >= 0xff01 && codepoint <= 0xff60) ||
-	    (codepoint >= 0xffe0 && codepoint <= 0xffe6);
+	       codepoint == 0x2329 || codepoint == 0x232a ||
+	       (codepoint >= 0x2e80 && codepoint <= 0xa4cf) ||
+	       (codepoint >= 0xac00 && codepoint <= 0xd7a3) ||
+	       (codepoint >= 0xf900 && codepoint <= 0xfaff) ||
+	       (codepoint >= 0xfe10 && codepoint <= 0xfe6f) ||
+	       (codepoint >= 0xff01 && codepoint <= 0xff60) ||
+	       (codepoint >= 0xffe0 && codepoint <= 0xffe6);
 }
 
 static void
@@ -208,22 +208,21 @@ put_codepoint(struct terminal *terminal, uint32_t codepoint)
 		terminal->cursor_column = 0;
 		line_feed(terminal);
 	}
-	cell = cell_at(terminal, terminal->cursor_column,
-	    terminal->cursor_row);
+	cell = cell_at(terminal, terminal->cursor_column, terminal->cursor_row);
 	cell->codepoint = codepoint;
 	cell->foreground = terminal->foreground;
 	cell->background = terminal->background;
 	cell->continuation = 0;
 	if (width == 2U) {
 		cell = cell_at(terminal, terminal->cursor_column + 1U,
-		    terminal->cursor_row);
+			       terminal->cursor_row);
 		cell->codepoint = 0;
 		cell->foreground = terminal->foreground;
 		cell->background = terminal->background;
 		cell->continuation = 1;
 	}
 	damage(terminal, terminal->cursor_row, terminal->cursor_column,
-	    terminal->cursor_column + width - 1U);
+	       terminal->cursor_column + width - 1U);
 	terminal->cursor_column += width;
 	if (terminal->cursor_column >= terminal->columns) {
 		terminal->cursor_column = 0;
@@ -253,21 +252,27 @@ csi_dispatch(struct terminal *terminal, unsigned char final)
 	/* Unsupported CSI commands are intentionally ignored. */
 	switch (final) {
 	case 'A':
-		terminal->cursor_row = value > (int)terminal->cursor_row ? 0 :
-		    terminal->cursor_row - (unsigned)value;
+		terminal->cursor_row =
+		    value > (int)terminal->cursor_row
+			? 0
+			: terminal->cursor_row - (unsigned)value;
 		break;
 	case 'B':
 		row = terminal->cursor_row + (unsigned)value;
-		terminal->cursor_row = row < terminal->rows ? row : terminal->rows - 1U;
+		terminal->cursor_row =
+		    row < terminal->rows ? row : terminal->rows - 1U;
 		break;
 	case 'C':
 		column = terminal->cursor_column + (unsigned)value;
-		terminal->cursor_column = column < terminal->columns ? column :
-		    terminal->columns - 1U;
+		terminal->cursor_column = column < terminal->columns
+					      ? column
+					      : terminal->columns - 1U;
 		break;
 	case 'D':
-		terminal->cursor_column = value > (int)terminal->cursor_column ? 0 :
-		    terminal->cursor_column - (unsigned)value;
+		terminal->cursor_column =
+		    value > (int)terminal->cursor_column
+			? 0
+			: terminal->cursor_column - (unsigned)value;
 		break;
 	case 'H':
 	case 'f':
@@ -286,26 +291,32 @@ csi_dispatch(struct terminal *terminal, unsigned char final)
 			terminal->cursor_column = terminal->cursor_row = 0;
 		} else {
 			erase_range(terminal, terminal->cursor_row,
-			    terminal->cursor_column, terminal->columns - 1U);
-			for (row = terminal->cursor_row + 1U; row < terminal->rows; row++)
-				erase_range(terminal, row, 0, terminal->columns - 1U);
+				    terminal->cursor_column,
+				    terminal->columns - 1U);
+			for (row = terminal->cursor_row + 1U;
+			     row < terminal->rows; row++)
+				erase_range(terminal, row, 0,
+					    terminal->columns - 1U);
 		}
 		break;
 	case 'K':
 		value = parameter(terminal, 0, 0);
 		if (value == 1)
 			erase_range(terminal, terminal->cursor_row, 0,
-			    terminal->cursor_column);
+				    terminal->cursor_column);
 		else if (value == 2)
 			erase_range(terminal, terminal->cursor_row, 0,
-			    terminal->columns - 1U);
+				    terminal->columns - 1U);
 		else
 			erase_range(terminal, terminal->cursor_row,
-			    terminal->cursor_column, terminal->columns - 1U);
+				    terminal->cursor_column,
+				    terminal->columns - 1U);
 		break;
 	case 'm':
 		for (i = 0; i <= terminal->parameter_index; i++) {
-			value = terminal->parameters[i] < 0 ? 0 : terminal->parameters[i];
+			value = terminal->parameters[i] < 0
+				    ? 0
+				    : terminal->parameters[i];
 			if (value == 0) {
 				terminal->foreground = 0xdcdde5;
 				terminal->background = 0x000000;
@@ -318,9 +329,11 @@ csi_dispatch(struct terminal *terminal, unsigned char final)
 			else if (value >= 40 && value <= 47)
 				terminal->background = ansi_colors[value - 40];
 			else if (value >= 90 && value <= 97)
-				terminal->foreground = ansi_colors[value - 90 + 8];
+				terminal->foreground =
+				    ansi_colors[value - 90 + 8];
 			else if (value >= 100 && value <= 107)
-				terminal->background = ansi_colors[value - 100 + 8];
+				terminal->background =
+				    ansi_colors[value - 100 + 8];
 			else if (value == 39)
 				terminal->foreground = 0xdcdde5;
 			else if (value == 49)
@@ -364,7 +377,8 @@ utf8_byte(struct terminal *terminal, unsigned char byte)
 	terminal->utf8_value = (terminal->utf8_value << 6) | (byte & 0x3fU);
 	if (--terminal->utf8_remaining == 0) {
 		uint32_t codepoint = terminal->utf8_value;
-		if (codepoint < terminal->utf8_minimum || codepoint > 0x10ffffU ||
+		if (codepoint < terminal->utf8_minimum ||
+		    codepoint > 0x10ffffU ||
 		    (codepoint >= 0xd800U && codepoint <= 0xdfffU))
 			codepoint = 0xfffd;
 		put_codepoint(terminal, codepoint);
@@ -374,7 +388,8 @@ utf8_byte(struct terminal *terminal, unsigned char byte)
 static void
 terminal_byte(struct terminal *terminal, unsigned char byte)
 {
-	/* parser_state: 0 is text, 1 follows ESC, and 2 parses a CSI sequence. */
+	/* parser_state: 0 is text, 1 follows ESC, and 2 parses a CSI sequence.
+	 */
 	if (terminal->parser_state == 1) {
 		terminal->parser_state = 0;
 		if (byte == '[') {
@@ -399,11 +414,13 @@ terminal_byte(struct terminal *terminal, unsigned char byte)
 	}
 	if (terminal->parser_state == 2) {
 		if (byte >= '0' && byte <= '9') {
-			int *value = &terminal->parameters[terminal->parameter_index];
-			if (*value < 0) *value = 0;
+			int *value =
+			    &terminal->parameters[terminal->parameter_index];
+			if (*value < 0)
+				*value = 0;
 			*value = *value * 10 + byte - '0';
 		} else if (byte == ';' &&
-		    terminal->parameter_index + 1 < CSI_PARAMETERS)
+			   terminal->parameter_index + 1 < CSI_PARAMETERS)
 			terminal->parameter_index++;
 		else if (byte == '?')
 			return;
@@ -425,8 +442,8 @@ terminal_byte(struct terminal *terminal, unsigned char byte)
 			terminal->cursor_column--;
 	} else if (byte == '\t') {
 		unsigned next = (terminal->cursor_column + 8U) & ~7U;
-		terminal->cursor_column = next < terminal->columns ? next :
-		    terminal->columns - 1U;
+		terminal->cursor_column =
+		    next < terminal->columns ? next : terminal->columns - 1U;
 	} else if (byte >= 0x20)
 		utf8_byte(terminal, byte);
 }
@@ -441,13 +458,13 @@ terminal_message(struct terminal *terminal, const char *message)
 /* Rendering. */
 
 static void
-draw_row(struct terminal *terminal, unsigned row, unsigned first,
-    unsigned last)
+draw_row(struct terminal *terminal, unsigned row, unsigned first, unsigned last)
 {
 	unsigned column;
 	XChar2b text[MAX_COLUMNS];
 
-	/* Damage touching either half of a wide glyph must repaint both cells. */
+	/* Damage touching either half of a wide glyph must repaint both cells.
+	 */
 	if (first != 0U && cell_at(terminal, first, row)->continuation)
 		first--;
 	if (last + 1U < terminal->columns &&
@@ -457,20 +474,23 @@ draw_row(struct terminal *terminal, unsigned row, unsigned first,
 	XSetForeground(terminal->display, terminal->gc, 0x000000);
 	x_request(terminal);
 	XFillRectangle(terminal->display, terminal->window, terminal->gc,
-	    (int)(first * CELL_WIDTH), (int)(row * CELL_HEIGHT),
-	    (last - first + 1U) * CELL_WIDTH, CELL_HEIGHT);
+		       (int)(first * CELL_WIDTH), (int)(row * CELL_HEIGHT),
+		       (last - first + 1U) * CELL_WIDTH, CELL_HEIGHT);
 	x_request(terminal);
 
 	for (column = first; column <= last;) {
 		unsigned first = column;
-		uint32_t background = cell_at(terminal, column, row)->background;
+		uint32_t background =
+		    cell_at(terminal, column, row)->background;
 		while (column <= last &&
-		    cell_at(terminal, column, row)->background == background)
+		       cell_at(terminal, column, row)->background == background)
 			column++;
 		if (background != 0) {
-			XSetForeground(terminal->display, terminal->gc, background);
+			XSetForeground(terminal->display, terminal->gc,
+				       background);
 			x_request(terminal);
-			XFillRectangle(terminal->display, terminal->window, terminal->gc,
+			XFillRectangle(
+			    terminal->display, terminal->window, terminal->gc,
 			    (int)(first * CELL_WIDTH), (int)(row * CELL_HEIGHT),
 			    (column - first) * CELL_WIDTH, CELL_HEIGHT);
 			x_request(terminal);
@@ -498,11 +518,14 @@ draw_row(struct terminal *terminal, unsigned row, unsigned first,
 		while (scan <= last) {
 			struct cell *cell = cell_at(terminal, scan, row);
 			if (!cell->continuation &&
-			    (cell->codepoint == ' ' || cell->foreground != foreground))
+			    (cell->codepoint == ' ' ||
+			     cell->foreground != foreground))
 				break;
 			if (!cell->continuation) {
-				text[count].byte1 = (unsigned char)(cell->codepoint >> 8);
-				text[count].byte2 = (unsigned char)cell->codepoint;
+				text[count].byte1 =
+				    (unsigned char)(cell->codepoint >> 8);
+				text[count].byte2 =
+				    (unsigned char)cell->codepoint;
 				count++;
 			}
 			scan++;
@@ -510,8 +533,8 @@ draw_row(struct terminal *terminal, unsigned row, unsigned first,
 		XSetForeground(terminal->display, terminal->gc, foreground);
 		x_request(terminal);
 		XDrawString16(terminal->display, terminal->window, terminal->gc,
-		    (int)(first * CELL_WIDTH), (int)((row + 1U) * CELL_HEIGHT),
-		    text, count);
+			      (int)(first * CELL_WIDTH),
+			      (int)((row + 1U) * CELL_HEIGHT), text, count);
 		x_request(terminal);
 		column = scan;
 	}
@@ -523,20 +546,22 @@ redraw(struct terminal *terminal)
 {
 	unsigned row;
 
-	/* First restore the old cursor cell, then draw the cursor at its new site. */
+	/* First restore the old cursor cell, then draw the cursor at its new
+	 * site. */
 	if (terminal->cursor_drawn)
 		damage(terminal, terminal->drawn_cursor_row,
-		    terminal->drawn_cursor_column, terminal->drawn_cursor_column);
+		       terminal->drawn_cursor_column,
+		       terminal->drawn_cursor_column);
 	for (row = 0; row < terminal->rows; row++)
 		if (terminal->dirty[row])
 			draw_row(terminal, row, terminal->dirty_first[row],
-			    terminal->dirty_last[row]);
+				 terminal->dirty_last[row]);
 	XSetForeground(terminal->display, terminal->gc, 0xffffff);
 	x_request(terminal);
 	XFillRectangle(terminal->display, terminal->window, terminal->gc,
-	    (int)(terminal->cursor_column * CELL_WIDTH),
-	    (int)((terminal->cursor_row + 1U) * CELL_HEIGHT - 2U),
-	    CELL_WIDTH, 2);
+		       (int)(terminal->cursor_column * CELL_WIDTH),
+		       (int)((terminal->cursor_row + 1U) * CELL_HEIGHT - 2U),
+		       CELL_WIDTH, 2);
 	x_request(terminal);
 	terminal->drawn_cursor_column = terminal->cursor_column;
 	terminal->drawn_cursor_row = terminal->cursor_row;
@@ -555,23 +580,56 @@ send_key(struct terminal *terminal, XKeyEvent *event)
 	size_t length = 1;
 
 	switch (symbol) {
-	case XK_Up: sequence = "\033[A"; length = 3; break;
-	case XK_Down: sequence = "\033[B"; length = 3; break;
-	case XK_Right: sequence = "\033[C"; length = 3; break;
-	case XK_Left: sequence = "\033[D"; length = 3; break;
-	case XK_Home: sequence = "\033[H"; length = 3; break;
-	case XK_End: sequence = "\033[F"; length = 3; break;
-	case XK_Delete: sequence = "\033[3~"; length = 4; break;
-	case XK_Page_Up: sequence = "\033[5~"; length = 4; break;
-	case XK_Page_Down: sequence = "\033[6~"; length = 4; break;
-	case XK_Return: byte = '\r'; sequence = &byte; break;
-	case XK_BackSpace: byte = 0x7f; sequence = &byte; break;
+	case XK_Up:
+		sequence = "\033[A";
+		length = 3;
+		break;
+	case XK_Down:
+		sequence = "\033[B";
+		length = 3;
+		break;
+	case XK_Right:
+		sequence = "\033[C";
+		length = 3;
+		break;
+	case XK_Left:
+		sequence = "\033[D";
+		length = 3;
+		break;
+	case XK_Home:
+		sequence = "\033[H";
+		length = 3;
+		break;
+	case XK_End:
+		sequence = "\033[F";
+		length = 3;
+		break;
+	case XK_Delete:
+		sequence = "\033[3~";
+		length = 4;
+		break;
+	case XK_Page_Up:
+		sequence = "\033[5~";
+		length = 4;
+		break;
+	case XK_Page_Down:
+		sequence = "\033[6~";
+		length = 4;
+		break;
+	case XK_Return:
+		byte = '\r';
+		sequence = &byte;
+		break;
+	case XK_BackSpace:
+		byte = 0x7f;
+		sequence = &byte;
+		break;
 	default:
 		if (symbol > 0 && symbol < 0x80) {
 			byte = (char)symbol;
 			if ((event->state & ControlMask) != 0 &&
 			    ((byte >= 'a' && byte <= 'z') ||
-			    (byte >= 'A' && byte <= 'Z')))
+			     (byte >= 'A' && byte <= 'Z')))
 				byte = (char)((byte & 0x1f));
 			sequence = &byte;
 		} else
@@ -590,19 +648,25 @@ resize_terminal(struct terminal *terminal, unsigned width, unsigned height)
 	unsigned row, column, copy_columns, copy_rows;
 	struct winsize winsize;
 
-	if (columns == 0) columns = 1;
-	if (rows == 0) rows = 1;
-	if (columns > MAX_COLUMNS) columns = MAX_COLUMNS;
-	if (rows > MAX_ROWS) rows = MAX_ROWS;
+	if (columns == 0)
+		columns = 1;
+	if (rows == 0)
+		rows = 1;
+	if (columns > MAX_COLUMNS)
+		columns = MAX_COLUMNS;
+	if (rows > MAX_ROWS)
+		rows = MAX_ROWS;
 	if (columns == old_columns && rows == old_rows)
 		return 0;
-	/* Preserve the overlapping top-left region and blank newly exposed cells. */
+	/* Preserve the overlapping top-left region and blank newly exposed
+	 * cells. */
 	old = malloc((size_t)old_columns * old_rows * sizeof(*old));
 	if (old == NULL)
 		return -1;
 	memcpy(old, terminal->cells,
-	    (size_t)old_columns * old_rows * sizeof(*old));
-	terminal->columns = columns; terminal->rows = rows;
+	       (size_t)old_columns * old_rows * sizeof(*old));
+	terminal->columns = columns;
+	terminal->rows = rows;
 	for (row = 0; row < rows; row++)
 		for (column = 0; column < columns; column++)
 			blank_cell(terminal, column, row);
@@ -610,10 +674,12 @@ resize_terminal(struct terminal *terminal, unsigned width, unsigned height)
 	copy_rows = rows < old_rows ? rows : old_rows;
 	for (row = 0; row < copy_rows; row++)
 		memcpy(&terminal->cells[row * columns], &old[row * old_columns],
-		    (size_t)copy_columns * sizeof(*old));
+		       (size_t)copy_columns * sizeof(*old));
 	free(old);
-	if (terminal->cursor_column >= columns) terminal->cursor_column = columns - 1U;
-	if (terminal->cursor_row >= rows) terminal->cursor_row = rows - 1U;
+	if (terminal->cursor_column >= columns)
+		terminal->cursor_column = columns - 1U;
+	if (terminal->cursor_row >= rows)
+		terminal->cursor_row = rows - 1U;
 	memset(&winsize, 0, sizeof(winsize));
 	winsize.ws_row = (unsigned short)rows;
 	winsize.ws_col = (unsigned short)columns;
@@ -642,7 +708,7 @@ initialize(struct terminal *terminal)
 		return -1;
 	root = DefaultRootWindow(terminal->display);
 	if (!XGetGeometry(terminal->display, root, &root_return, &x, &y,
-	    &root_width, &root_height, &border, &depth))
+			  &root_width, &root_height, &border, &depth))
 		return -1;
 	width = root_width > 40U ? root_width - 40U : root_width;
 	height = root_height > 80U ? root_height - 80U : root_height;
@@ -650,47 +716,52 @@ initialize(struct terminal *terminal)
 	height = (height / CELL_HEIGHT) * CELL_HEIGHT;
 	terminal->columns = width / CELL_WIDTH;
 	terminal->rows = height / CELL_HEIGHT;
-	if (terminal->columns > MAX_COLUMNS) terminal->columns = MAX_COLUMNS;
-	if (terminal->rows > MAX_ROWS) terminal->rows = MAX_ROWS;
+	if (terminal->columns > MAX_COLUMNS)
+		terminal->columns = MAX_COLUMNS;
+	if (terminal->rows > MAX_ROWS)
+		terminal->rows = MAX_ROWS;
 	width = terminal->columns * CELL_WIDTH;
 	height = terminal->rows * CELL_HEIGHT;
 	clear_screen(terminal);
 	terminal->window = XCreateSimpleWindow(terminal->display, root, 20, 8,
-	    width, height, 0, 0, 0x000000);
+					       width, height, 0, 0, 0x000000);
 	XStoreName(terminal->display, terminal->window, "zterm");
 	XzedSetIconPath(terminal->display, terminal->window,
-	    "/usr/share/zterm/icons/app-icon.xpm");
+			"/usr/share/zterm/icons/app-icon.xpm");
 	terminal->gc = XCreateGC(terminal->display, terminal->window, 0, NULL);
 	terminal->font = XLoadQueryFont(terminal->display, "zed-unicode");
 	if (terminal->font == NULL)
 		return -1;
 	XSetFont(terminal->display, terminal->gc, terminal->font->fid);
 	XSelectInput(terminal->display, terminal->window,
-	    ExposureMask | KeyPressMask | ButtonPressMask | StructureNotifyMask);
+		     ExposureMask | KeyPressMask | ButtonPressMask |
+			 StructureNotifyMask);
 	XMapWindow(terminal->display, terminal->window);
 	XSync(terminal->display, False);
 	memset(&winsize, 0, sizeof(winsize));
 	winsize.ws_row = (unsigned short)terminal->rows;
 	winsize.ws_col = (unsigned short)terminal->columns;
-	/* forkpty supplies both the shell's controlling terminal and our PTY master. */
+	/* forkpty supplies both the shell's controlling terminal and our PTY
+	 * master. */
 	terminal->child = forkpty(&terminal->master, NULL, NULL, &winsize);
 	if (terminal->child < 0) {
 		char message[96];
 		snprintf(message, sizeof(message),
-		    "zterm: cannot start /bin/sh: %s\r\n", strerror(errno));
+			 "zterm: cannot start /bin/sh: %s\r\n",
+			 strerror(errno));
 		terminal_message(terminal, message);
 		damage_all(terminal);
 		return 0;
 	}
 	if (terminal->child == 0) {
-		char *arguments[] = { "/bin/sh", NULL };
+		char *arguments[] = {"/bin/sh", NULL};
 		char message[96];
 		int saved;
 		close(ConnectionNumber(terminal->display));
 		execve(arguments[0], arguments, environ);
 		saved = errno;
 		snprintf(message, sizeof(message),
-		    "zterm: exec /bin/sh: %s\r\n", strerror(saved));
+			 "zterm: exec /bin/sh: %s\r\n", strerror(saved));
 		(void)write(STDERR_FILENO, message, strlen(message));
 		_exit(127);
 	}
@@ -707,7 +778,7 @@ main(void)
 
 	if (initialize(&terminal) != 0) {
 		fprintf(stderr, "zterm: initialization failed: %s\n",
-		    strerror(errno));
+			strerror(errno));
 		return 1;
 	}
 	while (running) {
@@ -716,10 +787,11 @@ main(void)
 		uint8_t input[4096];
 		ssize_t count;
 
-		/* Drive X events and shell output from the same nonblocking loop. */
-		descriptors[0] = (struct pollfd){ ConnectionNumber(terminal.display),
-		    POLLIN, 0 };
-		descriptors[1] = (struct pollfd){ terminal.master, POLLIN, 0 };
+		/* Drive X events and shell output from the same nonblocking
+		 * loop. */
+		descriptors[0] = (struct pollfd){
+		    ConnectionNumber(terminal.display), POLLIN, 0};
+		descriptors[1] = (struct pollfd){terminal.master, POLLIN, 0};
 		result = poll(descriptors, 2, 100);
 		if (result < 0 && errno != EINTR)
 			break;
@@ -746,24 +818,27 @@ main(void)
 				damage_all(&terminal);
 				redraw(&terminal);
 			} else if (event.type == ConfigureNotify) {
-				if (resize_terminal(&terminal,
-				    (unsigned)event.xconfigure.width,
-				    (unsigned)event.xconfigure.height) == 0)
+				if (resize_terminal(
+					&terminal,
+					(unsigned)event.xconfigure.width,
+					(unsigned)event.xconfigure.height) == 0)
 					redraw(&terminal);
 			} else if (event.type == KeyPress)
 				(void)send_key(&terminal, &event.xkey);
 		}
-		if (terminal.child > 0 &&
-		    waitpid(terminal.child, &status, WNOHANG) == terminal.child) {
+		if (terminal.child > 0 && waitpid(terminal.child, &status,
+						  WNOHANG) == terminal.child) {
 			char message[96];
 			if (WIFSIGNALED(status))
 				snprintf(message, sizeof(message),
-				    "\r\nzterm: /bin/sh terminated by signal %d\r\n",
-				    WTERMSIG(status));
+					 "\r\nzterm: /bin/sh terminated by "
+					 "signal %d\r\n",
+					 WTERMSIG(status));
 			else
 				snprintf(message, sizeof(message),
-				    "\r\nzterm: /bin/sh exited (%d)\r\n",
-				    WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+					 "\r\nzterm: /bin/sh exited (%d)\r\n",
+					 WIFEXITED(status) ? WEXITSTATUS(status)
+							   : -1);
 			terminal_message(&terminal, message);
 			redraw(&terminal);
 			close(terminal.master);

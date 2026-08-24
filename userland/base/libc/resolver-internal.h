@@ -30,12 +30,12 @@ struct resolver_config {
 };
 
 int resolver_dns_build_query(uint8_t *, size_t, uint16_t, const char *,
-	uint16_t, size_t *);
+			     uint16_t, size_t *);
 int resolver_dns_parse(const uint8_t *, size_t, uint16_t, const char *,
-	uint16_t, struct resolver_result *, int *);
+		       uint16_t, struct resolver_result *, int *);
 int resolver_load_config(struct resolver_config *);
 int resolver_query_server(const char *, uint16_t, const struct in_addr *,
-	uint16_t, struct resolver_result *);
+			  uint16_t, struct resolver_result *);
 int resolver_query(const char *, uint16_t, struct resolver_result *);
 
 #endif

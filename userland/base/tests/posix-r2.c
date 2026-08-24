@@ -49,11 +49,24 @@ static volatile unsigned timer_callback_bits;
 static char pty_stress_input[PTY_STRESS_SIZE];
 static char pty_stress_output[PTY_STRESS_SIZE];
 
-static void atfork_prepare(void) { atfork_prepare_called++; }
-static void atfork_parent(void) { atfork_parent_called++; }
-static void atfork_child(void) { atfork_child_called++; }
+static void
+atfork_prepare(void)
+{
+	atfork_prepare_called++;
+}
+static void
+atfork_parent(void)
+{
+	atfork_parent_called++;
+}
+static void
+atfork_child(void)
+{
+	atfork_child_called++;
+}
 
-static void *detached_worker(void *argument)
+static void *
+detached_worker(void *argument)
 {
 	(void)argument;
 	(void)sem_post(&detached_ready);
@@ -64,10 +77,11 @@ static void
 thread_timer_callback(union sigval value)
 {
 	__atomic_store_n(&timer_callback_value, value.sival_int,
-	    __ATOMIC_RELEASE);
+			 __ATOMIC_RELEASE);
 	if (value.sival_int > 0 && value.sival_int < 32)
 		(void)__atomic_fetch_or(&timer_callback_bits,
-		    1U << (unsigned)value.sival_int, __ATOMIC_RELEASE);
+					1U << (unsigned)value.sival_int,
+					__ATOMIC_RELEASE);
 	(void)sem_post(&timer_ready);
 }
 
@@ -78,22 +92,23 @@ public_realtime_handler(int signo)
 }
 
 static int
-same_signal_action(const struct sigaction *left,
-	const struct sigaction *right)
+same_signal_action(const struct sigaction *left, const struct sigaction *right)
 {
 	return left->sa_handler == right->sa_handler &&
-	    left->sa_mask == right->sa_mask &&
-	    left->sa_flags == right->sa_flags &&
-	    left->sa_restorer == right->sa_restorer;
+	       left->sa_mask == right->sa_mask &&
+	       left->sa_flags == right->sa_flags &&
+	       left->sa_restorer == right->sa_restorer;
 }
 
-static void cancel_cleanup(void *argument)
+static void
+cancel_cleanup(void *argument)
 {
 	(void)argument;
 	cleanup_called = 1;
 }
 
-static void *cancel_worker(void *argument)
+static void *
+cancel_worker(void *argument)
 {
 	(void)argument;
 	pthread_cleanup_push(cancel_cleanup, NULL);
@@ -102,7 +117,8 @@ static void *cancel_worker(void *argument)
 	return NULL;
 }
 
-static int fail(const char *name)
+static int
+fail(const char *name)
 {
 	(void)write(2, "POSIX_R2_FAIL: ", 15);
 	(void)write(2, name, strlen(name));
@@ -110,7 +126,8 @@ static int fail(const char *name)
 	return 1;
 }
 
-static int fail_errno(const char *name)
+static int
+fail_errno(const char *name)
 {
 	char digits[4];
 	unsigned value = (unsigned)errno;
@@ -138,7 +155,7 @@ test_pty_line_discipline(int master, int slave)
 	int master_flags, slave_flags;
 	int status;
 	pid_t child;
-	struct timespec interbyte = { 0, 300000000L };
+	struct timespec interbyte = {0, 300000000L};
 
 	if (tcgetattr(slave, &saved) != 0)
 		return fail_errno("pty-termios-get");
@@ -152,7 +169,8 @@ test_pty_line_discipline(int master, int slave)
 	if (tcsetattr(slave, TCSANOW, &settings) != 0)
 		return fail_errno("pty-termios-set");
 
-	/* IEXTEN word erase and literal-next are shared by console and PTY input. */
+	/* IEXTEN word erase and literal-next are shared by console and PTY
+	 * input. */
 	memcpy(input, "ab cd", 5);
 	input[5] = settings.c_cc[VWERASE];
 	input[6] = 'x';
@@ -173,8 +191,7 @@ test_pty_line_discipline(int master, int slave)
 	settings.c_lflag &= ~ICANON;
 	settings.c_cc[VMIN] = 3;
 	settings.c_cc[VTIME] = 5;
-	if (tcsetattr(slave, TCSANOW, &settings) != 0 ||
-	    (child = fork()) < 0)
+	if (tcsetattr(slave, TCSANOW, &settings) != 0 || (child = fork()) < 0)
 		return fail_errno("pty-vmin-vtime-setup");
 	if (child == 0) {
 		if (write(master, "1", 1) != 1 ||
@@ -221,7 +238,8 @@ test_pty_line_discipline(int master, int slave)
 	return 0;
 }
 
-static void *worker(void *argument)
+static void *
+worker(void *argument)
 {
 	(void)argument;
 	if (pthread_mutex_lock(&mutex) != 0)
@@ -241,7 +259,8 @@ static void *worker(void *argument)
 	return (void *)7;
 }
 
-static void *locale_worker(void *argument)
+static void *
+locale_worker(void *argument)
 {
 	locale_t locale = argument;
 	if (uselocale(locale) == NULL || MB_CUR_MAX != 1U)
@@ -249,11 +268,12 @@ static void *locale_worker(void *argument)
 	return (void *)0;
 }
 
-int main(void)
+int
+main(void)
 {
-	char *exec_argv[] = { "/bin/sh", NULL };
-	char *exec_envp[] = { "R2_EXEC_FINAL=1", NULL };
-	char *spawn_envp[] = { "R2_SPAWN_CHILD=1", NULL };
+	char *exec_argv[] = {"/bin/sh", NULL};
+	char *exec_envp[] = {"R2_EXEC_FINAL=1", NULL};
+	char *spawn_envp[] = {"R2_SPAWN_CHILD=1", NULL};
 	pthread_t thread;
 	pthread_attr_t detached_attributes;
 	pthread_attr_t timer_attributes;
@@ -283,7 +303,7 @@ int main(void)
 	struct iovec file_vectors[2];
 	struct utsname uts;
 	struct timespec now;
-	struct timespec signal_timeout = { 1, 0 };
+	struct timespec signal_timeout = {1, 0};
 	struct rlimit saved_limit, small_limit;
 	struct statvfs filesystem_status, descriptor_status;
 	struct flock file_lock;
@@ -346,9 +366,10 @@ int main(void)
 		return fail("pthread_cancel");
 	if (pthread_attr_init(&detached_attributes) != 0 ||
 	    pthread_attr_setdetachstate(&detached_attributes,
-	    PTHREAD_CREATE_DETACHED) != 0 ||
-	    pthread_create(&thread, &detached_attributes,
-	    detached_worker, NULL) != 0 || sem_wait(&detached_ready) != 0)
+					PTHREAD_CREATE_DETACHED) != 0 ||
+	    pthread_create(&thread, &detached_attributes, detached_worker,
+			   NULL) != 0 ||
+	    sem_wait(&detached_ready) != 0)
 		return fail("pthread_detach");
 	(void)pthread_attr_destroy(&detached_attributes);
 	if (pthread_atfork(atfork_prepare, atfork_parent, atfork_child) != 0)
@@ -358,29 +379,34 @@ int main(void)
 		return fail_errno("pthread-fork");
 	if (child == 0)
 		_exit(atfork_prepare_called == 1 && atfork_child_called == 1 &&
-		    atfork_parent_called == 0 ? 0 : 41);
+			      atfork_parent_called == 0
+			  ? 0
+			  : 41);
 	memset(&child_information, 0, sizeof(child_information));
 	if (waitid(P_PID, (id_t)child, &child_information, WEXITED) != 0 ||
 	    child_information.si_pid != child ||
 	    child_information.si_code != CLD_EXITED ||
-	    child_information.si_status != 0 ||
-	    atfork_prepare_called != 1 || atfork_parent_called != 1 ||
-	    atfork_child_called != 0)
+	    child_information.si_status != 0 || atfork_prepare_called != 1 ||
+	    atfork_parent_called != 1 || atfork_child_called != 0)
 		return fail("pthread-atfork");
 	if (pipe(pipefd) != 0)
 		return fail("pipe");
-	event.fd = pipefd[0]; event.events = POLLIN; event.revents = 0;
+	event.fd = pipefd[0];
+	event.events = POLLIN;
+	event.revents = 0;
 	poll_result = poll(&event, 1, 0);
 	if (poll_result < 0)
 		return fail_errno("poll-empty-error");
 	if (poll_result != 0)
-		return fail((event.revents & POLLHUP) != 0 ?
-		    "poll-empty-hup" : "poll-empty-ready");
+		return fail((event.revents & POLLHUP) != 0
+				? "poll-empty-hup"
+				: "poll-empty-ready");
 	if (write(pipefd[1], "p", 1) != 1 || poll(&event, 1, 1000) != 1 ||
 	    (event.revents & POLLIN) == 0 || read(pipefd[0], &byte, 1) != 1 ||
 	    byte != 'p')
 		return fail("poll-pipe");
-	(void)close(pipefd[0]); (void)close(pipefd[1]);
+	(void)close(pipefd[0]);
+	(void)close(pipefd[1]);
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0)
 		return fail("socketpair");
 	if (send(pair[0], "u", 1, 0) != 1 || recv(pair[1], &byte, 1, 0) != 1 ||
@@ -388,31 +414,33 @@ int main(void)
 		return fail("unix-stream");
 	option_length = sizeof(option_value);
 	if (getsockopt(pair[0], SOL_SOCKET, SO_SNDBUF, &option_value,
-	    &option_length) != 0 || option_length != sizeof(option_value) ||
-	    option_value != 65536)
+		       &option_length) != 0 ||
+	    option_length != sizeof(option_value) || option_value != 65536)
 		return fail_errno("unix-stream-default-sndbuf");
 	option_length = sizeof(option_value);
 	if (getsockopt(pair[1], SOL_SOCKET, SO_RCVBUF, &option_value,
-	    &option_length) != 0 || option_length != sizeof(option_value) ||
-	    option_value != 65536)
+		       &option_length) != 0 ||
+	    option_length != sizeof(option_value) || option_value != 65536)
 		return fail_errno("unix-stream-default-rcvbuf");
 	option_value = 4096;
 	if (setsockopt(pair[0], SOL_SOCKET, SO_SNDBUF, &option_value,
-	    sizeof(option_value)) != 0)
+		       sizeof(option_value)) != 0)
 		return fail_errno("unix-stream-set-sndbuf");
 	option_value = 0;
 	option_length = sizeof(option_value);
 	if (getsockopt(pair[0], SOL_SOCKET, SO_SNDBUF, &option_value,
-	    &option_length) != 0 || option_value != 4096)
+		       &option_length) != 0 ||
+	    option_value != 4096)
 		return fail_errno("unix-stream-get-sndbuf");
 	option_value = 65536;
 	if (setsockopt(pair[0], SOL_SOCKET, SO_SNDBUF, &option_value,
-	    sizeof(option_value)) != 0)
+		       sizeof(option_value)) != 0)
 		return fail_errno("unix-stream-restore-sndbuf");
 	option_value = 1;
 	errno = 0;
 	if (setsockopt(pair[0], SOL_SOCKET, SO_RCVBUF, &option_value,
-	    sizeof(option_value)) != -1 || errno != EINVAL)
+		       sizeof(option_value)) != -1 ||
+	    errno != EINVAL)
 		return fail("unix-stream-invalid-rcvbuf");
 	for (stream_index = 0; stream_index < 16; stream_index++)
 		if (send(pair[0], "w", 1, 0) != 1)
@@ -420,12 +448,12 @@ int main(void)
 	if (recv(pair[1], stream_readback, 16, MSG_WAITALL) != 16)
 		return fail_errno("unix-stream-many-writes-receive");
 	for (stream_index = 0; stream_index < sizeof(stream_buffer);
-	    stream_index++)
+	     stream_index++)
 		stream_buffer[stream_index] = (char)(stream_index * 29U + 7U);
 	if (send(pair[0], stream_buffer, sizeof(stream_buffer), 0) !=
-	    (ssize_t)sizeof(stream_buffer) ||
-	    recv(pair[1], stream_readback, sizeof(stream_readback), MSG_WAITALL) !=
-	    (ssize_t)sizeof(stream_readback) ||
+		(ssize_t)sizeof(stream_buffer) ||
+	    recv(pair[1], stream_readback, sizeof(stream_readback),
+		 MSG_WAITALL) != (ssize_t)sizeof(stream_readback) ||
 	    memcmp(stream_buffer, stream_readback, sizeof(stream_buffer)) != 0)
 		return fail_errno("unix-stream-fragmentation");
 	saved_flags = fcntl(pair[0], F_GETFL, 0);
@@ -447,7 +475,9 @@ int main(void)
 	errno = 0;
 	if (send(pair[0], "x", 1, 0) != -1 || errno != EAGAIN)
 		return fail("unix-stream-full-eagain");
-	event.fd = pair[0]; event.events = POLLOUT; event.revents = 0;
+	event.fd = pair[0];
+	event.events = POLLOUT;
+	event.revents = 0;
 	if (poll(&event, 1, 0) != 0)
 		return fail("unix-stream-full-poll");
 	if (recv(pair[1], &byte, 1, 0) != 1)
@@ -458,8 +488,8 @@ int main(void)
 	(void)close(pair[0]);
 	stream_drained = 1;
 	for (;;) {
-		ssize_t received = recv(pair[1], stream_readback,
-		    sizeof(stream_readback), 0);
+		ssize_t received =
+		    recv(pair[1], stream_readback, sizeof(stream_readback), 0);
 
 		if (received < 0)
 			return fail_errno("unix-stream-drain");
@@ -486,7 +516,7 @@ int main(void)
 	((struct cmsghdr *)control.bytes)->cmsg_type = SCM_RIGHTS;
 	((struct cmsghdr *)control.bytes)->cmsg_len = CMSG_LEN(sizeof(int));
 	memcpy(CMSG_DATA((struct cmsghdr *)control.bytes), &rights_pipe[1],
-	    sizeof(int));
+	       sizeof(int));
 	if (sendmsg(pair[0], &message, 0) != 1)
 		return fail_errno("unix-rights-send");
 	(void)close(rights_pipe[1]);
@@ -504,17 +534,20 @@ int main(void)
 	    ((struct cmsghdr *)control.bytes)->cmsg_type != SCM_RIGHTS)
 		return fail_errno("unix-rights-receive");
 	memcpy(&received_fd, CMSG_DATA((struct cmsghdr *)control.bytes),
-	    sizeof(received_fd));
+	       sizeof(received_fd));
 	if (write(received_fd, "r", 1) != 1 ||
 	    read(rights_pipe[0], &byte, 1) != 1 || byte != 'r')
 		return fail_errno("unix-rights-use");
-	(void)close(received_fd); (void)close(rights_pipe[0]);
-	(void)close(pair[0]); (void)close(pair[1]);
+	(void)close(received_fd);
+	(void)close(rights_pipe[0]);
+	(void)close(pair[0]);
+	(void)close(pair[1]);
 	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pair) != 0 ||
-	    send(pair[0], "d", 1, 0) != 1 ||
-	    recv(pair[1], &byte, 1, 0) != 1 || byte != 'd')
+	    send(pair[0], "d", 1, 0) != 1 || recv(pair[1], &byte, 1, 0) != 1 ||
+	    byte != 'd')
 		return fail_errno("unix-dgram-pair");
-	(void)close(pair[0]); (void)close(pair[1]);
+	(void)close(pair[0]);
+	(void)close(pair[1]);
 	memset(&local, 0, sizeof(local));
 	local.sun_family = AF_UNIX;
 	strcpy(local.sun_path, "/tmp/posix-r2.sock");
@@ -530,7 +563,9 @@ int main(void)
 	if (write(client, "s", 1) != 1 || read(accepted, &byte, 1) != 1 ||
 	    byte != 's')
 		return fail_errno("unix-accept-stream");
-	(void)close(accepted); (void)close(client); (void)close(listener);
+	(void)close(accepted);
+	(void)close(client);
+	(void)close(listener);
 	(void)unlink(local.sun_path);
 	memset(&local, 0, sizeof(local));
 	local.sun_family = AF_UNIX;
@@ -539,12 +574,14 @@ int main(void)
 	datagram_server = socket(AF_UNIX, SOCK_DGRAM, 0);
 	datagram_client = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (datagram_server < 0 || datagram_client < 0 ||
-	    bind(datagram_server, (struct sockaddr *)&local, sizeof(local)) != 0 ||
-	    sendto(datagram_client, "g", 1, 0,
-	    (struct sockaddr *)&local, sizeof(local)) != 1 ||
+	    bind(datagram_server, (struct sockaddr *)&local, sizeof(local)) !=
+		0 ||
+	    sendto(datagram_client, "g", 1, 0, (struct sockaddr *)&local,
+		   sizeof(local)) != 1 ||
 	    recv(datagram_server, &byte, 1, 0) != 1 || byte != 'g')
 		return fail_errno("unix-dgram-path");
-	(void)close(datagram_client); (void)close(datagram_server);
+	(void)close(datagram_client);
+	(void)close(datagram_server);
 	(void)unlink(local.sun_path);
 	(void)mq_unlink("/posix-r2");
 	queue = mq_open("/posix-r2", O_CREAT | O_EXCL | O_RDWR, 0600, NULL);
@@ -560,9 +597,11 @@ int main(void)
 	notification.sigev_value.sival_int = 73;
 	if (mq_notify(queue, &notification) != 0 ||
 	    mq_send(queue, "mq", 2, 7) != 0 ||
-	    sigtimedwait(&notify_set, &notify_info, &signal_timeout) != SIGUSR1 ||
+	    sigtimedwait(&notify_set, &notify_info, &signal_timeout) !=
+		SIGUSR1 ||
 	    notify_info.si_value.sival_int != 73 ||
-	    mq_receive(queue, mq_buffer, sizeof(mq_buffer), &mq_priority) != 2 ||
+	    mq_receive(queue, mq_buffer, sizeof(mq_buffer), &mq_priority) !=
+		2 ||
 	    mq_buffer[0] != 'm' || mq_buffer[1] != 'q' || mq_priority != 7)
 		return fail_errno("mqueue");
 	(void)pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
@@ -581,7 +620,8 @@ int main(void)
 	(void)readdir(directory);
 	(void)closedir(directory);
 	regular_fd = creat("/tmp/posix-r2-file", 0600);
-	if (regular_fd < 0) return fail_errno("conformance-creat");
+	if (regular_fd < 0)
+		return fail_errno("conformance-creat");
 	(void)close(regular_fd);
 	regular_fd = open("/tmp/posix-r2-file", O_RDWR);
 	file_vectors[0].iov_base = (void *)"ab";
@@ -621,8 +661,10 @@ int main(void)
 		return fail_errno("process-timer-create");
 	if (timer_settime(process_timer, 0, &timer_value, NULL) != 0)
 		return fail_errno("process-timer-settime");
-	if (sigtimedwait(&notify_set, &notify_info, &signal_timeout) != SIGALRM ||
-	    notify_info.si_code != SI_TIMER || notify_info.si_value.sival_int != 91)
+	if (sigtimedwait(&notify_set, &notify_info, &signal_timeout) !=
+		SIGALRM ||
+	    notify_info.si_code != SI_TIMER ||
+	    notify_info.si_value.sival_int != 91)
 		return fail_errno("process-timer-signal");
 	if (timer_gettime(process_timer, &timer_current) != 0 ||
 	    timer_current.it_value.tv_sec != 0 ||
@@ -652,25 +694,28 @@ int main(void)
 	for (realtime_offset = 7; realtime_offset >= 0; realtime_offset--)
 		for (realtime_round = 0; realtime_round < 2; realtime_round++) {
 			union sigval queued;
-			queued.sival_int = realtime_offset * 10 + realtime_round;
+			queued.sival_int =
+			    realtime_offset * 10 + realtime_round;
 			if (sigqueue(getpid(), SIGRTMIN + realtime_offset,
-			    queued) != 0)
+				     queued) != 0)
 				return fail_errno("realtime-signal-queue");
 		}
 	for (realtime_offset = 0; realtime_offset < 8; realtime_offset++)
 		for (realtime_round = 0; realtime_round < 2; realtime_round++) {
 			memset(&notify_info, 0, sizeof(notify_info));
 			if (sigtimedwait(&realtime_set, &notify_info,
-			    &signal_timeout) != SIGRTMIN + realtime_offset ||
+					 &signal_timeout) !=
+				SIGRTMIN + realtime_offset ||
 			    notify_info.si_code != SI_QUEUE ||
 			    notify_info.si_value.sival_int !=
-			    realtime_offset * 10 + realtime_round)
+				realtime_offset * 10 + realtime_round)
 				return fail_errno("realtime-signal-fifo");
 		}
 	(void)pthread_sigmask(SIG_SETMASK, &realtime_old_mask, NULL);
 
-	/* SIGEV_THREAD uses a libc-private number, never the public RT upper end.
-	 * Preserve an application disposition and mask across all lifecycle paths. */
+	/* SIGEV_THREAD uses a libc-private number, never the public RT upper
+	 * end. Preserve an application disposition and mask across all
+	 * lifecycle paths. */
 	memset(&public_top_install, 0, sizeof(public_top_install));
 	public_top_install.sa_handler =
 	    (uint64_t)(uintptr_t)public_realtime_handler;
@@ -681,14 +726,14 @@ int main(void)
 		return fail_errno("thread-timer-public-action-setup");
 	(void)sigemptyset(&public_top_set);
 	(void)sigaddset(&public_top_set, SIGRTMAX);
-	if (pthread_sigmask(SIG_BLOCK, &public_top_set,
-	    &public_top_old_mask) != 0 ||
-	    pthread_sigmask(SIG_SETMASK, NULL,
-	    &public_top_expected_mask) != 0)
+	if (pthread_sigmask(SIG_BLOCK, &public_top_set, &public_top_old_mask) !=
+		0 ||
+	    pthread_sigmask(SIG_SETMASK, NULL, &public_top_expected_mask) != 0)
 		return fail("thread-timer-public-mask-setup");
 
 	/* SIGEV_THREAD is backed by a kernel SIGEV_SIGNAL timer, but all unsafe
-	 * work is performed by libc's worker before this detached callback runs. */
+	 * work is performed by libc's worker before this detached callback
+	 * runs. */
 	if (pthread_attr_init(&timer_attributes) != 0 ||
 	    pthread_attr_setguardsize(&timer_attributes, 8192U) != 0)
 		return fail("thread-timer-attributes");
@@ -704,7 +749,8 @@ int main(void)
 	    timer_settime(process_timer, 0, &timer_value, NULL) != 0)
 		return fail_errno("thread-timer-create");
 	if (sigaction(SIGRTMAX, NULL, &public_top_observed) != 0 ||
-	    pthread_sigmask(SIG_SETMASK, NULL, &public_top_observed_mask) != 0 ||
+	    pthread_sigmask(SIG_SETMASK, NULL, &public_top_observed_mask) !=
+		0 ||
 	    !same_signal_action(&public_top_observed, &public_top_expected) ||
 	    public_top_observed_mask != public_top_expected_mask)
 		return fail("thread-timer-public-state-create");
@@ -718,16 +764,18 @@ int main(void)
 	    timer_delete(process_timer) != 0)
 		return fail_errno("thread-timer-callback");
 	if (sigaction(SIGRTMAX, NULL, &public_top_observed) != 0 ||
-	    pthread_sigmask(SIG_SETMASK, NULL, &public_top_observed_mask) != 0 ||
+	    pthread_sigmask(SIG_SETMASK, NULL, &public_top_observed_mask) !=
+		0 ||
 	    !same_signal_action(&public_top_observed, &public_top_expected) ||
 	    public_top_observed_mask != public_top_expected_mask)
 		return fail("thread-timer-public-state-delete");
 	errno = 0;
-	if (timer_gettime(process_timer, &timer_current) != -1 || errno != EINVAL)
+	if (timer_gettime(process_timer, &timer_current) != -1 ||
+	    errno != EINVAL)
 		return fail("thread-timer-stale-id");
 
-	/* Independent slots retain their callback values and each expiration gets
-	 * a newly-created detached thread. */
+	/* Independent slots retain their callback values and each expiration
+	 * gets a newly-created detached thread. */
 	__atomic_store_n(&timer_callback_bits, 0, __ATOMIC_RELEASE);
 	notification.sigev_value.sival_int = 1;
 	if (timer_create(CLOCK_MONOTONIC, &notification, &process_timer) != 0)
@@ -743,9 +791,8 @@ int main(void)
 	if (sem_timedwait(&timer_ready, &now) != 0 ||
 	    sem_timedwait(&timer_ready, &now) != 0 ||
 	    __atomic_load_n(&timer_callback_bits, __ATOMIC_ACQUIRE) !=
-	    ((1U << 1) | (1U << 2)) ||
-	    timer_delete(process_timer) != 0 ||
-	    timer_delete(second_timer) != 0)
+		((1U << 1) | (1U << 2)) ||
+	    timer_delete(process_timer) != 0 || timer_delete(second_timer) != 0)
 		return fail_errno("thread-timer-multiple-callback");
 
 	/* A libc timer handle must become invalid in the child while remaining
@@ -759,13 +806,17 @@ int main(void)
 	if (child == 0) {
 		errno = 0;
 		_exit(timer_gettime(process_timer, &timer_current) == -1 &&
-		    errno == EINVAL &&
-		    sigaction(SIGRTMAX, NULL, &public_top_observed) == 0 &&
-		    pthread_sigmask(SIG_SETMASK, NULL,
-		    &public_top_observed_mask) == 0 &&
-		    same_signal_action(&public_top_observed,
-		    &public_top_expected) &&
-		    public_top_observed_mask == public_top_expected_mask ? 0 : 46);
+			      errno == EINVAL &&
+			      sigaction(SIGRTMAX, NULL, &public_top_observed) ==
+				  0 &&
+			      pthread_sigmask(SIG_SETMASK, NULL,
+					      &public_top_observed_mask) == 0 &&
+			      same_signal_action(&public_top_observed,
+						 &public_top_expected) &&
+			      public_top_observed_mask ==
+				  public_top_expected_mask
+			  ? 0
+			  : 46);
 	}
 	if (waitpid(child, &child_status, 0) != child ||
 	    !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0 ||
@@ -773,7 +824,8 @@ int main(void)
 	    timer_delete(process_timer) != 0)
 		return fail_errno("thread-timer-fork");
 	if (sigaction(SIGRTMAX, NULL, &public_top_observed) != 0 ||
-	    pthread_sigmask(SIG_SETMASK, NULL, &public_top_observed_mask) != 0 ||
+	    pthread_sigmask(SIG_SETMASK, NULL, &public_top_observed_mask) !=
+		0 ||
 	    !same_signal_action(&public_top_observed, &public_top_expected) ||
 	    public_top_observed_mask != public_top_expected_mask)
 		return fail("thread-timer-public-state-fork");
@@ -789,7 +841,8 @@ int main(void)
 	    filesystem_status.f_blocks == 0 || filesystem_status.f_bfree == 0)
 		return fail_errno("mount-tmpfs");
 	directory_fd = open("/mnt", O_RDONLY | O_DIRECTORY);
-	if (directory_fd < 0 || fstatvfs(directory_fd, &descriptor_status) != 0 ||
+	if (directory_fd < 0 ||
+	    fstatvfs(directory_fd, &descriptor_status) != 0 ||
 	    descriptor_status.f_bsize != filesystem_status.f_bsize)
 		return fail_errno("fstatvfs-tmpfs");
 	errno = 0;
@@ -799,8 +852,8 @@ int main(void)
 	if (unmount("/mnt", 0) != 0 || rmdir("/mnt") != 0)
 		return fail_errno("unmount-tmpfs");
 	pty_master = posix_openpt(O_RDWR | O_NOCTTY);
-	if (pty_master < 0 || ptsname_r(pty_master, path_buffer,
-	    sizeof(path_buffer)) != 0)
+	if (pty_master < 0 ||
+	    ptsname_r(pty_master, path_buffer, sizeof(path_buffer)) != 0)
 		return fail_errno("ptmx-open");
 	errno = 0;
 	if (open(path_buffer, O_RDWR | O_NOCTTY) != -1 || errno != EACCES)
@@ -826,18 +879,21 @@ int main(void)
 		return fail_errno("pty-backpressure-fork");
 	if (child == 0)
 		_exit(write(pty_slave, pty_stress_input,
-		    sizeof(pty_stress_input)) == (ssize_t)sizeof(pty_stress_input) ?
-		    0 : 42);
+			    sizeof(pty_stress_input)) ==
+			      (ssize_t)sizeof(pty_stress_input)
+			  ? 0
+			  : 42);
 	pty_received = 0;
 	while (pty_received < sizeof(pty_stress_output)) {
-		ssize_t count = read(pty_master, pty_stress_output + pty_received,
-		    sizeof(pty_stress_output) - pty_received);
+		ssize_t count =
+		    read(pty_master, pty_stress_output + pty_received,
+			 sizeof(pty_stress_output) - pty_received);
 		if (count <= 0)
 			return fail_errno("pty-backpressure-read");
 		pty_received += (size_t)count;
 	}
 	if (memcmp(pty_stress_input, pty_stress_output,
-	    sizeof(pty_stress_input)) != 0 ||
+		   sizeof(pty_stress_input)) != 0 ||
 	    waitpid(child, &child_status, 0) != child ||
 	    !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)
 		return fail_errno("pty-backpressure-data");
@@ -850,59 +906,71 @@ int main(void)
 		return fail_errno("locale-utf8");
 	memset(&multibyte_state, 0, sizeof(multibyte_state));
 	if (mbrtowc(&wide_character, "\xe2", 1, &multibyte_state) !=
-	    (size_t)-2 || mbrtowc(&wide_character, "\x82\xac", 2,
-	    &multibyte_state) != 2 || wide_character != (wchar_t)0x20acU)
+		(size_t)-2 ||
+	    mbrtowc(&wide_character, "\x82\xac", 2, &multibyte_state) != 2 ||
+	    wide_character != (wchar_t)0x20acU)
 		return fail_errno("locale-split-utf8");
 	memset(&multibyte_state, 0, sizeof(multibyte_state));
 	errno = 0;
 	if (mbrtowc(&wide_character, "\xc0\x80", 2, &multibyte_state) !=
-	    (size_t)-1 || errno != EILSEQ)
+		(size_t)-1 ||
+	    errno != EILSEQ)
 		return fail("locale-overlong");
 	if (wcrtomb(encoded, (wchar_t)0x3042U, NULL) != 3 ||
-	    (unsigned char)encoded[0] != 0xe3U || wcwidth((wchar_t)0x3042U) != 2 ||
-	    !iswalpha((wint_t)0x3042U))
+	    (unsigned char)encoded[0] != 0xe3U ||
+	    wcwidth((wchar_t)0x3042U) != 2 || !iswalpha((wint_t)0x3042U))
 		return fail_errno("locale-wide");
 	c_locale = newlocale(LC_ALL_MASK, "C", NULL);
-	if (c_locale == NULL || pthread_create(&thread, NULL, locale_worker,
-	    c_locale) != 0 || pthread_join(thread, &thread_result) != 0 ||
+	if (c_locale == NULL ||
+	    pthread_create(&thread, NULL, locale_worker, c_locale) != 0 ||
+	    pthread_join(thread, &thread_result) != 0 ||
 	    thread_result != NULL || MB_CUR_MAX != 4U)
 		return fail_errno("locale-thread");
 	freelocale(c_locale);
 	(void)write(1, "R2:TIMER:PASS\n", 14);
 	/* WNOWAIT must report without consuming the child event. */
 	child = fork();
-	if (child < 0) return fail_errno("waitid-nowait-fork");
-	if (child == 0) _exit(19);
+	if (child < 0)
+		return fail_errno("waitid-nowait-fork");
+	if (child == 0)
+		_exit(19);
 	memset(&child_information, 0, sizeof(child_information));
-	if (waitid(P_PID, (id_t)child, &child_information,
-	    WEXITED | WNOWAIT) != 0 || child_information.si_pid != child ||
+	if (waitid(P_PID, (id_t)child, &child_information, WEXITED | WNOWAIT) !=
+		0 ||
+	    child_information.si_pid != child ||
 	    child_information.si_status != 19 ||
-	    waitid(P_PID, (id_t)child, &child_information,
-	    WEXITED | WNOWAIT) != 0 || waitpid(child, &child_status, 0) != child ||
+	    waitid(P_PID, (id_t)child, &child_information, WEXITED | WNOWAIT) !=
+		0 ||
+	    waitpid(child, &child_status, 0) != child ||
 	    WEXITSTATUS(child_status) != 19)
 		return fail_errno("waitid-nowait");
 	/* tmpfs special nodes and POSIX process-owned byte-range locks. */
 	(void)unlink("/tmp/posix-r2-fifo");
 	if (mkfifo("/tmp/posix-r2-fifo", 0600) != 0 ||
-	    (pipefd[0] = open("/tmp/posix-r2-fifo",
-	    O_RDONLY | O_NONBLOCK)) < 0 ||
-	    (pipefd[1] = open("/tmp/posix-r2-fifo",
-	    O_WRONLY | O_NONBLOCK)) < 0 || write(pipefd[1], "n", 1) != 1 ||
-	    read(pipefd[0], &byte, 1) != 1 || byte != 'n')
+	    (pipefd[0] = open("/tmp/posix-r2-fifo", O_RDONLY | O_NONBLOCK)) <
+		0 ||
+	    (pipefd[1] = open("/tmp/posix-r2-fifo", O_WRONLY | O_NONBLOCK)) <
+		0 ||
+	    write(pipefd[1], "n", 1) != 1 || read(pipefd[0], &byte, 1) != 1 ||
+	    byte != 'n')
 		return fail_errno("named-fifo");
-	(void)close(pipefd[0]); (void)close(pipefd[1]);
+	(void)close(pipefd[0]);
+	(void)close(pipefd[1]);
 	(void)unlink("/tmp/posix-r2-fifo");
 	regular_fd = open("/tmp/posix-r2-lock", O_CREAT | O_RDWR, 0600);
 	memset(&file_lock, 0, sizeof(file_lock));
-	file_lock.l_type = F_WRLCK; file_lock.l_whence = SEEK_SET;
+	file_lock.l_type = F_WRLCK;
+	file_lock.l_whence = SEEK_SET;
 	file_lock.l_len = 1;
 	if (regular_fd < 0 || fcntl(regular_fd, F_SETLK, &file_lock) != 0)
 		return fail_errno("record-lock-parent");
 	child = fork();
-	if (child < 0) return fail_errno("record-lock-fork");
+	if (child < 0)
+		return fail_errno("record-lock-fork");
 	if (child == 0) {
 		int locked = fcntl(regular_fd, F_SETLK, &file_lock);
-		_exit(locked == -1 && (errno == EAGAIN || errno == EACCES) ? 0 : 1);
+		_exit(locked == -1 && (errno == EAGAIN || errno == EACCES) ? 0
+									   : 1);
 	}
 	if (waitpid(child, &child_status, 0) != child ||
 	    !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)
@@ -910,18 +978,22 @@ int main(void)
 	file_lock.l_type = F_UNLCK;
 	if (fcntl(regular_fd, F_SETLK, &file_lock) != 0)
 		return fail_errno("record-unlock");
-	(void)close(regular_fd); (void)unlink("/tmp/posix-r2-lock");
-	/* Lowering NOFILE leaves existing descriptors valid but blocks new ones. */
+	(void)close(regular_fd);
+	(void)unlink("/tmp/posix-r2-lock");
+	/* Lowering NOFILE leaves existing descriptors valid but blocks new
+	 * ones. */
 	if (getrlimit(RLIMIT_NOFILE, &saved_limit) != 0)
 		return fail_errno("getrlimit-nofile");
-	small_limit = saved_limit; small_limit.rlim_cur = 3;
+	small_limit = saved_limit;
+	small_limit.rlim_cur = 3;
 	if (setrlimit(RLIMIT_NOFILE, &small_limit) != 0 ||
 	    open("/tmp/limit-must-fail", O_CREAT | O_RDWR, 0600) != -1 ||
 	    errno != EMFILE || setrlimit(RLIMIT_NOFILE, &saved_limit) != 0)
 		return fail_errno("setrlimit-nofile");
 	(void)unlink("/tmp/limit-must-fail");
-	if (posix_spawn(&child, "/bin/sh", NULL, NULL, exec_argv,
-	    spawn_envp) != 0 || waitpid(child, &child_status, 0) != child ||
+	if (posix_spawn(&child, "/bin/sh", NULL, NULL, exec_argv, spawn_envp) !=
+		0 ||
+	    waitpid(child, &child_status, 0) != child ||
 	    !WIFEXITED(child_status) || WEXITSTATUS(child_status) != 23)
 		return fail_errno("conformance-posix-spawn");
 	(void)sem_destroy(&ready);

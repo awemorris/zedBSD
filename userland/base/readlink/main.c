@@ -31,9 +31,9 @@ main(int argc, char **argv)
 		return 2;
 	}
 	length = readlink(argv[index], buffer, sizeof(buffer));
-	if (length < 0 || command_write_all(STDOUT_FILENO, buffer,
-	    (size_t)length) != 0 || (newline &&
-	    command_write_all(STDOUT_FILENO, "\n", 1) != 0)) {
+	if (length < 0 ||
+	    command_write_all(STDOUT_FILENO, buffer, (size_t)length) != 0 ||
+	    (newline && command_write_all(STDOUT_FILENO, "\n", 1) != 0)) {
 		command_error("readlink", argv[index]);
 		return 1;
 	}

@@ -3,5 +3,85 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-static char*field(char*s,int n){char*p=s;while(--n>0){while(*p==' '||*p=='\t')p++;while(*p&&*p!=' '&&*p!='\t'&&*p!='\n')p++;}while(*p==' '||*p=='\t')p++;return p;}static int keycmp(char*a,char*b,int fa,int fb){char*x=field(a,fa),*y=field(b,fb);while(*x&&*x!=' '&&*x!='\t'&&*x!='\n'&&*y&&*y!=' '&&*y!='\t'&&*y!='\n'){if(*x!=*y)return(unsigned char)*x-(unsigned char)*y;x++;y++;}return((*x!=' '&&*x!='\t'&&*x!='\n')-(*y!=' '&&*y!='\t'&&*y!='\n'));}
-int main(int argc,char**argv){int f1=1,f2=1,i=1;FILE*a,*b;char*x=NULL,*y=NULL;size_t cx=0,cy=0;long nx,ny;for(;i<argc;i++){if(!strcmp(argv[i],"-1")&&++i<argc)f1=atoi(argv[i]);else if(!strcmp(argv[i],"-2")&&++i<argc)f2=atoi(argv[i]);else break;}if(argc-i!=2){fprintf(stderr,"usage: join [-1 field] [-2 field] file1 file2\n");return 2;}a=fopen(argv[i],"r");b=fopen(argv[i+1],"r");if(!a||!b){command_error("join",!a?argv[i]:argv[i+1]);return 1;}nx=command_read_line(a,&x,&cx);ny=command_read_line(b,&y,&cy);while(nx>0&&ny>0){int c=keycmp(x,y,f1,f2);if(c<0)nx=command_read_line(a,&x,&cx);else if(c>0)ny=command_read_line(b,&y,&cy);else{char*k=field(x,f1),*e=k;while(*e&&*e!=' '&&*e!='\t'&&*e!='\n')e++;fwrite(k,1,(size_t)(e-k),stdout);printf(" %s",x);if(nx&&x[nx-1]!='\n')putchar('\n');printf("%s",y);nx=command_read_line(a,&x,&cx);ny=command_read_line(b,&y,&cy);}}free(x);free(y);fclose(a);fclose(b);return ferror(stdout);}
+static char *
+field(char *s, int n)
+{
+	char *p = s;
+	while (--n > 0) {
+		while (*p == ' ' || *p == '\t')
+			p++;
+		while (*p && *p != ' ' && *p != '\t' && *p != '\n')
+			p++;
+	}
+	while (*p == ' ' || *p == '\t')
+		p++;
+	return p;
+}
+static int
+keycmp(char *a, char *b, int fa, int fb)
+{
+	char *x = field(a, fa), *y = field(b, fb);
+	while (*x && *x != ' ' && *x != '\t' && *x != '\n' && *y && *y != ' ' &&
+	       *y != '\t' && *y != '\n') {
+		if (*x != *y)
+			return (unsigned char)*x - (unsigned char)*y;
+		x++;
+		y++;
+	}
+	return ((*x != ' ' && *x != '\t' && *x != '\n') -
+		(*y != ' ' && *y != '\t' && *y != '\n'));
+}
+int
+main(int argc, char **argv)
+{
+	int f1 = 1, f2 = 1, i = 1;
+	FILE *a, *b;
+	char *x = NULL, *y = NULL;
+	size_t cx = 0, cy = 0;
+	long nx, ny;
+	for (; i < argc; i++) {
+		if (!strcmp(argv[i], "-1") && ++i < argc)
+			f1 = atoi(argv[i]);
+		else if (!strcmp(argv[i], "-2") && ++i < argc)
+			f2 = atoi(argv[i]);
+		else
+			break;
+	}
+	if (argc - i != 2) {
+		fprintf(stderr,
+			"usage: join [-1 field] [-2 field] file1 file2\n");
+		return 2;
+	}
+	a = fopen(argv[i], "r");
+	b = fopen(argv[i + 1], "r");
+	if (!a || !b) {
+		command_error("join", !a ? argv[i] : argv[i + 1]);
+		return 1;
+	}
+	nx = command_read_line(a, &x, &cx);
+	ny = command_read_line(b, &y, &cy);
+	while (nx > 0 && ny > 0) {
+		int c = keycmp(x, y, f1, f2);
+		if (c < 0)
+			nx = command_read_line(a, &x, &cx);
+		else if (c > 0)
+			ny = command_read_line(b, &y, &cy);
+		else {
+			char *k = field(x, f1), *e = k;
+			while (*e && *e != ' ' && *e != '\t' && *e != '\n')
+				e++;
+			fwrite(k, 1, (size_t)(e - k), stdout);
+			printf(" %s", x);
+			if (nx && x[nx - 1] != '\n')
+				putchar('\n');
+			printf("%s", y);
+			nx = command_read_line(a, &x, &cx);
+			ny = command_read_line(b, &y, &cy);
+		}
+	}
+	free(x);
+	free(y);
+	fclose(a);
+	fclose(b);
+	return ferror(stdout);
+}

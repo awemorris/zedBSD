@@ -47,20 +47,34 @@ static const char *
 signal_message(int number)
 {
 	switch (number) {
-	case SIGHUP: return "Hangup";
-	case SIGINT: return "Interrupt";
-	case SIGQUIT: return "Quit";
-	case SIGILL: return "Illegal instruction";
-	case SIGTRAP: return "Trace/BPT trap";
-	case SIGABRT: return "Abort trap";
-	case SIGFPE: return "Floating point exception";
-	case SIGKILL: return "Killed";
-	case SIGBUS: return "Bus error";
-	case SIGSEGV: return "Segmentation fault";
-	case SIGPIPE: return "Broken pipe";
-	case SIGALRM: return "Alarm clock";
-	case SIGTERM: return "Terminated";
-	default: return "Terminated by signal";
+	case SIGHUP:
+		return "Hangup";
+	case SIGINT:
+		return "Interrupt";
+	case SIGQUIT:
+		return "Quit";
+	case SIGILL:
+		return "Illegal instruction";
+	case SIGTRAP:
+		return "Trace/BPT trap";
+	case SIGABRT:
+		return "Abort trap";
+	case SIGFPE:
+		return "Floating point exception";
+	case SIGKILL:
+		return "Killed";
+	case SIGBUS:
+		return "Bus error";
+	case SIGSEGV:
+		return "Segmentation fault";
+	case SIGPIPE:
+		return "Broken pipe";
+	case SIGALRM:
+		return "Alarm clock";
+	case SIGTERM:
+		return "Terminated";
+	default:
+		return "Terminated by signal";
 	}
 }
 
@@ -84,11 +98,15 @@ wait_foreground(pid_t pid, int *status)
 	pid_t shell_pgrp = getpgrp();
 	int terminal = isatty(0);
 	pid_t result;
-	if (terminal) (void)tcsetpgrp(0, pid);
-	do result = waitpid(pid, status, WUNTRACED);
+	if (terminal)
+		(void)tcsetpgrp(0, pid);
+	do
+		result = waitpid(pid, status, WUNTRACED);
 	while (result < 0 && errno == EINTR);
-	if (terminal) (void)tcsetpgrp(0, shell_pgrp);
-	if (result < 0) return 0;
+	if (terminal)
+		(void)tcsetpgrp(0, shell_pgrp);
+	if (result < 0)
+		return 0;
 	if (WIFSTOPPED(*status)) {
 		last_job = pid;
 		printf("[%d] stopped\n", (int)pid);
@@ -108,15 +126,16 @@ spawn_wait(char *const argv[])
 	if (!command_subshell) {
 		if (posix_spawnattr_init(&attributes) != 0 ||
 		    posix_spawnattr_setflags(&attributes,
-		    POSIX_SPAWN_SETPGROUP) != 0 ||
+					     POSIX_SPAWN_SETPGROUP) != 0 ||
 		    posix_spawnattr_setpgroup(&attributes, 0) != 0) {
-			fprintf(stderr, "sh: unable to prepare process group\n");
+			fprintf(stderr,
+				"sh: unable to prepare process group\n");
 			return 0;
 		}
 		attribute_pointer = &attributes;
 	}
-	error = posix_spawn(&pid, argv[0], NULL, attribute_pointer,
-	    argv, environ);
+	error =
+	    posix_spawn(&pid, argv[0], NULL, attribute_pointer, argv, environ);
 	if (attribute_pointer != NULL)
 		(void)posix_spawnattr_destroy(attribute_pointer);
 	if (error != 0) {
@@ -132,7 +151,8 @@ spawn_wait(char *const argv[])
 	}
 	if (command_subshell) {
 		pid_t waited;
-		do waited = waitpid(pid, &status, 0);
+		do
+			waited = waitpid(pid, &status, 0);
 		while (waited < 0 && errno == EINTR);
 		if (waited < 0) {
 			fprintf(stderr, "wait: %d\n", errno);
@@ -153,11 +173,14 @@ static int
 read_line(char *buffer, size_t capacity)
 {
 	ssize_t length;
-	if (capacity < 2) return -1;
+	if (capacity < 2)
+		return -1;
 	length = read(0, buffer, capacity - 1U);
-	if (length <= 0) return -1;
-	while (length > 0 && (buffer[length - 1] == '\r' ||
-	    buffer[length - 1] == '\n')) length--;
+	if (length <= 0)
+		return -1;
+	while (length > 0 &&
+	       (buffer[length - 1] == '\r' || buffer[length - 1] == '\n'))
+		length--;
 	buffer[length] = '\0';
 	return (int)length;
 }
@@ -174,24 +197,28 @@ shell_signal_handler(int signal_number)
 static int
 signal_number(const char *name)
 {
-	static const struct { const char *name; int number; } names[] = {
-		{ "HUP", SIGHUP }, { "INT", SIGINT }, { "QUIT", SIGQUIT },
-		{ "ILL", SIGILL }, { "TRAP", SIGTRAP }, { "ABRT", SIGABRT },
-		{ "FPE", SIGFPE }, { "KILL", SIGKILL }, { "BUS", SIGBUS },
-		{ "SEGV", SIGSEGV }, { "PIPE", SIGPIPE }, { "ALRM", SIGALRM },
-		{ "TERM", SIGTERM }, { "USR1", SIGUSR1 }, { "USR2", SIGUSR2 },
-		{ "CHLD", SIGCHLD }, { "CONT", SIGCONT }, { "STOP", SIGSTOP },
-		{ "TSTP", SIGTSTP }, { "TTIN", SIGTTIN }, { "TTOU", SIGTTOU }
-	};
+	static const struct {
+		const char *name;
+		int number;
+	} names[] = {{"HUP", SIGHUP},	{"INT", SIGINT},   {"QUIT", SIGQUIT},
+		     {"ILL", SIGILL},	{"TRAP", SIGTRAP}, {"ABRT", SIGABRT},
+		     {"FPE", SIGFPE},	{"KILL", SIGKILL}, {"BUS", SIGBUS},
+		     {"SEGV", SIGSEGV}, {"PIPE", SIGPIPE}, {"ALRM", SIGALRM},
+		     {"TERM", SIGTERM}, {"USR1", SIGUSR1}, {"USR2", SIGUSR2},
+		     {"CHLD", SIGCHLD}, {"CONT", SIGCONT}, {"STOP", SIGSTOP},
+		     {"TSTP", SIGTSTP}, {"TTIN", SIGTTIN}, {"TTOU", SIGTTOU}};
 	char *end;
 	long value;
 	size_t index;
-	if (!strncmp(name, "SIG", 3)) name += 3;
+	if (!strncmp(name, "SIG", 3))
+		name += 3;
 	value = strtol(name, &end, 10);
 	if (*name != '\0' && *end == '\0' && value > 0 &&
-	    value < SHELL_SIGNAL_MAX) return (int)value;
+	    value < SHELL_SIGNAL_MAX)
+		return (int)value;
 	for (index = 0; index < sizeof(names) / sizeof(names[0]); index++)
-		if (!strcmp(name, names[index].name)) return names[index].number;
+		if (!strcmp(name, names[index].name))
+			return names[index].number;
 	return -1;
 }
 
@@ -200,20 +227,25 @@ set_trap(const char *action, int number)
 {
 	struct sigaction disposition;
 	char *copy = NULL;
-	if (number <= 0 || number >= SHELL_SIGNAL_MAX ||
-	    number == SIGKILL || number == SIGSTOP) {
+	if (number <= 0 || number >= SHELL_SIGNAL_MAX || number == SIGKILL ||
+	    number == SIGSTOP) {
 		errno = EINVAL;
 		return 0;
 	}
 	if (action != NULL && action[0] != '\0') {
 		copy = malloc(strlen(action) + 1U);
-		if (copy == NULL) return 0;
+		if (copy == NULL)
+			return 0;
 		strcpy(copy, action);
 	}
 	memset(&disposition, 0, sizeof(disposition));
-	if (action == NULL) disposition.sa_handler = SIG_DFL;
-	else if (action[0] == '\0') disposition.sa_handler = SIG_IGN;
-	else disposition.sa_handler = (uint64_t)(uintptr_t)shell_signal_handler;
+	if (action == NULL)
+		disposition.sa_handler = SIG_DFL;
+	else if (action[0] == '\0')
+		disposition.sa_handler = SIG_IGN;
+	else
+		disposition.sa_handler =
+		    (uint64_t)(uintptr_t)shell_signal_handler;
 	disposition.sa_flags = SA_RESTART;
 	sigemptyset(&disposition.sa_mask);
 	if (sigaction(number, &disposition, NULL) != 0) {
@@ -233,12 +265,15 @@ run_pending_traps(void)
 	int result = 1;
 	for (number = 1; number < SHELL_SIGNAL_MAX; number++) {
 		char *action;
-		if (!trap_pending[number] || trap_action[number] == NULL) continue;
+		if (!trap_pending[number] || trap_action[number] == NULL)
+			continue;
 		trap_pending[number] = 0;
 		action = malloc(strlen(trap_action[number]) + 1U);
-		if (action == NULL) return 0;
+		if (action == NULL)
+			return 0;
 		strcpy(action, trap_action[number]);
-		if (!command(action)) result = 0;
+		if (!command(action))
+			result = 0;
 		free(action);
 	}
 	return result;
@@ -279,13 +314,15 @@ shell_command_substitute(void *context, const char *source, char **result)
 		ssize_t count = read(descriptors[0], chunk, sizeof(chunk));
 		char *larger;
 		if (count < 0) {
-			if (errno == EINTR) continue;
+			if (errno == EINTR)
+				continue;
 			free(output);
 			(void)close(descriptors[0]);
 			(void)waitpid(child, NULL, 0);
 			return 0;
 		}
-		if (count == 0) break;
+		if (count == 0)
+			break;
 		if (length + (size_t)count + 1U < length) {
 			free(output);
 			(void)close(descriptors[0]);
@@ -313,10 +350,12 @@ shell_command_substitute(void *context, const char *source, char **result)
 		free(output);
 		return 0;
 	}
-	while (length != 0 && output[length - 1U] == '\n') length--;
+	while (length != 0 && output[length - 1U] == '\n')
+		length--;
 	if (output == NULL) {
 		output = malloc(1U);
-		if (output == NULL) return 0;
+		if (output == NULL)
+			return 0;
 	}
 	output[length] = '\0';
 	*result = output;
@@ -366,7 +405,7 @@ source_file_mode(const char *path, int continue_on_error)
 				return 0;
 			}
 			fprintf(stderr, "%s:%u: command failed\n", path,
-			    line_number);
+				line_number);
 		}
 		line = end;
 	}
@@ -410,9 +449,11 @@ run_noct(int argc, char **argv)
 	} else {
 		snprintf(resolved, sizeof(resolved), "/usr/bin/%s", argv[0]);
 		if (access(resolved, F_OK) != 0) {
-			snprintf(resolved, sizeof(resolved), "/bin/%s", argv[0]);
+			snprintf(resolved, sizeof(resolved), "/bin/%s",
+				 argv[0]);
 			if (access(resolved, F_OK) != 0) {
-				snprintf(resolved, sizeof(resolved), "/%s", argv[0]);
+				snprintf(resolved, sizeof(resolved), "/%s",
+					 argv[0]);
 				if (access(resolved, F_OK) != 0)
 					return 0;
 			}
@@ -432,7 +473,8 @@ show_devices(void)
 	struct system_info info;
 	uint32_t index;
 	if (fd < 0 || ioctl(fd, ZEDBSD_SYSTEM_GET_INFO, &info) != 0) {
-		if (fd >= 0) close(fd);
+		if (fd >= 0)
+			close(fd);
 		return 0;
 	}
 	for (index = 0; index < info.device_count; index++) {
@@ -442,11 +484,12 @@ show_devices(void)
 		if (ioctl(fd, ZEDBSD_SYSTEM_GET_DEVICE, &device) != 0)
 			continue;
 		printf("%s%u BIOS %02x H/S %u/%u%s\n",
-		    device.device_class == 2 ? "ide" :
-		    device.device_class == 3 ? "scsi" : "fd",
-		    device.display_index, device.bios_id, device.heads,
-		    device.sectors,
-		    device.bios_id == info.boot_bios_id ? " boot" : "");
+		       device.device_class == 2	  ? "ide"
+		       : device.device_class == 3 ? "scsi"
+						  : "fd",
+		       device.display_index, device.bios_id, device.heads,
+		       device.sectors,
+		       device.bios_id == info.boot_bios_id ? " boot" : "");
 	}
 	close(fd);
 	return 1;
@@ -458,34 +501,33 @@ show_vmstat(void)
 	int fd = open("/dev/system", O_RDONLY);
 	struct vm_statistics s;
 	if (fd < 0 || ioctl(fd, ZEDBSD_SYSTEM_GET_VMSTAT, &s) != 0) {
-		if (fd >= 0) close(fd);
+		if (fd >= 0)
+			close(fd);
 		return 0;
 	}
 	close(fd);
-	printf("physical.total=%llu\nphysical.free=%llu\n"
-	       "heap.fixed=%llu\nheap.current=%llu\nheap.peak=%llu\n"
-	       "heap.largest_free=%llu\nheap.largest_failed=%llu\n"
-	       "hal.tasks=%llu\nhal.task_stack_bytes=%llu\n"
-	       "hal.spaces=%llu\nhal.page_tables=%llu\n"
-	       "vm.resident=%llu\nvm.swapped=%llu\n"
-	       "swap.total=%llu\nswap.free=%llu\n"
-	       "vm.commit.limit=%llu\nvm.commit.used=%llu\n"
-	       "vm.commit.available=%llu\n",
+	printf(
+	    "physical.total=%llu\nphysical.free=%llu\n"
+	    "heap.fixed=%llu\nheap.current=%llu\nheap.peak=%llu\n"
+	    "heap.largest_free=%llu\nheap.largest_failed=%llu\n"
+	    "hal.tasks=%llu\nhal.task_stack_bytes=%llu\n"
+	    "hal.spaces=%llu\nhal.page_tables=%llu\n"
+	    "vm.resident=%llu\nvm.swapped=%llu\n"
+	    "swap.total=%llu\nswap.free=%llu\n"
+	    "vm.commit.limit=%llu\nvm.commit.used=%llu\n"
+	    "vm.commit.available=%llu\n",
 	    (unsigned long long)s.physical_total,
 	    (unsigned long long)s.physical_free,
 	    (unsigned long long)s.heap_fixed,
-	    (unsigned long long)s.heap_current,
-	    (unsigned long long)s.heap_peak,
+	    (unsigned long long)s.heap_current, (unsigned long long)s.heap_peak,
 	    (unsigned long long)s.heap_largest_free,
 	    (unsigned long long)s.heap_largest_failed,
 	    (unsigned long long)s.hal_tasks,
 	    (unsigned long long)s.hal_task_stack_bytes,
 	    (unsigned long long)s.hal_spaces,
 	    (unsigned long long)s.hal_page_tables,
-	    (unsigned long long)s.vm_resident,
-	    (unsigned long long)s.vm_swapped,
-	    (unsigned long long)s.swap_total,
-	    (unsigned long long)s.swap_free,
+	    (unsigned long long)s.vm_resident, (unsigned long long)s.vm_swapped,
+	    (unsigned long long)s.swap_total, (unsigned long long)s.swap_free,
 	    (unsigned long long)s.vm_commit_limit,
 	    (unsigned long long)s.vm_commit_used,
 	    (unsigned long long)s.vm_commit_available);
@@ -522,12 +564,12 @@ is_elf(const char *path)
 	count = read(fd, magic, sizeof(magic));
 	close(fd);
 	return count == (ssize_t)sizeof(magic) && magic[0] == 0x7f &&
-	    magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F';
+	       magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F';
 }
 
 static int
 path_candidate(const char *path, size_t *position, const char *name,
-    const char *suffix, char *candidate, size_t capacity, int *last)
+	       const char *suffix, char *candidate, size_t capacity, int *last)
 {
 	size_t start = *position;
 	size_t length;
@@ -554,13 +596,13 @@ path_candidate(const char *path, size_t *position, const char *name,
 	candidate[length] = '/';
 	memcpy(candidate + length + 1U, name, name_length);
 	memcpy(candidate + length + 1U + name_length, suffix,
-	    suffix_length + 1U);
+	       suffix_length + 1U);
 	return 1;
 }
 
 static int
-search_path(const char *name, const char *suffix, int elf,
-    char *candidate, size_t capacity)
+search_path(const char *name, const char *suffix, int elf, char *candidate,
+	    size_t capacity)
 {
 	const char *path = sh_var_get("PATH");
 	size_t position = 0;
@@ -569,9 +611,9 @@ search_path(const char *name, const char *suffix, int elf,
 	for (;;) {
 		int last;
 		int result = path_candidate(path, &position, name, suffix,
-		    candidate, capacity, &last);
-		if (result > 0 && (elf ? is_elf(candidate) :
-		    access(candidate, F_OK) == 0))
+					    candidate, capacity, &last);
+		if (result > 0 &&
+		    (elf ? is_elf(candidate) : access(candidate, F_OK) == 0))
 			return 1;
 		if (last)
 			break;
@@ -627,13 +669,13 @@ static int
 assignment_length(const char *text)
 {
 	const char *cursor = text;
-	if (!( (*cursor >= 'A' && *cursor <= 'Z') ||
-	    (*cursor >= 'a' && *cursor <= 'z') || *cursor == '_'))
+	if (!((*cursor >= 'A' && *cursor <= 'Z') ||
+	      (*cursor >= 'a' && *cursor <= 'z') || *cursor == '_'))
 		return -1;
 	cursor++;
 	while ((*cursor >= 'A' && *cursor <= 'Z') ||
-	    (*cursor >= 'a' && *cursor <= 'z') || *cursor == '_' ||
-	    (*cursor >= '0' && *cursor <= '9'))
+	       (*cursor >= 'a' && *cursor <= 'z') || *cursor == '_' ||
+	       (*cursor >= '0' && *cursor <= '9'))
 		cursor++;
 	return *cursor == '=' ? (int)(cursor - text) : -1;
 }
@@ -657,12 +699,13 @@ static int
 shell_builtin_name(const char *name)
 {
 	static const char *const names[] = {
-		":", ".", "[", "alias", "bg", "cd", "command", "device", "echo", "env",
-		"eval", "exec", "exit", "export", "false", "fg", "getopts", "halt",
-		"help", "jobs", "part", "pause", "printf", "pwd", "read", "readonly",
-		"reboot", "run", "set", "shift", "source", "true", "type",
-		"test", "umask", "unalias", "unset", "vmstat", "wait", NULL
-	};
+	    ":",       ".",	   "[",	     "alias", "bg",	 "cd",
+	    "command", "device",   "echo",   "env",   "eval",	 "exec",
+	    "exit",    "export",   "false",  "fg",    "getopts", "halt",
+	    "help",    "jobs",	   "part",   "pause", "printf",	 "pwd",
+	    "read",    "readonly", "reboot", "run",   "set",	 "shift",
+	    "source",  "true",	   "type",   "test",  "umask",	 "unalias",
+	    "unset",   "vmstat",   "wait",   NULL};
 	int index;
 	for (index = 0; names[index] != NULL; index++)
 		if (strcmp(name, names[index]) == 0)
@@ -688,7 +731,8 @@ join_arguments(int argc, char **argv, int first, char **result)
 	cursor = text;
 	for (index = first; index < argc; index++) {
 		size_t item = strlen(argv[index]);
-		if (index != first) *cursor++ = ' ';
+		if (index != first)
+			*cursor++ = ' ';
 		memcpy(cursor, argv[index], item);
 		cursor += item;
 	}
@@ -735,7 +779,7 @@ set_decimal_variable(const char *name, long value)
 	char buffer[32];
 	int length = snprintf(buffer, sizeof(buffer), "%ld", value);
 	return length > 0 && (size_t)length < sizeof(buffer) &&
-	    sh_var_set(name, buffer, -1) == 0;
+	       sh_var_set(name, buffer, -1) == 0;
 }
 
 static int
@@ -747,26 +791,31 @@ shell_getopts_builtin(int argc, char **argv)
 	int argument_count;
 	char *end;
 	long option_index;
-	char option_name[2] = { 0, 0 };
+	char option_name[2] = {0, 0};
 	const char *definition;
 	int silent;
 	if (argc < 3 || !sh_var_name(argv[2]))
 		return 0;
 	options = argv[1];
 	silent = options[0] == ':';
-	if (silent) options++;
+	if (silent)
+		options++;
 	arguments = argc > 3 ? argv + 3 : shell_positional;
 	argument_count = argc > 3 ? argc - 3 : shell_positional_count;
 	index_text = sh_var_get("OPTIND");
 	option_index = index_text == NULL ? 1 : strtol(index_text, &end, 10);
 	if (index_text != NULL && (*index_text == '\0' || *end != '\0'))
 		option_index = 1;
-	if (option_index < 1) option_index = 1;
-	if (option_index != getopts_last_index) getopts_offset = 1;
-	if (option_index > argument_count) return 0;
+	if (option_index < 1)
+		option_index = 1;
+	if (option_index != getopts_last_index)
+		getopts_offset = 1;
+	if (option_index > argument_count)
+		return 0;
 	if (getopts_offset == 1) {
 		const char *argument = arguments[option_index - 1];
-		if (argument[0] != '-' || argument[1] == '\0') return 0;
+		if (argument[0] != '-' || argument[1] == '\0')
+			return 0;
 		if (!strcmp(argument, "--")) {
 			option_index++;
 			getopts_last_index = option_index;
@@ -781,10 +830,13 @@ shell_getopts_builtin(int argc, char **argv)
 	}
 	definition = strchr(options, option_name[0]);
 	if (definition == NULL) {
-		char bad[2] = { option_name[0], '\0' };
+		char bad[2] = {option_name[0], '\0'};
 		(void)sh_var_set(argv[2], "?", -1);
-		if (silent) (void)sh_var_set("OPTARG", bad, -1);
-		else fprintf(stderr, "getopts: illegal option -- %c\n", option_name[0]);
+		if (silent)
+			(void)sh_var_set("OPTARG", bad, -1);
+		else
+			fprintf(stderr, "getopts: illegal option -- %c\n",
+				option_name[0]);
 		getopts_last_index = option_index;
 		(void)set_decimal_variable("OPTIND", option_index);
 		return 1;
@@ -799,11 +851,15 @@ shell_getopts_builtin(int argc, char **argv)
 			value = arguments[option_index - 1];
 			option_index++;
 		} else {
-			char missing[2] = { option_name[0], '\0' };
+			char missing[2] = {option_name[0], '\0'};
 			(void)sh_var_set(argv[2], silent ? ":" : "?", -1);
-			if (silent) (void)sh_var_set("OPTARG", missing, -1);
-			else fprintf(stderr, "getopts: option requires an argument -- %c\n",
-			    option_name[0]);
+			if (silent)
+				(void)sh_var_set("OPTARG", missing, -1);
+			else
+				fprintf(stderr,
+					"getopts: option requires an argument "
+					"-- %c\n",
+					option_name[0]);
 			getopts_last_index = option_index;
 			(void)set_decimal_variable("OPTIND", option_index);
 			return 1;
@@ -826,7 +882,8 @@ command_dispatch(int argc, char **argv)
 	if (argc == 0)
 		return 1;
 	if (!strcmp(argv[0], "jobs")) {
-		if (last_job > 0) printf("[%d] active or stopped\n", (int)last_job);
+		if (last_job > 0)
+			printf("[%d] active or stopped\n", (int)last_job);
 		return 1;
 	}
 	if (!strcmp(argv[0], "bg")) {
@@ -835,26 +892,33 @@ command_dispatch(int argc, char **argv)
 	if (!strcmp(argv[0], "fg")) {
 		int status = 0;
 		pid_t job = last_job;
-		if (job <= 0) return 0;
+		if (job <= 0)
+			return 0;
 		(void)kill(-job, SIGCONT);
 		last_job = 0;
 		return wait_foreground(job, &status);
 	}
 	if (!strcmp(argv[0], "help")) {
-		puts("help echo pwd cd ls cp cat stat touch clear true false jobs fg bg "
-		     "env set export readonly unset pause wait device probe-ide probe-scsi "
+		puts("help echo pwd cd ls cp cat stat touch clear true false "
+		     "jobs fg bg "
+		     "env set export readonly unset pause wait device "
+		     "probe-ide probe-scsi "
 		     "part source "
 		     "run noct emacs vmstat reboot halt exit");
 		return 1;
 	}
 	if (!strcmp(argv[0], "alias")) {
 		int index;
-		if (argc == 1) { sh_alias_print(); return 1; }
+		if (argc == 1) {
+			sh_alias_print();
+			return 1;
+		}
 		for (index = 1; index < argc; index++) {
 			char *equals = strchr(argv[index], '=');
 			if (equals == NULL) {
 				const char *value = sh_alias_get(argv[index]);
-				if (value == NULL) return 0;
+				if (value == NULL)
+					return 0;
 				printf("alias %s='%s'\n", argv[index], value);
 				continue;
 			}
@@ -873,9 +937,11 @@ command_dispatch(int argc, char **argv)
 			sh_alias_clear();
 			return 1;
 		}
-		if (argc < 2) return 0;
+		if (argc < 2)
+			return 0;
 		for (index = 1; index < argc; index++)
-			if (sh_alias_unset(argv[index]) != 0) result = 0;
+			if (sh_alias_unset(argv[index]) != 0)
+				result = 0;
 		return result;
 	}
 	if (!strcmp(argv[0], "getopts"))
@@ -886,14 +952,17 @@ command_dispatch(int argc, char **argv)
 		if (argc == 1) {
 			for (index = 1; index < SHELL_SIGNAL_MAX; index++)
 				if (trap_action[index] != NULL)
-					printf("trap -- '%s' %d\n", trap_action[index], index);
+					printf("trap -- '%s' %d\n",
+					       trap_action[index], index);
 			return 1;
 		}
-		if (argc < 3) return 0;
+		if (argc < 3)
+			return 0;
 		action = !strcmp(argv[1], "-") ? NULL : argv[1];
 		for (index = 2; index < argc; index++) {
 			int number = signal_number(argv[index]);
-			if (number < 0 || !set_trap(action, number)) return 0;
+			if (number < 0 || !set_trap(action, number))
+				return 0;
 		}
 		return 1;
 	}
@@ -902,7 +971,8 @@ command_dispatch(int argc, char **argv)
 	if (!strcmp(argv[0], "eval")) {
 		char *text;
 		int result;
-		if (!join_arguments(argc, argv, 1, &text)) return 0;
+		if (!join_arguments(argc, argv, 1, &text))
+			return 0;
 		result = command(text);
 		free(text);
 		return result;
@@ -910,13 +980,15 @@ command_dispatch(int argc, char **argv)
 	if (!strcmp(argv[0], "shift")) {
 		long count = 1;
 		char *end;
-		if (argc > 2) return 0;
+		if (argc > 2)
+			return 0;
 		if (argc == 2) {
 			count = strtol(argv[1], &end, 10);
 			if (*argv[1] == '\0' || *end != '\0' || count < 0)
 				return 0;
 		}
-		if (count > shell_positional_count) return 0;
+		if (count > shell_positional_count)
+			return 0;
 		shell_positional += count;
 		shell_positional_count -= (int)count;
 		return 1;
@@ -944,7 +1016,7 @@ command_dispatch(int argc, char **argv)
 		const char *name = argc == 2 ? argv[1] : "REPLY";
 		if (argc > 2 || assignment_length(name) >= 0 ||
 		    !(name[0] == '_' || (name[0] >= 'A' && name[0] <= 'Z') ||
-		    (name[0] >= 'a' && name[0] <= 'z')))
+		      (name[0] >= 'a' && name[0] <= 'z')))
 			return 0;
 		if (read_line(input, sizeof(input)) < 0)
 			return 0;
@@ -952,22 +1024,26 @@ command_dispatch(int argc, char **argv)
 	}
 	if (!strcmp(argv[0], "wait"))
 		return shell_wait_builtin(argc, argv);
-	if (!strcmp(argv[0], "type") ||
-	    (!strcmp(argv[0], "command") && argc > 1 && !strcmp(argv[1], "-v"))) {
+	if (!strcmp(argv[0], "type") || (!strcmp(argv[0], "command") &&
+					 argc > 1 && !strcmp(argv[1], "-v"))) {
 		int first = !strcmp(argv[0], "type") ? 1 : 2;
 		int index, success = first < argc;
 		for (index = first; index < argc; index++) {
 			char candidate[256];
 			if (shell_builtin_name(argv[index]))
-				printf("%s%s\n", !strcmp(argv[0], "type") ?
-				    "shell builtin: " : "", argv[index]);
+				printf("%s%s\n",
+				       !strcmp(argv[0], "type")
+					   ? "shell builtin: "
+					   : "",
+				       argv[index]);
 			else if (strchr(argv[index], '/') != NULL &&
-			    access(argv[index], F_OK) == 0)
+				 access(argv[index], F_OK) == 0)
 				puts(argv[index]);
 			else if (search_path(argv[index], "", 1, candidate,
-			    sizeof(candidate)))
+					     sizeof(candidate)))
 				puts(candidate);
-			else success = 0;
+			else
+				success = 0;
 		}
 		return success;
 	}
@@ -976,10 +1052,12 @@ command_dispatch(int argc, char **argv)
 	if (!strcmp(argv[0], "exec")) {
 		char candidate[256];
 		char **child = argv + 1;
-		if (argc < 2) return 1;
+		if (argc < 2)
+			return 1;
 		if (strchr(child[0], '/') == NULL) {
 			if (!search_path(child[0], "", 1, candidate,
-			    sizeof(candidate))) return 0;
+					 sizeof(candidate)))
+				return 0;
 			child[0] = candidate;
 		}
 		execve(child[0], child, environ);
@@ -1003,40 +1081,49 @@ command_dispatch(int argc, char **argv)
 		return argc == 2 && sh_var_unset(argv[1]) == 0;
 	if (!strcmp(argv[0], "export")) {
 		int index;
-		if (argc < 2) return 0;
+		if (argc < 2)
+			return 0;
 		for (index = 1; index < argc; index++) {
 			int length = assignment_length(argv[index]);
 			if (length >= 0) {
 				char saved = argv[index][length];
 				argv[index][length] = '\0';
-				if (sh_var_set(argv[index], argv[index] + length + 1, 1) != 0) {
+				if (sh_var_set(argv[index],
+					       argv[index] + length + 1,
+					       1) != 0) {
 					argv[index][length] = saved;
 					return 0;
 				}
 				argv[index][length] = saved;
-			} else if (sh_var_export(argv[index]) != 0) return 0;
+			} else if (sh_var_export(argv[index]) != 0)
+				return 0;
 		}
 		return 1;
 	}
 	if (!strcmp(argv[0], "readonly")) {
 		int index;
-		if (argc < 2) return 0;
+		if (argc < 2)
+			return 0;
 		for (index = 1; index < argc; index++) {
 			int length = assignment_length(argv[index]);
 			if (length >= 0) {
 				char saved = argv[index][length];
 				argv[index][length] = '\0';
-				if (sh_var_set(argv[index], argv[index] + length + 1, -1) != 0 ||
+				if (sh_var_set(argv[index],
+					       argv[index] + length + 1,
+					       -1) != 0 ||
 				    sh_var_readonly(argv[index]) != 0) {
 					argv[index][length] = saved;
 					return 0;
 				}
 				argv[index][length] = saved;
-			} else if (sh_var_readonly(argv[index]) != 0) return 0;
+			} else if (sh_var_readonly(argv[index]) != 0)
+				return 0;
 		}
 		return 1;
 	}
-	if (!strcmp(argv[0], ":")) return 1;
+	if (!strcmp(argv[0], ":"))
+		return 1;
 	if (!strcmp(argv[0], "pause")) {
 		unsigned char byte;
 		int i;
@@ -1059,7 +1146,8 @@ command_dispatch(int argc, char **argv)
 		char *args[ARG_MAX];
 		int i;
 		if (getenv("REMACS_SKK_DICT") == NULL)
-			(void)setenv("REMACS_SKK_DICT", "/home/skkjisyo.dic", 1);
+			(void)setenv("REMACS_SKK_DICT", "/home/skkjisyo.dic",
+				     1);
 		args[0] = "/usr/bin/remacs.nap";
 		for (i = 1; i < argc && i < ARG_MAX; i++)
 			args[i] = argv[i];
@@ -1074,8 +1162,8 @@ command_dispatch(int argc, char **argv)
 		for (i = 0; i < argc; i++)
 			child[i] = argv[i];
 		child[argc] = NULL;
-		return is_elf(argv[0]) ? run_external(child) :
-		    run_shell_script(argc, argv, argv[0]);
+		return is_elf(argv[0]) ? run_external(child)
+				       : run_shell_script(argc, argv, argv[0]);
 	}
 	return run_search_path(argc, argv);
 }
@@ -1084,10 +1172,9 @@ static int
 special_builtin_name(const char *name)
 {
 	static const char *const names[] = {
-		":", ".", "break", "continue", "eval", "exec", "exit",
-		"export", "readonly", "return", "set", "shift", "trap",
-		"unset", NULL
-	};
+	    ":",    ".",     "break",  "continue", "eval",
+	    "exec", "exit",  "export", "readonly", "return",
+	    "set",  "shift", "trap",   "unset",	   NULL};
 	int index;
 	for (index = 0; names[index] != NULL; index++)
 		if (strcmp(name, names[index]) == 0)
@@ -1135,17 +1222,18 @@ command_argv(int argc, char **argv)
 		for (index = 0; index < assignments; index++) {
 			if (apply_assignment(argv[index]) < 0) {
 				fprintf(stderr, "sh: %s: %s\n", argv[index],
-				    strerror(errno));
+					strerror(errno));
 				return 0;
 			}
 		}
 	} else {
 		for (index = 0; index < assignments; index++) {
-			if (temporary_assignment(argv[index], &snapshots[index]) != 0) {
+			if (temporary_assignment(argv[index],
+						 &snapshots[index]) != 0) {
 				while (index-- > 0)
 					(void)sh_var_restore(&snapshots[index]);
 				fprintf(stderr, "sh: %s: %s\n", argv[index + 1],
-				    strerror(errno));
+					strerror(errno));
 				return 0;
 			}
 			temporary++;
@@ -1173,7 +1261,8 @@ pipeline_free(struct pipeline_command *items, int count)
 {
 	int command_index, argument;
 	for (command_index = 0; command_index < count; command_index++) {
-		for (argument = 0; argument < items[command_index].argc; argument++)
+		for (argument = 0; argument < items[command_index].argc;
+		     argument++)
 			free(items[command_index].argv[argument]);
 		free(items[command_index].input);
 		free(items[command_index].output);
@@ -1187,21 +1276,29 @@ pipeline_child(struct pipeline_command *item)
 	if (item->input != NULL) {
 		descriptor = open(item->input, O_RDONLY);
 		if (descriptor < 0 || dup2(descriptor, STDIN_FILENO) < 0) {
-			fprintf(stderr, "%s: %s\n", item->input, strerror(errno));
-			if (descriptor >= 0) (void)close(descriptor);
+			fprintf(stderr, "%s: %s\n", item->input,
+				strerror(errno));
+			if (descriptor >= 0)
+				(void)close(descriptor);
 			return 0;
 		}
-		if (descriptor != STDIN_FILENO) (void)close(descriptor);
+		if (descriptor != STDIN_FILENO)
+			(void)close(descriptor);
 	}
 	if (item->output != NULL) {
-		descriptor = open(item->output, O_WRONLY | O_CREAT |
-		    (item->append ? O_APPEND : O_TRUNC), 0666);
+		descriptor = open(item->output,
+				  O_WRONLY | O_CREAT |
+				      (item->append ? O_APPEND : O_TRUNC),
+				  0666);
 		if (descriptor < 0 || dup2(descriptor, STDOUT_FILENO) < 0) {
-			fprintf(stderr, "%s: %s\n", item->output, strerror(errno));
-			if (descriptor >= 0) (void)close(descriptor);
+			fprintf(stderr, "%s: %s\n", item->output,
+				strerror(errno));
+			if (descriptor >= 0)
+				(void)close(descriptor);
 			return 0;
 		}
-		if (descriptor != STDOUT_FILENO) (void)close(descriptor);
+		if (descriptor != STDOUT_FILENO)
+			(void)close(descriptor);
 	}
 	command_subshell = 1;
 	command_background = 0;
@@ -1219,7 +1316,8 @@ execute_parent_command(struct pipeline_command *item)
 		descriptor = open(item->input, O_RDONLY);
 		if (saved_input < 0 || descriptor < 0 ||
 		    dup2(descriptor, STDIN_FILENO) < 0) {
-			fprintf(stderr, "%s: %s\n", item->input, strerror(errno));
+			fprintf(stderr, "%s: %s\n", item->input,
+				strerror(errno));
 			goto done;
 		}
 		(void)close(descriptor);
@@ -1228,11 +1326,14 @@ execute_parent_command(struct pipeline_command *item)
 	if (item->output != NULL) {
 		(void)fflush(stdout);
 		saved_output = dup(STDOUT_FILENO);
-		descriptor = open(item->output, O_WRONLY | O_CREAT |
-		    (item->append ? O_APPEND : O_TRUNC), 0666);
+		descriptor = open(item->output,
+				  O_WRONLY | O_CREAT |
+				      (item->append ? O_APPEND : O_TRUNC),
+				  0666);
 		if (saved_output < 0 || descriptor < 0 ||
 		    dup2(descriptor, STDOUT_FILENO) < 0) {
-			fprintf(stderr, "%s: %s\n", item->output, strerror(errno));
+			fprintf(stderr, "%s: %s\n", item->output,
+				strerror(errno));
 			goto done;
 		}
 		(void)close(descriptor);
@@ -1240,15 +1341,18 @@ execute_parent_command(struct pipeline_command *item)
 	}
 	command_background = 0;
 	result = command_argv(item->argc, item->argv);
-	done:
+done:
 	(void)fflush(NULL);
-	if (descriptor >= 0) (void)close(descriptor);
+	if (descriptor >= 0)
+		(void)close(descriptor);
 	if (saved_output >= 0) {
-		if (dup2(saved_output, STDOUT_FILENO) < 0) result = 0;
+		if (dup2(saved_output, STDOUT_FILENO) < 0)
+			result = 0;
 		(void)close(saved_output);
 	}
 	if (saved_input >= 0) {
-		if (dup2(saved_input, STDIN_FILENO) < 0) result = 0;
+		if (dup2(saved_input, STDIN_FILENO) < 0)
+			result = 0;
 		(void)close(saved_input);
 	}
 	clearerr(stdin);
@@ -1271,14 +1375,16 @@ execute_pipeline(struct pipeline_command *items, int count, int background)
 		return execute_parent_command(&items[0]);
 	(void)fflush(NULL);
 	for (index = 0; index < count; index++) {
-		int descriptors[2] = { -1, -1 };
+		int descriptors[2] = {-1, -1};
 		pid_t child;
 		if (index + 1 < count && pipe(descriptors) != 0)
 			goto failed;
 		child = fork();
 		if (child < 0) {
-			if (descriptors[0] >= 0) (void)close(descriptors[0]);
-			if (descriptors[1] >= 0) (void)close(descriptors[1]);
+			if (descriptors[0] >= 0)
+				(void)close(descriptors[0]);
+			if (descriptors[1] >= 0)
+				(void)close(descriptors[1]);
 			goto failed;
 		}
 		if (child == 0) {
@@ -1288,9 +1394,12 @@ execute_pipeline(struct pipeline_command *items, int count, int background)
 			if (descriptors[1] >= 0 &&
 			    dup2(descriptors[1], STDOUT_FILENO) < 0)
 				_exit(126);
-			if (input >= 0) (void)close(input);
-			if (descriptors[0] >= 0) (void)close(descriptors[0]);
-			if (descriptors[1] >= 0) (void)close(descriptors[1]);
+			if (input >= 0)
+				(void)close(input);
+			if (descriptors[0] >= 0)
+				(void)close(descriptors[0]);
+			if (descriptors[1] >= 0)
+				(void)close(descriptors[1]);
 			if (!pipeline_child(&items[index])) {
 				(void)fflush(NULL);
 				_exit(1);
@@ -1298,20 +1407,25 @@ execute_pipeline(struct pipeline_command *items, int count, int background)
 			(void)fflush(NULL);
 			_exit(0);
 		}
-		if (group == 0) group = child;
+		if (group == 0)
+			group = child;
 		(void)setpgid(child, group);
 		children[created++] = child;
-		if (input >= 0) (void)close(input);
-		if (descriptors[1] >= 0) (void)close(descriptors[1]);
+		if (input >= 0)
+			(void)close(input);
+		if (descriptors[1] >= 0)
+			(void)close(descriptors[1]);
 		input = descriptors[0];
 	}
-	if (input >= 0) (void)close(input);
+	if (input >= 0)
+		(void)close(input);
 	if (background) {
 		last_job = group;
 		printf("[%d]\n", (int)group);
 		return 1;
 	}
-	if (terminal) (void)tcsetpgrp(STDIN_FILENO, group);
+	if (terminal)
+		(void)tcsetpgrp(STDIN_FILENO, group);
 	for (index = 0; index < created; index++) {
 		int status = 0;
 		pid_t waited = waitpid(children[index], &status, WUNTRACED);
@@ -1326,10 +1440,12 @@ execute_pipeline(struct pipeline_command *items, int count, int background)
 			printf("[%d] stopped\n", (int)group);
 		}
 	}
-	if (terminal) (void)tcsetpgrp(STDIN_FILENO, shell_group);
+	if (terminal)
+		(void)tcsetpgrp(STDIN_FILENO, shell_group);
 	return WIFEXITED(last_status) && WEXITSTATUS(last_status) == 0;
 failed:
-	if (input >= 0) (void)close(input);
+	if (input >= 0)
+		(void)close(input);
 	while (created-- > 0)
 		(void)waitpid(children[created], NULL, 0);
 	fprintf(stderr, "sh: pipeline: %s\n", strerror(errno));
@@ -1338,8 +1454,9 @@ failed:
 
 static int
 parse_pipeline(const struct sh_token_list *list, size_t *position,
-    struct pipeline_command *items, int *item_count,
-    enum sh_token_type *following, const struct sh_expand_context *context)
+	       struct pipeline_command *items, int *item_count,
+	       enum sh_token_type *following,
+	       const struct sh_expand_context *context)
 {
 	int count = 1;
 	struct pipeline_command *item = &items[0];
@@ -1351,19 +1468,23 @@ parse_pipeline(const struct sh_token_list *list, size_t *position,
 			struct sh_field_list fields;
 			size_t field;
 			int assignment = assignment_length(
-			    list->tokens[*position].text) >= 0;
+					     list->tokens[*position].text) >= 0;
 			if (assignment) {
 				char *word;
-				if (!sh_expand_word(&list->tokens[*position], context,
-				    &word, &error_text)) {
-					fprintf(stderr, "sh: expansion: %s\n", error_text);
+				if (!sh_expand_word(&list->tokens[*position],
+						    context, &word,
+						    &error_text)) {
+					fprintf(stderr, "sh: expansion: %s\n",
+						error_text);
 					pipeline_free(items, count);
 					return 0;
 				}
 				memset(&fields, 0, sizeof(fields));
 				fields.fields = malloc(sizeof(*fields.fields));
-				fields.quoted = calloc(1, sizeof(*fields.quoted));
-				if (fields.fields == NULL || fields.quoted == NULL) {
+				fields.quoted =
+				    calloc(1, sizeof(*fields.quoted));
+				if (fields.fields == NULL ||
+				    fields.quoted == NULL) {
 					free(word);
 					free(fields.fields);
 					free(fields.quoted);
@@ -1373,14 +1494,18 @@ parse_pipeline(const struct sh_token_list *list, size_t *position,
 				fields.fields[0] = word;
 				fields.quoted[0] = NULL;
 				fields.count = 1;
-			} else if (!sh_expand_fields(&list->tokens[*position], context,
-			    &fields, &error_text)) {
-				fprintf(stderr, "sh: expansion: %s\n", error_text);
+			} else if (!sh_expand_fields(&list->tokens[*position],
+						     context, &fields,
+						     &error_text)) {
+				fprintf(stderr, "sh: expansion: %s\n",
+					error_text);
 				pipeline_free(items, count);
 				return 0;
 			}
-			if (!assignment && !sh_glob_fields(&fields, &error_text)) {
-				fprintf(stderr, "sh: pathname expansion: %s\n", error_text);
+			if (!assignment &&
+			    !sh_glob_fields(&fields, &error_text)) {
+				fprintf(stderr, "sh: pathname expansion: %s\n",
+					error_text);
 				sh_fields_free(&fields);
 				pipeline_free(items, count);
 				return 0;
@@ -1405,18 +1530,21 @@ parse_pipeline(const struct sh_token_list *list, size_t *position,
 			struct sh_field_list fields;
 			(*position)++;
 			if (list->tokens[*position].type != SH_TOKEN_WORD) {
-				fprintf(stderr, "sh: redirection requires a path\n");
+				fprintf(stderr,
+					"sh: redirection requires a path\n");
 				pipeline_free(items, count);
 				return 0;
 			}
 			if (!sh_expand_fields(&list->tokens[*position], context,
-			    &fields, &error_text)) {
-				fprintf(stderr, "sh: expansion: %s\n", error_text);
+					      &fields, &error_text)) {
+				fprintf(stderr, "sh: expansion: %s\n",
+					error_text);
 				pipeline_free(items, count);
 				return 0;
 			}
 			if (!sh_glob_fields(&fields, &error_text)) {
-				fprintf(stderr, "sh: pathname expansion: %s\n", error_text);
+				fprintf(stderr, "sh: pathname expansion: %s\n",
+					error_text);
 				sh_fields_free(&fields);
 				pipeline_free(items, count);
 				return 0;
@@ -1488,7 +1616,8 @@ command(char *text)
 		int item_count;
 		int execute;
 
-		if (!run_pending_traps()) result = 0;
+		if (!run_pending_traps())
+			result = 0;
 		context.status = result ? 0 : 1;
 		context.shell_pid = (long)getpid();
 		context.last_job = (long)last_job;
@@ -1500,7 +1629,7 @@ command(char *text)
 		context.positional_count = shell_positional_count;
 		context.positional = shell_positional;
 		if (!parse_pipeline(&list, &index, items, &item_count, &next,
-		    &context)) {
+				    &context)) {
 			result = 0;
 			goto done;
 		}
@@ -1512,12 +1641,13 @@ command(char *text)
 			result = 0;
 			goto done;
 		}
-		execute = connector == SH_TOKEN_SEMI || connector == SH_TOKEN_AMP ||
-		    (connector == SH_TOKEN_AND_IF && result) ||
-		    (connector == SH_TOKEN_OR_IF && !result);
+		execute = connector == SH_TOKEN_SEMI ||
+			  connector == SH_TOKEN_AMP ||
+			  (connector == SH_TOKEN_AND_IF && result) ||
+			  (connector == SH_TOKEN_OR_IF && !result);
 		if (execute) {
 			result = execute_pipeline(items, item_count,
-			    next == SH_TOKEN_AMP);
+						  next == SH_TOKEN_AMP);
 			any = 1;
 		}
 		pipeline_free(items, item_count);
@@ -1534,7 +1664,8 @@ command(char *text)
 	}
 	if (!any)
 		result = 1;
-	if (!run_pending_traps()) result = 0;
+	if (!run_pending_traps())
+		result = 0;
 done:
 	command_background = 0;
 	sh_tokens_free(&list);
@@ -1545,7 +1676,7 @@ static void
 run_startup(void)
 {
 	struct console_event event;
-	struct timespec start, now, delay = { 0, 10000000L };
+	struct timespec start, now, delay = {0, 10000000L};
 	int cancelled = 0;
 
 	if (access("/etc/zinit.rc", F_OK) != 0)
@@ -1563,7 +1694,7 @@ run_startup(void)
 			break;
 		if (now.tv_sec > start.tv_sec + 1 ||
 		    (now.tv_sec == start.tv_sec + 1 &&
-		    now.tv_nsec >= start.tv_nsec))
+		     now.tv_nsec >= start.tv_nsec))
 			break;
 		(void)nanosleep(&delay, NULL);
 	}
@@ -1598,7 +1729,7 @@ main(int argc, char **argv)
 		if (gethostname(hostname, sizeof(hostname)) != 0)
 			strcpy(hostname, "zedbsd");
 		(void)snprintf(prompt, sizeof(prompt), "root@%s:%s$ ", hostname,
-		    cwd);
+			       cwd);
 		line = readline(prompt);
 		if (line == NULL)
 			continue;

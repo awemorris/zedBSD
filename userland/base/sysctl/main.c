@@ -17,16 +17,16 @@ show_name(const char *name)
 		if (sysctlbyname(name, &stats, &length, NULL, 0) != 0)
 			return -1;
 		printf("%s: buffers=%llu hits=%llu misses=%llu read_bios=%llu "
-		    "write_bios=%llu evictions=%llu waits=%llu "
-		    "writeback_errors=%llu\n", name,
-		    (unsigned long long)stats.buffers,
-		    (unsigned long long)stats.hits,
-		    (unsigned long long)stats.misses,
-		    (unsigned long long)stats.read_bios,
-		    (unsigned long long)stats.write_bios,
-		    (unsigned long long)stats.evictions,
-		    (unsigned long long)stats.waits,
-		    (unsigned long long)stats.writeback_errors);
+		       "write_bios=%llu evictions=%llu waits=%llu "
+		       "writeback_errors=%llu\n",
+		       name, (unsigned long long)stats.buffers,
+		       (unsigned long long)stats.hits,
+		       (unsigned long long)stats.misses,
+		       (unsigned long long)stats.read_bios,
+		       (unsigned long long)stats.write_bios,
+		       (unsigned long long)stats.evictions,
+		       (unsigned long long)stats.waits,
+		       (unsigned long long)stats.writeback_errors);
 		return 0;
 	} else {
 		uint64_t value;
@@ -41,16 +41,16 @@ static int
 show_all(void)
 {
 	static const char *const names[] = {
-		"vfs.bufcache.max_bytes",
-		"vfs.bufcache.current_bytes",
-		"vfs.bufcache.dirty_bytes",
-		"vfs.bufcache.stats",
+	    "vfs.bufcache.max_bytes",
+	    "vfs.bufcache.current_bytes",
+	    "vfs.bufcache.dirty_bytes",
+	    "vfs.bufcache.stats",
 	};
 	unsigned i;
 	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++)
 		if (show_name(names[i]) != 0) {
 			fprintf(stderr, "sysctl: %s: %s\n", names[i],
-			    strerror(errno));
+				strerror(errno));
 			return 1;
 		}
 	return 0;

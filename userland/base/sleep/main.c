@@ -12,7 +12,8 @@ main(int argc, char **argv)
 	unsigned long long seconds;
 	struct timespec request, remaining;
 	if (argc != 2 || command_parse_ull(argv[1], &seconds) != 0 ||
-	    (time_t)seconds < 0 || (unsigned long long)(time_t)seconds != seconds) {
+	    (time_t)seconds < 0 ||
+	    (unsigned long long)(time_t)seconds != seconds) {
 		fprintf(stderr, "usage: sleep seconds\n");
 		return 1;
 	}

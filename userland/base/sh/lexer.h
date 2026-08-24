@@ -36,7 +36,8 @@ struct sh_token_list {
 	size_t count;
 };
 
-/* Returns zero and leaves error_text pointing at a static diagnostic on error. */
+/* Returns zero and leaves error_text pointing at a static diagnostic on error.
+ */
 int sh_lex(const char *, struct sh_token_list *, const char **error_text);
 void sh_tokens_free(struct sh_token_list *);
 

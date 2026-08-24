@@ -27,11 +27,13 @@ HOSTCC ?= cc
 PYTHON ?= python3
 .DEFAULT_GOAL := disk-image
 
--include config.mk
+ZEDBSD_CONFIG ?= config.mk
+-include $(ZEDBSD_CONFIG)
 
 # menuconfig and help remain available before the first configuration is
 # saved.  Every build target requires the target information from config.mk.
-ZEDBSD_CONFIG_OPTIONAL_GOALS := menuconfig help
+ZEDBSD_CONFIG_OPTIONAL_GOALS := menuconfig help list-user-programs \
+	menuconfig-host-test
 ifeq ($(strip $(ZEDBSD_PLATFORM)),)
 ifneq ($(filter-out $(ZEDBSD_CONFIG_OPTIONAL_GOALS),$(MAKECMDGOALS)),)
 $(error config.mk is missing or invalid; run 'make menuconfig')
@@ -162,7 +164,7 @@ list-user-programs:
 
 .PHONY: menuconfig
 menuconfig:
-	@$(PYTHON) tools/menuconfig.py --output config.mk
+	@$(PYTHON) tools/menuconfig.py --output $(ZEDBSD_CONFIG)
 
 .PHONY: help list-targets
 help:
@@ -211,7 +213,7 @@ ZEDBSD_CHECK_TARGETS := check libc-host-test softfloat-host-test \
 	posix2024-header-check posix2024-api-matrix-check \
 	posix2024-utility-matrix-check \
 	susv4-libc-host-test crypt-host-test gettext-catalog-host-test \
-	userland-command-host-test \
+	userland-command-host-test menuconfig-host-test \
 	ufs1-format-host-test ufs2-format-host-test ufs1-format-python-test \
 	ufs2-format-python-test overlay-journal-format-host-test
 
@@ -1000,6 +1002,11 @@ userland-command-host-test: tests/test-userland-commands-host.sh
 
 CHECK_RUN_TARGETS += userland-command-host-test
 
+menuconfig-host-test: tests/menuconfig-host-test.py tools/menuconfig.py
+	$(PYTHON) tests/menuconfig-host-test.py
+
+CHECK_RUN_TARGETS += menuconfig-host-test
+
 $(BUILD)/tests/msgfmt-host: userland/base/msgfmt/main.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror $< -o $@
@@ -1159,6 +1166,6 @@ distclean:
 	hal-signal-frame-layout-check \
 	posix-header-check posix-api-matrix-check susv4-header-check \
 	susv4-libc-host-test crypt-host-test gettext-catalog-host-test \
-	userland-command-host-test \
+	userland-command-host-test menuconfig-host-test \
 	ufs1-format-host-test \
 	ufs2-format-host-test ufs1-format-python-test ufs2-format-python-test

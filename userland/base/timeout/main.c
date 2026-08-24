@@ -20,7 +20,7 @@
 #include <unistd.h>
 
 #ifndef SIG2STR_MAX
-#define SIG2STR_MAX	32
+#define SIG2STR_MAX 32
 #endif
 
 struct options {
@@ -38,10 +38,10 @@ static volatile int timeout_reached;
 static volatile int forwarded_signal;
 static volatile int timeout_signal = SIGTERM;
 
-#if defined(HAL_ARCH_I386) || defined(HAL_ARCH_AMD64) || \
-    defined(HAL_ARCH_ARM64) || defined(HAL_ARCH_SPARCV9) || \
+#if defined(HAL_ARCH_I386) || defined(HAL_ARCH_AMD64) ||                       \
+    defined(HAL_ARCH_ARM64) || defined(HAL_ARCH_SPARCV9) ||                    \
     defined(HAL_ARCH_M68K)
-#define ACTION_HANDLER(action, handler) \
+#define ACTION_HANDLER(action, handler)                                        \
 	((action).sa_handler = (uint64_t)(uintptr_t)(handler))
 #else
 #define ACTION_HANDLER(action, handler) ((action).sa_handler = (handler))
@@ -113,11 +113,20 @@ duration_parse(const char *text, struct timespec *result)
 		nanoseconds++;
 	switch (*cursor) {
 	case '\0':
-	case 's': multiplier = 1U; break;
-	case 'm': multiplier = 60U; break;
-	case 'h': multiplier = 60U * 60U; break;
-	case 'd': multiplier = 24U * 60U * 60U; break;
-	default: return -1;
+	case 's':
+		multiplier = 1U;
+		break;
+	case 'm':
+		multiplier = 60U;
+		break;
+	case 'h':
+		multiplier = 60U * 60U;
+		break;
+	case 'd':
+		multiplier = 24U * 60U * 60U;
+		break;
+	default:
+		return -1;
 	}
 	if (*cursor != '\0' && cursor[1] != '\0')
 		return -1;
@@ -144,24 +153,24 @@ signal_parse(const char *text, int *result)
 		const char *name;
 		int number;
 	} names[] = {
-		{ "HUP", SIGHUP }, { "INT", SIGINT }, { "QUIT", SIGQUIT },
-		{ "ILL", SIGILL }, { "TRAP", SIGTRAP }, { "ABRT", SIGABRT },
-		{ "FPE", SIGFPE }, { "KILL", SIGKILL }, { "BUS", SIGBUS },
-		{ "SEGV", SIGSEGV }, { "PIPE", SIGPIPE }, { "ALRM", SIGALRM },
-		{ "TERM", SIGTERM }, { "USR1", SIGUSR1 }, { "USR2", SIGUSR2 },
-		{ "CHLD", SIGCHLD }, { "CONT", SIGCONT }, { "STOP", SIGSTOP },
-		{ "TSTP", SIGTSTP }, { "TTIN", SIGTTIN }, { "TTOU", SIGTTOU },
+	    {"HUP", SIGHUP},	 {"INT", SIGINT},   {"QUIT", SIGQUIT},
+	    {"ILL", SIGILL},	 {"TRAP", SIGTRAP}, {"ABRT", SIGABRT},
+	    {"FPE", SIGFPE},	 {"KILL", SIGKILL}, {"BUS", SIGBUS},
+	    {"SEGV", SIGSEGV},	 {"PIPE", SIGPIPE}, {"ALRM", SIGALRM},
+	    {"TERM", SIGTERM},	 {"USR1", SIGUSR1}, {"USR2", SIGUSR2},
+	    {"CHLD", SIGCHLD},	 {"CONT", SIGCONT}, {"STOP", SIGSTOP},
+	    {"TSTP", SIGTSTP},	 {"TTIN", SIGTTIN}, {"TTOU", SIGTTOU},
 #ifdef SIGURG
-		{ "URG", SIGURG },
+	    {"URG", SIGURG},
 #endif
 #ifdef SIGWINCH
-		{ "WINCH", SIGWINCH },
+	    {"WINCH", SIGWINCH},
 #endif
 #ifdef SIGXCPU
-		{ "XCPU", SIGXCPU },
+	    {"XCPU", SIGXCPU},
 #endif
 #ifdef SIGXFSZ
-		{ "XFSZ", SIGXFSZ },
+	    {"XFSZ", SIGXFSZ},
 #endif
 	};
 	char name[SIG2STR_MAX];
@@ -210,8 +219,12 @@ parse_options(int argc, char **argv, struct options *options, int *first)
 		}
 		for (position = 1; argument[position] != '\0'; position++) {
 			switch (argument[position]) {
-			case 'f': options->foreground = 1; break;
-			case 'p': options->preserve_status = 1; break;
+			case 'f':
+				options->foreground = 1;
+				break;
+			case 'p':
+				options->preserve_status = 1;
+				break;
 			case 'k':
 			case 's': {
 				char option = argument[position];
@@ -219,29 +232,33 @@ parse_options(int argc, char **argv, struct options *options, int *first)
 
 				if (argument[position + 1U] != '\0') {
 					value = argument + position + 1U;
-					position = (unsigned)strlen(argument) - 1U;
+					position =
+					    (unsigned)strlen(argument) - 1U;
 				} else if (++index < argc) {
 					value = argv[index];
 				} else {
 					return -1;
 				}
 				if (option == 'k') {
-					if (duration_parse(value,
-					    &options->kill_delay) != 0)
+					if (duration_parse(
+						value, &options->kill_delay) !=
+					    0)
 						return -1;
 					options->has_kill_delay = 1;
-				} else if (signal_parse(value,
-				    &options->signal_number) != 0) {
+				} else if (signal_parse(
+					       value,
+					       &options->signal_number) != 0) {
 					return -1;
 				}
 				break;
 			}
-			default: return -1;
+			default:
+				return -1;
 			}
 		}
 	}
-	if (argc - index < 2 || duration_parse(argv[index],
-	    &options->duration) != 0)
+	if (argc - index < 2 ||
+	    duration_parse(argv[index], &options->duration) != 0)
 		return -1;
 	*first = index + 1;
 	return 0;
@@ -294,10 +311,9 @@ kill_and_reap(pid_t child)
 int
 main(int argc, char **argv)
 {
-	static const int relayed[] = {
-		SIGHUP, SIGINT, SIGQUIT, SIGABRT, SIGPIPE, SIGTERM,
-		SIGUSR1, SIGUSR2, SIGXCPU, SIGXFSZ
-	};
+	static const int relayed[] = {SIGHUP,  SIGINT,	SIGQUIT, SIGABRT,
+				      SIGPIPE, SIGTERM, SIGUSR1, SIGUSR2,
+				      SIGXCPU, SIGXFSZ};
 	struct sigaction action;
 	struct sigevent event;
 	struct options options;
@@ -309,8 +325,9 @@ main(int argc, char **argv)
 	unsigned index;
 
 	if (parse_options(argc, argv, &options, &first) != 0) {
-		fprintf(stderr, "usage: timeout [-fp] [-k time] [-s signal_name] "
-		    "duration utility [argument ...]\n");
+		fprintf(stderr,
+			"usage: timeout [-fp] [-k time] [-s signal_name] "
+			"duration utility [argument ...]\n");
 		return 125;
 	}
 	child = fork();
@@ -366,8 +383,8 @@ main(int argc, char **argv)
 					memset(&event, 0, sizeof(event));
 					event.sigev_notify = SIGEV_SIGNAL;
 					event.sigev_signo = SIGALRM;
-					if (timer_create(CLOCK_MONOTONIC, &event,
-					    &timer) != 0)
+					if (timer_create(CLOCK_MONOTONIC,
+							 &event, &timer) != 0)
 						goto internal_failure;
 					timer_created = 1;
 				}
@@ -376,7 +393,8 @@ main(int argc, char **argv)
 					send_to_child(SIGKILL);
 				} else {
 					timeout_signal = SIGKILL;
-					if (timer_arm(timer, &options.kill_delay) != 0)
+					if (timer_arm(timer,
+						      &options.kill_delay) != 0)
 						goto internal_failure;
 				}
 				kill_timer_armed = 1;

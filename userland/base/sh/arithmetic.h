@@ -3,6 +3,6 @@
 #define ZEDBSD_USERLAND_SH_ARITHMETIC_H
 
 int sh_arithmetic_eval(const char *, const char *(*)(void *, const char *),
-    void *, long *, const char **);
+		       void *, long *, const char **);
 
 #endif

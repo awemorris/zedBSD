@@ -14,8 +14,8 @@ main(int argc, char **argv)
 	unsigned long long value;
 	int index, failed = 0;
 	if (argc < 4 || strcmp(argv[1], "-s") != 0 ||
-	    command_parse_ull(argv[2], &value) != 0 ||
-	    (off_t)value < 0 || (unsigned long long)(off_t)value != value) {
+	    command_parse_ull(argv[2], &value) != 0 || (off_t)value < 0 ||
+	    (unsigned long long)(off_t)value != value) {
 		fprintf(stderr, "usage: truncate -s size file...\n");
 		return 1;
 	}

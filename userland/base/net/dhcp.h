@@ -26,9 +26,9 @@ struct dhcp_lease {
 	uint8_t message_type;
 };
 
-int dhcp_build(uint8_t *, size_t, size_t *, uint8_t, uint32_t,
-	const uint8_t[6], uint32_t, uint32_t);
+int dhcp_build(uint8_t *, size_t, size_t *, uint8_t, uint32_t, const uint8_t[6],
+	       uint32_t, uint32_t);
 int dhcp_parse(const uint8_t *, size_t, uint32_t, const uint8_t[6],
-	struct dhcp_lease *);
+	       struct dhcp_lease *);
 
 #endif

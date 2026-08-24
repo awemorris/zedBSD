@@ -34,8 +34,9 @@ struct target_term {
 
 static struct target_term terminal;
 
-static int directory_read(void *context, const char *path, size_t index,
-			  char *name, size_t capacity, int *is_directory)
+static int
+directory_read(void *context, const char *path, size_t index, char *name,
+	       size_t capacity, int *is_directory)
 {
 	const struct noct_services *services = context;
 	struct noct_dirent entry;
@@ -59,7 +60,8 @@ static int directory_read(void *context, const char *path, size_t index,
 	return 1;
 }
 
-static int term_open(void *context)
+static int
+term_open(void *context)
 {
 	struct target_term *term = context;
 
@@ -73,31 +75,34 @@ static int term_open(void *context)
 	term->open = 1;
 	if (term->services->screen_show_cursor != NULL)
 		(void)term->services->screen_show_cursor(
-			term->services->context, 1);
+		    term->services->context, 1);
 	return 1;
 }
 
-static void term_close(void *context)
+static void
+term_close(void *context)
 {
 	struct target_term *term = context;
 
 	if (term->services != NULL &&
 	    term->services->screen_show_cursor != NULL)
 		(void)term->services->screen_show_cursor(
-			term->services->context, 1);
+		    term->services->context, 1);
 	term->open = 0;
 }
 
-static int term_is_tty(void *context)
+static int
+term_is_tty(void *context)
 {
 	struct target_term *term = context;
 
 	return term->services != NULL &&
-		term->services->screen_put_utf8 != NULL &&
-		term->services->keyboard_read != NULL;
+	       term->services->screen_put_utf8 != NULL &&
+	       term->services->keyboard_read != NULL;
 }
 
-static int term_size(void *context, unsigned *rows, unsigned *columns)
+static int
+term_size(void *context, unsigned *rows, unsigned *columns)
 {
 	(void)context;
 	if (rows == NULL || columns == NULL)
@@ -107,18 +112,21 @@ static int term_size(void *context, unsigned *rows, unsigned *columns)
 	return 1;
 }
 
-static int term_resized(void *context)
+static int
+term_resized(void *context)
 {
 	(void)context;
 	return 0;
 }
 
-static int term_move_to(void *context, unsigned row, unsigned column)
+static int
+term_move_to(void *context, unsigned row, unsigned column)
 {
 	struct target_term *term = context;
 
-	if (term->services == NULL || term->services->screen_set_cursor == NULL ||
-	    row == 0 || row > 25 || column == 0 || column > 80)
+	if (term->services == NULL ||
+	    term->services->screen_set_cursor == NULL || row == 0 || row > 25 ||
+	    column == 0 || column > 80)
 		return 0;
 	term->row = row - 1U;
 	term->column = column - 1U;
@@ -126,7 +134,8 @@ static int term_move_to(void *context, unsigned row, unsigned column)
 						 term->row, term->column);
 }
 
-static int term_write(void *context, const char *utf8, size_t length)
+static int
+term_write(void *context, const char *utf8, size_t length)
 {
 	struct target_term *term = context;
 	size_t position = 0;
@@ -142,9 +151,9 @@ static int term_write(void *context, const char *utf8, size_t length)
 			position++;
 		if (position != start) {
 			cells = term->services->screen_put_utf8(
-				term->services->context, term->row, term->column,
-				utf8 + start, (unsigned)(position - start),
-				term->attribute);
+			    term->services->context, term->row, term->column,
+			    utf8 + start, (unsigned)(position - start),
+			    term->attribute);
 			if (cells < 0)
 				return 0;
 			term->column += (unsigned)cells;
@@ -154,10 +163,12 @@ static int term_write(void *context, const char *utf8, size_t length)
 		if (position == length)
 			break;
 		/* Remacs uses only SGR reset and reverse-video escapes in its
-		 * composed rows.  Translate those to native PC-98 attributes. */
+		 * composed rows.  Translate those to native PC-98 attributes.
+		 */
 		if (length - position >= 4U && utf8[position + 1U] == '[' &&
 		    utf8[position + 3U] == 'm' &&
-		    (utf8[position + 2U] == '0' || utf8[position + 2U] == '7')) {
+		    (utf8[position + 2U] == '0' ||
+		     utf8[position + 2U] == '7')) {
 			if (utf8[position + 2U] == '7')
 				term->attribute |= 0x04U;
 			else
@@ -166,9 +177,9 @@ static int term_write(void *context, const char *utf8, size_t length)
 			continue;
 		}
 		/* Keep an unsupported escape visible for diagnostics. */
-		cells = term->services->screen_put_utf8(term->services->context,
-			term->row, term->column, utf8 + position, 1U,
-			term->attribute);
+		cells = term->services->screen_put_utf8(
+		    term->services->context, term->row, term->column,
+		    utf8 + position, 1U, term->attribute);
 		if (cells < 0)
 			return 0;
 		term->column += (unsigned)cells;
@@ -177,7 +188,8 @@ static int term_write(void *context, const char *utf8, size_t length)
 	return 1;
 }
 
-static int term_clear(void *context)
+static int
+term_clear(void *context)
 {
 	struct target_term *term = context;
 
@@ -189,17 +201,19 @@ static int term_clear(void *context)
 	return 1;
 }
 
-static int term_clear_to_eol(void *context)
+static int
+term_clear_to_eol(void *context)
 {
 	struct target_term *term = context;
 
 	return term->services != NULL &&
-		term->services->screen_clear_to_eol != NULL &&
-		term->services->screen_clear_to_eol(term->services->context,
+	       term->services->screen_clear_to_eol != NULL &&
+	       term->services->screen_clear_to_eol(term->services->context,
 						   term->row, term->column);
 }
 
-static int term_set_style(void *context, const struct NoctTermStyle *style)
+static int
+term_set_style(void *context, const struct NoctTermStyle *style)
 {
 	struct target_term *term = context;
 	uint8_t attribute = 0xe1U;
@@ -207,8 +221,8 @@ static int term_set_style(void *context, const struct NoctTermStyle *style)
 	if (style == NULL)
 		return 0;
 	if (style->foreground >= 0)
-		attribute = (uint8_t)(1U |
-			((unsigned)style->foreground & 7U) << 5);
+		attribute =
+		    (uint8_t)(1U | ((unsigned)style->foreground & 7U) << 5);
 	if (style->reverse)
 		attribute |= 0x04U;
 	if (style->underline)
@@ -217,43 +231,47 @@ static int term_set_style(void *context, const struct NoctTermStyle *style)
 	return 1;
 }
 
-static int term_show_cursor(void *context, int visible)
+static int
+term_show_cursor(void *context, int visible)
 {
 	struct target_term *term = context;
 
 	return term->services != NULL &&
-		term->services->screen_show_cursor != NULL &&
-		term->services->screen_show_cursor(term->services->context,
+	       term->services->screen_show_cursor != NULL &&
+	       term->services->screen_show_cursor(term->services->context,
 						  visible);
 }
 
-static int term_flush(void *context)
+static int
+term_flush(void *context)
 {
 	struct target_term *term = context;
 
-	if (term->services != NULL &&
-	    term->services->screen_set_cursor != NULL)
+	if (term->services != NULL && term->services->screen_set_cursor != NULL)
 		(void)term->services->screen_set_cursor(
-			term->services->context, term->row, term->column);
+		    term->services->context, term->row, term->column);
 	return 1;
 }
 
-static int translate_key(int event)
+static int
+translate_key(int event)
 {
 	unsigned shift = ((unsigned)event & TARGET_KEY_SHIFT ? 0x01U : 0) |
-		((unsigned)event & TARGET_KEY_CTRL ? 0x10U : 0) |
-		((unsigned)event & TARGET_KEY_GRAPH ? 0x08U : 0);
+			 ((unsigned)event & TARGET_KEY_CTRL ? 0x10U : 0) |
+			 ((unsigned)event & TARGET_KEY_GRAPH ? 0x08U : 0);
 	int modifiers = 0;
 	int key = event & (int)TARGET_KEY_MASK;
 
 	/* Modifier make events describe state; they are not editor input. */
-	if (key == 0x170 || key == 0x173 || key == 0x174) /* Shift, Graph, Ctrl */
+	if (key == 0x170 || key == 0x173 ||
+	    key == 0x174) /* Shift, Graph, Ctrl */
 		return -1;
 
 	switch (key) {
 	case NOCT_BEUI_KEY_TAB:
 		/* Remacs completion and ordinary editor insertion both use the
-		 * terminal's literal Tab character, not a modified Ctrl-I event. */
+		 * terminal's literal Tab character, not a modified Ctrl-I
+		 * event. */
 		return NOCT_BEUI_KEY_TAB;
 	case NOCT_BEUI_KEY_BACKSPACE:
 		return 0x7f;
@@ -307,7 +325,8 @@ static int translate_key(int event)
  * even when ESC arrived immediately before a second boundary. A bare ESC is
  * therefore delayed by one to two seconds, but never blocks indefinitely.
  */
-static int read_meta_suffix(struct target_term *term)
+static int
+read_meta_suffix(struct target_term *term)
 {
 	int previous;
 	unsigned changes = 0;
@@ -315,8 +334,11 @@ static int read_meta_suffix(struct target_term *term)
 	if (term->services->keyboard_poll == NULL)
 		return -1;
 	if (term->services->clock_second == NULL)
-		return term->services->keyboard_poll(term->services->context) >= 0 ?
-			term->services->keyboard_read(term->services->context) : -1;
+		return term->services->keyboard_poll(term->services->context) >=
+			       0
+			   ? term->services->keyboard_read(
+				 term->services->context)
+			   : -1;
 	previous = term->services->clock_second(term->services->context);
 	if (previous < 0 || previous > 59)
 		return -1;
@@ -325,7 +347,7 @@ static int read_meta_suffix(struct target_term *term)
 
 		if (term->services->keyboard_poll(term->services->context) >= 0)
 			return term->services->keyboard_read(
-				term->services->context);
+			    term->services->context);
 		second = term->services->clock_second(term->services->context);
 		if (second < 0 || second > 59)
 			return -1;
@@ -337,7 +359,8 @@ static int read_meta_suffix(struct target_term *term)
 	}
 }
 
-static int term_read_key(void *context, int timeout_ms)
+static int
+term_read_key(void *context, int timeout_ms)
 {
 	struct target_term *term = context;
 	int allow_blocking = timeout_ms >= 1000;
@@ -350,21 +373,24 @@ static int term_read_key(void *context, int timeout_ms)
 
 		if (term->services->keyboard_poll != NULL &&
 		    term->services->keyboard_poll(term->services->context) >= 0)
-			key = term->services->keyboard_read(term->services->context);
+			key = term->services->keyboard_read(
+			    term->services->context);
 		/* The PC-98 BIOS offers a blocking read and a poll, but no
-		 * millisecond timeout. Remacs uses a 20 ms grace read after each
-		 * human keystroke to coalesce pasted input. Turning that grace read
-		 * into a blocking BIOS call leaves every typed character waiting for
-		 * the next one. Preserve blocking behavior only for the normal
-		 * one-second event-loop wait. */
+		 * millisecond timeout. Remacs uses a 20 ms grace read after
+		 * each human keystroke to coalesce pasted input. Turning that
+		 * grace read into a blocking BIOS call leaves every typed
+		 * character waiting for the next one. Preserve blocking
+		 * behavior only for the normal one-second event-loop wait. */
 		else if (allow_blocking)
-			key = term->services->keyboard_read(term->services->context);
+			key = term->services->keyboard_read(
+			    term->services->context);
 		if (key < 0)
 			return -1;
 		translated = translate_key(key);
 		if (translated < 0) {
-			/* A modifier-only event may precede the printable key in the
-			 * same BIOS queue. Consume it and keep looking. */
+			/* A modifier-only event may precede the printable key
+			 * in the same BIOS queue. Consume it and keep looking.
+			 */
 			continue;
 		}
 		if (translated == 0x1b) {
@@ -376,36 +402,37 @@ static int term_read_key(void *context, int timeout_ms)
 	}
 }
 
-static int term_pending_input(void *context)
+static int
+term_pending_input(void *context)
 {
 	struct target_term *term = context;
 
 	return term->services != NULL &&
-		term->services->keyboard_poll != NULL &&
-		term->services->keyboard_poll(term->services->context) >= 0;
+	       term->services->keyboard_poll != NULL &&
+	       term->services->keyboard_poll(term->services->context) >= 0;
 }
 
-int noct_target_register(NoctEnv *env,
-				const struct noct_services *services)
+int
+noct_target_register(NoctEnv *env, const struct noct_services *services)
 {
 	static const struct NoctDirectoryBackend directory = {
-		.read = directory_read,
+	    .read = directory_read,
 	};
 	static const struct NoctTermBackend term = {
-		.open = term_open,
-		.close = term_close,
-		.is_tty = term_is_tty,
-		.size = term_size,
-		.resized = term_resized,
-		.move_to = term_move_to,
-		.write = term_write,
-		.clear = term_clear,
-		.clear_to_eol = term_clear_to_eol,
-		.set_style = term_set_style,
-		.show_cursor = term_show_cursor,
-		.flush = term_flush,
-		.read_key = term_read_key,
-		.pending_input = term_pending_input,
+	    .open = term_open,
+	    .close = term_close,
+	    .is_tty = term_is_tty,
+	    .size = term_size,
+	    .resized = term_resized,
+	    .move_to = term_move_to,
+	    .write = term_write,
+	    .clear = term_clear,
+	    .clear_to_eol = term_clear_to_eol,
+	    .set_style = term_set_style,
+	    .show_cursor = term_show_cursor,
+	    .flush = term_flush,
+	    .read_key = term_read_key,
+	    .pending_input = term_pending_input,
 	};
 
 	memset(&terminal, 0, sizeof(terminal));
@@ -413,10 +440,11 @@ int noct_target_register(NoctEnv *env,
 	terminal.attribute = 0xe1U;
 	noct_set_directory_backend(&directory, (void *)services);
 	return noct_register_api_file(env) &&
-		noct_register_api_term_backend(env, &term, &terminal);
+	       noct_register_api_term_backend(env, &term, &terminal);
 }
 
-void noct_target_cleanup(void)
+void
+noct_target_cleanup(void)
 {
 	noct_set_directory_backend(NULL, NULL);
 	memset(&terminal, 0, sizeof(terminal));

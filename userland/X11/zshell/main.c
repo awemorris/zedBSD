@@ -113,8 +113,8 @@ read_entire_file(const char *path, char **result, size_t *result_size)
 		return 0;
 	}
 	while (used < (size_t)st.st_size) {
-		ssize_t count = read(descriptor, data + used,
-		    (size_t)st.st_size - used);
+		ssize_t count =
+		    read(descriptor, data + used, (size_t)st.st_size - used);
 		if (count < 0 && errno == EINTR)
 			continue;
 		if (count <= 0) {
@@ -190,15 +190,16 @@ load_icon(struct icon *icon, const char *path)
 	cursor = file;
 	end = file + size;
 	line = next_quoted(&cursor, end);
-	if (line == NULL || !xpm_header(line, header) ||
-	    header[0] == 0 || header[0] > ICON_MAX_SIZE ||
-	    header[1] == 0 || header[1] > ICON_MAX_SIZE ||
-	    header[2] == 0 || header[2] > ICON_MAX_COLORS || header[3] != 1)
+	if (line == NULL || !xpm_header(line, header) || header[0] == 0 ||
+	    header[0] > ICON_MAX_SIZE || header[1] == 0 ||
+	    header[1] > ICON_MAX_SIZE || header[2] == 0 ||
+	    header[2] > ICON_MAX_COLORS || header[3] != 1)
 		goto invalid;
 	icon->width = header[0];
 	icon->height = header[1];
 	icon->color_count = header[2];
-	/* Xzed desktop icons require one-byte keys and #RRGGBB or None colors. */
+	/* Xzed desktop icons require one-byte keys and #RRGGBB or None colors.
+	 */
 	for (index = 0; index < icon->color_count; index++) {
 		char *color;
 		line = next_quoted(&cursor, end);
@@ -212,7 +213,8 @@ load_icon(struct icon *icon, const char *path)
 			icon->colors[index] = UINT32_MAX;
 		else if (*color == '#') {
 			char *number_end;
-			unsigned long value = strtoul(color + 1, &number_end, 16);
+			unsigned long value =
+			    strtoul(color + 1, &number_end, 16);
 			if (number_end != color + 7 || *number_end != '\0')
 				goto invalid;
 			icon->colors[index] = (uint32_t)value;
@@ -228,8 +230,10 @@ load_icon(struct icon *icon, const char *path)
 			uint8_t palette = ICON_TRANSPARENT;
 			for (index = 0; index < icon->color_count; index++)
 				if (line[column] == keys[index]) {
-					palette = icon->colors[index] == UINT32_MAX ?
-					    ICON_TRANSPARENT : (uint8_t)index;
+					palette =
+					    icon->colors[index] == UINT32_MAX
+						? ICON_TRANSPARENT
+						: (uint8_t)index;
 					break;
 				}
 			icon->pixels[row * ICON_MAX_SIZE + column] = palette;
@@ -250,11 +254,13 @@ cached_icon(struct desktop_shell *shell, const char *path)
 
 	for (index = 0; index < shell->icon_count; index++)
 		if (strcmp(shell->icons[index].path, path) == 0)
-			return shell->icons[index].valid ? &shell->icons[index] : NULL;
+			return shell->icons[index].valid ? &shell->icons[index]
+							 : NULL;
 	if (shell->icon_count == ICON_CACHE_SIZE)
 		return NULL;
 	index = shell->icon_count++;
-	return load_icon(&shell->icons[index], path) ? &shell->icons[index] : NULL;
+	return load_icon(&shell->icons[index], path) ? &shell->icons[index]
+						     : NULL;
 }
 
 /* Desktop task discovery. */
@@ -288,11 +294,12 @@ window_icon_path(struct desktop_shell *shell, Window window, char **path)
 	unsigned count = 0;
 	unsigned index;
 
-	/* A window manager may attach the icon to its frame or to the client. */
+	/* A window manager may attach the icon to its frame or to the client.
+	 */
 	if (XzedGetIconPath(shell->display, window, path))
 		return 1;
 	if (!XQueryTree(shell->display, window, &root_return, &parent_return,
-	    &children, &count))
+			&children, &count))
 		return 0;
 	for (index = 0; index < count; index++)
 		if (XzedGetIconPath(shell->display, children[index], path)) {
@@ -311,7 +318,8 @@ window_client(struct desktop_shell *shell, Window window)
 	Window client = window;
 
 	if (XQueryTree(shell->display, window, &root_return, &parent_return,
-	    &children, &count) && count != 0)
+		       &children, &count) &&
+	    count != 0)
 		client = children[0];
 	XFree(children);
 	return client;
@@ -331,10 +339,9 @@ refresh_tasks(struct desktop_shell *shell)
 
 	memset(next, 0, sizeof(next));
 	if (!XQueryTree(shell->display, shell->root, &root_return,
-	    &parent_return, &children, &count))
+			&parent_return, &children, &count))
 		return 0;
-	for (index = 0; index < count && next_count < MAX_TASKS;
-	    index++) {
+	for (index = 0; index < count && next_count < MAX_TASKS; index++) {
 		struct task *task;
 		char *name = NULL;
 		char *path = NULL;
@@ -357,13 +364,15 @@ refresh_tasks(struct desktop_shell *shell)
 		XFree(name);
 	}
 	XFree(children);
-	/* Preserve the existing array when the root stacking order is unchanged. */
+	/* Preserve the existing array when the root stacking order is
+	 * unchanged. */
 	changed = next_count != shell->task_count;
 	if (!changed)
 		for (index = 0; index < next_count; index++)
 			if (next[index].window != shell->tasks[index].window ||
 			    next[index].client != shell->tasks[index].client ||
-			    strcmp(next[index].name, shell->tasks[index].name) != 0 ||
+			    strcmp(next[index].name,
+				   shell->tasks[index].name) != 0 ||
 			    next[index].icon != shell->tasks[index].icon) {
 				changed = 1;
 				break;
@@ -379,26 +388,26 @@ refresh_tasks(struct desktop_shell *shell)
 
 static void
 fill(struct desktop_shell *shell, unsigned long color, int x, int y,
-    unsigned width, unsigned height)
+     unsigned width, unsigned height)
 {
 	XSetForeground(shell->display, shell->gc, color);
 	x_request(shell);
-	XFillRectangle(shell->display, shell->window, shell->gc, x, y,
-	    width, height);
+	XFillRectangle(shell->display, shell->window, shell->gc, x, y, width,
+		       height);
 	x_request(shell);
 }
 
 static void
 draw_text(struct desktop_shell *shell, int x, int y, const char *text,
-    size_t maximum)
+	  size_t maximum)
 {
 	size_t length = strlen(text);
 	if (length > maximum)
 		length = maximum;
 	XSetForeground(shell->display, shell->gc, BAR_TEXT);
 	x_request(shell);
-	XDrawString(shell->display, shell->window, shell->gc, x, y,
-	    text, (int)length);
+	XDrawString(shell->display, shell->window, shell->gc, x, y, text,
+		    (int)length);
 	x_request(shell);
 }
 
@@ -408,7 +417,8 @@ draw_icon(struct desktop_shell *shell, const struct icon *icon, int x, int y)
 	unsigned color;
 	if (icon == NULL || !icon->valid)
 		return;
-	/* Collapse adjacent pixels into horizontal runs to reduce X requests. */
+	/* Collapse adjacent pixels into horizontal runs to reduce X requests.
+	 */
 	for (color = 0; color < icon->color_count; color++) {
 		XRectangle rectangles[ICON_MAX_SIZE * ICON_MAX_SIZE];
 		int count = 0;
@@ -420,24 +430,28 @@ draw_icon(struct desktop_shell *shell, const struct icon *icon, int x, int y)
 			while (column < icon->width) {
 				unsigned first;
 				while (column < icon->width &&
-				    icon->pixels[row * ICON_MAX_SIZE + column] != color)
+				       icon->pixels[row * ICON_MAX_SIZE +
+						    column] != color)
 					column++;
 				if (column == icon->width)
 					break;
 				first = column;
 				while (column < icon->width &&
-				    icon->pixels[row * ICON_MAX_SIZE + column] == color)
+				       icon->pixels[row * ICON_MAX_SIZE +
+						    column] == color)
 					column++;
 				rectangles[count++] = (XRectangle){
-				    (short)(x + (int)first), (short)(y + (int)row),
-				    (unsigned short)(column - first), 1 };
+				    (short)(x + (int)first),
+				    (short)(y + (int)row),
+				    (unsigned short)(column - first), 1};
 			}
 		}
 		if (count != 0) {
-			XSetForeground(shell->display, shell->gc, icon->colors[color]);
+			XSetForeground(shell->display, shell->gc,
+				       icon->colors[color]);
 			x_request(shell);
-			XFillRectangles(shell->display, shell->window, shell->gc,
-			    rectangles, count);
+			XFillRectangles(shell->display, shell->window,
+					shell->gc, rectangles, count);
 			x_request(shell);
 		}
 	}
@@ -451,7 +465,7 @@ draw_launcher(struct desktop_shell *shell)
 	for (row = 0; row < 3; row++)
 		for (column = 0; column < 3; column++)
 			fill(shell, BAR_TEXT, 10 + (int)column * 5,
-			    6 + (int)row * 5, 3, 3);
+			     6 + (int)row * 5, 3, 3);
 }
 
 static void
@@ -461,14 +475,14 @@ draw_speaker(struct desktop_shell *shell, int x)
 	fill(shell, BAR_MUTED, x + 2, 8, 2, 8);
 	XSetForeground(shell->display, shell->gc, BAR_MUTED);
 	x_request(shell);
-	XDrawLine(shell->display, shell->window, shell->gc, x + 6, 9,
-	    x + 8, 11);
+	XDrawLine(shell->display, shell->window, shell->gc, x + 6, 9, x + 8,
+		  11);
 	x_request(shell);
-	XDrawLine(shell->display, shell->window, shell->gc, x + 8, 11,
-	    x + 8, 13);
+	XDrawLine(shell->display, shell->window, shell->gc, x + 8, 11, x + 8,
+		  13);
 	x_request(shell);
-	XDrawLine(shell->display, shell->window, shell->gc, x + 8, 13,
-	    x + 6, 15);
+	XDrawLine(shell->display, shell->window, shell->gc, x + 8, 13, x + 6,
+		  15);
 	x_request(shell);
 }
 
@@ -479,32 +493,32 @@ draw_monitor(struct desktop_shell *shell, int x)
 	x_request(shell);
 	XDrawLine(shell->display, shell->window, shell->gc, x, 6, x + 14, 6);
 	x_request(shell);
-	XDrawLine(shell->display, shell->window, shell->gc, x + 14, 6,
-	    x + 14, 15);
+	XDrawLine(shell->display, shell->window, shell->gc, x + 14, 6, x + 14,
+		  15);
 	x_request(shell);
-	XDrawLine(shell->display, shell->window, shell->gc, x + 14, 15,
-	    x, 15);
+	XDrawLine(shell->display, shell->window, shell->gc, x + 14, 15, x, 15);
 	x_request(shell);
 	XDrawLine(shell->display, shell->window, shell->gc, x, 15, x, 6);
 	x_request(shell);
-	XDrawLine(shell->display, shell->window, shell->gc, x + 7, 15,
-	    x + 7, 18);
+	XDrawLine(shell->display, shell->window, shell->gc, x + 7, 15, x + 7,
+		  18);
 	x_request(shell);
-	XDrawLine(shell->display, shell->window, shell->gc, x + 3, 18,
-	    x + 11, 18);
+	XDrawLine(shell->display, shell->window, shell->gc, x + 3, 18, x + 11,
+		  18);
 	x_request(shell);
 }
 
 static void
 draw_clock(struct desktop_shell *shell, const char *clock)
 {
-	unsigned status_x = shell->width > STATUS_WIDTH ?
-	    shell->width - STATUS_WIDTH : shell->width;
+	unsigned status_x = shell->width > STATUS_WIDTH
+				? shell->width - STATUS_WIDTH
+				: shell->width;
 
 	if (status_x >= shell->width)
 		return;
 	fill(shell, BAR_BACKGROUND, (int)status_x + 49, 2,
-	    shell->width - status_x - 49U, TASKBAR_HEIGHT - 2U);
+	     shell->width - status_x - 49U, TASKBAR_HEIGHT - 2U);
 	draw_text(shell, (int)status_x + 60, 20, clock, 5);
 }
 
@@ -514,41 +528,45 @@ redraw(struct desktop_shell *shell)
 	char clock[32];
 	Window focus = None;
 	int revert;
-	unsigned status_x = shell->width > STATUS_WIDTH ?
-	    shell->width - STATUS_WIDTH : shell->width;
+	unsigned status_x = shell->width > STATUS_WIDTH
+				? shell->width - STATUS_WIDTH
+				: shell->width;
 	unsigned x = LAUNCHER_WIDTH;
 	unsigned index;
 
-	/* Build the complete taskbar in Xzed's retained window backing store. */
+	/* Build the complete taskbar in Xzed's retained window backing store.
+	 */
 	clock_text(clock, sizeof(clock));
 	(void)XGetInputFocus(shell->display, &focus, &revert);
 	fill(shell, BAR_BACKGROUND, 0, 0, shell->width, TASKBAR_HEIGHT);
 	fill(shell, BAR_BORDER, 0, 0, shell->width, 2);
 	draw_launcher(shell);
-	fill(shell, BAR_BORDER, LAUNCHER_WIDTH - 1U, 2, 1,
-	    TASKBAR_HEIGHT - 2U);
+	fill(shell, BAR_BORDER, LAUNCHER_WIDTH - 1U, 2, 1, TASKBAR_HEIGHT - 2U);
 	for (index = 0; index < shell->task_count && x + 44U < status_x;
-	    index++) {
+	     index++) {
 		unsigned width = TASK_WIDTH;
 		if (x + width > status_x)
 			width = status_x - x;
-		fill(shell, focus == shell->tasks[index].client ||
-		    focus == shell->tasks[index].window ? BAR_PANEL_ACTIVE : BAR_PANEL,
-		    (int)x, 2, width, TASKBAR_HEIGHT - 2U);
+		fill(shell,
+		     focus == shell->tasks[index].client ||
+			     focus == shell->tasks[index].window
+			 ? BAR_PANEL_ACTIVE
+			 : BAR_PANEL,
+		     (int)x, 2, width, TASKBAR_HEIGHT - 2U);
 		fill(shell, BAR_BORDER, (int)(x + width - 1U), 2, 1,
-		    TASKBAR_HEIGHT - 2U);
+		     TASKBAR_HEIGHT - 2U);
 		draw_icon(shell, shell->tasks[index].icon, (int)x + 5, 4);
 		draw_text(shell, (int)x + 28, 20, shell->tasks[index].name,
-		    width > 36U ? (width - 36U) / 8U : 0);
+			  width > 36U ? (width - 36U) / 8U : 0);
 		x += width;
 	}
 	if (status_x < shell->width) {
 		fill(shell, BAR_BORDER, (int)status_x, 2, 1,
-		    TASKBAR_HEIGHT - 2U);
+		     TASKBAR_HEIGHT - 2U);
 		draw_speaker(shell, (int)status_x + 8);
 		draw_monitor(shell, (int)status_x + 28);
 		fill(shell, BAR_BORDER, (int)status_x + 48, 2, 1,
-		    TASKBAR_HEIGHT - 2U);
+		     TASKBAR_HEIGHT - 2U);
 		draw_clock(shell, clock);
 	}
 	strncpy(shell->clock, clock, sizeof(shell->clock));
@@ -559,8 +577,9 @@ redraw(struct desktop_shell *shell)
 static void
 task_click(struct desktop_shell *shell, int x)
 {
-	unsigned status_x = shell->width > STATUS_WIDTH ?
-	    shell->width - STATUS_WIDTH : shell->width;
+	unsigned status_x = shell->width > STATUS_WIDTH
+				? shell->width - STATUS_WIDTH
+				: shell->width;
 	unsigned index;
 	Window focus = None;
 	int revert;
@@ -571,15 +590,18 @@ task_click(struct desktop_shell *shell, int x)
 	if (index >= shell->task_count)
 		return;
 	(void)XGetInputFocus(shell->display, &focus, &revert);
-	/* Clicking the active task hides it; clicking an inactive task restores it. */
-	if (focus == shell->tasks[index].client || focus == shell->tasks[index].window) {
+	/* Clicking the active task hides it; clicking an inactive task restores
+	 * it. */
+	if (focus == shell->tasks[index].client ||
+	    focus == shell->tasks[index].window) {
 		XUnmapWindow(shell->display, shell->tasks[index].window);
-		XSetInputFocus(shell->display, shell->root, RevertToParent, CurrentTime);
+		XSetInputFocus(shell->display, shell->root, RevertToParent,
+			       CurrentTime);
 	} else {
 		XMapWindow(shell->display, shell->tasks[index].window);
 		XRaiseWindow(shell->display, shell->tasks[index].window);
 		XSetInputFocus(shell->display, shell->tasks[index].client,
-		    RevertToParent, CurrentTime);
+			       RevertToParent, CurrentTime);
 	}
 	redraw(shell);
 }
@@ -615,11 +637,12 @@ initialize(struct desktop_shell *shell)
 		return -1;
 	shell->root = DefaultRootWindow(shell->display);
 	if (!XGetGeometry(shell->display, shell->root, &root_return, &x, &y,
-	    &shell->width, &shell->height, &border, &depth))
+			  &shell->width, &shell->height, &border, &depth))
 		return -1;
-	shell->window = XCreateSimpleWindow(shell->display, shell->root, 0,
-	    (int)(shell->height - TASKBAR_HEIGHT), shell->width,
-	    TASKBAR_HEIGHT, 0, 0, BAR_BACKGROUND);
+	shell->window = XCreateSimpleWindow(
+	    shell->display, shell->root, 0,
+	    (int)(shell->height - TASKBAR_HEIGHT), shell->width, TASKBAR_HEIGHT,
+	    0, 0, BAR_BACKGROUND);
 	XStoreName(shell->display, shell->window, "_XZED_SHELL");
 	shell->gc = XCreateGC(shell->display, shell->window, 0, NULL);
 	shell->font = XLoadQueryFont(shell->display, "zed-unicode");
@@ -627,7 +650,7 @@ initialize(struct desktop_shell *shell)
 		return -1;
 	XSetFont(shell->display, shell->gc, shell->font->fid);
 	XSelectInput(shell->display, shell->window,
-	    ExposureMask | ButtonPressMask);
+		     ExposureMask | ButtonPressMask);
 	XMapWindow(shell->display, shell->window);
 	XSync(shell->display, False);
 	return 0;
@@ -642,7 +665,7 @@ main(void)
 
 	if (initialize(&shell) != 0) {
 		fprintf(stderr, "zshell: initialization failed: %s\n",
-		    strerror(errno));
+			strerror(errno));
 		return 1;
 	}
 	(void)refresh_tasks(&shell);
@@ -651,9 +674,10 @@ main(void)
 		int exposed = 0;
 		int tasks_changed;
 
-		/* The timeout also drives the clock and discovers root-window changes. */
-		descriptor = (struct pollfd){ ConnectionNumber(shell.display),
-		    POLLIN, 0 };
+		/* The timeout also drives the clock and discovers root-window
+		 * changes. */
+		descriptor =
+		    (struct pollfd){ConnectionNumber(shell.display), POLLIN, 0};
 		(void)poll(&descriptor, 1, 1000);
 		while (XPending(shell.display)) {
 			XEvent event;
@@ -663,7 +687,8 @@ main(void)
 			}
 			if (event.type == Expose)
 				exposed = 1;
-			else if (event.type == ButtonPress && event.xbutton.keycode == 1)
+			else if (event.type == ButtonPress &&
+				 event.xbutton.keycode == 1)
 				task_click(&shell, event.xbutton.x_root);
 		}
 		if (!running)

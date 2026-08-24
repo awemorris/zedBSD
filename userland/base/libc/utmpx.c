@@ -30,7 +30,8 @@ utmp_record_read(off_t offset, struct utmpx *entry)
 	if (count == 0)
 		return 0;
 	if (count != (ssize_t)sizeof(*entry)) {
-		if (count >= 0) errno = EIO;
+		if (count >= 0)
+			errno = EIO;
 		return -1;
 	}
 	return 1;
@@ -62,7 +63,8 @@ getutxent(void)
 		return NULL;
 	}
 	status = utmp_record_read(utmp_offset, &utmp_result);
-	if (status == 1) utmp_offset += (off_t)sizeof(utmp_result);
+	if (status == 1)
+		utmp_offset += (off_t)sizeof(utmp_result);
 	pthread_mutex_unlock(&utmp_lock);
 	return status == 1 ? &utmp_result : NULL;
 }
@@ -71,7 +73,8 @@ void
 endutxent(void)
 {
 	pthread_mutex_lock(&utmp_lock);
-	if (utmp_fd >= 0) close(utmp_fd);
+	if (utmp_fd >= 0)
+		close(utmp_fd);
 	utmp_fd = -1;
 	utmp_offset = 0;
 	pthread_mutex_unlock(&utmp_lock);
@@ -81,7 +84,10 @@ struct utmpx *
 getutxid(const struct utmpx *key)
 {
 	struct utmpx *entry;
-	if (key == NULL) { errno = EINVAL; return NULL; }
+	if (key == NULL) {
+		errno = EINVAL;
+		return NULL;
+	}
 	while ((entry = getutxent()) != NULL)
 		if (utmp_same_id(entry, key))
 			return entry;
@@ -92,10 +98,15 @@ struct utmpx *
 getutxline(const struct utmpx *key)
 {
 	struct utmpx *entry;
-	if (key == NULL) { errno = EINVAL; return NULL; }
+	if (key == NULL) {
+		errno = EINVAL;
+		return NULL;
+	}
 	while ((entry = getutxent()) != NULL)
-		if ((entry->ut_type == LOGIN_PROCESS || entry->ut_type == USER_PROCESS) &&
-		    !strncmp(entry->ut_line, key->ut_line, sizeof(entry->ut_line)))
+		if ((entry->ut_type == LOGIN_PROCESS ||
+		     entry->ut_type == USER_PROCESS) &&
+		    !strncmp(entry->ut_line, key->ut_line,
+			     sizeof(entry->ut_line)))
 			return entry;
 	return NULL;
 }
@@ -108,23 +119,32 @@ pututxline(const struct utmpx *entry)
 	off_t offset = 0;
 	int status;
 
-	if (entry == NULL) { errno = EINVAL; return NULL; }
+	if (entry == NULL) {
+		errno = EINVAL;
+		return NULL;
+	}
 	pthread_mutex_lock(&utmp_lock);
-	if (utmp_open(1) != 0) goto fail;
+	if (utmp_open(1) != 0)
+		goto fail;
 	memset(&lock, 0, sizeof(lock));
-	lock.l_type = F_WRLCK; lock.l_whence = SEEK_SET;
-	if (fcntl(utmp_fd, F_SETLKW, &lock) != 0) goto fail;
+	lock.l_type = F_WRLCK;
+	lock.l_whence = SEEK_SET;
+	if (fcntl(utmp_fd, F_SETLKW, &lock) != 0)
+		goto fail;
 	while ((status = utmp_record_read(offset, &current)) == 1) {
-		if (utmp_same_id(&current, entry)) break;
+		if (utmp_same_id(&current, entry))
+			break;
 		offset += (off_t)sizeof(current);
 	}
 	if (status < 0 || pwrite(utmp_fd, entry, sizeof(*entry), offset) !=
-	    (ssize_t)sizeof(*entry)) {
-		lock.l_type = F_UNLCK; (void)fcntl(utmp_fd, F_SETLK, &lock);
+			      (ssize_t)sizeof(*entry)) {
+		lock.l_type = F_UNLCK;
+		(void)fcntl(utmp_fd, F_SETLK, &lock);
 		goto fail;
 	}
 	(void)fsync(utmp_fd);
-	lock.l_type = F_UNLCK; (void)fcntl(utmp_fd, F_SETLK, &lock);
+	lock.l_type = F_UNLCK;
+	(void)fcntl(utmp_fd, F_SETLK, &lock);
 	utmp_result = *entry;
 	pthread_mutex_unlock(&utmp_lock);
 	return &utmp_result;

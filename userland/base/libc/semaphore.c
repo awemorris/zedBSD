@@ -16,12 +16,18 @@
 #define SEM_MAGIC 0x5a53454dU
 extern void __pthread_cancel_point(void) __attribute__((weak));
 extern int __pthread_cancel_enabled(void) __attribute__((weak));
-static void cancel_point(void)
-{ if (__pthread_cancel_point != NULL) __pthread_cancel_point(); }
-static uintptr_t cancelable_flag(void)
+static void
+cancel_point(void)
 {
-	return __pthread_cancel_enabled != NULL &&
-	    __pthread_cancel_enabled() ? ZEDBSD_USYNC_CANCELABLE : 0;
+	if (__pthread_cancel_point != NULL)
+		__pthread_cancel_point();
+}
+static uintptr_t
+cancelable_flag(void)
+{
+	return __pthread_cancel_enabled != NULL && __pthread_cancel_enabled()
+		   ? ZEDBSD_USYNC_CANCELABLE
+		   : 0;
 }
 
 static int
@@ -34,10 +40,11 @@ sem_usync_wait(sem_t *sem, const struct timespec *timeout, clockid_t clock)
 		if (clock == CLOCK_REALTIME)
 			timeout_flags |= ZEDBSD_USYNC_CLOCK_REALTIME;
 	}
-	intptr_t result = syscall_result(__syscall6(ZEDBSD_SYS_usync,
-	    (uintptr_t)&sem->value, ZEDBSD_USYNC_WAIT, 0, (uintptr_t)timeout,
-	    0, (sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE) |
-	    cancelable_flag() | timeout_flags));
+	intptr_t result = syscall_result(
+	    __syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->value,
+		       ZEDBSD_USYNC_WAIT, 0, (uintptr_t)timeout, 0,
+		       (sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE) |
+			   cancelable_flag() | timeout_flags));
 	return result < 0 ? -1 : 0;
 }
 
@@ -45,8 +52,8 @@ static void
 sem_usync_wake(sem_t *sem)
 {
 	(void)__syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->value,
-	    ZEDBSD_USYNC_WAKE, 0, 0, 1,
-	    sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
+			 ZEDBSD_USYNC_WAKE, 0, 0, 1,
+			 sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
 }
 
 static void
@@ -54,8 +61,8 @@ sem_lock(sem_t *sem)
 {
 	while (__atomic_exchange_n(&sem->guard, 1, __ATOMIC_ACQUIRE) != 0) {
 		(void)__syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->guard,
-		    ZEDBSD_USYNC_WAIT, 1, 0, 0,
-		    sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
+				 ZEDBSD_USYNC_WAIT, 1, 0, 0,
+				 sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
 	}
 }
 
@@ -64,14 +71,17 @@ sem_unlock(sem_t *sem)
 {
 	__atomic_store_n(&sem->guard, 0, __ATOMIC_RELEASE);
 	(void)__syscall6(ZEDBSD_SYS_usync, (uintptr_t)&sem->guard,
-	    ZEDBSD_USYNC_WAKE, 0, 0, 1,
-	    sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
+			 ZEDBSD_USYNC_WAKE, 0, 0, 1,
+			 sem->pshared ? 0 : ZEDBSD_USYNC_PRIVATE);
 }
 
 int
 sem_init(sem_t *sem, int pshared, unsigned value)
 {
-	if (sem == NULL || value > SEM_VALUE_MAX) { errno = EINVAL; return -1; }
+	if (sem == NULL || value > SEM_VALUE_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
 	sem->value = value;
 	sem->waiters = 0;
 	sem->guard = 0;
@@ -80,7 +90,8 @@ sem_init(sem_t *sem, int pshared, unsigned value)
 	return 0;
 }
 
-int sem_destroy(sem_t *sem)
+int
+sem_destroy(sem_t *sem)
 {
 	if (sem == NULL || sem->magic != SEM_MAGIC || sem->waiters != 0) {
 		errno = sem != NULL && sem->waiters != 0 ? EBUSY : EINVAL;
@@ -93,7 +104,10 @@ int sem_destroy(sem_t *sem)
 int
 sem_trywait(sem_t *sem)
 {
-	if (sem == NULL || sem->magic != SEM_MAGIC) { errno = EINVAL; return -1; }
+	if (sem == NULL || sem->magic != SEM_MAGIC) {
+		errno = EINVAL;
+		return -1;
+	}
 	sem_lock(sem);
 	if (sem->value != 0) {
 		sem->value--;
@@ -106,8 +120,7 @@ sem_trywait(sem_t *sem)
 }
 
 static int
-sem_wait_common(sem_t *sem, clockid_t clock,
-	const struct timespec *absolute)
+sem_wait_common(sem_t *sem, clockid_t clock, const struct timespec *absolute)
 {
 	cancel_point();
 	if (absolute != NULL &&
@@ -128,14 +141,16 @@ sem_wait_common(sem_t *sem, clockid_t clock,
 
 			__atomic_sub_fetch(&sem->waiters, 1, __ATOMIC_RELAXED);
 			if (saved_errno == EAGAIN) {
-				/* The value changed between sem_trywait and the kernel
-				 * comparison.  Retry the predicate and also honor a cancel
-				 * request which bypassed wait registration. */
+				/* The value changed between sem_trywait and the
+				 * kernel comparison.  Retry the predicate and
+				 * also honor a cancel request which bypassed
+				 * wait registration. */
 				cancel_point();
 				continue;
 			}
-			/* A cancellation request must be acted on only after waiter
-			 * accounting is rolled back.  An ordinary signal remains EINTR. */
+			/* A cancellation request must be acted on only after
+			 * waiter accounting is rolled back.  An ordinary signal
+			 * remains EINTR. */
 			if (saved_errno == EINTR)
 				cancel_point();
 			errno = saved_errno;
@@ -146,12 +161,19 @@ sem_wait_common(sem_t *sem, clockid_t clock,
 	}
 }
 
-int sem_wait(sem_t *sem) { return sem_wait_common(sem, CLOCK_REALTIME, NULL); }
+int
+sem_wait(sem_t *sem)
+{
+	return sem_wait_common(sem, CLOCK_REALTIME, NULL);
+}
 
 int
 sem_timedwait(sem_t *sem, const struct timespec *absolute)
 {
-	if (absolute == NULL) { errno = EINVAL; return -1; }
+	if (absolute == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
 	return sem_wait_common(sem, CLOCK_REALTIME, absolute);
 }
 
@@ -168,10 +190,15 @@ sem_clockwait(sem_t *sem, clockid_t clock, const struct timespec *absolute)
 int
 sem_post(sem_t *sem)
 {
-	if (sem == NULL || sem->magic != SEM_MAGIC) { errno = EINVAL; return -1; }
+	if (sem == NULL || sem->magic != SEM_MAGIC) {
+		errno = EINVAL;
+		return -1;
+	}
 	sem_lock(sem);
 	if (sem->value >= SEM_VALUE_MAX) {
-		sem_unlock(sem); errno = EOVERFLOW; return -1;
+		sem_unlock(sem);
+		errno = EOVERFLOW;
+		return -1;
 	}
 	sem->value++;
 	sem_unlock(sem);
@@ -180,10 +207,12 @@ sem_post(sem_t *sem)
 	return 0;
 }
 
-int sem_getvalue(sem_t *sem, int *result)
+int
+sem_getvalue(sem_t *sem, int *result)
 {
 	if (sem == NULL || result == NULL || sem->magic != SEM_MAGIC) {
-		errno = EINVAL; return -1;
+		errno = EINVAL;
+		return -1;
 	}
 	*result = (int)__atomic_load_n(&sem->value, __ATOMIC_ACQUIRE);
 	return 0;
@@ -194,9 +223,15 @@ named_sem_name(const char *name, char output[PATH_MAX])
 {
 	size_t length;
 	if (name == NULL || name[0] != '/' || name[1] == '\0' ||
-	    strchr(name + 1, '/') != NULL) { errno = EINVAL; return -1; }
+	    strchr(name + 1, '/') != NULL) {
+		errno = EINVAL;
+		return -1;
+	}
 	length = strlen(name + 1);
-	if (length > PATH_MAX - sizeof("/sem.")) { errno = ENAMETOOLONG; return -1; }
+	if (length > PATH_MAX - sizeof("/sem.")) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
 	memcpy(output, "/sem.", sizeof("/sem.") - 1U);
 	memcpy(output + sizeof("/sem.") - 1U, name + 1, length + 1U);
 	return 0;
@@ -218,10 +253,14 @@ sem_open(const char *name, int flags, ...)
 		mode = va_arg(args, mode_t);
 		value = va_arg(args, unsigned);
 		va_end(args);
-		if (value > SEM_VALUE_MAX) { errno = EINVAL; return SEM_FAILED; }
+		if (value > SEM_VALUE_MAX) {
+			errno = EINVAL;
+			return SEM_FAILED;
+		}
 	}
 	if ((flags & O_CREAT) != 0) {
-		descriptor = shm_open(object_name, O_RDWR | O_CREAT | O_EXCL, mode);
+		descriptor =
+		    shm_open(object_name, O_RDWR | O_CREAT | O_EXCL, mode);
 		if (descriptor >= 0)
 			created = 1;
 		else if (errno == EEXIST && (flags & O_EXCL) == 0)
@@ -232,28 +271,43 @@ sem_open(const char *name, int flags, ...)
 	if (descriptor < 0)
 		return SEM_FAILED;
 	if (created && ftruncate(descriptor, (off_t)sizeof(*sem)) != 0) {
-		(void)close(descriptor); (void)shm_unlink(object_name); return SEM_FAILED;
+		(void)close(descriptor);
+		(void)shm_unlink(object_name);
+		return SEM_FAILED;
 	}
 	sem = mmap(NULL, sizeof(*sem), PROT_READ | PROT_WRITE, MAP_SHARED,
-	    descriptor, 0);
+		   descriptor, 0);
 	(void)close(descriptor);
 	if (sem == MAP_FAILED) {
-		if (created) (void)shm_unlink(object_name);
+		if (created)
+			(void)shm_unlink(object_name);
 		return SEM_FAILED;
 	}
 	if (created) {
 		(void)sem_init(sem, 1, value);
-	} else if (__atomic_load_n(&sem->magic, __ATOMIC_ACQUIRE) != SEM_MAGIC) {
-		(void)munmap(sem, sizeof(*sem)); errno = EINVAL; return SEM_FAILED;
+	} else if (__atomic_load_n(&sem->magic, __ATOMIC_ACQUIRE) !=
+		   SEM_MAGIC) {
+		(void)munmap(sem, sizeof(*sem));
+		errno = EINVAL;
+		return SEM_FAILED;
 	}
 	return sem;
 }
 
-int sem_close(sem_t *sem)
+int
+sem_close(sem_t *sem)
 {
-	if (sem == NULL || sem == SEM_FAILED) { errno = EINVAL; return -1; }
+	if (sem == NULL || sem == SEM_FAILED) {
+		errno = EINVAL;
+		return -1;
+	}
 	(void)msync(sem, sizeof(*sem), MS_SYNC);
 	return munmap(sem, sizeof(*sem));
 }
-int sem_unlink(const char *name)
-{ char object_name[PATH_MAX]; return named_sem_name(name, object_name) == 0 ? shm_unlink(object_name) : -1; }
+int
+sem_unlink(const char *name)
+{
+	char object_name[PATH_MAX];
+	return named_sem_name(name, object_name) == 0 ? shm_unlink(object_name)
+						      : -1;
+}

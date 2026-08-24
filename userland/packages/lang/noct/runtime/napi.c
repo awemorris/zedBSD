@@ -96,8 +96,8 @@ return_string(NoctEnv *env, const char *value)
 }
 
 static bool
-register_module(NoctEnv *env, const char *module,
-		struct api_item *items, size_t item_count)
+register_module(NoctEnv *env, const char *module, struct api_item *items,
+		size_t item_count)
 {
 	NoctValue dictionary;
 	NoctValue function;
@@ -114,12 +114,12 @@ register_module(NoctEnv *env, const char *module,
 	for (index = 0; index < item_count; index++) {
 		struct api_item *item = &items[index];
 
-		if (!noct_register_cfunc(env, item->global_name,
-					 item->parameter_count,
-					 item->parameters, item->function, NULL) ||
+		if (!noct_register_cfunc(
+			env, item->global_name, item->parameter_count,
+			item->parameters, item->function, NULL) ||
 		    !noct_get_global(env, item->global_name, &function) ||
-		    !noct_set_dict_elem_cstr(env, &dictionary,
-					     item->field_name, &function))
+		    !noct_set_dict_elem_cstr(env, &dictionary, item->field_name,
+					     &function))
 			goto out;
 	}
 	ok = true;
@@ -130,17 +130,16 @@ out:
 
 /* Intrinsic-like global conveniences are declared in one auditable table. */
 static bool
-register_intrinsics(NoctEnv *env, struct api_item *items,
-		    size_t item_count)
+register_intrinsics(NoctEnv *env, struct api_item *items, size_t item_count)
 {
 	size_t index;
 
 	for (index = 0; index < item_count; index++) {
 		struct api_item *item = &items[index];
 
-		if (!noct_register_cfunc(env, item->global_name,
-					 item->parameter_count, item->parameters,
-					 item->function, NULL))
+		if (!noct_register_cfunc(
+			env, item->global_name, item->parameter_count,
+			item->parameters, item->function, NULL))
 			return false;
 	}
 	return true;
@@ -218,8 +217,8 @@ serialize_dict(struct serializer *output, NoctValue *value, unsigned depth)
 	for (index = 0; index < count && index < SERIALIZE_ITEMS; index++) {
 		if (index != 0)
 			serialize_string(output, ", ");
-		if (!noct_get_dict_by_index(output->env, value, index,
-					    &key, &element) ||
+		if (!noct_get_dict_by_index(output->env, value, index, &key,
+					    &element) ||
 		    !noct_get_string(output->env, &key, &name))
 			return false;
 		serialize_string(output, name);
@@ -354,9 +353,10 @@ cfunc_console_gets(NoctEnv *env)
 	}
 	if (active.services->screen_show_cursor != NULL)
 		(void)active.services->screen_show_cursor(
-			active.services->context, 1);
+		    active.services->context, 1);
 	for (;;) {
-		int key = active.services->keyboard_read(active.services->context);
+		int key =
+		    active.services->keyboard_read(active.services->context);
 
 		if (key < 0) {
 			noct_error(env, "gets failed.");
@@ -455,9 +455,9 @@ cfunc_screen_put(NoctEnv *env)
 	if (!noct_get_arg_check_int(env, 0, &argument, &row) ||
 	    !noct_get_arg_check_int(env, 1, &argument, &column) ||
 	    !noct_get_arg_check_string(env, 2, &argument, &text) ||
-	    !noct_get_arg_check_int(env, 3, &argument, &attribute) ||
-	    row < 0 || row >= 25 || column < 0 || column >= 80 ||
-	    attribute < 0 || attribute > 255 || !services_ready() ||
+	    !noct_get_arg_check_int(env, 3, &argument, &attribute) || row < 0 ||
+	    row >= 25 || column < 0 || column >= 80 || attribute < 0 ||
+	    attribute > 255 || !services_ready() ||
 	    active.services->screen_put == NULL) {
 		noct_error(env, "Screen.put received an invalid argument.");
 		goto out;
@@ -487,13 +487,13 @@ cfunc_screen_set_cursor(NoctEnv *env)
 	if (!noct_pin_local(env, 1, &argument))
 		return false;
 	if (!noct_get_arg_check_int(env, 0, &argument, &row) ||
-	    !noct_get_arg_check_int(env, 1, &argument, &column) ||
-	    row < 0 || row >= 25 || column < 0 || column >= 80 ||
-	    !services_ready() || active.services->screen_set_cursor == NULL ||
-	    !active.services->screen_set_cursor(active.services->context,
-						(unsigned)row,
-						(unsigned)column))
-		noct_error(env, "Screen.setCursor received an invalid position.");
+	    !noct_get_arg_check_int(env, 1, &argument, &column) || row < 0 ||
+	    row >= 25 || column < 0 || column >= 80 || !services_ready() ||
+	    active.services->screen_set_cursor == NULL ||
+	    !active.services->screen_set_cursor(
+		active.services->context, (unsigned)row, (unsigned)column))
+		noct_error(env,
+			   "Screen.setCursor received an invalid position.");
 	else
 		ok = return_int(env, 0);
 	(void)noct_unpin_local(env, 1, &argument);
@@ -513,7 +513,7 @@ cfunc_screen_show_cursor(NoctEnv *env)
 	if (!noct_get_arg_check_int(env, 0, &argument, &visible) ||
 	    !services_ready() || active.services->screen_show_cursor == NULL ||
 	    !active.services->screen_show_cursor(active.services->context,
-						  visible != 0))
+						 visible != 0))
 		noct_error(env, "Screen.showCursor failed.");
 	else
 		ok = return_int(env, 0);
@@ -564,24 +564,25 @@ cfunc_keyboard_is_printable(NoctEnv *env)
 	if (!noct_get_arg_check_int(env, 0, &argument, &key))
 		goto out;
 	ok = return_int(env, (key >= 0x20 && key <= 0x7e) ||
-			     (key >= 0xa1 && key <= 0xdf));
+				 (key >= 0xa1 && key <= 0xdf));
 out:
 	(void)noct_unpin_local(env, 1, &argument);
 	return ok;
 }
 
 static bool
-make_directory_entry(NoctEnv *env, NoctValue *dictionary,
-		     NoctValue *scratch, const struct noct_dirent *entry)
+make_directory_entry(NoctEnv *env, NoctValue *dictionary, NoctValue *scratch,
+		     const struct noct_dirent *entry)
 {
 	return noct_make_empty_dict(env, dictionary) &&
 	       noct_set_dict_elem_make_string(env, dictionary, "name", scratch,
 					      entry->name) &&
 	       noct_set_dict_elem_make_long(env, dictionary, "size", scratch,
 					    (int64_t)entry->size) &&
-	       noct_set_dict_elem_make_int(env, dictionary, "attributes", scratch,
-					   entry->attributes) &&
-	       noct_set_dict_elem_make_int(env, dictionary, "directory", scratch,
+	       noct_set_dict_elem_make_int(env, dictionary, "attributes",
+					   scratch, entry->attributes) &&
+	       noct_set_dict_elem_make_int(env, dictionary, "directory",
+					   scratch,
 					   (entry->attributes & 0x10U) != 0);
 }
 
@@ -609,8 +610,8 @@ cfunc_directory_list(NoctEnv *env)
 	    !noct_make_empty_array(env, &array))
 		goto error;
 	for (index = 0; index < ZEDBSD_NOCT_DIRECTORY_MAX; index++) {
-		status = active.services->directory_read(active.services->context,
-							path, index, &entry);
+		status = active.services->directory_read(
+		    active.services->context, path, index, &entry);
 		if (status < 0)
 			goto error;
 		if (status == 0)
@@ -632,7 +633,8 @@ cfunc_directory_list(NoctEnv *env)
 error:
 	noct_error(env, "Directory.list failed.");
 out:
-	(void)noct_unpin_local(env, 4, &argument, &array, &dictionary, &scratch);
+	(void)noct_unpin_local(env, 4, &argument, &array, &dictionary,
+			       &scratch);
 	return ok;
 }
 
@@ -685,7 +687,7 @@ cfunc_directory_stat(NoctEnv *env)
 			goto error;
 		for (index = 0; index < ZEDBSD_NOCT_DIRECTORY_MAX; index++) {
 			status = active.services->directory_read(
-				active.services->context, "/", index, &entry);
+			    active.services->context, "/", index, &entry);
 			if (status <= 0)
 				goto error;
 			if (ascii_equal_folded(entry.name, name))
@@ -760,9 +762,9 @@ cfunc_system_pcall(NoctEnv *env)
 			goto out;
 	} else {
 		noct_get_error_message(env, &message);
-		if (!noct_set_dict_elem_make_string(env, &result, "message",
-						 &scratch,
-						 message != NULL ? message : "?"))
+		if (!noct_set_dict_elem_make_string(
+			env, &result, "message", &scratch,
+			message != NULL ? message : "?"))
 			goto out;
 	}
 	ok = noct_set_return(env, &result);
@@ -817,7 +819,8 @@ cfunc_system_set_env(NoctEnv *env)
 	ok = return_int(env, 0);
 	goto out;
 error:
-	noct_error(env, "System.setEnv rejected the name, value, or full store.");
+	noct_error(env,
+		   "System.setEnv rejected the name, value, or full store.");
 out:
 	(void)noct_unpin_local(env, 2, &name_value, &string_value);
 	return ok;
@@ -867,7 +870,7 @@ cfunc_system_list_env(NoctEnv *env)
 
 		if (!env_at(active.environment, index, &name, &value) ||
 		    !noct_set_dict_elem_make_string(env, &dictionary, name,
-						 &scratch, value))
+						    &scratch, value))
 			goto out;
 	}
 	ok = noct_set_return(env, &dictionary);
@@ -892,7 +895,8 @@ cfunc_system_memory_usage(NoctEnv *env)
 					 (int64_t)heap_active_current()) &&
 	    noct_set_dict_elem_make_long(env, &dictionary, "peak", &scratch,
 					 (int64_t)heap_active_peak()) &&
-	    noct_set_dict_elem_make_long(env, &dictionary, "arenaSize", &scratch,
+	    noct_set_dict_elem_make_long(env, &dictionary, "arenaSize",
+					 &scratch,
 					 (int64_t)active.arena_size) &&
 	    noct_set_return(env, &dictionary))
 		ok = true;
@@ -917,7 +921,8 @@ cfunc_system_import(NoctEnv *env)
 	if (!noct_get_arg_check_string(env, 0, &argument, &path) ||
 	    !services_ready() || active.services->file_size == NULL ||
 	    active.services->file_read == NULL ||
-	    !active.services->file_size(active.services->context, path, &size) ||
+	    !active.services->file_size(active.services->context, path,
+					&size) ||
 	    size > active.source_max)
 		goto error;
 	path_length = strlen(path);
@@ -931,9 +936,9 @@ cfunc_system_import(NoctEnv *env)
 	source->path = (char *)(source + 1);
 	source->source = source->path + path_length + 1U;
 	memcpy(source->path, path, path_length + 1U);
-	if ((size != 0 && !active.services->file_read(active.services->context,
-						       path, 0, source->source,
-						       size)) ||
+	if ((size != 0 &&
+	     !active.services->file_read(active.services->context, path, 0,
+					 source->source, size)) ||
 	    (source->source[size] = '\0',
 	     !noct_register_source(env, source->path, source->source)))
 		goto error;
@@ -967,62 +972,80 @@ key_normalize_bios_ax(uint16_t bios_ax)
 }
 
 int
-noct_napi_register(NoctEnv *env,
-			  const struct noct_options *options)
+noct_napi_register(NoctEnv *env, const struct noct_options *options)
 {
 	static struct api_item console[] = {
-		{ "Console.print", "print", 1, { "value" }, cfunc_console_print },
-		{ "Console.write", "write", 1, { "text" }, cfunc_console_write },
-		{ "Console.gets", "gets", 0, { NULL }, cfunc_console_gets },
+	    {"Console.print", "print", 1, {"value"}, cfunc_console_print},
+	    {"Console.write", "write", 1, {"text"}, cfunc_console_write},
+	    {"Console.gets", "gets", 0, {NULL}, cfunc_console_gets},
 	};
 	static struct api_item intrinsics[] = {
-		{ "print", NULL, 1, { "value" }, cfunc_console_print },
-		{ "gets", NULL, 0, { NULL }, cfunc_console_gets },
+	    {"print", NULL, 1, {"value"}, cfunc_console_print},
+	    {"gets", NULL, 0, {NULL}, cfunc_console_gets},
 	};
 	static struct api_item screen[] = {
-		{ "Screen.getWidth", "getWidth", 0, { NULL },
-		  cfunc_screen_get_width },
-		{ "Screen.getHeight", "getHeight", 0, { NULL },
-		  cfunc_screen_get_height },
-		{ "Screen.clear", "clear", 0, { NULL }, cfunc_screen_clear },
-		{ "Screen.clearRow", "clearRow", 1, { "row" },
-		  cfunc_screen_clear_row },
-		{ "Screen.put", "put", 4,
-		  { "row", "column", "text", "attribute" }, cfunc_screen_put },
-		{ "Screen.setCursor", "setCursor", 2, { "row", "column" },
-		  cfunc_screen_set_cursor },
-		{ "Screen.showCursor", "showCursor", 1, { "visible" },
-		  cfunc_screen_show_cursor },
+	    {"Screen.getWidth", "getWidth", 0, {NULL}, cfunc_screen_get_width},
+	    {"Screen.getHeight",
+	     "getHeight",
+	     0,
+	     {NULL},
+	     cfunc_screen_get_height},
+	    {"Screen.clear", "clear", 0, {NULL}, cfunc_screen_clear},
+	    {"Screen.clearRow", "clearRow", 1, {"row"}, cfunc_screen_clear_row},
+	    {"Screen.put",
+	     "put",
+	     4,
+	     {"row", "column", "text", "attribute"},
+	     cfunc_screen_put},
+	    {"Screen.setCursor",
+	     "setCursor",
+	     2,
+	     {"row", "column"},
+	     cfunc_screen_set_cursor},
+	    {"Screen.showCursor",
+	     "showCursor",
+	     1,
+	     {"visible"},
+	     cfunc_screen_show_cursor},
 	};
 	static struct api_item keyboard[] = {
-		{ "Keyboard.poll", "poll", 0, { NULL }, cfunc_keyboard_poll },
-		{ "Keyboard.read", "read", 0, { NULL }, cfunc_keyboard_read },
-		{ "Keyboard.isPrintable", "isPrintable", 1, { "code" },
-		  cfunc_keyboard_is_printable },
+	    {"Keyboard.poll", "poll", 0, {NULL}, cfunc_keyboard_poll},
+	    {"Keyboard.read", "read", 0, {NULL}, cfunc_keyboard_read},
+	    {"Keyboard.isPrintable",
+	     "isPrintable",
+	     1,
+	     {"code"},
+	     cfunc_keyboard_is_printable},
 	};
 	static struct api_item directory[] = {
-		{ "Directory.list", "list", 1, { "path" },
-		  cfunc_directory_list },
-		{ "Directory.stat", "stat", 1, { "path" },
-		  cfunc_directory_stat },
+	    {"Directory.list", "list", 1, {"path"}, cfunc_directory_list},
+	    {"Directory.stat", "stat", 1, {"path"}, cfunc_directory_stat},
 	};
 	static struct api_item system[] = {
-		{ "System.getOSName", "getOSName", 0, { NULL },
-		  cfunc_system_get_os_name },
-		{ "System.pcall", "pcall", 3, { "f", "a", "b" },
-		  cfunc_system_pcall },
-		{ "System.import", "import", 1, { "path" },
-		  cfunc_system_import },
-		{ "System.memoryUsage", "memoryUsage", 0, { NULL },
-		  cfunc_system_memory_usage },
-		{ "System.getEnv", "getEnv", 1, { "name" },
-		  cfunc_system_get_env },
-		{ "System.setEnv", "setEnv", 2, { "name", "value" },
-		  cfunc_system_set_env },
-		{ "System.unsetEnv", "unsetEnv", 1, { "name" },
-		  cfunc_system_unset_env },
-		{ "System.listEnv", "listEnv", 0, { NULL },
-		  cfunc_system_list_env },
+	    {"System.getOSName",
+	     "getOSName",
+	     0,
+	     {NULL},
+	     cfunc_system_get_os_name},
+	    {"System.pcall", "pcall", 3, {"f", "a", "b"}, cfunc_system_pcall},
+	    {"System.import", "import", 1, {"path"}, cfunc_system_import},
+	    {"System.memoryUsage",
+	     "memoryUsage",
+	     0,
+	     {NULL},
+	     cfunc_system_memory_usage},
+	    {"System.getEnv", "getEnv", 1, {"name"}, cfunc_system_get_env},
+	    {"System.setEnv",
+	     "setEnv",
+	     2,
+	     {"name", "value"},
+	     cfunc_system_set_env},
+	    {"System.unsetEnv",
+	     "unsetEnv",
+	     1,
+	     {"name"},
+	     cfunc_system_unset_env},
+	    {"System.listEnv", "listEnv", 0, {NULL}, cfunc_system_list_env},
 	};
 
 	if (env == NULL || options == NULL || options->write == NULL ||
@@ -1037,8 +1060,9 @@ noct_napi_register(NoctEnv *env,
 	active.environment = options->environment;
 	/* BeUI registers its own module, key dictionary, and image registry
 	 * upstream; the boot target only supplies the backend. */
-	if (!noct_register_api_beui(env, options->services != NULL ?
-					 options->services->beui : NULL) ||
+	if (!noct_register_api_beui(env, options->services != NULL
+					     ? options->services->beui
+					     : NULL) ||
 	    !register_intrinsics(env, intrinsics,
 				 sizeof(intrinsics) / sizeof(intrinsics[0])) ||
 	    !register_module(env, "Console", console,

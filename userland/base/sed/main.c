@@ -3,5 +3,101 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-static int subst(char*line,const char*old,const char*rep,int global){char*p=strstr(line,old);int changed=0;size_t ol=strlen(old),rl=strlen(rep);if(!ol)return 0;while(p){size_t tail=strlen(p+ol);if(rl>ol){char*end=line+strlen(line);if((size_t)(end-line)+rl-ol>=4095)break;}memmove(p+rl,p+ol,tail+1);memcpy(p,rep,rl);changed=1;if(!global)break;p=strstr(p+rl,old);}return changed;}
-int main(int argc,char**argv){int noauto=0,i=1;const char*script;char old[256],rep[256];int global=0,print=0,del=0;if(i<argc&&!strcmp(argv[i],"-n")){noauto=1;i++;}if(i>=argc){fprintf(stderr,"usage: sed [-n] script [file ...]\n");return 2;}script=argv[i++];if(script[0]=='s'&&script[1]){char sep=script[1];const char*a=script+2,*b=strchr(a,sep),*e;if(!b||(e=strchr(b+1,sep))==NULL||(size_t)(b-a)>=sizeof(old)||(size_t)(e-b-1)>=sizeof(rep)){fprintf(stderr,"sed: invalid substitute\n");return 2;}memcpy(old,a,(size_t)(b-a));old[b-a]=0;memcpy(rep,b+1,(size_t)(e-b-1));rep[e-b-1]=0;global=strchr(e+1,'g')!=NULL;print=strchr(e+1,'p')!=NULL;}else if(!strcmp(script,"p"))print=1;else if(!strcmp(script,"d"))del=1;else{fprintf(stderr,"sed: unsupported script\n");return 2;}do{FILE*f=i==argc||!strcmp(argv[i],"-")?stdin:fopen(argv[i],"r");char*l=NULL;size_t cap=0;long n;if(!f){command_error("sed",argv[i]);return 1;}while((n=command_read_line(f,&l,&cap))>0){int changed=0;if(script[0]=='s'){char work[4096];if((size_t)n>=sizeof(work)){fprintf(stderr,"sed: line too long\n");return 1;}memcpy(work,l,(size_t)n+1);changed=subst(work,old,rep,global);if(!noauto)fwrite(work,1,strlen(work),stdout);if(print&&changed)fwrite(work,1,strlen(work),stdout);}else if(!del&&(!noauto||print))fwrite(l,1,(size_t)n,stdout);}free(l);if(f!=stdin)fclose(f);++i;}while(i<argc);return ferror(stdout);}
+static int
+subst(char *line, const char *old, const char *rep, int global)
+{
+	char *p = strstr(line, old);
+	int changed = 0;
+	size_t ol = strlen(old), rl = strlen(rep);
+	if (!ol)
+		return 0;
+	while (p) {
+		size_t tail = strlen(p + ol);
+		if (rl > ol) {
+			char *end = line + strlen(line);
+			if ((size_t)(end - line) + rl - ol >= 4095)
+				break;
+		}
+		memmove(p + rl, p + ol, tail + 1);
+		memcpy(p, rep, rl);
+		changed = 1;
+		if (!global)
+			break;
+		p = strstr(p + rl, old);
+	}
+	return changed;
+}
+int
+main(int argc, char **argv)
+{
+	int noauto = 0, i = 1;
+	const char *script;
+	char old[256], rep[256];
+	int global = 0, print = 0, del = 0;
+	if (i < argc && !strcmp(argv[i], "-n")) {
+		noauto = 1;
+		i++;
+	}
+	if (i >= argc) {
+		fprintf(stderr, "usage: sed [-n] script [file ...]\n");
+		return 2;
+	}
+	script = argv[i++];
+	if (script[0] == 's' && script[1]) {
+		char sep = script[1];
+		const char *a = script + 2, *b = strchr(a, sep), *e;
+		if (!b || (e = strchr(b + 1, sep)) == NULL ||
+		    (size_t)(b - a) >= sizeof(old) ||
+		    (size_t)(e - b - 1) >= sizeof(rep)) {
+			fprintf(stderr, "sed: invalid substitute\n");
+			return 2;
+		}
+		memcpy(old, a, (size_t)(b - a));
+		old[b - a] = 0;
+		memcpy(rep, b + 1, (size_t)(e - b - 1));
+		rep[e - b - 1] = 0;
+		global = strchr(e + 1, 'g') != NULL;
+		print = strchr(e + 1, 'p') != NULL;
+	} else if (!strcmp(script, "p"))
+		print = 1;
+	else if (!strcmp(script, "d"))
+		del = 1;
+	else {
+		fprintf(stderr, "sed: unsupported script\n");
+		return 2;
+	}
+	do {
+		FILE *f = i == argc || !strcmp(argv[i], "-")
+			      ? stdin
+			      : fopen(argv[i], "r");
+		char *l = NULL;
+		size_t cap = 0;
+		long n;
+		if (!f) {
+			command_error("sed", argv[i]);
+			return 1;
+		}
+		while ((n = command_read_line(f, &l, &cap)) > 0) {
+			int changed = 0;
+			if (script[0] == 's') {
+				char work[4096];
+				if ((size_t)n >= sizeof(work)) {
+					fprintf(stderr, "sed: line too long\n");
+					return 1;
+				}
+				memcpy(work, l, (size_t)n + 1);
+				changed = subst(work, old, rep, global);
+				if (!noauto)
+					fwrite(work, 1, strlen(work), stdout);
+				if (print && changed)
+					fwrite(work, 1, strlen(work), stdout);
+			} else if (!del && (!noauto || print))
+				fwrite(l, 1, (size_t)n, stdout);
+		}
+		free(l);
+		if (f != stdin)
+			fclose(f);
+		++i;
+	} while (i < argc);
+	return ferror(stdout);
+}

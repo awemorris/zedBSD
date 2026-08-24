@@ -75,11 +75,10 @@ resize_edges_at(const struct frame *frame, int x, int y)
 	unsigned fw = frame_width(frame);
 	unsigned fh = frame_height(frame);
 	int left = x >= -RESIZE_MARGIN && x < RESIZE_MARGIN;
-	int right = x >= (int)fw - RESIZE_MARGIN &&
-	    x < (int)fw + RESIZE_MARGIN;
+	int right = x >= (int)fw - RESIZE_MARGIN && x < (int)fw + RESIZE_MARGIN;
 	int top = y >= -RESIZE_MARGIN && y < RESIZE_MARGIN;
-	int bottom = y >= (int)fh - RESIZE_MARGIN &&
-	    y < (int)fh + RESIZE_MARGIN;
+	int bottom =
+	    y >= (int)fh - RESIZE_MARGIN && y < (int)fh + RESIZE_MARGIN;
 
 	if (left && y >= -RESIZE_MARGIN && y < (int)fh + RESIZE_MARGIN)
 		edges |= EDGE_LEFT;
@@ -95,11 +94,9 @@ resize_edges_at(const struct frame *frame, int x, int y)
 static unsigned
 cursor_for_edges(unsigned edges)
 {
-	if ((edges & (EDGE_LEFT | EDGE_BOTTOM)) ==
-	    (EDGE_LEFT | EDGE_BOTTOM))
+	if ((edges & (EDGE_LEFT | EDGE_BOTTOM)) == (EDGE_LEFT | EDGE_BOTTOM))
 		return XZED_CURSOR_BOTTOM_LEFT;
-	if ((edges & (EDGE_RIGHT | EDGE_BOTTOM)) ==
-	    (EDGE_RIGHT | EDGE_BOTTOM))
+	if ((edges & (EDGE_RIGHT | EDGE_BOTTOM)) == (EDGE_RIGHT | EDGE_BOTTOM))
 		return XZED_CURSOR_BOTTOM_RIGHT;
 	if ((edges & (EDGE_LEFT | EDGE_TOP)) == (EDGE_LEFT | EDGE_TOP))
 		return XZED_CURSOR_BOTTOM_RIGHT;
@@ -145,9 +142,9 @@ next_quoted(char **cursor, char *end)
 
 static int
 xpm_header(char *s, unsigned *width, unsigned *height, unsigned *ncolors,
-    unsigned *cpp)
+	   unsigned *cpp)
 {
-	unsigned *values[4] = { width, height, ncolors, cpp };
+	unsigned *values[4] = {width, height, ncolors, cpp};
 	unsigned i;
 	char *end;
 
@@ -253,7 +250,8 @@ load_xpm(Display *display, Window root, const char *path)
 			goto out;
 		colors[i].key = quoted[0];
 		hash = strchr(quoted, '#');
-		colors[i].pixel = hash != NULL ? strtoul(hash + 1, NULL, 16) : 0;
+		colors[i].pixel =
+		    hash != NULL ? strtoul(hash + 1, NULL, 16) : 0;
 	}
 
 	if ((size_t)width > SIZE_MAX / (size_t)height)
@@ -271,7 +269,7 @@ load_xpm(Display *display, Window root, const char *path)
 	}
 
 	if (!XGetGeometry(display, root, &root_return, &root_x, &root_y,
-	    &root_width, &root_height, &border, &depth) ||
+			  &root_width, &root_height, &border, &depth) ||
 	    width != root_width || height != root_height)
 		goto out;
 
@@ -283,8 +281,8 @@ load_xpm(Display *display, Window root, const char *path)
 		goto out;
 
 	/*
-	 * Build the complete background off screen.  Drawing these runs must not
-	 * expose partially rendered color planes on /dev/graphics.
+	 * Build the complete background off screen.  Drawing these runs must
+	 * not expose partially rendered color planes on /dev/graphics.
 	 */
 	for (i = 0; i < ncolors; i++) {
 		int count = 0;
@@ -296,21 +294,23 @@ load_xpm(Display *display, Window root, const char *path)
 			while (x < width) {
 				unsigned start;
 
-				if (pixels[(size_t)y * width + x] != colors[i].key) {
+				if (pixels[(size_t)y * width + x] !=
+				    colors[i].key) {
 					x++;
 					continue;
 				}
 				start = x;
 				while (x < width &&
-				    pixels[(size_t)y * width + x] == colors[i].key)
+				       pixels[(size_t)y * width + x] ==
+					   colors[i].key)
 					x++;
-				rectangles[count++] = (XRectangle) {
-					(short)start, (short)y,
-					(unsigned short)(x - start), 1
-				};
+				rectangles[count++] = (XRectangle){
+				    (short)start, (short)y,
+				    (unsigned short)(x - start), 1};
 				if (count == XPM_RECT_BATCH) {
 					if (XFillRectangles(display, pixmap, gc,
-					    rectangles, count) != 0)
+							    rectangles,
+							    count) != 0)
 						goto out;
 					if (XSync(display, False) != 0)
 						goto out;
@@ -319,7 +319,7 @@ load_xpm(Display *display, Window root, const char *path)
 			}
 		}
 		if (count != 0 && XFillRectangles(display, pixmap, gc,
-		    rectangles, count) != 0)
+						  rectangles, count) != 0)
 			goto out;
 		if (count != 0 && XSync(display, False) != 0)
 			goto out;
@@ -359,16 +359,16 @@ ppm_token(char **cursor, char *end, char *token, size_t capacity)
 	size_t length = 0;
 
 	for (;;) {
-		while (p < end && (*p == ' ' || *p == '\t' || *p == '\r' ||
-		    *p == '\n'))
+		while (p < end &&
+		       (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n'))
 			p++;
 		if (p >= end || *p != '#')
 			break;
 		while (p < end && *p != '\n')
 			p++;
 	}
-	while (p < end && *p != ' ' && *p != '\t' && *p != '\r' &&
-	    *p != '\n' && *p != '#') {
+	while (p < end && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' &&
+	       *p != '#') {
 		if (length + 1U >= capacity)
 			return 0;
 		token[length++] = *p++;
@@ -419,7 +419,7 @@ load_ppm(Display *display, Window root, const char *path)
 	    width > 65535U || height > 65535U)
 		goto out;
 	if (cursor >= end || (*cursor != ' ' && *cursor != '\t' &&
-	    *cursor != '\r' && *cursor != '\n'))
+			      *cursor != '\r' && *cursor != '\n'))
 		goto out;
 	if (*cursor++ == '\r' && cursor < end && *cursor == '\n')
 		cursor++;
@@ -430,15 +430,16 @@ load_ppm(Display *display, Window root, const char *path)
 	if ((size_t)(end - cursor) < pixel_bytes)
 		goto out;
 	if (!XGetGeometry(display, root, &root_return, &root_x, &root_y,
-	    &root_width, &root_height, &border, &depth) ||
+			  &root_width, &root_height, &border, &depth) ||
 	    width != root_width || height != root_height)
 		goto out;
 	pixmap = XCreatePixmap(display, root, width, height, depth);
 	if (pixmap == 0)
 		goto out;
 	gc = XCreateGC(display, pixmap, 0, NULL);
-	if (gc == NULL || XzedPutImageRGB24(display, pixmap, 0, 0, width,
-	    height, (const unsigned char *)cursor, width * 3U) != 0 ||
+	if (gc == NULL ||
+	    XzedPutImageRGB24(display, pixmap, 0, 0, width, height,
+			      (const unsigned char *)cursor, width * 3U) != 0 ||
 	    XSync(display, False) != 0)
 		goto out;
 	XCopyArea(display, pixmap, root, gc, 0, 0, width, height, 0, 0);
@@ -471,7 +472,7 @@ load_background(Display *display, Window root)
 	FILE *file;
 	char line[512];
 	char directory[320] = "/usr/share/zwm/backgrounds";
-	char fallback[400] = { 0 };
+	char fallback[400] = {0};
 	char path[400];
 	unsigned width;
 	unsigned height;
@@ -505,44 +506,42 @@ load_background(Display *display, Window root)
 		strncpy(destination, p, capacity - 1U);
 		destination[capacity - 1U] = '\0';
 		length = strlen(destination);
-		while (length != 0 &&
-		    (destination[length - 1] == '\n' ||
-		    destination[length - 1] == '\r' ||
-		    destination[length - 1] == ' ' ||
-		    destination[length - 1] == '\t'))
+		while (length != 0 && (destination[length - 1] == '\n' ||
+				       destination[length - 1] == '\r' ||
+				       destination[length - 1] == ' ' ||
+				       destination[length - 1] == '\t'))
 			destination[--length] = '\0';
 	}
 	if (file != NULL)
 		fclose(file);
 	if (!XGetGeometry(display, root, &root_return, &x, &y, &width, &height,
-	    &border, &depth))
+			  &border, &depth))
 		return;
 	path_length = snprintf(path, sizeof(path), "%s/%ux%u.ppm", directory,
-	    width, height);
+			       width, height);
 	if (path_length < 0 || (size_t)path_length >= sizeof(path))
 		return;
 	if (load_ppm(display, root, path))
 		return;
 	if (fallback[0] != '\0' && load_xpm(display, root, fallback))
 		return;
-	fprintf(stderr, "zwm: cannot load %ux%u background from %s\n",
-	    width, height, directory);
+	fprintf(stderr, "zwm: cannot load %ux%u background from %s\n", width,
+		height, directory);
 }
 
 static void
-restore_background(Display *display, Window root, int x, int y,
-    unsigned width, unsigned height)
+restore_background(Display *display, Window root, int x, int y, unsigned width,
+		   unsigned height)
 {
-	if (background_pixmap == 0 || background_gc == NULL ||
-	    x < 0 || y < 0 || (unsigned)x >= background_width ||
-	    (unsigned)y >= background_height)
+	if (background_pixmap == 0 || background_gc == NULL || x < 0 || y < 0 ||
+	    (unsigned)x >= background_width || (unsigned)y >= background_height)
 		return;
 	if (width > background_width - (unsigned)x)
 		width = background_width - (unsigned)x;
 	if (height > background_height - (unsigned)y)
 		height = background_height - (unsigned)y;
-	XCopyArea(display, background_pixmap, root, background_gc,
-	    x, y, width, height, x, y);
+	XCopyArea(display, background_pixmap, root, background_gc, x, y, width,
+		  height, x, y);
 }
 
 static struct frame *
@@ -600,7 +599,7 @@ unmanage(Display *display, struct frame *frame)
 		(void)XDestroyWindow(display, frame->frame);
 	if (index + 1U < frame_count)
 		memmove(&frames[index], &frames[index + 1U],
-		    (frame_count - index - 1U) * sizeof(frames[0]));
+			(frame_count - index - 1U) * sizeof(frames[0]));
 	frame_count--;
 	memset(&frames[frame_count], 0, sizeof(frames[0]));
 	(void)XSync(display, False);
@@ -637,37 +636,30 @@ decorate(Display *display, struct frame *frame)
 
 	/* Flat monochrome controls: minimize, maximize, and close. */
 	XSetForeground(display, frame->gc, FRAME_SYMBOL);
-	symbols[symbol_count++] = (XRectangle) {
-	    (short)(minimize_x - 4), 15, 9, 1
-	};
-	symbols[symbol_count++] = (XRectangle) {
-	    (short)(maximize_x - 4), 9, 9, 1
-	};
-	symbols[symbol_count++] = (XRectangle) {
-	    (short)(maximize_x - 4), 9, 1, 9
-	};
-	symbols[symbol_count++] = (XRectangle) {
-	    (short)(maximize_x + 4), 9, 1, 9
-	};
-	symbols[symbol_count++] = (XRectangle) {
-	    (short)(maximize_x - 4), 17, 9, 1
-	};
+	symbols[symbol_count++] =
+	    (XRectangle){(short)(minimize_x - 4), 15, 9, 1};
+	symbols[symbol_count++] =
+	    (XRectangle){(short)(maximize_x - 4), 9, 9, 1};
+	symbols[symbol_count++] =
+	    (XRectangle){(short)(maximize_x - 4), 9, 1, 9};
+	symbols[symbol_count++] =
+	    (XRectangle){(short)(maximize_x + 4), 9, 1, 9};
+	symbols[symbol_count++] =
+	    (XRectangle){(short)(maximize_x - 4), 17, 9, 1};
 	for (offset = -4; offset <= 4; offset++) {
-		symbols[symbol_count++] = (XRectangle) {
-		    (short)(close_x + offset), (short)(13 + offset), 1, 1
-		};
-		symbols[symbol_count++] = (XRectangle) {
-		    (short)(close_x + offset), (short)(13 - offset), 1, 1
-		};
+		symbols[symbol_count++] = (XRectangle){
+		    (short)(close_x + offset), (short)(13 + offset), 1, 1};
+		symbols[symbol_count++] = (XRectangle){
+		    (short)(close_x + offset), (short)(13 - offset), 1, 1};
 	}
 	XFillRectangles(display, frame->frame, frame->gc, symbols,
-	    symbol_count);
+			symbol_count);
 
 	if (title_length != 0) {
 		title_x = ((int)fw - (int)title_length * 8) / 2;
 		XSetForeground(display, frame->gc, WhitePixel(display, 0));
 		XDrawString(display, frame->frame, frame->gc, title_x, 20,
-		    frame->title, (int)title_length);
+			    frame->title, (int)title_length);
 	}
 	XSync(display, False);
 }
@@ -695,8 +687,8 @@ manage(Display *display, Window root, Window client)
 	}
 
 	if (frame_count == MAX_FRAMES ||
-	    !XGetGeometry(display, client, &root_return, &x, &y, &width, &height,
-	    &border, &depth))
+	    !XGetGeometry(display, client, &root_return, &x, &y, &width,
+			  &height, &border, &depth))
 		return;
 	(void)XFetchName(display, client, &title);
 	if (title != NULL && strcmp(title, "_XZED_SHELL") == 0) {
@@ -718,15 +710,17 @@ manage(Display *display, Window root, Window client)
 		strcpy(frame->title, "Xzed Application");
 	}
 	XFree(title);
-	frame->frame = XCreateSimpleWindow(display, root, x, y,
-	    frame_width(frame), frame_height(frame), 0, 0, FRAME_FACE);
+	frame->frame =
+	    XCreateSimpleWindow(display, root, x, y, frame_width(frame),
+				frame_height(frame), 0, 0, FRAME_FACE);
 	if (frame->frame == 0)
 		goto fail;
 	frame->cursor_shape = XZED_CURSOR_LEFT_PTR;
-	if (XzedSetCursorShape(display, frame->frame,
-	    XZED_CURSOR_LEFT_PTR) != 0 ||
+	if (XzedSetCursorShape(display, frame->frame, XZED_CURSOR_LEFT_PTR) !=
+		0 ||
 	    XzedSetInputMargins(display, frame->frame, RESIZE_MARGIN,
-	    RESIZE_MARGIN, RESIZE_MARGIN, RESIZE_MARGIN) != 0)
+				RESIZE_MARGIN, RESIZE_MARGIN,
+				RESIZE_MARGIN) != 0)
 		goto fail;
 	/* Do not inherit a resize cursor after crossing into the client. */
 	if (XzedSetCursorShape(display, client, XZED_CURSOR_LEFT_PTR) != 0 ||
@@ -739,11 +733,11 @@ manage(Display *display, Window root, Window client)
 		if (XSetFont(display, frame->gc, title_font->fid) != 0)
 			goto fail;
 	if (XSelectInput(display, frame->frame,
-	    ExposureMask | ButtonPressMask | ButtonReleaseMask |
-	    PointerMotionMask | StructureNotifyMask) != 0)
+			 ExposureMask | ButtonPressMask | ButtonReleaseMask |
+			     PointerMotionMask | StructureNotifyMask) != 0)
 		goto fail;
 	if (XReparentWindow(display, client, frame->frame, CLIENT_X,
-	    CLIENT_Y) != 0)
+			    CLIENT_Y) != 0)
 		goto fail;
 	reparent_requested = 1;
 	/* Drain the seven setup requests before mapping and decorating. */
@@ -758,7 +752,7 @@ manage(Display *display, Window root, Window client)
 
 fail:
 	fprintf(stderr, "zwm: cannot manage window 0x%lx: %s\n",
-	    (unsigned long)client, strerror(errno));
+		(unsigned long)client, strerror(errno));
 	if (reparent_requested)
 		(void)XReparentWindow(display, client, root, x, y);
 	if (frame->gc != NULL)
@@ -791,7 +785,8 @@ main(int argc, char **argv)
 	root = DefaultRootWindow(display);
 	title_font = XLoadQueryFont(display, "zed-unicode");
 	XSelectInput(display, root,
-	    SubstructureRedirectMask | SubstructureNotifyMask | ExposureMask);
+		     SubstructureRedirectMask | SubstructureNotifyMask |
+			 ExposureMask);
 	load_background(display, root);
 	if (argc > 1) {
 		pid_t pid = fork();
@@ -818,8 +813,10 @@ main(int argc, char **argv)
 			struct frame *frame = by_frame(event.xexpose.window);
 
 			if (event.xexpose.window == root) {
-				restore_background(display, root, event.xexpose.x,
-				    event.xexpose.y, (unsigned)event.xexpose.width,
+				restore_background(
+				    display, root, event.xexpose.x,
+				    event.xexpose.y,
+				    (unsigned)event.xexpose.width,
 				    (unsigned)event.xexpose.height);
 			} else if (frame != NULL) {
 				decorate(display, frame);
@@ -833,23 +830,29 @@ main(int argc, char **argv)
 				unsigned fw = frame_width(frame);
 
 				activate(display, frame);
-				if (local_y >= 2 && local_y < (int)TITLE_HEIGHT &&
-				    local_x >= (int)fw - 84 && local_x < (int)fw - 60) {
+				if (local_y >= 2 &&
+				    local_y < (int)TITLE_HEIGHT &&
+				    local_x >= (int)fw - 84 &&
+				    local_x < (int)fw - 60) {
 					minimize(display, root, frame);
 					continue;
 				}
 				drag = frame;
 				drag_start_x = event.xbutton.x_root;
 				drag_start_y = event.xbutton.y_root;
-				drag_frame_x = frame->x; drag_frame_y = frame->y;
-				drag_width = frame->width; drag_height = frame->height;
-				drag_edges = resize_edges_at(frame, local_x, local_y);
+				drag_frame_x = frame->x;
+				drag_frame_y = frame->y;
+				drag_width = frame->width;
+				drag_height = frame->height;
+				drag_edges =
+				    resize_edges_at(frame, local_x, local_y);
 			}
 		} else if (event.type == MotionNotify && drag == NULL) {
 			struct frame *frame = by_frame(event.xmotion.window);
 
 			if (frame != NULL)
-				set_resize_cursor(display, frame,
+				set_resize_cursor(
+				    display, frame,
 				    event.xmotion.x_root - frame->x,
 				    event.xmotion.y_root - frame->y);
 		} else if (event.type == MotionNotify) {
@@ -859,42 +862,61 @@ main(int argc, char **argv)
 			int width = (int)drag_width, height = (int)drag_height;
 
 			if (drag_edges == 0) {
-				x += dx; y += dy;
+				x += dx;
+				y += dy;
 			} else {
-				if (drag_edges & EDGE_LEFT) { x += dx; width -= dx; }
-				if (drag_edges & EDGE_RIGHT) width += dx;
-				if (drag_edges & EDGE_TOP) { y += dy; height -= dy; }
-				if (drag_edges & EDGE_BOTTOM) height += dy;
+				if (drag_edges & EDGE_LEFT) {
+					x += dx;
+					width -= dx;
+				}
+				if (drag_edges & EDGE_RIGHT)
+					width += dx;
+				if (drag_edges & EDGE_TOP) {
+					y += dy;
+					height -= dy;
+				}
+				if (drag_edges & EDGE_BOTTOM)
+					height += dy;
 				if (width < (int)MIN_CLIENT_WIDTH) {
-					if (drag_edges & EDGE_LEFT) x -= (int)MIN_CLIENT_WIDTH - width;
+					if (drag_edges & EDGE_LEFT)
+						x -= (int)MIN_CLIENT_WIDTH -
+						     width;
 					width = MIN_CLIENT_WIDTH;
 				}
 				if (height < (int)MIN_CLIENT_HEIGHT) {
 					if (drag_edges & EDGE_TOP)
-						y -= (int)MIN_CLIENT_HEIGHT - height;
+						y -= (int)MIN_CLIENT_HEIGHT -
+						     height;
 					height = MIN_CLIENT_HEIGHT;
 				}
 			}
 			if (x == drag->x && y == drag->y &&
-			    width == (int)drag->width && height == (int)drag->height)
+			    width == (int)drag->width &&
+			    height == (int)drag->height)
 				continue;
-			drag->x = x; drag->y = y;
-			drag->width = (unsigned)width; drag->height = (unsigned)height;
+			drag->x = x;
+			drag->y = y;
+			drag->width = (unsigned)width;
+			drag->height = (unsigned)height;
 			if (drag_edges == 0)
-				XMoveResizeWindow(display, drag->frame, drag->x, drag->y,
-				    frame_width(drag), frame_height(drag));
+				XMoveResizeWindow(display, drag->frame, drag->x,
+						  drag->y, frame_width(drag),
+						  frame_height(drag));
 			else
-				XzedMoveResizeWindowBuffered(display, drag->frame,
-				    drag->x, drag->y, frame_width(drag),
-				    frame_height(drag));
+				XzedMoveResizeWindowBuffered(
+				    display, drag->frame, drag->x, drag->y,
+				    frame_width(drag), frame_height(drag));
 		} else if (event.type == ButtonRelease) {
 			if (drag != NULL) {
 				if (drag_edges != 0)
 					XMoveResizeWindow(display, drag->client,
-					    drag->x + CLIENT_X, drag->y + CLIENT_Y,
-					    drag->width, drag->height);
+							  drag->x + CLIENT_X,
+							  drag->y + CLIENT_Y,
+							  drag->width,
+							  drag->height);
 				decorate(display, drag);
-				set_resize_cursor(display, drag,
+				set_resize_cursor(
+				    display, drag,
 				    event.xbutton.x_root - drag->x,
 				    event.xbutton.y_root - drag->y);
 			}

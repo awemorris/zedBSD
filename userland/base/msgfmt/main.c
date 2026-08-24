@@ -105,10 +105,10 @@ catalog_get(struct catalogs *catalogs, const char *domain)
 	if (catalog != NULL)
 		return catalog;
 	if (catalogs->count == catalogs->capacity) {
-		size_t capacity = catalogs->capacity == 0 ? 4U :
-		    catalogs->capacity * 2U;
+		size_t capacity =
+		    catalogs->capacity == 0 ? 4U : catalogs->capacity * 2U;
 		void *items = resize_array(catalogs->items, capacity,
-		    sizeof(*catalogs->items));
+					   sizeof(*catalogs->items));
 
 		if (items == NULL)
 			return NULL;
@@ -231,22 +231,40 @@ format_signature(const char *format, char signature[128])
 		if (count + 1U >= 128U || *format == '\0')
 			return -1;
 		switch (*format++) {
-		case 'd': case 'i':
+		case 'd':
+		case 'i':
 			type = length == 2 ? 'l' : length >= 3 ? 'q' : 'i';
 			break;
-		case 'o': case 'u': case 'x': case 'X':
+		case 'o':
+		case 'u':
+		case 'x':
+		case 'X':
 			type = length == 2 ? 'L' : length >= 3 ? 'Q' : 'I';
 			break;
-		case 'a': case 'A': case 'e': case 'E': case 'f': case 'F':
-		case 'g': case 'G':
+		case 'a':
+		case 'A':
+		case 'e':
+		case 'E':
+		case 'f':
+		case 'F':
+		case 'g':
+		case 'G':
 			type = length == 4 ? 'D' : 'd';
 			break;
-		case 'c': type = length == 2 ? 'w' : 'i'; break;
-		case 's': type = length == 2 ? 'W' : 'p'; break;
-		case 'p': type = 'p'; break;
-		case 'n': type = length == 2 ? 'n' : length >= 3 ? 'N' : 'm';
+		case 'c':
+			type = length == 2 ? 'w' : 'i';
 			break;
-		default: return -1;
+		case 's':
+			type = length == 2 ? 'W' : 'p';
+			break;
+		case 'p':
+			type = 'p';
+			break;
+		case 'n':
+			type = length == 2 ? 'n' : length >= 3 ? 'N' : 'm';
+			break;
+		default:
+			return -1;
 		}
 		signature[count++] = type;
 	}
@@ -262,8 +280,8 @@ formats_compatible(const char *source, const char *translation)
 	char translation_signature[128];
 
 	return format_signature(source, source_signature) == 0 &&
-	    format_signature(translation, translation_signature) == 0 &&
-	    !strcmp(source_signature, translation_signature);
+	       format_signature(translation, translation_signature) == 0 &&
+	       !strcmp(source_signature, translation_signature);
 }
 
 static int
@@ -278,39 +296,43 @@ message_complete(struct parser *parser)
 	if (parser->message.translation_count == 0 ||
 	    parser->message.translations[0] == NULL) {
 		diagnostic(parser->path, parser->line,
-		    "msgid has no corresponding msgstr");
+			   "msgid has no corresponding msgstr");
 		return -1;
 	}
 	if (parser->message.plural_identifier != NULL &&
 	    parser->message.translation_count < 2U) {
 		diagnostic(parser->path, parser->line,
-		    "plural msgid has fewer than two msgstr forms");
+			   "plural msgid has fewer than two msgstr forms");
 		return -1;
 	}
 	for (index = 0; index < parser->message.translation_count; index++) {
 		if (parser->message.translations[index] == NULL) {
 			diagnostic(parser->path, parser->line,
-			    "plural msgstr indexes are not contiguous");
+				   "plural msgstr indexes are not contiguous");
 			return -1;
 		}
 	}
 	if (parser->check && parser->message.c_format) {
-		for (index = 0; index < parser->message.translation_count; index++) {
-			const char *source = index == 0 ||
-			    parser->message.plural_identifier == NULL ?
-			    parser->message.identifier :
-			    parser->message.plural_identifier;
+		for (index = 0; index < parser->message.translation_count;
+		     index++) {
+			const char *source =
+			    index == 0 ||
+				    parser->message.plural_identifier == NULL
+				? parser->message.identifier
+				: parser->message.plural_identifier;
 
-			if (!formats_compatible(source,
-			    parser->message.translations[index])) {
-				diagnostic(parser->path, parser->line,
+			if (!formats_compatible(
+				source, parser->message.translations[index])) {
+				diagnostic(
+				    parser->path, parser->line,
 				    "msgid and msgstr format arguments differ");
 				return -1;
 			}
 		}
 	}
 	if (parser->message.identifier[0] != '\0') {
-		for (index = 0; index < parser->message.translation_count; index++)
+		for (index = 0; index < parser->message.translation_count;
+		     index++)
 			if (parser->message.translations[index][0] == '\0') {
 				message_discard(&parser->message);
 				return 0;
@@ -322,15 +344,17 @@ message_complete(struct parser *parser)
 	}
 	for (index = 0; index < parser->catalog->count; index++)
 		if (!strcmp(parser->catalog->messages[index].identifier,
-		    parser->message.identifier)) {
+			    parser->message.identifier)) {
 			message_discard(&parser->message);
 			return 0;
 		}
 	if (parser->catalog->count == parser->catalog->capacity) {
-		size_t capacity = parser->catalog->capacity == 0 ? 16U :
-		    parser->catalog->capacity * 2U;
-		void *messages = resize_array(parser->catalog->messages, capacity,
-		    sizeof(*parser->catalog->messages));
+		size_t capacity = parser->catalog->capacity == 0
+				      ? 16U
+				      : parser->catalog->capacity * 2U;
+		void *messages =
+		    resize_array(parser->catalog->messages, capacity,
+				 sizeof(*parser->catalog->messages));
 
 		if (messages == NULL)
 			return -1;
@@ -393,7 +417,7 @@ append_quoted(char **destination, const char *text, const char **end_pointer)
 
 		if (*cursor != '\\') {
 			if (append_byte(destination, &length,
-			    (unsigned char)*cursor++) != 0)
+					(unsigned char)*cursor++) != 0)
 				return -1;
 			continue;
 		}
@@ -401,24 +425,51 @@ append_quoted(char **destination, const char *text, const char **end_pointer)
 		if (*cursor == '\0')
 			return -1;
 		switch (*cursor) {
-		case 'a': value = '\a'; cursor++; break;
-		case 'b': value = '\b'; cursor++; break;
-		case 'f': value = '\f'; cursor++; break;
-		case 'n': value = '\n'; cursor++; break;
-		case 'r': value = '\r'; cursor++; break;
-		case 't': value = '\t'; cursor++; break;
-		case 'v': value = '\v'; cursor++; break;
-		case '\\': value = '\\'; cursor++; break;
-		case '"': value = '"'; cursor++; break;
+		case 'a':
+			value = '\a';
+			cursor++;
+			break;
+		case 'b':
+			value = '\b';
+			cursor++;
+			break;
+		case 'f':
+			value = '\f';
+			cursor++;
+			break;
+		case 'n':
+			value = '\n';
+			cursor++;
+			break;
+		case 'r':
+			value = '\r';
+			cursor++;
+			break;
+		case 't':
+			value = '\t';
+			cursor++;
+			break;
+		case 'v':
+			value = '\v';
+			cursor++;
+			break;
+		case '\\':
+			value = '\\';
+			cursor++;
+			break;
+		case '"':
+			value = '"';
+			cursor++;
+			break;
 		default:
 			if (*cursor >= '0' && *cursor <= '7') {
 				unsigned digits = 0;
 
 				value = 0;
 				while (digits < 3U && *cursor >= '0' &&
-				    *cursor <= '7') {
+				       *cursor <= '7') {
 					value = value * 8U +
-					    (unsigned)(*cursor++ - '0');
+						(unsigned)(*cursor++ - '0');
 					digits++;
 				}
 			} else if (*cursor == 'x') {
@@ -428,7 +479,7 @@ append_quoted(char **destination, const char *text, const char **end_pointer)
 				cursor++;
 				value = 0;
 				while ((digit = hexadecimal_value(
-				    (unsigned char)*cursor)) >= 0) {
+					    (unsigned char)*cursor)) >= 0) {
 					value = value * 16U + (unsigned)digit;
 					cursor++;
 					digits++;
@@ -473,13 +524,13 @@ translation_slot(struct message *message, size_t index, char ***slot)
 	if (index >= message->translation_count) {
 		size_t count = index + 1U;
 		char **translations = resize_array(message->translations, count,
-		    sizeof(*translations));
+						   sizeof(*translations));
 		size_t position;
 
 		if (translations == NULL)
 			return -1;
 		for (position = message->translation_count; position < count;
-		    position++)
+		     position++)
 			translations[position] = NULL;
 		message->translations = translations;
 		message->translation_count = count;
@@ -558,7 +609,7 @@ parse_directive(struct parser *parser, char *line)
 
 		if (*end != ']' || end[1] != '\0' || number > SIZE_MAX ||
 		    translation_slot(&parser->message, (size_t)number,
-		    &parser->active) != 0)
+				     &parser->active) != 0)
 			goto syntax;
 	} else if (!strcmp(keyword, "msgstr")) {
 		if (translation_slot(&parser->message, 0, &parser->active) != 0)
@@ -572,7 +623,8 @@ parse_directive(struct parser *parser, char *line)
 		goto syntax;
 	return 0;
 syntax:
-	diagnostic(parser->path, parser->line, "invalid portable object syntax");
+	diagnostic(parser->path, parser->line,
+		   "invalid portable object syntax");
 	return -1;
 }
 
@@ -584,8 +636,8 @@ read_line(FILE *stream, char **line, size_t *capacity, size_t *length)
 	*length = 0;
 	while ((character = fgetc(stream)) != EOF) {
 		if (*length + 1U >= *capacity) {
-			size_t new_capacity = *capacity == 0 ? 128U :
-			    *capacity * 2U;
+			size_t new_capacity =
+			    *capacity == 0 ? 128U : *capacity * 2U;
 			char *new_line = resize_array(*line, new_capacity, 1U);
 
 			if (new_line == NULL)
@@ -607,7 +659,7 @@ read_line(FILE *stream, char **line, size_t *capacity, size_t *length)
 
 static int
 parse_stream(struct catalogs *catalogs, FILE *stream, const char *path,
-	const struct options *options)
+	     const struct options *options)
 {
 	struct parser parser;
 	char *line = NULL;
@@ -624,7 +676,8 @@ parse_stream(struct catalogs *catalogs, FILE *stream, const char *path,
 	parser.path = path;
 	if (parser.catalog == NULL)
 		goto done;
-	while ((line_result = read_line(stream, &line, &capacity, &length)) > 0) {
+	while ((line_result = read_line(stream, &line, &capacity, &length)) >
+	       0) {
 		parser.line++;
 		while (length != 0 && line[length - 1] == '\r')
 			line[--length] = '\0';
@@ -662,15 +715,17 @@ write_u32(FILE *stream, uint32_t value)
 	bytes[1] = (unsigned char)(value >> 8);
 	bytes[2] = (unsigned char)(value >> 16);
 	bytes[3] = (unsigned char)(value >> 24);
-	return fwrite(bytes, 1, sizeof(bytes), stream) == sizeof(bytes) ? 0 : -1;
+	return fwrite(bytes, 1, sizeof(bytes), stream) == sizeof(bytes) ? 0
+									: -1;
 }
 
 static size_t
 original_length(const struct message *message)
 {
 	return strlen(message->identifier) +
-	    (message->plural_identifier != NULL ?
-	    strlen(message->plural_identifier) + 1U : 0U);
+	       (message->plural_identifier != NULL
+		    ? strlen(message->plural_identifier) + 1U
+		    : 0U);
 }
 
 static size_t
@@ -702,7 +757,7 @@ write_catalog(struct catalog *catalog, const char *path)
 		return -1;
 	}
 	qsort(catalog->messages, catalog->count, sizeof(*catalog->messages),
-	    message_compare);
+	      message_compare);
 	original_offset = 7U * 4U;
 	translation_offset = original_offset + catalog->count * 8U;
 	string_offset = translation_offset + catalog->count * 8U;
@@ -741,8 +796,8 @@ write_catalog(struct catalog *catalog, const char *path)
 		if (fwrite(message->identifier, 1, length, stream) != length)
 			failed = 1;
 		if (message->plural_identifier != NULL &&
-		    (fputc('\0', stream) == EOF || fputs(message->plural_identifier,
-		    stream) == EOF))
+		    (fputc('\0', stream) == EOF ||
+		     fputs(message->plural_identifier, stream) == EOF))
 			failed = 1;
 		if (fputc('\0', stream) == EOF)
 			failed = 1;
@@ -792,17 +847,26 @@ parse_options(int argc, char **argv, struct options *options, int *first)
 			char option_name = argument[position];
 
 			switch (argument[position]) {
-			case 'c': options->check = 1; break;
-			case 'f': options->use_fuzzy = 1; break;
-			case 'S': options->strict = 1; break;
-			case 'v': options->verbose = 1; break;
+			case 'c':
+				options->check = 1;
+				break;
+			case 'f':
+				options->use_fuzzy = 1;
+				break;
+			case 'S':
+				options->strict = 1;
+				break;
+			case 'v':
+				options->verbose = 1;
+				break;
 			case 'D':
 			case 'o': {
 				const char *value;
 
 				if (argument[position + 1U] != '\0') {
 					value = argument + position + 1U;
-					position = (unsigned)strlen(argument) - 1U;
+					position =
+					    (unsigned)strlen(argument) - 1U;
 				} else if (++index < argc) {
 					value = argv[index];
 				} else {
@@ -814,7 +878,8 @@ parse_options(int argc, char **argv, struct options *options, int *first)
 					options->output = value;
 				break;
 			}
-			default: return -1;
+			default:
+				return -1;
 			}
 		}
 	}
@@ -866,11 +931,11 @@ catalogs_discard(struct catalogs *catalogs)
 	size_t catalog_index, message_index;
 
 	for (catalog_index = 0; catalog_index < catalogs->count;
-	    catalog_index++) {
+	     catalog_index++) {
 		struct catalog *catalog = &catalogs->items[catalog_index];
 
 		for (message_index = 0; message_index < catalog->count;
-		    message_index++)
+		     message_index++)
 			message_discard(&catalog->messages[message_index]);
 		free(catalog->messages);
 		free(catalog->domain);
@@ -889,8 +954,8 @@ main(int argc, char **argv)
 
 	memset(&catalogs, 0, sizeof(catalogs));
 	if (parse_options(argc, argv, &options, &first) != 0) {
-		fprintf(stderr,
-		    "usage: msgfmt [-cfSv] [-D directory] [-o outputfile] pathname ...\n");
+		fprintf(stderr, "usage: msgfmt [-cfSv] [-D directory] [-o "
+				"outputfile] pathname ...\n");
 		return 2;
 	}
 	for (operand = first; operand < argc; operand++) {
@@ -924,45 +989,48 @@ main(int argc, char **argv)
 		memset(&combined, 0, sizeof(combined));
 		combined.domain = (char *)"messages";
 		for (catalog_index = 0; catalog_index < catalogs.count;
-		    catalog_index++)
+		     catalog_index++)
 			total += catalogs.items[catalog_index].count;
-		combined.messages = resize_array(NULL, total,
-		    sizeof(*combined.messages));
+		combined.messages =
+		    resize_array(NULL, total, sizeof(*combined.messages));
 		if (total != 0 && combined.messages == NULL)
 			goto done;
 		for (catalog_index = 0; catalog_index < catalogs.count;
-		    catalog_index++) {
+		     catalog_index++) {
 			struct catalog *source = &catalogs.items[catalog_index];
 			size_t message_index;
 
 			for (message_index = 0; message_index < source->count;
-			    message_index++)
+			     message_index++)
 				combined.messages[combined.count++] =
 				    source->messages[message_index];
 			source->count = 0;
 		}
 		if (write_catalog(&combined, options.output) != 0) {
 			for (catalog_index = 0; catalog_index < combined.count;
-			    catalog_index++)
-				message_discard(&combined.messages[catalog_index]);
+			     catalog_index++)
+				message_discard(
+				    &combined.messages[catalog_index]);
 			free(combined.messages);
 			goto done;
 		}
 		for (catalog_index = 0; catalog_index < combined.count;
-		    catalog_index++)
+		     catalog_index++)
 			message_discard(&combined.messages[catalog_index]);
 		free(combined.messages);
 	} else {
 		for (catalog_index = 0; catalog_index < catalogs.count;
-		    catalog_index++) {
-			struct catalog *catalog = &catalogs.items[catalog_index];
+		     catalog_index++) {
+			struct catalog *catalog =
+			    &catalogs.items[catalog_index];
 			char *output;
 
 			if (catalog->count == 0)
 				continue;
 			output = default_output_name(catalog->domain,
-			    options.strict);
-			if (output == NULL || write_catalog(catalog, output) != 0) {
+						     options.strict);
+			if (output == NULL ||
+			    write_catalog(catalog, output) != 0) {
 				free(output);
 				goto done;
 			}
@@ -973,10 +1041,10 @@ main(int argc, char **argv)
 		size_t messages = 0;
 
 		for (catalog_index = 0; catalog_index < catalogs.count;
-		    catalog_index++)
+		     catalog_index++)
 			messages += catalogs.items[catalog_index].count;
 		fprintf(stderr, "%lu translated messages.\n",
-		    (unsigned long)messages);
+			(unsigned long)messages);
 	}
 	result = 0;
 done:

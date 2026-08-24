@@ -35,8 +35,9 @@ static void *
 environment_thread(void *argument)
 {
 	(void)argument;
-	return (void *)(uintptr_t)(setenv("ZEDBSD_ENV_RACE", "new", 1) == 0 ?
-	    0 : 1);
+	return (void *)(uintptr_t)(setenv("ZEDBSD_ENV_RACE", "new", 1) == 0
+				       ? 0
+				       : 1);
 }
 
 int
@@ -88,9 +89,11 @@ main(int argc, char **argv, char **envp)
 	if (errno != 41)
 		return 19;
 	puts("DL:04:TLS");
-	if (pthread_create(&first, NULL, tls_thread, (void *)(uintptr_t)51) != 0)
+	if (pthread_create(&first, NULL, tls_thread, (void *)(uintptr_t)51) !=
+	    0)
 		return 20;
-	if (pthread_create(&second, NULL, tls_thread, (void *)(uintptr_t)52) != 0)
+	if (pthread_create(&second, NULL, tls_thread, (void *)(uintptr_t)52) !=
+	    0)
 		return 20;
 	if (pthread_join(first, &first_result) != 0 ||
 	    pthread_join(second, &second_result) != 0)
@@ -106,18 +109,17 @@ main(int argc, char **argv, char **envp)
 	puts("DL:05B:PLUGIN-OPENED");
 	plugin_get = (int (*)(void))dlsym(plugin, "tlstest_get");
 	plugin_set = (void (*)(int, int))dlsym(plugin, "tlstest_set");
-	plugin_constructor_seen = (int (*)(void))dlsym(plugin,
-	    "tlstest_constructor_seen");
-	plugin_set_destructor_counter = (void (*)(int *))dlsym(plugin,
-	    "tlstest_set_destructor_counter");
-	plugin_rpath_value = (int (*)(void))dlsym(plugin,
-	    "tlstest_rpath_value");
+	plugin_constructor_seen =
+	    (int (*)(void))dlsym(plugin, "tlstest_constructor_seen");
+	plugin_set_destructor_counter =
+	    (void (*)(int *))dlsym(plugin, "tlstest_set_destructor_counter");
+	plugin_rpath_value =
+	    (int (*)(void))dlsym(plugin, "tlstest_rpath_value");
 	if (plugin_get == NULL || plugin_set == NULL ||
 	    plugin_constructor_seen == NULL ||
 	    plugin_set_destructor_counter == NULL ||
-	    !plugin_constructor_seen() ||
-	    plugin_get() != 70 || plugin_rpath_value == NULL ||
-	    plugin_rpath_value() != 82)
+	    !plugin_constructor_seen() || plugin_get() != 70 ||
+	    plugin_rpath_value == NULL || plugin_rpath_value() != 82)
 		return 24;
 	puts("DL:05C:PLUGIN-READY");
 	plugin_set_destructor_counter(&plugin_destructor_count);
@@ -137,8 +139,8 @@ main(int argc, char **argv, char **envp)
 		return 29;
 	puts("DL:05E:PLUGIN-REOPENED");
 	plugin_get = (int (*)(void))dlsym(plugin, "tlstest_get");
-	plugin_set_destructor_counter = (void (*)(int *))dlsym(plugin,
-	    "tlstest_set_destructor_counter");
+	plugin_set_destructor_counter =
+	    (void (*)(int *))dlsym(plugin, "tlstest_set_destructor_counter");
 	if (plugin_get == NULL || plugin_set_destructor_counter == NULL ||
 	    plugin_get() != 70)
 		return 30;
@@ -154,10 +156,10 @@ main(int argc, char **argv, char **envp)
 		if (plugin == NULL)
 			return 32;
 		plugin_get = (int (*)(void))dlsym(plugin, "tlstest_get");
-		plugin_set_destructor_counter = (void (*)(int *))dlsym(plugin,
-		    "tlstest_set_destructor_counter");
-		if (plugin_get == NULL || plugin_set_destructor_counter == NULL ||
-		    plugin_get() != 70)
+		plugin_set_destructor_counter = (void (*)(int *))dlsym(
+		    plugin, "tlstest_set_destructor_counter");
+		if (plugin_get == NULL ||
+		    plugin_set_destructor_counter == NULL || plugin_get() != 70)
 			return 33;
 		plugin_set_destructor_counter(&plugin_destructor_count);
 		if (dlclose(plugin) != 0 ||
@@ -166,8 +168,8 @@ main(int argc, char **argv, char **envp)
 	}
 	puts("DL:05H:PLUGIN-RECYCLE");
 	for (reload_iteration = 0; reload_iteration < 64; reload_iteration++) {
-		exhausted_handles[reload_iteration] = dlopen("libc.so",
-		    RTLD_NOW | RTLD_LOCAL);
+		exhausted_handles[reload_iteration] =
+		    dlopen("libc.so", RTLD_NOW | RTLD_LOCAL);
 		if (exhausted_handles[reload_iteration] == NULL)
 			return 35;
 	}
@@ -202,12 +204,12 @@ main(int argc, char **argv, char **envp)
 	version_value = (int (*)(void))dlsym(handle, "versioned_value");
 	if (version_value == NULL || version_value() != 42)
 		return 44;
-	version_value = (int (*)(void))dlvsym(handle, "versioned_value",
-	    "ZEDBSD_1.0");
+	version_value =
+	    (int (*)(void))dlvsym(handle, "versioned_value", "ZEDBSD_1.0");
 	if (version_value == NULL || version_value() != 41)
 		return 45;
-	version_value = (int (*)(void))dlvsym(handle, "versioned_value",
-	    "ZEDBSD_2.0");
+	version_value =
+	    (int (*)(void))dlvsym(handle, "versioned_value", "ZEDBSD_2.0");
 	if (version_value == NULL || version_value() != 42 ||
 	    dlvsym(handle, "versioned_value", "ZEDBSD_MISSING") != NULL ||
 	    dlerror() == NULL || dlerror() != NULL || dlclose(handle) != 0)
@@ -216,7 +218,8 @@ main(int argc, char **argv, char **envp)
 	{
 		unsigned char bad_magic = 0;
 		int fd = open("/lib/tlstest.so", O_RDWR);
-		if (fd < 0 || pwrite(fd, &bad_magic, 1, 0) != 1 || close(fd) != 0)
+		if (fd < 0 || pwrite(fd, &bad_magic, 1, 0) != 1 ||
+		    close(fd) != 0)
 			return 47;
 		plugin = dlopen("tlstest.so", RTLD_NOW | RTLD_LOCAL);
 		if (plugin != NULL || dlerror() == NULL || dlerror() != NULL)
@@ -230,9 +233,10 @@ main(int argc, char **argv, char **envp)
 
 		if (setenv("ZEDBSD_ENV_RACE", "old", 1) != 0 ||
 		    (saved = getenv("ZEDBSD_ENV_RACE")) == NULL ||
-		    pthread_create(&first, NULL, environment_thread, NULL) != 0 ||
-		    pthread_join(first, &thread_result) != 0 || thread_result != NULL ||
-		    strcmp(saved, "old") != 0 ||
+		    pthread_create(&first, NULL, environment_thread, NULL) !=
+			0 ||
+		    pthread_join(first, &thread_result) != 0 ||
+		    thread_result != NULL || strcmp(saved, "old") != 0 ||
 		    strcmp(getenv("ZEDBSD_ENV_RACE"), "new") != 0)
 			return 49;
 		if (putenv(putenv_entry) != 0 ||
@@ -247,13 +251,14 @@ main(int argc, char **argv, char **envp)
 	{
 		char io_buffer[8], result[4];
 		FILE *file = fopen("/stdio-r2.tmp", "w+");
-		if (file == NULL || setvbuf(file, io_buffer, _IOFBF,
-		    sizeof(io_buffer)) != 0 || fwrite("abcdef", 1, 6, file) != 6 ||
-		    ftell(file) != 6 || fseek(file, 0, SEEK_SET) != 0 ||
-		    fread(result, 1, 3, file) != 3 || memcmp(result, "abc", 3) != 0 ||
-		    ungetc('Z', file) != 'Z' || fgetc(file) != 'Z' ||
-		    fgetc(file) != 'd' || fclose(file) != 0 ||
-		    unlink("/stdio-r2.tmp") != 0)
+		if (file == NULL ||
+		    setvbuf(file, io_buffer, _IOFBF, sizeof(io_buffer)) != 0 ||
+		    fwrite("abcdef", 1, 6, file) != 6 || ftell(file) != 6 ||
+		    fseek(file, 0, SEEK_SET) != 0 ||
+		    fread(result, 1, 3, file) != 3 ||
+		    memcmp(result, "abc", 3) != 0 || ungetc('Z', file) != 'Z' ||
+		    fgetc(file) != 'Z' || fgetc(file) != 'd' ||
+		    fclose(file) != 0 || unlink("/stdio-r2.tmp") != 0)
 			return 52;
 	}
 	puts("DL:05N:STDIO-BUFFERING");

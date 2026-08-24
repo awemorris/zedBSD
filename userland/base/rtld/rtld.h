@@ -16,8 +16,8 @@
 #define RTLD_NEEDED_MAX 16U
 #define RTLD_INTERP_PATH "/lib/ld.so"
 
-intptr_t rtld_syscall6(uint32_t, uintptr_t, uintptr_t, uintptr_t,
-	uintptr_t, uintptr_t, uintptr_t);
+intptr_t rtld_syscall6(uint32_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t,
+		       uintptr_t, uintptr_t);
 uintptr_t rtld_main(uintptr_t *initial_stack);
 
 size_t rtld_strlen(const char *);

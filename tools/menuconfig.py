@@ -468,7 +468,7 @@ def user_program_rows() -> list[list[str]]:
 
 
 def build(screen, values: dict[str, object], output: Path,
-          make_target: str, artifact_target: str) -> None:
+          make_target: str) -> None:
     answer = choose(screen, "Are you sure you want to build?",
                     ["Yes", "No"], target_label(values))
     if answer != 0:
@@ -492,13 +492,7 @@ def build(screen, values: dict[str, object], output: Path,
         screen.clear()
         screen.refresh()
     if result is not None and result.returncode == 0:
-        artifacts = subprocess.run(
-            ["make", "--no-print-directory", f"ZEDBSD_CONFIG={output}",
-             artifact_target], cwd=REPO, check=False, text=True,
-            stdout=subprocess.PIPE).stdout.splitlines()
-        lines = ["Build succeeded.", ""] + [
-            artifact for artifact in artifacts if artifact
-        ]
+        lines = ["Build succeeded.", "", f"Target: {make_target}"]
         message(screen, "Build result", lines, target_label(values))
     else:
         status = result.returncode if result is not None else "not started"
@@ -520,7 +514,6 @@ def tui(screen, values: dict[str, object], output: Path) -> None:
             ("Build toolchain", "build-toolchain"),
             ("Build kernel", "build-kernel"),
             ("Build rootfs", "build-rootfs"),
-            ("Build rootfs image", "build-rootfs-image"),
             ("Build boot disk image", "build-boot-disk"),
             ("", ""),
             ("Save and exit", "save"),
@@ -535,8 +528,7 @@ def tui(screen, values: dict[str, object], output: Path) -> None:
             save(output, values)
             return
         if action == "build-all":
-            build(screen, values, output, "build-release",
-                  "print-release-artifacts")
+            build(screen, values, output, "disk-image")
         elif action == "target":
             select_target(screen, values)
         elif action == "kernel-options":
@@ -548,21 +540,13 @@ def tui(screen, values: dict[str, object], output: Path) -> None:
         elif action == "user-programs":
             select_programs(screen, values)
         elif action == "build-toolchain":
-            message(screen, "Build toolchain",
-                    ["Build toolchain is not implemented yet."],
-                    target_label(values))
+            build(screen, values, output, "toolchain")
         elif action == "build-kernel":
-            build(screen, values, output, "build-kernel",
-                  "print-kernel-artifact")
+            build(screen, values, output, "vmunix")
         elif action == "build-rootfs":
-            build(screen, values, output, "build-rootfs",
-                  "print-rootfs-artifact")
-        elif action == "build-rootfs-image":
-            build(screen, values, output, "build-rootfs-image",
-                  "print-rootfs-image-artifact")
+            build(screen, values, output, "rootfs")
         elif action == "build-boot-disk":
-            build(screen, values, output, "build-boot-disk-image",
-                  "print-boot-disk-artifact")
+            build(screen, values, output, "disk-image")
 
 
 def main() -> None:

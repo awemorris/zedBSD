@@ -51,8 +51,9 @@ main(int argc, char **argv)
 			else if (strncmp(option, "fspec=", 6) == 0)
 				source = option + 6;
 			else {
-				fprintf(stderr, "mount: unsupported option: %s\n",
-				    option);
+				fprintf(stderr,
+					"mount: unsupported option: %s\n",
+					option);
 				return 2;
 			}
 		} else if (argv[i][0] == '-') {
@@ -69,8 +70,9 @@ main(int argc, char **argv)
 		}
 	}
 	if (type == NULL || target == NULL) {
-		fprintf(stderr, "usage: mount -t type [-r] [-o ro|nosuid|fspec=disk] "
-		    "[disk] directory\n");
+		fprintf(stderr,
+			"usage: mount -t type [-r] [-o ro|nosuid|fspec=disk] "
+			"[disk] directory\n");
 		return 2;
 	}
 	if (source != NULL) {
@@ -82,10 +84,11 @@ main(int argc, char **argv)
 		}
 		strcpy(arguments.fspec, source);
 	}
-	if (mount(type, target, flags,
-	    source != NULL ? &arguments : NULL) != 0) {
+	if (mount(type, target, flags, source != NULL ? &arguments : NULL) !=
+	    0) {
 		fprintf(stderr, "mount: %s on %s: %s\n",
-		    source != NULL ? source : type, target, strerror(errno));
+			source != NULL ? source : type, target,
+			strerror(errno));
 		return 1;
 	}
 	return 0;
