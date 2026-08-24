@@ -10,9 +10,15 @@
 #define EXIT_FAILURE 1
 #define RAND_MAX 2147483647
 
-typedef struct { int quot, rem; } div_t;
-typedef struct { long quot, rem; } ldiv_t;
-typedef struct { long long quot, rem; } lldiv_t;
+typedef struct {
+	int quot, rem;
+} div_t;
+typedef struct {
+	long quot, rem;
+} ldiv_t;
+typedef struct {
+	long long quot, rem;
+} lldiv_t;
 
 void *malloc(size_t size);
 void *calloc(size_t count, size_t size);
@@ -46,7 +52,7 @@ div_t div(int, int);
 ldiv_t ldiv(long, long);
 lldiv_t lldiv(long long, long long);
 void *bsearch(const void *, const void *, size_t, size_t,
-    int (*)(const void *, const void *));
+	      int (*)(const void *, const void *));
 void qsort(void *, size_t, size_t, int (*)(const void *, const void *));
 int rand(void);
 void srand(unsigned int seed);
@@ -71,8 +77,9 @@ void setprogname(const char *);
 int heapsort(void *, size_t, size_t, int (*)(const void *, const void *));
 int mergesort(void *, size_t, size_t, int (*)(const void *, const void *));
 void qsort_r(void *, size_t, size_t,
-    int (*)(const void *, const void *, void *), void *);
+	     int (*)(const void *, const void *, void *), void *);
 void *reallocarray(void *, size_t, size_t);
+int mkstemp(char *);
 void *reallocf(void *, size_t);
 void *recallocarray(void *, size_t, size_t, size_t);
 void srandomdev(void);
@@ -86,19 +93,19 @@ int ptsname_r(int, char *, size_t);
 long a64l(const char *);
 char *l64a(long);
 double drand48(void);
-double erand48(unsigned short [3]);
-long jrand48(unsigned short [3]);
-void lcong48(unsigned short [7]);
+double erand48(unsigned short[3]);
+long jrand48(unsigned short[3]);
+void lcong48(unsigned short[7]);
 long lrand48(void);
 long mrand48(void);
-long nrand48(unsigned short [3]);
-unsigned short *seed48(unsigned short [3]);
+long nrand48(unsigned short[3]);
+unsigned short *seed48(unsigned short[3]);
 void srand48(long);
 char *initstate(unsigned int, char *, size_t);
 long random(void);
 char *setstate(char *);
 void srandom(unsigned int);
-void setkey(const char [64]);
+void setkey(const char[64]);
 
 char *realpath(const char *, char *);
 

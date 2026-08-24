@@ -27,6 +27,7 @@ struct __stdio_file {
 	unsigned buffer_owned;
 	unsigned heap_allocated;
 	unsigned io_started;
+	pid_t child_pid;
 	int orientation;
 	int (*cookie_read)(void *, char *, int);
 	int (*cookie_write)(void *, const char *, int);

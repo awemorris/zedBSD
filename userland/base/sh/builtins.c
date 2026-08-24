@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -18,6 +19,97 @@
 #define COPY_BUFFER_SIZE 512U
 #define LS_INITIAL_CAPACITY 16U
 #define PATH_BUFFER_SIZE 256U
+
+struct hash_entry {
+	struct hash_entry *next;
+	char *name;
+	char *path;
+};
+
+static struct hash_entry *hash_entries;
+static char *hash_path;
+
+void
+sh_hash_clear(void)
+{
+	struct hash_entry *entry;
+
+	while ((entry = hash_entries) != NULL) {
+		hash_entries = entry->next;
+		free(entry->name);
+		free(entry->path);
+		free(entry);
+	}
+}
+
+int
+sh_hash_sync_path(const char *path)
+{
+	char *copy;
+
+	if (path == NULL)
+		path = "/bin:/usr/bin";
+	if (hash_path != NULL && strcmp(hash_path, path) == 0)
+		return 0;
+	copy = strdup(path);
+	if (copy == NULL)
+		return -1;
+	sh_hash_clear();
+	free(hash_path);
+	hash_path = copy;
+	return 0;
+}
+
+const char *
+sh_hash_lookup(const char *name)
+{
+	struct hash_entry *entry;
+
+	for (entry = hash_entries; entry != NULL; entry = entry->next)
+		if (strcmp(entry->name, name) == 0)
+			return entry->path;
+	return NULL;
+}
+
+int
+sh_hash_store(const char *name, const char *path)
+{
+	struct hash_entry *entry;
+	char *copy;
+
+	for (entry = hash_entries; entry != NULL; entry = entry->next)
+		if (strcmp(entry->name, name) == 0) {
+			copy = strdup(path);
+			if (copy == NULL)
+				return -1;
+			free(entry->path);
+			entry->path = copy;
+			return 0;
+		}
+	entry = calloc(1, sizeof(*entry));
+	if (entry == NULL)
+		return -1;
+	entry->name = strdup(name);
+	entry->path = strdup(path);
+	if (entry->name == NULL || entry->path == NULL) {
+		free(entry->name);
+		free(entry->path);
+		free(entry);
+		return -1;
+	}
+	entry->next = hash_entries;
+	hash_entries = entry;
+	return 0;
+}
+
+void
+sh_hash_print(void)
+{
+	struct hash_entry *entry;
+
+	for (entry = hash_entries; entry != NULL; entry = entry->next)
+		printf("%s=%s\n", entry->name, entry->path);
+}
 
 struct ls_entry {
 	char name[256];
@@ -111,6 +203,169 @@ builtin_cd(int argc, char **argv)
 	if (chdir(path) != 0) {
 		fprintf(stderr, "cd: %s: %s\n", path, strerror(errno));
 		return 0;
+	}
+	return 1;
+}
+
+struct ulimit_kind {
+	char option;
+	int resource;
+	rlim_t scale;
+	const char *label;
+};
+
+static const struct ulimit_kind ulimit_kinds[] = {
+    {'c', RLIMIT_CORE, 512U, "core file size (blocks)"},
+    {'d', RLIMIT_DATA, 1024U, "data segment size (kbytes)"},
+    {'f', RLIMIT_FSIZE, 512U, "file size (blocks)"},
+    {'n', RLIMIT_NOFILE, 1U, "open files"},
+    {'s', RLIMIT_STACK, 1024U, "stack size (kbytes)"},
+    {'t', RLIMIT_CPU, 1U, "cpu time (seconds)"},
+    {'v', RLIMIT_AS, 1024U, "address space (kbytes)"},
+};
+
+static const struct ulimit_kind *
+ulimit_kind_find(char option)
+{
+	size_t index;
+
+	for (index = 0; index < sizeof(ulimit_kinds) / sizeof(ulimit_kinds[0]);
+	     index++)
+		if (ulimit_kinds[index].option == option)
+			return &ulimit_kinds[index];
+	return NULL;
+}
+
+static void
+ulimit_print(rlim_t value, rlim_t scale)
+{
+	if (value == RLIM_INFINITY)
+		puts("unlimited");
+	else
+		printf("%llu\n", (unsigned long long)(value / scale));
+}
+
+static int
+ulimit_parse(const char *text, rlim_t scale, rlim_t *result)
+{
+	char *end;
+	unsigned long long value;
+
+	if (strcmp(text, "unlimited") == 0) {
+		*result = RLIM_INFINITY;
+		return 1;
+	}
+	if (*text == '\0' || *text == '-')
+		return 0;
+	errno = 0;
+	value = strtoull(text, &end, 10);
+	if (errno == ERANGE || *end != '\0' ||
+	    value > (unsigned long long)RLIM_INFINITY / scale)
+		return 0;
+	*result = (rlim_t)value * scale;
+	return 1;
+}
+
+static int
+builtin_ulimit(int argc, char **argv)
+{
+	const struct ulimit_kind *kind = ulimit_kind_find('f');
+	int hard = 0;
+	int soft = 0;
+	int all = 0;
+	int index = 1;
+
+	while (index < argc && argv[index][0] == '-' &&
+	       argv[index][1] != '\0') {
+		const char *option = argv[index] + 1;
+
+		if (strcmp(argv[index], "--") == 0) {
+			index++;
+			break;
+		}
+		while (*option != '\0') {
+			const struct ulimit_kind *selected;
+
+			if (*option == 'H')
+				hard = 1;
+			else if (*option == 'S')
+				soft = 1;
+			else if (*option == 'a')
+				all = 1;
+			else if ((selected = ulimit_kind_find(*option)) != NULL)
+				kind = selected;
+			else {
+				fprintf(stderr,
+					"ulimit: invalid option -- %c\n",
+					*option);
+				return 0;
+			}
+			option++;
+		}
+		index++;
+	}
+	if (all) {
+		size_t kind_index;
+
+		if (index != argc)
+			return 0;
+		for (kind_index = 0; kind_index < sizeof(ulimit_kinds) /
+						      sizeof(ulimit_kinds[0]);
+		     kind_index++) {
+			struct rlimit limit;
+
+			if (getrlimit(ulimit_kinds[kind_index].resource,
+				      &limit) != 0) {
+				fprintf(stderr, "ulimit: %s\n",
+					strerror(errno));
+				return 0;
+			}
+			printf("-%c: %-30s ", ulimit_kinds[kind_index].option,
+			       ulimit_kinds[kind_index].label);
+			ulimit_print(hard && !soft ? limit.rlim_max
+						   : limit.rlim_cur,
+				     ulimit_kinds[kind_index].scale);
+		}
+		return 1;
+	}
+	if (index == argc) {
+		struct rlimit limit;
+
+		if (getrlimit(kind->resource, &limit) != 0) {
+			fprintf(stderr, "ulimit: %s\n", strerror(errno));
+			return 0;
+		}
+		ulimit_print(hard && !soft ? limit.rlim_max : limit.rlim_cur,
+			     kind->scale);
+		return 1;
+	}
+	if (index + 1 != argc) {
+		fprintf(stderr, "usage: ulimit [-HSa] [-cdfnstv] [limit]\n");
+		return 0;
+	}
+	{
+		struct rlimit limit;
+		rlim_t value;
+
+		if (!ulimit_parse(argv[index], kind->scale, &value)) {
+			fprintf(stderr, "ulimit: invalid limit: %s\n",
+				argv[index]);
+			return 0;
+		}
+		if (getrlimit(kind->resource, &limit) != 0) {
+			fprintf(stderr, "ulimit: %s\n", strerror(errno));
+			return 0;
+		}
+		if (!hard && !soft)
+			hard = soft = 1;
+		if (hard)
+			limit.rlim_max = value;
+		if (soft)
+			limit.rlim_cur = value;
+		if (setrlimit(kind->resource, &limit) != 0) {
+			fprintf(stderr, "ulimit: %s\n", strerror(errno));
+			return 0;
+		}
 	}
 	return 1;
 }
@@ -1062,6 +1317,8 @@ sh_builtin_dispatch(int argc, char **argv, int *handled)
 		return builtin_stat(argc, argv);
 	if (!strcmp(argv[0], "touch"))
 		return builtin_touch(argc, argv);
+	if (!strcmp(argv[0], "ulimit"))
+		return builtin_ulimit(argc, argv);
 	if (!strcmp(argv[0], "clear")) {
 		if (argc != 1) {
 			fprintf(stderr, "usage: clear\n");

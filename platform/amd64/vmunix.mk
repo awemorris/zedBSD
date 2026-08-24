@@ -247,14 +247,7 @@ AMD64_USER_LIBC_OBJS := $(BUILD)/user64/src/crt/crt0-amd64.o \
 	$(patsubst %.c,$(BUILD)/user64/%.o,$(AMD64_USER_RUNTIME_SOURCES))
 AMD64_USER_NET_LIBC_OBJS := $(AMD64_USER_LIBC_OBJS)
 AMD64_USER_NETTEST_OBJS := $(BUILD)/user64/userland/base/nettest/main.o
-AMD64_USER_SH_OBJS := $(BUILD)/user64/userland/base/sh/main.o \
-	$(BUILD)/user64/userland/base/sh/builtins.o \
-	$(BUILD)/user64/userland/base/sh/lexer.o \
-	$(BUILD)/user64/userland/base/sh/expand.o \
-	$(BUILD)/user64/userland/base/sh/glob.o \
-	$(BUILD)/user64/userland/base/sh/vars.o \
-	$(BUILD)/user64/userland/base/sh/arithmetic.o \
-	$(BUILD)/user64/userland/base/sh/alias.o
+AMD64_USER_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,sh)
 AMD64_USER_READLINE_OBJ := $(BUILD)/user64/userland/base/libedit/readline.o
 AMD64_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 AMD64_USER_ELF_CHECK := tools/build/check-user-elf.py
@@ -272,6 +265,12 @@ $(BUILD)/user64/src/crt/crt0-amd64.o: src/crt/crt0-amd64.S \
 $(AMD64_USER_READLINE_OBJ): AMD64_USER_CPPFLAGS += -Iuserland/base/libedit
 $(AMD64_USER_SH_OBJS): AMD64_USER_CPPFLAGS += -Iuserland/base/libedit
 $(AMD64_USER_READLINE_LIB): $(AMD64_USER_READLINE_OBJ)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+AMD64_USER_CURSES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,\
+	$(BUILD)/user64,curses)
+$(BUILD)/lib/libcurses.a: $(AMD64_USER_CURSES_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
@@ -608,8 +607,11 @@ AMD64_ARCH_INPUTS += $(addprefix $(BUILD)/bin/,$(USERLAND_SELECTED_NETWORK_PROGR
 AMD64_ARCH_FILES += $(foreach command,$(USERLAND_SELECTED_NETWORK_PROGRAMS),--file /bin/$(command)=$(BUILD)/bin/$(command))
 AMD64_ARCH_INPUTS += $(USER_BASIC_TARGETS)
 AMD64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
+AMD64_ARCH_FILES += $(ZEDBSD_USERLAND_FILE_MODES)
 AMD64_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 AMD64_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
+AMD64_ARCH_INPUTS += $(ZEDBSD_BASE_DATA_INPUTS)
+AMD64_ARCH_FILES += $(ZEDBSD_BASE_DATA_FILES)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AMD64_ARCH_IMAGE),amd64,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
 $(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(AMD64_ARCH_INPUTS),$(AMD64_ARCH_FILES)))
 AMD64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/amd64.ufs
@@ -668,8 +670,310 @@ $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
 	cp -f $< $@
 
+AMD64_DEFERRED_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-deferred-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_DEFERRED_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/deferred-stub-zinit.rc,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/deferred-stub-zinit.rc))
+
+$(BUILD)/deferred-stub-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_DEFERRED_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	platform/amd64/tools/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+		--stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--arch-profile amd64 --arch-image $(AMD64_DEFERRED_TEST_UFS) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
+
+deferred-stub-qemu-test: $(BUILD)/deferred-stub-qemu.img \
+	tests/deferred-stub-qemu-test.py
+	$(PYTHON) tests/deferred-stub-qemu-test.py \
+		--qemu $(QEMU) --image $(BUILD)/deferred-stub-qemu.img
+
+AMD64_POSIX_PHASE2_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase2-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE2_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase2-zinit.rc \
+	tests/posix-phase2-input.txt tests/posix-phase2-tsort.txt \
+	tests/posix-phase2-uudecode.txt,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase2-zinit.rc \
+	--file /etc/posix-phase2-input=tests/posix-phase2-input.txt \
+	--file /etc/posix-phase2-tsort=tests/posix-phase2-tsort.txt \
+	--file /etc/posix-phase2-uudecode=tests/posix-phase2-uudecode.txt))
+
+$(BUILD)/posix-phase2-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE2_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	platform/amd64/tools/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+		--stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE2_TEST_UFS) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
+
+posix-phase2-qemu-test: $(BUILD)/posix-phase2-qemu.img \
+	tests/posix-phase2-qemu-test.py
+	$(PYTHON) tests/posix-phase2-qemu-test.py \
+		--qemu $(QEMU) --image $(BUILD)/posix-phase2-qemu.img
+
+AMD64_POSIX_PHASE3_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase3-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE3_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase3-zinit.rc \
+	tests/fixtures/phase3-messages.msg \
+	tests/fixtures/zed-test-locale.src tests/fixtures/UTF-8.charmap,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase3-zinit.rc \
+	--file /etc/phase3-messages.msg=tests/fixtures/phase3-messages.msg \
+	--file /etc/zed-test-locale.src=tests/fixtures/zed-test-locale.src \
+	--file /etc/UTF-8.charmap=tests/fixtures/UTF-8.charmap))
+
+$(BUILD)/posix-phase3-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE3_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	platform/amd64/tools/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+		--stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE3_TEST_UFS) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
+
+posix-phase3-qemu-test: $(BUILD)/posix-phase3-qemu.img \
+	tests/posix-phase3-qemu-test.py
+	$(PYTHON) tests/posix-phase3-qemu-test.py \
+		--qemu $(QEMU) --image $(BUILD)/posix-phase3-qemu.img
+
+AMD64_POSIX_PHASE4_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase4-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE4_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase4-zinit.rc \
+	tests/fixtures/phase4.m4 tests/fixtures/phase4-m4.expected \
+	tests/fixtures/phase4.ed,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase4-zinit.rc \
+	--file /etc/phase4.m4=tests/fixtures/phase4.m4 \
+	--file /etc/phase4-m4.expected=tests/fixtures/phase4-m4.expected \
+	--file /etc/phase4.ed=tests/fixtures/phase4.ed))
+
+$(BUILD)/posix-phase4-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE4_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	platform/amd64/tools/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+		--stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE4_TEST_UFS) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
+
+posix-phase4-qemu-test: $(BUILD)/posix-phase4-qemu.img \
+	tests/posix-phase4-qemu-test.py
+	$(PYTHON) tests/posix-phase4-qemu-test.py \
+		--qemu $(QEMU) --image $(BUILD)/posix-phase4-qemu.img
+
+$(BUILD)/bin/posix-phase5-helper: $(AMD64_USER_NET_LIBC_OBJS) \
+	$(BUILD)/user64/userland/base/tests/posix-phase5-helper.o \
+	$(AMD64_PLATFORM)/user.ld $(AMD64_USER_ELF_CHECK)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
+		$(BUILD)/user64/userland/base/tests/posix-phase5-helper.o -o $@
+	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+AMD64_POSIX_PHASE5_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase5-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE5_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) $(BUILD)/bin/posix-phase5-helper \
+	tests/posix-phase5-zinit.rc,\
+	$(AMD64_ARCH_FILES) \
+	--file /bin/posix-phase5-helper=$(BUILD)/bin/posix-phase5-helper \
+	--file /etc/zinit.rc=tests/posix-phase5-zinit.rc))
+
+$(BUILD)/posix-phase5-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE5_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	platform/amd64/tools/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+		--stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE5_TEST_UFS) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
+
+posix-phase5-qemu-test: $(BUILD)/posix-phase5-qemu.img \
+	tests/posix-phase5-qemu-test.py
+	$(PYTHON) tests/posix-phase5-qemu-test.py \
+		--qemu $(QEMU) --image $(BUILD)/posix-phase5-qemu.img
+
+AMD64_POSIX_PHASE6_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase6-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE6_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase6-zinit.rc \
+	tests/fixtures/phase6-cflow.c \
+	$(BUILD)/user64/userland/base/cflow/main.o,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase6-zinit.rc \
+	--file /etc/phase6-cflow.c=tests/fixtures/phase6-cflow.c \
+	--file /etc/phase6-object.o=$(BUILD)/user64/userland/base/cflow/main.o))
+
+$(BUILD)/posix-phase6-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE6_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	platform/amd64/tools/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+		--stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE6_TEST_UFS) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
+
+posix-phase6-qemu-test: $(BUILD)/posix-phase6-qemu.img \
+	tests/posix-phase6-qemu-test.py
+	$(PYTHON) tests/posix-phase6-qemu-test.py \
+		--qemu $(QEMU) --image $(BUILD)/posix-phase6-qemu.img
+
+AMD64_POSIX_PHASE7_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase7-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE7_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase7-zinit.rc \
+	tests/fixtures/phase6-cflow.c,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase7-zinit.rc \
+	--file /etc/phase7-input=tests/fixtures/phase6-cflow.c))
+
+$(BUILD)/posix-phase7-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE7_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	platform/amd64/tools/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+		--stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE7_TEST_UFS) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
+
+posix-phase7-qemu-test: $(BUILD)/posix-phase7-qemu.img \
+	tests/posix-phase7-qemu-test.py
+	$(PYTHON) tests/posix-phase7-qemu-test.py \
+		--qemu $(QEMU) --image $(BUILD)/posix-phase7-qemu.img
+
+AMD64_POSIX_PHASE8_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase8-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE8_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/posix-phase8-zinit.rc \
+	tests/fixtures/phase8-initial.txt tests/fixtures/phase8-second.txt,\
+	$(AMD64_ARCH_FILES) --file /etc/zinit.rc=tests/posix-phase8-zinit.rc \
+	--file /etc/phase8-initial=tests/fixtures/phase8-initial.txt \
+	--file /etc/phase8-second=tests/fixtures/phase8-second.txt))
+
+$(BUILD)/posix-phase8-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE8_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	platform/amd64/tools/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+		--stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE8_TEST_UFS) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
+
+posix-phase8-qemu-test: $(BUILD)/posix-phase8-qemu.img \
+	tests/posix-phase8-qemu-test.py
+	$(PYTHON) tests/posix-phase8-qemu-test.py \
+		--qemu $(QEMU) --image $(BUILD)/posix-phase8-qemu.img
+
+AMD64_POSIX_PHASE85_CURSES_SOURCES := tests/posix-phase85-curses.c \
+	userland/base/curses/curses.c userland/base/common/terminfo.c
+AMD64_POSIX_PHASE85_CURSES_OBJS := $(patsubst %.c,\
+	$(BUILD)/user64/%.o,$(AMD64_POSIX_PHASE85_CURSES_SOURCES))
+$(BUILD)/bin/phase85-curses-test: $(AMD64_USER_LIBC_OBJS) \
+	$(AMD64_POSIX_PHASE85_CURSES_OBJS) $(AMD64_PLATFORM)/user.ld \
+	$(AMD64_USER_ELF_CHECK)
+	@mkdir -p $(dir $@)
+	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
+		-z max-page-size=4096 -z stack-size=0x100000 \
+		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
+		$(AMD64_POSIX_PHASE85_CURSES_OBJS) -o $@
+	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
+	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+
+AMD64_POSIX_PHASE85_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase85-test.ufs
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE85_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) $(BUILD)/bin/phase85-curses-test \
+	tests/posix-phase85-zinit.rc tests/fixtures/phase85-terminal.ti,\
+	$(AMD64_ARCH_FILES) \
+	--file /bin/phase85-curses-test=$(BUILD)/bin/phase85-curses-test \
+	--file /etc/zinit.rc=tests/posix-phase85-zinit.rc \
+	--file /etc/phase85-terminal.ti=tests/fixtures/phase85-terminal.ti))
+
+$(BUILD)/posix-phase85-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_POSIX_PHASE85_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	platform/amd64/tools/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+		--stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE85_TEST_UFS) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
+
+posix-phase85-qemu-test: $(BUILD)/posix-phase85-qemu.img \
+	tests/posix-phase85-qemu-test.py
+	$(PYTHON) tests/posix-phase85-qemu-test.py \
+		--qemu $(QEMU) --image $(BUILD)/posix-phase85-qemu.img
+
 amd64-hal-compile: $(AMD64_HAL_OBJS)
 	@echo "HAL amd64/PCAT compile check: PASS"
 CHECK_RUN_TARGETS += amd64-hal-compile
 
-.PHONY: amd64-hal-compile
+.PHONY: amd64-hal-compile deferred-stub-qemu-test posix-phase2-qemu-test \
+	posix-phase3-qemu-test posix-phase4-qemu-test posix-phase5-qemu-test \
+	posix-phase6-qemu-test posix-phase7-qemu-test posix-phase8-qemu-test \
+	posix-phase85-qemu-test

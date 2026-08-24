@@ -100,17 +100,35 @@ unix_endpoint(struct socket *socket)
 	return (struct unix_socket *)socket;
 }
 
+int
+unix_socket_bound_path_matches(struct socket *socket, const struct path *path)
+{
+	struct unix_socket *endpoint;
+	unsigned long irq;
+	int matches;
+
+	if (socket == NULL || socket->family != AF_UNIX || path == NULL)
+		return 0;
+	endpoint = unix_endpoint(socket);
+	irq = spin_lock_irqsave(&socket->lock);
+	matches = endpoint->bound && path_equal(&endpoint->bound_path, path);
+	spin_unlock_irqrestore(&socket->lock, irq);
+	return matches;
+}
+
 static int
 unix_copy_path(const struct sockaddr *address, socklen_t length,
-	char path[UNIX_PATH_MAX])
+	       char path[UNIX_PATH_MAX])
 {
 	const struct sockaddr_un *local = (const struct sockaddr_un *)address;
 	size_t available, used;
-	if (address == NULL || length <= offsetof(struct sockaddr_un, sun_path) ||
+	if (address == NULL ||
+	    length <= offsetof(struct sockaddr_un, sun_path) ||
 	    length > sizeof(*local) || local->sun_family != AF_UNIX)
 		return EINVAL;
 	available = length - offsetof(struct sockaddr_un, sun_path);
-	for (used = 0; used < available && local->sun_path[used] != '\0'; used++)
+	for (used = 0; used < available && local->sun_path[used] != '\0';
+	     used++)
 		;
 	if (used == 0 || used == available || used >= UNIX_PATH_MAX)
 		return EINVAL;
@@ -121,16 +139,17 @@ unix_copy_path(const struct sockaddr *address, socklen_t length,
 
 static void
 unix_store_address(const struct unix_socket *endpoint, struct sockaddr *address,
-	socklen_t *length)
+		   socklen_t *length)
 {
 	struct sockaddr_un local;
 	socklen_t needed, capacity, copied;
 	memset(&local, 0, sizeof(local));
 	local.sun_family = AF_UNIX;
 	if (endpoint != NULL && endpoint->bound)
-		strncpy(local.sun_path, endpoint->path, sizeof(local.sun_path) - 1U);
+		strncpy(local.sun_path, endpoint->path,
+			sizeof(local.sun_path) - 1U);
 	needed = (socklen_t)(offsetof(struct sockaddr_un, sun_path) +
-	    strlen(local.sun_path) + 1U);
+			     strlen(local.sun_path) + 1U);
 	capacity = *length;
 	copied = capacity < needed ? capacity : needed;
 	if (copied != 0)
@@ -140,7 +159,7 @@ unix_store_address(const struct unix_socket *endpoint, struct sockaddr *address,
 
 static void
 unix_store_packet_source(const struct unix_socket *endpoint,
-	struct packet_buf *packet)
+			 struct packet_buf *packet)
 {
 	struct sockaddr_un source;
 	size_t length;
@@ -149,17 +168,18 @@ unix_store_packet_source(const struct unix_socket *endpoint,
 	source.sun_family = AF_UNIX;
 	if (endpoint->bound)
 		strncpy(source.sun_path, endpoint->path,
-		    sizeof(source.sun_path) - 1U);
+			sizeof(source.sun_path) - 1U);
 	length = offsetof(struct sockaddr_un, sun_path) +
-	    strlen(source.sun_path) + 1U;
+		 strlen(source.sun_path) + 1U;
 	memcpy(packet->source_address, &source, length);
 	packet->source_length = (uint8_t)length;
 }
 
 static int
 unix_resolve_endpoint(struct cwdinfo *context, const struct ucred *cred,
-	const struct sockaddr *address, socklen_t length, int type,
-	struct socket **result, char path_text[UNIX_PATH_MAX])
+		      const struct sockaddr *address, socklen_t length,
+		      int type, struct socket **result,
+		      char path_text[UNIX_PATH_MAX])
 {
 	struct path resolved;
 	struct socket *socket = NULL;
@@ -197,12 +217,13 @@ unix_resolve_endpoint(struct cwdinfo *context, const struct ucred *cred,
 static int
 unix_connection_create(struct socket *left, struct socket *right)
 {
-	struct unix_connection *connection = kern_calloc(1, sizeof(*connection));
+	struct unix_connection *connection =
+	    kern_calloc(1, sizeof(*connection));
 	if (connection == NULL)
 		return ENOMEM;
 	refcount_init(&connection->refs, 2);
 	spin_init(&connection->lock, LOCK_RANK_UNIX_CONNECTION,
-	    "unix connection");
+		  "unix connection");
 	connection->ends[0] = left;
 	connection->ends[1] = right;
 	unix_endpoint(left)->connection = connection;
@@ -262,16 +283,19 @@ unix_stream_chunk_free(struct unix_stream_chunk *chunk)
 
 static int
 unix_stream_wait_space(struct socket *peer, struct unix_socket *endpoint,
-	size_t send_hiwat, int flags, uint64_t deadline, size_t *available)
+		       size_t send_hiwat, int flags, uint64_t deadline,
+		       size_t *available)
 {
 	unsigned long irq = spin_lock_irqsave(&peer->lock);
 	int error = 0;
 
 	for (;;) {
-		size_t high = send_hiwat < peer->receive_hiwat_bytes ?
-		    send_hiwat : peer->receive_hiwat_bytes;
-		size_t space = endpoint->stream_bytes < high ?
-		    high - endpoint->stream_bytes : 0;
+		size_t high = send_hiwat < peer->receive_hiwat_bytes
+				  ? send_hiwat
+				  : peer->receive_hiwat_bytes;
+		size_t space = endpoint->stream_bytes < high
+				   ? high - endpoint->stream_bytes
+				   : 0;
 
 		if (peer->lifecycle != SOCKET_OPEN || peer->read_shutdown) {
 			error = EPIPE;
@@ -294,10 +318,11 @@ unix_stream_wait_space(struct socket *peer, struct unix_socket *endpoint,
 			break;
 		}
 		{
-			uint64_t sequence = waitq_sequence(
-			    &peer->receive_space_waitq);
+			uint64_t sequence =
+			    waitq_sequence(&peer->receive_space_waitq);
 			error = waitq_sleep(&peer->receive_space_waitq,
-			    &peer->lock, sequence, deadline, WAITQ_INTERRUPTIBLE);
+					    &peer->lock, sequence, deadline,
+					    WAITQ_INTERRUPTIBLE);
 			if (error == ETIMEDOUT)
 				error = EAGAIN;
 			if (error != 0)
@@ -310,7 +335,7 @@ unix_stream_wait_space(struct socket *peer, struct unix_socket *endpoint,
 
 static ssize_t
 unix_stream_send(struct socket *socket, const void *buffer, size_t length,
-	int flags, struct unix_rights *rights)
+		 int flags, struct unix_rights *rights)
 {
 	struct unix_socket *endpoint = unix_endpoint(socket);
 	struct unix_socket *peer_endpoint;
@@ -334,7 +359,7 @@ unix_stream_send(struct socket *socket, const void *buffer, size_t length,
 	send_hiwat = socket->send_hiwat_bytes;
 	if (socket->send_timeout_ticks != 0 &&
 	    syscall_restart_deadline_after(socket->send_timeout_ticks,
-	    &deadline) != 0) {
+					   &deadline) != 0) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return unix_send_failure(rights, EOVERFLOW);
 	}
@@ -352,8 +377,8 @@ unix_stream_send(struct socket *socket, const void *buffer, size_t length,
 	error = unix_peer_ref(endpoint, &peer);
 	if (error != 0) {
 		mutex_unlock(&endpoint->stream_send_lock);
-		return error == EPIPE ? unix_send_epipe(rights, flags) :
-		    unix_send_failure(rights, error);
+		return error == EPIPE ? unix_send_epipe(rights, flags)
+				      : unix_send_failure(rights, error);
 	}
 	peer_endpoint = unix_endpoint(peer);
 
@@ -363,7 +388,7 @@ unix_stream_send(struct socket *socket, const void *buffer, size_t length,
 		size_t amount = length - offset, available = 0;
 
 		error = unix_stream_wait_space(peer, peer_endpoint, send_hiwat,
-		    flags, deadline, &available);
+					       flags, deadline, &available);
 		if (error != 0)
 			break;
 		if (amount > UNIX_STREAM_CHUNK_SIZE)
@@ -371,7 +396,7 @@ unix_stream_send(struct socket *socket, const void *buffer, size_t length,
 		if (amount > available)
 			amount = available;
 		if (KERN_TEST_FAULT(KERN_TEST_FAULT_UNIX_STREAM_ALLOC,
-		    UINT32_MAX, UINT32_MAX, &fault)) {
+				    UINT32_MAX, UINT32_MAX, &fault)) {
 			error = fault.error != 0 ? fault.error : ENOBUFS;
 			break;
 		}
@@ -385,15 +410,19 @@ unix_stream_send(struct socket *socket, const void *buffer, size_t length,
 
 		irq = spin_lock_irqsave(&peer->lock);
 		{
-			size_t high = send_hiwat < peer->receive_hiwat_bytes ?
-			    send_hiwat : peer->receive_hiwat_bytes;
-			size_t space = peer_endpoint->stream_bytes < high ?
-			    high - peer_endpoint->stream_bytes : 0;
+			size_t high = send_hiwat < peer->receive_hiwat_bytes
+					  ? send_hiwat
+					  : peer->receive_hiwat_bytes;
+			size_t space = peer_endpoint->stream_bytes < high
+					   ? high - peer_endpoint->stream_bytes
+					   : 0;
 
-			if (peer->lifecycle != SOCKET_OPEN || peer->read_shutdown) {
+			if (peer->lifecycle != SOCKET_OPEN ||
+			    peer->read_shutdown) {
 				error = EPIPE;
 			} else if (space == 0) {
-				/* SO_RCVBUF may have changed after the first check. */
+				/* SO_RCVBUF may have changed after the first
+				 * check. */
 				error = EAGAIN;
 			} else {
 				struct unix_stream_chunk *tail =
@@ -402,20 +431,23 @@ unix_stream_send(struct socket *socket, const void *buffer, size_t length,
 				if (amount > space)
 					amount = space;
 				/*
-				 * Plain stream writes have no record boundary.  Coalesce
-				 * them into the last chunk so that many small writes consume
-				 * memory in proportion to queued bytes rather than calls.
-				 * Ancillary rights retain an explicit byte boundary.
+				 * Plain stream writes have no record boundary.
+				 * Coalesce them into the last chunk so that
+				 * many small writes consume memory in
+				 * proportion to queued bytes rather than calls.
+				 * Ancillary rights retain an explicit byte
+				 * boundary.
 				 */
 				if (rights == NULL && tail != NULL &&
 				    tail->rights == NULL &&
 				    tail->end < UNIX_STREAM_CHUNK_SIZE) {
-					size_t room = UNIX_STREAM_CHUNK_SIZE - tail->end;
+					size_t room =
+					    UNIX_STREAM_CHUNK_SIZE - tail->end;
 
 					if (amount > room)
 						amount = room;
-					memcpy(tail->data + tail->end, chunk->data,
-					    amount);
+					memcpy(tail->data + tail->end,
+					       chunk->data, amount);
 					tail->end += amount;
 					peer_endpoint->stream_bytes += amount;
 					waitq_wake_one(&peer->receive_waitq);
@@ -425,9 +457,11 @@ unix_stream_send(struct socket *socket, const void *buffer, size_t length,
 					chunk->rights = rights;
 					rights = NULL;
 					if (peer_endpoint->stream_tail != NULL)
-						peer_endpoint->stream_tail->next = chunk;
+						peer_endpoint->stream_tail
+						    ->next = chunk;
 					else
-						peer_endpoint->stream_head = chunk;
+						peer_endpoint->stream_head =
+						    chunk;
 					peer_endpoint->stream_tail = chunk;
 					peer_endpoint->stream_bytes += amount;
 					waitq_wake_one(&peer->receive_waitq);
@@ -459,8 +493,8 @@ unix_stream_send(struct socket *socket, const void *buffer, size_t length,
 
 static ssize_t
 unix_datagram_send(struct socket *socket, const void *buffer, size_t length,
-	int flags, const struct sockaddr *address, struct unix_rights *rights,
-	struct socket *resolved_peer)
+		   int flags, const struct sockaddr *address,
+		   struct unix_rights *rights, struct socket *resolved_peer)
 {
 	struct unix_socket *endpoint = unix_endpoint(socket);
 	struct socket *peer;
@@ -494,8 +528,9 @@ unix_datagram_send(struct socket *socket, const void *buffer, size_t length,
 	if (address != NULL) {
 		return unix_send_failure(rights, EOPNOTSUPP);
 	} else if (endpoint->connected && endpoint->datagram_peer != NULL) {
-		peer = socket_tryref(endpoint->datagram_peer) ?
-		    endpoint->datagram_peer : NULL;
+		peer = socket_tryref(endpoint->datagram_peer)
+			   ? endpoint->datagram_peer
+			   : NULL;
 	} else {
 		return unix_send_failure(rights, EDESTADDRREQ);
 	}
@@ -521,16 +556,17 @@ have_peer:
 	unix_store_packet_source(unix_endpoint(socket), packet);
 	packet->control = rights;
 	packet->control_release = rights != NULL ? unix_rights_release : NULL;
-	error = socket_enqueue_packet_wait(peer, packet,
-	    flags & MSG_DONTWAIT, timeout_ticks);
+	error = socket_enqueue_packet_wait(peer, packet, flags & MSG_DONTWAIT,
+					   timeout_ticks);
 	socket_release(peer);
 	return error == 0 ? (ssize_t)length : -(ssize_t)error;
 }
 
 static ssize_t
 unix_send_internal(struct socket *socket, const void *buffer, size_t length,
-	int flags, const struct sockaddr *address, socklen_t address_length,
-	struct unix_rights *rights, struct socket *resolved_peer)
+		   int flags, const struct sockaddr *address,
+		   socklen_t address_length, struct unix_rights *rights,
+		   struct socket *resolved_peer)
 {
 	(void)address_length;
 	if (socket == NULL || (buffer == NULL && length != 0) ||
@@ -546,22 +582,24 @@ unix_send_internal(struct socket *socket, const void *buffer, size_t length,
 			return unix_send_failure(rights, EISCONN);
 		return unix_stream_send(socket, buffer, length, flags, rights);
 	}
-	return unix_datagram_send(socket, buffer, length, flags, address, rights,
-	    resolved_peer);
+	return unix_datagram_send(socket, buffer, length, flags, address,
+				  rights, resolved_peer);
 }
 
 static ssize_t
 unix_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
-	const struct sockaddr *address, socklen_t address_length)
+	    const struct sockaddr *address, socklen_t address_length)
 {
 	return unix_send_internal(socket, buffer, length, flags, address,
-	    address_length, NULL, NULL);
+				  address_length, NULL, NULL);
 }
 
 ssize_t
 unix_socket_send_message(struct socket *socket, const void *buffer,
-	size_t length, int flags, const struct sockaddr *address,
-	socklen_t address_length, struct file **files, unsigned count)
+			 size_t length, int flags,
+			 const struct sockaddr *address,
+			 socklen_t address_length, struct file **files,
+			 unsigned count)
 {
 	struct unix_rights *rights = NULL;
 	unsigned index;
@@ -584,14 +622,16 @@ unix_socket_send_message(struct socket *socket, const void *buffer,
 			rights->files[index] = files[index];
 	}
 	return unix_send_internal(socket, buffer, length, flags, address,
-	    address_length, rights, NULL);
+				  address_length, rights, NULL);
 }
 
 ssize_t
 unix_socket_send_message_at(struct socket *socket, struct cwdinfo *context,
-	const struct ucred *cred, const void *buffer, size_t length, int flags,
-	const struct sockaddr *address, socklen_t address_length,
-	struct file **files, unsigned count)
+			    const struct ucred *cred, const void *buffer,
+			    size_t length, int flags,
+			    const struct sockaddr *address,
+			    socklen_t address_length, struct file **files,
+			    unsigned count)
 {
 	struct unix_rights *rights = NULL;
 	struct socket *peer = NULL;
@@ -616,18 +656,20 @@ unix_socket_send_message_at(struct socket *socket, struct cwdinfo *context,
 	}
 	if (address != NULL && socket->type == SOCK_DGRAM) {
 		error = unix_resolve_endpoint(context, cred, address,
-		    address_length, SOCK_DGRAM, &peer, NULL);
+					      address_length, SOCK_DGRAM, &peer,
+					      NULL);
 		if (error != 0)
 			return unix_send_failure(rights, error);
 	}
 	return unix_send_internal(socket, buffer, length, flags, address,
-	    address_length, rights, peer);
+				  address_length, rights, peer);
 }
 
 ssize_t
 unix_socket_receive_begin(struct socket *socket, void *buffer, size_t length,
-	int flags, struct sockaddr *address, socklen_t *address_length,
-	unsigned file_capacity, struct unix_recv_transaction *transaction)
+			  int flags, struct sockaddr *address,
+			  socklen_t *address_length, unsigned file_capacity,
+			  struct unix_recv_transaction *transaction)
 {
 	struct unix_socket *endpoint;
 	struct packet_buf *packet;
@@ -637,7 +679,8 @@ unix_socket_receive_begin(struct socket *socket, void *buffer, size_t length,
 	unsigned index, delivered;
 	unsigned long irq;
 	int datagram, error;
-	if (socket == NULL || socket->family != AF_UNIX || transaction == NULL ||
+	if (socket == NULL || socket->family != AF_UNIX ||
+	    transaction == NULL ||
 	    ((address == NULL) != (address_length == NULL)) ||
 	    file_capacity > ZEDBSD_MSG_FD_MAX)
 		return -EINVAL;
@@ -645,16 +688,16 @@ unix_socket_receive_begin(struct socket *socket, void *buffer, size_t length,
 	datagram = socket->type == SOCK_DGRAM;
 	if (!datagram && length == 0)
 		return 0;
-	if ((!datagram && (address != NULL ||
-	    (flags & ~(MSG_DONTWAIT | MSG_PEEK | MSG_WAITALL)) != 0)) ||
-	    (datagram &&
-	    (flags & ~(MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC)) != 0))
+	if ((!datagram &&
+	     (address != NULL ||
+	      (flags & ~(MSG_DONTWAIT | MSG_PEEK | MSG_WAITALL)) != 0)) ||
+	    (datagram && (flags & ~(MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC)) != 0))
 		return -EOPNOTSUPP;
 	endpoint = unix_endpoint(socket);
 	irq = spin_lock_irqsave(&socket->lock);
 	if (socket->receive_timeout_ticks != 0 &&
 	    syscall_restart_deadline_after(socket->receive_timeout_ticks,
-	    &deadline) != 0) {
+					   &deadline) != 0) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		return -EOVERFLOW;
 	}
@@ -694,9 +737,11 @@ unix_socket_receive_begin(struct socket *socket, void *buffer, size_t length,
 			return -EAGAIN;
 		}
 		{
-			uint64_t sequence = waitq_sequence(&socket->receive_waitq);
-			error = waitq_sleep(&socket->receive_waitq, &socket->lock,
-			    sequence, deadline, WAITQ_INTERRUPTIBLE);
+			uint64_t sequence =
+			    waitq_sequence(&socket->receive_waitq);
+			error = waitq_sleep(&socket->receive_waitq,
+					    &socket->lock, sequence, deadline,
+					    WAITQ_INTERRUPTIBLE);
 			if (error == EINTR || error == ETIMEDOUT) {
 				spin_unlock_irqrestore(&socket->lock, irq);
 				return error == EINTR ? -EINTR : -EAGAIN;
@@ -724,9 +769,10 @@ unix_socket_receive_begin(struct socket *socket, void *buffer, size_t length,
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	if (datagram) {
-		transaction->copied = length < packet->length ?
-		    length : packet->length;
-		transaction->data_truncated = transaction->copied < packet->length;
+		transaction->copied =
+		    length < packet->length ? length : packet->length;
+		transaction->data_truncated =
+		    transaction->copied < packet->length;
 		if (transaction->copied != 0)
 			memcpy(buffer, packet->data, transaction->copied);
 	} else {
@@ -742,7 +788,7 @@ unix_socket_receive_begin(struct socket *socket, void *buffer, size_t length,
 				copied = available;
 			if (copied != 0)
 				memcpy(destination + transaction->copied,
-				    current->data + current->begin, copied);
+				       current->data + current->begin, copied);
 			transaction->copied += copied;
 			if (copied < available)
 				break;
@@ -751,14 +797,15 @@ unix_socket_receive_begin(struct socket *socket, void *buffer, size_t length,
 	}
 	if (datagram && address != NULL && packet->source_length != 0) {
 		socklen_t actual = packet->source_length;
-		socklen_t copied = *address_length < actual ?
-		    *address_length : actual;
+		socklen_t copied =
+		    *address_length < actual ? *address_length : actual;
 		if (copied != 0)
 			memcpy(address, packet->source_address, copied);
 		*address_length = actual;
 	}
-	delivered = rights != NULL && rights->count < file_capacity ?
-	    rights->count : file_capacity;
+	delivered = rights != NULL && rights->count < file_capacity
+			? rights->count
+			: file_capacity;
 	if (rights == NULL)
 		delivered = 0;
 	for (index = 0; index < delivered; index++) {
@@ -768,8 +815,9 @@ unix_socket_receive_begin(struct socket *socket, void *buffer, size_t length,
 	transaction->file_count = delivered;
 	transaction->control_truncated =
 	    rights != NULL && delivered < rights->count;
-	return datagram && (flags & MSG_TRUNC) != 0 ?
-	    (ssize_t)packet->length : (ssize_t)transaction->copied;
+	return datagram && (flags & MSG_TRUNC) != 0
+		   ? (ssize_t)packet->length
+		   : (ssize_t)transaction->copied;
 }
 
 void
@@ -789,7 +837,7 @@ unix_socket_receive_abort(struct unix_recv_transaction *transaction)
 		    endpoint->reserved_packet == transaction->packet)
 			endpoint->reserved_packet = NULL;
 		else if (!transaction->datagram &&
-		    endpoint->reserved_stream == transaction->packet)
+			 endpoint->reserved_stream == transaction->packet)
 			endpoint->reserved_stream = NULL;
 	}
 	waitq_wake_all(&socket->receive_waitq);
@@ -822,12 +870,10 @@ unix_socket_receive_commit(struct unix_recv_transaction *transaction)
 	free_tail = &free_chunks;
 	irq = spin_lock_irqsave(&socket->lock);
 	if (endpoint->reservation_token != transaction->token ||
-	    (transaction->datagram &&
-	    (endpoint->reserved_packet != packet ||
-	    socket->receive_head != packet)) ||
-	    (!transaction->datagram &&
-	    (endpoint->reserved_stream != chunk ||
-	    endpoint->stream_head != chunk))) {
+	    (transaction->datagram && (endpoint->reserved_packet != packet ||
+				       socket->receive_head != packet)) ||
+	    (!transaction->datagram && (endpoint->reserved_stream != chunk ||
+					endpoint->stream_head != chunk))) {
 		spin_unlock_irqrestore(&socket->lock, irq);
 		unix_socket_receive_abort(transaction);
 		return;
@@ -847,10 +893,12 @@ unix_socket_receive_commit(struct unix_recv_transaction *transaction)
 		struct unix_rights *stream_rights = chunk->rights;
 		chunk->rights = NULL;
 		control = stream_rights;
-		control_release = stream_rights != NULL ? unix_rights_release : NULL;
+		control_release =
+		    stream_rights != NULL ? unix_rights_release : NULL;
 		while (chunk != NULL && remaining != 0) {
 			size_t available = chunk->end - chunk->begin;
-			size_t consumed = remaining < available ? remaining : available;
+			size_t consumed =
+			    remaining < available ? remaining : available;
 			chunk->begin += consumed;
 			remaining -= consumed;
 			if (chunk->begin != chunk->end)
@@ -893,7 +941,8 @@ unix_socket_receive_commit(struct unix_recv_transaction *transaction)
 		unix_stream_chunk_free(chunk);
 	}
 	for (index = 0; index < transaction->file_count; index++)
-		transaction->files[index] = NULL; /* ownership moved to filedesc */
+		transaction->files[index] =
+		    NULL; /* ownership moved to filedesc */
 	transaction->active = 0;
 	socket_release(socket);
 	poll_notify();
@@ -901,12 +950,13 @@ unix_socket_receive_commit(struct unix_recv_transaction *transaction)
 
 static ssize_t
 unix_recvfrom(struct socket *socket, void *buffer, size_t length, int flags,
-	struct sockaddr *address, socklen_t *address_length)
+	      struct sockaddr *address, socklen_t *address_length)
 {
 	struct unix_recv_transaction transaction;
 	ssize_t result;
-	result = unix_socket_receive_begin(socket, buffer, length, flags,
-	    address, address_length, 0, &transaction);
+	result =
+	    unix_socket_receive_begin(socket, buffer, length, flags, address,
+				      address_length, 0, &transaction);
 	if (result < 0 || !transaction.active)
 		return result;
 	if ((flags & MSG_PEEK) != 0)
@@ -917,10 +967,10 @@ unix_recvfrom(struct socket *socket, void *buffer, size_t length, int flags,
 }
 
 ssize_t
-unix_socket_receive_message(struct socket *socket, void *buffer,
-	size_t length, int flags, struct sockaddr *address,
-	socklen_t *address_length, struct file **files, unsigned *file_count,
-	unsigned *control_truncated)
+unix_socket_receive_message(struct socket *socket, void *buffer, size_t length,
+			    int flags, struct sockaddr *address,
+			    socklen_t *address_length, struct file **files,
+			    unsigned *file_count, unsigned *control_truncated)
 {
 	struct unix_recv_transaction transaction;
 	ssize_t result;
@@ -930,8 +980,9 @@ unix_socket_receive_message(struct socket *socket, void *buffer,
 	    ((address == NULL) != (address_length == NULL)))
 		return -(ssize_t)EINVAL;
 	capacity = *file_count;
-	result = unix_socket_receive_begin(socket, buffer, length, flags,
-	    address, address_length, capacity, &transaction);
+	result =
+	    unix_socket_receive_begin(socket, buffer, length, flags, address,
+				      address_length, capacity, &transaction);
 	if (result < 0 || !transaction.active)
 		return result;
 	for (index = 0; index < transaction.file_count; index++)
@@ -977,7 +1028,7 @@ unix_shutdown(struct socket *socket, int how)
 
 static int
 unix_bind(struct socket *socket, const struct sockaddr *address,
-	socklen_t length)
+	  socklen_t length)
 {
 	(void)socket;
 	(void)address;
@@ -987,8 +1038,8 @@ unix_bind(struct socket *socket, const struct sockaddr *address,
 
 int
 unix_socket_bind_path(struct socket *socket, struct cwdinfo *context,
-	const struct ucred *cred, mode_t umask, const struct sockaddr *address,
-	socklen_t length)
+		      const struct ucred *cred, mode_t umask,
+		      const struct sockaddr *address, socklen_t length)
 {
 	struct unix_socket *endpoint;
 	struct path parent;
@@ -1019,7 +1070,7 @@ unix_socket_bind_path(struct socket *socket, struct cwdinfo *context,
 		error = vfs_may_create(parent.p_inode, cred);
 	if (error == 0)
 		error = inode_mknod(parent.p_inode, &name, INODE_SOCKET,
-		    S_IFSOCK | (0777U & ~umask), 0, &inode);
+				    S_IFSOCK | (0777U & ~umask), 0, &inode);
 	if (error == 0) {
 		path_set(&endpoint->bound_path, parent.p_mount, inode);
 		strcpy(endpoint->path, path);
@@ -1070,7 +1121,7 @@ unix_listen(struct socket *socket, int backlog)
 
 static int
 unix_connect_resolved(struct socket *socket, struct socket *listener_socket,
-	const char *path, unsigned io_flags)
+		      const char *path, unsigned io_flags)
 {
 	struct unix_socket *client = unix_endpoint(socket);
 	struct unix_socket *listener = unix_endpoint(listener_socket);
@@ -1109,7 +1160,7 @@ unix_connect_resolved(struct socket *socket, struct socket *listener_socket,
 	}
 	refcount_init(&connection->refs, 2);
 	spin_init(&connection->lock, LOCK_RANK_UNIX_CONNECTION,
-	    "unix connection");
+		  "unix connection");
 	error = 0;
 	irq = spin_lock_irqsave(&listener->socket.lock);
 	if (!listener->listening) {
@@ -1145,7 +1196,7 @@ unix_connect_resolved(struct socket *socket, struct socket *listener_socket,
 
 static int
 unix_connect(struct socket *socket, const struct sockaddr *address,
-	socklen_t length, unsigned io_flags)
+	     socklen_t length, unsigned io_flags)
 {
 	(void)socket;
 	(void)address;
@@ -1156,8 +1207,9 @@ unix_connect(struct socket *socket, const struct sockaddr *address,
 
 int
 unix_socket_connect_path(struct socket *socket, struct cwdinfo *context,
-	const struct ucred *cred, const struct sockaddr *address,
-	socklen_t length, unsigned io_flags)
+			 const struct ucred *cred,
+			 const struct sockaddr *address, socklen_t length,
+			 unsigned io_flags)
 {
 	struct socket *listener;
 	char path[UNIX_PATH_MAX];
@@ -1165,7 +1217,7 @@ unix_socket_connect_path(struct socket *socket, struct cwdinfo *context,
 	if (socket == NULL || socket->family != AF_UNIX)
 		return EINVAL;
 	error = unix_resolve_endpoint(context, cred, address, length,
-	    socket->type, &listener, path);
+				      socket->type, &listener, path);
 	if (error != 0)
 		return error;
 	return unix_connect_resolved(socket, listener, path, io_flags);
@@ -1173,7 +1225,7 @@ unix_socket_connect_path(struct socket *socket, struct cwdinfo *context,
 
 static int
 unix_accept(struct socket *socket, struct socket **result,
-	struct sockaddr *address, socklen_t *length, unsigned io_flags)
+	    struct sockaddr *address, socklen_t *length, unsigned io_flags)
 {
 	struct unix_socket *listener = unix_endpoint(socket);
 	struct unix_pending *pending;
@@ -1201,7 +1253,7 @@ unix_accept(struct socket *socket, struct socket **result,
 		}
 		sequence = waitq_sequence(&socket->accept_waitq);
 		error = waitq_sleep(&socket->accept_waitq, &socket->lock,
-		    sequence, 0, WAITQ_INTERRUPTIBLE);
+				    sequence, 0, WAITQ_INTERRUPTIBLE);
 		if (error == EINTR) {
 			spin_unlock_irqrestore(&socket->lock, irq);
 			return EINTR;
@@ -1217,7 +1269,8 @@ unix_accept(struct socket *socket, struct socket **result,
 	if (address != NULL && length != NULL) {
 		struct socket *peer = NULL;
 		if (unix_peer_ref(unix_endpoint(*result), &peer) == 0) {
-			unix_store_address(unix_endpoint(peer), address, length);
+			unix_store_address(unix_endpoint(peer), address,
+					   length);
 			socket_release(peer);
 		} else {
 			unix_store_address(NULL, address, length);
@@ -1229,7 +1282,7 @@ unix_accept(struct socket *socket, struct socket **result,
 
 static int
 unix_getsockname(struct socket *socket, struct sockaddr *address,
-	socklen_t *length)
+		 socklen_t *length)
 {
 	if (address == NULL || length == NULL)
 		return EINVAL;
@@ -1239,7 +1292,7 @@ unix_getsockname(struct socket *socket, struct sockaddr *address,
 
 static int
 unix_getpeername(struct socket *socket, struct sockaddr *address,
-	socklen_t *length)
+		 socklen_t *length)
 {
 	struct socket *peer;
 	int error;
@@ -1300,8 +1353,10 @@ unix_poll(struct socket *socket, short events, short *revents)
 				error = unix_peer_ref(endpoint, &peer);
 			else {
 				peer = endpoint->datagram_peer != NULL &&
-				    socket_tryref(endpoint->datagram_peer) ?
-				    endpoint->datagram_peer : NULL;
+					       socket_tryref(
+						   endpoint->datagram_peer)
+					   ? endpoint->datagram_peer
+					   : NULL;
 				error = peer != NULL ? 0 : ECONNREFUSED;
 			}
 			if (error == 0) {
@@ -1310,9 +1365,11 @@ unix_poll(struct socket *socket, short events, short *revents)
 				    peer->read_shutdown ||
 				    (peer->receive_packet_limit != 0 &&
 				     peer->receive_packets >=
-				     peer->receive_packet_limit) ||
-				    peer->receive_bytes >= peer->receive_hiwat_bytes)
-					result &= (short)~(POLLOUT | POLLWRNORM);
+					 peer->receive_packet_limit) ||
+				    peer->receive_bytes >=
+					peer->receive_hiwat_bytes)
+					result &=
+					    (short)~(POLLOUT | POLLWRNORM);
 				spin_unlock_irqrestore(&peer->lock, irq);
 				socket_release(peer);
 			} else {
@@ -1335,16 +1392,17 @@ unix_poll(struct socket *socket, short events, short *revents)
 	if (socket->write_shutdown || socket->lifecycle != SOCKET_OPEN)
 		result |= POLLERR;
 	send_hiwat = socket->send_hiwat_bytes;
-	local_writable = !socket->write_shutdown &&
-	    socket->lifecycle == SOCKET_OPEN;
+	local_writable =
+	    !socket->write_shutdown && socket->lifecycle == SOCKET_OPEN;
 	spin_unlock_irqrestore(&socket->lock, irq);
 
 	if (local_writable && unix_peer_ref(endpoint, &peer) == 0) {
 		struct unix_socket *peer_endpoint = unix_endpoint(peer);
 		irq = spin_lock_irqsave(&peer->lock);
 		if (peer->lifecycle == SOCKET_OPEN && !peer->read_shutdown) {
-			size_t high = send_hiwat < peer->receive_hiwat_bytes ?
-			    send_hiwat : peer->receive_hiwat_bytes;
+			size_t high = send_hiwat < peer->receive_hiwat_bytes
+					  ? send_hiwat
+					  : peer->receive_hiwat_bytes;
 			if (peer_endpoint->stream_bytes < high)
 				result |= events & (POLLOUT | POLLWRNORM);
 		} else {
@@ -1472,19 +1530,19 @@ unix_close(struct socket *socket)
 }
 
 static const struct socket_ops unix_ops = {
-	.bind = unix_bind,
-	.connect = unix_connect,
-	.listen = unix_listen,
-	.accept = unix_accept,
-	.sendto = unix_sendto,
-	.recvfrom = unix_recvfrom,
-	.shutdown = unix_shutdown,
-	.getsockname = unix_getsockname,
-	.getpeername = unix_getpeername,
-	.poll = unix_poll,
-	.buffer_changed = unix_buffer_changed,
-	.endpoint_close = unix_endpoint_close,
-	.close = unix_close,
+    .bind = unix_bind,
+    .connect = unix_connect,
+    .listen = unix_listen,
+    .accept = unix_accept,
+    .sendto = unix_sendto,
+    .recvfrom = unix_recvfrom,
+    .shutdown = unix_shutdown,
+    .getsockname = unix_getsockname,
+    .getpeername = unix_getpeername,
+    .poll = unix_poll,
+    .buffer_changed = unix_buffer_changed,
+    .endpoint_close = unix_endpoint_close,
+    .close = unix_close,
 };
 
 static int
@@ -1497,9 +1555,10 @@ unix_create(int type, int protocol, struct socket **result)
 	endpoint = kern_calloc(1, sizeof(*endpoint));
 	if (endpoint == NULL)
 		return ENOMEM;
-	socket_init_object(&endpoint->socket, AF_UNIX, type, protocol, &unix_ops);
+	socket_init_object(&endpoint->socket, AF_UNIX, type, protocol,
+			   &unix_ops);
 	(void)mutex_init(&endpoint->stream_send_lock,
-	    LOCK_RANK_UNIX_STREAM_SEND, "unix stream send");
+			 LOCK_RANK_UNIX_STREAM_SEND, "unix stream send");
 	path_init(&endpoint->bound_path);
 	*result = &endpoint->socket;
 	return 0;
@@ -1507,7 +1566,7 @@ unix_create(int type, int protocol, struct socket **result)
 
 int
 unix_socket_pair_create(int type, int protocol, struct socket **left_result,
-	struct socket **right_result)
+			struct socket **right_result)
 {
 	struct socket *left = NULL, *right = NULL;
 	int error;
@@ -1536,6 +1595,7 @@ unix_socket_pair_create(int type, int protocol, struct socket **left_result,
 int
 unix_socket_init(void)
 {
-	static const struct socket_family_ops family_ops = { .create = unix_create };
+	static const struct socket_family_ops family_ops = {.create =
+								unix_create};
 	return socket_family_register(AF_UNIX, &family_ops);
 }

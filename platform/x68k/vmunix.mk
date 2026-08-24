@@ -58,13 +58,7 @@ X68K_USER_RUNTIME_SOURCES := \
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c libc/format.c libc/stdio.c \
 	$(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
-X68K_USER_SH_SOURCES := userland/base/sh/main.c \
-	userland/base/sh/builtins.c userland/base/sh/lexer.c userland/base/sh/expand.c
-
-X68K_USER_SH_SOURCES += userland/base/sh/glob.c userland/base/sh/vars.c \
-	userland/base/sh/arithmetic.c
-
-X68K_USER_SH_SOURCES += userland/base/sh/alias.c
+X68K_USER_SH_SOURCES := $(USERLAND_sh_SOURCES)
 X68K_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(X68K_USER_RUNTIME_SOURCES))
 X68K_USER_SH_OBJS := \
@@ -251,6 +245,11 @@ $(X68K_CRT0_OBJ): src/crt/crt0-m68k.S include/hal/arch.h \
 $(X68K_USER_SH_OBJS) $(X68K_USER_READLINE_OBJ): \
 	M68K_USER_CPPFLAGS += -Iuserland/base/libedit
 $(X68K_USER_READLINE_LIB): $(X68K_USER_READLINE_OBJ)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+X68K_USER_CURSES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user,curses)
+$(BUILD)/lib/libcurses.a: $(X68K_USER_CURSES_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 

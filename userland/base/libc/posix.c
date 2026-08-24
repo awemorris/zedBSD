@@ -2934,6 +2934,100 @@ fopen(const char *path, const char *mode)
 	stream_register(stream);
 	return stream;
 }
+
+FILE *
+fdopen(int descriptor, const char *mode)
+{
+	FILE *stream;
+
+	if (descriptor < 0 || mode == NULL ||
+	    (mode[0] != 'r' && mode[0] != 'w' && mode[0] != 'a')) {
+		errno = EINVAL;
+		return NULL;
+	}
+	stream = calloc(1, sizeof(*stream));
+	if (stream == NULL)
+		return NULL;
+	stream->context = (void *)(intptr_t)(descriptor + 1);
+	stream->mode = mode[0] == 'r' ? 1U : 2U;
+	if (strchr(mode, '+') != NULL)
+		stream->mode = 3U;
+	stream->buffering_mode = _IOFBF;
+	stream->ungot_character = EOF;
+	stream->heap_allocated = 1;
+	stream_register(stream);
+	return stream;
+}
+
+FILE *
+popen(const char *command, const char *mode)
+{
+	int descriptors[2];
+	pid_t child;
+	FILE *stream;
+
+	if (command == NULL || mode == NULL ||
+	    !((mode[0] == 'r' || mode[0] == 'w') && mode[1] == '\0')) {
+		errno = EINVAL;
+		return NULL;
+	}
+	if (pipe(descriptors) != 0)
+		return NULL;
+	child = fork();
+	if (child == 0) {
+		if (mode[0] == 'r') {
+			(void)close(descriptors[0]);
+			if (dup2(descriptors[1], STDOUT_FILENO) < 0)
+				_exit(127);
+			(void)close(descriptors[1]);
+		} else {
+			(void)close(descriptors[1]);
+			if (dup2(descriptors[0], STDIN_FILENO) < 0)
+				_exit(127);
+			(void)close(descriptors[0]);
+		}
+		execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+		_exit(127);
+	}
+	if (child < 0) {
+		(void)close(descriptors[0]);
+		(void)close(descriptors[1]);
+		return NULL;
+	}
+	if (mode[0] == 'r') {
+		(void)close(descriptors[1]);
+		stream = fdopen(descriptors[0], "r");
+	} else {
+		(void)close(descriptors[0]);
+		stream = fdopen(descriptors[1], "w");
+	}
+	if (stream == NULL) {
+		(void)kill(child, SIGTERM);
+		(void)waitpid(child, NULL, 0);
+		return NULL;
+	}
+	stream->child_pid = child;
+	return stream;
+}
+
+int
+pclose(FILE *stream)
+{
+	pid_t child;
+	int status;
+
+	if (stream == NULL || stream->child_pid <= 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	child = stream->child_pid;
+	if (fclose(stream) == EOF)
+		return -1;
+	while (waitpid(child, &status, 0) < 0)
+		if (errno != EINTR)
+			return -1;
+	return status;
+}
 int
 fclose(FILE *stream)
 {

@@ -29,8 +29,10 @@ uustat uux val vi wait wc what who write xargs xgettext yacc zcat
 """.split()
 REQUIREMENTS = {"required", "enabled-option", "disabled-option"}
 STATUSES = {
-    "missing", "implemented-unreviewed", "reviewed", "option-disabled",
+    "missing", "implemented-unreviewed", "deferred-stub", "reviewed",
+    "option-disabled",
 }
+TEST_MARKER = "POSIX-UTILITY-TEST:"
 
 
 def fail(message):
@@ -44,6 +46,19 @@ def advertised_posix2_version():
     if match is None:
         fail("cannot read _POSIX2_VERSION")
     return int(match.group(1))
+
+
+def validate_reviewed_test(utility, test_path, line):
+    text = test_path.read_text(encoding="utf-8")
+    expected = f"{TEST_MARKER} {utility} positive negative"
+    markers = [candidate.removeprefix("# ") for candidate in text.splitlines()]
+    if expected not in markers:
+        fail(
+            f"line {line}: reviewed utility test lacks marker "
+            f"'{expected}'"
+        )
+    if utility not in text:
+        fail(f"line {line}: reviewed utility is not named by its test")
 
 
 def validate():
@@ -71,12 +86,16 @@ def validate():
             fail(f"line {line}: disabled option is presented as implemented")
         source = row["implementation_evidence"]
         test = row["test_evidence"]
-        if row["status"] in ("implemented-unreviewed", "reviewed"):
+        if row["status"] in (
+            "implemented-unreviewed", "deferred-stub", "reviewed"
+        ):
             if not source or not (ROOT / source).is_file():
                 fail(f"line {line}: invalid implementation evidence")
-        if row["status"] == "reviewed":
+        if row["status"] in ("deferred-stub", "reviewed"):
             if not test or not (ROOT / test).is_file():
-                fail(f"line {line}: reviewed utility lacks a test")
+                fail(f"line {line}: utility status requires a test")
+        if row["status"] == "reviewed":
+            validate_reviewed_test(row["utility"], ROOT / test, line)
             reviewed += 1
         elif targeted:
             pending += 1

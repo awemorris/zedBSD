@@ -6,13 +6,14 @@
 #include <sys/types.h>
 #include <time.h>
 typedef void (*sighandler_t)(int);
+typedef int sig_atomic_t;
 typedef void (*siginfo_handler_t)(int, siginfo_t *, void *);
 typedef struct {
 	void *ss_sp;
 	size_t ss_size;
 	int ss_flags;
 } stack_t;
-#define SIG_ERR ((sighandler_t)-1)
+#define SIG_ERR ((sighandler_t) - 1)
 #define SIG_HOLD ((sighandler_t)2)
 #define SIG2STR_MAX 32
 int sig2str(int signal_number, char *name);

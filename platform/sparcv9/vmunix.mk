@@ -98,13 +98,7 @@ SPARCV9_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dl
 	src/softfloat/zed-softfloat.c src/softfloat/compiler-runtime.c \
 	src/softfloat/zed-softfloat128.c src/softfloat/compiler-runtime128.c \
 	src/softfloat/sparcv9/compiler-runtime.c
-SPARCV9_USER_SH_SOURCES := userland/base/sh/main.c \
-	userland/base/sh/builtins.c userland/base/sh/lexer.c userland/base/sh/expand.c
-
-SPARCV9_USER_SH_SOURCES += userland/base/sh/glob.c userland/base/sh/vars.c \
-	userland/base/sh/arithmetic.c
-
-SPARCV9_USER_SH_SOURCES += userland/base/sh/alias.c
+SPARCV9_USER_SH_SOURCES := $(USERLAND_sh_SOURCES)
 SPARCV9_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(SPARCV9_USER_RUNTIME_SOURCES))
 SPARCV9_USER_SH_OBJS := \
@@ -175,6 +169,12 @@ $(BUILD)/user/src/crt/crt0-sparcv9.o: src/crt/crt0-sparcv9.S \
 $(SPARCV9_USER_SH_OBJS) $(SPARCV9_USER_READLINE_OBJ): \
 	SPARCV9_CPPFLAGS += -Iuserland/base/libedit
 $(SPARCV9_USER_READLINE_LIB): $(SPARCV9_USER_READLINE_OBJ)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+SPARCV9_USER_CURSES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,\
+	$(BUILD)/user,curses)
+$(BUILD)/lib/libcurses.a: $(SPARCV9_USER_CURSES_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 

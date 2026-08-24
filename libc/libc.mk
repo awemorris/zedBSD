@@ -7,6 +7,9 @@ ZEDBSD_LIBC_CC ?= $(CC)
 ZEDBSD_LIBC_NM ?= nm
 ZEDBSD_LIBC_OBJDUMP ?= objdump
 
+ZEDBSD_REGEX_SOURCES := libc/regex/regcomp.c libc/regex/regexec.c \
+	libc/regex/regerror.c libc/regex/tre-mem.c
+
 ZEDBSD_LIBC_USER_EXTRA_SOURCES := \
 	userland/base/libc/atomic-runtime.c \
 	libc/string-extra.c libc/fenv.c libc/wide-extra.c libc/inttypes.c \
@@ -14,7 +17,9 @@ ZEDBSD_LIBC_USER_EXTRA_SOURCES := \
 	libc/setjmp.c libc/err.c libc/libgen.c libc/search.c \
 	libc/random48.c libc/random.c libc/xsi-crypto.c \
 	libc/ftw.c libc/ndbm.c libc/realpath.c libc/tempnam.c \
-	libc/xsi-process.c libc/fmtmsg.c libc/syslog.c libc/sysv-ipc.c
+	libc/xsi-process.c libc/fmtmsg.c libc/syslog.c libc/sysv-ipc.c \
+	libc/catalog.c libc/locale-db.c libc/fnmatch.c \
+	$(ZEDBSD_REGEX_SOURCES)
 
 ZEDBSD_LIBC_SOURCES := \
 	libc/heap.c \
@@ -43,7 +48,8 @@ ZEDBSD_LIBC_SOURCES := \
 	libc/ftw.c \
 	libc/ndbm.c \
 	libc/realpath.c \
-	libc/tempnam.c
+	libc/tempnam.c \
+	$(ZEDBSD_REGEX_SOURCES)
 
 ZEDBSD_LIBC_OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(ZEDBSD_LIBC_SOURCES))
 

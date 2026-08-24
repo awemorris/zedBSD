@@ -40,6 +40,9 @@ int vscanf(const char *, va_list);
 int putchar(int character);
 int puts(const char *string);
 FILE *fopen(const char *path, const char *mode);
+FILE *fdopen(int, const char *);
+FILE *popen(const char *, const char *);
+int pclose(FILE *);
 FILE *freopen(const char *, const char *, FILE *);
 FILE *tmpfile(void);
 char *tmpnam(char *);
@@ -48,6 +51,8 @@ int fclose(FILE *stream);
 int fflush(FILE *stream);
 int fseek(FILE *stream, long offset, int whence);
 long ftell(FILE *stream);
+#define fseeko(stream, offset, whence) fseek((stream), (long)(offset), (whence))
+#define ftello(stream) ((off_t)ftell(stream))
 int fgetpos(FILE *, fpos_t *);
 int fsetpos(FILE *, const fpos_t *);
 void rewind(FILE *);
@@ -85,8 +90,8 @@ char *fgetln(FILE *, size_t *);
 const char *fmtcheck(const char *, const char *);
 int fpurge(FILE *);
 FILE *funopen(const void *, int (*)(void *, char *, int),
-    int (*)(void *, const char *, int), fpos_t (*)(void *, fpos_t, int),
-    int (*)(void *));
+	      int (*)(void *, const char *, int),
+	      fpos_t (*)(void *, fpos_t, int), int (*)(void *));
 void setbuffer(FILE *, char *, int);
 int setlinebuf(FILE *);
 

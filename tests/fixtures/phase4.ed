@@ -1,0 +1,7 @@
+a
+alpha
+beta
+.
+1,$s/a/A/g
+w /tmp/phase4-ed-output
+Q

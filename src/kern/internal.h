@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 #define MAX_PARTS 16
-#define LINE_MAX 256
+#define KERNEL_LINE_MAX 256
 #define STARTUP_TIMEOUT_SECONDS 1
 #define MAX_IDE_DEVICES 4
 #define MAX_SCSI_TARGETS 7
@@ -23,14 +23,20 @@ struct part {
 };
 
 enum startup_phase {
-	STARTUP_DRAW, STARTUP_PROBE, STARTUP_TIMEOUT, STARTUP_SELECTED,
+	STARTUP_DRAW,
+	STARTUP_PROBE,
+	STARTUP_TIMEOUT,
+	STARTUP_SELECTED,
 	STARTUP_SHELL,
 };
 enum startup_auto_kind {
-	STARTUP_AUTO_NONE, STARTUP_AUTO_CONFIG, STARTUP_AUTO_PBR,
+	STARTUP_AUTO_NONE,
+	STARTUP_AUTO_CONFIG,
+	STARTUP_AUTO_PBR,
 };
 enum startup_config_kind {
-	STARTUP_CONFIG_NONE, STARTUP_CONFIG_BOOTCFG,
+	STARTUP_CONFIG_NONE,
+	STARTUP_CONFIG_BOOTCFG,
 };
 struct startup_state {
 	enum startup_phase phase;
@@ -82,7 +88,7 @@ int kern_m9_write_test(uint32_t lba);
 int kern_command(char *line);
 
 const char *startup_config_file(void);
-int run_noct_user(const char *, int, char *const []);
+int run_noct_user(const char *, int, char *const[]);
 int startup_menu(struct startup_state *state);
 
 #define ho kern_handoff

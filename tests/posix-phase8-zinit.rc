@@ -1,0 +1,20 @@
+echo zedBSD-POSIX-PHASE8-QEMU-START
+admin -i /etc/phase8-initial -y created /tmp/s.demo
+val /tmp/s.demo && echo zedBSD-POSIX-PHASE8-ADMIN-VAL-PASS
+get -p /tmp/s.demo > /tmp/phase8-get
+grep -q 'version 1.1 @(#)demo' /tmp/phase8-get && echo zedBSD-POSIX-PHASE8-GET-PASS
+get -e /tmp/s.demo
+cp /etc/phase8-second /tmp/demo
+delta -y second /tmp/s.demo
+prs -d ':I: :C:' /tmp/s.demo > /tmp/phase8-prs
+grep -q '1.2 second' /tmp/phase8-prs && echo zedBSD-POSIX-PHASE8-DELTA-PRS-PASS
+get -p /tmp/s.demo > /tmp/phase8-latest
+what /tmp/phase8-latest > /tmp/phase8-what
+grep -q 'demo.*1.2' /tmp/phase8-what && echo zedBSD-POSIX-PHASE8-WHAT-PASS
+get -e /tmp/s.demo
+sact /tmp/s.demo > /tmp/phase8-sact
+grep -q '1.2 1.3' /tmp/phase8-sact && unget /tmp/s.demo && echo zedBSD-POSIX-PHASE8-EDIT-PASS
+sccs val /tmp/s.demo && echo zedBSD-POSIX-PHASE8-DISPATCH-PASS
+rmdel -r 1.1 /tmp/s.demo || echo zedBSD-POSIX-PHASE8-RMDEL-GUARD-PASS
+echo zedBSD-POSIX-PHASE8-QEMU-PASS
+halt

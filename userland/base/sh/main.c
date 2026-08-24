@@ -26,7 +26,7 @@
 #include <termios.h>
 #include <unistd.h>
 
-#define LINE_MAX 256
+#define SHELL_LINE_MAX 256
 #define ARG_MAX 64
 #define SOURCE_MAX 8192
 #define PIPELINE_MAX 16
@@ -637,30 +637,63 @@ run_shell_script(int argc, char **argv, const char *path)
 }
 
 static int
+noct_path(const char *path)
+{
+	size_t length = strlen(path);
+
+	return length >= 4U && strcmp(path + length - 4U, ".nap") == 0;
+}
+
+static int
+resolve_command(const char *name, char *candidate, size_t capacity)
+{
+	if (search_path(name, "", 1, candidate, capacity))
+		return 1;
+	if (search_path(name, ".nap", 0, candidate, capacity))
+		return 1;
+	return search_path(name, "", 0, candidate, capacity);
+}
+
+static int
+run_resolved(int argc, char **argv, const char *path)
+{
+	char *child[ARG_MAX + 1];
+	int index;
+
+	if (!is_elf(path)) {
+		if (noct_path(path)) {
+			child[0] = (char *)path;
+			for (index = 1; index < argc; index++)
+				child[index] = argv[index];
+			child[argc] = NULL;
+			return run_noct(argc, child);
+		}
+		return run_shell_script(argc, argv, path);
+	}
+	child[0] = (char *)path;
+	for (index = 1; index < argc; index++)
+		child[index] = argv[index];
+	child[argc] = NULL;
+	return run_external(child);
+}
+
+static int
 run_search_path(int argc, char **argv)
 {
 	char candidate[256];
-	char *child[ARG_MAX + 1];
-	int i;
+	const char *path = sh_var_get("PATH");
+	const char *cached;
 
-	if (search_path(argv[0], "", 1, candidate, sizeof(candidate))) {
-		child[0] = candidate;
-		for (i = 1; i < argc; i++)
-			child[i] = argv[i];
-		child[argc] = NULL;
-		return run_external(child);
+	if (sh_hash_sync_path(path) != 0)
+		return 0;
+	cached = sh_hash_lookup(argv[0]);
+	if (cached != NULL)
+		return run_resolved(argc, argv, cached);
+	if (resolve_command(argv[0], candidate, sizeof(candidate))) {
+		if (sh_hash_store(argv[0], candidate) != 0)
+			return 0;
+		return run_resolved(argc, argv, candidate);
 	}
-	/* Compiled Noct applications remain executable by command name. */
-	if (search_path(argv[0], ".nap", 0, candidate, sizeof(candidate))) {
-		char *script[ARG_MAX + 1];
-		script[0] = candidate;
-		for (i = 1; i < argc; i++)
-			script[i] = argv[i];
-		script[argc] = NULL;
-		return run_noct(argc, script);
-	}
-	if (search_path(argv[0], "", 0, candidate, sizeof(candidate)))
-		return run_shell_script(argc, argv, candidate);
 	fprintf(stderr, "sh: %s: not found\n", argv[0]);
 	return 0;
 }
@@ -699,13 +732,13 @@ static int
 shell_builtin_name(const char *name)
 {
 	static const char *const names[] = {
-	    ":",       ".",	   "[",	     "alias", "bg",	 "cd",
-	    "command", "device",   "echo",   "env",   "eval",	 "exec",
-	    "exit",    "export",   "false",  "fg",    "getopts", "halt",
-	    "help",    "jobs",	   "part",   "pause", "printf",	 "pwd",
-	    "read",    "readonly", "reboot", "run",   "set",	 "shift",
-	    "source",  "true",	   "type",   "test",  "umask",	 "unalias",
-	    "unset",   "vmstat",   "wait",   NULL};
+	    ":",       ".",	 "[",	     "alias",  "bg",	  "cd",
+	    "command", "device", "echo",     "env",    "eval",	  "exec",
+	    "exit",    "export", "false",    "fg",     "getopts", "halt",
+	    "hash",    "help",	 "jobs",     "part",   "pause",	  "printf",
+	    "pwd",     "read",	 "readonly", "reboot", "run",	  "set",
+	    "shift",   "source", "true",     "type",   "test",	  "umask",
+	    "unalias", "ulimit", "unset",    "vmstat", "wait",	  NULL};
 	int index;
 	for (index = 0; names[index] != NULL; index++)
 		if (strcmp(name, names[index]) == 0)
@@ -944,6 +977,39 @@ command_dispatch(int argc, char **argv)
 				result = 0;
 		return result;
 	}
+	if (!strcmp(argv[0], "hash")) {
+		const char *path = sh_var_get("PATH");
+		int index;
+		int result = 1;
+
+		if (argc == 2 && !strcmp(argv[1], "-r")) {
+			sh_hash_clear();
+			return 1;
+		}
+		if (argc > 1 && argv[1][0] == '-') {
+			fprintf(stderr, "usage: hash [-r] [utility ...]\n");
+			return 0;
+		}
+		if (sh_hash_sync_path(path) != 0)
+			return 0;
+		if (argc == 1) {
+			sh_hash_print();
+			return 1;
+		}
+		for (index = 1; index < argc; index++) {
+			char candidate[256];
+
+			if (strchr(argv[index], '/') != NULL ||
+			    !resolve_command(argv[index], candidate,
+					     sizeof(candidate))) {
+				fprintf(stderr, "hash: %s: not found\n",
+					argv[index]);
+				result = 0;
+			} else if (sh_hash_store(argv[index], candidate) != 0)
+				return 0;
+		}
+		return result;
+	}
 	if (!strcmp(argv[0], "getopts"))
 		return shell_getopts_builtin(argc, argv);
 	if (!strcmp(argv[0], "trap")) {
@@ -1012,7 +1078,7 @@ command_dispatch(int argc, char **argv)
 		return 0;
 	}
 	if (!strcmp(argv[0], "read")) {
-		char input[LINE_MAX];
+		char input[SHELL_LINE_MAX];
 		const char *name = argc == 2 ? argv[1] : "REPLY";
 		if (argc > 2 || assignment_length(name) >= 0 ||
 		    !(name[0] == '_' || (name[0] >= 'A' && name[0] <= 'Z') ||
@@ -1709,6 +1775,8 @@ main(int argc, char **argv)
 {
 	if (sh_var_get("PATH") == NULL)
 		(void)sh_var_set("PATH", "/bin:/usr/bin", 1);
+	if (sh_var_get("TERM") == NULL)
+		(void)sh_var_set("TERM", "zed", 1);
 	if (argc > 1) {
 		shell_name = argv[1];
 		shell_positional_count = argc - 2;

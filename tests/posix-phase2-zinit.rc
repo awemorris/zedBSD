@@ -1,0 +1,14 @@
+echo zedBSD-POSIX-PHASE2-QEMU-START
+test "$(expr 6 \* 7)" = 42 && echo zedBSD-POSIX-PHASE2-EXPR-PASS
+cal 9 1752 && echo zedBSD-POSIX-PHASE2-CAL-PASS
+tsort /etc/posix-phase2-tsort && echo zedBSD-POSIX-PHASE2-TSORT-PASS
+uuencode -m /etc/posix-phase2-input posix-phase2-decoded && echo zedBSD-POSIX-PHASE2-UUENCODE-PASS
+uudecode /etc/posix-phase2-uudecode && cmp posix-phase2-decoded /etc/posix-phase2-input && echo zedBSD-POSIX-PHASE2-UUDECODE-PASS
+test "$(nice -n 0 expr 3 + 4)" = 7 && echo zedBSD-POSIX-PHASE2-NICE-PASS
+renice -n 0 -p $$ && echo zedBSD-POSIX-PHASE2-RENICE-PASS
+hash expr && hash && hash -r && echo zedBSD-POSIX-PHASE2-HASH-PASS
+ulimit -Sn 16 && test "$(ulimit -Sn)" = 16 && echo zedBSD-POSIX-PHASE2-ULIMIT-PASS
+test -n "$(getconf ARG_MAX)" && echo zedBSD-POSIX-PHASE2-GETCONF-PASS
+write zedbsd-no-such-user || echo zedBSD-POSIX-PHASE2-WRITE-NEGATIVE-PASS
+echo zedBSD-POSIX-PHASE2-QEMU-PASS
+halt

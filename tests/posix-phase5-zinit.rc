@@ -1,0 +1,20 @@
+echo zedBSD-POSIX-PHASE5-QEMU-START
+ps -A -o pid,ppid,pgid,sid,uid,gid,state,ni,time,comm > /tmp/phase5-ps
+grep -q PID /tmp/phase5-ps && echo zedBSD-POSIX-PHASE5-PS-PASS
+stat /bin/newgrp > /tmp/phase5-newgrp-stat
+grep -q mode=89ed /tmp/phase5-newgrp-stat && echo zedBSD-POSIX-PHASE5-NEWGRP-MODE-PASS
+newgrp group-that-does-not-exist || echo zedBSD-POSIX-PHASE5-NEWGRP-NEGATIVE-PASS
+posix-phase5-helper ipc-create
+ipcs -q > /tmp/phase5-ipcs-q
+ipcs -m > /tmp/phase5-ipcs-m
+ipcs -s > /tmp/phase5-ipcs-s
+grep -q 00001234 /tmp/phase5-ipcs-q && grep -q 00003456 /tmp/phase5-ipcs-m && grep -q 00002345 /tmp/phase5-ipcs-s && echo zedBSD-POSIX-PHASE5-IPCS-PASS
+ipcrm -Q 0x1234 -M 0x3456 -S 0x2345
+posix-phase5-helper ipc-absent && echo zedBSD-POSIX-PHASE5-IPCRM-PASS
+echo held > /tmp/phase5-held
+posix-phase5-helper hold /tmp/phase5-held &
+sleep 1
+fuser /tmp/phase5-held > /tmp/phase5-fuser
+grep -q f /tmp/phase5-fuser && echo zedBSD-POSIX-PHASE5-FUSER-PASS
+echo zedBSD-POSIX-PHASE5-QEMU-PASS
+halt

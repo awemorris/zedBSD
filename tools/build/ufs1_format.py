@@ -226,13 +226,13 @@ class Image:
                 child = self._child(parent, path.name, 4)
                 if child is None:
                     child = self.add_dir(parent, path.name,
-                                         path.stat().st_mode & 0o777)
+                                         path.stat().st_mode & 0o7777)
                 self.add_tree(path, child)
             elif path.is_file():
                 if self._child(parent, path.name) is not None:
                     raise ValueError(f'duplicate path: {path}')
                 self.add_file(parent, path.name, path.read_bytes(),
-                              path.stat().st_mode & 0o777)
+                              path.stat().st_mode & 0o7777)
 
     def finish(self):
         parents = {2: 2}

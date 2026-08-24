@@ -23,6 +23,15 @@ build gettext
 build msgfmt
 cp "$work/gettext" "$work/ngettext"
 
+# The matrix checker requires one exact marker for each reviewed utility whose
+# positive and negative behavior is exercised by this file.
+# POSIX-UTILITY-TEST: gettext positive negative
+# POSIX-UTILITY-TEST: msgfmt positive negative
+# POSIX-UTILITY-TEST: ngettext positive negative
+# POSIX-UTILITY-TEST: readlink positive negative
+# POSIX-UTILITY-TEST: realpath positive negative
+# POSIX-UTILITY-TEST: timeout positive negative
+
 printf 'gamma\nalpha\nalpha\nbeta\n' >"$work/in"
 printf 'one\ttwo\n' >"$work/tab"
 
@@ -49,6 +58,10 @@ test "$("$work/timeout" 1 command-that-does-not-exist; printf '%s' "$?")" = 127
 ln -s target "$work/link"
 test "$("$work/readlink" -n "$work/link")" = target
 test "$("$work/readlink" "$work/link")" = target
+if "$work/readlink" "$work/missing-link" >/dev/null 2>&1; then
+	echo 'readlink accepted a missing path' >&2
+	exit 1
+fi
 test "$("$work/realpath" -E "$work/missing")" = "$work/missing"
 if "$work/realpath" -e "$work/missing" >/dev/null 2>&1; then
 	echo 'realpath -e accepted a missing final component' >&2

@@ -83,12 +83,18 @@ USERLAND_$(1)_SELECTABLE := $(7)
 USERLAND_$(1)_MENU := $(8)
 USERLAND_$(1)_PACKAGE := $(9)
 USERLAND_$(1)_REQUIRE := $(10)
+USERLAND_$(1)_MODE := $(11)
+USERLAND_$(1)_TYPE := $(if $(12),$(12),\
+	$(if $(filter library,$(5)),library,program))
+USERLAND_$(1)_DATA := $(13)
+USERLAND_$(1)_HEADERS := $(14)
 endef
 # userland/noct is an upstream source submodule, not a zedBSD package tree.
 USERLAND_PACKAGE_MAKEFILES := $(filter-out userland/noct/%, $(sort \
 	$(wildcard userland/*/Makefile) \
 	$(wildcard userland/*/*/Makefile) \
 	$(wildcard userland/*/*/*/Makefile)))
+ZEDBSD_TOPLEVEL_BUILD := 1
 include $(USERLAND_PACKAGE_MAKEFILES)
 ZEDBSD_ALL_USER_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
 	$(if $(filter y,$(USERLAND_$(program)_SELECTABLE)),$(program)))
@@ -122,8 +128,8 @@ override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 		$(USERLAND_$(program)_PLATFORMS)),$(program)))
 # Essential administrative tools are present even when an older config.mk
 # predates their package registration.
-override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) blkid gettext \
-	hostname msgfmt ngettext)
+override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) at batch \
+	blkid crontab gettext hostname logger lp mailx msgfmt ngettext talk)
 # Xzed cannot operate without the kernel graphics character device.  Keep
 # hand-edited and older saved configurations from producing an unusable
 # userland/kernel combination.
@@ -145,6 +151,17 @@ USERLAND_SELECTED_BASIC_PROGRAMS = $(filter $(ZEDBSD_USER_PROGRAMS),\
 	$(USERLAND_BASIC_PROGRAMS))
 USERLAND_SELECTED_NETWORK_PROGRAMS = $(filter $(ZEDBSD_USER_PROGRAMS),\
 	$(USERLAND_NETWORK_PROGRAMS))
+ZEDBSD_USERLAND_FILE_MODES = $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
+	$(if $(USERLAND_$(program)_MODE),\
+		--mode /bin/$(program)=$(USERLAND_$(program)_MODE)))
+ZEDBSD_SELECTED_DATA_PACKAGES = $(foreach package,$(ZEDBSD_USER_PROGRAMS),\
+	$(if $(strip $(USERLAND_$(package)_DATA)),$(package)))
+ZEDBSD_USERLAND_DATA_INPUTS = $(foreach package,\
+	$(ZEDBSD_SELECTED_DATA_PACKAGES),$(foreach entry,\
+		$(USERLAND_$(package)_DATA),$(word 2,$(subst =, ,$(entry)))))
+ZEDBSD_USERLAND_DATA_FILES = $(foreach package,\
+	$(ZEDBSD_SELECTED_DATA_PACKAGES),$(foreach entry,\
+		$(USERLAND_$(package)_DATA),--file $(entry)))
 
 # $(1): object tree prefix, $(2): registered package name.
 define ZEDBSD_USERLAND_OBJECTS
@@ -329,6 +346,9 @@ uapi-abi-layout-check: $(BUILD)/tests/uapi-abi-ilp32.o \
 	$(BUILD)/tests/uapi-abi-lp64.o
 	@echo "zedBSD ILP32/LP64 UAPI layout check: PASS"
 
+uapi-abi-lp64-check: $(BUILD)/tests/uapi-abi-lp64.o
+	@echo "zedBSD LP64 UAPI layout check: PASS"
+
 HAL_SIGNAL_FRAME_HEADERS := include/hal/arch.h \
 	include/hal/arch/i386.h include/hal/arch/amd64.h \
 	include/hal/arch/aarch64.h include/hal/arch/m68030.h \
@@ -367,6 +387,12 @@ hal-signal-frame-layout-check: \
 	$(BUILD)/tests/hal-signal-frame-sparcv9.o
 	@echo "zedBSD HAL signal-frame layout check: PASS"
 
+hal-signal-frame-lp64-check: \
+	$(BUILD)/tests/hal-signal-frame-amd64.o \
+	$(BUILD)/tests/hal-signal-frame-arm64.o \
+	$(BUILD)/tests/hal-signal-frame-sparcv9.o
+	@echo "zedBSD LP64 HAL signal-frame layout check: PASS"
+
 $(BUILD)/tests/posix-header-ilp32.o: tests/posix-header-compile.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -m32 $(UAPI_ABI_TEST_FLAGS) -c $< -o $@
@@ -379,6 +405,9 @@ $(BUILD)/tests/posix-header-lp64.o: tests/posix-header-compile.c
 posix-header-check: $(BUILD)/tests/posix-header-ilp32.o \
 	$(BUILD)/tests/posix-header-lp64.o
 	@echo "zedBSD POSIX ILP32/LP64 public-header check: PASS"
+
+posix-header-lp64-check: $(BUILD)/tests/posix-header-lp64.o
+	@echo "zedBSD POSIX LP64 public-header check: PASS"
 
 $(BUILD)/tests/posix2024-header-ilp32.o: \
 	tests/posix-2024-header-compile.c
@@ -395,6 +424,9 @@ posix2024-header-check: $(BUILD)/tests/posix2024-header-ilp32.o \
 	$(BUILD)/tests/posix2024-header-lp64.o
 	@echo "zedBSD POSIX.1-2024 ILP32/LP64 public-header check: PASS"
 
+posix2024-header-lp64-check: $(BUILD)/tests/posix2024-header-lp64.o
+	@echo "zedBSD POSIX.1-2024 LP64 public-header check: PASS"
+
 $(BUILD)/tests/susv4-header-ilp32.o: tests/susv4-header-compile.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -m32 $(UAPI_ABI_TEST_FLAGS) -c $< -o $@
@@ -407,6 +439,9 @@ $(BUILD)/tests/susv4-header-lp64.o: tests/susv4-header-compile.c
 susv4-header-check: $(BUILD)/tests/susv4-header-ilp32.o \
 	$(BUILD)/tests/susv4-header-lp64.o
 	@echo "zedBSD SUSv4/XSI ILP32/LP64 public-header check: PASS"
+
+susv4-header-lp64-check: $(BUILD)/tests/susv4-header-lp64.o
+	@echo "zedBSD SUSv4/XSI LP64 public-header check: PASS"
 
 susv4-uapi-review-check: plan/susv4-uapi-audit.csv \
 	tools/susv4-uapi-review.py
@@ -459,12 +494,13 @@ $(BUILD)/tests/heap-context-host-test: tests/heap-context-host-test.c \
 
 $(BUILD)/tests/elf-host-test: tests/elf-host-test.c src/kern/elf.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -DHAL_ARCH_I386 -Iinclude -Isrc src/kern/elf.c $< -o $@
+	$(HOST_TEST_CC) -m32 -static -DHAL_ARCH_I386 -Iinclude -Isrc \
+		src/kern/elf.c $< -o $@
 
 $(BUILD)/tests/elf-m68k-host-test: tests/elf-m68k-host-test.c src/kern/elf.c
 	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -DHAL_ARCH_M68K -DZEDBSD_USER_ABI_M68K -Iinclude -Isrc \
-		src/kern/elf.c $< -o $@
+	$(HOST_TEST_CC) -m32 -static -DHAL_ARCH_M68K \
+		-DZEDBSD_USER_ABI_M68K -Iinclude -Isrc src/kern/elf.c $< -o $@
 
 $(BUILD)/tests/m68k-mmu-host-test: tests/m68k-mmu-host-test.c \
 	src/hal/m68k/mmu030.h
@@ -806,7 +842,7 @@ crypt-host-test: $(BUILD)/tests/crypt-host-test
 $(BUILD)/tests/susv4-libc-host-test: tests/susv4-libc-host-test.c \
 	libc/random48.c libc/random.c libc/search.c libc/xsi-crypto.c
 	@mkdir -p $(dir $@)
-	$(HOSTCC) -O2 -Wall -Wextra -Werror -Ilibc/include \
+	$(HOSTCC) -O2 -Wall -Wextra -Werror -Ilibc/include -Iinclude/uapi \
 		libc/random48.c libc/random.c libc/search.c libc/xsi-crypto.c $< -o $@
 
 susv4-libc-host-test: $(BUILD)/tests/susv4-libc-host-test
@@ -949,8 +985,6 @@ HOST_TEST_BINARIES := $(BUILD)/tests/sh-lexer-host-test \
 	$(BUILD)/tests/env-host-test \
 	$(BUILD)/tests/user-noct-memory-host-test \
 	$(BUILD)/tests/heap-context-host-test \
-	$(BUILD)/tests/elf-host-test \
-	$(BUILD)/tests/elf-m68k-host-test \
 	$(BUILD)/tests/m68k-mmu-host-test \
 	$(BUILD)/tests/m68k-space-host-test \
 	$(BUILD)/tests/x68k-memory-map-host-test \
@@ -985,15 +1019,15 @@ HOST_TEST_BINARIES := $(BUILD)/tests/sh-lexer-host-test \
 	$(BUILD)/tests/inet-stack-host-test \
 	$(BUILD)/tests/dhcp-host-test \
 	$(BUILD)/tests/dns-host-test
-CHECK_RUN_TARGETS := libc-host-test softfloat-host-test \
+CHECK_RUN_TARGETS := softfloat-host-test \
 	zed-softfloat-core-test float-parse-host-test \
 	math-host-test \
 	zed-softfloat128-core-test \
-	uapi-abi-layout-check hal-signal-frame-layout-check \
-	posix-header-check posix-api-matrix-check \
-	posix2024-header-check posix2024-api-matrix-check \
+	uapi-abi-lp64-check hal-signal-frame-lp64-check \
+	posix-header-lp64-check posix-api-matrix-check \
+	posix2024-header-lp64-check posix2024-api-matrix-check \
 	posix2024-utility-matrix-check \
-	susv4-header-check susv4-libc-host-test crypt-host-test \
+	susv4-header-lp64-check susv4-libc-host-test crypt-host-test \
 	gettext-catalog-host-test \
 	ufs1-format-host-test ufs2-format-host-test
 
@@ -1001,6 +1035,169 @@ userland-command-host-test: tests/test-userland-commands-host.sh
 	bash tests/test-userland-commands-host.sh
 
 CHECK_RUN_TARGETS += userland-command-host-test
+
+deferred-stub-host-test: tests/test-deferred-stubs-host.sh \
+	userland/base/deferred-stub/main.c
+	bash tests/test-deferred-stubs-host.sh
+
+CHECK_RUN_TARGETS += deferred-stub-host-test
+
+posix-phase2a-host-test: tests/test-posix-phase2a-host.sh \
+	userland/base/cal/main.c userland/base/expr/main.c \
+	userland/base/tsort/main.c $(ZEDBSD_REGEX_SOURCES)
+	bash tests/test-posix-phase2a-host.sh
+
+CHECK_RUN_TARGETS += posix-phase2a-host-test
+
+posix-phase2b-host-test: tests/test-posix-phase2b-host.sh \
+	userland/base/uuencode/main.c userland/base/uudecode/main.c \
+	userland/base/common/uucodec.c userland/base/common/uucodec.h
+	bash tests/test-posix-phase2b-host.sh
+
+CHECK_RUN_TARGETS += posix-phase2b-host-test
+
+posix-phase2c-priority-host-test: \
+	tests/test-posix-phase2c-priority-host.sh tests/priority-host-helper.c \
+	userland/base/nice/main.c userland/base/renice/main.c
+	bash tests/test-posix-phase2c-priority-host.sh
+
+CHECK_RUN_TARGETS += posix-phase2c-priority-host-test
+
+posix-write-host-test: tests/test-posix-write-host.py \
+	userland/base/write/main.c
+	$(PYTHON) tests/test-posix-write-host.py
+
+CHECK_RUN_TARGETS += posix-write-host-test
+
+posix-shell-builtins-host-test: tests/test-posix-shell-builtins-host.sh \
+	tests/sh-posix-builtins-host-test.c userland/base/sh/builtins.c \
+	userland/base/sh/builtins.h
+	bash tests/test-posix-shell-builtins-host.sh
+
+CHECK_RUN_TARGETS += posix-shell-builtins-host-test
+
+posix-getconf-host-test: tests/test-posix-getconf-host.sh \
+	userland/base/getconf/main.c userland/base/getconf/getconf-table.h
+	bash tests/test-posix-getconf-host.sh
+
+CHECK_RUN_TARGETS += posix-getconf-host-test
+
+posix-gencat-host-test: tests/test-posix-gencat-host.sh \
+	tests/posix-gencat-host-test.c userland/base/gencat/main.c \
+	libc/catalog.c libc/include/nl_types.h \
+	libc/include/zedbsd/catalog-format.h
+	bash tests/test-posix-gencat-host.sh
+
+CHECK_RUN_TARGETS += posix-gencat-host-test
+
+posix-localedef-host-test: tests/test-posix-localedef-host.sh \
+	tests/posix-locale-db-host-test.c \
+	tests/fixtures/zed-test-locale.src tests/fixtures/UTF-8.charmap \
+	userland/base/localedef/main.c libc/locale.c libc/locale-db.c \
+	libc/include/zedbsd/locale-format.h
+	bash tests/test-posix-localedef-host.sh
+
+CHECK_RUN_TARGETS += posix-localedef-host-test
+
+posix-locale-host-test: tests/test-posix-locale-host.sh \
+	tests/locale-host-shim.c userland/base/locale/main.c \
+	userland/base/localedef/main.c libc/locale.c libc/locale-db.c \
+	libc/include/zedbsd/locale-format.h
+	bash tests/test-posix-locale-host.sh
+
+CHECK_RUN_TARGETS += posix-locale-host-test
+
+posix-terminal-tools-host-test: tests/test-posix-terminal-tools-host.sh \
+	tests/terminfo-expander-host-test.c userland/base/tabs/main.c \
+	userland/base/tput/main.c userland/base/common/terminfo.c \
+	userland/base/common/terminfo.h
+	bash tests/test-posix-terminal-tools-host.sh
+
+CHECK_RUN_TARGETS += posix-terminal-tools-host-test
+
+posix-terminal-stack-host-test: tests/test-posix-terminal-stack-host.sh \
+	tests/fixtures/phase85-terminal.ti tests/posix-phase85-curses.c \
+	userland/base/tic/main.c userland/base/infocmp/main.c \
+	userland/base/curses/curses.c userland/base/curses/curses.h \
+	userland/base/common/terminfo.c userland/base/common/terminfo.h
+	bash tests/test-posix-terminal-stack-host.sh
+
+posix-development-host-test: tests/test-posix-development-host.sh \
+	tests/fixtures/phase6-cflow.c userland/base/ar/main.c \
+	userland/base/nm/main.c userland/base/cflow/main.c \
+	userland/base/cxref/main.c userland/base/common/archive.c \
+	userland/base/common/elf_symbols.c userland/base/common/c_parser.c
+	bash tests/test-posix-development-host.sh
+
+CHECK_RUN_TARGETS += posix-development-host-test
+
+posix-compress-host-test: tests/test-posix-compress-host.sh \
+	tests/fixtures/phase7-ABC.Z.hex userland/base/compress/main.c \
+	userland/base/common/lzw.c userland/base/common/lzw.h
+	bash tests/test-posix-compress-host.sh
+
+CHECK_RUN_TARGETS += posix-compress-host-test
+
+posix-sccs-host-test: tests/test-posix-sccs-host.sh \
+	userland/base/sccs/main.c userland/base/common/sccs.c \
+	userland/base/common/sccs.h
+	bash tests/test-posix-sccs-host.sh
+
+CHECK_RUN_TARGETS += posix-sccs-host-test
+
+posix-find-host-test: tests/test-posix-find-host.sh \
+	userland/base/find/main.c libc/fnmatch.c libc/include/fnmatch.h
+	bash tests/test-posix-find-host.sh
+
+CHECK_RUN_TARGETS += posix-find-host-test
+
+posix-ed-host-test: tests/test-posix-ed-host.sh \
+	userland/base/ed/buf.c userland/base/ed/ed.h \
+	userland/base/ed/glbl.c userland/base/ed/io.c \
+	userland/base/ed/main.c userland/base/ed/re.c \
+	userland/base/ed/sub.c userland/base/ed/undo.c
+	bash tests/test-posix-ed-host.sh
+
+CHECK_RUN_TARGETS += posix-ed-host-test
+
+posix-m4-host-test: tests/test-posix-m4-host.sh \
+	tests/m4-host-compat.c tests/m4-host-compat.h \
+	userland/base/m4/eval.c userland/base/m4/expr.c \
+	userland/base/m4/gnum4.c userland/base/m4/look.c \
+	userland/base/m4/main.c userland/base/m4/misc.c \
+	userland/base/m4/ohash.c userland/base/m4/ohash.h \
+	userland/base/m4/parser.c userland/base/m4/parser.h \
+	userland/base/m4/tokenizer.c userland/base/m4/trace.c
+	bash tests/test-posix-m4-host.sh
+
+CHECK_RUN_TARGETS += posix-m4-host-test
+
+posix-bc-host-test: tests/test-posix-bc-host.sh \
+	userland/base/bc/Makefile userland/base/bc/config.h
+	bash tests/test-posix-bc-host.sh
+
+CHECK_RUN_TARGETS += posix-bc-host-test
+
+posix-pax-host-test: tests/test-posix-pax-host.sh \
+	userland/base/pax/main.c
+	bash tests/test-posix-pax-host.sh
+
+CHECK_RUN_TARGETS += posix-pax-host-test
+
+$(BUILD)/tests/regex-host-test: tests/regex-host-test.c \
+	$(ZEDBSD_REGEX_SOURCES) libc/regex/tre.h libc/include/regex.h \
+	libc/include/wctype.h
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror \
+		-DZEDBSD_REGEX_HOST_TEST -Ilibc/include \
+		-Iinclude/uapi \
+		$(ZEDBSD_REGEX_SOURCES) $< -o $@
+
+regex-host-test: $(BUILD)/tests/regex-host-test
+	$(BUILD)/tests/regex-host-test
+	@echo "zedBSD POSIX BRE host tests: PASS"
+
+CHECK_RUN_TARGETS += regex-host-test
 
 menuconfig-host-test: tests/menuconfig-host-test.py tools/menuconfig.py
 	$(PYTHON) tests/menuconfig-host-test.py
@@ -1012,10 +1209,11 @@ $(BUILD)/tests/msgfmt-host: userland/base/msgfmt/main.c
 	$(HOSTCC) -std=c11 -D_DEFAULT_SOURCE -O2 -Wall -Wextra -Werror $< -o $@
 
 $(BUILD)/tests/gettext-catalog-host-test: \
-	tests/gettext-catalog-host-test.c libc/locale.c
+	tests/gettext-catalog-host-test.c libc/locale.c libc/locale-db.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -O2 -Wall -Wextra -Werror -DZEDBSD_USER_ABI_LP64 \
-		-I. -Iinclude -Iinclude/uapi -Ilibc/include libc/locale.c $< -o $@
+		-I. -Iinclude -Iinclude/uapi -Ilibc/include \
+		libc/locale.c libc/locale-db.c $< -o $@
 
 gettext-catalog-host-test: $(BUILD)/tests/msgfmt-host \
 	$(BUILD)/tests/gettext-catalog-host-test tests/fixtures/messages.po
@@ -1071,6 +1269,8 @@ ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \
 	--file /etc/shadow=userland/base/etc/shadow \
 	--mode /etc/passwd=0644 --mode /etc/group=0644 \
 	--mode /etc/shadow=0400
+ZEDBSD_BASE_DATA_INPUTS := $(ZEDBSD_USERLAND_DATA_INPUTS)
+ZEDBSD_BASE_DATA_FILES := $(ZEDBSD_USERLAND_DATA_FILES)
 ZEDBSD_XZED_SESSION_INPUTS := userland/X11/session/startx \
 	userland/X11/session/Xzedrc userland/X11/session/zwm.conf
 ZEDBSD_XZED_SESSION_FILES := $(if $(filter zwm,$(ZEDBSD_USER_PROGRAMS)),\
@@ -1147,6 +1347,9 @@ endif
 .PHONY: vmunix rootfs world
 world: vmunix rootfs
 
+deferred-stub-rootfs-test: rootfs tests/deferred-stub-rootfs-test.py
+	$(PYTHON) tests/deferred-stub-rootfs-test.py $(BUILD)/rootfs
+
 check: $(HOST_TEST_BINARIES) $(CHECK_RUN_TARGETS)
 	@set -e; for test in $(HOST_TEST_BINARIES); do \
 		echo "$$test"; $$test; done
@@ -1162,10 +1365,25 @@ distclean:
 	$(BUILD)/*/*/*/*/*/*.d $(BUILD)/*/*/*/*/*/*/*.d)
 
 .PHONY: check clean distclean \
-	overlay-journal-format-host-test uapi-abi-layout-check \
-	hal-signal-frame-layout-check \
-	posix-header-check posix-api-matrix-check susv4-header-check \
+	overlay-journal-format-host-test uapi-abi-layout-check uapi-abi-lp64-check \
+	hal-signal-frame-layout-check hal-signal-frame-lp64-check \
+	posix-header-check posix-header-lp64-check posix-api-matrix-check \
+	susv4-header-check susv4-header-lp64-check \
+	posix2024-header-lp64-check \
 	susv4-libc-host-test crypt-host-test gettext-catalog-host-test \
-	userland-command-host-test menuconfig-host-test \
+	userland-command-host-test deferred-stub-host-test posix-phase2a-host-test \
+	posix-phase2b-host-test posix-phase2c-priority-host-test \
+	posix-write-host-test \
+	posix-shell-builtins-host-test \
+	posix-getconf-host-test \
+	posix-gencat-host-test \
+	posix-localedef-host-test \
+	posix-locale-host-test \
+	posix-terminal-tools-host-test \
+	posix-find-host-test posix-ed-host-test posix-m4-host-test \
+	posix-bc-host-test \
+	posix-pax-host-test \
+	regex-host-test \
+	deferred-stub-rootfs-test menuconfig-host-test \
 	ufs1-format-host-test \
 	ufs2-format-host-test ufs1-format-python-test ufs2-format-python-test

@@ -237,8 +237,11 @@ I386_ARCH_INPUTS += $(addprefix $(BUILD)/bin/,$(USERLAND_SELECTED_NETWORK_PROGRA
 I386_ARCH_FILES += $(foreach command,$(USERLAND_SELECTED_NETWORK_PROGRAMS),--file /bin/$(command)=$(BUILD)/bin/$(command))
 I386_ARCH_INPUTS += $(USER_BASIC_TARGETS)
 I386_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
+I386_ARCH_FILES += $(ZEDBSD_USERLAND_FILE_MODES)
 I386_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 I386_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
+I386_ARCH_INPUTS += $(ZEDBSD_BASE_DATA_INPUTS)
+I386_ARCH_FILES += $(ZEDBSD_BASE_DATA_FILES)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 $(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
@@ -359,11 +362,7 @@ $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 	cp $< $@
 	$(PYTHON) $(USER_ELF_CHECK) $@
 
-USER_SH_OBJS := $(BUILD)/userland/base/sh/main.o \
-	$(BUILD)/userland/base/sh/builtins.o $(BUILD)/userland/base/sh/lexer.o \
-	$(BUILD)/userland/base/sh/expand.o $(BUILD)/userland/base/sh/glob.o \
-	$(BUILD)/userland/base/sh/vars.o $(BUILD)/userland/base/sh/arithmetic.o \
-	$(BUILD)/userland/base/sh/alias.o
+USER_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),sh)
 USER_READLINE_OBJ := $(BUILD)/userland/base/libedit/readline.o
 USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
 $(USER_SH_OBJS) $(USER_READLINE_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS) \
@@ -371,6 +370,11 @@ $(USER_SH_OBJS) $(USER_READLINE_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS) \
 $(USER_SH_OBJS) $(USER_READLINE_OBJ): OBJ_CFLAGS = $(USER_CFLAGS)
 
 $(USER_READLINE_LIB): $(USER_READLINE_OBJ)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+USER_CURSES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),curses)
+$(BUILD)/lib/libcurses.a: $(USER_CURSES_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 

@@ -10,7 +10,7 @@ void *memset(void *destination, int value, size_t count);
 void *memchr(const void *memory, int character, size_t count);
 int memcmp(const void *left, const void *right, size_t count);
 void *memccpy(void *destination, const void *source, int character,
-    size_t count);
+	      size_t count);
 size_t strlen(const char *string);
 size_t strnlen(const char *string, size_t maximum);
 int strcmp(const char *left, const char *right);
@@ -27,6 +27,7 @@ char *strpbrk(const char *, const char *);
 size_t strspn(const char *, const char *);
 char *strtok(char *, const char *);
 char *strdup(const char *string);
+char *strndup(const char *string, size_t maximum);
 char *strerror(int error);
 int strcoll(const char *, const char *);
 size_t strxfrm(char *, const char *, size_t);

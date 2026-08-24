@@ -78,7 +78,8 @@ print_vmstat(void)
 	print_stat("swap.extents", swap_fat_extent_count());
 }
 
-void prompt(void)
+void
+prompt(void)
 {
 	char cwd[ZEDBSD_PATH_MAX];
 	if (fs_getcwd(&kern_cwdinfo, cwd, sizeof(cwd)) != 0)
@@ -87,17 +88,21 @@ void prompt(void)
 	puts(" $ ");
 	update_cursor();
 }
-static uint32_t raw_key(void)
+static uint32_t
+raw_key(void)
 {
-	/* A blocking read must never leave the hardware cursor stale or hidden. */
+	/* A blocking read must never leave the hardware cursor stale or hidden.
+	 */
 	update_cursor();
 	return (uint32_t)console_input_read_event() & HAL_KEY_EVENT_KEY_MASK;
 }
-int key(void)
+int
+key(void)
 {
 	return (int)raw_key();
 }
-int poll(void)
+int
+poll(void)
 {
 	{
 		int event = console_input_poll_event();
@@ -105,7 +110,8 @@ int poll(void)
 	}
 }
 
-int line(char *b)
+int
+line(char *b)
 {
 	unsigned n = 0;
 	for (;;) {
@@ -126,14 +132,15 @@ int line(char *b)
 			update_cursor();
 			continue;
 		}
-		if (k >= 32 && k < 127 && n < LINE_MAX - 1) {
+		if (k >= 32 && k < 127 && n < KERNEL_LINE_MAX - 1) {
 			b[n++] = k;
 			putc(k);
 			update_cursor();
 		}
 	}
 }
-static int split(char *s, char **v, int max)
+static int
+split(char *s, char **v, int max)
 {
 	int n = 0;
 	while (*s) {
@@ -156,7 +163,8 @@ static int split(char *s, char **v, int max)
 	}
 	return n;
 }
-static int number(const char *s)
+static int
+number(const char *s)
 {
 	int n = 0;
 	if (!*s)
@@ -166,7 +174,8 @@ static int number(const char *s)
 	return *s ? -1 : n;
 }
 
-static void listdev(uint8_t cls)
+static void
+listdev(uint8_t cls)
 {
 	for (unsigned i = 0; i < device_count; i++) {
 		if (cls && devs[i].device_class != cls)
@@ -185,13 +194,14 @@ static void listdev(uint8_t cls)
 		putc('\n');
 	}
 }
-static int selectdisk(const char *c, const char *n)
+static int
+selectdisk(const char *c, const char *n)
 {
 	int ix = number(n);
-	uint8_t cls = streq(c, "fd")     ? 1
-	              : streq(c, "ide")  ? 2
-	              : streq(c, "scsi") ? 3
-	                                 : 0;
+	uint8_t cls = streq(c, "fd")	 ? 1
+		      : streq(c, "ide")	 ? 2
+		      : streq(c, "scsi") ? 3
+					 : 0;
 	if (!cls || ix < 0)
 		return 0;
 	for (unsigned i = 0; i < device_count; i++)
@@ -204,14 +214,15 @@ static int selectdisk(const char *c, const char *n)
 		}
 	return 0;
 }
-static int selectpart(const char *s)
+static int
+selectpart(const char *s)
 {
 	if (curdev < 0)
 		return 0;
 	int n = number(s);
 	for (int i = 0; i < MAX_PARTS; i++)
 		if (parts[i].valid && ((n >= 0 && i == n) ||
-		                       (n < 0 && streq(parts[i].name, s)))) {
+				       (n < 0 && streq(parts[i].name, s)))) {
 			if (!mountpart(curdev, i))
 				return 0;
 			curpart = i;
@@ -222,11 +233,12 @@ static int selectpart(const char *s)
 }
 
 /* Filesystem-facing shell commands and extension-module loaders. */
-static int vfs_ls(const char *path)
+static int
+vfs_ls(const char *path)
 {
 	struct file *directory;
-	int error = file_openat(&kern_cwdinfo, path,
-				O_RDONLY | O_DIRECTORY, 0, &directory);
+	int error = file_openat(&kern_cwdinfo, path, O_RDONLY | O_DIRECTORY, 0,
+				&directory);
 	if (error != 0)
 		return 0;
 	for (;;) {
@@ -241,7 +253,8 @@ static int vfs_ls(const char *path)
 	(void)file_close(directory);
 	return error == 0;
 }
-static int catfile(const char *n)
+static int
+catfile(const char *n)
 {
 	struct file *file;
 	ssize_t count;
@@ -253,9 +266,9 @@ static int catfile(const char *n)
 	(void)file_close(file);
 	return count == 0;
 }
-static int open_noct_application(const char *prefix, const char *name,
-				 const char *extension,
-				 char path[ZEDBSD_PATH_MAX])
+static int
+open_noct_application(const char *prefix, const char *name,
+		      const char *extension, char path[ZEDBSD_PATH_MAX])
 {
 	struct bootfs_file file;
 	unsigned source = 0;
@@ -274,8 +287,8 @@ static int open_noct_application(const char *prefix, const char *name,
 		if (ch == '.' || ch == '/' || ch == '\\' ||
 		    position + 1U >= ZEDBSD_PATH_MAX)
 			return 0;
-		path[position++] = ch >= 'a' && ch <= 'z' ?
-			(char)(ch - 'a' + 'A') : ch;
+		path[position++] =
+		    ch >= 'a' && ch <= 'z' ? (char)(ch - 'a' + 'A') : ch;
 	}
 	if (!base_length)
 		return 0;
@@ -293,7 +306,8 @@ static int open_noct_application(const char *prefix, const char *name,
  * volumes.  Unqualified names then fall back to precompiled NAME.NAP
  * bytecode in APPS/ (then CMD/ and the root), so applications too large
  * for the small-memory source compiler still launch as shell commands. */
-int run_noct_user(const char *path, int argc, char *const argv[])
+int
+run_noct_user(const char *path, int argc, char *const argv[])
 {
 	char executable[ZEDBSD_PATH_MAX];
 	char home[ZEDBSD_PATH_MAX + 6U];
@@ -354,9 +368,9 @@ int run_noct_user(const char *path, int argc, char *const argv[])
 	return error == 0 && status == 0;
 }
 
-static int run_noct_application(const char *name, const char *extension,
-				int nap_fallback, int argc,
-				char *const argv[])
+static int
+run_noct_application(const char *name, const char *extension, int nap_fallback,
+		     int argc, char *const argv[])
 {
 	char path[ZEDBSD_PATH_MAX];
 
@@ -370,7 +384,8 @@ static int run_noct_application(const char *name, const char *extension,
 	return run_noct_user(path, argc, argv);
 }
 
-int command(char *s)
+int
+command(char *s)
 {
 	char *v[20];
 	int n = split(s, v, 20);
@@ -384,7 +399,8 @@ int command(char *s)
 	}
 #endif
 	if (streq(v[0], "help")) {
-		puts("help echo env set unset pause wait device probe-ide probe-scsi "
+		puts("help echo env set unset pause wait device probe-ide "
+		     "probe-scsi "
 		     "disk part pwd cd ls cat source "
 		     "run noct emacs vmstat reboot halt\n");
 		return 1;
@@ -398,8 +414,8 @@ int command(char *s)
 	if (streq(v[0], "env")) {
 		if (n != 1)
 			return 0;
-		for (size_t index = 0;
-		     index < env_count(&boot_environment); index++) {
+		for (size_t index = 0; index < env_count(&boot_environment);
+		     index++) {
 			const char *name;
 			const char *value;
 
@@ -413,8 +429,7 @@ int command(char *s)
 		return 1;
 	}
 	if (streq(v[0], "set"))
-		return n == 3 &&
-		       env_set(&boot_environment, v[1], v[2]);
+		return n == 3 && env_set(&boot_environment, v[1], v[2]);
 	if (streq(v[0], "unset")) {
 		if (n != 2 || !env_name_valid(v[1]))
 			return 0;
@@ -474,8 +489,12 @@ int command(char *s)
 		if (n == 1) {
 			for (int i = 0; i < MAX_PARTS; i++)
 				if (parts[i].valid) {
-					dec(i); putc(' '); puts(parts[i].name);
-					puts(" LBA "); dec(parts[i].start); putc('\n');
+					dec(i);
+					putc(' ');
+					puts(parts[i].name);
+					puts(" LBA ");
+					dec(parts[i].start);
+					putc('\n');
 				}
 			return 1;
 		}
@@ -483,14 +502,17 @@ int command(char *s)
 	}
 	if (streq(v[0], "pwd")) {
 		char cwd[ZEDBSD_PATH_MAX];
-		if (n != 1) return 0;
+		if (n != 1)
+			return 0;
 		if (fs_getcwd(&kern_cwdinfo, cwd, sizeof(cwd)) != 0)
 			return 0;
-		puts(cwd); putc('\n'); return 1;
+		puts(cwd);
+		putc('\n');
+		return 1;
 	}
 	if (streq(v[0], "cd")) {
-		const char *path = n == 1 ? env_get(&boot_environment, "HOME") :
-			(n == 2 ? v[1] : NULL);
+		const char *path = n == 1 ? env_get(&boot_environment, "HOME")
+					  : (n == 2 ? v[1] : NULL);
 		return path != NULL && fs_chdir(&kern_cwdinfo, path) == 0;
 	}
 	if (streq(v[0], "ls"))
@@ -501,8 +523,8 @@ int command(char *s)
 		struct file *file;
 		off_t size;
 
-		if (n != 2 || file_openat(&kern_cwdinfo, v[1], O_RDONLY, 0,
-						 &file) != 0)
+		if (n != 2 ||
+		    file_openat(&kern_cwdinfo, v[1], O_RDONLY, 0, &file) != 0)
 			return 0;
 		size = file->f_inode->i_size;
 		if (size < 0 || size >= CFG_MAX ||
@@ -545,13 +567,14 @@ int command(char *s)
 		return run_noct_application(v[1], "", 0, n - 2, &v[2]);
 	}
 	if (streq(v[0], "emacs")) {
-		const char *dictionary = env_get(&boot_environment,
-						      "REMACS_SKK_DICT");
+		const char *dictionary =
+		    env_get(&boot_environment, "REMACS_SKK_DICT");
 
-		/* The 8.3 path is present in linux-pc98 product image with EMACS.NAP. */
+		/* The 8.3 path is present in linux-pc98 product image with
+		 * EMACS.NAP. */
 		if (dictionary == NULL || dictionary[0] == '\0')
 			(void)env_set(&boot_environment, "REMACS_SKK_DICT",
-					     "HOME/SKKJISYO.DIC");
+				      "HOME/SKKJISYO.DIC");
 		return run_noct_application("EMACS", ".NAP", 0, n - 1, &v[1]);
 	}
 	/* Unknown unqualified names resolve to NAME.NCT on the selected BOOT

@@ -85,13 +85,7 @@ ARM64_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfc
 	libc/heap.c libc/string.c libc/ctype.c libc/locale.c libc/wide.c \
 	libc/int64.c libc/strto.c \
 	libc/format.c libc/stdio.c $(ZEDBSD_LIBC_USER_EXTRA_SOURCES)
-ARM64_USER_SH_SOURCES := userland/base/sh/main.c \
-	userland/base/sh/builtins.c userland/base/sh/lexer.c userland/base/sh/expand.c
-
-ARM64_USER_SH_SOURCES += userland/base/sh/glob.c userland/base/sh/vars.c \
-	userland/base/sh/arithmetic.c
-
-ARM64_USER_SH_SOURCES += userland/base/sh/alias.c
+ARM64_USER_SH_SOURCES := $(USERLAND_sh_SOURCES)
 ARM64_USER_RUNTIME_OBJS := \
 	$(patsubst %.c,$(BUILD)/user/%.o,$(ARM64_USER_RUNTIME_SOURCES))
 ARM64_USER_SH_OBJS := \
@@ -148,6 +142,12 @@ $(BUILD)/user/src/crt/crt0-aarch64.o: src/crt/crt0-aarch64.S \
 $(ARM64_USER_SH_OBJS) $(ARM64_USER_READLINE_OBJ): \
 	ARM64_USER_CPPFLAGS += -Iuserland/base/libedit
 $(ARM64_USER_READLINE_LIB): $(ARM64_USER_READLINE_OBJ)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+ARM64_USER_CURSES_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,\
+	$(BUILD)/user,curses)
+$(BUILD)/lib/libcurses.a: $(ARM64_USER_CURSES_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
@@ -402,8 +402,11 @@ AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
 AARCH64_ARCH_INPUTS += $(USER_BASIC_TARGETS)
 AARCH64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file /bin/$(command)=$(BUILD)/bin/$(command))
+AARCH64_ARCH_FILES += $(ZEDBSD_USERLAND_FILE_MODES)
 AARCH64_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 AARCH64_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
+AARCH64_ARCH_INPUTS += $(ZEDBSD_BASE_DATA_INPUTS)
+AARCH64_ARCH_FILES += $(ZEDBSD_BASE_DATA_FILES)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(AARCH64_ARCH_IMAGE),aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
 $(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
 AARCH64_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/aarch64.ufs

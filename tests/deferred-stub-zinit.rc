@@ -1,0 +1,10 @@
+echo zedBSD-POSIX-DEFERRED-QEMU-START
+at
+batch
+crontab
+logger
+mailx
+talk
+lp
+echo zedBSD-POSIX-DEFERRED-QEMU-PASS
+halt

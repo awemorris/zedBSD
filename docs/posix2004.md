@@ -7,6 +7,11 @@ volume of POSIX.1-2024 (Issue 8) in zedBSD. The requested filename is kept as
 `docs/posix2004.md`; the target standard is **POSIX.1-2024**, not a 2004
 edition.
 
+Current cross-component status and all iterative hand-off work are maintained
+in [`docs/posix-compliance-master.md`](posix-compliance-master.md).  This file
+retains the historical phase order and acceptance policy; implementation work
+must update the master whenever a tracked fact or Phase 10 gate changes.
+
 The baseline used to prepare this plan is commit `cb860a1`. The authoritative
 inventory is `tests/posix-2024-utilities.csv`; this document must not become a
 second, manually maintained inventory.
@@ -136,8 +141,10 @@ utility, it is part of the milestone even if it is not listed above.
 
 ### Phase 0: protect the inventory and gates
 
-1. Run `git status --short`, `make posix2024-utility-matrix-check`, and
-   `make check`; preserve the output as the before-state.
+1. Run `git status --short` and `make posix2024-utility-matrix-check`; preserve
+   the output as the before-state. Do not use the aggregate `make check`
+   target for this implementation. Run the milestone-specific host and QEMU
+   targets directly instead.
 2. Apply the repository `.clang-format` to every tracked C source and header
    under `userland/` before implementation work begins:
 
@@ -383,11 +390,51 @@ The ten commands are one conformance feature. Do not mark early front ends
 `reviewed` while they rely on an incomplete or non-transactional history
 library.
 
+### Phase 8.5: terminal packages and standalone base builds
+
+Complete the terminal stack before the general utility review.
+
+1. Expand `userland/base/terminfo` into a data-only package with a Makefile
+   and useful definitions for the major terminal families supported by
+   zedBSD.  It must not install a program.
+2. Add a separate `terminfo-extra` data package for less common terminals so
+   the base image does not need to carry the entire historical terminal
+   database.
+3. Add separately selectable `curses`, `tic`, and `infocmp` packages.  Keep
+   the terminfo compiler/dumper and the runtime reader on one checked format;
+   do not maintain independent capability tables.
+4. Make `tabs`, `tput`, curses, and other consumers declare their terminfo
+   package dependencies and use the installed database consistently.
+5. Replace the assumption that every `userland/base` program consists of one
+   `main.c`.  Every base package Makefile must support a direct standalone
+   build and staged installation using `PREFIX`, while retaining registration
+   with the top-level zedBSD package discovery.  Source lists, private helper
+   objects, generated inputs, libraries, data files, and program-less packages
+   must all be expressible without top-level special cases.
+6. Install executables below `$(PREFIX)/bin`.  Install terminal data below
+   `$(PREFIX)/share/terminfo` for an ordinary prefix, but use
+   `/lib/terminfo` when `PREFIX=/`, since `/share` is not a normal root-level
+   hierarchy.  `DESTDIR` must remain usable for staging and no install rule
+   may write outside it accidentally.
+
+Add standalone-build tests over every base package, staged-install manifest
+tests for both a normal prefix and `PREFIX=/`, and QEMU tests that compile a
+terminfo source with `tic`, inspect it with `infocmp`, and consume it through
+`tput` and curses.
+
 ### Phase 9: review all existing utilities
 
-The 80 `implemented-unreviewed` rows remain part of the release work. Review
-them in matrix order after the missing implementations stabilize. For each
-utility:
+The first Phase 9 audit pass is recorded in
+[`docs/phase9-posix-2024-audit.md`](phase9-posix-2024-audit.md).  It found no
+`implemented-unreviewed` row with sufficient implementation and test evidence
+for promotion.  Confirmed incompatibilities and missing proof are kept in that
+report as hand-off work.  In particular, `awk` requires a substantial local
+implementation, and external implementations must not be imported into
+`userland/base` to close Phase 9 findings.
+
+All `implemented-unreviewed` rows remain part of the release work.  The first
+audit pass covered the current 111 rows; review their hand-off items in matrix
+order.  For each utility:
 
 1. read its Issue 8 page and change history;
 2. enumerate option, operand, stdin/stdout/stderr, locale, environment, exit
@@ -402,6 +449,21 @@ utility:
 Shell built-ins must be tested both as isolated parser/executor units and in a
 running zshell, because changes to the current environment, descriptors,
 traps, or process state cannot be proven by a host helper alone.
+
+### Phase 10: replace imported bc, ed, and m4 implementations
+
+Remove the imported implementations currently used for `bc`, `ed`, and `m4`
+and replace each with zedBSD-local source.  Removal has priority over preserving
+the current feature level: an honest, safe, partial local implementation may
+remain `implemented-unreviewed` while its POSIX gaps are completed.  Unsupported
+behavior must fail clearly and must remain recorded in the Phase 9 report.
+
+The detailed architecture, removal inventory, staged feature order, provenance
+gate, host tests, amd64 QEMU test, matrix transitions, and completion criteria
+are in
+[`docs/phase10-local-reimplementation.md`](phase10-local-reimplementation.md).
+Do not import replacement source, generated parsers, implementation-specific
+tables, compatibility layers, or copied upstream tests into `userland/base`.
 
 ## 6. Source and build layout
 
@@ -436,8 +498,9 @@ the wrong ABI or feature flags.
 4. **Rootfs tests:** every selected command is installed once at the intended
    path, provider replacement is unambiguous, and no host executable leaks
    into the image.
-5. **Multi-ABI checks:** ILP32 and LP64 headers/UAPI layouts plus builds for
-   every platform supported by each registered package.
+5. **Multi-ABI checks:** keep ILP32 and LP64 header/UAPI layout targets
+   available as explicit standalone checks. The aggregate `make check` target
+   exercises LP64 only; this implementation does not invoke the ILP32 checks.
 
 Every test must have a bounded timeout. A hang, skipped execution, or command
 name that merely exists is not a pass.
@@ -456,7 +519,7 @@ Run, at minimum:
 git diff --check
 make posix2024-utility-matrix-check
 make userland-command-host-test
-make check
+make <milestone-specific-host-test-targets>
 make world
 ```
 
@@ -514,11 +577,13 @@ This plan is complete when:
   `deferred-stub`, not falsely implemented;
 - `talk` remains disabled and its installed failure command is documented;
 - all matrix, host, runtime, rootfs, ABI, platform build, and disk-image checks
-  applicable to the selected profiles pass; and
+  applicable to the selected profiles pass;
+- the Phase 10 local replacement milestone has removed the imported `bc`, `ed`,
+  and `m4` implementations without promoting incomplete replacements; and
 - `_POSIX2_VERSION` and `_XOPEN_VERSION` have **not** been raised past a gate
   blocked by the deferred facilities.
 
-## 10. Follow-up: init and service implementation
+## 11. Follow-up: init and service implementation
 
 The next project after this plan is an init and service-management system.
 This is a formal hand-off item, not optional cleanup.
