@@ -41,69 +41,69 @@ vm_reclaim_init(void);
 
 void
 vm_private_page_init(
-	struct vm_private_page *);
+	struct vm_private_page *backing);
 
 void
 vm_private_page_ref(
-	struct vm_private_page *);
+	struct vm_private_page *backing);
 
 void
 vm_private_page_put(
-	struct vm_private_page *);
+	struct vm_private_page *backing);
 
 /*
  * The blocking acquire requires a caller-owned lifetime reference.
  */
 int
 vm_private_page_io_acquire(
-	struct vm_private_page *);
+	struct vm_private_page *backing);
 
 /*
  * On success the nonblocking form also returns an I/O lifetime reference.
  */
 int
 vm_private_page_io_try_acquire(
-	struct vm_private_page *);
+	struct vm_private_page *backing);
 
 void
 vm_private_page_io_release(
-	struct vm_private_page *);
+	struct vm_private_page *backing);
 
 int
 vm_private_page_wait_idle(
-	struct vm_private_page *);
+	struct vm_private_page *backing);
 
 /*
  * A successful short operation includes a backing lifetime reference.
  */
 int
 vm_private_page_operation_try_begin(
-	struct vm_private_page *);
+	struct vm_private_page *backing);
 
 void
 vm_private_page_operation_end(
-	struct vm_private_page *);
+	struct vm_private_page *backing);
 
 void
 vm_private_page_mark_dirty(
-	struct vm_private_page *);
+	struct vm_private_page *backing);
 
 int
 vm_private_page_pin(
-	struct vm_private_page *,
-	struct hal_pmem *);
+	struct vm_private_page *backing,
+	struct hal_pmem *memory);
 
 void
 vm_private_page_unpin(
-	struct vm_private_page *);
+	struct vm_private_page *backing);
 
 void
 vm_page_track(
-	struct vm_page *);
+	struct vm_page *page);
 
 void
 vm_page_untrack(
-	struct vm_page *);
+	struct vm_page *page);
 
 int
 vm_reclaim_one(
@@ -111,13 +111,13 @@ vm_reclaim_one(
 
 void
 vm_page_note_in(
-	struct vm_page *);
+	struct vm_page *page);
 
 void
 vm_reclaim_note_fault(void);
 
 void
 vm_reclaim_get_stats(
-	struct vm_reclaim_stats *);
+	struct vm_reclaim_stats *output);
 
 #endif

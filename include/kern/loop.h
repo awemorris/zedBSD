@@ -28,24 +28,24 @@ loop_init(void);
 
 int
 loop_attach_file(
-	struct file *,
-	unsigned,
-	struct disk **);
+	struct file *backing,
+	unsigned flags,
+	struct disk **disk_out);
 
 int
 loop_attach_path(
-	const struct path *,
-	const char *,
-	unsigned,
-	struct disk **);
+	const struct path *root,
+	const char *path,
+	unsigned flags,
+	struct disk **disk_out);
 
 int
 loop_detach(
-	struct disk *);
+	struct disk *disk);
 
 int
 loop_get_index(
-	const struct disk *,
-	unsigned *);
+	const struct disk *disk,
+	unsigned *index_out);
 
 #endif

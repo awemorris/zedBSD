@@ -203,14 +203,14 @@ socket_create(
 	struct socket **result);
 int
 socket_setsockopt_common(
-	struct socket *,
+	struct socket *socket,
 	int level,
 	int option,
 	const void *value,
 	socklen_t length);
 int
 socket_getsockopt_common(
-	struct socket *,
+	struct socket *socket,
 	int level,
 	int option,
 	void *value,
@@ -240,10 +240,10 @@ socket_enqueue_packet(
 	struct packet_buf *packet);
 int
 socket_enqueue_packet_wait(
-	struct socket *,
-	struct packet_buf *,
-	int,
-	uint64_t);
+	struct socket *socket,
+	struct packet_buf *packet,
+	int flags,
+	uint64_t timeout_ticks);
 int
 socket_requeue_packet_front(
 	struct socket *socket,
@@ -269,40 +269,40 @@ socket_from_file(
 	struct file *file);
 int
 socket_file_ref_get(
-	struct filedesc *,
-	int,
-	struct socket_file_ref *);
+	struct filedesc *fd,
+	int descriptor,
+	struct socket_file_ref *reference);
 void
 socket_file_ref_put(
-	struct socket_file_ref *);
+	struct socket_file_ref *reference);
 unsigned
 socket_file_effective_flags(
-	const struct socket_file_ref *,
-	int);
+	const struct socket_file_ref *reference,
+	int message_flags);
 int
 socket_take_error(
-	struct socket *);
+	struct socket *socket);
 void
 socket_set_error(
-	struct socket *,
-	int);
+	struct socket *socket,
+	int error);
 void
 socket_wake_receive(
-	struct socket *);
+	struct socket *socket);
 void
 socket_wake_send(
-	struct socket *);
+	struct socket *socket);
 void
 socket_wake_connect(
-	struct socket *);
+	struct socket *socket);
 void
 socket_wake_accept(
-	struct socket *);
+	struct socket *socket);
 int
 socket_poll_common(
-	struct socket *,
-	short,
-	short *);
+	struct socket *socket,
+	short events,
+	short *revents);
 unsigned
 socket_count_current(void);
 
@@ -312,75 +312,75 @@ int
 unix_socket_init(void);
 int
 unix_socket_pair_create(
-	int,
-	int,
-	struct socket **,
-	struct socket **);
+	int type,
+	int protocol,
+	struct socket **left_result,
+	struct socket **right_result);
 ssize_t
 unix_socket_send_message(
-	struct socket *,
-	const void *,
-	size_t,
-	int,
-	const struct sockaddr *,
-	socklen_t,
-	struct file **,
-	unsigned);
+	struct socket *socket,
+	const void *buffer,
+	size_t length,
+	int flags,
+	const struct sockaddr *address,
+	socklen_t address_length,
+	struct file **files,
+	unsigned count);
 ssize_t
 unix_socket_send_message_at(
-	struct socket *,
-	struct cwdinfo *,
-	const struct ucred *,
-	const void *,
-	size_t,
-	int,
-	const struct sockaddr *,
-	socklen_t,
-	struct file **,
-	unsigned);
+	struct socket *socket,
+	struct cwdinfo *context,
+	const struct ucred *cred,
+	const void *buffer,
+	size_t length,
+	int flags,
+	const struct sockaddr *address,
+	socklen_t address_length,
+	struct file **files,
+	unsigned count);
 ssize_t
 unix_socket_receive_message(
-	struct socket *,
-	void *,
-	size_t,
-	int,
-	struct sockaddr *,
-	socklen_t *,
-	struct file **,
-	unsigned *,
-	unsigned *);
+	struct socket *socket,
+	void *buffer,
+	size_t length,
+	int flags,
+	struct sockaddr *address,
+	socklen_t *address_length,
+	struct file **files,
+	unsigned *file_count,
+	unsigned *control_truncated);
 ssize_t
 unix_socket_receive_begin(
-	struct socket *,
-	void *,
-	size_t,
-	int,
-	struct sockaddr *,
-	socklen_t *,
-	unsigned,
-	struct unix_recv_transaction *);
+	struct socket *socket,
+	void *buffer,
+	size_t length,
+	int flags,
+	struct sockaddr *address,
+	socklen_t *address_length,
+	unsigned file_capacity,
+	struct unix_recv_transaction *transaction);
 void
 unix_socket_receive_commit(
-	struct unix_recv_transaction *);
+	struct unix_recv_transaction *transaction);
 void
 unix_socket_receive_abort(
-	struct unix_recv_transaction *);
+	struct unix_recv_transaction *transaction);
 int
 unix_socket_bind_path(
-	struct socket *,
-	struct cwdinfo *,
-	const struct ucred *,
-	mode_t,
-	const struct sockaddr *,
-	socklen_t);
+	struct socket *socket,
+	struct cwdinfo *context,
+	const struct ucred *cred,
+	mode_t umask,
+	const struct sockaddr *address,
+	socklen_t length);
 int
 unix_socket_connect_path(
-	struct socket *,
-	struct cwdinfo *,
-	const struct ucred *,
-	const struct sockaddr *,
-	socklen_t,
-	unsigned);
+	struct socket *socket,
+	struct cwdinfo *context,
+	const struct ucred *cred,
+	const struct sockaddr *address,
+	socklen_t length,
+	unsigned io_flags);
 void
 packet_socket_deliver(
 	const struct packet_buf *packet,

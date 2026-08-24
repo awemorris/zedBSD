@@ -161,24 +161,24 @@ bootfs_create_result(
 
 enum bootfs_result
 bootfs_mkdir_result(
-	struct bootfs *,
-	const char *);
+	struct bootfs *filesystem,
+	const char *path);
 
 enum bootfs_result
 bootfs_unlink_result(
-	struct bootfs *,
-	const char *);
+	struct bootfs *filesystem,
+	const char *path);
 
 enum bootfs_result
 bootfs_rmdir_result(
-	struct bootfs *,
-	const char *);
+	struct bootfs *filesystem,
+	const char *path);
 
 enum bootfs_result
 bootfs_rename_result(
-	struct bootfs *,
-	const char *,
-	const char *);
+	struct bootfs *filesystem,
+	const char *old_path,
+	const char *new_path);
 
 int
 bootfs_file_read(

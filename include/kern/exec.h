@@ -93,106 +93,106 @@ struct exec_auxv_info {
  */
 int
 exec_shebang_parse(
-	const void *,
-	size_t,
-	int,
-	struct exec_shebang *);
+	const void *contents,
+	size_t size,
+	int at_eof,
+	struct exec_shebang *result);
 
 int
 exec_script_argv_build(
-	char *const[],
-	const struct exec_shebang *,
-	const char *,
-	char ***);
+	char *const old_argv[],
+	const struct exec_shebang *shebang,
+	const char *script_path,
+	char ***result);
 
 void
 exec_script_argv_free(
-	char **);
+	char **argv);
 
 void
 exec_credential_prepare(
-	struct ucred *,
-	const struct stat *,
-	unsigned,
-	int,
-	unsigned *);
+	struct ucred *credential,
+	const struct stat *status,
+	unsigned mount_flags,
+	int script,
+	unsigned *secure);
 
 int
 elf32_load(
-	struct file *,
-	struct vmspace *,
-	struct elf32_image_info *);
+	struct file *file,
+	struct vmspace *vm,
+	struct elf32_image_info *image);
 
 int
 elf64_load(
-	struct file *,
-	struct vmspace *,
-	struct elf64_image_info *);
+	struct file *file,
+	struct vmspace *vm,
+	struct elf64_image_info *image);
 
 int
 elf32_load_content(
-	struct file_content_lease *,
-	struct vmspace *,
-	struct elf32_image_info *);
+	struct file_content_lease *lease,
+	struct vmspace *vm,
+	struct elf32_image_info *image);
 
 int
 elf64_load_content(
-	struct file_content_lease *,
-	struct vmspace *,
-	struct elf64_image_info *);
+	struct file_content_lease *lease,
+	struct vmspace *vm,
+	struct elf64_image_info *image);
 
 int
 elf32_load_interpreter(
-	struct file *,
-	struct vmspace *,
-	struct elf32_image_info *);
+	struct file *file,
+	struct vmspace *vm,
+	struct elf32_image_info *image);
 int
 elf64_load_interpreter(
-	struct file *,
-	struct vmspace *,
-	struct elf64_image_info *);
+	struct file *file,
+	struct vmspace *vm,
+	struct elf64_image_info *image);
 
 int
 exec_build_initial_stack(
-	struct vmspace *,
-	size_t,
-	char *const[],
-	char *const[],
-	const struct exec_auxv_info *,
+	struct vmspace *vm,
+	size_t stack_size,
+	char *const argv[],
+	char *const envp[],
+	const struct exec_auxv_info *aux,
 	uintptr_t *sp);
 
 int
 process_spawn(
-	const char *,
-	char *const[],
-	char *const[],
-	struct process **);
+	const char *path,
+	char *const argv[],
+	char *const envp[],
+	struct process **result);
 
 int
 process_spawn_from(
-	struct process *,
-	const char *,
-	char *const[],
-	char *const[],
-	struct process **);
+	struct process *parent,
+	const char *path,
+	char *const argv[],
+	char *const envp[],
+	struct process **result);
 
 int
 process_spawn_init(
-	const char *,
-	struct process **);
+	const char *path,
+	struct process **result);
 
 int
 process_execve(
-	struct process *,
-	const char *,
-	char *const[],
-	char *const[]);
+	struct process *process,
+	const char *path,
+	char *const argv[],
+	char *const envp[]);
 
 int
 process_fexecve(
-	struct process *,
-	struct file *,
-	char *const[],
-	char *const[]);
+	struct process *process,
+	struct file *file,
+	char *const argv[],
+	char *const envp[]);
 
 #endif

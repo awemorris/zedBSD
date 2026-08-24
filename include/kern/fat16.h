@@ -21,33 +21,33 @@ typedef int (*bootfat_extent_fn)(uint64_t, uint64_t, uint32_t, void *);
 
 int
 bootfat_file_extents(
-	struct bootfs_file *,
-	bootfat_extent_fn,
-	void *);
+	struct bootfs_file *file,
+	bootfat_extent_fn callback,
+	void *context);
 
 enum bootfs_result
 bootfat_stat_location(
-	struct bootfs *,
-	const char *,
-	struct bootfs_dirent *,
-	uint32_t *,
-	uint16_t *,
-	uint32_t *,
-	uint8_t *);
+	struct bootfs *filesystem,
+	const char *path,
+	struct bootfs_dirent *entry,
+	uint32_t *lba,
+	uint16_t *offset,
+	uint32_t *first_cluster,
+	uint8_t *attributes);
 
 enum bootfs_result
 bootfat_stat_location_casefold(
-	struct bootfs *,
-	const char *,
-	struct bootfs_dirent *,
-	uint32_t *,
-	uint16_t *,
-	uint32_t *,
-	uint8_t *);
+	struct bootfs *filesystem,
+	const char *path,
+	struct bootfs_dirent *entry,
+	uint32_t *lba,
+	uint16_t *offset,
+	uint32_t *first_cluster,
+	uint8_t *attributes);
 
 enum bootfs_result
 bootfat_discard_chain_result(
-	struct bootfs *,
-	uint32_t);
+	struct bootfs *filesystem,
+	uint32_t first_cluster);
 
 #endif

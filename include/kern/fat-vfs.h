@@ -41,14 +41,14 @@ typedef int (
 
 int
 fat_file_extents(
-	struct file *,
-	fat_extent_cb,
-	void *);
+	struct file *file,
+	fat_extent_cb callback,
+	void *context);
 
 int
 fat_file_contiguous_block(
-	struct file *,
-	struct disk **,
-	uint64_t *);
+	struct file *file,
+	struct disk **disk,
+	uint64_t *block);
 
 #endif

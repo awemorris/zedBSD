@@ -35,8 +35,8 @@ vmspace_layout_init(void);
 
 int
 vmspace_user_range_valid(
-	uintptr_t,
-	size_t);
+	uintptr_t start,
+	size_t size);
 
 struct file;
 struct vm_object;
@@ -231,172 +231,172 @@ vm_page_alloc_metadata(void);
 
 void
 vm_page_free_metadata(
-	struct vm_page *);
+	struct vm_page *page);
 
 int
 vmspace_tryref(
-	struct vmspace *);
+	struct vmspace *vm);
 
 void
 vmspace_ref(
-	struct vmspace *);
+	struct vmspace *vm);
 
 int
 vmspace_fork(
-	struct vmspace *,
-	struct vmspace **);
+	struct vmspace *source,
+	struct vmspace **result);
 
 int
 vmspace_map_anon(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t,
-	struct vm_region **);
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct vm_region **result);
 
 int
 vmspace_map_anon_fixed_noreplace(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t,
-	struct vm_region **);
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct vm_region **result);
 
 int
 vmspace_map_file(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t,
-	struct file *,
-	off_t,
-	uintptr_t,
-	size_t,
-	struct vm_region **);
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	uintptr_t data_start,
+	size_t data_size,
+	struct vm_region **result);
 
 int
 vmspace_map_file_shared(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t,
-	struct file *,
-	off_t,
-	size_t,
-	struct vm_region **);
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	size_t data_size,
+	struct vm_region **result);
 
 int
 vmspace_map_stack(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	size_t);
+	struct vmspace *vm,
+	uintptr_t top,
+	size_t size,
+	size_t guard_size);
 
 int
 vmspace_set_brk_start(
-	struct vmspace *,
-	uintptr_t,
-	uint64_t);
+	struct vmspace *vm,
+	uintptr_t start,
+	uint64_t static_data_bytes);
 
 int
 vmspace_brk(
-	struct vmspace *,
-	uintptr_t,
-	uintptr_t *);
+	struct vmspace *vm,
+	uintptr_t requested,
+	uintptr_t *result);
 
 struct vm_region *
 vmspace_find_region(
-	struct vmspace *,
-	uintptr_t,
-	size_t);
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size);
 
 int
 vmspace_shared_mapping_key(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	struct vm_object **,
-	uintptr_t *);
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size,
+	struct vm_object **object,
+	uintptr_t *offset);
 
 int
 vmspace_find_free_range(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	size_t,
-	uintptr_t *);
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	size_t alignment,
+	uintptr_t *mapped);
 
 int
 vmspace_find_free_range_bounded(
-	struct vmspace *,
-	uintptr_t,
-	uintptr_t,
-	size_t,
-	size_t,
-	uintptr_t *);
+	struct vmspace *vm,
+	uintptr_t minimum,
+	uintptr_t maximum,
+	size_t size,
+	size_t alignment,
+	uintptr_t *mapped);
 
 int
 vmspace_map_find(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t,
-	uintptr_t *);
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	uintptr_t *mapped);
 
 int
 vmspace_map_file_find(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t,
-	struct file *,
-	off_t,
-	size_t,
-	uintptr_t *);
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	size_t data_size,
+	uintptr_t *mapped);
 
 int
 vmspace_map_file_shared_find(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t,
-	struct file *,
-	off_t,
-	size_t,
-	uintptr_t *);
+	struct vmspace *vm,
+	uintptr_t hint,
+	size_t size,
+	uint32_t prot,
+	struct file *file,
+	off_t offset,
+	size_t data_size,
+	uintptr_t *mapped);
 
 int
 vmspace_unmap(
-	struct vmspace *,
-	uintptr_t,
-	size_t);
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size);
 
 int
 vmspace_protect(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t);
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	uint32_t prot);
 
 int
 vmspace_sync(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	int);
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	int flags);
 
 int
 vmspace_check(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t);
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size,
+	uint32_t required);
 
 int
 vmspace_fault(
-	struct vmspace *,
-	uintptr_t,
-	uint32_t);
+	struct vmspace *vm,
+	uintptr_t address,
+	uint32_t required);
 
 /*
  * Revoke and detach every PTE for one shared object page.  The object page
@@ -405,63 +405,63 @@ vmspace_fault(
  */
 int
 vmspace_object_page_revoke(
-	struct vm_object_page *,
-	uint32_t *);
+	struct vm_object_page *object_page,
+	uint32_t *observed_flags);
 
 int
 vmspace_pin_user_pages(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t,
-	struct vmspace_pinned_page *,
-	size_t);
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size,
+	uint32_t required,
+	struct vmspace_pinned_page *pages,
+	size_t page_count);
 
 void
 vmspace_unpin_user_pages(
-	struct vmspace_pinned_page *,
-	size_t);
+	struct vmspace_pinned_page *pages,
+	size_t page_count);
 
 int
 vmspace_wire_range(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t);
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size,
+	uint32_t required);
 
 void
 vmspace_unwire_range(
-	struct vmspace *,
-	uintptr_t,
-	size_t);
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size);
 
 int
 vmspace_copy_to(
-	struct vmspace *,
-	uintptr_t,
-	const void *,
-	size_t);
+	struct vmspace *vm,
+	uintptr_t destination,
+	const void *source,
+	size_t size);
 
 int
 vmspace_copy_from(
-	struct vmspace *,
-	void *,
-	uintptr_t,
-	size_t);
+	struct vmspace *vm,
+	void *destination,
+	uintptr_t source,
+	size_t size);
 
 /*
  * Release a reference.  The ordinary form may sleep while destroying it.
  */
 void
 vmspace_put(
-	struct vmspace *);
+	struct vmspace *vm);
 
 /*
  * Scheduler retirement uses the non-sleeping form; a reaper destroys it.
  */
 void
 vmspace_put_deferred(
-	struct vmspace *);
+	struct vmspace *vm);
 
 /*
  * Register the retained, non-sleeping wakeup used by the deferred reaper.
@@ -470,8 +470,8 @@ vmspace_put_deferred(
  */
 void
 vmspace_set_reaper_notify(
-	void (*)(void *),
-	void *);
+	void (*notify)(void *),
+	void *argument);
 
 unsigned
 vmspace_reap_pending(void);
@@ -481,38 +481,38 @@ vmspace_count(void);
 
 int
 vmspace_set_address_limit(
-	struct vmspace *,
-	uint64_t);
+	struct vmspace *vm,
+	uint64_t limit);
 
 int
 vmspace_set_data_limit(
-	struct vmspace *,
-	uint64_t);
+	struct vmspace *vm,
+	uint64_t limit);
 
 void
 vmspace_set_stack_limit(
-	struct vmspace *,
-	uint64_t);
+	struct vmspace *vm,
+	uint64_t limit);
 
 uint64_t
 vmspace_address_cap(void);
 
 uint32_t
 vm_page_effective_prot(
-	const struct vm_page *);
+	const struct vm_page *page);
 
 int
 vm_private_page_is_resident(
-	const struct vm_page *);
+	const struct vm_page *page);
 
 uintptr_t
 vm_private_page_vaddr(
-	const struct vm_page *);
+	const struct vm_page *page);
 
 void
 vm_page_replace_private(
-	struct vm_page *,
-	struct vm_private_page *);
+	struct vm_page *page,
+	struct vm_private_page *fresh);
 
 /*
  * Success keeps a short backing operation active until the caller publishes
@@ -520,7 +520,7 @@ vm_page_replace_private(
  */
 int
 vm_page_share_private(
-	struct vm_page *,
-	struct vm_page *);
+	struct vm_page *source,
+	struct vm_page *copy);
 
 #endif

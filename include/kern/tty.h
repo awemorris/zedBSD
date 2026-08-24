@@ -21,7 +21,7 @@ tty_console_init(void);
 
 void
 tty_console_input_event(
-	uint32_t);
+	uint32_t event);
 
 unsigned
 tty_vt_count(void);
@@ -31,79 +31,79 @@ tty_vt_active(void);
 
 int
 tty_vt_activate(
-	unsigned);
+	unsigned vt);
 
 ssize_t
 tty_vt_read(
-	unsigned,
-	struct file *,
-	void *,
-	size_t);
+	unsigned vt,
+	struct file *file,
+	void *buffer,
+	size_t size);
 
 ssize_t
 tty_vt_write(
-	unsigned,
-	struct file *,
-	const void *,
-	size_t);
+	unsigned vt,
+	struct file *file,
+	const void *buffer,
+	size_t size);
 
 int
 tty_vt_ioctl(
-	unsigned,
-	struct file *,
-	unsigned long,
-	uintptr_t);
+	unsigned vt,
+	struct file *file,
+	unsigned long request,
+	uintptr_t argument);
 
 int
 tty_vt_poll(
-	unsigned,
-	struct file *,
-	short,
-	short *);
+	unsigned vt,
+	struct file *file,
+	short events,
+	short *revents);
 
 ssize_t
 tty_console_read(
-	struct file *,
-	void *,
-	size_t);
+	struct file *f,
+	void *b,
+	size_t n);
 
 ssize_t
 tty_console_write(
-	struct file *,
-	const void *,
-	size_t);
+	struct file *f,
+	const void *b,
+	size_t n);
 
 int
 tty_console_ioctl(
-	struct file *,
-	unsigned long,
-	uintptr_t);
+	struct file *file,
+	unsigned long request,
+	uintptr_t argument);
 
 int
 tty_console_poll(
-	struct file *,
-	short,
-	short *);
+	struct file *file,
+	short events,
+	short *revents);
 
 void
 tty_attach_console(
-	struct process *);
+	struct process *process);
 
 void
 tty_detach_process(
-	struct process *);
+	struct process *process);
 
 int
 tty_pty_register(void);
 
 int
 tty_pty_exists(
-	unsigned);
+	unsigned index);
 
 unsigned
 tty_pty_snapshot(
-	unsigned *,
-	unsigned);
+	unsigned *indices,
+	unsigned capacity);
 
 extern const struct file_ops tty_pty_slave_file_ops;
 

@@ -30,24 +30,24 @@ cred_alloc_root(void);
 
 struct ucred *
 cred_copy(
-	const struct ucred *);
+	const struct ucred *source);
 
 void
 cred_ref(
-	struct ucred *);
+	struct ucred *cred);
 
 void
 cred_release(
-	struct ucred *);
+	struct ucred *cred);
 
 int
 cred_is_superuser(
-	const struct ucred *);
+	const struct ucred *cred);
 
 int
 cred_in_group(
-	const struct ucred *,
-	gid_t);
+	const struct ucred *cred,
+	gid_t group);
 
 const struct ucred *
 cred_current(void);
@@ -57,44 +57,44 @@ cred_current_ref(void);
 
 struct ucred *
 cred_process_ref(
-	struct process *);
+	struct process *process);
 
 int
 vfs_access(
-	const struct inode *,
-	const struct ucred *,
-	int);
+	const struct inode *inode,
+	const struct ucred *cred,
+	int requested);
 
 int
 vfs_may_create(
-	const struct inode *,
-	const struct ucred *);
+	const struct inode *parent,
+	const struct ucred *cred);
 
 int
 vfs_may_remove(
-	const struct inode *,
-	const struct inode *,
-	const struct ucred *);
+	const struct inode *parent,
+	const struct inode *victim,
+	const struct ucred *cred);
 
 int
 vfs_may_rename(
-	const struct inode *,
-	const struct inode *,
-	const struct inode *,
-	const struct inode *,
-	const struct ucred *);
+	const struct inode *old_parent,
+	const struct inode *source,
+	const struct inode *new_parent,
+	const struct inode *target,
+	const struct ucred *cred);
 
 int
 vfs_may_chown(
-	const struct inode *,
-	const struct ucred *,
-	uid_t,
-	gid_t);
+	const struct inode *inode,
+	const struct ucred *cred,
+	uid_t uid,
+	gid_t gid);
 
 int
 vfs_clear_setid_on_write(
-	struct inode *,
-	const struct ucred *);
+	struct inode *inode,
+	const struct ucred *cred);
 
 /*
  * Dirty MAP_SHARED pages have no meaningful writer credential.  Clearing
@@ -105,36 +105,36 @@ vfs_clear_setid_on_write(
  */
 int
 vfs_clear_setid_on_content_change(
-	struct inode *);
+	struct inode *inode);
 
 ssize_t
 vfs_getxattr(
-	struct inode *,
-	const struct ucred *,
-	const char *,
-	void *,
-	size_t);
+	struct inode *inode,
+	const struct ucred *cred,
+	const char *name,
+	void *value,
+	size_t size);
 
 int
 vfs_setxattr(
-	struct inode *,
-	const struct ucred *,
-	const char *,
-	const void *,
-	size_t,
-	unsigned);
+	struct inode *inode,
+	const struct ucred *cred,
+	const char *name,
+	const void *value,
+	size_t size,
+	unsigned flags);
 
 ssize_t
 vfs_listxattr(
-	struct inode *,
-	const struct ucred *,
-	char *,
-	size_t);
+	struct inode *inode,
+	const struct ucred *cred,
+	char *list,
+	size_t size);
 
 int
 vfs_removexattr(
-	struct inode *,
-	const struct ucred *,
-	const char *);
+	struct inode *inode,
+	const struct ucred *cred,
+	const char *name);
 
 #endif

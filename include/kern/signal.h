@@ -57,25 +57,25 @@ signal_init(void);
 
 int
 signal_send_process(
-	struct process *,
-	int);
+	struct process *process,
+	int signo);
 
 int
 signal_send_process_info(
-	struct process *,
-	int,
-	const struct signal_info *);
+	struct process *process,
+	int signo,
+	const struct signal_info *info);
 
 int
 signal_send_thread(
-	struct thread *,
-	int);
+	struct thread *thread,
+	int signo);
 
 int
 signal_send_thread_info(
-	struct thread *,
-	int,
-	const struct signal_info *);
+	struct thread *thread,
+	int signo,
+	const struct signal_info *info);
 
 /*
  * Atomically snapshot and optionally replace one disposition.
@@ -85,27 +85,27 @@ signal_send_thread_info(
  */
 int
 signal_action_set(
-	struct process *,
-	int,
-	const struct signal_action *,
-	struct signal_action *);
+	struct process *process,
+	int signo,
+	const struct signal_action *requested,
+	struct signal_action *previous);
 
 int
 signal_kill(
-	struct process *,
-	pid_t,
-	int);
+	struct process *sender,
+	pid_t selector,
+	int signo);
 
 int
 signal_pending_unblocked(
-	const struct thread *);
+	const struct thread *thread);
 
 /*
  * Caller holds thread->proc->lock.
  */
 int
 signal_pending_unblocked_locked(
-	const struct thread *);
+	const struct thread *thread);
 
 /*
  * Consume and perform one pending default job-control stop.  Returns
@@ -113,7 +113,7 @@ signal_pending_unblocked_locked(
  */
 int
 signal_stop_before_return(
-	struct thread *);
+	struct thread *thread);
 
 /*
  * Job-control generation decision: 0=default stop, EINTR=caught,
@@ -121,30 +121,30 @@ signal_stop_before_return(
  */
 int
 signal_job_control_decision(
-	const struct thread *,
-	int);
+	const struct thread *thread,
+	int signo);
 
 void
 signal_deliver_on_user_return(void);
 
 void
 signal_fork(
-	struct process *,
-	const struct process *,
-	struct thread *,
-	const struct thread *);
+	struct process *child,
+	const struct process *parent,
+	struct thread *child_thread,
+	const struct thread *parent_thread);
 
 void
 signal_exec(
-	struct process *);
+	struct process *process);
 
 int
 signal_timedwait(
-	struct thread *,
-	sigset_t,
-	uint64_t,
-	int,
-	struct signal_info *,
-	int *);
+	struct thread *thread,
+	sigset_t set,
+	uint64_t deadline,
+	int timed,
+	struct signal_info *info,
+	int *signo_out);
 
 #endif

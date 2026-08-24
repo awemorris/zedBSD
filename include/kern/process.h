@@ -156,11 +156,11 @@ process_find_next_ref(
 
 void
 process_ref(
-	struct process *);
+	struct process *process);
 
 void
 process_release(
-	struct process *);
+	struct process *process);
 
 /*
  * Parent links are protected by the process-tree lock.  The reference form
@@ -168,42 +168,42 @@ process_release(
  */
 pid_t
 process_parent_pid(
-	struct process *);
+	struct process *process);
 
 struct process *
 process_parent_ref(
-	struct process *);
+	struct process *process);
 
 int
 process_controlling_tty_snapshot(
-	struct process *,
-	struct tty **,
-	uint64_t *);
+	struct process *process,
+	struct tty **tty,
+	uint64_t *generation);
 
 int
 process_controlling_tty_matches(
-	struct process *,
-	struct tty *,
-	uint64_t);
+	struct process *process,
+	struct tty *tty,
+	uint64_t generation);
 
 int
 process_controlling_tty_attach(
-	struct process *,
-	struct tty *,
-	uint64_t);
+	struct process *process,
+	struct tty *tty,
+	uint64_t generation);
 
 void
 process_controlling_tty_detach_one(
-	struct process *,
-	struct tty *,
-	uint64_t);
+	struct process *process,
+	struct tty *tty,
+	uint64_t generation);
 
 void
 process_controlling_tty_detach_session(
-	pid_t,
+	pid_t session,
 
-	struct tty *,
-	uint64_t);
+	struct tty *tty,
+	uint64_t generation);
 
 /*
  * Acquire a stable reference to the address space currently published by a
@@ -212,20 +212,20 @@ process_controlling_tty_detach_session(
  */
 struct vmspace *
 process_vmspace_ref(
-	struct process *);
+	struct process *process);
 
 void
 process_cred_read_enter(
-	struct process *);
+	struct process *process);
 
 void
 process_cred_read_leave(
-	struct process *);
+	struct process *process);
 
 int
 process_cred_replace(
-	struct process *,
-	struct ucred *);
+	struct process *process,
+	struct ucred *replacement);
 
 /*
  * Reserve the only allocation needed by a credential replacement.  Exec
@@ -234,18 +234,18 @@ process_cred_replace(
  */
 int
 process_cred_reserve(
-	struct process *,
-	struct process_cred_reservation **);
+	struct process *process,
+	struct process_cred_reservation **result);
 
 void
 process_cred_reservation_abort(
-	struct process_cred_reservation *);
+	struct process_cred_reservation *reservation);
 
 void
 process_cred_commit_reserved(
-	struct process *,
-	struct ucred *,
-	struct process_cred_reservation *);
+	struct process *process,
+	struct ucred *replacement,
+	struct process_cred_reservation *reservation);
 
 struct thread *
 thread_find_ref(
@@ -253,34 +253,34 @@ thread_find_ref(
 
 int
 process_setpgid(
-	struct process *,
-	pid_t,
-	pid_t);
+	struct process *caller,
+	pid_t pid,
+	pid_t pgid);
 
 pid_t
 process_setsid(
-	struct process *);
+	struct process *process);
 
 int
 process_signal_pgrp(
-	pid_t,
-	pid_t,
-	int);
+	pid_t session,
+	pid_t pgrp,
+	int signo);
 
 int
 process_signal_pgrp_except(
-	pid_t,
-	pid_t,
-	int,
-	struct process *);
+	pid_t session,
+	pid_t pgrp,
+	int signo,
+	struct process *excluded);
 
 int process_pgrp_in_session(
-	pid_t,
-	pid_t);
+	pid_t session,
+	pid_t pgrp);
 
 int
 process_pgrp_is_orphaned(
-	const struct process *);
+	const struct process *process);
 
 int
 process_create(
@@ -290,8 +290,8 @@ process_create(
 
 int
 process_fork(
-	struct process *,
-	struct process **);
+	struct process *parent,
+	struct process **result);
 
 void
 process_publish(
@@ -307,79 +307,79 @@ process_free_mem(
 
 int
 process_wait(
-	struct process *,
+	struct process *process,
 	int *status);
 
 pid_t
 process_waitpid(
-	struct process *,
-	pid_t,
-	int *,
-	int);
+	struct process *parent,
+	pid_t selector,
+	int *status,
+	int options);
 
 pid_t
 process_wait_select(
-	struct process *,
-	pid_t,
-	int,
-	struct process_wait_event *);
+	struct process *parent,
+	pid_t selector,
+	int options,
+	struct process_wait_event *event);
 
 pid_t
 process_wait_select_mask(
-	struct process *,
-	pid_t,
-	int,
-	unsigned,
-	struct process_wait_event *);
+	struct process *parent,
+	pid_t selector,
+	int options,
+	unsigned event_mask,
+	struct process_wait_event *event);
 
 int
 process_wait_commit(
-	struct process_wait_event *);
+	struct process_wait_event *event);
 
 void
 process_wait_abort(
-	struct process_wait_event *);
+	struct process_wait_event *event);
 
 void
 process_stop_current(
-	int);
+	int signo);
 
 int
 process_stop_requested(
-	const struct thread *);
+	const struct thread *thread);
 
 int
 process_continue(
-	struct process *,
-	int);
+	struct process *process,
+	int report_continued);
 
 int
 process_itimer_get(
-	struct process *,
-	int,
-	uint64_t *,
-	uint64_t *);
+	struct process *process,
+	int which,
+	uint64_t *remaining,
+	uint64_t *interval);
 
 int
 process_itimer_set(
-	struct process *,
-	int,
-	uint64_t,
-	uint64_t,
-	uint64_t *,
-	uint64_t *);
+	struct process *process,
+	int which,
+	uint64_t remaining,
+	uint64_t interval,
+	uint64_t *old_remaining,
+	uint64_t *old_interval);
 
 int
 process_itimer_tick(
-	struct process *,
-	int);
+	struct process *process,
+	int which);
 
 void
 process_itimer_real_tick_all(void);
 
 void
 process_thread_retired(
-	struct thread *);
+	struct thread *thread);
 
 /*
  * Returns only when other live threads keep the process alive.

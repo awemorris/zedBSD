@@ -27,45 +27,45 @@ struct fat_lfn_state {
 
 void
 fat_lfn_reset(
-	struct fat_lfn_state *);
+	struct fat_lfn_state *state);
 int
 fat_lfn_feed(
-	struct fat_lfn_state *,
+	struct fat_lfn_state *state,
 	const uint8_t raw[32]);
 int
 fat_lfn_finish(
-	struct fat_lfn_state *,
+	struct fat_lfn_state *state,
 	const uint8_t sfn[32],
-	char *,
-	size_t);
+	char *output,
+	size_t capacity);
 uint8_t
 fat_lfn_checksum(
 	const uint8_t sfn[11]);
 int
 fat_utf8_casefold_equal(
-	const char *,
-	const char *);
+	const char *left,
+	const char *right);
 void
 fat_sfn_decode_preserve(
 	const uint8_t raw[32],
-	char *,
-	size_t);
+	char *output,
+	size_t capacity);
 int
 fat_utf8_to_utf16(
-	const char *,
-	uint16_t[FAT_LFN_MAX_UNITS],
-	unsigned *);
+	const char *name,
+	uint16_t units[FAT_LFN_MAX_UNITS],
+	unsigned *unit_count);
 void
 fat_lfn_build_entry(
-	uint8_t[32],
-	const uint16_t *,
-	unsigned,
-	unsigned,
-	uint8_t);
+	uint8_t raw[32],
+	const uint16_t *units,
+	unsigned unit_count,
+	unsigned ordinal,
+	uint8_t checksum);
 int
 fat_sfn_make_alias(
-	const char *,
-	unsigned,
-	uint8_t[11]);
+	const char *name,
+	unsigned serial,
+	uint8_t sfn[11]);
 
 #endif

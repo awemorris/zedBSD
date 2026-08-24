@@ -50,75 +50,75 @@ struct cwdinfo {
 
 int
 namei_at(
-	struct cwdinfo *,
-	const char *,
-	struct inode **);
+	struct cwdinfo *context,
+	const char *path,
+	struct inode **result);
 
 int
 namei_path_at(
-	struct cwdinfo *,
-	const char *,
-	struct path *);
+	struct cwdinfo *context,
+	const char *path,
+	struct path *result);
 
 int
 namei_path_flags_at(
-	struct cwdinfo *,
-	const char *,
-	unsigned,
-	struct path *);
+	struct cwdinfo *context,
+	const char *path,
+	unsigned flags,
+	struct path *result);
 
 int
 namei_parent_at(
-	struct cwdinfo *,
-	const char *,
-	struct inode **,
-	struct componentname *,
-	char[NAME_MAX + 1U]);
+	struct cwdinfo *context,
+	const char *path,
+	struct inode **parent,
+	struct componentname *last,
+	char storage[NAME_MAX + 1U]);
 
 int
 namei_parent_path_at(
-	struct cwdinfo *,
-	const char *,
-	struct path *,
-	struct componentname *,
-	char[NAME_MAX + 1U]);
+	struct cwdinfo *context,
+	const char *path,
+	struct path *parent,
+	struct componentname *last,
+	char storage[NAME_MAX + 1U]);
 
 int
 cwdinfo_init(
-	struct cwdinfo *,
-	const struct path *);
+	struct cwdinfo *context,
+	const struct path *root);
 
 int
 cwdinfo_clone(
-	const struct cwdinfo *,
-	struct cwdinfo **);
+	const struct cwdinfo *source,
+	struct cwdinfo **result);
 
 void
 cwdinfo_retain(
-	struct cwdinfo *);
+	struct cwdinfo *context);
 
 void
 cwdinfo_release(
-	struct cwdinfo *);
+	struct cwdinfo *context);
 
 void
 cwdinfo_destroy(
-	struct cwdinfo *);
+	struct cwdinfo *context);
 
 int
 fs_chdir(
-	struct cwdinfo *,
-	const char *);
+	struct cwdinfo *context,
+	const char *path);
 
 int
 fs_chdir_path(
-	struct cwdinfo *,
-	const struct path *);
+	struct cwdinfo *context,
+	const struct path *directory);
 
 int
 fs_getcwd(
-	const struct cwdinfo *,
-	char *,
-	size_t);
+	const struct cwdinfo *context,
+	char *buffer,
+	size_t capacity);
 
 #endif

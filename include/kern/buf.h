@@ -61,53 +61,53 @@ int
 buf_init(void);
 int
 buf_read(
-	struct disk *,
-	uint64_t,
-	uint32_t,
-	void *);
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	void *data);
 int
 buf_write(
-	struct disk *,
-	uint64_t,
-	uint32_t,
-	const void *);
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	const void *data);
 int
 buf_get(
-	struct disk *,
-	uint64_t,
-	struct buf **);
+	struct disk *disk,
+	uint64_t block,
+	struct buf **result);
 void
 buf_release(
-	struct buf *);
+	struct buf *buffer);
 void
 buf_mark_dirty(
-	struct buf *);
+	struct buf *buffer);
 int
 buf_writeback(
-	struct buf *);
+	struct buf *buffer);
 int
 buf_sync(
-	struct disk *);
+	struct disk *disk);
 int
 buf_invalidate(
-	struct disk *,
-	uint64_t,
-	uint64_t,
-	unsigned);
+	struct disk *disk,
+	uint64_t block,
+	uint64_t count,
+	unsigned flags);
 int
 buf_invalidate_disk(
-	struct disk *,
-	unsigned);
+	struct disk *disk,
+	unsigned flags);
 size_t
 buf_reclaim(
-	size_t,
-	unsigned);
+	size_t target_bytes,
+	unsigned flags);
 void
 buf_get_stats(
-	struct bufcache_stats *);
+	struct bufcache_stats *stats);
 int
 buf_set_max_bytes(
-	uint64_t);
+	uint64_t value);
 void
 buf_reset(void);
 

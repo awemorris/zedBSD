@@ -53,7 +53,7 @@ struct graphics_driver_ops {
 
 int
 graphics_driver_register(
-	const struct graphics_driver_ops *,
-	void *);
+	const struct graphics_driver_ops *ops,
+	void *context);
 
 #endif

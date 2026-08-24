@@ -20,33 +20,33 @@ struct process_limits {
 
 void
 resource_limits_default(
-	struct process_limits *);
+	struct process_limits *limits);
 
 int
 resource_limit_get(
-	struct process *,
-	int,
-	struct rlimit_record *);
+	struct process *process,
+	int resource,
+	struct rlimit_record *result);
 
 int
 resource_limit_set(
-	struct process *,
-	int,
-	const struct rlimit_record *);
+	struct process *process,
+	int resource,
+	const struct rlimit_record *requested);
 
 int
 resource_limit_apply_vm(
-	struct process *,
-	struct vmspace *);
+	struct process *process,
+	struct vmspace *vm);
 
 uint64_t
 resource_limit_current(
-	struct process *,
-	int);
+	struct process *process,
+	int resource);
 
 void
 resource_limit_cpu_tick(
-	struct process *,
+	struct process *process,
 	uint64_t total_ticks);
 
 #endif

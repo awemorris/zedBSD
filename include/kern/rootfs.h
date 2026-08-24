@@ -20,13 +20,13 @@ extern const struct filesystem_type rootfs_type;
 
 int
 rootfs_add_mountpoint(
-	struct mount *,
-	const char *,
-	struct inode **);
+	struct mount *root_mount,
+	const char *name,
+	struct inode **result);
 
 int
 rootfs_remove_mountpoint(
-	struct inode *);
+	struct inode *inode);
 
 void
 rootfs_reset(void);

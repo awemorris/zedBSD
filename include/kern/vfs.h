@@ -19,8 +19,8 @@ extern struct cwdinfo kern_cwdinfo;
 
 int
 kern_vfs_init(
-	const struct boot_handoff *,
-	const struct boot_device *,
-	unsigned);
+	const struct boot_handoff *handoff,
+	const struct boot_device *devices,
+	unsigned device_count);
 
 #endif

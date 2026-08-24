@@ -59,14 +59,14 @@ struct dp8390 {
 
 int
 dp8390_read_prom(
-	struct dp8390 *,
+	struct dp8390 *dp,
 	uint8_t prom[16]);
 int
 dp8390_attach(
-	struct dp8390 *,
-	struct net_device *);
+	struct dp8390 *dp,
+	struct net_device *device);
 void
 dp8390_interrupt(
-	struct dp8390 *);
+	struct dp8390 *dp);
 
 #endif

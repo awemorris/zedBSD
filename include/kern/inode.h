@@ -247,94 +247,94 @@ inode_cache_reset(void);
 
 int
 inode_lookup(
-	struct inode *,
-	const struct componentname *,
-	struct inode **);
+	struct inode *directory,
+	const struct componentname *name,
+	struct inode **result);
 
 int
 inode_lookup_casefold(
-	struct inode *,
-	const struct componentname *,
-	struct inode **);
+	struct inode *directory,
+	const struct componentname *name,
+	struct inode **result);
 
 int
 inode_getattr(
-	struct inode *,
-	struct stat *);
+	struct inode *inode,
+	struct stat *status);
 
 int
 inode_setattr(
-	struct inode *,
-	const struct stat *,
-	unsigned);
+	struct inode *i,
+	const struct stat *s,
+	unsigned mask);
 
 int
 inode_create(
-	struct inode *,
-	const struct componentname *,
-	mode_t,
-	struct inode **);
+	struct inode *i,
+	const struct componentname *n,
+	mode_t m,
+	struct inode **r);
 
 int
 inode_mkdir(
-	struct inode *,
-	const struct componentname *,
-	mode_t,
-	struct inode **);
+	struct inode *i,
+	const struct componentname *n,
+	mode_t m,
+	struct inode **r);
 
 int
 inode_mknod(
-	struct inode *,
-	const struct componentname *,
-	enum inode_type,
-	mode_t,
-	dev_t,
-	struct inode **);
+	struct inode *i,
+	const struct componentname *n,
+	enum inode_type type,
+	mode_t m,
+	dev_t dev,
+	struct inode **r);
 
 int
 inode_unlink(
-	struct inode *,
-	const struct componentname *);
+	struct inode *i,
+	const struct componentname *n);
 
 int
 inode_rmdir(
-	struct inode *,
-	const struct componentname *);
+	struct inode *i,
+	const struct componentname *n);
 /*
  * The caller holds the shared mount VFS transaction lock across any
  * permission checks and this namespace commit.
  */
 int
 inode_rename(
-	struct inode *,
-	const struct componentname *,
-	struct inode *,
-	const struct componentname *,
-	unsigned);
+	struct inode *od,
+	const struct componentname *on,
+	struct inode *nd,
+	const struct componentname *nn,
+	unsigned flags);
 
 int
 inode_link(
-	struct inode *,
-	const struct componentname *,
-	struct inode *);
+	struct inode *directory,
+	const struct componentname *name,
+	struct inode *target);
 
 int
 inode_symlink(
-	struct inode *,
-	const struct componentname *,
-	const char *,
-	struct inode **);
+	struct inode *directory,
+	const struct componentname *name,
+	const char *target,
+	struct inode **result);
 
 ssize_t
 inode_readlink(
-	struct inode *,
-	char *,
-	size_t);
+	struct inode *inode,
+	char *buffer,
+	size_t capacity);
 
 int
 inode_truncate(
-	struct inode *,
-	off_t);
+	struct inode *i,
+	off_t size);
 /*
  * Internal content-owner mutation (for example an overlay upper inode).
  * There is no originating credential at this layer, so executable set-id
@@ -342,8 +342,8 @@ inode_truncate(
  */
 int
 inode_truncate_content_change(
-	struct inode *,
-	off_t);
+	struct inode *i,
+	off_t size);
 
 /*
  * Apply a process growth ceiling in the same i_io transaction as the size
@@ -351,10 +351,10 @@ inode_truncate_content_change(
  */
 int
 inode_truncate_limited(
-	struct inode *,
-	off_t,
-	uint64_t,
-	int *);
+	struct inode *i,
+	off_t size,
+	uint64_t growth_limit,
+	int *limit_exceeded);
 
 /*
  * Credential-aware mutation additionally clears executable set-id state
@@ -362,58 +362,58 @@ inode_truncate_limited(
  */
 int
 inode_truncate_limited_cred(
-	struct inode *,
-	off_t,
-	uint64_t,
-	const struct ucred *,
-	int *);
+	struct inode *i,
+	off_t size,
+	uint64_t growth_limit,
+	const struct ucred *cred,
+	int *limit_exceeded);
 
 /*
  * Stacking backends forward the complete request recursively.
  */
 int
 inode_truncate_transaction(
-	struct inode *,
-	const struct inode_truncate_request *,
-	struct inode_truncate_result *);
+	struct inode *i,
+	const struct inode_truncate_request *request,
+	struct inode_truncate_result *result);
 
 ssize_t
 inode_getxattr(
-	struct inode *,
-	const char *,
-	void *,
-	size_t);
+	struct inode *inode,
+	const char *name,
+	void *value,
+	size_t size);
 
 int
 inode_setxattr(
-	struct inode *,
-	const char *,
-	const void *,
-	size_t,
-	unsigned);
+	struct inode *inode,
+	const char *name,
+	const void *value,
+	size_t size,
+	unsigned flags);
 
 ssize_t
 inode_listxattr(
-	struct inode *,
-	char *,
-	size_t);
+	struct inode *inode,
+	char *list,
+	size_t size);
 int
 inode_removexattr(
-	struct inode *,
-	const char *);
+	struct inode *inode,
+	const char *name);
 
 int
 inode_sync(
-	struct inode *);
+	struct inode *i);
 
 void
 inode_touch(
-	struct inode *,
-	unsigned);
+	struct inode *inode,
+	unsigned mask);
 
 void
 inode_dir_changed(
-	struct inode *);
+	struct inode *inode);
 
 mode_t
 inode_type_mode(

@@ -42,60 +42,60 @@ clock_realtime(
 
 int
 kern_timespec_validate(
-	const struct timespec *);
+	const struct timespec *value);
 
 int
 kern_timespec_normalize(
-	struct kern_timespec *);
+	struct kern_timespec *value);
 
 int
 kern_timespec_add(
-	const struct kern_timespec *,
-	const struct kern_timespec *,
-	struct kern_timespec *);
+	const struct kern_timespec *a,
+	const struct kern_timespec *b,
+	struct kern_timespec *result);
 
 int
 kern_timespec_sub(
-	const struct kern_timespec *,
-	const struct kern_timespec *,
-	struct kern_timespec *);
+	const struct kern_timespec *a,
+	const struct kern_timespec *b,
+	struct kern_timespec *result);
 
 int
 kern_timespec_compare(
-	const struct kern_timespec *,
-	const struct kern_timespec *);
+	const struct kern_timespec *a,
+	const struct kern_timespec *b);
 
 int
 kern_duration_to_ticks_ceil(
-	const struct timespec *,
-	uint64_t *);
+	const struct timespec *duration,
+	uint64_t *ticks);
 
 int
 kern_deadline_after(
-	uint64_t,
-	uint64_t,
-	uint64_t *);
+	uint64_t now,
+	uint64_t delta,
+	uint64_t *deadline);
 
 uint64_t
 kern_deadline_remaining(
-	uint64_t,
-	uint64_t);
+	uint64_t now,
+	uint64_t deadline);
 
 int
 kern_clock_gettime(
-	clockid_t,
-	struct timespec *);
+	clockid_t clock,
+	struct timespec *result);
 
 int
 kern_clock_getres(
-	clockid_t,
-	struct timespec *);
+	clockid_t clock,
+	struct timespec *result);
 
 int
 kern_clock_settime(
-	clockid_t,
-	const struct timespec *,
-	const struct ucred *);
+	clockid_t clock,
+	const struct timespec *requested,
+	const struct ucred *cred);
 
 int
 kern_clock_realtime_synchronized(void);

@@ -16,8 +16,8 @@ struct cwdinfo;
 
 int
 swap_fat_activate(
-	struct cwdinfo *,
-	const char *);
+	struct cwdinfo *cwd,
+	const char *mount_path);
 
 unsigned
 swap_fat_extent_count(void);

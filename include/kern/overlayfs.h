@@ -29,9 +29,9 @@ overlayfs_init(void);
 
 int
 overlay_mount_at(
-	struct mount *,
-	const char *,
-	const struct overlay_mount_args *,
-	struct mount **);
+	struct mount *namespace_root,
+	const char *target,
+	const struct overlay_mount_args *args,
+	struct mount **result);
 
 #endif

@@ -549,7 +549,7 @@ struct hal_memory_stats {
 
 void
 hal_memory_get_stats(
-	struct hal_memory_stats *);
+	struct hal_memory_stats *stats);
 
 /*
  * Task

@@ -38,6 +38,6 @@ struct kern_memory_stats {
 
 void
 kern_memory_get_stats(
-	struct kern_memory_stats *);
+	struct kern_memory_stats *stats);
 
 #endif

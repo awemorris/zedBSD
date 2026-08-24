@@ -16,9 +16,9 @@
 
 int
 pc98_font_get_glyph(
-	uint32_t,
-	uint8_t[32],
-	unsigned *,
-	unsigned *);
+	uint32_t codepoint,
+	uint8_t font[32],
+	unsigned *width,
+	unsigned *height);
 
 #endif

@@ -183,7 +183,7 @@ thread_current(void);
 
 int
 thread_create(
-	struct process *,
+	struct process *process,
 	uintptr_t entry,
 	uintptr_t user_sp,
 	struct thread **result);
@@ -194,9 +194,9 @@ thread_abort_new(
 
 int
 thread_fork(
-	struct process *,
-	hal_task_t,
-	struct thread **);
+	struct process *process,
+	hal_task_t task,
+	struct thread **result);
 
 int
 kthread_create(

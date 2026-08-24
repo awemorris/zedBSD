@@ -17,18 +17,18 @@ struct flock_record;
 
 int
 record_lock_fcntl(
-	struct process *,
-	struct file *,
-	int,
-	struct flock_record *);
+	struct process *owner,
+	struct file *file,
+	int command,
+	struct flock_record *request);
 
 void
 record_lock_release_process_inode(
-	struct process *,
-	struct inode *);
+	struct process *owner,
+	struct inode *inode);
 
 void
 record_lock_inode_destroy(
-	struct inode *);
+	struct inode *inode);
 
 #endif

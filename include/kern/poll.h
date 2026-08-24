@@ -24,23 +24,23 @@ poll_sequence(void);
 
 int
 poll_wait(
-	uint64_t,
-	uint64_t,
-	unsigned);
+	uint64_t observed,
+	uint64_t deadline,
+	unsigned flags);
 
 int
 file_poll(
-	struct file *,
-	short,
-	short *);
+	struct file *file,
+	short events,
+	short *revents);
 
 int
 kern_poll_wait(
-	struct process *,
-	struct pollfd *,
-	nfds_t,
-	uint64_t,
-	int,
-	int *);
+	struct process *process,
+	struct pollfd *fds,
+	nfds_t count,
+	uint64_t deadline,
+	int immediate,
+	int *ready);
 
 #endif

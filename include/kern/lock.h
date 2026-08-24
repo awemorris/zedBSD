@@ -67,57 +67,57 @@ struct mutex {
 
 void
 spin_init(
-	struct spinlock *,
-	enum lock_rank,
-	const char *);
+	struct spinlock *lock,
+	enum lock_rank rank,
+	const char *name);
 
 void
 spin_lock(
-	struct spinlock *);
+	struct spinlock *lock);
 
 int
 spin_trylock(
-	struct spinlock *);
+	struct spinlock *lock);
 
 void
 spin_unlock(
-	struct spinlock *);
+	struct spinlock *lock);
 
 unsigned long
 spin_lock_irqsave(
-	struct spinlock *);
+	struct spinlock *lock);
 
 void
 spin_unlock_irqrestore(
-	struct spinlock *,
-	unsigned long);
+	struct spinlock *lock,
+	unsigned long enabled);
 
 int
 mutex_init(
-	struct mutex *,
-	enum lock_rank,
-	const char *);
+	struct mutex *mutex,
+	enum lock_rank rank,
+	const char *name);
 int
 mutex_trylock(
-	struct mutex *);
+	struct mutex *mutex);
 int
 mutex_owned(
-	struct mutex *);
+	struct mutex *mutex);
 int
 mutex_lock_interruptible(
-	struct mutex *);
+	struct mutex *mutex);
 void
 mutex_lock(
-	struct mutex *);
+	struct mutex *mutex);
 void
 mutex_unlock(
-	struct mutex *);
+	struct mutex *mutex);
 int
 mutex_wait(
-	struct mutex *,
-	struct wait_queue *,
-	uint64_t,
-	uint64_t,
-	unsigned);
+	struct mutex *mutex,
+	struct wait_queue *condition,
+	uint64_t observed,
+	uint64_t deadline,
+	unsigned flags);
 
 #endif

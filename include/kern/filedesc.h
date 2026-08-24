@@ -56,137 +56,137 @@ struct filedesc_reservation {
 
 struct filedesc *
 filedesc_create(
-	struct process *);
+	struct process *owner);
 
 void
 filedesc_ref(
-	struct filedesc *);
+	struct filedesc *fd);
 
 void
 filedesc_destroy(
-	struct filedesc *);
+	struct filedesc *fd);
 
 struct file *
 filedesc_get_ref(
-	struct filedesc *,
+	struct filedesc *fd,
 	int descriptor);
 
 int
 filedesc_install(
-	struct filedesc *,
-	struct file *,
+	struct filedesc *fd,
+	struct file *file,
 	int *descriptor);
 
 int
 filedesc_install_from(
-	struct filedesc *,
-	struct file *,
-	unsigned,
+	struct filedesc *fd,
+	struct file *file,
+	unsigned flags,
 	int minimum,
 	int *descriptor);
 
 int
 filedesc_install_at(
-	struct filedesc *,
-	struct file *,
+	struct filedesc *fd,
+	struct file *file,
 	int descriptor);
 
 int
 filedesc_take(
-	struct filedesc *,
+	struct filedesc *fd,
 	int descriptor,
-	struct file **);
+	struct file **result);
 
 int
 filedesc_close(
-	struct filedesc *,
+	struct filedesc *fd,
 	int descriptor);
 
 int
 filedesc_clone_stdio(
-	struct filedesc *,
-	struct filedesc *);
+	struct filedesc *source,
+	struct filedesc *destination);
 
 int
 filedesc_clone(
-	struct filedesc *,
-	struct process *,
-	struct filedesc **);
+	struct filedesc *source,
+	struct process *owner,
+	struct filedesc **result);
 
 int
 filedesc_get_flags(
-	struct filedesc *,
-	int,
-	unsigned *);
+	struct filedesc *fd,
+	int descriptor,
+	unsigned *flags);
 
 int
 filedesc_set_flags(
-	struct filedesc *,
-	int,
-	unsigned);
+	struct filedesc *fd,
+	int descriptor,
+	unsigned flags);
 
 int
 filedesc_dup(
-	struct filedesc *,
-	int,
-	int,
-	unsigned,
-	int *);
+	struct filedesc *fd,
+	int oldfd,
+	int minimum,
+	unsigned flags,
+	int *result);
 
 int
 filedesc_dup2(
-	struct filedesc *,
-	int,
-	int,
-	unsigned,
-	int);
+	struct filedesc *fd,
+	int oldfd,
+	int newfd,
+	unsigned flags,
+	int reject_equal);
 
 int
 filedesc_install_pair(
-	struct filedesc *,
-	struct file *,
-	unsigned,
-	struct file *,
-	unsigned,
-	int[2]);
+	struct filedesc *fd,
+	struct file *first,
+	unsigned first_flags,
+	struct file *second,
+	unsigned second_flags,
+	int result[2]);
 
 int
 filedesc_install_many(
-	struct filedesc *,
-	struct file **,
-	unsigned,
-	unsigned,
-	int *);
+	struct filedesc *fd,
+	struct file **files,
+	unsigned count,
+	unsigned flags,
+	int *result);
 
 int
 filedesc_reserve_many(
-	struct filedesc *,
-	unsigned,
-	unsigned,
-	struct filedesc_reservation *);
+	struct filedesc *fd,
+	unsigned count,
+	unsigned flags,
+	struct filedesc_reservation *reservation);
 
 int
 filedesc_commit_reserved(
-	struct filedesc_reservation *,
-	struct file **,
-	int *);
+	struct filedesc_reservation *reservation,
+	struct file **files,
+	int *descriptors);
 
 void
 filedesc_abort_reserved(
-	struct filedesc_reservation *);
+	struct filedesc_reservation *reservation);
 
 int
 filedesc_set_limit(
-	struct filedesc *,
-	unsigned);
+	struct filedesc *fd,
+	unsigned limit);
 
 unsigned
 filedesc_get_limit(
-	struct filedesc *);
+	struct filedesc *fd);
 
 void
 filedesc_close_on_exec(
-	struct filedesc *);
+	struct filedesc *fd);
 
 unsigned
 filedesc_count(void);

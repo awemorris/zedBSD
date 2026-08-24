@@ -36,27 +36,27 @@ struct wait_queue {
 
 void
 waitq_init(
-	struct wait_queue *,
-	const char *);
+	struct wait_queue *queue,
+	const char *name);
 
 uint64_t
 waitq_sequence(
-	const struct wait_queue *);
+	const struct wait_queue *queue);
 
 int
 waitq_sleep(
-	struct wait_queue *,
-	struct spinlock *,
-	uint64_t,
-	uint64_t,
-	unsigned);
+	struct wait_queue *queue,
+	struct spinlock *condition_lock,
+	uint64_t observed,
+	uint64_t deadline,
+	unsigned flags);
 
 void
 waitq_wake_one(
-	struct wait_queue *);
+	struct wait_queue *queue);
 
 void
 waitq_wake_all(
-	struct wait_queue *);
+	struct wait_queue *queue);
 
 #endif

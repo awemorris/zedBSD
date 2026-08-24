@@ -14,18 +14,18 @@ usync_init(void);
 
 int
 usync_wait(
-	uintptr_t,
-	uint32_t,
-	uintptr_t,
-	uintptr_t,
-	uint64_t,
-	int);
+	uintptr_t address,
+	uint32_t expected,
+	uintptr_t process_key,
+	uintptr_t key_offset,
+	uint64_t deadline,
+	int cancelable);
 
 int
 usync_wake(
-	uintptr_t,
-	uintptr_t,
-	uintptr_t,
-	unsigned);
+	uintptr_t address,
+	uintptr_t process_key,
+	uintptr_t key_offset,
+	unsigned count);
 
 #endif

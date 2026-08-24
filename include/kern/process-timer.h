@@ -20,43 +20,43 @@ process_timer_init(void);
 
 int
 process_timer_create(
-	struct process *,
-	clockid_t,
-	const struct sigevent *,
-	timer_t *);
+	struct process *owner,
+	clockid_t clock,
+	const struct sigevent *requested,
+	timer_t *result);
 
 int
 process_timer_delete(
-	struct process *,
-	timer_t);
+	struct process *owner,
+	timer_t id);
 
 int
 process_timer_settime(
-	struct process *,
-	timer_t,
-	int,
-	const struct itimerspec *,
-	struct itimerspec *);
+	struct process *owner,
+	timer_t id,
+	int flags,
+	const struct itimerspec *requested,
+	struct itimerspec *previous);
 
 int
 process_timer_gettime(
-	struct process *,
-	timer_t,
-	struct itimerspec *);
+	struct process *owner,
+	timer_t id,
+	struct itimerspec *result);
 
 int
 process_timer_getoverrun(
-	struct process *,
-	timer_t,
-	int *);
+	struct process *owner,
+	timer_t id,
+	int *result);
 
 void
 process_timer_tick(
-	uint64_t);
+	uint64_t now_ticks);
 
 void
 process_timer_cleanup(
-	struct process *);
+	struct process *owner);
 
 /*
  * Complete/fail a notification captured by slot+generation.  Both
@@ -65,14 +65,14 @@ process_timer_cleanup(
  */
 void
 process_timer_notification_complete(
-	struct process *,
-	unsigned,
-	uint32_t);
+	struct process *owner,
+	unsigned slot,
+	uint32_t generation);
 
 void
 process_timer_notification_failed(
-	struct process *,
-	unsigned,
-	uint32_t);
+	struct process *owner,
+	unsigned slot,
+	uint32_t generation);
 
 #endif

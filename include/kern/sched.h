@@ -118,8 +118,8 @@ sched_sleep(
  */
 void
 sched_sleep_locked(
-	uint64_t,
-	struct spinlock *);
+	uint64_t timeout_tick,
+	struct spinlock *condition_lock);
 
 /*
  * Interruptible wait handoff.  Returns nonzero without sleeping when an
@@ -128,9 +128,9 @@ sched_sleep_locked(
  */
 int
 sched_sleep_locked_interruptible(
-	uint64_t,
-	struct spinlock *,
-	uint64_t);
+	uint64_t timeout_tick,
+	struct spinlock *condition_lock,
+	uint64_t observed_generation);
 
 /*
  * Like sched_sleep_locked(), then invokes notify after publishing SLEEPING.
@@ -139,10 +139,10 @@ sched_sleep_locked_interruptible(
  */
 void
 sched_sleep_locked_notify(
-	uint64_t,
-	struct spinlock *,
-	void (*)(void *),
-	void *);
+	uint64_t timeout_tick,
+	struct spinlock *condition_lock,
+	void (*notify)(void *),
+	void *argument);
 
 void
 sched_awake_from_sleep(
@@ -166,7 +166,7 @@ sched_wait_others_online(void);
 
 int
 sched_set_cpu(
-	struct thread *,
+	struct thread *thread,
 	hal_cpu_id_t cpu);
 
 void

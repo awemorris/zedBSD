@@ -17,12 +17,12 @@
 
 int
 block_identity_get(
-	struct disk *,
-	struct block_identity *);
+	struct disk *disk,
+	struct block_identity *id);
 
 int
 block_identity_resolve(
-	const char *,
-	struct disk **);
+	const char *selector,
+	struct disk **result);
 
 #endif

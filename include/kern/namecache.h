@@ -18,27 +18,27 @@
 
 int
 namecache_lookup(
-	struct inode *,
-	const struct componentname *,
-	struct inode **);
+	struct inode *parent,
+	const struct componentname *name,
+	struct inode **result);
 
 int
 namecache_enter(
-	struct inode *,
-	const struct componentname *,
-	struct inode *);
+	struct inode *parent,
+	const struct componentname *name,
+	struct inode *child);
 
 void
 namecache_remove(
-	struct inode *,
-	const struct componentname *);
+	struct inode *parent,
+	const struct componentname *name);
 
 void
 namecache_purge_inode(
-	struct inode *);
+	struct inode *inode);
 void
 namecache_purge_mount(
-	struct mount *);
+	struct mount *mountp);
 
 void
 namecache_reset(void);

@@ -152,22 +152,22 @@ struct vm_object_content {
 
 int
 vm_object_get_shared(
-	struct file *,
-	struct vm_object **);
+	struct file *file,
+	struct vm_object **result);
 
 void
 vm_object_ref(
-	struct vm_object *);
+	struct vm_object *object);
 
 void
 vm_object_put(
-	struct vm_object *);
+	struct vm_object *object);
 
 int
 vm_object_fault(
-	struct vm_object *,
-	off_t,
-	struct vm_object_page **);
+	struct vm_object *object,
+	off_t offset,
+	struct vm_object_page **result);
 
 /*
  * Pin object-page storage and its owner independently of reverse-mapping
@@ -179,78 +179,78 @@ vm_object_fault(
  */
 int
 vm_object_page_pin(
-	struct vm_object_page *);
+	struct vm_object_page *page);
 
 void
 vm_object_page_unpin(
-	struct vm_object_page *);
+	struct vm_object_page *page);
 
 int
 vm_object_page_pin_read(
-	struct vm_object_page *,
-	size_t,
-	void *,
-	size_t);
+	struct vm_object_page *page,
+	size_t offset,
+	void *buffer,
+	size_t length);
 
 int
 vm_object_page_pin_write(
-	struct vm_object_page *,
-	size_t,
-	const void *,
-	size_t);
+	struct vm_object_page *page,
+	size_t offset,
+	const void *buffer,
+	size_t length);
 
 void
 vm_object_fault_release(
-	struct vm_object_page *);
+	struct vm_object_page *page);
 
 void
 vm_object_mapping_add(
-	struct vm_object_page *,
-	struct vm_page *);
+	struct vm_object_page *object_page,
+	struct vm_page *mapping);
 
 void
 vm_object_mapping_remove(
-	struct vm_object_page *,
-	struct vm_page *);
+	struct vm_object_page *object_page,
+	struct vm_page *mapping);
 /*
  * VM reverse-mapping transactions use this only while vm_metadata and the
  * owning object's lock are both held.
  */
 void
 vm_object_mapping_remove_locked(
-	struct vm_object_page *,
-	struct vm_page *);
+	struct vm_object_page *object_page,
+	struct vm_page *mapping);
 
 void
 vm_object_mark_dirty(
-	struct vm_object_page *);
+	struct vm_object_page *page);
 
 int
 vm_object_sync_range(
-	struct vm_object *,
-	off_t,
-	size_t,
-	int);
+	struct vm_object *object,
+	off_t offset,
+	size_t size,
+	int flags);
 
 int
 vm_object_sync_inode(
-	struct inode *);
+	struct inode *inode);
 
 int
 vm_object_inode_io_wait(
-	struct inode *);
+	struct inode *inode);
 
 int
 vm_object_inode_resize_active(
-	struct inode *);
+	struct inode *inode);
 
 int
 vm_object_content_read_begin(
-	struct inode *);
+	struct inode *inode);
 
 void
 vm_object_content_read_end(
-	struct inode *);
+	struct inode *inode);
 
 /*
  * Registry snapshot used under i_io_lock to close the no-object fallback
@@ -258,59 +258,59 @@ vm_object_content_read_end(
  */
 int
 vm_object_cache_published(
-	struct inode *);
+	struct inode *inode);
 
 int
 vm_object_content_begin(
-	struct file *,
-	off_t,
-	size_t,
-	struct vm_object_resize *,
-	struct vm_object_content *);
+	struct file *file,
+	off_t offset,
+	size_t length,
+	struct vm_object_resize *resize_owner,
+	struct vm_object_content *content);
 
 int
 vm_object_content_prepare(
-	struct vm_object_content *);
+	struct vm_object_content *content);
 
 void
 vm_object_content_commit(
-	struct vm_object_content *,
-	const void *,
-	size_t);
+	struct vm_object_content *content,
+	const void *buffer,
+	size_t committed);
 
 void
 vm_object_content_abort(
-	struct vm_object_content *);
+	struct vm_object_content *content);
 /*
  * Return ENOENT when no published cache exists; callers may then use the
  * backend while retaining i_io_lock.
  */
 int
 vm_object_read_coherent(
-	struct inode *,
-	off_t,
-	void *,
-	size_t,
-	ssize_t *);
+	struct inode *inode,
+	off_t offset,
+	void *buffer,
+	size_t length,
+	ssize_t *result);
 
 int
 vm_object_resize_begin(
-	struct inode *,
-	off_t,
-	struct vm_object_resize *);
+	struct inode *inode,
+	off_t target_size,
+	struct vm_object_resize *resize);
 
 int
 vm_object_resize_prepare(
-	struct vm_object_resize *);
+	struct vm_object_resize *resize);
 
 void
 vm_object_resize_commit(
-	struct vm_object_resize *,
-	off_t);
+	struct vm_object_resize *resize,
+	off_t logical_size);
 
 void
 vm_object_resize_abort(
-	struct vm_object_resize *);
+	struct vm_object_resize *resize);
 
 /*
  * Transitional test/helper entry point.  Production EOF mutations use the
@@ -318,8 +318,8 @@ vm_object_resize_abort(
  */
 void
 vm_object_truncate_inode(
-	struct inode *,
-	off_t);
+	struct inode *inode,
+	off_t size);
 
 int
 vm_object_reclaim_one(void);

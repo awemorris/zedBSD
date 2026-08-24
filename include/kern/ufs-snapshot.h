@@ -34,37 +34,37 @@ struct ufs_snapshot {
 
 int
 ufs_snapshot_init(
-	struct ufs_snapshot *,
-	const struct ufs_journal_io *,
-	uint64_t,
-	uint64_t,
-	uint32_t,
-	struct ufs_snapshot_entry *,
-	size_t);
+	struct ufs_snapshot *snapshot,
+	const struct ufs_journal_io *io,
+	uint64_t volume,
+	uint64_t first,
+	uint32_t sectors,
+	struct ufs_snapshot_entry *map,
+	size_t map_count);
 
 int
 ufs_snapshot_open(
-	struct ufs_snapshot *);
+	struct ufs_snapshot *snapshot);
 
 int
 ufs_snapshot_create(
-	struct ufs_snapshot *);
+	struct ufs_snapshot *snapshot);
 
 int
 ufs_snapshot_preserve(
-	struct ufs_snapshot *,
-	uint64_t,
-	uint32_t);
+	struct ufs_snapshot *snapshot,
+	uint64_t first,
+	uint32_t count);
 
 int
 ufs_snapshot_read(
-	struct ufs_snapshot *,
-	uint64_t,
-	uint32_t,
-	void *);
+	struct ufs_snapshot *snapshot,
+	uint64_t first,
+	uint32_t count,
+	void *buffer);
 
 int
 ufs_snapshot_delete(
-	struct ufs_snapshot *);
+	struct ufs_snapshot *snapshot);
 
 #endif

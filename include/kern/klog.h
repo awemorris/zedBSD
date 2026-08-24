@@ -16,20 +16,20 @@ kern_log_init(void);
 
 void
 kern_log_write(
-	const char *,
-	size_t);
+	const char *bytes,
+	size_t length);
 
 void
 kern_logf(
-	const char *,
+	const char *format,
 	...)
 __attribute__((format(printf, 1, 2)));
 
 size_t
 kern_log_snapshot(
-	char *,
-	size_t,
-	uint64_t *);
+	char *buffer,
+	size_t capacity,
+	uint64_t *dropped);
 
 size_t
 kern_log_capacity(void);

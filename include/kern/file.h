@@ -185,169 +185,169 @@ struct file {
 
 int
 file_openat(
-	struct cwdinfo *,
-	const char *,
-	int,
-	mode_t,
-	struct file **);
+	struct cwdinfo *context,
+	const char *path,
+	int flags,
+	mode_t mode,
+	struct file **result);
 
 int
 file_openat_cred(
-	struct cwdinfo *,
-	const struct ucred *,
-	const char *,
-	int,
-	mode_t,
-	struct file **);
+	struct cwdinfo *context,
+	const struct ucred *cred,
+	const char *path,
+	int flags,
+	mode_t mode,
+	struct file **result);
 
 int
 file_open_resolved(
-	const struct path *,
-	int,
-	struct file **);
+	const struct path *resolved,
+	int flags,
+	struct file **result);
 
 int
 file_create_pseudo(
-	const struct file_ops *,
-	int,
-	void *,
-	struct file **);
+	const struct file_ops *ops,
+	int flags,
+	void *data,
+	struct file **result);
 
 int
 file_io_begin_cred(
-	struct file *,
-	enum file_io_kind,
-	off_t,
-	unsigned,
-	const struct ucred *,
-	struct file_io *);
+	struct file *file,
+	enum file_io_kind kind,
+	off_t offset,
+	unsigned internal_flags,
+	const struct ucred *credential,
+	struct file_io *io);
 
 int
 file_io_begin(
-	struct file *,
-	enum file_io_kind,
-	off_t,
-	unsigned,
-	struct file_io *);
+	struct file *file,
+	enum file_io_kind kind,
+	off_t offset,
+	unsigned internal_flags,
+	struct file_io *io);
 
 void
 file_io_set_growth_limit(
-	struct file_io *,
-	uint64_t);
+	struct file_io *io,
+	uint64_t limit);
 
 int
 file_io_take_growth_limit_hit(
-	struct file_io *);
+	struct file_io *io);
 
 ssize_t
 file_io_transfer(
-	struct file_io *,
-	void *,
-	size_t);
+	struct file_io *io,
+	void *buffer,
+	size_t length);
 
 void
 file_io_end(
-	struct file_io *);
+	struct file_io *io);
 
 int
 file_content_lease_begin(
-	struct file *,
-	struct file_content_lease *);
+	struct file *file,
+	struct file_content_lease *lease);
 
 ssize_t
 file_content_lease_pread(
-	struct file_content_lease *,
-	void *,
-	size_t,
-	off_t);
+	struct file_content_lease *lease,
+	void *buffer,
+	size_t length,
+	off_t offset);
 
 void
 file_content_lease_end(
-	struct file_content_lease *);
+	struct file_content_lease *lease);
 
 ssize_t
 file_read(
-	struct file *,
-	void *,
-	size_t);
+	struct file *file,
+	void *buffer,
+	size_t length);
 
 ssize_t
 file_pread(
-	struct file *,
-	void *,
-	size_t,
-	off_t);
+	struct file *file,
+	void *buffer,
+	size_t length,
+	off_t offset);
 
 ssize_t
 file_pread_internal(
-	struct file *,
-	void *,
-	size_t,
-	off_t,
-	unsigned);
+	struct file *file,
+	void *buffer,
+	size_t length,
+	off_t offset,
+	unsigned internal_flags);
 
 ssize_t
 file_pwrite(
-	struct file *,
-	const void *,
-	size_t,
-	off_t);
+	struct file *file,
+	const void *buffer,
+	size_t length,
+	off_t offset);
 
 ssize_t
 file_pwrite_internal(
-	struct file *,
-	const void *,
-	size_t,
-	off_t,
-	unsigned);
+	struct file *file,
+	const void *buffer,
+	size_t length,
+	off_t offset,
+	unsigned internal_flags);
 
 ssize_t
 file_pwrite_internal_cred(
-	struct file *,
-	const void *,
-	size_t,
-	off_t,
-	unsigned,
-	const struct ucred *);
+	struct file *file,
+	const void *buffer,
+	size_t length,
+	off_t offset,
+	unsigned internal_flags,
+	const struct ucred *credential);
 
 ssize_t
 file_write(
-	struct file *,
-	const void *,
-	size_t);
+	struct file *file,
+	const void *buffer,
+	size_t length);
 
 int
 file_readdir(
-	struct file *,
-	struct dirent *,
-	int *);
+	struct file *file,
+	struct dirent *entry,
+	int *eof);
 
 off_t
 file_seek(
-	struct file *,
-	off_t,
-	int);
+	struct file *file,
+	off_t offset,
+	int whence);
 
 int
 file_ioctl(
-	struct file *,
-	unsigned long,
-	uintptr_t);
+	struct file *file,
+	unsigned long request,
+	uintptr_t argument);
 
 /*
  * Flush this open file/backend; VM pages are synchronized by vm-object.
  */
 int
 file_fsync(
-	struct file *);
+	struct file *file);
 
 int
 file_close(
-	struct file *);
+	struct file *file);
 
 void
 file_ref(
-	struct file *);
+	struct file *file);
 
 static inline int
 file_status_flags_get(
@@ -358,13 +358,13 @@ file_status_flags_get(
 
 void
 file_status_flags_update(
-	struct file *,
-	int,
-	int);
+	struct file *file,
+	int mask,
+	int value);
 
 struct inode *
 file_vm_inode(
-	struct file *);
+	struct file *file);
 
 void
 file_pool_reset(void);

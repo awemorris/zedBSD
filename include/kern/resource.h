@@ -11,11 +11,11 @@
 
 void
 kern_resource_snapshot(
-	struct system_resource_info *);
+	struct system_resource_info *out);
 
 int
 kern_resource_equal(
-	const struct system_resource_info *,
-	const struct system_resource_info *);
+	const struct system_resource_info *a,
+	const struct system_resource_info *b);
 
 #endif

@@ -195,307 +195,307 @@ int
 drv_pci_scan_all(void);
 int
 drv_pci_foreach_bus(
-	drv_pci_bus_iterator_t,
-	void *);
+	drv_pci_bus_iterator_t fn,
+	void *arg);
 int
 drv_pci_foreach_device(
-	drv_pci_device_iterator_t,
-	void *);
+	drv_pci_device_iterator_t fn,
+	void *arg);
 
 /*
  * Host bridge and PCI bus objects.
  */
 int
 drv_pci_bus_create_root(
-	uint16_t,
-	uint8_t,
-	const struct drv_pci_bus_ops *,
-	void *,
-	struct drv_dma_device *,
-	struct drv_pci_bus **);
+	uint16_t segment,
+	uint8_t number,
+	const struct drv_pci_bus_ops *ops,
+	void *host,
+	struct drv_dma_device *dma,
+	struct drv_pci_bus **result);
 int
 drv_pci_bus_create_child(
-	struct drv_pci_bus *,
-	struct drv_pci_device *,
-	uint8_t,
-	struct drv_pci_bus **);
+	struct drv_pci_bus *parent,
+	struct drv_pci_device *bridge,
+	uint8_t number,
+	struct drv_pci_bus **result);
 int
 drv_pci_bus_destroy(
-	struct drv_pci_bus *);
+	struct drv_pci_bus *bus);
 int
 drv_pci_bus_scan(
-	struct drv_pci_bus *);
+	struct drv_pci_bus *bus);
 int
 drv_pci_bus_rescan(
-	struct drv_pci_bus *);
+	struct drv_pci_bus *bus);
 int
 drv_pci_bus_scan_tree(
-	struct drv_pci_bus *);
+	struct drv_pci_bus *bus);
 uint16_t
 drv_pci_bus_segment(
-	const struct drv_pci_bus *);
+	const struct drv_pci_bus *b);
 uint8_t
 drv_pci_bus_number(
-	const struct drv_pci_bus *);
+	const struct drv_pci_bus *b);
 struct drv_pci_bus *
 drv_pci_bus_parent(
-	const struct drv_pci_bus *);
+	const struct drv_pci_bus *b);
 struct drv_pci_device *
 drv_pci_bus_bridge(
-	const struct drv_pci_bus *);
+	const struct drv_pci_bus *b);
 int
 drv_pci_bus_foreach_device(
-	struct drv_pci_bus *,
-	drv_pci_device_iterator_t,
-	void *);
+	struct drv_pci_bus *b,
+	drv_pci_device_iterator_t fn,
+	void *arg);
 
 /*
  * Device identity and topology.
  */
 struct drv_pci_device *
 drv_pci_find_device(
-	const struct drv_pci_address *);
+	const struct drv_pci_address *a);
 struct drv_pci_device *
 drv_pci_find_id(
-	uint16_t,
-	uint16_t,
-	struct drv_pci_device *);
+	uint16_t v,
+	uint16_t p,
+	struct drv_pci_device *after);
 struct drv_pci_device *
 drv_pci_find_class(
-	uint32_t,
-	uint32_t,
-	struct drv_pci_device *);
+	uint32_t c,
+	uint32_t m,
+	struct drv_pci_device *after);
 struct drv_pci_bus *
 drv_pci_device_bus(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 struct drv_pci_bus *
 drv_pci_device_subordinate_bus(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 void
 drv_pci_device_address(
-	const struct drv_pci_device *,
-	struct drv_pci_address *);
+	const struct drv_pci_device *d,
+	struct drv_pci_address *a);
 uint16_t
 drv_pci_device_vendor(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 uint16_t
 drv_pci_device_product(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 uint16_t
 drv_pci_device_subvendor(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 uint16_t
 drv_pci_device_subproduct(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 uint32_t
 drv_pci_device_class(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 uint8_t
 drv_pci_device_revision(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 uint8_t
 drv_pci_device_header_type(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 bool
 drv_pci_device_is_bridge(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 bool
 drv_pci_device_is_multifunction(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 
 /*
  * PCI configuration space.
  */
 int
 drv_pci_device_config_read8(
-	struct drv_pci_device *,
-	unsigned,
-	uint8_t *);
+	struct drv_pci_device *d,
+	unsigned o,
+	uint8_t *v);
 int
 drv_pci_device_config_read16(
-	struct drv_pci_device *,
-	unsigned,
-	uint16_t *);
+	struct drv_pci_device *d,
+	unsigned o,
+	uint16_t *v);
 int
 drv_pci_device_config_read32(
-	struct drv_pci_device *,
-	unsigned,
-	uint32_t *);
+	struct drv_pci_device *d,
+	unsigned o,
+	uint32_t *v);
 int
 drv_pci_device_config_write8(
-	struct drv_pci_device *,
-	unsigned,
-	uint8_t);
+	struct drv_pci_device *d,
+	unsigned o,
+	uint8_t v);
 int
 drv_pci_device_config_write16(
-	struct drv_pci_device *,
-	unsigned,
-	uint16_t);
+	struct drv_pci_device *d,
+	unsigned o,
+	uint16_t v);
 int
 drv_pci_device_config_write32(
-	struct drv_pci_device *,
-	unsigned,
-	uint32_t);
+	struct drv_pci_device *d,
+	unsigned o,
+	uint32_t v);
 int
 drv_pci_device_find_capability(
-	struct drv_pci_device *,
-	uint8_t,
-	unsigned *);
+	struct drv_pci_device *d,
+	uint8_t id,
+	unsigned *result);
 int
 drv_pci_device_find_extended_capability(
-	struct drv_pci_device *,
-	uint16_t,
-	unsigned,
-	unsigned *);
+	struct drv_pci_device *d,
+	uint16_t id,
+	unsigned start,
+	unsigned *result);
 
 /*
  * Device command register and BAR access.
  */
 int
 drv_pci_device_enable(
-	struct drv_pci_device *);
+	struct drv_pci_device *d);
 void
 drv_pci_device_disable(
-	struct drv_pci_device *);
+	struct drv_pci_device *d);
 int
 drv_pci_device_enable_io(
-	struct drv_pci_device *);
+	struct drv_pci_device *d);
 int
 drv_pci_device_enable_memory(
-	struct drv_pci_device *);
+	struct drv_pci_device *d);
 int
 drv_pci_device_set_bus_master(
-	struct drv_pci_device *,
-	bool);
+	struct drv_pci_device *d,
+	bool on);
 unsigned
 drv_pci_device_bar_count(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 int
 drv_pci_device_bar(
-	const struct drv_pci_device *,
-	unsigned,
-	struct drv_pci_bar *);
+	const struct drv_pci_device *d,
+	unsigned i,
+	struct drv_pci_bar *b);
 int
 drv_pci_device_assign_bar(
-	struct drv_pci_device *,
-	unsigned,
-	uint64_t);
+	struct drv_pci_device *d,
+	unsigned i,
+	uint64_t a);
 int
 drv_pci_device_claim_bar(
-	struct drv_pci_device *,
-	unsigned);
+	struct drv_pci_device *d,
+	unsigned i);
 void
 drv_pci_device_release_bar(
-	struct drv_pci_device *,
-	unsigned);
+	struct drv_pci_device *d,
+	unsigned i);
 int
 drv_pci_device_map_bar(
-	struct drv_pci_device *,
-	unsigned,
-	unsigned,
-	struct drv_pci_mapping *);
+	struct drv_pci_device *d,
+	unsigned i,
+	unsigned f,
+	struct drv_pci_mapping *m);
 int
 drv_pci_device_map_bar_region(
-	struct drv_pci_device *,
-	unsigned,
-	uint64_t,
-	size_t,
-	unsigned,
-	struct drv_pci_mapping *);
+	struct drv_pci_device *d,
+	unsigned i,
+	uint64_t o,
+	size_t s,
+	unsigned f,
+	struct drv_pci_mapping *m);
 void
 drv_pci_device_unmap_bar(
-	struct drv_pci_device *,
-	struct drv_pci_mapping *);
+	struct drv_pci_device *d,
+	struct drv_pci_mapping *m);
 
 /*
  * Interrupt allocation and handler registration.
  */
 int
 drv_pci_device_allocate_irqs(
-	struct drv_pci_device *,
-	unsigned,
-	unsigned,
-	unsigned,
-	struct drv_pci_irq *,
-	unsigned *);
+	struct drv_pci_device *d,
+	unsigned flags,
+	unsigned min,
+	unsigned max,
+	struct drv_pci_irq *i,
+	unsigned *n);
 void
 drv_pci_device_free_irqs(
-	struct drv_pci_device *,
-	struct drv_pci_irq *,
-	unsigned);
+	struct drv_pci_device *d,
+	struct drv_pci_irq *i,
+	unsigned n);
 int
 drv_pci_device_establish_irq(
-	struct drv_pci_device *,
-	const struct drv_pci_irq *,
-	drv_pci_irq_handler_t,
-	void *,
-	const char *,
-	void **);
+	struct drv_pci_device *d,
+	const struct drv_pci_irq *i,
+	drv_pci_irq_handler_t h,
+	void *a,
+	const char *n,
+	void **result);
 void
 drv_pci_device_disestablish_irq(
-	struct drv_pci_device *,
-	void *);
+	struct drv_pci_device *d,
+	void *cookie);
 
 /*
  * Driver binding and per-device driver state.
  */
 struct drv_dma_device *
 drv_pci_device_dma(
-	struct drv_pci_device *);
+	struct drv_pci_device *d);
 struct drv_pci_driver *
 drv_pci_device_driver(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 void *
 drv_pci_device_driver_data(
-	const struct drv_pci_device *);
+	const struct drv_pci_device *d);
 int
 drv_pci_device_set_driver_data(
-	struct drv_pci_device *,
-	void *);
+	struct drv_pci_device *d,
+	void *p);
 int
 drv_pci_device_probe(
-	struct drv_pci_device *);
+	struct drv_pci_device *d);
 int
 drv_pci_device_detach(
-	struct drv_pci_device *,
-	unsigned);
+	struct drv_pci_device *d,
+	unsigned f);
 int
 drv_pci_device_reprobe(
-	struct drv_pci_device *);
+	struct drv_pci_device *d);
 
 /*
  * Built-in driver registry and matching.
  */
 int
 drv_pci_driver_register(
-	struct drv_pci_driver *);
+	struct drv_pci_driver *r);
 int
 drv_pci_driver_unregister(
-	struct drv_pci_driver *);
+	struct drv_pci_driver *r);
 const char *
 drv_pci_driver_name(
-	const struct drv_pci_driver *);
+	const struct drv_pci_driver *r);
 size_t
 drv_pci_driver_device_count(
-	const struct drv_pci_driver *);
+	const struct drv_pci_driver *r);
 int
 drv_pci_driver_foreach_device(
-	struct drv_pci_driver *,
-	drv_pci_device_iterator_t,
-	void *);
+	struct drv_pci_driver *r,
+	drv_pci_device_iterator_t fn,
+	void *a);
 int
 drv_pci_id_match(
-	const struct drv_pci_id *,
-	const struct drv_pci_device *);
+	const struct drv_pci_id *i,
+	const struct drv_pci_device *d);
 const struct drv_pci_id *
 drv_pci_driver_find_id(
-	const struct drv_pci_driver *,
-	const struct drv_pci_device *);
+	const struct drv_pci_driver *r,
+	const struct drv_pci_device *d);
 int
 drv_pci_driver_match(
-	struct drv_pci_driver *,
-	struct drv_pci_device *,
-	const struct drv_pci_id **);
+	struct drv_pci_driver *r,
+	struct drv_pci_device *d,
+	const struct drv_pci_id **out);
 
 void
 drv_pci_dump(void);

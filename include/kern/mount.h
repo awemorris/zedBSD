@@ -108,41 +108,41 @@ struct fat_mount_args {
 
 int
 filesystem_register(
-	const struct filesystem_type *);
+	const struct filesystem_type *type);
 
 void
 mount_reset(void);
 
 void
 path_init(
-	struct path *);
+	struct path *path);
 
 void
 mount_ref(
-	struct mount *);
+	struct mount *mountp);
 
 void
 mount_release(
-	struct mount *);
+	struct mount *mountp);
 
 void
 path_set(
-	struct path *,
-	struct mount *,
-	struct inode *);
+	struct path *path,
+	struct mount *mountp,
+	struct inode *inode);
 
 void
 path_ref(
-	struct path *);
+	struct path *path);
 
 void
 path_release(
-	struct path *);
+	struct path *path);
 
 int
 path_equal(
-	const struct path *,
-	const struct path *);
+	const struct path *left,
+	const struct path *right);
 
 int
 mount_rootfs(void);
@@ -152,133 +152,133 @@ mount_root_inode(void);
 
 int
 mount_root_create(
-	const char *,
-	int,
-	void *,
-	struct mount **);
+	const char *type_name,
+	int flags,
+	void *data,
+	struct mount **result);
 
 struct mount *
 mount_root_get_ref(void);
 
 int
 mount_at(
-	const char *,
-	const struct path *,
-	const char *,
-	int,
-	void *,
-	struct mount **);
+	const char *type_name,
+	const struct path *directory,
+	const char *name,
+	int flags,
+	void *data,
+	struct mount **result);
 
 int
 mount_bind_at(
-	const struct path *,
-	const struct path *,
-	const char *,
-	struct mount **);
+	const struct path *source,
+	const struct path *directory,
+	const char *name,
+	struct mount **result);
 
 int
 mount_private(
-	const char *,
-	struct disk *,
-	int,
-	void *,
-	struct mount **);
+	const char *type_name,
+	struct disk *disk,
+	int flags,
+	void *data,
+	struct mount **result);
 
 int
 mount_private_lookup(
-	struct mount *,
-	const char *,
-	struct path *);
+	struct mount *mountp,
+	const char *relative,
+	struct path *result);
 
 int
 unmount_private(
-	struct mount *);
+	struct mount *mountp);
 
 int
 mount_is_private(
-	const struct mount *);
+	const struct mount *mountp);
 
 int
 mount_sync(
-	struct mount *);
+	struct mount *mountp);
 
 int
 mount_sync_all(void);
 
 int
 mount_statvfs(
-	struct mount *,
-	struct statvfs *);
+	struct mount *mountp,
+	struct statvfs *result);
 
 int
 mount_quotactl(
-	struct mount *,
-	struct quota_control *);
+	struct mount *mountp,
+	struct quota_control *request);
 
 int
 mount_snapshotctl(
-	struct mount *,
-	struct snapshot_control *);
+	struct mount *mountp,
+	struct snapshot_control *request);
 
 int
 mount(
-	const char *,
-	const char *,
-	int,
-	void *);
+	const char *type_name,
+	const char *dir,
+	int flags,
+	void *data);
 
 int
 unmount(
-	const char *,
-	int);
+	const char *dir,
+	int flags);
 
 struct mount *
 mount_find_ref(
-	const char *);
+	const char *path);
 
 struct mount *
 mount_for_inode(
-	const struct inode *);
+	const struct inode *inode);
 
 int
 mount_follow(
-	struct inode *,
-	struct inode **);
+	struct inode *inode,
+	struct inode **result);
 
 int
 mount_cross_parent(
-	struct inode *,
-	struct inode **);
+	struct inode *inode,
+	struct inode **result);
 
 int
 mount_lookup_child(
-	const struct path *,
-	const struct componentname *,
-	struct path *);
+	const struct path *directory,
+	const struct componentname *component,
+	struct path *result);
 
 int
 mount_cross_path_parent(
-	const struct path *,
-	struct path *);
+	const struct path *current,
+	struct path *result);
 
 int
 mount_readdir_child(
-	const struct path *,
-	unsigned *,
-	struct dirent *);
+	const struct path *directory,
+	unsigned *cursor,
+	struct dirent *entry);
 
 int
 mount_child_shadows(
-	const struct path *,
-	const char *);
+	const struct path *directory,
+	const char *name);
 
 void
 mount_vfs_transaction_enter(
-	struct mount *);
+	struct mount *mountp);
 
 void
 mount_vfs_transaction_leave(
-	struct mount *);
+	struct mount *mountp);
 
 unsigned
 mount_count(void);

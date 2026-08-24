@@ -38,78 +38,78 @@ struct uaccess_pin {
 
 int
 user_range_check(
-	uintptr_t,
-	size_t,
-	uint32_t);
+	uintptr_t address,
+	size_t size,
+	uint32_t prot);
 
 int
 user_address_add(
-	uintptr_t,
-	size_t,
-	uintptr_t *);
+	uintptr_t address,
+	size_t delta,
+	uintptr_t *result);
 
 int
 off_add_size(
-	off_t,
-	size_t,
-	off_t *);
+	off_t offset,
+	size_t delta,
+	off_t *result);
 
 int
 size_add_checked(
-	size_t,
-	size_t,
-	size_t *);
+	size_t left,
+	size_t right,
+	size_t *result);
 
 int
 uaccess_pin_vmspace(
-	struct vmspace *,
-	uintptr_t,
-	size_t,
-	uint32_t,
-	struct uaccess_pin *);
+	struct vmspace *vm,
+	uintptr_t address,
+	size_t size,
+	uint32_t prot,
+	struct uaccess_pin *pin);
 
 int
 uaccess_pin(
-	uintptr_t,
-	size_t,
-	uint32_t,
-	struct uaccess_pin *);
+	uintptr_t address,
+	size_t size,
+	uint32_t prot,
+	struct uaccess_pin *pin);
 
 void
 uaccess_unpin(
-	struct uaccess_pin *);
+	struct uaccess_pin *pin);
 
 int
 copyin_pinned(
-	const struct uaccess_pin *,
-	size_t,
-	void *,
-	size_t);
+	const struct uaccess_pin *pin,
+	size_t offset,
+	void *destination,
+	size_t size);
 
 int
 copyout_pinned(
-	const struct uaccess_pin *,
-	size_t,
-	const void *,
-	size_t);
+	const struct uaccess_pin *pin,
+	size_t offset,
+	const void *source,
+	size_t size);
 
 int
 copyin(
-	uintptr_t,
-	void *,
-	size_t);
+	uintptr_t source,
+	void *destination,
+	size_t size);
 
 int
 copyout(
-	const void *,
-	uintptr_t,
-	size_t);
+	const void *source,
+	uintptr_t destination,
+	size_t size);
 
 int
 copyinstr(
-	uintptr_t,
-	char *,
-	size_t,
-	size_t *);
+	uintptr_t source,
+	char *destination,
+	size_t capacity,
+	size_t *length);
 
 #endif

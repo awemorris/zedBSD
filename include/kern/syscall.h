@@ -18,25 +18,25 @@ struct thread;
  */
 int
 syscall_restart_deadline_after(
-	uint64_t,
-	uint64_t *);
+	uint64_t ticks,
+	uint64_t *deadline);
 
 int
 syscall_restart_deadline_rearm(
-	uint64_t,
-	uint64_t *);
+	uint64_t ticks,
+	uint64_t *deadline);
 
 void
 syscall_restart_state_begin(
-	struct thread *);
+	struct thread *thread);
 
 void
 syscall_restart_prepare_stop(
-	struct thread *);
+	struct thread *thread);
 
 void
 syscall_restart_state_finish(
-	struct thread *);
+	struct thread *thread);
 
 void
 syscall_init(void);

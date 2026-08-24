@@ -42,18 +42,18 @@ cdev_reset(void);
 
 int
 cdev_register(
-	const char *,
-	dev_t,
-	const struct cdev_ops *,
-	void *);
+	const char *name,
+	dev_t rdev,
+	const struct cdev_ops *ops,
+	void *data);
 
 const struct cdev *
 cdev_find(
-	const char *);
+	const char *name);
 
 const struct cdev *
 cdev_at(
-	unsigned);
+	unsigned index);
 
 unsigned
 cdev_count(void);

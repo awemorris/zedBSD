@@ -307,312 +307,312 @@ void
 drv_usb_shutdown(void);
 int
 drv_usb_hcd_register(
-	struct drv_usb_hcd *,
-	struct drv_usb_bus **);
+	struct drv_usb_hcd *hcd,
+	struct drv_usb_bus **result);
 int
 drv_usb_hcd_unregister(
-	struct drv_usb_hcd *);
+	struct drv_usb_hcd *hcd);
 void
 drv_usb_hcd_root_hub_changed(
-	struct drv_usb_hcd *);
+	struct drv_usb_hcd *hcd);
 void
 drv_usb_hcd_complete(
-	struct drv_usb_hcd *,
-	struct drv_usb_urb *,
-	enum drv_usb_urb_status,
-	size_t);
+	struct drv_usb_hcd *hcd,
+	struct drv_usb_urb *urb,
+	enum drv_usb_urb_status status,
+	size_t actual);
 
 /*
  * Bus, device, and interface enumeration.
  */
 int
 drv_usb_foreach_bus(
-	drv_usb_bus_iterator_t,
-	void *);
+	drv_usb_bus_iterator_t fn,
+	void *argument);
 int
 drv_usb_foreach_device(
-	drv_usb_device_iterator_t,
-	void *);
+	drv_usb_device_iterator_t fn,
+	void *a);
 int
 drv_usb_bus_foreach_device(
-	struct drv_usb_bus *,
-	drv_usb_device_iterator_t,
-	void *);
+	struct drv_usb_bus *b,
+	drv_usb_device_iterator_t fn,
+	void *a);
 int
 drv_usb_device_foreach_interface(
-	struct drv_usb_device *,
-	drv_usb_interface_iterator_t,
-	void *);
+	struct drv_usb_device *d,
+	drv_usb_interface_iterator_t fn,
+	void *a);
 struct drv_usb_device *
 drv_usb_find_device(
-	unsigned,
-	unsigned);
+	unsigned bus,
+	unsigned address);
 unsigned
 drv_usb_bus_number(
-	const struct drv_usb_bus *);
+	const struct drv_usb_bus *b);
 struct drv_usb_hcd *
 drv_usb_bus_hcd(
-	const struct drv_usb_bus *);
+	const struct drv_usb_bus *b);
 struct drv_usb_device *
 drv_usb_bus_root_hub(
-	const struct drv_usb_bus *);
+	const struct drv_usb_bus *b);
 
 /*
  * Device identity, topology, state, and standard requests.
  */
 struct drv_usb_bus *
 drv_usb_device_bus(
-	const struct drv_usb_device *);
+	const struct drv_usb_device *d);
 struct drv_usb_device *
 drv_usb_device_parent(
-	const struct drv_usb_device *);
+	const struct drv_usb_device *d);
 unsigned
 drv_usb_device_address(
-	const struct drv_usb_device *);
+	const struct drv_usb_device *d);
 unsigned
 drv_usb_device_port(
-	const struct drv_usb_device *);
+	const struct drv_usb_device *d);
 enum drv_usb_speed
 drv_usb_device_speed(
-	const struct drv_usb_device *);
+	const struct drv_usb_device *d);
 enum drv_usb_device_state
 drv_usb_device_state(
-	const struct drv_usb_device *);
+	const struct drv_usb_device *d);
 const struct drv_usb_device_descriptor *
 drv_usb_device_descriptor(
-	const struct drv_usb_device *);
+	const struct drv_usb_device *d);
 struct drv_dma_device *
 drv_usb_device_dma(
-	struct drv_usb_device *);
+	struct drv_usb_device *d);
 int
 drv_usb_device_reset(
-	struct drv_usb_device *);
+	struct drv_usb_device *d);
 int
 drv_usb_device_set_configuration(
-	struct drv_usb_device *,
-	unsigned);
+	struct drv_usb_device *d,
+	unsigned n);
 int
 drv_usb_device_get_string(
-	struct drv_usb_device *,
-	unsigned,
-	unsigned,
-	char *,
-	size_t);
+	struct drv_usb_device *d,
+	unsigned i,
+	unsigned l,
+	char *b,
+	size_t n);
 int
 drv_usb_control(
-	struct drv_usb_device *,
-	uint8_t,
-	uint8_t,
-	uint16_t,
-	uint16_t,
-	void *,
-	size_t,
-	unsigned,
-	size_t *);
+	struct drv_usb_device *d,
+	uint8_t rt,
+	uint8_t r,
+	uint16_t v,
+	uint16_t i,
+	void *b,
+	size_t n,
+	unsigned t,
+	size_t *a);
 
 /*
  * Configuration and interface descriptor access.
  */
 const struct drv_usb_configuration_descriptor *
 drv_usb_configuration_descriptor(
-	const struct drv_usb_configuration *);
+	const struct drv_usb_configuration *c);
 unsigned
 drv_usb_device_configuration_count(
-	const struct drv_usb_device *);
+	const struct drv_usb_device *d);
 struct drv_usb_configuration *
 drv_usb_device_configuration(
-	struct drv_usb_device *,
-	unsigned);
+	struct drv_usb_device *d,
+	unsigned i);
 struct drv_usb_configuration *
 drv_usb_device_active_configuration(
-	struct drv_usb_device *);
+	struct drv_usb_device *d);
 struct drv_usb_device *
 drv_usb_interface_device(
-	const struct drv_usb_interface *);
+	const struct drv_usb_interface *i);
 const struct drv_usb_interface_descriptor *
 drv_usb_interface_descriptor(
-	const struct drv_usb_interface *);
+	const struct drv_usb_interface *i);
 unsigned
 drv_usb_interface_number(
-	const struct drv_usb_interface *);
+	const struct drv_usb_interface *i);
 unsigned
 drv_usb_interface_alternate_count(
-	const struct drv_usb_interface *);
+	const struct drv_usb_interface *i);
 int
 drv_usb_interface_set_alternate(
-	struct drv_usb_interface *,
-	unsigned);
+	struct drv_usb_interface *i,
+	unsigned a);
 struct drv_usb_driver *
 drv_usb_interface_driver(
-	const struct drv_usb_interface *);
+	const struct drv_usb_interface *i);
 void *
 drv_usb_interface_driver_data(
-	const struct drv_usb_interface *);
+	const struct drv_usb_interface *i);
 int
 drv_usb_interface_set_driver_data(
-	struct drv_usb_interface *,
-	void *);
+	struct drv_usb_interface *i,
+	void *d);
 
 /*
  * Endpoint discovery and properties.
  */
 unsigned
 drv_usb_interface_endpoint_count(
-	const struct drv_usb_interface *);
+	const struct drv_usb_interface *i);
 struct drv_usb_endpoint *
 drv_usb_interface_endpoint(
-	struct drv_usb_interface *,
-	unsigned);
+	struct drv_usb_interface *i,
+	unsigned n);
 struct drv_usb_endpoint *
 drv_usb_interface_find_endpoint(
-	struct drv_usb_interface *,
-	enum drv_usb_transfer_type,
-	uint8_t,
-	struct drv_usb_endpoint *);
+	struct drv_usb_interface *i,
+	enum drv_usb_transfer_type t,
+	uint8_t dir,
+	struct drv_usb_endpoint *after);
 const struct drv_usb_endpoint_descriptor *
 drv_usb_endpoint_descriptor(
-	const struct drv_usb_endpoint *);
+	const struct drv_usb_endpoint *e);
 enum drv_usb_transfer_type
 drv_usb_endpoint_type(
-	const struct drv_usb_endpoint *);
+	const struct drv_usb_endpoint *e);
 uint8_t
 drv_usb_endpoint_address(
-	const struct drv_usb_endpoint *);
+	const struct drv_usb_endpoint *e);
 uint16_t
 drv_usb_endpoint_max_packet_size(
-	const struct drv_usb_endpoint *);
+	const struct drv_usb_endpoint *e);
 bool
 drv_usb_endpoint_is_input(
-	const struct drv_usb_endpoint *);
+	const struct drv_usb_endpoint *e);
 uintptr_t
 drv_usb_endpoint_hcd_data(
-	const struct drv_usb_endpoint *,
-	unsigned);
+	const struct drv_usb_endpoint *e,
+	unsigned n);
 int
 drv_usb_endpoint_set_hcd_data(
-	struct drv_usb_endpoint *,
-	unsigned,
-	uintptr_t);
+	struct drv_usb_endpoint *e,
+	unsigned n,
+	uintptr_t value);
 
 /*
  * Asynchronous USB Request Block (URB) allocation and submission.
  */
 struct drv_usb_urb *
 drv_usb_urb_alloc(
-	struct drv_usb_device *,
-	struct drv_usb_endpoint *,
-	unsigned);
+	struct drv_usb_device *d,
+	struct drv_usb_endpoint *e,
+	unsigned iso_count);
 void
 drv_usb_urb_free(
-	struct drv_usb_urb *);
+	struct drv_usb_urb *u);
 int
 drv_usb_urb_setup(
-	struct drv_usb_urb *,
-	void *,
-	size_t,
-	unsigned,
-	unsigned,
-	drv_usb_urb_callback_t,
-	void *);
+	struct drv_usb_urb *u,
+	void *b,
+	size_t n,
+	unsigned f,
+	unsigned t,
+	drv_usb_urb_callback_t cb,
+	void *a);
 int
 drv_usb_urb_setup_control(
-	struct drv_usb_urb *,
-	const struct drv_usb_control_request *,
-	void *,
-	size_t,
-	unsigned,
-	drv_usb_urb_callback_t,
-	void *);
+	struct drv_usb_urb *u,
+	const struct drv_usb_control_request *r,
+	void *b,
+	size_t n,
+	unsigned t,
+	drv_usb_urb_callback_t cb,
+	void *a);
 int
 drv_usb_urb_setup_isochronous(
-	struct drv_usb_urb *,
-	struct drv_usb_iso_packet *,
-	unsigned);
+	struct drv_usb_urb *u,
+	struct drv_usb_iso_packet *p,
+	unsigned n);
 int
 drv_usb_urb_submit(
-	struct drv_usb_urb *);
+	struct drv_usb_urb *u);
 int
 drv_usb_urb_cancel(
-	struct drv_usb_urb *);
+	struct drv_usb_urb *u);
 int
 drv_usb_urb_wait(
-	struct drv_usb_urb *);
+	struct drv_usb_urb *u);
 enum drv_usb_urb_status
 drv_usb_urb_status(
-	const struct drv_usb_urb *);
+	const struct drv_usb_urb *u);
 size_t
 drv_usb_urb_actual_length(
-	const struct drv_usb_urb *);
+	const struct drv_usb_urb *u);
 void *
 drv_usb_urb_buffer(
-	const struct drv_usb_urb *);
+	const struct drv_usb_urb *u);
 size_t
 drv_usb_urb_length(
-	const struct drv_usb_urb *);
+	const struct drv_usb_urb *u);
 unsigned
 drv_usb_urb_flags(
-	const struct drv_usb_urb *);
+	const struct drv_usb_urb *u);
 const struct drv_usb_control_request *
 drv_usb_urb_control_request(
-	const struct drv_usb_urb *);
+	const struct drv_usb_urb *u);
 void *
 drv_usb_urb_hcd_data(
-	const struct drv_usb_urb *);
+	const struct drv_usb_urb *u);
 int
 drv_usb_urb_set_hcd_data(
-	struct drv_usb_urb *,
-	void *);
+	struct drv_usb_urb *u,
+	void *d);
 struct drv_usb_device *
 drv_usb_urb_device(
-	const struct drv_usb_urb *);
+	const struct drv_usb_urb *u);
 struct drv_usb_endpoint *
 drv_usb_urb_endpoint(
-	const struct drv_usb_urb *);
+	const struct drv_usb_urb *u);
 
 /*
  * Convenient synchronous transfers implemented on top of URBs.
  */
 int
 drv_usb_bulk(
-	struct drv_usb_device *,
-	struct drv_usb_endpoint *,
-	void *,
-	size_t,
-	unsigned,
-	size_t *);
+	struct drv_usb_device *d,
+	struct drv_usb_endpoint *e,
+	void *b,
+	size_t n,
+	unsigned t,
+	size_t *a);
 int
 drv_usb_interrupt(
-	struct drv_usb_device *,
-	struct drv_usb_endpoint *,
-	void *,
-	size_t,
-	unsigned,
-	size_t *);
+	struct drv_usb_device *d,
+	struct drv_usb_endpoint *e,
+	void *b,
+	size_t n,
+	unsigned t,
+	size_t *a);
 
 /*
  * Built-in interface-driver registry and matching.
  */
 int
 drv_usb_driver_register(
-	struct drv_usb_driver *);
+	struct drv_usb_driver *d);
 int
 drv_usb_driver_unregister(
-	struct drv_usb_driver *);
+	struct drv_usb_driver *d);
 int
 drv_usb_interface_probe(
-	struct drv_usb_interface *);
+	struct drv_usb_interface *i);
 int
 drv_usb_interface_detach(
-	struct drv_usb_interface *,
-	unsigned);
+	struct drv_usb_interface *i,
+	unsigned f);
 int
 drv_usb_id_match(
-	const struct drv_usb_id *,
-	const struct drv_usb_interface *);
+	const struct drv_usb_id *id,
+	const struct drv_usb_interface *i);
 const struct drv_usb_id *
 drv_usb_driver_find_id(
-	const struct drv_usb_driver *,
-	const struct drv_usb_interface *);
+	const struct drv_usb_driver *d,
+	const struct drv_usb_interface *i);
 
 void
 drv_usb_dump(void);

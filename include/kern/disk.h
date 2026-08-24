@@ -225,29 +225,29 @@ bio_flush(
  */
 int
 disk_read_direct(
-	struct disk *,
-	uint64_t,
-	uint32_t,
-	void *);
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	void *data);
 
 int
 disk_write_direct(
-	struct disk *,
-	uint64_t,
-	uint32_t,
-	const void *);
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	const void *data);
 
 int
 disk_resolve_range(
-	struct disk *,
-	uint64_t,
-	uint32_t,
-	struct disk **,
-	uint64_t *);
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	struct disk **leaf_out,
+	uint64_t *mapped_out);
 
 int
 disk_sync(
-	struct disk *);
+	struct disk *disk);
 
 
 int

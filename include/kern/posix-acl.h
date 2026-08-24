@@ -44,36 +44,36 @@ struct ucred;
 
 int
 posix_acl_validate(
-	const struct posix_acl *);
+	const struct posix_acl *acl);
 
 int
 posix_acl_check_access(
-	const struct posix_acl *,
-	const struct inode *,
-	const struct ucred *,
-	int);
+	const struct posix_acl *acl,
+	const struct inode *inode,
+	const struct ucred *cred,
+	int requested);
 
 int
 posix_acl_load(
-	struct inode *,
-	const char *,
-	struct posix_acl *);
+	struct inode *inode,
+	const char *name,
+	struct posix_acl *acl);
 
 int
 posix_acl_store(
-	struct inode *,
-	const char *,
-	const struct posix_acl *);
+	struct inode *inode,
+	const char *name,
+	const struct posix_acl *acl);
 
 int
 posix_acl_chmod(
-	struct inode *,
-	mode_t);
+	struct inode *inode,
+	mode_t mode);
 
 int
 posix_acl_inherit(
-	struct inode *,
-	struct inode *,
-	mode_t *);
+	struct inode *parent,
+	struct inode *child,
+	mode_t *mode);
 
 #endif

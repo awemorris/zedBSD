@@ -202,14 +202,14 @@ recvfrom(
 	socklen_t *address_length);
 ssize_t
 sendmsg(
-	int,
-	const struct msghdr *,
-	int);
+	int descriptor,
+	const struct msghdr *message,
+	int flags);
 ssize_t
 recvmsg(
-	int,
-	struct msghdr *,
-	int);
+	int descriptor,
+	struct msghdr *message,
+	int flags);
 int
 shutdown(
 	int descriptor,
