@@ -15,3 +15,19 @@ Parent: [WS007](../ws.md)
 
 Software/model results and target i915 results remain separate evidence.
 
+## X11 focused commands
+
+The internal relative-pointer/clamp state is checked independently of the
+current PS/2 transport:
+
+```sh
+cc -std=c11 -I. -Wall -Wextra -Werror \
+  plan/ws007-graphics/tests/xzed-pointer-test.c \
+  -o /tmp/ws007-xzed-pointer-test
+/tmp/ws007-xzed-pointer-test
+```
+
+GFX-T00 and the device-path part of GFX-T01 use the bounded QEMU matrix recorded
+by their Phase documents. QEMU monitor mouse deltas are sent as small repeated
+movements because a single delta outside the PS/2 packet range sets hardware
+overflow bits and is intentionally discarded by the current driver.

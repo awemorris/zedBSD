@@ -15,3 +15,19 @@ Parent: [WS004](../ws.md)
 
 QEMU/model and physical-hardware results are always separate evidence fields.
 
+## HW-00 host regressions
+
+The foundation-audit regressions are ordinary host binaries and do not use a
+repository-wide test target:
+
+```sh
+cc -std=c11 -Iinclude -Wall -Wextra -Werror \
+  drivers/dma.c plan/ws004-hardware/tests/dma-constraints-test.c \
+  -o /tmp/ws004-dma-test
+/tmp/ws004-dma-test
+
+cc -std=c11 -Iinclude -Wall -Wextra -Werror \
+  drivers/pci.c plan/ws004-hardware/tests/pci-rescan-test.c \
+  -o /tmp/ws004-pci-test
+/tmp/ws004-pci-test
+```

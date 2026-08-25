@@ -22,6 +22,8 @@
 #include <zedbsd/graphics.h>
 #include <zedbsd/mouse.h>
 
+#include "userland/X11/xzed/pointer.h"
+
 #define MAX_CLIENTS 8
 #define MAX_WINDOWS 64
 #define MAX_GCS 64
@@ -1964,16 +1966,9 @@ mouse(struct server *s)
 			struct window *w;
 			struct client *c;
 			unsigned b;
-			s->pointer_x += ev[i].dx;
-			s->pointer_y += ev[i].dy;
-			if (s->pointer_x < 0)
-				s->pointer_x = 0;
-			if (s->pointer_y < 0)
-				s->pointer_y = 0;
-			if (s->pointer_x >= (int)s->mode.width)
-				s->pointer_x = (int)s->mode.width - 1;
-			if (s->pointer_y >= (int)s->mode.height)
-				s->pointer_y = (int)s->mode.height - 1;
+			xzed_pointer_move(&s->pointer_x, &s->pointer_y,
+					  ev[i].dx, ev[i].dy, s->mode.width,
+					  s->mode.height);
 			w = s->pointer_grab_owner >= 0
 				? find_window(s, s->pointer_grab_window)
 				: hit(s, s->pointer_x, s->pointer_y);

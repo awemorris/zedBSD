@@ -8,11 +8,17 @@ main(int argc, char **argv)
 {
 	char *copy, *base;
 	size_t length, suffix_length;
+	int status = 0;
+
+	if (argc > 1 && strcmp(argv[1], "--") == 0) {
+		argc--;
+		argv++;
+	}
 	if (argc != 2 && argc != 3) {
 		fprintf(stderr, "usage: basename string [suffix]\n");
 		return 1;
 	}
-	copy = strdup(argv[1][0] != '\0' ? argv[1] : ".");
+	copy = strdup(argv[1]);
 	if (copy == NULL) {
 		fprintf(stderr, "basename: out of memory\n");
 		return 1;
@@ -30,7 +36,8 @@ main(int argc, char **argv)
 	    suffix_length < length &&
 	    !memcmp(base + length - suffix_length, argv[2], suffix_length))
 		base[length - suffix_length] = '\0';
-	puts(base);
+	if (printf("%s\n", base) < 0 || fflush(stdout) == EOF)
+		status = 1;
 	free(copy);
-	return ferror(stdout) ? 1 : 0;
+	return status;
 }

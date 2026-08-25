@@ -4,21 +4,25 @@ Last updated: 2026-08-25
 
 WSID: `ws003`
 
-Status: planned; no Phase started
+Status: paused; first Phase carried forward
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: none
+Last verified Phase: `ws003-p001` attempted and carried forward
 
-Resume point: extract the exact Latitude hardware-inventory Phase, followed by
-a separate QEMU USB-image/xHCI boot Phase.
+Resume point: resume `ws003-p001` on the physical Latitude 5320 or from a
+user-supplied DMI/firmware/PCI/USB inventory.
 
 Shared tests: [WS003 test index](tests/README.md)
 
 ## Phase registry
 
-No Phase has started. The first extraction covers BR-00 only; BR-01–BR-04 may
-then be split according to the xHCI audit from WS004.
+| Combined ID | Work item | Status | Result |
+| --- | --- | --- | --- |
+| `ws003-p001` | [BR-00 hardware inventory](phase001-hardware-inventory/phase.md) | Carried forward | Active host is WSL2; target DMI/PCI/USB evidence is unavailable |
+
+BR-01–BR-04 may be split according to the xHCI audit from WS004 after the
+inventory resumes.
 
 ## Goals
 

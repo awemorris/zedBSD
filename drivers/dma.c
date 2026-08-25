@@ -1,4 +1,5 @@
-/* Generic no-IOMMU DMA implementation. Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* Generic no-IOMMU DMA implementation. Copyright (C) 2026 Awe Morris;
+ * SPDX-License-Identifier: Zlib */
 #include <drivers/dma.h>
 #include <errno.h>
 #include <hal/hal.h>
@@ -19,8 +20,8 @@ struct drv_dma_mapping {
 	enum drv_dma_direction direction;
 };
 
-static int address_fits(const struct drv_dma_device *device,
-	uint64_t address, size_t size)
+static int
+address_fits(const struct drv_dma_device *device, uint64_t address, size_t size)
 {
 	uint64_t limit;
 	if (device->constraints.address_bits >= 64U)
@@ -29,13 +30,23 @@ static int address_fits(const struct drv_dma_device *device,
 	return address < limit && size <= limit - address;
 }
 
-int drv_dma_device_create(const struct drv_dma_constraints *constraints,
-	struct drv_dma_device **result)
+static int
+is_power_of_two(uint64_t value)
+{
+	return value != 0 && (value & (value - 1U)) == 0;
+}
+
+int
+drv_dma_device_create(const struct drv_dma_constraints *constraints,
+		      struct drv_dma_device **result)
 {
 	struct drv_dma_device *device;
 	if (constraints == NULL || result == NULL ||
 	    constraints->address_bits == 0 || constraints->address_bits > 64 ||
-	    constraints->max_segment_size == 0)
+	    constraints->max_segment_size == 0 ||
+	    (constraints->segment_boundary != 0 &&
+	     (!is_power_of_two(constraints->segment_boundary) ||
+	      constraints->max_segment_size > constraints->segment_boundary)))
 		return EINVAL;
 	device = hal_malloc(sizeof(*device));
 	if (device == NULL)
@@ -46,7 +57,8 @@ int drv_dma_device_create(const struct drv_dma_constraints *constraints,
 	return 0;
 }
 
-int drv_dma_device_destroy(struct drv_dma_device *device)
+int
+drv_dma_device_destroy(struct drv_dma_device *device)
 {
 	if (device == NULL)
 		return EINVAL;
@@ -56,15 +68,25 @@ int drv_dma_device_destroy(struct drv_dma_device *device)
 	return 0;
 }
 
-unsigned drv_dma_device_address_bits(const struct drv_dma_device *device)
-{ return device == NULL ? 0 : device->constraints.address_bits; }
-size_t drv_dma_device_max_segment_size(const struct drv_dma_device *device)
-{ return device == NULL ? 0 : device->constraints.max_segment_size; }
-int drv_dma_device_is_coherent(const struct drv_dma_device *device)
-{ return device != NULL && device->constraints.coherent; }
+unsigned
+drv_dma_device_address_bits(const struct drv_dma_device *device)
+{
+	return device == NULL ? 0 : device->constraints.address_bits;
+}
+size_t
+drv_dma_device_max_segment_size(const struct drv_dma_device *device)
+{
+	return device == NULL ? 0 : device->constraints.max_segment_size;
+}
+int
+drv_dma_device_is_coherent(const struct drv_dma_device *device)
+{
+	return device != NULL && device->constraints.coherent;
+}
 
-int drv_dma_alloc_coherent(struct drv_dma_device *device, size_t size,
-	size_t alignment, struct drv_dma_buffer *buffer)
+int
+drv_dma_alloc_coherent(struct drv_dma_device *device, size_t size,
+		       size_t alignment, struct drv_dma_buffer *buffer)
 {
 	struct hal_pmem_request request;
 	struct dma_allocation *allocation;
@@ -80,12 +102,15 @@ int drv_dma_alloc_coherent(struct drv_dma_device *device, size_t size,
 	request.size = size;
 	if (alignment < hal_page_get_page_size(1))
 		alignment = hal_page_get_page_size(1);
+	if (device->constraints.segment_boundary != 0 &&
+	    alignment < device->constraints.segment_boundary)
+		alignment = device->constraints.segment_boundary;
 	request.alignment = alignment;
 	request.type = HAL_PMEM_TYPE_RAM;
 	request.attr = 0;
 	error = hal_pmem_alloc(&request, &allocation->memory);
 	if (error != HAL_OK || !address_fits(device, allocation->memory.paddr,
-	    allocation->memory.size)) {
+					     allocation->memory.size)) {
 		if (error == HAL_OK)
 			(void)hal_pmem_free(&allocation->memory);
 		hal_free(allocation);
@@ -101,8 +126,9 @@ int drv_dma_alloc_coherent(struct drv_dma_device *device, size_t size,
 	return 0;
 }
 
-void drv_dma_free_coherent(struct drv_dma_device *device,
-	struct drv_dma_buffer *buffer)
+void
+drv_dma_free_coherent(struct drv_dma_device *device,
+		      struct drv_dma_buffer *buffer)
 {
 	struct dma_allocation **link, *allocation;
 	if (device == NULL || buffer == NULL || buffer->private_data[0] == 0)
@@ -118,8 +144,9 @@ void drv_dma_free_coherent(struct drv_dma_device *device,
 		}
 }
 
-int drv_dma_map(struct drv_dma_device *device, void *address, size_t size,
-	enum drv_dma_direction direction, struct drv_dma_mapping **result)
+int
+drv_dma_map(struct drv_dma_device *device, void *address, size_t size,
+	    enum drv_dma_direction direction, struct drv_dma_mapping **result)
 {
 	struct dma_allocation *allocation;
 	struct drv_dma_mapping *mapping;
@@ -128,7 +155,7 @@ int drv_dma_map(struct drv_dma_device *device, void *address, size_t size,
 	    direction > DRV_DMA_BIDIRECTIONAL)
 		return EINVAL;
 	for (allocation = device->allocations; allocation != NULL;
-	    allocation = allocation->next) {
+	     allocation = allocation->next) {
 		uintptr_t base = (uintptr_t)allocation->memory.vaddr;
 		if (start < base || start - base > allocation->memory.size ||
 		    size > allocation->memory.size - (start - base))
@@ -136,7 +163,8 @@ int drv_dma_map(struct drv_dma_device *device, void *address, size_t size,
 		mapping = hal_malloc(sizeof(*mapping));
 		if (mapping == NULL)
 			return ENOMEM;
-		mapping->segment.address = allocation->memory.paddr + start - base;
+		mapping->segment.address =
+		    allocation->memory.paddr + start - base;
 		mapping->segment.length = size;
 		mapping->direction = direction;
 		*result = mapping;
@@ -145,20 +173,38 @@ int drv_dma_map(struct drv_dma_device *device, void *address, size_t size,
 	return ENOTSUP;
 }
 
-void drv_dma_unmap(struct drv_dma_device *device,
-	struct drv_dma_mapping *mapping)
-{ (void)device; if (mapping != NULL) hal_free(mapping); }
-unsigned drv_dma_mapping_segment_count(const struct drv_dma_mapping *mapping)
-{ return mapping == NULL ? 0U : 1U; }
-int drv_dma_mapping_segment(const struct drv_dma_mapping *mapping,
-	unsigned index, struct drv_dma_segment *segment)
+void
+drv_dma_unmap(struct drv_dma_device *device, struct drv_dma_mapping *mapping)
+{
+	(void)device;
+	if (mapping != NULL)
+		hal_free(mapping);
+}
+unsigned
+drv_dma_mapping_segment_count(const struct drv_dma_mapping *mapping)
+{
+	return mapping == NULL ? 0U : 1U;
+}
+int
+drv_dma_mapping_segment(const struct drv_dma_mapping *mapping, unsigned index,
+			struct drv_dma_segment *segment)
 {
 	if (mapping == NULL || segment == NULL || index != 0)
 		return EINVAL;
 	*segment = mapping->segment;
 	return 0;
 }
-void drv_dma_sync_for_cpu(struct drv_dma_device *device,
-	struct drv_dma_mapping *mapping) { (void)device; (void)mapping; }
-void drv_dma_sync_for_device(struct drv_dma_device *device,
-	struct drv_dma_mapping *mapping) { (void)device; (void)mapping; }
+void
+drv_dma_sync_for_cpu(struct drv_dma_device *device,
+		     struct drv_dma_mapping *mapping)
+{
+	(void)device;
+	(void)mapping;
+}
+void
+drv_dma_sync_for_device(struct drv_dma_device *device,
+			struct drv_dma_mapping *mapping)
+{
+	(void)device;
+	(void)mapping;
+}

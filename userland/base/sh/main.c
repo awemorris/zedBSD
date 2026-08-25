@@ -486,7 +486,21 @@ path_candidate(const char *path, size_t *position, const char *name,
 }
 
 static int
-search_path(const char *name, const char *suffix, int elf, char *candidate,
+is_executable_file(const char *path)
+{
+	struct stat status;
+
+	if (stat(path, &status) != 0)
+		return 0;
+	if (!S_ISREG(status.st_mode)) {
+		errno = EACCES;
+		return 0;
+	}
+	return access(path, X_OK) == 0;
+}
+
+static int
+search_path(const char *name, const char *suffix, char *candidate,
 	    size_t capacity)
 {
 	const char *path = sh_var_get("PATH");
@@ -497,8 +511,7 @@ search_path(const char *name, const char *suffix, int elf, char *candidate,
 		int last;
 		int result = path_candidate(path, &position, name, suffix,
 					    candidate, capacity, &last);
-		if (result > 0 &&
-		    (elf ? is_elf(candidate) : access(candidate, F_OK) == 0))
+		if (result > 0 && is_executable_file(candidate))
 			return 1;
 		if (last)
 			break;
@@ -524,7 +537,7 @@ run_shell_script(int argc, char **argv, const char *path)
 static int
 resolve_command(const char *name, char *candidate, size_t capacity)
 {
-	return search_path(name, "", 1, candidate, capacity);
+	return search_path(name, "", candidate, capacity);
 }
 
 static int
@@ -533,6 +546,10 @@ run_resolved(int argc, char **argv, const char *path)
 	char *child[ARG_MAX + 1];
 	int index;
 
+	if (!is_executable_file(path)) {
+		fprintf(stderr, "sh: %s: %s\n", path, strerror(errno));
+		return 0;
+	}
 	if (!is_elf(path)) {
 		return run_shell_script(argc, argv, path);
 	}
@@ -966,7 +983,7 @@ command_dispatch(int argc, char **argv)
 			else if (strchr(argv[index], '/') != NULL &&
 				 access(argv[index], F_OK) == 0)
 				puts(argv[index]);
-			else if (search_path(argv[index], "", 1, candidate,
+			else if (search_path(argv[index], "", candidate,
 					     sizeof(candidate)))
 				puts(candidate);
 			else
@@ -982,7 +999,7 @@ command_dispatch(int argc, char **argv)
 		if (argc < 2)
 			return 1;
 		if (strchr(child[0], '/') == NULL) {
-			if (!search_path(child[0], "", 1, candidate,
+			if (!search_path(child[0], "", candidate,
 					 sizeof(candidate)))
 				return 0;
 			child[0] = candidate;

@@ -4,22 +4,26 @@ Last updated: 2026-08-25
 
 WSID: `ws009`
 
-Status: planned; no Phase started
+Status: in progress; information architecture established
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: none
+Last verified Phase: `ws009-p001` complete
 
-Resume point: extract DOC-00 to establish the product-document hierarchy,
-status conventions, and automated link validation.
+Resume point: extract DOC-20 for the build guide, or a producer-linked public
+interface reference Phase.
 
 Shared tests: [WS009 test index](tests/README.md)
 
 ## Phase registry
 
-No Phase has started. Documentation work may be extracted alongside a producer
-WS when it describes a newly frozen public interface, but it retains a WS009
-Phase ID and acceptance record.
+| Phase | Status | Result / resume point |
+| --- | --- | --- |
+| [`ws009-p001`](phase001-information-architecture/phase.md) | Complete | Product hierarchy/rules and Noct relative-link validation established |
+
+Documentation work may be extracted alongside a producer WS when it describes
+a newly frozen public interface, but it retains a WS009 Phase ID and acceptance
+record.
 
 ## Goals
 
@@ -53,7 +57,7 @@ than assumed here.
 
 | ID | Status | Deliverable | Dependencies | Acceptance gate |
 | --- | --- | --- | --- | --- |
-| DOC-00 | Planned | Documentation information architecture, style, version/status banners, and link checks | Current docs inventory | Navigation and automated relative-link validation pass |
+| DOC-00 | Complete | Documentation information architecture, style, version/status banners, and link checks | Current docs inventory | Navigation and automated relative-link validation pass |
 | DOC-10 | Planned | zedBSD independent-specification overview | Architecture inventory | Each intentional divergence has rationale, stable contract, and implementation references |
 | DOC-11 | Planned | HAL overview and architecture-independent kernel structure | Kernel/platform audit | Subsystem boundaries, ownership, and amd64-specific examples are traceable to source |
 | DOC-12 | Planned | UAPI POSIX/SUS compliance and `_XOPEN_SOURCE` profile | PX-02 | Claims match headers, implementations, and compliance ledger |

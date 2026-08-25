@@ -4,21 +4,25 @@ Last updated: 2026-08-25
 
 WSID: `ws006`
 
-Status: planned; no Phase started
+Status: in progress; evdev profile frozen
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: none
+Last verified Phase: `ws006-p001` complete
 
-Resume point: extract IN-00 and freeze the evdev compatibility profile before
-implementing or publishing an ABI.
+Resume point: extract IN-01 as `ws006-p002` and implement the input core/event
+device against the frozen profile.
 
 Shared tests: [WS006 test index](tests/README.md)
 
 ## Phase registry
 
-No Phase has started. The intended sequence is ABI, input core, existing
-producer bridge, consumer migration, legacy-console removal, and USB HID.
+| Phase | Status | Result / resume point |
+| --- | --- | --- |
+| [`ws006-p001`](phase001-evdev-profile/phase.md) | Complete | Experimental UAPI/profile and dual-ABI layout tests pass |
+
+The remaining sequence is input core, existing producer bridge, consumer
+migration, legacy-console removal, and USB HID.
 
 ## Goals
 
@@ -65,7 +69,7 @@ console's character/key translation path.
 
 | ID | Status | Deliverable | Dependencies | Acceptance gate |
 | --- | --- | --- | --- | --- |
-| IN-00 | Planned | evdev compatibility profile and public UAPI | Existing console UAPI audit | Header/layout tests and a documented Linux/FreeBSD difference table |
+| IN-00 | Complete | evdev compatibility profile and public UAPI | Existing console UAPI audit | Header/layout tests pass and difference table is published |
 | IN-01 | Planned | Kernel input core, registration, event fan-out, buffering, poll/read, and lifecycle | IN-00, VFS/device primitives | Multiple-reader, overflow, nonblocking, poll, disconnect, and permission tests |
 | IN-02 | Planned | Existing console input producers also register evdev devices | IN-01 | Keyboard/mouse events appear under `/dev/input/` without breaking console text input |
 | IN-03 | Planned | Console consumes the internal input stream | IN-01/02 | Console editing, modifiers, repeat, virtual-terminal behavior, and evdev readers coexist |

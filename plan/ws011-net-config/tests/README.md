@@ -13,3 +13,15 @@ repository-wide `make check` target is not an acceptance interface.
 | `NVIR-T001`–`NVIR-T008` | `ws011-p004` | VLAN tags/isolation, bridge learning/forwarding, lifecycle, cycles, rollback |
 
 Future WLAN fixtures use synthetic, redacted credentials only.
+
+## Executable tests
+
+`netconf-parser-test.c` is the `ws011-p001` host contract test. Run it with:
+
+```sh
+cc -std=c11 -D_POSIX_C_SOURCE=200809L -I. -Wall -Wextra -Werror \
+  userland/base/net/netconf.c \
+  plan/ws011-net-config/tests/netconf-parser-test.c \
+  -o /tmp/ws011-netconf-test
+/tmp/ws011-netconf-test
+```

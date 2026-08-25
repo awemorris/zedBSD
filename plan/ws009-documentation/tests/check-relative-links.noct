@@ -1,0 +1,74 @@
+func parentDirectory(path) {
+    var last = -1;
+    for (i in 0..String.charCount(path)) {
+        if (String.charAt(path, i) == "/") { last = i; }
+    }
+    if (last < 0) { return "."; }
+    if (last == 0) { return "/"; }
+    return String.substring(path, 0, last);
+}
+
+func checkDocument(path) {
+    var content = FileUtil.readText(path);
+    var offset = 0;
+    var checked = 0;
+    while (offset < String.charCount(content)) {
+        var rest = String.substring(content, offset, -1);
+        var marker = String.indexOf(rest, "](");
+        if (marker < 0) { break; }
+        var begin = offset + marker + 2;
+        var tail = String.substring(content, begin, -1);
+        var close = String.indexOf(tail, ")");
+        if (close < 0) { System.error(path + ": unterminated Markdown link"); }
+        var target = String.substring(content, begin, close);
+        offset = begin + close + 1;
+
+        if (String.charCount(target) >= 2 &&
+            String.charAt(target, 0) == "<" &&
+            String.charAt(target, String.charCount(target) - 1) == ">") {
+            target = String.substring(target, 1, String.charCount(target) - 2);
+        }
+        var hash = String.indexOf(target, "#");
+        if (hash >= 0) { target = String.substring(target, 0, hash); }
+        var query = String.indexOf(target, "?");
+        if (query >= 0) { target = String.substring(target, 0, query); }
+
+        if (target == "" || String.charAt(target, 0) == "/" ||
+            String.indexOf(target, "://") >= 0 ||
+            String.indexOf(target, "mailto:") == 0) {
+            continue;
+        }
+        var resolved = parentDirectory(path) + "/" + target;
+        if (FileUtil.checkFileExists(resolved) != 1) {
+            System.error(path + ": missing relative link target: " + target);
+        }
+        checked = checked + 1;
+    }
+    return checked;
+}
+
+func walk(path) {
+    if (String.charAt(path, String.charCount(path) - 1) == "/") {
+        path = String.substring(path, 0, String.charCount(path) - 1);
+    }
+    var total = 0;
+    for (entry in FileUtil.listDirectory(path)) {
+        var child = path + "/" + entry;
+        if (String.charAt(entry, String.charCount(entry) - 1) == "/") {
+            total = total + walk(child);
+        } else if (String.charCount(entry) >= 3 &&
+                   String.substring(entry, String.charCount(entry) - 3, 3) == ".md") {
+            total = total + checkDocument(child);
+        }
+    }
+    return total;
+}
+
+func main(args) {
+    if (Array.size(args) == 0) {
+        System.error("usage: check-relative-links.noct ROOT...");
+    }
+    var total = 0;
+    for (root in args) { total = total + walk(root); }
+    print("Markdown relative-link check: PASS (" + total + " links)");
+}

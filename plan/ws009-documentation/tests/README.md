@@ -16,3 +16,15 @@ Parent: [WS009](../ws.md)
 Link validation is shared across all WSs; producer WSs own behavioral evidence
 while WS009 owns document accuracy and navigation.
 
+## DOC-T00 command
+
+Run the native Noct validator from the repository root:
+
+```sh
+build/NoctLang/build-static/noct \
+  plan/ws009-documentation/tests/check-relative-links.noct docs plan
+```
+
+It recursively checks every Markdown link with a relative file target. Web,
+mail, absolute-path, and same-document fragment links are intentionally outside
+this file-existence check.

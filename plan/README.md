@@ -3,6 +3,9 @@
 The authoritative program plan is [master.md](master.md). Planning documents
 are organized by permanent workstream ID (WSID):
 
+The currently selected cross-WS execution set and its status are tracked in
+[current-work.md](current-work.md).
+
 ```text
 plan/
   master.md

@@ -4,22 +4,26 @@ Last updated: 2026-08-25
 
 WSID: `ws004`
 
-Status: planned; no Phase started
+Status: in progress; software foundation audit complete
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: none
+Last verified Phase: `ws004-p001` complete (hardware observations deferred)
 
-Resume point: extract HW-00 to audit PCIe, DMA, interrupts, firmware loading,
-and the current xHCI gap before selecting driver implementation details.
+Resume point: capture `ws003-p001`, then define the PCIe ECAM/MSI prerequisites
+for HW-01 before implementing xHCI.
 
 Shared tests: [WS004 test index](tests/README.md)
 
 ## Phase registry
 
-No Phase has started. Candidate order is HW-00, HW-01/HW-02, HW-10/HW-11,
-HW-20/HW-21, and HW-30; each candidate becomes a Phase only when its inputs and
-acceptance environment are available.
+| Phase | Status | Result / resume point |
+| --- | --- | --- |
+| [`ws004-p001`](phase001-foundation-audit/phase.md) | Complete | Software audit and two common fixes pass; Latitude evidence remains in `ws003-p001` |
+
+Candidate order after p001 is HW-01/HW-02, HW-10/HW-11, HW-20/HW-21, and
+HW-30; each candidate becomes a Phase only when its inputs and acceptance
+environment are available.
 
 ## Goals
 
@@ -65,7 +69,7 @@ implemented initially, the security and addressability limitation is explicit.
 
 | ID | Status | Deliverable | Dependencies | Acceptance gate |
 | --- | --- | --- | --- | --- |
-| HW-00 | Planned | PCIe/DMA/interrupt capability audit and common fixes | BR-00 hardware inventory | Focused self-tests plus existing-device regression coverage |
+| HW-00 | Complete (software scope) | PCIe/DMA/interrupt capability audit and common fixes | BR-00 hardware inventory deferred | Focused host tests and amd64 build pass; physical findings remain separate |
 | HW-01 | Planned | xHCI host-controller support sufficient for storage and HID | HW-00, existing USB core | QEMU xHCI enumeration, transfer, error, and reconnect tests; then Latitude logs |
 | HW-02 | Planned | USB mass-storage behavior needed for root continuity | HW-01, block layer | QEMU USB-root U0–U5 and hardware USB-root tests |
 | HW-10 | Planned | NVMe controller, admin/I/O queues, namespaces, and block integration | HW-00 | QEMU NVMe install/mount/I/O/reset tests pass |

@@ -203,6 +203,20 @@ int drv_pci_bus_destroy(struct drv_pci_bus *bus)
 
 int drv_pci_device_probe(struct drv_pci_device *device);
 
+static struct drv_pci_device *find_device_on_bus(struct drv_pci_bus *bus,
+	const struct drv_pci_address *address)
+{
+	struct drv_pci_device *device;
+
+	for (device = bus->devices; device != NULL; device = device->next)
+		if (device->address.segment == address->segment &&
+		    device->address.bus == address->bus &&
+		    device->address.device == address->device &&
+		    device->address.function == address->function)
+			return device;
+	return NULL;
+}
+
 int drv_pci_bus_scan(struct drv_pci_bus *bus)
 {
 	unsigned slot, function;
@@ -216,6 +230,12 @@ int drv_pci_bus_scan(struct drv_pci_bus *bus)
 			uint32_t value;
 			if (cfg_read(bus, &address, 0, 4, &value) != 0 ||
 			    (value & 0xffffU) == 0xffffU) continue;
+			device = find_device_on_bus(bus, &address);
+			if (device != NULL) {
+				if (function == 0 && (device->header_type & 0x80U) != 0)
+					functions = 8;
+				continue;
+			}
 			device = hal_malloc(sizeof(*device)); if (device == NULL) return ENOMEM;
 			memset(device, 0, sizeof(*device)); device->address = address;
 			device->bus = bus;

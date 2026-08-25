@@ -24,3 +24,12 @@ those paths.
 When a new Phase fixes a ledger item, add its normative case, failure case,
 executable path, and environment here before marking the row reviewed.
 
+## ws001-p011 basename
+
+`basename-test.sh` covers empty, all-slash, double-slash, trailing-slash,
+suffix-equal, suffix-removal-to-empty, `--`, usage, and output-failure cases:
+
+```sh
+sh plan/ws001-posix/tests/basename-test.sh
+make -j16 build/amd64/bin/basename
+```

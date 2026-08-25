@@ -15,3 +15,14 @@ Parent: [WS006](../ws.md)
 
 Executable paths are added when each Phase is extracted.
 
+IN-T00 uses `evdev-layout-test.c`. Compile it for both zedBSD x86 ABIs without
+linking:
+
+```sh
+cc -m64 -nostdinc -Ilibc/include -Iinclude/uapi -Iinclude \
+  -DZEDBSD_USER_ABI_LP64 -std=c11 -Wall -Wextra -Werror -fsyntax-only \
+  plan/ws006-input/tests/evdev-layout-test.c
+cc -m32 -nostdinc -Ilibc/include -Iinclude/uapi -Iinclude \
+  -std=c11 -Wall -Wextra -Werror -fsyntax-only \
+  plan/ws006-input/tests/evdev-layout-test.c
+```

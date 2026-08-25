@@ -4,14 +4,14 @@ Last updated: 2026-08-25
 
 WSID: `ws011`
 
-Status: planned
+Status: in progress; `ws011-p001` complete
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: none
+Last verified Phase: `ws011-p001`
 
-Resume point: implement `ws011-p001`; freeze and test `/etc/net.conf` version 1
-before changing boot behavior.
+Resume point: implement `ws011-p002` using the frozen model; boot behavior is
+still unchanged until `ws011-p003`.
 
 Shared tests: [WS011 test index](tests/README.md)
 
@@ -62,7 +62,7 @@ strict YAML-like zedBSD format, not general YAML.
 
 | Combined ID | Phase | Status | Completion result |
 | --- | --- | --- | --- |
-| `ws011-p001` | [`net.conf` v1 format and parser](phase001-netconf/phase.md) | Planned | Strict parser, validator, canonical writer, and fixtures pass |
+| `ws011-p001` | [`net.conf` v1 format and parser](phase001-netconf/phase.md) | Complete | Strict native parser/model/writer and host/native build gates pass |
 | `ws011-p002` | [Interactive `net` console](phase002-console/phase.md) | Planned | Operational/configuration modes and argv commands agree |
 | `ws011-p003` | [Persistence and boot migration](phase003-persistence/phase.md) | Planned | `net.conf` is authoritative and static/DHCP boot paths pass |
 | `ws011-p004` | [VLAN and bridge interfaces](phase004-vlan-bridge/phase.md) | Proposed | VLAN and bridge topology operates through kernel and networkd |

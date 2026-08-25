@@ -16,6 +16,8 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
+The currently selected execution set is [current-work.md](current-work.md).
+
 ## 2. Goals
 
 ### 2.1 Current project goal
@@ -61,17 +63,17 @@ before this long-term product goal is reached.
 
 | WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
 | --- | --- | --- | --- | --- | --- |
-| `ws001` | POSIX.1-2024 compliance | Paused, ledger active | `ws001-p010` complete | Re-rank open ledger rows, then define the next Phase | [WS001](ws001-posix/ws.md) |
+| `ws001` | POSIX.1-2024 compliance | Paused, ledger active | `ws001-p011` complete | Select the next tier-1 proof candidate or an active tier-0 blocker | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | Dell Latitude 5320 bring-up | Planned | No Phase started | Create hardware-inventory and QEMU USB-boot Phases | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Planned | No Phase started | Audit PCIe/DMA/interrupt foundations and xHCI gap | [WS004](ws004-hardware/ws.md) |
+| `ws003` | Dell Latitude 5320 bring-up | Paused | `ws003-p001` carried forward | Resume inventory on the physical Latitude; WSL2 exposes no target DMI/PCI/USB data | [WS003](ws003-bringup/ws.md) |
+| `ws004` | Hardware expansion | In progress | `ws004-p001` software audit complete | Capture target inventory, then define ECAM/MSI prerequisites for xHCI | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Planned | WS002 Phase 20 is the inherited baseline | Start physical-network diagnostic Phase after inventory | [WS005](ws005-networking/ws.md) |
-| `ws006` | Input and evdev | Planned | No Phase started | Freeze the evdev compatibility profile | [WS006](ws006-input/ws.md) |
-| `ws007` | Graphics and desktop | Planned | No Phase started | Repair X11 packaging/input before GPU UAPI work | [WS007](ws007-graphics/ws.md) |
+| `ws006` | Input and evdev | In progress | `ws006-p001` complete | Implement input core/event device as `ws006-p002` | [WS006](ws006-input/ws.md) |
+| `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked before Phase | No Phase started | Obtain the authoritative Noct tree/revision | [WS008](ws008-noct/ws.md) |
-| `ws009` | Documentation | Planned | No Phase started | Establish document layout and link validation | [WS009](ws009-documentation/ws.md) |
+| `ws009` | Documentation | In progress | `ws009-p001` complete | Extract build guide or next producer-linked UAPI reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
-| `ws011` | Network configuration console | Planned | `ws011-p001` planned | Freeze and implement `/etc/net.conf` v1 before boot migration | [WS011](ws011-net-config/ws.md) |
+| `ws011` | Network configuration console | In progress | `ws011-p001` complete | Implement interactive console in `ws011-p002`; boot remains unchanged | [WS011](ws011-net-config/ws.md) |
 
 ## 4. Milestones
 
@@ -138,7 +140,7 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | WLAN controller and firmware policy | WS004/WS005 | WLAN driver/backend Phases |
 | `/etc/net.conf` v1 grammar and empty-collection syntax | WS011 | Parser and boot migration |
 | VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | `ws011-p004` implementation |
-| Linux/FreeBSD evdev compatibility profile | WS006 | Publishing `/dev/input/eventN` UAPI |
+| Linux/FreeBSD evdev compatibility profile | WS006 | Resolved by `ws006-p001`; implement `/dev/input/eventN` against it |
 | zedBSD GPU/Vulkan capability profile | WS007 | Publishing `/dev/gpuN` UAPI |
 | Authoritative Noct repository and revision | WS008 | First Noct implementation Phase |
 

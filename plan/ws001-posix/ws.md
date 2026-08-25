@@ -4,14 +4,14 @@ Last updated: 2026-08-25
 
 WSID: `ws001`
 
-Status: paused after `ws001-p010`; compliance ledger remains active
+Status: paused after `ws001-p011`; compliance ledger remains active
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws001-p010`
+Last verified Phase: `ws001-p011`
 
-Resume point: classify open ledger rows by priority and extract the next bounded
-Phase; do not reuse the retired Phase 11 proposal.
+Resume point: select the next tier-1 proof candidate or an active tier-0
+platform blocker from the re-ranked ledger.
 
 Shared tests: [WS001 test index](tests/README.md)
 
@@ -31,6 +31,7 @@ Shared tests: [WS001 test index](tests/README.md)
 | `ws001-p085` | [terminfo and base builds](phase085-terminfo/phase.md) | Complete | Legacy Phase 8.5: terminal packages and standalone builds |
 | `ws001-p009` | [POSIX utility audit](phase009-audit/phase.md) | Complete as audit | Findings remain in this ledger |
 | `ws001-p010` | [local reimplementation](phase010-local-reimplementation/phase.md) | Complete milestone | Imported `bc`, `ed`, and `m4` were replaced locally |
+| `ws001-p011` | [bounded basename correction](phase011-basename/phase.md) | Complete milestone | Host semantics/failure test and native amd64 build pass; runtime conformance handoff remains |
 
 Original combined planning context is retained in the
 [legacy Phase 0–10 plan](history/phase000-010-legacy-plan.md).
@@ -84,7 +85,7 @@ state across components.
 
 | Artifact | Authority |
 |---|---|
-| [`tests/posix-2024-utilities.csv`](../../tests/posix-2024-utilities.csv) | machine-readable utility inventory, requirement/profile, status, implementation evidence, and test evidence |
+| `tests/posix-2024-utilities.csv` (retired legacy artifact) | The removed machine-readable inventory was absorbed into this ledger; new shared fixtures must be copied into this WS `tests/` directory |
 | this master | project objectives, cross-component dependencies, subsystem/API progress, embedded unmet utility work, completed Phase 0--10 results, and the backlog from which future phases are created |
 | [`ws001-p009`](phase009-audit/phase.md) | detailed evidence and rationale from the 2026-08-24 first audit pass |
 | [`ws001-p010`](phase010-local-reimplementation/phase.md) | detailed removal and local reimplementation design for `bc`, `ed`, and `m4` |
@@ -172,6 +173,7 @@ providers, services, or cross-component semantics remain pending.
 | 18 | partial | zedBSD power/administration behavior and `/etc/zinit.rc` were removed and `sh -c` works; the required POSIX grammar and semantic inventory is substantially incomplete |
 | 19 | partial integration success | bounded amd64 QEMU service smoke passes through orderly poweroff initiation; the explicit hand-offs in Section 11 prevent a full integration claim |
 | 20 | implementation milestone complete | focused host tests, `make -j16`, and four-CPU amd64 QEMU prove FD 3 readiness, synchronous `/sbin/net boot`, a real NE2000 DHCP lease through one-shot `dhcpc`, route/DNS installation, restart, direct-ifconfig recovery, interactive shell recovery after `ifconfig`, and shutdown |
+| ws001-p011 | implementation milestone complete | `basename` empty/slash/suffix/`--`/stdout behavior corrected; focused host test and native amd64 ELF validation pass |
 
 The Phase 0--10 series is closed as completed on 2026-08-24.  Here,
 "completed" means that each phase's defined implementation, audit, or
@@ -330,7 +332,7 @@ The following findings are deliberately not promoted to success:
 | ID | Component | Observed limitation | Safe current state / next unit |
 |---|---|---|---|
 | P18-SH-GRAMMAR | `/bin/sh` | `if`/`then`, `for`, `case`, functions, grouping, subshell grammar, here-documents, and multiline continuation after operators are not parsed as POSIX reserved-word grammar | Phase 18 is partial.  Keep the safe simple-command/list executor, then replace the line-at-a-time parser with a token-stream AST parser and clause-mapped tests before claiming POSIX shell compliance. |
-| P18-SH-SEMANTICS | `/bin/sh` | `ENV`, strict/extension mode separation, complete redirections and expansion ordering, special-builtin error rules, and full job control remain unproved or absent; Phase 20 follow-up fixed foreground tty restoration and EOF/error prompt spinning after external commands | Preserve the tested interactive foreground handoff and libedit input; implement each remaining semantic family as a separate master-derived phase. |
+| P18-SH-SEMANTICS | `/bin/sh` | `ENV`, strict/extension mode separation, complete redirections and expansion ordering, special-builtin error rules, and full job control remain unproved or absent; Phase 20 fixed foreground tty restoration and EOF/error prompt spinning, and `ws007-p001` fixed executable-script PATH lookup | Preserve the tested interactive foreground handoff, script lookup, and libedit input; implement each remaining semantic family as a separate master-derived phase. |
 | P16-CRON | `cron`/`crontab` | QEMU proves durable crontab installation and proves the same daemon executes immediate at jobs, but periodic crontab execution and a restart attempted after scheduled work did not complete within the focused bound | Keep cron enabled as a minimal scheduler; add daemon reload/restart diagnostics, full field parser, deterministic clock fixture, locking, and periodic execution evidence. |
 | P16-AT-BATCH | `at`/`batch` | accepted time syntax is only `now`, `now + N minutes/hours`, and `HH:MM`; batch does not wait for a load threshold | Retain honest subset behavior and durable jobs; implement the POSIX operand grammar, queue policy, environment, cancellation races, and output delivery next. |
 | P13-KLOG | `syslogd` | boot messages are a snapshot, not a live kernel-log stream; rotation and storage failure policy are absent | Keep `/run/log` and `/var/log/messages`; add a pollable kernel reader and rotation/backpressure policy in a later logging phase. |
@@ -351,6 +353,21 @@ aggregate `make check` and its ILP32 path were not used.  Phase 20-modified
 userland/base C and header sources pass clang-format 19.1.7's dry-run check.
 No source commit was created.
 
+### 11.1 Re-ranked next-work tiers
+
+This ordering controls selection, not conformance status. A lower tier may be
+chosen when it directly blocks an active product milestone.
+
+| Tier | Selection rule | Current examples |
+| --- | --- | --- |
+| 0 — platform blockers | Cross-component defects that invalidate many tests or the supported environment | complete public API inventory, shell grammar/state, tty/job control, credentials, AF_UNIX poll readiness |
+| 1 — bounded proof/correction | Low-dependency utilities whose complete operand and failure surface can be isolated | `basename` (p011), then `dirname`, `link`, `unlink`, `cksum`, `true`, `false` |
+| 2 — shared-library dependent | Closure depends on locale, robust stdio, regex, account/session, or filesystem semantics | `cat`, `comm`, `grep`, `mesg`, `logname`, `wc`, metadata/traversal utilities |
+| 3 — language/service scale | Dedicated parsers, persistent providers, or broad algorithms are required | `awk`, `bc`, `ed`, `m4`, `sed`, `sh`, SCCS, cron/at, `mailx` |
+
+`ws001-p011` was selected from tier 1 so the ledger resumes with a small,
+honestly bounded result while tier-0 architectural work remains visible.
+
 ## 12. Phase 9 unmet utility register
 
 This section embeds all 111 findings from the first Phase 9 audit and carries
@@ -366,7 +383,7 @@ The current register therefore contains 0 P0, 73 P1, and 38 P2 findings.
 | 2 | [alias](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/alias.html) | P2 incomplete proof | Basic set/list/query exists; quoting of displayed values, name/error cases, alias-substitution timing, and persistence in a running shell are not tested. |
 | 3 | [ar](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/ar.html) | P2 incomplete proof | Archive mutation and a SysV/GNU symbol index exist; complete operation/modifier interactions, `-C`, position/name edge cases, malformed archives, metadata, interruption, and output failures remain unproved. |
 | 6 | [awk](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/awk.html) | P1 known incompatibility | Only trivial `print`/`$N` processing exists.  Implement the POSIX language locally, including options, grammar, EREs, variables, records/fields, arrays, functions, control flow, I/O, and diagnostics. |
-| 7 | [basename](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/basename.html) | P2 incomplete proof | Basic suffix removal exists; `//`, root-only paths, trailing slashes, suffix-equals-result, empty results, locale, usage, and broken stdout need exact tests. |
+| 7 | [basename](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/basename.html) | P2 narrowed by `ws001-p011` | Empty/all-slash/trailing-slash behavior, the chosen `//` result, suffix-equals/result removal, `--`, usage, and host broken-stdout cases pass; native runtime, allocation failure, and diagnostic-locale proof remain. |
 | 9 | [bc](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/bc.html) | P1 known incompatibility (P0 resolved 2026-08-24) | The independent local replacement provides arbitrary-length integer literals, scalar assignment, precedence, `+ - * / % ^`, files/stdin, and checked failures.  Decimal scale, `ibase`/`obase` conversion, comparisons and control flow, functions, arrays, strings, standard functions, and the `-l` math library remain. |
 | 13 | [cat](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/cat.html) | P2 incomplete proof | `-u` and copying exist; repeated stdin, partial reads/writes, `EINTR`, same-file/error paths, close errors, and broken stdout are not proved. |
 | 14 | [cd](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/cd.html) | P1 known incompatibility | Missing `-L`, `-P`, and `-e`, `CDPATH`, logical `..`, `PWD`/`OLDPWD` updates, correct unset-`HOME` behavior, and shell-environment tests. |
@@ -441,7 +458,7 @@ The current register therefore contains 0 P0, 73 P1, and 38 P2 findings.
 | 107 | [sact](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/sact.html) | P2 incomplete proof | Shared p-file display exists; multiple/no pending edits, malformed/classic files, operand naming, permissions, output failure, diagnostics, and locale behavior need review. |
 | 108 | [sccs](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/sccs.html) | P1 known incompatibility | Basic argument-safe dispatch exists, but standard options, directory/project-prefix rewriting, command-specific flags, bulk operands, exit propagation, and full subcommand set/format compatibility are incomplete. |
 | 109 | [sed](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/sed.html) | P1 known incompatibility | Supports `-n`, `p`, `d`, and a narrow substitution syntax only; addresses, script files/`-e`/`-f`, BRE commands, hold/pattern spaces, branches, multiline behavior, writes, and errors are absent. |
-| 110 | [sh](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/sh.html) | P1 known incompatibility | Not a complete POSIX shell language or environment.  Implement and test full grammar, expansions, assignments, redirections/here-documents, compound commands/functions, execution/search, traps/jobs, special builtins, and error/status rules. |
+| 110 | [sh](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/sh.html) | P1 known incompatibility | Not a complete POSIX shell language or environment. `ws007-p001` proved executable non-ELF scripts are now found through PATH and launched, but full grammar, expansions, assignments, redirections/here-documents, compound commands/functions, remaining execution/search rules, traps/jobs, special builtins, and error/status rules remain. |
 | 111 | [sleep](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/sleep.html) | P2 incomplete proof | One numeric duration and `nanosleep()` exist; accepted syntax/range, fractional precision, overflow, signal interruption/remainder policy, locale decimal point, stray operands, and diagnostics need tests. |
 | 112 | [sort](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/sort.html) | P1 known incompatibility | In-memory bytewise ordering with only a small option subset; keys, locale collation, numeric/month/dictionary/fold/nonprinting modes, merge/check/output, stable ties, large data, and I/O errors are absent. |
 | 113 | [split](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/split.html) | P1 known incompatibility | Basic `-l`/`-b` exists; `-a`, suffix exhaustion, size suffix grammar, zero/huge values, exact line/byte boundaries, file cleanup, existing outputs, short writes, and signals are incomplete. |
