@@ -70,6 +70,7 @@ before this long-term product goal is reached.
 | `ws007` | Graphics and desktop | Planned | No Phase started | Repair X11 packaging/input before GPU UAPI work | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked before Phase | No Phase started | Obtain the authoritative Noct tree/revision | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | Planned | No Phase started | Establish document layout and link validation | [WS009](ws009-documentation/ws.md) |
+| `ws010` | Scripting | Planned | No Phase started | Replace Python dependency. `make toolchain` builds internal `noct`. | [WS010](ws010-scripting/ws.md) (not created) |
 
 ## 4. Milestones
 
