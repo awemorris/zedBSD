@@ -18,6 +18,10 @@ static uint64_t system_pd[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64_t system_kernel_pt[8][512]
 	__attribute__((aligned(PAGE_SIZE)));
 static uint64_t system_mmio_pd[512] __attribute__((aligned(PAGE_SIZE)));
+#define AMD64_ECAM_PD_FIRST 128U
+#define AMD64_ECAM_PD_COUNT 128U
+#define AMD64_ECAM_VIRTUAL_BASE 0xffffffffd0000000ULL
+static unsigned ecam_pd_used;
 static uintptr_t system_cr3;
 #define AMD64_CURRENT_SPACE (amd64_percpu_current()->current_space)
 static int next_space_id = 1;
@@ -94,6 +98,7 @@ amd64_space_init(void)
 	hal_memset(system_pd, 0, sizeof(system_pd));
 	hal_memset(system_kernel_pt, 0, sizeof(system_kernel_pt));
 	hal_memset(system_mmio_pd, 0, sizeof(system_mmio_pd));
+	ecam_pd_used = 0;
 	for (index = 0; index < 512; index++)
 		system_pd[index] = (uint64_t)index * 0x200000ULL |
 		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE | AMD64_PTE_LARGE |
@@ -140,6 +145,8 @@ amd64_space_init(void)
 		    0x200000ULL);
 		if (count == 0 || count > 496U)
 			HAL_FATAL("amd64 framebuffer MMIO window exceeded");
+		if (16U + count > AMD64_ECAM_PD_FIRST)
+			HAL_FATAL("amd64 framebuffer overlaps ECAM virtual window");
 		for (index = 0; index < count; index++)
 			system_mmio_pd[16U + index] = (base +
 			    (uint64_t)index * 0x200000ULL) |
@@ -170,6 +177,32 @@ amd64_space_init(void)
 	system_cr3 = amd64_direct_to_phys(system_pml4);
 	asm_load_cr3(system_cr3);
 	__atomic_store_n(&AMD64_CURRENT_SPACE, HAL_SPACE_SYS, __ATOMIC_RELEASE);
+}
+
+int
+amd64_mmio_map_ecam(paddr_t physical, size_t size, void **result)
+{
+	const uint64_t page_size = 0x200000ULL;
+	uint64_t aligned, end, offset;
+	unsigned count, index, first;
+	if (result == NULL || size == 0 || physical > UINT64_MAX - size)
+		return HAL_ERR_INVALID;
+	aligned = (uint64_t)physical & ~(page_size - 1U);
+	offset = (uint64_t)physical - aligned;
+	end = offset + size;
+	count = (unsigned)((end + page_size - 1U) / page_size);
+	if (count == 0 || count > AMD64_ECAM_PD_COUNT - ecam_pd_used)
+		return HAL_ERR_UNSUPPORTED;
+	first = AMD64_ECAM_PD_FIRST + ecam_pd_used;
+	for (index = 0; index < count; index++)
+		system_mmio_pd[first + index] = (aligned +
+		    (uint64_t)index * page_size) | AMD64_PTE_PRESENT |
+		    AMD64_PTE_WRITE | AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |
+		    AMD64_PTE_GLOBAL | AMD64_PTE_NX;
+	ecam_pd_used += count;
+	*result = (void *)(uintptr_t)(AMD64_ECAM_VIRTUAL_BASE +
+	    (uint64_t)(first - AMD64_ECAM_PD_FIRST) * page_size + offset);
+	return HAL_OK;
 }
 
 static bool

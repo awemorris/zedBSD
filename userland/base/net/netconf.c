@@ -3,9 +3,11 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define NETCONF_LINE_MAX 512
 
@@ -775,4 +777,66 @@ netconf_write(FILE *stream, const struct netconf *configuration)
 				return -1;
 	}
 	return ferror(stream) ? -1 : 0;
+}
+
+int
+netconf_save_atomic(const char *path, const struct netconf *configuration,
+		    char *error, size_t capacity)
+{
+	char temporary[512], validation[160];
+	FILE *stream = NULL;
+	int descriptor = -1, saved_errno, temporary_created = 0;
+
+	if (path == NULL || configuration == NULL ||
+	    netconf_validate(configuration, validation, sizeof(validation)) !=
+		0) {
+		if (error != NULL && capacity != 0)
+			(void)snprintf(error, capacity, "%s",
+				       path == NULL || configuration == NULL
+					   ? "invalid save request"
+					   : validation);
+		errno = EINVAL;
+		return -1;
+	}
+	if (snprintf(temporary, sizeof(temporary), "%s.tmp.%ld", path,
+		     (long)getpid()) >= (int)sizeof(temporary)) {
+		errno = ENAMETOOLONG;
+		if (error != NULL && capacity != 0)
+			(void)snprintf(error, capacity, "path is too long");
+		return -1;
+	}
+	descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0644);
+	if (descriptor < 0)
+		goto failed;
+	temporary_created = 1;
+	stream = fdopen(descriptor, "w");
+	if (stream == NULL)
+		goto failed;
+	descriptor = -1;
+	if (netconf_write(stream, configuration) != 0 || fflush(stream) != 0 ||
+	    fsync(fileno(stream)) != 0)
+		goto failed;
+	if (fclose(stream) != 0) {
+		stream = NULL;
+		goto failed;
+	}
+	stream = NULL;
+	if (rename(temporary, path) != 0)
+		goto failed;
+	if (error != NULL && capacity != 0)
+		error[0] = '\0';
+	return 0;
+
+failed:
+	saved_errno = errno;
+	if (stream != NULL)
+		(void)fclose(stream);
+	else if (descriptor >= 0)
+		(void)close(descriptor);
+	if (temporary_created)
+		(void)unlink(temporary);
+	if (error != NULL && capacity != 0)
+		(void)snprintf(error, capacity, "%s", strerror(saved_errno));
+	errno = saved_errno;
+	return -1;
 }

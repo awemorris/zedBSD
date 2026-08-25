@@ -4,14 +4,14 @@ Last updated: 2026-08-25
 
 WSID: `ws011`
 
-Status: in progress; `ws011-p001` complete
+Status: in progress; `ws011-p003` software milestone complete
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws011-p001`
+Last verified Phase: `ws011-p003`
 
-Resume point: implement `ws011-p002` using the frozen model; boot behavior is
-still unchanged until `ws011-p003`.
+Resume point: retain a migrated-DHCP QEMU rerun, then begin `ws011-p004` only
+after its kernel VLAN/bridge dependencies are selected.
 
 Shared tests: [WS011 test index](tests/README.md)
 
@@ -63,8 +63,8 @@ strict YAML-like zedBSD format, not general YAML.
 | Combined ID | Phase | Status | Completion result |
 | --- | --- | --- | --- |
 | `ws011-p001` | [`net.conf` v1 format and parser](phase001-netconf/phase.md) | Complete | Strict native parser/model/writer and host/native build gates pass |
-| `ws011-p002` | [Interactive `net` console](phase002-console/phase.md) | Planned | Operational/configuration modes and argv commands agree |
-| `ws011-p003` | [Persistence and boot migration](phase003-persistence/phase.md) | Planned | `net.conf` is authoritative and static/DHCP boot paths pass |
+| `ws011-p002` | [Interactive `net` console](phase002-console/phase.md) | Complete | Three modes, candidate safety, argv sharing, help/history, and native image gates pass |
+| `ws011-p003` | [Persistence and boot migration](phase003-persistence/phase.md) | Complete software milestone | Atomic authoritative configuration and boot/request evidence pass; migrated DHCP QEMU rerun remains |
 | `ws011-p004` | [VLAN and bridge interfaces](phase004-vlan-bridge/phase.md) | Proposed | VLAN and bridge topology operates through kernel and networkd |
 
 ## Fixed decisions

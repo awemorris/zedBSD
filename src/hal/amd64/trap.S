@@ -118,6 +118,30 @@ IRQ 13
 IRQ 14
 IRQ 15
 
+.macro MSI n
+.Lmsi\n:
+	pushq $0
+	pushq $(AMD64_VECTOR_MSI_BASE + \n)
+	jmp amd64_common_interrupt
+.endm
+
+MSI 0
+MSI 1
+MSI 2
+MSI 3
+MSI 4
+MSI 5
+MSI 6
+MSI 7
+MSI 8
+MSI 9
+MSI 10
+MSI 11
+MSI 12
+MSI 13
+MSI 14
+MSI 15
+
 .global amd64_notify_entry
 amd64_notify_entry:
 	pushq $0
@@ -173,3 +197,10 @@ amd64_irq_table:
 	.quad .Lirq4, .Lirq5, .Lirq6, .Lirq7
 	.quad .Lirq8, .Lirq9, .Lirq10, .Lirq11
 	.quad .Lirq12, .Lirq13, .Lirq14, .Lirq15
+
+.global amd64_msi_table
+amd64_msi_table:
+	.quad .Lmsi0, .Lmsi1, .Lmsi2, .Lmsi3
+	.quad .Lmsi4, .Lmsi5, .Lmsi6, .Lmsi7
+	.quad .Lmsi8, .Lmsi9, .Lmsi10, .Lmsi11
+	.quad .Lmsi12, .Lmsi13, .Lmsi14, .Lmsi15

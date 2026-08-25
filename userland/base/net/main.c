@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "userland/base/net/protocol.h"
-#include "userland/base/service/service-config.h"
+#include "userland/base/net/netconf.h"
+#include "userland/base/libedit/readline/history.h"
+#include "userland/base/libedit/readline/readline.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -13,8 +15,10 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#define NET_INTERFACE_LIMIT 16
 #define NET_DNS_LIMIT 8
+#define NET_CONSOLE_WORDS 12
+
+static int apply_candidate(const struct netconf *);
 
 static int
 write_all(int descriptor, const char *buffer, size_t length)
@@ -145,128 +149,64 @@ send_static(const char *name, const char *address, const char *mask)
 }
 
 static int
-apply_interface(const char *name, unsigned timeout)
-{
-	char key[96], configuration[256], copy[256], *tokens[8];
-	char *token;
-	int count = 0;
-	if (send_up(name) != 0)
-		return 1;
-	printf("net: %s up\n", name);
-	if (snprintf(key, sizeof(key), "net_%s", name) >= (int)sizeof(key))
-		return 1;
-	if (rcconf_get(ZEDBSD_RC_CONF, key, configuration,
-		       sizeof(configuration)) != 0) {
-		if (errno == ENOENT)
-			return 0;
-		fprintf(stderr, "net: invalid %s\n", key);
-		return 1;
-	}
-	strcpy(copy, configuration);
-	for (token = strtok(copy, " \t"); token != NULL;
-	     token = strtok(NULL, " \t")) {
-		if (count == (int)(sizeof(tokens) / sizeof(tokens[0]))) {
-			fprintf(stderr, "net: too many fields in %s\n", key);
-			return 1;
-		}
-		tokens[count++] = token;
-	}
-	if (count == 1 && strcmp(tokens[0], "dhcp") == 0) {
-		printf("net: %s dhcp timeout=%u\n", name, timeout);
-		return send_dhcp(name, timeout);
-	}
-	if (count == 5 && strcmp(tokens[0], "static") == 0 &&
-	    strcmp(tokens[1], "ipv4") == 0 &&
-	    strcmp(tokens[3], "netmask") == 0) {
-		printf("net: %s static ipv4\n", name);
-		return send_static(name, tokens[2], tokens[4]);
-	}
-	fprintf(stderr, "net: unsupported or invalid %s\n", key);
-	return 1;
-}
-
-static int
 boot(void)
 {
-	char automatic[512], copy[512], timeout_text[32] = "";
-	char *names[NET_INTERFACE_LIMIT], *name;
-	unsigned timeout = 10;
-	int count = 0, index, failed = 0;
+	struct netconf configuration;
+	char error[160] = "";
 
-	if (rcconf_get(ZEDBSD_RC_CONF, "net_auto", automatic,
-		       sizeof(automatic)) != 0) {
-		if (errno == ENOENT)
-			return 0;
-		fprintf(stderr, "net: invalid net_auto\n");
+	if (netconf_load(NETCONF_PATH, &configuration, error, sizeof(error)) !=
+	    0) {
+		fprintf(stderr, "net: cannot load %s: %s\n", NETCONF_PATH,
+			error[0] != '\0' ? error : strerror(errno));
 		return 1;
 	}
-	if (rcconf_get(ZEDBSD_RC_CONF, "net_dhcptimeout", timeout_text,
-		       sizeof(timeout_text)) == 0) {
-		if (decimal_timeout(timeout_text, &timeout) != 0) {
-			fprintf(stderr, "net: invalid net_dhcptimeout\n");
-			return 1;
-		}
-	} else if (errno != ENOENT) {
-		fprintf(stderr, "net: invalid net_dhcptimeout\n");
-		return 1;
-	}
-	strcpy(copy, automatic);
-	for (name = strtok(copy, " \t"); name != NULL;
-	     name = strtok(NULL, " \t")) {
-		if (!interface_name_valid(name) ||
-		    count == NET_INTERFACE_LIMIT) {
-			fprintf(stderr, "net: invalid interface in net_auto\n");
-			return 1;
-		}
-		for (index = 0; index < count; index++)
-			if (strcmp(names[index], name) == 0) {
-				fprintf(stderr, "net: duplicate interface %s\n",
-					name);
-				return 1;
-			}
-		names[count++] = name;
-	}
-	for (index = 0; index < count; index++) {
-		printf("net: configuring %s\n", names[index]);
-		if (apply_interface(names[index], timeout) != 0)
-			failed = 1;
-	}
-	{
-		char gateway[64];
-		if (rcconf_get(ZEDBSD_RC_CONF, "net_defaultroute", gateway,
-			       sizeof(gateway)) == 0 &&
-		    *gateway != '\0' &&
-		    backend("DEFAULTROUTE", gateway, 0) != 0)
-			failed = 1;
-	}
-	{
-		char dns[256];
-		if (rcconf_get(ZEDBSD_RC_CONF, "net_dns", dns, sizeof(dns)) ==
-			0 &&
-		    *dns != '\0' && backend("DNS", dns, 0) != 0)
-			failed = 1;
-	}
-	return failed;
+	return apply_candidate(&configuration);
 }
 
 static int
 usage(void)
 {
-	fprintf(
-	    stderr,
-	    "usage: net boot|show [interface]|up interface|down interface|"
-	    "dhcp interface --timeout=seconds|static interface ipv4 address "
-	    "netmask mask|defaultroute gateway|dns address...\n");
+	fprintf(stderr,
+		"usage: net [command]\n"
+		"       net help\n"
+		"       net show [interface]\n"
+		"       net up|down interface\n"
+		"       net dhcp interface [--timeout=seconds]\n"
+		"       net static interface ipv4 address netmask mask\n"
+		"       net defaultroute gateway\n"
+		"       net dns address...\n"
+		"       net boot\n");
 	return 2;
 }
 
-int
-main(int argc, char **argv)
+static int
+command_help(void)
+{
+	puts("net commands:\n"
+	     "  net                         enter the interactive console\n"
+	     "  net help                    show this help\n"
+	     "  net show [interface]        show networkd state\n"
+	     "  net up interface            bring a link up\n"
+	     "  net down interface          bring a link down\n"
+	     "  net dhcp interface [--timeout=seconds]\n"
+	     "                              acquire an IPv4 lease\n"
+	     "  net static interface ipv4 address netmask mask\n"
+	     "                              configure a static IPv4 address\n"
+	     "  net defaultroute gateway    set the default IPv4 route\n"
+	     "  net dns address...          replace resolver name servers\n"
+	     "  net boot                    apply boot network configuration");
+	return ferror(stdout) ? 1 : 0;
+}
+
+static int
+dispatch(int argc, char **argv)
 {
 	char operands[NETWORKD_REQUEST_MAX];
 	int length;
 	unsigned timeout;
 
+	if (argc == 2 && strcmp(argv[1], "help") == 0)
+		return command_help();
 	if (argc == 2 && strcmp(argv[1], "boot") == 0)
 		return boot();
 	if (argc >= 2 && strcmp(argv[1], "show") == 0 && argc <= 3)
@@ -276,10 +216,12 @@ main(int argc, char **argv)
 	    interface_name_valid(argv[2]))
 		return backend(strcmp(argv[1], "up") == 0 ? "UP" : "DOWN",
 			       argv[2], 0);
-	if (argc == 4 && strcmp(argv[1], "dhcp") == 0 &&
+	if ((argc == 3 || argc == 4) && strcmp(argv[1], "dhcp") == 0 &&
 	    interface_name_valid(argv[2]) &&
-	    strncmp(argv[3], "--timeout=", 10) == 0 &&
-	    decimal_timeout(argv[3] + 10, &timeout) == 0) {
+	    (argc == 3 || (strncmp(argv[3], "--timeout=", 10) == 0 &&
+			   decimal_timeout(argv[3] + 10, &timeout) == 0))) {
+		if (argc == 3)
+			timeout = 10;
 		length = snprintf(operands, sizeof(operands), "%s %u", argv[2],
 				  timeout);
 		return length < 0 || (size_t)length >= sizeof(operands)
@@ -317,4 +259,477 @@ main(int argc, char **argv)
 		return backend("DNS", operands, 0);
 	}
 	return usage();
+}
+
+enum console_mode {
+	CONSOLE_OPERATIONAL,
+	CONSOLE_CONFIGURATION,
+	CONSOLE_INTERFACE
+};
+
+struct console {
+	enum console_mode mode;
+	struct netconf startup;
+	struct netconf candidate;
+	struct netconf_interface *interface;
+	int dirty;
+};
+
+static void
+configuration_default(struct netconf *configuration)
+{
+	memset(configuration, 0, sizeof(*configuration));
+	configuration->version = 1;
+	configuration->dns_mode = NETCONF_DNS_DHCP;
+}
+
+static struct netconf_interface *
+configuration_interface(struct netconf *configuration, const char *name,
+			int create)
+{
+	size_t index;
+	for (index = 0; index < configuration->interface_count; index++)
+		if (strcmp(configuration->interfaces[index].name, name) == 0)
+			return &configuration->interfaces[index];
+	if (!create || !interface_name_valid(name) ||
+	    configuration->interface_count == NETCONF_MAX_INTERFACES)
+		return NULL;
+	index = configuration->interface_count++;
+	strcpy(configuration->interfaces[index].name, name);
+	configuration->interfaces[index].type =
+	    strcmp(name, "lo") == 0 || strcmp(name, "lo0") == 0
+		? NETCONF_INTERFACE_LOOPBACK
+		: NETCONF_INTERFACE_ETHERNET;
+	configuration->interfaces[index].enabled = 1;
+	configuration->interfaces[index].enabled_set = 1;
+	return &configuration->interfaces[index];
+}
+
+static int
+show_configuration(const struct netconf *configuration)
+{
+	if (netconf_write(stdout, configuration) != 0 ||
+	    fflush(stdout) == EOF) {
+		fprintf(stderr, "net: cannot write configuration\n");
+		return 1;
+	}
+	return 0;
+}
+
+static int
+prefix_mask(unsigned prefix, char *buffer, size_t capacity)
+{
+	uint32_t mask = prefix == 0 ? 0 : 0xffffffffU << (32U - prefix);
+	return snprintf(buffer, capacity, "%u.%u.%u.%u", (mask >> 24) & 0xffU,
+			(mask >> 16) & 0xffU, (mask >> 8) & 0xffU,
+			mask & 0xffU) >= (int)capacity
+		   ? -1
+		   : 0;
+}
+
+static int
+candidate_supported(const struct netconf *configuration, char *error,
+		    size_t capacity)
+{
+	size_t index;
+	if (netconf_validate(configuration, error, capacity) != 0)
+		return -1;
+	for (index = 0; index < configuration->interface_count; index++) {
+		const struct netconf_interface *item =
+		    &configuration->interfaces[index];
+		if (item->type != NETCONF_INTERFACE_LOOPBACK &&
+		    item->type != NETCONF_INTERFACE_ETHERNET) {
+			(void)snprintf(
+			    error, capacity,
+			    "interface %s type is not yet applicable",
+			    item->name);
+			return -1;
+		}
+		if (item->address_count > 1) {
+			(void)snprintf(error, capacity,
+				       "interface %s has multiple addresses",
+				       item->name);
+			return -1;
+		}
+	}
+	for (index = 0; index < configuration->route_count; index++)
+		if (strcmp(configuration->routes[index].destination,
+			   "default") != 0) {
+			(void)snprintf(
+			    error, capacity,
+			    "only a default route is currently applicable");
+			return -1;
+		}
+	return 0;
+}
+
+static int
+apply_candidate(const struct netconf *configuration)
+{
+	char error[160], mask[32], operands[256];
+	size_t index, dns_used = 0;
+	int length;
+
+	if (candidate_supported(configuration, error, sizeof(error)) != 0) {
+		fprintf(stderr, "net: candidate cannot be applied: %s\n",
+			error);
+		return 1;
+	}
+	for (index = 0; index < configuration->interface_count; index++) {
+		const struct netconf_interface *item =
+		    &configuration->interfaces[index];
+		if (!item->enabled) {
+			if (backend("DOWN", item->name, 0) != 0)
+				return 1;
+			continue;
+		}
+		if (send_up(item->name) != 0)
+			return 1;
+		if (item->dhcp && send_dhcp(item->name, item->dhcp_timeout_set
+							    ? item->dhcp_timeout
+							    : 10) != 0)
+			return 1;
+		if (item->address_count != 0) {
+			if (prefix_mask(item->addresses[0].prefix_length, mask,
+					sizeof(mask)) != 0 ||
+			    send_static(item->name, item->addresses[0].address,
+					mask) != 0)
+				return 1;
+		}
+	}
+	for (index = 0; index < configuration->route_count; index++)
+		if (backend("DEFAULTROUTE",
+			    configuration->routes[index].gateway, 0) != 0)
+			return 1;
+	if (configuration->dns_count != 0) {
+		for (index = 0; index < configuration->dns_count; index++) {
+			length = snprintf(operands + dns_used,
+					  sizeof(operands) - dns_used, "%s%s",
+					  dns_used == 0 ? "" : " ",
+					  configuration->dns_servers[index]);
+			if (length < 0 ||
+			    (size_t)length >= sizeof(operands) - dns_used)
+				return 1;
+			dns_used += (size_t)length;
+		}
+		if (backend("DNS", operands, 0) != 0)
+			return 1;
+	}
+	return 0;
+}
+
+static int
+split_words(char *line, char **words, int capacity)
+{
+	int count = 0;
+	char *cursor = line;
+	while (*cursor != '\0') {
+		while (isspace((unsigned char)*cursor))
+			cursor++;
+		if (*cursor == '\0')
+			break;
+		if (count == capacity)
+			return -1;
+		words[count++] = cursor;
+		while (*cursor != '\0' && !isspace((unsigned char)*cursor))
+			cursor++;
+		if (*cursor != '\0')
+			*cursor++ = '\0';
+	}
+	return count;
+}
+
+static const char *
+console_prompt(const struct console *console)
+{
+	static char prompt[48];
+	if (console->mode == CONSOLE_OPERATIONAL)
+		return "net> ";
+	if (console->mode == CONSOLE_CONFIGURATION)
+		return "net(config)> ";
+	(void)snprintf(prompt, sizeof(prompt), "net(config-if:%s)> ",
+		       console->interface->name);
+	return prompt;
+}
+
+static void
+console_help(enum console_mode mode)
+{
+	if (mode == CONSOLE_OPERATIONAL)
+		puts("Operational commands:\n"
+		     "  show interfaces|interface "
+		     "NAME|running-config|startup-config|candidate\n"
+		     "  up NAME | down NAME | dhcp NAME [timeout SECONDS]\n"
+		     "  configure\n"
+		     "  help | ? | exit");
+	else if (mode == CONSOLE_CONFIGURATION)
+		puts("Configuration commands:\n"
+		     "  interface NAME       select or create an interface\n"
+		     "  show candidate|startup-config|running-config\n"
+		     "  apply | save | discard\n"
+		     "  help | ? | end | exit");
+	else
+		puts("Interface commands:\n"
+		     "  enable | disable\n"
+		     "  dhcp [timeout SECONDS]\n"
+		     "  static ipv4 ADDRESS prefix-length BITS\n"
+		     "  no ipv4\n"
+		     "  up | down\n"
+		     "  help | ? | end | exit");
+}
+
+static int
+console_show(struct console *console, int count, char **words)
+{
+	if (count == 2 && strcmp(words[1], "interfaces") == 0)
+		return backend("SHOW", NULL, 1);
+	if (count == 3 && strcmp(words[1], "interface") == 0 &&
+	    interface_name_valid(words[2]))
+		return backend("SHOW", words[2], 1);
+	if (count == 2 && strcmp(words[1], "running-config") == 0)
+		return backend("SHOW", NULL, 1);
+	if (count == 2 && strcmp(words[1], "startup-config") == 0)
+		return show_configuration(&console->startup);
+	if (count == 2 && strcmp(words[1], "candidate") == 0)
+		return show_configuration(&console->candidate);
+	fprintf(stderr, "net: invalid show command\n");
+	return 1;
+}
+
+static int
+console_operational(struct console *console, int count, char **words)
+{
+	char timeout[32], *arguments[5] = {"net", NULL, NULL, NULL, NULL};
+	if (strcmp(words[0], "show") == 0)
+		return console_show(console, count, words);
+	if (count == 1 && strcmp(words[0], "configure") == 0) {
+		console->mode = CONSOLE_CONFIGURATION;
+		return 0;
+	}
+	if (count == 2 &&
+	    (strcmp(words[0], "up") == 0 || strcmp(words[0], "down") == 0)) {
+		arguments[1] = words[0];
+		arguments[2] = words[1];
+		return dispatch(3, arguments);
+	}
+	if ((count == 2 || count == 4) && strcmp(words[0], "dhcp") == 0 &&
+	    (count == 2 || strcmp(words[2], "timeout") == 0)) {
+		arguments[1] = "dhcp";
+		arguments[2] = words[1];
+		if (count == 4) {
+			if (snprintf(timeout, sizeof(timeout), "--timeout=%s",
+				     words[3]) >= (int)sizeof(timeout))
+				return 1;
+			arguments[3] = timeout;
+		}
+		return dispatch(count == 2 ? 3 : 4, arguments);
+	}
+	fprintf(stderr, "net: invalid operational command\n");
+	return 1;
+}
+
+static int
+console_configuration(struct console *console, int count, char **words)
+{
+	char error[160];
+	if (strcmp(words[0], "show") == 0)
+		return console_show(console, count, words);
+	if (count == 2 && strcmp(words[0], "interface") == 0) {
+		console->interface =
+		    configuration_interface(&console->candidate, words[1], 1);
+		if (console->interface == NULL) {
+			fprintf(stderr,
+				"net: invalid or excessive interface\n");
+			return 1;
+		}
+		console->mode = CONSOLE_INTERFACE;
+		console->dirty = 1;
+		return 0;
+	}
+	if (count == 1 && strcmp(words[0], "apply") == 0)
+		return apply_candidate(&console->candidate);
+	if (count == 1 && strcmp(words[0], "save") == 0) {
+		if (netconf_save_atomic(NETCONF_PATH, &console->candidate,
+					error, sizeof(error)) != 0) {
+			fprintf(stderr, "net: cannot save %s: %s\n",
+				NETCONF_PATH, error);
+			return 1;
+		}
+		console->startup = console->candidate;
+		console->dirty = 0;
+		return 0;
+	}
+	if (count == 1 && strcmp(words[0], "discard") == 0) {
+		console->candidate = console->startup;
+		console->interface = NULL;
+		console->dirty = 0;
+		return 0;
+	}
+	if (netconf_validate(&console->candidate, error, sizeof(error)) != 0)
+		fprintf(stderr, "net: candidate is invalid: %s\n", error);
+	else
+		fprintf(stderr, "net: invalid configuration command\n");
+	return 1;
+}
+
+static int
+parse_prefix(const char *text, unsigned *result)
+{
+	char *end;
+	unsigned long value = strtoul(text, &end, 10);
+	if (*text == '\0' || *end != '\0' || value > 32)
+		return -1;
+	*result = (unsigned)value;
+	return 0;
+}
+
+static int
+console_interface(struct console *console, int count, char **words)
+{
+	struct netconf_interface *item = console->interface;
+	struct in_addr parsed;
+	unsigned value;
+	if (count == 1 && (strcmp(words[0], "enable") == 0 ||
+			   strcmp(words[0], "disable") == 0)) {
+		item->enabled = strcmp(words[0], "enable") == 0;
+		item->enabled_set = 1;
+		console->dirty = 1;
+		return 0;
+	}
+	if ((count == 1 || count == 3) && strcmp(words[0], "dhcp") == 0 &&
+	    (count == 1 || (strcmp(words[1], "timeout") == 0 &&
+			    decimal_timeout(words[2], &value) == 0))) {
+		item->dhcp = 1;
+		item->dhcp_set = 1;
+		item->address_count = 0;
+		if (count == 3) {
+			item->dhcp_timeout = value;
+			item->dhcp_timeout_set = 1;
+		} else
+			item->dhcp_timeout_set = 0;
+		console->dirty = 1;
+		return 0;
+	}
+	if (count == 5 && strcmp(words[0], "static") == 0 &&
+	    strcmp(words[1], "ipv4") == 0 &&
+	    strcmp(words[3], "prefix-length") == 0 &&
+	    inet_aton(words[2], &parsed) != 0 &&
+	    parse_prefix(words[4], &value) == 0) {
+		strcpy(item->addresses[0].address, words[2]);
+		item->addresses[0].prefix_length = value;
+		item->address_count = 1;
+		item->dhcp = 0;
+		item->dhcp_set = 1;
+		item->dhcp_timeout_set = 0;
+		console->dirty = 1;
+		return 0;
+	}
+	if (count == 2 && strcmp(words[0], "no") == 0 &&
+	    strcmp(words[1], "ipv4") == 0) {
+		item->address_count = 0;
+		item->dhcp = 0;
+		item->dhcp_set = 0;
+		item->dhcp_timeout_set = 0;
+		console->dirty = 1;
+		return 0;
+	}
+	if (count == 1 &&
+	    (strcmp(words[0], "up") == 0 || strcmp(words[0], "down") == 0))
+		return backend(strcmp(words[0], "up") == 0 ? "UP" : "DOWN",
+			       item->name, 0);
+	fprintf(stderr, "net: invalid interface command\n");
+	return 1;
+}
+
+static int
+confirm_discard(void)
+{
+	char *answer = readline("Discard unsaved changes? [y/N] ");
+	int discard = answer != NULL &&
+		      (strcmp(answer, "y") == 0 || strcmp(answer, "yes") == 0);
+	free(answer);
+	return discard;
+}
+
+static int
+interactive(void)
+{
+	struct console console;
+	char error[160];
+
+	memset(&console, 0, sizeof(console));
+	if (netconf_load(NETCONF_PATH, &console.startup, error,
+			 sizeof(error)) != 0) {
+		if (errno != ENOENT) {
+			fprintf(stderr, "net: cannot load %s: %s\n",
+				NETCONF_PATH, error);
+			return 1;
+		}
+		configuration_default(&console.startup);
+	}
+	console.candidate = console.startup;
+	using_history();
+	for (;;) {
+		char *line = readline(console_prompt(&console));
+		char *words[NET_CONSOLE_WORDS];
+		int count;
+		if (line == NULL) {
+			if (console.dirty && !confirm_discard())
+				continue;
+			break;
+		}
+		count = split_words(line, words, NET_CONSOLE_WORDS);
+		if (count < 0) {
+			fprintf(stderr, "net: too many words\n");
+			free(line);
+			continue;
+		}
+		if (count == 0) {
+			free(line);
+			continue;
+		}
+		add_history(line);
+		if ((strcmp(words[0], "help") == 0 ||
+		     strcmp(words[0], "?") == 0) &&
+		    count == 1) {
+			console_help(console.mode);
+			free(line);
+			continue;
+		}
+		if (count == 1 && strcmp(words[0], "end") == 0 &&
+		    console.mode != CONSOLE_OPERATIONAL) {
+			console.mode = CONSOLE_OPERATIONAL;
+			console.interface = NULL;
+			free(line);
+			continue;
+		}
+		if (count == 1 && strcmp(words[0], "exit") == 0) {
+			if (console.mode == CONSOLE_INTERFACE) {
+				console.mode = CONSOLE_CONFIGURATION;
+				console.interface = NULL;
+			} else if (console.mode == CONSOLE_CONFIGURATION)
+				console.mode = CONSOLE_OPERATIONAL;
+			else if (!console.dirty || confirm_discard()) {
+				free(line);
+				break;
+			}
+			free(line);
+			continue;
+		}
+		if (console.mode == CONSOLE_OPERATIONAL)
+			(void)console_operational(&console, count, words);
+		else if (console.mode == CONSOLE_CONFIGURATION)
+			(void)console_configuration(&console, count, words);
+		else
+			(void)console_interface(&console, count, words);
+		free(line);
+	}
+	clear_history();
+	return 0;
+}
+
+int
+main(int argc, char **argv)
+{
+	return argc == 1 ? interactive() : dispatch(argc, argv);
 }

@@ -74,9 +74,10 @@ created by this work.
 
 ### 2.2 Configuration boundaries
 
-`/etc/rc.conf` is the single source for host settings, service enablement, and
-service options.  Structured databases remain separate where their format is
-the interface:
+`/etc/rc.conf` is the source for host settings, service enablement, and service
+options. Structured databases remain separate where their format is the
+interface. Network interface/address/route/DNS data moved to `/etc/net.conf`
+in `ws011-p003`; the Phase 20 `net_*` format below is retained as history.
 
 | Data | Path |
 |---|---|
@@ -86,6 +87,7 @@ the interface:
 | user periodic jobs | cron spool/crontabs |
 | one-shot jobs | at spool |
 | resolver output | `/etc/resolv.conf` |
+| persistent network configuration | `/etc/net.conf` |
 
 PID 1 does not parse fstab.  A required internal oneshot invokes
 `/sbin/mount -a`; the mount utility owns fstab parsing.
@@ -101,7 +103,7 @@ PID 1 does not parse fstab.  A required internal oneshot invokes
 
 ### 2.4 Network management
 
-- `networkd` is authoritative for interfaces named in `rc.conf`.
+- `networkd` is authoritative for interfaces named in `/etc/net.conf`.
 - `net` is the control front end and does not mutate managed interfaces behind
   the daemon's back.
 - The first implementation supports loopback, interface up/down, static IPv4,

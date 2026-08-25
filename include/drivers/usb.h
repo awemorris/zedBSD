@@ -257,6 +257,19 @@ struct drv_usb_hcd_ops {
 		*stop)(
 		struct drv_usb_hcd *);
 	int (
+		*device_enable)(
+		struct drv_usb_hcd *,
+		struct drv_usb_device *);
+	int (
+		*device_set_address)(
+		struct drv_usb_hcd *,
+		struct drv_usb_device *,
+		unsigned);
+	void (
+		*device_disable)(
+		struct drv_usb_hcd *,
+		struct drv_usb_device *);
+	int (
 		*urb_enqueue)(
 		struct drv_usb_hcd *,
 		struct drv_usb_urb *);
@@ -469,6 +482,9 @@ drv_usb_interface_find_endpoint(
 	enum drv_usb_transfer_type t,
 	uint8_t dir,
 	struct drv_usb_endpoint *after);
+struct drv_usb_device *
+drv_usb_endpoint_device(
+	const struct drv_usb_endpoint *endpoint);
 const struct drv_usb_endpoint_descriptor *
 drv_usb_endpoint_descriptor(
 	const struct drv_usb_endpoint *e);

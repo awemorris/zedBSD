@@ -14,6 +14,8 @@ Parent: [master plan](master.md)
 - The globally unambiguous Phase ID is `wsXXX-pYYY`.
 - Phase IDs are never reused. Historical numbering is preserved; WS001 uses
   `p085` to represent the legacy “Phase 8.5”.
+- The active Queue Book is `plan/queue.md`; completed Queue records use
+  `plan/queue-qNNN.md`. Queue IDs are permanent and use `qNNN`.
 - Shared test specifications and test indexes live in the WS `tests/`
   directory.
 
@@ -30,14 +32,55 @@ planning-only fixtures or test specifications belong under the WS `tests/`.
    accumulated decisions, and WS-level handoffs.
 3. `phase.md` owns one bounded implementation/design unit, its state,
    work-package checklist, evidence, interruption record, and next action.
-4. A WS `tests/README.md` owns the index of shared test cases and executable
+4. [queue.md](queue.md) owns the finite execution manifest currently proposed
+   or authorized by the user. It points to P books and does not replace them.
+5. A WS `tests/README.md` owns the index of shared test cases and executable
    test paths for that WS.
-5. WS001 `ws.md` additionally owns the POSIX compliance ledger.
+6. WS001 `ws.md` additionally owns the POSIX compliance ledger.
 
 The same fact may be summarized upward, but detail is edited at its owning
 level. The master links downward instead of duplicating phase design.
 
-## 3. Status vocabulary
+M/W/P are the planning hierarchy. Q is the execution boundary. The existence
+or approval of an M, W, or P book does not authorize implementation.
+
+## 3. Queue Book and authorization
+
+The four planning/execution books answer different questions:
+
+| Book | Local file | Responsibility |
+| --- | --- | --- |
+| M | `plan/master.md` | Where the project is going |
+| W | `plan/wsXXX-name/ws.md` | What outcome the workstream must achieve |
+| P | `plan/wsXXX-name/phaseYYY-name/phase.md` | How a bounded phase is implemented and verified |
+| Q | `plan/queue.md` | What the agent may execute in the current cycle |
+
+Queue construction considers dependencies, priority, timebox, risk, unresolved
+human decisions, and whether results can be verified. A Queue must be finite.
+It references P books rather than copying their detailed procedures.
+
+Before code changes begin, the proposed Queue and timebox are presented to the
+user. Implementation starts only after explicit Queue approval. A planned
+Phase that is absent from the approved Queue is not executable.
+
+Every Queue item uses exactly one lowercase state:
+
+| State | Meaning |
+| --- | --- |
+| `pending` | Selected for this Queue but not started; execution requires Queue approval |
+| `in-progress` | Currently being implemented or verified |
+| `completed` | Its P-book completion conditions have evidence |
+| `uncleared` | This cycle could not safely or reasonably complete it |
+
+An `uncleared` item records its reason, facts learned, remaining work, and
+resume condition. It is returned to P/W/M instead of being forced to pass. A
+Queue may be `finished` with uncleared items: Queue completion means all
+authorized items were processed as far as reasonable, not that all succeeded.
+
+Historical records `q001` through `q007` were mechanically migrated from the
+pre-Q terminology without renumbering their execution cycles.
+
+## 4. W/P status vocabulary
 
 | Status | Meaning |
 | --- | --- |
@@ -56,7 +99,7 @@ level. The master links downward instead of duplicating phase design.
 A WS may be paused while its last Phase is complete. A Phase may also be paused
 mid-implementation, but only after recording its exact safe state.
 
-## 4. Required `ws.md` fields
+## 5. Required `ws.md` fields
 
 Each workstream plan records:
 
@@ -67,7 +110,7 @@ Each workstream plan records:
 - shared-test index link;
 - WS completion definition and remaining handoffs.
 
-## 5. Required `phase.md` fields
+## 6. Required `phase.md` fields
 
 Each Phase records:
 
@@ -84,7 +127,7 @@ Historical aggregate plans may be retained under `history/`, but every Phase
 must have a `phase.md` that states its own scope and result. The historical
 document is supporting evidence, not the active state record.
 
-## 6. Pause protocol
+## 7. Pause protocol
 
 Before pausing an active Phase:
 
@@ -99,7 +142,7 @@ Resumption begins by checking those recorded assumptions and rerunning the last
 passing focused gate. It does not infer completion from elapsed time or from a
 newer unrelated Phase.
 
-## 7. Evidence rules
+## 8. Evidence rules
 
 - Host/unit tests prove separable logic only.
 - QEMU evidence records the full device model/command and does not prove
@@ -114,4 +157,3 @@ Every implementation Phase uses the supported build command, focused tests,
 bounded `qemu-system-x86_64` tests where relevant, formatting for changed
 userland C/header files, and `git diff --check`. The aggregate `make check`
 target is not required.
-

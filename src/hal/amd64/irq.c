@@ -13,7 +13,33 @@
 #include "pic.h"
 
 enum irq_mode { IRQ_MODE_NONE, IRQ_MODE_REALTIME, IRQ_MODE_TASK };
-static struct irq_service_info irq_service[IRQ_MAX + 1];
+static struct irq_service_info irq_service[IRQ_LOGICAL_MAX + 1];
+
+static int
+valid_irq(int irq)
+{
+	return irq >= 0 && irq <= IRQ_LOGICAL_MAX;
+}
+
+static int
+is_msi_irq(int irq)
+{
+	return irq >= IRQ_MSI_BASE && irq <= IRQ_LOGICAL_MAX;
+}
+
+static void
+hardware_mask(int irq)
+{
+	if (!is_msi_irq(irq))
+		amd64_ioapic_mask(irq);
+}
+
+static void
+hardware_unmask(int irq)
+{
+	if (!is_msi_irq(irq))
+		amd64_ioapic_unmask(irq);
+}
 
 static bool
 service_lock(struct irq_service_info *service)
@@ -38,7 +64,7 @@ irq_init(const struct amd64_acpi_info *acpi)
 {
 	unsigned irq;
 	hal_memset(irq_service, 0, sizeof(irq_service));
-	for (irq = 0; irq <= IRQ_MAX; irq++) {
+	for (irq = 0; irq <= IRQ_LOGICAL_MAX; irq++) {
 		hal_cpu_mask_set(&irq_service[irq].requested, 0);
 		irq_service[irq].masked = 1;
 		irq_service[irq].handler_cpu = HAL_CPU_MAX;
@@ -62,11 +88,11 @@ hal_irq_mask(int irq)
 {
 	struct irq_service_info *service;
 	bool enabled;
-	if (irq <= IRQ_TIMER || irq > IRQ_MAX) return;
+	if (irq <= IRQ_TIMER || !valid_irq(irq)) return;
 	service = &irq_service[irq];
 	enabled = service_lock(service);
 	service->masked = 1;
-	amd64_ioapic_mask(irq);
+	hardware_mask(irq);
 	service_unlock(service, enabled);
 }
 void
@@ -74,11 +100,11 @@ hal_irq_unmask(int irq)
 {
 	struct irq_service_info *service;
 	bool enabled;
-	if (irq <= IRQ_TIMER || irq > IRQ_MAX) return;
+	if (irq <= IRQ_TIMER || !valid_irq(irq)) return;
 	service = &irq_service[irq];
 	enabled = service_lock(service);
 	service->masked = 0;
-	amd64_ioapic_unmask(irq);
+	hardware_unmask(irq);
 	service_unlock(service, enabled);
 }
 
@@ -102,7 +128,7 @@ hal_irq_set_handler(int irq, hal_irq_handler_t handler, void *argument)
 {
 	struct irq_service_info *service;
 	bool enabled;
-	if (irq <= IRQ_TIMER || irq > IRQ_MAX ||
+	if (irq <= IRQ_TIMER || !valid_irq(irq) ||
 	    (handler == NULL && argument != NULL))
 		return HAL_ERR_INVALID;
 	service = &irq_service[irq];
@@ -115,7 +141,7 @@ hal_irq_set_handler(int irq, hal_irq_handler_t handler, void *argument)
 		}
 		service->removing = 1;
 		service->masked = 1;
-		amd64_ioapic_mask(irq);
+		hardware_mask(irq);
 		if (service->mode == IRQ_MODE_TASK) {
 			service->removing = 0;
 			service_unlock(service, enabled);
@@ -149,8 +175,10 @@ hal_irq_service_wait(int irq, hal_irq_ack_t *acknowledge)
 {
 	struct irq_service_info *service;
 	bool enabled;
-	if (irq <= IRQ_TIMER || irq > IRQ_MAX || acknowledge == NULL)
+	if (irq <= IRQ_TIMER || !valid_irq(irq) || acknowledge == NULL)
 		return HAL_ERR_INVALID;
+	if (is_msi_irq(irq))
+		return HAL_ERR_UNSUPPORTED;
 	for (;;) {
 		service = &irq_service[irq];
 		enabled = service_lock(service);
@@ -200,8 +228,10 @@ hal_irq_set_affinity(int irq, const struct hal_cpu_mask *requested)
 	struct irq_service_info *service;
 	bool enabled;
 	unsigned was_masked;
-	if (irq <= IRQ_TIMER || irq > IRQ_MAX || requested == NULL)
+	if (irq <= IRQ_TIMER || !valid_irq(irq) || requested == NULL)
 		return HAL_ERR_INVALID;
+	if (is_msi_irq(irq))
+		return HAL_ERR_UNSUPPORTED;
 	hal_cpu_ready_mask(&ready);
 	for (cpu = 0; cpu < HAL_CPU_MAX; cpu++)
 		if (hal_cpu_mask_test(requested, cpu) &&
@@ -240,7 +270,7 @@ hal_irq_get_affinity(int irq, struct hal_irq_affinity *result)
 	struct hal_cpu_mask ready;
 	struct irq_service_info *service;
 	bool enabled;
-	if (irq <= IRQ_TIMER || irq > IRQ_MAX || result == NULL)
+	if (irq <= IRQ_TIMER || !valid_irq(irq) || result == NULL)
 		return HAL_ERR_INVALID;
 	service = &irq_service[irq];
 	enabled = service_lock(service);
@@ -264,9 +294,11 @@ irq_handler(int irq)
 	hal_irq_handler_t handler;
 	void *argument;
 	hal_irq_ack_t acknowledge;
-	if (irq < 0 || irq > IRQ_MAX)
+	if (!valid_irq(irq))
 		HAL_FATAL("invalid amd64 APIC IRQ");
-	acknowledge = amd64_irq_ack_begin(INT_IRQ_BASE + (uint32_t)irq, irq);
+	acknowledge = amd64_irq_ack_begin(is_msi_irq(irq) ?
+	    AMD64_VECTOR_MSI_BASE + (uint32_t)(irq - IRQ_MSI_BASE) :
+	    INT_IRQ_BASE + (uint32_t)irq, irq);
 	if (irq == IRQ_TIMER) {
 		clock_handler();
 		kernel_timer_handler(hal_cpu_current(), acknowledge);
@@ -275,7 +307,8 @@ irq_handler(int irq)
 	service = &irq_service[irq];
 	(void)service_lock(service);
 	__atomic_store_n(&service->in_flight, 1U, __ATOMIC_RELEASE);
-	if (!service->removing && service->mode == IRQ_MODE_REALTIME &&
+	if (!service->removing && !service->masked &&
+	    service->mode == IRQ_MODE_REALTIME &&
 	    service->handler != NULL) {
 		handler = service->handler;
 		argument = service->argument;
@@ -292,7 +325,8 @@ irq_handler(int irq)
 		service_unlock(service, false);
 		return;
 	}
-	if (!service->removing && service->mode == IRQ_MODE_TASK &&
+	if (!service->removing && !service->masked &&
+	    service->mode == IRQ_MODE_TASK &&
 	    service->waiter != NULL) {
 		hal_task_t waiter = service->waiter;
 		amd64_ioapic_mask(irq);
@@ -304,7 +338,7 @@ irq_handler(int irq)
 		kernel_notify_task(waiter);
 		return;
 	}
-	amd64_ioapic_mask(irq);
+	hardware_mask(irq);
 	service->masked = 1;
 	__atomic_store_n(&service->in_flight, 0U, __ATOMIC_RELEASE);
 	service_unlock(service, false);
@@ -334,7 +368,7 @@ amd64_irq_task_transferable(hal_task_t task)
 	int irq;
 	if (task == NULL)
 		return 0;
-	for (irq = 1; irq <= IRQ_MAX; irq++) {
+	for (irq = 1; irq <= IRQ_LOGICAL_MAX; irq++) {
 		struct irq_service_info *service = &irq_service[irq];
 		bool enabled = service_lock(service);
 		if (service->waiter == task) {
@@ -344,4 +378,71 @@ amd64_irq_task_transferable(hal_task_t task)
 		service_unlock(service, enabled);
 	}
 	return 1;
+}
+
+int
+hal_irq_register_msi(const char *source, hal_irq_handler_t handler,
+	void *handler_arg, int *mapped_irq, paddr_t *mapped_addr,
+	uint32_t *mapped_event)
+{
+	int irq;
+	bool enabled;
+
+	if (!amd64_msi_source_valid(source) || handler == NULL || mapped_irq == NULL ||
+	    mapped_addr == NULL || mapped_event == NULL)
+		return HAL_ERR_INVALID;
+	for (irq = IRQ_MSI_BASE; irq <= IRQ_LOGICAL_MAX; irq++) {
+		struct irq_service_info *service = &irq_service[irq];
+		enabled = service_lock(service);
+		if (!service->allocated && service->mode == IRQ_MODE_NONE &&
+		    !service->removing) {
+			service->allocated = 1;
+			service->msi = 1;
+			service->masked = 0;
+			service->mode = IRQ_MODE_REALTIME;
+			service->handler = handler;
+			service->argument = handler_arg;
+			service_unlock(service, enabled);
+			*mapped_irq = irq;
+			*mapped_addr = (paddr_t)(0xfee00000U |
+			    (amd64_smp_apic_id(0) << 12));
+			*mapped_event = AMD64_VECTOR_MSI_BASE +
+			    (uint32_t)(irq - IRQ_MSI_BASE);
+			return HAL_OK;
+		}
+		service_unlock(service, enabled);
+	}
+	return HAL_ERR_NOMEM;
+}
+
+int
+hal_irq_unregister_msi(int mapped_irq)
+{
+	struct irq_service_info *service;
+	bool enabled;
+	int error;
+
+	if (!is_msi_irq(mapped_irq))
+		return HAL_ERR_INVALID;
+	service = &irq_service[mapped_irq];
+	enabled = service_lock(service);
+	if (!service->allocated || !service->msi || service->removing) {
+		service_unlock(service, enabled);
+		return HAL_ERR_INVALID;
+	}
+	service->removing = 1;
+	service_unlock(service, enabled);
+	error = hal_irq_set_handler(mapped_irq, NULL, NULL);
+	if (error != HAL_OK) {
+		enabled = service_lock(service);
+		service->removing = 0;
+		service_unlock(service, enabled);
+		return error;
+	}
+	enabled = service_lock(service);
+	service->allocated = 0;
+	service->msi = 0;
+	service->masked = 1;
+	service_unlock(service, enabled);
+	return HAL_OK;
 }

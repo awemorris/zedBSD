@@ -3,12 +3,16 @@
 The authoritative program plan is [master.md](master.md). Planning documents
 are organized by permanent workstream ID (WSID):
 
-The currently selected cross-WS execution set and its status are tracked in
-[current-work.md](current-work.md).
+The currently proposed or authorized cross-WS execution set and its status are
+tracked in [queue.md](queue.md). It is the Q-book execution boundary; M/W/P
+planning alone does not authorize implementation. Closed execution sets are
+retained as numbered `queue-qNNN.md` records.
 
 ```text
 plan/
   master.md
+  queue.md
+  queue-qNNN.md
   governance.md
   wsXXX-name/
     ws.md

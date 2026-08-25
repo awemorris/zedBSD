@@ -10,7 +10,7 @@ struct cell{uint8_t character,attribute;};
 static struct cell shadow[HAL_CONS_ROWS][HAL_CONS_COLUMNS];
 static struct hal_cons_state state={HAL_CONS_TERMINAL,0,0,1};
 static uint8_t current_attribute=HAL_CONS_NORMAL_ATTRIBUTE;
-static unsigned input_events[INPUT_EVENT_COUNT];
+static struct hal_key_event input_events[INPUT_EVENT_COUNT];
 static unsigned input_head, input_tail;
 static struct hal_cons_wait_queue input_waiters;
 
@@ -66,7 +66,7 @@ static void console_puts(const char*s){if(s)while(*s)console_putc(*s++);}
 static int console_getc(void){return rpi4_uart_getc();}
 void hal_cons_putc(int c){console_putc(c);}
 void hal_cons_move_cursor(int row,int column){(void)hal_cons_set_cursor((unsigned)row,(unsigned)column);}
-int hal_cons_getc(void){return hal_cons_read_event()&HAL_KEY_EVENT_KEY_MASK;}
+int hal_cons_getc(void){struct hal_key_event event;for(;;){(void)hal_cons_read_event(&event);if((event.flags&HAL_KEY_EVENT_PRESS)!=0&&event.symbol[1]=='\0')return event.symbol[0];}}
 void hal_cons_set_mode(enum hal_cons_mode mode){state.mode=mode;}
 void hal_cons_write(const char*s){console_puts(s);}
 void hal_cons_write_n(const char*s,unsigned n){if(s)while(n--)console_putc(*s++);}
@@ -91,8 +91,10 @@ static void rpi4_console_interrupt(int irq,hal_irq_ack_t acknowledge,void*argume
 	(void)irq;(void)argument;enabled=hal_cons_wait_queue_lock(&input_waiters);
 	while(rpi4_uart_poll()){
 		unsigned next=(input_head+1U)%INPUT_EVENT_COUNT;
-		int event=console_getc();if(next==input_tail)continue;
-		input_events[input_head]=(unsigned)event;input_head=next;
+		int character=console_getc();if(next==input_tail)continue;
+		for(unsigned i=0;i<HAL_KEY_SYMBOL_SIZE;i++)input_events[input_head].symbol[i]='\0';
+		input_events[input_head].symbol[0]=(char)character;
+		input_events[input_head].flags=HAL_KEY_EVENT_PRESS;input_head=next;
 	}
 	if(input_head!=input_tail)waiters=hal_cons_wait_queue_detach_all(&input_waiters);
 	hal_cons_wait_queue_unlock(&input_waiters,enabled);rpi4_uart_clear_rx_irq();
@@ -104,8 +106,8 @@ void rpi4_cons_irq_init(void)
 	if(info==NULL||info->uart_irq==0||hal_irq_set_handler((int)info->uart_irq,rpi4_console_interrupt,NULL)!=HAL_OK)HAL_FATAL("Raspberry Pi UART IRQ registration failed");
 	rpi4_uart_enable_rx_irq();hal_irq_unmask((int)info->uart_irq);
 }
-int hal_cons_poll_event(void){bool enabled=hal_cons_wait_queue_lock(&input_waiters);int event=input_head==input_tail?-1:(int)input_events[input_tail];hal_cons_wait_queue_unlock(&input_waiters,enabled);return event;}
-int hal_cons_read_event(void){struct hal_cons_wait_entry waiter={hal_task_get_current(),NULL,0};for(;;){bool enabled=hal_cons_wait_queue_lock(&input_waiters);if(input_head!=input_tail){int event=(int)input_events[input_tail];input_tail=(input_tail+1U)%INPUT_EVENT_COUNT;hal_cons_wait_queue_unlock(&input_waiters,enabled);return event;}hal_cons_wait_queue_add(&input_waiters,&waiter);hal_cons_wait_queue_unlock(&input_waiters,enabled);kernel_wait_task();}}
+int hal_cons_poll_event(struct hal_key_event*event){bool enabled=hal_cons_wait_queue_lock(&input_waiters);int available=input_head!=input_tail;if(available&&event!=NULL)*event=input_events[input_tail];hal_cons_wait_queue_unlock(&input_waiters,enabled);return available;}
+int hal_cons_read_event(struct hal_key_event*event){struct hal_cons_wait_entry waiter={hal_task_get_current(),NULL,0};for(;;){bool enabled=hal_cons_wait_queue_lock(&input_waiters);if(input_head!=input_tail){if(event!=NULL)*event=input_events[input_tail];input_tail=(input_tail+1U)%INPUT_EVENT_COUNT;hal_cons_wait_queue_unlock(&input_waiters,enabled);return 1;}hal_cons_wait_queue_add(&input_waiters,&waiter);hal_cons_wait_queue_unlock(&input_waiters,enabled);kernel_wait_task();}}
 int hal_cons_key_state(int key){(void)key;return 0;}
 void hal_cons_drain_input(void){bool enabled=hal_cons_wait_queue_lock(&input_waiters);input_tail=input_head;hal_cons_wait_queue_unlock(&input_waiters,enabled);}
 unsigned hal_cons_modifiers(void){return 0;}

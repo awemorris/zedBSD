@@ -26,6 +26,7 @@ struct amd64_space {
 };
 
 void amd64_space_init(void);
+int amd64_mmio_map_ecam(paddr_t physical, size_t size, void **result);
 uintptr_t amd64_direct_to_phys(const void *address);
 void *amd64_phys_to_direct(uintptr_t address);
 uintptr_t amd64_system_cr3(void);

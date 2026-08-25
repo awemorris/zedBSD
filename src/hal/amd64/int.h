@@ -16,6 +16,7 @@ void amd64_int_load(void);
 void int_handler(struct amd64_interrupt_frame *frame);
 extern void *amd64_fault_table[32];
 extern void *amd64_irq_table[16];
+extern void *amd64_msi_table[AMD64_VECTOR_MSI_COUNT];
 void amd64_notify_entry(void);
 void amd64_tlb_entry(void);
 void amd64_error_entry(void);

@@ -41,7 +41,7 @@ scope; producer Phases add or migrate them when their accuracy can be checked.
 DOC-T00 passes:
 
 ```text
-Markdown relative-link check: PASS (246 links at CW closure)
+Markdown relative-link check: PASS (246 links at Queue closure)
 ```
 
 The validator intentionally does not fetch web links or validate fragment

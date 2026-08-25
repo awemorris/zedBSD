@@ -5,6 +5,7 @@
 #include "kern/file.h"
 #include "kern/cdev.h"
 #include "kern/kmem.h"
+#include "kern/input-keymap.h"
 #include "kern/lock.h"
 #include "kern/poll.h"
 #include "kern/process.h"
@@ -493,14 +494,14 @@ tty_console_input_event(uint32_t event)
 {
 	struct tty *tty;
 	struct tty_input_result result;
-	unsigned key = event & HAL_KEY_EVENT_KEY_MASK;
+	unsigned key = event & INPUT_KEY_MASK;
 	unsigned long irq;
 	uint8_t byte;
 	const char *sequence = NULL;
 	size_t sequence_length = 0;
-	if ((event & HAL_KEY_EVENT_GRAPH) != 0 &&
-	    key >= HAL_KEY_F1 && key <= HAL_KEY_F4) {
-		(void)tty_vt_activate(key - HAL_KEY_F1);
+	if ((event & INPUT_KEY_GRAPH) != 0 &&
+	    key >= INPUT_KEY_F1 && key <= INPUT_KEY_F4) {
+		(void)tty_vt_activate(key - INPUT_KEY_F1);
 		return;
 	}
 	tty = &console_ttys[active_vt];
@@ -510,16 +511,16 @@ tty_console_input_event(uint32_t event)
 	 * Canonical input keeps its historical behavior and ignores navigation.
 	 */
 	switch (key) {
-	case HAL_KEY_UP: sequence = "\033[A"; sequence_length = 3; break;
-	case HAL_KEY_DOWN: sequence = "\033[B"; sequence_length = 3; break;
-	case HAL_KEY_RIGHT: sequence = "\033[C"; sequence_length = 3; break;
-	case HAL_KEY_LEFT: sequence = "\033[D"; sequence_length = 3; break;
-	case HAL_KEY_HOME: sequence = "\033[H"; sequence_length = 3; break;
-	case HAL_KEY_END: sequence = "\033[F"; sequence_length = 3; break;
-	case HAL_KEY_INSERT: sequence = "\033[2~"; sequence_length = 4; break;
-	case HAL_KEY_DELETE: sequence = "\033[3~"; sequence_length = 4; break;
-	case HAL_KEY_PAGE_UP: sequence = "\033[5~"; sequence_length = 4; break;
-	case HAL_KEY_PAGE_DOWN: sequence = "\033[6~"; sequence_length = 4; break;
+	case INPUT_KEY_UP: sequence = "\033[A"; sequence_length = 3; break;
+	case INPUT_KEY_DOWN: sequence = "\033[B"; sequence_length = 3; break;
+	case INPUT_KEY_RIGHT: sequence = "\033[C"; sequence_length = 3; break;
+	case INPUT_KEY_LEFT: sequence = "\033[D"; sequence_length = 3; break;
+	case INPUT_KEY_HOME: sequence = "\033[H"; sequence_length = 3; break;
+	case INPUT_KEY_END: sequence = "\033[F"; sequence_length = 3; break;
+	case INPUT_KEY_INSERT: sequence = "\033[2~"; sequence_length = 4; break;
+	case INPUT_KEY_DELETE: sequence = "\033[3~"; sequence_length = 4; break;
+	case INPUT_KEY_PAGE_UP: sequence = "\033[5~"; sequence_length = 4; break;
+	case INPUT_KEY_PAGE_DOWN: sequence = "\033[6~"; sequence_length = 4; break;
 	default: break;
 	}
 	if (sequence != NULL) {
@@ -542,19 +543,19 @@ tty_console_input_event(uint32_t event)
 		return;
 	}
 
-	if (key == HAL_KEY_ENTER)
+	if (key == INPUT_KEY_ENTER)
 		byte = '\n';
-	else if (key == HAL_KEY_BACKSPACE)
+	else if (key == INPUT_KEY_BACKSPACE)
 		byte = 8;
-	else if (key == HAL_KEY_TAB)
+	else if (key == INPUT_KEY_TAB)
 		byte = '\t';
 	else if (key > 0xffU)
 		return;
 	else
 		byte = (uint8_t)key;
-	if ((event & HAL_KEY_EVENT_CTRL) != 0 && byte >= 'a' && byte <= 'z')
+	if ((event & INPUT_KEY_CTRL) != 0 && byte >= 'a' && byte <= 'z')
 		byte = (uint8_t)(byte - 'a' + 1);
-	else if ((event & HAL_KEY_EVENT_CTRL) != 0 && byte >= 'A' && byte <= 'Z')
+	else if ((event & INPUT_KEY_CTRL) != 0 && byte >= 'A' && byte <= 'Z')
 		byte = (uint8_t)(byte - 'A' + 1);
 
 	irq = spin_lock_irqsave(&tty->lock);

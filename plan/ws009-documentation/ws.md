@@ -4,14 +4,13 @@ Last updated: 2026-08-25
 
 WSID: `ws009`
 
-Status: in progress; information architecture established
+Status: in progress; `ws009-p003` complete
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws009-p001` complete
+Last verified Phase: `ws009-p003` complete
 
-Resume point: extract DOC-20 for the build guide, or a producer-linked public
-interface reference Phase.
+Resume point: extract the next dependency-ready public reference.
 
 Shared tests: [WS009 test index](tests/README.md)
 
@@ -20,6 +19,8 @@ Shared tests: [WS009 test index](tests/README.md)
 | Phase | Status | Result / resume point |
 | --- | --- | --- |
 | [`ws009-p001`](phase001-information-architecture/phase.md) | Complete | Product hierarchy/rules and Noct relative-link validation established |
+| [`ws009-p002`](phase002-build-guide/phase.md) | Complete | Toolchain, parallel image build, amd64 QEMU marker, diagnostics, and links pass |
+| [`ws009-p003`](phase003-init-services/phase.md) | Complete | Current init/service configuration, readiness, supervision, and shutdown contract published |
 
 Documentation work may be extracted alongside a producer WS when it describes
 a newly frozen public interface, but it retains a WS009 Phase ID and acceptance
@@ -61,12 +62,12 @@ than assumed here.
 | DOC-10 | Planned | zedBSD independent-specification overview | Architecture inventory | Each intentional divergence has rationale, stable contract, and implementation references |
 | DOC-11 | Planned | HAL overview and architecture-independent kernel structure | Kernel/platform audit | Subsystem boundaries, ownership, and amd64-specific examples are traceable to source |
 | DOC-12 | Planned | UAPI POSIX/SUS compliance and `_XOPEN_SOURCE` profile | PX-02 | Claims match headers, implementations, and compliance ledger |
-| DOC-20 | Planned | Complete build-from-source guide | Supported toolchain/build audit | A clean environment follows the guide through image creation |
+| DOC-20 | Complete | Complete build-from-source guide | Supported toolchain/build audit | Toolchain/image commands reproduced; amd64 QEMU and links pass |
 | DOC-30 | Planned | Bootloader and boot-flow guide | BR-01–BR-04 design | BIOS/UEFI flow, failure points, and diagnostic paths are documented |
 | DOC-31 | Planned | Kernel parameter reference | Parser/default audit | Every documented parameter cites parser/default and unknown-key behavior |
 | DOC-32 | Planned | Boot filesystem plus loopback-root guide | Boot/root implementation | QEMU procedure reaches the intended root reproducibly |
 | DOC-33 | Planned | Native UFS-root guide | Stable native storage drivers | QEMU and supported hardware procedures are explicit and safe |
-| DOC-40 | Planned | zedBSD init, rc.conf, service.d, fd 3 readiness, and shutdown model | Phase 11–20 implementation | Boot/service/shutdown examples match tested behavior |
+| DOC-40 | Complete | zedBSD init, rc.conf, service.d, fd 3 readiness, and shutdown model | Phase 11–20 implementation | Boot/service/shutdown examples match tested behavior |
 | DOC-50 | Planned | `/dev/console` HAL-bridge reference | IN migration state | Text/input/framebuffer roles and deprecated interfaces are accurate |
 | DOC-51 | Planned | `/dev/graphics` HAL-bridge reference | GFX takeover design | Framebuffer, mmap/ioctl, ownership, and GPU takeover are specified |
 | DOC-52 | Planned | `/dev/system` HAL-bridge reference | Device/UAPI audit | Operations, permissions, data structures, and architecture hooks are specified |

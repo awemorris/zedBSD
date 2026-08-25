@@ -518,6 +518,42 @@ struct pc98_keyboard {
 #define SCAN_CTRL    0x74U
 #define SCAN_SHIFT_R 0x7dU
 
+/* Private legacy translation values; they are not part of the HAL API. */
+#define HAL_KEY_ESCAPE 0x1b
+#define HAL_KEY_BACKSPACE 0x08
+#define HAL_KEY_TAB 0x09
+#define HAL_KEY_ENTER 0x0d
+#define HAL_KEY_PAGE_UP 0x136
+#define HAL_KEY_PAGE_DOWN 0x137
+#define HAL_KEY_INSERT 0x138
+#define HAL_KEY_DELETE 0x139
+#define HAL_KEY_UP 0x13a
+#define HAL_KEY_LEFT 0x13b
+#define HAL_KEY_RIGHT 0x13c
+#define HAL_KEY_DOWN 0x13d
+#define HAL_KEY_HOME 0x13e
+#define HAL_KEY_END 0x13f
+#define HAL_KEY_F1 0x162
+#define HAL_KEY_F2 0x163
+#define HAL_KEY_F3 0x164
+#define HAL_KEY_F4 0x165
+#define HAL_KEY_F5 0x166
+#define HAL_KEY_F6 0x167
+#define HAL_KEY_F7 0x168
+#define HAL_KEY_F8 0x169
+#define HAL_KEY_F9 0x16a
+#define HAL_KEY_F10 0x16b
+#define HAL_KEY_SHIFT 0x170
+#define HAL_KEY_CAPS_LOCK 0x171
+#define HAL_KEY_KANA 0x172
+#define HAL_KEY_GRAPH 0x173
+#define HAL_KEY_CTRL 0x174
+#define HAL_KEY_EVENT_KEY_MASK 0x000001ffU
+#define HAL_KEY_EVENT_SHIFT_PRIVATE 0x00010000U
+#define HAL_KEY_EVENT_CTRL_PRIVATE 0x00020000U
+#define HAL_KEY_EVENT_GRAPH_PRIVATE 0x00040000U
+#define HAL_KEY_EVENT_RELEASE_PRIVATE 0x00080000U
+
 /* Unshifted characters.  0 means "not a printable key" (handled by the
  * special-key table or ignored). */
 static const uint8_t base_table[SCAN_MAX] = {
@@ -709,7 +745,7 @@ pc98_keyboard_feed(struct pc98_keyboard *kb, uint8_t raw, unsigned *result)
 		if (key == 0)
 			return 0;
 		*result = ((unsigned)key & HAL_KEY_EVENT_KEY_MASK) |
-		    keyboard_modifiers_locked() | HAL_KEY_EVENT_RELEASE;
+		    keyboard_modifiers_locked() | HAL_KEY_EVENT_RELEASE_PRIVATE;
 		return 1;
 	}
 
@@ -764,9 +800,65 @@ pc98_keyboard_is_down(const struct pc98_keyboard *kb, int key)
 #define QUEUE_SIZE 32U
 
 static struct pc98_keyboard keyboard;
-static unsigned events[QUEUE_SIZE];
+static struct hal_key_event events[QUEUE_SIZE];
 static unsigned head, tail;
 static struct hal_cons_wait_queue input_waiters;
+
+static const char *
+special_symbol(unsigned key)
+{
+	static const char *const function[] = {
+	    "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10"};
+	if (key >= HAL_KEY_F1 && key <= HAL_KEY_F10)
+		return function[key - HAL_KEY_F1];
+	switch (key) {
+	case HAL_KEY_ESCAPE: return "esc";
+	case HAL_KEY_BACKSPACE: return "backspace";
+	case HAL_KEY_TAB: return "tab";
+	case HAL_KEY_ENTER: return "enter";
+	case HAL_KEY_PAGE_UP: return "pageup";
+	case HAL_KEY_PAGE_DOWN: return "pagedown";
+	case HAL_KEY_INSERT: return "insert";
+	case HAL_KEY_DELETE: return "delete";
+	case HAL_KEY_UP: return "up";
+	case HAL_KEY_LEFT: return "left";
+	case HAL_KEY_RIGHT: return "right";
+	case HAL_KEY_DOWN: return "down";
+	case HAL_KEY_HOME: return "home";
+	case HAL_KEY_END: return "end";
+	case HAL_KEY_SHIFT: return "leftshift";
+	case HAL_KEY_CTRL: return "leftctrl";
+	case HAL_KEY_GRAPH: return "leftalt";
+	case HAL_KEY_CAPS_LOCK: return "capslock";
+	case HAL_KEY_KANA: return "kana";
+	default: return NULL;
+	}
+}
+
+static int
+event_from_legacy(struct hal_key_event *event, unsigned legacy)
+{
+	const char *symbol;
+	unsigned key = legacy & HAL_KEY_EVENT_KEY_MASK, index = 0;
+	char character[2];
+	symbol = special_symbol(key);
+	if (symbol == NULL && key <= 0xffU && key != 0) {
+		character[0] = (char)key;
+		character[1] = '\0';
+		symbol = character;
+	}
+	if (symbol == NULL)
+		return 0;
+	while (index + 1U < HAL_KEY_SYMBOL_SIZE && symbol[index] != '\0') {
+		event->symbol[index] = symbol[index];
+		index++;
+	}
+	while (index < HAL_KEY_SYMBOL_SIZE)
+		event->symbol[index++] = '\0';
+	event->flags = (legacy & HAL_KEY_EVENT_RELEASE_PRIVATE) != 0 ?
+	    HAL_KEY_EVENT_RELEASE : HAL_KEY_EVENT_PRESS;
+	return 1;
+}
 
 static uint8_t inb(uint16_t port)
 {
@@ -780,9 +872,9 @@ unsigned hal_cons_modifiers(void)
 	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
 	unsigned modifiers;
 
-	modifiers = (keyboard.shift ? HAL_KEY_EVENT_SHIFT : 0) |
-		(keyboard.ctrl ? HAL_KEY_EVENT_CTRL : 0) |
-		(keyboard.graph ? HAL_KEY_EVENT_GRAPH : 0);
+	modifiers = (keyboard.shift ? HAL_KEY_EVENT_SHIFT_PRIVATE : 0) |
+		(keyboard.ctrl ? HAL_KEY_EVENT_CTRL_PRIVATE : 0) |
+		(keyboard.graph ? HAL_KEY_EVENT_GRAPH_PRIVATE : 0);
 	hal_cons_wait_queue_unlock(&input_waiters, enabled);
 	return modifiers;
 }
@@ -790,9 +882,9 @@ unsigned hal_cons_modifiers(void)
 static unsigned
 keyboard_modifiers_locked(void)
 {
-	return (keyboard.shift ? HAL_KEY_EVENT_SHIFT : 0) |
-		(keyboard.ctrl ? HAL_KEY_EVENT_CTRL : 0) |
-		(keyboard.graph ? HAL_KEY_EVENT_GRAPH : 0);
+	return (keyboard.shift ? HAL_KEY_EVENT_SHIFT_PRIVATE : 0) |
+		(keyboard.ctrl ? HAL_KEY_EVENT_CTRL_PRIVATE : 0) |
+		(keyboard.graph ? HAL_KEY_EVENT_GRAPH_PRIVATE : 0);
 }
 
 static bool
@@ -820,8 +912,8 @@ pump_locked(void)
 		next = (head + 1U) % QUEUE_SIZE;
 		if (next == tail)
 			continue;
-		events[head] = event;
-		head = next;
+		if (event_from_legacy(&events[head], event))
+			head = next;
 	}
 }
 
@@ -842,16 +934,18 @@ keyboard_interrupt(int irq, hal_irq_ack_t acknowledge, void *argument)
 	hal_irq_send_eoi(acknowledge);
 }
 
-int hal_cons_poll_event(void)
+int hal_cons_poll_event(struct hal_key_event *event)
 {
 	bool enabled = input_lock_acquire();
-	int event = tail == head ? -1 : (int)events[tail];
+	int available = tail != head;
 
+	if (available && event != NULL)
+		*event = events[tail];
 	input_lock_release(enabled);
-	return event;
+	return available;
 }
 
-int hal_cons_read_event(void)
+int hal_cons_read_event(struct hal_key_event *event)
 {
 	struct hal_cons_wait_entry waiter;
 
@@ -862,11 +956,11 @@ int hal_cons_read_event(void)
 		bool enabled = input_lock_acquire();
 
 		if (tail != head) {
-			int event = (int)events[tail];
-
+			if (event != NULL)
+				*event = events[tail];
 			tail = (tail + 1U) % QUEUE_SIZE;
 			input_lock_release(enabled);
-			return event;
+			return 1;
 		}
 		hal_cons_wait_queue_add(&input_waiters, &waiter);
 		input_lock_release(enabled);
@@ -876,7 +970,18 @@ int hal_cons_read_event(void)
 
 int hal_cons_getc(void)
 {
-	return hal_cons_read_event() & (int)HAL_KEY_EVENT_KEY_MASK;
+	struct hal_key_event event;
+	for (;;) {
+		(void)hal_cons_read_event(&event);
+		if ((event.flags & (HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_REPEAT)) == 0)
+			continue;
+		if (event.symbol[1] == '\0')
+			return event.symbol[0];
+		if (event.symbol[0] == 'e' && event.symbol[1] == 'n') return '\r';
+		if (event.symbol[0] == 't' && event.symbol[1] == 'a') return '\t';
+		if (event.symbol[0] == 'b' && event.symbol[1] == 'a') return '\b';
+		if (event.symbol[0] == 'e' && event.symbol[1] == 's') return 0x1b;
+	}
 }
 
 int hal_cons_key_state(int key)

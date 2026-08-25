@@ -4,14 +4,15 @@ Last updated: 2026-08-25
 
 WSID: `ws003`
 
-Status: paused; first Phase carried forward
+Status: active; physical UEFI boot acceptance Uncleared
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws003-p001` attempted and carried forward
+Last verified Phase: `ws003-p002` software correction and OVMF pass; physical
+U0 evidence awaits corrected-image rerun
 
-Resume point: resume `ws003-p001` on the physical Latitude 5320 or from a
-user-supplied DMI/firmware/PCI/USB inventory.
+Resume point: run corrected `ws003-p002` image three times on the Latitude and
+capture the next marker/rejection reason; hardware inventory remains incomplete.
 
 Shared tests: [WS003 test index](tests/README.md)
 
@@ -20,6 +21,7 @@ Shared tests: [WS003 test index](tests/README.md)
 | Combined ID | Work item | Status | Result |
 | --- | --- | --- | --- |
 | `ws003-p001` | [BR-00 hardware inventory](phase001-hardware-inventory/phase.md) | Carried forward | Active host is WSL2; target DMI/PCI/USB evidence is unavailable |
+| `ws003-p002` | [BR-05 Latitude UEFI memory map](phase002-uefi-memory-map/phase.md) | Partial; Uncleared | Valid arbitrary ordering is fixed and OVMF reaches login; corrected-image Latitude BR-T32 remains |
 
 BR-01–BR-04 may be split according to the xHCI audit from WS004 after the
 inventory resumes.
@@ -74,7 +76,7 @@ M1 requires U0–U5 in QEMU. M2 requires U0–U5 on the Latitude 5320.
 | BR-02 | Planned | QEMU boot through `qemu-xhci` and `usb-storage` | BR-01, xHCI work in HW track | U0–U5 pass in the declared BIOS/UEFI matrix |
 | BR-03 | Planned | Stable boot/root device selection rather than enumeration-order assumptions | Bootloader/kernel parameter review | Root selection survives reordered storage-device attachment and reports actionable failure |
 | BR-04 | Planned | Kernel xHCI and USB-storage continuity sufficient for USB root | xHCI, block layer, USB storage | Repeated QEMU I/O and reset/error tests pass |
-| BR-05 | Planned | Latitude firmware-to-kernel USB boot | BR-00–BR-04 | Cold boots reach kernel reliably with captured diagnostics |
+| BR-05 | In progress; Uncleared | Latitude firmware-to-kernel USB boot | BR-00–BR-04 | Current highest tier U0; repair UEFI memory-map normalization and reach kernel reliably |
 | BR-06 | Planned | Latitude USB root through init/login/shell | BR-05 | Repeated cold boots reach a usable shell; filesystem smoke test passes |
 | BR-07 | Proposed | USB CDC diagnostic and/or network function selected and implemented | CDC profile decision, USB device/gadget capability | The selected profile interoperates with a documented host OS and recovers from reconnect |
 | BR-08 | Planned | At least one working physical network path | BR-00, BR-06, relevant NET/HW item | DHCP or static configuration, ping, and data transfer pass on hardware |

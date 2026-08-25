@@ -47,6 +47,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/syscall.o $(BUILD)/src/kern/uaccess.o \
 	$(BUILD)/src/kern/cdev.o $(BUILD)/src/kern/devfs.o \
 	$(BUILD)/src/kern/console-device.o $(BUILD)/src/kern/mouse-device.o \
+	$(BUILD)/src/kern/input-queue.o $(BUILD)/src/kern/input-device.o \
+	$(BUILD)/src/kern/input-keymap.o $(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/graphics-device.o \
 	$(BUILD)/src/kern/system-device.o \
@@ -61,6 +63,9 @@ PCAT_USB_HCD_OBJS += $(BUILD)/drivers/pci-uhci.o
 endif
 ifeq ($(CONFIG_DRIVER_PCI_EHCI),y)
 PCAT_USB_HCD_OBJS += $(BUILD)/drivers/pci-ehci.o
+endif
+ifeq ($(CONFIG_DRIVER_PCI_XHCI),y)
+PCAT_USB_HCD_OBJS += $(BUILD)/drivers/pci-xhci.o
 endif
 PCAT_USB_CLASS_OBJS :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
@@ -90,7 +95,7 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/pcat/platform.o $(BUILD)/src/kern/image.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PCAT_OBJS) $(KERN_OBJS) $(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS) \
-	$(KERN_UFS_CONSISTENCY_OBJS)
+	$(KERN_UFS_CONSISTENCY_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
 
 vmunix: $(BUILD)/vmunix
 

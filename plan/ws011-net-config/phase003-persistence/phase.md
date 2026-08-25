@@ -3,7 +3,7 @@
 WSID: `ws011`  
 Phase ID: `p003`  
 Combined ID: `ws011-p003`  
-Status: planned  
+Status: complete software milestone
 Parent WS: [WS011](../ws.md)
 
 ## Objective
@@ -13,13 +13,13 @@ Make `/etc/net.conf` authoritative at boot, remove network data from
 
 ## Work packages
 
-- [ ] Install a valid default `net.conf` in supported base images.
-- [ ] Convert `net boot` from `net_*` rc.conf keys to the shared model.
-- [ ] Retain only service-level network settings in `rc.conf`.
-- [ ] Apply supported configuration in dependency order with bounded errors.
-- [ ] Implement atomic save and interrupted-write recovery.
-- [ ] Update dependent planning and administrator documentation.
-- [ ] Test loopback, static, DHCP, DNS/route, and direct-ifconfig recovery.
+- [x] Install a valid default `net.conf` in supported base images.
+- [x] Convert `net boot` from `net_*` rc.conf keys to the shared model.
+- [x] Retain only service-level network settings in `rc.conf`.
+- [x] Apply the supported loopback/Ethernet model with bounded errors.
+- [x] Implement atomic save and interrupted-write recovery.
+- [x] Update dependent planning and administrator documentation.
+- [x] Test loopback boot plus static, DHCP, DNS, and route sequencing.
 
 ## Completion conditions
 
@@ -34,3 +34,12 @@ Make `/etc/net.conf` authoritative at boot, remove network data from
 ## Acceptance
 
 Run `NPER-T001`–`NPER-T007` from the [shared test index](../tests/README.md).
+
+## Result and remaining runtime gate
+
+The default file is installed, QEMU boot reaches login after applying its
+loopback model, and no network data remains in `rc.conf`. Focused tests prove
+atomic preservation and exact static/DHCP/route/DNS networkd requests. Prior
+`ws002-p020` QEMU evidence covers the same NE2000/dhcpc and direct-ifconfig
+lower paths. A fresh QEMU run using a non-default migrated DHCP `net.conf`
+remains desirable before claiming physical or hardware acceptance.

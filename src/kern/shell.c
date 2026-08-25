@@ -7,6 +7,7 @@
  */
 #include "kern/internal.h"
 #include "kern/console-device.h"
+#include "kern/input-keymap.h"
 #include "kern/platform.h"
 #include "kern/file.h"
 #include "kern/vfs.h"
@@ -94,7 +95,7 @@ raw_key(void)
 	/* A blocking read must never leave the hardware cursor stale or hidden.
 	 */
 	update_cursor();
-	return (uint32_t)console_input_read_event() & HAL_KEY_EVENT_KEY_MASK;
+	return (uint32_t)console_input_read_event() & INPUT_KEY_MASK;
 }
 int
 key(void)
@@ -106,7 +107,7 @@ poll(void)
 {
 	{
 		int event = console_input_poll_event();
-		return event < 0 ? -1 : event & (int)HAL_KEY_EVENT_KEY_MASK;
+		return event < 0 ? -1 : event & (int)INPUT_KEY_MASK;
 	}
 }
 

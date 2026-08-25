@@ -119,3 +119,24 @@ arm64_irq_dispatch(uint32_t id, hal_irq_ack_t acknowledge)
 	hal_irq_send_eoi(acknowledge);
 	hal_printf("unexpected IRQ %u\n", id);
 }
+
+int
+hal_irq_register_msi(const char *source, hal_irq_handler_t handler,
+	void *handler_arg, int *mapped_irq, paddr_t *mapped_addr,
+	uint32_t *mapped_event)
+{
+	(void)source;
+	(void)handler;
+	(void)handler_arg;
+	(void)mapped_irq;
+	(void)mapped_addr;
+	(void)mapped_event;
+	return HAL_ERR_UNSUPPORTED;
+}
+
+int
+hal_irq_unregister_msi(int mapped_irq)
+{
+	(void)mapped_irq;
+	return HAL_ERR_UNSUPPORTED;
+}

@@ -319,6 +319,7 @@ load_file_loop:
 	jae 1f
 	mov ecx, dword ptr [load_remaining]
 1:	mov dword ptr [copy_count], ecx
+	cli
 	xor bx, bx
 	mov edi, dword ptr [load_destination]
 copy_sector_loop:
@@ -344,18 +345,30 @@ copy_sector_byte:
 	dec ecx
 	jnz copy_sector_byte
 copy_sector_done:
+	sti
 	mov eax, dword ptr [copy_count]
 	add dword ptr [load_destination], eax
 	sub dword ptr [load_remaining], eax
 	inc dword ptr [load_file_sector]
 	jmp load_file_loop
 zero_bss:
+	cli
+	cmp byte ptr [elf_class], ELFCLASS64
+	je next_ph
 	mov si, word ptr [ph_cursor]
 	mov ecx, dword ptr [si + 12]
 	sub ecx, dword ptr [si + 8]
 	mov edi, dword ptr [si + 4]
 	add edi, dword ptr [si + 8]
-zero_bss_loop:
+	mov dword ptr [load_remaining], ecx
+zero_bss_chunk:
+	mov ecx, dword ptr [load_remaining]
+	test ecx, ecx
+	jz next_ph
+	cmp ecx, 0xfffc
+	jbe 1f
+	mov ecx, 0xfffc
+1:	mov dword ptr [copy_count], ecx
 	mov edx, ecx
 	shr ecx, 2
 	xor eax, eax
@@ -368,13 +381,18 @@ zero_bss_dword:
 zero_bss_tail:
 	mov ecx, edx
 	and ecx, 3
-	jz next_ph
+	jz zero_bss_chunk_done
 zero_bss_byte:
 	mov byte ptr gs:[edi], 0
 	inc edi
 	dec ecx
 	jnz zero_bss_byte
+zero_bss_chunk_done:
+	mov eax, dword ptr [copy_count]
+	sub dword ptr [load_remaining], eax
+	jmp zero_bss_chunk
 next_ph:
+	sti
 	add word ptr [ph_cursor], PH_RECORD_SIZE
 	dec word ptr [ph_remaining]
 	jmp load_ph_loop
@@ -436,6 +454,12 @@ fat16_mount:
 	movzx eax, word ptr es:[BPB_SECTORS_FAT16]
 	test eax, eax
 	jz fat32_mount
+	cmp byte ptr es:[BPB_EXT_SIGNATURE16], 0x29
+	jne 1f
+	mov edx, dword ptr es:[BPB_VOLUME_SERIAL16]
+	mov dword ptr [boot_volume_serial], edx
+	mov byte ptr [boot_uuid_valid], 1
+1:
 	mov dword ptr [fat_sectors], eax
 	movzx ecx, byte ptr es:[BPB_FAT_COUNT]
 	test ecx, ecx
@@ -477,6 +501,12 @@ fat16_mount:
 	ret
 
 fat32_mount:
+	cmp byte ptr es:[BPB_EXT_SIGNATURE32], 0x29
+	jne 1f
+	mov edx, dword ptr es:[BPB_VOLUME_SERIAL32]
+	mov dword ptr [boot_volume_serial], edx
+	mov byte ptr [boot_uuid_valid], 1
+1:
 	mov eax, dword ptr es:[BPB_SECTORS_FAT32]
 	test eax, eax
 	jz fatal_fat
@@ -973,6 +1003,12 @@ enter_long_mode:
 	call vbe_setup_framebuffer
 	mov si, offset msg_go
 	call puts
+	cmp byte ptr [boot_uuid_valid], 0
+	je 1f
+	or word ptr [long_handoff + ZBL6_HANDOFF_FLAGS_OFFSET], 0x0010
+	mov eax, dword ptr [boot_volume_serial]
+	mov dword ptr [long_handoff + ZBL6_HANDOFF_BOOT_SERIAL_OFFSET], eax
+1:
 	mov al, byte ptr [boot_drive]
 	mov byte ptr [long_handoff + ZBL6_HANDOFF_BOOT_DRIVE_OFFSET], al
 	mov al, byte ptr [partition_index]
@@ -1057,6 +1093,24 @@ long_entry:
 	mov rsp, 0x000000000009f000
 	xor rbp, rbp
 	cld
+	/* Clear every ELF64 p_memsz - p_filesz range through the native
+	 * identity map.  Do not depend on unreal-mode segment cache state. */
+	movzx r8d, word ptr [0x10000 + ph_load_count]
+	mov ebx, offset ph_table
+	add ebx, 0x10000
+.Lzero64_next:
+	test r8d, r8d
+	jz .Lzero64_done
+	mov ecx, dword ptr [rbx + 12]
+	sub ecx, dword ptr [rbx + 8]
+	mov edi, dword ptr [rbx + 4]
+	add edi, dword ptr [rbx + 8]
+	xor eax, eax
+	rep stosb
+	add ebx, PH_RECORD_SIZE
+	dec r8d
+	jmp .Lzero64_next
+.Lzero64_done:
 	mov rdi, offset long_handoff
 	add rdi, 0x10000
 	mov eax, dword ptr [0x10000 + elf_entry_low]
@@ -1160,6 +1214,7 @@ dir_sector:       .byte 0
 disk_retry:       .byte 0
 file_cache_valid: .byte 0
 fat_cache_valid:  .byte 0
+boot_uuid_valid:  .byte 0
 .balign 2
 cached_cluster:     .word 0
 cached_sector_in_cluster: .byte 0
@@ -1177,6 +1232,7 @@ dir_cluster32:      .long 0
 file_first_cluster32: .long 0
 cached_cluster32:   .long 0
 partition_blocks:   .long 0
+boot_volume_serial: .long 0
 fat_lba:            .long 0
 fat_sectors:        .long 0
 root_lba:           .long 0

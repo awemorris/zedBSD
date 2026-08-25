@@ -43,8 +43,8 @@ configured system builds after the change.
 ## Result and carry-forward reason
 
 The originally reported internal-coordinate mismatch was not reproduced in the
-bounded relative-input matrix. Per the CW rule, this Phase is Carried forward,
-not Complete. Absolute input and evdev consumer behavior cannot be tested until
+bounded relative-input matrix. Per the Queue rule, this Phase result is
+`uncleared`, not `completed`. Absolute input and evdev consumer behavior cannot be tested until
 WS006 supplies `/dev/input/eventN` and Xzed migration.
 
 ## Resume condition

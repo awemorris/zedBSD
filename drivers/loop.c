@@ -44,7 +44,6 @@ loop_open(struct disk *disk)
 	struct loop_device *loop = disk != NULL ? disk->d_data : NULL;
 	return loop == NULL || !loop->attached || loop->detaching ? ENXIO : 0;
 }
-
 static void
 loop_close(struct disk *disk)
 {
@@ -160,6 +159,9 @@ loop_backing_valid(struct file *backing, unsigned flags)
 	if (flags == LOOP_READ_WRITE &&
 	    (file_status_flags_get(backing) & O_ACCMODE) == O_RDONLY)
 		return EBADF;
+	if (flags == LOOP_READ_WRITE && inode->i_mount != NULL &&
+	    (inode->i_mount->m_flags & MOUNT_READ_ONLY) != 0)
+		return EROFS;
 	if ((inode->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0)
 		return EBUSY;
 	if (inode->i_mount != NULL && inode->i_mount->m_type != NULL &&

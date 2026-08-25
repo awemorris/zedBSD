@@ -4,6 +4,7 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 INIT_DATA := /etc/rc.conf=userland/base/etc/rc.conf \
 	/etc/fstab=userland/base/etc/fstab \
+	/etc/net.conf=userland/base/etc/net.conf \
 	/etc/service.d/syslogd=userland/base/init/services/syslogd \
 	/etc/service.d/getty_console=userland/base/init/services/getty_console \
 	/etc/service.d/networkd=userland/base/init/services/networkd \

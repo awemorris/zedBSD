@@ -114,6 +114,8 @@ typedef int (
 	void *);
 
 struct drv_pci_bus_ops {
+	/* Zero selects conventional 256-byte PCI configuration space. */
+	unsigned config_space_size;
 	int (
 		*config_read)(
 		void *,

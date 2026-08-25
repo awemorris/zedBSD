@@ -4,14 +4,14 @@ Last updated: 2026-08-25
 
 WSID: `ws006`
 
-Status: in progress; evdev profile frozen
+Status: in progress; `ws006-p004` complete PC/AT software milestone
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws006-p001` complete
+Last verified Phase: `ws006-p004` complete PC/AT software milestone
 
-Resume point: extract IN-01 as `ws006-p002` and implement the input core/event
-device against the frozen profile.
+Resume point: migrate Xzed when a concrete evdev consumer Phase is selected;
+retain PC-98/X68000 physical-token completion as a port-specific follow-up.
 
 Shared tests: [WS006 test index](tests/README.md)
 
@@ -20,6 +20,9 @@ Shared tests: [WS006 test index](tests/README.md)
 | Phase | Status | Result / resume point |
 | --- | --- | --- |
 | [`ws006-p001`](phase001-evdev-profile/phase.md) | Complete | Experimental UAPI/profile and dual-ABI layout tests pass |
+| [`ws006-p002`](phase002-input-core/phase.md) | Complete milestone | Core/devfs/queue build and focused evidence pass; real producer runtime remains IN-02 |
+| [`ws006-p003`](phase003-producer-bridge/phase.md) | Complete milestone | Production event nodes register in QEMU; physical-key broker/consumer evidence remains p004 |
+| [`ws006-p004`](phase004-console-broker/phase.md) | Complete PC/AT software milestone | Fixed string event, single broker, focused/build evidence, and production QEMU event-node/console coexistence pass; PC-98/X68000 physical detail remains |
 
 The remaining sequence is input core, existing producer bridge, consumer
 migration, legacy-console removal, and USB HID.
@@ -70,9 +73,9 @@ console's character/key translation path.
 | ID | Status | Deliverable | Dependencies | Acceptance gate |
 | --- | --- | --- | --- | --- |
 | IN-00 | Complete | evdev compatibility profile and public UAPI | Existing console UAPI audit | Header/layout tests pass and difference table is published |
-| IN-01 | Planned | Kernel input core, registration, event fan-out, buffering, poll/read, and lifecycle | IN-00, VFS/device primitives | Multiple-reader, overflow, nonblocking, poll, disconnect, and permission tests |
-| IN-02 | Planned | Existing console input producers also register evdev devices | IN-01 | Keyboard/mouse events appear under `/dev/input/` without breaking console text input |
-| IN-03 | Planned | Console consumes the internal input stream | IN-01/02 | Console editing, modifiers, repeat, virtual-terminal behavior, and evdev readers coexist |
+| IN-01 | Complete milestone | Kernel input core, registration, event fan-out, buffering, poll/read, and lifecycle | IN-00, VFS/device primitives | Queue/ABI/native build pass; guest producer lifecycle evidence is handed to IN-02 |
+| IN-02 | Complete PC/AT milestone | Existing console input producers also register evdev devices | IN-01 | Production keyboard/mouse nodes register and QEMU reads keyboard records without breaking console text input |
+| IN-03 | Complete PC/AT milestone | Console consumes the internal input stream | IN-01/02 | One worker fans out PC/AT physical events; keymap/queue/QEMU coexistence evidence passes |
 | IN-04 | Planned | Xzed evdev migration | IN-02, GFX X11 repair | Keyboard and absolute/relative mouse behavior pass in QEMU and hardware |
 | IN-05 | Planned | Noct/BeUI evdev migration | IN-02, NOCT upstream/backend work | BeUI event behavior passes without console event ioctls |
 | IN-06 | Planned | Remove console continuous-event and key-state UAPI | IN-03–05 | No in-tree consumer remains; compatibility audit and regression tests pass |

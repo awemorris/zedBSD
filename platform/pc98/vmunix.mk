@@ -59,7 +59,9 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/user-probe.o $(BUILD)/src/kern/syscall.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
 	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/console-device.o \
-	$(BUILD)/src/kern/mouse-device.o \
+	$(BUILD)/src/kern/mouse-device.o $(BUILD)/src/kern/input-queue.o \
+	$(BUILD)/src/kern/input-device.o $(BUILD)/src/kern/input-keymap.o \
+	$(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
 	$(BUILD)/src/kern/system-device.o \
@@ -114,7 +116,7 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/image.o \
 	$(BUILD)/src/kern/panic.o \
 	$(ZEDBSD_LIBC_OBJECTS) \
-	$(HAL_PC98_OBJS) $(KERN_OBJS)
+	$(HAL_PC98_OBJS) $(KERN_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
 M9_STAGE2_OBJS = $(filter-out $(BUILD)/src/kern/main.o \
 	$(BUILD)/src/kern/shell.o $(BUILD)/src/kern/device.o,$(STAGE2_OBJS)) \
 	$(BUILD)/$(PC98)/stage2-m9-test.o \

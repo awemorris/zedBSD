@@ -51,7 +51,6 @@ mount_alloc(void)
 	spin_unlock_irqrestore(&namespace_lock, irq);
 	return result;
 }
-
 void
 mount_vfs_transaction_enter(struct mount *mountp)
 {
@@ -219,6 +218,8 @@ mount_filesystem_on_disk(struct mount *mountp, const char *type_name,
 			return error;
 	}
 	mountp->m_flags = (unsigned)flags;
+	if (disk != NULL && (disk->d_flags & DISK_READ_ONLY) != 0)
+		mountp->m_flags |= MOUNT_READ_ONLY;
 	mountp->m_disk = disk;
 	mountp->m_type = type;
 	mountp->m_data = data;

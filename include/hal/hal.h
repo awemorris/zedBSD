@@ -275,6 +275,25 @@ hal_irq_service_wait(
 	hal_irq_ack_t *acknowledge);
 
 /*
+ * Allocate one message-signalled logical IRQ.  source is a canonical bus
+ * identity (initially "PCI SSSS:BB:DD.F").  Output values are published only
+ * after the handler and architecture mapping are fully installed.
+ */
+int
+hal_irq_register_msi(
+	const char *source,
+	hal_irq_handler_t handler,
+	void *handler_arg,
+	int *mapped_irq,
+	paddr_t *mapped_addr,
+	uint32_t *mapped_event);
+
+/* Release a message-signalled logical IRQ returned by register_msi. */
+int
+hal_irq_unregister_msi(
+	int mapped_irq);
+
+/*
  * Interval Time
  *
  * Do not consider timers other than local scheduling ticks.
@@ -845,43 +864,20 @@ enum hal_cons_mode {
 #define HAL_CONS_ROWS	25U
 #define HAL_CONS_NORMAL_ATTRIBUTE	0xe1U
 
-enum hal_key {
-	HAL_KEY_ESCAPE = 0x1b,
-	HAL_KEY_BACKSPACE = 0x08,
-	HAL_KEY_TAB = 0x09,
-	HAL_KEY_ENTER = 0x0d,
-	HAL_KEY_PAGE_UP = 0x136,
-	HAL_KEY_PAGE_DOWN = 0x137,
-	HAL_KEY_INSERT = 0x138,
-	HAL_KEY_DELETE = 0x139,
-	HAL_KEY_UP = 0x13a,
-	HAL_KEY_LEFT = 0x13b,
-	HAL_KEY_RIGHT = 0x13c,
-	HAL_KEY_DOWN = 0x13d,
-	HAL_KEY_HOME = 0x13e,
-	HAL_KEY_END = 0x13f,
-	HAL_KEY_F1 = 0x162,
-	HAL_KEY_F2 = 0x163,
-	HAL_KEY_F3 = 0x164,
-	HAL_KEY_F4 = 0x165,
-	HAL_KEY_F5 = 0x166,
-	HAL_KEY_F6 = 0x167,
-	HAL_KEY_F7 = 0x168,
-	HAL_KEY_F8 = 0x169,
-	HAL_KEY_F9 = 0x16a,
-	HAL_KEY_F10 = 0x16b,
-	HAL_KEY_CAPS_LOCK = 0x171,
-	HAL_KEY_KANA = 0x172,
-	HAL_KEY_GRAPH = 0x173,
-	HAL_KEY_CTRL = 0x174,
-	HAL_KEY_SHIFT = 0x170,
-};
+#define HAL_KEY_SYMBOL_SIZE 16U
+#define HAL_KEY_EVENT_PRESS   0x00000001U
+#define HAL_KEY_EVENT_RELEASE 0x00000002U
+#define HAL_KEY_EVENT_REPEAT  0x00000004U
 
-#define HAL_KEY_EVENT_KEY_MASK	(0x000001ffU)
-#define HAL_KEY_EVENT_SHIFT	(0x00010000U)
-#define HAL_KEY_EVENT_CTRL	(0x00020000U)
-#define HAL_KEY_EVENT_GRAPH	(0x00040000U)
-#define HAL_KEY_EVENT_RELEASE	(0x00080000U)
+/*
+ * A keysymbol is stable lowercase ASCII, at most 15 bytes, and NUL terminated.
+ * Exactly one flag describes a transition. Character-only consoles may emit a
+ * one-byte symbol with PRESS and need not synthesize release events.
+ */
+struct hal_key_event {
+	char symbol[HAL_KEY_SYMBOL_SIZE];
+	uint32_t flags;
+};
 
 struct hal_cons_state {
 	enum hal_cons_mode mode;
@@ -990,10 +986,12 @@ void
 hal_cons_update_cursor(void);
 
 int
-hal_cons_read_event(void);
+hal_cons_read_event(
+	struct hal_key_event *event);
 
 int
-hal_cons_poll_event(void);
+hal_cons_poll_event(
+	struct hal_key_event *event);
 
 int
 hal_cons_key_state(

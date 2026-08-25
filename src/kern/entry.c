@@ -32,7 +32,7 @@
 #define KERNEL_LARGE_THRESHOLD (2U * ZEDBSD_PAGE_SIZE)
 #define KERNEL_ALLOCATION_ALIGNMENT 16U
 static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
-	__attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
+    __attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
 static struct heap_allocator kernel_heap;
 static atomic_uint_t kernel_heap_lock;
 
@@ -80,13 +80,14 @@ kern_malloc(size_t size)
 		if (result != NULL)
 			return result;
 		/*
-		 * The fixed heap is deliberately small and can become fragmented.
-		 * A failed sub-threshold allocation must still be allowed to use a
-		 * page-backed allocation while physical memory remains available.
+		 * The fixed heap is deliberately small and can become
+		 * fragmented. A failed sub-threshold allocation must still be
+		 * allowed to use a page-backed allocation while physical memory
+		 * remains available.
 		 */
 	}
 	header_size = (sizeof(*large) + KERNEL_ALLOCATION_ALIGNMENT - 1U) &
-	    ~(size_t)(KERNEL_ALLOCATION_ALIGNMENT - 1U);
+		      ~(size_t)(KERNEL_ALLOCATION_ALIGNMENT - 1U);
 	if (size > SIZE_MAX - header_size)
 		return NULL;
 	memset(&request, 0, sizeof(request));
@@ -140,7 +141,7 @@ kern_free(void *pointer)
 		return;
 	}
 	for (link = &kernel_large_allocations; *link != NULL;
-	    link = &(*link)->next)
+	     link = &(*link)->next)
 		if ((*link)->pointer == pointer) {
 			large = *link;
 			*link = large->next;
@@ -166,16 +167,23 @@ kern_memory_get_stats(struct kern_memory_stats *stats)
 	stats->heap_fixed = KERNEL_HEAP_SIZE;
 	stats->heap_current = heap_allocator_current(&kernel_heap);
 	stats->heap_peak = heap_allocator_peak(&kernel_heap);
-	stats->heap_largest_free =
-		heap_allocator_largest_free(&kernel_heap);
+	stats->heap_largest_free = heap_allocator_largest_free(&kernel_heap);
 	stats->heap_largest_failed =
-		heap_allocator_largest_failed(&kernel_heap);
+	    heap_allocator_largest_failed(&kernel_heap);
 	stats->image_bytes = (size_t)(__kernel_vma_end - __kernel_vma_start);
 	kernel_heap_lock_leave(enabled);
 }
 
-static void *kernel_alloc(size_t size) { return kern_malloc(size); }
-static void kernel_free(void *pointer) { kern_free(pointer); }
+static void *
+kernel_alloc(size_t size)
+{
+	return kern_malloc(size);
+}
+static void
+kernel_free(void *pointer)
+{
+	kern_free(pointer);
+}
 
 void
 kernel_entry(const void *handoff)
@@ -194,7 +202,7 @@ kernel_entry(const void *handoff)
 	kern_log_init();
 	kern_logf("boot: kernel heap, process, and scheduler initialization\n");
 	heap_allocator_init(&kernel_heap, kernel_heap_storage,
-				 KERNEL_HEAP_SIZE);
+			    KERNEL_HEAP_SIZE);
 	(void)heap_active_set(&kernel_heap);
 	hal_set_allocator(kernel_alloc, kernel_free);
 	hal_task_init();
@@ -205,36 +213,42 @@ kernel_entry(const void *handoff)
 	sched_init();
 	sysctl_init();
 	if (buf_init() != 0)
-		hal_fatal(__FILE__, __LINE__, "buffer cache initialization failed");
+		hal_fatal(__FILE__, __LINE__,
+			  "buffer cache initialization failed");
 	if (thread_prepare_secondaries(hal_cpu_count()) != 0)
-		hal_fatal(__FILE__, __LINE__, "secondary thread allocation failed");
+		hal_fatal(__FILE__, __LINE__,
+			  "secondary thread allocation failed");
 	if (hal_cpu_start_others() != HAL_OK)
 		hal_fatal(__FILE__, __LINE__, "secondary CPU startup failed");
 	if (sched_wait_others_online() != 0)
-		hal_fatal(__FILE__, __LINE__, "secondary scheduler startup failed");
+		hal_fatal(__FILE__, __LINE__,
+			  "secondary scheduler startup failed");
 	thread_attach_secondaries();
-	/* Synchronize the shared kernel translation domain with newly ready CPUs. */
+	/* Synchronize the shared kernel translation domain with newly ready
+	 * CPUs. */
 	hal_page_flush_tlb_range(HAL_SPACE_SYS, __kernel_vma_start,
-	    ZEDBSD_PAGE_SIZE);
+				 ZEDBSD_PAGE_SIZE);
 	if (kern_cpu_notify_probe() != HAL_OK)
-		hal_fatal(__FILE__, __LINE__, "secondary CPU notification failed");
+		hal_fatal(__FILE__, __LINE__,
+			  "secondary CPU notification failed");
 	hal_printf("boot: HAL initialized successfully. "
-	    "[cpu %u, memory %uMB, timer %ums]\n",
-	    hal_cpu_count(),
-	    (unsigned)(hal_pmem_get_total_size() / (1024U * 1024U)),
-	    (unsigned)(1000U / HAL_TIMER_FREQUENCY));
+		   "[cpu %u, memory %uMB, timer %ums]\n",
+		   hal_cpu_count(),
+		   (unsigned)(hal_pmem_get_total_size() / (1024U * 1024U)),
+		   (unsigned)(1000U / HAL_TIMER_FREQUENCY));
 	kern_logf("boot: CPUs ready: %u\n", hal_cpu_count());
 	if (process_reaper_start() != 0)
-		hal_fatal(__FILE__, __LINE__, "process reaper initialization failed");
+		hal_fatal(__FILE__, __LINE__,
+			  "process reaper initialization failed");
 	if (net_init() != 0)
-		hal_fatal(__FILE__, __LINE__, "network subsystem initialization failed");
+		hal_fatal(__FILE__, __LINE__,
+			  "network subsystem initialization failed");
 
 	kern_logf("boot: platform device discovery\n");
-	device_count = kern_platform_init(h, devices, KERN_PLATFORM_MAX_DEVICES);
-	if (device_count == 0)
-		hal_fatal(__FILE__, __LINE__, "no boot devices");
+	device_count =
+	    kern_platform_init(h, devices, KERN_PLATFORM_MAX_DEVICES);
 	kern_logf("boot: platform devices detected: %u\n",
-	    (unsigned)device_count);
+		  (unsigned)device_count);
 	hal_irq_enable();
 	/* Deferred device work may submit interrupt-driven I/O. */
 	kern_platform_refresh_devices(devices, device_count);

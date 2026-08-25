@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/platform.h"
 #include "kern/disk.h"
+#include "kern/clock.h"
+#include "kern/sched.h"
 #include "kern/partition.h"
 #include "kern/mbr-partition.h"
 #include "drivers/pcat-ide.h"
@@ -11,6 +13,9 @@
 #endif
 #if CONFIG_DRIVER_PCI_EHCI
 #include "drivers/pci-ehci.h"
+#endif
+#if CONFIG_DRIVER_PCI_XHCI
+#include "drivers/pci-xhci.h"
 #endif
 #if CONFIG_DRIVER_USB_STORAGE
 #include "drivers/usb-storage.h"
@@ -38,6 +43,13 @@ kern_platform_init(const struct boot_handoff *handoff,
 	disk_registry_reset();
 	if (drv_pci_init() != 0)
 		hal_printf("pci: core initialization failed\n");
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+	{
+		extern int ws004_pci_msi_qemu_register(void);
+		if (ws004_pci_msi_qemu_register() != 0)
+			hal_printf("WS004 MSI fixture registration failed\n");
+	}
+#endif
 	if (drv_usb_init() != 0)
 		hal_printf("usb: core initialization failed\n");
 #if CONFIG_DRIVER_USB_STORAGE
@@ -52,12 +64,20 @@ kern_platform_init(const struct boot_handoff *handoff,
 	if (drv_pci_ehci_driver_register() != 0)
 		hal_printf("usb: EHCI PCI driver registration failed\n");
 #endif
+#if CONFIG_DRIVER_PCI_XHCI
+	if (drv_pci_xhci_driver_register() != 0)
+		hal_printf("usb: xHCI PCI driver registration failed\n");
+#endif
 #if CONFIG_DRIVER_GRAPHICS
 	if (pcat_graphics_driver_register() != 0)
 		hal_printf("graphics: PCI driver registration failed\n");
 #endif
 	if (drv_pci_pcat_init() != 0)
 		hal_printf("pci: PC/AT host initialization failed\n");
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+	else
+		drv_pci_dump();
+#endif
 	(void)pcat_ide_init();
 	for (unsigned slot = 0; slot < 4U && count < capacity; slot++) {
 		struct disk *disk = pcat_ide_bios_unit((uint8_t)(0x80U+slot));
@@ -94,14 +114,33 @@ kern_platform_init(const struct boot_handoff *handoff,
 
 void kern_platform_refresh_devices(const struct boot_device *d, size_t n)
 {
+	uint64_t deadline;
+
 	(void)d;
 	(void)n;
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+	{
+		extern void ws004_pci_msi_qemu_raise(void);
+		ws004_pci_msi_qemu_raise();
+	}
+#endif
 #if CONFIG_DRIVER_PCI_UHCI
 	drv_pci_uhci_probe_roots();
 #endif
 #if CONFIG_DRIVER_PCI_EHCI
 	drv_pci_ehci_probe_roots();
 #endif
+#if CONFIG_DRIVER_PCI_XHCI
+	drv_pci_xhci_probe_roots();
+#endif
+	if (disk_count() != 0)
+		return;
+	deadline = clock_ticks() + 5U * KERN_CLOCK_HZ;
+	hal_printf("boot: waiting up to 5 seconds for boot storage\n");
+	while (disk_count() == 0 && clock_ticks() < deadline)
+		sched_yield();
+	if (disk_count() == 0)
+		hal_printf("boot: boot-storage wait expired\n");
 }
 
 int kern_platform_input_init(void) { return pcat_ps2_mouse_init(); }

@@ -27,10 +27,12 @@ AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
 AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/amd64/asm.c src/hal/amd64/lib.c \
 	src/hal/amd64/page.c src/hal/amd64/space.c src/hal/amd64/cmain.c \
 	src/hal/amd64/descriptor.c src/hal/amd64/int.c src/hal/amd64/irq.c \
+	src/hal/amd64/msi-source.c \
 	src/hal/amd64/task.c src/hal/amd64/percpu.c src/hal/amd64/smp.c \
 	src/hal/amd64/bsp-pcat/boot.c src/hal/amd64/bsp-pcat/cons.c \
 	src/hal/amd64/bsp-pcat/pic.c src/hal/amd64/bsp-pcat/clock.c \
 	src/hal/amd64/bsp-pcat/acpi.c src/hal/amd64/bsp-pcat/lapic.c \
+	src/hal/amd64/bsp-pcat/mcfg.c \
 	src/hal/amd64/bsp-pcat/ioapic.c
 AMD64_HAL_ASM := src/hal/amd64/locore.S src/hal/amd64/trap.S \
 	src/hal/amd64/dispatch.S src/hal/amd64/ap-trampoline.S
@@ -43,6 +45,9 @@ AMD64_USB_HCD_SOURCES += drivers/pci-uhci.c
 endif
 ifeq ($(CONFIG_DRIVER_PCI_EHCI),y)
 AMD64_USB_HCD_SOURCES += drivers/pci-ehci.c
+endif
+ifeq ($(CONFIG_DRIVER_PCI_XHCI),y)
+AMD64_USB_HCD_SOURCES += drivers/pci-xhci.c
 endif
 AMD64_USB_CLASS_SOURCES :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
@@ -78,12 +83,17 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec-prepare.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
 	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
-	src/kern/mouse-device.c src/kern/tty.c \
+	src/kern/mouse-device.c src/kern/input-queue.c src/kern/input-device.c \
+	src/kern/input-keymap.c src/kern/locale-record.c \
+	src/kern/tty.c \
 	src/kern/graphics-device.c src/kern/system-device.c \
 	src/kern/pcat/font.c src/kern/pcat/vgafont.c drivers/pcat-graphics.c \
 	src/kern/init.c
 AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
 	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)
+ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
+AMD64_KERNEL_SOURCES += plan/ws004-hardware/tests/pci-msi-qemu.c
+endif
 AMD64_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
 AMD64_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
 AMD64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kern64/%.o,\
@@ -200,6 +210,7 @@ $(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin \
 
 $(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c \
 	$(UEFI_LOADER)/include/uefi.h $(UEFI_LOADER)/elf64.h \
+	$(UEFI_LOADER)/memory-map.h \
 	bootloader/include/amd64-handoff.h
 	@mkdir -p $(dir $@)
 	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
@@ -208,12 +219,19 @@ $(BUILD)/uefi/elf64.o: $(UEFI_LOADER)/elf64.c $(UEFI_LOADER)/elf64.h
 	@mkdir -p $(dir $@)
 	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
 
+$(BUILD)/uefi/memory-map.o: $(UEFI_LOADER)/memory-map.c \
+	$(UEFI_LOADER)/memory-map.h $(UEFI_LOADER)/include/uefi.h \
+	bootloader/include/amd64-handoff.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
 $(BUILD)/uefi/transition.o: $(UEFI_LOADER)/transition.S
 	@mkdir -p $(dir $@)
 	$(EFI_CC) -m64 -mno-red-zone -c $< -o $@
 
 $(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
-	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/transition.o \
+	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/memory-map.o \
+	$(BUILD)/uefi/transition.o \
 	platform/amd64/tools/check-bootx64.noct
 	$(EFI_LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \
 		--gc-sections --enable-reloc-section --no-insert-timestamp \

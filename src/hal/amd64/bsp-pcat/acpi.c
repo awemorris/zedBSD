@@ -36,6 +36,10 @@ struct madt {
 	uint8_t entries[];
 } __attribute__((packed));
 
+static struct amd64_acpi_ecam discovered_ecam[AMD64_ECAM_MAX];
+static uint8_t *discovered_ecam_virtual[AMD64_ECAM_MAX];
+static unsigned discovered_ecam_count;
+
 static int
 bytes_equal(const void *left, const char *right, size_t size)
 {
@@ -127,8 +131,8 @@ map_sdt(uint64_t physical)
 	return table;
 }
 
-static const struct madt *
-find_madt(const struct rsdp *rsdp)
+static const struct sdt *
+find_sdt(const struct rsdp *rsdp, const char signature[4], size_t minimum)
 {
 	const struct sdt *root;
 	unsigned width, count, index;
@@ -152,11 +156,21 @@ find_madt(const struct rsdp *rsdp)
 		uint64_t physical = width == 8 ? ((const uint64_t *)entries)[index] :
 		    ((const uint32_t *)entries)[index];
 		const struct sdt *table = map_sdt(physical);
-		if (table != NULL && bytes_equal(table->signature, "APIC", 4) &&
-		    table->length >= sizeof(struct madt))
-			return (const struct madt *)table;
+		if (table != NULL && bytes_equal(table->signature, signature, 4) &&
+		    table->length >= minimum)
+			return table;
 	}
 	return NULL;
+}
+
+static int
+discover_mcfg(struct amd64_acpi_info *result, const struct rsdp *rsdp)
+{
+	const struct sdt *mcfg = find_sdt(rsdp, "MCFG", sizeof(struct sdt) + 8U);
+	if (mcfg == NULL)
+		return HAL_OK;
+	return amd64_acpi_parse_mcfg(mcfg, mcfg->length, result->ecam,
+	    &result->ecam_count);
 }
 
 static int
@@ -182,6 +196,7 @@ amd64_acpi_discover(struct amd64_acpi_info *result,
 	const struct madt *madt;
 	const uint8_t *entry, *end;
 	unsigned i;
+	int error;
 
 	if (result == NULL)
 		return HAL_ERR_INVALID;
@@ -191,8 +206,12 @@ amd64_acpi_discover(struct amd64_acpi_info *result,
 		result->isa[i].gsi = i;
 	}
 	rsdp = find_rsdp(rsdp_address);
-	if (rsdp == NULL || (madt = find_madt(rsdp)) == NULL)
+	if (rsdp == NULL || (madt = (const struct madt *)find_sdt(rsdp, "APIC",
+	    sizeof(struct madt))) == NULL)
 		return HAL_ERR_UNSUPPORTED;
+	error = discover_mcfg(result, rsdp);
+	if (error != HAL_OK)
+		return error;
 	result->lapic_address = madt->lapic_address;
 	entry = madt->entries;
 	end = (const uint8_t *)madt + madt->header.length;
@@ -240,5 +259,54 @@ amd64_acpi_discover(struct amd64_acpi_info *result,
 	if (result->cpu_count == 0 || result->ioapic_count == 0 ||
 	    result->lapic_address == 0)
 		return HAL_ERR_UNSUPPORTED;
+	discovered_ecam_count = result->ecam_count;
+	for (i = 0; i < result->ecam_count; i++) {
+		size_t size = ((size_t)result->ecam[i].end_bus -
+		    result->ecam[i].start_bus + 1U) << 20;
+		discovered_ecam[i] = result->ecam[i];
+		if (amd64_mmio_map_ecam(result->ecam[i].address, size,
+		    (void **)&discovered_ecam_virtual[i]) != HAL_OK)
+			return HAL_ERR_UNSUPPORTED;
+	}
 	return HAL_OK;
+}
+
+int
+amd64_acpi_ecam_address(uint16_t segment, uint8_t bus, uint8_t device,
+	uint8_t function, paddr_t *result)
+{
+	unsigned index;
+	if (result == NULL || device >= 32U || function >= 8U)
+		return HAL_ERR_INVALID;
+	for (index = 0; index < discovered_ecam_count; index++) {
+		const struct amd64_acpi_ecam *region = &discovered_ecam[index];
+		if (region->segment == segment && bus >= region->start_bus &&
+		    bus <= region->end_bus) {
+			*result = region->address +
+			    ((paddr_t)(bus - region->start_bus) << 20) +
+			    ((paddr_t)device << 15) + ((paddr_t)function << 12);
+			return HAL_OK;
+		}
+	}
+	return HAL_ERR_UNSUPPORTED;
+}
+
+int
+amd64_acpi_ecam_pointer(uint16_t segment, uint8_t bus, uint8_t device,
+	uint8_t function, volatile uint8_t **result)
+{
+	unsigned index;
+	if (result == NULL || device >= 32U || function >= 8U)
+		return HAL_ERR_INVALID;
+	for (index = 0; index < discovered_ecam_count; index++) {
+		const struct amd64_acpi_ecam *region = &discovered_ecam[index];
+		if (region->segment == segment && bus >= region->start_bus &&
+		    bus <= region->end_bus) {
+			*result = discovered_ecam_virtual[index] +
+			    ((size_t)(bus - region->start_bus) << 20) +
+			    ((size_t)device << 15) + ((size_t)function << 12);
+			return HAL_OK;
+		}
+	}
+	return HAL_ERR_UNSUPPORTED;
 }

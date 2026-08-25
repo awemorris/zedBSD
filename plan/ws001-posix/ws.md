@@ -4,14 +4,13 @@ Last updated: 2026-08-25
 
 WSID: `ws001`
 
-Status: paused after `ws001-p011`; compliance ledger remains active
+Status: in progress; compliance ledger remains active
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws001-p011`
+Last verified Phase: `ws001-p013`
 
-Resume point: select the next tier-1 proof candidate or an active tier-0
-platform blocker from the re-ranked ledger.
+Resume point: select the next bounded utility or subsystem item from the ledger.
 
 Shared tests: [WS001 test index](tests/README.md)
 
@@ -32,6 +31,8 @@ Shared tests: [WS001 test index](tests/README.md)
 | `ws001-p009` | [POSIX utility audit](phase009-audit/phase.md) | Complete as audit | Findings remain in this ledger |
 | `ws001-p010` | [local reimplementation](phase010-local-reimplementation/phase.md) | Complete milestone | Imported `bc`, `ed`, and `m4` were replaced locally |
 | `ws001-p011` | [bounded basename correction](phase011-basename/phase.md) | Complete milestone | Host semantics/failure test and native amd64 build pass; runtime conformance handoff remains |
+| `ws001-p012` | [bounded dirname correction](phase012-dirname/phase.md) | Complete milestone | Host lexical/failure suite and native amd64 build pass; runtime/locale handoff remains |
+| `ws001-p013` | [bounded link/unlink correction](phase013-link-unlink/phase.md) | Complete | Host identity/failure suite and native amd64 build pass; broad filesystem matrix remains |
 
 Original combined planning context is retained in the
 [legacy Phase 0–10 plan](history/phase000-010-legacy-plan.md).
@@ -405,7 +406,7 @@ The current register therefore contains 0 P0, 73 P1, and 38 P2 findings.
 | 32 | [delta](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/delta.html) | P1 known incompatibility | Only `-y` is parsed; required options, MR/comment rules, p-file selection, SID/permission cases, weave interoperability, signals, and transactional recovery are incomplete. |
 | 33 | [df](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/df.html) | P1 known incompatibility | Only `-k` exists; `-P`/`-t`, correct filesystem/device identity, block accounting, operand resolution, default operand safety, locale formatting, and errors are incomplete. |
 | 34 | [diff](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/diff.html) | P1 known incompatibility | Performs line-at-the-same-index comparison rather than a difference algorithm; output forms, context/unified hunks, whitespace/recursive options, binary/errors, and exit status 2 semantics are absent. |
-| 35 | [dirname](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/dirname.html) | P2 incomplete proof | Basic lexical reduction exists; double slash, all-slash, trailing-slash, empty/long operand, locale, usage, and broken stdout cases need proof. |
+| 35 | [dirname](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/dirname.html) | implemented-unreviewed (`ws001-p012`) | Empty/no-slash, chosen double-slash, all/trailing/repeated slash, long operand, `--`, usage, and host broken-stdout cases pass. Localized diagnostics, allocation-failure injection, and direct guest failure evidence remain. |
 | 36 | [du](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/du.html) | P1 known incompatibility | Only `-a` exists; `-s`/`-k`/`-x` and `-H`/`-L`, hard-link deduplication, mount/symlink/cycle rules, overflow, permissions, and traversal errors are absent. |
 | 37 | [echo](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/echo.html) | P2 incomplete proof | Simple joining/newline exists; implementation-defined `-n`/backslash cases must be documented, and NUL/locale/output-error behavior needs running-shell tests. |
 | 38 | [ed](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/ed.html) | P1 known incompatibility (P0 resolved 2026-08-24) | The independent local replacement provides a checked memory line store, basic addresses and edit commands, BRE substitution, `g`/`v`, single-operation undo, reads, and atomic sibling-file writes.  Relative/mark/BRE addresses, the remaining commands, temporary backing storage, signal recovery, exact newline/byte-count/diagnostic behavior, metadata preservation, and locale remain. |

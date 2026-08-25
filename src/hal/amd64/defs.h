@@ -15,6 +15,8 @@
 
 #define INT_PAGEFAULT          0x0e
 #define INT_SYSCALL            0xc2
+#define AMD64_VECTOR_MSI_BASE  0xd0
+#define AMD64_VECTOR_MSI_COUNT 16
 #define INT_IRQ_BASE           0xe0
 #define INT_UNDEF              0xffffffff
 

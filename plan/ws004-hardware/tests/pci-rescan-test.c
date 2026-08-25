@@ -42,6 +42,7 @@ hal_irq_send_eoi(hal_irq_ack_t acknowledge)
 {
 	(void)acknowledge;
 }
+void hal_io_mb(void) { }
 
 int
 hal_irq_set_handler(int irq, hal_irq_handler_t handler, void *argument)
@@ -51,6 +52,13 @@ hal_irq_set_handler(int irq, hal_irq_handler_t handler, void *argument)
 	(void)argument;
 	return HAL_OK;
 }
+int hal_irq_register_msi(const char *s, hal_irq_handler_t h, void *a, int *i,
+	paddr_t *p, uint32_t *e)
+{
+	(void)s; (void)h; (void)a; (void)i; (void)p; (void)e;
+	return HAL_ERR_UNSUPPORTED;
+}
+int hal_irq_unregister_msi(int irq) { (void)irq; return HAL_ERR_UNSUPPORTED; }
 
 static int
 config_read(void *context, const struct drv_pci_address *address,

@@ -32,6 +32,8 @@ static int
 is_asynchronous_interrupt(int vector)
 {
 	return (vector >= INT_IRQ_BASE && vector <= INT_IRQ_BASE + IRQ_MAX) ||
+	    (vector >= AMD64_VECTOR_MSI_BASE &&
+	    vector < AMD64_VECTOR_MSI_BASE + AMD64_VECTOR_MSI_COUNT) ||
 	    vector == AMD64_VECTOR_NOTIFY || vector == AMD64_VECTOR_TLB ||
 	    vector == AMD64_VECTOR_ERROR || vector == AMD64_VECTOR_SPURIOUS;
 }
@@ -70,6 +72,9 @@ amd64_int_init(void)
 	idt[8].ist = 1;
 	for (index = 0; index < 16; index++)
 		set_gate(INT_IRQ_BASE + index, 0, amd64_irq_table[index]);
+	for (index = 0; index < AMD64_VECTOR_MSI_COUNT; index++)
+		set_gate(AMD64_VECTOR_MSI_BASE + index, 0,
+		    amd64_msi_table[index]);
 	set_gate(AMD64_VECTOR_NOTIFY, 0, amd64_notify_entry);
 	set_gate(AMD64_VECTOR_TLB, 0, amd64_tlb_entry);
 	set_gate(AMD64_VECTOR_ERROR, 0, amd64_error_entry);
@@ -141,6 +146,9 @@ int_handler(struct amd64_interrupt_frame *frame)
 		amd64_task_enter_user_frame(frame);
 	if (vector >= INT_IRQ_BASE && vector <= INT_IRQ_BASE + IRQ_MAX) {
 		irq_handler(vector - INT_IRQ_BASE);
+	} else if (vector >= AMD64_VECTOR_MSI_BASE &&
+	    vector < AMD64_VECTOR_MSI_BASE + AMD64_VECTOR_MSI_COUNT) {
+		irq_handler(IRQ_MSI_BASE + vector - AMD64_VECTOR_MSI_BASE);
 	} else if (vector == AMD64_VECTOR_NOTIFY) {
 		amd64_notify_interrupt();
 	} else if (vector == AMD64_VECTOR_TLB) {

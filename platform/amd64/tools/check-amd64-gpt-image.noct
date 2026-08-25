@@ -43,6 +43,7 @@ func main(args) {
     var tableCrc=header(raw,512,1,total-1,2);
     if(crc32Range(raw,1024,16384)!=tableCrc){zbFail("primary GPT entry CRC mismatch");}
     if(zbU64SmallLE(raw,1056)!=2048||zbU64SmallLE(raw,1064)+1!=2048+zbU32LE(raw,458)){zbFail("ESP extents differ");}
+    if(zbU64SmallLE(raw,1064)>zbU64SmallLE(raw,560)){zbFail("ESP exceeds GPT last usable LBA");}
     if(zbU64SmallLE(raw,1184)!=34||zbU64SmallLE(raw,1192)!=2047){zbFail("BIOS partition extent mismatch");}
     var stage=34*512;if(zbU32LE(raw,stage)!=0x324c425a||zbU16LE(raw,stage+4)!=1||zbU16LE(raw,stage+6)!=32||zbU16LE(raw,stage+14)!=1){zbFail("invalid ZBL2 header");}
     var sectors=zbU16LE(raw,stage+12);var sum=0;for(i in 0..sectors*128){sum=(sum+zbU32LE(raw,stage+i*4))&4294967295;}if(sum!=0){zbFail("ZBL2 checksum mismatch");}

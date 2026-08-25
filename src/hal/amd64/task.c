@@ -18,14 +18,12 @@ static hal_task_t xmm_selftest_task;
 static volatile unsigned xmm_selftest_stage;
 static volatile unsigned initial_fpregs_ready;
 static volatile unsigned task_registry_lock;
-static const uint8_t xmm_main_pattern[16] = {
-	0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
-	0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01
-};
-static const uint8_t xmm_task_pattern[16] = {
-	0xa5, 0x5a, 0xc3, 0x3c, 0x96, 0x69, 0xf0, 0x0f,
-	0x12, 0x21, 0x34, 0x43, 0x56, 0x65, 0x78, 0x87
-};
+static const uint8_t xmm_main_pattern[16] = {0x10, 0x32, 0x54, 0x76, 0x98, 0xba,
+					     0xdc, 0xfe, 0xef, 0xcd, 0xab, 0x89,
+					     0x67, 0x45, 0x23, 0x01};
+static const uint8_t xmm_task_pattern[16] = {0xa5, 0x5a, 0xc3, 0x3c, 0x96, 0x69,
+					     0xf0, 0x0f, 0x12, 0x21, 0x34, 0x43,
+					     0x56, 0x65, 0x78, 0x87};
 
 static int
 xmm_equal(const uint8_t *left, const uint8_t *right)
@@ -61,8 +59,8 @@ xmm_context_selftest(void)
 	uint8_t observed[16];
 
 	xmm_selftest_main = running_task;
-	xmm_selftest_task = hal_task_create(HAL_SPACE_SYS, xmm_selftest_entry,
-	    NULL, NULL);
+	xmm_selftest_task =
+	    hal_task_create(HAL_SPACE_SYS, xmm_selftest_entry, NULL, NULL);
 	if (xmm_selftest_task == NULL)
 		HAL_FATAL("amd64 XMM self-test task allocation failed");
 	amd64_xmm_load(xmm_main_pattern);
@@ -85,22 +83,31 @@ task_fpregs(struct amd64_task *task)
 	return (void *)(((uintptr_t)task->fpregs + 15U) & ~(uintptr_t)15U);
 }
 
+static void *
+task_signal_fpregs(struct amd64_task *task, unsigned depth)
+{
+	return (void *)(((uintptr_t)task->signal_fpregs[depth] + 15U) &
+			~(uintptr_t)15U);
+}
+
 static void
 tasklist_add(struct amd64_task *task)
 {
 	bool enabled = hal_irq_disable();
 	struct amd64_task **link = &task_list;
-	while (__atomic_exchange_n(&task_registry_lock, 1U,
-	    __ATOMIC_ACQUIRE) != 0)
+	while (__atomic_exchange_n(&task_registry_lock, 1U, __ATOMIC_ACQUIRE) !=
+	       0)
 		__asm__ volatile("pause");
-	while (*link != NULL) link = &(*link)->next;
+	while (*link != NULL)
+		link = &(*link)->next;
 	*link = task;
 	task->next = NULL;
 	task_count++;
 	if (task->sys_stack != NULL)
 		task_stack_bytes += AMD64_SYS_STACK_SIZE;
 	__atomic_store_n(&task_registry_lock, 0U, __ATOMIC_RELEASE);
-	if (enabled) hal_irq_enable();
+	if (enabled)
+		hal_irq_enable();
 }
 
 static void
@@ -108,19 +115,22 @@ tasklist_del(struct amd64_task *task)
 {
 	bool enabled = hal_irq_disable();
 	struct amd64_task **link = &task_list;
-	while (__atomic_exchange_n(&task_registry_lock, 1U,
-	    __ATOMIC_ACQUIRE) != 0)
+	while (__atomic_exchange_n(&task_registry_lock, 1U, __ATOMIC_ACQUIRE) !=
+	       0)
 		__asm__ volatile("pause");
-	while (*link != NULL && *link != task) link = &(*link)->next;
+	while (*link != NULL && *link != task)
+		link = &(*link)->next;
 	if (*link == task) {
 		*link = task->next;
-		if (task_count != 0) task_count--;
+		if (task_count != 0)
+			task_count--;
 		if (task->sys_stack != NULL &&
 		    task_stack_bytes >= AMD64_SYS_STACK_SIZE)
 			task_stack_bytes -= AMD64_SYS_STACK_SIZE;
 	}
 	__atomic_store_n(&task_registry_lock, 0U, __ATOMIC_RELEASE);
-	if (enabled) hal_irq_enable();
+	if (enabled)
+		hal_irq_enable();
 }
 
 void
@@ -129,16 +139,18 @@ amd64_task_init_cpu(int run_selftest)
 	struct amd64_task *task;
 	hal_cpu_id_t cpu = hal_cpu_current();
 
-	if (running_task != NULL) HAL_FATAL("hal_task_init twice");
+	if (running_task != NULL)
+		HAL_FATAL("hal_task_init twice");
 	if (run_selftest) {
 		__asm__ volatile("fninit; fxsave64 %0" : "=m"(initial_fpregs));
 		__atomic_store_n(&initial_fpregs_ready, 1U, __ATOMIC_RELEASE);
-	} else if (__atomic_load_n(&initial_fpregs_ready,
-	    __ATOMIC_ACQUIRE) == 0) {
+	} else if (__atomic_load_n(&initial_fpregs_ready, __ATOMIC_ACQUIRE) ==
+		   0) {
 		HAL_FATAL("amd64 AP task before BSP task initialization");
 	}
 	task = hal_malloc(sizeof(*task));
-	if (task == NULL) HAL_FATAL("initial amd64 task allocation failed");
+	if (task == NULL)
+		HAL_FATAL("initial amd64 task allocation failed");
 	hal_memset(task, 0, sizeof(*task));
 	task->space = HAL_SPACE_SYS;
 	task->run_cpu = (int)cpu;
@@ -157,11 +169,11 @@ hal_task_init(void)
 }
 
 static void
-build_initial_stack(struct amd64_task *task, void (*start)(void *),
-	void *arg, void *user_sp)
+build_initial_stack(struct amd64_task *task, void (*start)(void *), void *arg,
+		    void *user_sp)
 {
-	uintptr_t *sp = (uintptr_t *)((uintptr_t)task->sys_stack +
-	    AMD64_SYS_STACK_SIZE);
+	uintptr_t *sp =
+	    (uintptr_t *)((uintptr_t)task->sys_stack + AMD64_SYS_STACK_SIZE);
 	if (task->space == HAL_SPACE_SYS) {
 		*--sp = (uintptr_t)arg;
 		*--sp = (uintptr_t)start;
@@ -186,18 +198,24 @@ build_initial_stack(struct amd64_task *task, void (*start)(void *),
 
 hal_task_t
 hal_task_create(hal_space_t space, void (*start)(void *), void *arg,
-	void *user_stack_pointer)
+		void *user_stack_pointer)
 {
 	struct amd64_task *task;
 	if (start == NULL ||
-	    ((space == HAL_SPACE_SYS) != (user_stack_pointer == NULL))) return NULL;
+	    ((space == HAL_SPACE_SYS) != (user_stack_pointer == NULL)))
+		return NULL;
 	task = hal_malloc(sizeof(*task));
-	if (task == NULL) return NULL;
+	if (task == NULL)
+		return NULL;
 	hal_memset(task, 0, sizeof(*task));
 	task->sys_stack_allocation = hal_malloc(AMD64_SYS_STACK_SIZE + 15U);
-	if (task->sys_stack_allocation == NULL) { hal_free(task); return NULL; }
-	task->sys_stack = (void *)(((uintptr_t)task->sys_stack_allocation + 15U) &
-	    ~(uintptr_t)15U);
+	if (task->sys_stack_allocation == NULL) {
+		hal_free(task);
+		return NULL;
+	}
+	task->sys_stack =
+	    (void *)(((uintptr_t)task->sys_stack_allocation + 15U) &
+		     ~(uintptr_t)15U);
 	task->space = space;
 	task->run_cpu = -1;
 	task->target_cpu = hal_cpu_current();
@@ -235,11 +253,12 @@ hal_task_fork_current(hal_space_t child_space, intptr_t child_result)
 	if ((source->cs & 3U) != 3U)
 		return NULL;
 	child = hal_task_create(child_space, (void (*)(void *))source->rip,
-	    NULL, (void *)(uintptr_t)source->rsp);
+				NULL, (void *)(uintptr_t)source->rsp);
 	if (child == NULL)
 		return NULL;
-	resume = (uintptr_t *)((uintptr_t)child->sys_stack +
-	    AMD64_SYS_STACK_SIZE - sizeof(*source) - 8U * sizeof(uintptr_t));
+	resume =
+	    (uintptr_t *)((uintptr_t)child->sys_stack + AMD64_SYS_STACK_SIZE -
+			  sizeof(*source) - 8U * sizeof(uintptr_t));
 	hal_memset(resume, 0, 8U * sizeof(uintptr_t));
 	resume[6] = 0x202U;
 	resume[7] = (uintptr_t)amd64_user_frame_entry;
@@ -249,19 +268,23 @@ hal_task_fork_current(hal_space_t child_space, intptr_t child_result)
 	child->resume_rsp = (uintptr_t)resume;
 	child->tls = running_task->tls;
 	/* The in-memory image is stale while this task is running. */
-	__asm__ volatile("fxsave64 (%0)" : :
-	    "r"(task_fpregs(running_task)) : "memory");
+	__asm__ volatile("fxsave64 (%0)"
+			 :
+			 : "r"(task_fpregs(running_task))
+			 : "memory");
 	hal_memcpy(task_fpregs(child), task_fpregs(running_task), 512U);
 	return child;
 }
 
 int
 hal_task_exec_validate(hal_space_t new_space, uintptr_t entry,
-	uintptr_t user_stack_pointer)
+		       uintptr_t user_stack_pointer)
 {
 	return running_task != NULL && new_space != HAL_SPACE_SYS &&
-	    running_task->active_user_frame != NULL && entry != 0 &&
-	    user_stack_pointer != 0 ? 0 : -1;
+		       running_task->active_user_frame != NULL && entry != 0 &&
+		       user_stack_pointer != 0
+		   ? 0
+		   : -1;
 }
 
 int
@@ -287,54 +310,88 @@ hal_task_exec_current(hal_space_t new_space, uintptr_t entry,
 	asm_write_msr(AMD64_MSR_FS_BASE, 0);
 	running_task->signal_depth = 0;
 	hal_memcpy(task_fpregs(running_task), initial_fpregs,
-	    sizeof(initial_fpregs));
-	__asm__ volatile("fxrstor64 (%0)" : :
-	    "r"(task_fpregs(running_task)) : "memory");
+		   sizeof(initial_fpregs));
+	__asm__ volatile("fxrstor64 (%0)"
+			 :
+			 : "r"(task_fpregs(running_task))
+			 : "memory");
 	hal_page_switch_space(new_space);
 	return 0;
 }
 
-uintptr_t hal_task_user_stack(void)
+uintptr_t
+hal_task_user_stack(void)
 {
-	struct amd64_interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
-	return f!=NULL&&(f->cs&3U)==3U?(uintptr_t)f->rsp:0;
+	struct amd64_interrupt_frame *f =
+	    running_task != NULL ? running_task->active_user_frame : NULL;
+	return f != NULL && (f->cs & 3U) == 3U ? (uintptr_t)f->rsp : 0;
 }
-int hal_task_user_context(struct hal_user_context *context)
+int
+hal_task_user_context(struct hal_user_context *context)
 {
-	struct amd64_interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
-	if(f==NULL||context==NULL||(f->cs&3U)!=3U)return -1;
-	context->pc=(uintptr_t)f->rip;context->stack_pointer=(uintptr_t)f->rsp;
-	context->return_value=(intptr_t)f->rax;return 0;
+	struct amd64_interrupt_frame *f =
+	    running_task != NULL ? running_task->active_user_frame : NULL;
+	if (f == NULL || context == NULL || (f->cs & 3U) != 3U)
+		return -1;
+	context->pc = (uintptr_t)f->rip;
+	context->stack_pointer = (uintptr_t)f->rsp;
+	context->return_value = (intptr_t)f->rax;
+	return 0;
 }
-int hal_task_signal_enter(uintptr_t h,uintptr_t sp,int sig,uintptr_t info,
-	uintptr_t context,uintptr_t rest,uint32_t token)
+int
+hal_task_signal_enter(uintptr_t h, uintptr_t sp, int sig, uintptr_t info,
+		      uintptr_t context, uintptr_t rest, uint32_t token)
 {
-	struct amd64_interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
+	struct amd64_interrupt_frame *f =
+	    running_task != NULL ? running_task->active_user_frame : NULL;
 	unsigned depth;
 	(void)rest;
-	if(f==NULL||running_task->signal_depth>=HAL_SIGNAL_NEST_MAX||h==0||sp==0||token==0)return -1;
-	depth=running_task->signal_depth;running_task->signal_frame[depth]=*f;
-	__asm__ volatile("fxsave64 (%0)" : :
-	    "r"(running_task->signal_fpregs[depth]) : "memory");
-	running_task->signal_token[depth]=token;running_task->signal_depth=depth+1U;
-	f->rip=h;f->rsp=sp;f->rdi=(uint64_t)(uint32_t)sig;f->rsi=info;f->rdx=context;return 0;
+	if (f == NULL || running_task->signal_depth >= HAL_SIGNAL_NEST_MAX ||
+	    h == 0 || sp == 0 || token == 0)
+		return -1;
+	depth = running_task->signal_depth;
+	running_task->signal_frame[depth] = *f;
+	__asm__ volatile("fxsave64 (%0)"
+			 :
+			 : "r"(task_signal_fpregs(running_task, depth))
+			 : "memory");
+	running_task->signal_token[depth] = token;
+	running_task->signal_depth = depth + 1U;
+	f->rip = h;
+	f->rsp = sp;
+	f->rdi = (uint64_t)(uint32_t)sig;
+	f->rsi = info;
+	f->rdx = context;
+	return 0;
 }
-int hal_task_signal_return(uint32_t token,intptr_t *value)
+int
+hal_task_signal_return(uint32_t token, intptr_t *value)
 {
-	struct amd64_interrupt_frame *f=running_task!=NULL?running_task->active_user_frame:NULL;
+	struct amd64_interrupt_frame *f =
+	    running_task != NULL ? running_task->active_user_frame : NULL;
 	unsigned depth;
-	if(f==NULL||value==NULL||running_task->signal_depth==0||token==0)return -1;
-	depth=running_task->signal_depth-1U;if(token!=running_task->signal_token[depth])return -1;
-	*f=running_task->signal_frame[depth];*value=(intptr_t)f->rax;
-	__asm__ volatile("fxrstor64 (%0)" : :
-	    "r"(running_task->signal_fpregs[depth]) : "memory");
-	running_task->signal_token[depth]=0;running_task->signal_depth=depth;return 0;
+	if (f == NULL || value == NULL || running_task->signal_depth == 0 ||
+	    token == 0)
+		return -1;
+	depth = running_task->signal_depth - 1U;
+	if (token != running_task->signal_token[depth])
+		return -1;
+	*f = running_task->signal_frame[depth];
+	*value = (intptr_t)f->rax;
+	__asm__ volatile("fxrstor64 (%0)"
+			 :
+			 : "r"(task_signal_fpregs(running_task, depth))
+			 : "memory");
+	running_task->signal_token[depth] = 0;
+	running_task->signal_depth = depth;
+	return 0;
 }
 void
 hal_task_destroy(hal_task_t handle)
 {
 	struct amd64_task *task = handle;
-	if (task == NULL) return;
+	if (task == NULL)
+		return;
 	if (__atomic_load_n(&task->run_cpu, __ATOMIC_ACQUIRE) >= 0)
 		HAL_FATAL("destroying running amd64 task");
 	tasklist_del(task);
@@ -348,8 +405,10 @@ void
 hal_task_context_switch(hal_task_t handle)
 {
 	struct amd64_task *to = handle, *from = running_task;
-	if (to == NULL || from == NULL) HAL_FATAL("invalid amd64 task switch");
-	if (to == from) return;
+	if (to == NULL || from == NULL)
+		HAL_FATAL("invalid amd64 task switch");
+	if (to == from)
+		return;
 	if (__atomic_load_n(&to->run_cpu, __ATOMIC_ACQUIRE) >= 0)
 		HAL_FATAL("amd64 HAL task already running");
 	if (__atomic_load_n(&to->target_cpu, __ATOMIC_ACQUIRE) !=
@@ -357,26 +416,38 @@ hal_task_context_switch(hal_task_t handle)
 		HAL_FATAL("amd64 HAL task resumed on wrong CPU");
 	__atomic_store_n(&from->run_cpu, -1, __ATOMIC_RELEASE);
 	__atomic_store_n(&to->run_cpu, (int)hal_cpu_current(),
-	    __ATOMIC_RELEASE);
+			 __ATOMIC_RELEASE);
 	from->tls = (uintptr_t)asm_read_msr(AMD64_MSR_FS_BASE);
 	running_task = to;
 	hal_page_switch_space(to->space);
 	asm_write_msr(AMD64_MSR_FS_BASE, (uint64_t)to->tls);
 	if (to->sys_stack != NULL)
-		amd64_set_tss_rsp0((uintptr_t)to->sys_stack + AMD64_SYS_STACK_SIZE);
+		amd64_set_tss_rsp0((uintptr_t)to->sys_stack +
+				   AMD64_SYS_STACK_SIZE);
 	__asm__ volatile("fxsave64 (%0)" : : "r"(task_fpregs(from)) : "memory");
 	__asm__ volatile("fxrstor64 (%0)" : : "r"(task_fpregs(to)) : "memory");
 	asm_task_dispatch(&from->resume_rsp, &to->resume_rsp);
 }
 
-void amd64_task_returned(void)
+void
+amd64_task_returned(void)
 {
 	HAL_FATAL("amd64 task returned");
-	for (;;) asm_hlt();
+	for (;;)
+		asm_hlt();
 }
-void hal_cpu_idle(void) { __asm__ volatile("sti; hlt; cli" ::: "memory"); }
-hal_task_t hal_task_get_current(void) { return running_task; }
-void hal_task_set_tls(hal_task_t t, uintptr_t v)
+void
+hal_cpu_idle(void)
+{
+	__asm__ volatile("sti; hlt; cli" ::: "memory");
+}
+hal_task_t
+hal_task_get_current(void)
+{
+	return running_task;
+}
+void
+hal_task_set_tls(hal_task_t t, uintptr_t v)
 {
 	if (t != NULL) {
 		((struct amd64_task *)t)->tls = v;
@@ -384,40 +455,58 @@ void hal_task_set_tls(hal_task_t t, uintptr_t v)
 			asm_write_msr(AMD64_MSR_FS_BASE, (uint64_t)v);
 	}
 }
-uintptr_t hal_task_get_tls(hal_task_t t)
+uintptr_t
+hal_task_get_tls(hal_task_t t)
 {
 	if (t == running_task)
 		return (uintptr_t)asm_read_msr(AMD64_MSR_FS_BASE);
 	return t != NULL ? ((struct amd64_task *)t)->tls : 0;
 }
-void hal_task_set_private(hal_task_t t, void *p)
-{ if (t != NULL) ((struct amd64_task *)t)->private_data = p; }
-void *hal_task_get_private(hal_task_t t)
-{ return t != NULL ? ((struct amd64_task *)t)->private_data : NULL; }
-hal_space_t hal_task_get_space(hal_task_t t)
-{ return t != NULL ? ((struct amd64_task *)t)->space : HAL_SPACE_SYS; }
-int hal_task_transfer(hal_task_t handle, hal_cpu_id_t target_cpu)
+void
+hal_task_set_private(hal_task_t t, void *p)
+{
+	if (t != NULL)
+		((struct amd64_task *)t)->private_data = p;
+}
+void *
+hal_task_get_private(hal_task_t t)
+{
+	return t != NULL ? ((struct amd64_task *)t)->private_data : NULL;
+}
+hal_space_t
+hal_task_get_space(hal_task_t t)
+{
+	return t != NULL ? ((struct amd64_task *)t)->space : HAL_SPACE_SYS;
+}
+int
+hal_task_transfer(hal_task_t handle, hal_cpu_id_t target_cpu)
 {
 	struct amd64_task *task = handle;
 	struct hal_cpu_mask ready;
-	if (task == NULL || target_cpu >= hal_cpu_count()) return HAL_ERR_INVALID;
+	if (task == NULL || target_cpu >= hal_cpu_count())
+		return HAL_ERR_INVALID;
 	if (__atomic_load_n(&task->run_cpu, __ATOMIC_ACQUIRE) >= 0)
 		return HAL_ERR_BUSY;
 	if (!amd64_irq_task_transferable(task))
 		return HAL_ERR_BUSY;
 	hal_cpu_ready_mask(&ready);
-	if (!hal_cpu_mask_test(&ready, target_cpu)) return HAL_ERR_STATE;
+	if (!hal_cpu_mask_test(&ready, target_cpu))
+		return HAL_ERR_STATE;
 	__atomic_store_n(&task->target_cpu, target_cpu, __ATOMIC_RELEASE);
 	return HAL_OK;
 }
-void hal_amd64_task_memory_stats(uint32_t *count, size_t *bytes)
+void
+hal_amd64_task_memory_stats(uint32_t *count, size_t *bytes)
 {
 	bool enabled = hal_irq_disable();
-	while (__atomic_exchange_n(&task_registry_lock, 1U,
-	    __ATOMIC_ACQUIRE) != 0)
+	while (__atomic_exchange_n(&task_registry_lock, 1U, __ATOMIC_ACQUIRE) !=
+	       0)
 		__asm__ volatile("pause");
-	if (count != NULL) *count = task_count;
-	if (bytes != NULL) *bytes = task_stack_bytes;
+	if (count != NULL)
+		*count = task_count;
+	if (bytes != NULL)
+		*bytes = task_stack_bytes;
 	__atomic_store_n(&task_registry_lock, 0U, __ATOMIC_RELEASE);
-	if (enabled) hal_irq_enable();
+	if (enabled)
+		hal_irq_enable();
 }

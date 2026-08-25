@@ -28,17 +28,68 @@
 #define MFP_TSR_TE       0x01U
 
 static struct x68k_keyboard_state keyboard;
-static unsigned events[X68K_KEYBOARD_QUEUE];
+static struct hal_key_event events[X68K_KEYBOARD_QUEUE];
 static unsigned event_head, event_tail;
 static uint32_t overflow_count, receive_error_count;
 static struct hal_cons_wait_queue input_waiters;
+
+static const char *
+special_symbol(unsigned key)
+{
+	static const char *const functions[] = {
+	    "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10"};
+	if (key >= X68K_KEY_F1 && key <= X68K_KEY_F10)
+		return functions[key - X68K_KEY_F1];
+	switch (key) {
+	case X68K_KEY_ESCAPE: return "esc";
+	case X68K_KEY_BACKSPACE: return "backspace";
+	case X68K_KEY_TAB: return "tab";
+	case X68K_KEY_ENTER: return "enter";
+	case X68K_KEY_PAGE_UP: return "pageup";
+	case X68K_KEY_PAGE_DOWN: return "pagedown";
+	case X68K_KEY_DELETE: return "delete";
+	case X68K_KEY_UP: return "up";
+	case X68K_KEY_LEFT: return "left";
+	case X68K_KEY_RIGHT: return "right";
+	case X68K_KEY_DOWN: return "down";
+	case X68K_KEY_HOME: return "home";
+	case X68K_KEY_END: return "end";
+	default: return NULL;
+	}
+}
+
+static int
+event_from_legacy(struct hal_key_event *result, unsigned event)
+{
+	const char *symbol;
+	char character[2];
+	unsigned key = event & X68K_KEY_EVENT_KEY_MASK, index = 0;
+
+	symbol = special_symbol(key);
+	if (symbol == NULL && key <= 0xffU && key != 0) {
+		character[0] = (char)key;
+		character[1] = '\0';
+		symbol = character;
+	}
+	if (symbol == NULL)
+		return 0;
+	while (index + 1U < HAL_KEY_SYMBOL_SIZE && symbol[index] != '\0') {
+		result->symbol[index] = symbol[index];
+		index++;
+	}
+	while (index < HAL_KEY_SYMBOL_SIZE)
+		result->symbol[index++] = '\0';
+	result->flags = HAL_KEY_EVENT_PRESS;
+	return 1;
+}
 
 static void
 enqueue_raw(uint8_t raw)
 {
 	int event = x68k_keyboard_feed(&keyboard, raw);
+	struct hal_key_event converted;
 	unsigned next;
-	if (event < 0)
+	if (event < 0 || !event_from_legacy(&converted, (unsigned)event))
 		return;
 	next = (event_head + 1U) % X68K_KEYBOARD_QUEUE;
 	if (next == event_tail) {
@@ -46,7 +97,7 @@ enqueue_raw(uint8_t raw)
 		overflow_count++;
 		return;
 	}
-	events[event_head] = (unsigned)event;
+	events[event_head] = converted;
 	event_head = next;
 }
 
@@ -132,17 +183,19 @@ hal_cons_modifiers(void)
 }
 
 int
-hal_cons_poll_event(void)
+hal_cons_poll_event(struct hal_key_event *event)
 {
 	bool enabled = hal_cons_wait_queue_lock(&input_waiters);
-	int event = event_tail == event_head ? -1 : (int)events[event_tail];
+	int available = event_tail != event_head;
 
+	if (available && event != NULL)
+		*event = events[event_tail];
 	hal_cons_wait_queue_unlock(&input_waiters, enabled);
-	return event;
+	return available;
 }
 
 int
-hal_cons_read_event(void)
+hal_cons_read_event(struct hal_key_event *event)
 {
 	struct hal_cons_wait_entry waiter;
 
@@ -153,11 +206,11 @@ hal_cons_read_event(void)
 		bool enabled = hal_cons_wait_queue_lock(&input_waiters);
 
 		if (event_tail != event_head) {
-			int event = (int)events[event_tail];
-
+			if (event != NULL)
+				*event = events[event_tail];
 			event_tail = (event_tail + 1U) % X68K_KEYBOARD_QUEUE;
 			hal_cons_wait_queue_unlock(&input_waiters, enabled);
-			return event;
+			return 1;
 		}
 		hal_cons_wait_queue_add(&input_waiters, &waiter);
 		hal_cons_wait_queue_unlock(&input_waiters, enabled);

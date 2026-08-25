@@ -5,7 +5,9 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#ifndef NETCONF_PATH
 #define NETCONF_PATH "/etc/net.conf"
+#endif
 #define NETCONF_MAX_INTERFACES 16
 #define NETCONF_MAX_ADDRESSES 8
 #define NETCONF_MAX_MEMBERS 16
@@ -72,5 +74,6 @@ int netconf_parse(FILE *, struct netconf *, char *, size_t);
 int netconf_load(const char *, struct netconf *, char *, size_t);
 int netconf_validate(const struct netconf *, char *, size_t);
 int netconf_write(FILE *, const struct netconf *);
+int netconf_save_atomic(const char *, const struct netconf *, char *, size_t);
 
 #endif

@@ -14,10 +14,11 @@
 #define TARGET_KEY_GRAPH ZEDBSD_CONSOLE_EVENT_GRAPH
 #else
 #include "hal/hal.h"
-#define TARGET_KEY_MASK HAL_KEY_EVENT_KEY_MASK
-#define TARGET_KEY_SHIFT HAL_KEY_EVENT_SHIFT
-#define TARGET_KEY_CTRL HAL_KEY_EVENT_CTRL
-#define TARGET_KEY_GRAPH HAL_KEY_EVENT_GRAPH
+/* Private compatibility form used by firmware/runtime keyboard services. */
+#define TARGET_KEY_MASK 0x000001ffU
+#define TARGET_KEY_SHIFT 0x00010000U
+#define TARGET_KEY_CTRL 0x00020000U
+#define TARGET_KEY_GRAPH 0x00040000U
 #endif
 #include <noct/noct.h>
 #include <stddef.h>

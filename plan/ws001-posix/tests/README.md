@@ -33,3 +33,20 @@ suffix-equal, suffix-removal-to-empty, `--`, usage, and output-failure cases:
 sh plan/ws001-posix/tests/basename-test.sh
 make -j16 build/amd64/bin/basename
 ```
+
+## ws001-p012 dirname
+
+`dirname-test.sh` covers empty/no-slash, root/all-slash/double-slash, repeated
+and trailing slashes, a long operand, `--`, usage, and output failure:
+
+```sh
+sh plan/ws001-posix/tests/dirname-test.sh
+make -j16 build/amd64/bin/dirname
+```
+
+## ws001-p013 link and unlink
+
+```sh
+sh plan/ws001-posix/tests/link-unlink-test.sh
+make -j16 build/amd64/bin/link build/amd64/bin/unlink
+```

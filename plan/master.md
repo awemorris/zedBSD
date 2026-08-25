@@ -16,7 +16,12 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The currently selected execution set is [current-work.md](current-work.md).
+The currently proposed execution set is [queue.md](queue.md)
+(`q008`, pending timebox and execution authorization). Closed records are
+retained as [q001](queue-q001.md), [q002](queue-q002.md),
+[q003](queue-q003.md), [q004](queue-q004.md),
+[q005](queue-q005.md), [q006](queue-q006.md), and
+[q007](queue-q007.md).
 
 ## 2. Goals
 
@@ -63,25 +68,25 @@ before this long-term product goal is reached.
 
 | WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
 | --- | --- | --- | --- | --- | --- |
-| `ws001` | POSIX.1-2024 compliance | Paused, ledger active | `ws001-p011` complete | Select the next tier-1 proof candidate or an active tier-0 blocker | [WS001](ws001-posix/ws.md) |
+| `ws001` | POSIX.1-2024 compliance | Paused, ledger active | `ws001-p013` complete | Select `cksum` or another bounded tier-1 candidate | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | Dell Latitude 5320 bring-up | Paused | `ws003-p001` carried forward | Resume inventory on the physical Latitude; WSL2 exposes no target DMI/PCI/USB data | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | In progress | `ws004-p001` software audit complete | Capture target inventory, then define ECAM/MSI prerequisites for xHCI | [WS004](ws004-hardware/ws.md) |
+| `ws003` | Dell Latitude 5320 bring-up | Active; UEFI entry Uncleared | `ws003-p002` software correction complete, physical rerun pending | Run the corrected image on Latitude; inventory remains incomplete | [WS003](ws003-bringup/ws.md) |
+| `ws004` | Hardware expansion | Active; QEMU USB-root Uncleared | `ws004-p007` complete; `ws004-p006` reopened | Diagnose the reproducible q35/xHCI writable-overlay EIO before feature work | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Planned | WS002 Phase 20 is the inherited baseline | Start physical-network diagnostic Phase after inventory | [WS005](ws005-networking/ws.md) |
-| `ws006` | Input and evdev | In progress | `ws006-p001` complete | Implement input core/event device as `ws006-p002` | [WS006](ws006-input/ws.md) |
+| `ws006` | Input and evdev | In progress | `ws006-p004` complete PC/AT software milestone | Select Xzed migration after xHCI/USB-HID dependencies, retaining PC-98/X68000 physical-token follow-up | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked before Phase | No Phase started | Obtain the authoritative Noct tree/revision | [WS008](ws008-noct/ws.md) |
-| `ws009` | Documentation | In progress | `ws009-p001` complete | Extract build guide or next producer-linked UAPI reference | [WS009](ws009-documentation/ws.md) |
+| `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
-| `ws011` | Network configuration console | In progress | `ws011-p001` complete | Implement interactive console in `ws011-p002`; boot remains unchanged | [WS011](ws011-net-config/ws.md) |
+| `ws011` | Network configuration console | In progress | `ws011-p003` software milestone complete | Retain migrated-DHCP QEMU evidence; wait for VLAN/bridge kernel dependencies | [WS011](ws011-net-config/ws.md) |
 
 ## 4. Milestones
 
 | Milestone | Required result | Owning WSs |
 | --- | --- | --- |
 | M0 — Baseline preserved | Current QEMU boot, init, login, shell, and service behavior remains usable | WS001, WS002 |
-| M1 — QEMU USB root | The bootloader and kernel boot through emulated xHCI USB mass storage and retain the selected root | WS003, WS004 |
-| M2 — Latitude USB shell | The target laptop repeatedly boots from USB through init/login to a stable shell | WS003, WS004, WS009 |
+| M1 — QEMU USB root | Uncleared: identity and reboot pass, but user acceptance reproduces writable-overlay EIO through q35/xHCI | WS003, WS004 |
+| M2 — Latitude USB shell | Uncleared at U0: UEFI loader halts during memory-map normalization before kernel entry | WS003, WS004, WS009 |
 | M3 — Latitude network | At least one documented physical interface configures and transfers data | WS003, WS004, WS005 |
 | M4 — Native platform devices | NVMe, USB HID, and the selected WLAN work on the target | WS004, WS005, WS006 |
 | M5 — Application environments | X11 is usable and Noct/BeUI supports zedBSD upstream | WS006, WS007, WS008 |
@@ -143,6 +148,7 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | Linux/FreeBSD evdev compatibility profile | WS006 | Resolved by `ws006-p001`; implement `/dev/input/eventN` against it |
 | zedBSD GPU/Vulkan capability profile | WS007 | Publishing `/dev/gpuN` UAPI |
 | Authoritative Noct repository and revision | WS008 | First Noct implementation Phase |
+| PC/AT boot selector | WS004 | Resolved: reuse UUID/PARTUUID; standard FAT handoff uses UUID |
 
 ## 8. Interruption and resumption
 

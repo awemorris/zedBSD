@@ -3,3 +3,4 @@
 __pycache__/
 *~
 .internal/
+plan/ws*/temp/

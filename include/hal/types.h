@@ -11,5 +11,6 @@
 #include <stdint.h>
 
 typedef uintptr_t hal_physaddr_t;
+typedef hal_physaddr_t paddr_t;
 
 #endif

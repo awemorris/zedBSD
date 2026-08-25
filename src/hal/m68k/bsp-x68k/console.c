@@ -145,7 +145,19 @@ cons_putc(int character)
 
 void cons_puts(const char *string) { if (string != NULL) while (*string != '\0') cons_putc(*string++); }
 int cons_getc(void)
-{ return hal_cons_read_event() & (int)HAL_KEY_EVENT_KEY_MASK; }
+{
+	struct hal_key_event event;
+	for (;;) {
+		(void)hal_cons_read_event(&event);
+		if ((event.flags & (HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_REPEAT)) != 0 &&
+		    event.symbol[0] != '\0' && event.symbol[1] == '\0')
+			return (unsigned char)event.symbol[0];
+		if (event.symbol[0] == 'e' && event.symbol[1] == 'n' &&
+		    event.symbol[2] == 't' && event.symbol[3] == 'e' &&
+		    event.symbol[4] == 'r' && event.symbol[5] == '\0')
+			return '\n';
+	}
+}
 void cons_set_attr(int foreground, int background)
 { current_attribute = (uint8_t)(((background & 15) << 4) | (foreground & 15)); }
 void hal_cons_putc(int character) { cons_putc(character); }

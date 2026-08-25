@@ -19,8 +19,7 @@ struct amd64_task {
 	uintptr_t tls;
 	void *active_user_frame;
 	struct amd64_interrupt_frame signal_frame[HAL_SIGNAL_NEST_MAX];
-	uint8_t signal_fpregs[HAL_SIGNAL_NEST_MAX][512]
-	    __attribute__((aligned(16)));
+	uint8_t signal_fpregs[HAL_SIGNAL_NEST_MAX][512 + 15];
 	uint32_t signal_token[HAL_SIGNAL_NEST_MAX];
 	unsigned signal_depth;
 };

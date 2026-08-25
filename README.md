@@ -16,6 +16,9 @@ Supported targets are the following:
 
 ## Building
 
+The complete prerequisite, configuration, image, and QEMU procedure is in the
+[build-from-source guide](docs/howto/build-from-source.md).
+
 The build commands are:
 
 ```sh
@@ -52,9 +55,10 @@ make help              # show a short command summary
 
 ## Standards status
 
-The implemented POSIX/SUS surface and deliberate ABI limitations are
-described in [docs/conformance.md](docs/conformance.md).  The machine-readable
-API inventory used by `make check` is `tests/posix-r2-api.csv`.
+The implemented POSIX/SUS surface and known limitations are tracked by
+[WS001](plan/ws001-posix/ws.md). Focused acceptance evidence is owned by each
+workstream under `plan/wsXXX-*/tests/`; `make check` is not the project
+acceptance interface.
 
 ## License
 

@@ -26,3 +26,29 @@ cc -m32 -nostdinc -Ilibc/include -Iinclude/uapi -Iinclude \
   -std=c11 -Wall -Wextra -Werror -fsyntax-only \
   plan/ws006-input/tests/evdev-layout-test.c
 ```
+
+IN-T10 begins with the implementation-shared bounded queue model:
+
+```sh
+cc -std=c11 -D_POSIX_C_SOURCE=200809L -Iinclude/uapi -Iinclude \
+  -Wall -Wextra -Werror src/kern/input-queue.c \
+  plan/ws006-input/tests/input-queue-test.c -o /tmp/ws006-input-queue
+/tmp/ws006-input-queue
+make -j16 build/amd64/vmunix
+```
+
+IN-T20 begins with the producer key normalization contract:
+
+```sh
+cc -std=c11 -DHAL_ARCH_AMD64 -Iinclude/uapi -Iinclude -Wall -Wextra \
+  -Werror src/kern/input-keymap.c \
+  plan/ws006-input/tests/input-keymap-test.c -o /tmp/ws006-input-keymap
+/tmp/ws006-input-keymap
+```
+
+Guest event-node read/poll/ioctl evidence is added with IN-02, because IN-01
+does not install a fake production input device merely to make `/dev/input`
+appear populated.
+
+The production keyboard/console coexistence observation for `ws006-p004` is
+recorded in [qemu-evdev-evidence.md](qemu-evdev-evidence.md).

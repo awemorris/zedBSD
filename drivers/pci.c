@@ -14,6 +14,17 @@
 #define PCI_COMMAND_IO 0x0001U
 #define PCI_COMMAND_MEMORY 0x0002U
 #define PCI_COMMAND_MASTER 0x0004U
+#define PCI_COMMAND_INTX_DISABLE 0x0400U
+#define PCI_MSI_CONTROL 0x02U
+#define PCI_MSI_ADDRESS 0x04U
+#define PCI_MSI_ENABLE 0x0001U
+#define PCI_MSI_64BIT 0x0080U
+#define PCI_MSIX_CONTROL 0x02U
+#define PCI_MSIX_TABLE 0x04U
+#define PCI_MSIX_ENABLE 0x8000U
+#define PCI_MSIX_FUNCTION_MASK 0x4000U
+#define PCI_MSIX_ENTRY_SIZE 16U
+#define PCI_MSIX_ENTRY_MASK 0x00000001U
 
 struct drv_pci_bus {
 	uint16_t segment;
@@ -38,6 +49,7 @@ struct drv_pci_device {
 	unsigned enable_count, bar_count;
 	struct drv_pci_bar bars[6];
 	uint8_t bar_claimed[6];
+	uint32_t irq_claimed;
 };
 
 struct pci_driver_entry {
@@ -49,6 +61,11 @@ struct pci_irq_cookie {
 	int irq;
 	drv_pci_irq_handler_t handler;
 	void *argument;
+	struct drv_pci_device *device;
+	enum drv_pci_irq_type type;
+	unsigned capability, index;
+	struct drv_pci_mapping table;
+	unsigned table_mapped;
 };
 
 static struct drv_pci_bus *root_buses;
@@ -58,8 +75,10 @@ static int initialized;
 static int cfg_read(struct drv_pci_bus *bus, const struct drv_pci_address *a,
 	unsigned offset, unsigned width, uint32_t *value)
 {
+	unsigned limit = bus != NULL && bus->ops != NULL &&
+		bus->ops->config_space_size != 0 ? bus->ops->config_space_size : 256U;
 	if (bus == NULL || bus->ops == NULL || bus->ops->config_read == NULL ||
-	    value == NULL || offset + width > 256 ||
+	    value == NULL || offset > limit || width > limit - offset ||
 	    (width != 1 && width != 2 && width != 4))
 		return EINVAL;
 	return bus->ops->config_read(bus->host, a, offset, width, value);
@@ -68,8 +87,11 @@ static int cfg_read(struct drv_pci_bus *bus, const struct drv_pci_address *a,
 static int cfg_write(struct drv_pci_bus *bus, const struct drv_pci_address *a,
 	unsigned offset, unsigned width, uint32_t value)
 {
+	unsigned limit = bus != NULL && bus->ops != NULL &&
+		bus->ops->config_space_size != 0 ? bus->ops->config_space_size : 256U;
 	if (bus == NULL || bus->ops == NULL || bus->ops->config_write == NULL ||
-	    offset + width > 256 || (width != 1 && width != 2 && width != 4))
+	    offset > limit || width > limit - offset ||
+	    (width != 1 && width != 2 && width != 4))
 		return EINVAL;
 	return bus->ops->config_write(bus->host, a, offset, width, value);
 }
@@ -243,6 +265,14 @@ int drv_pci_bus_scan(struct drv_pci_bus *bus)
 			device->next = bus->devices; bus->devices = device;
 			if (function == 0 && (device->header_type & 0x80U) != 0)
 				functions = 8;
+			if ((device->header_type & 0x7fU) == 1U) {
+				uint8_t secondary = 0;
+				if (drv_pci_device_config_read8(device, 0x19U,
+				    &secondary) == 0 && secondary != 0 &&
+				    secondary != bus->number)
+					(void)drv_pci_bus_create_child(bus, device,
+					    secondary, &device->subordinate);
+			}
 			(void)drv_pci_device_probe(device);
 		}
 	}
@@ -250,14 +280,17 @@ int drv_pci_bus_scan(struct drv_pci_bus *bus)
 }
 
 int drv_pci_bus_rescan(struct drv_pci_bus *bus) { return drv_pci_bus_scan(bus); }
-int drv_pci_bus_scan_tree(struct drv_pci_bus *bus) { return drv_pci_bus_scan(bus); }
+int drv_pci_bus_scan_tree(struct drv_pci_bus *bus)
+{struct drv_pci_device*d;int e;if((e=drv_pci_bus_scan(bus))!=0)return e;for(d=bus->devices;d;d=d->next)if(d->subordinate&&(e=drv_pci_bus_scan_tree(d->subordinate))!=0)return e;return 0;}
 int drv_pci_scan_all(void)
 { struct drv_pci_bus *b; int e; for (b=root_buses;b;b=b->next) if ((e=drv_pci_bus_scan_tree(b))!=0) return e; return 0; }
 
 int drv_pci_foreach_bus(drv_pci_bus_iterator_t fn, void *arg)
 { struct drv_pci_bus *b; int e; if(!fn)return EINVAL; for(b=root_buses;b;b=b->next)if((e=fn(b,arg))!=0)return e;return 0; }
+static int foreach_device_tree(struct drv_pci_bus*b,drv_pci_device_iterator_t fn,void*arg)
+{struct drv_pci_device*d;int e;for(d=b->devices;d;d=d->next){if((e=fn(d,arg))!=0)return e;if(d->subordinate&&(e=foreach_device_tree(d->subordinate,fn,arg))!=0)return e;}return 0;}
 int drv_pci_foreach_device(drv_pci_device_iterator_t fn, void *arg)
-{ struct drv_pci_bus*b;int e;if(!fn)return EINVAL;for(b=root_buses;b;b=b->next)if((e=drv_pci_bus_foreach_device(b,fn,arg))!=0)return e;return 0; }
+{ struct drv_pci_bus*b;int e;if(!fn)return EINVAL;for(b=root_buses;b;b=b->next)if((e=foreach_device_tree(b,fn,arg))!=0)return e;return 0; }
 uint16_t drv_pci_bus_segment(const struct drv_pci_bus*b){return b?b->segment:0;}
 uint8_t drv_pci_bus_number(const struct drv_pci_bus*b){return b?b->number:0;}
 struct drv_pci_bus *drv_pci_bus_parent(const struct drv_pci_bus*b){return b?b->parent:NULL;}
@@ -294,7 +327,7 @@ int drv_pci_device_config_write32(struct drv_pci_device*d,unsigned o,uint32_t v)
 int drv_pci_device_find_capability(struct drv_pci_device*d,uint8_t id,unsigned*result)
 {uint16_t status;uint8_t p,n;unsigned guard=0;if(!d||!result)return EINVAL;if(drv_pci_device_config_read16(d,PCI_STATUS,&status)||!(status&0x10U))return ENOENT;if(drv_pci_device_config_read8(d,PCI_CAPABILITIES,&p))return EIO;p&=~3U;while(p>=0x40U&&guard++<48U){if(drv_pci_device_config_read8(d,p,&n))return EIO;if(n==id){*result=p;return 0;}if(drv_pci_device_config_read8(d,p+1U,&p))return EIO;p&=~3U;}return ENOENT;}
 int drv_pci_device_find_extended_capability(struct drv_pci_device*d,uint16_t id,unsigned start,unsigned*result)
-{(void)d;(void)id;(void)start;(void)result;return ENOTSUP;}
+{unsigned p=start?start:0x100U,guard=0,limit;uint32_t h;if(!d||!result||p<0x100U||(p&3U))return EINVAL;limit=d->bus->ops->config_space_size?d->bus->ops->config_space_size:256U;if(limit<4096U)return ENOTSUP;while(p>=0x100U&&p+4U<=limit&&guard++<960U){if(drv_pci_device_config_read32(d,p,&h)!=0)return EIO;if(h==0||h==0xffffffffU)return ENOENT;if((h&0xffffU)==id){*result=p;return 0;}if(((h>>20)&0xfffU)==0)return ENOENT;if(((h>>20)&0xfffU)<=p||(((h>>20)&0xfffU)&3U))return EIO;p=(h>>20)&0xfffU;}return EIO;}
 
 static int command_set(struct drv_pci_device*d,uint16_t set,uint16_t clear)
 {uint16_t v;int e;if(!d)return EINVAL;e=drv_pci_device_config_read16(d,PCI_COMMAND,&v);if(e)return e;return drv_pci_device_config_write16(d,PCI_COMMAND,(uint16_t)((v|set)&~clear));}
@@ -312,13 +345,278 @@ int drv_pci_device_map_bar_region(struct drv_pci_device*d,unsigned i,uint64_t o,
 int drv_pci_device_map_bar(struct drv_pci_device*d,unsigned i,unsigned f,struct drv_pci_mapping*m){if(!d||i>=d->bar_count)return EINVAL;return drv_pci_device_map_bar_region(d,i,0,(size_t)d->bars[i].size,f,m);}
 void drv_pci_device_unmap_bar(struct drv_pci_device*d,struct drv_pci_mapping*m){if(d&&m&&d->bus->ops->unmap_bar)d->bus->ops->unmap_bar(d->bus->host,m);}
 
-int drv_pci_device_allocate_irqs(struct drv_pci_device*d,unsigned flags,unsigned min,unsigned max,struct drv_pci_irq*i,unsigned*n)
-{enum drv_pci_irq_type t;if(!d||!i||!n||min==0||max<min)return EINVAL;if(!d->bus->ops->allocate_irqs)return ENOTSUP;t=(flags&DRV_PCI_IRQ_ALLOW_MSIX)?DRV_PCI_IRQ_MSIX:(flags&DRV_PCI_IRQ_ALLOW_MSI)?DRV_PCI_IRQ_MSI:DRV_PCI_IRQ_INTX;return d->bus->ops->allocate_irqs(d->bus->host,d,t,min,max,i,n);}
-void drv_pci_device_free_irqs(struct drv_pci_device*d,struct drv_pci_irq*i,unsigned n){if(d&&d->bus->ops->free_irqs)d->bus->ops->free_irqs(d->bus->host,d,i,n);}
-static void pci_irq_dispatch(int irq,hal_irq_ack_t ack,void*arg){struct pci_irq_cookie*c=arg;(void)irq;(void)c->handler(c->argument);hal_irq_send_eoi(ack);}
-int drv_pci_device_establish_irq(struct drv_pci_device*d,const struct drv_pci_irq*i,drv_pci_irq_handler_t h,void*a,const char*n,void**result)
-{struct pci_irq_cookie*c;(void)d;(void)n;if(!i||!h||!result||i->type!=DRV_PCI_IRQ_INTX)return EINVAL;c=hal_malloc(sizeof(*c));if(!c)return ENOMEM;c->irq=(int)i->vector;c->handler=h;c->argument=a;if(hal_irq_set_handler(c->irq,pci_irq_dispatch,c)!=HAL_OK){hal_free(c);return EIO;}hal_irq_unmask(c->irq);*result=c;return 0;}
-void drv_pci_device_disestablish_irq(struct drv_pci_device*d,void*cookie){struct pci_irq_cookie*c=cookie;(void)d;if(!c)return;hal_irq_mask(c->irq);(void)hal_irq_set_handler(c->irq,NULL,NULL);hal_free(c);}
+int
+drv_pci_device_allocate_irqs(struct drv_pci_device *device, unsigned flags,
+	unsigned minimum, unsigned maximum, struct drv_pci_irq *irqs,
+	unsigned *count)
+{
+	static const struct {
+		unsigned flag;
+		enum drv_pci_irq_type type;
+	} choices[] = {
+		{ DRV_PCI_IRQ_ALLOW_MSIX, DRV_PCI_IRQ_MSIX },
+		{ DRV_PCI_IRQ_ALLOW_MSI, DRV_PCI_IRQ_MSI },
+		{ DRV_PCI_IRQ_ALLOW_INTX, DRV_PCI_IRQ_INTX }
+	};
+	unsigned choice;
+	int error = ENOTSUP;
+	if (device == NULL || irqs == NULL || count == NULL || minimum == 0 ||
+	    maximum < minimum || device->bus->ops->allocate_irqs == NULL)
+		return EINVAL;
+	for (choice = 0; choice < sizeof(choices) / sizeof(choices[0]); choice++) {
+		if ((flags & choices[choice].flag) == 0)
+			continue;
+		error = device->bus->ops->allocate_irqs(device->bus->host, device,
+		    choices[choice].type, minimum, maximum, irqs, count);
+		if (error == 0)
+			return 0;
+		if (error != ENOTSUP && error != ENODEV)
+			return error;
+	}
+	return error;
+}
+
+void
+drv_pci_device_free_irqs(struct drv_pci_device *device,
+	struct drv_pci_irq *irqs, unsigned count)
+{
+	if (device != NULL && device->bus->ops->free_irqs != NULL)
+		device->bus->ops->free_irqs(device->bus->host, device, irqs,
+		    count);
+}
+
+static void
+pci_irq_dispatch(int irq, hal_irq_ack_t acknowledge, void *argument)
+{
+	struct pci_irq_cookie *cookie = argument;
+	(void)irq;
+	(void)cookie->handler(cookie->argument);
+	hal_irq_send_eoi(acknowledge);
+}
+
+static void
+pci_source(const struct drv_pci_address *address, char result[17])
+{
+	static const char hex[] = "0123456789abcdef";
+	result[0] = 'P'; result[1] = 'C'; result[2] = 'I'; result[3] = ' ';
+	result[4] = hex[address->segment >> 12];
+	result[5] = hex[(address->segment >> 8) & 15U];
+	result[6] = hex[(address->segment >> 4) & 15U];
+	result[7] = hex[address->segment & 15U]; result[8] = ':';
+	result[9] = hex[address->bus >> 4];
+	result[10] = hex[address->bus & 15U]; result[11] = ':';
+	result[12] = hex[address->device >> 4];
+	result[13] = hex[address->device & 15U]; result[14] = '.';
+	result[15] = hex[address->function]; result[16] = '\0';
+}
+
+static int
+establish_msi(struct pci_irq_cookie *cookie, const struct drv_pci_irq *irq)
+{
+	struct drv_pci_device *device = cookie->device;
+	char source[17];
+	paddr_t address;
+	uint32_t event;
+	uint16_t control;
+	unsigned data_offset;
+	int error;
+
+	pci_source(&device->address, source);
+	error = hal_irq_register_msi(source, pci_irq_dispatch, cookie,
+	    &cookie->irq, &address, &event);
+	if (error != HAL_OK)
+		return error == HAL_ERR_NOMEM ? ENOMEM : EIO;
+	if (event > UINT16_MAX ||
+	    drv_pci_device_config_read16(device,
+	    cookie->capability + PCI_MSI_CONTROL, &control) != 0) {
+		error = EIO;
+		goto fail;
+	}
+	control &= (uint16_t)~PCI_MSI_ENABLE;
+	if (drv_pci_device_config_write16(device,
+	    cookie->capability + PCI_MSI_CONTROL, control) != 0 ||
+	    drv_pci_device_config_write32(device,
+	    cookie->capability + PCI_MSI_ADDRESS, (uint32_t)address) != 0) {
+		error = EIO;
+		goto fail;
+	}
+	if ((control & PCI_MSI_64BIT) != 0) {
+		if (drv_pci_device_config_write32(device,
+		    cookie->capability + PCI_MSI_ADDRESS + 4U,
+		    (uint32_t)((uint64_t)address >> 32)) != 0) {
+			error = EIO;
+			goto fail;
+		}
+		data_offset = cookie->capability + 12U;
+	} else {
+		if (address > UINT32_MAX) {
+			error = ERANGE;
+			goto fail;
+		}
+		data_offset = cookie->capability + 8U;
+	}
+	if (drv_pci_device_config_write16(device, data_offset,
+	    (uint16_t)event) != 0 || drv_pci_device_config_write16(device,
+	    cookie->capability + PCI_MSI_CONTROL,
+	    control | PCI_MSI_ENABLE) != 0) {
+		error = EIO;
+		goto fail;
+	}
+	(void)irq;
+	return 0;
+fail:
+	(void)hal_irq_unregister_msi(cookie->irq);
+	return error;
+}
+
+static int
+map_msix_entry(struct pci_irq_cookie *cookie)
+{
+	struct drv_pci_device *device = cookie->device;
+	struct drv_pci_bar bar;
+	uint32_t table;
+	uint64_t offset;
+	unsigned bir;
+	if (drv_pci_device_config_read32(device,
+	    cookie->capability + PCI_MSIX_TABLE, &table) != 0)
+		return EIO;
+	bir = table & 7U;
+	offset = (uint64_t)(table & ~7U) +
+	    (uint64_t)cookie->index * PCI_MSIX_ENTRY_SIZE;
+	if (bir >= device->bar_count ||
+	    drv_pci_device_bar(device, bir, &bar) != 0 ||
+	    offset > bar.size || PCI_MSIX_ENTRY_SIZE > bar.size - offset)
+		return EINVAL;
+	bar.bus_address += offset;
+	bar.size = PCI_MSIX_ENTRY_SIZE;
+	if (device->bus->ops->map_bar == NULL)
+		return ENOTSUP;
+	return device->bus->ops->map_bar(device->bus->host, device, &bar,
+	    DRV_PCI_MAP_READ | DRV_PCI_MAP_WRITE | DRV_PCI_MAP_NOCACHE,
+	    &cookie->table);
+}
+
+static int
+establish_msix(struct pci_irq_cookie *cookie)
+{
+	volatile uint32_t *entry;
+	char source[17];
+	paddr_t address;
+	uint32_t event;
+	uint16_t control;
+	int error;
+
+	error = map_msix_entry(cookie);
+	if (error != 0)
+		return error;
+	cookie->table_mapped = 1;
+	entry = cookie->table.address;
+	entry[3] |= PCI_MSIX_ENTRY_MASK;
+	pci_source(&cookie->device->address, source);
+	error = hal_irq_register_msi(source, pci_irq_dispatch, cookie,
+	    &cookie->irq, &address, &event);
+	if (error != HAL_OK) {
+		error = error == HAL_ERR_NOMEM ? ENOMEM : EIO;
+		goto fail;
+	}
+	entry[0] = (uint32_t)address;
+	entry[1] = (uint32_t)((uint64_t)address >> 32);
+	entry[2] = event;
+	hal_io_mb();
+	if (drv_pci_device_config_read16(cookie->device,
+	    cookie->capability + PCI_MSIX_CONTROL, &control) != 0 ||
+	    drv_pci_device_config_write16(cookie->device,
+	    cookie->capability + PCI_MSIX_CONTROL,
+	    (control | PCI_MSIX_ENABLE) &
+	    (uint16_t)~PCI_MSIX_FUNCTION_MASK) != 0) {
+		error = EIO;
+		(void)hal_irq_unregister_msi(cookie->irq);
+		goto fail;
+	}
+	entry[3] &= ~PCI_MSIX_ENTRY_MASK;
+	hal_io_mb();
+	return 0;
+fail:
+	if (cookie->table_mapped) {
+		cookie->device->bus->ops->unmap_bar(cookie->device->bus->host,
+		    &cookie->table);
+		cookie->table_mapped = 0;
+	}
+	return error;
+}
+
+int
+drv_pci_device_establish_irq(struct drv_pci_device *device,
+	const struct drv_pci_irq *irq, drv_pci_irq_handler_t handler,
+	void *argument, const char *name, void **result)
+{
+	struct pci_irq_cookie *cookie;
+	int error;
+	(void)name;
+	if (device == NULL || irq == NULL || handler == NULL || result == NULL)
+		return EINVAL;
+	cookie = hal_malloc(sizeof(*cookie));
+	if (cookie == NULL)
+		return ENOMEM;
+	memset(cookie, 0, sizeof(*cookie));
+	cookie->device = device;
+	cookie->type = irq->type;
+	cookie->capability = (unsigned)irq->private_data[0];
+	cookie->index = irq->index;
+	cookie->handler = handler;
+	cookie->argument = argument;
+	if (irq->type == DRV_PCI_IRQ_INTX) {
+		cookie->irq = (int)irq->vector;
+		error = hal_irq_set_handler(cookie->irq, pci_irq_dispatch, cookie) ==
+		    HAL_OK ? 0 : EIO;
+		if (error == 0)
+			hal_irq_unmask(cookie->irq);
+	} else if (irq->type == DRV_PCI_IRQ_MSI) {
+		error = establish_msi(cookie, irq);
+	} else if (irq->type == DRV_PCI_IRQ_MSIX) {
+		error = establish_msix(cookie);
+	} else {
+		error = EINVAL;
+	}
+	if (error != 0) {
+		hal_free(cookie);
+		return error;
+	}
+	*result = cookie;
+	return 0;
+}
+
+void
+drv_pci_device_disestablish_irq(struct drv_pci_device *device, void *value)
+{
+	struct pci_irq_cookie *cookie = value;
+	uint16_t control;
+	(void)device;
+	if (cookie == NULL)
+		return;
+	if (cookie->type == DRV_PCI_IRQ_INTX) {
+		hal_irq_mask(cookie->irq);
+		(void)hal_irq_set_handler(cookie->irq, NULL, NULL);
+	} else if (cookie->type == DRV_PCI_IRQ_MSI) {
+		if (drv_pci_device_config_read16(cookie->device,
+		    cookie->capability + PCI_MSI_CONTROL, &control) == 0)
+			(void)drv_pci_device_config_write16(cookie->device,
+			    cookie->capability + PCI_MSI_CONTROL,
+			    control & (uint16_t)~PCI_MSI_ENABLE);
+		(void)hal_irq_unregister_msi(cookie->irq);
+	} else if (cookie->type == DRV_PCI_IRQ_MSIX) {
+		if (cookie->table_mapped) {
+			volatile uint32_t *entry = cookie->table.address;
+			entry[3] |= PCI_MSIX_ENTRY_MASK;
+			hal_io_mb();
+		}
+		(void)hal_irq_unregister_msi(cookie->irq);
+		if (cookie->table_mapped)
+			cookie->device->bus->ops->unmap_bar(
+			    cookie->device->bus->host, &cookie->table);
+	}
+	hal_free(cookie);
+}
 
 struct drv_dma_device*drv_pci_device_dma(struct drv_pci_device*d){return d?d->bus->dma:NULL;}
 struct drv_pci_driver*drv_pci_device_driver(const struct drv_pci_device*d){return d?d->driver:NULL;}
