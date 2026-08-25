@@ -31,7 +31,8 @@ For example, `ws001-p009` is WS001 Phase 009.
 | `ws007` | Graphics and desktop | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | [WS009](ws009-documentation/ws.md) |
+| `ws010` | Noct scripting and build tools | [WS010](ws010-scripting/ws.md) |
+| `ws011` | Network configuration console | [WS011](ws011-net-config/ws.md) |
 
 Status, interruption, resumption, and evidence rules are defined in
 [governance.md](governance.md).
-

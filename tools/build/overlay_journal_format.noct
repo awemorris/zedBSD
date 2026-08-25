@@ -1,0 +1,32 @@
+require zedbuild;
+
+func crc32Range(data, start, count) {
+    var crc = 4294967295;
+    for (i in 0..count) {
+        crc = crc ^ data[start + i];
+        for (j in 0..8) {
+            if ((crc & 1) != 0) { crc = (crc >> 1) ^ 0xedb88320; }
+            else { crc = crc >> 1; }
+        }
+    }
+    return (crc ^ 4294967295) & 4294967295;
+}
+func journalCrc(data, count) { return crc32Range(data, 0, count); }
+
+func overlayEmptyJournal() {
+    var data = Packed.uint8(128 * 1024);
+    var h = "ZOVLSLT"; for (i in 0..7) { data[i] = String.charCodeAt(h, i); }
+    zbPut16LE(data, 8, 1); zbPut16LE(data, 10, 48); zbPut32LE(data, 12, 512);
+    var id = "ZOVL"; for (i in 0..4) { data[16+i] = String.charCodeAt(id,i); }
+    zbPut64LE(data, 24, 1); zbPut32LE(data, 36, 1);
+    zbPut32LE(data, 508, journalCrc(data, 508));
+    var c = 512; var magic = "ZOVLCMT";
+    for (i in 0..7) { data[c+i] = String.charCodeAt(magic,i); }
+    zbPut16LE(data,c+8,1); for(i in 0..4){data[c+12+i]=String.charCodeAt(id,i);}
+    zbPut64LE(data,c+16,1); zbPut32LE(data,c+28,1);
+    var header = Packed.uint8(512); zbCopy(header,0,data,0,512);
+    zbPut32LE(data,c+40,journalCrc(header,512));
+    var commit = Packed.uint8(512); zbCopy(commit,0,data,c,512);
+    zbPut32LE(data,c+508,journalCrc(commit,508));
+    return data;
+}

@@ -1,0 +1,53 @@
+require zedbuild;
+require overlay_journal_format;
+
+func compareFat(image, source, name) {
+    if (source == "") { return; }
+    var extracted = image + ".ws010-extract";
+    var command = "mcopy -n -i " + zbShellQuote(image + "@@1048576") +
+                  " " + zbShellQuote("::/" + name) + " " + zbShellQuote(extracted) +
+                  " >/dev/null && cmp " + zbShellQuote(extracted) + " " +
+                  zbShellQuote(source) + " && rm -f " + zbShellQuote(extracted);
+    if (System.shell(command) != 0) { zbFail(name + " differs from its input"); }
+}
+func header(data, at, current, backup, entriesLba) {
+    if (!zbBytesEqual(data, at, "EFI PART") || zbU32LE(data, at + 8) != 65536 ||
+        zbU32LE(data, at + 12) != 92) { zbFail("invalid GPT header"); }
+    var copy = Packed.uint8(92); zbCopy(copy, 0, data, at, 92);
+    var stored = zbU32LE(copy, 16); zbPut32LE(copy, 16, 0);
+    if (crc32Range(copy, 0, 92) != stored || zbU64SmallLE(data, at + 24) != current ||
+        zbU64SmallLE(data, at + 32) != backup || zbU64SmallLE(data, at + 72) != entriesLba ||
+        zbU32LE(data, at + 80) != 128 || zbU32LE(data, at + 84) != 128) {
+        zbFail("GPT header CRC or geometry mismatch");
+    }
+    return zbU32LE(data, at + 88);
+}
+func main(args) {
+    var image="";var kernel="";var bootzbsd="";var bootx64="";var arch="";var dataImage="";var swap="";var i=0;
+    while(i<Array.size(args)){
+        var a=args[i];
+        if(a=="--kernel"&&i+1<Array.size(args)){kernel=args[i+1];i=i+2;}
+        else if(a=="--bootzbsd"&&i+1<Array.size(args)){bootzbsd=args[i+1];i=i+2;}
+        else if(a=="--bootx64"&&i+1<Array.size(args)){bootx64=args[i+1];i=i+2;}
+        else if(a=="--arch-image"&&i+1<Array.size(args)){arch=args[i+1];i=i+2;}
+        else if(a=="--data-image"&&i+1<Array.size(args)){dataImage=args[i+1];i=i+2;}
+        else if(a=="--swapfile"&&i+1<Array.size(args)){swap=args[i+1];i=i+2;}
+        else if((a=="--machine"||a=="--fat-type"||a=="--arch-profile"||a=="--arch-format"||a=="--noct"||a=="--holoris"||a=="--bin-file"||a=="--ufs-root")&&i+1<Array.size(args)){i=i+2;}
+        else if(String.indexOf(a,"--")==0){zbFail("unsupported GPT checker option: "+a);}
+        else {image=a;i=i+1;}
+    }
+    if(image==""){zbFail("GPT image path is required");}
+    var raw=zbReadFile(image);var total=Packed.size(raw)/512;
+    if(Packed.size(raw)==0||Packed.size(raw)%512!=0||raw[510]!=85||raw[511]!=170){zbFail("invalid disk size or MBR");}
+    if(raw[446]!=128||raw[450]!=14||zbU32LE(raw,454)!=2048||raw[466]!=238||zbU32LE(raw,470)!=1){zbFail("invalid hybrid MBR");}
+    var tableCrc=header(raw,512,1,total-1,2);
+    if(crc32Range(raw,1024,16384)!=tableCrc){zbFail("primary GPT entry CRC mismatch");}
+    if(zbU64SmallLE(raw,1056)!=2048||zbU64SmallLE(raw,1064)+1!=2048+zbU32LE(raw,458)){zbFail("ESP extents differ");}
+    if(zbU64SmallLE(raw,1184)!=34||zbU64SmallLE(raw,1192)!=2047){zbFail("BIOS partition extent mismatch");}
+    var stage=34*512;if(zbU32LE(raw,stage)!=0x324c425a||zbU16LE(raw,stage+4)!=1||zbU16LE(raw,stage+6)!=32||zbU16LE(raw,stage+14)!=1){zbFail("invalid ZBL2 header");}
+    var sectors=zbU16LE(raw,stage+12);var sum=0;for(i in 0..sectors*128){sum=(sum+zbU32LE(raw,stage+i*4))&4294967295;}if(sum!=0){zbFail("ZBL2 checksum mismatch");}
+    var backup=(total-33)*512;for(i in 0..16384){if(raw[1024+i]!=raw[backup+i]){zbFail("backup GPT entries differ");}}
+    header(raw,(total-1)*512,total-1,1,total-33);
+    compareFat(image,bootzbsd,"BOOTZBSD.EXE");compareFat(image,kernel,"VMUNIX");compareFat(image,kernel,"VMUNIX.X64");compareFat(image,bootx64,"EFI/BOOT/BOOTX64.EFI");compareFat(image,arch,"ROOTFS.IMG");compareFat(image,dataImage,"DATA.IMG");compareFat(image,swap,"SWAPFILE");
+    print("amd64 GPT image check: PASS");
+}

@@ -1,0 +1,38 @@
+require zedbuild;
+
+func biosCompare(image, source, name) {
+    if (source == "") { return; }
+    var extracted=image+".ws010-extract";
+    var command="mcopy -n -i "+zbShellQuote(image+"@@1048576")+" "+
+        zbShellQuote("::/"+name)+" "+zbShellQuote(extracted)+" >/dev/null && cmp "+
+        zbShellQuote(extracted)+" "+zbShellQuote(source)+" && rm -f "+zbShellQuote(extracted);
+    if(System.shell(command)!=0){zbFail(name+" differs from its input");}
+}
+func main(args){
+    var machine="";var kernel="";var bootzbsd="";var arch="";var dataImage="";var swap="";var image="";var i=0;
+    while(i<Array.size(args)){var a=args[i];
+        if(a=="--machine"&&i+1<Array.size(args)){machine=args[i+1];i=i+2;}
+        else if(a=="--kernel"&&i+1<Array.size(args)){kernel=args[i+1];i=i+2;}
+        else if(a=="--bootzbsd"&&i+1<Array.size(args)){bootzbsd=args[i+1];i=i+2;}
+        else if(a=="--arch-image"&&i+1<Array.size(args)){arch=args[i+1];i=i+2;}
+        else if(a=="--data-image"&&i+1<Array.size(args)){dataImage=args[i+1];i=i+2;}
+        else if(a=="--swapfile"&&i+1<Array.size(args)){swap=args[i+1];i=i+2;}
+        else if((a=="--fat-type"||a=="--arch-profile"||a=="--arch-format"||a=="--noct"||a=="--holoris"||a=="--bin-file"||a=="--ufs-root"||a=="--bootx64")&&i+1<Array.size(args)){i=i+2;}
+        else if(String.indexOf(a,"--")==0){zbFail("unsupported BIOS checker option: "+a);}
+        else {image=a;i=i+1;}
+    }
+    if((machine!="pcat"&&machine!="pc98")||image==""){zbFail("usage: check-bios-hdd-image.noct --machine pcat|pc98 ... IMAGE");}
+    var raw=zbReadFile(image);if(Packed.size(raw)<1048576||Packed.size(raw)%512!=0||raw[510]!=85||raw[511]!=170){zbFail("invalid BIOS disk image");}
+    if(machine=="pcat"&&(raw[446]!=128||raw[450]!=14||zbU32LE(raw,454)!=2048)){zbFail("invalid PC/AT MBR partition");}
+    if(machine=="pc98"&&(raw[512]!=0xa1||raw[513]!=0x91)){zbFail("invalid PC-98 partition table");}
+    var stage=512;if(machine=="pc98"){stage=1024;}
+    if(machine=="pc98"){
+        if(raw[stage+510]!=85||raw[stage+511]!=170){zbFail("invalid PC-98 LBA2 selector");}
+    }else {
+        if(zbU32LE(raw,stage)!=0x324c425a||zbU16LE(raw,stage+4)!=1||zbU16LE(raw,stage+6)!=32){zbFail("invalid ZBL2 header");}
+        if(zbU16LE(raw,stage+14)!=1){zbFail("ZBL2 machine mismatch");}
+        var sectors=zbU16LE(raw,stage+12);var sum=0;for(i in 0..sectors*128){sum=(sum+zbU32LE(raw,stage+i*4))&4294967295;}if(sum!=0){zbFail("ZBL2 checksum mismatch");}
+    }
+    biosCompare(image,bootzbsd,"BOOTZBSD.EXE");biosCompare(image,kernel,"VMUNIX");biosCompare(image,arch,"ROOTFS.IMG");biosCompare(image,dataImage,"DATA.IMG");biosCompare(image,swap,"SWAPFILE");
+    print("BIOS HDD image check: PASS");
+}

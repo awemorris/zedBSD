@@ -1,0 +1,58 @@
+require zedbuild;
+
+func check(path, machine) {
+    var data = zbReadFile(path);
+    var elf64 = machine == "amd64";
+    if (machine != "amd64" && machine != "i386") { zbFail("unsupported WS010 machine: " + machine); }
+    var ehsize = 52; var phentsize = 32; var expectedMachine = 3; var expectedClass = 1;
+    if (elf64) { ehsize = 64; phentsize = 56; expectedMachine = 62; expectedClass = 2; }
+    if (Packed.size(data) < ehsize || data[0] != 127 || data[1] != 69 ||
+        data[2] != 76 || data[3] != 70 || data[4] != expectedClass ||
+        data[5] != 1 || data[6] != 1) { zbFail(path + ": invalid ELF identification"); }
+    if (zbU16LE(data, 16) != 2 || zbU16LE(data, 18) != expectedMachine) { zbFail(path + ": expected ET_EXEC for target"); }
+    var phoff = zbU32LE(data, 28); var headerSize = zbU16LE(data, 40);
+    var actualPhent = zbU16LE(data, 42); var phnum = zbU16LE(data, 44);
+    if (elf64) {
+        phoff = zbU64SmallLE(data, 32); headerSize = zbU16LE(data, 52);
+        actualPhent = zbU16LE(data, 54); phnum = zbU16LE(data, 56);
+    }
+    if (headerSize != ehsize || actualPhent != phentsize || phnum == 0 ||
+        phoff > Packed.size(data) || phnum * phentsize > Packed.size(data) - phoff) {
+        zbFail(path + ": invalid program-header table");
+    }
+    var stacks = 0; var loads = 0;
+    for (i in 0..phnum) {
+        var at = phoff + i * phentsize;
+        var kind = zbU32LE(data, at);
+        var flags = zbU32LE(data, at + 24); var filesz = zbU32LE(data, at + 16);
+        var memsz = zbU32LE(data, at + 20); var vaddr = zbU32LE(data, at + 8);
+        var align = zbU32LE(data, at + 28);
+        if (elf64) {
+            flags = zbU32LE(data, at + 4); vaddr = zbU64SmallLE(data, at + 16);
+            filesz = zbU64SmallLE(data, at + 32); memsz = zbU64SmallLE(data, at + 40);
+            align = zbU64SmallLE(data, at + 48);
+        }
+        if (kind == 0x6474e551) {
+            stacks = stacks + 1;
+            if (filesz != 0 || memsz != 1048576 || flags != 6) { zbFail(path + ": invalid PT_GNU_STACK"); }
+        } else if (kind == 1) {
+            loads = loads + 1;
+            if (elf64 && (align < 4096 || (align & (align - 1)) != 0 ||
+                vaddr < 8192 || vaddr >= 140737488355328 || memsz > 140737488355328 - vaddr)) {
+                zbFail(path + ": invalid amd64 PT_LOAD virtual range/alignment");
+            }
+        }
+    }
+    if (stacks != 1) { zbFail(path + ": expected exactly one PT_GNU_STACK"); }
+    if (elf64 && loads == 0) { zbFail(path + ": expected at least one PT_LOAD"); }
+}
+
+func main(args) {
+    var machine = "i386"; var files = []; var i = 0;
+    while (i < Array.size(args)) {
+        if (args[i] == "--machine" && i + 1 < Array.size(args)) { machine = args[i + 1]; i = i + 2; }
+        else { Array.push(files, args[i]); i = i + 1; }
+    }
+    if (Array.size(files) == 0) { zbFail("usage: check-user-elf.noct [--machine i386|amd64] ELF..."); }
+    for (j in 0..Array.size(files)) { check(files[j], machine); }
+}

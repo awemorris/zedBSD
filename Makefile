@@ -25,6 +25,15 @@ OBJCOPY := objcopy
 CC := gcc
 HOSTCC ?= cc
 PYTHON ?= python3
+ZEDBSD_HOST_NOCT_REPOSITORY ?= https://github.com/awemorris/NoctLang.git
+ZEDBSD_HOST_NOCT_REVISION ?= 7d856856e16eb2d889ba49f557f2fda4dcaeea7e
+ZEDBSD_HOST_NOCT_SOURCE_DIR := build/NoctLang
+ZEDBSD_HOST_NOCT_BUILD_DIR := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/build-static
+ZEDBSD_HOST_NOCT := $(ZEDBSD_HOST_NOCT_BUILD_DIR)/noct
+NOCT ?= $(abspath $(ZEDBSD_HOST_NOCT))
+ZEDBSD_HOST_NOCT_CHECKOUT_STAMP := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/.zedbsd-checkout-$(ZEDBSD_HOST_NOCT_REVISION)
+ZEDBSD_HOST_NOCT_BUILD_STAMP := $(ZEDBSD_HOST_NOCT_BUILD_DIR)/.zedbsd-built-$(ZEDBSD_HOST_NOCT_REVISION)
+ZEDBSD_IMAGE_HOST := build/zedimage-host
 .DEFAULT_GOAL := disk-image
 
 ZEDBSD_CONFIG ?= config.mk
@@ -209,6 +218,35 @@ list-targets:
 	@printf 'Focused checks:\n'; \
 		for target in $(ZEDBSD_CHECK_TARGETS); do printf '  %s\n' "$$target"; done
 
+$(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP):
+	@mkdir -p build
+	@if test ! -d "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)/.git"; then \
+		git clone "$(ZEDBSD_HOST_NOCT_REPOSITORY)" "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)"; \
+	fi
+	@actual=$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" rev-parse HEAD); \
+	if test "$$actual" != "$(ZEDBSD_HOST_NOCT_REVISION)"; then \
+		git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" fetch origin "$(ZEDBSD_HOST_NOCT_REVISION)"; \
+		git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" checkout --detach "$(ZEDBSD_HOST_NOCT_REVISION)"; \
+	fi
+	@touch $@
+
+$(ZEDBSD_HOST_NOCT_BUILD_STAMP): $(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP)
+	cd "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" && cmake --preset static
+	cd "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" && cmake --build --preset static --parallel
+	@test -x "$(ZEDBSD_HOST_NOCT)"
+	@touch $@
+
+.PHONY: noct-toolchain-smoke
+noct-toolchain-smoke: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) plan/ws010-scripting/tests/toolchain-smoke.noct
+	$(NOCT) plan/ws010-scripting/tests/toolchain-smoke.noct \
+		$(abspath build/noct-toolchain-smoke.txt)
+
+toolchain: $(ZEDBSD_HOST_NOCT_BUILD_STAMP) noct-toolchain-smoke
+
+$(ZEDBSD_IMAGE_HOST): tools/build/zedimage-host.c
+	@mkdir -p $(dir $@)
+	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror $< -o $@
+
 ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_NE2000=$(if $(filter y,$(CONFIG_DRIVER_NE2000)),1,0) \
 	-DCONFIG_DRIVER_LGY98=$(if $(filter y,$(CONFIG_DRIVER_LGY98)),1,0) \
@@ -335,16 +373,13 @@ $(ZEDBSD_LIBC_OBJECTS): OBJ_CFLAGS = $(ZEDBSD_LIBC_CFLAGS)
 ARCH_IMAGE_DIR := build/arch-images
 DATA_IMAGE := build/data.img
 SWAP_IMAGE := build/swapfile
-DATA_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-data-image.py \
-	$(BUILD_TOOLS_DIR)/overlay_journal_format.py \
-	$(BUILD_TOOLS_DIR)/ufs1_format.py
+DATA_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-data-image.noct \
+	$(BUILD_TOOLS_DIR)/overlay_journal_format.noct \
+	$(BUILD_TOOLS_DIR)/ufs1_format.noct $(ZEDBSD_IMAGE_HOST)
 ARCH_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-image.py \
 	$(BUILD_TOOLS_DIR)/check-arch-overlay-image.py
-ARCH_UFS_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.py \
-	$(BUILD_TOOLS_DIR)/check-arch-overlay-ufs.py \
-	$(BUILD_TOOLS_DIR)/check-ufs1-image.py \
-	$(BUILD_TOOLS_DIR)/check_ufs1_import.py \
-	$(BUILD_TOOLS_DIR)/ufs1_format.py
+ARCH_UFS_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.noct \
+	$(BUILD_TOOLS_DIR)/ufs1_format.noct $(ZEDBSD_IMAGE_HOST)
 ZEDBSD_ACCOUNT_INPUTS := userland/base/etc/passwd userland/base/etc/group \
 	userland/base/etc/shadow
 ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \
@@ -366,12 +401,13 @@ ZEDBSD_PACKAGE_FILES += $(ZEDBSD_XZED_SESSION_FILES)
 
 $(DATA_IMAGE): $(DATA_IMAGE_TOOLS)
 	@mkdir -p $(dir $@)
-	PYTHONPATH=$(BUILD_TOOLS_DIR) $(PYTHON) \
-		$(BUILD_TOOLS_DIR)/make-data-image.py --output $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) \
+		$(BUILD_TOOLS_DIR)/make-data-image.noct \
+		--backend $(abspath $(ZEDBSD_IMAGE_HOST)) --output $@
 
-$(SWAP_IMAGE): $(BUILD_TOOLS_DIR)/make-swapfile.py
+$(SWAP_IMAGE): $(BUILD_TOOLS_DIR)/make-swapfile.noct
 	@mkdir -p $(dir $@)
-	$(PYTHON) $(BUILD_TOOLS_DIR)/make-swapfile.py --size-mib 64 --output $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-swapfile.noct --size-mib 64 --output $@
 
 # $(1): output, $(2): profile, $(3): prerequisites, $(4): --file arguments.
 define ZEDBSD_ARCH_IMAGE_RULE
@@ -389,9 +425,10 @@ endef
 define ZEDBSD_ARCH_UFS_IMAGE_RULE
 $(1): $(3) $(ZEDBSD_PACKAGE_INPUTS) $(ARCH_UFS_IMAGE_TOOLS)
 	@mkdir -p $$(dir $$@)
-	PYTHONPATH=$$(BUILD_TOOLS_DIR) $$(PYTHON) \
-		$$(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.py --force \
-		--profile $(2) --output $$@ $(4) $(ZEDBSD_PACKAGE_FILES)
+	$$(NOCT) --path=$$(BUILD_TOOLS_DIR) \
+		$$(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.noct \
+		--backend $$(abspath $$(ZEDBSD_IMAGE_HOST)) --force \
+		--profile $(2) --output $$@ $(4) $$(ZEDBSD_PACKAGE_FILES)
 
 $(1)-check: $(1)
 	PYTHONPATH=$$(BUILD_TOOLS_DIR) $$(PYTHON) \

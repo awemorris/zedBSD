@@ -1,0 +1,38 @@
+func main(args) {
+    if (Array.size(args) < 4) {
+        System.error("usage: qemu-boot-capture.noct QEMU IMAGE SCREENSHOT QEMU-ARG...");
+    }
+
+    var command = [args[0]];
+    var i = 3;
+    while (i < Array.size(args)) {
+        Array.push(command, args[i]);
+        i = i + 1;
+    }
+    Array.push(command, "-drive");
+    Array.push(command, "file=" + args[1] + ",format=raw,if=ide");
+    Array.push(command, "-boot");
+    Array.push(command, "c");
+    Array.push(command, "-display");
+    Array.push(command, "none");
+    Array.push(command, "-monitor");
+    Array.push(command, "stdio");
+    Array.push(command, "-no-reboot");
+
+    var child = Process.spawn(command);
+    if (child < 0) {
+        System.error("could not start QEMU");
+    }
+    if (System.shell("sleep 20") != 0 || Process.isAlive(child) != 1) {
+        System.error("QEMU exited before the bounded capture point");
+    }
+    Process.write(child, "screendump " + args[2] + "\n");
+    System.shell("sleep 1");
+    Process.write(child, "quit\n");
+    var status = Process.wait(child);
+    Process.close(child);
+    if (status != 0 || FileUtil.checkFileExists(args[2]) != 1) {
+        System.error("QEMU capture failed");
+    }
+    print("QEMU bounded boot capture: " + args[2]);
+}

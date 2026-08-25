@@ -580,7 +580,8 @@ terminfo_expand(const char *format, const long supplied[9], char *output,
 			}
 			case 'c':
 				if (!pop(stack, &depth, &left) || left <= 0 ||
-				    left > UCHAR_MAX || used + 1U >= capacity)
+                                    left > (long)UCHAR_MAX ||
+                                    used + 1U >= capacity)
 					goto invalid;
 				output[used++] = (char)left;
 				break;

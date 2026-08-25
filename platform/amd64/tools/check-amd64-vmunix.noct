@@ -1,0 +1,42 @@
+require zedbuild;
+
+func main(args) {
+    if (Array.size(args) != 1) { zbFail("usage: check-amd64-vmunix.noct VMUNIX"); }
+    var data = zbReadFile(args[0]);
+    if (Packed.size(data) < 64 || data[0] != 127 || data[1] != 69 ||
+        data[2] != 76 || data[3] != 70 ||
+        data[4] != 2 || data[5] != 1) { zbFail("expected little-endian ELF64"); }
+    if (zbU16LE(data, 18) != 62 || zbU16LE(data, 52) != 64 ||
+        zbU16LE(data, 54) != 56) { zbFail("unexpected ELF64 header"); }
+    var entry = zbI64LE(data, 24);
+    var phoff = zbU64SmallLE(data, 32);
+    var phnum = zbU16LE(data, 56);
+    if (entry < -2147483648 || entry >= -1073741824) {
+        zbFail("entry is outside the bootstrap high-half window");
+    }
+    if (phnum == 0 || phnum > 8 || phoff + phnum * 56 > 512) {
+        zbFail("program header table is outside the first sector");
+    }
+    var loads = 0;
+    var executable = false;
+    for (i in 0..phnum) {
+        var at = phoff + i * 56;
+        if (zbU32LE(data, at) != 1) { continue; }
+        loads = loads + 1;
+        var flags = zbU32LE(data, at + 4);
+        var offset = zbU64SmallLE(data, at + 8);
+        var vaddr = zbI64LE(data, at + 16);
+        var paddr = zbU64SmallLE(data, at + 24);
+        var filesz = zbU64SmallLE(data, at + 32);
+        var memsz = zbU64SmallLE(data, at + 40);
+        if ((offset & 511) != 0) { zbFail("PT_LOAD file offset is not sector aligned"); }
+        if (paddr >= 1073741824 || memsz > 1073741824 - paddr) { zbFail("PT_LOAD is outside the initial one-GiB physical map"); }
+        if (vaddr < -2147483648) { zbFail("PT_LOAD is not in the high half"); }
+        if (filesz > memsz) { zbFail("PT_LOAD filesz exceeds memsz"); }
+        if ((flags & 3) == 3) { zbFail("PT_LOAD is writable and executable"); }
+        if ((flags & 1) != 0 && vaddr <= entry && entry < vaddr + memsz) { executable = true; }
+    }
+    if (loads == 0) { zbFail("no PT_LOAD segments"); }
+    if (!executable) { zbFail("entry is not covered by an executable PT_LOAD"); }
+    print("amd64 vmunix check: PASS");
+}

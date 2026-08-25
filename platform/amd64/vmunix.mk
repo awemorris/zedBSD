@@ -126,10 +126,10 @@ $(BUILD)/kern64/%.o: %.c
 		-fno-strict-aliasing -MMD -MP -c $< -o $@
 
 $(BUILD)/vmunix: $(AMD64_VMUNIX_OBJS) $(AMD64_PLATFORM)/vmunix.ld \
-	platform/amd64/tools/check-amd64-vmunix.py
+	platform/amd64/tools/check-amd64-vmunix.noct
 	$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 \
 		-T $(AMD64_PLATFORM)/vmunix.ld -nostdlib $(AMD64_VMUNIX_OBJS) -o $@
-	$(PYTHON) platform/amd64/tools/check-amd64-vmunix.py $@
+	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-vmunix.noct $@
 
 $(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/stage1.S \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
@@ -161,8 +161,8 @@ $(BUILD)/bootloader/stage2.raw: $(BUILD)/bootloader/stage2.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 
 $(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.raw \
-	tools/build/finalize-bios-stage2.py
-	$(PYTHON) tools/build/finalize-bios-stage2.py --machine pcat $< $@
+	tools/build/finalize-bios-stage2.noct
+	$(NOCT) --path=tools/build tools/build/finalize-bios-stage2.noct --machine pcat $< $@
 
 $(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S
 	@mkdir -p $(dir $@)
@@ -191,12 +191,12 @@ $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 
 $(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw \
-	tools/build/finalize-bios-stage2.py
-	$(PYTHON) tools/build/finalize-bios-stage2.py --machine pcat $< $@
+	tools/build/finalize-bios-stage2.noct
+	$(NOCT) --path=tools/build tools/build/finalize-bios-stage2.noct --machine pcat $< $@
 
 $(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin \
-	tools/build/make-mz-exe.py
-	$(PYTHON) tools/build/make-mz-exe.py --entry 0x20 $< $@
+	tools/build/make-mz-exe.noct
+	$(NOCT) --path=tools/build tools/build/make-mz-exe.noct --entry 0x20 $< $@
 
 $(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c \
 	$(UEFI_LOADER)/include/uefi.h $(UEFI_LOADER)/elf64.h \
@@ -214,14 +214,14 @@ $(BUILD)/uefi/transition.o: $(UEFI_LOADER)/transition.S
 
 $(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
 	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/transition.o \
-	platform/amd64/tools/check-bootx64.py
+	platform/amd64/tools/check-bootx64.noct
 	$(EFI_LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \
 		--gc-sections --enable-reloc-section --no-insert-timestamp \
 		$(filter %.o,$^) -o $@
 	@test -z "$$($(EFI_NM) -u $@ | grep -Ev \
 		' (__bss_start__|__bss_end__|__end__|___tls_start__|___tls_end__)$$')" \
 		|| { $(EFI_NM) -u $@; exit 1; }
-	$(PYTHON) platform/amd64/tools/check-bootx64.py $@
+	$(NOCT) --path=tools/build platform/amd64/tools/check-bootx64.noct $@
 
 AMD64_USER_CPPFLAGS := -nostdinc -Iinclude -Iinclude/uapi -Isrc -I. \
 	-Ilibc/include -DHAL_ARCH_AMD64 -DZEDBSD_USER_ABI_LP64
@@ -250,7 +250,7 @@ AMD64_USER_NETTEST_OBJS := $(BUILD)/user64/userland/base/nettest/main.o
 AMD64_USER_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,sh)
 AMD64_USER_READLINE_OBJ := $(BUILD)/user64/userland/base/libedit/readline.o
 AMD64_USER_READLINE_LIB := $(BUILD)/lib/libreadline.a
-AMD64_USER_ELF_CHECK := tools/build/check-user-elf.py
+AMD64_USER_ELF_CHECK := tools/build/check-user-elf.noct
 
 $(BUILD)/user64/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -282,7 +282,7 @@ $(BUILD)/POSIX-R1.ELF: $(AMD64_USER_LIBC_OBJS) \
 		-T $(AMD64_PLATFORM)/user.ld \
 		$(AMD64_USER_LIBC_OBJS) \
 		$(BUILD)/user64/userland/base/tests/syscall-smoke.o -o $@
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/POSIX-R2.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/posix-r2.o $(AMD64_PLATFORM)/user.ld \
@@ -291,7 +291,7 @@ $(BUILD)/POSIX-R2.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
 		$(BUILD)/user64/userland/base/tests/posix-r2.o -o $@
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/POSIX-R2-REMAINING.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/posix-r2-remaining.o \
@@ -300,7 +300,7 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 		-z max-page-size=4096 -z stack-size=0x100000 \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
 		$(BUILD)/user64/userland/base/tests/posix-r2-remaining.o -o $@
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/SUSV4-XSI.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/susv4-xsi.o \
@@ -310,7 +310,7 @@ $(BUILD)/SUSV4-XSI.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
 		$(BUILD)/user64/userland/base/tests/susv4-xsi.o -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 susv4-xsi-user-test: $(BUILD)/SUSV4-XSI.ELF
 
@@ -324,7 +324,7 @@ $(BUILD)/bin/sh: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SH_OBJS) \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_USER_SH_OBJS) $(AMD64_USER_READLINE_LIB) -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 	$(BUILD)/user64/userland/base/tests/smp-resource-stress.o \
@@ -334,7 +334,7 @@ $(BUILD)/SMP-STRESS.ELF: $(AMD64_USER_NET_LIBC_OBJS) \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
 		$(BUILD)/user64/userland/base/tests/smp-resource-stress.o -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 AMD64_USER_SYSCTL_OBJ := $(BUILD)/user64/userland/base/sysctl/main.o
 $(BUILD)/bin/sysctl: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SYSCTL_OBJ) \
@@ -345,7 +345,7 @@ $(BUILD)/bin/sysctl: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_SYSCTL_OBJ) \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_USER_SYSCTL_OBJ) -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 AMD64_USER_MOUNT_OBJ := $(BUILD)/user64/userland/base/mount/main.o
 $(BUILD)/bin/mount: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_MOUNT_OBJ) \
@@ -356,7 +356,7 @@ $(BUILD)/bin/mount: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_MOUNT_OBJ) \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_USER_MOUNT_OBJ) -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
@@ -370,7 +370,7 @@ $(BUILD)/bin/nettest: $(AMD64_USER_NET_LIBC_OBJS) \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
 		$(AMD64_USER_NETTEST_OBJS) -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 USER_NET_COMMANDS := $(USERLAND_SELECTED_NETWORK_PROGRAMS)
 USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
@@ -390,7 +390,7 @@ $(BUILD)/bin/$(1): $(AMD64_USER_NET_LIBC_OBJS) \
 		$(AMD64_USER_NET_COMMON_OBJS) \
 		$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) -o $$@
 	@test -z "$$$$(nm -u $$@)" || { nm -u $$@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
 endef
 $(foreach command,$(USER_NET_COMMANDS),\
 	$(eval $(call AMD64_USER_NET_COMMAND,$(command))))
@@ -409,7 +409,7 @@ $(BUILD)/bin/$(1): $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_USER_BASIC_COMMON_OBJ) \
 		$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user64,$(1)) -o $$@
 	@test -z "$$$$(nm -u $$@)" || { nm -u $$@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $$@
 endef
 $(foreach command,$(USER_BASIC_COMMANDS),\
 	$(eval $(call AMD64_USER_BASIC_COMMAND,$(command))))
@@ -462,12 +462,12 @@ $(BUILD)/NOCT.ELF: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_NOCT_GLUE_OBJS) \
 		$(AMD64_USER_NOCT_GLUE_OBJS) $(USER_NOCT_OBJECTS) \
 		$(DYNAMIC_LIBM_OBJ) $(DYNAMIC_FLOAT_PARSE_OBJS) -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 	@mkdir -p $(dir $@)
 	cp -f $< $@
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 $(DYNAMIC_DIR)/obj/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -622,10 +622,10 @@ $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
 	$(DATA_IMAGE) $(SWAP_IMAGE) $(BUILD)/uefi/BOOTX64.EFI \
-	tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -643,8 +643,8 @@ $(BUILD)/ufs-root.img: $(AMD64_ARCH_UFS_IMAGE) \
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(BUILD)/ufs-root.img \
-	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.py
-	$(PYTHON) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.py --force \
+	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -654,10 +654,10 @@ $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -679,10 +679,10 @@ $(BUILD)/deferred-stub-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(AMD64_DEFERRED_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -711,10 +711,10 @@ $(BUILD)/posix-phase2-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(AMD64_POSIX_PHASE2_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -743,10 +743,10 @@ $(BUILD)/posix-phase3-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(AMD64_POSIX_PHASE3_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -775,10 +775,10 @@ $(BUILD)/posix-phase4-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(AMD64_POSIX_PHASE4_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -801,7 +801,7 @@ $(BUILD)/bin/posix-phase5-helper: $(AMD64_USER_NET_LIBC_OBJS) \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_NET_LIBC_OBJS) \
 		$(BUILD)/user64/userland/base/tests/posix-phase5-helper.o -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 AMD64_POSIX_PHASE5_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase5-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE5_TEST_UFS),amd64,\
@@ -815,10 +815,10 @@ $(BUILD)/posix-phase5-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(AMD64_POSIX_PHASE5_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -846,10 +846,10 @@ $(BUILD)/posix-phase6-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(AMD64_POSIX_PHASE6_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -875,10 +875,10 @@ $(BUILD)/posix-phase7-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(AMD64_POSIX_PHASE7_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -905,10 +905,10 @@ $(BUILD)/posix-phase8-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(AMD64_POSIX_PHASE8_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -938,10 +938,10 @@ $(BUILD)/phase19-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(AMD64_PHASE19_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -970,10 +970,10 @@ $(BUILD)/phase20-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(AMD64_PHASE20_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -1012,7 +1012,7 @@ $(BUILD)/bin/phase85-curses-test: $(AMD64_USER_LIBC_OBJS) \
 		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
 		$(AMD64_POSIX_PHASE85_CURSES_OBJS) -o $@
 	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
-	$(PYTHON) $(AMD64_USER_ELF_CHECK) --machine amd64 $@
+	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
 
 AMD64_POSIX_PHASE85_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-posix-phase85-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_POSIX_PHASE85_TEST_UFS),amd64,\
@@ -1027,10 +1027,10 @@ $(BUILD)/posix-phase85-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(AMD64_POSIX_PHASE85_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
-	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
-	platform/amd64/tools/check-amd64-gpt-image.py
-	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
-		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \

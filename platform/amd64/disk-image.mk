@@ -4,7 +4,7 @@ DISK_IMAGE_ARTIFACT := $(BUILD)/hdd-image.img
 disk-image: world bootloader $(DISK_IMAGE_ARTIFACT)
 
 check-disk-image: $(DISK_IMAGE_ARTIFACT)
-	$(PYTHON) platform/amd64/tools/check-amd64-gpt-image.py --machine pcat \
+	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-gpt-image.noct --machine pcat \
 		--kernel $(BUILD)/vmunix \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --arch-profile amd64 \
 		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \

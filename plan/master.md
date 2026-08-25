@@ -70,7 +70,8 @@ before this long-term product goal is reached.
 | `ws007` | Graphics and desktop | Planned | No Phase started | Repair X11 packaging/input before GPU UAPI work | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked before Phase | No Phase started | Obtain the authoritative Noct tree/revision | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | Planned | No Phase started | Establish document layout and link validation | [WS009](ws009-documentation/ws.md) |
-| `ws010` | Scripting | Planned | No Phase started | Replace Python dependency. `make toolchain` builds internal `noct`. | [WS010](ws010-scripting/ws.md) (not created) |
+| `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
+| `ws011` | Network configuration console | Planned | `ws011-p001` planned | Freeze and implement `/etc/net.conf` v1 before boot migration | [WS011](ws011-net-config/ws.md) |
 
 ## 4. Milestones
 
@@ -91,6 +92,11 @@ before this long-term product goal is reached.
 ```text
 WS002 service baseline
   +-- WS005 networkd/net/WPA expansion
+  +-- WS011 net console + /etc/net.conf
+
+WS011 configuration model
+  +-- WS005 physical network/WPA backends
+  +-- WS011 VLAN/bridge data path (joint UAPI review with WS005)
 
 WS003 hardware inventory
   +-- WS004 xHCI + USB storage -- WS003 QEMU/Latitude USB root
@@ -105,6 +111,7 @@ WS004 xHCI -- WS006 USB HID -- evdev
                                   +-- WS008 BeUI
 
 WS001 compliance and WS009 documentation cross all workstreams.
+WS010 supplies host-side build and test scripting used by all workstreams.
 ```
 
 ## 6. Priority waves
@@ -129,6 +136,8 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | Initial Secure Boot scope | WS003 | Freezing the USB image matrix |
 | USB CDC ACM versus ECM/NCM and device-role capability | WS003/WS005 | Any CDC implementation Phase |
 | WLAN controller and firmware policy | WS004/WS005 | WLAN driver/backend Phases |
+| `/etc/net.conf` v1 grammar and empty-collection syntax | WS011 | Parser and boot migration |
+| VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | `ws011-p004` implementation |
 | Linux/FreeBSD evdev compatibility profile | WS006 | Publishing `/dev/input/eventN` UAPI |
 | zedBSD GPU/Vulkan capability profile | WS007 | Publishing `/dev/gpuN` UAPI |
 | Authoritative Noct repository and revision | WS008 | First Noct implementation Phase |

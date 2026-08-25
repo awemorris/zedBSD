@@ -122,8 +122,8 @@ $(BUILD)/bootloader/stage2.raw: $(BUILD)/bootloader/stage2.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 
 $(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.raw \
-	$(BUILD_TOOLS_DIR)/finalize-bios-stage2.py
-	$(PYTHON) $(BUILD_TOOLS_DIR)/finalize-bios-stage2.py --machine pcat $< $@
+	$(BUILD_TOOLS_DIR)/finalize-bios-stage2.noct
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/finalize-bios-stage2.noct --machine pcat $< $@
 
 $(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S
 	@mkdir -p $(dir $@)
@@ -146,11 +146,11 @@ $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o $(BIOS_LOADER)/
 $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 $(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw \
-	$(BUILD_TOOLS_DIR)/finalize-bios-stage2.py
-	$(PYTHON) $(BUILD_TOOLS_DIR)/finalize-bios-stage2.py --machine pcat $< $@
+	$(BUILD_TOOLS_DIR)/finalize-bios-stage2.noct
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/finalize-bios-stage2.noct --machine pcat $< $@
 $(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin \
-	$(BUILD_TOOLS_DIR)/make-mz-exe.py
-	$(PYTHON) $(BUILD_TOOLS_DIR)/make-mz-exe.py --entry 0x20 $< $@
+	$(BUILD_TOOLS_DIR)/make-mz-exe.noct
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-mz-exe.noct --entry 0x20 $< $@
 
 $(BUILD)/bootloader/payload32.o: bootloader/tests/payload32-pcat.S
 	@mkdir -p $(dir $@)
@@ -212,15 +212,19 @@ $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(I386_ARCH_UFS_IMAGE) $(DATA_IMAGE) $(SWAP_IMAGE) \
 	$(HOLORIS_NOCT) \
-	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.py \
-	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.py
-	$(PYTHON) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.py --force \
+	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct \
+	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
 		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
+		--machine pcat --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --arch-image $(I386_ARCH_UFS_IMAGE) \
+		--data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) $@
 
 $(BUILD)/ufs-root.img: $(I386_ARCH_UFS_IMAGE) \
 	$(BUILD_TOOLS_DIR)/make-ufs1-root-image.py tools/build/ufs1_format.py
@@ -248,10 +252,10 @@ $(BUILD)/src/kern/entry.o: src/kern/entry.c
 	$(ZEDBSD_KERN_CC) -MMD -MP -c $< -o $@
 
 $(BUILD)/vmunix: $(VMUNIX_OBJS) $(PCAT)/vmunix.ld \
-	platform/pcat/tools/check-pcat-vmunix.py
+	platform/pcat/tools/check-pcat-vmunix.noct
 	$(LD) -m elf_i386 --gc-sections -z max-page-size=4096 \
 		-T $(PCAT)/vmunix.ld -nostdlib $(VMUNIX_OBJS) -o $@
-	$(PYTHON) platform/pcat/tools/check-pcat-vmunix.py $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) platform/pcat/tools/check-pcat-vmunix.noct $@
 	grub-file --is-x86-multiboot $@
 
 USER_LIBC_OBJS := $(BUILD)/src/crt/crt0.o \
@@ -278,7 +282,7 @@ USER_CFLAGS := $(ZEDBSD_CFLAGS) -fno-builtin -ffunction-sections \
 	-fdata-sections -msoft-float -mno-80387 -mno-fp-ret-in-387 \
 	-mno-mmx -mno-sse -mno-sse2
 USER_STACK_LDFLAGS := -z stack-size=0x100000
-USER_ELF_CHECK := $(BUILD_TOOLS_DIR)/check-user-elf.py
+USER_ELF_CHECK := $(BUILD_TOOLS_DIR)/check-user-elf.noct
 $(BUILD)/src/crt/crt0.o: src/crt/crt0.S include/hal/arch.h \
 	include/hal/arch/i386.h
 	@mkdir -p $(dir $@)
@@ -298,7 +302,7 @@ $(BUILD)/POSIX-R1.ELF: $(USER_LIBC_OBJS) \
 		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
 		$(BUILD)/userland/base/tests/syscall-smoke.o \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-	$(PYTHON) $(USER_ELF_CHECK) $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 $(BUILD)/POSIX-R2.ELF: $(USER_LIBC_OBJS) \
 	$(BUILD)/userland/base/tests/posix-r2.o $(ZEDBSD_SOFTFLOAT_OBJECTS) \
@@ -307,7 +311,7 @@ $(BUILD)/POSIX-R2.ELF: $(USER_LIBC_OBJS) \
 		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
 		$(BUILD)/userland/base/tests/posix-r2.o \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-	$(PYTHON) $(USER_ELF_CHECK) $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 $(BUILD)/POSIX-R2-REMAINING.ELF: $(USER_LIBC_OBJS) \
 	$(BUILD)/userland/base/tests/posix-r2-remaining.o $(PCAT)/user.ld \
@@ -316,7 +320,7 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: $(USER_LIBC_OBJS) \
 		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
 		$(BUILD)/userland/base/tests/posix-r2-remaining.o \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
-	$(PYTHON) $(USER_ELF_CHECK) $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 USER_SYSCTL_OBJ := $(BUILD)/userland/base/sysctl/main.o
 $(USER_SYSCTL_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
@@ -328,7 +332,7 @@ $(BUILD)/bin/sysctl: $(USER_LIBC_OBJS) $(USER_SYSCTL_OBJ) \
 		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
 		$(USER_SYSCTL_OBJ) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
-	$(PYTHON) $(USER_ELF_CHECK) $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 USER_MOUNT_OBJ := $(BUILD)/userland/base/mount/main.o
 $(USER_MOUNT_OBJ): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
@@ -340,7 +344,7 @@ $(BUILD)/bin/mount: $(USER_LIBC_OBJS) $(USER_MOUNT_OBJ) \
 		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
 		$(USER_MOUNT_OBJ) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
-	$(PYTHON) $(USER_ELF_CHECK) $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 $(BUILD)/bin/umount: $(BUILD)/bin/mount
 	@mkdir -p $(dir $@)
 	cp -f $< $@
@@ -368,12 +372,12 @@ $(BUILD)/NOCT.ELF: $(USER_LIBC_OBJS) $(USER_NOCT_GLUE_OBJS) \
 		$(USER_NOCT_GLUE_OBJS) $(USER_NOCT_OBJECTS) \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
-	$(PYTHON) $(USER_ELF_CHECK) $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 $(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
 	@mkdir -p $(dir $@)
 	cp $< $@
-	$(PYTHON) $(USER_ELF_CHECK) $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 USER_SH_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),sh)
 USER_READLINE_OBJ := $(BUILD)/userland/base/libedit/readline.o
@@ -400,7 +404,7 @@ $(BUILD)/bin/sh: $(USER_LIBC_OBJS) $(USER_SH_OBJS) $(USER_READLINE_LIB) \
 		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
 		$(USER_SH_OBJS) $(USER_READLINE_LIB) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
-	$(PYTHON) $(USER_ELF_CHECK) $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 USER_NETTEST_OBJS := $(BUILD)/userland/base/nettest/main.o
 $(USER_NETTEST_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
@@ -413,7 +417,7 @@ $(BUILD)/bin/nettest: $(USER_LIBC_OBJS) $(USER_NETTEST_OBJS) \
 		$(USER_STACK_LDFLAGS) -T $(PCAT)/user.ld $(USER_LIBC_OBJS) \
 		$(USER_NETTEST_OBJS) $(ZEDBSD_SOFTFLOAT_OBJECTS) -o $@
 	@test -z "$$($(NOCT_NM) -u $@)" || { $(NOCT_NM) -u $@; exit 1; }
-	$(PYTHON) $(USER_ELF_CHECK) $@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
 USER_NET_COMMANDS := $(USERLAND_SELECTED_NETWORK_PROGRAMS)
 USER_NET_COMMAND_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_NET_COMMANDS))
@@ -438,7 +442,7 @@ $(BUILD)/bin/$(1): $(USER_LIBC_OBJS) $(USER_NET_COMMON_OBJS) \
 		$(USER_NET_COMMON_OBJS) $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),$(1)) \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
 	@test -z "$$$$($(NOCT_NM) -u $$@)" || { $(NOCT_NM) -u $$@; exit 1; }
-	$(PYTHON) $(USER_ELF_CHECK) $$@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $$@
 endef
 $(foreach command,$(USER_NET_COMMANDS),\
 	$(eval $(call PCAT_USER_NET_COMMAND,$(command))))
@@ -458,7 +462,7 @@ $(BUILD)/bin/$(1): $(USER_LIBC_OBJS) $(USER_BASIC_COMMON_OBJ) \
 		$(USER_BASIC_COMMON_OBJ) $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD),$(1)) \
 		$(ZEDBSD_SOFTFLOAT_OBJECTS) -o $$@
 	@test -z "$$$$($(NOCT_NM) -u $$@)" || { $(NOCT_NM) -u $$@; exit 1; }
-	$(PYTHON) $(USER_ELF_CHECK) $$@
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $$@
 endef
 $(foreach command,$(USER_BASIC_COMMANDS),\
 	$(eval $(call PCAT_USER_BASIC_COMMAND,$(command))))

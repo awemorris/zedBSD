@@ -51,7 +51,7 @@ backend for authentication.
 ## 2. Stable control path
 
 ```text
-/etc/rc.conf -> /sbin/net boot -> networkd
+/etc/net.conf -> /sbin/net boot -> networkd
                                       +-- direct interface/route/DNS operations
                                       +-- dhcpc child for DHCP
                                       +-- wpa child for WLAN authentication
@@ -69,13 +69,14 @@ and failure.
 | ID | Status | Deliverable | Dependencies | Acceptance gate |
 | --- | --- | --- | --- | --- |
 | NET-00 | Complete with follow-ups | `networkd`, `net`, `dhcpc`, rc.conf boot orchestration, and fd 3 readiness | Phase 20 | See Phase 20 evidence and handoff list |
+| NET-05 | Planned in WS011 | Interactive `net`, `/etc/net.conf`, persistence, and VLAN/bridge configuration model | WS011 | WS011 owns its Phase and acceptance records |
 | NET-01 | Planned | Hardware-network bring-up procedure and diagnostics | BR-00, supported wired/USB interface | Static and DHCP paths pass on the target setup |
 | NET-10 | Proposed | USB CDC Ethernet support if ECM/NCM is selected and the hardware role permits it | BR-07 CDC decision, USB support | Host interoperability, reconnect, DHCP/static, and transfer tests |
 | NET-20 | Planned | Versioned `networkd`-to-`wpa` child protocol and pluggable backend contract | Process/fd primitives | Host protocol tests cover success, rejection, timeout, crash, and cancellation |
 | NET-21 | Planned | `/etc/wpa/` plaintext database and safe management semantics | NET-20 | Root-only permissions, atomic update, parse/error tests, and no credential logging |
 | NET-22 | Planned | `/sbin/wpa` initial backend | WLAN userspace/control ABI, NET-20/21 | Scan selection, authenticate/associate, reconnect, and useful errors on hardware |
 | NET-23 | Planned | `net` WLAN commands through `networkd` and backend | NET-20–22 | End-to-end `net` operation reaches association and then DHCP/static configuration |
-| NET-24 | Deferred | Additional WPA backend implementations | Stable NET-20 contract | Backend can be swapped without changing `net` or rc.conf semantics |
+| NET-24 | Deferred | Additional WPA backend implementations | Stable NET-20 contract | Backend can be swapped without changing `net` or `net.conf` semantics |
 
 ## 4. WPA backend contract
 
@@ -95,7 +96,7 @@ The protocol must provide at least:
 - distinction between protocol output and logs (`stderr` or syslog).
 
 The backend executable/path is configurable internally so another
-implementation can replace it without changing `/sbin/net` or rc.conf.
+implementation can replace it without changing `/sbin/net` or `net.conf`.
 
 ## 5. `/etc/wpa/` initial database
 

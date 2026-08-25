@@ -1,0 +1,7 @@
+require zedbuild;
+
+func ufsBuild(backend, size, root, output) {
+    var command = zbShellQuote(backend) + " ufs " + size + " " +
+                  zbShellQuote(root) + " " + zbShellQuote(output);
+    if (System.shell(command) != 0) { zbFail("UFS1 backend failed"); }
+}

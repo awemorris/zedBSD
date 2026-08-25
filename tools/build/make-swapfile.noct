@@ -1,0 +1,46 @@
+require zedbuild;
+
+func swapChecksum(header) {
+    var value = 2166136261;
+    for (i in 0..Packed.size(header)) {
+        var byte = header[i];
+        if (i >= 28 && i < 32) { byte = 0; }
+        value = ((value ^ byte) * 16777619) & 4294967295;
+    }
+    return value;
+}
+
+func main(args) {
+    var output = "";
+    var sizeMiB = 64;
+    var i = 0;
+    while (i < Array.size(args)) {
+        if (args[i] == "--output" && i + 1 < Array.size(args)) {
+            output = args[i + 1]; i = i + 2;
+        } else if (args[i] == "--size-mib" && i + 1 < Array.size(args)) {
+            sizeMiB = zbParseNumber(args[i + 1]); i = i + 2;
+        } else { zbFail("invalid make-swapfile argument: " + args[i]); }
+    }
+    if (output == "") { zbFail("--output is required"); }
+    if (sizeMiB != 32 && sizeMiB != 64) { zbFail("swapfile size must be 32 or 64 MiB"); }
+    var size = sizeMiB * 1024 * 1024;
+    var header = Packed.uint8(64);
+    for (j in 0..8) { header[j] = String.charCodeAt("ZEDSWAP1", j); }
+    zbPut32LE(header, 8, 1);
+    zbPut32LE(header, 12, 64);
+    zbPut32LE(header, 16, 4096);
+    zbPut32LE(header, 20, size);
+    zbPut32LE(header, 24, size / 4096 - 1);
+    zbPut32LE(header, 28, swapChecksum(header));
+    zbEnsureParent(output);
+    var temporary = output + ".tmp";
+    var file = File.open(temporary, "wb");
+    File.writeAll(file, header, 0, 64);
+    File.close(file);
+    if (System.shell("truncate -s " + size + " " + zbShellQuote(temporary)) != 0) {
+        zbFail("cannot allocate swapfile");
+    }
+    if (System.shell("mv -f " + zbShellQuote(temporary) + " " + zbShellQuote(output)) != 0) {
+        zbFail("cannot install swapfile");
+    }
+}

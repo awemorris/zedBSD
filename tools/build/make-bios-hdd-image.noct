@@ -1,0 +1,21 @@
+require zedbuild;
+
+func main(args) {
+    var backend = "";
+    var forwarded = [];
+    var i = 0;
+    while (i < Array.size(args)) {
+        if (args[i] == "--backend" && i + 1 < Array.size(args)) {
+            backend = args[i + 1]; i = i + 2;
+        } else { Array.push(forwarded, args[i]); i = i + 1; }
+    }
+    if (backend == "") { zbFail("make-bios-hdd-image: --backend is required"); }
+    var command = [backend, "disk"];
+    for (i in 0..Array.size(forwarded)) { Array.push(command, forwarded[i]); }
+    var child = Process.spawn(command);
+    if (child < 0) { zbFail("cannot start disk-image backend"); }
+    while (Process.isAlive(child) == 1) { Process.read(child, 100); }
+    Process.read(child, 0);
+    var status = Process.wait(child); Process.close(child);
+    if (status != 0) { zbFail("disk-image backend failed"); }
+}

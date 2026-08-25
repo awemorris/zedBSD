@@ -1,0 +1,31 @@
+func main(args) {
+    if (Array.size(args) != 1) {
+        System.error("usage: toolchain-smoke.noct OUTPUT");
+    }
+
+    var path = args[0];
+    FileUtil.writeText(path, "noct-file-ok\n");
+    if (FileUtil.readText(path) != "noct-file-ok\n") {
+        System.error("Noct File API smoke failed.");
+    }
+
+    var child = Process.spawn(["/bin/sh", "-c", "printf noct-process-ok"]);
+    if (child < 0) {
+        System.error("Noct Process API spawn failed.");
+    }
+    var output = "";
+    while (Process.isAlive(child) == 1) {
+        output = output + Process.read(child, 100);
+    }
+    output = output + Process.read(child, 0);
+    var status = Process.wait(child);
+    Process.close(child);
+    if (status != 0 || output != "noct-process-ok") {
+        System.error("Noct Process API smoke failed: " + output);
+    }
+
+    if (System.shell("rm -f " + path) != 0) {
+        System.error("Noct System API smoke failed.");
+    }
+    print("WS010 Noct toolchain smoke: PASS");
+}

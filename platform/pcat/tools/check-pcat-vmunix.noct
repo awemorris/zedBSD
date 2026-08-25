@@ -1,0 +1,48 @@
+require zedbuild;
+
+func main(args) {
+    if (Array.size(args) != 1) { zbFail("usage: check-pcat-vmunix.noct VMUNIX"); }
+    var data = zbReadFile(args[0]);
+    if (Packed.size(data) < 52 || data[0] != 127 || data[1] != 69 ||
+        data[2] != 76 || data[3] != 70 || data[4] != 1 || data[5] != 1 ||
+        data[6] != 1) { zbFail("not a little-endian ELF32 image"); }
+    if (zbU16LE(data, 18) != 3 || zbU16LE(data, 40) != 52 || zbU16LE(data, 42) != 32) { zbFail("unexpected ELF/program-header size"); }
+    var entry = zbU32LE(data, 24);
+    var phoff = zbU32LE(data, 28);
+    var phnum = zbU16LE(data, 44);
+    if (phnum == 0 || phoff + phnum * 32 > 512) { zbFail("program-header table is not wholly in the first sector"); }
+    var loads = 0;
+    var executable = false;
+    for (i in 0..phnum) {
+        var at = phoff + i * 32;
+        if (zbU32LE(data, at) != 1) { continue; }
+        var offset = zbU32LE(data, at + 4);
+        var vaddr = zbU32LE(data, at + 8);
+        var paddr = zbU32LE(data, at + 12);
+        var filesz = zbU32LE(data, at + 16);
+        var memsz = zbU32LE(data, at + 20);
+        var flags = zbU32LE(data, at + 24);
+        if (filesz > memsz || offset > Packed.size(data) || filesz > Packed.size(data) - offset) { zbFail("PT_LOAD has invalid size"); }
+        if ((offset & 511) != 0) { zbFail("PT_LOAD is not sector aligned"); }
+        if (paddr < 1048576 || memsz > 134217728 - paddr) { zbFail("PT_LOAD is outside supported physical window"); }
+        if (vaddr - paddr != 2147483648) { zbFail("PT_LOAD does not use high-kernel mapping"); }
+        if ((offset + filesz + 511) / 512 > 65535) { zbFail("PT_LOAD exceeds raw-kernel area"); }
+        loads = loads + 1;
+        if ((flags & 1) != 0 && paddr <= entry && entry < paddr + filesz) { executable = true; }
+    }
+    if (loads == 0 || !executable) { zbFail("invalid load segments or entry"); }
+    var found = false;
+    var end = Packed.size(data); if (end > 8192) { end = 8192; }
+    var at = 0;
+    while (at + 12 <= end) {
+        if (zbU32LE(data, at) == 0x1badb002) {
+            var flags = zbU32LE(data, at + 4);
+            if (((0x1badb002 + flags + zbU32LE(data, at + 8)) & 4294967295) != 0) { zbFail("Multiboot header checksum is invalid"); }
+            if ((flags & 65536) == 0) { zbFail("Multiboot header lacks address fields"); }
+            found = true; break;
+        }
+        at = at + 4;
+    }
+    if (!found) { zbFail("Multiboot header is absent from first 8 KiB"); }
+    print("PC/AT vmunix contract: OK");
+}
