@@ -1,13 +1,14 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "userland/base/net/netutil.h"
-#include "userland/base/service/service-config.h"
+#include "userland/base/net/protocol.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <net/if.h>
+#include <net/route.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -16,206 +17,47 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define NETWORKD_SOCKET "/run/networkd.sock"
+#define CHILD_OUTPUT_MAX 384
 
-struct managed_interface {
-	char name[IFNAMSIZ];
-	char mode[16];
-	char address[64];
-	int online;
-};
-
-static struct managed_interface interfaces[16];
-static size_t interface_count;
 static volatile sig_atomic_t stopping;
-static volatile sig_atomic_t reloading;
 
 static void
 handle_signal(int signal_number)
 {
-	if (signal_number == SIGHUP)
-		reloading = 1;
-	else
-		stopping = 1;
+	(void)signal_number;
+	stopping = 1;
+}
+
+static void
+ignore_signal(int signal_number)
+{
+	(void)signal_number;
 }
 
 static int
-set_flags(int descriptor, const char *name, int up)
+write_all(int descriptor, const char *buffer, size_t length)
 {
-	struct ifreq request;
-	if (netutil_ifreq(&request, name) != 0 ||
-	    ioctl(descriptor, SIOCGIFFLAGS, &request) != 0)
-		return -1;
-	if (up)
-		request.ifr_flags |= IFF_UP;
-	else
-		request.ifr_flags &= ~IFF_UP;
-	return ioctl(descriptor, SIOCSIFFLAGS, &request);
-}
-
-static int
-set_address(int descriptor, const char *name, unsigned long operation,
-	    struct in_addr address)
-{
-	struct ifreq request;
-	struct sockaddr_in *inet;
-	if (netutil_ifreq(&request, name) != 0)
-		return -1;
-	inet = (struct sockaddr_in *)&request.ifr_addr;
-	inet->sin_family = AF_INET;
-	inet->sin_addr = address;
-	return ioctl(descriptor, operation, &request);
-}
-
-static int
-configure_static(int descriptor, struct managed_interface *interface)
-{
-	struct in_addr address, mask, broadcast;
-	unsigned prefix;
-	if (netutil_parse_cidr(interface->address, &address, &mask, &prefix) !=
-	    0)
-		return -1;
-	(void)prefix;
-	broadcast.s_addr = address.s_addr | ~mask.s_addr;
-	return set_flags(descriptor, interface->name, 1) != 0 ||
-		       set_address(descriptor, interface->name, SIOCSIFNETMASK,
-				   mask) != 0 ||
-		       set_address(descriptor, interface->name, SIOCSIFBRDADDR,
-				   broadcast) != 0 ||
-		       set_address(descriptor, interface->name, SIOCSIFADDR,
-				   address) != 0
-		   ? -1
-		   : 0;
-}
-
-static int
-configure_dhcp(const char *name)
-{
-	char *arguments[] = {"dhcpcd", (char *)name, NULL};
-	pid_t child = fork();
-	int status;
-	if (child == 0) {
-		execv("/sbin/dhcpcd", arguments);
-		_exit(127);
-	}
-	return child > 0 && waitpid(child, &status, 0) == child &&
-		       WIFEXITED(status) && WEXITSTATUS(status) == 0
-		   ? 0
-		   : -1;
-}
-
-static int
-load_configuration(void)
-{
-	char list[512], copy[512], *name;
-	interface_count = 0;
-	if (rcconf_get(ZEDBSD_RC_CONF, "network_interfaces", list,
-		       sizeof(list)) != 0)
-		return -1;
-	strcpy(copy, list);
-	for (name = strtok(copy, " \t,"); name != NULL;
-	     name = strtok(NULL, " \t,")) {
-		struct managed_interface *interface;
-		char key[96];
-		if (interface_count ==
-			sizeof(interfaces) / sizeof(interfaces[0]) ||
-		    strlen(name) >= IFNAMSIZ)
+	size_t offset = 0;
+	while (offset < length) {
+		ssize_t count =
+		    write(descriptor, buffer + offset, length - offset);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0)
 			return -1;
-		interface = &interfaces[interface_count++];
-		memset(interface, 0, sizeof(*interface));
-		strcpy(interface->name, name);
-		snprintf(key, sizeof(key), "if_%s_mode", name);
-		if (rcconf_get(ZEDBSD_RC_CONF, key, interface->mode,
-			       sizeof(interface->mode)) != 0)
-			strcpy(interface->mode, "static");
-		snprintf(key, sizeof(key), "if_%s_address", name);
-		(void)rcconf_get(ZEDBSD_RC_CONF, key, interface->address,
-				 sizeof(interface->address));
+		offset += (size_t)count;
 	}
 	return 0;
 }
 
 static void
-configure_all(int descriptor)
+notify_init(const char *record)
 {
-	size_t index;
-	for (index = 0; index < interface_count; index++) {
-		struct managed_interface *interface = &interfaces[index];
-		int result = strcmp(interface->mode, "dhcp") == 0
-				 ? configure_dhcp(interface->name)
-				 : configure_static(descriptor, interface);
-		interface->online = result == 0;
-		printf("networkd: %s %s\n", interface->name,
-		       result == 0 ? "online" : "failed");
-	}
-}
-
-static struct managed_interface *
-find_interface(const char *name)
-{
-	size_t index;
-	for (index = 0; index < interface_count; index++)
-		if (strcmp(interfaces[index].name, name) == 0)
-			return &interfaces[index];
-	return NULL;
-}
-
-static void
-handle_request(int client, int control)
-{
-	char request[160], response[256], *command, *name;
-	ssize_t length = read(client, request, sizeof(request) - 1);
-	struct managed_interface *interface;
-	size_t index;
-	if (length <= 0)
+	const char *value = getenv("ZEDBSD_NOTIFY_FD");
+	if (value == NULL || strcmp(value, "3") != 0)
 		return;
-	request[length] = '\0';
-	command = strtok(request, " \t\r\n");
-	name = strtok(NULL, " \t\r\n");
-	if (command != NULL && strcmp(command, "reload") == 0) {
-		reloading = 1;
-		(void)write(client, "OK reload scheduled\n", 20);
-		return;
-	}
-	if (command != NULL && strcmp(command, "show") == 0 && name == NULL) {
-		for (index = 0; index < interface_count; index++) {
-			snprintf(response, sizeof(response), "%s\t%s\t%s\n",
-				 interfaces[index].name, interfaces[index].mode,
-				 interfaces[index].online ? "online"
-							  : "offline");
-			(void)write(client, response, strlen(response));
-		}
-		return;
-	}
-	interface = name != NULL ? find_interface(name) : NULL;
-	if (interface == NULL) {
-		(void)write(client, "ERR unknown interface\n", 22);
-		return;
-	}
-	if (strcmp(command, "show") == 0) {
-		snprintf(response, sizeof(response), "OK %s %s %s\n",
-			 interface->name, interface->mode,
-			 interface->online ? "online" : "offline");
-		(void)write(client, response, strlen(response));
-	} else if (strcmp(command, "up") == 0) {
-		interface->online = set_flags(control, interface->name, 1) == 0;
-		(void)write(client,
-			    interface->online ? "OK up\n" : "ERR up failed\n",
-			    interface->online ? 6 : 14);
-	} else if (strcmp(command, "down") == 0) {
-		interface->online = set_flags(control, interface->name, 0) != 0;
-		(void)write(client,
-			    !interface->online ? "OK down\n"
-					       : "ERR down failed\n",
-			    !interface->online ? 8 : 16);
-	} else if (strcmp(command, "dhcp") == 0) {
-		interface->online = configure_dhcp(interface->name) == 0;
-		(void)write(client,
-			    interface->online ? "OK dhcp\n"
-					      : "ERR dhcp failed\n",
-			    interface->online ? 8 : 16);
-	} else
-		(void)write(client, "ERR unknown command\n", 20);
+	(void)write_all(3, record, strlen(record));
+	(void)close(3);
 }
 
 static int
@@ -233,47 +75,428 @@ open_listener(void)
 	if (bind(descriptor, (struct sockaddr *)&address, sizeof(address)) !=
 		0 ||
 	    chmod(NETWORKD_SOCKET, 0600) != 0 || listen(descriptor, 8) != 0) {
+		int saved = errno;
 		close(descriptor);
+		errno = saved;
 		return -1;
 	}
-	(void)fcntl(descriptor, F_SETFL, O_NONBLOCK);
 	return descriptor;
+}
+
+static int
+read_request(int descriptor, char buffer[NETWORKD_REQUEST_MAX])
+{
+	size_t used = 0;
+	while (used + 1U < NETWORKD_REQUEST_MAX) {
+		ssize_t count = read(descriptor, buffer + used,
+				     NETWORKD_REQUEST_MAX - used - 1U);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0)
+			return -1;
+		if (count == 0)
+			break;
+		used += (size_t)count;
+		if (memchr(buffer, '\n', used) != NULL)
+			break;
+	}
+	if (used == 0 || used + 1U >= NETWORKD_REQUEST_MAX) {
+		errno = used == 0 ? EPIPE : EOVERFLOW;
+		return -1;
+	}
+	buffer[used] = '\0';
+	{
+		char *newline = strchr(buffer, '\n');
+		if (newline == NULL || newline[1] != '\0' ||
+		    (newline > buffer && newline[-1] == '\r')) {
+			errno = EINVAL;
+			return -1;
+		}
+		*newline = '\0';
+	}
+	return 0;
+}
+
+static void
+clean_diagnostic(char *text)
+{
+	size_t index, length = strlen(text);
+	while (length != 0 &&
+	       (text[length - 1U] == '\n' || text[length - 1U] == '\r'))
+		text[--length] = '\0';
+	for (index = 0; index < length; index++)
+		if ((unsigned char)text[index] < 32U || text[index] == 127)
+			text[index] = ' ';
+}
+
+static int
+run_command(char *const arguments[], unsigned timeout_seconds,
+	    char diagnostic[CHILD_OUTPUT_MAX])
+{
+	char temporary[96];
+	int output, status = 0, child_done = 0;
+	pid_t child;
+	unsigned ticks = 0, tick_limit = timeout_seconds * 100U;
+
+	diagnostic[0] = '\0';
+	if (snprintf(temporary, sizeof(temporary), "/run/networkd-child.%ld",
+		     (long)getpid()) >= (int)sizeof(temporary)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	output = open(temporary, O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+	if (output < 0)
+		return -1;
+	child = fork();
+	if (child == 0) {
+		if (dup2(output, STDOUT_FILENO) < 0 ||
+		    dup2(output, STDERR_FILENO) < 0)
+			_exit(126);
+		close(output);
+		execv(arguments[0], arguments);
+		_exit(127);
+	}
+	if (child < 0) {
+		close(output);
+		unlink(temporary);
+		return -1;
+	}
+	while (!child_done) {
+		pid_t result = waitpid(child, &status, WNOHANG);
+		if (result == child)
+			child_done = 1;
+		else if (result < 0 && errno != EINTR)
+			child_done = 1;
+		if (child_done)
+			break;
+		if (ticks++ >= tick_limit) {
+			(void)kill(child, SIGKILL);
+			(void)waitpid(child, &status, 0);
+			errno = ETIMEDOUT;
+			break;
+		}
+		usleep(10000);
+	}
+	if (lseek(output, 0, SEEK_SET) >= 0) {
+		ssize_t count = read(output, diagnostic, CHILD_OUTPUT_MAX - 1U);
+		if (count > 0)
+			diagnostic[count] = '\0';
+	}
+	close(output);
+	unlink(temporary);
+	clean_diagnostic(diagnostic);
+	if (ticks > tick_limit)
+		return -1;
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		errno = WIFEXITED(status) && WEXITSTATUS(status) == 127 ? ENOENT
+									: EIO;
+		return -1;
+	}
+	return 0;
+}
+
+static int
+interface_exists(const char *name)
+{
+	uint32_t index;
+	int descriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	int result =
+	    descriptor >= 0 ? netutil_ifindex(descriptor, name, &index) : -1;
+	if (descriptor >= 0)
+		close(descriptor);
+	return result;
+}
+
+static int
+append_interface_status(int descriptor, const char *name, char *output,
+			const size_t capacity, size_t *used)
+{
+	struct ifreq flags, address;
+	int count, has_address;
+	if (netutil_ifreq(&flags, name) != 0 ||
+	    ioctl(descriptor, SIOCGIFFLAGS, &flags) != 0)
+		return -1;
+	has_address =
+	    netutil_ifreq(&address, name) == 0 &&
+	    ioctl(descriptor, SIOCGIFADDR, &address) == 0 &&
+	    ((struct sockaddr_in *)&address.ifr_addr)->sin_addr.s_addr != 0;
+	count =
+	    snprintf(output + *used, capacity - *used, "%s %s %s\n", name,
+		     has_address ? "static" : "unconfigured",
+		     (flags.ifr_flags & IFF_UP) != 0 ? "online" : "offline");
+	if (count < 0 || (size_t)count >= capacity - *used) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	*used += (size_t)count;
+	return 0;
+}
+
+static int
+show_interfaces(const char *name, char *output, size_t capacity)
+{
+	struct ifreq *items = NULL;
+	unsigned count = 0, index;
+	size_t used = 0;
+	int descriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP), result = 0;
+	if (descriptor < 0)
+		return -1;
+	if (name != NULL)
+		result = append_interface_status(descriptor, name, output,
+						 capacity, &used);
+	else if (netutil_interfaces(descriptor, &items, &count) != 0)
+		result = -1;
+	else
+		for (index = 0; index < count; index++)
+			if (append_interface_status(
+				descriptor, items[index].ifr_name, output,
+				capacity, &used) != 0) {
+				result = -1;
+				break;
+			}
+	free(items);
+	close(descriptor);
+	return result;
+}
+
+static int
+default_route_exists(void)
+{
+	struct rtentry route;
+	int descriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (descriptor < 0)
+		return -1;
+	for (route.rt_index = 0; ioctl(descriptor, SIOCGRTENTRY, &route) == 0;
+	     route.rt_index++) {
+		const struct sockaddr_in *destination =
+		    (const struct sockaddr_in *)&route.rt_dst;
+		const struct sockaddr_in *mask =
+		    (const struct sockaddr_in *)&route.rt_genmask;
+		if (destination->sin_addr.s_addr == 0 &&
+		    mask->sin_addr.s_addr == 0) {
+			close(descriptor);
+			return 1;
+		}
+	}
+	close(descriptor);
+	return errno == ENOENT ? 0 : -1;
+}
+
+static int
+write_resolver(char *const addresses[], int count)
+{
+	char temporary[128], line[64];
+	int descriptor, index, prior;
+	if (snprintf(temporary, sizeof(temporary), "/etc/resolv.conf.tmp.%ld",
+		     (long)getpid()) >= (int)sizeof(temporary)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0644);
+	if (descriptor < 0)
+		return -1;
+	if (write_all(descriptor, "# Generated by networkd\n", 24) != 0)
+		goto fail;
+	for (index = 0; index < count; index++) {
+		struct in_addr parsed;
+		if (netutil_parse_ipv4(addresses[index], &parsed) != 0)
+			goto fail;
+		for (prior = 0; prior < index; prior++)
+			if (strcmp(addresses[prior], addresses[index]) == 0)
+				break;
+		if (prior != index)
+			continue;
+		{
+			int length =
+			    snprintf(line, sizeof(line), "nameserver %s\n",
+				     addresses[index]);
+			if (length < 0 || (size_t)length >= sizeof(line) ||
+			    write_all(descriptor, line, (size_t)length) != 0)
+				goto fail;
+		}
+	}
+	if (fsync(descriptor) != 0 || close(descriptor) != 0) {
+		descriptor = -1;
+		goto fail;
+	}
+	descriptor = -1;
+	if (rename(temporary, "/etc/resolv.conf") != 0)
+		goto fail;
+	return 0;
+
+fail:
+	if (descriptor >= 0)
+		close(descriptor);
+	unlink(temporary);
+	return -1;
+}
+
+static int
+parse_seconds(const char *text, unsigned *result)
+{
+	char *end;
+	unsigned long value;
+	if (text == NULL || *text == '\0')
+		return -1;
+	value = strtoul(text, &end, 10);
+	if (*end != '\0' || value < 1U || value > 3600U)
+		return -1;
+	*result = (unsigned)value;
+	return 0;
+}
+
+static void
+send_error(int client, int error, const char *reason)
+{
+	char response[NETWORKD_RESPONSE_MAX];
+	if (reason == NULL || *reason == '\0')
+		reason = strerror(error);
+	(void)snprintf(response, sizeof(response), "%s ERR %d %s\n",
+		       NETWORKD_PROTOCOL_VERSION, error, reason);
+	(void)write_all(client, response, strlen(response));
+}
+
+static void
+handle_request(int client)
+{
+	char request[NETWORKD_REQUEST_MAX], response[NETWORKD_RESPONSE_MAX];
+	char diagnostic[CHILD_OUTPUT_MAX], *arguments[16], *token;
+	char *items[16];
+	int count = 0, result = -1, error = EINVAL;
+	unsigned timeout = 10;
+
+	if (read_request(client, request) != 0) {
+		send_error(client, errno, "malformed request");
+		return;
+	}
+	for (token = strtok(request, " \t"); token != NULL;
+	     token = strtok(NULL, " \t")) {
+		if (count == (int)(sizeof(items) / sizeof(items[0]))) {
+			send_error(client, E2BIG, "too many operands");
+			return;
+		}
+		items[count++] = token;
+	}
+	if (count < 2 || strcmp(items[0], NETWORKD_PROTOCOL_VERSION) != 0) {
+		send_error(client, EINVAL, "unsupported protocol");
+		return;
+	}
+	diagnostic[0] = '\0';
+	if (strcmp(items[1], "SHOW") == 0 && (count == 2 || count == 3)) {
+		strcpy(response, NETWORKD_PROTOCOL_VERSION " OK ");
+		if (show_interfaces(count == 3 ? items[2] : NULL,
+				    response + strlen(response),
+				    sizeof(response) - strlen(response)) == 0) {
+			(void)write_all(client, response, strlen(response));
+			return;
+		}
+		error = errno;
+	} else if ((strcmp(items[1], "UP") == 0 ||
+		    strcmp(items[1], "DOWN") == 0) &&
+		   count == 3) {
+		arguments[0] = "/sbin/ifconfig";
+		arguments[1] = items[2];
+		arguments[2] = strcmp(items[1], "UP") == 0 ? "up" : "down";
+		arguments[3] = NULL;
+		if (interface_exists(items[2]) == 0)
+			result = run_command(arguments, 10, diagnostic);
+		error = errno;
+	} else if (strcmp(items[1], "STATIC") == 0 && count == 7 &&
+		   strcmp(items[3], "ipv4") == 0 &&
+		   strcmp(items[5], "netmask") == 0) {
+		struct in_addr address, mask;
+		unsigned prefix;
+		if (interface_exists(items[2]) == 0 &&
+		    netutil_parse_ipv4(items[4], &address) == 0 &&
+		    netutil_parse_ipv4(items[6], &mask) == 0 &&
+		    netutil_mask_prefix(mask, &prefix) == 0) {
+			arguments[0] = "/sbin/ifconfig";
+			arguments[1] = items[2];
+			arguments[2] = "inet";
+			arguments[3] = items[4];
+			arguments[4] = "netmask";
+			arguments[5] = items[6];
+			arguments[6] = NULL;
+			result = run_command(arguments, 10, diagnostic);
+		}
+		error = errno;
+	} else if (strcmp(items[1], "DHCP") == 0 && count == 4 &&
+		   parse_seconds(items[3], &timeout) == 0) {
+		char seconds[16];
+		(void)snprintf(seconds, sizeof(seconds), "%u", timeout);
+		arguments[0] = "/sbin/dhcpc";
+		arguments[1] = "-t";
+		arguments[2] = seconds;
+		arguments[3] = items[2];
+		arguments[4] = NULL;
+		if (interface_exists(items[2]) == 0)
+			result =
+			    run_command(arguments, timeout + 5U, diagnostic);
+		error = errno;
+	} else if (strcmp(items[1], "DEFAULTROUTE") == 0 && count == 3) {
+		struct in_addr gateway;
+		int present;
+		if (netutil_parse_ipv4(items[2], &gateway) == 0 &&
+		    (present = default_route_exists()) >= 0) {
+			if (present)
+				result = 0;
+			else {
+				arguments[0] = "/sbin/route";
+				arguments[1] = "add";
+				arguments[2] = "default";
+				arguments[3] = items[2];
+				arguments[4] = NULL;
+				result = run_command(arguments, 10, diagnostic);
+			}
+		}
+		error = errno;
+	} else if (strcmp(items[1], "DNS") == 0 && count >= 3) {
+		result = write_resolver(&items[2], count - 2);
+		error = errno;
+	} else if (strcmp(items[1], "RELOAD") == 0 && count == 2) {
+		result = 0;
+	} else {
+		send_error(client, EINVAL, "invalid operation or operands");
+		return;
+	}
+	if (result == 0) {
+		(void)write_all(client, NETWORKD_PROTOCOL_VERSION " OK\n", 6);
+		return;
+	}
+	send_error(client, error != 0 ? error : EIO, diagnostic);
 }
 
 int
 main(void)
 {
-	int listener, control = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	(void)signal(SIGHUP, handle_signal);
+	int listener;
+	(void)signal(SIGHUP, ignore_signal);
 	(void)signal(SIGTERM, handle_signal);
 	(void)signal(SIGINT, handle_signal);
-	if (control < 0 || load_configuration() != 0) {
-		fprintf(stderr, "networkd: configuration failed: %s\n",
-			strerror(errno));
+	listener = open_listener();
+	if (listener < 0) {
+		char record[256];
+		int saved = errno;
+		(void)snprintf(record, sizeof(record), "FAIL %d %s\n", saved,
+			       strerror(saved));
+		notify_init(record);
+		fprintf(stderr, "networkd: control socket: %s\n",
+			strerror(saved));
 		return 1;
 	}
-	configure_all(control);
-	listener = open_listener();
-	if (listener < 0)
-		return 1;
+	notify_init("READY\n");
 	while (!stopping) {
-		if (reloading) {
-			reloading = 0;
-			if (load_configuration() == 0)
-				configure_all(control);
+		int client = accept4(listener, NULL, NULL, SOCK_CLOEXEC);
+		if (client >= 0) {
+			handle_request(client);
+			close(client);
+			continue;
 		}
-		{
-			int client = accept(listener, NULL, NULL);
-			if (client >= 0) {
-				handle_request(client, control);
-				close(client);
-				continue;
-			}
-		}
+		if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+			break;
 		sleep(1);
 	}
 	close(listener);
-	close(control);
 	unlink(NETWORKD_SOCKET);
-	return 0;
+	return stopping ? 0 : 1;
 }

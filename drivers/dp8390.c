@@ -217,21 +217,30 @@ chip_start(struct dp8390 *dp)
 	wr(dp, DP_TCR, 0);
 	wr(dp, DP_RCR, DP_RCR_AB);
 	wr(dp, DP_ISR, 0xffU);
-	wr(dp, DP_IMR, DP_IMR_RUN);
 	dp->opened = 1;
 	dp->tx_busy = 0;
 	dp->device->flags |= NET_DEVICE_RUNNING;
+	wr(dp, DP_IMR, DP_IMR_RUN);
 	return 0;
 }
 
 static int dp_open(struct net_device *device)
 {
-	return chip_start(device->driver_data);
+	struct dp8390 *dp = device->driver_data;
+	unsigned long irq = spin_lock_irqsave(&dp->lock);
+	int error = chip_start(dp);
+
+	spin_unlock_irqrestore(&dp->lock, irq);
+	return error;
 }
 
 static void dp_close(struct net_device *device)
 {
-	chip_stop(device->driver_data);
+	struct dp8390 *dp = device->driver_data;
+	unsigned long irq = spin_lock_irqsave(&dp->lock);
+
+	chip_stop(dp);
+	spin_unlock_irqrestore(&dp->lock, irq);
 }
 
 static int
@@ -272,12 +281,16 @@ static int
 dp_transmit(struct net_device *device, struct packet_buf *packet)
 {
 	struct dp8390 *dp = device->driver_data;
+	unsigned long irq;
+	int error = 0;
 
 	if (packet == NULL)
 		return EINVAL;
+	irq = spin_lock_irqsave(&dp->lock);
 	if (!dp->opened) {
 		packet_buf_free(packet);
-		return ENETDOWN;
+		error = ENETDOWN;
+		goto out;
 	}
 	if (dp->tx_busy && (rd(dp, DP_ISR) & (DP_ISR_PTX | DP_ISR_TXE)) != 0) {
 		wr(dp, DP_ISR, DP_ISR_PTX | DP_ISR_TXE);
@@ -289,14 +302,19 @@ dp_transmit(struct net_device *device, struct packet_buf *packet)
 			(void)dp_start_transmit(dp, pending);
 		}
 	}
-	if (!dp->tx_busy)
-		return dp_start_transmit(dp, packet);
+	if (!dp->tx_busy) {
+		error = dp_start_transmit(dp, packet);
+		goto out;
+	}
 	if (dp->tx_pending != NULL) {
 		packet_buf_free(packet);
-		return ENOBUFS;
+		error = ENOBUFS;
+		goto out;
 	}
 	dp->tx_pending = packet;
-	return 0;
+out:
+	spin_unlock_irqrestore(&dp->lock, irq);
+	return error;
 }
 
 static uint8_t
@@ -370,11 +388,15 @@ static unsigned
 dp_poll_receive(struct net_device *device, unsigned budget)
 {
 	struct dp8390 *dp = device->driver_data;
+	unsigned long irq = spin_lock_irqsave(&dp->lock);
 	unsigned received = 0;
+	int reschedule;
 	uint8_t current;
 
-	if (!dp->opened)
+	if (!dp->opened) {
+		spin_unlock_irqrestore(&dp->lock, irq);
 		return 0;
+	}
 	current = current_page(dp);
 	while (received < budget && dp->next_packet != current) {
 		struct packet_buf *packet = NULL;
@@ -387,14 +409,21 @@ dp_poll_receive(struct net_device *device, unsigned budget)
 				(void)chip_start(dp);
 				break;
 			}
-		} else {
-			net_device_receive(device, packet);
+		} else
 			received++;
-		}
 		advance_ring(dp, next);
 		current = current_page(dp);
+		/* Protocol input can eventually transmit through this device. */
+		spin_unlock_irqrestore(&dp->lock, irq);
+		if (packet != NULL)
+			net_device_receive(device, packet);
+		irq = spin_lock_irqsave(&dp->lock);
+		if (!dp->opened)
+			break;
 	}
-	if (dp->next_packet != current)
+	reschedule = dp->opened && dp->next_packet != current;
+	spin_unlock_irqrestore(&dp->lock, irq);
+	if (reschedule)
 		net_device_schedule_poll(device);
 	return received;
 }
@@ -416,6 +445,7 @@ dp8390_attach(struct dp8390 *dp, struct net_device *device)
 	    dp->rx_start_page >= dp->stop_page)
 		return EINVAL;
 	dp->device = device;
+	spin_init(&dp->lock, LOCK_RANK_DEVICE, "dp8390");
 	device->driver_data = dp;
 	device->ops = &dp_ops;
 	return 0;
@@ -424,13 +454,18 @@ dp8390_attach(struct dp8390 *dp, struct net_device *device)
 void
 dp8390_interrupt(struct dp8390 *dp)
 {
+	unsigned long irq;
+	int schedule_poll = 0;
 	uint8_t status;
 
-	if (dp == NULL || !dp->opened)
+	if (dp == NULL)
 		return;
+	irq = spin_lock_irqsave(&dp->lock);
+	if (!dp->opened)
+		goto out;
 	status = rd(dp, DP_ISR);
 	if (status == 0 || status == 0xffU)
-		return;
+		goto out;
 	wr(dp, DP_ISR, status);
 	if ((status & (DP_ISR_PTX | DP_ISR_TXE)) != 0)
 		dp->tx_busy = 0;
@@ -442,10 +477,14 @@ dp8390_interrupt(struct dp8390 *dp)
 			dp->device->tx_errors++;
 	}
 	if ((status & (DP_ISR_PRX | DP_ISR_RXE | DP_ISR_OVW)) != 0)
-		net_device_schedule_poll(dp->device);
+		schedule_poll = 1;
 	if ((status & DP_ISR_CNT) != 0) {
 		(void)rd(dp, 0x0dU);
 		(void)rd(dp, 0x0eU);
 		(void)rd(dp, 0x0fU);
 	}
+out:
+	spin_unlock_irqrestore(&dp->lock, irq);
+	if (schedule_poll)
+		net_device_schedule_poll(dp->device);
 }

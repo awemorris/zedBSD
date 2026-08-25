@@ -1281,6 +1281,11 @@ builtin_test(int argc, char **argv)
 	}
 	if (argc == 3) {
 		int result;
+		if (!strcmp(argv[0], "!")) {
+			char *nested[] = {"test", argv[1], argv[2]};
+
+			return !builtin_test(3, nested);
+		}
 		if (!strcmp(argv[1], "="))
 			return strcmp(argv[0], argv[2]) == 0;
 		if (!strcmp(argv[1], "!="))

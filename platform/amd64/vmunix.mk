@@ -955,6 +955,44 @@ phase19-qemu-test: $(BUILD)/phase19-qemu.img tests/phase19-qemu-test.py
 	$(PYTHON) tests/phase19-qemu-test.py \
 		--qemu qemu-system-x86_64 --image $(BUILD)/phase19-qemu.img
 
+AMD64_PHASE20_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-phase20-test.ufs
+AMD64_PHASE20_TEST_FILES := $(subst \
+	--file /etc/rc.conf=userland/base/etc/rc.conf,\
+	--file /etc/rc.conf=tests/phase20-rc.conf,$(AMD64_ARCH_FILES))
+$(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_PHASE20_TEST_UFS),amd64,\
+	$(AMD64_ARCH_INPUTS) tests/phase20-rc.conf tests/phase20-service \
+	tests/phase20-smoke.sh,\
+	$(AMD64_PHASE20_TEST_FILES) \
+	--file /etc/service.d/phase20_smoke=tests/phase20-service \
+	--file /etc/phase20-smoke.sh=tests/phase20-smoke.sh))
+
+$(BUILD)/phase20-qemu.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
+	$(AMD64_PHASE20_TEST_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.py \
+	platform/amd64/tools/check-amd64-gpt-image.py
+	$(PYTHON) tools/build/make-bios-hdd-image.py --force --machine pcat --gpt \
+		--checker platform/amd64/tools/check-amd64-gpt-image.py \
+		--stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--arch-profile amd64 --arch-image $(AMD64_PHASE20_TEST_UFS) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
+
+.PHONY: phase20-qemu-test phase20-qemu-test-inner
+phase20-qemu-test:
+	$(MAKE) BUILD=build/amd64-phase20 CONFIG_DRIVER_NE2000=y \
+		phase20-qemu-test-inner
+
+phase20-qemu-test-inner: $(BUILD)/phase20-qemu.img \
+	tests/phase20-qemu-test.py
+	$(PYTHON) tests/phase20-qemu-test.py \
+		--qemu qemu-system-x86_64 --image $(BUILD)/phase20-qemu.img
+
 AMD64_POSIX_PHASE85_CURSES_SOURCES := tests/posix-phase85-curses.c \
 	userland/base/curses/curses.c userland/base/common/terminfo.c
 AMD64_POSIX_PHASE85_CURSES_OBJS := $(patsubst %.c,\

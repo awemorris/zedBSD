@@ -42,6 +42,7 @@ state across components.
 | [`docs/posix2004.md`](posix2004.md) | historical execution plan and phase acceptance policy |
 | [`docs/system-services-roadmap.md`](system-services-roadmap.md) | active post-Phase-10 architecture and Phase 11--19 roadmap |
 | [`docs/phase11-19-execution-plan.md`](phase11-19-execution-plan.md) | active detailed scope, gates, evidence, and hand-off rules for Phases 11--19 |
+| [`docs/phase20-net-service.md`](phase20-net-service.md) | planned synchronous net service, FD 3 daemon readiness, lightweight networkd command orchestration, and the dhcpcd-to-dhcpc rename |
 | Open Group Issue 8 pages | normative behavior to be reviewed; repository documents and tests do not replace the standard |
 
 When these artifacts disagree, do not choose the more optimistic status.
@@ -122,6 +123,7 @@ providers, services, or cross-component semantics remain pending.
 | 17 | partial | bounded local `ntpdate` client exists and is boot-optional; controlled-server QEMU success/failure evidence remains open |
 | 18 | partial | zedBSD power/administration behavior and `/etc/zinit.rc` were removed and `sh -c` works; the required POSIX grammar and semantic inventory is substantially incomplete |
 | 19 | partial integration success | bounded amd64 QEMU service smoke passes through orderly poweroff initiation; the explicit hand-offs in Section 11 prevent a full integration claim |
+| 20 | implementation milestone complete | focused host tests, `make -j16`, and four-CPU amd64 QEMU prove FD 3 readiness, synchronous `/sbin/net boot`, a real NE2000 DHCP lease through one-shot `dhcpc`, route/DNS installation, restart, direct-ifconfig recovery, and shutdown |
 
 The Phase 0--10 series is closed as completed on 2026-08-24.  Here,
 "completed" means that each phase's defined implementation, audit, or
@@ -133,6 +135,13 @@ logging, console sessions, networking, scheduled work, optional initial time,
 POSIX shell remediation, and integrated QEMU acceptance.  Any incomplete
 standards behavior discovered by those phases remains governed by this
 master's conservative hand-off policy.
+
+Phase 20 was selected from the Phase 15/19 networking and service-readiness
+hand-offs and completed its implementation milestone on 2026-08-25.  All
+focused host/build/QEMU gates in
+[`docs/phase20-net-service.md`](phase20-net-service.md) pass.  This narrows the
+networking hand-offs but does not claim DHCP renewal, Wi-Fi, IPv6, exhaustive
+startup-failure injection, or POSIX conformance.
 
 ## 5. Kernel subsystem tracker
 
@@ -157,7 +166,7 @@ may be implemented while its consuming utility remains non-conforming.
 | KERN-RSRC-01 | priorities | reviewed | `nice`, `renice` | declared current scope has reviewed utility evidence; keep regression and permission/range tests |
 | KERN-RSRC-02 | resource limits | reviewed | `ulimit`, shell | declared current scope has reviewed utility evidence; expand when new limit classes are exposed |
 | KERN-BOOT-01 | init/service lifecycle | implemented-unreviewed | `/sbin/init`, service providers | native PID 1 boots and initiates ordered shutdown in QEMU; complete crash-loop, required-failure, stop-timeout, cycle, credential, and recovery evidence |
-| KERN-NET-01 | loopback and interface control | implemented-unreviewed | `networkd`, `net`, socket users | kernel `lo0` and static address/up/down work in QEMU; route effects, packet-path concurrency, counters, aliases, IPv6, and full ioctl review remain |
+| KERN-NET-01 | loopback and interface control | implemented-unreviewed | `networkd`, `net`, socket users | four-CPU QEMU proves NE2000 receive/transmit, a real DHCP lease, default route, DNS, static `lo0`, up/down, and dp8390 SMP serialization; counters, aliases, IPv6, broader NICs, stress/race coverage, and full ioctl review remain |
 | KERN-POLL-01 | UNIX listener readiness | partial | `init`, `networkd` | listener `poll()` did not wake reliably after a queued AF_UNIX stream connection in Phase 19; daemons use a bounded one-second nonblocking accept loop pending a focused kernel repair |
 
 ## 6. System call and kernel-interface tracker
@@ -210,9 +219,10 @@ dependency even when they are not POSIX public APIs.
 | SVC-MAIL-01 | `mailx` | deferred-provider | explicit failure command | required mail provider and Send Mode; Receive Mode for enabled XSI/UP environment |
 | SVC-PRINT-01 | `lp` | reviewed | tested no-destination failure in the declared no-device profile | preserve provider replacement rules if CUPS is selected |
 | SVC-TALK-01 | `talk` | disabled-profile | installed failure command | local rendezvous provider and service only if UP/XSI profile is enabled |
-| SVC-INIT-01 | PID 1 and service manager | implemented-unreviewed | native `/sbin/init`, `/sbin/service`, `/etc/rc.conf`, and `/etc/service.d` | prove service restart after scheduled work, crash loops, dependency cycles, required/optional failures, malformed reload, stop timeout, persistence across reboot, and all shutdown actions |
+| SVC-INIT-01 | PID 1 and service manager | implemented-unreviewed | native `/sbin/init`, `/sbin/service`, `/etc/rc.conf`, and `/etc/service.d`; Phase 20 adds explicit `after`/`requires`, startup states, and FD 3 readiness, with networkd restart and orderly shutdown passing QEMU | prove crash loops, cycles, required/optional failures, malformed reload, stop timeout, persistence, scheduled-work restart, and the remaining shutdown actions |
+| SVC-NOTIFY-01 | daemon startup readiness | implemented-unreviewed | private FD 3 READY/FAIL protocol, bounded timeout/parser, descriptor hygiene, terminal startup states, dependency propagation, and service status are implemented; QEMU proves networkd READY before `net boot` | add runtime fault injection for fragmented/malformed/duplicate/oversized records, FAIL, premature exit, timeout, and every descriptor-leak/restart edge |
 | SVC-GETTY-01 | getty/login session | partial | production QEMU accepts the explicitly passwordless root account and starts `/bin/sh` in `/root` without daemon churn | prove utmpx transitions, logout, hangup, getty respawn, locked-account rejection, and hashed-password authentication |
-| SVC-NET-01 | networkd/net | partial | static `lo0` and up/down pass QEMU via `/run/networkd.sock` | move DHCP lease ownership into networkd, add routes/DNS/lease renewal/link events, Wi-Fi, unprivileged read policy, and failure/recovery tests |
+| SVC-NET-01 | networkd/net | partial | synchronous `net boot` and lightweight networkd orchestrate local ifconfig/route/dhcpc; four-CPU QEMU proves NE2000 DHCP address/default route/DNS, restart, up/down, and direct-ifconfig recovery | DHCP renewal, Wi-Fi, IPv6, unprivileged reads, broad link events, resolver failure policy, and remaining failure/recovery evidence stay later work |
 | SVC-TIME-01 | ntpdate | partial | local bounded NTPv4 client, disabled by default | controlled QEMU server, malformed/spoofed/unreachable cases, DNS timeout, clock privilege/error evidence; periodic `ntpd` remains a later project |
 
 ## 9. Cross-cutting unmet work
@@ -277,17 +287,19 @@ The following findings are deliberately not promoted to success:
 | P16-AT-BATCH | `at`/`batch` | accepted time syntax is only `now`, `now + N minutes/hours`, and `HH:MM`; batch does not wait for a load threshold | Retain honest subset behavior and durable jobs; implement the POSIX operand grammar, queue policy, environment, cancellation races, and output delivery next. |
 | P13-KLOG | `syslogd` | boot messages are a snapshot, not a live kernel-log stream; rotation and storage failure policy are absent | Keep `/run/log` and `/var/log/messages`; add a pollable kernel reader and rotation/backpressure policy in a later logging phase. |
 | P14-AUTH | getty/login | at the project owner's direction, the shipped root account has an empty password; production QEMU proves empty-password authentication and shell startup in `/root`, but logout/respawn and session accounting remain unproved | Treat passwordless root as a development-image policy only; before adding remote login, lock the account or provision a hashed password, and add locked/hashed authentication plus session/utmpx assertions. |
-| P15-DHCP | networkd | DHCP currently launches the local `dhcpcd`; lease state, renewal, routes, and DNS are not owned by networkd | Static configuration is usable.  Move the existing local DHCP engine behind networkd's state machine before retiring dhcpcd. |
+| P15-DHCP | networkd | Phase 20 renamed the local one-shot client to `dhcpc`; lightweight networkd invokes it synchronously, and QEMU proves an initial NE2000 lease plus address/default-route/DNS application with no resident DHCP process | Initial-acquisition milestone resolved.  Renewal/rebind/expiry/release and exhaustive timeout/NAK/spoof/rollback fault injection remain deliberate later hand-offs. |
 | P17-NTP | ntpdate | implementation builds, is bounded, and is disabled by default, but no controlled NTP endpoint was available in the guest test | Add a deterministic QEMU network fixture for valid, malformed, spoofed, and timeout responses before enabling at boot. |
 | P19-UNIX-POLL | kernel AF_UNIX/poll | listener readiness did not reliably wake init/networkd after a connection queued | Current daemons use nonblocking accept plus a one-second bounded loop.  Repair `poll_notify()`/listener readiness and restore event-driven waits in a focused kernel phase. |
 | P19-VARRUN | overlay VFS | creating sockets through the root-image `/var/run -> ../run` symlink returned `EOPNOTSUPP` | Runtime endpoints live directly in tmpfs `/run`; repair overlay symlink traversal for create/bind, then provide `/var/run` compatibility. |
-| P19-COVERAGE | integration | passwordless root login and shell startup pass in production QEMU; DHCP, logout/respawn, ntpdate success, crash-loop/cycle/malformed-service recovery, reboot persistence, and periodic cron remain outside passing markers | Phase 19 is partial integration success.  Extend the focused QEMU target rather than weakening its current markers. |
+| P19-COVERAGE | integration | passwordless root login and shell startup pass in production QEMU; Phase 20 additionally proves NE2000 DHCP, route/DNS, networkd restart, direct ifconfig, and clean shutdown | Logout/respawn, ntpdate success, crash-loop/cycle/malformed-service recovery, reboot persistence, periodic cron, and exhaustive network failure injection remain outside passing markers. |
 
-Build and evidence commands used for this result are `make -j16`,
-`make -j16 phase19-qemu-test`, and a separate bounded production-image boot
-under `qemu-system-x86_64`.  The aggregate `make check` and its ILP32 path were
-not used.  Userland/base C and header sources were formatted with
-clang-format 22.1.8.  No source commit was created.
+Phase 19 evidence used `make -j16`, `make -j16 phase19-qemu-test`, and a
+separate bounded production-image boot.  Phase 20 adds its four focused host
+targets, the vmspace overlapping-pin regression, `make -j16`, and
+`make phase20-qemu-test`, all passing under `qemu-system-x86_64`.  The
+aggregate `make check` and its ILP32 path were not used.  Phase 20-modified
+userland/base C and header sources pass clang-format 19.1.7's dry-run check.
+No source commit was created.
 
 ## 12. Phase 9 unmet utility register
 

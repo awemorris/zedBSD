@@ -227,6 +227,8 @@ ZEDBSD_PRIMARY_TARGETS := menuconfig vmunix bootloader rootfs-bin rootfs-usr \
 ZEDBSD_SUPPORT_TARGETS := help list-targets check clean distclean
 ZEDBSD_CHECK_TARGETS := check libc-host-test softfloat-host-test \
 	check-disk-image \
+	phase20-init-notify-host-test phase20-net-config-host-test \
+	phase20-networkd-protocol-host-test phase20-dhcp-host-test \
 	libc-opcode-check softfloat-opcode-check uapi-abi-layout-check \
 	hal-signal-frame-layout-check \
 	posix-header-check posix-api-matrix-check susv4-header-check \
@@ -236,6 +238,22 @@ ZEDBSD_CHECK_TARGETS := check libc-host-test softfloat-host-test \
 	userland-command-host-test menuconfig-host-test \
 	ufs1-format-host-test ufs2-format-host-test ufs1-format-python-test \
 	ufs2-format-python-test overlay-journal-format-host-test
+
+.PHONY: phase20-init-notify-host-test phase20-net-config-host-test \
+	phase20-networkd-protocol-host-test phase20-dhcp-host-test
+phase20-init-notify-host-test: tests/phase20-contract-host-test.py
+	$(PYTHON) $< init
+
+phase20-net-config-host-test: tests/phase20-contract-host-test.py
+	$(PYTHON) $< net-config
+
+phase20-networkd-protocol-host-test: tests/phase20-contract-host-test.py
+	$(PYTHON) $< protocol
+
+phase20-dhcp-host-test: $(BUILD)/tests/dhcp-host-test \
+	tests/phase20-contract-host-test.py
+	$(BUILD)/tests/dhcp-host-test
+	$(PYTHON) tests/phase20-contract-host-test.py dhcp
 
 # Scripts invoked from make receive the configured architecture and build tree.
 export ZEDBSD_ARCH := $(ZEDBSD_ARCHITECTURE)

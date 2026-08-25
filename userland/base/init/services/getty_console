@@ -1,6 +1,6 @@
 type=respawn
 command=/sbin/getty
 arguments=console
-after=syslogd
+after=syslogd,net
 restart=always
 required=YES

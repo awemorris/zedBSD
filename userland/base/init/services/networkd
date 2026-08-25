@@ -1,5 +1,7 @@
 type=daemon
 command=/sbin/networkd
 after=syslogd
+notify-fd3=on
+notify-timeout=10
 restart=on-failure
 required=NO

@@ -1507,6 +1507,50 @@ vmspace_unpin_user_pages(struct vmspace_pinned_page *pages, size_t page_count)
 	}
 }
 
+/* A resident mapping does not need to enter the fault path again merely to
+ * acquire another uaccess pin.  This matters when one syscall pins multiple
+ * ranges which share a user page: the fault path takes exclusive backing I/O
+ * ownership and would otherwise wait for the syscall's first pin. */
+static int
+vmspace_pin_mapping_ready(struct vmspace *vm, uintptr_t address,
+	uint32_t required)
+{
+	struct vm_region *region;
+	struct vm_page *entry;
+	int ready = 0;
+
+	vm_metadata_enter();
+	mutex_lock(&vm->lock);
+	region = find_region_locked(vm, address, 1);
+	entry = region != NULL ? find_page(region, address) : NULL;
+	if (entry != NULL && (region->prot & required) == required &&
+	    (entry->flags & (VM_MAPPING_BUSY | VM_MAPPING_MAPPED)) ==
+	    VM_MAPPING_MAPPED) {
+		if (entry->private_page != NULL &&
+		    vm_private_page_is_resident(entry) &&
+		    ((required & HAL_SPACE_WRITE) == 0 ||
+		    (entry->flags & VM_MAPPING_COW) == 0))
+			ready = 1;
+		else if (entry->object_page != NULL) {
+			struct vm_object_page *page = entry->object_page;
+			struct vm_object *object = page->owner;
+			unsigned long irq;
+
+			if (object != NULL) {
+				irq = spin_lock_irqsave(&object->lock);
+				ready = page->owner == object &&
+				    page->pmem.size != 0 &&
+				    (page->flags & (VM_OBJECT_PAGE_BUSY |
+				    VM_OBJECT_PAGE_ERROR)) == 0;
+				spin_unlock_irqrestore(&object->lock, irq);
+			}
+		}
+	}
+	mutex_unlock(&vm->lock);
+	vm_metadata_leave();
+	return ready;
+}
+
 int
 vmspace_pin_user_pages(struct vmspace *vm, uintptr_t address, size_t size,
 	uint32_t required, struct vmspace_pinned_page *pages, size_t page_count)
@@ -1539,9 +1583,11 @@ vmspace_pin_user_pages(struct vmspace *vm, uintptr_t address, size_t size,
 retry_faults:
 	/* Faulting may sleep and may break COW, so it is never done under a VM lock. */
 	for (current = first;; current += PAGE_SIZE) {
-		error = vmspace_fault(vm, current, fault_access);
-		if (error != 0)
-			return error;
+		if (!vmspace_pin_mapping_ready(vm, current, required)) {
+			error = vmspace_fault(vm, current, fault_access);
+			if (error != 0)
+				return error;
+		}
 		if (current == last)
 			break;
 	}

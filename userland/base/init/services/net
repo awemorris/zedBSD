@@ -1,0 +1,7 @@
+type=oneshot
+command=/sbin/net
+arguments=boot
+after=networkd
+requires=networkd
+restart=no
+required=NO

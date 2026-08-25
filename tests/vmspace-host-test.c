@@ -1865,6 +1865,29 @@ int main(void)
 		assert(commit_used == 0);
 	}
 
+	/* Multiple syscall outputs may pin disjoint ranges on one stack page. */
+	{
+		struct vmspace *pinned_vm = vmspace_create();
+		struct vm_region *region;
+		struct uaccess_pin first, second;
+
+		assert(pinned_vm != NULL);
+		assert(vmspace_map_anon(pinned_vm, 0x650000, TEST_PAGE_SIZE,
+		    HAL_SPACE_READ | HAL_SPACE_WRITE, &region) == 0);
+		assert(vmspace_copy_to(pinned_vm, 0x650000, "A", 1) == 0);
+		assert(uaccess_pin_vmspace(pinned_vm, 0x650000, 32,
+		    HAL_SPACE_WRITE, &first) == 0);
+		assert(uaccess_pin_vmspace(pinned_vm, 0x650080, 16,
+		    HAL_SPACE_READ | HAL_SPACE_WRITE, &second) == 0);
+		assert(first.pages[0].owner.private_page ==
+		    second.pages[0].owner.private_page);
+		assert(region->pages->private_page->pin_count == 2);
+		uaccess_unpin(&second);
+		uaccess_unpin(&first);
+		vmspace_put(pinned_vm);
+		assert(commit_used == 0);
+	}
+
 	/* A published pin owns the old backing after the VA is unmapped/reused. */
 	{
 		struct vmspace *pinned_vm = vmspace_create();

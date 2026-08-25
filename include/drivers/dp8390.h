@@ -14,6 +14,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <kern/lock.h>
 
 struct net_device;
 struct packet_buf;
@@ -44,6 +45,7 @@ struct dp8390_bus_ops {
 };
 
 struct dp8390 {
+	struct spinlock lock;
 	const struct dp8390_bus_ops *bus;
 	void *bus_cookie;
 	struct net_device *device;

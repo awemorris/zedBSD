@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,23 +20,22 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include <zedbsd/system.h>
 
 #define SERVICE_MAX 32
 #define ARGUMENT_MAX 16
 
-enum service_type {
-	SERVICE_DAEMON,
-	SERVICE_ONESHOT,
-	SERVICE_RESPAWN
-};
+enum service_type { SERVICE_DAEMON, SERVICE_ONESHOT, SERVICE_RESPAWN };
 
 enum service_state {
 	SERVICE_STOPPED,
 	SERVICE_STARTING,
 	SERVICE_RUNNING,
-	SERVICE_FAILED
+	SERVICE_COMPLETED,
+	SERVICE_FAILED,
+	SERVICE_SKIPPED
 };
 
 struct service {
@@ -43,6 +43,9 @@ struct service {
 	char command[256];
 	char arguments[512];
 	char after[256];
+	char
+		requires[
+		    256];
 	enum service_type type;
 	enum service_state state;
 	pid_t pid;
@@ -50,6 +53,8 @@ struct service {
 	int required;
 	int restart_always;
 	int restart_failure;
+	int notify_fd3;
+	unsigned notify_timeout;
 	unsigned failures;
 };
 
@@ -59,8 +64,7 @@ static volatile sig_atomic_t reload_requested;
 static volatile sig_atomic_t action_requested;
 
 static void
-signal_handler(
-	int number)
+signal_handler(int number)
 {
 	if (number == SIGHUP)
 		reload_requested = 1;
@@ -71,14 +75,40 @@ signal_handler(
 }
 
 static int
-yes(
-    const char *value)
+yes(const char *value)
 {
 	return value != NULL &&
-	       (strcmp(value, "YES") == 0 ||
-		strcmp(value, "yes") == 0 ||
-		strcmp(value, "1") == 0 ||
-		strcmp(value, "true") == 0);
+	       (strcmp(value, "YES") == 0 || strcmp(value, "yes") == 0 ||
+		strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
+}
+
+static int
+on_off(const char *value, int *result)
+{
+	if (strcmp(value, "on") == 0) {
+		*result = 1;
+		return 0;
+	}
+	if (strcmp(value, "off") == 0) {
+		*result = 0;
+		return 0;
+	}
+	return -1;
+}
+
+static int
+parse_seconds(const char *value, unsigned minimum, unsigned maximum,
+	      unsigned *result)
+{
+	char *end;
+	unsigned long number;
+	if (value == NULL || *value == '\0')
+		return -1;
+	number = strtoul(value, &end, 10);
+	if (*end != '\0' || number < minimum || number > maximum)
+		return -1;
+	*result = (unsigned)number;
+	return 0;
 }
 
 static void
@@ -102,8 +132,7 @@ run_mount_all(void)
 		_exit(127);
 	}
 
-	if (child > 0 &&
-	    waitpid(child, &status, 0) == child &&
+	if (child > 0 && waitpid(child, &status, 0) == child &&
 	    (!WIFEXITED(status) || WEXITSTATUS(status) != 0))
 		fprintf(stderr, "init: mount -a failed\n");
 }
@@ -113,34 +142,38 @@ set_configured_hostname(void)
 {
 	char hostname[256];
 
-	if (rcconf_get(ZEDBSD_RC_CONF, "hostname", hostname, sizeof(hostname)) == 0 &&
-	    hostname[0] != '\0' &&
-	    sethostname(hostname, strlen(hostname)) != 0)
+	if (rcconf_get(ZEDBSD_RC_CONF, "hostname", hostname,
+		       sizeof(hostname)) == 0 &&
+	    hostname[0] != '\0' && sethostname(hostname, strlen(hostname)) != 0)
 		fprintf(stderr, "init: sethostname: %s\n", strerror(errno));
 }
 
 static int
-load_one_service(
-	const char *name)
+load_one_service(const char *name)
 {
 	struct service *service;
 	char path[320], value[64], key[80];
 
-	if (!service_name_valid(name) ||
-	    service_count == SERVICE_MAX ||
-	    snprintf(path, sizeof(path), "/etc/service.d/%s", name) >= (int)sizeof(path))
+	if (!service_name_valid(name) || service_count == SERVICE_MAX ||
+	    snprintf(path, sizeof(path), "/etc/service.d/%s", name) >=
+		(int)sizeof(path))
 		return -1;
 
 	service = &services[service_count];
 	memset(service, 0, sizeof(*service));
 	strcpy(service->name, name);
 
-	if (rcconf_get(path, "command", service->command, sizeof(service->command)) != 0 ||
+	if (rcconf_get(path, "command", service->command,
+		       sizeof(service->command)) != 0 ||
 	    service->command[0] != '/')
 		return -1;
 
-	(void)rcconf_get(path, "arguments", service->arguments, sizeof(service->arguments));
+	(void)rcconf_get(path, "arguments", service->arguments,
+			 sizeof(service->arguments));
 	(void)rcconf_get(path, "after", service->after, sizeof(service->after));
+	(void)rcconf_get(path, "requires", service->requires,
+			 sizeof(service->requires));
+	service->notify_timeout = 10;
 
 	service->type = SERVICE_DAEMON;
 	if (rcconf_get(path, "type", value, sizeof(value)) == 0) {
@@ -160,10 +193,21 @@ load_one_service(
 		service->restart_failure = strcmp(value, "on-failure") == 0;
 	}
 
+	if (rcconf_get(path, "notify-fd3", value, sizeof(value)) == 0 &&
+	    on_off(value, &service->notify_fd3) != 0)
+		return -1;
+	if (rcconf_get(path, "notify-timeout", value, sizeof(value)) == 0 &&
+	    parse_seconds(value, 1, 300, &service->notify_timeout) != 0)
+		return -1;
+	if (service->notify_fd3 && service->type == SERVICE_ONESHOT)
+		return -1;
+
 	if (snprintf(key, sizeof(key), "%s_enable", name) >= (int)sizeof(key))
 		return -1;
 
-	service->enabled = rcconf_get(ZEDBSD_RC_CONF, key, value, sizeof(value)) == 0 && yes(value);
+	service->enabled =
+	    rcconf_get(ZEDBSD_RC_CONF, key, value, sizeof(value)) == 0 &&
+	    yes(value);
 	service->state = SERVICE_STOPPED;
 	service_count++;
 
@@ -188,7 +232,9 @@ load_services(void)
 		if (entry->d_name[0] == '.')
 			continue;
 		if (load_one_service(entry->d_name) != 0)
-			fprintf(stderr, "init: invalid service definition: %s\n", entry->d_name);
+			fprintf(stderr,
+				"init: invalid service definition: %s\n",
+				entry->d_name);
 	}
 
 	closedir(directory);
@@ -197,8 +243,7 @@ load_services(void)
 }
 
 static struct service *
-find_service(
-	const char *name)
+find_service(const char *name)
 {
 	size_t index;
 
@@ -210,46 +255,173 @@ find_service(
 	return NULL;
 }
 
+enum dependency_result {
+	DEPENDENCIES_WAIT,
+	DEPENDENCIES_READY,
+	DEPENDENCIES_SKIP
+};
+
 static int
-dependencies_ready(
-	const struct service *service)
+terminal_state(enum service_state state)
+{
+	return state == SERVICE_RUNNING || state == SERVICE_COMPLETED ||
+	       state == SERVICE_FAILED || state == SERVICE_SKIPPED;
+}
+
+static enum dependency_result
+dependencies_state(const struct service *service)
 {
 	char copy[256], *name;
 
-	if (service->after[0] == '\0')
-		return 1;
+	if (service->after[0] != '\0') {
+		strcpy(copy, service->after);
+		for (name = strtok(copy, ","); name != NULL;
+		     name = strtok(NULL, ",")) {
+			struct service *dependency = find_service(name);
+			if (dependency == NULL)
+				return DEPENDENCIES_SKIP;
+			if (dependency->enabled &&
+			    !terminal_state(dependency->state))
+				return DEPENDENCIES_WAIT;
+		}
+	}
+	if (service->requires[0] != '\0') {
+		strcpy(copy, service->requires);
+		for (name = strtok(copy, ","); name != NULL;
+		     name = strtok(NULL, ",")) {
+			struct service *dependency = find_service(name);
+			if (dependency == NULL || !dependency->enabled ||
+			    dependency->state == SERVICE_FAILED ||
+			    dependency->state == SERVICE_SKIPPED)
+				return DEPENDENCIES_SKIP;
+			if (dependency->state != SERVICE_RUNNING &&
+			    dependency->state != SERVICE_COMPLETED)
+				return DEPENDENCIES_WAIT;
+		}
+	}
+	return DEPENDENCIES_READY;
+}
 
-	strcpy(copy, service->after);
+static uint64_t
+monotonic_milliseconds(void)
+{
+	struct timespec now;
+	if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+		return 0;
+	return (uint64_t)(uint32_t)now.tv_sec * 1000U +
+	       (uint32_t)now.tv_nsec / 1000000U;
+}
 
-	for (name = strtok(copy, ","); name != NULL; name = strtok(NULL, ",")) {
-		struct service *dependency = find_service(name);
-		if (dependency != NULL &&
-		    dependency->enabled &&
-		    dependency->state != SERVICE_RUNNING)
+static int
+valid_failure_record(const char *record)
+{
+	const char *cursor = record + 5;
+	unsigned long code = 0;
+	if (strncmp(record, "FAIL ", 5) != 0 || *cursor < '0' || *cursor > '9')
+		return 0;
+	while (*cursor >= '0' && *cursor <= '9') {
+		code = code * 10U + (unsigned)(*cursor++ - '0');
+		if (code > 2147483647UL)
 			return 0;
 	}
-
+	if (code == 0 || *cursor++ != ' ' || *cursor == '\0')
+		return 0;
+	while (*cursor != '\0') {
+		unsigned char character = (unsigned char)*cursor++;
+		if (character < 32U || character == 127U)
+			return 0;
+	}
 	return 1;
 }
 
 static int
-spawn_service(
-	struct service *service)
+wait_for_notification(struct service *service, int descriptor)
+{
+	char record[513];
+	size_t used = 0;
+	uint64_t deadline = monotonic_milliseconds() +
+			    (uint64_t)service->notify_timeout * 1000U;
+	for (;;) {
+		for (;;) {
+			ssize_t count = read(descriptor, record + used,
+					     sizeof(record) - used - 1U);
+			if (count < 0 && errno == EINTR)
+				continue;
+			if (count < 0 &&
+			    (errno == EAGAIN || errno == EWOULDBLOCK))
+				break;
+			if (count <= 0) {
+				fprintf(stderr,
+					"init: %s exited before readiness\n",
+					service->name);
+				errno = EPIPE;
+				return -1;
+			}
+			used += (size_t)count;
+			if (used >= sizeof(record) - 1U) {
+				fprintf(stderr,
+					"init: %s oversized readiness record\n",
+					service->name);
+				errno = EOVERFLOW;
+				return -1;
+			}
+			record[used] = '\0';
+			{
+				char *newline = strchr(record, '\n');
+				if (newline == NULL)
+					continue;
+				if (newline[1] != '\0') {
+					errno = EINVAL;
+					return -1;
+				}
+				*newline = '\0';
+				if (strcmp(record, "READY") == 0)
+					return 0;
+				if (valid_failure_record(record))
+					fprintf(stderr, "init: %s: %s\n",
+						service->name, record);
+				else
+					fprintf(stderr,
+						"init: %s malformed readiness "
+						"record\n",
+						service->name);
+				errno = EINVAL;
+				return -1;
+			}
+		}
+		if (monotonic_milliseconds() >= deadline) {
+			errno = ETIMEDOUT;
+			fprintf(stderr, "init: %s readiness timeout\n",
+				service->name);
+			return -1;
+		}
+		usleep(10000);
+	}
+}
+
+static int
+spawn_service(struct service *service)
 {
 	char argument_copy[512], *argv[ARGUMENT_MAX];
 	char *argument;
-	int count = 1, status;
+	int count = 1, status, notify_pipe[2] = {-1, -1};
 	pid_t child;
+
+	if (service->state == SERVICE_RUNNING ||
+	    service->state == SERVICE_STARTING) {
+		errno = EBUSY;
+		return -1;
+	}
 
 	argv[0] = service->name;
 
 	strcpy(argument_copy, service->arguments);
 
-	for (argument = strtok(argument_copy, " \t");
-	     argument != NULL;
+	for (argument = strtok(argument_copy, " \t"); argument != NULL;
 	     argument = strtok(NULL, " \t")) {
 		if (count + 1 >= ARGUMENT_MAX) {
-			fprintf(stderr, "init: too many arguments for %s\n", service->name);
+			fprintf(stderr, "init: too many arguments for %s\n",
+				service->name);
 			return -1;
 		}
 		argv[count++] = argument;
@@ -258,19 +430,50 @@ spawn_service(
 	argv[count] = NULL;
 
 	service->state = SERVICE_STARTING;
+	if (service->notify_fd3 &&
+	    pipe2(notify_pipe, O_CLOEXEC | O_NONBLOCK) != 0) {
+		service->state = SERVICE_FAILED;
+		return -1;
+	}
 
 	child = fork();
 	if (child == 0) {
+		if (service->notify_fd3) {
+			close(notify_pipe[0]);
+			if (dup2(notify_pipe[1], 3) < 0 ||
+			    fcntl(3, F_SETFD, 0) != 0 ||
+			    setenv("ZEDBSD_NOTIFY_FD", "3", 1) != 0)
+				_exit(126);
+			if (notify_pipe[1] != 3)
+				close(notify_pipe[1]);
+		}
 		execv(service->command, argv);
-		fprintf(stderr, "init: exec %s: %s\n", service->command, strerror(errno));
+		fprintf(stderr, "init: exec %s: %s\n", service->command,
+			strerror(errno));
 		_exit(127);
 	}
 	if (child < 0) {
+		if (notify_pipe[0] >= 0)
+			close(notify_pipe[0]);
+		if (notify_pipe[1] >= 0)
+			close(notify_pipe[1]);
 		service->state = SERVICE_FAILED;
 		return -1;
 	}
 
 	service->pid = child;
+	if (service->notify_fd3) {
+		close(notify_pipe[1]);
+		if (wait_for_notification(service, notify_pipe[0]) != 0) {
+			close(notify_pipe[0]);
+			(void)kill(child, SIGTERM);
+			(void)waitpid(child, &status, 0);
+			service->pid = 0;
+			service->state = SERVICE_FAILED;
+			return -1;
+		}
+		close(notify_pipe[0]);
+	}
 	if (service->type != SERVICE_ONESHOT) {
 		service->state = SERVICE_RUNNING;
 		printf("init: started %s pid %ld\n", service->name,
@@ -278,8 +481,7 @@ spawn_service(
 		return 0;
 	}
 
-	if (waitpid(child, &status, 0) != child ||
-	    !WIFEXITED(status) ||
+	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
 	    WEXITSTATUS(status) != 0) {
 		service->state = SERVICE_FAILED;
 		service->pid = 0;
@@ -287,7 +489,7 @@ spawn_service(
 		return -1;
 	}
 
-	service->state = SERVICE_RUNNING;
+	service->state = SERVICE_COMPLETED;
 	service->pid = 0;
 
 	return 0;
@@ -301,27 +503,36 @@ start_enabled_services(void)
 	for (pass = 0; pass < service_count; pass++) {
 		for (index = 0; index < service_count; index++) {
 			struct service *service = &services[index];
+			enum dependency_result dependencies;
 
-			if (service->enabled &&
-			    service->state == SERVICE_STOPPED &&
-			    dependencies_ready(service))
+			if (!service->enabled ||
+			    service->state != SERVICE_STOPPED)
+				continue;
+			dependencies = dependencies_state(service);
+			if (dependencies == DEPENDENCIES_READY)
 				(void)spawn_service(service);
+			else if (dependencies == DEPENDENCIES_SKIP) {
+				service->state = SERVICE_SKIPPED;
+				fprintf(stderr,
+					"init: skipped %s: required dependency "
+					"failed\n",
+					service->name);
+			}
 		}
 	}
 
 	for (index = 0; index < service_count; index++) {
 		if (services[index].enabled &&
 		    services[index].state == SERVICE_STOPPED) {
-			fprintf(stderr,
-				"init: dependency cycle or unavailable dependency: %s\n",
+			services[index].state = SERVICE_FAILED;
+			fprintf(stderr, "init: dependency cycle: %s\n",
 				services[index].name);
 		}
 	}
 }
 
 static int
-stop_service(
-	struct service *service)
+stop_service(struct service *service)
 {
 	unsigned attempt;
 	int status;
@@ -370,7 +581,8 @@ reap_children(void)
 
 			success = WIFEXITED(status) && WEXITSTATUS(status) == 0;
 			service->pid = 0;
-			service->state = success ? SERVICE_STOPPED : SERVICE_FAILED;
+			service->state =
+			    success ? SERVICE_STOPPED : SERVICE_FAILED;
 
 #if 0
 			if (WIFEXITED(status))
@@ -381,9 +593,9 @@ reap_children(void)
 				fprintf(stderr, "init: %s changed state status=%d\n", service->name, status);
 #endif
 
-			if (service->enabled &&
-			    service->failures < 5 &&
-			    (service->restart_always || (service->restart_failure && !success))) {
+			if (service->enabled && service->failures < 5 &&
+			    (service->restart_always ||
+			     (service->restart_failure && !success))) {
 				service->failures++;
 				sleep(1);
 				(void)spawn_service(service);
@@ -395,15 +607,10 @@ reap_children(void)
 }
 
 static const char *
-state_name(
-	enum service_state state)
+state_name(enum service_state state)
 {
-	static const char *const names[] = {
-		"stopped",
-		"starting",
-		"running",
-		"failed"
-	};
+	static const char *const names[] = {"stopped",	 "starting", "running",
+					    "completed", "failed",   "skipped"};
 
 	return names[state];
 }
@@ -416,28 +623,24 @@ reload_policy(void)
 	for (index = 0; index < service_count; index++) {
 		char key[80], value[64];
 
-		if (snprintf(key, sizeof(key), "%s_enable", services[index].name) >= (int)sizeof(key))
+		if (snprintf(key, sizeof(key), "%s_enable",
+			     services[index].name) >= (int)sizeof(key))
 			continue;
 
-		services[index].enabled = rcconf_get(ZEDBSD_RC_CONF,
-						     key,
-						     value,
-						     sizeof(value)) == 0
-			&& yes(value);
+		services[index].enabled = rcconf_get(ZEDBSD_RC_CONF, key, value,
+						     sizeof(value)) == 0 &&
+					  yes(value);
 	}
 }
 
 static void
-write_response(
-	int client,
-	const char *response)
+write_response(int client, const char *response)
 {
 	(void)write(client, response, strlen(response));
 }
 
 static void
-handle_request(
-	int client)
+handle_request(int client)
 {
 	char request[256], response[512], *command, *name;
 	ssize_t length = read(client, request, sizeof(request) - 1);
@@ -461,11 +664,10 @@ handle_request(
 
 	if (strcmp(command, "list") == 0) {
 		for (index = 0; index < service_count; index++) {
-			snprintf(response,
-				 sizeof(response),
-				 "%s\t%s\t%s\n",
+			snprintf(response, sizeof(response), "%s\t%s\t%s\n",
 				 services[index].name,
-				 services[index].enabled ? "enabled" : "disabled",
+				 services[index].enabled ? "enabled"
+							 : "disabled",
 				 state_name(services[index].state));
 
 			write_response(client, response);
@@ -479,10 +681,9 @@ handle_request(
 		return;
 	}
 
-	if ((strcmp(command, "halt") == 0 ||
-	     strcmp(command, "poweroff") == 0 ||
-	     strcmp(command, "reboot") == 0)
-	    && name == NULL) {
+	if ((strcmp(command, "halt") == 0 || strcmp(command, "poweroff") == 0 ||
+	     strcmp(command, "reboot") == 0) &&
+	    name == NULL) {
 		action_requested = strcmp(command, "reboot") == 0
 				       ? ZEDBSD_SYSTEM_REBOOT
 				       : ZEDBSD_SYSTEM_HALT;
@@ -498,17 +699,23 @@ handle_request(
 
 	if (strcmp(command, "status") == 0) {
 		snprintf(response, sizeof(response), "OK %s %s %s pid=%ld\n",
-			 service->name, service->enabled ? "enabled" : "disabled",
+			 service->name,
+			 service->enabled ? "enabled" : "disabled",
 			 state_name(service->state), (long)service->pid);
 		write_response(client, response);
 	} else if (strcmp(command, "start") == 0) {
-		write_response(client,
-			       spawn_service(service) == 0 ? "OK started\n" : "ERR start failed\n");
+		write_response(client, spawn_service(service) == 0
+					   ? "OK started\n"
+					   : "ERR start failed\n");
 	} else if (strcmp(command, "stop") == 0) {
-		write_response(client, stop_service(service) == 0 ? "OK stopped\n" : "ERR stop failed\n");
+		write_response(client, stop_service(service) == 0
+					   ? "OK stopped\n"
+					   : "ERR stop failed\n");
 	} else if (strcmp(command, "restart") == 0) {
 		(void)stop_service(service);
-		write_response(client, spawn_service(service) == 0 ? "OK restarted\n" : "ERR restart failed\n");
+		write_response(client, spawn_service(service) == 0
+					   ? "OK restarted\n"
+					   : "ERR restart failed\n");
 	} else {
 		write_response(client, "ERR unknown command\n");
 	}
@@ -518,7 +725,8 @@ static int
 open_control_socket(void)
 {
 	struct sockaddr_un address;
-	int descriptor = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	int descriptor =
+	    socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 
 	if (descriptor < 0)
 		return -1;
@@ -529,9 +737,9 @@ open_control_socket(void)
 
 	(void)unlink(address.sun_path);
 
-	if (bind(descriptor, (struct sockaddr *)&address, sizeof(address)) != 0 ||
-	    chmod(address.sun_path, 0600) != 0 ||
-	    listen(descriptor, 8) != 0) {
+	if (bind(descriptor, (struct sockaddr *)&address, sizeof(address)) !=
+		0 ||
+	    chmod(address.sun_path, 0600) != 0 || listen(descriptor, 8) != 0) {
 		close(descriptor);
 		return -1;
 	}
@@ -542,8 +750,7 @@ open_control_socket(void)
 }
 
 static void
-shutdown_system(
-	int action)
+shutdown_system(int action)
 {
 	size_t index = service_count;
 	int system_descriptor;
@@ -557,7 +764,8 @@ shutdown_system(
 
 	system_descriptor = open("/dev/system", O_RDONLY);
 	if (system_descriptor < 0 || ioctl(system_descriptor, action) != 0) {
-		fprintf(stderr, "init: final system action failed: %s\n", strerror(errno));
+		fprintf(stderr, "init: final system action failed: %s\n",
+			strerror(errno));
 	}
 
 	for (;;)
@@ -584,7 +792,8 @@ main(void)
 	run_mount_all();
 
 	if (load_services() != 0)
-		fprintf(stderr, "init: continuing without service definitions\n");
+		fprintf(stderr,
+			"init: continuing without service definitions\n");
 
 	listener = open_control_socket();
 	if (listener < 0)
@@ -614,7 +823,7 @@ main(void)
 			continue;
 		}
 
-		client = accept(listener, NULL, NULL);
+		client = accept4(listener, NULL, NULL, SOCK_CLOEXEC);
 		if (client >= 0) {
 			handle_request(client);
 			close(client);
