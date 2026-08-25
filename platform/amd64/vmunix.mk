@@ -983,7 +983,8 @@ $(BUILD)/phase20-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
 
-.PHONY: phase20-qemu-test phase20-qemu-test-inner
+.PHONY: phase20-qemu-test phase20-qemu-test-inner \
+	phase20-interactive-shell-qemu-test
 phase20-qemu-test:
 	$(MAKE) BUILD=build/amd64-phase20 CONFIG_DRIVER_NE2000=y \
 		phase20-qemu-test-inner
@@ -992,6 +993,11 @@ phase20-qemu-test-inner: $(BUILD)/phase20-qemu.img \
 	tests/phase20-qemu-test.py
 	$(PYTHON) tests/phase20-qemu-test.py \
 		--qemu qemu-system-x86_64 --image $(BUILD)/phase20-qemu.img
+
+phase20-interactive-shell-qemu-test: $(BUILD)/hdd-image.img \
+	tests/phase20-interactive-shell-qemu-test.py
+	$(PYTHON) tests/phase20-interactive-shell-qemu-test.py \
+		--qemu qemu-system-x86_64 --image $(BUILD)/hdd-image.img
 
 AMD64_POSIX_PHASE85_CURSES_SOURCES := tests/posix-phase85-curses.c \
 	userland/base/curses/curses.c userland/base/common/terminfo.c

@@ -123,7 +123,7 @@ providers, services, or cross-component semantics remain pending.
 | 17 | partial | bounded local `ntpdate` client exists and is boot-optional; controlled-server QEMU success/failure evidence remains open |
 | 18 | partial | zedBSD power/administration behavior and `/etc/zinit.rc` were removed and `sh -c` works; the required POSIX grammar and semantic inventory is substantially incomplete |
 | 19 | partial integration success | bounded amd64 QEMU service smoke passes through orderly poweroff initiation; the explicit hand-offs in Section 11 prevent a full integration claim |
-| 20 | implementation milestone complete | focused host tests, `make -j16`, and four-CPU amd64 QEMU prove FD 3 readiness, synchronous `/sbin/net boot`, a real NE2000 DHCP lease through one-shot `dhcpc`, route/DNS installation, restart, direct-ifconfig recovery, and shutdown |
+| 20 | implementation milestone complete | focused host tests, `make -j16`, and four-CPU amd64 QEMU prove FD 3 readiness, synchronous `/sbin/net boot`, a real NE2000 DHCP lease through one-shot `dhcpc`, route/DNS installation, restart, direct-ifconfig recovery, interactive shell recovery after `ifconfig`, and shutdown |
 
 The Phase 0--10 series is closed as completed on 2026-08-24.  Here,
 "completed" means that each phase's defined implementation, audit, or
@@ -206,7 +206,7 @@ dependency even when they are not POSIX public APIs.
 | TERM-CURSES-01 | curses library | implemented-unreviewed | future full-screen programs | expand window/input/update semantics and define the POSIX/XSI scope before any conformance claim |
 | ARCHIVE-01 | archive/ELF shared readers | implemented-unreviewed | `ar`, `nm`, `pax` | standard format variants, malformed data, overflow, metadata, symbol tables, non-ELF policy, and fuzz evidence |
 | SCCS-CORE-01 | SCCS history/p-file/locking core | partial | ten SCCS commands | classic weave/control interoperability, full flags/MRs/SIDs, preservation, stale locks, interrupted atomic updates |
-| SHELL-CORE-01 | shell lexer/parser/expansion/executor | partial | `sh`, cron, login | `sh -c`, simple lists/pipelines/expansion and scripts work, and zedBSD administration paths are removed; reserved words, multiline continuation, compound commands, functions, grouping/subshell grammar, here-documents, full redirects/expansions, strict mode, `ENV`, jobs/traps, and special-builtin semantics remain |
+| SHELL-CORE-01 | shell lexer/parser/expansion/executor | partial | `sh`, cron, login | `sh -c`, simple lists/pipelines/expansion and scripts work; QEMU proves foreground tty restoration and continued input after interactive `ifconfig`; reserved words, multiline continuation, compound commands, functions, grouping/subshell grammar, here-documents, full redirects/expansions, strict mode, `ENV`, complete jobs/traps, and special-builtin semantics remain |
 | BUILD-PKG-01 | standalone base package interface | implemented-unreviewed | all base packages | retain direct build/install coverage for source lists, libraries, headers, data-only packages, `PREFIX=/`, and ordinary prefixes |
 | BUILD-PROV-01 | base source provenance gate | reviewed | `bc`, `ed`, `m4` replacement scope | `make phase10-local-source-check` enforces exact local manifests, Zlib headers, removed-file references, and known external fingerprints; extend the manifest when future source is added |
 
@@ -282,7 +282,7 @@ The following findings are deliberately not promoted to success:
 | ID | Component | Observed limitation | Safe current state / next unit |
 |---|---|---|---|
 | P18-SH-GRAMMAR | `/bin/sh` | `if`/`then`, `for`, `case`, functions, grouping, subshell grammar, here-documents, and multiline continuation after operators are not parsed as POSIX reserved-word grammar | Phase 18 is partial.  Keep the safe simple-command/list executor, then replace the line-at-a-time parser with a token-stream AST parser and clause-mapped tests before claiming POSIX shell compliance. |
-| P18-SH-SEMANTICS | `/bin/sh` | `ENV`, strict/extension mode separation, complete redirections and expansion ordering, special-builtin error rules, and full job control remain unproved or absent | Preserve libedit only for interactive input; implement each semantic family as a separate master-derived phase. |
+| P18-SH-SEMANTICS | `/bin/sh` | `ENV`, strict/extension mode separation, complete redirections and expansion ordering, special-builtin error rules, and full job control remain unproved or absent; Phase 20 follow-up fixed foreground tty restoration and EOF/error prompt spinning after external commands | Preserve the tested interactive foreground handoff and libedit input; implement each remaining semantic family as a separate master-derived phase. |
 | P16-CRON | `cron`/`crontab` | QEMU proves durable crontab installation and proves the same daemon executes immediate at jobs, but periodic crontab execution and a restart attempted after scheduled work did not complete within the focused bound | Keep cron enabled as a minimal scheduler; add daemon reload/restart diagnostics, full field parser, deterministic clock fixture, locking, and periodic execution evidence. |
 | P16-AT-BATCH | `at`/`batch` | accepted time syntax is only `now`, `now + N minutes/hours`, and `HH:MM`; batch does not wait for a load threshold | Retain honest subset behavior and durable jobs; implement the POSIX operand grammar, queue policy, environment, cancellation races, and output delivery next. |
 | P13-KLOG | `syslogd` | boot messages are a snapshot, not a live kernel-log stream; rotation and storage failure policy are absent | Keep `/run/log` and `/var/log/messages`; add a pollable kernel reader and rotation/backpressure policy in a later logging phase. |
@@ -291,12 +291,14 @@ The following findings are deliberately not promoted to success:
 | P17-NTP | ntpdate | implementation builds, is bounded, and is disabled by default, but no controlled NTP endpoint was available in the guest test | Add a deterministic QEMU network fixture for valid, malformed, spoofed, and timeout responses before enabling at boot. |
 | P19-UNIX-POLL | kernel AF_UNIX/poll | listener readiness did not reliably wake init/networkd after a connection queued | Current daemons use nonblocking accept plus a one-second bounded loop.  Repair `poll_notify()`/listener readiness and restore event-driven waits in a focused kernel phase. |
 | P19-VARRUN | overlay VFS | creating sockets through the root-image `/var/run -> ../run` symlink returned `EOPNOTSUPP` | Runtime endpoints live directly in tmpfs `/run`; repair overlay symlink traversal for create/bind, then provide `/var/run` compatibility. |
-| P19-COVERAGE | integration | passwordless root login and shell startup pass in production QEMU; Phase 20 additionally proves NE2000 DHCP, route/DNS, networkd restart, direct ifconfig, and clean shutdown | Logout/respawn, ntpdate success, crash-loop/cycle/malformed-service recovery, reboot persistence, periodic cron, and exhaustive network failure injection remain outside passing markers. |
+| P19-COVERAGE | integration | passwordless root login and shell startup pass in production QEMU; Phase 20 additionally proves NE2000 DHCP, route/DNS, networkd restart, direct ifconfig, interactive prompt recovery after an external command, and clean shutdown | Logout/respawn, ntpdate success, crash-loop/cycle/malformed-service recovery, reboot persistence, periodic cron, and exhaustive network failure injection remain outside passing markers. |
 
 Phase 19 evidence used `make -j16`, `make -j16 phase19-qemu-test`, and a
 separate bounded production-image boot.  Phase 20 adds its four focused host
-targets, the vmspace overlapping-pin regression, `make -j16`, and
-`make phase20-qemu-test`, all passing under `qemu-system-x86_64`.  The
+targets, the vmspace overlapping-pin regression, `make -j16`,
+`make phase20-qemu-test`, and
+`make phase20-interactive-shell-qemu-test`, all passing under
+`qemu-system-x86_64`.  The
 aggregate `make check` and its ILP32 path were not used.  Phase 20-modified
 userland/base C and header sources pass clang-format 19.1.7's dry-run check.
 No source commit was created.

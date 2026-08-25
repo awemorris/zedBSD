@@ -511,7 +511,9 @@ binaries, and a deterministic supported NIC/DHCP fixture.  It must prove:
 10. shutdown closes notify/control/child descriptors, stops networkd, and
     leaves no child or service-manager hang; and
 11. `/sbin/dhcpc` is installed while `/sbin/dhcpcd` and all obsolete package
-    identity are absent from the final image.
+    identity are absent from the final image; and
+12. after an interactive root login, `ifconfig` returns to exactly one usable
+    shell prompt and a following command executes normally.
 
 The test harness must use explicit success/failure markers, a finite timeout,
 and complete debug output on failure.  QEMU user networking may be used for a
@@ -529,6 +531,7 @@ make phase20-networkd-protocol-host-test
 make phase20-dhcp-host-test
 make -j16
 make phase20-qemu-test
+make phase20-interactive-shell-qemu-test
 git diff --check
 ```
 
@@ -587,16 +590,21 @@ real DHCP lease through `/sbin/dhcpc`, the installed address/default route/DNS,
 the absence of a resident DHCP client, networkd restart followed by a fresh
 command, the direct-ifconfig recovery path, and bounded shutdown.
 
-Debugging that acceptance path found and fixed three integration defects:
+Debugging that acceptance path found and fixed four integration defects:
 
 - dp8390 register, remote-DMA, transmit, receive-poll, and interrupt state is
   serialized for SMP, and the device is marked ready before its interrupt mask
   is enabled;
 - a syscall may now pin multiple output ranges that share an already-resident
   user page without re-entering a fault path that waits on its own first pin;
-  the VM host test contains a two-pin regression case; and
+  the VM host test contains a two-pin regression case;
 - accepted init/networkd control descriptors are close-on-exec, so a newly
-  started daemon cannot inherit a service client connection and prevent EOF.
+  started daemon cannot inherit a service client connection and prevent EOF;
+- the interactive shell temporarily ignores `SIGTTOU` while transferring the
+  controlling terminal's foreground process group, restores itself after an
+  external command, and exits instead of spinning on terminal EOF/error.  A
+  QEMU keyboard-driven regression proves that `ifconfig` returns to one usable
+  prompt and that a following command runs.
 
 The focused smoke also exposed the shell's missing three-operand unary
 negation; `test ! -e path` now works, which lets the installed-image identity

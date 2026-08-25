@@ -88,18 +88,36 @@ shell_assign(void *context, const char *name, const char *value)
 }
 
 static int
+shell_tcsetpgrp(int descriptor, pid_t pgrp)
+{
+	void (*previous)(int);
+	int error, saved_errno;
+
+	/* A shell restoring itself from the background must not be stopped by
+	 * the TIOCSPGRP operation which makes it foreground again. */
+	previous = signal(SIGTTOU, (sighandler_t)SIG_IGN);
+	if (previous == (sighandler_t)SIG_ERR)
+		return -1;
+	error = tcsetpgrp(descriptor, pgrp);
+	saved_errno = errno;
+	(void)signal(SIGTTOU, previous);
+	errno = saved_errno;
+	return error;
+}
+
+static int
 wait_foreground(pid_t pid, int *status)
 {
 	pid_t shell_pgrp = getpgrp();
 	int terminal = isatty(0);
 	pid_t result;
 	if (terminal)
-		(void)tcsetpgrp(0, pid);
+		(void)shell_tcsetpgrp(0, pid);
 	do
 		result = waitpid(pid, status, WUNTRACED);
 	while (result < 0 && errno == EINTR);
 	if (terminal)
-		(void)tcsetpgrp(0, shell_pgrp);
+		(void)shell_tcsetpgrp(0, shell_pgrp);
 	if (result < 0)
 		return 0;
 	if (WIFSTOPPED(*status)) {
@@ -1305,7 +1323,7 @@ execute_pipeline(struct pipeline_command *items, int count, int background)
 		return 1;
 	}
 	if (terminal)
-		(void)tcsetpgrp(STDIN_FILENO, group);
+		(void)shell_tcsetpgrp(STDIN_FILENO, group);
 	for (index = 0; index < created; index++) {
 		int status = 0;
 		pid_t waited = waitpid(children[index], &status, WUNTRACED);
@@ -1321,7 +1339,7 @@ execute_pipeline(struct pipeline_command *items, int count, int background)
 		}
 	}
 	if (terminal)
-		(void)tcsetpgrp(STDIN_FILENO, shell_group);
+		(void)shell_tcsetpgrp(STDIN_FILENO, shell_group);
 	return WIFEXITED(last_status) && WEXITSTATUS(last_status) == 0;
 failed:
 	if (input >= 0)
@@ -1586,8 +1604,10 @@ main(int argc, char **argv)
 		(void)snprintf(prompt, sizeof(prompt), "root@%s:%s$ ", hostname,
 			       cwd);
 		line = readline(prompt);
-		if (line == NULL)
-			continue;
+		if (line == NULL) {
+			(void)putchar('\n');
+			return 0;
+		}
 		if (line[0] != '\0')
 			add_history(line);
 		(void)command(line);
