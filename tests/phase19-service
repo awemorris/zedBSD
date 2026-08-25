@@ -1,6 +1,0 @@
-type=daemon
-command=/bin/sh
-arguments=/etc/phase19-smoke.sh
-after=syslogd,net,cron
-restart=no
-required=YES

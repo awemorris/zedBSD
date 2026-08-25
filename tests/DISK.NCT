@@ -1,4 +1,0 @@
-func main(args) {
-    Console.write("zedBSD-M7-BUILTIN-PRECEDENCE-FAIL\n");
-    return 1;
-}

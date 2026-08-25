@@ -1,9 +1,0 @@
-echo zedBSD-POSIX-PHASE85-QEMU-START
-tic -o /tmp/phase85-terminfo /etc/phase85-terminal.ti && echo zedBSD-POSIX-PHASE85-TIC-PASS
-infocmp -A /tmp/phase85-terminfo phase85 > /tmp/phase85-infocmp
-grep -q 'cols#90' /tmp/phase85-infocmp && echo zedBSD-POSIX-PHASE85-INFOCMP-PASS
-TERMINFO=/tmp/phase85-terminfo tput -T phase85 cols > /tmp/phase85-cols
-grep -q '^90$' /tmp/phase85-cols && echo zedBSD-POSIX-PHASE85-TPUT-PASS
-TERM=phase85 TERMINFO=/tmp/phase85-terminfo phase85-curses-test
-echo zedBSD-POSIX-PHASE85-QEMU-PASS
-halt

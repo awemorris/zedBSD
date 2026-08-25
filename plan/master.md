@@ -1,0 +1,164 @@
+# zedBSD master plan
+
+Last updated: 2026-08-25
+
+Status: active
+
+## 1. Purpose
+
+This is the authoritative program-wide plan. It assigns permanent workstream
+IDs, records the current stop/resume point of every WS, and defines dependencies
+between WSs. Detailed scope belongs in each `ws.md`; implementation design,
+acceptance, results, and interruption state belong in each `phase.md`.
+
+The immediate north star is:
+
+> Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
+> establish a working network path with reproducible evidence.
+
+## 2. Goals
+
+### 2.1 Current project goal
+
+Reimplement the useful operating-system functionality and interfaces found in
+commercial UNIX, BSD, and Linux as zedBSD under the most permissive practical
+license. The implementation is clean and independent: compatibility is a
+behavioral and interface target, not permission to copy proprietary or
+incompatibly licensed base-system source.
+
+The zedBSD base system—including the kernel, libc, boot environment, init and
+service infrastructure, core command set, system libraries, and native system
+tools—is fully reimplemented for zedBSD. External implementations are not
+incorporated into the base system.
+
+Software distributed as packages is a separate boundary. Packages may build
+and provide GNU software and other third-party software under their respective
+licenses. This allows familiar GNU applications and toolchains without changing
+the licensing or implementation policy of the zedBSD base system.
+
+### 2.2 Final product goal
+
+Deliver zedBSD as a common operating-system foundation for:
+
+- desktop operating systems;
+- mobile operating systems;
+- embedded systems, including routers and network appliances; and
+- server operating systems.
+
+These products may select different packages, services, drivers, user
+interfaces, and security/resource policies while sharing the reimplemented
+base system and stable zedBSD interfaces.
+
+### 2.3 Program completion direction
+
+The project advances toward the final goal when the base system can be built
+from its own maintained source, boots reliably on supported targets, provides
+the documented UNIX/POSIX-oriented interfaces, and supports product-specific
+package sets for all four target classes. Individual WSs may complete or pause
+before this long-term product goal is reached.
+
+## 3. Workstream registry
+
+| WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
+| --- | --- | --- | --- | --- | --- |
+| `ws001` | POSIX.1-2024 compliance | Paused, ledger active | `ws001-p010` complete | Re-rank open ledger rows, then define the next Phase | [WS001](ws001-posix/ws.md) |
+| `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
+| `ws003` | Dell Latitude 5320 bring-up | Planned | No Phase started | Create hardware-inventory and QEMU USB-boot Phases | [WS003](ws003-bringup/ws.md) |
+| `ws004` | Hardware expansion | Planned | No Phase started | Audit PCIe/DMA/interrupt foundations and xHCI gap | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WPA | Planned | WS002 Phase 20 is the inherited baseline | Start physical-network diagnostic Phase after inventory | [WS005](ws005-networking/ws.md) |
+| `ws006` | Input and evdev | Planned | No Phase started | Freeze the evdev compatibility profile | [WS006](ws006-input/ws.md) |
+| `ws007` | Graphics and desktop | Planned | No Phase started | Repair X11 packaging/input before GPU UAPI work | [WS007](ws007-graphics/ws.md) |
+| `ws008` | Noct and BeUI | Blocked before Phase | No Phase started | Obtain the authoritative Noct tree/revision | [WS008](ws008-noct/ws.md) |
+| `ws009` | Documentation | Planned | No Phase started | Establish document layout and link validation | [WS009](ws009-documentation/ws.md) |
+
+## 4. Milestones
+
+| Milestone | Required result | Owning WSs |
+| --- | --- | --- |
+| M0 — Baseline preserved | Current QEMU boot, init, login, shell, and service behavior remains usable | WS001, WS002 |
+| M1 — QEMU USB root | The bootloader and kernel boot through emulated xHCI USB mass storage and retain the selected root | WS003, WS004 |
+| M2 — Latitude USB shell | The target laptop repeatedly boots from USB through init/login to a stable shell | WS003, WS004, WS009 |
+| M3 — Latitude network | At least one documented physical interface configures and transfers data | WS003, WS004, WS005 |
+| M4 — Native platform devices | NVMe, USB HID, and the selected WLAN work on the target | WS004, WS005, WS006 |
+| M5 — Application environments | X11 is usable and Noct/BeUI supports zedBSD upstream | WS006, WS007, WS008 |
+| M6 — Accelerated graphics | `/dev/gpu0`, i915, the declared Vulkan profile, and GLES-on-Vulkan operate coherently | WS004, WS007 |
+| M7 — Wayland desktop | A zedBSD Wayland compositor/DE runs on the supported input and graphics stacks | WS006, WS007 |
+| Continuous | POSIX debt and public documentation remain traceable | WS001, WS009, all producers |
+
+## 5. Dependency map
+
+```text
+WS002 service baseline
+  +-- WS005 networkd/net/WPA expansion
+
+WS003 hardware inventory
+  +-- WS004 xHCI + USB storage -- WS003 QEMU/Latitude USB root
+  |                                  +-- WS003 diagnostics/network
+  +-- WS004 PCIe/DMA/interrupts
+       +-- NVMe
+       +-- WLAN -- WS005 wpa/networkd
+       +-- i915 -- WS007 GPU/Vulkan/GLES/Wayland
+
+WS004 xHCI -- WS006 USB HID -- evdev
+                                  +-- WS007 X11/Wayland
+                                  +-- WS008 BeUI
+
+WS001 compliance and WS009 documentation cross all workstreams.
+```
+
+## 6. Priority waves
+
+1. Preserve M0 and capture the exact Latitude hardware inventory.
+2. Implement QEMU xHCI USB-root boot and stable boot-device selection.
+3. Reach a Latitude USB-root login shell and establish diagnostics.
+4. Bring up a physical network path, NVMe, evdev, and USB HID.
+5. Add the selected WLAN driver and pluggable WPA path; repair X11 and add the
+   upstream Noct target/BeUI backend.
+6. Freeze the GPU UAPI, implement i915, Vulkan, and OpenGL ES 2.0.
+7. Implement the Wayland compositor/desktop environment.
+
+WS001 and WS009 advance within every wave when bounded work is selected. Lower
+priority POSIX gaps may remain paused if they do not block the active milestone.
+
+## 7. Decisions that gate new Phases
+
+| Decision | Owning WS | Required before |
+| --- | --- | --- |
+| Exact Latitude BIOS, boot mode, PCI/USB topology and IDs | WS003 | Driver selection and hardware acceptance |
+| Initial Secure Boot scope | WS003 | Freezing the USB image matrix |
+| USB CDC ACM versus ECM/NCM and device-role capability | WS003/WS005 | Any CDC implementation Phase |
+| WLAN controller and firmware policy | WS004/WS005 | WLAN driver/backend Phases |
+| Linux/FreeBSD evdev compatibility profile | WS006 | Publishing `/dev/input/eventN` UAPI |
+| zedBSD GPU/Vulkan capability profile | WS007 | Publishing `/dev/gpuN` UAPI |
+| Authoritative Noct repository and revision | WS008 | First Noct implementation Phase |
+
+## 8. Interruption and resumption
+
+A WS does not need to complete all planned Phases in one execution period. A WS
+may be paused after a Phase, or a Phase may be interrupted at a safe checkpoint.
+At interruption:
+
+1. this master records the WS status, last verified Phase, and exact resume
+   point;
+2. `ws.md` records completed, current, and remaining Phase rows;
+3. the active `phase.md` records completed work packages, failing/unrun tests,
+   working-tree assumptions, and the next safe action;
+4. unresolved POSIX findings are also entered in WS001;
+5. partial or stub behavior is never reported as completed acceptance.
+
+The detailed state vocabulary and file contracts are in
+[governance.md](governance.md).
+
+## 9. Reconsideration boundaries
+
+Stop the active Phase and update its state before changing the plan when:
+
+- target hardware IDs do not match the selected driver family;
+- a stable UAPI cannot represent the target without a breaking redesign;
+- required firmware has unresolved loading, licensing, or redistribution
+  constraints;
+- QEMU cannot model the required hardware and no safe test double, passthrough,
+  or physical diagnostic path exists;
+- USB root requires a boot/root architecture change outside the active Phase;
+- a requested compatibility target conflicts with an explicit zedBSD design
+  policy.

@@ -1,7 +1,0 @@
-type=daemon
-command=/bin/sh
-arguments=/etc/phase20-smoke.sh
-after=syslogd,net,cron
-requires=networkd,net
-restart=no
-required=YES
