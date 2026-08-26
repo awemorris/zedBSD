@@ -35,6 +35,11 @@
 #define ZBL6_HANDOFF_V4_VERSION 4
 #define ZBL6_HANDOFF_V4_SIZE 100
 
+#define ZBL6_HANDOFF_V3_FRAMEBUFFER_BASE_OFFSET 64
+#define ZBL6_HANDOFF_V3_FRAMEBUFFER_WIDTH_OFFSET 80
+#define ZBL6_HANDOFF_V3_FRAMEBUFFER_HEIGHT_OFFSET 84
+#define ZBL6_HANDOFF_V3_FRAMEBUFFER_STRIDE_OFFSET 88
+
 #define ZBL6_HANDOFF_FLAG_UEFI (1U << 0)
 #define ZBL6_HANDOFF_FLAG_MEMORY_MAP (1U << 1)
 #define ZBL6_HANDOFF_FLAG_ACPI_RSDP (1U << 2)
@@ -150,6 +155,20 @@ _Static_assert(sizeof(struct zbl6_handoff_v3) == ZBL6_HANDOFF_V3_SIZE,
 	       "ZBL6 handoff v3 size");
 _Static_assert(sizeof(struct zbl6_handoff_v4) == ZBL6_HANDOFF_V4_SIZE,
 	       "ZBL6 handoff v4 size");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v3, framebuffer_base) ==
+		   ZBL6_HANDOFF_V3_FRAMEBUFFER_BASE_OFFSET,
+	       "ZBL6 framebuffer base offset");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v3, framebuffer_width) ==
+		   ZBL6_HANDOFF_V3_FRAMEBUFFER_WIDTH_OFFSET,
+	       "ZBL6 framebuffer width offset");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v3,
+				 framebuffer_height) ==
+		   ZBL6_HANDOFF_V3_FRAMEBUFFER_HEIGHT_OFFSET,
+	       "ZBL6 framebuffer height offset");
+_Static_assert(__builtin_offsetof(struct zbl6_handoff_v3,
+				 framebuffer_stride) ==
+		   ZBL6_HANDOFF_V3_FRAMEBUFFER_STRIDE_OFFSET,
+	       "ZBL6 framebuffer stride offset");
 _Static_assert(sizeof(struct zbl6_memory_range) == 24,
 	       "ZBL6 memory range size");
 #endif

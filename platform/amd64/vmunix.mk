@@ -25,7 +25,8 @@ AMD64_CFLAGS := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
 AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
 
 AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/amd64/asm.c src/hal/amd64/lib.c \
-	src/hal/amd64/page.c src/hal/amd64/space.c src/hal/amd64/cmain.c \
+	src/hal/amd64/page.c src/hal/amd64/space.c \
+	src/hal/amd64/acpi-window.c src/hal/amd64/cmain.c \
 	src/hal/amd64/descriptor.c src/hal/amd64/int.c src/hal/amd64/irq.c \
 	src/hal/amd64/msi-source.c \
 	src/hal/amd64/task.c src/hal/amd64/percpu.c src/hal/amd64/smp.c \

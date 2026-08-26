@@ -171,7 +171,7 @@ bsp_boot_init(const void *raw_boot_info)
 		    raw_v2->kernel_phys_end > 0x01200000ULL ||
 		    (raw_v2->bootstrap_cr3 & 0xfffU) != 0 ||
 		    raw_v2->bootstrap_cr3 >= 0x40000000ULL ||
-		    raw_v2->rsdp == 0 || raw_v2->rsdp >= 0x40000000ULL)
+		    raw_v2->rsdp == 0)
 			HAL_FATAL("invalid amd64 ZBL6 v2 handoff");
 		boot_info_v2 = *raw_v2;
 		if (raw->version == ZBL6_HANDOFF_V3_VERSION ||
@@ -282,6 +282,35 @@ bsp_mem_range(uint32_t index, uint64_t *base, uint64_t *size, uint32_t *type)
 	*size = boot_memory_range[index].size;
 	*type = boot_memory_range[index].type;
 	return 1;
+}
+
+int
+bsp_physical_range_mappable(uint64_t physical, size_t size)
+{
+	uint64_t end;
+	uint32_t index;
+	int legacy = boot_info_v2.magic != ZBL6_HANDOFF_MAGIC;
+
+	if (size == 0 || physical > UINT64_MAX - size)
+		return 0;
+	end = physical + size;
+	/* The v1 BIOS handoff has only a usable-memory total.  SeaBIOS places
+	 * checksum-protected ACPI tables in the reserved gap just above that
+	 * total, so retain the old sub-1-GiB readable extent for this path. */
+	if (legacy)
+		return end <= 0x40000000ULL;
+	for (index = 0; index < boot_memory_range_count; index++) {
+		uint64_t range_end = boot_memory_range[index].base +
+				     boot_memory_range[index].size;
+		uint32_t type = boot_memory_range[index].type;
+
+		if (boot_memory_range[index].base <= physical && end <= range_end &&
+		    (type == ZBL6_MEMORY_RESERVED ||
+		     type == ZBL6_MEMORY_ACPI_RECLAIM ||
+		     type == ZBL6_MEMORY_ACPI_NVS))
+			return 1;
+	}
+	return 0;
 }
 
 uint64_t

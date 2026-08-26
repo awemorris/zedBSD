@@ -27,6 +27,14 @@
 #define PTE_WRITE 0x002ULL
 #define PTE_LARGE 0x080ULL
 
+#define DIAGNOSTIC_BLOCK_WIDTH 24U
+#define DIAGNOSTIC_BLOCK_HEIGHT 16U
+#define DIAGNOSTIC_BLOCK_GAP 8U
+#define DIAGNOSTIC_MARGIN 8U
+#define DIAGNOSTIC_PANEL_WIDTH 136U
+#define DIAGNOSTIC_PANEL_HEIGHT 40U
+#define DIAGNOSTIC_PIXEL 0x00ffffffU
+
 extern uint8_t zbl_transition_start[];
 extern uint8_t zbl_transition_end[];
 
@@ -38,6 +46,8 @@ struct loader_context {
 
 typedef void(EFIAPI *transition_fn)(uint64_t, uint64_t, uint64_t, uint64_t)
     __attribute__((noreturn));
+
+static void __attribute__((noreturn)) halt(void);
 
 static void
 byte_zero(void *pointer, UINTN size)
@@ -125,6 +135,83 @@ console_ascii(struct loader_context *context, const char *string)
 	}
 	buffer[used] = 0;
 	context->system->ConOut->OutputString(context->system->ConOut, buffer);
+}
+
+static void
+console_hex64(struct loader_context *context, const char *label, uint64_t value)
+{
+	static const char digits[] = "0123456789abcdef";
+	char message[64];
+	UINTN used = 0;
+	int shift;
+
+	while (*label != 0 && used + 1U < sizeof(message))
+		message[used++] = *label++;
+	if (used + 20U >= sizeof(message))
+		halt();
+	message[used++] = '0';
+	message[used++] = 'x';
+	for (shift = 60; shift >= 0; shift -= 4)
+		message[used++] = digits[(value >> shift) & 15U];
+	message[used++] = '\n';
+	message[used] = 0;
+	console_ascii(context, message);
+}
+
+/*
+ * Leave a firmware-independent, photographable progress code in the GOP
+ * framebuffer.  Stage one clears the panel and every stage adds one white
+ * block.  Later code duplicates this exact geometry after the CR3 switch and
+ * at the first kernel instruction.
+ */
+static void
+framebuffer_stage(const struct zbl6_framebuffer *framebuffer, unsigned stage)
+{
+	volatile uint32_t *pixels =
+	    (volatile uint32_t *)(uintptr_t)framebuffer->physical_base;
+	unsigned block, origin_x, x, y;
+
+	if (stage == 0 || stage > 4U ||
+	    framebuffer->width < DIAGNOSTIC_PANEL_WIDTH ||
+	    framebuffer->height < DIAGNOSTIC_PANEL_HEIGHT)
+		halt();
+	origin_x = framebuffer->width - DIAGNOSTIC_PANEL_WIDTH;
+	if (stage == 1U)
+		for (y = 0; y < DIAGNOSTIC_PANEL_HEIGHT; y++)
+			for (x = 0; x < DIAGNOSTIC_PANEL_WIDTH; x++)
+				pixels[(uint64_t)y * framebuffer->stride +
+				       origin_x + x] = 0;
+	block = stage - 1U;
+	for (y = 0; y < DIAGNOSTIC_BLOCK_HEIGHT; y++)
+		for (x = 0; x < DIAGNOSTIC_BLOCK_WIDTH; x++)
+			pixels[(uint64_t)(y + DIAGNOSTIC_MARGIN) *
+				   framebuffer->stride +
+			       origin_x + DIAGNOSTIC_MARGIN +
+			       block * (DIAGNOSTIC_BLOCK_WIDTH +
+					DIAGNOSTIC_BLOCK_GAP) +
+			       x] = DIAGNOSTIC_PIXEL;
+	__asm__ volatile("sfence" : : : "memory");
+}
+
+static void
+framebuffer_map_error(const struct zbl6_framebuffer *framebuffer,
+		      enum zbl_uefi_map_result result)
+{
+	volatile uint32_t *pixels =
+	    (volatile uint32_t *)(uintptr_t)framebuffer->physical_base;
+	unsigned block, origin_x, x, y;
+
+	if (result <= ZBL_UEFI_MAP_OK || result > ZBL_UEFI_MAP_EMPTY)
+		result = ZBL_UEFI_MAP_INVALID_ARGUMENT;
+	origin_x = framebuffer->width - DIAGNOSTIC_PANEL_WIDTH;
+	for (block = 0; block < (unsigned)result; block++)
+		for (y = 0; y < 6U; y++)
+			for (x = 0; x < 8U; x++)
+				pixels[(uint64_t)(y + 30U) * framebuffer->stride +
+				       origin_x + DIAGNOSTIC_MARGIN +
+				       block * 12U + x] =
+				    DIAGNOSTIC_PIXEL;
+	__asm__ volatile("sfence" : : : "memory");
 }
 
 static void __attribute__((noreturn))
@@ -444,6 +531,15 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	if (handoff->common.rsdp == 0)
 		fail_status(&context, "Locate ACPI RSDP", EFI_NOT_FOUND);
 	handoff->common.flags |= ZBL6_HANDOFF_FLAG_ACPI_RSDP;
+	console_hex64(&context, "A64 RSDP ", handoff->common.rsdp);
+	console_hex64(&context, "A64 GOP  ", framebuffer.physical_base);
+	console_hex64(&context, "A64 LOW  ", low_address);
+	{
+		uint64_t cr4;
+
+		__asm__ volatile("movq %%cr4,%0" : "=r"(cr4));
+		console_hex64(&context, "A64 CR4  ", cr4);
+	}
 
 	map_size = 0;
 	status = boot->GetMemoryMap(&map_size, 0, &map_key, &descriptor_size,
@@ -471,6 +567,11 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 		console_ascii(&context, "\n");
 		fail_status(&context, "Normalize memory map", EFI_LOAD_ERROR);
 	}
+	console_hex64(&context, "A64 MAPSZ ", map_size);
+	console_hex64(&context, "A64 DESCSZ ", descriptor_size);
+	console_hex64(&context, "A64 DESCVER ", descriptor_version);
+	console_hex64(&context, "A64 RANGES ", range_count);
+	console_ascii(&context, "A64 MARK 1=EBS 2=MAP 3=CR3 4=KERN\n");
 	console_ascii(&context, "A64 UEFI READY\n");
 
 	for (attempt = 0; attempt < 3U; attempt++) {
@@ -478,29 +579,27 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 		status =
 		    boot->GetMemoryMap(&map_size, map, &map_key,
 				       &descriptor_size, &descriptor_version);
-		if (EFI_ERROR(status)) {
-			debug_port("A64 UEFI FINAL MAP FAILED\n");
-			halt();
-		}
+		if (EFI_ERROR(status))
+			fail_status(&context, "Final memory map", status);
 		status = boot->ExitBootServices(image, map_key);
 		if (status == EFI_SUCCESS)
 			break;
-		if (status != EFI_INVALID_PARAMETER) {
-			debug_port("A64 UEFI EXIT FAILED\n");
-			halt();
-		}
+		if (status != EFI_INVALID_PARAMETER)
+			fail_status(&context, "ExitBootServices", status);
 	}
-	if (status != EFI_SUCCESS) {
-		debug_port("A64 UEFI EXIT RETRIES EXHAUSTED\n");
-		halt();
-	}
+	if (status != EFI_SUCCESS)
+		fail_status(&context, "ExitBootServices retries", status);
+	framebuffer_stage(&framebuffer, 1U);
+	debug_port("A64 UEFI BOOT SERVICES EXITED\n");
 	map_result = zbl_uefi_normalize_memory_map(
 	    map, map_size, descriptor_size, ranges, MAX_MEMORY_RANGES,
 	    &range_count);
 	if (map_result != ZBL_UEFI_MAP_OK) {
+		framebuffer_map_error(&framebuffer, map_result);
 		debug_port("A64 UEFI FINAL MAP REJECTED\n");
 		halt();
 	}
+	framebuffer_stage(&framebuffer, 2U);
 	handoff->common.memory_range_count = range_count;
 	debug_port("A64 UEFI EXIT\n");
 	((transition_fn)(uintptr_t)(low_address + LOW_TRAMPOLINE_OFFSET))(

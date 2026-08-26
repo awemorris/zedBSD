@@ -5,6 +5,8 @@
 #include "percpu.h"
 #include "space.h"
 #include "smp.h"
+#include "acpi-window.h"
+#include "bsp.h"
 #include "bsp-pcat/lapic.h"
 #include "bootloader/include/amd64-handoff.h"
 
@@ -18,6 +20,14 @@ static uint64_t system_pd[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64_t system_kernel_pt[8][512]
 	__attribute__((aligned(PAGE_SIZE)));
 static uint64_t system_mmio_pd[512] __attribute__((aligned(PAGE_SIZE)));
+#define AMD64_ACPI_PDPT_INDEX 509U
+#define AMD64_ACPI_WINDOW_BASE 0xffffffff40000000ULL
+static uint64_t system_acpi_pd[512] __attribute__((aligned(PAGE_SIZE)));
+static uint64_t
+    system_acpi_pt[AMD64_ACPI_WINDOW_PT_COUNT][512]
+	__attribute__((aligned(PAGE_SIZE)));
+static struct amd64_acpi_window acpi_window;
+static paddr_t acpi_physical_max;
 #define AMD64_ECAM_PD_FIRST 128U
 #define AMD64_ECAM_PD_COUNT 128U
 #define AMD64_ECAM_VIRTUAL_BASE 0xffffffffd0000000ULL
@@ -42,6 +52,25 @@ static struct amd64_shootdown_request shootdowns[AMD64_SHOOTDOWN_REQUESTS];
 
 static void shootdown(hal_space_t handle, void *vaddr, size_t size);
 static void service_shootdowns(hal_cpu_id_t cpu);
+
+static paddr_t
+cpu_physical_max(void)
+{
+	uint32_t eax = 0x80000000U, ebx, ecx, edx;
+	unsigned bits = 36U;
+
+	__asm__ volatile("cpuid"
+	    : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
+	if (eax >= 0x80000008U) {
+		eax = 0x80000008U;
+		__asm__ volatile("cpuid"
+		    : "+a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx));
+		bits = eax & 0xffU;
+	}
+	if (bits < 32U || bits > 52U)
+		bits = 36U;
+	return ((paddr_t)1U << bits) - 1U;
+}
 
 static void
 table_count_drop(void)
@@ -98,6 +127,10 @@ amd64_space_init(void)
 	hal_memset(system_pd, 0, sizeof(system_pd));
 	hal_memset(system_kernel_pt, 0, sizeof(system_kernel_pt));
 	hal_memset(system_mmio_pd, 0, sizeof(system_mmio_pd));
+	hal_memset(system_acpi_pd, 0, sizeof(system_acpi_pd));
+	hal_memset(system_acpi_pt, 0, sizeof(system_acpi_pt));
+	amd64_acpi_window_init(&acpi_window);
+	acpi_physical_max = cpu_physical_max();
 	ecam_pd_used = 0;
 	for (index = 0; index < 512; index++)
 		system_pd[index] = (uint64_t)index * 0x200000ULL |
@@ -158,6 +191,13 @@ amd64_space_init(void)
 	system_pd[0] &= ~AMD64_PTE_NX;
 	system_pdpt[0] = amd64_direct_to_phys(system_pd) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	for (index = 0; index < AMD64_ACPI_WINDOW_PT_COUNT; index++)
+		system_acpi_pd[index] =
+		    amd64_direct_to_phys(system_acpi_pt[index]) |
+		    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
+	system_pdpt[AMD64_ACPI_PDPT_INDEX] =
+	    amd64_direct_to_phys(system_acpi_pd) |
+	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 	system_pdpt[510] = amd64_direct_to_phys(system_pd) |
 	    AMD64_PTE_PRESENT | AMD64_PTE_WRITE;
 	system_pdpt[511] = amd64_direct_to_phys(system_mmio_pd) |
@@ -177,6 +217,44 @@ amd64_space_init(void)
 	system_cr3 = amd64_direct_to_phys(system_pml4);
 	asm_load_cr3(system_cr3);
 	__atomic_store_n(&AMD64_CURRENT_SPACE, HAL_SPACE_SYS, __ATOMIC_RELEASE);
+}
+
+const void *
+amd64_acpi_map_physical(paddr_t physical, size_t size)
+{
+	unsigned first, new_first, new_count, index;
+	paddr_t page_physical;
+	size_t offset, page_span;
+
+	page_physical = physical & ~(paddr_t)(PAGE_SIZE - 1U);
+	offset = (size_t)(physical - page_physical);
+	if (size == 0 || size > SIZE_MAX - offset ||
+	    size + offset >
+		(size_t)AMD64_ACPI_WINDOW_SLOTS * PAGE_SIZE)
+		return NULL;
+	page_span = size + offset;
+	if (page_span > SIZE_MAX - (PAGE_SIZE - 1U))
+		return NULL;
+	page_span = (page_span + PAGE_SIZE - 1U) & ~(size_t)(PAGE_SIZE - 1U);
+	if (page_physical > acpi_physical_max ||
+	    page_span - 1U > acpi_physical_max - page_physical ||
+	    !bsp_physical_range_mappable(page_physical, page_span) ||
+	    !amd64_acpi_window_reserve(&acpi_window, physical, size, &first,
+				       &offset, &new_first, &new_count))
+		return NULL;
+	for (index = 0; index < new_count; index++) {
+		unsigned slot = new_first + index;
+		paddr_t page = acpi_window.slot_physical[slot];
+
+		system_acpi_pt[slot / 512U][slot % 512U] =
+		    (uint64_t)page | AMD64_PTE_PRESENT | AMD64_PTE_NX;
+	}
+	if (new_count != 0) {
+		__atomic_thread_fence(__ATOMIC_RELEASE);
+		asm_flush_tlb();
+	}
+	return (const void *)(uintptr_t)(AMD64_ACPI_WINDOW_BASE +
+		(uint64_t)first * PAGE_SIZE + offset);
 }
 
 int

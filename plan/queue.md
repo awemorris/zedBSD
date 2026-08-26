@@ -1,12 +1,12 @@
-# Queue: SMP heap integrity and resumed USB acceptance
+# Queue: Latitude post-READY localization and high-RSDP correction
 
 Last updated: 2026-08-26
 
-QID: `q010`
+QID: `q011`
 
-Queue status: finished
+Queue status: in-progress
 
-Queue finished: **Yes**
+Queue finished: **No**
 
 Authorization: approved by user on 2026-08-26
 
@@ -14,49 +14,73 @@ Timebox: no fixed duration
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q009](queue-q009.md)
+Previous Queue: [q010](queue-q010.md)
 
 ## Purpose
 
-Diagnose and repair the rare SMP kernel-heap corruption which interrupted q009,
-then resume `ws004-p006` and restart its 500-run q35/xHCI USB acceptance gate
-from run 1.
-
-This Queue contains only the two WS004 Phases required for that dependency
-chain. No unrelated hardware or feature Phase is authorized.
+Resume only `ws003-p002`. Make every boundary after `A64 UEFI READY` visible on
+the Latitude without firmware console calls, use one physical diagnostic boot
+to identify the first failing boundary, and correct only the failure supported
+by that evidence.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative documents | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws004-p008` | [WS004](ws004-hardware/ws.md), [Phase](ws004-hardware/phase008-smp-heap-integrity/phase.md), [HW-T12 evidence](ws004-hardware/tests/q010-hwt12-evidence.md) | completed | Shared heap lock violation and aligned-prefix underflow corrected; focused and control regressions pass |
-| 2 | `ws004-p006` | [WS004](ws004-hardware/ws.md), [Phase](ws004-hardware/phase006-usb-overlay-write/phase.md), [HW-T12](ws004-hardware/tests/README.md) | completed automatic milestone | Revised 500-boot pristine-image USB gate passes with zero kernel/storage failures; detailed manual acceptance remains separate |
+| 1 | `ws003-p002` | [WS003](ws003-bringup/ws.md), [Phase](ws003-bringup/phase002-uefi-memory-map/phase.md), [BR-T32 evidence](ws003-bringup/tests/latitude-uefi-evidence.md) | in-progress | Four physical GOP markers identify the old 1-GiB RSDP rejection; the bounded correction passes 4/8/16-GiB OVMF USB boots, crosses the former Latitude stop once, and has BR-T32 hardware acceptance at 1/3 |
+
+## Dependencies and uncertainty
+
+- The diagnostic physical run is complete: four blocks prove kernel entry and
+  the measured RSDP is `0x64ffe014`.
+- The correction does not broaden the general direct map or allocator. It uses
+  an early-only, bounded 16-MiB sparse ACPI mapping window.
+- QEMU/OVMF acceptance requires the same image to reach `login:` at 4, 8, and
+  16 GiB with an RSDP above 1 GiB.
+- Three user-operated Latitude cold boots are required after the corrected
+  image is built. Run 1/3 reaches ACPI/IRQ/HAL; two repetitions remain.
+- The first downstream failure is both xHCI functions rejecting their
+  capability image. It is planned as `ws003-p003`, which is not part of q011
+  and is not authorized for implementation by this Queue.
 
 ## Execution contract
 
-- Follow the p008 evidence order. Do not hide allocator corruption with retry,
-  delays, CPU pinning, disabled validation, or a reduced SMP count.
-- Use `qemu-system-x86_64` with the exact q35/xHCI/SMP=4/NE2000 topology and a
-  fresh disposable raw-image copy for every counted boot.
-- Use port `0xe9` debug-console text as the primary machine oracle. OCR is
-  optional corroboration for a captured failure.
-- Do not consume `.internal/`, run `make check`, commit changes, or mutate the
-  pristine base image.
-- Use focused tests, `make -j16`, and `git diff --check`.
+- Do not call UEFI console or any boot service after successful
+  `ExitBootServices()`.
+- Keep the marker implementation independent of port `0xe9`; the latest stage
+  must remain recognizable in a photograph if execution halts.
+- Preserve existing debug-port text for OVMF automation.
+- Correct a defect inside the UEFI-to-early-amd64 boundary only when the marker
+  and bounded facts support it. Extract an address-space/LA57 redesign instead
+  of silently broadening this Queue.
+- Use focused tests, `make -j16`, QEMU OVMF USB control, and
+  `git diff --check`. Do not use `make check`, `.internal/`, or commits.
 
-## Update record
+## Execution record
 
-| Item | Status | Evidence / blocker | Next action |
-| --- | --- | --- | --- |
-| `ws004-p008` | completed | syslogd's large sysctl buffer used unlocked libc allocation on the shared kernel heap; sysctl now uses `kern_malloc/free`, future libc calls share the lock, and aligned allocation arithmetic is corrected | No automatic action; retain detailed manual acceptance handoff |
-| `ws004-p006` | completed automatic milestone | First 500 of 501 recorded fresh-image boots pass with zero kernel, USB/storage, or harness failures; focused tests and 10/10 controls pass | User performs detailed manual acceptance separately |
+Execution was approved on 2026-08-26. The diagnostic physical run, correction,
+and software gates are complete; corrected-image Latitude acceptance remains.
 
-## Closure checklist
-
-- [x] The first heap corruption is localized and corrected with a focused
-      regression.
-- [x] SMP=4 USB and IDE controls have no allocator/kernel failures.
-- [x] The resumed 500-run HW-T12 gate passes or p006 is marked Uncleared with
-      a precise new blocker.
-- [x] Phase, WS, tests/evidence, master, and Queue status agree.
-- [x] Queue is finished and ready to archive.
+- Final corrected image: `build/amd64/hdd-image.img`
+- Image SHA-256:
+  `5d6900b49f2edf51a742b94491783f1f6d7c5809ea57cd43d982140a825a0dd8`
+- BR-T23 memory-map fixture: PASS
+- Physical diagnostic: RSDP `0x64ffe014`, CR4 `0x668`, 173 descriptors,
+  135 normalized ranges, and four GOP blocks; U1 proved
+- Confirmed cause: the old pre-console `rsdp >= 0x40000000` handoff rejection
+- ACPI sparse-window fixture: PASS
+- BR-T24 q35/OVMF/xHCI/SMP=4 USB boot at 4/8/16 GiB: 3/3 PASS;
+  every run observed high RSDP, ACPI/IRQ readiness, four CPUs, and `login:`
+- PC/AT BIOS xHCI USB control: 1/1 PASS
+- 2026-08-26 requested revalidation: both focused fixtures PASS; `make -j16`
+  reports the production image up to date; image SHA-256 remains
+  `5d6900b49f2edf51a742b94491783f1f6d7c5809ea57cd43d982140a825a0dd8`
+- Revalidation BR-T24 under QEMU 10.0.11: 4/8/16-GiB cases PASS in
+  12/11/11 seconds with RSDP `0x000000007f77e014`; legacy-BIOS q35/xHCI USB
+  control PASS 1/1 in 11 seconds
+- Physical corrected-image run 1/3: PASS through kernel ACPI/IRQ/HAL and timer;
+  the previous high-RSDP boundary is cleared in this run
+- Downstream handoff: both xHCI functions fail at `capabilities (13)`, followed
+  by zero physical disks and UUID `ENOENT`; analysis and the proposed solution
+  are in [ws003-p003](ws003-bringup/phase003-latitude-xhci-capability-mmio/phase.md)
+- Physical disposition: pending two more Latitude cold boots for BR-T32

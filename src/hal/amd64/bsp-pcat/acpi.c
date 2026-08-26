@@ -40,6 +40,8 @@ static struct amd64_acpi_ecam discovered_ecam[AMD64_ECAM_MAX];
 static uint8_t *discovered_ecam_virtual[AMD64_ECAM_MAX];
 static unsigned discovered_ecam_count;
 
+static const struct rsdp *rsdp_at(hal_physaddr_t physical);
+
 static int
 bytes_equal(const void *left, const char *right, size_t size)
 {
@@ -61,19 +63,52 @@ checksum_ok(const void *data, size_t size)
 	return sum == 0;
 }
 
+static uint16_t
+load_u16(const void *data)
+{
+	uint16_t value;
+
+	hal_memcpy(&value, data, sizeof(value));
+	return value;
+}
+
+static uint32_t
+load_u32(const void *data)
+{
+	uint32_t value;
+
+	hal_memcpy(&value, data, sizeof(value));
+	return value;
+}
+
+static uint64_t
+load_u64(const void *data)
+{
+	uint64_t value;
+
+	hal_memcpy(&value, data, sizeof(value));
+	return value;
+}
+
+static const void *
+map_physical(uint64_t physical, size_t size)
+{
+	if (physical > UINTPTR_MAX || size == 0 ||
+	    size - 1U > UINTPTR_MAX - (uintptr_t)physical)
+		return NULL;
+	return amd64_acpi_map_physical((paddr_t)physical, size);
+}
+
 static const struct rsdp *
 scan_rsdp(uintptr_t start, uintptr_t end)
 {
 	uintptr_t address;
 	for (address = start; address + 20U <= end; address += 16U) {
-		const struct rsdp *candidate = amd64_phys_to_direct(address);
-		if (bytes_equal(candidate->signature, "RSD PTR ", 8) &&
-		    checksum_ok(candidate, 20) &&
+		const struct rsdp *candidate = rsdp_at(address);
+
+		if (candidate != NULL &&
 		    (candidate->revision < 2 ||
-		    (candidate->length >= sizeof(*candidate) &&
-		    candidate->length <= 4096U &&
-		    candidate->length <= end - address &&
-		    checksum_ok(candidate, candidate->length))))
+		     candidate->length <= end - address))
 			return candidate;
 	}
 	return NULL;
@@ -83,32 +118,41 @@ static const struct rsdp *
 rsdp_at(hal_physaddr_t physical)
 {
 	const struct rsdp *candidate;
+	uint32_t length;
 
-	if (physical >= AMD64_DIRECT_LIMIT ||
-	    physical > AMD64_DIRECT_LIMIT - 20U)
+	candidate = map_physical(physical, 20U);
+	if (candidate == NULL)
 		return NULL;
-	candidate = amd64_phys_to_direct((uintptr_t)physical);
 	if (!bytes_equal(candidate->signature, "RSD PTR ", 8) ||
 	    !checksum_ok(candidate, 20))
 		return NULL;
-	if (candidate->revision >= 2 &&
-	    (candidate->length < sizeof(*candidate) ||
-	    candidate->length > 4096U ||
-	    physical > AMD64_DIRECT_LIMIT - candidate->length ||
-	    !checksum_ok(candidate, candidate->length)))
-		return NULL;
+	if (candidate->revision >= 2) {
+		candidate = map_physical(physical, 24U);
+		if (candidate == NULL)
+			return NULL;
+		length = candidate->length;
+		if (length < sizeof(*candidate) || length > 4096U)
+			return NULL;
+		candidate = map_physical(physical, length);
+		if (candidate == NULL || !checksum_ok(candidate, length))
+			return NULL;
+	}
 	return candidate;
 }
 
 static const struct rsdp *
 find_rsdp(hal_physaddr_t supplied)
 {
-	const uint16_t *ebda_segment = amd64_phys_to_direct(0x40eU);
-	uintptr_t ebda = (uintptr_t)*ebda_segment << 4;
+	const uint16_t *ebda_segment;
+	uintptr_t ebda;
 	const struct rsdp *result = NULL;
 
 	if (supplied != 0)
 		return rsdp_at(supplied);
+	ebda_segment = map_physical(0x40eU, sizeof(*ebda_segment));
+	if (ebda_segment == NULL)
+		return NULL;
+	ebda = (uintptr_t)*ebda_segment << 4;
 	if (ebda >= 0x400U && ebda < 0xa0000U)
 		result = scan_rsdp(ebda, ebda + 1024U);
 	if (result == NULL)
@@ -117,16 +161,28 @@ find_rsdp(hal_physaddr_t supplied)
 }
 
 static const struct sdt *
-map_sdt(uint64_t physical)
+map_sdt_header(uint64_t physical)
 {
 	const struct sdt *table;
-	if (physical >= AMD64_DIRECT_LIMIT ||
-	    physical > AMD64_DIRECT_LIMIT - sizeof(*table))
+
+	table = map_physical(physical, sizeof(*table));
+	if (table == NULL || table->length < sizeof(*table) ||
+	    table->length > 0x100000U)
 		return NULL;
-	table = amd64_phys_to_direct((uintptr_t)physical);
-	if (table->length < sizeof(*table) || table->length > 0x100000U ||
-	    physical > AMD64_DIRECT_LIMIT - table->length ||
-	    !checksum_ok(table, table->length))
+	return table;
+}
+
+static const struct sdt *
+map_sdt(uint64_t physical)
+{
+	const struct sdt *table = map_sdt_header(physical);
+	uint32_t length;
+
+	if (table == NULL)
+		return NULL;
+	length = table->length;
+	table = map_physical(physical, length);
+	if (table == NULL || !checksum_ok(table, length))
 		return NULL;
 	return table;
 }
@@ -140,12 +196,21 @@ find_sdt(const struct rsdp *rsdp, const char signature[4], size_t minimum)
 	if (rsdp->revision >= 2 && rsdp->xsdt != 0) {
 		root = map_sdt(rsdp->xsdt);
 		width = 8;
-		if (root == NULL || !bytes_equal(root->signature, "XSDT", 4))
+		if (root == NULL) {
+			hal_printf("A64 ACPI XSDT MAP FAIL %08X:%08X\n",
+			    (uint32_t)(rsdp->xsdt >> 32), (uint32_t)rsdp->xsdt);
+			return NULL;
+		}
+		if (!bytes_equal(root->signature, "XSDT", 4))
 			return NULL;
 	} else {
 		root = map_sdt(rsdp->rsdt);
 		width = 4;
-		if (root == NULL || !bytes_equal(root->signature, "RSDT", 4))
+		if (root == NULL) {
+			hal_printf("A64 ACPI RSDT MAP FAIL %08X\n", rsdp->rsdt);
+			return NULL;
+		}
+		if (!bytes_equal(root->signature, "RSDT", 4))
 			return NULL;
 	}
 	if ((root->length - sizeof(*root)) % width != 0)
@@ -153,12 +218,18 @@ find_sdt(const struct rsdp *rsdp, const char signature[4], size_t minimum)
 	count = (root->length - sizeof(*root)) / width;
 	for (index = 0; index < count; index++) {
 		const uint8_t *entries = (const uint8_t *)root + sizeof(*root);
-		uint64_t physical = width == 8 ? ((const uint64_t *)entries)[index] :
-		    ((const uint32_t *)entries)[index];
-		const struct sdt *table = map_sdt(physical);
+		const uint8_t *entry = entries + (size_t)index * width;
+		uint64_t physical = width == 8 ? load_u64(entry) : load_u32(entry);
+		const struct sdt *table;
+
+		table = map_sdt_header(physical);
+
 		if (table != NULL && bytes_equal(table->signature, signature, 4) &&
-		    table->length >= minimum)
-			return table;
+		    table->length >= minimum) {
+			table = map_sdt(physical);
+			if (table != NULL)
+				return table;
+		}
 	}
 	return NULL;
 }
@@ -194,7 +265,8 @@ amd64_acpi_discover(struct amd64_acpi_info *result,
 {
 	const struct rsdp *rsdp;
 	const struct madt *madt;
-	const uint8_t *entry, *end;
+	const uint8_t *entry;
+	size_t remaining;
 	unsigned i;
 	int error;
 
@@ -206,21 +278,33 @@ amd64_acpi_discover(struct amd64_acpi_info *result,
 		result->isa[i].gsi = i;
 	}
 	rsdp = find_rsdp(rsdp_address);
-	if (rsdp == NULL || (madt = (const struct madt *)find_sdt(rsdp, "APIC",
-	    sizeof(struct madt))) == NULL)
+	if (rsdp == NULL) {
+		hal_puts("A64 ACPI RSDP FAIL\n");
 		return HAL_ERR_UNSUPPORTED;
+	}
+	hal_printf("A64 ACPI RSDP PASS rev=%u rsdt=%08X xsdt=%08X:%08X\n",
+	    rsdp->revision, rsdp->rsdt, (uint32_t)(rsdp->xsdt >> 32),
+	    (uint32_t)rsdp->xsdt);
+	madt = (const struct madt *)find_sdt(rsdp, "APIC",
+	    sizeof(struct madt));
+	if (madt == NULL) {
+		hal_puts("A64 ACPI MADT FAIL\n");
+		return HAL_ERR_UNSUPPORTED;
+	}
 	error = discover_mcfg(result, rsdp);
 	if (error != HAL_OK)
 		return error;
 	result->lapic_address = madt->lapic_address;
 	entry = madt->entries;
-	end = (const uint8_t *)madt + madt->header.length;
-	while (entry + 2 <= end) {
+	remaining = madt->header.length - sizeof(*madt);
+	while (remaining != 0) {
+		if (remaining < 2)
+			return HAL_ERR_INVALID;
 		uint8_t type = entry[0], length = entry[1];
-		if (length < 2 || entry + length > end)
+		if (length < 2 || length > remaining)
 			return HAL_ERR_INVALID;
 		if (type == 0 && length >= 8) {
-			uint32_t flags = *(const uint32_t *)(entry + 4);
+			uint32_t flags = load_u32(entry + 4);
 			uint8_t apic_id = entry[3];
 			if ((flags & 3U) != 0) {
 				int error = add_cpu(result, apic_id);
@@ -232,29 +316,30 @@ amd64_acpi_discover(struct amd64_acpi_info *result,
 			struct amd64_acpi_ioapic *io =
 			    &result->ioapics[result->ioapic_count++];
 			io->id = entry[2];
-			io->address = *(const uint32_t *)(entry + 4);
-			io->gsi_base = *(const uint32_t *)(entry + 8);
+			io->address = load_u32(entry + 4);
+			io->gsi_base = load_u32(entry + 8);
 		} else if (type == 2 && length >= 10 && entry[2] == 0 &&
 		    entry[3] < 16) {
 			struct amd64_acpi_iso *iso = &result->isa[entry[3]];
 			iso->source = entry[3];
-			iso->gsi = *(const uint32_t *)(entry + 4);
-			iso->flags = *(const uint16_t *)(entry + 8);
+			iso->gsi = load_u32(entry + 4);
+			iso->flags = load_u16(entry + 8);
 			iso->present = 1;
 		} else if (type == 5 && length >= 12) {
-			uint64_t address = *(const uint64_t *)(entry + 4);
+			uint64_t address = load_u64(entry + 4);
 			if (address > UINT32_MAX)
 				return HAL_ERR_UNSUPPORTED;
 			result->lapic_address = (uint32_t)address;
 		} else if (type == 9 && length >= 16) {
-			uint32_t apic_id = *(const uint32_t *)(entry + 4);
-			uint32_t flags = *(const uint32_t *)(entry + 8);
+			uint32_t apic_id = load_u32(entry + 4);
+			uint32_t flags = load_u32(entry + 8);
 			int error;
 			if ((flags & 3U) != 0 &&
 			    (error = add_cpu(result, apic_id)) != HAL_OK)
 				return error;
 		}
 		entry += length;
+		remaining -= length;
 	}
 	if (result->cpu_count == 0 || result->ioapic_count == 0 ||
 	    result->lapic_address == 0)

@@ -1,6 +1,6 @@
 # WS003 Phase 002: Latitude UEFI memory-map normalization
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 WSID: `ws003`
 
@@ -8,7 +8,7 @@ Phase ID: `p002`
 
 Combined ID: `ws003-p002`
 
-Status: uncleared; ExitBootServices sequencing correction awaits physical validation
+Status: in progress; high-RSDP boundary passes hardware 1/3, repeatability pending
 
 Acceptance disposition: **Uncleared**
 
@@ -48,15 +48,42 @@ the old three-failure path then halted without a visible post-READY message.
 The final normalization is now deferred until after a successful exit, leaving
 only the required two firmware calls in the retry interval.
 
-The highest proven physical tier is U0: firmware loads and runs the UEFI loader.
-U1 kernel entry and M2 Latitude USB shell acceptance are Uncleared. The static
-screen is a deliberate loader halt after the diagnostic, not evidence that the
-machine reached the kernel.
+The 2026-08-26 physical acceptance run with that corrected sequencing still
+stops visibly at exactly `A64 UEFI READY`. The sequencing defect was real, but
+the physical result falsifies it as a sufficient explanation. The loader emits
+all later diagnostics only to QEMU debug port `0xe9`, and the kernel can also
+halt in `bsp_boot_init()` before its framebuffer console is initialized.
+Consequently the current screen cannot distinguish final-map failure,
+`ExitBootServices()` failure, bootstrap page-table/CR3 failure, kernel-entry
+failure, or an early silent handoff rejection.
+
+The q011 diagnostic hardware run resolved that uncertainty. The Latitude
+reported `RSDP=0x64ffe014`, `CR4=0x668`, 173 firmware descriptors, and 135
+normalized ranges. Four persistent GOP blocks prove successful
+`ExitBootServices()`, final normalization, bootstrap-CR3 execution, and the
+first kernel instruction. LA57 is clear and the handoff capacity is not
+exhausted.
+
+The first proven stop was therefore the old `bsp_boot_init()` validation which
+rejected every RSDP at or above 1 GiB before console initialization. The
+Latitude address exceeds that limit.
+
+The first corrected-image hardware run now displays `ENTRY`, `PAGING`, ACPI
+RSDP, IRQ, XMM, eight-CPU HAL initialization, and the timer. This proves the
+former boundary is corrected in that run. It subsequently fails both physical
+xHCI functions at capability validation and therefore enumerates no boot USB
+disk. That downstream boundary is planned separately as `ws003-p003`; this
+Phase remains 1/3 until the declared BR-T32 repeatability gate is complete.
 
 ## Scope
 
-- Capture descriptor size/version/count and a bounded diagnostic identifying
-  the exact normalization rejection without dumping sensitive firmware data.
+- Capture descriptor size/version/count, RSDP and framebuffer addresses, and
+  CR4.LA57 state using bounded diagnostics that do not dump sensitive firmware
+  data.
+- Add post-READY visual stage markers written directly through the GOP
+  framebuffer, without calling firmware after `ExitBootServices()`, for:
+  successful boot-services exit, final-map normalization, bootstrap CR3 load,
+  and the first kernel instruction.
 - Compare the Latitude map shape with the UEFI contract and QEMU/OVMF control.
 - Accept valid maps regardless of descriptor ordering by sorting/merging a
   loader-owned representation when required, while rejecting real overlaps,
@@ -81,19 +108,29 @@ machine reached the kernel.
 
 ## Ordered work packages
 
-- [x] Add bounded reason diagnostics; a fresh Latitude result is still needed
-      to identify any remaining rejection.
+- [x] Make post-READY failure stages observable on physical GOP without relying
+      on port `0xe9` or boot services.
 - [x] Add host fixtures for sorted, unsorted-valid, adjacent, overlapping,
       malformed-size, overflow, and range-capacity maps.
 - [x] Implement safe canonical ordering/merging at the loader boundary.
 - [x] Verify QEMU/OVMF still emits `A64 UEFI EXIT` and reaches kernel/login.
 - [x] Re-verify QEMU/OVMF after moving final normalization past
       `ExitBootServices`.
-- [ ] Rebuild the USB image and verify the Latitude passes normalization,
-      `ExitBootServices`, and kernel entry.
-- [ ] Record the new highest U-tier and hand off any next physical failure
+- [x] Rebuild the diagnostic USB image and verify its marker path reaches login
+      under q35/OVMF/xHCI/SMP=4.
+- [x] Record the latest visible stage and bounded address/state facts on the
+      Latitude.
+- [x] Correct the first proven failing boundary. If the evidence requires a
+      broader physical-map or LA57 redesign, leave this Phase Uncleared and
+      extract that design rather than guessing inside this Phase.
+- [x] Boot the same production image through OVMF q35/xHCI USB with 4, 8, and
+      16 GiB; require a greater-than-1-GiB RSDP, ACPI/IRQ readiness, four CPUs,
+      `login:`, and no fatal/storage error.
+- [ ] Verify the Latitude passes normalization, `ExitBootServices`, CR3
+      transition, and kernel entry on three cold boots (current: 1/3).
+- [x] Record the new highest U-tier and hand off any next physical failure
       without claiming shell acceptance prematurely.
-- [ ] Run focused tests, `make -j16`, and `git diff --check`; do not use
+- [x] Run focused tests, `make -j16`, and `git diff --check`; do not use
       `make check` or `.internal/` material.
 
 ## Completion conditions
@@ -101,6 +138,9 @@ machine reached the kernel.
 - Valid descriptor maps in arbitrary order normalize deterministically; invalid
   size, overflow, overlap, and capacity cases fail with distinct diagnostics.
 - QEMU/OVMF retains its current UEFI boot behavior.
+- One production image passes the BR-T24 OVMF q35/xHCI USB matrix at 4, 8,
+  and 16 GiB with an RSDP above 1 GiB, full ACPI/IRQ initialization, four
+  CPUs, and `login:`.
 - The Latitude passes `Normalize memory map`, exits boot services, and reaches
   an unambiguous kernel-entry marker on three cold boots from the USB image.
 - The handoff contains non-overlapping, ordered, correctly typed ranges within
@@ -109,7 +149,42 @@ machine reached the kernel.
 
 ## Interruption / resumption
 
-The BR-T23 fixture and post-sequencing OVMF USB run pass. OVMF emits `A64 UEFI
-EXIT`, reaches the amd64 kernel, mounts the overlay, starts init, and reaches
-`login:`. Resume with the rebuilt USB image on the Latitude and run BR-T32
-three times. Do not infer the physical result from OVMF.
+The BR-T23 fixture, q011 diagnostic run, bounded ACPI-window correction, and
+BR-T24 software gates are complete. The exact old stop was selected from
+physical evidence rather than inferred from OVMF. One corrected-image Latitude
+cold boot crosses that stop and reaches the running kernel; resume with two
+more cold boots for BR-T32. The observed downstream xHCI failure belongs to
+planned `ws003-p003` and is not implementation scope for q011.
+
+The q011 diagnostic image prints RSDP, GOP, low-bootstrap, CR4, map size,
+descriptor size/version, and normalized range count before `READY`. It reserves
+the top-right GOP panel for a persistent unary stage code:
+
+- one large block: `ExitBootServices()` succeeded;
+- two: the accepted final memory map normalized successfully;
+- three: execution continued under the bootstrap CR3; and
+- four: the first kernel instruction executed.
+
+An ordinary failure returned by the final `GetMemoryMap()` or
+`ExitBootServices()` is printed through the still-live firmware console. If
+final normalization fails after exit, one large block remains and 1--7 small
+lower blocks encode the `zbl_uefi_map_result` value.
+
+The Latitude photograph showed all four blocks and `RSDP=0x64ffe014`, proving
+U1 and selecting the old 1-GiB RSDP rejection as the exact first stop. The
+kernel now retains its 1-GiB general direct map and allocator but maps validated
+ACPI pages through a dedicated persistent 16-MiB sparse window. The window is
+early-boot-only, read-only, NX, supervisor-only, non-global, and bounded to
+4096 aggregate unique pages. Physical spans are page-rounded and checked
+against CPU MAXPHYADDR and, for UEFI, ACPI reclaim/NVS/reserved map entries.
+Legacy BIOS retains its historical sub-1-GiB readable extent because its v1
+handoff does not describe SeaBIOS's reserved ACPI-table gap.
+
+BR-T24 passes 3/3 using the same production image at 4, 8, and 16 GiB. Every
+case placed the RSDP at `0x7f77e014` and reached ACPI validation, IRQ readiness,
+four CPUs, USB-root init, and `login:` without fatal or storage errors. A
+legacy-BIOS q35/xHCI USB control also passes 1/1. BR-T32 remains Uncleared only
+pending two more Latitude cold boots of the corrected final image. Run 1/3
+crossed the old boundary and exposed `xhci: attach failed at capabilities (13)`
+on both physical xHCI functions; see
+[latitude-xhci-evidence.md](../tests/latitude-xhci-evidence.md).
