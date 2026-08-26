@@ -8,9 +8,9 @@ Phase ID: `p002`
 
 Combined ID: `ws003-p002`
 
-Status: in progress; high-RSDP boundary passes hardware 1/3, repeatability pending
+Status: Complete
 
-Acceptance disposition: **Uncleared**
+Acceptance disposition: **Cleared**
 
 Parent: [WS003](../ws.md)
 
@@ -68,12 +68,12 @@ The first proven stop was therefore the old `bsp_boot_init()` validation which
 rejected every RSDP at or above 1 GiB before console initialization. The
 Latitude address exceeds that limit.
 
-The first corrected-image hardware run now displays `ENTRY`, `PAGING`, ACPI
+The corrected-image hardware runs display `ENTRY`, `PAGING`, ACPI
 RSDP, IRQ, XMM, eight-CPU HAL initialization, and the timer. This proves the
-former boundary is corrected in that run. It subsequently fails both physical
+former boundary is corrected. The image subsequently fails both physical
 xHCI functions at capability validation and therefore enumerates no boot USB
 disk. That downstream boundary is planned separately as `ws003-p003`; this
-Phase remains 1/3 until the declared BR-T32 repeatability gate is complete.
+Phase completed its declared BR-T32 gate 3/3.
 
 ## Scope
 
@@ -126,8 +126,8 @@ Phase remains 1/3 until the declared BR-T32 repeatability gate is complete.
 - [x] Boot the same production image through OVMF q35/xHCI USB with 4, 8, and
       16 GiB; require a greater-than-1-GiB RSDP, ACPI/IRQ readiness, four CPUs,
       `login:`, and no fatal/storage error.
-- [ ] Verify the Latitude passes normalization, `ExitBootServices`, CR3
-      transition, and kernel entry on three cold boots (current: 1/3).
+- [x] Verify the Latitude passes normalization, `ExitBootServices`, CR3
+      transition, and kernel entry on three cold boots (result: 3/3).
 - [x] Record the new highest U-tier and hand off any next physical failure
       without claiming shell acceptance prematurely.
 - [x] Run focused tests, `make -j16`, and `git diff --check`; do not use
@@ -147,14 +147,21 @@ Phase remains 1/3 until the declared BR-T32 repeatability gate is complete.
   the fixed handoff capacity.
 - Focused tests, `make -j16`, and `git diff --check` pass.
 
+## Actual result
+
+All completion conditions pass. The same production image passes the focused
+fixtures, the 4/8/16-GiB OVMF USB matrix, the legacy-BIOS control, and BR-T32
+3/3 on the Latitude. Each physical run reaches `ENTRY`, `PAGING`, ACPI RSDP,
+IRQ, XMM, eight-CPU HAL initialization, and the timer. The later xHCI
+capability failure is outside this Phase and is handed to `ws003-p003`.
+
 ## Interruption / resumption
 
-The BR-T23 fixture, q011 diagnostic run, bounded ACPI-window correction, and
-BR-T24 software gates are complete. The exact old stop was selected from
-physical evidence rather than inferred from OVMF. One corrected-image Latitude
-cold boot crosses that stop and reaches the running kernel; resume with two
-more cold boots for BR-T32. The observed downstream xHCI failure belongs to
-planned `ws003-p003` and is not implementation scope for q011.
+The BR-T23 fixture, q011 diagnostic run, bounded ACPI-window correction,
+BR-T24 software gates, and BR-T32 physical acceptance are complete. The exact
+old stop was selected from physical evidence rather than inferred from OVMF.
+Resume WS003 by selecting planned `ws003-p003` in a new Queue; the downstream
+xHCI failure was not implementation scope for q011.
 
 The q011 diagnostic image prints RSDP, GOP, low-bootstrap, CR4, map size,
 descriptor size/version, and normalized range count before `READY`. It reserves
@@ -183,8 +190,8 @@ handoff does not describe SeaBIOS's reserved ACPI-table gap.
 BR-T24 passes 3/3 using the same production image at 4, 8, and 16 GiB. Every
 case placed the RSDP at `0x7f77e014` and reached ACPI validation, IRQ readiness,
 four CPUs, USB-root init, and `login:` without fatal or storage errors. A
-legacy-BIOS q35/xHCI USB control also passes 1/1. BR-T32 remains Uncleared only
-pending two more Latitude cold boots of the corrected final image. Run 1/3
-crossed the old boundary and exposed `xhci: attach failed at capabilities (13)`
+legacy-BIOS q35/xHCI USB control also passes 1/1. BR-T32 passes 3/3 with the
+corrected final image. All three runs crossed the old boundary and exposed
+`xhci: attach failed at capabilities (13)`
 on both physical xHCI functions; see
 [latitude-xhci-evidence.md](../tests/latitude-xhci-evidence.md).

@@ -68,7 +68,7 @@ lengths, transfer-event ownership, Link TRB chain/cycle wrap at 254→0, and the
 cancellation DMA-retention rule:
 
 ```sh
-cc -std=c11 -Wall -Wextra -Werror \
+cc -std=c11 -Iinclude -Wall -Wextra -Werror \
   plan/ws004-hardware/tests/xhci-model-test.c \
   -o /tmp/ws004-xhci-model-test
 /tmp/ws004-xhci-model-test

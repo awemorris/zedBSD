@@ -11,11 +11,15 @@ Parent: [WS003](../ws.md)
 | BR-T22 | QEMU root I/O | Sustained read/write, sync, reboot, missing-root, and timeout behavior pass on disposable images |
 | BR-T23 | UEFI memory-map normalization | Valid sorted/unsorted maps canonicalize; malformed size, overflow, overlap, and capacity cases fail distinctly; OVMF still boots |
 | BR-T24 | QEMU high-RSDP USB boot | The same production image boots OVMF/q35/xHCI at 4, 8, and 16 GiB; RSDP is above 1 GiB and ACPI/IRQ, four CPUs, USB root, and `login:` pass without fatal/storage errors |
-| BR-T25 | Host xHCI capability/MMIO fixture | Valid 1.0/1.1/1.2 capability layouts pass; zero/all-one and malformed extents fail distinctly; Memory Space enable precedes MMIO and rollback is balanced |
-| BR-T30 | Latitude cold boot | Repeated cold boots reach init/login/shell from USB with diagnostic logs |
+| BR-T25 | Host xHCI capability/MMIO fixture | Valid 1.0/1.1/1.2 capability layouts pass; zero/all-one and malformed extents fail distinctly; all-ones runtime MMIO is invalid; Memory Space enable precedes MMIO; 32/64-bit BAR assignment is transactional and fail-closed |
+| BR-T26 | Host USB HCD teardown fixture | Failed checked quiesce retains the registered bus and blocks new URBs; a later successful quiesce/stop removes the same bus |
+| BR-T27 | Host xHCI control/EP0/reset fixture | Setup, Data, and Status TRBs have exact xHCI 1.2 reserved-zero and TD boundaries; EP0 packet size/Average TRB Length and bounded port-reset outcomes are correct |
+| BR-T28 | Host xHCI cancellation fixture | Running, Halted, Error, and Stopped endpoint recovery retains request/DMA ownership until Stop/Reset/Set-Dequeue or controller quiesce succeeds |
+| BR-T30 | Final Latitude repeatability | One frozen integrated image reaches init/login/shell from USB on five consecutive cold boots; a failure breaks the sequence and is analyzed before retry |
 | BR-T31 | Latitude root I/O | USB-root filesystem smoke and sustained I/O complete without reset/corruption |
 | BR-T32 | Latitude UEFI entry | Three cold boots pass memory-map normalization and `ExitBootServices`, then show an unambiguous kernel-entry marker |
-| BR-T33 | Latitude xHCI enumeration | Both xHCI functions are identified and the boot-media controller attaches and enumerates USB mass storage in three cold boots without `capabilities (13)` or `devices=0` |
+| BR-T33 | Latitude xHCI boundary confirmation | One boot identifies both xHCI functions and the boot-media controller attaches and enumerates USB mass storage without `capabilities (13)`, `boot-storage wait expired`, or `physical disks=0`; final repeatability belongs to BR-T30 |
+| BR-T34 | Latitude xHCI device enumeration | One boot of the frozen p004 image reaches `usb-storage: sda` without an EP0 transfer failure or boot-storage timeout; later U3 errors are recorded separately |
 | BR-T40 | CDC selection | Selected ACM or ECM/NCM profile interoperates and reconnects; device-role capability is proven first |
 | BR-T50 | Physical network | Static or DHCP setup, peer reachability, and a bounded data transfer pass |
 
@@ -51,6 +55,33 @@ cc -std=c11 -I. -Wall -Wextra -Werror \
   plan/ws003-bringup/tests/uefi-memory-map-test.c \
   -o /tmp/zedbsd-uefi-memory-map-test
 /tmp/zedbsd-uefi-memory-map-test
+```
+
+BR-T25 directly shares the production xHCI capability arithmetic and PCI
+enable-state implementation. It covers valid xHCI 1.0--1.2 snapshots,
+reason-coded malformed layouts, scratchpad and relative xECP arithmetic,
+32/64-bit BAR readback and transactional assignment, command-state rollback,
+all-ones runtime-MMIO rejection, and fail-closed partial-write/readback-error
+paths:
+
+```sh
+cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
+  drivers/pci.c \
+  plan/ws003-bringup/tests/xhci-capability-mmio-test.c \
+  -o /tmp/ws003-xhci-capability-mmio-test
+/tmp/ws003-xhci-capability-mmio-test
+```
+
+The p003 teardown regression links the production USB core and verifies that a
+failed checked HCD quiesce retains its registered bus, blocks new URBs, and can
+be retried safely, while a later successful quiesce/stop removes that same bus:
+
+```sh
+cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
+  drivers/usb.c \
+  plan/ws003-bringup/tests/usb-hcd-unregister-test.c \
+  -o /tmp/ws003-usb-hcd-unregister-test
+/tmp/ws003-usb-hcd-unregister-test
 ```
 
 BR-T24 is the production OVMF USB matrix. It defaults to the required 4, 8,

@@ -4,19 +4,18 @@ Last updated: 2026-08-26
 
 WSID: `ws003`
 
-Status: active; corrected image passes the former UEFI boundary once, and the
-Latitude xHCI U2 Phase is planned
+Status: active; `ws003-p003` Partial, `ws003-p004` ready for a future Queue
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws003-p002` corrected the high-RSDP rejection, passes
-OVMF at 4, 8, and 16 GiB, preserves the BIOS path, and has now crossed the
-former physical stop once; BR-T32 repeatability is 1/3
+OVMF at 4, 8, and 16 GiB, preserves the BIOS path, and passes BR-T32 3/3 on
+the Latitude
 
-Resume point: record two more q011 corrected-image Latitude cold boots for the
-BR-T32 repeatability gate. The earliest downstream stop is the two physical
-xHCI functions failing capability validation; select `ws003-p003` explicitly
-in a later Queue before implementing it. Hardware inventory remains incomplete.
+Resume point: q012 finished with `ws003-p003` uncleared. Both Latitude xHCI
+1.2 controllers attach, but EP0 device enumeration fails before USB storage.
+Place `ws003-p004` in a future Queue and begin with the exact control-TRB
+fixture. Hardware inventory remains incomplete.
 
 Shared tests: [WS003 test index](tests/README.md)
 
@@ -25,24 +24,25 @@ Shared tests: [WS003 test index](tests/README.md)
 | Combined ID | Work item | Status | Result |
 | --- | --- | --- | --- |
 | `ws003-p001` | [BR-00 hardware inventory](phase001-hardware-inventory/phase.md) | Carried forward | Active host is WSL2; target DMI/PCI/USB evidence is unavailable |
-| `ws003-p002` | [BR-05 Latitude UEFI memory map](phase002-uefi-memory-map/phase.md) | In progress; BR-T32 1/3 | Four physical markers proved U1 and `RSDP=0x64ffe014`; the corrected image now reaches ACPI/IRQ/HAL on hardware once, while BR-T24 4/8/16-GiB OVMF and legacy BIOS remain passing |
-| `ws003-p003` | [Latitude xHCI capability/MMIO bring-up](phase003-latitude-xhci-capability-mmio/phase.md) | Planned; Queue approval pending | Move U1 to U2 by diagnosing both xHCI PCI functions, correcting decode/BAR/capability handling, and enumerating the boot USB mass-storage device |
+| `ws003-p002` | [BR-05 Latitude UEFI memory map](phase002-uefi-memory-map/phase.md) | Complete | Four physical markers proved U1 and `RSDP=0x64ffe014`; the corrected image reaches ACPI/IRQ/HAL on hardware 3/3, while BR-T24 4/8/16-GiB OVMF and legacy BIOS remain passing |
+| `ws003-p003` | [Latitude xHCI capability/MMIO bring-up](phase003-latitude-xhci-capability-mmio/phase.md) | Partial (`q012` uncleared) | Both physical xHCI 1.2 controllers pass capability validation and attach; BR-T33 then fails during EP0 enumeration before mass storage |
+| `ws003-p004` | [Latitude xHCI device enumeration](phase004-latitude-xhci-device-enumeration/phase.md) | Ready; not queued | Correct Control TRB TD boundaries, port-reset completion, EP0 context, and cancellation recovery, then reach `usb-storage: sda` on hardware |
 
-`ws003-p003` is the bounded physical continuation of BR-04/BR-06 after the
-WS004 QEMU xHCI milestone. Its existence does not add it to q011 or authorize
-implementation.
+`ws003-p003` was the sole authorized item in q012. Its physical result closes
+the PCI/BAR/capability boundary and extracts the first device-enumeration stop
+to `ws003-p004`; q012 does not authorize that new Phase.
 
 ## Current xHCI handoff decisions
 
-- `capabilities (13)` means the driver's compound `ENODEV` validation failed;
-  it is not a hardware status code.
+- The former `capabilities (13)` compound `ENODEV` failure is cleared on both
+  physical functions; both report HCIVERSION 1.2 and `reject=00000000:ok`.
 - Enable PCI Memory Space before every BAR MMIO read, but keep bus mastering
   deferred until DMA/controller startup.
 - Diagnose the original and reassigned BAR and raw capability registers before
   choosing between a local ordering fix and bounded high-address MMIO support.
 - Keep U2 controller/storage enumeration separate from U3/U4 root and login
-  acceptance, and do not misclassify the downstream UUID `ENOENT` as a VFS
-  defect while physical disk count is zero.
+  acceptance. The current first failure is the EP0 control-transfer path,
+  before the storage-class driver or VFS.
 
 ## Goals
 
@@ -54,9 +54,10 @@ implementation.
 ## WS completion conditions
 
 WS003 is complete when USB boot reaches tier U5 in both the declared QEMU matrix
-and on the target laptop, repeated cold boots reach a usable shell, the root
-filesystem passes safe I/O tests, and one documented physical network path
-passes configuration and transfer tests.
+and on the target laptop, the frozen integrated image reaches a usable shell on
+five consecutive final-acceptance cold boots, the root filesystem passes safe
+I/O tests, and one documented physical network path passes configuration and
+transfer tests.
 
 Target: Dell Latitude 5320, Intel 11th generation platform
 
@@ -94,8 +95,8 @@ M1 requires U0–U5 in QEMU. M2 requires U0–U5 on the Latitude 5320.
 | BR-02 | Planned | QEMU boot through `qemu-xhci` and `usb-storage` | BR-01, xHCI work in HW track | U0–U5 pass in the declared BIOS/UEFI matrix |
 | BR-03 | Planned | Stable boot/root device selection rather than enumeration-order assumptions | Bootloader/kernel parameter review | Root selection survives reordered storage-device attachment and reports actionable failure |
 | BR-04 | Planned | Kernel xHCI and USB-storage continuity sufficient for USB root | xHCI, block layer, USB storage | Repeated QEMU I/O and reset/error tests pass |
-| BR-05 | In progress; Uncleared | Latitude firmware-to-kernel USB boot | BR-00–BR-04 | Current highest tier U1; corrected high-RSDP path reaches ACPI/IRQ/HAL 1/3 and must do so reliably on three cold boots |
-| BR-06 | Planned; xHCI U2 sub-gate extracted | Latitude USB root through init/login/shell | BR-05, `ws003-p003` | `ws003-p003` first enumerates the boot USB device; repeated cold boots then reach a usable shell and filesystem smoke passes |
+| BR-05 | Complete | Latitude firmware-to-kernel USB boot | BR-00–BR-04 | U1 passes: corrected high-RSDP path reaches ACPI/IRQ/HAL on three cold boots |
+| BR-06 | Planned; xHCI U2 sub-gate extracted | Latitude USB root through init/login/shell | BR-05, `ws003-p003`, `ws003-p004` | One physical success provisionally confirms each new boundary while implementation continues; after U4 is frozen, BR-T30 requires five consecutive shell boots and filesystem smoke passes |
 | BR-07 | Proposed | USB CDC diagnostic and/or network function selected and implemented | CDC profile decision, USB device/gadget capability | The selected profile interoperates with a documented host OS and recovers from reconnect |
 | BR-08 | Planned | At least one working physical network path | BR-00, BR-06, relevant NET/HW item | DHCP or static configuration, ping, and data transfer pass on hardware |
 

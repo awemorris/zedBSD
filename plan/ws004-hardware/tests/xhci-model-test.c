@@ -1,14 +1,10 @@
 /* Focused xHCI ring/context arithmetic fixture for ws004-p004. */
+#include <drivers/pci-xhci-capability.h>
+
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-
-static unsigned
-scratchpads(uint32_t hcs2)
-{
-	return (((hcs2 >> 27) & 31U) << 5) | ((hcs2 >> 21) & 31U);
-}
 
 static unsigned
 normal_trbs(uint64_t address, size_t length)
@@ -97,8 +93,8 @@ cancel_retains_dma(int stop_result)
 int
 main(void)
 {
-	assert(scratchpads(0) == 0);
-	assert(scratchpads((1U << 27) | (3U << 21)) == 35U);
+	assert(drv_xhci_scratchpad_count(0) == 0);
+	assert(drv_xhci_scratchpad_count((1U << 27) | (3U << 21)) == 97U);
 	assert(normal_trbs(0x10000U, 0) == 1U);
 	assert(normal_trbs(0x1fff0U, 32U) == 2U);
 	assert(normal_trbs(0x20000U, 0x20000U) == 2U);

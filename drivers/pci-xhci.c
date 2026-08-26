@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: Zlib */
 #include <drivers/pci-xhci.h>
 #include <drivers/pci.h>
+#include <drivers/pci-xhci-capability.h>
 #include <drivers/usb.h>
 #include <errno.h>
 #include <hal/hal.h>
@@ -23,6 +24,7 @@
 #define XHCI_STS_HALTED 0x01U
 #define XHCI_STS_EINT 0x08U
 #define XHCI_STS_FATAL 0x04U
+#define XHCI_STS_CNR 0x00000800U
 #define XHCI_PORT_CCS 0x00000001U
 #define XHCI_PORT_PED 0x00000002U
 #define XHCI_PORT_PR 0x00000010U
@@ -37,6 +39,14 @@
 #define XHCI_TRB_SLOT(n) ((uint32_t)(n) << 24)
 #define XHCI_RING_TRBS 256U
 #define XHCI_TIMEOUT 10000000U
+#define XHCI_PCI_COMMAND 0x04U
+#define XHCI_PCI_BAR0 0x10U
+#define XHCI_PCI_COMMAND_IO 0x0001U
+#define XHCI_PCI_COMMAND_MEMORY 0x0002U
+#define XHCI_PCI_COMMAND_MASTER 0x0004U
+#define XHCI_PCI_COMMAND_ENABLE \
+	(XHCI_PCI_COMMAND_IO | XHCI_PCI_COMMAND_MEMORY | \
+	XHCI_PCI_COMMAND_MASTER)
 
 struct xhci_trb {
 	volatile uint32_t parameter_low, parameter_high, status, control;
@@ -76,6 +86,8 @@ struct xhci_request {
 struct xhci_controller {
 	struct drv_pci_device *pci;
 	struct drv_pci_mapping mapping;
+	struct drv_pci_bar original_bar;
+	struct drv_pci_enable_state pci_enable_state;
 	volatile uint8_t *capability, *operational, *runtime, *doorbells;
 	struct drv_dma_buffer dcbaa, command_memory, event_memory, erst_memory;
 	struct drv_dma_buffer scratchpad_array, *scratchpads;
@@ -93,6 +105,10 @@ struct xhci_controller {
 	struct thread *port_worker;
 	volatile unsigned command_busy, event_busy;
 	volatile unsigned port_pending, port_stopping, root_ready;
+	unsigned bar_claimed, bar_mapped, original_bar_valid, pci_state_saved;
+	unsigned dma_quiesced, hcd_registered, irq_allocated, quarantined;
+	unsigned legacy_offset, legacy_claimed;
+	uint32_t legacy_control;
 	struct xhci_controller *next;
 };
 static struct xhci_controller *controllers;
@@ -114,6 +130,12 @@ wr32(volatile uint8_t *b, unsigned o, uint32_t v)
 	hal_io_mb();
 }
 static void
+wr8(volatile uint8_t *b, unsigned o, uint8_t v)
+{
+	b[o] = v;
+	hal_io_mb();
+}
+static void
 wr64(volatile uint8_t *b, unsigned o, uint64_t v)
 {
 	wr32(b, o, (uint32_t)v);
@@ -129,10 +151,205 @@ static int
 wait_bits(volatile uint8_t *b, unsigned o, uint32_t mask, uint32_t wanted)
 {
 	unsigned n;
-	for (n = 0; n < XHCI_TIMEOUT; n++)
-		if ((rd32(b, o) & mask) == wanted)
+	uint32_t value;
+
+	for (n = 0; n < XHCI_TIMEOUT; n++) {
+		value = rd32(b, o);
+		if (!drv_xhci_mmio32_valid(value))
+			return EIO;
+		if ((value & mask) == wanted)
 			return 0;
+	}
 	return ETIMEDOUT;
+}
+
+static void
+xhci_bar_raw(struct drv_pci_device *device, enum drv_pci_bar_type type,
+	uint32_t *low, uint32_t *high)
+{
+	*low = 0xffffffffU;
+	*high = 0;
+	(void)drv_pci_device_config_read32(device, XHCI_PCI_BAR0, low);
+	if (type == DRV_PCI_BAR_MEMORY64) {
+		*high = 0xffffffffU;
+		(void)drv_pci_device_config_read32(device, XHCI_PCI_BAR0 + 4U,
+		    high);
+	}
+}
+
+static void
+xhci_pci_identity(struct drv_pci_device *device)
+{
+	struct drv_pci_address address, bridge_address;
+	struct drv_pci_bus *bus;
+	struct drv_pci_device *bridge;
+
+	drv_pci_device_address(device, &address);
+	bus = drv_pci_device_bus(device);
+	bridge = bus != NULL ? drv_pci_bus_bridge(bus) : NULL;
+	if (bridge != NULL) {
+		drv_pci_device_address(bridge, &bridge_address);
+		hal_printf(
+		    "xhci: pci %04x:%02x:%02x.%u id=%04x:%04x sub=%04x:%04x rev=%02x parent=%04x:%02x:%02x.%u\n",
+		    address.segment, address.bus, address.device,
+		    address.function, drv_pci_device_vendor(device),
+		    drv_pci_device_product(device),
+		    drv_pci_device_subvendor(device),
+		    drv_pci_device_subproduct(device),
+		    drv_pci_device_revision(device), bridge_address.segment,
+		    bridge_address.bus, bridge_address.device,
+		    bridge_address.function);
+	} else {
+		hal_printf(
+		    "xhci: pci %04x:%02x:%02x.%u id=%04x:%04x sub=%04x:%04x rev=%02x parent=root\n",
+		    address.segment, address.bus, address.device,
+		    address.function, drv_pci_device_vendor(device),
+		    drv_pci_device_product(device),
+		    drv_pci_device_subvendor(device),
+		    drv_pci_device_subproduct(device),
+		    drv_pci_device_revision(device));
+	}
+}
+
+static int
+xhci_restore_bar(struct xhci_controller *controller)
+{
+	struct drv_pci_bar current;
+	int error;
+
+	if (!controller->original_bar_valid)
+		return 0;
+	error = drv_pci_device_bar(controller->pci, 0, &current);
+	if (error != 0)
+		return error;
+	if (current.bus_address == controller->original_bar.bus_address)
+		return 0;
+	return drv_pci_device_assign_bar(controller->pci, 0,
+	    controller->original_bar.bus_address);
+}
+
+static int
+xhci_bus_master_disable(struct xhci_controller *controller)
+{
+	uint16_t command;
+	int error;
+
+	error = drv_pci_device_set_bus_master(controller->pci, false);
+	if (error != 0)
+		return error;
+	error = drv_pci_device_config_read16(controller->pci,
+	    XHCI_PCI_COMMAND, &command);
+	if (error != 0)
+		return error;
+	return (command & XHCI_PCI_COMMAND_MASTER) == 0 ? 0 : EIO;
+}
+
+static int
+xhci_pci_quiesce(struct xhci_controller *controller)
+{
+	uint16_t command;
+	int error;
+
+	error = drv_pci_device_config_read16(controller->pci,
+	    XHCI_PCI_COMMAND, &command);
+	if (error != 0)
+		return error;
+	error = drv_pci_device_config_write16(controller->pci,
+	    XHCI_PCI_COMMAND,
+	    (uint16_t)(command & ~XHCI_PCI_COMMAND_ENABLE));
+	if (error != 0)
+		return error;
+	error = drv_pci_device_config_read16(controller->pci,
+	    XHCI_PCI_COMMAND, &command);
+	if (error != 0)
+		return error;
+	return (command & XHCI_PCI_COMMAND_ENABLE) == 0 ? 0 : EIO;
+}
+
+static void
+xhci_legacy_release(struct xhci_controller *controller)
+{
+	uint32_t control;
+	uint8_t owned;
+
+	if (!controller->legacy_claimed || controller->capability == NULL ||
+	    !drv_xhci_region_fits(controller->mapping.size,
+		controller->legacy_offset, 8U))
+		return;
+	control = rd32(controller->capability,
+	    controller->legacy_offset + 4U);
+	control = drv_xhci_legacy_control_restore(control,
+	    controller->legacy_control);
+	wr32(controller->capability, controller->legacy_offset + 4U, control);
+	owned = rd8(controller->capability, controller->legacy_offset + 3U);
+	wr8(controller->capability, controller->legacy_offset + 3U,
+	    owned & (uint8_t)~1U);
+	controller->legacy_claimed = 0;
+}
+
+static int
+xhci_pci_release(struct xhci_controller *controller)
+{
+	int error, bar_error = 0, master_error = 0, quiesce_error;
+
+	if (controller->pci_state_saved || controller->bar_mapped)
+		master_error = xhci_bus_master_disable(controller);
+	if (master_error != 0) {
+		hal_printf("xhci: PCI bus-master disable failed (%d)\n",
+		    master_error);
+		return master_error;
+	}
+	xhci_legacy_release(controller);
+	if (controller->bar_mapped) {
+		drv_pci_device_unmap_bar(controller->pci, &controller->mapping);
+		controller->bar_mapped = 0;
+	}
+	bar_error = xhci_restore_bar(controller);
+	if (bar_error != 0) {
+		hal_printf("xhci: BAR0 restore failed (%d)\n", bar_error);
+		quiesce_error = xhci_pci_quiesce(controller);
+		if (quiesce_error != 0)
+			hal_printf(
+			    "xhci: PCI quiesce after BAR failure failed (%d)\n",
+			    quiesce_error);
+		return bar_error;
+	}
+	if (controller->pci_state_saved) {
+		error = drv_pci_device_restore_enable_state(controller->pci,
+		    &controller->pci_enable_state);
+		if (error != 0) {
+			hal_printf(
+			    "xhci: PCI command restore failed (%d)\n",
+			    error);
+			quiesce_error = xhci_pci_quiesce(controller);
+			if (quiesce_error != 0)
+				hal_printf(
+				    "xhci: PCI command failure quiesce failed (%d)\n",
+				    quiesce_error);
+			return error;
+		}
+		controller->pci_state_saved = 0;
+	}
+	if (controller->bar_claimed) {
+		drv_pci_device_release_bar(controller->pci, 0);
+		controller->bar_claimed = 0;
+	}
+	return 0;
+}
+
+static void
+xhci_quarantine(struct xhci_controller *controller, const char *stage,
+	int error)
+{
+	if (!controller->quarantined) {
+		controller->quarantined = 1;
+		drv_pci_device_set_driver_data(controller->pci, controller);
+		controller->next = controllers;
+		controllers = controller;
+	}
+	hal_printf(
+	    "xhci: attach quarantined at %s (%d); controller ownership retained\n",
+	    stage, error);
 }
 
 static int
@@ -289,18 +506,58 @@ static int
 ownership(struct xhci_controller *c)
 {
 	uint32_t hcc = rd32(c->capability, 0x10U);
-	unsigned offset = ((hcc >> 16) & 0xffffU) * 4U, guard = 0;
-	while (offset && offset + 4U < c->mapping.size && guard++ < 64U) {
+	unsigned offset = ((hcc >> 16) & 0xffffU) * 4U;
+
+	if (offset != 0 && (offset < 0x20U ||
+	    !drv_xhci_region_fits(c->mapping.size, offset, 4U)))
+		return EIO;
+	while (offset != 0) {
 		uint32_t cap = rd32(c->capability, offset);
 		unsigned id = cap & 0xffU;
+		unsigned next;
+		int step;
+
+		if (id == 0U || id == 0xffU)
+			return EIO;
 		if (id == 1U) {
-			wr32(c->capability, offset, cap | 0x01000000U);
-			if (wait_bits(c->capability, offset, 0x00010000U, 0) !=
-			    0)
+			uint32_t control;
+			uint8_t owned;
+			unsigned count;
+
+			if (c->legacy_claimed)
+				return EIO;
+			if (!drv_xhci_region_fits(c->mapping.size, offset, 8U))
+				return EIO;
+			c->legacy_offset = offset;
+			c->legacy_control = rd32(c->capability, offset + 4U);
+			owned = rd8(c->capability, offset + 3U);
+			wr8(c->capability, offset + 3U, owned | 1U);
+			c->legacy_claimed = 1;
+			for (count = 0; count < XHCI_TIMEOUT; count++)
+				if (drv_xhci_legacy_ownership_ready(
+				    rd8(c->capability, offset + 2U),
+				    rd8(c->capability, offset + 3U)))
+					break;
+			if (count == XHCI_TIMEOUT) {
+				xhci_legacy_release(c);
 				return ETIMEDOUT;
-			return 0;
+			}
+			control = rd32(c->capability, offset + 4U);
+			wr32(c->capability, offset + 4U,
+			    drv_xhci_legacy_control_disable(control));
+			if ((rd32(c->capability, offset + 4U) &
+			    DRV_XHCI_LEGACY_SMI_ENABLE) != 0) {
+				xhci_legacy_release(c);
+				return EIO;
+			}
 		}
-		offset = ((cap >> 8) & 0xffU) * 4U;
+		step = drv_xhci_extended_capability_next(c->mapping.size,
+		    offset, cap, &next);
+		if (step < 0)
+			return EIO;
+		if (step == 0)
+			return 0;
+		offset = next;
 	}
 	return 0;
 }
@@ -1016,12 +1273,48 @@ fail:
 	return e;
 }
 
+static int
+xhci_quiesce(struct drv_usb_hcd *h)
+{
+	struct xhci_controller *c = hcd_controller(h);
+	int halt_error, master_error;
+	uint32_t command, iman;
+
+	if (c->dma_quiesced)
+		return 0;
+	iman = rd32(c->runtime, 0x20U);
+	wr32(c->runtime, 0x20U, (iman & ~2U) | 1U);
+	command = rd32(c->operational, XHCI_USBCMD);
+	wr32(c->operational, XHCI_USBCMD,
+	    command & ~(XHCI_CMD_RUN | XHCI_CMD_INTE));
+	halt_error = wait_bits(c->operational, XHCI_USBSTS,
+	    XHCI_STS_HALTED, XHCI_STS_HALTED);
+	master_error = xhci_bus_master_disable(c);
+	if (halt_error != 0) {
+		hal_printf(
+		    "xhci: stop did not reach HCHalted (halt=%d master=%d); retaining DMA/IRQ state\n",
+		    halt_error, master_error);
+		return halt_error;
+	}
+	c->dma_quiesced = 1;
+	if (master_error != 0)
+		hal_printf("xhci: bus-master disable failed; controller halted\n");
+	if (c->irq_cookie) {
+		drv_pci_device_disestablish_irq(c->pci, c->irq_cookie);
+		c->irq_cookie = NULL;
+	}
+	return 0;
+}
+
 static void
 xhci_stop(struct drv_usb_hcd *h)
 {
 	struct xhci_controller *c = hcd_controller(h);
-	wr32(c->operational, XHCI_USBCMD, 0);
-	wr32(c->runtime, 0x20U, 0);
+
+	if (!c->dma_quiesced) {
+		hal_printf("xhci: refusing to release DMA before HCHalted\n");
+		return;
+	}
 	xhci_scratchpads_free(c);
 	if (c->erst_memory.address)
 		drv_dma_free_coherent(h->dma, &c->erst_memory);
@@ -1030,9 +1323,21 @@ xhci_stop(struct drv_usb_hcd *h)
 	if (c->command.dma.address)
 		ring_free(c, &c->command);
 	if (c->dcbaa.address)
-		drv_dma_free_coherent(h->dma, &c->dcbaa);
+			drv_dma_free_coherent(h->dma, &c->dcbaa);
 	memset(&c->command_memory, 0, sizeof(c->command_memory));
 	c->events = NULL;
+}
+
+static int
+xhci_stop_checked(struct drv_usb_hcd *h)
+{
+	int error;
+
+	error = xhci_quiesce(h);
+	if (error != 0)
+		return error;
+	xhci_stop(h);
+	return 0;
 }
 
 static int
@@ -1040,7 +1345,9 @@ xhci_start(struct drv_usb_hcd *h)
 {
 	struct xhci_controller *c = hcd_controller(h);
 	struct xhci_erst *erst;
-	int e;
+	int e, stop_error;
+	if ((e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_CNR, 0)) != 0)
+		return e;
 	wr32(c->operational, XHCI_USBCMD,
 	     rd32(c->operational, XHCI_USBCMD) & ~XHCI_CMD_RUN);
 	if ((e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_HALTED,
@@ -1050,8 +1357,11 @@ xhci_start(struct drv_usb_hcd *h)
 	if ((e = wait_bits(c->operational, XHCI_USBCMD, XHCI_CMD_RESET, 0)) !=
 	    0)
 		return e;
+	if ((e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_CNR, 0)) != 0)
+		return e;
 	if ((rd32(c->operational, XHCI_PAGESIZE) & 1U) == 0)
 		return ENOTSUP;
+	c->dma_quiesced = 0;
 	if ((e = drv_dma_alloc_coherent(h->dma, 4096U, 64U, &c->dcbaa)) != 0)
 		goto fail;
 	memset(c->dcbaa.address, 0, 4096U);
@@ -1088,11 +1398,14 @@ xhci_start(struct drv_usb_hcd *h)
 	if (!e)
 		return 0;
 fail:
-	xhci_stop(h);
+	stop_error = xhci_stop_checked(h);
+	if (stop_error != 0)
+		return stop_error;
 	return e;
 }
 static const struct drv_usb_hcd_ops xhci_ops = {
     .start = xhci_start,
+    .quiesce = xhci_quiesce,
     .stop = xhci_stop,
     .device_enable = xhci_device_enable,
     .device_set_address = xhci_set_address,
@@ -1109,56 +1422,140 @@ static int
 xhci_attach(struct drv_pci_device *d, const struct drv_pci_id *id)
 {
 	struct xhci_controller *c;
+	struct drv_xhci_capability_snapshot snapshot;
+	struct drv_pci_address address;
+	struct drv_pci_bar mapped_bar;
 	const char *stage = "allocation";
 	unsigned count = 0;
-	uint32_t hcs, hcs2, hcc, doorbell_offset, runtime_offset;
-	unsigned capability_length, version;
+	uint32_t first, reasons, doorbell_offset, runtime_offset;
+	uint32_t original_low, original_high, mapped_low, mapped_high;
+	uint16_t command_before = 0xffffU, command_mapped, command_after;
 	const char *irq_type;
-	int e;
+	int cleanup_error, e;
 	(void)id;
 	c = hal_malloc(sizeof(*c));
 	if (!c)
 		return ENOMEM;
 	memset(c, 0, sizeof(*c));
+	c->dma_quiesced = 1;
 	spin_init(&c->active_lock, LOCK_RANK_DEVICE, "xHCI active request");
 	c->pci = d;
+	xhci_pci_identity(d);
+	drv_pci_device_address(d, &address);
 	stage = "BAR claim";
 	e = drv_pci_device_claim_bar(d, 0);
 	if (e != 0)
-		goto fail_unmapped;
+		goto fail;
+	c->bar_claimed = 1;
+	stage = "BAR inspection";
+	e = drv_pci_device_bar(d, 0, &c->original_bar);
+	if (e != 0)
+		goto fail;
+	c->original_bar_valid = 1;
+	xhci_bar_raw(d, c->original_bar.type, &original_low, &original_high);
+	stage = "PCI command save";
+	e = drv_pci_device_config_read16(d, XHCI_PCI_COMMAND,
+	    &command_before);
+	if (e != 0)
+		goto fail;
+	e = drv_pci_device_save_enable_state(d, &c->pci_enable_state);
+	if (e != 0)
+		goto fail;
+	c->pci_state_saved = 1;
 	stage = "BAR map";
 	e = drv_pci_device_map_bar(
 	    d, 0, DRV_PCI_MAP_READ | DRV_PCI_MAP_WRITE | DRV_PCI_MAP_NOCACHE,
 	    &c->mapping);
 	if (e != 0)
-		goto fail_claimed;
+		goto fail;
+	c->bar_mapped = 1;
+	stage = "BAR readback";
+	if (drv_pci_device_bar(d, 0, &mapped_bar) != 0 ||
+	    (mapped_bar.type != DRV_PCI_BAR_MEMORY32 &&
+	    mapped_bar.type != DRV_PCI_BAR_MEMORY64) ||
+	    c->mapping.address == NULL || c->mapping.size == 0 ||
+	    c->mapping.size > mapped_bar.size) {
+		e = EIO;
+		goto fail;
+	}
+	xhci_bar_raw(d, mapped_bar.type, &mapped_low, &mapped_high);
+	hal_printf(
+	    "xhci: pci %04x:%02x:%02x.%u BAR0 type=%u size=%08x:%08x original=%08x:%08x/%08x:%08x final=%08x:%08x/%08x:%08x mapped=%u\n",
+	    address.segment, address.bus, address.device, address.function,
+	    mapped_bar.type == DRV_PCI_BAR_MEMORY64 ? 64U : 32U,
+	    (uint32_t)(mapped_bar.size >> 32), (uint32_t)mapped_bar.size,
+	    (uint32_t)(c->original_bar.bus_address >> 32),
+	    (uint32_t)c->original_bar.bus_address, original_high, original_low,
+	    (uint32_t)(mapped_bar.bus_address >> 32),
+	    (uint32_t)mapped_bar.bus_address, mapped_high, mapped_low,
+	    (unsigned)c->mapping.size);
+	if (!drv_xhci_bar_readback_matches(mapped_bar.bus_address,
+	    mapped_bar.type == DRV_PCI_BAR_MEMORY64, mapped_low, mapped_high)) {
+		e = EIO;
+		goto fail;
+	}
+	if (drv_pci_device_config_read16(d, XHCI_PCI_COMMAND,
+	    &command_mapped) != 0 ||
+	    (command_mapped & 7U) != (command_before & 7U)) {
+		e = EIO;
+		stage = "BAR command restore";
+		goto fail;
+	}
+
+	/* Mapping a BAR does not require device decode.  Capability MMIO does. */
+	stage = "PCI memory enable";
+	if ((e = drv_pci_device_set_bus_master(d, false)) != 0 ||
+	    (e = drv_pci_device_enable_memory(d)) != 0 ||
+	    (e = drv_pci_device_config_read16(d, XHCI_PCI_COMMAND,
+		&command_after)) != 0)
+		goto fail;
+	hal_printf(
+	    "xhci: pci %04x:%02x:%02x.%u command=%04x->%04x (MEM on, MASTER off)\n",
+	    address.segment, address.bus, address.device, address.function,
+	    command_before, command_after);
+	if ((command_after & XHCI_PCI_COMMAND_MEMORY) == 0 ||
+	    (command_after & XHCI_PCI_COMMAND_MASTER) != 0) {
+		e = EIO;
+		goto fail;
+	}
+	hal_io_mb();
+
 	c->capability = c->mapping.address;
-	capability_length = rd8(c->capability, 0);
-	version = rd32(c->capability, 0) >> 16;
-	hcs = rd32(c->capability, 4);
-	hcs2 = rd32(c->capability, 8);
-	hcc = rd32(c->capability, 0x10U);
-	doorbell_offset = rd32(c->capability, 0x14U) & ~3U;
-	runtime_offset = rd32(c->capability, 0x18U) & ~31U;
-	c->max_slots = hcs & 0xffU;
-	c->ports = (hcs >> 24) & 0xffU;
-	c->context_size = (hcc & (1U << 2)) ? 64U : 32U;
-	c->scratchpad_count =
-	    (((hcs2 >> 27) & 31U) << 5) | ((hcs2 >> 21) & 31U);
-	if (!c->max_slots || !c->ports || capability_length < 0x20U ||
-	    (version != 0x100U && version != 0x110U) ||
-	    capability_length + XHCI_PORTSC(c->ports - 1U) + 4U >
-		c->mapping.size ||
-	    runtime_offset > c->mapping.size ||
-	    0x40U > c->mapping.size - runtime_offset ||
-	    doorbell_offset > c->mapping.size ||
-	    (size_t)(c->max_slots + 1U) * 4U >
-		c->mapping.size - doorbell_offset) {
+	memset(&snapshot, 0, sizeof(snapshot));
+	snapshot.mapping_size = c->mapping.size;
+	if (c->mapping.size >= 0x1cU) {
+		first = rd32(c->capability, 0);
+		snapshot.capability_length = first & 0xffU;
+		snapshot.version = first >> 16;
+		snapshot.structural_parameters1 = rd32(c->capability, 4);
+		snapshot.structural_parameters2 = rd32(c->capability, 8);
+		snapshot.capability_parameters1 = rd32(c->capability, 0x10U);
+		snapshot.doorbell_offset_raw = rd32(c->capability, 0x14U);
+		snapshot.runtime_offset_raw = rd32(c->capability, 0x18U);
+	}
+	reasons = drv_xhci_capability_validate(&snapshot);
+	hal_printf(
+	    "xhci: pci %04x:%02x:%02x.%u caps len=%02x version=%04x hcs1=%08x hcs2=%08x hcc1=%08x dboff=%08x rtsoff=%08x reject=%08x:%s\n",
+	    address.segment, address.bus, address.device, address.function,
+	    snapshot.capability_length, snapshot.version,
+	    snapshot.structural_parameters1, snapshot.structural_parameters2,
+	    snapshot.capability_parameters1, snapshot.doorbell_offset_raw,
+	    snapshot.runtime_offset_raw, reasons,
+	    drv_xhci_capability_reason_name(reasons));
+	if (reasons != 0) {
 		e = ENODEV;
 		stage = "capabilities";
 		goto fail;
 	}
-	c->operational = c->capability + capability_length;
+	doorbell_offset = snapshot.doorbell_offset_raw & ~3U;
+	runtime_offset = snapshot.runtime_offset_raw & ~31U;
+	c->max_slots = snapshot.structural_parameters1 & 0xffU;
+	c->ports = (snapshot.structural_parameters1 >> 24) & 0xffU;
+	c->context_size =
+	    (snapshot.capability_parameters1 & (1U << 2)) ? 64U : 32U;
+	c->scratchpad_count =
+	    drv_xhci_scratchpad_count(snapshot.structural_parameters2);
+	c->operational = c->capability + snapshot.capability_length;
 	c->runtime = c->capability + runtime_offset;
 	c->doorbells = c->capability + doorbell_offset;
 	c->hcd.name = "xHCI";
@@ -1169,9 +1566,8 @@ xhci_attach(struct drv_pci_device *d, const struct drv_pci_id *id)
 	stage = "ownership";
 	if ((e = ownership(c)) != 0)
 		goto fail;
-	stage = "PCI enable";
-	if ((e = drv_pci_device_enable_memory(d)) != 0 ||
-	    (e = drv_pci_device_set_bus_master(d, true)) != 0)
+	stage = "PCI bus master";
+	if ((e = drv_pci_device_set_bus_master(d, true)) != 0)
 		goto fail;
 	stage = "IRQ allocation";
 	/* One vector is sufficient; use MSI-X when present, then MSI or INTx.
@@ -1182,6 +1578,7 @@ xhci_attach(struct drv_pci_device *d, const struct drv_pci_id *id)
 						  DRV_PCI_IRQ_ALLOW_INTX,
 					      1, 1, &c->irq, &count)) != 0)
 		goto fail;
+	c->irq_allocated = 1;
 	stage = "IRQ establishment";
 	if ((e = drv_pci_device_establish_irq(d, &c->irq, xhci_irq, c, "xhci",
 					      &c->irq_cookie)) != 0)
@@ -1189,9 +1586,16 @@ xhci_attach(struct drv_pci_device *d, const struct drv_pci_id *id)
 	stage = "controller start";
 	if ((e = drv_usb_hcd_register(&c->hcd, &c->bus)) != 0)
 		goto fail;
+	c->hcd_registered = 1;
 	stage = "port worker";
 	if ((e = xhci_worker_start(c)) != 0) {
-		(void)drv_usb_hcd_unregister(&c->hcd);
+		int unregister_error = drv_usb_hcd_unregister(&c->hcd);
+
+		if (unregister_error != 0) {
+			e = unregister_error;
+			goto fail;
+		}
+		c->hcd_registered = 0;
 		goto fail;
 	}
 	drv_pci_device_set_driver_data(d, c);
@@ -1202,19 +1606,27 @@ xhci_attach(struct drv_pci_device *d, const struct drv_pci_id *id)
 						     : "INTx";
 	hal_printf(
 	    "xhci: PCI controller, version=%x ports=%u slots=%u irq=%u %s\n",
-	    rd32(c->capability, 0) >> 16, c->ports, c->max_slots, c->irq.vector,
+	    snapshot.version, c->ports, c->max_slots, c->irq.vector,
 	    irq_type);
 	return 0;
 fail:
+	if (c->hcd_registered || !c->dma_quiesced) {
+		xhci_quarantine(c, stage, e);
+		return 0;
+	}
 	if (c->irq_cookie)
 		drv_pci_device_disestablish_irq(d, c->irq_cookie);
-	if (count)
+	c->irq_cookie = NULL;
+	if (c->irq_allocated) {
 		drv_pci_device_free_irqs(d, &c->irq, 1);
-	(void)drv_pci_device_set_bus_master(d, false);
-	drv_pci_device_unmap_bar(d, &c->mapping);
-fail_claimed:
-	drv_pci_device_release_bar(d, 0);
-fail_unmapped:
+		c->irq_allocated = 0;
+	}
+	cleanup_error = xhci_pci_release(c);
+	if (cleanup_error != 0) {
+		hal_printf("xhci: attach failed at %s (%d)\n", stage, e);
+		xhci_quarantine(c, "PCI release", cleanup_error);
+		return 0;
+	}
 	hal_printf("xhci: attach failed at %s (%d)\n", stage, e);
 	hal_free(c);
 	return e;
@@ -1224,22 +1636,43 @@ xhci_detach(struct drv_pci_device *d, unsigned flags)
 {
 	struct xhci_controller *c = drv_pci_device_driver_data(d);
 	struct xhci_controller **link;
-	int error;
+	int error, had_worker;
 	(void)flags;
 	if (!c)
 		return 0;
-	xhci_worker_stop(c);
-	error = drv_usb_hcd_unregister(&c->hcd);
-	if (error) {
-		(void)xhci_worker_start(c);
-		return error;
+	had_worker = c->port_worker != NULL;
+	if (had_worker)
+		xhci_worker_stop(c);
+	if (c->hcd_registered) {
+		error = drv_usb_hcd_unregister(&c->hcd);
+		if (error) {
+			if (had_worker && error == EBUSY)
+				(void)xhci_worker_start(c);
+			else
+				c->quarantined = 1;
+			return error;
+		}
+		c->hcd_registered = 0;
+	}
+	if (!c->dma_quiesced) {
+		error = xhci_stop_checked(&c->hcd);
+		if (error != 0) {
+			c->quarantined = 1;
+			return error;
+		}
 	}
 	if (c->irq_cookie)
 		drv_pci_device_disestablish_irq(d, c->irq_cookie);
-	drv_pci_device_free_irqs(d, &c->irq, 1);
-	(void)drv_pci_device_set_bus_master(d, false);
-	drv_pci_device_unmap_bar(d, &c->mapping);
-	drv_pci_device_release_bar(d, 0);
+	c->irq_cookie = NULL;
+	if (c->irq_allocated) {
+		drv_pci_device_free_irqs(d, &c->irq, 1);
+		c->irq_allocated = 0;
+	}
+	error = xhci_pci_release(c);
+	if (error != 0) {
+		c->quarantined = 1;
+		return error;
+	}
 	drv_pci_device_set_driver_data(d, NULL);
 	for (link = &controllers; *link != NULL; link = &(*link)->next)
 		if (*link == c) {
@@ -1267,6 +1700,8 @@ drv_pci_xhci_probe_roots(void)
 {
 	struct xhci_controller *c;
 	for (c = controllers; c; c = c->next) {
+		if (c->quarantined)
+			continue;
 		drv_usb_hcd_root_hub_changed(&c->hcd);
 		c->port_pending = 0;
 		c->root_ready = 1;

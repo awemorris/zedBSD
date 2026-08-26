@@ -8,9 +8,9 @@ Phase ID: `p003`
 
 Combined ID: `ws003-p003`
 
-Status: Planned; Queue approval pending
+Status: Partial (`q012` finished; BR-T33 uncleared)
 
-Acceptance disposition: **Not started**
+Acceptance disposition: **PCI/BAR/capability accepted on hardware; USB device enumeration handed to `ws003-p004`**
 
 Parent: [WS003](../ws.md)
 
@@ -59,7 +59,7 @@ returns `ENOENT` (`6`). Those VFS messages are downstream evidence, not a
 separate boot-selector defect at this boundary.
 
 The visible ENTRY/ACPI/IRQ/HAL markers prove the former high-RSDP stop is
-cleared in this run. BR-T32 remains 1/3 until its repeatability gate is met.
+cleared in three runs. BR-T32 and `ws003-p002` are complete.
 
 ## Root-cause hypotheses
 
@@ -110,11 +110,10 @@ version or removing bounds checks.
 
 ## Dependencies
 
-- `ws003-p002` corrected high-RSDP path and kernel-console entry. Its remaining
-  BR-T32 repetitions may be satisfied by the same production image used here,
-  but the Phase records remain separate.
+- Completed `ws003-p002` high-RSDP path and kernel-console entry.
 - WS004 PCI/ECAM/MSI and xHCI QEMU milestones (`ws004-p002`--`p004`).
-- A disposable boot USB device and user-operated Latitude cold boots.
+- A disposable boot USB device and one user-operated Latitude boundary
+  confirmation during this implementation Phase.
 - Bounded PCI inventory for each xHCI function: segment/BDF, vendor, device,
   subsystem, revision, parent bridge, command register, and BAR0.
 
@@ -148,6 +147,8 @@ xHCI facts above.
 - `drivers/pci-xhci.c`
 - `drivers/pci.c` and `include/drivers/pci.h`, if balanced command-state or BAR
   inspection support is required
+- `drivers/usb.c` and `include/drivers/usb.h` for checked xHCI quiesce and
+  fail-closed unregister
 - `drivers/pci-pcat.c`
 - amd64 MMIO page mapping code only if H2 is confirmed
 - `plan/ws003-bringup/tests/` fixtures, runbooks, and evidence
@@ -155,51 +156,67 @@ xHCI facts above.
 
 ## Ordered work packages
 
-- [ ] Record this photograph as BR-T32 run 1/3 and establish xHCI capability
+- [x] Record the BR-T32 photographs and establish xHCI capability
       validation as the earliest downstream failure.
-- [ ] Emit one bounded diagnostic record per controller containing
+- [x] Emit one bounded diagnostic record per controller containing
       segment/BDF, vendor/device/revision, PCI COMMAND before and after Memory
       Space enable, BAR type/size/original low-high pair, assignment readback,
       parent bridge, and final mapping extent.
-- [ ] Refactor capability validation into a reason-coded snapshot containing
+- [x] Refactor capability validation into a reason-coded snapshot containing
       CAPLENGTH, HCIVERSION, HCSPARAMS1/2, HCCPARAMS1, DBOFF, RTSOFF, mapping
       size, and the exact failed predicate. Detect all-zero/all-one snapshots.
-- [ ] Add BR-T25 host fixtures for valid xHCI 1.0/1.1/1.2 layouts, zero/all-one
+- [x] Add BR-T25 host fixtures for valid xHCI 1.0/1.1/1.2 layouts, zero/all-one
       images, every extent failure, scratchpad field composition, relative
       xECP walking, and `PCI_COMMAND.MEM=0` sequencing/rollback.
-- [ ] Move balanced Memory Space enable before the first MMIO read. Keep bus
+- [x] Move balanced Memory Space enable before the first MMIO read. Keep bus
       master, IRQ allocation, controller registration, and teardown ordered and
       independently diagnosed.
-- [ ] Correct scratchpad composition and xECP/legacy handoff walking, then wait
+- [x] Make 32/64-bit BAR assignment transactional: disable and verify
+      I/O/MEM/BME, program and read back both halves, restore COMMAND only on
+      success, and roll back or remain decode-off after a partial failure.
+- [x] Add an optional checked USB HCD quiesce barrier. xHCI unregister/detach
+      releases IRQ, DMA, BAR, and controller memory only after `HCHalted`; a
+      failed stop remains PCI-bound and quarantined against root/URB work and
+      reprobe.
+- [x] Correct scratchpad composition and xECP/legacy handoff walking, then wait
       for `USBSTS.CNR` to clear after reset before programming operational
       registers.
-- [ ] Use the first diagnostic image to choose the H2 branch. If the reassigned
+- [x] Use the first diagnostic image to choose the H2 branch. If the reassigned
       BAR reads back and returns a valid snapshot, do not broaden amd64 MMIO.
       If it remains zero/all-one, map the validated firmware BAR at its original
       address; extract general PCI rebalance if bridge/resource repair is
-      required.
-- [ ] Run the focused fixtures, existing WS004 xHCI controls, `make -j16`, and
+      required. The physical snapshot is valid through the relocated BAR, so
+      no high-MMIO or general PCI rebalance branch is selected.
+- [x] Run the focused fixtures, existing WS004 xHCI controls, `make -j16`, and
       `git diff --check`. Do not use `make check` or `.internal/` material.
-- [ ] Re-run BR-T24 with one production image at 4, 8, and 16 GiB and the
+- [x] Re-run BR-T24 with one production image at 4, 8, and 16 GiB and the
       legacy-BIOS q35/xHCI USB control.
-- [ ] Run BR-T33 on the Latitude three cold boots. Record both xHCI functions,
-      the active controller's successful attach/start, and boot USB
-      mass-storage enumeration.
-- [ ] Record U3/login if reached. If the first new stop is controller reset,
+- [x] Run BR-T33 once on the Latitude. Record both xHCI functions, the active
+      controller's successful attach/start, and boot USB mass-storage
+      enumeration. One success provisionally clears U2 and allows subsequent
+      implementation to continue. Both controllers attached, but EP0 device
+      enumeration failed before mass storage; BR-T33 therefore remains failed.
+- [x] Record U3/login if reached. If the first new stop is controller reset,
       DMA, IRQ, port, mass-storage, or VFS, leave its exact stage and evidence
-      as a bounded handoff rather than expanding this Phase silently.
+      as a bounded handoff rather than expanding this Phase silently. The new
+      EP0 transfer/timeout/cancellation boundary is handed to `ws003-p004`.
 
 ## Acceptance cases
 
 - `BR-T25`: the host capability/BAR/MEM-decode fixture accepts valid 1.0--1.2
   samples and rejects malformed, zero, all-one, overflow, and out-of-BAR
   samples with distinct reasons; enable/rollback ordering is asserted.
+- `BR-T26`: production USB-core teardown retains the same registered bus and
+  rejects new URBs when checked xHCI quiesce fails; a later successful retry
+  performs stop and removes the bus.
 - `BR-T21`: QEMU q35 xHCI still enumerates USB mass storage.
 - `BR-T24`: one production image still reaches `login:` under OVMF USB boot at
   4, 8, and 16 GiB, plus the existing legacy-BIOS control.
-- `BR-T33`: three Latitude cold boots attach the boot-media xHCI controller and
-  enumerate the intended USB mass-storage device without
-  `attach failed at capabilities` or `devices=0`.
+- `BR-T33`: one Latitude boundary-confirmation boot attaches the boot-media
+  xHCI controller and enumerates the intended USB mass-storage device without
+  `attach failed at capabilities`, `boot-storage wait expired`, or
+  `physical disks=0`. The legacy `devices=0` field is not itself a failure:
+  successful QEMU USB-only boots print it before reporting `physical disks=1`.
 - Focused tests, existing applicable WS004 xHCI tests, `make -j16`, and
   `git diff --check` pass.
 
@@ -213,34 +230,103 @@ xHCI facts above.
   startup have ordered, balanced failure/detach handling.
 - All discovered xHCI functions either attach or have a specific documented
   unsupported reason, and the function carrying the boot media attaches.
-- Three Latitude cold boots enumerate the intended USB mass-storage device and
-  reach U2 without a boot-storage timeout caused by an absent HCD.
-- BR-T25, BR-T21, BR-T24 at 4/8/16 GiB, the legacy-BIOS control, `make -j16`,
-  and `git diff --check` pass without regression.
+- One Latitude boundary-confirmation boot enumerates the intended USB
+  mass-storage device and reaches U2 without a boot-storage timeout caused by
+  an absent HCD.
+- BR-T25, BR-T26, BR-T21, BR-T24 at 4/8/16 GiB, the legacy-BIOS control,
+  `make -j16`, and `git diff --check` pass without regression.
 
 Reaching U3, login, and safe root I/O is desirable evidence but not required to
 declare this controller-focused Phase complete. Those gates remain BR-06,
-BR-T30, and BR-T31.
+BR-T30, and BR-T31. Repeatability is not an intermediate p003 gate: after U4
+implementation is frozen, BR-T30 performs the final five-consecutive-boot
+Latitude acceptance campaign.
 
 ## Actual results and evidence
 
-Planning only. No implementation or verification is authorized by this Phase
-document. The source photograph and code-path analysis are recorded in
-[latitude-xhci-evidence.md](../tests/latitude-xhci-evidence.md).
+Execution was authorized as the sole item in `q012` on 2026-08-26. The driver
+now enables and verifies PCI Memory Space before its first capability MMIO,
+keeps Bus Master disabled until DMA startup, validates BAR assignment
+readback, emits BDF/ID/COMMAND/BAR/raw-capability diagnostics, and restores
+the saved PCI enable state and original BAR on failure or detach. Generic PCI
+BAR assignment now performs checked, transactional 32/64-bit updates and
+fails closed with decode/BME disabled after partial failure.
+
+Capability arithmetic is shared with BR-T25. It accepts only xHCI 1.0, 1.1,
+and 1.2, rejects zero/all-one and malformed layouts with reason bits, fixes
+scratchpad Hi/Lo composition and relative xECP walking, performs byte-wide
+legacy ownership handoff with SMI cleanup/rollback, and waits for CNR both
+before initial operational writes and after HCRST.
+
+Teardown now has a checked xHCI quiesce boundary. USB core removes a bus only
+after `HCHalted`; otherwise it blocks new root/URB work and retains the bus.
+An all-ones `USBSTS` read is treated as unreachable MMIO, never as a halted
+controller, so DMA and IRQ resources remain retained on that fail-closed path.
+Attach-time failures which cannot quiesce, or cannot restore PCI state, remain
+bound to the PCI device in a quarantine state so DMA, IRQ, mapping, BAR claim,
+and controller ownership cannot be freed or reprobed prematurely.
+
+The following software gates pass:
+
+- BR-T25 capability/MMIO and PCI enable-state fixture;
+- BR-T26 checked HCD quiesce/unregister fixture;
+- existing WS004 xHCI model, PCI rescan, PCIe capability, and PCI MSI fixtures;
+- `make -j16`;
+- BR-T24 OVMF USB-root boots at 4, 8, and 16 GiB;
+- one legacy-BIOS q35/xHCI USB-root control reaching `login:`; and
+- `git diff --check`.
+
+The recorded q012 candidate is `build/amd64/hdd-image.img`, 135266304 bytes, SHA-256
+`4b346ec9d303c557c4b810f2a5b3ea430964c7e6e9a98fc7a572410f2ba667f4`.
+QEMU reports `reject=00000000:ok`, attaches xHCI, enumerates `sda`, resolves
+the root, and reaches `login:` in every required software case. Physical U2
+has not been claimed.
+
+The one BR-T33 Latitude run used the recorded image and cleared the original
+physical boundary. Both `0000:00:0d.0` and `0000:00:14.0` report
+`version=0120` and `reject=00000000:ok`; both register an xHCI HCD. The latter
+also proves that BAR0 relocation to `0xf0810000`, Memory Space enable, and the
+64-KiB MMIO mapping are usable. H1 and H3 are resolved, while H2 does not
+require a high-MMIO or general PCI-resource branch.
+
+BR-T33 itself failed after controller start. `usb1` reported EP0 transfer
+completion 6 followed by `EPIPE (44)`, completion 4 followed by `EIO (5)`, an
+`ETIMEDOUT (42)`, and Stop Endpoint command 15 completion 19 during timeout
+cancellation. The photograph contains no `usb-storage: sda` and stops at the
+boot-storage wait. The first new boundary is therefore xHCI device/control
+endpoint enumeration, before the mass-storage class driver. It is extracted
+to [ws003-p004](../phase004-latitude-xhci-device-enumeration/phase.md). Code
+review also found that the failed-cancel path loses the durable request/DMA
+owner and can later free endpoint resources after an unchecked Disable Slot
+failure. Treat the current artifact as diagnostic-only; p004 must close this
+P1 before another physical run.
 
 ## Interruption / resumption
 
-This Phase is not present in the approved q011 Queue and has not started. After
-q011 records the remaining BR-T32 repetitions, construct a new finite Queue
-which selects `ws003-p003` explicitly. The first implementation action is the
-bounded BDF/COMMAND/BAR/capability diagnostic; do not start with a broad PCI
-allocator rewrite.
+q012 is finished with this Phase Partial and its sole item uncleared. Resume
+the bring-up only by placing `ws003-p004` in a future approved Queue. Its first
+action is the focused control-TRB and EP0-state fixture; no further p003
+physical repetition is required.
 
 ## Remaining debt and handoff
 
 - Full root continuity, writable I/O, and login remain BR-06/BR-T30--T31.
 - A proven need for generic high-physical-address PCI MMIO or bridge resource
   assignment becomes a separate WS004 Phase.
+- The early-boot legacy BIOS ownership wait is bounded by MMIO poll count, not
+  a real one-second monotonic deadline; a pre-scheduler HAL monotonic source is
+  required before that specification detail can be closed.
+- The PC/AT fallback BAR cursor is not reclaimed when a temporary assignment
+  is restored, so repeated detach/reprobe can consume the small fallback
+  window. General PCI resource reclamation belongs in WS004.
+- The PCI enable-state token is intentionally an exclusive attach/detach lease;
+  nested tokens or mixing it with the older enable counter remains unsupported.
+- Returning xHCI legacy ownership before restoring a relocated BAR can race
+  firmware which immediately reacquires the device. A later lifecycle Phase
+  must define firmware hand-back explicitly; normal boot attach is unaffected.
+- A raw BAR rollback write can itself fail. Decode/BME remain disabled and the
+  cached address is refreshed, but richer recovery/diagnostics remain PCI-core
+  work.
 - A later failure after controller start is classified by its first stage and
   extracted if it exceeds this Phase's U2 boundary.
 
@@ -248,4 +334,3 @@ allocator rewrite.
 
 - [Intel xHCI specification and current revisions](https://www.intel.com/content/www/us/en/products/docs/io/universal-serial-bus/universal-serial-bus-specifications.html)
 - [Intel 500 Series PCH datasheet, volume 2](https://cdrdv2-public.intel.com/631120/631120-002.pdf)
-

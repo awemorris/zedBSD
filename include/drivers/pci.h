@@ -88,6 +88,11 @@ struct drv_pci_mapping {
 	uintptr_t private_data[2];
 };
 
+/* Opaque token for restoring PCI I/O, memory, and bus-master enable bits. */
+struct drv_pci_enable_state {
+	uintptr_t private_data[2];
+};
+
 enum drv_pci_irq_type {
 	DRV_PCI_IRQ_INTX,
 	DRV_PCI_IRQ_MSI,
@@ -365,6 +370,20 @@ drv_pci_device_enable_io(
 int
 drv_pci_device_enable_memory(
 	struct drv_pci_device *d);
+/*
+ * Save the current I/O, memory, and bus-master enable bits in a zeroed token.
+ * Restore performs a read/modify/write so unrelated command bits survive.
+ * This is an exclusive driver attach/detach lease; overlapping tokens or use
+ * alongside drv_pci_device_enable()/disable() on the same device are invalid.
+ */
+int
+drv_pci_device_save_enable_state(
+	struct drv_pci_device *d,
+	struct drv_pci_enable_state *state);
+int
+drv_pci_device_restore_enable_state(
+	struct drv_pci_device *d,
+	struct drv_pci_enable_state *state);
 int
 drv_pci_device_set_bus_master(
 	struct drv_pci_device *d,
@@ -377,6 +396,11 @@ drv_pci_device_bar(
 	const struct drv_pci_device *d,
 	unsigned i,
 	struct drv_pci_bar *b);
+/*
+ * Reprogram a BAR transactionally.  A failed transaction restores the old
+ * BAR when possible and deliberately leaves I/O, memory, and bus mastering
+ * disabled so a partial address can never be decoded or used for DMA.
+ */
 int
 drv_pci_device_assign_bar(
 	struct drv_pci_device *d,

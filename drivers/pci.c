@@ -15,6 +15,8 @@
 #define PCI_COMMAND_MEMORY 0x0002U
 #define PCI_COMMAND_MASTER 0x0004U
 #define PCI_COMMAND_INTX_DISABLE 0x0400U
+#define PCI_COMMAND_ENABLE_MASK \
+	(PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER)
 #define PCI_MSI_CONTROL 0x02U
 #define PCI_MSI_ADDRESS 0x04U
 #define PCI_MSI_ENABLE 0x0001U
@@ -335,10 +337,206 @@ int drv_pci_device_enable(struct drv_pci_device*d){int e;if(!d)return EINVAL;if(
 void drv_pci_device_disable(struct drv_pci_device*d){if(d&&d->enable_count&&--d->enable_count==0)(void)command_set(d,0,PCI_COMMAND_IO|PCI_COMMAND_MEMORY|PCI_COMMAND_MASTER);}
 int drv_pci_device_enable_io(struct drv_pci_device*d){return command_set(d,PCI_COMMAND_IO,0);}
 int drv_pci_device_enable_memory(struct drv_pci_device*d){return command_set(d,PCI_COMMAND_MEMORY,0);}
+int
+drv_pci_device_save_enable_state(struct drv_pci_device *d,
+	struct drv_pci_enable_state *state)
+{
+	uint16_t command;
+	int error;
+
+	if (d == NULL || state == NULL)
+		return EINVAL;
+	if (state->private_data[1] != 0)
+		return EBUSY;
+	error = drv_pci_device_config_read16(d, PCI_COMMAND, &command);
+	if (error != 0)
+		return error;
+	state->private_data[0] = command & PCI_COMMAND_ENABLE_MASK;
+	state->private_data[1] = 1;
+	return 0;
+}
+int
+drv_pci_device_restore_enable_state(struct drv_pci_device *d,
+	struct drv_pci_enable_state *state)
+{
+	uint16_t command, readback, restored;
+	int error;
+
+	if (d == NULL || state == NULL)
+		return EINVAL;
+	if (state->private_data[1] == 0)
+		return 0;
+	error = drv_pci_device_config_read16(d, PCI_COMMAND, &command);
+	if (error != 0)
+		return error;
+	restored = (uint16_t)((command & ~PCI_COMMAND_ENABLE_MASK) |
+	    (uint16_t)state->private_data[0]);
+	if (restored != command) {
+		error = drv_pci_device_config_write16(d, PCI_COMMAND, restored);
+		if (error != 0)
+			return error;
+	}
+	error = drv_pci_device_config_read16(d, PCI_COMMAND, &readback);
+	if (error != 0)
+		return error;
+	if ((readback & PCI_COMMAND_ENABLE_MASK) !=
+	    (restored & PCI_COMMAND_ENABLE_MASK))
+		return EIO;
+	state->private_data[0] = 0;
+	state->private_data[1] = 0;
+	return 0;
+}
 int drv_pci_device_set_bus_master(struct drv_pci_device*d,bool on){return command_set(d,on?PCI_COMMAND_MASTER:0,on?0:PCI_COMMAND_MASTER);}
 unsigned drv_pci_device_bar_count(const struct drv_pci_device*d){return d?d->bar_count:0;}
 int drv_pci_device_bar(const struct drv_pci_device*d,unsigned i,struct drv_pci_bar*b){if(!d||!b||i>=d->bar_count)return EINVAL;*b=d->bars[i];return b->type==DRV_PCI_BAR_NONE?ENOENT:0;}
-int drv_pci_device_assign_bar(struct drv_pci_device*d,unsigned i,uint64_t a){struct drv_pci_bar*b;uint32_t low;uint16_t command;int e;if(!d||i>=d->bar_count)return EINVAL;b=&d->bars[i];if(b->type==DRV_PCI_BAR_NONE||b->size==0||(a&(b->size-1U))!=0)return EINVAL;if(b->type!=DRV_PCI_BAR_MEMORY64&&a>0xffffffffU)return EINVAL;e=drv_pci_device_config_read16(d,PCI_COMMAND,&command);if(e)return e;(void)drv_pci_device_config_write16(d,PCI_COMMAND,(uint16_t)(command&~(PCI_COMMAND_IO|PCI_COMMAND_MEMORY)));low=(uint32_t)a|(b->type==DRV_PCI_BAR_IO?1U:(b->prefetchable?8U:0U))|(b->type==DRV_PCI_BAR_MEMORY64?4U:0U);e=drv_pci_device_config_write32(d,PCI_BAR0+i*4U,low);if(!e&&b->type==DRV_PCI_BAR_MEMORY64)e=drv_pci_device_config_write32(d,PCI_BAR0+(i+1U)*4U,(uint32_t)(a>>32));(void)drv_pci_device_config_write16(d,PCI_COMMAND,command);if(!e)b->bus_address=a;return e;}
+
+static uint64_t
+pci_bar_address(enum drv_pci_bar_type type, uint32_t low, uint32_t high)
+{
+	if (type == DRV_PCI_BAR_IO)
+		return low & ~3U;
+	return ((uint64_t)(type == DRV_PCI_BAR_MEMORY64 ? high : 0) << 32) |
+	    (low & ~15U);
+}
+
+static int
+pci_bar_read_raw(struct drv_pci_device *device, unsigned index,
+	enum drv_pci_bar_type type, uint32_t *low, uint32_t *high)
+{
+	int error;
+
+	error = drv_pci_device_config_read32(device,
+	    PCI_BAR0 + index * 4U, low);
+	if (error != 0)
+		return error;
+	*high = 0;
+	if (type == DRV_PCI_BAR_MEMORY64)
+		return drv_pci_device_config_read32(device,
+		    PCI_BAR0 + (index + 1U) * 4U, high);
+	return 0;
+}
+
+static int
+pci_bar_write_raw(struct drv_pci_device *device, unsigned index,
+	enum drv_pci_bar_type type, uint32_t low, uint32_t high)
+{
+	int error;
+
+	/* Decode is disabled by the caller, so commit the low half last. */
+	if (type == DRV_PCI_BAR_MEMORY64) {
+		error = drv_pci_device_config_write32(device,
+		    PCI_BAR0 + (index + 1U) * 4U, high);
+		if (error != 0)
+			return error;
+	}
+	return drv_pci_device_config_write32(device,
+	    PCI_BAR0 + index * 4U, low);
+}
+
+static int
+pci_command_quiesce(struct drv_pci_device *device, uint16_t command)
+{
+	uint16_t readback;
+	int error;
+
+	command &= (uint16_t)~PCI_COMMAND_ENABLE_MASK;
+	error = drv_pci_device_config_write16(device, PCI_COMMAND, command);
+	if (error != 0)
+		return error;
+	error = drv_pci_device_config_read16(device, PCI_COMMAND, &readback);
+	if (error != 0)
+		return error;
+	return (readback & PCI_COMMAND_ENABLE_MASK) == 0 ? 0 : EIO;
+}
+
+static void
+pci_bar_cache_readback(struct drv_pci_device *device, unsigned index,
+	struct drv_pci_bar *bar)
+{
+	uint32_t low, high;
+
+	if (pci_bar_read_raw(device, index, bar->type, &low, &high) == 0)
+		bar->bus_address = pci_bar_address(bar->type, low, high);
+	else
+		bar->bus_address = 0;
+}
+
+int
+drv_pci_device_assign_bar(struct drv_pci_device *device, unsigned index,
+	uint64_t address)
+{
+	struct drv_pci_bar *bar;
+	uint32_t original_low, original_high, low, high, read_low, read_high;
+	uint16_t original_command, read_command;
+	int error, quiesce_error;
+
+	if (device == NULL || index >= device->bar_count)
+		return EINVAL;
+	bar = &device->bars[index];
+	if (bar->type == DRV_PCI_BAR_NONE || bar->size == 0 ||
+	    (bar->size & (bar->size - 1U)) != 0 ||
+	    (address & (bar->size - 1U)) != 0 ||
+	    address > UINT64_MAX - (bar->size - 1U) ||
+	    (bar->type != DRV_PCI_BAR_MEMORY64 &&
+	    (address > UINT32_MAX || bar->size - 1U > UINT32_MAX - address)) ||
+	    (bar->type == DRV_PCI_BAR_MEMORY64 &&
+	    index + 1U >= device->bar_count))
+		return EINVAL;
+	error = drv_pci_device_config_read16(device, PCI_COMMAND,
+	    &original_command);
+	if (error != 0)
+		return error;
+	error = pci_bar_read_raw(device, index, bar->type, &original_low,
+	    &original_high);
+	if (error != 0)
+		return error;
+	error = pci_command_quiesce(device, original_command);
+	if (error != 0)
+		return error;
+
+	low = (uint32_t)address |
+	    (bar->type == DRV_PCI_BAR_IO ? 1U : (bar->prefetchable ? 8U : 0U)) |
+	    (bar->type == DRV_PCI_BAR_MEMORY64 ? 4U : 0U);
+	high = (uint32_t)(address >> 32);
+	error = pci_bar_write_raw(device, index, bar->type, low, high);
+	if (error == 0)
+		error = pci_bar_read_raw(device, index, bar->type, &read_low,
+		    &read_high);
+	if (error == 0 &&
+	    (read_low != low ||
+	    (bar->type == DRV_PCI_BAR_MEMORY64 && read_high != high)))
+		error = EIO;
+	if (error != 0)
+		goto rollback;
+
+	error = drv_pci_device_config_write16(device, PCI_COMMAND,
+	    original_command);
+	if (error == 0)
+		error = drv_pci_device_config_read16(device, PCI_COMMAND,
+		    &read_command);
+	if (error == 0 && read_command != original_command)
+		error = EIO;
+	if (error != 0) {
+		/* Never roll a BAR back while the failed restore may have enabled
+		 * decode or DMA. */
+		quiesce_error = pci_command_quiesce(device, original_command);
+		if (quiesce_error != 0) {
+			bar->bus_address = address;
+			return error;
+		}
+		goto rollback;
+	}
+	bar->bus_address = address;
+	return 0;
+
+rollback:
+	/* A failed transaction deliberately leaves decode and bus mastering off.
+	 * The caller may retry or detach without exposing a partial BAR. */
+	(void)pci_bar_write_raw(device, index, bar->type, original_low,
+	    original_high);
+	pci_bar_cache_readback(device, index, bar);
+	return error;
+}
 int drv_pci_device_claim_bar(struct drv_pci_device*d,unsigned i){if(!d||i>=d->bar_count)return EINVAL;if(d->bar_claimed[i])return EBUSY;d->bar_claimed[i]=1;return 0;}
 void drv_pci_device_release_bar(struct drv_pci_device*d,unsigned i){if(d&&i<d->bar_count)d->bar_claimed[i]=0;}
 int drv_pci_device_map_bar_region(struct drv_pci_device*d,unsigned i,uint64_t o,size_t s,unsigned f,struct drv_pci_mapping*m){struct drv_pci_bar b;if(!d||!m||i>=d->bar_count||!d->bar_claimed[i]||!d->bus->ops->map_bar||s==0)return EINVAL;b=d->bars[i];if(o>b.size||s>b.size-o)return EINVAL;b.bus_address+=o;b.size=s;return d->bus->ops->map_bar(d->bus->host,d,&b,f,m);}

@@ -157,3 +157,49 @@ Every implementation Phase uses the supported build command, focused tests,
 bounded `qemu-system-x86_64` tests where relevant, formatting for changed
 userland C/header files, and `git diff --check`. The aggregate `make check`
 target is not required.
+
+## 9. Physical-run coordination
+
+Each implementation-stage request for user-operated physical-hardware work
+covers exactly one boot, probe, or other bounded operation. A final acceptance
+campaign may contain an explicit consecutive-run count, but it is identified
+as final repeatability work rather than an implementation dependency.
+
+Before the user starts, the request states all of the following in one place:
+
+- the purpose of this one run and the boundary it is intended to prove;
+- the WS/Phase and test-case ID, plus this run's ordinal within any planned
+  repetition count;
+- a clickable repository link to the exact image or executable artifact;
+- the artifact SHA-256, and whether it must be written as a raw image;
+- one bounded action to perform;
+- the exact success markers or measurements to capture;
+- the evidence requested, such as one full-screen photograph; and
+- known later errors which are outside the run's acceptance boundary and do
+  not invalidate it.
+
+Terms such as "the corrected image", "the current image", or "boot it again"
+are not sufficient without the artifact link and purpose. A physical result is
+recorded before issuing the next single-run request.
+
+### Scheduling repeatability work
+
+For behavior which is expected to be deterministic, one successful physical
+observation is provisional confirmation: record it, then continue safe
+implementation and automated verification. Do not require N physical successes
+before proceeding to the next implementable Phase.
+
+Repeated physical boots or probes are deferred to the final acceptance stage
+after all safe agent-executable implementation and automated verification have
+been exhausted. The default final campaign is five consecutive successful runs
+of one frozen artifact. A failure breaks the consecutive sequence, is recorded,
+and is analyzed before a new final sequence begins. A Phase may choose another
+count only with an explicit risk or cost rationale.
+
+Earlier repetition is justified only when the defect is intermittent or
+probabilistic, the sample count is itself needed to evaluate the correction,
+or safety/data-integrity risk makes continued implementation unsound without
+repeat evidence. The Phase states that exception explicitly. Otherwise, one
+successful run unblocks continued work and repeatability counts belong to a
+final acceptance campaign rather than the feature's implementation critical
+path.

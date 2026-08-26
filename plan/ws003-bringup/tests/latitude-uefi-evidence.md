@@ -199,8 +199,8 @@ window fixtures pass, as does `make -j16`.
 
 The corrected final image is `build/amd64/hdd-image.img`, SHA-256
 `5d6900b49f2edf51a742b94491783f1f6d7c5809ea57cd43d982140a825a0dd8`.
-BR-T32 remains Uncleared: this exact image has completed 1/3 required Latitude
-cold boots, with two repetitions remaining.
+BR-T32 is complete: this exact image passed all 3/3 declared Latitude cold
+boots.
 
 ## Corrected-image physical run 1/3
 
@@ -234,6 +234,32 @@ pristine image copy per case:
 
 The legacy-BIOS q35/xHCI USB control also passes 1/1 in 11 seconds. The BR-T24
 harness now rejects an RSDP equal to 1 GiB as well as one below it, matching the
-documented requirement that the RSDP be strictly above 1 GiB. The physical
-BR-T32 state remains 1/3; software evidence cannot substitute for the two
-remaining Latitude cold boots.
+documented requirement that the RSDP be strictly above 1 GiB. BR-T32 is now
+complete at 3/3 with the final physical result below.
+
+## Corrected-image physical run 2/3
+
+The next user-operated cold boot used `build/amd64/hdd-image.img`; its local
+SHA-256 still matches the q011 production value
+`5d6900b49f2edf51a742b94491783f1f6d7c5809ea57cd43d982140a825a0dd8`.
+The photograph records `A64 ENTRY PASS`, `A64 PAGING PASS`,
+`A64 ACPI RSDP PASS`, `A64 IRQ READY`, `A64 XMM CONTEXT PASS`, eight-CPU HAL
+initialization, and `A64 TIMER TICK`. BR-T32 run 2/3 is PASS.
+
+Both xHCI functions again fail later at `capabilities (13)`, leaving no
+physical disks. This is the expected downstream `ws003-p003` handoff and does
+not invalidate the q011 UEFI/RSDP result. The displayed `memory 1024MB` is the
+current amd64 1-GiB general direct-map/allocator limit, not a failure to receive
+the firmware memory map.
+
+## Corrected-image physical run 3/3
+
+The final user-operated cold boot used the same q011 production image. The
+photograph records `A64 ENTRY PASS`, `A64 PAGING PASS`,
+`A64 ACPI RSDP PASS`, `A64 IRQ READY`, `A64 XMM CONTEXT PASS`, eight-CPU HAL
+initialization, and `A64 TIMER TICK`. BR-T32 run 3/3 is PASS and
+`ws003-p002` is complete.
+
+Both xHCI functions again fail later at `capabilities (13)`. The resulting
+storage timeout and UUID `ENOENT` remain the planned `ws003-p003` boundary and
+do not alter the completed high-RSDP result.

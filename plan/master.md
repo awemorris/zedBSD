@@ -17,10 +17,10 @@ The immediate north star is:
 > establish a working network path with reproducible evidence.
 
 The latest execution record is [queue.md](queue.md)
-(`q011`, in progress; the high-RSDP correction passes its software gates and
-its first corrected-image Latitude run, with two repeat boots remaining). The
-first downstream xHCI U2 boundary is planned as `ws003-p003` but is not in the
-approved Queue. Closed archived records are
+(`q012`, finished with `ws003-p003` uncleared). Both physical xHCI controllers
+now attach; the next U2 boundary is the unqueued `ws003-p004` EP0/device
+enumeration Phase. The preceding high-RSDP correction is retained in
+[q011](queue-q011.md). Closed archived records are
 retained as [q001](queue-q001.md), [q002](queue-q002.md),
 [q003](queue-q003.md), [q004](queue-q004.md),
 [q005](queue-q005.md), [q006](queue-q006.md),
@@ -74,7 +74,7 @@ before this long-term product goal is reached.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Paused, ledger active | `ws001-p013` complete | Select `cksum` or another bounded tier-1 candidate | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | Dell Latitude 5320 bring-up | Active; UEFI repeatability 1/3, xHCI U2 Phase planned | The corrected image crosses the former high-RSDP stop on hardware and retains 4/8/16-GiB OVMF USB acceptance; both physical xHCI functions then fail capability validation | Complete two BR-T32 repeat boots, then select `ws003-p003` in a new Queue to diagnose PCI decode/BAR/capability handling and reach U2 | [WS003](ws003-bringup/ws.md) |
+| `ws003` | Dell Latitude 5320 bring-up | Active; `ws003-p003` Partial, `p004` ready | Both physical xHCI 1.2 controllers now pass capability validation and attach; U2 stops during EP0 device enumeration | Put `ws003-p004` in a future Queue and begin with the spec-exact Control TRB fixture | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; automatic USB gate cleared | `ws004-p008` and resumed `p006` automatic milestones complete | Record detailed manual USB acceptance or extract the next hardware Phase | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Planned | WS002 Phase 20 is the inherited baseline | Start physical-network diagnostic Phase after inventory | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | In progress | `ws006-p004` complete PC/AT software milestone | Select Xzed migration after xHCI/USB-HID dependencies, retaining PC-98/X68000 physical-token follow-up | [WS006](ws006-input/ws.md) |
@@ -90,7 +90,7 @@ before this long-term product goal is reached.
 | --- | --- | --- |
 | M0 — Baseline preserved | Current QEMU boot, init, login, shell, and service behavior remains usable | WS001, WS002 |
 | M1 — QEMU USB root | Automatic milestone complete: identity/reboot, URB and heap corrections, controls, and 500 pristine-copy boots pass; detailed manual acceptance pending | WS003, WS004 |
-| M2 — Latitude USB shell | Uncleared at U1: the corrected image now reaches ACPI/IRQ/HAL on hardware 1/3; the earliest downstream blocker is two xHCI capability-validation failures, planned as `ws003-p003` | WS003, WS004, WS009 |
+| M2 — Latitude USB shell | U1 complete; both xHCI controllers attach, while `ws003-p004` owns the EP0/device-enumeration boundary before U2 | WS003, WS004, WS009 |
 | M3 — Latitude network | At least one documented physical interface configures and transfers data | WS003, WS004, WS005 |
 | M4 — Native platform devices | NVMe, USB HID, and the selected WLAN work on the target | WS004, WS005, WS006 |
 | M5 — Application environments | X11 is usable and Noct/BeUI supports zedBSD upstream | WS006, WS007, WS008 |

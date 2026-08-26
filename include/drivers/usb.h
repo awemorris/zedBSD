@@ -253,6 +253,13 @@ struct drv_usb_hcd_ops {
 	int (
 		*start)(
 		struct drv_usb_hcd *);
+	/* Optional checked stop barrier.  A failure keeps the registered bus and
+	 * all HCD-owned resources so the driver can retry or remain quarantined. */
+	int (
+		*quiesce)(
+		struct drv_usb_hcd *);
+	/* Release resources after quiesce, or perform the legacy unchecked stop
+	 * for controllers which do not provide a quiesce callback. */
 	void (
 		*stop)(
 		struct drv_usb_hcd *);
