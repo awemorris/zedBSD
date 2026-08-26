@@ -48,6 +48,7 @@
 #define DRV_USB_DESCRIPTOR_INTERFACE	4U
 #define DRV_USB_DESCRIPTOR_ENDPOINT	5U
 #define DRV_USB_DESCRIPTOR_BOS	15U
+#define DRV_USB_DESCRIPTOR_SUPERSPEED_ENDPOINT_COMPANION	48U
 
 #define DRV_USB_ID_VENDOR	(1U << 0)
 #define DRV_USB_ID_PRODUCT	(1U << 1)
@@ -164,6 +165,20 @@ struct drv_usb_endpoint_descriptor {
 	uint8_t interval;
 } __attribute__((packed));
 
+struct drv_usb_superspeed_endpoint_companion_descriptor {
+	uint8_t length;
+	uint8_t descriptor_type;
+	uint8_t maximum_burst;
+	uint8_t attributes;
+	uint16_t bytes_per_interval;
+} __attribute__((packed));
+
+int
+drv_usb_decode_superspeed_endpoint_companion(
+	const void *raw,
+	size_t length,
+	struct drv_usb_superspeed_endpoint_companion_descriptor *result);
+
 struct drv_usb_control_request {
 	uint8_t request_type;
 	uint8_t request;
@@ -272,6 +287,14 @@ struct drv_usb_hcd_ops {
 		struct drv_usb_hcd *,
 		struct drv_usb_device *,
 		unsigned);
+	/* Optional checked device-DMA barrier.  On failure the USB core keeps
+	 * the device and every HCD-owned resource quarantined for a later retry. */
+	int (
+		*device_quiesce)(
+		struct drv_usb_hcd *,
+		struct drv_usb_device *);
+	/* Release resources only after device_quiesce succeeds, or perform the
+	 * legacy unchecked teardown when device_quiesce is not implemented. */
 	void (
 		*device_disable)(
 		struct drv_usb_hcd *,
@@ -308,6 +331,12 @@ struct drv_usb_hcd_ops {
 		void *,
 		size_t,
 		size_t *);
+	/* Optional controller-specific synchronous root-port reset.  The callback
+	 * returns only after the port is enabled at its usable link state. */
+	int (
+		*root_port_reset)(
+		struct drv_usb_hcd *,
+		unsigned);
 };
 
 struct drv_usb_hcd {
@@ -401,6 +430,22 @@ drv_usb_device_state(
 const struct drv_usb_device_descriptor *
 drv_usb_device_descriptor(
 	const struct drv_usb_device *d);
+/* HCD teardown barrier: nonzero while an accepted URB is still owned by the
+ * controller or is between HCD dequeue and USB-core terminal publication. */
+unsigned
+drv_usb_device_hcd_urb_count(
+	const struct drv_usb_device *d);
+/* Host-controller-private association.  USB lifecycle ownership, not this
+ * raw value, keeps the associated object alive. */
+uintptr_t
+drv_usb_device_hcd_data(
+	const struct drv_usb_device *d,
+	unsigned n);
+int
+drv_usb_device_set_hcd_data(
+	struct drv_usb_device *d,
+	unsigned n,
+	uintptr_t value);
 struct drv_dma_device *
 drv_usb_device_dma(
 	struct drv_usb_device *d);
@@ -503,6 +548,9 @@ drv_usb_endpoint_address(
 	const struct drv_usb_endpoint *e);
 uint16_t
 drv_usb_endpoint_max_packet_size(
+	const struct drv_usb_endpoint *e);
+uint8_t
+drv_usb_endpoint_maximum_burst(
 	const struct drv_usb_endpoint *e);
 bool
 drv_usb_endpoint_is_input(

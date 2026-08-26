@@ -8,7 +8,7 @@ Phase ID: `p004`
 
 Combined ID: `ws003-p004`
 
-Status: Ready; not present in an approved Queue
+Status: Complete (`q013`)
 
 Parent: [WS003](../ws.md)
 
@@ -20,8 +20,8 @@ Evidence: [Latitude xHCI evidence](../tests/latitude-xhci-evidence.md)
 
 Move the Latitude 5320 from two attached xHCI 1.2 host controllers to U2 by
 making control-transfer TDs, root-port reset completion, EP0 context updates,
-and timeout cancellation conform to the xHCI state machine, then enumerate the
-boot USB mass-storage device as `sda`.
+and Control endpoint parameters conform to the xHCI state machine, then
+enumerate the boot USB mass-storage device as `sda`.
 
 ## Baseline and confirmed boundary
 
@@ -48,7 +48,8 @@ Completion 6 is Stall, completion 4 is USB Transaction Error, and command 15
 completion 19 is a Stop Endpoint Context State Error. The latter occurs during
 timeout cancellation and is a secondary recovery failure, not the first
 transfer failure. The logged `endpoint=1` is DCI 1, the Default Control
-Endpoint, not USB endpoint address 1.
+Endpoint, not USB endpoint address 1. Command/cancel/DMA safety exposed by the
+same photograph is owned and completed first by `ws003-p005` in q013.
 
 ## Confirmed implementation defects and hypotheses
 
@@ -57,8 +58,6 @@ Endpoint, not USB endpoint address 1.
 | D1 | Control-transfer TRBs violate reserved-zero and TD-boundary rules | The Setup Stage writes a TD Size value into reserved bits and sets CH. The one-TRB Data Stage sets TD Size 1 and chains into the Status Stage even though Setup, Data, and Status are distinct TDs. QEMU xHCI 1.0 accepts this; the physical xHCI 1.2 controller need not. A shared builder fixture must assert every DWORD and reserved bit. |
 | D2 | Root-port reset uses a fixed delay without observing completion | USB core waits 50 ms but does not require `PR=0`, the reset-change indication, and `PED=1` while connection remains present. It then issues an ineffective PORT_ENABLE request. Record the final PORTSC state and replace delay-only completion with a bounded state poll. |
 | D3 | EP0 parameters are not updated from the first descriptor | Full-Speed `bMaxPacketSize0` is stored only in the generic USB object and not rebuilt into the xHC EP0 input context before the non-BSR Address Device command. SuperSpeed encodes 512 as exponent 9. Control EP Average TRB Length is also incorrectly set to Max Packet Size instead of 8. |
-| D4 | Timeout cancellation loses recoverable request ownership | The active/HCD pointers are cleared before Stop Endpoint. If the endpoint is already Halted or Error and Stop returns Context State Error, the DMA buffer is intentionally retained but no durable owner remains. USB teardown can then ignore Disable Slot failure and free the ring/context while DMA may still be live. Track endpoint state, retain the request, require successful recovery/Disable Slot, or quarantine the controller before reclamation. |
-| D5 | Command Completion is not associated with its command TRB | The polling path accepts the first type-33 event without comparing its command-TRB pointer, while the IRQ path consumes and discards type-33 events. A focused interleaving fixture must prove command completion ownership or the event path must route completions to the waiter. |
 
 ## Scope
 
@@ -69,18 +68,12 @@ Endpoint, not USB endpoint address 1.
 - Update the EP0 context through the command valid for the current Slot state
   before the next control stage, including the SuperSpeed exponent rule.
 - Set Control endpoint Average TRB Length to 8.
-- Track transfer endpoint state sufficiently to recover Halted/Error/Stopped
-  endpoints and retain request/DMA ownership until cancellation is safe.
-- Prevent device/ring/context teardown until Disable Slot succeeds or the
-  entire controller has reached a proven quiescent quarantine boundary.
-- Associate every Command Completion Event with the submitted command TRB so
-  an IRQ/poll interleaving cannot consume the wrong completion.
-- Add request-stage diagnostics which identify controller, port, slot, USB
+- Add request-stage diagnostics which identify port, slot, USB
   request, completion code, endpoint state, and recovery operation without
   unbounded logging.
 - Preserve the QEMU BIOS and 4/8/16-GiB OVMF USB-root baseline.
-- Perform one intermediate Latitude boot only after all agent-executable gates
-  pass; final five-run repeatability remains BR-T30.
+- Perform exactly one shared Latitude boot only after all agent-executable
+  gates pass; final five-run repeatability remains BR-T30.
 
 ## Non-goals
 
@@ -97,6 +90,8 @@ Endpoint, not USB endpoint address 1.
 
 - Partial `ws003-p003`, whose PCI/xHCI attach changes and diagnostics remain
   the accepted baseline.
+- `ws003-p005`, which must close command/cancel/DMA ownership before p004
+  exercises the failing enumeration path.
 - Existing WS004 xHCI model, PCI, URB, heap, and USB-root regression fixtures.
 - One disposable USB boot device and one user-operated Latitude run after the
   software candidate is frozen.
@@ -118,19 +113,13 @@ Endpoint, not USB endpoint address 1.
   xHC EP0 context with the command valid for the current Slot state; updating
   only the generic USB object is insufficient. Full/Low/High-Speed sizes are
   byte values; SuperSpeed exponent 9 becomes 512.
-- Transfer completion 4 or 6 updates the tracked endpoint state. Cancellation
-  chooses Reset Endpoint and Set TR Dequeue according to that state; it never
-  drops the last request/DMA owner merely because Stop Endpoint failed.
-- Set TR Dequeue or Disable Slot failure does not release request, ring,
-  context, or DMA memory. A controller which cannot be recovered is quiesced
-  and retained using the p003 quarantine contract.
-- QEMU success alone does not close this Phase. One physical `usb-storage: sda`
-  observation is the intermediate U2 gate.
+- QEMU success alone does not close this Phase. The one shared BR-T34
+  `usb-storage: sda` observation is the physical U2 gate.
 
 ## Expected files and subsystems
 
 - `drivers/pci-xhci.c`
-- a small shared xHCI transfer/context helper under `include/drivers/`
+- a small shared xHCI control/context helper under `include/drivers/`
 - `drivers/usb.c` and `include/drivers/usb.h` for reset completion and EP0
   packet-size handoff if the HCD interface needs it
 - `plan/ws003-bringup/tests/` fixtures, runbook, and evidence
@@ -138,43 +127,38 @@ Endpoint, not USB endpoint address 1.
 
 ## Ordered work packages
 
-- [ ] Add BR-T27 exact-DWORD fixtures for no-data and IN/OUT data control
+- [x] Add BR-T27 exact-DWORD fixtures for no-data and IN/OUT data control
       transfers, including every reserved-zero, TRT, DIR, IOC, CH, and TD Size
       field.
-- [ ] Correct Setup/Data/Status construction and preserve event-pointer and
+- [x] Correct Setup/Data/Status construction and preserve event-pointer and
       residual matching for the resulting independent TDs.
-- [ ] Add a bounded port-reset state helper and BR-T27 cases for success,
+- [x] Add a bounded port-reset state helper and BR-T27 cases for success,
       disconnect, never-cleared reset, non-enabled completion, and timeout.
-- [ ] Decode and validate `bMaxPacketSize0`, update EP0 through the state-valid
+- [x] Decode and validate `bMaxPacketSize0`, update EP0 through the state-valid
       xHC command before the next control stage, and assert Control Average TRB
       Length 8.
-- [ ] Add BR-T28 endpoint-state/cancellation fixtures for Running, Halted,
-      Error, and Stopped states, including Stop completion 19. Keep request and
-      DMA ownership reachable until recovery or controller quarantine; inject
-      Set TR Dequeue and Disable Slot failures and prove no live resource is
-      freed.
-- [ ] Route or match Command Completion Events by their command-TRB pointer and
-      cover an IRQ/poll interleaving in BR-T28.
-- [ ] Add bounded enumeration-stage diagnostics and completion-code names.
-- [ ] Run BR-T27/BR-T28, applicable WS004 regressions, `make -j16`, and
+- [x] Wait two 10-ms scheduler ticks after Address Device/SET_ADDRESS so the
+      following descriptor request cannot observe a sub-tick recovery delay.
+- [x] Add bounded enumeration-stage diagnostics carrying the numeric
+      completion code and controller-owned endpoint state.
+- [x] Run BR-T27, the passing p005 BR-T28/BR-T29 gates, applicable WS004
+      regressions, `make -j16`, and
       `git diff --check`. Do not use `make check` or `.internal/` material.
-- [ ] Run the legacy-BIOS q35/xHCI USB-root control and BR-T24 OVMF USB-root at
+- [x] Run the legacy-BIOS q35/xHCI USB-root control and BR-T24 OVMF USB-root at
       4, 8, and 16 GiB with one frozen production image.
-- [ ] Run BR-T34 once on the Latitude. Record controller/BDF, port, slot, the
+- [x] Run BR-T34 once on the Latitude. Record controller/BDF, port, slot, the
       first descriptor and address/configuration stages, `usb-storage: sda`,
-      and the first later stop if U2 succeeds but U3 does not.
-- [ ] Record the highest physical U-tier and update P/W/M/Q evidence. Defer the
-      final five consecutive boots to BR-T30.
+      and the first later stop if U2 succeeds but U3 does not; then record the
+      highest physical U-tier and update P/W/M/Q evidence. Defer the final five
+      consecutive boots to BR-T30.
 
 ## Acceptance cases
 
 - `BR-T27`: host control-transfer/context/reset fixture proves the exact xHCI
   1.2 TRB words, reserved-zero contract, EP0 packet-size conversion, Average
   TRB Length, and reset-state outcomes.
-- `BR-T28`: host cancellation fixture proves every endpoint-state path retains
-  request/DMA ownership until recovery succeeds and does not loop on Context
-  State Error; command events are matched and Disable Slot failure cannot lead
-  to live-DMA release.
+- Passing p005 `BR-T28` and `BR-T29` are prerequisites, not duplicated p004
+  acceptance.
 - Existing applicable WS004 xHCI, USB URB, PCI, and heap fixtures pass.
 - `BR-T21` and `BR-T24`: the frozen image reaches `login:` by USB root under
   legacy BIOS and OVMF at 4, 8, and 16 GiB.
@@ -187,32 +171,52 @@ Endpoint, not USB endpoint address 1.
 - Control-transfer TRBs and EP0 contexts satisfy the declared xHCI 1.2
   reserved-bit, TD-boundary, packet-size, and Average TRB Length contracts.
 - Port reset completion is state-based, bounded, and diagnosed.
-- Timeout and Halted/Error endpoint recovery have durable ownership and focused
-  regression evidence.
+- The p005 command/cancellation safety prerequisites remain passing.
 - All declared host, QEMU, build, and formatting gates pass.
 - One Latitude run reaches `usb-storage: sda`, proving U2. Repetition remains
   the final BR-T30 campaign rather than an implementation blocker.
 
 ## Actual results and evidence
 
-Planning only. This Phase was extracted from the q012 BR-T33 result and is not
-authorized for implementation by q012.
+Execution was authorized in q013 on 2026-08-26 after p005. The production
+control/context helpers and driver path now implement the declared exact
+Setup/Data/Status words, EP0 packet-size conversion, Control Average TRB
+Length, bounded state-based root reset, and two-tick reset/address recovery
+interval.
+
+Automatic evidence is complete: BR-T27, prerequisite BR-T28/BR-T29, the
+applicable DMA/xHCI/USB-URB/USB-storage regressions, `make -j16`, and
+`git diff --check` passed. The legacy-BIOS q35/xHCI USB-only root reached
+`login:`, and BR-T24 reached `login:` under OVMF at 4, 8, and 16 GiB. The
+frozen 135266304-byte `build/amd64/hdd-image.img` has SHA-256
+`bd3aa801ac890deabb5f0ad4b6f3388e5137992e9f6f81e8d912af4abad7585f`.
+
+BR-T34 was then run once on the Latitude with that exact artifact. Ports 8,
+10, and 13 reset and configured, and the SuperSpeed boot medium registered as
+`usb-storage: sda`. UUID `45a3-2251` resolved to `/dev/sda1`. No EP0,
+Control/Command, recovery, retention, enumeration, or boot-storage-timeout
+error recurred. This proves U2 and completes this Phase.
+
+The later `sense=05/20/00` stop occurred only after storage discovery, loop
+attachment, and the first writable-overlay flush. It is the independent U3
+SCSI cache-capability boundary extracted to
+[ws003-p010](../phase010-usb-storage-flush-capability/phase.md); it does not
+reopen this xHCI enumeration result.
 
 ## Interruption / resumption
 
-Create a new finite Queue containing `ws003-p004` before changing code. Begin
-with BR-T27 and the Control TRB correction; do not begin with the secondary
-Stop Endpoint completion 19 or storage-class code.
+No p004 work remains. Resume U3 in `ws003-p010`; repeatability remains the
+later BR-T30 gate.
 
 ## Remaining debt and handoff
 
 - If the spec-correct control path still fails on only one physical port or
   speed, parse Supported Protocol capabilities and extract protocol-specific
   root-port handling rather than accepting arbitrary Speed IDs.
-- If `usb-storage: sda` appears and the next stop is root selection or I/O,
-  hand it to the existing U3/U4 BR-06/BR-T31 boundary.
-- Multi-device concurrency, hub topology, and broader endpoint scheduling
-  remain later common USB/xHCI work unless required for the boot device.
+- BR-T34 reached `usb-storage: sda`; its later unsupported SCSI flush is now
+  owned by `ws003-p010` under the U3 BR-06 boundary.
+- Multi-device concurrency and broader endpoint scheduling are tracked by the
+  p005/common USB handoff unless required for the boot device.
 
 ## Reference
 

@@ -1,12 +1,38 @@
 #include <drivers/dma.h>
 #include <hal/hal.h>
+#include <kern/lock.h>
 
 #include <assert.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 static size_t observed_alignment;
+
+void
+spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
+{
+	memset(lock, 0, sizeof(*lock));
+	lock->rank = rank;
+	lock->name = name;
+}
+
+unsigned long
+spin_lock_irqsave(struct spinlock *lock)
+{
+	assert(lock->held.value == 0);
+	lock->held.value = 1;
+	return 0;
+}
+
+void
+spin_unlock_irqrestore(struct spinlock *lock, unsigned long enabled)
+{
+	(void)enabled;
+	assert(lock->held.value == 1);
+	lock->held.value = 0;
+}
 
 void *
 hal_malloc(size_t size)

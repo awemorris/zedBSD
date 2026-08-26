@@ -421,6 +421,7 @@ kern_vfs_init(const struct boot_handoff *handoff,
 #ifdef ROOTFS_IMAGE_PRIMARY
 	if (root_partition == NULL) {
 		struct overlay_mount_args overlay_args;
+		const char *mount_stage;
 		struct path private_root;
 		struct path lower;
 		struct path upper;
@@ -464,6 +465,7 @@ kern_vfs_init(const struct boot_handoff *handoff,
 					    : "attach rootfs image",
 					error);
 		if (root_loop != NULL && data_loop != NULL) {
+			mount_stage = "mount rootfs image";
 			VFS_LOG(
 			    "vfs: %s <- rootfs image (private, read-only)\n",
 			    root_loop->d_name);
@@ -477,6 +479,7 @@ kern_vfs_init(const struct boot_handoff *handoff,
 			if (error == 0) {
 				VFS_LOG("vfs: %s UFS consistency check...\n",
 					data_loop->d_name);
+				mount_stage = "mount data image";
 				error = mount_private("auto", data_loop, 0,
 						      NULL, &data_private);
 			}
@@ -491,6 +494,7 @@ kern_vfs_init(const struct boot_handoff *handoff,
 			overlay_args.lower = lower;
 			overlay_args.flags = OVERLAY_READ_WRITE;
 			if (error == 0) {
+				mount_stage = "mount root overlay";
 				VFS_LOG("vfs: mounting overlay filesystem at "
 					"/...\n");
 				error = mount_root_create(
@@ -499,7 +503,7 @@ kern_vfs_init(const struct boot_handoff *handoff,
 			path_release(&upper);
 			path_release(&lower);
 			if (error != 0)
-				return vfs_fail("mount root overlay", error);
+				return vfs_fail(mount_stage, error);
 			VFS_LOG("vfs: root=overlay lower=%s upper=%s\n",
 				root_loop->d_name, data_loop->d_name);
 		}

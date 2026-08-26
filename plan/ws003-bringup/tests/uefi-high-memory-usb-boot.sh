@@ -50,7 +50,7 @@ command -v sha256sum >/dev/null
 mkdir -p "$output"
 base_digest=$(sha256sum "$image" | awk '{print $1}')
 results=$output/results.tsv
-failure_pattern='fatal:|kernel panic|panic:|amd64 fault v=|loop1: write .*error=[1-9]|usb-storage: BOT .*error=[1-9]|usb-storage: BOT .*actual=0.*expected=[1-9]|usb-storage: sda op=2a .*error=[1-9]|xhci: transfer completion=|syslogd: .*Input/output error'
+failure_pattern='fatal:|kernel panic|panic:|amd64 fault v=|loop1: write .*error=[1-9]|usb-storage: BOT .*error=[1-9]|usb-storage: BOT .*actual=0.*expected=[1-9]|usb-storage: sda op=2a .*error=[1-9]|usb-storage: sda flush .*error=[1-9]|xhci: transfer completion=|xhci: control |xhci: command [0-9][0-9]* failed|xhci: .*retain|syslogd: .*Input/output error'
 
 {
 	echo "base_image=$image"
@@ -79,6 +79,10 @@ for memory in $memory_list; do
 
 	cp --reflink=auto --sparse=always "$image" "$run_image"
 	cp "$ovmf_vars" "$vars"
+	# Reusing an evidence directory must never let a previous guest log satisfy
+	# this run's markers before QEMU has opened its debugcon output.
+	: >"$log"
+	: >"$qemu_log"
 	"$qemu" \
 		-machine q35 \
 		-m "$memory" \

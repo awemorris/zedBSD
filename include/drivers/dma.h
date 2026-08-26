@@ -50,6 +50,13 @@ struct drv_dma_constraints {
 
 int drv_dma_device_create(const struct drv_dma_constraints *constraints,
 			  struct drv_dma_device **result);
+/*
+ * Destroy closes the device to new allocations and mappings.  EBUSY means an
+ * operation or coherent allocation is still live; free the remaining buffers
+ * and retry.  A device is not reopened after destruction has begun.  As with
+ * other raw kernel object handles, its owner must prevent a brand-new API call
+ * from starting after a successful destroy.
+ */
 int drv_dma_device_destroy(struct drv_dma_device *device);
 
 unsigned drv_dma_device_address_bits(const struct drv_dma_device *device);

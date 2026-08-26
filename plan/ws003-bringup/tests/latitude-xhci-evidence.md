@@ -1,8 +1,11 @@
-# ws003-p003 Latitude xHCI capability/MMIO evidence
+# WS003 Latitude xHCI bring-up evidence
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
-Parent Phase: [ws003-p003](../phase003-latitude-xhci-capability-mmio/phase.md)
+Parents: [ws003-p003 handoff](../phase003-latitude-xhci-capability-mmio/phase.md),
+q013 [ws003-p004](../phase004-latitude-xhci-device-enumeration/phase.md)
+through [ws003-p009](../phase009-superspeed-endpoint-context/phase.md), and
+q014 [ws003-p010](../phase010-usb-storage-flush-capability/phase.md)
 
 ## 2026-08-26 corrected-image physical run
 
@@ -229,3 +232,194 @@ cancellation recovery are handed to
 - `ws003-p003`: Partial; both physical xHCI functions attach, but BR-T33 failed
   during EP0 enumeration before USB mass storage.
 - Highest physically proven tier: U1. `ws003-p004` owns the next U2 boundary.
+
+## 2026-08-26 q013 integrated correction candidate
+
+The BR-T33 photograph exposed several independently testable boundaries, so
+q013 aggregates all known corrections before asking for another physical
+observation:
+
+| Phase | Closed automatic boundary |
+| --- | --- |
+| `ws003-p004` | exact Control Setup/Data/Status TDs, EP0 packet/context values, bounded root-port reset, and two-tick address/reset recovery |
+| `ws003-p005` | exact Command Completion association, single completion owner, checked Stop/Reset/Set-Dequeue/Disable-Slot barriers, and fail-closed request/DMA/slot retention |
+| `ws003-p006` | pre-submit Halted/Stopped/Error endpoint recovery, packet-based Normal TD Size, and terminal Normal-IN short-packet accounting |
+| `ws003-p007` | IRQ/SMP-safe shared DMA allocation registry and destroy gate for the two physical xHCI functions |
+| `ws003-p008` | USB-lifecycle-owned direct xHCI device association with no lockless device-list lookup in submit/disconnect fast paths |
+| `ws003-p009` | raw PORTSC Speed ID in Slot Context and SuperSpeed Endpoint Companion `bMaxBurst` in bulk Endpoint Context |
+
+The final source review found no remaining P0/P1 in the Latitude xHCI USB
+mass-storage boot path.  It deliberately does not close the separately
+recorded generic USB topology/driver-registry, deferred retained-object reaper,
+or future IOMMU mapping-lifetime debt.
+
+Automatic evidence for the frozen candidate:
+
+| Gate | Result |
+| --- | --- |
+| BR-T25 capability/MMIO | PASS |
+| BR-T26 HCD teardown and direct association lifetime | PASS |
+| BR-T27 Control/EP0/root-reset fixture | PASS |
+| BR-T28 cancellation/command lifecycle fixture | PASS |
+| BR-T29 QEMU xHCI remove/re-add with live IDE root | PASS |
+| BR-T35 halted endpoint and Normal-IN model | PASS |
+| BR-T36 concurrent shared-DMA lifecycle | PASS |
+| BR-T37 device association lifetime | PASS through BR-T26/BR-T29 coverage |
+| BR-T38 raw speed and SuperSpeed Max Burst | PASS |
+| Legacy BIOS q35/xHCI USB-only root | PASS; xHCI attach, configured device, `sda`, `/dev/sda1`, `login:` |
+| BR-T24 OVMF q35/xHCI USB root | PASS at 4, 8, and 16 GiB; each RSDP `0x000000007f77e014` |
+| Existing DMA, xHCI model, URB publication, and USB-storage SCSI regressions | PASS |
+| `make -j16`; `git diff --check` | PASS |
+
+The BR-T24 harness also proved that reusing its output directory must truncate
+the prior guest log before launch; q013 fixed that evidence-integrity defect
+and the same-directory rerun passed 3/3.
+
+Frozen artifact for the one shared BR-T34 observation:
+
+- file: [build/amd64/hdd-image.img](../../../build/amd64/hdd-image.img)
+- size: 135266304 bytes
+- SHA-256:
+  `bd3aa801ac890deabb5f0ad4b6f3388e5137992e9f6f81e8d912af4abad7585f`
+
+BR-T34 is one Latitude cold boot of this exact image.  Its purpose is to
+observe p004--p009 together, not to gate each Phase on a separate human run.
+Success reaches `usb-storage: sda` and preferably root/init/login without a
+Control/Command/recovery/retention/enumeration or boot-storage-timeout error.
+A failure photograph is also a valid bounded observation and is fed back to
+all six Phases.  Repeatability remains deferred to the final BR-T30 five-boot
+acceptance after the implementation is otherwise frozen.
+
+## 2026-08-26 BR-T34 physical result and U3 handoff
+
+The requested one Latitude cold boot was performed with the frozen q013
+artifact. The photograph shows all q013 physical boundaries passing:
+
+```text
+xhci: port 8 reset complete portsc=00200e03
+usb1: device 2 port 8 0a5c:5842 class 00 configured
+xhci: port 10 reset complete portsc=00200603
+usb1: device 3 port 10 0bda:c131 class e0 configured
+xhci: port 13 reset complete portsc=00201203
+usb1: device 4 port 13 30de:6544 class 00 configured
+usb-storage: sda blocks=60549120 block-size=512
+```
+
+The boot medium then remained usable through discovery and root selection:
+
+```text
+vfs: native boot disk=none physical disks=1
+vfs: boot selector UUID=45a3-2251
+vfs: scan sda H/S=255/63 blocks=60549120: 4 entries
+vfs: sda partition 1 start=2048 data=2048 blocks=262111
+vfs: boot selector UUID=45a3-2251 resolved to /dev/sda1
+vfs: loop0 <- rootfs image (private, read-only)
+vfs: loop1 <- data.img (private, read-write)
+vfs: loop0 filesystem consistency check...
+vfs: loop1 UFS consistency check...
+```
+
+No EP0, xHCI command, endpoint recovery, DMA retention, device-association,
+SuperSpeed context, enumeration, or boot-storage-timeout failure recurred.
+Result: BR-T34 **PASS**, U2 is physically proved, and q013 p004--p009 are
+complete.
+
+The first later stop is a distinct U3 durability-capability boundary:
+
+```text
+usb-storage: BOT check-condition residue=0
+usb-storage: sda op=35 lba=2048 blocks=0 error=5 sense=05/20/00
+vfs: mount root overlay failed (error 5)
+VFS initialization failed (5); entering idle.
+```
+
+The BOT command, CSW, REQUEST SENSE, storage registration, partition scan,
+UUID resolution, loop attachment, and UFS consistency checks all completed.
+Sense `05/20/00` identifies Illegal Request / Invalid Command Operation Code:
+the medium rejected optional SCSI SYNCHRONIZE CACHE(10). The logged LBA 2048
+is the partition-offset diagnostic inherited by the whole-device flush BIO;
+it is not encoded in the zeroed SYNCHRONIZE CACHE CDB.
+
+This result does not reopen any q013 xHCI Phase. q014
+[ws003-p010](../phase010-usb-storage-flush-capability/phase.md) owns bounded
+MODE SENSE cache-page parsing and pre-publication policy selection, including
+conditional SYNCHRONIZE CACHE preflight and the immutable `sync-cache` /
+proved `write-through` / advertised `fua` policy. Unknown or unsafe media is
+published read-only, and loss of a working runtime sync path is a sticky
+failure rather than a late fallback.
+
+BR-T41 will be exactly one later Latitude boot after p010 passes every
+automatic gate and freezes a new production image. Its purpose is U3 only;
+final five-run repeatability remains BR-T30.
+
+## 2026-08-26 q014 automatic result and BR-T41 request
+
+`ws003-p010` now passes its complete automatic gate. The USB-storage driver
+uses the actual MODE/SENSE and BOT transfer lengths, validates CSW status and
+residue, and distinguishes a validated SCSI command failure from transport or
+phase failure before interpreting sense. Before publishing the disk it selects
+exactly one of:
+
+- proved WCE-clear `write-through` with no flush command;
+- preflighted `sync-cache` with a sticky original runtime error;
+- advertised DPOFUA with FUA on the first and every later WRITE(10); or
+- read-only publication for an unsafe or unknown durability contract.
+
+BR-T39 plus eight related host regressions pass. Legacy BIOS USB root reaches
+the writable overlay and `login:` for both QEMU write-back and WCE-clear media.
+The WCE-clear run selects `cache=disabled dpofua=no flush=write-through`, and
+QEMU's command log contains zero SYNCHRONIZE CACHE commands. OVMF q35/xHCI USB
+root passes at 4, 8, and 16 GiB, BR-T29 hotplug passes, and one final HW-T12
+pristine-copy overlay boot passes. `make -j16` and `git diff --check` pass.
+
+Frozen BR-T41 artifact:
+
+- file: [build/amd64/hdd-image-q014.img](../../../build/amd64/hdd-image-q014.img)
+- size: 135266304 bytes
+- SHA-256:
+  `003b54ef77e1fe2e0d96278421441ff7cf4988f736f766f433bf33d6b11cd891`
+
+BR-T41 is physical confirmation **1 of 1** planned for this Phase. Its sole
+purpose is to determine whether the Latitude boot medium is classified with a
+safe cache policy and then reaches U3: `/dev/sda1` resolves, `loop1` mounts
+read-write, `vfs: root=overlay lower=loop0 upper=loop1` appears, and init starts.
+Use only the frozen file above for this one ordinary USB cold boot. Record one
+photo containing the `usb-storage: sda ... cache=... dpofua=... flush=...`
+line and the latest visible boot stage. Do not perform repeat boots now; BR-T30
+owns the final five-consecutive-run campaign.
+
+## 2026-08-27 BR-T41 physical result
+
+The user reports that the requested frozen q014 image completed the one planned
+Latitude cold boot successfully. The console photograph records:
+
+```text
+vfs: boot selector ... resolved to /dev/sda1
+vfs: loop0 <- rootfs image (private, read-only)
+vfs: loop1 <- data.img (private, read-write)
+vfs: loop0 filesystem consistency check...
+vfs: loop1 UFS consistency check...
+vfs: mounting overlay filesystem at /...
+vfs: root=overlay lower=loop0 upper=loop1
+vfs: runtime filesystems mounted
+boot: starting init /sbin/init
+init: system running
+login: root
+root@zedbsd:/root$
+```
+
+The same photograph shows `uname` and a root-directory listing from the
+interactive shell. A second photograph shows X with an interactive root shell
+inside `zterm`. No opcode-35 CHECK CONDITION, BOT error, overlay failure, or
+VFS initialization failure recurs.
+
+The requested `usb-storage: sda ... cache=... dpofua=... flush=...` diagnostic
+had scrolled out of the supplied photographs. Its exact tuple is therefore not
+inferred. This does not require another intermediate boot: the frozen driver
+can publish read-write storage only after selecting a policy proven by BR-T39,
+and the physical boot visibly uses read-write `loop1` through U3.
+
+Result: BR-T41 **PASS**. U3 and `ws003-p010` are complete, and q014 is
+finished. The login/root-shell/X observation is additional smoke evidence, not
+completion of full U4/U5, BR-T30 five-boot repeatability, or BR-T31 sustained
+root I/O.

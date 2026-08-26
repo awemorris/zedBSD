@@ -42,7 +42,7 @@ mkdir -p "$output"
 base_digest=$(sha256sum "$image" | awk '{print $1}')
 results=$output/results.tsv
 metadata=$output/metadata.txt
-failure_pattern='loop1: write .*error=[1-9]|usb-storage: BOT .*error=[1-9]|usb-storage: BOT .*actual=0.*expected=[1-9]|usb-storage: sda op=2a .*error=[1-9]|xhci: transfer completion=|syslogd: .*Input/output error'
+failure_pattern='loop1: write .*error=[1-9]|usb-storage: BOT .*error=[1-9]|usb-storage: BOT .*actual=0.*expected=[1-9]|usb-storage: sda op=2a .*error=[1-9]|usb-storage: sda flush .*error=[1-9]|xhci: transfer completion=|syslogd: .*Input/output error'
 kernel_failure_pattern='amd64 fault v=|fatal: .*unhandled amd64 fault|kernel panic|panic:'
 
 {

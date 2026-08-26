@@ -1,5 +1,6 @@
 /* Focused xHCI ring/context arithmetic fixture for ws004-p004. */
 #include <drivers/pci-xhci-capability.h>
+#include <drivers/pci-xhci-lifecycle.h>
 
 #include <assert.h>
 #include <stddef.h>
@@ -74,6 +75,13 @@ completion_succeeds(unsigned completion, int input)
 	return completion == 1U || (completion == 13U && input);
 }
 
+static uint32_t
+normal_control(int input, int final)
+{
+	return (1U << 10) | (input ? 0x4U : 0U) |
+	    (final ? 0x20U : 0x10U);
+}
+
 static unsigned
 root_speed_flag(unsigned xhci_speed)
 {
@@ -93,6 +101,8 @@ cancel_retains_dma(int stop_result)
 int
 main(void)
 {
+	size_t short_actual = SIZE_MAX;
+
 	assert(drv_xhci_scratchpad_count(0) == 0);
 	assert(drv_xhci_scratchpad_count((1U << 27) | (3U << 21)) == 97U);
 	assert(normal_trbs(0x10000U, 0) == 1U);
@@ -111,6 +121,25 @@ main(void)
 	assert(completion_succeeds(1U, 0));
 	assert(completion_succeeds(13U, 1));
 	assert(!completion_succeeds(13U, 0));
+	assert((normal_control(1, 0) & 0x14U) == 0x14U);
+	assert((normal_control(1, 1) & 0x24U) == 0x24U);
+	assert((normal_control(0, 0) & 0x4U) == 0);
+	assert(drv_xhci_normal_short_actual(0x1fff0U, 32U, 0U, 8U,
+	    &short_actual));
+	assert(short_actual == 8U);
+	/* A short on either Normal TRB is terminal; actual is cumulative through
+	 * the event TRB and no final IOC is awaited after the first case. */
+	assert(drv_xhci_normal_short_actual(0x1fff0U, 32U, 1U, 4U,
+	    &short_actual));
+	assert(short_actual == 28U);
+	assert(!drv_xhci_normal_short_actual(0x1fff0U, 32U, 0U, 17U,
+	    &short_actual));
+	assert(drv_xhci_normal_td_size(32U, 16U, 512U, 0) == 1U);
+	assert(drv_xhci_normal_td_size(32U, 32U, 512U, 1) == 0U);
+	assert(drv_xhci_normal_td_size(65536U, 65520U, 512U, 0) == 1U);
+	assert(drv_xhci_normal_td_size(65536U, 65536U, 512U, 1) == 0U);
+	assert(drv_xhci_normal_td_size(1024U * 64U, 1U, 64U, 0) == 31U);
+	assert(drv_xhci_normal_td_size(1U, 0U, 0U, 0) == 0U);
 	assert(root_speed_flag(2U) == 0x200U);
 	assert(root_speed_flag(3U) == 0x400U);
 	assert(root_speed_flag(4U) == 0x800U);
