@@ -8,7 +8,7 @@ Phase ID: `p002`
 
 Combined ID: `ws003-p002`
 
-Status: in progress; ExitBootServices sequencing correction pending validation
+Status: uncleared; ExitBootServices sequencing correction awaits physical validation
 
 Acceptance disposition: **Uncleared**
 

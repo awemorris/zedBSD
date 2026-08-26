@@ -35,6 +35,8 @@ static uint8_t kernel_heap_storage[KERNEL_HEAP_SIZE]
     __attribute__((section(".kernel_heap"), aligned(ZEDBSD_PAGE_SIZE)));
 static struct heap_allocator kernel_heap;
 static atomic_uint_t kernel_heap_lock;
+static uint8_t kernel_heap_libc_lock_active[HAL_CPU_MAX];
+static uint8_t kernel_heap_libc_irq_enabled[HAL_CPU_MAX];
 
 struct kernel_large_allocation {
 	struct kernel_large_allocation *next;
@@ -53,6 +55,43 @@ kernel_heap_lock_enter(void)
 	while (!atomic_try_acquire_zero(&kernel_heap_lock))
 		hal_compiler_barrier();
 	return enabled;
+}
+
+/*
+ * libc's malloc/free compatibility entry points use the same active heap as
+ * kern_malloc/kern_free.  The weak libc hooks are intentionally no-ops for
+ * single-threaded freestanding consumers, so the kernel must override them and
+ * join the one kernel-heap lock domain.
+ */
+void
+__libc_heap_lock(void)
+{
+	hal_cpu_id_t cpu;
+	bool enabled = hal_irq_disable();
+
+	cpu = hal_cpu_current();
+	if (cpu >= HAL_CPU_MAX || kernel_heap_libc_lock_active[cpu] != 0)
+		HAL_FATAL("recursive libc kernel heap lock");
+	while (!atomic_try_acquire_zero(&kernel_heap_lock))
+		hal_compiler_barrier();
+	kernel_heap_libc_irq_enabled[cpu] = enabled ? 1U : 0U;
+	kernel_heap_libc_lock_active[cpu] = 1U;
+}
+
+void
+__libc_heap_unlock(void)
+{
+	hal_cpu_id_t cpu = hal_cpu_current();
+	bool enabled;
+
+	if (cpu >= HAL_CPU_MAX || kernel_heap_libc_lock_active[cpu] == 0)
+		HAL_FATAL("unbalanced libc kernel heap unlock");
+	enabled = kernel_heap_libc_irq_enabled[cpu] != 0;
+	kernel_heap_libc_lock_active[cpu] = 0;
+	kernel_heap_libc_irq_enabled[cpu] = 0;
+	atomic_store_release(&kernel_heap_lock, 0U);
+	if (enabled)
+		hal_irq_enable();
 }
 
 static void

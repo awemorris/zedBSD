@@ -828,28 +828,29 @@ xhci_urb_dequeue(struct drv_usb_hcd *h, struct drv_usb_urb *u)
 {
 	struct xhci_controller *c = hcd_controller(h);
 	struct xhci_device *d = find_device(c, drv_usb_urb_device(u));
-	struct xhci_request *r = drv_usb_urb_hcd_data(u);
+	struct xhci_request *r;
 	struct xhci_endpoint *ep;
 	uint64_t dequeue;
 	unsigned dci;
 	int error;
-	if (!d || !r)
+	if (!d)
 		return EINVAL;
-	dci = r->endpoint->dci;
-	ep = &d->endpoints[dci];
 	/* Hide the request before Stop Endpoint so a late transfer event cannot
 	 * complete an URB which the caller is cancelling.  The bounce buffer
 	 * stays owned until the controller confirms that it has stopped
 	 * fetching. */
 	{
 		unsigned long irq = spin_lock_irqsave(&c->active_lock);
-		if (c->active != r) {
+		r = c->active;
+		if (r == NULL || r->urb != u) {
 			spin_unlock_irqrestore(&c->active_lock, irq);
 			return EBUSY;
 		}
 		c->active = NULL;
 		spin_unlock_irqrestore(&c->active_lock, irq);
 	}
+	dci = r->endpoint->dci;
+	ep = &d->endpoints[dci];
 	drv_usb_urb_set_hcd_data(u, NULL);
 	error = command(
 	    c, 0, 0, XHCI_TRB_TYPE(15) | (dci << 16) | XHCI_TRB_SLOT(d->slot),

@@ -8,7 +8,7 @@ Parent: [WS004](../ws.md)
 | HW-T01 | ECAM/MSI HAL contract | Canonical source parsing, MCFG validation, vector allocation/exhaustion/reuse, PCI register images, rollback, in-flight unregister, and real QEMU delivery pass |
 | HW-T10 | xHCI model | QEMU enumeration, control/bulk/interrupt transfers, reconnect, timeout, and controller reset pass |
 | HW-T11 | USB storage | Root-continuity cases from WS003 pass through xHCI |
-| HW-T12 | USB overlay writes | USB-backed `DATA.IMG` login/write/fsync/readback/cold-persistence passes without loop/FAT/BOT/xHCI errors; IDE is the control |
+| HW-T12 | USB overlay writes | Correlated URB/heap tests pass; 500 sequential q35/xHCI/SMP=4 boots from pristine raw-image copies have zero kernel/storage-error markers; explicit `DATA.IMG` persistence and IDE control pass; detailed manual acceptance follows |
 | HW-T13 | PC/AT warm reset | Three consecutive guest reboots reach fresh login with clean kernel BSS state |
 | HW-T20 | NVMe QEMU | Identify, namespace bounds, read/write/flush, concurrency, reset, and failure tests pass on disposable images |
 | HW-T21 | NVMe hardware | Read-only identify precedes explicitly safe I/O; device IDs and stress/error logs are stored |
@@ -113,3 +113,83 @@ are recorded in [qemu-usb-root-evidence.md](qemu-usb-root-evidence.md). Identity
 and bounded discovery pass. HW-T12 write/read-only-injection evidence is
 recorded by `ws004-p006`; HW-T13 diagnosis and repeated reboot evidence is in
 [qemu-warm-reset-evidence.md](qemu-warm-reset-evidence.md).
+
+## HW-T12 USB overlay write stress
+
+The intermittent write failure is evaluated with a phase-owned harness under
+this directory. The harness contract is:
+
+- build once with `make -j16`, record the diagnostic fingerprint and SHA-256 of
+  the pristine raw image, and never boot that base image directly;
+- create a byte-identical disposable raw copy for every iteration;
+- boot sequentially with the user's q35, `qemu-xhci`, USB-storage, SMP=4,
+  NE2000 topology and a bounded runtime;
+- capture the mirrored port `0xe9` debug console to a per-run text file, require
+  the expected build fingerprint and `login:`, and retain a post-login settling
+  interval;
+- classify `loop1`, UFS/FAT, BOT/SCSI, xHCI, or syslog write errors as failures
+  even if a prompt is usable;
+- classify a kernel fault separately from USB/storage errors, and classify
+  missing/truncated evidence, an early QEMU exit, or timeout as harness failure
+  rather than pass; and
+- retain an aggregate machine-readable result plus the complete log and image
+  for each failure.
+
+The harness must first demonstrate that it detects at least one known failure
+on the unfixed baseline. After a correction, all 500 classified pristine-copy
+boots must pass. Any matching failure after a code change resets the post-fix
+count. Runs are sequential because parallel QEMU instances would change host
+scheduling and confound the timing comparison. The 500-run threshold was
+approved on 2026-08-26; detailed manual acceptance is recorded separately.
+
+OCR is not the primary oracle. The amd64 console mirrors each character to both
+VGA and port `0xe9`; exact debug-console text is therefore less lossy. A QEMU
+screen capture and OCR result may accompany a failed run to demonstrate visual
+parity, but cannot replace the text log.
+
+Separate focused tests must deterministically cover:
+
+- legacy terminal-status-before-length publication producing success with a
+  stale zero length;
+- corrected release/acquire publication over many iterations; and
+- normal completion racing timeout/cancel without terminal-state overwrite,
+  premature URB free, or premature DMA release.
+
+The completion-publication and single-terminal-owner model is:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror -pthread \
+  plan/ws004-hardware/tests/usb-urb-publication-test.c \
+  -o /tmp/ws004-usb-urb-publication-test
+/tmp/ws004-usb-urb-publication-test
+```
+
+The q009 correction and interrupted 36-run acceptance attempt are recorded in
+[q009-hwt12-evidence.md](q009-hwt12-evidence.md). Thirty-five boots were clean;
+one independent SMP heap fault blocked the then-1,000-run gate. That historical
+sample is not an HW-T12 pass; q010 corrected the blocker and passed the revised
+500-run gate.
+
+## HW-T12 SMP heap blocker
+
+`ws004-p008` verifies the allocator's split/merge/realloc/alignment invariants
+and the requirement that libc compatibility allocation and `kern_malloc` share
+one lock domain:
+
+```sh
+cc -std=c11 -I. -Wall -Wextra -Werror \
+  -Dmalloc=zed_test_malloc -Dcalloc=zed_test_calloc \
+  -Drealloc=zed_test_realloc -Dfree=zed_test_free \
+  -c libc/heap.c -o /tmp/ws004-heap.o
+cc -std=c11 -I. -Wall -Wextra -Werror -pthread \
+  plan/ws004-hardware/tests/kernel-heap-lock-test.c \
+  /tmp/ws004-heap.o -o /tmp/ws004-kernel-heap-lock-test
+/tmp/ws004-kernel-heap-lock-test
+```
+
+The amd64 kernel ELF must also define strong `__libc_heap_lock` and
+`__libc_heap_unlock` symbols whenever libc allocation remains reachable. A
+weak/no-op hook is a failure when `heap_active_set()` points libc allocation at
+the kernel heap. The current linked amd64 kernel has no standard `malloc/free`
+call site; q010 evidence is in
+[q010-hwt12-evidence.md](q010-hwt12-evidence.md).

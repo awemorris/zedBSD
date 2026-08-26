@@ -355,9 +355,17 @@ retry:
 		    ~(uintptr_t)(alignment - 1U);
 		prefix = (size_t)(first - (uintptr_t)payload);
 		if (prefix != 0 && prefix < block_header_size() + HEAP_ALIGNMENT) {
-			if (first > UINTPTR_MAX - alignment)
+			size_t minimum = block_header_size() + HEAP_ALIGNMENT;
+			size_t missing = minimum - prefix;
+			size_t advance;
+
+			if (missing > SIZE_MAX - (alignment - 1U))
 				continue;
-			first += alignment;
+			advance = (missing + alignment - 1U) &
+			    ~(alignment - 1U);
+			if (first > UINTPTR_MAX - advance)
+				continue;
+			first += advance;
 		}
 		if (first > UINTPTR_MAX - capacity)
 			continue;

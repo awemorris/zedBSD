@@ -1,12 +1,12 @@
 # WS004 Phase 005: stable USB boot/root continuity
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 Phase ID: `ws004-p005`
 
-Status: partial; identity complete, writable-root acceptance uncleared
+Status: partial; automatic QEMU runtime complete, manual acceptance pending
 
-Acceptance disposition: **Uncleared**
+Acceptance disposition: **Automatically cleared; manual follow-up pending**
 
 Parent: [WS004](../ws.md)
 
@@ -110,8 +110,9 @@ MBR `PARTUUID`, not a separate boot ABI.
 - [x] Implement identity handoff in BIOS and UEFI loaders.
 - [x] Reorder/bound PC/AT USB block discovery and remove the IDE-only fatal path.
 - [x] Implement exact boot-partition matching and diagnostics.
-- [x] Clear the HW-T11 writable-overlay and clean-reboot cases through
-      `ws004-p006` and `ws004-p007`; identity/discovery subcases pass.
+- [ ] Clear the HW-T11 writable-overlay case through `ws004-p006` after its
+      `ws004-p008` heap blocker; `ws004-p007` reboot and identity/discovery
+      subcases pass.
 - [x] Record identity/discovery evidence and remaining physical/bug handoff.
 
 ## Completion conditions
@@ -141,10 +142,15 @@ insufficient while the writable overlay reports storage errors. `ws004-p006`
 then recorded three fresh writable USB boots, explicit copies, cold retained
 readback, IDE control, and bounded read-only failure injection. User acceptance
 subsequently reproduced EIO at blocks 32 and 40 with SMP=4 and NE2000, so that
-sample does not clear writable-root acceptance. `ws004-p007`
+sample did not clear writable-root acceptance. q009 corrected the demonstrated
+URB completion-publication race and then observed 35 clean boots, but its
+then-1,000-run gate was interrupted by a separate SMP heap fault. q010 corrected
+that fault in `ws004-p008`; the user revised the automatic threshold to 500,
+and the first 500 of 501 recorded boots passed without a kernel or storage
+failure. `ws004-p007`
 completed three consecutive BIOS/IDE reboots and a combined q35/xHCI USB
 reboot. Identity/discovery remains complete, but HW-T11 and this Phase remain
-Uncleared pending `ws004-p006`. Detailed commands and
+automatically cleared; detailed manual acceptance remains pending. Detailed commands and
 observations are in
 [qemu-usb-root-evidence.md](../tests/qemu-usb-root-evidence.md) and
 [qemu-warm-reset-evidence.md](../tests/qemu-warm-reset-evidence.md).
@@ -155,5 +161,6 @@ and added a Noct checker bound. The aggregate `make check` target was not used.
 ## Follow-up
 
 The malformed-handoff host fixture remains useful defense-in-depth work, and
-USB throughput remains performance debt. The writable-overlay EIO blocks the
-QEMU runtime milestone. Physical Latitude U0--U5 acceptance remains in WS003.
+USB throughput remains performance debt. The automatic writable-overlay gate
+is complete, while the user's detailed manual test is a separate follow-up.
+Physical Latitude U0--U5 acceptance remains in WS003.

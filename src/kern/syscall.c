@@ -470,7 +470,7 @@ sys_sysctl_call(const uintptr_t args[6])
 		if (args[2] != 0 && old_length > sizeof(old_value)) {
 			if (old_length > SYSCALL_SYSCTL_OUTPUT_MAX)
 				return -ENOMEM;
-			old_output = malloc(old_length);
+			old_output = kern_malloc(old_length);
 			if (old_output == NULL)
 				return -ENOMEM;
 		}
@@ -500,7 +500,7 @@ sys_sysctl_call(const uintptr_t args[6])
 
 out:
 	if (old_output != old_value)
-		free(old_output);
+		kern_free(old_output);
 	return error == 0 ? 0 : -error;
 }
 

@@ -71,6 +71,7 @@ struct drv_usb_urb {
 	struct drv_usb_iso_packet *iso_packets;
 	unsigned iso_packet_count;
 	enum drv_usb_urb_status status;
+	unsigned terminal_claimed;
 	uintptr_t hcd_private[6];
 };
 
@@ -106,7 +107,9 @@ int drv_usb_init(void)
 {
 	if (usb_initialized) return EALREADY;
 	usb_buses = NULL; usb_drivers = NULL; next_bus_number = 0;
-	usb_initialized = true; return 0;
+	usb_initialized = true;
+	hal_printf("usb: URB completion contract q009-release-acquire-v1\n");
+	return 0;
 }
 
 void drv_usb_shutdown(void)
@@ -303,14 +306,33 @@ void drv_usb_hcd_root_hub_changed(struct drv_usb_hcd *hcd)
 	for(port=1;port<=hcd->root_port_count;port++){struct drv_usb_control_request request={0xa3U,0,0,(uint16_t)port,4};uint32_t status=0;size_t actual=0;int error=hcd->ops->root_hub_control(hcd,&request,&status,sizeof(status),&actual);struct drv_usb_device*present=find_port_device(bus,port);if(error||actual!=4)continue;if(!(status&1U)&&present){destroy_device(bus,present);present=NULL;}if((status&1U)&&!present){request.request_type=0x23U;request.request=3;request.value=4;request.length=0;(void)hcd->ops->root_hub_control(hcd,&request,NULL,0,&actual);usb_delay_ticks(5U);request.request=1;(void)hcd->ops->root_hub_control(hcd,&request,NULL,0,&actual);request.request=3;request.value=1;(void)hcd->ops->root_hub_control(hcd,&request,NULL,0,&actual);usb_delay_ticks(1U);request.request_type=0xa3U;request.request=0;request.value=0;request.length=4;if(hcd->ops->root_hub_control(hcd,&request,&status,sizeof(status),&actual)==0){error=enumerate_port(bus,port,status);if(error)hal_printf("usb%u: port %u enumeration failed (%d)\n",bus->number,port,error);}}}
 }
 
+static int
+urb_publish_terminal(struct drv_usb_urb *urb,
+	enum drv_usb_urb_status status, size_t actual)
+{
+	unsigned expected = 0;
+
+	if (urb == NULL || status == DRV_USB_URB_IDLE ||
+	    status == DRV_USB_URB_PENDING)
+		return 0;
+	if (hal_atomic_load_acquire(&urb->status) != DRV_USB_URB_PENDING)
+		return 0;
+	if (!hal_atomic_compare_exchange_acq_rel(&urb->terminal_claimed,
+	    &expected, 1U))
+		return 0;
+	urb->actual_length = actual > urb->length ? urb->length : actual;
+	/* The terminal state publishes actual_length and all HCD input data. */
+	hal_atomic_store_release(&urb->status, status);
+	if (urb->callback != NULL)
+		urb->callback(urb, urb->callback_argument);
+	return 1;
+}
+
 void drv_usb_hcd_complete(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb,
 	enum drv_usb_urb_status status, size_t actual)
 {
 	(void)hcd;
-	if (urb == NULL || urb->status != DRV_USB_URB_PENDING) return;
-	urb->actual_length = actual > urb->length ? urb->length : actual;
-	urb->status = status;
-	if (urb->callback != NULL) urb->callback(urb, urb->callback_argument);
+	(void)urb_publish_terminal(urb, status, actual);
 }
 
 int drv_usb_foreach_bus(drv_usb_bus_iterator_t fn, void *argument)
@@ -347,15 +369,17 @@ struct drv_usb_urb *drv_usb_urb_alloc(struct drv_usb_device*d,
 	if(iso_count){u->iso_packets=hal_malloc(sizeof(*u->iso_packets)*iso_count);if(!u->iso_packets){hal_free(u);return NULL;}memset(u->iso_packets,0,sizeof(*u->iso_packets)*iso_count);}
 	return u;
 }
-void drv_usb_urb_free(struct drv_usb_urb*u){if(!u||u->status==DRV_USB_URB_PENDING)return;if(u->iso_packets)hal_free(u->iso_packets);hal_free(u);}
-int drv_usb_urb_setup(struct drv_usb_urb*u,void*b,size_t n,unsigned f,unsigned t,drv_usb_urb_callback_t cb,void*a){if(!u||u->status==DRV_USB_URB_PENDING||(!b&&n))return EINVAL;u->buffer=b;u->length=n;u->flags=f;u->timeout_ms=t;u->callback=cb;u->callback_argument=a;u->actual_length=0;u->status=DRV_USB_URB_IDLE;return 0;}
+void drv_usb_urb_free(struct drv_usb_urb*u){if(!u||hal_atomic_load_acquire(&u->status)==DRV_USB_URB_PENDING)return;if(u->iso_packets)hal_free(u->iso_packets);hal_free(u);}
+int drv_usb_urb_setup(struct drv_usb_urb*u,void*b,size_t n,unsigned f,unsigned t,drv_usb_urb_callback_t cb,void*a){if(!u||hal_atomic_load_acquire(&u->status)==DRV_USB_URB_PENDING||(!b&&n))return EINVAL;u->buffer=b;u->length=n;u->flags=f;u->timeout_ms=t;u->callback=cb;u->callback_argument=a;u->actual_length=0;hal_atomic_store_relaxed(&u->terminal_claimed,0U);hal_atomic_store_release(&u->status,DRV_USB_URB_IDLE);return 0;}
 int drv_usb_urb_setup_control(struct drv_usb_urb*u,const struct drv_usb_control_request*r,void*b,size_t n,unsigned t,drv_usb_urb_callback_t cb,void*a){int e;if(!u||!r||u->endpoint->type!=DRV_USB_TRANSFER_CONTROL)return EINVAL;e=drv_usb_urb_setup(u,b,n,0,t,cb,a);if(!e)u->control=*r;return e;}
 int drv_usb_urb_setup_isochronous(struct drv_usb_urb*u,struct drv_usb_iso_packet*p,unsigned n){if(!u||!p||n!=u->iso_packet_count||u->endpoint->type!=DRV_USB_TRANSFER_ISOCHRONOUS)return EINVAL;memcpy(u->iso_packets,p,n*sizeof(*p));return 0;}
-int drv_usb_urb_submit(struct drv_usb_urb*u){int e;if(!u||u->status==DRV_USB_URB_PENDING)return EINVAL;u->status=DRV_USB_URB_PENDING;u->actual_length=0;e=u->device->bus->hcd->ops->urb_enqueue(u->device->bus->hcd,u);if(e)u->status=DRV_USB_URB_IDLE;return e;}
-int drv_usb_urb_cancel(struct drv_usb_urb*u){int e;if(!u||u->status!=DRV_USB_URB_PENDING)return EINVAL;e=u->device->bus->hcd->ops->urb_dequeue(u->device->bus->hcd,u);if(!e)drv_usb_hcd_complete(u->device->bus->hcd,u,DRV_USB_URB_CANCELLED,0);return e;}
-int drv_usb_urb_wait(struct drv_usb_urb*u){uint64_t deadline;if(!u)return EINVAL;deadline=u->timeout_ms?sched_ticks()+(u->timeout_ms+9U)/10U:0;while(u->status==DRV_USB_URB_PENDING){if(deadline&&sched_ticks()>=deadline){(void)drv_usb_urb_cancel(u);u->status=DRV_USB_URB_TIMEOUT;return ETIMEDOUT;}hal_compiler_barrier();}return u->status==DRV_USB_URB_COMPLETE?0:u->status==DRV_USB_URB_TIMEOUT?ETIMEDOUT:u->status==DRV_USB_URB_STALL?EPIPE:u->status==DRV_USB_URB_DISCONNECTED?ENODEV:EIO;}
-enum drv_usb_urb_status drv_usb_urb_status(const struct drv_usb_urb*u){return u?u->status:DRV_USB_URB_IO_ERROR;}
-size_t drv_usb_urb_actual_length(const struct drv_usb_urb*u){return u?u->actual_length:0;}
+int drv_usb_urb_submit(struct drv_usb_urb*u){int e;if(!u||hal_atomic_load_acquire(&u->status)==DRV_USB_URB_PENDING)return EINVAL;u->actual_length=0;hal_atomic_store_relaxed(&u->terminal_claimed,0U);hal_atomic_store_release(&u->status,DRV_USB_URB_PENDING);e=u->device->bus->hcd->ops->urb_enqueue(u->device->bus->hcd,u);if(e)hal_atomic_store_release(&u->status,DRV_USB_URB_IDLE);return e;}
+static int urb_cancel_to(struct drv_usb_urb*u,enum drv_usb_urb_status terminal){int e;if(!u||hal_atomic_load_acquire(&u->status)!=DRV_USB_URB_PENDING)return EINVAL;e=u->device->bus->hcd->ops->urb_dequeue(u->device->bus->hcd,u);if(e)return e;return urb_publish_terminal(u,terminal,0)?0:EALREADY;}
+int drv_usb_urb_cancel(struct drv_usb_urb*u){return urb_cancel_to(u,DRV_USB_URB_CANCELLED);}
+static int urb_status_error(enum drv_usb_urb_status status){return status==DRV_USB_URB_COMPLETE?0:status==DRV_USB_URB_TIMEOUT?ETIMEDOUT:status==DRV_USB_URB_STALL?EPIPE:status==DRV_USB_URB_DISCONNECTED?ENODEV:EIO;}
+int drv_usb_urb_wait(struct drv_usb_urb*u){uint64_t deadline,cancel_deadline=0;enum drv_usb_urb_status status;if(!u)return EINVAL;deadline=u->timeout_ms?sched_ticks()+(u->timeout_ms+9U)/10U:0;for(;;){status=hal_atomic_load_acquire(&u->status);if(status!=DRV_USB_URB_PENDING)return urb_status_error(status);if(deadline&&sched_ticks()>=deadline){int e=urb_cancel_to(u,DRV_USB_URB_TIMEOUT);if(e==0)continue;if(e!=EBUSY&&e!=EINVAL&&e!=EALREADY)return e;if(cancel_deadline==0)cancel_deadline=sched_ticks()+100U;if(sched_ticks()>=cancel_deadline)return ETIMEDOUT;sched_yield();continue;}hal_compiler_barrier();}}
+enum drv_usb_urb_status drv_usb_urb_status(const struct drv_usb_urb*u){return u?hal_atomic_load_acquire(&u->status):DRV_USB_URB_IO_ERROR;}
+size_t drv_usb_urb_actual_length(const struct drv_usb_urb*u){enum drv_usb_urb_status status;if(!u)return 0;status=hal_atomic_load_acquire(&u->status);return status==DRV_USB_URB_PENDING?0:u->actual_length;}
 void*drv_usb_urb_buffer(const struct drv_usb_urb*u){return u?u->buffer:NULL;}
 size_t drv_usb_urb_length(const struct drv_usb_urb*u){return u?u->length:0;}
 unsigned drv_usb_urb_flags(const struct drv_usb_urb*u){return u?u->flags:0;}

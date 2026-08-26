@@ -1,18 +1,18 @@
 # WS004: hardware expansion
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 WSID: `ws004`
 
-Status: active; QEMU USB-root writable-overlay gate uncleared
+Status: active; q010 automatic USB/heap gate complete, manual acceptance pending
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws004-p007` complete warm-reset milestone; `ws004-p006`
-reopened after user acceptance reproduced writable-overlay EIO
+Last verified Phase: `ws004-p008` and resumed `ws004-p006` complete their
+automatic QEMU milestones; detailed manual USB acceptance is pending
 
-Resume point: diagnose `ws004-p006` with the supplied q35/xHCI, SMP=4, NE2000
-topology before extracting new feature work.
+Resume point: record the user's detailed manual USB acceptance separately, or
+extract the next planned hardware Phase. The automatic 500-boot gate passed.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -24,9 +24,10 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p002`](phase002-pcie-xhci-prerequisites/phase.md) | Complete software milestone | Config limits, extended capabilities, bridge-tree scan, and contract evidence pass |
 | [`ws004-p003`](phase003-ecam-msi/phase.md) | Complete software milestone | Fixed HAL API, MCFG/ECAM, amd64 vector allocation, PCI MSI/MSI-X lifecycle, and real QEMU delivery pass; unavailable cross-target toolchains are recorded |
 | [`ws004-p004`](phase004-xhci/phase.md) | Complete QEMU storage milestone | Native xHCI uses MSI-X, enumerates and reads USB storage, and passes disconnect/reconnect; SuperSpeed/fault injection and Latitude evidence remain follow-ups |
-| [`ws004-p005`](phase005-usb-root/phase.md) | Partial; Uncleared | BIOS/UEFI USB root identity/discovery passes, but writable-overlay EIO invalidates QEMU runtime acceptance |
-| [`ws004-p006`](phase006-usb-overlay-write/phase.md) | In progress; Uncleared | User acceptance reproduced block-32/block-40 EIO with q35/xHCI, SMP=4, and NE2000 |
+| [`ws004-p005`](phase005-usb-root/phase.md) | Partial; automatic runtime cleared | BIOS/UEFI identity and revised 500-boot writable-root gate pass; malformed-handoff fixture and detailed manual acceptance remain |
+| [`ws004-p006`](phase006-usb-overlay-write/phase.md) | Complete automatic QEMU milestone | URB correction plus p008 heap fix pass focused tests and the revised 500-boot gate; manual acceptance is pending |
 | [`ws004-p007`](phase007-warm-reset/phase.md) | Complete | Native-mode ELF64 BSS clearing fixes stale allocator state; three IDE reboots and a USB reboot reach login |
+| [`ws004-p008`](phase008-smp-heap-integrity/phase.md) | Complete | Unified kernel heap lock domain, corrected aligned-prefix arithmetic, controls, and 500-boot combined gate pass |
 
 ### MSI follow-up register
 
@@ -87,7 +88,7 @@ implemented initially, the security and addressability limitation is explicit.
 | --- | --- | --- | --- | --- |
 | HW-00 | Complete (software scope) | PCIe/DMA/interrupt capability audit and common fixes | BR-00 hardware inventory deferred | Focused host tests and amd64 build pass; physical findings remain separate |
 | HW-01 | Complete read-only QEMU milestone | xHCI host-controller support sufficient for storage and future HID | HW-00, existing USB core | QEMU xHCI enumeration, bounded media read, and reconnect pass; writable-root correctness is HW-02/p006 |
-| HW-02 | In progress; QEMU writable-overlay gate Uncleared | Stable USB identity/discovery, writable overlay, bounded read-only rejection, and warm reboot | HW-01, block layer, approved selector decision | Clear the reproducible q35/xHCI loop1 EIO before physical USB-root tests |
+| HW-02 | Complete automatic QEMU milestone; manual acceptance pending | Stable USB identity/discovery, writable overlay, bounded read-only rejection, and warm reboot | HW-01, block layer, approved selector decision | Revised HW-T12 500-copy gate passes; record the user's detailed manual acceptance separately before physical USB-root claims |
 | HW-10 | Planned | NVMe controller, admin/I/O queues, namespaces, and block integration | HW-00 | QEMU NVMe install/mount/I/O/reset tests pass |
 | HW-11 | Planned | NVMe verification on the Latitude controller | HW-10, BR-00 | Identify/read-only first, then disposable-range I/O and stress without corruption |
 | HW-20 | Proposed | WLAN architecture and exact-device driver | BR-00, HW-00, firmware policy | Scan, authenticate, associate, and exchange data on hardware |

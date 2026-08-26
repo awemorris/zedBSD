@@ -1,6 +1,6 @@
 # ws004-p005 QEMU USB-root evidence
 
-Date: 2026-08-25
+Date: 2026-08-26
 
 QEMU: `qemu-system-x86_64` 10.0.11 (Debian package
 `1:10.0.11+ds-0+deb13u1`)
@@ -75,13 +75,31 @@ backend exposed the generic EIO path: SCSI write protection was ignored and
 was not propagated through private mount/loop setup. The corrected driver uses
 MODE SENSE(6), preserves sense key/ASC/ASCQ, and the VFS rejects the read-write
 data loop early with `EROFS`. That clearance was subsequently withdrawn: user
-acceptance with a newly generated image reproduced the EIO on the first boot,
-while the second boot did not. Added BOT diagnostics identified a zero-byte
-short completion of the 31-byte Bulk OUT CBW (`error=0 actual=0 expected=31`),
-before SCSI command execution. The xHCI Link/event correction passes a focused
-wrap model and a fresh headless boot/copy run, but HW-T11 remains Uncleared
-until the supplied GUI command confirms the result. Physical-media acceptance
-remains in WS003.
+acceptance with newly generated images reproduced the EIO intermittently; it is
+not restricted to one fixed boot point or reliably to the first boot. Added BOT
+diagnostics have observed success with a zero caller-visible length for the
+31-byte Bulk OUT CBW, the 4,096-byte Bulk OUT data phase, and a 13-byte Bulk IN
+CSW. In the CSW case, the expected nonzero tag and successful status were copied
+into the zero-initialized destination even though the caller read
+`actual_length == 0`.
+
+The xHCI Link/event correction passes a focused wrap model but did not clear the
+failure. Inspection of the pre-q009 optimized amd64 object found that the
+compiler emitted terminal URB status before `actual_length`; the polling waiter
+used no acquire operation. q009 replaced this with a single-owner terminal
+transition and release/acquire publication, and corrected xHCI cancellation's
+active-request ownership. Focused publication, completion/cancel, xHCI, and
+SCSI models pass.
+
+The q009 post-fix gate produced 35 clean USB boots out of 36 attempts, then was
+stopped because one run hit a separate SMP kernel-heap fault in `remove_free()`.
+Rebooting that retained image reached login, excluding persistent overlay-media
+corruption. q010 proved the unlocked libc/kernel heap lock-domain mismatch,
+corrected it, and passed the user-revised automatic gate: the accepted first
+500 plus one additional boot all passed with zero kernel or storage failure.
+See [q009 history](q009-hwt12-evidence.md) and
+[q010 evidence](q010-hwt12-evidence.md). Detailed manual acceptance and
+physical-media acceptance remain separate; the latter is owned by WS003.
 
 A clean guest `/sbin/reboot` initially was not accepted. The first attempt exposed an
 unaligned amd64 signal FXSAVE area, which is fixed by dynamically aligning each
