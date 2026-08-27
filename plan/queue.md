@@ -1,108 +1,132 @@
-# Queue: YAML `/etc/rc.conf` foundation
+# Queue: WS012 service administration completion
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
-QID: `q017`
+QID: `q018`
 
-Queue status: finished
+Queue status: in-progress
 
-Queue finished: **Yes**
+Queue finished: **No**
 
 Authorization: explicitly approved by the user on 2026-08-27 as part of the
-automatic WS-priority Queue execution run
+automatic WS-priority Queue execution run, including automatic continuation
+and the Phase-boundary WIP commit/push policy below
 
-Timebox: continuous execution through 2026-08-28 09:00 JST; this finite Queue
-contains one dependency-ready Phase and may finish earlier
+Timebox: continuous execution through 2026-08-28 09:00 JST; stop earlier only
+when every Queue item has been processed or no dependency-ready work remains
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q016](queue-q016.md)
+Previous Queue: [q017](queue-q017.md)
 
 ## Purpose
 
-Complete `ws012-p002`, the only currently dependency-ready WS012 Phase. Replace
-the legacy `/etc/rc.conf` assignment format with the accepted bounded,
-mapping-only YAML v1 model and one locked, atomic persistence API shared by
-PID 1, `service`, and `ntpdate`.
+Complete the remaining WS012 service-administration stack in dependency order.
+Build the bounded ZSV1 PID 1 protocol first, rebuild the script-safe service
+CLI on that typed protocol and q017's YAML persistence foundation, add the
+argument-free interactive console through the same dispatcher, and finish
+with production amd64 QEMU integration and public documentation.
 
-The later service-console Phases are not in this finite Queue. The user has
-since accepted `/run/init.sock` for ZSV1 service and HALT/POWEROFF/REBOOT
-actions without the old protocol or a new signal path. After p002 closes,
-p003-p006 are eligible for the next WS012 Queue in dependency order.
+The p003 protocol includes typed service operations and fixed `ZSV1 HALT`,
+`ZSV1 POWEROFF`, and `ZSV1 REBOOT` operations. `/sbin/halt`,
+`/sbin/poweroff`, `/sbin/reboot`, and `/sbin/shutdown` migrate together; the
+unversioned socket grammar is removed without a compatibility path.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative documents | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws012-p002` | [WS012](ws012-service-console/ws.md), [Phase](ws012-service-console/phase002-yaml-rcconf/phase.md), [tests](ws012-service-console/tests/README.md) | completed | All rc.conf readers use the strict YAML v1 model; stable locking and atomic replacement pass focused failure/concurrency fixtures and the production build |
+| 1 | `ws012-p003` | [WS012](ws012-service-console/ws.md), [Phase](ws012-service-console/phase003-zsv1-init-protocol/phase.md), [tests](ws012-service-console/tests/README.md) | completed | PID 1 and every installed service/shutdown client use bounded, terminated ZSV1 service and system-action records with no display-text parsing or unversioned fallback |
+| 2 | `ws012-p004` | [WS012](ws012-service-console/ws.md), [Phase](ws012-service-console/phase004-service-argv-persistence/phase.md), [tests](ws012-service-console/tests/README.md) | in-progress | The argv CLI has fixed grammar/output/exit status, separates runtime control from locked persistent policy, and uses typed ZSV1 state |
+| 3 | `ws012-p005` | [WS012](ws012-service-console/ws.md), [Phase](ws012-service-console/phase005-interactive-console/phase.md), [tests](ws012-service-console/tests/README.md) | pending | Argument-free service enters the bounded native console and reuses the p004 dispatcher without candidate/save state |
+| 4 | `ws012-p006` | [WS012](ws012-service-console/ws.md), [Phase](ws012-service-console/phase006-integration-acceptance/phase.md), [tests](ws012-service-console/tests/README.md) | pending | Focused fixtures, production amd64 QEMU behavior, persistence/failure/concurrency cases, fatal-log scan, and public documentation prove the complete WS012 contract |
 
-## Entry evidence and dependencies
+## Entry evidence and dependency order
 
-- `ws012-p001` accepted the exact YAML shape, strict subset, direct replacement
-  policy, stable companion lock, and atomic same-directory rename contract.
-- The installed file has only hostname, service enablement, and ntpdate server
-  consumers; `/etc/service.d/` remains on its separate assignment grammar.
-- Native `fcntl(F_SETLKW)`, `fsync`, ownership/mode operations, and same-mount
-  rename exist; q017 guest acceptance proved the required overlay/UFS behavior.
-- The p003 shutdown protocol decision is resolved but remains outside this
-  Queue's implementation boundary.
+- q017 completed `ws012-p002`: strict YAML parsing, stable locking, atomic
+  persistence, all-reader migration, the production build, and a guest
+  persistence/reboot proof all pass.
+- All p003 product decisions are fixed. `/run/init.sock` remains the root-only
+  endpoint, fd 3 remains an independent readiness channel, foreground
+  daemon/respawn services remain direct PID 1 children, and ZSV1 carries the
+  three system actions.
+- p004 depends on p003, p005 depends on p004, and integrated p006 depends on
+  p002-p005. An item starts only after every earlier dependency completes.
+- No known human product decision remains inside this finite Queue.
 
 ## Ordered execution
 
-1. Inventory and separate the existing assignment parser from every rc.conf
-   consumer without changing `/etc/service.d/` syntax.
-2. Implement bounded YAML parsing, semantic validation, canonical ordering and
-   serialization, model lookup/mutation, stable lock acquisition, exclusive
-   temporary-file write, fsync, and atomic replacement.
-3. Convert PID 1 hostname and enabled-policy snapshots, `service` persistence,
-   and `ntpdate` servers to the model; install only canonical YAML rc.conf.
-4. Add Phase-owned accepted/rejected grammar, bounds, round-trip, failure-
-   injection, lock-contention, and no-lost-update host fixtures.
-5. Run focused fixtures, `make -j16`, a bounded QEMU persistence/reload proof
-   if required by the Phase, config-preservation verification, and
-   `git diff --check`.
-6. Synchronize the Phase, WS012, master, and Queue, then archive q017.
-7. Group p003-p006 into the next WS012 Queue after p002 closes.
+1. Execute [p003](ws012-service-console/phase003-zsv1-init-protocol/phase.md):
+   isolate the bounded parser/emitter and typed client decoder, migrate service
+   and shutdown clients atomically, add focused protocol/action fixtures, and
+   verify its complete P-book contract.
+2. Execute [p004](ws012-service-console/phase004-service-argv-persistence/phase.md):
+   implement the shared typed dispatcher, deterministic views, runtime-only
+   control, policy-only locked mutations, and explicit failure/exit semantics.
+3. Execute [p005](ws012-service-console/phase005-interactive-console/phase.md):
+   wrap that dispatcher with the bounded `service>` console, usable help,
+   recovery, EOF/exit handling, and concurrent-writer coverage.
+4. Execute [p006](ws012-service-console/phase006-integration-acceptance/phase.md):
+   rerun every focused group, build with `make -j16`, exercise a disposable
+   amd64 image with `qemu-system-x86_64`, repair in-scope integration defects,
+   scan fatal diagnostics, and update the public init/service reference.
+5. After each Queue item is processed, synchronize its actual result into its
+   P book, WS012, the master, the test index, and this Queue before starting a
+   dependent item.
+6. When all items are completed or honestly uncleared, archive q018 and select
+   the next dependency-ready WS according to the approved automatic loop.
 
-## Stop, defer, and continuation rules
+## `ws012-p003` result
 
-- Parser, persistence, reader migration, fixture, or ordinary build defects
-  within the fixed p002 contract remain in scope and are repaired directly.
-- If the filesystem cannot provide the accepted stable-lock plus atomic-rename
-  contract, record exact evidence, mark p002 uncleared, report the required
-  human decision, and continue to the next independent WS.
-- Do not broaden p002 with the separately authorized p003 service protocol.
-- Do not use `make check`, `.internal/`, a physical test, or a repository
-  commit. Preserve unrelated working-tree changes and `config.mk`.
-
-## Approval boundary
-
-This Queue authorizes only `ws012-p002`. The accepted p003-p006 work requires
-the next finite Queue record.
-
-## Result
-
-`ws012-p002` completed without a human-decision blocker. The legacy assignment
-format was replaced by the strict mapping-only YAML v1 model for rc.conf while
-the `/etc/service.d/` assignment reader remained separate. PID 1, `service`,
-and `ntpdate` now share the validated model; writers serialize on the stable
-companion lock and publish canonical data through same-directory fsync and
-atomic rename.
-
-The strict-model and persistence host fixtures passed, including grammar,
-bounds, deterministic round-trip, lock contention, two-writer no-lost-update,
-and injected write/fsync/rename failures. `make -j16` passed. On one disposable
-amd64 QEMU image, `service disable cron` persisted across reboot and cron was
-not started afterward. Guest `stat` evidence for `/etc/rc.conf` was
-`mode=81a4 uid=0 gid=0`, proving the required root-owned `0644` replacement.
+`ws012-p003` completed on 2026-08-28. The production-shared ZSV1 protocol,
+client, server, and shutdown-argv fixtures passed, including ASan/UBSan runs
+for the protocol, client, and server. `make -j16` passed. One disposable amd64
+QEMU boot verified the root-owned mode-`0600` socket, typed state and lifecycle
+operations, synchronous reload, typed error recovery, acknowledged halt, and
+a clean fatal-log scan. See
+[the q018 p003 QEMU evidence](ws012-service-console/tests/q018-p003-qemu-evidence.md).
 
 The saved `config.mk` SHA-256 remained
 `3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`, and
-`git diff --check` passed. No `make check`, `.internal/`, physical test, or
-repository commit was used.
+`git diff --check` passed. `make check` was not run and `.internal/` was not
+used. q018 remains in progress with `ws012-p004` as the current item.
 
-The first guest attempt also exposed an unrelated build-dependency defect:
-an earlier custom boot-parameter input could leave a newer generated header
-authoritative for a later default build. That residual is isolated as
-[`ws003-p016`](ws003-bringup/phase016-boot-parameter-header-dependency/phase.md)
-and does not weaken the successful p002 rerun with regenerated defaults.
+## Phase checkpoint and push policy
+
+After each processed Phase and its planning-book synchronization:
+
+1. run `git add -A`;
+2. run `git commit -m WIP`; and
+3. run `git push`.
+
+The user explicitly authorized automatic push. If the execution environment
+or approval reviewer rejects a push, record that fact and continue with the
+local WIP commit; push rejection alone does not stop this Queue. A failed test,
+unfinished Phase, or hidden uncertainty must not be mislabeled as completed to
+create a checkpoint.
+
+## Stop, defer, and continuation rules
+
+- Routine defects inside a selected Phase's fixed P-book contract remain in
+  scope and are repaired until its verification conditions pass.
+- If a Phase reaches its reconsideration boundary or needs a new human product
+  decision, record the exact question and evidence in P/W/M, mark that item
+  `uncleared`, leave dependent items unexecuted with the dependency reason,
+  report the question in the conversation, and continue any independent
+  authorized work.
+- Do not replace ZSV1 with JSON, binary framing, display-text scraping, an
+  unversioned compatibility path, or an unbounded field.
+- Do not add candidate/save service policy, container-specific protocol data,
+  support for daemonizing/forking services, runlevels, or a general command
+  language.
+- Use `make -j16`; do not run `make check` or consume `.internal/`. Use only
+  disposable image copies for mutating QEMU acceptance and preserve the user's
+  saved build configuration.
+- Physical-machine validation and unrelated service, network, container, or
+  kernel redesign are outside q018.
+
+## Approval boundary
+
+q018 authorizes only `ws012-p003` through `ws012-p006` in the stated dependency
+order. Detailed implementation and verification requirements remain in the
+linked P books rather than being duplicated here.

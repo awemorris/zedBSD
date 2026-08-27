@@ -1,20 +1,20 @@
 # WS012: service administration console
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 WSID: `ws012`
 
-Status: Active; `ws012-p002` complete in `q017`, p003-p006 Queue-ready in dependency order
+Status: Active; `ws012-p003` complete in `q018`, p004 in progress, p005-p006 pending in dependency order
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws012-p002`
+Last verified Phase: `ws012-p003`
 
-Resume point: execute p003-p006 in dependency order, beginning with the ZSV1
-protocol Phase. `/run/init.sock` is accepted for the service
-control protocol, the old unversioned protocol is removed without a
-compatibility path, ZSV1 includes the system actions, and fd 3 remains
-readiness notification from opted-in services only.
+Resume point: continue q018 with the in-progress `ws012-p004` argv and
+persistent-policy Phase, followed by p005-p006. The p003 ZSV1 service and
+system-action protocol, root-only socket, typed clients, and lifecycle/error
+behavior are verified; fd 3 remains readiness notification from opted-in
+services only.
 
 Shared reviews: [WS012 review index](tests/README.md)
 
@@ -66,23 +66,29 @@ when the dependency-ready Phase crosses an approved Queue boundary.
 | --- | --- | --- | --- |
 | `ws012-p001` | [Service-console design discussion](phase001-design-discussion/phase.md) | Complete | YAML, ZSV1, grammar, policy, permissions, and concurrency decisions accepted |
 | `ws012-p002` | [YAML rc.conf model and persistence foundation](phase002-yaml-rcconf/phase.md) | Complete (`q017`) | Strict model, parser, canonical writer, stable lock, atomic replacement, and all-reader migration |
-| `ws012-p003` | [ZSV1 init service-control protocol](phase003-zsv1-init-protocol/phase.md) | Planned; Queue-ready | Replace the old socket grammar with bounded versioned service/system-action records and typed service/shutdown clients |
-| `ws012-p004` | [Non-interactive service CLI and persistent policy](phase004-service-argv-persistence/phase.md) | Planned; Queue-ready after p003 | Stable argv grammar/output, runtime controls, immediate locked enable/disable, and reload |
-| `ws012-p005` | [Interactive service console](phase005-interactive-console/phase.md) | Planned; Queue-ready after p004 | Argument-free prompt reuses the argv dispatcher with no candidate/save state |
-| `ws012-p006` | [Service-console integration acceptance](phase006-integration-acceptance/phase.md) | Planned; Queue-ready after p002-p005 | Host/QEMU lifecycle, concurrency, persistence, failure, cold boot, and documentation evidence |
+| `ws012-p003` | [ZSV1 init service-control protocol](phase003-zsv1-init-protocol/phase.md) | Complete (`q018`, 2026-08-28) | Replace the old socket grammar with bounded versioned service/system-action records and typed service/shutdown clients |
+| `ws012-p004` | [Non-interactive service CLI and persistent policy](phase004-service-argv-persistence/phase.md) | In progress (`q018`) | Stable argv grammar/output, runtime controls, immediate locked enable/disable, and reload |
+| `ws012-p005` | [Interactive service console](phase005-interactive-console/phase.md) | Pending (`q018`); depends on p004 | Argument-free prompt reuses the argv dispatcher with no candidate/save state |
+| `ws012-p006` | [Service-console integration acceptance](phase006-integration-acceptance/phase.md) | Pending (`q018`); depends on p002-p005 | Host/QEMU lifecycle, concurrency, persistence, failure, cold boot, and documentation evidence |
 
 The implementation dependency chain is p002 -> p003 -> p004 -> p005 -> p006.
-q017 completed p002. The next finite WS012 Queue may group p003-p006 and must
-execute them in that order.
+q017 completed p002. [q018](../queue.md) is executing p003-p006 serially in
+that order; p003 is complete and p004 is the current item.
 
 ## Latest completed evidence
 
-q017 passed both Phase-owned host fixtures and `make -j16`. A disposable amd64
-QEMU image persisted `service disable cron` across a reboot and did not start
-cron afterward. Guest metadata reported `/etc/rc.conf` as
-`mode=81a4 uid=0 gid=0`; the saved `config.mk` hash remained
-`3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`.
-`git diff --check` passed, and neither `make check` nor `.internal/` was used.
+q018 p003 passed the production-shared ZSV1 protocol, client, server, and
+shutdown-argv fixtures plus protocol/client/server ASan/UBSan runs and
+`make -j16`. One disposable amd64 QEMU boot verified the root-owned mode-`0600`
+socket, typed state and lifecycle operations, synchronous reload, error
+recovery, acknowledged halt, and a clean fatal-log scan. See
+[the production QEMU evidence](tests/q018-p003-qemu-evidence.md).
+
+The saved `config.mk` hash remained
+`3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6` and
+`git diff --check` passed. Neither `make check` nor `.internal/` was used. q017
+remains the predecessor evidence for strict YAML persistence and the rebooted
+disabled-policy proof.
 
 ## Accepted service-control decisions
 

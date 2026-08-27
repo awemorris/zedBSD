@@ -7,6 +7,7 @@
 
 #include "userland/base/service/service-config.h"
 #include "userland/base/service/rcconf.h"
+#include "userland/base/service/zsv1-server.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -37,6 +38,13 @@ enum service_state {
 	SERVICE_COMPLETED,
 	SERVICE_FAILED,
 	SERVICE_SKIPPED
+};
+
+enum init_action {
+	INIT_ACTION_NONE,
+	INIT_ACTION_HALT,
+	INIT_ACTION_POWEROFF,
+	INIT_ACTION_REBOOT
 };
 
 struct service {
@@ -70,9 +78,9 @@ signal_handler(int number)
 	if (number == SIGHUP)
 		reload_requested = 1;
 	else if (number == SIGINT)
-		action_requested = ZEDBSD_SYSTEM_REBOOT;
+		action_requested = INIT_ACTION_REBOOT;
 	else if (number == SIGTERM)
-		action_requested = ZEDBSD_SYSTEM_HALT;
+		action_requested = INIT_ACTION_HALT;
 }
 
 static int
@@ -167,6 +175,7 @@ load_one_service(const char *name, const struct rcconf_model *snapshot)
 {
 	struct service *service;
 	char path[320], value[64];
+	size_t after_count, requires_count;
 	int enabled;
 
 	if (!service_name_valid(name) || service_count == SERVICE_MAX ||
@@ -185,10 +194,16 @@ load_one_service(const char *name, const struct rcconf_model *snapshot)
 
 	(void)assignment_get(path, "arguments", service->arguments,
 			     sizeof(service->arguments));
-	(void)assignment_get(path, "after", service->after,
-			     sizeof(service->after));
-	(void)assignment_get(path, "requires", service->requires,
-			     sizeof(service->requires));
+	if ((assignment_get(path, "after", service->after,
+			    sizeof(service->after)) != 0 &&
+	     errno != ENOENT) ||
+	    (assignment_get(path, "requires", service->requires,
+			    sizeof(service->requires)) != 0 &&
+	     errno != ENOENT) ||
+	    zsv1_server_dependency_lists_validate(
+		service->after, service->requires, &after_count,
+		&requires_count) != 0)
+		return -1;
 	service->notify_timeout = 10;
 
 	service->type = SERVICE_DAEMON;
@@ -435,6 +450,7 @@ spawn_service(struct service *service)
 		if (count + 1 >= ARGUMENT_MAX) {
 			fprintf(stderr, "init: too many arguments for %s\n",
 				service->name);
+			errno = E2BIG;
 			return -1;
 		}
 		argv[count++] = argument;
@@ -466,11 +482,14 @@ spawn_service(struct service *service)
 		_exit(127);
 	}
 	if (child < 0) {
+		int error = errno;
+
 		if (notify_pipe[0] >= 0)
 			close(notify_pipe[0]);
 		if (notify_pipe[1] >= 0)
 			close(notify_pipe[1]);
 		service->state = SERVICE_FAILED;
+		errno = error;
 		return -1;
 	}
 
@@ -478,11 +497,14 @@ spawn_service(struct service *service)
 	if (service->notify_fd3) {
 		close(notify_pipe[1]);
 		if (wait_for_notification(service, notify_pipe[0]) != 0) {
+			int error = errno;
+
 			close(notify_pipe[0]);
 			(void)kill(child, SIGTERM);
 			(void)waitpid(child, &status, 0);
 			service->pid = 0;
 			service->state = SERVICE_FAILED;
+			errno = error;
 			return -1;
 		}
 		close(notify_pipe[0]);
@@ -494,11 +516,21 @@ spawn_service(struct service *service)
 		return 0;
 	}
 
-	if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
-	    WEXITSTATUS(status) != 0) {
+	if (waitpid(child, &status, 0) != child) {
+		int error = errno;
+
+		service->state = SERVICE_FAILED;
+		service->pid = 0;
+		fprintf(stderr, "init: oneshot %s wait failed\n",
+			service->name);
+		errno = error;
+		return -1;
+	}
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
 		service->state = SERVICE_FAILED;
 		service->pid = 0;
 		fprintf(stderr, "init: oneshot %s failed\n", service->name);
+		errno = EIO;
 		return -1;
 	}
 
@@ -619,15 +651,6 @@ reap_children(void)
 	}
 }
 
-static const char *
-state_name(enum service_state state)
-{
-	static const char *const names[] = {"stopped",	 "starting", "running",
-					    "completed", "failed",   "skipped"};
-
-	return names[state];
-}
-
 static int
 reload_policy(void)
 {
@@ -636,8 +659,11 @@ reload_policy(void)
 
 	snapshot = load_rcconf_snapshot();
 	if (snapshot == NULL) {
+		int error = errno;
+
 		fprintf(stderr, "init: cannot reload %s: %s\n", RCCONF_PATH,
-			strerror(errno));
+			strerror(error));
+		errno = error;
 		return -1;
 	}
 
@@ -653,92 +679,174 @@ reload_policy(void)
 	return 0;
 }
 
-static void
-write_response(int client, const char *response)
+static enum zsv1_service_state
+zsv1_state(enum service_state state)
 {
-	(void)write(client, response, strlen(response));
+	switch (state) {
+	case SERVICE_STOPPED:
+		return ZSV1_STATE_STOPPED;
+	case SERVICE_STARTING:
+		return ZSV1_STATE_STARTING;
+	case SERVICE_RUNNING:
+		return ZSV1_STATE_RUNNING;
+	case SERVICE_COMPLETED:
+		return ZSV1_STATE_COMPLETED;
+	case SERVICE_FAILED:
+		return ZSV1_STATE_FAILED;
+	case SERVICE_SKIPPED:
+		return ZSV1_STATE_SKIPPED;
+	}
+	return ZSV1_STATE_FAILED;
+}
+
+static int
+receive_request(int client, struct zsv1_request *request)
+{
+	struct timespec deadline;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0)
+		return -1;
+	deadline.tv_sec += 5;
+	return zsv1_server_receive_fd(client, request, &deadline);
+}
+
+static int
+send_service(int client, const struct service *service)
+{
+	struct zsv1_record record;
+
+	memset(&record, 0, sizeof(record));
+	record.type = ZSV1_RECORD_SERVICE;
+	strcpy(record.service.name, service->name);
+	record.service.state = zsv1_state(service->state);
+	record.service.enabled = service->enabled;
+	record.service.pid = service->pid;
+	return zsv1_server_send_record_fd(client, &record);
+}
+
+static int
+send_dependencies(int client, const char *list, enum zsv1_record_type type)
+{
+	char copy[256], *name;
+
+	if (*list == '\0')
+		return 0;
+	strcpy(copy, list);
+	for (name = strtok(copy, ","); name != NULL; name = strtok(NULL, ",")) {
+		struct zsv1_record record;
+
+		memset(&record, 0, sizeof(record));
+		record.type = type;
+		strcpy(record.name, name);
+		if (zsv1_server_send_record_fd(client, &record) != 0)
+			return -1;
+	}
+	return 0;
 }
 
 static void
 handle_request(int client)
 {
-	char request[256], response[512], *command, *name;
-	ssize_t length = read(client, request, sizeof(request) - 1);
+	struct zsv1_request request;
 	struct service *service;
 	size_t index;
+	int error;
 
-	if (length <= 0)
-		return;
-
-	request[length] = '\0';
-	if ((name = strchr(request, '\n')) != NULL)
-		*name = '\0';
-
-	command = strtok(request, " \t");
-	name = strtok(NULL, " \t");
-
-	if (command == NULL) {
-		write_response(client, "ERR empty request\n");
+	if (receive_request(client, &request) != 0) {
+		error = errno;
+		(void)zsv1_server_send_error_end_fd(
+		    client, error > 0 ? error : EIO,
+		    error == EPROTONOSUPPORT ? "unknown-version"
+		    : error == EOVERFLOW || error == EMSGSIZE
+			? "request-too-long"
+		    : error == ETIMEDOUT ? "request-timeout"
+					 : "malformed-request");
 		return;
 	}
 
-	if (strcmp(command, "list") == 0) {
+	if (request.command == ZSV1_COMMAND_LIST) {
 		for (index = 0; index < service_count; index++) {
-			snprintf(response, sizeof(response), "%s\t%s\t%s\n",
-				 services[index].name,
-				 services[index].enabled ? "enabled"
-							 : "disabled",
-				 state_name(services[index].state));
+			if (send_service(client, &services[index]) != 0)
+				return;
+		}
+		(void)zsv1_server_send_end_fd(client);
+		return;
+	}
 
-			write_response(client, response);
+	if (request.command == ZSV1_COMMAND_RELOAD) {
+		if (reload_policy() == 0)
+			(void)zsv1_server_send_ok_end_fd(client, "reloaded");
+		else {
+			error = errno;
+			(void)zsv1_server_send_error_end_fd(
+			    client, error > 0 ? error : EIO, "reload-failed");
 		}
 		return;
 	}
 
-	if (strcmp(command, "reload") == 0 && name == NULL) {
-		reload_requested = 1;
-		write_response(client, "OK reload scheduled\n");
+	if (request.command == ZSV1_COMMAND_HALT ||
+	    request.command == ZSV1_COMMAND_POWEROFF ||
+	    request.command == ZSV1_COMMAND_REBOOT) {
+		enum init_action action =
+		    request.command == ZSV1_COMMAND_REBOOT ? INIT_ACTION_REBOOT
+		    : request.command == ZSV1_COMMAND_POWEROFF
+			? INIT_ACTION_POWEROFF
+			: INIT_ACTION_HALT;
+		if (zsv1_server_send_ok_end_fd(client, "scheduled") == 0)
+			action_requested = action;
 		return;
 	}
 
-	if ((strcmp(command, "halt") == 0 || strcmp(command, "poweroff") == 0 ||
-	     strcmp(command, "reboot") == 0) &&
-	    name == NULL) {
-		action_requested = strcmp(command, "reboot") == 0
-				       ? ZEDBSD_SYSTEM_REBOOT
-				       : ZEDBSD_SYSTEM_HALT;
-		write_response(client, "OK shutdown scheduled\n");
-		return;
-	}
-
-	service = name != NULL ? find_service(name) : NULL;
+	service = find_service(request.service);
 	if (service == NULL) {
-		write_response(client, "ERR unknown service\n");
+		(void)zsv1_server_send_error_end_fd(client, ENOENT,
+						    "unknown-service");
 		return;
 	}
 
-	if (strcmp(command, "status") == 0) {
-		snprintf(response, sizeof(response), "OK %s %s %s pid=%ld\n",
-			 service->name,
-			 service->enabled ? "enabled" : "disabled",
-			 state_name(service->state), (long)service->pid);
-		write_response(client, response);
-	} else if (strcmp(command, "start") == 0) {
-		write_response(client, spawn_service(service) == 0
-					   ? "OK started\n"
-					   : "ERR start failed\n");
-	} else if (strcmp(command, "stop") == 0) {
-		write_response(client, stop_service(service) == 0
-					   ? "OK stopped\n"
-					   : "ERR stop failed\n");
-	} else if (strcmp(command, "restart") == 0) {
-		(void)stop_service(service);
-		write_response(client, spawn_service(service) == 0
-					   ? "OK restarted\n"
-					   : "ERR restart failed\n");
-	} else {
-		write_response(client, "ERR unknown command\n");
+	if (request.command == ZSV1_COMMAND_SHOW) {
+		if (send_service(client, service) != 0 ||
+		    send_dependencies(client, service->after,
+				      ZSV1_RECORD_AFTER) != 0 ||
+		    send_dependencies(client, service->requires,
+				      ZSV1_RECORD_REQUIRES) != 0)
+			return;
+		(void)zsv1_server_send_end_fd(client);
+		return;
 	}
+
+	if (request.command == ZSV1_COMMAND_START) {
+		if (spawn_service(service) == 0) {
+			(void)zsv1_server_send_ok_end_fd(client, "started");
+			return;
+		}
+		error = errno;
+		(void)zsv1_server_send_error_end_fd(
+		    client, error > 0 ? error : EIO, "start-failed");
+		return;
+	}
+	if (request.command == ZSV1_COMMAND_STOP) {
+		if (stop_service(service) == 0) {
+			(void)zsv1_server_send_ok_end_fd(client, "stopped");
+			return;
+		}
+		error = errno;
+		(void)zsv1_server_send_error_end_fd(
+		    client, error > 0 ? error : EIO, "stop-failed");
+		return;
+	}
+	if (request.command == ZSV1_COMMAND_RESTART) {
+		if (stop_service(service) == 0 && spawn_service(service) == 0) {
+			(void)zsv1_server_send_ok_end_fd(client, "restarted");
+			return;
+		}
+		error = errno;
+		(void)zsv1_server_send_error_end_fd(
+		    client, error > 0 ? error : EIO, "restart-failed");
+		return;
+	}
+
+	(void)zsv1_server_send_error_end_fd(client, EINVAL, "unknown-command");
 }
 
 static int
@@ -760,7 +868,10 @@ open_control_socket(void)
 	if (bind(descriptor, (struct sockaddr *)&address, sizeof(address)) !=
 		0 ||
 	    chmod(address.sun_path, 0600) != 0 || listen(descriptor, 8) != 0) {
+		int error = errno;
+
 		close(descriptor);
+		errno = error;
 		return -1;
 	}
 
@@ -770,10 +881,10 @@ open_control_socket(void)
 }
 
 static void
-shutdown_system(int action)
+shutdown_system(enum init_action action)
 {
 	size_t index = service_count;
-	int system_descriptor;
+	int system_descriptor, system_action;
 
 	printf("init: stopping services\n");
 
@@ -782,8 +893,11 @@ shutdown_system(int action)
 
 	sync();
 
+	system_action = action == INIT_ACTION_REBOOT ? ZEDBSD_SYSTEM_REBOOT
+						     : ZEDBSD_SYSTEM_HALT;
 	system_descriptor = open("/dev/system", O_RDONLY);
-	if (system_descriptor < 0 || ioctl(system_descriptor, action) != 0) {
+	if (system_descriptor < 0 ||
+	    ioctl(system_descriptor, system_action) != 0) {
 		fprintf(stderr, "init: final system action failed: %s\n",
 			strerror(errno));
 	}

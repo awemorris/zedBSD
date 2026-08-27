@@ -1,6 +1,6 @@
 # zedBSD master plan
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 Status: active
 
@@ -16,10 +16,12 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is `q017`, finished, and retained as
-[q017](queue-q017.md). It completed `ws012-p002`: the strict YAML rc.conf host
+The current [Queue Book](queue.md) is `q018`, in progress. It executes
+`ws012-p003` through p006 serially; p003 completed its ZSV1 init-control
+contract and p004 is now in progress, with p005-p006 pending. The preceding
+[q017](queue-q017.md) completed `ws012-p002`: the strict YAML rc.conf host
 fixtures, production build, and disposable amd64 QEMU persistence/reboot proof
-all passed. The preceding [q016](queue-q016.md) completed `ws004-p009`.
+all passed. [q016](queue-q016.md) completed `ws004-p009`.
 [q015](queue-q015.md) completed `ws003-p011`--`p015`: BR-T46 passed all 31
 production-loader cells across i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64
 UEFI in the post-review `q015-br-t46-final-007` run. The earlier
@@ -91,7 +93,7 @@ before this long-term product goal is reached.
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
-| `ws012` | Service administration console | Active; p002 complete in `q017`, p003-p006 Queue-ready in order | `ws012-p002` complete | Execute ZSV1 service/system actions, argv CLI, console, and integration Phases beginning with p003 | [WS012](ws012-service-console/ws.md) |
+| `ws012` | Service administration console | Active; p003 complete in `q018`, p004 in progress, p005-p006 pending in order | `ws012-p003` complete; p004 current | Continue q018 with argv CLI/persistence, console, then integration acceptance | [WS012](ws012-service-console/ws.md) |
 | `ws013` | CPAR container partitioning | Proposed; Boot v1 grammar fixed, Runtime topics manually blocked | `ws013-p001` is the only current Phase | Resolve bounded UEFI FAT LFN/parser/menu details until Runtime CPAR holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
@@ -181,7 +183,7 @@ WS010 supplies host-side build and test scripting used by all workstreams.
    storage milestones.
 
 The current dependency-ready planning pool also contains `ws003-p016`,
-`ws008-p001`, `ws012-p003`, `ws016-p001`, and `ws017-p001`. They may be
+`ws008-p001`, `ws016-p001`, and `ws017-p001`. They may be
 selected into a later finite Queue according to the user's next priority; this
 list does not itself authorize implementation.
 
@@ -200,7 +202,7 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | Manually blocked; `ws011-p004` discussion and implementation |
 | Linux/FreeBSD evdev compatibility profile | WS006 | Resolved by `ws006-p001`; implement `/dev/input/eventN` against it |
 | zedBSD GPU/Vulkan capability, object, and display-takeover profile | WS014 | Manually blocked; publishing `/dev/gpuN` UAPI or transferring i915 ownership |
-| YAML `/etc/rc.conf` schema and versioned init status/control protocol | WS012 | Resolved: q017 completed YAML/persistence, and p003 uses the same `/run/init.sock` for `ZSV1 HALT`/`POWEROFF`/`REBOOT` while migrating all service and shutdown clients without an unversioned compatibility path |
+| YAML `/etc/rc.conf` schema and versioned init status/control protocol | WS012 | Resolved: q017 completed YAML/persistence, and q018 completed p003 on `/run/init.sock` with typed service and `ZSV1 HALT`/`POWEROFF`/`REBOOT` clients and no unversioned compatibility path |
 | x86 kernel boot-parameter contract | WS003/WS013 | Resolved and implemented by q015: `boot0`--`boot3`, exclusive `rootpart` or explicit overlay root/data, `swap0`--`swap3`, and `init`; BR-T46 passes all 31 four-platform QEMU cells |
 | UEFI Boot CPAR `boot.cfg`/LFN/menu contract | WS013 | Section grammar maps to the common parameter contract; freeze bounded FAT/parser/menu details before implementation; legacy PC/AT and PC-98 menus are excluded |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |

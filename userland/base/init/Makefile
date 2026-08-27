@@ -11,4 +11,4 @@ INIT_DATA := /etc/rc.conf=userland/base/etc/rc.conf \
 	/etc/service.d/net=userland/base/init/services/net \
 	/etc/service.d/cron=userland/base/init/services/cron \
 	/etc/service.d/ntpdate=userland/base/init/services/ntpdate
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,init,init,*,y,basic,userland/base/init/main.c userland/base/service/service-config.c userland/base/service/rcconf.c,n,base,,,0755,program,$(INIT_DATA),,sbin))
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,init,init,*,y,basic,userland/base/init/main.c userland/base/service/service-config.c userland/base/service/rcconf.c userland/base/service/zsv1-protocol.c userland/base/service/zsv1-server.c,n,base,,,0755,program,$(INIT_DATA),,sbin))
