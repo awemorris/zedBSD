@@ -492,33 +492,6 @@ DYNAMIC_FLOAT_PARSE_OBJS := $(DYNAMIC_FLOAT_DIR)/zed-softfloat.o \
 	$(DYNAMIC_FLOAT_DIR)/float-parse.o
 DYNAMIC_LIBC_OBJS += $(DYNAMIC_LIBM_OBJ) $(DYNAMIC_FLOAT_PARSE_OBJS)
 
-AMD64_USER_NOCT_GLUE_OBJS := \
-	$(BUILD)/user64/userland/packages/lang/noct/runtime/main.o \
-	$(BUILD)/user64/userland/packages/lang/noct/runtime/memory.o \
-	$(BUILD)/user64/userland/packages/lang/noct/runtime/platform.o \
-	$(BUILD)/user64/userland/packages/lang/noct/runtime/env.o \
-	$(BUILD)/user64/userland/packages/lang/noct/runtime/napi.o \
-	$(BUILD)/user64/userland/packages/lang/noct/runtime/target.o
-$(AMD64_USER_NOCT_GLUE_OBJS): AMD64_USER_CPPFLAGS := \
-	$(USER_NOCT_CPPFLAGS) -Iinclude -Isrc
-
-$(BUILD)/NOCT.ELF: $(AMD64_USER_LIBC_OBJS) $(AMD64_USER_NOCT_GLUE_OBJS) \
-	$(USER_NOCT_OBJECTS) $(DYNAMIC_LIBM_OBJ) \
-	$(DYNAMIC_FLOAT_PARSE_OBJS) $(AMD64_PLATFORM)/user.ld \
-	$(AMD64_USER_ELF_CHECK)
-	$(LD) -m elf_x86_64 --gc-sections -nostdlib -static \
-		-z max-page-size=4096 -z stack-size=0x100000 \
-		-T $(AMD64_PLATFORM)/user.ld $(AMD64_USER_LIBC_OBJS) \
-		$(AMD64_USER_NOCT_GLUE_OBJS) $(USER_NOCT_OBJECTS) \
-		$(DYNAMIC_LIBM_OBJ) $(DYNAMIC_FLOAT_PARSE_OBJS) -o $@
-	@test -z "$$(nm -u $@)" || { nm -u $@; exit 1; }
-	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
-
-$(BUILD)/bin/noct: $(BUILD)/NOCT.ELF
-	@mkdir -p $(dir $@)
-	cp -f $< $@
-	$(NOCT) --path=tools/build $(AMD64_USER_ELF_CHECK) --machine amd64 $@
-
 $(DYNAMIC_DIR)/obj/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(DYNAMIC_CPPFLAGS) $(DYNAMIC_CFLAGS) -MMD -MP -c $< -o $@

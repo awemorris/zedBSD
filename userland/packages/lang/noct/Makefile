@@ -6,6 +6,8 @@ NOCT_ROOT ?= userland/noct
 NOCT_SOURCE_SENTINEL ?= $(NOCT_ROOT)/CMakeLists.txt
 NOCT_SOURCE_DIR := $(NOCT_ROOT)
 NOCT_PACKAGE_HOLORIS := $(NOCT_SOURCE_DIR)/apps/holoris/holoris.noct
+NOCT_ZEDBSD_BUILD_DIR := $(NOCT_SOURCE_DIR)/build-zedbsd
+NOCT_ZEDBSD_ARTIFACT := $(NOCT_ZEDBSD_BUILD_DIR)/noct
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter noct,$(ZEDBSD_USER_PROGRAMS)),\
 	$(BUILD)/bin/noct $(NOCT_PACKAGE_HOLORIS))
 ZEDBSD_PACKAGE_FILES += $(if $(filter noct,$(ZEDBSD_USER_PROGRAMS)),\
@@ -23,3 +25,22 @@ $(NOCT_PACKAGE_HOLORIS): | $(NOCT_SOURCE_SENTINEL)
 
 .PHONY: noct-source
 noct-source: $(NOCT_SOURCE_SENTINEL)
+
+ifeq ($(ZEDBSD_ARCHITECTURE),amd64)
+.PHONY: noct-zedbsd
+noct-zedbsd: | $(NOCT_SOURCE_SENTINEL)
+	cd $(NOCT_SOURCE_DIR) && \
+		ZEDBSD_SOURCE_DIR=$(abspath .) cmake --preset zedbsd
+	cd $(NOCT_SOURCE_DIR) && \
+		ZEDBSD_SOURCE_DIR=$(abspath .) \
+		cmake --build --preset zedbsd --parallel 16
+	@test -x $(NOCT_ZEDBSD_ARTIFACT)
+
+$(BUILD)/bin/noct: noct-zedbsd
+	@mkdir -p $(dir $@)
+	cp -f $(NOCT_ZEDBSD_ARTIFACT) $@
+	@cmp -s $(NOCT_ZEDBSD_ARTIFACT) $@ || { \
+		echo "Installed Noct differs from the canonical CMake artifact" >&2; \
+		exit 1; \
+	}
+endif

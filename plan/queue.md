@@ -31,7 +31,7 @@ JIT path in amd64 QEMU.
 
 | Priority | WS / Phase | Authoritative documents | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws008-p001` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase001-zedbsd-preset/phase.md), [tests](ws008-noct/tests/README.md) | pending | `cmake --preset zedbsd` and its build preset produce the static canonical amd64 zedBSD Noct artifact, the package installs that artifact, and a non-JIT QEMU smoke passes |
+| 1 | `ws008-p001` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase001-zedbsd-preset/phase.md), [tests](ws008-noct/tests/README.md) | complete | `cmake --preset zedbsd` and its build preset produce the static canonical amd64 zedBSD Noct artifact, the package installs that artifact, and a non-JIT QEMU smoke passes |
 | 2 | `ws008-p002` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase002-beui-zedbsd/phase.md), [tests](ws008-noct/tests/README.md) | pending | Canonical BeUI uses `/dev/graphics` and capability-discovered evdev, the downstream duplicate is removed, and host/QEMU backend evidence passes |
 | 3 | `ws008-p003` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase003-amd64-jit/phase.md), [tests](ws008-noct/tests/README.md) | pending | Direct VM and canonical Noct probes prove generated amd64 code executes after RW-to-RX protection with no accepted fallback or RWX mapping |
 

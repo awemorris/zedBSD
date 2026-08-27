@@ -1,6 +1,6 @@
 # WS008 Phase 001: canonical Noct zedBSD CMake preset
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 WSID: `ws008`
 
@@ -8,7 +8,7 @@ Phase ID: `p001`
 
 Combined ID: `ws008-p001`
 
-Status: Planned; Queue-ready
+Status: Complete (`q019`)
 
 Parent: [WS008](../ws.md)
 
@@ -46,25 +46,26 @@ binary.
 - Canonical target/CMake changes live in the official Noct checkout. zedBSD
   retains only build inputs that it owns: UAPI/libc/linker/sysroot integration,
   package metadata, installation, and revision provenance.
-- No commit, push, or submodule gitlink update is part of this Phase.
+- No canonical Noct commit, push, or submodule gitlink update is part of this
+  Phase. The enclosing zedBSD Phase checkpoint is committed and pushed.
 
 ## Work packages
 
-- [ ] Record clean baseline revisions and path-scoped status for
+- [x] Record clean baseline revisions and path-scoped status for
       `/home/awe/NoctLang` and `userland/noct` before editing.
-- [ ] Add a `NOCT_TARGET_ZEDBSD` target selection, amd64 toolchain integration,
+- [x] Add a `NOCT_TARGET_ZEDBSD` target selection, amd64 toolchain integration,
       and matching `zedbsd` configure/build presets to canonical Noct.
-- [ ] Select only APIs supported by the current zedBSD libc and fail configure
+- [x] Select only APIs supported by the current zedBSD libc and fail configure
       for incompatible shared-library or host-only options.
-- [ ] Move or replace only the target entry/runtime pieces required to produce
+- [x] Move or replace only the target entry/runtime pieces required to produce
       the canonical executable; do not migrate BeUI in this Phase.
-- [ ] Make the zedBSD Noct package consume the CMake target artifact, eliminate
+- [x] Make the zedBSD Noct package consume the CMake target artifact, eliminate
       obsolete per-platform manual Noct object/link lists for amd64, and retain
       explicit source provenance.
-- [ ] Add focused preset/artifact checks under `plan/ws008-noct/tests/`.
-- [ ] Run the non-JIT language smoke in `qemu-system-x86_64`, then run the
+- [x] Add focused preset/artifact checks under `plan/ws008-noct/tests/`.
+- [x] Run the non-JIT language smoke in `qemu-system-x86_64`, then run the
       supported `make -j16` image gate.
-- [ ] Produce a parity manifest for the official and integration Noct checkout
+- [x] Produce a parity manifest for the official and integration Noct checkout
       changes without committing either tree.
 
 ## Acceptance
@@ -103,3 +104,49 @@ that decision to the WS rather than hiding it in package glue.
 
 Resume at the first failing NOCT-T001--T003 gate using the preserved clean
 configure log and artifact audit.
+
+## Implementation result
+
+- Canonical Noct now owns the `zedbsd` configure/build presets, target
+  selection, target detection, generic CLI fixes, and zedBSD OS identity. The
+  preset builds the real CLI/runtime with JIT compiled in and BeUI disabled.
+- The zedBSD-owned adapter builds crt0 and the supported libc as a separate
+  object target. This preserves libc header precedence, uses
+  `platform/amd64/user.ld`, and prevents host headers, host crt objects, and
+  host libraries from entering the final static ELF.
+- The amd64 package copies `userland/noct/build-zedbsd/noct` verbatim to
+  `build/amd64/bin/noct`; the obsolete empty/manual-link path was removed only
+  for amd64. Existing i386 and PC-98 paths remain unchanged for later work.
+- QEMU exposed the canonical desktop GC default as too large for the current
+  64 MiB guest. The zedBSD target therefore retains the established
+  `NOCT_MEMORY_SMALL` policy and software `fmaf` path. Host GCC Linux macros
+  are explicitly suppressed, and direct Linux topology branches now use
+  `NOCT_TARGET_LINUX` rather than compiler-host macros.
+- `/home/awe/NoctLang` and `userland/noct` remain at
+  `7d856856e16eb2d889ba49f557f2fda4dcaeea7e`, with the same nine changed
+  paths. They intentionally remain uncommitted/unpublished; advancing the
+  package revision remains release administration, not a hidden Phase action.
+
+## Acceptance result
+
+- `NOCT-T001` and `NOCT-T002`: PASS in
+  `plan/ws008-noct/temp/p001-host-20260827T185736Z-2/`. Both root-error cases,
+  the literal clean configure/build, zedBSD layout, `_start`, 1 MiB
+  non-executable stack, host-contamination, and unresolved-symbol audits pass.
+- Package identity: PASS. The integration CMake artifact, package artifact,
+  and staged `/usr/bin/noct` are byte-identical. The clean-copy artifact is
+  audited independently because debug information records its temporary
+  absolute source path.
+- Checkout parity: PASS for nine paths. The parity manifest SHA-256 is
+  `72402db91ba157c5497df5a2efa634297f9145fe7b8d9e6b93cc2f299973a6f4`.
+- `NOCT-T003`: PASS in
+  `plan/ws008-noct/temp/q019-p001-noct.eqwMMU/`. The amd64/PC-AT image boots to
+  production init/login, its embedded `/usr/bin/noct` matches host POSIX
+  checksum `3310757182 2735224`, and
+  `noct -j0 -e 'print("NOCT-P001-SMOKE")'` emits the exact marker with status
+  zero and no fatal diagnostics.
+- Final `make -j16`: PASS (`Nothing to be done for 'disk-image'`). The
+  aggregate `make check` target and `.internal/` were not used.
+
+All completion conditions are met. `ws008-p002` may start without redesigning
+the target or package boundary.
