@@ -12,6 +12,7 @@
 #include <kern/swap.h>
 
 #define KERN_SWAP_SOURCE_COUNT SWAP_SOURCE_COUNT
+#define KERN_SWAP_SOURCE_TEXT_MAX 255U
 
 struct disk;
 struct inode;
@@ -23,8 +24,26 @@ struct kern_swap_source {
 	struct disk *identity_disk;
 	struct inode *identity_inode;
 	uint32_t slot_count;
+	uint32_t header_version;
+	uint8_t uuid[ZEDBSD_SWAP_V2_UUID_SIZE];
+	char label[ZEDBSD_SWAP_V2_LABEL_SIZE];
+	char diagnostic[KERN_SWAP_SOURCE_TEXT_MAX + 1U];
 	unsigned parameter_index;
 };
+
+/* Pointer-free scalar snapshot used by the runtime control facade. */
+struct kern_swap_source_snapshot {
+	uint32_t source_id;
+	uint32_t state;
+	uint32_t header_version;
+	uint32_t total_pages;
+	uint32_t used_pages;
+	uint8_t uuid[ZEDBSD_SWAP_V2_UUID_SIZE];
+	char label[ZEDBSD_SWAP_V2_LABEL_SIZE];
+	char diagnostic[KERN_SWAP_SOURCE_TEXT_MAX + 1U];
+};
+
+typedef int (*kern_swap_source_cancel_fn)(void *);
 
 struct kern_swap_source_range {
 	struct kern_swap_source source;
@@ -37,6 +56,8 @@ struct kern_swap_source_set {
 	unsigned active;
 	/* Serializes every operation which changes range/backend ownership. */
 	unsigned control_busy;
+	/* Seqlock-style epoch for pointer-free GET snapshots. */
+	uint64_t metadata_generation;
 };
 
 void
@@ -58,6 +79,11 @@ kern_swap_source_prepare_raw(
 void
 kern_swap_source_destroy(
 	struct kern_swap_source *source);
+
+int
+kern_swap_source_set_diagnostic(
+	struct kern_swap_source *source,
+	const char *diagnostic);
 
 void
 kern_swap_source_set_init(
@@ -101,6 +127,26 @@ int
 kern_swap_source_set_runtime_remove(
 	struct kern_swap_source_set *set,
 	unsigned source_id);
+
+int
+kern_swap_source_set_runtime_remove_cancelable(
+	struct kern_swap_source_set *set,
+	unsigned source_id,
+	kern_swap_source_cancel_fn cancel,
+	void *cancel_argument);
+
+int
+kern_swap_source_set_find_identity(
+	const struct kern_swap_source_set *set,
+	struct disk *identity_disk,
+	struct inode *identity_inode,
+	unsigned *source_id);
+
+int
+kern_swap_source_set_snapshot(
+	struct kern_swap_source_set *set,
+	unsigned source_id,
+	struct kern_swap_source_snapshot *snapshot);
 
 int
 kern_swap_source_set_abort(

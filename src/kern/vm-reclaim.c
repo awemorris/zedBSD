@@ -89,6 +89,20 @@ private_page_wait_sequence(struct vm_private_page *backing, uint64_t sequence)
 	return error;
 }
 
+static int
+private_page_wait_sequence_interruptible(struct vm_private_page *backing,
+	uint64_t sequence)
+{
+	unsigned long irq;
+	int error;
+
+	irq = spin_lock_irqsave(&backing->state_lock);
+	error = waitq_sleep(&backing->state_waitq, &backing->state_lock,
+	    sequence, 0, WAITQ_INTERRUPTIBLE);
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	return error;
+}
+
 int
 vm_private_page_io_acquire(struct vm_private_page *backing)
 {
@@ -173,6 +187,35 @@ vm_private_page_wait_idle(struct vm_private_page *backing)
 			if (error != 0 && error != EAGAIN)
 				return error;
 		}
+	}
+}
+
+static int
+vm_private_page_wait_idle_cancelable(struct vm_private_page *backing,
+	int (*cancel)(void *), void *cancel_argument)
+{
+	if (cancel == NULL)
+		return vm_private_page_wait_idle(backing);
+	if (backing == NULL)
+		return EINVAL;
+	for (;;) {
+		uint64_t sequence;
+		unsigned long irq;
+		int error = cancel(cancel_argument);
+
+		if (error != 0)
+			return error;
+		irq = spin_lock_irqsave(&backing->state_lock);
+		if ((backing->flags & VM_PAGE_BUSY) == 0 &&
+		    backing->active_operations == 0 && backing->pin_count == 0) {
+			spin_unlock_irqrestore(&backing->state_lock, irq);
+			return 0;
+		}
+		sequence = waitq_sequence(&backing->state_waitq);
+		spin_unlock_irqrestore(&backing->state_lock, irq);
+		error = private_page_wait_sequence_interruptible(backing, sequence);
+		if (error != 0 && error != EAGAIN)
+			return error;
 	}
 }
 
@@ -656,7 +699,8 @@ drain_mapping_pins_release(struct vm_private_page *backing)
 }
 
 int
-vm_reclaim_drain_swap_source(unsigned source_id)
+vm_reclaim_drain_swap_source_cancelable(unsigned source_id,
+	int (*cancel)(void *), void *cancel_argument)
 {
 	if (source_id >= SWAP_SOURCE_COUNT)
 		return EINVAL;
@@ -668,6 +712,9 @@ vm_reclaim_drain_swap_source(unsigned source_id)
 		struct swap_source_stats source_stats;
 		int scan_error = 0;
 		int error;
+
+		if (cancel != NULL && (error = cancel(cancel_argument)) != 0)
+			return error;
 
 		/* Select and pin one target while reverse mappings are stable.  No VM
 		 * metadata lock survives physical allocation or backing I/O. */
@@ -715,10 +762,14 @@ vm_reclaim_drain_swap_source(unsigned source_id)
 			vm_private_page_put(selected);
 			if (error != 0)
 				return error;
+			if (cancel != NULL &&
+			    (error = cancel(cancel_argument)) != 0)
+				return error;
 			continue;
 		}
 		if (wait_backing != NULL) {
-			error = vm_private_page_wait_idle(wait_backing);
+			error = vm_private_page_wait_idle_cancelable(wait_backing,
+			    cancel, cancel_argument);
 			vm_private_page_put(wait_backing);
 			if (error != 0 && error != EAGAIN)
 				return error;
@@ -742,6 +793,12 @@ vm_reclaim_drain_swap_source(unsigned source_id)
 			return 0;
 		sched_yield();
 	}
+}
+
+int
+vm_reclaim_drain_swap_source(unsigned source_id)
+{
+	return vm_reclaim_drain_swap_source_cancelable(source_id, NULL, NULL);
 }
 
 /* Mapping metadata is pinned and the backing has one exclusive I/O owner. */

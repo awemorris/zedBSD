@@ -31,9 +31,16 @@ enum kern_boot_source_failure_stage {
 };
 
 struct kern_boot_source_slot {
-	/* disk is borrowed from mount while mount is non-NULL. */
+	/* disk is borrowed from runtime_mount while runtime_mount is non-NULL. */
 	struct disk *disk;
+	/* Owned private mount until release or promotion. */
 	struct mount *mount;
+	/*
+	 * System-lifetime lookup anchor.  Normally identical to mount; after a
+	 * boot filesystem is promoted to the namespace root it remains a borrowed
+	 * pointer to that root mount while mount becomes NULL.
+	 */
+	struct mount *runtime_mount;
 	unsigned configured;
 	unsigned retained;
 	unsigned promoted;
@@ -44,6 +51,8 @@ struct kern_boot_source_context {
 	unsigned failure_slot;
 	enum kern_boot_source_failure_stage failure_stage;
 	int cleanup_error;
+	/* Immutable once set.  Published contexts have system lifetime. */
+	unsigned runtime_published;
 };
 
 int
@@ -92,6 +101,26 @@ int
 kern_boot_source_retain_slot(
 	struct kern_boot_source_context *context,
 	unsigned slot);
+
+/*
+ * Runtime bootN selectors require every configured private boot mount to
+ * survive root selection.  Retain is performed before root selection can
+ * release unused mounts; publication happens only after the root namespace
+ * and swap-control facade are ready.
+ */
+int
+kern_boot_source_retain_configured(
+	struct kern_boot_source_context *context);
+
+int
+kern_boot_source_publish_runtime(
+	struct kern_boot_source_context *context);
+
+int
+kern_boot_source_runtime_lookup(
+	struct kern_boot_source_context *context,
+	const char *text,
+	struct path *path_out);
 
 int
 kern_boot_source_find_disk(

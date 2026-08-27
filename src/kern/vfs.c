@@ -25,6 +25,7 @@
 #include "kern/klog.h"
 #include "kern/inode.h"
 #include "kern/swap-boot.h"
+#include "kern/swap-control.h"
 #include "kern/swap-source.h"
 
 #include <errno.h>
@@ -55,6 +56,104 @@ static struct kern_boot_source_context boot_sources
 	__attribute__((section(".vfs_bss")));
 static struct kern_swap_source_set swap_sources
 	__attribute__((section(".vfs_bss")));
+
+struct vfs_swap_control_context {
+	struct kern_boot_source_context *boot_sources;
+	/* Owned system-lifetime reference; NULL for an overlay root. */
+	struct disk *native_root;
+};
+
+static struct vfs_swap_control_context swap_control_context
+	__attribute__((section(".vfs_bss")));
+
+static int
+vfs_swap_resolve_path(void *opaque, const char *selector,
+		      struct path *result)
+{
+	struct vfs_swap_control_context *context = opaque;
+
+	if (context == NULL || selector == NULL || result == NULL)
+		return EINVAL;
+	if (selector[0] == '/')
+		return namei_path_at(&kern_cwdinfo, selector, result);
+	return kern_boot_source_runtime_lookup(context->boot_sources, selector,
+	    result);
+}
+
+static int
+vfs_swap_resolve_disk(void *opaque, const char *selector,
+		      struct disk **result)
+{
+	int error;
+
+	(void)opaque;
+	if (result == NULL)
+		return EINVAL;
+	*result = NULL;
+	error = kern_boot_source_selector_validate(selector);
+	if (error != 0)
+		return error;
+	return block_identity_resolve(selector, result);
+}
+
+struct vfs_disk_range {
+	struct disk *leaf;
+	uint64_t first;
+	uint64_t last;
+};
+
+static int
+vfs_disk_range_resolve(struct disk *disk, struct vfs_disk_range *range)
+{
+	struct disk *first_leaf, *last_leaf;
+	uint64_t first, last;
+	int error;
+
+	if (disk == NULL || range == NULL || disk->d_block_count == 0)
+		return EINVAL;
+	error = disk_resolve_range(disk, 0, 1, &first_leaf, &first);
+	if (error != 0)
+		return error;
+	error = disk_resolve_range(disk, disk->d_block_count - 1U, 1,
+	    &last_leaf, &last);
+	if (error != 0)
+		return error;
+	if (first_leaf != last_leaf || last < first)
+		return EIO;
+	range->leaf = first_leaf;
+	range->first = first;
+	range->last = last;
+	return 0;
+}
+
+static int
+vfs_swap_validate_raw(void *opaque, struct disk *candidate)
+{
+	struct vfs_swap_control_context *context = opaque;
+	struct vfs_disk_range root, source;
+	int error;
+
+	if (context == NULL || candidate == NULL)
+		return EINVAL;
+	if (context->native_root == NULL)
+		return 0;
+	error = vfs_disk_range_resolve(context->native_root, &root);
+	if (error != 0)
+		return error;
+	error = vfs_disk_range_resolve(candidate, &source);
+	if (error != 0)
+		return error;
+	if ((root.leaf == source.leaf || root.leaf->d_dev == source.leaf->d_dev) &&
+	    root.first <= source.last && source.first <= root.last)
+		return EEXIST;
+	return 0;
+}
+
+static const struct kern_swap_control_resolver_ops vfs_swap_resolver = {
+	.resolve_path = vfs_swap_resolve_path,
+	.resolve_disk = vfs_swap_resolve_disk,
+	.validate_raw = vfs_swap_validate_raw,
+};
 
 static int
 vfs_fail(const char *stage, int error)
@@ -350,6 +449,8 @@ vfs_mount_legacy_root(struct disk *boot_partition,
 	error = mount_root_create("auto", 0, &args, root_out);
 	if (error != 0)
 		return vfs_fail("mount legacy boot partition root", error);
+	disk_ref(boot_partition);
+	*root_disk_out = boot_partition;
 	return 0;
 }
 #endif
@@ -796,6 +897,20 @@ kern_vfs_init(const struct boot_handoff *handoff,
 		    &root_partition, &root_mount);
 		if (error != 0)
 			return error;
+		/* Legacy root discovery has no swapN parameters, but the runtime UAPI
+		 * still owns the same active (initially empty) four-source manager. */
+		kern_swap_source_set_init(&swap_sources);
+		error = kern_swap_source_set_activate(&swap_sources);
+		if (error != 0) {
+			disk_release(root_partition);
+			return vfs_fail("activate legacy runtime swap manager", error);
+		}
+		error = kern_boot_source_retain_configured(&boot_sources);
+		if (error != 0) {
+			(void)kern_swap_source_set_abort(&swap_sources);
+			disk_release(root_partition);
+			return vfs_fail("retain legacy runtime boot slots", error);
+		}
 		goto root_ready;
 	}
 #endif
@@ -868,6 +983,28 @@ kern_vfs_init(const struct boot_handoff *handoff,
 			disk_release(root_partition);
 			return vfs_fail("validate rootpart swap alias", error);
 		}
+	}
+	/*
+	 * Runtime `bootN:PATH` is a stable selector, not merely a boot-time
+	 * convenience.  Earlier code released every configured slot which was
+	 * unrelated to root/boot swap at root selection.  Retain all configured
+	 * slots now, while context_destroy can still unwind every private mount;
+	 * publication is deferred until the complete VFS namespace is ready.
+	 */
+	error = kern_boot_source_retain_configured(&boot_sources);
+	if (error != 0) {
+		int swap_error = kern_swap_source_set_abort(&swap_sources);
+		int cleanup_error =
+		    kern_boot_source_context_destroy(&boot_sources);
+
+		if (swap_error != 0)
+			VFS_LOG("vfs: swap retain rollback failed (error %d)\n",
+			    swap_error);
+		if (cleanup_error != 0)
+			VFS_LOG("vfs: boot-slot retain rollback failed (error %d)\n",
+			    cleanup_error);
+		disk_release(root_partition);
+		return vfs_fail("retain runtime boot slots", error);
 	}
 	/*
 	 * Publish the fully prepared aggregate only after a native root has been
@@ -998,6 +1135,32 @@ root_ready:
 		error = mount_at("auto", &root_path, name, 0, &args, NULL);
 		if (error == 0)
 			next_number++;
+	}
+	{
+		struct kern_swap_control_registration registration;
+
+		failure_stage = "publish runtime boot selectors";
+		error = kern_boot_source_publish_runtime(&boot_sources);
+		if (error != 0)
+			goto out_root;
+		memset(&swap_control_context, 0,
+		    sizeof(swap_control_context));
+		swap_control_context.boot_sources = &boot_sources;
+		if (root_partition != NULL) {
+			disk_ref(root_partition);
+			swap_control_context.native_root = root_partition;
+		}
+		memset(&registration, 0, sizeof(registration));
+		registration.sources = &swap_sources;
+		registration.resolver = &vfs_swap_resolver;
+		registration.resolver_context = &swap_control_context;
+		failure_stage = "register runtime swap control";
+		error = kern_swap_control_register(&registration);
+		if (error != 0) {
+			disk_release(swap_control_context.native_root);
+			swap_control_context.native_root = NULL;
+			goto out_root;
+		}
 	}
 	path_release(&root_path);
 	disk_release(root_partition);

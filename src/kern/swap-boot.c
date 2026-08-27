@@ -50,6 +50,8 @@ kern_swap_boot_prepare(const struct kern_boot_parameters *parameters,
 				    parameter, &source);
 			path_release(&path);
 			if (error == 0)
+				error = kern_swap_source_set_diagnostic(&source, value);
+			if (error == 0)
 				error = kern_swap_source_set_add(swap_sources,
 				    &source);
 			if (error == 0)
@@ -66,6 +68,8 @@ kern_swap_boot_prepare(const struct kern_boot_parameters *parameters,
 				    &source);
 			if (disk != NULL)
 				disk_release(disk);
+			if (error == 0)
+				error = kern_swap_source_set_diagnostic(&source, value);
 			if (error == 0)
 				error = kern_swap_source_set_add(swap_sources,
 				    &source);

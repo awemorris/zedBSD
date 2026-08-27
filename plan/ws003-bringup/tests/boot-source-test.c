@@ -1,6 +1,7 @@
 /* Boot-slot and root-mode production regression fixture (BR-T44). */
 #include <kern/boot-source.h>
 #include <kern/inode.h>
+#include <kern/namei.h>
 
 #include <assert.h>
 #include <errno.h>
@@ -171,6 +172,44 @@ path_init(struct path *path)
 	memset(path, 0, sizeof(*path));
 }
 
+void
+path_set(struct path *path, struct mount *mountp, struct inode *inode)
+{
+	path->p_mount = mountp;
+	path->p_inode = inode;
+}
+
+void
+path_release(struct path *path)
+{
+	path_init(path);
+}
+
+int
+cwdinfo_init(struct cwdinfo *context, const struct path *root)
+{
+	memset(context, 0, sizeof(*context));
+	context->root = *root;
+	context->cwd = *root;
+	return 0;
+}
+
+void
+cwdinfo_destroy(struct cwdinfo *context)
+{
+	(void)context;
+}
+
+int
+namei_path_at(struct cwdinfo *context, const char *relative,
+	      struct path *result)
+{
+	assert(context != NULL);
+	assert(relative != NULL);
+	path_set(result, context->root.p_mount, context->root.p_inode);
+	return 0;
+}
+
 static void
 fixture_reset(void)
 {
@@ -325,6 +364,7 @@ test_sparse_slots_lookup_and_release(void)
 	    NULL) == 0);
 	assert(context.slot[0].configured);
 	assert(context.slot[1].configured);
+	assert(context.slot[1].runtime_mount == context.slot[1].mount);
 	assert(!context.slot[2].configured);
 	assert(context.slot[3].configured);
 	assert(private_mounts == 3U);
@@ -467,6 +507,8 @@ test_same_fat_root_promotion(void)
 	assert(root != NULL);
 	assert(context.slot[0].promoted);
 	assert(context.slot[0].mount == NULL);
+	assert(context.slot[0].runtime_mount == root);
+	assert(context.slot[0].disk == &disks[0]);
 	assert(private_mounts == 0U);
 	assert(promoted_mounts == 1U);
 	assert(kern_boot_source_context_destroy(&context) == 0);

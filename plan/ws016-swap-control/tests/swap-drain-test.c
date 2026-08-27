@@ -61,6 +61,7 @@ static pthread_mutex_t metadata_mutex;
 static _Thread_local unsigned metadata_depth;
 static volatile unsigned yield_count;
 static volatile unsigned wait_sleep_count;
+static volatile unsigned interruptible_wait_error;
 
 static void
 host_fail(const char *message)
@@ -221,9 +222,12 @@ waitq_sleep(struct wait_queue *queue, struct spinlock *condition_lock,
 	struct host_queue *host = host_queue_for(queue);
 
 	(void)deadline;
-	(void)flags;
 	if (queue->sequence != observed)
 		return EAGAIN;
+	if ((flags & WAITQ_INTERRUPTIBLE) != 0 &&
+	    __atomic_exchange_n(&interruptible_wait_error, 0U,
+		__ATOMIC_SEQ_CST) != 0)
+		return EINTR;
 	(void)__atomic_add_fetch(&wait_sleep_count, 1U, __ATOMIC_SEQ_CST);
 	assert(pthread_cond_wait(&host->condition, &lock->mutex) == 0);
 	return 0;
@@ -707,6 +711,43 @@ test_io_owner_wait(struct swap_backend *backend)
 	mapping_destroy(&mapping);
 }
 
+static int
+cancel_never(void *argument)
+{
+	(void)argument;
+	return 0;
+}
+
+static void
+test_interruptible_io_owner_wait(struct swap_backend *backend)
+{
+	struct fake_source source;
+	struct swap_source_stats stats;
+	struct test_mapping mapping;
+	uint32_t slot;
+
+	source_install(backend, &source, 0);
+	slot = source_fill(backend, 0x69U);
+	mapping_init(&mapping, slot);
+	assert(vm_private_page_io_try_acquire(&mapping.backing) == 0);
+	assert(swap_source_begin_drain(backend, TEST_SOURCE_ID) == 0);
+	__atomic_store_n(&interruptible_wait_error, 1U, __ATOMIC_SEQ_CST);
+	assert(vm_reclaim_drain_swap_source_cancelable(TEST_SOURCE_ID,
+	    cancel_never, NULL) == EINTR);
+	assert(swap_source_get_stats(backend, TEST_SOURCE_ID, &stats) == 0);
+	assert(stats.state == SWAP_SOURCE_STATE_DRAINING &&
+	    stats.allocated_slots == 1U);
+	assert((mapping.backing.flags & VM_PAGE_SWAPPED) != 0 &&
+	    mapping.backing.swap_slot == slot);
+	vm_private_page_io_release(&mapping.backing);
+	vm_private_page_put(&mapping.backing);
+	assert(vm_reclaim_drain_swap_source(TEST_SOURCE_ID) == 0);
+	assert_resident_pattern(&mapping, 0x69U);
+	assert_source_empty(backend);
+	source_remove(backend, &source);
+	mapping_destroy(&mapping);
+}
+
 int
 main(void)
 {
@@ -718,6 +759,7 @@ main(void)
 	test_read_error_and_retry(&backend);
 	test_allocator_publication_window(&backend);
 	test_io_owner_wait(&backend);
+	test_interruptible_io_owner_wait(&backend);
 	assert(swap_shutdown(&backend) == 0);
 	puts("SWAP-T005: production VM source drain: PASS");
 	return 0;

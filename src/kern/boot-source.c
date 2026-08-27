@@ -3,6 +3,7 @@
 #include <kern/boot-source.h>
 #include <kern/block-identity.h>
 #include <kern/fat-vfs.h>
+#include <kern/namei.h>
 
 #include <errno.h>
 #include <string.h>
@@ -22,6 +23,9 @@ kern_boot_source_context_destroy(struct kern_boot_source_context *context)
 
 	if (context == NULL)
 		return EINVAL;
+	/* A published context is an immutable system-lifetime resolver. */
+	if (context->runtime_published)
+		return EBUSY;
 	for (slot = KERN_BOOT_SOURCE_SLOT_COUNT; slot != 0U; slot--) {
 		struct kern_boot_source_slot *source = &context->slot[slot - 1U];
 		int error;
@@ -59,6 +63,8 @@ kern_boot_source_context_mount(struct kern_boot_source_context *context,
 
 	if (context == NULL || parameters == NULL)
 		return EINVAL;
+	if (context->runtime_published)
+		return EBUSY;
 	for (slot = 0; slot < KERN_BOOT_SOURCE_SLOT_COUNT; slot++)
 		if (context->slot[slot].mount != NULL)
 			return EBUSY;
@@ -129,6 +135,8 @@ kern_boot_source_context_mount(struct kern_boot_source_context *context,
 			    KERN_BOOT_SOURCE_FAILURE_MOUNT, error);
 		}
 		context->slot[slot].disk = context->slot[slot].mount->m_disk;
+		context->slot[slot].runtime_mount =
+		    context->slot[slot].mount;
 		context->slot[slot].configured = 1U;
 		disk_release(disk);
 	}
@@ -173,6 +181,94 @@ kern_boot_source_retain_slot(struct kern_boot_source_context *context,
 }
 
 int
+kern_boot_source_retain_configured(struct kern_boot_source_context *context)
+{
+	unsigned slot;
+
+	if (context == NULL || context->runtime_published)
+		return EINVAL;
+	for (slot = 0; slot < KERN_BOOT_SOURCE_SLOT_COUNT; slot++) {
+		struct kern_boot_source_slot *source = &context->slot[slot];
+
+		if (!source->configured)
+			continue;
+		if (source->mount == NULL || source->runtime_mount == NULL ||
+		    source->disk == NULL)
+			return EINVAL;
+	}
+	for (slot = 0; slot < KERN_BOOT_SOURCE_SLOT_COUNT; slot++)
+		if (context->slot[slot].configured)
+			context->slot[slot].retained = 1U;
+	return 0;
+}
+
+int
+kern_boot_source_publish_runtime(struct kern_boot_source_context *context)
+{
+	unsigned slot;
+
+	if (context == NULL || context->runtime_published)
+		return EINVAL;
+	for (slot = 0; slot < KERN_BOOT_SOURCE_SLOT_COUNT; slot++) {
+		const struct kern_boot_source_slot *source = &context->slot[slot];
+
+		if (!source->configured)
+			continue;
+		if (!source->retained || source->runtime_mount == NULL ||
+		    source->disk == NULL)
+			return EINVAL;
+	}
+	/* kern_vfs_init publishes before starting the first userspace process. */
+	context->runtime_published = 1U;
+	return 0;
+}
+
+static int
+runtime_mount_lookup(struct kern_boot_source_slot *source,
+		     const char *relative, struct path *result)
+{
+	struct cwdinfo context;
+	struct path root;
+	int error;
+
+	if (!source->promoted)
+		return mount_private_lookup(source->runtime_mount, relative,
+		    result);
+	path_init(&root);
+	path_set(&root, source->runtime_mount, source->runtime_mount->m_root);
+	error = cwdinfo_init(&context, &root);
+	path_release(&root);
+	if (error != 0)
+		return error;
+	error = namei_path_at(&context, relative, result);
+	cwdinfo_destroy(&context);
+	return error;
+}
+
+int
+kern_boot_source_runtime_lookup(struct kern_boot_source_context *context,
+				const char *text, struct path *path_out)
+{
+	struct kern_boot_source_reference reference;
+	struct kern_boot_source_slot *source;
+	int error;
+
+	if (context == NULL || path_out == NULL)
+		return EINVAL;
+	path_init(path_out);
+	if (!context->runtime_published)
+		return ENXIO;
+	error = kern_boot_source_reference_parse(text, &reference);
+	if (error != 0)
+		return error;
+	source = &context->slot[reference.slot];
+	if (!source->configured || !source->retained ||
+	    source->runtime_mount == NULL)
+		return ENOENT;
+	return runtime_mount_lookup(source, reference.relative, path_out);
+}
+
+int
 kern_boot_source_find_disk(const struct kern_boot_source_context *context,
 			   const struct disk *disk, unsigned *slot_out)
 {
@@ -206,7 +302,6 @@ kern_boot_source_promote_root(struct kern_boot_source_context *context,
 	if (error != 0)
 		return error;
 	source->mount = NULL;
-	source->disk = NULL;
 	source->retained = 1U;
 	source->promoted = 1U;
 	return 0;

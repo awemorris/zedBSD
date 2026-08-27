@@ -138,6 +138,17 @@ int
 vm_reclaim_drain_swap_source(
 	unsigned source_id);
 
+/*
+ * The cancel callback is sampled between page-ins and while retrying a busy
+ * backing.  A nonzero result stops the drain without discarding any resident
+ * page already recovered; the swap manager can then restore ACTIVE state.
+ */
+int
+vm_reclaim_drain_swap_source_cancelable(
+	unsigned source_id,
+	int (*cancel)(void *),
+	void *cancel_argument);
+
 void
 vm_page_note_in(
 	struct vm_page *page);

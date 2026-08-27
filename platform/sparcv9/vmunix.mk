@@ -45,6 +45,7 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
 	src/kern/mount.c src/kern/rootfs.c src/kern/tmpfs.c src/kern/overlayfs.c \
 	src/kern/vfs.c src/kern/swap.c src/kern/backing-claim.c src/kern/swap-source.c \
+	src/kern/swap-control.c \
 	src/kern/swap-boot.c \
 	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/buf.c \
 	src/kern/sysctl.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
@@ -66,7 +67,8 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/input-device.c \
 	src/kern/input-keymap.c src/kern/locale-record.c \
 	src/kern/tty.c \
-	src/kern/graphics-device.c src/kern/system-device.c \
+	src/kern/graphics-device.c src/kern/system-swap-device.c \
+	src/kern/system-device.c \
 	src/kern/boot-parameters.c src/kern/init.c
 SPARCV9_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
 	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)

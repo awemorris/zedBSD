@@ -13,6 +13,7 @@
 #define ZEDBSD_UAPI_SYSTEM_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include <sys/ioctl.h>
 
 #define ZEDBSD_SYSTEM_IOC_GROUP 's'
@@ -106,6 +107,54 @@ struct system_file_usage {
 	uint64_t reserved[4];
 };
 
+/*
+ * Runtime swap control is a zedBSD extension.  The structures deliberately
+ * contain no pointer-sized fields so one request number and one layout serve
+ * both ILP32 and LP64 processes.
+ */
+#define ZEDBSD_SYSTEM_SWAP_VERSION 1U
+#define ZEDBSD_SYSTEM_SWAP_SOURCE_COUNT 4U
+#define ZEDBSD_SYSTEM_SWAP_SOURCE_MAX 256U
+#define ZEDBSD_SYSTEM_SWAP_UUID_SIZE 8U
+#define ZEDBSD_SYSTEM_SWAP_LABEL_SIZE 20U
+
+#define ZEDBSD_SYSTEM_SWAP_STATE_INACTIVE 0U
+#define ZEDBSD_SYSTEM_SWAP_STATE_ACTIVE 1U
+#define ZEDBSD_SYSTEM_SWAP_STATE_DRAINING 2U
+
+struct system_swap_control {
+	uint32_t version;
+	uint32_t struct_size;
+	uint32_t flags;
+	uint32_t reserved0;
+	char source[ZEDBSD_SYSTEM_SWAP_SOURCE_MAX];
+	uint32_t reserved[8];
+} __attribute__((aligned(4)));
+
+struct system_swap_source_info {
+	uint32_t version;
+	uint32_t struct_size;
+	uint32_t flags;
+	uint32_t source_id;
+	uint32_t state;
+	uint32_t header_version;
+	uint32_t total_pages;
+	uint32_t used_pages;
+	uint8_t uuid[ZEDBSD_SYSTEM_SWAP_UUID_SIZE];
+	char label[ZEDBSD_SYSTEM_SWAP_LABEL_SIZE];
+	char source[ZEDBSD_SYSTEM_SWAP_SOURCE_MAX];
+	uint32_t reserved[8];
+} __attribute__((aligned(4)));
+
+_Static_assert(sizeof(struct system_swap_control) == 304U,
+    "runtime swap control ABI must be identical on ILP32 and LP64");
+_Static_assert(offsetof(struct system_swap_control, source) == 16U,
+    "runtime swap source selector offset is an ABI contract");
+_Static_assert(sizeof(struct system_swap_source_info) == 348U,
+    "runtime swap source ABI must be identical on ILP32 and LP64");
+_Static_assert(offsetof(struct system_swap_source_info, source) == 60U,
+    "runtime swap diagnostic source offset is an ABI contract");
+
 #define ZEDBSD_SYSTEM_GET_INFO                                                 \
 	_IOR(ZEDBSD_SYSTEM_IOC_GROUP, 1, struct system_info)
 #define ZEDBSD_SYSTEM_GET_DEVICE                                               \
@@ -120,5 +169,11 @@ struct system_file_usage {
 	_IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 7, struct process_info)
 #define ZEDBSD_SYSTEM_GET_FILE_USAGE                                           \
 	_IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 8, struct system_file_usage)
+#define ZEDBSD_SYSTEM_SWAP_ADD                                                 \
+	_IOW(ZEDBSD_SYSTEM_IOC_GROUP, 9, struct system_swap_control)
+#define ZEDBSD_SYSTEM_SWAP_REMOVE                                              \
+	_IOW(ZEDBSD_SYSTEM_IOC_GROUP, 10, struct system_swap_control)
+#define ZEDBSD_SYSTEM_GET_SWAP_SOURCE                                          \
+	_IOWR(ZEDBSD_SYSTEM_IOC_GROUP, 11, struct system_swap_source_info)
 
 #endif

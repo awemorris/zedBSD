@@ -1,6 +1,6 @@
 # WS016 Phase 002: `/dev/system` runtime-swap UAPI
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 WSID: `ws016`
 
@@ -8,7 +8,7 @@ Phase ID: `p002`
 
 Combined ID: `ws016-p002`
 
-Status: Planned; Queue-ready after `ws016-p001`
+Status: Complete (`q021`)
 
 Parent: [WS016](../ws.md)
 
@@ -69,3 +69,18 @@ commit capacity.
 Stop if `/dev/system` cannot identify the calling credentials or keep the
 operation's source/VM lifetime stable. Do not substitute an undocumented
 numeric syscall or expose kernel-private manager structures.
+
+## Execution result
+
+Completed on 2026-08-28. The versioned, pointer-free UAPI has identical
+ILP32/LP64 layouts; `/dev/system` validates the complete request before
+mutation, enforces effective-UID control, and publishes only initialized
+enumeration output. Runtime selectors resolve to canonical inode or disk
+identity, and file activation re-resolves the selector after the backing claim
+is established so an unlink/rebind race cannot publish an unreachable source.
+Interrupted removal restores both the active source and VM commit capacity.
+
+SWAP-T007/T008, the `bootN` lifetime adjunct, all p001 regressions,
+`make -j16`, and `git diff --check` passed. An independent completion review
+found no remaining critical or high-priority defect after the selector-race
+repair.

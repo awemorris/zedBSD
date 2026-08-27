@@ -66,6 +66,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
+	$(BUILD)/src/kern/system-swap-device.o \
 	$(BUILD)/src/kern/system-device.o \
 	$(BUILD)/src/kern/boot-parameters.o \
 	$(KERN_BOOT_SOURCE_OBJS) \
@@ -106,6 +107,7 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/swap.o \
 	$(BUILD)/src/kern/backing-claim.o \
 	$(BUILD)/src/kern/swap-source.o \
+	$(BUILD)/src/kern/swap-control.o \
 	$(BUILD)/src/kern/swap-boot.o \
 	$(BUILD)/src/kern/swap-fat.o \
 	$(BUILD)/src/kern/vm-reclaim.o \

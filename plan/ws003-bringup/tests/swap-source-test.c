@@ -139,6 +139,24 @@ vm_reclaim_drain_swap_source(unsigned source_id)
 }
 
 int
+vm_reclaim_drain_swap_source_cancelable(unsigned source_id,
+	int (*cancel)(void *), void *argument)
+{
+	int error = cancel != NULL ? cancel(argument) : 0;
+
+	if (error != 0)
+		return error;
+	return vm_reclaim_drain_swap_source(source_id);
+}
+
+static int
+test_remove_interrupt(void *argument)
+{
+	(void)argument;
+	return EINTR;
+}
+
+int
 mount_disk_writable_busy(struct disk *disk)
 {
 	(void)disk;
@@ -1368,6 +1386,13 @@ test_runtime_source_lifecycle(void)
 	test_commit_resize_error = ENOMEM;
 	assert(kern_swap_source_set_runtime_remove(&set, 0U) == ENOMEM);
 	assert(test_drain_calls == drains_before);
+	assert(swap_source_get_stats(&set.backend, 0U, &source_stats) == 0);
+	assert(source_stats.state == SWAP_SOURCE_STATE_ACTIVE &&
+	    dynamic.destroys == 0U && test_commit_swap_pages == 2U);
+
+	/* An interrupted drain restores commitment and allocation eligibility. */
+	assert(kern_swap_source_set_runtime_remove_cancelable(&set, 0U,
+	    test_remove_interrupt, NULL) == EINTR);
 	assert(swap_source_get_stats(&set.backend, 0U, &source_stats) == 0);
 	assert(source_stats.state == SWAP_SOURCE_STATE_ACTIVE &&
 	    dynamic.destroys == 0U && test_commit_swap_pages == 2U);

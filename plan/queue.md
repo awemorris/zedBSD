@@ -32,8 +32,8 @@ commands, and prove the complete path in disposable amd64 QEMU images.
 | Priority | WS / Phase | Authoritative documents | Status | Required result |
 | --- | --- | --- | --- | --- |
 | 1 | `ws016-p001` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase001-runtime-swap-manager/phase.md), [tests](ws016-swap-control/tests/README.md) | complete | Stable source-encoded slots, dynamic add/drain/remove, backing claims, and live commit accounting pass focused host tests and regressions |
-| 2 | `ws016-p002` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase002-swap-uapi/phase.md), [tests](ws016-swap-control/tests/README.md) | pending; dependency cleared | Versioned privileged `/dev/system` control and source enumeration pass ABI, permission, and failure-atomicity tests |
-| 3 | `ws016-p003` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase003-swap-commands/phase.md), [tests](ws016-swap-control/tests/README.md) | pending; dependency-gated by p002 | `/sbin/swapon` and `/sbin/swapoff` implement the fixed multi-operand CLI and are installed in configured images |
+| 2 | `ws016-p002` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase002-swap-uapi/phase.md), [tests](ws016-swap-control/tests/README.md) | complete | Versioned privileged `/dev/system` control and source enumeration pass ABI, permission, and failure-atomicity tests |
+| 3 | `ws016-p003` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase003-swap-commands/phase.md), [tests](ws016-swap-control/tests/README.md) | in-progress | `/sbin/swapon` and `/sbin/swapoff` implement the fixed multi-operand CLI and are installed in configured images |
 | 4 | `ws016-p004` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase004-runtime-swap-acceptance/phase.md), [tests](ws016-swap-control/tests/README.md) | pending; dependency-gated by p001--p003 | Disposable amd64 QEMU images prove runtime add, page-out/in, safe drain/remove, failure preservation, and boot-swap regression |
 
 ## Entry evidence and dependency order

@@ -39,5 +39,23 @@ The q021 p001 execution passed `run-phase001.sh`, an ASan/UBSan pass over the
 manager, claim, and drain fixtures, a forced `make -B -j16`, and
 `git diff --check` on 2026-08-28.
 
+## Implemented p002 runners
+
+- `run-system-swap-device-test.sh`: SWAP-T007/T008 UAPI layout, copyin/copyout,
+  validation, effective-UID authorization, state mapping, initialized output,
+  and failed-request atomicity.
+- `run-swap-control-test.sh`: SWAP-T008 canonical file/raw identity, duplicate
+  aliases, root overlap, signal interruption, source snapshots, and the
+  post-claim missing/rebind race rejection.
+- `run-boot-source-runtime-test.sh`: SWAP-T008 VFS lifetime adjunct.  It proves
+  that all configured `boot0`--`boot3` mounts survive the former unused-slot
+  release point, remain resolvable after a boot mount is promoted to the root,
+  reject unpublished/unconfigured/non-`bootN` lookups, and cannot be destroyed
+  after their system-lifetime publication.
+
+The q021 p002 execution passed all three runners, p001 regressions, an
+ASan/UBSan pass over the facade fixture, `make -j16`, and `git diff --check` on
+2026-08-28.
+
 The supported build gate is `make -j16`; the aggregate `make check` target and
 repository `.internal/` tests are not part of this WS.

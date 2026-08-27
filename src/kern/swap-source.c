@@ -28,6 +28,8 @@ extern int mount_sync(struct mount *) __attribute__((weak));
 extern int mount_disk_writable_busy(struct disk *) __attribute__((weak));
 extern int buf_invalidate(struct disk *, uint64_t, uint64_t, unsigned)
     __attribute__((weak));
+extern int vm_reclaim_drain_swap_source_cancelable(unsigned,
+    int (*)(void *), void *) __attribute__((weak));
 
 struct fat_swap_extent {
 	uint64_t file_block;
@@ -58,6 +60,13 @@ static struct spinlock swap_source_lock = {
 
 static int source_set_control_enter(struct kern_swap_source_set *);
 static void source_set_control_leave(struct kern_swap_source_set *);
+
+static void
+source_metadata_changed_locked(struct kern_swap_source_set *set)
+{
+	if (++set->metadata_generation == 0)
+		set->metadata_generation++;
+}
 
 static void
 active_extents_add(unsigned count)
@@ -391,6 +400,9 @@ kern_swap_source_prepare_file(const struct path *path,
 	source->identity_disk = data->disk;
 	source->identity_inode = data->inode;
 	source->slot_count = (uint32_t)header_info.slot_count;
+	source->header_version = header_info.version;
+	memcpy(source->uuid, header_info.uuid, sizeof(source->uuid));
+	memcpy(source->label, header_info.label, sizeof(source->label));
 	source->parameter_index = parameter_index;
 	active_extents_add(data->extent_count);
 	data = NULL;
@@ -488,6 +500,9 @@ kern_swap_source_prepare_raw(struct disk *disk, unsigned parameter_index,
 	source->data = data;
 	source->identity_disk = disk;
 	source->slot_count = (uint32_t)header_info.slot_count;
+	source->header_version = header_info.version;
+	memcpy(source->uuid, header_info.uuid, sizeof(source->uuid));
+	memcpy(source->label, header_info.label, sizeof(source->label));
 	source->parameter_index = parameter_index;
 	return 0;
 }
@@ -501,6 +516,23 @@ kern_swap_source_destroy(struct kern_swap_source *source)
 	    source->data != NULL)
 		source->ops->destroy(source->data);
 	kern_swap_source_init(source);
+}
+
+int
+kern_swap_source_set_diagnostic(struct kern_swap_source *source,
+	const char *diagnostic)
+{
+	size_t length;
+
+	if (source == NULL || diagnostic == NULL)
+		return EINVAL;
+	for (length = 0; length <= KERN_SWAP_SOURCE_TEXT_MAX; length++)
+		if (diagnostic[length] == '\0')
+			break;
+	if (length == 0 || length > KERN_SWAP_SOURCE_TEXT_MAX)
+		return EINVAL;
+	memcpy(source->diagnostic, diagnostic, length + 1U);
+	return 0;
 }
 
 void
@@ -526,6 +558,18 @@ source_identity_equal(const struct kern_swap_source *left,
 	return left->identity_inode == NULL && right->identity_inode == NULL &&
 	    left->identity_disk != NULL && right->identity_disk != NULL &&
 	    left->identity_disk->d_dev == right->identity_disk->d_dev;
+}
+
+static int
+source_identity_matches(const struct kern_swap_source *source,
+	struct disk *identity_disk, struct inode *identity_inode)
+{
+	struct kern_swap_source identity;
+
+	kern_swap_source_init(&identity);
+	identity.identity_disk = identity_disk;
+	identity.identity_inode = identity_inode;
+	return source_identity_equal(source, &identity);
 }
 
 int
@@ -573,8 +617,14 @@ kern_swap_source_set_add(struct kern_swap_source_set *set,
 		error = EOVERFLOW;
 		goto out;
 	}
-	set->range[source_id].source = *source;
-	set->count++;
+	{
+		unsigned long irq = spin_lock_irqsave(&swap_source_lock);
+
+		set->range[source_id].source = *source;
+		set->count++;
+		source_metadata_changed_locked(set);
+		spin_unlock_irqrestore(&swap_source_lock, irq);
+	}
 	kern_swap_source_init(source);
 	error = 0;
 out:
@@ -846,18 +896,42 @@ kern_swap_source_set_runtime_add(struct kern_swap_source_set *set,
 	if (error != 0)
 		goto rollback_prepared;
 	commit_grown = 1;
+	/* Metadata is visible before ACTIVE publication.  A concurrent snapshot
+	 * therefore sees either an internal PREPARED source (reported inactive) or
+	 * a complete ACTIVE source, never ACTIVE with an empty identity. */
+	{
+		unsigned long irq = spin_lock_irqsave(&swap_source_lock);
+
+		set->range[id].source = *source;
+		source_metadata_changed_locked(set);
+		spin_unlock_irqrestore(&swap_source_lock, irq);
+	}
 	error = swap_source_publish(&set->backend, id);
 	if (error != 0)
-		goto rollback_prepared;
+		goto rollback_metadata;
 	source->parameter_index = id;
-	set->range[id].source = *source;
-	set->count++;
+	{
+		unsigned long irq = spin_lock_irqsave(&swap_source_lock);
+
+		set->range[id].source.parameter_index = id;
+		set->count++;
+		source_metadata_changed_locked(set);
+		spin_unlock_irqrestore(&swap_source_lock, irq);
+	}
 	kern_swap_source_init(source);
 	if (source_id != NULL)
 		*source_id = id;
 	error = 0;
 	goto out;
 
+rollback_metadata:
+	{
+		unsigned long irq = spin_lock_irqsave(&swap_source_lock);
+
+		kern_swap_source_init(&set->range[id].source);
+		source_metadata_changed_locked(set);
+		spin_unlock_irqrestore(&swap_source_lock, irq);
+	}
 rollback_prepared:
 	if (commit_grown && vm_commit_resize_swap(new_total, old_total) != 0)
 		HAL_FATAL("runtime swap commitment rollback failed");
@@ -871,6 +945,15 @@ out:
 int
 kern_swap_source_set_runtime_remove(struct kern_swap_source_set *set,
 	unsigned source_id)
+{
+	return kern_swap_source_set_runtime_remove_cancelable(set, source_id,
+	    NULL, NULL);
+}
+
+int
+kern_swap_source_set_runtime_remove_cancelable(struct kern_swap_source_set *set,
+	unsigned source_id, kern_swap_source_cancel_fn cancel,
+	void *cancel_argument)
 {
 	struct swap_source_stats stats;
 	uint32_t old_total, new_total;
@@ -903,7 +986,10 @@ kern_swap_source_set_runtime_remove(struct kern_swap_source_set *set,
 			HAL_FATAL("runtime swap commitment restore failed");
 		goto out;
 	}
-	error = vm_reclaim_drain_swap_source(source_id);
+	error = cancel == NULL || vm_reclaim_drain_swap_source_cancelable == NULL ?
+	    vm_reclaim_drain_swap_source(source_id) :
+	    vm_reclaim_drain_swap_source_cancelable(source_id, cancel,
+		cancel_argument);
 	if (error == 0)
 		error = swap_source_remove(&set->backend, source_id);
 	if (error != 0) {
@@ -913,11 +999,94 @@ kern_swap_source_set_runtime_remove(struct kern_swap_source_set *set,
 			HAL_FATAL("runtime swap drain rollback failed");
 		goto out;
 	}
-	kern_swap_source_init(&set->range[source_id].source);
-	set->count--;
+	{
+		unsigned long irq = spin_lock_irqsave(&swap_source_lock);
+
+		kern_swap_source_init(&set->range[source_id].source);
+		set->count--;
+		source_metadata_changed_locked(set);
+		spin_unlock_irqrestore(&swap_source_lock, irq);
+	}
 out:
 	source_set_control_leave(set);
 	return error;
+}
+
+int
+kern_swap_source_set_find_identity(const struct kern_swap_source_set *set,
+	struct disk *identity_disk, struct inode *identity_inode,
+	unsigned *source_id)
+{
+	unsigned long irq;
+	unsigned index;
+	int error = ENOENT;
+
+	if (set == NULL || identity_disk == NULL || source_id == NULL)
+		return EINVAL;
+	irq = spin_lock_irqsave(&swap_source_lock);
+	for (index = 0; index < KERN_SWAP_SOURCE_COUNT; index++) {
+		const struct kern_swap_source *source = &set->range[index].source;
+
+		if (source->ops != NULL && source_identity_matches(source,
+		    identity_disk, identity_inode)) {
+			*source_id = index;
+			error = 0;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&swap_source_lock, irq);
+	return error;
+}
+
+int
+kern_swap_source_set_snapshot(struct kern_swap_source_set *set,
+	unsigned source_id, struct kern_swap_source_snapshot *snapshot)
+{
+	struct swap_source_stats stats;
+	struct kern_swap_source metadata;
+	uint64_t generation;
+	unsigned attempt;
+	int error;
+
+	if (set == NULL || source_id >= KERN_SWAP_SOURCE_COUNT || snapshot == NULL)
+		return EINVAL;
+	for (attempt = 0; attempt < 8U; attempt++) {
+		unsigned long irq = spin_lock_irqsave(&swap_source_lock);
+
+		generation = set->metadata_generation;
+		metadata = set->range[source_id].source;
+		spin_unlock_irqrestore(&swap_source_lock, irq);
+		error = swap_source_get_stats(&set->backend, source_id, &stats);
+		if (error != 0)
+			return error;
+		irq = spin_lock_irqsave(&swap_source_lock);
+		if (generation == set->metadata_generation) {
+			spin_unlock_irqrestore(&swap_source_lock, irq);
+			break;
+		}
+		spin_unlock_irqrestore(&swap_source_lock, irq);
+	}
+	if (attempt == 8U)
+		return EBUSY;
+	memset(snapshot, 0, sizeof(*snapshot));
+	snapshot->source_id = source_id;
+	if (stats.state == SWAP_SOURCE_STATE_INACTIVE ||
+	    stats.state == SWAP_SOURCE_STATE_PREPARED) {
+		snapshot->state = SWAP_SOURCE_STATE_INACTIVE;
+		return 0;
+	}
+	if (metadata.ops == NULL)
+		return EBUSY;
+	snapshot->state = stats.state == SWAP_SOURCE_STATE_ACTIVE ?
+	    SWAP_SOURCE_STATE_ACTIVE : SWAP_SOURCE_STATE_DRAINING;
+	snapshot->header_version = metadata.header_version;
+	snapshot->total_pages = stats.total_slots;
+	snapshot->used_pages = stats.allocated_slots;
+	memcpy(snapshot->uuid, metadata.uuid, sizeof(snapshot->uuid));
+	memcpy(snapshot->label, metadata.label, sizeof(snapshot->label));
+	memcpy(snapshot->diagnostic, metadata.diagnostic,
+	    sizeof(snapshot->diagnostic));
+	return 0;
 }
 
 int
@@ -945,10 +1114,16 @@ kern_swap_source_set_abort(struct kern_swap_source_set *set)
 				HAL_FATAL("swap abort commitment restore failed");
 			goto out;
 		}
-		for (index = 0; index < KERN_SWAP_SOURCE_COUNT; index++)
-			kern_swap_source_init(&set->range[index].source);
-		set->count = 0;
-		set->active = 0;
+		{
+			unsigned long irq = spin_lock_irqsave(&swap_source_lock);
+
+			for (index = 0; index < KERN_SWAP_SOURCE_COUNT; index++)
+				kern_swap_source_init(&set->range[index].source);
+			set->count = 0;
+			set->active = 0;
+			source_metadata_changed_locked(set);
+			spin_unlock_irqrestore(&swap_source_lock, irq);
+		}
 		goto out;
 	}
 	for (index = 0; index < KERN_SWAP_SOURCE_COUNT; index++)

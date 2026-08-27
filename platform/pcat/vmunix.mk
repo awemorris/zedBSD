@@ -52,6 +52,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/input-keymap.o $(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/graphics-device.o \
+	$(BUILD)/src/kern/system-swap-device.o \
 	$(BUILD)/src/kern/system-device.o \
 	$(BUILD)/src/kern/pcat/font.o $(BUILD)/src/kern/pcat/vgafont.o \
 	$(BUILD)/drivers/pcat-graphics.o \
@@ -86,7 +87,8 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/overlayfs.o \
 	$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/swap.o \
 	$(BUILD)/src/kern/backing-claim.o \
-	$(BUILD)/src/kern/swap-source.o $(BUILD)/src/kern/swap-boot.o \
+	$(BUILD)/src/kern/swap-source.o $(BUILD)/src/kern/swap-control.o \
+	$(BUILD)/src/kern/swap-boot.o \
 	$(BUILD)/src/kern/swap-fat.o \
 	$(BUILD)/src/kern/vm-reclaim.o \
 	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/partition.o \

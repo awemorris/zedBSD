@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/system-device.h"
+#include "kern/system-swap-device.h"
 #include "kern/cdev.h"
 #include "kern/internal.h"
 #include "kern/kmem.h"
@@ -326,6 +327,15 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 		cred_release(caller_credential);
 		path_release(&target);
 		return copyout(&output, argument, sizeof(output));
+	}
+	case ZEDBSD_SYSTEM_SWAP_ADD:
+	case ZEDBSD_SYSTEM_SWAP_REMOVE:
+	case ZEDBSD_SYSTEM_GET_SWAP_SOURCE: {
+		struct ucred *credential = cred_current_ref();
+		int superuser = cred_is_superuser(credential);
+
+		cred_release(credential);
+		return system_swap_device_ioctl(request, argument, superuser);
 	}
 	case ZEDBSD_SYSTEM_HALT:
 		if (curthread->proc->pid != 1)
