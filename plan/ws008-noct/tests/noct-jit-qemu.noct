@@ -1,0 +1,16 @@
+// WS008 NOCT-T021/T022 deterministic JIT and interpreter corpus.
+// Both modes must emit exactly the same single semantic-output line.
+
+func jit_target(value: int): int {
+    return value * 2 + 42;
+}
+
+func main(): int {
+    var result: int = jit_target(2100);
+
+    if (result != 4242) {
+        return 1;
+    }
+    print("NOCT-JIT-RESULT-4242");
+    return 0;
+}

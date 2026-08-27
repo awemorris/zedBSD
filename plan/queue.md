@@ -4,9 +4,9 @@ Last updated: 2026-08-28
 
 QID: `q020`
 
-Queue status: in-progress
+Queue status: complete
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: selected automatically under the user's approved WS-priority
 Queue loop on 2026-08-28; Phase-boundary commit and push are authorized for the
@@ -32,7 +32,7 @@ before WS008 rather than accepting event-number or name inference in BeUI.
 | --- | --- | --- | --- | --- |
 | 1 | `ws006-p005` | [WS006](ws006-input/ws.md), [Phase](ws006-input/phase005-evdev-capability-state/phase.md), [tests](ws006-input/tests/README.md) | complete | Production evdev reports registered type/code capabilities, current key/button state, and ABS metadata/state, and a guest discovers keyboard/pointer roles without numbers or names |
 | 2 | `ws008-p002` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase002-beui-zedbsd/phase.md), [tests](ws008-noct/tests/README.md) | complete | Canonical BeUI uses `/dev/graphics` and capability-discovered evdev, the downstream duplicate is removed, and host/QEMU backend evidence passes |
-| 3 | `ws008-p003` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase003-amd64-jit/phase.md), [tests](ws008-noct/tests/README.md) | in-progress | Direct VM and canonical Noct probes prove generated amd64 code executes after RW-to-RX protection with no accepted fallback or RWX mapping |
+| 3 | `ws008-p003` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase003-amd64-jit/phase.md), [tests](ws008-noct/tests/README.md) | complete | Direct VM and canonical Noct probes prove generated amd64 code executes after RW-to-RX protection with no accepted fallback or RWX mapping |
 
 ## Entry evidence and dependency order
 
@@ -43,8 +43,13 @@ before WS008 rather than accepting event-number or name inference in BeUI.
 - `ws008-p002` completed in q020. The canonical backend uses public graphics
   and dynamically capability-discovered evdev interfaces, its host state and
   SDL/PC-98 regressions pass, and one QEMU run proved drawing, input, teardown,
-  and later console input. The downstream BeUI duplicate is removed. p003 is
-  therefore active.
+  and later console input. The downstream BeUI duplicate is removed, which
+  made p003 dependency-ready.
+- `ws008-p003` completed in q020. A direct guest probe proved W^X rejection,
+  RW-to-RX native execution, post-protection write rejection, invalid-range
+  behavior, and unmap. Two fresh canonical Noct processes compiled and entered
+  `jit_target` natively with successful publish/destroy records; a `-j0`
+  process produced the same result with no JIT record. q020 is complete.
 - q019 completed `ws008-p001` and proved the canonical CMake artifact in QEMU.
 - q019 stopped p002 before canonical backend work because the production input
   core cannot answer the already-declared capability/state requests. The exact

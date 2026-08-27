@@ -16,11 +16,13 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is `q020`, in progress. It completed
+The current [Queue Book](queue.md) is `q020`, complete. It completed
 `ws006-p005`, including capability-only amd64 QEMU discovery and real-ioctl
 boundary evidence, and `ws008-p002`, including canonical BeUI graphics/evdev
-acceptance without a private event-number/name fallback. It is now executing
-`ws008-p003` JIT acceptance. The archived [q019](queue-q019.md) completed
+acceptance without a private event-number/name fallback. It then completed
+`ws008-p003`, proving direct amd64 RW-to-RX execution and two canonical Noct
+JIT lifecycles with an interpreter negative control. The archived
+[q019](queue-q019.md) completed
 `ws008-p001`, honestly stopped p002 before implementation, and did not start
 dependency-gated p003. The
 preceding [q018](queue-q018.md) completed `ws012-p003` through p006 and closed
@@ -96,7 +98,7 @@ before this long-term product goal is reached.
 | `ws005` | Networking and WPA | Planned; USB Ethernet first, WLAN manually blocked | WS002 Phase 20 is the inherited baseline | Classify one USB Ethernet descriptor, then extract the wired physical-network Phase | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Active in `q020`; p003 in progress | `ws008-p002` complete | Complete direct VM and canonical Noct RW-to-RX JIT acceptance in p003 | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Complete (`q020`) | `ws008-p003` complete | No implementation Phase remains; canonical publication/revision advancement is separate release administration | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |

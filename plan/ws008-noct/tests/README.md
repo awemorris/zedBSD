@@ -137,6 +137,39 @@ checked-in runner and summary are the durable test contract.
 | `NOCT-T021` | p003 | Forced canonical Noct JIT result plus positive `noct-jit: ...: compiled` evidence and no fallback |
 | `NOCT-T022` | p003 | Interpreter negative control and second clean forced-JIT lifecycle |
 
+### Phase 003 host and QEMU runners
+
+The canonical host regression gates cover successful JIT allocation and
+publication, forced `mprotect`/`munmap` failures, invalid-entry suppression,
+interpreter fallback safety, and the complete opt-in lifecycle record:
+
+```sh
+cd userland/noct
+cmake --build --preset static --parallel 16
+tests/test.sh jit-slab build-static
+tests/test.sh jit-branch /home/awe/zedBSD/userland/noct/build-static/noct
+NOCT=/home/awe/zedBSD/userland/noct/build-static/noct tests/test.sh cli
+```
+
+The JIT-disabled host build, MinGW x86-64 build, `zedbsd` preset build,
+canonical host build/acceptance, and exact canonical/integration path parity
+are additional p003 build gates.
+
+[`qemu-noct-jit.sh`](./qemu-noct-jit.sh) builds the direct
+[`noct-jit-vm-probe.c`](./noct-jit-vm-probe.c), installs the deterministic
+[`noct-jit-qemu.noct`](./noct-jit-qemu.noct), and evaluates
+`NOCT-T020`--`NOCT-T022` in one disposable amd64 QEMU image:
+
+```sh
+plan/ws008-noct/tests/qemu-noct-jit.sh
+```
+
+The completed `q020` result is summarized in
+[`q020-p003-jit-evidence.md`](./q020-p003-jit-evidence.md). Raw metadata,
+serial transcripts, and the disposable image live under an ignored
+`plan/ws008-noct/temp/q020-p003-jit.XXXXXX/` directory and may be deleted; the
+checked-in runner, fixtures, and summary are the durable test contract.
+
 Every QEMU record names the CMake source revision/status, zedBSD configuration,
 image path/hash, exact command line, QEMU version, start/end time, expected
 markers, fatal scan, and exit classification. Use `qemu-system-x86_64` for the
