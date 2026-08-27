@@ -1,0 +1,84 @@
+func main() : int
+{
+	print("NOCT-T011-BEGIN");
+	if (!BeUI.initWithHint(24)) {
+		print("NOCT-T011-INIT-FAIL");
+		return 10;
+	}
+
+	let width = BeUI.getWidth();
+	let height = BeUI.getHeight();
+	if (width < 320 || height < 200) {
+		BeUI.close();
+		print("NOCT-T011-MODE-FAIL");
+		return 11;
+	}
+
+	BeUI.fill(0, 0, width, height, 0x102030);
+	BeUI.patternFill(16, 16, 96, 64, 0x406080, 0x55aa55aa);
+	BeUI.line(0, height - 1, width - 1, 0, 0xffffff);
+
+	let image_size = FileUtil.getFileSize("/usr/share/noct/beui-zedbsd.bmp");
+	let image_file = File.open("/usr/share/noct/beui-zedbsd.bmp", "rb");
+	let image_bytes = File.readExact(image_file, image_size);
+	File.close(image_file);
+	let image = BeUI.loadImage(image_bytes);
+	BeUI.drawImage(image, 160, 40);
+	BeUI.drawText("Noct BeUI zedBSD", 24, 112, 0xffffff, 0x102030);
+	if (!BeUI.flush()) {
+		BeUI.destroyImage(image);
+		BeUI.close();
+		print("NOCT-T011-FLUSH-FAIL");
+		return 12;
+	}
+	print("NOCT-T011-DRAWN");
+
+	let initial_x = BeUI.getPointerX();
+	let initial_y = BeUI.getPointerY();
+	var saw_shift = 0;
+	var saw_motion = 0;
+	var saw_left = 0;
+	// The host controller captures the framebuffer before injecting input.
+	// Keep this loop deliberately much longer than the host-side timeout so
+	// that a slow screendump cannot race the guest's acceptance window.
+	for (i in 0..100000) {
+		if (!BeUI.poll()) {
+			BeUI.destroyImage(image);
+			BeUI.close();
+			print("NOCT-T012-POLL-FAIL");
+			return 20;
+		}
+		if (!saw_shift && BeUI.isKeyDown(Key.Shift)) {
+			saw_shift = 1;
+			print("NOCT-T012-SHIFT-OK");
+		}
+		if (!saw_motion && (BeUI.getPointerX() != initial_x ||
+		    BeUI.getPointerY() != initial_y)) {
+			saw_motion = 1;
+			print("NOCT-T012-MOTION-OK");
+		}
+		if (!saw_left &&
+		    (BeUI.getPointerButtons() & Button.Left) != 0) {
+			saw_left = 1;
+			print("NOCT-T012-LEFT-OK");
+		}
+		if (saw_shift && saw_motion && saw_left) {
+			print("NOCT-T012-INPUT-OK");
+			BeUI.destroyImage(image);
+			BeUI.close();
+			print("NOCT-T011-CLOSED");
+			return 0;
+		}
+		BeUI.sleep(10);
+	}
+
+	if (!saw_shift || !saw_motion || !saw_left) {
+		BeUI.destroyImage(image);
+		BeUI.close();
+		print("NOCT-T012-INPUT-FAIL");
+		return 21;
+	}
+	BeUI.destroyImage(image);
+	BeUI.close();
+	return 21;
+}

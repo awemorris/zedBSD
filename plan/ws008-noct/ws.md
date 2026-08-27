@@ -4,15 +4,14 @@ Last updated: 2026-08-28
 
 WSID: `ws008`
 
-Status: active in `q020`; `ws008-p002` in progress
+Status: active in `q020`; `ws008-p003` in progress
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws008-p001`
+Last verified Phase: `ws008-p002`
 
-Resume point: resume `ws008-p002` against the proven canonical target and
-completed evdev capability/state prerequisite; do not start JIT acceptance
-before p002 completes.
+Resume point: execute `ws008-p003` direct VM and canonical Noct JIT acceptance
+against the completed preset, BeUI, and evdev foundation.
 
 Shared tests: [WS008 test index](tests/README.md)
 
@@ -21,8 +20,8 @@ Shared tests: [WS008 test index](tests/README.md)
 | Phase | Status | Deliverable / gate |
 | --- | --- | --- |
 | [`ws008-p001`](phase001-zedbsd-preset/phase.md) | Complete (`q019`) | Official Noct builds for zedBSD with `cmake --preset zedbsd`, and the resulting amd64 executable passes a non-JIT QEMU smoke |
-| [`ws008-p002`](phase002-beui-zedbsd/phase.md) | In progress (`q020`) | Official BeUI zedBSD backend uses `/dev/graphics` and `/dev/input/eventN`; the downstream duplicate and console-event dependency are removed |
-| [`ws008-p003`](phase003-amd64-jit/phase.md) | Pending in `q020` after p002 | amd64 zedBSD proves Noct-generated code traverses RW `mmap` to RX `mprotect` and executes under QEMU |
+| [`ws008-p002`](phase002-beui-zedbsd/phase.md) | Complete (`q020`) | Official BeUI zedBSD backend uses `/dev/graphics` and capability-discovered `/dev/input/eventN`; the downstream duplicate and console-event dependency are removed |
+| [`ws008-p003`](phase003-amd64-jit/phase.md) | In progress (`q020`) | amd64 zedBSD proves Noct-generated code traverses RW `mmap` to RX `mprotect` and executes under QEMU |
 
 The old NOCT-00--NOCT-05 labels are superseded as scheduling units by these
 immutable Phase IDs. Their concerns are retained inside p001--p003 rather than

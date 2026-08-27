@@ -8,7 +8,7 @@ Phase ID: `p002`
 
 Combined ID: `ws008-p002`
 
-Status: In progress (`q020`); evdev prerequisite completed by `ws006-p005`
+Status: Complete (`q020`)
 
 Parent: [WS008](../ws.md)
 
@@ -57,53 +57,73 @@ duplicate after parity is demonstrated.
 
 ## Work packages
 
-- [ ] Isolate the reusable `/dev/graphics` logic from downstream
+- [x] Isolate the reusable `/dev/graphics` logic from downstream
       `userland/packages/lang/noct/runtime/platform.c` and implement the
       canonical zedBSD BeUI display HAL.
-- [ ] Implement bounded event-node discovery, capability selection, keyboard
+- [x] Implement bounded event-node discovery, capability selection, keyboard
       state, relative/absolute pointer state, button state, synchronization,
       detach, and cleanup in the canonical backend.
-- [ ] Add `NOCT_ENABLE_API_BEUI_ZEDBSD` (or an equivalently explicit target
+- [x] Add `NOCT_ENABLE_API_BEUI_ZEDBSD` (or an equivalently explicit target
       selection) with invalid-option checks and enable it in the `zedbsd`
       preset.
-- [ ] Add host tests around backend translation/state with mocked public UAPI
+- [x] Add host tests around backend translation/state with mocked public UAPI
       operations and retain canonical SDL2 BeUI tests.
-- [ ] Add an amd64 QEMU BeUI probe which performs visible drawing and reports
+- [x] Add an amd64 QEMU BeUI probe which performs visible drawing and reports
       injected keyboard and pointer observations through a non-graphical
       evidence channel.
-- [ ] Remove the downstream BeUI implementation only after the canonical
+- [x] Remove the downstream BeUI implementation only after the canonical
       backend passes the same graphics operations; retain unrelated package
       target/terminal adapters until their owning work explicitly removes them.
-- [ ] Run a source audit proving the zedBSD Noct/BeUI path has no legacy
+- [x] Run a source audit proving the zedBSD Noct/BeUI path has no legacy
       console event/key-state calls, followed by `make -j16`.
-- [ ] Mirror the official source change into the integration checkout and
+- [x] Mirror the official source change into the integration checkout and
       record the path parity manifest without committing or pushing.
 
 ## Acceptance
 
-- `NOCT-T010`: host backend tests cover capability discovery, key
+- [x] `NOCT-T010`: host backend tests cover capability discovery, key
   press/release/repeat, relative and absolute pointer updates, buttons,
   `SYN_REPORT`, `SYN_DROPPED`, partial/multiple records, unknown codes, detach,
   and descriptor cleanup.
-- `NOCT-T011`: in `qemu-system-x86_64`, BeUI enters `/dev/graphics`, draws a
+- [x] `NOCT-T011`: in `qemu-system-x86_64`, BeUI enters `/dev/graphics`, draws a
   deterministic pattern/image/text sample, flushes, and closes without kernel
   or process error.
-- `NOCT-T012`: the same guest run injects keyboard and pointer activity; the
+- [x] `NOCT-T012`: the same guest run injects keyboard and pointer activity; the
   probe reports the expected BeUI key/button/coordinate transitions while
   ordinary console input remains usable after BeUI exits.
-- `NOCT-T013`: a source/object audit finds no legacy continuous-event,
+- [x] `NOCT-T013`: a source/object audit finds no legacy continuous-event,
   key-state, or drain-input console ioctl in the installed Noct/BeUI path.
-- The canonical SDL2 BeUI focused tests and `make -j16` pass; `make check` is
+- [x] The canonical SDL2 BeUI focused tests and `make -j16` pass; `make check` is
   not used.
 
 ## Completion conditions
 
-- Canonical Noct owns the only zedBSD BeUI backend implementation.
-- Graphics and input evidence passes on amd64 QEMU using only public
+- [x] Canonical Noct owns the only zedBSD BeUI backend implementation.
+- [x] Graphics and input evidence passes on amd64 QEMU using only public
   `/dev/graphics` and `/dev/input/eventN` UAPIs.
-- Dynamic event numbering, synchronization loss, detach, and cleanup have
+- [x] Dynamic event numbering, synchronization loss, detach, and cleanup have
   deterministic bounded behavior.
-- No downstream Noct BeUI code depends on the console event/key-state API.
+- [x] No downstream Noct BeUI code depends on the console event/key-state API.
+
+## q020 completion result
+
+[`q020-p002-beui-evidence.md`](../tests/q020-p002-beui-evidence.md) records the
+completed acceptance run. In summary:
+
+- the sanitized host state/wiring corpus passed, as did the generic BeUI core,
+  PC-98 GDC, PC-98 Cirrus, and SDL2 dummy-driver regressions;
+- one amd64 `qemu-system-x86_64` run produced the graphics markers
+  `BEGIN`/`DRAWN`/`CLOSED`, observed injected Shift, relative motion, and left
+  button state, and returned to a working text console;
+- the deterministic 1024x768 screenshot checker found the expected background,
+  pattern, line/glyph, and four BMP colors;
+- the legacy-console source/object audit, canonical/package/staged artifact
+  identity, 15-path canonical/integration parity check, and `make -j16` passed.
+
+The raw QEMU directory
+`plan/ws008-noct/temp/q020-p002-beui.59sAEO/` is ignored, disposable evidence;
+the checked-in runner, fixtures, and completion record are the durable
+reproduction contract.
 
 ## Failure and resume rules
 

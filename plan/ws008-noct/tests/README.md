@@ -94,6 +94,41 @@ another non-graphical evidence channel so acceptance is not based only on a
 screenshot. It discovers event roles by `EVIOCGBIT`/identity data and must vary
 event registration order in at least one focused test.
 
+### Phase 002 host runners
+
+The canonical Noct tree contains the reusable sanitized evdev state and wiring
+runner. From the integration checkout, run:
+
+```sh
+userland/noct/tests/testcases/run-beui-zedbsd.sh /home/awe/zedBSD
+```
+
+It compiles the production state engine with `-Wall -Wextra -Werror` and
+ASan/UBSan, then covers capability-derived roles, key/button state, relative
+and absolute motion, packet boundaries, `SYN_DROPPED`, resynchronization,
+detach, cleanup, and the legacy-console source audit. The existing canonical
+`run-beui.sh` suite remains the regression gate for the generic core, PC-98
+GDC, PC-98 Cirrus, and SDL2 dummy backends.
+
+### Phase 002 QEMU runner
+
+[`qemu-beui-zedbsd.sh`](./qemu-beui-zedbsd.sh) creates a private amd64 config,
+builds with `make -j16`, boots a disposable disk copy with
+`qemu-system-x86_64`, injects Shift and pointer activity through the QEMU
+monitor, and checks the result through the debug console. It also captures a
+PPM screendump and validates deterministic background, pattern, line/glyph,
+and BMP pixels:
+
+```sh
+plan/ws008-noct/tests/qemu-beui-zedbsd.sh
+```
+
+The completed `q020` result is summarized in
+[`q020-p002-beui-evidence.md`](./q020-p002-beui-evidence.md). The runner's raw
+logs, disk copy, screenshot, and generated binaries remain under an ignored
+`plan/ws008-noct/temp/q020-p002-beui.XXXXXX/` directory and may be deleted; the
+checked-in runner and summary are the durable test contract.
+
 ## JIT tests
 
 | ID | Phase | Contract |
