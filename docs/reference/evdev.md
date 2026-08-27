@@ -1,6 +1,7 @@
 # evdev compatibility profile
 
-Status: experimental UAPI; kernel device implementation planned
+Status: experimental UAPI; event devices operational, capability/state ioctl
+completion planned
 
 zedBSD reserves `/dev/input/eventN` for an independently implemented event
 interface whose initial keyboard and pointer subset is source-oriented toward
@@ -71,5 +72,13 @@ incorporated into the zedBSD base system.
 
 The [IN-T00 layout test](../../plan/ws006-input/tests/evdev-layout-test.c)
 compiles under both supported x86 ABI modes and freezes sizes, offsets, and core
-numeric constants. No `/dev/input/eventN` kernel device exists yet; read,
-queue, ioctl, and lifecycle behavior remains acceptance scope for `ws006-p002`.
+numeric constants. `ws006-p002` through p004 added operational event nodes,
+independent reads, overflow/detach handling, grab, keyboard/mouse producers,
+and console coexistence.
+
+Version, identity, name/physical/unique strings, and grab are implemented.
+Capability bitmaps, current key state, and absolute-axis descriptors are
+declared by the profile but not yet implemented by the kernel. This prevents a
+consumer from selecting dynamic event nodes by capability. The bounded repair
+is tracked by
+[`ws006-p005`](../../plan/ws006-input/phase005-evdev-capability-state/phase.md).

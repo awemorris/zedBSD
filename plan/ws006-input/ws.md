@@ -1,17 +1,17 @@
 # WS006: input and evdev
 
-Last updated: 2026-08-25
+Last updated: 2026-08-28
 
 WSID: `ws006`
 
-Status: in progress; `ws006-p004` complete PC/AT software milestone
+Status: in progress; `ws006-p005` is Queue-ready
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws006-p004` complete PC/AT software milestone
 
-Resume point: migrate Xzed when a concrete evdev consumer Phase is selected;
-retain PC-98/X68000 physical-token completion as a port-specific follow-up.
+Resume point: execute `ws006-p005` to complete capability/state queries needed
+by capability-discovering consumers, then resume Noct/BeUI migration.
 
 Shared tests: [WS006 test index](tests/README.md)
 
@@ -23,6 +23,7 @@ Shared tests: [WS006 test index](tests/README.md)
 | [`ws006-p002`](phase002-input-core/phase.md) | Complete milestone | Core/devfs/queue build and focused evidence pass; real producer runtime remains IN-02 |
 | [`ws006-p003`](phase003-producer-bridge/phase.md) | Complete milestone | Production event nodes register in QEMU; physical-key broker/consumer evidence remains p004 |
 | [`ws006-p004`](phase004-console-broker/phase.md) | Complete PC/AT software milestone | Fixed string event, single broker, focused/build evidence, and production QEMU event-node/console coexistence pass; PC-98/X68000 physical detail remains |
+| [`ws006-p005`](phase005-evdev-capability-state/phase.md) | Planned; Queue-ready | Registered capability metadata, core-maintained state, and capability/state ioctls unblock dynamic consumers |
 
 The remaining sequence is input core, existing producer bridge, consumer
 migration, legacy-console removal, and USB HID.

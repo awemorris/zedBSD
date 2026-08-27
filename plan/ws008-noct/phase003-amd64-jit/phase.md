@@ -8,7 +8,7 @@ Phase ID: `p003`
 
 Combined ID: `ws008-p003`
 
-Status: Planned; Queue-ready after `ws008-p002`
+Status: Planned; dependency-blocked by uncleared `ws008-p002`
 
 Parent: [WS008](../ws.md)
 

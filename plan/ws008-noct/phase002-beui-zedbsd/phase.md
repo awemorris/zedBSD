@@ -1,6 +1,6 @@
 # WS008 Phase 002: canonical BeUI zedBSD graphics and evdev backend
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 WSID: `ws008`
 
@@ -8,7 +8,7 @@ Phase ID: `p002`
 
 Combined ID: `ws008-p002`
 
-Status: Planned; Queue-ready after `ws008-p001`
+Status: Uncleared (`q019`); waiting for `ws006-p005`
 
 Parent: [WS008](../ws.md)
 
@@ -115,3 +115,28 @@ Phase `uncleared` and hand it to the dedicated LFB workstream.
 
 Resume from the first failing NOCT-T010--T013 case with its event transcript,
 capability dump, and guest serial log.
+
+## q019 stop result
+
+The pre-implementation source/UAPI audit found that the public ABI can express
+the required behavior, but its kernel implementation cannot yet supply it:
+
+- `include/uapi/zedbsd/input.h` declares `EVIOCGBIT`, `EVIOCGKEY`, and
+  `EVIOCGABS`;
+- `src/kern/input-device.c` implements version, identity, device-string, and
+  grab requests only, returning `EOPNOTSUPP` for the required queries;
+- `struct input_device_info` and the registered keyboard/mouse devices carry
+  no capability bitsets, current key state, or absolute-axis descriptors.
+
+Consequently a canonical backend cannot distinguish a keyboard, relative
+pointer, and absolute pointer by capability or scale an absolute axis. Event
+number, name, or product-ID inference was rejected because it would violate
+the fixed contract. The allowed visible reset could handle `SYN_DROPPED`
+without `EVIOCGKEY`, but it cannot replace `EVIOCGBIT` or `EVIOCGABS`.
+
+The `/dev/graphics` audit found the required mode, drawing, glyph, flush, and
+close operations already sufficient; no LFB mapping is needed for correctness.
+No partial canonical backend or new downstream duplicate was added. Resume
+after [`ws006-p005`](../../ws006-input/phase005-evdev-capability-state/phase.md)
+implements and verifies the frozen evdev capability/state contract. Then run
+`NOCT-T010` through `NOCT-T013` as originally specified.

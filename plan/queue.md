@@ -4,9 +4,9 @@ Last updated: 2026-08-28
 
 QID: `q019`
 
-Queue status: in-progress
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: selected automatically under the user's approved WS-priority
 Queue loop on 2026-08-28; Phase-boundary commit and push are authorized for the
@@ -32,8 +32,8 @@ JIT path in amd64 QEMU.
 | Priority | WS / Phase | Authoritative documents | Status | Required result |
 | --- | --- | --- | --- | --- |
 | 1 | `ws008-p001` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase001-zedbsd-preset/phase.md), [tests](ws008-noct/tests/README.md) | complete | `cmake --preset zedbsd` and its build preset produce the static canonical amd64 zedBSD Noct artifact, the package installs that artifact, and a non-JIT QEMU smoke passes |
-| 2 | `ws008-p002` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase002-beui-zedbsd/phase.md), [tests](ws008-noct/tests/README.md) | pending | Canonical BeUI uses `/dev/graphics` and capability-discovered evdev, the downstream duplicate is removed, and host/QEMU backend evidence passes |
-| 3 | `ws008-p003` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase003-amd64-jit/phase.md), [tests](ws008-noct/tests/README.md) | pending | Direct VM and canonical Noct probes prove generated amd64 code executes after RW-to-RX protection with no accepted fallback or RWX mapping |
+| 2 | `ws008-p002` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase002-beui-zedbsd/phase.md), [tests](ws008-noct/tests/README.md) | uncleared | Canonical BeUI uses `/dev/graphics` and capability-discovered evdev, the downstream duplicate is removed, and host/QEMU backend evidence passes |
+| 3 | `ws008-p003` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase003-amd64-jit/phase.md), [tests](ws008-noct/tests/README.md) | uncleared | Not executed: p002 did not complete, so the Queue dependency gate forbids starting p003 |
 
 ## Entry evidence and dependency order
 
@@ -87,6 +87,23 @@ JIT path in amd64 QEMU.
   preserve an empty/manual-link false success or duplicate UAPI definitions.
 - Use `make -j16`; do not run `make check` or consume `.internal/`. Use
   disposable images for guest mutation and preserve `config.mk`.
+
+## `ws008-p002` stop result
+
+The source and UAPI audit found a prerequisite implementation gap rather than
+a Noct product decision. `<zedbsd/input.h>` declares `EVIOCGBIT`,
+`EVIOCGKEY`, and `EVIOCGABS`, and the published evdev profile requires
+capability-driven event-node discovery. The production input core currently
+implements only version, identity, device strings, and grab. It stores no
+event/code capabilities, current key state, or absolute-axis descriptors, so
+all required capability/state requests return `EOPNOTSUPP`.
+
+Using event numbers, names, or product IDs as a private BeUI substitute would
+violate the fixed p002 contract. The graphics UAPI is sufficient and needs no
+LFB extension for correctness. `ws008-p002` is therefore honestly uncleared
+before canonical source migration, and p003 was not started. The bounded
+repair is [`ws006-p005`](ws006-input/phase005-evdev-capability-state/phase.md);
+after it passes, a new Queue may resume p002 and then p003.
 
 ## Approval boundary
 
