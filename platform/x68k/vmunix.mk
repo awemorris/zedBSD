@@ -108,7 +108,7 @@ X68K_KERNEL_SOURCES := \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
 	src/kern/mount.c src/kern/rootfs.c src/kern/vfs.c src/kern/swap.c \
 	src/kern/tmpfs.c src/kern/overlayfs.c drivers/loop.c \
-	src/kern/swap-source.c src/kern/swap-boot.c src/kern/swap-fat.c \
+	src/kern/backing-claim.c src/kern/swap-source.c src/kern/swap-boot.c src/kern/swap-fat.c \
 	src/kern/vm-reclaim.c \
 	src/kern/disk.c \
 	src/kern/partition.c src/kern/x68k/partition.c src/kern/x68k/platform.c \

@@ -1126,57 +1126,6 @@ allocate_page_frame(struct vm_private_page *backing, struct vm_page *avoid)
 	return 0;
 }
 
-/* Caller owns backing I/O and keeps accounting_page metadata pinned. */
-static int
-page_in_owned(struct vm_private_page *backing,
-	struct vm_page *accounting_page)
-{
-	struct swap_backend *backend = swap_system_backend();
-	uint32_t slot;
-	unsigned long irq;
-	int error;
-
-	if (backing == NULL || backend == NULL)
-		return EIO;
-	irq = spin_lock_irqsave(&backing->state_lock);
-	if ((backing->flags & (VM_PAGE_BUSY | VM_PAGE_SWAPPED)) !=
-	    (VM_PAGE_BUSY | VM_PAGE_SWAPPED)) {
-		spin_unlock_irqrestore(&backing->state_lock, irq);
-		return EIO;
-	}
-	slot = backing->swap_slot;
-	spin_unlock_irqrestore(&backing->state_lock, irq);
-	error = allocate_page_frame(backing, accounting_page);
-	if (error == 0)
-		error = swap_read_page(backend, slot,
-				       (void *)backing->pmem.vaddr);
-	if (error != 0) {
-		if (backing->pmem.size != 0)
-			(void)hal_pmem_free(&backing->pmem);
-		return error;
-	}
-	swap_free_slot(backend, slot);
-	irq = spin_lock_irqsave(&backing->state_lock);
-	if ((backing->flags & (VM_PAGE_BUSY | VM_PAGE_SWAPPED)) !=
-	    (VM_PAGE_BUSY | VM_PAGE_SWAPPED) || backing->swap_slot != slot)
-		HAL_FATAL("VM private page-in state changed under I/O owner");
-	backing->swap_slot = SWAP_SLOT_NONE;
-	backing->flags &= ~VM_PAGE_SWAPPED;
-	/*
-	 * The swap slot was the only backing store for this page.  Once it is
-	 * released, a clean-looking resident page must not be discarded: CPU
-	 * reads do not set the PTE dirty bit and a later reclaim would recreate
-	 * anonymous memory as zero-filled data.  Treat the page as dirty until
-	 * it has been written to swap again.
-	 */
-	backing->flags |= VM_PAGE_RESIDENT | VM_PAGE_DIRTY;
-	if (++backing->generation == 0)
-		backing->generation++;
-	spin_unlock_irqrestore(&backing->state_lock, irq);
-	vm_page_note_in(accounting_page);
-	return 0;
-}
-
 static int
 fill_file_page(struct vm_region *region, struct vm_page *page)
 {
@@ -1348,7 +1297,7 @@ retry:
 			swapped = (reserved_backing->flags & VM_PAGE_SWAPPED) != 0;
 			spin_unlock_irqrestore(&reserved_backing->state_lock, state_irq);
 			if (swapped)
-				error = page_in_owned(reserved_backing, page);
+				error = vm_private_page_in_owned(reserved_backing, page);
 		}
 		if (error == 0 && need_cow)
 			error = prepare_cow_copy(page, reserved_backing, &fresh);

@@ -1,16 +1,17 @@
 # WS016: runtime swap control
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 WSID: `ws016`
 
-Status: planned; Phases are defined and Queue-ready
+Status: active; `ws016-p001` complete in `q021`
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: none
+Last verified Phase: `ws016-p001`
 
-Resume point: select `ws016-p001` for a finite Queue after execution approval.
+Resume point: execute dependency-cleared `ws016-p002`, then advance through
+`ws016-p003` and `ws016-p004` in `q021`.
 
 Shared tests: [WS016 test index](tests/README.md)
 
@@ -136,8 +137,8 @@ hibernation, encryption, and a listing option are not part of the initial CLI.
 
 | Combined ID | Phase | Status | Required result |
 | --- | --- | --- | --- |
-| `ws016-p001` | [Runtime swap manager](phase001-runtime-swap-manager/phase.md) | Planned; Queue-ready | Stable source-encoded slots, dynamic add/drain/remove, backing claims, and live commit accounting pass host tests |
-| `ws016-p002` | [`/dev/system` swap UAPI](phase002-swap-uapi/phase.md) | Planned; Queue-ready after p001 | Versioned privileged control and source enumeration pass ABI, permission, and failure-atomicity tests |
+| `ws016-p001` | [Runtime swap manager](phase001-runtime-swap-manager/phase.md) | Complete (`q021`) | Stable source-encoded slots, dynamic add/drain/remove, backing claims, and live commit accounting pass host tests |
+| `ws016-p002` | [`/dev/system` swap UAPI](phase002-swap-uapi/phase.md) | Planned; dependency cleared in `q021` | Versioned privileged control and source enumeration pass ABI, permission, and failure-atomicity tests |
 | `ws016-p003` | [`swapon` and `swapoff` commands](phase003-swap-commands/phase.md) | Planned; Queue-ready after p002 | Both `/sbin` utilities implement the fixed multi-operand CLI and are installed in configured images |
 | `ws016-p004` | [Runtime swap QEMU acceptance](phase004-runtime-swap-acceptance/phase.md) | Planned; Queue-ready after p001--p003 | Disposable amd64 QEMU images prove add, page-out/in, drain/remove, failure preservation, and boot-swap regression |
 

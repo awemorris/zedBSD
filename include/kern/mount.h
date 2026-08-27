@@ -14,6 +14,7 @@
 
 #include "kern/disk.h"
 #include "kern/atomic.h"
+#include "kern/backing-claim.h"
 #include "kern/lock.h"
 #include "kern/waitq.h"
 #include <limits.h>
@@ -89,6 +90,8 @@ struct mount {
 	struct wait_queue m_waitq;
 	enum mount_state m_state;
 	unsigned m_internal_flags;
+	/* Held from writable mount preparation through LIVE publication. */
+	struct backing_mutation_guard m_backing_guard;
 	struct disk *m_disk;
 	const struct filesystem_type *m_type;
 	struct inode *m_root;
@@ -209,6 +212,10 @@ mount_sync(
 
 int
 mount_sync_all(void);
+
+int
+mount_disk_writable_busy(
+	struct disk *disk);
 
 int
 mount_statvfs(

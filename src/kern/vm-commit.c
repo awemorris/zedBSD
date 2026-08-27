@@ -13,6 +13,7 @@
 
 static struct vm_commit_stats commit_stats;
 static int commit_initialized;
+static int commit_swap_seeded;
 static struct spinlock commit_lock = {
 	{ 0 }, LOCK_RANK_VM_OBJECT, "VM commit accounting", 0, 0
 };
@@ -40,9 +41,16 @@ vm_commit_init(void)
 	swap = swap_system_backend();
 	if (swap != NULL)
 		(void)swap_get_stats(swap, &swap_pages, &swap_free);
-	memset(&commit_stats, 0, sizeof(commit_stats));
+	if (!commit_swap_seeded) {
+		memset(&commit_stats, 0, sizeof(commit_stats));
+		commit_stats.swap_pages = swap_pages;
+	} else if (commit_stats.swap_pages != swap_pages) {
+		/* The prepared manager and published backend must describe the same
+		 * capacity before user commitment can begin. */
+		spin_unlock_irqrestore(&commit_lock, irq);
+		return EAGAIN;
+	}
 	commit_stats.physical_pages = physical_pages;
-	commit_stats.swap_pages = swap_pages;
 	commit_stats.limit_pages = commit_stats.physical_pages +
 		commit_stats.swap_pages;
 	if (commit_stats.limit_pages == 0) {
@@ -50,6 +58,34 @@ vm_commit_init(void)
 		return ENOMEM;
 	}
 	commit_initialized = 1;
+	spin_unlock_irqrestore(&commit_lock, irq);
+	return 0;
+}
+
+int
+vm_commit_resize_swap(uint64_t expected_pages, uint64_t replacement_pages)
+{
+	uint64_t limit;
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&commit_lock);
+	if (commit_stats.swap_pages != expected_pages) {
+		spin_unlock_irqrestore(&commit_lock, irq);
+		return EAGAIN;
+	}
+	if (replacement_pages > UINT64_MAX - commit_stats.physical_pages) {
+		spin_unlock_irqrestore(&commit_lock, irq);
+		return EOVERFLOW;
+	}
+	limit = commit_stats.physical_pages + replacement_pages;
+	if (commit_initialized && commit_stats.used_pages > limit) {
+		spin_unlock_irqrestore(&commit_lock, irq);
+		return ENOMEM;
+	}
+	commit_stats.swap_pages = replacement_pages;
+	commit_stats.limit_pages = limit;
+	if (!commit_initialized)
+		commit_swap_seeded = 1;
 	spin_unlock_irqrestore(&commit_lock, irq);
 	return 0;
 }

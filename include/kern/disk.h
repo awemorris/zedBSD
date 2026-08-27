@@ -44,6 +44,7 @@ enum bio_state {
 struct disk;
 struct bio;
 struct thread;
+struct backing_claim;
 
 struct disk_geometry {
 	uint32_t cylinders;
@@ -232,6 +233,22 @@ disk_read_direct(
 
 int
 disk_write_direct(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	const void *data);
+
+int
+disk_write_direct_claimed(
+	struct disk *disk,
+	uint64_t block,
+	uint32_t count,
+	const void *data,
+	const struct backing_claim *claim);
+
+/* Trusted filesystem volume writes are distinct from raw block aliases. */
+int
+disk_write_filesystem(
 	struct disk *disk,
 	uint64_t block,
 	uint32_t count,

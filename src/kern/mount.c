@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/mount.h"
+#include "kern/backing-claim.h"
 #include "kern/file.h"
 #include "kern/inode.h"
 #include "kern/namecache.h"
@@ -72,6 +73,7 @@ mount_free(struct mount *mountp)
 	unsigned i;
 	if (mountp == NULL || refcount_load(&mountp->m_refs) != 1)
 		return;
+	backing_mutation_end(&mountp->m_backing_guard);
 	irq = spin_lock_irqsave(&namespace_lock);
 	if (refcount_load(&mountp->m_refs) != 1) {
 		spin_unlock_irqrestore(&namespace_lock, irq);
@@ -213,9 +215,25 @@ mount_filesystem_on_disk(struct mount *mountp, const char *type_name,
 	if (!(type->fs_flags & FILESYSTEM_NODEV) && disk == NULL)
 		return ENXIO;
 	if (disk != NULL) {
-		error = disk_open(disk);
-		if (error != 0)
+		if ((flags & MOUNT_READ_ONLY) == 0 &&
+		    (disk->d_flags & DISK_READ_ONLY) == 0) {
+			error = backing_mutation_begin_disk(
+			    disk, 0, disk->d_block_count, NULL,
+			    &mountp->m_backing_guard);
+			if (error != 0)
+				return error;
+		}
+		error = backing_claim_check_mount(disk, (unsigned)flags |
+		    ((disk->d_flags & DISK_READ_ONLY) != 0 ? MOUNT_READ_ONLY : 0));
+		if (error != 0) {
+			backing_mutation_end(&mountp->m_backing_guard);
 			return error;
+		}
+		error = disk_open(disk);
+		if (error != 0) {
+			backing_mutation_end(&mountp->m_backing_guard);
+			return error;
+		}
 	}
 	mountp->m_flags = (unsigned)flags;
 	if (disk != NULL && (disk->d_flags & DISK_READ_ONLY) != 0)
@@ -227,9 +245,51 @@ mount_filesystem_on_disk(struct mount *mountp, const char *type_name,
 	if (error != 0 || mountp->m_root == NULL) {
 		if (disk != NULL)
 			disk_close(disk);
+		backing_mutation_end(&mountp->m_backing_guard);
 		return error != 0 ? error : EIO;
 	}
 	return 0;
+}
+
+int
+mount_disk_writable_busy(struct disk *disk)
+{
+	struct disk *leaf, *last_leaf, *candidate_leaf, *candidate_last_leaf;
+	uint64_t first, last, candidate_first, candidate_last;
+	struct mount *mountp;
+	unsigned index;
+	unsigned long irq;
+	int busy = 0;
+
+	if (disk == NULL || disk->d_block_count == 0 ||
+	    disk_resolve_range(disk, 0, 1, &leaf, &first) != 0 ||
+	    disk_resolve_range(disk, disk->d_block_count - 1U, 1, &last_leaf,
+	    &last) != 0 || leaf != last_leaf)
+		return EINVAL;
+	irq = spin_lock_irqsave(&namespace_lock);
+	for (index = 0; index < MOUNT_MAX; index++) {
+		if (!mount_used[index])
+			continue;
+		mountp = &mounts[index];
+		if (mountp->m_state != MOUNT_STATE_LIVE || mountp->m_disk == NULL ||
+		    (mountp->m_flags & MOUNT_READ_ONLY) != 0 ||
+		    mountp->m_disk->d_block_count == 0)
+			continue;
+		if (disk_resolve_range(mountp->m_disk, 0, 1, &candidate_leaf,
+		    &candidate_first) != 0 ||
+		    disk_resolve_range(mountp->m_disk,
+		    mountp->m_disk->d_block_count - 1U, 1,
+		    &candidate_last_leaf, &candidate_last) != 0 ||
+		    candidate_leaf != candidate_last_leaf)
+			continue;
+		if (candidate_leaf == leaf && candidate_first <= last &&
+		    first <= candidate_last) {
+			busy = 1;
+			break;
+		}
+	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	return busy ? EBUSY : 0;
 }
 
 static int
@@ -296,6 +356,7 @@ mount_root_create(const char *type_name, int flags, void *data,
 	mount_head = root_mount = mountp;
 	mountp->m_state = MOUNT_STATE_LIVE;
 	spin_unlock_irqrestore(&namespace_lock, irq);
+	backing_mutation_end(&mountp->m_backing_guard);
 	if (result != NULL)
 		*result = mountp;
 	return 0;
@@ -430,6 +491,7 @@ mount_at(const char *type_name, const struct path *directory,
 	link_global(mountp);
 	mountp->m_state = MOUNT_STATE_LIVE;
 	spin_unlock_irqrestore(&namespace_lock, irq);
+	backing_mutation_end(&mountp->m_backing_guard);
 	if (result != NULL)
 		*result = mountp;
 	return 0;
@@ -487,6 +549,7 @@ mount_private(const char *type_name, struct disk *disk, int flags, void *data,
 	      struct mount **result)
 {
 	struct mount *mountp;
+	unsigned long irq;
 	int error;
 	if (type_name == NULL || disk == NULL || result == NULL)
 		return EINVAL;
@@ -500,7 +563,10 @@ mount_private(const char *type_name, struct disk *disk, int flags, void *data,
 		mount_free(mountp);
 		return error;
 	}
+	irq = spin_lock_irqsave(&namespace_lock);
 	mountp->m_state = MOUNT_STATE_LIVE;
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	backing_mutation_end(&mountp->m_backing_guard);
 	*result = mountp;
 	return 0;
 }

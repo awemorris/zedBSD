@@ -14,6 +14,7 @@
 
 #include "kern/inode.h"
 #include "kern/mount.h"
+#include "kern/backing-claim.h"
 #include "kern/atomic.h"
 #include "kern/lock.h"
 #include "kern/vm-object.h"
@@ -128,6 +129,7 @@ struct file_io {
 	unsigned setid_prepared;
 
 	unsigned transferred;
+	struct backing_mutation_guard backing_guard;
 };
 
 /*
@@ -194,6 +196,7 @@ struct file {
 	struct mutex f_lock;
 	unsigned f_mount_cursor;
 	void *f_data;
+	struct backing_claim *f_backing_claim;
 };
 
 int

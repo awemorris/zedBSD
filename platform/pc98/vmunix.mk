@@ -104,6 +104,7 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/overlayfs.o \
 	$(BUILD)/src/kern/vfs.o \
 	$(BUILD)/src/kern/swap.o \
+	$(BUILD)/src/kern/backing-claim.o \
 	$(BUILD)/src/kern/swap-source.o \
 	$(BUILD)/src/kern/swap-boot.o \
 	$(BUILD)/src/kern/swap-fat.o \

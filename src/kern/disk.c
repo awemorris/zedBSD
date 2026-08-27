@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/disk.h"
+#include "kern/backing-claim.h"
 #include "kern/buf.h"
 #include "kern/sched.h"
 #include "kern/atomic.h"
@@ -52,21 +53,24 @@ disk_index(const struct disk *disk)
 	return -1;
 }
 
-static void zero_bytes(void *p, size_t n)
+static void
+zero_bytes(void *p, size_t n)
 {
 	uint8_t *q = p;
 	while (n--)
 		*q++ = 0;
 }
 
-static int name_equal(const char *a, const char *b)
+static int
+name_equal(const char *a, const char *b)
 {
 	while (*a != '\0' && *a == *b)
 		a++, b++;
 	return *a == *b;
 }
 
-static int name_valid(const char name[DISK_NAME_MAX])
+static int
+name_valid(const char name[DISK_NAME_MAX])
 {
 	unsigned i;
 	if (name[0] == '\0')
@@ -77,7 +81,8 @@ static int name_valid(const char name[DISK_NAME_MAX])
 	return 0;
 }
 
-struct disk *disk_alloc(void)
+struct disk *
+disk_alloc(void)
 {
 	unsigned i;
 	bool enabled = disk_lock();
@@ -159,7 +164,8 @@ disk_alloc_sd_name(struct disk *disk)
 	return ENOSPC;
 }
 
-int disk_create(struct disk *disk)
+int
+disk_create(struct disk *disk)
 {
 	struct disk **tail;
 	struct disk *found;
@@ -197,11 +203,19 @@ int disk_create(struct disk *disk)
 	return 0;
 }
 
-void disk_gone(struct disk *disk)
+void
+disk_gone(struct disk *disk)
 {
 	struct disk **link;
-	bool enabled = disk_lock();
-	if (disk == NULL || disk->d_state == DISK_GONE)
+	struct backing_mutation_guard guard;
+	bool enabled;
+
+	if (disk == NULL ||
+	    backing_mutation_begin_disk(disk, 0, disk->d_block_count, NULL,
+					&guard) != 0)
+		return;
+	enabled = disk_lock();
+	if (disk->d_state == DISK_GONE)
 		goto out;
 	if (disk->d_state != DISK_LIVE)
 		goto out;
@@ -216,38 +230,52 @@ void disk_gone(struct disk *disk)
 	disk->d_state = DISK_GONE;
 out:
 	disk_unlock(enabled);
+	backing_mutation_end(&guard);
 }
 
 DISK_HIGH int
 disk_gone_if_idle(struct disk *disk)
 {
 	struct disk **link;
-	bool enabled = disk_lock();
-	if (disk == NULL || disk_index(disk) < 0 || disk->d_state != DISK_LIVE) {
+	struct backing_mutation_guard guard;
+	bool enabled;
+	int error;
+
+	if (disk == NULL)
+		return EINVAL;
+	error = backing_mutation_begin_disk(disk, 0, disk->d_block_count, NULL,
+					    &guard);
+	if (error != 0)
+		return error;
+	enabled = disk_lock();
+	if (disk == NULL || disk_index(disk) < 0 ||
+	    disk->d_state != DISK_LIVE) {
 		disk_unlock(enabled);
-		return ENXIO;
+		error = ENXIO;
+		goto out;
 	}
 	if (disk->d_open_count != 0 || disk->d_inflight != 0) {
 		disk_unlock(enabled);
-		return EBUSY;
+		error = EBUSY;
+		goto out;
 	}
 	disk_unlock(enabled);
-	/* Resident buffers pin their leaf disk.  Flush and invalidate them before
-	 * applying the final external-reference test. */
-	{
-		int error = buf_invalidate_disk(disk, 0);
-		if (error != 0)
-			return error;
-	}
+	/* Resident buffers pin their leaf disk.  Flush and invalidate them
+	 * before applying the final external-reference test. */
+	error = buf_invalidate_disk(disk, 0);
+	if (error != 0)
+		goto out;
 	enabled = disk_lock();
 	if (disk_index(disk) < 0 || disk->d_state != DISK_LIVE) {
 		disk_unlock(enabled);
-		return ENXIO;
+		error = ENXIO;
+		goto out;
 	}
 	if (disk->d_open_count != 0 || disk->d_inflight != 0 ||
 	    refcount_load(&disk->d_refs) != 1) {
 		disk_unlock(enabled);
-		return EBUSY;
+		error = EBUSY;
+		goto out;
 	}
 	for (link = &disk_head; *link != NULL; link = &(*link)->d_next)
 		if (*link == disk) {
@@ -258,10 +286,14 @@ disk_gone_if_idle(struct disk *disk)
 	disk->d_next = NULL;
 	disk->d_state = DISK_GONE;
 	disk_unlock(enabled);
-	return 0;
+	error = 0;
+out:
+	backing_mutation_end(&guard);
+	return error;
 }
 
-DISK_HIGH int disk_destroy(struct disk *disk)
+DISK_HIGH int
+disk_destroy(struct disk *disk)
 {
 	int i;
 	struct disk *parent;
@@ -293,7 +325,8 @@ DISK_HIGH int disk_destroy(struct disk *disk)
 	return 0;
 }
 
-struct disk *disk_find(const char *name)
+struct disk *
+disk_find(const char *name)
 {
 	struct disk *disk;
 	bool enabled;
@@ -311,7 +344,8 @@ struct disk *disk_find(const char *name)
 	return disk;
 }
 
-struct disk *disk_find_by_dev(dev_t dev)
+struct disk *
+disk_find_by_dev(dev_t dev)
 {
 	struct disk *disk;
 	bool enabled = disk_lock();
@@ -324,7 +358,8 @@ struct disk *disk_find_by_dev(dev_t dev)
 	return disk;
 }
 
-unsigned disk_count(void)
+unsigned
+disk_count(void)
 {
 	unsigned count;
 	bool enabled = disk_lock();
@@ -348,7 +383,8 @@ disk_inflight_count(void)
 	return count;
 }
 
-struct disk *disk_at(unsigned index)
+struct disk *
+disk_at(unsigned index)
 {
 	struct disk *disk;
 	bool enabled = disk_lock();
@@ -361,7 +397,8 @@ struct disk *disk_at(unsigned index)
 	return disk;
 }
 
-void disk_ref(struct disk *disk)
+void
+disk_ref(struct disk *disk)
 {
 	bool enabled = disk_lock();
 	if (disk != NULL && disk_index(disk) >= 0)
@@ -369,7 +406,8 @@ void disk_ref(struct disk *disk)
 	disk_unlock(enabled);
 }
 
-void disk_release(struct disk *disk)
+void
+disk_release(struct disk *disk)
 {
 	bool enabled = disk_lock();
 	if (disk != NULL && disk_index(disk) >= 0)
@@ -377,7 +415,8 @@ void disk_release(struct disk *disk)
 	disk_unlock(enabled);
 }
 
-void disk_registry_reset(void)
+void
+disk_registry_reset(void)
 {
 	unsigned i;
 	buf_reset();
@@ -445,11 +484,13 @@ disk_registry_snapshot(struct disk_info *entries, unsigned capacity,
 	return 0;
 }
 
-int disk_open(struct disk *disk)
+int
+disk_open(struct disk *disk)
 {
 	int error = 0;
 	bool enabled = disk_lock();
-	if (disk == NULL || disk_index(disk) < 0 || disk->d_state != DISK_LIVE) {
+	if (disk == NULL || disk_index(disk) < 0 ||
+	    disk->d_state != DISK_LIVE) {
 		disk_unlock(enabled);
 		return ENXIO;
 	}
@@ -499,7 +540,8 @@ disk_open_by_dev(dev_t dev, struct disk **result)
 	return error;
 }
 
-void disk_close(struct disk *disk)
+void
+disk_close(struct disk *disk)
 {
 	bool enabled = disk_lock();
 	if (disk == NULL || disk_index(disk) < 0 || disk->d_open_count == 0) {
@@ -513,11 +555,13 @@ void disk_close(struct disk *disk)
 	disk_release(disk);
 }
 
-int disk_ioctl(struct disk *disk, unsigned long request, void *argument)
+int
+disk_ioctl(struct disk *disk, unsigned long request, void *argument)
 {
 	int error;
 	bool enabled = disk_lock();
-	if (disk == NULL || disk_index(disk) < 0 || disk->d_state != DISK_LIVE) {
+	if (disk == NULL || disk_index(disk) < 0 ||
+	    disk->d_state != DISK_LIVE) {
 		disk_unlock(enabled);
 		return ENXIO;
 	}
@@ -532,7 +576,8 @@ int disk_ioctl(struct disk *disk, unsigned long request, void *argument)
 	return error;
 }
 
-int bio_submit(struct disk *disk, struct bio *bio)
+int
+bio_submit(struct disk *disk, struct bio *bio)
 {
 	struct disk *leaf;
 	uint64_t mapped;
@@ -601,7 +646,8 @@ int bio_submit(struct disk *disk, struct bio *bio)
 	return error;
 }
 
-void bio_complete(struct bio *bio, int error, size_t transferred)
+void
+bio_complete(struct bio *bio, int error, size_t transferred)
 {
 	struct disk *leaf;
 	void (*done)(struct bio *);
@@ -633,16 +679,16 @@ void bio_complete(struct bio *bio, int error, size_t transferred)
 
 int
 disk_resolve_range(struct disk *disk, uint64_t block, uint32_t count,
-	struct disk **leaf_out, uint64_t *mapped_out)
+		   struct disk **leaf_out, uint64_t *mapped_out)
 {
 	struct disk *leaf;
 	uint64_t mapped;
-	if (disk == NULL || leaf_out == NULL || mapped_out == NULL || count == 0)
+	if (disk == NULL || leaf_out == NULL || mapped_out == NULL ||
+	    count == 0)
 		return EINVAL;
 	if (disk->d_state != DISK_LIVE)
 		return ENXIO;
-	if (block >= disk->d_block_count ||
-	    count > disk->d_block_count - block)
+	if (block >= disk->d_block_count || count > disk->d_block_count - block)
 		return EOVERFLOW;
 	leaf = disk;
 	mapped = block;
@@ -657,14 +703,16 @@ disk_resolve_range(struct disk *disk, uint64_t block, uint32_t count,
 		mapped += leaf->d_parent_offset;
 		leaf = parent;
 	}
-	if (mapped >= leaf->d_block_count || count > leaf->d_block_count - mapped)
+	if (mapped >= leaf->d_block_count ||
+	    count > leaf->d_block_count - mapped)
 		return EOVERFLOW;
 	*leaf_out = leaf;
 	*mapped_out = mapped;
 	return 0;
 }
 
-int bio_wait(struct bio *bio)
+int
+bio_wait(struct bio *bio)
 {
 	struct thread *thread;
 	unsigned long irq;
@@ -678,7 +726,7 @@ int bio_wait(struct bio *bio)
 		while (bio->b_state == BIO_SUBMITTED) {
 			uint64_t sequence = waitq_sequence(&bio->b_waitq);
 			error = waitq_sleep(&bio->b_waitq, &bio->b_lock,
-			    sequence, 0, 0);
+					    sequence, 0, 0);
 			if (error != 0 && error != EAGAIN) {
 				spin_unlock_irqrestore(&bio->b_lock, irq);
 				return error;
@@ -700,20 +748,33 @@ int bio_wait(struct bio *bio)
 	return error;
 }
 
-int bio_flush(struct disk *disk)
+int
+bio_flush(struct disk *disk)
 {
-	struct bio bio = { .b_op = BIO_FLUSH };
+	struct bio bio = {.b_op = BIO_FLUSH};
 	int error = bio_submit(disk, &bio);
 	return error != 0 ? error : bio_wait(&bio);
 }
 
-static int disk_transfer_direct(struct disk *disk, enum bio_op op,
-	uint64_t block, uint32_t count, void *data)
+static int
+disk_transfer_direct(struct disk *disk, enum bio_op op, uint64_t block,
+		     uint32_t count, void *data,
+		     const struct backing_claim *claim)
 {
 	uint8_t *bytes = data;
-	if (disk == NULL || data == NULL || count == 0 || disk->d_block_size == 0 ||
+	struct backing_mutation_guard guard;
+	int guarded = 0;
+	if (disk == NULL || data == NULL || count == 0 ||
+	    disk->d_block_size == 0 ||
 	    (size_t)count > SIZE_MAX / disk->d_block_size)
 		return EINVAL;
+	if (op == BIO_WRITE) {
+		int error = backing_mutation_begin_disk(disk, block, count,
+							claim, &guard);
+		if (error != 0)
+			return error;
+		guarded = 1;
+	}
 	while (count != 0) {
 		uint32_t chunk = count;
 		struct bio bio;
@@ -728,46 +789,92 @@ static int disk_transfer_direct(struct disk *disk, enum bio_op op,
 		bio.b_block_count = chunk;
 		bio.b_data = bytes;
 		error = bio_submit(disk, &bio);
-		if (error != 0)
+		if (error != 0) {
+			if (guarded)
+				backing_mutation_end(&guard);
 			return error;
+		}
 		error = bio_wait(&bio);
-		if (error != 0)
+		if (error != 0) {
+			if (guarded)
+				backing_mutation_end(&guard);
 			return error;
+		}
 		expected = (size_t)chunk * disk->d_block_size;
-		if (bio.b_transferred != expected)
+		if (bio.b_transferred != expected) {
+			if (guarded)
+				backing_mutation_end(&guard);
 			return EIO;
+		}
 		block += chunk;
 		count -= chunk;
 		bytes += expected;
 	}
+	if (guarded)
+		backing_mutation_end(&guard);
 	return 0;
 }
 
-int disk_read_direct(struct disk *disk, uint64_t block, uint32_t count,
-	void *data)
+int
+disk_read_direct(struct disk *disk, uint64_t block, uint32_t count, void *data)
 {
-	return disk_transfer_direct(disk, BIO_READ, block, count, data);
+	return disk_transfer_direct(disk, BIO_READ, block, count, data, NULL);
 }
 
-int disk_write_direct(struct disk *disk, uint64_t block, uint32_t count,
-	const void *data)
+int
+disk_write_direct(struct disk *disk, uint64_t block, uint32_t count,
+		  const void *data)
 {
-	return disk_transfer_direct(disk, BIO_WRITE, block, count, (void *)data);
+	return disk_transfer_direct(disk, BIO_WRITE, block, count, (void *)data,
+				    NULL);
 }
 
-int disk_sync(struct disk *disk)
+int
+disk_write_direct_claimed(struct disk *disk, uint64_t block, uint32_t count,
+			  const void *data, const struct backing_claim *claim)
+{
+	if (claim == NULL)
+		return EINVAL;
+	return disk_transfer_direct(disk, BIO_WRITE, block, count, (void *)data,
+				    claim);
+}
+
+int
+disk_sync(struct disk *disk)
 {
 	int error = buf_sync(disk);
 	return error != 0 ? error : bio_flush(disk);
 }
 
-int disk_read(struct disk *disk, uint64_t block, uint32_t count, void *data)
+int
+disk_read(struct disk *disk, uint64_t block, uint32_t count, void *data)
 {
 	return buf_read(disk, block, count, data);
 }
 
-int disk_write(struct disk *disk, uint64_t block, uint32_t count,
-	       const void *data)
+int
+disk_write(struct disk *disk, uint64_t block, uint32_t count, const void *data)
 {
-	return buf_write(disk, block, count, data);
+	struct backing_mutation_guard guard;
+	int error =
+	    backing_mutation_begin_disk(disk, block, count, NULL, &guard);
+	if (error != 0)
+		return error;
+	error = buf_write(disk, block, count, data);
+	backing_mutation_end(&guard);
+	return error;
+}
+
+int
+disk_write_filesystem(struct disk *disk, uint64_t block, uint32_t count,
+		      const void *data)
+{
+	struct backing_mutation_guard guard;
+	int error = backing_mutation_begin_disk_filesystem(disk, block, count,
+							  &guard);
+	if (error != 0)
+		return error;
+	error = buf_write(disk, block, count, data);
+	backing_mutation_end(&guard);
+	return error;
 }

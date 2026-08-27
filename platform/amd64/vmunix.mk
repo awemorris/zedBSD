@@ -64,7 +64,7 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/fat-vfs.c src/kern/inode.c src/kern/file.c \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
 	src/kern/rootfs.c src/kern/tmpfs.c src/kern/overlayfs.c src/kern/vfs.c \
-	src/kern/swap.c src/kern/swap-source.c src/kern/swap-boot.c \
+	src/kern/swap.c src/kern/backing-claim.c src/kern/swap-source.c src/kern/swap-boot.c \
 	src/kern/swap-fat.c \
 	src/kern/vm-reclaim.c src/kern/buf.c src/kern/sysctl.c \
 	src/kern/resource.c src/kern/poll.c src/kern/usync.c \

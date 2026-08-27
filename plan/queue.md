@@ -1,106 +1,86 @@
-# Queue: evdev prerequisite repair and Noct completion
+# Queue: runtime swap control
 
 Last updated: 2026-08-28
 
-QID: `q020`
+QID: `q021`
 
-Queue status: complete
+Queue status: active
 
-Queue finished: **Yes**
+Queue finished: **No**
 
 Authorization: selected automatically under the user's approved WS-priority
 Queue loop on 2026-08-28; Phase-boundary commit and push are authorized for the
-zedBSD repository
+zedBSD repository. If push is rejected by the environment, retain the local
+commit and continue.
 
-Timebox: continuous execution through 2026-08-28 09:00 JST; stop earlier only
-when every Queue item has been processed or no dependency-ready item remains
+Timebox: the current continuous execution cycle; stop when every Queue item has
+been processed or no dependency-ready item remains
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q019](queue-q019.md)
+Previous Queue: [q020](queue-q020.md)
 
 ## Purpose
 
-Repair the frozen evdev capability/state implementation needed by dynamic
-consumers, then resume the canonical Noct BeUI migration stopped in q019 and
-finish the independent amd64 JIT acceptance. The repair is deliberately placed
-before WS008 rather than accepting event-number or name inference in BeUI.
+Implement the fixed WS016 runtime-swap design as one dependency-ordered Queue:
+first replace the immutable boot aggregate with a safe four-source runtime
+manager, then expose it through `/dev/system`, add the native administration
+commands, and prove the complete path in disposable amd64 QEMU images.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative documents | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws006-p005` | [WS006](ws006-input/ws.md), [Phase](ws006-input/phase005-evdev-capability-state/phase.md), [tests](ws006-input/tests/README.md) | complete | Production evdev reports registered type/code capabilities, current key/button state, and ABS metadata/state, and a guest discovers keyboard/pointer roles without numbers or names |
-| 2 | `ws008-p002` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase002-beui-zedbsd/phase.md), [tests](ws008-noct/tests/README.md) | complete | Canonical BeUI uses `/dev/graphics` and capability-discovered evdev, the downstream duplicate is removed, and host/QEMU backend evidence passes |
-| 3 | `ws008-p003` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase003-amd64-jit/phase.md), [tests](ws008-noct/tests/README.md) | complete | Direct VM and canonical Noct probes prove generated amd64 code executes after RW-to-RX protection with no accepted fallback or RWX mapping |
+| 1 | `ws016-p001` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase001-runtime-swap-manager/phase.md), [tests](ws016-swap-control/tests/README.md) | complete | Stable source-encoded slots, dynamic add/drain/remove, backing claims, and live commit accounting pass focused host tests and regressions |
+| 2 | `ws016-p002` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase002-swap-uapi/phase.md), [tests](ws016-swap-control/tests/README.md) | pending; dependency cleared | Versioned privileged `/dev/system` control and source enumeration pass ABI, permission, and failure-atomicity tests |
+| 3 | `ws016-p003` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase003-swap-commands/phase.md), [tests](ws016-swap-control/tests/README.md) | pending; dependency-gated by p002 | `/sbin/swapon` and `/sbin/swapoff` implement the fixed multi-operand CLI and are installed in configured images |
+| 4 | `ws016-p004` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase004-runtime-swap-acceptance/phase.md), [tests](ws016-swap-control/tests/README.md) | pending; dependency-gated by p001--p003 | Disposable amd64 QEMU images prove runtime add, page-out/in, safe drain/remove, failure preservation, and boot-swap regression |
 
 ## Entry evidence and dependency order
 
-- `ws006-p005` completed in q020. Native-word capability/state bitmaps,
-  strict ioctl dispatch, producer declarations, host/sanitizer fixtures, full
-  build, and capability-only QEMU discovery passed; the transcript is linked
-  from the Phase.
-- `ws008-p002` completed in q020. The canonical backend uses public graphics
-  and dynamically capability-discovered evdev interfaces, its host state and
-  SDL/PC-98 regressions pass, and one QEMU run proved drawing, input, teardown,
-  and later console input. The downstream BeUI duplicate is removed, which
-  made p003 dependency-ready.
-- `ws008-p003` completed in q020. A direct guest probe proved W^X rejection,
-  RW-to-RX native execution, post-protection write rejection, invalid-range
-  behavior, and unmap. Two fresh canonical Noct processes compiled and entered
-  `jit_target` natively with successful publish/destroy records; a `-j0`
-  process produced the same result with no JIT record. q020 is complete.
-- q019 completed `ws008-p001` and proved the canonical CMake artifact in QEMU.
-- q019 stopped p002 before canonical backend work because the production input
-  core cannot answer the already-declared capability/state requests. The exact
-  gap and prohibition on private fallback are recorded in its Phase book.
-- The public evdev structures, constants, ioctl encoding, event values, queue,
-  producers, and console coexistence are already fixed by `ws006-p001`--p004.
-  p005 requires no new product decision or public ABI redesign.
-- p002 resumes only after p005 completes. p003 starts only after p002 completes.
-  An uncleared predecessor leaves dependent items unexecuted.
-- `/home/awe/NoctLang` and `userland/noct` remain at
-  `7d856856e16eb2d889ba49f557f2fda4dcaeea7e` with the same uncommitted p001
-  change set. They remain uncommitted/unpublished and their gitlink is not
-  advanced by this Queue.
+- `ws003-p014` completed signed `ZEDSWAP1`/`ZEDSWAP2` file/raw sources,
+  direct I/O, boot aggregation, integrity checks, and multi-source behavior.
+- `ws003-p015` completed the four-platform boot-parameter matrix and supplies
+  the boot-swap regression baseline reused by p004.
+- The WS016 runtime model, stable token encoding, backing claim, drain rules,
+  versioned UAPI, command contract, and reconsideration boundaries are fixed.
+- p002 starts only after p001 completes; p003 starts only after p002 completes;
+  p004 starts only after p001--p003 complete. An uncleared predecessor leaves
+  every dependent Phase unexecuted.
 
 ## Ordered execution
 
-1. Execute [ws006-p005](ws006-input/phase005-evdev-capability-state/phase.md):
-   add bounded registered capability/ABS metadata, core-maintained state,
-   length-safe queries, accurate keyboard/mouse declarations, focused host
-   fixtures, and capability-only guest discovery.
-2. On p005 completion, resume
-   [ws008-p002](ws008-noct/phase002-beui-zedbsd/phase.md) from its recorded
-   q019 stop point and complete canonical graphics/evdev migration and tests.
+1. Execute [ws016-p001](ws016-swap-control/phase001-runtime-swap-manager/phase.md)
+   and verify the source manager, backing claims, drain, and commit accounting.
+2. On p001 completion, execute
+   [ws016-p002](ws016-swap-control/phase002-swap-uapi/phase.md) and verify the
+   versioned `/dev/system` ABI and failure-atomic control boundary.
 3. On p002 completion, execute
-   [ws008-p003](ws008-noct/phase003-amd64-jit/phase.md) and prove direct and
-   canonical Noct RW-to-RX execution without fallback or RWX mappings.
-4. After each processed Phase, synchronize P/W/M/Q/test evidence, run
+   [ws016-p003](ws016-swap-control/phase003-swap-commands/phase.md) and verify
+   the two installed native `/sbin` commands.
+4. On p001--p003 completion, execute
+   [ws016-p004](ws016-swap-control/phase004-runtime-swap-acceptance/phase.md)
+   and run the complete disposable-image amd64 QEMU acceptance.
+5. After each processed Phase, synchronize P/W/M/Q/test evidence, run
    `git add -A`, `git commit -m WIP`, and `git push`. If push is rejected by
    the environment, retain the local commit and continue.
-5. Finish q020 when every item is complete or honestly uncleared, then select
-   the next dependency-ready work from the approved priority sequence.
 
 ## Stop, defer, and continuation rules
 
-- Ordinary bitset, validation, copyout, state, producer metadata, canonical
-  backend, build, QEMU, VM, and JIT defects inside the linked Phase contracts
-  remain in scope and are repaired.
-- p005 must not change public ioctl encodings, create stable event numbering,
-  or choose new USB/multitouch policy. Such a need makes p005 `uncleared` and
-  requires human review.
-- p002 must not use event numbers, names, product IDs, private ioctls, or LFB
-  mapping as a substitute for the public capability/state contract.
-- p003 must not weaken W^X, accept interpreter fallback, or enable permanent
-  RWX mappings.
-- Do not commit/push canonical Noct checkouts or advance their package gitlink.
-  Use `make -j16`, never `make check` or `.internal/`, and use disposable QEMU
-  images for mutating guest tests.
+- Execute only the fixed surfaces in the linked WS016 Phase books. Do not add
+  formatting, priorities, `fstab`, UFS extent discovery, or a syscall/libc API.
+- If a Phase reaches its reconsideration boundary, record it as `uncleared`
+  with the facts learned and concrete resume condition, then continue with any
+  remaining dependency-ready Queue item. Do not execute a dependent Phase
+  whose predecessor is not complete.
+- Use `make -j16`, never `make check` or `.internal/`. Runtime acceptance uses
+  `qemu-system-x86_64` and disposable copies of the amd64 disk image.
+- Preserve all existing boot-selected swap, VM, storage, and image-build
+  behavior unless the owning Phase explicitly changes it.
 
 ## Approval boundary
 
-The user's automatic Queue-loop authorization covers this finite dependency
-repair followed by the two already-selected WS008 Phases. It does not authorize
-USB HID, Xzed migration, legacy console-UAPI removal, LFB acceleration, public
-evdev ABI redesign, or publication of canonical Noct changes.
+The user's automatic Queue-loop authorization covers only `ws016-p001` through
+`ws016-p004` in dependency order and the bounded repairs allowed by their Phase
+books. A reconsideration boundary is recorded as `uncleared`; it does not
+authorize a policy redesign or execution of dependency-gated successors.

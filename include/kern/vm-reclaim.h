@@ -120,6 +120,24 @@ int
 vm_reclaim_private_one(
 	struct vm_page *avoid);
 
+/*
+ * The caller owns backing I/O.  A successful call changes a swapped private
+ * backing into a resident, dirty backing and returns its old slot to swap.
+ * Failure leaves the swap token and its only valid copy intact.
+ */
+int
+vm_private_page_in_owned(
+	struct vm_private_page *backing,
+	struct vm_page *accounting_page);
+
+/*
+ * Page in every private backing whose encoded slot belongs to source_id.
+ * The swap manager must put that source in DRAINING state before calling.
+ */
+int
+vm_reclaim_drain_swap_source(
+	unsigned source_id);
+
 void
 vm_page_note_in(
 	struct vm_page *page);

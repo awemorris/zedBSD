@@ -16,13 +16,14 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is `q020`, complete. It completed
-`ws006-p005`, including capability-only amd64 QEMU discovery and real-ioctl
-boundary evidence, and `ws008-p002`, including canonical BeUI graphics/evdev
-acceptance without a private event-number/name fallback. It then completed
-`ws008-p003`, proving direct amd64 RW-to-RX execution and two canonical Noct
-JIT lifecycles with an interpreter negative control. The archived
-[q019](queue-q019.md) completed
+The current [Queue Book](queue.md) is `q021`; `ws016-p001` is complete and
+`ws016-p002` is next. It runs
+the four WS016 runtime-swap Phases in dependency order: manager, `/dev/system`
+UAPI, native commands, and disposable amd64 QEMU acceptance. The archived
+[q020](queue-q020.md) completed `ws006-p005`, `ws008-p002`, and
+`ws008-p003`, including capability-only evdev discovery, canonical BeUI
+graphics/input, direct amd64 RW-to-RX execution, and canonical Noct JIT
+lifecycle evidence. The preceding [q019](queue-q019.md) completed
 `ws008-p001`, honestly stopped p002 before implementation, and did not start
 dependency-gated p003. The
 preceding [q018](queue-q018.md) completed `ws012-p003` through p006 and closed
@@ -106,7 +107,7 @@ before this long-term product goal is reached.
 | `ws013` | CPAR container partitioning | Proposed; Boot v1 grammar fixed, Runtime topics manually blocked | `ws013-p001` is the only current Phase | Resolve bounded UEFI FAT LFN/parser/menu details until Runtime CPAR holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
-| `ws016` | Runtime swap control | Planned; four implementation Phases Queue-ready | No Phase started; `ws016-p001` is dependency-ready | Queue p001 runtime manager, followed by UAPI, commands, and amd64 QEMU acceptance | [WS016](ws016-swap-control/ws.md) |
+| `ws016` | Runtime swap control | Active (`q021`) | `ws016-p001` complete; `ws016-p002` next | Execute p002 UAPI, p003 commands, and p004 amd64 QEMU acceptance | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Planned; four implementation Phases Queue-ready | No Phase started; `ws017-p001` is dependency-ready | Queue p001 device-mmap/UAPI, then amd64 backend, Xzed fast path, and UEFI acceptance | [WS017](ws017-lfb-graphics/ws.md) |
 
 ## 4. Milestones
@@ -191,9 +192,8 @@ WS010 supplies host-side build and test scripting used by all workstreams.
    implementation Phases without displacing earlier physical-network and
    storage milestones.
 
-The current dependency-ready planning pool outside q019 contains
-`ws006-p005`, `ws003-p016`, `ws016-p001`, `ws017-p001`, and `ws001-p014`.
-They may be
+The current dependency-ready planning pool outside q021 contains
+`ws003-p016`, `ws017-p001`, and `ws001-p014`. They may be
 selected into a later finite Queue according to the user's next priority; this
 list does not itself authorize implementation.
 

@@ -698,6 +698,24 @@ file_io_begin_cred(struct file *file, enum file_io_kind kind, off_t offset,
 			}
 		}
 	}
+	if (writing && file->f_inode != NULL &&
+	    file->f_inode->i_type == INODE_REG) {
+		int error = backing_mutation_begin_inode_claimed(file->f_inode,
+		    (internal_flags & FILE_IO_LOOP_BACKING) != 0 ?
+		    file->f_backing_claim : NULL, &io->backing_guard);
+		if (error != 0) {
+			if (io->held_visible_gate)
+				vm_object_content_read_end(file->f_inode);
+			if (io->held_content_inode_io)
+				mutex_unlock(&io->content_inode->i_io_lock);
+			if (io->held_inode_io)
+				mutex_unlock(&file->f_inode->i_io_lock);
+			if (io->held_position)
+				mutex_unlock(&file->f_lock);
+			memset(io, 0, sizeof(*io));
+			return error;
+		}
+	}
 	if (!positional) {
 		io->offset = io->held_position ? file->f_offset : 0;
 		if (io->append_requested && io->content_inode != NULL)
@@ -1108,6 +1126,7 @@ file_io_end(struct file_io *io)
 		mutex_unlock(&file->f_inode->i_io_lock);
 	if (io->held_position)
 		mutex_unlock(&file->f_lock);
+	backing_mutation_end(&io->backing_guard);
 	memset(io, 0, sizeof(*io));
 }
 

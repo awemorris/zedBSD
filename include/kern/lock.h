@@ -38,6 +38,7 @@ enum lock_rank {
 	LOCK_RANK_DEVICE = 125,
 	LOCK_RANK_BUFCACHE = 126,
 	LOCK_RANK_BUF = 127,
+	LOCK_RANK_BACKING_CLAIM = 128,
 	/*
 	 * Block I/O is an independent leaf domain; do not enter VFS/VM from it.
 	 */

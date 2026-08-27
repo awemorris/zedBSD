@@ -913,11 +913,13 @@ kern_vfs_init(const struct boot_handoff *handoff,
 		uint32_t total, free_slots;
 		unsigned source_index;
 
-		for (source_index = 0; source_index < swap_sources.count;
-		     source_index++) {
+		for (source_index = 0;
+		     source_index < KERN_SWAP_SOURCE_COUNT; source_index++) {
 			const struct kern_swap_source *source =
 			    &swap_sources.range[source_index].source;
 
+			if (source->ops == NULL)
+				continue;
 			VFS_LOG("swap: swap%u source=%s slots=%u\n",
 			    source->parameter_index,
 			    kern_boot_parameters_swap(parameters,

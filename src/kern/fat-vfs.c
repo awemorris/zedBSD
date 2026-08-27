@@ -50,31 +50,42 @@ struct fat_file_state {
 };
 
 static struct fat_mount_state fat_mounts[FAT_MOUNT_MAX]
-	__attribute__((section(".vfs_bss")));
+    __attribute__((section(".vfs_bss")));
 static struct fat_inode_slot fat_inodes[FAT_INODE_MAX]
-	__attribute__((section(".vfs_bss")));
+    __attribute__((section(".vfs_bss")));
 static struct fat_file_state fat_files[FAT_FILE_MAX]
-	__attribute__((section(".vfs_bss")));
+    __attribute__((section(".vfs_bss")));
 static struct spinlock fat_pool_lock = {
-	{ 0 }, LOCK_RANK_INODE, "FAT object pools", 0, 0
-};
+    {0}, LOCK_RANK_INODE, "FAT object pools", 0, 0};
 
 static int
 fs_error(enum bootfs_result result)
 {
 	switch (result) {
-	case ZEDBSD_FS_OK: return 0;
-	case ZEDBSD_FS_NOT_FOUND: return ENOENT;
-	case ZEDBSD_FS_INVALID_PATH: return EINVAL;
-	case ZEDBSD_FS_READ_ONLY: return EROFS;
-	case ZEDBSD_FS_NO_SPACE: return ENOSPC;
-	case ZEDBSD_FS_IO_ERROR: return EIO;
-	case ZEDBSD_FS_CORRUPT: return EIO;
-	case ZEDBSD_FS_UNSUPPORTED: return EOPNOTSUPP;
-	case ZEDBSD_FS_EXISTS: return EEXIST;
-	case ZEDBSD_FS_NOT_EMPTY: return ENOTEMPTY;
-	case ZEDBSD_FS_IS_DIRECTORY: return EISDIR;
-	default: return EINVAL;
+	case ZEDBSD_FS_OK:
+		return 0;
+	case ZEDBSD_FS_NOT_FOUND:
+		return ENOENT;
+	case ZEDBSD_FS_INVALID_PATH:
+		return EINVAL;
+	case ZEDBSD_FS_READ_ONLY:
+		return EROFS;
+	case ZEDBSD_FS_NO_SPACE:
+		return ENOSPC;
+	case ZEDBSD_FS_IO_ERROR:
+		return EIO;
+	case ZEDBSD_FS_CORRUPT:
+		return EIO;
+	case ZEDBSD_FS_UNSUPPORTED:
+		return EOPNOTSUPP;
+	case ZEDBSD_FS_EXISTS:
+		return EEXIST;
+	case ZEDBSD_FS_NOT_EMPTY:
+		return ENOTEMPTY;
+	case ZEDBSD_FS_IS_DIRECTORY:
+		return EISDIR;
+	default:
+		return EINVAL;
 	}
 }
 
@@ -87,7 +98,7 @@ volume_read(const void *context, uint32_t lba, void *buffer)
 static int
 volume_write(void *context, uint32_t lba, const void *buffer)
 {
-	return disk_write(context, lba, 1, buffer) == 0;
+	return disk_write_filesystem(context, lba, 1, buffer) == 0;
 }
 
 static struct boot_volume
@@ -113,7 +124,8 @@ static int
 fat_metadata_number(const char *text, unsigned base, uint32_t *value)
 {
 	uint32_t result = 0;
-	if (*text == '\0') return EINVAL;
+	if (*text == '\0')
+		return EINVAL;
 	while (*text != '\0') {
 		unsigned digit = (unsigned)(*text++ - '0');
 		if (digit >= base || result > (UINT32_MAX - digit) / base)
@@ -135,8 +147,9 @@ fat_metadata_load(struct fat_mount_state *state)
 	if (bootfs_open_result(&state->legacy, "etc/unixmode", &file) !=
 	    ZEDBSD_FS_OK)
 		return;
-	length = file.size < sizeof(buffer) - 1U ? (uint32_t)file.size :
-	    (uint32_t)sizeof(buffer) - 1U;
+	length = file.size < sizeof(buffer) - 1U
+		     ? (uint32_t)file.size
+		     : (uint32_t)sizeof(buffer) - 1U;
 	if (bootfs_file_read_result(&file, 0, buffer, length, NULL, NULL) !=
 	    ZEDBSD_FS_OK)
 		return;
@@ -148,13 +161,23 @@ fat_metadata_load(struct fat_mount_state *state)
 		uint32_t mode_value, uid_value, gid_value;
 
 		end = strchr(line, '\n');
-		if (end != NULL) *end = '\0';
+		if (end != NULL)
+			*end = '\0';
 		offset += (uint32_t)strlen(line) + (end != NULL ? 1U : 0U);
-		mode = strchr(line, ':'); if (mode == NULL) continue; *mode++ = '\0';
-		uid = strchr(mode, ':'); if (uid == NULL) continue; *uid++ = '\0';
-		gid = strchr(uid, ':'); if (gid == NULL) continue; *gid++ = '\0';
-		if (strchr(gid, ':') != NULL || line[0] == '/' || line[0] == '\0' ||
-		    strlen(line) >= sizeof(metadata->path) ||
+		mode = strchr(line, ':');
+		if (mode == NULL)
+			continue;
+		*mode++ = '\0';
+		uid = strchr(mode, ':');
+		if (uid == NULL)
+			continue;
+		*uid++ = '\0';
+		gid = strchr(uid, ':');
+		if (gid == NULL)
+			continue;
+		*gid++ = '\0';
+		if (strchr(gid, ':') != NULL || line[0] == '/' ||
+		    line[0] == '\0' || strlen(line) >= sizeof(metadata->path) ||
 		    fat_metadata_number(mode, 8, &mode_value) != 0 ||
 		    fat_metadata_number(uid, 10, &uid_value) != 0 ||
 		    fat_metadata_number(gid, 10, &gid_value) != 0 ||
@@ -175,8 +198,8 @@ fat_metadata_apply(struct mount *mountp, const char *path, struct inode *inode)
 	unsigned i;
 	for (i = 0; state != NULL && i < state->metadata_count; i++)
 		if (!strcmp(state->metadata[i].path, path)) {
-			inode->i_mode = (inode->i_mode & S_IFMT) |
-			    state->metadata[i].mode;
+			inode->i_mode =
+			    (inode->i_mode & S_IFMT) | state->metadata[i].mode;
 			inode->i_uid = state->metadata[i].uid;
 			inode->i_gid = state->metadata[i].gid;
 			break;
@@ -193,7 +216,8 @@ fat_slot(struct inode *inode)
 	return NULL;
 }
 
-static const char *fat_path(struct inode *inode)
+static const char *
+fat_path(struct inode *inode)
 {
 	struct fat_inode_slot *slot = fat_slot(inode);
 	return slot != NULL ? slot->path : NULL;
@@ -239,7 +263,7 @@ join_path(const char *parent, const struct componentname *name,
 	size_t parent_length = strlen(parent);
 	if (name->cn_namelen == 0 || name->cn_namelen > NAME_MAX ||
 	    parent_length + (parent_length != 0) + name->cn_namelen >=
-	    ZEDBSD_PATH_MAX)
+		ZEDBSD_PATH_MAX)
 		return ENAMETOOLONG;
 	memcpy(output, parent, parent_length);
 	if (parent_length != 0)
@@ -265,7 +289,7 @@ static int
 fat_month_days(int year, int month)
 {
 	static const uint8_t days[] = {
-		31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+	    31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
 	};
 	return month == 2 && fat_leap_year(year) ? 29 : days[month - 1];
 }
@@ -290,7 +314,7 @@ fat_decode_time(uint16_t date, uint16_t time)
 		days += fat_month_days(year, m);
 	days += day - 1;
 	seconds = (int64_t)days * 86400 + ((time >> 11) & 0x1f) * 3600 +
-		((time >> 5) & 0x3f) * 60 + (time & 0x1f) * 2;
+		  ((time >> 5) & 0x3f) * 60 + (time & 0x1f) * 2;
 #ifdef ZEDBSD_USER_ABI_LP64
 	return (time_t)seconds;
 #else
@@ -318,36 +342,36 @@ fat_encode_time(time_t seconds, uint16_t *date, uint16_t *time)
 		days -= fat_month_days(year, month);
 		month++;
 	}
-	*date = (uint16_t)(((year - 1980) << 9) | (month << 5) |
-		(days + 1));
-	*time = (uint16_t)(((remainder / 3600) << 11) |
-		(((remainder / 60) % 60) << 5) | ((remainder % 60) / 2));
+	*date = (uint16_t)(((year - 1980) << 9) | (month << 5) | (days + 1));
+	*time =
+	    (uint16_t)(((remainder / 3600) << 11) |
+		       (((remainder / 60) % 60) << 5) | ((remainder % 60) / 2));
 	return 0;
 }
 
 static void
-fat_load_inode_times(struct mount *mountp, struct inode *inode,
-			 uint32_t lba, uint16_t offset)
+fat_load_inode_times(struct mount *mountp, struct inode *inode, uint32_t lba,
+		     uint16_t offset)
 {
 	struct fat_mount_state *state = fat_mount_state(mountp);
 	const uint8_t *sector;
 	const uint8_t *raw;
 
-	if (state == NULL || bootfat_read_sector_result(&state->legacy, lba,
-	    &sector) != ZEDBSD_FS_OK)
+	if (state == NULL || bootfat_read_sector_result(
+				 &state->legacy, lba, &sector) != ZEDBSD_FS_OK)
 		return;
 	raw = sector + offset;
 	inode->i_atime.tv_sec = fat_decode_time(bootfat_get16(raw + 18), 0);
-	inode->i_mtime.tv_sec = fat_decode_time(bootfat_get16(raw + 24),
-		bootfat_get16(raw + 22));
-	inode->i_ctime.tv_sec = fat_decode_time(bootfat_get16(raw + 16),
-		bootfat_get16(raw + 14));
+	inode->i_mtime.tv_sec =
+	    fat_decode_time(bootfat_get16(raw + 24), bootfat_get16(raw + 22));
+	inode->i_ctime.tv_sec =
+	    fat_decode_time(bootfat_get16(raw + 16), bootfat_get16(raw + 14));
 }
 
 static int
 fat_make_inode(struct mount *mountp, const char *path,
-	       const struct bootfs_dirent *entry, uint32_t lba,
-	       uint16_t offset, uint32_t first_cluster, uint8_t attributes,
+	       const struct bootfs_dirent *entry, uint32_t lba, uint16_t offset,
+	       uint32_t first_cluster, uint8_t attributes,
 	       struct inode **result)
 {
 	struct fat_inode_info *info;
@@ -382,8 +406,8 @@ fat_make_inode(struct mount *mountp, const char *path,
 		inode->i_size = 0;
 	} else {
 		inode->i_type = INODE_REG;
-		/* FAT has no execute bit.  Mount regular files with the executable
-		 * default expected by this boot/userland volume. */
+		/* FAT has no execute bit.  Mount regular files with the
+		 * executable default expected by this boot/userland volume. */
 		inode->i_mode = S_IFREG | 0755U;
 	}
 	if (attributes & FAT_ATTRIBUTE_READ_ONLY)
@@ -420,39 +444,68 @@ static int fat_fsync(struct file *);
 static int fat_close_file(struct file *);
 
 static const struct inode_ops fat_inode_ops = {
-	.lookup = fat_lookup,
-	.lookup_casefold = fat_lookup_casefold,
-	.create = fat_create,
-	.mkdir = fat_mkdir,
-	.unlink = fat_unlink,
-	.rmdir = fat_rmdir,
-	.rename = fat_rename,
-	.getattr = fat_getattr,
-	.setattr = fat_setattr,
-	.truncate = fat_truncate,
-	.sync = NULL,
-	.reclaim = fat_reclaim,
+    .lookup = fat_lookup,
+    .lookup_casefold = fat_lookup_casefold,
+    .create = fat_create,
+    .mkdir = fat_mkdir,
+    .unlink = fat_unlink,
+    .rmdir = fat_rmdir,
+    .rename = fat_rename,
+    .getattr = fat_getattr,
+    .setattr = fat_setattr,
+    .truncate = fat_truncate,
+    .sync = NULL,
+    .reclaim = fat_reclaim,
 };
 static const struct file_ops fat_regular_ops = {
-	.open = fat_open_file,
-	.read = fat_read_file,
-	.write = fat_write_file,
-	.pread = fat_pread_file,
-	.pwrite = fat_pwrite_file,
-	.fsync = fat_fsync,
-	.close = fat_close_file,
+    .open = fat_open_file,
+    .read = fat_read_file,
+    .write = fat_write_file,
+    .pread = fat_pread_file,
+    .pwrite = fat_pwrite_file,
+    .fsync = fat_fsync,
+    .close = fat_close_file,
 };
 static const struct file_ops fat_directory_ops = {
-	.readdir = fat_readdir,
-	.close = fat_close_file,
+    .readdir = fat_readdir,
+    .close = fat_close_file,
 };
 
 static void
 set_inode_ops(struct inode *inode)
 {
 	inode->i_op = &fat_inode_ops;
-	inode->i_fop = inode->i_type == INODE_DIR ?
-		&fat_directory_ops : &fat_regular_ops;
+	inode->i_fop =
+	    inode->i_type == INODE_DIR ? &fat_directory_ops : &fat_regular_ops;
+}
+
+int
+fat_file_backing_identity(struct inode *inode, struct disk **disk,
+			  uint64_t *object)
+{
+	struct fat_mount_state *state;
+	struct fat_inode_info *info;
+
+	if (inode == NULL || disk == NULL || object == NULL)
+		return EINVAL;
+	if (inode->i_type != INODE_REG || inode->i_mount == NULL ||
+	    inode->i_mount->m_type != &fat_filesystem_type ||
+	    inode->i_mount->m_disk == NULL)
+		return EOPNOTSUPP;
+	state = fat_mount_state(inode->i_mount);
+	if (state == NULL)
+		return EIO;
+	mutex_lock(&state->lock);
+	info = fat_inode(inode);
+	*disk = inode->i_mount->m_disk;
+	/* The directory-entry location is identical across separate mounts of
+	 * the same FAT volume. Claimed rename is rejected before it can change
+	 * these fields.
+	 */
+	*object = ((uint64_t)info->fi_dirent_lba << 16) |
+		  (uint64_t)info->fi_dirent_offset;
+	mutex_unlock(&state->lock);
+	return 0;
 }
 
 static int
@@ -467,9 +520,9 @@ fat_stat_path(struct mount *mountp, const char *path, struct inode **result)
 	uint16_t offset;
 	uint8_t attributes;
 	int error;
-	enum bootfs_result fsresult = bootfat_stat_location(
-		&state->legacy, path, &entry, &lba, &offset,
-		&first_cluster, &attributes);
+	enum bootfs_result fsresult =
+	    bootfat_stat_location(&state->legacy, path, &entry, &lba, &offset,
+				  &first_cluster, &attributes);
 	if (fsresult != ZEDBSD_FS_OK)
 		return fs_error(fsresult);
 	slash = strrchr(path, '/');
@@ -499,8 +552,8 @@ fat_stat_path_casefold(struct mount *mountp, const char *path,
 	uint8_t attributes;
 	int error;
 	enum bootfs_result fsresult = bootfat_stat_location_casefold(
-		&state->legacy, path, &entry, &lba, &offset,
-		&first_cluster, &attributes);
+	    &state->legacy, path, &entry, &lba, &offset, &first_cluster,
+	    &attributes);
 	if (fsresult != ZEDBSD_FS_OK)
 		return fs_error(fsresult);
 	slash = strrchr(path, '/');
@@ -526,13 +579,17 @@ fat_lookup_unlocked(struct inode *directory, const struct componentname *name,
 	if (parent == NULL)
 		return EIO;
 	if (name->cn_namelen == 1 && name->cn_nameptr[0] == '.') {
-		inode_ref(directory); *result = directory; return 0;
+		inode_ref(directory);
+		*result = directory;
+		return 0;
 	}
 	if (name->cn_namelen == 2 && name->cn_nameptr[0] == '.' &&
 	    name->cn_nameptr[1] == '.') {
 		char *slash;
 		if (parent[0] == '\0') {
-			inode_ref(directory); *result = directory; return 0;
+			inode_ref(directory);
+			*result = directory;
+			return 0;
 		}
 		strcpy(path, parent);
 		slash = strrchr(path, '/');
@@ -545,8 +602,8 @@ fat_lookup_unlocked(struct inode *directory, const struct componentname *name,
 		return fat_stat_path(directory->i_mount, path, result);
 	}
 	error = join_path(parent, name, path);
-	return error != 0 ? error :
-		fat_stat_path(directory->i_mount, path, result);
+	return error != 0 ? error
+			  : fat_stat_path(directory->i_mount, path, result);
 }
 
 static int
@@ -573,8 +630,9 @@ fat_lookup_casefold_unlocked(struct inode *directory,
 	if (parent == NULL)
 		return EIO;
 	error = join_path(parent, name, path);
-	return error != 0 ? error :
-		fat_stat_path_casefold(directory->i_mount, path, result);
+	return error != 0
+		   ? error
+		   : fat_stat_path_casefold(directory->i_mount, path, result);
 }
 
 static int
@@ -592,8 +650,10 @@ fat_getattr(struct inode *inode, struct stat *status)
 	status->st_mtime = inode->i_mtime.tv_sec;
 	status->st_ctime = inode->i_ctime.tv_sec;
 	status->st_blksize = 512;
-	status->st_blocks = inode->i_size > 0 ?
-	    (blkcnt_t)(((uint64_t)inode->i_size + 511U) / 512U) : 0;
+	status->st_blocks =
+	    inode->i_size > 0
+		? (blkcnt_t)(((uint64_t)inode->i_size + 511U) / 512U)
+		: 0;
 	return 0;
 }
 
@@ -635,7 +695,7 @@ fat_setattr_unlocked(struct inode *inode, const struct stat *status,
 		    status->st_atim.tv_nsec >= 1000000000L)
 			return EINVAL;
 		error = fat_encode_time(status->st_atim.tv_sec, &atime_date,
-			&atime_time);
+					&atime_time);
 		if (error != 0)
 			return error;
 	}
@@ -644,12 +704,12 @@ fat_setattr_unlocked(struct inode *inode, const struct stat *status,
 		    status->st_mtim.tv_nsec >= 1000000000L)
 			return EINVAL;
 		error = fat_encode_time(status->st_mtim.tv_sec, &mtime_date,
-			&mtime_time);
+					&mtime_time);
 		if (error != 0)
 			return error;
 	}
 	result = bootfat_write_sector_result(&state->legacy,
-		info->fi_dirent_lba, &sector);
+					     info->fi_dirent_lba, &sector);
 	if (result != ZEDBSD_FS_OK)
 		return fs_error(result);
 	memcpy(saved, sector + info->fi_dirent_offset, sizeof(saved));
@@ -672,8 +732,10 @@ fat_setattr_unlocked(struct inode *inode, const struct stat *status,
 	if (result != ZEDBSD_FS_OK) {
 		uint8_t *rollback;
 		if (bootfat_write_sector_result(&state->legacy,
-		    info->fi_dirent_lba, &rollback) == ZEDBSD_FS_OK) {
-			memcpy(rollback + info->fi_dirent_offset, saved, sizeof(saved));
+						info->fi_dirent_lba,
+						&rollback) == ZEDBSD_FS_OK) {
+			memcpy(rollback + info->fi_dirent_offset, saved,
+			       sizeof(saved));
 			(void)bootfat_mark_sector_dirty(&state->legacy);
 		}
 		return fs_error(result);
@@ -718,9 +780,8 @@ fat_file_get(struct file *file)
 	if (slot == NULL)
 		return NULL;
 	mount_state = fat_mount_state(file->f_inode->i_mount);
-	if (bootfs_open_result(&mount_state->legacy,
-				  fat_path(file->f_inode), &slot->legacy) !=
-	    ZEDBSD_FS_OK) {
+	if (bootfs_open_result(&mount_state->legacy, fat_path(file->f_inode),
+			       &slot->legacy) != ZEDBSD_FS_OK) {
 		irq = spin_lock_irqsave(&fat_pool_lock);
 		memset(slot, 0, sizeof(*slot));
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
@@ -733,7 +794,7 @@ fat_file_get(struct file *file)
 	 */
 	slot->legacy.size = (uint64_t)file->f_inode->i_size;
 	bootfat_file_state(&slot->legacy)->first_cluster =
-		fat_inode(file->f_inode)->fi_first_cluster;
+	    fat_inode(file->f_inode)->fi_first_cluster;
 	file->f_data = slot;
 	return slot;
 }
@@ -764,7 +825,7 @@ fat_pread_file_unlocked(struct file *file, void *buffer, size_t length,
 		length = (size_t)(file->f_inode->i_size - offset);
 	count = length > UINT32_MAX ? UINT32_MAX : (uint32_t)length;
 	result = bootfs_file_read_result(&state->legacy, (uint64_t)offset,
-					buffer, count, NULL, NULL);
+					 buffer, count, NULL, NULL);
 	if (result != ZEDBSD_FS_OK)
 		return -fs_error(result);
 	return count;
@@ -834,8 +895,8 @@ fat_pwrite_file_unlocked(struct file *file, const void *buffer, size_t length,
 	if ((uint64_t)offset > UINT32_MAX ||
 	    (uint64_t)count > UINT32_MAX - (uint64_t)offset)
 		return -EFBIG;
-	result = bootfs_file_write_result(&state->legacy,
-					 (uint64_t)offset, buffer, count);
+	result = bootfs_file_write_result(&state->legacy, (uint64_t)offset,
+					  buffer, count);
 	if (result != ZEDBSD_FS_OK)
 		return -fs_error(result);
 	fat_sync_inode_state(file->f_inode, &state->legacy);
@@ -861,8 +922,9 @@ fat_write_file(struct file *file, const void *buffer, size_t length)
 	off_t offset;
 	ssize_t count;
 	mutex_lock(&state->lock);
-	offset = (file_status_flags_get(file) & O_APPEND) != 0 ?
-		file->f_inode->i_size : file->f_offset;
+	offset = (file_status_flags_get(file) & O_APPEND) != 0
+		     ? file->f_inode->i_size
+		     : file->f_offset;
 	count = fat_pwrite_file_unlocked(file, buffer, length, offset);
 	if (count > 0)
 		file->f_offset = offset + count;
@@ -878,9 +940,9 @@ fat_readdir_unlocked(struct file *file, struct dirent *entry, int *eof)
 	char child_path[ZEDBSD_PATH_MAX];
 	struct componentname component;
 	struct inode *child;
-	enum bootfs_result result = bootfs_readdir_result(
-		&state->legacy, fat_path(file->f_inode),
-		(unsigned)file->f_offset, &legacy);
+	enum bootfs_result result =
+	    bootfs_readdir_result(&state->legacy, fat_path(file->f_inode),
+				  (unsigned)file->f_offset, &legacy);
 	if (result == ZEDBSD_FS_NOT_FOUND) {
 		*eof = 1;
 		return 0;
@@ -920,8 +982,9 @@ static int
 fat_close_file(struct file *file)
 {
 	struct fat_file_state *state = file->f_data;
-	struct fat_mount_state *mount_state = file->f_inode != NULL ?
-		fat_mount_state(file->f_inode->i_mount) : NULL;
+	struct fat_mount_state *mount_state =
+	    file->f_inode != NULL ? fat_mount_state(file->f_inode->i_mount)
+				  : NULL;
 	unsigned long irq;
 	int error = 0;
 	if (mount_state != NULL)
@@ -930,13 +993,15 @@ fat_close_file(struct file *file)
 		if ((file_status_flags_get(file) & O_ACCMODE) != O_RDONLY &&
 		    file->f_inode != NULL &&
 		    (file->f_inode->i_flags & INODE_DEAD) == 0) {
-			error = fs_error(bootfs_file_flush_result(&state->legacy));
+			error =
+			    fs_error(bootfs_file_flush_result(&state->legacy));
 			if (error == 0)
-				fat_sync_inode_state(file->f_inode, &state->legacy);
+				fat_sync_inode_state(file->f_inode,
+						     &state->legacy);
 		} else if (file->f_inode != NULL &&
-			 (file->f_inode->i_flags & INODE_DEAD) != 0)
+			   (file->f_inode->i_flags & INODE_DEAD) != 0)
 			error = fs_error(bootfat_flush(
-				&fat_mount_state(file->f_inode->i_mount)->legacy));
+			    &fat_mount_state(file->f_inode->i_mount)->legacy));
 		irq = spin_lock_irqsave(&fat_pool_lock);
 		memset(state, 0, sizeof(*state));
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
@@ -951,7 +1016,7 @@ static int
 fat_fsync(struct file *file)
 {
 	struct fat_mount_state *mount_state =
-		fat_mount_state(file->f_inode->i_mount);
+	    fat_mount_state(file->f_inode->i_mount);
 	struct fat_file_state *state;
 	int error;
 	mutex_lock(&mount_state->lock);
@@ -959,7 +1024,7 @@ fat_fsync(struct file *file)
 	if (state == NULL)
 		error = EIO;
 	else if (file->f_inode != NULL &&
-	    (file->f_inode->i_flags & INODE_DEAD) != 0)
+		 (file->f_inode->i_flags & INODE_DEAD) != 0)
 		error = fs_error(bootfat_flush(&mount_state->legacy));
 	else
 		error = fs_error(bootfs_file_flush_result(&state->legacy));
@@ -970,8 +1035,8 @@ fat_fsync(struct file *file)
 }
 
 static int
-fat_lookup_casefold(struct inode *directory,
-		    const struct componentname *name, struct inode **result)
+fat_lookup_casefold(struct inode *directory, const struct componentname *name,
+		    struct inode **result)
 {
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
 	int error;
@@ -1107,9 +1172,9 @@ fat_remove_inode_unlocked(struct inode *directory,
 	error = fat_lookup_unlocked(directory, name, &victim);
 	if (error != 0)
 		return error;
-	error = fs_error(remove_directory ?
-		bootfs_rmdir_result(&state->legacy, path) :
-		bootfs_unlink_result(&state->legacy, path));
+	error = fs_error(remove_directory
+			     ? bootfs_rmdir_result(&state->legacy, path)
+			     : bootfs_unlink_result(&state->legacy, path));
 	if (error == 0) {
 		namecache_remove(directory, name);
 		fat_orphan(victim);
@@ -1153,7 +1218,7 @@ fat_path_descendant(const char *parent, const char *path)
 {
 	size_t length = strlen(parent);
 	return length != 0 && !memcmp(parent, path, length) &&
-		path[length] == '/';
+	       path[length] == '/';
 }
 
 static FAT_MUTATION void
@@ -1175,8 +1240,8 @@ fat_repath_descendants(struct mount *mountp, const char *old_path,
 		if (new_length + suffix >= sizeof(replacement))
 			continue;
 		memcpy(replacement, new_path, new_length);
-		memcpy(replacement + new_length, fat_inodes[i].path + old_length,
-			suffix + 1U);
+		memcpy(replacement + new_length,
+		       fat_inodes[i].path + old_length, suffix + 1U);
 		strcpy(fat_inodes[i].path, replacement);
 	}
 	spin_unlock_irqrestore(&fat_pool_lock, irq);
@@ -1186,8 +1251,8 @@ static FAT_MUTATION int
 fat_rename_unlocked(struct inode *old_directory,
 		    const struct componentname *old_name,
 		    struct inode *new_directory,
-		    const struct componentname *new_name,
-		    unsigned flags, struct inode **orphaned)
+		    const struct componentname *new_name, unsigned flags,
+		    struct inode **orphaned)
 {
 	struct fat_mount_state *state = fat_mount_state(old_directory->i_mount);
 	struct inode *source = NULL, *target = NULL;
@@ -1218,8 +1283,8 @@ fat_rename_unlocked(struct inode *old_directory,
 		inode_release(source);
 		return 0;
 	}
-	error = fs_error(bootfs_rename_result(&state->legacy,
-		old_path, new_path));
+	error =
+	    fs_error(bootfs_rename_result(&state->legacy, old_path, new_path));
 	if (error != 0) {
 		if (target != NULL)
 			inode_release(target);
@@ -1228,8 +1293,9 @@ fat_rename_unlocked(struct inode *old_directory,
 	}
 	if (target != NULL)
 		fat_orphan(target);
-	error = fs_error(bootfat_stat_location(&state->legacy, new_path,
-		&entry, &lba, &offset, &cluster, &attributes));
+	error = fs_error(bootfat_stat_location(&state->legacy, new_path, &entry,
+					       &lba, &offset, &cluster,
+					       &attributes));
 	if (error == 0) {
 		uint32_t authoritative_cluster;
 		off_t authoritative_size;
@@ -1242,22 +1308,26 @@ fat_rename_unlocked(struct inode *old_directory,
 		info->fi_dirent_offset = offset;
 		info->fi_attributes = attributes;
 		/*
-		 * The legacy rename engine copies the on-disk directory entry.  An
-		 * open writer may have newer size/cluster state which has not reached
-		 * that entry yet.  Keep the inode authoritative and repair the new
-		 * directory location before exposing it to a subsequent open.
+		 * The legacy rename engine copies the on-disk directory entry.
+		 * An open writer may have newer size/cluster state which has
+		 * not reached that entry yet.  Keep the inode authoritative and
+		 * repair the new directory location before exposing it to a
+		 * subsequent open.
 		 */
 		if (source->i_type == INODE_REG &&
 		    (cluster != authoritative_cluster ||
 		     (off_t)entry.size != authoritative_size)) {
-			error = fs_error(bootfs_open_result(&state->legacy,
-				new_path, &renamed_file));
+			error = fs_error(bootfs_open_result(
+			    &state->legacy, new_path, &renamed_file));
 			if (error == 0) {
-				renamed_file.size = (uint64_t)authoritative_size;
-				bootfat_file_state(&renamed_file)->first_cluster =
-					authoritative_cluster;
-				bootfat_file_state(&renamed_file)->directory_dirty = 1;
-				error = fs_error(bootfs_file_flush_result(&renamed_file));
+				renamed_file.size =
+				    (uint64_t)authoritative_size;
+				bootfat_file_state(&renamed_file)
+				    ->first_cluster = authoritative_cluster;
+				bootfat_file_state(&renamed_file)
+				    ->directory_dirty = 1;
+				error = fs_error(
+				    bootfs_file_flush_result(&renamed_file));
 			}
 		}
 		source->i_ino = fat_ino(lba, offset);
@@ -1272,8 +1342,8 @@ fat_rename_unlocked(struct inode *old_directory,
 		}
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
 		if (source->i_type == INODE_DIR)
-			fat_repath_descendants(old_directory->i_mount,
-				old_path, new_path);
+			fat_repath_descendants(old_directory->i_mount, old_path,
+					       new_path);
 		irq = spin_lock_irqsave(&fat_pool_lock);
 		strcpy(fat_slot(source)->path, new_path);
 		spin_unlock_irqrestore(&fat_pool_lock, irq);
@@ -1296,7 +1366,7 @@ fat_rename(struct inode *old_directory, const struct componentname *old_name,
 	int error;
 	mutex_lock(&state->lock);
 	error = fat_rename_unlocked(old_directory, old_name, new_directory,
-		new_name, flags, &orphaned);
+				    new_name, flags, &orphaned);
 	mutex_unlock(&state->lock);
 	if (orphaned != NULL)
 		fat_release_orphan(orphaned);
@@ -1311,7 +1381,7 @@ fat_reclaim_unlocked(struct inode *inode)
 	if ((info->fi_flags & FAT_INODE_ORPHANED) != 0 &&
 	    info->fi_first_cluster != 0 && state != NULL) {
 		(void)bootfat_discard_chain_result(&state->legacy,
-			info->fi_first_cluster);
+						   info->fi_first_cluster);
 		info->fi_first_cluster = 0;
 	}
 }
@@ -1372,8 +1442,9 @@ static int
 fat_mount_impl(struct mount *mountp)
 {
 	static const struct bootfs_driver *const drivers[] = {
-		&bootfat12_driver, &bootfat16_driver,
-		&bootfat32_driver,
+	    &bootfat12_driver,
+	    &bootfat16_driver,
+	    &bootfat32_driver,
 	};
 	struct fat_mount_state *state = NULL;
 	struct inode *root;
@@ -1393,15 +1464,16 @@ fat_mount_impl(struct mount *mountp)
 	if (state == NULL)
 		return ENOSPC;
 	(void)mutex_init(&state->lock, LOCK_RANK_INODE, "FAT mount");
-	result = bootfs_mount_result(&state->legacy,
-				       &(struct boot_volume){
-					.context = mountp->m_disk,
-					.sector_size = 512,
-					.read = volume_read,
-					.write = (mountp->m_flags & MOUNT_READ_ONLY) ?
-						NULL : volume_write,
-				       }, drivers,
-				       sizeof(drivers) / sizeof(drivers[0]));
+	result = bootfs_mount_result(
+	    &state->legacy,
+	    &(struct boot_volume){
+		.context = mountp->m_disk,
+		.sector_size = 512,
+		.read = volume_read,
+		.write =
+		    (mountp->m_flags & MOUNT_READ_ONLY) ? NULL : volume_write,
+	    },
+	    drivers, sizeof(drivers) / sizeof(drivers[0]));
 	if (result != ZEDBSD_FS_OK) {
 		irq = spin_lock_irqsave(&fat_pool_lock);
 		memset(state, 0, sizeof(*state));
@@ -1473,8 +1545,8 @@ fat_statvfs(struct mount *mountp, struct statvfs *result)
 		return EINVAL;
 	mutex_lock(&state->lock);
 	fat = bootfat_state(&state->legacy);
-	error = fs_error(bootfat_count_free_clusters(&state->legacy,
-	    &free_clusters));
+	error = fs_error(
+	    bootfat_count_free_clusters(&state->legacy, &free_clusters));
 	if (error == 0) {
 		memset(result, 0, sizeof(*result));
 		result->f_bsize = (uint64_t)fat->sectors_per_cluster * 512U;
@@ -1494,14 +1566,14 @@ fat_statvfs(struct mount *mountp, struct statvfs *result)
 }
 
 const struct filesystem_type fat_filesystem_type = {
-	.fs_name = "fat",
-	.probe = fat_probe,
-	.mount = fat_mount_impl,
-	.sync = fat_sync_mount,
-	.statvfs = fat_statvfs,
-	.unmount = fat_unmount_impl,
-	.alloc_inode = fat_alloc_inode,
-	.free_inode = fat_free_inode,
+    .fs_name = "fat",
+    .probe = fat_probe,
+    .mount = fat_mount_impl,
+    .sync = fat_sync_mount,
+    .statvfs = fat_statvfs,
+    .unmount = fat_unmount_impl,
+    .alloc_inode = fat_alloc_inode,
+    .free_inode = fat_free_inode,
 };
 
 int
@@ -1520,8 +1592,10 @@ fat_file_extents(struct file *file, fat_extent_cb callback, void *context)
 	if (state == NULL)
 		error = EIO;
 	else
-		error = bootfat_file_extents(&state->legacy, callback,
-			context) == 0 ? 0 : EIO;
+		error =
+		    bootfat_file_extents(&state->legacy, callback, context) == 0
+			? 0
+			: EIO;
 	mutex_unlock(&mount_state->lock);
 	return error;
 }
@@ -1532,8 +1606,9 @@ struct contiguous_context {
 	int seen;
 };
 
-static int contiguous_extent(uint64_t file_block, uint64_t disk_block,
-			     uint32_t count, void *argument)
+static int
+contiguous_extent(uint64_t file_block, uint64_t disk_block, uint32_t count,
+		  void *argument)
 {
 	struct contiguous_context *context = argument;
 	if (!context->seen) {
@@ -1552,7 +1627,7 @@ int
 fat_file_contiguous_block(struct file *file, struct disk **disk,
 			  uint64_t *block)
 {
-	struct contiguous_context context = { 0 };
+	struct contiguous_context context = {0};
 	int error;
 	if (file == NULL || disk == NULL || block == NULL ||
 	    file->f_inode->i_mount->m_type != &fat_filesystem_type)

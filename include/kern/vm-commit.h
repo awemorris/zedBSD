@@ -32,6 +32,17 @@ int
 vm_commit_reserve(
 	size_t bytes);
 
+/*
+ * Replace the swap contribution to the commit limit as one serialized
+ * transition.  expected_pages closes a stale manager snapshot race.  The
+ * operation is also valid before vm_commit_init(); initialization then adds
+ * the physical-memory contribution without losing the prepared swap total.
+ */
+int
+vm_commit_resize_swap(
+	uint64_t expected_pages,
+	uint64_t replacement_pages);
+
 void
 vm_commit_release(
 	size_t bytes);

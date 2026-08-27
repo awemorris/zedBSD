@@ -4,10 +4,13 @@
  * SPDX-License-Identifier: Zlib
  */
 #include "kern/loop.h"
+#include "kern/backing-claim.h"
 #include "kern/block-identity.h"
 #include "kern/disk.h"
+#include "kern/fat-vfs.h"
 #include "kern/file.h"
 #include "kern/inode.h"
+#include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/mount.h"
 #include "kern/namei.h"
@@ -22,6 +25,66 @@
 #define LOOP_SECTOR_SIZE 512U
 #define LOOP_MAX_TRANSFER_BLOCKS 128U
 
+struct loop_extent_collection {
+	struct backing_claim_extent *extents;
+	unsigned count;
+	unsigned capacity;
+};
+
+static int
+loop_collect_extent(uint64_t file_block, uint64_t disk_block, uint32_t count,
+		    void *argument)
+{
+	struct loop_extent_collection *collection = argument;
+
+	(void)file_block;
+	if (collection->count == UINT32_MAX)
+		return E2BIG;
+	if (collection->extents != NULL) {
+		if (collection->count >= collection->capacity)
+			return EAGAIN;
+		collection->extents[collection->count].block = disk_block;
+		collection->extents[collection->count].block_count = count;
+	}
+	collection->count++;
+	return 0;
+}
+
+static int
+loop_finalize_claim(struct file *backing, struct backing_claim *claim)
+{
+	struct loop_extent_collection collection;
+	struct disk *disk;
+	unsigned i;
+	int error;
+
+	if (claim == NULL)
+		return 0;
+	memset(&collection, 0, sizeof(collection));
+	error = fat_file_extents(backing, loop_collect_extent, &collection);
+	if (error != 0)
+		return error;
+	if (collection.count == 0)
+		return EIO;
+	collection.extents =
+	    kern_calloc(collection.count, sizeof(*collection.extents));
+	if (collection.extents == NULL)
+		return ENOMEM;
+	collection.capacity = collection.count;
+	collection.count = 0;
+	error = fat_file_extents(backing, loop_collect_extent, &collection);
+	if (error != 0)
+		goto out;
+	disk = backing->f_inode->i_mount->m_disk;
+	for (i = 0; i < collection.count; i++)
+		collection.extents[i].disk = disk;
+	error =
+	    backing_claim_finalize(claim, collection.extents, collection.count);
+out:
+	kern_free(collection.extents);
+	return error;
+}
+
 struct loop_device {
 	unsigned index;
 	unsigned flags;
@@ -31,11 +94,12 @@ struct loop_device {
 	struct file *backing;
 	struct inode *backing_inode;
 	struct disk *disk;
+	struct backing_claim *claim;
 	uint64_t size_bytes;
 };
 
 static struct loop_device loops[LOOP_MAX_DEVICES]
-	__attribute__((section(".vfs_bss")));
+    __attribute__((section(".vfs_bss")));
 static struct spinlock loop_lock;
 
 static int
@@ -81,8 +145,9 @@ loop_submit(struct disk *disk, struct bio *bio)
 		return EINVAL;
 	bytes64 = (uint64_t)bio->b_block_count * LOOP_SECTOR_SIZE;
 	offset64 = bio->b_mapped_block * LOOP_SECTOR_SIZE;
-	if (offset64 > loop->size_bytes || bytes64 > loop->size_bytes - offset64 ||
-	    offset64 > INT32_MAX || bytes64 > (uint64_t)INT32_MAX - offset64)
+	if (offset64 > loop->size_bytes ||
+	    bytes64 > loop->size_bytes - offset64 || offset64 > INT32_MAX ||
+	    bytes64 > (uint64_t)INT32_MAX - offset64)
 		return EOVERFLOW;
 	if (bio->b_op == BIO_READ)
 		done = file_pread(loop->backing, bio->b_data, (size_t)bytes64,
@@ -91,13 +156,15 @@ loop_submit(struct disk *disk, struct bio *bio)
 		done = -EROFS;
 	else
 		done = file_pwrite_internal(loop->backing, bio->b_data,
-			(size_t)bytes64, (off_t)offset64, FILE_IO_LOOP_BACKING);
+					    (size_t)bytes64, (off_t)offset64,
+					    FILE_IO_LOOP_BACKING);
 	if (done < 0)
 		error = (int)-done;
 	else if ((uint64_t)done != bytes64)
 		error = bio->b_op == BIO_WRITE ? ENOSPC : EIO;
 	if (error != 0)
-		hal_printf("loop%u: %s block=%u count=%u flags=%x error=%d\n",
+		hal_printf(
+		    "loop%u: %s block=%u count=%u flags=%x error=%d\n",
 		    loop->index, bio->b_op == BIO_READ ? "read" : "write",
 		    (uint32_t)bio->b_mapped_block, bio->b_block_count,
 		    (unsigned)file_status_flags_get(loop->backing), error);
@@ -106,10 +173,10 @@ loop_submit(struct disk *disk, struct bio *bio)
 }
 
 static const struct disk_ops loop_disk_ops = {
-	.open = loop_open,
-	.close = loop_close,
-	.submit = loop_submit,
-	.ioctl = loop_ioctl,
+    .open = loop_open,
+    .close = loop_close,
+    .submit = loop_submit,
+    .ioctl = loop_ioctl,
 };
 
 int
@@ -183,6 +250,7 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	unsigned i;
 	int error;
 	unsigned long irq;
+	struct backing_claim *claim = NULL;
 
 	if (disk_out == NULL)
 		return EINVAL;
@@ -191,9 +259,21 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	if (error != 0)
 		return error;
 	backing_inode = backing->f_inode;
+	error = backing_claim_prepare_inode(backing_inode, BACKING_CLAIM_LOOP,
+					    &claim);
+	if (error == 0)
+		error = loop_finalize_claim(backing, claim);
+	else if (error == EOPNOTSUPP)
+		error = 0;
+	if (error != 0) {
+		backing_claim_release(claim);
+		return error;
+	}
 	irq = spin_lock_irqsave(&loop_lock);
-	if ((backing->f_inode->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+	if ((backing->f_inode->i_flags & (INODE_SWAPFILE | INODE_LOOPFILE)) !=
+	    0) {
 		spin_unlock_irqrestore(&loop_lock, irq);
+		backing_claim_release(claim);
 		return EBUSY;
 	}
 	for (i = 0; i < LOOP_MAX_DEVICES; i++)
@@ -204,6 +284,7 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 		}
 	if (loop == NULL) {
 		spin_unlock_irqrestore(&loop_lock, irq);
+		backing_claim_release(claim);
 		return ENOSPC;
 	}
 	backing->f_inode->i_flags |= INODE_LOOPFILE;
@@ -216,13 +297,16 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 		error = ENOSPC;
 		goto fail_refs;
 	}
-	disk->d_name[0] = 'l'; disk->d_name[1] = 'o'; disk->d_name[2] = 'o';
-	disk->d_name[3] = 'p'; disk->d_name[4] = (char)('0' + loop->index);
+	disk->d_name[0] = 'l';
+	disk->d_name[1] = 'o';
+	disk->d_name[2] = 'o';
+	disk->d_name[3] = 'p';
+	disk->d_name[4] = (char)('0' + loop->index);
 	disk->d_name[5] = '\0';
 	disk->d_flags = flags == LOOP_READ_ONLY ? DISK_READ_ONLY : 0;
 	disk->d_block_size = LOOP_SECTOR_SIZE;
-	disk->d_block_count = (uint64_t)(uint32_t)backing->f_inode->i_size /
-		LOOP_SECTOR_SIZE;
+	disk->d_block_count =
+	    (uint64_t)(uint32_t)backing->f_inode->i_size / LOOP_SECTOR_SIZE;
 	disk->d_max_transfer_blocks = LOOP_MAX_TRANSFER_BLOCKS;
 	disk->d_ops = &loop_disk_ops;
 	disk->d_data = loop;
@@ -230,6 +314,8 @@ loop_attach_file(struct file *backing, unsigned flags, struct disk **disk_out)
 	loop->backing = backing;
 	loop->backing_inode = backing->f_inode;
 	loop->disk = disk;
+	loop->claim = claim;
+	backing->f_backing_claim = claim;
 	loop->size_bytes = (uint64_t)(uint32_t)backing->f_inode->i_size;
 	error = disk_create(disk);
 	if (error != 0) {
@@ -255,7 +341,9 @@ fail_refs:
 	backing_inode->i_flags &= ~INODE_LOOPFILE;
 	spin_unlock_irqrestore(&loop_lock, irq);
 	inode_release(backing_inode);
+	backing->f_backing_claim = NULL;
 	(void)file_close(backing);
+	backing_claim_release(claim);
 	irq = spin_lock_irqsave(&loop_lock);
 	memset(loop, 0, sizeof(*loop));
 	loop->index = i;
@@ -281,15 +369,17 @@ loop_attach_path(const struct path *root, const char *path, unsigned flags,
 		error = loop_attach_file(file, flags, disk_out);
 		if (error != 0)
 			hal_printf("loop: attach %s mode=%s file-flags=%x "
-			    "size=%u failed (%d)\n", path,
-			    flags == LOOP_READ_WRITE ? "rw" : "ro",
-			    (unsigned)file_status_flags_get(file),
-			    file->f_inode != NULL ?
-			    (uint32_t)file->f_inode->i_size : 0U, error);
+				   "size=%u failed (%d)\n",
+				   path, flags == LOOP_READ_WRITE ? "rw" : "ro",
+				   (unsigned)file_status_flags_get(file),
+				   file->f_inode != NULL
+				       ? (uint32_t)file->f_inode->i_size
+				       : 0U,
+				   error);
 		(void)file_close(file);
 	} else
 		hal_printf("loop: open %s flags=%x failed (%d)\n", path,
-		    (unsigned)open_flags, error);
+			   (unsigned)open_flags, error);
 	cwdinfo_destroy(&context);
 	return error;
 }
@@ -321,11 +411,14 @@ loop_detach(struct disk *disk)
 		goto retryable;
 	error = disk_destroy(disk);
 	if (error != 0)
-		return error; /* Invariant failure: keep the slot pinned for diagnosis. */
+		return error; /* Invariant failure: keep the slot pinned for
+				 diagnosis. */
 	irq = spin_lock_irqsave(&loop_lock);
 	loop->backing_inode->i_flags &= ~INODE_LOOPFILE;
 	spin_unlock_irqrestore(&loop_lock, irq);
 	inode_release(loop->backing_inode);
+	loop->backing->f_backing_claim = NULL;
+	backing_claim_release(loop->claim);
 	(void)file_close(loop->backing);
 	memset(loop, 0, sizeof(*loop));
 	loop->index = index;

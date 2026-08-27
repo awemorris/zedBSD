@@ -5,6 +5,7 @@
 #include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/page.h"
+#include "kern/sched.h"
 #include "kern/vm-lock.h"
 
 #include <errno.h>
@@ -475,6 +476,28 @@ static int backing_wired_or_avoided(struct vm_private_page *backing,
 	return 0;
 }
 
+static int
+backing_has_wired_mapping(struct vm_private_page *backing)
+{
+	struct vm_page *page;
+
+	for (page = backing->mappings; page != NULL; page = page->private_next)
+		if (page->wire_count != 0)
+			return 1;
+	return 0;
+}
+
+static int
+backing_has_busy_mapping(struct vm_private_page *backing)
+{
+	struct vm_page *page;
+
+	for (page = backing->mappings; page != NULL; page = page->private_next)
+		if ((page->flags & VM_MAPPING_BUSY) != 0)
+			return 1;
+	return 0;
+}
+
 static uint32_t backing_pte_flags(struct vm_private_page *backing)
 {
 	struct vm_page *page;
@@ -541,6 +564,183 @@ unpin_backing_mappings(struct vm_private_page *backing)
 		mutex_unlock(&vm->lock);
 		/* Never run final vmspace destruction under either VM metadata lock. */
 		vmspace_put_deferred(vm);
+	}
+}
+
+int
+vm_private_page_in_owned(struct vm_private_page *backing,
+	struct vm_page *accounting_page)
+{
+	const struct hal_pmem_request request = {
+		HAL_PMEM_PADDR_ANY, PAGE_SIZE, PAGE_SIZE,
+		HAL_PMEM_TYPE_RAM, 0
+	};
+	struct swap_backend *backend = swap_system_backend();
+	uint32_t slot;
+	unsigned long irq;
+	int error;
+
+	if (backing == NULL || accounting_page == NULL || backend == NULL)
+		return EIO;
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if ((backing->flags & (VM_PAGE_BUSY | VM_PAGE_SWAPPED)) !=
+	    (VM_PAGE_BUSY | VM_PAGE_SWAPPED)) {
+		spin_unlock_irqrestore(&backing->state_lock, irq);
+		return EIO;
+	}
+	slot = backing->swap_slot;
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+
+	error = hal_pmem_alloc(&request, &backing->pmem) == HAL_OK ? 0 : ENOMEM;
+	if (error != 0 && vm_reclaim_one(accounting_page) == 0)
+		error = hal_pmem_alloc(&request, &backing->pmem) == HAL_OK ? 0 :
+		    ENOMEM;
+	if (error == 0)
+		error = swap_read_page(backend, slot,
+		    (void *)backing->pmem.vaddr);
+	if (error != 0) {
+		if (backing->pmem.size != 0) {
+			struct hal_pmem memory = backing->pmem;
+
+			memset(&backing->pmem, 0, sizeof(backing->pmem));
+			(void)hal_pmem_free(&memory);
+		}
+		return error;
+	}
+
+	/* No source state is held while the backing operation completes.  The
+	 * exclusive private-page I/O owner keeps the token stable until this
+	 * resident state is published. */
+	swap_free_slot(backend, slot);
+	irq = spin_lock_irqsave(&backing->state_lock);
+	if ((backing->flags & (VM_PAGE_BUSY | VM_PAGE_SWAPPED)) !=
+	    (VM_PAGE_BUSY | VM_PAGE_SWAPPED) || backing->swap_slot != slot)
+		HAL_FATAL("VM private page-in state changed under I/O owner");
+	backing->swap_slot = SWAP_SLOT_NONE;
+	backing->flags &= ~VM_PAGE_SWAPPED;
+	/* The old slot was the only persistent copy.  Keep the resident page
+	 * dirty until a later reclaim writes it to an active source. */
+	backing->flags |= VM_PAGE_RESIDENT | VM_PAGE_DIRTY;
+	private_page_advance_locked(backing);
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	vm_page_note_in(accounting_page);
+	return 0;
+}
+
+static int
+private_page_targets_source(struct vm_private_page *backing,
+	unsigned source_id)
+{
+	uint32_t slot;
+	unsigned decoded_source;
+	unsigned flags;
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&backing->state_lock);
+	flags = backing->flags;
+	slot = backing->swap_slot;
+	spin_unlock_irqrestore(&backing->state_lock, irq);
+	return (flags & VM_PAGE_SWAPPED) != 0 && slot != SWAP_SLOT_NONE &&
+	    swap_slot_decode(slot, &decoded_source, NULL) == 0 &&
+	    decoded_source == source_id;
+}
+
+static void
+drain_mapping_pins_release(struct vm_private_page *backing)
+{
+	vm_metadata_enter();
+	mutex_lock(&reclaim_lock);
+	unpin_backing_mappings(backing);
+	mutex_unlock(&reclaim_lock);
+	vm_metadata_leave();
+}
+
+int
+vm_reclaim_drain_swap_source(unsigned source_id)
+{
+	if (source_id >= SWAP_SOURCE_COUNT)
+		return EINVAL;
+	for (;;) {
+		struct vm_private_page *selected = NULL;
+		struct vm_private_page *wait_backing = NULL;
+		struct vm_page *accounting_page = NULL;
+		struct swap_backend *backend;
+		struct swap_source_stats source_stats;
+		int scan_error = 0;
+		int error;
+
+		/* Select and pin one target while reverse mappings are stable.  No VM
+		 * metadata lock survives physical allocation or backing I/O. */
+		vm_metadata_enter();
+		mutex_lock(&reclaim_lock);
+		for (struct vm_private_page *backing = page_queue;
+		     backing != NULL; backing = backing->queue_next) {
+			if (!private_page_targets_source(backing, source_id))
+				continue;
+			/* A wired page cannot legitimately have been reclaimed to swap.
+			 * Report the broken invariant instead of waiting forever. */
+			if (backing_has_wired_mapping(backing)) {
+				scan_error = EIO;
+				break;
+			}
+			if (backing_has_busy_mapping(backing) ||
+			    vm_private_page_io_try_acquire(backing) != 0) {
+				vm_private_page_ref(backing);
+				wait_backing = backing;
+				break;
+			}
+			/* A fault may have completed between the first observation and
+			 * our exclusive acquisition. */
+			if (!private_page_targets_source(backing, source_id)) {
+				vm_private_page_io_release(backing);
+				vm_private_page_put(backing);
+				continue;
+			}
+			if (backing->mappings == NULL)
+				HAL_FATAL("tracked swapped backing has no mapping");
+			pin_backing_mappings(backing);
+			accounting_page = backing->mappings;
+			selected = backing;
+			break;
+		}
+		mutex_unlock(&reclaim_lock);
+		vm_metadata_leave();
+		if (scan_error != 0)
+			return scan_error;
+
+		if (selected != NULL) {
+			error = vm_private_page_in_owned(selected, accounting_page);
+			drain_mapping_pins_release(selected);
+			vm_private_page_io_release(selected);
+			vm_private_page_put(selected);
+			if (error != 0)
+				return error;
+			continue;
+		}
+		if (wait_backing != NULL) {
+			error = vm_private_page_wait_idle(wait_backing);
+			vm_private_page_put(wait_backing);
+			if (error != 0 && error != EAGAIN)
+				return error;
+			sched_yield();
+			continue;
+		}
+
+		/* A slot allocator which crossed begin_drain may not have published
+		 * its backing token yet.  Source counters close that scan/publication
+		 * window; yield until it finishes, then scan again. */
+		backend = swap_system_backend();
+		if (backend == NULL)
+			return ENXIO;
+		error = swap_source_get_stats(backend, source_id, &source_stats);
+		if (error != 0)
+			return error;
+		if (source_stats.state != SWAP_SOURCE_STATE_DRAINING)
+			return EBUSY;
+		if (source_stats.allocated_slots == 0 &&
+		    source_stats.inflight == 0)
+			return 0;
+		sched_yield();
 	}
 }
 

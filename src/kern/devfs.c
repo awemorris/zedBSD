@@ -3,6 +3,7 @@
  */
 
 #include "kern/devfs.h"
+#include "kern/backing-claim.h"
 #include "kern/block-identity.h"
 #include "kern/cdev.h"
 #include "kern/disk.h"
@@ -376,6 +377,7 @@ static DEVFS_HIGH ssize_t
 block_pwrite(struct file *file, const void *buffer, size_t length, off_t offset)
 {
 	struct disk *disk = file->f_data;
+	struct backing_mutation_guard guard;
 	uint8_t bounce[512];
 	const uint8_t *input = buffer;
 	uint64_t size, position;
@@ -389,6 +391,16 @@ block_pwrite(struct file *file, const void *buffer, size_t length, off_t offset)
 	position = (uint32_t)offset;
 	if (position >= size || (uint64_t)length > size - position)
 		return -ENOSPC;
+	if (length != 0) {
+		uint64_t first = position / 512U;
+		uint64_t last = (position + length - 1U) / 512U;
+		error = backing_mutation_begin_disk(disk, first,
+		    last - first + 1U, NULL, &guard);
+		if (error != 0)
+			return -error;
+	} else {
+		memset(&guard, 0, sizeof(guard));
+	}
 	while (total < length) {
 		uint64_t block = position / 512U;
 		size_t within = (size_t)(position & 511U);
@@ -397,18 +409,23 @@ block_pwrite(struct file *file, const void *buffer, size_t length, off_t offset)
 			count = length - total;
 		if (within != 0 || count != 512U) {
 			error = disk_read(disk, block, 1, bounce);
-			if (error != 0)
+			if (error != 0) {
+				backing_mutation_end(&guard);
 				return total != 0 ? (ssize_t)total : -error;
+			}
 		} else {
 			memset(bounce, 0, sizeof(bounce));
 		}
 		memcpy(bounce + within, input + total, count);
 		error = disk_write(disk, block, 1, bounce);
-		if (error != 0)
+		if (error != 0) {
+			backing_mutation_end(&guard);
 			return total != 0 ? (ssize_t)total : -error;
+		}
 		total += count;
 		position += count;
 	}
+	backing_mutation_end(&guard);
 	return (ssize_t)total;
 }
 

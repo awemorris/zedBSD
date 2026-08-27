@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/inode.h"
+#include "kern/backing-claim.h"
 #include "kern/cred.h"
 #include "kern/atomic.h"
 #include "kern/mount.h"
@@ -666,23 +667,32 @@ int inode_mknod(struct inode *i, const struct componentname *n,
 int inode_unlink(struct inode *i, const struct componentname *n)
 {
 	struct inode *target;
+	struct backing_mutation_guard guard;
 	int error;
 	if (i == NULL || n == NULL) return EINVAL;
 	if (readonly(i)) return EROFS;
 	error = inode_lookup(i, n, &target);
 	if (error != 0) return error;
+	error = backing_mutation_begin_inode(target, &guard);
+	if (error != 0) {
+		inode_release(target);
+		return error;
+	}
 	if (target->i_type == INODE_DIR) {
+		backing_mutation_end(&guard);
 		inode_release(target);
 		return EPERM;
 	}
 	if ((target->i_flags & (INODE_ROOT | INODE_MOUNTPOINT |
 	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+		backing_mutation_end(&guard);
 		inode_release(target);
 		return EBUSY;
 	}
 	inode_release(target);
 	error = i->i_op != NULL && i->i_op->unlink != NULL ?
 		i->i_op->unlink(i, n) : EOPNOTSUPP;
+	backing_mutation_end(&guard);
 	if (error == 0) {
 		namecache_remove(i, n);
 		inode_dir_changed(i);
@@ -820,6 +830,8 @@ int inode_rename(struct inode *od, const struct componentname *on,
 		 struct inode *nd, const struct componentname *nn, unsigned flags)
 {
 	struct inode *source, *target;
+	struct backing_mutation_guard source_guard, target_guard;
+	int target_guarded = 0;
 	int error;
 	if (od == NULL || on == NULL || nd == NULL || nn == NULL || flags != 0)
 		return EINVAL;
@@ -830,14 +842,21 @@ int inode_rename(struct inode *od, const struct componentname *on,
 	error = inode_lookup(od, on, &source);
 	if (error != 0)
 		return error;
+	error = backing_mutation_begin_inode(source, &source_guard);
+	if (error != 0) {
+		inode_release(source);
+		return error;
+	}
 	if ((source->i_flags & (INODE_ROOT | INODE_MOUNTPOINT |
 	    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
+		backing_mutation_end(&source_guard);
 		inode_release(source);
 		return EBUSY;
 	}
 	if (source->i_type == INODE_DIR && !inode_same(od, nd)) {
 		error = inode_rename_ancestor_check(source, nd);
 		if (error != 0) {
+			backing_mutation_end(&source_guard);
 			inode_release(source);
 			return error;
 		}
@@ -847,27 +866,43 @@ int inode_rename(struct inode *od, const struct componentname *on,
 		if (target == source || (target->i_mount == source->i_mount &&
 		    target->i_ino == source->i_ino)) {
 			inode_release(target);
+			backing_mutation_end(&source_guard);
 			inode_release(source);
 			return 0;
 		}
+		error = backing_mutation_begin_inode(target, &target_guard);
+		if (error != 0) {
+			inode_release(target);
+			backing_mutation_end(&source_guard);
+			inode_release(source);
+			return error;
+		}
+		target_guarded = 1;
 		if ((target->i_flags & (INODE_ROOT | INODE_MOUNTPOINT |
 		    INODE_SWAPFILE | INODE_LOOPFILE)) != 0) {
 			inode_release(target);
+			backing_mutation_end(&target_guard);
+			backing_mutation_end(&source_guard);
 			inode_release(source);
 			return EBUSY;
 		}
 		if (source->i_type == INODE_DIR && target->i_type != INODE_DIR) {
 			inode_release(target);
+			backing_mutation_end(&target_guard);
+			backing_mutation_end(&source_guard);
 			inode_release(source);
 			return ENOTDIR;
 		}
 		if (source->i_type != INODE_DIR && target->i_type == INODE_DIR) {
 			inode_release(target);
+			backing_mutation_end(&target_guard);
+			backing_mutation_end(&source_guard);
 			inode_release(source);
 			return EISDIR;
 		}
 		inode_release(target);
 	} else if (error != ENOENT) {
+		backing_mutation_end(&source_guard);
 		inode_release(source);
 		return error;
 	}
@@ -886,12 +921,16 @@ int inode_rename(struct inode *od, const struct componentname *on,
 		if (!inode_same(nd, od))
 			inode_touch(nd, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
 	}
+	if (target_guarded)
+		backing_mutation_end(&target_guard);
+	backing_mutation_end(&source_guard);
 	inode_release(source);
 	return error;
 }
 int inode_link(struct inode *directory, const struct componentname *name,
 	       struct inode *target)
 {
+	struct backing_mutation_guard guard;
 	int error;
 	if (directory == NULL || name == NULL || target == NULL)
 		return EINVAL;
@@ -903,8 +942,12 @@ int inode_link(struct inode *directory, const struct componentname *name,
 		return EXDEV;
 	if (readonly(directory))
 		return EROFS;
+	error = backing_mutation_begin_inode(target, &guard);
+	if (error != 0)
+		return error;
 	error = directory->i_op != NULL && directory->i_op->link != NULL ?
 		directory->i_op->link(directory, name, target) : EOPNOTSUPP;
+	backing_mutation_end(&guard);
 	if (error == 0) {
 		inode_dir_changed(directory);
 		target->i_linkcount++;
@@ -957,8 +1000,8 @@ inode_vm_resize_available(void)
 	    vm_object_resize_abort != NULL;
 }
 
-int
-inode_truncate_transaction(struct inode *i,
+static int
+inode_truncate_transaction_impl(struct inode *i,
 	const struct inode_truncate_request *request,
 	struct inode_truncate_result *result)
 {
@@ -1082,6 +1125,24 @@ inode_truncate_transaction(struct inode *i,
 		}
 	}
 	mutex_unlock(&i->i_io_lock);
+	return error;
+}
+
+int
+inode_truncate_transaction(struct inode *i,
+	const struct inode_truncate_request *request,
+	struct inode_truncate_result *result)
+{
+	struct backing_mutation_guard guard;
+	int error;
+
+	if (i == NULL || request == NULL)
+		return inode_truncate_transaction_impl(i, request, result);
+	error = backing_mutation_begin_inode(i, &guard);
+	if (error != 0)
+		return error;
+	error = inode_truncate_transaction_impl(i, request, result);
+	backing_mutation_end(&guard);
 	return error;
 }
 

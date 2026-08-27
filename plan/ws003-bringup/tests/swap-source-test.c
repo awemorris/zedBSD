@@ -87,6 +87,71 @@ kern_logf(const char *format, ...)
 	(void)format;
 }
 
+static uint64_t test_commit_swap_pages;
+static int test_commit_resize_error;
+static unsigned test_drain_calls;
+static int test_drain_error;
+static int test_drain_block;
+static int test_drain_entered;
+static int test_drain_release;
+static pthread_mutex_t test_drain_gate = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t test_drain_condition = PTHREAD_COND_INITIALIZER;
+
+int
+vm_commit_resize_swap(uint64_t expected_pages, uint64_t replacement_pages)
+{
+	if (test_commit_swap_pages != expected_pages)
+		fprintf(stderr, "commit swap mismatch: have=%llu expected=%llu "
+		    "replacement=%llu\n",
+		    (unsigned long long)test_commit_swap_pages,
+		    (unsigned long long)expected_pages,
+		    (unsigned long long)replacement_pages);
+	assert(test_commit_swap_pages == expected_pages);
+	if (test_commit_resize_error != 0) {
+		int error = test_commit_resize_error;
+
+		test_commit_resize_error = 0;
+		return error;
+	}
+	test_commit_swap_pages = replacement_pages;
+	return 0;
+}
+
+int
+vm_reclaim_drain_swap_source(unsigned source_id)
+{
+	(void)source_id;
+	test_drain_calls++;
+	assert(pthread_mutex_lock(&test_drain_gate) == 0);
+	test_drain_entered = 1;
+	assert(pthread_cond_broadcast(&test_drain_condition) == 0);
+	while (test_drain_block && !test_drain_release)
+		assert(pthread_cond_wait(&test_drain_condition,
+		    &test_drain_gate) == 0);
+	assert(pthread_mutex_unlock(&test_drain_gate) == 0);
+	if (test_drain_error != 0) {
+		int error = test_drain_error;
+
+		test_drain_error = 0;
+		return error;
+	}
+	return 0;
+}
+
+int
+mount_disk_writable_busy(struct disk *disk)
+{
+	(void)disk;
+	return 0;
+}
+
+void
+hal_fatal(const char *file, int line, const char *message)
+{
+	fprintf(stderr, "HAL_FATAL %s:%d: %s\n", file, line, message);
+	abort();
+}
+
 static struct test_disk_state *
 disk_state(struct disk *disk)
 {
@@ -565,7 +630,7 @@ fake_destroy(void *argument)
 	trace_event(200U + fake->id);
 }
 
-static const struct kern_swap_source_ops fake_ops = {
+static const struct swap_backend_ops fake_ops = {
 	.read_page = fake_read,
 	.write_page = fake_write,
 	.flush = fake_flush,
@@ -584,6 +649,64 @@ make_source(struct kern_swap_source *source, struct fake_source *fake,
 	source->identity_inode = identity_inode;
 	source->slot_count = slots;
 	source->parameter_index = parameter_index;
+}
+
+static void
+test_prepared_publication(void)
+{
+	struct swap_backend backend;
+	struct swap_backend fresh;
+	struct swap_backend already_enabled;
+	struct fake_source fake = { .id = 9U };
+	struct swap_source_stats source_stats;
+	uint32_t slot, total, free_slots;
+
+	/* The convenience add must undo an enable transition that it performed
+	 * when prepare fails.  A manager which was already enabled remains so. */
+	swap_init(&fresh);
+	assert(swap_source_add(&fresh, 0U, NULL, &fake, SWAP_PAGE_SIZE, 1U) ==
+	    EINVAL);
+	assert(swap_get_stats(&fresh, &total, &free_slots) == ENXIO);
+	assert(fake.flushes == 0U && fake.destroys == 0U);
+
+	swap_init(&already_enabled);
+	assert(swap_manager_enable(&already_enabled) == 0);
+	assert(swap_source_add(&already_enabled, 0U, NULL, &fake,
+	    SWAP_PAGE_SIZE, 1U) == EINVAL);
+	assert(swap_get_stats(&already_enabled, &total, &free_slots) == 0);
+	assert(total == 0U && free_slots == 0U);
+	assert(swap_shutdown(&already_enabled) == 0);
+	assert(fake.flushes == 0U && fake.destroys == 0U);
+
+	swap_init(&backend);
+	assert(swap_manager_enable(&backend) == 0);
+	assert(swap_get_stats(&backend, &total, &free_slots) == 0);
+	assert(total == 0U && free_slots == 0U);
+	assert(swap_source_prepare(&backend, 1U, &fake_ops, &fake,
+	    SWAP_PAGE_SIZE, 2U) == 0);
+	assert(swap_source_get_stats(&backend, 1U, &source_stats) == 0);
+	assert(source_stats.state == SWAP_SOURCE_STATE_PREPARED &&
+	    source_stats.total_slots == 2U && source_stats.allocated_slots == 0U);
+	assert(swap_get_stats(&backend, &total, &free_slots) == 0);
+	assert(total == 0U && free_slots == 0U);
+	assert(swap_alloc_slot(&backend, &slot) == ENOSPC);
+	assert(swap_source_begin_drain(&backend, 1U) == EBUSY);
+	assert(swap_shutdown(&backend) == EBUSY);
+	assert(swap_source_cancel_prepare(&backend, 1U) == 0);
+	assert(fake.flushes == 0U && fake.destroys == 0U);
+
+	assert(swap_source_prepare(&backend, 1U, &fake_ops, &fake,
+	    SWAP_PAGE_SIZE, 2U) == 0);
+	assert(swap_source_publish(&backend, 1U) == 0);
+	assert(swap_get_stats(&backend, &total, &free_slots) == 0);
+	assert(total == 2U && free_slots == 2U);
+	assert(swap_alloc_slot(&backend, &slot) == 0 &&
+	    slot == (1U << SWAP_SLOT_SOURCE_SHIFT));
+	swap_free_slot(&backend, slot);
+	assert(swap_source_begin_drain(&backend, 1U) == 0);
+	assert(swap_source_remove(&backend, 1U) == 0);
+	assert(fake.flushes == 1U && fake.destroys == 1U);
+	assert(swap_shutdown(&backend) == 0);
 }
 
 struct allocation_context {
@@ -650,8 +773,9 @@ test_sparse_cardinality_and_order(void)
 
 	kern_swap_source_set_init(&set);
 	assert(kern_swap_source_set_activate(&set) == 0);
-	assert(swap_system_backend() == NULL);
+	assert(swap_system_backend() == &set.backend);
 	assert(kern_swap_source_set_abort(&set) == 0);
+	assert(swap_system_backend() == NULL);
 
 	memset(fake, 0, sizeof(fake));
 	memset(identity, 0, sizeof(identity));
@@ -661,7 +785,8 @@ test_sparse_cardinality_and_order(void)
 	make_source(&source, &fake[0], 3U, 2U, &identity[0], NULL);
 	assert(kern_swap_source_set_add(&set, &source) == 0);
 	assert(kern_swap_source_set_activate(&set) == 0);
-	assert(swap_alloc_slot(&set.backend, &slots[0]) == 0 && slots[0] == 0U);
+	assert(swap_alloc_slot(&set.backend, &slots[0]) == 0 &&
+	    slots[0] == (3U << SWAP_SLOT_SOURCE_SHIFT));
 	swap_free_slot(&set.backend, slots[0]);
 	lifecycle_trace_count = 0;
 	assert(kern_swap_source_set_abort(&set) == 0);
@@ -680,7 +805,7 @@ test_sparse_cardinality_and_order(void)
 	assert(kern_swap_source_set_activate(&set) == 0);
 	for (index = 0; index < 4U; index++) {
 		assert(swap_alloc_slot(&set.backend, &slots[index]) == 0);
-		assert(slots[index] == index);
+		assert(slots[index] == index << SWAP_SLOT_SOURCE_SHIFT);
 		value = (index + 1U) * 100U;
 		assert(swap_write_page(&set.backend, slots[index], &value) == 0);
 	}
@@ -719,14 +844,20 @@ test_aggregate_and_concurrency(void)
 	assert(kern_swap_source_set_add(&set, &source) == 0);
 	assert(kern_swap_source_set_map(&set, 0U, &index, &mapped) == 0);
 	assert(index == 0U && mapped == 0U);
-	assert(kern_swap_source_set_map(&set, 2U, &index, &mapped) == 0);
-	assert(index == 1U && mapped == 0U);
-	assert(kern_swap_source_set_map(&set, 5U, NULL, NULL) == ERANGE);
+	assert(kern_swap_source_set_map(&set,
+	    2U << SWAP_SLOT_SOURCE_SHIFT, &index, &mapped) == 0);
+	assert(index == 2U && mapped == 0U);
+	assert(kern_swap_source_set_map(&set,
+	    1U << SWAP_SLOT_SOURCE_SHIFT, NULL, NULL) == ERANGE);
 	assert(kern_swap_source_set_activate(&set) == 0);
 	assert(swap_system_backend() == &set.backend);
-	for (index = 0; index < 5U; index++)
+	for (index = 0; index < 5U; index++) {
+		uint32_t expected = index < 2U ? index :
+		    (2U << SWAP_SLOT_SOURCE_SHIFT) | (index - 2U);
+
 		assert(swap_alloc_slot(&set.backend, &slots[index]) == 0 &&
-		    slots[index] == index);
+		    slots[index] == expected);
+	}
 	assert(swap_alloc_slot(&set.backend, &mapped) == ENOSPC);
 	value = 100U;
 	assert(swap_write_page(&set.backend, slots[0], &value) == 0);
@@ -767,7 +898,7 @@ test_aggregate_and_concurrency(void)
 	assert(swap_flush(&set.backend) == EIO);
 	assert(first.flushes == 1U && second.flushes == 1U);
 	lifecycle_trace_count = 0;
-	assert(swap_shutdown(&set.backend) == EIO);
+	assert(kern_swap_source_set_abort(&set) == EIO);
 	assert(first.flushes == 2U && second.flushes == 2U);
 	assert(first.destroys == 1U && second.destroys == 1U);
 	assert(lifecycle_trace_count == 4U);
@@ -855,7 +986,8 @@ test_raw_source(void)
 	kern_swap_source_set_init(&set);
 	assert(kern_swap_source_set_add(&set, &source) == 0);
 	assert(kern_swap_source_set_activate(&set) == 0);
-	assert(swap_alloc_slot(&set.backend, &slot) == 0 && slot == 0U);
+	assert(swap_alloc_slot(&set.backend, &slot) == 0 &&
+	    slot == (2U << SWAP_SLOT_SOURCE_SHIFT));
 	for (index = 0; index < sizeof(input); index++)
 		input[index] = (uint8_t)(index ^ 0xa5U);
 	state.record_count = 0;
@@ -869,7 +1001,7 @@ test_raw_source(void)
 	assert(state.record_count == 2U && state.record[1].write == 0 &&
 	    state.record[1].block == 8U && state.record[1].count == 8U);
 	assert(swap_alloc_slot(&set.backend, &boundary_slot) == 0 &&
-	    boundary_slot == 1U);
+	    boundary_slot == ((2U << SWAP_SLOT_SOURCE_SHIFT) | 1U));
 	state.record_count = 0;
 	assert(swap_write_page(&set.backend, boundary_slot, input) == 0);
 	assert(state.record_count == 1U && state.record[0].write != 0 &&
@@ -953,7 +1085,8 @@ test_file_source(void)
 	kern_swap_source_set_init(&set);
 	assert(kern_swap_source_set_add(&set, &source) == 0);
 	assert(kern_swap_source_set_activate(&set) == 0);
-	assert(swap_alloc_slot(&set.backend, &slot) == 0 && slot == 0U);
+	assert(swap_alloc_slot(&set.backend, &slot) == 0 &&
+	    slot == (1U << SWAP_SLOT_SOURCE_SHIFT));
 	for (index = 0; index < sizeof(input); index++)
 		input[index] = (uint8_t)(index * 3U + 1U);
 	disk_state_value.record_count = 0;
@@ -969,7 +1102,7 @@ test_file_source(void)
 	assert(swap_read_page(&set.backend, slot, output) == 0);
 	assert(memcmp(input, output, sizeof(input)) == 0);
 	assert(swap_alloc_slot(&set.backend, &boundary_slot) == 0 &&
-	    boundary_slot == 1U);
+	    boundary_slot == ((1U << SWAP_SLOT_SOURCE_SHIFT) | 1U));
 	disk_state_value.record_count = 0;
 	assert(swap_write_page(&set.backend, boundary_slot, input) == 0);
 	assert(disk_state_value.record_count == 1U &&
@@ -1047,15 +1180,25 @@ test_duplicate_and_partial_unwind(void)
 	kern_swap_source_init(&second);
 	assert(kern_swap_source_set_abort(&set) == 0);
 
-	/* The aggregate exposes a uint32_t slot identity to the VM.  Reject a
-	 * source whose range would cross that boundary before publication. */
+	/* Each source owns 29 local bits.  The four maximum valid tokens retain
+	 * bit 31 clear, while UINT32_MAX remains the sentinel. */
 	kern_swap_source_set_init(&set);
-	make_source(&source, &fake, 0U, UINT32_MAX, &identity_a, NULL);
-	assert(kern_swap_source_set_add(&set, &source) == 0);
-	make_source(&second, &other, 1U, 1U, &identity_b, NULL);
-	assert(kern_swap_source_set_add(&set, &second) == EOVERFLOW);
-	kern_swap_source_destroy(&second);
-	assert(kern_swap_source_set_abort(&set) == 0);
+	make_source(&source, &fake, 0U, SWAP_SOURCE_MAX_SLOTS + 1U,
+	    &identity_a, NULL);
+	assert(kern_swap_source_set_add(&set, &source) == EINVAL);
+	kern_swap_source_destroy(&source);
+	{
+		uint32_t token;
+		unsigned source_id;
+		uint32_t local;
+
+		assert(swap_slot_encode(3U, SWAP_SLOT_LOCAL_MASK, &token) == 0);
+		assert(token == SWAP_SLOT_VALID_MASK && token != SWAP_SLOT_NONE);
+		assert(swap_slot_decode(token, &source_id, &local) == 0);
+		assert(source_id == 3U && local == SWAP_SLOT_LOCAL_MASK);
+		assert(swap_slot_encode(4U, 0U, &token) == EINVAL);
+		assert(swap_slot_decode(SWAP_SLOT_NONE, NULL, NULL) == EINVAL);
+	}
 
 	test_disk_init(&raw_a, &state_a, 110U, 512U, 16U, DISK_PARTITION);
 	test_disk_init(&raw_b, &state_b, 110U, 512U, 16U, DISK_PARTITION);
@@ -1073,9 +1216,9 @@ test_duplicate_and_partial_unwind(void)
 	test_disk_fini(&state_a);
 	test_disk_fini(&state_b);
 
-	/* A competing system backend forces publication failure after the
-	 * candidate aggregate has allocated its VM tables.  The candidate must
-	 * still flush, destroy, close, and release every prepared source. */
+	/* A competing system backend is rejected before candidate metadata or data
+	 * is published.  Caller-owned sources are destroyed without an unnecessary
+	 * backing flush, while every claim and reference is still released. */
 	kern_swap_source_set_init(&blocker);
 	make_source(&source, &fake, 0U, 1U, &identity_a, NULL);
 	assert(kern_swap_source_set_add(&blocker, &source) == 0);
@@ -1088,7 +1231,7 @@ test_duplicate_and_partial_unwind(void)
 	assert(kern_swap_source_set_add(&set, &source) == 0);
 	assert(kern_swap_source_set_activate(&set) == EBUSY);
 	assert(set.active == 0U && set.count == 0U);
-	assert(state_partial.flushes == 1U && state_partial.closes == 1U &&
+	assert(state_partial.flushes == 0U && state_partial.closes == 1U &&
 	    state_partial.releases == 1U);
 	assert(kern_swap_source_set_abort(&blocker) == 0);
 	test_disk_fini(&state_partial);
@@ -1174,6 +1317,190 @@ test_native_root_alias_validation(void)
 	assert(kern_swap_source_set_abort(&set) == 0);
 }
 
+static void
+test_runtime_source_lifecycle(void)
+{
+	struct kern_swap_source_set set;
+	struct kern_swap_source source;
+	struct fake_source boot = { .id = 2U };
+	struct fake_source dynamic = { .id = 4U, .flush_error = EIO };
+	struct fake_source failed = { .id = 6U };
+	struct fake_source replacement = { .id = 5U };
+	struct disk boot_disk = { .d_dev = 300U };
+	struct disk dynamic_disk = { .d_dev = 301U };
+	struct disk failed_disk = { .d_dev = 303U };
+	struct disk replacement_disk = { .d_dev = 302U };
+	struct swap_source_stats source_stats;
+	uint32_t first, second;
+	unsigned drains_before;
+	unsigned source_id;
+
+	test_drain_calls = 0;
+	kern_swap_source_set_init(&set);
+	make_source(&source, &boot, 2U, 1U, &boot_disk, NULL);
+	assert(kern_swap_source_set_add(&set, &source) == 0);
+	assert(kern_swap_source_set_activate(&set) == 0);
+
+	make_source(&source, &dynamic, 3U, 1U, &dynamic_disk, NULL);
+	assert(kern_swap_source_set_runtime_add(&set, &source, &source_id) == 0);
+	assert(source_id == 0U && source.data == NULL && set.count == 2U);
+	assert(swap_alloc_slot(&set.backend, &first) == 0 && first == 0U);
+	assert(swap_alloc_slot(&set.backend, &second) == 0 &&
+	    second == (2U << SWAP_SLOT_SOURCE_SHIFT));
+	swap_free_slot(&set.backend, first);
+	swap_free_slot(&set.backend, second);
+
+	/* A failed capacity publication leaves the prepared source caller-owned and
+	 * invisible to allocation and aggregate accounting. */
+	make_source(&source, &failed, 3U, 1U, &failed_disk, NULL);
+	test_commit_resize_error = EAGAIN;
+	assert(kern_swap_source_set_runtime_add(&set, &source, NULL) == EAGAIN);
+	assert(source.data == &failed && source.parameter_index == 3U &&
+	    failed.destroys == 0U && set.count == 2U);
+	assert(swap_source_get_stats(&set.backend, 1U, &source_stats) == 0);
+	assert(source_stats.state == SWAP_SOURCE_STATE_INACTIVE);
+	kern_swap_source_destroy(&source);
+	assert(failed.destroys == 1U);
+
+	/* Commitment rejection happens before draining and leaves ACTIVE unchanged.
+	 */
+	drains_before = test_drain_calls;
+	test_commit_resize_error = ENOMEM;
+	assert(kern_swap_source_set_runtime_remove(&set, 0U) == ENOMEM);
+	assert(test_drain_calls == drains_before);
+	assert(swap_source_get_stats(&set.backend, 0U, &source_stats) == 0);
+	assert(source_stats.state == SWAP_SOURCE_STATE_ACTIVE &&
+	    dynamic.destroys == 0U && test_commit_swap_pages == 2U);
+
+	/* A page-in/drain error restores commitment and allocation eligibility. */
+	test_drain_error = EIO;
+	assert(kern_swap_source_set_runtime_remove(&set, 0U) == EIO);
+	assert(swap_source_get_stats(&set.backend, 0U, &source_stats) == 0);
+	assert(source_stats.state == SWAP_SOURCE_STATE_ACTIVE &&
+	    dynamic.destroys == 0U && test_commit_swap_pages == 2U);
+
+	/* A flush failure restores both commitment and allocation eligibility. */
+	assert(kern_swap_source_set_runtime_remove(&set, 0U) == EIO);
+	assert(swap_source_get_stats(&set.backend, 0U, &source_stats) == 0);
+	assert(source_stats.state == SWAP_SOURCE_STATE_ACTIVE &&
+	    source_stats.total_slots == 1U && dynamic.destroys == 0U);
+	dynamic.flush_error = 0;
+	assert(kern_swap_source_set_runtime_remove(&set, 0U) == 0);
+	assert(dynamic.destroys == 1U && set.count == 1U);
+
+	/* The lowest free stable ID is reused only after complete removal. */
+	make_source(&source, &replacement, 1U, 1U, &replacement_disk, NULL);
+	assert(kern_swap_source_set_runtime_add(&set, &source, &source_id) == 0);
+	assert(source_id == 0U);
+	assert(kern_swap_source_set_runtime_remove(&set, 0U) == 0);
+	assert(replacement.destroys == 1U);
+	assert(kern_swap_source_set_abort(&set) == 0);
+	assert(boot.destroys == 1U && test_commit_swap_pages == 0U);
+}
+
+static void
+test_empty_runtime_source_lifecycle(void)
+{
+	struct kern_swap_source_set set;
+	struct kern_swap_source source;
+	struct fake_source first = { .id = 11U };
+	struct fake_source replacement = { .id = 12U };
+	struct disk first_disk = { .d_dev = 311U };
+	struct disk replacement_disk = { .d_dev = 312U };
+	uint32_t slot;
+	unsigned source_id;
+
+	assert(test_commit_swap_pages == 0U);
+	kern_swap_source_set_init(&set);
+	assert(kern_swap_source_set_activate(&set) == 0);
+	assert(set.active != 0U && set.count == 0U);
+	assert(swap_system_backend() == &set.backend);
+
+	make_source(&source, &first, 3U, 1U, &first_disk, NULL);
+	assert(kern_swap_source_set_runtime_add(&set, &source, &source_id) == 0);
+	assert(source_id == 0U && source.data == NULL && set.count == 1U);
+	assert(test_commit_swap_pages == 1U);
+	assert(swap_alloc_slot(&set.backend, &slot) == 0 && slot == 0U);
+	swap_free_slot(&set.backend, slot);
+	assert(kern_swap_source_set_runtime_remove(&set, 0U) == 0);
+	assert(set.active != 0U && set.count == 0U && first.destroys == 1U);
+	assert(test_commit_swap_pages == 0U);
+	assert(swap_system_backend() == &set.backend);
+
+	/* Complete removal releases the stable numeric ID for reuse. */
+	make_source(&source, &replacement, 2U, 1U, &replacement_disk, NULL);
+	assert(kern_swap_source_set_runtime_add(&set, &source, &source_id) == 0);
+	assert(source_id == 0U && set.count == 1U);
+	assert(kern_swap_source_set_runtime_remove(&set, 0U) == 0);
+	assert(set.count == 0U && replacement.destroys == 1U);
+	assert(test_commit_swap_pages == 0U);
+	assert(kern_swap_source_set_abort(&set) == 0);
+	assert(set.active == 0U && swap_system_backend() == NULL);
+}
+
+struct runtime_remove_context {
+	struct kern_swap_source_set *set;
+	unsigned source_id;
+	int error;
+};
+
+static void *
+runtime_remove_worker(void *argument)
+{
+	struct runtime_remove_context *context = argument;
+
+	context->error = kern_swap_source_set_runtime_remove(context->set,
+	    context->source_id);
+	return NULL;
+}
+
+static void
+test_runtime_lifecycle_gate(void)
+{
+	struct kern_swap_source_set set;
+	struct kern_swap_source source, contender;
+	struct fake_source fake = { .id = 8U };
+	struct fake_source other = { .id = 10U };
+	struct disk identity = { .d_dev = 308U };
+	struct disk other_identity = { .d_dev = 310U };
+	struct runtime_remove_context context;
+	pthread_t thread;
+
+	kern_swap_source_set_init(&set);
+	make_source(&source, &fake, 0U, 1U, &identity, NULL);
+	assert(kern_swap_source_set_add(&set, &source) == 0);
+	assert(kern_swap_source_set_activate(&set) == 0);
+	test_drain_block = 1;
+	test_drain_entered = 0;
+	test_drain_release = 0;
+	context.set = &set;
+	context.source_id = 0U;
+	context.error = EIO;
+	assert(pthread_create(&thread, NULL, runtime_remove_worker, &context) == 0);
+	assert(pthread_mutex_lock(&test_drain_gate) == 0);
+	while (!test_drain_entered)
+		assert(pthread_cond_wait(&test_drain_condition,
+		    &test_drain_gate) == 0);
+	assert(pthread_mutex_unlock(&test_drain_gate) == 0);
+	/* abort must not race range/count ownership against a removal transaction. */
+	assert(kern_swap_source_set_abort(&set) == EBUSY);
+	assert(set.active != 0 && set.count == 1U && fake.destroys == 0U);
+	make_source(&contender, &other, 3U, 1U, &other_identity, NULL);
+	assert(kern_swap_source_set_runtime_add(&set, &contender, NULL) == EBUSY);
+	assert(contender.data == &other && other.destroys == 0U);
+	kern_swap_source_destroy(&contender);
+	assert(other.destroys == 1U);
+	assert(pthread_mutex_lock(&test_drain_gate) == 0);
+	test_drain_release = 1;
+	assert(pthread_cond_broadcast(&test_drain_condition) == 0);
+	assert(pthread_mutex_unlock(&test_drain_gate) == 0);
+	assert(pthread_join(thread, NULL) == 0);
+	assert(context.error == 0 && set.count == 0U && fake.destroys == 1U);
+	test_drain_block = 0;
+	assert(kern_swap_source_set_abort(&set) == 0);
+	assert(set.active == 0 && test_commit_swap_pages == 0U);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1184,6 +1511,7 @@ main(int argc, char **argv)
 	test_headers();
 	test_generated_header(argv[1], 1U);
 	test_generated_header(argv[2], 2U);
+	test_prepared_publication();
 	test_sparse_cardinality_and_order();
 	test_aggregate_and_concurrency();
 	test_concurrent_lifecycle();
@@ -1191,6 +1519,9 @@ main(int argc, char **argv)
 	test_file_source();
 	test_duplicate_and_partial_unwind();
 	test_native_root_alias_validation();
+	test_runtime_source_lifecycle();
+	test_empty_runtime_source_lifecycle();
+	test_runtime_lifecycle_gate();
 	puts("BR-T45 swap source: PASS");
 	return 0;
 }

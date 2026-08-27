@@ -11,21 +11,14 @@
 #include <stdint.h>
 #include <kern/swap.h>
 
-#define KERN_SWAP_SOURCE_COUNT 4U
+#define KERN_SWAP_SOURCE_COUNT SWAP_SOURCE_COUNT
 
 struct disk;
 struct inode;
 struct path;
 
-struct kern_swap_source_ops {
-	int (*read_page)(void *, uint32_t, void *);
-	int (*write_page)(void *, uint32_t, const void *);
-	int (*flush)(void *);
-	void (*destroy)(void *);
-};
-
 struct kern_swap_source {
-	const struct kern_swap_source_ops *ops;
+	const struct swap_backend_ops *ops;
 	void *data;
 	struct disk *identity_disk;
 	struct inode *identity_inode;
@@ -35,7 +28,6 @@ struct kern_swap_source {
 
 struct kern_swap_source_range {
 	struct kern_swap_source source;
-	uint32_t first_slot;
 };
 
 struct kern_swap_source_set {
@@ -43,6 +35,8 @@ struct kern_swap_source_set {
 	struct kern_swap_source_range range[KERN_SWAP_SOURCE_COUNT];
 	unsigned count;
 	unsigned active;
+	/* Serializes every operation which changes range/backend ownership. */
+	unsigned control_busy;
 };
 
 void
@@ -88,6 +82,25 @@ kern_swap_source_set_validate_native_root(
 int
 kern_swap_source_set_activate(
 	struct kern_swap_source_set *set);
+
+/*
+ * Activation publishes the manager even when it is empty.  Runtime
+ * publication chooses the lowest unused source ID.  On success the set owns
+ * source and clears the caller object; every failure leaves it caller-owned.
+ * Removal is synchronous: it returns only after commitment permits the shrink,
+ * every target page is resident, the backing is flushed, and the source claim
+ * is released.
+ */
+int
+kern_swap_source_set_runtime_add(
+	struct kern_swap_source_set *set,
+	struct kern_swap_source *source,
+	unsigned *source_id);
+
+int
+kern_swap_source_set_runtime_remove(
+	struct kern_swap_source_set *set,
+	unsigned source_id);
 
 int
 kern_swap_source_set_abort(
