@@ -4,15 +4,17 @@ Last updated: 2026-08-27
 
 WSID: `ws012`
 
-Status: Proposed; design discussion only
+Status: Active; `ws012-p002` complete in `q017`, p003-p006 Queue-ready in dependency order
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: none
+Last verified Phase: `ws012-p002`
 
-Resume point: review the concrete minimal YAML `/etc/rc.conf` and `ZSV1`
-line-protocol proposals in `ws012-p001`; migration and candidate/save semantics
-are no longer part of the initial service console.
+Resume point: execute p003-p006 in dependency order, beginning with the ZSV1
+protocol Phase. `/run/init.sock` is accepted for the service
+control protocol, the old unversioned protocol is removed without a
+compatibility path, ZSV1 includes the system actions, and fd 3 remains
+readiness notification from opted-in services only.
 
 Shared reviews: [WS012 review index](tests/README.md)
 
@@ -28,9 +30,10 @@ Shared reviews: [WS012 review index](tests/README.md)
 
 ## Objective
 
-Design a coherent administration interface over the existing native init and
-`/run/init.sock` baseline. The first and only current Phase is discussion and
-specification; it does not authorize code changes.
+Implement a coherent administration interface over the existing native init.
+The prior `/run/init.sock` implementation is evidence, not a fixed product
+contract. Planning does not authorize code changes; implementation begins only
+when the dependency-ready Phase crosses an approved Queue boundary.
 
 ## Scope
 
@@ -61,9 +64,42 @@ specification; it does not authorize code changes.
 
 | Combined ID | Phase | Status | Required result |
 | --- | --- | --- | --- |
-| `ws012-p001` | [Service-console design discussion](phase001-design-discussion/phase.md) | Proposed | Resolve the public grammar and state/protocol semantics, then extract bounded implementation Phases |
+| `ws012-p001` | [Service-console design discussion](phase001-design-discussion/phase.md) | Complete | YAML, ZSV1, grammar, policy, permissions, and concurrency decisions accepted |
+| `ws012-p002` | [YAML rc.conf model and persistence foundation](phase002-yaml-rcconf/phase.md) | Complete (`q017`) | Strict model, parser, canonical writer, stable lock, atomic replacement, and all-reader migration |
+| `ws012-p003` | [ZSV1 init service-control protocol](phase003-zsv1-init-protocol/phase.md) | Planned; Queue-ready | Replace the old socket grammar with bounded versioned service/system-action records and typed service/shutdown clients |
+| `ws012-p004` | [Non-interactive service CLI and persistent policy](phase004-service-argv-persistence/phase.md) | Planned; Queue-ready after p003 | Stable argv grammar/output, runtime controls, immediate locked enable/disable, and reload |
+| `ws012-p005` | [Interactive service console](phase005-interactive-console/phase.md) | Planned; Queue-ready after p004 | Argument-free prompt reuses the argv dispatcher with no candidate/save state |
+| `ws012-p006` | [Service-console integration acceptance](phase006-integration-acceptance/phase.md) | Planned; Queue-ready after p002-p005 | Host/QEMU lifecycle, concurrency, persistence, failure, cold boot, and documentation evidence |
 
-No implementation Phase is defined until `ws012-p001` is complete.
+The implementation dependency chain is p002 -> p003 -> p004 -> p005 -> p006.
+q017 completed p002. The next finite WS012 Queue may group p003-p006 and must
+execute them in that order.
+
+## Latest completed evidence
+
+q017 passed both Phase-owned host fixtures and `make -j16`. A disposable amd64
+QEMU image persisted `service disable cron` across a reboot and did not start
+cron afterward. Guest metadata reported `/etc/rc.conf` as
+`mode=81a4 uid=0 gid=0`; the saved `config.mk` hash remained
+`3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`.
+`git diff --check` passed, and neither `make check` nor `.internal/` was used.
+
+## Accepted service-control decisions
+
+- fd 3 is only the inherited readiness channel by which opted-in services such
+  as networkd report `READY` or `FAIL` after work such as DHCP completion. It
+  is not a general client-to-init control channel.
+- `/run/init.sock` is accepted as the root-only PID 1 service-control channel.
+  ZSV1 replaces the current grammar; no unversioned compatibility protocol is
+  retained.
+- ZSV1 contains service LIST/SHOW/START/STOP/RESTART/RELOAD and the fixed
+  HALT/POWEROFF/REBOOT system actions. `/sbin/halt`, `/sbin/poweroff`,
+  `/sbin/reboot`, and `/sbin/shutdown` migrate to the typed ZSV1 client. No new
+  signal-control path is implemented in this iteration.
+- The initial supervised service model remains the current one: daemon and
+  respawn commands stay in the foreground as direct PID 1 children, allowing
+  authoritative `waitpid()` state and restart handling. Traditional
+  daemonizing/forking services are future design work.
 
 ## Confirmed inputs
 
@@ -84,9 +120,9 @@ No implementation Phase is defined until `ws012-p001` is complete.
 - Current `key=value` rc.conf compatibility is intentionally omitted. The
   installed configuration and all base-system readers/writers switch together.
 
-## Current YAML proposal
+## Fixed YAML v1 shape
 
-The proposed v1 schema keeps host settings at top level and service policy in
+The fixed v1 schema keeps host settings at top level and service policy in
 one mapping:
 
 ```yaml
@@ -101,19 +137,29 @@ services:
       servers: ""
 ```
 
-It uses a strict two-space, mapping-only subset with scalar values. Generic
-service metadata remains in `/etc/service.d/`; only enablement and
-service-specific rc settings belong here. The exact subset and proposed
-`ZSV1` newline-delimited init records are specified for review in p001.
+It uses a strict two-space, mapping-only subset with bounded scalar values.
+Generic service metadata remains in `/etc/service.d/`; only enablement and
+service-specific rc settings belong here. Exact parsing, canonicalization, and
+locking rules are in p002; the accepted `ZSV1` newline-delimited records are
+in p003.
 
-## WS completion direction
+## WS completion conditions
 
-The current planning-stage WS may pause after p001 has produced fixed decisions
-and a later Phase map. Implementation completion conditions are deliberately
-not invented before that discussion closes.
+WS012 is complete when p002-p006 demonstrate that the installed rc.conf has
+one strict YAML representation; concurrent persistent writers cannot lose an
+update or publish an invalid file; PID 1 exposes coherent bounded ZSV1 state;
+argv and interactive clients share one dispatcher; runtime operations remain
+separate from immediate persistent enablement; root-only authorization,
+failure, reload, and reboot behavior pass in the production amd64 image; and
+the public reference matches the verified implementation.
+
+The WS may pause after any completed Phase when its actual boundary and next
+dependency-ready Phase are recorded here and in the master. Container-specific
+status remains a future WS013 integration and is not a completion dependency.
 
 ## Reconsideration boundaries
 
-Stop the design discussion before committing to implementation if atomic
-policy persistence conflicts with `/etc/rc.conf`, PID 1 cannot expose a stable
-snapshot, or container details would leak into the generic service protocol.
+Return the affected Phase `uncleared` rather than weakening the contract if
+the filesystem cannot provide stable-lock plus atomic-replace persistence,
+PID 1 cannot expose a coherent bounded snapshot, or container details would
+leak into the generic service protocol.

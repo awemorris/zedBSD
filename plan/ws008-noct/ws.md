@@ -4,90 +4,142 @@ Last updated: 2026-08-27
 
 WSID: `ws008`
 
-Status: planned; authoritative upstream tree is now available
+Status: planned; three implementation Phases are Queue-ready
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: none
 
-Resume point: extract NOCT-00 as an audit Phase against `/home/awe/NoctLang`
-and the `userland/noct` submodule at pinned revision
-`7d856856e16eb2d889ba49f557f2fda4dcaeea7e`.
+Resume point: Queue `ws008-p001`; do not start BeUI or JIT acceptance before
+the zedBSD CMake target and installed executable are proven.
 
 Shared tests: [WS008 test index](tests/README.md)
 
 ## Phase registry
 
-No Phase has started. The former missing-upstream blocker is cleared; NOCT-00
-can now be extracted before implementation begins.
+| Phase | Status | Deliverable / gate |
+| --- | --- | --- |
+| [`ws008-p001`](phase001-zedbsd-preset/phase.md) | Planned; Queue-ready | Official Noct builds for zedBSD with `cmake --preset zedbsd`, and the resulting amd64 executable passes a non-JIT QEMU smoke |
+| [`ws008-p002`](phase002-beui-zedbsd/phase.md) | Planned; Queue-ready after p001 | Official BeUI zedBSD backend uses `/dev/graphics` and `/dev/input/eventN`; the downstream duplicate and console-event dependency are removed |
+| [`ws008-p003`](phase003-amd64-jit/phase.md) | Planned; Queue-ready after p002 | amd64 zedBSD proves Noct-generated code traverses RW `mmap` to RX `mprotect` and executes under QEMU |
+
+The old NOCT-00--NOCT-05 labels are superseded as scheduling units by these
+immutable Phase IDs. Their concerns are retained inside p001--p003 rather than
+requiring a preliminary audit-only Queue item.
 
 ## Goals
 
 - Add zedBSD as an upstream target system of the canonical Noct project.
-- Add upstream BeUI backends for zedBSD graphics and evdev while retaining the
-  existing SDL backend.
-- Make the local Noct package a pinned clone-and-build integration only.
+- Build that target through the public `zedbsd` CMake configure/build preset.
+- Move the existing downstream BeUI adaptation into canonical Noct, using
+  `/dev/graphics` and evdev while retaining the SDL backend.
+- Prove on amd64 zedBSD that the canonical Noct JIT really executes generated
+  native code through the supported `mmap`/`mprotect` path.
+- Reduce the zedBSD package to target integration, installation, provenance,
+  and revision selection rather than a divergent Noct/BeUI implementation.
 
 ## WS completion conditions
 
-WS008 is complete when upstream Noct builds and runs the declared runtime tests
-for zedBSD, BeUI drawing and input tests pass on zedBSD public UAPIs, the changes
-exist in the authoritative upstream tree, and the local package reproducibly
-fetches the pinned revision, builds, installs, and records its licenses.
+WS008 is complete when all three Phases are complete: the official Noct source
+tree provides working `zedbsd` configure and build presets, the installed amd64
+artifact is built from that target, the official BeUI backend passes graphics
+and evdev tests without legacy console event ioctls, and a QEMU guest produces
+both correct JIT program output and positive JIT-compilation evidence after an
+RW-to-RX mapping transition. The SDL backend must retain its upstream tests.
+
+Publishing, committing, or pushing the canonical Noct changes is release
+administration and is not authorized implicitly by executing these Phases.
+The implementation must nevertheless be authored in an official Noct checkout,
+not copied into a new zedBSD-owned fork. A reproducible package revision cannot
+be advanced until that revision exists; this is recorded honestly at Queue
+closure rather than worked around with an untracked source copy.
 
 ## 1. Objective
 
-Make zedBSD an upstream target of the canonical Noct language project, add a
-zedBSD BeUI backend using `/dev/graphics` and evdev, and reduce the local
-`userland/packages/noct` package to a reproducible clone-and-build recipe.
+Make canonical Noct a first-class zedBSD amd64 application, make canonical
+BeUI consume zedBSD's public graphics/input interfaces, and validate the
+language's native JIT execution path. This sequence deliberately starts with a
+plain target build, then adds the graphical/input backend, then enables the
+runtime feature whose VM permissions are the most security-sensitive.
 
-## 2. Current baseline and prerequisite
+## 2. Verified baseline
 
-The zedBSD tree contains a local Noct runtime/package prototype that uses
-`/dev/graphics` and the legacy `/dev/console` event mode. The canonical
-`~/NoctLang` tree and `userland/noct` upstream submodule are now present at the
-same pinned revision. NOCT-00 must audit both before deciding which remaining
-zedBSD runtime/BeUI changes move upstream and which local package glue is
-deleted.
+- `/home/awe/NoctLang` and `userland/noct` are official Noct checkouts at
+  `7d856856e16eb2d889ba49f557f2fda4dcaeea7e`; neither currently defines a
+  `zedbsd` CMake preset.
+- zedBSD currently carries target entry, NAPI, terminal, filesystem, memory,
+  and BeUI glue under `userland/packages/lang/noct/runtime/`. The BeUI portion
+  opens `/dev/graphics` but still reads event/key state through legacy
+  `/dev/console` ioctls.
+- Canonical Noct already owns the generic BeUI core/HAL and SDL2 backend. A
+  zedBSD backend belongs beside those backends, not in `userland/base` and not
+  as a second BeUI implementation in package glue.
+- The public zedBSD UAPIs are `<zedbsd/graphics.h>` and
+  `<zedbsd/input.h>`. Event-node numbering is dynamic and consumers must
+  discover devices by capabilities rather than assume event0/event1 roles.
+- Canonical Noct has positive JIT observability: with `NOCT_JIT_DEBUG=1`, a
+  successful compilation emits `noct-jit: ...: compiled`; interpreter fallback
+  is therefore distinguishable from a real JIT pass.
+- The Noct JIT already maps writable anonymous memory and then calls
+  `mprotect(..., PROT_READ | PROT_EXEC)`. zedBSD has libc entry points for
+  `mmap`, `mprotect`, and `munmap`, but the exact end-to-end amd64 JIT path has
+  not yet been accepted.
 
-BeUI already has an SDL backend upstream according to the project direction;
-the zedBSD backend is added alongside it rather than replacing it.
+## 3. Dependency order
 
-## 3. Work items
+```text
+ws006-p003/p004 evdev producer/core milestone
+                  |
+ws008-p001 zedBSD preset and executable
+                  |
+ws008-p002 canonical BeUI graphics + evdev backend
+                  |
+ws008-p003 amd64 mmap/mprotect JIT execution
+```
 
-| ID | Status | Deliverable | Dependencies | Acceptance gate |
-| --- | --- | --- | --- | --- |
-| NOCT-00 | Ready to extract | Audit authoritative Noct tree, target model, runtime, BeUI, build, and tests | Upstream tree/repository supplied | Baseline and required upstream change list are recorded |
-| NOCT-01 | Proposed | zedBSD target-system definition in upstream Noct | NOCT-00, stable zedBSD compiler/runtime interfaces | Compiler emits runnable zedBSD binaries and upstream target tests pass |
-| NOCT-02 | Proposed | zedBSD runtime/syscall/platform layer upstream | NOCT-00/01, relevant UAPI | File, memory, process, time, and threading subset tests pass |
-| NOCT-03 | Proposed | BeUI `/dev/graphics` backend upstream | NOCT-00, stable graphics UAPI | Drawing, surfaces, resize/mode behavior, and teardown pass |
-| NOCT-04 | Proposed | BeUI evdev input backend upstream | IN-00–IN-05 | Keyboard/mouse event tests pass without console event mode |
-| NOCT-05 | Proposed | Local package becomes pinned upstream clone-and-build only | NOCT-01–04 | Clean build from declared revision produces/install tested artifacts |
+p001 may build without enabling BeUI. p002 requires the implemented evdev core
+and producers, but not USB HID: QEMU's existing console keyboard/mouse producers
+are sufficient. p003 depends on the canonical executable from p001; it follows
+p002 so that its final image is also the target WS artifact, but it must diagnose
+VM/JIT failures independently of BeUI.
 
-## 4. Upstream-first policy
+## 4. Upstream/downstream ownership
 
-Target-system and BeUI changes are made in the canonical Noct project first.
-zedBSD does not maintain a divergent duplicate implementation under
-`userland/base`. The package recipe may fetch external source because it is a
-package, but it must record enough provenance for reproducibility:
+Canonical Noct owns:
 
-- authoritative repository URL;
-- tag or immutable commit revision;
-- expected toolchain/build options;
-- offline/cache behavior and clear network-failure reporting;
-- installed files and licenses.
+- `zedbsd` CMake configure/build presets and target selection;
+- portable Noct runtime/compiler/JIT changes;
+- the BeUI zedBSD backend and its backend-local tests;
+- target-facing documentation and build options.
 
-“Simply clone and build” describes the package's role, not an unpinned moving
-target. Updating the revision is a deliberate package change.
+zedBSD owns:
 
-## 5. Backend boundaries
+- its public UAPI headers, libc/syscalls, linker scripts, and image/QEMU tests;
+- package metadata, provenance, install paths, and the immutable upstream
+  revision;
+- only the minimal adapter that is inherently part of zedBSD packaging and
+  cannot reasonably live in canonical Noct.
 
-BeUI's zedBSD backend uses public UAPIs only:
+The backend includes zedBSD UAPI headers from the selected sysroot/source tree;
+it must not copy those definitions into Noct. Work is made first in the
+authoritative `/home/awe/NoctLang` checkout and then mirrored for integration
+testing in `userland/noct`. With commits prohibited, parity is evidenced by a
+path-scoped diff/hash manifest; neither Phase commits, pushes, or silently
+changes the submodule gitlink.
 
-- `/dev/graphics` for the initial framebuffer path;
-- `/dev/input/eventN` for keyboard and mouse;
-- the future GPU API only through a separately designed optional backend.
+## 5. Product boundaries
 
-The backend must not depend on the removed `/dev/console` continuous-event or
-key-state interfaces. SDL remains a separate backend for other host systems and
-development tests.
+- Initial target and acceptance are amd64 only. i386/PC-98 Noct target support
+  is not removed, but porting the new preset/backend/JIT acceptance to those
+  ABIs is outside p001--p003.
+- p002 uses the ioctl rendering path. Direct LFB mapping belongs to the
+  dedicated graphics/LFB workstream and is not folded into Noct migration.
+- The terminal/text API may continue to use ordinary tty or console services.
+  What is forbidden after p002 is BeUI dependence on the removed continuous
+  console-event, drain-input, or key-state ioctls.
+- No general CMake sysroot framework, package manager, GPU backend, USB HID,
+  Xzed migration, or broad POSIX audit is hidden in this WS.
+- If p003 reveals a narrow defect in zedBSD anonymous mappings, executable
+  protection, instruction-cache synchronization, or Noct's target branch, that
+  fix is in scope. A VM redesign or policy change is returned to planning as an
+  `uncleared` result.

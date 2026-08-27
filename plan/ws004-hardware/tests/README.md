@@ -6,6 +6,7 @@ Parent: [WS004](../ws.md)
 | --- | --- | --- |
 | HW-T00 | PCIe/DMA/interrupts | BARs, capability walking, DMA widths/order, MSI/MSI-X setup/teardown, and timeout cleanup pass focused tests |
 | HW-T01 | ECAM/MSI HAL contract | Canonical source parsing, MCFG validation, vector allocation/exhaustion/reuse, PCI register images, rollback, in-flight unregister, and real QEMU delivery pass |
+| HW-T02 | Legacy PCI HCD IRQ teardown | EHCI and UHCI retain the IRQ cookie/allocation, DMA, BAR-or-I/O ownership, HCD bus, handler argument, and controller after checked removal failure; retry releases each resource exactly once |
 | HW-T10 | xHCI model | QEMU enumeration, control/bulk/interrupt transfers, reconnect, timeout, and controller reset pass |
 | HW-T11 | USB storage | Root-continuity cases from WS003 pass through xHCI |
 | HW-T12 | USB overlay writes | Correlated URB/heap tests pass; 500 sequential q35/xHCI/SMP=4 boots from pristine raw-image copies have zero kernel/storage-error markers; explicit `DATA.IMG` persistence and IDE control pass; detailed manual acceptance follows |
@@ -59,6 +60,22 @@ their matching source file. The QEMU fixture is linked only when
 `CONFIG_KERNEL_TEST_CHECKPOINTS=y`; it boots `q35` with `-device edu` and checks
 allocator exhaustion/reuse, a delivered MSI, and continued progress through
 `login:`. It does not use `make check` or material from `.internal/`.
+
+## HW-T02 checked legacy-HCD teardown
+
+The lifecycle fixture applies the same ownership contract to EHCI and UHCI. It
+distinguishes USB-core preflight `EBUSY` (quiesce is not entered and hardware
+remains operational) from checked-IRQ `EBUSY` (hardware is halted but all
+ownership remains). It also covers halt and bus-master-disable failures,
+persistent checked-removal errors, stop/DMA release only after completed
+quiesce, successful retry, and idempotent final detach without double-free:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror \
+  plan/ws004-hardware/tests/pci-hcd-irq-teardown-test.c \
+  -o /tmp/ws004-pci-hcd-irq-teardown-test
+/tmp/ws004-pci-hcd-irq-teardown-test
+```
 
 ## HW-T10 xHCI evidence
 

@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "userland/base/service/service-config.h"
+#include "userland/base/service/rcconf.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -79,10 +80,10 @@ main(int argc, char **argv)
 			    command);
 			return name == NULL ? 2 : 1;
 		}
-		if (rcconf_set_enabled(ZEDBSD_RC_CONF, name,
+		if (rcconf_set_enabled(RCCONF_PATH, name,
 				       strcmp(command, "enable") == 0) != 0) {
 			fprintf(stderr, "service: cannot update %s: %s\n",
-				ZEDBSD_RC_CONF, strerror(errno));
+				RCCONF_PATH, strerror(errno));
 			return 1;
 		}
 		return send_request("reload", NULL);

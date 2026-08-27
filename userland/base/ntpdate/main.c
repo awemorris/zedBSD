@@ -1,5 +1,5 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "userland/base/service/service-config.h"
+#include "userland/base/service/rcconf.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -84,6 +84,7 @@ int
 main(int argc, char **argv)
 {
 	char configured[512], copy[512], *server;
+	struct rcconf_model *snapshot;
 	struct timespec selected;
 	int index;
 	if (geteuid() != 0) {
@@ -91,12 +92,22 @@ main(int argc, char **argv)
 		return 1;
 	}
 	if (argc == 1) {
-		if (rcconf_get(ZEDBSD_RC_CONF, "ntpdate_servers", configured,
-			       sizeof(configured)) != 0 ||
+		snapshot = malloc(sizeof(*snapshot));
+		if (snapshot == NULL ||
+		    rcconf_load(RCCONF_PATH, snapshot) != 0) {
+			fprintf(stderr, "ntpdate: cannot load %s: %s\n",
+				RCCONF_PATH, strerror(errno));
+			free(snapshot);
+			return 1;
+		}
+		if (rcconf_setting_get(snapshot, "ntpdate", "servers",
+				       configured, sizeof(configured)) != 0 ||
 		    configured[0] == '\0') {
+			free(snapshot);
 			fprintf(stderr, "ntpdate: no servers configured\n");
 			return 1;
 		}
+		free(snapshot);
 		strcpy(copy, configured);
 		for (server = strtok(copy, " \t,"); server != NULL;
 		     server = strtok(NULL, " \t,"))

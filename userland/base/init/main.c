@@ -6,6 +6,7 @@
  */
 
 #include "userland/base/service/service-config.h"
+#include "userland/base/service/rcconf.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -137,22 +138,36 @@ run_mount_all(void)
 		fprintf(stderr, "init: mount -a failed\n");
 }
 
-static void
-set_configured_hostname(void)
+static struct rcconf_model *
+load_rcconf_snapshot(void)
 {
-	char hostname[256];
+	struct rcconf_model *snapshot = malloc(sizeof(*snapshot));
+	int error;
 
-	if (rcconf_get(ZEDBSD_RC_CONF, "hostname", hostname,
-		       sizeof(hostname)) == 0 &&
-	    hostname[0] != '\0' && sethostname(hostname, strlen(hostname)) != 0)
+	if (snapshot == NULL)
+		return NULL;
+	if (rcconf_load(RCCONF_PATH, snapshot) == 0)
+		return snapshot;
+	error = errno;
+	free(snapshot);
+	errno = error;
+	return NULL;
+}
+
+static void
+set_configured_hostname(const struct rcconf_model *snapshot)
+{
+	if (snapshot != NULL && snapshot->hostname[0] != '\0' &&
+	    sethostname(snapshot->hostname, strlen(snapshot->hostname)) != 0)
 		fprintf(stderr, "init: sethostname: %s\n", strerror(errno));
 }
 
 static int
-load_one_service(const char *name)
+load_one_service(const char *name, const struct rcconf_model *snapshot)
 {
 	struct service *service;
-	char path[320], value[64], key[80];
+	char path[320], value[64];
+	int enabled;
 
 	if (!service_name_valid(name) || service_count == SERVICE_MAX ||
 	    snprintf(path, sizeof(path), "/etc/service.d/%s", name) >=
@@ -163,20 +178,21 @@ load_one_service(const char *name)
 	memset(service, 0, sizeof(*service));
 	strcpy(service->name, name);
 
-	if (rcconf_get(path, "command", service->command,
-		       sizeof(service->command)) != 0 ||
+	if (assignment_get(path, "command", service->command,
+			   sizeof(service->command)) != 0 ||
 	    service->command[0] != '/')
 		return -1;
 
-	(void)rcconf_get(path, "arguments", service->arguments,
-			 sizeof(service->arguments));
-	(void)rcconf_get(path, "after", service->after, sizeof(service->after));
-	(void)rcconf_get(path, "requires", service->requires,
-			 sizeof(service->requires));
+	(void)assignment_get(path, "arguments", service->arguments,
+			     sizeof(service->arguments));
+	(void)assignment_get(path, "after", service->after,
+			     sizeof(service->after));
+	(void)assignment_get(path, "requires", service->requires,
+			     sizeof(service->requires));
 	service->notify_timeout = 10;
 
 	service->type = SERVICE_DAEMON;
-	if (rcconf_get(path, "type", value, sizeof(value)) == 0) {
+	if (assignment_get(path, "type", value, sizeof(value)) == 0) {
 		if (strcmp(value, "oneshot") == 0)
 			service->type = SERVICE_ONESHOT;
 		else if (strcmp(value, "respawn") == 0)
@@ -185,29 +201,26 @@ load_one_service(const char *name)
 			return -1;
 	}
 
-	if (rcconf_get(path, "required", value, sizeof(value)) == 0)
+	if (assignment_get(path, "required", value, sizeof(value)) == 0)
 		service->required = yes(value);
 
-	if (rcconf_get(path, "restart", value, sizeof(value)) == 0) {
+	if (assignment_get(path, "restart", value, sizeof(value)) == 0) {
 		service->restart_always = strcmp(value, "always") == 0;
 		service->restart_failure = strcmp(value, "on-failure") == 0;
 	}
 
-	if (rcconf_get(path, "notify-fd3", value, sizeof(value)) == 0 &&
+	if (assignment_get(path, "notify-fd3", value, sizeof(value)) == 0 &&
 	    on_off(value, &service->notify_fd3) != 0)
 		return -1;
-	if (rcconf_get(path, "notify-timeout", value, sizeof(value)) == 0 &&
+	if (assignment_get(path, "notify-timeout", value, sizeof(value)) == 0 &&
 	    parse_seconds(value, 1, 300, &service->notify_timeout) != 0)
 		return -1;
 	if (service->notify_fd3 && service->type == SERVICE_ONESHOT)
 		return -1;
 
-	if (snprintf(key, sizeof(key), "%s_enable", name) >= (int)sizeof(key))
-		return -1;
-
 	service->enabled =
-	    rcconf_get(ZEDBSD_RC_CONF, key, value, sizeof(value)) == 0 &&
-	    yes(value);
+	    snapshot != NULL &&
+	    rcconf_service_enabled(snapshot, name, &enabled) == 0 && enabled;
 	service->state = SERVICE_STOPPED;
 	service_count++;
 
@@ -215,7 +228,7 @@ load_one_service(const char *name)
 }
 
 static int
-load_services(void)
+load_services(const struct rcconf_model *snapshot)
 {
 	DIR *directory;
 	struct dirent *entry;
@@ -231,7 +244,7 @@ load_services(void)
 	while ((entry = readdir(directory)) != NULL) {
 		if (entry->d_name[0] == '.')
 			continue;
-		if (load_one_service(entry->d_name) != 0)
+		if (load_one_service(entry->d_name, snapshot) != 0)
 			fprintf(stderr,
 				"init: invalid service definition: %s\n",
 				entry->d_name);
@@ -615,22 +628,29 @@ state_name(enum service_state state)
 	return names[state];
 }
 
-static void
+static int
 reload_policy(void)
 {
+	struct rcconf_model *snapshot;
 	size_t index;
 
-	for (index = 0; index < service_count; index++) {
-		char key[80], value[64];
-
-		if (snprintf(key, sizeof(key), "%s_enable",
-			     services[index].name) >= (int)sizeof(key))
-			continue;
-
-		services[index].enabled = rcconf_get(ZEDBSD_RC_CONF, key, value,
-						     sizeof(value)) == 0 &&
-					  yes(value);
+	snapshot = load_rcconf_snapshot();
+	if (snapshot == NULL) {
+		fprintf(stderr, "init: cannot reload %s: %s\n", RCCONF_PATH,
+			strerror(errno));
+		return -1;
 	}
+
+	for (index = 0; index < service_count; index++) {
+		int enabled;
+
+		services[index].enabled =
+		    rcconf_service_enabled(snapshot, services[index].name,
+					   &enabled) == 0 &&
+		    enabled;
+	}
+	free(snapshot);
+	return 0;
 }
 
 static void
@@ -775,6 +795,7 @@ shutdown_system(int action)
 int
 main(void)
 {
+	struct rcconf_model *snapshot;
 	int listener;
 
 	if (getpid() != 1) {
@@ -788,12 +809,17 @@ main(void)
 	(void)signal(SIGCHLD, SIG_DFL);
 
 	make_runtime_directories();
-	set_configured_hostname();
+	snapshot = load_rcconf_snapshot();
+	if (snapshot == NULL)
+		fprintf(stderr, "init: cannot load %s: %s\n", RCCONF_PATH,
+			strerror(errno));
+	set_configured_hostname(snapshot);
 	run_mount_all();
 
-	if (load_services() != 0)
+	if (load_services(snapshot) != 0)
 		fprintf(stderr,
 			"init: continuing without service definitions\n");
+	free(snapshot);
 
 	listener = open_control_socket();
 	if (listener < 0)
@@ -812,10 +838,11 @@ main(void)
 
 		if (reload_requested) {
 			reload_requested = 0;
-			reload_policy();
-
-			/* Runtime instances are deliberately preserved. */
-			printf("init: configuration reloaded\n");
+			if (reload_policy() == 0) {
+				/* Runtime instances are deliberately preserved.
+				 */
+				printf("init: configuration reloaded\n");
+			}
 		}
 
 		if (listener < 0) {

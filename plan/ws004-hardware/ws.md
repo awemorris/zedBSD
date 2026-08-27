@@ -4,17 +4,17 @@ Last updated: 2026-08-27
 
 WSID: `ws004`
 
-Status: active; q010 automatic USB/heap gate complete, manual acceptance pending
+Status: active; `ws004-p009` complete in `q016`
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws004-p008` and resumed `ws004-p006` complete their
-automatic QEMU milestones; `ws004-p009` carries a checked legacy-HCD IRQ
-teardown finding from q015
+Last verified Phase: `ws004-p009` completes the checked EHCI/UHCI IRQ and
+controller-lifetime repair; `ws004-p008` and resumed `ws004-p006` retain their
+completed automatic QEMU milestones
 
 Resume point: record the user's detailed manual USB acceptance separately, or
-queue `ws004-p009` to migrate EHCI/UHCI to checked IRQ teardown. The automatic
-500-boot gate passed.
+extract the next dependency-ready hardware Phase. The automatic 500-boot gate
+and the legacy-HCD checked teardown gate have passed.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -30,7 +30,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p006`](phase006-usb-overlay-write/phase.md) | Complete automatic QEMU milestone | URB correction plus p008 heap fix pass focused tests and the revised 500-boot gate; manual acceptance is pending |
 | [`ws004-p007`](phase007-warm-reset/phase.md) | Complete | Native-mode ELF64 BSS clearing fixes stale allocator state; three IDE reboots and a USB reboot reach login |
 | [`ws004-p008`](phase008-smp-heap-integrity/phase.md) | Complete | Unified kernel heap lock domain, corrected aligned-prefix arithmetic, controls, and 500-boot combined gate pass |
-| [`ws004-p009`](phase009-pci-hcd-irq-teardown/phase.md) | Planned | Convert EHCI/UHCI from the legacy void IRQ removal path; retain complete controller ownership on checked-removal failure |
+| [`ws004-p009`](phase009-pci-hcd-irq-teardown/phase.md) | Complete (`q016`) | EHCI/UHCI use checked quiesce, retain all ownership on failure, restore staged attach/detach state, unlink stale root-probe nodes, pass HW-T02 and both i386 production builds |
 
 ### MSI follow-up register
 
@@ -92,7 +92,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-00 | Complete (software scope) | PCIe/DMA/interrupt capability audit and common fixes | BR-00 hardware inventory deferred | Focused host tests and amd64 build pass; physical findings remain separate |
 | HW-01 | Complete read-only QEMU milestone | xHCI host-controller support sufficient for storage and future HID | HW-00, existing USB core | QEMU xHCI enumeration, bounded media read, and reconnect pass; writable-root correctness is HW-02/p006 |
 | HW-02 | Complete automatic QEMU milestone; manual acceptance pending | Stable USB identity/discovery, writable overlay, bounded read-only rejection, and warm reboot | HW-01, block layer, approved selector decision | Revised HW-T12 500-copy gate passes; record the user's detailed manual acceptance separately before physical USB-root claims |
-| HW-03 | Planned (`ws004-p009`) | Checked PCI IRQ/controller lifetime for EHCI and UHCI detach | HW-00, checked PCI IRQ API from q015 | Busy/error removal retains all ownership; retry and final detach host fixtures plus i386 builds pass |
+| HW-03 | Complete (`q016`) | Checked PCI IRQ/controller lifetime for EHCI and UHCI detach; xHCI is already converted and is outside this Phase | HW-00, checked PCI IRQ API from q015 | Busy/error removal retains all ownership; retry and final detach host fixtures plus i386 builds pass |
 | HW-10 | Planned | NVMe controller, admin/I/O queues, namespaces, and block integration | HW-00 | QEMU NVMe install/mount/I/O/reset tests pass |
 | HW-11 | Planned | NVMe verification on the Latitude controller | HW-10, BR-00 | Identify/read-only first, then disposable-range I/O and stress without corruption |
 | HW-12 | Planned; first network target | Common USB Ethernet core, CDC ECM/NCM class binding, and a Realtek-family backend if the target descriptors are vendor-specific | HW-01, target descriptors; VID:PID only for vendor-specific matching | At least one user adapter attaches, links, transfers concurrently, times out safely, reconnects, and detaches; class matching is not falsely claimed for vendor-specific devices |

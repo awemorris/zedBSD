@@ -3,10 +3,8 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 #define RC_LINE_MAX 1024
 
@@ -15,11 +13,16 @@ service_name_valid(const char *name)
 {
 	size_t length = 0;
 
-	if (name == NULL || !isalnum((unsigned char)name[0]))
+	if (name == NULL || !((name[0] >= 'A' && name[0] <= 'Z') ||
+			      (name[0] >= 'a' && name[0] <= 'z') ||
+			      (name[0] >= '0' && name[0] <= '9')))
 		return 0;
 	while (name[length] != '\0') {
 		unsigned char character = (unsigned char)name[length];
-		if (!isalnum(character) && character != '_' && character != '-')
+		if (!((character >= 'A' && character <= 'Z') ||
+		      (character >= 'a' && character <= 'z') ||
+		      (character >= '0' && character <= '9')) &&
+		    character != '_' && character != '-')
 			return 0;
 		if (++length > 63)
 			return 0;
@@ -70,7 +73,8 @@ parse_line(char *line, char **key, char **value)
 }
 
 int
-rcconf_get(const char *path, const char *wanted, char *output, size_t capacity)
+assignment_get(const char *path, const char *wanted, char *output,
+	       size_t capacity)
 {
 	FILE *stream;
 	char line[RC_LINE_MAX];
@@ -116,64 +120,4 @@ rcconf_get(const char *path, const char *wanted, char *output, size_t capacity)
 	if (found == 0)
 		errno = ENOENT;
 	return found == 1 ? 0 : -1;
-}
-
-int
-rcconf_set_enabled(const char *path, const char *service, int enabled)
-{
-	char key[80], temporary[320], line[RC_LINE_MAX];
-	FILE *input = NULL, *output = NULL;
-	int descriptor = -1, changed = 0, failed = 0;
-
-	if (!service_name_valid(service) || strchr(service, '-') != NULL ||
-	    snprintf(key, sizeof(key), "%s_enable", service) >=
-		(int)sizeof(key) ||
-	    snprintf(temporary, sizeof(temporary), "%s.tmp.%ld", path,
-		     (long)getpid()) >= (int)sizeof(temporary)) {
-		errno = EINVAL;
-		return -1;
-	}
-	input = fopen(path, "r");
-	if (input == NULL)
-		return -1;
-	descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0644);
-	if (descriptor < 0 || (output = fdopen(descriptor, "w")) == NULL) {
-		if (descriptor >= 0)
-			close(descriptor);
-		fclose(input);
-		return -1;
-	}
-	while (fgets(line, sizeof(line), input) != NULL) {
-		char copy[RC_LINE_MAX], *candidate, *value;
-		int parsed;
-		strcpy(copy, line);
-		parsed = parse_line(copy, &candidate, &value);
-		(void)value;
-		if (parsed > 0 && strcmp(candidate, key) == 0) {
-			if (changed || fprintf(output, "%s=%s\n", key,
-					       enabled ? "YES" : "NO") < 0) {
-				errno = changed ? EEXIST : EIO;
-				failed = 1;
-				break;
-			}
-			changed = 1;
-		} else if (fputs(line, output) == EOF) {
-			failed = 1;
-			break;
-		}
-	}
-	if (!failed && !changed &&
-	    fprintf(output, "%s=%s\n", key, enabled ? "YES" : "NO") < 0)
-		failed = 1;
-	if (ferror(input))
-		failed = 1;
-	if (fclose(input) != 0)
-		failed = 1;
-	if (fflush(output) != 0 || fsync(fileno(output)) != 0 ||
-	    fclose(output) != 0)
-		failed = 1;
-	if (!failed && rename(temporary, path) == 0)
-		return 0;
-	unlink(temporary);
-	return -1;
 }

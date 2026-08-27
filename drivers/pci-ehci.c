@@ -8,6 +8,7 @@
 #include <drivers/usb.h>
 #include <errno.h>
 #include <hal/hal.h>
+#include <kern/sched.h>
 #include <string.h>
 
 #define EHCI_USBCMD 0x00U
@@ -42,6 +43,9 @@
 #define EHCI_PORT_POWER 0x00001000U
 #define EHCI_PORT_OWNER 0x00002000U
 #define EHCI_MAX_QTDS 124U
+#define EHCI_PCI_COMMAND 0x04U
+#define EHCI_PCI_COMMAND_MASTER 0x0004U
+#define EHCI_QUIESCE_TICKS 100U
 
 struct ehci_qtd {
 	volatile uint32_t next, alternate, token, buffer[5];
@@ -62,6 +66,7 @@ struct ehci_request {
 struct ehci_controller {
 	struct drv_pci_device *pci;
 	struct drv_pci_mapping registers;
+	struct drv_pci_enable_state pci_enable_state;
 	volatile uint8_t *capability,*operational;
 	struct drv_dma_buffer periodic, async_head_memory;
 	struct ehci_qh *async_head;
@@ -71,6 +76,9 @@ struct ehci_controller {
 	void *irq_cookie;
 	struct ehci_request *active;
 	struct ehci_controller *next;
+	unsigned bar_claimed, bar_mapped, pci_state_saved;
+	unsigned hcd_registered, irq_allocated, dma_quiesced;
+	unsigned listed, quarantined;
 };
 static struct ehci_controller *ehci_controllers;
 
@@ -105,11 +113,123 @@ static int ehci_start(struct drv_usb_hcd*hcd)
 	wr32(c->operational,EHCI_ASYNCLISTADDR,(uint32_t)c->async_head_memory.device_address);
 	wr32(c->operational,EHCI_USBSTS,EHCI_STS_ALL);wr32(c->operational,EHCI_USBINTR,0);
 	wr32(c->operational,EHCI_CONFIGFLAG,1);wr32(c->operational,EHCI_USBCMD,EHCI_CMD_RUN|EHCI_CMD_ASYNC);
-	for(timeout=0;timeout<1000000U;timeout++)if((rd32(c->operational,EHCI_USBSTS)&EHCI_STS_HALTED)==0)return 0;
+	for(timeout=0;timeout<1000000U;timeout++)if((rd32(c->operational,EHCI_USBSTS)&EHCI_STS_HALTED)==0){c->dma_quiesced=0;return 0;}
 	error=EIO;
 fail:drv_dma_free_coherent(hcd->dma,&c->async_head_memory);drv_dma_free_coherent(hcd->dma,&c->periodic);return error;
 }
-static void ehci_stop(struct drv_usb_hcd*hcd){struct ehci_controller*c=hcd_controller(hcd);wr32(c->operational,EHCI_USBINTR,0);wr32(c->operational,EHCI_USBCMD,0);if(c->async_head_memory.address)drv_dma_free_coherent(hcd->dma,&c->async_head_memory);if(c->periodic.address)drv_dma_free_coherent(hcd->dma,&c->periodic);}
+
+static int
+ehci_bus_master_disable(struct ehci_controller *c)
+{
+	uint16_t command;
+	int error;
+
+	error = drv_pci_device_set_bus_master(c->pci, false);
+	if (error != 0)
+		return error;
+	error = drv_pci_device_config_read16(c->pci, EHCI_PCI_COMMAND,
+	    &command);
+	if (error != 0)
+		return error;
+	return (command & EHCI_PCI_COMMAND_MASTER) == 0 ? 0 : EIO;
+}
+
+static int
+ehci_irq_disestablish(struct ehci_controller *c)
+{
+	uint64_t started;
+	int error;
+
+	if (c->irq_cookie == NULL)
+		return 0;
+	started = sched_ticks();
+	for (;;) {
+		error = drv_pci_device_disestablish_irq_checked(c->pci,
+		    c->irq_cookie);
+		if (error != EBUSY)
+			break;
+		if (sched_ticks() - started >= EHCI_QUIESCE_TICKS) {
+			hal_printf(
+			    "ehci: IRQ removal timed out; retaining controller ownership\n");
+			return EBUSY;
+		}
+		sched_yield();
+	}
+	if (error != 0) {
+		hal_printf(
+		    "ehci: checked IRQ removal failed (%d); retaining controller ownership\n",
+		    error);
+		return error;
+	}
+	c->irq_cookie = NULL;
+	return 0;
+}
+
+static int
+ehci_quiesce(struct drv_usb_hcd *hcd)
+{
+	struct ehci_controller *c = hcd_controller(hcd);
+	uint64_t started;
+	uint32_t command;
+	int halt_error = 0, master_error, irq_error;
+
+	if (c->dma_quiesced)
+		return 0;
+	if (c->active != NULL)
+		return EBUSY;
+	wr32(c->operational, EHCI_USBINTR, 0);
+	command = rd32(c->operational, EHCI_USBCMD);
+	wr32(c->operational, EHCI_USBCMD,
+	    command & ~(EHCI_CMD_RUN | EHCI_CMD_PERIODIC | EHCI_CMD_ASYNC));
+	started = sched_ticks();
+	while ((rd32(c->operational, EHCI_USBSTS) & EHCI_STS_HALTED) == 0) {
+		if (sched_ticks() - started >= EHCI_QUIESCE_TICKS) {
+			halt_error = ETIMEDOUT;
+			break;
+		}
+		sched_yield();
+	}
+	master_error = ehci_bus_master_disable(c);
+	if (halt_error != 0) {
+		hal_printf(
+		    "ehci: controller halt timed out (master=%d); retaining DMA and IRQ state\n",
+		    master_error);
+		return halt_error;
+	}
+	if (master_error != 0) {
+		hal_printf(
+		    "ehci: bus-master disable failed (%d); retaining DMA and IRQ state\n",
+		    master_error);
+		return master_error;
+	}
+	irq_error = ehci_irq_disestablish(c);
+	if (irq_error != 0)
+		return irq_error;
+	c->dma_quiesced = 1;
+	return 0;
+}
+
+static void
+ehci_stop(struct drv_usb_hcd *hcd)
+{
+	struct ehci_controller *c = hcd_controller(hcd);
+
+	if (!c->dma_quiesced) {
+		hal_printf("ehci: refusing to release DMA before checked quiesce\n");
+		c->quarantined = 1;
+		return;
+	}
+	if (c->async_head_memory.address) {
+		drv_dma_free_coherent(hcd->dma, &c->async_head_memory);
+		memset(&c->async_head_memory, 0,
+		    sizeof(c->async_head_memory));
+	}
+	if (c->periodic.address) {
+		drv_dma_free_coherent(hcd->dma, &c->periodic);
+		memset(&c->periodic, 0, sizeof(c->periodic));
+	}
+	c->async_head = NULL;
+}
 
 static uint32_t qtd_token(unsigned pid,unsigned toggle,unsigned length){return EHCI_QTD_ACTIVE|(3U<<10)|(pid<<8)|((uint32_t)length<<16)|((uint32_t)toggle<<31);}
 static void qtd_buffer(struct ehci_qtd*q,uint32_t address,size_t length){unsigned i,pages;q->buffer[0]=address;pages=(unsigned)(((address&0xfffU)+length+4095U)/4096U);for(i=1;i<5&&i<pages;i++)q->buffer[i]=(address+(uint32_t)i*4096U)&~0xfffU;}
@@ -139,12 +259,192 @@ static int ehci_root_status(struct drv_usb_hcd*h,void*b,size_t n,size_t*a){struc
 static int ehci_root_control(struct drv_usb_hcd*h,const struct drv_usb_control_request*r,void*b,size_t n,size_t*a)
 {struct ehci_controller*c=hcd_controller(h);unsigned p;uint32_t s;if(!r||r->index<1||r->index>h->root_port_count)return EINVAL;p=r->index-1U;s=rd32(c->operational,EHCI_PORTSC(p));if(r->request==0&&b&&n>=4){uint32_t v=0;if(!(s&EHCI_PORT_OWNER)){if(s&EHCI_PORT_CONNECT)v|=1U;if(s&EHCI_PORT_ENABLE)v|=2U;if(s&EHCI_PORT_RESET)v|=0x10U;v|=0x400U;}if(s&EHCI_PORT_CONNECT_CHANGE)v|=0x10000U;if(s&EHCI_PORT_ENABLE_CHANGE)v|=0x20000U;memcpy(b,&v,4);if(a)*a=4;return 0;}if(r->request==3&&r->value==4){if((s&0x0c00U)!=0){wr32(c->operational,EHCI_PORTSC(p),s|EHCI_PORT_OWNER);if(a)*a=0;return 0;}wr32(c->operational,EHCI_PORTSC(p),s|EHCI_PORT_RESET|EHCI_PORT_POWER);if(a)*a=0;return 0;}if(r->request==1){if(r->value==4)s&=~EHCI_PORT_RESET;else if(r->value==16)s|=EHCI_PORT_CONNECT_CHANGE;else if(r->value==17)s|=EHCI_PORT_ENABLE_CHANGE;else return ENOTSUP;wr32(c->operational,EHCI_PORTSC(p),s);if(a)*a=0;return 0;}if(r->request==3&&r->value==1){if(a)*a=0;return 0;}return ENOTSUP;}
 static int ehci_irq(void*argument){struct ehci_controller*c=argument;struct ehci_request*r;struct drv_usb_urb*urb;uint32_t status;size_t actual=0;unsigned i;enum drv_usb_urb_status result=DRV_USB_URB_COMPLETE;status=rd32(c->operational,EHCI_USBSTS);if(!(status&EHCI_STS_ALL))return 0;wr32(c->operational,EHCI_USBSTS,status);r=c->active;if(!r)return 1;for(i=0;i<r->qtd_count;i++)if(r->qtds[i].token&EHCI_QTD_ACTIVE)return 1;for(i=0;i<r->qtd_count;i++)if(r->qtds[i].token&EHCI_QTD_ERRORS){result=(r->qtds[i].token&EHCI_QTD_HALTED)?DRV_USB_URB_STALL:DRV_USB_URB_IO_ERROR;break;}for(i=0;i<r->data_count;i++){uint32_t remaining=(r->qtds[r->data_first+i].token>>16)&0x7fffU;actual+=r->requested[r->data_first+i]-remaining;}if(result==DRV_USB_URB_COMPLETE&&!r->control)(void)drv_usb_endpoint_set_hcd_data(drv_usb_urb_endpoint(r->urb),0,(r->qh->token>>31)&1U);if(r->input&&actual)memcpy(drv_usb_urb_buffer(r->urb),(uint8_t*)r->bounce.address+8U,actual);c->async_head->horizontal=(uint32_t)c->async_head_memory.device_address|EHCI_LINK_QH;urb=r->urb;c->active=NULL;drv_usb_urb_set_hcd_data(urb,NULL);request_free(c,r);drv_usb_hcd_complete(&c->hcd,urb,result,actual);return 1;}
-static const struct drv_usb_hcd_ops ehci_ops={.start=ehci_start,.stop=ehci_stop,.urb_enqueue=ehci_urb_enqueue,.urb_dequeue=ehci_urb_dequeue,.endpoint_enable=ehci_endpoint_enable,.endpoint_disable=ehci_endpoint_disable,.frame_number=ehci_frame_number,.root_hub_status=ehci_root_status,.root_hub_control=ehci_root_control};
+static const struct drv_usb_hcd_ops ehci_ops={.start=ehci_start,.quiesce=ehci_quiesce,.stop=ehci_stop,.urb_enqueue=ehci_urb_enqueue,.urb_dequeue=ehci_urb_dequeue,.endpoint_enable=ehci_endpoint_enable,.endpoint_disable=ehci_endpoint_disable,.frame_number=ehci_frame_number,.root_hub_status=ehci_root_status,.root_hub_control=ehci_root_control};
 
-static int ehci_attach(struct drv_pci_device*d,const struct drv_pci_id*id){struct ehci_controller*c;unsigned ports,count=0;int error;(void)id;c=hal_malloc(sizeof(*c));if(!c)return ENOMEM;memset(c,0,sizeof(*c));c->pci=d;if(drv_pci_device_claim_bar(d,0)!=0||(error=drv_pci_device_map_bar(d,0,DRV_PCI_MAP_READ|DRV_PCI_MAP_WRITE|DRV_PCI_MAP_NOCACHE,&c->registers))!=0){hal_free(c);return ENODEV;}c->capability=c->registers.address;c->operational=c->capability+rd8(c->capability,0);ports=rd32(c->capability,4)&15U;if(!ports){error=ENODEV;goto fail;}c->hcd.name="EHCI";c->hcd.ops=&ehci_ops;c->hcd.dma=drv_pci_device_dma(d);c->hcd.root_port_count=ports;c->hcd.private_data[0]=(uintptr_t)c;if((error=drv_pci_device_enable_memory(d))!=0||(error=drv_pci_device_set_bus_master(d,true))!=0||(error=drv_usb_hcd_register(&c->hcd,&c->bus))!=0)goto fail;if((error=drv_pci_device_allocate_irqs(d,DRV_PCI_IRQ_ALLOW_INTX,1,1,&c->irq,&count))!=0||(error=drv_pci_device_establish_irq(d,&c->irq,ehci_irq,c,"ehci",&c->irq_cookie))!=0){(void)drv_usb_hcd_unregister(&c->hcd);goto fail;}wr32(c->operational,EHCI_USBINTR,0x37U);drv_pci_device_set_driver_data(d,c);c->next=ehci_controllers;ehci_controllers=c;hal_printf("ehci: PCI controller, ports=%u version=%x\n",ports,*(volatile uint16_t*)(c->capability+2));return 0;
-fail:drv_pci_device_unmap_bar(d,&c->registers);drv_pci_device_release_bar(d,0);hal_free(c);return error;}
-static int ehci_detach(struct drv_pci_device*d,unsigned flags){struct ehci_controller*c=drv_pci_device_driver_data(d);(void)flags;if(!c)return 0;wr32(c->operational,EHCI_USBINTR,0);if(c->irq_cookie)drv_pci_device_disestablish_irq(d,c->irq_cookie);drv_pci_device_free_irqs(d,&c->irq,1);if(drv_usb_hcd_unregister(&c->hcd)!=0)return EBUSY;(void)drv_pci_device_set_bus_master(d,false);drv_pci_device_unmap_bar(d,&c->registers);drv_pci_device_release_bar(d,0);drv_pci_device_set_driver_data(d,NULL);hal_free(c);return 0;}
+static void
+ehci_publish(struct ehci_controller *c)
+{
+	if (c->listed)
+		return;
+	drv_pci_device_set_driver_data(c->pci, c);
+	c->next = ehci_controllers;
+	ehci_controllers = c;
+	c->listed = 1;
+}
+
+static void
+ehci_unpublish(struct ehci_controller *c)
+{
+	struct ehci_controller **link;
+
+	if (!c->listed)
+		return;
+	for (link = &ehci_controllers; *link != NULL; link = &(*link)->next) {
+		if (*link == c) {
+			*link = c->next;
+			break;
+		}
+	}
+	c->next = NULL;
+	c->listed = 0;
+}
+
+static int
+ehci_pci_release(struct ehci_controller *c)
+{
+	int error;
+
+	if (c->pci_state_saved) {
+		error = ehci_bus_master_disable(c);
+		if (error != 0)
+			return error;
+	}
+	if (c->bar_mapped) {
+		drv_pci_device_unmap_bar(c->pci, &c->registers);
+		c->bar_mapped = 0;
+		c->capability = NULL;
+		c->operational = NULL;
+	}
+	if (c->pci_state_saved) {
+		error = drv_pci_device_restore_enable_state(c->pci,
+		    &c->pci_enable_state);
+		if (error != 0)
+			return error;
+		c->pci_state_saved = 0;
+	}
+	if (c->bar_claimed) {
+		drv_pci_device_release_bar(c->pci, 0);
+		c->bar_claimed = 0;
+	}
+	return 0;
+}
+
+static int
+ehci_cleanup(struct ehci_controller *c)
+{
+	int error;
+
+	if (c->hcd_registered) {
+		error = drv_usb_hcd_unregister(&c->hcd);
+		if (error != 0)
+			return error;
+		c->hcd_registered = 0;
+	}
+	if (c->irq_allocated) {
+		/* A registered HCD removes the checked IRQ from quiesce. */
+		if (c->irq_cookie != NULL)
+			return EBUSY;
+		drv_pci_device_free_irqs(c->pci, &c->irq, 1);
+		c->irq_allocated = 0;
+	}
+	return ehci_pci_release(c);
+}
+
+static int
+ehci_attach(struct drv_pci_device *d, const struct drv_pci_id *id)
+{
+	struct ehci_controller *c;
+	unsigned count = 0, ports;
+	const char *stage = "allocation";
+	int cleanup_error, error;
+
+	(void)id;
+	c = hal_malloc(sizeof(*c));
+	if (c == NULL)
+		return ENOMEM;
+	memset(c, 0, sizeof(*c));
+	c->pci = d;
+	c->dma_quiesced = 1;
+	stage = "BAR claim";
+	error = drv_pci_device_claim_bar(d, 0);
+	if (error != 0)
+		goto fail;
+	c->bar_claimed = 1;
+	stage = "PCI command save";
+	error = drv_pci_device_save_enable_state(d, &c->pci_enable_state);
+	if (error != 0)
+		goto fail;
+	c->pci_state_saved = 1;
+	stage = "BAR map";
+	error = drv_pci_device_map_bar(d, 0,
+	    DRV_PCI_MAP_READ | DRV_PCI_MAP_WRITE | DRV_PCI_MAP_NOCACHE,
+	    &c->registers);
+	if (error != 0)
+		goto fail;
+	c->bar_mapped = 1;
+	c->capability = c->registers.address;
+	c->operational = c->capability + rd8(c->capability, 0);
+	ports = rd32(c->capability, 4) & 15U;
+	if (ports == 0) {
+		error = ENODEV;
+		stage = "capabilities";
+		goto fail;
+	}
+	c->hcd.name = "EHCI";
+	c->hcd.ops = &ehci_ops;
+	c->hcd.dma = drv_pci_device_dma(d);
+	c->hcd.root_port_count = ports;
+	c->hcd.private_data[0] = (uintptr_t)c;
+	stage = "PCI enable";
+	if ((error = drv_pci_device_enable_memory(d)) != 0 ||
+	    (error = drv_pci_device_set_bus_master(d, true)) != 0)
+		goto fail;
+	stage = "HCD registration";
+	error = drv_usb_hcd_register(&c->hcd, &c->bus);
+	if (error != 0)
+		goto fail;
+	c->hcd_registered = 1;
+	stage = "IRQ allocation";
+	error = drv_pci_device_allocate_irqs(d, DRV_PCI_IRQ_ALLOW_INTX,
+	    1, 1, &c->irq, &count);
+	if (error != 0)
+		goto fail;
+	c->irq_allocated = 1;
+	stage = "IRQ establishment";
+	error = drv_pci_device_establish_irq(d, &c->irq, ehci_irq, c,
+	    "ehci", &c->irq_cookie);
+	if (error != 0)
+		goto fail;
+	wr32(c->operational, EHCI_USBINTR, 0x37U);
+	ehci_publish(c);
+	hal_printf("ehci: PCI controller, ports=%u version=%x\n", ports,
+	    *(volatile uint16_t *)(c->capability + 2));
+	return 0;
+
+fail:
+	cleanup_error = ehci_cleanup(c);
+	if (cleanup_error != 0) {
+		c->quarantined = 1;
+		ehci_publish(c);
+		hal_printf(
+		    "ehci: attach failed at %s (%d), cleanup failed (%d); controller quarantined\n",
+		    stage, error, cleanup_error);
+		return 0;
+	}
+	hal_free(c);
+	return error;
+}
+
+static int
+ehci_detach(struct drv_pci_device *d, unsigned flags)
+{
+	struct ehci_controller *c = drv_pci_device_driver_data(d);
+	int error;
+
+	(void)flags;
+	if (c == NULL)
+		return 0;
+	error = ehci_cleanup(c);
+	if (error != 0) {
+		c->quarantined = 1;
+		return error;
+	}
+	ehci_unpublish(c);
+	drv_pci_device_set_driver_data(d, NULL);
+	hal_free(c);
+	return 0;
+}
 static const struct drv_pci_id ehci_ids[]={{DRV_PCI_ANY_ID,DRV_PCI_ANY_ID,DRV_PCI_ANY_ID,DRV_PCI_ANY_ID,0x0c0320U,0xffffffU,0}};
 static struct drv_pci_driver ehci_driver={.name="ehci",.ids=ehci_ids,.id_count=1,.attach=ehci_attach,.detach=ehci_detach};
 int drv_pci_ehci_driver_register(void){return drv_pci_driver_register(&ehci_driver);}
-void drv_pci_ehci_probe_roots(void){struct ehci_controller*c;for(c=ehci_controllers;c;c=c->next)drv_usb_hcd_root_hub_changed(&c->hcd);}
+void drv_pci_ehci_probe_roots(void){struct ehci_controller*c;for(c=ehci_controllers;c;c=c->next)if(!c->quarantined)drv_usb_hcd_root_hub_changed(&c->hcd);}

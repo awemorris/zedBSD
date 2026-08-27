@@ -8,7 +8,7 @@ Phase ID: `p001`
 
 Combined ID: `ws012-p001`
 
-Status: Proposed
+Status: Complete
 
 Parent: [WS012](../ws.md)
 
@@ -43,11 +43,12 @@ Argument-free invocation currently prints usage instead of entering a console.
 - designing container isolation internals;
 - changing init supervision, service dependency, or no-runlevel decisions.
 
-## Open decisions
+## Design decision
 
-- Review and accept or revise the concrete YAML `/etc/rc.conf` proposal below.
-- Review and accept or revise the concrete `ZSV1` init protocol proposal
-  below. No binary framing or general serialization library is proposed.
+The user accepted the concrete YAML `/etc/rc.conf` and newline-delimited
+`ZSV1` proposals without a product-level revision on 2026-08-27. No binary
+framing, general serializer, legacy rc.conf migration, or candidate/save
+policy is part of the initial implementation.
 
 ## Fixed decisions
 
@@ -72,7 +73,7 @@ Argument-free invocation currently prints usage instead of entering a console.
   rc.conf data. The installed default, init parser, and service writer change
   together because there are no existing users to migrate.
 
-## Proposed minimal YAML `/etc/rc.conf`
+## Accepted minimal YAML `/etc/rc.conf`
 
 ```yaml
 version: 1
@@ -104,8 +105,8 @@ and restart policy remain in `/etc/service.d/NAME`, not in rc.conf.
 The initial parser is a deliberately small mapping-only YAML subset:
 
 - exactly two spaces per indentation level; tabs are rejected;
-- mappings, whole-line comments, bounded keys, quoted strings, `true`,
-  `false`, and bounded unsigned integers only;
+- mappings, whole-line comments, bounded keys, quoted strings, a restricted
+  safe plain-string token, `true`, `false`, and bounded unsigned integers only;
 - no sequences, flow collections, anchors, aliases, tags, multiple documents,
   multiline scalars, implicit dates/numbers, or duplicate keys;
 - unknown top-level, service-policy, and service-setting keys fail validation;
@@ -113,12 +114,11 @@ The initial parser is a deliberately small mapping-only YAML subset:
   deterministic service order, and writes through the common lock plus
   same-directory temporary/sync/rename path.
 
-This proposal intentionally resembles YAML without requiring a general YAML
-implementation. The design review must decide whether `settings` is the right
-single container for all service-specific options; no migration question
-remains.
+This accepted design intentionally resembles YAML without requiring a general
+YAML implementation. `settings` is the single container for service-specific
+options; no migration question remains.
 
-## Proposed init socket protocol (`ZSV1`)
+## Accepted init socket protocol (`ZSV1`)
 
 “Machine-readable framing” means that `/sbin/service` must not scrape the
 English text PID 1 currently prints. The initial replacement can remain a
@@ -168,34 +168,42 @@ stable without JSON, binary messages, or display-text parsing.
 
 ## Work packages
 
-- [ ] Resolve each open decision with examples and failure behavior.
-- [ ] Freeze the public argv and interactive grammar.
-- [ ] Freeze runtime versus immediate persistent-policy semantics.
-- [ ] Review and freeze the proposed YAML rc.conf schema and common lock
+- [x] Resolve each open decision with examples and failure behavior.
+- [x] Freeze the public argv and interactive grammar.
+- [x] Freeze runtime versus immediate persistent-policy semantics.
+- [x] Review and freeze the proposed YAML rc.conf schema and common lock
       contract; no migration path is required.
-- [ ] Review and freeze the proposed `ZSV1` init control protocol.
-- [ ] Define permissions, concurrency, and atomic-rewrite requirements.
-- [ ] Write completion conditions and split later implementation Phases.
-- [ ] Synchronize WS012, the master, and WS009 handoffs.
+- [x] Review and freeze the proposed `ZSV1` init control protocol.
+- [x] Define root-only permissions, concurrency, and atomic-rewrite
+      requirements.
+- [x] Write completion conditions and split implementation into
+      `ws012-p002` through `ws012-p006`.
+- [x] Synchronize the WS012 registry and leave the master/WS009 pointers to
+      the owning planning update.
 
 ## Acceptance
 
-The design review cases in the [WS012 review index](../tests/README.md) must all
-have an explicit resolution. No build or QEMU result is claimed by this Phase.
+The design review cases in the [WS012 review index](../tests/README.md) all
+have an explicit accepted resolution. No build or QEMU result is claimed by
+this Phase.
 
 ## Actual results and evidence
 
-The initial repository audit confirms that the argv command and PID 1 control
-path exist, but responses are human-readable, argument-free invocation has no
-console, and rc.conf still uses `key=value`. Concrete minimal YAML and `ZSV1`
-proposals now make the two remaining review decisions explicit.
+The repository audit confirms that the argv command and PID 1 control path
+exist, but responses are human-readable, argument-free invocation has no
+console, and rc.conf still uses `key=value`. The user accepted the concrete
+minimal YAML and `ZSV1` designs, including immediate enable/disable, a stable
+companion lock, and no migration compatibility. Queue-ready implementation
+Phases now cover the parser/persistence foundation, protocol, argv interface,
+interactive console, and integrated acceptance.
 
 ## Interruption / resumption
 
-Resume at the first unresolved decision above. Do not place an implementation
-Phase in a Queue until p001 records its command and state contracts.
+Not interrupted. `ws012-p002` is the first dependency-ready implementation
+Phase.
 
 ## Remaining debt and handoff
 
-All implementation, automated tests, QEMU integration, public documentation,
-and WS013 container-status integration remain later Phases.
+Implementation, automated tests, QEMU integration, and public documentation
+remain p002-p006. WS013 container-status integration remains outside the
+initial service console and does not block it.
