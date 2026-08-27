@@ -4,13 +4,13 @@ Last updated: 2026-08-28
 
 WSID: `ws016`
 
-Status: active; `ws016-p003` in progress in `q021`
+Status: active; `ws016-p004` in progress in `q021`
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws016-p002`
+Last verified Phase: `ws016-p003`
 
-Resume point: complete `ws016-p003`, then execute `ws016-p004` in `q021`.
+Resume point: complete the disposable amd64 QEMU acceptance in `ws016-p004`.
 
 Shared tests: [WS016 test index](tests/README.md)
 
@@ -138,8 +138,8 @@ hibernation, encryption, and a listing option are not part of the initial CLI.
 | --- | --- | --- | --- |
 | `ws016-p001` | [Runtime swap manager](phase001-runtime-swap-manager/phase.md) | Complete (`q021`) | Stable source-encoded slots, dynamic add/drain/remove, backing claims, and live commit accounting pass host tests |
 | `ws016-p002` | [`/dev/system` swap UAPI](phase002-swap-uapi/phase.md) | Complete (`q021`) | Versioned privileged control and source enumeration pass ABI, permission, and failure-atomicity tests |
-| `ws016-p003` | [`swapon` and `swapoff` commands](phase003-swap-commands/phase.md) | In progress (`q021`) | Both `/sbin` utilities implement the fixed multi-operand CLI and are installed in configured images |
-| `ws016-p004` | [Runtime swap QEMU acceptance](phase004-runtime-swap-acceptance/phase.md) | Planned; Queue-ready after p001--p003 | Disposable amd64 QEMU images prove add, page-out/in, drain/remove, failure preservation, and boot-swap regression |
+| `ws016-p003` | [`swapon` and `swapoff` commands](phase003-swap-commands/phase.md) | Complete (`q021`) | Both `/sbin` utilities implement the fixed multi-operand CLI and are installed in configured images |
+| `ws016-p004` | [Runtime swap QEMU acceptance](phase004-runtime-swap-acceptance/phase.md) | In progress (`q021`) | Disposable amd64 QEMU images prove add, page-out/in, drain/remove, failure preservation, and boot-swap regression |
 
 ## WS completion conditions
 

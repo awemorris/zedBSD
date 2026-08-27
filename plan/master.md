@@ -16,8 +16,8 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is `q021`; `ws016-p001` and `ws016-p002`
-are complete, and `ws016-p003` is in progress. It runs
+The current [Queue Book](queue.md) is `q021`; `ws016-p001` through
+`ws016-p003` are complete, and `ws016-p004` is in progress. It runs
 the four WS016 runtime-swap Phases in dependency order: manager, `/dev/system`
 UAPI, native commands, and disposable amd64 QEMU acceptance. The archived
 [q020](queue-q020.md) completed `ws006-p005`, `ws008-p002`, and
@@ -107,7 +107,7 @@ before this long-term product goal is reached.
 | `ws013` | CPAR container partitioning | Proposed; Boot v1 grammar fixed, Runtime topics manually blocked | `ws013-p001` is the only current Phase | Resolve bounded UEFI FAT LFN/parser/menu details until Runtime CPAR holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
-| `ws016` | Runtime swap control | Active (`q021`) | `ws016-p002` complete; `ws016-p003` in progress | Complete p003 commands, then execute p004 amd64 QEMU acceptance | [WS016](ws016-swap-control/ws.md) |
+| `ws016` | Runtime swap control | Active (`q021`) | `ws016-p003` complete; `ws016-p004` in progress | Complete the amd64 QEMU runtime-swap acceptance | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Planned; four implementation Phases Queue-ready | No Phase started; `ws017-p001` is dependency-ready | Queue p001 device-mmap/UAPI, then amd64 backend, Xzed fast path, and UEFI acceptance | [WS017](ws017-lfb-graphics/ws.md) |
 
 ## 4. Milestones

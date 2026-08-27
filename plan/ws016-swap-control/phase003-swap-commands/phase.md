@@ -1,6 +1,6 @@
 # WS016 Phase 003: `/sbin/swapon` and `/sbin/swapoff`
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 WSID: `ws016`
 
@@ -8,7 +8,7 @@ Phase ID: `p003`
 
 Combined ID: `ws016-p003`
 
-Status: Planned; Queue-ready after `ws016-p002`
+Status: Complete (`q021`)
 
 Parent: [WS016](../ws.md)
 
@@ -67,3 +67,16 @@ These are zedBSD extensions; POSIX/SUS does not specify either command.
 
 Stop if a requested selector cannot be represented by the p002 bounded UAPI.
 Do not add an unplanned configuration parser or silently create/format swap.
+
+## Execution result
+
+Completed on 2026-08-28. The two independent base packages share only a small
+header implementation, pass selectors unchanged through the fixed p002 UAPI,
+and implement the exact multi-operand, `--`, diagnostic, continuation, and exit
+status contract. Both native amd64 ELFs build and install as mode 0755 at
+`/sbin/swapon` and `/sbin/swapoff`; PC/AT and PC-98 cross-ABI object builds also
+pass.
+
+SWAP-T009/T010 passed in strict and ASan/UBSan variants. `make -j16`, package
+installation checks, native ELF checks, and `git diff --check` passed without
+`make check`, `.internal/`, or an external implementation.
