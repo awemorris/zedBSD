@@ -4,16 +4,16 @@ Last updated: 2026-08-28
 
 WSID: `ws012`
 
-Status: Active; `ws012-p004` complete in `q018`, p005 in progress, p006 pending
+Status: Active; `ws012-p005` complete in `q018`, p006 in progress
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws012-p004`
+Last verified Phase: `ws012-p005`
 
-Resume point: continue q018 with the in-progress `ws012-p005` interactive
-console, then p006 integration acceptance. The verified p004 dispatcher owns
-grammar, formatting, root checks, runtime control, and locked persistent
-policy; p005 must reuse it rather than duplicate command semantics.
+Resume point: finish q018 through the in-progress `ws012-p006` integration
+acceptance. The verified p005 console is a bounded frontend over the p004
+dispatcher; p006 must consolidate host regressions, production amd64 QEMU,
+persistence/failure behavior, fatal-log scan, and public documentation.
 
 Shared reviews: [WS012 review index](tests/README.md)
 
@@ -67,28 +67,28 @@ when the dependency-ready Phase crosses an approved Queue boundary.
 | `ws012-p002` | [YAML rc.conf model and persistence foundation](phase002-yaml-rcconf/phase.md) | Complete (`q017`) | Strict model, parser, canonical writer, stable lock, atomic replacement, and all-reader migration |
 | `ws012-p003` | [ZSV1 init service-control protocol](phase003-zsv1-init-protocol/phase.md) | Complete (`q018`, 2026-08-28) | Replace the old socket grammar with bounded versioned service/system-action records and typed service/shutdown clients |
 | `ws012-p004` | [Non-interactive service CLI and persistent policy](phase004-service-argv-persistence/phase.md) | Complete (`q018`, 2026-08-28) | Stable argv grammar/output, runtime controls, immediate locked enable/disable, and reload |
-| `ws012-p005` | [Interactive service console](phase005-interactive-console/phase.md) | In progress (`q018`) | Argument-free prompt reuses the argv dispatcher with no candidate/save state |
-| `ws012-p006` | [Service-console integration acceptance](phase006-integration-acceptance/phase.md) | Pending (`q018`); depends on p002-p005 | Host/QEMU lifecycle, concurrency, persistence, failure, cold boot, and documentation evidence |
+| `ws012-p005` | [Interactive service console](phase005-interactive-console/phase.md) | Complete (`q018`, 2026-08-28) | Argument-free prompt reuses the argv dispatcher with no candidate/save state |
+| `ws012-p006` | [Service-console integration acceptance](phase006-integration-acceptance/phase.md) | In progress (`q018`) | Host/QEMU lifecycle, concurrency, persistence, failure, cold boot, and documentation evidence |
 
 The implementation dependency chain is p002 -> p003 -> p004 -> p005 -> p006.
 q017 completed p002. [q018](../queue.md) is executing p003-p006 serially in
-that order; p003-p004 are complete and p005 is the current item.
+that order; p003-p005 are complete and p006 is the current item.
 
 ## Latest completed evidence
 
-q018 p004 added and verified the shared service dispatcher, deterministic
-typed views, strict grammar/root checks, runtime/policy separation, and locked
-canonical enable/disable persistence. Its strict-C17 and ASan/UBSan fixture
-passed, including 20/20 repeated forked two-writer runs; the p002 model and
-persistence fixtures also passed. A response count/token bounds defect found
-during review was corrected at the callback boundary.
+q018 p005 added and verified the bounded argument-free console over the p004
+dispatcher: exact banner/prompt/help, root preflight, line/token bounds, no
+shell interpretation, clean exit, error recovery, fresh requests, and
+immediate persistent policy all passed strict C17, ASan/UBSan, and 20/20
+repeated fixture runs. Unchecked help/diagnostic stream failures found during
+review were corrected.
 
 The saved `config.mk` hash remained
 `3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6` and
-the service production target, formatting, and `git diff --check` passed. The
-The repository-wide `make -j16` gate passed before the Phase checkpoint.
-Neither `make check` nor `.internal/` was used. q018 p003 remains the production
-QEMU evidence for the typed socket and lifecycle paths.
+repository-wide `make -j16`, formatting, and `git diff --check` passed. Neither
+`make check` nor `.internal/` was used. The p004 regression preserved its
+shared-dispatcher and concurrent-writer result; p006 now owns final QEMU and
+documentation acceptance.
 
 ## Accepted service-control decisions
 

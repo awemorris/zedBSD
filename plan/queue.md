@@ -38,8 +38,8 @@ unversioned socket grammar is removed without a compatibility path.
 | --- | --- | --- | --- | --- |
 | 1 | `ws012-p003` | [WS012](ws012-service-console/ws.md), [Phase](ws012-service-console/phase003-zsv1-init-protocol/phase.md), [tests](ws012-service-console/tests/README.md) | completed | PID 1 and every installed service/shutdown client use bounded, terminated ZSV1 service and system-action records with no display-text parsing or unversioned fallback |
 | 2 | `ws012-p004` | [WS012](ws012-service-console/ws.md), [Phase](ws012-service-console/phase004-service-argv-persistence/phase.md), [tests](ws012-service-console/tests/README.md) | completed | The argv CLI has fixed grammar/output/exit status, separates runtime control from locked persistent policy, and uses typed ZSV1 state |
-| 3 | `ws012-p005` | [WS012](ws012-service-console/ws.md), [Phase](ws012-service-console/phase005-interactive-console/phase.md), [tests](ws012-service-console/tests/README.md) | in-progress | Argument-free service enters the bounded native console and reuses the p004 dispatcher without candidate/save state |
-| 4 | `ws012-p006` | [WS012](ws012-service-console/ws.md), [Phase](ws012-service-console/phase006-integration-acceptance/phase.md), [tests](ws012-service-console/tests/README.md) | pending | Focused fixtures, production amd64 QEMU behavior, persistence/failure/concurrency cases, fatal-log scan, and public documentation prove the complete WS012 contract |
+| 3 | `ws012-p005` | [WS012](ws012-service-console/ws.md), [Phase](ws012-service-console/phase005-interactive-console/phase.md), [tests](ws012-service-console/tests/README.md) | completed | Argument-free service enters the bounded native console and reuses the p004 dispatcher without candidate/save state |
+| 4 | `ws012-p006` | [WS012](ws012-service-console/ws.md), [Phase](ws012-service-console/phase006-integration-acceptance/phase.md), [tests](ws012-service-console/tests/README.md) | in-progress | Focused fixtures, production amd64 QEMU behavior, persistence/failure/concurrency cases, fatal-log scan, and public documentation prove the complete WS012 contract |
 
 ## Entry evidence and dependency order
 
@@ -89,8 +89,8 @@ a clean fatal-log scan. See
 The saved `config.mk` SHA-256 remained
 `3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`, and
 `git diff --check` passed. `make check` was not run and `.internal/` was not
-used. The following p004 item is also complete; q018 remains in progress with
-`ws012-p005` as the current item.
+used. The following p004-p005 items are also complete; q018 remains in progress
+with `ws012-p006` as the current item.
 
 ## `ws012-p004` result
 
@@ -108,8 +108,27 @@ were rerun and passed. Review also found and fixed missing callback-response
 count/token bounds before fixed-array/string use. The service production target,
 repository-wide `make -j16`, formatting, and `git diff --check` passed. The saved `config.mk` hash
 remained `3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`.
+`make check` was not run and `.internal/` was not used. The following p005 item
+is also complete; q018 remains in progress with `ws012-p006` as the current
+item.
+
+## `ws012-p005` result
+
+`ws012-p005` completed on 2026-08-28. Argument-free service now enters the
+exact root-only banner/prompt loop around the p004 dispatcher. The reader
+accepts 511 bytes, completely consumes and rejects 512 or more, tokenizes at
+most 16 space/tab fields without shell interpretation, exposes help/? without
+save/commit state, and cleanly handles EOF/exit/quit. Local, dispatcher,
+malformed-input, and backend failures recover to a fresh prompt and request;
+there is no global candidate or lock outside the existing per-update lock.
+
+The production console fixture passed strict C17, ASan/UBSan, and 20/20
+repeated runs; the p004 regression passed. Review found and fixed ignored
+help/diagnostic stream-write failures. Repository-wide `make -j16`, formatting,
+and `git diff --check` passed. The saved `config.mk` hash remained
+`3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`.
 `make check` was not run and `.internal/` was not used. q018 remains in progress
-with `ws012-p005` as the current item.
+with `ws012-p006` as the current item.
 
 ## Phase checkpoint and push policy
 

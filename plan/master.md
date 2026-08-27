@@ -17,9 +17,9 @@ The immediate north star is:
 > establish a working network path with reproducible evidence.
 
 The current [Queue Book](queue.md) is `q018`, in progress. It executes
-`ws012-p003` through p006 serially; p003-p004 completed their ZSV1 and argv /
-persistent-policy contracts, p005 is now in progress, and p006 remains pending.
-The preceding
+`ws012-p003` through p006 serially; p003-p005 completed their ZSV1, argv /
+persistent-policy, and interactive-console contracts, and p006 integration
+acceptance is now in progress. The preceding
 [q017](queue-q017.md) completed `ws012-p002`: the strict YAML rc.conf host
 fixtures, production build, and disposable amd64 QEMU persistence/reboot proof
 all passed. [q016](queue-q016.md) completed `ws004-p009`.
@@ -94,7 +94,7 @@ before this long-term product goal is reached.
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
-| `ws012` | Service administration console | Active; p003-p004 complete in `q018`, p005 in progress, p006 pending | `ws012-p004` complete; p005 current | Continue q018 with the shared-dispatcher interactive console, then integration acceptance | [WS012](ws012-service-console/ws.md) |
+| `ws012` | Service administration console | Active; p003-p005 complete in `q018`, p006 in progress | `ws012-p005` complete; p006 current | Finish q018 through consolidated host/QEMU/failure/documentation acceptance | [WS012](ws012-service-console/ws.md) |
 | `ws013` | CPAR container partitioning | Proposed; Boot v1 grammar fixed, Runtime topics manually blocked | `ws013-p001` is the only current Phase | Resolve bounded UEFI FAT LFN/parser/menu details until Runtime CPAR holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
