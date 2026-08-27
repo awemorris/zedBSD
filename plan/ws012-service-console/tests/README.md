@@ -22,8 +22,8 @@ for their owning approved Queue Phases.
 | `SVC-T001` | `ws012-p002` | Passed (`q017`) | YAML accepted/rejected grammar, semantic bounds, canonical round-trip, service-definition parser separation, all-reader migration |
 | `SVC-T002` | `ws012-p002` | Passed (`q017`) | Stable lock contention, two-writer no-lost-update, temporary/sync/rename failure preserving the old file |
 | `SVC-T003` | `ws012-p003` | Passed (`q018`, 2026-08-28) | ZSV1 request/record grammar, partial/fragmented I/O, client `SHUT_WR` and server EOF-before-dispatch gating, bounded stalled-input rejection, bounds/versions/END framing, `MSG_NOSIGNAL` disconnect safety, one 310-second whole-request deadline, synchronous RELOAD results, coherent LIST/SHOW snapshots, dependency token/count validation, root-only authorization, and HALT/POWEROFF/REBOOT clients whose actions occur only after complete `OK`+`END` transmission; v1 POWEROFF-to-HALT backend mapping is explicit |
-| `SVC-T004` | `ws012-p004` | Planned | Argv grammar, exit status, deterministic list/detail output, runtime-only actions, policy-only actions, persist-success/reload-failure |
-| `SVC-T005` | `ws012-p005` | Planned | Prompt/help, shared commands, error recovery, EOF/exit, bounded input, concurrent console/argv writers |
+| `SVC-T004` | `ws012-p004` | Passed (`q018`, 2026-08-28) | Argv grammar, exit status, deterministic list/detail output, runtime-only actions, policy-only actions, persist-success/reload-failure |
+| `SVC-T005` | `ws012-p005` | In progress (`q018`) | Prompt/help, shared commands, error recovery, EOF/exit, bounded input, concurrent console/argv writers |
 | `SVC-T006` | `ws012-p006` | Planned | Production amd64 QEMU boot, service lifecycle, reload, persistence across reboot, malformed reload preservation, fatal-log scan |
 
 ## q017 evidence
@@ -57,3 +57,23 @@ for their owning approved Queue Phases.
   `3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`.
   `git diff --check` passed. `make check` was not run and `.internal/` was not
   used.
+
+## q018 p004 evidence
+
+- The production dispatcher fixture passed strict C17 and ASan/UBSan runs. It
+  covered grammar and exit 0/1/2, root preflight, all six sorted lifecycle
+  states, absent PID, list/show and show/status aliases, metadata/arguments,
+  sorted dependencies, exact runtime tokens, typed/transport/wrong-token
+  failures, and runtime-versus-policy separation.
+- Real rc.conf and assignment APIs proved definition-plus-SHOW preflight,
+  canonical atomic enable/disable persistence, unrelated-field preservation,
+  RELOAD-only policy reconciliation, no write for missing/invalid definitions,
+  and changed/stale diagnostics without rollback after three reload-failure
+  classes. Forked two-writer acceptance passed 20/20 repeated runs.
+- Response count/token bounds are now checked at the dispatcher callback
+  boundary before fixed-array and string operations. The p002 model and
+  persistence fixtures were rerun and passed.
+- The service production target, repository-wide `make -j16`, formatting, and
+  `git diff --check` passed. The saved `config.mk` SHA-256 remained
+  `3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`.
+  `make check` was not run and `.internal/` was not used.

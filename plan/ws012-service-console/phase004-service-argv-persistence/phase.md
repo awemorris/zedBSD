@@ -1,6 +1,6 @@
 # WS012 Phase 004: non-interactive service CLI and persistent policy
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 WSID: `ws012`
 
@@ -8,7 +8,7 @@ Phase ID: `p004`
 
 Combined ID: `ws012-p004`
 
-Status: Planned; Queue-ready after `ws012-p003`
+Status: Completed (`q018`, 2026-08-28)
 
 Parent: [WS012](../ws.md)
 
@@ -104,6 +104,36 @@ dependency closure or container-specific column is added.
 - focused tests and `make -j16` pass, and `git diff --check` passes without
   `make check` or `.internal/` use.
 
+## Completion record (`q018`)
+
+- `/sbin/service` now enters a shared context-driven dispatcher used by the
+  argv frontend and available to p005. It enforces the fixed grammar and exit
+  statuses 0/1/2, validates effective UID 0 before any backend operation, and
+  decodes typed ZSV1 results without forwarding server display text.
+- LIST and argument-free SHOW share a bytewise-sorted deterministic table.
+  SHOW NAME and STATUS NAME share a deterministic detail view containing all
+  six lifecycle states, `-` for an absent PID, validated type/command/arguments
+  and restart metadata, and sorted direct dependencies.
+- START, STOP, RESTART, and RELOAD affect only runtime state. ENABLE and
+  DISABLE validate the service definition and PID 1 SHOW record before taking
+  the stable rc.conf lock, atomically publish canonical YAML, and then request
+  RELOAD. A post-persistence transport, typed-error, or wrong-token failure
+  reports that policy changed and runtime policy may be stale; it never rolls
+  back over a possible concurrent update.
+- Review exposed a response-boundary defect: forged or invalid callback counts
+  and unterminated result tokens could reach fixed-array or string operations.
+  The dispatcher now validates service/dependency counts and token termination
+  immediately after every callback, before copy, sort, or comparison.
+- The production-backed service-command fixture passed strict C17, ASan/UBSan,
+  exact grammar/output/failure cases, and 20/20 repeated forked two-writer
+  runs. The p002 strict-model and persistence fixtures were rerun and passed.
+  The service production target and the repository-wide `make -j16` gate
+  passed.
+- Formatting and `git diff --check` passed. The saved `config.mk` SHA-256
+  remained
+  `3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`.
+  `make check` was not run and `.internal/` was not used.
+
 ## Reconsideration boundary
 
 Stop for a new protocol Phase if stable argv output requires data ZSV1 does
@@ -112,6 +142,6 @@ candidate/save transaction to work around a persistence problem.
 
 ## Interruption / resumption
 
-Not started. After p003 completes, resume by defining the shared typed
-command-result structure and golden output before replacing the current
-`send_request()` passthrough.
+Completed without interruption in q018. Continue with `ws012-p005`, reusing
+the verified dispatcher and result formatting behind the bounded interactive
+console rather than creating a second command implementation.
