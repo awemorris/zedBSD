@@ -12,6 +12,7 @@
 #ifndef ZEDBSD_KERN_SWAP_H
 #define ZEDBSD_KERN_SWAP_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define SWAP_SLOT_NONE			UINT32_MAX
@@ -19,6 +20,16 @@
 #define ZEDBSD_SWAP_FILE_MIN_BYTES	(32U * 1024U * 1024U)
 #define ZEDBSD_SWAP_FILE_MAX_BYTES	(64U * 1024U * 1024U)
 #define ZEDBSD_SWAP_HEADER_SIZE		64U
+#define ZEDBSD_SWAP_V2_UUID_SIZE		8U
+#define ZEDBSD_SWAP_V2_LABEL_SIZE	20U
+
+struct swap_header_info {
+	uint32_t version;
+	uint64_t backing_bytes;
+	uint64_t slot_count;
+	uint8_t uuid[ZEDBSD_SWAP_V2_UUID_SIZE];
+	char label[ZEDBSD_SWAP_V2_LABEL_SIZE];
+};
 
 struct swap_backend_ops {
 	int (
@@ -96,7 +107,7 @@ swap_shutdown(
 	struct swap_backend *backend);
 
 
-void
+int
 swap_set_system_backend(
 	struct swap_backend *backend);
 
@@ -116,6 +127,18 @@ swap_header_checksum(
 int
 swap_header_validate(
 	const uint8_t *header,
-	uint32_t file_bytes);
+	uint64_t backing_bytes);
+
+int
+swap_header_parse(
+	const uint8_t *header,
+	uint64_t backing_bytes,
+	struct swap_header_info *result);
+
+int
+swap_header_uuid_format(
+	const struct swap_header_info *header,
+	char *output,
+	size_t capacity);
 
 #endif

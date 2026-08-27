@@ -1,5 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/vfs.h"
+#include "kern/boot-parameters.h"
+#include "kern/boot-source.h"
 #include "kern/disk.h"
 #include "kern/block-identity.h"
 #include "kern/fat-vfs.h"
@@ -21,6 +23,9 @@
 #include "kern/overlayfs.h"
 #include "kern/loop.h"
 #include "kern/klog.h"
+#include "kern/inode.h"
+#include "kern/swap-boot.h"
+#include "kern/swap-source.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -35,19 +40,21 @@
 		kern_logf(__VA_ARGS__);                                        \
 	} while (0)
 
-#if defined(HAL_ARCH_I386)
-#define ROOTFS_IMAGE_PRIMARY "/rootfs.img"
-#define ROOTFS_IMAGE_UNIFIED_PC98 "/rootfs.98"
-#define ROOTFS_IMAGE_UNIFIED_OTHER "/rootfs.x86"
-#elif defined(HAL_ARCH_AMD64)
-#define ROOTFS_IMAGE_PRIMARY "/rootfs.img"
-#define ROOTFS_IMAGE_UNIFIED_OTHER "/rootfs.x64"
-#elif defined(HAL_ARCH_ARM64)
-#define ROOTFS_IMAGE_PRIMARY "/rootfs.img"
-#define ROOTFS_IMAGE_UNIFIED_OTHER "/rootfs.rp4"
+#if !defined(HAL_ARCH_I386) && !defined(HAL_ARCH_AMD64)
+#define VFS_LEGACY_NULL_AUTOROOT 1
+#endif
+
+#if defined(HAL_ARCH_ARM64)
+#define LEGACY_ROOTFS_IMAGE_PRIMARY "/rootfs.img"
+#define LEGACY_ROOTFS_IMAGE_UNIFIED "/rootfs.rp4"
+#define LEGACY_DATA_IMAGE "/data.img"
 #endif
 
 struct cwdinfo kern_cwdinfo __attribute__((section(".vfs_bss")));
+static struct kern_boot_source_context boot_sources
+	__attribute__((section(".vfs_bss")));
+static struct kern_swap_source_set swap_sources
+	__attribute__((section(".vfs_bss")));
 
 static int
 vfs_fail(const char *stage, int error)
@@ -68,79 +75,6 @@ disk_name(unsigned number, char name[NAME_MAX + 1U])
 	name[at++] = (char)('0' + number % 10);
 	name[at] = '\0';
 	return 0;
-}
-
-static int
-command_line_selector(const char *key, char output[ZEDBSD_BLKID_TEXT_MAX],
-		      unsigned *mount_flags)
-{
-	const char *line = hal_get_arch_handoff("boot.command-line");
-	size_t key_length = strlen(key);
-	if (line == NULL)
-		return ENOENT;
-	while (*line != '\0') {
-		const char *start;
-		size_t length;
-		while (*line == ' ')
-			line++;
-		start = line;
-		while (*line != '\0' && *line != ' ')
-			line++;
-		length = (size_t)(line - start);
-		if (length > key_length &&
-		    memcmp(start, key, key_length) == 0) {
-			start += key_length;
-			length -= key_length;
-			/* ro/rw is a mount option, not part of the identity. */
-			for (size_t i = 0; i < length; i++)
-				if (start[i] == ',') {
-					const char *option = start + i + 1U;
-					size_t option_length = length - i - 1U;
-					if (mount_flags != NULL &&
-					    option_length == 2U &&
-					    memcmp(option, "ro", 2U) == 0)
-						*mount_flags = MOUNT_READ_ONLY;
-					else if (mount_flags == NULL ||
-						 !(option_length == 2U &&
-						   memcmp(option, "rw", 2U) ==
-						       0))
-						return EINVAL;
-					length = i;
-					break;
-				}
-			if (length == 0 || length >= ZEDBSD_BLKID_TEXT_MAX)
-				return EINVAL;
-			memcpy(output, start, length);
-			output[length] = '\0';
-			return 0;
-		}
-	}
-	return ENOENT;
-}
-
-static int
-boot_partition_selector(char output[ZEDBSD_BLKID_TEXT_MAX])
-{
-	const char *automatic;
-	size_t length;
-	int error = command_line_selector("boot=", output, NULL);
-
-	if (error != ENOENT)
-		return error;
-	automatic = hal_get_arch_handoff("boot.selector");
-	if (automatic == NULL)
-		return ENOENT;
-	length = strlen(automatic);
-	if (length == 0 || length >= ZEDBSD_BLKID_TEXT_MAX)
-		return EINVAL;
-	memcpy(output, automatic, length + 1U);
-	return 0;
-}
-
-static int
-boot_root_selector(char output[ZEDBSD_BLKID_TEXT_MAX], unsigned *mount_flags)
-{
-	return command_line_selector("root=", output, mount_flags);
 }
 
 static int
@@ -167,6 +101,7 @@ vfs_ensure_root_directory(const struct path *root, const char *name,
 	return error;
 }
 
+#if defined(VFS_LEGACY_NULL_AUTOROOT)
 static VFS_HIGH int
 ufs1_root_marker_matches(struct disk *disk, int *matches)
 {
@@ -211,34 +146,522 @@ out:
 	return error;
 }
 
+#if defined(HAL_ARCH_ARM64)
+struct vfs_legacy_overlay_setup {
+	struct path lower_root;
+	struct path upper_root;
+	struct disk *lower_loop;
+	struct disk *upper_loop;
+	struct mount *boot_mount;
+	struct mount *lower_mount;
+	struct mount *upper_mount;
+};
+
+static void
+vfs_legacy_overlay_setup_init(struct vfs_legacy_overlay_setup *setup)
+{
+	memset(setup, 0, sizeof(*setup));
+	path_init(&setup->lower_root);
+	path_init(&setup->upper_root);
+}
+
+static int
+vfs_legacy_overlay_setup_cleanup(struct vfs_legacy_overlay_setup *setup)
+{
+	int error, first_error = 0;
+
+	path_release(&setup->upper_root);
+	path_release(&setup->lower_root);
+	if (setup->upper_mount != NULL) {
+		error = unmount_private(setup->upper_mount);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		if (error == 0)
+			setup->upper_mount = NULL;
+	}
+	if (setup->lower_mount != NULL) {
+		error = unmount_private(setup->lower_mount);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		if (error == 0)
+			setup->lower_mount = NULL;
+	}
+	if (setup->upper_loop != NULL) {
+		error = loop_detach(setup->upper_loop);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		if (error == 0)
+			setup->upper_loop = NULL;
+	}
+	if (setup->lower_loop != NULL) {
+		error = loop_detach(setup->lower_loop);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		if (error == 0)
+			setup->lower_loop = NULL;
+	}
+	if (setup->boot_mount != NULL) {
+		error = unmount_private(setup->boot_mount);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		if (error == 0)
+			setup->boot_mount = NULL;
+	}
+	return first_error;
+}
+
+static VFS_HIGH int
+vfs_mount_legacy_arm_overlay(struct disk *boot_partition,
+			     struct mount **root_out)
+{
+	struct vfs_legacy_overlay_setup setup;
+	struct overlay_mount_args args;
+	struct path boot_root;
+	const char *stage = "mount legacy boot partition";
+	int cleanup_error, error;
+
+	vfs_legacy_overlay_setup_init(&setup);
+	path_init(&boot_root);
+	error = mount_private("auto", boot_partition, 0, NULL,
+	    &setup.boot_mount);
+	if (error != 0)
+		goto fail;
+	path_set(&boot_root, setup.boot_mount, setup.boot_mount->m_root);
+	stage = "attach legacy rootfs image";
+	error = loop_attach_path(&boot_root, LEGACY_ROOTFS_IMAGE_PRIMARY,
+	    LOOP_READ_ONLY, &setup.lower_loop);
+	if (error == ENOENT)
+		error = loop_attach_path(&boot_root, LEGACY_ROOTFS_IMAGE_UNIFIED,
+		    LOOP_READ_ONLY, &setup.lower_loop);
+	if (error == ENOENT && setup.lower_loop == NULL) {
+		path_release(&boot_root);
+		cleanup_error = vfs_legacy_overlay_setup_cleanup(&setup);
+		if (cleanup_error != 0)
+			return vfs_fail("release legacy boot mount", cleanup_error);
+		return ENOENT;
+	}
+	if (error != 0)
+		goto fail;
+	stage = "attach legacy data image";
+	error = loop_attach_path(&boot_root, LEGACY_DATA_IMAGE, LOOP_READ_WRITE,
+	    &setup.upper_loop);
+	path_release(&boot_root);
+	if (error != 0)
+		goto fail;
+
+	VFS_LOG("vfs: %s <- legacy rootfs image (private, read-only)\n",
+	    setup.lower_loop->d_name);
+	VFS_LOG("vfs: %s <- legacy data image (private, read-write)\n",
+	    setup.upper_loop->d_name);
+	stage = "mount legacy rootfs image";
+	error = mount_private("auto", setup.lower_loop, MOUNT_READ_ONLY, NULL,
+	    &setup.lower_mount);
+	if (error != 0)
+		goto fail;
+	stage = "mount legacy data image";
+	error = mount_private("auto", setup.upper_loop, 0, NULL,
+	    &setup.upper_mount);
+	if (error != 0)
+		goto fail;
+	path_set(&setup.lower_root, setup.lower_mount,
+	    setup.lower_mount->m_root);
+	path_set(&setup.upper_root, setup.upper_mount,
+	    setup.upper_mount->m_root);
+	memset(&args, 0, sizeof(args));
+	args.upper = setup.upper_root;
+	args.lower = setup.lower_root;
+	args.flags = OVERLAY_READ_WRITE;
+	stage = "mount legacy root overlay";
+	error = mount_root_create("overlay", 0, &args, root_out);
+	if (error != 0)
+		goto fail;
+	VFS_LOG("vfs: root=legacy-overlay lower=%s upper=%s\n",
+	    setup.lower_loop->d_name, setup.upper_loop->d_name);
+	path_release(&setup.upper_root);
+	path_release(&setup.lower_root);
+	return 0;
+
+fail:
+	path_release(&boot_root);
+	cleanup_error = vfs_legacy_overlay_setup_cleanup(&setup);
+	if (cleanup_error != 0)
+		VFS_LOG("vfs: %s cleanup failed (error %d)\n", stage,
+		    cleanup_error);
+	return vfs_fail(stage, error);
+}
+#endif
+
+static VFS_HIGH int
+vfs_mount_legacy_root(struct disk *boot_partition,
+		      struct disk *boot_physical, struct disk **root_disk_out,
+		      struct mount **root_out)
+{
+	struct disk *root_partition = NULL;
+	struct fat_mount_args args;
+	unsigned index;
+	int error;
+
+	*root_disk_out = NULL;
+	*root_out = NULL;
+	if (boot_partition == NULL)
+		return vfs_fail("find loader boot partition", ENXIO);
+	for (index = 0; index < partition_count(); index++) {
+		const struct partition *partition = partition_at(index);
+		int matches = 0;
+
+		if (partition == NULL || partition->p_disk == NULL ||
+		    partition->p_disk == boot_partition ||
+		    partition->p_parent != boot_physical)
+			continue;
+		error = ufs1_root_marker_matches(partition->p_disk, &matches);
+		if (error != 0)
+			return vfs_fail("inspect legacy UFS1 root candidate", error);
+		if (!matches)
+			continue;
+		if (root_partition != NULL)
+			return vfs_fail("ambiguous legacy UFS1 root candidates",
+			    EINVAL);
+		root_partition = partition->p_disk;
+	}
+
+#if defined(HAL_ARCH_ARM64)
+	if (root_partition == NULL) {
+		error = vfs_mount_legacy_arm_overlay(boot_partition, root_out);
+		if (error == 0)
+			return 0;
+		if (error != ENOENT)
+			return error;
+	}
+#endif
+
+	if (root_partition != NULL) {
+		disk_ref(root_partition);
+		args.fspec = root_partition->d_name;
+		error = mount_root_create("auto", 0, &args, root_out);
+		if (error != 0) {
+			disk_release(root_partition);
+			return vfs_fail("mount legacy UFS1 root", error);
+		}
+		*root_disk_out = root_partition;
+		return 0;
+	}
+
+	args.fspec = boot_partition->d_name;
+	error = mount_root_create("auto", 0, &args, root_out);
+	if (error != 0)
+		return vfs_fail("mount legacy boot partition root", error);
+	return 0;
+}
+#endif
+
+struct vfs_overlay_setup {
+	struct path lower_file_path;
+	struct path upper_file_path;
+	struct path lower_root;
+	struct path upper_root;
+	struct file *lower_file;
+	struct file *upper_file;
+	struct disk *lower_loop;
+	struct disk *upper_loop;
+	struct mount *lower_mount;
+	struct mount *upper_mount;
+};
+
+static void
+vfs_overlay_setup_init(struct vfs_overlay_setup *setup)
+{
+	memset(setup, 0, sizeof(*setup));
+	path_init(&setup->lower_file_path);
+	path_init(&setup->upper_file_path);
+	path_init(&setup->lower_root);
+	path_init(&setup->upper_root);
+}
+
+static int
+vfs_overlay_setup_cleanup(struct vfs_overlay_setup *setup)
+{
+	int error, first_error = 0;
+
+	path_release(&setup->upper_root);
+	path_release(&setup->lower_root);
+	if (setup->upper_mount != NULL) {
+		error = unmount_private(setup->upper_mount);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		if (error == 0)
+			setup->upper_mount = NULL;
+	}
+	if (setup->lower_mount != NULL) {
+		error = unmount_private(setup->lower_mount);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		if (error == 0)
+			setup->lower_mount = NULL;
+	}
+	if (setup->upper_loop != NULL) {
+		error = loop_detach(setup->upper_loop);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		if (error == 0)
+			setup->upper_loop = NULL;
+	}
+	if (setup->lower_loop != NULL) {
+		error = loop_detach(setup->lower_loop);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		if (error == 0)
+			setup->lower_loop = NULL;
+	}
+	if (setup->upper_file != NULL) {
+		error = file_close(setup->upper_file);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		setup->upper_file = NULL;
+	}
+	if (setup->lower_file != NULL) {
+		error = file_close(setup->lower_file);
+		if (first_error == 0 && error != 0)
+			first_error = error;
+		setup->lower_file = NULL;
+	}
+	path_release(&setup->upper_file_path);
+	path_release(&setup->lower_file_path);
+	return first_error;
+}
+
+static void
+vfs_overlay_setup_release_transient(struct vfs_overlay_setup *setup)
+{
+	path_release(&setup->upper_root);
+	path_release(&setup->lower_root);
+	if (setup->upper_file != NULL) {
+		(void)file_close(setup->upper_file);
+		setup->upper_file = NULL;
+	}
+	if (setup->lower_file != NULL) {
+		(void)file_close(setup->lower_file);
+		setup->lower_file = NULL;
+	}
+	path_release(&setup->upper_file_path);
+	path_release(&setup->lower_file_path);
+}
+
+static VFS_HIGH int
+vfs_mount_overlay_root(const struct kern_boot_parameters *parameters,
+			       struct mount **root_out)
+{
+	struct vfs_overlay_setup setup;
+	struct overlay_mount_args args;
+	const char *lower_text = kern_boot_parameters_overlay_root(parameters);
+	const char *upper_text = kern_boot_parameters_overlay_data(parameters);
+	const char *stage = "resolve overlay-root";
+	unsigned lower_slot = 0, upper_slot = 0;
+	int cleanup_error, error;
+
+	vfs_overlay_setup_init(&setup);
+	error = kern_boot_source_lookup(&boot_sources, lower_text, &lower_slot,
+	    &setup.lower_file_path);
+	if (error != 0)
+		goto fail;
+	stage = "resolve overlay-data";
+	error = kern_boot_source_lookup(&boot_sources, upper_text, &upper_slot,
+	    &setup.upper_file_path);
+	if (error != 0)
+		goto fail;
+	stage = "validate overlay image files";
+	if (setup.lower_file_path.p_inode->i_type != INODE_REG ||
+	    setup.upper_file_path.p_inode->i_type != INODE_REG) {
+		error = EINVAL;
+		goto fail;
+	}
+	if (path_equal(&setup.lower_file_path, &setup.upper_file_path) ||
+	    (setup.lower_file_path.p_mount->m_disk != NULL &&
+	     setup.upper_file_path.p_mount->m_disk != NULL &&
+	     setup.lower_file_path.p_mount->m_disk->d_dev ==
+		 setup.upper_file_path.p_mount->m_disk->d_dev &&
+	     setup.lower_file_path.p_inode->i_ino ==
+		 setup.upper_file_path.p_inode->i_ino)) {
+		error = EEXIST;
+		goto fail;
+	}
+	if ((setup.upper_file_path.p_mount->m_flags & MOUNT_READ_ONLY) != 0 ||
+	    setup.upper_file_path.p_mount->m_disk == NULL ||
+	    (setup.upper_file_path.p_mount->m_disk->d_flags &
+	     DISK_READ_ONLY) != 0 ||
+	    (setup.upper_file_path.p_inode->i_mode & 0222U) == 0) {
+		error = EROFS;
+		goto fail;
+	}
+	stage = "open overlay-root";
+	error = file_open_resolved(&setup.lower_file_path, O_RDONLY,
+	    &setup.lower_file);
+	if (error != 0)
+		goto fail;
+	stage = "open overlay-data";
+	error = file_open_resolved(&setup.upper_file_path, O_RDWR,
+	    &setup.upper_file);
+	if (error != 0)
+		goto fail;
+	stage = "attach overlay-root loop";
+	error = loop_attach_file(setup.lower_file, LOOP_READ_ONLY,
+	    &setup.lower_loop);
+	if (error != 0)
+		goto fail;
+	stage = "attach overlay-data loop";
+	error = loop_attach_file(setup.upper_file, LOOP_READ_WRITE,
+	    &setup.upper_loop);
+	if (error != 0)
+		goto fail;
+	VFS_LOG("vfs: %s <- %s (private, read-only)\n",
+	    setup.lower_loop->d_name, lower_text);
+	VFS_LOG("vfs: %s <- %s (private, read-write)\n",
+	    setup.upper_loop->d_name, upper_text);
+	stage = "mount overlay-root image";
+	error = mount_private("auto", setup.lower_loop, MOUNT_READ_ONLY, NULL,
+	    &setup.lower_mount);
+	if (error != 0)
+		goto fail;
+	stage = "mount overlay-data image";
+	error = mount_private("auto", setup.upper_loop, 0, NULL,
+	    &setup.upper_mount);
+	if (error != 0)
+		goto fail;
+	path_set(&setup.lower_root, setup.lower_mount,
+	    setup.lower_mount->m_root);
+	path_set(&setup.upper_root, setup.upper_mount,
+	    setup.upper_mount->m_root);
+	/* A successful loop attachment makes its boot slot a system-lifetime
+	 * backing owner.  Mark both before the sole root namespace commit. */
+	error = kern_boot_source_retain_slot(&boot_sources, lower_slot);
+	if (error == 0)
+		error = kern_boot_source_retain_slot(&boot_sources, upper_slot);
+	if (error != 0) {
+		stage = "retain overlay boot slot";
+		goto fail;
+	}
+	stage = "release unused boot slots";
+	error = kern_boot_source_release_unused(&boot_sources);
+	if (error != 0)
+		goto fail;
+	memset(&args, 0, sizeof(args));
+	args.upper = setup.upper_root;
+	args.lower = setup.lower_root;
+	args.flags = OVERLAY_READ_WRITE;
+	stage = "mount root overlay";
+	error = mount_root_create("overlay", 0, &args, root_out);
+	if (error != 0)
+		goto fail;
+	VFS_LOG("vfs: root=overlay lower=%s upper=%s\n", lower_text,
+	    upper_text);
+	vfs_overlay_setup_release_transient(&setup);
+	return 0;
+
+fail:
+	cleanup_error = vfs_overlay_setup_cleanup(&setup);
+	if (cleanup_error != 0)
+		VFS_LOG("vfs: %s cleanup failed (error %d)\n", stage,
+		    cleanup_error);
+	return vfs_fail(stage, error);
+}
+
+static VFS_HIGH int
+vfs_resolve_native_root(const char *selector, struct disk **root_disk_out)
+{
+	struct disk *disk = NULL;
+	int error;
+
+	*root_disk_out = NULL;
+	error = kern_boot_source_selector_validate(selector);
+	if (error != 0)
+		return vfs_fail("validate rootpart selector", error);
+	error = block_identity_resolve(selector, &disk);
+	if (error != 0)
+		return vfs_fail("resolve rootpart selector", error);
+	if ((disk->d_flags & DISK_PARTITION) == 0) {
+		disk_release(disk);
+		return vfs_fail("validate rootpart partition", EINVAL);
+	}
+	VFS_LOG("vfs: rootpart selector %s resolved to /dev/%s\n", selector,
+	    disk->d_name);
+	*root_disk_out = disk;
+	return 0;
+}
+
+static VFS_HIGH int
+vfs_mount_native_root(struct disk *disk, struct mount **root_out)
+{
+	struct fat_mount_args args;
+	unsigned boot_slot;
+	int error;
+
+	if (disk == NULL || root_out == NULL)
+		return vfs_fail("mount resolved rootpart", EINVAL);
+	if (kern_boot_source_find_disk(&boot_sources, disk, &boot_slot) == 0) {
+		error = kern_boot_source_retain_slot(&boot_sources, boot_slot);
+		if (error != 0)
+			return vfs_fail("retain rootpart boot slot", error);
+		error = kern_boot_source_release_unused(&boot_sources);
+		if (error != 0)
+			return vfs_fail("release unused boot slots", error);
+		error = kern_boot_source_promote_root(&boot_sources, boot_slot,
+		    root_out);
+		if (error != 0)
+			return vfs_fail("promote rootpart boot slot", error);
+		VFS_LOG("vfs: rootpart reuses boot%u FAT mount\n", boot_slot);
+	} else {
+		error = kern_boot_source_release_unused(&boot_sources);
+		if (error != 0)
+			return vfs_fail("release unused boot slots", error);
+		args.fspec = disk->d_name;
+		error = mount_root_create("auto", 0, &args, root_out);
+		if (error != 0)
+			return vfs_fail("mount rootpart", error);
+	}
+	return 0;
+}
+
+static int
+vfs_boot_source_contains_disk(const struct disk *disk)
+{
+	unsigned slot;
+
+	return kern_boot_source_find_disk(&boot_sources, disk, &slot) == 0;
+}
+
 int
 kern_vfs_init(const struct boot_handoff *handoff,
 	      const struct boot_device *devices, unsigned device_count)
 {
 	struct disk *physical[PHYSICAL_DISK_MAX];
 	struct disk *boot_physical = NULL;
-	struct disk *boot_partition = NULL;
+	struct disk *loader_boot_partition = NULL;
 	struct disk *root_partition = NULL;
-	struct disk *root_loop = NULL;
-	struct mount *root_mount;
-#ifdef ROOTFS_IMAGE_PRIMARY
-	struct mount *boot_private = NULL;
-	struct disk *data_loop = NULL;
-	struct mount *root_private = NULL;
-	struct mount *data_private = NULL;
-#endif
+	struct mount *root_mount = NULL;
 	struct path root_path;
+	const struct kern_boot_parameters *parameters;
+	enum kern_boot_root_mode root_mode = KERN_BOOT_ROOT_NATIVE;
 	const char *failure_stage = "initialize root cwd";
-	unsigned physical_count = 0, next_number = 1, i;
-	int error;
-	char root_selector[ZEDBSD_BLKID_TEXT_MAX];
-	char boot_selector[ZEDBSD_BLKID_TEXT_MAX];
-	int explicit_root = 0;
-	int explicit_boot = 0;
-	unsigned root_mount_flags = 0;
+	unsigned physical_count = 0, next_number = 1, failed_swap, i;
+	int error, legacy_autoroot = 0;
 
 	if (handoff == NULL)
 		return vfs_fail("handoff", EINVAL);
+	parameters = kern_boot_parameters_current();
+	if (parameters == NULL)
+		return vfs_fail("boot parameter state", EINVAL);
+#if defined(VFS_LEGACY_NULL_AUTOROOT)
+	legacy_autoroot = !kern_boot_parameters_source_present();
+#endif
+	if (!legacy_autoroot) {
+		error = kern_boot_source_root_mode(
+		    kern_boot_parameters_rootpart(parameters),
+		    kern_boot_parameters_overlay_root(parameters),
+		    kern_boot_parameters_overlay_data(parameters), &root_mode);
+		if (error != 0)
+			return vfs_fail("select root mode", error);
+	} else {
+		VFS_LOG("vfs: absent parameter source; using legacy autoroot\n");
+	}
 	if (handoff->version == ZEDBSD_HANDOFF_VERSION_SUN4U)
 		VFS_LOG("vfs: boot BIOS=%02x Sun slice=%u devices=%u\n",
 			handoff->boot_bios_id, handoff->boot_partition_index,
@@ -260,24 +683,9 @@ kern_vfs_init(const struct boot_handoff *handoff,
 			boot_physical = kern_platform_block_device(&devices[i]);
 			break;
 		}
-	for (i = 0; i < disk_count() && physical_count < PHYSICAL_DISK_MAX;
-	     i++) {
-		struct disk *disk = disk_at(i);
-		if (disk != NULL && !(disk->d_flags & DISK_PARTITION))
-			physical[physical_count++] = disk;
-	}
-	VFS_LOG("vfs: native boot disk=%s physical disks=%u\n",
-		boot_physical != NULL ? boot_physical->d_name : "none",
-		physical_count);
-	error = boot_partition_selector(boot_selector);
-	if (error == 0) {
-		explicit_boot = 1;
-		VFS_LOG("vfs: boot selector %s\n", boot_selector);
-	} else if (error != ENOENT) {
-		return vfs_fail("parse boot selector", error);
-	}
 	mount_reset();
 	(void)loop_init();
+	kern_boot_source_context_init(&boot_sources);
 	cdev_reset();
 	partition_reset();
 	error = filesystem_register(&fat_filesystem_type);
@@ -314,6 +722,17 @@ kern_vfs_init(const struct boot_handoff *handoff,
 	error = system_device_register();
 	if (error != 0)
 		return vfs_fail("register system", error);
+	for (i = 0; i < disk_count() && physical_count < PHYSICAL_DISK_MAX;
+	     i++) {
+		struct disk *disk = disk_at(i);
+		if (disk != NULL && !(disk->d_flags & DISK_PARTITION))
+			physical[physical_count++] = disk;
+		else if (disk != NULL)
+			disk_release(disk);
+	}
+	VFS_LOG("vfs: native boot disk=%s physical disks=%u\n",
+		boot_physical != NULL ? boot_physical->d_name : "none",
+		physical_count);
 	for (i = 0; i < physical_count; i++) {
 		struct partition entries[PARTITION_MAX];
 		struct disk_geometry geometry;
@@ -344,7 +763,7 @@ kern_vfs_init(const struct boot_handoff *handoff,
 			    (uint32_t)entries[slot].p_start_block,
 			    (uint32_t)entries[slot].p_data_block,
 			    (uint32_t)entries[slot].p_block_count);
-			if (!explicit_boot && physical[i] == boot_physical &&
+			if (physical[i] == boot_physical &&
 			    ((handoff->version ==
 				  ZEDBSD_HANDOFF_VERSION_MULTIBOOT &&
 			      handoff->boot_partition_scheme ==
@@ -367,161 +786,150 @@ kern_vfs_init(const struct boot_handoff *handoff,
 			     (handoff->version == ZEDBSD_HANDOFF_VERSION_PC98 &&
 			      entries[slot].p_start_block ==
 				  handoff->boot_partition_lba)))
-				boot_partition = entries[slot].p_disk;
+				loader_boot_partition = entries[slot].p_disk;
 		}
 		disk_release(physical[i]);
 	}
-	if (explicit_boot) {
-		error = block_identity_resolve(boot_selector, &boot_partition);
+#if defined(VFS_LEGACY_NULL_AUTOROOT)
+	if (legacy_autoroot) {
+		error = vfs_mount_legacy_root(loader_boot_partition, boot_physical,
+		    &root_partition, &root_mount);
 		if (error != 0)
-			return vfs_fail("resolve boot selector", error);
-		for (i = 0; i < partition_count(); i++) {
-			const struct partition *partition = partition_at(i);
-			if (partition != NULL &&
-			    partition->p_disk == boot_partition) {
-				boot_physical = partition->p_parent;
-				break;
-			}
-		}
-		if (boot_physical == NULL)
-			return vfs_fail("find boot selector parent", ENXIO);
-		VFS_LOG("vfs: boot selector %s resolved to /dev/%s\n",
-			boot_selector, boot_partition->d_name);
-	}
-	if (boot_partition == NULL)
-		return vfs_fail("find boot partition", ENXIO);
-	error = boot_root_selector(root_selector, &root_mount_flags);
-	if (error == 0) {
-		error = block_identity_resolve(root_selector, &root_partition);
-		if (error != 0)
-			return vfs_fail("resolve root selector", error);
-		explicit_root = 1;
-		VFS_LOG("vfs: root selector %s resolved to /dev/%s\n",
-			root_selector, root_partition->d_name);
-	} else if (error != ENOENT)
-		return vfs_fail("parse root selector", error);
-	for (i = 0; i < partition_count(); i++) {
-		const struct partition *partition = partition_at(i);
-		int matches = 0;
-		if (explicit_root || partition == NULL ||
-		    partition->p_disk == NULL ||
-		    partition->p_disk == boot_partition ||
-		    partition->p_parent != boot_physical)
-			continue;
-		error = ufs1_root_marker_matches(partition->p_disk, &matches);
-		if (error != 0)
-			return vfs_fail("inspect UFS1 root candidate", error);
-		if (!matches)
-			continue;
-		if (root_partition != NULL)
-			return vfs_fail("ambiguous UFS1 root candidates",
-					EINVAL);
-		root_partition = partition->p_disk;
-	}
-#ifdef ROOTFS_IMAGE_PRIMARY
-	if (root_partition == NULL) {
-		struct overlay_mount_args overlay_args;
-		const char *mount_stage;
-		struct path private_root;
-		struct path lower;
-		struct path upper;
-		path_init(&private_root);
-		path_init(&lower);
-		path_init(&upper);
-		error = mount_private("auto", boot_partition, 0, NULL,
-				      &boot_private);
-		if (error == 0) {
-			path_set(&private_root, boot_private,
-				 boot_private->m_root);
-			error = loop_attach_path(&private_root,
-						 ROOTFS_IMAGE_PRIMARY,
-						 LOOP_READ_ONLY, &root_loop);
-			if (error == ENOENT) {
-				const char *unified =
-				    ROOTFS_IMAGE_UNIFIED_OTHER;
-#ifdef ROOTFS_IMAGE_UNIFIED_PC98
-				if (handoff->version ==
-				    ZEDBSD_HANDOFF_VERSION_PC98)
-					unified = ROOTFS_IMAGE_UNIFIED_PC98;
-#endif
-				error = loop_attach_path(&private_root, unified,
-							 LOOP_READ_ONLY,
-							 &root_loop);
-			}
-			if (error == 0)
-				error = loop_attach_path(
-				    &private_root, "/data.img", LOOP_READ_WRITE,
-				    &data_loop);
-		}
-		path_release(&private_root);
-		if (error == ENOENT && root_loop == NULL) {
-			(void)unmount_private(boot_private);
-			boot_private = NULL;
-			error = 0;
-		}
-		if (error != 0)
-			return vfs_fail(root_loop != NULL
-					    ? "attach data image"
-					    : "attach rootfs image",
-					error);
-		if (root_loop != NULL && data_loop != NULL) {
-			mount_stage = "mount rootfs image";
-			VFS_LOG(
-			    "vfs: %s <- rootfs image (private, read-only)\n",
-			    root_loop->d_name);
-			VFS_LOG("vfs: %s <- data.img (private, read-write)\n",
-				data_loop->d_name);
-			VFS_LOG("vfs: %s filesystem consistency check...\n",
-				root_loop->d_name);
-			error =
-			    mount_private("auto", root_loop, MOUNT_READ_ONLY,
-					  NULL, &root_private);
-			if (error == 0) {
-				VFS_LOG("vfs: %s UFS consistency check...\n",
-					data_loop->d_name);
-				mount_stage = "mount data image";
-				error = mount_private("auto", data_loop, 0,
-						      NULL, &data_private);
-			}
-			if (error == 0)
-				path_set(&lower, root_private,
-					 root_private->m_root);
-			if (error == 0)
-				path_set(&upper, data_private,
-					 data_private->m_root);
-			memset(&overlay_args, 0, sizeof(overlay_args));
-			overlay_args.upper = upper;
-			overlay_args.lower = lower;
-			overlay_args.flags = OVERLAY_READ_WRITE;
-			if (error == 0) {
-				mount_stage = "mount root overlay";
-				VFS_LOG("vfs: mounting overlay filesystem at "
-					"/...\n");
-				error = mount_root_create(
-				    "overlay", 0, &overlay_args, &root_mount);
-			}
-			path_release(&upper);
-			path_release(&lower);
-			if (error != 0)
-				return vfs_fail(mount_stage, error);
-			VFS_LOG("vfs: root=overlay lower=%s upper=%s\n",
-				root_loop->d_name, data_loop->d_name);
-		}
+			return error;
+		goto root_ready;
 	}
 #endif
-	if (root_partition != NULL) {
-		struct fat_mount_args args = {root_partition->d_name};
-		error = mount_root_create("auto", root_mount_flags, &args,
-					  &root_mount);
-	} else if (root_loop == NULL) {
-		struct fat_mount_args args = {boot_partition->d_name};
-		error = mount_root_create("auto", 0, &args, &root_mount);
+	error = kern_boot_source_context_mount(&boot_sources, parameters,
+	    loader_boot_partition, hal_get_arch_handoff("boot.selector"));
+	if (error != 0) {
+		VFS_LOG("vfs: boot%u %s failed (error %d)\n",
+		    boot_sources.failure_slot,
+		    kern_boot_source_failure_stage_name(
+			boot_sources.failure_stage), error);
+		if (boot_sources.cleanup_error != 0)
+			VFS_LOG("vfs: boot-slot rollback failed (error %d)\n",
+			    boot_sources.cleanup_error);
+		return error;
 	}
-	if (error != 0)
-		return vfs_fail(root_partition != NULL ? "mount UFS1 root"
-				: root_loop != NULL    ? "mount rootfs image"
-						       : "mount boot FAT root",
-				error);
+	for (i = 0; i < KERN_BOOT_SOURCE_SLOT_COUNT; i++)
+		if (boot_sources.slot[i].configured)
+			VFS_LOG("vfs: boot%u %s -> /dev/%s (private FAT)\n", i,
+			    kern_boot_parameters_boot(parameters, i) != NULL ?
+				kern_boot_parameters_boot(parameters, i) :
+				"<loader-origin>",
+				    boot_sources.slot[i].disk->d_name);
+	if (root_mode == KERN_BOOT_ROOT_NATIVE) {
+		error = vfs_resolve_native_root(
+		    kern_boot_parameters_rootpart(parameters), &root_partition);
+		if (error != 0) {
+			int cleanup_error =
+			    kern_boot_source_context_destroy(&boot_sources);
+
+			if (cleanup_error != 0)
+				VFS_LOG("vfs: rootpart resolution rollback failed "
+				    "(error %d)\n", cleanup_error);
+			return error;
+		}
+	}
+
+	/*
+	 * Prepare every selected source as one transaction before root selection.
+	 * File-backed sources retain their private boot slot; root selection may
+	 * then release every unrelated slot without invalidating swap extents.
+	 */
+	error = kern_swap_boot_prepare(parameters, &boot_sources, &swap_sources,
+	    &failed_swap);
+	if (error != 0) {
+		int cleanup_error;
+
+		VFS_LOG("vfs: swap%u prepare failed (error %d)\n", failed_swap,
+		    error);
+		cleanup_error = kern_boot_source_context_destroy(&boot_sources);
+		if (cleanup_error != 0)
+			VFS_LOG("vfs: swap rollback failed (error %d)\n",
+			    cleanup_error);
+		disk_release(root_partition);
+		return error;
+	}
+	if (root_mode == KERN_BOOT_ROOT_NATIVE) {
+		error = kern_swap_source_set_validate_native_root(&swap_sources,
+		    root_partition);
+		if (error != 0) {
+			int swap_error = kern_swap_source_set_abort(&swap_sources);
+			int cleanup_error =
+			    kern_boot_source_context_destroy(&boot_sources);
+
+			if (swap_error != 0)
+				VFS_LOG("vfs: swap alias rollback failed (error %d)\n",
+				    swap_error);
+			if (cleanup_error != 0)
+				VFS_LOG("vfs: swap alias boot-slot rollback failed "
+				    "(error %d)\n", cleanup_error);
+			disk_release(root_partition);
+			return vfs_fail("validate rootpart swap alias", error);
+		}
+	}
+	/*
+	 * Publish the fully prepared aggregate only after a native root has been
+	 * resolved and checked against every raw source.  Root mounting may then
+	 * release unused boot slots or commit the namespace.  If publication
+	 * fails, every retained file source and private FAT mount can still be
+	 * unwound by destroying the untouched boot-source context.
+	 */
+	error = kern_swap_source_set_activate(&swap_sources);
+	if (error != 0) {
+		int swap_error = kern_swap_source_set_abort(&swap_sources);
+		int cleanup_error;
+
+		if (swap_error != 0)
+			VFS_LOG("vfs: swap activation rollback failed (error %d)\n",
+			    swap_error);
+		cleanup_error = kern_boot_source_context_destroy(&boot_sources);
+		if (cleanup_error != 0)
+			VFS_LOG("vfs: swap boot-slot rollback failed (error %d)\n",
+			    cleanup_error);
+		disk_release(root_partition);
+		return vfs_fail("activate swap sources", error);
+	}
+	if (root_mode == KERN_BOOT_ROOT_NATIVE)
+		error = vfs_mount_native_root(root_partition, &root_mount);
+	else
+		error = vfs_mount_overlay_root(parameters, &root_mount);
+	if (error != 0) {
+		int swap_error = kern_swap_source_set_abort(&swap_sources);
+		int cleanup_error;
+
+		if (swap_error != 0)
+			VFS_LOG("vfs: swap rollback failed (error %d)\n",
+			    swap_error);
+		cleanup_error = kern_boot_source_context_destroy(&boot_sources);
+		if (cleanup_error != 0)
+			VFS_LOG("vfs: root-selection rollback failed (error %d)\n",
+			    cleanup_error);
+		disk_release(root_partition);
+		return error;
+	}
+	if (swap_sources.count != 0) {
+		uint32_t total, free_slots;
+		unsigned source_index;
+
+		for (source_index = 0; source_index < swap_sources.count;
+		     source_index++) {
+			const struct kern_swap_source *source =
+			    &swap_sources.range[source_index].source;
+
+			VFS_LOG("swap: swap%u source=%s slots=%u\n",
+			    source->parameter_index,
+			    kern_boot_parameters_swap(parameters,
+				source->parameter_index), source->slot_count);
+		}
+		if (swap_get_stats(&swap_sources.backend, &total, &free_slots) == 0)
+			VFS_LOG("swap: active sources=%u total=%u free=%u\n",
+			    swap_sources.count, total, free_slots);
+	}
+#if defined(VFS_LEGACY_NULL_AUTOROOT)
+root_ready:
+#endif
 	path_set(&root_path, root_mount, root_mount->m_root);
 	error = cwdinfo_init(&kern_cwdinfo, &root_path);
 	if (error != 0)
@@ -578,7 +986,9 @@ kern_vfs_init(const struct boot_handoff *handoff,
 		struct fat_mount_args args;
 		char name[NAME_MAX + 1U];
 		if (partition == NULL || partition->p_disk == NULL ||
-		    partition->p_disk == boot_partition ||
+		    (legacy_autoroot ?
+			 partition->p_disk == loader_boot_partition :
+			 vfs_boot_source_contains_disk(partition->p_disk)) ||
 		    partition->p_disk == root_partition ||
 		    disk_name(next_number, name) != 0)
 			continue;
@@ -588,9 +998,11 @@ kern_vfs_init(const struct boot_handoff *handoff,
 			next_number++;
 	}
 	path_release(&root_path);
+	disk_release(root_partition);
 	return 0;
 
 out_root:
 	path_release(&root_path);
+	disk_release(root_partition);
 	return vfs_fail(failure_stage, error);
 }

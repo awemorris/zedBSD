@@ -1,37 +1,102 @@
 require zedbuild;
 
-func swapChecksum(header) {
+func swapChecksum(header, checksumOffset) {
     var value = 2166136261;
     for (i in 0..Packed.size(header)) {
         var byte = header[i];
-        if (i >= 28 && i < 32) { byte = 0; }
+        if (i >= checksumOffset && i < checksumOffset + 4) { byte = 0; }
         value = ((value ^ byte) * 16777619) & 4294967295;
     }
     return value;
 }
 
+func hexDigit(code) {
+    if (code >= 48 && code <= 57) { return code - 48; }
+    if (code >= 65 && code <= 70) { return code - 65 + 10; }
+    if (code >= 97 && code <= 102) { return code - 97 + 10; }
+    return -1;
+}
+
+func putUuid(header, text) {
+    var compact = "";
+    for (i in 0..String.charCount(text)) {
+        var c = String.charAt(text, i);
+        if (c != "-") { compact = compact + c; }
+    }
+    if (compact == "") { return; }
+    if (String.charCount(compact) != 16) {
+        zbFail("swap UUID must contain exactly 16 hexadecimal digits");
+    }
+    for (i in 0..8) {
+        var high = hexDigit(String.charCodeAt(compact, i * 2));
+        var low = hexDigit(String.charCodeAt(compact, i * 2 + 1));
+        if (high < 0 || low < 0) { zbFail("invalid swap UUID"); }
+        header[32 + i] = high * 16 + low;
+    }
+}
+
+func putLabel(header, text) {
+    var count = String.byteLength(text);
+    if (count > 19 || count != String.charCount(text)) {
+        zbFail("swap label must be at most 19 ASCII bytes");
+    }
+    for (i in 0..count) {
+        var code = String.charCodeAt(text, i);
+        if (code < 32 || code > 126) { zbFail("invalid swap label"); }
+        header[40 + i] = code;
+    }
+}
+
 func main(args) {
     var output = "";
     var sizeMiB = 64;
+    var format = "v2";
+    var uuid = "";
+    var label = "";
     var i = 0;
     while (i < Array.size(args)) {
         if (args[i] == "--output" && i + 1 < Array.size(args)) {
             output = args[i + 1]; i = i + 2;
         } else if (args[i] == "--size-mib" && i + 1 < Array.size(args)) {
             sizeMiB = zbParseNumber(args[i + 1]); i = i + 2;
+        } else if (args[i] == "--format" && i + 1 < Array.size(args)) {
+            format = args[i + 1]; i = i + 2;
+        } else if (args[i] == "--uuid" && i + 1 < Array.size(args)) {
+            uuid = args[i + 1]; i = i + 2;
+        } else if (args[i] == "--label" && i + 1 < Array.size(args)) {
+            label = args[i + 1]; i = i + 2;
         } else { zbFail("invalid make-swapfile argument: " + args[i]); }
     }
     if (output == "") { zbFail("--output is required"); }
-    if (sizeMiB != 32 && sizeMiB != 64) { zbFail("swapfile size must be 32 or 64 MiB"); }
+    if (format != "v1" && format != "v2") { zbFail("--format must be v1 or v2"); }
+    if (format == "v1" && sizeMiB != 32 && sizeMiB != 64) {
+        zbFail("v1 swapfile size must be 32 or 64 MiB");
+    }
+    if (sizeMiB <= 0) { zbFail("swapfile size must be positive"); }
+    if (format == "v1" && (uuid != "" || label != "")) {
+        zbFail("v1 swapfiles do not carry UUID or label");
+    }
     var size = sizeMiB * 1024 * 1024;
     var header = Packed.uint8(64);
-    for (j in 0..8) { header[j] = String.charCodeAt("ZEDSWAP1", j); }
-    zbPut32LE(header, 8, 1);
-    zbPut32LE(header, 12, 64);
-    zbPut32LE(header, 16, 4096);
-    zbPut32LE(header, 20, size);
-    zbPut32LE(header, 24, size / 4096 - 1);
-    zbPut32LE(header, 28, swapChecksum(header));
+    if (format == "v1") {
+        for (j in 0..8) { header[j] = String.charCodeAt("ZEDSWAP1", j); }
+        zbPut32LE(header, 8, 1);
+        zbPut32LE(header, 12, 64);
+        zbPut32LE(header, 16, 4096);
+        zbPut32LE(header, 20, size);
+        zbPut32LE(header, 24, size / 4096 - 1);
+        zbPut32LE(header, 28, swapChecksum(header, 28));
+    } else {
+        for (j in 0..8) { header[j] = String.charCodeAt("ZEDSWAP2", j); }
+        zbPut16LE(header, 8, 2);
+        zbPut16LE(header, 10, 64);
+        zbPut32LE(header, 12, 4096);
+        zbPut64LE(header, 16, size);
+        zbPut64LE(header, 24, size / 4096 - 1);
+        putUuid(header, uuid);
+        putLabel(header, label);
+        zbPut32LE(header, 60, swapChecksum(header, 60));
+    }
     zbEnsureParent(output);
     var temporary = output + ".tmp";
     var file = File.open(temporary, "wb");

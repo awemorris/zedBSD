@@ -191,6 +191,11 @@ mount_private_lookup(
 	struct path *result);
 
 int
+mount_private_promote_root(
+	struct mount *mountp,
+	struct mount **result);
+
+int
 unmount_private(
 	struct mount *mountp);
 

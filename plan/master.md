@@ -16,13 +16,16 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The latest execution record is [queue.md](queue.md) (`q014`, finished).
-`ws003-p010` and BR-T41 pass: one Latitude boot of the frozen image resolved
-the USB root, mounted the writable overlay, started init, reached a root shell,
-and also reached X/`zterm`. No later Queue has been selected. The preceding
-records are
-[q013](queue-q013.md), [q012](queue-q012.md), and
-[q011](queue-q011.md). Closed archived records are
+The current [Queue Book](queue.md) is `q015`, finished, and retained as
+[q015](queue-q015.md). It completed `ws003-p011`--`p015`: BR-T46 passed all
+31 production-loader cells across i386 PC/AT, i386 PC-98, amd64 BIOS, and
+amd64 UEFI in the post-review `q015-br-t46-final-007` run. No subsequent Queue
+is approved. The earlier [q014](queue-q014.md)
+record completed `ws003-p010` and BR-T41 when one Latitude boot resolved the
+USB root, mounted the writable overlay, started init, reached a root shell,
+and also reached X/`zterm`. Earlier records include [q013](queue-q013.md),
+[q012](queue-q012.md), and
+[q011](queue-q011.md). Other closed archived records are
 retained as [q001](queue-q001.md), [q002](queue-q002.md),
 [q003](queue-q003.md), [q004](queue-q004.md),
 [q005](queue-q005.md), [q006](queue-q006.md),
@@ -76,15 +79,19 @@ before this long-term product goal is reached.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Paused, ledger active | `ws001-p013` complete | Select `cksum` or another bounded tier-1 candidate | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | Dell Latitude 5320 bring-up | Active; physical U3 and q014 `ws003-p010` complete | BR-T41 mounted the USB-backed writable overlay and reached init/login/root shell and X/`zterm` once | Extract and separately authorize the next bounded U4/U5 Phase; BR-T30 repeatability and BR-T31 sustained I/O remain | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; automatic USB gate cleared | `ws004-p008` and resumed `p006` automatic milestones complete | Record detailed manual USB acceptance or extract the next hardware Phase | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WPA | Planned | WS002 Phase 20 is the inherited baseline | Start physical-network diagnostic Phase after inventory | [WS005](ws005-networking/ws.md) |
+| `ws003` | Dell Latitude 5320 bring-up | Active; physical U3/q014 and q015 p011--p015 complete | `ws003-p015` completed with BR-T46 31/31 | Extract physical U4/U5 work; BR-T30 repeatability, BR-T31 sustained I/O, and hardware inventory remain | [WS003](ws003-bringup/ws.md) |
+| `ws004` | Hardware expansion | Active; automatic USB gate cleared, checked legacy-HCD IRQ residual planned | `ws004-p008` and resumed `p006` automatic milestones complete; `p009` planned | Record detailed manual USB acceptance or queue `ws004-p009` | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WPA | Planned; USB Ethernet first, WLAN manually blocked | WS002 Phase 20 is the inherited baseline | Classify one USB Ethernet descriptor, then extract the wired physical-network Phase | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | In progress | `ws006-p004` complete PC/AT software milestone | Select Xzed migration after xHCI/USB-HID dependencies, retaining PC-98/X68000 physical-token follow-up | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Blocked before Phase | No Phase started | Obtain the authoritative Noct tree/revision | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Planned; upstream tree available | No Phase started; NOCT-00 is ready to extract | Audit the canonical and submodule trees at the pinned revision before upstream implementation | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
-| `ws011` | Network configuration console | In progress | `ws011-p003` software milestone complete | Retain migrated-DHCP QEMU evidence; wait for VLAN/bridge kernel dependencies | [WS011](ws011-net-config/ws.md) |
+| `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
+| `ws012` | Service administration console | Proposed; concrete YAML/ZSV1 proposals under discussion | `ws012-p001` is the only current Phase | Review the mapping-only rc.conf and newline-delimited init protocol proposals | [WS012](ws012-service-console/ws.md) |
+| `ws013` | CPAR container partitioning | Proposed; Boot v1 grammar fixed, Runtime topics manually blocked | `ws013-p001` is the only current Phase | Resolve bounded UEFI FAT LFN/parser/menu details until Runtime CPAR holds are released | [WS013](ws013-containers/ws.md) |
+| `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
+| `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 
 ## 4. Milestones
 
@@ -93,11 +100,13 @@ before this long-term product goal is reached.
 | M0 — Baseline preserved | Current QEMU boot, init, login, shell, and service behavior remains usable | WS001, WS002 |
 | M1 — QEMU USB root | Automatic milestone complete: identity/reboot, URB and heap corrections, controls, and 500 pristine-copy boots pass; detailed manual acceptance pending | WS003, WS004 |
 | M2 — Latitude USB shell | U3 is complete and one BR-T41 boot reached init/login/root shell and X/`zterm`; full U4/U5, BR-T30 repeatability, and BR-T31 sustained root I/O remain | WS003, WS004, WS009 |
-| M3 — Latitude network | At least one documented physical interface configures and transfers data | WS003, WS004, WS005 |
+| M3 — Latitude network | At least one documented USB Ethernet interface configures and transfers data | WS003, WS004, WS005 |
 | M4 — Native platform devices | NVMe, USB HID, and the selected WLAN work on the target | WS004, WS005, WS006 |
 | M5 — Application environments | X11 is usable and Noct/BeUI supports zedBSD upstream | WS006, WS007, WS008 |
-| M6 — Accelerated graphics | `/dev/gpu0`, i915, the declared Vulkan profile, and GLES-on-Vulkan operate coherently | WS004, WS007 |
-| M7 — Wayland desktop | A zedBSD Wayland compositor/DE runs on the supported input and graphics stacks | WS006, WS007 |
+| M6 — Accelerated graphics | `/dev/gpu0`, i915, the declared Vulkan profile, and GLES-on-Vulkan operate coherently | WS004, WS014, WS007 |
+| M7 — Wayland desktop | A zedBSD Wayland compositor/DE runs on the supported input and graphics stacks | WS006, WS007, WS014 |
+| M8 — CPAR environments | Boot environments are manageable as files, and selected services and runtime environments use immutable images and an honestly documented isolation profile without displacing traditional services | WS002, WS003, WS012, WS013 |
+| M9 — Asymmetric hard real time | A declared μITRON-compatible profile runs resident work on statically reserved RT cores, communicates with POSIX through a bounded message bridge, and meets a published board-specific latency and limited failure-recovery contract | WS001, WS003, WS004, WS009, WS015 |
 | Continuous | POSIX debt and public documentation remain traceable | WS001, WS009, all producers |
 
 ## 5. Dependency map
@@ -106,6 +115,7 @@ before this long-term product goal is reached.
 WS002 service baseline
   +-- WS005 networkd/net/WPA expansion
   +-- WS011 net console + /etc/net.conf
+  +-- WS012 service administration console -- WS013 service containers
 
 WS011 configuration model
   +-- WS005 physical network/WPA backends
@@ -113,15 +123,24 @@ WS011 configuration model
 
 WS003 hardware inventory
   +-- WS004 xHCI + USB storage -- WS003 QEMU/Latitude USB root
-  |                                  +-- WS003 diagnostics/network
+  |                                  +-- USB Ethernet -- WS003/WS005 network
   +-- WS004 PCIe/DMA/interrupts
        +-- NVMe
-       +-- WLAN -- WS005 wpa/networkd
-       +-- i915 -- WS007 GPU/Vulkan/GLES/Wayland
+       +-- RTL8822CE WLAN -- WS005 wpa/networkd (manual hold MB-006)
+       +-- i915 prerequisites -- WS014 GPU/Vulkan/GLES -- WS007 Wayland
 
 WS004 xHCI -- WS006 USB HID -- evdev
                                   +-- WS007 X11/Wayland
                                   +-- WS008 BeUI
+
+WS013 Boot CPAR -- WS003 p011-p015 common x86 parameters
+                  +-- WS003/bootloader FAT32, LFN and boot.cfg menu
+WS013 Runtime CPAR -- WS012 service administration
+                   +-- WS005 optional network profiles
+                   +-- WS004 persistent image storage
+
+WS004 SMP/IRQ/timer/reset + WS001 POSIX boundary
+  +-- WS015 μITRON asymmetric RT domain -- WS009 public API and timing contract
 
 WS001 compliance and WS009 documentation cross all workstreams.
 WS010 supplies host-side build and test scripting used by all workstreams.
@@ -132,11 +151,22 @@ WS010 supplies host-side build and test scripting used by all workstreams.
 1. Preserve M0 and capture the exact Latitude hardware inventory.
 2. Implement QEMU xHCI USB-root boot and stable boot-device selection.
 3. Reach a Latitude USB-root login shell and establish diagnostics.
-4. Bring up a physical network path, NVMe, evdev, and USB HID.
-5. Add the selected WLAN driver and pluggable WPA path; repair X11 and add the
-   upstream Noct target/BeUI backend.
-6. Freeze the GPU UAPI, implement i915, Vulkan, and OpenGL ES 2.0.
+4. Bring up USB Ethernet as the first physical network path, plus NVMe, evdev,
+   and USB HID.
+5. After `MB-006` is released, add the RTL8822CE driver and pluggable WPA path;
+   repair X11 and add the upstream Noct target/BeUI backend.
+6. After its manual hold is released, complete WS014 GPU architecture
+   discussion, then freeze the GPU UAPI and implement i915, Vulkan, and OpenGL
+   ES 2.0 through separately authorized Phases.
 7. Implement the Wayland compositor/desktop environment.
+8. Complete the unblocked UEFI Boot CPAR design. Runtime CPAR and service
+   containers remain outside implementation priority until their manual holds
+   are released.
+9. After `MB-007` is released, complete WS015's μITRON/RT architecture
+   discussion; after its profile, target, isolation, mailbox/filesystem,
+   failure, and evidence decisions are fixed, schedule bounded RT
+   implementation Phases without displacing earlier physical-network and
+   storage milestones.
 
 WS001 and WS009 advance within every wave when bounded work is selected. Lower
 priority POSIX gaps may remain paused if they do not block the active milestone.
@@ -146,15 +176,37 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | Decision | Owning WS | Required before |
 | --- | --- | --- |
 | Exact Latitude BIOS, boot mode, PCI/USB topology and IDs | WS003 | Driver selection and hardware acceptance |
-| Initial Secure Boot scope | WS003 | Freezing the USB image matrix |
-| USB CDC ACM versus ECM/NCM and device-role capability | WS003/WS005 | Any CDC implementation Phase |
-| WLAN controller and firmware policy | WS004/WS005 | WLAN driver/backend Phases |
+| Initial Secure Boot scope | WS003 | Resolved: use UEFI with Secure Boot disabled; signing/key enrollment deferred and not required for NVMe |
+| USB Ethernet interface descriptors and, for vendor-specific interfaces, VID:PID/controller family | WS003/WS004/WS005 | Choose CDC ECM/NCM class frontend or Realtek-family frontend for HW-12/NET-10; ACM is inapplicable |
+| Built-in PCI WLAN identity | WS004/WS005 | Resolved as RTL8822CE `10ec:c822`, subsystem `10ec:c130`; implementation and firmware packaging are manually blocked by `MB-006` |
 | `/etc/net.conf` v1 grammar and empty-collection syntax | WS011 | Parser and boot migration |
-| VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | `ws011-p004` implementation |
+| VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | Manually blocked; `ws011-p004` discussion and implementation |
 | Linux/FreeBSD evdev compatibility profile | WS006 | Resolved by `ws006-p001`; implement `/dev/input/eventN` against it |
-| zedBSD GPU/Vulkan capability profile | WS007 | Publishing `/dev/gpuN` UAPI |
-| Authoritative Noct repository and revision | WS008 | First Noct implementation Phase |
+| zedBSD GPU/Vulkan capability, object, and display-takeover profile | WS014 | Manually blocked; publishing `/dev/gpuN` UAPI or transferring i915 ownership |
+| YAML `/etc/rc.conf` schema and versioned init status/control protocol | WS012 | Review the concrete mapping-only YAML and `ZSV1` proposals before an interactive `/sbin/service` implementation Phase; no migration is required |
+| x86 kernel boot-parameter contract | WS003/WS013 | Resolved and implemented by q015: `boot0`--`boot3`, exclusive `rootpart` or explicit overlay root/data, `swap0`--`swap3`, and `init`; BR-T46 passes all 31 four-platform QEMU cells |
+| UEFI Boot CPAR `boot.cfg`/LFN/menu contract | WS013 | Section grammar maps to the common parameter contract; freeze bounded FAT/parser/menu details before implementation; legacy PC/AT and PC-98 menus are excluded |
+| Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
+| Confirmed-commit implementation bounds | WS011 | Public semantics are fixed: interactive only, explicit timeout, delayed `/etc/net.conf` write, ordinary `commit` confirms, and DHCP is reacquired; freeze timeout maximum, lock path, and diagnostic bounds before implementation |
+| Authoritative Noct repository and revision | WS008 | Resolved: upstream and submodule trees are available at pinned revision `7d856856e16eb2d889ba49f557f2fda4dcaeea7e` |
 | PC/AT boot selector | WS004 | Resolved: reuse UUID/PARTUUID; standard FAT handoff uses UUID |
+| μITRON compatibility and RT isolation contract | WS015 | Manually blocked by `MB-007`; user-mode resident ELF and explicit MMIO grants are fixed, but exact profile, legacy static configuration, RT CPU/IRQ/timer model, RT/POSIX mailbox/filesystem ownership, limited POSIX-failure recovery, and first board-specific latency target remain required before any implementation Phase |
+
+### 7.1 Manual blocking register
+
+These are explicit user holds, not missing implementation authorization. They
+remain visible but are excluded from Queue proposals and active design agendas
+until the user explicitly releases the named hold.
+
+| Hold ID | Owning WS/Phase | Manually blocked topic | Resume condition |
+| --- | --- | --- | --- |
+| `MB-001` | `ws011-p004` | VLAN/bridge detailed design and implementation | User explicitly resumes VLAN/bridge discussion |
+| `MB-002` | `ws013-p001` | Runtime CPAR namespace, isolation, and security model | User explicitly resumes Runtime CPAR namespace discussion |
+| `MB-003` | `ws013-p001` | `cpar run`, `cpar sh`, and `cpar build` grammar/lifecycle | User explicitly resumes Runtime CPAR CLI/build discussion |
+| `MB-004` | `ws013-p001` | Service-container package format, dependencies, updates, config, and data | User explicitly resumes service-container package discussion |
+| `MB-005` | `ws014-p001` | GPU UAPI, capability profiles, display takeover, i915 split, Vulkan/GLES | User explicitly resumes GPU architecture discussion |
+| `MB-006` | `ws004`/`ws005` | RTL8822CE driver, firmware acquisition/republication policy, WPA database/backend, and WLAN integration | User explicitly resumes WLAN discussion after the USB Ethernet milestone |
+| `MB-007` | `ws015-p001` | μITRON profile/UAPI, legacy static configuration, RT/POSIX mailbox and filesystem proxy, scheduling, failure, and timing contracts | User explicitly resumes WS015 architecture/API discussion |
 
 ## 8. Interruption and resumption
 
@@ -186,3 +238,5 @@ Stop the active Phase and update its state before changing the plan when:
 - USB root requires a boot/root architecture change outside the active Phase;
 - a requested compatibility target conflicts with an explicit zedBSD design
   policy.
+- a hard-real-time or POSIX-crash-survival claim cannot be supported by the
+  selected core, interrupt, firmware, memory, or shared-kernel isolation model.

@@ -40,6 +40,10 @@ For example, `ws001-p009` is WS001 Phase 009.
 | `ws009` | Documentation | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and build tools | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | [WS011](ws011-net-config/ws.md) |
+| `ws012` | Service administration console | [WS012](ws012-service-console/ws.md) |
+| `ws013` | CPAR container partitioning | [WS013](ws013-containers/ws.md) |
+| `ws014` | Native GPU stack | [WS014](ws014-gpu/ws.md) |
+| `ws015` | μITRON asymmetric real-time domain | [WS015](ws015-muitron-rt/ws.md) |
 
 Status, interruption, resumption, and evidence rules are defined in
 [governance.md](governance.md).

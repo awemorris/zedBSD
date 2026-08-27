@@ -7,7 +7,7 @@ HAL_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
 	-Iinclude -Iinclude/uapi -Isrc -Isrc/hal/i386 -Ilibc/include \
 	-DHAL_ARCH_I386 -DHAL_BOARD_PCAT -DHAL_PCAT_DEBUGCON
-HAL_PCAT_SOURCES := src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/x86/rtc.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c \
+HAL_PCAT_SOURCES := src/hal/i386/smp.c src/hal/i386/percpu.c src/hal/x86/rtc.c src/hal/x86/boot-parameters.c src/hal/i386/lib.c src/hal/i386/atomic.c src/hal/i386/irq.c \
 	src/hal/i386/mps.c src/hal/i386/acpi.c src/hal/i386/lapic.c \
 	src/hal/i386/ioapic.c src/hal/i386/interrupt-controller.c \
 	src/hal/i386/page.c src/hal/i386/space.c src/hal/i386/int.c \
@@ -54,6 +54,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/system-device.o \
 	$(BUILD)/src/kern/pcat/font.o $(BUILD)/src/kern/pcat/vgafont.o \
 	$(BUILD)/drivers/pcat-graphics.o \
+	$(BUILD)/src/kern/boot-parameters.o \
+	$(KERN_BOOT_SOURCE_OBJS) \
 	$(BUILD)/src/kern/init.o \
 	$(KERN_NET_OBJS)
 
@@ -82,7 +84,9 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/tmpfs.o \
 	$(BUILD)/src/kern/overlayfs.o \
 	$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/swap.o \
-	$(BUILD)/src/kern/swap-fat.o $(BUILD)/src/kern/vm-reclaim.o \
+	$(BUILD)/src/kern/swap-source.o $(BUILD)/src/kern/swap-boot.o \
+	$(BUILD)/src/kern/swap-fat.o \
+	$(BUILD)/src/kern/vm-reclaim.o \
 	$(BUILD)/src/kern/disk.o $(BUILD)/src/kern/partition.o \
 	$(BUILD)/drivers/loop.o $(BUILD)/drivers/dma.o \
 	$(BUILD)/drivers/pci.o $(BUILD)/drivers/pci-pcat.o \
@@ -143,9 +147,14 @@ $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	$(BIOS_LOADER)/vbe.inc \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
-	bootloader/include/elf.inc bootloader/include/amd64-handoff.h
+	bootloader/include/elf.inc bootloader/include/amd64-handoff.h \
+	bootloader/include/boot-parameter-handoff.h \
+	bootloader/include/boot-parameter-record.inc \
+	include/boot/parameter-handoff.h include/boot/parameters.h \
+	$(ZEDBSD_BOOT_PARAMETERS_HEADER)
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
+	$(CC) -m64 -I. -include $(ZEDBSD_BOOT_PARAMETERS_HEADER) \
+		-x assembler-with-cpp -c $< -o $@
 $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o $(BIOS_LOADER)/stage2.ld
 	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
 $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
@@ -166,7 +175,9 @@ $(BUILD)/bootloader/payload32.elf: $(BUILD)/bootloader/payload32.o \
 	$(LD) -m elf_i386 -T bootloader/tests/payload32-pcat.ld $< -o $@
 
 $(BUILD)/bootloader/payload64.o: bootloader/tests/payload64-pcat.S \
-	bootloader/include/amd64-handoff.h
+	bootloader/include/amd64-handoff.h \
+	bootloader/include/boot-parameter-handoff.h \
+	include/boot/parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -I. -c $< -o $@
 

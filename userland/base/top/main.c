@@ -120,6 +120,10 @@ draw(int fd, int batch)
 	printf("%%Cpu(s):  0.0 us,  0.0 sy,  0.0 ni, 100.0 id,  0.0 wa\n");
 	printf("MiB Mem : %8s total, %8s free, %8s used\n", total, freeb, used);
 	printf("MiB Swap: %8s total, %8s free\n\n", swap, swapfree);
+	printf("VM I/O: %llu page-in, %llu page-out, %llu swapped\n\n",
+	       (unsigned long long)vm.vm_page_in,
+	       (unsigned long long)vm.vm_page_out,
+	       (unsigned long long)vm.vm_swapped);
 	puts("    PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     "
 	     "TIME+ COMMAND");
 	for (i = 0; i < count; i++) {

@@ -22,6 +22,11 @@
 
 #define PAGE_SIZE ZEDBSD_PAGE_SIZE
 #define VM_PAGE_SLAB_SLOTS 32U
+#define VM_PRIVATE_PAGE_SLAB_SLOTS 24U
+#define VM_PRIVATE_PAGE_SLAB_FREE_MASK \
+	((1U << VM_PRIVATE_PAGE_SLAB_SLOTS) - 1U)
+#define VM_PAGE_MAP_RECLAIM_RETRIES 4U
+#define VM_PAGE_MAP_RESERVE_PAGES 4U
 
 extern void vmspace_unmap_retire_checkpoint(struct vmspace *, uintptr_t,
 	size_t) __attribute__((weak));
@@ -41,8 +46,23 @@ struct vm_page_slab {
 _Static_assert(sizeof(struct vm_page_slab) <= PAGE_SIZE,
 	"VM page metadata slab exceeds one physical page");
 
+struct vm_private_page_slab {
+	struct hal_pmem memory;
+	struct vm_private_page_slab *next;
+	uint32_t free_mask;
+	unsigned used;
+	struct vm_private_page slots[VM_PRIVATE_PAGE_SLAB_SLOTS];
+};
+
+_Static_assert(VM_PRIVATE_PAGE_SLAB_SLOTS < 32U,
+	"VM private metadata slab bitmap must fit uint32_t");
+_Static_assert(sizeof(struct vm_private_page_slab) <= PAGE_SIZE,
+	"VM private metadata slab exceeds one physical page");
+
 static struct spinlock vm_page_slab_lock;
 static struct vm_page_slab *vm_page_slabs;
+static struct spinlock vm_private_page_slab_lock;
+static struct vm_private_page_slab *vm_private_page_slabs;
 static struct spinlock vmspace_reap_lock;
 static struct vmspace *vmspace_reap_head;
 static struct vmspace *vmspace_reap_tail;
@@ -75,9 +95,12 @@ vmspace_layout_init(void)
 		return;
 	spin_init(&vm_page_slab_lock, LOCK_RANK_VM_OBJECT,
 	    "VM page metadata");
+	spin_init(&vm_private_page_slab_lock, LOCK_RANK_VM_OBJECT,
+	    "VM private metadata");
 	spin_init(&vmspace_reap_lock, LOCK_RANK_VMSPACE,
 	    "VM space reaper");
 	vm_page_slabs = NULL;
+	vm_private_page_slabs = NULL;
 	vmspace_reap_head = vmspace_reap_tail = NULL;
 	vmspace_reap_notify = NULL;
 	vmspace_reap_notify_argument = NULL;
@@ -100,6 +123,30 @@ vmspace_layout_init(void)
 		HAL_FATAL("user address range too small");
 	vm_layout.stack_top = limit - PAGE_SIZE;
 	vm_layout_initialized = 1;
+}
+
+/*
+ * A fault normally reaches allocate_page_frame(), which can reclaim a user
+ * page before retrying physical allocation.  A metadata slab refill happens
+ * first, however, so it needs the same bounded retry or memory pressure can
+ * fail a fault before reclaim is attempted at all.
+ *
+ * Never enter reclaim recursively while the caller owns the cross-VM
+ * metadata lock.  This also covers vmspace_fork(), whose metadata allocation
+ * intentionally remains a nonblocking ENOMEM path while its source VM is
+ * locked.  vm_reclaim_one() itself does not allocate mapping metadata, so one
+ * unlocked retry is sufficient and cannot recurse through this helper.
+ */
+static int
+alloc_vm_metadata_page(struct hal_pmem *memory)
+{
+	int error = alloc_vm_page(memory);
+
+	if (error == HAL_OK)
+		return HAL_OK;
+	if (vm_metadata_owned() || vm_reclaim_one(NULL) != 0)
+		return error;
+	return alloc_vm_page(memory);
 }
 
 static struct vm_page *
@@ -127,10 +174,6 @@ vm_page_slab_take_locked(void)
 struct vm_page *
 vm_page_alloc_metadata(void)
 {
-	const struct hal_pmem_request request = {
-		HAL_PMEM_PADDR_ANY, PAGE_SIZE, PAGE_SIZE,
-		HAL_PMEM_TYPE_RAM, 0
-	};
 	struct hal_pmem memory;
 	struct vm_page_slab *fresh;
 	struct vm_page *page;
@@ -142,8 +185,13 @@ vm_page_alloc_metadata(void)
 	spin_unlock_irqrestore(&vm_page_slab_lock, irq);
 	if (page != NULL)
 		return page;
-	if (hal_pmem_alloc(&request, &memory) != HAL_OK)
-		return NULL;
+	if (alloc_vm_metadata_page(&memory) != HAL_OK) {
+		/* Reclaim or a concurrent free may have returned a slab slot. */
+		irq = spin_lock_irqsave(&vm_page_slab_lock);
+		page = vm_page_slab_take_locked();
+		spin_unlock_irqrestore(&vm_page_slab_lock, irq);
+		return page;
+	}
 	fresh = memory.vaddr;
 	memset(fresh, 0, PAGE_SIZE);
 	fresh->memory = memory;
@@ -165,15 +213,18 @@ vm_page_alloc_metadata(void)
 void
 vm_page_free_metadata(struct vm_page *page)
 {
-	struct vm_page_slab *slab;
+	struct vm_page_slab **link, *slab;
+	struct hal_pmem released;
 	uintptr_t address;
 	unsigned long irq;
+	int release = 0;
 
 	if (page == NULL)
 		return;
 	address = (uintptr_t)page;
 	irq = spin_lock_irqsave(&vm_page_slab_lock);
-	for (slab = vm_page_slabs; slab != NULL; slab = slab->next) {
+	for (link = &vm_page_slabs; (slab = *link) != NULL;
+	     link = &slab->next) {
 		uintptr_t first = (uintptr_t)&slab->slots[0];
 		uintptr_t end = (uintptr_t)&slab->slots[VM_PAGE_SLAB_SLOTS];
 		unsigned slot;
@@ -186,11 +237,123 @@ vm_page_free_metadata(struct vm_page *page)
 		memset(page, 0, sizeof(*page));
 		slab->free_mask |= 1U << slot;
 		slab->used--;
+		if (slab->used == 0) {
+			*link = slab->next;
+			released = slab->memory;
+			release = 1;
+		}
 		spin_unlock_irqrestore(&vm_page_slab_lock, irq);
+		if (release && hal_pmem_free(&released) != HAL_OK)
+			HAL_FATAL("VM page metadata slab free failed");
 		return;
 	}
 	spin_unlock_irqrestore(&vm_page_slab_lock, irq);
 	HAL_FATAL("foreign VM page metadata free");
+}
+
+static struct vm_private_page *
+vm_private_page_slab_take_locked(void)
+{
+	struct vm_private_page_slab *slab;
+	unsigned slot;
+
+	for (slab = vm_private_page_slabs; slab != NULL; slab = slab->next) {
+		if (slab->free_mask == 0)
+			continue;
+		for (slot = 0; slot < VM_PRIVATE_PAGE_SLAB_SLOTS; slot++)
+			if ((slab->free_mask & (1U << slot)) != 0)
+				break;
+		if (slot == VM_PRIVATE_PAGE_SLAB_SLOTS)
+			HAL_FATAL("invalid VM private metadata slab bitmap");
+		slab->free_mask &= ~(1U << slot);
+		slab->used++;
+		memset(&slab->slots[slot], 0, sizeof(slab->slots[slot]));
+		return &slab->slots[slot];
+	}
+	return NULL;
+}
+
+static struct vm_private_page *
+vm_private_page_alloc_metadata(void)
+{
+	struct hal_pmem memory;
+	struct vm_private_page_slab *fresh;
+	struct vm_private_page *backing;
+	unsigned long irq;
+
+	vmspace_layout_init();
+	irq = spin_lock_irqsave(&vm_private_page_slab_lock);
+	backing = vm_private_page_slab_take_locked();
+	spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
+	if (backing != NULL)
+		return backing;
+	if (alloc_vm_metadata_page(&memory) != HAL_OK) {
+		/* Reclaim or a concurrent free may have returned a slab slot. */
+		irq = spin_lock_irqsave(&vm_private_page_slab_lock);
+		backing = vm_private_page_slab_take_locked();
+		spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
+		return backing;
+	}
+	fresh = memory.vaddr;
+	memset(fresh, 0, PAGE_SIZE);
+	fresh->memory = memory;
+	fresh->free_mask = VM_PRIVATE_PAGE_SLAB_FREE_MASK;
+	irq = spin_lock_irqsave(&vm_private_page_slab_lock);
+	backing = vm_private_page_slab_take_locked();
+	if (backing == NULL) {
+		fresh->next = vm_private_page_slabs;
+		vm_private_page_slabs = fresh;
+		backing = vm_private_page_slab_take_locked();
+		fresh = NULL;
+	}
+	spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
+	if (fresh != NULL && hal_pmem_free(&memory) != HAL_OK)
+		HAL_FATAL("unused VM private metadata slab free failed");
+	return backing;
+}
+
+void
+vm_private_page_free_metadata(struct vm_private_page *backing)
+{
+	struct vm_private_page_slab **link, *slab;
+	struct hal_pmem released;
+	uintptr_t address;
+	unsigned long irq;
+	int release = 0;
+
+	if (backing == NULL)
+		return;
+	address = (uintptr_t)backing;
+	irq = spin_lock_irqsave(&vm_private_page_slab_lock);
+	for (link = &vm_private_page_slabs; (slab = *link) != NULL;
+	     link = &slab->next) {
+		uintptr_t first = (uintptr_t)&slab->slots[0];
+		uintptr_t end =
+		    (uintptr_t)&slab->slots[VM_PRIVATE_PAGE_SLAB_SLOTS];
+		unsigned slot;
+
+		if (address < first || address >= end ||
+		    (address - first) % sizeof(struct vm_private_page) != 0)
+			continue;
+		slot = (unsigned)((address - first) /
+		    sizeof(struct vm_private_page));
+		if ((slab->free_mask & (1U << slot)) != 0 || slab->used == 0)
+			HAL_FATAL("invalid VM private metadata free");
+		memset(backing, 0, sizeof(*backing));
+		slab->free_mask |= 1U << slot;
+		slab->used--;
+		if (slab->used == 0) {
+			*link = slab->next;
+			released = slab->memory;
+			release = 1;
+		}
+		spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
+		if (release && hal_pmem_free(&released) != HAL_OK)
+			HAL_FATAL("VM private metadata slab free failed");
+		return;
+	}
+	spin_unlock_irqrestore(&vm_private_page_slab_lock, irq);
+	HAL_FATAL("foreign VM private metadata free");
 }
 
 static int
@@ -243,6 +406,24 @@ static struct vm_page *find_page(struct vm_region *, uintptr_t);
 static void vmspace_generation_advance_locked(struct vmspace *);
 static void vmspace_wait_faults_locked(struct vmspace *);
 static void vmspace_fault_wake_locked(struct vmspace *);
+
+/*
+ * A page-table miss can require more than the one page returned by a normal
+ * frame-allocation retry.  In particular, once the fixed kernel heap is full,
+ * the i386 HAL needs one page-backed descriptor and one PTE page at a new PDE
+ * boundary.  Reclaim a small bounded reserve while the fault's own mapping is
+ * BUSY, then retry the complete fault transaction.
+ */
+static unsigned
+reclaim_page_map_reserve(struct vm_page *avoid)
+{
+	unsigned reclaimed;
+
+	for (reclaimed = 0; reclaimed < VM_PAGE_MAP_RESERVE_PAGES; reclaimed++)
+		if (vm_reclaim_private_one(avoid) != 0)
+			break;
+	return reclaimed;
+}
 
 /*
  * A shared-file content writer first makes its object page BUSY.  Existing
@@ -364,7 +545,7 @@ vmspace_object_page_revoke(struct vm_object_page *object_page,
 static struct vm_private_page *
 private_page_alloc(void)
 {
-	struct vm_private_page *backing = kern_calloc(1, sizeof(*backing));
+	struct vm_private_page *backing = vm_private_page_alloc_metadata();
 	if (backing == NULL)
 		return NULL;
 	vm_private_page_init(backing);
@@ -1076,6 +1257,7 @@ vmspace_fault(struct vmspace *vm, uintptr_t address, uint32_t required)
 	uint64_t reservation_generation;
 	off_t object_offset = 0;
 	uint32_t new_reservation_prot = 0;
+	unsigned map_pressure_retries = 0;
 	int error = 0;
 	int mapped = 0;
 	int private_io_owned = 0;
@@ -1118,6 +1300,7 @@ retry:
 		int need_cow = 0;
 		int was_mapped = 0;
 		int old_unmapped = 0;
+		int map_pressure = 0;
 		int retry_fault = 0;
 
 		if (page->private_page == NULL) {
@@ -1219,9 +1402,10 @@ retry:
 			error = EAGAIN;
 		if (error == 0 && fresh != NULL) {
 			if (hal_page_map(vm->space, (void *)page_address,
-			    fresh->pmem.paddr, PAGE_SIZE, region->prot) != HAL_OK)
+			    fresh->pmem.paddr, PAGE_SIZE, region->prot) != HAL_OK) {
 				error = ENOMEM;
-			else {
+				map_pressure = 1;
+			} else {
 				vm_page_replace_private(page, fresh);
 				fresh = NULL; /* The mapping owns the creator reference. */
 				page->flags &= ~VM_MAPPING_COW;
@@ -1231,10 +1415,28 @@ retry:
 		    (page->flags & VM_MAPPING_MAPPED) == 0) {
 			if (hal_page_map(vm->space, (void *)page_address,
 			    prepared_physical, PAGE_SIZE,
-			    vm_page_effective_prot(page)) != HAL_OK)
+			    vm_page_effective_prot(page)) != HAL_OK) {
 				error = ENOMEM;
-			else
+				map_pressure = 1;
+			} else
 				page->flags |= VM_MAPPING_MAPPED;
+		}
+		if (map_pressure) {
+			mutex_unlock(&vm->lock);
+			vm_metadata_leave();
+			if (map_pressure_retries < VM_PAGE_MAP_RECLAIM_RETRIES &&
+			    reclaim_page_map_reserve(page) != 0) {
+				map_pressure_retries++;
+				error = EAGAIN;
+			}
+			vm_metadata_enter();
+			mutex_lock(&vm->lock);
+			if (find_region_locked(vm, address, 1) != region ||
+			    find_page(region, page_address) != page ||
+			    page->private_page != reserved_backing ||
+			    (page->flags & VM_MAPPING_BUSY) == 0 ||
+			    region->hold_count == 0)
+				HAL_FATAL("VM map-pressure reservation lost");
 		}
 		page->flags &= ~VM_MAPPING_BUSY;
 		if (region->hold_count == 0)
@@ -1317,7 +1519,18 @@ retry:
 		mapped = hal_page_map(vm->space, (void *)page_address,
 		    object_page->pmem.paddr, PAGE_SIZE, region->prot) == HAL_OK;
 		if (!mapped) {
-			error = ENOMEM;
+			/*
+			 * The fault hold keeps this cache page out of object reclaim,
+			 * while the BUSY placeholder and region hold keep its VM
+			 * metadata stable.  Reclaim other pages with no VM lock held,
+			 * then retire the placeholder and retry the full transaction.
+			 */
+			if (map_pressure_retries < VM_PAGE_MAP_RECLAIM_RETRIES &&
+			    reclaim_page_map_reserve(page) != 0) {
+				map_pressure_retries++;
+				error = EAGAIN;
+			} else
+				error = ENOMEM;
 			goto remove_placeholder;
 		}
 		page->flags |= VM_PAGE_RESIDENT | VM_MAPPING_MAPPED;
@@ -1400,8 +1613,23 @@ retry:
 	}
 	if (hal_page_map(vm->space, (void *)page_address,
 	    prepared_physical, PAGE_SIZE, region->prot) != HAL_OK) {
-		error = ENOMEM;
-		goto unlink_locked;
+		/*
+		 * The frame allocator already retries after reclaim, but the HAL can
+		 * need another physical page for a new page-table level.  Drop the VM
+		 * locks before reclaim, retire this incomplete fault reservation, and
+		 * retry the complete transaction.  Releasing the prepared frame during
+		 * rollback leaves both it and the reclaimed frame available to a HAL
+		 * which needs separate allocation metadata and table storage.
+		 */
+		mutex_unlock(&vm->lock);
+		vm_metadata_leave();
+		if (map_pressure_retries < VM_PAGE_MAP_RECLAIM_RETRIES &&
+		    reclaim_page_map_reserve(page) != 0) {
+			map_pressure_retries++;
+			error = EAGAIN;
+		} else
+			error = ENOMEM;
+		goto remove_placeholder;
 	}
 	mapped = 1;
 	page->flags |= VM_MAPPING_MAPPED;

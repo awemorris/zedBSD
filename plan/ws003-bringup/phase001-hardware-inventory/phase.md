@@ -3,7 +3,7 @@
 WSID: `ws003`  
 Phase ID: `p001`  
 Combined ID: `ws003-p001`  
-Status: carried forward  
+Status: carried forward; WLAN identity partially captured
 Last attempted: 2026-08-25  
 Parent WS: [WS003](../ws.md)
 
@@ -24,12 +24,27 @@ Target DMI fields, `/sys/firmware/efi`, PCI inventory, and USB inventory are
 unavailable. `lspci`, `lsusb`, `mokutil`, and `efibootmgr` are also absent.
 Installing tools cannot expose hardware hidden by WSL2.
 
+The user later supplied physical FreeBSD `pciconf` evidence for the built-in
+WLAN controller:
+
+```text
+rtw880@pci0:113:0:0
+vendor=0x10ec device=0xc822
+subvendor=0x10ec subdevice=0xc130
+Realtek RTL8822CE 802.11ac PCIe Wireless Network Adapter
+```
+
+This closes the WLAN identity sub-item only. The Realtek USB Ethernet
+adapters still require interface descriptors to distinguish standards-based
+CDC ECM/NCM devices from vendor-specific RTL8152/RTL8153-family devices.
+
 ## Work packages
 
 - [x] Identify whether the active host is the target laptop.
 - [x] Check availability of DMI, firmware-mode, PCI, and USB evidence.
 - [ ] Capture Latitude BIOS/UEFI and Secure Boot state.
-- [ ] Capture exact CPU/GPU/xHCI/NVMe/WLAN/network device IDs.
+- [ ] Capture exact CPU/GPU/xHCI/NVMe/network device IDs; WLAN is captured as
+      PCI `10ec:c822`, subsystem `10ec:c130`.
 - [ ] Record cold-boot and removable-media observations.
 
 ## Completion conditions

@@ -109,6 +109,17 @@ int
 vm_reclaim_one(
 	struct vm_page *avoid);
 
+/*
+ * Fault paths which retain BUSY VM/object state must not enter object
+ * writeback, because an object content or resize transaction can be waiting
+ * for that retained state.  This bounded form considers private mappings
+ * only and never waits on an object transaction.  EAGAIN means that no
+ * eligible private backing was available.
+ */
+int
+vm_reclaim_private_one(
+	struct vm_page *avoid);
+
 void
 vm_page_note_in(
 	struct vm_page *page);

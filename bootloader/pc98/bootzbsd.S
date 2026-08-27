@@ -10,6 +10,8 @@
 #include "bootloader/include/mbr.inc"
 #include "bootloader/include/fat16.inc"
 #include "bootloader/include/elf.inc"
+#include "include/boot/pc98-handoff.h"
+#include "bootloader/include/boot-parameter-record.inc"
 
 .set PH_RECORD_SIZE, 28
 
@@ -1000,7 +1002,7 @@ unreal_fs:
 prepare_pc98_handoff:
 	mov dword ptr [pc98_handoff + 0], 0x48323842
 	mov word ptr [pc98_handoff + 4], 2
-	mov word ptr [pc98_handoff + 6], 24
+	mov word ptr [pc98_handoff + 6], ZEDBSD_PC98_PARAMETER_HANDOFF_SIZE
 	mov al, byte ptr [boot_drive]
 	mov byte ptr [pc98_handoff + 9], al
 	/* Version 2 selects the native PC-98 partition by LBA.  The scheme and
@@ -1548,7 +1550,9 @@ long_handoff:
 	.long boot_drive
 
 .balign 4
-pc98_handoff: .space 24
+pc98_handoff:
+	.space ZEDBSD_PC98_HANDOFF_COMMON_SIZE
+	ZEDBSD_EMIT_BOOT_PARAMETER_RECORD
 device_table: .space 16 * 4
 fat_cache: .space 1024
 

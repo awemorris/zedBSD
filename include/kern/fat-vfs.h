@@ -13,6 +13,7 @@
 #define ZEDBSD_KERN_FAT_VFS_H
 
 #include "kern/file.h"
+#include "kern/fat.h"
 #include "kern/mount.h"
 
 struct fat_inode_info {
@@ -32,6 +33,11 @@ fat_inode(
 }
 
 extern const struct filesystem_type fat_filesystem_type;
+
+int
+fat_probe_type(
+	struct disk *disk,
+	enum bootfat_type *type);
 typedef int (
 	*fat_extent_cb)(
 	uint64_t,

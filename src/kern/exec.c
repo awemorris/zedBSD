@@ -555,10 +555,11 @@ process_spawn_from(struct process *parent, const char *path, char *const argv[],
 	error = setup_standard_files(parent, process, access_cred);
 	if (error != 0)
 		goto out;
-	/* PID 1 receives console file descriptors for diagnostics, but must not
-	 * own the controlling terminal: its supervised getty creates the login
-	 * session and claims the console. */
-	if (parent != &process0 || strcmp(path, "/sbin/init") != 0)
+	/* PID 1 receives console file descriptors for diagnostics, but an init
+	 * supervisor must not own the controlling terminal: its getty creates
+	 * the login session and claims the console.  The explicitly requested
+	 * /bin/sh rescue PID 1 is interactive and therefore claims it. */
+	if (process->pid != 1 || strcmp(path, "/bin/sh") == 0)
 		tty_attach_console(process);
 	stage = "create initial thread";
 	strncpy(process->command, argv[0], sizeof(process->command) - 1U);

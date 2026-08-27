@@ -3,7 +3,7 @@
 WSID: `ws011`  
 Phase ID: `p004`  
 Combined ID: `ws011-p004`  
-Status: proposed  
+Status: Blocked (manual hold)
 Parent WS: [WS011](../ws.md)
 
 ## Objective
@@ -41,5 +41,7 @@ Run `NVIR-T001`–`NVIR-T008` from the [shared test index](../tests/README.md).
 
 ## Resume point
 
-Jointly review the virtual-interface UAPI and packet ownership with WS005
+The feature is wanted later but its detailed design is intentionally on manual
+hold. Resume only after the user explicitly selects VLAN/bridge discussion;
+then jointly review the virtual-interface UAPI and packet ownership with WS005
 before implementation.

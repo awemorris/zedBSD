@@ -14,7 +14,12 @@ amd64_start:
 	cmpl $ZBL6_HANDOFF_MAGIC, (%rdi)
 	jne .Lentry_stage_done
 	cmpw $ZBL6_HANDOFF_V4_VERSION, 4(%rdi)
+	je .Lentry_stage_framebuffer
+	cmpw $ZBL6_HANDOFF_V5_VERSION, 4(%rdi)
 	jne .Lentry_stage_done
+	cmpw $ZBL6_HANDOFF_V5_UEFI_SIZE, 6(%rdi)
+	jne .Lentry_stage_done
+.Lentry_stage_framebuffer:
 	movq ZBL6_HANDOFF_V3_FRAMEBUFFER_BASE_OFFSET(%rdi), %r8
 	andq $0x1fffff, %r8
 	movabsq $ZBL6_FRAMEBUFFER_VIRTUAL_BASE, %rax

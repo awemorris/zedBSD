@@ -72,7 +72,7 @@ vm_private_page_put(struct vm_private_page *backing)
 		(void)hal_pmem_free(&memory);
 	if (slot != SWAP_SLOT_NONE && swap_system_backend() != NULL)
 		swap_free_slot(swap_system_backend(), slot);
-	kern_free(backing);
+	vm_private_page_free_metadata(backing);
 }
 
 static int
@@ -812,12 +812,11 @@ reclaim_backing_owned(struct vm_private_page *backing, int file_candidate)
 	return swap_out_backing_owned(backing);
 }
 
-int vm_reclaim_one(struct vm_page *avoid)
+int vm_reclaim_private_one(struct vm_page *avoid)
 {
 	struct vm_private_page *selected = NULL;
 	unsigned pass;
 	int file_candidate = 0;
-	int result;
 
 	vm_metadata_enter();
 	mutex_lock(&reclaim_lock);
@@ -853,6 +852,17 @@ out:
 	vm_metadata_leave();
 	if (selected != NULL)
 		return reclaim_backing_owned(selected, file_candidate);
+	return EAGAIN;
+}
+
+int vm_reclaim_one(struct vm_page *avoid)
+{
+	int result = vm_reclaim_private_one(avoid);
+
+	if (result == 0)
+		return 0;
+	if (result != EAGAIN)
+		return result;
 	/*
 	 * Object writeback can sleep in VFS I/O.  It must not inherit either the
 	 * private-page queue lock or the global cross-VM metadata lock from the

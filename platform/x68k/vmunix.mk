@@ -108,7 +108,9 @@ X68K_KERNEL_SOURCES := \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
 	src/kern/mount.c src/kern/rootfs.c src/kern/vfs.c src/kern/swap.c \
 	src/kern/tmpfs.c src/kern/overlayfs.c drivers/loop.c \
-	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/disk.c \
+	src/kern/swap-source.c src/kern/swap-boot.c src/kern/swap-fat.c \
+	src/kern/vm-reclaim.c \
+	src/kern/disk.c \
 	src/kern/partition.c src/kern/x68k/partition.c src/kern/x68k/platform.c \
 	drivers/x68k-mb89352.c drivers/x68k-spc-disk.c \
 	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
@@ -127,9 +129,10 @@ X68K_KERNEL_SOURCES := \
 	src/kern/tty.c \
 	src/kern/graphics-device.c \
 	src/kern/system-device.c \
-	src/kern/init.c
+	src/kern/boot-parameters.c src/kern/init.c
 X68K_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
 	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)
+X68K_KERNEL_SOURCES += $(KERN_BOOT_SOURCE_SOURCES)
 X68K_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(X68K_KERNEL_SOURCES))
 X68K_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURCES))
 X68K_VMUNIX_OBJS := $(X68K_EARLY_OBJS) $(X68K_KERNEL_OBJS) \

@@ -5,6 +5,7 @@
 #include "../bsp.h"
 #include "../multiboot.h"
 #include "../i386.h"
+#include "../../x86/boot-parameters.h"
 
 #define VGA_FONT_HANDOFF 0x00007000U
 #define VGA_FONT_MAGIC 0x3854465aU
@@ -29,7 +30,7 @@ static uint8_t root_partition;
 static int boot_info_valid;
 static uint8_t boot_font[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 static int boot_font_valid;
-static const char *boot_command_line;
+static char boot_command_line[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE];
 
 static int
 handoff_name_is(const char *name, const char *expected)
@@ -41,68 +42,6 @@ handoff_name_is(const char *name, const char *expected)
 		expected++;
 	}
 	return *name == *expected;
-}
-
-static int
-hex_digit(char c)
-{
-	if (c >= '0' && c <= '9') return c - '0';
-	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-	return -1;
-}
-
-static int
-parse_number(const char **text, uint32_t *value)
-{
-	const char *p = *text;
-	uint32_t result = 0;
-	int base = 10, digit, count = 0;
-
-	if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
-		base = 16;
-		p += 2;
-	}
-	while ((digit = hex_digit(*p)) >= 0 && digit < base) {
-		if (result > (0xffffffffU - (uint32_t)digit) / (uint32_t)base)
-			return 0;
-		result = result * (uint32_t)base + (uint32_t)digit;
-		p++;
-		count++;
-	}
-	if (count == 0) return 0;
-	*text = p;
-	*value = result;
-	return 1;
-}
-
-static void
-parse_command_line(const char *line)
-{
-	static const char option[] = "zedbsd.root=";
-
-	if (line == 0) return;
-	while (*line != '\0') {
-		const char *p = line;
-		unsigned i;
-		uint32_t drive, partition;
-
-		while (*p == ' ') p++;
-		for (i = 0; option[i] != '\0' && p[i] == option[i]; i++) ;
-		if (option[i] == '\0') {
-			p += i;
-			if (parse_number(&p, &drive) && *p++ == ',' &&
-			    parse_number(&p, &partition) &&
-			    (*p == '\0' || *p == ' ') && drive >= 0x80U &&
-			    drive <= 0x83U && partition >= 1U && partition <= 4U) {
-				root_bios_id = (uint8_t)drive;
-				root_partition = (uint8_t)partition;
-			}
-			return;
-		}
-		while (*p != '\0' && *p != ' ') p++;
-		line = p;
-	}
 }
 
 void
@@ -133,17 +72,35 @@ bsp_boot_init(const void *raw_boot_info)
 		if (partition < 4U)
 			root_partition = (uint8_t)(partition + 1U);
 	}
-	if ((mbi->flags & MBINFO_FLAG_CMDLINE) && mbi->cmdline != 0)
-		boot_command_line = (const char *)(uintptr_t)mbi->cmdline;
-	if (boot_command_line != NULL)
-		parse_command_line(boot_command_line);
+	if ((mbi->flags & MBINFO_FLAG_CMDLINE) && mbi->cmdline != 0) {
+		uint32_t address = mbi->cmdline;
+		size_t available;
+
+		if (address >= total_memory) {
+			boot_info_valid = 0;
+			return;
+		}
+		available = (size_t)(total_memory - address);
+		if (available > ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE)
+			available = ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE;
+		if (x86_boot_parameters_copy(boot_command_line,
+		    (const char *)(uintptr_t)address, available) !=
+		    X86_BOOT_PARAMETERS_OK) {
+			boot_info_valid = 0;
+			return;
+		}
+	} else if (x86_boot_parameters_copy(boot_command_line, NULL, 0) !=
+	    X86_BOOT_PARAMETERS_OK) {
+		boot_info_valid = 0;
+		return;
+	}
 }
 
 void *
 hal_get_arch_handoff(const char *name)
 {
 	if (handoff_name_is(name, "boot.command-line"))
-		return (void *)boot_command_line;
+		return boot_command_line;
 	if (!boot_font_valid || !handoff_name_is(name, "pcat.boot-font"))
 		return NULL;
 	return boot_font;

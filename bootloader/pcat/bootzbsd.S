@@ -11,6 +11,7 @@
 #include "bootloader/include/fat16.inc"
 #include "bootloader/include/elf.inc"
 #include "bootloader/include/amd64-handoff.h"
+#include "bootloader/include/boot-parameter-record.inc"
 
 .set PH_RECORD_SIZE, 28
 
@@ -968,7 +969,7 @@ unreal_gs:
 
 /* ------------------------------------------------------------------ */
 enter_protected_mode:
-	mov dword ptr [mbi_flags], 3
+	mov dword ptr [mbi_flags], 7
 	mov dword ptr [mbi_mem_lower], 640
 	movzx eax, byte ptr [boot_drive]
 	shl eax, 24
@@ -1257,22 +1258,27 @@ copy_count:         .long 0
 
 .balign 8
 mbi:
-mbi_flags:       .long 3
+mbi_flags:       .long 7
 mbi_mem_lower:   .long 640
 mbi_mem_upper:   .long 0
 mbi_boot_device: .long 0
+mbi_cmdline:
+	.long 0x10000 + long_handoff + \
+	    ZBL6_HANDOFF_V5_BIOS_PARAMETERS_OFFSET + \
+	    ZEDBSD_BOOT_PARAMETER_RECORD_TEXT_OFFSET
 
 long_handoff:
 	.long ZBL6_HANDOFF_MAGIC
-	.word ZBL6_HANDOFF_VERSION
-	.word ZBL6_HANDOFF_FB_SIZE
+	.word ZBL6_HANDOFF_V5_VERSION
+	.word ZBL6_HANDOFF_V5_BIOS_SIZE
 	.byte 0                         /* boot drive, populated at runtime */
 	.byte 0                         /* partition index, populated at runtime */
-	.word 0                         /* flags */
+	.word ZBL6_HANDOFF_FLAG_BOOT_PARAMETERS
 	.long 0                         /* conventional memory, KiB */
 	.long 0                         /* extended memory, KiB */
 	.long 0
 	.space ZBL6_HANDOFF_FB_SIZE - ZBL6_HANDOFF_SIZE
+	ZEDBSD_EMIT_BOOT_PARAMETER_RECORD
 
 fat_cache: .space 1024
 

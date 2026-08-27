@@ -1,16 +1,18 @@
 # WS002: system services
 
-Last updated: 2026-08-25
+Last updated: 2026-08-27
 
 WSID: `ws002`
 
-Status: complete through `ws002-p020`; follow-ups transferred to WS005
+Status: baseline complete through `ws002-p020`; corrective `ws002-p021` is
+planned and non-blocking
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws002-p020`
 
-Resume point: this WS is closed as a baseline. Continue DHCP lifecycle, physical
+Resume point: retain the completed service baseline. Execute `ws002-p021` when
+session-lifecycle robustness is selected; continue DHCP lifecycle, physical
 networking, WLAN, and WPA in [WS005](../ws005-networking/ws.md).
 
 Shared tests: [WS002 test index](tests/README.md)
@@ -78,6 +80,9 @@ created by this work.
 options. Structured databases remain separate where their format is the
 interface. Network interface/address/route/DNS data moved to `/etc/net.conf`
 in `ws011-p003`; the Phase 20 `net_*` format below is retained as history.
+This completed baseline uses a strict `key=value` data format. WS012 owns the
+planned migration to YAML; the baseline is not described as YAML before that
+separately authorized migration completes.
 
 | Data | Path |
 |---|---|
@@ -151,6 +156,7 @@ PID 1 does not parse fstab.  A required internal oneshot invokes
 | `ws002-p018` | [POSIX shell](phase018-shell/phase.md) | Partial with handoffs | Shell is usable; remaining incompatibilities are recorded in WS001 |
 | `ws002-p019` | [integrated QEMU acceptance](phase019-integration/phase.md) | Complete minimum system | Boot, login, services, jobs, network, and shutdown were exercised and repaired |
 | `ws002-p020` | [synchronous network service](phase020-network-service/phase.md) | Complete milestone | fd 3 readiness and synchronous `net` orchestration pass host/build/QEMU gates |
+| `ws002-p021` | [missing-login session teardown](phase021-missing-login-session-teardown/phase.md) | Planned corrective; non-blocking | A deliberately missing `/bin/login` cannot corrupt getty/TTY/process teardown or escape bounded crash-loop supervision |
 
 The original Phase 11–19 detail is retained in the
 [legacy aggregate plan](history/phase011-019-legacy-plan.md).

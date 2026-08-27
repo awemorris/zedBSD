@@ -1,7 +1,9 @@
 /* Block device filesystem and partition identity.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <kern/block-identity.h>
+#include <kern/kmem.h>
 #include <kern/partition.h>
+#include <kern/swap.h>
 
 #include <errno.h>
 #include <string.h>
@@ -60,20 +62,36 @@ static void copy_trimmed(char *output, size_t capacity, const uint8_t *input,
 static int read_bytes(struct disk *disk, uint64_t offset, size_t length,
 	uint8_t *output)
 {
-	uint8_t sector[512];
-	if (disk->d_block_size != sizeof(sector)) return EOPNOTSUPP;
+	uint8_t *block;
+	uint64_t bytes;
+	size_t block_size;
+	int error = 0;
+
+	if (disk == NULL || output == NULL || disk->d_block_size == 0 ||
+	    disk->d_block_count > UINT64_MAX / disk->d_block_size)
+		return EINVAL;
+	block_size = disk->d_block_size;
+	bytes = disk->d_block_count * disk->d_block_size;
+	if (offset > bytes || length > bytes - offset)
+		return EIO;
+	block = kern_malloc(block_size);
+	if (block == NULL)
+		return ENOMEM;
 	while (length != 0) {
-		size_t within = (size_t)(offset % sizeof(sector));
-		size_t amount = sizeof(sector) - within;
+		size_t within = (size_t)(offset % block_size);
+		size_t amount = block_size - within;
 		if (amount > length) amount = length;
 		/* Identification is synchronous metadata probing.  Bypass bufcache:
 		 * a loop device may itself be backed by a file on the cached disk. */
-		if (disk_read_direct(disk, offset / sizeof(sector), 1, sector) != 0)
-			return EIO;
-		memcpy(output, sector + within, amount);
+		if (disk_read_direct(disk, offset / block_size, 1, block) != 0) {
+			error = EIO;
+			break;
+		}
+		memcpy(output, block + within, amount);
 		output += amount; offset += amount; length -= amount;
 	}
-	return 0;
+	kern_free(block);
+	return error;
 }
 
 static int probe_fat(struct disk *disk, struct block_identity *id)
@@ -141,6 +159,31 @@ static int probe_ufs_at(struct disk *disk, uint64_t offset,
 	return 1;
 }
 
+static int
+probe_swap(struct disk *disk, struct block_identity *id)
+{
+	uint8_t header[ZEDBSD_SWAP_HEADER_SIZE];
+	struct swap_header_info info;
+	uint64_t bytes;
+
+	if (disk->d_block_size == 0 ||
+	    disk->d_block_count > UINT64_MAX / disk->d_block_size)
+		return 0;
+	bytes = disk->d_block_count * disk->d_block_size;
+	if (read_bytes(disk, 0, sizeof(header), header) != 0 ||
+	    swap_header_parse(header, bytes, &info) != 0)
+		return 0;
+	strcpy(id->type, "swap");
+	id->flags |= ZEDBSD_BLKID_TYPE;
+	if (swap_header_uuid_format(&info, id->uuid, sizeof(id->uuid)) == 0)
+		id->flags |= ZEDBSD_BLKID_UUID;
+	if (info.label[0] != '\0') {
+		strcpy(id->label, info.label);
+		id->flags |= ZEDBSD_BLKID_LABEL;
+	}
+	return 1;
+}
+
 int block_identity_get(struct disk *disk, struct block_identity *id)
 {
 	unsigned i;
@@ -175,7 +218,8 @@ int block_identity_get(struct disk *disk, struct block_identity *id)
 			break;
 		}
 	}
-	if (!probe_fat(disk, id) && !probe_ufs_at(disk, UFS1_SUPER_OFFSET, id))
+	if (!probe_fat(disk, id) && !probe_swap(disk, id) &&
+	    !probe_ufs_at(disk, UFS1_SUPER_OFFSET, id))
 		(void)probe_ufs_at(disk, UFS2_SUPER_OFFSET, id);
 	if (id->flags == 0) return ENOENT;
 	disk->d_identity_flags = id->flags;

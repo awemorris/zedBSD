@@ -139,7 +139,7 @@ if [ "$class" = pass ]; then
 	for marker in \
 	    'xhci: PCI controller' \
 	    'usb-storage: sda blocks=' \
-	    'resolved to /dev/sda1' \
+	    '-> /dev/sda1 (private FAT)' \
 	    'login:'; do
 		if ! rg -a -F -q -- "$marker" "$guest_log"; then
 			class=missing-marker

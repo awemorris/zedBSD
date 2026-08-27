@@ -22,9 +22,23 @@ _start:
 	cmpl $ZBL6_HANDOFF_MAGIC, ZBL6_HANDOFF_MAGIC_OFFSET(%rdi)
 	jne fail
 	cmpw $ZBL6_HANDOFF_VERSION, ZBL6_HANDOFF_VERSION_OFFSET(%rdi)
+	je legacy_handoff
+	cmpw $ZBL6_HANDOFF_V5_VERSION, ZBL6_HANDOFF_VERSION_OFFSET(%rdi)
 	jne fail
+	cmpw $ZBL6_HANDOFF_V5_BIOS_SIZE, ZBL6_HANDOFF_SIZE_OFFSET(%rdi)
+	jne fail
+	testw $ZBL6_HANDOFF_FLAG_BOOT_PARAMETERS, ZBL6_HANDOFF_FLAGS_OFFSET(%rdi)
+	jz fail
+	cmpl $ZEDBSD_BOOT_PARAMETER_RECORD_MAGIC, \
+	    ZBL6_HANDOFF_V5_BIOS_PARAMETERS_OFFSET(%rdi)
+	jne fail
+	jmp common_handoff
+legacy_handoff:
 	cmpw $ZBL6_HANDOFF_SIZE, ZBL6_HANDOFF_SIZE_OFFSET(%rdi)
+	je common_handoff
+	cmpw $ZBL6_HANDOFF_FB_SIZE, ZBL6_HANDOFF_SIZE_OFFSET(%rdi)
 	jne fail
+common_handoff:
 	cmpb $0x80, ZBL6_HANDOFF_BOOT_DRIVE_OFFSET(%rdi)
 	jne fail
 	cmpb $1, ZBL6_HANDOFF_PARTITION_OFFSET(%rdi)

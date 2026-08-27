@@ -608,6 +608,14 @@ drv_usb_urb_cancel(
 int
 drv_usb_urb_wait(
 	struct drv_usb_urb *u);
+/* Synchronous reusable URBs have no callback.  In addition to a terminal
+ * status, wait until the HCD has dropped its private ownership so the caller
+ * can immediately call drv_usb_urb_setup*() on the same object.  If a timeout
+ * cancellation cannot retire the HCD request immediately, this ownership
+ * barrier may extend past the requested transfer timeout. */
+int
+drv_usb_urb_wait_reusable(
+	struct drv_usb_urb *u);
 enum drv_usb_urb_status
 drv_usb_urb_status(
 	const struct drv_usb_urb *u);

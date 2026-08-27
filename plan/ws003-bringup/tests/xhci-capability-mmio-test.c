@@ -38,6 +38,9 @@ struct pci_fixture {
 	unsigned mmio_reads;
 };
 
+static int irq_remove_result = HAL_OK;
+static unsigned irq_mask_calls;
+
 void *
 hal_malloc(size_t size)
 {
@@ -61,6 +64,7 @@ void
 hal_irq_mask(int irq)
 {
 	(void)irq;
+	irq_mask_calls++;
 }
 
 void
@@ -84,9 +88,8 @@ int
 hal_irq_set_handler(int irq, hal_irq_handler_t handler, void *argument)
 {
 	(void)irq;
-	(void)handler;
 	(void)argument;
-	return HAL_OK;
+	return handler == NULL ? irq_remove_result : HAL_OK;
 }
 
 int
@@ -589,6 +592,35 @@ test_pci_bar_assignment(struct drv_pci_device *device,
 	fixture_clear_faults(fixture);
 }
 
+static int
+test_irq_handler(void *argument)
+{
+	(void)argument;
+	return 1;
+}
+
+static void
+test_checked_irq_disestablish(struct drv_pci_device *device)
+{
+	struct drv_pci_irq irq = {
+		.type = DRV_PCI_IRQ_INTX,
+		.vector = 10U,
+	};
+	void *cookie = NULL;
+	unsigned masks_before = irq_mask_calls;
+
+	assert(drv_pci_device_establish_irq(device, &irq, test_irq_handler,
+	    NULL, "checked-remove", &cookie) == 0);
+	assert(cookie != NULL);
+	irq_remove_result = HAL_ERR_BUSY;
+	assert(drv_pci_device_disestablish_irq_checked(device, cookie) ==
+	    EBUSY);
+	assert(irq_mask_calls == masks_before + 1U);
+	irq_remove_result = HAL_OK;
+	assert(drv_pci_device_disestablish_irq_checked(device, cookie) == 0);
+	assert(irq_mask_calls == masks_before + 2U);
+}
+
 int
 main(void)
 {
@@ -622,6 +654,7 @@ main(void)
 	assert(device != NULL);
 	test_pci_enable_state(device, &fixture);
 	test_pci_bar_assignment(device, &fixture);
+	test_checked_irq_disestablish(device);
 
 	puts("xHCI capability/MMIO test: PASS");
 	return 0;

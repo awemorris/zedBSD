@@ -24,13 +24,16 @@ AMD64_CFLAGS := -m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
 	-ffunction-sections -fdata-sections -Os -Wall -Wextra -Werror
 AMD64_KERNEL_LIBC_CFLAGS := $(filter-out -mgeneral-regs-only,$(AMD64_CFLAGS))
 
-AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/amd64/asm.c src/hal/amd64/lib.c \
+AMD64_HAL_SOURCES := src/hal/x86/rtc.c src/hal/x86/boot-parameters.c \
+	src/hal/amd64/asm.c src/hal/amd64/lib.c \
 	src/hal/amd64/page.c src/hal/amd64/space.c \
 	src/hal/amd64/acpi-window.c src/hal/amd64/cmain.c \
 	src/hal/amd64/descriptor.c src/hal/amd64/int.c src/hal/amd64/irq.c \
 	src/hal/amd64/msi-source.c \
 	src/hal/amd64/task.c src/hal/amd64/percpu.c src/hal/amd64/smp.c \
-	src/hal/amd64/bsp-pcat/boot.c src/hal/amd64/bsp-pcat/cons.c \
+	src/hal/amd64/bsp-pcat/boot.c \
+	src/hal/amd64/bsp-pcat/handoff-validation.c \
+	src/hal/amd64/bsp-pcat/cons.c \
 	src/hal/amd64/bsp-pcat/pic.c src/hal/amd64/bsp-pcat/clock.c \
 	src/hal/amd64/bsp-pcat/acpi.c src/hal/amd64/bsp-pcat/lapic.c \
 	src/hal/amd64/bsp-pcat/mcfg.c \
@@ -61,7 +64,8 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/fat-vfs.c src/kern/inode.c src/kern/file.c \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
 	src/kern/rootfs.c src/kern/tmpfs.c src/kern/overlayfs.c src/kern/vfs.c \
-	src/kern/swap.c src/kern/swap-fat.c \
+	src/kern/swap.c src/kern/swap-source.c src/kern/swap-boot.c \
+	src/kern/swap-fat.c \
 	src/kern/vm-reclaim.c src/kern/buf.c src/kern/sysctl.c \
 	src/kern/resource.c src/kern/poll.c src/kern/usync.c \
 	src/kern/resource-limit.c \
@@ -89,9 +93,10 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/tty.c \
 	src/kern/graphics-device.c src/kern/system-device.c \
 	src/kern/pcat/font.c src/kern/pcat/vgafont.c drivers/pcat-graphics.c \
-	src/kern/init.c
+	src/kern/boot-parameters.c src/kern/init.c
 AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
 	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)
+AMD64_KERNEL_SOURCES += $(KERN_BOOT_SOURCE_SOURCES)
 ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
 AMD64_KERNEL_SOURCES += plan/ws004-hardware/tests/pci-msi-qemu.c
 endif
@@ -160,9 +165,14 @@ $(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2.S \
 	$(BIOS_LOADER)/vbe.inc \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
-	bootloader/include/elf.inc bootloader/include/amd64-handoff.h
+	bootloader/include/elf.inc bootloader/include/amd64-handoff.h \
+	bootloader/include/boot-parameter-handoff.h \
+	bootloader/include/boot-parameter-record.inc \
+	include/boot/parameter-handoff.h include/boot/parameters.h \
+	$(ZEDBSD_BOOT_PARAMETERS_HEADER)
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
+	$(CC) -m64 -I. -include $(ZEDBSD_BOOT_PARAMETERS_HEADER) \
+		-x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/stage2.elf: $(BUILD)/bootloader/stage2.o \
 	$(BIOS_LOADER)/stage2.ld
@@ -190,9 +200,14 @@ $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	$(BIOS_LOADER)/vbe.inc \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
-	bootloader/include/elf.inc bootloader/include/amd64-handoff.h
+	bootloader/include/elf.inc bootloader/include/amd64-handoff.h \
+	bootloader/include/boot-parameter-handoff.h \
+	bootloader/include/boot-parameter-record.inc \
+	include/boot/parameter-handoff.h include/boot/parameters.h \
+	$(ZEDBSD_BOOT_PARAMETERS_HEADER)
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
+	$(CC) -m64 -I. -include $(ZEDBSD_BOOT_PARAMETERS_HEADER) \
+		-x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
 	$(BIOS_LOADER)/stage2.ld
@@ -211,8 +226,19 @@ $(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin \
 
 $(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c \
 	$(UEFI_LOADER)/include/uefi.h $(UEFI_LOADER)/elf64.h \
-	$(UEFI_LOADER)/memory-map.h \
-	bootloader/include/amd64-handoff.h
+	$(UEFI_LOADER)/memory-map.h $(UEFI_LOADER)/load-options.h \
+	bootloader/include/amd64-handoff.h \
+	bootloader/include/boot-parameter-handoff.h \
+	include/boot/parameter-handoff.h include/boot/parameters.h \
+	$(ZEDBSD_BOOT_PARAMETERS_HEADER)
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -include $(ZEDBSD_BOOT_PARAMETERS_HEADER) \
+		-c $< -o $@
+
+$(BUILD)/uefi/load-options.o: $(UEFI_LOADER)/load-options.c \
+	$(UEFI_LOADER)/load-options.h \
+	bootloader/include/boot-parameter-handoff.h \
+	include/boot/parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
 	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
 
@@ -226,12 +252,17 @@ $(BUILD)/uefi/memory-map.o: $(UEFI_LOADER)/memory-map.c \
 	@mkdir -p $(dir $@)
 	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
 
+$(BUILD)/src/hal/amd64/locore.o: bootloader/include/amd64-handoff.h \
+	bootloader/include/boot-parameter-handoff.h \
+	include/boot/parameter-handoff.h include/boot/parameters.h
+
 $(BUILD)/uefi/transition.o: $(UEFI_LOADER)/transition.S
 	@mkdir -p $(dir $@)
 	$(EFI_CC) -m64 -mno-red-zone -c $< -o $@
 
 $(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
 	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/memory-map.o \
+	$(BUILD)/uefi/load-options.o \
 	$(BUILD)/uefi/transition.o \
 	platform/amd64/tools/check-bootx64.noct
 	$(EFI_LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \

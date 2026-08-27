@@ -972,6 +972,31 @@ static int urb_cancel_to(struct drv_usb_urb*u,enum drv_usb_urb_status terminal){
 int drv_usb_urb_cancel(struct drv_usb_urb*u){return urb_cancel_to(u,DRV_USB_URB_CANCELLED);}
 static int urb_status_error(enum drv_usb_urb_status status){return status==DRV_USB_URB_COMPLETE?0:status==DRV_USB_URB_TIMEOUT?ETIMEDOUT:status==DRV_USB_URB_STALL?EPIPE:status==DRV_USB_URB_DISCONNECTED?ENODEV:EIO;}
 int drv_usb_urb_wait(struct drv_usb_urb*u){uint64_t deadline,cancel_deadline=0;enum drv_usb_urb_status status;if(!u)return EINVAL;deadline=u->timeout_ms?sched_ticks()+(u->timeout_ms+9U)/10U:0;for(;;){status=hal_atomic_load_acquire(&u->status);if(status!=DRV_USB_URB_PENDING)return urb_status_error(status);if(deadline&&sched_ticks()>=deadline){int e=urb_cancel_to(u,DRV_USB_URB_TIMEOUT);if(e==0)continue;if(e!=EBUSY&&e!=EINVAL&&e!=EALREADY)return e;if(cancel_deadline==0)cancel_deadline=sched_ticks()+100U;if(sched_ticks()>=cancel_deadline)return ETIMEDOUT;sched_yield();continue;}hal_compiler_barrier();}}
+int
+drv_usb_urb_wait_reusable(struct drv_usb_urb *u)
+{
+	int error;
+	enum drv_usb_urb_status status;
+
+	if (u == NULL || u->callback != NULL)
+		return EINVAL;
+	error = drv_usb_urb_wait(u);
+	for (;;) {
+		status = hal_atomic_load_acquire(&u->status);
+		if (status != DRV_USB_URB_PENDING)
+			break;
+		/* A failed cancellation may outlive the caller's timeout.  A
+		 * reusable synchronous URB cannot return while the HCD may still
+		 * access its buffer; preserve the timeout result but extend the
+		 * ownership barrier. */
+		sched_yield();
+	}
+	if (status == DRV_USB_URB_IDLE)
+		return error;
+	while (hal_atomic_load_acquire(&u->hcd_owned) != 0)
+		sched_yield();
+	return error;
+}
 enum drv_usb_urb_status drv_usb_urb_status(const struct drv_usb_urb*u){return u?hal_atomic_load_acquire(&u->status):DRV_USB_URB_IO_ERROR;}
 size_t drv_usb_urb_actual_length(const struct drv_usb_urb*u){enum drv_usb_urb_status status;if(!u)return 0;status=hal_atomic_load_acquire(&u->status);return status==DRV_USB_URB_PENDING?0:u->actual_length;}
 void*drv_usb_urb_buffer(const struct drv_usb_urb*u){return u?u->buffer:NULL;}

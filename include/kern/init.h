@@ -13,6 +13,7 @@
 #define ZEDBSD_KERN_INIT_H
 
 int
-kern_init_start(void);
+kern_init_start(
+	const char *path);
 
 #endif

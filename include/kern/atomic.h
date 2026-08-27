@@ -66,6 +66,14 @@ atomic_raw_fetch_add_relaxed(
 }
 
 static inline unsigned
+atomic_raw_fetch_add_release(
+	volatile unsigned *value,
+	unsigned add)
+{
+	return hal_atomic_fetch_add_release(value, add);
+}
+
+static inline unsigned
 atomic_raw_fetch_or_release(
 	volatile unsigned *value,
 	unsigned bits)

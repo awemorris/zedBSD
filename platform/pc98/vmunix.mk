@@ -23,6 +23,7 @@ HAL_PC98_SOURCES := \
 	src/hal/i386/ioapic.c src/hal/i386/interrupt-controller.c \
 	src/hal/i386/space.c src/hal/i386/int.c src/hal/i386/cmain.c \
 	src/hal/i386/task.c \
+	src/hal/x86/boot-parameters.c \
 	src/hal/i386/bsp-pc98/boot.c \
 	src/hal/i386/bsp-pc98/cons.c src/hal/i386/bsp-pc98/pic.c \
 	src/hal/i386/bsp-pc98/pit.c src/hal/i386/bsp-pc98/display.c \
@@ -65,6 +66,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
 	$(BUILD)/src/kern/system-device.o \
+	$(BUILD)/src/kern/boot-parameters.o \
+	$(KERN_BOOT_SOURCE_OBJS) \
 	$(BUILD)/src/kern/init.o \
 	$(BUILD)/drivers/pc98-graphics.o \
 	$(KERN_NET_OBJS) \
@@ -100,6 +103,8 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/overlayfs.o \
 	$(BUILD)/src/kern/vfs.o \
 	$(BUILD)/src/kern/swap.o \
+	$(BUILD)/src/kern/swap-source.o \
+	$(BUILD)/src/kern/swap-boot.o \
 	$(BUILD)/src/kern/swap-fat.o \
 	$(BUILD)/src/kern/vm-reclaim.o \
 	$(BUILD)/src/kern/disk.o \
@@ -167,9 +172,13 @@ $(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
 $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
-	bootloader/include/elf.inc
+	bootloader/include/elf.inc bootloader/include/boot-parameter-handoff.h \
+	bootloader/include/boot-parameter-record.inc \
+	include/boot/pc98-handoff.h include/boot/parameter-handoff.h \
+	include/boot/parameters.h $(ZEDBSD_BOOT_PARAMETERS_HEADER)
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
+	$(CC) -m64 -I. -include $(ZEDBSD_BOOT_PARAMETERS_HEADER) \
+		-x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
 	$(BIOS_LOADER)/stage2.ld
@@ -203,9 +212,11 @@ $(BUILD)/bootloader/partition-pbr.elf: $(BUILD)/bootloader/partition-pbr.o
 $(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 
-$(BUILD)/bootloader/payload32.o: bootloader/tests/payload32-pc98.S
+$(BUILD)/bootloader/payload32.o: bootloader/tests/payload32-pc98.S \
+	include/boot/pc98-handoff.h include/boot/parameter-handoff.h \
+	include/boot/parameters.h
 	@mkdir -p $(dir $@)
-	$(CC) -m32 -c $< -o $@
+	$(CC) -m32 -I. -c $< -o $@
 
 $(BUILD)/bootloader/payload32.elf: $(BUILD)/bootloader/payload32.o \
 	bootloader/tests/payload32-pc98.ld

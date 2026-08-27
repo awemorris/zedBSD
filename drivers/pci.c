@@ -784,36 +784,56 @@ drv_pci_device_establish_irq(struct drv_pci_device *device,
 	return 0;
 }
 
-void
-drv_pci_device_disestablish_irq(struct drv_pci_device *device, void *value)
+int
+drv_pci_device_disestablish_irq_checked(struct drv_pci_device *device,
+	void *value)
 {
 	struct pci_irq_cookie *cookie = value;
 	uint16_t control;
+	int hal_error;
 	(void)device;
 	if (cookie == NULL)
-		return;
+		return EINVAL;
 	if (cookie->type == DRV_PCI_IRQ_INTX) {
 		hal_irq_mask(cookie->irq);
-		(void)hal_irq_set_handler(cookie->irq, NULL, NULL);
+		hal_error = hal_irq_set_handler(cookie->irq, NULL, NULL);
+		if (hal_error != HAL_OK)
+			return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
 	} else if (cookie->type == DRV_PCI_IRQ_MSI) {
 		if (drv_pci_device_config_read16(cookie->device,
-		    cookie->capability + PCI_MSI_CONTROL, &control) == 0)
-			(void)drv_pci_device_config_write16(cookie->device,
-			    cookie->capability + PCI_MSI_CONTROL,
-			    control & (uint16_t)~PCI_MSI_ENABLE);
-		(void)hal_irq_unregister_msi(cookie->irq);
+		    cookie->capability + PCI_MSI_CONTROL, &control) != 0 ||
+		    drv_pci_device_config_write16(cookie->device,
+		    cookie->capability + PCI_MSI_CONTROL,
+		    control & (uint16_t)~PCI_MSI_ENABLE) != 0)
+			return EIO;
+		hal_error = hal_irq_unregister_msi(cookie->irq);
+		if (hal_error != HAL_OK)
+			return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
 	} else if (cookie->type == DRV_PCI_IRQ_MSIX) {
 		if (cookie->table_mapped) {
 			volatile uint32_t *entry = cookie->table.address;
 			entry[3] |= PCI_MSIX_ENTRY_MASK;
 			hal_io_mb();
 		}
-		(void)hal_irq_unregister_msi(cookie->irq);
+		hal_error = hal_irq_unregister_msi(cookie->irq);
+		if (hal_error != HAL_OK)
+			return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
 		if (cookie->table_mapped)
 			cookie->device->bus->ops->unmap_bar(
 			    cookie->device->bus->host, &cookie->table);
-	}
+	} else
+		return EINVAL;
 	hal_free(cookie);
+	return 0;
+}
+
+void
+drv_pci_device_disestablish_irq(struct drv_pci_device *device, void *value)
+{
+	/* Legacy callers cannot report a busy interrupt teardown.  Drivers which
+	 * must free their handler argument immediately use the checked API and
+	 * retain their complete device state until a successful retry. */
+	(void)drv_pci_device_disestablish_irq_checked(device, value);
 }
 
 struct drv_dma_device*drv_pci_device_dma(struct drv_pci_device*d){return d?d->bus->dma:NULL;}

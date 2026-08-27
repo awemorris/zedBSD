@@ -233,6 +233,14 @@ void
 vm_page_free_metadata(
 	struct vm_page *page);
 
+/*
+ * Private backing metadata is page-slabbed independently of the general
+ * kernel heap.  The final backing reference releases it through this helper.
+ */
+void
+vm_private_page_free_metadata(
+	struct vm_private_page *backing);
+
 int
 vmspace_tryref(
 	struct vmspace *vm);

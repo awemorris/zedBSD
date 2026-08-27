@@ -65,6 +65,17 @@ endif
 endif
 BUILD := build/$(ZEDBSD_PLATFORM_DIR)
 
+ZEDBSD_BOOT_PARAMETERS_FILE ?= bootloader/default-boot-parameters.txt
+ZEDBSD_BOOT_PARAMETERS_HEADER := $(BUILD)/generated/boot-parameters.h
+ZEDBSD_BOOT_PARAMETERS_HEADER_TOOL := \
+	tools/build/make-boot-parameters-header.py
+
+$(ZEDBSD_BOOT_PARAMETERS_HEADER): $(ZEDBSD_BOOT_PARAMETERS_FILE) \
+	$(ZEDBSD_BOOT_PARAMETERS_HEADER_TOOL)
+	@mkdir -p $(dir $@)
+	$(PYTHON) $(ZEDBSD_BOOT_PARAMETERS_HEADER_TOOL) \
+		--input $(ZEDBSD_BOOT_PARAMETERS_FILE) --output $@
+
 CONFIG_DRIVER_NE2000 ?= y
 CONFIG_DRIVER_LGY98 ?= y
 CONFIG_DRIVER_GRAPHICS ?= y
@@ -140,7 +151,7 @@ override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 # Essential administrative tools are present even when an older config.mk
 # predates their package registration.
 override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) at batch \
-	blkid crontab getty gettext halt hostname init logger lp mailx msgfmt ngettext \
+	blkid crontab getty gettext halt hostname init logger login lp mailx msgfmt ngettext \
 	cron net networkd ntpdate poweroff reboot service shutdown syslogd talk)
 # Xzed cannot operate without the kernel graphics character device.  Keep
 # hand-edited and older saved configurations from producing an unusable
@@ -344,6 +355,11 @@ KERN_ACL_SOURCES := src/kern/posix-acl.c
 KERN_ACL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_ACL_SOURCES))
 KERN_QUOTA_SOURCES := src/kern/quota.c
 KERN_QUOTA_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_QUOTA_SOURCES))
+KERN_BOOT_SOURCE_SOURCES := \
+	src/kern/boot-source-contract.c \
+	src/kern/boot-source.c
+KERN_BOOT_SOURCE_OBJS := $(patsubst %.c,$(BUILD)/%.o,\
+	$(KERN_BOOT_SOURCE_SOURCES))
 
 # ----------------------------------------------------------------------
 # Generic compile rules.  Per-object flag overrides use target-specific

@@ -8,7 +8,7 @@ fi
 output="$1"
 vmunix="$2"
 shift 2
-arguments="zedbsd.root=0x80,1"
+arguments="overlay-root=boot0:rootfs.img overlay-data=boot0:data.img swap0=boot0:swapfile"
 if test "$#" -ne 0; then
 	arguments="$*"
 fi

@@ -1846,7 +1846,8 @@ bootfat_file_extents(struct bootfs_file *file, bootfat_extent_fn callback,
 	filesystem = file->filesystem;
 	fat = bootfat_state(filesystem);
 	state = bootfat_file_state(file);
-	if (fat->type != ZEDBSD_FAT12 && fat->type != ZEDBSD_FAT16)
+	if (fat->type != ZEDBSD_FAT12 && fat->type != ZEDBSD_FAT16 &&
+	    fat->type != ZEDBSD_FAT32)
 		return -1;
 	remaining = file->size;
 	if (remaining == 0)

@@ -505,6 +505,35 @@ mount_private(const char *type_name, struct disk *disk, int flags, void *data,
 	return 0;
 }
 
+MOUNT_HIGH int
+mount_private_promote_root(struct mount *mountp, struct mount **result)
+{
+	unsigned long irq;
+	int error = 0;
+
+	if (!mount_is_private(mountp))
+		return EINVAL;
+	irq = spin_lock_irqsave(&namespace_lock);
+	if (root_mount != NULL)
+		error = EBUSY;
+	else if (mountp->m_state != MOUNT_STATE_LIVE ||
+	    mountp->m_children != NULL)
+		error = EBUSY;
+	if (error == 0) {
+		strcpy(mountp->m_path, "/");
+		mountp->m_name[0] = '\0';
+		mountp->m_internal_flags &= ~MOUNT_PRIVATE_INTERNAL;
+		mountp->m_parent = NULL;
+		mountp->m_sibling = NULL;
+		mountp->m_next = NULL;
+		mount_head = root_mount = mountp;
+	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
+	if (error == 0 && result != NULL)
+		*result = mountp;
+	return error;
+}
+
 static MOUNT_HIGH int
 valid_private_path(const char *path)
 {

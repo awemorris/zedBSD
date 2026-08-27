@@ -4,15 +4,15 @@ Last updated: 2026-08-25
 
 WSID: `ws005`
 
-Status: planned; Phase 20 baseline supplied by WS002
+Status: planned; USB Ethernet is the next physical path, WLAN manually blocked
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: none in WS005; inherited baseline is `ws002-p020`
 
-Resume point: after WS003 hardware inventory, extract NET-01 for the first
-physical network path. Do not select a WLAN backend before the controller and
-firmware policy are known.
+Resume point: capture one target USB Ethernet configuration descriptor, classify
+it as CDC ECM/NCM or Realtek vendor-family, then extract NET-01/NET-10 around
+that first physical path. RTL8822CE WLAN/WPA work is on `MB-006`.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -71,12 +71,12 @@ and failure.
 | NET-00 | Complete with follow-ups | `networkd`, `net`, `dhcpc`, rc.conf boot orchestration, and fd 3 readiness | Phase 20 | See Phase 20 evidence and handoff list |
 | NET-05 | Planned in WS011 | Interactive `net`, `/etc/net.conf`, persistence, and VLAN/bridge configuration model | WS011 | WS011 owns its Phase and acceptance records |
 | NET-01 | Planned | Hardware-network bring-up procedure and diagnostics | BR-00, supported wired/USB interface | Static and DHCP paths pass on the target setup |
-| NET-10 | Proposed | USB CDC Ethernet support if ECM/NCM is selected and the hardware role permits it | BR-07 CDC decision, USB support | Host interoperability, reconnect, DHCP/static, and transfer tests |
-| NET-20 | Planned | Versioned `networkd`-to-`wpa` child protocol and pluggable backend contract | Process/fd primitives | Host protocol tests cover success, rejection, timeout, crash, and cancellation |
-| NET-21 | Planned | `/etc/wpa/` plaintext database and safe management semantics | NET-20 | Root-only permissions, atomic update, parse/error tests, and no credential logging |
-| NET-22 | Planned | `/sbin/wpa` initial backend | WLAN userspace/control ABI, NET-20/21 | Scan selection, authenticate/associate, reconnect, and useful errors on hardware |
-| NET-23 | Planned | `net` WLAN commands through `networkd` and backend | NET-20–22 | End-to-end `net` operation reaches association and then DHCP/static configuration |
-| NET-24 | Deferred | Additional WPA backend implementations | Stable NET-20 contract | Backend can be swapped without changing `net` or `net.conf` semantics |
+| NET-10 | Planned; first physical network | USB Ethernet integration through the class or Realtek-family frontend selected by descriptors | BR-07, HW-12 | Link, reconnect, DHCP/static, DNS, and transfer pass through networkd/net |
+| NET-20 | Manually blocked (`MB-006`) | Versioned `networkd`-to-`wpa` child protocol and pluggable backend contract | Process/fd primitives, explicit release | Host protocol tests cover success, rejection, timeout, crash, and cancellation |
+| NET-21 | Manually blocked (`MB-006`) | `/etc/wpa/` plaintext database and safe management semantics | NET-20, explicit release | Root-only permissions, atomic update, parse/error tests, and no credential logging |
+| NET-22 | Manually blocked (`MB-006`) | `/sbin/wpa` initial RTL8822CE backend | WLAN userspace/control ABI, NET-20/21, firmware policy | Scan selection, authenticate/associate, reconnect, and useful errors on hardware |
+| NET-23 | Manually blocked (`MB-006`) | `net` WLAN commands through `networkd` and backend | NET-20–22, explicit release | End-to-end `net` operation reaches association and then DHCP/static configuration |
+| NET-24 | Deferred behind `MB-006` | Additional WPA backend implementations | Stable NET-20 contract | Backend can be swapped without changing `net` or `net.conf` semantics |
 
 ## 4. WPA backend contract
 

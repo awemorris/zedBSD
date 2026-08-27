@@ -53,6 +53,9 @@ struct usb_storage {
 	struct drv_usb_device *device;
 	struct drv_usb_endpoint *bulk_in;
 	struct drv_usb_endpoint *bulk_out;
+	struct drv_usb_urb *control_urb;
+	struct drv_usb_urb *bulk_in_urb;
+	struct drv_usb_urb *bulk_out_urb;
 	struct disk *disk;
 	struct mutex lock;
 	uint32_t next_tag;
@@ -100,11 +103,106 @@ static void put_be16(uint8_t value[2], uint16_t number)
 	value[1] = (uint8_t)number;
 }
 
+/*
+ * USB storage can back swap.  Allocate its synchronous URBs while the device
+ * is attached rather than while reclaim is trying to create a free page.
+ * The storage mutex serializes every reuse of these three endpoint-specific
+ * objects.
+ */
+static int
+storage_urb_transfer(struct drv_usb_urb *urb, void *buffer, size_t length,
+	unsigned timeout, size_t *actual)
+{
+	int error;
+
+	if (actual != NULL)
+		*actual = 0;
+	error = drv_usb_urb_setup(urb, buffer, length, 0, timeout, NULL, NULL);
+	if (error == 0)
+		error = drv_usb_urb_submit(urb);
+	if (error == 0)
+		error = drv_usb_urb_wait_reusable(urb);
+	if (actual != NULL)
+		*actual = drv_usb_urb_actual_length(urb);
+	return error;
+}
+
+static int
+storage_bulk(struct usb_storage *storage, struct drv_usb_endpoint *endpoint,
+	void *buffer, size_t length, unsigned timeout, size_t *actual)
+{
+	struct drv_usb_urb *urb;
+
+	if (endpoint == storage->bulk_in)
+		urb = storage->bulk_in_urb;
+	else if (endpoint == storage->bulk_out)
+		urb = storage->bulk_out_urb;
+	else
+		return EINVAL;
+	return storage_urb_transfer(urb, buffer, length, timeout, actual);
+}
+
+static int
+storage_control(struct usb_storage *storage, uint8_t request_type,
+	uint8_t request, uint16_t value, uint16_t index, void *buffer,
+	size_t length, unsigned timeout, size_t *actual)
+{
+	struct drv_usb_control_request control = {
+		request_type, request, value, index, (uint16_t)length
+	};
+	int error;
+
+	if (length > UINT16_MAX)
+		return EINVAL;
+	if (actual != NULL)
+		*actual = 0;
+	error = drv_usb_urb_setup_control(storage->control_urb, &control,
+	    buffer, length, timeout, NULL, NULL);
+	if (error == 0)
+		error = drv_usb_urb_submit(storage->control_urb);
+	if (error == 0)
+		error = drv_usb_urb_wait_reusable(storage->control_urb);
+	if (actual != NULL)
+		*actual = drv_usb_urb_actual_length(storage->control_urb);
+	return error;
+}
+
+static int
+storage_urbs_alloc(struct usb_storage *storage)
+{
+	storage->control_urb = drv_usb_urb_alloc(storage->device, NULL, 0);
+	storage->bulk_in_urb =
+	    drv_usb_urb_alloc(storage->device, storage->bulk_in, 0);
+	storage->bulk_out_urb =
+	    drv_usb_urb_alloc(storage->device, storage->bulk_out, 0);
+	if (storage->control_urb != NULL && storage->bulk_in_urb != NULL &&
+	    storage->bulk_out_urb != NULL)
+		return 0;
+	drv_usb_urb_free(storage->bulk_out_urb);
+	drv_usb_urb_free(storage->bulk_in_urb);
+	drv_usb_urb_free(storage->control_urb);
+	storage->bulk_out_urb = NULL;
+	storage->bulk_in_urb = NULL;
+	storage->control_urb = NULL;
+	return ENOMEM;
+}
+
+static void
+storage_urbs_free(struct usb_storage *storage)
+{
+	drv_usb_urb_free(storage->bulk_out_urb);
+	drv_usb_urb_free(storage->bulk_in_urb);
+	drv_usb_urb_free(storage->control_urb);
+	storage->bulk_out_urb = NULL;
+	storage->bulk_in_urb = NULL;
+	storage->control_urb = NULL;
+}
+
 static int clear_halt(struct usb_storage *storage,
 	struct drv_usb_endpoint *endpoint)
 {
 	size_t actual = 0;
-	return drv_usb_control(storage->device,
+	return storage_control(storage,
 	    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_ENDPOINT,
 	    1U, USB_ENDPOINT_HALT, drv_usb_endpoint_address(endpoint), NULL, 0,
 	    1000U, &actual);
@@ -114,7 +212,7 @@ static int bot_reset(struct usb_storage *storage)
 {
 	size_t actual = 0;
 	int error;
-	error = drv_usb_control(storage->device,
+	error = storage_control(storage,
 	    DRV_USB_DIR_OUT | DRV_USB_REQUEST_CLASS | DRV_USB_RECIP_INTERFACE,
 	    USB_MASS_STORAGE_RESET, 0, drv_usb_interface_number(storage->interface),
 	    NULL, 0, 1000U, &actual);
@@ -160,7 +258,7 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 	memcpy(cbw.command, cdb, cdb_length);
 
 	actual = 0;
-	error = drv_usb_bulk(storage->device, storage->bulk_out, &cbw,
+	error = storage_bulk(storage, storage->bulk_out, &cbw,
 	    sizeof(cbw), BOT_TIMEOUT_MS, &actual);
 	if (error != 0 || actual != sizeof(cbw)) {
 		hal_printf("usb-storage: BOT CBW error=%d actual=%u expected=%u\n",
@@ -173,7 +271,7 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 		int data_stalled = 0;
 
 		actual = 0;
-		error = drv_usb_bulk(storage->device, endpoint, buffer, length,
+		error = storage_bulk(storage, endpoint, buffer, length,
 		    BOT_TIMEOUT_MS, &actual);
 		data_actual = actual;
 		if (error == EPIPE) {
@@ -196,7 +294,7 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 		}
 	}
 	actual = 0;
-	error = drv_usb_bulk(storage->device, storage->bulk_in, &csw,
+	error = storage_bulk(storage, storage->bulk_in, &csw,
 	    sizeof(csw), BOT_TIMEOUT_MS, &actual);
 	if (error != 0 || actual != sizeof(csw) ||
 	    get_le32(csw.signature) != BOT_CSW_SIGNATURE ||
@@ -558,7 +656,12 @@ static int storage_attach(struct drv_usb_interface *interface,
 		return ENODEV;
 	}
 	(void)mutex_init(&storage->lock, LOCK_RANK_DISK, "usb-storage");
-	if (drv_usb_control(storage->device,
+	error = storage_urbs_alloc(storage);
+	if (error != 0) {
+		hal_free(storage);
+		return error;
+	}
+	if (storage_control(storage,
 	    DRV_USB_DIR_IN | DRV_USB_REQUEST_CLASS | DRV_USB_RECIP_INTERFACE,
 	    USB_MASS_STORAGE_GET_MAX_LUN, 0,
 	    drv_usb_interface_number(interface), &maximum_lun, 1, 1000U,
@@ -567,17 +670,20 @@ static int storage_attach(struct drv_usb_interface *interface,
 		    (unsigned)maximum_lun + 1U);
 	error = scsi_probe(storage);
 	if (error != 0) {
+		storage_urbs_free(storage);
 		hal_free(storage);
 		return error;
 	}
 	disk = disk_alloc();
 	if (disk == NULL) {
+		storage_urbs_free(storage);
 		hal_free(storage);
 		return ENOSPC;
 	}
 	error = disk_alloc_sd_name(disk);
 	if (error != 0) {
 		(void)disk_destroy(disk);
+		storage_urbs_free(storage);
 		hal_free(storage);
 		return error;
 	}
@@ -594,6 +700,7 @@ static int storage_attach(struct drv_usb_interface *interface,
 	error = disk_create(disk);
 	if (error != 0) {
 		(void)disk_destroy(disk);
+		storage_urbs_free(storage);
 		hal_free(storage);
 		return error;
 	}
@@ -622,6 +729,7 @@ static int storage_detach(struct drv_usb_interface *interface, unsigned flags)
 	error = disk_destroy(storage->disk);
 	if (error != 0)
 		return error;
+	storage_urbs_free(storage);
 	hal_free(storage);
 	return 0;
 }

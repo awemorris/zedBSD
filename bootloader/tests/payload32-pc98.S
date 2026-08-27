@@ -1,5 +1,6 @@
 /* PC-98 ELF32 native MBR-loader payload. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+#include "include/boot/pc98-handoff.h"
 .code32
 .section .text
 .global _start
@@ -8,12 +9,25 @@ _start:
 	jne fail
 	cmpl $0x48323842, 0(%ebx)
 	jne fail
+	cmpw $2, 4(%ebx)
+	jne legacy_v3
+	cmpw $ZEDBSD_PC98_PARAMETER_HANDOFF_SIZE, 6(%ebx)
+	jne fail
+	cmpw $0, 10(%ebx)
+	jne fail
+	cmpl $ZEDBSD_BOOT_PARAMETER_RECORD_MAGIC, ZEDBSD_PC98_PARAMETER_RECORD_OFFSET(%ebx)
+	jne fail
+	jmp origin_ready
+legacy_v3:
 	cmpw $3, 4(%ebx)
+	jne fail
+	cmpw $ZEDBSD_PC98_HANDOFF_COMMON_SIZE, 6(%ebx)
 	jne fail
 	cmpb $1, 10(%ebx)
 	jne fail
 	cmpb $1, 11(%ebx)
 	jne fail
+origin_ready:
 	cmpl $2048, 20(%ebx)
 	jne fail
 	movl 12(%ebx), %edi

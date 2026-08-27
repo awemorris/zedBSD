@@ -3,7 +3,14 @@
 #include "include/uefi.h"
 #include "elf64.h"
 #include "memory-map.h"
+#include "load-options.h"
 #include "bootloader/include/amd64-handoff.h"
+
+#ifndef ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT
+#define ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT ZEDBSD_BOOT_PARAMETERS_DEFAULT_TEXT
+#define ZEDBSD_IMAGE_BOOT_PARAMETERS_LENGTH \
+	(sizeof(ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT) - 1U)
+#endif
 
 #define PAGE_SIZE 4096ULL
 #define LOW_BLOCK_PAGES 16U
@@ -37,6 +44,13 @@
 
 extern uint8_t zbl_transition_start[];
 extern uint8_t zbl_transition_end[];
+
+static const char image_boot_parameters[] =
+	ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT;
+
+_Static_assert(ZBL6_HANDOFF_V5_UEFI_SIZE <=
+	       MEMORY_RANGES_OFFSET - HANDOFF_OFFSET,
+	       "UEFI parameter handoff must fit its low-memory slot");
 
 struct loader_context {
 	EFI_HANDLE image;
@@ -351,7 +365,8 @@ framebuffer_from_gop(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop,
 static void
 build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 		const struct zbl6_framebuffer *framebuffer,
-		uint32_t boot_volume_serial)
+		uint32_t boot_volume_serial,
+		const struct zedbsd_boot_parameter_record *parameters)
 {
 	uint8_t *low = (void *)(uintptr_t)low_base;
 	uint64_t *pml4 = (void *)(low + LOW_PML4_OFFSET);
@@ -360,7 +375,9 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 	uint64_t *high_pdpt = (void *)(low + HIGH_PDPT_OFFSET);
 	uint64_t *high_pd = (void *)(low + HIGH_PD_OFFSET);
 	uint64_t *framebuffer_pd = (void *)(low + FRAMEBUFFER_PD_OFFSET);
-	struct zbl6_handoff_v4 *handoff = (void *)(low + HANDOFF_OFFSET);
+	struct zbl6_handoff_v5_uefi *handoff =
+	    (void *)(low + HANDOFF_OFFSET);
+	struct zbl6_handoff_v3 *common = &handoff->common.common;
 	UINTN transition_size =
 	    (UINTN)(zbl_transition_end - zbl_transition_start);
 	unsigned index;
@@ -395,30 +412,32 @@ build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan,
 		framebuffer_pd[16U + index] =
 		    (framebuffer_aligned + (uint64_t)index * 0x200000ULL) |
 		    PTE_PRESENT | PTE_WRITE | PTE_LARGE;
-	handoff->common.magic = ZBL6_HANDOFF_MAGIC;
-	handoff->common.version = ZBL6_HANDOFF_V4_VERSION;
-	handoff->common.size = sizeof(*handoff);
-	handoff->common.flags = ZBL6_HANDOFF_FLAG_UEFI |
-				ZBL6_HANDOFF_FLAG_MEMORY_MAP |
-				ZBL6_HANDOFF_FLAG_FRAMEBUFFER;
-	handoff->common.flags |= ZBL6_HANDOFF_FLAG_BOOT_UUID;
-	handoff->common.boot_drive = 0x80;
-	handoff->common.root_partition_scheme = 1;
-	handoff->common.root_partition_index = 1;
-	handoff->common.loader_partition_index = 2;
-	handoff->common.memory_range_entry_size =
+	common->magic = ZBL6_HANDOFF_MAGIC;
+	common->version = ZBL6_HANDOFF_V5_VERSION;
+	common->size = sizeof(*handoff);
+	common->flags = ZBL6_HANDOFF_FLAG_UEFI |
+			ZBL6_HANDOFF_FLAG_MEMORY_MAP |
+			ZBL6_HANDOFF_FLAG_FRAMEBUFFER |
+			ZBL6_HANDOFF_FLAG_BOOT_UUID |
+			ZBL6_HANDOFF_FLAG_BOOT_PARAMETERS;
+	common->boot_drive = 0x80;
+	common->root_partition_scheme = 1;
+	common->root_partition_index = 1;
+	common->loader_partition_index = 2;
+	common->memory_range_entry_size =
 	    sizeof(struct zbl6_memory_range);
-	handoff->common.memory_ranges = low_base + MEMORY_RANGES_OFFSET;
-	handoff->common.kernel_phys_start = plan->physical_start;
-	handoff->common.kernel_phys_end = plan->physical_end;
-	handoff->common.bootstrap_cr3 = low_base + LOW_PML4_OFFSET;
-	handoff->common.framebuffer_base = framebuffer->physical_base;
-	handoff->common.framebuffer_size = framebuffer->size;
-	handoff->common.framebuffer_width = framebuffer->width;
-	handoff->common.framebuffer_height = framebuffer->height;
-	handoff->common.framebuffer_stride = framebuffer->stride;
-	handoff->common.framebuffer_format = framebuffer->format;
-	handoff->boot_volume_serial = boot_volume_serial;
+	common->memory_ranges = low_base + MEMORY_RANGES_OFFSET;
+	common->kernel_phys_start = plan->physical_start;
+	common->kernel_phys_end = plan->physical_end;
+	common->bootstrap_cr3 = low_base + LOW_PML4_OFFSET;
+	common->framebuffer_base = framebuffer->physical_base;
+	common->framebuffer_size = framebuffer->size;
+	common->framebuffer_width = framebuffer->width;
+	common->framebuffer_height = framebuffer->height;
+	common->framebuffer_stride = framebuffer->stride;
+	common->framebuffer_format = framebuffer->format;
+	handoff->common.boot_volume_serial = boot_volume_serial;
+	byte_copy(&handoff->parameters, parameters, sizeof(*parameters));
 }
 
 EFI_STATUS EFIAPI
@@ -439,12 +458,15 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	UINTN descriptor_size;
 	UINT32 descriptor_version;
 	EFI_MEMORY_DESCRIPTOR *map;
-	struct zbl6_handoff_v4 *handoff;
+	struct zbl6_handoff_v5_uefi *handoff;
+	struct zbl6_handoff_v3 *handoff_common;
 	struct zbl6_framebuffer framebuffer;
+	struct zedbsd_boot_parameter_record parameter_record;
 	struct zbl6_memory_range *ranges;
 	uint32_t range_count;
 	uint32_t boot_volume_serial;
 	enum zbl_uefi_map_result map_result;
+	enum zbl_uefi_load_options_result option_result;
 	unsigned index, attempt;
 
 	if (system == 0 || system->BootServices == 0)
@@ -465,6 +487,16 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 				      (void **)&loaded);
 	if (EFI_ERROR(status))
 		fail_status(&context, "LoadedImage", status);
+	option_result = zbl_uefi_load_options_record(&parameter_record,
+	    loaded->LoadOptions, loaded->LoadOptionsSize, image_boot_parameters,
+	    sizeof(image_boot_parameters));
+	if (option_result != ZBL_UEFI_LOAD_OPTIONS_OK) {
+		console_ascii(&context, "UEFI LoadOptions rejected: ");
+		console_ascii(&context,
+		    zbl_uefi_load_options_result_name(option_result));
+		console_ascii(&context, "\n");
+		fail_status(&context, "Validate LoadOptions", EFI_INVALID_PARAMETER);
+	}
 	status = boot->HandleProtocol(loaded->DeviceHandle,
 				      &EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,
 				      (void **)&filesystem);
@@ -524,14 +556,16 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	    low_address + LOW_BLOCK_PAGES * PAGE_SIZE > 0x00200000ULL)
 		fail_status(&context, "Allocate bootstrap",
 			    EFI_ERROR(status) ? status : EFI_LOAD_ERROR);
-	build_bootstrap(low_address, &plan, &framebuffer, boot_volume_serial);
+	build_bootstrap(low_address, &plan, &framebuffer, boot_volume_serial,
+	    &parameter_record);
 	handoff = (void *)(uintptr_t)(low_address + HANDOFF_OFFSET);
+	handoff_common = &handoff->common.common;
 	ranges = (void *)(uintptr_t)(low_address + MEMORY_RANGES_OFFSET);
-	handoff->common.rsdp = find_acpi_rsdp(system);
-	if (handoff->common.rsdp == 0)
+	handoff_common->rsdp = find_acpi_rsdp(system);
+	if (handoff_common->rsdp == 0)
 		fail_status(&context, "Locate ACPI RSDP", EFI_NOT_FOUND);
-	handoff->common.flags |= ZBL6_HANDOFF_FLAG_ACPI_RSDP;
-	console_hex64(&context, "A64 RSDP ", handoff->common.rsdp);
+	handoff_common->flags |= ZBL6_HANDOFF_FLAG_ACPI_RSDP;
+	console_hex64(&context, "A64 RSDP ", handoff_common->rsdp);
 	console_hex64(&context, "A64 GOP  ", framebuffer.physical_base);
 	console_hex64(&context, "A64 LOW  ", low_address);
 	{
@@ -600,9 +634,9 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 		halt();
 	}
 	framebuffer_stage(&framebuffer, 2U);
-	handoff->common.memory_range_count = range_count;
+	handoff_common->memory_range_count = range_count;
 	debug_port("A64 UEFI EXIT\n");
 	((transition_fn)(uintptr_t)(low_address + LOW_TRAMPOLINE_OFFSET))(
-	    handoff->common.bootstrap_cr3, low_address + TRANSITION_STACK_TOP,
+	    handoff_common->bootstrap_cr3, low_address + TRANSITION_STACK_TOP,
 	    low_address + HANDOFF_OFFSET, plan.entry);
 }

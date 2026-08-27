@@ -28,6 +28,11 @@ Parent: [WS003](../ws.md)
 | BR-T39 | Host USB-storage flush capability | Bounded MODE/SENSE parsing plus BOT status/residue accounting select immutable sync-cache, write-through, FUA-from-first-write, or read-only policy before publication; unsafe state and runtime sync loss fail closed with the original error |
 | BR-T40 | CDC selection | Selected ACM or ECM/NCM profile interoperates and reconnects; device-role capability is proven first |
 | BR-T41 | Latitude USB-storage U3 confirmation | One boot of the frozen q014 image resolves `/dev/sda1`, mounts the read-write data loop and root overlay, and starts init without opcode-35 `05/20/00` or a false-success cache policy |
+| BR-T42 | Common boot-parameter parser | The production parser enforces the 3071-byte grammar, known-key uniqueness, indexed boot/swap names, unknown-key policy, and architecture-independent absolute `init=` selection |
+| BR-T43 | Four-path x86 parameter handoff | i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI validate and copy the same bounded NUL-terminated parameter string without retaining loader memory |
+| BR-T44 | Boot-slot and root-mode selection | Four sparse FAT boot slots, selector ambiguity/aliasing, safe `bootN:PATH`, native `rootpart`, explicit lower/upper overlay, and complete failure unwind follow the public contract |
+| BR-T45 | Multi-source swap | Zero to four sparse FAT-file or signed raw-partition sources activate atomically, allocate in numeric order, route I/O to the owning source, aggregate stats, and shut down without leaks |
+| BR-T46 | Four-platform parameter acceptance | Every declared i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI runtime cell proves normal/default init, explicit shell init, native root, overlay root, file swap, raw swap, and visible invalid-configuration failure |
 | BR-T50 | Physical network | Static or DHCP setup, peer reachability, and a bounded data transfer pass |
 
 For the q011 diagnostic BR-T32 image, the top-right GOP marker is unary: one
@@ -164,6 +169,165 @@ cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
   -o /tmp/ws003-usb-storage-flush-test
 /tmp/ws003-usb-storage-flush-test
 ```
+
+BR-T42 links the production common parser directly. It covers the complete
+known-name set, sparse boot/swap indices, owned storage, bounded unknown-name
+diagnostics, duplicate and malformed input, ASCII/NUL transport boundaries,
+the exact 3071-byte limit, and absolute `init=` selection:
+
+```sh
+cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
+  src/kern/boot-parameters.c src/kern/init.c \
+  plan/ws003-bringup/tests/boot-parameters-test.c \
+  -o /tmp/ws003-boot-parameters-test
+/tmp/ws003-boot-parameters-test
+```
+
+BR-T43 links the production shared record, four x86 layout classifiers, and
+UEFI `LoadOptions` conversion helpers directly:
+
+```sh
+cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
+  src/hal/x86/boot-parameters.c \
+  src/hal/amd64/bsp-pcat/handoff-validation.c \
+  bootloader/uefi/load-options.c \
+  plan/ws003-bringup/tests/x86-parameter-handoff-test.c \
+  -o /tmp/ws003-x86-parameter-handoff-test
+/tmp/ws003-x86-parameter-handoff-test
+```
+
+BR-T44 links the production selector, boot-reference, root-mode, and private
+slot ownership code. It covers strict selectors, bounded normalized paths,
+sparse slots, loader-origin fallback, duplicate aliases, FAT12 rejection,
+undefined references, same-FAT root promotion, and reverse rollback after
+every slot acquisition stage:
+
+```sh
+cc -std=c11 -Iinclude -Iinclude/uapi -I. -Wall -Wextra -Werror \
+  src/kern/boot-parameters.c src/kern/boot-source-contract.c \
+  src/kern/boot-source.c plan/ws003-bringup/tests/boot-source-test.c \
+  -o /tmp/ws003-boot-source-test
+/tmp/ws003-boot-source-test
+```
+
+BR-T45 links the production swap header, VM backend, and aggregate source
+mapping. It covers legacy `ZEDSWAP1`, 64-bit `ZEDSWAP2` capacity/UUID/label,
+malformed and length-mismatched headers, sparse numeric source order,
+duplicate/overflow rejection, boundary routing, concurrent allocation/free,
+first-error flush, and complete shutdown. Generate both on-disk formats before
+running the fixture:
+
+```sh
+build/NoctLang/build-static/noct --path=tools/build \
+  tools/build/make-swapfile.noct --format v1 --size-mib 32 \
+  --output /tmp/ws003-swap-v1
+build/NoctLang/build-static/noct --path=tools/build \
+  tools/build/make-swapfile.noct --format v2 --size-mib 1 \
+  --uuid 0123456789ABCDEF --label TESTSWAP \
+  --output /tmp/ws003-swap-v2
+cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
+  -ffunction-sections -fdata-sections -pthread \
+  src/kern/swap.c src/kern/swap-source.c \
+  plan/ws003-bringup/tests/swap-source-test.c \
+  -Wl,--gc-sections -o /tmp/ws003-swap-source-test
+/tmp/ws003-swap-source-test /tmp/ws003-swap-v1 /tmp/ws003-swap-v2
+```
+
+BR-T46 is the production-loader QEMU acceptance harness.  Its complete matrix
+contains 31 cells: six common behaviors on each of i386 PC/AT, i386 PC-98,
+amd64 BIOS, and amd64 UEFI (24 cells), plus mixed file/raw swap, UUID disk
+reordering, and PARTUUID disk reordering on both amd64 firmware paths (six
+cells), plus one PC/AT native-root/raw-swap alias rejection cell.  `--list` and
+`--dry-run` expose the selected cells without building or booting them:
+
+```sh
+plan/ws003-bringup/tests/boot-parameter-qemu-acceptance.sh --list
+plan/ws003-bringup/tests/boot-parameter-qemu-acceptance.sh --dry-run \
+  --platform amd64-uefi --case partuuid-reorder
+```
+
+A full run requires a new or empty persistent output directory.  It saves the
+generated configurations, build logs, exact QEMU commands and versions,
+parameter/image hashes, guest logs, controller results, and result table there.
+It hashes the user's `config.mk` before and after the run, uses the normal
+independent `build/pcat`, `build/pc98`, and `build/amd64` directories with
+`make -j16`, and gives QEMU only per-cell disposable image copies:
+
+```sh
+plan/ws003-bringup/tests/boot-parameter-qemu-acceptance.sh \
+  plan/ws003-bringup/temp/q015-br-t46
+```
+
+Swap cells add the test-only production-ABI `/bin/brt46-swap` helper to a
+private acceptance root image.  A cell passes only after at least 1024 pages
+(4 MiB) have actually paged out, all touched anonymous pages have been read
+back with their contents intact, and the VM counters report a positive
+page-in.  PC-98 observations use QEMU monitor text-VRAM snapshots rather than
+OCR.  The amd64 UUID and PARTUUID regressions enumerate a distinct auxiliary
+MBR/FAT disk before the production boot disk while `bootindex` still selects
+the production image; this independently verifies loader-origin `boot0` and
+explicit `boot1` resolution.  The PC/AT alias regression stamps a valid
+`ZEDSWAP2` header into the reserved boot block of a disposable native UFS root
+partition, selects that same partition as both `rootpart` and `swap0`, and
+requires the pre-mount/pre-activation `EEXIST` diagnostic.
+
+The q015 USB-backed swap forward-progress correction reserves one embedded
+xHCI transfer request plus an 8-KiB-aligned, 8-KiB coherent bounce buffer per
+controller before it runs. The existing controller-wide single-flight rule
+lets page-sized storage I/O and its BOT envelope use that reserve without a
+heap or DMA allocation; generic transfers above 8 KiB retain the dynamic path.
+USB storage similarly allocates persistent control, bulk-in, and bulk-out URBs
+at attach. `drv_usb_urb_wait_reusable()` prevents reuse until terminal status
+and the HCD ownership hold are both clear. xHCI's atomic `completion_busy`
+counter prevents detach/stop quiescence from seeing a false zero across
+overlapping or reentrant completion publication, while failed cancellation
+retains request, URB, and DMA ownership.
+
+Focused post-correction BR-T46 evidence is:
+
+| Cell | Evidence directory | Final page-in / page-out |
+| --- | --- | --- |
+| amd64 UEFI file swap, repeat 002 | `plan/ws003-bringup/temp/q015-br-t46-reserve-file-focused-002-uefi` | 1767 / 3533 |
+| amd64 UEFI file swap, repeat 003 | `plan/ws003-bringup/temp/q015-br-t46-reserve-file-focused-003-uefi` | 1767 / 3533 |
+| amd64 BIOS raw swap | `plan/ws003-bringup/temp/q015-br-t46-reserve-raw-focused-001-bios` | 2755 / 5509 |
+| amd64 UEFI raw swap | `plan/ws003-bringup/temp/q015-br-t46-reserve-raw-focused-001-uefi` | 1748 / 3495 |
+| amd64 BIOS mixed file/raw swap | `plan/ws003-bringup/temp/q015-br-t46-reserve-mixed-focused-001-bios` | 2799 / 5597 |
+| amd64 UEFI mixed file/raw swap | `plan/ws003-bringup/temp/q015-br-t46-reserve-mixed-focused-001-uefi` | 1792 / 3583 |
+
+Every listed `results.tsv` records `pass`; each cell's logical guest log ends
+with a successful full anonymous-page readback and the nonzero counters shown
+above. The eight existing affected host regressions also pass:
+`xhci-capability-mmio-test`, `usb-hcd-unregister-test`,
+`xhci-control-ep0-reset-test`, `xhci-cancel-command-test`,
+`dma-allocation-lock-test`, `xhci-model-test`, `usb-storage-scsi-test`, and
+`usb-urb-publication-test`. BR-T39 `usb-storage-flush-test` also passes against
+the corrected USB-storage path.
+
+The authoritative BR-T46 result is **PASS 31/31** at
+`plan/ws003-bringup/temp/q015-br-t46-final-007`: PC/AT 7/7, PC-98 6/6, amd64
+BIOS 9/9, and amd64 UEFI 9/9. It ran from 2026-08-27 11:04:12Z through
+11:20:24Z with system QEMU 10.0.11 and PC-98 QEMU 11.0.93. All 10 positive
+swap cells report nonzero page-in/page-out, full anonymous-page readback, and
+`OBJECT-SHARED PASS`; the fatal BOT/storage scan found zero matches. The
+native-root/raw-swap alias rejection and both UUID and PARTUUID reordered-disk
+cases pass on their declared production paths.
+
+The run preserved `config.mk` SHA-256
+`3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`.
+Its authoritative SHA-256 values are
+`d290ceb43b1f4b3c076c53b3b41d571dbfdf61b4526bd7821e03da5355efeb3c`
+for `cells.tsv`,
+`d64dfbcc76d3c0f8e86f27ba86a7280391ca7a4e86fe0666c404c5d1f8a7d8cf`
+for `results.tsv`, and
+`e38233677fbebf399d89cd2688c9a98d65f6ec2bea1b81baedcb3f26a4fffd1b`
+for `metadata.txt`.
+
+This run postdates the final xHCI stop/IRQ ownership review. In addition to
+the eight existing affected regressions, `usb-hcd-unregister-test` now proves
+that a timeout cannot return a reusable synchronous URB while the HCD still
+owns it, and `xhci-capability-mmio-test` proves that checked PCI IRQ removal
+retains its cookie across a first-attempt `EBUSY` and succeeds on retry. The
+complete final host set passes 13/13.
 
 BR-T41 was performed once after q014's host/build/QEMU gates passed and its
 production image was frozen with a recorded path, size, and SHA-256. The

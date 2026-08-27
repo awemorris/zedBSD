@@ -28,6 +28,8 @@ extern void vm_object_read_checkpoint(struct inode *, size_t, size_t)
 
 #define PAGE_SIZE ZEDBSD_PAGE_SIZE
 #define VM_OBJECT_DATA __attribute__((section(".vfs_bss")))
+#define VM_OBJECT_FAULT_RECLAIM_RETRIES 4U
+#define VM_OBJECT_FAULT_RESERVE_PAGES 4U
 
 static struct vm_object *shared_objects VM_OBJECT_DATA;
 static unsigned object_count VM_OBJECT_DATA;
@@ -169,6 +171,24 @@ alloc_vm_page(struct hal_pmem *memory)
 		HAL_PMEM_TYPE_RAM, 0
 	};
 	return hal_pmem_alloc(&request, memory);
+}
+
+/*
+ * A filesystem page read may need page-backed scratch storage after the
+ * object frame itself has consumed the page obtained by normal reclaim.
+ * Reclaim a small bounded reserve only from the lockless fault-I/O boundary;
+ * the current object page is BUSY and therefore cannot be selected.
+ */
+static unsigned
+reclaim_object_fault_reserve(void)
+{
+	unsigned reclaimed;
+
+	for (reclaimed = 0; reclaimed < VM_OBJECT_FAULT_RESERVE_PAGES;
+	     reclaimed++)
+		if (vm_reclaim_private_one(NULL) != 0)
+			break;
+	return reclaimed;
 }
 
 static struct vm_object_page *
@@ -1414,6 +1434,7 @@ vm_object_fault(struct vm_object *object, off_t offset,
 	size_t length;
 	ssize_t count;
 	unsigned long irq;
+	unsigned read_retries = 0;
 	int error;
 	if (object == NULL || result == NULL || offset < 0 ||
 	    (offset & (PAGE_SIZE - 1U)) != 0)
@@ -1503,6 +1524,8 @@ read_page:
 	length = (size_t)(fault_size - offset);
 	if (length > PAGE_SIZE)
 		length = PAGE_SIZE;
+
+read_io_retry:
 	if ((object->flags & VM_OBJECT_ANONYMOUS) != 0) {
 		count = (ssize_t)length;
 	} else {
@@ -1524,6 +1547,12 @@ read_page:
 			    (void *)page->pmem.vaddr, length) : -error;
 			file_io_end(&io);
 		}
+	}
+	if (count == -(ssize_t)ENOMEM &&
+	    read_retries < VM_OBJECT_FAULT_RECLAIM_RETRIES &&
+	    reclaim_object_fault_reserve() != 0) {
+		read_retries++;
+		goto read_io_retry;
 	}
 	irq = spin_lock_irqsave(&object->lock);
 	if ((object->flags & (VM_OBJECT_RESIZING | VM_OBJECT_CONTENT)) != 0 ||

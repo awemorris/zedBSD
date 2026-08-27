@@ -1330,20 +1330,42 @@ fat_reclaim(struct inode *inode)
 	mutex_unlock(&state->lock);
 }
 
-static int
-fat_probe(struct disk *disk)
+int
+fat_probe_type(struct disk *disk, enum bootfat_type *type)
 {
 	struct boot_volume volume;
 	enum bootfs_result result;
-	if (disk == NULL || disk->d_block_size != 512)
+	if (disk == NULL || type == NULL || disk->d_block_size != 512)
 		return EOPNOTSUPP;
 	volume = fat_volume(disk);
 	result = bootfat12_driver.probe(&volume);
-	if (result == ZEDBSD_FS_UNSUPPORTED)
-		result = bootfat16_driver.probe(&volume);
-	if (result == ZEDBSD_FS_UNSUPPORTED)
-		result = bootfat32_driver.probe(&volume);
+	if (result == ZEDBSD_FS_OK) {
+		*type = ZEDBSD_FAT12;
+		return 0;
+	}
+	if (result != ZEDBSD_FS_UNSUPPORTED)
+		return fs_error(result);
+	result = bootfat16_driver.probe(&volume);
+	if (result == ZEDBSD_FS_OK) {
+		*type = ZEDBSD_FAT16;
+		return 0;
+	}
+	if (result != ZEDBSD_FS_UNSUPPORTED)
+		return fs_error(result);
+	result = bootfat32_driver.probe(&volume);
+	if (result == ZEDBSD_FS_OK) {
+		*type = ZEDBSD_FAT32;
+		return 0;
+	}
 	return fs_error(result);
+}
+
+static int
+fat_probe(struct disk *disk)
+{
+	enum bootfat_type type;
+
+	return fat_probe_type(disk, &type);
 }
 
 static int

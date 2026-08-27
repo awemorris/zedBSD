@@ -25,10 +25,14 @@ static unsigned start_calls;
 static unsigned quiesce_calls;
 static unsigned stop_calls;
 static unsigned enqueue_calls;
+static int dequeue_result = ENOTSUP;
 static struct drv_usb_urb *pending_urb;
 static uint32_t root_status_value;
 static uint32_t cleared_features;
 static unsigned root_reset_calls;
+static uint64_t fake_ticks;
+static uint64_t complete_at_tick;
+static struct drv_usb_hcd *completion_hcd;
 
 void *
 hal_malloc(size_t size)
@@ -52,12 +56,19 @@ hal_printf(const char *format, ...)
 uint64_t
 sched_ticks(void)
 {
-	return 0;
+	return fake_ticks++;
 }
 
 void
 sched_yield(void)
 {
+	fake_ticks++;
+	if (complete_at_tick != 0 && fake_ticks >= complete_at_tick &&
+	    pending_urb != NULL) {
+		drv_usb_hcd_complete(completion_hcd, pending_urb,
+		    DRV_USB_URB_COMPLETE, 0);
+		complete_at_tick = 0;
+	}
 }
 
 static int
@@ -98,7 +109,7 @@ test_urb_dequeue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 {
 	(void)hcd;
 	(void)urb;
-	return ENOTSUP;
+	return dequeue_result;
 }
 
 static int
@@ -274,6 +285,36 @@ main(void)
 	pending_urb = NULL;
 	assert(drv_usb_hcd_unregister(&ownership_hcd) == 0);
 	assert(quiesce_calls == 2);
+	assert(stop_calls == 1);
+	assert(bus_count(&ownership_hcd, NULL) == 0);
+
+	/* A failed timeout cancellation must not let a synchronous reusable URB
+	 * escape while the HCD still owns its request or buffer.  Complete it
+	 * after drv_usb_urb_wait() has exhausted its cancellation grace period;
+	 * wait_reusable() preserves ETIMEDOUT but waits for ownership release. */
+	quiesce_calls = 0;
+	stop_calls = 0;
+	fake_ticks = 0;
+	assert(drv_usb_hcd_register(&ownership_hcd, &ownership_bus) == 0);
+	urb = drv_usb_urb_alloc(drv_usb_bus_root_hub(ownership_bus), NULL, 0);
+	assert(urb != NULL);
+	assert(drv_usb_urb_setup(urb, NULL, 0, 0, 10, NULL, NULL) == 0);
+	assert(drv_usb_urb_submit(urb) == 0);
+	assert(pending_urb == urb);
+	completion_hcd = &ownership_hcd;
+	dequeue_result = EBUSY;
+	complete_at_tick = 250;
+	assert(drv_usb_urb_wait_reusable(urb) == ETIMEDOUT);
+	assert(fake_ticks >= 250);
+	assert(complete_at_tick == 0);
+	assert(drv_usb_urb_status(urb) == DRV_USB_URB_COMPLETE);
+	pending_urb = NULL;
+	completion_hcd = NULL;
+	dequeue_result = ENOTSUP;
+	assert(drv_usb_urb_setup(urb, NULL, 0, 0, 0, NULL, NULL) == 0);
+	drv_usb_urb_free(urb);
+	assert(drv_usb_hcd_unregister(&ownership_hcd) == 0);
+	assert(quiesce_calls == 1);
 	assert(stop_calls == 1);
 	assert(bus_count(&ownership_hcd, NULL) == 0);
 

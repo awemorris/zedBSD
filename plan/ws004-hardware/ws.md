@@ -1,6 +1,6 @@
 # WS004: hardware expansion
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 WSID: `ws004`
 
@@ -9,10 +9,12 @@ Status: active; q010 automatic USB/heap gate complete, manual acceptance pending
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws004-p008` and resumed `ws004-p006` complete their
-automatic QEMU milestones; detailed manual USB acceptance is pending
+automatic QEMU milestones; `ws004-p009` carries a checked legacy-HCD IRQ
+teardown finding from q015
 
 Resume point: record the user's detailed manual USB acceptance separately, or
-extract the next planned hardware Phase. The automatic 500-boot gate passed.
+queue `ws004-p009` to migrate EHCI/UHCI to checked IRQ teardown. The automatic
+500-boot gate passed.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -28,6 +30,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p006`](phase006-usb-overlay-write/phase.md) | Complete automatic QEMU milestone | URB correction plus p008 heap fix pass focused tests and the revised 500-boot gate; manual acceptance is pending |
 | [`ws004-p007`](phase007-warm-reset/phase.md) | Complete | Native-mode ELF64 BSS clearing fixes stale allocator state; three IDE reboots and a USB reboot reach login |
 | [`ws004-p008`](phase008-smp-heap-integrity/phase.md) | Complete | Unified kernel heap lock domain, corrected aligned-prefix arithmetic, controls, and 500-boot combined gate pass |
+| [`ws004-p009`](phase009-pci-hcd-irq-teardown/phase.md) | Planned | Convert EHCI/UHCI from the legacy void IRQ removal path; retain complete controller ownership on checked-removal failure |
 
 ### MSI follow-up register
 
@@ -46,8 +49,8 @@ environment are available.
 
 - Provide the reusable PCIe, DMA, interrupt, reset, and firmware foundations
   required by the target laptop.
-- Implement xHCI/USB-root, NVMe, the selected WLAN device, and i915 foundations
-  as native zedBSD drivers.
+- Implement xHCI/USB-root, USB Ethernet, NVMe, the selected WLAN device, and
+  i915 foundations as native zedBSD drivers.
 - Keep modeled/QEMU results separate from physical-hardware results.
 
 ## WS completion conditions
@@ -89,10 +92,12 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-00 | Complete (software scope) | PCIe/DMA/interrupt capability audit and common fixes | BR-00 hardware inventory deferred | Focused host tests and amd64 build pass; physical findings remain separate |
 | HW-01 | Complete read-only QEMU milestone | xHCI host-controller support sufficient for storage and future HID | HW-00, existing USB core | QEMU xHCI enumeration, bounded media read, and reconnect pass; writable-root correctness is HW-02/p006 |
 | HW-02 | Complete automatic QEMU milestone; manual acceptance pending | Stable USB identity/discovery, writable overlay, bounded read-only rejection, and warm reboot | HW-01, block layer, approved selector decision | Revised HW-T12 500-copy gate passes; record the user's detailed manual acceptance separately before physical USB-root claims |
+| HW-03 | Planned (`ws004-p009`) | Checked PCI IRQ/controller lifetime for EHCI and UHCI detach | HW-00, checked PCI IRQ API from q015 | Busy/error removal retains all ownership; retry and final detach host fixtures plus i386 builds pass |
 | HW-10 | Planned | NVMe controller, admin/I/O queues, namespaces, and block integration | HW-00 | QEMU NVMe install/mount/I/O/reset tests pass |
 | HW-11 | Planned | NVMe verification on the Latitude controller | HW-10, BR-00 | Identify/read-only first, then disposable-range I/O and stress without corruption |
-| HW-20 | Proposed | WLAN architecture and exact-device driver | BR-00, HW-00, firmware policy | Scan, authenticate, associate, and exchange data on hardware |
-| HW-21 | Proposed | Testable WLAN hardware abstraction or protocol fixture | HW-20 design | Driver state/error paths can be tested without claiming QEMU emulates the laptop radio |
+| HW-12 | Planned; first network target | Common USB Ethernet core, CDC ECM/NCM class binding, and a Realtek-family backend if the target descriptors are vendor-specific | HW-01, target descriptors; VID:PID only for vendor-specific matching | At least one user adapter attaches, links, transfers concurrently, times out safely, reconnects, and detaches; class matching is not falsely claimed for vendor-specific devices |
+| HW-20 | Manually blocked (`MB-006`) | RTL8822CE (`10ec:c822`, subsystem `10ec:c130`) architecture and native driver | BR-00, HW-00, firmware packaging policy, explicit release | Scan, authenticate, associate, and exchange data on hardware |
+| HW-21 | Manually blocked (`MB-006`) | Testable RTL8822CE WLAN hardware abstraction or protocol fixture | HW-20 design and explicit release | Driver state/error paths can be tested without claiming QEMU emulates the laptop radio |
 | HW-30 | Proposed | i915 hardware foundations for the discovered 11th-generation GPU | BR-00, HW-00, GFX UAPI | Modeset/scanout and recovery on hardware; model tests for device-independent layers |
 
 ## 4. NVMe sequence
@@ -111,9 +116,10 @@ it is not needed to prove the initial USB-root milestone.
 
 ## 5. WLAN sequence
 
-WLAN implementation cannot be selected from the laptop model name. BR-00 first
-records the vendor/device/subsystem IDs and required firmware. The resulting
-Phase defines:
+The physical evidence identifies the built-in WLAN as Realtek RTL8822CE, PCI
+`10ec:c822`, subsystem `10ec:c130`. WLAN is explicitly behind manual hold
+`MB-006`; USB Ethernet is the earlier physical-network target. When resumed,
+the resulting Phase defines:
 
 - the boundary between hardware driver, 802.11 state/frames, and the `wpa`
   userspace backend;
@@ -122,10 +128,45 @@ Phase defines:
 - firmware loading, reset, radio-kill, power, and reconnect behavior;
 - data-plane integration with the existing network stack.
 
-QEMU does not provide a faithful substitute for the expected Intel laptop WLAN
-or Tiger Lake i915 device. Host-side state-machine tests, a constrained test
-double, or PCI passthrough may validate separable logic, but final completion
-requires the exact hardware.
+QEMU does not provide a faithful substitute for the RTL8822CE radio or Tiger
+Lake i915 device. Host-side state-machine tests, a constrained test double, or
+PCI passthrough may validate separable logic, but final completion requires the
+exact hardware.
+
+On FreeBSD the built-in PCI WLAN inventory is collected with:
+
+```sh
+pciconf -lv | grep -A1 -B3 network
+```
+
+Retain the full matching stanza, including `vendor`, `device`, `subvendor`, and
+`subdevice`. The supplied stanza is now the canonical RTL8822CE target identity.
+
+The matching `linux-firmware` payload is `rtw88/rtw8822c_fw.bin`. Its WHENCE
+entry uses `LICENCE.rtlwifi_firmware.txt`: unmodified binary use and
+redistribution are permitted when the copyright/disclaimer accompanies it,
+while reverse engineering, decompilation, and disassembly are prohibited and
+the patent grant is limited. It is therefore not zlib-licensed source and must
+not be represented as part of the permissively licensed base implementation.
+If later approved, ship it as a separately identified firmware package with
+the exact upstream blob, license text, provenance, hash, and update policy.
+Final acquisition/republication policy remains on `MB-006`.
+
+References:
+
+- FreeBSD network-adapter inventory procedure:
+  <https://docs.freebsd.org/en/books/handbook/network/>
+- FreeBSD `usbconfig(8)` descriptor inspection:
+  <https://man.freebsd.org/cgi/man.cgi?query=usbconfig&sektion=8>
+- FreeBSD `ure(4)` identifies RTL8152/RTL8153 as a vendor-family USB Ethernet
+  target rather than generic CDC ACM:
+  <https://man.freebsd.org/cgi/man.cgi?query=ure&sektion=4>
+- Linux firmware maps RTL8822CE to `rtw8822c_fw.bin` and marks it
+  redistributable under the Realtek binary-firmware terms:
+  <https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+/f9b926a6e1d67e09e54adc329c4e76be5f24a895/LICENCE.rtlwifi_firmware.txt>
+- FreeBSD distributes rtw88 firmware as a separate package rather than
+  treating it as driver source:
+  <https://cgit.freebsd.org/ports/tree/net/wifi-firmware-rtw88-kmod>
 
 ## 6. Driver completion rule
 

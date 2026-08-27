@@ -1,24 +1,25 @@
 # WS008: Noct and BeUI
 
-Last updated: 2026-08-25
+Last updated: 2026-08-27
 
 WSID: `ws008`
 
-Status: blocked before first Phase: authoritative upstream tree unavailable
+Status: planned; authoritative upstream tree is now available
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: none
 
-Resume point: make the authoritative Noct repository/tree and target revision
-available, then extract NOCT-00 as an audit Phase.
+Resume point: extract NOCT-00 as an audit Phase against `/home/awe/NoctLang`
+and the `userland/noct` submodule at pinned revision
+`7d856856e16eb2d889ba49f557f2fda4dcaeea7e`.
 
 Shared tests: [WS008 test index](tests/README.md)
 
 ## Phase registry
 
-No Phase has started. The WS is blocked before Phase extraction rather than
-creating an implementation Phase whose baseline cannot be inspected.
+No Phase has started. The former missing-upstream blocker is cleared; NOCT-00
+can now be extracted before implementation begins.
 
 ## Goals
 
@@ -42,11 +43,12 @@ zedBSD BeUI backend using `/dev/graphics` and evdev, and reduce the local
 
 ## 2. Current baseline and prerequisite
 
-The zedBSD tree currently contains a local Noct runtime/package prototype that
-uses `/dev/graphics` and the legacy `/dev/console` event mode. The canonical
-source expected at `~/NoctLang` was not present when this plan was written.
-Detailed upstream file-level planning is therefore blocked until the upstream
-tree or its authoritative repository/revision is available.
+The zedBSD tree contains a local Noct runtime/package prototype that uses
+`/dev/graphics` and the legacy `/dev/console` event mode. The canonical
+`~/NoctLang` tree and `userland/noct` upstream submodule are now present at the
+same pinned revision. NOCT-00 must audit both before deciding which remaining
+zedBSD runtime/BeUI changes move upstream and which local package glue is
+deleted.
 
 BeUI already has an SDL backend upstream according to the project direction;
 the zedBSD backend is added alongside it rather than replacing it.
@@ -55,7 +57,7 @@ the zedBSD backend is added alongside it rather than replacing it.
 
 | ID | Status | Deliverable | Dependencies | Acceptance gate |
 | --- | --- | --- | --- | --- |
-| NOCT-00 | Blocked | Audit authoritative Noct tree, target model, runtime, BeUI, build, and tests | Upstream tree/repository supplied | Baseline and required upstream change list are recorded |
+| NOCT-00 | Ready to extract | Audit authoritative Noct tree, target model, runtime, BeUI, build, and tests | Upstream tree/repository supplied | Baseline and required upstream change list are recorded |
 | NOCT-01 | Proposed | zedBSD target-system definition in upstream Noct | NOCT-00, stable zedBSD compiler/runtime interfaces | Compiler emits runnable zedBSD binaries and upstream target tests pass |
 | NOCT-02 | Proposed | zedBSD runtime/syscall/platform layer upstream | NOCT-00/01, relevant UAPI | File, memory, process, time, and threading subset tests pass |
 | NOCT-03 | Proposed | BeUI `/dev/graphics` backend upstream | NOCT-00, stable graphics UAPI | Drawing, surfaces, resize/mode behavior, and teardown pass |

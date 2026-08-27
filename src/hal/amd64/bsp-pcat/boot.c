@@ -2,7 +2,9 @@
 #include <hal/hal.h>
 #include <kern/boot.h>
 #include "bootloader/include/amd64-handoff.h"
+#include "../../x86/boot-parameters.h"
 #include "../bsp.h"
+#include "handoff-validation.h"
 
 #define VGA_FONT_HANDOFF 0x00007000U
 #define VGA_FONT_MAGIC 0x3854465aU
@@ -29,6 +31,7 @@ static uint64_t total_memory;
 static uint8_t boot_font[PCAT_BOOT_FONT_GLYPHS][PCAT_BOOT_FONT_HEIGHT];
 static int boot_font_valid;
 static char boot_selector[15];
+static char boot_parameters[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE];
 
 static int
 handoff_name_is(const char *name, const char *expected)
@@ -95,26 +98,40 @@ bsp_boot_init(const void *raw_boot_info)
 	const struct zbl6_handoff *raw = raw_boot_info;
 	const struct zbl6_handoff_v2 *raw_v2 = raw_boot_info;
 	const struct zbl6_handoff_v4 *raw_v4 = raw_boot_info;
+	const struct zbl6_handoff_v5_bios *raw_v5_bios = raw_boot_info;
+	const struct zbl6_handoff_v5_uefi *raw_v5_uefi = raw_boot_info;
 	const struct vga_font_handoff *font =
 	    (const struct vga_font_handoff *)(uintptr_t)VGA_FONT_HANDOFF;
 	uint64_t highest = 0;
 	uint32_t index;
+	int bios_form = 0;
+	enum zbl6_handoff_form form;
+	enum x86_boot_parameters_result parameter_result;
 
 	if (raw == NULL || raw->magic != ZBL6_HANDOFF_MAGIC)
 		HAL_FATAL("invalid amd64 ZBL6 handoff");
+	hal_memset(&boot_info, 0, sizeof(boot_info));
+	hal_memset(&boot_info_v2, 0, sizeof(boot_info_v2));
 	hal_memset(&boot_framebuffer, 0, sizeof(boot_framebuffer));
-	if (raw->version == ZBL6_HANDOFF_VERSION) {
+	hal_memset(boot_selector, 0, sizeof(boot_selector));
+	form = zbl6_handoff_classify_raw(raw_boot_info);
+	if (form == ZBL6_HANDOFF_FORM_INVALID)
+		HAL_FATAL("unsupported amd64 ZBL6 handoff");
+	if (form == ZBL6_HANDOFF_FORM_LEGACY_BIOS ||
+	    form == ZBL6_HANDOFF_FORM_V5_BIOS) {
 		const struct zbl6_handoff_framebuffer *raw_framebuffer =
 		    raw_boot_info;
+		int v5 = form == ZBL6_HANDOFF_FORM_V5_BIOS;
 
-		if (raw->size < sizeof(*raw) || raw->boot_drive < 0x80U ||
-		    raw->partition_index < 1U || raw->partition_index > 4U)
+		if (raw->boot_drive < 0x80U || raw->partition_index < 1U ||
+		    raw->partition_index > 4U)
 			HAL_FATAL("invalid amd64 ZBL6 v1 handoff");
 		boot_info = *raw;
+		bios_form = 1;
 		if ((raw->flags & ZBL6_HANDOFF_FLAG_BOOT_UUID) != 0)
 			set_boot_uuid(raw->reserved);
 		if ((raw->flags & ZBL6_HANDOFF_FLAG_FRAMEBUFFER) != 0) {
-			if (raw->size < sizeof(*raw_framebuffer))
+			if (!v5 && raw->size < sizeof(*raw_framebuffer))
 				HAL_FATAL(
 				    "truncated amd64 BIOS framebuffer handoff");
 			accept_framebuffer(raw_framebuffer->framebuffer_base,
@@ -124,6 +141,13 @@ bsp_boot_init(const void *raw_boot_info)
 					   raw_framebuffer->framebuffer_stride,
 					   raw_framebuffer->framebuffer_format);
 		}
+		parameter_result = v5
+		    ? x86_boot_parameter_record_copy(boot_parameters,
+			  &raw_v5_bios->parameters,
+			  sizeof(raw_v5_bios->parameters))
+		    : x86_boot_parameters_copy(boot_parameters, NULL, 0U);
+		if (parameter_result != X86_BOOT_PARAMETERS_OK)
+			HAL_FATAL("invalid amd64 BIOS boot parameters");
 		total_memory =
 		    0x100000ULL + (uint64_t)boot_info.mem_upper_kib * 1024ULL;
 		if (total_memory > 0x40000000ULL)
@@ -133,25 +157,18 @@ bsp_boot_init(const void *raw_boot_info)
 		boot_memory_range[0].size = total_memory;
 		boot_memory_range[0].type = ZBL6_MEMORY_USABLE;
 		boot_memory_range[0].flags = 0;
-	} else if (raw->version == ZBL6_HANDOFF_V2_VERSION ||
-		   raw->version == ZBL6_HANDOFF_V3_VERSION ||
-		   raw->version == ZBL6_HANDOFF_V4_VERSION) {
+	} else {
 		const struct zbl6_memory_range *source;
 		const struct zbl6_handoff_v3 *raw_v3 = raw_boot_info;
 		uint64_t previous_end = 0;
+		int framebuffer_version =
+		    raw->version == ZBL6_HANDOFF_V3_VERSION ||
+		    raw->version == ZBL6_HANDOFF_V4_VERSION ||
+		    raw->version == ZBL6_HANDOFF_V5_VERSION;
+		int uuid_version = raw->version == ZBL6_HANDOFF_V4_VERSION ||
+		    raw->version == ZBL6_HANDOFF_V5_VERSION;
 
-		size_t required =
-		    raw->version == ZBL6_HANDOFF_V4_VERSION   ? sizeof(*raw_v4)
-		    : raw->version == ZBL6_HANDOFF_V3_VERSION ? sizeof(*raw_v3)
-							      : sizeof(*raw_v2);
-
-		if (raw_v2->size < required ||
-		    (raw_v2->flags &
-		     (ZBL6_HANDOFF_FLAG_UEFI | ZBL6_HANDOFF_FLAG_MEMORY_MAP |
-		      ZBL6_HANDOFF_FLAG_ACPI_RSDP)) !=
-			(ZBL6_HANDOFF_FLAG_UEFI | ZBL6_HANDOFF_FLAG_MEMORY_MAP |
-			 ZBL6_HANDOFF_FLAG_ACPI_RSDP) ||
-		    raw_v2->boot_drive < 0x80U ||
+		if (raw_v2->boot_drive < 0x80U ||
 		    raw_v2->root_partition_scheme !=
 			ZEDBSD_PARTITION_SCHEME_MBR ||
 		    raw_v2->root_partition_index < 1U ||
@@ -173,12 +190,14 @@ bsp_boot_init(const void *raw_boot_info)
 		    raw_v2->bootstrap_cr3 >= 0x40000000ULL ||
 		    raw_v2->rsdp == 0)
 			HAL_FATAL("invalid amd64 ZBL6 v2 handoff");
+		if (framebuffer_version &&
+		    (raw_v3->flags & ZBL6_HANDOFF_FLAG_FRAMEBUFFER) == 0U)
+			HAL_FATAL("invalid amd64 framebuffer handoff");
+		if (uuid_version &&
+		    (raw_v4->common.flags & ZBL6_HANDOFF_FLAG_BOOT_UUID) == 0U)
+			HAL_FATAL("missing amd64 boot UUID handoff");
 		boot_info_v2 = *raw_v2;
-		if (raw->version == ZBL6_HANDOFF_V3_VERSION ||
-		    raw->version == ZBL6_HANDOFF_V4_VERSION) {
-			if ((raw_v3->flags & ZBL6_HANDOFF_FLAG_FRAMEBUFFER) ==
-			    0)
-				HAL_FATAL("invalid amd64 framebuffer handoff");
+		if (framebuffer_version) {
 			accept_framebuffer(raw_v3->framebuffer_base,
 					   raw_v3->framebuffer_size,
 					   raw_v3->framebuffer_width,
@@ -186,12 +205,15 @@ bsp_boot_init(const void *raw_boot_info)
 					   raw_v3->framebuffer_stride,
 					   raw_v3->framebuffer_format);
 		}
-		if (raw->version == ZBL6_HANDOFF_V4_VERSION) {
-			if ((raw_v4->common.flags &
-			     ZBL6_HANDOFF_FLAG_BOOT_UUID) == 0)
-				HAL_FATAL("missing amd64 boot UUID handoff");
+		if (uuid_version)
 			set_boot_uuid(raw_v4->boot_volume_serial);
-		}
+		parameter_result = raw->version == ZBL6_HANDOFF_V5_VERSION
+		    ? x86_boot_parameter_record_copy(boot_parameters,
+			  &raw_v5_uefi->parameters,
+			  sizeof(raw_v5_uefi->parameters))
+		    : x86_boot_parameters_copy(boot_parameters, NULL, 0U);
+		if (parameter_result != X86_BOOT_PARAMETERS_OK)
+			HAL_FATAL("invalid amd64 UEFI boot parameters");
 		source = (const void *)(uintptr_t)raw_v2->memory_ranges;
 		boot_memory_range_count = raw_v2->memory_range_count;
 		for (index = 0; index < boot_memory_range_count; index++) {
@@ -218,8 +240,6 @@ bsp_boot_init(const void *raw_boot_info)
 		}
 		total_memory =
 		    highest > 0x40000000ULL ? 0x40000000ULL : highest;
-	} else {
-		HAL_FATAL("unsupported amd64 ZBL6 handoff");
 	}
 	if (total_memory < 0x00400000ULL)
 		HAL_FATAL("too little amd64 memory");
@@ -233,7 +253,7 @@ bsp_boot_init(const void *raw_boot_info)
 	kernel_handoff.magic = ZEDBSD_HANDOFF_MAGIC;
 	kernel_handoff.version = ZEDBSD_HANDOFF_VERSION_MULTIBOOT;
 	kernel_handoff.size = sizeof(kernel_handoff);
-	if (raw->version == ZBL6_HANDOFF_VERSION) {
+	if (bios_form) {
 		kernel_handoff.boot_bios_id = boot_info.boot_drive;
 		kernel_handoff.boot_partition_scheme =
 		    ZEDBSD_PARTITION_SCHEME_MBR;
@@ -250,6 +270,8 @@ bsp_boot_init(const void *raw_boot_info)
 void *
 hal_get_arch_handoff(const char *name)
 {
+	if (handoff_name_is(name, "boot.command-line"))
+		return boot_parameters;
 	if (boot_selector[0] != '\0' && handoff_name_is(name, "boot.selector"))
 		return boot_selector;
 	if (boot_font_valid && handoff_name_is(name, "pcat.boot-font"))

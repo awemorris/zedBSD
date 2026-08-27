@@ -1,6 +1,6 @@
 # WS001: POSIX.1-2024 compliance
 
-Last updated: 2026-08-25
+Last updated: 2026-08-27
 
 WSID: `ws001`
 
@@ -208,15 +208,15 @@ may be implemented while its consuming utility remains non-conforming.
 | KERN-IPC-03 | System V shared memory | implemented-unreviewed | `ipcrm`, `ipcs` | create/attach/stat/remove path exists; verify attachment lifecycle, permissions, limits, stale IDs, and removal races |
 | KERN-CRED-01 | credentials and process identity | partial | `id`, `chown`, `chgrp`, `newgrp`, `ps` | numeric credentials work; audit real/effective IDs, supplementary groups, set-ID transitions, permission checks, and account-database integration |
 | KERN-SIG-01 | signals and process groups | partial | `kill`, `sh`, `time`, `wait` | basic signaling works; prove process-group targets, job-control delivery, stopped/continued children, saved statuses, interruption, and permissions |
-| KERN-WAIT-01 | child wait and accounting | partial | `wait`, `time`, `sh` | basic `waitpid()` works; multiple saved statuses, non-child behavior, signal status, stopped jobs, and user/system CPU accounting remain |
+| KERN-WAIT-01 | child wait and accounting | partial | `wait`, `time`, `sh` | basic `waitpid()` works; multiple saved statuses, non-child behavior, signal status, stopped jobs, and user/system CPU accounting remain; missing-login exit/reap invalid-free remains tracked by [`ws002-p021`](../ws002-services/phase021-missing-login-session-teardown/phase.md) |
 | KERN-TTY-01 | tty line discipline and termios | partial | `stty`, `sh`, `mesg`, `tty`, `newgrp` | canonical/raw and common flags exist; audit all required flags, speeds, control characters, VMIN/VTIME, drains/flushes, signals, and error atomicity |
-| KERN-PTY-01 | pseudo terminals and controlling tty | implemented-unreviewed | shell/job control, terminal tests | UNIX98-style PTY path exists; prove session/controlling-terminal acquisition, foreground groups, hangup, permissions, and lifecycle |
+| KERN-PTY-01 | pseudo terminals and controlling tty | implemented-unreviewed | shell/job control, terminal tests | UNIX98-style PTY path exists; prove session/controlling-terminal acquisition, foreground groups, hangup, permissions, and lifecycle; missing-login exit/reap invalid-free remains tracked by [`ws002-p021`](../ws002-services/phase021-missing-login-session-teardown/phase.md) |
 | KERN-CLOCK-01 | clocks and clock setting | partial | `date`, `touch`, libc time | `clock_settime()` exists; prove privilege checks, valid ranges, clock selection, timezone-facing behavior, interruption, and filesystem timestamp integration |
 | KERN-VFS-01 | pathname, metadata, and traversal semantics | partial | file utilities | core operations exist, but recursive symlink policies, mount boundaries, hard-link identity, metadata preservation, races, and exact error propagation need family tests |
 | KERN-FSSTAT-01 | filesystem capacity/accounting | partial | `df`, `du` | provide and verify stable filesystem/device identity, portable block accounting, mount lookup, overflow behavior, and permission/error cases |
 | KERN-RSRC-01 | priorities | reviewed | `nice`, `renice` | declared current scope has reviewed utility evidence; keep regression and permission/range tests |
 | KERN-RSRC-02 | resource limits | reviewed | `ulimit`, shell | declared current scope has reviewed utility evidence; expand when new limit classes are exposed |
-| KERN-BOOT-01 | init/service lifecycle | implemented-unreviewed | `/sbin/init`, service providers | native PID 1 boots and initiates ordered shutdown in QEMU; complete crash-loop, required-failure, stop-timeout, cycle, credential, and recovery evidence |
+| KERN-BOOT-01 | init/service lifecycle | implemented-unreviewed | `/sbin/init`, service providers | native PID 1 boots and initiates ordered shutdown in QEMU; complete crash-loop, required-failure, stop-timeout, cycle, credential, and recovery evidence; missing-login exit/reap invalid-free remains tracked by [`ws002-p021`](../ws002-services/phase021-missing-login-session-teardown/phase.md) |
 | KERN-NET-01 | loopback and interface control | implemented-unreviewed | `networkd`, `net`, socket users | four-CPU QEMU proves NE2000 receive/transmit, a real DHCP lease, default route, DNS, static `lo0`, up/down, and dp8390 SMP serialization; counters, aliases, IPv6, broader NICs, stress/race coverage, and full ioctl review remain |
 | KERN-POLL-01 | UNIX listener readiness | partial | `init`, `networkd` | listener `poll()` did not wake reliably after a queued AF_UNIX stream connection in Phase 19; daemons use a bounded one-second nonblocking accept loop pending a focused kernel repair |
 
@@ -228,6 +228,7 @@ dependency even when they are not POSIX public APIs.
 | ID | API/interface | State | Implementation evidence | Unmet work |
 |---|---|---|---|---|
 | API-AUDIT-00 | complete POSIX public interface inventory | missing | utility-driven dependency audit only | enumerate every required header, type, constant, function, and semantic option from Base Definitions/System Interfaces, then add stable API rows and tests |
+| API-MMAP-01 | `mmap()` fixed-address replacement | partial | a `MAP_FIXED` syscall/VM branch exists, but the public `mmap()` flag mask rejects `MAP_FIXED` before that branch | admit the public flag only after replacement semantics are defined; prove overlapping replacement, failure atomicity, exact alignment/protection/backing errors, and production guest evidence |
 | API-CLOCK-01 | `clock_settime()` | implemented-unreviewed | `ZEDBSD_SYS_clock_settime`, `kern_clock_settime()` | range/privilege/error/QEMU cases and `date` setting operands |
 | API-RSRC-01 | `getpriority()`, `setpriority()`, `nice()` | reviewed | priority syscalls and reviewed `nice`/`renice` rows | retain regression across user/process-group selectors and permissions |
 | API-RSRC-02 | `getrlimit()`, `setrlimit()` | reviewed | resource-limit syscalls and reviewed `ulimit` row | retain current-shell inheritance and hard/soft-limit regression |
@@ -272,7 +273,7 @@ dependency even when they are not POSIX public APIs.
 | SVC-TALK-01 | `talk` | disabled-profile | installed failure command | local rendezvous provider and service only if UP/XSI profile is enabled |
 | SVC-INIT-01 | PID 1 and service manager | implemented-unreviewed | native `/sbin/init`, `/sbin/service`, `/etc/rc.conf`, and `/etc/service.d`; Phase 20 adds explicit `after`/`requires`, startup states, and FD 3 readiness, with networkd restart and orderly shutdown passing QEMU | prove crash loops, cycles, required/optional failures, malformed reload, stop timeout, persistence, scheduled-work restart, and the remaining shutdown actions |
 | SVC-NOTIFY-01 | daemon startup readiness | implemented-unreviewed | private FD 3 READY/FAIL protocol, bounded timeout/parser, descriptor hygiene, terminal startup states, dependency propagation, and service status are implemented; QEMU proves networkd READY before `net boot` | add runtime fault injection for fragmented/malformed/duplicate/oversized records, FAIL, premature exit, timeout, and every descriptor-leak/restart edge |
-| SVC-GETTY-01 | getty/login session | partial | production QEMU accepts the explicitly passwordless root account and starts `/bin/sh` in `/root` without daemon churn | prove utmpx transitions, logout, hangup, getty respawn, locked-account rejection, and hashed-password authentication |
+| SVC-GETTY-01 | getty/login session | partial | production QEMU accepts the explicitly passwordless root account and starts `/bin/sh` in `/root` without daemon churn | prove utmpx transitions, logout, hangup, getty respawn, locked-account rejection, and hashed-password authentication; missing-login exit/reap invalid-free remains tracked by [`ws002-p021`](../ws002-services/phase021-missing-login-session-teardown/phase.md) |
 | SVC-NET-01 | networkd/net | partial | synchronous `net boot` and lightweight networkd orchestrate local ifconfig/route/dhcpc; four-CPU QEMU proves NE2000 DHCP address/default route/DNS, restart, up/down, and direct-ifconfig recovery | DHCP renewal, Wi-Fi, IPv6, unprivileged reads, broad link events, resolver failure policy, and remaining failure/recovery evidence stay later work |
 | SVC-TIME-01 | ntpdate | partial | local bounded NTPv4 client, disabled by default | controlled QEMU server, malformed/spoofed/unreachable cases, DNS timeout, clock privilege/error evidence; periodic `ntpd` remains a later project |
 
