@@ -16,11 +16,13 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is `q018`, in progress. It executes
-`ws012-p003` through p006 serially; p003-p005 completed their ZSV1, argv /
-persistent-policy, and interactive-console contracts, and p006 integration
-acceptance is now in progress. The preceding
-[q017](queue-q017.md) completed `ws012-p002`: the strict YAML rc.conf host
+The current [Queue Book](queue.md) is `q019`, in progress. It executes
+`ws008-p001` through p003 serially: canonical Noct zedBSD CMake target first,
+canonical BeUI graphics/evdev second, and amd64 JIT acceptance third. The
+preceding [q018](queue-q018.md) completed `ws012-p003` through p006 and closed
+WS012 after ZSV1, argv/persistent policy, the interactive console, and
+production integration all passed. [q017](queue-q017.md) completed
+`ws012-p002`: the strict YAML rc.conf host
 fixtures, production build, and disposable amd64 QEMU persistence/reboot proof
 all passed. [q016](queue-q016.md) completed `ws004-p009`.
 [q015](queue-q015.md) completed `ws003-p011`--`p015`: BR-T46 passed all 31
@@ -83,18 +85,18 @@ before this long-term product goal is reached.
 
 | WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
 | --- | --- | --- | --- | --- | --- |
-| `ws001` | POSIX.1-2024 compliance | Paused, ledger active | `ws001-p013` complete | Select `cksum` or another bounded tier-1 candidate | [WS001](ws001-posix/ws.md) |
+| `ws001` | POSIX.1-2024 compliance | Paused, ledger active; shell handoff residual Queue-ready | `ws001-p013` complete; p014 planned | Queue `ws001-p014` when WS001 is selected, or choose another bounded ledger item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
 | `ws003` | Dell Latitude 5320 bring-up | Active; physical U3/q014 and q015 p011--p015 complete; p016 Queue-ready | `ws003-p015` completed with BR-T46 31/31 | Run `ws003-p016` to isolate generated boot-parameter inputs, then extract physical U4/U5 work; BR-T30 repeatability, BR-T31 sustained I/O, and hardware inventory remain | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; checked legacy-HCD IRQ residual complete in `q016` | `ws004-p009` complete; prior automatic USB milestones remain complete | Select the next dependency-ready hardware Phase or record later manual USB evidence; MSI-less xHCI policy remains independent | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Planned; USB Ethernet first, WLAN manually blocked | WS002 Phase 20 is the inherited baseline | Classify one USB Ethernet descriptor, then extract the wired physical-network Phase | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | In progress | `ws006-p004` complete PC/AT software milestone | Select Xzed migration after xHCI/USB-HID dependencies, retaining PC-98/X68000 physical-token follow-up | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Planned; three implementation Phases Queue-ready | No Phase started; `ws008-p001` is dependency-ready | Queue p001 for canonical `cmake --preset zedbsd`, then p002 BeUI and p003 amd64 JIT in dependency order | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Planned; selected as pending q019 work | No Phase started; `ws008-p001` is dependency-ready | Execute p001 for canonical `cmake --preset zedbsd`, then p002 BeUI and p003 amd64 JIT in dependency order | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
-| `ws012` | Service administration console | Active; p003-p005 complete in `q018`, p006 in progress | `ws012-p005` complete; p006 current | Finish q018 through consolidated host/QEMU/failure/documentation acceptance | [WS012](ws012-service-console/ws.md) |
+| `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
 | `ws013` | CPAR container partitioning | Proposed; Boot v1 grammar fixed, Runtime topics manually blocked | `ws013-p001` is the only current Phase | Resolve bounded UEFI FAT LFN/parser/menu details until Runtime CPAR holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
@@ -183,8 +185,8 @@ WS010 supplies host-side build and test scripting used by all workstreams.
    implementation Phases without displacing earlier physical-network and
    storage milestones.
 
-The current dependency-ready planning pool also contains `ws003-p016`,
-`ws008-p001`, `ws016-p001`, and `ws017-p001`. They may be
+The current dependency-ready planning pool outside q019 contains
+`ws003-p016`, `ws016-p001`, `ws017-p001`, and `ws001-p014`. They may be
 selected into a later finite Queue according to the user's next priority; this
 list does not itself authorize implementation.
 
@@ -203,7 +205,7 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | Manually blocked; `ws011-p004` discussion and implementation |
 | Linux/FreeBSD evdev compatibility profile | WS006 | Resolved by `ws006-p001`; implement `/dev/input/eventN` against it |
 | zedBSD GPU/Vulkan capability, object, and display-takeover profile | WS014 | Manually blocked; publishing `/dev/gpuN` UAPI or transferring i915 ownership |
-| YAML `/etc/rc.conf` schema and versioned init status/control protocol | WS012 | Resolved: q017 completed YAML/persistence, and q018 completed p003 on `/run/init.sock` with typed service and `ZSV1 HALT`/`POWEROFF`/`REBOOT` clients and no unversioned compatibility path |
+| YAML `/etc/rc.conf` schema and versioned init status/control protocol | WS012 | Resolved and complete: q017 completed YAML/persistence; q018 completed typed `/run/init.sock` service and `ZSV1 HALT`/`POWEROFF`/`REBOOT` clients, argv/interactive administration, and production integration with no unversioned compatibility path |
 | x86 kernel boot-parameter contract | WS003/WS013 | Resolved and implemented by q015: `boot0`--`boot3`, exclusive `rootpart` or explicit overlay root/data, `swap0`--`swap3`, and `init`; BR-T46 passes all 31 four-platform QEMU cells |
 | UEFI Boot CPAR `boot.cfg`/LFN/menu contract | WS013 | Section grammar maps to the common parameter contract; freeze bounded FAT/parser/menu details before implementation; legacy PC/AT and PC-98 menus are excluded |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |

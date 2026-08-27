@@ -4,16 +4,15 @@ Last updated: 2026-08-28
 
 WSID: `ws012`
 
-Status: Active; `ws012-p005` complete in `q018`, p006 in progress
+Status: Complete (`q018`, 2026-08-28)
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws012-p005`
+Last verified Phase: `ws012-p006`
 
-Resume point: finish q018 through the in-progress `ws012-p006` integration
-acceptance. The verified p005 console is a bounded frontend over the p004
-dispatcher; p006 must consolidate host regressions, production amd64 QEMU,
-persistence/failure behavior, fatal-log scan, and public documentation.
+Resume point: no current WS012 Phase. Future generic administration changes
+must be extracted from a concrete requirement; container-backed service work
+remains in WS013.
 
 Shared reviews: [WS012 review index](tests/README.md)
 
@@ -68,27 +67,31 @@ when the dependency-ready Phase crosses an approved Queue boundary.
 | `ws012-p003` | [ZSV1 init service-control protocol](phase003-zsv1-init-protocol/phase.md) | Complete (`q018`, 2026-08-28) | Replace the old socket grammar with bounded versioned service/system-action records and typed service/shutdown clients |
 | `ws012-p004` | [Non-interactive service CLI and persistent policy](phase004-service-argv-persistence/phase.md) | Complete (`q018`, 2026-08-28) | Stable argv grammar/output, runtime controls, immediate locked enable/disable, and reload |
 | `ws012-p005` | [Interactive service console](phase005-interactive-console/phase.md) | Complete (`q018`, 2026-08-28) | Argument-free prompt reuses the argv dispatcher with no candidate/save state |
-| `ws012-p006` | [Service-console integration acceptance](phase006-integration-acceptance/phase.md) | In progress (`q018`) | Host/QEMU lifecycle, concurrency, persistence, failure, cold boot, and documentation evidence |
+| `ws012-p006` | [Service-console integration acceptance](phase006-integration-acceptance/phase.md) | Complete (`q018`, 2026-08-28) | Host/QEMU lifecycle, concurrency, persistence, failure, cold boot, and documentation evidence |
 
 The implementation dependency chain is p002 -> p003 -> p004 -> p005 -> p006.
-q017 completed p002. [q018](../queue.md) is executing p003-p006 serially in
-that order; p003-p005 are complete and p006 is the current item.
+q017 completed p002, and q018 completed p003-p006 serially and closed the WS.
 
 ## Latest completed evidence
 
-q018 p005 added and verified the bounded argument-free console over the p004
-dispatcher: exact banner/prompt/help, root preflight, line/token bounds, no
-shell interpretation, clean exit, error recovery, fresh requests, and
-immediate persistent policy all passed strict C17, ASan/UBSan, and 20/20
-repeated fixture runs. Unchecked help/diagnostic stream failures found during
-review were corrected.
+q018 p006 reran all eight production-linked host fixtures under strict C17 and
+ASan/UBSan, then passed production amd64 QEMU integration. The installed YAML,
+socket and policy modes, argv and interactive views, runtime/policy separation,
+malformed reload preservation, persistence across reboot, and final ZSV1
+reboot/halt/poweroff handoffs all passed. Guest and QEMU/HMP fatal scans were
+empty.
+
+Integration repaired deterministic installed-data modes and the shell race in
+which a direct foreground external could read before its process group owned
+the TTY. The general pipeline and `fg` ordering residual is carried by
+[`ws001-p014`](../ws001-posix/phase014-shell-job-control/phase.md), not hidden
+inside this completed WS. Exact evidence is indexed by the
+[p006 result matrix](tests/q018-p006-results.tsv).
 
 The saved `config.mk` hash remained
 `3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6` and
-repository-wide `make -j16`, formatting, and `git diff --check` passed. Neither
-`make check` nor `.internal/` was used. The p004 regression preserved its
-shared-dispatcher and concurrent-writer result; p006 now owns final QEMU and
-documentation acceptance.
+repository-wide `make -j16`, formatting, DOC-T00, and `git diff --check`
+passed. Neither `make check` nor `.internal/` was used.
 
 ## Accepted service-control decisions
 

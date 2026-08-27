@@ -186,6 +186,10 @@ ZEDBSD_USERLAND_DATA_INPUTS = $(foreach package,\
 ZEDBSD_USERLAND_DATA_FILES = $(foreach package,\
 	$(ZEDBSD_SELECTED_DATA_PACKAGES),$(foreach entry,\
 		$(USERLAND_$(package)_DATA),--file $(entry)))
+ZEDBSD_USERLAND_DATA_MODES = $(foreach package,\
+	$(ZEDBSD_SELECTED_DATA_PACKAGES),$(foreach entry,\
+		$(USERLAND_$(package)_DATA),\
+		--mode $(word 1,$(subst =, ,$(entry)))=0644))
 
 # $(1): object tree prefix, $(2): registered package name.
 define ZEDBSD_USERLAND_OBJECTS
@@ -406,7 +410,8 @@ ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \
 	--mode /etc/passwd=0644 --mode /etc/group=0644 \
 	--mode /etc/shadow=0400
 ZEDBSD_BASE_DATA_INPUTS := $(ZEDBSD_USERLAND_DATA_INPUTS)
-ZEDBSD_BASE_DATA_FILES := $(ZEDBSD_USERLAND_DATA_FILES)
+ZEDBSD_BASE_DATA_FILES := $(ZEDBSD_USERLAND_DATA_FILES) \
+	$(ZEDBSD_USERLAND_DATA_MODES)
 ZEDBSD_XZED_SESSION_INPUTS := userland/X11/session/startx \
 	userland/X11/session/Xzedrc userland/X11/session/zwm.conf
 ZEDBSD_XZED_SESSION_FILES := $(if $(filter zwm,$(ZEDBSD_USER_PROGRAMS)),\

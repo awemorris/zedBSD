@@ -110,14 +110,23 @@ wait_foreground(pid_t pid, int *status)
 {
 	pid_t shell_pgrp = getpgrp();
 	int terminal = isatty(0);
+	int foreground_set = 0;
 	pid_t result;
-	if (terminal)
-		(void)shell_tcsetpgrp(0, pid);
+	if (terminal) {
+		if (shell_tcsetpgrp(0, pid) == 0)
+			foreground_set = 1;
+		else
+			fprintf(stderr,
+				"sh: cannot foreground process %d: %s\n",
+				(int)pid, strerror(errno));
+	}
 	do
 		result = waitpid(pid, status, WUNTRACED);
 	while (result < 0 && errno == EINTR);
-	if (terminal)
-		(void)shell_tcsetpgrp(0, shell_pgrp);
+	if (foreground_set && shell_tcsetpgrp(0, shell_pgrp) != 0)
+		fprintf(stderr,
+			"sh: cannot restore foreground process group: %s\n",
+			strerror(errno));
 	if (result < 0)
 		return 0;
 	if (WIFSTOPPED(*status)) {
@@ -125,6 +134,107 @@ wait_foreground(pid_t pid, int *status)
 		printf("[%d] stopped\n", (int)pid);
 	}
 	return 1;
+}
+
+static ssize_t
+shell_write_nosigpipe(int descriptor, const void *buffer, size_t length)
+{
+	void (*previous)(int);
+	ssize_t result;
+	int saved_errno;
+
+	previous = signal(SIGPIPE, (sighandler_t)SIG_IGN);
+	if (previous == (sighandler_t)SIG_ERR)
+		return -1;
+	do
+		result = write(descriptor, buffer, length);
+	while (result < 0 && errno == EINTR);
+	saved_errno = errno;
+	if (signal(SIGPIPE, previous) == (sighandler_t)SIG_ERR)
+		return -1;
+	errno = saved_errno;
+	return result;
+}
+
+static int
+spawn_foreground_tty(char *const argv[], int *status)
+{
+	char release = 'x';
+	int gate[2];
+	int saved_errno;
+	pid_t child, waited;
+	pid_t shell_pgrp = getpgrp();
+	ssize_t count;
+
+	/* posix_spawn() returns only after the child has executed.  A child
+	 * which reads the terminal can therefore receive SIGTTIN before the
+	 * parent makes its new process group foreground.  Hold the pre-exec
+	 * child behind a close-on-exec pipe until the terminal hand-off is
+	 * complete. */
+	if (pipe2(gate, O_CLOEXEC) != 0)
+		return -1;
+	child = fork();
+	if (child < 0) {
+		int saved_errno = errno;
+
+		(void)close(gate[0]);
+		(void)close(gate[1]);
+		errno = saved_errno;
+		return -1;
+	}
+	if (child == 0) {
+		(void)close(gate[1]);
+		if (setpgid(0, 0) != 0)
+			_exit(126);
+		do
+			count = read(gate[0], &release, 1);
+		while (count < 0 && errno == EINTR);
+		(void)close(gate[0]);
+		if (count != 1)
+			_exit(126);
+		execve(argv[0], argv, environ);
+		fprintf(stderr, "sh: %s: %s\n", argv[0], strerror(errno));
+		(void)fflush(stderr);
+		_exit(127);
+	}
+
+	(void)close(gate[0]);
+	if (setpgid(child, child) != 0)
+		goto setup_failed;
+	if (shell_tcsetpgrp(STDIN_FILENO, child) != 0)
+		goto setup_failed;
+	count = shell_write_nosigpipe(gate[1], &release, 1);
+	if (count != 1) {
+		if (count >= 0)
+			errno = EIO;
+		goto setup_failed;
+	}
+	(void)close(gate[1]);
+	do
+		waited = waitpid(child, status, WUNTRACED);
+	while (waited < 0 && errno == EINTR);
+	if (shell_tcsetpgrp(STDIN_FILENO, shell_pgrp) != 0)
+		fprintf(stderr,
+			"sh: cannot restore foreground process group: %s\n",
+			strerror(errno));
+	if (waited < 0)
+		return -1;
+	if (WIFSTOPPED(*status)) {
+		last_job = child;
+		printf("[%d] stopped\n", (int)child);
+	}
+	return 0;
+
+setup_failed:
+	saved_errno = errno;
+	(void)close(gate[1]);
+	(void)kill(child, SIGKILL);
+	do
+		waited = waitpid(child, status, 0);
+	while (waited < 0 && errno == EINTR);
+	(void)shell_tcsetpgrp(STDIN_FILENO, shell_pgrp);
+	errno = saved_errno;
+	return -1;
 }
 
 static int
@@ -135,6 +245,20 @@ spawn_wait(char *const argv[])
 	pid_t pid;
 	int error;
 	int status = 0;
+
+	if (!command_subshell && !command_background && isatty(STDIN_FILENO)) {
+		if (spawn_foreground_tty(argv, &status) != 0) {
+			fprintf(stderr, "sh: %s: %s\n", argv[0],
+				strerror(errno));
+			return 0;
+		}
+		if (WIFSIGNALED(status)) {
+			fprintf(stderr, "%s\n",
+				signal_message(WTERMSIG(status)));
+			return 0;
+		}
+		return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+	}
 
 	if (!command_subshell) {
 		if (posix_spawnattr_init(&attributes) != 0 ||

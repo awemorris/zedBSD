@@ -1,6 +1,6 @@
 # WS012 Phase 006: service-console integration acceptance
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 WSID: `ws012`
 
@@ -8,7 +8,7 @@ Phase ID: `p006`
 
 Combined ID: `ws012-p006`
 
-Status: Planned; Queue-ready after `ws012-p002` through `ws012-p005`
+Status: Complete (`q018`, 2026-08-28)
 
 Parent: [WS012](../ws.md)
 
@@ -88,8 +88,38 @@ meet the accepted lock/rename durability model, PID 1 cannot expose a coherent
 bounded snapshot, or a lifecycle defect requires redesign outside WS012. Do
 not weaken validation or skip the failure/concurrency cases to claim success.
 
+## Result
+
+The consolidated host runner passed all eight production-linked fixtures in
+both strict C17 and ASan/UBSan configurations. The production `make -j16`
+build passed. A disposable amd64 QEMU main cell verified boot, argv and
+interactive views, runtime-only actions, policy-only actions, malformed reload
+preservation, persistence over one ZSV1 reboot, explicit start, and the reboot
+and halt final-action boundaries. A second fresh cell verified poweroff. All
+guest and QEMU/HMP fatal scans were empty, and the original image plus
+`config.mk` hashes were unchanged.
+
+Integration found and repaired three in-scope defects: image-installed data
+mode drift, the shell's single-foreground-external pre-`tcsetpgrp()` race, and
+a shutdown evidence gap before the final system action. The shell gate is
+interrupt-safe and cannot terminate the shell with `SIGPIPE` if its child
+disappears before release.
+
+The analogous foreground-pipeline ordering and `fg` continuation ordering are
+general shell job-control residuals outside this service Phase. They are
+explicitly owned by
+[ws001-p014](../../ws001-posix/phase014-shell-job-control/phase.md).
+
+The exact case matrix and evidence are in
+[q018-p006-results.tsv](../tests/q018-p006-results.tsv) and the
+[QEMU integration record](../tests/q018-p006-qemu-evidence.md). The public
+[init/service reference](../../../docs/reference/init-services.md) and WS009
+handoff now match the verified YAML v1 and ZSV1 behavior. DOC-T00, formatting,
+and `git diff --check` passed. `make check` was not run and `.internal/` was not
+used.
+
 ## Interruption / resumption
 
-Not started. Resume only after p002-p005 are complete, beginning with a fresh
-test inventory and disposable production image copy. Exercise only ZSV1, not
-the removed unversioned socket grammar.
+Complete. No WS012 implementation Phase remains. Future container-specific
+service work belongs to WS013, and general shell job-control work resumes at
+`ws001-p014` rather than reopening this Phase.

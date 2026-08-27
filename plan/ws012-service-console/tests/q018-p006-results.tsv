@@ -1,0 +1,34 @@
+case	variant	command	result	evidence
+rcconf-model	strict	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/rcconf-model-strict.log
+rcconf-persistence	strict	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/rcconf-persistence-strict.log
+zsv1-protocol	strict	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/zsv1-protocol-strict.log
+zsv1-client	strict	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/zsv1-client-strict.log
+zsv1-server	strict	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/zsv1-server-strict.log
+zsv1-shutdown-argv	strict	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/zsv1-shutdown-argv-strict.log
+service-command	strict	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/service-command-strict.log
+service-console	strict	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/service-console-strict.log
+rcconf-model	ASan-UBSan	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/rcconf-model-sanitizer.log
+rcconf-persistence	ASan-UBSan	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/rcconf-persistence-sanitizer.log
+zsv1-protocol	ASan-UBSan	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/zsv1-protocol-sanitizer.log
+zsv1-client	ASan-UBSan	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/zsv1-client-sanitizer.log
+zsv1-server	ASan-UBSan	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/zsv1-server-sanitizer.log
+zsv1-shutdown-argv	ASan-UBSan	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/zsv1-shutdown-argv-sanitizer.log
+service-command	ASan-UBSan	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/service-command-sanitizer.log
+service-console	ASan-UBSan	./plan/ws012-service-console/tests/host-service-acceptance.sh /tmp/ws012-p006-host-final-004	pass	/tmp/ws012-p006-host-final-004/service-console-sanitizer.log
+argv-list-show	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/argv-list-section.log,/tmp/ws012-p006-qemu-final-004/argv-show-section.log,/tmp/ws012-p006-qemu-final-004/argv-show-networkd-section.log,/tmp/ws012-p006-qemu-final-004/argv-status-networkd-section.log,/tmp/ws012-p006-qemu-final-004/argv-unknown-section.log
+runtime-only	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/runtime-section.log
+interactive-console	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/console-section.log
+policy-only	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/console-section.log
+malformed-reload	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/malformed-section.log
+reboot-persistence	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/boot-b-section.log
+policy-enable-only	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/policy-enabled-section.log
+explicit-start	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/started-section.log
+reboot-action	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/main-guest.log
+halt-action	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/main-guest.log
+poweroff-action	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/poweroff-guest.log
+guest-fatal-scans	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/main-fatal-scan.txt,/tmp/ws012-p006-qemu-final-004/poweroff-fatal-scan.txt
+qemu-fatal-scans	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/main-qemu-fatal-scan.txt,/tmp/ws012-p006-qemu-final-004/poweroff-qemu-fatal-scan.txt
+input-integrity	QEMU	./plan/ws012-service-console/tests/qemu-service-acceptance.sh /tmp/ws012-p006-qemu-final-004	pass	/tmp/ws012-p006-qemu-final-004/run-metadata.txt
+production-build	native	make -j16	pass	q018-p006-qemu-evidence.md
+userland-format	clang-format-19	LD_LIBRARY_PATH=/tmp/zedbsd-clang-format19.VGWiPu/usr/lib/x86_64-linux-gnu /tmp/zedbsd-clang-format19.VGWiPu/usr/bin/clang-format-19 --dry-run --Werror userland/base/sh/main.c userland/base/init/main.c	pass	q018-p006-qemu-evidence.md
+markdown-links	DOC-T00	build/NoctLang/build-static/noct plan/ws009-documentation/tests/check-relative-links.noct docs plan	pass	q018-p006-qemu-evidence.md

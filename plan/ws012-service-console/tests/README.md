@@ -3,8 +3,8 @@
 Parent: [WS012](../ws.md)
 
 The p001 review cases were accepted on 2026-08-27. `SVC-T001` and `SVC-T002`
-were implemented and passed in q017; the remaining groups stay as contracts
-for their owning approved Queue Phases.
+passed in q017, and `SVC-T003` through `SVC-T006` passed in q018. The contracts
+and evidence below remain the regression baseline for future changes.
 
 | Case | Status | Required design result |
 | --- | --- | --- |
@@ -24,7 +24,7 @@ for their owning approved Queue Phases.
 | `SVC-T003` | `ws012-p003` | Passed (`q018`, 2026-08-28) | ZSV1 request/record grammar, partial/fragmented I/O, client `SHUT_WR` and server EOF-before-dispatch gating, bounded stalled-input rejection, bounds/versions/END framing, `MSG_NOSIGNAL` disconnect safety, one 310-second whole-request deadline, synchronous RELOAD results, coherent LIST/SHOW snapshots, dependency token/count validation, root-only authorization, and HALT/POWEROFF/REBOOT clients whose actions occur only after complete `OK`+`END` transmission; v1 POWEROFF-to-HALT backend mapping is explicit |
 | `SVC-T004` | `ws012-p004` | Passed (`q018`, 2026-08-28) | Argv grammar, exit status, deterministic list/detail output, runtime-only actions, policy-only actions, persist-success/reload-failure |
 | `SVC-T005` | `ws012-p005` | Passed (`q018`, 2026-08-28) | Prompt/help, shared commands, error recovery, EOF/exit, bounded input, concurrent console/argv writers |
-| `SVC-T006` | `ws012-p006` | In progress (`q018`) | Production amd64 QEMU boot, service lifecycle, reload, persistence across reboot, malformed reload preservation, fatal-log scan |
+| `SVC-T006` | `ws012-p006` | Passed (`q018`, 2026-08-28) | Production amd64 QEMU boot, service lifecycle, reload, persistence across reboot, malformed reload preservation, fatal-log scan |
 
 ## q017 evidence
 
@@ -95,3 +95,23 @@ for their owning approved Queue Phases.
   `git diff --check` passed. The saved `config.mk` SHA-256 remained
   `3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`.
   `make check` was not run and `.internal/` was not used.
+
+## q018 p006 evidence
+
+- The consolidated host runner passed the model, persistence, protocol,
+  client, server, shutdown-argv, command-dispatcher, and console fixtures under
+  both strict C17 and ASan/UBSan. The exact 16-cell matrix is in
+  [q018-p006-results.tsv](q018-p006-results.tsv).
+- The production QEMU runner passed argv/list/show, runtime-only operations,
+  the complete interactive command set and recovery, policy-only operations,
+  malformed reload preservation, reboot persistence, explicit start, and the
+  ZSV1 reboot/halt/poweroff final-action boundaries. Guest and QEMU/HMP fatal
+  scans were empty. Details are in the
+  [q018 p006 integration record](q018-p006-qemu-evidence.md).
+- Integration fixed deterministic mode `0644` for registered image data and a
+  `/bin/sh` foreground handoff race which previously stopped argument-free
+  `service` with `SIGTTIN`. Foreground-pipeline and `fg` ordering are recorded
+  separately in `ws001-p014`.
+- `make -j16`, formatting, DOC-T00, and `git diff --check` passed. The original
+  image and saved `config.mk` hashes remained unchanged. `make check` was not
+  run and `.internal/` was not used.

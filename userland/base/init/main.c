@@ -884,6 +884,7 @@ static void
 shutdown_system(enum init_action action)
 {
 	size_t index = service_count;
+	const char *action_name;
 	int system_descriptor, system_action;
 
 	printf("init: stopping services\n");
@@ -892,6 +893,11 @@ shutdown_system(enum init_action action)
 		(void)stop_service(&services[--index]);
 
 	sync();
+	action_name = action == INIT_ACTION_REBOOT     ? "reboot"
+		      : action == INIT_ACTION_POWEROFF ? "poweroff"
+						       : "halt";
+	printf("init: executing system action %s\n", action_name);
+	(void)fflush(stdout);
 
 	system_action = action == INIT_ACTION_REBOOT ? ZEDBSD_SYSTEM_REBOOT
 						     : ZEDBSD_SYSTEM_HALT;
