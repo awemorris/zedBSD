@@ -31,6 +31,15 @@ static unsigned open_count;
 static struct input_device *mouse_input;
 static uint32_t evdev_buttons;
 
+static const struct input_capability mouse_capabilities[] = {
+	{EV_SYN, SYN_REPORT},
+	{EV_REL, REL_X},
+	{EV_REL, REL_Y},
+	{EV_KEY, BTN_LEFT},
+	{EV_KEY, BTN_RIGHT},
+	{EV_KEY, BTN_MIDDLE},
+};
+
 static int
 mouse_consumer_open(void)
 {
@@ -230,6 +239,9 @@ mouse_device_register(void)
 	    .name = "zedBSD relative mouse",
 	    .physical_path = "mouse/input0",
 	    .id = {.bustype = BUS_HOST, .product = 2, .version = 1},
+	    .capabilities = mouse_capabilities,
+	    .capability_count =
+		sizeof(mouse_capabilities) / sizeof(mouse_capabilities[0]),
 	    .open = mouse_input_open,
 	    .close = mouse_input_close,
 	};

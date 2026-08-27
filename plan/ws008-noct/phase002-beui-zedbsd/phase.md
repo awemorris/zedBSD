@@ -8,7 +8,7 @@ Phase ID: `p002`
 
 Combined ID: `ws008-p002`
 
-Status: Uncleared (`q019`); waiting for `ws006-p005`
+Status: In progress (`q020`); evdev prerequisite completed by `ws006-p005`
 
 Parent: [WS008](../ws.md)
 

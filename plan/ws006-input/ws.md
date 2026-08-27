@@ -4,14 +4,15 @@ Last updated: 2026-08-28
 
 WSID: `ws006`
 
-Status: in progress; `ws006-p005` is Queue-ready
+Status: active; `ws006-p005` complete PC/AT milestone in `q020`
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws006-p004` complete PC/AT software milestone
+Last verified Phase: `ws006-p005` complete PC/AT software milestone
 
-Resume point: execute `ws006-p005` to complete capability/state queries needed
-by capability-discovering consumers, then resume Noct/BeUI migration.
+Resume point: capability/state queries now unblock Noct/BeUI. Later WS006 work
+retains character-only HAL truthfulness, multi-source pointer ownership,
+consumer migration, legacy-console removal, and USB HID.
 
 Shared tests: [WS006 test index](tests/README.md)
 
@@ -23,7 +24,7 @@ Shared tests: [WS006 test index](tests/README.md)
 | [`ws006-p002`](phase002-input-core/phase.md) | Complete milestone | Core/devfs/queue build and focused evidence pass; real producer runtime remains IN-02 |
 | [`ws006-p003`](phase003-producer-bridge/phase.md) | Complete milestone | Production event nodes register in QEMU; physical-key broker/consumer evidence remains p004 |
 | [`ws006-p004`](phase004-console-broker/phase.md) | Complete PC/AT software milestone | Fixed string event, single broker, focused/build evidence, and production QEMU event-node/console coexistence pass; PC-98/X68000 physical detail remains |
-| [`ws006-p005`](phase005-evdev-capability-state/phase.md) | Planned; Queue-ready | Registered capability metadata, core-maintained state, and capability/state ioctls unblock dynamic consumers |
+| [`ws006-p005`](phase005-evdev-capability-state/phase.md) | Complete PC/AT milestone (`q020`) | Registered native-word capabilities, state queries, boundary fixtures, and capability-only amd64 QEMU discovery pass; character-only HAL and multi-source pointer residuals retained |
 
 The remaining sequence is input core, existing producer bridge, consumer
 migration, legacy-console removal, and USB HID.

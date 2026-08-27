@@ -3,6 +3,7 @@
 #include "kern/cdev.h"
 #include "kern/clock.h"
 #include "kern/file.h"
+#include "kern/input-capability.h"
 #include "kern/input-queue.h"
 #include "kern/kmem.h"
 #include "kern/lock.h"
@@ -34,6 +35,7 @@ struct input_device {
 	char name[INPUT_TEXT_MAX];
 	char physical_path[INPUT_TEXT_MAX];
 	char unique_id[INPUT_TEXT_MAX];
+	struct input_capability_state capability_state;
 	int (*open)(void *);
 	void (*close)(void *);
 	void *context;
@@ -199,11 +201,91 @@ copy_text(const char *text, unsigned long request, uintptr_t argument)
 	return copyout(text, argument, length);
 }
 
+static size_t
+ioctl_size(unsigned long request)
+{
+	return (request >> 16) & 0x1fffU;
+}
+
+static int
+copy_bits(const uint8_t *bits, size_t bit_size, size_t capacity,
+	  uintptr_t argument)
+{
+	uint8_t output[32];
+	size_t copied = 0, count;
+	uintptr_t address;
+	int error;
+	while (copied < capacity) {
+		count = capacity - copied;
+		if (count > sizeof(output))
+			count = sizeof(output);
+		error = input_capability_copy(bits, bit_size, copied, output,
+					      count);
+		if (error == 0)
+			error = user_address_add(argument, copied, &address);
+		if (error == 0)
+			error = copyout(output, address, count);
+		if (error != 0)
+			return error;
+		copied += count;
+	}
+	return 0;
+}
+
+static int
+copy_capability_bits(const struct input_device *device, unsigned type,
+		     size_t capacity, uintptr_t argument)
+{
+	const uint8_t *bits;
+	size_t size;
+	int error = input_capability_bits(&device->capability_state, type,
+					  &bits, &size);
+	if (error != 0)
+		return ENOTTY;
+	return copy_bits(bits, size, capacity, argument);
+}
+
+static int
+copy_key_state(struct input_device *device, size_t capacity,
+	       uintptr_t argument)
+{
+	uint8_t snapshot[INPUT_KEY_BITS_SIZE];
+	const uint8_t *bits;
+	size_t size;
+	unsigned long irq;
+	irq = spin_lock_irqsave(&device->lock);
+	(void)input_capability_key_state(&device->capability_state, &bits,
+					 &size);
+	memcpy(snapshot, bits, sizeof(snapshot));
+	spin_unlock_irqrestore(&device->lock, irq);
+	return copy_bits(snapshot, size, capacity, argument);
+}
+
+static int
+copy_abs_info(struct input_device *device, unsigned axis, uintptr_t argument)
+{
+	struct input_absinfo info;
+	unsigned long irq;
+	int error;
+	irq = spin_lock_irqsave(&device->lock);
+	error = input_capability_abs_info(&device->capability_state, axis,
+					  &info);
+	spin_unlock_irqrestore(&device->lock, irq);
+	if (error == ENOENT)
+		return ENOTTY;
+	if (error != 0)
+		return error;
+	return copyout(&info, argument, sizeof(info));
+}
+
 static int
 input_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 {
 	struct input_device *device = file_device(file);
 	struct input_reader *reader = file_reader(file), *item;
+	unsigned group = (unsigned)((request >> 8) & 0xffU);
+	unsigned number = (unsigned)(request & 0xffU);
+	size_t size = ioctl_size(request);
 	unsigned long irq;
 	int value, error = 0;
 	if (device == NULL || reader == NULL)
@@ -214,21 +296,39 @@ input_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 	}
 	if (request == EVIOCGID)
 		return copyout(&device->id, argument, sizeof(device->id));
-	if (((request >> 8) & 0xffU) == ZEDBSD_EVDEV_IOC_GROUP) {
-		switch (request & 0xffU) {
+	if (group == ZEDBSD_EVDEV_IOC_GROUP) {
+		switch (number) {
 		case 0x06:
+			if (request != EVIOCGNAME(size))
+				return ENOTTY;
 			return copy_text(device->name, request, argument);
 		case 0x07:
+			if (request != EVIOCGPHYS(size))
+				return ENOTTY;
 			return copy_text(device->physical_path, request,
 					 argument);
 		case 0x08:
+			if (request != EVIOCGUNIQ(size))
+				return ENOTTY;
 			return copy_text(device->unique_id, request, argument);
 		default:
 			break;
 		}
 	}
+	if (group == ZEDBSD_EVDEV_IOC_GROUP && number == 0x18U &&
+	    request == EVIOCGKEY(size))
+		return copy_key_state(device, size, argument);
+	if (group == ZEDBSD_EVDEV_IOC_GROUP && number >= 0x20U &&
+	    number <= 0x20U + EV_MAX &&
+	    request == EVIOCGBIT(number - 0x20U, size))
+		return copy_capability_bits(device, number - 0x20U, size,
+					    argument);
+	if (group == ZEDBSD_EVDEV_IOC_GROUP && number >= 0x40U &&
+	    number <= 0x40U + ABS_MAX &&
+	    request == EVIOCGABS(number - 0x40U))
+		return copy_abs_info(device, number - 0x40U, argument);
 	if (request != EVIOCGRAB)
-		return EOPNOTSUPP;
+		return ENOTTY;
 	if ((error = copyin(argument, &value, sizeof(value))) != 0)
 		return error;
 	irq = spin_lock_irqsave(&device->lock);
@@ -300,6 +400,14 @@ input_device_register(const struct input_device_info *info,
 		return error;
 	}
 	device->id = info->id;
+	error = input_capability_state_init(
+	    &device->capability_state, info->capabilities,
+	    info->capability_count, info->absolute_axes,
+	    info->absolute_axis_count);
+	if (error != 0) {
+		kern_free(device);
+		return error;
+	}
 	device->open = info->open;
 	device->close = info->close;
 	device->context = info->context;
@@ -348,6 +456,7 @@ input_device_emit(struct input_device *device, uint16_t type, uint16_t code,
 	struct input_event event;
 	uint64_t milliseconds;
 	unsigned long irq;
+	int published = 0;
 	if (device == NULL)
 		return;
 	milliseconds = clock_milliseconds(NULL);
@@ -358,10 +467,14 @@ input_device_emit(struct input_device *device, uint16_t type, uint16_t code,
 	event.code = code;
 	event.value = value;
 	irq = spin_lock_irqsave(&device->lock);
-	if (device->registered) {
+	if (device->registered &&
+	    input_capability_event(&device->capability_state, type, code,
+				   value)) {
 		input_queue_push(&device->queue, &event);
 		waitq_wake_all(&device->waitq);
+		published = 1;
 	}
 	spin_unlock_irqrestore(&device->lock, irq);
-	poll_notify();
+	if (published)
+		poll_notify();
 }

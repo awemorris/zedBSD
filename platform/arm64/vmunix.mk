@@ -55,7 +55,8 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/elf.c src/kern/exec-prepare.c src/kern/exec.c src/kern/user-probe.c src/kern/syscall.c \
 	src/kern/uaccess.c src/kern/cdev.c src/kern/devfs.c \
 	src/kern/console-device.c src/kern/mouse-device.c src/kern/input-queue.c \
-	src/kern/input-device.c src/kern/input-keymap.c src/kern/locale-record.c \
+	src/kern/input-capability.c src/kern/input-device.c \
+	src/kern/input-keymap.c src/kern/locale-record.c \
 	src/kern/tty.c \
 	src/kern/graphics-device.c \
 	src/kern/system-device.c src/kern/boot-parameters.c src/kern/init.c

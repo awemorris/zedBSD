@@ -16,11 +16,12 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is `q019`, finished. It completed
-`ws008-p001`, then honestly stopped p002 before implementation because the
-kernel evdev capability/state queries required by its fixed contract are not
-implemented; dependency-gated p003 was not started. The repair is extracted as
-`ws006-p005` for the next automatic Queue. The
+The current [Queue Book](queue.md) is `q020`, in progress. It completed
+`ws006-p005`, including capability-only amd64 QEMU discovery and real-ioctl
+boundary evidence, and is now executing `ws008-p002` before p003 without a
+private event-number/name fallback. The archived [q019](queue-q019.md) completed
+`ws008-p001`, honestly stopped p002 before implementation, and did not start
+dependency-gated p003. The
 preceding [q018](queue-q018.md) completed `ws012-p003` through p006 and closed
 WS012 after ZSV1, argv/persistent policy, the interactive console, and
 production integration all passed. [q017](queue-q017.md) completed
@@ -92,9 +93,9 @@ before this long-term product goal is reached.
 | `ws003` | Dell Latitude 5320 bring-up | Active; physical U3/q014 and q015 p011--p015 complete; p016 Queue-ready | `ws003-p015` completed with BR-T46 31/31 | Run `ws003-p016` to isolate generated boot-parameter inputs, then extract physical U4/U5 work; BR-T30 repeatability, BR-T31 sustained I/O, and hardware inventory remain | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; checked legacy-HCD IRQ residual complete in `q016` | `ws004-p009` complete; prior automatic USB milestones remain complete | Select the next dependency-ready hardware Phase or record later manual USB evidence; MSI-less xHCI policy remains independent | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Planned; USB Ethernet first, WLAN manually blocked | WS002 Phase 20 is the inherited baseline | Classify one USB Ethernet descriptor, then extract the wired physical-network Phase | [WS005](ws005-networking/ws.md) |
-| `ws006` | Input and evdev | In progress; p005 Queue-ready | `ws006-p004` complete PC/AT software milestone | Execute p005 capability/state queries to unblock BeUI, then retain PC-98/X68000 physical-token follow-up | [WS006](ws006-input/ws.md) |
+| `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Paused after `q019`; p002 uncleared | `ws008-p001` complete | Complete `ws006-p005`, then resume p002 before p003 JIT acceptance | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Active in `q020`; p002 in progress | `ws008-p001` complete | Complete canonical graphics/evdev p002, then run p003 JIT acceptance | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |

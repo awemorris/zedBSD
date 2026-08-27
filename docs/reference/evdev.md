@@ -1,7 +1,7 @@
 # evdev compatibility profile
 
-Status: experimental UAPI; event devices operational, capability/state ioctl
-completion planned
+Status: experimental UAPI; event, capability, and current-state queries are
+operational for the production PC/AT keyboard and relative-pointer devices
 
 zedBSD reserves `/dev/input/eventN` for an independently implemented event
 interface whose initial keyboard and pointer subset is source-oriented toward
@@ -34,13 +34,27 @@ and select a device by those properties.
 
 ## Initial ioctl and policy subset
 
-The reserved subset is `EVIOCGVERSION`, `EVIOCGID`, repeat get/set, name,
-physical path, unique ID, properties, capability bits, current key/LED state,
-absolute-axis information, and `EVIOCGRAB`. Unsupported requests return
-`ENOTTY`. A grab excludes delivery to other evdev file readers but does not
-disable the kernel console text path. Writing/injecting events is not supported.
-Device-node permissions are an installation policy; the kernel does not infer
-trust from an event-device number.
+The operational subset is `EVIOCGVERSION`, `EVIOCGID`, `EVIOCGNAME`,
+`EVIOCGPHYS`, `EVIOCGUNIQ`, `EVIOCGBIT`, `EVIOCGKEY`, `EVIOCGABS`, and
+`EVIOCGRAB`. `EVIOCGABS` succeeds only for an axis registered by that device;
+the current production relative pointer has no absolute axes. Repeat get/set,
+properties, and current LED state remain reserved in the header but are not
+operational. Unsupported requests return `ENOTTY` without changing caller
+memory.
+
+Capability and key-state buffers use the caller architecture's native
+`unsigned long[]` representation, matching the Linux/FreeBSD source convention:
+code `n` is bit `n % (sizeof(unsigned long) * 8)` in word
+`n / (sizeof(unsigned long) * 8)`. The natural bitmap size is rounded up to a
+whole native word. A zero encoded length is a successful no-op, a shorter
+length receives the corresponding byte prefix, and bytes beyond the natural
+size in an oversized query are zero-filled. All dynamic-length requests require
+the exact output-direction encoding.
+
+A grab excludes delivery to other evdev file readers but does not disable the
+kernel console text path. Writing/injecting events is not supported. Device-node
+permissions are an installation policy; the kernel does not infer trust from an
+event-device number.
 
 The header currently declares only the constants needed for ordinary PC
 keyboards, relative mice, wheels, absolute pointers, and basic multitouch
@@ -76,9 +90,20 @@ numeric constants. `ws006-p002` through p004 added operational event nodes,
 independent reads, overflow/detach handling, grab, keyboard/mouse producers,
 and console coexistence.
 
-Version, identity, name/physical/unique strings, and grab are implemented.
-Capability bitmaps, current key state, and absolute-axis descriptors are
-declared by the profile but not yet implemented by the kernel. This prevents a
-consumer from selecting dynamic event nodes by capability. The bounded repair
-is tracked by
+Version, identity, name/physical/unique strings, grab, registered capability
+bitmaps, current key/button state, and registered absolute-axis descriptors are
+implemented. Registration requires `EV_SYN/SYN_REPORT`; the core rejects
+undeclared or malformed producer events so the advertised set and delivered
+stream remain consistent. The production console keyboard and relative mouse
+can therefore be selected without stable event numbers or display names. The
+host boundary fixtures and the amd64 QEMU capability-only discovery probe are
+tracked by
 [`ws006-p005`](../../plan/ws006-input/phase005-evdev-capability-state/phase.md).
+
+Two platform residuals are intentionally not hidden by this milestone.
+Character-only HAL consoles on arm64, sparcv9, and X68000 currently produce
+press events without physical release events and share the broad console
+capability declaration, so their `EVIOCGKEY` state and advertised key set need a
+later platform-specific truthfulness policy. The relative-mouse bridge also has
+one aggregate button state and is not yet a multi-device merger; USB HID and
+multi-pointer ownership remain later WS006 work.

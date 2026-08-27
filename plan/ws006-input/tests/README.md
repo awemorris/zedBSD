@@ -39,6 +39,27 @@ cc -std=c11 -D_POSIX_C_SOURCE=200809L -Iinclude/uapi -Iinclude \
 make -j16 build/amd64/vmunix
 ```
 
+IN-T11 links the production capability/state helper directly. The strict run
+freezes registration validation, bit ordering and boundary bits, zero-filled
+capability storage, key press/release/repeat state, and absolute-axis metadata
+and value updates. The sanitizer run checks the same query boundaries for
+out-of-bounds and undefined behavior:
+
+```sh
+cc -std=c11 -D_POSIX_C_SOURCE=200809L -Iinclude/uapi -Iinclude \
+  -Wall -Wextra -Werror src/kern/input-capability.c \
+  plan/ws006-input/tests/input-capability-test.c \
+  -o /tmp/ws006-input-capability
+/tmp/ws006-input-capability
+cc -std=c11 -D_POSIX_C_SOURCE=200809L -Iinclude/uapi -Iinclude \
+  -Wall -Wextra -Werror -g -fno-omit-frame-pointer \
+  -fsanitize=address,undefined src/kern/input-capability.c \
+  plan/ws006-input/tests/input-capability-test.c \
+  -o /tmp/ws006-input-capability-sanitize
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
+  /tmp/ws006-input-capability-sanitize
+```
+
 IN-T20 begins with the producer key normalization contract:
 
 ```sh
@@ -54,3 +75,22 @@ appear populated.
 
 The production keyboard/console coexistence observation for `ws006-p004` is
 recorded in [qemu-evdev-evidence.md](qemu-evdev-evidence.md).
+
+IN-T12 uses a test-only amd64 user program and disk image.  The guest program
+enumerates every decimal `eventN` entry in `/dev/input`, queries only
+`EVIOCGBIT`, prints the complete event/key/relative-axis code sets, and derives
+keyboard and relative-pointer roles from those sets.  The runner rejects fixed
+event-number literals and name/identity ioctls in the probe source:
+
+```sh
+plan/ws006-input/tests/qemu-evdev-capability.sh
+```
+
+The runner builds with `make -j16`, creates a writable QEMU image copy under
+the untracked WS temp directory, requires exactly one production keyboard and
+one relative pointer, scans the guest log for fatal errors, and verifies that
+`config.mk` was not modified.  The production rootfs does not gain a permanent
+test command; [evdev-capability-qemu.mk](evdev-capability-qemu.mk) adds the
+probe only to the dedicated IN-T12 image. The final q020 transcript and hashes
+are retained in
+[qemu-evdev-capability-evidence.md](qemu-evdev-capability-evidence.md).

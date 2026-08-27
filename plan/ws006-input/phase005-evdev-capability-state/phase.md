@@ -8,7 +8,7 @@ Phase ID: `p005`
 
 Combined ID: `ws006-p005`
 
-Status: Planned; Queue-ready
+Status: Complete (amd64/PC/AT software milestone, `q020`)
 
 Parent: [WS006](../ws.md)
 
@@ -57,23 +57,23 @@ roles without relying on unstable event numbers or display names.
 
 ## Work packages
 
-- [ ] Add bounded registration metadata and owned device copies for event/code
+- [x] Add bounded registration metadata and owned device copies for event/code
       capabilities and absolute-axis descriptors.
-- [ ] Maintain current key/button and absolute-axis state in the input core as
+- [x] Maintain current key/button and absolute-axis state in the input core as
       events are published.
-- [ ] Implement length-safe `EVIOCGBIT`, `EVIOCGKEY`, and `EVIOCGABS` copyout
+- [x] Implement length-safe `EVIOCGBIT`, `EVIOCGKEY`, and `EVIOCGABS` copyout
       paths and align unsupported-request behavior with the published profile.
-- [ ] Declare accurate capabilities for the production console keyboard and
+- [x] Declare accurate capabilities for the production console keyboard and
       relative mouse without changing their event streams.
-- [ ] Add host fixtures for truncation, zero-fill, unknown types/codes,
+- [x] Add host fixtures for truncation, zero-fill, unknown types/codes,
       press/release/repeat state, absolute value/range updates, and malformed
       registration metadata.
-- [ ] Add an amd64 QEMU guest probe that enumerates event nodes by capabilities
+- [x] Add an amd64 QEMU guest probe that enumerates event nodes by capabilities
       and identifies the production keyboard and relative pointer without
       assuming their numbers or names.
-- [ ] Run the existing queue/keymap/ABI fixtures and `make -j16`; do not use
+- [x] Run the existing queue/keymap/ABI fixtures and `make -j16`; do not use
       `make check` or `.internal/`.
-- [ ] Update the evdev reference with the exact operational ioctl subset and
+- [x] Update the evdev reference with the exact operational ioctl subset and
       retained residuals.
 
 ## Acceptance
@@ -107,3 +107,27 @@ public structure/ioctl encoding, inventing a stable event-number policy, or
 choosing new USB/multitouch semantics, mark the Phase `uncleared` and request
 human review. On success, resume `ws008-p002`; no BeUI name/number fallback is
 permitted.
+
+## q020 result
+
+The input core now owns native-`unsigned long` capability and state bitmaps,
+registered ABS metadata, and exact-direction `EVIOCGBIT`, `EVIOCGKEY`, and
+`EVIOCGABS` dispatch. Zero-length requests are no-ops, short requests truncate,
+oversized requests zero-fill, and unsupported/malformed requests return
+`ENOTTY` without modifying caller memory. Registration requires
+`EV_SYN/SYN_REPORT`; undeclared codes and malformed producer values are not
+published, keeping advertised capabilities and delivered events consistent.
+
+IN-T00, IN-T10, IN-T11 (strict and sanitizer), IN-T20, the amd64 kernel build,
+and full `make -j16` all pass. IN-T12 reached init/login in
+`qemu-system-x86_64`, discovered exactly one keyboard and one relative pointer
+solely by capability, and passed the real-ioctl boundary checks. The retained
+transcript and hashes are in
+[qemu-evdev-capability-evidence.md](../tests/qemu-evdev-capability-evidence.md).
+
+The milestone does not claim character-only HAL correctness on arm64,
+sparcv9, or X68000: those producers currently lack physical release events and
+share the broad console capability list. Multi-source relative-pointer button
+aggregation is likewise deferred to the USB HID/device-ownership work. These
+are documented residuals, not hidden substitutes for the amd64 BeUI
+prerequisite completed here.

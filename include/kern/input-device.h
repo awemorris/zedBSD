@@ -2,6 +2,8 @@
 #ifndef ZEDBSD_KERN_INPUT_DEVICE_H
 #define ZEDBSD_KERN_INPUT_DEVICE_H
 
+#include "kern/input-capability.h"
+
 #include <zedbsd/input.h>
 #include <stdint.h>
 
@@ -12,6 +14,10 @@ struct input_device_info {
 	const char *physical_path;
 	const char *unique_id;
 	struct input_id id;
+	const struct input_capability *capabilities;
+	size_t capability_count;
+	const struct input_abs_axis *absolute_axes;
+	size_t absolute_axis_count;
 	int (*open)(void *);
 	void (*close)(void *);
 	void *context;

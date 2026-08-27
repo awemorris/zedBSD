@@ -61,7 +61,8 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
 	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/console-device.o \
 	$(BUILD)/src/kern/mouse-device.o $(BUILD)/src/kern/input-queue.o \
-	$(BUILD)/src/kern/input-device.o $(BUILD)/src/kern/input-keymap.o \
+	$(BUILD)/src/kern/input-capability.o $(BUILD)/src/kern/input-device.o \
+	$(BUILD)/src/kern/input-keymap.o \
 	$(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
