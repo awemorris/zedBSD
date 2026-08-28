@@ -40,6 +40,7 @@ make help              # show a short command summary
 | `include/`           | Public HAL, kernel, and user ABI interfaces            |
 | `src/hal/`           | Architecture HALs and board support                    |
 | `src/kern/`          | Platform-neutral kernel                                |
+| `src/drivers/`       | Device and bus driver implementations                  |
 | `src/crt/`           | Architecture-specific crt0/crt1 startup code           |
 | `src/softfloat/`     | zedBSD's integer-only soft-float/compiler runtime      |
 | `userland/`          | Userland programs                                      |

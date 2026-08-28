@@ -16,9 +16,16 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is finished `q023`: it completed
-`ws003-p016`, `ws008-p005`, and `ws001-p014` in that order without reaching a
-human-decision boundary. The archived
+The current [Queue Book](queue.md) is completed `q025`: it disabled the target
+Noct/Remacs package options without touching the maintainer's Noct source,
+then completed the first WS018 kernel-ownership foundation wave. A successor
+Queue has not yet been selected. The
+archived [q024](queue-q024.md) passed automated Noct gates but is recorded
+`uncleared` because the Principal Engineer's first source review rejected the
+implementation quality. Noct is now under maintainer-only manual repair. The
+requested kernel reorganization remains WS018 p001--p012. The
+archived [q023](queue-q023.md) completed `ws003-p016`, `ws008-p005`, and
+`ws001-p014` in that order without reaching a human-decision boundary. The archived
 [q022](queue-q022.md) published the Noct maintainer-review correction as upstream commit
 `eba2043ca74b8601d68a405ecbbeca50ca8d5ac0`, replaced the zedBSD gitlink with
 one pinned source-acquisition Makefile, and passed host plus non-JIT, BeUI, and
@@ -116,6 +123,15 @@ freedom is generally preferred. Shared conformance tests may enforce the
 interface contract without requiring the implementations themselves to share
 code.
 
+The same preference applies to public headers.  Prefer a small number of
+cohesive, deliberately comprehensive interface headers over many convenience
+fragments.  A public header is a stable design ledger, not an implementation
+scratchpad: additions, removals, or splits should follow a significant and
+explicit interface decision, while ordinary implementation refactoring should
+adapt below the existing contract.  This is informative project-owner
+guidance, like the duplication preference above, rather than a ban on every
+future header change.
+
 ### 2.5 Project scripting language and bootstrap order
 
 Noct is the project scripting language for repository-owned build, image,
@@ -144,7 +160,7 @@ actually warranted.
 | `ws005` | Networking and WPA | Planned; USB Ethernet first, WLAN manually blocked | WS002 Phase 20 is the inherited baseline | Classify one USB Ethernet descriptor, then extract the wired physical-network Phase | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Complete (`q023`) | `ws008-p005` complete; canonical revision `c1e4e0fcdbb7b8cdf1705601b13d57b787c61621` published and pinned | No current Phase; extract a new requirement before resuming | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Manual hold; target packages disabled | `ws008-p006` uncleared after Principal Engineer rejection; `ws008-p007` complete | Leave all Noct source work to the maintainer until an accepted revision is explicitly returned | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
@@ -154,6 +170,7 @@ actually warranted.
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
+| `ws018` | Kernel source ownership and interface consolidation | Active; q025 foundation wave complete | p001, p003, p004, p005, and p006 complete | Select p007, p009, or p010 for the next bounded Queue; p002 follows p009 | [WS018](ws018-kernel-architecture/ws.md) |
 
 ## 4. Milestones
 
@@ -201,6 +218,14 @@ WS003 p014/p015 signed swap sources + VM/VFS ownership
 WS007 Xzed + /dev/graphics + VM device mappings
   +-- WS017 optional LFB mmap -- Xzed fast path -- amd64 UEFI acceptance
 
+WS003 boot/storage + WS006 evdev + WS007 Xzed/graphics + WS016 swap
+  +-- WS018 source ownership and stable-interface consolidation
+        +-- driver/platform/disk-label relocation
+        +-- independent UFS/FAT and filesystem-owned probes
+        +-- Xzed evdev-only -> independent mouse producers -> remove /dev/mouse
+        +-- independent graphics frontends
+        +-- boot/FAT native VFS consolidation -> remove bootfs
+
 WS013 Boot CPAR -- WS003 p011-p015 common x86 parameters
                   +-- WS003/bootloader FAT32, LFN and boot.cfg menu
 WS013 Runtime CPAR -- WS012 service administration
@@ -236,11 +261,15 @@ WS010 supplies host-side build and test scripting used by all workstreams.
    failure, and evidence decisions are fixed, schedule bounded RT
    implementation Phases without displacing earlier physical-network and
    storage milestones.
+10. Execute WS018 only as a sequence of bounded migrations.  Preserve the
+    consumer-before-deletion order for evdev, graphics, FAT/VFS, and bootfs;
+    source-layout planning does not authorize a bulk tree rewrite.
 
 q023 completed the independently dependency-ready `ws003-p016`, `ws008-p005`,
-and `ws001-p014` sequence. `ws017-p001` returns to the planning pool only after
-its recorded `mprotect` ceiling decision. No further implementation is
-authorized until another finite Queue is approved.
+and `ws001-p014` sequence. q024's automated Noct correction was rejected in
+manual review and is `uncleared`; q025 holds the target package and executes
+WS018 kernel ownership. `ws017-p001` returns to the planning pool only after
+its recorded `mprotect` ceiling decision.
 
 WS001 and WS009 advance within every wave when bounded work is selected. Lower
 priority POSIX gaps may remain paused if they do not block the active milestone.

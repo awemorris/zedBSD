@@ -45,7 +45,7 @@ general amd64 memory model and is not evidence of this xHCI failure.
 
 ## Exact software boundary
 
-`ENODEV` is value 13. In `drivers/pci-xhci.c`, the `capabilities` stage sets
+`ENODEV` is value 13. In `src/drivers/pci-xhci.c`, the `capabilities` stage sets
 that value only for the compound check of:
 
 1. zero MaxSlots;

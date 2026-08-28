@@ -1,6 +1,9 @@
 # zedBSD userland package
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,Noct,i386 pc98 amd64,y,package,,y,packages/lang,lang/noct,))
+# Temporarily unavailable as a zedBSD target package while the Principal
+# Engineer repairs the canonical Noct source.  The host build-script toolchain
+# is separate and remains enabled by the top-level Makefile.
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,Noct,i386 pc98 amd64,n,package,,n,packages/lang,lang/noct,))
 
 NOCT_ROOT ?= userland/noct/NoctLang
 NOCT_SOURCE_SENTINEL ?= $(NOCT_ROOT)/CMakeLists.txt

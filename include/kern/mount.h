@@ -42,6 +42,7 @@ struct dirent;
 struct statvfs;
 struct quota_control;
 struct snapshot_control;
+struct block_identity;
 
 struct path {
 	struct mount *p_mount;
@@ -60,6 +61,12 @@ struct filesystem_type {
 	const char *fs_name;
 	unsigned fs_flags;
 	int (*probe)(struct disk *);
+	/*
+	 * Return 0 after recognizing the disk and filling only filesystem-owned
+	 * TYPE/UUID/LABEL metadata, or EOPNOTSUPP for a format mismatch.  Other
+	 * errno values report bounded metadata-read or validation failures.
+	 */
+	int (*identify)(struct disk *, struct block_identity *);
 	int (*mount)(struct mount *);
 	int (*sync)(struct mount *);
 	int (*statvfs)(struct mount *, struct statvfs *);
@@ -112,6 +119,12 @@ struct fat_mount_args {
 int
 filesystem_register(
 	const struct filesystem_type *type);
+
+/* Dispatch registered identity callbacks without mounting the disk. */
+int
+filesystem_identify(
+	struct disk *disk,
+	struct block_identity *identity);
 
 void
 mount_reset(void);

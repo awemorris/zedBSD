@@ -243,6 +243,35 @@ platform suffixes. The SDL2 and PC-98 behavior gates remain canonical Noct
 tests described by `NOCT-T041` and `NOCT-T042`; this focused runner does not
 silently skip them or claim their result.
 
+## Maintainer API/layout review tests
+
+| ID | Phase | Contract |
+| --- | --- | --- |
+| `NOCT-T050` | p006 | Maintainer-owned `include/noct/noct.h` is byte-for-byte unchanged and no editor/backup file is staged |
+| `NOCT-T051` | p006 | Deleted callback backends, shared BeUI implementation files, redundant BeUI header, old moved-source paths, and split PC-98 sources are absent |
+| `NOCT-T052` | p006 | Static/shared host builds and public ANSI Term, File/FileUtil, and EUC-JP behavior pass without injection APIs |
+| `NOCT-T053` | p006 | Win32/MinGW compiles and links its standalone Term implementation behind the fixed registrar |
+| `NOCT-T054` | p006 | Standalone SDL2 and combined PC-98 BeUI implementations pass BMP/core, dummy-window, GDC, Cirrus, glyph, and selection regressions |
+| `NOCT-T055` | p006 | Standalone zedBSD BeUI passes preset build, sanitizer, source, evdev, and single-registrar checks |
+| `NOCT-T056` | p006 | Moved accelerator sources pass source audit and applicable static/OpenGL/Vulkan/DX12 build or execution gates without false claims for unavailable hardware/toolchains |
+| `NOCT-T057` | p006 | Outer build and affected non-JIT/JIT/BeUI integration regressions pass without `make check` or `.internal/` |
+
+The p006 runner must operate on the existing dirty canonical checkout without
+requiring a detached-clean precondition.  It records the protected header hash
+before any implementation work and rejects a different final hash.  All Git
+audits and staging commands are path-scoped because untracked maintainer
+editor/backup files are explicitly outside agent ownership.
+
+The focused host matrix uses clean CMake build directories for the static,
+shared, selected Windows cross-build, SDL2, PC-98, and zedBSD configurations.
+OpenGL, Vulkan, and DX12 source compilation is required when its configured
+toolchain is available; hardware execution is evidence only where the required
+device exists.  An unavailable optional backend is recorded as not applicable,
+not reported as a pass.
+
+The completed p006 matrix and unavailable-toolchain record are captured in
+[the Phase execution evidence](../phase006-maintainer-api-layout-review/evidence.md).
+
 ## Common build gate
 
 Run `make -j16` after each implementation Phase. Do not use the aggregate

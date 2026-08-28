@@ -107,14 +107,14 @@ X68K_KERNEL_SOURCES := \
 	src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c src/kern/fat-vfs.c \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
 	src/kern/mount.c src/kern/rootfs.c src/kern/vfs.c src/kern/swap.c \
-	src/kern/tmpfs.c src/kern/overlayfs.c drivers/loop.c \
+	src/kern/tmpfs.c src/kern/overlayfs.c src/drivers/loop.c \
 	src/kern/backing-claim.c src/kern/swap-source.c src/kern/swap-control.c \
 	src/kern/swap-boot.c src/kern/swap-fat.c \
 	src/kern/vm-reclaim.c \
 	src/kern/disk.c \
 	src/kern/partition.c src/kern/x68k/partition.c src/kern/x68k/platform.c \
-	drivers/x68k-mb89352.c drivers/x68k-spc-disk.c \
-	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
+	src/drivers/x68k-mb89352.c src/drivers/x68k-spc-disk.c \
+	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process-timer.c src/kern/lock.c src/kern/klog.c src/kern/waitq.c \
 	src/kern/buf.c src/kern/sysctl.c src/kern/resource.c \
 	src/kern/resource-limit.c src/kern/poll.c src/kern/usync.c \
@@ -123,18 +123,17 @@ X68K_KERNEL_SOURCES := \
 	src/kern/record-lock.c src/kern/pipe.c src/kern/cred.c \
 	src/kern/posix-acl.c src/kern/quota.c src/kern/signal.c \
 	src/kern/cwdinfo.c \
-	src/kern/elf.c src/kern/exec-prepare.c src/kern/exec.c src/kern/user-probe.c \
+	src/kern/elf.c src/kern/exec.c src/kern/user-probe.c \
 	src/kern/syscall.c src/kern/uaccess.c src/kern/cdev.c src/kern/devfs.c \
 	src/kern/console-device.c src/kern/mouse-device.c src/kern/input-queue.c \
 	src/kern/input-capability.c src/kern/input-device.c \
 	src/kern/input-keymap.c src/kern/locale-record.c \
 	src/kern/tty.c \
 	src/kern/graphics-device.c \
-	src/kern/system-swap-device.c src/kern/system-device.c \
-	src/kern/boot-parameters.c src/kern/init.c
-X68K_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
-	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)
-X68K_KERNEL_SOURCES += $(KERN_BOOT_SOURCE_SOURCES)
+	src/kern/system-swap-device.c src/kern/system-device.c src/kern/init.c
+X68K_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
+	$(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES)
+X68K_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
 X68K_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(X68K_KERNEL_SOURCES))
 X68K_KERNEL_LIBC_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ZEDBSD_LIBC_SOURCES))
 X68K_VMUNIX_OBJS := $(X68K_EARLY_OBJS) $(X68K_KERNEL_OBJS) \
@@ -161,8 +160,8 @@ X68K_AUDIT_C_SOURCES := \
 	src/hal/m68k/bsp-x68k/timer.c \
 	src/kern/x68k/platform.c \
 	src/kern/x68k/partition.c \
-	drivers/x68k-mb89352.c \
-	drivers/x68k-spc-disk.c
+	src/drivers/x68k-mb89352.c \
+	src/drivers/x68k-spc-disk.c
 X68K_AUDIT_S_SOURCES := \
 	src/hal/m68k/cache030.S \
 	src/hal/m68k/irq030.S \
@@ -311,8 +310,8 @@ $(BUILD)/bootloader/x68k/%.o: bootloader/x68k/%.c bootloader/x68k/boot-layout.h
 	$(M68K_CC) $(M68K_CPPFLAGS) $(M68K_KERNEL_CFLAGS) -fno-builtin \
 		-fno-strict-aliasing -MMD -MP -c $< -o $@
 
-$(BUILD)/bootloader/x68k/mb89352.o: drivers/x68k-mb89352.c \
-	drivers/x68k-mb89352.h
+$(BUILD)/bootloader/x68k/mb89352.o: src/drivers/x68k-mb89352.c \
+	src/drivers/x68k-mb89352.h
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_CPPFLAGS) $(M68K_KERNEL_CFLAGS) -fno-builtin \
 		-fno-strict-aliasing -MMD -MP -c $< -o $@

@@ -26,17 +26,17 @@ repository-wide test target:
 
 ```sh
 cc -std=c11 -Iinclude -Wall -Wextra -Werror \
-  drivers/dma.c plan/ws004-hardware/tests/dma-constraints-test.c \
+  src/drivers/dma.c plan/ws004-hardware/tests/dma-constraints-test.c \
   -o /tmp/ws004-dma-test
 /tmp/ws004-dma-test
 
 cc -std=c11 -Iinclude -Wall -Wextra -Werror \
-  drivers/pci.c plan/ws004-hardware/tests/pci-rescan-test.c \
+  src/drivers/pci.c plan/ws004-hardware/tests/pci-rescan-test.c \
   -o /tmp/ws004-pci-test
 /tmp/ws004-pci-test
 
 cc -std=c11 -Iinclude -Wall -Wextra -Werror \
-  drivers/pci.c plan/ws004-hardware/tests/pcie-capability-test.c \
+  src/drivers/pci.c plan/ws004-hardware/tests/pcie-capability-test.c \
   -o /tmp/ws004-pcie-test
 /tmp/ws004-pcie-test
 ```

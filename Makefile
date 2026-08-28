@@ -6,6 +6,7 @@
 #   include/          public HAL and kernel interfaces
 #   src/hal/          HAL and board support implementation
 #   src/kern/         platform-neutral kernel services
+#   src/drivers/      device and bus driver implementation
 #   userland/base/       base-system programs and libc glue
 #   userland/comp/       compilers
 #   userland/X11/        X11 servers and applications
@@ -129,7 +130,12 @@ ZEDBSD_USER_PROGRAMS_DEPS_2 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_1) \
 	$(call user_program_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_1)))
 ZEDBSD_USER_PROGRAMS_DEPS_3 := $(sort $(ZEDBSD_USER_PROGRAMS_DEPS_2) \
 	$(call user_program_dependency_names,$(ZEDBSD_USER_PROGRAMS_DEPS_2)))
-override ZEDBSD_USER_PROGRAMS := $(ZEDBSD_USER_PROGRAMS_DEPS_3)
+# The target Noct port is under Principal Engineer repair.  Keep the separate
+# host Noct toolchain used by build scripts, but do not let a stale/manual
+# configuration or dependency expansion install Noct or its Remacs dependent.
+ZEDBSD_TARGET_PACKAGE_HOLD := noct remacs
+override ZEDBSD_USER_PROGRAMS := $(filter-out \
+	$(ZEDBSD_TARGET_PACKAGE_HOLD),$(ZEDBSD_USER_PROGRAMS_DEPS_3))
 # A saved configuration may be reused after changing targets.  Do not let
 # packages selected for another ABI become impossible prerequisites of the
 # current root filesystem (PC/AT i386 is named "pcat" by the build system).
@@ -328,31 +334,27 @@ KERN_NET_SOURCES := \
 	src/kern/net/tcp.c
 KERN_NET_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_NET_SOURCES))
 
+KERN_BLOCK_IDENTITY_SOURCES := src/kern/block-identity.c
+KERN_BLOCK_IDENTITY_OBJS := $(patsubst %.c,$(BUILD)/%.o,\
+	$(KERN_BLOCK_IDENTITY_SOURCES))
 KERN_UFS1_SOURCES := \
-	src/kern/block-identity.c \
-	src/kern/ufs1/ufs1-endian.c \
-	src/kern/ufs1/ufs1-super.c \
-	src/kern/ufs1/ufs1-vfs.c
+	src/drivers/fs/ufs1/ufs1-endian.c \
+	src/drivers/fs/ufs1/ufs1-super.c \
+	src/drivers/fs/ufs1/ufs1-vfs.c
 KERN_UFS1_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_UFS1_SOURCES))
 KERN_UFS2_SOURCES := \
-	src/kern/ufs2/ufs2-super.c \
-	src/kern/ufs2/ufs2-vfs.c
+	src/drivers/fs/ufs2/ufs2-endian.c \
+	src/drivers/fs/ufs2/ufs2-super.c \
+	src/drivers/fs/ufs2/ufs2-vfs.c \
+	src/drivers/fs/ufs2/ufs2-journal.c \
+	src/drivers/fs/ufs2/ufs2-snapshot.c
 KERN_UFS2_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_UFS2_SOURCES))
-KERN_UFS_CONSISTENCY_SOURCES := \
-	src/kern/ufs/ufs-journal.c \
-	src/kern/ufs/ufs-softdep.c \
-	src/kern/ufs/ufs-snapshot.c
-KERN_UFS_CONSISTENCY_OBJS := $(patsubst %.c,$(BUILD)/%.o,\
-	$(KERN_UFS_CONSISTENCY_SOURCES))
 KERN_ACL_SOURCES := src/kern/posix-acl.c
 KERN_ACL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_ACL_SOURCES))
 KERN_QUOTA_SOURCES := src/kern/quota.c
 KERN_QUOTA_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_QUOTA_SOURCES))
-KERN_BOOT_SOURCE_SOURCES := \
-	src/kern/boot-source-contract.c \
-	src/kern/boot-source.c
-KERN_BOOT_SOURCE_OBJS := $(patsubst %.c,$(BUILD)/%.o,\
-	$(KERN_BOOT_SOURCE_SOURCES))
+KERN_BOOT_SOURCES := src/kern/boot.c
+KERN_BOOT_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_BOOT_SOURCES))
 
 # ----------------------------------------------------------------------
 # Generic compile rules.  Per-object flag overrides use target-specific
@@ -365,6 +367,13 @@ OBJ_CC = $(CC)
 $(BUILD)/%.o: %.S
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
+
+# PC/AT and PC-98 keep their established driver object paths even though the
+# production source owner is src/drivers.  Platform-specific target flags are
+# attached to these object names in their vmunix makefiles.
+$(BUILD)/drivers/%.o: src/drivers/%.c
+	@mkdir -p $(dir $@)
+	$(OBJ_CC) $(OBJ_CPPFLAGS) $(OBJ_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)

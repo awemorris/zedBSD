@@ -2,8 +2,7 @@
 #include <kern/swap-boot.h>
 
 #include <kern/block-identity.h>
-#include <kern/boot-parameters.h>
-#include <kern/boot-source.h>
+#include <kern/boot.h>
 #include <kern/disk.h>
 #include <kern/mount.h>
 

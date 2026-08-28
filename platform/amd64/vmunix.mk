@@ -45,17 +45,17 @@ AMD64_HAL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(AMD64_HAL_SOURCES)) \
 
 AMD64_USB_HCD_SOURCES :=
 ifeq ($(CONFIG_DRIVER_PCI_UHCI),y)
-AMD64_USB_HCD_SOURCES += drivers/pci-uhci.c
+AMD64_USB_HCD_SOURCES += src/drivers/pci-uhci.c
 endif
 ifeq ($(CONFIG_DRIVER_PCI_EHCI),y)
-AMD64_USB_HCD_SOURCES += drivers/pci-ehci.c
+AMD64_USB_HCD_SOURCES += src/drivers/pci-ehci.c
 endif
 ifeq ($(CONFIG_DRIVER_PCI_XHCI),y)
-AMD64_USB_HCD_SOURCES += drivers/pci-xhci.c
+AMD64_USB_HCD_SOURCES += src/drivers/pci-xhci.c
 endif
 AMD64_USB_CLASS_SOURCES :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
-AMD64_USB_CLASS_SOURCES += drivers/usb-storage.c
+AMD64_USB_CLASS_SOURCES += src/drivers/usb-storage.c
 endif
 
 AMD64_KERNEL_SOURCES := \
@@ -71,13 +71,13 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/resource.c src/kern/poll.c src/kern/usync.c \
 	src/kern/resource-limit.c \
 	src/kern/disk.c src/kern/partition.c \
-	drivers/loop.c drivers/dma.c drivers/pci.c drivers/pci-pcat.c \
-	drivers/usb.c $(AMD64_USB_HCD_SOURCES) \
+	src/drivers/loop.c src/drivers/dma.c src/drivers/pci.c \
+	src/drivers/pci-pcat.c src/drivers/usb.c $(AMD64_USB_HCD_SOURCES) \
 	$(AMD64_USB_CLASS_SOURCES) \
-	drivers/pcat-ide.c drivers/dp8390.c drivers/pcat-ne2000.c \
-	drivers/pcat-ps2-mouse.c \
+	src/drivers/pcat-ide.c src/drivers/dp8390.c \
+	src/drivers/pcat-ne2000.c src/drivers/pcat-ps2-mouse.c \
 	src/kern/mbr-partition.c src/kern/pcat/platform.c \
-	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
+	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process-timer.c src/kern/klog.c \
 	src/kern/test-checkpoint.c \
 	src/kern/lock.c src/kern/waitq.c \
@@ -86,7 +86,7 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/filedesc.c \
 	src/kern/record-lock.c \
 	src/kern/pipe.c src/kern/cred.c src/kern/signal.c \
-	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec-prepare.c src/kern/exec.c \
+	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
 	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
 	src/kern/mouse-device.c src/kern/input-queue.c src/kern/input-capability.c \
@@ -95,11 +95,11 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/tty.c \
 	src/kern/graphics-device.c src/kern/system-swap-device.c \
 	src/kern/system-device.c \
-	src/kern/pcat/font.c src/kern/pcat/vgafont.c drivers/pcat-graphics.c \
-	src/kern/boot-parameters.c src/kern/init.c
-AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
-	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)
-AMD64_KERNEL_SOURCES += $(KERN_BOOT_SOURCE_SOURCES)
+	src/kern/pcat/font.c src/kern/pcat/vgafont.c \
+	src/drivers/pcat-graphics.c src/kern/init.c
+AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
+	$(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES)
+AMD64_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
 ifeq ($(CONFIG_KERNEL_TEST_CHECKPOINTS),y)
 AMD64_KERNEL_SOURCES += plan/ws004-hardware/tests/pci-msi-qemu.c
 endif
@@ -135,7 +135,7 @@ $(BUILD)/kern64/src/kern/%.o: src/kern/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
 
-$(BUILD)/kern64/drivers/%.o: drivers/%.c
+$(BUILD)/kern64/src/drivers/%.o: src/drivers/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_CFLAGS) -MMD -MP -c $< -o $@
 

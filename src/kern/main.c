@@ -12,7 +12,7 @@
 #include "kern/vfs.h"
 #include "kern/exec.h"
 #include "kern/init.h"
-#include "kern/boot-parameters.h"
+#include "kern/boot.h"
 #include "kern/klog.h"
 #include "kern/sched.h"
 #include "kern/vm-commit.h"

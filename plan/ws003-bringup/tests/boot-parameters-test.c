@@ -1,5 +1,5 @@
 /* Common boot-parameter parser regression fixture (BR-T42). */
-#include <kern/boot-parameters.h>
+#include <kern/boot.h>
 #include <kern/init.h>
 
 #include <assert.h>

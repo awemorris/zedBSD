@@ -2,7 +2,9 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 REQUIRE = lang/noct
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,remacs,Remacs,i386 pc98 amd64,n,package,,y,packages/editors,editors/remacs,$(REQUIRE)))
+# Remacs currently requires the held target Noct package, so it is hidden
+# until that dependency is explicitly returned to service.
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,remacs,Remacs,i386 pc98 amd64,n,package,,n,packages/editors,editors/remacs,$(REQUIRE)))
 REQUIRE =
 
 REMACS_REPOSITORY ?= https://github.com/awemorris/remacs.git

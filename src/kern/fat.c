@@ -9,8 +9,6 @@
 
 #define FAT_PROGRESS_INTERVAL (64U * 1024U)
 
-static uint8_t bpb_cache[512];
-
 _Static_assert(sizeof(struct bootfat_state) <=
 	       sizeof(((struct bootfs *)0)->private_data),
 	       "FAT state exceeds generic filesystem storage");
@@ -180,24 +178,25 @@ enum bootfs_result bootfat_cluster_lba(
 static enum bootfs_result parse_bpb(const struct boot_volume *volume,
 				       struct bootfat_state *fat)
 {
+	uint8_t bpb[512];
 	uint32_t reserved, fat_sectors, fat32_sectors, root_sectors, metadata;
 	uint32_t total, total_physical, data_sectors;
 	uint16_t bytes, fat16_sectors;
 	uint8_t sectors_per_cluster;
 
-	if (!boot_volume_read(volume, 0, bpb_cache))
+	if (!boot_volume_read(volume, 0, bpb))
 		return ZEDBSD_FS_IO_ERROR;
-	bytes = bootfat_get16(bpb_cache + 11);
+	bytes = bootfat_get16(bpb + 11);
 	fat->sector_scale = bytes == 512 ? 1 : bytes == 1024 ? 2 : 0;
-	sectors_per_cluster = bpb_cache[13];
-	reserved = bootfat_get16(bpb_cache + 14);
-	fat->number_of_fats = bpb_cache[16];
-	fat->root_entries = bootfat_get16(bpb_cache + 17);
-	total = bootfat_get16(bpb_cache + 19);
+	sectors_per_cluster = bpb[13];
+	reserved = bootfat_get16(bpb + 14);
+	fat->number_of_fats = bpb[16];
+	fat->root_entries = bootfat_get16(bpb + 17);
+	total = bootfat_get16(bpb + 19);
 	if (!total)
-		total = bootfat_get32(bpb_cache + 32);
-	fat16_sectors = bootfat_get16(bpb_cache + 22);
-	fat32_sectors = bootfat_get32(bpb_cache + 36);
+		total = bootfat_get32(bpb + 32);
+	fat16_sectors = bootfat_get16(bpb + 22);
+	fat32_sectors = bootfat_get32(bpb + 36);
 	fat_sectors = fat16_sectors;
 	if (!fat_sectors)
 		fat_sectors = fat32_sectors;
@@ -234,8 +233,8 @@ static enum bootfs_result parse_bpb(const struct boot_volume *volume,
 	fat->fat16_layout = fat16_sectors != 0 && fat->root_entries != 0;
 	fat->fat32_layout = fat16_sectors == 0 && fat32_sectors != 0 &&
 		fat->root_entries == 0;
-	fat->root_cluster = bootfat_get32(bpb_cache + 44) & 0x0fffffffU;
-	fat->fsinfo_sector = bootfat_get16(bpb_cache + 48);
+	fat->root_cluster = bootfat_get32(bpb + 44) & 0x0fffffffU;
+	fat->fsinfo_sector = bootfat_get16(bpb + 48);
 	if (fat->type == ZEDBSD_FAT32 &&
 	    (!fat->fat32_layout || fat->root_cluster < 2U ||
 	     fat->root_cluster >= fat->cluster_count + 2U))

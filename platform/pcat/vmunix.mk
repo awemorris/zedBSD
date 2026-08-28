@@ -42,7 +42,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(KERN_QUOTA_OBJS) \
 	$(BUILD)/src/kern/signal.o \
 	$(BUILD)/src/kern/cwdinfo.o $(BUILD)/src/kern/elf.o \
-	$(BUILD)/src/kern/exec-prepare.o $(BUILD)/src/kern/exec.o \
+	$(BUILD)/src/kern/exec.o \
 	$(BUILD)/src/kern/user-probe.o \
 	$(BUILD)/src/kern/syscall.o $(BUILD)/src/kern/uaccess.o \
 	$(BUILD)/src/kern/cdev.o $(BUILD)/src/kern/devfs.o \
@@ -56,8 +56,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/system-device.o \
 	$(BUILD)/src/kern/pcat/font.o $(BUILD)/src/kern/pcat/vgafont.o \
 	$(BUILD)/drivers/pcat-graphics.o \
-	$(BUILD)/src/kern/boot-parameters.o \
-	$(KERN_BOOT_SOURCE_OBJS) \
+	$(KERN_BOOT_OBJS) \
 	$(BUILD)/src/kern/init.o \
 	$(KERN_NET_OBJS)
 
@@ -100,10 +99,10 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/drivers/pcat-ne2000.o \
 	$(BUILD)/drivers/pcat-ps2-mouse.o \
 	$(BUILD)/src/kern/mbr-partition.o \
-	$(BUILD)/src/kern/pcat/platform.o $(BUILD)/src/kern/image.o \
+	$(BUILD)/src/kern/pcat/platform.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \
-	$(HAL_PCAT_OBJS) $(KERN_OBJS) $(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS) \
-	$(KERN_UFS_CONSISTENCY_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
+	$(HAL_PCAT_OBJS) $(KERN_OBJS) $(KERN_BLOCK_IDENTITY_OBJS) \
+	$(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
 
 vmunix: $(BUILD)/vmunix
 

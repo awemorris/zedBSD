@@ -1,5 +1,5 @@
 /* WS016 SWAP-T007 bootN runtime-lifetime regression fixture. */
-#include <kern/boot-source.h>
+#include <kern/boot.h>
 #include <kern/inode.h>
 #include <kern/namei.h>
 

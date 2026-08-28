@@ -55,8 +55,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(KERN_ACL_OBJS) \
 	$(KERN_QUOTA_OBJS) \
 	$(BUILD)/src/kern/cwdinfo.o \
-	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec-prepare.o \
-	$(BUILD)/src/kern/exec.o \
+	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec.o \
 	$(BUILD)/src/kern/user-probe.o $(BUILD)/src/kern/syscall.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
 	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/console-device.o \
@@ -68,12 +67,11 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
 	$(BUILD)/src/kern/system-swap-device.o \
 	$(BUILD)/src/kern/system-device.o \
-	$(BUILD)/src/kern/boot-parameters.o \
-	$(KERN_BOOT_SOURCE_OBJS) \
+	$(KERN_BOOT_OBJS) \
 	$(BUILD)/src/kern/init.o \
 	$(BUILD)/drivers/pc98-graphics.o \
 	$(KERN_NET_OBJS) \
-	$(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS) $(KERN_UFS_CONSISTENCY_OBJS)
+	$(KERN_BLOCK_IDENTITY_OBJS) $(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS)
 
 # Native PC-98 display backends used by /dev/graphics.  The Core-Graph
 # blitter is the one hot loop in the graphical path, so it trades size for
@@ -122,7 +120,6 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/pc98/partition.o \
 	$(BUILD)/src/kern/pc98/partition-auto.o \
 	$(BUILD)/src/kern/pc98/platform.o \
-	$(BUILD)/src/kern/image.o \
 	$(BUILD)/src/kern/panic.o \
 	$(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PC98_OBJS) $(KERN_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)

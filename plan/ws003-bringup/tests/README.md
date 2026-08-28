@@ -79,7 +79,7 @@ paths:
 
 ```sh
 cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
-  drivers/pci.c \
+  src/drivers/pci.c \
   plan/ws003-bringup/tests/xhci-capability-mmio-test.c \
   -o /tmp/ws003-xhci-capability-mmio-test
 /tmp/ws003-xhci-capability-mmio-test
@@ -91,7 +91,7 @@ be retried safely, while a later successful quiesce/stop removes that same bus:
 
 ```sh
 cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
-  drivers/usb.c \
+  src/drivers/usb.c \
   plan/ws003-bringup/tests/usb-hcd-unregister-test.c \
   -o /tmp/ws003-usb-hcd-unregister-test
 /tmp/ws003-usb-hcd-unregister-test
@@ -113,7 +113,7 @@ cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
 /tmp/ws003-xhci-cancel-command-test
 
 cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror -pthread \
-  drivers/dma.c plan/ws003-bringup/tests/dma-allocation-lock-test.c \
+  src/drivers/dma.c plan/ws003-bringup/tests/dma-allocation-lock-test.c \
   -o /tmp/ws003-dma-allocation-lock-test
 /tmp/ws003-dma-allocation-lock-test
 ```
@@ -177,10 +177,11 @@ diagnostics, duplicate and malformed input, ASCII/NUL transport boundaries,
 the exact 3071-byte limit, and absolute `init=` selection:
 
 ```sh
-cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
-  src/kern/boot-parameters.c src/kern/init.c \
+cc -std=c11 -Iinclude -Iinclude/uapi -I. -Wall -Wextra -Werror \
+  -ffunction-sections -fdata-sections \
+  src/kern/boot.c src/kern/init.c \
   plan/ws003-bringup/tests/boot-parameters-test.c \
-  -o /tmp/ws003-boot-parameters-test
+  -Wl,--gc-sections -o /tmp/ws003-boot-parameters-test
 /tmp/ws003-boot-parameters-test
 ```
 
@@ -205,8 +206,7 @@ every slot acquisition stage:
 
 ```sh
 cc -std=c11 -Iinclude -Iinclude/uapi -I. -Wall -Wextra -Werror \
-  src/kern/boot-parameters.c src/kern/boot-source-contract.c \
-  src/kern/boot-source.c plan/ws003-bringup/tests/boot-source-test.c \
+  src/kern/boot.c plan/ws003-bringup/tests/boot-source-test.c \
   -o /tmp/ws003-boot-source-test
 /tmp/ws003-boot-source-test
 ```

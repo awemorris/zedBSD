@@ -50,9 +50,9 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/buf.c \
 	src/kern/sysctl.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
 	src/kern/resource-limit.c \
-	drivers/loop.c \
+	src/drivers/loop.c \
 	src/kern/partition.c src/kern/sun-disklabel.c src/kern/sun4u/platform.c \
-	drivers/sun4u-cmd646.c src/kern/image.c src/kern/panic.c \
+	src/drivers/sun4u-cmd646.c src/kern/panic.c \
 	src/kern/entry.c src/kern/clock.c src/kern/process-timer.c src/kern/klog.c \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c \
@@ -60,7 +60,7 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/vm-commit.c src/kern/filedesc.c src/kern/pipe.c \
 	src/kern/record-lock.c \
 	src/kern/cred.c src/kern/signal.c src/kern/cwdinfo.c \
-	src/kern/elf.c src/kern/exec-prepare.c src/kern/exec.c \
+	src/kern/elf.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
 	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
 	src/kern/mouse-device.c src/kern/input-queue.c src/kern/input-capability.c \
@@ -68,11 +68,10 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/input-keymap.c src/kern/locale-record.c \
 	src/kern/tty.c \
 	src/kern/graphics-device.c src/kern/system-swap-device.c \
-	src/kern/system-device.c \
-	src/kern/boot-parameters.c src/kern/init.c
-SPARCV9_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
-	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)
-SPARCV9_KERNEL_SOURCES += $(KERN_BOOT_SOURCE_SOURCES)
+	src/kern/system-device.c src/kern/init.c
+SPARCV9_KERNEL_SOURCES += $(KERN_NET_SOURCES) \
+	$(KERN_BLOCK_IDENTITY_SOURCES) $(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES)
+SPARCV9_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
 SPARCV9_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
 SPARCV9_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
 SPARCV9_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(SPARCV9_KERNEL_SOURCES))

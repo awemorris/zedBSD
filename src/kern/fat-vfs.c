@@ -1,6 +1,7 @@
 /* FAT inode/file adapter over the proven FAT12/FAT16 chain engine.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/fat-vfs.h"
+#include "kern/block-identity.h"
 #include "kern/fat.h"
 #include "kern/fat16.h"
 #include "kern/fat32.h"
@@ -93,6 +94,12 @@ static int
 volume_read(const void *context, uint32_t lba, void *buffer)
 {
 	return disk_read((struct disk *)context, lba, 1, buffer) == 0;
+}
+
+static int
+volume_read_direct(const void *context, uint32_t lba, void *buffer)
+{
+	return disk_read_direct((struct disk *)context, lba, 1, buffer) == 0;
 }
 
 static int
@@ -1400,34 +1407,144 @@ fat_reclaim(struct inode *inode)
 	mutex_unlock(&state->lock);
 }
 
-int
-fat_probe_type(struct disk *disk, enum bootfat_type *type)
+static int
+fat_probe_volume(const struct boot_volume *volume, enum bootfat_type *type)
 {
-	struct boot_volume volume;
 	enum bootfs_result result;
-	if (disk == NULL || type == NULL || disk->d_block_size != 512)
+
+	if (volume == NULL || type == NULL)
 		return EOPNOTSUPP;
-	volume = fat_volume(disk);
-	result = bootfat12_driver.probe(&volume);
+	result = bootfat12_driver.probe(volume);
 	if (result == ZEDBSD_FS_OK) {
 		*type = ZEDBSD_FAT12;
 		return 0;
 	}
 	if (result != ZEDBSD_FS_UNSUPPORTED)
 		return fs_error(result);
-	result = bootfat16_driver.probe(&volume);
+	result = bootfat16_driver.probe(volume);
 	if (result == ZEDBSD_FS_OK) {
 		*type = ZEDBSD_FAT16;
 		return 0;
 	}
 	if (result != ZEDBSD_FS_UNSUPPORTED)
 		return fs_error(result);
-	result = bootfat32_driver.probe(&volume);
+	result = bootfat32_driver.probe(volume);
 	if (result == ZEDBSD_FS_OK) {
 		*type = ZEDBSD_FAT32;
 		return 0;
 	}
 	return fs_error(result);
+}
+
+int
+fat_probe_type(struct disk *disk, enum bootfat_type *type)
+{
+	struct boot_volume volume;
+
+	if (disk == NULL || type == NULL || disk->d_block_size != 512)
+		return EOPNOTSUPP;
+	volume = fat_volume(disk);
+	return fat_probe_volume(&volume, type);
+}
+
+static char
+fat_hex_digit(unsigned value)
+{
+	return (char)(value < 10U ? '0' + value : 'A' + value - 10U);
+}
+
+static void
+fat_hex32(char output[9], uint32_t value)
+{
+	unsigned i;
+
+	for (i = 0; i < 8U; i++)
+		output[i] = fat_hex_digit((value >> (28U - i * 4U)) & 15U);
+	output[8] = '\0';
+}
+
+static void
+fat_copy_label(char *output, size_t capacity, const uint8_t *input,
+	size_t length)
+{
+	size_t end = length;
+	size_t i;
+
+	while (end != 0U && (input[end - 1U] == ' ' || input[end - 1U] == 0U))
+		end--;
+	if (end >= capacity)
+		end = capacity - 1U;
+	for (i = 0; i < end; i++)
+		output[i] = input[i] >= 0x20U && input[i] <= 0x7eU ?
+		    (char)input[i] : '_';
+	output[end] = '\0';
+}
+
+int
+fat_identify(struct disk *disk, struct block_identity *identity)
+{
+	struct boot_volume volume;
+	enum bootfat_type type;
+	uint8_t boot[512];
+	uint32_t declared_sectors;
+	uint32_t fat_sectors;
+	uint32_t serial;
+	uint32_t sector_scale;
+	uint16_t sector_bytes;
+	unsigned label_offset;
+	unsigned serial_offset;
+	int error;
+
+	if (disk == NULL || identity == NULL)
+		return EINVAL;
+	if (disk->d_block_size != 512U || disk->d_block_count == 0U)
+		return EOPNOTSUPP;
+	volume = fat_volume(disk);
+	volume.read = volume_read_direct;
+	if (!volume.read(volume.context, 0, boot))
+		return EIO;
+	if (boot[510] != 0x55U || boot[511] != 0xaaU)
+		return EOPNOTSUPP;
+	sector_bytes = bootfat_get16(boot + 11U);
+	sector_scale = sector_bytes == 512U ? 1U :
+	    sector_bytes == 1024U ? 2U : 0U;
+	declared_sectors = bootfat_get16(boot + 19U);
+	if (declared_sectors == 0U)
+		declared_sectors = bootfat_get32(boot + 32U);
+	fat_sectors = bootfat_get16(boot + 22U);
+	if (fat_sectors == 0U)
+		fat_sectors = bootfat_get32(boot + 36U);
+	/* An MBR has the same trailing signature.  Require a credible FAT BPB
+	 * before treating decoder failures as filesystem corruption. */
+	if ((sector_scale != 1U && sector_scale != 2U) || boot[13U] == 0U ||
+	    bootfat_get16(boot + 14U) == 0U || boot[16U] == 0U ||
+	    declared_sectors == 0U || fat_sectors == 0U)
+		return EOPNOTSUPP;
+	if (declared_sectors > UINT32_MAX / sector_scale ||
+	    (uint64_t)declared_sectors * sector_scale > disk->d_block_count)
+		return EINVAL;
+	error = fat_probe_volume(&volume, &type);
+	if (error != 0)
+		return error;
+
+	memset(identity, 0, sizeof(*identity));
+	strcpy(identity->type, "vfat");
+	identity->flags = ZEDBSD_BLKID_TYPE;
+	serial_offset = type == ZEDBSD_FAT32 ? 67U : 39U;
+	label_offset = type == ZEDBSD_FAT32 ? 71U : 43U;
+	if (boot[serial_offset - 1U] != 0x29U)
+		return 0;
+	serial = bootfat_get32(boot + serial_offset);
+	fat_hex32(identity->uuid, serial);
+	memmove(identity->uuid + 5, identity->uuid + 4, 4U);
+	identity->uuid[4] = '-';
+	identity->uuid[9] = '\0';
+	identity->flags |= ZEDBSD_BLKID_UUID;
+	fat_copy_label(identity->label, sizeof(identity->label),
+	    boot + label_offset, 11U);
+	if (identity->label[0] != '\0' && strcmp(identity->label, "NO NAME") != 0)
+		identity->flags |= ZEDBSD_BLKID_LABEL;
+	return 0;
 }
 
 static int
@@ -1568,6 +1685,7 @@ fat_statvfs(struct mount *mountp, struct statvfs *result)
 const struct filesystem_type fat_filesystem_type = {
     .fs_name = "fat",
     .probe = fat_probe,
+    .identify = fat_identify,
     .mount = fat_mount_impl,
     .sync = fat_sync_mount,
     .statvfs = fat_statvfs,

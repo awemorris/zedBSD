@@ -1,5 +1,6 @@
 /* Boot-slot and root-mode production regression fixture (BR-T44). */
-#include <kern/boot-source.h>
+#include <kern/boot.h>
+#include <kern/fat.h>
 #include <kern/inode.h>
 #include <kern/namei.h>
 

@@ -12,7 +12,10 @@
 #ifndef ZEDBSD_ABI_H
 #define ZEDBSD_ABI_H
 
+#include <stddef.h>
 #include <stdint.h>
+
+#include <boot/parameters.h>
 
 /*
  * Shared data contract between the real-mode Stage 1 and 32-bit Stage 2.
@@ -185,5 +188,262 @@ struct boot_device {
 _Static_assert(
 	sizeof(struct boot_device) == 16,
 	"zedBSD device descriptor ABI must remain 16 bytes");
+
+/*
+ * Architecture-independent boot parameters and boot-source ownership.
+ *
+ * This header is the public boot-interface ledger.  Declarations are appended
+ * or changed only after a recorded architecture/API decision, not as an
+ * implementation-refactoring convenience.
+ */
+
+#define KERN_BOOT_PARAMETERS_TEXT_MAX ZEDBSD_BOOT_PARAMETERS_TEXT_MAX
+#define KERN_BOOT_PARAMETERS_STORAGE_SIZE ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE
+#define KERN_BOOT_PARAMETERS_INIT_PATH_MAX 255U
+#define KERN_BOOT_PARAMETERS_UNKNOWN_NAME_MAX 31U
+#define KERN_BOOT_PARAMETER_OFFSET_ABSENT UINT16_MAX
+
+enum kern_boot_parameter_key {
+	KERN_BOOT_PARAMETER_BOOT0,
+	KERN_BOOT_PARAMETER_BOOT1,
+	KERN_BOOT_PARAMETER_BOOT2,
+	KERN_BOOT_PARAMETER_BOOT3,
+	KERN_BOOT_PARAMETER_ROOTPART,
+	KERN_BOOT_PARAMETER_OVERLAY_ROOT,
+	KERN_BOOT_PARAMETER_OVERLAY_DATA,
+	KERN_BOOT_PARAMETER_SWAP0,
+	KERN_BOOT_PARAMETER_SWAP1,
+	KERN_BOOT_PARAMETER_SWAP2,
+	KERN_BOOT_PARAMETER_SWAP3,
+	KERN_BOOT_PARAMETER_INIT,
+	KERN_BOOT_PARAMETER_COUNT
+};
+
+/*
+ * Values are offsets into storage so the structure remains self-contained
+ * when a host fixture or a future handoff path copies it.
+ */
+struct kern_boot_parameters {
+	char storage[KERN_BOOT_PARAMETERS_STORAGE_SIZE];
+	uint16_t value_offset[KERN_BOOT_PARAMETER_COUNT];
+	unsigned unknown_count;
+	unsigned unknown_name_truncated;
+	char unknown_name[KERN_BOOT_PARAMETERS_UNKNOWN_NAME_MAX + 1U];
+};
+
+/*
+ * Parse at most input_capacity readable bytes, including the terminating NUL.
+ * A NULL input with zero capacity denotes an empty parameter set.  On error,
+ * parameters is reset to an empty, safely inspectable result.
+ *
+ * EINVAL       invalid arguments, syntax, control data, or relative init path
+ * EILSEQ       a non-ASCII byte before the terminating NUL
+ * E2BIG        text exceeds 3071 bytes or lacks NUL at that maximum boundary
+ * EEXIST       a known name occurs more than once
+ * ENAMETOOLONG init path is 256 bytes or longer
+ */
+int
+kern_boot_parameters_parse(
+	struct kern_boot_parameters *parameters,
+	const char *input,
+	size_t input_capacity);
+
+const char *
+kern_boot_parameters_value(
+	const struct kern_boot_parameters *parameters,
+	enum kern_boot_parameter_key key);
+
+const char *
+kern_boot_parameters_boot(
+	const struct kern_boot_parameters *parameters,
+	unsigned index);
+
+const char *
+kern_boot_parameters_swap(
+	const struct kern_boot_parameters *parameters,
+	unsigned index);
+
+const char *
+kern_boot_parameters_rootpart(
+	const struct kern_boot_parameters *parameters);
+
+const char *
+kern_boot_parameters_overlay_root(
+	const struct kern_boot_parameters *parameters);
+
+const char *
+kern_boot_parameters_overlay_data(
+	const struct kern_boot_parameters *parameters);
+
+const char *
+kern_boot_parameters_init_path(
+	const struct kern_boot_parameters *parameters);
+
+unsigned
+kern_boot_parameters_unknown_count(
+	const struct kern_boot_parameters *parameters);
+
+const char *
+kern_boot_parameters_unknown_name(
+	const struct kern_boot_parameters *parameters,
+	int *truncated);
+
+/* Kernel-global parse-once instance consumed by init and later VFS phases. */
+int
+kern_boot_parameters_initialize(
+	const char *input,
+	size_t input_capacity);
+
+const struct kern_boot_parameters *
+kern_boot_parameters_current(void);
+
+/*
+ * True only when the valid kernel-global instance was initialized from an
+ * actual parameter source.  This deliberately distinguishes an absent source
+ * (NULL, zero capacity) from a present but empty string.
+ */
+int
+kern_boot_parameters_source_present(void);
+
+#define KERN_BOOT_SOURCE_SLOT_COUNT 4U
+
+struct disk;
+struct mount;
+struct path;
+enum bootfat_type;
+
+struct kern_boot_source_reference {
+	unsigned slot;
+	/* Matches the stable kernel path limit without importing VFS internals. */
+	char relative[256U];
+};
+
+enum kern_boot_root_mode {
+	KERN_BOOT_ROOT_INVALID = 0,
+	KERN_BOOT_ROOT_NATIVE,
+	KERN_BOOT_ROOT_OVERLAY,
+};
+
+enum kern_boot_source_failure_stage {
+	KERN_BOOT_SOURCE_FAILURE_NONE = 0,
+	KERN_BOOT_SOURCE_FAILURE_SELECTOR,
+	KERN_BOOT_SOURCE_FAILURE_RESOLVE,
+	KERN_BOOT_SOURCE_FAILURE_PARTITION,
+	KERN_BOOT_SOURCE_FAILURE_DUPLICATE,
+	KERN_BOOT_SOURCE_FAILURE_FILESYSTEM,
+	KERN_BOOT_SOURCE_FAILURE_MOUNT,
+};
+
+struct kern_boot_source_slot {
+	/* disk is borrowed from runtime_mount while runtime_mount is non-NULL. */
+	struct disk *disk;
+	/* Owned private mount until release or promotion. */
+	struct mount *mount;
+	/*
+	 * System-lifetime lookup anchor.  Normally identical to mount; after a
+	 * boot filesystem is promoted to the namespace root it remains a borrowed
+	 * pointer to that root mount while mount becomes NULL.
+	 */
+	struct mount *runtime_mount;
+	unsigned configured;
+	unsigned retained;
+	unsigned promoted;
+};
+
+struct kern_boot_source_context {
+	struct kern_boot_source_slot slot[KERN_BOOT_SOURCE_SLOT_COUNT];
+	unsigned failure_slot;
+	enum kern_boot_source_failure_stage failure_stage;
+	int cleanup_error;
+	/* Immutable once set.  Published contexts have system lifetime. */
+	unsigned runtime_published;
+};
+
+int
+kern_boot_source_selector_validate(
+	const char *selector);
+
+int
+kern_boot_source_reference_parse(
+	const char *text,
+	struct kern_boot_source_reference *reference);
+
+int
+kern_boot_source_root_mode(
+	const char *rootpart,
+	const char *overlay_root,
+	const char *overlay_data,
+	enum kern_boot_root_mode *mode);
+
+int
+kern_boot_source_fat_type_supported(
+	enum bootfat_type type);
+
+const char *
+kern_boot_source_failure_stage_name(
+	enum kern_boot_source_failure_stage stage);
+
+void
+kern_boot_source_context_init(
+	struct kern_boot_source_context *context);
+
+int
+kern_boot_source_context_mount(
+	struct kern_boot_source_context *context,
+	const struct kern_boot_parameters *parameters,
+	struct disk *loader_origin,
+	const char *loader_origin_selector);
+
+int
+kern_boot_source_lookup(
+	struct kern_boot_source_context *context,
+	const char *text,
+	unsigned *slot_out,
+	struct path *path_out);
+
+int
+kern_boot_source_retain_slot(
+	struct kern_boot_source_context *context,
+	unsigned slot);
+
+/*
+ * Runtime bootN selectors require every configured private boot mount to
+ * survive root selection.  Retain is performed before root selection can
+ * release unused mounts; publication happens only after the root namespace
+ * and swap-control facade are ready.
+ */
+int
+kern_boot_source_retain_configured(
+	struct kern_boot_source_context *context);
+
+int
+kern_boot_source_publish_runtime(
+	struct kern_boot_source_context *context);
+
+int
+kern_boot_source_runtime_lookup(
+	struct kern_boot_source_context *context,
+	const char *text,
+	struct path *path_out);
+
+int
+kern_boot_source_find_disk(
+	const struct kern_boot_source_context *context,
+	const struct disk *disk,
+	unsigned *slot_out);
+
+int
+kern_boot_source_promote_root(
+	struct kern_boot_source_context *context,
+	unsigned slot,
+	struct mount **root_out);
+
+int
+kern_boot_source_release_unused(
+	struct kern_boot_source_context *context);
+
+int
+kern_boot_source_context_destroy(
+	struct kern_boot_source_context *context);
 
 #endif

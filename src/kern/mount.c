@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/statvfs.h>
+#include <zedbsd/blkid.h>
 #include <zedbsd/quota.h>
 #include <zedbsd/snapshot.h>
 
@@ -154,6 +155,104 @@ filesystem_register(const struct filesystem_type *type)
 	}
 	filesystems[filesystem_count++] = type;
 	spin_unlock_irqrestore(&namespace_lock, irq);
+	return 0;
+}
+
+static int
+identity_text_zero(const char *text, size_t capacity)
+{
+	size_t index;
+
+	for (index = 0; index < capacity; index++)
+		if (text[index] != '\0')
+			return 0;
+	return 1;
+}
+
+static int
+identity_text_valid(
+	const char *text,
+	size_t capacity,
+	uint32_t flags,
+	uint32_t field_flag)
+{
+	if ((flags & field_flag) == 0)
+		return identity_text_zero(text, capacity);
+	return text[0] != '\0' && memchr(text, '\0', capacity) != NULL;
+}
+
+static int
+filesystem_identity_valid(const struct block_identity *identity)
+{
+	const uint32_t allowed = ZEDBSD_BLKID_TYPE | ZEDBSD_BLKID_UUID |
+	    ZEDBSD_BLKID_LABEL;
+
+	if ((identity->flags & ~allowed) != 0 || identity->reserved != 0 ||
+	    !identity_text_zero(identity->partuuid,
+	    sizeof(identity->partuuid)) ||
+	    !identity_text_zero(identity->partlabel,
+	    sizeof(identity->partlabel)) ||
+	    !identity_text_valid(identity->type, sizeof(identity->type),
+	    identity->flags, ZEDBSD_BLKID_TYPE) ||
+	    !identity_text_valid(identity->uuid, sizeof(identity->uuid),
+	    identity->flags, ZEDBSD_BLKID_UUID) ||
+	    !identity_text_valid(identity->label, sizeof(identity->label),
+	    identity->flags, ZEDBSD_BLKID_LABEL))
+		return 0;
+	return 1;
+}
+
+int
+filesystem_identify(struct disk *disk, struct block_identity *identity)
+{
+	const struct filesystem_type *snapshot[FILESYSTEM_MAX];
+	struct block_identity candidate, match;
+	unsigned snapshot_count = 0;
+	unsigned match_count = 0;
+	unsigned long irq;
+	unsigned index;
+	int saved_error = EOPNOTSUPP;
+
+	if (identity == NULL)
+		return EINVAL;
+	memset(identity, 0, sizeof(*identity));
+	if (disk == NULL)
+		return EINVAL;
+
+	/* Identity callbacks perform I/O, so only snapshot the registry locked. */
+	irq = spin_lock_irqsave(&namespace_lock);
+	for (index = 0; index < filesystem_count; index++) {
+		const struct filesystem_type *type = filesystems[index];
+
+		if ((type->fs_flags & FILESYSTEM_NODEV) != 0 ||
+		    type->identify == NULL)
+			continue;
+		snapshot[snapshot_count++] = type;
+	}
+	spin_unlock_irqrestore(&namespace_lock, irq);
+
+	for (index = 0; index < snapshot_count; index++) {
+		int error;
+
+		memset(&candidate, 0, sizeof(candidate));
+		error = snapshot[index]->identify(disk, &candidate);
+		if (error == EOPNOTSUPP)
+			continue;
+		if (error == 0 && !filesystem_identity_valid(&candidate))
+			error = EINVAL;
+		if (error != 0) {
+			if (saved_error == EOPNOTSUPP)
+				saved_error = error;
+			continue;
+		}
+		if (match_count++ != 0)
+			return EEXIST;
+		match = candidate;
+	}
+
+	if (match_count == 0)
+		return saved_error;
+	*identity = match;
 	return 0;
 }
 

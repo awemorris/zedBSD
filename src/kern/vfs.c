@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/vfs.h"
-#include "kern/boot-parameters.h"
-#include "kern/boot-source.h"
+#include "kern/boot.h"
 #include "kern/disk.h"
 #include "kern/block-identity.h"
 #include "kern/fat-vfs.h"

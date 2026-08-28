@@ -41,10 +41,10 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/swap-fat.c src/kern/vm-reclaim.c src/kern/buf.c \
 	src/kern/sysctl.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
 	src/kern/resource-limit.c \
-	drivers/loop.c \
+	src/drivers/loop.c \
 	src/kern/partition.c src/kern/mbr-partition.c src/kern/rpi4/platform.c \
-	drivers/rpi4-sdhci.c \
-	src/kern/image.c src/kern/panic.c src/kern/entry.c src/kern/clock.c \
+	src/drivers/rpi4-sdhci.c \
+	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process-timer.c src/kern/klog.c \
 	src/kern/lock.c src/kern/waitq.c \
 	src/kern/process.c src/kern/thread.c src/kern/sched.c src/kern/vm-lock.c src/kern/vmspace.c \
@@ -53,18 +53,17 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/pipe.c src/kern/cred.c \
 	src/kern/signal.c \
 	src/kern/cwdinfo.c \
-	src/kern/elf.c src/kern/exec-prepare.c src/kern/exec.c src/kern/user-probe.c src/kern/syscall.c \
+	src/kern/elf.c src/kern/exec.c src/kern/user-probe.c src/kern/syscall.c \
 	src/kern/uaccess.c src/kern/cdev.c src/kern/devfs.c \
 	src/kern/console-device.c src/kern/mouse-device.c src/kern/input-queue.c \
 	src/kern/input-capability.c src/kern/input-device.c \
 	src/kern/input-keymap.c src/kern/locale-record.c \
 	src/kern/tty.c \
 	src/kern/graphics-device.c \
-	src/kern/system-swap-device.c src/kern/system-device.c \
-	src/kern/boot-parameters.c src/kern/init.c
-ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_UFS1_SOURCES) \
-	$(KERN_UFS2_SOURCES) $(KERN_UFS_CONSISTENCY_SOURCES)
-ARM64_KERNEL_SOURCES += $(KERN_BOOT_SOURCE_SOURCES)
+	src/kern/system-swap-device.c src/kern/system-device.c src/kern/init.c
+ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
+	$(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES)
+ARM64_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
 ARM64_KERNEL_SOURCES += $(KERN_ACL_SOURCES)
 ARM64_KERNEL_SOURCES += $(KERN_QUOTA_SOURCES)
 ARM64_KERNEL_OBJS := $(patsubst %.c,$(BUILD)/kernel/%.o,$(ARM64_KERNEL_SOURCES))
