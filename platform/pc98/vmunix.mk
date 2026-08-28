@@ -70,10 +70,11 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec.o \
 	$(BUILD)/src/kern/user-probe.o $(BUILD)/src/kern/syscall.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
-	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/console-device.o \
-	$(BUILD)/src/kern/mouse-device.o $(BUILD)/src/kern/input-queue.o \
-	$(BUILD)/src/kern/input-capability.o $(BUILD)/src/kern/input-device.o \
-	$(BUILD)/src/kern/input-keymap.o \
+	$(BUILD)/src/kern/devfs.o $(BUILD)/src/drivers/fs/console.o \
+	$(BUILD)/src/drivers/input-queue.o \
+	$(BUILD)/src/drivers/input-capability.o \
+	$(BUILD)/src/drivers/input-device.o \
+	$(BUILD)/src/drivers/input-keymap.o \
 	$(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/system-swap-device.o \
@@ -121,7 +122,7 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/partition.o \
 	$(BUILD)/drivers/loop.o \
 	$(BUILD)/drivers/pc98-ide.o \
-	$(BUILD)/drivers/pc98-busmouse.o \
+	$(BUILD)/drivers/hid/pc98-busmouse.o \
 	$(BUILD)/drivers/dp8390.o \
 	$(BUILD)/drivers/pc98-lgy98.o \
 	$(BUILD)/drivers/disklabel/mbr.o \

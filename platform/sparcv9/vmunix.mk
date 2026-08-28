@@ -63,10 +63,10 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/cred.c src/kern/signal.c src/kern/cwdinfo.c \
 	src/kern/elf.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
-	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
-	src/kern/mouse-device.c src/kern/input-queue.c src/kern/input-capability.c \
-	src/kern/input-device.c \
-	src/kern/input-keymap.c src/kern/locale-record.c \
+	src/kern/cdev.c src/kern/devfs.c src/drivers/fs/console.c \
+	src/drivers/input-queue.c src/drivers/input-capability.c \
+	src/drivers/input-device.c \
+	src/drivers/input-keymap.c src/kern/locale-record.c \
 	src/kern/tty.c \
 	src/kern/system-swap-device.c \
 	src/kern/system-device.c src/kern/init.c

@@ -1,6 +1,6 @@
 # WS018 Phase 008: independent input/HID driver ownership
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 WSID: `ws018`
 
@@ -8,7 +8,7 @@ Phase ID: `p008`
 
 Combined ID: `ws018-p008`
 
-Status: planned; not queued
+Status: completed (`q026`)
 
 Parent: [WS018](../ws.md)
 
@@ -181,3 +181,65 @@ cannot safely be owned by its backend.  Do not respond by recreating
 legacy cdev.  A need to move architecture console producers out of HAL is a
 new Phase and is not folded into this one.
 
+## Execution result
+
+Completed on 2026-08-29 under `q026` without reaching a reconsideration
+condition.
+
+- The four generic input implementations now live directly below
+  `src/drivers/`, and the unchanged console frontend now lives at
+  `src/drivers/fs/console.c`.  All supported architecture manifests and the
+  active WS006 input fixture commands name only those final paths; their
+  established `include/kern/` interfaces remain unchanged.
+- PC/AT PS/2 and PC-98 bus-mouse sources and headers now occupy their final
+  `src/drivers/hid/` and `include/drivers/hid/` paths.  Each driver owns its
+  input device, exact evdev capability set, button state, reader count,
+  first-open hardware start, failed-start retry, and final-close stop.  The
+  lifecycle mutex prevents half-started concurrent opens and reference
+  underflow.  PC/AT keeps packet/IRQ work behind its controller lock; PC-98
+  retains its one-time service worker and PPI interrupt gate.
+- Both producers publish nonzero `REL_X`, then nonzero `REL_Y`, changed
+  left/right/middle button values, and one `SYN_REPORT`.  Positive-down Y is
+  preserved.  Final close serializes against an in-flight producer, publishes
+  releases plus `SYN_REPORT` for held buttons, and clears evdev state before a
+  later open; a pending inactive IRQ cannot publish a late frame.
+- VFS initializes the input core, registers the console keyboard, then asks
+  the platform to register its physical pointer.  The generic
+  `mouse-device.c`, its kernel header, the legacy mouse UAPI, `/dev/mouse`
+  registration, backend registry, and all live consumer/producer references
+  are deleted.
+- [`run-input-hid-host-test.sh`](../tests/run-input-hid-host-test.sh) passed
+  ordinary `-Werror` and ASan/UBSan runs for both production driver sources.
+  KA-T070 covers a failed first open and retry, two readers, last-close stop,
+  signed motion, unchanged-button frames, zero-motion button edges, ordered
+  `SYN_REPORT` framing, held-button close/reopen state, and suppression of late
+  inactive IRQ publication.  KA-T071 verifies the final paths, registration
+  sites, VFS ordering, and absence of every retired live symbol/path.
+- The p007 Xzed production-linked fixture passed ordinary `-Werror` and
+  ASan/UBSan runs after legacy removal.  WS006's LP64 and ILP32 evdev layout
+  compiles, bounded queue fixture, capability/state fixture in ordinary and
+  ASan/UBSan modes, and keymap fixture all passed from the relocated sources.
+- A normal `make -j16` amd64 build passed.  Fresh supported `vmunix` builds for
+  amd64, i386 PC/AT, i386 PC-98, rpi4, sun4u, and x68k all passed; the isolated
+  cross-build outputs are below
+  `plan/ws018-kernel-architecture/temp/q026-p008-*`.  The maintained WS006
+  `qemu-evdev-capability.sh` acceptance also passed capability-only discovery.
+- The amd64 `qemu-system-x86_64` run used a disposable image at
+  `plan/ws018-kernel-architecture/temp/q026-p008-amd64-runtime.eh9KzR`.
+  Boot registered `event0` as the console keyboard and `event1` as the PC/AT
+  PS/2 mouse; Xzed independently classified and opened both roles.  Injected
+  pointer motion was accepted and injected keyboard input produced `p008key`
+  inside the Xzed session.  The guest-log SHA-256 is
+  `dc76348e501f2f88056e36a4fb7e8f5efe878c38777e3031ecb6af8e94fd284c`.
+- The maintained BR-T46 runner rebuilt and booted the PC-98 default cell under
+  `plan/ws018-kernel-architecture/temp/q026-p008-pc98-runtime`; its result is
+  `pass`, the guest reached `login:`, and every captured boot registered the
+  independent `event1: NEC PC-98 bus mouse`.  The normalized guest-log SHA-256
+  is `61bcd95f61193038ec6fdbd3ed014683478931e75592ba3622fe95788a2a9f8f`
+  and the result-table SHA-256 is
+  `de752e60791a70aa95eec7c0f04e0133294382a3f04274353c940dabb8267439`.
+- An independent review found no P0--P2 issue in ownership, lifecycle,
+  publication, state, manifests, or fixtures.  Its stale pre-change PC-98
+  artifact observation was resolved by the maintained runner's fresh rebuild.
+  The final live-source legacy audit and `git diff --check` passed; no Noct or
+  repository `.internal/` source was inspected or changed.

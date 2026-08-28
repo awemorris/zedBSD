@@ -20,8 +20,8 @@ disposable build/QEMU evidence belongs under `../temp/` and remains untracked.
 | KA-T050 | p006 | [`run-boot-header-aggregate-compile.sh`](run-boot-header-aggregate-compile.sh) compiles the sole `<kern/boot.h>` contract for kernel 32/64-bit, amd64/i386 HAL, PC-98 handoff, and X68k Stage 2 consumers without retired or private boot-header dependencies; maintained WS003 parser/source fixtures preserve all parameter and ownership behavior |
 | KA-T051 | p006 | The existing 31-cell matrix passes on i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI production loaders |
 | KA-T060 | p007 | [`run-xzed-input-host-test.sh`](run-xzed-input-host-test.sh) links Xzed's production evdev consumer and proves capability-only multi-device discovery, key/repeat/modifier/Caps translation, framed relative/absolute pointer input, dropped-event resynchronization, split reads, HUP, and absence of legacy/fixed-identity paths |
-| KA-T070 | p008 | PC/AT PS/2 and PC-98 bus-mouse boots each expose dynamic evdev nodes and correct press/release/motion events |
-| KA-T071 | p008 | Source/node/symbol audit finds final input ownership and no `mouse-device.c` or `/dev/mouse` implementation |
+| KA-T070 | p008 | [`run-input-hid-host-test.sh`](run-input-hid-host-test.sh) links each production mouse driver directly and proves independent evdev lifecycle, ordered press/release/motion frames, close/reopen state, and late-IRQ exclusion; platform boots provide hardware evidence |
+| KA-T071 | p008 | The same runner proves final input/console/HID source ownership, registration order, and no live `mouse-device.c`, `/dev/mouse`, registry symbol, or legacy UAPI implementation |
 | KA-T080 | p009 | [`run-graphics-frontends-host-test.sh`](run-graphics-frontends-host-test.sh) links the production PC/AT and PC-98 frontends independently and preserves registration, ownership, mode, drawing, glyph, copy-fault, rollback, and restore behavior |
 | KA-T081 | p009 | The same runner proves that both frontend copies remain explicit and behavior-identical, no registry/common implementation remains, and exactly two platform-owned registration sites exist; supported/disabled kernel builds separately prove capability selection and node ownership |
 | KA-T090 | p010 | FAT12/16/32, LFN, file read, and directory traversal fixtures are behavior-identical after consolidation while compatibility `bootfs` remains |
@@ -91,3 +91,14 @@ modifier/button aggregation, full signed absolute-axis ranges with an
 snapshots, CapsLock toggle retention without an LED query, and drain-before-
 remove HUP behavior.  Production PS/2 keyboard/mouse runtime coverage remains
 the amd64 QEMU acceptance recorded by p007 rather than being simulated here.
+
+KA-T070 compiles the real PC/AT PS/2 and PC-98 bus-mouse translation units
+against only host I/O, IRQ, locking, thread, and evdev capture shims.  Both
+ordinary and ASan/UBSan runs exercise first-open failure/retry, two readers,
+last-close stop, signed relative motion, unchanged buttons, zero-motion button
+edges, held-button release on close, state recovery on reopen, and complete
+`SYN_REPORT` framing.  The PS/2 fixture requires publication and EOI while the
+controller lock is held; the PC-98 fixture requires publication while its
+lifecycle mutex is held, so final close cannot race a late frame.  KA-T071's
+source audit is host-side; booted node absence and hardware delivery remain
+part of the Phase's amd64 and applicable PC-98 runtime gates.

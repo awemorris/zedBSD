@@ -75,7 +75,7 @@ AMD64_KERNEL_SOURCES := \
 	src/drivers/pci-pcat.c src/drivers/usb.c $(AMD64_USB_HCD_SOURCES) \
 	$(AMD64_USB_CLASS_SOURCES) \
 	src/drivers/pcat-ide.c src/drivers/dp8390.c \
-	src/drivers/pcat-ne2000.c src/drivers/pcat-ps2-mouse.c \
+	src/drivers/pcat-ne2000.c src/drivers/hid/ps2-mouse.c \
 	src/drivers/disklabel/mbr.c src/kern/platform/pcat.c \
 	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process-timer.c src/kern/klog.c \
@@ -88,10 +88,10 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/pipe.c src/kern/cred.c src/kern/signal.c \
 	src/kern/cwdinfo.c src/kern/elf.c src/kern/exec.c \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
-	src/kern/cdev.c src/kern/devfs.c src/kern/console-device.c \
-	src/kern/mouse-device.c src/kern/input-queue.c src/kern/input-capability.c \
-	src/kern/input-device.c \
-	src/kern/input-keymap.c src/kern/locale-record.c \
+	src/kern/cdev.c src/kern/devfs.c src/drivers/fs/console.c \
+	src/drivers/input-queue.c src/drivers/input-capability.c \
+	src/drivers/input-device.c \
+	src/drivers/input-keymap.c src/kern/locale-record.c \
 	src/kern/tty.c \
 	src/kern/system-swap-device.c \
 	src/kern/system-device.c \

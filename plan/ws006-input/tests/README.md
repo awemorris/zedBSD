@@ -33,7 +33,7 @@ IN-T10 begins with the implementation-shared bounded queue model:
 
 ```sh
 cc -std=c11 -D_POSIX_C_SOURCE=200809L -Iinclude/uapi -Iinclude \
-  -Wall -Wextra -Werror src/kern/input-queue.c \
+  -Wall -Wextra -Werror src/drivers/input-queue.c \
   plan/ws006-input/tests/input-queue-test.c -o /tmp/ws006-input-queue
 /tmp/ws006-input-queue
 make -j16 build/amd64/vmunix
@@ -47,13 +47,13 @@ out-of-bounds and undefined behavior:
 
 ```sh
 cc -std=c11 -D_POSIX_C_SOURCE=200809L -Iinclude/uapi -Iinclude \
-  -Wall -Wextra -Werror src/kern/input-capability.c \
+  -Wall -Wextra -Werror src/drivers/input-capability.c \
   plan/ws006-input/tests/input-capability-test.c \
   -o /tmp/ws006-input-capability
 /tmp/ws006-input-capability
 cc -std=c11 -D_POSIX_C_SOURCE=200809L -Iinclude/uapi -Iinclude \
   -Wall -Wextra -Werror -g -fno-omit-frame-pointer \
-  -fsanitize=address,undefined src/kern/input-capability.c \
+  -fsanitize=address,undefined src/drivers/input-capability.c \
   plan/ws006-input/tests/input-capability-test.c \
   -o /tmp/ws006-input-capability-sanitize
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
@@ -64,7 +64,7 @@ IN-T20 begins with the producer key normalization contract:
 
 ```sh
 cc -std=c11 -DHAL_ARCH_AMD64 -Iinclude/uapi -Iinclude -Wall -Wextra \
-  -Werror src/kern/input-keymap.c \
+  -Werror src/drivers/input-keymap.c \
   plan/ws006-input/tests/input-keymap-test.c -o /tmp/ws006-input-keymap
 /tmp/ws006-input-keymap
 ```

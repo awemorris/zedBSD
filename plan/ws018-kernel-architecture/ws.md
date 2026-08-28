@@ -1,18 +1,18 @@
 # WS018: kernel source ownership and interface consolidation
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 WSID: `ws018`
 
-Status: active; `q026` platform ownership migration in progress
+Status: active; `q026` ownership migration finished
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws018-p004`
+Last verified Phase: `ws018-p008`
 
-Resume point: `ws018-p002` and p007 are complete; `ws018-p009` source/build
-work is implemented but runtime-matrix evidence remains uncleared.  Execute
-p008.
+Resume point: p001--p008 are complete. Resume p009 when maintained runners are
+available for its remaining graphics runtime matrix; otherwise the next
+dependency-ready implementation Phase is p010.
 
 Shared tests: [WS018 test index](tests/README.md)
 
@@ -213,7 +213,7 @@ path in the same bounded change.
 | `ws018-p005` | [Core source consolidation](phase005-core-source-consolidation/phase.md) | Complete (`q025`) | exec preparation is internal to `exec.c` and proven-dead image code is gone |
 | `ws018-p006` | [Boot implementation and public API consolidation](phase006-boot-api-consolidation/phase.md) | Complete (`q025`) | One `boot.c` and one stable public `boot.h` preserve the four-platform contract |
 | `ws018-p007` | [Xzed evdev-only consumer](phase007-xzed-evdev-consumer/phase.md) | Complete (`q026`) | Xzed discovers and consumes keyboard plus relative/absolute pointer events only through `/dev/input/eventX` |
-| `ws018-p008` | [Independent input/HID driver ownership](phase008-input-hid-driver-ownership/phase.md) | In progress (`q026`) | Input sources have final owners, mouse backends emit evdev directly, and `/dev/mouse` is removed |
+| `ws018-p008` | [Independent input/HID driver ownership](phase008-input-hid-driver-ownership/phase.md) | Complete (`q026`) | Input sources have final owners, mouse backends emit evdev directly, and `/dev/mouse` is removed |
 | `ws018-p009` | [Independent graphics frontends](phase009-independent-graphics-frontends/phase.md) | Uncleared (`q026`; implementation complete, runtime matrix remains) | Each supported graphics backend independently supplies `/dev/graphics`; shared frontend is gone |
 | `ws018-p010` | [FAT source consolidation](phase010-fat-source-consolidation/phase.md) | Planned after p001 | One driver-owned `fat.c` preserves current FAT/bootfs behavior |
 | `ws018-p011` | [FAT native VFS migration](phase011-fat-native-vfs/phase.md) | Planned after p004, p010 | Boot-media files use the normal filesystem contract with overlay and swap intact |

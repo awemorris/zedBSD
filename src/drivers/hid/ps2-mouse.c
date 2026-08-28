@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Zlib
  */
 
-#include "drivers/pcat-ps2-mouse.h"
+#include "drivers/hid/ps2-mouse.h"
+#include "kern/input-device.h"
 #include "kern/lock.h"
-#include "kern/mouse-device.h"
 
 #include <errno.h>
 #include <hal/hal.h>
+#include <limits.h>
 #include <stdint.h>
-#include <zedbsd/mouse.h>
 
 #define I8042_DATA             0x60U
 #define I8042_STATUS           0x64U
@@ -36,12 +36,44 @@
 #define PS2_MOUSE_IRQ          12
 #define PS2_WAIT_LOOPS         100000U
 
+#define MOUSE_BUTTON_LEFT      0x01U
+#define MOUSE_BUTTON_MIDDLE    0x02U
+#define MOUSE_BUTTON_RIGHT     0x04U
+
 static struct spinlock controller_lock;
+static struct mutex lifecycle_lock;
+static struct input_device *mouse_input;
 static uint8_t packet[3];
 static unsigned packet_index;
 static uint32_t last_buttons;
+static unsigned reader_count;
 static int mouse_active;
 
+static const struct input_capability mouse_capabilities[] = {
+	{EV_SYN, SYN_REPORT},
+	{EV_REL, REL_X},
+	{EV_REL, REL_Y},
+	{EV_KEY, BTN_LEFT},
+	{EV_KEY, BTN_RIGHT},
+	{EV_KEY, BTN_MIDDLE},
+};
+
+#ifdef WS018_INPUT_HID_HOST_TEST
+uint8_t ws018_input_hid_test_inb(uint16_t);
+void ws018_input_hid_test_outb(uint16_t, uint8_t);
+
+static uint8_t
+inb(uint16_t port)
+{
+	return ws018_input_hid_test_inb(port);
+}
+
+static void
+outb(uint16_t port, uint8_t value)
+{
+	ws018_input_hid_test_outb(port, value);
+}
+#else
 static uint8_t
 inb(uint16_t port)
 {
@@ -55,6 +87,7 @@ outb(uint16_t port, uint8_t value)
 {
 	__asm__ volatile("outb %0,%w1" : : "a"(value), "Nd"(port));
 }
+#endif
 
 static int
 wait_input_empty(void)
@@ -173,16 +206,36 @@ consume_byte(uint8_t value, int32_t *dx, int32_t *dy, uint32_t *buttons)
 	if ((first & 0xc0U) != 0)
 		return 0;
 	*dx = (int8_t)packet[1];
-	/* PS/2 positive Y is upwards; /dev/mouse positive Y is downwards. */
+	/* PS/2 positive Y is upwards; evdev REL_Y remains positive downwards. */
 	*dy = -(int32_t)(int8_t)packet[2];
 	*buttons = 0;
 	if ((first & 0x01U) != 0)
-		*buttons |= ZEDBSD_MOUSE_BUTTON_LEFT;
+		*buttons |= MOUSE_BUTTON_LEFT;
 	if ((first & 0x04U) != 0)
-		*buttons |= ZEDBSD_MOUSE_BUTTON_MIDDLE;
+		*buttons |= MOUSE_BUTTON_MIDDLE;
 	if ((first & 0x02U) != 0)
-		*buttons |= ZEDBSD_MOUSE_BUTTON_RIGHT;
+		*buttons |= MOUSE_BUTTON_RIGHT;
 	return 1;
+}
+
+static void
+publish_sample(int32_t dx, int32_t dy, uint32_t buttons,
+	       uint32_t changed_buttons)
+{
+	if (dx != 0)
+		input_device_emit(mouse_input, EV_REL, REL_X, dx);
+	if (dy != 0)
+		input_device_emit(mouse_input, EV_REL, REL_Y, dy);
+	if ((changed_buttons & MOUSE_BUTTON_LEFT) != 0)
+		input_device_emit(mouse_input, EV_KEY, BTN_LEFT,
+		    (buttons & MOUSE_BUTTON_LEFT) != 0);
+	if ((changed_buttons & MOUSE_BUTTON_RIGHT) != 0)
+		input_device_emit(mouse_input, EV_KEY, BTN_RIGHT,
+		    (buttons & MOUSE_BUTTON_RIGHT) != 0);
+	if ((changed_buttons & MOUSE_BUTTON_MIDDLE) != 0)
+		input_device_emit(mouse_input, EV_KEY, BTN_MIDDLE,
+		    (buttons & MOUSE_BUTTON_MIDDLE) != 0);
+	input_device_emit(mouse_input, EV_SYN, SYN_REPORT, 0);
 }
 
 static void
@@ -191,7 +244,7 @@ mouse_interrupt(int interrupt, hal_irq_ack_t acknowledge, void *argument)
 	unsigned long irq;
 	uint8_t status;
 	int32_t dx = 0, dy = 0;
-	uint32_t buttons = 0;
+	uint32_t buttons = 0, changed_buttons = 0;
 	int report = 0;
 
 	(void)interrupt;
@@ -203,19 +256,21 @@ mouse_interrupt(int interrupt, hal_irq_ack_t acknowledge, void *argument)
 		uint8_t value = inb(I8042_DATA);
 		int complete = mouse_active ? consume_byte(value, &dx, &dy,
 		    &buttons) : 0;
-		if (complete && (dx != 0 || dy != 0 ||
-		    buttons != last_buttons)) {
-			last_buttons = buttons;
-			report = 1;
+		if (complete) {
+			changed_buttons = buttons ^ last_buttons;
+			if (dx != 0 || dy != 0 || changed_buttons != 0) {
+				last_buttons = buttons;
+				report = 1;
+			}
 		}
 	}
-	spin_unlock_irqrestore(&controller_lock, irq);
 	/* Read one byte per edge.  The 8042 lowers IRQ12 when its output
 	 * buffer is read, allowing the next packet byte to create a fresh edge
 	 * after EOI instead of being stranded while a task IRQ is masked. */
 	hal_irq_send_eoi(acknowledge);
 	if (report)
-		mouse_input_report(0, dx, dy, buttons);
+		publish_sample(dx, dy, buttons, changed_buttons);
+	spin_unlock_irqrestore(&controller_lock, irq);
 }
 
 static int
@@ -229,7 +284,6 @@ mouse_start(void)
 	irq = spin_lock_irqsave(&controller_lock);
 	mouse_active = 0;
 	packet_index = 0;
-	last_buttons = 0;
 	flush_output();
 	error = write_command(I8042_ENABLE_AUX);
 	if (error == 0)
@@ -277,22 +331,70 @@ mouse_stop(void)
 	}
 	(void)write_command(I8042_DISABLE_AUX);
 	flush_output();
+	if (last_buttons != 0) {
+		publish_sample(0, 0, 0, last_buttons);
+		last_buttons = 0;
+	}
 	spin_unlock_irqrestore(&controller_lock, irq);
+}
+
+static int
+mouse_input_open(void *context)
+{
+	int error = 0;
+
+	(void)context;
+	mutex_lock(&lifecycle_lock);
+	if (reader_count == UINT_MAX) {
+		error = EMFILE;
+	} else if (reader_count != 0) {
+		reader_count++;
+	} else {
+		error = mouse_start();
+		if (error == 0)
+			reader_count = 1;
+	}
+	mutex_unlock(&lifecycle_lock);
+	return error;
+}
+
+static void
+mouse_input_close(void *context)
+{
+	(void)context;
+	mutex_lock(&lifecycle_lock);
+	if (reader_count != 0 && --reader_count == 0)
+		mouse_stop();
+	mutex_unlock(&lifecycle_lock);
 }
 
 int
 pcat_ps2_mouse_init(void)
 {
+	const struct input_device_info mouse_info = {
+	    .name = "PC/AT PS/2 mouse",
+	    .physical_path = "pcat/i8042/aux0",
+	    .id = {.bustype = BUS_HOST, .product = 2, .version = 1},
+	    .capabilities = mouse_capabilities,
+	    .capability_count =
+		sizeof(mouse_capabilities) / sizeof(mouse_capabilities[0]),
+	    .open = mouse_input_open,
+	    .close = mouse_input_close,
+	};
 	int error;
 
 	spin_init(&controller_lock, LOCK_RANK_DEVICE, "i8042 mouse");
+	(void)mutex_init(&lifecycle_lock, LOCK_RANK_DEVICE,
+	    "i8042 mouse lifecycle");
+	mouse_input = NULL;
 	packet_index = 0;
 	last_buttons = 0;
+	reader_count = 0;
 	mouse_active = 0;
 	hal_irq_mask(PS2_MOUSE_IRQ);
 	if (hal_irq_set_handler(PS2_MOUSE_IRQ, mouse_interrupt, NULL) != HAL_OK)
 		return EBUSY;
-	error = mouse_device_set_backend(mouse_start, mouse_stop);
+	error = input_device_register(&mouse_info, &mouse_input);
 	if (error != 0)
 		(void)hal_irq_set_handler(PS2_MOUSE_IRQ, NULL, NULL);
 	return error;

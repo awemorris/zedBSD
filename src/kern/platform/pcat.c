@@ -7,7 +7,7 @@
 #include <drivers/disklabel.h>
 #include "drivers/pcat-ide.h"
 #include "drivers/pci-pcat.h"
-#include "drivers/pcat-ps2-mouse.h"
+#include "drivers/hid/ps2-mouse.h"
 #if CONFIG_DRIVER_PCI_UHCI
 #include "drivers/pci-uhci.h"
 #endif

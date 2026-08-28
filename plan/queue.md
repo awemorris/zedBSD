@@ -4,9 +4,9 @@ Last updated: 2026-08-29
 
 QID: `q026`
 
-Queue status: in-progress
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: after reviewing the remaining `src/kern` driver-like sources
 and historical platform directories, the user explicitly instructed the agent
@@ -37,7 +37,7 @@ driver locations and delete `/dev/mouse`.
 | 1 | `ws018-p009` | [Phase](ws018-kernel-architecture/phase009-independent-graphics-frontends/phase.md) | uncleared | Source/build migration and amd64 runtime pass; PC/AT and PC-98 backend runtime matrix remains explicit residual verification |
 | 2 | `ws018-p002` | [Phase](ws018-kernel-architecture/phase002-disklabel-platform-layout/phase.md) | completed | Disk labels live under `src/drivers/disklabel`; each platform has exactly one `src/kern/platform/<platform>.c`, with historical directories absent |
 | 3 | `ws018-p007` | [Phase](ws018-kernel-architecture/phase007-xzed-evdev-consumer/phase.md) | completed | Xzed discovers and consumes keyboard and relative/absolute pointer input only through evdev |
-| 4 | `ws018-p008` | [Phase](ws018-kernel-architecture/phase008-input-hid-driver-ownership/phase.md) | in-progress | Input/console implementations have final driver owners, mouse backends publish evdev directly, and `/dev/mouse` is absent |
+| 4 | `ws018-p008` | [Phase](ws018-kernel-architecture/phase008-input-hid-driver-ownership/phase.md) | completed | Input/console implementations have final driver owners, mouse backends publish evdev directly, and `/dev/mouse` is absent |
 
 ## Dependency order
 
@@ -82,3 +82,27 @@ results are synchronized to P/W/M/Q, and every supported build plus applicable
 focused/runtime gate has recorded evidence. A finished Queue may retain an
 `uncleared` runtime-only result, but may not claim ownership deletion that is
 not present in the source tree.
+
+## Execution result
+
+Finished on 2026-08-29. Three Phases completed and `ws018-p009` remains
+`uncleared` solely for its explicit graphics runtime matrix.
+
+- Independent PC/AT and PC-98 graphics frontends, driver-owned fonts, and all
+  source/build ownership work in p009 are implemented. Its focused tests, six
+  builds, configuration toggles, amd64 Xzed render, and console restoration
+  passed. PC/AT VGA/Cirrus, PC-98 GDC/Cirrus, and booted graphics-disabled
+  node-absence runs remain recorded in that Phase as residual verification.
+- Disk-label implementations live under `src/drivers/disklabel/`. The
+  historical `src/kern/{pcat,pc98,rpi4,sun4u,x68k}/` directories are absent,
+  and `src/kern/platform/` contains only its README and exactly one complete
+  translation unit per platform.
+- Xzed is an evdev-only keyboard and pointer consumer. Generic input sources,
+  the console frontend, and the two independent physical mouse drivers now
+  have their final `src/drivers/` owners; `/dev/mouse`, its UAPI, and the
+  shared mouse frontend are absent.
+- Focused ordinary and sanitizer fixtures, all six supported kernel builds,
+  amd64 Xzed operation through production evdev, PC-98 boot/input registration,
+  live legacy-source audits, independent review, and `git diff --check` passed.
+  Neither `make check` nor `.internal/` was used, and no Noct source was
+  inspected or changed.

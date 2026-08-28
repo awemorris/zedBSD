@@ -1,6 +1,6 @@
 # zedBSD master plan
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 Status: active
 
@@ -16,10 +16,13 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is completed `q025`: it disabled the target
-Noct/Remacs package options without touching the maintainer's Noct source,
-then completed the first WS018 kernel-ownership foundation wave. A successor
-Queue has not yet been selected. The
+The current [Queue Book](queue.md) is finished `q026`: it completed the
+disk-label/platform, Xzed-evdev, and input/HID ownership Phases and implemented
+the independent graphics ownership change. The graphics Phase remains
+`uncleared` only for its explicit residual runtime matrix. A successor Queue
+has not yet been selected. The archived [q025](queue-q025.md) disabled the
+target Noct/Remacs package options without touching the maintainer's Noct
+source, then completed the first WS018 kernel-ownership foundation wave. The
 archived [q024](queue-q024.md) passed automated Noct gates but is recorded
 `uncleared` because the Principal Engineer's first source review rejected the
 implementation quality. Noct is now under maintainer-only manual repair. The
@@ -170,7 +173,7 @@ actually warranted.
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
-| `ws018` | Kernel source ownership and interface consolidation | Active; q026 ownership migration in progress | p001--p007 complete; p009 source/build work implemented with runtime matrix uncleared; p008 active | Execute q026 p008; later resume p009's explicit runtime-only evidence | [WS018](ws018-kernel-architecture/ws.md) |
+| `ws018` | Kernel source ownership and interface consolidation | Active; q026 ownership migration finished | p001--p008 complete; p009 source/build work implemented with runtime matrix uncleared | Resume p009's explicit runtime-only evidence when runners are available, or queue dependency-ready p010 | [WS018](ws018-kernel-architecture/ws.md) |
 
 ## 4. Milestones
 

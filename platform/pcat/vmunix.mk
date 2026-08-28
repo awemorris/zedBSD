@@ -54,10 +54,11 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/user-probe.o \
 	$(BUILD)/src/kern/syscall.o $(BUILD)/src/kern/uaccess.o \
 	$(BUILD)/src/kern/cdev.o $(BUILD)/src/kern/devfs.o \
-	$(BUILD)/src/kern/console-device.o $(BUILD)/src/kern/mouse-device.o \
-	$(BUILD)/src/kern/input-queue.o $(BUILD)/src/kern/input-capability.o \
-	$(BUILD)/src/kern/input-device.o \
-	$(BUILD)/src/kern/input-keymap.o $(BUILD)/src/kern/locale-record.o \
+	$(BUILD)/src/drivers/fs/console.o \
+	$(BUILD)/src/drivers/input-queue.o \
+	$(BUILD)/src/drivers/input-capability.o \
+	$(BUILD)/src/drivers/input-device.o \
+	$(BUILD)/src/drivers/input-keymap.o $(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/system-swap-device.o \
 	$(BUILD)/src/kern/system-device.o \
@@ -106,7 +107,7 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(PCAT_USB_CLASS_OBJS) \
 	$(BUILD)/drivers/pcat-ide.o $(BUILD)/drivers/dp8390.o \
 	$(BUILD)/drivers/pcat-ne2000.o \
-	$(BUILD)/drivers/pcat-ps2-mouse.o \
+	$(BUILD)/drivers/hid/ps2-mouse.o \
 	$(BUILD)/drivers/disklabel/mbr.o \
 	$(BUILD)/src/kern/platform/pcat.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \

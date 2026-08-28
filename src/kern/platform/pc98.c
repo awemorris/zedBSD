@@ -4,7 +4,7 @@
 #include "kern/partition.h"
 #include <drivers/disklabel.h>
 #include "drivers/pc98-ide.h"
-#include "drivers/pc98-busmouse.h"
+#include "drivers/hid/pc98-busmouse.h"
 #if CONFIG_DRIVER_LGY98
 #include "drivers/pc98-lgy98.h"
 #endif
