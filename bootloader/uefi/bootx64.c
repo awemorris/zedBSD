@@ -6,12 +6,6 @@
 #include "load-options.h"
 #include "bootloader/include/amd64-handoff.h"
 
-#ifndef ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT
-#define ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT ZEDBSD_BOOT_PARAMETERS_DEFAULT_TEXT
-#define ZEDBSD_IMAGE_BOOT_PARAMETERS_LENGTH \
-	(sizeof(ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT) - 1U)
-#endif
-
 #define PAGE_SIZE 4096ULL
 #define LOW_BLOCK_PAGES 16U
 #define LOW_BLOCK_MAX 0x001fffffULL
@@ -45,8 +39,19 @@
 extern uint8_t zbl_transition_start[];
 extern uint8_t zbl_transition_end[];
 
-static const char image_boot_parameters[] =
-	ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT;
+static const struct zedbsd_boot_parameter_record image_boot_parameters = {
+	.magic = ZEDBSD_BOOT_PARAMETER_RECORD_MAGIC,
+	.version = ZEDBSD_BOOT_PARAMETER_RECORD_VERSION,
+	.size = ZEDBSD_BOOT_PARAMETER_RECORD_SIZE,
+	.flags = ZEDBSD_BOOT_PARAMETER_RECORD_FLAG_TEXT,
+	.length = sizeof(ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT) - 1U,
+	.reserved = 0,
+	.text = ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT,
+};
+
+_Static_assert(sizeof(ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT) - 1U <=
+	       ZEDBSD_BOOT_PARAMETERS_TEXT_MAX,
+	       "image boot parameters must fit transport storage");
 
 _Static_assert(ZBL6_HANDOFF_V5_UEFI_SIZE <=
 	       MEMORY_RANGES_OFFSET - HANDOFF_OFFSET,
@@ -488,8 +493,8 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	if (EFI_ERROR(status))
 		fail_status(&context, "LoadedImage", status);
 	option_result = zbl_uefi_load_options_record(&parameter_record,
-	    loaded->LoadOptions, loaded->LoadOptionsSize, image_boot_parameters,
-	    sizeof(image_boot_parameters));
+	    loaded->LoadOptions, loaded->LoadOptionsSize,
+	    image_boot_parameters.text, sizeof(image_boot_parameters.text));
 	if (option_result != ZBL_UEFI_LOAD_OPTIONS_OK) {
 		console_ascii(&context, "UEFI LoadOptions rejected: ");
 		console_ascii(&context,

@@ -179,10 +179,9 @@ $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	bootloader/include/elf.inc bootloader/include/boot-parameter-handoff.h \
 	bootloader/include/boot-parameter-record.inc \
 	include/boot/pc98-handoff.h include/boot/parameter-handoff.h \
-	include/boot/parameters.h $(ZEDBSD_BOOT_PARAMETERS_HEADER)
+	include/boot/parameters.h
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -include $(ZEDBSD_BOOT_PARAMETERS_HEADER) \
-		-x assembler-with-cpp -c $< -o $@
+	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
 	$(BIOS_LOADER)/stage2.ld

@@ -151,8 +151,6 @@ printf 'case\tresult\tevidence\n' >"$results"
 : >"$controller_result"
 
 build_command=(make -C "$repo" -j16 "ZEDBSD_CONFIG=$temporary_config")
-boot_parameter_command=(make -C "$repo" -B
-	"ZEDBSD_CONFIG=$temporary_config" build/amd64/generated/boot-parameters.h)
 qemu_command=(
 	"$qemu" -machine pc -m 512 -smp 4
 	-drive "file=$run_image,format=raw,if=ide"
@@ -184,9 +182,6 @@ qemu_command=(
 	printf 'build_command='
 	printf '%q ' timeout --foreground --kill-after=10 "${build_timeout}s" \
 		"${build_command[@]}"
-	printf '\n'
-	printf 'boot_parameter_command='
-	printf '%q ' "${boot_parameter_command[@]}"
 	printf '\n'
 	printf 'qemu_command='
 	printf '%q ' timeout --foreground --kill-after=5 "${cell_timeout}s" \
@@ -282,9 +277,7 @@ build_start_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 build_started=$(date +%s)
 set +e
 timeout --foreground --kill-after=10 "${build_timeout}s" \
-	"${boot_parameter_command[@]}" >"$build_log" 2>&1 && \
-	timeout --foreground --kill-after=10 "${build_timeout}s" \
-	"${build_command[@]}" >>"$build_log" 2>&1
+	"${build_command[@]}" >"$build_log" 2>&1
 build_status=$?
 set -e
 build_elapsed=$(( $(date +%s) - build_started ))

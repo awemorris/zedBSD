@@ -7,10 +7,14 @@
 	.word ZEDBSD_BOOT_PARAMETER_RECORD_VERSION
 	.word ZEDBSD_BOOT_PARAMETER_RECORD_SIZE
 	.word ZEDBSD_BOOT_PARAMETER_RECORD_FLAG_TEXT
-	.word ZEDBSD_IMAGE_BOOT_PARAMETERS_LENGTH
+	.word .Lzedbsd_boot_parameters_end\@ - \
+	      .Lzedbsd_boot_parameters_start\@
 	.long 0
+.Lzedbsd_boot_parameters_start\@:
 	.ascii ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT
+.Lzedbsd_boot_parameters_end\@:
 	.byte 0
 	.space ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE - \
-	       ZEDBSD_IMAGE_BOOT_PARAMETERS_LENGTH - 1
+	       (.Lzedbsd_boot_parameters_end\@ - \
+	        .Lzedbsd_boot_parameters_start\@) - 1
 .endm

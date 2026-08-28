@@ -1,0 +1,192 @@
+require zedbuild;
+
+// BR-T47 test-only fixed BPR1 artifact patcher.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+var bprMagic = 0x31525042;
+var bprVersion = 1;
+var bprFlags = 1;
+var bprHeaderSize = 16;
+var bprStorageSize = 3072;
+var bprTextMax = 3071;
+var bprRecordSize = bprHeaderSize + bprStorageSize;
+
+func textError(text) {
+    var bytes = String.byteLength(text);
+    var characters = String.charCount(text);
+    if (bytes > bprTextMax) { return "parameter text exceeds 3071 bytes"; }
+    if (bytes != characters) { return "parameter text is not printable ASCII"; }
+    for (i in 0..characters) {
+        var code = String.charCodeAt(text, i);
+        if (code < 32 || code > 126) {
+            return "parameter text is not printable ASCII";
+        }
+    }
+    return "";
+}
+
+func recordError(data, offset) {
+    if (offset < 0 || offset > Packed.size(data) ||
+        bprRecordSize > Packed.size(data) - offset) {
+        return "truncated BPR1 record";
+    }
+    if (zbU32LE(data, offset) != bprMagic) {
+        return "invalid BPR1 magic";
+    }
+    if (zbU16LE(data, offset + 4) != bprVersion) {
+        return "unsupported BPR1 version";
+    }
+    if (zbU16LE(data, offset + 6) != bprRecordSize) {
+        return "unsupported BPR1 record size";
+    }
+    if (zbU16LE(data, offset + 8) != bprFlags) {
+        return "unsupported BPR1 flags";
+    }
+    var length = zbU16LE(data, offset + 10);
+    if (length > bprTextMax) { return "invalid BPR1 text length"; }
+    if (zbU32LE(data, offset + 12) != 0) {
+        return "nonzero BPR1 reserved field";
+    }
+    var textOffset = offset + bprHeaderSize;
+    for (i in 0..length) {
+        if (data[textOffset + i] < 32 || data[textOffset + i] > 126) {
+            return "BPR1 text is not printable ASCII";
+        }
+    }
+    if (data[textOffset + length] != 0) {
+        return "BPR1 text is not NUL terminated at its declared length";
+    }
+    for (i in length + 1..bprStorageSize) {
+        if (data[textOffset + i] != 0) {
+            return "BPR1 text padding is not zero";
+        }
+    }
+    return "";
+}
+
+// Return [offset, error].  Executable code may contain the four magic bytes as
+// an immediate constant, so only complete structurally valid records count.
+// Magic-like bytes inside a validated record's text/padding are data, not a
+// second record.
+func locateRecord(data) {
+    var valid = [];
+    var protectedUntil = -1;
+    var limit = Packed.size(data) - 4;
+    if (limit < 0) { return [-1, "BPR1 record not found"]; }
+    for (offset in 0..limit + 1) {
+        if (offset < protectedUntil) { continue; }
+        if (data[offset] == 0x42 && data[offset + 1] == 0x50 &&
+            data[offset + 2] == 0x52 && data[offset + 3] == 0x31) {
+            var error = recordError(data, offset);
+            if (error == "") {
+                Array.push(valid, offset);
+                protectedUntil = offset + bprRecordSize;
+            }
+        }
+    }
+    if (Array.size(valid) == 0) { return [-1, "BPR1 record not found"]; }
+    if (Array.size(valid) != 1) { return [-1, "multiple BPR1 records found"]; }
+    return [valid[0], ""];
+}
+
+func makeRecord(text) {
+    var data = Packed.uint8(bprRecordSize);
+    zbPut32LE(data, 0, bprMagic);
+    zbPut16LE(data, 4, bprVersion);
+    zbPut16LE(data, 6, bprRecordSize);
+    zbPut16LE(data, 8, bprFlags);
+    zbPut16LE(data, 10, String.byteLength(text));
+    zbPut32LE(data, 12, 0);
+    for (i in 0..String.byteLength(text)) {
+        data[bprHeaderSize + i] = String.charCodeAt(text, i);
+    }
+    return data;
+}
+
+func expectError(data, expected) {
+    var result = locateRecord(data);
+    if (result[1] != expected) {
+        zbFail("self-test: expected '" + expected + "', got '" + result[1] + "'");
+    }
+}
+
+func expectRecordError(data, expected) {
+    var error = recordError(data, 0);
+    if (error != expected) {
+        zbFail("self-test: expected '" + expected + "', got '" + error + "'");
+    }
+}
+
+func selfTest() {
+    var valid = makeRecord("init=/bin/sh");
+    var result = locateRecord(valid);
+    if (result[0] != 0 || result[1] != "") {
+        zbFail("self-test: valid record rejected");
+    }
+
+    var missing = Packed.uint8(bprRecordSize);
+    expectError(missing, "BPR1 record not found");
+
+    var duplicate = Packed.uint8(bprRecordSize * 2);
+    zbCopy(duplicate, 0, valid, 0, bprRecordSize);
+    zbCopy(duplicate, bprRecordSize, valid, 0, bprRecordSize);
+    expectError(duplicate, "multiple BPR1 records found");
+
+    var malformed = makeRecord("init=/bin/sh");
+    zbPut16LE(malformed, 6, bprRecordSize - 1);
+    expectRecordError(malformed, "unsupported BPR1 record size");
+
+    var oversized = makeRecord("init=/bin/sh");
+    zbPut16LE(oversized, 10, bprStorageSize);
+    expectRecordError(oversized, "invalid BPR1 text length");
+
+    var nonAscii = makeRecord("init=/bin/sh");
+    nonAscii[bprHeaderSize] = 31;
+    expectRecordError(nonAscii, "BPR1 text is not printable ASCII");
+
+    var unterminated = makeRecord("init=/bin/sh");
+    unterminated[bprHeaderSize + 12] = 65;
+    expectRecordError(unterminated,
+                      "BPR1 text is not NUL terminated at its declared length");
+
+    var unsupported = makeRecord("init=/bin/sh");
+    zbPut16LE(unsupported, 4, bprVersion + 1);
+    expectRecordError(unsupported, "unsupported BPR1 version");
+
+    print("BPR1 patcher self-test: PASS");
+}
+
+func main(args) {
+    if (Array.size(args) == 1 && args[0] == "--self-test") {
+        selfTest();
+        return;
+    }
+    if (Array.size(args) != 4 || args[0] != "--text") {
+        zbFail("usage: patch-boot-parameter-record.noct --self-test | " +
+               "--text TEXT INPUT OUTPUT");
+    }
+    var text = args[1];
+    var input = args[2];
+    var output = args[3];
+    if (input == output) { zbFail("input and output must differ"); }
+    var error = textError(text);
+    if (error != "") { zbFail(error); }
+
+    var data = zbReadFile(input);
+    var result = locateRecord(data);
+    if (result[1] != "") { zbFail(result[1]); }
+    var offset = result[0];
+    var oldLength = zbU16LE(data, offset + 10);
+    var textOffset = offset + bprHeaderSize;
+    zbPut16LE(data, offset + 10, String.byteLength(text));
+    for (i in 0..bprStorageSize) { data[textOffset + i] = 0; }
+    for (i in 0..String.byteLength(text)) {
+        data[textOffset + i] = String.charCodeAt(text, i);
+    }
+    if (recordError(data, offset) != "") {
+        zbFail("internal error: patched BPR1 record is invalid");
+    }
+    zbAtomicWrite(output, data);
+    print("BPR1 patch: PASS offset=" + offset + " old-length=" + oldLength +
+          " new-length=" + String.byteLength(text));
+}

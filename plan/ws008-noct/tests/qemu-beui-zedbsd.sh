@@ -107,8 +107,6 @@ printf 'case\tresult\tevidence\n' >"$results"
 : >"$controller_result"
 
 build_command=(make -C "$repo" -j16 "ZEDBSD_CONFIG=$config")
-boot_parameter_command=(make -C "$repo" -B
-	"ZEDBSD_CONFIG=$config" build/amd64/generated/boot-parameters.h)
 qemu_command=(
 	"$qemu" -machine pc -m 512 -smp 4
 	-drive "file=$run_image,format=raw,if=ide"
@@ -126,14 +124,11 @@ qemu_command=(
 	printf 'production_image=%s\n' "$production_image"
 	printf 'qemu=%s\n' "$("$qemu" --version | sed -n '1p')"
 	printf 'build_command='; printf '%q ' "${build_command[@]}"; printf '\n'
-	printf 'boot_parameter_command='; printf '%q ' "${boot_parameter_command[@]}"; printf '\n'
 	printf 'qemu_command='; printf '%q ' "${qemu_command[@]}"; printf '\n'
 } >"$metadata"
 
 timeout --foreground --kill-after=10 "${build_timeout}s" \
-	"${boot_parameter_command[@]}" >"$build_log" 2>&1
-timeout --foreground --kill-after=10 "${build_timeout}s" \
-	"${build_command[@]}" >>"$build_log" 2>&1
+	"${build_command[@]}" >"$build_log" 2>&1
 printf 'build\tpass\tbuild.log\n' >>"$results"
 for required in "$cmake_artifact" "$package_artifact" "$staged_artifact" \
 	"$production_image"; do

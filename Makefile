@@ -65,17 +65,6 @@ endif
 endif
 BUILD := build/$(ZEDBSD_PLATFORM_DIR)
 
-ZEDBSD_BOOT_PARAMETERS_FILE ?= bootloader/default-boot-parameters.txt
-ZEDBSD_BOOT_PARAMETERS_HEADER := $(BUILD)/generated/boot-parameters.h
-ZEDBSD_BOOT_PARAMETERS_HEADER_TOOL := \
-	tools/build/make-boot-parameters-header.py
-
-$(ZEDBSD_BOOT_PARAMETERS_HEADER): $(ZEDBSD_BOOT_PARAMETERS_FILE) \
-	$(ZEDBSD_BOOT_PARAMETERS_HEADER_TOOL)
-	@mkdir -p $(dir $@)
-	$(PYTHON) $(ZEDBSD_BOOT_PARAMETERS_HEADER_TOOL) \
-		--input $(ZEDBSD_BOOT_PARAMETERS_FILE) --output $@
-
 CONFIG_DRIVER_NE2000 ?= y
 CONFIG_DRIVER_LGY98 ?= y
 CONFIG_DRIVER_GRAPHICS ?= y

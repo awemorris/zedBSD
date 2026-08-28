@@ -17,6 +17,8 @@ platform_filter=all
 case_filter=all
 mode=run
 output=
+noct=$repo/build/NoctLang/build-static/noct
+parameter_patcher=$script_dir/patch-boot-parameter-record.noct
 
 usage()
 {
@@ -157,6 +159,16 @@ for command in awk cc chmod cp date find make mktemp realpath rg rm sed \
 	}
 done
 
+[[ -x $noct ]] || {
+	echo "Noct toolchain missing; run make toolchain first" >&2
+	exit 2
+}
+[[ -f $parameter_patcher ]] || {
+	echo "BPR1 patcher missing: $parameter_patcher" >&2
+	exit 2
+}
+"$noct" --path="$repo/tools/build" "$parameter_patcher" --self-test
+
 image_tool=$output/host/boot-parameter-image-tool
 cc -std=c11 -Wall -Wextra -Werror \
     "$script_dir/boot-parameter-image-tool.c" -o "$image_tool"
@@ -181,11 +193,6 @@ for command in "$qemu_i386" "$qemu_x86_64" "$qemu_pc98"; do
 done
 [[ -f $ovmf_code ]] || { echo "OVMF code not found: $ovmf_code" >&2; exit 2; }
 [[ -f $ovmf_vars ]] || { echo "OVMF vars not found: $ovmf_vars" >&2; exit 2; }
-[[ -x $repo/build/NoctLang/build-static/noct ]] || {
-	echo "Noct toolchain missing; run make toolchain first" >&2
-	exit 2
-}
-
 config_hash_before=absent
 if [[ -f $repo/config.mk ]]; then
 	config_hash_before=$(sha256sum "$repo/config.mk" | awk '{print $1}')
@@ -293,47 +300,116 @@ parameter_text()
 	esac
 }
 
-make_case()
+build_group_once()
 {
-	local group=$1 case_name=$2 config=$3 parameters=$4 log=$5
+	local group=$1 config=$2 log=$3 group_cases=$4 case_name
+	local need_native=0 need_swap=0
+	local -n build_cases_ref=$group_cases
+	local targets=(disk-image)
+	for case_name in "${build_cases_ref[@]}"; do
+		local any_selected=0
+		if [[ $group == amd64 ]]; then
+			selected amd64-bios "$case_name" && any_selected=1
+			selected amd64-uefi "$case_name" && any_selected=1
+		else
+			selected "$group" "$case_name" && any_selected=1
+		fi
+		((any_selected)) || continue
+		case $case_name in
+		native|root-swap-alias) need_native=1 ;;
+		file-swap|raw-swap|mixed-swap) need_swap=1 ;;
+		esac
+	done
+	if ((need_native)); then
+		targets+=("build/$group/ufs-root.img")
+	fi
+	if ((need_swap)); then
+		targets+=("build/$group/rootfs.tar.gz"
+		    "build/$group/BR-T46-SWAP.ELF")
+	fi
 	if ! make -C "$repo" -j16 -f Makefile \
 	    -f "$script_dir/boot-parameter-acceptance.mk" \
 	    ZEDBSD_CONFIG="$config" ARCH_IMAGE_DIR="build/$group/arch-images" \
-	    ZEDBSD_BOOT_PARAMETERS_FILE="$parameters" disk-image \
-	    >"$log" 2>&1; then
-		tail -n 80 "$log" >&2
+	    "${targets[@]}" >"$log" 2>&1; then
+		tail -n 100 "$log" >&2
 		return 1
 	fi
-	if [[ $case_name == native || $case_name == root-swap-alias ]]; then
-		if ! make -C "$repo" -j16 -f Makefile \
-		    -f "$script_dir/boot-parameter-acceptance.mk" \
-		    ZEDBSD_CONFIG="$config" \
-		    ARCH_IMAGE_DIR="build/$group/arch-images" \
-		    ZEDBSD_BOOT_PARAMETERS_FILE="$parameters" \
-		    "build/$group/ufs-root.img" >>"$log" 2>&1; then
-			tail -n 80 "$log" >&2
-			return 1
-		fi
+}
+
+production_loader_paths()
+{
+	local group=$1 build_dir=$repo/build/$group
+	printf '%s\n' \
+	    "$build_dir/bootloader/stage1.bin" \
+	    "$build_dir/bootloader/stage2.bin" \
+	    "$build_dir/bootloader/partition-pbr.bin" \
+	    "$build_dir/bootloader/bootzbsd.raw" \
+	    "$build_dir/bootloader/bootzbsd.bin" \
+	    "$build_dir/bootloader/BOOTZBSD.EXE"
+	if [[ $group == amd64 ]]; then
+		printf '%s\n' "$build_dir/bootloader/stage2.raw" \
+		    "$build_dir/uefi/BOOTX64.EFI"
 	fi
-	case $case_name in
-	file-swap|raw-swap|mixed-swap)
-		if ! make -C "$repo" -j16 -f Makefile \
-		    -f "$script_dir/boot-parameter-acceptance.mk" \
-		    ZEDBSD_CONFIG="$config" \
-		    ARCH_IMAGE_DIR="build/$group/arch-images" \
-		    ZEDBSD_BOOT_PARAMETERS_FILE="$parameters" \
-		    "build/$group/rootfs.tar.gz" \
-		    "build/$group/BR-T46-SWAP.ELF" >>"$log" 2>&1; then
-			tail -n 80 "$log" >&2
+}
+
+hash_production_loaders()
+{
+	local group=$1 destination=$2 artifact
+	: >"$destination"
+	while IFS= read -r artifact; do
+		[[ -f $artifact ]] || {
+			echo "production loader artifact missing: $artifact" >&2
 			return 1
-		fi
-		;;
-	esac
+		}
+		sha256sum "$artifact" >>"$destination"
+	done < <(production_loader_paths "$group")
+}
+
+patch_record()
+{
+	local parameters=$1 input=$2 output_file=$3
+	"$noct" --path="$repo/tools/build" "$parameter_patcher" \
+	    --text "$parameters" "$input" "$output_file"
+}
+
+prepare_case_loaders()
+{
+	local group=$1 parameters=$2 destination=$3
+	local build_dir=$repo/build/$group
+	mkdir -p -- "$destination"
+	if [[ $group == amd64 ]]; then
+		patch_record "$parameters" "$build_dir/bootloader/stage2.raw" \
+		    "$destination/stage2.raw"
+		"$noct" --path="$repo/tools/build" \
+		    "$repo/tools/build/finalize-bios-stage2.noct" --machine pcat \
+		    "$destination/stage2.raw" "$destination/stage2.bin"
+	else
+		cp "$build_dir/bootloader/stage2.bin" "$destination/stage2.bin"
+	fi
+
+	patch_record "$parameters" "$build_dir/bootloader/bootzbsd.raw" \
+	    "$destination/bootzbsd.raw"
+	"$noct" --path="$repo/tools/build" \
+	    "$repo/tools/build/finalize-bios-stage2.noct" \
+	    --machine "$([[ $group == pc98 ]] && echo pc98 || echo pcat)" \
+	    "$destination/bootzbsd.raw" "$destination/bootzbsd.bin"
+	"$noct" --path="$repo/tools/build" \
+	    "$repo/tools/build/make-mz-exe.noct" --entry 0x20 \
+	    "$destination/bootzbsd.bin" "$destination/BOOTZBSD.EXE"
+
+	if [[ $group == amd64 ]]; then
+		patch_record "$parameters" "$build_dir/uefi/BOOTX64.EFI" \
+		    "$destination/BOOTX64.EFI"
+		"$noct" --path="$repo/tools/build" \
+		    "$repo/platform/amd64/tools/check-bootx64.noct" \
+		    "$destination/BOOTX64.EFI"
+	fi
 }
 
 build_extended_image()
 {
-	local group=$1 case_name=$2 destination=$3 acceptance_rootfs=${4:-}
+	local group=$1 case_name=$2 destination=$3 loaders=$4
+	local acceptance_rootfs=${5:-}
 	local machine build_dir partition_index= kind= payload=
 	machine=pcat
 	build_dir=$repo/build/$group
@@ -342,14 +418,22 @@ build_extended_image()
 	fi
 	local command=("$repo/build/zedimage-host" disk --machine "$machine"
 	    --stage1 "$build_dir/bootloader/stage1.bin"
-	    --stage2 "$build_dir/bootloader/stage2.bin"
+	    --stage2 "$loaders/stage2.bin"
 	    --partition-pbr "$build_dir/bootloader/partition-pbr.bin"
-	    --bootzbsd "$build_dir/bootloader/BOOTZBSD.EXE"
+	    --bootzbsd "$loaders/BOOTZBSD.EXE"
 	    --kernel "$build_dir/vmunix" --size-mib 201 --fat-size-mib 128)
 	if [[ $group == amd64 ]]; then
-		command+=(--gpt --bootx64 "$build_dir/uefi/BOOTX64.EFI")
+		command+=(--gpt --bootx64 "$loaders/BOOTX64.EFI")
 	fi
 	case $case_name in
+	default|shell|invalid|cross-boot|partuuid-reorder)
+		local arch_profile=i386
+		[[ $group == amd64 ]] && arch_profile=amd64
+		command+=(--arch-image \
+		    "$build_dir/arch-images/$arch_profile.ufs"
+		    --data-image "$repo/build/data.img"
+		    --swapfile "$repo/build/swapfile")
+		;;
 	native|root-swap-alias)
 		partition_index=$([[ $group == amd64 ]] && echo 3 || echo 2)
 		kind=ufs
@@ -841,7 +925,7 @@ run_qemu_cell()
 run_group()
 {
 	local group=$1 config build_dir
-	local case_name parameters_file parameters build_log group_cases
+	local case_name parameters_file parameters group_cases
 	local base_image auxiliary_image platform cell_dir image_hash param_hash elapsed
 	local cell_status elapsed_file
 	local acceptance_rootfs=
@@ -858,6 +942,11 @@ run_group()
 		group_cases=common_cases
 	fi
 	local -n cases_ref=$group_cases
+	echo "BR-T46 production build: $group"
+	build_group_once "$group" "$config" \
+	    "$output/build-logs/$group-production.log" "$group_cases"
+	local production_hashes=$output/host/$group-production-loaders.sha256
+	hash_production_loaders "$group" "$production_hashes"
 	for case_name in "${cases_ref[@]}"; do
 		local any_selected=0
 		if [[ $group == amd64 ]]; then
@@ -870,14 +959,41 @@ run_group()
 		parameters_file=$output/config/$group-$case_name.parameters
 		parameter_text "$group" "$case_name" >"$parameters_file"
 		parameters=$(<"$parameters_file")
-		build_log=$output/build-logs/$group-$case_name.log
-		echo "BR-T46 build: $group $case_name"
-		make_case "$group" "$case_name" "$config" "$parameters_file" "$build_log"
 		cell_dir=$output/cells/$group-$case_name-artifacts
 		mkdir -p "$cell_dir"
+		local loaders=$cell_dir/loaders
+		prepare_case_loaders "$group" "$parameters" "$loaders" \
+		    >"$cell_dir/loader-patch.log"
+		if [[ $case_name == default ]]; then
+			local artifact relative
+			for artifact in bootloader/bootzbsd.raw \
+			    bootloader/bootzbsd.bin bootloader/BOOTZBSD.EXE; do
+				relative=${artifact##*/}
+				[[ $(sha256sum "$build_dir/$artifact" | awk '{print $1}') == \
+				    $(sha256sum "$loaders/$relative" | awk '{print $1}') ]] || {
+					echo "static default differs in $group/$artifact" >&2
+					return 1
+				}
+			done
+			if [[ $group == amd64 ]]; then
+				for artifact in bootloader/stage2.raw \
+				    bootloader/stage2.bin uefi/BOOTX64.EFI; do
+					relative=${artifact##*/}
+					[[ $(sha256sum "$build_dir/$artifact" | awk '{print $1}') == \
+					    $(sha256sum "$loaders/$relative" | awk '{print $1}') ]] || {
+						echo "static default differs in amd64/$artifact" >&2
+						return 1
+					}
+				done
+			fi
+		fi
 		base_image=$cell_dir/base.img
 		auxiliary_image=
 		case $case_name in
+		default)
+			cp --reflink=auto --sparse=always \
+			    "$build_dir/hdd-image.img" "$base_image"
+			;;
 		file-swap|raw-swap|mixed-swap)
 			if [[ -z $acceptance_rootfs ]]; then
 				acceptance_rootfs=$output/cells/$group-br-t46-rootfs.img
@@ -885,14 +1001,14 @@ run_group()
 				    "$output/host/$group-br-t46-rootfs"
 			fi
 			build_extended_image "$group" "$case_name" "$base_image" \
-			    "$acceptance_rootfs" >"$cell_dir/image-layout.txt"
-			;;
-		native|root-swap-alias)
-			build_extended_image "$group" "$case_name" "$base_image" \
+			    "$loaders" "$acceptance_rootfs" \
 			    >"$cell_dir/image-layout.txt"
 			;;
-		*) cp --reflink=auto --sparse=always \
-		    "$build_dir/hdd-image.img" "$base_image" ;;
+		*)
+			build_extended_image "$group" "$case_name" "$base_image" \
+			    "$loaders" \
+			    >"$cell_dir/image-layout.txt"
+			;;
 		esac
 		if [[ $case_name == cross-boot || \
 		    $case_name == partuuid-reorder ]]; then
@@ -958,6 +1074,10 @@ run_group()
 			fi
 		fi
 	done
+	if ! sha256sum --check --status "$production_hashes"; then
+		echo "production loader changed during BR-T46 group: $group" >&2
+		return 1
+	fi
 }
 
 validator_self_test

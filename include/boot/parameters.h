@@ -7,8 +7,11 @@
 #define ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE \
 	(ZEDBSD_BOOT_PARAMETERS_TEXT_MAX + 1)
 
-#define ZEDBSD_BOOT_PARAMETERS_DEFAULT_TEXT \
+#define ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT \
 	"overlay-root=boot0:rootfs.img overlay-data=boot0:data.img " \
 	"swap0=boot0:swapfile"
+
+#define ZEDBSD_BOOT_PARAMETERS_DEFAULT_TEXT \
+	ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT
 
 #endif

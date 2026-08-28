@@ -1,1 +1,0 @@
-overlay-root=boot0:rootfs.img overlay-data=boot0:data.img swap0=boot0:swapfile

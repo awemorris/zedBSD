@@ -252,7 +252,11 @@ generated configurations, build logs, exact QEMU commands and versions,
 parameter/image hashes, guest logs, controller results, and result table there.
 It hashes the user's `config.mk` before and after the run, uses the normal
 independent `build/pcat`, `build/pc98`, and `build/amd64` directories with
-`make -j16`, and gives QEMU only per-cell disposable image copies:
+`make -j16`, and builds each group's production loaders once. Each non-default
+cell patches only disposable BPR1-bearing loader copies, rebuilds and validates
+the corresponding BIOS/MZ or EFI wrapper, and verifies that every production
+loader hash remains unchanged. QEMU receives only per-cell disposable image
+copies:
 
 ```sh
 plan/ws003-bringup/tests/boot-parameter-qemu-acceptance.sh \
@@ -271,6 +275,13 @@ explicit `boot1` resolution.  The PC/AT alias regression stamps a valid
 `ZEDSWAP2` header into the reserved boot block of a disposable native UFS root
 partition, selects that same partition as both `rootpart` and `swap0`, and
 requires the pre-mount/pre-activation `EEXIST` diagnostic.
+
+The PC-98 extended-image fixture also makes its BOOT and added UFS/SWAP
+partitions disjoint. The ordinary single-partition PC-98 image describes the
+BOOT entry through the medium end while its BPB bounds the FAT filesystem; the
+fixture shortens that entry to the actual 128-MiB FAT boundary before adding a
+second partition. This preserves the q020 writable-backing overlap safety
+check instead of exempting a historical test-only overlap.
 
 The q015 USB-backed swap forward-progress correction reserves one embedded
 xHCI transfer request plus an 8-KiB-aligned, 8-KiB coherent bounce buffer per
@@ -322,6 +333,48 @@ for `cells.tsv`,
 for `results.tsv`, and
 `e38233677fbebf399d89cd2688c9a98d65f6ec2bea1b81baedcb3f26a4fffd1b`
 for `metadata.txt`.
+
+q023 reran the complete matrix after replacing the generated parameter header
+with the static BR-T47 source contract. The newest authoritative result is
+**PASS 31/31** at
+`plan/ws003-bringup/temp/q023-p016-br-t46-authoritative.9rIQrm`: PC/AT 7/7,
+PC-98 6/6, amd64 BIOS 9/9, and amd64 UEFI 9/9. The default cell for each path
+boots the normal production `hdd-image.img`; only non-default cases patch a
+validated BPR1 record in a disposable loader copy. Production-loader hashes
+and `config.mk` stayed unchanged. The run's `cells.tsv`, `results.tsv`, and
+`metadata.txt` SHA-256 values are
+`d290ceb43b1f4b3c076c53b3b41d571dbfdf61b4526bd7821e03da5355efeb3c`,
+`afa1c1cb043f042a9efc6188a699d1fcfd9267964adc70cc8c82a876fa932e90`,
+and `d522c4340d1fb89544753ac2d70a1352d8dfa294456dbff4af7b94aa5ffd5d11`.
+
+The corresponding no-Python source/build audit passed for amd64, PC/AT, and
+PC-98 at `plan/ws003-bringup/temp/q023-p016-audit-final.8oHUQf`. The affected
+WS016 runtime-swap runner also passed file, mixed, and native cells 3/3 at
+`plan/ws016-swap-control/temp/q023-p016-runtime-swap.UGNqkG`.
+
+BR-T47 guards the maintained-source boot-parameter contract. Run the project
+toolchain first, then use the two Phase-owned Noct helpers:
+
+```sh
+make -j16 toolchain
+build/NoctLang/build-static/noct --path=tools/build \
+  plan/ws003-bringup/tests/patch-boot-parameter-record.noct --self-test
+build/NoctLang/build-static/noct --path=tools/build \
+  plan/ws003-bringup/tests/boot-parameter-source-audit.noct \
+  "$PWD" plan/ws003-bringup/temp/br-t47-source-audit
+```
+
+`boot-parameter-source-audit.noct` accepts optional
+`[REPOSITORY [OUTPUT]]` arguments. It verifies the sole maintained source
+default, derived C/assembly lengths, absence of the removed generator, selector,
+and stale generated output, and forced amd64, PC/AT, and PC-98 disk-image
+dependency traces with no Python invocation.
+
+`patch-boot-parameter-record.noct` accepts either `--self-test` or
+`--text TEXT INPUT OUTPUT`. It is only for distinct disposable artifacts. It
+requires exactly one complete fixed-size BPR1 record, rejects zero, duplicate,
+malformed, oversized, non-ASCII, unterminated, and unsupported records, and
+atomically writes the patched output without changing its input.
 
 This run postdates the final xHCI stop/IRQ ownership review. In addition to
 the eight existing affected regressions, `usb-hcd-unregister-test` now proves

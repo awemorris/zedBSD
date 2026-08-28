@@ -171,6 +171,49 @@ pc98_lba(const uint8_t in[4], unsigned heads)
 	    in[0];
 }
 
+static uint64_t
+pc98_fat_end(int image, const uint8_t table[SECTOR_SIZE], unsigned heads,
+	     uint64_t disk_blocks, const char *image_path)
+{
+	const uint8_t *entry = table;
+	uint8_t boot[SECTOR_SIZE];
+	uint64_t start, total, blocks;
+	uint16_t bytes_per_sector;
+
+	if (entry[0] != 0xa1 || entry[1] != 0x91)
+		return UINT64_MAX;
+	start = pc98_lba(entry + 8, heads);
+	if (start >= disk_blocks)
+		return UINT64_MAX;
+	read_exact(image, start * SECTOR_SIZE, boot, sizeof(boot), image_path);
+	bytes_per_sector = get16(boot + 11);
+	total = get16(boot + 19);
+	if (total == 0)
+		total = get32(boot + 32);
+	if (boot[510] != 0x55 || boot[511] != 0xaa ||
+	    bytes_per_sector < SECTOR_SIZE ||
+	    bytes_per_sector % SECTOR_SIZE != 0 || total == 0 ||
+	    total > UINT64_MAX / bytes_per_sector)
+		return UINT64_MAX;
+	blocks = total * bytes_per_sector / SECTOR_SIZE;
+	if (blocks == 0 || blocks > disk_blocks - start)
+		return UINT64_MAX;
+	return start + blocks - 1U;
+}
+
+static int
+pc98_boot_entry_can_shorten(const uint8_t entry[PC98_ENTRY_SIZE],
+			    uint64_t new_start, uint64_t disk_blocks,
+			    unsigned heads, uint64_t fat_end)
+{
+	uint64_t entry_start = pc98_lba(entry + 8, heads);
+	uint64_t entry_end = pc98_lba(entry + 12, heads);
+
+	return entry[0] == 0xa1 && entry[1] == 0x91 && disk_blocks != 0 &&
+	    entry_start < new_start && entry_end == disk_blocks - 1U &&
+	    fat_end != UINT64_MAX && fat_end + 1U == new_start;
+}
+
 static int
 region_overlaps(uint64_t left_start, uint64_t left_count,
 		uint64_t right_start, uint64_t right_count)
@@ -273,7 +316,8 @@ add_mbr_partition(uint8_t sector[SECTOR_SIZE], unsigned index,
 static void
 add_pc98_partition(uint8_t table[SECTOR_SIZE], unsigned index,
 		   int swap, uint64_t start, uint64_t blocks,
-		   uint64_t disk_blocks, unsigned heads)
+		   uint64_t disk_blocks, unsigned heads,
+		   uint64_t boot_filesystem_end)
 {
 	uint8_t *entry;
 	unsigned previous;
@@ -285,7 +329,7 @@ add_pc98_partition(uint8_t table[SECTOR_SIZE], unsigned index,
 	if (entry[0] != 0)
 		fail("target PC-98 partition entry is not empty");
 	for (previous = 1; previous < index; previous++) {
-		const uint8_t *candidate =
+		uint8_t *candidate =
 		    table + (previous - 1U) * PC98_ENTRY_SIZE;
 		uint64_t candidate_start, candidate_end;
 
@@ -293,12 +337,20 @@ add_pc98_partition(uint8_t table[SECTOR_SIZE], unsigned index,
 			continue;
 		candidate_start = pc98_lba(candidate + 8, heads);
 		candidate_end = pc98_lba(candidate + 12, heads);
-		/* The production PC-98 boot entry intentionally describes the
-		 * complete medium while its BPB bounds the FAT filesystem.  Permit
-		 * the historical overlapping entry only for slot one. */
-		if (previous != 1U && region_overlaps(start, blocks,
-		    candidate_start, candidate_end - candidate_start + 1U))
-			fail("new PC-98 partition overlaps a non-boot partition");
+		if (candidate_end < candidate_start)
+			fail("invalid existing PC-98 partition geometry");
+		/* zedimage's single-partition PC-98 layout describes the boot entry
+		 * through the end of the medium even though the FAT BPB ends at the
+		 * requested partition start.  Make that implicit boundary explicit
+		 * before adding a test-only second partition. */
+		if (previous == 1U && pc98_boot_entry_can_shorten(candidate,
+		    start, disk_blocks, heads, boot_filesystem_end)) {
+			pc98_chs(candidate + 12, start - 1U, heads);
+			candidate_end = start - 1U;
+		}
+		if (region_overlaps(start, blocks, candidate_start,
+		    candidate_end - candidate_start + 1U))
+			fail("new PC-98 partition overlaps an existing partition");
 	}
 	memset(entry, 0, PC98_ENTRY_SIZE);
 	entry[0] = swap ? 0x22 : 0x21;
@@ -380,10 +432,13 @@ add_partition(int argc, char **argv)
 		write_exact(image, 0, sector, sizeof(sector), image_path);
 	} else {
 		unsigned heads = image_bytes <= 20ULL * 1024ULL * 1024ULL ? 4 : 8;
+		uint64_t boot_filesystem_end;
 		read_exact(image, PC98_TABLE_LBA * SECTOR_SIZE, sector,
 		    sizeof(sector), image_path);
+		boot_filesystem_end = pc98_fat_end(image, sector, heads,
+		    disk_blocks, image_path);
 		add_pc98_partition(sector, index, swap, start, blocks,
-		    disk_blocks, heads);
+		    disk_blocks, heads, boot_filesystem_end);
 		write_exact(image, PC98_TABLE_LBA * SECTOR_SIZE, sector,
 		    sizeof(sector), image_path);
 	}
@@ -569,7 +624,19 @@ self_test(void)
 	entry[1] = 0x91;
 	pc98_chs(entry + 8, 2048, 8);
 	pc98_chs(entry + 12, 411647, 8);
-	add_pc98_partition(table, 2, 1, 264192, 131072, 411648, 8);
+	if (!pc98_boot_entry_can_shorten(entry, 264192, 411648, 8, 264191) ||
+	    pc98_boot_entry_can_shorten(entry, 264192, 411648, 8, 264190) ||
+	    pc98_boot_entry_can_shorten(entry, 264192, 411649, 8, 264191))
+		fail("PC-98 boot-boundary predicate self-test failed");
+	entry[0] = 0xa0;
+	if (pc98_boot_entry_can_shorten(entry, 264192, 411648, 8, 264191))
+		fail("PC-98 non-FAT boundary self-test failed");
+	entry[0] = 0xa1;
+	add_pc98_partition(table, 2, 1, 264192, 131072, 411648, 8,
+	    264191);
+	entry = table;
+	if (pc98_lba(entry + 12, 8) != 264191)
+		fail("PC-98 boot-boundary self-test failed");
 	entry = table + PC98_ENTRY_SIZE;
 	if (pc98_lba(entry + 8, 8) != 264192 ||
 	    pc98_lba(entry + 12, 8) != 395263 ||

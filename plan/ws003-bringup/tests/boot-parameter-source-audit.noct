@@ -1,0 +1,180 @@
+require zedbuild;
+
+// WS003 BR-T47a/BR-T47b static boot-parameter source/build audit.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+func capture(command) {
+    var child = Process.spawn(["/bin/sh", "-c", command + " 2>&1"]);
+    if (child < 0) { zbFail("cannot spawn audit command: " + command); }
+    var output = "";
+    while (Process.isAlive(child) == 1) {
+        output = output + Process.read(child, 100);
+    }
+    output = output + Process.read(child, 0);
+    var status = Process.wait(child);
+    Process.close(child);
+    // Process.spawn uses a PTY on the host, so normalize its CRLF output before
+    // applying byte-exact source-audit assertions or preserving trace logs.
+    var normalized = "";
+    for (i in 0..String.charCount(output)) {
+        if (String.charCodeAt(output, i) != 13) {
+            normalized = normalized + String.charAt(output, i);
+        }
+    }
+    return [status, normalized];
+}
+
+func needText(text, expected, what) {
+    if (String.indexOf(text, expected) < 0) {
+        zbFail(what + " is missing: " + expected);
+    }
+}
+
+func expectExact(repo, command, expected, what) {
+    var result = capture("cd " + zbShellQuote(repo) + " && " + command);
+    if (result[0] != 0 || result[1] != expected) {
+        zbFail(what + " failed (status=" + result[0] + "): " + result[1]);
+    }
+}
+
+func expectNoMatches(repo, command, what) {
+    var result = capture("cd " + zbShellQuote(repo) + " && " + command);
+    if (result[0] == 0) { zbFail(what + ":\n" + result[1]); }
+    if (result[0] != 1 || result[1] != "") {
+        zbFail(what + " audit failed (status=" + result[0] + "): " +
+               result[1]);
+    }
+}
+
+func requireAbsent(path, what) {
+    var result = capture("test ! -e " + zbShellQuote(path));
+    if (result[0] != 0) { zbFail(what + " remains: " + path); }
+}
+
+func auditSource(repo) {
+    requireAbsent(repo + "/bootloader/default-boot-parameters.txt",
+                  "deleted boot-parameter text input");
+    requireAbsent(repo + "/tools/build/make-boot-parameters-header.py",
+                  "deleted Python generator");
+
+    var scopes = "Makefile bootloader include platform src tools userland " +
+        "plan/ws003-bringup/tests plan/ws008-noct/tests " +
+        "plan/ws016-swap-control/tests";
+    var removed =
+        "'ZEDBSD_BOOT_PARAMETERS_(FILE|HEADER)|" +
+        "default-boot-parameters[.]txt|" +
+        "make-boot-parameters-header[.]py|" +
+        "generated/boot-parameters[.]h'";
+    expectNoMatches(repo,
+        "rg -n " + removed + " " + scopes +
+        " --glob '!boot-parameter-source-audit.noct'",
+        "removed boot-parameter input/generator/variable reference remains");
+
+    expectExact(repo,
+        "rg --count '^#define[[:space:]]+" +
+        "ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT([[:space:]]|$)' " + scopes,
+        "include/boot/parameters.h:1\n",
+        "image boot-parameter source definition count");
+    expectExact(repo,
+        "rg --count '^#define[[:space:]]+" +
+        "ZEDBSD_BOOT_PARAMETERS_DEFAULT_TEXT([[:space:]]|$)' " + scopes,
+        "include/boot/parameters.h:1\n",
+        "kernel fallback alias definition count");
+
+    var header = FileUtil.readText(repo + "/include/boot/parameters.h");
+    needText(header,
+        "#define ZEDBSD_BOOT_PARAMETERS_DEFAULT_TEXT \\\n\tZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT",
+        "kernel fallback alias");
+
+    expectNoMatches(repo,
+        "rg -n 'ZEDBSD_IMAGE_BOOT_PARAMETERS_(LENGTH|SIZE)' " + scopes +
+        " --glob '!boot-parameter-source-audit.noct'",
+        "hand-maintained image boot-parameter length remains");
+
+    var assembly = FileUtil.readText(
+        repo + "/bootloader/include/boot-parameter-record.inc");
+    needText(assembly,
+        ".word .Lzedbsd_boot_parameters_end\\@ - \\\n\t      .Lzedbsd_boot_parameters_start\\@",
+        "assembly-derived BPR1 length");
+    needText(assembly, ".ascii ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT",
+             "assembly source default");
+    needText(assembly,
+        "(.Lzedbsd_boot_parameters_end\\@ - \\\n\t        .Lzedbsd_boot_parameters_start\\@) - 1",
+        "assembly-derived BPR1 padding");
+
+    var uefi = FileUtil.readText(repo + "/bootloader/uefi/bootx64.c");
+    needText(uefi,
+        ".length = sizeof(ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT) - 1U,",
+        "UEFI-derived BPR1 length");
+    needText(uefi,
+        "_Static_assert(sizeof(ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT) - 1U <=",
+        "UEFI source-default bounds check");
+
+    var generated = capture("cd " + zbShellQuote(repo) +
+        " && { test ! -d build || find build -type f " +
+        "-path '*/generated/boot-parameters.h' -print; }");
+    if (generated[0] != 0 || generated[1] != "") {
+        zbFail("generated boot-parameter output remains: " + generated[1]);
+    }
+    print("BR-T47a static source audit: PASS");
+}
+
+func tracePlatform(repo, outputDirectory, name, platform, architecture,
+                   board, marker) {
+    var command = "cd " + zbShellQuote(repo) +
+        " && LC_ALL=C make --no-print-directory -Bn " +
+        "ZEDBSD_CONFIG=/dev/null ZEDBSD_PLATFORM=" + platform +
+        " ZEDBSD_ARCHITECTURE=" + architecture +
+        " ZEDBSD_BOARD=" + board +
+        " ZEDBSD_USER_PROGRAMS= disk-image";
+    var result = capture(command);
+    var trace = outputDirectory + "/" + name + ".make-dry-run.log";
+    FileUtil.writeText(trace, result[1]);
+    if (result[0] != 0) {
+        zbFail(name + " forced dependency trace failed (status=" +
+               result[0] + "; evidence=" + trace + ")");
+    }
+    needText(result[1], marker, name + " loader dependency trace");
+    needText(result[1], "build/NoctLang/build-static/noct",
+             name + " Noct build-tool trace");
+
+    var python = capture("LC_ALL=C rg -n -i " +
+        "'(^|[[:space:]])([^[:space:]]*/)?" +
+        "python([0-9]+([.][0-9]+)*)?([[:space:]]|$)' " +
+        zbShellQuote(trace));
+    if (python[0] == 0) {
+        zbFail(name + " dependency trace invokes Python:\n" + python[1]);
+    }
+    if (python[0] != 1 || python[1] != "") {
+        zbFail(name + " Python trace audit failed (status=" + python[0] +
+               "): " + python[1]);
+    }
+    print("BR-T47b " + name + " no-Python dependency trace: PASS");
+}
+
+func main(args) {
+    var repo = ".";
+    var output = "plan/ws003-bringup/temp/br-t47-source-audit";
+    if (Array.size(args) > 2) {
+        zbFail("usage: boot-parameter-source-audit.noct [REPOSITORY [OUTPUT]]");
+    }
+    if (Array.size(args) >= 1) { repo = args[0]; }
+    if (Array.size(args) == 2) { output = args[1]; }
+    if (System.shell("mkdir -p " + zbShellQuote(output)) != 0) {
+        zbFail("cannot create audit output directory: " + output);
+    }
+    if (System.shell("test -x " + zbShellQuote(
+            repo + "/build/NoctLang/build-static/noct")) != 0) {
+        zbFail("run make toolchain before BR-T47");
+    }
+
+    auditSource(repo);
+    tracePlatform(repo, output, "amd64", "amd64", "amd64", "pcat",
+                  "build/amd64/uefi/BOOTX64.EFI");
+    tracePlatform(repo, output, "pcat", "i386", "i386", "pcat",
+                  "build/pcat/bootloader/BOOTZBSD.EXE");
+    tracePlatform(repo, output, "pc98", "pc98", "i386", "pc98",
+                  "build/pc98/bootloader/BOOTZBSD.EXE");
+    print("WS003 BR-T47a/BR-T47b source/build audit: PASS (" + output +
+          ")");
+}

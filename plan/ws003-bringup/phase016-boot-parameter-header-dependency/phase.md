@@ -8,7 +8,7 @@ Phase ID: `p016`
 
 Combined ID: `ws003-p016`
 
-Status: In progress (`q023`)
+Status: Completed (`q023`, 2026-08-28)
 
 Parent: [WS003](../ws.md)
 
@@ -153,3 +153,42 @@ path, or if preserving the accepted parameter behavior requires changing the
 public grammar or handoff ABI. A Makefile, test-fixture, C/assembly layout, or
 Noct tooling defect inside the fixed static-source contract remains
 implementation work.
+
+## Execution result
+
+Completed in q023 without reaching the reconsideration boundary.
+
+- The default now has one maintained definition,
+  `ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT`, and the kernel fallback aliases it.
+  BIOS/PC-98 assembly derives its BPR1 length from labels and UEFI derives it
+  with `sizeof`; no numeric length twin remains.
+- The text input, Python generator, generated-header rule, forced includes,
+  and `ZEDBSD_BOOT_PARAMETERS_FILE` selector were removed. `BR-T47a` and all
+  three `BR-T47b` forced build traces passed at
+  `plan/ws003-bringup/temp/q023-p016-audit-final.8oHUQf`.
+- The Phase-owned Noct patcher passed its malformed-record corpus and supplied
+  only disposable non-default loaders. Production-loader hashes stayed
+  unchanged across the run.
+- The final `BR-T46`/`BR-T47c`/`BR-T47d` matrix passed 31/31 at
+  `plan/ws003-bringup/temp/q023-p016-br-t46-authoritative.9rIQrm`: PC/AT 7,
+  PC-98 6, amd64 BIOS 9, and amd64 UEFI 9. The four default cells booted the
+  ordinary production `hdd-image.img`; parameterized cells used patched
+  disposable copies. `config.mk` stayed at SHA-256
+  `3ce199529678bade77d6f37af22bac8292df7b007f3bd70f137766da6333c1c6`.
+- `cells.tsv`, `results.tsv`, and `metadata.txt` have SHA-256 values
+  `d290ceb43b1f4b3c076c53b3b41d571dbfdf61b4526bd7821e03da5355efeb3c`,
+  `afa1c1cb043f042a9efc6188a699d1fcfd9267964adc70cc8c82a876fa932e90`,
+  and `d522c4340d1fb89544753ac2d70a1352d8dfa294456dbff4af7b94aa5ffd5d11`.
+- The PC-98 raw-swap fixture exposed a historical synthetic partition
+  overlap. The image helper now shortens only the exact whole-medium FAT
+  sentinel at its BPB-derived boundary before adding the non-overlapping test
+  partition; wrong type or boundary is rejected. The strengthened self-test
+  and the PC-98 raw-swap cell pass.
+- The prior runtime-swap runner passed its file, mixed, and native cells 3/3 at
+  `plan/ws016-swap-control/temp/q023-p016-runtime-swap.UGNqkG`. `BR-T42` and
+  `BR-T43` passed at `/tmp/ws003-p016-host-final.FXrfDG`.
+- A real GRUB Multiboot ISO with no explicit arguments reported the common
+  static default exactly. Its expected later VFS failure was due to the ISO
+  containing no boot filesystem image, after the parameter handoff had passed.
+- `make -j16`, script syntax checks, source audits, image/helper tests, and
+  `git diff --check` passed. `make check` and `.internal/` were not used.

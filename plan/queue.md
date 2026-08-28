@@ -34,8 +34,8 @@ the shell's two remaining foreground job-control ordering races.
 
 | Priority | WS / Phase | Authoritative documents | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws003-p016` | [WS003](ws003-bringup/ws.md), [Phase](ws003-bringup/phase016-boot-parameter-header-dependency/phase.md), [tests](ws003-bringup/tests/README.md) | in-progress | One maintained source default feeds every x86 loader and kernel fallback; generated/Python inputs disappear and affected four-platform and swap evidence remains usable |
-| 2 | `ws008-p005` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase005-independent-beui-backends/phase.md), [tests](ws008-noct/tests/README.md) | pending | Each selected canonical BeUI platform source independently implements the sole public `noct_register_api_beui()` interface; shared dispatcher/backend and public HAL injection disappear |
+| 1 | `ws003-p016` | [WS003](ws003-bringup/ws.md), [Phase](ws003-bringup/phase016-boot-parameter-header-dependency/phase.md), [tests](ws003-bringup/tests/README.md) | completed | One maintained source default feeds every x86 loader and kernel fallback; generated/Python inputs disappear and affected four-platform and swap evidence remains usable |
+| 2 | `ws008-p005` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase005-independent-beui-backends/phase.md), [tests](ws008-noct/tests/README.md) | in-progress | Each selected canonical BeUI platform source independently implements the sole public `noct_register_api_beui()` interface; shared dispatcher/backend and public HAL injection disappear |
 | 3 | `ws001-p014` | [WS001](ws001-posix/ws.md), [Phase](ws001-posix/phase014-shell-job-control/phase.md), [tests](ws001-posix/tests/README.md) | pending | Foreground pipeline children cannot read before TTY handoff, and `fg` foregrounds before `SIGCONT`, without background/non-TTY regression |
 
 ## Entry evidence and decisions
@@ -93,3 +93,13 @@ q023 finishes when all three registry items are either `completed` with their
 required evidence or `uncleared` with a concrete resume condition, all result
 states are synchronized across P/W/M/Q, and every safe completed change is
 committed and pushed under the recorded authorization.
+
+## Execution log
+
+- `ws003-p016` completed on 2026-08-28. `BR-T47a/b` passed at
+  `plan/ws003-bringup/temp/q023-p016-audit-final.8oHUQf`; the authoritative
+  four-path matrix passed 31/31 at
+  `plan/ws003-bringup/temp/q023-p016-br-t46-authoritative.9rIQrm`; and the
+  affected WS016 runtime-swap cells passed 3/3 at
+  `plan/ws016-swap-control/temp/q023-p016-runtime-swap.UGNqkG`.
+- Queue execution advanced to `ws008-p005`.

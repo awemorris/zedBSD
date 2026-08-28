@@ -8,7 +8,7 @@ Phase ID: `p005`
 
 Combined ID: `ws008-p005`
 
-Status: Pending (`q023`)
+Status: In progress (`q023`)
 
 Parent: [WS008](../ws.md)
 

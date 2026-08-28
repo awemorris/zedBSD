@@ -184,8 +184,6 @@ printf 'case\tresult\tevidence\n' >"$results"
 
 build_command=(make -C "$repo" -j16 "ZEDBSD_CONFIG=$temporary_config"
 	"$probe_target" disk-image)
-boot_parameter_command=(make -C "$repo" -B
-	"ZEDBSD_CONFIG=$temporary_config" build/amd64/generated/boot-parameters.h)
 qemu_command=(
 	"$qemu" -machine pc -m 512 -smp 4
 	-drive "file=$run_image,format=raw,if=ide"
@@ -231,7 +229,6 @@ guest_t022_jit_command=$guest_t021_command
 	printf 'cell_timeout_seconds=%s\n' "$cell_timeout"
 	printf 'build_command='; printf '%q ' timeout --foreground --kill-after=10 \
 		"${build_timeout}s" "${build_command[@]}"; printf '\n'
-	printf 'boot_parameter_command='; printf '%q ' "${boot_parameter_command[@]}"; printf '\n'
 	printf 'qemu_command='; printf '%q ' timeout --foreground --kill-after=5 \
 		"${cell_timeout}s" "${qemu_command[@]}"; printf '\n'
 	printf 'guest_t020_command=%s\n' "$guest_t020_command"
@@ -327,9 +324,7 @@ printf 'build_start_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 	>>"$metadata"
 set +e
 timeout --foreground --kill-after=10 "${build_timeout}s" \
-	"${boot_parameter_command[@]}" >"$build_log" 2>&1 && \
-	timeout --foreground --kill-after=10 "${build_timeout}s" \
-	"${build_command[@]}" >>"$build_log" 2>&1
+	"${build_command[@]}" >"$build_log" 2>&1
 build_status=$?
 set -e
 {

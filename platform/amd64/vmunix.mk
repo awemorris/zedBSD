@@ -171,11 +171,9 @@ $(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2.S \
 	bootloader/include/elf.inc bootloader/include/amd64-handoff.h \
 	bootloader/include/boot-parameter-handoff.h \
 	bootloader/include/boot-parameter-record.inc \
-	include/boot/parameter-handoff.h include/boot/parameters.h \
-	$(ZEDBSD_BOOT_PARAMETERS_HEADER)
+	include/boot/parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -include $(ZEDBSD_BOOT_PARAMETERS_HEADER) \
-		-x assembler-with-cpp -c $< -o $@
+	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/stage2.elf: $(BUILD)/bootloader/stage2.o \
 	$(BIOS_LOADER)/stage2.ld
@@ -206,11 +204,9 @@ $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	bootloader/include/elf.inc bootloader/include/amd64-handoff.h \
 	bootloader/include/boot-parameter-handoff.h \
 	bootloader/include/boot-parameter-record.inc \
-	include/boot/parameter-handoff.h include/boot/parameters.h \
-	$(ZEDBSD_BOOT_PARAMETERS_HEADER)
+	include/boot/parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -include $(ZEDBSD_BOOT_PARAMETERS_HEADER) \
-		-x assembler-with-cpp -c $< -o $@
+	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
 
 $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
 	$(BIOS_LOADER)/stage2.ld
@@ -232,11 +228,9 @@ $(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c \
 	$(UEFI_LOADER)/memory-map.h $(UEFI_LOADER)/load-options.h \
 	bootloader/include/amd64-handoff.h \
 	bootloader/include/boot-parameter-handoff.h \
-	include/boot/parameter-handoff.h include/boot/parameters.h \
-	$(ZEDBSD_BOOT_PARAMETERS_HEADER)
+	include/boot/parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
-	$(EFI_CC) $(EFI_CFLAGS) -include $(ZEDBSD_BOOT_PARAMETERS_HEADER) \
-		-c $< -o $@
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
 
 $(BUILD)/uefi/load-options.o: $(UEFI_LOADER)/load-options.c \
 	$(UEFI_LOADER)/load-options.h \

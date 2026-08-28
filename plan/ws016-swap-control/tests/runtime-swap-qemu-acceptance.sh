@@ -71,10 +71,17 @@ done
 [[ -f $ovmf_code ]] || { echo "OVMF code not found: $ovmf_code" >&2; exit 2; }
 [[ -f $ovmf_vars ]] || { echo "OVMF vars not found: $ovmf_vars" >&2; exit 2; }
 noct=$repo/build/NoctLang/build-static/noct
+parameter_patcher=$br_t46_dir/patch-boot-parameter-record.noct
 [[ -x $noct ]] || {
 	echo "Noct toolchain missing; run make toolchain first" >&2
 	exit 2
 }
+[[ -f $parameter_patcher ]] || {
+	echo "BPR1 patcher missing: $parameter_patcher" >&2
+	exit 2
+}
+"$noct" --path="$repo/tools/build" "$parameter_patcher" --self-test \
+	>"$output/host/bpr1-patcher-self-test.log"
 
 image_tool=$output/host/boot-parameter-image-tool
 cc -std=c11 -Wall -Wextra -Werror \
@@ -156,21 +163,29 @@ parameters_for()
 	esac
 }
 
-make_case()
+build_once()
 {
-	local case_name=$1 parameters=$output/config/$case_name.parameters
-	local build_log=$output/build-logs/$case_name.log
-	parameters_for "$case_name" >"$parameters"
+	local build_log=$output/build-logs/production.log
 	if ! make -C "$repo" -j16 -f Makefile \
 	    -f "$br_t46_dir/boot-parameter-acceptance.mk" \
 	    -f "$script_dir/runtime-swap-acceptance.mk" \
 	    ZEDBSD_CONFIG="$config" ARCH_IMAGE_DIR=build/amd64/arch-images \
-	    ZEDBSD_BOOT_PARAMETERS_FILE="$parameters" disk-image \
+	    disk-image \
 	    build/amd64/rootfs.tar.gz build/amd64/WS016-SWAP.ELF \
 	    >"$build_log" 2>&1; then
 		tail -n 100 "$build_log" >&2
 		return 1
 	fi
+}
+
+prepare_uefi_loader()
+{
+	local parameters=$1 destination=$2
+	"$noct" --path="$repo/tools/build" "$parameter_patcher" \
+	    --text "$parameters" "$repo/build/amd64/uefi/BOOTX64.EFI" \
+	    "$destination"
+	"$noct" --path="$repo/tools/build" \
+	    "$repo/platform/amd64/tools/check-bootx64.noct" "$destination"
 }
 
 rootfs_staging=$output/host/rootfs
@@ -212,7 +227,7 @@ build_rootfs_fixtures()
 
 build_image()
 {
-	local case_name=$1 destination=$2 build_dir=$repo/build/amd64
+	local case_name=$1 destination=$2 bootx64=$3 build_dir=$repo/build/amd64
 	local command=("$repo/build/zedimage-host" disk --machine pcat --gpt
 	    --size-mib 201 --fat-size-mib 128
 	    --stage1 "$build_dir/bootloader/stage1.bin"
@@ -220,7 +235,7 @@ build_image()
 	    --partition-pbr "$build_dir/bootloader/partition-pbr.bin"
 	    --bootzbsd "$build_dir/bootloader/BOOTZBSD.EXE"
 	    --kernel "$build_dir/vmunix"
-	    --bootx64 "$build_dir/uefi/BOOTX64.EFI")
+	    --bootx64 "$bootx64")
 	case $case_name in
 	file)
 		command+=(--arch-image "$overlay_rootfs"
@@ -422,21 +437,24 @@ selected_runtime_case()
 }
 
 runtime_status=0
-fixtures_ready=0
+echo "SWAP-T011/T012 production build"
+build_once
+production_loader_hash=$(sha256sum "$repo/build/amd64/uefi/BOOTX64.EFI" | \
+	awk '{print $1}')
+build_rootfs_fixtures >"$output/build-logs/fixtures.log" 2>&1
 for case_name in file mixed native; do
 	selected_runtime_case "$case_name" || continue
-	echo "SWAP-T011/T012 build: $case_name"
-	make_case "$case_name"
-	if [[ $fixtures_ready -eq 0 ]]; then
-		build_rootfs_fixtures >"$output/build-logs/fixtures.log" 2>&1
-		fixtures_ready=1
-	fi
+	parameters_file=$output/config/$case_name.parameters
+	parameters_for "$case_name" >"$parameters_file"
+	parameters=$(<"$parameters_file")
+	loader=$output/images/$case_name-BOOTX64.EFI
+	prepare_uefi_loader "$parameters" "$loader" \
+	    >"$output/build-logs/$case_name-loader-patch.log"
 	base_image=$output/images/$case_name-base.img
-	build_image "$case_name" "$base_image" \
+	build_image "$case_name" "$base_image" "$loader" \
 	    >"$output/cells/$case_name-image-layout.txt"
-	parameters=$(parameters_for "$case_name")
 	image_hash=$(sha256sum "$base_image" | awk '{print $1}')
-	parameter_hash=$(sha256sum "$output/config/$case_name.parameters" | awk '{print $1}')
+	parameter_hash=$(sha256sum "$parameters_file" | awk '{print $1}')
 	echo "SWAP-T011/T012 run: $case_name"
 	set +e
 	elapsed=$(run_qemu_cell "$case_name" "$base_image" "$parameters" \
@@ -462,6 +480,12 @@ for case_name in file mixed native; do
 		runtime_status=1
 	fi
 done
+
+if [[ $(sha256sum "$repo/build/amd64/uefi/BOOTX64.EFI" | awk '{print $1}') != \
+    "$production_loader_hash" ]]; then
+	echo "production BOOTX64.EFI changed during SWAP-T011/T012" >&2
+	runtime_status=1
+fi
 
 br_status=0
 if [[ $run_br_t46 -eq 1 ]]; then

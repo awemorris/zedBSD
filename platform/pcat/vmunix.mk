@@ -154,11 +154,9 @@ $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	bootloader/include/elf.inc bootloader/include/amd64-handoff.h \
 	bootloader/include/boot-parameter-handoff.h \
 	bootloader/include/boot-parameter-record.inc \
-	include/boot/parameter-handoff.h include/boot/parameters.h \
-	$(ZEDBSD_BOOT_PARAMETERS_HEADER)
+	include/boot/parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -include $(ZEDBSD_BOOT_PARAMETERS_HEADER) \
-		-x assembler-with-cpp -c $< -o $@
+	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
 $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o $(BIOS_LOADER)/stage2.ld
 	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
 $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
