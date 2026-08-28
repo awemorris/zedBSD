@@ -194,8 +194,10 @@ source-root defaults are updated to `userland/noct/NoctLang`.
 [`noct-p004-review.sh`](./noct-p004-review.sh) implements the host portion. It
 performs a fresh pinned checkout in an ignored disposable parent layout,
 checks idempotence and negative repository/revision cases, rebuilds the static
-and zedBSD presets, audits the merged source/dispatcher/target macros and
-Boolean JIT boundary, and runs the zedBSD evdev plus JIT failure corpus:
+and zedBSD presets, audits the compiler target and Boolean JIT boundary, and
+runs the zedBSD evdev plus JIT failure corpus. The succeeding p005 layout is
+intentionally left to the focused p005 runner rather than encoded as a stale
+p004 dispatcher assertion:
 
 ```sh
 plan/ws008-noct/tests/noct-p004-review.sh
@@ -219,6 +221,27 @@ The p005 runner may extend `noct-p004-review.sh` or add a focused companion,
 but its assertions must describe independent platform ownership rather than
 the p004 dispatcher/shared-backend layout. Existing p001--p003 QEMU runners
 remain the runtime regression gates.
+
+[`noct-p005-backends.sh`](./noct-p005-backends.sh) is that focused companion.
+It requires the canonical checkout to be clean, detached, and exactly equal to
+the revision pinned by `userland/noct/Makefile`; proves that only
+`noct_register_api_beui()` crosses the public header and CLI boundary; rejects
+the deleted dispatcher/backend and every `with_hal` or platform-suffixed
+registrar; and confirms that all three platform sources independently own the
+one interface. It then builds the zedBSD preset, runs the canonical sanitized
+zedBSD wiring corpus, and checks both the selected link object and global
+symbols in `libnoctapi.a` and `noct`:
+
+```sh
+plan/ws008-noct/tests/noct-p005-backends.sh
+```
+
+The existing [`qemu-beui-zedbsd.sh`](./qemu-beui-zedbsd.sh) supplies
+`NOCT-T044`. Its linked-artifact audit likewise accepts only one exact,
+unsuffixed `noct_register_api_beui` symbol and rejects `with_hal` and all
+platform suffixes. The SDL2 and PC-98 behavior gates remain canonical Noct
+tests described by `NOCT-T041` and `NOCT-T042`; this focused runner does not
+silently skip them or claim their result.
 
 ## Common build gate
 

@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 NOCT_REPOSITORY ?= https://github.com/awemorris/NoctLang.git
-NOCT_REVISION ?= eba2043ca74b8601d68a405ecbbeca50ca8d5ac0
+NOCT_REVISION ?= c1e4e0fcdbb7b8cdf1705601b13d57b787c61621
 NOCT_SOURCE_DIR ?= NoctLang
 ZEDBSD_SOURCE_DIR ?= $(abspath ../..)
 NOCT_BUILD_JOBS ?= 16

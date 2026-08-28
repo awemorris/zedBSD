@@ -8,7 +8,7 @@ Phase ID: `p005`
 
 Combined ID: `ws008-p005`
 
-Status: In progress (`q023`)
+Status: Completed (`q023`, 2026-08-28)
 
 Parent: [WS008](../ws.md)
 
@@ -116,3 +116,42 @@ backends in one executable or if preserving the public BeUI language contract
 requires another API change. Runtime HAL injection is explicitly not a public
 contract. Do not restore a shared implementation merely because the
 independent sources contain substantial duplicate code.
+
+## Execution result
+
+Completed in q023 without reaching the reconsideration boundary.
+
+- Canonical NoctLang commit
+  `c1e4e0fcdbb7b8cdf1705601b13d57b787c61621` was committed and pushed to
+  `awemorris/NoctLang`. Both the host toolchain pin in the top-level Makefile
+  and the userland package pin now select that exact revision.
+- `api-beui.c` and `api-beui-backend.c` were deleted. The PC-98, SDL2, and
+  zedBSD platform sources each own their complete FFI registration layer and
+  define exactly one `bool noct_register_api_beui(NoctEnv *)`; CMake rejects a
+  BeUI configuration that does not select exactly one implementation.
+- `noct_register_api_beui_with_hal()` and every platform-suffixed registrar
+  were removed from source, headers, documentation, and linked artifacts.
+  The installed `include/noct/beui.h` exposes only
+  `noct_register_api_beui()`. HAL types, `noct_beui_bind()`, core, and image
+  contracts moved to non-installed `src/api/beui-internal.h`.
+- The shared-library visibility target was corrected from `noct` to
+  `noctapi`. The final `readelf` audit records the generic registrar as
+  `GLOBAL DEFAULT` and every `noct_beui_*` implementation symbol as `LOCAL`;
+  unrelated `NOCT_DLL` APIs remain global.
+- `NOCT-T040` and `NOCT-T043` passed at
+  `plan/ws008-noct/temp/q023-p005-backends.cWrM3p`. Canonical zedBSD
+  ASan/UBSan/wiring tests, exact-one negative CMake configurations, installed
+  header boundary, and shared-symbol audits passed.
+- `NOCT-T041` and `NOCT-T042` passed through the canonical `run-beui.sh`
+  corpus: generic core, SDL2 dummy video/audio, PC-98 GDC, and PC-98 Cirrus.
+- `NOCT-T044` passed through the complete BeUI QEMU acceptance at
+  `plan/ws008-noct/temp/q020-p002-beui.unH7qL`. Drawing, evdev keyboard and
+  pointer input, post-BeUI console use, artifact identity, screenshot pixels,
+  and the unsuffixed-only linked registrar audit all passed.
+- The pinned revision also passed the non-JIT QEMU smoke at
+  `plan/ws008-noct/temp/q019-p001-noct.Q5DH4P`, the JIT/RW-to-RX QEMU corpus at
+  `plan/ws008-noct/temp/q020-p003-jit.0mYri3`, and the updated p004 host
+  regression at `plan/ws008-noct/temp/q022-p004-review.KBH0on`.
+- `make -j16 toolchain`, the canonical zedBSD build, focused outer acceptance,
+  script syntax checks, and `git diff --check` passed. `make check` and
+  `.internal/` were not used.

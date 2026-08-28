@@ -35,8 +35,8 @@ the shell's two remaining foreground job-control ordering races.
 | Priority | WS / Phase | Authoritative documents | Status | Required result |
 | --- | --- | --- | --- | --- |
 | 1 | `ws003-p016` | [WS003](ws003-bringup/ws.md), [Phase](ws003-bringup/phase016-boot-parameter-header-dependency/phase.md), [tests](ws003-bringup/tests/README.md) | completed | One maintained source default feeds every x86 loader and kernel fallback; generated/Python inputs disappear and affected four-platform and swap evidence remains usable |
-| 2 | `ws008-p005` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase005-independent-beui-backends/phase.md), [tests](ws008-noct/tests/README.md) | in-progress | Each selected canonical BeUI platform source independently implements the sole public `noct_register_api_beui()` interface; shared dispatcher/backend and public HAL injection disappear |
-| 3 | `ws001-p014` | [WS001](ws001-posix/ws.md), [Phase](ws001-posix/phase014-shell-job-control/phase.md), [tests](ws001-posix/tests/README.md) | pending | Foreground pipeline children cannot read before TTY handoff, and `fg` foregrounds before `SIGCONT`, without background/non-TTY regression |
+| 2 | `ws008-p005` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase005-independent-beui-backends/phase.md), [tests](ws008-noct/tests/README.md) | completed | Each selected canonical BeUI platform source independently implements the sole public `noct_register_api_beui()` interface; shared dispatcher/backend and public HAL injection disappear |
+| 3 | `ws001-p014` | [WS001](ws001-posix/ws.md), [Phase](ws001-posix/phase014-shell-job-control/phase.md), [tests](ws001-posix/tests/README.md) | in-progress | Foreground pipeline children cannot read before TTY handoff, and `fg` foregrounds before `SIGCONT`, without background/non-TTY regression |
 
 ## Entry evidence and decisions
 
@@ -103,3 +103,12 @@ committed and pushed under the recorded authorization.
   affected WS016 runtime-swap cells passed 3/3 at
   `plan/ws016-swap-control/temp/q023-p016-runtime-swap.UGNqkG`.
 - Queue execution advanced to `ws008-p005`.
+- `ws008-p005` completed on 2026-08-28. Canonical NoctLang commit
+  `c1e4e0fcdbb7b8cdf1705601b13d57b787c61621` was pushed and pinned in both
+  zedBSD acquisition paths. `NOCT-T040/T043` passed at
+  `plan/ws008-noct/temp/q023-p005-backends.cWrM3p`; canonical generic/SDL2/
+  PC-98 tests passed; and `NOCT-T044` passed at
+  `plan/ws008-noct/temp/q020-p002-beui.unH7qL`. Non-JIT and JIT QEMU
+  regressions also passed at `q019-p001-noct.Q5DH4P` and
+  `q020-p003-jit.0mYri3`.
+- Queue execution advanced to `ws001-p014`.

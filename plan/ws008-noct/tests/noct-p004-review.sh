@@ -54,7 +54,7 @@ if make -C "$delivery" checkout \
 fi
 
 test -f "$source_dir/src/api/api-beui-zedbsd.c"
-test -f "$source_dir/src/api/api-beui.c"
+test -f "$source_dir/include/noct/beui.h"
 test ! -e "$source_dir/src/api/beui-zedbsd-input.c"
 test ! -e "$source_dir/src/api/beui-zedbsd-input.h"
 test ! -e "$source_dir/cmake/modules/Platform/zedBSD.cmake"

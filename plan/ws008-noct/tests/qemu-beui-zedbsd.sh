@@ -21,7 +21,7 @@ if [[ $# -gt 1 ]]; then
 	echo "usage: $0 [OUTPUT-DIRECTORY]" >&2
 	exit 2
 fi
-for command in "$qemu" awk base64 cc cp date make rg sed sha256sum \
+for command in "$qemu" awk base64 cc cp date make nm rg sed sha256sum \
 	sleep timeout tr; do
 	command -v "$command" >/dev/null || {
 		echo "required command not found: $command" >&2
@@ -59,6 +59,8 @@ run_image=$output/run.img
 metadata=$output/run-metadata.txt
 results=$output/results.tsv
 controller_result=$output/controller-result.txt
+symbol_report=$output/noct-global-symbols.txt
+registrar_report=$output/noct-beui-registrars.txt
 
 hash_file()
 {
@@ -157,7 +159,15 @@ fi
 [[ ! -e $repo/userland/noct/NoctLang/src/api/beui-zedbsd-input.h ]]
 rg -q 'api-beui-zedbsd.c' "$link_file"
 ! rg -q 'beui-zedbsd-input.c' "$link_file"
-nm "$cmake_artifact" | rg -q 'noct_register_api_beui_zedbsd'
+nm -g --defined-only "$cmake_artifact" >"$symbol_report"
+awk '$NF ~ /^noct_register_api_beui/ { print $NF }' \
+	"$symbol_report" >"$registrar_report"
+[[ $(awk 'END { print NR + 0 }' "$registrar_report") -eq 1 &&
+   $(<"$registrar_report") == noct_register_api_beui ]] || {
+	echo "Noct must export exactly the unsuffixed BeUI registrar" >&2
+	cat "$registrar_report" >&2
+	exit 1
+}
 printf 'NOCT-T013\tpass\tcanonical source and linked-object audit\n' >>"$results"
 
 cc -std=c11 -Wall -Wextra -Werror \

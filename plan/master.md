@@ -137,14 +137,14 @@ actually warranted.
 
 | WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
 | --- | --- | --- | --- | --- | --- |
-| `ws001` | POSIX.1-2024 compliance | Active in q023 after two independent items; shell handoff residual pending | `ws001-p013` complete; p014 pending in q023 | Execute `ws001-p014` after q023 p016/p005 are processed | [WS001](ws001-posix/ws.md) |
+| `ws001` | POSIX.1-2024 compliance | Active in q023; shell handoff residual in progress | `ws001-p013` complete; p014 active in q023 | Complete the two bounded foreground job-control ordering fixes or record their reconsideration boundary | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
 | `ws003` | Dell Latitude 5320 bring-up | Active; p016 complete in q023 | `ws003-p016` completed with BR-T47 and a fresh BR-T46 31/31 | Return to physical U4/U5 work; BR-T30 repeatability, BR-T31 sustained I/O, and hardware inventory remain | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; checked legacy-HCD IRQ residual complete in `q016` | `ws004-p009` complete; prior automatic USB milestones remain complete | Select the next dependency-ready hardware Phase or record later manual USB evidence; MSI-less xHCI policy remains independent | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Planned; USB Ethernet first, WLAN manually blocked | WS002 Phase 20 is the inherited baseline | Classify one USB Ethernet descriptor, then extract the wired physical-network Phase | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Active; independent BeUI platform implementations in progress in q023 | `ws008-p004` complete; p005 active | Complete and publish the platform-owned generic BeUI registrar, then advance both Noct pins | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Complete (`q023`) | `ws008-p005` complete; canonical revision `c1e4e0fcdbb7b8cdf1705601b13d57b787c61621` published and pinned | No current Phase; extract a new requirement before resuming | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
