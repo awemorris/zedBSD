@@ -561,22 +561,24 @@ mutation_reserve(const struct backing_object_key *key,
 		}
 		if (claim->key_valid && range != NULL) {
 			volume = key_volume(&claim->key);
-			/* Unowned raw aliases may change FAT allocation metadata, not
-			 * merely the claimed data sectors.  Reject their complete volume.
-			 * A trusted filesystem write may update unrelated metadata, but it
-			 * still may not touch another claim's exact data extents.
+			/* Truly unowned raw aliases may change FAT allocation metadata,
+			 * not merely the requested data sectors, so reject their complete
+			 * volume.  An explicitly supplied owner was already restricted to
+			 * its own published extents above; let that direct I/O coexist with
+			 * disjoint inode claims while still rejecting another claim's exact
+			 * data extents.  Trusted filesystem writes have the same exact-
+			 * extent exclusion while retaining their metadata-update latitude.
 			 */
-			if (range_overlap(range, &volume) && !effective_filesystem) {
+			if (range_overlap(range, &volume) && !effective_filesystem &&
+			    effective_owner == NULL) {
 				error = EBUSY;
 				goto out;
 			}
-			if (effective_filesystem)
-				for (j = 0; j < claim->range_count; j++)
-					if (range_overlap(range,
-							  &claim->ranges[j])) {
-						error = EBUSY;
-						goto out;
-					}
+			for (j = 0; j < claim->range_count; j++)
+				if (range_overlap(range, &claim->ranges[j])) {
+					error = EBUSY;
+					goto out;
+				}
 		} else if (range != NULL)
 			for (j = 0; j < claim->range_count; j++)
 				if (range_overlap(range, &claim->ranges[j])) {

@@ -4,13 +4,14 @@ Last updated: 2026-08-28
 
 WSID: `ws016`
 
-Status: active; `ws016-p004` in progress in `q021`
+Status: Complete (`q021`)
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws016-p003`
+Last verified Phase: `ws016-p004`
 
-Resume point: complete the disposable amd64 QEMU acceptance in `ws016-p004`.
+Resume point: no planned Phase remains; extract a new requirement before
+resuming WS016.
 
 Shared tests: [WS016 test index](tests/README.md)
 
@@ -139,7 +140,7 @@ hibernation, encryption, and a listing option are not part of the initial CLI.
 | `ws016-p001` | [Runtime swap manager](phase001-runtime-swap-manager/phase.md) | Complete (`q021`) | Stable source-encoded slots, dynamic add/drain/remove, backing claims, and live commit accounting pass host tests |
 | `ws016-p002` | [`/dev/system` swap UAPI](phase002-swap-uapi/phase.md) | Complete (`q021`) | Versioned privileged control and source enumeration pass ABI, permission, and failure-atomicity tests |
 | `ws016-p003` | [`swapon` and `swapoff` commands](phase003-swap-commands/phase.md) | Complete (`q021`) | Both `/sbin` utilities implement the fixed multi-operand CLI and are installed in configured images |
-| `ws016-p004` | [Runtime swap QEMU acceptance](phase004-runtime-swap-acceptance/phase.md) | In progress (`q021`) | Disposable amd64 QEMU images prove add, page-out/in, drain/remove, failure preservation, and boot-swap regression |
+| `ws016-p004` | [Runtime swap QEMU acceptance](phase004-runtime-swap-acceptance/phase.md) | Complete (`q021`) | Disposable amd64 UEFI QEMU images prove add, page-out/in, installed-command drain/remove, failure preservation, ID reuse, and boot-swap regression |
 
 ## WS completion conditions
 
@@ -166,3 +167,11 @@ source drain needs an unbounded stop-the-world VM walk, or if `/dev/system`
 cannot retain source ownership across interrupted control calls. Do not reduce
 `swapoff` to destructive detach or declare a runtime file safe using only the
 boot-time inode flag.
+
+## Completion result
+
+WS016 completed in `q021` on 2026-08-28. SWAP-T001--T012, the installed native
+commands, focused VM/storage/UAPI regressions, and the final six-cell amd64
+UEFI QEMU matrix passed. The final p004 result table is recorded in the Phase
+book with SHA-256
+`94c36cc82625d8150db69269df50d02a03ba8e0f1233f4a4cdcb284b3ed07f14`.

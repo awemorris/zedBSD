@@ -153,9 +153,12 @@ main(void)
 	struct disk leaf, partition, disjoint;
 	struct mount mount_a, mount_b, mount_parent;
 	struct inode inode_a, inode_alias, inode_other, inode_parent;
+	struct inode inode_runtime;
 	struct backing_claim *file_claim = NULL, *overlap = NULL;
 	struct backing_claim *raw_claim = NULL, *second_claim = NULL;
 	struct backing_claim *parent_claim = NULL;
+	struct backing_claim *loop_claim0 = NULL, *loop_claim1 = NULL;
+	struct backing_claim *runtime_claim = NULL;
 	struct backing_claim_extent extent;
 	struct backing_mutation_guard guard;
 	struct backing_mutation_guard inode_guard, filesystem_guard;
@@ -315,6 +318,47 @@ main(void)
 	assert(backing_mutation_begin_disk(&leaf, 120, 1, NULL, &guard) == 0);
 	backing_mutation_end(&guard);
 	assert(backing_claim_check_mount(&partition, 0) == 0);
+
+	/* Runtime ordering differs from boot activation: the root/data loop
+	 * claims already exist when swapon publishes a third, disjoint inode
+	 * claim.  Direct swap I/O carrying that owner must remain confined to its
+	 * own exact extents, but must not be rejected merely because the two loop
+	 * claims occupy the same FAT volume.
+	 */
+	make_inode(&inode_a, &mount_a, 201);
+	make_inode(&inode_other, &mount_a, 202);
+	make_inode(&inode_runtime, &mount_a, 203);
+	extent.disk = &partition;
+	extent.block = 20;
+	extent.block_count = 8;
+	assert(backing_claim_prepare_inode(&inode_a, BACKING_CLAIM_LOOP,
+					   &loop_claim0) == 0);
+	assert(backing_claim_finalize(loop_claim0, &extent, 1) == 0);
+	extent.block = 40;
+	assert(backing_claim_prepare_inode(&inode_other, BACKING_CLAIM_LOOP,
+					   &loop_claim1) == 0);
+	assert(backing_claim_finalize(loop_claim1, &extent, 1) == 0);
+	extent.block = 60;
+	assert(backing_claim_prepare_inode(&inode_runtime, BACKING_CLAIM_SWAP,
+					   &runtime_claim) == 0);
+	assert(backing_claim_finalize(runtime_claim, &extent, 1) == 0);
+	assert(backing_mutation_begin_disk(&partition, 60, 8, runtime_claim,
+					   &guard) == 0);
+	backing_mutation_end(&guard);
+	/* An owner cannot authorize a write into a sibling loop extent. */
+	assert(backing_mutation_begin_disk(&partition, 20, 1, runtime_claim,
+					   &guard) == EBUSY);
+	/* Truly unowned raw access remains volume-wide excluded, both away from
+	 * and directly on a claimed extent.
+	 */
+	assert(backing_mutation_begin_disk(&partition, 80, 1, NULL, &guard) ==
+	       EBUSY);
+	assert(backing_mutation_begin_disk(&partition, 60, 1, NULL, &guard) ==
+	       EBUSY);
+	backing_claim_release(runtime_claim);
+	backing_claim_release(loop_claim1);
+	backing_claim_release(loop_claim0);
+	runtime_claim = loop_claim1 = loop_claim0 = NULL;
 
 	/* An owned inode on an overlapping parent disk must not authorize a
 	 * filesystem write through a different canonical volume alias.

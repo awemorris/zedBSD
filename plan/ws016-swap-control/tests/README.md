@@ -67,5 +67,20 @@ The q021 p003 execution passed this runner in strict and ASan/UBSan variants,
 native amd64 ELF and install-mode checks, PC/AT and PC-98 cross-ABI object
 builds, `make -j16`, and `git diff --check` on 2026-08-28.
 
+## Implemented p004 runner
+
+- `runtime-swap-qemu-acceptance.sh`, `runtime-swap-acceptance.mk`, and
+  `runtime-swap-guest.c`: SWAP-T011/T012 production-UAPI and installed-command
+  acceptance on disposable amd64 UEFI/q35/xHCI USB images. Runtime file,
+  boot-file plus runtime-raw, native-root negatives, source-order/drain/reuse,
+  deterministic page-pattern readback, and representative BR-T46 UEFI
+  file/raw/mixed boot cells are covered.
+
+The q021 p004 execution passed all six full cells in `p004-final-002`. Its
+`results.tsv` SHA-256 is
+`94c36cc82625d8150db69269df50d02a03ba8e0f1233f4a4cdcb284b3ed07f14`.
+SWAP-T001--T010 focused regressions, `make -j16`, `bash -n`, and
+`git diff --check` also passed on 2026-08-28.
+
 The supported build gate is `make -j16`; the aggregate `make check` target and
 repository `.internal/` tests are not part of this WS.

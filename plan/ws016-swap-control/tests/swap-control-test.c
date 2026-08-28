@@ -15,8 +15,11 @@ static struct disk file_disk;
 static struct disk raw_disk;
 static struct disk root_disk;
 static struct mount file_mount;
+static struct mount bind_mount;
+static struct mount unsupported_mount;
 static struct inode file_inode;
 static struct inode rebound_inode;
+static struct inode unsupported_inode;
 static unsigned char test_thread_storage;
 static int pending_signal;
 enum path_race_mode {
@@ -28,8 +31,10 @@ static enum path_race_mode path_race;
 static unsigned path_race_resolution;
 static unsigned file_prepare_count;
 static unsigned raw_prepare_count;
+static unsigned unsupported_prepare_count;
 static unsigned source_destroy_count;
 static unsigned runtime_add_count;
+static unsigned identity_find_count;
 static unsigned path_release_count;
 static unsigned disk_release_count;
 
@@ -144,6 +149,13 @@ kern_swap_source_prepare_file(const struct path *path, unsigned parameter,
 {
 	static int file_cookie;
 
+	if (path->p_inode == &unsupported_inode) {
+		assert(path->p_mount == &unsupported_mount &&
+		    path->p_mount->m_disk == NULL);
+		unsupported_prepare_count++;
+		kern_swap_source_init(source);
+		return EOPNOTSUPP;
+	}
 	assert(path->p_inode == &file_inode);
 	file_prepare_count++;
 	kern_swap_source_init(source);
@@ -183,6 +195,8 @@ kern_swap_source_set_find_identity(const struct kern_swap_source_set *set,
 {
 	unsigned id;
 
+	assert(disk != NULL);
+	identity_find_count++;
 	for (id = 0; id < KERN_SWAP_SOURCE_COUNT; id++) {
 		const struct kern_swap_source *source = &set->range[id].source;
 
@@ -269,6 +283,16 @@ static int
 resolve_path(void *context, const char *selector, struct path *result)
 {
 	(void)context;
+	if (strcmp(selector, "/unsupported") == 0) {
+		result->p_mount = &unsupported_mount;
+		result->p_inode = &unsupported_inode;
+		return 0;
+	}
+	if (strcmp(selector, "/swap-bind") == 0) {
+		result->p_mount = &bind_mount;
+		result->p_inode = &file_inode;
+		return 0;
+	}
 	if (strcmp(selector, "/swap") != 0 &&
 	    strcmp(selector, "boot0:swap") != 0)
 		return ENOENT;
@@ -353,8 +377,11 @@ main(void)
 	memset(&raw_disk, 0, sizeof(raw_disk));
 	memset(&root_disk, 0, sizeof(root_disk));
 	memset(&file_mount, 0, sizeof(file_mount));
+	memset(&bind_mount, 0, sizeof(bind_mount));
+	memset(&unsupported_mount, 0, sizeof(unsupported_mount));
 	memset(&file_inode, 0, sizeof(file_inode));
 	memset(&rebound_inode, 0, sizeof(rebound_inode));
+	memset(&unsupported_inode, 0, sizeof(unsupported_inode));
 	file_disk.d_dev = 1;
 	raw_disk.d_dev = 2;
 	root_disk.d_dev = 3;
@@ -363,6 +390,8 @@ main(void)
 	file_inode.i_ino = 100;
 	rebound_inode.i_mount = &file_mount;
 	rebound_inode.i_ino = 101;
+	unsupported_inode.i_mount = &unsupported_mount;
+	unsupported_inode.i_ino = 200;
 	sources.active = 1;
 
 	assert(kern_swap_control_register(&registration) == 0);
@@ -383,13 +412,17 @@ main(void)
 	assert(strcmp(info.source, "/swap") == 0);
 	assert(kern_swap_control_add("boot0:swap") == EEXIST);
 	assert(file_prepare_count == 3 && path_release_count == 6);
+	/* A diskless bind wrapper still resolves through the inode's owning FAT
+	 * mount and therefore matches the same canonical source. */
+	assert(kern_swap_control_add("/swap-bind") == EEXIST);
+	assert(file_prepare_count == 3 && path_release_count == 7);
 
 	pending_signal = 1;
 	assert(kern_swap_control_remove("boot0:swap") == EINTR);
 	assert(kern_swap_control_get(0, &info) == 0 &&
 	    info.state == SWAP_SOURCE_STATE_ACTIVE);
 	pending_signal = 0;
-	assert(kern_swap_control_remove("boot0:swap") == 0);
+	assert(kern_swap_control_remove("/swap-bind") == 0);
 	assert(kern_swap_control_get(0, &info) == 0 &&
 	    info.state == SWAP_SOURCE_STATE_INACTIVE);
 
@@ -406,6 +439,33 @@ main(void)
 	assert(kern_swap_control_get(0, &info) == 0 &&
 	    info.header_version == 1 && info.total_pages == 63 &&
 	    strcmp(info.source, "/dev/sda2") == 0);
+	{
+		unsigned count = sources.count;
+		unsigned destroy = source_destroy_count;
+		unsigned add = runtime_add_count;
+		unsigned find = identity_find_count;
+		unsigned release = path_release_count;
+		unsigned prepare = unsupported_prepare_count;
+
+		assert(kern_swap_control_add("/unsupported") == EOPNOTSUPP);
+		assert(unsupported_prepare_count == prepare + 1U);
+		assert(path_release_count == release + 1U);
+		assert(identity_find_count == find);
+		assert(source_destroy_count == destroy);
+		assert(runtime_add_count == add && sources.count == count);
+		assert(kern_swap_control_get(0, &info) == 0 &&
+		    info.state == SWAP_SOURCE_STATE_ACTIVE &&
+		    strcmp(info.source, "/dev/sda2") == 0);
+
+		assert(kern_swap_control_remove("/unsupported") == ENOENT);
+		assert(path_release_count == release + 2U);
+		assert(identity_find_count == find);
+		assert(source_destroy_count == destroy);
+		assert(runtime_add_count == add && sources.count == count);
+		assert(kern_swap_control_get(0, &info) == 0 &&
+		    info.state == SWAP_SOURCE_STATE_ACTIVE &&
+		    strcmp(info.source, "/dev/sda2") == 0);
+	}
 	assert(kern_swap_control_remove("UUID=RAW") == 0);
 	assert(disk_release_count == 5);
 	assert(kern_swap_control_remove("UUID=RAW") == ENOENT);

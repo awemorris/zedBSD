@@ -1,86 +1,74 @@
-# Queue: runtime swap control
+# Queue proposal: shell foreground job-control synchronization
 
 Last updated: 2026-08-28
 
-QID: `q021`
+QID: `q022`
 
-Queue status: active
+Queue status: proposed; execution approval pending
 
 Queue finished: **No**
 
-Authorization: selected automatically under the user's approved WS-priority
-Queue loop on 2026-08-28; Phase-boundary commit and push are authorized for the
-zedBSD repository. If push is rejected by the environment, retain the local
-commit and continue.
+Authorization: not yet authorized. The prior automatic execution window ended
+at 2026-08-28 09:00 JST; this Queue must not enter `in-progress` until the user
+explicitly approves it and supplies or accepts a new timebox.
 
-Timebox: the current continuous execution cycle; stop when every Queue item has
-been processed or no dependency-ready item remains
+Timebox: pending user confirmation
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q020](queue-q020.md)
+Previous Queue: [q021](queue-q021.md)
 
 ## Purpose
 
-Implement the fixed WS016 runtime-swap design as one dependency-ordered Queue:
-first replace the immutable boot aggregate with a safe four-source runtime
-manager, then expose it through `/dev/system`, add the native administration
-commands, and prove the complete path in disposable amd64 QEMU images.
+Complete the bounded `/bin/sh` job-control synchronization residual left after
+the accepted `ws012-p006` single-command gate. The Phase prevents foreground
+pipeline members from reading the controlling terminal before their process
+group owns it and makes `fg` transfer the terminal before sending `SIGCONT`.
 
-## Execution registry
+## Proposed execution registry
 
 | Priority | WS / Phase | Authoritative documents | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws016-p001` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase001-runtime-swap-manager/phase.md), [tests](ws016-swap-control/tests/README.md) | complete | Stable source-encoded slots, dynamic add/drain/remove, backing claims, and live commit accounting pass focused host tests and regressions |
-| 2 | `ws016-p002` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase002-swap-uapi/phase.md), [tests](ws016-swap-control/tests/README.md) | complete | Versioned privileged `/dev/system` control and source enumeration pass ABI, permission, and failure-atomicity tests |
-| 3 | `ws016-p003` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase003-swap-commands/phase.md), [tests](ws016-swap-control/tests/README.md) | complete | `/sbin/swapon` and `/sbin/swapoff` implement the fixed multi-operand CLI and are installed in configured images |
-| 4 | `ws016-p004` | [WS016](ws016-swap-control/ws.md), [Phase](ws016-swap-control/phase004-runtime-swap-acceptance/phase.md), [tests](ws016-swap-control/tests/README.md) | in-progress | Disposable amd64 QEMU images prove runtime add, page-out/in, safe drain/remove, failure preservation, and boot-swap regression |
+| 1 | `ws001-p014` | [WS001](ws001-posix/ws.md), [Phase](ws001-posix/phase014-shell-job-control/phase.md), [tests](ws001-posix/tests/README.md) | pending | Deterministic PTY checkpoints prove foreground pipelines and `fg` cannot race TTY ownership, while direct, background, and non-TTY behavior remains usable |
 
 ## Entry evidence and dependency order
 
-- `ws003-p014` completed signed `ZEDSWAP1`/`ZEDSWAP2` file/raw sources,
-  direct I/O, boot aggregation, integrity checks, and multi-source behavior.
-- `ws003-p015` completed the four-platform boot-parameter matrix and supplies
-  the boot-swap regression baseline reused by p004.
-- The WS016 runtime model, stable token encoding, backing claim, drain rules,
-  versioned UAPI, command contract, and reconsideration boundaries are fixed.
-- p002 starts only after p001 completes; p003 starts only after p002 completes;
-  p004 starts only after p001--p003 complete. An uncleared predecessor leaves
-  every dependent Phase unexecuted.
+- `ws012-p006` is complete and supplies the accepted pre-exec gate for one
+  foreground external command.
+- The remaining pipeline and `fg` races, cleanup rules, test checkpoints, and
+  kernel reconsideration boundary are fixed in `ws001-p014`; no product-policy
+  decision is currently open.
+- This single-item Queue deliberately excludes `ws017-p001`: its device-mmap
+  `mprotect` ceiling still needs the recorded human decision.
+- `ws003-p016` is independently dependency-ready but remains outside this
+  Queue so the selected WS001 correction stays finite and reviewable.
 
-## Ordered execution
+## Proposed execution
 
-1. Execute [ws016-p001](ws016-swap-control/phase001-runtime-swap-manager/phase.md)
-   and verify the source manager, backing claims, drain, and commit accounting.
-2. On p001 completion, execute
-   [ws016-p002](ws016-swap-control/phase002-swap-uapi/phase.md) and verify the
-   versioned `/dev/system` ABI and failure-atomic control boundary.
-3. On p002 completion, execute
-   [ws016-p003](ws016-swap-control/phase003-swap-commands/phase.md) and verify
-   the two installed native `/sbin` commands.
-4. On p001--p003 completion, execute
-   [ws016-p004](ws016-swap-control/phase004-runtime-swap-acceptance/phase.md)
-   and run the complete disposable-image amd64 QEMU acceptance.
-5. After each processed Phase, synchronize P/W/M/Q/test evidence, run
-   `git add -A`, `git commit -m WIP`, and `git push`. If push is rejected by
-   the environment, retain the local commit and continue.
+1. Create or copy a Phase-owned PTY fixture under `plan/ws001-posix/tests/`
+   without using `.internal/`.
+2. Add deterministic process-group/foreground-group checkpoints and implement
+   the shared foreground-pipeline barrier plus `fg` handoff ordering.
+3. Prove cleanup, stopped-state retention, background behavior, and non-TTY
+   behavior with focused repetition and state assertions rather than sleeps.
+4. Format changed shell source, run `make -j16`, perform bounded amd64 QEMU
+   acceptance, and run `git diff --check`; do not run `make check`.
+5. Synchronize P/W/M/Q evidence, commit with message `WIP`, and push. If push is
+   rejected, retain the local commit and report the rejection.
 
-## Stop, defer, and continuation rules
+## Stop and defer rules
 
-- Execute only the fixed surfaces in the linked WS016 Phase books. Do not add
-  formatting, priorities, `fstab`, UFS extent discovery, or a syscall/libc API.
-- If a Phase reaches its reconsideration boundary, record it as `uncleared`
-  with the facts learned and concrete resume condition, then continue with any
-  remaining dependency-ready Queue item. Do not execute a dependent Phase
-  whose predecessor is not complete.
-- Use `make -j16`, never `make check` or `.internal/`. Runtime acceptance uses
-  `qemu-system-x86_64` and disposable copies of the amd64 disk image.
-- Preserve all existing boot-selected swap, VM, storage, and image-build
-  behavior unless the owning Phase explicitly changes it.
+- If a focused reproducer shows a kernel defect in `setpgid()`, `tcsetpgrp()`,
+  `SIGTTIN`, `SIGTSTP`, `SIGCONT`, or `waitpid(WUNTRACED)`, mark the item
+  `uncleared`, record the evidence, and extract a kernel-owned Phase. Do not
+  hide it with sleeps or relaxed assertions.
+- Do not redesign the parser, expansion, multiple-job UI, terminal-mode
+  persistence, or general kernel TTY ABI in this Queue.
+- Preserve the user-owned dirty `userland/noct` checkout and do not advance or
+  publish its gitlink.
 
 ## Approval boundary
 
-The user's automatic Queue-loop authorization covers only `ws016-p001` through
-`ws016-p004` in dependency order and the bounded repairs allowed by their Phase
-books. A reconsideration boundary is recorded as `uncleared`; it does not
-authorize a policy redesign or execution of dependency-gated successors.
+This book is a proposal only. Implementation begins after explicit approval of
+`q022` and its timebox. Approval covers only `ws001-p014` and bounded defects
+inside its Phase contract.

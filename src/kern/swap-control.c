@@ -126,13 +126,21 @@ control_resolve_identity(const struct kern_swap_control_registration *control,
 	    selector, path);
 	if (error != 0)
 		return error;
-	if (path->p_inode == NULL || path->p_mount == NULL ||
-	    path->p_mount->m_disk == NULL) {
+	if (path->p_inode == NULL || path->p_mount == NULL) {
 		path_release(path);
 		path_init(path);
 		return EINVAL;
 	}
-	*disk = path->p_mount->m_disk;
+	/*
+	 * Canonical file identity follows the inode's owning filesystem, not the
+	 * namespace mount which may be a diskless bind wrapper.  A regular file
+	 * whose owning filesystem has no disk still has a valid pathname lifetime;
+	 * keep that path so prepare_file() can return backend-specific EOPNOTSUPP.
+	 * Successful preparations necessarily supply a disk-backed identity before
+	 * publication.
+	 */
+	*disk = path->p_inode->i_mount != NULL ?
+	    path->p_inode->i_mount->m_disk : NULL;
 	*identity_inode = path->p_inode;
 	return 0;
 }
@@ -210,8 +218,11 @@ kern_swap_control_add(const char *selector)
 	    &identity_inode);
 	if (error != 0)
 		goto out;
-	error = kern_swap_source_set_find_identity(control.sources, disk,
-	    identity_inode, &source_id);
+	if (disk != NULL)
+		error = kern_swap_source_set_find_identity(control.sources, disk,
+		    identity_inode, &source_id);
+	else
+		error = ENOENT;
 	if (error == 0) {
 		error = EEXIST;
 		goto out_release;
@@ -277,8 +288,11 @@ kern_swap_control_remove(const char *selector)
 	    &identity_inode);
 	if (error != 0)
 		goto out;
-	error = kern_swap_source_set_find_identity(control.sources, disk,
-	    identity_inode, &source_id);
+	if (disk != NULL)
+		error = kern_swap_source_set_find_identity(control.sources, disk,
+		    identity_inode, &source_id);
+	else
+		error = ENOENT;
 	if (error == 0)
 		error = kern_swap_source_set_runtime_remove_cancelable(
 		    control.sources, source_id, control_cancelled,

@@ -1,6 +1,6 @@
 # WS017 Phase 001: device-mmap and graphics LFB UAPI
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 WSID: `ws017`
 
@@ -8,11 +8,26 @@ Phase ID: `p001`
 
 Combined ID: `ws017-p001`
 
-Status: Planned; Queue-ready
+Status: Blocked; human decision required
 
 Parent: [WS017](../ws.md)
 
 Tests: [WS017 test index](../tests/README.md)
+
+## Human-decision gate
+
+Execution is blocked until the maximum-protection behavior of a device mapping
+is selected:
+
+1. **Initial-protection ceiling (recommended):** an initially RW mapping may
+   transition `RW -> RO -> RW`; an initially RO mapping cannot add write, and
+   execute is always forbidden.
+2. **Monotonic reduction:** once write is removed from a region or derivative,
+   it cannot be restored; execute is always forbidden.
+
+The selected rule becomes the public VM contract and must be covered across
+fork and region splitting. No implementation choice is authorized by the
+current Phase definition.
 
 ## Objective
 
@@ -32,9 +47,9 @@ enabling a production graphics backend.
    unmap, descriptor close, and process exit. Final release calls the device
    operation exactly once; device regions are not swapped, reclaimed, written
    back, or counted as anonymous commitment.
-4. Reject `MAP_PRIVATE`, nonzero offsets, execute permission, permission
-   escalation through `mprotect`, out-of-user-range addresses, and extent/
-   arithmetic overflow for graphics mappings.
+4. Reject `MAP_PRIVATE`, nonzero offsets, execute permission, protection above
+   the human-selected `mprotect` ceiling, out-of-user-range addresses, and
+   extent/arithmetic overflow for graphics mappings.
 5. Add `ZEDBSD_GRAPHICS_CAP_LFB_MMAP`, versioned
    `ZEDBSD_GRAPHICS_GET_LFB_INFO`, indexed/direct-RGB format constants, mapping
    flags, and the fields fixed by the WS contract.
@@ -66,7 +81,8 @@ enabling a production graphics backend.
 ## Completion conditions
 
 - valid device pages map with the requested device/non-cacheable attributes
-  and cannot become executable;
+  and cannot become executable; `mprotect` follows the selected ceiling across
+  fork and region splitting;
 - no page is mapped unless the driver-owned span proves that all prefix,
   visible, padding, and suffix bytes belong to the framebuffer aperture;
 - all region derivatives retain the device lease and final release occurs once

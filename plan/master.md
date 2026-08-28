@@ -16,11 +16,11 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is `q021`; `ws016-p001` through
-`ws016-p003` are complete, and `ws016-p004` is in progress. It runs
-the four WS016 runtime-swap Phases in dependency order: manager, `/dev/system`
-UAPI, native commands, and disposable amd64 QEMU acceptance. The archived
-[q020](queue-q020.md) completed `ws006-p005`, `ws008-p002`, and
+The current [Queue Book](queue.md) is the proposed `q022`, containing only
+`ws001-p014`; its execution approval and timebox are pending. The archived
+[q021](queue-q021.md) completed all four WS016 runtime-swap Phases, including
+six passing amd64 UEFI runtime and representative boot-regression cells. The
+archived [q020](queue-q020.md) completed `ws006-p005`, `ws008-p002`, and
 `ws008-p003`, including capability-only evdev discovery, canonical BeUI
 graphics/input, direct amd64 RW-to-RX execution, and canonical Noct JIT
 lifecycle evidence. The preceding [q019](queue-q019.md) completed
@@ -107,8 +107,8 @@ before this long-term product goal is reached.
 | `ws013` | CPAR container partitioning | Proposed; Boot v1 grammar fixed, Runtime topics manually blocked | `ws013-p001` is the only current Phase | Resolve bounded UEFI FAT LFN/parser/menu details until Runtime CPAR holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
-| `ws016` | Runtime swap control | Active (`q021`) | `ws016-p003` complete; `ws016-p004` in progress | Complete the amd64 QEMU runtime-swap acceptance | [WS016](ws016-swap-control/ws.md) |
-| `ws017` | `/dev/graphics` LFB fast path | Planned; four implementation Phases Queue-ready | No Phase started; `ws017-p001` is dependency-ready | Queue p001 device-mmap/UAPI, then amd64 backend, Xzed fast path, and UEFI acceptance | [WS017](ws017-lfb-graphics/ws.md) |
+| `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
+| `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
 
 ## 4. Milestones
 
@@ -192,10 +192,10 @@ WS010 supplies host-side build and test scripting used by all workstreams.
    implementation Phases without displacing earlier physical-network and
    storage milestones.
 
-The current dependency-ready planning pool outside q021 contains
-`ws003-p016`, `ws017-p001`, and `ws001-p014`. They may be
-selected into a later finite Queue according to the user's next priority; this
-list does not itself authorize implementation.
+With q021 complete, `ws001-p014` is proposed alone in q022. `ws003-p016`
+remains independently dependency-ready. `ws017-p001` returns to the planning
+pool only after its recorded `mprotect` ceiling decision. Neither a proposed
+Queue nor this planning pool authorizes implementation by itself.
 
 WS001 and WS009 advance within every wave when bounded work is selected. Lower
 priority POSIX gaps may remain paused if they do not block the active milestone.
@@ -211,6 +211,7 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | `/etc/net.conf` v1 grammar and empty-collection syntax | WS011 | Parser and boot migration |
 | VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | Manually blocked; `ws011-p004` discussion and implementation |
 | Linux/FreeBSD evdev compatibility profile | WS006 | Resolved by `ws006-p001`; implement `/dev/input/eventN` against it |
+| Device-mapping `mprotect` ceiling | WS017 | Choose whether an initial RW mapping may return from RO to RW within its original maximum, or whether every permission reduction is permanent, before `ws017-p001` enters a Queue |
 | zedBSD GPU/Vulkan capability, object, and display-takeover profile | WS014 | Manually blocked; publishing `/dev/gpuN` UAPI or transferring i915 ownership |
 | YAML `/etc/rc.conf` schema and versioned init status/control protocol | WS012 | Resolved and complete: q017 completed YAML/persistence; q018 completed typed `/run/init.sock` service and `ZSV1 HALT`/`POWEROFF`/`REBOOT` clients, argv/interactive administration, and production integration with no unversioned compatibility path |
 | x86 kernel boot-parameter contract | WS003/WS013 | Resolved and implemented by q015: `boot0`--`boot3`, exclusive `rootpart` or explicit overlay root/data, `swap0`--`swap3`, and `init`; BR-T46 passes all 31 four-platform QEMU cells |
