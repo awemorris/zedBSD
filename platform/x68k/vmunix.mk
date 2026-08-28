@@ -130,7 +130,8 @@ X68K_KERNEL_SOURCES := \
 	src/drivers/input-capability.c src/drivers/input-device.c \
 	src/drivers/input-keymap.c src/kern/locale-record.c \
 	src/kern/tty.c \
-	src/kern/system-swap-device.c src/kern/system-device.c src/kern/init.c
+	src/kern/system-swap-device.c src/kern/system-device.c src/kern/shutdown.c \
+	src/kern/init.c
 X68K_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
 	$(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES)
 X68K_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)

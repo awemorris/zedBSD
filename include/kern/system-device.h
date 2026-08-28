@@ -15,4 +15,8 @@
 int
 system_device_register(void);
 
+/* Common thread-context boundary for every orderly halt or reboot path. */
+void
+system_shutdown_prepare(void);
+
 #endif

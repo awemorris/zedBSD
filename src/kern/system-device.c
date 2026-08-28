@@ -340,11 +340,13 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 	case ZEDBSD_SYSTEM_HALT:
 		if (curthread->proc->pid != 1)
 			return EPERM;
+		system_shutdown_prepare();
 		kern_platform_halt();
 		return 0;
 	case ZEDBSD_SYSTEM_REBOOT:
 		if (curthread->proc->pid != 1)
 			return EPERM;
+		system_shutdown_prepare();
 		kern_platform_reboot();
 		return 0;
 	default:

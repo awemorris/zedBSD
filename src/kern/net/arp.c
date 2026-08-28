@@ -51,16 +51,27 @@ arp_lookup_locked(struct net_device *device, uint32_t address,
 static void
 arp_learn(struct net_device *device, uint32_t address, const uint8_t hardware[6])
 {
+	struct net_device *release_device = NULL;
 	unsigned index, slot = ARP_CACHE_MAX;
 	unsigned long irq;
+	int insert_reference = 1;
 
-	if (address == 0)
+	if (address == 0 || !net_device_ref_live(device))
 		return;
 	irq = spin_lock_irqsave(&cache_lock);
+	/* Serialize the final live-state check with cache publication.  If GONE
+	 * wins first, its purge may already have run; if it wins after this check,
+	 * its purge waits for cache_lock and observes this entry. */
+	if (!net_device_is_live(device)) {
+		spin_unlock_irqrestore(&cache_lock, irq);
+		net_device_release(device);
+		return;
+	}
 	for (index = 0; index < ARP_CACHE_MAX; index++) {
 		if (cache[index].valid && cache[index].device == device &&
 		    cache[index].address == address) {
 			slot = index;
+			insert_reference = 0;
 			break;
 		}
 		if (!cache[index].valid && slot == ARP_CACHE_MAX)
@@ -69,12 +80,41 @@ arp_learn(struct net_device *device, uint32_t address, const uint8_t hardware[6]
 	if (slot == ARP_CACHE_MAX) {
 		slot = replacement++ % ARP_CACHE_MAX;
 	}
+	if (insert_reference && cache[slot].valid)
+		release_device = cache[slot].device;
 	cache[slot].device = device;
 	cache[slot].address = address;
 	memcpy(cache[slot].hardware, hardware, 6);
 	cache[slot].valid = 1;
 	waitq_wake_all(&cache_waitq);
 	spin_unlock_irqrestore(&cache_lock, irq);
+	if (!insert_reference)
+		net_device_release(device);
+	if (release_device != NULL)
+		net_device_release(release_device);
+}
+
+void
+arp_purge_device(struct net_device *device)
+{
+	struct net_device *references[ARP_CACHE_MAX];
+	unsigned count = 0, index;
+	unsigned long irq;
+
+	if (device == NULL)
+		return;
+	irq = spin_lock_irqsave(&cache_lock);
+	for (index = 0; index < ARP_CACHE_MAX; index++) {
+		if (!cache[index].valid || cache[index].device != device)
+			continue;
+		references[count++] = cache[index].device;
+		memset(&cache[index], 0, sizeof(cache[index]));
+	}
+	if (count != 0)
+		waitq_wake_all(&cache_waitq);
+	spin_unlock_irqrestore(&cache_lock, irq);
+	for (index = 0; index < count; index++)
+		net_device_release(references[index]);
 }
 
 int
@@ -86,6 +126,8 @@ arp_resolve(struct net_device *device, uint32_t address, uint8_t hardware[6])
 
 	if (device == NULL || hardware == NULL)
 		return EINVAL;
+	if (!net_device_is_live(device))
+		return ENODEV;
 	if (address == INADDR_BROADCAST ||
 	    (inet_interface_address(device, &local, &mask, &broadcast) == 0 &&
 	     address == broadcast)) {
@@ -221,6 +263,11 @@ arp_input(struct packet_buf *packet)
 int
 arp_init(void)
 {
+	unsigned index;
+
+	for (index = 0; index < ARP_CACHE_MAX; index++)
+		if (cache[index].valid && cache[index].device != NULL)
+			net_device_release(cache[index].device);
 	memset(cache, 0, sizeof(cache));
 	replacement = 0;
 	spin_init(&cache_lock, LOCK_RANK_NETWORK, "ARP cache");

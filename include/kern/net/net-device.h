@@ -31,11 +31,17 @@ struct net_device;
 
 struct net_device_ops {
 	int (*open)(struct net_device *device);
+	/* Stop I/O producers and drain callbacks synchronously.  close must not
+	 * free driver_data; outstanding net_device references may still use it. */
 	void (*close)(struct net_device *device);
 	int (*transmit)(struct net_device *device, struct packet_buf *packet);
 	unsigned (*poll_receive)(struct net_device *device, unsigned budget);
 	int (*ioctl)(struct net_device *device, unsigned long request,
 		     void *argument);
+	/* Optional final owner for dynamically allocated driver state.  This is
+	 * called only after close has returned and the last net_device reference
+	 * has retired.  It may free driver_data, but must not access device. */
+	void (*release)(void *driver_data);
 };
 
 struct net_device {
@@ -50,9 +56,13 @@ struct net_device {
 	unsigned open_count;
 	refcount_t refs;
 	unsigned state;
+	unsigned carrier;
+	unsigned destroy_pending;
+	unsigned reclaiming;
 	unsigned opening;
 	unsigned closing;
 	unsigned poll_scheduled;
+	unsigned poll_active;
 	uint64_t rx_packets;
 	uint64_t rx_bytes;
 	uint64_t rx_errors;
@@ -67,7 +77,13 @@ struct net_device {
 void net_device_registry_init(void);
 struct net_device *net_device_alloc(void);
 int net_device_create(struct net_device *device);
-void net_device_gone(struct net_device *device);
+/* Thread-context teardown barrier.  The device becomes unobservable before
+ * this joins open, close, and poll callbacks.  If IRQs were already disabled,
+ * EWOULDBLOCK is returned without changing registry or lifecycle state. */
+int net_device_gone(struct net_device *device);
+/* Terminal network shutdown removes every live device and synchronously
+ * retires all of its open references before returning. */
+int net_device_shutdown_all(void);
 void net_device_destroy(struct net_device *device);
 /*
  * Lookup functions return an owned reference.
@@ -77,8 +93,16 @@ struct net_device *net_device_find_by_index_ref(unsigned ifindex);
 struct net_device *net_device_at_ref(unsigned index);
 unsigned net_device_count(void);
 void net_device_ref(struct net_device *device);
+int net_device_ref_live(struct net_device *device);
 void net_device_release(struct net_device *device);
+int net_device_is_live(const struct net_device *device);
+unsigned net_device_flags_get(const struct net_device *device);
+int net_device_set_carrier(struct net_device *device, int carrier);
+int net_device_carrier(const struct net_device *device);
+int net_device_running(const struct net_device *device);
 int net_device_open(struct net_device *device);
+/* The final close may yield while an in-flight poll callback retires.  A final
+ * close requested with IRQs already disabled is conservatively deferred. */
 void net_device_close(struct net_device *device);
 int net_device_transmit(struct net_device *device, struct packet_buf *packet);
 void net_device_receive(struct net_device *device, struct packet_buf *packet);

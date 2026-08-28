@@ -94,7 +94,7 @@ AMD64_KERNEL_SOURCES := \
 	src/drivers/input-keymap.c src/kern/locale-record.c \
 	src/kern/tty.c \
 	src/kern/system-swap-device.c \
-	src/kern/system-device.c \
+	src/kern/system-device.c src/kern/shutdown.c \
 	src/drivers/graphics/pcat/vgafont.c src/kern/init.c
 ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
 AMD64_KERNEL_SOURCES += \

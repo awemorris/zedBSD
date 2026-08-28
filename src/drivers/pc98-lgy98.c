@@ -138,7 +138,7 @@ int
 pc98_lgy98_init(void)
 {
 	uint8_t prom[16];
-	int error;
+	int error, gone_error = 0;
 	int irq_registered = 0;
 
 	/* An unused C-bus port reads as 0xff.  Avoid modifying unrelated ports. */
@@ -186,9 +186,11 @@ pc98_lgy98_init(void)
 	{
 		struct net_device *registered = net_device_find_ref("ne0");
 		if (registered == lgy_device)
-			net_device_gone(lgy_device);
+			gone_error = net_device_gone(lgy_device);
 		net_device_release(registered);
 	}
+	if (gone_error != 0)
+		return gone_error;
 	net_device_destroy(lgy_device);
 	lgy_device = NULL;
 	return error;

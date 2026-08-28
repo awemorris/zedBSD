@@ -23,6 +23,7 @@ int arp_resolve(struct net_device *, uint32_t address, uint8_t hardware[6]);
 int arp_resolve_wait(struct net_device *, uint32_t address,
 		     uint8_t hardware[6]);
 int arp_request(struct net_device *, uint32_t address);
+void arp_purge_device(struct net_device *);
 
 int ipv4_init(void);
 int ipv4_protocol_register(uint8_t protocol, ipv4_input_fn input);

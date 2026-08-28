@@ -34,14 +34,13 @@ static struct net_device *loopback_device;
 static int
 loopback_open(struct net_device *device)
 {
-	device->flags |= NET_DEVICE_RUNNING;
-	return 0;
+	return net_device_set_carrier(device, 1);
 }
 
 static void
 loopback_close(struct net_device *device)
 {
-	device->flags &= ~NET_DEVICE_RUNNING;
+	(void)net_device_set_carrier(device, 0);
 }
 
 static int
@@ -288,20 +287,15 @@ void
 net_shutdown_for_boot(void)
 {
 	struct packet_buf *packet;
-	unsigned index;
 	unsigned long irq;
+	int error;
 
 	irq = spin_lock_irqsave(&input_lock);
 	network_stopping = 1;
 	spin_unlock_irqrestore(&input_lock, irq);
-	for (index = 0;; index++) {
-		struct net_device *device = net_device_at_ref(index);
-
-		if (device == NULL)
-			break;
-		net_device_close(device);
-		net_device_release(device);
-	}
+	error = net_device_shutdown_all();
+	if (error != 0)
+		hal_printf("net: shutdown barrier failed (%d)\n", error);
 	while ((packet = input_dequeue()) != NULL)
 		packet_buf_free(packet);
 }

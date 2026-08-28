@@ -81,6 +81,7 @@ route_add_flags(uint32_t network, uint32_t netmask, uint32_t gateway,
 {
 	bool enabled;
 	unsigned index, free_index = ROUTE_MAX;
+	int result = 0;
 
 	if (device == NULL || mask_prefix(netmask, NULL) != 0 ||
 	    (network & ~netmask) != 0 || !(flags & RTF_UP) ||
@@ -89,6 +90,10 @@ route_add_flags(uint32_t network, uint32_t netmask, uint32_t gateway,
 	    ((flags & RTF_HOST) != 0 && netmask != 0xffffffffU))
 		return EINVAL;
 	enabled = route_lock();
+	if (!net_device_ref_live(device)) {
+		route_unlock(enabled);
+		return ENODEV;
+	}
 	for (index = 0; index < ROUTE_MAX; index++) {
 		if (!route_used[index]) {
 			if (free_index == ROUTE_MAX)
@@ -100,13 +105,12 @@ route_add_flags(uint32_t network, uint32_t netmask, uint32_t gateway,
 		    routes[index].device == device) {
 			routes[index].gateway = gateway;
 			routes[index].flags = flags;
-			route_unlock(enabled);
-			return 0;
+			goto out_release;
 		}
 	}
 	if (free_index == ROUTE_MAX) {
-		route_unlock(enabled);
-		return ENOSPC;
+		result = ENOSPC;
+		goto out_release;
 	}
 	route_used[free_index] = 1;
 	routes[free_index].network = network;
@@ -114,9 +118,13 @@ route_add_flags(uint32_t network, uint32_t netmask, uint32_t gateway,
 	routes[free_index].gateway = gateway;
 	routes[free_index].device = device;
 	routes[free_index].flags = flags;
-	net_device_ref(device);
 	route_unlock(enabled);
 	return 0;
+
+out_release:
+	route_unlock(enabled);
+	net_device_release(device);
+	return result;
 }
 
 int
@@ -177,13 +185,14 @@ route_get_ref(unsigned ordinal, struct net_route *result)
 	for (index = 0; index < ROUTE_MAX; index++) {
 		if (!route_used[index])
 			continue;
+		if (!net_device_ref_live(routes[index].device))
+			continue;
 		if (ordinal-- == 0) {
 			*result = routes[index];
-			if (result->device != NULL)
-				net_device_ref(result->device);
 			route_unlock(enabled);
 			return 0;
 		}
+		net_device_release(routes[index].device);
 	}
 	route_unlock(enabled);
 	return ENOENT;
@@ -204,19 +213,22 @@ route_lookup_ref(uint32_t destination, struct net_route *result)
 		if (!route_used[index] ||
 		    (destination & routes[index].netmask) != routes[index].network)
 			continue;
+		if (!net_device_ref_live(routes[index].device))
+			continue;
 		(void)mask_prefix(routes[index].netmask, &prefix);
 		if (best == NULL || prefix > best_prefix) {
+			if (best != NULL)
+				net_device_release(best->device);
 			best = &routes[index];
 			best_prefix = prefix;
-		}
+		} else
+			net_device_release(routes[index].device);
 	}
 	if (best == NULL) {
 		route_unlock(enabled);
 		return ENETUNREACH;
 	}
 	*result = *best;
-	if (result->device != NULL)
-		net_device_ref(result->device);
 	route_unlock(enabled);
 	return 0;
 }

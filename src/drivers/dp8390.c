@@ -219,7 +219,7 @@ chip_start(struct dp8390 *dp)
 	wr(dp, DP_ISR, 0xffU);
 	dp->opened = 1;
 	dp->tx_busy = 0;
-	dp->device->flags |= NET_DEVICE_RUNNING;
+	(void)net_device_set_carrier(dp->device, 1);
 	wr(dp, DP_IMR, DP_IMR_RUN);
 	return 0;
 }
@@ -241,6 +241,7 @@ static void dp_close(struct net_device *device)
 
 	chip_stop(dp);
 	spin_unlock_irqrestore(&dp->lock, irq);
+	(void)net_device_set_carrier(device, 0);
 }
 
 static int

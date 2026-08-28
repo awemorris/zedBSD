@@ -61,7 +61,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/drivers/input-keymap.o $(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/system-swap-device.o \
-	$(BUILD)/src/kern/system-device.o \
+	$(BUILD)/src/kern/system-device.o $(BUILD)/src/kern/shutdown.o \
 	$(PCAT_GRAPHICS_OBJS) \
 	$(KERN_BOOT_OBJS) \
 	$(BUILD)/src/kern/init.o \

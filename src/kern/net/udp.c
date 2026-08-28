@@ -186,7 +186,8 @@ udp_sendto(struct socket *socket, const void *buffer, size_t length, int flags,
 		    endpoint->inet.local_port != DHCP_CLIENT_PORT ||
 		    endpoint->inet.ifindex == 0 ||
 		    !(endpoint->inet.inet_flags & INET_SOCKET_BROADCAST) ||
-		    (device->flags & (NET_DEVICE_UP | NET_DEVICE_RUNNING |
+		    (net_device_flags_get(device) &
+		     (NET_DEVICE_UP | NET_DEVICE_RUNNING |
 		     NET_DEVICE_BROADCAST)) != (NET_DEVICE_UP |
 		     NET_DEVICE_RUNNING | NET_DEVICE_BROADCAST))
 			goto fail;

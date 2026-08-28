@@ -151,7 +151,7 @@ int
 pcat_ne2000_init(void)
 {
 	uint8_t prom[16];
-	int error;
+	int error, gone_error = 0;
 	int irq_registered = 0;
 
 	memset(&ne2000, 0, sizeof(ne2000));
@@ -199,9 +199,11 @@ pcat_ne2000_init(void)
 	{
 		struct net_device *registered = net_device_find_ref("ne0");
 		if (registered == ne2000.device)
-			net_device_gone(ne2000.device);
+			gone_error = net_device_gone(ne2000.device);
 		net_device_release(registered);
 	}
+	if (gone_error != 0)
+		return gone_error;
 	net_device_destroy(ne2000.device);
 	ne2000.device = NULL;
 	return error;

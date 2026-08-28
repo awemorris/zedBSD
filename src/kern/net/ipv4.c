@@ -175,7 +175,8 @@ ipv4_input(struct packet_buf *packet)
 		packet->l3_offset = (uint16_t)(packet->data - packet->storage);
 	packet->l3_length = total;
 	if (destination == INADDR_BROADCAST) {
-		if ((packet->device->flags & (NET_DEVICE_UP | NET_DEVICE_RUNNING |
+		if ((net_device_flags_get(packet->device) &
+		     (NET_DEVICE_UP | NET_DEVICE_RUNNING |
 		    NET_DEVICE_BROADCAST)) != (NET_DEVICE_UP | NET_DEVICE_RUNNING |
 		    NET_DEVICE_BROADCAST)) {
 			packet_buf_free(packet);

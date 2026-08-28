@@ -16,6 +16,7 @@
 #include "kern/kmem.h"
 #include "kern/swap.h"
 #include "kern/swap-fat.h"
+#include "kern/system-device.h"
 #include "kern/vm-reclaim.h"
 #include "hal/hal.h"
 #include <errno.h>
@@ -557,9 +558,11 @@ command(char *s)
 		return 1;
 	}
 	if (streq(v[0], "halt")) {
+		system_shutdown_prepare();
 		kern_platform_halt();
 	}
 	if (streq(v[0], "reboot")) {
+		system_shutdown_prepare();
 		kern_platform_reboot();
 	}
 	if (streq(v[0], "noct")) {

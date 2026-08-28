@@ -3,6 +3,7 @@
 #include "kern/net/byteorder.h"
 #include "kern/net/net-device.h"
 #include "kern/net/route.h"
+#include "kern/atomic.h"
 #include "kern/uaccess.h"
 #include "internal.h"
 
@@ -10,6 +11,7 @@
 #include <zedbsd/netinet.h>
 #include <zedbsd/route.h>
 #include <errno.h>
+#include <stdbool.h>
 #include <string.h>
 
 struct inet_interface {
@@ -20,41 +22,111 @@ struct inet_interface {
 };
 
 static struct inet_interface interfaces[NET_DEVICE_MAX];
+static atomic_uint_t interface_guard;
+
+extern bool hal_irq_disable(void) __attribute__((weak));
+extern void hal_irq_enable(void) __attribute__((weak));
+
+static bool
+interface_lock(void)
+{
+	bool enabled = hal_irq_disable != NULL ? hal_irq_disable() : false;
+
+	while (!atomic_try_acquire_zero(&interface_guard))
+		__asm__ volatile("" ::: "memory");
+	return enabled;
+}
+
+static void
+interface_unlock(bool enabled)
+{
+	atomic_store_release(&interface_guard, 0);
+	if (enabled && hal_irq_enable != NULL)
+		hal_irq_enable();
+}
 
 static struct inet_interface *
-interface_for_device(struct net_device *device, int create)
+interface_for_device_locked(struct net_device *device)
 {
-	unsigned index, free_index = NET_DEVICE_MAX;
+	unsigned index;
 
-	for (index = 0; index < NET_DEVICE_MAX; index++) {
+	for (index = 0; index < NET_DEVICE_MAX; index++)
 		if (interfaces[index].device == device)
 			return &interfaces[index];
-		if (interfaces[index].device == NULL &&
-		    free_index == NET_DEVICE_MAX)
-			free_index = index;
+	return NULL;
+}
+
+static int
+interface_ensure(struct net_device *device)
+{
+	struct net_device *release_device = NULL;
+	struct inet_interface *interface;
+	bool enabled;
+	unsigned index, free_index = NET_DEVICE_MAX;
+	int error = 0;
+
+	if (device == NULL)
+		return ENODEV;
+	enabled = interface_lock();
+	interface = interface_for_device_locked(device);
+	if (interface != NULL) {
+		error = net_device_is_live(device) ? 0 : ENODEV;
+		goto out;
 	}
-	if (!create || device == NULL || free_index == NET_DEVICE_MAX)
-		return NULL;
-	net_device_ref(device);
+	for (index = 0; index < NET_DEVICE_MAX; index++)
+		if (interfaces[index].device == NULL) {
+			free_index = index;
+			break;
+		}
+	if (free_index == NET_DEVICE_MAX) {
+		error = ENOSPC;
+		goto out;
+	}
+	if (!net_device_ref_live(device)) {
+		error = ENODEV;
+		goto out;
+	}
+	/* Clear the complete slot before publishing its new identity so values
+	 * left by a removed interface cannot alias a reconnected device. */
+	memset(&interfaces[free_index], 0, sizeof(interfaces[free_index]));
 	interfaces[free_index].device = device;
-	return &interfaces[free_index];
+	if (!net_device_is_live(device)) {
+		release_device = interfaces[free_index].device;
+		memset(&interfaces[free_index], 0,
+		       sizeof(interfaces[free_index]));
+		error = ENODEV;
+	}
+out:
+	interface_unlock(enabled);
+	if (release_device != NULL)
+		net_device_release(release_device);
+	return error;
 }
 
 int
 inet_interface_configuration(struct net_device *device, uint32_t *address,
 			     uint32_t *netmask, uint32_t *broadcast)
 {
-	struct inet_interface *interface = interface_for_device(device, 0);
+	struct inet_interface *interface;
+	bool enabled;
+	int error = 0;
 
-	if (interface == NULL)
+	if (device == NULL)
 		return EADDRNOTAVAIL;
-	if (address != NULL)
-		*address = interface->address;
-	if (netmask != NULL)
-		*netmask = interface->netmask;
-	if (broadcast != NULL)
-		*broadcast = interface->broadcast;
-	return 0;
+	enabled = interface_lock();
+	interface = interface_for_device_locked(device);
+	if (interface == NULL || !net_device_is_live(device)) {
+		error = EADDRNOTAVAIL;
+	} else {
+		if (address != NULL)
+			*address = interface->address;
+		if (netmask != NULL)
+			*netmask = interface->netmask;
+		if (broadcast != NULL)
+			*broadcast = interface->broadcast;
+	}
+	interface_unlock(enabled);
+	return error;
 }
 
 int
@@ -73,20 +145,16 @@ inet_interface_address(struct net_device *device, uint32_t *address,
 }
 
 static void
-interface_update_route(struct inet_interface *interface, uint32_t old_address,
-		       uint32_t old_netmask)
+interface_update_route(struct net_device *device, uint32_t old_address,
+		       uint32_t old_netmask, uint32_t address,
+		       uint32_t netmask)
 {
 	if (old_address != 0 && old_netmask != 0)
 		(void)route_delete(old_address & old_netmask, old_netmask,
-				   interface->device);
-	if (interface->address != 0 && interface->netmask != 0) {
-		(void)route_add_flags(interface->address & interface->netmask,
-				      interface->netmask, 0, interface->device,
+				   device);
+	if (address != 0 && netmask != 0)
+		(void)route_add_flags(address & netmask, netmask, 0, device,
 				      RTF_UP | RTF_CONNECTED);
-		if (interface->broadcast == 0)
-			interface->broadcast =
-			    interface->address | ~interface->netmask;
-	}
 }
 
 void
@@ -102,21 +170,27 @@ inet_socket_bind(struct inet_socket *inet, const struct sockaddr *address,
 		 socklen_t length)
 {
 	const struct sockaddr_in *input = (const struct sockaddr_in *)address;
+	bool enabled;
 	uint32_t local;
-	unsigned index;
+	unsigned ifindex = 0, index;
 
 	if (inet == NULL || address == NULL || length < sizeof(*input) ||
 	    input->sin_family != AF_INET)
 		return EINVAL;
 	local = net_ntohl(input->sin_addr.s_addr);
 	if (local != INADDR_ANY) {
+		enabled = interface_lock();
 		for (index = 0; index < NET_DEVICE_MAX; index++)
 			if (interfaces[index].device != NULL &&
-			    interfaces[index].address == local)
+			    interfaces[index].address == local &&
+			    net_device_is_live(interfaces[index].device)) {
+				ifindex = interfaces[index].device->ifindex;
 				break;
-		if (index == NET_DEVICE_MAX)
+			}
+		interface_unlock(enabled);
+		if (ifindex == 0)
 			return EADDRNOTAVAIL;
-		inet->ifindex = interfaces[index].device->ifindex;
+		inet->ifindex = ifindex;
 	}
 	inet->local_address = local;
 	inet->local_port = net_ntohs(input->sin_port);
@@ -254,16 +328,17 @@ inet_socket_getsockopt(struct inet_socket *inet, int level, int option,
 static unsigned
 device_flags(const struct net_device *device)
 {
+	unsigned device_state = net_device_flags_get(device);
 	unsigned flags = 0;
-	if (device->flags & NET_DEVICE_UP)
+	if (device_state & NET_DEVICE_UP)
 		flags |= IFF_UP;
-	if (device->flags & NET_DEVICE_RUNNING)
+	if (device_state & NET_DEVICE_RUNNING)
 		flags |= IFF_RUNNING;
-	if (device->flags & NET_DEVICE_BROADCAST)
+	if (device_state & NET_DEVICE_BROADCAST)
 		flags |= IFF_BROADCAST;
-	if (device->flags & NET_DEVICE_MULTICAST)
+	if (device_state & NET_DEVICE_MULTICAST)
 		flags |= IFF_MULTICAST;
-	if (device->flags & NET_DEVICE_LOOPBACK)
+	if (device_state & NET_DEVICE_LOOPBACK)
 		flags |= IFF_LOOPBACK;
 	return flags;
 }
@@ -335,7 +410,8 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 	struct ifreq request;
 	struct net_device *device;
 	struct inet_interface *interface;
-	uint32_t old_address, old_netmask;
+	bool enabled;
+	uint32_t address, broadcast, netmask, old_address, old_netmask;
 	int error;
 
 	(void)socket;
@@ -364,10 +440,14 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 	device = net_device_find_ref(request.ifr_name);
 	if (device == NULL)
 		return ENODEV;
-	interface = interface_for_device(device, 1);
-	if (interface == NULL) {
+	error = interface_ensure(device);
+	if (error != 0) {
 		net_device_release(device);
-		return ENOSPC;
+		return error;
+	}
+	if (!net_device_is_live(device)) {
+		net_device_release(device);
+		return ENODEV;
 	}
 	switch (command) {
 	case SIOCGIFINDEX:
@@ -378,14 +458,14 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 		break;
 	case SIOCSIFFLAGS:
 		if ((request.ifr_flags & IFF_UP) != 0 &&
-		    !(device->flags & NET_DEVICE_UP)) {
+		    !(net_device_flags_get(device) & NET_DEVICE_UP)) {
 			error = net_device_open(device);
 			if (error != 0) {
 				net_device_release(device);
 				return error;
 			}
 		} else if ((request.ifr_flags & IFF_UP) == 0 &&
-			   (device->flags & NET_DEVICE_UP)) {
+			   (net_device_flags_get(device) & NET_DEVICE_UP)) {
 			net_device_close(device);
 		}
 		net_device_release(device);
@@ -410,13 +490,29 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 		request.ifr_data.ifi_oqdrops = device->tx_dropped;
 		break;
 	case SIOCGIFADDR:
-		set_ifreq_address(&request, interface->address);
+		error = inet_interface_configuration(device, &address, NULL, NULL);
+		if (error != 0) {
+			net_device_release(device);
+			return ENODEV;
+		}
+		set_ifreq_address(&request, address);
 		break;
 	case SIOCGIFNETMASK:
-		set_ifreq_address(&request, interface->netmask);
+		error = inet_interface_configuration(device, NULL, &netmask, NULL);
+		if (error != 0) {
+			net_device_release(device);
+			return ENODEV;
+		}
+		set_ifreq_address(&request, netmask);
 		break;
 	case SIOCGIFBRDADDR:
-		set_ifreq_address(&request, interface->broadcast);
+		error = inet_interface_configuration(device, NULL, NULL,
+					     &broadcast);
+		if (error != 0) {
+			net_device_release(device);
+			return ENODEV;
+		}
+		set_ifreq_address(&request, broadcast);
 		break;
 	case SIOCSIFADDR:
 	case SIOCSIFNETMASK:
@@ -429,6 +525,13 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 			return EAFNOSUPPORT;
 		}
 		value = net_ntohl(input->sin_addr.s_addr);
+		enabled = interface_lock();
+		interface = interface_for_device_locked(device);
+		if (interface == NULL || !net_device_is_live(device)) {
+			interface_unlock(enabled);
+			net_device_release(device);
+			return ENODEV;
+		}
 		old_address = interface->address;
 		old_netmask = interface->netmask;
 		if (command == SIOCSIFADDR)
@@ -437,7 +540,15 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 			interface->netmask = value;
 		if (command == SIOCSIFBRDADDR)
 			interface->broadcast = value;
-		interface_update_route(interface, old_address, old_netmask);
+		if (interface->address != 0 && interface->netmask != 0 &&
+		    interface->broadcast == 0)
+			interface->broadcast =
+			    interface->address | ~interface->netmask;
+		address = interface->address;
+		netmask = interface->netmask;
+		interface_unlock(enabled);
+		interface_update_route(device, old_address, old_netmask, address,
+				       netmask);
 		net_device_release(device);
 		return 0;
 	}
@@ -467,26 +578,38 @@ static const struct socket_family_ops inet_family = {.create = inet_create};
 int
 inet_socket_init(void)
 {
-	unsigned index;
+	struct net_device *references[NET_DEVICE_MAX];
+	bool enabled;
+	unsigned count = 0, index;
 
+	enabled = interface_lock();
 	for (index = 0; index < NET_DEVICE_MAX; index++)
 		if (interfaces[index].device != NULL)
-			net_device_release(interfaces[index].device);
+			references[count++] = interfaces[index].device;
 	memset(interfaces, 0, sizeof(interfaces));
+	interface_unlock(enabled);
+	for (index = 0; index < count; index++)
+		net_device_release(references[index]);
 	return socket_family_register(AF_INET, &inet_family);
 }
 
 void
 inet_interface_purge_device(struct net_device *device)
 {
-	unsigned index;
+	struct net_device *references[NET_DEVICE_MAX];
+	bool enabled;
+	unsigned count = 0, index;
 
 	if (device == NULL)
 		return;
+	enabled = interface_lock();
 	for (index = 0; index < NET_DEVICE_MAX; index++)
 		if (interfaces[index].device == device) {
+			references[count++] = interfaces[index].device;
 			memset(&interfaces[index], 0,
 			       sizeof(interfaces[index]));
-			net_device_release(device);
 		}
+	interface_unlock(enabled);
+	for (index = 0; index < count; index++)
+		net_device_release(references[index]);
 }

@@ -32,8 +32,8 @@ speculative common USB-Ethernet implementation.
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
 | 1 | `ws004-p010` | [Phase](ws004-hardware/phase010-usb-function-model/phase.md) | completed | USB configuration, alternate-setting, functional-descriptor, string, interface-claim, and transactional endpoint contracts pass 1280 focused checks plus sanitizer, analyzer, regression, and configured-build gates |
-| 2 | `ws004-p011` | [Phase](ws004-hardware/phase011-xhci-concurrent-urbs/phase.md) | pending | xHCI safely owns simultaneous endpoint URBs without weakening storage/reclaim guarantees |
-| 3 | `ws004-p012` | [Phase](ws004-hardware/phase012-net-device-hotplug/phase.md) | in-progress | carrier, detach, ARP purge, deferred release, and shutdown lifetime tests pass |
+| 2 | `ws004-p011` | [Phase](ws004-hardware/phase011-xhci-concurrent-urbs/phase.md) | in-progress | xHCI safely owns simultaneous endpoint URBs without weakening storage/reclaim guarantees |
+| 3 | `ws004-p012` | [Phase](ws004-hardware/phase012-net-device-hotplug/phase.md) | completed | carrier, concurrent detach, stale-identity purge, deferred release, and terminal shutdown barriers pass focused and sanitizer gates |
 | 4 | `ws004-p013` | [Phase](ws004-hardware/phase013-cdc-ncm-wire/phase.md) | completed | strict bounded negotiation and NTH16/NDP16 encode/decode, including the advertised-maximum no-ZLP exception, pass production-source fixtures |
 | 5 | `ws004-p014` | [Phase](ws004-hardware/phase014-cdc-ncm-driver/phase.md) | pending | production NCM class driver binds as `ueN`, transfers, cancels, detaches, reconnects, and passes the declared software gate |
 
@@ -49,9 +49,8 @@ ws004-p012 ----+
 ws004-p013 ----+
 ```
 
-p010 and p013 are complete. p011 may start against the now-frozen USB function
-model; p012 remains independently in progress, and p014 does not start until
-all four prerequisites are complete.
+p010, p012, and p013 are complete. p011 is in progress against the frozen USB
+function and network-lifetime models; p014 does not start until p011 completes.
 
 ## Frozen product boundary
 
