@@ -91,6 +91,29 @@ the documented UNIX/POSIX-oriented interfaces, and supports product-specific
 package sets for all four target classes. Individual WSs may complete or pause
 before this long-term product goal is reached.
 
+### 2.4 Design preference: interface-based modularity and late abstraction
+
+This subsection is informative rather than a mandatory project rule. It
+records the project owner's preferred style so that future design discussions
+can evaluate proposals in the intended context.
+
+Modularity is primarily established by a clear, stable interface and by
+information hiding, not by maximizing implementation reuse. An implementation
+behind that interface should be free to use a different internal structure and
+should be replaceable as a whole without changing its consumers. Two modules
+that satisfy the same external contract therefore need not share an internal
+framework merely because some of their current code looks similar.
+
+Code duplication is not, by itself, considered a design defect or an automatic
+refactoring trigger. The preferred approach is AHA/late abstraction: allow
+independent implementations to develop first, observe which parts actually
+remain common, and extract a shared implementation only after that commonality
+has become substantial and stable. When choosing between duplication and a
+premature or constraining abstraction, preserving independent implementation
+freedom is generally preferred. Shared conformance tests may enforce the
+interface contract without requiring the implementations themselves to share
+code.
+
 ## 3. Workstream registry
 
 | WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
