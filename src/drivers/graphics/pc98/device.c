@@ -1,0 +1,404 @@
+/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+#include "kern/graphics-device.h"
+#include "kern/cdev.h"
+#include "kern/file.h"
+#include "kern/lock.h"
+#include "kern/uaccess.h"
+#include "drivers/graphics/pc98/backend.h"
+
+#include <zedbsd/graphics.h>
+#include <errno.h>
+#include <hal/hal.h>
+#include <string.h>
+
+#define GRAPHICS_CAPABILITIES (ZEDBSD_GRAPHICS_CAP_FILL | \
+	ZEDBSD_GRAPHICS_CAP_LINE | ZEDBSD_GRAPHICS_CAP_PATTERN | \
+	ZEDBSD_GRAPHICS_CAP_BLIT_INDEX8 | ZEDBSD_GRAPHICS_CAP_BLIT_RGB24 | \
+	ZEDBSD_GRAPHICS_CAP_BLIT_MONO1 | ZEDBSD_GRAPHICS_CAP_FLUSH | \
+	ZEDBSD_GRAPHICS_CAP_GLYPH)
+#define GRAPHICS_MAX_RECTS 32U
+#define GRAPHICS_ROW_MAX 4096U
+#define GRAPHICS_MAX_MODES 16U
+
+static struct file *graphics_owner __attribute__((section(".vfs_bss")));
+static int graphics_entered __attribute__((section(".vfs_bss")));
+static struct graphics_mode graphics_mode __attribute__((section(".vfs_bss")));
+static uint8_t row_buffer[GRAPHICS_ROW_MAX] __attribute__((section(".vfs_bss")));
+static uint32_t palette_buffer[256] __attribute__((section(".vfs_bss")));
+static struct mutex graphics_lock __attribute__((section(".vfs_bss")));
+static int graphics_lock_ready __attribute__((section(".vfs_bss")));
+
+/* Registration happens serially on the boot CPU.  Once this flag is
+ * published, every open/close/ioctl operation uses the sleepable mutex so
+ * driver callbacks and user-memory faults never run under a spinlock. */
+static void
+graphics_lock_init_once(void)
+{
+	if (!graphics_lock_ready) {
+		(void)mutex_init(&graphics_lock,LOCK_RANK_DEVICE,"graphics device");
+		graphics_lock_ready=1;
+	}
+}
+
+static int graphics_open(struct file *file)
+{
+	int error=0;
+	mutex_lock(&graphics_lock);
+	if (!pc98_graphics_backend_ready()) {
+		error=ENODEV;
+	} else if (graphics_owner != NULL) {
+		error=EBUSY;
+	} else {
+		graphics_owner = file;
+		graphics_entered = 0;
+		memset(&graphics_mode, 0, sizeof(graphics_mode));
+	}
+	mutex_unlock(&graphics_lock);
+	return error;
+}
+
+static int graphics_close(struct file *file)
+{
+	mutex_lock(&graphics_lock);
+	if (graphics_owner == file) {
+		if (graphics_entered) {
+			pc98_graphics_backend_leave();
+			hal_cons_resume();
+			graphics_entered = 0;
+		}
+		graphics_owner = NULL;
+	}
+	mutex_unlock(&graphics_lock);
+	return 0;
+}
+
+static int require_entered(struct file *file)
+{
+	return file == graphics_owner && graphics_entered ? 0 : ENXIO;
+}
+
+static int valid_rect(const struct graphics_rect *rect)
+{
+	return rect->width != 0 && rect->height != 0 &&
+		rect->x <= graphics_mode.width && rect->y <= graphics_mode.height &&
+		rect->width <= graphics_mode.width - rect->x &&
+		rect->height <= graphics_mode.height - rect->y;
+}
+
+static int graphics_enter(uintptr_t argument)
+{
+	struct graphics_mode request;
+	int error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+	if (graphics_entered ||
+	    ((request.preferred_width == 0) != (request.preferred_height == 0)) ||
+	    request.preferred_width > 16384U || request.preferred_height > 16384U ||
+	    (request.preferred_bits_per_pixel != 0 &&
+	     request.preferred_bits_per_pixel != 4 &&
+	     request.preferred_bits_per_pixel != 8 &&
+	     request.preferred_bits_per_pixel != 24 &&
+	     request.preferred_bits_per_pixel != 32))
+		return EINVAL;
+	memset(&graphics_mode, 0, sizeof(graphics_mode));
+	graphics_mode.preferred_width = request.preferred_width;
+	graphics_mode.preferred_height = request.preferred_height;
+	graphics_mode.preferred_bits_per_pixel = request.preferred_bits_per_pixel;
+	hal_cons_suspend();
+	if (!pc98_graphics_backend_enter(&graphics_mode)) {
+		pc98_graphics_backend_leave();
+		hal_cons_resume();
+		return ENODEV;
+	}
+	graphics_entered = 1;
+	request.width = graphics_mode.width;
+	request.height = graphics_mode.height;
+	request.bits_per_pixel = graphics_mode.bits_per_pixel;
+	request.stride = graphics_mode.stride;
+	request.capabilities = GRAPHICS_CAPABILITIES;
+	error = copyout(&request, argument, sizeof(request));
+	if (error != 0) {
+		pc98_graphics_backend_leave();
+		hal_cons_resume();
+		graphics_entered = 0;
+	}
+	return error;
+}
+
+static int
+graphics_get_modes(uintptr_t argument)
+{
+	struct graphics_mode_list request;
+	struct graphics_mode_info native[GRAPHICS_MAX_MODES];
+	struct graphics_mode_info result;
+	size_t total, returned, i;
+	int error;
+
+	error = copyin(argument, &request, sizeof(request));
+	if (error != 0)
+		return error;
+	if (request.reserved != 0 || request.capacity > GRAPHICS_MAX_MODES ||
+	    (request.capacity != 0 && request.modes == 0))
+		return EINVAL;
+	total = pc98_graphics_backend_get_modes(native, request.capacity);
+	returned = total < request.capacity ? total : request.capacity;
+	for (i = 0; i < returned; i++) {
+		result.width = native[i].width;
+		result.height = native[i].height;
+		result.bits_per_pixel = native[i].bits_per_pixel;
+		result.stride = native[i].stride;
+		error = copyout(&result,
+		    request.modes + i * sizeof(result), sizeof(result));
+		if (error != 0)
+			return error;
+	}
+	request.count = (uint32_t)total;
+	return copyout(&request, argument, sizeof(request));
+}
+
+static int graphics_fill(uintptr_t argument, int patterned)
+{
+	if (patterned) {
+		struct graphics_pattern_fill request;
+		int error = copyin(argument, &request, sizeof(request));
+		if (error != 0) return error;
+		if (request.reserved != 0 || !valid_rect(&request.rect)) return EINVAL;
+		return pc98_graphics_backend_pattern_fill(&request.rect,
+			request.color, request.pattern) ? 0 : EIO;
+	} else {
+		struct graphics_fill request;
+		int error = copyin(argument, &request, sizeof(request));
+		if (error != 0) return error;
+		if (request.reserved != 0 || !valid_rect(&request.rect)) return EINVAL;
+		return pc98_graphics_backend_fill(&request.rect, request.color) ? 0 : EIO;
+	}
+}
+
+static int graphics_line(uintptr_t argument)
+{
+	struct graphics_line request;
+	int error = copyin(argument, &request, sizeof(request));
+	if (error != 0) return error;
+	if (request.reserved != 0 || request.x0 >= graphics_mode.width ||
+	    request.x1 >= graphics_mode.width || request.y0 >= graphics_mode.height ||
+	    request.y1 >= graphics_mode.height)
+		return EINVAL;
+	return pc98_graphics_backend_line(request.x0, request.y0, request.x1,
+		request.y1, request.color) ? 0 : EIO;
+}
+
+static int load_palette(const struct graphics_blit *request)
+{
+	if (request->format == ZEDBSD_GRAPHICS_FORMAT_MONO1) {
+		palette_buffer[0] = request->background;
+		palette_buffer[1] = request->foreground;
+		return 0;
+	}
+	if (request->format == ZEDBSD_GRAPHICS_FORMAT_RGB24)
+		return request->palette == 0 && request->palette_count == 0 ? 0 : EINVAL;
+	if (request->format != ZEDBSD_GRAPHICS_FORMAT_INDEX8 ||
+	    request->palette == 0 || request->palette_count == 0 ||
+	    request->palette_count > 256U)
+		return EINVAL;
+	return copyin(request->palette, palette_buffer,
+		request->palette_count * sizeof(palette_buffer[0]));
+}
+
+static int graphics_blit(uintptr_t argument, int patterned)
+{
+	struct graphics_blit request;
+	struct pc98_graphics_image image;
+	uint64_t minimum_stride, source_offset;
+	unsigned row;
+	int error = copyin(argument, &request, sizeof(request));
+	if (error != 0) return error;
+	if (request.reserved != 0 || request.width == 0 || request.height == 0 ||
+	    request.x > graphics_mode.width || request.y > graphics_mode.height ||
+	    request.width > graphics_mode.width - request.x ||
+	    request.height > graphics_mode.height - request.y || request.pixels == 0)
+		return EINVAL;
+	if (request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24)
+		minimum_stride = (uint64_t)request.width * 3U;
+	else if (request.format == ZEDBSD_GRAPHICS_FORMAT_INDEX8)
+		minimum_stride = request.width;
+	else if (request.format == ZEDBSD_GRAPHICS_FORMAT_MONO1)
+		minimum_stride = ((uint64_t)request.width + 7U) / 8U;
+	else
+		return EINVAL;
+	if (minimum_stride > request.stride || minimum_stride > GRAPHICS_ROW_MAX)
+		return EINVAL;
+	error = load_palette(&request);
+	if (error != 0) return error;
+	memset(&image, 0, sizeof(image));
+	image.format = request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24 ? 2U : 1U;
+	image.width = request.width;
+	image.height = 1;
+	image.stride = request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24 ?
+		(size_t)request.width * 3U : request.width;
+	image.pixels = row_buffer;
+	image.palette = palette_buffer;
+	image.palette_size = request.format == ZEDBSD_GRAPHICS_FORMAT_RGB24 ? 0U :
+		request.format == ZEDBSD_GRAPHICS_FORMAT_MONO1 ? 2U : request.palette_count;
+	for (row = 0; row < request.height; row++) {
+		unsigned column;
+		source_offset = (uint64_t)request.stride * row;
+		if (source_offset > UINTPTR_MAX - (uintptr_t)request.pixels)
+			return EFAULT;
+		if (request.format == ZEDBSD_GRAPHICS_FORMAT_MONO1) {
+			uint8_t packed[128];
+			if (minimum_stride > sizeof(packed)) return EINVAL;
+			error = copyin(request.pixels + (uintptr_t)source_offset,
+				packed, (size_t)minimum_stride);
+			if (error != 0) return error;
+			for (column = 0; column < request.width; column++)
+				row_buffer[column] =
+					(packed[column / 8U] >> (7U - column % 8U)) & 1U;
+		} else {
+			error = copyin(request.pixels + (uintptr_t)source_offset,
+				row_buffer, (size_t)minimum_stride);
+			if (error != 0) return error;
+		}
+		if (!pc98_graphics_backend_blit(request.x, request.y + row, &image,
+			request.pattern, patterned))
+			return EIO;
+	}
+	return 0;
+}
+
+static int graphics_flush(uintptr_t argument)
+{
+	struct graphics_flush request;
+	struct graphics_rect input[GRAPHICS_MAX_RECTS];
+	unsigned i;
+	int error = copyin(argument, &request, sizeof(request));
+	if (error != 0) return error;
+	if (request.rectangle_count > GRAPHICS_MAX_RECTS ||
+	    (request.rectangle_count != 0 && request.rectangles == 0))
+		return EINVAL;
+	if (request.rectangle_count != 0) {
+		error = copyin(request.rectangles, input,
+			request.rectangle_count * sizeof(input[0]));
+		if (error != 0) return error;
+	}
+	for (i = 0; i < request.rectangle_count; i++) {
+		if (!valid_rect(&input[i])) return EINVAL;
+	}
+	return pc98_graphics_backend_flush(input, request.rectangle_count) ? 0 : EIO;
+}
+
+static int graphics_glyph(uintptr_t argument)
+{
+	struct graphics_glyph request;
+	uint8_t bitmap[32];
+	unsigned width, height;
+	int error = copyin(argument, &request, sizeof(request));
+	if (error != 0) return error;
+	if (request.reserved != 0 || request.bitmap == 0 ||
+	    request.bitmap_capacity < sizeof(bitmap))
+		return EINVAL;
+	if (!pc98_graphics_backend_get_glyph(request.codepoint, bitmap, &width,
+	    &height))
+		return EINVAL;
+	request.width = width; request.height = height;
+	request.stride = width / 8U; request.bearing_x = 0;
+	request.bearing_y = 0; request.advance = width;
+	request.format = ZEDBSD_GRAPHICS_GLYPH_MSB1;
+	request.bitmap_size = request.stride * height;
+	error = copyout(bitmap, request.bitmap, request.bitmap_size);
+	if (error == 0) error = copyout(&request, argument, sizeof(request));
+	return error;
+}
+
+static int graphics_ioctl_locked(struct file *file, unsigned long request,
+			  uintptr_t argument)
+{
+	int error;
+	if (file != graphics_owner)
+		return EBADF;
+	if (request == ZEDBSD_GRAPHICS_GET_CAPS) {
+		struct graphics_mode_info modes[GRAPHICS_MAX_MODES];
+		struct graphics_caps caps = { GRAPHICS_CAPABILITIES, 0, 0, 0 };
+		size_t count, i;
+		count = pc98_graphics_backend_get_modes(modes, GRAPHICS_MAX_MODES);
+		if (count > GRAPHICS_MAX_MODES)
+			count = GRAPHICS_MAX_MODES;
+		for (i = 0; i < count; i++) {
+			if (modes[i].width > caps.maximum_width)
+				caps.maximum_width = modes[i].width;
+			if (modes[i].height > caps.maximum_height)
+				caps.maximum_height = modes[i].height;
+		}
+		return copyout(&caps, argument, sizeof(caps));
+	}
+	if (request == ZEDBSD_GRAPHICS_GET_MODES)
+		return graphics_get_modes(argument);
+	if (request == ZEDBSD_GRAPHICS_ENTER)
+		return graphics_enter(argument);
+	error = require_entered(file);
+	if (error != 0) return error;
+	switch (request) {
+	case ZEDBSD_GRAPHICS_GET_MODE: {
+		const struct graphics_mode mode = {
+			.preferred_width = graphics_mode.preferred_width,
+			.preferred_height = graphics_mode.preferred_height,
+			.preferred_bits_per_pixel = graphics_mode.preferred_bits_per_pixel,
+			.width = graphics_mode.width,
+			.height = graphics_mode.height,
+			.bits_per_pixel = graphics_mode.bits_per_pixel,
+			.stride = graphics_mode.stride,
+			.capabilities = GRAPHICS_CAPABILITIES,
+		};
+		return copyout(&mode, argument, sizeof(mode));
+	}
+	case ZEDBSD_GRAPHICS_FILL_RECT: return graphics_fill(argument, 0);
+	case ZEDBSD_GRAPHICS_DRAW_LINE: return graphics_line(argument);
+	case ZEDBSD_GRAPHICS_PATTERN_FILL: return graphics_fill(argument, 1);
+	case ZEDBSD_GRAPHICS_BLIT: return graphics_blit(argument, 0);
+	case ZEDBSD_GRAPHICS_BLIT_PATTERN: return graphics_blit(argument, 1);
+	case ZEDBSD_GRAPHICS_FLUSH: return graphics_flush(argument);
+	case ZEDBSD_GRAPHICS_GET_GLYPH: return graphics_glyph(argument);
+	default: return EOPNOTSUPP;
+	}
+}
+
+static int
+graphics_ioctl(struct file *file,unsigned long request,uintptr_t argument)
+{
+	int error;
+	mutex_lock(&graphics_lock);
+	error=graphics_ioctl_locked(file,request,argument);
+	mutex_unlock(&graphics_lock);
+	return error;
+}
+
+static const struct cdev_ops graphics_ops = {
+	.open = graphics_open,
+	.close = graphics_close,
+	.ioctl = graphics_ioctl,
+};
+
+int graphics_device_register(void)
+{
+	graphics_lock_init_once();
+	mutex_lock(&graphics_lock);
+	graphics_owner = NULL;
+	graphics_entered = 0;
+	mutex_unlock(&graphics_lock);
+	return cdev_register("graphics", 0x00010001U, &graphics_ops, NULL);
+}
+
+void
+graphics_device_restore_text(void)
+{
+	if (!graphics_lock_ready) {
+		hal_cons_resume();
+		return;
+	}
+	mutex_lock(&graphics_lock);
+	if (graphics_entered) {
+		pc98_graphics_backend_leave();
+		graphics_entered = 0;
+	}
+	hal_cons_resume();
+	mutex_unlock(&graphics_lock);
+}

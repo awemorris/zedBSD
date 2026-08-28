@@ -37,6 +37,18 @@ ZEDBSD_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
 	-Iinclude -Iinclude/uapi -Isrc -I. -Ilibc/include
 ZEDBSD_KERN_CC += $(ZEDBSD_CONFIG_CPPFLAGS)
+PC98_GRAPHICS_OBJS :=
+PC98_DISPLAY_OBJS :=
+ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
+PC98_GRAPHICS_OBJS := \
+	$(BUILD)/src/drivers/graphics/pc98/device.o \
+	$(BUILD)/src/drivers/graphics/pc98/backend.o
+PC98_DISPLAY_OBJS := \
+	$(BUILD)/src/drivers/graphics/pc98/display-gdc.o \
+	$(BUILD)/src/drivers/graphics/pc98/display-glyph.o \
+	$(BUILD)/src/drivers/graphics/pc98/display-cirrus.o \
+	$(BUILD)/src/drivers/graphics/pc98/display-auto.o
+endif
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/process-timer.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/klog.o $(BUILD)/src/kern/waitq.o \
@@ -64,24 +76,20 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/input-keymap.o \
 	$(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
-	$(BUILD)/src/kern/graphics-device.o $(BUILD)/src/kern/pc98/font.o \
 	$(BUILD)/src/kern/system-swap-device.o \
 	$(BUILD)/src/kern/system-device.o \
 	$(KERN_BOOT_OBJS) \
 	$(BUILD)/src/kern/init.o \
-	$(BUILD)/drivers/pc98-graphics.o \
+	$(PC98_GRAPHICS_OBJS) \
 	$(KERN_NET_OBJS) \
 	$(KERN_BLOCK_IDENTITY_OBJS) $(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS)
+
+$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/pc98/platform.o: \
+	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
 
 # Native PC-98 display backends used by /dev/graphics.  The Core-Graph
 # blitter is the one hot loop in the graphical path, so it trades size for
 # speed while the rest of the image stays at -Os.
-PC98_DISPLAY_OBJS := \
-	$(BUILD)/drivers/pc98-display-gdc.o \
-	$(BUILD)/drivers/pc98-display-glyph.o \
-	$(BUILD)/drivers/pc98-display-cirrus.o \
-	$(BUILD)/drivers/pc98-display-auto.o
-
 STAGE2_OBJS = \
 	$(BUILD)/$(PC98)/boot-header.o \
 	$(BUILD)/src/kern/main.o \
@@ -134,10 +142,10 @@ vmunix: $(BUILD)/vmunix
 # ----------------------------------------------------------------------
 # Per-object flag overrides.
 
-$(BUILD)/drivers/pc98-display-cirrus.o: OBJ_CFLAGS = $(PC98_CIRRUS_CFLAGS)
+$(BUILD)/src/drivers/graphics/pc98/display-cirrus.o: OBJ_CFLAGS = $(PC98_CIRRUS_CFLAGS)
 
-$(BUILD)/drivers/pc98-graphics.o $(PC98_DISPLAY_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-$(BUILD)/drivers/pc98-graphics.o: OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
+$(PC98_GRAPHICS_OBJS) $(PC98_DISPLAY_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
+$(PC98_GRAPHICS_OBJS): OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
 
 STAGE2_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 
@@ -689,7 +697,8 @@ $(BUILD)/USER-STACK-GUARD.ELF: $(BUILD)/tests/user-stack-guard.o \
 		-T $(PC98)/user-init.ld $< -o $@
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(USER_ELF_CHECK) $@
 
-$(BUILD)/stage2.elf: $(STAGE2_OBJS) $(PC98)/stage2.ld
+$(BUILD)/stage2.elf: $(STAGE2_OBJS) $(ZEDBSD_GRAPHICS_CONFIG_STAMP) \
+	$(PC98)/stage2.ld
 	$(LD) -m elf_i386 --gc-sections -z max-page-size=512 \
 		-T $(PC98)/stage2.ld -nostdlib \
 		$(STAGE2_OBJS) -o $@

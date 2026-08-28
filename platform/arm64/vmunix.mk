@@ -59,7 +59,6 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/input-capability.c src/kern/input-device.c \
 	src/kern/input-keymap.c src/kern/locale-record.c \
 	src/kern/tty.c \
-	src/kern/graphics-device.c \
 	src/kern/system-swap-device.c src/kern/system-device.c src/kern/init.c
 ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
 	$(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES)

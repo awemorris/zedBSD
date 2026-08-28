@@ -9,8 +9,8 @@
 #if CONFIG_DRIVER_LGY98
 #include "drivers/pc98-lgy98.h"
 #endif
-#if CONFIG_DRIVER_GRAPHICS
-#include "drivers/pc98-graphics.h"
+#if CONFIG_DRIVER_GRAPHICS_DEVICE
+#include "drivers/graphics/pc98.h"
 #endif
 #include <errno.h>
 #include <hal/hal.h>
@@ -64,8 +64,8 @@ kern_platform_init(const struct boot_handoff *handoff,
 			    network_error);
 	}
 #endif
-#if CONFIG_DRIVER_GRAPHICS
-	if (!pc98_graphics_init())
+#if CONFIG_DRIVER_GRAPHICS_DEVICE
+	if (!pc98_graphics_prepare())
 		hal_printf("graphics: PC-98 driver unavailable\n");
 #endif
 	return count;

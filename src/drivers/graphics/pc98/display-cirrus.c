@@ -13,7 +13,7 @@
  * the driver stays compiler and host neutral.
  */
 
-#include "drivers/pc98-display-cirrus.h"
+#include "drivers/graphics/pc98/display-cirrus.h"
 
 #include <string.h>
 

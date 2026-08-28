@@ -12,7 +12,7 @@
  * the embedder so the driver stays compiler neutral.
  */
 
-#include "drivers/pc98-display-gdc.h"
+#include "drivers/graphics/pc98/display-gdc.h"
 
 #include <string.h>
 

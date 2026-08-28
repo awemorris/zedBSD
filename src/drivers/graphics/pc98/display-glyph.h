@@ -9,11 +9,11 @@
  * Boots PC-98 CGROM glyph backend
  */
 
-#ifndef PC98_DISPLAY_PC98_GLYPH_H
-#define PC98_DISPLAY_PC98_GLYPH_H
+#ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_GLYPH_H
+#define ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_GLYPH_H
 
-#include "drivers/pc98-display.h"
-#include "drivers/pc98-display-gdc.h"
+#include "drivers/graphics/pc98/display.h"
+#include "drivers/graphics/pc98/display-gdc.h"
 
 struct pc98_glyph {
 	void *io_context;
@@ -47,6 +47,13 @@ int
 pc98_glyph_make_hal(
 	struct pc98_glyph_ops *hal,
 	struct pc98_glyph *backend);
+int
+pc98_glyph_get_bitmap(
+	struct pc98_glyph *backend,
+	uint32_t codepoint,
+	uint8_t font[32],
+	unsigned *width,
+	unsigned *height);
 uint16_t
 pc98_unicode_to_jis(
 	uint32_t codepoint);

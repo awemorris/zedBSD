@@ -1,8 +1,8 @@
 /* PC/AT boot framebuffer, Cirrus GD5446, and standard VGA backends.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "kern/graphics-driver.h"
-#include "kern/pcat/font.h"
-#include "drivers/pcat-graphics.h"
+#include "drivers/graphics/pcat/backend.h"
+#include "drivers/graphics/pcat/font.h"
+#include "drivers/graphics/pcat.h"
 
 #include <drivers/pci.h>
 #include <hal/hal.h>
@@ -21,6 +21,7 @@ enum display_backend { DISPLAY_NONE, DISPLAY_LINEAR, DISPLAY_CIRRUS,
 	DISPLAY_VGA };
 
 static enum display_backend active_backend;
+static int backend_prepared;
 static uint8_t active_bpp;
 static int cirrus_present;
 static struct drv_pci_device *cirrus_device;
@@ -31,9 +32,7 @@ static volatile uint8_t *vga_aperture, *cirrus_aperture;
 static const struct zbl6_framebuffer *linear_framebuffer;
 static volatile uint32_t *linear_pixels;
 
-static int pcat_graphics_clear(void *);
-static int pcat_graphics_fill(void *, const struct kern_graphics_rect *,
-	uint32_t);
+static int pcat_graphics_clear(void);
 
 static const uint32_t vga_palette[16] = {
 	0x000000U, 0x0000aaU, 0x00aa00U, 0x00aaaaU,
@@ -346,7 +345,7 @@ static int pattern_bit(uint64_t pattern, unsigned x, unsigned y)
 	return (row & (uint8_t)(0x80U >> (x & 7U))) != 0;
 }
 
-static int pcat_graphics_prepare(void)
+static int pcat_graphics_prepare_hardware(void)
 {
 	struct hal_pmem_request request = {
 		0x000a0000U, 0x00020000U, 0x1000U,
@@ -382,10 +381,10 @@ static int pcat_graphics_prepare(void)
 	return 1;
 }
 
-static int pcat_graphics_enter(void *context, struct kern_graphics_mode *mode)
+int
+pcat_graphics_backend_enter(struct graphics_mode *mode)
 {
 	unsigned requested;
-	(void)context;
 	if (mode == NULL)
 		return 0;
 	if (linear_pixels != NULL) {
@@ -395,7 +394,7 @@ static int pcat_graphics_enter(void *context, struct kern_graphics_mode *mode)
 		mode->height = linear_framebuffer->height;
 		mode->bits_per_pixel = 32U;
 		mode->stride = linear_framebuffer->stride * 4U;
-		(void)pcat_graphics_clear(NULL);
+		(void)pcat_graphics_clear();
 		hal_printf("graphics: boot framebuffer %ux%ux32 stride=%u\n",
 		    mode->width, mode->height, mode->stride);
 		return 1;
@@ -417,24 +416,23 @@ static int pcat_graphics_enter(void *context, struct kern_graphics_mode *mode)
 	mode->height = HEIGHT;
 	mode->bits_per_pixel = 4;
 	mode->stride = WIDTH / 8U;
-	(void)pcat_graphics_clear(NULL);
+	(void)pcat_graphics_clear();
 	hal_printf("graphics: PC/AT VGA fallback %ux%ux4 planar\n",
 	    WIDTH, HEIGHT);
 	return 1;
 }
 
-static size_t
-pcat_graphics_get_modes(void *context, struct kern_graphics_mode_info *modes,
+size_t
+pcat_graphics_backend_get_modes(struct graphics_mode_info *modes,
 	size_t capacity)
 {
-	static const struct kern_graphics_mode_info available[] = {
+	static const struct graphics_mode_info available[] = {
 		{ WIDTH, HEIGHT, 24U, CIRRUS_STRIDE24 },
 		{ WIDTH, HEIGHT, 8U, CIRRUS_STRIDE8 },
 		{ WIDTH, HEIGHT, 4U, WIDTH / 8U },
 	};
 	size_t i;
 
-	(void)context;
 	if (linear_framebuffer != NULL) {
 		if (modes != NULL && capacity != 0) {
 			modes[0].width = linear_framebuffer->width;
@@ -450,22 +448,21 @@ pcat_graphics_get_modes(void *context, struct kern_graphics_mode_info *modes,
 	return sizeof(available) / sizeof(available[0]);
 }
 
-static int pcat_graphics_clear(void *context)
+static int pcat_graphics_clear(void)
 {
-	struct kern_graphics_rect screen = { 0, 0, WIDTH, HEIGHT };
-	(void)context;
+	struct graphics_rect screen = { 0, 0, WIDTH, HEIGHT };
 	if (active_backend == DISPLAY_NONE)
 		return 0;
 	if (active_backend == DISPLAY_LINEAR) {
 		screen.width = linear_framebuffer->width;
 		screen.height = linear_framebuffer->height;
 	}
-	return pcat_graphics_fill(NULL, &screen, 0);
+	return pcat_graphics_backend_fill(&screen, 0);
 }
 
-static void pcat_graphics_leave(void *context)
+void
+pcat_graphics_backend_leave(void)
 {
-	(void)context;
 	if (active_backend == DISPLAY_NONE)
 		return;
 	if (active_backend == DISPLAY_LINEAR) {
@@ -487,11 +484,10 @@ static void pcat_graphics_leave(void *context)
 	hal_printf("graphics: PC/AT text mode restored\n");
 }
 
-static int pcat_graphics_fill(void *context,
-			     const struct kern_graphics_rect *rect, uint32_t color)
+int
+pcat_graphics_backend_fill(const struct graphics_rect *rect, uint32_t color)
 {
 	unsigned x, y;
-	(void)context;
 	if (rect == NULL || active_backend == DISPLAY_NONE)
 		return 0;
 	if (active_backend == DISPLAY_LINEAR) {
@@ -532,8 +528,9 @@ static int pcat_graphics_fill(void *context,
 	return 1;
 }
 
-static int pcat_graphics_line(void *context, unsigned x0, unsigned y0,
-			     unsigned x1, unsigned y1, uint32_t color)
+int
+pcat_graphics_backend_line(unsigned x0, unsigned y0, unsigned x1,
+	unsigned y1, uint32_t color)
 {
 	int x = (int)x0, y = (int)y0;
 	int target_x = (int)x1, target_y = (int)y1;
@@ -542,7 +539,6 @@ static int pcat_graphics_line(void *context, unsigned x0, unsigned y0,
 	int dy = target_y >= y ? y - target_y : target_y - y;
 	int sy = y < target_y ? 1 : -1;
 	int error = dx + dy;
-	(void)context;
 	if (active_backend == DISPLAY_NONE)
 		return 0;
 	for (;;) {
@@ -557,11 +553,11 @@ static int pcat_graphics_line(void *context, unsigned x0, unsigned y0,
 	return 1;
 }
 
-static int pcat_graphics_pattern_fill(void *context,
-	const struct kern_graphics_rect *rect, uint32_t color, uint64_t pattern)
+int
+pcat_graphics_backend_pattern_fill(const struct graphics_rect *rect,
+	uint32_t color, uint64_t pattern)
 {
 	unsigned x, y;
-	(void)context;
 	if (rect == NULL || active_backend == DISPLAY_NONE)
 		return 0;
 	for (y = 0; y < rect->height; y++)
@@ -571,12 +567,11 @@ static int pcat_graphics_pattern_fill(void *context,
 	return 1;
 }
 
-static int pcat_graphics_blit(void *context, unsigned destination_x,
-	unsigned destination_y, const struct kern_graphics_image *image,
-	uint64_t pattern, int patterned)
+int
+pcat_graphics_backend_blit(unsigned destination_x, unsigned destination_y,
+	const struct pcat_graphics_image *image, uint64_t pattern, int patterned)
 {
 	unsigned x, y;
-	(void)context;
 	if (image == NULL || active_backend == DISPLAY_NONE)
 		return 0;
 	for (y = 0; y < image->height; y++) {
@@ -600,34 +595,21 @@ static int pcat_graphics_blit(void *context, unsigned destination_x,
 	return 1;
 }
 
-static int pcat_graphics_flush(void *context,
-	const struct kern_graphics_rect *rectangles, size_t count)
+int
+pcat_graphics_backend_flush(const struct graphics_rect *rectangles,
+	size_t count)
 {
-	(void)context;
 	(void)rectangles;
 	(void)count;
 	return active_backend != DISPLAY_NONE;
 }
 
-static int pcat_graphics_get_glyph(void *context, uint32_t codepoint,
-	uint8_t bitmap[32], unsigned *width, unsigned *height)
+int
+pcat_graphics_backend_get_glyph(uint32_t codepoint, uint8_t bitmap[32],
+	unsigned *width, unsigned *height)
 {
-	(void)context;
 	return pcat_font_get_glyph(codepoint, bitmap, width, height);
 }
-
-static const struct graphics_driver_ops pcat_graphics_ops = {
-	.get_modes = pcat_graphics_get_modes,
-	.enter = pcat_graphics_enter,
-	.clear = pcat_graphics_clear,
-	.leave = pcat_graphics_leave,
-	.fill = pcat_graphics_fill,
-	.line = pcat_graphics_line,
-	.pattern_fill = pcat_graphics_pattern_fill,
-	.blit = pcat_graphics_blit,
-	.flush = pcat_graphics_flush,
-	.get_glyph = pcat_graphics_get_glyph,
-};
 
 static int cirrus_attach(struct drv_pci_device *device,
 	const struct drv_pci_id *id)
@@ -669,15 +651,23 @@ static struct drv_pci_driver cirrus_driver = {
 	.attach = cirrus_attach, .detach = cirrus_detach
 };
 
-int pcat_graphics_driver_register(void)
+int pcat_graphics_pci_register(void)
 {
 	return drv_pci_driver_register(&cirrus_driver);
 }
 
 int
-pcat_graphics_init(void)
+pcat_graphics_prepare(void)
 {
-	if (!pcat_graphics_prepare())
+	backend_prepared = 0;
+	if (!pcat_graphics_prepare_hardware())
 		return 0;
-	return graphics_driver_register(&pcat_graphics_ops, NULL) == 0;
+	backend_prepared = 1;
+	return 1;
+}
+
+int
+pcat_graphics_backend_ready(void)
+{
+	return backend_prepared;
 }

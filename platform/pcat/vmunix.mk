@@ -23,6 +23,14 @@ ZEDBSD_KERN_CC := $(CC) -m32 -march=i386 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -nostdinc -Os -Wall -Wextra -Werror \
 	-Iinclude -Iinclude/uapi -Isrc -I. -Ilibc/include
 ZEDBSD_KERN_CC += $(ZEDBSD_CONFIG_CPPFLAGS)
+PCAT_GRAPHICS_OBJS :=
+ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
+PCAT_GRAPHICS_OBJS := \
+	$(BUILD)/src/drivers/graphics/pcat/device.o \
+	$(BUILD)/src/drivers/graphics/pcat/backend.o \
+	$(BUILD)/src/drivers/graphics/pcat/font.o \
+	$(BUILD)/src/drivers/graphics/pcat/vgafont.o
+endif
 KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/process-timer.o \
 	$(BUILD)/src/kern/lock.o $(BUILD)/src/kern/klog.o $(BUILD)/src/kern/waitq.o \
@@ -51,14 +59,15 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/input-device.o \
 	$(BUILD)/src/kern/input-keymap.o $(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
-	$(BUILD)/src/kern/graphics-device.o \
 	$(BUILD)/src/kern/system-swap-device.o \
 	$(BUILD)/src/kern/system-device.o \
-	$(BUILD)/src/kern/pcat/font.o $(BUILD)/src/kern/pcat/vgafont.o \
-	$(BUILD)/drivers/pcat-graphics.o \
+	$(PCAT_GRAPHICS_OBJS) \
 	$(KERN_BOOT_OBJS) \
 	$(BUILD)/src/kern/init.o \
 	$(KERN_NET_OBJS)
+
+$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/pcat/platform.o: \
+	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
 
 PCAT_USB_HCD_OBJS :=
 ifeq ($(CONFIG_DRIVER_PCI_UHCI),y)
@@ -268,7 +277,8 @@ $(BUILD)/src/kern/entry.o: src/kern/entry.c
 	@mkdir -p $(dir $@)
 	$(ZEDBSD_KERN_CC) -MMD -MP -c $< -o $@
 
-$(BUILD)/vmunix: $(VMUNIX_OBJS) $(PCAT)/vmunix.ld \
+$(BUILD)/vmunix: $(VMUNIX_OBJS) $(ZEDBSD_GRAPHICS_CONFIG_STAMP) \
+	$(PCAT)/vmunix.ld \
 	platform/pcat/tools/check-pcat-vmunix.noct
 	$(LD) -m elf_i386 --gc-sections -z max-page-size=4096 \
 		-T $(PCAT)/vmunix.ld -nostdlib $(VMUNIX_OBJS) -o $@

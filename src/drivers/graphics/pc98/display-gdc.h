@@ -15,10 +15,10 @@
  * to preserve text VRAM and update only requested rectangles.
  */
 
-#ifndef PC98_DISPLAY_PC98_H
-#define PC98_DISPLAY_PC98_H
+#ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_GDC_H
+#define ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_GDC_H
 
-#include "drivers/pc98-display.h"
+#include "drivers/graphics/pc98/display.h"
 
 #define PC98_DISPLAY_GDC_PLANE_BYTES	(640U * 400U / 8U)
 

@@ -1,7 +1,7 @@
 /* Built-in IBM PC-compatible VGA font.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#ifndef KERN_PCAT_VGAFONT_H
-#define KERN_PCAT_VGAFONT_H
+#ifndef ZEDBSD_DRIVERS_GRAPHICS_PCAT_VGAFONT_H
+#define ZEDBSD_DRIVERS_GRAPHICS_PCAT_VGAFONT_H
 
 #include <stdint.h>
 

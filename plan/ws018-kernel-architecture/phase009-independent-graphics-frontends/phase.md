@@ -1,6 +1,6 @@
 # WS018 Phase 009: independent graphics frontends
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 WSID: `ws018`
 
@@ -8,7 +8,7 @@ Phase ID: `p009`
 
 Combined ID: `ws018-p009`
 
-Status: planned; not queued
+Status: uncleared (`q026`; implementation complete, residual runtime matrix)
 
 Parent: [WS018](../ws.md)
 
@@ -183,3 +183,83 @@ cannot be preserved with driver-owned implementations.  Do not solve drift or
 porting difficulty by restoring a shared frontend, macro-generating both
 implementations from one body, or reintroducing a runtime backend registry.
 
+## q026 execution record (2026-08-29)
+
+Implementation completed the source and build-ownership migration:
+
+- PC/AT and PC-98 now each own a complete, independently compiled frontend in
+  `src/drivers/graphics/pcat/device.c` and
+  `src/drivers/graphics/pc98/device.c`.  Each translation unit owns its cdev
+  state and operations and directly calls only its platform-private backend.
+- PC/AT font/VGA-font ownership and PC-98 display/CG-glyph ownership moved
+  under the corresponding `src/drivers/graphics/` subtree.  The retired common
+  frontend, backend-ops registry, and historical kernel font sources/headers
+  were deleted.  `<zedbsd/graphics.h>` was unchanged.
+- The build derives the internal `CONFIG_DRIVER_GRAPHICS_DEVICE` capability
+  only for a configured PC/AT or PC-98 backend.  A content-stable build stamp
+  invalidates guarded objects and the link when that capability changes, so an
+  enabled and disabled kernel can be rebuilt correctly in the same `BUILD`.
+  Unsupported targets keep the capability at zero and link no registration or
+  platform graphics symbol.
+- KA-T080/KA-T081 are owned under this WS.  The host fixture links each
+  production frontend separately against a private fake backend and exercises
+  registration/readiness, exclusive ownership, modes, enter rollback, fill,
+  line, pattern, INDEX8/RGB24/MONO1 row staging, palette validation/faults,
+  flush, glyph, backend failure, user-copy failure, restore, close, and reopen.
+  The runner also normalizes and compares the two explicit frontend copies and
+  audits retired paths and registration ownership.
+
+Recorded verification:
+
+```text
+run-graphics-frontends-host-test.sh
+  KA-T080 PC/AT independent frontend: PASS
+  KA-T080 PC-98 independent frontend: PASS
+  KA-T080/KA-T081 graphics ownership audit: PASS
+
+make -j16                                      amd64/PC-AT: PASS
+make -j16 vmunix (i386/PC-AT)                  PASS
+make -j16 vmunix (i386/PC-98)                  PASS
+make -j16 vmunix (aarch64/Raspberry Pi 4)      PASS
+make -j16 vmunix (sparcv9/sun4u)               PASS
+make -j16 vmunix (m68k/X68000)                 PASS
+git diff --check                               PASS
+```
+
+Fresh graphics-disabled amd64 builds passed and contained no frontend/backend
+registration symbol.  PC/AT, PC-98, and amd64 were also rebuilt in place
+through enabled -> disabled -> enabled transitions: the guarded VFS/platform
+objects were recompiled, the kernels were relinked, disabled images contained
+no graphics registration/platform symbol, and the re-enabled image contained
+only the selected platform implementation.  The three unsupported target
+images likewise contained no graphics registration or PC/AT/PC-98 backend
+symbol.
+
+For runtime evidence, an amd64 disk image was rebuilt, copied to a disposable
+WS `temp/` image, and booted with `qemu-system-x86_64`.  Root login followed by
+`startx` selected the production 1024x768x32 boot framebuffer; the captured
+1024x768 frame contained rendered Xzed output.  A separate disposable run
+started Xzed, sent `SIGTERM`, waited for exit, and observed the marker and
+resumed shell prompt, providing console-resume evidence.
+
+The remaining Phase-contract runtime matrix was not executed in q026: PC/AT
+VGA and Cirrus, PC-98 GDC and Cirrus, and a graphics-disabled boot/node-absence
+check still need their maintained runners.  Accordingly this record does not
+claim the full KA-T080 hardware matrix or every Phase completion condition;
+the Queue result must retain these as explicit residual verification unless
+that evidence is supplied separately.
+
+### q026 disposition
+
+The Phase is `uncleared`, not failed: all planned source ownership, deletion,
+focused fixture, supported-build, configuration-toggle, amd64 Xzed/render, and
+console-return work is present and verified.  It is not marked complete because
+the remaining PC/AT and PC-98 backend runtime matrix and a booted disabled-node
+check were not executed.  Resume by adding or selecting maintained runners for
+those configurations and recording the resulting KA-T080/KA-T081 evidence; no
+known source change is required first.
+
+The source-ownership dependency needed by `ws018-p002` is nevertheless
+satisfied: fonts and complete frontends no longer reside in historical
+platform directories.  q026 may therefore continue with p002 without claiming
+p009's outstanding runtime acceptance.

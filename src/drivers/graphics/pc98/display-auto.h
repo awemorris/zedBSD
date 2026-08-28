@@ -11,12 +11,12 @@
  * always-present GDC at 640x400x4, so one HAL covers both machines.
  */
 
-#ifndef PC98_DISPLAY_PC98_AUTO_H
-#define PC98_DISPLAY_PC98_AUTO_H
+#ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_AUTO_H
+#define ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_AUTO_H
 
-#include "drivers/pc98-display-cirrus.h"
-#include "drivers/pc98-display-glyph.h"
-#include "drivers/pc98-display-gdc.h"
+#include "drivers/graphics/pc98/display-cirrus.h"
+#include "drivers/graphics/pc98/display-glyph.h"
+#include "drivers/graphics/pc98/display-gdc.h"
 
 struct pc98_auto {
 	struct pc98_cirrus cirrus;

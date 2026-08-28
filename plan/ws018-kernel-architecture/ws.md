@@ -4,14 +4,14 @@ Last updated: 2026-08-28
 
 WSID: `ws018`
 
-Status: active; `q025` foundation wave complete
+Status: active; `q026` platform ownership migration in progress
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws018-p004`
 
-Resume point: select the next bounded dependency-ready migration from p007,
-p009, or p010; p002 remains ordered after p009.
+Resume point: `ws018-p009` source/build work is implemented but runtime-matrix
+evidence remains uncleared; execute `ws018-p002`, then p007 and p008.
 
 Shared tests: [WS018 test index](tests/README.md)
 
@@ -206,14 +206,14 @@ path in the same bounded change.
 | Combined ID | Phase | Status | Required result |
 | --- | --- | --- | --- |
 | `ws018-p001` | [Driver source-tree relocation](phase001-driver-source-tree/phase.md) | Complete (`q025`) | All root `drivers/` content and manifests move to `src/drivers/`; every supported target still builds |
-| `ws018-p002` | [Disk-label and platform ownership](phase002-disklabel-platform-layout/phase.md) | Planned after p001, p009 | Disk labels/fonts gain driver owners and every platform has exactly one platform-init TU |
+| `ws018-p002` | [Disk-label and platform ownership](phase002-disklabel-platform-layout/phase.md) | In progress (`q026`) | Disk labels/fonts gain driver owners and every platform has exactly one platform-init TU |
 | `ws018-p003` | [Independent UFS1 and UFS2](phase003-ufs-independence/phase.md) | Complete (`q025`) | UFS1/UFS2 build and operate without a shared implementation directory |
 | `ws018-p004` | [Filesystem-owned identity probes](phase004-filesystem-identity/phase.md) | Complete (`q025`) | FAT/UFS recognition is dispatched through the filesystem interface while generic identities remain generic |
 | `ws018-p005` | [Core source consolidation](phase005-core-source-consolidation/phase.md) | Complete (`q025`) | exec preparation is internal to `exec.c` and proven-dead image code is gone |
 | `ws018-p006` | [Boot implementation and public API consolidation](phase006-boot-api-consolidation/phase.md) | Complete (`q025`) | One `boot.c` and one stable public `boot.h` preserve the four-platform contract |
 | `ws018-p007` | [Xzed evdev-only consumer](phase007-xzed-evdev-consumer/phase.md) | Planned after p001 | Xzed discovers and consumes keyboard plus relative/absolute pointer events only through `/dev/input/eventX` |
 | `ws018-p008` | [Independent input/HID driver ownership](phase008-input-hid-driver-ownership/phase.md) | Planned after p001, p007 | Input sources have final owners, mouse backends emit evdev directly, and `/dev/mouse` is removed |
-| `ws018-p009` | [Independent graphics frontends](phase009-independent-graphics-frontends/phase.md) | Planned after p001 | Each supported graphics backend independently supplies `/dev/graphics`; shared frontend is gone |
+| `ws018-p009` | [Independent graphics frontends](phase009-independent-graphics-frontends/phase.md) | Uncleared (`q026`; implementation complete, runtime matrix remains) | Each supported graphics backend independently supplies `/dev/graphics`; shared frontend is gone |
 | `ws018-p010` | [FAT source consolidation](phase010-fat-source-consolidation/phase.md) | Planned after p001 | One driver-owned `fat.c` preserves current FAT/bootfs behavior |
 | `ws018-p011` | [FAT native VFS migration](phase011-fat-native-vfs/phase.md) | Planned after p004, p010 | Boot-media files use the normal filesystem contract with overlay and swap intact |
 | `ws018-p012` | [Legacy bootfs and platform residue removal](phase012-legacy-bootfs-removal/phase.md) | Planned after p002, p006, p011 | `struct bootfs`, obsolete internal state, and historical platform residue are absent without regressions |

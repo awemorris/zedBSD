@@ -15,11 +15,11 @@
  * the driver stays compiler and host neutral.
  */
 
-#ifndef PC98_DISPLAY_PC98_CIRRUS_H
-#define PC98_DISPLAY_PC98_CIRRUS_H
+#ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_CIRRUS_H
+#define ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_CIRRUS_H
 
-#include "drivers/pc98-display.h"
-#include "drivers/pc98-display-gdc.h"
+#include "drivers/graphics/pc98/display.h"
+#include "drivers/graphics/pc98/display-gdc.h"
 
 #define PC98_DISPLAY_CIRRUS_WIDTH	640U
 #define PC98_DISPLAY_CIRRUS_HEIGHT	480U

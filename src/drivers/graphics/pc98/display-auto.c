@@ -10,7 +10,7 @@
  * HAL covers both machines.
  */
 
-#include "drivers/pc98-display-auto.h"
+#include "drivers/graphics/pc98/display-auto.h"
 
 #include <string.h>
 

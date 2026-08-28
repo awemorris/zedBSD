@@ -11,7 +11,7 @@
  * bank handling; these details matter on physical PC-98 hardware.
  */
 
-#include "drivers/pc98-display-glyph.h"
+#include "drivers/graphics/pc98/display-glyph.h"
 
 #include <string.h>
 
@@ -121,6 +121,24 @@ read_font(struct pc98_glyph *backend, uint16_t jis,
 	return 1;
 }
 
+int
+pc98_glyph_get_bitmap(struct pc98_glyph *backend, uint32_t codepoint,
+	uint8_t font[32], unsigned *width, unsigned *height)
+{
+	uint16_t jis;
+
+	if (backend == NULL || font == NULL || width == NULL || height == NULL ||
+	    codepoint > 0x10ffffU ||
+	    (codepoint >= 0xd800U && codepoint <= 0xdfffU))
+		return 0;
+	jis = pc98_unicode_to_jis(codepoint);
+	if (jis == 0)
+		jis = pc98_unicode_to_jis('?');
+	*width = glyph_width(jis);
+	*height = 16U;
+	return read_font(backend, jis, font);
+}
+
 static int
 glyph_measure(void *context, uint32_t codepoint, unsigned *width,
 	      unsigned *height)
@@ -205,7 +223,7 @@ pc98_glyph_default(struct pc98_glyph *backend,
 	backend->port_in8 = port_in8;
 	backend->port_out8 = port_out8;
 	backend->io_context = io_context;
-	backend->cg_window = (volatile uint8_t *)0x000a4000U;
+	backend->cg_window = (volatile uint8_t *)0x800a4000U;
 	backend->display = display;
 }
 

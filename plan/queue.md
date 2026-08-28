@@ -1,93 +1,84 @@
-# Queue: target-package hold and kernel ownership foundation
+# Queue: kernel driver and platform ownership migration
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
-QID: `q025`
+QID: `q026`
 
-Queue status: completed
+Queue status: in-progress
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: on 2026-08-28 the user instructed the agent to remove Noct
-from the target build options, leave Noct to Principal Engineer manual repair,
-then fill and execute a kernel-work Queue. This authorizes the finite sequence
-below without authorizing any Noct source edit.
+Authorization: after reviewing the remaining `src/kern` driver-like sources
+and historical platform directories, the user explicitly instructed the agent
+to perform that work. This authorizes the finite WS018 sequence below. It does
+not authorize Noct source changes or the later FAT/bootfs semantic migration.
 
-Timebox: no fixed wall-clock limit; six finite Phases.
+Timebox: no fixed wall-clock limit; four finite Phases, executed as far as this
+session safely permits.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q024](queue-q024.md)
+Previous Queue: [q025](queue-q025.md)
 
 ## Purpose
 
-Quarantine the rejected target Noct package without breaking the separate
-host script runtime, then establish the first WS018 kernel ownership wave:
-relocate the driver tree, consolidate dead/split kernel core and boot APIs,
-and separate UFS implementations plus filesystem identity dispatch.
+Complete the dependency-ready driver/platform ownership wave: make each PC/AT
+and PC-98 graphics backend own its complete `/dev/graphics` frontend, move
+fonts and disk-label implementations to driver ownership, collapse each
+historical platform directory into one canonical platform translation unit,
+move Xzed exclusively to capability-discovered evdev, then move generic input
+and console implementations plus independent mouse producers to their final
+driver locations and delete `/dev/mouse`.
 
 ## Execution registry
 
-| Priority | WS / Phase | Authoritative documents | Status | Required result |
+| Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws008-p007` | [Phase](ws008-noct/phase007-target-package-hold/phase.md) | completed | Target Noct and dependent Remacs are unavailable to image selection while host Noct scripting remains operational |
-| 2 | `ws018-p001` | [Phase](ws018-kernel-architecture/phase001-driver-source-tree/phase.md) | completed | Move repository-root drivers to `src/drivers/` and repair every maintained build/test path without behavior change |
-| 3 | `ws018-p005` | [Phase](ws018-kernel-architecture/phase005-core-source-consolidation/phase.md) | completed | Merge exec preparation into `exec.c` and delete only proven-dead image code |
-| 4 | `ws018-p006` | [Phase](ws018-kernel-architecture/phase006-boot-api-consolidation/phase.md) | completed | Consolidate boot implementation and public declarations into one stable `boot.c`/`boot.h` contract |
-| 5 | `ws018-p003` | [Phase](ws018-kernel-architecture/phase003-ufs-independence/phase.md) | completed | Make UFS1 and UFS2 independent filesystem implementations without a common implementation directory |
-| 6 | `ws018-p004` | [Phase](ws018-kernel-architecture/phase004-filesystem-identity/phase.md) | completed | Move filesystem recognition behind the filesystem-driver identity callback while generic identities remain generic |
+| 1 | `ws018-p009` | [Phase](ws018-kernel-architecture/phase009-independent-graphics-frontends/phase.md) | uncleared | Source/build migration and amd64 runtime pass; PC/AT and PC-98 backend runtime matrix remains explicit residual verification |
+| 2 | `ws018-p002` | [Phase](ws018-kernel-architecture/phase002-disklabel-platform-layout/phase.md) | in-progress | Disk labels live under `src/drivers/disklabel`; each platform has exactly one `src/kern/platform/<platform>.c`, with historical directories absent |
+| 3 | `ws018-p007` | [Phase](ws018-kernel-architecture/phase007-xzed-evdev-consumer/phase.md) | pending | Xzed discovers and consumes keyboard and relative/absolute pointer input only through evdev |
+| 4 | `ws018-p008` | [Phase](ws018-kernel-architecture/phase008-input-hid-driver-ownership/phase.md) | pending | Input/console implementations have final driver owners, mouse backends publish evdev directly, and `/dev/mouse` is absent |
 
 ## Dependency order
 
 ```text
-ws008-p007 (independent target-package hold)
+ws018-p009 -> ws018-p002
 
-ws018-p001
-  +-- ws018-p005 -> ws018-p006
-  +-- ws018-p003 -> ws018-p004
+ws018-p007 -> ws018-p008
 ```
 
-An item starts only after every predecessor in this Queue has completed. An
-`uncleared` predecessor makes its dependent item `uncleared/not started`; the
-independent branch may continue.
+The two chains are architecturally independent, but this Queue processes them
+in registry order so build-manifest edits and Phase evidence stay reviewable.
+
+## Known bounds and uncertainty
+
+- The public `<zedbsd/graphics.h>` and evdev UAPIs are frozen for this Queue.
+- Source duplication below those interfaces is intentional; a new common
+  graphics or mouse frontend is outside scope.
+- Missing maintained physical/PC-98 runtime infrastructure may make only the
+  corresponding runtime evidence `uncleared`; it does not permit weakening
+  source, host-fixture, or build gates.
+- FAT consolidation and native VFS/bootfs removal remain p010--p012 and are
+  excluded because they change filesystem access semantics beyond this
+  ownership wave.
 
 ## Execution rules
 
 - Do not inspect or modify `userland/noct/NoctLang` or `/home/awe/NoctLang`.
-- Preserve the host Noct runtime under `build/NoctLang`; it is infrastructure
-  for accepted project-owned build scripts, not the disabled target package.
-- Perform source moves mechanically first, then semantic consolidation in the
-  owning Phase. Do not combine later FAT/input/graphics/platform deletion work
-  into q025.
-- Preserve all unrelated dirty work. Do not reset, checkout, clean, or broadly
-  stage files.
-- Use `make -j16`, focused WS018 fixtures, and `qemu-system-x86_64` where an
-  amd64 runtime gate is required. Do not run `make check` or consume
-  `.internal/`.
-- A newly discovered API/product decision is recorded in its Phase and that
-  item becomes `uncleared`; continue an independent dependency-ready branch.
-- Do not commit or push during q025 unless the user separately requests it.
+- Preserve unrelated work; do not reset, checkout, clean, or broadly overwrite
+  files.
+- Use `make -j16`, focused WS018 fixtures, and `qemu-system-x86_64` for amd64
+  runtime verification. Do not use `make check` or `.internal/`.
+- Use disposable image copies for guest mutation.
+- Stop the affected Phase at its documented reconsideration boundary, record
+  exact evidence and resume condition, then continue an independent item.
+- Commit each completed Phase as `WIP` and push it. If push cannot proceed,
+  retain the local commit and continue.
 
 ## Completion definition
 
-q025 is finished when all six items are `completed` or `uncleared`, all actual
-results are synchronized to P/W/M/Q, and any human decisions have exact resume
-conditions. The Queue may finish with residual work, but it must not claim a
-Phase whose source ownership or behavioral gates are incomplete.
-
-## Execution result
-
-Completed on 2026-08-28.  All six items completed; no item was deferred and no
-human decision boundary was reached.
-
-- The target Noct/Remacs package selections are held while the independent
-  host Noct scripting runtime remains available.
-- The root driver tree moved to `src/drivers`, exec and boot implementation
-  boundaries were consolidated, and the aggregate boot API remains stable.
-- UFS1/UFS2 are independent driver groups, and FAT/UFS filesystem identity is
-  now dispatched through the filesystem interface rather than parsed by
-  generic block core.
-- Focused WS018 fixtures, six supported builds, representative four-platform
-  boots, amd64 BIOS/UEFI UUID cross-boot, normal `make -j16`, and whitespace
-  checks passed.  The p004 Phase records one unrelated intermittent ATA retry
-  transparently.
+q026 is finished after all four entries are `completed` or `uncleared`, actual
+results are synchronized to P/W/M/Q, and every supported build plus applicable
+focused/runtime gate has recorded evidence. A finished Queue may retain an
+`uncleared` runtime-only result, but may not claim ownership deletion that is
+not present in the source tree.

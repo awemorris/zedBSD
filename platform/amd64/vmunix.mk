@@ -93,10 +93,15 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/input-device.c \
 	src/kern/input-keymap.c src/kern/locale-record.c \
 	src/kern/tty.c \
-	src/kern/graphics-device.c src/kern/system-swap-device.c \
+	src/kern/system-swap-device.c \
 	src/kern/system-device.c \
-	src/kern/pcat/font.c src/kern/pcat/vgafont.c \
-	src/drivers/pcat-graphics.c src/kern/init.c
+	src/drivers/graphics/pcat/vgafont.c src/kern/init.c
+ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
+AMD64_KERNEL_SOURCES += \
+	src/drivers/graphics/pcat/device.c \
+	src/drivers/graphics/pcat/backend.c \
+	src/drivers/graphics/pcat/font.c
+endif
 AMD64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
 	$(KERN_UFS1_SOURCES) $(KERN_UFS2_SOURCES)
 AMD64_KERNEL_SOURCES += $(KERN_BOOT_SOURCES)
@@ -114,6 +119,9 @@ AMD64_VMUNIX_OBJS := $(AMD64_HAL_OBJS) $(AMD64_KERNEL_OBJS) \
 ifneq ($(strip $(ZEDBSD_CONFIG)),)
 $(AMD64_VMUNIX_OBJS): $(ZEDBSD_CONFIG)
 endif
+$(BUILD)/kern64/src/kern/vfs.o \
+	$(BUILD)/kern64/src/kern/pcat/platform.o: \
+	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
 
 vmunix: $(BUILD)/vmunix
 
@@ -144,7 +152,8 @@ $(BUILD)/kern64/%.o: %.c
 	$(CC) $(AMD64_CPPFLAGS) $(AMD64_KERNEL_LIBC_CFLAGS) -fno-builtin \
 		-fno-strict-aliasing -MMD -MP -c $< -o $@
 
-$(BUILD)/vmunix: $(AMD64_VMUNIX_OBJS) $(AMD64_PLATFORM)/vmunix.ld \
+$(BUILD)/vmunix: $(AMD64_VMUNIX_OBJS) $(ZEDBSD_GRAPHICS_CONFIG_STAMP) \
+	$(AMD64_PLATFORM)/vmunix.ld \
 	platform/amd64/tools/check-amd64-vmunix.noct
 	$(LD) -m elf_x86_64 --gc-sections -z max-page-size=4096 \
 		-T $(AMD64_PLATFORM)/vmunix.ld -nostdlib $(AMD64_VMUNIX_OBJS) -o $@

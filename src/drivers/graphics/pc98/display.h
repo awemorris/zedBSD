@@ -9,8 +9,8 @@
  * zedBSD PC-98 native display backend contract
  */
 
-#ifndef ZEDBSD_PC98_DISPLAY_H
-#define ZEDBSD_PC98_DISPLAY_H
+#ifndef ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_H
+#define ZEDBSD_DRIVERS_GRAPHICS_PC98_DISPLAY_H
 
 #include <stddef.h>
 #include <stdint.h>

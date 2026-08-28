@@ -154,6 +154,30 @@ override ZEDBSD_USER_PROGRAMS := $(sort $(ZEDBSD_USER_PROGRAMS) at batch \
 ifneq ($(filter Xzed,$(ZEDBSD_USER_PROGRAMS)),)
 override CONFIG_DRIVER_GRAPHICS := y
 endif
+# Only PC/AT and PC-98 currently provide a /dev/graphics implementation.
+# Keep this derived capability internal: an unsupported target may still carry
+# an old CONFIG_DRIVER_GRAPHICS=y setting without acquiring a generic node or
+# an unresolved registration symbol.
+ZEDBSD_GRAPHICS_BACKEND := $(strip \
+	$(if $(filter pcat amd64,$(ZEDBSD_PLATFORM_DIR)),pcat,\
+	$(if $(filter pc98,$(ZEDBSD_PLATFORM_DIR)),pc98)))
+override CONFIG_DRIVER_GRAPHICS_DEVICE := $(if $(and \
+	$(filter y,$(CONFIG_DRIVER_GRAPHICS)),$(ZEDBSD_GRAPHICS_BACKEND)),y,n)
+# Kernel object lists and preprocessor guards both depend on this derived
+# capability.  Keep a content-stable stamp so changing either config.mk or a
+# command-line CONFIG_DRIVER_GRAPHICS override invalidates an existing BUILD
+# without forcing an otherwise unchanged kernel to rebuild every time.
+ZEDBSD_GRAPHICS_CONFIG_STAMP := $(BUILD)/.graphics-device-config
+.PHONY: FORCE_ZEDBSD_GRAPHICS_CONFIG
+FORCE_ZEDBSD_GRAPHICS_CONFIG:
+
+$(ZEDBSD_GRAPHICS_CONFIG_STAMP): FORCE_ZEDBSD_GRAPHICS_CONFIG
+	@mkdir -p $(dir $@)
+	@value='CONFIG_DRIVER_GRAPHICS_DEVICE=$(CONFIG_DRIVER_GRAPHICS_DEVICE)'; \
+		if ! test -f $@ || ! grep -Fqx "$$value" $@; then \
+			printf '%s\n' "$$value" > $@.tmp; \
+			mv $@.tmp $@; \
+		fi
 ZEDBSD_MISSING_PACKAGE_REQUIREMENTS := $(sort \
 	$(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 		$(foreach requirement,$(USERLAND_$(program)_REQUIRE),\
@@ -262,6 +286,7 @@ ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_NE2000=$(if $(filter y,$(CONFIG_DRIVER_NE2000)),1,0) \
 	-DCONFIG_DRIVER_LGY98=$(if $(filter y,$(CONFIG_DRIVER_LGY98)),1,0) \
 	-DCONFIG_DRIVER_GRAPHICS=$(if $(filter y,$(CONFIG_DRIVER_GRAPHICS)),1,0) \
+	-DCONFIG_DRIVER_GRAPHICS_DEVICE=$(if $(filter y,$(CONFIG_DRIVER_GRAPHICS_DEVICE)),1,0) \
 	-DCONFIG_DRIVER_PCI_UHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_UHCI)),1,0) \
 	-DCONFIG_DRIVER_PCI_EHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_EHCI)),1,0) \
 	-DCONFIG_DRIVER_PCI_XHCI=$(if $(filter y,$(CONFIG_DRIVER_PCI_XHCI)),1,0) \

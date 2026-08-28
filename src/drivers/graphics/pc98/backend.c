@@ -1,12 +1,11 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "kern/graphics-driver.h"
-#include "kern/pc98/font.h"
-#include "drivers/pc98-graphics.h"
+#include "drivers/graphics/pc98/backend.h"
+#include "drivers/graphics/pc98.h"
 #include "hal/i386/bsp-pc98/display.h"
 
-#include "drivers/pc98-display-auto.h"
+#include "drivers/graphics/pc98/display-auto.h"
 #include <hal/hal.h>
-#include "drivers/pc98-display.h"
+#include "drivers/graphics/pc98/display.h"
 #include <string.h>
 
 #define CIRRUS_PADDR 0xf0000000U
@@ -17,6 +16,7 @@ static struct hal_pmem cirrus_memory;
 static struct pc98_auto display;
 static struct pc98_display_backend backend_hal;
 static struct pc98_display_ops native_display;
+static int backend_prepared;
 
 static uint8_t port_in8(void *context, uint16_t port)
 {
@@ -44,7 +44,7 @@ static int display_stop(void *context)
 	return pc98_display_graphics_stop();
 }
 
-static int pc98_graphics_prepare(void)
+static int pc98_graphics_prepare_hardware(void)
 {
 	static const hal_physaddr_t plane_address[4] = {
 		0x000a8000U, 0x000b0000U, 0x000b8000U, 0x000e0000U
@@ -89,34 +89,27 @@ fail:
 	return 0;
 }
 
-static int pc98_graphics_clear(void *context)
-{
-	(void)context;
-	return pc98_gdc_clear_graphics(&display.gdc);
-}
-
-static size_t
-pc98_graphics_get_modes(void *context, struct kern_graphics_mode_info *modes,
+size_t
+pc98_graphics_backend_get_modes(struct graphics_mode_info *modes,
 	size_t capacity)
 {
-	static const struct kern_graphics_mode_info available[] = {
+	static const struct graphics_mode_info available[] = {
 		{ 640U, 480U, 24U, 640U * 3U },
 		{ 640U, 480U, 8U, 640U },
 		{ 640U, 400U, 4U, 80U },
 	};
 	size_t i;
 
-	(void)context;
 	if (modes != NULL)
 		for (i = 0; i < capacity && i < sizeof(available) / sizeof(available[0]); i++)
 			modes[i] = available[i];
 	return sizeof(available) / sizeof(available[0]);
 }
 
-static int pc98_graphics_enter(void *context, struct kern_graphics_mode *mode)
+int
+pc98_graphics_backend_enter(struct graphics_mode *mode)
 {
 	struct pc98_display_info info;
-	(void)context;
 	if (mode == NULL || native_display.enter == NULL)
 		return 0;
 	memset(&info, 0, sizeof(info));
@@ -137,18 +130,17 @@ static int pc98_graphics_enter(void *context, struct kern_graphics_mode *mode)
 	return 1;
 }
 
-static void pc98_graphics_leave(void *context)
+void
+pc98_graphics_backend_leave(void)
 {
-	(void)context;
 	if (native_display.leave != NULL)
 		native_display.leave(native_display.context);
 }
 
-static int pc98_graphics_fill(void *context,
-			     const struct kern_graphics_rect *rect, uint32_t color)
+int
+pc98_graphics_backend_fill(const struct graphics_rect *rect, uint32_t color)
 {
 	struct pc98_display_rect native;
-	(void)context;
 	if (rect == NULL || native_display.fill == NULL)
 		return 0;
 	native.x = rect->x; native.y = rect->y;
@@ -156,19 +148,19 @@ static int pc98_graphics_fill(void *context,
 	return native_display.fill(native_display.context, &native, color);
 }
 
-static int pc98_graphics_line(void *context, unsigned x0, unsigned y0,
-			     unsigned x1, unsigned y1, uint32_t color)
+int
+pc98_graphics_backend_line(unsigned x0, unsigned y0, unsigned x1,
+	unsigned y1, uint32_t color)
 {
-	(void)context;
 	return native_display.line != NULL && native_display.line(
 		native_display.context, x0, y0, x1, y1, color);
 }
 
-static int pc98_graphics_pattern_fill(void *context,
-	const struct kern_graphics_rect *rect, uint32_t color, uint64_t pattern)
+int
+pc98_graphics_backend_pattern_fill(const struct graphics_rect *rect,
+	uint32_t color, uint64_t pattern)
 {
 	struct pc98_display_rect native;
-	(void)context;
 	if (rect == NULL || native_display.pattern_fill == NULL)
 		return 0;
 	native.x = rect->x; native.y = rect->y;
@@ -177,12 +169,12 @@ static int pc98_graphics_pattern_fill(void *context,
 		color, pattern);
 }
 
-static int pc98_graphics_blit(void *context, unsigned x, unsigned y,
-	const struct kern_graphics_image *image, uint64_t pattern, int patterned)
+int
+pc98_graphics_backend_blit(unsigned x, unsigned y,
+	const struct pc98_graphics_image *image, uint64_t pattern, int patterned)
 {
 	struct pc98_display_image native;
 	unsigned i;
-	(void)context;
 	if (image == NULL || image->palette_size > 256U)
 		return 0;
 	memset(&native, 0, sizeof(native));
@@ -203,12 +195,12 @@ static int pc98_graphics_blit(void *context, unsigned x, unsigned y,
 		native_display.context, x, y, &native);
 }
 
-static int pc98_graphics_flush(void *context,
-	const struct kern_graphics_rect *rectangles, size_t count)
+int
+pc98_graphics_backend_flush(const struct graphics_rect *rectangles,
+	size_t count)
 {
 	struct pc98_display_rect native[32];
 	size_t i;
-	(void)context;
 	if (count > 32U || native_display.flush == NULL)
 		return 0;
 	for (i = 0; i < count; i++) {
@@ -221,31 +213,27 @@ static int pc98_graphics_flush(void *context,
 		count == 0 ? NULL : native, count);
 }
 
-static int
-pc98_graphics_get_glyph(void *context, uint32_t codepoint, uint8_t font[32],
-			 unsigned *width, unsigned *height)
+int
+pc98_graphics_backend_get_glyph(uint32_t codepoint, uint8_t font[32],
+	unsigned *width, unsigned *height)
 {
-	(void)context;
-	return pc98_font_get_glyph(codepoint, font, width, height);
+	return pc98_glyph_get_bitmap(&display.glyph, codepoint, font, width,
+	    height);
 }
 
-static const struct graphics_driver_ops pc98_graphics_ops = {
-	.get_modes = pc98_graphics_get_modes,
-	.enter = pc98_graphics_enter,
-	.clear = pc98_graphics_clear,
-	.leave = pc98_graphics_leave,
-	.fill = pc98_graphics_fill,
-	.line = pc98_graphics_line,
-	.pattern_fill = pc98_graphics_pattern_fill,
-	.blit = pc98_graphics_blit,
-	.flush = pc98_graphics_flush,
-	.get_glyph = pc98_graphics_get_glyph,
-};
 
 int
-pc98_graphics_init(void)
+pc98_graphics_prepare(void)
 {
-	if (!pc98_graphics_prepare())
+	backend_prepared = 0;
+	if (!pc98_graphics_prepare_hardware())
 		return 0;
-	return graphics_driver_register(&pc98_graphics_ops, NULL) == 0;
+	backend_prepared = 1;
+	return 1;
+}
+
+int
+pc98_graphics_backend_ready(void)
+{
+	return backend_prepared;
 }

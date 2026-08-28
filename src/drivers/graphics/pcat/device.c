@@ -1,10 +1,10 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/graphics-device.h"
-#include "kern/graphics-driver.h"
 #include "kern/cdev.h"
 #include "kern/file.h"
 #include "kern/lock.h"
 #include "kern/uaccess.h"
+#include "drivers/graphics/pcat/backend.h"
 
 #include <zedbsd/graphics.h>
 #include <errno.h>
@@ -22,10 +22,7 @@
 
 static struct file *graphics_owner __attribute__((section(".vfs_bss")));
 static int graphics_entered __attribute__((section(".vfs_bss")));
-static const struct graphics_driver_ops *graphics_driver
-	__attribute__((section(".vfs_bss")));
-static void *graphics_driver_context __attribute__((section(".vfs_bss")));
-static struct kern_graphics_mode graphics_mode __attribute__((section(".vfs_bss")));
+static struct graphics_mode graphics_mode __attribute__((section(".vfs_bss")));
 static uint8_t row_buffer[GRAPHICS_ROW_MAX] __attribute__((section(".vfs_bss")));
 static uint32_t palette_buffer[256] __attribute__((section(".vfs_bss")));
 static struct mutex graphics_lock __attribute__((section(".vfs_bss")));
@@ -47,7 +44,7 @@ static int graphics_open(struct file *file)
 {
 	int error=0;
 	mutex_lock(&graphics_lock);
-	if (graphics_driver == NULL) {
+	if (!pcat_graphics_backend_ready()) {
 		error=ENODEV;
 	} else if (graphics_owner != NULL) {
 		error=EBUSY;
@@ -65,7 +62,7 @@ static int graphics_close(struct file *file)
 	mutex_lock(&graphics_lock);
 	if (graphics_owner == file) {
 		if (graphics_entered) {
-			graphics_driver->leave(graphics_driver_context);
+			pcat_graphics_backend_leave();
 			hal_cons_resume();
 			graphics_entered = 0;
 		}
@@ -88,13 +85,6 @@ static int valid_rect(const struct graphics_rect *rect)
 		rect->height <= graphics_mode.height - rect->y;
 }
 
-static void convert_rect(struct kern_graphics_rect *to,
-			 const struct graphics_rect *from)
-{
-	to->x = from->x; to->y = from->y;
-	to->width = from->width; to->height = from->height;
-}
-
 static int graphics_enter(uintptr_t argument)
 {
 	struct graphics_mode request;
@@ -115,8 +105,8 @@ static int graphics_enter(uintptr_t argument)
 	graphics_mode.preferred_height = request.preferred_height;
 	graphics_mode.preferred_bits_per_pixel = request.preferred_bits_per_pixel;
 	hal_cons_suspend();
-	if (!graphics_driver->enter(graphics_driver_context, &graphics_mode)) {
-		graphics_driver->leave(graphics_driver_context);
+	if (!pcat_graphics_backend_enter(&graphics_mode)) {
+		pcat_graphics_backend_leave();
 		hal_cons_resume();
 		return ENODEV;
 	}
@@ -128,7 +118,7 @@ static int graphics_enter(uintptr_t argument)
 	request.capabilities = GRAPHICS_CAPABILITIES;
 	error = copyout(&request, argument, sizeof(request));
 	if (error != 0) {
-		graphics_driver->leave(graphics_driver_context);
+		pcat_graphics_backend_leave();
 		hal_cons_resume();
 		graphics_entered = 0;
 	}
@@ -139,7 +129,7 @@ static int
 graphics_get_modes(uintptr_t argument)
 {
 	struct graphics_mode_list request;
-	struct kern_graphics_mode_info native[GRAPHICS_MAX_MODES];
+	struct graphics_mode_info native[GRAPHICS_MAX_MODES];
 	struct graphics_mode_info result;
 	size_t total, returned, i;
 	int error;
@@ -150,8 +140,7 @@ graphics_get_modes(uintptr_t argument)
 	if (request.reserved != 0 || request.capacity > GRAPHICS_MAX_MODES ||
 	    (request.capacity != 0 && request.modes == 0))
 		return EINVAL;
-	total = graphics_driver->get_modes(graphics_driver_context, native,
-	    request.capacity);
+	total = pcat_graphics_backend_get_modes(native, request.capacity);
 	returned = total < request.capacity ? total : request.capacity;
 	for (i = 0; i < returned; i++) {
 		result.width = native[i].width;
@@ -169,23 +158,19 @@ graphics_get_modes(uintptr_t argument)
 
 static int graphics_fill(uintptr_t argument, int patterned)
 {
-	struct kern_graphics_rect native;
 	if (patterned) {
 		struct graphics_pattern_fill request;
 		int error = copyin(argument, &request, sizeof(request));
 		if (error != 0) return error;
 		if (request.reserved != 0 || !valid_rect(&request.rect)) return EINVAL;
-		convert_rect(&native, &request.rect);
-		return graphics_driver->pattern_fill(graphics_driver_context, &native,
+		return pcat_graphics_backend_pattern_fill(&request.rect,
 			request.color, request.pattern) ? 0 : EIO;
 	} else {
 		struct graphics_fill request;
 		int error = copyin(argument, &request, sizeof(request));
 		if (error != 0) return error;
 		if (request.reserved != 0 || !valid_rect(&request.rect)) return EINVAL;
-		convert_rect(&native, &request.rect);
-		return graphics_driver->fill(graphics_driver_context, &native,
-			request.color) ? 0 : EIO;
+		return pcat_graphics_backend_fill(&request.rect, request.color) ? 0 : EIO;
 	}
 }
 
@@ -198,8 +183,8 @@ static int graphics_line(uintptr_t argument)
 	    request.x1 >= graphics_mode.width || request.y0 >= graphics_mode.height ||
 	    request.y1 >= graphics_mode.height)
 		return EINVAL;
-	return graphics_driver->line(graphics_driver_context, request.x0,
-		request.y0, request.x1, request.y1, request.color) ? 0 : EIO;
+	return pcat_graphics_backend_line(request.x0, request.y0, request.x1,
+		request.y1, request.color) ? 0 : EIO;
 }
 
 static int load_palette(const struct graphics_blit *request)
@@ -222,7 +207,7 @@ static int load_palette(const struct graphics_blit *request)
 static int graphics_blit(uintptr_t argument, int patterned)
 {
 	struct graphics_blit request;
-	struct kern_graphics_image image;
+	struct pcat_graphics_image image;
 	uint64_t minimum_stride, source_offset;
 	unsigned row;
 	int error = copyin(argument, &request, sizeof(request));
@@ -273,8 +258,8 @@ static int graphics_blit(uintptr_t argument, int patterned)
 				row_buffer, (size_t)minimum_stride);
 			if (error != 0) return error;
 		}
-		if (!graphics_driver->blit(graphics_driver_context, request.x,
-			request.y + row, &image, request.pattern, patterned))
+		if (!pcat_graphics_backend_blit(request.x, request.y + row, &image,
+			request.pattern, patterned))
 			return EIO;
 	}
 	return 0;
@@ -284,7 +269,6 @@ static int graphics_flush(uintptr_t argument)
 {
 	struct graphics_flush request;
 	struct graphics_rect input[GRAPHICS_MAX_RECTS];
-	struct kern_graphics_rect native[GRAPHICS_MAX_RECTS];
 	unsigned i;
 	int error = copyin(argument, &request, sizeof(request));
 	if (error != 0) return error;
@@ -298,10 +282,8 @@ static int graphics_flush(uintptr_t argument)
 	}
 	for (i = 0; i < request.rectangle_count; i++) {
 		if (!valid_rect(&input[i])) return EINVAL;
-		convert_rect(&native[i], &input[i]);
 	}
-	return graphics_driver->flush(graphics_driver_context, native,
-		request.rectangle_count) ? 0 : EIO;
+	return pcat_graphics_backend_flush(input, request.rectangle_count) ? 0 : EIO;
 }
 
 static int graphics_glyph(uintptr_t argument)
@@ -314,8 +296,8 @@ static int graphics_glyph(uintptr_t argument)
 	if (request.reserved != 0 || request.bitmap == 0 ||
 	    request.bitmap_capacity < sizeof(bitmap))
 		return EINVAL;
-	if (!graphics_driver->get_glyph(graphics_driver_context,
-	    request.codepoint, bitmap, &width, &height))
+	if (!pcat_graphics_backend_get_glyph(request.codepoint, bitmap, &width,
+	    &height))
 		return EINVAL;
 	request.width = width; request.height = height;
 	request.stride = width / 8U; request.bearing_x = 0;
@@ -334,11 +316,10 @@ static int graphics_ioctl_locked(struct file *file, unsigned long request,
 	if (file != graphics_owner)
 		return EBADF;
 	if (request == ZEDBSD_GRAPHICS_GET_CAPS) {
-		struct kern_graphics_mode_info modes[GRAPHICS_MAX_MODES];
+		struct graphics_mode_info modes[GRAPHICS_MAX_MODES];
 		struct graphics_caps caps = { GRAPHICS_CAPABILITIES, 0, 0, 0 };
 		size_t count, i;
-		count = graphics_driver->get_modes(graphics_driver_context, modes,
-		    GRAPHICS_MAX_MODES);
+		count = pcat_graphics_backend_get_modes(modes, GRAPHICS_MAX_MODES);
 		if (count > GRAPHICS_MAX_MODES)
 			count = GRAPHICS_MAX_MODES;
 		for (i = 0; i < count; i++) {
@@ -406,29 +387,6 @@ int graphics_device_register(void)
 	return cdev_register("graphics", 0x00010001U, &graphics_ops, NULL);
 }
 
-int
-graphics_driver_register(const struct graphics_driver_ops *ops, void *context)
-{
-	int error=0;
-
-	if (ops == NULL || ops->get_modes == NULL || ops->enter == NULL ||
-	    ops->clear == NULL ||
-	    ops->leave == NULL || ops->fill == NULL || ops->line == NULL ||
-	    ops->pattern_fill == NULL || ops->blit == NULL ||
-	    ops->flush == NULL || ops->get_glyph == NULL)
-		return EINVAL;
-	graphics_lock_init_once();
-	mutex_lock(&graphics_lock);
-	if (graphics_driver != NULL) {
-		error=EBUSY;
-	} else {
-		graphics_driver = ops;
-		graphics_driver_context = context;
-	}
-	mutex_unlock(&graphics_lock);
-	return error;
-}
-
 void
 graphics_device_restore_text(void)
 {
@@ -437,8 +395,8 @@ graphics_device_restore_text(void)
 		return;
 	}
 	mutex_lock(&graphics_lock);
-	if (graphics_entered && graphics_driver != NULL) {
-		graphics_driver->leave(graphics_driver_context);
+	if (graphics_entered) {
+		pcat_graphics_backend_leave();
 		graphics_entered = 0;
 	}
 	hal_cons_resume();

@@ -7,7 +7,7 @@
  * Source: https://github.com/coreboot/seabios/blob/master/vgasrc/vgafonts.c
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
  */
-#include "kern/pcat/vgafont.h"
+#include "drivers/graphics/pcat/vgafont.h"
 
 const uint8_t
 pcat_vgafont16[PCAT_VGAFONT_GLYPHS * PCAT_VGAFONT_HEIGHT] = {

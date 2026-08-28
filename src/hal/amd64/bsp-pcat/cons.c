@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include <hal/hal.h>
 #include "bootloader/include/amd64-handoff.h"
-#include "kern/pcat/vgafont.h"
+#include "drivers/graphics/pcat/vgafont.h"
 #include "../asm.h"
 #include "../defs.h"
 #include "../irq.h"

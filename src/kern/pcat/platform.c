@@ -25,8 +25,8 @@
 #if CONFIG_DRIVER_NE2000
 #include "drivers/pcat-ne2000.h"
 #endif
-#if CONFIG_DRIVER_GRAPHICS
-#include "drivers/pcat-graphics.h"
+#if CONFIG_DRIVER_GRAPHICS_DEVICE
+#include "drivers/graphics/pcat.h"
 #endif
 #include <errno.h>
 #include <hal/hal.h>
@@ -68,8 +68,8 @@ kern_platform_init(const struct boot_handoff *handoff,
 	if (drv_pci_xhci_driver_register() != 0)
 		hal_printf("usb: xHCI PCI driver registration failed\n");
 #endif
-#if CONFIG_DRIVER_GRAPHICS
-	if (pcat_graphics_driver_register() != 0)
+#if CONFIG_DRIVER_GRAPHICS_DEVICE
+	if (pcat_graphics_pci_register() != 0)
 		hal_printf("graphics: PCI driver registration failed\n");
 #endif
 	if (drv_pci_pcat_init() != 0)
@@ -105,8 +105,8 @@ kern_platform_init(const struct boot_handoff *handoff,
 			    network_error);
 	}
 #endif
-#if CONFIG_DRIVER_GRAPHICS
-	if (!pcat_graphics_init())
+#if CONFIG_DRIVER_GRAPHICS_DEVICE
+	if (!pcat_graphics_prepare())
 		hal_printf("graphics: PC/AT driver unavailable\n");
 #endif
 	return count;

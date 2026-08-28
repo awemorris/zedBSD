@@ -1,7 +1,7 @@
 /* PC/AT VGA 8x16 ASCII font preservation.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "kern/pcat/font.h"
-#include "kern/pcat/vgafont.h"
+#include "drivers/graphics/pcat/font.h"
+#include "drivers/graphics/pcat/vgafont.h"
 
 #include <hal/hal.h>
 #include <string.h>

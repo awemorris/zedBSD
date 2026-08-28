@@ -22,8 +22,8 @@ disposable build/QEMU evidence belongs under `../temp/` and remains untracked.
 | KA-T060 | p007 | Xzed discovers keyboard and relative/absolute pointer capabilities through `/dev/input/eventX`, receives keys/movement/buttons, and contains no `/dev/mouse` or console-event fallback |
 | KA-T070 | p008 | PC/AT PS/2 and PC-98 bus-mouse boots each expose dynamic evdev nodes and correct press/release/motion events |
 | KA-T071 | p008 | Source/node/symbol audit finds final input ownership and no `mouse-device.c` or `/dev/mouse` implementation |
-| KA-T080 | p009 | PC/AT boot-framebuffer/VGA/Cirrus and PC-98 GDC/Cirrus backends each provide the stable `/dev/graphics` behavior independently |
-| KA-T081 | p009 | Backend-disabled targets do not fabricate `/dev/graphics`, and no `graphics-device.c` implementation remains |
+| KA-T080 | p009 | [`run-graphics-frontends-host-test.sh`](run-graphics-frontends-host-test.sh) links the production PC/AT and PC-98 frontends independently and preserves registration, ownership, mode, drawing, glyph, copy-fault, rollback, and restore behavior |
+| KA-T081 | p009 | The same runner proves that both frontend copies remain explicit and behavior-identical, no registry/common implementation remains, and exactly two platform-owned registration sites exist; supported/disabled kernel builds separately prove capability selection and node ownership |
 | KA-T090 | p010 | FAT12/16/32, LFN, file read, and directory traversal fixtures are behavior-identical after consolidation while compatibility `bootfs` remains |
 | KA-T100 | p011 | FAT boot media provides rootfs image, writable data overlay, and file-backed swap through native filesystem/VFS calls |
 | KA-T101 | p011 | Native partition root and runtime FAT mounts remain usable, with bounded failures for missing/corrupt image files |
@@ -72,3 +72,11 @@ does not duplicate the identity decoders.  Its FAT driver tables delegate to
 the production `bootfat_probe` decoder while omitting unrelated file
 operations.  Cache coverage treats a newly initialized `struct disk` as the
 documented re-probe boundary; no test-only cache invalidation API is assumed.
+
+KA-T080/KA-T081 compile the same host scenario twice: once with the real
+PC/AT frontend and a PC/AT fake backend, and once with the real PC-98 frontend
+and a PC-98 fake backend.  The runner also compares normalized frontend source,
+audits retired registry/common paths, and requires exactly one platform-owned
+registration call per frontend.  Supported-target and graphics-disabled kernel
+builds remain the link-time proof that only the selected frontend is present;
+QEMU boots provide the device-node and hardware-backend evidence.

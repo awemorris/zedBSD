@@ -15,7 +15,9 @@
 #include "kern/console-device.h"
 #include "kern/mouse-device.h"
 #include "kern/input-device.h"
+#if CONFIG_DRIVER_GRAPHICS_DEVICE
 #include "kern/graphics-device.h"
+#endif
 #include "kern/system-device.h"
 #include "kern/devfs.h"
 #include "kern/tmpfs.h"
@@ -816,9 +818,11 @@ kern_vfs_init(const struct boot_handoff *handoff,
 	error = kern_platform_input_init();
 	if (error != 0)
 		return vfs_fail("initialize platform input", error);
+#if CONFIG_DRIVER_GRAPHICS_DEVICE
 	error = graphics_device_register();
 	if (error != 0)
 		return vfs_fail("register graphics", error);
+#endif
 	error = system_device_register();
 	if (error != 0)
 		return vfs_fail("register system", error);
