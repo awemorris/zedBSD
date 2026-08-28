@@ -19,7 +19,7 @@ disposable build/QEMU evidence belongs under `../temp/` and remains untracked.
 | KA-T040 | p005 | [`run-exec-preparation-host-test.sh`](run-exec-preparation-host-test.sh) preserves shebang, script-vector, allocation, and credential boundaries before and after the source merge; the separate dead-image audit has no live consumer |
 | KA-T050 | p006 | [`run-boot-header-aggregate-compile.sh`](run-boot-header-aggregate-compile.sh) compiles the sole `<kern/boot.h>` contract for kernel 32/64-bit, amd64/i386 HAL, PC-98 handoff, and X68k Stage 2 consumers without retired or private boot-header dependencies; maintained WS003 parser/source fixtures preserve all parameter and ownership behavior |
 | KA-T051 | p006 | The existing 31-cell matrix passes on i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI production loaders |
-| KA-T060 | p007 | Xzed discovers keyboard and relative/absolute pointer capabilities through `/dev/input/eventX`, receives keys/movement/buttons, and contains no `/dev/mouse` or console-event fallback |
+| KA-T060 | p007 | [`run-xzed-input-host-test.sh`](run-xzed-input-host-test.sh) links Xzed's production evdev consumer and proves capability-only multi-device discovery, key/repeat/modifier/Caps translation, framed relative/absolute pointer input, dropped-event resynchronization, split reads, HUP, and absence of legacy/fixed-identity paths |
 | KA-T070 | p008 | PC/AT PS/2 and PC-98 bus-mouse boots each expose dynamic evdev nodes and correct press/release/motion events |
 | KA-T071 | p008 | Source/node/symbol audit finds final input ownership and no `mouse-device.c` or `/dev/mouse` implementation |
 | KA-T080 | p009 | [`run-graphics-frontends-host-test.sh`](run-graphics-frontends-host-test.sh) links the production PC/AT and PC-98 frontends independently and preserves registration, ownership, mode, drawing, glyph, copy-fault, rollback, and restore behavior |
@@ -80,3 +80,14 @@ audits retired registry/common paths, and requires exactly one platform-owned
 registration call per frontend.  Supported-target and graphics-disabled kernel
 builds remain the link-time proof that only the selected frontend is present;
 QEMU boots provide the device-node and hardware-backend evidence.
+
+KA-T060 supplies fake descriptors only at the I/O boundary and directly links
+`userland/X11/xzed/input.c`; directory traversal, event-name filtering,
+capability classification, all state machines, and event translation remain
+production code.  The runner executes both an ordinary `-Werror` build and an
+ASan/UBSan build.  It includes arbitrary byte-boundary reads, multi-device
+modifier/button aggregation, full signed absolute-axis ranges with an
+`INT_MAX` screen extent, `SYN_DROPPED` state recovery through key/axis
+snapshots, CapsLock toggle retention without an LED query, and drain-before-
+remove HUP behavior.  Production PS/2 keyboard/mouse runtime coverage remains
+the amd64 QEMU acceptance recorded by p007 rather than being simulated here.

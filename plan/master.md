@@ -170,7 +170,7 @@ actually warranted.
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
-| `ws018` | Kernel source ownership and interface consolidation | Active; q026 ownership migration in progress | p001--p006 complete; p009 source/build work implemented with runtime matrix uncleared; p007 active | Execute q026 p007 -> p008; later resume p009's explicit runtime-only evidence | [WS018](ws018-kernel-architecture/ws.md) |
+| `ws018` | Kernel source ownership and interface consolidation | Active; q026 ownership migration in progress | p001--p007 complete; p009 source/build work implemented with runtime matrix uncleared; p008 active | Execute q026 p008; later resume p009's explicit runtime-only evidence | [WS018](ws018-kernel-architecture/ws.md) |
 
 ## 4. Milestones
 

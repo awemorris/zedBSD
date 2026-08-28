@@ -18,10 +18,9 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <zedbsd/console.h>
 #include <zedbsd/graphics.h>
-#include <zedbsd/mouse.h>
 
+#include "userland/X11/xzed/input.h"
 #include "userland/X11/xzed/pointer.h"
 
 #define MAX_CLIENTS 8
@@ -126,10 +125,8 @@ struct pixmap {
 
 struct server {
 	int listener;
-	int console;
-	int mouse;
 	int graphics;
-	struct console_input_mode old_console_mode;
+	struct xzed_input *input;
 	struct graphics_mode mode;
 	struct client clients[MAX_CLIENTS];
 	struct window windows[MAX_WINDOWS];
@@ -155,6 +152,16 @@ struct server {
 	uint32_t focus;
 	int pointer_grab_owner;
 	uint32_t pointer_grab_window;
+	struct window *pending_motion_window;
+	struct client *pending_motion_client;
+	uint32_t pending_motion_time;
+	int pending_motion_x;
+	int pending_motion_y;
+	uint16_t pending_motion_buttons;
+	int pending_motion;
+	int pointer_dirty;
+	int pointer_old_x;
+	int pointer_old_y;
 };
 
 static volatile int stopped;
@@ -1847,224 +1854,135 @@ read_client(struct server *s, unsigned i)
 	}
 }
 
-/* Console and mouse events are translated to their X11 equivalents here. */
+/* Capability-discovered evdev records are normalized by input.c. */
 
-static uint32_t
-keycode(uint32_t key)
+static void
+input_key(void *context, uint8_t keycode, int value, uint32_t time,
+	uint16_t state)
 {
-	switch (key) {
-	case ZEDBSD_CONSOLE_KEY_UP:
-		return XZED_KEYCODE_UP;
-	case ZEDBSD_CONSOLE_KEY_DOWN:
-		return XZED_KEYCODE_DOWN;
-	case ZEDBSD_CONSOLE_KEY_LEFT:
-		return XZED_KEYCODE_LEFT;
-	case ZEDBSD_CONSOLE_KEY_RIGHT:
-		return XZED_KEYCODE_RIGHT;
-	case ZEDBSD_CONSOLE_KEY_HOME:
-		return XZED_KEYCODE_HOME;
-	case ZEDBSD_CONSOLE_KEY_END:
-		return XZED_KEYCODE_END;
-	case ZEDBSD_CONSOLE_KEY_PAGE_UP:
-		return XZED_KEYCODE_PAGE_UP;
-	case ZEDBSD_CONSOLE_KEY_PAGE_DOWN:
-		return XZED_KEYCODE_PAGE_DOWN;
-	case ZEDBSD_CONSOLE_KEY_INSERT:
-		return XZED_KEYCODE_INSERT;
-	case ZEDBSD_CONSOLE_KEY_DELETE:
-		return XZED_KEYCODE_DELETE;
-	default:
-		return key < 248 ? key + 8 : 0;
+	struct server *s = context;
+	struct window *w = find_window(s, s->focus);
+	struct client *c;
+	if (!w)
+		w = hit(s, s->pointer_x, s->pointer_y);
+	c = owner_client(s, w->owner);
+	s->key_state = state;
+	if (!c || keycode == 0)
+		return;
+	if (value == 1)
+		send_event(c, 2, w->id, keycode, time, s->pointer_x,
+		    s->pointer_y, state);
+	else if (value == 0)
+		send_event(c, 3, w->id, keycode, time, s->pointer_x,
+		    s->pointer_y, state);
+	else if (value == 2) {
+		send_event(c, 3, w->id, keycode, time, s->pointer_x,
+		    s->pointer_y, state);
+		send_event(c, 2, w->id, keycode, time, s->pointer_x,
+		    s->pointer_y, state);
 	}
-}
-
-static uint16_t
-x_modifier_state(uint32_t modifiers)
-{
-	uint16_t state = 0;
-	if (modifiers & ZEDBSD_CONSOLE_EVENT_SHIFT)
-		state |= 1U << 0;
-	if (modifiers & ZEDBSD_CONSOLE_EVENT_CTRL)
-		state |= 1U << 2;
-	if (modifiers & ZEDBSD_CONSOLE_EVENT_GRAPH)
-		state |= 1U << 3;
-	return state;
 }
 
 static void
-keyboard(struct server *s)
+flush_pointer_motion(struct server *s)
 {
-	struct console_input_event ev[16];
-	ssize_t n;
-	while ((n = read(s->console, ev, sizeof(ev))) > 0) {
-		size_t i;
-		if ((size_t)n % sizeof(ev[0])) {
-			stopped = 1;
-			return;
-		}
-		for (i = 0; i < (size_t)n / sizeof(ev[0]); i++) {
-			struct window *w = find_window(s, s->focus);
-			struct client *c;
-			uint32_t kc;
-			uint16_t state = x_modifier_state(ev[i].modifiers);
-			if (!w)
-				w = hit(s, s->pointer_x, s->pointer_y);
-			c = owner_client(s, w->owner);
-			kc = keycode(ev[i].key);
-			s->key_state = state;
-			if (!c || !kc)
-				continue;
-			if (ev[i].state == ZEDBSD_CONSOLE_KEY_PRESS) {
-				send_event(
-				    c, 2, w->id, kc,
-				    (uint32_t)(ev[i].timestamp_ns / 1000000),
-				    s->pointer_x, s->pointer_y, state);
-			} else if (ev[i].state == ZEDBSD_CONSOLE_KEY_RELEASE) {
-				send_event(
-				    c, 3, w->id, kc,
-				    (uint32_t)(ev[i].timestamp_ns / 1000000),
-				    s->pointer_x, s->pointer_y, state);
-			} else {
-				send_event(
-				    c, 3, w->id, kc,
-				    (uint32_t)(ev[i].timestamp_ns / 1000000),
-				    s->pointer_x, s->pointer_y, state);
-				send_event(
-				    c, 2, w->id, kc,
-				    (uint32_t)(ev[i].timestamp_ns / 1000000),
-				    s->pointer_x, s->pointer_y, state);
-			}
-		}
-	}
-	if (n < 0 && errno != EAGAIN && errno != EINTR)
-		stopped = 1;
+	if (!s->pending_motion)
+		return;
+	send_motion_event(s->pending_motion_client, s->pending_motion_window,
+	    (uint64_t)s->pending_motion_time * 1000000U, s->pending_motion_x,
+	    s->pending_motion_y, s->pending_motion_buttons);
+	s->pending_motion = 0;
 }
 
 static void
-mouse(struct server *s)
+input_pointer(void *context, const struct xzed_input_pointer_frame *frame)
 {
-	struct mouse_event ev[16];
-	ssize_t n;
-	int redraw = 0, oldx = s->pointer_x, oldy = s->pointer_y;
-
-	while ((n = read(s->mouse, ev, sizeof(ev))) > 0) {
-		size_t i;
-		struct window *pending_window = NULL;
-		struct client *pending_client = NULL;
-		uint64_t pending_time = 0;
-		int pending_x = 0, pending_y = 0;
-		uint16_t pending_buttons = 0;
-		int pending_motion = 0;
-
-		if ((size_t)n % sizeof(ev[0])) {
-			stopped = 1;
-			return;
-		}
-		for (i = 0; i < (size_t)n / sizeof(ev[0]); i++) {
-			uint32_t changed = s->buttons ^ ev[i].buttons;
-			int moved = ev[i].dx != 0 || ev[i].dy != 0;
-			struct window *w;
-			struct client *c;
-			unsigned b;
-			xzed_pointer_move(&s->pointer_x, &s->pointer_y,
-					  ev[i].dx, ev[i].dy, s->mode.width,
-					  s->mode.height);
-			w = s->pointer_grab_owner >= 0
-				? find_window(s, s->pointer_grab_window)
-				: hit(s, s->pointer_x, s->pointer_y);
-			if (!w)
-				w = hit(s, s->pointer_x, s->pointer_y);
-			c = s->pointer_grab_owner >= 0
-				? owner_client(s,
-					       (uint32_t)s->pointer_grab_owner)
-				: owner_client(s, w->owner);
-			/* Compress consecutive pointer motion.  A resize must
-			 * follow the newest pointer position, not replay a
-			 * stale queue after the physical mouse has stopped.
-			 * Preserve ordering at button edges. */
-			if (changed && pending_motion) {
-				send_motion_event(pending_client,
-						  pending_window, pending_time,
-						  pending_x, pending_y,
-						  pending_buttons);
-				pending_motion = 0;
-			}
-			if (moved && changed)
-				send_motion_event(c, w, ev[i].timestamp_ns,
-						  s->pointer_x, s->pointer_y,
-						  (uint16_t)s->buttons);
-			else if (moved) {
-				pending_client = c;
-				pending_window = w;
-				pending_time = ev[i].timestamp_ns;
-				pending_x = s->pointer_x;
-				pending_y = s->pointer_y;
-				pending_buttons = (uint16_t)s->buttons;
-				pending_motion = 1;
-			}
-			for (b = 0; b < 3; b++)
-				if (changed & (1U << b)) {
-					uint32_t window_id = w->id;
-					if (c)
-						send_event(
-						    c,
-						    (ev[i].buttons & (1U << b))
-							? 4
-							: 5,
-						    window_id, b + 1,
-						    (uint32_t)(ev[i]
-								   .timestamp_ns /
-							       1000000),
-						    s->pointer_x, s->pointer_y,
-						    (uint16_t)s->buttons);
-					if (ev[i].buttons & (1U << b)) {
-						struct window *top =
-						    top_level_window(s, w);
-						/* A desktop panel must be
-						 * clickable without stealing
-						 * the application's focus used
-						 * for toggle-minimize
-						 * semantics. */
-						if (top == NULL ||
-						    strcmp(top->name,
-							   "_XZED_SHELL") !=
-							0) {
-							s->focus = window_id;
-							raise_window(s, top);
-						}
-						w = find_window(s, window_id);
-					}
-					if ((ev[i].buttons & (1U << b)) &&
-					    s->pointer_grab_owner < 0 && c) {
-						s->pointer_grab_owner =
-						    w->owner;
-						s->pointer_grab_window = w->id;
-					}
-				}
-			s->buttons = ev[i].buttons;
-			if (!s->buttons) {
-				s->pointer_grab_owner = -1;
-				s->pointer_grab_window = 0;
-			}
-			if (moved)
-				redraw = 1;
-		}
-		if (pending_motion)
-			send_motion_event(pending_client, pending_window,
-					  pending_time, pending_x, pending_y,
-					  pending_buttons);
+	struct server *s = context;
+	struct window *w;
+	struct client *c;
+	int moved = frame->absolute || frame->relative_x != 0 ||
+	    frame->relative_y != 0;
+	size_t index;
+	s->buttons = frame->buttons_before;
+	if (frame->edge_count != 0)
+		flush_pointer_motion(s);
+	if (moved && !s->pointer_dirty) {
+		s->pointer_dirty = 1;
+		s->pointer_old_x = s->pointer_x;
+		s->pointer_old_y = s->pointer_y;
 	}
-	if (redraw) {
-		mark_dirty(s, oldx - CURSOR_WIDTH, oldy - CURSOR_HEIGHT,
-			   CURSOR_WIDTH * 2, CURSOR_HEIGHT * 2);
-		present(s);
-		mark_dirty(s, s->pointer_x - CURSOR_WIDTH,
-			   s->pointer_y - CURSOR_HEIGHT, CURSOR_WIDTH * 2,
-			   CURSOR_HEIGHT * 2);
-		present(s);
+	if (frame->absolute) {
+		s->pointer_x = frame->absolute_x;
+		s->pointer_y = frame->absolute_y;
 	}
-	if (n < 0 && errno != EAGAIN && errno != EINTR)
-		stopped = 1;
+	if (frame->relative_x != 0 || frame->relative_y != 0)
+		xzed_pointer_move(&s->pointer_x, &s->pointer_y,
+		    frame->relative_x, frame->relative_y, s->mode.width,
+		    s->mode.height);
+	w = s->pointer_grab_owner >= 0
+		? find_window(s, s->pointer_grab_window)
+		: hit(s, s->pointer_x, s->pointer_y);
+	if (!w)
+		w = hit(s, s->pointer_x, s->pointer_y);
+	c = s->pointer_grab_owner >= 0
+		? owner_client(s, (uint32_t)s->pointer_grab_owner)
+		: owner_client(s, w->owner);
+	if (moved && frame->edge_count != 0)
+		send_motion_event(c, w, (uint64_t)frame->time * 1000000U,
+		    s->pointer_x, s->pointer_y, s->buttons);
+	else if (moved) {
+		s->pending_motion_client = c;
+		s->pending_motion_window = w;
+		s->pending_motion_time = frame->time;
+		s->pending_motion_x = s->pointer_x;
+		s->pending_motion_y = s->pointer_y;
+		s->pending_motion_buttons = s->buttons;
+		s->pending_motion = 1;
+	}
+	for (index = 0; index < frame->edge_count; index++) {
+		const struct xzed_input_button_edge *edge = &frame->edges[index];
+		uint32_t window_id = w->id;
+		if (c)
+			send_event(c, edge->pressed ? 4 : 5, window_id,
+			    edge->button, frame->time, s->pointer_x, s->pointer_y,
+			    s->buttons);
+		s->buttons = edge->buttons;
+		if (edge->pressed) {
+			struct window *top = top_level_window(s, w);
+			/* The desktop panel remains clickable without taking the
+			 * application's focus used by toggle-minimize semantics. */
+			if (top == NULL || strcmp(top->name, "_XZED_SHELL") != 0) {
+				s->focus = window_id;
+				raise_window(s, top);
+			}
+			w = find_window(s, window_id);
+			if (s->pointer_grab_owner < 0 && c) {
+				s->pointer_grab_owner = w->owner;
+				s->pointer_grab_window = w->id;
+			}
+		}
+	}
+	if (!s->buttons) {
+		s->pointer_grab_owner = -1;
+		s->pointer_grab_window = 0;
+	}
+}
+
+static void
+finish_pointer_input(struct server *s)
+{
+	flush_pointer_motion(s);
+	if (!s->pointer_dirty)
+		return;
+	mark_dirty(s, s->pointer_old_x - CURSOR_WIDTH,
+	    s->pointer_old_y - CURSOR_HEIGHT, CURSOR_WIDTH * 2,
+	    CURSOR_HEIGHT * 2);
+	present(s);
+	mark_dirty(s, s->pointer_x - CURSOR_WIDTH,
+	    s->pointer_y - CURSOR_HEIGHT, CURSOR_WIDTH * 2,
+	    CURSOR_HEIGHT * 2);
+	present(s);
+	s->pointer_dirty = 0;
 }
 
 /* Graphics mode selection and server lifetime. */
@@ -2142,21 +2060,14 @@ initialize(struct server *s, unsigned preferred_width,
 {
 	struct sockaddr_un a;
 	struct graphics_caps caps;
-	struct console_input_mode m = {ZEDBSD_CONSOLE_INPUT_EVENT, 0};
+	const struct xzed_input_handlers input_handlers = {input_key,
+							   input_pointer};
 	unsigned i;
 	memset(s, 0, sizeof(*s));
-	s->listener = s->console = s->mouse = s->graphics = -1;
+	s->listener = s->graphics = -1;
 	s->pointer_grab_owner = -1;
 	for (i = 0; i < MAX_CLIENTS; i++)
 		s->clients[i].fd = -1;
-	s->console = open("/dev/console", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-	if (s->console < 0)
-		return -1;
-	if (ioctl(s->console, ZEDBSD_CONSOLE_GET_INPUT_MODE,
-		  &s->old_console_mode) ||
-	    ioctl(s->console, ZEDBSD_CONSOLE_SET_INPUT_MODE, &m))
-		return -1;
-	s->mouse = open("/dev/mouse", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
 	s->graphics = open("/dev/graphics", O_RDWR | O_CLOEXEC);
 	if (s->graphics < 0)
 		return -1;
@@ -2196,6 +2107,11 @@ initialize(struct server *s, unsigned preferred_width,
 	s->focus = ROOT_XID;
 	s->pointer_x = (int)s->mode.width / 2;
 	s->pointer_y = (int)s->mode.height / 2;
+	if (xzed_input_open(&s->input, s->mode.width, s->mode.height,
+	    &input_handlers, s) != 0)
+		return -1;
+	s->buttons = xzed_input_buttons(s->input);
+	s->key_state = xzed_input_modifiers(s->input);
 	s->windows[0].pixels =
 	    window_pixels_alloc(s->windows[0].width, s->windows[0].height,
 				s->windows[0].background);
@@ -2226,13 +2142,7 @@ cleanup(struct server *s)
 	if (s->listener >= 0)
 		close(s->listener);
 	(void)unlink("/tmp/.X11-unix/X0");
-	if (s->mouse >= 0)
-		close(s->mouse);
-	if (s->console >= 0) {
-		(void)ioctl(s->console, ZEDBSD_CONSOLE_SET_INPUT_MODE,
-			    &s->old_console_mode);
-		close(s->console);
-	}
+	xzed_input_close(s->input);
 	if (s->graphics >= 0)
 		close(s->graphics);
 }
@@ -2241,8 +2151,8 @@ int
 main(int argc, char **argv)
 {
 	struct server s;
-	struct pollfd p[3 + MAX_CLIENTS];
-	unsigned i, count;
+	struct pollfd p[1 + XZED_INPUT_MAX_DEVICES + MAX_CLIENTS];
+	unsigned i, count, input_base, input_count;
 	int arg = 1;
 	unsigned preferred_width = 0, preferred_height = 0,
 		 preferred_depth = 24;
@@ -2303,9 +2213,10 @@ main(int argc, char **argv)
 		int ready;
 		count = 0;
 		p[count++] = (struct pollfd){s.listener, POLLIN, 0};
-		p[count++] = (struct pollfd){s.console, POLLIN, 0};
-		if (s.mouse >= 0)
-			p[count++] = (struct pollfd){s.mouse, POLLIN, 0};
+		input_base = count;
+		input_count = (unsigned)xzed_input_pollfds(s.input, p + count,
+		    XZED_INPUT_MAX_DEVICES);
+		count += input_count;
 		for (i = 0; i < MAX_CLIENTS; i++)
 			if (s.clients[i].fd >= 0)
 				p[count++] =
@@ -2316,8 +2227,7 @@ main(int argc, char **argv)
 				continue;
 			break;
 		}
-		count = 0;
-		if (p[count++].revents & POLLIN) {
+		if (p[0].revents & POLLIN) {
 			int fd = accept(s.listener, NULL, NULL);
 			if (fd >= 0) {
 				int descriptor_flags = fcntl(fd, F_GETFD);
@@ -2343,10 +2253,9 @@ main(int argc, char **argv)
 				}
 			}
 		}
-		if (p[count++].revents & POLLIN)
-			keyboard(&s);
-		if (s.mouse >= 0 && p[count++].revents & POLLIN)
-			mouse(&s);
+		if (xzed_input_dispatch(s.input, p + input_base, input_count) != 0)
+			stopped = 1;
+		finish_pointer_input(&s);
 		for (i = 0; i < MAX_CLIENTS; i++)
 			if (s.clients[i].fd >= 0)
 				read_client(&s, i);

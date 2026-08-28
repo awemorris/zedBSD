@@ -1,6 +1,6 @@
 # WS018 Phase 007: Xzed evdev-only consumer
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 WSID: `ws018`
 
@@ -8,7 +8,7 @@ Phase ID: `p007`
 
 Combined ID: `ws018-p007`
 
-Status: planned; not queued
+Status: Complete (`q026`)
 
 Parent: [WS018](../ws.md)
 
@@ -72,7 +72,10 @@ from `EVIOCGBIT`, not `EVIOCGNAME`, `EVIOCGPHYS`, or a fixed path.
   `SYN_REPORT`, preserving button-edge ordering and the existing X pointer-grab
   semantics.  A `SYN_DROPPED` frame triggers state resynchronization through
   `EVIOCGKEY` and, where available, current absolute-axis values; it must not be
-  interpreted as ordinary motion.
+  interpreted as ordinary motion.  Resynchronize physical keys, modifiers,
+  pointer buttons, and axes.  Keep the last CapsLock toggle observed through
+  ordinary events: do not add `EVIOCGLED`, and do not infer a new toggle while
+  recovering a dropped frame.
 - Do not request an evdev exclusive grab merely to reproduce the old path.
   Kernel console brokering remains independent and Xzed's X-level pointer grab
   remains an X server concern.
@@ -158,3 +161,56 @@ absolute coordinates cannot be recovered from the existing `EVIOCGABS`
 contract.  Do not resolve such a finding by restoring `/dev/mouse`, hard-coding
 an event number/name, or continuing to consume console continuous events.
 
+## Execution result
+
+Completed on 2026-08-29 without reaching a reconsideration condition.
+
+- Xzed now owns a userland-local evdev consumer split between the production
+  POSIX/ioctl adapter and a testable discovery/framing/state machine.  It
+  enumerates only exact decimal `eventN` entries, classifies roles only from
+  `EVIOCGBIT` plus valid `EVIOCGABS` ranges, retains up to eight useful
+  descriptors, and requires at least one keyboard and one pointer.  It never
+  requests an identity string or exclusive grab and has no fixed event number.
+- Key processing preserves the existing converted ASCII-plus-8 and navigation
+  `0xe0`--`0xe9` X keycodes.  Press, release, repeat, left/right Shift,
+  Control, and Alt are tracked per device; CapsLock toggles on fresh ordinary
+  presses only.  Drop recovery uses `EVIOCGKEY` for physical state while
+  retaining the last observed CapsLock toggle and makes no `EVIOCGLED` query.
+- Relative and absolute pointer records are accumulated through `SYN_REPORT`.
+  Relative sums and final coordinates clamp safely, absolute scaling uses
+  positive `uint64_t` arithmetic across the full signed 32-bit axis range,
+  button edges remain ordered, and Xzed's focus, raise, motion compression,
+  and pointer-grab behavior remain at the X layer.  Arbitrarily split byte
+  reads are carried per descriptor; `EINTR`, `EAGAIN`, EOF, `POLLHUP`, malformed
+  terminal records, descriptor compaction, and required-role disappearance
+  have bounded handling.
+- KA-T060's production-linked host runner passed both its ordinary `-Werror`
+  build and ASan/UBSan build.  It covers permuted event numbers, rejected
+  non-event names, multiple keyboards/pointers, ASCII/navigation/repeat/
+  modifier/Caps behavior, REL aggregation and ordered buttons, full-range ABS
+  scaling including an `INT_MAX` screen extent, `SYN_DROPPED` key/button/axis
+  recovery, Caps retention, byte-split reads with `EAGAIN`, drain-before-remove
+  HUP, and incomplete-record EOF.  Its source audit found no legacy input path,
+  fixed event number, identity ioctl, or evdev grab.
+- A fresh configured `make -j16` passed, as did the focused Xzed production
+  link/user-ELF check, the required legacy-path `rg` audit with no matches, and
+  `git diff --check`.
+- The amd64 runtime used a disposable image below
+  `plan/ws018-kernel-architecture/temp/q026-p007-runtime.UBVbt3`.  Literal
+  `startx` reached the normal zwm/zshell/zterm session and Xzed reported
+  `/dev/input/event0 keyboard` plus `/dev/input/event1 relative-pointer` from
+  capability discovery.  Injected PS/2 input entered zterm through Xzed:
+  ordinary keys plus Shift produced `p007key`, repeated make codes produced
+  `aaa`, relative movement changed the captured cursor position, and a left
+  press/release restored zterm focus before the typed `kill 12` terminated
+  Xzed by SIGTERM.  The original console shell then returned its prompt.  The
+  evidence log SHA-256 is
+  `beabd5b4ccc82d426d94cb2cdc114d40bc62aa1e9c2d4ada1911e7d3f5a95dac`;
+  stable before/after REL screenshots have SHA-256
+  `04ccc6c05e610cc1db6a5678cac08fdc13a7f70379c325afd1d5ec76810d8f2b`
+  and `fbc25af6058ae868458e84ec45d0dbdaa68e1dee2b432af79327743972105e0c`.
+  Xzed made no console-mode ioctl, and normal exit required no mode restore.
+
+The production kernel still intentionally contains the legacy console-event
+and `/dev/mouse` producers.  Their relocation and deletion remain the ordered
+scope of `ws018-p008`; this Phase changed only the Xzed consumer.
