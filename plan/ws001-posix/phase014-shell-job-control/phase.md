@@ -4,7 +4,7 @@ Last updated: 2026-08-28
 
 Phase ID: `ws001-p014`
 
-Status: In progress (`q023`)
+Status: Completed (`q023`, 2026-08-28)
 
 Parent: [WS001](../ws.md)
 
@@ -155,7 +155,47 @@ loops, repeated retries without state checks, or relaxed assertions.
 
 ## Resume point
 
-Place this Phase in a finite Queue by itself or next to another
-dependency-independent WS001 correction. Begin with the process-group
-checkpoint fixture and the two recorded race sequences before editing
-production shell code.
+No work remains in this Phase. Select a new bounded item from the WS001 ledger;
+do not infer complete POSIX shell or multi-job support from this synchronization
+milestone.
+
+## Execution result
+
+Completed in q023 without reaching the kernel reconsideration boundary.
+
+- Interactive foreground pipelines now create one close-on-exec gate. Every
+  child establishes or joins the pipeline process group before waiting; the
+  parent confirms membership for all children, transfers the controlling TTY,
+  and only then releases exactly one byte per child.
+- Setup, release, and wait failures close every gate/pipeline descriptor, kill
+  and reap only still-live wrapper children, restore shell TTY ownership when
+  it had been transferred, preserve the original error, and cannot terminate
+  the shell through `SIGPIPE`.
+- The bounded single-job model now remembers the wrapper PID of every pipeline
+  member. `fg` preserves that state until successful TTY handoff, transfers the
+  TTY before `SIGCONT`, waits every remembered member with stopped reporting,
+  retains retryable members on failure, and restores the shell group.
+- The deterministic Phase-owned fixture passed at
+  `plan/ws001-posix/temp/q023-p014-job-control.LdD3qT`. Its event trace proves
+  both pipeline children wait before handoff/release and proves TTY handoff
+  precedes `SIGCONT`. It also observes a real background `SIGTTIN` stop,
+  verifies non-TTY execution performs no gate/TTY operation, and injects
+  `tcsetpgrp`, gate-write, and parent-wait failures with subsequent recovery
+  and no live fixture PID. A separate handoff failure emits no `SIGCONT`,
+  retains the same stopped process group, and succeeds on the next `fg`. A
+  final ten-run repetition of this expanded corpus passed 10/10, from
+  `q023-p014-job-control.wNj8wc` through
+  `q023-p014-job-control.CZiqw6`; ordering checkpoints, not probability,
+  remain the acceptance criterion.
+- The production amd64 disk image passed the current strict QEMU acceptance at
+  `plan/ws001-posix/temp/q023-p014-qemu.PhJyEq`: `/bin/head -n 1 | /bin/cat`
+  accepted terminal input, a direct reader recovered through Ctrl-Z and `fg`,
+  a background reader recovered through `fg`, an inner non-TTY shell ran, the
+  outer prompt remained usable, fatal scans were empty, and the source image
+  SHA-256 remained unchanged. Reader markers were each observed exactly twice
+  (TTY echo plus copied output), so a stopped reader cannot pass by returning
+  the marker to the outer shell as a command. The finalized runner repeated
+  successfully at `plan/ws001-posix/temp/q023-p014-qemu.JmEqpw`.
+- `clang-format` 19.1.7 formatting and dry-run checks, fixture warning-free
+  builds, repeated focused runs, `make -j16`, script syntax checks, and
+  `git diff --check` passed. `make check` and `.internal/` were not used.

@@ -30,6 +30,8 @@
 static int command_background;
 static int command_subshell;
 static pid_t last_job;
+static pid_t last_job_processes[PIPELINE_MAX];
+static int last_job_process_count;
 static const char *shell_name = "/bin/sh";
 static int shell_positional_count;
 static char **shell_positional;
@@ -37,6 +39,30 @@ static char *trap_action[SHELL_SIGNAL_MAX];
 static volatile int trap_pending[SHELL_SIGNAL_MAX];
 static int getopts_offset = 1;
 static long getopts_last_index = 1;
+
+static void
+remember_job(pid_t group, const pid_t *processes, int count)
+{
+	int index;
+
+	last_job = group;
+	last_job_process_count = count;
+	for (index = 0; index < count; index++)
+		last_job_processes[index] = processes[index];
+}
+
+static void
+remember_single_job(pid_t process)
+{
+	remember_job(process, &process, 1);
+}
+
+static void
+forget_job(void)
+{
+	last_job = 0;
+	last_job_process_count = 0;
+}
 
 static const char *
 signal_message(int number)
@@ -130,8 +156,93 @@ wait_foreground(pid_t pid, int *status)
 	if (result < 0)
 		return 0;
 	if (WIFSTOPPED(*status)) {
-		last_job = pid;
+		remember_single_job(pid);
 		printf("[%d] stopped\n", (int)pid);
+	}
+	return 1;
+}
+
+static int
+continue_foreground(pid_t pid, int *status)
+{
+	pid_t processes[PIPELINE_MAX];
+	pid_t retained[PIPELINE_MAX];
+	pid_t shell_pgrp = getpgrp();
+	int terminal = isatty(STDIN_FILENO);
+	int foreground_set = 0;
+	int process_count = last_job_process_count;
+	int retained_count = 0;
+	int index;
+	int wait_failed = 0;
+	int saved_errno;
+
+	if (process_count <= 0) {
+		processes[0] = pid;
+		process_count = 1;
+	} else {
+		for (index = 0; index < process_count; index++)
+			processes[index] = last_job_processes[index];
+	}
+
+	/* A stopped terminal reader must own the terminal before it resumes.
+	 * Keep last_job intact until both operations succeed so a failed
+	 * handoff remains retryable. */
+	if (terminal) {
+		if (shell_tcsetpgrp(STDIN_FILENO, pid) != 0) {
+			fprintf(stderr,
+				"fg: cannot foreground process %d: %s\n",
+				(int)pid, strerror(errno));
+			return 0;
+		}
+		foreground_set = 1;
+	}
+	if (kill(-pid, SIGCONT) != 0) {
+		saved_errno = errno;
+		if (foreground_set &&
+		    shell_tcsetpgrp(STDIN_FILENO, shell_pgrp) != 0)
+			fprintf(
+			    stderr,
+			    "sh: cannot restore foreground process group: %s\n",
+			    strerror(errno));
+		errno = saved_errno;
+		fprintf(stderr, "fg: cannot continue process %d: %s\n",
+			(int)pid, strerror(errno));
+		return 0;
+	}
+	for (index = 0; index < process_count; index++) {
+		pid_t result;
+
+		do
+			result = waitpid(processes[index], status, WUNTRACED);
+		while (result < 0 && errno == EINTR);
+		if (result < 0) {
+			if (errno == ECHILD)
+				continue;
+			saved_errno = errno;
+			wait_failed = 1;
+			for (; index < process_count; index++)
+				retained[retained_count++] = processes[index];
+			break;
+		}
+		if (WIFSTOPPED(*status))
+			retained[retained_count++] = processes[index];
+	}
+	if (foreground_set && shell_tcsetpgrp(STDIN_FILENO, shell_pgrp) != 0)
+		fprintf(stderr,
+			"sh: cannot restore foreground process group: %s\n",
+			strerror(errno));
+	if (wait_failed) {
+		remember_job(pid, retained, retained_count);
+		errno = saved_errno;
+		fprintf(stderr, "fg: cannot wait for process %d: %s\n",
+			(int)pid, strerror(errno));
+		return 0;
+	}
+	if (retained_count > 0) {
+		remember_job(pid, retained, retained_count);
+		printf("[%d] stopped\n", (int)pid);
+	} else {
+		forget_job();
 	}
 	return 1;
 }
@@ -220,7 +331,7 @@ spawn_foreground_tty(char *const argv[], int *status)
 	if (waited < 0)
 		return -1;
 	if (WIFSTOPPED(*status)) {
-		last_job = child;
+		remember_single_job(child);
 		printf("[%d] stopped\n", (int)child);
 	}
 	return 0;
@@ -282,7 +393,7 @@ spawn_wait(char *const argv[])
 	if (!command_subshell)
 		(void)setpgid(pid, pid);
 	if (command_background) {
-		last_job = pid;
+		remember_single_job(pid);
 		printf("[%d]\n", (int)pid);
 		return 1;
 	}
@@ -800,10 +911,33 @@ shell_wait_builtin(int argc, char **argv)
 		if (waitpid(target, &status, 0) != target)
 			return 0;
 	} else if (last_job > 0) {
-		target = last_job;
-		if (waitpid(target, &status, 0) != target)
-			return 0;
-		last_job = 0;
+		pid_t group = last_job;
+		pid_t processes[PIPELINE_MAX];
+		pid_t remaining[PIPELINE_MAX];
+		int index;
+		int count = last_job_process_count;
+		int remaining_count = 0;
+
+		if (count <= 0) {
+			processes[0] = group;
+			count = 1;
+		} else {
+			for (index = 0; index < count; index++)
+				processes[index] = last_job_processes[index];
+		}
+		for (index = 0; index < count; index++) {
+			do
+				target = waitpid(processes[index], &status, 0);
+			while (target < 0 && errno == EINTR);
+			if (target < 0 && errno != ECHILD) {
+				for (; index < count; index++)
+					remaining[remaining_count++] =
+					    processes[index];
+				remember_job(group, remaining, remaining_count);
+				return 0;
+			}
+		}
+		forget_job();
 	} else {
 		while (waitpid(-1, &status, 0) > 0)
 			;
@@ -933,9 +1067,7 @@ command_dispatch(int argc, char **argv)
 		pid_t job = last_job;
 		if (job <= 0)
 			return 0;
-		(void)kill(-job, SIGCONT);
-		last_job = 0;
-		return wait_foreground(job, &status);
+		return continue_foreground(job, &status);
 	}
 	if (!strcmp(argv[0], "help")) {
 		puts("help echo pwd cd true false jobs fg bg env set export "
@@ -1403,15 +1535,26 @@ static int
 execute_pipeline(struct pipeline_command *items, int count, int background)
 {
 	pid_t children[PIPELINE_MAX];
+	pid_t stopped[PIPELINE_MAX];
 	pid_t group = 0;
 	pid_t shell_group = getpgrp();
 	int terminal = !command_subshell && isatty(STDIN_FILENO);
+	int synchronize = terminal && !background;
+	int gate[2] = {-1, -1};
+	int terminal_owned = 0;
+	int active[PIPELINE_MAX] = {0};
 	int input = -1;
 	int index, created = 0;
+	int stopped_count = 0;
 	int last_status = 0;
+	int saved_errno;
 
 	if (count == 1 && !background)
 		return execute_parent_command(&items[0]);
+	if (synchronize && pipe2(gate, O_CLOEXEC) != 0) {
+		fprintf(stderr, "sh: pipeline: %s\n", strerror(errno));
+		return 0;
+	}
 	(void)fflush(NULL);
 	for (index = 0; index < count; index++) {
 		int descriptors[2] = {-1, -1};
@@ -1427,7 +1570,22 @@ execute_pipeline(struct pipeline_command *items, int count, int background)
 			goto failed;
 		}
 		if (child == 0) {
-			(void)setpgid(0, group == 0 ? 0 : group);
+			char release;
+			ssize_t release_count;
+
+			if (synchronize)
+				(void)close(gate[1]);
+			if (setpgid(0, group == 0 ? 0 : group) != 0)
+				_exit(126);
+			if (synchronize) {
+				do
+					release_count =
+					    read(gate[0], &release, 1);
+				while (release_count < 0 && errno == EINTR);
+				(void)close(gate[0]);
+				if (release_count != 1 || release != 'x')
+					_exit(126);
+			}
 			if (input >= 0 && dup2(input, STDIN_FILENO) < 0)
 				_exit(126);
 			if (descriptors[1] >= 0 &&
@@ -1448,46 +1606,111 @@ execute_pipeline(struct pipeline_command *items, int count, int background)
 		}
 		if (group == 0)
 			group = child;
-		(void)setpgid(child, group);
-		children[created++] = child;
+		children[created] = child;
+		active[created++] = 1;
 		if (input >= 0)
 			(void)close(input);
 		if (descriptors[1] >= 0)
 			(void)close(descriptors[1]);
 		input = descriptors[0];
+		if (synchronize) {
+			if (setpgid(child, group) != 0)
+				goto failed;
+			if (getpgid(child) != group) {
+				errno = EPERM;
+				goto failed;
+			}
+		} else {
+			(void)setpgid(child, group);
+		}
 	}
 	if (input >= 0)
 		(void)close(input);
+	input = -1;
 	if (background) {
-		last_job = group;
+		remember_job(group, children, created);
 		printf("[%d]\n", (int)group);
 		return 1;
 	}
-	if (terminal)
-		(void)shell_tcsetpgrp(STDIN_FILENO, group);
+	if (synchronize) {
+		char release[PIPELINE_MAX];
+		ssize_t release_count;
+
+		(void)close(gate[0]);
+		gate[0] = -1;
+		if (shell_tcsetpgrp(STDIN_FILENO, group) != 0)
+			goto failed;
+		terminal_owned = 1;
+		memset(release, 'x', (size_t)created);
+		release_count =
+		    shell_write_nosigpipe(gate[1], release, (size_t)created);
+		if (release_count != created) {
+			if (release_count >= 0)
+				errno = EIO;
+			goto failed;
+		}
+		(void)close(gate[1]);
+		gate[1] = -1;
+	}
 	for (index = 0; index < created; index++) {
 		int status = 0;
-		pid_t waited = waitpid(children[index], &status, WUNTRACED);
+		pid_t waited;
+
+		do
+			waited = waitpid(children[index], &status, WUNTRACED);
+		while (waited < 0 && errno == EINTR);
 		if (waited < 0) {
-			last_status = 1;
-			continue;
+			saved_errno = errno;
+			goto wait_failed;
 		}
 		if (children[index] == children[created - 1])
 			last_status = status;
 		if (WIFSTOPPED(status)) {
-			last_job = group;
-			printf("[%d] stopped\n", (int)group);
+			stopped[stopped_count++] = children[index];
+		} else {
+			active[index] = 0;
 		}
 	}
-	if (terminal)
-		(void)shell_tcsetpgrp(STDIN_FILENO, shell_group);
+	if (terminal_owned && shell_tcsetpgrp(STDIN_FILENO, shell_group) != 0)
+		fprintf(stderr,
+			"sh: cannot restore foreground process group: %s\n",
+			strerror(errno));
+	if (stopped_count > 0) {
+		remember_job(group, stopped, stopped_count);
+		printf("[%d] stopped\n", (int)group);
+	}
 	return WIFEXITED(last_status) && WEXITSTATUS(last_status) == 0;
+wait_failed:
+	errno = saved_errno;
 failed:
+	saved_errno = errno;
 	if (input >= 0)
 		(void)close(input);
-	while (created-- > 0)
-		(void)waitpid(children[created], NULL, 0);
-	fprintf(stderr, "sh: pipeline: %s\n", strerror(errno));
+	if (gate[0] >= 0)
+		(void)close(gate[0]);
+	if (gate[1] >= 0)
+		(void)close(gate[1]);
+	for (index = 0; index < created; index++)
+		if (active[index]) {
+			(void)kill(-group, SIGKILL);
+			break;
+		}
+	for (index = 0; index < created; index++)
+		if (active[index])
+			(void)kill(children[index], SIGKILL);
+	for (index = 0; index < created; index++) {
+		pid_t waited;
+
+		if (!active[index])
+			continue;
+		do
+			waited = waitpid(children[index], NULL, 0);
+		while (waited < 0 && errno == EINTR);
+	}
+	if (terminal_owned)
+		(void)shell_tcsetpgrp(STDIN_FILENO, shell_group);
+	errno = saved_errno;
+	fprintf(stderr, "sh: pipeline: %s\n", strerror(saved_errno));
 	return 0;
 }
 

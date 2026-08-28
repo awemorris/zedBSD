@@ -139,7 +139,7 @@ Completed in q023 without reaching the reconsideration boundary.
   `GLOBAL DEFAULT` and every `noct_beui_*` implementation symbol as `LOCAL`;
   unrelated `NOCT_DLL` APIs remain global.
 - `NOCT-T040` and `NOCT-T043` passed at
-  `plan/ws008-noct/temp/q023-p005-backends.cWrM3p`. Canonical zedBSD
+  `plan/ws008-noct/temp/q023-p005-backends.P8ZsxV`. Canonical zedBSD
   ASan/UBSan/wiring tests, exact-one negative CMake configurations, installed
   header boundary, and shared-symbol audits passed.
 - `NOCT-T041` and `NOCT-T042` passed through the canonical `run-beui.sh`

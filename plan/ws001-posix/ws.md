@@ -8,10 +8,10 @@ Status: in progress; compliance ledger remains active
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws001-p013`
+Last verified Phase: `ws001-p014`
 
-Resume point: continue q023 `ws001-p014`, then select the next bounded ledger
-item after its evidence and residuals are recorded.
+Resume point: select the next bounded dependency-ready item from the compliance
+ledger; no Phase is currently authorized after finished q023.
 
 Shared tests: [WS001 test index](tests/README.md)
 
@@ -34,7 +34,7 @@ Shared tests: [WS001 test index](tests/README.md)
 | `ws001-p011` | [bounded basename correction](phase011-basename/phase.md) | Complete milestone | Host semantics/failure test and native amd64 build pass; runtime conformance handoff remains |
 | `ws001-p012` | [bounded dirname correction](phase012-dirname/phase.md) | Complete milestone | Host lexical/failure suite and native amd64 build pass; runtime/locale handoff remains |
 | `ws001-p013` | [bounded link/unlink correction](phase013-link-unlink/phase.md) | Complete | Host identity/failure suite and native amd64 build pass; broad filesystem matrix remains |
-| `ws001-p014` | [shell foreground job-control synchronization](phase014-shell-job-control/phase.md) | In progress (`q023`) | Preserve the fixed direct external gate; remove foreground-pipeline and `fg` ordering races |
+| `ws001-p014` | [shell foreground job-control synchronization](phase014-shell-job-control/phase.md) | Complete (`q023`, 2026-08-28) | Foreground pipelines gate every member until TTY handoff; `fg` hands off before `SIGCONT`; background/non-TTY and cleanup regressions pass |
 
 Original combined planning context is retained in the
 [legacy Phase 0–10 plan](history/phase000-010-legacy-plan.md).
@@ -260,7 +260,7 @@ dependency even when they are not POSIX public APIs.
 | TERM-CURSES-01 | curses library | implemented-unreviewed | future full-screen programs | expand window/input/update semantics and define the POSIX/XSI scope before any conformance claim |
 | ARCHIVE-01 | archive/ELF shared readers | implemented-unreviewed | `ar`, `nm`, `pax` | standard format variants, malformed data, overflow, metadata, symbol tables, non-ELF policy, and fuzz evidence |
 | SCCS-CORE-01 | SCCS history/p-file/locking core | partial | ten SCCS commands | classic weave/control interoperability, full flags/MRs/SIDs, preservation, stale locks, interrupted atomic updates |
-| SHELL-CORE-01 | shell lexer/parser/expansion/executor | partial | `sh`, cron, login | `sh -c`, simple lists/pipelines/expansion and scripts work; `ws012-p006` gates a single foreground external until its process group owns the TTY, while [`ws001-p014`](phase014-shell-job-control/phase.md) retains the foreground-pipeline pre-`tcsetpgrp()` race and `fg` continuation ordering for focused correction; reserved words, multiline continuation, compound commands, functions, grouping/subshell grammar, here-documents, full redirects/expansions, strict mode, `ENV`, complete jobs/traps, and special-builtin semantics remain |
+| SHELL-CORE-01 | shell lexer/parser/expansion/executor | partial | `sh`, cron, login | `sh -c`, simple lists/pipelines/expansion and scripts work; `ws012-p006` gates a single foreground external, and [`ws001-p014`](phase014-shell-job-control/phase.md) gates every foreground-pipeline member until TTY handoff and makes `fg` hand off before `SIGCONT`; reserved words, multiline continuation, compound commands, functions, grouping/subshell grammar, here-documents, full redirects/expansions, strict mode, `ENV`, multiple-job selection, complete jobs/traps, and special-builtin semantics remain |
 | BUILD-PKG-01 | standalone base package interface | implemented-unreviewed | all base packages | retain direct build/install coverage for source lists, libraries, headers, data-only packages, `PREFIX=/`, and ordinary prefixes |
 | BUILD-PROV-01 | base source provenance gate | reviewed | `bc`, `ed`, `m4` replacement scope | `make phase10-local-source-check` enforces exact local manifests, Zlib headers, removed-file references, and known external fingerprints; extend the manifest when future source is added |
 
@@ -288,7 +288,7 @@ dependency even when they are not POSIX public APIs.
 | CROSS-MEM-01 | allocation/size overflow | partial | dynamic arrays, parsers, recursion, binary formats | deterministic allocation injection, checked arithmetic, bounded nesting/input |
 | CROSS-FS-01 | filesystem failures and atomic replacement | partial | editors, archives, SCCS, copy/move, generated databases | permissions, full disk, rename/fsync failure, interruption, rollback, no corrupted destination |
 | CROSS-LOCALE-01 | locale/collation/multibyte | partial | most text and display utilities | non-C locale fixtures, invalid artifacts/sequences, boundary-split input, output verification |
-| CROSS-SHELL-01 | current-shell state | partial | shell builtins | tests inside a running zshell for environment, cwd, umask, limits, traps, descriptors, and jobs; [`ws001-p014`](phase014-shell-job-control/phase.md) owns direct/pipeline/Ctrl-Z/`fg`/background/non-TTY job-control regression |
+| CROSS-SHELL-01 | current-shell state | partial | shell builtins | tests inside a running zshell for environment, cwd, umask, limits, traps, descriptors, and jobs; completed [`ws001-p014`](phase014-shell-job-control/phase.md) supplies direct/pipeline/Ctrl-Z/`fg`/background/non-TTY job-control regression |
 | CROSS-BINARY-01 | malformed binary formats | partial | locale/catalog/terminfo/archive/ELF/SCCS/compression | truncation, invalid offsets/counts, integer overflow, fuzz corpus, bounded failure |
 | CROSS-QEMU-01 | zedBSD runtime evidence | implemented-unreviewed | kernel-, tty-, credential-, IPC-, process-, service-dependent behavior | bounded headless amd64 tests with complete markers; add a target whenever host behavior is insufficient |
 | CROSS-PROV-01 | external source exclusion | reviewed | Phase 10 `bc`, `ed`, `m4` scope | imported production/generated trees and the m4 host compatibility layer were removed; `make phase10-local-source-check` passes |
@@ -336,7 +336,7 @@ The following findings are deliberately not promoted to success:
 | ID | Component | Observed limitation | Safe current state / next unit |
 |---|---|---|---|
 | P18-SH-GRAMMAR | `/bin/sh` | `if`/`then`, `for`, `case`, functions, grouping, subshell grammar, here-documents, and multiline continuation after operators are not parsed as POSIX reserved-word grammar | Phase 18 is partial.  Keep the safe simple-command/list executor, then replace the line-at-a-time parser with a token-stream AST parser and clause-mapped tests before claiming POSIX shell compliance. |
-| P18-SH-SEMANTICS | `/bin/sh` | `ENV`, strict/extension mode separation, complete redirections and expansion ordering, special-builtin error rules, and full job control remain unproved or absent; Phase 20 fixed foreground tty restoration and EOF/error prompt spinning, `ws012-p006` fixes the pre-exec handoff for one foreground external, and `ws007-p001` fixed executable-script PATH lookup | Preserve the tested direct foreground handoff, script lookup, and libedit input; [`ws001-p014`](phase014-shell-job-control/phase.md) owns the remaining foreground-pipeline and `fg` ordering races, while other semantic families remain separate master-derived phases. |
+| P18-SH-SEMANTICS | `/bin/sh` | `ENV`, strict/extension mode separation, complete redirections and expansion ordering, special-builtin error rules, terminal-mode preservation, multiple remembered jobs, job selection, and full job control remain unproved or absent; Phase 20 fixed foreground tty restoration and EOF/error prompt spinning, `ws012-p006` fixed one-external pre-exec handoff, completed `ws001-p014` fixed foreground-pipeline and `fg` ordering, and `ws007-p001` fixed executable-script PATH lookup | Preserve the tested direct/pipeline foreground handoff, Ctrl-Z/`fg`, background/non-TTY behavior, script lookup, and libedit input; extract the remaining semantic families as separate master-derived phases. |
 | P16-CRON | `cron`/`crontab` | QEMU proves durable crontab installation and proves the same daemon executes immediate at jobs, but periodic crontab execution and a restart attempted after scheduled work did not complete within the focused bound | Keep cron enabled as a minimal scheduler; add daemon reload/restart diagnostics, full field parser, deterministic clock fixture, locking, and periodic execution evidence. |
 | P16-AT-BATCH | `at`/`batch` | accepted time syntax is only `now`, `now + N minutes/hours`, and `HH:MM`; batch does not wait for a load threshold | Retain honest subset behavior and durable jobs; implement the POSIX operand grammar, queue policy, environment, cancellation races, and output delivery next. |
 | P13-KLOG | `syslogd` | boot messages are a snapshot, not a live kernel-log stream; rotation and storage failure policy are absent | Keep `/run/log` and `/var/log/messages`; add a pollable kernel reader and rotation/backpressure policy in a later logging phase. |

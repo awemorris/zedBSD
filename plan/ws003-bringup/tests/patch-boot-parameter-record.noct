@@ -65,28 +65,40 @@ func recordError(data, offset) {
 }
 
 // Return [offset, error].  Executable code may contain the four magic bytes as
-// an immediate constant, so only complete structurally valid records count.
+// an immediate constant, so magic plus the fixed size/flags/reserved layout
+// identifies a structural candidate.  Every candidate is then validated
+// completely, including version, length, text, terminator, and padding.
 // Magic-like bytes inside a validated record's text/padding are data, not a
 // second record.
 func locateRecord(data) {
     var valid = [];
+    var candidateError = "";
     var protectedUntil = -1;
     var limit = Packed.size(data) - 4;
     if (limit < 0) { return [-1, "BPR1 record not found"]; }
     for (offset in 0..limit + 1) {
         if (offset < protectedUntil) { continue; }
         if (data[offset] == 0x42 && data[offset + 1] == 0x50 &&
-            data[offset + 2] == 0x52 && data[offset + 3] == 0x31) {
+            data[offset + 2] == 0x52 && data[offset + 3] == 0x31 &&
+            offset + bprHeaderSize <= Packed.size(data) &&
+            zbU16LE(data, offset + 6) == bprRecordSize &&
+            zbU16LE(data, offset + 8) == bprFlags &&
+            zbU32LE(data, offset + 12) == 0) {
             var error = recordError(data, offset);
             if (error == "") {
                 Array.push(valid, offset);
                 protectedUntil = offset + bprRecordSize;
+            } else if (candidateError == "") {
+                candidateError = error;
             }
         }
     }
-    if (Array.size(valid) == 0) { return [-1, "BPR1 record not found"]; }
-    if (Array.size(valid) != 1) { return [-1, "multiple BPR1 records found"]; }
-    return [valid[0], ""];
+    if (Array.size(valid) == 1) { return [valid[0], ""]; }
+    if (Array.size(valid) > 1) {
+        return [-1, "multiple BPR1 records found"];
+    }
+    if (candidateError != "") { return [-1, candidateError]; }
+    return [-1, "BPR1 record not found"];
 }
 
 func makeRecord(text) {
@@ -117,6 +129,13 @@ func expectRecordError(data, expected) {
     }
 }
 
+func expectTextError(text, expected) {
+    var error = textError(text);
+    if (error != expected) {
+        zbFail("self-test: expected '" + expected + "', got '" + error + "'");
+    }
+}
+
 func selfTest() {
     var valid = makeRecord("init=/bin/sh");
     var result = locateRecord(valid);
@@ -132,9 +151,25 @@ func selfTest() {
     zbCopy(duplicate, bprRecordSize, valid, 0, bprRecordSize);
     expectError(duplicate, "multiple BPR1 records found");
 
+    var mixed = Packed.uint8(bprRecordSize * 2);
+    var malformedCandidate = makeRecord("init=/bin/sh");
+    zbPut16LE(malformedCandidate, 4, bprVersion + 1);
+    zbCopy(mixed, 0, malformedCandidate, 0, bprRecordSize);
+    zbCopy(mixed, bprRecordSize, valid, 0, bprRecordSize);
+    result = locateRecord(mixed);
+    if (result[0] != bprRecordSize || result[1] != "") {
+        zbFail("self-test: valid record lost beside malformed candidate");
+    }
+
     var malformed = makeRecord("init=/bin/sh");
     zbPut16LE(malformed, 6, bprRecordSize - 1);
     expectRecordError(malformed, "unsupported BPR1 record size");
+
+    var truncated = Packed.uint8(8);
+    zbPut32LE(truncated, 0, bprMagic);
+    zbPut16LE(truncated, 4, bprVersion);
+    zbPut16LE(truncated, 6, bprRecordSize);
+    expectRecordError(truncated, "truncated BPR1 record");
 
     var oversized = makeRecord("init=/bin/sh");
     zbPut16LE(oversized, 10, bprStorageSize);
@@ -152,6 +187,23 @@ func selfTest() {
     var unsupported = makeRecord("init=/bin/sh");
     zbPut16LE(unsupported, 4, bprVersion + 1);
     expectRecordError(unsupported, "unsupported BPR1 version");
+
+    var badFlags = makeRecord("init=/bin/sh");
+    zbPut16LE(badFlags, 8, 0);
+    expectRecordError(badFlags, "unsupported BPR1 flags");
+
+    var reserved = makeRecord("init=/bin/sh");
+    zbPut32LE(reserved, 12, 1);
+    expectRecordError(reserved, "nonzero BPR1 reserved field");
+
+    var badPadding = makeRecord("init=/bin/sh");
+    badPadding[bprHeaderSize + 13] = 1;
+    expectRecordError(badPadding, "BPR1 text padding is not zero");
+
+    expectTextError("line\nbreak", "parameter text is not printable ASCII");
+    var tooLong = "";
+    for (i in 0..bprStorageSize) { tooLong = tooLong + "a"; }
+    expectTextError(tooLong, "parameter text exceeds 3071 bytes");
 
     print("BPR1 patcher self-test: PASS");
 }

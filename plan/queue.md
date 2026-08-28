@@ -4,9 +4,9 @@ Last updated: 2026-08-28
 
 QID: `q023`
 
-Queue status: in-progress
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: explicitly approved by the user on 2026-08-28 by directing the
 agent to Phase the static boot-parameter design, place all executable Phases
@@ -36,7 +36,7 @@ the shell's two remaining foreground job-control ordering races.
 | --- | --- | --- | --- | --- |
 | 1 | `ws003-p016` | [WS003](ws003-bringup/ws.md), [Phase](ws003-bringup/phase016-boot-parameter-header-dependency/phase.md), [tests](ws003-bringup/tests/README.md) | completed | One maintained source default feeds every x86 loader and kernel fallback; generated/Python inputs disappear and affected four-platform and swap evidence remains usable |
 | 2 | `ws008-p005` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase005-independent-beui-backends/phase.md), [tests](ws008-noct/tests/README.md) | completed | Each selected canonical BeUI platform source independently implements the sole public `noct_register_api_beui()` interface; shared dispatcher/backend and public HAL injection disappear |
-| 3 | `ws001-p014` | [WS001](ws001-posix/ws.md), [Phase](ws001-posix/phase014-shell-job-control/phase.md), [tests](ws001-posix/tests/README.md) | in-progress | Foreground pipeline children cannot read before TTY handoff, and `fg` foregrounds before `SIGCONT`, without background/non-TTY regression |
+| 3 | `ws001-p014` | [WS001](ws001-posix/ws.md), [Phase](ws001-posix/phase014-shell-job-control/phase.md), [tests](ws001-posix/tests/README.md) | completed | Foreground pipeline children cannot read before TTY handoff, and `fg` foregrounds before `SIGCONT`, without background/non-TTY regression |
 
 ## Entry evidence and decisions
 
@@ -106,9 +106,25 @@ committed and pushed under the recorded authorization.
 - `ws008-p005` completed on 2026-08-28. Canonical NoctLang commit
   `c1e4e0fcdbb7b8cdf1705601b13d57b787c61621` was pushed and pinned in both
   zedBSD acquisition paths. `NOCT-T040/T043` passed at
-  `plan/ws008-noct/temp/q023-p005-backends.cWrM3p`; canonical generic/SDL2/
+  `plan/ws008-noct/temp/q023-p005-backends.P8ZsxV`; canonical generic/SDL2/
   PC-98 tests passed; and `NOCT-T044` passed at
   `plan/ws008-noct/temp/q020-p002-beui.unH7qL`. Non-JIT and JIT QEMU
   regressions also passed at `q019-p001-noct.Q5DH4P` and
   `q020-p003-jit.0mYri3`.
 - Queue execution advanced to `ws001-p014`.
+- A post-completion `ws003-p016` patcher audit found that instruction bytes in
+  `BOOTX64.EFI` can contain the four-byte `BPR1` magic. The Phase-owned Noct
+  helper now identifies a record from its fixed structural fields before full
+  validation. Its self-test and an actual disposable UEFI patch at offset
+  16512 both passed, and the production loader remained unchanged.
+- `ws001-p014` completed on 2026-08-28. The deterministic host fixture passed
+  foreground-pipeline gate ordering, TTY-before-`SIGCONT`, a real background
+  `SIGTTIN` stop, non-TTY bypass, and three injected cleanup failures at
+  `plan/ws001-posix/temp/q023-p014-job-control.LdD3qT`; an injected first
+  `fg` handoff failure also retained the same job for a successful retry. The
+  installed amd64
+  `/bin/sh` passed foreground pipeline, Ctrl-Z/`fg`, background-reader/`fg`,
+  non-TTY, fatal-scan, and input-integrity acceptance at
+  `plan/ws001-posix/temp/q023-p014-qemu.PhJyEq`; strict marker counts distinguish
+  reader output from terminal input echo.
+- All three q023 items are completed; the Queue is finished.

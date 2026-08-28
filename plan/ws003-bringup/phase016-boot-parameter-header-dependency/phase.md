@@ -169,6 +169,12 @@ Completed in q023 without reaching the reconsideration boundary.
 - The Phase-owned Noct patcher passed its malformed-record corpus and supplied
   only disposable non-default loaders. Production-loader hashes stayed
   unchanged across the run.
+- A post-completion audit found incidental `BPR1` magic immediates in UEFI
+  machine code. Record discovery now first requires the fixed size, flags, and
+  reserved layout and then performs the complete version/length/ASCII/NUL/
+  padding validation. The expanded self-test and a disposable current
+  `BOOTX64.EFI` patch passed at the sole record offset 16512; the EFI checker
+  accepted the result and the production input was not modified.
 - The final `BR-T46`/`BR-T47c`/`BR-T47d` matrix passed 31/31 at
   `plan/ws003-bringup/temp/q023-p016-br-t46-authoritative.9rIQrm`: PC/AT 7,
   PC-98 6, amd64 BIOS 9, and amd64 UEFI 9. The four default cells booted the

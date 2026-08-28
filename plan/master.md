@@ -16,9 +16,9 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is active `q023`: it runs
-`ws003-p016`, `ws008-p005`, and `ws001-p014` in that order, deferring only an
-item that reaches a recorded human-decision boundary. The archived
+The current [Queue Book](queue.md) is finished `q023`: it completed
+`ws003-p016`, `ws008-p005`, and `ws001-p014` in that order without reaching a
+human-decision boundary. The archived
 [q022](queue-q022.md) published the Noct maintainer-review correction as upstream commit
 `eba2043ca74b8601d68a405ecbbeca50ca8d5ac0`, replaced the zedBSD gitlink with
 one pinned source-acquisition Makefile, and passed host plus non-JIT, BeUI, and
@@ -137,7 +137,7 @@ actually warranted.
 
 | WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
 | --- | --- | --- | --- | --- | --- |
-| `ws001` | POSIX.1-2024 compliance | Active in q023; shell handoff residual in progress | `ws001-p013` complete; p014 active in q023 | Complete the two bounded foreground job-control ordering fixes or record their reconsideration boundary | [WS001](ws001-posix/ws.md) |
+| `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
 | `ws003` | Dell Latitude 5320 bring-up | Active; p016 complete in q023 | `ws003-p016` completed with BR-T47 and a fresh BR-T46 31/31 | Return to physical U4/U5 work; BR-T30 repeatability, BR-T31 sustained I/O, and hardware inventory remain | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; checked legacy-HCD IRQ residual complete in `q016` | `ws004-p009` complete; prior automatic USB milestones remain complete | Select the next dependency-ready hardware Phase or record later manual USB evidence; MSI-less xHCI policy remains independent | [WS004](ws004-hardware/ws.md) |
@@ -237,10 +237,10 @@ WS010 supplies host-side build and test scripting used by all workstreams.
    implementation Phases without displacing earlier physical-network and
    storage milestones.
 
-q023 now owns the independently dependency-ready `ws003-p016`, `ws008-p005`,
+q023 completed the independently dependency-ready `ws003-p016`, `ws008-p005`,
 and `ws001-p014` sequence. `ws017-p001` returns to the planning pool only after
-its recorded `mprotect` ceiling decision. Work outside q023 remains planning
-only and is not implementation authorization.
+its recorded `mprotect` ceiling decision. No further implementation is
+authorized until another finite Queue is approved.
 
 WS001 and WS009 advance within every wave when bounded work is selected. Lower
 priority POSIX gaps may remain paused if they do not block the active milestone.
@@ -263,7 +263,7 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | UEFI Boot CPAR `boot.cfg`/LFN/menu contract | WS013 | Section grammar maps to the common parameter contract; freeze bounded FAT/parser/menu details before implementation; legacy PC/AT and PC-98 menus are excluded |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
 | Confirmed-commit implementation bounds | WS011 | Public semantics are fixed: interactive only, explicit timeout, delayed `/etc/net.conf` write, ordinary `commit` confirms, and DHCP is reacquired; freeze timeout maximum, lock path, and diagnostic bounds before implementation |
-| Authoritative Noct repository, build sequence, and revision | WS008 | Resolved by q022: official main is `awemorris/NoctLang`; zedBSD tracks only `userland/noct/Makefile`, which clones and builds pinned commit `eba2043ca74b8601d68a405ecbbeca50ca8d5ac0` under `userland/noct/NoctLang` |
+| Authoritative Noct repository, build sequence, and revision | WS008 | Resolved by q022 and refined by q023: official main is `awemorris/NoctLang`; zedBSD tracks only `userland/noct/Makefile`, which clones and builds pinned commit `c1e4e0fcdbb7b8cdf1705601b13d57b787c61621` under `userland/noct/NoctLang` |
 | PC/AT boot selector | WS004 | Resolved: reuse UUID/PARTUUID; standard FAT handoff uses UUID |
 | Runtime swap command standard and control boundary | WS016 | Resolved for v1: SUSv4/POSIX does not define `swapon`/`swapoff`; zedBSD supplies minimal privileged extensions over versioned `/dev/system` control and existing signed sources |
 | Optional LFB mapping and Xzed fallback boundary | WS017 | Resolved for v1: fixed post-ENTER geometry, 8/16/24/32-bpp layout query, shared non-executable mmap when supported, true-color Xzed fast path, and unchanged ioctl fallback; PC-98 Cirrus is excluded |
