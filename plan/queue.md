@@ -31,7 +31,7 @@ speculative common USB-Ethernet implementation.
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws004-p010` | [Phase](ws004-hardware/phase010-usb-function-model/phase.md) | in-progress | USB configuration, alternate-setting, functional-descriptor, string, and interface-claim contracts pass focused tests |
+| 1 | `ws004-p010` | [Phase](ws004-hardware/phase010-usb-function-model/phase.md) | completed | USB configuration, alternate-setting, functional-descriptor, string, interface-claim, and transactional endpoint contracts pass 1280 focused checks plus sanitizer, analyzer, regression, and configured-build gates |
 | 2 | `ws004-p011` | [Phase](ws004-hardware/phase011-xhci-concurrent-urbs/phase.md) | pending | xHCI safely owns simultaneous endpoint URBs without weakening storage/reclaim guarantees |
 | 3 | `ws004-p012` | [Phase](ws004-hardware/phase012-net-device-hotplug/phase.md) | in-progress | carrier, detach, ARP purge, deferred release, and shutdown lifetime tests pass |
 | 4 | `ws004-p013` | [Phase](ws004-hardware/phase013-cdc-ncm-wire/phase.md) | completed | strict bounded negotiation and NTH16/NDP16 encode/decode, including the advertised-maximum no-ZLP exception, pass production-source fixtures |
@@ -49,9 +49,9 @@ ws004-p012 ----+
 ws004-p013 ----+
 ```
 
-p010, p012, and p013 are independent enough to execute concurrently. p011 may
-start after the current xHCI ownership model is frozen by its Phase; p014 does
-not start until all four prerequisites are complete.
+p010 and p013 are complete. p011 may start against the now-frozen USB function
+model; p012 remains independently in progress, and p014 does not start until
+all four prerequisites are complete.
 
 ## Frozen product boundary
 

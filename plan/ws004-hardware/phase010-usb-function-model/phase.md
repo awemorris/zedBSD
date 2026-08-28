@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 Phase ID: `ws004-p010`
 
-Status: in-progress (`q027`)
+Status: completed (`q027`)
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -63,3 +63,49 @@ for these operations. Descriptor parsing details remain implementation-owned.
 Stop and record `uncleared` if safe alternate rollback requires a new HCD
 transaction API whose ownership cannot be specified locally. Do not publish
 partially enabled endpoints as an active interface.
+
+## Actual result
+
+- The USB core now retains every bounded configuration, logical interface,
+  alternate setting, endpoint, IAD, class-specific extra descriptor, and raw
+  configuration byte sequence.  Inactive configurations remain retained but
+  are never attached.
+- Enumeration selects the configuration with the highest registered-driver
+  match score across alternate-zero interfaces.  Descriptor order is the
+  deterministic tie breaker and the first configuration remains the fallback
+  when no driver supports the device.
+- Configuration and alternate selection use checked endpoint transitions.
+  Partial endpoint and later-interface failures compensate only the operations
+  completed by that transaction; failed compensation or ambiguous control I/O
+  quarantines the device instead of publishing a partial endpoint set.
+- The HCD endpoint-disable callback is checked and returns `int` consistently
+  in xHCI, EHCI, and UHCI.  xHCI publishes disabled state and releases endpoint
+  ring ownership only after its command succeeds.
+- Function drivers can locate, claim, and release sibling interfaces.  Claims
+  are released after attach failure and successful detach, retained after a
+  failed detach, and handled safely during disconnect.
+- USB strings discover the first LANGID and convert bounded UTF-16LE, including
+  valid surrogate pairs, into NUL-terminated UTF-8.  Malformed and truncated
+  descriptors fail visibly.
+- No new HCD transaction API was required, so the reconsideration boundary was
+  not reached.  Existing USB-storage behavior and the URB flag contract were
+  preserved.
+
+## Evidence
+
+- [`usb-function-model-test.c`](../tests/usb-function-model-test.c): 1280
+  checks pass, including multi-configuration preference, alternate/configuration
+  rollback, strict endpoint state, claim lifetime, malformed descriptors,
+  bounded nth-allocation failure with balanced cleanup, hot-unplug, and terminal
+  shutdown ordering.
+- The same production-source fixture passes ASan/UBSan with leak detection
+  disabled because LeakSanitizer is unavailable under the host ptrace policy;
+  explicit allocation/free balance remains active.  GCC `-fanalyzer` also
+  passes.
+- Existing `xhci-model-test.c`, `usb-storage-scsi-test.c`, and
+  `usb-urb-publication-test.c` pass.
+- `make -j16` passes for the default amd64 image, and `make -j16
+  ZEDBSD_CONFIG=plan/ws004-hardware/tests/config-pcat-xhci.mk` passes for the
+  configured i386 PC/AT xHCI image.
+- Scoped production and new-fixture whitespace checks pass.  `make check` and
+  `.internal/` were not used.

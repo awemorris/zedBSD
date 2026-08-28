@@ -922,7 +922,7 @@ xhci_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 	const struct drv_usb_endpoint_descriptor *desc;
 	uint8_t *input;
 	uint32_t *control;
-	unsigned number, dci, type, packet, interval, maximum_burst;
+	unsigned number, dci, entries, type, packet, interval, maximum_burst;
 	int e;
 	if (!d)
 		return ENODEV;
@@ -941,9 +941,8 @@ xhci_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 	memset(input, 0, 4096U);
 	control = (uint32_t *)input;
 	control[1] = 1U | (1U << dci);
-	if (dci > d->context_entries)
-		d->context_entries = dci;
-	fill_slot(c, d, input + c->context_size, d->context_entries);
+	entries = dci > d->context_entries ? dci : d->context_entries;
+	fill_slot(c, d, input + c->context_size, entries);
 	packet = desc->maximum_packet_size & 0x7ffU;
 	switch (drv_usb_endpoint_type(usbep)) {
 	case DRV_USB_TRANSFER_ISOCHRONOUS:
@@ -970,10 +969,11 @@ xhci_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 		ring_free(c, &ep->ring);
 		return e;
 	}
+	d->context_entries = entries;
 	ep->enabled = 1;
 	return 0;
 }
-static void
+static int
 xhci_endpoint_disable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 {
 	struct xhci_controller *c = hcd_controller(h);
@@ -984,11 +984,13 @@ xhci_endpoint_disable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 	uint32_t *control;
 	unsigned dci, entries;
 	if (!d)
-		return;
+		return ENODEV;
 	dci = (drv_usb_endpoint_address(usbep) & 15U) * 2U +
 	      (drv_usb_endpoint_is_input(usbep) ? 1U : 0U);
-	if (dci < 2U || dci >= 32U || !d->endpoints[dci].enabled)
-		return;
+	if (dci < 2U || dci >= 32U)
+		return EINVAL;
+	if (!d->endpoints[dci].enabled)
+		return 0;
 	ep = &d->endpoints[dci];
 	for (entries = 31U; entries > 1U; entries--)
 		if (entries != dci && d->endpoints[entries].enabled)
@@ -999,12 +1001,16 @@ xhci_endpoint_disable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 	control[0] = 1U << dci;
 	control[1] = 1U;
 	fill_slot(c, d, input + c->context_size, entries);
-	if (command(c, d->input_context.device_address, 0,
-		    XHCI_TRB_TYPE(12) | XHCI_TRB_SLOT(d->slot), NULL) != 0)
-		return;
+	{
+		int error = command(c, d->input_context.device_address, 0,
+		    XHCI_TRB_TYPE(12) | XHCI_TRB_SLOT(d->slot), NULL);
+		if (error != 0)
+			return error;
+	}
 	d->context_entries = entries;
 	ep->enabled = 0;
 	ring_free(c, &ep->ring);
+	return 0;
 }
 
 static int
@@ -2483,16 +2489,19 @@ xhci_guarded_endpoint_enable(struct drv_usb_hcd *h,
 	return error;
 }
 
-static void
+static int
 xhci_guarded_endpoint_disable(struct drv_usb_hcd *h,
 	struct drv_usb_endpoint *endpoint)
 {
 	struct xhci_controller *c = hcd_controller(h);
+	int error;
 
-	if (xhci_operation_enter(c) != 0)
-		return;
-	xhci_endpoint_disable(h, endpoint);
+	error = xhci_operation_enter(c);
+	if (error != 0)
+		return error;
+	error = xhci_endpoint_disable(h, endpoint);
 	xhci_operation_leave(c);
+	return error;
 }
 
 static uint32_t

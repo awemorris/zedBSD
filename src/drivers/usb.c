@@ -17,8 +17,10 @@
 #define USB_REQ_GET_DESCRIPTOR 6U
 #define USB_REQ_SET_ADDRESS 5U
 #define USB_REQ_SET_CONFIGURATION 9U
+#define USB_REQ_SET_INTERFACE 11U
 #define USB_ADDRESS_RECOVERY_TICKS 2U
 #define USB_RESET_RECOVERY_TICKS 2U
+#define USB_CONTROL_TIMEOUT_MS 1000U
 
 #define USB_DEVICE_LIFECYCLE_DISCONNECTING (1U << 31)
 #define USB_DEVICE_LIFECYCLE_FINALIZING (1U << 30)
@@ -26,6 +28,13 @@
 
 struct drv_usb_configuration {
 	struct drv_usb_configuration_descriptor descriptor;
+	struct drv_usb_device *device;
+	struct drv_usb_interface *interfaces;
+	struct drv_usb_interface_association_descriptor *iads;
+	unsigned interface_count;
+	unsigned iad_count;
+	uint8_t *raw;
+	size_t raw_length;
 };
 
 struct drv_usb_endpoint {
@@ -37,12 +46,27 @@ struct drv_usb_endpoint {
 	uintptr_t hcd_private[4];
 };
 
+struct drv_usb_host_interface {
+	struct drv_usb_interface *interface;
+	struct drv_usb_interface_descriptor descriptor;
+	struct drv_usb_endpoint *endpoints;
+	unsigned endpoint_count;
+	unsigned extra_count;
+	size_t raw_offset;
+	size_t raw_length;
+	struct drv_usb_host_interface *next;
+};
+
 struct drv_usb_interface {
 	struct drv_usb_device *device;
+	struct drv_usb_configuration *configuration;
 	struct drv_usb_interface_descriptor descriptor;
 	struct drv_usb_endpoint *endpoints;
 	unsigned endpoint_count;
 	unsigned alternate_count;
+	struct drv_usb_host_interface *alternates;
+	struct drv_usb_host_interface *active_alternate;
+	struct drv_usb_interface *claimed_by;
 	struct drv_usb_driver *driver;
 	void *driver_data;
 	struct drv_usb_interface *next;
@@ -60,6 +84,7 @@ struct drv_usb_device {
 	unsigned lifecycle;
 	unsigned hcd_urb_count;
 	unsigned quarantined;
+	unsigned selection_busy;
 	unsigned report_disconnect;
 	void *quarantine_buffer;
 	uintptr_t hcd_private[4];
@@ -109,6 +134,10 @@ static bool usb_initialized;
 static atomic_uint_t usb_topology_gate;
 
 static void device_urb_put(struct drv_usb_device *device);
+static int device_disable_active_endpoints(struct drv_usb_device *device);
+static int detach_interfaces(struct drv_usb_device *device);
+static int device_quiesce(struct drv_usb_bus *bus,
+	struct drv_usb_device *device);
 
 static void
 usb_topology_lock(void)
@@ -155,6 +184,13 @@ device_is_disconnecting(const struct drv_usb_device *device)
 	    USB_DEVICE_LIFECYCLE_DISCONNECTING) != 0;
 }
 
+static unsigned
+device_urb_reference_count(const struct drv_usb_device *device)
+{
+	return hal_atomic_load_acquire(&device->lifecycle) &
+	    USB_DEVICE_LIFECYCLE_URB_MASK;
+}
+
 static struct drv_usb_device *allocate_root_hub(struct drv_usb_bus *bus)
 {
 	struct drv_usb_device *device = hal_malloc(sizeof(*device));
@@ -186,17 +222,49 @@ int drv_usb_init(void)
 void drv_usb_shutdown(void)
 {
 	struct drv_usb_bus *bus;
+
+	usb_topology_lock();
 	for (bus = usb_buses; bus != NULL; bus = bus->next) {
-		hal_atomic_store_release(&bus->stopping, 1U);
+		struct drv_usb_device *device;
+		int error, retain = 0;
+
+		if (hal_atomic_fetch_or_release(&bus->stopping, 1U) != 0)
+			continue;
+		/* Stop admission first, then let every class driver disconnect and
+		 * cancel/drain its own work while the HCD is still operational. */
+		for (device = bus->devices; device != NULL; device = device->next)
+			device_begin_disconnect(device);
+		for (device = bus->devices; device != NULL; device = device->next) {
+			error = detach_interfaces(device);
+			if (error != 0) {
+				hal_printf(
+				    "usb%u: device %u driver shutdown failed (%d); host controller retained\n",
+				    bus->number, device->address, error);
+				retain = 1;
+			}
+		}
+		/* Driver teardown is the first ownership boundary.  Device/HCD
+		 * quiesce follows only after no interface can submit more work. */
+		for (device = bus->devices; device != NULL;
+		    device = device->next) {
+			error = device_quiesce(bus, device);
+			if (error != 0)
+				retain = 1;
+		}
 		if (bus->hcd->ops->quiesce != NULL &&
 		    bus->hcd->ops->quiesce(bus->hcd) != 0) {
 			hal_printf("usb%u: host controller stop failed\n",
 			    bus->number);
 			continue;
 		}
+		/* A failed class/device teardown keeps callback-visible HCD memory,
+		 * but the checked HCD quiesce above still stops DMA before reboot. */
+		if (retain)
+			continue;
 		if (bus->hcd->ops->stop != NULL)
 			bus->hcd->ops->stop(bus->hcd);
 	}
+	usb_topology_unlock();
 }
 
 int drv_usb_hcd_register(struct drv_usb_hcd *hcd, struct drv_usb_bus **result)
@@ -206,7 +274,9 @@ int drv_usb_hcd_register(struct drv_usb_hcd *hcd, struct drv_usb_bus **result)
 	if (!usb_initialized || hcd == NULL || hcd->name == NULL ||
 	    hcd->ops == NULL || hcd->ops->start == NULL ||
 	    hcd->ops->stop == NULL || hcd->ops->urb_enqueue == NULL ||
-	    hcd->ops->urb_dequeue == NULL || result == NULL)
+	    hcd->ops->urb_dequeue == NULL ||
+	    ((hcd->ops->endpoint_enable == NULL) !=
+	    (hcd->ops->endpoint_disable == NULL)) || result == NULL)
 		return EINVAL;
 	bus = hal_malloc(sizeof(*bus)); if (bus == NULL) return ENOMEM;
 	memset(bus, 0, sizeof(*bus)); bus->number = next_bus_number++;
@@ -303,20 +373,44 @@ static struct drv_usb_device *find_port_device(struct drv_usb_bus *bus,
 { struct drv_usb_device*d;for(d=bus->devices;d;d=d->next)if(d->parent==bus->root_hub&&d->port==port)return d;return NULL; }
 
 static void
-free_interfaces(struct drv_usb_device *device, int disable)
+free_configuration(struct drv_usb_configuration *configuration)
 {
-	struct drv_usb_interface *interface, *next;
-	for (interface = device->interfaces; interface != NULL; interface = next) {
-		unsigned index;
-		next = interface->next;
-		if (disable && device->bus->hcd->ops->endpoint_disable != NULL)
-			for (index = 0; index < interface->endpoint_count; index++)
-				device->bus->hcd->ops->endpoint_disable(
-				    device->bus->hcd, &interface->endpoints[index]);
-		if (interface->endpoints != NULL)
-			hal_free(interface->endpoints);
+	struct drv_usb_interface *interface, *next_interface;
+
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = next_interface) {
+		struct drv_usb_host_interface *alternate, *next_alternate;
+
+		next_interface = interface->next;
+		for (alternate = interface->alternates; alternate != NULL;
+		    alternate = next_alternate) {
+			next_alternate = alternate->next;
+			if (alternate->endpoints != NULL)
+				hal_free(alternate->endpoints);
+			hal_free(alternate);
+		}
 		hal_free(interface);
 	}
+	if (configuration->iads != NULL)
+		hal_free(configuration->iads);
+	if (configuration->raw != NULL)
+		hal_free(configuration->raw);
+	memset(configuration, 0, sizeof(*configuration));
+}
+
+static void
+free_configurations(struct drv_usb_device *device)
+{
+	unsigned index;
+
+	if (device->configurations != NULL) {
+		for (index = 0; index < device->configuration_count; index++)
+			free_configuration(&device->configurations[index]);
+		hal_free(device->configurations);
+	}
+	device->configurations = NULL;
+	device->configuration_count = 0;
+	device->active_configuration = NULL;
 	device->interfaces = NULL;
 }
 
@@ -324,7 +418,7 @@ static int
 detach_interfaces(struct drv_usb_device *device)
 {
 	struct drv_usb_interface *interface;
-	int error;
+	int error, first_error = 0;
 
 	for (interface = device->interfaces; interface != NULL;
 	    interface = interface->next) {
@@ -332,10 +426,12 @@ detach_interfaces(struct drv_usb_device *device)
 			continue;
 		error = drv_usb_interface_detach(interface,
 		    DRV_USB_DETACH_FORCE | DRV_USB_DETACH_QUIET);
-		if (error != 0)
-			return error;
+		/* A failed function must not prevent the remaining functions on a
+		 * composite device from closing and draining their own work. */
+		if (error != 0 && first_error == 0)
+			first_error = error;
 	}
-	return 0;
+	return first_error;
 }
 
 static int
@@ -363,8 +459,12 @@ device_quiesce(struct drv_usb_bus *bus, struct drv_usb_device *device)
 {
 	int error;
 
-	if (bus->hcd->ops->device_quiesce == NULL)
-		return 0;
+	if (bus->hcd->ops->device_quiesce == NULL) {
+		if (!device->quarantined)
+			return 0;
+		device_link(bus, device);
+		return EBUSY;
+	}
 	error = bus->hcd->ops->device_quiesce(bus->hcd, device);
 	if (error == 0 && drv_usb_device_hcd_urb_count(device) != 0)
 		error = EBUSY;
@@ -394,15 +494,13 @@ device_finalize(struct drv_usb_bus *bus, struct drv_usb_device *device)
 			*link = device->next;
 			break;
 		}
-	/* A checked device quiesce and successful driver detach have already
-	 * stopped every user and HCD path which can reach these interfaces. */
-	free_interfaces(device, bus->hcd->ops->device_quiesce == NULL);
+	/* A checked device/endpoint quiesce and successful driver detach have
+	 * already stopped every path which can reach these descriptors. */
+	free_configurations(device);
 	if (bus->hcd->ops->device_disable != NULL)
 		bus->hcd->ops->device_disable(bus->hcd, device);
 	if (address > 0 && address <= DRV_USB_MAX_ADDRESS)
 		bus->address_used[address] = 0;
-	if (device->configurations != NULL)
-		hal_free(device->configurations);
 	if (device->quarantine_buffer != NULL)
 		hal_free(device->quarantine_buffer);
 	hal_free(device);
@@ -455,23 +553,26 @@ device_urb_put(struct drv_usb_device *device)
 static int
 destroy_device(struct drv_usb_bus *bus, struct drv_usb_device *device)
 {
-	int error;
+	int detach_error, quiesce_error;
 
 	if (device == NULL || device == bus->root_hub)
 		return EINVAL;
 	device_begin_disconnect(device);
-	error = device_quiesce(bus, device);
-	if (error != 0)
-		return error;
-	error = detach_interfaces(device);
-	if (error != 0) {
-		if (!device->quarantined)
+	detach_error = detach_interfaces(device);
+	/* Admission is closed before detach.  Even a class-driver failure must
+	 * reach the checked DMA barrier before the bus owner may release memory. */
+	quiesce_error = device_quiesce(bus, device);
+	if (quiesce_error == 0 && bus->hcd->ops->device_quiesce == NULL)
+		quiesce_error = device_disable_active_endpoints(device);
+	if (detach_error != 0 || quiesce_error != 0) {
+		if (detach_error != 0 && !device->quarantined)
 			hal_printf(
 			    "usb%u: device %u port %u driver detach pending (%d); device retained\n",
-			    bus->number, device->address, device->port, error);
-		device->quarantined = 1;
+			    bus->number, device->address, device->port,
+			    detach_error);
+		device->quarantined = 1U;
 		device_link(bus, device);
-		return error;
+		return detach_error != 0 ? detach_error : quiesce_error;
 	}
 	device->report_disconnect = 1U;
 	return device_release(bus, device);
@@ -532,34 +633,471 @@ drv_usb_decode_superspeed_endpoint_companion(const void *raw, size_t length,
 	return 0;
 }
 
-static int parse_configuration(struct drv_usb_device *device,
-	const uint8_t *raw,size_t length)
+static struct drv_usb_interface *
+configuration_find_interface(struct drv_usb_configuration *configuration,
+	unsigned number)
 {
-	struct drv_usb_interface *current=NULL,**tail=&device->interfaces;
-	struct drv_usb_endpoint *current_endpoint=NULL;
-	size_t offset=0;
-	while(offset+2U<=length){uint8_t n=raw[offset],type=raw[offset+1U];
-		if(n<2U||offset+n>length)return EINVAL;
-		if(type==DRV_USB_DESCRIPTOR_INTERFACE&&n>=sizeof(struct drv_usb_interface_descriptor)){
-			struct drv_usb_interface_descriptor descriptor;memcpy(&descriptor,raw+offset,sizeof(descriptor));
-			current_endpoint=NULL;
-			if(descriptor.alternate_setting==0){current=hal_malloc(sizeof(*current));if(!current)return ENOMEM;memset(current,0,sizeof(*current));current->device=device;current->descriptor=descriptor;current->alternate_count=1;if(descriptor.endpoint_count){current->endpoints=hal_malloc(sizeof(*current->endpoints)*descriptor.endpoint_count);if(!current->endpoints){hal_free(current);return ENOMEM;}memset(current->endpoints,0,sizeof(*current->endpoints)*descriptor.endpoint_count);}*tail=current;tail=&current->next;}
-			else if(current&&descriptor.interface_number==current->descriptor.interface_number)current->alternate_count++;
-		}else if(type==DRV_USB_DESCRIPTOR_ENDPOINT&&n>=sizeof(struct drv_usb_endpoint_descriptor)&&current&&current->endpoint_count<current->descriptor.endpoint_count){struct drv_usb_endpoint*endpoint=&current->endpoints[current->endpoint_count++];memcpy(&endpoint->descriptor,raw+offset,sizeof(endpoint->descriptor));endpoint->interface=current;endpoint->type=(enum drv_usb_transfer_type)(endpoint->descriptor.attributes&3U);current_endpoint=endpoint;}
-		else if(type==DRV_USB_DESCRIPTOR_SUPERSPEED_ENDPOINT_COMPANION&&current_endpoint!=NULL){if(drv_usb_decode_superspeed_endpoint_companion(raw+offset,n,&current_endpoint->companion)!=0)return EINVAL;current_endpoint->companion_valid=1U;current_endpoint=NULL;}
-		offset+=n;
+	struct drv_usb_interface *interface;
+
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = interface->next)
+		if (interface->descriptor.interface_number == number)
+			return interface;
+	return NULL;
+}
+
+static struct drv_usb_host_interface *
+interface_find_alternate(struct drv_usb_interface *interface,
+	unsigned setting)
+{
+	struct drv_usb_host_interface *alternate;
+
+	for (alternate = interface->alternates; alternate != NULL;
+	    alternate = alternate->next)
+		if (alternate->descriptor.alternate_setting == setting)
+			return alternate;
+	return NULL;
+}
+
+static void
+interface_publish_alternate(struct drv_usb_interface *interface,
+	struct drv_usb_host_interface *alternate)
+{
+	interface->active_alternate = alternate;
+	interface->descriptor = alternate->descriptor;
+	interface->endpoints = alternate->endpoints;
+	interface->endpoint_count = alternate->endpoint_count;
+}
+
+static int
+configuration_iads_prepare(struct drv_usb_configuration *configuration,
+	const uint8_t *raw, size_t length)
+{
+	size_t offset = 0;
+	unsigned count = 0;
+
+	while (offset < length) {
+		uint8_t descriptor_length, descriptor_type;
+
+		if (length - offset < 2U)
+			return EINVAL;
+		descriptor_length = raw[offset];
+		descriptor_type = raw[offset + 1U];
+		if (descriptor_length < 2U || descriptor_length > length - offset)
+			return EINVAL;
+		if (descriptor_type ==
+		    DRV_USB_DESCRIPTOR_INTERFACE_ASSOCIATION) {
+			if (descriptor_length != sizeof(
+			    struct drv_usb_interface_association_descriptor) ||
+			    count == DRV_USB_MAX_IADS)
+				return EINVAL;
+			count++;
+		}
+		offset += descriptor_length;
+	}
+	if (count != 0) {
+		configuration->iads = hal_malloc(count *
+		    sizeof(*configuration->iads));
+		if (configuration->iads == NULL)
+			return ENOMEM;
+		memset(configuration->iads, 0,
+		    count * sizeof(*configuration->iads));
+	}
+	configuration->iad_count = count;
+	return 0;
+}
+
+static int
+configuration_iads_validate(struct drv_usb_configuration *configuration)
+{
+	unsigned left, right;
+
+	for (left = 0; left < configuration->iad_count; left++) {
+		const struct drv_usb_interface_association_descriptor *iad =
+		    &configuration->iads[left];
+		unsigned first = iad->first_interface;
+		unsigned end = first + iad->interface_count;
+
+		if (iad->interface_count == 0 || end > (unsigned)UINT8_MAX + 1U)
+			return EINVAL;
+		for (; first < end; first++)
+			if (configuration_find_interface(configuration, first) == NULL)
+				return EINVAL;
+		for (right = 0; right < left; right++) {
+			const struct drv_usb_interface_association_descriptor *other =
+			    &configuration->iads[right];
+			unsigned other_end = other->first_interface +
+			    other->interface_count;
+
+			if (iad->first_interface < other_end &&
+			    other->first_interface < end)
+				return EINVAL;
+		}
 	}
 	return 0;
 }
 
+static int
+configuration_endpoint_addresses_validate(
+	const struct drv_usb_configuration *configuration)
+{
+	const struct drv_usb_interface *interface;
+	uint32_t configuration_addresses = 0;
+
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = interface->next) {
+		const struct drv_usb_host_interface *alternate;
+		uint32_t interface_addresses = 0;
+
+		for (alternate = interface->alternates; alternate != NULL;
+		    alternate = alternate->next) {
+			unsigned endpoint_index;
+
+			for (endpoint_index = 0;
+			    endpoint_index < alternate->endpoint_count;
+			    endpoint_index++) {
+				uint8_t address = alternate->endpoints[endpoint_index].
+				    descriptor.address;
+				unsigned bit = (address & 0x0fU) +
+				    ((address & DRV_USB_DIR_IN) != 0 ? 16U : 0U);
+
+				interface_addresses |= (uint32_t)1U << bit;
+			}
+		}
+		/* Alternate settings of one logical interface may reuse an
+		 * endpoint address, but independently selectable interfaces may
+		 * not alias an HCD endpoint context. */
+		if ((configuration_addresses & interface_addresses) != 0)
+			return EINVAL;
+		configuration_addresses |= interface_addresses;
+	}
+	return 0;
+}
+
+static int
+parse_configuration(struct drv_usb_configuration *configuration,
+	struct drv_usb_device *device, uint8_t *raw, size_t length)
+{
+	struct drv_usb_configuration_descriptor descriptor;
+	struct drv_usb_interface **interface_tail;
+	struct drv_usb_interface *current_interface = NULL;
+	struct drv_usb_host_interface *current_alternate = NULL;
+	struct drv_usb_endpoint *current_endpoint = NULL;
+	size_t offset;
+	unsigned iad_index = 0;
+	int error;
+
+	memset(configuration, 0, sizeof(*configuration));
+	configuration->raw = raw;
+	configuration->raw_length = length;
+	configuration->device = device;
+	if (length < sizeof(descriptor)) {
+		error = EINVAL;
+		goto fail;
+	}
+	memcpy(&descriptor, raw, sizeof(descriptor));
+	if (descriptor.length < sizeof(descriptor) ||
+	    descriptor.length > length ||
+	    descriptor.descriptor_type != DRV_USB_DESCRIPTOR_CONFIGURATION ||
+	    descriptor.total_length != length ||
+	    descriptor.configuration_value == 0 ||
+	    descriptor.interface_count > DRV_USB_MAX_INTERFACES) {
+		error = EINVAL;
+		goto fail;
+	}
+	configuration->descriptor = descriptor;
+	error = configuration_iads_prepare(configuration, raw, length);
+	if (error != 0)
+		goto fail;
+	interface_tail = &configuration->interfaces;
+	offset = descriptor.length;
+	while (offset < length) {
+		uint8_t descriptor_length = raw[offset];
+		uint8_t descriptor_type = raw[offset + 1U];
+
+		if (descriptor_type == DRV_USB_DESCRIPTOR_INTERFACE) {
+			struct drv_usb_interface_descriptor interface_descriptor;
+			struct drv_usb_host_interface **alternate_tail;
+
+			if (descriptor_length < sizeof(interface_descriptor)) {
+				error = EINVAL;
+				goto fail;
+			}
+			if (current_alternate != NULL) {
+				if (current_alternate->endpoint_count !=
+				    current_alternate->descriptor.endpoint_count) {
+					error = EINVAL;
+					goto fail;
+				}
+				current_alternate->raw_length = offset -
+				    current_alternate->raw_offset;
+			}
+			memcpy(&interface_descriptor, raw + offset,
+			    sizeof(interface_descriptor));
+			if (interface_descriptor.endpoint_count >
+			    DRV_USB_MAX_ENDPOINTS) {
+				error = EINVAL;
+				goto fail;
+			}
+			current_interface = configuration_find_interface(configuration,
+			    interface_descriptor.interface_number);
+			if (current_interface == NULL) {
+				if (configuration->interface_count ==
+				    DRV_USB_MAX_INTERFACES) {
+					error = EINVAL;
+					goto fail;
+				}
+				current_interface = hal_malloc(sizeof(*current_interface));
+				if (current_interface == NULL) {
+					error = ENOMEM;
+					goto fail;
+				}
+				memset(current_interface, 0, sizeof(*current_interface));
+				current_interface->device = device;
+				current_interface->configuration = configuration;
+				current_interface->descriptor = interface_descriptor;
+				*interface_tail = current_interface;
+				interface_tail = &current_interface->next;
+				configuration->interface_count++;
+			}
+			if (current_interface->alternate_count ==
+			    DRV_USB_MAX_ALTERNATES ||
+			    interface_find_alternate(current_interface,
+			    interface_descriptor.alternate_setting) != NULL) {
+				error = EINVAL;
+				goto fail;
+			}
+			current_alternate = hal_malloc(sizeof(*current_alternate));
+			if (current_alternate == NULL) {
+				error = ENOMEM;
+				goto fail;
+			}
+			memset(current_alternate, 0, sizeof(*current_alternate));
+			current_alternate->interface = current_interface;
+			current_alternate->descriptor = interface_descriptor;
+			current_alternate->raw_offset = offset;
+			if (interface_descriptor.endpoint_count != 0) {
+				current_alternate->endpoints = hal_malloc(
+				    interface_descriptor.endpoint_count *
+				    sizeof(*current_alternate->endpoints));
+				if (current_alternate->endpoints == NULL) {
+					hal_free(current_alternate);
+					current_alternate = NULL;
+					error = ENOMEM;
+					goto fail;
+				}
+				memset(current_alternate->endpoints, 0,
+				    interface_descriptor.endpoint_count *
+				    sizeof(*current_alternate->endpoints));
+			}
+			alternate_tail = &current_interface->alternates;
+			while (*alternate_tail != NULL)
+				alternate_tail = &(*alternate_tail)->next;
+			*alternate_tail = current_alternate;
+			current_interface->alternate_count++;
+			current_endpoint = NULL;
+		} else if (descriptor_type == DRV_USB_DESCRIPTOR_ENDPOINT) {
+			struct drv_usb_endpoint_descriptor endpoint_descriptor;
+			unsigned endpoint_number, endpoint_index;
+
+			if (current_alternate == NULL ||
+			    descriptor_length < sizeof(endpoint_descriptor) ||
+			    current_alternate->endpoint_count >=
+			    current_alternate->descriptor.endpoint_count) {
+				error = EINVAL;
+				goto fail;
+			}
+			memcpy(&endpoint_descriptor, raw + offset,
+			    sizeof(endpoint_descriptor));
+			endpoint_number = endpoint_descriptor.address & 0x0fU;
+			if (endpoint_number == 0 ||
+			    (endpoint_descriptor.address & 0x70U) != 0 ||
+			    (endpoint_descriptor.attributes & 3U) ==
+			    DRV_USB_TRANSFER_CONTROL ||
+			    endpoint_descriptor.maximum_packet_size == 0) {
+				error = EINVAL;
+				goto fail;
+			}
+			for (endpoint_index = 0;
+			    endpoint_index < current_alternate->endpoint_count;
+			    endpoint_index++)
+				if (current_alternate->endpoints[endpoint_index].
+				    descriptor.address == endpoint_descriptor.address) {
+					error = EINVAL;
+					goto fail;
+				}
+			current_endpoint = &current_alternate->endpoints[
+			    current_alternate->endpoint_count++];
+			current_endpoint->interface = current_interface;
+			current_endpoint->descriptor = endpoint_descriptor;
+			current_endpoint->type = (enum drv_usb_transfer_type)
+			    (endpoint_descriptor.attributes & 3U);
+		} else if (descriptor_type ==
+		    DRV_USB_DESCRIPTOR_SUPERSPEED_ENDPOINT_COMPANION) {
+			if (current_endpoint == NULL ||
+			    current_endpoint->companion_valid ||
+			    drv_usb_decode_superspeed_endpoint_companion(raw + offset,
+			    descriptor_length, &current_endpoint->companion) != 0) {
+				error = EINVAL;
+				goto fail;
+			}
+			current_endpoint->companion_valid = 1U;
+			current_endpoint = NULL;
+		} else if (descriptor_type ==
+		    DRV_USB_DESCRIPTOR_INTERFACE_ASSOCIATION) {
+			if (iad_index >= configuration->iad_count) {
+				error = EINVAL;
+				goto fail;
+			}
+			memcpy(&configuration->iads[iad_index++], raw + offset,
+			    sizeof(configuration->iads[0]));
+			current_endpoint = NULL;
+		} else {
+			if (descriptor_type == DRV_USB_DESCRIPTOR_CONFIGURATION) {
+				error = EINVAL;
+				goto fail;
+			}
+			if (current_alternate != NULL)
+				current_alternate->extra_count++;
+			current_endpoint = NULL;
+		}
+		offset += descriptor_length;
+	}
+	if (current_alternate != NULL) {
+		if (current_alternate->endpoint_count !=
+		    current_alternate->descriptor.endpoint_count) {
+			error = EINVAL;
+			goto fail;
+		}
+		current_alternate->raw_length = offset -
+		    current_alternate->raw_offset;
+	}
+	if (configuration->interface_count != descriptor.interface_count ||
+	    iad_index != configuration->iad_count) {
+		error = EINVAL;
+		goto fail;
+	}
+	for (current_interface = configuration->interfaces;
+	    current_interface != NULL; current_interface = current_interface->next) {
+		current_alternate = interface_find_alternate(current_interface, 0);
+		if (current_alternate == NULL) {
+			error = EINVAL;
+			goto fail;
+		}
+		interface_publish_alternate(current_interface, current_alternate);
+	}
+	error = configuration_endpoint_addresses_validate(configuration);
+	if (error != 0)
+		goto fail;
+	error = configuration_iads_validate(configuration);
+	if (error != 0)
+		goto fail;
+	return 0;
+
+fail:
+	free_configuration(configuration);
+	return error;
+}
+
+static int
+enumerate_configuration(struct drv_usb_device *device, unsigned index,
+	struct drv_usb_configuration *configuration)
+{
+	struct drv_usb_configuration_descriptor descriptor;
+	uint8_t *raw;
+	size_t actual = 0;
+	int error;
+
+	error = drv_usb_control(device,
+	    DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_DEVICE,
+	    USB_REQ_GET_DESCRIPTOR,
+	    (uint16_t)((DRV_USB_DESCRIPTOR_CONFIGURATION << 8) | index), 0,
+	    &descriptor, sizeof(descriptor), USB_CONTROL_TIMEOUT_MS, &actual);
+	if (error != 0)
+		return error;
+	if (actual != sizeof(descriptor) ||
+	    descriptor.length < sizeof(descriptor) ||
+	    descriptor.descriptor_type != DRV_USB_DESCRIPTOR_CONFIGURATION ||
+	    descriptor.total_length < descriptor.length)
+		return EIO;
+	raw = hal_malloc(descriptor.total_length);
+	if (raw == NULL)
+		return ENOMEM;
+	error = drv_usb_control(device,
+	    DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_DEVICE,
+	    USB_REQ_GET_DESCRIPTOR,
+	    (uint16_t)((DRV_USB_DESCRIPTOR_CONFIGURATION << 8) | index), 0,
+	    raw, descriptor.total_length, USB_CONTROL_TIMEOUT_MS, &actual);
+	if (error != 0 || actual != descriptor.total_length) {
+		hal_free(raw);
+		return error != 0 ? error : EIO;
+	}
+	return parse_configuration(configuration, device, raw, actual);
+}
+
+static int
+interface_registered_driver_score(struct drv_usb_interface *interface)
+{
+	struct usb_driver_entry *entry;
+	int best = 0;
+
+	for (entry = usb_drivers; entry != NULL; entry = entry->next) {
+		const struct drv_usb_id *id;
+		int score;
+
+		id = drv_usb_driver_find_id(entry->driver, interface);
+		if (id == NULL)
+			continue;
+		score = entry->driver->match != NULL ?
+		    entry->driver->match(interface, id) : 1;
+		if (score > best)
+			best = score;
+	}
+	return best;
+}
+
+static struct drv_usb_configuration *
+device_preferred_configuration(struct drv_usb_device *device)
+{
+	struct drv_usb_configuration *best = &device->configurations[0];
+	int best_score = 0;
+	unsigned configuration_index;
+
+	for (configuration_index = 0;
+	    configuration_index < device->configuration_count;
+	    configuration_index++) {
+		struct drv_usb_configuration *configuration =
+		    &device->configurations[configuration_index];
+		struct drv_usb_interface *interface;
+		int score = 0;
+
+		for (interface = configuration->interfaces; interface != NULL;
+		    interface = interface->next) {
+			int interface_score =
+			    interface_registered_driver_score(interface);
+
+			if (interface_score > score)
+				score = interface_score;
+		}
+		/* Strictly greater preserves descriptor order for ties and for the
+		 * all-unsupported case.  Matching is observational: inactive
+		 * configurations are never attached or published. */
+		if (configuration_index == 0 || score > best_score) {
+			best = configuration;
+			best_score = score;
+		}
+	}
+	return best;
+}
+
 static int enumerate_port(struct drv_usb_bus *bus,unsigned port,uint32_t status)
 {
-	struct drv_usb_configuration_descriptor config;
 	struct drv_usb_device *device;
+	struct drv_usb_configuration *preferred;
 	struct drv_usb_interface *interface;
-	uint8_t first[8], *raw = NULL;
+	uint8_t first[8];
 	size_t actual = 0;
-	unsigned packet;
+	unsigned configuration_index, other, packet;
 	int address = 0, cleanup_error, error = 0;
 
 	device = hal_malloc(sizeof(*device));
@@ -584,7 +1122,7 @@ static int enumerate_port(struct drv_usb_bus *bus,unsigned port,uint32_t status)
 	    DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_DEVICE,
 	    USB_REQ_GET_DESCRIPTOR,
 	    (uint16_t)(DRV_USB_DESCRIPTOR_DEVICE << 8), 0, first,
-	    sizeof(first), 1000U, &actual);
+	    sizeof(first), USB_CONTROL_TIMEOUT_MS, &actual);
 	if (error != 0 || actual != sizeof(first)) {
 		if (error == 0)
 			error = EIO;
@@ -618,7 +1156,7 @@ static int enumerate_port(struct drv_usb_bus *bus,unsigned port,uint32_t status)
 		    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
 			DRV_USB_RECIP_DEVICE,
 		    USB_REQ_SET_ADDRESS, (uint16_t)address, 0, NULL, 0,
-		    1000U, &actual);
+		    USB_CONTROL_TIMEOUT_MS, &actual);
 	if (error != 0)
 		goto fail;
 	device->state = DRV_USB_STATE_ADDRESS;
@@ -627,70 +1165,50 @@ static int enumerate_port(struct drv_usb_bus *bus,unsigned port,uint32_t status)
 	    DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_DEVICE,
 	    USB_REQ_GET_DESCRIPTOR,
 	    (uint16_t)(DRV_USB_DESCRIPTOR_DEVICE << 8), 0,
-	    &device->descriptor, sizeof(device->descriptor), 1000U, &actual);
+	    &device->descriptor, sizeof(device->descriptor),
+	    USB_CONTROL_TIMEOUT_MS, &actual);
 	if (error != 0 || actual != sizeof(device->descriptor)) {
 		if (error == 0)
 			error = EIO;
 		goto fail;
 	}
-	error = drv_usb_control(device,
-	    DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_DEVICE,
-	    USB_REQ_GET_DESCRIPTOR,
-	    (uint16_t)(DRV_USB_DESCRIPTOR_CONFIGURATION << 8), 0, &config,
-	    sizeof(config), 1000U, &actual);
-	if (error != 0 || actual != sizeof(config) ||
-	    config.total_length < sizeof(config)) {
-		if (error == 0)
-			error = EIO;
+	if (device->descriptor.configuration_count == 0 ||
+	    device->descriptor.configuration_count >
+	    DRV_USB_MAX_CONFIGURATIONS) {
+		error = EINVAL;
 		goto fail;
 	}
-	raw = hal_malloc(config.total_length);
-	if (raw == NULL) {
-		error = ENOMEM;
-		goto fail;
-	}
-	error = drv_usb_control(device,
-	    DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_DEVICE,
-	    USB_REQ_GET_DESCRIPTOR,
-	    (uint16_t)(DRV_USB_DESCRIPTOR_CONFIGURATION << 8), 0, raw,
-	    config.total_length, 1000U, &actual);
-	if (error != 0 || actual < sizeof(config)) {
-		if (error == 0)
-			error = EIO;
-		goto fail;
-	}
-	device->configurations = hal_malloc(sizeof(*device->configurations));
+	device->configuration_count = device->descriptor.configuration_count;
+	device->configurations = hal_malloc(device->configuration_count *
+	    sizeof(*device->configurations));
 	if (device->configurations == NULL) {
 		error = ENOMEM;
 		goto fail;
 	}
-	memset(device->configurations, 0, sizeof(*device->configurations));
-	device->configurations[0].descriptor = config;
-	device->configuration_count = 1;
-	error = parse_configuration(device, raw, actual);
-	if (error != 0)
-		goto fail;
-	error = drv_usb_control(device,
-	    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_DEVICE,
-	    USB_REQ_SET_CONFIGURATION, config.configuration_value, 0, NULL, 0,
-	    1000U, &actual);
-	if (error != 0)
-		goto fail;
-	for (interface = device->interfaces; interface != NULL;
-	    interface = interface->next) {
-		unsigned endpoint;
-
-		for (endpoint = 0; endpoint < interface->endpoint_count;
-		    endpoint++)
-			if (bus->hcd->ops->endpoint_enable != NULL &&
-			    (error = bus->hcd->ops->endpoint_enable(bus->hcd,
-				&interface->endpoints[endpoint])) != 0)
+	memset(device->configurations, 0, device->configuration_count *
+	    sizeof(*device->configurations));
+	for (configuration_index = 0;
+	    configuration_index < device->configuration_count;
+	    configuration_index++) {
+		error = enumerate_configuration(device, configuration_index,
+		    &device->configurations[configuration_index]);
+		if (error != 0)
+			goto fail;
+		for (other = 0; other < configuration_index; other++)
+			if (device->configurations[other].descriptor.
+			    configuration_value ==
+			    device->configurations[configuration_index].descriptor.
+			    configuration_value) {
+				error = EINVAL;
 				goto fail;
+			}
 	}
-	device->active_configuration = device->configurations;
-	device->state = DRV_USB_STATE_CONFIGURED;
+	preferred = device_preferred_configuration(device);
+	error = drv_usb_device_set_configuration(device,
+	    preferred->descriptor.configuration_value);
+	if (error != 0)
+		goto fail;
 	device_link(bus, device);
-	hal_free(raw);
 	hal_printf("usb%u: device %u port %u %04x:%04x class %02x configured\n",
 	    bus->number, device->address, port, device->descriptor.vendor,
 	    device->descriptor.product, device->descriptor.device_class);
@@ -705,11 +1223,8 @@ fail:
 	device_begin_disconnect(device);
 	cleanup_error = device_quiesce(bus, device);
 	if (cleanup_error != 0) {
-		device->quarantine_buffer = raw;
 		return error;
 	}
-	if (raw != NULL)
-		hal_free(raw);
 	device_release(bus, device);
 	return error;
 }
@@ -950,8 +1465,424 @@ uintptr_t drv_usb_device_hcd_data(const struct drv_usb_device*d,unsigned n){retu
 int drv_usb_device_set_hcd_data(struct drv_usb_device*d,unsigned n,uintptr_t value){if(!d||n>=4U)return EINVAL;__atomic_store_n(&d->hcd_private[n],value,__ATOMIC_RELEASE);return 0;}
 struct drv_dma_device*drv_usb_device_dma(struct drv_usb_device*d){return d?d->bus->hcd->dma:NULL;}
 int drv_usb_device_reset(struct drv_usb_device*d){(void)d;return ENOTSUP;}
-int drv_usb_device_set_configuration(struct drv_usb_device*d,unsigned n){(void)d;(void)n;return ENOTSUP;}
-int drv_usb_device_get_string(struct drv_usb_device*d,unsigned i,unsigned l,char*b,size_t n){(void)d;(void)i;(void)l;(void)b;(void)n;return ENOTSUP;}
+
+static void
+device_quarantine_selection(struct drv_usb_device *device, const char *stage,
+	int error)
+{
+	if (!device->quarantined)
+		hal_printf("usb%u: device %u %s rollback failed (%d); quarantined\n",
+		    device->bus->number, device->address, stage, error);
+	device->quarantined = 1U;
+}
+
+static int
+host_interface_enable(struct drv_usb_host_interface *alternate)
+{
+	struct drv_usb_hcd *hcd = alternate->interface->device->bus->hcd;
+	unsigned index, rollback_index;
+	int error, rollback_error = 0;
+
+	if (hcd->ops->endpoint_enable == NULL)
+		return 0;
+	for (index = 0; index < alternate->endpoint_count; index++) {
+		error = hcd->ops->endpoint_enable(hcd,
+		    &alternate->endpoints[index]);
+		if (error != 0) {
+			/* Only endpoints enabled by this invocation are eligible for
+			 * compensation.  Reverse order preserves HCD dependencies. */
+			for (rollback_index = index; rollback_index != 0;) {
+				int rollback;
+
+				rollback_index--;
+				rollback = hcd->ops->endpoint_disable(hcd,
+				    &alternate->endpoints[rollback_index]);
+				if (rollback_error == 0 && rollback != 0)
+					rollback_error = rollback;
+			}
+			if (rollback_error != 0)
+				device_quarantine_selection(
+				    alternate->interface->device,
+				    "endpoint-enable", rollback_error);
+			return error;
+		}
+	}
+	return 0;
+}
+
+static int
+host_interface_disable(struct drv_usb_host_interface *alternate)
+{
+	struct drv_usb_hcd *hcd = alternate->interface->device->bus->hcd;
+	unsigned index, rollback_index;
+	int error, rollback_error = 0;
+
+	if (hcd->ops->endpoint_disable == NULL)
+		return 0;
+	for (index = 0; index < alternate->endpoint_count; index++) {
+		error = hcd->ops->endpoint_disable(hcd,
+		    &alternate->endpoints[index]);
+		if (error == 0)
+			continue;
+		/* SET_INTERFACE has not yet been issued.  Re-enable only the
+		 * endpoints disabled by this invocation, in reverse order. */
+		for (rollback_index = index; rollback_index != 0;) {
+			int rollback;
+
+			rollback_index--;
+			rollback = hcd->ops->endpoint_enable(hcd,
+			    &alternate->endpoints[rollback_index]);
+			if (rollback_error == 0 && rollback != 0)
+				rollback_error = rollback;
+		}
+		if (rollback_error != 0)
+			device_quarantine_selection(alternate->interface->device,
+			    "endpoint-disable", rollback_error);
+		return error;
+	}
+	return 0;
+}
+
+static int
+configuration_enable_endpoints(struct drv_usb_configuration *configuration)
+{
+	struct drv_usb_interface *interface;
+	struct drv_usb_interface *enabled[DRV_USB_MAX_INTERFACES];
+	unsigned enabled_count = 0;
+	int error, rollback_error = 0;
+
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = interface->next) {
+		error = host_interface_enable(interface->active_alternate);
+		if (error != 0) {
+			while (enabled_count != 0) {
+				int rollback;
+
+				interface = enabled[--enabled_count];
+				rollback = host_interface_disable(
+				    interface->active_alternate);
+				if (rollback_error == 0 && rollback != 0)
+					rollback_error = rollback;
+			}
+			if (rollback_error != 0)
+				device_quarantine_selection(configuration->device,
+				    "configuration-enable", rollback_error);
+			return error;
+		}
+		enabled[enabled_count++] = interface;
+	}
+	return 0;
+}
+
+static int
+configuration_disable_endpoints(struct drv_usb_configuration *configuration)
+{
+	struct drv_usb_interface *interface;
+	struct drv_usb_interface *disabled[DRV_USB_MAX_INTERFACES];
+	unsigned disabled_count = 0;
+	int error, rollback_error = 0;
+
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = interface->next) {
+		error = host_interface_disable(interface->active_alternate);
+		if (error != 0) {
+			while (disabled_count != 0) {
+				int rollback;
+
+				interface = disabled[--disabled_count];
+				rollback = host_interface_enable(
+				    interface->active_alternate);
+				if (rollback_error == 0 && rollback != 0)
+					rollback_error = rollback;
+			}
+			if (rollback_error != 0)
+				device_quarantine_selection(configuration->device,
+				    "configuration-disable", rollback_error);
+			return error;
+		}
+		disabled[disabled_count++] = interface;
+	}
+	return 0;
+}
+
+static int
+device_disable_active_endpoints(struct drv_usb_device *device)
+{
+	return device->active_configuration == NULL ? 0 :
+	    configuration_disable_endpoints(device->active_configuration);
+}
+
+static int
+configuration_has_owners(const struct drv_usb_configuration *configuration)
+{
+	const struct drv_usb_interface *interface;
+
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = interface->next)
+		if (interface->driver != NULL || interface->claimed_by != NULL)
+			return 1;
+	return 0;
+}
+
+static void
+configuration_select_defaults(struct drv_usb_configuration *configuration)
+{
+	struct drv_usb_interface *interface;
+
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = interface->next)
+		interface_publish_alternate(interface,
+		    interface_find_alternate(interface, 0));
+}
+
+static int
+configuration_restore(struct drv_usb_device *device,
+	struct drv_usb_configuration *configuration)
+{
+	struct drv_usb_interface *interface;
+	size_t actual = 0;
+	int error;
+
+	if (configuration == NULL)
+		return drv_usb_control(device,
+		    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
+		    DRV_USB_RECIP_DEVICE, USB_REQ_SET_CONFIGURATION, 0, 0, NULL, 0,
+		    USB_CONTROL_TIMEOUT_MS, &actual);
+	error = drv_usb_control(device,
+	    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_DEVICE,
+	    USB_REQ_SET_CONFIGURATION,
+	    configuration->descriptor.configuration_value, 0, NULL, 0,
+	    USB_CONTROL_TIMEOUT_MS, &actual);
+	if (error != 0)
+		return error;
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = interface->next) {
+		if (interface->active_alternate->descriptor.alternate_setting == 0)
+			continue;
+		error = drv_usb_control(device,
+		    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
+		    DRV_USB_RECIP_INTERFACE, USB_REQ_SET_INTERFACE,
+		    interface->active_alternate->descriptor.alternate_setting,
+		    interface->descriptor.interface_number, NULL, 0,
+		    USB_CONTROL_TIMEOUT_MS, &actual);
+		if (error != 0)
+			return error;
+	}
+	return configuration_enable_endpoints(configuration);
+}
+
+int
+drv_usb_device_set_configuration(struct drv_usb_device *device,
+	unsigned configuration_value)
+{
+	struct drv_usb_configuration *old, *target = NULL;
+	unsigned index;
+	size_t actual = 0;
+	int error, rollback_error;
+
+	if (device == NULL || device->parent == NULL ||
+	    (device->state != DRV_USB_STATE_ADDRESS &&
+	    device->state != DRV_USB_STATE_CONFIGURED))
+		return EINVAL;
+	if (device_is_disconnecting(device) || device->quarantined)
+		return ENODEV;
+	if (configuration_value != 0) {
+		for (index = 0; index < device->configuration_count; index++)
+			if (device->configurations[index].descriptor.
+			    configuration_value == configuration_value) {
+				target = &device->configurations[index];
+				break;
+			}
+		if (target == NULL)
+			return ENOENT;
+	}
+	old = device->active_configuration;
+	if (old == target)
+		return 0;
+	if (device->selection_busy || device_urb_reference_count(device) != 0 ||
+	    drv_usb_device_hcd_urb_count(device) != 0 ||
+	    (old != NULL && configuration_has_owners(old)))
+		return EBUSY;
+	device->selection_busy = 1U;
+	if (old != NULL) {
+		error = configuration_disable_endpoints(old);
+		if (error != 0)
+			goto out;
+	}
+	error = drv_usb_control(device,
+	    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_DEVICE,
+	    USB_REQ_SET_CONFIGURATION, (uint16_t)configuration_value, 0,
+	    NULL, 0, USB_CONTROL_TIMEOUT_MS, &actual);
+	if (error != 0) {
+		/* STALL rejects the request without changing the selected
+		 * configuration. Other transport failures leave device state
+		 * unknowable and must not republish endpoints. */
+		if (error != EPIPE) {
+			device_quarantine_selection(device, "set-configuration",
+			    error);
+			goto out;
+		}
+		rollback_error = old == NULL ? 0 :
+		    configuration_enable_endpoints(old);
+		if (rollback_error != 0)
+			device_quarantine_selection(device, "set-configuration",
+			    rollback_error);
+		goto out;
+	}
+	if (target != NULL) {
+		configuration_select_defaults(target);
+		error = configuration_enable_endpoints(target);
+		if (error != 0) {
+			rollback_error = 0;
+			if (!device->quarantined)
+				rollback_error = configuration_restore(device, old);
+			if (rollback_error != 0)
+				device_quarantine_selection(device,
+				    "configuration-enable", rollback_error);
+			goto out;
+		}
+	}
+	device->active_configuration = target;
+	device->interfaces = target == NULL ? NULL : target->interfaces;
+	device->state = target == NULL ? DRV_USB_STATE_ADDRESS :
+	    DRV_USB_STATE_CONFIGURED;
+	error = 0;
+
+out:
+	device->selection_busy = 0;
+	return error;
+}
+
+static int
+usb_string_descriptor(struct drv_usb_device *device, uint8_t index,
+	uint16_t language, uint8_t *descriptor, size_t *descriptor_length)
+{
+	uint8_t header[2];
+	size_t actual = 0;
+	int error;
+
+	error = drv_usb_control(device,
+	    DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_DEVICE,
+	    USB_REQ_GET_DESCRIPTOR,
+	    (uint16_t)((DRV_USB_DESCRIPTOR_STRING << 8) | index), language,
+	    header, sizeof(header), USB_CONTROL_TIMEOUT_MS, &actual);
+	if (error != 0)
+		return error;
+	if (actual != sizeof(header) || header[0] < 2U ||
+	    (header[0] & 1U) != 0 || header[1] != DRV_USB_DESCRIPTOR_STRING)
+		return EILSEQ;
+	error = drv_usb_control(device,
+	    DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_DEVICE,
+	    USB_REQ_GET_DESCRIPTOR,
+	    (uint16_t)((DRV_USB_DESCRIPTOR_STRING << 8) | index), language,
+	    descriptor, header[0], USB_CONTROL_TIMEOUT_MS, &actual);
+	if (error != 0)
+		return error;
+	if (actual != header[0] || descriptor[0] != header[0] ||
+	    descriptor[1] != DRV_USB_DESCRIPTOR_STRING)
+		return EILSEQ;
+	*descriptor_length = actual;
+	return 0;
+}
+
+static int
+utf8_append(char *buffer, size_t capacity, size_t *used, uint32_t codepoint)
+{
+	uint8_t encoded[4];
+	unsigned count, index;
+
+	if (codepoint == 0 || codepoint > 0x10ffffU ||
+	    (codepoint >= 0xd800U && codepoint <= 0xdfffU))
+		return EILSEQ;
+	if (codepoint < 0x80U) {
+		encoded[0] = (uint8_t)codepoint;
+		count = 1;
+	} else if (codepoint < 0x800U) {
+		encoded[0] = (uint8_t)(0xc0U | (codepoint >> 6));
+		encoded[1] = (uint8_t)(0x80U | (codepoint & 0x3fU));
+		count = 2;
+	} else if (codepoint < 0x10000U) {
+		encoded[0] = (uint8_t)(0xe0U | (codepoint >> 12));
+		encoded[1] = (uint8_t)(0x80U | ((codepoint >> 6) & 0x3fU));
+		encoded[2] = (uint8_t)(0x80U | (codepoint & 0x3fU));
+		count = 3;
+	} else {
+		encoded[0] = (uint8_t)(0xf0U | (codepoint >> 18));
+		encoded[1] = (uint8_t)(0x80U | ((codepoint >> 12) & 0x3fU));
+		encoded[2] = (uint8_t)(0x80U | ((codepoint >> 6) & 0x3fU));
+		encoded[3] = (uint8_t)(0x80U | (codepoint & 0x3fU));
+		count = 4;
+	}
+	if (*used > capacity || count >= capacity - *used)
+		return ENOSPC;
+	for (index = 0; index < count; index++)
+		buffer[(*used)++] = (char)encoded[index];
+	return 0;
+}
+
+int
+drv_usb_device_get_string(struct drv_usb_device *device, unsigned index,
+	unsigned language, char *buffer, size_t capacity)
+{
+	uint8_t descriptor[255];
+	size_t descriptor_length, offset, used = 0;
+	uint16_t selected_language;
+	int error;
+
+	if (device == NULL || index == 0 || index > UINT8_MAX ||
+	    language > UINT16_MAX || buffer == NULL || capacity == 0)
+		return EINVAL;
+	buffer[0] = '\0';
+	selected_language = (uint16_t)language;
+	if (selected_language == 0) {
+		error = usb_string_descriptor(device, 0, 0, descriptor,
+		    &descriptor_length);
+		if (error != 0)
+			return error;
+		if (descriptor_length < 4U)
+			return EILSEQ;
+		selected_language = (uint16_t)(descriptor[2] |
+		    ((uint16_t)descriptor[3] << 8));
+		if (selected_language == 0)
+			return EILSEQ;
+	}
+	error = usb_string_descriptor(device, (uint8_t)index,
+	    selected_language, descriptor, &descriptor_length);
+	if (error != 0)
+		return error;
+	for (offset = 2; offset < descriptor_length; offset += 2U) {
+		uint32_t codepoint = descriptor[offset] |
+		    ((uint32_t)descriptor[offset + 1U] << 8);
+
+		if (codepoint >= 0xd800U && codepoint <= 0xdbffU) {
+			uint32_t low;
+
+			if (offset + 3U >= descriptor_length) {
+				buffer[0] = '\0';
+				return EILSEQ;
+			}
+			low = descriptor[offset + 2U] |
+			    ((uint32_t)descriptor[offset + 3U] << 8);
+			if (low < 0xdc00U || low > 0xdfffU) {
+				buffer[0] = '\0';
+				return EILSEQ;
+			}
+			codepoint = 0x10000U + ((codepoint - 0xd800U) << 10) +
+			    (low - 0xdc00U);
+			offset += 2U;
+		} else if (codepoint >= 0xdc00U && codepoint <= 0xdfffU) {
+			buffer[0] = '\0';
+			return EILSEQ;
+		}
+		error = utf8_append(buffer, capacity, &used, codepoint);
+		if (error != 0) {
+			buffer[0] = '\0';
+			return error;
+		}
+	}
+	buffer[used] = '\0';
+	return 0;
+}
 
 struct drv_usb_urb *drv_usb_urb_alloc(struct drv_usb_device*d,
 	struct drv_usb_endpoint*e,unsigned iso_count)
@@ -1017,17 +1948,276 @@ const struct drv_usb_configuration_descriptor*drv_usb_configuration_descriptor(c
 unsigned drv_usb_device_configuration_count(const struct drv_usb_device*d){return d?d->configuration_count:0;}
 struct drv_usb_configuration*drv_usb_device_configuration(struct drv_usb_device*d,unsigned i){return d&&i<d->configuration_count?&d->configurations[i]:NULL;}
 struct drv_usb_configuration*drv_usb_device_active_configuration(struct drv_usb_device*d){return d?d->active_configuration:NULL;}
+const void *
+drv_usb_configuration_raw_descriptors(
+	const struct drv_usb_configuration *configuration, size_t *length)
+{
+	if (length != NULL)
+		*length = configuration == NULL ? 0 : configuration->raw_length;
+	return configuration == NULL ? NULL : configuration->raw;
+}
+unsigned
+drv_usb_configuration_interface_count(
+	const struct drv_usb_configuration *configuration)
+{
+	return configuration == NULL ? 0 : configuration->interface_count;
+}
+struct drv_usb_interface *
+drv_usb_configuration_interface(struct drv_usb_configuration *configuration,
+	unsigned index)
+{
+	struct drv_usb_interface *interface;
+
+	if (configuration == NULL)
+		return NULL;
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = interface->next)
+		if (index-- == 0)
+			return interface;
+	return NULL;
+}
+struct drv_usb_interface *
+drv_usb_configuration_find_interface(
+	struct drv_usb_configuration *configuration, unsigned interface_number)
+{
+	return configuration == NULL ? NULL :
+	    configuration_find_interface(configuration, interface_number);
+}
+unsigned
+drv_usb_configuration_iad_count(
+	const struct drv_usb_configuration *configuration)
+{
+	return configuration == NULL ? 0 : configuration->iad_count;
+}
+const struct drv_usb_interface_association_descriptor *
+drv_usb_configuration_iad(const struct drv_usb_configuration *configuration,
+	unsigned index)
+{
+	return configuration != NULL && index < configuration->iad_count ?
+	    &configuration->iads[index] : NULL;
+}
 struct drv_usb_device*drv_usb_interface_device(const struct drv_usb_interface*i){return i?i->device:NULL;}
 const struct drv_usb_interface_descriptor*drv_usb_interface_descriptor(const struct drv_usb_interface*i){return i?&i->descriptor:NULL;}
 unsigned drv_usb_interface_number(const struct drv_usb_interface*i){return i?i->descriptor.interface_number:0;}
 unsigned drv_usb_interface_alternate_count(const struct drv_usb_interface*i){return i?i->alternate_count:0;}
-int drv_usb_interface_set_alternate(struct drv_usb_interface*i,unsigned a){(void)i;(void)a;return ENOTSUP;}
+const struct drv_usb_host_interface *
+drv_usb_interface_active_alternate(const struct drv_usb_interface *interface)
+{
+	return interface == NULL ? NULL : interface->active_alternate;
+}
+const struct drv_usb_host_interface *
+drv_usb_interface_alternate(const struct drv_usb_interface *interface,
+	unsigned index)
+{
+	const struct drv_usb_host_interface *alternate;
+
+	if (interface == NULL)
+		return NULL;
+	for (alternate = interface->alternates; alternate != NULL;
+	    alternate = alternate->next)
+		if (index-- == 0)
+			return alternate;
+	return NULL;
+}
+const struct drv_usb_host_interface *
+drv_usb_interface_find_alternate(const struct drv_usb_interface *interface,
+	unsigned alternate_setting)
+{
+	return interface == NULL ? NULL : interface_find_alternate(
+	    (struct drv_usb_interface *)interface, alternate_setting);
+}
+int
+drv_usb_interface_set_alternate(struct drv_usb_interface *interface,
+	unsigned alternate_setting)
+{
+	struct drv_usb_device *device;
+	struct drv_usb_host_interface *old, *target;
+	size_t actual = 0;
+	int error, rollback_error;
+
+	if (interface == NULL)
+		return EINVAL;
+	device = interface->device;
+	if (device->active_configuration != interface->configuration ||
+	    device->state != DRV_USB_STATE_CONFIGURED)
+		return ENODEV;
+	target = interface_find_alternate(interface, alternate_setting);
+	if (target == NULL)
+		return ENOENT;
+	old = interface->active_alternate;
+	if (old == target)
+		return 0;
+	if (device->selection_busy || device->quarantined ||
+	    device_is_disconnecting(device))
+		return EBUSY;
+	if (device_urb_reference_count(device) != 0 ||
+	    drv_usb_device_hcd_urb_count(device) != 0)
+		return EBUSY;
+	device->selection_busy = 1U;
+	error = host_interface_disable(old);
+	if (error != 0)
+		goto out;
+	error = drv_usb_control(device,
+	    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_INTERFACE,
+	    USB_REQ_SET_INTERFACE, target->descriptor.alternate_setting,
+	    interface->descriptor.interface_number, NULL, 0,
+	    USB_CONTROL_TIMEOUT_MS, &actual);
+	if (error != 0) {
+		/* A STALL leaves the old alternate selected. A timeout or I/O
+		 * failure is ambiguous, so retain no published HCD endpoint set. */
+		if (error != EPIPE) {
+			device_quarantine_selection(device, "set-interface", error);
+			goto out;
+		}
+		rollback_error = host_interface_enable(old);
+		if (rollback_error != 0)
+			device_quarantine_selection(device, "set-interface",
+			    rollback_error);
+		goto out;
+	}
+	error = host_interface_enable(target);
+	if (error != 0) {
+		rollback_error = 0;
+		if (!device->quarantined)
+			rollback_error = drv_usb_control(device,
+			    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
+			    DRV_USB_RECIP_INTERFACE, USB_REQ_SET_INTERFACE,
+			    old->descriptor.alternate_setting,
+			    interface->descriptor.interface_number, NULL, 0,
+			    USB_CONTROL_TIMEOUT_MS, &actual);
+		if (rollback_error == 0 && !device->quarantined)
+			rollback_error = host_interface_enable(old);
+		if (rollback_error != 0)
+			device_quarantine_selection(device, "alternate-enable",
+			    rollback_error);
+		goto out;
+	}
+	interface_publish_alternate(interface, target);
+	error = 0;
+
+out:
+	device->selection_busy = 0;
+	return error;
+}
+int
+drv_usb_interface_claim(struct drv_usb_interface *owner,
+	struct drv_usb_interface *target)
+{
+	if (owner == NULL || target == NULL || owner == target ||
+	    owner->device != target->device ||
+	    owner->configuration != target->configuration ||
+	    owner->device->active_configuration != owner->configuration)
+		return EINVAL;
+	if (target->driver != NULL || target->claimed_by != NULL)
+		return EBUSY;
+	target->claimed_by = owner;
+	return 0;
+}
+int
+drv_usb_interface_release(struct drv_usb_interface *owner,
+	struct drv_usb_interface *target)
+{
+	if (owner == NULL || target == NULL)
+		return EINVAL;
+	if (target->claimed_by != owner)
+		return EPERM;
+	target->claimed_by = NULL;
+	return 0;
+}
+struct drv_usb_interface *
+drv_usb_interface_claimed_by(const struct drv_usb_interface *interface)
+{
+	return interface == NULL ? NULL : interface->claimed_by;
+}
 struct drv_usb_driver*drv_usb_interface_driver(const struct drv_usb_interface*i){return i?i->driver:NULL;}
 void*drv_usb_interface_driver_data(const struct drv_usb_interface*i){return i?i->driver_data:NULL;}
 int drv_usb_interface_set_driver_data(struct drv_usb_interface*i,void*d){if(!i)return EINVAL;i->driver_data=d;return 0;}
+const struct drv_usb_interface_descriptor *
+drv_usb_host_interface_descriptor(
+	const struct drv_usb_host_interface *alternate)
+{
+	return alternate == NULL ? NULL : &alternate->descriptor;
+}
+unsigned
+drv_usb_host_interface_endpoint_count(
+	const struct drv_usb_host_interface *alternate)
+{
+	return alternate == NULL ? 0 : alternate->endpoint_count;
+}
+struct drv_usb_endpoint *
+drv_usb_host_interface_endpoint(const struct drv_usb_host_interface *alternate,
+	unsigned index)
+{
+	return alternate != NULL && index < alternate->endpoint_count ?
+	    &alternate->endpoints[index] : NULL;
+}
+unsigned
+drv_usb_host_interface_extra_count(
+	const struct drv_usb_host_interface *alternate)
+{
+	return alternate == NULL ? 0 : alternate->extra_count;
+}
+int
+drv_usb_host_interface_extra(const struct drv_usb_host_interface *alternate,
+	unsigned index, const void **descriptor, size_t *length)
+{
+	const struct drv_usb_configuration *configuration;
+	const uint8_t *raw;
+	size_t offset, end;
+
+	if (alternate == NULL || descriptor == NULL || length == NULL)
+		return EINVAL;
+	configuration = alternate->interface->configuration;
+	raw = configuration->raw;
+	offset = alternate->raw_offset + raw[alternate->raw_offset];
+	end = alternate->raw_offset + alternate->raw_length;
+	while (offset < end) {
+		uint8_t descriptor_length = raw[offset];
+		uint8_t descriptor_type = raw[offset + 1U];
+
+		if (descriptor_type != DRV_USB_DESCRIPTOR_ENDPOINT &&
+		    descriptor_type !=
+		    DRV_USB_DESCRIPTOR_SUPERSPEED_ENDPOINT_COMPANION &&
+		    descriptor_type !=
+		    DRV_USB_DESCRIPTOR_INTERFACE_ASSOCIATION) {
+			if (index-- == 0) {
+				*descriptor = raw + offset;
+				*length = descriptor_length;
+				return 0;
+			}
+		}
+		offset += descriptor_length;
+	}
+	return ENOENT;
+}
 unsigned drv_usb_interface_endpoint_count(const struct drv_usb_interface*i){return i?i->endpoint_count:0;}
 struct drv_usb_endpoint*drv_usb_interface_endpoint(struct drv_usb_interface*i,unsigned n){return i&&n<i->endpoint_count?&i->endpoints[n]:NULL;}
-struct drv_usb_endpoint*drv_usb_interface_find_endpoint(struct drv_usb_interface*i,enum drv_usb_transfer_type t,uint8_t dir,struct drv_usb_endpoint*after){unsigned n=0;if(!i)return NULL;if(after)n=(unsigned)(after-i->endpoints)+1U;for(;n<i->endpoint_count;n++)if(i->endpoints[n].type==t&&(i->endpoints[n].descriptor.address&DRV_USB_DIR_IN)==dir)return&i->endpoints[n];return NULL;}
+struct drv_usb_endpoint *
+drv_usb_interface_find_endpoint(struct drv_usb_interface *interface,
+	enum drv_usb_transfer_type type, uint8_t direction,
+	struct drv_usb_endpoint *after)
+{
+	unsigned index = 0;
+	int found = after == NULL;
+
+	if (interface == NULL)
+		return NULL;
+	if (after != NULL)
+		for (; index < interface->endpoint_count; index++)
+			if (&interface->endpoints[index] == after) {
+				index++;
+				found = 1;
+				break;
+			}
+	if (!found)
+		return NULL;
+	for (; index < interface->endpoint_count; index++)
+		if (interface->endpoints[index].type == type &&
+		    (interface->endpoints[index].descriptor.address &
+		    DRV_USB_DIR_IN) == direction)
+			return &interface->endpoints[index];
+	return NULL;
+}
 struct drv_usb_device*drv_usb_endpoint_device(const struct drv_usb_endpoint*e){return e&&e->interface?e->interface->device:NULL;}
 const struct drv_usb_endpoint_descriptor*drv_usb_endpoint_descriptor(const struct drv_usb_endpoint*e){return e?&e->descriptor:NULL;}
 enum drv_usb_transfer_type drv_usb_endpoint_type(const struct drv_usb_endpoint*e){return e?e->type:DRV_USB_TRANSFER_CONTROL;}
@@ -1040,8 +2230,65 @@ int drv_usb_endpoint_set_hcd_data(struct drv_usb_endpoint*e,unsigned n,uintptr_t
 
 int drv_usb_id_match(const struct drv_usb_id*id,const struct drv_usb_interface*i){const struct drv_usb_device_descriptor*d;if(!id||!i)return 0;d=&i->device->descriptor;return(!(id->match_flags&DRV_USB_ID_VENDOR)||id->vendor==d->vendor)&&(!(id->match_flags&DRV_USB_ID_PRODUCT)||id->product==d->product)&&(!(id->match_flags&DRV_USB_ID_RELEASE_RANGE)||(d->device_release>=id->release_minimum&&d->device_release<=id->release_maximum))&&(!(id->match_flags&DRV_USB_ID_DEVICE_CLASS)||id->device_class==d->device_class)&&(!(id->match_flags&DRV_USB_ID_DEVICE_SUBCLASS)||id->device_subclass==d->device_subclass)&&(!(id->match_flags&DRV_USB_ID_DEVICE_PROTOCOL)||id->device_protocol==d->device_protocol)&&(!(id->match_flags&DRV_USB_ID_IF_CLASS)||id->interface_class==i->descriptor.interface_class)&&(!(id->match_flags&DRV_USB_ID_IF_SUBCLASS)||id->interface_subclass==i->descriptor.interface_subclass)&&(!(id->match_flags&DRV_USB_ID_IF_PROTOCOL)||id->interface_protocol==i->descriptor.interface_protocol)&&(!(id->match_flags&DRV_USB_ID_IF_NUMBER)||id->interface_number==i->descriptor.interface_number);}
 const struct drv_usb_id*drv_usb_driver_find_id(const struct drv_usb_driver*d,const struct drv_usb_interface*i){size_t n;if(!d||!i)return NULL;for(n=0;n<d->id_count;n++)if(drv_usb_id_match(&d->ids[n],i))return&d->ids[n];return NULL;}
-int drv_usb_interface_probe(struct drv_usb_interface*i){struct usb_driver_entry*e;const struct drv_usb_id*id;int score,best=0,error;struct drv_usb_driver*driver=NULL;if(!i||i->driver)return i?EBUSY:EINVAL;for(e=usb_drivers;e;e=e->next){id=drv_usb_driver_find_id(e->driver,i);if(!id)continue;score=e->driver->match?e->driver->match(i,id):1;if(score>best){best=score;driver=e->driver;}}if(!driver)return ENODEV;id=drv_usb_driver_find_id(driver,i);error=driver->attach?driver->attach(i,id):0;if(!error)i->driver=driver;return error;}
-int drv_usb_interface_detach(struct drv_usb_interface*i,unsigned f){int e=0;if(!i||!i->driver)return EINVAL;if(i->driver->detach)e=i->driver->detach(i,f);if(!e){i->driver=NULL;i->driver_data=NULL;}return e;}
+int
+drv_usb_interface_probe(struct drv_usb_interface *interface)
+{
+	struct usb_driver_entry *entry;
+	const struct drv_usb_id *id;
+	int score, best = 0, error;
+	struct drv_usb_driver *driver = NULL;
+
+	if (interface == NULL)
+		return EINVAL;
+	if (interface->driver != NULL || interface->claimed_by != NULL)
+		return EBUSY;
+	for (entry = usb_drivers; entry != NULL; entry = entry->next) {
+		id = drv_usb_driver_find_id(entry->driver, interface);
+		if (id == NULL)
+			continue;
+		score = entry->driver->match != NULL ?
+		    entry->driver->match(interface, id) : 1;
+		if (score > best) {
+			best = score;
+			driver = entry->driver;
+		}
+	}
+	if (driver == NULL)
+		return ENODEV;
+	id = drv_usb_driver_find_id(driver, interface);
+	error = driver->attach != NULL ? driver->attach(interface, id) : 0;
+	if (error == 0) {
+		interface->driver = driver;
+	} else {
+		struct drv_usb_interface *sibling;
+
+		for (sibling = interface->configuration->interfaces;
+		    sibling != NULL; sibling = sibling->next)
+			if (sibling->claimed_by == interface)
+				sibling->claimed_by = NULL;
+	}
+	return error;
+}
+int
+drv_usb_interface_detach(struct drv_usb_interface *interface, unsigned flags)
+{
+	struct drv_usb_interface *sibling;
+	int error = 0;
+
+	if (interface == NULL || interface->driver == NULL)
+		return EINVAL;
+	if (interface->driver->detach != NULL)
+		error = interface->driver->detach(interface, flags);
+	if (error != 0)
+		return error;
+	for (sibling = interface->configuration->interfaces; sibling != NULL;
+	    sibling = sibling->next)
+		if (sibling->claimed_by == interface)
+			sibling->claimed_by = NULL;
+	interface->driver = NULL;
+	interface->driver_data = NULL;
+	return 0;
+}
 int drv_usb_driver_register(struct drv_usb_driver*d){struct usb_driver_entry*e;if(!usb_initialized||!d||!d->name)return EINVAL;for(e=usb_drivers;e;e=e->next)if(e->driver==d)return EEXIST;e=hal_malloc(sizeof(*e));if(!e)return ENOMEM;e->driver=d;e->next=usb_drivers;usb_drivers=e;return 0;}
 int drv_usb_driver_unregister(struct drv_usb_driver*d){struct usb_driver_entry**p,*e;if(!d)return EINVAL;for(p=&usb_drivers;(e=*p)!=NULL;p=&e->next)if(e->driver==d){*p=e->next;hal_free(e);return 0;}return ENOENT;}
 void drv_usb_dump(void){struct drv_usb_bus*b;for(b=usb_buses;b;b=b->next)hal_printf("usb%u: hcd=%s ports=%u\n",b->number,b->hcd->name,b->hcd->root_port_count);}

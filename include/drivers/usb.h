@@ -28,8 +28,11 @@
 #define DRV_USB_ANY_ID	((uint16_t)0xffffU)
 #define DRV_USB_ANY_CLASS	((uint8_t)0xffU)
 #define DRV_USB_MAX_ADDRESS	127U
+#define DRV_USB_MAX_CONFIGURATIONS	8U
 #define DRV_USB_MAX_ENDPOINTS	32U
 #define DRV_USB_MAX_INTERFACES	32U
+#define DRV_USB_MAX_ALTERNATES	32U
+#define DRV_USB_MAX_IADS	32U
 
 #define DRV_USB_DIR_OUT	0x00U
 #define DRV_USB_DIR_IN	0x80U
@@ -47,6 +50,7 @@
 #define DRV_USB_DESCRIPTOR_STRING	3U
 #define DRV_USB_DESCRIPTOR_INTERFACE	4U
 #define DRV_USB_DESCRIPTOR_ENDPOINT	5U
+#define DRV_USB_DESCRIPTOR_INTERFACE_ASSOCIATION	11U
 #define DRV_USB_DESCRIPTOR_BOS	15U
 #define DRV_USB_DESCRIPTOR_SUPERSPEED_ENDPOINT_COMPANION	48U
 
@@ -156,6 +160,17 @@ struct drv_usb_interface_descriptor {
 	uint8_t interface_string;
 } __attribute__((packed));
 
+struct drv_usb_interface_association_descriptor {
+	uint8_t length;
+	uint8_t descriptor_type;
+	uint8_t first_interface;
+	uint8_t interface_count;
+	uint8_t function_class;
+	uint8_t function_subclass;
+	uint8_t function_protocol;
+	uint8_t function_string;
+} __attribute__((packed));
+
 struct drv_usb_endpoint_descriptor {
 	uint8_t length;
 	uint8_t descriptor_type;
@@ -235,6 +250,8 @@ struct drv_usb_driver {
 	const char *name;
 	const struct drv_usb_id *ids;
 	size_t id_count;
+	/* Matching is observational and may run against a retained inactive
+	 * configuration while the core chooses which configuration to select. */
 	int (
 		*match)(
 		struct drv_usb_interface *,
@@ -307,11 +324,18 @@ struct drv_usb_hcd_ops {
 		*urb_dequeue)(
 		struct drv_usb_hcd *,
 		struct drv_usb_urb *);
+	/* Endpoint callbacks are a pair: both must be supplied, or both omitted
+	 * by HCDs whose schedules need no endpoint-level programming.  A failed
+	 * enable must leave the endpoint disabled and without HCD-owned resources;
+	 * the USB core compensates only endpoints whose enable returned success. */
 	int (
 		*endpoint_enable)(
 		struct drv_usb_hcd *,
 		struct drv_usb_endpoint *);
-	void (
+	/* A checked disable is required for safe alternate/configuration
+	 * transitions.  Failure means the endpoint and all of its HCD-owned
+	 * resources remain enabled and reachable by the old setting. */
+	int (
 		*endpoint_disable)(
 		struct drv_usb_hcd *,
 		struct drv_usb_endpoint *);
@@ -452,17 +476,20 @@ drv_usb_device_dma(
 int
 drv_usb_device_reset(
 	struct drv_usb_device *d);
+/* Select by bConfigurationValue; zero returns the device to Address state. */
 int
 drv_usb_device_set_configuration(
 	struct drv_usb_device *d,
-	unsigned n);
+	unsigned configuration_value);
+/* language_id zero discovers the first advertised LANGID.  The result is
+ * bounded, NUL-terminated UTF-8. */
 int
 drv_usb_device_get_string(
 	struct drv_usb_device *d,
-	unsigned i,
-	unsigned l,
-	char *b,
-	size_t n);
+	unsigned string_index,
+	unsigned language_id,
+	char *buffer,
+	size_t capacity);
 int
 drv_usb_control(
 	struct drv_usb_device *d,
@@ -491,6 +518,28 @@ drv_usb_device_configuration(
 struct drv_usb_configuration *
 drv_usb_device_active_configuration(
 	struct drv_usb_device *d);
+const void *
+drv_usb_configuration_raw_descriptors(
+	const struct drv_usb_configuration *c,
+	size_t *length);
+unsigned
+drv_usb_configuration_interface_count(
+	const struct drv_usb_configuration *c);
+struct drv_usb_interface *
+drv_usb_configuration_interface(
+	struct drv_usb_configuration *c,
+	unsigned index);
+struct drv_usb_interface *
+drv_usb_configuration_find_interface(
+	struct drv_usb_configuration *c,
+	unsigned interface_number);
+unsigned
+drv_usb_configuration_iad_count(
+	const struct drv_usb_configuration *c);
+const struct drv_usb_interface_association_descriptor *
+drv_usb_configuration_iad(
+	const struct drv_usb_configuration *c,
+	unsigned index);
 struct drv_usb_device *
 drv_usb_interface_device(
 	const struct drv_usb_interface *i);
@@ -503,10 +552,32 @@ drv_usb_interface_number(
 unsigned
 drv_usb_interface_alternate_count(
 	const struct drv_usb_interface *i);
+const struct drv_usb_host_interface *
+drv_usb_interface_active_alternate(
+	const struct drv_usb_interface *i);
+const struct drv_usb_host_interface *
+drv_usb_interface_alternate(
+	const struct drv_usb_interface *i,
+	unsigned index);
+const struct drv_usb_host_interface *
+drv_usb_interface_find_alternate(
+	const struct drv_usb_interface *i,
+	unsigned alternate_setting);
 int
 drv_usb_interface_set_alternate(
 	struct drv_usb_interface *i,
-	unsigned a);
+	unsigned alternate_setting);
+int
+drv_usb_interface_claim(
+	struct drv_usb_interface *owner,
+	struct drv_usb_interface *target);
+int
+drv_usb_interface_release(
+	struct drv_usb_interface *owner,
+	struct drv_usb_interface *target);
+struct drv_usb_interface *
+drv_usb_interface_claimed_by(
+	const struct drv_usb_interface *i);
 struct drv_usb_driver *
 drv_usb_interface_driver(
 	const struct drv_usb_interface *i);
@@ -517,6 +588,32 @@ int
 drv_usb_interface_set_driver_data(
 	struct drv_usb_interface *i,
 	void *d);
+
+/*
+ * Alternate-setting descriptor access.  Extra descriptors are retained in
+ * their original byte representation and order, excluding the interface,
+ * endpoint, SuperSpeed companion, and IAD descriptors represented by typed
+ * accessors elsewhere in this interface.
+ */
+const struct drv_usb_interface_descriptor *
+drv_usb_host_interface_descriptor(
+	const struct drv_usb_host_interface *h);
+unsigned
+drv_usb_host_interface_endpoint_count(
+	const struct drv_usb_host_interface *h);
+struct drv_usb_endpoint *
+drv_usb_host_interface_endpoint(
+	const struct drv_usb_host_interface *h,
+	unsigned index);
+unsigned
+drv_usb_host_interface_extra_count(
+	const struct drv_usb_host_interface *h);
+int
+drv_usb_host_interface_extra(
+	const struct drv_usb_host_interface *h,
+	unsigned index,
+	const void **descriptor,
+	size_t *length);
 
 /*
  * Endpoint discovery and properties.

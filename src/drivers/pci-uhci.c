@@ -338,9 +338,9 @@ static int uhci_irq(void *argument)
 static int uhci_endpoint_enable(struct drv_usb_hcd *hcd,
 	struct drv_usb_endpoint *endpoint)
 { (void)hcd; (void)endpoint; return 0; }
-static void uhci_endpoint_disable(struct drv_usb_hcd *hcd,
+static int uhci_endpoint_disable(struct drv_usb_hcd *hcd,
 	struct drv_usb_endpoint *endpoint)
-{ (void)hcd; (void)endpoint; }
+{ (void)hcd; (void)endpoint; return 0; }
 static uint32_t uhci_frame_number(struct drv_usb_hcd *hcd)
 { struct uhci_controller*c=hcd_controller(hcd);return in16(c->io_base+UHCI_FRNUM)&0x7ffU; }
 
