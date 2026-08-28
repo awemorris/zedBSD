@@ -1,6 +1,6 @@
-# WS003 Phase 016: boot-parameter generated-header isolation
+# WS003 Phase 016: static image boot parameters and Python-regression removal
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 WSID: `ws003`
 
@@ -8,7 +8,7 @@ Phase ID: `p016`
 
 Combined ID: `ws003-p016`
 
-Status: Planned; Queue-ready; not in the active Queue
+Status: In progress (`q023`)
 
 Parent: [WS003](../ws.md)
 
@@ -18,105 +18,138 @@ Shared tests: [WS003 test index](../tests/README.md)
 
 ## Objective
 
-Make the generated boot-parameter header and every loader/image that consumes
-it follow the currently selected `ZEDBSD_BOOT_PARAMETERS_FILE`, even when a
-single platform build directory is reused across default and custom builds.
-Changing the make-variable value must never leave a newer header generated
-from the previous input authoritative.
+Make the default parameter text embedded in each x86 boot image ordinary,
+maintained source. Remove the generated `boot-parameters.h`, its Python
+generator, its text input, and the `ZEDBSD_BOOT_PARAMETERS_FILE` build-time
+selection mechanism. Restore the WS010 contract that supported x86 production
+image builds do not invoke Python after `make toolchain` has built Noct.
 
 ## Defect and cause
 
-During q017, an ordinary default `make -j16` reused
-`build/amd64/generated/boot-parameters.h` from an earlier Queue's custom
-`ZEDBSD_BOOT_PARAMETERS_FILE`. The generated target was newer than both the
-custom and default text files, so the existing timestamp-only rule did not
-run when the variable changed back to its default. The stale header then
-contaminated an unrelated QEMU boot.
+WS010 completed the migration of the amd64, i386 PC/AT, and i386 PC-98 image
+dependency graphs away from Python on 2026-08-25. The boot-parameter work added
+`tools/build/make-boot-parameters-header.py` on 2026-08-27, after that
+acceptance, and therefore reintroduced a Python dependency into all three
+supported x86 loader builds.
 
-The defect is not in the boot-parameter grammar or loader handoff. Make's
-dependency graph currently represents the selected file's timestamp, but not
-the identity or generated content selected by the command-line variable.
+The generated target also has an incorrect dependency model. Its fixed output
+path does not encode which `ZEDBSD_BOOT_PARAMETERS_FILE` supplied the content,
+so a custom/default transition can retain the preceding, newer generated
+header. Source generation is unnecessary for a fixed legacy image default and
+is contrary to the selected project style. This Phase removes the mechanism
+rather than repairing its cache key.
+
+## Fixed design
+
+- `ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT` is defined directly in the maintained
+  boot parameter header under `include/boot/`.
+- `ZEDBSD_BOOT_PARAMETERS_DEFAULT_TEXT` aliases the same source definition so
+  loader-image fallback and kernel fallback cannot drift.
+- C derives the byte length as
+  `sizeof(ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT) - 1U`.
+- Assembly derives the byte length from labels around
+  `.ascii ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT`; no manually synchronized numeric
+  length macro is retained.
+- amd64 UEFI stores its fallback as one fixed-size
+  `zedbsd_boot_parameter_record`, with the C initializer length derived by
+  `sizeof`. This gives every x86 loader the same bounded record representation.
+- The production Makefiles do not generate or force-include a parameter header
+  under `build/`, and do not accept `ZEDBSD_BOOT_PARAMETERS_FILE`.
+- amd64 UEFI LoadOptions remain the supported immediate runtime override.
+  Future UEFI `boot.cfg` menu selection remains a separate WS013 facility.
+- Legacy i386 PC/AT, i386 PC-98, and amd64 BIOS images keep their fixed source
+  default until an independently designed runtime configuration path exists.
+- Test-only non-default loader fixtures patch validated BPR1 records in
+  disposable loader copies with a Phase-owned Noct helper. They must not
+  restore a production source generator, rewrite the maintained header in the
+  user's working tree, alter a production artifact, or require Python.
 
 ## Scope
 
-- `Makefile` dependency rules for
-  `build/PLATFORM/generated/boot-parameters.h`;
-- the existing boot-parameter header generator if content-aware replacement
-  is needed to avoid unnecessary downstream rebuilds;
-- amd64 BIOS and UEFI loader objects and the combined disk image that consume
-  the generated header;
-- one Phase-owned automatic default/custom/default switching fixture; and
-- preservation of the user's `config.mk` and normal `make -j16` workflow.
+- the common source header and x86 BIOS, PC-98, and UEFI loader consumers;
+- removal of `bootloader/default-boot-parameters.txt`,
+  `tools/build/make-boot-parameters-header.py`, and their top-level Make rules;
+- removal of generated-header prerequisites and forced includes from the x86
+  platform Makefiles;
+- adaptation of WS003 and WS016 reusable acceptance runners that currently set
+  `ZEDBSD_BOOT_PARAMETERS_FILE`;
+- one Phase-owned static-source/no-Python regression, `BR-T47`; and
+- preservation of `config.mk`, the common public parameter grammar, and the
+  normal `make toolchain` followed by `make -j16` workflow.
 
-## Required behavior
-
-1. A default build generates the exact text from
-   `bootloader/default-boot-parameters.txt`.
-2. A subsequent build in the same `build/amd64` tree with
-   `ZEDBSD_BOOT_PARAMETERS_FILE=CUSTOM` regenerates every affected loader and
-   image with the custom text.
-3. A third ordinary default build in that same tree, without cleaning,
-   regenerates every affected loader and image with the default text again.
-4. Selection is based on the effective input identity/content, not on which
-   candidate file happens to have the newest modification time.
-5. Repeating a build with unchanged selected content must not rewrite the
-   header merely to advance its timestamp and must not cause perpetual loader
-   rebuilds.
-
-A valid implementation may use a selected-input provenance/content stamp or
-an always-checked, compare-before-replace generator. It must make actual
-content changes visible to Make dependencies while leaving an identical
-generated header byte- and timestamp-stable. Deleting the build tree,
-requiring `make clean`, touching an input, or teaching Queue scripts to remove
-the header is not a fix.
+No new parameter spelling, loader handoff structure, root/swap behavior,
+`boot.cfg` parser, or runtime configuration UAPI is in scope.
 
 ## Work packages
 
-1. Add BR-T47 under `plan/ws003-bringup/tests/` to reproduce the transition in
-   one unchanged amd64 build directory: default, distinctive valid custom
-   parameters, then default again.
-2. Correct the generated-header dependency/provenance rule and, if necessary,
-   make the generator replace its output only when the bytes differ.
-3. At every transition, verify the generated header and extract the embedded
-   parameter record from both the production amd64 BIOS loader and
-   `BOOTX64.EFI`; neither loader may retain the previous transition's text.
-4. Save a disposable copy of each of the three resulting disk images and use
-   bounded `qemu-system-x86_64` boots to observe the expected parameter/init
-   behavior from each copy. Runtime evidence must distinguish the custom
-   image from both default images rather than relying only on source text.
-5. Repeat the final default build once and prove that unchanged content does
-   not rewrite the header or rebuild its loader consumers.
-6. Hash `config.mk` before and after the fixture, run the normal `make -j16`
-   gate, and run `git diff --check`. Do not run `make check` or consume
-   `.internal/` material.
+1. Move the image-default text into the maintained common header, alias the
+   kernel fallback to it, and make both C and assembly derive the length.
+2. Delete the text input and Python generator, remove their Make variables and
+   targets, and remove all generated-header dependencies/forced includes.
+3. Add a source/build audit that rejects the deleted paths and symbols and
+   rejects Python execution in forced amd64, i386 PC/AT, and i386 PC-98
+   production disk-image dependency traces after `make toolchain`.
+4. Add a Phase-owned Noct artifact helper which finds exactly one valid,
+   fixed-size BPR1 record in a disposable loader copy, validates its complete
+   header/text/padding contract, and replaces only its length and text area.
+   Patch PC/AT and PC-98 `bootzbsd.raw`, amd64 BIOS `stage2.raw` and
+   `bootzbsd.raw`, and the fixed UEFI record in `BOOTX64.EFI`. Re-run the
+   existing Noct finalizer/MZ builder for patched BIOS artifacts and the EFI
+   checker for patched UEFI artifacts.
+5. Adapt affected WS003/WS016 acceptance fixtures to build each production
+   loader once and create parameterized disposable images from patched loader
+   copies. Preserve the non-default parser, handoff, root, and swap coverage;
+   verify pre/post hashes of every production artifact and do not expose a
+   replacement production source-generation knob.
+6. Extract and validate the embedded record from the production PC/AT, PC-98,
+   amd64 BIOS, and amd64 UEFI loaders, then boot the default production image
+   on all four QEMU paths and observe the exact static parameter string.
+7. Remove the targeted generated-header workarounds from the WS008 Noct QEMU
+   runners, rerun focused host parameter/handoff tests and affected WS008/WS016
+   regressions, then run `make -j16` and `git diff --check`. Do not use
+   `make check` or `.internal/`.
+
+## Verification
+
+- `BR-T47a`: source audit finds exactly one maintained image-default text,
+  finds no generated header/text input/Python generator/build-file selector,
+  and verifies C/assembly length derivation rather than a hand-maintained
+  length constant.
+- `BR-T47b`: after `make toolchain`, forced dry-run/dependency traces for the
+  three supported x86 disk images contain no Python interpreter invocation.
+- `BR-T47c`: the PC/AT, PC-98, amd64 BIOS, and amd64 UEFI production loader
+  records contain the exact source default and each QEMU path reports that
+  exact parameter string.
+- `BR-T47d`: the Noct patcher rejects zero, duplicate, malformed, oversized,
+  non-ASCII, unterminated, and unsupported BPR1 records; affected non-default
+  WS003 parameter and WS016 swap fixtures still exercise their accepted
+  behavior without a production generated-header mechanism or Python
+  dependency, and production artifact hashes remain unchanged.
 
 ## Completion conditions
 
-- BR-T47 fails against the stale-header behavior and passes after the fix;
-- default/custom/default switching succeeds without a clean or targeted
-  deletion between builds;
-- each of the three saved build images contains and boots with the parameter
-  text selected for that build;
-- both amd64 BIOS and UEFI production loader records match on every
-  transition;
-- a repeated unchanged default build leaves the generated header and loader
-  outputs unchanged rather than creating a rebuild loop;
+- all generated boot-parameter inputs, outputs, variables, rules, and Python
+  code are absent;
+- `ZEDBSD_IMAGE_BOOT_PARAMETERS_TEXT` and the kernel fallback have one source
+  definition, with derived C and assembly lengths;
+- all `BR-T47a`--`BR-T47d` gates pass, including the four x86 QEMU paths;
+- the affected prior parameter and runtime-swap regressions remain usable;
 - the pre/post `config.mk` hash is identical;
-- `make -j16`, the automatic fixture, and `git diff --check` pass; and
-- the result and exact evidence directory are synchronized into this Phase
-  and WS003.
+- `make -j16`, the Phase-owned fixtures, and `git diff --check` pass; and
+- results and exact evidence paths are synchronized into this Phase, WS003,
+  the master plan, and the executing Queue.
 
 ## Dependencies
 
-Depends on completed `ws003-p011`, `p012`, and `p015`. It has no physical
-hardware dependency and requires no new boot-parameter syntax or product
-decision.
+Depends on completed `ws003-p011`, `p012`, `p015`, WS010, and `ws016-p004`.
+It has no physical-hardware dependency and requires no new public syntax or
+product decision.
 
 ## Reconsideration boundary
 
-Stop for human review only if correctness would require changing the public
-boot-parameter grammar or making clean builds part of the supported workflow.
-An ordinary Make/generator defect, fixture defect, or QEMU observation defect
-inside the fixed default/custom/default contract remains implementation work
-for this Phase.
-
+Stop for human review only if removing the production build-time selector
+would eliminate a currently required user-facing legacy boot configuration
+path, or if preserving the accepted parameter behavior requires changing the
+public grammar or handoff ABI. A Makefile, test-fixture, C/assembly layout, or
+Noct tooling defect inside the fixed static-source contract remains
+implementation work.

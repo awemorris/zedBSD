@@ -10,8 +10,8 @@ Parent: [master plan](../master.md)
 
 Last verified Phase: `ws001-p013`
 
-Resume point: `ws001-p014` is Queue-ready; otherwise select the next bounded
-utility or subsystem item from the ledger.
+Resume point: execute q023 `ws001-p014` after the earlier independent Queue
+items are processed; otherwise select the next bounded ledger item afterward.
 
 Shared tests: [WS001 test index](tests/README.md)
 
@@ -34,7 +34,7 @@ Shared tests: [WS001 test index](tests/README.md)
 | `ws001-p011` | [bounded basename correction](phase011-basename/phase.md) | Complete milestone | Host semantics/failure test and native amd64 build pass; runtime conformance handoff remains |
 | `ws001-p012` | [bounded dirname correction](phase012-dirname/phase.md) | Complete milestone | Host lexical/failure suite and native amd64 build pass; runtime/locale handoff remains |
 | `ws001-p013` | [bounded link/unlink correction](phase013-link-unlink/phase.md) | Complete | Host identity/failure suite and native amd64 build pass; broad filesystem matrix remains |
-| `ws001-p014` | [shell foreground job-control synchronization](phase014-shell-job-control/phase.md) | Planned; Queue-ready | Preserve the fixed direct external gate; remove foreground-pipeline and `fg` ordering races |
+| `ws001-p014` | [shell foreground job-control synchronization](phase014-shell-job-control/phase.md) | Pending (`q023`) | Preserve the fixed direct external gate; remove foreground-pipeline and `fg` ordering races |
 
 Original combined planning context is retained in the
 [legacy Phase 0–10 plan](history/phase000-010-legacy-plan.md).

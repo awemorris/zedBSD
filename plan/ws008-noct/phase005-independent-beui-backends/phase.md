@@ -8,7 +8,7 @@ Phase ID: `p005`
 
 Combined ID: `ws008-p005`
 
-Status: Planned; Queue-ready
+Status: Pending (`q023`)
 
 Parent: [WS008](../ws.md)
 
@@ -40,6 +40,10 @@ accepted deliberately; it is not a completion defect.
 - The stable caller-facing interface remains
   `bool noct_register_api_beui(NoctEnv *env)`. Existing CLI callers do not gain
   platform conditionals.
+- `noct_register_api_beui_with_hal()` is removed from the public header,
+  exported symbols, and documentation. Its HAL is Noct's backend function
+  table, not a supported embedding interface; any equivalent setup helper is
+  private to the selected platform source.
 - Backend-private helpers may remain inside their owning
   `api-beui-<platform>.c`. Do not introduce a replacement common implementation
   merely to remove duplicated code.
@@ -56,8 +60,9 @@ accepted deliberately; it is not a completion defect.
 2. Move or reproduce the complete required implementation in each selected
    `api-beui-<platform>.c`, preserving that platform's existing HAL behavior.
 3. Rename each selected backend's registrar to the one public
-   `noct_register_api_beui()` symbol and remove the dispatcher and shared
-   backend source.
+   `noct_register_api_beui()` symbol, internalize any platform-local setup
+   helper, remove `noct_register_api_beui_with_hal()` from the public header
+   and documentation, and remove the dispatcher and shared backend source.
 4. Change CMake source selection so every supported configuration compiles
    exactly one complete platform source and never compiles two definitions of
    the public registrar.
@@ -87,8 +92,9 @@ accepted deliberately; it is not a completion defect.
 
 ## Completion conditions
 
-- canonical NoctLang contains no `api-beui.c`, `api-beui-backend.c`, shared
-  backend registrar, or platform-suffixed public BeUI registrar;
+- canonical NoctLang contains no `api-beui.c`, `api-beui-backend.c`, public
+  `noct_register_api_beui_with_hal()`, shared backend registrar, or
+  platform-suffixed public BeUI registrar;
 - every supported build links one platform-owned implementation of
   `noct_register_api_beui()` and all `NOCT-T040`--`NOCT-T044` gates pass;
 - the accepted canonical commit is published and zedBSD reproducibly pins it
@@ -106,7 +112,7 @@ either implementation.
 ## Reconsideration boundary
 
 Return for human review if canonical Noct must support two BeUI platform
-backends in one executable, if an external embedding API requires runtime HAL
-injection, or if preserving a public BeUI language contract requires an API
-change. Do not restore a shared implementation merely because the independent
-sources contain substantial duplicate code.
+backends in one executable or if preserving the public BeUI language contract
+requires another API change. Runtime HAL injection is explicitly not a public
+contract. Do not restore a shared implementation merely because the
+independent sources contain substantial duplicate code.

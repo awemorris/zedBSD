@@ -6,8 +6,9 @@ WSID: `ws003`
 
 Status: active; `ws003-p004` through `ws003-p009` complete in q013; q014
 `ws003-p010` and physical U3 complete through BR-T41; q015 completed `p011`
-through `p015` and the 31-cell BR-T46 QEMU matrix; `ws003-p016` is Queue-ready
-to eliminate cross-build generated boot-parameter contamination
+through `p015` and the 31-cell BR-T46 QEMU matrix; `ws003-p016` is in progress
+in q023 to replace the late Python/generated-header regression with one
+maintained source default
 
 Parent: [master plan](../master.md)
 
@@ -18,7 +19,7 @@ the intended UUID to `/dev/sda1`, mounted the
 read-write data loop and root overlay, started init, and reached a root shell,
 proving physical tier U3.
 
-Resume point: `ws003-p016` can run entirely on the host/QEMU before the
+Resume point: execute `ws003-p016` entirely on the host/QEMU before the
 remaining physical U4/U5 work. Physical follow-up still includes BR-T31
 sustained root I/O and, after U4 is otherwise frozen, BR-T30 five-boot
 repeatability. Do not request an additional intermediate hardware boot now.
@@ -45,7 +46,7 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p013` | [boot slots and root-source selection](phase013-root-source-selection/phase.md) | Completed (`q015`, 2026-08-27) | BR-T44 and BR-T46 pass native/overlay selection on all four platforms plus UUID/PARTUUID discovery-order regressions on both amd64 firmware paths |
 | `ws003-p014` | [multi-source swap activation](phase014-multi-swap/phase.md) | Completed (`q015`, 2026-08-27) | BR-T45 and every BR-T46 file/raw/mixed swap cell pass actual page-out, page-in, and content restoration |
 | `ws003-p015` | [four-platform boot-parameter acceptance](phase015-x86-parameter-acceptance/phase.md) | Completed (`q015`, 2026-08-27) | BR-T46 passes 31/31 production-loader cells: PC/AT 7, PC-98 6, amd64 BIOS 9, and amd64 UEFI 9 |
-| `ws003-p016` | [boot-parameter generated-header isolation](phase016-boot-parameter-header-dependency/phase.md) | Planned; Queue-ready | Default/custom/default builds in one amd64 tree each produce matching BIOS/UEFI loaders and images without stale generated-header reuse or `config.mk` mutation |
+| `ws003-p016` | [static image boot parameters and Python-regression removal](phase016-boot-parameter-header-dependency/phase.md) | In progress (`q023`) | One maintained source definition feeds all x86 loaders and the kernel fallback; generated inputs, Python, and stale cross-build state are removed |
 
 `ws003-p003` was the sole authorized item in q012. Its physical result closes
 the PCI/BAR/capability boundary and extracts the first device-enumeration stop
@@ -63,11 +64,11 @@ uses four boot filesystem slots (`boot0`--`boot3`), mutually exclusive native
 (`swap0`--`swap3`), and architecture-independent `init`. The old `boot=` and
 `root=` spellings and the provisional `loop0=`/`loop1=` names are not retained.
 
-q017 exposed a build-system residual outside the completed parameter grammar:
-changing `ZEDBSD_BOOT_PARAMETERS_FILE` can leave a newer generated header from
-the preceding selection in `build/amd64`. `ws003-p016` owns the content-aware
-dependency fix and the default/custom/default BR-T47 regression; it does not
-reopen the p011--p015 public contract.
+The boot-parameter implementation added a Python-generated header after WS010
+had removed Python from the supported x86 image paths. It also exposed stale
+cross-build state when `ZEDBSD_BOOT_PARAMETERS_FILE` changed. `ws003-p016`
+removes that mechanism, makes the image default maintained source, and adapts
+the affected regressions without reopening the p011--p015 public contract.
 
 ## Current xHCI handoff decisions
 

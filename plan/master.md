@@ -16,8 +16,10 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is completed `q022`: it published the Noct
-maintainer-review correction as upstream commit
+The current [Queue Book](queue.md) is active `q023`: it runs
+`ws003-p016`, `ws008-p005`, and `ws001-p014` in that order, deferring only an
+item that reaches a recorded human-decision boundary. The archived
+[q022](queue-q022.md) published the Noct maintainer-review correction as upstream commit
 `eba2043ca74b8601d68a405ecbbeca50ca8d5ac0`, replaced the zedBSD gitlink with
 one pinned source-acquisition Makefile, and passed host plus non-JIT, BeUI, and
 JIT QEMU acceptance. The archived
@@ -114,18 +116,35 @@ freedom is generally preferred. Shared conformance tests may enforce the
 interface contract without requiring the implementations themselves to share
 code.
 
+### 2.5 Project scripting language and bootstrap order
+
+Noct is the project scripting language for repository-owned build, image,
+generation, and maintenance tooling. A supported build first runs
+`make toolchain`, which obtains and builds the host Noct interpreter below
+`build/NoctLang`; subsequent project scripts invoke that interpreter. New
+Python dependencies must not be added to supported production build paths,
+and an already migrated path must not regress to invoking Python.
+
+The bootstrap needed to obtain Noct may use Make, the host compiler, CMake,
+Git, and a minimal shell recipe because Noct does not exist yet at that point.
+Ordinary Make recipes that directly invoke tools are not required to be
+rewritten as scripts. When a value can be expressed clearly as maintained
+source or an ordinary Make dependency, prefer that over generating source at
+build time; Noct is the implementation language when a project-owned script is
+actually warranted.
+
 ## 3. Workstream registry
 
 | WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
 | --- | --- | --- | --- | --- | --- |
-| `ws001` | POSIX.1-2024 compliance | Paused, ledger active; shell handoff residual Queue-ready | `ws001-p013` complete; p014 planned | Queue `ws001-p014` when WS001 is selected, or choose another bounded ledger item | [WS001](ws001-posix/ws.md) |
+| `ws001` | POSIX.1-2024 compliance | Active in q023 after two independent items; shell handoff residual pending | `ws001-p013` complete; p014 pending in q023 | Execute `ws001-p014` after q023 p016/p005 are processed | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | Dell Latitude 5320 bring-up | Active; physical U3/q014 and q015 p011--p015 complete; p016 Queue-ready | `ws003-p015` completed with BR-T46 31/31 | Run `ws003-p016` to isolate generated boot-parameter inputs, then extract physical U4/U5 work; BR-T30 repeatability, BR-T31 sustained I/O, and hardware inventory remain | [WS003](ws003-bringup/ws.md) |
+| `ws003` | Dell Latitude 5320 bring-up | Active; p016 in progress in q023 | `ws003-p015` completed with BR-T46 31/31; p016 active | Complete static/Python-free image parameters, then extract physical U4/U5 work; BR-T30 repeatability, BR-T31 sustained I/O, and hardware inventory remain | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; checked legacy-HCD IRQ residual complete in `q016` | `ws004-p009` complete; prior automatic USB milestones remain complete | Select the next dependency-ready hardware Phase or record later manual USB evidence; MSI-less xHCI policy remains independent | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Planned; USB Ethernet first, WLAN manually blocked | WS002 Phase 20 is the inherited baseline | Classify one USB Ethernet descriptor, then extract the wired physical-network Phase | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Active; independent BeUI platform implementations Queue-ready | `ws008-p004` complete; p005 planned | Queue `ws008-p005` to remove the shared BeUI dispatcher/backend and give each selected platform one complete implementation | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Active; independent BeUI platform implementations pending in q023 | `ws008-p004` complete; p005 pending | Execute `ws008-p005` after q023 p016 is processed | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
@@ -218,10 +237,10 @@ WS010 supplies host-side build and test scripting used by all workstreams.
    implementation Phases without displacing earlier physical-network and
    storage milestones.
 
-With q022 complete, `ws001-p014`, `ws003-p016`, and `ws008-p005` remain
-independently dependency-ready. `ws017-p001` returns to the planning pool only
-after its recorded `mprotect` ceiling decision. Neither a proposed Queue nor
-this planning pool authorizes implementation by itself.
+q023 now owns the independently dependency-ready `ws003-p016`, `ws008-p005`,
+and `ws001-p014` sequence. `ws017-p001` returns to the planning pool only after
+its recorded `mprotect` ceiling decision. Work outside q023 remains planning
+only and is not implementation authorization.
 
 WS001 and WS009 advance within every wave when bounded work is selected. Lower
 priority POSIX gaps may remain paused if they do not block the active milestone.

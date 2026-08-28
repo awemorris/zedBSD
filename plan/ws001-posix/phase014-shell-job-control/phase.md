@@ -4,7 +4,7 @@ Last updated: 2026-08-28
 
 Phase ID: `ws001-p014`
 
-Status: Planned; Queue-ready
+Status: Pending (`q023`)
 
 Parent: [WS001](../ws.md)
 

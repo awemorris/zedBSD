@@ -33,7 +33,7 @@ Parent: [WS003](../ws.md)
 | BR-T44 | Boot-slot and root-mode selection | Four sparse FAT boot slots, selector ambiguity/aliasing, safe `bootN:PATH`, native `rootpart`, explicit lower/upper overlay, and complete failure unwind follow the public contract |
 | BR-T45 | Multi-source swap | Zero to four sparse FAT-file or signed raw-partition sources activate atomically, allocate in numeric order, route I/O to the owning source, aggregate stats, and shut down without leaks |
 | BR-T46 | Four-platform parameter acceptance | Every declared i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI runtime cell proves normal/default init, explicit shell init, native root, overlay root, file swap, raw swap, and visible invalid-configuration failure |
-| BR-T47 | Generated boot-parameter input switching | Reusing one amd64 build tree across default/custom/default selections rebuilds both BIOS and UEFI loader records and each disposable image with the selected text, while an unchanged repeat causes no rebuild churn and `config.mk` remains unchanged |
+| BR-T47 | Static image parameters and scripting closure | One maintained source default feeds all four x86 loader paths and the kernel fallback; no generated input/header, Python generator, build-time file selector, stale state, or Python invocation remains, while affected non-default parameter/swap fixtures remain usable |
 | BR-T50 | Physical network | Static or DHCP setup, peer reachability, and a bounded data transfer pass |
 
 For the q011 diagnostic BR-T32 image, the top-right GOP marker is unary: one

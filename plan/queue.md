@@ -1,88 +1,95 @@
-# Queue proposal: canonical Noct maintainer-review corrections
+# Queue: static boot defaults, independent BeUI backends, and shell TTY ordering
 
 Last updated: 2026-08-28
 
-QID: `q022`
+QID: `q023`
 
-Queue status: finished
+Queue status: in-progress
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: explicitly approved by the user on 2026-08-28, including
-replacement of the gitlink checkout and automatic commit/push to both
-`awemorris/NoctLang` and zedBSD
+Authorization: explicitly approved by the user on 2026-08-28 by directing the
+agent to Phase the static boot-parameter design, place all executable Phases
+in a Queue, and execute autonomously. The standing authorization to commit and
+push after completed Phases remains active. For `ws008-p005`, this explicitly
+includes changes, verification, commit, and publication in both canonical
+`awemorris/NoctLang` and zedBSD.
 
-Timebox: no fixed limit; continue until the Queue completes or reaches a
-recorded human-decision boundary
+Timebox: no fixed wall-clock limit; the scope is the finite three-Phase
+registry below. Continue until every item is completed or recorded
+`uncleared`. A human-decision boundary defers only the affected item and does
+not stop dependency-independent later items.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q021](queue-q021.md)
+Previous Queue: [q022](queue-q022.md)
 
 ## Purpose
 
-Apply the maintainer's review to the canonical NoctLang zedBSD target, publish
-that reviewed upstream commit, and replace zedBSD's Noct submodule/gitlink with
-one tracked Makefile that reproducibly clones and builds the accepted official
-revision.
+Remove a post-WS010 generated-source/Python regression from x86 boot images,
+apply the agreed independent-platform BeUI architecture upstream, and close
+the shell's two remaining foreground job-control ordering races.
 
-## Proposed execution registry
+## Execution registry
 
 | Priority | WS / Phase | Authoritative documents | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws008-p004` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase004-upstream-review/phase.md), [tests](ws008-noct/tests/README.md) | complete | Canonical BeUI source/registration, zedBSD macro/CMake, Boolean JIT boundary, and Makefile-only source delivery pass the reviewed contract and prior QEMU regressions |
+| 1 | `ws003-p016` | [WS003](ws003-bringup/ws.md), [Phase](ws003-bringup/phase016-boot-parameter-header-dependency/phase.md), [tests](ws003-bringup/tests/README.md) | in-progress | One maintained source default feeds every x86 loader and kernel fallback; generated/Python inputs disappear and affected four-platform and swap evidence remains usable |
+| 2 | `ws008-p005` | [WS008](ws008-noct/ws.md), [Phase](ws008-noct/phase005-independent-beui-backends/phase.md), [tests](ws008-noct/tests/README.md) | pending | Each selected canonical BeUI platform source independently implements the sole public `noct_register_api_beui()` interface; shared dispatcher/backend and public HAL injection disappear |
+| 3 | `ws001-p014` | [WS001](ws001-posix/ws.md), [Phase](ws001-posix/phase014-shell-job-control/phase.md), [tests](ws001-posix/tests/README.md) | pending | Foreground pipeline children cannot read before TTY handoff, and `fg` foregrounds before `SIGCONT`, without background/non-TTY regression |
 
-## Entry evidence
+## Entry evidence and decisions
 
-- `awemorris/NoctLang` main and the clean local integration checkout are at
-  `3af6d723ac4cfe5ee80dcc5a5a405209c6fc4597`, titled `Add zedBSD support`.
-- The current public JIT boundary is already Boolean; p004 preserves and tests
-  it rather than performing another incompatible signature change.
-- q019/q020 completed the target build, public evdev repair, canonical BeUI
-  behavior, and amd64 RW-to-RX JIT evidence. This Queue is a bounded maintainer
-  review correction, not a redesign of those facilities.
-- The previously proposed shell Phase `ws001-p014` was never approved or
-  started. It returns to the dependency-ready planning pool.
+- `ws003-p016` depends only on completed p011, p012, p015, WS010, and
+  `ws016-p004`. The product decision is fixed: production image parameters are
+  maintained source; test variation patches only disposable artifacts with
+  Noct.
+- The boot-parameter Python generator was introduced on 2026-08-27, after
+  WS010's 2026-08-25 x86 Python-removal acceptance. Its removal is regression
+  repair, not a new boot grammar.
+- `ws008-p005` is based on canonical NoctLang tree
+  `595d5797a1c68844855b8a2a7e3d41846eab64e7`. The user resolved its only known
+  interface decision: remove public `noct_register_api_beui_with_hal()` and
+  expose only `noct_register_api_beui()`.
+- `ws001-p014` depends on completed `ws012-p006`; its userspace synchronization
+  design is fixed. A proven kernel TTY/process-group defect is a residual, not
+  authorization for an implicit kernel ABI redesign.
+- `ws002-p021` is excluded because its probabilistic diagnostic budget is not
+  yet finite. Manually blocked WS011, WS013 Runtime, WS014, WS015, WS017, WLAN,
+  and VLAN/bridge work remains outside this Queue.
 
-## Proposed execution
+## Execution procedure
 
-1. Clone a clean upstream worktree at the recorded main revision and apply the
-   p004 canonical NoctLang corrections.
-2. Run upstream static, zedBSD, BeUI, JIT, sanitizer, and source-layout gates.
-3. Commit and push the canonical NoctLang correction; record the published
-   commit ID.
-4. Replace zedBSD's `userland/noct` gitlink with one tracked Makefile that
-   clones the published revision into `userland/noct/NoctLang`, update package,
-   toolchain, tests, and ignore rules, and prove clean/idempotent acquisition.
-5. Re-run affected p001--p003 host/QEMU acceptance, `make -j16`, and
-   `git diff --check`; do not run `make check` or use `.internal/`.
-6. Synchronize P/W/M/Q evidence, commit `WIP`, and push zedBSD. If a push is
-   rejected, retain the local commit and report the repository and rejection.
+1. Execute each item in registry order and synchronize P/W/M/Q evidence after
+   its verification contract is satisfied or its stop boundary is reached.
+2. Run `make toolchain` before project-owned Noct scripts are needed. Do not
+   introduce Python into a supported production path, use `make check`, or
+   consume `.internal/`.
+3. Use `make -j16` for repository build gates and `qemu-system-x86_64` for
+   amd64 runtime verification. Use disposable image copies for writable tests.
+4. After a completed Phase, commit `WIP` and push. For p005, publish the tested
+   canonical NoctLang commit first, then pin and publish the zedBSD commit. If a
+   push is rejected, retain the local commit, record the rejection, and
+   continue where safe.
+5. If a Phase reaches a human decision or its reconsideration boundary, mark
+   it `uncleared`, record facts and the exact resume condition in P/W/M/Q,
+   report the requested decision in chat, and continue with the next
+   dependency-independent item.
 
-## Stop and defer rules
+## Scope and stop rules
 
-- Do not delete the current gitlink checkout until a clean clone of the same
-  published source has been verified and the replacement Makefile is ready.
-- Do not publish an upstream commit until its focused static/zedBSD/BeUI/JIT
-  gates pass.
-- Do not pin zedBSD to an unpublished commit or carry canonical Noct source as
-  ordinary files in zedBSD.
-- If preserving a public custom-HAL registration entry requires an API choice,
-  or CMake cannot retain zedBSD identity without a Platform module, mark p004
-  `uncleared` and request human review.
+- Do not add a replacement production boot-parameter generator, hidden
+  compile-time file selector, `boot.cfg` implementation, or parameter syntax.
+- Do not preserve a public BeUI HAL-injection API, add a multi-backend binary,
+  or replace the removed shared BeUI source with another common implementation.
+- Do not redesign the shell parser, jobs model, or kernel ABI. If a focused
+  reproducer proves a kernel defect, extract and defer that residual.
+- Findings outside the three Phase books are documented and returned to the
+  planning pool rather than silently absorbed.
 
-## Approval boundary
+## Completion definition
 
-Approval must explicitly cover `ws008-p004`, its bounded corrections, deletion
-of the existing `userland/noct` gitlink checkout after verification, and
-commit/push to both `awemorris/NoctLang` and zedBSD. It does not authorize the
-deferred shell Phase, unrelated Noct features, or a new public zedBSD UAPI.
-
-## Execution result
-
-Finished on 2026-08-28 with `ws008-p004` complete. Canonical NoctLang commit
-`eba2043ca74b8601d68a405ecbbeca50ca8d5ac0` was pushed to official main. The
-zedBSD gitlink was replaced by a single pinned Makefile, `NOCT-T030`--`T034`
-host acceptance passed, and the final non-JIT, BeUI/evdev, and RW-to-RX JIT
-QEMU cells all passed from `userland/noct/NoctLang`. No human-decision boundary
-or uncleared item remains in q022.
+q023 finishes when all three registry items are either `completed` with their
+required evidence or `uncleared` with a concrete resume condition, all result
+states are synchronized across P/W/M/Q, and every safe completed change is
+committed and pushed under the recorded authorization.

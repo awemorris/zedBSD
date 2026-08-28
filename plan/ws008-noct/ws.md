@@ -4,14 +4,13 @@ Last updated: 2026-08-28
 
 WSID: `ws008`
 
-Status: Active; `ws008-p005` planned and Queue-ready
+Status: Active; `ws008-p005` pending in q023
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws008-p004`
 
-Resume point: Queue `ws008-p005` to replace the shared BeUI dispatcher/backend
-with independent platform-owned implementations
+Resume point: execute q023 `ws008-p005` after `ws003-p016` is processed
 
 Shared tests: [WS008 test index](tests/README.md)
 
@@ -23,7 +22,7 @@ Shared tests: [WS008 test index](tests/README.md)
 | [`ws008-p002`](phase002-beui-zedbsd/phase.md) | Complete (`q020`) | Official BeUI zedBSD backend uses `/dev/graphics` and capability-discovered `/dev/input/eventN`; the downstream duplicate and console-event dependency are removed |
 | [`ws008-p003`](phase003-amd64-jit/phase.md) | Complete (`q020`) | amd64 zedBSD proves Noct-generated code traverses RW `mmap` to RX `mprotect` and executes under QEMU |
 | [`ws008-p004`](phase004-upstream-review/phase.md) | Complete (`q022`) | Maintainer review is published upstream, the BeUI/JIT/CMake contracts are cleaned up, and zedBSD uses one reproducible clone/build Makefile instead of a gitlink |
-| [`ws008-p005`](phase005-independent-beui-backends/phase.md) | Planned; Queue-ready | Canonical Noct removes `api-beui.c` and `api-beui-backend.c`; each selected platform source independently owns the complete `noct_register_api_beui()` implementation |
+| [`ws008-p005`](phase005-independent-beui-backends/phase.md) | Pending (`q023`) | Canonical Noct removes `api-beui.c` and `api-beui-backend.c`; each selected platform source independently owns the complete `noct_register_api_beui()` implementation |
 
 The old NOCT-00--NOCT-05 labels are superseded as scheduling units by these
 immutable Phase IDs. Their concerns are retained inside p001--p003 rather than
