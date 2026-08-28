@@ -76,7 +76,7 @@ AMD64_KERNEL_SOURCES := \
 	$(AMD64_USB_CLASS_SOURCES) \
 	src/drivers/pcat-ide.c src/drivers/dp8390.c \
 	src/drivers/pcat-ne2000.c src/drivers/pcat-ps2-mouse.c \
-	src/kern/mbr-partition.c src/kern/pcat/platform.c \
+	src/drivers/disklabel/mbr.c src/kern/platform/pcat.c \
 	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process-timer.c src/kern/klog.c \
 	src/kern/test-checkpoint.c \
@@ -120,7 +120,7 @@ ifneq ($(strip $(ZEDBSD_CONFIG)),)
 $(AMD64_VMUNIX_OBJS): $(ZEDBSD_CONFIG)
 endif
 $(BUILD)/kern64/src/kern/vfs.o \
-	$(BUILD)/kern64/src/kern/pcat/platform.o: \
+	$(BUILD)/kern64/src/kern/platform/pcat.o: \
 	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
 
 vmunix: $(BUILD)/vmunix

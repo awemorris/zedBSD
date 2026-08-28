@@ -4,7 +4,7 @@
 #include "kern/clock.h"
 #include "kern/sched.h"
 #include "kern/partition.h"
-#include "kern/mbr-partition.h"
+#include <drivers/disklabel.h>
 #include "drivers/pcat-ide.h"
 #include "drivers/pci-pcat.h"
 #include "drivers/pcat-ps2-mouse.h"

@@ -1,7 +1,7 @@
 /* X68000 SCSI disk mark and partition decoder. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 
-#include <kern/x68k-partition.h>
+#include <drivers/disklabel.h>
 
 #define X68K_TABLE_OFFSET 2048U
 #define X68K_ENTRY_OFFSET 16U

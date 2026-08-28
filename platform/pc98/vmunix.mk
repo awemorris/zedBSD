@@ -84,7 +84,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(KERN_NET_OBJS) \
 	$(KERN_BLOCK_IDENTITY_OBJS) $(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS)
 
-$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/pc98/platform.o: \
+$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/platform/pc98.o: \
 	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
 
 # Native PC-98 display backends used by /dev/graphics.  The Core-Graph
@@ -124,10 +124,10 @@ STAGE2_OBJS = \
 	$(BUILD)/drivers/pc98-busmouse.o \
 	$(BUILD)/drivers/dp8390.o \
 	$(BUILD)/drivers/pc98-lgy98.o \
-	$(BUILD)/src/kern/mbr-partition.o \
-	$(BUILD)/src/kern/pc98/partition.o \
-	$(BUILD)/src/kern/pc98/partition-auto.o \
-	$(BUILD)/src/kern/pc98/platform.o \
+	$(BUILD)/drivers/disklabel/mbr.o \
+	$(BUILD)/drivers/disklabel/pc98.o \
+	$(BUILD)/drivers/disklabel/pc98-auto.o \
+	$(BUILD)/src/kern/platform/pc98.o \
 	$(BUILD)/src/kern/panic.o \
 	$(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PC98_OBJS) $(KERN_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)

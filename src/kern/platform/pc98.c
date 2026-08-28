@@ -2,8 +2,7 @@
 #include "kern/platform.h"
 #include "kern/disk.h"
 #include "kern/partition.h"
-#include "kern/pc98/partition.h"
-#include "kern/pc98/partition-auto.h"
+#include <drivers/disklabel.h>
 #include "drivers/pc98-ide.h"
 #include "drivers/pc98-busmouse.h"
 #if CONFIG_DRIVER_LGY98

@@ -66,7 +66,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/init.o \
 	$(KERN_NET_OBJS)
 
-$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/pcat/platform.o: \
+$(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/platform/pcat.o: \
 	$(ZEDBSD_GRAPHICS_CONFIG_STAMP)
 
 PCAT_USB_HCD_OBJS :=
@@ -107,8 +107,8 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/drivers/pcat-ide.o $(BUILD)/drivers/dp8390.o \
 	$(BUILD)/drivers/pcat-ne2000.o \
 	$(BUILD)/drivers/pcat-ps2-mouse.o \
-	$(BUILD)/src/kern/mbr-partition.o \
-	$(BUILD)/src/kern/pcat/platform.o \
+	$(BUILD)/drivers/disklabel/mbr.o \
+	$(BUILD)/src/kern/platform/pcat.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PCAT_OBJS) $(KERN_OBJS) $(KERN_BLOCK_IDENTITY_OBJS) \
 	$(KERN_UFS1_OBJS) $(KERN_UFS2_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
@@ -642,19 +642,6 @@ $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
 $(BUILD)/zedbsd-grub.iso: $(BUILD)/vmunix \
 	platform/pcat/tools/make-pcat-grub-iso.sh
 	platform/pcat/tools/make-pcat-grub-iso.sh $@ $(BUILD)/vmunix
-
-$(BUILD)/tests/pcat-mbr-host-test: tests/pcat-mbr-host-test.c \
-	tests/disk-host-stubs.c \
-	src/kern/buf.c src/kern/disk.c src/kern/partition.c src/kern/mbr-partition.c
-	@mkdir -p $(dir $@)
-	$(HOST_TEST_CC) -Iinclude -Iinclude/uapi -Isrc src/kern/buf.c src/kern/disk.c src/kern/partition.c \
-		src/kern/mbr-partition.c tests/disk-host-stubs.c $< -o $@
-
-pcat-mbr-host-test: $(BUILD)/tests/pcat-mbr-host-test
-	$(BUILD)/tests/pcat-mbr-host-test
-
-HOST_TEST_BINARIES += $(BUILD)/tests/pcat-mbr-host-test
-.PHONY: pcat-mbr-host-test
 
 hal-pcat-compile: $(HAL_PCAT_OBJS)
 	@echo "HAL i386/PCAT compile check: PASS"

@@ -35,8 +35,8 @@ driver locations and delete `/dev/mouse`.
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
 | 1 | `ws018-p009` | [Phase](ws018-kernel-architecture/phase009-independent-graphics-frontends/phase.md) | uncleared | Source/build migration and amd64 runtime pass; PC/AT and PC-98 backend runtime matrix remains explicit residual verification |
-| 2 | `ws018-p002` | [Phase](ws018-kernel-architecture/phase002-disklabel-platform-layout/phase.md) | in-progress | Disk labels live under `src/drivers/disklabel`; each platform has exactly one `src/kern/platform/<platform>.c`, with historical directories absent |
-| 3 | `ws018-p007` | [Phase](ws018-kernel-architecture/phase007-xzed-evdev-consumer/phase.md) | pending | Xzed discovers and consumes keyboard and relative/absolute pointer input only through evdev |
+| 2 | `ws018-p002` | [Phase](ws018-kernel-architecture/phase002-disklabel-platform-layout/phase.md) | completed | Disk labels live under `src/drivers/disklabel`; each platform has exactly one `src/kern/platform/<platform>.c`, with historical directories absent |
+| 3 | `ws018-p007` | [Phase](ws018-kernel-architecture/phase007-xzed-evdev-consumer/phase.md) | in-progress | Xzed discovers and consumes keyboard and relative/absolute pointer input only through evdev |
 | 4 | `ws018-p008` | [Phase](ws018-kernel-architecture/phase008-input-hid-driver-ownership/phase.md) | pending | Input/console implementations have final driver owners, mouse backends publish evdev directly, and `/dev/mouse` is absent |
 
 ## Dependency order

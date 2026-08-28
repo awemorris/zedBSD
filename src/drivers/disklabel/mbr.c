@@ -1,6 +1,6 @@
 /* PC/AT MBR primary partition scheme.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "kern/mbr-partition.h"
+#include <drivers/disklabel.h>
 
 #include <string.h>
 

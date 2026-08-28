@@ -112,7 +112,8 @@ X68K_KERNEL_SOURCES := \
 	src/kern/swap-boot.c src/kern/swap-fat.c \
 	src/kern/vm-reclaim.c \
 	src/kern/disk.c \
-	src/kern/partition.c src/kern/x68k/partition.c src/kern/x68k/platform.c \
+	src/kern/partition.c src/drivers/disklabel/x68k.c \
+	src/kern/platform/x68k.c \
 	src/drivers/x68k-mb89352.c src/drivers/x68k-spc-disk.c \
 	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process-timer.c src/kern/lock.c src/kern/klog.c src/kern/waitq.c \
@@ -157,8 +158,8 @@ X68K_AUDIT_C_SOURCES := \
 	src/hal/m68k/bsp-x68k/pmem.c \
 	src/hal/m68k/bsp-x68k/scsi.c \
 	src/hal/m68k/bsp-x68k/timer.c \
-	src/kern/x68k/platform.c \
-	src/kern/x68k/partition.c \
+	src/kern/platform/x68k.c \
+	src/drivers/disklabel/x68k.c \
 	src/drivers/x68k-mb89352.c \
 	src/drivers/x68k-spc-disk.c
 X68K_AUDIT_S_SOURCES := \

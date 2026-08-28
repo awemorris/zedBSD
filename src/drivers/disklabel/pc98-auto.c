@@ -1,8 +1,6 @@
 /* Per-disk PC-98 partition format selection.
  * Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
-#include "kern/mbr-partition.h"
-#include "kern/pc98/partition.h"
-#include "kern/pc98/partition-auto.h"
+#include <drivers/disklabel.h>
 
 static int
 pc98_auto_scan(const struct partition_scheme *scheme, struct disk *disk,

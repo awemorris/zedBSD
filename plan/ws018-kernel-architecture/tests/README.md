@@ -10,8 +10,8 @@ disposable build/QEMU evidence belongs under `../temp/` and remains untracked.
 | --- | --- | --- |
 | KA-T001 | p001 | Every supported architecture resolves sources only below `src/drivers/`; no root `drivers/` dependency remains |
 | KA-T002 | p001 | `make -j16` produces the supported amd64, i386 PC/AT, i386 PC-98, sun4u, rpi4, and x68k artifacts represented by current manifests |
-| KA-T010 | p002 | MBR, PC-98, Sun, and X68k disk-label fixtures resolve the same partitions before and after relocation; PC-98 auto-selection and X68k native-label parsing are distinct cases |
-| KA-T011 | p002 | Tree audit finds one C file per platform, no common platform source, no historical platform directory, and graphics-owned fonts |
+| KA-T010 | p002 | [`run-disklabel-host-test.sh`](run-disklabel-host-test.sh) links the production MBR/GPT, PC-98 native/auto, Sun, and X68k parsers against deterministic disk images and preserves count, indexes, extents, flags, UUIDs, and labels across relocation |
+| KA-T011 | p002 | [`run-platform-layout-audit.sh`](run-platform-layout-audit.sh) finds one C file per platform, no common platform source, no historical platform directory or header, driver-owned disk labels, and graphics-owned fonts |
 | KA-T020 | p003 | [`run-ufs-independence-host-test.sh`](run-ufs-independence-host-test.sh) compiles and links UFS1 and UFS2 superblock/endian boundaries independently, preserves little-/big-endian decode, rejects malformed metadata, and rejects cross-format implementation symbols |
 | KA-T021 | p003 | [`run-ufs2-consistency-host-test.sh`](run-ufs2-consistency-host-test.sh) exercises UFS2-owned journal commit/replay/rejection and snapshot create/preserve/reopen/read/delete behavior without UFS1 or retired common-UFS symbols |
 | KA-T030 | p004 | [`run-filesystem-identity-host-test.sh`](run-filesystem-identity-host-test.sh) validates registry dispatch and real FAT12/16/32 plus little-/big-endian UFS1/UFS2 type, UUID, and label callbacks, including bounded mismatch, malformed, truncated, I/O, ambiguity, output-validation, cache, and UUID/LABEL unique/duplicate/case-fold/hard-error selector cases |

@@ -1,8 +1,8 @@
 #include <errno.h>
 #include <hal/hal.h>
+#include <drivers/disklabel.h>
 #include <kern/disk.h>
 #include <kern/platform.h>
-#include <kern/sun-disklabel.h>
 #include <kern/sun4u/boot.h>
 #include "drivers/sun4u-cmd646.h"
 

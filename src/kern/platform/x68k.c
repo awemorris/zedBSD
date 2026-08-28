@@ -3,10 +3,10 @@
 
 #include <errno.h>
 #include <hal/hal.h>
+#include <drivers/disklabel.h>
 #include <kern/disk.h>
 #include <kern/platform.h>
 #include <kern/partition.h>
-#include <kern/x68k-partition.h>
 #include "drivers/x68k-spc-disk.h"
 #include "hal/m68k/bsp-x68k/bsp.h"
 #include "hal/m68k/bsp-x68k/scsi.h"

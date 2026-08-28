@@ -11,7 +11,7 @@
  * partition disk's block count.
  */
 
-#include "kern/partition.h"
+#include <drivers/disklabel.h>
 
 #define PC98_TABLE_LBA 1U
 #define PC98_ENTRY_SIZE 32U

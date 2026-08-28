@@ -1,8 +1,8 @@
 #include <errno.h>
 #include <hal/hal.h>
+#include <drivers/disklabel.h>
 #include <kern/disk.h>
 #include <kern/partition.h>
-#include <kern/mbr-partition.h>
 #include <kern/platform.h>
 #include <kern/rpi4/boot.h>
 #include "drivers/rpi4-sdhci.h"

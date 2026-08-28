@@ -1,6 +1,6 @@
 # WS018 Phase 002: disk-label and platform ownership
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 WSID: `ws018`
 
@@ -8,7 +8,7 @@ Phase ID: `p002`
 
 Combined ID: `ws018-p002`
 
-Status: Planned; not selected in a Queue
+Status: Complete (`q026`)
 
 Parent: [WS018](../ws.md)
 
@@ -116,3 +116,55 @@ its parser, if PC-98 auto detection cannot be preserved, if one platform
 cannot express its complete hook set in one C file, or if a stable partition
 identity changes.  Do not introduce a common platform source or a second
 disk-label directory as a workaround.
+
+## q026 execution record (2026-08-29)
+
+Completed without reaching the reconsideration boundary.
+
+- MBR/GPT, PC-98 native, PC-98 auto-selection, Sun, and X68k parsers now live
+  under the sole `src/drivers/disklabel/` implementation directory.  Their
+  shared declarations and X68k decoder constants are consolidated in
+  `include/drivers/disklabel.h`; the generic registry and scan policy remain
+  in `src/kern/partition.c` and `include/kern/partition.h`.
+- `src/kern/platform/` now contains only its ownership README and the five
+  platform translation units `pcat.c`, `pc98.c`, `rpi4.c`, `sun4u.c`, and
+  `x68k.c`.  PC/AT continues to serve both i386 and amd64.  Each built object
+  exports all seven declarations from `<kern/platform.h>` and selects exactly
+  its prior disk-label scheme.
+- The historical `src/kern/{pcat,pc98,rpi4,sun4u,x68k}/` directories and the
+  five private disk-label headers were removed after all six manifests were
+  repaired.  The parser and platform bodies compare equal to their entry
+  versions except for replacement by the consolidated include, so scan policy
+  and device-registration order did not change.  The p009-owned PC/AT and
+  PC-98 fonts remain below `src/drivers/graphics/`.
+
+`KA-T010` passed before and after relocation.  Its maintained host fixture
+links the production parsers against deterministic memory disks and covers
+MBR PARTUUID/extents, protective-MBR GPT GUID/UTF-16 labels, PC-98 native CHS
+extents and flags, authoritative `IPL1` selection, MBR fallback and native
+fallback, Sun checksum/geometry/slices, and X68k 4096-byte labels with
+1024-byte-to-512-byte extent conversion.  Counts, indexes, start/data blocks,
+sizes, flags, UUIDs, and labels remained equal.
+
+`KA-T011` passed: the two canonical directories have their exact allowed
+contents, every platform source has the complete hook set and expected scheme
+mapping, no historical directory/header or parallel `parttable/` owner
+remains, all active manifests use the canonical paths, and font ownership is
+under the graphics drivers.
+
+Fresh, separate compile/link builds passed:
+
+| Target | Selected scheme | Result |
+| --- | --- | --- |
+| amd64 PC/AT | MBR | kernel link and amd64 checker pass |
+| i386 PC/AT | MBR | kernel link and PC/AT contract checker pass |
+| i386 PC-98 | PC-98 auto | stage-2 link and patch checker pass |
+| RPi4 arm64 | MBR | kernel link and arm64 checker pass |
+| sun4u sparcv9 | Sun | kernel link and SPARC V9 checker pass |
+| X68k m68k | X68k native | kernel link and m68k checker pass |
+
+The normal configured `make -j16` rebuilt the amd64 disk image.  A disposable
+copy booted under `qemu-system-x86_64`, preserved platform device discovery,
+reported the expected four-entry MBR scan and `sda1` extent, started init, and
+reached `login:`.  `git diff --check` passed.  Neither `make check` nor
+`.internal/` was used, and no Noct source was inspected or modified.

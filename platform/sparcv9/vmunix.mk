@@ -51,7 +51,8 @@ SPARCV9_KERNEL_SOURCES := \
 	src/kern/sysctl.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
 	src/kern/resource-limit.c \
 	src/drivers/loop.c \
-	src/kern/partition.c src/kern/sun-disklabel.c src/kern/sun4u/platform.c \
+	src/kern/partition.c src/drivers/disklabel/sun.c \
+	src/kern/platform/sun4u.c \
 	src/drivers/sun4u-cmd646.c src/kern/panic.c \
 	src/kern/entry.c src/kern/clock.c src/kern/process-timer.c src/kern/klog.c \
 	src/kern/lock.c src/kern/waitq.c \

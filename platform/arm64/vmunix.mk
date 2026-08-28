@@ -42,7 +42,8 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/sysctl.c src/kern/resource.c src/kern/poll.c src/kern/usync.c src/kern/disk.c \
 	src/kern/resource-limit.c \
 	src/drivers/loop.c \
-	src/kern/partition.c src/kern/mbr-partition.c src/kern/rpi4/platform.c \
+	src/kern/partition.c src/drivers/disklabel/mbr.c \
+	src/kern/platform/rpi4.c \
 	src/drivers/rpi4-sdhci.c \
 	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process-timer.c src/kern/klog.c \
