@@ -1,6 +1,3 @@
 [submodule "vendor/raspberrypi-firmware"]
 	path = vendor/raspberrypi-firmware
 	url = https://github.com/raspberrypi/firmware.git
-[submodule "userland/noct"]
-	path = userland/noct
-	url = https://github.com/awemorris/NoctLang.git

@@ -100,7 +100,7 @@ The canonical Noct tree contains the reusable sanitized evdev state and wiring
 runner. From the integration checkout, run:
 
 ```sh
-userland/noct/tests/testcases/run-beui-zedbsd.sh /home/awe/zedBSD
+userland/noct/NoctLang/tests/testcases/run-beui-zedbsd.sh /home/awe/zedBSD
 ```
 
 It compiles the production state engine with `-Wall -Wextra -Werror` and
@@ -144,11 +144,11 @@ publication, forced `mprotect`/`munmap` failures, invalid-entry suppression,
 interpreter fallback safety, and the complete opt-in lifecycle record:
 
 ```sh
-cd userland/noct
+cd userland/noct/NoctLang
 cmake --build --preset static --parallel 16
 tests/test.sh jit-slab build-static
-tests/test.sh jit-branch /home/awe/zedBSD/userland/noct/build-static/noct
-NOCT=/home/awe/zedBSD/userland/noct/build-static/noct tests/test.sh cli
+tests/test.sh jit-branch /home/awe/zedBSD/userland/noct/NoctLang/build-static/noct
+NOCT=/home/awe/zedBSD/userland/noct/NoctLang/build-static/noct tests/test.sh cli
 ```
 
 The JIT-disabled host build, MinGW x86-64 build, `zedbsd` preset build,
@@ -175,6 +175,35 @@ image path/hash, exact command line, QEMU version, start/end time, expected
 markers, fatal scan, and exit classification. Use `qemu-system-x86_64` for the
 amd64 runtime gates and disposable image copies for tests that may mutate the
 guest filesystem.
+
+## Maintainer-review correction tests
+
+| ID | Phase | Contract |
+| --- | --- | --- |
+| `NOCT-T030` | p004 | Makefile-only source delivery clones the pinned official revision and is idempotent |
+| `NOCT-T031` | p004 | One zedBSD BeUI source and one public target dispatcher remain; split input and CMake Platform files are absent |
+| `NOCT-T032` | p004 | Clean static/zedBSD presets derive the target from `__ZEDBSD__` without Linux-host leakage |
+| `NOCT-T033` | p004 | Merged BeUI host/sanitizer plus SDL/PC-98 regressions pass |
+| `NOCT-T034` | p004 | All JIT backends retain Boolean failure propagation and amd64 RW-to-RX QEMU acceptance passes |
+
+The p004 runner must begin from a disposable parent layout containing only the
+tracked `userland/noct/Makefile`; it must not rely on a pre-existing submodule
+or consume `.internal/`. Existing p001--p003 runners are reused after their
+source-root defaults are updated to `userland/noct/NoctLang`.
+
+[`noct-p004-review.sh`](./noct-p004-review.sh) implements the host portion. It
+performs a fresh pinned checkout in an ignored disposable parent layout,
+checks idempotence and negative repository/revision cases, rebuilds the static
+and zedBSD presets, audits the merged source/dispatcher/target macros and
+Boolean JIT boundary, and runs the zedBSD evdev plus JIT failure corpus:
+
+```sh
+plan/ws008-noct/tests/noct-p004-review.sh
+```
+
+`NOCT_TEST_REPOSITORY` may name a verified local mirror when the official
+GitHub transport is unavailable. The SDL2 dummy-window gate and the existing
+p001--p003 QEMU runners remain explicit companion tests.
 
 ## Common build gate
 

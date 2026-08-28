@@ -26,7 +26,7 @@ CC := gcc
 HOSTCC ?= cc
 PYTHON ?= python3
 ZEDBSD_HOST_NOCT_REPOSITORY ?= https://github.com/awemorris/NoctLang.git
-ZEDBSD_HOST_NOCT_REVISION ?= 7d856856e16eb2d889ba49f557f2fda4dcaeea7e
+ZEDBSD_HOST_NOCT_REVISION ?= eba2043ca74b8601d68a405ecbbeca50ca8d5ac0
 ZEDBSD_HOST_NOCT_SOURCE_DIR := build/NoctLang
 ZEDBSD_HOST_NOCT_BUILD_DIR := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/build-static
 ZEDBSD_HOST_NOCT := $(ZEDBSD_HOST_NOCT_BUILD_DIR)/noct
@@ -111,7 +111,7 @@ USERLAND_$(1)_DATA := $(13)
 USERLAND_$(1)_HEADERS := $(14)
 USERLAND_$(1)_INSTALL_DIR := $(if $(15),$(15),bin)
 endef
-# userland/noct is an upstream source submodule, not a zedBSD package tree.
+# userland/noct is a source-acquisition helper, not a zedBSD image package.
 USERLAND_PACKAGE_MAKEFILES := $(filter-out userland/noct/%, $(sort \
 	$(wildcard userland/*/Makefile) \
 	$(wildcard userland/*/*/Makefile) \

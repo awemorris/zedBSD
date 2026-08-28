@@ -16,8 +16,11 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is the proposed `q022`, containing only
-`ws001-p014`; its execution approval and timebox are pending. The archived
+The current [Queue Book](queue.md) is completed `q022`: it published the Noct
+maintainer-review correction as upstream commit
+`eba2043ca74b8601d68a405ecbbeca50ca8d5ac0`, replaced the zedBSD gitlink with
+one pinned source-acquisition Makefile, and passed host plus non-JIT, BeUI, and
+JIT QEMU acceptance. The archived
 [q021](queue-q021.md) completed all four WS016 runtime-swap Phases, including
 six passing amd64 UEFI runtime and representative boot-regression cells. The
 archived [q020](queue-q020.md) completed `ws006-p005`, `ws008-p002`, and
@@ -99,7 +102,7 @@ before this long-term product goal is reached.
 | `ws005` | Networking and WPA | Planned; USB Ethernet first, WLAN manually blocked | WS002 Phase 20 is the inherited baseline | Classify one USB Ethernet descriptor, then extract the wired physical-network Phase | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Complete (`q020`) | `ws008-p003` complete | No implementation Phase remains; canonical publication/revision advancement is separate release administration | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Complete (`q022`) | `ws008-p004` complete | No current Phase; extract a new bounded Noct/BeUI requirement before resuming | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
@@ -192,10 +195,10 @@ WS010 supplies host-side build and test scripting used by all workstreams.
    implementation Phases without displacing earlier physical-network and
    storage milestones.
 
-With q021 complete, `ws001-p014` is proposed alone in q022. `ws003-p016`
-remains independently dependency-ready. `ws017-p001` returns to the planning
-pool only after its recorded `mprotect` ceiling decision. Neither a proposed
-Queue nor this planning pool authorizes implementation by itself.
+With q022 complete, `ws001-p014` and `ws003-p016` remain independently
+dependency-ready. `ws017-p001` returns to the planning pool only after its
+recorded `mprotect` ceiling decision. Neither a proposed Queue nor this
+planning pool authorizes implementation by itself.
 
 WS001 and WS009 advance within every wave when bounded work is selected. Lower
 priority POSIX gaps may remain paused if they do not block the active milestone.
@@ -218,7 +221,7 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | UEFI Boot CPAR `boot.cfg`/LFN/menu contract | WS013 | Section grammar maps to the common parameter contract; freeze bounded FAT/parser/menu details before implementation; legacy PC/AT and PC-98 menus are excluded |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
 | Confirmed-commit implementation bounds | WS011 | Public semantics are fixed: interactive only, explicit timeout, delayed `/etc/net.conf` write, ordinary `commit` confirms, and DHCP is reacquired; freeze timeout maximum, lock path, and diagnostic bounds before implementation |
-| Authoritative Noct repository, build sequence, and revision | WS008 | Resolved: official and integration trees are pinned at `7d856856e16eb2d889ba49f557f2fda4dcaeea7e`; Queue-ready order is zedBSD CMake preset, canonical BeUI backend, then amd64 JIT acceptance |
+| Authoritative Noct repository, build sequence, and revision | WS008 | Resolved by q022: official main is `awemorris/NoctLang`; zedBSD tracks only `userland/noct/Makefile`, which clones and builds pinned commit `eba2043ca74b8601d68a405ecbbeca50ca8d5ac0` under `userland/noct/NoctLang` |
 | PC/AT boot selector | WS004 | Resolved: reuse UUID/PARTUUID; standard FAT handoff uses UUID |
 | Runtime swap command standard and control boundary | WS016 | Resolved for v1: SUSv4/POSIX does not define `swapon`/`swapoff`; zedBSD supplies minimal privileged extensions over versioned `/dev/system` control and existing signed sources |
 | Optional LFB mapping and Xzed fallback boundary | WS017 | Resolved for v1: fixed post-ENTER geometry, 8/16/24/32-bpp layout query, shared non-executable mmap when supported, true-color Xzed fast path, and unchanged ioctl fallback; PC-98 Cirrus is excluded |

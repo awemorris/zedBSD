@@ -4,15 +4,14 @@ Last updated: 2026-08-28
 
 WSID: `ws008`
 
-Status: complete (`q020`)
+Status: Complete (`q022`)
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws008-p003`
+Last verified Phase: `ws008-p004`
 
-Resume point: no implementation Phase remains. Publishing the canonical Noct
-change set and advancing the package revision remain separate release
-administration.
+Resume point: no current Phase; extract a new bounded Noct/BeUI requirement
+before resuming this WS
 
 Shared tests: [WS008 test index](tests/README.md)
 
@@ -23,6 +22,7 @@ Shared tests: [WS008 test index](tests/README.md)
 | [`ws008-p001`](phase001-zedbsd-preset/phase.md) | Complete (`q019`) | Official Noct builds for zedBSD with `cmake --preset zedbsd`, and the resulting amd64 executable passes a non-JIT QEMU smoke |
 | [`ws008-p002`](phase002-beui-zedbsd/phase.md) | Complete (`q020`) | Official BeUI zedBSD backend uses `/dev/graphics` and capability-discovered `/dev/input/eventN`; the downstream duplicate and console-event dependency are removed |
 | [`ws008-p003`](phase003-amd64-jit/phase.md) | Complete (`q020`) | amd64 zedBSD proves Noct-generated code traverses RW `mmap` to RX `mprotect` and executes under QEMU |
+| [`ws008-p004`](phase004-upstream-review/phase.md) | Complete (`q022`) | Maintainer review is published upstream, the BeUI/JIT/CMake contracts are cleaned up, and zedBSD uses one reproducible clone/build Makefile instead of a gitlink |
 
 The old NOCT-00--NOCT-05 labels are superseded as scheduling units by these
 immutable Phase IDs. Their concerns are retained inside p001--p003 rather than
@@ -41,15 +41,18 @@ requiring a preliminary audit-only Queue item.
 
 ## WS completion conditions
 
-WS008 is complete when all three Phases are complete: the official Noct source
+WS008 is complete when all four Phases are complete: the official Noct source
 tree provides working `zedbsd` configure and build presets, the installed amd64
 artifact is built from that target, the official BeUI backend passes graphics
 and evdev tests without legacy console event ioctls, and a QEMU guest produces
 both correct JIT program output and positive JIT-compilation evidence after an
-RW-to-RX mapping transition. The SDL backend must retain its upstream tests.
+RW-to-RX mapping transition. The SDL backend must retain its upstream tests,
+and the reviewed official revision must be reproducibly acquired without a
+zedBSD-owned source copy or gitlink.
 
-Publishing, committing, or pushing the canonical Noct changes is release
-administration and is not authorized implicitly by executing these Phases.
+Publishing, committing, or pushing the canonical Noct changes requires the
+explicit two-repository approval recorded by p004; it is not inferred from an
+ordinary zedBSD Phase execution.
 The implementation must nevertheless be authored in an official Noct checkout,
 not copied into a new zedBSD-owned fork. A reproducible package revision cannot
 be advanced until that revision exists; this is recorded honestly at Queue
@@ -63,7 +66,7 @@ language's native JIT execution path. This sequence deliberately starts with a
 plain target build, then adds the graphical/input backend, then enables the
 runtime feature whose VM permissions are the most security-sensitive.
 
-## 2. Verified baseline
+## 2. Initial verified baseline
 
 - `/home/awe/NoctLang` and `userland/noct` are official Noct checkouts at
   `7d856856e16eb2d889ba49f557f2fda4dcaeea7e`; neither currently defines a
@@ -122,11 +125,11 @@ zedBSD owns:
   cannot reasonably live in canonical Noct.
 
 The backend includes zedBSD UAPI headers from the selected sysroot/source tree;
-it must not copy those definitions into Noct. Work is made first in the
-authoritative `/home/awe/NoctLang` checkout and then mirrored for integration
-testing in `userland/noct`. With commits prohibited, parity is evidenced by a
-path-scoped diff/hash manifest; neither Phase commits, pushes, or silently
-changes the submodule gitlink.
+it must not copy those definitions into Noct. Canonical source is published in
+`awemorris/NoctLang` and acquired at the accepted revision under
+`userland/noct/NoctLang`; the host build-tool checkout under `build/NoctLang`
+is separate. q022 explicitly authorized and completed the two-repository
+publication and removed the former submodule/gitlink.
 
 ## 5. Product boundaries
 

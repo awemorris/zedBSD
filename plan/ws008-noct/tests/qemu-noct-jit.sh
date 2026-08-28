@@ -8,7 +8,7 @@ repo=$(cd -- "$script_dir/../../.." && pwd)
 runner=$script_dir/qemu-noct-jit.sh
 production_config=$repo/config.mk
 production_image=$repo/build/amd64/hdd-image.img
-cmake_artifact=${NOCT_CMAKE_ARTIFACT:-$repo/userland/noct/build-zedbsd/noct}
+cmake_artifact=${NOCT_CMAKE_ARTIFACT:-$repo/userland/noct/NoctLang/build-zedbsd/noct}
 package_artifact=$repo/build/amd64/bin/noct
 staged_artifact=$repo/build/amd64/rootfs/usr/bin/noct
 probe_source=$script_dir/noct-jit-vm-probe.c
@@ -16,7 +16,7 @@ probe_target=build/amd64/NOCT-JIT-VM-PROBE.ELF
 probe_artifact=$repo/$probe_target
 probe_staged=$repo/build/amd64/rootfs/usr/bin/noct-jit-vm-probe
 jit_script=$script_dir/noct-jit-qemu.noct
-noct_source=${NOCT_SOURCE_DIR:-$repo/userland/noct}
+noct_source=${NOCT_SOURCE_DIR:-$repo/userland/noct/NoctLang}
 qemu=${QEMU_SYSTEM_X86_64:-qemu-system-x86_64}
 build_timeout=${BUILD_TIMEOUT_SECONDS:-3600}
 boot_timeout=${BOOT_TIMEOUT_SECONDS:-120}
@@ -184,6 +184,8 @@ printf 'case\tresult\tevidence\n' >"$results"
 
 build_command=(make -C "$repo" -j16 "ZEDBSD_CONFIG=$temporary_config"
 	"$probe_target" disk-image)
+boot_parameter_command=(make -C "$repo" -B
+	"ZEDBSD_CONFIG=$temporary_config" build/amd64/generated/boot-parameters.h)
 qemu_command=(
 	"$qemu" -machine pc -m 512 -smp 4
 	-drive "file=$run_image,format=raw,if=ide"
@@ -229,6 +231,7 @@ guest_t022_jit_command=$guest_t021_command
 	printf 'cell_timeout_seconds=%s\n' "$cell_timeout"
 	printf 'build_command='; printf '%q ' timeout --foreground --kill-after=10 \
 		"${build_timeout}s" "${build_command[@]}"; printf '\n'
+	printf 'boot_parameter_command='; printf '%q ' "${boot_parameter_command[@]}"; printf '\n'
 	printf 'qemu_command='; printf '%q ' timeout --foreground --kill-after=5 \
 		"${cell_timeout}s" "${qemu_command[@]}"; printf '\n'
 	printf 'guest_t020_command=%s\n' "$guest_t020_command"
@@ -324,7 +327,9 @@ printf 'build_start_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 	>>"$metadata"
 set +e
 timeout --foreground --kill-after=10 "${build_timeout}s" \
-	"${build_command[@]}" >"$build_log" 2>&1
+	"${boot_parameter_command[@]}" >"$build_log" 2>&1 && \
+	timeout --foreground --kill-after=10 "${build_timeout}s" \
+	"${build_command[@]}" >>"$build_log" 2>&1
 build_status=$?
 set -e
 {

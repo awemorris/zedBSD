@@ -9,8 +9,8 @@ production_config=$repo/config.mk
 production_image=$repo/build/amd64/hdd-image.img
 package_artifact=$repo/build/amd64/bin/noct
 staged_artifact=$repo/build/amd64/rootfs/usr/bin/noct
-cmake_artifact=${NOCT_CMAKE_ARTIFACT:-$repo/userland/noct/build-zedbsd/noct}
-noct_source=${NOCT_SOURCE_DIR:-$repo/userland/noct}
+cmake_artifact=${NOCT_CMAKE_ARTIFACT:-$repo/userland/noct/NoctLang/build-zedbsd/noct}
+noct_source=${NOCT_SOURCE_DIR:-$repo/userland/noct/NoctLang}
 qemu=${QEMU_SYSTEM_X86_64:-qemu-system-x86_64}
 build_timeout=${BUILD_TIMEOUT_SECONDS:-3600}
 boot_timeout=${BOOT_TIMEOUT_SECONDS:-120}
@@ -151,6 +151,8 @@ printf 'case\tresult\tevidence\n' >"$results"
 : >"$controller_result"
 
 build_command=(make -C "$repo" -j16 "ZEDBSD_CONFIG=$temporary_config")
+boot_parameter_command=(make -C "$repo" -B
+	"ZEDBSD_CONFIG=$temporary_config" build/amd64/generated/boot-parameters.h)
 qemu_command=(
 	"$qemu" -machine pc -m 512 -smp 4
 	-drive "file=$run_image,format=raw,if=ide"
@@ -182,6 +184,9 @@ qemu_command=(
 	printf 'build_command='
 	printf '%q ' timeout --foreground --kill-after=10 "${build_timeout}s" \
 		"${build_command[@]}"
+	printf '\n'
+	printf 'boot_parameter_command='
+	printf '%q ' "${boot_parameter_command[@]}"
 	printf '\n'
 	printf 'qemu_command='
 	printf '%q ' timeout --foreground --kill-after=5 "${cell_timeout}s" \
@@ -277,7 +282,9 @@ build_start_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 build_started=$(date +%s)
 set +e
 timeout --foreground --kill-after=10 "${build_timeout}s" \
-	"${build_command[@]}" >"$build_log" 2>&1
+	"${boot_parameter_command[@]}" >"$build_log" 2>&1 && \
+	timeout --foreground --kill-after=10 "${build_timeout}s" \
+	"${build_command[@]}" >>"$build_log" 2>&1
 build_status=$?
 set -e
 build_elapsed=$(( $(date +%s) - build_started ))

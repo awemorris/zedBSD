@@ -14,7 +14,7 @@ MODE=all
 REQUIRE_PACKAGE=0
 REQUIRE_PARITY_CHANGES=0
 OFFICIAL_DIR=${NOCT_OFFICIAL_DIR:-/home/awe/NoctLang}
-INTEGRATION_DIR=${NOCT_INTEGRATION_DIR:-$REPO_ROOT/userland/noct}
+INTEGRATION_DIR=${NOCT_INTEGRATION_DIR:-$REPO_ROOT/userland/noct/NoctLang}
 ZEDBSD_ROOT=${ZEDBSD_SOURCE_DIR:-$REPO_ROOT}
 ARTIFACT_REL=${NOCT_CANONICAL_ARTIFACT_REL:-build-zedbsd/noct}
 INSTALL_SOURCE_ARTIFACT=${NOCT_INSTALL_SOURCE_ARTIFACT:-}
@@ -33,7 +33,7 @@ Modes:
 
 Options:
   --official-dir DIR              Canonical Noct working tree.
-  --integration-dir DIR           Mirrored userland/noct working tree.
+  --integration-dir DIR           Official userland/noct/NoctLang checkout.
   --zedbsd-source-dir DIR         Valid value used for ZEDBSD_SOURCE_DIR.
   --canonical-artifact-relative P Path below the clean canonical copy.
   --install-source-artifact FILE  Canonical CMake artifact consumed by make.
