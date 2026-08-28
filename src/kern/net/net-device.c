@@ -223,7 +223,7 @@ net_device_create(struct net_device *device)
 	enabled = device_lock();
 	if (device->state != NET_DEVICE_ALLOCATED || registry_stopping) {
 		device_unlock(enabled);
-		return registry_stopping ? ESHUTDOWN : EINVAL;
+		return registry_stopping ? EBUSY : EINVAL;
 	}
 	for (other = device_head; other != NULL; other = other->next)
 		if (!strcmp(other->name, device->name)) {
@@ -586,7 +586,7 @@ net_device_open(struct net_device *device)
 	enabled = device_lock();
 	if (device->state != NET_DEVICE_LIVE || registry_stopping) {
 		device_unlock(enabled);
-		return registry_stopping ? ESHUTDOWN : ENODEV;
+		return registry_stopping ? EBUSY : ENODEV;
 	}
 	if (device->opening || device->closing) {
 		device_unlock(enabled);
