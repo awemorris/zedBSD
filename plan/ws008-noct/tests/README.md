@@ -205,6 +205,21 @@ plan/ws008-noct/tests/noct-p004-review.sh
 GitHub transport is unavailable. The SDL2 dummy-window gate and the existing
 p001--p003 QEMU runners remain explicit companion tests.
 
+## Independent platform implementation tests
+
+| ID | Phase | Contract |
+| --- | --- | --- |
+| `NOCT-T040` | p005 | Shared dispatcher/backend sources are absent and each configured target selects exactly one platform-owned public registrar |
+| `NOCT-T041` | p005 | Independent SDL2 implementation passes canonical static/generic/dummy-window behavior |
+| `NOCT-T042` | p005 | Independent PC-98 implementation passes GDC and Cirrus regressions |
+| `NOCT-T043` | p005 | Independent zedBSD implementation passes host sanitizer, evdev, and source audits |
+| `NOCT-T044` | p005 | amd64 zedBSD BeUI QEMU acceptance passes from the newly published and pinned canonical revision |
+
+The p005 runner may extend `noct-p004-review.sh` or add a focused companion,
+but its assertions must describe independent platform ownership rather than
+the p004 dispatcher/shared-backend layout. Existing p001--p003 QEMU runners
+remain the runtime regression gates.
+
 ## Common build gate
 
 Run `make -j16` after each implementation Phase. Do not use the aggregate

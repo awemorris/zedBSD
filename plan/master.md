@@ -125,7 +125,7 @@ code.
 | `ws005` | Networking and WPA | Planned; USB Ethernet first, WLAN manually blocked | WS002 Phase 20 is the inherited baseline | Classify one USB Ethernet descriptor, then extract the wired physical-network Phase | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Complete (`q022`) | `ws008-p004` complete | No current Phase; extract a new bounded Noct/BeUI requirement before resuming | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Active; independent BeUI platform implementations Queue-ready | `ws008-p004` complete; p005 planned | Queue `ws008-p005` to remove the shared BeUI dispatcher/backend and give each selected platform one complete implementation | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
@@ -218,10 +218,10 @@ WS010 supplies host-side build and test scripting used by all workstreams.
    implementation Phases without displacing earlier physical-network and
    storage milestones.
 
-With q022 complete, `ws001-p014` and `ws003-p016` remain independently
-dependency-ready. `ws017-p001` returns to the planning pool only after its
-recorded `mprotect` ceiling decision. Neither a proposed Queue nor this
-planning pool authorizes implementation by itself.
+With q022 complete, `ws001-p014`, `ws003-p016`, and `ws008-p005` remain
+independently dependency-ready. `ws017-p001` returns to the planning pool only
+after its recorded `mprotect` ceiling decision. Neither a proposed Queue nor
+this planning pool authorizes implementation by itself.
 
 WS001 and WS009 advance within every wave when bounded work is selected. Lower
 priority POSIX gaps may remain paused if they do not block the active milestone.
