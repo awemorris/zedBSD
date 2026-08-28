@@ -11,6 +11,10 @@ Parent: [WS004](../ws.md)
 | HW-T11 | USB storage | Root-continuity cases from WS003 pass through xHCI |
 | HW-T12 | USB overlay writes | Correlated URB/heap tests pass; 500 sequential q35/xHCI/SMP=4 boots from pristine raw-image copies have zero kernel/storage-error markers; explicit `DATA.IMG` persistence and IDE control pass; detailed manual acceptance follows |
 | HW-T13 | PC/AT warm reset | Three consecutive guest reboots reach fresh login with clean kernel BSS state |
+| HW-T14 | USB function model | Multiple configurations, IAD/Union, class-specific descriptors, alternate endpoints, strings, sibling claims, and failed-selection rollback pass production-source fixtures |
+| HW-T15 | Concurrent xHCI URBs | Control, interrupt, bulk RX/TX, and independent storage requests complete out of order; isolated cancel, quiesce, and reclaim reserve invariants pass |
+| HW-T16 | Removable net device | Carrier changes, queued-RX detach, ARP/route purge, deferred release, shutdown, and more than eight reconnects pass without stale ownership |
+| HW-T17 | CDC NCM wire and driver | NTH16/NDP16 valid/malformed fixtures, strict negotiation, bind/unwind, RX/TX, notification, detach, reconnect, and concurrent storage pass |
 | HW-T20 | NVMe QEMU | Identify, namespace bounds, read/write/flush, concurrency, reset, and failure tests pass on disposable images |
 | HW-T21 | NVMe hardware | Read-only identify precedes explicitly safe I/O; device IDs and stress/error logs are stored |
 | HW-T30 | WLAN logic | Scan/association/key/error state tests pass against a bounded fixture without claiming radio hardware success |
@@ -210,3 +214,20 @@ weak/no-op hook is a failure when `heap_active_set()` points libc allocation at
 the kernel heap. The current linked amd64 kernel has no standard `malloc/free`
 call site; q010 evidence is in
 [q010-hwt12-evidence.md](q010-hwt12-evidence.md).
+
+## HW-T14 USB function model
+
+The fixture drives the production USB core through a fake HCD. It covers two
+configurations, a storage-compatible alternate-zero interface, a CDC-shaped
+IAD and Union descriptor, data alternates zero and one, exact endpoint
+publication, sibling claim contention, checked transition rollback, automatic
+LANGID discovery, UTF-16LE conversion, and malformed descriptors and strings:
+
+```sh
+mkdir -p build/q027-tmp
+cc -std=c11 -Iinclude -Iinclude/uapi -Wall -Wextra -Werror \
+  src/drivers/usb.c \
+  plan/ws004-hardware/tests/usb-function-model-test.c \
+  -o build/q027-tmp/usb-function-model-test
+build/q027-tmp/usb-function-model-test
+```

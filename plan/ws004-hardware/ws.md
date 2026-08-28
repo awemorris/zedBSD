@@ -1,20 +1,20 @@
 # WS004: hardware expansion
 
-Last updated: 2026-08-27
+Last updated: 2026-08-29
 
 WSID: `ws004`
 
-Status: active; `ws004-p009` complete in `q016`
+Status: active; `q027` CDC NCM software milestone in progress
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws004-p009` completes the checked EHCI/UHCI IRQ and
-controller-lifetime repair; `ws004-p008` and resumed `ws004-p006` retain their
-completed automatic QEMU milestones
+Last verified Phase: `ws004-p013` completes the strict, bounded NTH16/NDP16
+wire contract. `ws004-p010`--`p012` and `p014` remain in the approved CDC NCM
+software sequence.
 
-Resume point: record the user's detailed manual USB acceptance separately, or
-extract the next dependency-ready hardware Phase. The automatic 500-boot gate
-and the legacy-HCD checked teardown gate have passed.
+Resume point: execute `q027`: USB function ownership, xHCI concurrent URBs,
+removable net-device lifetime, NCM wire codec, then the integrated `ueN`
+driver. Physical NCM interoperability remains a separate WS005 gate.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -31,6 +31,11 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p007`](phase007-warm-reset/phase.md) | Complete | Native-mode ELF64 BSS clearing fixes stale allocator state; three IDE reboots and a USB reboot reach login |
 | [`ws004-p008`](phase008-smp-heap-integrity/phase.md) | Complete | Unified kernel heap lock domain, corrected aligned-prefix arithmetic, controls, and 500-boot combined gate pass |
 | [`ws004-p009`](phase009-pci-hcd-irq-teardown/phase.md) | Complete (`q016`) | EHCI/UHCI use checked quiesce, retain all ownership on failure, restore staged attach/detach state, unlink stale root-probe nodes, pass HW-T02 and both i386 production builds |
+| [`ws004-p010`](phase010-usb-function-model/phase.md) | In progress (`q027`) | Retain and operate USB configurations, alternates, CDC descriptors, strings, and sibling claims |
+| [`ws004-p011`](phase011-xhci-concurrent-urbs/phase.md) | Pending (`q027`) | Replace xHCI controller-wide single-flight transfer ownership while preserving storage reserve guarantees |
+| [`ws004-p012`](phase012-net-device-hotplug/phase.md) | In progress (`q027`) | Safe carrier, hot-unplug, deferred slot release, stale-state purge, and shutdown lifetime |
+| [`ws004-p013`](phase013-cdc-ncm-wire/phase.md) | Complete (`q027`) | Strict NCM 1.0-compatible NTH16/NDP16 negotiation and wire codec pass ordinary, sanitizer, analyzer, and production-build gates |
+| [`ws004-p014`](phase014-cdc-ncm-driver/phase.md) | Pending (`q027`) | Self-contained CDC NCM `ueN` integration and automatic software acceptance |
 
 ### MSI follow-up register
 
@@ -95,7 +100,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-03 | Complete (`q016`) | Checked PCI IRQ/controller lifetime for EHCI and UHCI detach; xHCI is already converted and is outside this Phase | HW-00, checked PCI IRQ API from q015 | Busy/error removal retains all ownership; retry and final detach host fixtures plus i386 builds pass |
 | HW-10 | Planned | NVMe controller, admin/I/O queues, namespaces, and block integration | HW-00 | QEMU NVMe install/mount/I/O/reset tests pass |
 | HW-11 | Planned | NVMe verification on the Latitude controller | HW-10, BR-00 | Identify/read-only first, then disposable-range I/O and stress without corruption |
-| HW-12 | Planned; first network target | Common USB Ethernet core, CDC ECM/NCM class binding, and a Realtek-family backend if the target descriptors are vendor-specific | HW-01, target descriptors; VID:PID only for vendor-specific matching | At least one user adapter attaches, links, transfers concurrently, times out safely, reconnects, and detaches; class matching is not falsely claimed for vendor-specific devices |
+| HW-12 | In progress (`q027` software scope); first network target | Independent CDC NCM class driver after common USB/xHCI/net-device lifetime foundations; later ECM or Realtek-family implementations remain independent until stable commonality exists | HW-01; physical role proof remains WS005 | Automatic NCM fixtures and QEMU regressions pass without falsely claiming ECM/RNDIS/vendor hardware; physical link/transfer/reconnect is NET-T40 |
 | HW-20 | Manually blocked (`MB-006`) | RTL8822CE (`10ec:c822`, subsystem `10ec:c130`) architecture and native driver | BR-00, HW-00, firmware packaging policy, explicit release | Scan, authenticate, associate, and exchange data on hardware |
 | HW-21 | Manually blocked (`MB-006`) | Testable RTL8822CE WLAN hardware abstraction or protocol fixture | HW-20 design and explicit release | Driver state/error paths can be tested without claiming QEMU emulates the laptop radio |
 | HW-30 | Proposed | i915 hardware foundations for the discovered 11th-generation GPU | BR-00, HW-00, GFX UAPI | Modeset/scanout and recovery on hardware; model tests for device-independent layers |

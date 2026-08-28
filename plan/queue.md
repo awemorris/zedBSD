@@ -1,108 +1,91 @@
-# Queue: kernel driver and platform ownership migration
+# Queue: USB CDC NCM software milestone
 
 Last updated: 2026-08-29
 
-QID: `q026`
+QID: `q027`
 
-Queue status: finished
+Queue status: in-progress
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: after reviewing the remaining `src/kern` driver-like sources
-and historical platform directories, the user explicitly instructed the agent
-to perform that work. This authorizes the finite WS018 sequence below. It does
-not authorize Noct source changes or the later FAT/bootfs semantic migration.
+Authorization: the user approved this five-Phase Queue on 2026-08-29 after
+reviewing its phase order, initial NCM profile, QEMU limitation, and physical
+acceptance boundary.
 
-Timebox: no fixed wall-clock limit; four finite Phases, executed as far as this
-session safely permits.
+Timebox: no fixed wall-clock limit; continue until all five finite items have
+been completed or honestly marked `uncleared` at a documented boundary.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q025](queue-q025.md)
+Previous Queue: [q026](queue-q026.md)
 
 ## Purpose
 
-Complete the dependency-ready driver/platform ownership wave: make each PC/AT
-and PC-98 graphics backend own its complete `/dev/graphics` frontend, move
-fonts and disk-label implementations to driver ownership, collapse each
-historical platform directory into one canonical platform translation unit,
-move Xzed exclusively to capability-discovered evdev, then move generic input
-and console implementations plus independent mouse producers to their final
-driver locations and delete `/dev/mouse`.
+Add a native host-side USB CDC NCM network interface without hiding the USB,
+xHCI, network-device, and shutdown contracts that NCM exercises.  The first
+implementation is an NCM 1.0-compatible NTH16/NDP16, no-CRC, 1500-byte-MTU
+profile named `ueN`.  It is deliberately independent rather than built on a
+speculative common USB-Ethernet implementation.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws018-p009` | [Phase](ws018-kernel-architecture/phase009-independent-graphics-frontends/phase.md) | uncleared | Source/build migration and amd64 runtime pass; PC/AT and PC-98 backend runtime matrix remains explicit residual verification |
-| 2 | `ws018-p002` | [Phase](ws018-kernel-architecture/phase002-disklabel-platform-layout/phase.md) | completed | Disk labels live under `src/drivers/disklabel`; each platform has exactly one `src/kern/platform/<platform>.c`, with historical directories absent |
-| 3 | `ws018-p007` | [Phase](ws018-kernel-architecture/phase007-xzed-evdev-consumer/phase.md) | completed | Xzed discovers and consumes keyboard and relative/absolute pointer input only through evdev |
-| 4 | `ws018-p008` | [Phase](ws018-kernel-architecture/phase008-input-hid-driver-ownership/phase.md) | completed | Input/console implementations have final driver owners, mouse backends publish evdev directly, and `/dev/mouse` is absent |
+| 1 | `ws004-p010` | [Phase](ws004-hardware/phase010-usb-function-model/phase.md) | in-progress | USB configuration, alternate-setting, functional-descriptor, string, and interface-claim contracts pass focused tests |
+| 2 | `ws004-p011` | [Phase](ws004-hardware/phase011-xhci-concurrent-urbs/phase.md) | pending | xHCI safely owns simultaneous endpoint URBs without weakening storage/reclaim guarantees |
+| 3 | `ws004-p012` | [Phase](ws004-hardware/phase012-net-device-hotplug/phase.md) | in-progress | carrier, detach, ARP purge, deferred release, and shutdown lifetime tests pass |
+| 4 | `ws004-p013` | [Phase](ws004-hardware/phase013-cdc-ncm-wire/phase.md) | completed | strict bounded negotiation and NTH16/NDP16 encode/decode, including the advertised-maximum no-ZLP exception, pass production-source fixtures |
+| 5 | `ws004-p014` | [Phase](ws004-hardware/phase014-cdc-ncm-driver/phase.md) | pending | production NCM class driver binds as `ueN`, transfers, cancels, detaches, reconnects, and passes the declared software gate |
 
 ## Dependency order
 
 ```text
-ws018-p009 -> ws018-p002
-
-ws018-p007 -> ws018-p008
+ws004-p010 ----+---------------------> ws004-p014
+               |
+ws004-p011 ----+
+               |
+ws004-p012 ----+
+               |
+ws004-p013 ----+
 ```
 
-The two chains are architecturally independent, but this Queue processes them
-in registry order so build-manifest edits and Phase evidence stay reviewable.
+p010, p012, and p013 are independent enough to execute concurrently. p011 may
+start after the current xHCI ownership model is frozen by its Phase; p014 does
+not start until all four prerequisites are complete.
 
-## Known bounds and uncertainty
+## Frozen product boundary
 
-- The public `<zedbsd/graphics.h>` and evdev UAPIs are frozen for this Queue.
-- Source duplication below those interfaces is intentional; a new common
-  graphics or mouse frontend is outside scope.
-- Missing maintained physical/PC-98 runtime infrastructure may make only the
-  corresponding runtime evidence `uncleared`; it does not permit weakening
-  source, host-fixture, or build gates.
-- FAT consolidation and native VFS/bootfs removal remain p010--p012 and are
-  excluded because they change filesystem access semantics beyond this
-  ownership wave.
+- Host-side CDC NCM 1.0-compatible operation only.
+- NTH16 and NDP16 only; CRC, NTH32, MBIM, ECM, RNDIS, vendor-specific Realtek,
+  USB-device/gadget role, jumbo frames, and advanced TX aggregation are out of
+  scope.
+- RX accepts multiple valid Ethernet datagrams per NTB. Initial TX may emit one
+  datagram per NTB.
+- xHCI is the first concurrent-HCD target. UHCI/EHCI must fail safely rather
+  than falsely advertising NCM support.
+- The driver is self-contained below stable USB and `net_device` interfaces.
+  Common USB-Ethernet code may be extracted only after another implementation
+  demonstrates stable commonality.
+- Stock QEMU `usb-net` is ECM/RNDIS, not NCM. Host production-source fixtures,
+  configured builds, xHCI regression, and ordinary QEMU boot form the software
+  completion gate. True NCM interoperability remains WS005 physical/gadget
+  acceptance and is not falsely claimed here.
 
 ## Execution rules
 
-- Do not inspect or modify `userland/noct/NoctLang` or `/home/awe/NoctLang`.
-- Preserve unrelated work; do not reset, checkout, clean, or broadly overwrite
-  files.
-- Use `make -j16`, focused WS018 fixtures, and `qemu-system-x86_64` for amd64
-  runtime verification. Do not use `make check` or `.internal/`.
-- Use disposable image copies for guest mutation.
-- Stop the affected Phase at its documented reconsideration boundary, record
-  exact evidence and resume condition, then continue an independent item.
-- Commit each completed Phase as `WIP` and push it. If push cannot proceed,
+- Preserve unrelated work, including the existing root `AGENTS.md` move; do
+  not stage or rewrite it as part of q027.
+- Do not inspect or modify `.internal/`, `userland/noct/NoctLang`, or
+  `/home/awe/NoctLang`.
+- Use `make -j16`, focused WS004 fixtures, and `qemu-system-x86_64`; do not use
+  `make check`.
+- Keep USB storage boot and reclaim-safe DMA behavior working while adding
+  persistent network URBs.
+- Commit each completed Phase as `WIP` and push it. If push is unavailable,
   retain the local commit and continue.
 
 ## Completion definition
 
-q026 is finished after all four entries are `completed` or `uncleared`, actual
-results are synchronized to P/W/M/Q, and every supported build plus applicable
-focused/runtime gate has recorded evidence. A finished Queue may retain an
-`uncleared` runtime-only result, but may not claim ownership deletion that is
-not present in the source tree.
-
-## Execution result
-
-Finished on 2026-08-29. Three Phases completed and `ws018-p009` remains
-`uncleared` solely for its explicit graphics runtime matrix.
-
-- Independent PC/AT and PC-98 graphics frontends, driver-owned fonts, and all
-  source/build ownership work in p009 are implemented. Its focused tests, six
-  builds, configuration toggles, amd64 Xzed render, and console restoration
-  passed. PC/AT VGA/Cirrus, PC-98 GDC/Cirrus, and booted graphics-disabled
-  node-absence runs remain recorded in that Phase as residual verification.
-- Disk-label implementations live under `src/drivers/disklabel/`. The
-  historical `src/kern/{pcat,pc98,rpi4,sun4u,x68k}/` directories are absent,
-  and `src/kern/platform/` contains only its README and exactly one complete
-  translation unit per platform.
-- Xzed is an evdev-only keyboard and pointer consumer. Generic input sources,
-  the console frontend, and the two independent physical mouse drivers now
-  have their final `src/drivers/` owners; `/dev/mouse`, its UAPI, and the
-  shared mouse frontend are absent.
-- Focused ordinary and sanitizer fixtures, all six supported kernel builds,
-  amd64 Xzed operation through production evdev, PC-98 boot/input registration,
-  live legacy-source audits, independent review, and `git diff --check` passed.
-  Neither `make check` nor `.internal/` was used, and no Noct source was
-  inspected or changed.
+q027 is finished when every item is `completed` or `uncleared`, actual results
+are synchronized to P/W/M/Q, focused fixtures and declared builds pass, and no
+result claims physical NCM interoperability without a proven NCM device role.
