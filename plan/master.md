@@ -16,11 +16,15 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is `q028`: `ws004-p018` has completed its
-automatic gates after correcting
+The current [Queue Book](queue.md) is finished `q028`: `ws004-p018` corrected
 the IAD-less, Union-associated CDC NCM match exposed when the physical RTL8156
-enumerated without publishing `ue0`, adds concise binding diagnostics, and
-now awaits one final Latitude publication check. The archived
+enumerated without publishing `ue0`, added concise binding diagnostics, and
+passed physical acceptance when Latitude selected NCM configuration 2 and
+published `ue0`. Carrier, DHCP, and packet flow are not yet complete: the
+acceptance exposed a DHCP error and a possible first-inbound-activity stop.
+Before returning to physical NCM debugging, planned `ws004-p019` adds an
+independent CDC ECM driver and QEMU `usb-net` end-to-end control; the physical
+handoff remains `ws005-p001`. The archived
 [q027](queue-q027.md) completed all six USB/NCM software Phases, including the
 general binding/interface transaction and integrated `ueN` automatic
 milestone. Link, DHCP, transfer, reconnect, and repeated physical acceptance
@@ -167,8 +171,8 @@ actually warranted.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
 | `ws003` | Dell Latitude 5320 bring-up | Active; p017 QEMU complete, physical acceptance pending | Dell-style UEFI `LoadOptions` regression is corrected and covered by BR-T48 | Boot the p017 production image once, then return to BR-T30 repeatability, BR-T31 sustained I/O, and hardware inventory | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; q028 automatic gates complete, physical check pending | `ws004-p010`--`p015` complete; `p018` automatic implementation and regression gates pass; legacy-HCD `p016` and runtime-policy `p017` remain later | Run the single Latitude `ue0` publication check; link/transfer/reconnect remain WS005 | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WPA | Planned; USB Ethernet first, WLAN manually blocked | WS002 Phase 20 is the inherited baseline | Classify one USB Ethernet descriptor, then extract the wired physical-network Phase | [WS005](ws005-networking/ws.md) |
+| `ws004` | Hardware expansion | Active; p019 CDC ECM/QEMU baseline ready | `ws004-p010`--`p015` and `p018` complete; legacy-HCD `p016` and runtime-policy `p017` remain later | Queue p019 to prove the common USB/network path automatically, then return to WS005 p001 | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WPA | Active; p001 waits for p019, WLAN manually blocked | Physical RTL8156 NCM bind/`ue0` publication is proven by WS004 p018 | After p019 passes, isolate NCM first-RX/static/DHCP behavior in p001; retain reconnect/reliability for later | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Manual hold; target packages disabled | `ws008-p006` uncleared after Principal Engineer rejection; `ws008-p007` complete | Leave all Noct source work to the maintainer until an accepted revision is explicitly returned | [WS008](ws008-noct/ws.md) |

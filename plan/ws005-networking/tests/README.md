@@ -11,7 +11,8 @@ Parent: [WS005](../ws.md)
 | NET-T30 | WLAN fixture | `net` to `networkd` to fake `wpa` to DHCP/static orchestration passes without claiming hardware |
 | NET-T31 | WLAN hardware | Scan/selection/authentication/association, DHCP/static, reconnect, and transfer pass on the selected controller |
 | NET-T40 | USB CDC Ethernet | If selected, ECM/NCM interoperability, reconnect, DHCP/static, and transfer pass with device role proven |
+| NET-T41 | RTL8156 first data path | First notification and bulk RX return without a freeze, static peer ping passes, and DHCP lease plus post-lease ping pass before broader reconnect/reliability acceptance |
+| NET-T42 | QEMU CDC ECM control | QEMU `usb-net` selects ECM, publishes `ue0`, and passes carrier, static ARP/ping, DHCP, and post-lease ping in IDE-control and concurrent xHCI USB-storage topologies |
 
 Existing executable Phase 20 and DHCP tests remain under repository `/tests`
 and are cross-owned as regression inputs rather than duplicated.
-

@@ -4,9 +4,9 @@ Last updated: 2026-08-29
 
 QID: `q028`
 
-Queue status: automatic gates complete; final physical acceptance pending
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: the user approved implementation on 2026-08-29 after the first
 Latitude RTL8156 insertion enumerated `0bda:8156` but did not publish a network
@@ -36,7 +36,7 @@ interface tuple, and probe outcome instead of stopping at device class `00`.
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws004-p018` | [Phase](ws004-hardware/phase018-rtl8156-ncm-association/phase.md) | automatic gates complete; physical acceptance pending | Union-associated, IAD-less NCM wins a three-configuration RTL8156-shaped fixture, binding diagnostics are actionable, automatic/build/QEMU gates pass, and one final Latitude `ue0` acceptance action is prepared |
+| 1 | `ws004-p018` | [Phase](ws004-hardware/phase018-rtl8156-ncm-association/phase.md) | completed | Union-associated, IAD-less NCM wins a three-configuration RTL8156-shaped fixture, binding diagnostics are actionable, automatic/build/QEMU gates pass, and Latitude publishes `ue0` |
 
 ## Dependency order
 
@@ -90,8 +90,16 @@ The generic association fix and binding diagnostics are implemented. Focused
 ordinary, sanitizer, analyzer, USB binding, NCM wire, xHCI, net hotplug, and
 USB Storage gates pass. Both amd64 and configured i386/PC/AT builds pass, and a
 disposable amd64 q35/qemu-xhci USB-root boot reaches `login:` without a tracked
-failure marker. The candidate is ready for the one remaining Latitude
-insertion check; q028 is not marked finished before that result is returned.
+failure marker. The final Latitude insertion selected configuration 2, bound
+the NCM control/data function, and published `ue0`. q028 is complete.
+
+The same acceptance exposed the next, separate WS005 boundary: DHCP reports an
+error and static addressing does not yet yield packet transfer, with a possible
+first-inbound-activity stop. This is carried by
+[`ws005-p001`](ws005-networking/phase001-usb-ncm-physical-datapath/phase.md);
+q028 does not claim carrier, DHCP, or data transfer. Before that physical Phase
+is queued, [`ws004-p019`](ws004-hardware/phase019-cdc-ecm-qemu-baseline/phase.md)
+provides an independent CDC ECM implementation and QEMU common-path control.
 
 ## Completion definition
 

@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 Phase ID: `ws004-p018`
 
-Status: automatic gates complete; physical acceptance pending (`q028`)
+Status: complete (`q028`)
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -148,10 +148,18 @@ Automatic evidence on 2026-08-29:
   with no USB-storage, overlay-write, xHCI-transfer, kernel-fault, or panic
   marker.
 
-The remaining p018 gate is deliberately one physical Latitude boot and one
-RTL8156 insertion using the exact candidate image. It must show configuration
-selection, `driver=usb-cdc-ncm`, and `ue0`; link and traffic are not part of
-this Phase.
+## Physical acceptance result
+
+The user's single Latitude acceptance on 2026-08-29 passed the p018 boundary.
+The RTL8156 selected configuration 2, the `02/0d/00` control interface bound to
+`usb-cdc-ncm`, the `0a/00/01` sibling was claimed by that driver, `ue0` was
+published with its MAC address, and `net show` listed `ue0`.
+
+DHCP subsequently reported an error; static IPv4 assignment succeeded but a
+peer ping did not, with an apparent stop on inbound activity. Those facts do
+not retract the explicitly enumeration-only p018 result. They are recorded in
+[`ws005-p001`](../../ws005-networking/phase001-usb-ncm-physical-datapath/phase.md)
+as the physical carrier/data-path handoff.
 
 ## Completion conditions
 
@@ -177,7 +185,7 @@ this Phase.
 Stop and mark the Phase `uncleared` rather than broadening it if the physical
 device's selected function is vendor-specific, requires a Realtek vendor
 initialization protocol or firmware download, lacks the declared CDC NCM
-descriptors, or binds `ue0` but fails later in link/transfer behavior. Record
-the exact selected configuration and interface tuples. A Realtek-family
-frontend, ECM support, DHCP/data-plane work, or xHCI routing correction then
-belongs in a distinct Phase.
+descriptors, or cannot publish `ue0`. Record the exact selected configuration
+and interface tuples. Once `ue0` is published, a later carrier, DHCP, packet,
+or xHCI runtime failure belongs in a distinct WS005 data-path Phase and does
+not broaden this association Phase.
