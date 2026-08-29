@@ -35,6 +35,7 @@ Parent: [WS003](../ws.md)
 | BR-T46 | Four-platform parameter acceptance | Every declared i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI runtime cell proves normal/default init, explicit shell init, native root, overlay root, file swap, raw swap, and visible invalid-configuration failure |
 | BR-T47 | Static image parameters and scripting closure | One maintained source default feeds all four x86 loader paths and the kernel fallback; no generated input/header, Python generator, build-time file selector, stale state, or Python invocation remains, while affected non-default parameter/swap fixtures remain usable |
 | BR-T48 | UEFI whole-load-option compatibility | A test wrapper places one valid complete `EFI_LOAD_OPTION` descriptor with empty `OptionalData` in the real `EFI_LOADED_IMAGE_PROTOCOL.LoadOptions` fields, then the production loader boots through OVMF/q35/xHCI USB to `login:` without a LoadOptions fatal |
+| BR-T49 | Latitude NVMe installation | The ordinary USB system explicitly initializes the internal SN740 as GPT/ESP, installs and verifies zedBSD, and the frozen result boots both native UFS root and NVMe-backed overlay root through installed `BOOTX64.EFI` |
 | BR-T50 | Physical network | Static or DHCP setup, peer reachability, and a bounded data transfer pass |
 
 For the q011 diagnostic BR-T32 image, the top-right GOP marker is unary: one

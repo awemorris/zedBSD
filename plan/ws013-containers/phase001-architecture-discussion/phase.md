@@ -49,8 +49,8 @@ into bounded implementation Phases.
 - Legacy i386 PC/AT and PC-98 retain FAT16, the fixed legacy `boot.cfg`, and
   fixed image names. They do not implement CPAR Boot Menu.
 - `/boot/boot.cfg` contains a timed default plus named menu sections. Each
-  section supplies `rootfs`, `datafs`, and `swap`. No separate CPAR manifest is
-  introduced.
+  section supplies either native `rootpart` or overlay `rootfs` plus `datafs`,
+  and may supply `swap`. No separate CPAR manifest is introduced.
 - The initial menu selects one complete named section. It does not perform
   semantic version comparison or independently compose kernel/root/data at
   the keyboard. The explicit `default` key is authoritative.
@@ -87,18 +87,18 @@ datafs=boot0:datafs-1.0.0.img
 swap=boot0:swapfile
 
 [zedBSD 0.8.0]
-rootfs=boot0:rootfs-0.8.0.img
-datafs=boot0:datafs-0.8.0.img
+rootpart=/dev/nvme0n1p2
 swap=boot0:swapfile
 ```
 
 The global keys are only `timeout` in seconds and `default`, whose value must
 exactly name one section. A section title is the displayed menu title and must
-be unique. Each section has exactly one `rootfs`, `datafs`, and `swap`; unknown
-or duplicate keys fail visibly. `bootN:NAME` names a long filename on the
-corresponding implemented boot-filesystem slot. Boot CPAR v1 uses file-backed
-root/data images; native partition roots are selected independently through
-the kernel's `rootpart=` contract rather than overloaded into `datafs`.
+be unique. Each section has exactly one root mode: either one `rootpart`, or one
+`rootfs` plus one `datafs`; mixing or omitting a required root key fails.
+`swap` is optional and may occur once. Unknown or duplicate keys fail visibly.
+`bootN:NAME` names a long filename on the corresponding implemented
+boot-filesystem slot. Native roots reuse the kernel's `rootpart=` contract
+rather than being overloaded into `datafs`.
 
 The UEFI menu highlights `default`, counts down `timeout`, and boots it unless
 the user selects another complete section. It does not sort versions, infer a
@@ -108,10 +108,11 @@ but invalid file stops with a visible configuration error rather than silently
 booting a different environment.
 
 Selection uses the implemented common textual boot-parameter model. The loader
-translates the selected section into `overlay-root=`, `overlay-data=`, and
-`swap0=`. `boot0` denotes the loader-origin FAT filesystem by default, and
-`boot1`--`boot3` may name additional FAT filesystems. No CPAR-specific handoff
-structure or ABI registry is introduced. The authoritative parameter
+translates an overlay section into `overlay-root=`, `overlay-data=`, and an
+optional `swap0=`; it translates a native section into `rootpart=` and an
+optional `swap0=`. `boot0` denotes the loader-origin FAT filesystem by default,
+and `boot1`--`boot3` may name additional FAT filesystems. No CPAR-specific
+handoff structure or ABI registry is introduced. The authoritative parameter
 contract is
 [kernel-boot-parameters.md](../../../docs/reference/kernel-boot-parameters.md).
 
@@ -172,9 +173,9 @@ of the selected complete section into the common parameter string.
   configuration behavior.
 - The smallest keyboard menu controls, default/timeout behavior, and visible
   parse/error presentation.
-- Exact translation of one selected complete section to
-  `overlay-root=`, `overlay-data=`, and `swap0=` without merging hidden
-  defaults into a present section.
+- Exact translation of one selected complete native or overlay section to the
+  corresponding `rootpart=` or `overlay-root=`/`overlay-data=` contract plus
+  optional `swap0=`, without merging hidden defaults into a present section.
 
 ## Manually blocked design topics
 

@@ -11,10 +11,16 @@ IDs, records the current stop/resume point of every WS, and defines dependencies
 between WSs. Detailed scope belongs in each `ws.md`; implementation design,
 acceptance, results, and interruption state belong in each `phase.md`.
 
-The immediate north star is:
+The completed first hardware north star was:
 
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
+
+The next hardware/install north star is:
+
+> Implement native NVMe, install zedBSD from the ordinary USB system with
+> `/bin/zedinst`, and boot the Dell Latitude 5320 from its internal NVMe through
+> `BOOTX64.EFI` in both native-root and overlay-root configurations.
 
 The current [Queue Book](queue.md) is finished `q029`; its closed copy is
 [archived here](queue-q029.md). `ws004-p020` is
@@ -118,7 +124,24 @@ These products may select different packages, services, drivers, user
 interfaces, and security/resource policies while sharing the reimplemented
 base system and stable zedBSD interfaces.
 
-### 2.3 Program completion direction
+### 2.3 Current platform installation milestone
+
+The next bounded platform goal is native NVMe installation on the Dell
+Latitude 5320. zedBSD first implements and accepts its NVMe controller and
+block path in QEMU, then identifies the laptop's SanDisk SN740 (`15b7:5015`)
+read-only. The ordinary USB-booted system provides `/bin/zedinst`; no separate
+installer image is introduced. `/sbin/diskpart` supplies an intentionally
+small GPT administration surface.
+
+Installer v1 supports either explicitly selected existing partitions or an
+explicitly confirmed whole-disk UEFI layout. It deliberately does not offer
+resize, move, dual-boot, or automatic target selection. USB boot remains the
+recommended way to try zedBSD without modifying internal storage. Completion
+requires installed `BOOTX64.EFI` to boot both a native UFS `rootpart` and an
+immutable root plus writable overlay whose files reside on the NVMe boot
+partition.
+
+### 2.4 Program completion direction
 
 The project advances toward the final goal when the base system can be built
 from its own maintained source, boots reliably on supported targets, provides
@@ -126,7 +149,7 @@ the documented UNIX/POSIX-oriented interfaces, and supports product-specific
 package sets for all four target classes. Individual WSs may complete or pause
 before this long-term product goal is reached.
 
-### 2.4 Design preference: interface-based modularity and late abstraction
+### 2.5 Design preference: interface-based modularity and late abstraction
 
 This subsection is informative rather than a mandatory project rule. It
 records the project owner's preferred style so that future design discussions
@@ -158,7 +181,7 @@ adapt below the existing contract.  This is informative project-owner
 guidance, like the duplication preference above, rather than a ban on every
 future header change.
 
-### 2.5 Project scripting language and bootstrap order
+### 2.6 Project scripting language and bootstrap order
 
 Noct is the project scripting language for repository-owned build, image,
 generation, and maintenance tooling. A supported build first runs
@@ -181,8 +204,8 @@ actually warranted.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | Dell Latitude 5320 bring-up | Active; p017 QEMU complete, physical acceptance pending | Dell-style UEFI `LoadOptions` regression is corrected and covered by BR-T48 | Boot the p017 production image once, then return to BR-T30 repeatability, BR-T31 sustained I/O, and hardware inventory | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; q029 p020 and final RTL8156 milestone complete; p021 ready for a Queue proposal | `ws004-p010`--`p015`, `p018`, p020 complete; final Latitude-native RTL8156 DHCP/DNS/external fetch passes | Select p021, p016/p017, p019, or another dependency-ready hardware Phase in a future Queue | [WS004](ws004-hardware/ws.md) |
+| `ws003` | Dell Latitude 5320 bring-up | Active; USB/network milestone complete; p018 NVMe install/boot dependency-gated | Dell-style UEFI `LoadOptions` regression is covered by BR-T48; p018 is defined | Finish its earlier residual acceptance separately; run p018 only after WS004/WS013/WS019 prerequisites | [WS003](ws003-bringup/ws.md) |
+| `ws004` | Hardware expansion | Active; RTL8156 milestone complete; p021 and p022 ready for Queue proposals | `ws004-p010`--`p015`, `p018`, p020 complete; p022--p025 define the NVMe sequence | Select p022 for the next NVMe Queue, or another dependency-ready hardware Phase | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Active; q029 p001 complete; WLAN manually blocked | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Select reconnect/reliability or another dependency-ready networking Phase; WLAN remains blocked | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
@@ -191,12 +214,13 @@ actually warranted.
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
 | `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
-| `ws013` | CPAR container partitioning | Proposed; Boot v1 grammar fixed, Runtime topics manually blocked | `ws013-p001` is the only current Phase | Resolve bounded UEFI FAT LFN/parser/menu details until Runtime CPAR holds are released | [WS013](ws013-containers/ws.md) |
+| `ws013` | CPAR container partitioning | Proposed; Boot v1 native/overlay grammar fixed, Runtime topics manually blocked | `ws013-p001` is the only current Phase | Resolve bounded UEFI FAT LFN/parser/menu details needed by both CPAR and NVMe installation | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | Active; q026 ownership migration finished | p001--p008 complete; p009 source/build work implemented with runtime matrix uncleared | Resume p009's explicit runtime-only evidence when runners are available, or queue dependency-ready p010 | [WS018](ws018-kernel-architecture/ws.md) |
+| `ws019` | Installation and disk administration | Planning; p001 contract decisions open | No Phase complete; `/sbin/diskpart` and `/bin/zedinst` are planned | Finish p001, then extract and Queue the block-admin/GPT foundation before installer implementation | [WS019](ws019-installation/ws.md) |
 
 ## 4. Milestones
 
@@ -212,6 +236,7 @@ actually warranted.
 | M7 — Wayland desktop | A zedBSD Wayland compositor/DE runs on the supported input and graphics stacks | WS006, WS007, WS014 |
 | M8 — CPAR environments | Boot environments are manageable as files, and selected services and runtime environments use immutable images and an honestly documented isolation profile without displacing traditional services | WS002, WS003, WS012, WS013 |
 | M9 — Asymmetric hard real time | A declared μITRON-compatible profile runs resident work on statically reserved RT cores, communicates with POSIX through a bounded message bridge, and meets a published board-specific latency and limited failure-recovery contract | WS001, WS003, WS004, WS009, WS015 |
+| M10 — Latitude NVMe installation | The ordinary USB system installs through `/bin/zedinst`; installed `BOOTX64.EFI` boots both native UFS root and NVMe-backed overlay root from the internal SN740 | WS003, WS004, WS009, WS013, WS019 |
 | Continuous | POSIX debt and public documentation remain traceable | WS001, WS009, all producers |
 
 ## 5. Dependency map
@@ -258,6 +283,12 @@ WS013 Runtime CPAR -- WS012 service administration
                    +-- WS005 optional network profiles
                    +-- WS004 persistent image storage
 
+WS004 p022-p025 NVMe driver/read-only hardware acceptance
+  + WS013 UEFI FAT32/LFN + native/overlay boot.cfg translation
+  + WS019 block administration + diskpart + zedinst QEMU acceptance
+       -> WS003 p018 Latitude whole-disk install and native/overlay boot
+       -> WS009 USB-trial/install/recovery guide
+
 WS004 SMP/IRQ/timer/reset + WS001 POSIX boundary
   +-- WS015 μITRON asymmetric RT domain -- WS009 public API and timing contract
 
@@ -270,8 +301,10 @@ WS010 supplies host-side build and test scripting used by all workstreams.
 1. Preserve M0 and capture the exact Latitude hardware inventory.
 2. Implement QEMU xHCI USB-root boot and stable boot-device selection.
 3. Reach a Latitude USB-root login shell and establish diagnostics.
-4. Bring up USB Ethernet as the first physical network path, plus NVMe, evdev,
-   and USB HID.
+4. Bring up USB Ethernet as the first physical network path, then implement and
+   accept NVMe, the deliberately small GPT installer, Latitude NVMe boot,
+   evdev, and USB HID. USB trial use remains the recommended path until the
+   installer milestone is complete.
 5. Add the optional LFB Xzed path and the upstream Noct target/BeUI/JIT
    sequence when selected. Independently, after `MB-006` is released, add the
    RTL8822CE driver and pluggable WPA path.
@@ -315,7 +348,10 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | zedBSD GPU/Vulkan capability, object, and display-takeover profile | WS014 | Manually blocked; publishing `/dev/gpuN` UAPI or transferring i915 ownership |
 | YAML `/etc/rc.conf` schema and versioned init status/control protocol | WS012 | Resolved and complete: q017 completed YAML/persistence; q018 completed typed `/run/init.sock` service and `ZSV1 HALT`/`POWEROFF`/`REBOOT` clients, argv/interactive administration, and production integration with no unversioned compatibility path |
 | x86 kernel boot-parameter contract | WS003/WS013 | Resolved and implemented by q015: `boot0`--`boot3`, exclusive `rootpart` or explicit overlay root/data, `swap0`--`swap3`, and `init`; BR-T46 passes all 31 four-platform QEMU cells |
-| UEFI Boot CPAR `boot.cfg`/LFN/menu contract | WS013 | Section grammar maps to the common parameter contract; freeze bounded FAT/parser/menu details before implementation; legacy PC/AT and PC-98 menus are excluded |
+| UEFI Boot CPAR `boot.cfg`/LFN/menu contract | WS013 | Native sections use `rootpart`; overlay sections use `rootfs` plus `datafs`; freeze bounded FAT/parser/menu details before implementation; legacy PC/AT and PC-98 menus are excluded |
+| NVMe partition naming | WS004/WS019 | Resolved by the existing one-based disk contract: namespace is `/dev/nvme0n1`, first partition is `p1`; the earlier `p0` example is not a new ABI |
+| Installer v1 layouts and existing-partition mutation | WS019 p001 | Freeze exact GPT/ESP/UFS/swap layout and type GUIDs, target formatting, selected-filesystem replacement rules, source artifacts, confirmation, and recovery before any destructive command enters a Queue |
+| Installer block administration UAPI | WS019 p001/p002 | Add 64-bit geometry and raw offsets, exactly-once sector writes, stable whole/partition identity, parent ranges, exclusive mutation refusal for mounted/swap descendants, flush, and safe rescan before `diskpart` |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
 | Confirmed-commit implementation bounds | WS011 | Public semantics are fixed: interactive only, explicit timeout, delayed `/etc/net.conf` write, ordinary `commit` confirms, and DHCP is reacquired; freeze timeout maximum, lock path, and diagnostic bounds before implementation |
 | Authoritative Noct repository, build sequence, and revision | WS008 | Resolved by q022 and refined by q023: official main is `awemorris/NoctLang`; zedBSD tracks only `userland/noct/Makefile`, which clones and builds pinned commit `c1e4e0fcdbb7b8cdf1705601b13d57b787c61621` under `userland/noct/NoctLang` |
@@ -368,6 +404,9 @@ Stop the active Phase and update its state before changing the plan when:
 - QEMU cannot model the required hardware and no safe test double, passthrough,
   or physical diagnostic path exists;
 - USB root requires a boot/root architecture change outside the active Phase;
+- the Latitude firmware cannot boot the deliberately selected GPT/ESP layout,
+  or safe NVMe installation requires preserving/resizing an
+  unknown existing filesystem;
 - a requested compatibility target conflicts with an explicit zedBSD design
   policy.
 - a hard-real-time or POSIX-crash-survival claim cannot be supported by the

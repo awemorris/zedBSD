@@ -67,6 +67,7 @@ than assumed here.
 | DOC-31 | Planned | Kernel parameter reference | Parser/default audit | Every documented parameter cites parser/default and unknown-key behavior |
 | DOC-32 | Planned | Boot filesystem plus loopback-root guide | Boot/root implementation | QEMU procedure reaches the intended root reproducibly |
 | DOC-33 | Planned | Native UFS-root guide | Stable native storage drivers | QEMU and supported hardware procedures are explicit and safe |
+| DOC-34 | Planned | USB trial and NVMe installation guide | WS019 QEMU acceptance, WS003 p018 | USB-first evaluation, destructive whole-disk warnings, `diskpart`/`zedinst`, native/overlay boot, and recovery steps match the released tools |
 | DOC-40 | Complete | zedBSD init, rc.conf, service.d, fd 3 readiness, and shutdown model | Phase 11–20 implementation | Boot/service/shutdown examples match tested behavior |
 | DOC-50 | Planned | `/dev/console` HAL-bridge reference | IN migration state | Text/input/framebuffer roles and deprecated interfaces are accurate |
 | DOC-51 | Planned | `/dev/graphics` HAL-bridge reference | GFX takeover design | Framebuffer, mmap/ioctl, ownership, and GPU takeover are specified |

@@ -7,7 +7,8 @@ WSID: `ws003`
 Status: active; `ws003-p004` through `ws003-p009` complete in q013; q014
 `ws003-p010` and physical U3 complete through BR-T41; q015 completed `p011`
 through `p015`; q023 completed `ws003-p016`; `ws003-p017` corrects the
-post-q027 physical UEFI `LoadOptions` regression and awaits one physical boot
+post-q027 physical UEFI `LoadOptions` regression and awaits one physical boot;
+`ws003-p018` is the dependency-gated final Latitude NVMe install/boot milestone
 
 Parent: [master plan](../master.md)
 
@@ -47,6 +48,7 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p015` | [four-platform boot-parameter acceptance](phase015-x86-parameter-acceptance/phase.md) | Completed (`q015`, 2026-08-27) | BR-T46 passes 31/31 production-loader cells: PC/AT 7, PC-98 6, amd64 BIOS 9, and amd64 UEFI 9 |
 | `ws003-p016` | [static image boot parameters and Python-regression removal](phase016-boot-parameter-header-dependency/phase.md) | Completed (`q023`, 2026-08-28) | BR-T47 and a fresh BR-T46 pass: one maintained definition feeds all x86 loaders and the kernel fallback; generated inputs, Python, and stale cross-build state are absent |
 | `ws003-p017` | [UEFI LoadOptions firmware compatibility](phase017-uefi-load-options-compatibility/phase.md) | QEMU complete; physical acceptance pending | BR-T48 covers Dell-style whole-descriptor `LoadOptions`, length-delimited text, opaque fallback, and the actual loaded-image entry path |
+| `ws003-p018` | [Latitude NVMe installation and boot](phase018-latitude-nvme-install-boot/phase.md) | Planned; dependency-gated | Install from the ordinary USB image, then boot installed `BOOTX64.EFI` with native UFS root and NVMe-backed overlay root |
 
 `ws003-p003` was the sole authorized item in q012. Its physical result closes
 the PCI/BAR/capability boundary and extracts the first device-enumeration stop
@@ -89,14 +91,17 @@ the affected regressions without reopening the p011--p015 public contract.
 - Reach a stable init/login shell while continuing to use the intended USB
   mass-storage root.
 - Establish usable diagnostics and at least one physical network path.
+- Install from the ordinary USB system onto the Latitude's internal NVMe and
+  boot both native-root and overlay-root configurations through UEFI.
 
 ## WS completion conditions
 
 WS003 is complete when USB boot reaches tier U5 in both the declared QEMU matrix
 and on the target laptop, the frozen integrated image reaches a usable shell on
 five consecutive final-acceptance cold boots, the root filesystem passes safe
-I/O tests, and one documented physical network path passes configuration and
-transfer tests.
+I/O tests, one documented physical network path passes configuration and
+transfer tests, and p018 installs then boots the internal NVMe in both declared
+root modes.
 
 Target: Dell Latitude 5320, Intel 11th generation platform
 
@@ -105,6 +110,8 @@ Target: Dell Latitude 5320, Intel 11th generation platform
 Boot a reproducible zedBSD USB image on the target laptop, retain the USB mass
 storage device as the root backing store, reach a stable login shell, establish
 a diagnostic path, and make at least one physical network interface usable.
+After that non-destructive base is stable, use the ordinary USB system to
+install to the internal NVMe and accept native-root plus overlay-root UEFI boot.
 
 The target name alone is insufficient to select drivers. The exact machine
 configuration and PCI/USB IDs are part of the first deliverable.
@@ -129,7 +136,7 @@ M1 requires U0–U5 in QEMU. M2 requires U0–U5 on the Latitude 5320.
 
 | ID | Status | Deliverable | Dependencies | Acceptance gate |
 | --- | --- | --- | --- | --- |
-| BR-00 | In progress; WLAN ID captured | Exact target inventory: BIOS, UEFI mode, Secure Boot state, CPU, GPU, xHCI, NVMe, WLAN, Ethernet/USB adapters, and IDs | Physical laptop | RTL8822CE `10ec:c822`/subsystem `10ec:c130` is recorded; remaining inventory is stored with commands and output summary |
+| BR-00 | In progress; WLAN and NVMe IDs captured | Exact target inventory: BIOS, UEFI mode, Secure Boot state, CPU, GPU, xHCI, NVMe, WLAN, Ethernet/USB adapters, and IDs | Physical laptop | RTL8822CE `10ec:c822`/subsystem `10ec:c130` and SanDisk SN740 NVMe `15b7:5015` are recorded; remaining inventory is stored with commands and output summary |
 | BR-01 | Planned | Reproducible USB image layout and safe write/verify procedure | Current build/image pipeline | A disposable image is generated twice consistently and its partitions/files are inspected |
 | BR-02 | Planned | QEMU boot through `qemu-xhci` and `usb-storage` | BR-01, xHCI work in HW track | U0–U5 pass in the declared BIOS/UEFI matrix |
 | BR-03 | Complete (`q015`) | Stable boot/root device selection rather than enumeration-order assumptions | Bootloader/kernel parameter review | BR-T46 UUID and PARTUUID cells pass on both amd64 firmware paths with the auxiliary disk enumerated first; the PC/AT root/swap alias is rejected before publication |
@@ -138,6 +145,7 @@ M1 requires U0–U5 in QEMU. M2 requires U0–U5 on the Latitude 5320.
 | BR-06 | In progress; U3 complete, one shell/X smoke boot passed | Latitude USB root through init/login/shell | BR-05, `ws003-p003`--`p010` | BR-T41 provisionally confirms U3 and a basic U4 path; BR-T31 sustained I/O and, after U4 is frozen, BR-T30 five consecutive shell boots remain |
 | BR-07 | Planned after device identification | The user's Realtek USB LAN adapter works as a host-mode physical network path | Exact USB VID:PID/controller family, WS004 driver, WS005 integration | The adapter reconnects and passes DHCP/static and transfer tests on the Latitude |
 | BR-08 | Planned | At least one working physical network path | BR-00, BR-06, relevant NET/HW item | DHCP or static configuration, ping, and data transfer pass on hardware |
+| BR-09 | Planned as `ws003-p018` | Install to and boot from the Latitude internal NVMe | WS004 p025, WS013 Boot CPAR loader work, WS019 p007 | One explicit whole-disk install followed by native and overlay UEFI boots; final frozen image passes the declared repeatability gate |
 
 ## 4. QEMU USB matrix
 

@@ -47,6 +47,7 @@ For example, `ws001-p009` is WS001 Phase 009.
 | `ws016` | Runtime swap control | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` linear-framebuffer fast path | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | [WS018](ws018-kernel-architecture/ws.md) |
+| `ws019` | Installation and disk administration | [WS019](ws019-installation/ws.md) |
 
 Status, interruption, resumption, and evidence rules are defined in
 [governance.md](governance.md).

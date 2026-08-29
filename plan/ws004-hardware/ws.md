@@ -5,7 +5,8 @@ Last updated: 2026-08-29
 WSID: `ws004`
 
 Status: active; `ws004-p020` deterministic CDC NCM hardening complete;
-`ws004-p021` planned and ready for a Queue proposal
+`ws004-p021` and the first NVMe Phase `ws004-p022` are ready for future Queue
+proposals
 
 Parent: [master plan](../master.md)
 
@@ -29,10 +30,12 @@ the first physical RTL8156 insertion, and the accepted follow-up published
 `ue0`. The broader asynchronous-TX/accounting decisions remain in p017.
 
 Resume point: q029 p020 and WS005 p001 are complete, including the final
-Latitude-native RTL8156 DHCP/DNS/external-fetch acceptance. p021 remains a
-ready but independent xHCI specification cleanup rather than a prerequisite
-for NCM. p019 remains an independent ECM baseline. p016 and the remaining
-asynchronous-TX/accounting portion of p017 stay later WS004 work.
+Latitude-native RTL8156 DHCP/DNS/external-fetch acceptance. The next storage
+goal is decomposed as p022--p025: QEMU NVMe discovery, I/O/lifecycle,
+acceptance, then a read-only Latitude SN740 checkpoint. p021 remains a ready
+but independent xHCI specification cleanup. p019 remains an independent ECM
+baseline. p016 and the remaining asynchronous-TX/accounting portion of p017
+stay later WS004 work.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -61,6 +64,10 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Planned independent baseline; not in q029 | Independent CDC ECM plus QEMU `usb-net` remains available for a future common-path comparison; real RTL8156 NCM carrier/DHCP/ping now passes through QEMU, so p019 is not the automatic response to a native xHCI-only failure |
 | [`ws004-p020`](phase020-cdc-ncm-deterministic-hardening/phase.md) | Complete (`q029` automatic software scope) | Valid sequences accept/resynchronize, malformed input preserves state, completions and rearms are bounded/fair, and the packet filter is programmed transactionally on open; focused and regression gates pass |
 | [`ws004-p021`](phase021-xhci-superspeed-interrupt-context/phase.md) | Planned; ready for Queue proposal; not queued | Encode legal SuperSpeed interrupt companion `wBytesPerInterval` as xHCI Max ESIT/Average TRB Length, reject malformed descriptors, and preserve every other endpoint context |
+| [`ws004-p022`](phase022-nvme-admin-identify/phase.md) | Planned; ready for Queue proposal | Standard PCI NVMe reset/admin queues/Identify publish one truthful read-only `/dev/nvme0n1` |
+| [`ws004-p023`](phase023-nvme-io-lifecycle/phase.md) | Planned; depends on p022 | One I/O queue provides bounded read/write/flush, timeout/reset, shutdown, and detach through the block layer |
+| [`ws004-p024`](phase024-nvme-qemu-acceptance/phase.md) | Planned; depends on p022/p023 | Disposable QEMU namespaces pass integrity, flush, reset, concurrency, GPT partition, and regression gates |
+| [`ws004-p025`](phase025-latitude-nvme-readonly/phase.md) | Planned physical checkpoint; depends on p024 | Latitude SN740 `15b7:5015` identifies and reads safely without modifying internal storage |
 
 ### MSI follow-up register
 
@@ -74,7 +81,7 @@ Shared tests: [WS004 test index](tests/README.md)
 q029, p020, and WS005 p001 are complete through final Latitude-native external
 fetch. p021 remains ready for a future Queue as an independent standards
 correction, not an active failure response. Later WS004 candidates are
-p016/p017, p019, HW-10/HW-11,
+p016/p017, p019, p022, HW-10/HW-11,
 HW-20/HW-21, and HW-30 when their inputs and acceptance environments are
 available.
 
@@ -126,8 +133,8 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-01 | Complete read-only QEMU milestone | xHCI host-controller support sufficient for storage and future HID | HW-00, existing USB core | QEMU xHCI enumeration, bounded media read, and reconnect pass; writable-root correctness is HW-02/p006 |
 | HW-02 | Complete automatic QEMU milestone; manual acceptance pending | Stable USB identity/discovery, writable overlay, bounded read-only rejection, and warm reboot | HW-01, block layer, approved selector decision | Revised HW-T12 500-copy gate passes; record the user's detailed manual acceptance separately before physical USB-root claims |
 | HW-03 | Complete (`q016`) | Checked PCI IRQ/controller lifetime for EHCI and UHCI detach; xHCI is already converted and is outside this Phase | HW-00, checked PCI IRQ API from q015 | Busy/error removal retains all ownership; retry and final detach host fixtures plus i386 builds pass |
-| HW-10 | Planned | NVMe controller, admin/I/O queues, namespaces, and block integration | HW-00 | QEMU NVMe install/mount/I/O/reset tests pass |
-| HW-11 | Planned | NVMe verification on the Latitude controller | HW-10, BR-00 | Identify/read-only first, then disposable-range I/O and stress without corruption |
+| HW-10 | Planned as `ws004-p022`--`p024` | NVMe controller, admin/I/O queues, namespace naming, block integration, and disposable QEMU acceptance | HW-00 | QEMU NVMe identify/read/write/flush/concurrency/reset and GPT partition tests pass |
+| HW-11 | Planned as `ws004-p025` plus WS003 p018 | Read-only SN740 verification before the separately confirmed destructive install/boot acceptance | HW-10, BR-00, WS019 | Identify/read-only first; writes occur only through the explicitly confirmed installer Phase |
 | HW-12 | Active (`q029` p020 hardening; q028 bind complete) | Independent CDC NCM class driver on the common USB/xHCI/net-device lifetime foundations; Union-associated NCM does not require an IAD; deterministic valid-sequence recovery, bounded completion work, and post-alternate open filtering precede one physical data check | HW-01 | p020 automatic gates pass, then WS005 proves or precisely bounds carrier/static/DHCP traffic on the Latitude RTL8156 |
 | HW-13 | `ws004-p019` planned fallback | Independent standards-based CDC ECM driver and QEMU `usb-net` common-path baseline; no speculative shared ECM/NCM backend | HW-01, HW-12 foundations, NET-00, failed q029 physical discriminator | If needed after q029, QEMU selects ECM, publishes `ue0`, passes static/DHCP/ping in IDE and concurrent USB-storage topologies, and preserves detach/reconnect ownership |
 | HW-20 | Manually blocked (`MB-006`) | RTL8822CE (`10ec:c822`, subsystem `10ec:c130`) architecture and native driver | BR-00, HW-00, firmware packaging policy, explicit release | Scan, authenticate, associate, and exchange data on hardware |
@@ -136,17 +143,21 @@ implemented initially, the security and addressability limitation is explicit.
 
 ## 4. NVMe sequence
 
-1. Specify controller ownership, queue memory, PRP handling, namespace mapping,
-   flush semantics, timeouts, and reset behavior.
-2. Implement identify and read-only namespace discovery.
-3. Add block I/O, flush, concurrent queues, bounds checks, and error recovery.
-4. Test using QEMU's NVMe device with disposable images, including power-cycle
-   and reset simulations available in the harness.
-5. On the laptop, begin with controller identification and read-only access.
-   Destructive tests require an explicitly disposable namespace or device.
+1. `ws004-p022` implements bounded controller reset, one admin queue, Identify,
+   one 512-byte namespace, one message interrupt, and `/dev/nvme0n1` naming.
+2. `ws004-p023` adds one I/O queue, bounce-buffer PRPs, read/write/flush,
+   timeout/reset, shutdown, and detach without pretending that the current DMA
+   layer supplies scatter/gather or IOMMU isolation.
+3. `ws004-p024` runs integrity, concurrency, flush, reset, power-cycle, GPT
+   partition, IDE, and USB-root gates using disposable QEMU images.
+4. `ws004-p025` identifies and reads the Latitude SN740 (`15b7:5015`) without
+   modifying it.
+5. Destructive physical writes occur only later through WS019's explicit
+   installer safety contract and WS003 p018 acceptance.
 
-Native UFS root on NVMe is a later acceptance case after the driver is stable;
-it is not needed to prove the initial USB-root milestone.
+Native UFS root and file-backed overlay root on NVMe are end-to-end installer
+acceptance cases after the driver is stable; they are not part of the initial
+USB-root milestone or the read-only hardware checkpoint.
 
 ## 5. WLAN sequence
 

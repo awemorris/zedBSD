@@ -59,8 +59,9 @@ Runtime CPAR implementation.
 - UEFI FAT16/FAT32 and VFAT long-filename boot discovery, the fixed `boot.cfg`
   v1 environment sections, timed default, and complete-section keyboard
   selection;
-- Boot CPAR selection of `rootfs-*.img`, a writable `datafs` image, and the
-  shared swap file while retaining the initial fixed `VMUNIX.X64` kernel name;
+- Boot CPAR selection of either a native `rootpart` or a `rootfs-*.img` plus
+  writable `datafs` image, and a shared swap source, while retaining the
+  initial fixed `VMUNIX.X64` kernel name;
 - process-root, mount, process-visibility, signal, device, IPC, and network
   isolation profiles for Runtime CPAR;
 - a two-layer read-only Runtime CPAR root composed from base and application
@@ -126,6 +127,10 @@ complete.
 - The base system remains available from an immutable `rootfs-*.img`; multiple
   versioned roots and named writable data images may coexist on one boot
   filesystem. Versioned-kernel selection is not part of Boot CPAR v1.
+- A complete section selects exactly one root mode: `rootpart` for a native
+  filesystem, or both `rootfs` and `datafs` for an overlay. The loader maps the
+  fields to the already implemented kernel parameters rather than adding a
+  new handoff.
 - Runtime CPAR uses exactly two read-only image roles, `base` and `app`.
   Application state is written only through explicitly mounted writable data
   directories; the rest of the composed root remains read-only.
@@ -157,16 +162,16 @@ datafs=boot0:datafs-1.0.0.img
 swap=boot0:swapfile
 
 [zedBSD 0.8.0]
-rootfs=boot0:rootfs-0.8.0.img
-datafs=boot0:datafs-0.8.0.img
+rootpart=/dev/nvme0n1p2
 swap=boot0:swapfile
 ```
 
-The selected locators map to the implemented textual `overlay-root=`,
-`overlay-data=`, and `swap0=` contract. `boot0` is the loader-origin FAT
-filesystem unless explicitly overridden; `boot1`--`boot3` allow later named
-filesystems. No CPAR-specific binary handoff is added. The implemented common
-kernel contract is
+An overlay section maps `rootfs`, `datafs`, and `swap` to the implemented
+textual `overlay-root=`, `overlay-data=`, and `swap0=` contract. A native
+section maps `rootpart` and `swap` to `rootpart=` and `swap0=` and may not also
+contain `rootfs` or `datafs`. `boot0` is the loader-origin FAT filesystem unless
+explicitly overridden; `boot1`--`boot3` allow later named filesystems. No
+CPAR-specific binary handoff is added. The implemented common kernel contract is
 [documented here](../../docs/reference/kernel-boot-parameters.md). Boot CPAR
 still must add UEFI FAT32/VFAT long-filename lookup, the bounded `boot.cfg`
 parser and menu, and translation of the selected complete section into that
