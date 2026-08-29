@@ -16,6 +16,8 @@ boot_timeout=${BOOT_TIMEOUT_SECONDS:-120}
 command_timeout=${COMMAND_TIMEOUT_SECONDS:-120}
 cell_timeout=${CELL_TIMEOUT_SECONDS:-420}
 key_delay=${KEY_DELAY_SECONDS:-0.015}
+guest_device=${NVME_GUEST_DEVICE:-/dev/nvme0n1}
+namespace_initializer=${NVME_NAMESPACE_INITIALIZER:-}
 low_offset=8388608
 high_offset=4294971392
 stress_offset=4296015872
@@ -33,6 +35,10 @@ second boot verifies both patterns after QEMU/controller restart.
 
 When OUTPUT-DIRECTORY is omitted, mktemp uses TMPDIR. Existing non-empty output
 directories are rejected. Production disk images are never booted directly.
+
+NVME_GUEST_DEVICE may select a published partition such as /dev/nvme0n1p1.
+NVME_NAMESPACE_INITIALIZER may name an executable called once with the newly
+created sparse namespace path before either QEMU boot.
 EOF
 }
 
@@ -56,6 +62,14 @@ case $key_delay in
 	exit 2
 	;;
 esac
+[[ $guest_device =~ ^/dev/[a-z0-9._/-]+$ ]] || {
+	echo "NVME_GUEST_DEVICE is not a sendkey-safe /dev path" >&2
+	exit 2
+}
+if [[ -n $namespace_initializer && ! -x $namespace_initializer ]]; then
+	echo "NVME_NAMESPACE_INITIALIZER is not executable: $namespace_initializer" >&2
+	exit 2
+fi
 
 for command in "$qemu" awk cp date find make mkdir mktemp rg sed sha256sum \
 	sleep tail timeout tr truncate; do
@@ -172,6 +186,8 @@ printf 'case\tresult\tevidence\n' >"$results"
 	printf 'stress_offset=%s\n' "$stress_offset"
 	printf 'concurrent_offset=%s\n' "$concurrent_offset"
 	printf 'guest_flush=open-pwrite-fsync-pread-compare on raw descriptor\n'
+	printf 'guest_device=%s\n' "$guest_device"
+	printf 'namespace_initializer=%s\n' "${namespace_initializer:--}"
 } >"$metadata"
 
 if ! timeout --foreground --kill-after=10 "${build_timeout}s" \
@@ -197,6 +213,9 @@ printf 'build\tpass\tbuild.log\n' >>"$results"
 
 cp --reflink=auto --sparse=always "$source_image" "$run_boot"
 truncate -s 5368709120 "$namespace"
+if [[ -n $namespace_initializer ]]; then
+	"$namespace_initializer" "$namespace" >>"$build_log" 2>&1
+fi
 
 marker_count()
 {
@@ -281,21 +300,21 @@ controller_body()
 	send_text '' || return 1
 	wait_for_pattern "$shell_prompt" "$guest_log" "$command_timeout" \
 		$((shell_before + 1)) || return 1
-	send_shell "/usr/bin/nvme-io-guest $mode /dev/nvme0n1 $low_offset" || {
+	send_shell "/usr/bin/nvme-io-guest $mode $guest_device $low_offset" || {
 		echo "low-offset helper timeout" >"$controller_result"
 		return 1
 	}
-	send_shell "/usr/bin/nvme-io-guest $mode /dev/nvme0n1 $high_offset" || {
+	send_shell "/usr/bin/nvme-io-guest $mode $guest_device $high_offset" || {
 		echo "high-offset helper timeout" >"$controller_result"
 		return 1
 	}
 	local stress_mode=stress-$mode
-	send_shell "/usr/bin/nvme-io-guest $stress_mode /dev/nvme0n1 $stress_offset" || {
+	send_shell "/usr/bin/nvme-io-guest $stress_mode $guest_device $stress_offset" || {
 		echo "phase-wrap stress helper timeout" >"$controller_result"
 		return 1
 	}
 	local concurrent_mode=concurrent-$mode
-	send_shell "/usr/bin/nvme-io-guest $concurrent_mode /dev/nvme0n1 $concurrent_offset" || {
+	send_shell "/usr/bin/nvme-io-guest $concurrent_mode $guest_device $concurrent_offset" || {
 		echo "concurrent helper timeout" >"$controller_result"
 		return 1
 	}
@@ -332,7 +351,7 @@ validate_cell()
 	}
 	for offset in "$low_offset" "$high_offset"; do
 		for marker in \
-		    "^HW-T20 NVME-IO BEGIN mode=$mode device=/dev/nvme0n1 offset=$offset$" \
+		    "^HW-T20 NVME-IO BEGIN mode=$mode device=$guest_device offset=$offset$" \
 		    "^HW-T20 NVME-IO READBACK bytes=4096 offset=$offset$" \
 		    "^HW-T20 NVME-IO PASS mode=$mode offset=$offset$"; do
 			[[ $(marker_count "$marker" "$log") -eq 1 ]] || {
@@ -352,7 +371,7 @@ validate_cell()
 		fi
 	done
 	for marker in \
-	    "^HW-T20 NVME-IO BEGIN mode=$stress_mode device=/dev/nvme0n1 offset=$stress_offset$" \
+	    "^HW-T20 NVME-IO BEGIN mode=$stress_mode device=$guest_device offset=$stress_offset$" \
 	    "^HW-T20 NVME-IO STRESS-READBACK commands=96 bytes=393216 offset=$stress_offset$" \
 	    "^HW-T20 NVME-IO PASS mode=$stress_mode offset=$stress_offset$"; do
 		[[ $(marker_count "$marker" "$log") -eq 1 ]] || {
@@ -371,7 +390,7 @@ validate_cell()
 		done
 	fi
 	for marker in \
-	    "^HW-T20 NVME-IO BEGIN mode=$concurrent_mode device=/dev/nvme0n1 offset=$concurrent_offset$" \
+	    "^HW-T20 NVME-IO BEGIN mode=$concurrent_mode device=$guest_device offset=$concurrent_offset$" \
 	    "^HW-T20 NVME-IO CONCURRENT-READBACK workers=4 commands=128 bytes=524288 offset=$concurrent_offset$" \
 	    "^HW-T20 NVME-IO PASS mode=$concurrent_mode offset=$concurrent_offset$"; do
 		[[ $(marker_count "$marker" "$log") -eq 1 ]] || {

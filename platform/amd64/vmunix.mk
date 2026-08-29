@@ -85,7 +85,8 @@ AMD64_KERNEL_SOURCES := \
 	$(AMD64_NVME_SOURCES) \
 	src/drivers/pcat-ide.c src/drivers/dp8390.c \
 	src/drivers/pcat-ne2000.c src/drivers/hid/ps2-mouse.c \
-	src/drivers/disklabel/mbr.c src/kern/platform/pcat.c \
+	src/drivers/disklabel/mbr.c src/drivers/disklabel/gpt.c \
+	src/drivers/disklabel/pcat-auto.c src/kern/platform/pcat.c \
 	src/kern/panic.c src/kern/entry.c src/kern/clock.c \
 	src/kern/process-timer.c src/kern/klog.c \
 	src/kern/test-checkpoint.c \

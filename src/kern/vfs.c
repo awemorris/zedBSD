@@ -858,10 +858,14 @@ kern_vfs_init(const struct boot_handoff *handoff,
 			    partition_create_disk(&entries[slot]) != 0)
 				continue;
 			VFS_LOG(
-			    "vfs: %s partition %u start=%u data=%u blocks=%u\n",
-			    physical[i]->d_name, (unsigned)slot + 1U,
+			    "vfs: %s partition %u start=%08X:%08X "
+			    "data=%08X:%08X blocks=%08X:%08X\n",
+			    physical[i]->d_name, entries[slot].p_index + 1U,
+			    (uint32_t)(entries[slot].p_start_block >> 32),
 			    (uint32_t)entries[slot].p_start_block,
+			    (uint32_t)(entries[slot].p_data_block >> 32),
 			    (uint32_t)entries[slot].p_data_block,
+			    (uint32_t)(entries[slot].p_block_count >> 32),
 			    (uint32_t)entries[slot].p_block_count);
 			if (physical[i] == boot_physical &&
 			    ((handoff->version ==

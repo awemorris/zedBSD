@@ -10,7 +10,7 @@ disposable build/QEMU evidence belongs under `../temp/` and remains untracked.
 | --- | --- | --- |
 | KA-T001 | p001 | Every supported architecture resolves sources only below `src/drivers/`; no root `drivers/` dependency remains |
 | KA-T002 | p001 | `make -j16` produces the supported amd64, i386 PC/AT, i386 PC-98, sun4u, rpi4, and x68k artifacts represented by current manifests |
-| KA-T010 | p002 | [`run-disklabel-host-test.sh`](run-disklabel-host-test.sh) links the production MBR/GPT, PC-98 native/auto, Sun, and X68k parsers against deterministic disk images and preserves count, indexes, extents, flags, UUIDs, and labels across relocation |
+| KA-T010 | p002 | [`run-disklabel-host-test.sh`](run-disklabel-host-test.sh) links the production legacy MBR, PC-98 native/auto, Sun, and X68k parsers against deterministic disk images, preserves count, indexes, extents, flags, UUIDs, and labels across relocation, and proves that MBR no longer decodes GPT identity |
 | KA-T011 | p002 | [`run-platform-layout-audit.sh`](run-platform-layout-audit.sh) finds one C file per platform, no common platform source, no historical platform directory or header, driver-owned disk labels, and graphics-owned fonts |
 | KA-T020 | p003 | [`run-ufs-independence-host-test.sh`](run-ufs-independence-host-test.sh) compiles and links UFS1 and UFS2 superblock/endian boundaries independently, preserves little-/big-endian decode, rejects malformed metadata, and rejects cross-format implementation symbols |
 | KA-T021 | p003 | [`run-ufs2-consistency-host-test.sh`](run-ufs2-consistency-host-test.sh) exercises UFS2-owned journal commit/replay/rejection and snapshot create/preserve/reopen/read/delete behavior without UFS1 or retired common-UFS symbols |
@@ -32,6 +32,12 @@ disposable build/QEMU evidence belongs under `../temp/` and remains untracked.
 The supported build gate is `make -j16`; the aggregate `make check` target and
 repository `.internal/` material are excluded.  amd64 runtime tests use
 `qemu-system-x86_64`; destructive image tests use disposable copies.
+
+Strict PC/AT GPT semantics added after the source-ownership move are exercised
+by WS004 HW-T20's production parser fixture rather than duplicated here.
+KA-T011 nevertheless audits `gpt.c` and `pcat-auto.c` as architecture-neutral
+disk-label owners and requires PC/AT to select the strict GPT/legacy-MBR
+dispatcher.
 
 KA-T040's runner keeps `src/kern/exec-prepare.c` as its default so the same
 command records the pre-merge baseline in the pre-merge tree.  After p005

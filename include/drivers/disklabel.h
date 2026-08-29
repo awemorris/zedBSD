@@ -12,6 +12,8 @@
 #define X68K_PARTITION_COUNT		8U
 
 extern const struct partition_scheme partition_scheme_mbr;
+extern const struct partition_scheme partition_scheme_gpt;
+extern const struct partition_scheme partition_scheme_pcat_auto;
 extern const struct partition_scheme partition_scheme_pc98;
 extern const struct partition_scheme partition_scheme_pc98_auto;
 extern const struct partition_scheme partition_scheme_sun;

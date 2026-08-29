@@ -43,13 +43,6 @@ put_le32(uint8_t *p, uint32_t value)
 }
 
 static void
-put_le64(uint8_t *p, uint64_t value)
-{
-	put_le32(p, (uint32_t)value);
-	put_le32(p + 4U, (uint32_t)(value >> 32));
-}
-
-static void
 put_be16(uint8_t *p, uint16_t value)
 {
 	p[0] = (uint8_t)(value >> 8);
@@ -189,16 +182,9 @@ test_mbr(void)
 }
 
 static void
-test_hybrid_gpt_identity(void)
+test_mbr_does_not_decode_gpt_identity(void)
 {
-	static const uint8_t guid[16] = {
-		0x33, 0x22, 0x11, 0x00, 0x55, 0x44, 0x77, 0x66,
-		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
-	};
-	static const char label[] = "SYSTEM";
 	struct partition entries[ENTRY_CAPACITY];
-	uint8_t *header, *table;
-	unsigned i;
 	int count;
 
 	reset_medium();
@@ -207,26 +193,13 @@ test_hybrid_gpt_identity(void)
 	put_le32(medium.bytes + 0x1b8U, 0x01020304U);
 	mbr_entry(0, 0x80U, 0xefU, 128U, 64U);
 	mbr_entry(1, 0x00U, 0xeeU, 1U, DISK_SECTORS - 1U);
-	header = medium.bytes + SECTOR_SIZE;
-	memcpy(header, "EFI PART", 8U);
-	put_le64(header + 72U, 2U);
-	put_le32(header + 80U, 4U);
-	put_le32(header + 84U, 128U);
-	table = medium.bytes + 2U * SECTOR_SIZE;
-	memcpy(table + 16U, guid, sizeof(guid));
-	put_le64(table + 32U, 128U);
-	put_le64(table + 40U, 191U);
-	for (i = 0; i < sizeof(label) - 1U; i++) {
-		table[56U + i * 2U] = (uint8_t)label[i];
-		table[57U + i * 2U] = 0;
-	}
 	memset(entries, 0xa5, sizeof(entries));
 	count = partition_scheme_mbr.scan(&partition_scheme_mbr, &disk, entries,
 	    ENTRY_CAPACITY);
 	CHECK(count == 4);
-	check_partition("hybrid-gpt", &entries[0], 0U, 128U, 128U, 64U,
-	    PARTITION_BOOTABLE | PARTITION_HAS_LABEL | PARTITION_HAS_UUID,
-	    "SYSTEM", "00112233-4455-6677-8899-aabbccddeeff");
+	check_partition("mbr-no-gpt-identity", &entries[0], 0U, 128U, 128U,
+	    64U, PARTITION_BOOTABLE | PARTITION_HAS_UUID, "mbr1",
+	    "01020304-01");
 	CHECK(entries[1].p_block_count == 0U);
 }
 
@@ -420,7 +393,7 @@ int
 main(void)
 {
 	test_mbr();
-	test_hybrid_gpt_identity();
+	test_mbr_does_not_decode_gpt_identity();
 	test_pc98_native_priority();
 	test_pc98_mbr_fallback();
 	test_pc98_default_native_fallback();
@@ -430,6 +403,6 @@ main(void)
 		printf("KA-T010: %u failure(s)\n", failures);
 		return 1;
 	}
-	puts("KA-T010: PASS (MBR/GPT, PC-98 native/auto, Sun, X68k)");
+	puts("KA-T010: PASS (MBR, PC-98 native/auto, Sun, X68k)");
 	return 0;
 }

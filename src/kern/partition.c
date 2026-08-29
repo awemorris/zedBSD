@@ -2,6 +2,7 @@
 #include "kern/partition.h"
 
 #include <errno.h>
+#include <limits.h>
 
 static const struct partition_scheme *active_scheme;
 static struct partition partitions[PARTITION_POOL_MAX];
@@ -28,8 +29,13 @@ int partition_scan(struct disk *disk, struct partition *entries,
 
 static int partition_name(struct partition *partition, char name[DISK_NAME_MAX])
 {
-	unsigned at = 0, number = partition->p_index + 1U;
+	char reverse[10U];
+	unsigned at = 0, count = 0, i, number;
 	const char *parent = partition->p_parent->d_name;
+
+	if (partition->p_index == UINT_MAX)
+		return EOVERFLOW;
+	number = partition->p_index + 1U;
 	while (parent[at] != '\0' && at + 1U < DISK_NAME_MAX)
 		name[at] = parent[at], at++;
 	if (at == 0)
@@ -39,14 +45,16 @@ static int partition_name(struct partition *partition, char name[DISK_NAME_MAX])
 			return ENAMETOOLONG;
 		name[at++] = 'p';
 	}
-	if (at + 1U >= DISK_NAME_MAX)
-		return ENAMETOOLONG;
-	if (number >= 10U) {
-		if (at + 2U >= DISK_NAME_MAX)
+	do {
+		if (count == sizeof(reverse))
 			return ENAMETOOLONG;
-		name[at++] = (char)('0' + number / 10U);
-	}
-	name[at++] = (char)('0' + number % 10U);
+		reverse[count++] = (char)('0' + number % 10U);
+		number /= 10U;
+	} while (number != 0U);
+	if (at + count >= DISK_NAME_MAX)
+		return ENAMETOOLONG;
+	for (i = 0; i < count; i++)
+		name[at++] = reverse[count - i - 1U];
 	name[at] = '\0';
 	return 0;
 }
@@ -66,8 +74,10 @@ int partition_create_disk(struct partition *source)
 	if (disk == NULL)
 		return ENOSPC;
 	error = partition_name(partition, disk->d_name);
-	if (error != 0)
+	if (error != 0) {
+		(void)disk_destroy(disk);
 		return error;
+	}
 	disk->d_flags = DISK_PARTITION |
 		(partition->p_parent->d_flags & DISK_READ_ONLY);
 	disk->d_block_size = partition->p_parent->d_block_size;
@@ -77,8 +87,12 @@ int partition_create_disk(struct partition *source)
 	disk->d_parent_offset = partition->p_data_block;
 	disk->d_data = partition;
 	error = disk_create(disk);
-	if (error != 0)
+	if (error != 0) {
+		/* disk_create() acquires the parent reference only on success. */
+		disk->d_parent = NULL;
+		(void)disk_destroy(disk);
 		return error;
+	}
 	partition->p_disk = disk;
 	source->p_disk = disk;
 	partitions_count++;

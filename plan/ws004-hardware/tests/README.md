@@ -30,6 +30,44 @@ QEMU/model and physical-hardware results are always separate evidence fields.
 
 ## HW-T20 NVMe I/O and lifecycle evidence
 
+The p024 strict GPT fixture links the production `gpt.c`, PC/AT selector, and
+legacy MBR parser.  Ordinary, ASan/UBSan, and compiler-analyzer runs cover
+512- and 4096-byte logical blocks, both valid copies, either-copy degradation,
+contradictory copies, header/table CRCs and geometry, authoritative hybrid
+selection, no fallback after any GPT evidence, pure-MBR fallback, all-entry
+validation before capacity failure, mixed-endian PARTUUID text, UTF-16LE and
+UTF-8 boundaries, and preserved sparse GPT slot indexes:
+
+```sh
+TMPDIR="$PWD/build/q030-tmp" \
+  plan/ws004-hardware/tests/run-gpt-host-test.sh
+TMPDIR="$PWD/build/q030-tmp" \
+  plan/ws004-hardware/tests/run-partition-publication-test.sh
+```
+
+The second production-source fixture continues from parsed metadata through
+partition publication.  It proves unbounded decimal GPT slot naming such as
+`nvme0n1p100`, the non-numeric-parent form `sda100`, and transactional cleanup
+after allocation, name, or registry-creation failure.
+
+The p024 QEMU harness constructs GPT sectors itself with the small host C tool;
+it neither depends on a host partitioning utility nor modifies a production
+image.  It extends the p023 raw-I/O runner through its explicit namespace
+initializer and guest-device hooks.  Two boots write, flush, and verify
+`/dev/nvme0n1p1`; a third boot attaches a separate namespace whose two GPT
+header CRCs are damaged, requires strict rejection with no partition
+publication, and still reaches login from the disposable IDE copy:
+
+```sh
+TMPDIR="$PWD/build/q030-tmp" \
+  plan/ws004-hardware/tests/qemu-nvme-gpt.sh
+```
+
+The ordinary IDE and xHCI USB-root regressions remain separate controls so a
+GPT failure cannot be hidden by changing the system-image transport.
+The retained q030 host/QEMU observations are in
+[q030 NVMe GPT evidence](q030-nvme-gpt-evidence.md).
+
 The p023 host fixtures exercise command encoding/status translation, 64-bit
 block-range arithmetic, and the private command/BIO/DMA ownership ledger under
 normal completion, timeout/reset, quarantine, shutdown, detach, and

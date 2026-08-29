@@ -4,9 +4,9 @@ Last updated: 2026-08-30
 
 QID: `q030`
 
-Queue status: in-progress
+Queue status: completed
 
-Queue finished: **No**
+Queue finished: **Yes — 2026-08-30**
 
 Authorization: after reviewing and refining the staged NVMe overlay installer
 plan, the user explicitly requested implementation on 2026-08-29. This Queue
@@ -32,14 +32,21 @@ storage driver.
 | --- | --- | --- | --- | --- |
 | 1 | `ws004-p022` | [Phase](ws004-hardware/phase022-nvme-admin-identify/phase.md) | completed | Standard PCI NVMe reset/admin queues/Identify publish exactly one truthful discovery-only `/dev/nvme0n1`; focused, build, QEMU, IDE, and USB gates pass |
 | 2 | `ws004-p023` | [Phase](ws004-hardware/phase023-nvme-io-lifecycle/phase.md) | completed | One bounded I/O queue provides read/write/flush and safe timeout/reset/shutdown/detach; focused/build/QEMU/IDE/USB gates pass |
-| 3 | `ws004-p024` | [Phase](ws004-hardware/phase024-nvme-qemu-acceptance/phase.md) | pending; next | Disposable QEMU integrity/lifecycle and strict primary/backup GPT partition gates pass |
+| 3 | `ws004-p024` | [Phase](ws004-hardware/phase024-nvme-qemu-acceptance/phase.md) | completed | Disposable QEMU integrity/lifecycle and strict primary/backup GPT partition gates pass |
 
-Current resume point: `ws004-p023` completed on 2026-08-30. Its retained
-[HW-T20 evidence](ws004-hardware/tests/q030-nvme-io-evidence.md) includes
-ordinary/sanitizer/analyzer fixtures, amd64 and i386 PC/AT builds, a
-disposable 5-GiB QEMU namespace with below/above-4-GiB descriptor flush and
-restart readback, SQ1/CQ1 wrap, four-worker concurrency, and IDE plus xHCI
-USB-root regressions. `ws004-p024` has not started.
+Final result: p022 through p024 completed on 2026-08-30. The retained
+[I/O evidence](ws004-hardware/tests/q030-nvme-io-evidence.md) and
+[strict-GPT evidence](ws004-hardware/tests/q030-nvme-gpt-evidence.md) cover
+ordinary/sanitizer/analyzer fixtures, amd64 and i386 PC/AT builds, disposable
+5-GiB raw and GPT QEMU namespaces, below/above-4-GiB descriptor flush and
+restart readback, SQ1/CQ1 wrap, four-worker concurrency, malformed-GPT
+fail-closed rejection, and IDE plus xHCI USB-root regressions.
+
+Next dependency-ready Queue: `q031`, grouping `ws013-p002`--`p003` followed by
+`ws019-p002`--`p005`. This keeps UEFI payload discovery, bounded `boot.cfg`
+translation, read-only disk administration, preflight, copy transaction, and
+QEMU installer acceptance together before the single physical
+`ws004-p025`/`ws003-p018` checkpoint.
 
 ## Dependency order
 

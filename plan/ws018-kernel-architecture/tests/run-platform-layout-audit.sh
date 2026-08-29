@@ -32,9 +32,11 @@ test "$actual_platform" = "$expected_platform" || {
 	exit 1
 }
 
-expected_disklabel='mbr.c
+expected_disklabel='gpt.c
+mbr.c
 pc98-auto.c
 pc98.c
+pcat-auto.c
 sun.c
 x68k.c'
 actual_disklabel=$(find "$disklabel_dir" -mindepth 1 -maxdepth 1 -printf '%f\n' |
@@ -59,7 +61,7 @@ done
 
 test -f "$repo_dir/include/drivers/disklabel.h" ||
 	fail "focused disk-label driver header is absent"
-for scheme in mbr pc98 pc98_auto sun x68k; do
+for scheme in mbr gpt pcat_auto pc98 pc98_auto sun x68k; do
 	grep -q "partition_scheme_$scheme" \
 		"$repo_dir/include/drivers/disklabel.h" ||
 		fail "partition_scheme_$scheme declaration is absent"
@@ -74,8 +76,8 @@ for platform in pcat pc98 rpi4 sun4u x68k; do
 	done
 done
 
-grep -q 'partition_set_scheme(&partition_scheme_mbr)' \
-	"$platform_dir/pcat.c" || fail "PC/AT no longer selects MBR"
+grep -q 'partition_set_scheme(&partition_scheme_pcat_auto)' \
+	"$platform_dir/pcat.c" || fail "PC/AT no longer selects strict GPT/MBR auto"
 grep -q 'partition_set_scheme(&partition_scheme_pc98_auto)' \
 	"$platform_dir/pc98.c" || fail "PC-98 no longer selects auto disk label"
 grep -q 'partition_set_scheme(&partition_scheme_mbr)' \

@@ -118,6 +118,8 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/drivers/pcat-ne2000.o \
 	$(BUILD)/drivers/hid/ps2-mouse.o \
 	$(BUILD)/drivers/disklabel/mbr.o \
+	$(BUILD)/drivers/disklabel/gpt.o \
+	$(BUILD)/drivers/disklabel/pcat-auto.o \
 	$(BUILD)/src/kern/platform/pcat.o \
 	$(BUILD)/src/kern/panic.o $(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PCAT_OBJS) $(KERN_OBJS) $(KERN_BLOCK_IDENTITY_OBJS) \

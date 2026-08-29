@@ -45,7 +45,7 @@ kern_platform_init(const struct boot_handoff *handoff,
 	if (handoff == 0 || devices == 0 || capacity == 0 ||
 	    handoff->magic != ZEDBSD_HANDOFF_MAGIC ||
 	    handoff->version != ZEDBSD_HANDOFF_VERSION_MULTIBOOT) return 0;
-	partition_set_scheme(&partition_scheme_mbr);
+	partition_set_scheme(&partition_scheme_pcat_auto);
 	disk_registry_reset();
 	if (drv_pci_init() != 0)
 		hal_printf("pci: core initialization failed\n");

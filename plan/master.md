@@ -25,11 +25,13 @@ The next hardware/install north star is deliberately staged:
 Native-root installation, GPT creation, and filesystem creation follow as a
 separate milestone after this non-formatting path is accepted.
 
-The current [Queue Book](queue.md) is active `q030`. Its first two items,
-`ws004-p022` and `ws004-p023`, completed the QEMU NVMe
-controller/admin/Identify foundation and the bounded I/O/read/write/flush,
-concurrency, timeout/reset, shutdown, and detach lifecycle; strict GPT and the
-final disposable acceptance matrix are next in p024. The
+The current [Queue Book](queue.md) records completed `q030`.
+`ws004-p022` through `ws004-p024` completed the QEMU NVMe
+controller/admin/Identify foundation, bounded I/O/read/write/flush lifecycle,
+strict primary/backup GPT discovery, and the final disposable acceptance
+matrix. The next dependency-ready Queue is `q031`: `ws013-p002`--`p003`
+followed by `ws019-p002`--`p005`, before one combined physical
+`ws004-p025`/`ws003-p018` checkpoint. The
 previous Queue is [archived here](queue-q029.md). `ws004-p020` is
 complete: fully valid NCM NTBs accept and resynchronize any sequence, malformed
 input preserves state, completion work is budgeted, and packet-filter
@@ -220,7 +222,7 @@ actually warranted.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
 | `ws003` | Dell Latitude 5320 bring-up | Active; USB/network milestone complete; p018 overlay-NVMe install/boot dependency-gated | Dell-style UEFI `LoadOptions` regression is covered by BR-T48; p018 and later native p019 are defined | Run p018 only after WS004/WS013/WS019 overlay prerequisites; retain p019 for the later native-install milestone | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; `q030` NVMe software sequence in progress | `ws004-p010`--`p015`, `p018`, p020, and p022--p023 complete; p024 is next | Complete q030 p024 strict-GPT/disposable QEMU acceptance, then select the read-only p025 Latitude checkpoint | [WS004](ws004-hardware/ws.md) |
+| `ws004` | Hardware expansion | Active; `q030` NVMe software sequence complete | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Complete automatic WS013/WS019 prerequisites, then run the read-only p025 Latitude checkpoint with the later installed-boot acceptance | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Active; q029 p001 complete; WLAN manually blocked | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Select reconnect/reliability or another dependency-ready networking Phase; WLAN remains blocked | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
