@@ -29,8 +29,9 @@ concurrent I/O, flush, reset, and regression boot paths on disposable media.
 - guest power cycle followed by complete data verification;
 - unchanged amd64 IDE and xHCI USB-storage boot to `login:`.
 
-The later installer and `boot.cfg` Phases own native-root and overlay-root boot
-from NVMe. This Phase proves the driver and partition substrate only.
+WS013/WS019 first own the existing-FAT overlay install/boot. Native-root and
+destructive GPT administration follow separately. This Phase proves the driver
+and partition substrate only.
 
 ## GPT substrate boundary
 

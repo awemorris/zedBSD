@@ -134,7 +134,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-02 | Complete automatic QEMU milestone; manual acceptance pending | Stable USB identity/discovery, writable overlay, bounded read-only rejection, and warm reboot | HW-01, block layer, approved selector decision | Revised HW-T12 500-copy gate passes; record the user's detailed manual acceptance separately before physical USB-root claims |
 | HW-03 | Complete (`q016`) | Checked PCI IRQ/controller lifetime for EHCI and UHCI detach; xHCI is already converted and is outside this Phase | HW-00, checked PCI IRQ API from q015 | Busy/error removal retains all ownership; retry and final detach host fixtures plus i386 builds pass |
 | HW-10 | Planned as `ws004-p022`--`p024` | NVMe controller, admin/I/O queues, namespace naming, block integration, and disposable QEMU acceptance | HW-00 | QEMU NVMe identify/read/write/flush/concurrency/reset and GPT partition tests pass |
-| HW-11 | Planned as `ws004-p025` plus WS003 p018 | Read-only SN740 verification before the separately confirmed destructive install/boot acceptance | HW-10, BR-00, WS019 | Identify/read-only first; writes occur only through the explicitly confirmed installer Phase |
+| HW-11 | Planned as `ws004-p025` plus WS003 p018 | Read-only SN740 verification before the separately confirmed existing-FAT overlay install/boot acceptance | HW-10, BR-00, WS019 | Identify/read-only first; file writes occur only through the explicitly confirmed installer Phase |
 | HW-12 | Active (`q029` p020 hardening; q028 bind complete) | Independent CDC NCM class driver on the common USB/xHCI/net-device lifetime foundations; Union-associated NCM does not require an IAD; deterministic valid-sequence recovery, bounded completion work, and post-alternate open filtering precede one physical data check | HW-01 | p020 automatic gates pass, then WS005 proves or precisely bounds carrier/static/DHCP traffic on the Latitude RTL8156 |
 | HW-13 | `ws004-p019` planned fallback | Independent standards-based CDC ECM driver and QEMU `usb-net` common-path baseline; no speculative shared ECM/NCM backend | HW-01, HW-12 foundations, NET-00, failed q029 physical discriminator | If needed after q029, QEMU selects ECM, publishes `ue0`, passes static/DHCP/ping in IDE and concurrent USB-storage topologies, and preserves detach/reconnect ownership |
 | HW-20 | Manually blocked (`MB-006`) | RTL8822CE (`10ec:c822`, subsystem `10ec:c130`) architecture and native driver | BR-00, HW-00, firmware packaging policy, explicit release | Scan, authenticate, associate, and exchange data on hardware |
@@ -152,12 +152,13 @@ implemented initially, the security and addressability limitation is explicit.
    partition, IDE, and USB-root gates using disposable QEMU images.
 4. `ws004-p025` identifies and reads the Latitude SN740 (`15b7:5015`) without
    modifying it.
-5. Destructive physical writes occur only later through WS019's explicit
-   installer safety contract and WS003 p018 acceptance.
+5. Physical file writes occur only later through WS019's explicit no-format
+   installer contract and WS003 p018 acceptance; GPT/mkfs/native writes remain
+   still later work.
 
-Native UFS root and file-backed overlay root on NVMe are end-to-end installer
-acceptance cases after the driver is stable; they are not part of the initial
-USB-root milestone or the read-only hardware checkpoint.
+File-backed overlay root on NVMe is the first end-to-end installer acceptance
+after the driver is stable. Native UFS root follows separately; neither is
+part of the USB-root milestone or the read-only hardware checkpoint.
 
 ## 5. WLAN sequence
 

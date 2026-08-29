@@ -1,6 +1,6 @@
 # WS013 Phase 001: CPAR architecture discussion
 
-Last updated: 2026-08-27
+Last updated: 2026-08-29
 
 WSID: `ws013`
 
@@ -48,15 +48,16 @@ into bounded implementation Phases.
   remain directly visible and editable.
 - Legacy i386 PC/AT and PC-98 retain FAT16, the fixed legacy `boot.cfg`, and
   fixed image names. They do not implement CPAR Boot Menu.
-- `/boot/boot.cfg` contains a timed default plus named menu sections. Each
+- The payload FAT root `/boot.cfg` contains a timed default plus named menu
+  sections. When mounted at `/boot`, it appears as `/boot/boot.cfg`. Each
   section supplies either native `rootpart` or overlay `rootfs` plus `datafs`,
   and may supply `swap`. No separate CPAR manifest is introduced.
 - The initial menu selects one complete named section. It does not perform
   semantic version comparison or independently compose kernel/root/data at
   the keyboard. The explicit `default` key is authoritative.
-- The UEFI kernel filename remains the existing fixed `VMUNIX.X64` in the
-  initial Boot CPAR grammar. Versioned-kernel selection is outside v1 rather
-  than inferred from section titles.
+- The UEFI kernel pathname is fixed as `/vmunix` in the initial Boot CPAR
+  grammar. Versioned-kernel selection is outside v1 rather than inferred from
+  section titles.
 - There is no `cpar boot` command family. A running system administers Boot
   CPAR by ordinary file operations and direct `boot.cfg` editing under `/boot`.
 - File-backed image mounting remains a VFS abstraction; no public loop-device
@@ -110,23 +111,26 @@ booting a different environment.
 Selection uses the implemented common textual boot-parameter model. The loader
 translates an overlay section into `overlay-root=`, `overlay-data=`, and an
 optional `swap0=`; it translates a native section into `rootpart=` and an
-optional `swap0=`. `boot0` denotes the loader-origin FAT filesystem by default,
-and `boot1`--`boot3` may name additional FAT filesystems. No CPAR-specific
-handoff structure or ABI registry is introduced. The authoritative parameter
-contract is
+optional `swap0=`. For the installed two-partition path, the loader finds
+exactly one same-physical-disk non-ESP FAT32 containing `/vmunix` and
+`/boot.cfg`, then injects that partition's PARTUUID as explicit `boot0`.
+Missing or ambiguous matches fail visibly. Existing single-partition images
+may retain loader-origin `boot0`, and `boot1`--`boot3` may name additional FAT
+filesystems. No CPAR-specific handoff structure or ABI registry is introduced.
+The authoritative parameter contract is
 [kernel-boot-parameters.md](../../../docs/reference/kernel-boot-parameters.md).
 
 q015 closed the earlier common-kernel and transport gap: the parser, all four
 x86 transports, boot/root selection, configurable root/data paths,
 four-source file/raw swap, and init selection are implemented. Boot CPAR
 reuses that textual channel rather than creating a CPAR handoff format. Its
-remaining bootloader work is UEFI FAT32/VFAT long-filename access, a bounded
-`boot.cfg` parser and menu/default/timeout implementation, and translation
-of the selected complete section into the common parameter string.
+remaining bootloader work is split into p002 deterministic payload discovery
+and kernel loading, followed by p003 bounded `boot.cfg`
+parser/menu/default/timeout and selected-section translation.
 
 ## Scope
 
-- Boot CPAR file naming, discovery, the fixed v1 `boot.cfg` grammar, menu,
+- Boot CPAR file naming, discovery, the fixed v1 `/boot.cfg` grammar, menu,
   timeout, textual boot-parameter selection, and legacy-layout fallback;
 - future minimum Runtime CPAR isolation required before the word “container”
   is used;
@@ -200,7 +204,8 @@ part of the active discussion agenda until explicitly resumed.
       legacy fallback, and textual parameter model.
 - [x] Record the q015 common parser, four-x86 handoff, boot/root, swap, and
       init foundation that Boot CPAR will reuse.
-- [ ] Resolve the bounded Boot CPAR implementation details above.
+- [x] Assign the bounded initial Boot CPAR implementation details to p002 and
+      p003; Runtime details remain on their manual holds.
 - [ ] Manual hold `MB-002`: resolve the two-image root mechanism, writable data
       paths, and image lifetimes.
 - [ ] Manual hold `MB-002`: resolve service/runtime/PID 1 ownership and failure
@@ -209,10 +214,12 @@ part of the active discussion agenda until explicitly resumed.
       updates, and rollback.
 - [ ] Manual hold `MB-004`: resolve configuration/data binding and
       secret-handling rules.
-- [ ] Define host, focused-kernel, QEMU, and later hardware acceptance classes.
-- [ ] Split UEFI Boot CPAR implementation into ordered loader/configuration and
-      acceptance Phases; split Runtime/package Phases only after their holds.
-- [ ] Synchronize WS013, master dependencies, and WS009 documentation handoffs.
+- [x] Define the p002/p003 host and QEMU acceptance classes; physical installed
+      boot remains WS003 p018.
+- [x] Split UEFI Boot CPAR implementation into p002 payload discovery and p003
+      configuration/menu Phases; split Runtime/package Phases only after their
+      holds.
+- [x] Synchronize WS013, master dependencies, and WS019 installation handoffs.
 
 ## Acceptance
 
@@ -225,18 +232,17 @@ claim is accepted merely from a successful chroot demonstration.
 q015 establishes the common boot-parameter, four-x86 handoff, private
 boot-slot, root-mode, multi-source swap, and init-selection foundation that
 Boot CPAR needs. It does not implement Boot CPAR's FAT32/VFAT LFN lookup,
-`boot.cfg` parser, menu, or selected-section translation. The initial source
-audit also proves that private mount namespaces, public dynamic image
+`boot.cfg` parser, menu, or selected-section translation. WS013 p002/p003 now
+own that bounded Boot work. The initial source audit also proves that private
+mount namespaces, public dynamic image
 attachment, and the requested Runtime CPAR multi-layer composition are not
 current features. Discussion remains open.
 
 ## Interruption / resumption
 
-Resume the bounded UEFI FAT32/VFAT LFN, `boot.cfg` parser, menu, and
-selected-section translation details, then split Boot CPAR implementation
-Phases. Runtime namespace, Runtime CLI/build, and service-container package
-discussion remain on manual hold and must not enter a Queue until explicitly
-resumed.
+Queue p002 after its NVMe/GPT fixture dependencies, then p003. Runtime
+namespace, Runtime CLI/build, and service-container package discussion remain
+on manual hold and must not enter a Queue until explicitly resumed.
 
 ## Remaining debt and handoff
 

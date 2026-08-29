@@ -1,10 +1,10 @@
-# WS019 Phase 001: installer v1 product and safety contract
+# WS019 Phase 001: overlay installer-v1 contract
 
 Last updated: 2026-08-29
 
 Phase ID: `ws019-p001`
 
-Status: planned; discussion/design only; not ready for a Queue
+Status: completed by design, 2026-08-29
 
 Parent: [WS019 installation and disk administration](../ws.md)
 
@@ -12,83 +12,51 @@ Tests: [WS019 test index](../tests/README.md)
 
 ## Objective
 
-Freeze the exact initial disk layouts and mutation rules before exposing a raw
-partition writer or installer. This Phase produces a reviewed specification
-and ordered implementation P books; it does not implement commands or write a
-disk.
+Freeze the first installer as one non-formatting FAT-overlay path and split
+its implementation into bounded Phases. This Phase changes plans only; it
+does not implement commands or write a disk.
 
-## Already fixed
+## Fixed result
 
-- `/bin/zedinst` runs from the normal USB-booted system.
-- `/sbin/diskpart` supports GPT only.
-- Guided installation offers existing-partition use or explicit whole-disk
-  erase; it offers no dual-boot, resize, move, or automatic target selection.
-- USB boot is the recommended non-destructive trial path.
-- Whole-disk UEFI v1 uses protective MBR plus primary/backup GPT and a FAT32
-  EFI System Partition; hybrid and legacy-MBR layouts are excluded.
-- The installed fallback loader path is `EFI/BOOT/BOOTX64.EFI`.
-- Device partitions remain one-based; the first NVMe partition is
-  `/dev/nvme0n1p1`.
-- Existing-partition mode is GPT-only and names every selected destination
-  explicitly by its current partition node and stable PARTUUID.
+- `/bin/zedinst` runs from the normal USB system.
+- The destination is one existing GPT disk with exactly one usable existing
+  FAT32 ESP and one explicitly selected distinct existing FAT32 partition.
+- The ESP receives only `/EFI/BOOT/BOOTX64.EFI` as a managed path.
+- The payload FAT32 receives only `/vmunix`, `/boot.cfg`, `/rootfs.img`,
+  `/data.img`, and `/swapfile` as managed paths.
+- `ZEDBSD` names the payload role; v1 does not require or change a GPT name or
+  FAT volume label.
+- The installer performs no GPT/MBR write, `mkfs`, resize, label change,
+  native-root installation, or UEFI-variable mutation.
+- A conflicting managed file is refused. Unmanaged data is preserved.
+- The loader selects exactly one same-disk non-ESP FAT32 containing
+  `/vmunix` and `/boot.cfg`, loads the kernel there, and injects that
+  partition's PARTUUID as `boot0`.
+- The generated one-section `boot.cfg` selects `rootfs.img`, `data.img`, and
+  `swapfile` through `boot0`.
+- Firmware fallback/recovery discovery is attempted first. One explicit
+  firmware menu/file selection is acceptable; portable automatic Boot entry
+  management is later work.
+- Native install, whole-disk GPT creation, and filesystem creation are
+  explicitly separate later milestones.
 
-## Decisions to finish
+## Phase decomposition produced
 
-1. Freeze the fixed whole-disk partition map, sizes/alignment, GPT type GUIDs,
-   attributes, FAT32 ESP contents, native UFS partition, and swap/data
-   placement. Allocate stable zedBSD-specific type GUIDs where no standard
-   type applies.
-2. Decide whether the initial native root is formatted to the destination size
-   by a target UFS1 formatter, or seeded from the existing UFS1 root image with
-   an explicitly documented fixed-size limitation. A formatter is preferred
-   for a useful internal installation.
-3. Define existing-partition mode precisely: which filesystems and minimum
-   sizes are accepted, whether selected filesystems are reformatted, what
-   existing files may be replaced, and how every destructive extent is shown
-   before confirmation. No coexistence promise is implicit.
-4. Freeze the block-admin UAPI: 64-bit geometry, parent/partition flags and
-   offsets, stable identity, exclusive whole-disk mutation claim, mounted/swap
-   descendant refusal, flush, safe partition rescan, and exactly-once raw
-   writes.
-5. Freeze confirmation and automation rules. Interactive whole-disk mode must
-   require an exact device-specific erase phrase; any future noninteractive
-   mode needs both explicit confirmation and stable identity, not `--force`
-   alone.
-6. Define failure/recovery states across protective MBR, primary/backup GPT,
-   rescan, format, copy, config, and verification. Partial installation is
-   visible and never reported as success.
-7. Define the source-artifact contract by which a USB-booted `zedinst` locates
-   its own `BOOTX64.EFI`, kernel, root image/tree, data image, and swap payload.
-8. Freeze the QEMU NVMe matrix for both installed native and overlay entries.
-9. Decide whether v1 relies on firmware fallback/manual selection only or may
-   create one zedBSD `Boot####` entry. In either case it must not reorder or
-   delete unrelated firmware entries implicitly.
+1. `ws019-p002` exposes read-only disk/GPT/partition/filesystem identity.
+2. `ws019-p003` implements read-only `/sbin/diskpart` list/show.
+3. WS013 p002 selects the payload FAT and injects `boot0`; WS013 p003 parses
+   and translates `boot.cfg`.
+4. `ws019-p004` implements the bounded existing-FAT overlay copy transaction.
+5. `ws019-p005` accepts that install and boot on disposable QEMU NVMe.
+6. WS003 p018 performs one initial Latitude install/boot checkpoint and the
+   later frozen repeatability gate.
+7. Whole-disk creation and native root remain future p006/p007 work.
 
-## Suggested fixed layout for discussion
+## Completion evidence
 
-The smallest layout that can exercise both required boot modes on one disk is:
-
-1. GPT entry 1, standard EFI System Partition, FAT32, containing
-   `EFI/BOOT/BOOTX64.EFI`, the fixed kernel, `boot.cfg`, `rootfs.img`,
-   `data.img`, and optional file-backed swap;
-2. GPT entry 2, zedBSD UFS1 native root, populated from the same staged base
-   system;
-3. optional raw swap only if p001 selects it instead of the already implemented
-   `boot0:swapfile` model;
-4. remaining GPT entries unused; no hybrid MBR aliases.
-
-The menu can then offer a native entry using `rootpart=/dev/nvme0n1p2` and an
-overlay entry using `boot0` files. This is a proposal, not yet a frozen layout.
-The user's original `rootpart=/dev/nvme0n1p0` example is corrected by the
-existing one-based convention; if only one partition is created it is `p1`,
-while this two-partition proposal places native UFS at `p2`.
-
-## Completion conditions
-
-- Every decision above has one unambiguous answer, including exact destructive
-  extents and recovery behavior.
-- WS019 p002--p007 each receive a bounded P book with dependencies, tests,
-  completion conditions, and reconsideration boundaries.
-- WS004, WS013, WS003, WS009, and the master dependency/status entries agree
-  with the frozen contract.
-- No code implementation or destructive test is claimed by this design Phase.
+- The parent WS, master, WS003, WS013, and test indexes point to the same
+  staged contract.
+- Every initial implementation concern has an owning Phase.
+- No unresolved destructive behavior has been placed in a Queue.
+- No implementation or disk mutation is claimed by this completed design
+  Phase.

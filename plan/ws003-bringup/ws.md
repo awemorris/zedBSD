@@ -48,7 +48,8 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p015` | [four-platform boot-parameter acceptance](phase015-x86-parameter-acceptance/phase.md) | Completed (`q015`, 2026-08-27) | BR-T46 passes 31/31 production-loader cells: PC/AT 7, PC-98 6, amd64 BIOS 9, and amd64 UEFI 9 |
 | `ws003-p016` | [static image boot parameters and Python-regression removal](phase016-boot-parameter-header-dependency/phase.md) | Completed (`q023`, 2026-08-28) | BR-T47 and a fresh BR-T46 pass: one maintained definition feeds all x86 loaders and the kernel fallback; generated inputs, Python, and stale cross-build state are absent |
 | `ws003-p017` | [UEFI LoadOptions firmware compatibility](phase017-uefi-load-options-compatibility/phase.md) | QEMU complete; physical acceptance pending | BR-T48 covers Dell-style whole-descriptor `LoadOptions`, length-delimited text, opaque fallback, and the actual loaded-image entry path |
-| `ws003-p018` | [Latitude NVMe installation and boot](phase018-latitude-nvme-install-boot/phase.md) | Planned; dependency-gated | Install from the ordinary USB image, then boot installed `BOOTX64.EFI` with native UFS root and NVMe-backed overlay root |
+| `ws003-p018` | [Latitude existing-FAT NVMe overlay installation and boot](phase018-latitude-nvme-install-boot/phase.md) | Planned; dependency-gated | Install without GPT/mkfs/NVRAM mutation, then boot the installed fallback loader and NVMe overlay |
+| `ws003-p019` | [Latitude NVMe native installation and boot](phase019-latitude-nvme-native-install-boot/phase.md) | Future; not designed | Accept the later native-root installer only after separate WS019 design and QEMU proof |
 
 `ws003-p003` was the sole authorized item in q012. Its physical result closes
 the PCI/BAR/capability boundary and extracts the first device-enumeration stop
@@ -91,8 +92,9 @@ the affected regressions without reopening the p011--p015 public contract.
 - Reach a stable init/login shell while continuing to use the intended USB
   mass-storage root.
 - Establish usable diagnostics and at least one physical network path.
-- Install from the ordinary USB system onto the Latitude's internal NVMe and
-  boot both native-root and overlay-root configurations through UEFI.
+- Install from the ordinary USB system into existing NVMe FAT32 partitions and
+  boot the overlay through UEFI without formatting; retain native-root
+  installation as later p019 work.
 
 ## WS completion conditions
 
@@ -100,8 +102,8 @@ WS003 is complete when USB boot reaches tier U5 in both the declared QEMU matrix
 and on the target laptop, the frozen integrated image reaches a usable shell on
 five consecutive final-acceptance cold boots, the root filesystem passes safe
 I/O tests, one documented physical network path passes configuration and
-transfer tests, and p018 installs then boots the internal NVMe in both declared
-root modes.
+transfer tests, and p018 installs then boots the internal-NVMe overlay. The
+later native p019 is a separate milestone rather than a p018 condition.
 
 Target: Dell Latitude 5320, Intel 11th generation platform
 
@@ -111,7 +113,8 @@ Boot a reproducible zedBSD USB image on the target laptop, retain the USB mass
 storage device as the root backing store, reach a stable login shell, establish
 a diagnostic path, and make at least one physical network interface usable.
 After that non-destructive base is stable, use the ordinary USB system to
-install to the internal NVMe and accept native-root plus overlay-root UEFI boot.
+install the non-formatting overlay path to existing internal-NVMe FAT32
+storage. Native-root UEFI installation follows separately.
 
 The target name alone is insufficient to select drivers. The exact machine
 configuration and PCI/USB IDs are part of the first deliverable.
@@ -145,7 +148,8 @@ M1 requires U0–U5 in QEMU. M2 requires U0–U5 on the Latitude 5320.
 | BR-06 | In progress; U3 complete, one shell/X smoke boot passed | Latitude USB root through init/login/shell | BR-05, `ws003-p003`--`p010` | BR-T41 provisionally confirms U3 and a basic U4 path; BR-T31 sustained I/O and, after U4 is frozen, BR-T30 five consecutive shell boots remain |
 | BR-07 | Planned after device identification | The user's Realtek USB LAN adapter works as a host-mode physical network path | Exact USB VID:PID/controller family, WS004 driver, WS005 integration | The adapter reconnects and passes DHCP/static and transfer tests on the Latitude |
 | BR-08 | Planned | At least one working physical network path | BR-00, BR-06, relevant NET/HW item | DHCP or static configuration, ping, and data transfer pass on hardware |
-| BR-09 | Planned as `ws003-p018` | Install to and boot from the Latitude internal NVMe | WS004 p025, WS013 Boot CPAR loader work, WS019 p007 | One explicit whole-disk install followed by native and overlay UEFI boots; final frozen image passes the declared repeatability gate |
+| BR-09 | Planned as `ws003-p018` | Install to and boot an overlay from existing Latitude NVMe FAT32 partitions | WS004 p025, WS013 p002/p003, WS019 p005 | No-format/no-GPT/no-NVRAM install followed by fallback/manual UEFI boot; final frozen image passes the declared repeatability gate |
+| BR-10 | Future as `ws003-p019` | Install and boot a native Latitude NVMe root | WS019 p006/p007 and explicit later design | Native `rootpart=` boot is accepted without weakening BR-09 |
 
 ## 4. QEMU USB matrix
 
