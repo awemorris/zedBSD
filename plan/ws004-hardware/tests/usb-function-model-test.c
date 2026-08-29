@@ -6,10 +6,13 @@
 #include <drivers/usb.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <threads.h>
+#include <time.h>
 
 static unsigned checks;
 static size_t allocation_attempts;
@@ -182,6 +185,9 @@ struct fake_controller {
 	unsigned fail_set_interface_io;
 	unsigned fail_set_configuration;
 	unsigned fail_set_configuration_io;
+	unsigned fail_enqueue;
+	unsigned hold_async;
+	struct drv_usb_urb *held_async_urb;
 	unsigned fail_enable_address;
 	unsigned fail_disable_address;
 	unsigned expected_published_alternate;
@@ -242,6 +248,15 @@ fake_enqueue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 	size_t length = 0;
 
 	CHECK(request != NULL);
+	if (controller->fail_enqueue) {
+		controller->fail_enqueue = 0;
+		return EIO;
+	}
+	if (controller->hold_async) {
+		CHECK(controller->held_async_urb == NULL);
+		controller->held_async_urb = urb;
+		return 0;
+	}
 	if (request->request == 6 && (request->value >> 8) == 1) {
 		bytes = device_descriptor;
 		length = sizeof(device_descriptor);
@@ -465,7 +480,8 @@ static const struct drv_usb_hcd_ops fake_ops = {
 };
 
 static void
-fake_register(struct fake_controller *controller, unsigned malformed)
+fake_register_capabilities(struct fake_controller *controller,
+	unsigned malformed, unsigned capabilities)
 {
 	memset(controller, 0, sizeof(*controller));
 	controller->malformed = malformed;
@@ -474,9 +490,16 @@ fake_register(struct fake_controller *controller, unsigned malformed)
 	controller->hcd.name = "fixture";
 	controller->hcd.ops = &fake_ops;
 	controller->hcd.root_port_count = 1;
+	controller->hcd.capabilities = capabilities;
 	controller->hcd.private_data[0] = (uintptr_t)controller;
 	CHECK(drv_usb_hcd_register(&controller->hcd, &controller->bus) == 0);
 	controller->bus_number = drv_usb_bus_number(controller->bus);
+}
+
+static void
+fake_register(struct fake_controller *controller, unsigned malformed)
+{
+	fake_register_capabilities(controller, malformed, 0);
 }
 
 static void
@@ -622,6 +645,55 @@ static struct drv_usb_driver fake_storage_driver = {
 	.detach = fake_storage_detach
 };
 
+struct drain_fixture {
+	struct drv_usb_hcd *hcd;
+	struct drv_usb_urb *urb;
+	atomic_uint callback_entered;
+	atomic_uint callback_release;
+	atomic_uint callback_returned;
+	atomic_uint drain_started;
+	atomic_uint drain_done;
+	int drain_result;
+};
+
+static void
+blocking_callback(struct drv_usb_urb *urb, void *argument)
+{
+	struct drain_fixture *fixture = argument;
+
+	(void)urb;
+	atomic_store_explicit(&fixture->callback_entered, 1U,
+	    memory_order_release);
+	while (atomic_load_explicit(&fixture->callback_release,
+	    memory_order_acquire) == 0)
+		thrd_yield();
+	atomic_store_explicit(&fixture->callback_returned, 1U,
+	    memory_order_release);
+}
+
+static int
+completion_thread(void *argument)
+{
+	struct drain_fixture *fixture = argument;
+
+	drv_usb_hcd_complete(fixture->hcd, fixture->urb,
+	    DRV_USB_URB_COMPLETE, 0);
+	return 0;
+}
+
+static int
+drain_thread(void *argument)
+{
+	struct drain_fixture *fixture = argument;
+
+	atomic_store_explicit(&fixture->drain_started, 1U,
+	    memory_order_release);
+	fixture->drain_result = drv_usb_urb_drain(fixture->urb, 0);
+	atomic_store_explicit(&fixture->drain_done, 1U,
+	    memory_order_release);
+	return 0;
+}
+
 int
 main(void)
 {
@@ -632,11 +704,16 @@ main(void)
 	struct fake_controller hotplug_success, hotplug_detach_failure;
 	struct fake_controller shutdown_success, shutdown_detach_failure;
 	struct fake_controller shutdown_device_failure;
+	struct fake_controller capability_controller;
 	struct drv_usb_hcd invalid_hcd;
 	struct drv_usb_hcd_ops invalid_ops;
 	struct drv_usb_bus *invalid_bus = NULL;
 	struct drv_usb_device *device;
 	struct drv_usb_urb *held_urb;
+	struct drv_usb_control_request control_request = { 0 };
+	struct drain_fixture drain_fixture;
+	thrd_t completion_worker, drain_worker;
+	struct timespec settle = { .tv_sec = 0, .tv_nsec = 10000000L };
 	struct drv_usb_configuration *configuration;
 	struct drv_usb_interface *control, *data, *storage;
 	const struct drv_usb_host_interface *alternate;
@@ -654,12 +731,26 @@ main(void)
 	invalid_hcd.name = "invalid one-sided endpoint contract";
 	invalid_hcd.ops = &invalid_ops;
 	CHECK(drv_usb_hcd_register(&invalid_hcd, &invalid_bus) == EINVAL);
+	memset(&invalid_hcd, 0, sizeof(invalid_hcd));
+	invalid_hcd.name = "invalid unknown capability";
+	invalid_hcd.ops = &fake_ops;
+	invalid_hcd.root_port_count = 1;
+	invalid_hcd.capabilities = 1U << 31;
+	CHECK(drv_usb_hcd_register(&invalid_hcd, &invalid_bus) == EINVAL);
+	fake_register_capabilities(&capability_controller, 0,
+	    DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	device = drv_usb_find_device(capability_controller.bus_number, 0);
+	CHECK(device != NULL);
+	CHECK(drv_usb_device_hcd_capabilities(device) ==
+	    DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	fake_unregister(&capability_controller);
 	CHECK(drv_usb_driver_register(&fake_driver) == 0);
 	fake_register(&controller, 0);
 	controller.vendor_first = 1U;
 	drv_usb_hcd_root_hub_changed(&controller.hcd);
 	device = drv_usb_find_device(controller.bus_number, 1);
 	CHECK(device != NULL);
+	CHECK(drv_usb_device_hcd_capabilities(device) == 0);
 	CHECK(drv_usb_device_configuration_count(device) == 2);
 	configuration = drv_usb_device_configuration(device, 1);
 	CHECK(configuration != NULL);
@@ -714,6 +805,61 @@ main(void)
 	    controller.endpoint_enabled[0x05] == 1);
 	held_urb = drv_usb_urb_alloc(device, NULL, 0);
 	CHECK(held_urb != NULL);
+	CHECK(drv_usb_urb_drain(held_urb, 10U) == 0);
+	CHECK(drv_usb_urb_setup_control_flags(held_urb, &control_request,
+	    NULL, 0, DRV_USB_URB_RECLAIM_SAFE, 100U, NULL, NULL) == 0);
+	CHECK(drv_usb_urb_flags(held_urb) == DRV_USB_URB_RECLAIM_SAFE);
+	CHECK(drv_usb_urb_setup_control(held_urb, &control_request, NULL, 0,
+	    100U, NULL, NULL) == 0);
+	CHECK(drv_usb_urb_flags(held_urb) == 0);
+	controller.fail_enqueue = 1U;
+	CHECK(drv_usb_urb_submit(held_urb) == EIO);
+	CHECK(drv_usb_urb_status(held_urb) == DRV_USB_URB_IDLE);
+	CHECK(drv_usb_device_hcd_urb_count(device) == 0);
+	CHECK(drv_usb_urb_drain(held_urb, 10U) == 0);
+
+	memset(&drain_fixture, 0, sizeof(drain_fixture));
+	drain_fixture.hcd = &controller.hcd;
+	drain_fixture.urb = held_urb;
+	CHECK(drv_usb_urb_setup_control(held_urb, &control_request, NULL, 0,
+	    100U, blocking_callback, &drain_fixture) == 0);
+	controller.hold_async = 1U;
+	CHECK(drv_usb_urb_submit(held_urb) == 0);
+	CHECK(controller.held_async_urb == held_urb);
+	CHECK(drv_usb_device_hcd_urb_count(device) == 1U);
+	CHECK(thrd_create(&completion_worker, completion_thread,
+	    &drain_fixture) == thrd_success);
+	while (atomic_load_explicit(&drain_fixture.callback_entered,
+	    memory_order_acquire) == 0)
+		thrd_yield();
+	CHECK(drv_usb_urb_status(held_urb) == DRV_USB_URB_COMPLETE);
+	CHECK(drv_usb_device_hcd_urb_count(device) == 1U);
+	CHECK(drv_usb_urb_drain(held_urb, 10U) == ETIMEDOUT);
+	CHECK(drv_usb_urb_status(held_urb) == DRV_USB_URB_COMPLETE);
+	CHECK(drv_usb_device_hcd_urb_count(device) == 1U);
+	CHECK(atomic_load_explicit(&drain_fixture.callback_returned,
+	    memory_order_acquire) == 0);
+	CHECK(thrd_create(&drain_worker, drain_thread, &drain_fixture) ==
+	    thrd_success);
+	while (atomic_load_explicit(&drain_fixture.drain_started,
+	    memory_order_acquire) == 0)
+		thrd_yield();
+	(void)thrd_sleep(&settle, NULL);
+	CHECK(atomic_load_explicit(&drain_fixture.drain_done,
+	    memory_order_acquire) == 0);
+	atomic_store_explicit(&drain_fixture.callback_release, 1U,
+	    memory_order_release);
+	CHECK(thrd_join(completion_worker, NULL) == thrd_success);
+	CHECK(thrd_join(drain_worker, NULL) == thrd_success);
+	CHECK(atomic_load_explicit(&drain_fixture.callback_returned,
+	    memory_order_acquire) == 1U);
+	CHECK(atomic_load_explicit(&drain_fixture.drain_done,
+	    memory_order_acquire) == 1U);
+	CHECK(drain_fixture.drain_result == 0);
+	CHECK(drv_usb_device_hcd_urb_count(device) == 0);
+	CHECK(drv_usb_urb_drain(held_urb, 10U) == 0);
+	controller.held_async_urb = NULL;
+	controller.hold_async = 0;
 	CHECK(drv_usb_interface_set_alternate(data, 0) == EBUSY);
 	drv_usb_urb_free(held_urb);
 	controller.expected_published_alternate = 1;

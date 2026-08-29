@@ -8,15 +8,14 @@ Status: active; `q027` CDC NCM software milestone in progress
 
 Parent: [master plan](../master.md)
 
-Last verified Phases: `ws004-p010` completes the retained USB function,
-transactional endpoint, string, and sibling-claim model; `ws004-p012` completes
-removable network-device and terminal shutdown lifetime; `ws004-p013` completes
-the strict, bounded NTH16/NDP16 wire contract. `ws004-p011` and `p014` remain
-in the approved CDC NCM software sequence.
+Last verified Phases: `ws004-p010` completes the retained USB function model;
+`ws004-p011` completes concurrent xHCI endpoint ownership and callback drain;
+`ws004-p012` completes removable network-device and terminal shutdown lifetime;
+`ws004-p013` completes the strict, bounded NTH16/NDP16 wire contract. `p014`
+remains in the approved CDC NCM software sequence.
 
-Resume point: continue `q027` with xHCI concurrent URBs, then execute the
-integrated `ueN` driver Phase. Physical NCM interoperability remains a separate
-WS005 gate.
+Resume point: execute the integrated `ueN` driver Phase `ws004-p014`. Physical
+NCM interoperability remains a separate WS005 gate.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -34,7 +33,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p008`](phase008-smp-heap-integrity/phase.md) | Complete | Unified kernel heap lock domain, corrected aligned-prefix arithmetic, controls, and 500-boot combined gate pass |
 | [`ws004-p009`](phase009-pci-hcd-irq-teardown/phase.md) | Complete (`q016`) | EHCI/UHCI use checked quiesce, retain all ownership on failure, restore staged attach/detach state, unlink stale root-probe nodes, pass HW-T02 and both i386 production builds |
 | [`ws004-p010`](phase010-usb-function-model/phase.md) | Complete (`q027`) | Retained multi-configuration/alternate/IAD/extras and UTF-8 strings, deterministic driver-aware configuration choice, exclusive sibling claims, and range-limited checked endpoint rollback pass 1280 focused checks and configured x86 builds |
-| [`ws004-p011`](phase011-xhci-concurrent-urbs/phase.md) | In progress (`q027`) | Replace xHCI controller-wide single-flight transfer ownership while preserving storage reserve guarantees |
+| [`ws004-p011`](phase011-xhci-concurrent-urbs/phase.md) | Complete (`q027`) | Per-endpoint xHCI ownership, exact event claim, checked cancel/drain, bounded reclaim reserve, opaque concurrency capability, and callback-aware URB drain pass focused, analyzer, configured-build, and USB-root QEMU gates |
 | [`ws004-p012`](phase012-net-device-hotplug/phase.md) | Complete (`q027`) | Safe carrier, concurrent hot-unplug barriers, deferred slot release, stale identity purge, and terminal shutdown lifetime pass focused, sanitizer, and 500-run race gates |
 | [`ws004-p013`](phase013-cdc-ncm-wire/phase.md) | Complete (`q027`) | Strict NCM 1.0-compatible NTH16/NDP16 negotiation and wire codec pass ordinary, sanitizer, analyzer, and production-build gates |
 | [`ws004-p014`](phase014-cdc-ncm-driver/phase.md) | Pending (`q027`) | Self-contained CDC NCM `ueN` integration and automatic software acceptance |

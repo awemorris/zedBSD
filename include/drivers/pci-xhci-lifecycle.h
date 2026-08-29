@@ -28,6 +28,67 @@ enum drv_xhci_cancel_action {
 	DRV_XHCI_CANCEL_QUIESCE_CONTROLLER
 };
 
+enum drv_xhci_reserve_action {
+	DRV_XHCI_RESERVE_DYNAMIC = 0,
+	DRV_XHCI_RESERVE_USE,
+	DRV_XHCI_RESERVE_BUSY,
+	DRV_XHCI_RESERVE_REJECT
+};
+
+/* A normal URB must never consume the reclaim reserve merely because it is
+ * small.  Conversely, an explicitly eligible transfer cannot fall back to a
+ * potentially allocating path when the bounded reserve is busy or too small. */
+static inline enum drv_xhci_reserve_action
+drv_xhci_reserve_action(int reclaim_safe, size_t length,
+	size_t reserve_size, int reserve_available, int reserve_busy)
+{
+	if (!reclaim_safe)
+		return DRV_XHCI_RESERVE_DYNAMIC;
+	if (length > reserve_size || !reserve_available)
+		return DRV_XHCI_RESERVE_REJECT;
+	return reserve_busy ? DRV_XHCI_RESERVE_BUSY : DRV_XHCI_RESERVE_USE;
+}
+
+/* Transfer Events identify a TD only through all three hardware identities:
+ * slot, DCI, and the exact submitted TRB address.  The final ring entry is a
+ * Link TRB and is never part of a TD. */
+static inline int
+drv_xhci_transfer_event_matches(uint64_t ring_address, unsigned ring_trbs,
+	unsigned request_slot, unsigned request_dci, unsigned first_trb,
+	unsigned trb_count, uint64_t event_pointer, unsigned event_slot,
+	unsigned event_dci, unsigned *trb_offset)
+{
+	uint64_t delta;
+	unsigned current, event_index, offset, usable;
+
+	if (trb_offset != NULL)
+		*trb_offset = 0;
+	if (ring_trbs < 2U || request_slot == 0 || request_dci == 0 ||
+	    request_slot != event_slot || request_dci != event_dci ||
+	    (ring_address & 15U) != 0 || (event_pointer & 15U) != 0 ||
+	    event_pointer < ring_address)
+		return 0;
+	usable = ring_trbs - 1U;
+	if (first_trb >= usable || trb_count == 0 || trb_count > usable)
+		return 0;
+	delta = event_pointer - ring_address;
+	if (delta / 16U >= usable || delta % 16U != 0)
+		return 0;
+	event_index = (unsigned)(delta / 16U);
+	current = first_trb;
+	for (offset = 0; offset < trb_count; offset++) {
+		if (current == event_index) {
+			if (trb_offset != NULL)
+				*trb_offset = offset;
+			return 1;
+		}
+		current++;
+		if (current == usable)
+			current = 0;
+	}
+	return 0;
+}
+
 /*
  * Select only commands valid for the current controller-owned Endpoint State.
  * Callers must reread the output context after each successful command rather

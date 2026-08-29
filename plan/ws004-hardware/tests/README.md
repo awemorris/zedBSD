@@ -226,8 +226,36 @@ LANGID discovery, UTF-16LE conversion, and malformed descriptors and strings:
 ```sh
 mkdir -p build/q027-tmp
 cc -std=c11 -Iinclude -Iinclude/uapi -Wall -Wextra -Werror \
+  -pthread \
   src/drivers/usb.c \
   plan/ws004-hardware/tests/usb-function-model-test.c \
   -o build/q027-tmp/usb-function-model-test
 build/q027-tmp/usb-function-model-test
+```
+
+## HW-T15 concurrent xHCI URBs
+
+The production-contract model owns requests by slot and DCI, and identifies a
+completion by exact wrap-aware submitted TRB membership. It exercises control,
+CDC notification, bulk RX, bulk TX, and an independent storage request through
+all 120 completion orders. It also covers same-endpoint `EBUSY`, malformed and
+cross-endpoint events, cancellation without premature ring reuse, device-only
+drain, the HCHalted/bus-master/IRQ global drain boundary, and the explicit
+8-KiB reclaim reserve. Ordinary NCM requests remain on the dynamic path.
+
+The runner executes the fixture normally, with ASan/UBSan, with GCC
+`-fanalyzer`, and audits the production xHCI/USB/storage sources for the frozen
+ownership and reserve interface.
+
+The same gate also runs the production USB-core fixture with a deliberately
+blocked asynchronous callback.  It proves that `drv_usb_urb_drain()` joins HCD
+ownership after callback return (not merely terminal status publication), that
+timeout leaves the URB/callback graph owned and retryable, and that the opaque
+HCD capability query reports concurrent URBs only for an advertising HCD.  It
+also covers idle and failed-submit drains plus unknown capability rejection:
+
+```sh
+mkdir -p build/q027-tmp
+TMPDIR="$PWD/build/q027-tmp" \
+  plan/ws004-hardware/tests/run-xhci-concurrent-urbs-test.sh
 ```

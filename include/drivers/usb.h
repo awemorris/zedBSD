@@ -69,6 +69,16 @@
 #define DRV_USB_URB_ZERO_PACKET	(1U << 1)
 #define DRV_USB_URB_NO_DMA_MAP	(1U << 2)
 #define DRV_USB_URB_ISO_ASAP	(1U << 3)
+/* Eligibility hint for HCDs which advertise a bounded reclaim reserve.  The
+ * complete transfer path may run while VM reclaim has no free page, so a
+ * supporting HCD uses preallocated request/DMA storage.  HCDs without that
+ * capability retain their existing behavior; the flag alone is not a
+ * portable no-allocation guarantee. */
+#define DRV_USB_URB_RECLAIM_SAFE	(1U << 4)
+#define DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE	8192U
+
+/* The HCD accepts one active URB per endpoint instead of one per controller. */
+#define DRV_USB_HCD_CAP_CONCURRENT_URBS	(1U << 0)
 
 #define DRV_USB_DETACH_FORCE	(1U << 0)
 #define DRV_USB_DETACH_QUIET	(1U << 1)
@@ -368,6 +378,7 @@ struct drv_usb_hcd {
 	const struct drv_usb_hcd_ops *ops;
 	struct drv_dma_device *dma;
 	unsigned root_port_count;
+	unsigned capabilities;
 	uintptr_t private_data[6];
 };
 
@@ -458,6 +469,11 @@ drv_usb_device_descriptor(
  * controller or is between HCD dequeue and USB-core terminal publication. */
 unsigned
 drv_usb_device_hcd_urb_count(
+	const struct drv_usb_device *d);
+/* Public HCD behavior only; callers must not inspect an opaque controller's
+ * name, ops table, or private data to infer concurrency support. */
+unsigned
+drv_usb_device_hcd_capabilities(
 	const struct drv_usb_device *d);
 /* Host-controller-private association.  USB lifecycle ownership, not this
  * raw value, keeps the associated object alive. */
@@ -692,6 +708,16 @@ drv_usb_urb_setup_control(
 	drv_usb_urb_callback_t cb,
 	void *a);
 int
+drv_usb_urb_setup_control_flags(
+	struct drv_usb_urb *u,
+	const struct drv_usb_control_request *r,
+	void *b,
+	size_t n,
+	unsigned f,
+	unsigned t,
+	drv_usb_urb_callback_t cb,
+	void *a);
+int
 drv_usb_urb_setup_isochronous(
 	struct drv_usb_urb *u,
 	struct drv_usb_iso_packet *p,
@@ -705,6 +731,14 @@ drv_usb_urb_cancel(
 int
 drv_usb_urb_wait(
 	struct drv_usb_urb *u);
+/* Join an asynchronous URB without initiating cancellation.  Success means
+ * it is terminal and HCD ownership was dropped after any callback returned.
+ * timeout_ms zero waits indefinitely.  A timed-out caller retains the whole
+ * URB/callback graph and may retry.  A callback must not drain its own URB. */
+int
+drv_usb_urb_drain(
+	struct drv_usb_urb *u,
+	unsigned timeout_ms);
 /* Synchronous reusable URBs have no callback.  In addition to a terminal
  * status, wait until the HCD has dropped its private ownership so the caller
  * can immediately call drv_usb_urb_setup*() on the same object.  If a timeout

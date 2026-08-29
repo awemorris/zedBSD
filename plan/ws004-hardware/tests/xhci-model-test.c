@@ -102,6 +102,7 @@ int
 main(void)
 {
 	size_t short_actual = SIZE_MAX;
+	unsigned event_offset = UINT32_MAX;
 
 	assert(drv_xhci_scratchpad_count(0) == 0);
 	assert(drv_xhci_scratchpad_count((1U << 27) | (3U << 21)) == 97U);
@@ -118,6 +119,21 @@ main(void)
 	assert(event_matches(254U, 2U, 254U));
 	assert(event_matches(254U, 2U, 0U));
 	assert(!event_matches(254U, 2U, 255U));
+	assert(drv_xhci_transfer_event_matches(0x100000U, 256U, 2U, 5U,
+	    254U, 2U, 0x100000U, 2U, 5U, &event_offset));
+	assert(event_offset == 1U);
+	assert(!drv_xhci_transfer_event_matches(0x100000U, 256U, 2U, 5U,
+	    254U, 2U, 0x100000U, 1U, 5U, &event_offset));
+	assert(!drv_xhci_transfer_event_matches(0x100000U, 256U, 2U, 5U,
+	    254U, 2U, 0x100000U, 2U, 4U, &event_offset));
+	assert(drv_xhci_reserve_action(0, 1U, 8192U, 1, 0) ==
+	    DRV_XHCI_RESERVE_DYNAMIC);
+	assert(drv_xhci_reserve_action(1, 8192U, 8192U, 1, 0) ==
+	    DRV_XHCI_RESERVE_USE);
+	assert(drv_xhci_reserve_action(1, 8193U, 8192U, 1, 0) ==
+	    DRV_XHCI_RESERVE_REJECT);
+	assert(drv_xhci_reserve_action(1, 1U, 8192U, 1, 1) ==
+	    DRV_XHCI_RESERVE_BUSY);
 	assert(completion_succeeds(1U, 0));
 	assert(completion_succeeds(13U, 1));
 	assert(!completion_succeeds(13U, 0));

@@ -113,11 +113,14 @@ static int
 storage_urb_transfer(struct drv_usb_urb *urb, void *buffer, size_t length,
 	unsigned timeout, size_t *actual)
 {
+	unsigned flags = length <= DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE ?
+	    DRV_USB_URB_RECLAIM_SAFE : 0;
 	int error;
 
 	if (actual != NULL)
 		*actual = 0;
-	error = drv_usb_urb_setup(urb, buffer, length, 0, timeout, NULL, NULL);
+	error = drv_usb_urb_setup(urb, buffer, length, flags, timeout, NULL,
+	    NULL);
 	if (error == 0)
 		error = drv_usb_urb_submit(urb);
 	if (error == 0)
@@ -150,14 +153,16 @@ storage_control(struct usb_storage *storage, uint8_t request_type,
 	struct drv_usb_control_request control = {
 		request_type, request, value, index, (uint16_t)length
 	};
+	unsigned flags = length <= DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE ?
+	    DRV_USB_URB_RECLAIM_SAFE : 0;
 	int error;
 
 	if (length > UINT16_MAX)
 		return EINVAL;
 	if (actual != NULL)
 		*actual = 0;
-	error = drv_usb_urb_setup_control(storage->control_urb, &control,
-	    buffer, length, timeout, NULL, NULL);
+	error = drv_usb_urb_setup_control_flags(storage->control_urb, &control,
+	    buffer, length, flags, timeout, NULL, NULL);
 	if (error == 0)
 		error = drv_usb_urb_submit(storage->control_urb);
 	if (error == 0)
