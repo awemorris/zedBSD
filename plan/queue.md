@@ -4,9 +4,9 @@ Last updated: 2026-08-29
 
 QID: `q027`
 
-Queue status: in-progress
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: the user approved the original five-Phase Queue on 2026-08-29.
 After p014 reached its documented ownership reconsideration boundary, the user
@@ -39,7 +39,7 @@ speculative common USB-Ethernet implementation.
 | 3 | `ws004-p012` | [Phase](ws004-hardware/phase012-net-device-hotplug/phase.md) | completed | carrier, concurrent detach, stale-identity purge, deferred release, and terminal shutdown barriers pass focused and sanitizer gates |
 | 4 | `ws004-p013` | [Phase](ws004-hardware/phase013-cdc-ncm-wire/phase.md) | completed | strict bounded negotiation and NTH16/NDP16 encode/decode, including the advertised-maximum no-ZLP exception, pass production-source fixtures |
 | 5 | `ws004-p015` | [Phase](ws004-hardware/phase015-usb-binding-transactions/phase.md) | completed | interface-scoped I/O gate, active-endpoint submit, provisional binding, and EP0 serialization pass general USB gates |
-| 6 | `ws004-p014` | [Phase](ws004-hardware/phase014-cdc-ncm-driver/phase.md) | pending | production NCM class driver moves to the general transaction contract, binds as `ueN`, transfers, detaches, reconnects, and passes the declared software gate |
+| 6 | `ws004-p014` | [Phase](ws004-hardware/phase014-cdc-ncm-driver/phase.md) | completed | production NCM class driver uses the general transaction contract, binds as `ueN`, transfers, detaches, reconnects, and passes the declared software gate |
 
 ## Dependency order
 
@@ -53,9 +53,10 @@ ws004-p012 ----+
 ws004-p013 ----+
 ```
 
-p010 through p013 are complete. p014's first implementation exposed a general
-allocated-URB/alternate ownership gap. p015 now executes against the frozen
-USB, xHCI, and network lifetime contracts; p014 resumes only after p015 passes.
+p010 through p013 were complete when this Queue began. p014's first
+implementation exposed a general allocated-URB/alternate ownership gap. p015
+resolved that gap against the frozen USB, xHCI, and network lifetime contracts,
+then p014 completed on top of the resulting general contract.
 
 ## Frozen product boundary
 
@@ -93,3 +94,30 @@ USB, xHCI, and network lifetime contracts; p014 resumes only after p015 passes.
 q027 is finished when every item is `completed` or `uncleared`, actual results
 are synchronized to P/W/M/Q, focused fixtures and declared builds pass, and no
 result claims physical NCM interoperability without a proven NCM device role.
+
+## Execution result
+
+Finished on 2026-08-29. All six Phases completed; no item is `uncleared`.
+
+- `ws004-p015` completed the general USB binding/interface transaction:
+  immutable alternate ownership, exact active-endpoint submit admission,
+  provisional binding cleanup, endpoint-zero serialization, callback-aware
+  drain, and conservative legacy-HCD ownership.
+- `ws004-p014` completed the software CDC NCM milestone. A strict NCM 1.0
+  communication/data function binds as `ueN`; attach makes alt 1 the final
+  fallible commit, while normal detach retains the exact graph if alt 0 or
+  registry withdrawal fails and permits a later retry.
+- The final production-source NCM fixture passed 1259 checks in both ordinary
+  and ASan/UBSan builds plus GCC `-fanalyzer`. Wire-codec, USB binding, xHCI,
+  removable-net-device, shutdown, USB Storage, and URB-publication regressions
+  passed. Default amd64 and configured i386 PC/AT `make -j16` builds passed.
+- One fresh disposable amd64 image reached `login:` through q35 `qemu-xhci`
+  USB Mass Storage without USB, storage, or kernel failure diagnostics.
+  `git diff --check` and the final independent P0/P1 review passed.
+
+Physical NCM link/transfer/reconnect evidence remains WS005 NET-T40. The
+controller-proven UHCI/EHCI request-retirement work remains pending outside
+this Queue as `ws004-p016`. Sequence resynchronization and asynchronous TX
+completion accounting are recorded as the nonblocking, non-Queue
+`ws004-p017`; none of these boundaries weakens this completed software
+milestone.

@@ -84,6 +84,10 @@ PCAT_USB_CLASS_OBJS :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-storage.o
 endif
+ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)
+PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-cdc-ncm.o \
+	$(BUILD)/drivers/usb-cdc-ncm-net.o
+endif
 
 VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/fs.o $(BUILD)/src/kern/namespace.o \

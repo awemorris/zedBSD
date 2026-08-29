@@ -260,3 +260,29 @@ mkdir -p build/q027-tmp
 TMPDIR="$PWD/build/q027-tmp" \
   plan/ws004-hardware/tests/run-xhci-concurrent-urbs-test.sh
 ```
+
+## HW-T17 CDC NCM wire and integrated driver
+
+The wire runner exercises the production NTH16/NDP16 negotiation, encoder, and
+decoder in ordinary and sanitizer modes. The integrated-driver runner includes
+the production class-driver source and a fake concurrent HCD/function. It
+covers strict descriptor association, the alt-1 final attach commit, provisional
+attach cleanup, persistent notification/RX/TX requests, multiple RX datagrams,
+TX ownership, carrier notification, bounded rearm failure, shutdown, forced
+detach, normal detach retry with exact graph retention, twelve reconnects, and
+isolation from an independent pending Storage request.
+
+It also pauses an admitted network poll while detach begins, proving that alt 0
+cannot precede worker retirement. The failed-attach fixture makes cleanup fail
+once, verifies that the provisional graph remains intact, then completes one
+forced cleanup without a double release.
+
+```sh
+plan/ws004-hardware/tests/run-usb-cdc-ncm-wire-test.sh
+plan/ws004-hardware/tests/run-usb-cdc-ncm-driver-test.sh
+```
+
+The integrated runner executes ordinary and ASan/UBSan builds plus GCC
+`-fanalyzer`; its q027 result is 1259 checks in each runtime mode. This is an
+automatic software gate. A real NCM role or `g_ncm` gadget still owns the
+physical link/transfer/reconnect acceptance in WS005 NET-T40.

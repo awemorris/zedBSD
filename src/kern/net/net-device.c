@@ -580,6 +580,7 @@ net_device_open(struct net_device *device)
 	bool enabled;
 	int error = 0;
 	int close_after_open = 0;
+	int schedule_after_open = 0;
 
 	if (device == NULL)
 		return ENODEV;
@@ -612,6 +613,7 @@ net_device_open(struct net_device *device)
 		refcount_get(&device->refs);
 		device->flags |= NET_DEVICE_UP;
 		device_update_running_locked(device);
+		schedule_after_open = device->ops->poll_receive != NULL;
 	} else if (error == 0) {
 		device->closing = 1;
 		close_after_open = 1;
@@ -625,6 +627,11 @@ net_device_open(struct net_device *device)
 		device->closing = 0;
 		device_unlock(enabled);
 	}
+	/* A producer may complete synchronously while open_count is still zero.
+	 * Give every polling driver one post-publication pass so that bounded work
+	 * published by such a completion cannot be stranded. */
+	if (schedule_after_open)
+		net_device_schedule_poll(device);
 	net_device_release(device);
 	return error;
 }

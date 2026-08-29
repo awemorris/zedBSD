@@ -57,6 +57,10 @@ AMD64_USB_CLASS_SOURCES :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb-storage.c
 endif
+ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb-cdc-ncm.c \
+	src/drivers/usb-cdc-ncm-net.c
+endif
 
 AMD64_KERNEL_SOURCES := \
 	src/kern/main.c src/kern/env.c src/kern/fs.c src/kern/namespace.c \

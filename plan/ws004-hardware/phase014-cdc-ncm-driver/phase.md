@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 Phase ID: `ws004-p014`
 
-Status: pending; unblocked by completed `ws004-p015` (`q027`)
+Status: completed (`q027`)
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -22,6 +22,8 @@ notification, RX, TX, close, detach, and reconnect behavior.
 - `ws004-p011`: concurrent xHCI endpoint URBs.
 - `ws004-p012`: removable `net_device` lifetime and carrier state.
 - `ws004-p013`: strict NCM wire codec.
+- `ws004-p015`: general binding, alternate, endpoint-admission, and callback
+  drain transactions.
 
 ## Frozen driver boundary
 
@@ -104,6 +106,54 @@ release ownership.
 The user approved reopening the general USB contract and inserting
 `ws004-p015` before this Phase.  That Phase is complete: allocated, terminal,
 fully drained URBs survive alternate changes, while submit validates the exact
-active alternate and binding lifecycle.  Resume this Phase using that contract
-and the ordering above; no NCM-specific alternate API or cleanup framework is
-needed.
+active alternate and binding lifecycle. This Phase used that contract and the
+ordering above; no NCM-specific alternate API or cleanup framework was needed.
+
+## Result
+
+Completed on 2026-08-29 as the automatic software milestone.
+
+- The integrated driver strictly matches an NCM 1.0 communication interface,
+  its IAD/Union-associated CDC data sibling, functional descriptors, and a
+  valid MAC string. HCDs without concurrent-URB capability reject the match
+  safely.
+- Attach claims the sibling, negotiates and programs the bounded NTH16/NDP16
+  no-CRC profile, and programs the packet filter before allocating all buffers,
+  three persistent idle URBs, and a published but not-ready `ueN`. Selecting
+  data alt 1 is the final fallible hardware commit; only success publishes the
+  adapter ready.
+- Persistent notification, bulk RX, and bulk TX requests feed bounded network
+  worker work. RX handles multiple datagrams, TX consumes one packet exactly
+  once, and network/speed notifications update carrier and link data.
+- Close and detach withdraw admission, join local submitters and an already
+  admitted poll worker, then cancel and drain every URB. A normal alt-0 or
+  `net_device_gone()` failure retains the same URBs, buffers, network identity,
+  claim, and driver data for retry. Forced and failed-attach cleanup avoid new
+  control I/O; USB core alone clears claims and driver data after success.
+- Failed final attach commit, cleanup failure followed by forced retry,
+  shutdown, drain failure, bounded rearm failure, twelve reconnects, and an
+  independent pending Storage request all preserve their declared ownership.
+
+Verification evidence:
+
+- `run-usb-cdc-ncm-driver-test.sh`: 1259 checks in ordinary and ASan/UBSan
+  builds plus GCC `-fanalyzer`; the fixture uses the production driver source.
+- NCM wire, USB binding (971 checks in both modes), concurrent xHCI/USB core,
+  removable-net-device, shutdown, USB Storage SCSI, and URB-publication gates
+  passed.
+- Default amd64 and configured i386 PC/AT `make -j16` builds passed with the
+  NCM driver enabled.
+- A disposable copy of `build/amd64/hdd-image.img` booted once through q35
+  `qemu-xhci` USB Mass Storage to `login:` with no matched USB, storage, or
+  kernel failure diagnostic.
+- `git diff --check` and the final independent audit found no open P0/P1 issue.
+
+Stock QEMU does not provide an NCM device role. Real NCM or `g_ncm`
+link/transfer/reconnect acceptance therefore remains WS005 NET-T40 and is not
+claimed by this Phase.
+
+The final audit also recorded two nonblocking runtime-policy improvements in
+[`ws004-p017`](../phase017-cdc-ncm-runtime-recovery/phase.md): sequence
+resynchronization after a lost/malformed NTB and asynchronous terminal-TX error
+accounting. They do not change this Phase's completed ownership and software
+integration result.

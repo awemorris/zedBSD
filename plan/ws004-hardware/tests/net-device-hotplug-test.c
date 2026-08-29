@@ -46,6 +46,7 @@ static atomic_int shutdown_result;
 static struct net_device *blocked_close_device;
 static unsigned poll_count;
 static atomic_uint poll_sequence;
+static atomic_int schedule_during_open;
 static _Thread_local int irq_enabled = 1;
 
 bool
@@ -128,6 +129,8 @@ fixture_open(struct net_device *device)
 			sched_yield();
 	}
 	(void)net_device_set_carrier(device, 1);
+	if (atomic_load_explicit(&schedule_during_open, memory_order_acquire))
+		net_device_schedule_poll(device);
 	atomic_store_explicit(&open_returned, 1, memory_order_release);
 	return 0;
 }
@@ -433,6 +436,24 @@ poll_close_barrier_test(void)
 }
 
 static void
+immediate_completion_open_test(void)
+{
+	struct net_device *device = create_device("ue0");
+	unsigned polled = poll_count;
+
+	atomic_store_explicit(&schedule_during_open, 1, memory_order_release);
+	assert(net_device_open(device) == 0);
+	atomic_store_explicit(&schedule_during_open, 0, memory_order_release);
+	/* The schedule attempted inside ->open() is rejected while opening is
+	 * published.  net_device_open() must provide the post-publication pass. */
+	assert(net_device_poll_pending(device));
+	assert(net_device_poll(device, 1) == 1);
+	assert(poll_count == polled + 1U);
+	assert(net_device_gone(device) == 0);
+	net_device_destroy(device);
+}
+
+static void
 irq_disabled_gone_test(void)
 {
 	struct net_device *device = create_device("ue0");
@@ -629,6 +650,7 @@ main(void)
 	route_init();
 	carrier_and_route_test();
 	queued_receive_test();
+	immediate_completion_open_test();
 	poll_close_barrier_test();
 	irq_disabled_gone_test();
 	close_detach_race_test();

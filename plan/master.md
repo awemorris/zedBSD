@@ -16,15 +16,15 @@ The immediate north star is:
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
 > establish a working network path with reproducible evidence.
 
-The current [Queue Book](queue.md) is active `q027`: the USB
-function/alternate model, concurrent xHCI URBs, removable network-device
-lifetime, and strict CDC NCM wire profile are complete; a general USB binding
-transaction Phase now precedes completion of the integrated `ueN` software
-milestone. The archived [q026](queue-q026.md) completed the
+The current [Queue Book](queue.md) is finished `q027`: all six USB/NCM software
+Phases completed, including the general binding/interface transaction and the
+integrated `ueN` automatic milestone. Physical NCM interoperability remains in
+WS005, and a successor Queue has not yet been selected. The archived
+[q026](queue-q026.md) completed the
 disk-label/platform, Xzed-evdev, and input/HID ownership Phases and implemented
 the independent graphics ownership change. The graphics Phase remains
-`uncleared` only for its explicit residual runtime matrix. A successor Queue
-has not yet been selected. The archived [q025](queue-q025.md) disabled the
+`uncleared` only for its explicit residual runtime matrix. The archived
+[q025](queue-q025.md) disabled the
 target Noct/Remacs package options without touching the maintainer's Noct
 source, then completed the first WS018 kernel-ownership foundation wave. The
 archived [q024](queue-q024.md) passed automated Noct gates but is recorded
@@ -163,7 +163,7 @@ actually warranted.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
 | `ws003` | Dell Latitude 5320 bring-up | Active; p016 complete in q023 | `ws003-p016` completed with BR-T47 and a fresh BR-T46 31/31 | Return to physical U4/U5 work; BR-T30 repeatability, BR-T31 sustained I/O, and hardware inventory remain | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; USB transaction/NCM sequence in `q027` | `ws004-p010`--`p013` and `p015` complete; `p015` resolves the general binding transaction and records legacy-HCD checked retirement as pending `p016` | Complete the integrated NCM driver, then leave physical NCM evidence to WS005; `p016` remains a non-Queue safety follow-up | [WS004](ws004-hardware/ws.md) |
+| `ws004` | Hardware expansion | Active; q027 NCM software milestone complete | `ws004-p010`--`p015` complete; follow-ups are legacy-HCD retirement `p016` and NCM runtime policy `p017` | Select `p016`, resolve p017 policy, or choose another bounded hardware Phase; physical NCM evidence remains WS005 | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Planned; USB Ethernet first, WLAN manually blocked | WS002 Phase 20 is the inherited baseline | Classify one USB Ethernet descriptor, then extract the wired physical-network Phase | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |

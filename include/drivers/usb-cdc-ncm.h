@@ -107,6 +107,9 @@ struct drv_usb_cdc_ncm_control_request {
 typedef int (*drv_usb_cdc_ncm_datagram_fn)(const void *frame,
 	size_t frame_length, void *argument);
 
+/* Register the integrated CDC NCM communication-interface driver. */
+int drv_usb_cdc_ncm_driver_register(void);
+
 int drv_usb_cdc_ncm_negotiate_nth16(const void *parameters,
 	size_t parameters_length, const struct drv_usb_cdc_ncm_limits *limits,
 	struct drv_usb_cdc_ncm_profile *profile);
