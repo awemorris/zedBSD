@@ -82,6 +82,7 @@
 
 #define DRV_USB_DETACH_FORCE	(1U << 0)
 #define DRV_USB_DETACH_QUIET	(1U << 1)
+#define DRV_USB_DETACH_ATTACH_FAILED	(1U << 2)
 
 struct drv_usb_bus;
 struct drv_usb_device;
@@ -326,10 +327,18 @@ struct drv_usb_hcd_ops {
 		*device_disable)(
 		struct drv_usb_hcd *,
 		struct drv_usb_device *);
+	/* Zero accepts HCD ownership and requires exactly one call to
+	 * drv_usb_hcd_complete(); completion may be synchronous but an accepted
+	 * enqueue must still return zero.  A nonzero return leaves ownership with
+	 * the core and forbids completion for that enqueue attempt. */
 	int (
 		*urb_enqueue)(
 		struct drv_usb_hcd *,
 		struct drv_usb_urb *);
+	/* Zero retires the HCD request and transfers terminal publication and
+	 * ownership release to the core, so the HCD must not complete it afterward.
+	 * A nonzero return leaves the accepted request under the normal completion
+	 * contract. */
 	int (
 		*urb_dequeue)(
 		struct drv_usb_hcd *,

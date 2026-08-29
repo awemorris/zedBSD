@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 Phase ID: `ws004-p014`
 
-Status: pending (`q027`)
+Status: pending; unblocked by completed `ws004-p015` (`q027`)
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -76,3 +76,34 @@ Stop and mark this Phase `uncleared` if production HCD or network ownership
 cannot satisfy the frozen close/detach contract, or if available physical
 hardware proves not to expose CDC NCM. Do not relabel ECM/RNDIS or a Realtek
 vendor protocol as NCM.
+
+## Resolved ownership decision
+
+The q027 implementation review found an ownership gap at the boundary between
+p010 alternate selection and persistent class-driver URBs:
+
+- `drv_usb_interface_set_alternate()` currently rejects every allocated URB,
+  even when it is terminal, drained, and no longer HCD-owned.  A normal NCM
+  detach must therefore free its fixed URBs before selecting data alternate
+  zero.  If that selection fails, a later allocation failure prevents exact
+  restoration of the retained driver graph.
+- The same ordering forces attach to select data alternate one before it can
+  reserve the persistent notification/RX/TX URBs.  An allocation failure after
+  selection then needs a second, fallible alternate-zero rollback.
+
+The recommended completion path is to reopen the p010 contract without adding
+a second alternate-selection entry point: permit allocated but completely
+drained URBs across `drv_usb_interface_set_alternate()`, continue to reject any
+HCD-owned URB, and make `drv_usb_urb_submit()` reject an endpoint which is not
+part of the interface's active alternate.  p014 can then reserve every buffer,
+URB, and unpublished/not-ready network object before alternate one becomes the
+final fallible attach commit.  Detach can retain the same idle URBs until the
+alternate-zero commit succeeds, and only then remove the network identity and
+release ownership.
+
+The user approved reopening the general USB contract and inserting
+`ws004-p015` before this Phase.  That Phase is complete: allocated, terminal,
+fully drained URBs survive alternate changes, while submit validates the exact
+active alternate and binding lifecycle.  Resume this Phase using that contract
+and the ordering above; no NCM-specific alternate API or cleanup framework is
+needed.

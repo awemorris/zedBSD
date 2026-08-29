@@ -8,6 +8,7 @@
 #include <drivers/usb.h>
 #include <errno.h>
 #include <hal/hal.h>
+#include <kern/lock.h>
 #include <kern/sched.h>
 #include <string.h>
 
@@ -69,9 +70,10 @@ struct uhci_controller {
 	struct drv_usb_bus *bus;
 	struct drv_pci_irq irq;
 	void *irq_cookie;
+	struct spinlock active_lock;
 	struct uhci_request *active;
 	unsigned bar_claimed, pci_state_saved, hcd_registered, irq_allocated;
-	unsigned dma_quiesced, listed, quarantined;
+	unsigned dma_quiesced, quiescing, submitting, listed, quarantined;
 	struct uhci_controller *next;
 };
 
@@ -129,14 +131,27 @@ static int uhci_start(struct drv_usb_hcd *hcd)
 		drv_dma_free_coherent(hcd->dma, &controller->frame_list);
 		return EIO;
 	}
-	controller->dma_quiesced = 0;
+	{
+		unsigned long irq = spin_lock_irqsave(&controller->active_lock);
+
+		controller->dma_quiesced = 0;
+		controller->quiescing = 0;
+		spin_unlock_irqrestore(&controller->active_lock, irq);
+	}
 	return 0;
 }
 
 static void uhci_stop(struct drv_usb_hcd *hcd)
 {
 	struct uhci_controller *controller = hcd_controller(hcd);
-	if (!controller->dma_quiesced) {
+	unsigned long irq;
+	int releasable;
+
+	irq = spin_lock_irqsave(&controller->active_lock);
+	releasable = controller->dma_quiesced && controller->active == NULL &&
+	    !controller->submitting;
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+	if (!releasable) {
 		hal_printf("uhci: refusing to release DMA before checked quiesce\n");
 		return;
 	}
@@ -202,12 +217,22 @@ uhci_quiesce(struct drv_usb_hcd *hcd)
 	struct uhci_controller *controller = hcd_controller(hcd);
 	uint64_t started;
 	uint16_t command;
+	unsigned long irq;
 	int error;
 
-	if (controller->dma_quiesced)
+	irq = spin_lock_irqsave(&controller->active_lock);
+	if (controller->dma_quiesced) {
+		spin_unlock_irqrestore(&controller->active_lock, irq);
 		return 0;
-	if (controller->active != NULL)
+	}
+	if (controller->active != NULL || controller->submitting) {
+		spin_unlock_irqrestore(&controller->active_lock, irq);
 		return EBUSY;
+	}
+	/* Once checked quiesce begins, no later enqueue may publish work even if
+	 * hardware shutdown has to be retried after a checked failure. */
+	controller->quiescing = 1;
+	spin_unlock_irqrestore(&controller->active_lock, irq);
 	out16(controller->io_base + UHCI_USBINTR, 0);
 	command = in16(controller->io_base + UHCI_USBCMD);
 	out16(controller->io_base + UHCI_USBCMD,
@@ -232,7 +257,13 @@ uhci_quiesce(struct drv_usb_hcd *hcd)
 	error = uhci_irq_disestablish(controller);
 	if (error != 0)
 		return error;
+	irq = spin_lock_irqsave(&controller->active_lock);
+	if (controller->active != NULL || controller->submitting) {
+		spin_unlock_irqrestore(&controller->active_lock, irq);
+		__builtin_trap();
+	}
 	controller->dma_quiesced = 1;
+	spin_unlock_irqrestore(&controller->active_lock, irq);
 	return 0;
 }
 
@@ -301,39 +332,131 @@ fail:uhci_request_free(c,r);return error;
 
 static int uhci_urb_enqueue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 {
-	struct uhci_controller*c=hcd_controller(hcd);struct uhci_request*r;uint32_t*frames;unsigned i;bool enabled;int error;
-	enabled=hal_irq_disable();if(c->active){if(enabled)hal_irq_enable();return EBUSY;}
-	error=uhci_build_request(c,urb,&r);if(error){if(enabled)hal_irq_enable();return error;}
-	c->active=r;drv_usb_urb_set_hcd_data(urb,r);frames=c->frame_list.address;
-	for(i=0;i<1024U;i++)frames[i]=(uint32_t)r->schedule.device_address|UHCI_LINK_QH;
-	if(enabled)hal_irq_enable();
+	struct uhci_controller *c = hcd_controller(hcd);
+	struct uhci_request *r;
+	uint32_t *frames;
+	unsigned i;
+	unsigned long irq;
+	int error;
+
+	irq = spin_lock_irqsave(&c->active_lock);
+	if (c->quiescing || c->dma_quiesced || c->active != NULL ||
+	    c->submitting) {
+		error = c->quiescing || c->dma_quiesced ? ENODEV : EBUSY;
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return error;
+	}
+	c->submitting = 1;
+	spin_unlock_irqrestore(&c->active_lock, irq);
+	error = uhci_build_request(c, urb, &r);
+	if (error != 0) {
+		irq = spin_lock_irqsave(&c->active_lock);
+		if (!c->submitting)
+			__builtin_trap();
+		c->submitting = 0;
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return error;
+	}
+	irq = spin_lock_irqsave(&c->active_lock);
+	if (!c->submitting)
+		__builtin_trap();
+	c->submitting = 0;
+	if (c->quiescing || c->dma_quiesced || c->active != NULL) {
+		error = c->quiescing || c->dma_quiesced ? ENODEV : EBUSY;
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		uhci_request_free(c, r);
+		return error;
+	}
+	c->active = r;
+	drv_usb_urb_set_hcd_data(urb, r);
+	frames = c->frame_list.address;
+	for (i = 0; i < 1024U; i++)
+		frames[i] = (uint32_t)r->schedule.device_address | UHCI_LINK_QH;
+	hal_io_wmb();
+	spin_unlock_irqrestore(&c->active_lock, irq);
 	return 0;
 }
 static int uhci_urb_dequeue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 {
-	struct uhci_controller*c=hcd_controller(hcd);struct uhci_request*r=drv_usb_urb_hcd_data(urb);uint32_t*frames;unsigned i;bool enabled;
-	if(!r)return EINVAL;
-	enabled=hal_irq_disable();frames=c->frame_list.address;
-	for(i=0;i<1024U;i++)frames[i]=UHCI_LINK_TERM;
-	c->active=NULL;
-	drv_usb_urb_set_hcd_data(urb,NULL);if(enabled)hal_irq_enable();uhci_request_free(c,r);return 0;
+	struct uhci_controller *c = hcd_controller(hcd);
+	struct uhci_request *r;
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&c->active_lock);
+	r = c->active;
+	if (r == NULL || r->urb != urb || drv_usb_urb_hcd_data(urb) != r) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return EBUSY;
+	}
+	/* Removing a UHCI QH from the software frame list does not prove that the
+	 * controller has stopped using a prefetched TD.  Until a checked frame
+	 * retirement handshake exists, retain HCD ownership and let the ordinary
+	 * completion path publish the terminal state. */
+	spin_unlock_irqrestore(&c->active_lock, irq);
+	return EBUSY;
 }
 
 static int uhci_irq(void *argument)
 {
-	struct uhci_controller*c=argument;struct uhci_request*r;struct drv_usb_urb*urb;
-	uint16_t status;uint32_t*frames;size_t actual=0;unsigned i;enum drv_usb_urb_status result=DRV_USB_URB_COMPLETE;
-	status=in16(c->io_base+UHCI_USBSTS);if((status&UHCI_STS_ALL)==0)return 0;
-	out16(c->io_base+UHCI_USBSTS,status);r=c->active;if(!r)return 1;
-	for(i=0;i<r->td_count;i++)if(r->tds[i].status&UHCI_TD_ACTIVE)return 1;
-	for(i=0;i<r->td_count;i++)if(r->tds[i].status&UHCI_TD_ERRORS){result=(r->tds[i].status&UHCI_TD_STALLED)?DRV_USB_URB_STALL:DRV_USB_URB_IO_ERROR;break;}
-	for(i=0;i<r->data_count;i++){uint32_t n=r->tds[r->data_first+i].status&0x7ffU;if(n!=0x7ffU)actual+=n+1U;}
-	if(result==DRV_USB_URB_COMPLETE&&drv_usb_urb_control_request(r->urb)==NULL)
-		(void)drv_usb_endpoint_set_hcd_data(drv_usb_urb_endpoint(r->urb),0,r->final_toggle);
-	if(r->input&&actual)memcpy(drv_usb_urb_buffer(r->urb),(uint8_t*)r->bounce.address+8U,actual);
-	frames=c->frame_list.address;for(i=0;i<1024U;i++)frames[i]=UHCI_LINK_TERM;
-	urb=r->urb;c->active=NULL;drv_usb_urb_set_hcd_data(urb,NULL);uhci_request_free(c,r);
-	drv_usb_hcd_complete(&c->hcd,urb,result,actual);return 1;
+	struct uhci_controller *c = argument;
+	struct uhci_request *r;
+	struct drv_usb_urb *urb;
+	uint16_t status;
+	uint32_t *frames;
+	size_t actual = 0;
+	unsigned i;
+	unsigned long irq;
+	enum drv_usb_urb_status result = DRV_USB_URB_COMPLETE;
+
+	status = in16(c->io_base + UHCI_USBSTS);
+	if ((status & UHCI_STS_ALL) == 0)
+		return 0;
+	out16(c->io_base + UHCI_USBSTS, status);
+	irq = spin_lock_irqsave(&c->active_lock);
+	r = c->active;
+	if (r == NULL) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return 1;
+	}
+	for (i = 0; i < r->td_count; i++) {
+		if ((r->tds[i].status & UHCI_TD_ACTIVE) != 0) {
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			return 1;
+		}
+	}
+	for (i = 0; i < r->td_count; i++) {
+		if ((r->tds[i].status & UHCI_TD_ERRORS) != 0) {
+			result = (r->tds[i].status & UHCI_TD_STALLED) != 0 ?
+			    DRV_USB_URB_STALL : DRV_USB_URB_IO_ERROR;
+			break;
+		}
+	}
+	for (i = 0; i < r->data_count; i++) {
+		uint32_t n = r->tds[r->data_first + i].status & 0x7ffU;
+
+		if (n != 0x7ffU)
+			actual += n + 1U;
+	}
+	if (result == DRV_USB_URB_COMPLETE &&
+	    drv_usb_urb_control_request(r->urb) == NULL)
+		(void)drv_usb_endpoint_set_hcd_data(
+		    drv_usb_urb_endpoint(r->urb), 0, r->final_toggle);
+	if (r->input && actual != 0)
+		memcpy(drv_usb_urb_buffer(r->urb),
+		    (uint8_t *)r->bounce.address + 8U, actual);
+	frames = c->frame_list.address;
+	for (i = 0; i < 1024U; i++)
+		frames[i] = UHCI_LINK_TERM;
+	hal_io_wmb();
+	urb = r->urb;
+	if (drv_usb_urb_hcd_data(urb) != r)
+		__builtin_trap();
+	c->active = NULL;
+	drv_usb_urb_set_hcd_data(urb, NULL);
+	spin_unlock_irqrestore(&c->active_lock, irq);
+	uhci_request_free(c, r);
+	drv_usb_hcd_complete(&c->hcd, urb, result, actual);
+	return 1;
 }
 static int uhci_endpoint_enable(struct drv_usb_hcd *hcd,
 	struct drv_usb_endpoint *endpoint)
@@ -464,8 +587,11 @@ uhci_attach(struct drv_pci_device *device, const struct drv_pci_id *id)
 	if (controller == NULL)
 		return ENOMEM;
 	memset(controller, 0, sizeof(*controller));
+	spin_init(&controller->active_lock, LOCK_RANK_DEVICE,
+	    "UHCI active request");
 	controller->pci = device;
 	controller->dma_quiesced = 1;
+	controller->quiescing = 1;
 	for (index = 0; index < drv_pci_device_bar_count(device); index++)
 		if (drv_pci_device_bar(device, index, &bar) == 0 &&
 		    bar.type == DRV_PCI_BAR_IO)

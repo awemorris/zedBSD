@@ -15,6 +15,7 @@ Parent: [WS004](../ws.md)
 | HW-T15 | Concurrent xHCI URBs | Control, interrupt, bulk RX/TX, and independent storage requests complete out of order; isolated cancel, quiesce, and reclaim reserve invariants pass |
 | HW-T16 | Removable net device | Carrier changes, queued-RX detach, ARP/route purge, deferred release, shutdown, and more than eight reconnects pass without stale ownership |
 | HW-T17 | CDC NCM wire and driver | NTH16/NDP16 valid/malformed fixtures, strict negotiation, bind/unwind, RX/TX, notification, detach, reconnect, and concurrent storage pass |
+| HW-T18 | USB binding transactions | Idle inactive-alt URBs, interface-scoped switch admission, sibling concurrency, submit races, provisional attach abort, detach retention, EP0 serialization, and Mass Storage regression pass |
 | HW-T20 | NVMe QEMU | Identify, namespace bounds, read/write/flush, concurrency, reset, and failure tests pass on disposable images |
 | HW-T21 | NVMe hardware | Read-only identify precedes explicitly safe I/O; device IDs and stress/error logs are stored |
 | HW-T30 | WLAN logic | Scan/association/key/error state tests pass against a bounded fixture without claiming radio hardware success |

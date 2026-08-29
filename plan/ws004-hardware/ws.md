@@ -11,11 +11,14 @@ Parent: [master plan](../master.md)
 Last verified Phases: `ws004-p010` completes the retained USB function model;
 `ws004-p011` completes concurrent xHCI endpoint ownership and callback drain;
 `ws004-p012` completes removable network-device and terminal shutdown lifetime;
-`ws004-p013` completes the strict, bounded NTH16/NDP16 wire contract. `p014`
-remains in the approved CDC NCM software sequence.
+`ws004-p013` completes the strict, bounded NTH16/NDP16 wire contract. `p015`
+completes the general USB binding/interface transaction and unblocks `p014`.
+`p016` records the non-Queue legacy-HCD hardware-retirement follow-up exposed
+by that audit; current UHCI/EHCI cancellation remains conservative until it is
+completed.
 
-Resume point: execute the integrated `ueN` driver Phase `ws004-p014`. Physical
-NCM interoperability remains a separate WS005 gate.
+Resume point: finish and verify the integrated `ueN` driver Phase
+`ws004-p014`. Physical NCM interoperability remains a separate WS005 gate.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -36,7 +39,9 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p011`](phase011-xhci-concurrent-urbs/phase.md) | Complete (`q027`) | Per-endpoint xHCI ownership, exact event claim, checked cancel/drain, bounded reclaim reserve, opaque concurrency capability, and callback-aware URB drain pass focused, analyzer, configured-build, and USB-root QEMU gates |
 | [`ws004-p012`](phase012-net-device-hotplug/phase.md) | Complete (`q027`) | Safe carrier, concurrent hot-unplug barriers, deferred slot release, stale identity purge, and terminal shutdown lifetime pass focused, sanitizer, and 500-run race gates |
 | [`ws004-p013`](phase013-cdc-ncm-wire/phase.md) | Complete (`q027`) | Strict NCM 1.0-compatible NTH16/NDP16 negotiation and wire codec pass ordinary, sanitizer, analyzer, and production-build gates |
-| [`ws004-p014`](phase014-cdc-ncm-driver/phase.md) | Pending (`q027`) | Self-contained CDC NCM `ueN` integration and automatic software acceptance |
+| [`ws004-p014`](phase014-cdc-ncm-driver/phase.md) | Pending; unblocked (`q027`) | Self-contained CDC NCM `ueN` integration and automatic software acceptance |
+| [`ws004-p015`](phase015-usb-binding-transactions/phase.md) | Complete (`q027`) | General binding lifecycle, interface I/O gate, active-endpoint submission, endpoint-zero serialization, and conservative legacy-HCD ownership passed focused, sanitizer, analyzer, build, and USB-root QEMU gates |
+| [`ws004-p016`](phase016-legacy-hcd-request-retirement/phase.md) | Pending; not queued | Controller-proven UHCI frame and EHCI Async Advance retirement before normal-completion or cancellation DMA release |
 
 ### MSI follow-up register
 

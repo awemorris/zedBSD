@@ -1,4 +1,4 @@
-# Queue: USB CDC NCM software milestone
+# Queue: general USB transactions and CDC NCM software milestone
 
 Last updated: 2026-08-29
 
@@ -8,11 +8,12 @@ Queue status: in-progress
 
 Queue finished: **No**
 
-Authorization: the user approved this five-Phase Queue on 2026-08-29 after
-reviewing its phase order, initial NCM profile, QEMU limitation, and physical
-acceptance boundary.
+Authorization: the user approved the original five-Phase Queue on 2026-08-29.
+After p014 reached its documented ownership reconsideration boundary, the user
+approved rebuilding q027 on 2026-08-29 to insert the general `ws004-p015`
+binding/interface transaction before resuming p014, with execution authorized.
 
-Timebox: no fixed wall-clock limit; continue until all five finite items have
+Timebox: no fixed wall-clock limit; continue until all six finite items have
 been completed or honestly marked `uncleared` at a documented boundary.
 
 Parent: [master plan](master.md)
@@ -22,7 +23,9 @@ Previous Queue: [q026](queue-q026.md)
 ## Purpose
 
 Add a native host-side USB CDC NCM network interface without hiding the USB,
-xHCI, network-device, and shutdown contracts that NCM exercises.  The first
+xHCI, network-device, and shutdown contracts that NCM exercises.  Resolve the
+discovered alternate/URB conflict as a general Mass Storage, NCM, HID, Audio,
+and composite-device USB transaction contract rather than an NCM exception. The first
 implementation is an NCM 1.0-compatible NTH16/NDP16, no-CRC, 1500-byte-MTU
 profile named `ueN`.  It is deliberately independent rather than built on a
 speculative common USB-Ethernet implementation.
@@ -35,12 +38,13 @@ speculative common USB-Ethernet implementation.
 | 2 | `ws004-p011` | [Phase](ws004-hardware/phase011-xhci-concurrent-urbs/phase.md) | completed | per-endpoint xHCI ownership, checked cancellation/drain, bounded reclaim reserve, capability query, and callback-aware URB drain pass focused, analyzer, build, and USB-root QEMU gates |
 | 3 | `ws004-p012` | [Phase](ws004-hardware/phase012-net-device-hotplug/phase.md) | completed | carrier, concurrent detach, stale-identity purge, deferred release, and terminal shutdown barriers pass focused and sanitizer gates |
 | 4 | `ws004-p013` | [Phase](ws004-hardware/phase013-cdc-ncm-wire/phase.md) | completed | strict bounded negotiation and NTH16/NDP16 encode/decode, including the advertised-maximum no-ZLP exception, pass production-source fixtures |
-| 5 | `ws004-p014` | [Phase](ws004-hardware/phase014-cdc-ncm-driver/phase.md) | pending | production NCM class driver binds as `ueN`, transfers, cancels, detaches, reconnects, and passes the declared software gate |
+| 5 | `ws004-p015` | [Phase](ws004-hardware/phase015-usb-binding-transactions/phase.md) | completed | interface-scoped I/O gate, active-endpoint submit, provisional binding, and EP0 serialization pass general USB gates |
+| 6 | `ws004-p014` | [Phase](ws004-hardware/phase014-cdc-ncm-driver/phase.md) | pending | production NCM class driver moves to the general transaction contract, binds as `ueN`, transfers, detaches, reconnects, and passes the declared software gate |
 
 ## Dependency order
 
 ```text
-ws004-p010 ----+---------------------> ws004-p014
+ws004-p010 ----+----> ws004-p015 ----> ws004-p014
                |
 ws004-p011 ----+
                |
@@ -49,8 +53,9 @@ ws004-p012 ----+
 ws004-p013 ----+
 ```
 
-p010 through p013 are complete. p014 is dependency-ready against their frozen
-USB function, xHCI ownership, network-lifetime, and NCM wire contracts.
+p010 through p013 are complete. p014's first implementation exposed a general
+allocated-URB/alternate ownership gap. p015 now executes against the frozen
+USB, xHCI, and network lifetime contracts; p014 resumes only after p015 passes.
 
 ## Frozen product boundary
 

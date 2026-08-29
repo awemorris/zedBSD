@@ -787,7 +787,11 @@ main(void)
 
 	controller.observed_interface = data;
 	CHECK(controller.endpoint_enabled[0x83] == 1);
-	CHECK(drv_usb_interface_claim(control, data) == 0);
+	/* Claims have a lifecycle owner.  Re-probe after the selection-only
+	 * candidate abort so this claim is made by a provisional binding. */
+	fake_driver_state.mode = FAKE_ATTACH_CLAIM_SUCCESS;
+	CHECK(drv_usb_interface_probe(control) == 0);
+	CHECK(drv_usb_interface_driver(control) == &fake_driver);
 	CHECK(drv_usb_interface_claim(control, data) == EBUSY);
 	CHECK(drv_usb_interface_claimed_by(data) == control);
 	CHECK(drv_usb_interface_probe(data) == EBUSY);
@@ -860,7 +864,10 @@ main(void)
 	CHECK(drv_usb_urb_drain(held_urb, 10U) == 0);
 	controller.held_async_urb = NULL;
 	controller.hold_async = 0;
-	CHECK(drv_usb_interface_set_alternate(data, 0) == EBUSY);
+	controller.expected_published_alternate = 1;
+	CHECK(drv_usb_interface_set_alternate(data, 0) == 0);
+	controller.expected_published_alternate = 0;
+	CHECK(drv_usb_interface_set_alternate(data, 1) == 0);
 	drv_usb_urb_free(held_urb);
 	controller.expected_published_alternate = 1;
 	controller.fail_disable_address = 0x05;
@@ -885,8 +892,10 @@ main(void)
 	CHECK(controller.endpoint_enabled[0x83] == 1 &&
 	    controller.endpoint_enabled[0x84] == 1 &&
 	    controller.endpoint_enabled[0x05] == 1);
-	CHECK(drv_usb_interface_release(control, data) == 0);
+	CHECK(drv_usb_interface_detach(control, 0) == 0);
+	CHECK(drv_usb_interface_driver(control) == NULL);
 	CHECK(drv_usb_interface_claimed_by(data) == NULL);
+	fake_driver_state.mode = FAKE_ATTACH_SELECT_ONLY;
 	controller.expected_published_alternate = 1;
 	controller.fail_disable_address = 0x84;
 	CHECK(drv_usb_device_set_configuration(device, 1) == EIO);

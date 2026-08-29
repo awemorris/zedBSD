@@ -8,6 +8,7 @@
 #include <drivers/usb.h>
 #include <errno.h>
 #include <hal/hal.h>
+#include <kern/lock.h>
 #include <kern/sched.h>
 #include <string.h>
 
@@ -74,11 +75,12 @@ struct ehci_controller {
 	struct drv_usb_bus *bus;
 	struct drv_pci_irq irq;
 	void *irq_cookie;
+	struct spinlock active_lock;
 	struct ehci_request *active;
 	struct ehci_controller *next;
 	unsigned bar_claimed, bar_mapped, pci_state_saved;
 	unsigned hcd_registered, irq_allocated, dma_quiesced;
-	unsigned listed, quarantined;
+	unsigned quiescing, submitting, listed, quarantined;
 };
 static struct ehci_controller *ehci_controllers;
 
@@ -96,7 +98,7 @@ static int ehci_ownership(struct ehci_controller*c)
 
 static int ehci_start(struct drv_usb_hcd*hcd)
 {
-	struct ehci_controller*c=hcd_controller(hcd);uint32_t*periodic;unsigned i,timeout;int error;
+	struct ehci_controller*c=hcd_controller(hcd);uint32_t*periodic;unsigned i,timeout;unsigned long irq;int error;
 	if((error=ehci_ownership(c))!=0)return error;
 	if((error=drv_dma_alloc_coherent(hcd->dma,4096U,4096U,&c->periodic))!=0)return error;
 	if((error=drv_dma_alloc_coherent(hcd->dma,4096U,64U,&c->async_head_memory))!=0){drv_dma_free_coherent(hcd->dma,&c->periodic);return error;}
@@ -113,7 +115,13 @@ static int ehci_start(struct drv_usb_hcd*hcd)
 	wr32(c->operational,EHCI_ASYNCLISTADDR,(uint32_t)c->async_head_memory.device_address);
 	wr32(c->operational,EHCI_USBSTS,EHCI_STS_ALL);wr32(c->operational,EHCI_USBINTR,0);
 	wr32(c->operational,EHCI_CONFIGFLAG,1);wr32(c->operational,EHCI_USBCMD,EHCI_CMD_RUN|EHCI_CMD_ASYNC);
-	for(timeout=0;timeout<1000000U;timeout++)if((rd32(c->operational,EHCI_USBSTS)&EHCI_STS_HALTED)==0){c->dma_quiesced=0;return 0;}
+	for(timeout=0;timeout<1000000U;timeout++)
+		if((rd32(c->operational,EHCI_USBSTS)&EHCI_STS_HALTED)==0){
+			irq=spin_lock_irqsave(&c->active_lock);
+			c->dma_quiesced=0;c->quiescing=0;
+			spin_unlock_irqrestore(&c->active_lock,irq);
+			return 0;
+		}
 	error=EIO;
 fail:drv_dma_free_coherent(hcd->dma,&c->async_head_memory);drv_dma_free_coherent(hcd->dma,&c->periodic);return error;
 }
@@ -171,12 +179,22 @@ ehci_quiesce(struct drv_usb_hcd *hcd)
 	struct ehci_controller *c = hcd_controller(hcd);
 	uint64_t started;
 	uint32_t command;
+	unsigned long irq;
 	int halt_error = 0, master_error, irq_error;
 
-	if (c->dma_quiesced)
+	irq = spin_lock_irqsave(&c->active_lock);
+	if (c->dma_quiesced) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
 		return 0;
-	if (c->active != NULL)
+	}
+	if (c->active != NULL || c->submitting) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
 		return EBUSY;
+	}
+	/* Permanently close submission admission for this shutdown attempt.  A
+	 * failed checked teardown may be retried but must not admit fresh DMA. */
+	c->quiescing = 1;
+	spin_unlock_irqrestore(&c->active_lock, irq);
 	wr32(c->operational, EHCI_USBINTR, 0);
 	command = rd32(c->operational, EHCI_USBCMD);
 	wr32(c->operational, EHCI_USBCMD,
@@ -205,7 +223,13 @@ ehci_quiesce(struct drv_usb_hcd *hcd)
 	irq_error = ehci_irq_disestablish(c);
 	if (irq_error != 0)
 		return irq_error;
+	irq = spin_lock_irqsave(&c->active_lock);
+	if (c->active != NULL || c->submitting) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		__builtin_trap();
+	}
 	c->dma_quiesced = 1;
+	spin_unlock_irqrestore(&c->active_lock, irq);
 	return 0;
 }
 
@@ -213,8 +237,13 @@ static void
 ehci_stop(struct drv_usb_hcd *hcd)
 {
 	struct ehci_controller *c = hcd_controller(hcd);
+	unsigned long irq;
+	int releasable;
 
-	if (!c->dma_quiesced) {
+	irq = spin_lock_irqsave(&c->active_lock);
+	releasable = c->dma_quiesced && c->active == NULL && !c->submitting;
+	spin_unlock_irqrestore(&c->active_lock, irq);
+	if (!releasable) {
 		hal_printf("ehci: refusing to release DMA before checked quiesce\n");
 		c->quarantined = 1;
 		return;
@@ -250,15 +279,136 @@ static int build_request(struct ehci_controller*c,struct drv_usb_urb*urb,struct 
 	r->qh->characteristics=(address&0x7fU)|((endpoint&15U)<<8)|(2U<<12)|(r->control?(1U<<14):0U)|((packet&0x7ffU)<<16)|(4U<<28);r->qh->capabilities=1U<<30;r->qh->next=(uint32_t)r->schedule.device_address+128U;r->qh->alternate=EHCI_LINK_TERM;r->qh->token=r->control?0U:((uint32_t)initial_toggle<<31);*result=r;return 0;
 fail:request_free(c,r);return error;
 }
-static int ehci_urb_enqueue(struct drv_usb_hcd*hcd,struct drv_usb_urb*urb){struct ehci_controller*c=hcd_controller(hcd);struct ehci_request*r;bool enabled;int error;enabled=hal_irq_disable();if(c->active){if(enabled)hal_irq_enable();return EBUSY;}error=build_request(c,urb,&r);if(error){if(enabled)hal_irq_enable();return error;}c->active=r;drv_usb_urb_set_hcd_data(urb,r);c->async_head->horizontal=(uint32_t)r->schedule.device_address|EHCI_LINK_QH;if(enabled)hal_irq_enable();return 0;}
-static int ehci_urb_dequeue(struct drv_usb_hcd*hcd,struct drv_usb_urb*urb){struct ehci_controller*c=hcd_controller(hcd);struct ehci_request*r=drv_usb_urb_hcd_data(urb);bool enabled;if(!r)return EINVAL;enabled=hal_irq_disable();c->async_head->horizontal=(uint32_t)c->async_head_memory.device_address|EHCI_LINK_QH;c->active=NULL;drv_usb_urb_set_hcd_data(urb,NULL);if(enabled)hal_irq_enable();request_free(c,r);return 0;}
+static int
+ehci_urb_enqueue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
+{
+	struct ehci_controller *c = hcd_controller(hcd);
+	struct ehci_request *r;
+	unsigned long irq;
+	int error;
+
+	irq = spin_lock_irqsave(&c->active_lock);
+	if (c->quiescing || c->dma_quiesced || c->active != NULL ||
+	    c->submitting) {
+		error = c->quiescing || c->dma_quiesced ? ENODEV : EBUSY;
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return error;
+	}
+	c->submitting = 1;
+	spin_unlock_irqrestore(&c->active_lock, irq);
+	error = build_request(c, urb, &r);
+	if (error != 0) {
+		irq = spin_lock_irqsave(&c->active_lock);
+		if (!c->submitting)
+			__builtin_trap();
+		c->submitting = 0;
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return error;
+	}
+	irq = spin_lock_irqsave(&c->active_lock);
+	if (!c->submitting)
+		__builtin_trap();
+	c->submitting = 0;
+	if (c->quiescing || c->dma_quiesced || c->active != NULL) {
+		error = c->quiescing || c->dma_quiesced ? ENODEV : EBUSY;
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		request_free(c, r);
+		return error;
+	}
+	c->active = r;
+	drv_usb_urb_set_hcd_data(urb, r);
+	c->async_head->horizontal =
+	    (uint32_t)r->schedule.device_address | EHCI_LINK_QH;
+	hal_io_wmb();
+	spin_unlock_irqrestore(&c->active_lock, irq);
+	return 0;
+}
+
+static int
+ehci_urb_dequeue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
+{
+	struct ehci_controller *c = hcd_controller(hcd);
+	struct ehci_request *r;
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&c->active_lock);
+	r = c->active;
+	if (r == NULL || r->urb != urb || drv_usb_urb_hcd_data(urb) != r) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return EBUSY;
+	}
+	/* An async-list pointer update alone does not retire an EHCI-cached QH.
+	 * Keep ownership until normal completion until a checked Async Advance
+	 * cancellation path is implemented. */
+	spin_unlock_irqrestore(&c->active_lock, irq);
+	return EBUSY;
+}
 static int ehci_endpoint_enable(struct drv_usb_hcd*h,struct drv_usb_endpoint*e){(void)h;(void)e;return 0;}
 static int ehci_endpoint_disable(struct drv_usb_hcd*h,struct drv_usb_endpoint*e){(void)h;(void)e;return 0;}
 static uint32_t ehci_frame_number(struct drv_usb_hcd*h){struct ehci_controller*c=hcd_controller(h);return rd32(c->operational,EHCI_FRINDEX)>>3;}
 static int ehci_root_status(struct drv_usb_hcd*h,void*b,size_t n,size_t*a){struct ehci_controller*c=hcd_controller(h);uint8_t bits=0;unsigned p;if(!b||n<1)return EINVAL;for(p=0;p<h->root_port_count;p++){uint32_t s=rd32(c->operational,EHCI_PORTSC(p));if(s&(EHCI_PORT_CONNECT_CHANGE|EHCI_PORT_ENABLE_CHANGE))bits|=(uint8_t)(2U<<p);}*(uint8_t*)b=bits;if(a)*a=1;return 0;}
 static int ehci_root_control(struct drv_usb_hcd*h,const struct drv_usb_control_request*r,void*b,size_t n,size_t*a)
 {struct ehci_controller*c=hcd_controller(h);unsigned p;uint32_t s;if(!r||r->index<1||r->index>h->root_port_count)return EINVAL;p=r->index-1U;s=rd32(c->operational,EHCI_PORTSC(p));if(r->request==0&&b&&n>=4){uint32_t v=0;if(!(s&EHCI_PORT_OWNER)){if(s&EHCI_PORT_CONNECT)v|=1U;if(s&EHCI_PORT_ENABLE)v|=2U;if(s&EHCI_PORT_RESET)v|=0x10U;v|=0x400U;}if(s&EHCI_PORT_CONNECT_CHANGE)v|=0x10000U;if(s&EHCI_PORT_ENABLE_CHANGE)v|=0x20000U;memcpy(b,&v,4);if(a)*a=4;return 0;}if(r->request==3&&r->value==4){if((s&0x0c00U)!=0){wr32(c->operational,EHCI_PORTSC(p),s|EHCI_PORT_OWNER);if(a)*a=0;return 0;}wr32(c->operational,EHCI_PORTSC(p),s|EHCI_PORT_RESET|EHCI_PORT_POWER);if(a)*a=0;return 0;}if(r->request==1){if(r->value==4)s&=~EHCI_PORT_RESET;else if(r->value==16)s|=EHCI_PORT_CONNECT_CHANGE;else if(r->value==17)s|=EHCI_PORT_ENABLE_CHANGE;else return ENOTSUP;wr32(c->operational,EHCI_PORTSC(p),s);if(a)*a=0;return 0;}if(r->request==3&&r->value==1){if(a)*a=0;return 0;}return ENOTSUP;}
-static int ehci_irq(void*argument){struct ehci_controller*c=argument;struct ehci_request*r;struct drv_usb_urb*urb;uint32_t status;size_t actual=0;unsigned i;enum drv_usb_urb_status result=DRV_USB_URB_COMPLETE;status=rd32(c->operational,EHCI_USBSTS);if(!(status&EHCI_STS_ALL))return 0;wr32(c->operational,EHCI_USBSTS,status);r=c->active;if(!r)return 1;for(i=0;i<r->qtd_count;i++)if(r->qtds[i].token&EHCI_QTD_ACTIVE)return 1;for(i=0;i<r->qtd_count;i++)if(r->qtds[i].token&EHCI_QTD_ERRORS){result=(r->qtds[i].token&EHCI_QTD_HALTED)?DRV_USB_URB_STALL:DRV_USB_URB_IO_ERROR;break;}for(i=0;i<r->data_count;i++){uint32_t remaining=(r->qtds[r->data_first+i].token>>16)&0x7fffU;actual+=r->requested[r->data_first+i]-remaining;}if(result==DRV_USB_URB_COMPLETE&&!r->control)(void)drv_usb_endpoint_set_hcd_data(drv_usb_urb_endpoint(r->urb),0,(r->qh->token>>31)&1U);if(r->input&&actual)memcpy(drv_usb_urb_buffer(r->urb),(uint8_t*)r->bounce.address+8U,actual);c->async_head->horizontal=(uint32_t)c->async_head_memory.device_address|EHCI_LINK_QH;urb=r->urb;c->active=NULL;drv_usb_urb_set_hcd_data(urb,NULL);request_free(c,r);drv_usb_hcd_complete(&c->hcd,urb,result,actual);return 1;}
+static int
+ehci_irq(void *argument)
+{
+	struct ehci_controller *c = argument;
+	struct ehci_request *r;
+	struct drv_usb_urb *urb;
+	uint32_t status;
+	size_t actual = 0;
+	unsigned i;
+	unsigned long irq;
+	enum drv_usb_urb_status result = DRV_USB_URB_COMPLETE;
+
+	status = rd32(c->operational, EHCI_USBSTS);
+	if ((status & EHCI_STS_ALL) == 0)
+		return 0;
+	wr32(c->operational, EHCI_USBSTS, status);
+	irq = spin_lock_irqsave(&c->active_lock);
+	r = c->active;
+	if (r == NULL) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return 1;
+	}
+	for (i = 0; i < r->qtd_count; i++) {
+		if ((r->qtds[i].token & EHCI_QTD_ACTIVE) != 0) {
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			return 1;
+		}
+	}
+	for (i = 0; i < r->qtd_count; i++) {
+		if ((r->qtds[i].token & EHCI_QTD_ERRORS) != 0) {
+			result = (r->qtds[i].token & EHCI_QTD_HALTED) != 0 ?
+			    DRV_USB_URB_STALL : DRV_USB_URB_IO_ERROR;
+			break;
+		}
+	}
+	for (i = 0; i < r->data_count; i++) {
+		uint32_t remaining =
+		    (r->qtds[r->data_first + i].token >> 16) & 0x7fffU;
+
+		actual += r->requested[r->data_first + i] - remaining;
+	}
+	if (result == DRV_USB_URB_COMPLETE && !r->control)
+		(void)drv_usb_endpoint_set_hcd_data(
+		    drv_usb_urb_endpoint(r->urb), 0, (r->qh->token >> 31) & 1U);
+	if (r->input && actual != 0)
+		memcpy(drv_usb_urb_buffer(r->urb),
+		    (uint8_t *)r->bounce.address + 8U, actual);
+	c->async_head->horizontal =
+	    (uint32_t)c->async_head_memory.device_address | EHCI_LINK_QH;
+	hal_io_wmb();
+	urb = r->urb;
+	if (drv_usb_urb_hcd_data(urb) != r)
+		__builtin_trap();
+	c->active = NULL;
+	drv_usb_urb_set_hcd_data(urb, NULL);
+	spin_unlock_irqrestore(&c->active_lock, irq);
+	request_free(c, r);
+	drv_usb_hcd_complete(&c->hcd, urb, result, actual);
+	return 1;
+}
 static const struct drv_usb_hcd_ops ehci_ops={.start=ehci_start,.quiesce=ehci_quiesce,.stop=ehci_stop,.urb_enqueue=ehci_urb_enqueue,.urb_dequeue=ehci_urb_dequeue,.endpoint_enable=ehci_endpoint_enable,.endpoint_disable=ehci_endpoint_disable,.frame_number=ehci_frame_number,.root_hub_status=ehci_root_status,.root_hub_control=ehci_root_control};
 
 static void
@@ -353,8 +503,11 @@ ehci_attach(struct drv_pci_device *d, const struct drv_pci_id *id)
 	if (c == NULL)
 		return ENOMEM;
 	memset(c, 0, sizeof(*c));
+	spin_init(&c->active_lock, LOCK_RANK_DEVICE,
+	    "EHCI active request");
 	c->pci = d;
 	c->dma_quiesced = 1;
+	c->quiescing = 1;
 	stage = "BAR claim";
 	error = drv_pci_device_claim_bar(d, 0);
 	if (error != 0)

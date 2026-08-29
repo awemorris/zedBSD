@@ -65,6 +65,42 @@ if grep -q 'DRV_USB_HCD_CAP_CONCURRENT_URBS' \
 	echo 'xHCI source audit: EHCI/UHCI advertises concurrent URBs' >&2
 	exit 1
 fi
+
+# The legacy single-active HCDs share their request slot between submit,
+# interrupt completion, cancellation, and quiesce.  Cancellation may only
+# return success after checked hardware retirement exists; until then it must
+# retain the request for the locked interrupt completion path.
+for legacy_hcd in ehci uhci; do
+	legacy_source="$root/src/drivers/pci-$legacy_hcd.c"
+	grep -q 'struct spinlock active_lock;' "$legacy_source"
+	grep -q 'submitting = 1;' "$legacy_source"
+	grep -q 'quiescing = 1;' "$legacy_source"
+	awk -v function_name="${legacy_hcd}_urb_dequeue" '
+		$0 ~ ("^" function_name "\\(") ||
+		    $0 ~ ("^static int " function_name "\\(") { inside = 1 }
+		inside && /return EBUSY;/ { busy = 1 }
+		inside && /(request_free|active = NULL|drv_usb_urb_set_hcd_data\(urb, NULL\))/ {
+			unsafe_release = 1
+		}
+		inside && /^}/ { exit !(busy && !unsafe_release) }
+		END { if (!inside) exit 1 }
+	' "$legacy_source"
+	awk -v function_name="${legacy_hcd}_irq" '
+		$0 ~ ("^" function_name "\\(") ||
+		    $0 ~ ("^static int " function_name "\\(") { inside = 1 }
+		inside && /spin_lock_irqsave\(&c->active_lock\)/ { locked = NR }
+		inside && /c->active = NULL;/ { unlinked = NR }
+		inside && /drv_usb_urb_set_hcd_data\(urb, NULL\)/ { detached = NR }
+		inside && /spin_unlock_irqrestore\(&c->active_lock/ { unlocked = NR }
+		inside && /request_free\(c, r\)/ { freed = NR }
+		inside && /drv_usb_hcd_complete\(&c->hcd, urb/ { completed = NR }
+		inside && /^}/ {
+			exit !(locked && locked < unlinked && unlinked < detached &&
+			    detached < unlocked && unlocked < freed && freed < completed)
+		}
+		END { if (!inside) exit 1 }
+	' "$legacy_source"
+done
 if sed -n '/struct xhci_controller {/,/^};/p' "$xhci" |
 	grep -q 'struct xhci_request[[:space:]]*\*active'; then
 	echo 'xHCI source audit: controller-global active request remains' >&2
@@ -88,10 +124,13 @@ echo 'xHCI concurrent URB source audit: PASS'
 # the model cannot substitute for the kernel headers and warning policy.
 TMPDIR="$temporary_root" "$make_command" -C "$root" -j16 \
 	build/amd64/kern64/src/drivers/pci-xhci.o \
+	build/amd64/kern64/src/drivers/pci-ehci.o \
+	build/amd64/kern64/src/drivers/pci-uhci.o \
 	build/amd64/kern64/src/drivers/usb.o \
 	build/amd64/kern64/src/drivers/usb-storage.o
 TMPDIR="$temporary_root" "$make_command" -C "$root" -j16 \
 	ZEDBSD_CONFIG=plan/ws004-hardware/tests/config-pcat-xhci.mk \
-	build/pcat/drivers/pci-xhci.o build/pcat/drivers/usb.o \
+	build/pcat/drivers/pci-xhci.o build/pcat/drivers/pci-ehci.o \
+	build/pcat/drivers/pci-uhci.o build/pcat/drivers/usb.o \
 	build/pcat/drivers/usb-storage.o
 echo 'xHCI concurrent URB production object gate: PASS'

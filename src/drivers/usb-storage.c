@@ -11,6 +11,7 @@
 #include <hal/hal.h>
 #include <kern/disk.h>
 #include <kern/lock.h>
+#include <kern/sched.h>
 #include <string.h>
 
 #define USB_MASS_STORAGE_CLASS 0x08U
@@ -155,16 +156,32 @@ storage_control(struct usb_storage *storage, uint8_t request_type,
 	};
 	unsigned flags = length <= DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE ?
 	    DRV_USB_URB_RECLAIM_SAFE : 0;
+	uint64_t deadline = 0;
 	int error;
 
 	if (length > UINT16_MAX)
 		return EINVAL;
 	if (actual != NULL)
 		*actual = 0;
-	error = drv_usb_urb_setup_control_flags(storage->control_urb, &control,
-	    buffer, length, flags, timeout, NULL, NULL);
-	if (error == 0)
-		error = drv_usb_urb_submit(storage->control_urb);
+	if (timeout != 0) {
+		uint64_t now = sched_ticks();
+		uint64_t ticks = ((uint64_t)timeout + 9U) / 10U;
+
+		deadline = UINT64_MAX - now < ticks ? UINT64_MAX : now + ticks;
+	}
+	for (;;) {
+		error = drv_usb_urb_setup_control_flags(storage->control_urb,
+		    &control, buffer, length, flags, timeout, NULL, NULL);
+		if (error == 0)
+			error = drv_usb_urb_submit(storage->control_urb);
+		if (error != EBUSY || deadline == 0)
+			break;
+		if (sched_ticks() >= deadline) {
+			error = ETIMEDOUT;
+			break;
+		}
+		sched_yield();
+	}
 	if (error == 0)
 		error = drv_usb_urb_wait_reusable(storage->control_urb);
 	if (actual != NULL)
