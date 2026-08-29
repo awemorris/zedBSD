@@ -19,7 +19,8 @@ the integrated `ueN` automatic software milestone.
 completion-budget, rearm, and packet-filter-open hardening with focused and
 regression evidence. The q029 physical follow-up captured valid RTL8156
 connection/speed notifications with data-interface `wIndex`; the repaired NCM
-parser and real adapter now pass carrier, DHCP, and ping through QEMU xHCI.
+parser and real adapter pass carrier, DHCP, and ping through QEMU xHCI, and the
+final Latitude-native image successfully fetches `www.google.com`.
 `p021` records the independent native-xHCI Max ESIT defect exposed by the same
 audit and remains outside q029. `p016` records the non-Queue legacy-HCD hardware-retirement follow-up exposed
 by that audit; current UHCI/EHCI cancellation remains conservative until it is
@@ -27,13 +28,11 @@ completed. `p018` corrected the IAD-less, Union-associated NCM match exposed by
 the first physical RTL8156 insertion, and the accepted follow-up published
 `ue0`. The broader asynchronous-TX/accounting decisions remain in p017.
 
-Resume point: q029 p020 and the authorized automatic/remote WS005 p001 slices
-are complete. Run one final Latitude-native RTL8156 check with the superseding
-candidate. A native-periodic-interrupt-only failure makes ready p021 the
-evidence-led next Phase.
-p019 remains an independent ECM baseline rather than an automatic detour after
-physical NCM interoperability has passed. p016 and the remaining asynchronous
-TX/accounting portion of p017 stay later WS004 work.
+Resume point: q029 p020 and WS005 p001 are complete, including the final
+Latitude-native RTL8156 DHCP/DNS/external-fetch acceptance. p021 remains a
+ready but independent xHCI specification cleanup rather than a prerequisite
+for NCM. p019 remains an independent ECM baseline. p016 and the remaining
+asynchronous-TX/accounting portion of p017 stay later WS004 work.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -72,11 +71,10 @@ Shared tests: [WS004 test index](tests/README.md)
 | arm64 IORT/GIC ITS backend | Deferred; public signature preserved and port returns unsupported | An arm64 PCIe platform Phase supplies firmware and interrupt-controller fixtures |
 | Non-PCI message source prefixes | Deferred; only canonical PCI BDF is accepted | A concrete platform device needs message interrupts and defines stable source identity |
 
-The active q029 item is WS005 p001's final Latitude-native acceptance; its
-automatic slice, real-device QEMU-passthrough path, and p020 are complete.
-p021 is the first evidence-led native-controller candidate if periodic
-notification delivery alone still fails and is ready for a new Queue proposal.
-Later WS004 candidates are p016/p017, p019, HW-10/HW-11,
+q029, p020, and WS005 p001 are complete through final Latitude-native external
+fetch. p021 remains ready for a future Queue as an independent standards
+correction, not an active failure response. Later WS004 candidates are
+p016/p017, p019, HW-10/HW-11,
 HW-20/HW-21, and HW-30 when their inputs and acceptance environments are
 available.
 

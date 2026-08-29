@@ -4,8 +4,8 @@ Last updated: 2026-08-29
 
 Phase ID: `ws005-p001`
 
-Status: in progress (`q029`); automatic and real-device QEMU-passthrough paths
-pass, final Latitude-native check pending
+Status: completed (`q029`); automatic, real-device QEMU-passthrough, and final
+Latitude-native paths pass
 
 Parent: [WS005 networking and WPA](../ws.md)
 
@@ -260,16 +260,23 @@ It then passed the real-device USB-host cell end to end:
   zero loss.
 
 This proves the physical RTL8156 NCM notification, DHCP, NTB TX/RX, ARP, IPv4,
-and ICMP path through the QEMU xHCI model. It does not substitute for the
-Latitude's native xHCI controller, so the Phase remains in progress until one
-combined Dell check uses the current image.
+and ICMP path through the QEMU xHCI model.
+
+## Final Latitude-native acceptance
+
+The final candidate passed its one combined Dell Latitude 5320 acceptance on
+2026-08-29. The user reported that it worked perfectly and that
+`fetch www.google.com` succeeded. That result proves the native xHCI carrier
+notification, DHCP configuration, DNS resolution, default routing, and
+external application transfer required by this Phase. No intermediate retry
+or ECM detour was needed.
 
 A separate static audit found that the native xHCI endpoint-context builder
 does not encode SuperSpeed periodic Max ESIT Payload. QEMU tolerates that
 independent specification defect. Its bounded correction is planned as
 `ws004-p021` and is not silently added to q029 implementation scope.
 
-The final review also retained two nonblocking multi-process/multi-interface
+The final review retains two nonblocking multi-process/multi-interface
 follow-ups rather than broadening q029: IPv4 limited broadcast must ignore a
 different interface's global default gateway when `SO_BINDTODEVICE` selects the
 DHCP interface, and direct concurrent `dhcpc` invocations need route-transaction
@@ -300,11 +307,9 @@ Ethernet interface, so neither changes its recorded result.
 
 ## Reconsideration boundary
 
-Stop after the final repaired-image Latitude check rather than guessing if it
-still fails. A carrier-only failure now points first to the independently
-planned `ws004-p021` SuperSpeed periodic endpoint-context correction because
-the same physical adapter and NCM stack pass through QEMU. Keep
-`ws004-p019` as an independent ECM baseline, not the automatic next action
-after evidence has already proven physical NCM interoperability. Any remaining
-failure must retain its first stage and be returned through a newly approved
-Queue rather than silently expanding q029.
+The repaired-image Latitude check passed, so the reconsideration branch was
+not selected. Keep `ws004-p021` as an independent xHCI specification cleanup
+and `ws004-p019` as an independent ECM baseline rather than prerequisites for
+this completed physical NCM milestone. Any later reconnect, sustained-transfer,
+or multi-interface failure returns through a newly approved Queue rather than
+silently reopening q029.

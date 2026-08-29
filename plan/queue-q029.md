@@ -1,5 +1,7 @@
 # Queue: CDC NCM deterministic hardening and one physical data-path check
 
+Archive status: closed
+
 Last updated: 2026-08-29
 
 QID: `q029`

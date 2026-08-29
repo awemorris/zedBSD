@@ -25,10 +25,11 @@ bMaxBurst=0  bmAttributes=0  wBytesPerInterval=16
 ```
 
 Its expected xHCI values are Max ESIT Payload 16 and Endpoint Context word 4
-`0x00100010`. The current builder leaves Max ESIT Payload zero. QEMU tolerates
-that invalid context, while a native controller may decline to schedule the
-notification endpoint. This is independent of the q029 notification-`wIndex`
-parser defect and must remain a separate change and Phase.
+`0x00100010`. The current builder leaves Max ESIT Payload zero. QEMU and the
+final q029 Latitude run both tolerate that invalid context, so this is now a
+nonblocking specification correction rather than the explanation for the
+physical carrier failure. It is independent of the repaired q029
+notification-`wIndex` parser defect and remains a separate change and Phase.
 
 ## Dependencies
 
@@ -36,8 +37,9 @@ parser defect and must remain a separate change and Phase.
 - `ws004-p011`: concurrent xHCI endpoint/request ownership and retirement.
 - `ws004-p014` and `ws004-p018`: the NCM interrupt endpoint consumer and the
   exact physical RTL8156 descriptor evidence.
-- q029 remote evidence: the same adapter passes connection notification,
-  DHCP, NTB transfer, and ping through QEMU xHCI after the parser repair.
+- q029 evidence: the same adapter passes connection notification, DHCP, NTB
+  transfer, and ping through QEMU xHCI, then DHCP/DNS/external fetch on the
+  Latitude after the parser repair.
 
 ## Frozen implementation boundary
 
@@ -94,10 +96,10 @@ descriptor.
    where their Phase fixtures provide them.
 4. Run `make -j16` and boot a disposable amd64 xHCI USB-storage image to
    `login:` with `qemu-system-x86_64`. Do not use `make check` or `.internal/`.
-5. Build one candidate image and combine its first Latitude check with the
-   pending q029 NCM acceptance. One successful `net up ue0`, DHCP lease, and
-   peer ping is sufficient for the development checkpoint; repeated cold-boot
-   acceptance remains the later final reliability gate.
+5. Build one candidate image and run one Latitude check when this independent
+   Phase is eventually queued. One successful `net up ue0`, DHCP lease, and
+   external fetch is sufficient for its development checkpoint; repeated
+   cold-boot acceptance remains the later final reliability gate.
 
 ## Completion conditions
 

@@ -4,8 +4,8 @@ Last updated: 2026-08-29
 
 WSID: `ws005`
 
-Status: active; q029 p001 automatic and real-device passthrough paths pass,
-final Latitude-native check pending; WLAN manually blocked
+Status: active; q029 p001 complete through final Latitude-native external
+fetch; WLAN manually blocked
 
 Parent: [master plan](../master.md)
 
@@ -14,16 +14,16 @@ candidate-image QEMU USB-root gate pass. A real RTL8156 capture identified that
 valid connection/speed notifications name its paired data interface; the
 bounded parser and DHCP route-transaction repairs now pass carrier, a
 static-to-DHCP transition, routing, and ping through QEMU USB-host with that
-physical adapter. p001 remains incomplete until one
-Latitude-native acceptance. Physical NCM publication dependency `ws004-p018`
-and deterministic hardening dependency `ws004-p020` are complete; the inherited
-control-plane baseline is `ws002-p020`.
+physical adapter. The final Latitude-native image also reached DHCP and
+successfully fetched `www.google.com`, completing p001. Physical NCM
+publication dependency `ws004-p018` and deterministic hardening dependency
+`ws004-p020` are complete; the inherited control-plane baseline is
+`ws002-p020`.
 
-Resume point: boot the superseding p001 candidate image once on the Latitude
-for combined RTL8156 carrier/static/DHCP acceptance. If only native periodic
-interrupt delivery still fails, return planned `ws004-p021` to a new Queue;
-the real RTL8156 NCM data path has already passed through QEMU xHCI, so p019 ECM
-is no longer the automatic next action. RTL8822CE WLAN/WPA remains on `MB-006`.
+Resume point: p001 needs no further acceptance. Select a separately approved
+follow-up such as reconnect/reliability, the independent ECM baseline, or
+`ws004-p021` xHCI specification cleanup when prioritized. RTL8822CE WLAN/WPA
+remains on `MB-006`.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -31,7 +31,7 @@ Shared tests: [WS005 test index](tests/README.md)
 
 | Phase | Status | Result / resume point |
 | --- | --- | --- |
-| [`ws005-p001`](phase001-usb-ncm-physical-datapath/phase.md) | In progress (`q029`); automatic plus remote real-device path pass | Carrier/deadline, rollback, diagnostics, notification-pair and DHCP-route repairs, final image, USB-root, and real RTL8156 static-to-DHCP/ping through QEMU pass; run one final Latitude-native check next |
+| [`ws005-p001`](phase001-usb-ncm-physical-datapath/phase.md) | Complete (`q029`) | Carrier/deadline, rollback, diagnostics, notification-pair and DHCP-route repairs, USB-root and real RTL8156 passthrough gates pass; final Latitude-native DHCP plus `fetch www.google.com` succeeds |
 
 `ws002-p020` remains historical ownership of the current `networkd`/`net`
 baseline; it is not renumbered into this WS.
@@ -85,8 +85,8 @@ and failure.
 | --- | --- | --- | --- | --- |
 | NET-00 | Complete with follow-ups | `networkd`, `net`, `dhcpc`, rc.conf boot orchestration, and fd 3 readiness | Phase 20 | See Phase 20 evidence and handoff list |
 | NET-05 | Planned in WS011 | Interactive `net`, `/etc/net.conf`, persistence, and VLAN/bridge configuration model | WS011 | WS011 owns its Phase and acceptance records |
-| NET-01 | In progress (`q029` p001); remote physical-adapter path passes | Hardware-network bring-up procedure, safe DHCP transition/diagnostics, and bounded carrier/TX/RX evidence | BR-00, bound RTL8156 `ue0`, completed p020 hardening | The current image passes real RTL8156 carrier/DHCP/ping through QEMU; one final Latitude-native static/DHCP check must pass or retain its exact controller boundary |
-| NET-10 | Active; NCM physical-device path proven, native controller check pending | Independent ECM and NCM USB Ethernet implementations behind common USB/`net_device` contracts; no Realtek frontend is assumed | BR-07, HW-12; HW-13 remains an independent baseline | p001 tests the repaired candidate once on the Latitude; p021, not ECM, is the first planned response to a native periodic-interrupt-only failure; later work proves reconnect, DNS/external transfer, and reliability |
+| NET-01 | Complete (`q029` p001) | Hardware-network bring-up procedure, safe DHCP transition/diagnostics, and bounded carrier/TX/RX evidence | BR-00, bound RTL8156 `ue0`, completed p020 hardening | Real RTL8156 carrier/static/DHCP/ping passes through QEMU and final Latitude-native DHCP/DNS/external fetch passes |
+| NET-10 | Active; NCM physical-device and native-controller milestone proven | Independent ECM and NCM USB Ethernet implementations behind common USB/`net_device` contracts; no Realtek frontend is assumed | BR-07, HW-12; HW-13 remains an independent baseline | p001 is complete; later work separately proves reconnect, ECM comparison, and sustained reliability |
 | NET-20 | Manually blocked (`MB-006`) | Versioned `networkd`-to-`wpa` child protocol and pluggable backend contract | Process/fd primitives, explicit release | Host protocol tests cover success, rejection, timeout, crash, and cancellation |
 | NET-21 | Manually blocked (`MB-006`) | `/etc/wpa/` plaintext database and safe management semantics | NET-20, explicit release | Root-only permissions, atomic update, parse/error tests, and no credential logging |
 | NET-22 | Manually blocked (`MB-006`) | `/sbin/wpa` initial RTL8822CE backend | WLAN userspace/control ABI, NET-20/21, firmware policy | Scan selection, authenticate/associate, reconnect, and useful errors on hardware |
