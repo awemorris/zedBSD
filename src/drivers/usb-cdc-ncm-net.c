@@ -139,28 +139,44 @@ ncm_interface_configuration(struct drv_usb_interface *interface)
 }
 
 static int
-ncm_iad_valid(struct drv_usb_configuration *configuration,
+ncm_iad_covers(
+	const struct drv_usb_interface_association_descriptor *iad,
+	unsigned interface_number)
+{
+	return iad->interface_count != 0U &&
+	    interface_number >= iad->first_interface &&
+	    interface_number - iad->first_interface < iad->interface_count;
+}
+
+static int
+ncm_iad_consistent(struct drv_usb_configuration *configuration,
 	unsigned control_number, unsigned data_number)
 {
 	unsigned index;
-	int matches = 0;
+	int association = 0;
 
 	for (index = 0; index < drv_usb_configuration_iad_count(configuration);
 	    index++) {
 		const struct drv_usb_interface_association_descriptor *iad =
 		    drv_usb_configuration_iad(configuration, index);
 
-		if (iad == NULL || iad->first_interface != control_number ||
-		    iad->interface_count != 2U)
+		if (iad == NULL)
+			return 0;
+		if (!ncm_iad_covers(iad, control_number) &&
+		    !ncm_iad_covers(iad, data_number) &&
+		    iad->first_interface != control_number &&
+		    iad->first_interface != data_number)
 			continue;
-		if (iad->function_class != NCM_COMMUNICATION_CLASS ||
+		if (association || iad->first_interface != control_number ||
+		    iad->interface_count != 2U ||
+		    iad->function_class != NCM_COMMUNICATION_CLASS ||
 		    iad->function_subclass != NCM_COMMUNICATION_SUBCLASS ||
 		    iad->function_protocol != NCM_COMMUNICATION_PROTOCOL ||
 		    data_number != control_number + 1U)
 			return 0;
-		matches++;
+		association = 1;
 	}
-	return matches == 1;
+	return 1;
 }
 
 static int
@@ -339,7 +355,7 @@ ncm_binding_parse(struct drv_usb_interface *control,
 	binding->data = drv_usb_configuration_find_interface(configuration,
 	    data_number);
 	if (binding->data == NULL ||
-	    !ncm_iad_valid(configuration, control_number, data_number) ||
+	    !ncm_iad_consistent(configuration, control_number, data_number) ||
 	    !ncm_find_data_alternate(binding->data, &binding->bulk_in,
 	    &binding->bulk_out, &binding->data_alternate))
 		return 0;

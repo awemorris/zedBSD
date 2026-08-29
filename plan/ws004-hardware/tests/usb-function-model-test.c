@@ -18,6 +18,8 @@ static unsigned checks;
 static size_t allocation_attempts;
 static size_t allocation_fail_at;
 static size_t live_allocations;
+static char diagnostic_log[16384];
+static size_t diagnostic_log_length;
 
 #define CHECK(expression) do { \
 	checks++; \
@@ -56,8 +58,37 @@ hal_free(void *pointer)
 int
 hal_printf(const char *format, ...)
 {
-	(void)format;
-	return 0;
+	va_list arguments;
+	int written;
+	size_t available;
+
+	available = sizeof(diagnostic_log) - diagnostic_log_length;
+	if (available == 0)
+		return 0;
+	va_start(arguments, format);
+	written = vsnprintf(diagnostic_log + diagnostic_log_length, available,
+	    format, arguments);
+	va_end(arguments);
+	if (written < 0)
+		return written;
+	if ((size_t)written >= available)
+		diagnostic_log_length = sizeof(diagnostic_log) - 1U;
+	else
+		diagnostic_log_length += (size_t)written;
+	return written;
+}
+
+static void
+diagnostic_log_reset(void)
+{
+	diagnostic_log[0] = '\0';
+	diagnostic_log_length = 0;
+}
+
+static int
+diagnostic_log_contains(const char *text)
+{
+	return strstr(diagnostic_log, text) != NULL;
 }
 
 uint64_t
@@ -78,6 +109,11 @@ static const uint8_t device_descriptor[] = {
 	0x34, 0x12, 0x78, 0x56, 0x00, 0x01, 1, 2, 5, 2
 };
 
+static const uint8_t rtl8156_device_descriptor[] = {
+	18, 1, 0x10, 0x02, 0, 0, 0, 64,
+	0xda, 0x0b, 0x56, 0x81, 0x04, 0x31, 1, 2, 6, 3
+};
+
 static const uint8_t storage_configuration[] = {
 	9, 2, 32, 0, 1, 1, 0, 0x80, 50,
 	9, 4, 0, 0, 2, 8, 6, 0x50, 0,
@@ -92,6 +128,42 @@ static const uint8_t unsupported_vendor_configuration[] = {
 	9, 4, 2, 0, 2, 0xff, 0, 0, 0,
 	7, 5, 0x86, 2, 64, 0, 0,
 	7, 5, 0x07, 2, 64, 0, 0
+};
+
+static const uint8_t rtl8156_vendor_configuration[] = {
+	9, 2, 39, 0, 1, 1, 0, 0xa0, 64,
+	9, 4, 0, 0, 3, 0xff, 0xff, 0, 0,
+	7, 5, 0x81, 2, 0x00, 0x02, 0,
+	7, 5, 0x02, 2, 0x00, 0x02, 0,
+	7, 5, 0x83, 3, 2, 0, 11
+};
+
+/* RTL8156 exposes an explicit CDC Union but no IAD in its NCM mode. */
+static const uint8_t rtl8156_ncm_configuration[] = {
+	9, 2, 86, 0, 2, 2, 0, 0xa0, 64,
+	9, 4, 0, 0, 1, 2, 0x0d, 0, 5,
+	5, 0x24, 0, 0x10, 0x01,
+	5, 0x24, 6, 0, 1,
+	13, 0x24, 0x0f, 3, 0, 0, 0, 0, 0xee, 0x05, 0, 0, 0,
+	6, 0x24, 0x1a, 0x00, 0x01, 0x2b,
+	7, 5, 0x83, 3, 16, 0, 11,
+	9, 4, 1, 0, 0, 0x0a, 0, 1, 0,
+	9, 4, 1, 1, 2, 0x0a, 0, 1, 4,
+	7, 5, 0x81, 2, 0x00, 0x02, 0,
+	7, 5, 0x02, 2, 0x00, 0x02, 0
+};
+
+static const uint8_t rtl8156_ecm_configuration[] = {
+	9, 2, 80, 0, 2, 3, 0, 0xa0, 64,
+	9, 4, 0, 0, 1, 2, 6, 0, 5,
+	5, 0x24, 0, 0x10, 0x01,
+	5, 0x24, 6, 0, 1,
+	13, 0x24, 0x0f, 3, 0, 0, 0, 0, 0xee, 0x05, 0, 0, 0,
+	7, 5, 0x83, 3, 16, 0, 11,
+	9, 4, 1, 0, 0, 0x0a, 0, 0, 0,
+	9, 4, 1, 1, 2, 0x0a, 0, 0, 4,
+	7, 5, 0x81, 2, 0x00, 0x02, 0,
+	7, 5, 0x02, 2, 0x00, 0x02, 0
 };
 
 static const uint8_t tied_first_configuration[] = {
@@ -170,6 +242,7 @@ struct fake_controller {
 	unsigned connected;
 	unsigned malformed;
 	unsigned vendor_first;
+	unsigned rtl8156_layout;
 	unsigned tie_first;
 	unsigned teardown_composite;
 	unsigned configuration;
@@ -258,12 +331,25 @@ fake_enqueue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 		return 0;
 	}
 	if (request->request == 6 && (request->value >> 8) == 1) {
-		bytes = device_descriptor;
-		length = sizeof(device_descriptor);
+		bytes = controller->rtl8156_layout ? rtl8156_device_descriptor :
+		    device_descriptor;
+		length = controller->rtl8156_layout ?
+		    sizeof(rtl8156_device_descriptor) : sizeof(device_descriptor);
 	} else if (request->request == 6 && (request->value >> 8) == 2) {
 		unsigned index = request->value & 0xffU;
 
-		if (controller->malformed == 1) {
+		if (controller->rtl8156_layout) {
+			if (index == 0) {
+				bytes = rtl8156_vendor_configuration;
+				length = sizeof(rtl8156_vendor_configuration);
+			} else if (index == 1) {
+				bytes = rtl8156_ncm_configuration;
+				length = sizeof(rtl8156_ncm_configuration);
+			} else if (index == 2) {
+				bytes = rtl8156_ecm_configuration;
+				length = sizeof(rtl8156_ecm_configuration);
+			}
+		} else if (controller->malformed == 1) {
 			bytes = malformed_configuration;
 			length = sizeof(malformed_configuration);
 		} else if (controller->malformed == 2) {
@@ -700,7 +786,7 @@ main(void)
 	struct fake_controller controller, malformed, missing_endpoint;
 	struct fake_controller aliased_endpoint, sparse_interface;
 	struct fake_controller interface_io, claim_controller, fault_controller;
-	struct fake_controller tie_controller, no_driver_controller;
+	struct fake_controller tie_controller, no_driver_controller, rtl8156;
 	struct fake_controller hotplug_success, hotplug_detach_failure;
 	struct fake_controller shutdown_success, shutdown_detach_failure;
 	struct fake_controller shutdown_device_failure;
@@ -747,6 +833,7 @@ main(void)
 	CHECK(drv_usb_driver_register(&fake_driver) == 0);
 	fake_register(&controller, 0);
 	controller.vendor_first = 1U;
+	diagnostic_log_reset();
 	drv_usb_hcd_root_hub_changed(&controller.hcd);
 	device = drv_usb_find_device(controller.bus_number, 1);
 	CHECK(device != NULL);
@@ -759,6 +846,10 @@ main(void)
 	    configuration_value == 2);
 	CHECK(controller.configuration == 2);
 	CHECK(fake_driver_state.attach_count == 1);
+	CHECK(diagnostic_log_contains("configuration=2 configured"));
+	CHECK(diagnostic_log_contains("interface 0 class 02/0d/00 "
+	    "driver=fixture-ncm attach-failed error="));
+	CHECK(diagnostic_log_contains("interface 1 class 0a/00/01 no-driver"));
 	CHECK(drv_usb_configuration_raw_descriptors(configuration,
 	    &raw_length) != NULL && raw_length == sizeof(ncm_configuration));
 	CHECK(drv_usb_configuration_interface_count(configuration) == 2);
@@ -928,6 +1019,36 @@ main(void)
 
 	fake_unregister(&controller);
 
+	/* The physical RTL8156 shape is vendor/NCM/ECM.  Its Union-only NCM
+	 * configuration must win by interface match, never by a fixed value. */
+	fake_driver_state.mode = FAKE_ATTACH_CLAIM_SUCCESS;
+	fake_register_capabilities(&rtl8156, 0,
+	    DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	rtl8156.rtl8156_layout = 1U;
+	diagnostic_log_reset();
+	drv_usb_hcd_root_hub_changed(&rtl8156.hcd);
+	device = drv_usb_find_device(rtl8156.bus_number, 1);
+	CHECK(device != NULL);
+	CHECK(drv_usb_device_configuration_count(device) == 3);
+	configuration = drv_usb_device_active_configuration(device);
+	CHECK(configuration == drv_usb_device_configuration(device, 1));
+	CHECK(drv_usb_configuration_descriptor(configuration)->
+	    configuration_value == 2);
+	CHECK(drv_usb_configuration_iad_count(configuration) == 0);
+	CHECK(rtl8156.configuration == 2);
+	control = drv_usb_configuration_find_interface(configuration, 0);
+	data = drv_usb_configuration_find_interface(configuration, 1);
+	CHECK(control != NULL && data != NULL);
+	CHECK(drv_usb_interface_driver(control) == &fake_driver);
+	CHECK(drv_usb_interface_claimed_by(data) == control);
+	CHECK(diagnostic_log_contains("0bda:8156 class 00 configuration=2 "
+	    "configured"));
+	CHECK(diagnostic_log_contains("interface 0 class 02/0d/00 "
+	    "driver=fixture-ncm\n"));
+	CHECK(!diagnostic_log_contains("attach-failed"));
+	fake_unregister(&rtl8156);
+	fake_driver_state.mode = FAKE_ATTACH_SELECT_ONLY;
+
 	fake_register(&interface_io, 0);
 	drv_usb_hcd_root_hub_changed(&interface_io.hcd);
 	device = drv_usb_find_device(interface_io.bus_number, 1);
@@ -1035,12 +1156,16 @@ main(void)
 	CHECK(fault_success_nth > 20U && fault_success_nth <= 128U);
 	CHECK(drv_usb_driver_unregister(&fake_driver) == 0);
 	fake_register(&no_driver_controller, 0);
+	diagnostic_log_reset();
 	drv_usb_hcd_root_hub_changed(&no_driver_controller.hcd);
 	device = drv_usb_find_device(no_driver_controller.bus_number, 1);
 	CHECK(device != NULL);
 	CHECK(drv_usb_configuration_descriptor(
 	    drv_usb_device_active_configuration(device))->configuration_value == 1);
 	CHECK(no_driver_controller.configuration == 1);
+	CHECK(diagnostic_log_contains("configuration=1 configured "
+	    "(no supported configuration; first selected)"));
+	CHECK(diagnostic_log_contains("interface 0 class 08/06/50 no-driver"));
 	fake_unregister(&no_driver_controller);
 	CHECK(live_allocations == 0);
 
@@ -1057,6 +1182,7 @@ main(void)
 	hotplug_success.teardown_tracking = 1U;
 	hotplug_success.teardown_composite = 1U;
 	hotplug_success.vendor_first = 1U;
+	diagnostic_log_reset();
 	drv_usb_hcd_root_hub_changed(&hotplug_success.hcd);
 	device = drv_usb_find_device(hotplug_success.bus_number, 1);
 	CHECK(device != NULL);
@@ -1068,6 +1194,14 @@ main(void)
 	CHECK(drv_usb_interface_driver(control) == &fake_driver);
 	CHECK(drv_usb_interface_claimed_by(data) == control);
 	CHECK(drv_usb_interface_driver(storage) == &fake_storage_driver);
+	CHECK(diagnostic_log_contains("interface 0 class 02/0d/00 "
+	    "driver=fixture-ncm"));
+	CHECK(diagnostic_log_contains("interface 1 class 0a/00/01 "
+	    "claimed-by=0 driver=fixture-ncm"));
+	CHECK(!diagnostic_log_contains("interface 1 class 0a/00/01 "
+	    "probe-failed error="));
+	CHECK(diagnostic_log_contains("interface 2 class 08/06/50 "
+	    "driver=fixture-storage"));
 	hotplug_success.connected = 0;
 	drv_usb_hcd_root_hub_changed(&hotplug_success.hcd);
 	CHECK(drv_usb_find_device(hotplug_success.bus_number, 1) == NULL);

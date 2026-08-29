@@ -1,123 +1,101 @@
-# Queue: general USB transactions and CDC NCM software milestone
+# Queue: RTL8156 CDC NCM association and physical-enumeration follow-up
 
 Last updated: 2026-08-29
 
-QID: `q027`
+QID: `q028`
 
-Queue status: finished
+Queue status: automatic gates complete; final physical acceptance pending
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: the user approved the original five-Phase Queue on 2026-08-29.
-After p014 reached its documented ownership reconsideration boundary, the user
-approved rebuilding q027 on 2026-08-29 to insert the general `ws004-p015`
-binding/interface transaction before resuming p014, with execution authorized.
+Authorization: the user approved implementation on 2026-08-29 after the first
+Latitude RTL8156 insertion enumerated `0bda:8156` but did not publish a network
+device.
 
-Timebox: no fixed wall-clock limit; continue until all six finite items have
-been completed or honestly marked `uncleared` at a documented boundary.
+Timebox: no fixed wall-clock limit; complete the finite automatic gates and
+prepare one final real-hardware `ue0` acceptance action.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q026](queue-q026.md)
+Previous Queue: [q027](queue-q027.md)
 
 ## Purpose
 
-Add a native host-side USB CDC NCM network interface without hiding the USB,
-xHCI, network-device, and shutdown contracts that NCM exercises.  Resolve the
-discovered alternate/URB conflict as a general Mass Storage, NCM, HID, Audio,
-and composite-device USB transaction contract rather than an NCM exception. The first
-implementation is an NCM 1.0-compatible NTH16/NDP16, no-CRC, 1500-byte-MTU
-profile named `ueN`.  It is deliberately independent rather than built on a
-speculative common USB-Ethernet implementation.
+Correct the standards-based CDC NCM association rule exposed by the real
+RTL8156 descriptor layout. A CDC Union descriptor is the authoritative
+control/data association; an Interface Association Descriptor is optional
+corroboration rather than a prerequisite. Preserve driver-aware
+multi-configuration selection so an NCM configuration outranks unsupported
+vendor and ECM configurations without a VID:PID configuration-number quirk.
+
+Add concise USB binding diagnostics so a successful USB enumeration that does
+not create a class device identifies the selected configuration, relevant
+interface tuple, and probe outcome instead of stopping at device class `00`.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws004-p010` | [Phase](ws004-hardware/phase010-usb-function-model/phase.md) | completed | USB configuration, alternate-setting, functional-descriptor, string, interface-claim, and transactional endpoint contracts pass 1280 focused checks plus sanitizer, analyzer, regression, and configured-build gates |
-| 2 | `ws004-p011` | [Phase](ws004-hardware/phase011-xhci-concurrent-urbs/phase.md) | completed | per-endpoint xHCI ownership, checked cancellation/drain, bounded reclaim reserve, capability query, and callback-aware URB drain pass focused, analyzer, build, and USB-root QEMU gates |
-| 3 | `ws004-p012` | [Phase](ws004-hardware/phase012-net-device-hotplug/phase.md) | completed | carrier, concurrent detach, stale-identity purge, deferred release, and terminal shutdown barriers pass focused and sanitizer gates |
-| 4 | `ws004-p013` | [Phase](ws004-hardware/phase013-cdc-ncm-wire/phase.md) | completed | strict bounded negotiation and NTH16/NDP16 encode/decode, including the advertised-maximum no-ZLP exception, pass production-source fixtures |
-| 5 | `ws004-p015` | [Phase](ws004-hardware/phase015-usb-binding-transactions/phase.md) | completed | interface-scoped I/O gate, active-endpoint submit, provisional binding, and EP0 serialization pass general USB gates |
-| 6 | `ws004-p014` | [Phase](ws004-hardware/phase014-cdc-ncm-driver/phase.md) | completed | production NCM class driver uses the general transaction contract, binds as `ueN`, transfers, detaches, reconnects, and passes the declared software gate |
+| 1 | `ws004-p018` | [Phase](ws004-hardware/phase018-rtl8156-ncm-association/phase.md) | automatic gates complete; physical acceptance pending | Union-associated, IAD-less NCM wins a three-configuration RTL8156-shaped fixture, binding diagnostics are actionable, automatic/build/QEMU gates pass, and one final Latitude `ue0` acceptance action is prepared |
 
 ## Dependency order
 
 ```text
-ws004-p010 ----+----> ws004-p015 ----> ws004-p014
-               |
-ws004-p011 ----+
-               |
-ws004-p012 ----+
-               |
-ws004-p013 ----+
+ws004-p010 USB configuration/function model
+          +
+ws004-p014 CDC NCM software driver
+          |
+          v
+ws004-p018 RTL8156 association and diagnostics
 ```
-
-p010 through p013 were complete when this Queue began. p014's first
-implementation exposed a general allocated-URB/alternate ownership gap. p015
-resolved that gap against the frozen USB, xHCI, and network lifetime contracts,
-then p014 completed on top of the resulting general contract.
 
 ## Frozen product boundary
 
-- Host-side CDC NCM 1.0-compatible operation only.
-- NTH16 and NDP16 only; CRC, NTH32, MBIM, ECM, RNDIS, vendor-specific Realtek,
-  USB-device/gadget role, jumbo frames, and advanced TX aggregation are out of
-  scope.
-- RX accepts multiple valid Ethernet datagrams per NTB. Initial TX may emit one
-  datagram per NTB.
-- xHCI is the first concurrent-HCD target. UHCI/EHCI must fail safely rather
-  than falsely advertising NCM support.
-- The driver is self-contained below stable USB and `net_device` interfaces.
-  Common USB-Ethernet code may be extracted only after another implementation
-  demonstrates stable commonality.
-- Stock QEMU `usb-net` is ECM/RNDIS, not NCM. Host production-source fixtures,
-  configured builds, xHCI regression, and ordinary QEMU boot form the software
-  completion gate. True NCM interoperability remains WS005 physical/gadget
-  acceptance and is not falsely claimed here.
+- Keep the generic CDC NCM class match. Do not hardcode RTL8156 configuration
+  numbers or relabel its vendor-specific configuration as NCM.
+- Require exactly one valid CDC Union association between the NCM control
+  interface and CDC data interface.
+- Do not require an IAD. If a relevant IAD is present, require it to corroborate
+  the same two-interface NCM function; contradictory or ambiguous metadata is
+  rejected.
+- Preserve strict Header, Ethernet, NCM functional-descriptor, alternate,
+  endpoint, MAC-string, HCD capability, and lifecycle validation from p014.
+- Diagnostics are concise and bounded. They expose selection/binding facts and
+  errors; they do not dump arbitrary descriptor payloads or add a debug-only
+  success path.
+- This Queue proves enumeration and `ue0` publication. DHCP, IP transfer,
+  sustained traffic, link recovery, and repeated physical acceptance remain
+  WS005 networking evidence.
 
 ## Execution rules
 
 - Preserve unrelated work, including the existing root `AGENTS.md` move; do
-  not stage or rewrite it as part of q027.
+  not stage or rewrite it as part of q028.
 - Do not inspect or modify `.internal/`, `userland/noct/NoctLang`, or
   `/home/awe/NoctLang`.
 - Use `make -j16`, focused WS004 fixtures, and `qemu-system-x86_64`; do not use
   `make check`.
-- Keep USB storage boot and reclaim-safe DMA behavior working while adding
-  persistent network URBs.
-- Commit each completed Phase as `WIP` and push it. If push is unavailable,
-  retain the local commit and continue.
-
-## Completion definition
-
-q027 is finished when every item is `completed` or `uncleared`, actual results
-are synchronized to P/W/M/Q, focused fixtures and declared builds pass, and no
-result claims physical NCM interoperability without a proven NCM device role.
+- Keep ordinary USB Storage selection, boot, disconnect, and reclaim behavior
+  working while changing function matching and diagnostics.
+- Complete automatic work before requesting one real-machine action. State
+  that action's purpose and exact image path; do not request repeated boots at
+  intermediate steps.
+- Do not commit from the documentation-only planning subtask. The executing
+  root task owns the final Phase commit and push under the user's standing
+  authorization.
 
 ## Execution result
 
-Finished on 2026-08-29. All six Phases completed; no item is `uncleared`.
+The generic association fix and binding diagnostics are implemented. Focused
+ordinary, sanitizer, analyzer, USB binding, NCM wire, xHCI, net hotplug, and
+USB Storage gates pass. Both amd64 and configured i386/PC/AT builds pass, and a
+disposable amd64 q35/qemu-xhci USB-root boot reaches `login:` without a tracked
+failure marker. The candidate is ready for the one remaining Latitude
+insertion check; q028 is not marked finished before that result is returned.
 
-- `ws004-p015` completed the general USB binding/interface transaction:
-  immutable alternate ownership, exact active-endpoint submit admission,
-  provisional binding cleanup, endpoint-zero serialization, callback-aware
-  drain, and conservative legacy-HCD ownership.
-- `ws004-p014` completed the software CDC NCM milestone. A strict NCM 1.0
-  communication/data function binds as `ueN`; attach makes alt 1 the final
-  fallible commit, while normal detach retains the exact graph if alt 0 or
-  registry withdrawal fails and permits a later retry.
-- The final production-source NCM fixture passed 1259 checks in both ordinary
-  and ASan/UBSan builds plus GCC `-fanalyzer`. Wire-codec, USB binding, xHCI,
-  removable-net-device, shutdown, USB Storage, and URB-publication regressions
-  passed. Default amd64 and configured i386 PC/AT `make -j16` builds passed.
-- One fresh disposable amd64 image reached `login:` through q35 `qemu-xhci`
-  USB Mass Storage without USB, storage, or kernel failure diagnostics.
-  `git diff --check` and the final independent P0/P1 review passed.
+## Completion definition
 
-Physical NCM link/transfer/reconnect evidence remains WS005 NET-T40. The
-controller-proven UHCI/EHCI request-retirement work remains pending outside
-this Queue as `ws004-p016`. Sequence resynchronization and asynchronous TX
-completion accounting are recorded as the nonblocking, non-Queue
-`ws004-p017`; none of these boundaries weakens this completed software
-milestone.
+q028 is finished when `ws004-p018` is either `completed` or honestly
+`uncleared`, its automatic evidence is synchronized to P/W/M/Q, and the final
+single-boot Latitude acceptance either observes `ue0` or records the exact new
+descriptor/probe boundary needed for a successor Phase.

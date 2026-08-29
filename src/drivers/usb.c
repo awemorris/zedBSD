@@ -175,6 +175,8 @@ static int device_quiesce(struct drv_usb_bus *bus,
 	struct drv_usb_device *device);
 static int interface_binding_detach(struct drv_usb_interface *interface,
 	unsigned flags, unsigned expected_state);
+static int interface_probe_internal(struct drv_usb_interface *interface,
+	struct drv_usb_driver **matched_driver);
 static int usb_control_locked(struct drv_usb_device *device,
 	uint8_t request_type, uint8_t request, uint16_t value, uint16_t index,
 	void *buffer, size_t length, unsigned timeout_ms, size_t *actual);
@@ -1290,7 +1292,8 @@ interface_registered_driver_score(struct drv_usb_interface *interface)
 }
 
 static struct drv_usb_configuration *
-device_preferred_configuration(struct drv_usb_device *device)
+device_preferred_configuration(struct drv_usb_device *device,
+	int *selected_score)
 {
 	struct drv_usb_configuration *best = &device->configurations[0];
 	int best_score = 0;
@@ -1320,7 +1323,62 @@ device_preferred_configuration(struct drv_usb_device *device)
 			best_score = score;
 		}
 	}
+	if (selected_score != NULL)
+		*selected_score = best_score;
 	return best;
+}
+
+static void
+interface_report_probe(struct drv_usb_interface *interface, int error,
+	struct drv_usb_driver *matched_driver)
+{
+	const struct drv_usb_interface_descriptor *descriptor;
+	struct drv_usb_interface *owner;
+	struct drv_usb_driver *driver;
+	unsigned bus, address;
+
+	descriptor = drv_usb_interface_descriptor(interface);
+	if (descriptor == NULL)
+		return;
+	bus = interface->device->bus->number;
+	address = interface->device->address;
+	owner = interface_claim_owner(interface);
+	if (error == 0) {
+		driver = interface->driver;
+		hal_printf("usb%u: device %u interface %u class %02x/%02x/%02x "
+		    "driver=%s\n", bus, address, descriptor->interface_number,
+		    descriptor->interface_class, descriptor->interface_subclass,
+		    descriptor->interface_protocol, driver != NULL ? driver->name :
+		    "unknown");
+	} else if (error == EBUSY && owner != NULL) {
+		const struct drv_usb_interface_descriptor *owner_descriptor =
+		    drv_usb_interface_descriptor(owner);
+
+		driver = owner->driver;
+		hal_printf("usb%u: device %u interface %u class %02x/%02x/%02x "
+		    "claimed-by=%u driver=%s\n", bus, address,
+		    descriptor->interface_number, descriptor->interface_class,
+		    descriptor->interface_subclass, descriptor->interface_protocol,
+		    owner_descriptor != NULL ? owner_descriptor->interface_number : 0,
+		    driver != NULL ? driver->name : "unknown");
+	} else if (error == ENODEV && matched_driver == NULL) {
+		hal_printf("usb%u: device %u interface %u class %02x/%02x/%02x "
+		    "no-driver\n", bus, address, descriptor->interface_number,
+		    descriptor->interface_class, descriptor->interface_subclass,
+		    descriptor->interface_protocol);
+	} else if (matched_driver != NULL) {
+		hal_printf("usb%u: device %u interface %u class %02x/%02x/%02x "
+		    "driver=%s attach-failed error=%d\n", bus, address,
+		    descriptor->interface_number, descriptor->interface_class,
+		    descriptor->interface_subclass, descriptor->interface_protocol,
+		    matched_driver->name, error);
+	} else {
+		hal_printf("usb%u: device %u interface %u class %02x/%02x/%02x "
+		    "probe-failed error=%d\n", bus, address,
+		    descriptor->interface_number, descriptor->interface_class,
+		    descriptor->interface_subclass, descriptor->interface_protocol,
+		    error);
+	}
 }
 
 static int enumerate_port(struct drv_usb_bus *bus,unsigned port,uint32_t status)
@@ -1331,7 +1389,7 @@ static int enumerate_port(struct drv_usb_bus *bus,unsigned port,uint32_t status)
 	uint8_t first[8];
 	size_t actual = 0;
 	unsigned configuration_index, other, packet;
-	int address = 0, cleanup_error, error = 0;
+	int address = 0, cleanup_error, error = 0, preferred_score;
 
 	device = hal_malloc(sizeof(*device));
 	if (device == NULL)
@@ -1436,18 +1494,25 @@ static int enumerate_port(struct drv_usb_bus *bus,unsigned port,uint32_t status)
 				goto fail;
 			}
 	}
-	preferred = device_preferred_configuration(device);
+	preferred = device_preferred_configuration(device, &preferred_score);
 	error = drv_usb_device_set_configuration(device,
 	    preferred->descriptor.configuration_value);
 	if (error != 0)
 		goto fail;
 	device_link(bus, device);
-	hal_printf("usb%u: device %u port %u %04x:%04x class %02x configured\n",
+	hal_printf("usb%u: device %u port %u %04x:%04x class %02x "
+	    "configuration=%u configured%s\n",
 	    bus->number, device->address, port, device->descriptor.vendor,
-	    device->descriptor.product, device->descriptor.device_class);
+	    device->descriptor.product, device->descriptor.device_class,
+	    preferred->descriptor.configuration_value, preferred_score == 0 ?
+	    " (no supported configuration; first selected)" : "");
 	for (interface = device->interfaces; interface != NULL;
-	    interface = interface->next)
-		(void)drv_usb_interface_probe(interface);
+	    interface = interface->next) {
+		struct drv_usb_driver *matched_driver = NULL;
+
+		error = interface_probe_internal(interface, &matched_driver);
+		interface_report_probe(interface, error, matched_driver);
+	}
 	return 0;
 
 fail:
@@ -3161,8 +3226,9 @@ interface_binding_detach(struct drv_usb_interface *interface, unsigned flags,
 	return 0;
 }
 
-int
-drv_usb_interface_probe(struct drv_usb_interface *interface)
+static int
+interface_probe_internal(struct drv_usb_interface *interface,
+	struct drv_usb_driver **matched_driver)
 {
 	struct drv_usb_device *device;
 	struct usb_driver_entry *entry;
@@ -3171,6 +3237,8 @@ drv_usb_interface_probe(struct drv_usb_interface *interface)
 	int score, best = 0, error, cleanup_error;
 	struct drv_usb_driver *driver = NULL;
 
+	if (matched_driver != NULL)
+		*matched_driver = NULL;
 	if (interface == NULL)
 		return EINVAL;
 	device = interface->device;
@@ -3226,6 +3294,8 @@ drv_usb_interface_probe(struct drv_usb_interface *interface)
 		error = ENODEV;
 		goto out;
 	}
+	if (matched_driver != NULL)
+		*matched_driver = driver;
 	id = drv_usb_driver_find_id(driver, interface);
 	interface->driver = driver;
 	io_gate_open(&interface->binding_gate);
@@ -3243,6 +3313,11 @@ drv_usb_interface_probe(struct drv_usb_interface *interface)
 out:
 	device_binding_exit(device);
 	return error;
+}
+int
+drv_usb_interface_probe(struct drv_usb_interface *interface)
+{
+	return interface_probe_internal(interface, NULL);
 }
 int
 drv_usb_interface_detach(struct drv_usb_interface *interface, unsigned flags)

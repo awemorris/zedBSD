@@ -16,6 +16,7 @@ Parent: [WS004](../ws.md)
 | HW-T16 | Removable net device | Carrier changes, queued-RX detach, ARP/route purge, deferred release, shutdown, and more than eight reconnects pass without stale ownership |
 | HW-T17 | CDC NCM wire and driver | NTH16/NDP16 valid/malformed fixtures, strict negotiation, bind/unwind, RX/TX, notification, detach, reconnect, and concurrent storage pass |
 | HW-T18 | USB binding transactions | Idle inactive-alt URBs, interface-scoped switch admission, sibling concurrency, submit races, provisional attach abort, detach retention, EP0 serialization, and Mass Storage regression pass |
+| HW-T19 | RTL8156 NCM association | An unsupported-vendor/NCM/ECM three-configuration fixture selects Union-associated NCM without requiring an IAD; matching IAD corroborates, contradictions reject, binding diagnostics identify selection/outcome, and one final Latitude insertion publishes `ue0` |
 | HW-T20 | NVMe QEMU | Identify, namespace bounds, read/write/flush, concurrency, reset, and failure tests pass on disposable images |
 | HW-T21 | NVMe hardware | Read-only identify precedes explicitly safe I/O; device IDs and stress/error logs are stored |
 | HW-T30 | WLAN logic | Scan/association/key/error state tests pass against a bounded fixture without claiming radio hardware success |
@@ -218,9 +219,11 @@ call site; q010 evidence is in
 
 ## HW-T14 USB function model
 
-The fixture drives the production USB core through a fake HCD. It covers two
-configurations, a storage-compatible alternate-zero interface, a CDC-shaped
-IAD and Union descriptor, data alternates zero and one, exact endpoint
+The fixture drives the production USB core through a fake HCD. Its baseline
+covers two configurations, and its RTL8156-shaped case retains three
+vendor/NCM/ECM configurations. Together they cover a storage-compatible
+alternate-zero interface, optional IAD plus mandatory CDC Union association,
+data alternates zero and one, exact endpoint
 publication, sibling claim contention, checked transition rollback, automatic
 LANGID discovery, UTF-16LE conversion, and malformed descriptors and strings:
 
@@ -283,6 +286,22 @@ plan/ws004-hardware/tests/run-usb-cdc-ncm-driver-test.sh
 ```
 
 The integrated runner executes ordinary and ASan/UBSan builds plus GCC
-`-fanalyzer`; its q027 result is 1259 checks in each runtime mode. This is an
+`-fanalyzer`; its q028 result is 1,283 checks in each runtime mode. This is an
 automatic software gate. A real NCM role or `g_ncm` gadget still owns the
 physical link/transfer/reconnect acceptance in WS005 NET-T40.
+
+## HW-T19 RTL8156 NCM association
+
+The production USB-core fixture retains an unsupported vendor configuration,
+an IAD-less NCM configuration with a valid Union, and an ECM configuration.
+It proves descriptor-score selection of the NCM configuration, successful
+control-interface binding and data-interface claim, and bounded configuration
+and binding diagnostics. The production NCM-driver fixture separately proves
+that the same Union-only association publishes exactly one `ue0`; malformed,
+missing, duplicate, overlapping, and contradictory association metadata is
+rejected. The current automatic results are 1,404 USB-core checks and 1,283
+NCM-driver checks in each ordinary and sanitizer mode, plus both analyzers.
+
+The final p018 gate is one Latitude boot and one adapter insertion. It verifies
+only selected NCM binding and `ue0` publication. Link, DHCP, data transfer,
+reconnect, and repeated hardware reliability remain WS005.

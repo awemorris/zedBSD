@@ -55,7 +55,8 @@ struct drv_usb_interface {
 struct drv_usb_configuration {
 	struct drv_usb_device *device;
 	struct drv_usb_interface interfaces[2];
-	struct drv_usb_interface_association_descriptor iad;
+	struct drv_usb_interface_association_descriptor iads[3];
+	unsigned iad_count;
 };
 
 struct drv_usb_device {
@@ -285,14 +286,15 @@ function_init(struct drv_usb_device *device, unsigned capabilities)
 	put_le16(device->parameters + 26U, NCM_RX_QUEUE_MAX);
 	configuration = &device->configuration;
 	configuration->device = device;
-	configuration->iad.length = 8;
-	configuration->iad.descriptor_type =
+	configuration->iad_count = 1;
+	configuration->iads[0].length = 8;
+	configuration->iads[0].descriptor_type =
 	    DRV_USB_DESCRIPTOR_INTERFACE_ASSOCIATION;
-	configuration->iad.first_interface = 0;
-	configuration->iad.interface_count = 2;
-	configuration->iad.function_class = NCM_COMMUNICATION_CLASS;
-	configuration->iad.function_subclass = NCM_COMMUNICATION_SUBCLASS;
-	configuration->iad.function_protocol = NCM_COMMUNICATION_PROTOCOL;
+	configuration->iads[0].first_interface = 0;
+	configuration->iads[0].interface_count = 2;
+	configuration->iads[0].function_class = NCM_COMMUNICATION_CLASS;
+	configuration->iads[0].function_subclass = NCM_COMMUNICATION_SUBCLASS;
+	configuration->iads[0].function_protocol = NCM_COMMUNICATION_PROTOCOL;
 	control = &configuration->interfaces[0];
 	control->device = device;
 	control->configuration = configuration;
@@ -394,14 +396,14 @@ drv_usb_configuration_find_interface(struct drv_usb_configuration *c,
 unsigned
 drv_usb_configuration_iad_count(const struct drv_usb_configuration *c)
 {
-	return c == NULL ? 0 : 1;
+	return c == NULL ? 0 : c->iad_count;
 }
 
 const struct drv_usb_interface_association_descriptor *
 drv_usb_configuration_iad(const struct drv_usb_configuration *c,
 	unsigned index)
 {
-	return c != NULL && index == 0 ? &c->iad : NULL;
+	return c != NULL && index < c->iad_count ? &c->iads[index] : NULL;
 }
 
 struct drv_usb_device *
@@ -1113,17 +1115,50 @@ test_binding_and_attach(void)
 }
 
 static void
+test_optional_iad_binding(void)
+{
+	struct drv_usb_device device;
+	struct drv_usb_interface *control;
+
+	/* RTL8156's NCM configuration has a CDC Union but no IAD. */
+	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	device.configuration.iad_count = 0;
+	control = &device.configuration.interfaces[0];
+	CHECK(ncm_driver.match(control, &ncm_ids[0]) == 100);
+	CHECK(core_attach_attempt(&device) == 0);
+	CHECK(published_device != NULL && !strcmp(published_device->name, "ue0"));
+	CHECK(core_detach(control, 0) == 0);
+	CHECK(published_device == NULL && live_urbs == 0 && hal_live == 0);
+}
+
+static void
 test_strict_binding(void)
 {
 	struct drv_usb_device device;
 	struct drv_usb_interface *control, *data;
+	struct drv_usb_host_interface *alternate;
 
 	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
 	control = &device.configuration.interfaces[0];
-	control->alternates[0].extra_count = 3;
+	alternate = &control->alternates[0];
+	alternate->extras[1] = ethernet_descriptor;
+	alternate->extra_lengths[1] = sizeof(ethernet_descriptor);
+	alternate->extras[2] = device.ncm_extra;
+	alternate->extra_lengths[2] = sizeof(device.ncm_extra);
+	alternate->extra_count = 3;
 	CHECK(ncm_driver.match(control, &ncm_ids[0]) == 0);
 	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
-	device.configuration.iad.first_interface = 7;
+	device.configuration.iads[0].function_subclass = 0;
+	CHECK(ncm_driver.match(&device.configuration.interfaces[0],
+	    &ncm_ids[0]) == 0);
+	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	device.configuration.iads[1] = device.configuration.iads[0];
+	device.configuration.iad_count = 2;
+	CHECK(ncm_driver.match(&device.configuration.interfaces[0],
+	    &ncm_ids[0]) == 0);
+	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	device.configuration.iads[0].first_interface = 1;
+	device.configuration.iads[0].interface_count = 1;
 	CHECK(ncm_driver.match(&device.configuration.interfaces[0],
 	    &ncm_ids[0]) == 0);
 	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
@@ -1850,6 +1885,7 @@ main(void)
 	CHECK(drv_usb_cdc_ncm_driver_register() == 0);
 	CHECK(registered_driver == &ncm_driver);
 	test_binding_and_attach();
+	test_optional_iad_binding();
 	test_strict_binding();
 	test_optional_capabilities();
 	test_io_and_lifetime();

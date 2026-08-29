@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 WSID: `ws004`
 
-Status: active; `q027` CDC NCM software milestone complete
+Status: active; `q028` automatic gates complete, physical acceptance pending
 
 Parent: [master plan](../master.md)
 
@@ -16,11 +16,13 @@ completes the general USB binding/interface transaction; and `p014` completes
 the integrated `ueN` automatic software milestone.
 `p016` records the non-Queue legacy-HCD hardware-retirement follow-up exposed
 by that audit; current UHCI/EHCI cancellation remains conservative until it is
-completed.
+completed. `p018` follows the first physical RTL8156 insertion: USB enumeration
+completed but the IAD-less, Union-associated NCM configuration did not receive
+a positive match score and no `ueN` appeared.
 
-Resume point: select `ws004-p016` legacy-HCD retirement, resolve the small
-runtime-policy choices in `ws004-p017`, or select another bounded hardware
-Phase. Physical NCM interoperability remains a separate WS005 gate.
+Resume point: perform the one remaining `ws004-p018` Latitude `ue0`
+publication check using the automatic candidate. Link, DHCP, transfer, reconnect, and
+reliability remain a separate WS005 gate; p016 and p017 remain later work.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -45,6 +47,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p015`](phase015-usb-binding-transactions/phase.md) | Complete (`q027`) | General binding lifecycle, interface I/O gate, active-endpoint submission, endpoint-zero serialization, and conservative legacy-HCD ownership passed focused, sanitizer, analyzer, build, and USB-root QEMU gates |
 | [`ws004-p016`](phase016-legacy-hcd-request-retirement/phase.md) | Pending; not queued | Controller-proven UHCI frame and EHCI Async Advance retirement before normal-completion or cancellation DMA release |
 | [`ws004-p017`](phase017-cdc-ncm-runtime-recovery/phase.md) | Pending; not queued; policy choices open | Resynchronize RX after dropped/malformed NTBs and account for asynchronous terminal TX errors without weakening strict validation |
+| [`ws004-p018`](phase018-rtl8156-ncm-association/phase.md) | Automatic gates complete; physical acceptance pending (`q028`) | CDC Union is authoritative and IAD is optional strict corroboration; RTL8156-shaped selection/binding, diagnostics, focused tests, builds, and QEMU pass; one Latitude `ue0` check remains |
 
 ### MSI follow-up register
 
@@ -109,7 +112,7 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-03 | Complete (`q016`) | Checked PCI IRQ/controller lifetime for EHCI and UHCI detach; xHCI is already converted and is outside this Phase | HW-00, checked PCI IRQ API from q015 | Busy/error removal retains all ownership; retry and final detach host fixtures plus i386 builds pass |
 | HW-10 | Planned | NVMe controller, admin/I/O queues, namespaces, and block integration | HW-00 | QEMU NVMe install/mount/I/O/reset tests pass |
 | HW-11 | Planned | NVMe verification on the Latitude controller | HW-10, BR-00 | Identify/read-only first, then disposable-range I/O and stress without corruption |
-| HW-12 | Complete (`q027` software scope); physical NET-T40 pending | Independent CDC NCM class driver on the common USB/xHCI/net-device lifetime foundations; later ECM or Realtek-family implementations remain independent until stable commonality exists | HW-01; physical role proof remains WS005 | Automatic NCM fixtures and QEMU regressions passed without falsely claiming ECM/RNDIS/vendor hardware; physical link/transfer/reconnect remains NET-T40 |
+| HW-12 | q028 automatic association/binding gates complete; physical publication pending | Independent CDC NCM class driver on the common USB/xHCI/net-device lifetime foundations; Union-associated NCM does not require an IAD; later ECM or Realtek-family implementations remain independent until stable commonality exists | HW-01; p018 physical role proof, with link/transfer still in WS005 | Automatic NCM fixtures, builds, and QEMU regressions pass; the single remaining Latitude check must publish `ue0` before WS005 link/transfer/reconnect evidence |
 | HW-20 | Manually blocked (`MB-006`) | RTL8822CE (`10ec:c822`, subsystem `10ec:c130`) architecture and native driver | BR-00, HW-00, firmware packaging policy, explicit release | Scan, authenticate, associate, and exchange data on hardware |
 | HW-21 | Manually blocked (`MB-006`) | Testable RTL8822CE WLAN hardware abstraction or protocol fixture | HW-20 design and explicit release | Driver state/error paths can be tested without claiming QEMU emulates the laptop radio |
 | HW-30 | Proposed | i915 hardware foundations for the discovered 11th-generation GPU | BR-00, HW-00, GFX UAPI | Modeset/scanout and recovery on hardware; model tests for device-independent layers |
