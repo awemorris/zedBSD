@@ -19,7 +19,7 @@
 #include <kern/lock.h>
 #include <kern/waitq.h>
 
-#define DISK_NAME_MAX	16U
+#define DISK_NAME_MAX	32U
 #define DISK_MAX	80U
 #define DISK_IDENTITY_TEXT_MAX	64U
 
@@ -126,6 +126,13 @@ disk_alloc(void);
 int
 disk_alloc_sd_name(
 	struct disk *disk);
+
+/* Assign a stable NVMe namespace name such as nvme0n1. */
+int
+disk_alloc_nvme_name(
+	struct disk *disk,
+	unsigned controller,
+	unsigned namespace_id);
 
 int
 disk_create(

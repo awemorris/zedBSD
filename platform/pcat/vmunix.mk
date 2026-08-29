@@ -84,6 +84,10 @@ PCAT_USB_CLASS_OBJS :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-storage.o
 endif
+PCAT_NVME_OBJS :=
+ifeq ($(CONFIG_DRIVER_PCI_NVME),y)
+PCAT_NVME_OBJS += $(BUILD)/drivers/pci-nvme.o
+endif
 ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-cdc-ncm.o \
 	$(BUILD)/drivers/usb-cdc-ncm-net.o
@@ -109,6 +113,7 @@ VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/drivers/pci.o $(BUILD)/drivers/pci-pcat.o \
 	$(BUILD)/drivers/usb.o $(PCAT_USB_HCD_OBJS) \
 	$(PCAT_USB_CLASS_OBJS) \
+	$(PCAT_NVME_OBJS) \
 	$(BUILD)/drivers/pcat-ide.o $(BUILD)/drivers/dp8390.o \
 	$(BUILD)/drivers/pcat-ne2000.o \
 	$(BUILD)/drivers/hid/ps2-mouse.o \

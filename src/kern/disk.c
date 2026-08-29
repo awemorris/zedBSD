@@ -10,6 +10,9 @@
 #include <hal/hal.h>
 #include <string.h>
 
+_Static_assert(DISK_NAME_MAX >= sizeof("nvme0n4294967295"),
+    "DISK_NAME_MAX must represent every 32-bit NVMe namespace ID");
+
 extern struct thread *thread_current(void) __attribute__((weak));
 extern bool hal_irq_disable(void) __attribute__((weak));
 extern void hal_irq_enable(void) __attribute__((weak));
@@ -162,6 +165,64 @@ disk_alloc_sd_name(struct disk *disk)
 	}
 	disk_unlock(enabled);
 	return ENOSPC;
+}
+
+static int
+name_append_unsigned(char name[DISK_NAME_MAX], unsigned *at, unsigned value)
+{
+	char reverse[10];
+	unsigned count = 0, i;
+
+	do {
+		if (count == sizeof(reverse))
+			return ENAMETOOLONG;
+		reverse[count++] = (char)('0' + value % 10U);
+		value /= 10U;
+	} while (value != 0);
+	if (*at + count >= DISK_NAME_MAX)
+		return ENAMETOOLONG;
+	for (i = 0; i < count; i++)
+		name[(*at)++] = reverse[count - i - 1U];
+	return 0;
+}
+
+int
+disk_alloc_nvme_name(struct disk *disk, unsigned controller,
+	unsigned namespace_id)
+{
+	char candidate[DISK_NAME_MAX];
+	unsigned at = 0, i;
+	bool enabled;
+
+	if (disk == NULL || namespace_id == 0)
+		return EINVAL;
+	candidate[at++] = 'n';
+	candidate[at++] = 'v';
+	candidate[at++] = 'm';
+	candidate[at++] = 'e';
+	if (name_append_unsigned(candidate, &at, controller) != 0 ||
+	    at + 1U >= DISK_NAME_MAX)
+		return ENAMETOOLONG;
+	candidate[at++] = 'n';
+	if (name_append_unsigned(candidate, &at, namespace_id) != 0)
+		return ENAMETOOLONG;
+	candidate[at] = '\0';
+
+	enabled = disk_lock();
+	if (disk_index(disk) < 0 || disk->d_state != DISK_ALLOCATED) {
+		disk_unlock(enabled);
+		return EINVAL;
+	}
+	for (i = 0; i < DISK_MAX; i++)
+		if (disk_used[i] && &disks[i] != disk &&
+		    name_equal(disks[i].d_name, candidate)) {
+			disk_unlock(enabled);
+			return EEXIST;
+		}
+	for (i = 0; i <= at; i++)
+		disk->d_name[i] = candidate[i];
+	disk_unlock(enabled);
+	return 0;
 }
 
 int

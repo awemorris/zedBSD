@@ -57,6 +57,10 @@ AMD64_USB_CLASS_SOURCES :=
 ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb-storage.c
 endif
+AMD64_NVME_SOURCES :=
+ifeq ($(CONFIG_DRIVER_PCI_NVME),y)
+AMD64_NVME_SOURCES += src/drivers/pci-nvme.c
+endif
 ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb-cdc-ncm.c \
 	src/drivers/usb-cdc-ncm-net.c
@@ -78,6 +82,7 @@ AMD64_KERNEL_SOURCES := \
 	src/drivers/loop.c src/drivers/dma.c src/drivers/pci.c \
 	src/drivers/pci-pcat.c src/drivers/usb.c $(AMD64_USB_HCD_SOURCES) \
 	$(AMD64_USB_CLASS_SOURCES) \
+	$(AMD64_NVME_SOURCES) \
 	src/drivers/pcat-ide.c src/drivers/dp8390.c \
 	src/drivers/pcat-ne2000.c src/drivers/hid/ps2-mouse.c \
 	src/drivers/disklabel/mbr.c src/kern/platform/pcat.c \

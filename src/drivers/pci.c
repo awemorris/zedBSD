@@ -20,6 +20,7 @@
 #define PCI_MSI_CONTROL 0x02U
 #define PCI_MSI_ADDRESS 0x04U
 #define PCI_MSI_ENABLE 0x0001U
+#define PCI_MSI_MME_MASK 0x0070U
 #define PCI_MSI_64BIT 0x0080U
 #define PCI_MSIX_CONTROL 0x02U
 #define PCI_MSIX_TABLE 0x04U
@@ -68,6 +69,15 @@ struct pci_irq_cookie {
 	unsigned capability, index;
 	struct drv_pci_mapping table;
 	unsigned table_mapped;
+	unsigned message_registered;
+	unsigned msi_state_saved;
+	uint16_t msi_control_saved;
+	uint16_t msi_data_saved;
+	uint32_t msi_address_low_saved;
+	uint32_t msi_address_high_saved;
+	unsigned msix_state_saved;
+	uint16_t msix_control_saved;
+	uint32_t msix_entry_saved[4];
 };
 
 static struct drv_pci_bus *root_buses;
@@ -619,18 +629,39 @@ establish_msi(struct pci_irq_cookie *cookie, const struct drv_pci_irq *irq)
 	unsigned data_offset;
 	int error;
 
+	if (drv_pci_device_config_read16(device,
+	    cookie->capability + PCI_MSI_CONTROL, &control) != 0 ||
+	    drv_pci_device_config_read32(device,
+	    cookie->capability + PCI_MSI_ADDRESS,
+	    &cookie->msi_address_low_saved) != 0)
+		return EIO;
+	cookie->msi_control_saved = control;
+	if ((control & PCI_MSI_64BIT) != 0) {
+		if (drv_pci_device_config_read32(device,
+		    cookie->capability + PCI_MSI_ADDRESS + 4U,
+		    &cookie->msi_address_high_saved) != 0)
+			return EIO;
+		data_offset = cookie->capability + 12U;
+	} else {
+		cookie->msi_address_high_saved = 0;
+		data_offset = cookie->capability + 8U;
+	}
+	if (drv_pci_device_config_read16(device, data_offset,
+	    &cookie->msi_data_saved) != 0)
+		return EIO;
+	cookie->msi_state_saved = 1;
+
 	pci_source(&device->address, source);
 	error = hal_irq_register_msi(source, pci_irq_dispatch, cookie,
 	    &cookie->irq, &address, &event);
 	if (error != HAL_OK)
 		return error == HAL_ERR_NOMEM ? ENOMEM : EIO;
-	if (event > UINT16_MAX ||
-	    drv_pci_device_config_read16(device,
-	    cookie->capability + PCI_MSI_CONTROL, &control) != 0) {
+	cookie->message_registered = 1;
+	if (event > UINT16_MAX) {
 		error = EIO;
 		goto fail;
 	}
-	control &= (uint16_t)~PCI_MSI_ENABLE;
+	control &= (uint16_t)~(PCI_MSI_ENABLE | PCI_MSI_MME_MASK);
 	if (drv_pci_device_config_write16(device,
 	    cookie->capability + PCI_MSI_CONTROL, control) != 0 ||
 	    drv_pci_device_config_write32(device,
@@ -663,7 +694,23 @@ establish_msi(struct pci_irq_cookie *cookie, const struct drv_pci_irq *irq)
 	(void)irq;
 	return 0;
 fail:
-	(void)hal_irq_unregister_msi(cookie->irq);
+	if (cookie->message_registered &&
+	    hal_irq_unregister_msi(cookie->irq) == HAL_OK)
+		cookie->message_registered = 0;
+	(void)drv_pci_device_config_write32(device,
+	    cookie->capability + PCI_MSI_ADDRESS,
+	    cookie->msi_address_low_saved);
+	if ((cookie->msi_control_saved & PCI_MSI_64BIT) != 0)
+		(void)drv_pci_device_config_write32(device,
+		    cookie->capability + PCI_MSI_ADDRESS + 4U,
+		    cookie->msi_address_high_saved);
+	(void)drv_pci_device_config_write16(device,
+	    (cookie->msi_control_saved & PCI_MSI_64BIT) != 0 ?
+	    cookie->capability + 12U : cookie->capability + 8U,
+	    cookie->msi_data_saved);
+	(void)drv_pci_device_config_write16(device,
+	    cookie->capability + PCI_MSI_CONTROL,
+	    cookie->msi_control_saved);
 	return error;
 }
 
@@ -709,6 +756,16 @@ establish_msix(struct pci_irq_cookie *cookie)
 		return error;
 	cookie->table_mapped = 1;
 	entry = cookie->table.address;
+	if (drv_pci_device_config_read16(cookie->device,
+	    cookie->capability + PCI_MSIX_CONTROL,
+	    &cookie->msix_control_saved) != 0) {
+		error = EIO;
+		goto fail;
+	}
+	hal_io_rmb();
+	for (unsigned index = 0; index < 4U; index++)
+		cookie->msix_entry_saved[index] = entry[index];
+	cookie->msix_state_saved = 1;
 	entry[3] |= PCI_MSIX_ENTRY_MASK;
 	pci_source(&cookie->device->address, source);
 	error = hal_irq_register_msi(source, pci_irq_dispatch, cookie,
@@ -717,6 +774,7 @@ establish_msix(struct pci_irq_cookie *cookie)
 		error = error == HAL_ERR_NOMEM ? ENOMEM : EIO;
 		goto fail;
 	}
+	cookie->message_registered = 1;
 	entry[0] = (uint32_t)address;
 	entry[1] = (uint32_t)((uint64_t)address >> 32);
 	entry[2] = event;
@@ -728,13 +786,31 @@ establish_msix(struct pci_irq_cookie *cookie)
 	    (control | PCI_MSIX_ENABLE) &
 	    (uint16_t)~PCI_MSIX_FUNCTION_MASK) != 0) {
 		error = EIO;
-		(void)hal_irq_unregister_msi(cookie->irq);
+		if (hal_irq_unregister_msi(cookie->irq) == HAL_OK)
+			cookie->message_registered = 0;
 		goto fail;
 	}
 	entry[3] &= ~PCI_MSIX_ENTRY_MASK;
 	hal_io_mb();
 	return 0;
 fail:
+	if (cookie->message_registered &&
+	    hal_irq_unregister_msi(cookie->irq) == HAL_OK)
+		cookie->message_registered = 0;
+	if (cookie->msix_state_saved && cookie->table_mapped) {
+		entry = cookie->table.address;
+		entry[0] = cookie->msix_entry_saved[0];
+		entry[1] = cookie->msix_entry_saved[1];
+		entry[2] = cookie->msix_entry_saved[2];
+		entry[3] = cookie->msix_entry_saved[3] |
+		    PCI_MSIX_ENTRY_MASK;
+		hal_io_mb();
+		(void)drv_pci_device_config_write16(cookie->device,
+		    cookie->capability + PCI_MSIX_CONTROL,
+		    cookie->msix_control_saved);
+		entry[3] = cookie->msix_entry_saved[3];
+		hal_io_mb();
+	}
 	if (cookie->table_mapped) {
 		cookie->device->bus->ops->unmap_bar(cookie->device->bus->host,
 		    &cookie->table);
@@ -800,24 +876,66 @@ drv_pci_device_disestablish_irq_checked(struct drv_pci_device *device,
 		if (hal_error != HAL_OK)
 			return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
 	} else if (cookie->type == DRV_PCI_IRQ_MSI) {
-		if (drv_pci_device_config_read16(cookie->device,
-		    cookie->capability + PCI_MSI_CONTROL, &control) != 0 ||
+		if (cookie->message_registered) {
+			if (drv_pci_device_config_read16(cookie->device,
+			    cookie->capability + PCI_MSI_CONTROL, &control) != 0 ||
+			    drv_pci_device_config_write16(cookie->device,
+			    cookie->capability + PCI_MSI_CONTROL,
+			    control & (uint16_t)~PCI_MSI_ENABLE) != 0)
+				return EIO;
+			hal_error = hal_irq_unregister_msi(cookie->irq);
+			if (hal_error != HAL_OK)
+				return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
+			cookie->message_registered = 0;
+		}
+		if (!cookie->msi_state_saved ||
+		    drv_pci_device_config_write32(cookie->device,
+		    cookie->capability + PCI_MSI_ADDRESS,
+		    cookie->msi_address_low_saved) != 0 ||
+		    ((cookie->msi_control_saved & PCI_MSI_64BIT) != 0 &&
+		    drv_pci_device_config_write32(cookie->device,
+		    cookie->capability + PCI_MSI_ADDRESS + 4U,
+		    cookie->msi_address_high_saved) != 0) ||
+		    drv_pci_device_config_write16(cookie->device,
+		    (cookie->msi_control_saved & PCI_MSI_64BIT) != 0 ?
+		    cookie->capability + 12U : cookie->capability + 8U,
+		    cookie->msi_data_saved) != 0 ||
 		    drv_pci_device_config_write16(cookie->device,
 		    cookie->capability + PCI_MSI_CONTROL,
-		    control & (uint16_t)~PCI_MSI_ENABLE) != 0)
+		    cookie->msi_control_saved) != 0)
 			return EIO;
-		hal_error = hal_irq_unregister_msi(cookie->irq);
-		if (hal_error != HAL_OK)
-			return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
+		cookie->msi_state_saved = 0;
 	} else if (cookie->type == DRV_PCI_IRQ_MSIX) {
-		if (cookie->table_mapped) {
+		if (cookie->message_registered && cookie->table_mapped) {
 			volatile uint32_t *entry = cookie->table.address;
 			entry[3] |= PCI_MSIX_ENTRY_MASK;
 			hal_io_mb();
 		}
-		hal_error = hal_irq_unregister_msi(cookie->irq);
-		if (hal_error != HAL_OK)
-			return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
+		if (cookie->message_registered) {
+			hal_error = hal_irq_unregister_msi(cookie->irq);
+			if (hal_error != HAL_OK)
+				return hal_error == HAL_ERR_BUSY ? EBUSY : EIO;
+			cookie->message_registered = 0;
+		}
+		if (!cookie->msix_state_saved || !cookie->table_mapped)
+			return EIO;
+		{
+			volatile uint32_t *entry = cookie->table.address;
+
+			entry[0] = cookie->msix_entry_saved[0];
+			entry[1] = cookie->msix_entry_saved[1];
+			entry[2] = cookie->msix_entry_saved[2];
+			entry[3] = cookie->msix_entry_saved[3] |
+			    PCI_MSIX_ENTRY_MASK;
+			hal_io_mb();
+			if (drv_pci_device_config_write16(cookie->device,
+			    cookie->capability + PCI_MSIX_CONTROL,
+			    cookie->msix_control_saved) != 0)
+				return EIO;
+			entry[3] = cookie->msix_entry_saved[3];
+			hal_io_mb();
+		}
+		cookie->msix_state_saved = 0;
 		if (cookie->table_mapped)
 			cookie->device->bus->ops->unmap_bar(
 			    cookie->device->bus->host, &cookie->table);

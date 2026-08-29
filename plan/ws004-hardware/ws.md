@@ -4,9 +4,9 @@ Last updated: 2026-08-29
 
 WSID: `ws004`
 
-Status: active; `ws004-p020` deterministic CDC NCM hardening complete;
-`ws004-p021` and the first NVMe Phase `ws004-p022` are ready for future Queue
-proposals
+Status: active; `ws004-p020` deterministic CDC NCM hardening and
+`ws004-p022` NVMe admin/Identify are complete; `ws004-p023` is next in `q030`;
+`ws004-p021` remains ready but independent
 
 Parent: [master plan](../master.md)
 
@@ -29,10 +29,10 @@ completed. `p018` corrected the IAD-less, Union-associated NCM match exposed by
 the first physical RTL8156 insertion, and the accepted follow-up published
 `ue0`. The broader asynchronous-TX/accounting decisions remain in p017.
 
-Resume point: q029 p020 and WS005 p001 are complete, including the final
-Latitude-native RTL8156 DHCP/DNS/external-fetch acceptance. The next storage
-goal is decomposed as p022--p025: QEMU NVMe discovery, I/O/lifecycle,
-acceptance, then a read-only Latitude SN740 checkpoint. p021 remains a ready
+Resume point: q030 completed p022 and proceeds to p023, then p024: QEMU NVMe
+I/O/lifecycle followed by strict GPT and disposable acceptance. The later
+p025 is the single read-only Latitude SN740 checkpoint and is not part of
+q030. p021 remains a ready
 but independent xHCI specification cleanup. p019 remains an independent ECM
 baseline. p016 and the remaining asynchronous-TX/accounting portion of p017
 stay later WS004 work.
@@ -64,8 +64,8 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Planned independent baseline; not in q029 | Independent CDC ECM plus QEMU `usb-net` remains available for a future common-path comparison; real RTL8156 NCM carrier/DHCP/ping now passes through QEMU, so p019 is not the automatic response to a native xHCI-only failure |
 | [`ws004-p020`](phase020-cdc-ncm-deterministic-hardening/phase.md) | Complete (`q029` automatic software scope) | Valid sequences accept/resynchronize, malformed input preserves state, completions and rearms are bounded/fair, and the packet filter is programmed transactionally on open; focused and regression gates pass |
 | [`ws004-p021`](phase021-xhci-superspeed-interrupt-context/phase.md) | Planned; ready for Queue proposal; not queued | Encode legal SuperSpeed interrupt companion `wBytesPerInterval` as xHCI Max ESIT/Average TRB Length, reject malformed descriptors, and preserve every other endpoint context |
-| [`ws004-p022`](phase022-nvme-admin-identify/phase.md) | Planned; ready for Queue proposal | Standard PCI NVMe reset/admin queues/Identify publish one truthful read-only `/dev/nvme0n1` |
-| [`ws004-p023`](phase023-nvme-io-lifecycle/phase.md) | Planned; depends on p022 | One I/O queue provides bounded read/write/flush, timeout/reset, shutdown, and detach through the block layer |
+| [`ws004-p022`](phase022-nvme-admin-identify/phase.md) | Complete (`q030`) | Bounded reset/admin Identify, transactional PCI/MSI lifecycle, stable names, focused fixtures, amd64/i386 builds, exact non-mutating QEMU namespace, IDE, and USB-root gates pass |
+| [`ws004-p023`](phase023-nvme-io-lifecycle/phase.md) | Planned; next in `q030`; p022 complete | One I/O queue provides bounded read/write/flush, timeout/reset, shutdown, and detach through the block layer |
 | [`ws004-p024`](phase024-nvme-qemu-acceptance/phase.md) | Planned; depends on p022/p023 | Disposable QEMU namespaces pass integrity, flush, reset, concurrency, GPT partition, and regression gates |
 | [`ws004-p025`](phase025-latitude-nvme-readonly/phase.md) | Planned physical checkpoint; depends on p024 | Latitude SN740 `15b7:5015` identifies and reads safely without modifying internal storage |
 
@@ -81,7 +81,7 @@ Shared tests: [WS004 test index](tests/README.md)
 q029, p020, and WS005 p001 are complete through final Latitude-native external
 fetch. p021 remains ready for a future Queue as an independent standards
 correction, not an active failure response. Later WS004 candidates are
-p016/p017, p019, p022, HW-10/HW-11,
+p016/p017, p019, p023, HW-10/HW-11,
 HW-20/HW-21, and HW-30 when their inputs and acceptance environments are
 available.
 

@@ -20,6 +20,7 @@ void hal_irq_mask(int irq) { (void)irq; }
 void hal_irq_unmask(int irq) { (void)irq; }
 void hal_irq_send_eoi(hal_irq_ack_t acknowledge) { (void)acknowledge; }
 void hal_io_mb(void) { }
+void hal_io_rmb(void) { }
 int hal_irq_set_handler(int irq, hal_irq_handler_t handler, void *argument)
 { (void)irq; (void)handler; (void)argument; return HAL_OK; }
 
@@ -156,7 +157,7 @@ main(void)
 	config[0x34] = 0x50U;
 	config[0x50] = 0x05U;
 	config[0x51] = 0;
-	put16(0x52, 0x0080U);
+	put16(0x52, 0x00b0U);
 	assert(drv_pci_init() == 0);
 	assert(drv_pci_bus_create_root(0, 0, &operations, NULL, NULL, &bus) == 0);
 	assert(drv_pci_bus_scan(bus) == 0);
@@ -172,15 +173,26 @@ main(void)
 	memcpy(&value, config + 0x5c, sizeof(uint16_t));
 	assert((value & 0xffffU) == 0xd0U);
 	assert((config[0x52] & 1U) != 0);
+	assert((config[0x52] & 0x70U) == 0);
 	drv_pci_device_disestablish_irq(device, cookie);
 	assert(unregistered_irq == registered_irq);
-	assert((config[0x52] & 1U) == 0);
+	memcpy(&value, config + 0x54, sizeof(value));
+	assert(value == 0U);
+	memcpy(&value, config + 0x58, sizeof(value));
+	assert(value == 0U);
+	memcpy(&value, config + 0x5c, sizeof(uint16_t));
+	assert((value & 0xffffU) == 0U);
+	memcpy(&value, config + 0x52, sizeof(uint16_t));
+	assert((value & 0xffffU) == 0x00b0U);
 
 	config[0x50] = 0x11U;
-	put16(0x52, 0);
+	put16(0x52, 0x4000U);
 	put32(0x54, 0);
 	put32(0x10, 0x1000U);
-	memset(msix_table, 0, sizeof(msix_table));
+	msix_table[0] = 0x11111111U;
+	msix_table[1] = 0x22222222U;
+	msix_table[2] = 0x33333333U;
+	msix_table[3] = 0x44444444U;
 	assert(drv_pci_device_allocate_irqs(device, DRV_PCI_IRQ_ALLOW_MSIX,
 	    1, 1, &irq, &count) == 0);
 	assert(drv_pci_device_establish_irq(device, &irq, handler, NULL, "test",
@@ -190,6 +202,11 @@ main(void)
 	assert(msix_table[2] == 0xd0U);
 	assert((msix_table[3] & 1U) == 0);
 	drv_pci_device_disestablish_irq(device, cookie);
-	assert((msix_table[3] & 1U) != 0);
+	assert(msix_table[0] == 0x11111111U);
+	assert(msix_table[1] == 0x22222222U);
+	assert(msix_table[2] == 0x33333333U);
+	assert(msix_table[3] == 0x44444444U);
+	memcpy(&value, config + 0x52, sizeof(uint16_t));
+	assert((value & 0xffffU) == 0x4000U);
 	return 0;
 }

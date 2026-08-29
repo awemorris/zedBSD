@@ -17,6 +17,9 @@
 #if CONFIG_DRIVER_PCI_XHCI
 #include "drivers/pci-xhci.h"
 #endif
+#if CONFIG_DRIVER_PCI_NVME
+#include <drivers/pci-nvme.h>
+#endif
 #if CONFIG_DRIVER_USB_STORAGE
 #include "drivers/usb-storage.h"
 #endif
@@ -74,6 +77,10 @@ kern_platform_init(const struct boot_handoff *handoff,
 #if CONFIG_DRIVER_PCI_XHCI
 	if (drv_pci_xhci_driver_register() != 0)
 		hal_printf("usb: xHCI PCI driver registration failed\n");
+#endif
+#if CONFIG_DRIVER_PCI_NVME
+	if (drv_pci_nvme_driver_register() != 0)
+		hal_printf("nvme: PCI driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_GRAPHICS_DEVICE
 	if (pcat_graphics_pci_register() != 0)
@@ -141,13 +148,20 @@ void kern_platform_refresh_devices(const struct boot_device *d, size_t n)
 	drv_pci_xhci_probe_roots();
 #endif
 	if (disk_count() != 0)
-		return;
+		goto nvme;
 	deadline = clock_ticks() + 5U * KERN_CLOCK_HZ;
 	hal_printf("boot: waiting up to 5 seconds for boot storage\n");
 	while (disk_count() == 0 && clock_ticks() < deadline)
 		sched_yield();
 	if (disk_count() == 0)
 		hal_printf("boot: boot-storage wait expired\n");
+nvme:
+	/* p022 NVMe is discovery-only.  Publish it after removable boot media
+	 * has had its existing bounded discovery window, so a present read-only
+	 * namespace cannot make USB-root discovery look complete. */
+#if CONFIG_DRIVER_PCI_NVME
+	drv_pci_nvme_probe_namespaces();
+#endif
 }
 
 int kern_platform_input_init(void) { return pcat_ps2_mouse_init(); }

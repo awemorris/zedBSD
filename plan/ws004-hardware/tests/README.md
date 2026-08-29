@@ -308,3 +308,43 @@ NCM-driver checks in each ordinary and sanitizer mode, plus both analyzers.
 The final p018 gate is one Latitude boot and one adapter insertion. It verifies
 only selected NCM binding and `ue0` publication. Link, DHCP, data transfer,
 reconnect, and repeated hardware reliability remain WS005.
+
+## HW-T20 NVMe QEMU
+
+The p022 admin fixture exercises production register/CAP/queue/Identify
+arithmetic, malformed completion ownership, sparse active NSIDs, and namespace
+profile rejection. The lifecycle fixture uses the production cleanup ledger
+and injects every acquisition and cleanup failure, including quarantine,
+retry, exact reverse release, and double-release prevention. Both runners
+execute ordinary, ASan/UBSan, and GCC analyzer variants:
+
+```sh
+plan/ws004-hardware/tests/run-nvme-admin-test.sh
+plan/ws004-hardware/tests/run-nvme-lifecycle-test.sh
+```
+
+The existing PCI message fixture additionally verifies that checked MSI and
+MSI-X removal restores the exact saved capability/address/data and MSI-X table
+entry rather than leaving an OS-programmed vector behind:
+
+```sh
+cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
+  src/drivers/pci.c plan/ws004-hardware/tests/pci-msi-test.c \
+  -o build/q030-p022/host/pci-msi-test
+build/q030-p022/host/pci-msi-test
+```
+
+The p022 QEMU gate boots an OVMF/q35 guest from a disposable IDE copy, attaches
+one 32 MiB standard PCI NVMe namespace, and requires exactly one truthful
+`/dev/nvme0n1` publication plus login. SHA-256 before/after checks prove that
+neither the source boot image nor the discovery-only namespace was modified:
+
+```sh
+plan/ws004-hardware/tests/qemu-nvme-admin.sh \
+  build/amd64/hdd-image.img build/q030-p022/nvme-final-4
+```
+
+The exact commands and final p022 observations are retained in
+[q030 NVMe admin evidence](q030-nvme-admin-evidence.md). HW-T20 remains open as
+the shared family identifier until p023 adds NVM I/O and p024 completes its
+integrity, reset, concurrency, and strict GPT portions.

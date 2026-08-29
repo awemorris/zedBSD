@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 Phase ID: `ws004-p022`
 
-Status: planned; ready for a future Queue proposal
+Status: completed (`q030`)
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -33,8 +33,10 @@ namespace as `/dev/nvme0n1` without permitting data writes yet.
   one admin queue, 512-byte logical blocks, and no namespace hotplug.
 - Add stable `nvme<controller>n<namespace>` disk naming. Partition naming stays
   one-based, so the first GPT partition is `/dev/nvme0n1p1`.
-- Publish the namespace read-only in this Phase. NVM read/write/flush commands
-  and the writable block contract belong to p023.
+- Publish the namespace as discovery-only in this Phase. The generic block
+  layer rejects writes with `EROFS`; reads return `EOPNOTSUPP` until p023 adds
+  the NVM I/O queue. NVM read/write/flush commands and the usable block-data
+  contract belong to p023.
 
 ## Verification plan
 
@@ -51,9 +53,43 @@ namespace as `/dev/nvme0n1` without permitting data writes yet.
 
 - Standard QEMU NVMe identifies through bounded admin-queue operation and
   publishes exactly one truthful read-only namespace.
-- Invalid capabilities and all injected timeout/probe failures release IRQ,
-  DMA, queue, PCI, and disk-registry ownership.
+- Invalid capabilities and all injected timeout/probe failures either release
+  IRQ, DMA, queue, PCI, and disk-registry ownership exactly once, or retain the
+  still-owned graph in an explicit retryable quarantine when hardware
+  quiescence cannot be proved.
 - The existing IDE and USB-storage boot paths remain passing.
+
+## Result
+
+Completed on 2026-08-29. The standard PCI class driver now performs bounded
+reset and admin Identify over coherent queues, uses MSI-X with single-message
+MSI fallback, validates CQ phase/SQ/CID ownership, accepts a truthful sparse
+active NSID, and publishes exactly one discovery-only `/dev/nvme0n1` with
+stable one-based partition naming.
+
+The production attach path and the host failure fixture share the same strict
+cleanup ledger. Probe/detach admission is serialized, aborted detach restores
+normal admission, and a failure to prove controller/IRQ/PCI quiescence retains
+ownership for retry instead of freeing live DMA. QEMU exposed and the Phase
+fixed two interrupt-ordering defects: NVMe INTMS/INTMC cannot mask MSI-X after
+MSI-X enable, and an admin waiter must yield with CPU interrupts restored so a
+CPU0-targeted message can be delivered.
+
+Final static review moved PCI bus-master quiescence ahead of BAR mapping,
+checks the mapped BAR before the first MMIO access, uses the tick deadline once
+the clock advances, and keeps only the bounded spin fallback needed before the
+first timer tick. Checked PCI message teardown now restores the prior MSI or
+MSI-X capability/table image transactionally; single-message MSI clears MME
+while active, and firmware-inherited MSI/MSI-X is disabled before the first
+controller reset and restored only after safe teardown. The disk-name storage
+also represents the complete non-reserved 32-bit NSID range.
+
+[HW-T20 p022 evidence](../tests/q030-nvme-admin-evidence.md) records the focused
+ordinary/sanitizer/analyzer passes, amd64 and i386 PC/AT builds, exact 32 MiB
+namespace/non-mutation QEMU proof, and passing IDE plus xHCI USB-root
+regressions. The expected `geometry error=21` scan diagnostic remains because
+p022 deliberately has no NVM read command; p023 removes it by adding the I/O
+queue.
 
 ## Reconsideration boundary
 
