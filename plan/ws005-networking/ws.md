@@ -4,18 +4,21 @@ Last updated: 2026-08-29
 
 WSID: `ws005`
 
-Status: active; p001 waits for the CDC ECM/QEMU control, WLAN manually blocked
+Status: active; q029 p001 automatic slice complete, physical check pending;
+WLAN manually blocked
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: none in WS005; physical NCM publication dependency
-`ws004-p018` is complete and the inherited control-plane baseline is
-`ws002-p020`
+Last verified result: the p001 safe DHCP/diagnostic automatic slice and
+candidate-image QEMU USB-root gate pass; p001 remains incomplete until its one
+physical acceptance. Physical NCM publication dependency `ws004-p018` and
+deterministic hardening dependency `ws004-p020` are complete; the inherited
+control-plane baseline is `ws002-p020`.
 
-Resume point: Queue `ws004-p019` first to implement CDC ECM and prove the common
-USB/network path with QEMU `usb-net`. Then resume `ws005-p001` against the
-physical RTL8156 to isolate NCM-only carrier/first-RX behavior, static peer
-ping, and DHCP. RTL8822CE WLAN/WPA work remains on `MB-006`.
+Resume point: boot the recorded p001 candidate image for one combined physical
+RTL8156 carrier/static/DHCP acceptance. If that check fails, `ws004-p019` CDC
+ECM/QEMU is the next Queue item before another hardware cycle. RTL8822CE
+WLAN/WPA remains on `MB-006`.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -23,7 +26,7 @@ Shared tests: [WS005 test index](tests/README.md)
 
 | Phase | Status | Result / resume point |
 | --- | --- | --- |
-| [`ws005-p001`](phase001-usb-ncm-physical-datapath/phase.md) | Planned; waiting for `ws004-p019` | Bound RTL8156 `ue0` needs bounded carrier/TX/RX tracing, first static peer ping, and DHCP after the QEMU ECM common-path control passes; reconnect/reliability remain later |
+| [`ws005-p001`](phase001-usb-ncm-physical-datapath/phase.md) | In progress (`q029`); automatic slice complete | Carrier/deadline, clean-source, complete interface/default-route rollback, staged diagnostics, focused tests, production image, and QEMU USB-root gate pass; run one physical carrier/static/DHCP check next, retaining the first boundary on failure |
 
 `ws002-p020` remains historical ownership of the current `networkd`/`net`
 baseline; it is not renumbered into this WS.
@@ -77,8 +80,8 @@ and failure.
 | --- | --- | --- | --- | --- |
 | NET-00 | Complete with follow-ups | `networkd`, `net`, `dhcpc`, rc.conf boot orchestration, and fd 3 readiness | Phase 20 | See Phase 20 evidence and handoff list |
 | NET-05 | Planned in WS011 | Interactive `net`, `/etc/net.conf`, persistence, and VLAN/bridge configuration model | WS011 | WS011 owns its Phase and acceptance records |
-| NET-01 | p001 waits for p019 | Hardware-network bring-up procedure and bounded carrier/TX/RX diagnostics | BR-00, bound RTL8156 `ue0`, QEMU ECM control | First static and DHCP paths pass on the target setup without a freeze |
-| NET-10 | Active; p019 control precedes p001 physical slice | Independent ECM and NCM USB Ethernet implementations behind common USB/`net_device` contracts; physical NCM binding is proven and no Realtek frontend is assumed | BR-07, HW-12, HW-13 | p019 proves the QEMU common path; p001 proves NCM link/static/DHCP/peer ping; later work proves reconnect, DNS/external transfer, and reliability |
+| NET-01 | In progress (`q029` p001); automatic slice complete | Hardware-network bring-up procedure, safe DHCP transition/diagnostics, and bounded carrier/TX/RX evidence | BR-00, bound RTL8156 `ue0`, completed p020 hardening | The candidate and automatic gates pass; one combined physical static/DHCP check must pass or retain the exact failure that queues p019 next |
+| NET-10 | Active; one physical hardened-NCM check precedes p019 | Independent ECM and NCM USB Ethernet implementations behind common USB/`net_device` contracts; physical NCM binding is proven and no Realtek frontend is assumed | BR-07, HW-12; HW-13 becomes next on q029 failure | p001 now tests the hardened candidate once; p019 supplies the ECM/QEMU control next only if that check fails; later work proves reconnect, DNS/external transfer, and reliability |
 | NET-20 | Manually blocked (`MB-006`) | Versioned `networkd`-to-`wpa` child protocol and pluggable backend contract | Process/fd primitives, explicit release | Host protocol tests cover success, rejection, timeout, crash, and cancellation |
 | NET-21 | Manually blocked (`MB-006`) | `/etc/wpa/` plaintext database and safe management semantics | NET-20, explicit release | Root-only permissions, atomic update, parse/error tests, and no credential logging |
 | NET-22 | Manually blocked (`MB-006`) | `/sbin/wpa` initial RTL8822CE backend | WLAN userspace/control ABI, NET-20/21, firmware policy | Scan selection, authenticate/associate, reconnect, and useful errors on hardware |

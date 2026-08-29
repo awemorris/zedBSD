@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 Phase ID: `ws004-p019`
 
-Status: planned; ready for Queue
+Status: planned fallback; not in `q029`
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -13,11 +13,11 @@ Tests: [WS004 test index](../tests/README.md) and
 
 ## Objective
 
-Implement a self-contained USB CDC ECM Ethernet driver and use QEMU's standard
-`usb-net` function to prove the complete common path from xHCI and USB binding
-through `net_device`, ARP/IPv4/UDP, `networkd`, and `dhcpc`. This creates an
-automatic reference path before more physical RTL8156 NCM debugging is asked
-of the user.
+If q029's one deterministic-hardened physical NCM check still fails, implement
+a self-contained USB CDC ECM Ethernet driver and use QEMU's standard `usb-net`
+function to prove the complete common path from xHCI and USB binding through
+`net_device`, ARP/IPv4/UDP, `networkd`, and `dhcpc`. This then supplies the
+independent automatic reference path before another physical RTL8156 cycle.
 
 This Phase does not replace CDC NCM and does not extract a speculative common
 USB-Ethernet backend. ECM and NCM keep separate implementations behind the
@@ -52,8 +52,17 @@ model is `hw/usb/dev-network.c`:
   zero-packet transfer-contract work outside xHCI.
 - `ws002-p020`: `net` -> `networkd` -> `dhcpc` control-plane baseline.
 
-The physical NCM Phase `ws005-p001` depends on this Phase's automatic result;
-this Phase does not depend on physical RTL8156 access.
+This Phase is not a prerequisite for q029's first `ws005-p001` physical check.
+Its Queue resume condition is that p020 and the safe WS005 automatic fixes have
+passed but the one retained physical acceptance still fails. Once queued, this
+Phase does not itself depend on further physical RTL8156 access.
+
+## Queue sequencing
+
+`ws004-p020`, the safe DHCP/diagnostic fixes, one candidate image, and one
+physical acceptance run before p019. No ECM implementation belongs in q029. If
+that check passes, p019 returns to the ordinary planning pool; if it fails with
+bounded evidence, p019 is the next controlled Queue item.
 
 ## Frozen driver boundary
 
@@ -116,8 +125,9 @@ this Phase does not depend on physical RTL8156 access.
    `ifconfig ue0` to report `RUNNING` before starting address configuration.
    Use separate fresh-image cells for fixed-address ARP/ICMP and for a bounded
    DHCP lease through `/sbin/net` and `dhcpc`, followed by one ping to the QEMU
-   user-network peer. Do not let the known static-to-DHCP address-retention bug
-   contaminate the ECM transport result.
+   user-network peer. Retain q029's completed transactional static-to-DHCP
+   clearing and rollback fixtures as a prerequisite for the ECM transport
+   result.
 6. Use four fresh bounded cells: IDE/static, IDE/DHCP, xHCI USB-storage/static,
    and xHCI USB-storage/DHCP. The isolated IDE cells attach only the network
    function to xHCI. The integrated cells use the proven UEFI USB-storage

@@ -41,6 +41,11 @@
 #define NCM_TRANSFER_TIMEOUT_MS 5000U
 #define NCM_CONTROL_TIMEOUT_MS 1000U
 #define NCM_REARM_RETRY_MAX 3U
+#define NCM_COMPLETION_KINDS 3U
+
+#define NCM_COMPLETION_TX 0U
+#define NCM_COMPLETION_NOTIFICATION 1U
+#define NCM_COMPLETION_RX 2U
 
 #define NCM_CAP_PACKET_FILTER 0x01U
 #define NCM_CAP_MAX_DATAGRAM_SIZE 0x08U
@@ -83,6 +88,7 @@ struct ncm_adapter {
 	unsigned ready;
 	unsigned starts_active;
 	unsigned polls_active;
+	unsigned poll_cursor;
 	unsigned opened;
 	unsigned closing;
 	unsigned stopping;
@@ -92,6 +98,8 @@ struct ncm_adapter {
 	unsigned tx_ready;
 	unsigned notification_rearm;
 	unsigned rx_rearm;
+	unsigned notification_rearm_active;
+	unsigned rx_rearm_active;
 	unsigned notification_retries;
 	unsigned rx_retries;
 	unsigned tx_busy;
@@ -454,6 +462,39 @@ ncm_program_profile(struct ncm_adapter *adapter)
 }
 
 static int
+ncm_program_packet_filter(struct ncm_adapter *adapter)
+{
+	size_t actual = 0;
+	unsigned long irq;
+	int error;
+
+	if ((adapter->capabilities & NCM_CAP_PACKET_FILTER) == 0)
+		return 0;
+	irq = spin_lock_irqsave(&adapter->lock);
+	if (!adapter->ready || !adapter->opened || adapter->closing ||
+	    adapter->quarantined) {
+		spin_unlock_irqrestore(&adapter->lock, irq);
+		return ENETDOWN;
+	}
+	adapter->starts_active++;
+	spin_unlock_irqrestore(&adapter->lock, irq);
+	error = ncm_control(adapter, DRV_USB_DIR_OUT | DRV_USB_REQUEST_CLASS |
+	    DRV_USB_RECIP_INTERFACE, NCM_SET_ETHERNET_PACKET_FILTER,
+	    NCM_FILTER_DIRECTED | NCM_FILTER_ALL_MULTICAST |
+	    NCM_FILTER_BROADCAST, NULL, 0, &actual);
+	if (error != 0 || actual != 0)
+		error = error != 0 ? error : EIO;
+	irq = spin_lock_irqsave(&adapter->lock);
+	if (adapter->starts_active == 0)
+		__builtin_trap();
+	if (error == 0 && (adapter->closing || !adapter->opened))
+		error = ENETDOWN;
+	adapter->starts_active--;
+	spin_unlock_irqrestore(&adapter->lock, irq);
+	return error;
+}
+
+static int
 ncm_urb_status_error(enum drv_usb_urb_status status)
 {
 	if (status == DRV_USB_URB_COMPLETE)
@@ -597,6 +638,8 @@ ncm_stop(struct ncm_adapter *adapter)
 		adapter->tx_ready = 0;
 		adapter->notification_rearm = 0;
 		adapter->rx_rearm = 0;
+		adapter->notification_rearm_active = 0;
+		adapter->rx_rearm_active = 0;
 		adapter->notification_retries = 0;
 		adapter->rx_retries = 0;
 		adapter->tx_busy = 0;
@@ -630,7 +673,12 @@ ncm_open(struct net_device *device)
 	adapter->opened = 1;
 	adapter->stop_error = 0;
 	spin_unlock_irqrestore(&adapter->lock, irq);
-	error = ncm_start_urb(adapter, adapter->notification_urb,
+	/* The data alternate is active by the time the net device becomes ready.
+	 * Some functions discard their filter across an administrative close, so
+	 * program it on every open and before publishing any persistent URB. */
+	error = ncm_program_packet_filter(adapter);
+	if (error == 0)
+		error = ncm_start_urb(adapter, adapter->notification_urb,
 	    adapter->notification_buffer, NCM_NOTIFICATION_SIZE);
 	if (error == 0)
 		error = ncm_start_urb(adapter, adapter->rx_urb,
@@ -778,6 +826,8 @@ ncm_rearm(struct ncm_adapter *adapter, int notification)
 	    &adapter->rx_retries;
 	unsigned *pending = notification ? &adapter->notification_rearm :
 	    &adapter->rx_rearm;
+	unsigned *active = notification ? &adapter->notification_rearm_active :
+	    &adapter->rx_rearm_active;
 	int retryable = error == EBUSY || error == ENOMEM || error == EAGAIN ||
 	    error == ENOBUFS;
 	int retry_scheduled = 0;
@@ -785,15 +835,18 @@ ncm_rearm(struct ncm_adapter *adapter, int notification)
 	int stopping = !adapter->ready || !adapter->opened || adapter->closing ||
 	    adapter->stopping;
 
+	if (*active == 0)
+		__builtin_trap();
 	if (error == 0) {
+		/* The caller atomically claimed the old rearm request.  Preserve a new
+		 * one that an immediately completed submission may already have
+		 * published through another poll. */
 		*retry = 0;
-		*pending = 0;
 	} else if (stopping) {
 		/* A poll admitted immediately before close may reach rearm after
 		 * close has withdrawn admission.  This is orderly retirement, not a
 		 * transfer failure and must not quarantine the adapter. */
 		*retry = 0;
-		*pending = 0;
 		error = 0;
 	} else if (retryable && *retry < NCM_REARM_RETRY_MAX) {
 		(*retry)++;
@@ -805,6 +858,7 @@ ncm_rearm(struct ncm_adapter *adapter, int notification)
 		adapter->opened = 0;
 		quarantine = 1;
 	}
+	*active = 0;
 	spin_unlock_irqrestore(&adapter->lock, irq);
 	if (quarantine && adapter->net_device != NULL)
 		(void)net_device_set_carrier(adapter->net_device, 0);
@@ -867,109 +921,206 @@ ncm_poll_exit(struct ncm_adapter *adapter)
 	spin_unlock_irqrestore(&adapter->lock, irq);
 }
 
+static int
+ncm_take_pending(struct ncm_adapter *adapter, unsigned *pending)
+{
+	unsigned long irq = spin_lock_irqsave(&adapter->lock);
+	int taken = *pending != 0;
+
+	if (taken)
+		*pending = 0;
+	spin_unlock_irqrestore(&adapter->lock, irq);
+	return taken;
+}
+
+static void
+ncm_restore_pending(struct ncm_adapter *adapter, unsigned *pending)
+{
+	unsigned long irq = spin_lock_irqsave(&adapter->lock);
+
+	*pending = 1;
+	spin_unlock_irqrestore(&adapter->lock, irq);
+}
+
+static int
+ncm_take_notification_rearm(struct ncm_adapter *adapter)
+{
+	unsigned long irq = spin_lock_irqsave(&adapter->lock);
+	int taken = adapter->notification_rearm != 0 &&
+	    adapter->notification_rearm_active == 0;
+
+	if (taken) {
+		adapter->notification_rearm = 0;
+		adapter->notification_rearm_active = 1;
+	}
+	spin_unlock_irqrestore(&adapter->lock, irq);
+	return taken;
+}
+
+static int
+ncm_take_rx_rearm(struct ncm_adapter *adapter)
+{
+	unsigned long irq = spin_lock_irqsave(&adapter->lock);
+	int taken = adapter->rx_rearm != 0 &&
+	    adapter->rx_rearm_active == 0 && adapter->rx_queue_count == 0;
+
+	if (taken) {
+		adapter->rx_rearm = 0;
+		adapter->rx_rearm_active = 1;
+	}
+	spin_unlock_irqrestore(&adapter->lock, irq);
+	return taken;
+}
+
+static int
+ncm_poll_tx_completion(struct ncm_adapter *adapter)
+{
+	unsigned long irq;
+
+	if (!ncm_take_pending(adapter, &adapter->tx_ready))
+		return 0;
+	irq = spin_lock_irqsave(&adapter->lock);
+	if (adapter->starts_active != 0) {
+		spin_unlock_irqrestore(&adapter->lock, irq);
+		ncm_restore_pending(adapter, &adapter->tx_ready);
+		return 0;
+	}
+	spin_unlock_irqrestore(&adapter->lock, irq);
+	if (drv_usb_urb_drain(adapter->tx_urb,
+	    NCM_TRANSFER_TIMEOUT_MS) != 0) {
+		ncm_restore_pending(adapter, &adapter->tx_ready);
+		return 0;
+	}
+	irq = spin_lock_irqsave(&adapter->lock);
+	adapter->tx_busy = 0;
+	spin_unlock_irqrestore(&adapter->lock, irq);
+	return 1;
+}
+
+static int
+ncm_poll_notification_completion(struct ncm_adapter *adapter)
+{
+	if (!ncm_take_pending(adapter, &adapter->notification_ready))
+		return 0;
+	if (drv_usb_urb_drain(adapter->notification_urb,
+	    NCM_TRANSFER_TIMEOUT_MS) != 0) {
+		ncm_restore_pending(adapter, &adapter->notification_ready);
+		return 0;
+	}
+	ncm_notification_process(adapter);
+	ncm_restore_pending(adapter, &adapter->notification_rearm);
+	return 1;
+}
+
+static int
+ncm_poll_rx_completion(struct net_device *device,
+	struct ncm_adapter *adapter)
+{
+	size_t count = 0;
+	int error;
+
+	if (!ncm_take_pending(adapter, &adapter->rx_ready))
+		return 0;
+	if (drv_usb_urb_drain(adapter->rx_urb,
+	    NCM_TRANSFER_TIMEOUT_MS) != 0) {
+		ncm_restore_pending(adapter, &adapter->rx_ready);
+		return 0;
+	}
+	error = ncm_urb_status_error(drv_usb_urb_status(adapter->rx_urb));
+	if (error == 0)
+		error = drv_usb_cdc_ncm_parse_ntb16(&adapter->profile,
+		    &adapter->rx_state, adapter->rx_buffer,
+		    drv_usb_urb_actual_length(adapter->rx_urb),
+		    ncm_queue_datagram, adapter, &count);
+	if (error != 0)
+		device->rx_errors++;
+	ncm_restore_pending(adapter, &adapter->rx_rearm);
+	return 1;
+}
+
+static int
+ncm_has_poll_work(struct ncm_adapter *adapter)
+{
+	unsigned long irq = spin_lock_irqsave(&adapter->lock);
+	int pending = adapter->ready && adapter->opened && !adapter->closing &&
+	    !adapter->stopping && !adapter->quarantined &&
+	    (adapter->notification_ready || adapter->rx_ready ||
+	    adapter->tx_ready || (adapter->notification_rearm &&
+	    !adapter->notification_rearm_active) || (adapter->rx_rearm &&
+	    !adapter->rx_rearm_active) || adapter->rx_queue_count != 0);
+
+	spin_unlock_irqrestore(&adapter->lock, irq);
+	return pending;
+}
+
 static unsigned
 ncm_poll_receive(struct net_device *device, unsigned budget)
 {
 	struct ncm_adapter *adapter = device->driver_data;
-	unsigned delivered;
+	unsigned cursor, delivered, index, work = 0;
 	unsigned long irq;
-	unsigned notification_ready, rx_ready, tx_ready;
-	unsigned notification_rearm, rx_rearm;
-	int reschedule = 0;
+	int notification_completed = 0, rx_progress = 0;
 
 	if (!ncm_poll_enter(adapter))
 		return 0;
 	delivered = ncm_deliver_queued(adapter, budget);
+	work += delivered;
+	rx_progress = delivered != 0;
 
 	irq = spin_lock_irqsave(&adapter->lock);
-	notification_ready = adapter->notification_ready;
-	rx_ready = adapter->rx_ready;
-	tx_ready = adapter->tx_ready;
-	notification_rearm = adapter->notification_rearm;
-	rx_rearm = adapter->rx_rearm;
-	adapter->notification_ready = 0;
-	adapter->rx_ready = 0;
-	adapter->tx_ready = 0;
-	adapter->notification_rearm = 0;
-	adapter->rx_rearm = 0;
+	cursor = adapter->poll_cursor % NCM_COMPLETION_KINDS;
 	spin_unlock_irqrestore(&adapter->lock, irq);
+	for (index = 0; index < NCM_COMPLETION_KINDS && work < budget;
+	    index++) {
+		unsigned kind = (cursor + index) % NCM_COMPLETION_KINDS;
+		int completed;
 
-	if (tx_ready) {
+		if (kind == NCM_COMPLETION_TX)
+			completed = ncm_poll_tx_completion(adapter);
+		else if (kind == NCM_COMPLETION_NOTIFICATION)
+			completed = ncm_poll_notification_completion(adapter);
+		else
+			completed = ncm_poll_rx_completion(device, adapter);
+		if (!completed)
+			continue;
+		if (kind == NCM_COMPLETION_NOTIFICATION)
+			notification_completed = 1;
+		else if (kind == NCM_COMPLETION_RX)
+			rx_progress = 1;
+		work++;
 		irq = spin_lock_irqsave(&adapter->lock);
-		if (adapter->starts_active != 0) {
-			adapter->tx_ready = 1;
-			spin_unlock_irqrestore(&adapter->lock, irq);
-			reschedule = 1;
-		} else {
-			spin_unlock_irqrestore(&adapter->lock, irq);
-			if (drv_usb_urb_drain(adapter->tx_urb,
-		    NCM_TRANSFER_TIMEOUT_MS) == 0) {
-				irq = spin_lock_irqsave(&adapter->lock);
-				adapter->tx_busy = 0;
-				spin_unlock_irqrestore(&adapter->lock, irq);
-			} else
-				reschedule = 1;
-		}
+		adapter->poll_cursor = (kind + 1U) % NCM_COMPLETION_KINDS;
+		spin_unlock_irqrestore(&adapter->lock, irq);
 	}
-	if (notification_ready) {
-		if (drv_usb_urb_drain(adapter->notification_urb,
-		    NCM_TRANSFER_TIMEOUT_MS) == 0) {
-			ncm_notification_process(adapter);
-			notification_rearm = 1;
-		} else {
-			irq = spin_lock_irqsave(&adapter->lock);
-			adapter->notification_ready = 1;
-			spin_unlock_irqrestore(&adapter->lock, irq);
-			reschedule = 1;
-		}
+	if (work < budget) {
+		delivered = ncm_deliver_queued(adapter, budget - work);
+		work += delivered;
+		if (delivered != 0)
+			rx_progress = 1;
 	}
-	if (rx_ready) {
-		if (drv_usb_urb_drain(adapter->rx_urb,
-		    NCM_TRANSFER_TIMEOUT_MS) == 0) {
-			size_t count = 0;
-			int error = ncm_urb_status_error(
-			    drv_usb_urb_status(adapter->rx_urb));
 
-			if (error == 0)
-				error = drv_usb_cdc_ncm_parse_ntb16(
-				    &adapter->profile, &adapter->rx_state,
-				    adapter->rx_buffer,
-				    drv_usb_urb_actual_length(adapter->rx_urb),
-				    ncm_queue_datagram, adapter, &count);
-			if (error != 0)
-				device->rx_errors++;
-			rx_rearm = 1;
-		} else {
-			irq = spin_lock_irqsave(&adapter->lock);
-			adapter->rx_ready = 1;
-			spin_unlock_irqrestore(&adapter->lock, irq);
-			reschedule = 1;
-		}
+	/* A rearm caused by a completion (or by draining the last queued frame)
+	 * is part of that already-budgeted work item.  A standalone retry consumes
+	 * one unit so persistent HCD backpressure cannot escape the poll budget. */
+	if (notification_completed) {
+		if (ncm_take_notification_rearm(adapter))
+			(void)ncm_rearm(adapter, 1);
+	} else if (work < budget &&
+	    ncm_take_notification_rearm(adapter)) {
+		(void)ncm_rearm(adapter, 1);
+		work++;
 	}
-	if (delivered < budget)
-		delivered += ncm_deliver_queued(adapter, budget - delivered);
-	irq = spin_lock_irqsave(&adapter->lock);
-	if (adapter->rx_queue_count != 0)
-		reschedule = 1;
-	spin_unlock_irqrestore(&adapter->lock, irq);
-	if (notification_rearm && ncm_rearm(adapter, 1) == EAGAIN)
-		reschedule = 1;
-	if (rx_rearm) {
-		irq = spin_lock_irqsave(&adapter->lock);
-		if (adapter->rx_queue_count != 0) {
-			adapter->rx_rearm = 1;
-			reschedule = 1;
-			spin_unlock_irqrestore(&adapter->lock, irq);
-		} else {
-			spin_unlock_irqrestore(&adapter->lock, irq);
-			if (ncm_rearm(adapter, 0) == EAGAIN)
-				reschedule = 1;
-		}
+	if (rx_progress) {
+		if (ncm_take_rx_rearm(adapter))
+			(void)ncm_rearm(adapter, 0);
+	} else if (work < budget && ncm_take_rx_rearm(adapter)) {
+		(void)ncm_rearm(adapter, 0);
+		work++;
 	}
-	if (reschedule)
+	if (ncm_has_poll_work(adapter))
 		net_device_schedule_poll(device);
 	ncm_poll_exit(adapter);
-	return delivered;
+	return work;
 }
 
 static void
@@ -1144,17 +1295,6 @@ ncm_attach(struct drv_usb_interface *interface, const struct drv_usb_id *id)
 	if (error != 0)
 		return error;
 	drv_usb_cdc_ncm_rx_reset(&adapter->rx_state);
-	if ((adapter->capabilities & NCM_CAP_PACKET_FILTER) != 0) {
-		error = ncm_control(adapter, DRV_USB_DIR_OUT |
-		    DRV_USB_REQUEST_CLASS | DRV_USB_RECIP_INTERFACE,
-		    NCM_SET_ETHERNET_PACKET_FILTER, NCM_FILTER_DIRECTED |
-		    NCM_FILTER_ALL_MULTICAST | NCM_FILTER_BROADCAST, NULL, 0,
-		    &actual);
-		if (error != 0 || actual != 0) {
-			error = error != 0 ? error : EIO;
-			return error;
-		}
-	}
 	error = ncm_buffers_alloc(adapter);
 	if (error != 0)
 		return error;

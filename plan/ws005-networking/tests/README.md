@@ -11,8 +11,9 @@ Parent: [WS005](../ws.md)
 | NET-T30 | WLAN fixture | `net` to `networkd` to fake `wpa` to DHCP/static orchestration passes without claiming hardware |
 | NET-T31 | WLAN hardware | Scan/selection/authentication/association, DHCP/static, reconnect, and transfer pass on the selected controller |
 | NET-T40 | USB CDC Ethernet | If selected, ECM/NCM interoperability, reconnect, DHCP/static, and transfer pass with device role proven |
-| NET-T41 | RTL8156 first data path | First notification and bulk RX return without a freeze, static peer ping passes, and DHCP lease plus post-lease ping pass before broader reconnect/reliability acceptance |
-| NET-T42 | QEMU CDC ECM control | QEMU `usb-net` selects ECM, publishes `ue0`, and passes carrier, static ARP/ping, DHCP, and post-lease ping in IDE-control and concurrent xHCI USB-storage topologies |
+| NET-T41 | RTL8156 first data path | After p020 and the safe automatic fixes, one candidate image gets one combined acceptance: first notification/bulk RX remain responsive, fixed-peer ARP/ping passes, and DHCP lease plus post-lease ping passes; failure retains the exact first stage and makes p019 next |
+| NET-T42 | QEMU CDC ECM control | If NET-T41 still fails, the next Queue's QEMU `usb-net` selects ECM, publishes `ue0`, and passes carrier, static ARP/ping, DHCP, and post-lease ping in IDE-control and concurrent xHCI USB-storage topologies |
+| NET-T43 | DHCP transition and diagnostics | Starting with no address or a static address, DISCOVER uses IPv4 source zero and BOOTP `ciaddr` zero; failure restores prior state, success commits the lease, and `ENETDOWN` is distinguishable from `ETIMEDOUT` |
 
 Existing executable Phase 20 and DHCP tests remain under repository `/tests`
 and are cross-owned as regression inputs rather than duplicated.

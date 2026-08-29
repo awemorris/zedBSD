@@ -574,6 +574,8 @@ expect_rejected(const struct drv_usb_cdc_ncm_profile *profile,
 	assert(log.count == 0);
 	assert(count == 0);
 	assert(state.expected_sequence == 0);
+	assert(state.sequence_initialized == 0);
+	assert(state.sequence_mismatches == 0);
 }
 
 static void
@@ -595,7 +597,6 @@ test_malformed(void)
 	REJECT_CHANGE(changed[0] ^= 1U);
 	REJECT_CHANGE(put_le32(changed, DRV_USB_CDC_NCM_NTH32_SIGNATURE));
 	REJECT_CHANGE(put_le16(changed + 4U, 16U));
-	REJECT_CHANGE(put_le16(changed + 6U, 1U));
 	REJECT_CHANGE(put_le16(changed + 8U, (uint16_t)(length - 1U)));
 	REJECT_CHANGE(put_le16(changed + 10U, 0U));
 	REJECT_CHANGE(put_le16(changed + 10U, 14U));
@@ -687,22 +688,88 @@ static void
 test_sequence_and_callback(void)
 {
 	struct drv_usb_cdc_ncm_profile profile = make_profile();
-	struct drv_usb_cdc_ncm_rx_state state;
+	struct drv_usb_cdc_ncm_rx_state state, state_before;
 	struct delivery_log log;
 	uint8_t ntb[BUFFER_SIZE];
 	size_t length, count;
 
-	state.expected_sequence = UINT16_MAX;
+	/* A malformed predecessor cannot initialize the sequence transaction. */
+	drv_usb_cdc_ncm_rx_reset(&state);
+	state_before = state;
+	length = make_two_datagram_ntb(ntb, 99U);
+	ntb[0] ^= 1U;
+	reset_log(&log);
+	assert(drv_usb_cdc_ncm_parse_ntb16(&profile, &state, ntb, length,
+	    deliver_frame, &log, &count) != 0);
+	assert(log.count == 0 && count == 0);
+	assert(memcmp(&state, &state_before, sizeof(state)) == 0);
+
+	/* The first completely valid NTB establishes the wire baseline even when
+	 * the function did not start at sequence zero. */
+	length = make_two_datagram_ntb(ntb, 37U);
+	reset_log(&log);
+	assert(drv_usb_cdc_ncm_parse_ntb16(&profile, &state, ntb, length,
+	    deliver_frame, &log, &count) == 0);
+	assert(state.sequence_initialized == 1U);
+	assert(state.expected_sequence == 38U);
+	assert(state.sequence_mismatches == 0);
+
+	/* A fully valid gap is consumed and immediately resynchronizes. */
+	length = make_two_datagram_ntb(ntb, 41U);
+	reset_log(&log);
+	assert(drv_usb_cdc_ncm_parse_ntb16(&profile, &state, ntb, length,
+	    deliver_frame, &log, &count) == 0);
+	assert(state.expected_sequence == 42U);
+	assert(state.sequence_mismatches == 1U);
+
+	/* Structural failure must not move either sequence field, even when its
+	 * wire sequence also differs from the current baseline. */
+	length = make_two_datagram_ntb(ntb, 99U);
+	ntb[0] ^= 1U;
+	state_before = state;
+	reset_log(&log);
+	assert(drv_usb_cdc_ncm_parse_ntb16(&profile, &state, ntb, length,
+	    deliver_frame, &log, &count) != 0);
+	assert(log.count == 0 && count == 0);
+	assert(memcmp(&state, &state_before, sizeof(state)) == 0);
+
+	length = make_two_datagram_ntb(ntb, 42U);
+	reset_log(&log);
+	assert(drv_usb_cdc_ncm_parse_ntb16(&profile, &state, ntb, length,
+	    deliver_frame, &log, &count) == 0);
+	assert(state.expected_sequence == 43U);
+	assert(state.sequence_mismatches == 1U);
+	/* A backward mismatch follows the same delivery and resync policy. */
+	length = make_two_datagram_ntb(ntb, 7U);
+	reset_log(&log);
+	assert(drv_usb_cdc_ncm_parse_ntb16(&profile, &state, ntb, length,
+	    deliver_frame, &log, &count) == 0);
+	assert(state.expected_sequence == 8U);
+	assert(state.sequence_mismatches == 2U);
+
+	/* Sequence wrap is ordinary synchronized progression. */
 	length = make_two_datagram_ntb(ntb, UINT16_MAX);
 	reset_log(&log);
 	assert(drv_usb_cdc_ncm_parse_ntb16(&profile, &state, ntb, length,
 	    deliver_frame, &log, &count) == 0);
 	assert(state.expected_sequence == 0);
+	assert(state.sequence_mismatches == 3U);
 	length = make_two_datagram_ntb(ntb, 0);
 	reset_log(&log);
 	assert(drv_usb_cdc_ncm_parse_ntb16(&profile, &state, ntb, length,
 	    deliver_frame, &log, &count) == 0);
 	assert(state.expected_sequence == 1U);
+	assert(state.sequence_mismatches == 3U);
+
+	/* UINT16_MAX is also a valid first accepted sequence, not a sentinel. */
+	drv_usb_cdc_ncm_rx_reset(&state);
+	length = make_two_datagram_ntb(ntb, UINT16_MAX);
+	reset_log(&log);
+	assert(drv_usb_cdc_ncm_parse_ntb16(&profile, &state, ntb, length,
+	    deliver_frame, &log, &count) == 0);
+	assert(state.expected_sequence == 0);
+	assert(state.sequence_initialized == 1U);
+	assert(state.sequence_mismatches == 0);
 
 	drv_usb_cdc_ncm_rx_reset(&state);
 	length = make_two_datagram_ntb(ntb, 0);
@@ -712,6 +779,8 @@ test_sequence_and_callback(void)
 	    deliver_frame, &log, &count) == ENOBUFS);
 	assert(log.count == 1U && count == 1U);
 	assert(state.expected_sequence == 1U);
+	assert(state.sequence_initialized == 1U);
+	assert(state.sequence_mismatches == 0);
 }
 
 static void

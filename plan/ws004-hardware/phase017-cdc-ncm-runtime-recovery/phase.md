@@ -12,9 +12,10 @@ Tests: [WS004 test index](../tests/README.md)
 
 ## Objective
 
-Recover CDC NCM receive service after a dropped, malformed, or sequence-skipped
-NTB, and make an accepted transmit's later terminal HCD error observable in
-network statistics without weakening the strict wire validator or the completed
+Complete the CDC NCM recovery and accounting work that remains after the
+approved deterministic subset was extracted into `ws004-p020`, especially
+making an accepted transmit's later terminal HCD error observable in network
+statistics without weakening the strict wire validator or the completed
 ownership contract.
 
 ## Dependencies
@@ -39,30 +40,34 @@ runtime-policy gaps:
 These are recovery and accounting limitations, not buffer-bounds, callback,
 DMA, UAF, or detach-ownership defects in p014.
 
+The user has since approved one deterministic receive policy as
+[`ws004-p020`](../phase020-cdc-ncm-deterministic-hardening/phase.md): the first
+fully valid NTB is accepted at any sequence, every fully valid mismatch is
+delivered and resynchronizes the next expectation to the wire sequence plus
+one, malformed input changes no sequence state, and completion work is
+budgeted. p020 also owns packet-filter programming on open after the active
+alternate. Those items no longer wait on this broader Phase, but p017 remains
+pending for asynchronous TX accounting and any later recovery work outside
+p020's explicit boundary.
+
 ## Planned design work
 
-1. Keep `drv_usb_cdc_ncm_parse_ntb16()` strict and transactional. Add an
-   adapter-local resynchronization policy rather than silently making malformed
-   wire input acceptable.
-2. After a transfer loss, malformed NTB, or sequence gap, use only a minimally
-   valid NTH16 header to select a candidate sequence. Deliver no frame until the
-   complete existing validator accepts the NTB.
-3. Define whether a valid current NTB that merely skipped sequence numbers is
-   accepted on a checked second parse, or whether it is dropped and only the
-   next valid NTB resumes delivery. Record the selected policy and wraparound.
-4. Define the `net_device` meaning of accepted-versus-completed TX statistics,
+1. Retain p020's fully validated sequence acceptance/resynchronization and
+   completion-budget contracts as dependencies rather than reopening them.
+2. Define the `net_device` meaning of accepted-versus-completed TX statistics,
    then publish terminal bulk-OUT errors without double-consuming a packet or
    racing device removal.
-5. Add production-source fixtures for malformed then valid input, transport
-   loss then valid input, forward sequence gaps, wraparound, terminal TX error,
-   close/detach during recovery, and reconnect reset.
+3. Decide whether any transport-loss or quarantine recovery behavior beyond
+   p020 is required after physical evidence, without adding notification
+   reassembly or an xHCI IRQ redesign implicitly.
+4. Add production-source fixtures for terminal TX error, close/detach during
+   accounting, reconnect reset, and any separately approved residual recovery
+   rule.
 
 ## Completion conditions
 
-- One bad or lost NTB cannot leave RX permanently rejecting subsequent valid
-  traffic.
-- Recovery never delivers an incompletely validated datagram and remains
-  bounded under repeated hostile input.
+- The completed p020 receive-policy and bounded-work regressions remain
+  passing.
 - A submitted TX that later fails has the documented statistics outcome
   exactly once.
 - Existing p013/p014, USB binding, xHCI, net-device, build, and QEMU regression
@@ -70,7 +75,9 @@ DMA, UAF, or detach-ownership defects in p014.
 
 ## Reconsideration boundary
 
-Do not queue implementation until the sequence-gap acceptance rule and the
-meaning of asynchronous TX statistics are explicit. If correct accounting
-requires changing the general `net_device` contract, plan that shared change
-before modifying the NCM driver or its public headers.
+Do not queue this remaining Phase until the meaning of asynchronous TX
+statistics is explicit and new physical evidence identifies any additional
+recovery rule. If correct accounting requires changing the general
+`net_device` contract, plan that shared change before modifying the NCM driver
+or its public headers. Do not fold p020, notification reassembly, xHCI IRQ
+redesign, or ECM into p017 merely because they concern the same device.

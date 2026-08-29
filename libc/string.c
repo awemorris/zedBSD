@@ -233,6 +233,8 @@ strerror(int error)
 	case EFAULT: return "Bad address";
 	case EAGAIN: return "Resource temporarily unavailable";
 	case EACCES: return "Permission denied";
+	case ENETDOWN: return "Network is down";
+	case ETIMEDOUT: return "Connection timed out";
 	case ESRCH: return "No such process";
 	case ECHILD: return "No child process";
 	case E2BIG: return "Argument list too long";

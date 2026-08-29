@@ -223,7 +223,7 @@ append_interface_status(int descriptor, const char *name, char *output,
 	count =
 	    snprintf(output + *used, capacity - *used, "%s %s %s\n", name,
 		     has_address ? "static" : "unconfigured",
-		     (flags.ifr_flags & IFF_UP) != 0 ? "online" : "offline");
+		     (flags.ifr_flags & IFF_RUNNING) != 0 ? "online" : "offline");
 	if (count < 0 || (size_t)count >= capacity - *used) {
 		errno = EOVERFLOW;
 		return -1;

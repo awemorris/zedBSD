@@ -83,6 +83,8 @@ struct drv_usb_cdc_ncm_profile {
 
 struct drv_usb_cdc_ncm_rx_state {
 	uint16_t expected_sequence;
+	uint8_t sequence_initialized;
+	uint32_t sequence_mismatches;
 };
 
 enum drv_usb_cdc_ncm_control_step {
@@ -125,6 +127,9 @@ void drv_usb_cdc_ncm_rx_reset(struct drv_usb_cdc_ncm_rx_state *state);
  * The complete NTB is validated before deliver is called.  A callback error
  * can stop delivery after earlier, already-valid datagrams were delivered;
  * sequence state still advances because the USB NTB itself was consumed.
+ * The first structurally valid NTB establishes the sequence baseline.  A
+ * later structurally valid mismatch is accepted and resynchronizes the next
+ * expected sequence; malformed NTBs never change sequence state.
  */
 int drv_usb_cdc_ncm_parse_ntb16(
 	const struct drv_usb_cdc_ncm_profile *profile,

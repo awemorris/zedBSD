@@ -69,6 +69,9 @@ struct drv_usb_device {
 	unsigned control_count;
 	unsigned control_attempts;
 	unsigned fail_control_at;
+	unsigned filter_attempts;
+	unsigned filter_active_index;
+	unsigned filter_data_pending_urbs;
 	unsigned alternate_attempts;
 	unsigned fail_alternate_at;
 	unsigned auto_complete_notification;
@@ -123,6 +126,8 @@ static atomic_int poll_thread_returned;
 static atomic_int detach_thread_started;
 static atomic_int detach_thread_returned;
 static atomic_int detach_thread_result;
+static atomic_int blocked_rearm_submit_address;
+static atomic_int rearm_submit_attempts;
 
 static void
 fixture_thread_yield(void)
@@ -610,6 +615,12 @@ drv_usb_control(struct drv_usb_device *device, uint8_t request_type,
 	(void)timeout;
 	device->control_attempts++;
 	device->controls[device->control_count++] = request;
+	if (request == NCM_SET_ETHERNET_PACKET_FILTER) {
+		device->filter_attempts++;
+		device->filter_active_index =
+		    device->configuration.interfaces[1].active_index;
+		device->filter_data_pending_urbs = device->data_pending_urbs;
+	}
 	if (device->fail_control_at == device->control_attempts)
 		return EIO;
 	if (request == NCM_GET_NTB_PARAMETERS) {
@@ -694,6 +705,8 @@ fake_complete(struct drv_usb_urb *urb, enum drv_usb_urb_status status,
 int
 drv_usb_urb_submit(struct drv_usb_urb *urb)
 {
+	int blocked_address;
+
 	if (urb == NULL || urb->status == DRV_USB_URB_PENDING)
 		return EINVAL;
 	if (urb->device->submit_error_count != 0) {
@@ -703,6 +716,16 @@ drv_usb_urb_submit(struct drv_usb_urb *urb)
 	if (urb->device->fail_submit_once) {
 		urb->device->fail_submit_once = 0;
 		return EIO;
+	}
+	blocked_address = atomic_load_explicit(&blocked_rearm_submit_address,
+	    memory_order_acquire);
+	if (blocked_address != 0 && urb->endpoint != NULL &&
+	    urb->endpoint->address == (uint8_t)blocked_address &&
+	    atomic_fetch_add_explicit(&rearm_submit_attempts, 1,
+	    memory_order_acq_rel) == 0) {
+		while (atomic_load_explicit(&blocked_rearm_submit_address,
+		    memory_order_acquire) == blocked_address)
+			fixture_thread_yield();
 	}
 	urb->status = DRV_USB_URB_PENDING;
 	urb->hcd_owned = 1;
@@ -1082,8 +1105,7 @@ test_binding_and_attach(void)
 		NCM_GET_NTB_PARAMETERS, DRV_USB_CDC_NCM_SET_NTB_FORMAT,
 		DRV_USB_CDC_NCM_SET_NTB_INPUT_SIZE,
 		DRV_USB_CDC_NCM_SET_MAX_DATAGRAM_SIZE,
-		DRV_USB_CDC_NCM_SET_CRC_MODE,
-		NCM_SET_ETHERNET_PACKET_FILTER, 0x101U
+		DRV_USB_CDC_NCM_SET_CRC_MODE, 0x101U
 	};
 	unsigned index, releases_before;
 
@@ -1211,6 +1233,52 @@ test_optional_capabilities(void)
 }
 
 static void
+test_filter_open_order_failure_and_reopen(void)
+{
+	struct drv_usb_device device;
+	struct ncm_adapter *adapter;
+	unsigned controls_before_open;
+
+	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	adapter = attach_function(&device);
+	controls_before_open = device.control_count;
+	CHECK(device.configuration.interfaces[1].active_index == 1 &&
+	    device.filter_attempts == 0 && pending_urbs == 0);
+
+	/* The first filter transaction runs on the selected data alternate and
+	 * before either persistent receive URB.  Its failure leaves a reusable,
+	 * completely idle ownership graph. */
+	device.fail_control_at = device.control_attempts + 1U;
+	CHECK(net_device_open(published_device) == EIO);
+	CHECK(device.filter_attempts == 1 &&
+	    device.filter_active_index == 1 &&
+	    device.filter_data_pending_urbs == 0 && pending_urbs == 0);
+	CHECK(adapter->opened == 0 && adapter->quarantined == 0 &&
+	    adapter->notification_ready == 0 && adapter->rx_ready == 0 &&
+	    adapter->notification_urb->status != DRV_USB_URB_PENDING &&
+	    adapter->rx_urb->status != DRV_USB_URB_PENDING);
+
+	CHECK(net_device_open(published_device) == 0);
+	CHECK(device.filter_attempts == 2 &&
+	    device.filter_active_index == 1 &&
+	    device.filter_data_pending_urbs == 0 && pending_urbs == 2);
+	CHECK(device.controls[controls_before_open] ==
+	    NCM_SET_ETHERNET_PACKET_FILTER &&
+	    device.controls[controls_before_open + 1U] ==
+	    NCM_SET_ETHERNET_PACKET_FILTER);
+	net_device_close(published_device);
+	CHECK(pending_urbs == 0);
+	CHECK(net_device_open(published_device) == 0);
+	CHECK(device.filter_attempts == 3 &&
+	    device.filter_active_index == 1 &&
+	    device.filter_data_pending_urbs == 0 && pending_urbs == 2);
+	net_device_close(published_device);
+	CHECK(core_detach(&device.configuration.interfaces[0],
+	    DRV_USB_DETACH_FORCE) == 0);
+	CHECK(hal_live == 0 && live_urbs == 0 && pending_urbs == 0);
+}
+
+static void
 test_io_and_lifetime(void)
 {
 	struct drv_usb_device device;
@@ -1233,13 +1301,17 @@ test_io_and_lifetime(void)
 	adapter->notification_buffer[1] = NCM_NOTIFICATION_NETWORK_CONNECTION;
 	adapter->notification_buffer[2] = 1;
 	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 8);
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(published_device->carrier != 0);
 	CHECK(adapter->notification_urb->status == DRV_USB_URB_PENDING);
 	CHECK(drv_usb_cdc_ncm_build_ntb16(&adapter->profile, 0, frame,
 	    sizeof(frame), ntb, sizeof(ntb), &ntb_length) == 0);
 	memcpy(adapter->rx_buffer, ntb, ntb_length);
 	fake_complete(adapter->rx_urb, DRV_USB_URB_COMPLETE, ntb_length);
+	CHECK(net_device_poll(published_device, 1) == 1);
+	CHECK(received_packets == 0 && adapter->rx_queue_count == 1 &&
+	    adapter->rx_ready == 0 && adapter->rx_rearm != 0 &&
+	    published_device->poll_scheduled != 0);
 	CHECK(net_device_poll(published_device, 1) == 1);
 	CHECK(received_packets == 1 && received_length == sizeof(frame));
 	CHECK(!memcmp(received_frame, frame, sizeof(frame)));
@@ -1253,10 +1325,15 @@ test_io_and_lifetime(void)
 	memcpy(adapter->rx_buffer, ntb, ntb_length);
 	fake_complete(adapter->rx_urb, DRV_USB_URB_COMPLETE, ntb_length);
 	CHECK(net_device_poll(published_device, 1) == 1);
+	CHECK(received_packets == 1 && adapter->rx_queue_count == 1);
+	CHECK(net_device_poll(published_device, 1) == 1);
 	CHECK(received_packets == 2);
 	ntb_length = make_two_datagram_ntb(ntb, 2, frame);
 	memcpy(adapter->rx_buffer, ntb, ntb_length);
 	fake_complete(adapter->rx_urb, DRV_USB_URB_COMPLETE, ntb_length);
+	CHECK(net_device_poll(published_device, 1) == 1);
+	CHECK(received_packets == 2 && published_device->poll_scheduled != 0 &&
+	    adapter->rx_queue_count == 2);
 	CHECK(net_device_poll(published_device, 1) == 1);
 	CHECK(received_packets == 3 && published_device->poll_scheduled != 0 &&
 	    adapter->rx_queue_count == 1);
@@ -1268,7 +1345,7 @@ test_io_and_lifetime(void)
 	ntb[0] ^= 0xffU;
 	memcpy(adapter->rx_buffer, ntb, ntb_length);
 	fake_complete(adapter->rx_urb, DRV_USB_URB_COMPLETE, ntb_length);
-	CHECK(net_device_poll(published_device, 1) == 0);
+	CHECK(net_device_poll(published_device, 1) == 1);
 	CHECK(published_device->rx_errors == rx_errors + 1U &&
 	    received_packets == 4);
 	memset(adapter->notification_buffer, 0, 8);
@@ -1276,7 +1353,7 @@ test_io_and_lifetime(void)
 	adapter->notification_buffer[1] = NCM_NOTIFICATION_NETWORK_CONNECTION;
 	adapter->notification_buffer[2] = 1;
 	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 8);
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(published_device->carrier != 0);
 	memset(adapter->notification_buffer, 0, 16);
 	adapter->notification_buffer[0] = 0xa1;
@@ -1285,14 +1362,14 @@ test_io_and_lifetime(void)
 	put_le32(adapter->notification_buffer + 8U, 100000000U);
 	put_le32(adapter->notification_buffer + 12U, 20000000U);
 	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 16);
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(adapter->downstream_bps == 100000000U &&
 	    adapter->upstream_bps == 20000000U);
 	memset(adapter->notification_buffer, 0, 8);
 	adapter->notification_buffer[0] = 0xa1;
 	adapter->notification_buffer[1] = NCM_NOTIFICATION_NETWORK_CONNECTION;
 	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 8);
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(published_device->carrier == 0);
 	memset(adapter->notification_buffer, 0, 16);
 	adapter->notification_buffer[0] = 0xa1;
@@ -1302,7 +1379,7 @@ test_io_and_lifetime(void)
 	put_le32(adapter->notification_buffer + 8U, 1U);
 	put_le32(adapter->notification_buffer + 12U, 2U);
 	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 16);
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(adapter->downstream_bps == 100000000U &&
 	    adapter->upstream_bps == 20000000U);
 	packet = packet_buf_alloc(0);
@@ -1330,7 +1407,7 @@ test_io_and_lifetime(void)
 	drv_usb_urb_free(storage_urb);
 	fake_complete(adapter->tx_urb, DRV_USB_URB_COMPLETE,
 	    adapter->tx_urb->length);
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(!adapter->tx_busy);
 	CHECK(adapter->tx_sequence == 1);
 	packet = packet_buf_alloc(0);
@@ -1349,7 +1426,7 @@ test_io_and_lifetime(void)
 	CHECK(ncm_le16(adapter->tx_buffer + 6U) == 1U);
 	fake_complete(adapter->tx_urb, DRV_USB_URB_COMPLETE,
 	    adapter->tx_urb->length);
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	net_device_close(published_device);
 	CHECK(pending_urbs == 0 && packet_live == 0);
 	for (iteration = 0; iteration < 12U; iteration++) {
@@ -1374,12 +1451,139 @@ test_immediate_completion(void)
 	(void)attach_function(&device);
 	CHECK(net_device_open(published_device) == 0);
 	CHECK(published_device->poll_scheduled != 0);
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(published_device->carrier != 0);
 	net_device_close(published_device);
 	CHECK(core_detach(&device.configuration.interfaces[0],
 	    DRV_USB_DETACH_FORCE) == 0);
 	CHECK(hal_live == 0);
+}
+
+static void
+test_poll_budget_and_completion_storm(void)
+{
+	struct drv_usb_device device;
+	struct ncm_adapter *adapter;
+	struct packet_buf *packet;
+	uint8_t frame[64], ntb[NCM_NTB_BUFFER_SIZE];
+	size_t ntb_length;
+	uint64_t rx_errors_before;
+	unsigned received_before, iteration;
+
+	memset(frame, 0x6d, sizeof(frame));
+	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	adapter = attach_function(&device);
+	CHECK(net_device_open(published_device) == 0);
+	packet = packet_buf_alloc(0);
+	CHECK(packet != NULL && packet_buf_append(packet, sizeof(frame)) != NULL);
+	memcpy(packet->data, frame, sizeof(frame));
+	CHECK(net_device_transmit(published_device, packet) == 0);
+	CHECK(drv_usb_cdc_ncm_build_ntb16(&adapter->profile, 73U, frame,
+	    sizeof(frame), ntb, sizeof(ntb), &ntb_length) == 0);
+	memcpy(adapter->rx_buffer, ntb, ntb_length);
+	memset(adapter->notification_buffer, 0, 8);
+	adapter->notification_buffer[0] = 0xa1;
+	adapter->notification_buffer[1] = NCM_NOTIFICATION_NETWORK_CONNECTION;
+	adapter->notification_buffer[2] = 1;
+	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 8);
+	fake_complete(adapter->rx_urb, DRV_USB_URB_COMPLETE, ntb_length);
+	fake_complete(adapter->tx_urb, DRV_USB_URB_COMPLETE,
+	    adapter->tx_urb->length);
+	received_before = received_packets;
+
+	/* Zero budget leaves every completion untouched.  Budget one then retires
+	 * exactly one TX, notification, RX, or queued-frame work item per poll. */
+	CHECK(net_device_poll(published_device, 0) == 0);
+	CHECK(adapter->tx_ready != 0 && adapter->notification_ready != 0 &&
+	    adapter->rx_ready != 0 && adapter->tx_busy != 0 &&
+	    adapter->rx_state.sequence_initialized == 0 &&
+	    published_device->carrier == 0 &&
+	    published_device->poll_scheduled != 0);
+	CHECK(net_device_poll(published_device, 1) == 1);
+	CHECK(adapter->tx_ready == 0 && adapter->tx_busy == 0 &&
+	    adapter->notification_ready != 0 && adapter->rx_ready != 0 &&
+	    adapter->rx_state.sequence_initialized == 0 &&
+	    published_device->carrier == 0 &&
+	    published_device->poll_scheduled != 0);
+	CHECK(net_device_poll(published_device, 1) == 1);
+	CHECK(adapter->notification_ready == 0 && adapter->rx_ready != 0 &&
+	    published_device->carrier != 0 &&
+	    published_device->poll_scheduled != 0);
+	CHECK(net_device_poll(published_device, 1) == 1);
+	CHECK(adapter->rx_ready == 0 && adapter->rx_queue_count == 1 &&
+	    adapter->rx_rearm != 0 && received_packets == received_before &&
+	    adapter->rx_state.sequence_initialized != 0 &&
+	    adapter->rx_state.expected_sequence == 74U &&
+	    published_device->poll_scheduled != 0);
+	CHECK(net_device_poll(published_device, 1) == 1);
+	CHECK(adapter->rx_queue_count == 0 && adapter->rx_rearm == 0 &&
+	    received_packets == received_before + 1U && pending_urbs == 2);
+
+	/* Terminal transfer failures and fully transferred malformed NTBs each
+	 * consume one unit, rearm once, and preserve the accepted sequence state. */
+	rx_errors_before = published_device->rx_errors;
+	for (iteration = 0; iteration < 8U; iteration++) {
+		fake_complete(adapter->rx_urb, DRV_USB_URB_IO_ERROR, 0);
+		CHECK(net_device_poll(published_device, 1) == 1);
+		CHECK(published_device->rx_errors == rx_errors_before + iteration + 1U &&
+		    adapter->rx_state.expected_sequence == 74U &&
+		    adapter->rx_state.sequence_mismatches == 0 &&
+		    adapter->rx_queue_count == 0 &&
+		    adapter->rx_urb->status == DRV_USB_URB_PENDING);
+	}
+	CHECK(drv_usb_cdc_ncm_build_ntb16(&adapter->profile, 999U, frame,
+	    sizeof(frame), ntb, sizeof(ntb), &ntb_length) == 0);
+	ntb[0] ^= 1U;
+	for (iteration = 0; iteration < 8U; iteration++) {
+		memcpy(adapter->rx_buffer, ntb, ntb_length);
+		fake_complete(adapter->rx_urb, DRV_USB_URB_COMPLETE, ntb_length);
+		CHECK(net_device_poll(published_device, 1) == 1);
+		CHECK(published_device->rx_errors == rx_errors_before + 8U +
+		    iteration + 1U && adapter->rx_state.expected_sequence == 74U &&
+		    adapter->rx_state.sequence_mismatches == 0 &&
+		    adapter->rx_queue_count == 0 &&
+		    adapter->rx_urb->status == DRV_USB_URB_PENDING);
+	}
+	net_device_close(published_device);
+	CHECK(pending_urbs == 0);
+
+	/* An interrupt endpoint that completes synchronously on every rearm is a
+	 * bounded completion storm: each invocation consumes and reports one item,
+	 * while the new completion remains pending for the next poll. */
+	device.auto_complete_notification = 1;
+	CHECK(net_device_open(published_device) == 0);
+	CHECK(adapter->notification_ready != 0 && pending_urbs == 1);
+	for (iteration = 0; iteration < 4U; iteration++) {
+		CHECK(net_device_poll(published_device, 1) == 1);
+		CHECK(adapter->notification_ready != 0 && adapter->rx_ready == 0 &&
+		    published_device->poll_scheduled != 0 && pending_urbs == 1);
+	}
+	CHECK(drv_usb_cdc_ncm_build_ntb16(&adapter->profile, 74U, frame,
+	    sizeof(frame), ntb, sizeof(ntb), &ntb_length) == 0);
+	memcpy(adapter->rx_buffer, ntb, ntb_length);
+	fake_complete(adapter->rx_urb, DRV_USB_URB_COMPLETE, ntb_length);
+	received_before = received_packets;
+	CHECK(adapter->notification_ready != 0 && adapter->rx_ready != 0);
+	CHECK(net_device_poll(published_device, 1) == 1);
+	CHECK(adapter->notification_ready != 0 && adapter->rx_ready == 0 &&
+	    adapter->rx_queue_count == 1 && received_packets == received_before &&
+	    adapter->rx_state.expected_sequence == 75U &&
+	    published_device->poll_scheduled != 0);
+	CHECK(net_device_poll(published_device, 1) == 1);
+	CHECK(adapter->notification_ready != 0 && adapter->rx_queue_count == 0 &&
+	    received_packets == received_before + 1U && pending_urbs == 1 &&
+	    published_device->poll_scheduled != 0);
+	for (iteration = 0; iteration < 12U; iteration++) {
+		CHECK(net_device_poll(published_device, 1) == 1);
+		CHECK(adapter->notification_ready != 0 && adapter->rx_ready == 0 &&
+		    published_device->poll_scheduled != 0 && pending_urbs == 1);
+	}
+	device.auto_complete_notification = 0;
+	net_device_close(published_device);
+	CHECK(core_detach(&device.configuration.interfaces[0],
+	    DRV_USB_DETACH_FORCE) == 0);
+	CHECK(hal_live == 0 && live_urbs == 0 && pending_urbs == 0 &&
+	    packet_live == 0);
 }
 
 static void
@@ -1398,12 +1602,12 @@ test_rearm_retry_and_quarantine(void)
 	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 8);
 	device.submit_error = ENOMEM;
 	device.submit_error_count = 1;
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(adapter->notification_retries == 1 &&
 	    adapter->notification_rearm != 0 &&
 	    adapter->quarantined == 0 && published_device->carrier != 0);
 	CHECK(published_device->poll_scheduled != 0 && pending_urbs == 1);
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(adapter->notification_retries == 0 &&
 	    adapter->notification_rearm == 0 &&
 	    adapter->quarantined == 0 && published_device->carrier != 0);
@@ -1427,11 +1631,11 @@ test_rearm_retry_and_quarantine(void)
 	device.submit_error = EAGAIN;
 	device.submit_error_count = NCM_REARM_RETRY_MAX + 1U;
 	for (unsigned attempt = 0; attempt < NCM_REARM_RETRY_MAX; attempt++) {
-		CHECK(net_device_poll(published_device, 8) == 0);
+		CHECK(net_device_poll(published_device, 8) == 1);
 		CHECK(adapter->quarantined == 0 &&
 		    published_device->poll_scheduled != 0);
 	}
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(adapter->quarantined != 0 && adapter->opened == 0 &&
 	    published_device->carrier == 0 &&
 	    published_device->poll_scheduled == 0);
@@ -1452,9 +1656,73 @@ test_rearm_retry_and_quarantine(void)
 	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 8);
 	device.submit_error = EIO;
 	device.submit_error_count = 1;
-	CHECK(net_device_poll(published_device, 8) == 0);
+	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(adapter->quarantined != 0 && adapter->opened == 0 &&
 	    published_device->carrier == 0);
+	CHECK(core_detach(&device.configuration.interfaces[0],
+	    DRV_USB_DETACH_FORCE) == 0);
+	CHECK(hal_live == 0 && live_urbs == 0 && pending_urbs == 0);
+}
+
+static void
+test_overlapping_poll_rearm_claim(void)
+{
+	struct drv_usb_device device;
+	struct ncm_adapter *adapter;
+	pthread_t poll_thread;
+
+	function_init(&device, DRV_USB_HCD_CAP_CONCURRENT_URBS);
+	adapter = attach_function(&device);
+	CHECK(net_device_open(published_device) == 0 && pending_urbs == 2);
+
+	/* Hold the first poll inside notification rearm.  A concurrent poll must
+	 * observe the atomically claimed flag and cannot submit the same URB. */
+	memset(adapter->notification_buffer, 0, 8);
+	adapter->notification_buffer[0] = 0xa1;
+	adapter->notification_buffer[1] = NCM_NOTIFICATION_NETWORK_CONNECTION;
+	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 8);
+	atomic_store_explicit(&rearm_submit_attempts, 0, memory_order_release);
+	atomic_store_explicit(&blocked_rearm_submit_address, 0x83,
+	    memory_order_release);
+	atomic_store_explicit(&poll_thread_returned, 0, memory_order_release);
+	CHECK(pthread_create(&poll_thread, NULL, poll_thread_main,
+	    published_device) == 0);
+	wait_for_atomic(&rearm_submit_attempts);
+	CHECK(adapter->polls_active == 1 && adapter->notification_rearm == 0 &&
+	    adapter->notification_rearm_active != 0);
+	CHECK(published_device->ops->poll_receive(published_device, 8) == 0);
+	CHECK(atomic_load_explicit(&rearm_submit_attempts,
+	    memory_order_acquire) == 1 && adapter->notification_rearm == 0 &&
+	    adapter->notification_rearm_active != 0);
+	atomic_store_explicit(&blocked_rearm_submit_address, 0,
+	    memory_order_release);
+	CHECK(pthread_join(poll_thread, NULL) == 0);
+	CHECK(atomic_load_explicit(&poll_thread_returned,
+	    memory_order_acquire) != 0 && pending_urbs == 2);
+
+	/* RX uses the same claim transaction, including an empty-queue error
+	 * completion that is immediately eligible for rearm. */
+	fake_complete(adapter->rx_urb, DRV_USB_URB_IO_ERROR, 0);
+	atomic_store_explicit(&rearm_submit_attempts, 0, memory_order_release);
+	atomic_store_explicit(&blocked_rearm_submit_address, 0x84,
+	    memory_order_release);
+	atomic_store_explicit(&poll_thread_returned, 0, memory_order_release);
+	CHECK(pthread_create(&poll_thread, NULL, poll_thread_main,
+	    published_device) == 0);
+	wait_for_atomic(&rearm_submit_attempts);
+	CHECK(adapter->polls_active == 1 && adapter->rx_rearm == 0 &&
+	    adapter->rx_rearm_active != 0);
+	CHECK(published_device->ops->poll_receive(published_device, 8) == 0);
+	CHECK(atomic_load_explicit(&rearm_submit_attempts,
+	    memory_order_acquire) == 1 && adapter->rx_rearm == 0 &&
+	    adapter->rx_rearm_active != 0);
+	atomic_store_explicit(&blocked_rearm_submit_address, 0,
+	    memory_order_release);
+	CHECK(pthread_join(poll_thread, NULL) == 0);
+	CHECK(atomic_load_explicit(&poll_thread_returned,
+	    memory_order_acquire) != 0 && pending_urbs == 2);
+
+	net_device_close(published_device);
 	CHECK(core_detach(&device.configuration.interfaces[0],
 	    DRV_USB_DETACH_FORCE) == 0);
 	CHECK(hal_live == 0 && live_urbs == 0 && pending_urbs == 0);
@@ -1486,8 +1754,9 @@ test_shutdown(void)
 	    adapter->stop_error == 0 && adapter->tx_busy == 0);
 	CHECK(adapter->notification_ready == 0 && adapter->rx_ready == 0 &&
 	    adapter->tx_ready == 0 && adapter->notification_rearm == 0 &&
-	    adapter->rx_rearm == 0 && adapter->notification_retries == 0 &&
-	    adapter->rx_retries == 0);
+	    adapter->rx_rearm == 0 && adapter->notification_rearm_active == 0 &&
+	    adapter->rx_rearm_active == 0 &&
+	    adapter->notification_retries == 0 && adapter->rx_retries == 0);
 	CHECK(adapter->notification_urb->status == DRV_USB_URB_CANCELLED &&
 	    !adapter->notification_urb->hcd_owned &&
 	    adapter->rx_urb->status == DRV_USB_URB_CANCELLED &&
@@ -1514,7 +1783,7 @@ test_failure_unwind(void)
 {
 	unsigned failure;
 
-	for (failure = 1; failure <= 6U; failure++) {
+	for (failure = 1; failure <= 5U; failure++) {
 		struct drv_usb_device device;
 		int error;
 
@@ -1753,9 +2022,8 @@ test_attach_commit_and_detach_retry(void)
 	    attach_failure.configuration.interfaces[1].claimed_by == NULL &&
 	    attach_failure.configuration.interfaces[0].driver_data == NULL);
 	CHECK(attach_failure.alternate_attempts == 1 &&
-	    attach_failure.controls[attach_failure.control_count - 2U] ==
-	    NCM_SET_ETHERNET_PACKET_FILTER &&
-	    attach_failure.controls[attach_failure.control_count - 1U] == 0x101U);
+	    attach_failure.controls[attach_failure.control_count - 1U] == 0x101U &&
+	    attach_failure.filter_attempts == 0);
 	CHECK(release_calls == releases_before &&
 	    driver_data_clear_calls == clears_before);
 	CHECK(published_device == NULL && device_registry_count == 0 &&
@@ -1888,9 +2156,12 @@ main(void)
 	test_optional_iad_binding();
 	test_strict_binding();
 	test_optional_capabilities();
+	test_filter_open_order_failure_and_reopen();
 	test_io_and_lifetime();
 	test_immediate_completion();
+	test_poll_budget_and_completion_storm();
 	test_rearm_retry_and_quarantine();
+	test_overlapping_poll_rearm_claim();
 	test_shutdown();
 	test_failure_unwind();
 	test_drain_quarantine();

@@ -354,7 +354,7 @@ void
 drv_usb_cdc_ncm_rx_reset(struct drv_usb_cdc_ncm_rx_state *state)
 {
 	if (state != NULL)
-		state->expected_sequence = 0;
+		memset(state, 0, sizeof(*state));
 }
 
 static int
@@ -522,8 +522,6 @@ validate_ntb16(const struct drv_usb_cdc_ncm_profile *profile,
 	    load_le16(bytes + 4U) != DRV_USB_CDC_NCM_NTH16_SIZE)
 		return EINVAL;
 	result->sequence = load_le16(bytes + 6U);
-	if (result->sequence != state->expected_sequence)
-		return EILSEQ;
 	wire_block_length = load_le16(bytes + 8U);
 	if (wire_block_length == 0) {
 		/* Zero is legal only when a short USB transfer delimits the NTB. */
@@ -559,7 +557,12 @@ drv_usb_cdc_ncm_parse_ntb16(
 	error = validate_ntb16(profile, state, ntb, ntb_length, &result);
 	if (error != 0)
 		return error;
+	if (state->sequence_initialized &&
+	    result.sequence != state->expected_sequence &&
+	    state->sequence_mismatches != UINT32_MAX)
+		state->sequence_mismatches++;
 	state->expected_sequence = (uint16_t)(result.sequence + 1U);
+	state->sequence_initialized = 1;
 	for (index = 0; index < result.datagram_count; index++) {
 		if (deliver != NULL) {
 			error = deliver(bytes + result.datagrams[index].offset,

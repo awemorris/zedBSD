@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 WSID: `ws004`
 
-Status: active; `ws004-p019` CDC ECM/QEMU baseline ready for Queue
+Status: active; `ws004-p020` deterministic CDC NCM hardening complete
 
 Parent: [master plan](../master.md)
 
@@ -14,16 +14,19 @@ Last verified Phases: `ws004-p010` completes the retained USB function model;
 `ws004-p013` completes the strict, bounded NTH16/NDP16 wire contract; `p015`
 completes the general USB binding/interface transaction; and `p014` completes
 the integrated `ueN` automatic software milestone.
-`p016` records the non-Queue legacy-HCD hardware-retirement follow-up exposed
+`p020` completes the deterministic valid-sequence/resynchronization,
+completion-budget, rearm, and packet-filter-open hardening with focused and
+regression evidence. `p016` records the non-Queue legacy-HCD hardware-retirement follow-up exposed
 by that audit; current UHCI/EHCI cancellation remains conservative until it is
 completed. `p018` corrected the IAD-less, Union-associated NCM match exposed by
 the first physical RTL8156 insertion, and the accepted follow-up published
-`ue0`.
+`ue0`. The broader asynchronous-TX/accounting decisions remain in p017.
 
-Resume point: p018 is complete. Queue p019 to add an independent CDC ECM driver
-and prove the common USB/network stack automatically with QEMU `usb-net`.
-Physical NCM carrier, DHCP, and first packet flow then continue in
-`ws005-p001`; p016 and p017 remain later WS004 work.
+Resume point: q029 p020 and the authorized automatic WS005 p001 slice are
+complete. Run the one combined physical RTL8156 check with the recorded
+candidate image. If that single check still fails, queue p019 next as the
+independent CDC ECM/QEMU common-path control. p016 and the remaining
+asynchronous-TX/accounting portion of p017 stay later WS004 work.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -47,9 +50,10 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p014`](phase014-cdc-ncm-driver/phase.md) | Complete (`q027`) | Strict self-contained CDC NCM `ueN` integration passes automatic lifecycle, concurrency, build, and QEMU regression gates; physical NCM remains WS005 |
 | [`ws004-p015`](phase015-usb-binding-transactions/phase.md) | Complete (`q027`) | General binding lifecycle, interface I/O gate, active-endpoint submission, endpoint-zero serialization, and conservative legacy-HCD ownership passed focused, sanitizer, analyzer, build, and USB-root QEMU gates |
 | [`ws004-p016`](phase016-legacy-hcd-request-retirement/phase.md) | Pending; not queued | Controller-proven UHCI frame and EHCI Async Advance retirement before normal-completion or cancellation DMA release |
-| [`ws004-p017`](phase017-cdc-ncm-runtime-recovery/phase.md) | Pending; not queued; policy choices open | Resynchronize RX after dropped/malformed NTBs and account for asynchronous terminal TX errors without weakening strict validation |
+| [`ws004-p017`](phase017-cdc-ncm-runtime-recovery/phase.md) | Pending; not queued; residual TX-accounting policy open | p020 extracts the approved valid-sequence/resync and bounded-work rules; p017 retains asynchronous terminal TX accounting and any later separately approved recovery work |
 | [`ws004-p018`](phase018-rtl8156-ncm-association/phase.md) | Complete (`q028`) | CDC Union is authoritative and IAD is optional strict corroboration; automatic gates pass and physical RTL8156 configuration 2 binds and publishes `ue0`; carrier/data work moved to WS005 p001 |
-| [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Planned; ready for Queue | Independent CDC ECM driver plus QEMU `usb-net` must prove the common xHCI/USB/`net_device`/ARP/IP/UDP/DHCP path before further physical NCM debugging |
+| [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Planned fallback; not in q029 | Independent CDC ECM plus QEMU `usb-net` becomes the next Queue item only if q029's one hardened physical NCM check still fails |
+| [`ws004-p020`](phase020-cdc-ncm-deterministic-hardening/phase.md) | Complete (`q029` automatic software scope) | Valid sequences accept/resynchronize, malformed input preserves state, completions and rearms are bounded/fair, and the packet filter is programmed transactionally on open; focused and regression gates pass |
 
 ### MSI follow-up register
 
@@ -60,8 +64,9 @@ Shared tests: [WS004 test index](tests/README.md)
 | arm64 IORT/GIC ITS backend | Deferred; public signature preserved and port returns unsupported | An arm64 PCIe platform Phase supplies firmware and interrupt-controller fixtures |
 | Non-PCI message source prefixes | Deferred; only canonical PCI BDF is accepted | A concrete platform device needs message interrupts and defines stable source identity |
 
-The immediate candidate is p019. After that automatic baseline, physical NCM
-resumes in WS005 p001; later WS004 candidates are p016/p017, HW-10/HW-11,
+The active q029 item is WS005 p001's one physical acceptance; its automatic
+slice and p020 are complete. p019 becomes the immediate next candidate only if
+that check fails; later WS004 candidates are p016/p017, HW-10/HW-11,
 HW-20/HW-21, and HW-30 when their inputs and acceptance environments are
 available.
 
@@ -115,8 +120,8 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-03 | Complete (`q016`) | Checked PCI IRQ/controller lifetime for EHCI and UHCI detach; xHCI is already converted and is outside this Phase | HW-00, checked PCI IRQ API from q015 | Busy/error removal retains all ownership; retry and final detach host fixtures plus i386 builds pass |
 | HW-10 | Planned | NVMe controller, admin/I/O queues, namespaces, and block integration | HW-00 | QEMU NVMe install/mount/I/O/reset tests pass |
 | HW-11 | Planned | NVMe verification on the Latitude controller | HW-10, BR-00 | Identify/read-only first, then disposable-range I/O and stress without corruption |
-| HW-12 | Complete (`q028` association and physical publication scope) | Independent CDC NCM class driver on the common USB/xHCI/net-device lifetime foundations; Union-associated NCM does not require an IAD; later ECM or Realtek-family implementations remain independent until stable commonality exists | HW-01 | Automatic gates pass and Latitude RTL8156 publishes `ue0`; carrier, DHCP, first packet flow, and reconnect remain WS005 |
-| HW-13 | `ws004-p019` ready | Independent standards-based CDC ECM driver and QEMU `usb-net` common-path baseline; no speculative shared ECM/NCM backend | HW-01, HW-12 foundations, NET-00 | QEMU selects ECM, publishes `ue0`, passes static/DHCP/ping in IDE and concurrent USB-storage topologies, and preserves detach/reconnect ownership |
+| HW-12 | Active (`q029` p020 hardening; q028 bind complete) | Independent CDC NCM class driver on the common USB/xHCI/net-device lifetime foundations; Union-associated NCM does not require an IAD; deterministic valid-sequence recovery, bounded completion work, and post-alternate open filtering precede one physical data check | HW-01 | p020 automatic gates pass, then WS005 proves or precisely bounds carrier/static/DHCP traffic on the Latitude RTL8156 |
+| HW-13 | `ws004-p019` planned fallback | Independent standards-based CDC ECM driver and QEMU `usb-net` common-path baseline; no speculative shared ECM/NCM backend | HW-01, HW-12 foundations, NET-00, failed q029 physical discriminator | If needed after q029, QEMU selects ECM, publishes `ue0`, passes static/DHCP/ping in IDE and concurrent USB-storage topologies, and preserves detach/reconnect ownership |
 | HW-20 | Manually blocked (`MB-006`) | RTL8822CE (`10ec:c822`, subsystem `10ec:c130`) architecture and native driver | BR-00, HW-00, firmware packaging policy, explicit release | Scan, authenticate, associate, and exchange data on hardware |
 | HW-21 | Manually blocked (`MB-006`) | Testable RTL8822CE WLAN hardware abstraction or protocol fixture | HW-20 design and explicit release | Driver state/error paths can be tested without claiming QEMU emulates the laptop radio |
 | HW-30 | Proposed | i915 hardware foundations for the discovered 11th-generation GPU | BR-00, HW-00, GFX UAPI | Modeset/scanout and recovery on hardware; model tests for device-independent layers |

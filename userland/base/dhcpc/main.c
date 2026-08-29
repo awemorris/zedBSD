@@ -21,6 +21,8 @@ struct snapshot {
 	struct in_addr address, mask, broadcast;
 };
 
+#define CARRIER_POLL_INTERVAL_US 10000U
+
 static volatile sig_atomic_t timed_out;
 
 static void
@@ -65,6 +67,145 @@ set_address(int descriptor, const char *name, unsigned long command,
 }
 
 static int
+snapshot_interface(int descriptor, const char *name, struct snapshot *saved)
+{
+	struct ifreq request;
+
+	memset(saved, 0, sizeof(*saved));
+	if (if_request(descriptor, name, SIOCGIFFLAGS, &request) != 0)
+		return -1;
+	saved->flags = request.ifr_flags;
+	if (get_address(descriptor, name, SIOCGIFADDR, &saved->address) != 0 ||
+	    get_address(descriptor, name, SIOCGIFNETMASK, &saved->mask) != 0 ||
+	    get_address(descriptor, name, SIOCGIFBRDADDR, &saved->broadcast) != 0)
+		return -1;
+	return 0;
+}
+
+static int
+restore_interface(int descriptor, const char *name,
+		  const struct snapshot *saved)
+{
+	struct ifreq request;
+	int first_error = 0;
+
+	/* Attempt every field even if an earlier restoration fails. */
+	if (set_address(descriptor, name, SIOCSIFNETMASK, saved->mask) != 0)
+		first_error = errno;
+	if (set_address(descriptor, name, SIOCSIFBRDADDR, saved->broadcast) != 0 &&
+	    first_error == 0)
+		first_error = errno;
+	if (set_address(descriptor, name, SIOCSIFADDR, saved->address) != 0 &&
+	    first_error == 0)
+		first_error = errno;
+	if (netutil_ifreq(&request, name) == 0) {
+		request.ifr_flags = saved->flags;
+		if (ioctl(descriptor, SIOCSIFFLAGS, &request) != 0 &&
+		    first_error == 0)
+			first_error = errno;
+	} else if (first_error == 0)
+		first_error = errno;
+	if (first_error != 0) {
+		errno = first_error;
+		return -1;
+	}
+	return 0;
+}
+
+static int
+wait_for_carrier(int descriptor, const char *name, uint64_t deadline)
+{
+	for (;;) {
+		struct ifreq request;
+		uint64_t now, remaining;
+		useconds_t delay;
+
+		now = netutil_monotonic_us();
+		if (timed_out || now >= deadline) {
+			errno = ETIMEDOUT;
+			return -1;
+		}
+		if (if_request(descriptor, name, SIOCGIFFLAGS, &request) != 0)
+			return -1;
+		if ((request.ifr_flags & IFF_RUNNING) != 0)
+			return 0;
+		now = netutil_monotonic_us();
+		if (now >= deadline) {
+			errno = ETIMEDOUT;
+			return -1;
+		}
+		remaining = deadline - now;
+		delay = (useconds_t)(remaining < CARRIER_POLL_INTERVAL_US ?
+		    remaining : CARRIER_POLL_INTERVAL_US);
+		if (usleep(delay) != 0 && errno != EINTR)
+			return -1;
+	}
+}
+
+static int
+prepare_interface(int descriptor, const char *name, uint64_t deadline,
+		  struct snapshot *saved, int *rollback_error)
+{
+	struct ifreq request;
+	struct in_addr zero = {0};
+	int saved_errno;
+
+	if (snapshot_interface(descriptor, name, saved) != 0)
+		return -1;
+	if (netutil_ifreq(&request, name) != 0)
+		return -1;
+	request.ifr_flags = saved->flags | IFF_UP;
+	if (ioctl(descriptor, SIOCSIFFLAGS, &request) != 0)
+		return -1;
+	if (wait_for_carrier(descriptor, name, deadline) == 0 &&
+	    set_address(descriptor, name, SIOCSIFADDR, zero) == 0 &&
+	    set_address(descriptor, name, SIOCSIFNETMASK, zero) == 0 &&
+	    set_address(descriptor, name, SIOCSIFBRDADDR, zero) == 0)
+		return 0;
+
+	saved_errno = errno;
+	if (restore_interface(descriptor, name, saved) != 0 &&
+	    rollback_error != NULL)
+		*rollback_error = errno;
+	errno = saved_errno;
+	return -1;
+}
+
+static int
+deadline_check(uint64_t deadline)
+{
+	if (timed_out || netutil_monotonic_us() >= deadline) {
+		errno = ETIMEDOUT;
+		return -1;
+	}
+	return 0;
+}
+
+static int
+set_receive_deadline(int descriptor, uint64_t deadline)
+{
+	struct timeval timeout;
+	uint64_t now, remaining;
+
+	now = netutil_monotonic_us();
+	if (timed_out || now >= deadline) {
+		errno = ETIMEDOUT;
+		return -1;
+	}
+	remaining = deadline - now;
+	if (remaining > 1000000U)
+		remaining = 1000000U;
+	timeout.tv_sec = (time_t)(remaining / 1000000U);
+	timeout.tv_usec = (long)(remaining % 1000000U);
+	/* The deadline check above excludes zero.  Preserve a nonzero socket
+	 * timeout even on a sub-microsecond clock-resolution boundary. */
+	if (timeout.tv_sec == 0 && timeout.tv_usec == 0)
+		timeout.tv_usec = 1;
+	return setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+	    sizeof(timeout));
+}
+
+static int
 select_interface(int descriptor, char name[IFNAMSIZ])
 {
 	struct ifreq *items, request;
@@ -106,8 +247,8 @@ sockaddr_value(struct sockaddr *address, uint32_t value)
 	inet->sin_addr.s_addr = value;
 }
 
-static void
-delete_dynamic_default(int descriptor, uint32_t ifindex)
+static int
+delete_interface_default(int descriptor, uint32_t ifindex)
 {
 	struct rtentry entry;
 	unsigned ordinal = 0;
@@ -115,14 +256,14 @@ delete_dynamic_default(int descriptor, uint32_t ifindex)
 		memset(&entry, 0, sizeof(entry));
 		entry.rt_index = ordinal;
 		if (ioctl(descriptor, SIOCGRTENTRY, &entry) != 0)
-			break;
-		if ((entry.rt_flags & RTF_DYNAMIC) != 0 &&
-		    entry.rt_ifindex == ifindex &&
+			return errno == ENOENT ? 0 : -1;
+		if (entry.rt_ifindex == ifindex &&
 		    ((struct sockaddr_in *)&entry.rt_dst)->sin_addr.s_addr ==
 			0 &&
 		    ((struct sockaddr_in *)&entry.rt_genmask)
 			    ->sin_addr.s_addr == 0) {
-			(void)ioctl(descriptor, SIOCDELRT, &entry);
+			if (ioctl(descriptor, SIOCDELRT, &entry) != 0)
+				return -1;
 			continue;
 		}
 		ordinal++;
@@ -130,13 +271,18 @@ delete_dynamic_default(int descriptor, uint32_t ifindex)
 }
 
 static int
-find_dynamic_default(int descriptor, uint32_t ifindex, struct rtentry *saved)
+find_interface_default(int descriptor, uint32_t ifindex,
+		       struct rtentry *saved)
 {
 	struct rtentry entry;
-	for (entry.rt_index = 0; ioctl(descriptor, SIOCGRTENTRY, &entry) == 0;
-	     entry.rt_index++) {
-		if ((entry.rt_flags & RTF_DYNAMIC) != 0 &&
-		    entry.rt_ifindex == ifindex &&
+	unsigned ordinal;
+
+	for (ordinal = 0;; ordinal++) {
+		memset(&entry, 0, sizeof(entry));
+		entry.rt_index = ordinal;
+		if (ioctl(descriptor, SIOCGRTENTRY, &entry) != 0)
+			return errno == ENOENT ? 0 : -1;
+		if (entry.rt_ifindex == ifindex &&
 		    ((struct sockaddr_in *)&entry.rt_dst)->sin_addr.s_addr ==
 			0 &&
 		    ((struct sockaddr_in *)&entry.rt_genmask)
@@ -145,7 +291,6 @@ find_dynamic_default(int descriptor, uint32_t ifindex, struct rtentry *saved)
 			return 1;
 		}
 	}
-	return errno == ENOENT ? 0 : -1;
 }
 
 static int
@@ -154,7 +299,7 @@ write_resolver(const char *interface, const struct dhcp_lease *lease)
 	char buffer[256], address[16], temporary[128];
 	size_t used = 0;
 	unsigned index, prior;
-	int descriptor;
+	int descriptor, saved_errno;
 	used += (size_t)snprintf(buffer + used, sizeof(buffer) - used,
 				 "# Generated by dhcpc for %s\n", interface);
 	for (index = 0; index < lease->dns_count && used < sizeof(buffer);
@@ -185,20 +330,35 @@ write_resolver(const char *interface, const struct dhcp_lease *lease)
 		while (offset < used) {
 			ssize_t count =
 			    write(descriptor, buffer + offset, used - offset);
+			if (count < 0 && errno == EINTR)
+				continue;
 			if (count <= 0) {
-				close(descriptor);
-				unlink(temporary);
+				saved_errno = count < 0 ? errno : EIO;
+				(void)close(descriptor);
+				(void)unlink(temporary);
+				errno = saved_errno;
 				return -1;
 			}
 			offset += (size_t)count;
 		}
 	}
-	if (fsync(descriptor) != 0 || close(descriptor) != 0) {
-		unlink(temporary);
+	if (fsync(descriptor) != 0) {
+		saved_errno = errno;
+		(void)close(descriptor);
+		(void)unlink(temporary);
+		errno = saved_errno;
+		return -1;
+	}
+	if (close(descriptor) != 0) {
+		saved_errno = errno;
+		(void)unlink(temporary);
+		errno = saved_errno;
 		return -1;
 	}
 	if (rename(temporary, "/etc/resolv.conf") != 0) {
-		unlink(temporary);
+		saved_errno = errno;
+		(void)unlink(temporary);
+		errno = saved_errno;
 		return -1;
 	}
 	return 0;
@@ -219,14 +379,15 @@ main(int argc, char **argv)
 	struct ifreq request;
 	struct sockaddr_in client, server, source;
 	struct dhcp_lease offer, lease;
-	struct timeval receive_timeout = {1, 0};
 	uint8_t packet[600], mac[6];
 	char interface[IFNAMSIZ] = {0}, text[16];
 	uint32_t xid, timeout_seconds = 15, ifindex;
 	uint64_t deadline;
 	size_t packet_length;
-	int control, socket_, verbose = 0, arg = 1, got_offer = 0, got_ack = 0;
-	int previous_default_present = 0, route_changed = 0;
+	const char *failure_stage = "interface";
+	int control, socket_ = -1, verbose = 0, arg = 1, got_offer = 0;
+	int got_ack = 0, interface_prepared = 0;
+	int previous_default_present = 0, route_changed = 0, rollback_error = 0;
 
 	while (arg < argc && argv[arg][0] == '-') {
 		if (strcmp(argv[arg], "-v") == 0) {
@@ -259,20 +420,23 @@ main(int argc, char **argv)
 		close(control);
 		return 1;
 	}
-	memset(&saved, 0, sizeof(saved));
 	memset(&previous_default, 0, sizeof(previous_default));
-	if (if_request(control, interface, SIOCGIFFLAGS, &request) != 0)
+	deadline =
+	    netutil_monotonic_us() + (uint64_t)timeout_seconds * 1000000U;
+	timed_out = 0;
+	(void)signal(SIGALRM, timeout_handler);
+	(void)alarm(timeout_seconds);
+	failure_stage = "carrier";
+	if (prepare_interface(control, interface, deadline, &saved,
+	    &rollback_error) != 0)
 		goto fail;
-	saved.flags = request.ifr_flags;
-	(void)get_address(control, interface, SIOCGIFADDR, &saved.address);
-	(void)get_address(control, interface, SIOCGIFNETMASK, &saved.mask);
-	(void)get_address(control, interface, SIOCGIFBRDADDR, &saved.broadcast);
-	request.ifr_flags |= IFF_UP;
-	if (ioctl(control, SIOCSIFFLAGS, &request) != 0 ||
-	    if_request(control, interface, SIOCGIFHWADDR, &request) != 0 ||
+	interface_prepared = 1;
+	failure_stage = "identity";
+	if (if_request(control, interface, SIOCGIFHWADDR, &request) != 0 ||
 	    netutil_ifindex(control, interface, &ifindex) != 0)
 		goto fail;
 	memcpy(mac, request.ifr_hwaddr, sizeof(mac));
+	failure_stage = "socket";
 	socket_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (socket_ < 0)
 		goto fail;
@@ -281,9 +445,7 @@ main(int argc, char **argv)
 		if (setsockopt(socket_, SOL_SOCKET, SO_BINDTODEVICE, interface,
 			       (socklen_t)strlen(interface) + 1U) != 0 ||
 		    setsockopt(socket_, SOL_SOCKET, SO_BROADCAST, &enabled,
-			       sizeof(enabled)) != 0 ||
-		    setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO,
-			       &receive_timeout, sizeof(receive_timeout)) != 0)
+			       sizeof(enabled)) != 0)
 			goto socket_fail;
 	}
 	memset(&client, 0, sizeof(client));
@@ -297,12 +459,10 @@ main(int argc, char **argv)
 	server.sin_port = htons(67);
 	server.sin_addr.s_addr = INADDR_BROADCAST;
 	xid = transaction_id(mac);
-	deadline =
-	    netutil_monotonic_us() + (uint64_t)timeout_seconds * 1000000U;
-	(void)signal(SIGALRM, timeout_handler);
-	(void)alarm(timeout_seconds);
+	failure_stage = "offer";
 	while (!timed_out && netutil_monotonic_us() < deadline && !got_offer) {
-		if (dhcp_build(packet, sizeof(packet), &packet_length,
+		if (deadline_check(deadline) != 0 ||
+		    dhcp_build(packet, sizeof(packet), &packet_length,
 			       DHCP_DISCOVER, xid, mac, 0, 0) != 0 ||
 		    sendto(socket_, packet, packet_length, 0,
 			   (struct sockaddr *)&server, sizeof(server)) < 0)
@@ -311,11 +471,18 @@ main(int argc, char **argv)
 			printf("dhcpc: %s: broadcasting discover\n", interface);
 		for (;;) {
 			socklen_t slen = sizeof(source);
-			ssize_t count =
-			    recvfrom(socket_, packet, sizeof(packet), 0,
+			ssize_t count;
+
+			if (set_receive_deadline(socket_, deadline) != 0)
+				goto socket_fail;
+			count = recvfrom(socket_, packet, sizeof(packet), 0,
 				     (struct sockaddr *)&source, &slen);
-			if (count < 0)
+			if (count < 0 &&
+			    (errno == EAGAIN || errno == EWOULDBLOCK ||
+			     errno == EINTR))
 				break;
+			if (count < 0)
+				goto socket_fail;
 			if (source.sin_port == htons(67) &&
 			    dhcp_parse(packet, (size_t)count, xid, mac,
 				       &offer) == 0 &&
@@ -338,8 +505,10 @@ main(int argc, char **argv)
 		inet_ntop(AF_INET, &value, text, sizeof(text));
 		printf(" by %s\n", text);
 	}
+	failure_stage = "ack";
 	while (!timed_out && netutil_monotonic_us() < deadline && !got_ack) {
-		if (dhcp_build(packet, sizeof(packet), &packet_length,
+		if (deadline_check(deadline) != 0 ||
+		    dhcp_build(packet, sizeof(packet), &packet_length,
 			       DHCP_REQUEST, xid, mac, offer.address,
 			       offer.server_identifier) != 0 ||
 		    sendto(socket_, packet, packet_length, 0,
@@ -347,11 +516,18 @@ main(int argc, char **argv)
 			goto socket_fail;
 		for (;;) {
 			socklen_t slen = sizeof(source);
-			ssize_t count =
-			    recvfrom(socket_, packet, sizeof(packet), 0,
+			ssize_t count;
+
+			if (set_receive_deadline(socket_, deadline) != 0)
+				goto socket_fail;
+			count = recvfrom(socket_, packet, sizeof(packet), 0,
 				     (struct sockaddr *)&source, &slen);
-			if (count < 0)
+			if (count < 0 &&
+			    (errno == EAGAIN || errno == EWOULDBLOCK ||
+			     errno == EINTR))
 				break;
+			if (count < 0)
+				goto socket_fail;
 			if (source.sin_port == htons(67) &&
 			    dhcp_parse(packet, (size_t)count, xid, mac,
 				       &lease) == 0) {
@@ -373,6 +549,7 @@ main(int argc, char **argv)
 		errno = ETIMEDOUT;
 		goto socket_fail;
 	}
+	failure_stage = "configuration";
 	{
 		struct in_addr value;
 		value.s_addr = lease.netmask;
@@ -385,12 +562,14 @@ main(int argc, char **argv)
 		if (set_address(control, interface, SIOCSIFADDR, value) != 0)
 			goto socket_fail;
 	}
+	failure_stage = "route";
 	previous_default_present =
-	    find_dynamic_default(control, ifindex, &previous_default);
+	    find_interface_default(control, ifindex, &previous_default);
 	if (previous_default_present < 0)
 		goto socket_fail;
-	delete_dynamic_default(control, ifindex);
 	route_changed = previous_default_present != 0;
+	if (delete_interface_default(control, ifindex) != 0)
+		goto socket_fail;
 	if (lease.router_count != 0) {
 		struct rtentry route;
 		memset(&route, 0, sizeof(route));
@@ -423,6 +602,7 @@ main(int argc, char **argv)
 			inet_ntop(AF_INET, &value, text, sizeof(text));
 			printf("dhcpc: %s: dns %s\n", interface, text);
 		}
+		failure_stage = "resolver";
 		if (write_resolver(interface, &lease) != 0)
 			goto socket_fail;
 	}
@@ -432,25 +612,36 @@ main(int argc, char **argv)
 	close(control);
 	return 0;
 socket_fail:
-	(void)alarm(0);
-	printf("dhcpc: %s: %s\n", interface, strerror(errno));
-	close(socket_);
-	if (route_changed) {
-		delete_dynamic_default(control, ifindex);
-		if (previous_default_present > 0)
-			(void)ioctl(control, SIOCADDRT, &previous_default);
-	}
-	(void)set_address(control, interface, SIOCSIFNETMASK, saved.mask);
-	(void)set_address(control, interface, SIOCSIFBRDADDR, saved.broadcast);
-	(void)set_address(control, interface, SIOCSIFADDR, saved.address);
-	if (if_request(control, interface, SIOCGIFFLAGS, &request) == 0) {
-		request.ifr_flags = saved.flags;
-		(void)ioctl(control, SIOCSIFFLAGS, &request);
-	}
-	close(control);
-	return 1;
 fail:
-	printf("dhcpc: %s: %s\n", interface, strerror(errno));
-	close(control);
-	return 1;
+	{
+		int saved_errno = errno != 0 ? errno : EIO;
+		int error;
+
+		(void)alarm(0);
+		if (socket_ >= 0)
+			close(socket_);
+		if (route_changed) {
+			if (delete_interface_default(control, ifindex) != 0 &&
+			    rollback_error == 0)
+				rollback_error = errno;
+			if (previous_default_present > 0 &&
+			    ioctl(control, SIOCADDRT, &previous_default) != 0 &&
+			    rollback_error == 0)
+				rollback_error = errno;
+		}
+		if (interface_prepared &&
+		    restore_interface(control, interface, &saved) != 0 &&
+		    rollback_error == 0)
+			rollback_error = errno;
+		printf("dhcpc: %s: %s: %s\n", interface, failure_stage,
+		       strerror(saved_errno));
+		if (rollback_error != 0) {
+			error = rollback_error;
+			printf("dhcpc: %s: rollback: %s\n", interface,
+			       strerror(error));
+		}
+		close(control);
+		errno = saved_errno;
+		return 1;
+	}
 }
