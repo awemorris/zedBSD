@@ -6,6 +6,7 @@
 #ifndef ZEDBSD_DRIVERS_PCI_NVME_PROTOCOL_H
 #define ZEDBSD_DRIVERS_PCI_NVME_PROTOCOL_H
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -33,6 +34,18 @@
 #define DRV_NVME_ADMIN_DELETE_IO_CQ	0x04U
 #define DRV_NVME_ADMIN_CREATE_IO_CQ	0x05U
 #define DRV_NVME_ADMIN_IDENTIFY		0x06U
+#define DRV_NVME_ADMIN_SET_FEATURES	0x09U
+
+#define DRV_NVME_FEATURE_NUMBER_OF_QUEUES	0x07U
+
+#define DRV_NVME_NVM_FLUSH		0x00U
+#define DRV_NVME_NVM_WRITE		0x01U
+#define DRV_NVME_NVM_READ		0x02U
+
+#define DRV_NVME_STATUS_GENERIC		0x00U
+#define DRV_NVME_STATUS_COMMAND_SPECIFIC	0x01U
+#define DRV_NVME_STATUS_MEDIA		0x02U
+#define DRV_NVME_STATUS_PATH		0x03U
 
 #define DRV_NVME_IDENTIFY_NAMESPACE	0x00U
 #define DRV_NVME_IDENTIFY_CONTROLLER	0x01U
@@ -99,8 +112,8 @@ enum drv_nvme_ready_state {
 };
 
 struct drv_nvme_completion_cursor {
-	uint16_t head;
-	uint16_t depth;
+	uint32_t head;
+	uint32_t depth;
 	uint8_t phase;
 };
 
@@ -338,6 +351,21 @@ drv_nvme_controller_ready_state(uint32_t status, int expected_ready)
 	    (expected_ready != 0) ? DRV_NVME_READY_MATCH : DRV_NVME_READY_WAIT;
 }
 
+/*
+ * CSTS.CFS describes why a live controller needs resetting; it is not proof
+ * that the reset failed.  A disable/reset waiter must therefore continue past
+ * CFS while RDY is set and accept RDY clear even if CFS has not cleared yet.
+ * An all-ones MMIO read remains unreachable and can never prove quiescence.
+ */
+static inline enum drv_nvme_ready_state
+drv_nvme_controller_disable_state(uint32_t status)
+{
+	if (status == UINT32_MAX)
+		return DRV_NVME_READY_UNREACHABLE;
+	return (status & DRV_NVME_CSTS_READY) == 0U ?
+	    DRV_NVME_READY_MATCH : DRV_NVME_READY_WAIT;
+}
+
 static inline void
 drv_nvme_command_clear(struct drv_nvme_command *command)
 {
@@ -368,6 +396,159 @@ drv_nvme_identify_command(struct drv_nvme_command *command,
 	command->namespace_id = namespace_id;
 	command->prp1 = buffer_address;
 	command->cdw10 = selector;
+	return 1;
+}
+
+static inline int
+drv_nvme_set_queue_count_command(struct drv_nvme_command *command,
+	uint16_t command_id, unsigned submission_count,
+	unsigned completion_count)
+{
+	if (command == NULL || submission_count == 0U ||
+	    submission_count > 65536U || completion_count == 0U ||
+	    completion_count > 65536U)
+		return 0;
+	drv_nvme_command_clear(command);
+	command->cdw0 = DRV_NVME_ADMIN_SET_FEATURES |
+	    ((uint32_t)command_id << 16);
+	command->cdw10 = DRV_NVME_FEATURE_NUMBER_OF_QUEUES;
+	command->cdw11 = (uint32_t)(submission_count - 1U) |
+	    ((uint32_t)(completion_count - 1U) << 16);
+	return 1;
+}
+
+static inline int
+drv_nvme_queue_count_result(uint32_t result, unsigned *submission_count,
+	unsigned *completion_count)
+{
+	unsigned submission_zero_based, completion_zero_based;
+
+	if (submission_count == NULL || completion_count == NULL)
+		return 0;
+	submission_zero_based = (unsigned)(result & UINT32_C(0xffff));
+	completion_zero_based = (unsigned)(result >> 16);
+	*submission_count = submission_zero_based + 1U;
+	*completion_count = completion_zero_based + 1U;
+	return 1;
+}
+
+static inline int
+drv_nvme_create_io_cq_command(struct drv_nvme_command *command,
+	uint16_t command_id, unsigned queue_id, unsigned depth,
+	uint64_t buffer_address, unsigned interrupt_vector,
+	int interrupt_enabled)
+{
+	/* This initial PCI profile selects a 4-KiB CC.MPS and contiguous queues. */
+	if (command == NULL || queue_id == 0U || queue_id > UINT16_MAX ||
+	    depth < 2U || depth > 65536U || buffer_address == 0U ||
+	    (buffer_address & UINT64_C(0xfff)) != 0U ||
+	    interrupt_vector > UINT16_MAX ||
+	    (interrupt_enabled != 0 && interrupt_enabled != 1))
+		return 0;
+	drv_nvme_command_clear(command);
+	command->cdw0 = DRV_NVME_ADMIN_CREATE_IO_CQ |
+	    ((uint32_t)command_id << 16);
+	command->prp1 = buffer_address;
+	command->cdw10 = (uint32_t)queue_id |
+	    ((uint32_t)(depth - 1U) << 16);
+	command->cdw11 = 1U | ((uint32_t)interrupt_enabled << 1) |
+	    ((uint32_t)interrupt_vector << 16);
+	return 1;
+}
+
+static inline int
+drv_nvme_create_io_sq_command(struct drv_nvme_command *command,
+	uint16_t command_id, unsigned queue_id, unsigned completion_queue_id,
+	unsigned depth, uint64_t buffer_address)
+{
+	/* QPRIO is zero (urgent) and PC is one for coherent contiguous memory. */
+	if (command == NULL || queue_id == 0U || queue_id > UINT16_MAX ||
+	    completion_queue_id == 0U || completion_queue_id > UINT16_MAX ||
+	    depth < 2U || depth > 65536U || buffer_address == 0U ||
+	    (buffer_address & UINT64_C(0xfff)) != 0U)
+		return 0;
+	drv_nvme_command_clear(command);
+	command->cdw0 = DRV_NVME_ADMIN_CREATE_IO_SQ |
+	    ((uint32_t)command_id << 16);
+	command->prp1 = buffer_address;
+	command->cdw10 = (uint32_t)queue_id |
+	    ((uint32_t)(depth - 1U) << 16);
+	command->cdw11 = 1U | ((uint32_t)completion_queue_id << 16);
+	return 1;
+}
+
+static inline int
+drv_nvme_io_range_valid(uint64_t first_block, uint32_t block_count,
+	uint64_t namespace_blocks)
+{
+	return block_count != 0U && first_block < namespace_blocks &&
+	    (uint64_t)block_count <= namespace_blocks - first_block;
+}
+
+static inline int
+drv_nvme_single_prp_transfer_valid(uint64_t buffer_address,
+	uint32_t block_size, uint32_t block_count, uint32_t page_size)
+{
+	uint64_t bytes, offset;
+
+	if (buffer_address == 0U || (buffer_address & 3U) != 0U ||
+	    block_size == 0U || block_count == 0U ||
+	    !drv_nvme_power_of_two(page_size))
+		return 0;
+	bytes = (uint64_t)block_size * block_count;
+	offset = buffer_address & (uint64_t)(page_size - 1U);
+	return bytes <= (uint64_t)page_size - offset &&
+	    buffer_address <= UINT64_MAX - (bytes - 1U);
+}
+
+static inline uint32_t
+drv_nvme_io_chunk_blocks(uint64_t remaining_blocks, uint32_t block_size,
+	size_t bounce_bytes, size_t controller_bytes)
+{
+	size_t limit, blocks;
+
+	if (remaining_blocks == 0U || block_size == 0U ||
+	    bounce_bytes < block_size || controller_bytes < block_size)
+		return 0U;
+	limit = bounce_bytes < controller_bytes ? bounce_bytes :
+	    controller_bytes;
+	blocks = limit / block_size;
+	if (blocks > 65536U)
+		blocks = 65536U;
+	if ((uint64_t)blocks > remaining_blocks)
+		blocks = (size_t)remaining_blocks;
+	return (uint32_t)blocks;
+}
+
+static inline int
+drv_nvme_io_command(struct drv_nvme_command *command, uint16_t command_id,
+	uint8_t opcode, uint32_t namespace_id, uint64_t first_block,
+	uint32_t block_count, uint64_t buffer_address)
+{
+	if (command == NULL || namespace_id == 0U ||
+	    namespace_id == UINT32_MAX)
+		return 0;
+	if (opcode == DRV_NVME_NVM_FLUSH) {
+		if (first_block != 0U || block_count != 0U ||
+		    buffer_address != 0U)
+			return 0;
+	} else if (opcode == DRV_NVME_NVM_READ ||
+	    opcode == DRV_NVME_NVM_WRITE) {
+		if (block_count == 0U || block_count > 65536U ||
+		    buffer_address == 0U)
+			return 0;
+	} else {
+		return 0;
+	}
+	drv_nvme_command_clear(command);
+	command->cdw0 = opcode | ((uint32_t)command_id << 16);
+	command->namespace_id = namespace_id;
+	if (opcode != DRV_NVME_NVM_FLUSH) {
+		command->prp1 = buffer_address;
+		command->cdw10 = (uint32_t)first_block;
+		command->cdw11 = (uint32_t)(first_block >> 32);
+		command->cdw12 = block_count - 1U;
+	}
 	return 1;
 }
 
@@ -413,13 +594,70 @@ drv_nvme_completion_success(const struct drv_nvme_completion *completion)
 }
 
 static inline int
+drv_nvme_completion_error(const struct drv_nvme_completion *completion)
+{
+	unsigned code, type;
+
+	if (completion == NULL)
+		return EINVAL;
+	type = drv_nvme_completion_status_type(completion);
+	code = drv_nvme_completion_status_code(completion);
+	if (type == DRV_NVME_STATUS_GENERIC) {
+		switch (code) {
+		case 0x00U:
+			return 0;
+		case 0x01U:
+			return EOPNOTSUPP;
+		case 0x02U:
+		case 0x0aU:
+		case 0x0cU:
+			return EINVAL;
+		case 0x03U:
+		case 0x1dU:
+		case 0x82U:
+		case 0x83U:
+		case 0x84U:
+			return EBUSY;
+		case 0x07U:
+		case 0x08U:
+			return ECANCELED;
+		case 0x0bU:
+			return ENXIO;
+		case 0x14U:
+		case 0x23U:
+			return EACCES;
+		case 0x20U:
+			return EROFS;
+		case 0x21U:
+		case 0x22U:
+			return EAGAIN;
+		case 0x80U:
+			return EOVERFLOW;
+		case 0x81U:
+			return ENOSPC;
+		default:
+			return EIO;
+		}
+	}
+	if (type == DRV_NVME_STATUS_COMMAND_SPECIFIC) {
+		if (code <= 0x02U)
+			return EINVAL;
+		if (code == 0x82U)
+			return EROFS;
+		if (code == 0x83U)
+			return EOVERFLOW;
+	}
+	return EIO;
+}
+
+static inline int
 drv_nvme_completion_cursor_init(struct drv_nvme_completion_cursor *cursor,
 	unsigned depth)
 {
-	if (cursor == NULL || depth < 2U || depth > UINT16_MAX)
+	if (cursor == NULL || depth < 2U || depth > 65536U)
 		return 0;
 	cursor->head = 0;
-	cursor->depth = (uint16_t)depth;
+	cursor->depth = depth;
 	cursor->phase = 1U;
 	return 1;
 }

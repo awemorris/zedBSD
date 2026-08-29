@@ -83,6 +83,15 @@ test_capability(void)
 	    DRV_NVME_READY_FATAL);
 	CHECK(drv_nvme_controller_ready_state(UINT32_MAX, 1) ==
 	    DRV_NVME_READY_UNREACHABLE);
+	CHECK(drv_nvme_controller_disable_state(DRV_NVME_CSTS_READY |
+	    DRV_NVME_CSTS_FATAL) == DRV_NVME_READY_WAIT);
+	CHECK(drv_nvme_controller_disable_state(DRV_NVME_CSTS_READY) ==
+	    DRV_NVME_READY_WAIT);
+	CHECK(drv_nvme_controller_disable_state(DRV_NVME_CSTS_FATAL) ==
+	    DRV_NVME_READY_MATCH);
+	CHECK(drv_nvme_controller_disable_state(0U) == DRV_NVME_READY_MATCH);
+	CHECK(drv_nvme_controller_disable_state(UINT32_MAX) ==
+	    DRV_NVME_READY_UNREACHABLE);
 
 	snapshot.capability &= ~(UINT64_C(1) << 37);
 	reasons = drv_nvme_capability_validate(&snapshot);

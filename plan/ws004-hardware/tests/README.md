@@ -28,6 +28,38 @@ Parent: [WS004](../ws.md)
 
 QEMU/model and physical-hardware results are always separate evidence fields.
 
+## HW-T20 NVMe I/O and lifecycle evidence
+
+The p023 host fixtures exercise command encoding/status translation, 64-bit
+block-range arithmetic, and the private command/BIO/DMA ownership ledger under
+normal completion, timeout/reset, quarantine, shutdown, detach, and
+exactly-once release:
+
+```sh
+TMPDIR="$PWD/build/q030-tmp" \
+  plan/ws004-hardware/tests/run-nvme-io-test.sh
+TMPDIR="$PWD/build/q030-tmp" \
+  plan/ws004-hardware/tests/run-nvme-io-lifecycle-test.sh
+TMPDIR="$PWD/build/q030-tmp" \
+  plan/ws004-hardware/tests/run-devfs-block-range-test.sh
+```
+
+The QEMU runner builds a separate WS004 test image containing
+`/usr/bin/nvme-io-guest`; it never adds that helper to an ordinary image. The
+guest opens the raw NVMe descriptor and performs `pwrite`, descriptor `fsync`,
+`pread`, and comparison below and above 4 GiB. A second QEMU/controller boot
+verifies both patterns from the same disposable namespace. Each boot also
+executes 96 disjoint 4-KiB transfers and requires the QEMU device trace to show
+both SQ1 and CQ1 wrapping to zero; the focused lifecycle fixture covers
+multiple outstanding owners, out-of-order completion, and CID reuse. `dd`
+followed by a shell-wide `sync` is deliberately not accepted as flush evidence:
+
+```sh
+mkdir -p build/q030-tmp
+TMPDIR="$PWD/build/q030-tmp" \
+  plan/ws004-hardware/tests/qemu-nvme-io.sh
+```
+
 ## HW-00 host regressions
 
 The foundation-audit regressions are ordinary host binaries and do not use a
@@ -323,6 +355,22 @@ plan/ws004-hardware/tests/run-nvme-admin-test.sh
 plan/ws004-hardware/tests/run-nvme-lifecycle-test.sh
 ```
 
+The p023 fixtures add exact Set Features/Create Queue/NVM command encodings,
+64-bit namespace bounds, one-PRP bounce limits, split sizing, status-to-errno
+translation, foreign completions, and the serialized BIO/command/DMA ownership
+ledger.  The latter injects timeout, reset recovery, failed quiesce quarantine,
+shutdown with an in-flight command, late completion, and exactly-once BIO and
+resource release:
+
+```sh
+TMPDIR="$PWD/build/q030-tmp" \
+  plan/ws004-hardware/tests/run-nvme-io-test.sh
+TMPDIR="$PWD/build/q030-tmp" \
+  plan/ws004-hardware/tests/run-nvme-io-lifecycle-test.sh
+TMPDIR="$PWD/build/q030-tmp" \
+  plan/ws004-hardware/tests/run-nvme-shutdown-lifecycle-test.sh
+```
+
 The existing PCI message fixture additionally verifies that checked MSI and
 MSI-X removal restores the exact saved capability/address/data and MSI-X table
 entry rather than leaving an OS-programmed vector behind:
@@ -348,3 +396,9 @@ The exact commands and final p022 observations are retained in
 [q030 NVMe admin evidence](q030-nvme-admin-evidence.md). HW-T20 remains open as
 the shared family identifier until p023 adds NVM I/O and p024 completes its
 integrity, reset, concurrency, and strict GPT portions.
+
+The p023 destructive runtime gate must use a disposable raw namespace and a
+phase-owned monitor/sendkey harness.  Its guest write path must call `fsync()`
+on the still-open raw NVMe descriptor before rereading and restarting; a plain
+`dd` followed by a process-wide `sync()` is not evidence that this unmounted
+devfs descriptor issued the driver's `BIO_FLUSH` operation.

@@ -156,9 +156,9 @@ void kern_platform_refresh_devices(const struct boot_device *d, size_t n)
 	if (disk_count() == 0)
 		hal_printf("boot: boot-storage wait expired\n");
 nvme:
-	/* p022 NVMe is discovery-only.  Publish it after removable boot media
-	 * has had its existing bounded discovery window, so a present read-only
-	 * namespace cannot make USB-root discovery look complete. */
+	/* Probe NVMe namespaces after removable boot media has had its existing
+	 * bounded discovery window.  A present PCI namespace must not make
+	 * USB-root discovery look complete before the removable device arrives. */
 #if CONFIG_DRIVER_PCI_NVME
 	drv_pci_nvme_probe_namespaces();
 #endif

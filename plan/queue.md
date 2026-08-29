@@ -1,6 +1,6 @@
 # Queue: QEMU NVMe and strict GPT foundation
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 QID: `q030`
 
@@ -31,8 +31,15 @@ storage driver.
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
 | 1 | `ws004-p022` | [Phase](ws004-hardware/phase022-nvme-admin-identify/phase.md) | completed | Standard PCI NVMe reset/admin queues/Identify publish exactly one truthful discovery-only `/dev/nvme0n1`; focused, build, QEMU, IDE, and USB gates pass |
-| 2 | `ws004-p023` | [Phase](ws004-hardware/phase023-nvme-io-lifecycle/phase.md) | pending; next | One bounded I/O queue provides read/write/flush and safe timeout/reset/shutdown/detach |
-| 3 | `ws004-p024` | [Phase](ws004-hardware/phase024-nvme-qemu-acceptance/phase.md) | pending | Disposable QEMU integrity/lifecycle and strict primary/backup GPT partition gates pass |
+| 2 | `ws004-p023` | [Phase](ws004-hardware/phase023-nvme-io-lifecycle/phase.md) | completed | One bounded I/O queue provides read/write/flush and safe timeout/reset/shutdown/detach; focused/build/QEMU/IDE/USB gates pass |
+| 3 | `ws004-p024` | [Phase](ws004-hardware/phase024-nvme-qemu-acceptance/phase.md) | pending; next | Disposable QEMU integrity/lifecycle and strict primary/backup GPT partition gates pass |
+
+Current resume point: `ws004-p023` completed on 2026-08-30. Its retained
+[HW-T20 evidence](ws004-hardware/tests/q030-nvme-io-evidence.md) includes
+ordinary/sanitizer/analyzer fixtures, amd64 and i386 PC/AT builds, a
+disposable 5-GiB QEMU namespace with below/above-4-GiB descriptor flush and
+restart readback, SQ1/CQ1 wrap, four-worker concurrency, and IDE plus xHCI
+USB-root regressions. `ws004-p024` has not started.
 
 ## Dependency order
 

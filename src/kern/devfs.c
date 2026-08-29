@@ -5,6 +5,7 @@
 #include "kern/devfs.h"
 #include "kern/backing-claim.h"
 #include "kern/block-identity.h"
+#include "kern/devfs-block-range.h"
 #include "kern/cdev.h"
 #include "kern/disk.h"
 #include "kern/file.h"
@@ -337,23 +338,30 @@ block_pread(struct file *file, void *buffer, size_t length, off_t offset)
 	struct disk *disk = file->f_data;
 	uint8_t bounce[512];
 	uint8_t *output = buffer;
-	uint64_t size, position;
+	struct devfs_block_io_range range;
+	uint64_t position;
+	uint32_t block_size;
 	size_t total = 0;
 	int error;
-	if (disk == NULL || offset < 0)
+	if (disk == NULL)
 		return -EINVAL;
-	size = disk->d_block_count * 512U;
-	position = (uint32_t)offset;
-	if (position >= size)
-		return 0;
-	if ((uint64_t)length > size - position)
-		length = (size_t)(size - position);
+	block_size = disk->d_block_size;
+	if (block_size != sizeof(bounce))
+		return -EOPNOTSUPP;
+	error = devfs_block_io_range_prepare(disk->d_block_count, block_size,
+	    (int64_t)offset, length, DEVFS_BLOCK_IO_READ, &range);
+	if (error != 0)
+		return -error;
+	position = range.position;
+	length = range.length;
 	while (total < length) {
-		uint64_t block = position / 512U;
-		size_t within = (size_t)(position & 511U);
-		size_t count = 512U - within;
-		if (count > length - total)
-			count = length - total;
+		uint64_t block;
+		size_t within, count;
+
+		error = devfs_block_io_piece(position, length - total,
+		    block_size, &block, &within, &count);
+		if (error != 0)
+			return total != 0 ? (ssize_t)total : -error;
 		error = disk_read(disk, block, 1, bounce);
 		if (error != 0)
 			return total != 0 ? (ssize_t)total : -error;
@@ -380,20 +388,27 @@ block_pwrite(struct file *file, const void *buffer, size_t length, off_t offset)
 	struct backing_mutation_guard guard;
 	uint8_t bounce[512];
 	const uint8_t *input = buffer;
-	uint64_t size, position;
+	struct devfs_block_io_range range;
+	uint64_t position;
+	uint32_t block_size;
 	size_t total = 0;
 	int error;
-	if (disk == NULL || offset < 0)
+	if (disk == NULL)
 		return -EINVAL;
 	if ((disk->d_flags & DISK_READ_ONLY) != 0)
 		return -EROFS;
-	size = disk->d_block_count * 512U;
-	position = (uint32_t)offset;
-	if (position >= size || (uint64_t)length > size - position)
-		return -ENOSPC;
+	block_size = disk->d_block_size;
+	if (block_size != sizeof(bounce))
+		return -EOPNOTSUPP;
+	error = devfs_block_io_range_prepare(disk->d_block_count, block_size,
+	    (int64_t)offset, length, DEVFS_BLOCK_IO_WRITE, &range);
+	if (error != 0)
+		return -error;
+	position = range.position;
+	length = range.length;
 	if (length != 0) {
-		uint64_t first = position / 512U;
-		uint64_t last = (position + length - 1U) / 512U;
+		uint64_t first = position / block_size;
+		uint64_t last = (position + length - 1U) / block_size;
 		error = backing_mutation_begin_disk(disk, first,
 		    last - first + 1U, NULL, &guard);
 		if (error != 0)
@@ -402,12 +417,16 @@ block_pwrite(struct file *file, const void *buffer, size_t length, off_t offset)
 		memset(&guard, 0, sizeof(guard));
 	}
 	while (total < length) {
-		uint64_t block = position / 512U;
-		size_t within = (size_t)(position & 511U);
-		size_t count = 512U - within;
-		if (count > length - total)
-			count = length - total;
-		if (within != 0 || count != 512U) {
+		uint64_t block;
+		size_t within, count;
+
+		error = devfs_block_io_piece(position, length - total,
+		    block_size, &block, &within, &count);
+		if (error != 0) {
+			backing_mutation_end(&guard);
+			return total != 0 ? (ssize_t)total : -error;
+		}
+		if (within != 0 || count != block_size) {
 			error = disk_read(disk, block, 1, bounce);
 			if (error != 0) {
 				backing_mutation_end(&guard);
