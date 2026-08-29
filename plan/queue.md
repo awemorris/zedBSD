@@ -9,12 +9,14 @@ Queue status: in-progress
 Queue finished: **No**
 
 Authorization: the user authorized the deterministic CDC NCM fixes, safe
-DHCP/diagnostic corrections, candidate-image preparation, and one physical
-Latitude/RTL8156 acceptance check on 2026-08-29. CDC ECM is not authorized in
-this Queue.
+DHCP/diagnostic corrections, candidate-image preparation, the first physical
+Latitude/RTL8156 check, and evidence-led remote QEMU/libusb debugging with the
+same physical adapter on 2026-08-29. CDC ECM and the separately planned native
+xHCI periodic-context repair are not authorized in this Queue.
 
-Timebox: no fixed wall-clock limit; complete the finite automatic gates, build
-one candidate image, and request exactly one combined physical action.
+Timebox: no fixed wall-clock limit; finish the finite repair and automatic
+gates, then request one final combined Latitude action with the superseding
+candidate rather than intermediate boots.
 
 Parent: [master plan](master.md)
 
@@ -26,16 +28,17 @@ Remove four deterministic defects or hazards before asking the user to repeat
 physical testing: strict sequence continuity that can reject valid NCM traffic,
 zero-delivery completion work that can evade the network poll budget, packet
 filter programming before the active data alternate, and DHCP/diagnostic paths
-that can hide the actual first failure. Then produce one candidate image and
-use one bounded hardware check to decide whether the physical NCM path is
-working or whether the independent ECM/QEMU control Phase should be next.
+that can hide the actual first failure. The first candidate exposed a carrier
+timeout; the user-authorized remote discriminator then found one bounded
+notification filter defect, produced a superseding candidate, and proved the
+physical NCM path through QEMU before the final Latitude-native check.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
 | 1 | `ws004-p020` | [Phase](ws004-hardware/phase020-cdc-ncm-deterministic-hardening/phase.md) | completed | Fully valid NTBs accept/resynchronize any sequence, malformed NTBs preserve state, completion work is budgeted, and packet-filter programming occurs on open after the active alternate |
-| 2 | `ws005-p001` | [Phase](ws005-networking/phase001-usb-ncm-physical-datapath/phase.md) | in-progress | The safe automatic DHCP/diagnostic slice and candidate image are complete; one combined physical check must now either prove first carrier/static/DHCP traffic or record the exact boundary that sends the next Queue to p019 |
+| 2 | `ws005-p001` | [Phase](ws005-networking/phase001-usb-ncm-physical-datapath/phase.md) | in-progress | The first Latitude check exposed a carrier timeout; USB capture identified and repaired data-interface `wIndex` rejection, and real RTL8156 passthrough now passes carrier, DHCP, and ping; one final Latitude-native check remains |
 
 ## Dependency order
 
@@ -46,13 +49,22 @@ ws004-p018 physical bind and ue0 publication
 ws004-p020 deterministic NCM hardening
                   |
                   v
-ws005-p001 automatic DHCP/diagnostics + candidate image
+ws005-p001 automatic DHCP/diagnostics + first candidate
                   |
                   v
-one physical RTL8156 acceptance
-          | pass                 | fail with retained evidence
+first Latitude result: carrier timeout
+                  |
+                  v
+real RTL8156 USB capture -> paired-interface notification repair
+                  |
+                  v
+QEMU xHCI + physical RTL8156 carrier/DHCP/ping pass
+                  |
+                  v
+one final Latitude-native acceptance
+          | pass                 | native interrupt failure
           v                      v
-  continue WS005          ws004-p019 ECM/QEMU next Queue
+  continue WS005          consider ws004-p021 in a new Queue
 ```
 
 ## Frozen product boundary
@@ -65,6 +77,10 @@ one physical RTL8156 acceptance
   produces no packet. This Queue does not redesign the xHCI IRQ path.
 - Program the supported Ethernet packet filter during open, after the active
   data alternate and before notification/RX submission.
+- Accept a CDC connection/speed notification only when its `wIndex` names one
+  of the exact control/data interfaces already validated as the bound NCM
+  function. This covers the RTL8156 data-interface notification without a
+  VID:PID special case or acceptance of unrelated interfaces.
 - Correct the deterministic static-to-DHCP transition so DISCOVER uses IPv4
   source zero while preserving transactional rollback of the prior static
   configuration. Make at least `ENETDOWN` and `ETIMEDOUT` diagnostics distinct
@@ -73,21 +89,25 @@ one physical RTL8156 acceptance
   offer, ACK, configuration, route, resolver, and rollback failures. Broader
   NCM/xHCI open, TX, RX, validate, and delivery counters remain in p001 and are
   not claimed by this candidate image.
-- Build exactly one candidate image after all automatic gates. Ask for one
-  combined physical action using that image; do not request intermediate boots.
+- Retain the original candidate and the single evidence-led superseding image
+  with exact hashes. Ask for one final combined Latitude action using the
+  superseding image; do not request intermediate boots.
 - CDC ECM, notification reassembly, xHCI IRQ redesign, asynchronous TX
   statistics, and vendor-specific Realtek initialization are outside q029.
 
-## Optional QEMU USB passthrough
+## QEMU USB passthrough discriminator
 
-A libusb-backed `qemu-system-x86_64` USB-host passthrough cell may be used as
-additional evidence only if `0bda:8156` is visible to the host and can be
-claimed safely without disrupting required host networking. It must use a
-disposable guest image and the same bounded stage markers. Passthrough
-availability or success is not a completion blocker, does not replace the one
-Latitude acceptance, and does not authorize a libusb/QEMU infrastructure
-project. No host USB device was visible while q029's automatic gates ran, so
-this optional cell was unavailable and was not treated as a blocker.
+A libusb-backed `qemu-system-x86_64` USB-host cell became available on the
+user-provided remote host. The host's SSH route used a different PCI Ethernet
+device, the RTL8156 was safely claimable, and every run used a disposable IDE
+guest image. The pre-repair guest reproduced offline carrier. Its USB capture
+then proved successful endpoint `0x83` completions carrying valid connection-up
+and 2.5-Gbit/s notifications with data-interface `wIndex=1`. The repaired guest
+reached carrier, DHCP, and bidirectional traffic through the same adapter.
+
+This discriminator proves the physical NCM device and zedBSD protocol path but
+does not replace the Latitude-native xHCI acceptance or authorize a general
+libusb/QEMU infrastructure project.
 
 ## Automatic execution evidence
 
@@ -108,14 +128,35 @@ write, sync, close, and rename failures; `ENETDOWN` and `ETIMEDOUT` have
 distinct strings; and the real DHCP builder is covered for zero `ciaddr`. Its
 ordinary, sanitizer, and analyzer fixtures passed.
 
-The candidate is
+The original automatic candidate was
 [`build/amd64/hdd-image.img`](../build/amd64/hdd-image.img), 135266304 bytes,
 SHA-256
 `267315c0c002def1400c8f9fb2d97c1166b69af9ee557550cde4079b8033c719`.
 A disposable copy booted as QEMU xHCI USB Storage to `login:` within the
-30-second cell without a USB Storage error. These automatic results do not
-claim physical RTL8156 carrier or packet transfer, nor do they claim the
-broader kernel stage-counter/trace work retained by p001.
+30-second cell without a USB Storage error.
+
+After the first Latitude check timed out at carrier, the real-device capture
+identified the exact notification filter defect. The repaired production
+driver fixture passed ordinary and ASan/UBSan modes at 1540 checks plus its
+analyzer. NCM wire, USB binding at 971 checks, concurrent xHCI/USB function at
+1404 checks, and removable-network-device regressions pass. `make -j16` and a
+fresh disposable USB-root login pass. The first notification-repair candidate
+remained the same path and size with SHA-256
+`982201f8f5f2b00632c3c3e7d9437504fe6dcc110b49419ca455e0b7df0cb7bf`.
+
+Clean DHCP passed with that image. A subsequent static-to-DHCP run proved via
+USB PCAP that no DHCP client frame left the guest while the old default route
+remained; rollback restored the exact static configuration. Moving the
+old-route snapshot/removal before DHCP send is now covered by ordinary,
+ASan/UBSan, and analyzer fixtures. The final candidate remains the same path
+and size with SHA-256
+`34341960f871335f9ff40177664d1d0da017ce1cd3497aff0ad45658adb06e46`.
+
+With the final image and the physical RTL8156 passed through QEMU xHCI, `ue0`
+became online, static peer traffic passed, USB PCAP retained the zero-source
+DHCP broadcasts and server responses, the dynamic default route was installed,
+and two post-lease pings each to the gateway and remote host completed without
+loss. The remaining completion boundary is one Latitude-native action.
 
 ## Execution rules
 
@@ -136,18 +177,20 @@ broader kernel stage-counter/trace work retained by p001.
 
 ## Physical decision rule
 
-The one acceptance action checks link/carrier, a fixed-address peer ARP/ping,
+The final Latitude action checks link/carrier, a fixed-address peer ARP/ping,
 DHCP from a clean or transactionally cleared address state, and one post-lease
 ping while retaining the available bounded stage/error output. If it passes,
-synchronize the achieved WS005 milestone. If it fails, record the first failed stage and
-relevant counters, mark the q029 item honestly `uncleared` if its completion
-conditions are not met, and make `ws004-p019` CDC ECM/QEMU the next Queue item.
-Do not implement ECM inside q029.
+synchronize the achieved WS005 milestone. If it fails, record the first failed
+stage and relevant counters and mark the q029 item honestly `uncleared` if its
+completion conditions are not met. A carrier/interrupt-only native failure now
+points first to planned `ws004-p021`; the real device has already proved that
+an ECM detour is not required to validate the common network path. Neither
+p021 nor ECM is implemented inside q029.
 
 ## Completion definition
 
 q029 is finished when p020 and the authorized p001 slice are each `completed`
-or honestly `uncleared`, all declared automatic gates and the candidate image
-are recorded, exactly one combined physical acceptance has been processed,
-and P/W/M/Q state identifies either the proven physical milestone or p019 as
-the next controlled action. Optional USB passthrough is not required.
+or honestly `uncleared`, all declared automatic/remote gates and the current
+candidate image are recorded, the final combined Latitude acceptance has been
+processed, and P/W/M/Q state identifies either the proven physical milestone
+or the exact next controlled action.

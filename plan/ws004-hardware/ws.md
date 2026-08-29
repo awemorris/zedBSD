@@ -4,7 +4,8 @@ Last updated: 2026-08-29
 
 WSID: `ws004`
 
-Status: active; `ws004-p020` deterministic CDC NCM hardening complete
+Status: active; `ws004-p020` deterministic CDC NCM hardening complete;
+`ws004-p021` planned and ready for a Queue proposal
 
 Parent: [master plan](../master.md)
 
@@ -16,17 +17,23 @@ completes the general USB binding/interface transaction; and `p014` completes
 the integrated `ueN` automatic software milestone.
 `p020` completes the deterministic valid-sequence/resynchronization,
 completion-budget, rearm, and packet-filter-open hardening with focused and
-regression evidence. `p016` records the non-Queue legacy-HCD hardware-retirement follow-up exposed
+regression evidence. The q029 physical follow-up captured valid RTL8156
+connection/speed notifications with data-interface `wIndex`; the repaired NCM
+parser and real adapter now pass carrier, DHCP, and ping through QEMU xHCI.
+`p021` records the independent native-xHCI Max ESIT defect exposed by the same
+audit and remains outside q029. `p016` records the non-Queue legacy-HCD hardware-retirement follow-up exposed
 by that audit; current UHCI/EHCI cancellation remains conservative until it is
 completed. `p018` corrected the IAD-less, Union-associated NCM match exposed by
 the first physical RTL8156 insertion, and the accepted follow-up published
 `ue0`. The broader asynchronous-TX/accounting decisions remain in p017.
 
-Resume point: q029 p020 and the authorized automatic WS005 p001 slice are
-complete. Run the one combined physical RTL8156 check with the recorded
-candidate image. If that single check still fails, queue p019 next as the
-independent CDC ECM/QEMU common-path control. p016 and the remaining
-asynchronous-TX/accounting portion of p017 stay later WS004 work.
+Resume point: q029 p020 and the authorized automatic/remote WS005 p001 slices
+are complete. Run one final Latitude-native RTL8156 check with the superseding
+candidate. A native-periodic-interrupt-only failure makes ready p021 the
+evidence-led next Phase.
+p019 remains an independent ECM baseline rather than an automatic detour after
+physical NCM interoperability has passed. p016 and the remaining asynchronous
+TX/accounting portion of p017 stay later WS004 work.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -52,8 +59,9 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p016`](phase016-legacy-hcd-request-retirement/phase.md) | Pending; not queued | Controller-proven UHCI frame and EHCI Async Advance retirement before normal-completion or cancellation DMA release |
 | [`ws004-p017`](phase017-cdc-ncm-runtime-recovery/phase.md) | Pending; not queued; residual TX-accounting policy open | p020 extracts the approved valid-sequence/resync and bounded-work rules; p017 retains asynchronous terminal TX accounting and any later separately approved recovery work |
 | [`ws004-p018`](phase018-rtl8156-ncm-association/phase.md) | Complete (`q028`) | CDC Union is authoritative and IAD is optional strict corroboration; automatic gates pass and physical RTL8156 configuration 2 binds and publishes `ue0`; carrier/data work moved to WS005 p001 |
-| [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Planned fallback; not in q029 | Independent CDC ECM plus QEMU `usb-net` becomes the next Queue item only if q029's one hardened physical NCM check still fails |
+| [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Planned independent baseline; not in q029 | Independent CDC ECM plus QEMU `usb-net` remains available for a future common-path comparison; real RTL8156 NCM carrier/DHCP/ping now passes through QEMU, so p019 is not the automatic response to a native xHCI-only failure |
 | [`ws004-p020`](phase020-cdc-ncm-deterministic-hardening/phase.md) | Complete (`q029` automatic software scope) | Valid sequences accept/resynchronize, malformed input preserves state, completions and rearms are bounded/fair, and the packet filter is programmed transactionally on open; focused and regression gates pass |
+| [`ws004-p021`](phase021-xhci-superspeed-interrupt-context/phase.md) | Planned; ready for Queue proposal; not queued | Encode legal SuperSpeed interrupt companion `wBytesPerInterval` as xHCI Max ESIT/Average TRB Length, reject malformed descriptors, and preserve every other endpoint context |
 
 ### MSI follow-up register
 
@@ -64,9 +72,11 @@ Shared tests: [WS004 test index](tests/README.md)
 | arm64 IORT/GIC ITS backend | Deferred; public signature preserved and port returns unsupported | An arm64 PCIe platform Phase supplies firmware and interrupt-controller fixtures |
 | Non-PCI message source prefixes | Deferred; only canonical PCI BDF is accepted | A concrete platform device needs message interrupts and defines stable source identity |
 
-The active q029 item is WS005 p001's one physical acceptance; its automatic
-slice and p020 are complete. p019 becomes the immediate next candidate only if
-that check fails; later WS004 candidates are p016/p017, HW-10/HW-11,
+The active q029 item is WS005 p001's final Latitude-native acceptance; its
+automatic slice, real-device QEMU-passthrough path, and p020 are complete.
+p021 is the first evidence-led native-controller candidate if periodic
+notification delivery alone still fails and is ready for a new Queue proposal.
+Later WS004 candidates are p016/p017, p019, HW-10/HW-11,
 HW-20/HW-21, and HW-30 when their inputs and acceptance environments are
 available.
 

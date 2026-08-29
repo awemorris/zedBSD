@@ -101,11 +101,13 @@ struct fake_interface {
 	unsigned close_count;
 	unsigned last_alarm;
 	unsigned fail_clear_mask_once;
+	unsigned fail_lease_mask_once;
 	unsigned discover_seen;
 	unsigned request_seen;
 	unsigned receive_count;
 	unsigned invalid_receive_count;
 	unsigned send_succeeds;
+	unsigned require_route_absent_at_send;
 	unsigned serve_offer;
 	unsigned serve_ack;
 	unsigned lease_router;
@@ -123,6 +125,8 @@ struct fake_interface {
 	unsigned resolver_unlink_count;
 	unsigned resolver_fd_open;
 	unsigned fail_restore_route;
+	unsigned fail_route_get_once;
+	unsigned fail_route_delete_once;
 	unsigned route_add_count;
 	unsigned route_delete_count;
 	uint64_t receive_timeout_us;
@@ -198,6 +202,11 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 	va_end(arguments);
 	if (command == SIOCGRTENTRY) {
 		route = argument;
+		if (fake.fail_route_get_once) {
+			fake.fail_route_get_once = 0;
+			errno = EIO;
+			return -1;
+		}
 		if (!fake.route_present || route->rt_index != 0) {
 			errno = ENOENT;
 			return -1;
@@ -208,6 +217,11 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 	}
 	if (command == SIOCDELRT) {
 		route = argument;
+		if (fake.fail_route_delete_once) {
+			fake.fail_route_delete_once = 0;
+			errno = EIO;
+			return -1;
+		}
 		if (!fake.route_present ||
 		    route->rt_ifindex != fake.route.rt_ifindex) {
 			errno = ENOENT;
@@ -259,6 +273,11 @@ fixture_ioctl(int descriptor, unsigned long command, ...)
 		value = request_address(request);
 		if (value.s_addr == 0 && fake.fail_clear_mask_once) {
 			fake.fail_clear_mask_once = 0;
+			errno = EIO;
+			return -1;
+		}
+		if (value.s_addr != 0 && fake.fail_lease_mask_once) {
+			fake.fail_lease_mask_once = 0;
 			errno = EIO;
 			return -1;
 		}
@@ -386,6 +405,8 @@ fixture_sendto(int descriptor, const void *buffer, size_t length, int flags,
 	if (descriptor != 11 || length == 0 || fake.address.s_addr != 0 ||
 	    fake.mask.s_addr != 0 || fake.broadcast.s_addr != 0)
 		fail("DHCP send did not observe zero interface configuration");
+	if (fake.require_route_absent_at_send && fake.route_present)
+		fail("DHCP send retained the previous default route");
 	if (fake.last_message_type == DHCP_DISCOVER)
 		fake.discover_seen++;
 	else if (fake.last_message_type == DHCP_REQUEST)
@@ -778,6 +799,119 @@ set_fake_default_route(unsigned flags, uint32_t gateway)
 }
 
 static void
+require_default_route_exact(const struct rtentry *expected)
+{
+	if (!fake.route_present ||
+	    memcmp(&fake.route, expected, sizeof(*expected)) != 0)
+		fail("previous default route was not restored exactly");
+}
+
+static void
+test_route_snapshot_failure_preserves_state(void)
+{
+	char *arguments[] = {"dhcpc", "-t", "1", "ue0", NULL};
+	struct rtentry expected;
+
+	reset_fake();
+	fake.carrier_after_sleeps = 0;
+	set_fake_default_route(RTF_UP | RTF_GATEWAY | RTF_STATIC,
+	    htonl(UINT32_C(0xc0000201)));
+	expected = fake.route;
+	fake.fail_route_get_once = 1U;
+	if (dhcpc_program_main(4, arguments) != 1 || fake.discover_seen != 0 ||
+	    fake.route_delete_count != 0 || fake.route_add_count != 0 ||
+	    strstr(fake.output, "route: Input/output error") == NULL)
+		fail("route snapshot failure was not isolated before DHCP");
+	require_default_route_exact(&expected);
+	require_original_state();
+}
+
+static void
+test_route_delete_failure_restores_state(void)
+{
+	char *arguments[] = {"dhcpc", "-t", "1", "ue0", NULL};
+	struct rtentry expected;
+
+	reset_fake();
+	fake.carrier_after_sleeps = 0;
+	set_fake_default_route(RTF_UP | RTF_GATEWAY | RTF_STATIC,
+	    htonl(UINT32_C(0xc0000201)));
+	expected = fake.route;
+	fake.fail_route_delete_once = 1U;
+	if (dhcpc_program_main(4, arguments) != 1 || fake.discover_seen != 0 ||
+	    fake.route_delete_count != 1U || fake.route_add_count != 1U ||
+	    strstr(fake.output, "route: Input/output error") == NULL)
+		fail("route delete failure was not rolled back before DHCP");
+	require_default_route_exact(&expected);
+	require_original_state();
+}
+
+static void
+test_static_default_offer_timeout_rollback(void)
+{
+	char *arguments[] = {"dhcpc", "-t", "1", "ue0", NULL};
+	struct rtentry expected;
+
+	reset_fake();
+	fake.carrier_after_sleeps = 0;
+	fake.send_succeeds = 1U;
+	fake.require_route_absent_at_send = 1U;
+	set_fake_default_route(RTF_UP | RTF_GATEWAY | RTF_STATIC,
+	    htonl(UINT32_C(0xc0000201)));
+	expected = fake.route;
+	if (dhcpc_program_main(4, arguments) != 1 ||
+	    strstr(fake.output, "offer: Connection timed out") == NULL ||
+	    fake.route_delete_count != 1U || fake.route_add_count != 1U)
+		fail("offer timeout did not roll back the early route transaction");
+	require_default_route_exact(&expected);
+	require_original_state();
+}
+
+static void
+test_static_default_send_failure_rollback(void)
+{
+	char *arguments[] = {"dhcpc", "-t", "1", "ue0", NULL};
+	struct rtentry expected;
+
+	reset_fake();
+	fake.carrier_after_sleeps = 0;
+	fake.require_route_absent_at_send = 1U;
+	set_fake_default_route(RTF_UP | RTF_GATEWAY | RTF_STATIC,
+	    htonl(UINT32_C(0xc0000201)));
+	expected = fake.route;
+	if (dhcpc_program_main(4, arguments) != 1 || fake.discover_seen != 1U ||
+	    strstr(fake.output, "offer: Input/output error") == NULL ||
+	    fake.route_delete_count != 1U || fake.route_add_count != 1U)
+		fail("send failure did not roll back the early route transaction");
+	require_default_route_exact(&expected);
+	require_original_state();
+}
+
+static void
+test_static_default_configuration_failure_rollback(void)
+{
+	char *arguments[] = {"dhcpc", "-t", "1", "ue0", NULL};
+	struct rtentry expected;
+
+	reset_fake();
+	fake.carrier_after_sleeps = 0;
+	fake.send_succeeds = 1U;
+	fake.serve_offer = 1U;
+	fake.serve_ack = 1U;
+	fake.fail_lease_mask_once = 1U;
+	fake.require_route_absent_at_send = 1U;
+	set_fake_default_route(RTF_UP | RTF_GATEWAY | RTF_STATIC,
+	    htonl(UINT32_C(0xc0000201)));
+	expected = fake.route;
+	if (dhcpc_program_main(4, arguments) != 1 ||
+	    strstr(fake.output, "configuration: Input/output error") == NULL ||
+	    fake.route_delete_count != 1U || fake.route_add_count != 1U)
+		fail("configuration failure did not restore the early route");
+	require_default_route_exact(&expected);
+	require_original_state();
+}
+
+static void
 test_invalid_receive_deadline(void)
 {
 	char *arguments[] = {"dhcpc", "-t", "1", "ue0", NULL};
@@ -825,17 +959,16 @@ test_static_default_route_rollback(void)
 	fake.lease_router = 1U;
 	fake.lease_dns = 1U;
 	fake.fail_resolver_open = 1U;
+	fake.require_route_absent_at_send = 1U;
 	set_fake_default_route(RTF_UP | RTF_GATEWAY | RTF_STATIC,
 	    htonl(UINT32_C(0xc0000201)));
 	expected = fake.route;
-	if (dhcpc_program_main(4, arguments) != 1 || !fake.route_present ||
-	    fake.route.rt_flags != expected.rt_flags ||
-	    fake.route.rt_ifindex != expected.rt_ifindex ||
-	    memcmp(&fake.route.rt_gateway, &expected.rt_gateway,
-	    sizeof(expected.rt_gateway)) != 0 || fake.route_add_count != 2U ||
+	if (dhcpc_program_main(4, arguments) != 1 ||
+	    fake.route_add_count != 2U ||
 	    fake.route_delete_count != 2U ||
 	    strstr(fake.output, "resolver: Input/output error") == NULL)
 		fail("static default route was not restored transactionally");
+	require_default_route_exact(&expected);
 	require_original_state();
 }
 
@@ -849,11 +982,37 @@ test_static_default_removed_without_dhcp_router(void)
 	fake.send_succeeds = 1U;
 	fake.serve_offer = 1U;
 	fake.serve_ack = 1U;
+	fake.require_route_absent_at_send = 1U;
 	set_fake_default_route(RTF_UP | RTF_GATEWAY | RTF_STATIC,
 	    htonl(UINT32_C(0xc0000201)));
 	if (dhcpc_program_main(4, arguments) != 0 || fake.route_present ||
 	    fake.route_delete_count != 1U || fake.route_add_count != 0)
 		fail("stale static default survived a routerless DHCP lease");
+}
+
+static void
+test_static_default_replaced_by_dhcp_route(void)
+{
+	char *arguments[] = {"dhcpc", "-t", "1", "ue0", NULL};
+	const struct sockaddr_in *gateway;
+
+	reset_fake();
+	fake.carrier_after_sleeps = 0;
+	fake.send_succeeds = 1U;
+	fake.serve_offer = 1U;
+	fake.serve_ack = 1U;
+	fake.lease_router = 1U;
+	fake.require_route_absent_at_send = 1U;
+	set_fake_default_route(RTF_UP | RTF_GATEWAY | RTF_STATIC,
+	    htonl(UINT32_C(0xc0000201)));
+	if (dhcpc_program_main(4, arguments) != 0 || !fake.route_present ||
+	    fake.route.rt_flags != (RTF_UP | RTF_GATEWAY | RTF_DYNAMIC) ||
+	    fake.route.rt_ifindex != 7U || fake.route_delete_count != 1U ||
+	    fake.route_add_count != 1U)
+		fail("successful DHCP transaction did not replace the old route");
+	gateway = (const struct sockaddr_in *)&fake.route.rt_gateway;
+	if (gateway->sin_addr.s_addr != htonl(UINT32_C(0x0a000001)))
+		fail("successful DHCP transaction restored the old gateway");
 }
 
 static void
@@ -951,6 +1110,7 @@ test_route_rollback_failure_diagnostic(void)
 	fake.lease_dns = 1U;
 	fake.fail_resolver_open = 1U;
 	fake.fail_restore_route = 1U;
+	fake.require_route_absent_at_send = 1U;
 	set_fake_default_route(RTF_UP | RTF_GATEWAY | RTF_STATIC,
 	    htonl(UINT32_C(0xc0000201)));
 	if (dhcpc_program_main(4, arguments) != 1 ||
@@ -993,8 +1153,14 @@ main(void)
 	test_discover_zero_and_failure_rollback();
 	test_invalid_receive_deadline();
 	test_ack_timeout_stage();
+	test_route_snapshot_failure_preserves_state();
+	test_route_delete_failure_restores_state();
+	test_static_default_offer_timeout_rollback();
+	test_static_default_send_failure_rollback();
+	test_static_default_configuration_failure_rollback();
 	test_static_default_route_rollback();
 	test_static_default_removed_without_dhcp_router();
+	test_static_default_replaced_by_dhcp_route();
 	test_route_rollback_failure_diagnostic();
 	test_resolver_success_commits_atomically();
 	test_resolver_failure_preserves_old(RESOLVER_WRITE_FAILURE);

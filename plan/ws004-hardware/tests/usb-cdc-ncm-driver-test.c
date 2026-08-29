@@ -1300,6 +1300,7 @@ test_io_and_lifetime(void)
 	adapter->notification_buffer[0] = 0xa1;
 	adapter->notification_buffer[1] = NCM_NOTIFICATION_NETWORK_CONNECTION;
 	adapter->notification_buffer[2] = 1;
+	put_le16(adapter->notification_buffer + 4U, 1U);
 	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 8);
 	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(published_device->carrier != 0);
@@ -1358,6 +1359,7 @@ test_io_and_lifetime(void)
 	memset(adapter->notification_buffer, 0, 16);
 	adapter->notification_buffer[0] = 0xa1;
 	adapter->notification_buffer[1] = NCM_NOTIFICATION_SPEED_CHANGE;
+	put_le16(adapter->notification_buffer + 4U, 1U);
 	adapter->notification_buffer[6] = 8;
 	put_le32(adapter->notification_buffer + 8U, 100000000U);
 	put_le32(adapter->notification_buffer + 12U, 20000000U);
@@ -1368,6 +1370,14 @@ test_io_and_lifetime(void)
 	memset(adapter->notification_buffer, 0, 8);
 	adapter->notification_buffer[0] = 0xa1;
 	adapter->notification_buffer[1] = NCM_NOTIFICATION_NETWORK_CONNECTION;
+	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 8);
+	CHECK(net_device_poll(published_device, 8) == 1);
+	CHECK(published_device->carrier == 0);
+	memset(adapter->notification_buffer, 0, 8);
+	adapter->notification_buffer[0] = 0xa1;
+	adapter->notification_buffer[1] = NCM_NOTIFICATION_NETWORK_CONNECTION;
+	adapter->notification_buffer[2] = 1;
+	put_le16(adapter->notification_buffer + 4U, 2U);
 	fake_complete(adapter->notification_urb, DRV_USB_URB_COMPLETE, 8);
 	CHECK(net_device_poll(published_device, 8) == 1);
 	CHECK(published_device->carrier == 0);

@@ -20,11 +20,15 @@ The current [Queue Book](queue.md) is in-progress `q029`. `ws004-p020` is
 complete: fully valid NCM NTBs accept and resynchronize any sequence, malformed
 input preserves state, completion work is budgeted, and packet-filter
 programming occurs on open after the active alternate. The safe automatic
-`ws005-p001` DHCP/diagnostic slice, production image, and disposable QEMU
-USB-root gate also pass. One combined physical RTL8156 carrier/static/DHCP check
-remains. CDC ECM is excluded from q029. If that single check fails, planned
-`ws004-p019` becomes the next Queue's independent QEMU `usb-net` common-path
-control before another hardware cycle.
+`ws005-p001` DHCP/diagnostic slice and disposable QEMU USB-root gate pass. The
+first Latitude attempt then stopped at carrier; a real RTL8156 USB capture
+proved that valid connection/speed notifications used paired data-interface
+`wIndex=1` and were discarded by a control-interface-only check. The bounded
+repair now passes carrier, a static-to-DHCP transition, routing, NTB traffic,
+and ping with that physical adapter through QEMU xHCI. One final
+Latitude-native check with the
+superseding image remains. CDC ECM and the separately planned xHCI
+SuperSpeed-interrupt context Phase are excluded from q029.
 
 The archived [q028](queue-q028.md) corrected the IAD-less, Union-associated CDC
 NCM match, added concise binding diagnostics, and passed its physical scope when
@@ -176,8 +180,8 @@ actually warranted.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
 | `ws003` | Dell Latitude 5320 bring-up | Active; p017 QEMU complete, physical acceptance pending | Dell-style UEFI `LoadOptions` regression is corrected and covered by BR-T48 | Boot the p017 production image once, then return to BR-T30 repeatability, BR-T31 sustained I/O, and hardware inventory | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; q029 p020 complete | `ws004-p010`--`p015`, `p018`, and deterministic NCM hardening p020 complete | Run q029's one WS005 physical check; queue p019 next only if that check fails | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WPA | Active; q029 p001 automatic slice complete, physical check pending; WLAN manually blocked | Safe DHCP transition/rollback/diagnostics, candidate image, and QEMU USB-root gate pass; physical NCM bind/`ue0` publication was proven by WS004 p018 | Run one combined physical check with the recorded candidate; on failure preserve the boundary and queue p019 next | [WS005](ws005-networking/ws.md) |
+| `ws004` | Hardware expansion | Active; q029 p020 complete; p021 ready for a Queue proposal | `ws004-p010`--`p015`, `p018`, p020 complete; real RTL8156 NCM carrier/DHCP/ping passes through QEMU xHCI | Run q029's final WS005 Latitude check, or explicitly queue p021's native Max ESIT repair first to combine both in one later hardware action | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WPA | Active; q029 p001 remote real-device path passes, Latitude-native check pending; WLAN manually blocked | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, final candidate image, USB-root, and physical RTL8156 static-to-DHCP/ping through QEMU pass | Run one final combined Latitude check with the final candidate; retain the native controller boundary on failure | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Manual hold; target packages disabled | `ws008-p006` uncleared after Principal Engineer rejection; `ws008-p007` complete | Leave all Noct source work to the maintainer until an accepted revision is explicitly returned | [WS008](ws008-noct/ws.md) |

@@ -789,12 +789,18 @@ ncm_notification_process(struct ncm_adapter *adapter)
 {
 	const uint8_t *notification = adapter->notification_buffer;
 	size_t length = drv_usb_urb_actual_length(adapter->notification_urb);
+	uint16_t interface_number;
 
 	if (drv_usb_urb_status(adapter->notification_urb) !=
 	    DRV_USB_URB_COMPLETE || length < 8U || notification[0] !=
-	    (DRV_USB_DIR_IN | DRV_USB_REQUEST_CLASS | DRV_USB_RECIP_INTERFACE) ||
-	    ncm_le16(notification + 4U) !=
-	    drv_usb_interface_number(adapter->control))
+	    (DRV_USB_DIR_IN | DRV_USB_REQUEST_CLASS | DRV_USB_RECIP_INTERFACE))
+		return;
+	/* Some NCM functions, including RTL8156 configuration 2, name the
+	 * associated data interface rather than the communication interface.
+	 * The binding has already validated this exact control/data pair. */
+	interface_number = ncm_le16(notification + 4U);
+	if (interface_number != drv_usb_interface_number(adapter->control) &&
+	    interface_number != drv_usb_interface_number(adapter->data))
 		return;
 	if (notification[1] == NCM_NOTIFICATION_NETWORK_CONNECTION &&
 	    ncm_le16(notification + 6U) == 0U && length == 8U)

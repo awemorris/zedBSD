@@ -387,7 +387,7 @@ main(int argc, char **argv)
 	const char *failure_stage = "interface";
 	int control, socket_ = -1, verbose = 0, arg = 1, got_offer = 0;
 	int got_ack = 0, interface_prepared = 0;
-	int previous_default_present = 0, route_changed = 0, rollback_error = 0;
+	int previous_default_present = 0, route_prepared = 0, rollback_error = 0;
 
 	while (arg < argc && argv[arg][0] == '-') {
 		if (strcmp(argv[arg], "-v") == 0) {
@@ -436,6 +436,14 @@ main(int argc, char **argv)
 	    netutil_ifindex(control, interface, &ifindex) != 0)
 		goto fail;
 	memcpy(mac, request.ifr_hwaddr, sizeof(mac));
+	failure_stage = "route";
+	previous_default_present =
+	    find_interface_default(control, ifindex, &previous_default);
+	if (previous_default_present < 0)
+		goto fail;
+	route_prepared = 1;
+	if (delete_interface_default(control, ifindex) != 0)
+		goto fail;
 	failure_stage = "socket";
 	socket_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (socket_ < 0)
@@ -563,13 +571,6 @@ main(int argc, char **argv)
 			goto socket_fail;
 	}
 	failure_stage = "route";
-	previous_default_present =
-	    find_interface_default(control, ifindex, &previous_default);
-	if (previous_default_present < 0)
-		goto socket_fail;
-	route_changed = previous_default_present != 0;
-	if (delete_interface_default(control, ifindex) != 0)
-		goto socket_fail;
 	if (lease.router_count != 0) {
 		struct rtentry route;
 		memset(&route, 0, sizeof(route));
@@ -580,7 +581,6 @@ main(int argc, char **argv)
 		sockaddr_value(&route.rt_gateway, lease.routers[0]);
 		if (ioctl(control, SIOCADDRT, &route) != 0)
 			goto socket_fail;
-		route_changed = 1;
 	}
 	{
 		struct in_addr value = {lease.address};
@@ -620,7 +620,7 @@ fail:
 		(void)alarm(0);
 		if (socket_ >= 0)
 			close(socket_);
-		if (route_changed) {
+		if (route_prepared) {
 			if (delete_interface_default(control, ifindex) != 0 &&
 			    rollback_error == 0)
 				rollback_error = errno;
