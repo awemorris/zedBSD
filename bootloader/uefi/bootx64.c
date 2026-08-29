@@ -495,12 +495,20 @@ efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system)
 	option_result = zbl_uefi_load_options_record(&parameter_record,
 	    loaded->LoadOptions, loaded->LoadOptionsSize,
 	    image_boot_parameters.text, sizeof(image_boot_parameters.text));
-	if (option_result != ZBL_UEFI_LOAD_OPTIONS_OK) {
-		console_ascii(&context, "UEFI LoadOptions rejected: ");
+	if (option_result == ZBL_UEFI_LOAD_OPTIONS_DESCRIPTOR) {
+		console_ascii(&context,
+		    "UEFI LoadOptions descriptor: using OptionalData\n");
+	} else if (option_result != ZBL_UEFI_LOAD_OPTIONS_OK) {
+		console_ascii(&context, "UEFI LoadOptions ignored: ");
 		console_ascii(&context,
 		    zbl_uefi_load_options_result_name(option_result));
 		console_ascii(&context, "\n");
-		fail_status(&context, "Validate LoadOptions", EFI_INVALID_PARAMETER);
+		option_result = zbl_uefi_load_options_record(&parameter_record,
+		    NULL, 0U, image_boot_parameters.text,
+		    sizeof(image_boot_parameters.text));
+		if (option_result != ZBL_UEFI_LOAD_OPTIONS_OK)
+			fail_status(&context, "Prepare LoadOptions",
+			    EFI_INVALID_PARAMETER);
 	}
 	status = boot->HandleProtocol(loaded->DeviceHandle,
 				      &EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,

@@ -146,3 +146,9 @@ uses this same handoff.
 Stop if one legacy loader cannot reserve a bounded parameter block without a
 layout/size redesign, or if UEFI firmware supplies non-text OptionalData that
 cannot be distinguished safely from an intended command string.
+
+This UEFI boundary was reached on the Latitude on 2026-08-29: firmware supplied
+nonempty data that the original strict NUL-terminated converter rejected
+before kernel load. The corrective design and physical acceptance are tracked
+separately as [ws003-p017](../phase017-uefi-load-options-compatibility/phase.md)
+rather than rewriting this Phase's q015 historical result.

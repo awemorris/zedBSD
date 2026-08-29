@@ -1,13 +1,13 @@
 # WS003: real-hardware bring-up
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 WSID: `ws003`
 
 Status: active; `ws003-p004` through `ws003-p009` complete in q013; q014
 `ws003-p010` and physical U3 complete through BR-T41; q015 completed `p011`
-through `p015`; q023 completed `ws003-p016` and the Python-free static image
-parameter closure with a fresh 31-cell four-platform matrix
+through `p015`; q023 completed `ws003-p016`; `ws003-p017` corrects the
+post-q027 physical UEFI `LoadOptions` regression and awaits one physical boot
 
 Parent: [master plan](../master.md)
 
@@ -18,8 +18,8 @@ the intended UUID to `/dev/sda1`, mounted the
 read-write data loop and root overlay, started init, and reached a root shell,
 proving physical tier U3.
 
-Resume point: return to the remaining physical U4/U5 work after q023. Physical
-follow-up still includes BR-T31
+Resume point: physically accept `ws003-p017`, then return to the remaining
+physical U4/U5 work. Physical follow-up still includes BR-T31
 sustained root I/O and, after U4 is otherwise frozen, BR-T30 five-boot
 repeatability. Do not request an additional intermediate hardware boot now.
 Hardware inventory remains incomplete.
@@ -46,6 +46,7 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p014` | [multi-source swap activation](phase014-multi-swap/phase.md) | Completed (`q015`, 2026-08-27) | BR-T45 and every BR-T46 file/raw/mixed swap cell pass actual page-out, page-in, and content restoration |
 | `ws003-p015` | [four-platform boot-parameter acceptance](phase015-x86-parameter-acceptance/phase.md) | Completed (`q015`, 2026-08-27) | BR-T46 passes 31/31 production-loader cells: PC/AT 7, PC-98 6, amd64 BIOS 9, and amd64 UEFI 9 |
 | `ws003-p016` | [static image boot parameters and Python-regression removal](phase016-boot-parameter-header-dependency/phase.md) | Completed (`q023`, 2026-08-28) | BR-T47 and a fresh BR-T46 pass: one maintained definition feeds all x86 loaders and the kernel fallback; generated inputs, Python, and stale cross-build state are absent |
+| `ws003-p017` | [UEFI LoadOptions firmware compatibility](phase017-uefi-load-options-compatibility/phase.md) | QEMU complete; physical acceptance pending | BR-T48 covers Dell-style whole-descriptor `LoadOptions`, length-delimited text, opaque fallback, and the actual loaded-image entry path |
 
 `ws003-p003` was the sole authorized item in q012. Its physical result closes
 the PCI/BAR/capability boundary and extracts the first device-enumeration stop

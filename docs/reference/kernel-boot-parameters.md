@@ -291,11 +291,25 @@ memory can be unmapped. No CPAR-specific binary handoff is added.
 
 Each of the four x86 production loaders materializes the generated-image
 default shown in Section 5.2 when its loader input is absent or empty. A
-nonempty loader parameter source is the complete final parameter string and
-replaces that default; it is not merged token by token. Consequently, an
-explicit override must include one complete root mode. This keeps precedence
-identical across Multiboot, custom BIOS handoffs, and UEFI `LoadOptions` and
-prevents hidden duplicate-key resolution.
+nonempty recognized loader parameter source is the complete final parameter
+string and replaces that default; it is not merged token by token.
+Consequently, an explicit override must include one complete root mode. This
+keeps precedence identical across Multiboot, custom BIOS handoffs, and
+recognized UEFI text `LoadOptions` and prevents hidden duplicate-key
+resolution.
+
+UEFI defines `EFI_LOADED_IMAGE_PROTOCOL.LoadOptions` as an opaque,
+length-delimited binary buffer sourced from a boot option's `OptionalData`; it
+does not require that firmware terminate it as text. zedBSD recognizes a
+bounded printable-ASCII `CHAR16` buffer, with or without a final NUL, only when
+its first token begins with a known zedBSD parameter name. Empty or
+unrecognized options use the image default. Some x86 firmware passes the
+complete packed `EFI_LOAD_OPTION` descriptor instead of `OptionalData`; the
+loader validates every description and Device Path boundary before extracting
+that descriptor's `OptionalData`. Any other firmware-specific binary form is
+diagnosed as ignored and never prevents removable-media boot. All multi-byte
+fields are decoded bytewise because neither descriptor nor `OptionalData`
+requires natural alignment.
 
 All four x86 paths use the same common parser and observable semantics:
 
