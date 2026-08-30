@@ -27,13 +27,14 @@ CC := gcc
 HOSTCC ?= cc
 PYTHON ?= python3
 ZEDBSD_HOST_NOCT_REPOSITORY ?= https://github.com/awemorris/NoctLang.git
-ZEDBSD_HOST_NOCT_REVISION ?= c1e4e0fcdbb7b8cdf1705601b13d57b787c61621
+ZEDBSD_HOST_NOCT_REVISION ?= 3bf3d236aa8ce014c63853dee3b21fa023d877ed
 ZEDBSD_HOST_NOCT_SOURCE_DIR := build/NoctLang
 ZEDBSD_HOST_NOCT_BUILD_DIR := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/build-static
 ZEDBSD_HOST_NOCT := $(ZEDBSD_HOST_NOCT_BUILD_DIR)/noct
+ZEDBSD_HOST_NOCT_CMAKE_OPTIONS := -DNOCT_ENABLE_API_PROCESS=ON
 NOCT ?= $(abspath $(ZEDBSD_HOST_NOCT))
 ZEDBSD_HOST_NOCT_CHECKOUT_STAMP := $(ZEDBSD_HOST_NOCT_SOURCE_DIR)/.zedbsd-checkout-$(ZEDBSD_HOST_NOCT_REVISION)
-ZEDBSD_HOST_NOCT_BUILD_STAMP := $(ZEDBSD_HOST_NOCT_BUILD_DIR)/.zedbsd-built-$(ZEDBSD_HOST_NOCT_REVISION)
+ZEDBSD_HOST_NOCT_BUILD_STAMP := $(ZEDBSD_HOST_NOCT_BUILD_DIR)/.zedbsd-built-$(ZEDBSD_HOST_NOCT_REVISION)-process
 ZEDBSD_IMAGE_HOST := build/zedimage-host
 .DEFAULT_GOAL := disk-image
 
@@ -314,20 +315,40 @@ list-targets:
 	@printf 'Focused checks:\n'; \
 		for target in $(ZEDBSD_CHECK_TARGETS); do printf '  %s\n' "$$target"; done
 
-$(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP):
+.PHONY: zedbsd-host-noct-checkout-verify
+zedbsd-host-noct-checkout-verify:
 	@mkdir -p build
 	@if test ! -d "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)/.git"; then \
 		git clone "$(ZEDBSD_HOST_NOCT_REPOSITORY)" "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)"; \
 	fi
-	@actual=$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" rev-parse HEAD); \
+	@if ! git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" diff --quiet || \
+	    ! git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" diff --cached --quiet; then \
+		echo "NoctLang host checkout has tracked changes: $(ZEDBSD_HOST_NOCT_SOURCE_DIR)" >&2; \
+		exit 1; \
+	fi
+	@changed=0; \
+	actual=$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" rev-parse HEAD); \
 	if test "$$actual" != "$(ZEDBSD_HOST_NOCT_REVISION)"; then \
 		git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" fetch origin "$(ZEDBSD_HOST_NOCT_REVISION)"; \
 		git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" checkout --detach "$(ZEDBSD_HOST_NOCT_REVISION)"; \
+		changed=1; \
+	fi; \
+	if test ! -e "$(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP)"; then \
+		changed=1; \
+	fi; \
+	if test "$$changed" = 1; then \
+		rm -f "$(ZEDBSD_HOST_NOCT_BUILD_STAMP)"; \
+		touch "$(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP)"; \
 	fi
-	@touch $@
+
+$(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP): | zedbsd-host-noct-checkout-verify
+	@test "$$(git -C "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" rev-parse HEAD)" = \
+		"$(ZEDBSD_HOST_NOCT_REVISION)"
+	@test -e "$@"
 
 $(ZEDBSD_HOST_NOCT_BUILD_STAMP): $(ZEDBSD_HOST_NOCT_CHECKOUT_STAMP)
-	cd "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" && cmake --preset static
+	cd "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" && cmake --preset static \
+		$(ZEDBSD_HOST_NOCT_CMAKE_OPTIONS)
 	cd "$(ZEDBSD_HOST_NOCT_SOURCE_DIR)" && cmake --build --preset static --parallel
 	@test -x "$(ZEDBSD_HOST_NOCT)"
 	@touch $@

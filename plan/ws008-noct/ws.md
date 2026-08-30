@@ -9,12 +9,12 @@ Status: Active; maintainer hold released, target package remains disabled by
 
 Parent: [master plan](../master.md)
 
-Last accepted Phase: `ws008-p007`
+Last accepted Phase: `ws008-p008`
 
-Resume point: q041 selects `ws008-p008` after the preceding WS004/WS005
-items. Do not execute
-`ws008-p009` until a clean upstream zedBSD-target fix is published or the user
-explicitly chooses a downstream patch-overlay policy.
+Resume point: host toolchain p008 is complete at immutable upstream commit
+`3bf3d236aa8ce014c63853dee3b21fa023d877ed`.  Do not execute `ws008-p009`
+until a clean upstream zedBSD-target fix is published or the user explicitly
+chooses a downstream patch-overlay policy.
 
 Shared tests: [WS008 test index](tests/README.md)
 
@@ -29,7 +29,7 @@ Shared tests: [WS008 test index](tests/README.md)
 | [`ws008-p005`](phase005-independent-beui-backends/phase.md) | Complete (`q023`, 2026-08-28) | Canonical Noct removes `api-beui.c` and `api-beui-backend.c`; each selected platform source independently owns the complete `noct_register_api_beui()` implementation, with HAL/core details private |
 | [`ws008-p006`](phase006-maintainer-api-layout-review/phase.md) | Uncleared (`q024`; manual review rejection) | Automated gates passed, but the Principal Engineer rejected the implementation quality and took ownership of the repair |
 | [`ws008-p007`](phase007-target-package-hold/phase.md) | Complete (`q025`, 2026-08-28) | Target Noct and dependent Remacs are absent from menu, forced selection, and a fresh rootfs; the separate host Noct script runtime remains operational |
-| [`ws008-p008`](phase008-latest-host-toolchain-pin/phase.md) | Selected (`q041`); pending after `ws005-p005` | Resolve upstream `main` once, pin its immutable commit for `build/NoctLang`, and prove the host Noct script toolchain |
+| [`ws008-p008`](phase008-latest-host-toolchain-pin/phase.md) | Complete (`q041`, 2026-08-31) | Host pin `3bf3d236...`, clean detached checkout, Process-enabled static build, stale-stamp invalidation, and clean/incremental toolchain smoke pass |
 | [`ws008-p009`](phase009-base-noct-relocation-target-resume/phase.md) | Blocked | Move target integration to `userland/base/noct/` with clone at `userland/base/noct/noct/`, then re-enable amd64 Noct only after upstream/overlay resolution and QEMU acceptance |
 
 The old NOCT-00--NOCT-05 labels are superseded as scheduling units by these

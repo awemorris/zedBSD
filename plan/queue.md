@@ -4,9 +4,9 @@ Last updated: 2026-08-31
 
 QID: `q041`
 
-Queue status: in-progress
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: the user explicitly requested that, after the current fixes,
 the remaining workstreams continue automatically.  The standing priority
@@ -36,7 +36,7 @@ and later physical WLAN driver remain external checkpoints.
 | --- | --- | --- | --- | --- |
 | 1 | `ws004-p016` | [Phase](ws004-hardware/phase016-legacy-hcd-request-retirement/phase.md) | completed | UHCI frame and EHCI fresh Async Advance retirement, failure retention, callback re-entry, toggle continuity, 8,189-check model/sanitizer/analyzer gates, configured x86 builds, and UHCI/EHCI QEMU enumeration/bulk/reboot lifecycle pass; unavailable fault injection is explicitly model-only |
 | 2 | `ws005-p005` | [Phase](ws005-networking/phase005-wifi-credential-store/phase.md) | uncleared | Host parser/store/CLI and regressions pass; native non-root ownership and truthful directory-sync acceptance wait for newly planned `ws001-p015` and `ws001-p016` |
-| 3 | `ws008-p008` | [Phase](ws008-noct/phase008-latest-host-toolchain-pin/phase.md) | pending | Resolve public Noct `main` once, pin the full immutable commit for the host toolchain only, leave a clean detached `build/NoctLang`, and pass clean plus incremental `make toolchain` smoke without touching target Noct paths |
+| 3 | `ws008-p008` | [Phase](ws008-noct/phase008-latest-host-toolchain-pin/phase.md) | completed | Pinned public main at `3bf3d236...`, explicitly enabled the required host Process API, hardened stale-stamp verification, and passed clean plus incremental toolchain smoke in a clean detached checkout |
 
 ## Dependency and deferral decisions
 
@@ -83,3 +83,10 @@ q041 is finished when all three selected items have been processed to
 synchronized into P, W, and M.  An honest controller/QEMU limitation or
 upstream/toolchain failure may leave one item uncleared without blocking the
 next independent item.
+
+## Closure
+
+q041 is finished.  `ws004-p016` and `ws008-p008` completed.  `ws005-p005`
+retains its passing host implementation but is uncleared at the documented
+native VFS reconsideration boundary; WS001 p015 and p016 are the exact resume
+conditions.  No unresolved p005 dependency was hidden inside this Queue.
