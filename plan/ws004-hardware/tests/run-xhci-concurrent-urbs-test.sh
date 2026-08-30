@@ -67,40 +67,29 @@ if grep -q 'DRV_USB_HCD_CAP_CONCURRENT_URBS' \
 fi
 
 # The legacy single-active HCDs share their request slot between submit,
-# interrupt completion, cancellation, and quiesce.  Cancellation may only
-# return success after checked hardware retirement exists; until then it must
-# retain the request for the locked interrupt completion path.
+# interrupt completion, cancellation, and quiesce.  p016 replaced the former
+# unconditional EBUSY dequeue with checked controller-specific retirement.
+# Keep this xHCI regression aware of that contract without duplicating the
+# detailed FRNUM/IAA fixture owned by run-legacy-hcd-retirement-test.sh.
 for legacy_hcd in ehci uhci; do
 	legacy_source="$root/src/drivers/pci-$legacy_hcd.c"
 	grep -q 'struct spinlock active_lock;' "$legacy_source"
 	grep -q 'submitting = 1;' "$legacy_source"
 	grep -q 'quiescing = 1;' "$legacy_source"
-	awk -v function_name="${legacy_hcd}_urb_dequeue" '
-		$0 ~ ("^" function_name "\\(") ||
-		    $0 ~ ("^static int " function_name "\\(") { inside = 1 }
-		inside && /return EBUSY;/ { busy = 1 }
-		inside && /(request_free|active = NULL|drv_usb_urb_set_hcd_data\(urb, NULL\))/ {
-			unsafe_release = 1
-		}
-		inside && /^}/ { exit !(busy && !unsafe_release) }
-		END { if (!inside) exit 1 }
-	' "$legacy_source"
-	awk -v function_name="${legacy_hcd}_irq" '
-		$0 ~ ("^" function_name "\\(") ||
-		    $0 ~ ("^static int " function_name "\\(") { inside = 1 }
-		inside && /spin_lock_irqsave\(&c->active_lock\)/ { locked = NR }
-		inside && /c->active = NULL;/ { unlinked = NR }
-		inside && /drv_usb_urb_set_hcd_data\(urb, NULL\)/ { detached = NR }
-		inside && /spin_unlock_irqrestore\(&c->active_lock/ { unlocked = NR }
-		inside && /request_free\(c, r\)/ { freed = NR }
-		inside && /drv_usb_hcd_complete\(&c->hcd, urb/ { completed = NR }
-		inside && /^}/ {
-			exit !(locked && locked < unlinked && unlinked < detached &&
-			    detached < unlocked && unlocked < freed && freed < completed)
-		}
-		END { if (!inside) exit 1 }
-	' "$legacy_source"
+	dequeue_body=$(sed -n "/${legacy_hcd}_urb_dequeue(/,/^}/p" \
+		"$legacy_source")
+	irq_body=$(sed -n "/${legacy_hcd}_irq(/,/^}/p" "$legacy_source")
+	printf '%s\n' "$dequeue_body" | grep -q 'REQUEST_RETIRED_CANCEL'
+	printf '%s\n' "$dequeue_body" | grep -q 'return 0;'
+	if printf '%s\n' "$irq_body" | grep -q 'request_free'; then
+		echo "xHCI source audit: $legacy_hcd IRQ bypasses retirement worker" >&2
+		exit 1
+	fi
 done
+grep -q 'uhci_retirement_begin_locked' "$root/src/drivers/pci-uhci.c"
+grep -q 'uhci_wait_frame_advance' "$root/src/drivers/pci-uhci.c"
+grep -q 'ehci_retirement_begin_iaa_locked' "$root/src/drivers/pci-ehci.c"
+grep -q 'ehci_retirement_observe_iaa_locked' "$root/src/drivers/pci-ehci.c"
 if sed -n '/struct xhci_controller {/,/^};/p' "$xhci" |
 	grep -q 'struct xhci_request[[:space:]]*\*active'; then
 	echo 'xHCI source audit: controller-global active request remains' >&2

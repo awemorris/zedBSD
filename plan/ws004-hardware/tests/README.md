@@ -7,6 +7,7 @@ Parent: [WS004](../ws.md)
 | HW-T00 | PCIe/DMA/interrupts | BARs, capability walking, DMA widths/order, MSI/MSI-X setup/teardown, and timeout cleanup pass focused tests |
 | HW-T01 | ECAM/MSI HAL contract | Canonical source parsing, MCFG validation, vector allocation/exhaustion/reuse, PCI register images, rollback, in-flight unregister, and real QEMU delivery pass |
 | HW-T02 | Legacy PCI HCD IRQ teardown | EHCI and UHCI retain the IRQ cookie/allocation, DMA, BAR-or-I/O ownership, HCD bus, handler argument, and controller after checked removal failure; retry releases each resource exactly once |
+| HW-T03 | Legacy HCD request retirement | UHCI requires all-frame unlink plus an observed FRNUM boundary, EHCI requires a fresh matching Async Advance acknowledgement, and both retain request/URB/DMA ownership on every checked failure |
 | HW-T10 | xHCI model | QEMU enumeration, control/bulk/interrupt transfers, reconnect, timeout, and controller reset pass |
 | HW-T11 | USB storage | Root-continuity cases from WS003 pass through xHCI |
 | HW-T12 | USB overlay writes | Correlated URB/heap tests pass; 500 sequential q35/xHCI/SMP=4 boots from pristine raw-image copies have zero kernel/storage-error markers; explicit `DATA.IMG` persistence and IDE control pass; detailed manual acceptance follows |
@@ -269,6 +270,53 @@ cc -std=c11 -Wall -Wextra -Werror \
   -o /tmp/ws004-pci-hcd-irq-teardown-test
 /tmp/ws004-pci-hcd-irq-teardown-test
 ```
+
+## HW-T03 checked legacy-HCD request retirement
+
+`ws004-p016` keeps the single-active-request UHCI/EHCI contract but replaces
+software-only unlink with a controller-observed retirement boundary.  The
+focused model and production-source gate cover completion versus dequeue,
+timeout versus IRQ, late/duplicate acknowledgement, quiesce/stop during
+retirement, failure retention, exactly-one terminal publication, callback
+execution after the ownership lock is released, and worker-callback
+enqueue/dequeue re-entry. UHCI additionally covers all 1024 frame entries,
+raw-register health before `0x7ff` to zero FRNUM wrap, and successful-TD toggle
+progress. EHCI clears a stale IAA before IAAD, accepts only the matching
+post-doorbell acknowledgement, and commits the stable QH overlay toggle.
+
+The runner executes ordinary, ASan/UBSan, GCC analyzer, source-contract, amd64
+UEFI, and i386 PC/AT production-object gates.  `/tmp` is not used because it
+may be a small tmpfs:
+
+```sh
+mkdir -p build/q041-tmp
+TMPDIR="$PWD/build/q041-tmp" \
+  plan/ws004-hardware/tests/run-legacy-hcd-retirement-test.sh
+```
+
+The runtime runner uses the dedicated
+`config-amd64-legacy-hcd.mk` selection, one disposable OVMF/q35 IDE-root copy,
+and a read-only auxiliary USB disk. It boots once with `piix3-usb-uhci` and
+once with `usb-ehci`, requires each checked-retirement marker, completes a
+4-KiB guest bulk read into disposable tmpfs, then requires clean reboot/HCD
+shutdown:
+
+```sh
+TMPDIR="$PWD/build/q041-tmp" make -j16 \
+  ZEDBSD_CONFIG=plan/ws004-hardware/tests/config-amd64-legacy-hcd.mk \
+  disk-image
+TMPDIR="$PWD/build/q041-tmp" \
+  plan/ws004-hardware/tests/run-legacy-hcd-qemu.sh \
+  build/amd64/hdd-image.img build/data.img build/q041-p016-qemu
+```
+
+The legacy drivers do not yet dispatch runtime root-port changes, and QEMU
+does not provide a stable public fault control for a frozen UHCI FRNUM or
+stale, duplicate, or missing EHCI IAA. Cancellation and those faults therefore
+remain deterministic focused-model evidence. The QEMU metadata records each
+under `not_injected` and never claims hot-unplug or hardware fault-injection
+coverage; the runtime portion proves real control/bulk traffic and checked
+shutdown only.
 
 ## HW-T10 xHCI evidence
 

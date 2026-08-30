@@ -34,7 +34,7 @@ and later physical WLAN driver remain external checkpoints.
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws004-p016` | [Phase](ws004-hardware/phase016-legacy-hcd-request-retirement/phase.md) | in-progress | UHCI uses a controller-observed frame retirement boundary and EHCI uses a checked Async Advance acknowledgement before any completed/cancelled request DMA is freed; focused races, configured x86 builds, and available QEMU UHCI/EHCI lifecycle gates pass |
+| 1 | `ws004-p016` | [Phase](ws004-hardware/phase016-legacy-hcd-request-retirement/phase.md) | completed | UHCI frame and EHCI fresh Async Advance retirement, failure retention, callback re-entry, toggle continuity, 8,189-check model/sanitizer/analyzer gates, configured x86 builds, and UHCI/EHCI QEMU enumeration/bulk/reboot lifecycle pass; unavailable fault injection is explicitly model-only |
 | 2 | `ws005-p005` | [Phase](ws005-networking/phase005-wifi-credential-store/phase.md) | pending | Add the strict `wifi-conf 1` parser/model, euid/passwd-selected root and per-user stores, checked persistent lock and atomic writer, redacted `net wifi set-key`, focused fault/concurrency evidence, build, and bounded guest ownership evidence |
 | 3 | `ws008-p008` | [Phase](ws008-noct/phase008-latest-host-toolchain-pin/phase.md) | pending | Resolve public Noct `main` once, pin the full immutable commit for the host toolchain only, leave a clean detached `build/NoctLang`, and pass clean plus incremental `make toolchain` smoke without touching target Noct paths |
 

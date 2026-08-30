@@ -4,8 +4,9 @@ Last updated: 2026-08-31
 
 WSID: `ws004`
 
-Status: audited active; WS is not complete. q041 is executing p016 checked
-legacy-HCD request retirement. `ws004-p026` completed every
+Status: audited active; WS is not complete. q041 completed p016 checked
+legacy-HCD request retirement and is proceeding to its independent WS005 and
+WS008 items. `ws004-p026` completed every
 automatic/read-only intake field in q040 and is uncleared only at the printed
 unit label. `ws004-p020` deterministic CDC NCM hardening and
 `ws004-p022`--`p024` NVMe discovery/I/O/strict-GPT QEMU acceptance are
@@ -27,9 +28,9 @@ connection/speed notifications with data-interface `wIndex`; the repaired NCM
 parser and real adapter pass carrier, DHCP, and ping through QEMU xHCI, and the
 final Latitude-native image successfully fetches `www.google.com`.
 `p021` records the independent native-xHCI Max ESIT defect exposed by the same
-audit and remains outside q029. `p016` records the non-Queue legacy-HCD hardware-retirement follow-up exposed
-by that audit; current UHCI/EHCI cancellation remains conservative until it is
-completed. `p018` corrected the IAD-less, Union-associated NCM match exposed by
+audit and remains outside q029. `p016` now completes the controller-proven
+legacy-HCD hardware-retirement follow-up exposed by that audit. `p018`
+corrected the IAD-less, Union-associated NCM match exposed by
 the first physical RTL8156 insertion, and the accepted follow-up published
 `ue0`. The broader asynchronous-TX/accounting decisions remain in p017.
 
@@ -69,7 +70,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p013`](phase013-cdc-ncm-wire/phase.md) | Complete (`q027`) | Strict NCM 1.0-compatible NTH16/NDP16 negotiation and wire codec pass ordinary, sanitizer, analyzer, and production-build gates |
 | [`ws004-p014`](phase014-cdc-ncm-driver/phase.md) | Complete (`q027`) | Strict self-contained CDC NCM `ueN` integration passes automatic lifecycle, concurrency, build, and QEMU regression gates; physical NCM remains WS005 |
 | [`ws004-p015`](phase015-usb-binding-transactions/phase.md) | Complete (`q027`) | General binding lifecycle, interface I/O gate, active-endpoint submission, endpoint-zero serialization, and conservative legacy-HCD ownership passed focused, sanitizer, analyzer, build, and USB-root QEMU gates |
-| [`ws004-p016`](phase016-legacy-hcd-request-retirement/phase.md) | In progress (`q041`) | Controller-proven UHCI frame and EHCI Async Advance retirement before normal-completion or cancellation DMA release |
+| [`ws004-p016`](phase016-legacy-hcd-request-retirement/phase.md) | Complete (`q041`) | Controller-proven UHCI frame and EHCI Async Advance retirement, callback re-entry and toggle continuity pass focused/configured/QEMU gates; unavailable fault injection is explicitly model-only |
 | [`ws004-p017`](phase017-cdc-ncm-runtime-recovery/phase.md) | Pending; not queued; residual TX-accounting policy open | p020 extracts the approved valid-sequence/resync and bounded-work rules; p017 retains asynchronous terminal TX accounting and any later separately approved recovery work |
 | [`ws004-p018`](phase018-rtl8156-ncm-association/phase.md) | Complete (`q028`) | CDC Union is authoritative and IAD is optional strict corroboration; automatic gates pass and physical RTL8156 configuration 2 binds and publishes `ue0`; carrier/data work moved to WS005 p001 |
 | [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Deferred; trigger no longer present | Real RTL8156 NCM carrier/DHCP/ping passed through QEMU and on Latitude, so the diagnostic ECM fallback is not required by the current WLAN/NVMe path; retain it only as an independently selected future class-driver baseline |

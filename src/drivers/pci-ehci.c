@@ -10,6 +10,7 @@
 #include <hal/hal.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
+#include <kern/thread.h>
 #include <string.h>
 
 #define EHCI_USBCMD 0x00U
@@ -25,7 +26,13 @@
 #define EHCI_CMD_RESET 0x00000002U
 #define EHCI_CMD_PERIODIC 0x00000010U
 #define EHCI_CMD_ASYNC 0x00000020U
+#define EHCI_CMD_IAAD 0x00000040U
+#define EHCI_STS_USBINT 0x00000001U
+#define EHCI_STS_USBERRINT 0x00000002U
+#define EHCI_STS_HSE 0x00000010U
+#define EHCI_STS_IAA 0x00000020U
 #define EHCI_STS_HALTED 0x00001000U
+#define EHCI_STS_ASYNC 0x00008000U
 #define EHCI_STS_ALL 0x0000003fU
 #define EHCI_LINK_TERM 0x00000001U
 #define EHCI_LINK_QH 0x00000002U
@@ -47,6 +54,18 @@
 #define EHCI_PCI_COMMAND 0x04U
 #define EHCI_PCI_COMMAND_MASTER 0x0004U
 #define EHCI_QUIESCE_TICKS 100U
+#define EHCI_RETIRE_TICKS 100U
+
+enum ehci_request_state {
+	EHCI_REQUEST_ACTIVE,
+	EHCI_REQUEST_DEACTIVATING_COMPLETE,
+	EHCI_REQUEST_DEACTIVATING_CANCEL,
+	EHCI_REQUEST_WAIT_IAA_COMPLETE,
+	EHCI_REQUEST_WAIT_IAA_CANCEL,
+	EHCI_REQUEST_COMPLETING,
+	EHCI_REQUEST_RETIRED_CANCEL,
+	EHCI_REQUEST_FAILED
+};
 
 struct ehci_qtd {
 	volatile uint32_t next, alternate, token, buffer[5];
@@ -63,6 +82,11 @@ struct ehci_request {
 	unsigned qtd_count, data_first, data_count;
 	uint16_t requested[EHCI_MAX_QTDS];
 	bool input, control;
+	enum ehci_request_state state;
+	uint64_t retirement_generation, retirement_started;
+	const char *failure_stage;
+	int failure_error;
+	unsigned failure_reported;
 };
 struct ehci_controller {
 	struct drv_pci_device *pci;
@@ -77,12 +101,20 @@ struct ehci_controller {
 	void *irq_cookie;
 	struct spinlock active_lock;
 	struct ehci_request *active;
+	struct thread *retirement_worker;
 	struct ehci_controller *next;
+	uint64_t retirement_generation;
 	unsigned bar_claimed, bar_mapped, pci_state_saved;
 	unsigned hcd_registered, irq_allocated, dma_quiesced;
 	unsigned quiescing, submitting, listed, quarantined;
+	unsigned retirement_success_reported;
+	volatile unsigned retirement_pending, retirement_stopping;
 };
 static struct ehci_controller *ehci_controllers;
+
+static int ehci_retirement_worker_start(struct ehci_controller *);
+static int ehci_retirement_worker_stop(struct ehci_controller *);
+static void ehci_retirement_worker_wakeup(struct ehci_controller *);
 
 static uint8_t rd8(volatile uint8_t*p,unsigned o){return p[o];}
 static uint32_t rd32(volatile uint8_t*p,unsigned o){return *(volatile uint32_t*)(p+o);}
@@ -115,13 +147,18 @@ static int ehci_start(struct drv_usb_hcd*hcd)
 	wr32(c->operational,EHCI_ASYNCLISTADDR,(uint32_t)c->async_head_memory.device_address);
 	wr32(c->operational,EHCI_USBSTS,EHCI_STS_ALL);wr32(c->operational,EHCI_USBINTR,0);
 	wr32(c->operational,EHCI_CONFIGFLAG,1);wr32(c->operational,EHCI_USBCMD,EHCI_CMD_RUN|EHCI_CMD_ASYNC);
-	for(timeout=0;timeout<1000000U;timeout++)
-		if((rd32(c->operational,EHCI_USBSTS)&EHCI_STS_HALTED)==0){
+	for(timeout=0;timeout<1000000U;timeout++) {
+		uint32_t status = rd32(c->operational, EHCI_USBSTS);
+
+		if (status != UINT32_MAX &&
+		    (status & (EHCI_STS_HALTED | EHCI_STS_ASYNC)) ==
+		    EHCI_STS_ASYNC) {
 			irq=spin_lock_irqsave(&c->active_lock);
 			c->dma_quiesced=0;c->quiescing=0;
 			spin_unlock_irqrestore(&c->active_lock,irq);
 			return 0;
 		}
+	}
 	error=EIO;
 fail:drv_dma_free_coherent(hcd->dma,&c->async_head_memory);drv_dma_free_coherent(hcd->dma,&c->periodic);return error;
 }
@@ -178,14 +215,17 @@ ehci_quiesce(struct drv_usb_hcd *hcd)
 {
 	struct ehci_controller *c = hcd_controller(hcd);
 	uint64_t started;
-	uint32_t command;
+	uint32_t command, status;
 	unsigned long irq;
 	int halt_error = 0, master_error, irq_error;
 
 	irq = spin_lock_irqsave(&c->active_lock);
 	if (c->dma_quiesced) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
-		return 0;
+		/* A callback running on the retirement worker may have established
+		 * hardware quiescence but cannot join itself.  A later external retry
+		 * finishes the software-worker boundary before stop can release memory. */
+		return ehci_retirement_worker_stop(c);
 	}
 	if (c->active != NULL || c->submitting) {
 		spin_unlock_irqrestore(&c->active_lock, irq);
@@ -194,13 +234,19 @@ ehci_quiesce(struct drv_usb_hcd *hcd)
 	/* Permanently close submission admission for this shutdown attempt.  A
 	 * failed checked teardown may be retried but must not admit fresh DMA. */
 	c->quiescing = 1;
-	spin_unlock_irqrestore(&c->active_lock, irq);
 	wr32(c->operational, EHCI_USBINTR, 0);
 	command = rd32(c->operational, EHCI_USBCMD);
 	wr32(c->operational, EHCI_USBCMD,
 	    command & ~(EHCI_CMD_RUN | EHCI_CMD_PERIODIC | EHCI_CMD_ASYNC));
+	spin_unlock_irqrestore(&c->active_lock, irq);
 	started = sched_ticks();
-	while ((rd32(c->operational, EHCI_USBSTS) & EHCI_STS_HALTED) == 0) {
+	for (;;) {
+		irq = spin_lock_irqsave(&c->active_lock);
+		status = rd32(c->operational, EHCI_USBSTS);
+		hal_io_mb();
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		if ((status & EHCI_STS_HALTED) != 0)
+			break;
 		if (sched_ticks() - started >= EHCI_QUIESCE_TICKS) {
 			halt_error = ETIMEDOUT;
 			break;
@@ -230,7 +276,7 @@ ehci_quiesce(struct drv_usb_hcd *hcd)
 	}
 	c->dma_quiesced = 1;
 	spin_unlock_irqrestore(&c->active_lock, irq);
-	return 0;
+	return ehci_retirement_worker_stop(c);
 }
 
 static void
@@ -241,7 +287,8 @@ ehci_stop(struct drv_usb_hcd *hcd)
 	int releasable;
 
 	irq = spin_lock_irqsave(&c->active_lock);
-	releasable = c->dma_quiesced && c->active == NULL && !c->submitting;
+	releasable = c->dma_quiesced && c->active == NULL && !c->submitting &&
+	    c->retirement_worker == NULL;
 	spin_unlock_irqrestore(&c->active_lock, irq);
 	if (!releasable) {
 		hal_printf("ehci: refusing to release DMA before checked quiesce\n");
@@ -265,10 +312,439 @@ static void qtd_buffer(struct ehci_qtd*q,uint32_t address,size_t length){unsigne
 static int add_qtd(struct ehci_request*r,unsigned pid,unsigned toggle,unsigned length,uint32_t buffer)
 {struct ehci_qtd*q;uint32_t physical;if(r->qtd_count>=EHCI_MAX_QTDS)return E2BIG;q=&r->qtds[r->qtd_count];physical=(uint32_t)r->schedule.device_address+128U+r->qtd_count*sizeof(*q);if(r->qtd_count)r->qtds[r->qtd_count-1U].next=physical;q->next=EHCI_LINK_TERM;q->alternate=EHCI_LINK_TERM;q->token=qtd_token(pid,toggle,length);qtd_buffer(q,buffer,length);r->requested[r->qtd_count]=(uint16_t)length;r->qtd_count++;return 0;}
 static void request_free(struct ehci_controller*c,struct ehci_request*r){if(!r)return;if(r->schedule.address)drv_dma_free_coherent(c->hcd.dma,&r->schedule);if(r->bounce.address)drv_dma_free_coherent(c->hcd.dma,&r->bounce);hal_free(r);}
+
+static void
+ehci_request_commit_toggle(struct ehci_request *request)
+{
+	/* Non-control QHs use the overlay data-toggle bit.  Once IAA proves the
+	 * overlay retired, it is the next toggle even for a short transfer, halted
+	 * error, or cancellation after some packets reached the device. */
+	if (!request->control)
+		(void)drv_usb_endpoint_set_hcd_data(
+		    drv_usb_urb_endpoint(request->urb), 0,
+		    (request->qh->token >> 31) & 1U);
+}
+
+static int
+ehci_request_waiting_iaa(const struct ehci_request *request)
+{
+	return request != NULL &&
+	    (request->state == EHCI_REQUEST_WAIT_IAA_COMPLETE ||
+	    request->state == EHCI_REQUEST_WAIT_IAA_CANCEL);
+}
+
+static int
+ehci_retirement_expired(const struct ehci_request *request)
+{
+	return sched_ticks() - request->retirement_started >= EHCI_RETIRE_TICKS;
+}
+
+/* active_lock is held and interrupts are disabled for all schedule changes. */
+static void
+ehci_request_deactivate_locked(struct ehci_request *request)
+{
+	unsigned index;
+
+	for (index = 0; index < request->qtd_count; index++)
+		request->qtds[index].token &= ~EHCI_QTD_ACTIVE;
+	/* The overlay is controller-owned while the QH is scheduled.  Do not
+	 * manufacture the retirement observation by clearing its Active bit in
+	 * software: the worker must observe the controller refresh it from the
+	 * now-inactive qTD chain before unlinking the QH. */
+	hal_io_wmb();
+}
+
+static int
+ehci_request_inactive_locked(const struct ehci_request *request)
+{
+	unsigned index;
+
+	if ((request->qh->token & EHCI_QTD_ACTIVE) != 0)
+		return 0;
+	for (index = 0; index < request->qtd_count; index++)
+		if ((request->qtds[index].token & EHCI_QTD_ACTIVE) != 0)
+			return 0;
+	return 1;
+}
+
+static void
+ehci_retirement_fail_locked(struct ehci_controller *controller,
+	struct ehci_request *request, int error, const char *stage)
+{
+	if (request->state == EHCI_REQUEST_FAILED)
+		return;
+	request->state = EHCI_REQUEST_FAILED;
+	request->failure_error = error != 0 ? error : EIO;
+	request->failure_stage = stage;
+	controller->quiescing = 1;
+	controller->quarantined = 1;
+}
+
+static void
+ehci_retirement_report(struct ehci_controller *controller)
+{
+	struct ehci_request *request;
+	const char *stage = NULL;
+	unsigned long irq;
+	int error = 0;
+
+	irq = spin_lock_irqsave(&controller->active_lock);
+	request = controller->active;
+	if (request != NULL && request->state == EHCI_REQUEST_FAILED &&
+	    !request->failure_reported) {
+		request->failure_reported = 1;
+		stage = request->failure_stage;
+		error = request->failure_error;
+	}
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+	if (stage != NULL)
+		hal_printf(
+		    "ehci: request retirement failed at %s (%d); request and DMA retained\n",
+		    stage, error);
+}
+
+/*
+ * Begin the EHCI 4.8.2 handshake.  There is only one active request, so a
+ * software generation together with a cleared, read-back IAA status prevents
+ * a stale acknowledgement from satisfying this unlink.
+ */
+static int
+ehci_retirement_begin_iaa_locked(struct ehci_controller *controller,
+	struct ehci_request *request)
+{
+	uint32_t command, status;
+
+	if (request->state != EHCI_REQUEST_DEACTIVATING_COMPLETE &&
+	    request->state != EHCI_REQUEST_DEACTIVATING_CANCEL)
+		return EINVAL;
+	status = rd32(controller->operational, EHCI_USBSTS);
+	command = rd32(controller->operational, EHCI_USBCMD);
+	hal_io_mb();
+	if (status == UINT32_MAX || command == UINT32_MAX)
+		return EIO;
+	if ((status & (EHCI_STS_HSE | EHCI_STS_HALTED)) != 0)
+		return EIO;
+	if ((command & (EHCI_CMD_RUN | EHCI_CMD_ASYNC)) !=
+	    (EHCI_CMD_RUN | EHCI_CMD_ASYNC))
+		return EIO;
+	/* A prior doorbell can still be draining when software reaches this QH.
+	 * It is not proof for this generation.  Wait for it to self-clear, then
+	 * acknowledge its IAA below before issuing our own doorbell. */
+	if ((status & EHCI_STS_ASYNC) == 0 ||
+	    (command & EHCI_CMD_IAAD) != 0)
+		return EAGAIN;
+	if ((status & EHCI_STS_IAA) != 0) {
+		wr32(controller->operational, EHCI_USBSTS, EHCI_STS_IAA);
+		status = rd32(controller->operational, EHCI_USBSTS);
+		hal_io_mb();
+		if (status == UINT32_MAX || (status & EHCI_STS_IAA) != 0)
+			return EIO;
+	}
+	controller->async_head->horizontal =
+	    (uint32_t)controller->async_head_memory.device_address |
+	    EHCI_LINK_QH;
+	hal_io_wmb();
+	controller->retirement_generation++;
+	if (controller->retirement_generation == 0)
+		controller->retirement_generation++;
+	request->retirement_generation = controller->retirement_generation;
+	request->state = request->state == EHCI_REQUEST_DEACTIVATING_COMPLETE ?
+	    EHCI_REQUEST_WAIT_IAA_COMPLETE : EHCI_REQUEST_WAIT_IAA_CANCEL;
+	wr32(controller->operational, EHCI_USBCMD, command | EHCI_CMD_IAAD);
+	return 0;
+}
+
+/* Return zero only for the matching, acknowledged Async Advance. */
+static int
+ehci_retirement_observe_iaa_locked(struct ehci_controller *controller,
+	struct ehci_request *request)
+{
+	uint32_t command, status;
+
+	if (!ehci_request_waiting_iaa(request) ||
+	    request->retirement_generation == 0 ||
+	    request->retirement_generation != controller->retirement_generation)
+		return EINVAL;
+	status = rd32(controller->operational, EHCI_USBSTS);
+	command = rd32(controller->operational, EHCI_USBCMD);
+	hal_io_mb();
+	if (status == UINT32_MAX || command == UINT32_MAX)
+		return EIO;
+	if ((status & (EHCI_STS_HSE | EHCI_STS_HALTED)) != 0 ||
+	    (status & EHCI_STS_ASYNC) == 0 ||
+	    (command & (EHCI_CMD_RUN | EHCI_CMD_ASYNC)) !=
+	    (EHCI_CMD_RUN | EHCI_CMD_ASYNC))
+		return EIO;
+	if ((status & EHCI_STS_IAA) == 0 ||
+	    (command & EHCI_CMD_IAAD) != 0)
+		return EAGAIN;
+	wr32(controller->operational, EHCI_USBSTS, EHCI_STS_IAA);
+	status = rd32(controller->operational, EHCI_USBSTS);
+	hal_io_mb();
+	if (status == UINT32_MAX || (status & EHCI_STS_IAA) != 0)
+		return EIO;
+	request->state = request->state == EHCI_REQUEST_WAIT_IAA_COMPLETE ?
+	    EHCI_REQUEST_COMPLETING : EHCI_REQUEST_RETIRED_CANCEL;
+	return 0;
+}
+
+static void
+ehci_complete_retired_request(struct ehci_controller *controller,
+	struct ehci_request *request)
+{
+	struct drv_usb_urb *urb = request->urb;
+	enum drv_usb_urb_status result = DRV_USB_URB_COMPLETE;
+	size_t actual = 0, length = drv_usb_urb_length(urb);
+	unsigned index;
+	unsigned long irq;
+
+	/* IAA has made every descriptor and bounce write stable. */
+	hal_io_rmb();
+	for (index = 0; index < request->qtd_count; index++) {
+		if ((request->qtds[index].token & EHCI_QTD_ERRORS) != 0) {
+			result = (request->qtds[index].token & EHCI_QTD_HALTED) != 0 ?
+			    DRV_USB_URB_STALL : DRV_USB_URB_IO_ERROR;
+			break;
+		}
+	}
+	for (index = 0; index < request->data_count; index++) {
+		unsigned qtd_index = request->data_first + index;
+		uint32_t remaining;
+		size_t transferred;
+
+		if (qtd_index >= request->qtd_count) {
+			result = DRV_USB_URB_IO_ERROR;
+			actual = 0;
+			break;
+		}
+		remaining = (request->qtds[qtd_index].token >> 16) & 0x7fffU;
+		if (remaining > request->requested[qtd_index]) {
+			result = DRV_USB_URB_IO_ERROR;
+			actual = 0;
+			break;
+		}
+		transferred = request->requested[qtd_index] - remaining;
+		if (actual > length || transferred > length - actual) {
+			result = DRV_USB_URB_IO_ERROR;
+			actual = 0;
+			break;
+		}
+		actual += transferred;
+	}
+	ehci_request_commit_toggle(request);
+	if (request->input && actual != 0)
+		memcpy(drv_usb_urb_buffer(urb),
+		    (uint8_t *)request->bounce.address + 8U, actual);
+
+	irq = spin_lock_irqsave(&controller->active_lock);
+	if (controller->active != request ||
+	    request->state != EHCI_REQUEST_COMPLETING ||
+	    drv_usb_urb_hcd_data(urb) != request)
+		__builtin_trap();
+	controller->active = NULL;
+	(void)drv_usb_urb_set_hcd_data(urb, NULL);
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+	request_free(controller, request);
+	drv_usb_hcd_complete(&controller->hcd, urb, result, actual);
+}
+
+static void
+ehci_retirement_progress(struct ehci_controller *controller)
+{
+	for (;;) {
+		struct ehci_request *complete = NULL;
+		struct ehci_request *request;
+		unsigned long irq;
+		int error = 0, failed = 0, success = 0;
+
+		irq = spin_lock_irqsave(&controller->active_lock);
+		request = controller->active;
+		if (request == NULL ||
+		    __atomic_load_n(&controller->retirement_stopping,
+		    __ATOMIC_ACQUIRE) != 0) {
+			spin_unlock_irqrestore(&controller->active_lock, irq);
+			return;
+		}
+		switch (request->state) {
+		case EHCI_REQUEST_DEACTIVATING_COMPLETE:
+		case EHCI_REQUEST_DEACTIVATING_CANCEL:
+			if (ehci_request_inactive_locked(request)) {
+				error = ehci_retirement_begin_iaa_locked(controller,
+				    request);
+				if (error == EAGAIN &&
+				    ehci_retirement_expired(request)) {
+					ehci_retirement_fail_locked(controller, request,
+					    ETIMEDOUT, "async-advance setup");
+					failed = 1;
+				} else if (error != 0 && error != EAGAIN) {
+					ehci_retirement_fail_locked(controller, request,
+					    error, "async-advance setup");
+					failed = 1;
+				}
+			} else if (ehci_retirement_expired(request)) {
+				ehci_retirement_fail_locked(controller, request,
+				    ETIMEDOUT, "descriptor deactivation");
+				failed = 1;
+			}
+			break;
+		case EHCI_REQUEST_WAIT_IAA_COMPLETE:
+		case EHCI_REQUEST_WAIT_IAA_CANCEL:
+			error = ehci_retirement_observe_iaa_locked(controller,
+			    request);
+			if (error == 0) {
+				success = 1;
+				if (request->state == EHCI_REQUEST_COMPLETING)
+					complete = request;
+			}
+			else if (error != 0 && error != EAGAIN) {
+				ehci_retirement_fail_locked(controller, request,
+				    error, "async-advance acknowledgement");
+				failed = 1;
+			} else if (error == EAGAIN &&
+			    ehci_retirement_expired(request)) {
+				ehci_retirement_fail_locked(controller, request,
+				    ETIMEDOUT, "async-advance acknowledgement");
+				failed = 1;
+			}
+			break;
+		case EHCI_REQUEST_COMPLETING:
+			complete = request;
+			break;
+		case EHCI_REQUEST_RETIRED_CANCEL:
+		case EHCI_REQUEST_FAILED:
+		case EHCI_REQUEST_ACTIVE:
+		default:
+			failed = request->state == EHCI_REQUEST_FAILED;
+			spin_unlock_irqrestore(&controller->active_lock, irq);
+			if (failed)
+				ehci_retirement_report(controller);
+			return;
+		}
+		spin_unlock_irqrestore(&controller->active_lock, irq);
+		if (success && __atomic_exchange_n(
+		    &controller->retirement_success_reported, 1U,
+		    __ATOMIC_ACQ_REL) == 0)
+			hal_printf(
+			    "ehci: checked async-advance retirement active\n");
+		if (failed) {
+			ehci_retirement_report(controller);
+			return;
+		}
+		if (complete != NULL) {
+			ehci_complete_retired_request(controller, complete);
+			return;
+		}
+		sched_yield();
+	}
+}
+
+static void
+ehci_retirement_worker(void *argument)
+{
+	struct ehci_controller *controller = argument;
+
+	for (;;) {
+		if (__atomic_load_n(&controller->retirement_stopping,
+		    __ATOMIC_ACQUIRE) != 0)
+			return;
+		if (__atomic_exchange_n(&controller->retirement_pending, 0U,
+		    __ATOMIC_ACQ_REL) != 0) {
+			ehci_retirement_progress(controller);
+			continue;
+		}
+		kernel_wait_task();
+	}
+}
+
+static void
+ehci_retirement_worker_wakeup(struct ehci_controller *controller)
+{
+	struct thread *worker;
+	unsigned long irq;
+
+	__atomic_store_n(&controller->retirement_pending, 1U,
+	    __ATOMIC_RELEASE);
+	irq = spin_lock_irqsave(&controller->active_lock);
+	worker = controller->retirement_worker;
+	if (worker != NULL)
+		kernel_notify_task(worker->task);
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+}
+
+static int
+ehci_retirement_worker_start(struct ehci_controller *controller)
+{
+	struct thread *worker;
+	unsigned long irq;
+	int error;
+
+	irq = spin_lock_irqsave(&controller->active_lock);
+	if (controller->retirement_worker != NULL) {
+		spin_unlock_irqrestore(&controller->active_lock, irq);
+		return EALREADY;
+	}
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+	__atomic_store_n(&controller->retirement_stopping, 0U,
+	    __ATOMIC_RELEASE);
+	__atomic_store_n(&controller->retirement_pending, 0U,
+	    __ATOMIC_RELEASE);
+	error = kthread_create(ehci_retirement_worker, controller,
+	    SCHED_PRIORITY_DEFAULT, &worker);
+	if (error != 0)
+		return error;
+	irq = spin_lock_irqsave(&controller->active_lock);
+	controller->retirement_worker = worker;
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+	/* Publish before start so the already-registered HCD never admits a URB
+	 * without a retirement owner.  A pre-start wake leaves retirement_pending
+	 * set; the worker consumes that latch before its first wait. */
+	thread_start(worker);
+	return 0;
+}
+
+static int
+ehci_retirement_worker_stop(struct ehci_controller *controller)
+{
+	struct thread *worker;
+	unsigned long irq;
+	int error;
+
+	irq = spin_lock_irqsave(&controller->active_lock);
+	worker = controller->retirement_worker;
+	if (worker == NULL) {
+		spin_unlock_irqrestore(&controller->active_lock, irq);
+		return 0;
+	}
+	if (curthread == worker) {
+		spin_unlock_irqrestore(&controller->active_lock, irq);
+		return EBUSY;
+	}
+	if (__atomic_load_n(&controller->retirement_stopping,
+	    __ATOMIC_ACQUIRE) != 0) {
+		spin_unlock_irqrestore(&controller->active_lock, irq);
+		return EBUSY;
+	}
+	__atomic_store_n(&controller->retirement_stopping, 1U,
+	    __ATOMIC_RELEASE);
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+	kernel_notify_task(worker->task);
+	while (worker->state != THREAD_ZOMBIE)
+		sched_yield();
+	irq = spin_lock_irqsave(&controller->active_lock);
+	if (controller->retirement_worker != worker)
+		__builtin_trap();
+	controller->retirement_worker = NULL;
+	spin_unlock_irqrestore(&controller->active_lock, irq);
+	error = thread_wait(worker, NULL);
+	if (error != 0)
+		return error;
+	return 0;
+}
+
 static int build_request(struct ehci_controller*c,struct drv_usb_urb*urb,struct ehci_request**result)
 {
 	struct ehci_request*r;struct drv_usb_endpoint*ep=drv_usb_urb_endpoint(urb);const struct drv_usb_control_request*control=drv_usb_urb_control_request(urb);size_t length=drv_usb_urb_length(urb),offset=0;unsigned packet,address,endpoint,toggle=0,initial_toggle=0;int error;
-	r=hal_malloc(sizeof(*r));if(!r)return ENOMEM;memset(r,0,sizeof(*r));r->urb=urb;
+	r=hal_malloc(sizeof(*r));if(!r)return ENOMEM;memset(r,0,sizeof(*r));r->urb=urb;r->state=EHCI_REQUEST_ACTIVE;
 	if((error=drv_dma_alloc_coherent(c->hcd.dma,4096U,64U,&r->schedule))!=0){hal_free(r);return error;}
 	if((error=drv_dma_alloc_coherent(c->hcd.dma,length+8U,64U,&r->bounce))!=0){request_free(c,r);return error;}
 	memset(r->schedule.address,0,4096U);r->qh=r->schedule.address;r->qtds=(void*)((uint8_t*)r->schedule.address+128U);
@@ -288,9 +764,11 @@ ehci_urb_enqueue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 	int error;
 
 	irq = spin_lock_irqsave(&c->active_lock);
-	if (c->quiescing || c->dma_quiesced || c->active != NULL ||
+	if (c->quiescing || c->dma_quiesced ||
+	    c->retirement_worker == NULL || c->active != NULL ||
 	    c->submitting) {
-		error = c->quiescing || c->dma_quiesced ? ENODEV : EBUSY;
+		error = c->quiescing || c->dma_quiesced ||
+		    c->retirement_worker == NULL ? ENODEV : EBUSY;
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		return error;
 	}
@@ -309,8 +787,10 @@ ehci_urb_enqueue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 	if (!c->submitting)
 		__builtin_trap();
 	c->submitting = 0;
-	if (c->quiescing || c->dma_quiesced || c->active != NULL) {
-		error = c->quiescing || c->dma_quiesced ? ENODEV : EBUSY;
+	if (c->quiescing || c->dma_quiesced ||
+	    c->retirement_worker == NULL || c->active != NULL) {
+		error = c->quiescing || c->dma_quiesced ||
+		    c->retirement_worker == NULL ? ENODEV : EBUSY;
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		request_free(c, r);
 		return error;
@@ -330,6 +810,7 @@ ehci_urb_dequeue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 	struct ehci_controller *c = hcd_controller(hcd);
 	struct ehci_request *r;
 	unsigned long irq;
+	int error, inline_retirement;
 
 	irq = spin_lock_irqsave(&c->active_lock);
 	r = c->active;
@@ -337,11 +818,55 @@ ehci_urb_dequeue(struct drv_usb_hcd *hcd, struct drv_usb_urb *urb)
 		spin_unlock_irqrestore(&c->active_lock, irq);
 		return EBUSY;
 	}
-	/* An async-list pointer update alone does not retire an EHCI-cached QH.
-	 * Keep ownership until normal completion until a checked Async Advance
-	 * cancellation path is implemented. */
+	if (r->state != EHCI_REQUEST_ACTIVE || c->retirement_worker == NULL) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return EBUSY;
+	}
+	/* Cancellation owns this terminal race.  Make every in-memory execution
+	 * token inactive, then let the worker prove the QH overlay has settled and
+	 * perform the checked Async Advance unlink. */
+	r->state = EHCI_REQUEST_DEACTIVATING_CANCEL;
+	r->retirement_started = sched_ticks();
+	ehci_request_deactivate_locked(r);
+	inline_retirement = curthread == c->retirement_worker;
 	spin_unlock_irqrestore(&c->active_lock, irq);
-	return EBUSY;
+	/* Completion callbacks execute on the retirement worker.  A callback may
+	 * enqueue and synchronously cancel a replacement URB; waking ourselves and
+	 * entering the wait loop would deadlock that cancellation forever. */
+	if (inline_retirement)
+		ehci_retirement_progress(c);
+	else
+		ehci_retirement_worker_wakeup(c);
+
+	for (;;) {
+		irq = spin_lock_irqsave(&c->active_lock);
+		if (c->active != r || r->urb != urb ||
+		    drv_usb_urb_hcd_data(urb) != r) {
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			return EBUSY;
+		}
+		if (r->state == EHCI_REQUEST_RETIRED_CANCEL) {
+			ehci_request_commit_toggle(r);
+			c->active = NULL;
+			(void)drv_usb_urb_set_hcd_data(urb, NULL);
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			request_free(c, r);
+			return 0;
+		}
+		if (r->state == EHCI_REQUEST_FAILED) {
+			error = r->failure_error != 0 ? r->failure_error : EIO;
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			ehci_retirement_report(c);
+			return error;
+		}
+		if (r->state != EHCI_REQUEST_DEACTIVATING_CANCEL &&
+		    r->state != EHCI_REQUEST_WAIT_IAA_CANCEL) {
+			spin_unlock_irqrestore(&c->active_lock, irq);
+			return EBUSY;
+		}
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		sched_yield();
+	}
 }
 static int ehci_endpoint_enable(struct drv_usb_hcd*h,struct drv_usb_endpoint*e){(void)h;(void)e;return 0;}
 static int ehci_endpoint_disable(struct drv_usb_hcd*h,struct drv_usb_endpoint*e){(void)h;(void)e;return 0;}
@@ -354,59 +879,72 @@ ehci_irq(void *argument)
 {
 	struct ehci_controller *c = argument;
 	struct ehci_request *r;
-	struct drv_usb_urb *urb;
-	uint32_t status;
-	size_t actual = 0;
-	unsigned i;
+	uint32_t acknowledge, status;
 	unsigned long irq;
-	enum drv_usb_urb_status result = DRV_USB_URB_COMPLETE;
+	int failed = 0, report_controller = 0, wake_worker = 0;
 
-	status = rd32(c->operational, EHCI_USBSTS);
-	if ((status & EHCI_STS_ALL) == 0)
-		return 0;
-	wr32(c->operational, EHCI_USBSTS, status);
 	irq = spin_lock_irqsave(&c->active_lock);
+	status = rd32(c->operational, EHCI_USBSTS);
+	hal_io_mb();
 	r = c->active;
-	if (r == NULL) {
+	if (status == UINT32_MAX) {
+		report_controller = !c->quarantined;
+		c->quiescing = 1;
+		c->quarantined = 1;
+		if (r != NULL && r->state != EHCI_REQUEST_FAILED) {
+			ehci_retirement_fail_locked(c, r, EIO, "IRQ status read");
+			failed = 1;
+		}
 		spin_unlock_irqrestore(&c->active_lock, irq);
+		if (failed)
+			ehci_retirement_report(c);
+		else if (report_controller)
+			hal_printf(
+			    "ehci: invalid IRQ status; controller quarantined\n");
 		return 1;
 	}
-	for (i = 0; i < r->qtd_count; i++) {
-		if ((r->qtds[i].token & EHCI_QTD_ACTIVE) != 0) {
-			spin_unlock_irqrestore(&c->active_lock, irq);
-			return 1;
+	acknowledge = status & EHCI_STS_ALL;
+	if (acknowledge == 0) {
+		spin_unlock_irqrestore(&c->active_lock, irq);
+		return 0;
+	}
+	/* The retirement worker owns the matching IAA acknowledgement.  Other
+	 * status sources remain ordinary W1C events and a stale/duplicate IAA is
+	 * harmless when no handshake is outstanding. */
+	if (r != NULL && ehci_request_waiting_iaa(r) &&
+	    (status & EHCI_STS_HSE) == 0)
+		acknowledge &= ~EHCI_STS_IAA;
+	if (acknowledge != 0)
+		wr32(c->operational, EHCI_USBSTS, acknowledge);
+	if ((status & EHCI_STS_HSE) != 0) {
+		report_controller = !c->quarantined;
+		c->quiescing = 1;
+		c->quarantined = 1;
+		if (r != NULL && r->state != EHCI_REQUEST_FAILED) {
+			ehci_retirement_fail_locked(c, r, EIO,
+			    "host-system error");
+			failed = 1;
 		}
+	} else if (r != NULL && r->state == EHCI_REQUEST_ACTIVE &&
+	    (status & (EHCI_STS_USBINT | EHCI_STS_USBERRINT)) != 0) {
+		/* USBINT also denotes a short packet, while an error may leave later
+		 * qTDs active.  In both cases this request is the terminal owner; stop
+		 * every remaining token before the worker unlinks it. */
+		r->state = EHCI_REQUEST_DEACTIVATING_COMPLETE;
+		r->retirement_started = sched_ticks();
+		ehci_request_deactivate_locked(r);
+		wake_worker = 1;
 	}
-	for (i = 0; i < r->qtd_count; i++) {
-		if ((r->qtds[i].token & EHCI_QTD_ERRORS) != 0) {
-			result = (r->qtds[i].token & EHCI_QTD_HALTED) != 0 ?
-			    DRV_USB_URB_STALL : DRV_USB_URB_IO_ERROR;
-			break;
-		}
-	}
-	for (i = 0; i < r->data_count; i++) {
-		uint32_t remaining =
-		    (r->qtds[r->data_first + i].token >> 16) & 0x7fffU;
-
-		actual += r->requested[r->data_first + i] - remaining;
-	}
-	if (result == DRV_USB_URB_COMPLETE && !r->control)
-		(void)drv_usb_endpoint_set_hcd_data(
-		    drv_usb_urb_endpoint(r->urb), 0, (r->qh->token >> 31) & 1U);
-	if (r->input && actual != 0)
-		memcpy(drv_usb_urb_buffer(r->urb),
-		    (uint8_t *)r->bounce.address + 8U, actual);
-	c->async_head->horizontal =
-	    (uint32_t)c->async_head_memory.device_address | EHCI_LINK_QH;
-	hal_io_wmb();
-	urb = r->urb;
-	if (drv_usb_urb_hcd_data(urb) != r)
-		__builtin_trap();
-	c->active = NULL;
-	drv_usb_urb_set_hcd_data(urb, NULL);
+	if (r != NULL && ehci_request_waiting_iaa(r) &&
+	    (status & EHCI_STS_IAA) != 0)
+		wake_worker = 1;
 	spin_unlock_irqrestore(&c->active_lock, irq);
-	request_free(c, r);
-	drv_usb_hcd_complete(&c->hcd, urb, result, actual);
+	if (failed)
+		ehci_retirement_report(c);
+	else if (report_controller)
+		hal_printf("ehci: host-system error; controller quarantined\n");
+	if (wake_worker)
+		ehci_retirement_worker_wakeup(c);
 	return 1;
 }
 static const struct drv_usb_hcd_ops ehci_ops={.start=ehci_start,.quiesce=ehci_quiesce,.stop=ehci_stop,.urb_enqueue=ehci_urb_enqueue,.urb_dequeue=ehci_urb_dequeue,.endpoint_enable=ehci_endpoint_enable,.endpoint_disable=ehci_endpoint_disable,.frame_number=ehci_frame_number,.root_hub_status=ehci_root_status,.root_hub_control=ehci_root_control};
@@ -556,6 +1094,10 @@ ehci_attach(struct drv_pci_device *d, const struct drv_pci_id *id)
 	stage = "IRQ establishment";
 	error = drv_pci_device_establish_irq(d, &c->irq, ehci_irq, c,
 	    "ehci", &c->irq_cookie);
+	if (error != 0)
+		goto fail;
+	stage = "retirement worker";
+	error = ehci_retirement_worker_start(c);
 	if (error != 0)
 		goto fail;
 	wr32(c->operational, EHCI_USBINTR, 0x37U);

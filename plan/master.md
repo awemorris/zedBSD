@@ -50,8 +50,8 @@ production qemu-pc98 cursor now moves by the exact injected delta through
 evdev without monitor-side PIC repair. The archived [q040](queue-q040.md)
 records the uncleared printed-label-only Archer identity checkpoint and the
 completed independent AF_UNIX/network authorization foundation.  The current
-[Queue Book](queue.md) records active `q041`: checked UHCI/EHCI retirement,
-the independent Wi-Fi credential store, and the latest pinned host Noct
+[Queue Book](queue.md) records active `q041`: checked UHCI/EHCI retirement is
+complete, followed by the independent Wi-Fi credential store and latest pinned host Noct
 toolchain in standing priority order. The
 archived [q038](queue-q038.md) replaced the
 stale or intermediate image used for the first Intel Mac observation with one
@@ -308,7 +308,7 @@ actually warranted.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q039 p023 confirms the signature and passes every automatic entry-localization gate but remains external-checkpoint uncleared; p018 Latitude overlay-NVMe install/boot dependency-gated | p020/p021 physical CF-SV7 path passes; p022/p023 qemu-pc98 login passes; one p023 V13 audio observation and p018/p019 remain | Record one boot of the exact p023 diagnostic artifact, then return to dependency-ready p018 work | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Audited active; q040 p026 completed every automatic/read-only intake step and is uncleared only for the purchased unit's printed model/region/revision. q041 selects p016 checked legacy-HCD retirement. `q030` NVMe software and the physical USB-Ethernet path are complete | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Execute q041 p016; obtain one serial-redacted Archer label observation when convenient without blocking independent work | [WS004](ws004-hardware/ws.md) |
+| `ws004` | Hardware expansion | Audited active; q041 p016 completed checked UHCI/EHCI request retirement with configured and QEMU lifecycle evidence. q040 p026 completed every automatic/read-only intake step and is uncleared only for the purchased unit's printed model/region/revision. `q030` NVMe software and the physical USB-Ethernet path are complete | `ws004-p010`--`p016`, `p018`, p020, and p022--p024 complete | Proceed through q041; obtain one serial-redacted Archer label observation when convenient without blocking independent work | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q029 p001 and q040 p003 complete; q041 selects p005 after the higher-priority WS004 item | Physical USB Ethernet plus immutable AF_UNIX peer identity, `root:network 0660` publication, non-root SHOW-only authorization, direct ioctl privilege enforcement, and native runtime gates pass | Execute q041 p005 local root/per-user credential store; p004 remains hardware-core dependency-gated | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Audited active; not complete. p005 is only the PC/AT capability milestone | `ws006-p005` complete | Execute p006--p008 for producer truthfulness and USB HID when selected; run p009 consumer/legacy-console removal only after the accepted WS008 userland tree is available | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 mouse repair complete | `ws007-p001` and `p003` complete; amd64 `p002` carried | Select GFX-02 integration regression work when prioritized; retain the separate amd64 p002 report honestly | [WS007](ws007-graphics/ws.md) |

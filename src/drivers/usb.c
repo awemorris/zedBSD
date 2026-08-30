@@ -1442,12 +1442,19 @@ static int enumerate_port(struct drv_usb_bus *bus,unsigned port,uint32_t status)
 	if (bus->hcd->ops->device_set_address != NULL)
 		error = bus->hcd->ops->device_set_address(bus->hcd, device,
 		    (unsigned)address);
-	else
+	else {
+		/* A wire SET_ADDRESS request is addressed to endpoint zero at the
+		 * default address.  Keep the allocated value in the device for failure
+		 * cleanup, but expose address zero while the synchronous request is built
+		 * and completed.  Controller-command HCDs use the callback above. */
+		device->address = 0;
 		error = drv_usb_control(device,
 		    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
 			DRV_USB_RECIP_DEVICE,
 		    USB_REQ_SET_ADDRESS, (uint16_t)address, 0, NULL, 0,
 		    USB_CONTROL_TIMEOUT_MS, &actual);
+		device->address = (unsigned)address;
+	}
 	if (error != 0)
 		goto fail;
 	device->state = DRV_USB_STATE_ADDRESS;
