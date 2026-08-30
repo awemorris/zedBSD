@@ -145,15 +145,6 @@ func header(data, at, current, backup, entriesLba, firstUsable, lastUsable) {
     }
     return zbU32LE(data, at + 88);
 }
-func declaredSectors(text) {
-    if (text == "") { return 0; }
-    var gib = zbParseNumber(text);
-    if (gib != 2 && gib != 4 && gib != 8 && gib != 16 && gib != 32 &&
-        gib != 64 && gib != 128 && gib != 256) {
-        zbFail("unsupported declared image capacity");
-    }
-    return gib * 2097152;
-}
 func requireZero(data, first, last, what) {
     if (first < 0 || last < first || last > Packed.size(data)) {
         zbFail("invalid zero-range while checking " + what);
@@ -300,20 +291,18 @@ func checkBios(image, raw, stage1Input, stage2Input, kernel, bootzbsd, pbr,
         "::/DATA.IMG\n::/SWAPFILE\n");
     print("amd64 BIOS-only image check: PASS");
 }
-func checkUefi(image, raw, declared, kernel, bootzbsd, pbr, bootx64,
+func checkUefi(image, raw, kernel, bootzbsd, pbr, bootx64,
                zedbsdConfig, arch, dataImage, swap) {
     var espStart = 2048;
     var espBlocks = 131072;
     var payloadStart = espStart + espBlocks;
     var payloadBlocks = 262144;
-    var compactSectors = payloadStart + payloadBlocks;
-    if (declared == 0) { zbFail("UEFI-only checker requires declared capacity"); }
-    if (Packed.size(raw) != compactSectors * 512) {
-        zbFail("UEFI-only artifact is not the exact compact extent");
+    var total = payloadStart + payloadBlocks + 33;
+    if (Packed.size(raw) != total * 512) {
+        zbFail("UEFI-only artifact is not the exact fixed extent");
     }
     requireZero(raw, 0, 446, "UEFI-only protective-MBR bootstrap area");
-    var protectiveBlocks = declared - 1;
-    if (protectiveBlocks > 4294967295) { protectiveBlocks = 4294967295; }
+    var protectiveBlocks = total - 1;
     if (raw[446] != 0 || raw[447] != 0 || raw[448] != 2 || raw[449] != 0 ||
         raw[450] != 238 || raw[451] != 255 || raw[452] != 255 ||
         raw[453] != 255 || zbU32LE(raw, 454) != 1 ||
@@ -322,7 +311,7 @@ func checkUefi(image, raw, declared, kernel, bootzbsd, pbr, bootx64,
         zbFail("invalid UEFI-only protective MBR");
     }
     requireZero(raw, 462, 510, "unused UEFI-only MBR entries");
-    var tableCrc = header(raw, 512, 1, declared - 1, 2, 34, declared - 34);
+    var tableCrc = header(raw, 512, 1, total - 1, 2, 34, total - 34);
     if (crc32Range(raw, 1024, 16384) != tableCrc) {
         zbFail("UEFI-only primary GPT entry CRC mismatch");
     }
@@ -339,10 +328,12 @@ func checkUefi(image, raw, declared, kernel, bootzbsd, pbr, bootx64,
         zbU64SmallLE(raw, 1064) + 1 != espStart + espBlocks ||
         zbU64SmallLE(raw, 1184) != payloadStart ||
         zbU64SmallLE(raw, 1192) + 1 != payloadStart + payloadBlocks ||
-        zbU64SmallLE(raw, 1192) > declared - 34) {
+        zbU64SmallLE(raw, 1192) > total - 34) {
         zbFail("UEFI-only partition extents differ");
     }
     requireZero(raw, 17408, espStart * 512, "UEFI-only pre-ESP gap");
+    requireZero(raw, (total - 33) * 512, total * 512,
+                "UEFI-only absent backup GPT reservation");
     var espOffset = espStart * 512;
     var payloadOffset = payloadStart * 512;
     if (zbU16LE(raw, espOffset + 22) != 0 ||
@@ -375,10 +366,10 @@ func checkUefi(image, raw, declared, kernel, bootzbsd, pbr, bootx64,
         "::/EFI/\n::/EFI/BOOT/\n::/EFI/BOOT/BOOTX64.EFI\n");
     requireFatListing(image, "uefi-payload", payloadVolume,
         "::/vmunix\n::/zedbsd.cfg\n::/rootfs.img\n::/data.img\n::/swapfile\n");
-    print("amd64 UEFI-only compact image check: PASS");
+    print("amd64 UEFI-only primary-only image check: PASS");
 }
 func main(args) {
-    var image="";var stage1Input="";var stage2Input="";var kernel="";var bootzbsd="";var pbr="";var bootx64="";var zedbsdConfig="";var arch="";var dataImage="";var swap="";var machine="";var layout="hybrid";var layoutSpecified=false;var declaredText="";var i=0;
+    var image="";var stage1Input="";var stage2Input="";var kernel="";var bootzbsd="";var pbr="";var bootx64="";var zedbsdConfig="";var arch="";var dataImage="";var swap="";var machine="";var layout="hybrid";var layoutSpecified=false;var i=0;
     while(i<Array.size(args)){
         var a=args[i];
         if(a=="--kernel"&&i+1<Array.size(args)){kernel=args[i+1];i=i+2;}
@@ -392,19 +383,14 @@ func main(args) {
         else if(a=="--data-image"&&i+1<Array.size(args)){dataImage=args[i+1];i=i+2;}
         else if(a=="--swapfile"&&i+1<Array.size(args)){swap=args[i+1];i=i+2;}
         else if(a=="--layout"&&i+1<Array.size(args)){layout=args[i+1];layoutSpecified=true;i=i+2;}
-        else if(a=="--declared-size-gib"&&i+1<Array.size(args)){declaredText=args[i+1];i=i+2;}
         else if(a=="--machine"&&i+1<Array.size(args)){machine=args[i+1];i=i+2;}
         else if((a=="--arch-profile"||a=="--arch-format"||a=="--noct"||a=="--holoris"||a=="--bin-file"||a=="--ufs-root")&&i+1<Array.size(args)){i=i+2;}
         else if(String.indexOf(a,"--")==0){zbFail("unsupported GPT checker option: "+a);}
         else {image=a;i=i+1;}
     }
     if(image==""){zbFail("GPT image path is required");}
-    var declared = declaredSectors(declaredText);
     if (layout != "hybrid" && layout != "bios" && layout != "uefi") {
         zbFail("unsupported amd64 image layout");
-    }
-    if (layoutSpecified && declared == 0) {
-        zbFail("selected image layout requires declared capacity");
     }
     if (layoutSpecified && machine != "pcat") {
         zbFail("selected amd64 image layout requires machine pcat");
@@ -416,27 +402,22 @@ func main(args) {
     }
     var fileSize = FileUtil.getFileSize(image);
     if (fileSize < 0) { zbFail("cannot stat image"); }
-    // Enforce every public artifact extent before reading it into memory.  In
-    // particular, this rejects materialized 2--256-GiB sparse media without a
-    // whole-file read; the bounded kernel fixture and p003 own their tails.
+    // Enforce every public artifact extent before reading it into memory.
     var expectedFileSize = 203423744;
     if (layout == "bios") { expectedFileSize = 135266304; }
-    else if (layout == "uefi") { expectedFileSize = 202375168; }
+    else if (layout == "uefi") { expectedFileSize = 202392064; }
     if (fileSize != expectedFileSize) {
         zbFail(layout + " artifact has the wrong exact extent");
     }
     var raw=zbReadFile(image);var total=Packed.size(raw)/512;
     if(Packed.size(raw)==0||Packed.size(raw)%512!=0||raw[510]!=85||raw[511]!=170){zbFail("invalid disk size or MBR");}
-    if (declared != 0 && declared < total) {
-        zbFail("selected deployment capacity is smaller than the artifact");
-    }
     if (layout == "bios") {
         checkBios(image, raw, stage1Input, stage2Input, kernel, bootzbsd, pbr,
                   bootx64, zedbsdConfig, arch, dataImage, swap);
         return;
     }
     if (layout == "uefi") {
-        checkUefi(image, raw, declared, kernel, bootzbsd, pbr, bootx64,
+        checkUefi(image, raw, kernel, bootzbsd, pbr, bootx64,
                   zedbsdConfig, arch, dataImage, swap);
         return;
     }

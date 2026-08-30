@@ -26,8 +26,8 @@ $(AMD64_UEFI_CONFIGURED_IMAGES): $(AMD64_ZEDBSD_CONFIG) \
 .DELETE_ON_ERROR: $(BUILD)/ufs-root-hdd-image.img \
 	$(BUILD)/hdd-image.img
 
-# Variant and capacity are image-composition inputs only.  This content-stable
-# stamp invalidates a previously published hdd-image.img without leaking either
+# Variant is an image-composition input only.  This content-stable stamp
+# invalidates a previously published hdd-image.img without leaking the
 # selection into kernel, userland, or loader compilation.
 AMD64_IMAGE_CONTRACT_STAMP := $(BUILD)/.disk-image-contract
 AMD64_IMAGE_STAGE1 := $(if $(filter bios,$(ZEDBSD_VARIANT)),\
@@ -37,7 +37,7 @@ FORCE_AMD64_IMAGE_CONTRACT:
 
 $(AMD64_IMAGE_CONTRACT_STAMP): FORCE_AMD64_IMAGE_CONTRACT
 	@mkdir -p $(dir $@)
-	@value='layout=$(ZEDBSD_VARIANT) capacity-gib=$(ZEDBSD_IMAGE_SIZE_GIB)'; \
+	@value='layout=$(ZEDBSD_VARIANT)'; \
 		if ! test -f $@ || ! grep -Fqx "$$value" $@; then \
 			printf '%s\n' "$$value" > $@.tmp; \
 			mv $@.tmp $@; \
@@ -46,7 +46,6 @@ $(AMD64_IMAGE_CONTRACT_STAMP): FORCE_AMD64_IMAGE_CONTRACT
 define AMD64_VALIDATE_GPT_IMAGE
 	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-gpt-image.noct \
 		--layout $(ZEDBSD_VARIANT) \
-		--declared-size-gib $(ZEDBSD_IMAGE_SIZE_GIB) \
 		--machine pcat --stage1 $(AMD64_IMAGE_STAGE1) \
 		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -853,7 +852,6 @@ $(BUILD)/hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct \
 		--backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat \
 		--layout $(ZEDBSD_VARIANT) \
-		--declared-size-gib $(ZEDBSD_IMAGE_SIZE_GIB) \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
 		--checker-runner $(NOCT) \
 		--stage1 $(AMD64_IMAGE_STAGE1) \

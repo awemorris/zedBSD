@@ -42,9 +42,9 @@ func updatePrimaryHeaderCrc(data) {
 func writeSemanticMutation(source, destination, kind) {
     var data = zbReadFile(source);
     if (kind == "alternate") {
-        // Keep the primary header internally valid while making its declared
-        // alternate LBA disagree with the selected 256-GiB capacity.
-        zbPut64LE(data, 512 + 32, 536870910);
+        // Keep the primary header internally valid while moving its declared
+        // alternate LBA away from the fixed logical last block.
+        zbPut64LE(data, 512 + 32, 395295);
         updatePrimaryHeaderCrc(data);
     } else if (kind == "overlap") {
         // Move payload first-LBA into the ESP and update both CRCs so the
@@ -75,6 +75,21 @@ func writeFat32BackupMutation(source, destination, volumeOffset) {
     zbWriteFile(destination, data);
 }
 
+func writeValidBackupGptMutation(source, destination) {
+    var data = zbReadFile(source);
+    var total = 395297;
+    var tableAt = (total - 33) * 512;
+    var headerAt = (total - 1) * 512;
+    zbCopy(data, tableAt, data, 1024, 16384);
+    zbCopy(data, headerAt, data, 512, 512);
+    zbPut64LE(data, headerAt + 24, total - 1);
+    zbPut64LE(data, headerAt + 32, 1);
+    zbPut64LE(data, headerAt + 72, total - 33);
+    zbPut32LE(data, headerAt + 16, 0);
+    zbPut32LE(data, headerAt + 16, crc32Range(data, headerAt, 92));
+    zbWriteFile(destination, data);
+}
+
 func makeVariables(config, build, evidence) {
     return " ZEDBSD_CONFIG=" + zbShellQuote(config) +
         " BUILD=" + zbShellQuote(build) +
@@ -84,32 +99,31 @@ func makeVariables(config, build, evidence) {
         " ZEDBSD_IMAGE_HOST=" + zbShellQuote(evidence + "/zedimage-host");
 }
 
-func makeImage(repo, evidence, config, build, layout, capacity) {
-    var name = layout + "-" + capacity;
+func makeImage(repo, evidence, config, build, layout) {
+    var name = layout;
     var command = "make --no-print-directory -j16 " +
         "ZEDBSD_PLATFORM=amd64 ZEDBSD_ARCHITECTURE=amd64 " +
         "ZEDBSD_BOARD=pcat ZEDBSD_VARIANT=" + layout +
-        " ZEDBSD_IMAGE_SIZE_GIB=" + capacity +
         makeVariables(config, build, evidence) + " disk-image";
     runLogged(repo, evidence + "/build-" + name + ".log", command,
               name + " production image");
     var expected = "";
     if (layout == "hybrid") { expected = "203423744"; }
     else if (layout == "bios") { expected = "135266304"; }
-    else { expected = "202375168"; }
+    else { expected = "202392064"; }
     var image = build + "/hdd-image.img";
     run(repo, "test \"$(stat -c%s " + zbShellQuote(image) + ")\" = " + expected,
         name + " exact artifact extent");
     var checker = "build/NoctLang/build-static/noct --path=tools/build " +
         "platform/amd64/tools/check-amd64-gpt-image.noct ";
     runLogged(repo, evidence + "/check-" + name + ".log",
-        checker + checkerArgs(build, evidence, layout, capacity, image),
+        checker + checkerArgs(build, evidence, layout, image),
         name + " independent production check");
 }
 
-func checkerArgsForMachineStage1(build, evidence, layout, capacity, image,
+func checkerArgsForMachineStage1(build, evidence, layout, image,
                                  machine, stage1) {
-    return "--layout " + layout + " --declared-size-gib " + capacity +
+    return "--layout " + layout +
         " --machine " + machine + " --stage1 " + zbShellQuote(stage1) +
         " --stage2 " + zbShellQuote(build + "/bootloader/stage2-chain.bin") +
         " --partition-pbr " +
@@ -126,24 +140,24 @@ func checkerArgsForMachineStage1(build, evidence, layout, capacity, image,
         zbShellQuote(image);
 }
 
-func checkerArgsForStage1(build, evidence, layout, capacity, image, stage1) {
-    return checkerArgsForMachineStage1(build, evidence, layout, capacity,
+func checkerArgsForStage1(build, evidence, layout, image, stage1) {
+    return checkerArgsForMachineStage1(build, evidence, layout,
                                        image, "pcat", stage1);
 }
 
-func checkerArgs(build, evidence, layout, capacity, image) {
+func checkerArgs(build, evidence, layout, image) {
     var stage1 = build + "/bootloader/stage1.bin";
     if (layout == "bios") {
         stage1 = build + "/bootloader/stage1-native.bin";
     }
-    return checkerArgsForStage1(build, evidence, layout, capacity, image,
+    return checkerArgsForStage1(build, evidence, layout, image,
                                 stage1);
 }
 
 func backendArgsOmitting(build, evidence, layout, image, omitted) {
     var stage1 = build + "/bootloader/stage1.bin";
     if (layout == "bios") { stage1 = build + "/bootloader/stage1-native.bin"; }
-    var result = "--layout " + layout + " --declared-size-gib 2" +
+    var result = "--layout " + layout +
         " --machine pcat --stage1 " + zbShellQuote(stage1) +
         " --stage2 " + zbShellQuote(build + "/bootloader/stage2-chain.bin") +
         " --partition-pbr " +
@@ -180,37 +194,41 @@ func main(args) {
         "clean fixture-private BUILD");
 
     // Hybrid remains the accepted self-contained GPT and BIOS remains the
-    // legacy MBR artifact; capacity is a deployment constraint for both.
-    makeImage(repo, evidence, config, build, "hybrid", "2");
+    // legacy MBR artifact.  UEFI-only has one fixed primary-only GPT extent.
+    makeImage(repo, evidence, config, build, "hybrid");
+    var hybrid = evidence + "/hybrid.img";
+    run(repo, "cp --reflink=auto --sparse=always " +
+        zbShellQuote(build + "/hdd-image.img") + " " +
+        zbShellQuote(hybrid), "save Hybrid fixture");
 
     // The explicit layout interface owns its fixed partition geometry.  Old
     // geometry and native/fragmentation switches remain available only to
     // legacy builder calls without --layout.
     expectFailure(repo, evidence + "/reject-layout-size-override.log",
         zbShellQuote(evidence + "/zedimage-host") + " disk " +
-        checkerArgs(build, evidence, "hybrid", "2",
+        checkerArgs(build, evidence, "hybrid",
                     evidence + "/override.img") + " --size-mib 130",
         "explicit layout size override");
     expectFailure(repo, evidence + "/reject-layout-native-override.log",
         zbShellQuote(evidence + "/zedimage-host") + " disk " +
-        checkerArgs(build, evidence, "bios", "2",
+        checkerArgs(build, evidence, "bios",
                     evidence + "/override.img") +
         " --ufs-root " + zbShellQuote(evidence + "/arch-images/amd64.ufs"),
         "explicit layout native-root override");
     expectFailure(repo, evidence + "/reject-hybrid-native-stage1-backend.log",
         zbShellQuote(evidence + "/zedimage-host") + " disk " +
-        checkerArgsForStage1(build, evidence, "hybrid", "2",
+        checkerArgsForStage1(build, evidence, "hybrid",
             evidence + "/override.img",
             build + "/bootloader/stage1-native.bin"),
         "Hybrid backend with native-LBA Stage 1");
     expectFailure(repo, evidence + "/reject-bios-gpt-stage1-backend.log",
         zbShellQuote(evidence + "/zedimage-host") + " disk " +
-        checkerArgsForStage1(build, evidence, "bios", "2",
+        checkerArgsForStage1(build, evidence, "bios",
             evidence + "/override.img", build + "/bootloader/stage1.bin"),
         "BIOS backend with GPT-LBA Stage 1");
     expectFailure(repo, evidence + "/reject-layout-machine.log",
         zbShellQuote(evidence + "/zedimage-host") + " disk " +
-        checkerArgsForMachineStage1(build, evidence, "hybrid", "2",
+        checkerArgsForMachineStage1(build, evidence, "hybrid",
             evidence + "/override.img", "banana",
             build + "/bootloader/stage1.bin"),
         "explicit layout non-PCAT machine");
@@ -222,7 +240,7 @@ func main(args) {
         "corrupt Stage 1 metadata magic");
     expectFailure(repo, evidence + "/reject-stage1-metadata-backend.log",
         zbShellQuote(evidence + "/zedimage-host") + " disk " +
-        checkerArgsForStage1(build, evidence, "hybrid", "2",
+        checkerArgsForStage1(build, evidence, "hybrid",
             evidence + "/override.img", corruptStage1),
         "backend corrupted Stage 1 metadata");
     expectFailure(repo, evidence + "/reject-bios-missing-data.log",
@@ -236,26 +254,17 @@ func main(args) {
                             evidence + "/override.img", "bootx64"),
         "Hybrid backend missing required BOOTX64.EFI");
 
-    makeImage(repo, evidence, config, build, "hybrid", "256");
-    var hybrid = evidence + "/hybrid-256.img";
-    run(repo, "cp --reflink=auto --sparse=always " +
-        zbShellQuote(build + "/hdd-image.img") + " " +
-        zbShellQuote(hybrid), "save Hybrid fixture");
-    makeImage(repo, evidence, config, build, "bios", "2");
-    makeImage(repo, evidence, config, build, "bios", "256");
-    var bios = evidence + "/bios-256.img";
+    makeImage(repo, evidence, config, build, "bios");
+    var bios = evidence + "/bios.img";
     run(repo, "cp --reflink=auto --sparse=always " +
         zbShellQuote(build + "/hdd-image.img") + " " +
         zbShellQuote(bios), "save BIOS fixture");
 
-    // Every public capacity must be encoded exactly by compact UEFI-only.
-    for (capacity in ["2", "4", "8", "16", "32", "64", "128", "256"]) {
-        makeImage(repo, evidence, config, build, "uefi", capacity);
-    }
-    var valid = evidence + "/uefi-256.img";
+    makeImage(repo, evidence, config, build, "uefi");
+    var valid = evidence + "/uefi.img";
     run(repo, "cp --reflink=auto --sparse=always " +
         zbShellQuote(build + "/hdd-image.img") + " " +
-        zbShellQuote(valid), "save compact UEFI fixture");
+        zbShellQuote(valid), "save fixed UEFI fixture");
 
     var checker = "build/NoctLang/build-static/noct --path=tools/build " +
         "platform/amd64/tools/check-amd64-gpt-image.noct ";
@@ -269,14 +278,14 @@ func main(args) {
             " bs=1 seek=" + offset + " count=1 conv=notrunc status=none",
             "write " + mutation + " mutation");
         expectFailure(repo, evidence + "/reject-" + mutation + ".log",
-            checker + checkerArgs(build, evidence, "uefi", "256", broken),
+            checker + checkerArgs(build, evidence, "uefi", broken),
             mutation + " corruption rejection");
     }
     for (mutation in ["alternate", "overlap", "outside"]) {
         var broken = evidence + "/broken-" + mutation + ".img";
         writeSemanticMutation(valid, broken, mutation);
         expectFailure(repo, evidence + "/reject-" + mutation + ".log",
-            checker + checkerArgs(build, evidence, "uefi", "256", broken),
+            checker + checkerArgs(build, evidence, "uefi", broken),
             mutation + " semantic rejection");
     }
 
@@ -290,16 +299,16 @@ func main(args) {
         " ::/BOOTZBSD.EXE",
         "insert forbidden BIOS loader into UEFI payload");
     expectFailure(repo, evidence + "/reject-cross-loader.log",
-        checker + checkerArgs(build, evidence, "uefi", "256", crossLoader),
+        checker + checkerArgs(build, evidence, "uefi", crossLoader),
         "cross-layout loader rejection");
     expectFailure(repo, evidence + "/reject-uefi-as-hybrid.log",
-        checker + checkerArgs(build, evidence, "hybrid", "256", valid),
+        checker + checkerArgs(build, evidence, "hybrid", valid),
         "UEFI artifact as Hybrid rejection");
     expectFailure(repo, evidence + "/reject-hybrid-as-uefi.log",
-        checker + checkerArgs(build, evidence, "uefi", "256", hybrid),
+        checker + checkerArgs(build, evidence, "uefi", hybrid),
         "Hybrid artifact as UEFI rejection");
     expectFailure(repo, evidence + "/reject-bios-as-uefi.log",
-        checker + checkerArgs(build, evidence, "uefi", "256", bios),
+        checker + checkerArgs(build, evidence, "uefi", bios),
         "BIOS artifact as UEFI rejection");
 
     // Byte comparison alone must not let a caller redefine a layout's Stage
@@ -315,7 +324,7 @@ func main(args) {
         " bs=1 count=440 conv=notrunc status=none",
         "substitute native Stage 1 into Hybrid");
     expectFailure(repo, evidence + "/reject-hybrid-native-stage1-check.log",
-        checker + checkerArgsForStage1(build, evidence, "hybrid", "256",
+        checker + checkerArgsForStage1(build, evidence, "hybrid",
             wrongHybridStage1, build + "/bootloader/stage1-native.bin"),
         "Hybrid checker native-LBA Stage 1");
     var wrongBiosStage1 = evidence + "/broken-bios-gpt-stage1.img";
@@ -328,7 +337,7 @@ func main(args) {
         " bs=1 count=440 conv=notrunc status=none",
         "substitute GPT Stage 1 into BIOS");
     expectFailure(repo, evidence + "/reject-bios-gpt-stage1-check.log",
-        checker + checkerArgsForStage1(build, evidence, "bios", "256",
+        checker + checkerArgsForStage1(build, evidence, "bios",
             wrongBiosStage1, build + "/bootloader/stage1.bin"),
         "BIOS checker GPT-LBA Stage 1");
     var corruptStage1Image = evidence + "/broken-hybrid-stage1-metadata.img";
@@ -340,41 +349,63 @@ func main(args) {
         " bs=1 count=440 conv=notrunc status=none",
         "substitute corrupted Stage 1 metadata");
     expectFailure(repo, evidence + "/reject-stage1-metadata-check.log",
-        checker + checkerArgsForStage1(build, evidence, "hybrid", "256",
+        checker + checkerArgsForStage1(build, evidence, "hybrid",
             corruptStage1Image, corruptStage1),
         "checker corrupted Stage 1 metadata");
 
     var hybridEspBackup = evidence + "/broken-hybrid-esp-backup.img";
     writeFat32BackupMutation(hybrid, hybridEspBackup, 1048576);
     expectFailure(repo, evidence + "/reject-hybrid-esp-backup.log",
-        checker + checkerArgs(build, evidence, "hybrid", "256",
+        checker + checkerArgs(build, evidence, "hybrid",
                               hybridEspBackup),
         "Hybrid ESP backup-VBR corruption rejection");
+    var hybridPayloadBackup = evidence + "/broken-hybrid-payload-backup.img";
+    writeFat32BackupMutation(hybrid, hybridPayloadBackup, 68157440);
+    expectFailure(repo, evidence + "/reject-hybrid-payload-backup.log",
+        checker + checkerArgs(build, evidence, "hybrid",
+                              hybridPayloadBackup),
+        "Hybrid payload backup-VBR corruption rejection");
+    var uefiEspBackup = evidence + "/broken-uefi-esp-backup.img";
+    writeFat32BackupMutation(valid, uefiEspBackup, 1048576);
+    expectFailure(repo, evidence + "/reject-uefi-esp-backup.log",
+        checker + checkerArgs(build, evidence, "uefi", uefiEspBackup),
+        "UEFI ESP backup-VBR corruption rejection");
+    var uefiPayloadBackup = evidence + "/broken-uefi-payload-backup.img";
+    writeFat32BackupMutation(valid, uefiPayloadBackup, 68157440);
+    expectFailure(repo, evidence + "/reject-uefi-payload-backup.log",
+        checker + checkerArgs(build, evidence, "uefi", uefiPayloadBackup),
+        "UEFI payload backup-VBR corruption rejection");
 
-    // Materialization stays sparse and the checker rejects it before any
-    // whole-file read.  The exact final 33 sectors are initially zero.
-    var materialized = evidence + "/uefi-256-materialized.img";
+    // The public UEFI artifact includes its zero final-33-sector reservation;
+    // no target-capacity materialization step exists.
+    var shortImage = evidence + "/broken-uefi-short.img";
     run(repo, "cp --reflink=auto --sparse=always " + zbShellQuote(valid) +
-        " " + zbShellQuote(materialized), "copy materialized fixture");
-    run(repo, "truncate -s 274877906944 " + zbShellQuote(materialized),
-        "materialize selected capacity");
-    run(repo, "dd if=" + zbShellQuote(materialized) +
-        " bs=512 skip=536870879 count=33 status=none | " +
-        "cmp -n 16896 - /dev/zero", "zero absent-backup extent");
-    expectFailure(repo, evidence + "/reject-materialized.log",
-        checker + checkerArgs(build, evidence, "uefi", "256", materialized),
-        "bounded materialized checker rejection");
-    run(repo, "printf X | dd of=" + zbShellQuote(materialized) +
-        " bs=1 seek=274877906432 count=1 conv=notrunc status=none",
-        "materialize nonzero malformed backup extent");
-    expectFailure(repo, evidence + "/reject-nonzero-backup-region.log",
-        "dd if=" + zbShellQuote(materialized) +
-        " bs=512 skip=536870879 count=33 status=none | " +
-        "cmp -n 16896 - /dev/zero",
-        "nonzero final backup-region classification");
-    expectFailure(repo, evidence + "/reject-materialized-nonzero.log",
-        checker + checkerArgs(build, evidence, "uefi", "256", materialized),
-        "nonzero materialized checker rejection");
+        " " + zbShellQuote(shortImage) + " && truncate -s 202391552 " +
+        zbShellQuote(shortImage), "create short UEFI fixture");
+    expectFailure(repo, evidence + "/reject-uefi-short.log",
+        checker + checkerArgs(build, evidence, "uefi", shortImage),
+        "short UEFI extent rejection");
+    var longImage = evidence + "/broken-uefi-long.img";
+    run(repo, "cp --reflink=auto --sparse=always " + zbShellQuote(valid) +
+        " " + zbShellQuote(longImage) + " && truncate -s 202392576 " +
+        zbShellQuote(longImage), "create long UEFI fixture");
+    expectFailure(repo, evidence + "/reject-uefi-long.log",
+        checker + checkerArgs(build, evidence, "uefi", longImage),
+        "long UEFI extent rejection");
+    var nonzeroTail = evidence + "/broken-uefi-tail.img";
+    run(repo, "cp --reflink=auto --sparse=always " + zbShellQuote(valid) +
+        " " + zbShellQuote(nonzeroTail) +
+        " && printf X | dd of=" + zbShellQuote(nonzeroTail) +
+        " bs=1 seek=202375168 count=1 conv=notrunc status=none",
+        "create nonzero absent-backup reservation");
+    expectFailure(repo, evidence + "/reject-uefi-tail.log",
+        checker + checkerArgs(build, evidence, "uefi", nonzeroTail),
+        "nonzero UEFI final reservation rejection");
+    var completeGpt = evidence + "/broken-uefi-valid-backup.img";
+    writeValidBackupGptMutation(valid, completeGpt);
+    expectFailure(repo, evidence + "/reject-uefi-valid-backup.log",
+        checker + checkerArgs(build, evidence, "uefi", completeGpt),
+        "source UEFI valid backup GPT rejection");
 
     // Feed a corrupted compact image through the real atomic wrapper using a
     // temporary backend.  A checker failure must retain the old destination.
@@ -392,7 +423,7 @@ func main(args) {
         "tools/build/make-bios-hdd-image.noct --backend " + fake +
         " --checker platform/amd64/tools/check-amd64-gpt-image.noct" +
         " --checker-runner build/NoctLang/build-static/noct " +
-        checkerArgs(build, evidence, "uefi", "256", destination);
+        checkerArgs(build, evidence, "uefi", destination);
     expectFailure(repo, evidence + "/reject-atomic.log", wrapper,
         "atomic malformed-image publication");
     run(repo, "test \"$(cat " + zbShellQuote(destination) +
@@ -400,6 +431,6 @@ func main(args) {
         " && test ! -e " + zbShellQuote(destination + ".unchecked.tmp"),
         "atomic destination retention");
 
-    print("MAC-T010/MAC-T011 image layouts: PASS (3 layouts, 8 capacities, " +
+    print("MAC-T010/MAC-T011 image layouts: PASS (3 fixed layouts, " +
           "negative and atomic gates; " + evidence + ")");
 }

@@ -4,7 +4,7 @@ Last updated: 2026-08-31
 
 WSID: `ws020`
 
-Status: in progress; revised p001 complete, p002 fixed-layout correction in progress
+Status: in progress; revised p001-p002 complete, p003 QEMU matrix in progress
 
 Parent: [master plan](../master.md)
 
@@ -78,8 +78,8 @@ PC/AT default remains the combined UEFI+BIOS profile.
 | Phase | Status | Result / resume point |
 | --- | --- | --- |
 | [`ws020-p001`](phase001-target-variant-config/phase.md) | Completed (revised 2026-08-31) | Capacity selector removed; generic Variant round-trip and three-way compiled-artifact invariance pass with the requested labels/order |
-| [`ws020-p002`](phase002-image-layouts/phase.md) | In progress | Replace capacity-dependent UEFI geometry with the fixed pure-Protective-MBR primary-only profile and retain strict layout gates |
-| [`ws020-p003`](phase003-qemu-acceptance/phase.md) | Pending revised p002 | Run the six-cell SeaBIOS/OVMF positive and negative matrix |
+| [`ws020-p002`](phase002-image-layouts/phase.md) | Completed (revised 2026-08-31) | Fixed pure-PMBR primary-only UEFI layout and larger-medium kernel handling pass strict image and GPT host gates |
+| [`ws020-p003`](phase003-qemu-acceptance/phase.md) | In progress | Run the six-cell SeaBIOS/OVMF positive and negative matrix |
 | [`ws020-p004`](phase004-physical-bringup/phase.md) | Planned after p003; physical checkpoint | One Intel Mac UEFI-only boot reaches login, then the frozen artifact passes the final five-run campaign |
 
 ## Completion conditions

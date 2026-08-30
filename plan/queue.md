@@ -35,8 +35,8 @@ bounded Intel Mac acceptance run.
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
 | 1 | `ws020-p001` | [Phase](ws020-intel-mac/phase001-target-variant-config/phase.md) | completed (revised) | Generic board-owned Variant round-trips through menuconfig/config.mk, the removed capacity field is absent, and all amd64 compiled artifacts remain identical |
-| 2 | `ws020-p002` | [Phase](ws020-intel-mac/phase002-image-layouts/phase.md) | in-progress | Combined, BIOS-only, and fixed pure-Protective-MBR UEFI-only layouts contain exactly their intended boot paths and strict GPT rules |
-| 3 | `ws020-p003` | [Phase](ws020-intel-mac/phase003-qemu-acceptance/phase.md) | pending revised p002 | Six SeaBIOS/OVMF positive and negative acceptance cells pass |
+| 2 | `ws020-p002` | [Phase](ws020-intel-mac/phase002-image-layouts/phase.md) | completed (revised) | Combined, BIOS-only, and fixed pure-Protective-MBR UEFI-only layouts contain exactly their intended boot paths and strict GPT rules |
+| 3 | `ws020-p003` | [Phase](ws020-intel-mac/phase003-qemu-acceptance/phase.md) | in-progress | Six SeaBIOS/OVMF positive and negative acceptance cells pass |
 
 ## Dependency and deferral rules
 

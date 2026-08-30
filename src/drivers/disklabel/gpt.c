@@ -541,16 +541,21 @@ out:
 	return equal;
 }
 
-/* A compact UEFI image deliberately omits the conventional backup array and
- * header.  After the image is materialized to its declared exact capacity,
- * those fixed final metadata blocks must read as zero.  Keep this probe
- * independent of attacker-controlled usable-range values: it reads at most
- * the 16-KiB entry-array reservation plus one header block. */
+/* The UEFI-only image deliberately omits the conventional backup array and
+ * header while reserving their logical final blocks as zero.  This strict
+ * shape remains self-contained when copied to a larger physical medium.
+ * Keep the probe independent of attacker-controlled usable-range values: it
+ * reads only the MBR and the 16-KiB array reservation plus one header block.
+ * A matching shape with nonzero reserved blocks is not classified as an
+ * intentional omission; exact-media degraded-copy recovery remains separate.
+ */
 static int
 intentional_primary_only(struct disk *disk, const struct gpt_copy *primary,
 	uint64_t logical_last, uint8_t *block)
 {
+	const uint8_t *entry;
 	uint64_t reserve_blocks, first, lba;
+	uint32_t advertised;
 
 	reserve_blocks = GPT_ENTRY_ARRAY_RESERVE / disk->d_block_size;
 	if (GPT_ENTRY_ARRAY_RESERVE % disk->d_block_size != 0U)
@@ -562,6 +567,20 @@ intentional_primary_only(struct disk *disk, const struct gpt_copy *primary,
 	    primary->table_bytes != GPT_ENTRY_ARRAY_RESERVE ||
 	    primary->first_usable != 2U + reserve_blocks ||
 	    primary->last_usable != logical_last - reserve_blocks - 1U)
+		return 0;
+	if (disk_read(disk, 0U, 1U, block) != 0)
+		return -EIO;
+	entry = block + GPT_MBR_TABLE;
+	advertised = logical_last > UINT32_MAX ? UINT32_MAX :
+	    (uint32_t)logical_last;
+	if (!all_zero(block, GPT_MBR_TABLE) ||
+	    entry[0U] != 0U || entry[1U] != 0U || entry[2U] != 2U ||
+	    entry[3U] != 0U || entry[4U] != 0xeeU || entry[5U] != 0xffU ||
+	    entry[6U] != 0xffU || entry[7U] != 0xffU ||
+	    get32(entry + 8U) != 1U || get32(entry + 12U) != advertised ||
+	    !all_zero(entry + GPT_MBR_ENTRY_SIZE,
+	    3U * GPT_MBR_ENTRY_SIZE) || block[510U] != 0x55U ||
+	    block[511U] != 0xaaU)
 		return 0;
 	first = logical_last - reserve_blocks;
 	for (lba = first; lba <= logical_last; lba++) {
@@ -653,22 +672,24 @@ gpt_scan(const struct partition_scheme *scheme, struct disk *disk,
 		error = -ENOMEM;
 		goto out;
 	}
-	if (bounded && (primary_error != 0 || backup_error != 0)) {
+	if (primary_error == 0 && backup_error != 0 && backup_error != -EIO) {
+		primary_only = intentional_primary_only(disk, &primary,
+		    logical_last, block);
+		if (primary_only < 0) {
+			if (bounded) {
+				error = -EINVAL;
+				goto out;
+			}
+			primary_only = 0;
+		}
+	}
+	if (bounded && (primary_error != 0 ||
+	    (backup_error != 0 && primary_only == 0))) {
 		hal_printf("gpt: %s rejected: bounded extent requires both copies "
 		    "primary=%d backup=%d\n", disk->d_name, -primary_error,
 		    -backup_error);
 		error = -EINVAL;
 		goto out;
-	}
-	if (!bounded && primary_error == 0 && backup_error != 0 &&
-	    backup_error != -EIO) {
-		/* Zero is the only intentional-absence representation.  A readable
-		 * malformed/nonzero backup retains the established degraded-copy
-		 * recovery path, but is never reported as a primary-only image. */
-		primary_only = intentional_primary_only(disk, &primary,
-		    logical_last, block);
-		if (primary_only < 0)
-			primary_only = 0;
 	}
 	if (primary_error != 0 && backup_error != 0) {
 		hal_printf("gpt: %s rejected: primary=%d backup=%d\n",

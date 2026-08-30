@@ -296,6 +296,10 @@ protective_mbr(void)
 	mbr[510U] = 0x55U;
 	mbr[511U] = 0xaaU;
 	mbr_entry(0U, 0U, 0xeeU, 1U, blocks);
+	mbr[0x1beU + 2U] = 2U;
+	mbr[0x1beU + 5U] = 0xffU;
+	mbr[0x1beU + 6U] = 0xffU;
+	mbr[0x1beU + 7U] = 0xffU;
 }
 
 static void
@@ -874,8 +878,8 @@ test_intentional_primary_only_classification(void)
 	    NULL);
 	CHECK(strstr(diagnostics, "backup damaged") == NULL);
 
-	/* A readable nonzero malformed backup may retain generic degraded-copy
-	 * recovery, but it is never classified as an intentional omission. */
+	/* A nonzero malformed backup keeps exact-media degraded-copy recovery,
+	 * but is never classified as an intentional omission. */
 	begin_gpt(512U, 128U, 128U);
 	write_entry(3U, 0x10U, layout.first_usable + 8U,
 	    layout.first_usable + 71U, name,
@@ -902,40 +906,91 @@ test_intentional_primary_only_classification(void)
 }
 
 static void
-test_compact_primary_only_declared_capacities(void)
+test_fixed_primary_only_extent(void)
 {
 	static const uint16_t name[] = {
 		'z', 'e', 'd', 'B', 'S', 'D'
 	};
-	static const uint16_t capacities_gib[] = { 2U, 256U };
+	const uint64_t logical_last = 395296U;
 	struct partition entries[TEST_CAPACITY];
-	unsigned index;
+	int result;
 
-	for (index = 0U; index < sizeof(capacities_gib) /
-	    sizeof(capacities_gib[0]); index++) {
-		uint64_t blocks = (uint64_t)capacities_gib[index] * 2097152U;
-		int result;
+	begin_gpt_extent(512U, 128U, 128U, logical_last,
+	    logical_last + 1U);
+	write_entry(3U, 0x10U, layout.first_usable + 8U,
+	    layout.first_usable + 71U, name,
+	    (unsigned)(sizeof(name) / sizeof(name[0])));
+	write_header(1);
+	write_header(0);
+	memset(table_at(0), 0, (size_t)layout.table_bytes);
+	memset(header_at(0), 0, disk.d_block_size);
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics,
+	    "intentional primary-only GPT accepted") != NULL);
 
-		begin_gpt_extent(512U, 128U, 128U, blocks - 1U, blocks);
-		write_entry(3U, 0x10U, layout.first_usable + 8U,
-		    layout.first_usable + 71U, name,
-		    (unsigned)(sizeof(name) / sizeof(name[0])));
-		write_header(1);
-		write_header(0);
-		memset(table_at(0), 0, (size_t)layout.table_bytes);
-		memset(header_at(0), 0, disk.d_block_size);
-		result = scan(entries, TEST_CAPACITY);
-		CHECK(result == 1);
-		check_basic_entry(&entries[0], "zedBSD");
-		CHECK(strstr(diagnostics,
-		    "intentional primary-only GPT accepted") != NULL);
+	/* The declared logical extent may occupy either the whole medium or a
+	 * bounded prefix of a larger destination. */
+	disk.d_block_count = logical_last + 2U;
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics,
+	    "intentional primary-only GPT accepted") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
+	disk.d_block_count = logical_last + 4097U;
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics,
+	    "intentional primary-only GPT accepted") != NULL);
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
 
-		/* Exact selected capacity is part of the primary-only contract. */
-		disk.d_block_count = blocks - 1U;
-		expect_rejected("primary-only-medium-one-sector-short");
-		disk.d_block_count = blocks + 1U;
-		expect_rejected("primary-only-medium-one-sector-large");
-	}
+	/* Truncation below the advertised logical last block remains fatal. */
+	disk.d_block_count = logical_last;
+	expect_rejected("primary-only-medium-one-sector-short");
+
+	/* A larger physical tail does not excuse bytes in the declared backup
+	 * reservation, a BIOS-capable PMBR, or noncanonical primary geometry. */
+	disk.d_block_count = logical_last + 4097U;
+	table_at(0)[0U] = 1U;
+	expect_rejected("bounded-primary-only-nonzero-reservation");
+
+	begin_gpt_extent(512U, 128U, 128U, logical_last,
+	    logical_last + 4097U);
+	write_entry(3U, 0x10U, layout.first_usable + 8U,
+	    layout.first_usable + 71U, name,
+	    (unsigned)(sizeof(name) / sizeof(name[0])));
+	write_header(1);
+	write_header(0);
+	memset(table_at(0), 0, (size_t)layout.table_bytes);
+	memset(header_at(0), 0, disk.d_block_size);
+	block_at(0U)[0U] = 0x90U;
+	expect_rejected("bounded-primary-only-nonzero-mbr-bootstrap");
+
+	begin_gpt_extent(512U, 128U, 128U, logical_last,
+	    logical_last + 4097U);
+	write_entry(3U, 0x10U, layout.first_usable + 8U,
+	    layout.first_usable + 71U, name,
+	    (unsigned)(sizeof(name) / sizeof(name[0])));
+	write_header(1);
+	write_header(0);
+	memset(table_at(0), 0, (size_t)layout.table_bytes);
+	memset(header_at(0), 0, disk.d_block_size);
+	mbr_entry(1U, 0U, 0x0cU, 2048U, 128U);
+	expect_rejected("bounded-primary-only-compatibility-mbr-entry");
+
+	begin_gpt_extent(512U, 8U, 128U, logical_last,
+	    logical_last + 4097U);
+	write_entry(3U, 0x10U, layout.first_usable + 8U,
+	    layout.first_usable + 71U, name,
+	    (unsigned)(sizeof(name) / sizeof(name[0])));
+	write_header(1);
+	write_header(0);
+	memset(table_at(0), 0, (size_t)layout.table_bytes);
+	memset(header_at(0), 0, disk.d_block_size);
+	expect_rejected("bounded-primary-only-noncanonical-entry-geometry");
 }
 
 static void
@@ -1294,7 +1349,7 @@ main(void)
 	test_pure_mbr_fallback();
 	test_degraded_copy_selection();
 	test_intentional_primary_only_classification();
-	test_compact_primary_only_declared_capacities();
+	test_fixed_primary_only_extent();
 	test_contradictory_valid_copies();
 	test_header_and_geometry_rejection();
 	test_protective_mbr_rejection();
