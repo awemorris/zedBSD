@@ -4,8 +4,8 @@ Last updated: 2026-08-31
 
 Phase ID: `ws003-p022`
 
-Status: In progress (`q037`); automatic checkpoint passed, awaiting one
-PC-9821V13 observation
+Status: Uncleared (`q037`); automatic checkpoint passed, awaiting the already
+requested one PC-9821V13 observation
 
 Parent: [WS003](../ws.md)
 

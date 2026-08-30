@@ -878,9 +878,21 @@ kern_vfs_init(const struct boot_handoff *handoff,
 			continue;
 		}
 		for (slot = 0; slot < count; slot++) {
-			if (entries[slot].p_block_count == 0 ||
-			    partition_create_disk(&entries[slot]) != 0)
+			int partition_error;
+
+			if (entries[slot].p_block_count == 0) {
+				VFS_LOG("vfs: %s partition %u has zero blocks; "
+				    "not published\n", physical[i]->d_name,
+				    entries[slot].p_index + 1U);
 				continue;
+			}
+			partition_error = partition_create_disk(&entries[slot]);
+			if (partition_error != 0) {
+				VFS_LOG("vfs: %s partition %u create failed "
+				    "(error %d)\n", physical[i]->d_name,
+				    entries[slot].p_index + 1U, partition_error);
+				continue;
+			}
 			VFS_LOG(
 			    "vfs: %s partition %u start=%08X:%08X "
 			    "data=%08X:%08X blocks=%08X:%08X\n",

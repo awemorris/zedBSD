@@ -11,7 +11,8 @@ the WS013 required-`zedbsd.cfg` path; `ws003-p018` is the dependency-gated
 final Latitude NVMe install/boot milestone; `ws003-p020` completed in q033 on
 the Panasonic CF-SV7, and `ws003-p021` completed its raw-image GPT/root
 continuation in q034 with a successful physical CF-SV7 boot; `ws003-p022`
-passed its automatic q037 gates and awaits one PC-9821V13 observation
+passed its automatic q037 gates and is uncleared only at the already-requested
+PC-9821V13 observation
 
 Parent: [master plan](../master.md)
 
@@ -23,8 +24,9 @@ the intended UUID to `/dev/sda1`, mounted the
 read-write data loop and root overlay, started init, and reached a root shell,
 proving physical tier U3.
 
-Resume point: Complete q037 `ws003-p022` with its one PC-9821V13 observation;
-the automatic PC-98 gates already pass. The CF-SV7 USB-root issue is closed.
+Resume point: Record the one `ws003-p022` PC-9821V13 observation when it is
+available; q037 is closed and the automatic PC-98 gates already pass. The
+CF-SV7 USB-root issue is closed.
 Finish the automatic WS013/WS019 prerequisites before `ws003-p018`. Latitude follow-up still
 includes BR-T31
 sustained root I/O and, after U4 is otherwise frozen, BR-T30 five-boot
@@ -58,7 +60,7 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p019` | [Latitude NVMe native installation and boot](phase019-latitude-nvme-native-install-boot/phase.md) | Future; not designed | Accept the later native-root installer only after separate WS019 design and QEMU proof |
 | `ws003-p020` | [Panasonic CF-SV7 early ACPI/interrupt bring-up](phase020-cf-sv7-acpi-irq-bringup/phase.md) | Completed (`q033`, 2026-08-30) | The single physical boot passed IRQ/XMM/HAL and continued through xHCI, USB storage, and VFS; early-init automated gates remain passing |
 | `ws003-p021` | [Portable GPT image extent on larger USB media](phase021-portable-gpt-image-extent/phase.md) | Completed (`q034`, 2026-08-30) | Generic bounded-GPT host/QEMU gates pass and the frozen image boots successfully on the CF-SV7 through USB-root overlay/init/login |
-| `ws003-p022` | [PC-9821V13 IPL stack and disk-read contract](phase022-pc9821-v13-ipl-read-contract/phase.md) | In progress (`q037`); automatic checkpoint passed | Native layout and `55 aa` are preserved; private-stack/SENSE/read invariants and qemu-pc98 login pass; frozen image awaits one V13 observation |
+| `ws003-p022` | [PC-9821V13 IPL stack and disk-read contract](phase022-pc9821-v13-ipl-read-contract/phase.md) | Uncleared (`q037`); automatic checkpoint passed | Native layout and `55 aa` are preserved; private-stack/SENSE/read invariants and qemu-pc98 login pass; frozen image awaits one V13 observation |
 
 `ws003-p003` was the sole authorized item in q012. Its physical result closes
 the PCI/BAR/capability boundary and extracts the first device-enumeration stop

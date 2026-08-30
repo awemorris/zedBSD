@@ -9,6 +9,7 @@ Parent: [WS020](../ws.md)
 | `MAC-T011` | p002 | **PASS:** The kernel distinguishes the strict zero-tail primary-only format from ordinary damaged-copy recovery, including on larger physical media |
 | `MAC-T020` | p003 | Hybrid boots under SeaBIOS and OVMF; BIOS-only boots only under SeaBIOS; UEFI-only boots only under OVMF |
 | `MAC-T030` | p004 | One provisional Intel Mac boot passes, followed only at final acceptance by five consecutive cold boots of the frozen artifact |
+| `MAC-T021` | p005 | **PASS:** A fresh checked UEFI-only source, sparsely presented as a 60,549,120-sector xHCI USB disk, publishes exactly two partitions, resolves its payload UUID to `/dev/sda2`, and reaches login without mutating the source |
 
 `make menuconfig-host-test` runs the saved-configuration matrix from
 `menuconfig-target-host-test.py`. After `make toolchain`, run the compiled
@@ -76,6 +77,22 @@ then produced no `login:` prompt before the bound. This occurred with both
 firmware paths and remained with single-thread TCG/one vCPU, so the runner
 correctly fails rather than converting retries into acceptance. The runtime
 getty/init scheduling issue is separate from the byte-level layout gates.
+
+Run the focused current-production handoff preflight with an absent evidence
+path:
+
+```sh
+build/NoctLang/build-static/noct --path=tools/build \
+  plan/ws020-intel-mac/tests/qemu-uefi-larger-media.noct \
+  . plan/ws020-intel-mac/temp/p005-production-preflight
+```
+
+`MAC-T021` builds only the UEFI-only profile in a private tree, applies the
+production byte checker, freezes the source identity, and enlarges only a
+disposable copy to the observed 60,549,120-sector USB capacity. It is a focused
+storage/handoff gate and does not replace or weaken p003's six-cell oracle. The
+accepted run is retained under `../temp/p005-production-preflight-final-003/`;
+its source hash is `3bca88c3f5673f0b447cac4a7af457b8aba3a745861a005459f374adbe50dc79`.
 
 Reusable runners added by an authorized Phase live here. Disposable boot
 media and QEMU logs live below `../temp/` and remain untracked. Do not consume
