@@ -47,7 +47,13 @@ image for the still-silent PC-9821V13 boundary; its automatic gates pass and
 one physical observation remains. It then repairs the independently
 reproduced PC-98 PIC-cascade defect which blocked Xzed mouse events; the
 production qemu-pc98 cursor now moves by the exact injected delta through
-evdev without monitor-side PIC repair. The archived [q040](queue-q040.md)
+evdev without monitor-side PIC repair. A later comparative audit has isolated
+Stage 1's unused SENSE-before-fixed-read sequence as the narrowest remaining
+V13 compatibility difference; Queue-ready `ws003-p024` removes only that
+transaction while preserving PBR/BOOTZBSD geometry checks. The user's newer
+PC-98 Xzed mouse report conflicts with the still-passing managed QEMU path, so
+Queue-ready `ws007-p004` freezes the exact image/QEMU/GUI/input conditions and
+diagnoses the first divergent boundary before any further repair. The archived [q040](queue-q040.md)
 records the uncleared printed-label-only Archer identity checkpoint and the
 completed independent AF_UNIX/network authorization foundation.  The current
 [Queue Book](queue.md) records active `q041`: checked UHCI/EHCI retirement is
@@ -305,14 +311,14 @@ actually warranted.
 
 | WSID | Workstream | Status | Last completed / current Phase | Resume point | WS plan |
 | --- | --- | --- | --- | --- | --- |
-| `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete; p015/p016 now own two VFS prerequisites discovered by q041 | `ws001-p014` complete; p015/p016 Queue-ready | Execute credential-aware creation and truthful directory-sync Phases, then return their evidence to WS005 p005 | [WS001](ws001-posix/ws.md) |
+| `ws001` | POSIX.1-2024 compliance | Active ledger; q042 retained passing source/host milestones for both VFS prerequisites discovered by q041 | `ws001-p014` complete; p015/p016 source/host milestones uncleared | Restore the Noct host CLI through WS008 p010, complete p015's two retained fault cells, then run fresh native/remount acceptance for p015/p016 before returning to WS005 p005 | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q039 p023 confirms the signature and passes every automatic entry-localization gate but remains external-checkpoint uncleared; p018 Latitude overlay-NVMe install/boot dependency-gated | p020/p021 physical CF-SV7 path passes; p022/p023 qemu-pc98 login passes; one p023 V13 audio observation and p018/p019 remain | Record one boot of the exact p023 diagnostic artifact, then return to dependency-ready p018 work | [WS003](ws003-bringup/ws.md) |
+| `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q039 p023 confirms the signature and passes every automatic entry-localization gate; p024 is the Queue-ready fixed-read compatibility correction; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p022/p023 qemu-pc98 login passes; p024, one new exact V13 observation, and p018/p019 remain | Execute p024 without waiting for the older p023 artifact, then request one consolidated boot of the new hash and return to dependency-ready p018 work | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Audited active; q041 p016 completed checked UHCI/EHCI request retirement with configured and QEMU lifecycle evidence. q040 p026 completed every automatic/read-only intake step and is uncleared only for the purchased unit's printed model/region/revision. `q030` NVMe software and the physical USB-Ethernet path are complete | `ws004-p010`--`p016`, `p018`, p020, and p022--p024 complete | Proceed through q041; obtain one serial-redacted Archer label observation when convenient without blocking independent work | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WLAN | Active; q029 p001 and q040 p003 complete; q041 p005 host implementation passes but native acceptance is uncleared | Physical USB Ethernet and authenticated control pass; strict local credential parser/store/CLI now pass host safety and regression gates | Complete WS001 p015/p016, then requeue p005 root/non-root ownership and remount-durability acceptance; p004 remains hardware-core dependency-gated | [WS005](ws005-networking/ws.md) |
+| `ws005` | Networking and WLAN | Active; q029 p001 and q040 p003 complete; q041 p005 host implementation passes and q042 advanced but did not complete its VFS dependencies | Physical USB Ethernet and authenticated control pass; strict local credential parser/store/CLI now pass host safety and regression gates | Complete WS001 p015/p016 after WS008 p010, then requeue p005 root/non-root ownership and remount-durability acceptance; p004 remains hardware-core dependency-gated | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Audited active; not complete. p005 is only the PC/AT capability milestone | `ws006-p005` complete | Execute p006--p008 for producer truthfulness and USB HID when selected; run p009 consumer/legacy-console removal only after the accepted WS008 userland tree is available | [WS006](ws006-input/ws.md) |
-| `ws007` | Graphics and desktop | Active; q039 PC-98 mouse repair complete | `ws007-p001` and `p003` complete; amd64 `p002` carried | Select GFX-02 integration regression work when prioritized; retain the separate amd64 p002 report honestly | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Host refresh complete; target packages remain disabled until the target Phase passes | `ws008-p008` complete at immutable `3bf3d236...`; p009 target refresh is human-blocked by the current upstream zedBSD build regression | Resume p009 only from a corrected upstream revision or an explicit downstream-patch-overlay decision; never mutate the old dirty checkout | [WS008](ws008-noct/ws.md) |
+| `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, newer PC-98 Xzed mouse report reopened for exact reproduction | `ws007-p001` and `p003` complete; p004 Queue-ready; amd64 `p002` carried | Execute p004's immutable headless/GUI matrix and diagnose only a reproduced first broken boundary; retain a non-reproduction honestly | [WS007](ws007-graphics/ws.md) |
+| `ws008` | Noct and BeUI | Blocked; target packages remain disabled, and the p008 host pin is not production-usable because upstream removed its documented module-path CLI | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 records the later `--path` production-build regression and p009 remains separately target-blocked | Resume p010 from the maintainer's accepted upstream repair or an explicit compatible revision, then resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; VLAN/bridge hold released, detailed design still open | `ws011-p003` complete; p004 resumed for design; p005 bounds open | After higher priorities, finish p004's virtual-interface/UAPI/packet-ownership design before implementation; freeze p005 bounds independently | [WS011](ws011-net-config/ws.md) |
@@ -438,16 +444,19 @@ priority one.
    passthrough of the connected adapter after automatic gates pass.
 5. Complete the `/sbin/net` WLAN stack in WS005 through the fixed
    `net` -> `networkd` -> `ifconfig`/`wifi`/`dhcpc` topology.
-6. Resume WS008 from the maintainer's latest accepted NoctLang tree. Update
-   both the bootstrap/toolchain checkout and the userland package; the latter
-   is rooted at `userland/base/noct/` and clones upstream into
+6. Resume WS008 from the maintainer's latest accepted NoctLang tree. First
+   restore and verify the host `--path`/`require` CLI contract in p010; then
+   update the userland package through p009. The latter is rooted at
+   `userland/base/noct/` and clones upstream into
    `userland/base/noct/noct/`.
 7. Implement WS017's `/dev/graphics` LFB fast path after resolving its retained
    `mprotect` permission-ceiling decision. Do not infer that decision from the
    priority change.
-8. Re-run and finish WS007 after WS017, including real Xzed/LFB behavior and
-   the existing mouse issue. If the mouse defect cannot be reproduced, retain
-   it honestly rather than fabricating a fix.
+8. Run the newly extracted `ws007-p004` exact PC-98 mouse reproduction when
+   its corrective Queue is selected. Re-run and finish the remaining WS007
+   integration work after WS017, including real Xzed/LFB behavior. If a mouse
+   defect cannot be reproduced under the frozen conditions, retain it
+   honestly rather than fabricating a fix.
 9. Continue WS001 POSIX work. Add a bounded `lp`/`lpr` Phase whose deliberate
    model posts PDF directly to an LPD printer and has no local spool queue.
 10. Re-plan WS019 so the installer is written in Noct, then implement it after
@@ -500,7 +509,7 @@ until stopped or no judgment-free Phase remains.
 | Installer source-image stability | WS019 p004 | Choose unused immutable installer templates for data/swap (recommended) or explicitly redesign p004 to generate them at the target; never copy the live overlay upper or active swap |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
 | Confirmed-commit implementation bounds | WS011 | Public semantics are fixed: interactive only, explicit timeout, delayed `/etc/net.conf` write, ordinary `commit` confirms, and DHCP is reacquired; freeze timeout maximum, lock path, and diagnostic bounds before implementation |
-| Authoritative Noct repository, build sequence, and revision | WS008 | Resolved by q022 and refined by q023: official main is `awemorris/NoctLang`; zedBSD tracks only `userland/noct/Makefile`, which clones and builds pinned commit `c1e4e0fcdbb7b8cdf1705601b13d57b787c61621` under `userland/noct/NoctLang` |
+| Authoritative Noct repository, build sequence, and revision | WS008 | Official main remains `awemorris/NoctLang`. q041 pinned host commit `3bf3d236...`, but p010 records that it rejects the still-documented `--path`/`require` CLI used by production scripts; the accepted replacement revision is manually blocked by `MB-008`. Target relocation remains p009. |
 | PC/AT boot selector | WS004 | Resolved: reuse UUID/PARTUUID; standard FAT handoff uses UUID |
 | Runtime swap command standard and control boundary | WS016 | Resolved for v1: SUSv4/POSIX does not define `swapon`/`swapoff`; zedBSD supplies minimal privileged extensions over versioned `/dev/system` control and existing signed sources |
 | Optional LFB mapping and Xzed fallback boundary | WS017 | Resolved for v1: fixed post-ENTER geometry, 8/16/24/32-bpp layout query, shared non-executable mmap when supported, true-color Xzed fast path, and unchanged ioctl fallback; PC-98 Cirrus is excluded |
@@ -519,6 +528,7 @@ until the user explicitly releases the named hold.
 | `MB-004` | `ws013-p001` | Service-container package format, dependencies, updates, config, and data | User explicitly resumes service-container package discussion |
 | `MB-005` | `ws014-p001` | GPU UAPI, capability profiles, display takeover, i915 split, Vulkan/GLES | User explicitly resumes GPU architecture discussion |
 | `MB-007` | `ws015-p001` | μITRON profile/UAPI, legacy static configuration, RT/POSIX mailbox and filesystem proxy, scheduling, failure, and timing contracts | User explicitly resumes WS015 architecture/API discussion |
+| `MB-008` | `ws008-p010` | Noct host CLI repair ownership and replacement revision after pinned `3bf3d236...` removed the documented `--path`/`require` contract | Maintainer publishes and identifies an accepted upstream repair, or the user explicitly selects a compatible older immutable revision |
 
 Released holds remain permanent history rather than reusable identifiers:
 

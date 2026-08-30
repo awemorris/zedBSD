@@ -4,7 +4,9 @@ Last updated: 2026-08-31
 
 Phase ID: `ws001-p016`
 
-Status: planned; Queue-ready
+Status: Uncleared (`q042`, 2026-08-31); implementation and deterministic host
+ordering tests pass, but disposable-image/remount acceptance is blocked by
+`ws008-p010`
 
 Parent: [WS001](../ws.md)
 
@@ -213,3 +215,31 @@ as evidence of `fsync()` durability.
 This Phase is independent of `ws001-p015` and may be queued before or after it.
 After both Phases complete, requeue `ws005-p005` and run its complete
 root/non-root transactional credential-store acceptance.
+
+## q042 execution result
+
+The source implementation is retained as safe partial progress:
+
+- `file_fsync()` now rejects a directory which has no explicit filesystem
+  implementation with `EOPNOTSUPP`, without changing the regular-file inode
+  fallback;
+- UFS1 and UFS2 directory descriptors use their existing inode-sync followed
+  by backing `disk_sync()` operation and preserve the first error; and
+- overlay directories synchronize an authoritative upper directory when one
+  exists, then the active overlay journal, then the upper mount.  A read-only
+  overlay with no writable state remains a successful no-op.
+
+The Phase-owned host fixture links the exact production functions and passes
+13 VFS dispatch checks, 36 UFS ordering/error checks, and 86 overlay
+ordering/error checks.  The affected UFS1, UFS2, overlay, and generic file
+objects compile with warnings as errors for both configured PC-98 and amd64
+targets, and `git diff --check` passes.
+
+Completion is not claimed.  The ordinary production build reaches the final
+PC-98 image step and then the pinned Noct interpreter rejects the established
+`--path=tools/build` option.  Consequently q042 could not generate disposable
+images or prove create/rename/directory-`fsync` survival across a native
+remount and real storage flush.  Resume after `ws008-p010` restores the host
+script CLI contract, rerun the host fixture, generate fresh disposable images,
+and execute the bounded amd64 QEMU/remount matrix before changing this Phase to
+complete.

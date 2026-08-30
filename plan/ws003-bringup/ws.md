@@ -14,7 +14,10 @@ continuation in q034 with a successful physical CF-SV7 boot; `ws003-p022`
 passed its automatic q037 gates but the reported PC-9821V13 boot still does
 not advance visibly; q039 `ws003-p023` is localizing the entry boundary
 without changing the confirmed `IPL1` signature; all p023 automatic gates pass
-and one exact audio-trace image awaits its single V13 observation
+and one exact audio-trace image awaits its single V13 observation. The
+completed comparative audit has now extracted Queue-ready `ws003-p024`: remove
+only Stage 1's unused SENSE transaction before its invariant CHS 0/0/2 read,
+while retaining the geometry-dependent PBR/BOOTZBSD SENSE paths
 
 Parent: [master plan](../master.md)
 
@@ -26,9 +29,12 @@ the intended UUID to `/dev/sda1`, mounted the
 read-write data loop and root overlay, started init, and reached a root shell,
 proving physical tier U3.
 
-Resume point: Record the one `ws003-p022` PC-9821V13 observation when it is
-available; q037 is closed and the automatic PC-98 gates already pass. The
-CF-SV7 USB-root issue is closed.
+Resume point: After the active Queue closes, select `ws003-p024`. Its source
+decision no longer depends on first running the p023 artifact: the fixed
+Stage-1 read does not consume SENSE geometry. Build and check one new exact
+artifact, then request one consolidated PC-9821V13 observation. Preserve p023
+as historical evidence rather than reporting its unperformed checkpoint as a
+pass. The CF-SV7 USB-root issue is closed.
 Finish the automatic WS013/WS019 prerequisites before `ws003-p018`. Latitude follow-up still
 includes BR-T31
 sustained root I/O and, after U4 is otherwise frozen, BR-T30 five-boot
@@ -64,6 +70,7 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p021` | [Portable GPT image extent on larger USB media](phase021-portable-gpt-image-extent/phase.md) | Completed (`q034`, 2026-08-30) | Generic bounded-GPT host/QEMU gates pass and the frozen image boots successfully on the CF-SV7 through USB-root overlay/init/login |
 | `ws003-p022` | [PC-9821V13 IPL stack and disk-read contract](phase022-pc9821-v13-ipl-read-contract/phase.md) | Uncleared (`q037`); automatic checkpoint passed | Native layout and `55 aa` are preserved; private-stack/SENSE/read invariants and qemu-pc98 login pass; frozen image awaits one V13 observation |
 | `ws003-p023` | [PC-9821V13 IPL entry localization](phase023-pc9821-v13-ipl-entry-localization/phase.md) | Uncleared (`q039`); automatic gates passed | Exact/corrupted `IPL1`, normal/diagnostic qemu-pc98 login, and immutable artifact pass; one V13 audio observation remains |
+| `ws003-p024` | [PC-9821V13 Stage-1 fixed-read compatibility](phase024-pc9821-v13-stage1-fixed-read-compatibility/phase.md) | Planned; Queue-ready | Remove only Stage 1's unused AH=`84h` SENSE before its fixed CHS 0/0/2 read; keep PBR/BOOTZBSD SENSE, automatic native-layout/QEMU gates, and one exact V13 artifact boot |
 
 `ws003-p003` was the sole authorized item in q012. Its physical result closes
 the PCI/BAR/capability boundary and extracts the first device-enumeration stop

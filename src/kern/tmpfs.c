@@ -309,16 +309,18 @@ allocate_entry(const struct componentname *component, struct inode *inode)
 }
 
 static int
-allocate_node(struct inode *directory, enum inode_type type, mode_t mode,
-	dev_t rdev, struct inode **result)
+allocate_node(struct inode *directory,
+	const struct inode_creation_request *request, struct inode **result)
 {
 	struct tmpfs_node *parent = tmpfs_node(directory);
 	struct tmpfs_state *state = parent != NULL ? parent->state : NULL;
 	struct tmpfs_node *node;
 	struct inode *inode;
+	enum inode_type type;
 	int error;
-	if (state == NULL)
+	if (state == NULL || request == NULL)
 		return EINVAL;
+	type = request->type;
 	error = charge_node(state);
 	if (error != 0)
 		return error;
@@ -344,10 +346,18 @@ allocate_node(struct inode *directory, enum inode_type type, mode_t mode,
 	    type == INODE_FIFO ? &fifo_file_ops : NULL;
 	inode->i_data = node;
 	inode->i_linkcount = type == INODE_DIR ? 2 : 1;
-	inode->i_mode = inode_type_mode(type) | (mode & 07777U);
-	inode->i_rdev = rdev;
 	*result = inode;
 	return 0;
+}
+
+static void
+discard_unpublished(struct inode *inode)
+{
+	if (inode == NULL)
+		return;
+	inode->i_linkcount = 0;
+	inode->i_flags |= INODE_DEAD;
+	inode_release(inode);
 }
 
 static int
@@ -378,24 +388,30 @@ publish_new(struct inode *directory, const struct componentname *component,
 
 static int
 tmpfs_make(struct inode *directory, const struct componentname *component,
-	enum inode_type type, mode_t mode, dev_t rdev, const char *target,
+	const struct inode_creation_request *request, const char *target,
 	struct inode **result)
 {
 	struct inode *inode = NULL;
 	struct tmpfs_node *node;
 	int error;
 	if (directory == NULL || directory->i_type != INODE_DIR ||
-	    result == NULL || !component_valid(component))
+	    request == NULL || result == NULL || !component_valid(component))
 		return EINVAL;
-	error = allocate_node(directory, type, mode, rdev, &inode);
+	*result = NULL;
+	error = allocate_node(directory, request, &inode);
 	if (error != 0)
 		return error;
+	error = inode_creation_prepare(directory, inode, request);
+	if (error != 0) {
+		discard_unpublished(inode);
+		return error;
+	}
 	node = tmpfs_node(inode);
-	if (type == INODE_SYMLINK) {
+	if (request->type == INODE_SYMLINK) {
 		node->symlink_length = strlen(target);
 		node->symlink = kern_malloc(node->symlink_length + 1U);
 		if (node->symlink == NULL) {
-			inode_release(inode);
+			discard_unpublished(inode);
 			return ENOMEM;
 		}
 		memcpy(node->symlink, target, node->symlink_length + 1U);
@@ -403,7 +419,7 @@ tmpfs_make(struct inode *directory, const struct componentname *component,
 	}
 	error = publish_new(directory, component, inode);
 	if (error != 0) {
-		inode_release(inode);
+		discard_unpublished(inode);
 		return error;
 	}
 	*result = inode;
@@ -444,34 +460,42 @@ tmpfs_lookup(struct inode *directory, const struct componentname *component,
 
 static int
 tmpfs_create(struct inode *directory, const struct componentname *component,
-	mode_t mode, struct inode **result)
+	const struct inode_creation_request *request, struct inode **result)
 {
-	return tmpfs_make(directory, component, INODE_REG, mode, 0, NULL, result);
+	if (request == NULL || request->type != INODE_REG)
+		return EINVAL;
+	return tmpfs_make(directory, component, request, NULL, result);
 }
 
 static int
 tmpfs_mkdir(struct inode *directory, const struct componentname *component,
-	mode_t mode, struct inode **result)
+	const struct inode_creation_request *request, struct inode **result)
 {
-	return tmpfs_make(directory, component, INODE_DIR, mode, 0, NULL, result);
+	if (request == NULL || request->type != INODE_DIR)
+		return EINVAL;
+	return tmpfs_make(directory, component, request, NULL, result);
 }
 
 static int
 tmpfs_mknod(struct inode *directory, const struct componentname *component,
-	enum inode_type type, mode_t mode, dev_t rdev, struct inode **result)
+	const struct inode_creation_request *request, struct inode **result)
 {
-	if (type != INODE_FIFO && type != INODE_SOCKET &&
-	    type != INODE_CHAR && type != INODE_BLOCK)
+	if (request == NULL)
+		return EINVAL;
+	if (request->type != INODE_FIFO && request->type != INODE_SOCKET &&
+	    request->type != INODE_CHAR && request->type != INODE_BLOCK)
 		return EOPNOTSUPP;
-	return tmpfs_make(directory, component, type, mode, rdev, NULL, result);
+	return tmpfs_make(directory, component, request, NULL, result);
 }
 
 static int
 tmpfs_symlink(struct inode *directory, const struct componentname *component,
-	const char *target, struct inode **result)
+	const char *target, const struct inode_creation_request *request,
+	struct inode **result)
 {
-	return tmpfs_make(directory, component, INODE_SYMLINK, 0777U, 0,
-	    target, result);
+	if (request == NULL || request->type != INODE_SYMLINK)
+		return EINVAL;
+	return tmpfs_make(directory, component, request, target, result);
 }
 
 static ssize_t

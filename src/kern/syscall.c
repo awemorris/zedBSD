@@ -752,6 +752,7 @@ static intptr_t
 sys_bind_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
+	struct ucred *credential = NULL;
 	struct socket_file_ref reference;
 	struct socket *socket;
 	struct sockaddr_storage address;
@@ -763,13 +764,19 @@ sys_bind_call(const uintptr_t args[6])
 	if (socket->ops == NULL || socket->ops->bind == NULL)
 		return socket_result(&reference, -EOPNOTSUPP);
 	error = copy_sockaddr_in(args[1], (socklen_t)args[2], &address);
-	if (error == 0)
-		error = socket->family == AF_UNIX ?
-		    unix_socket_bind_path(socket, process->cwdi, process->cred,
-		    process->umask, (struct sockaddr *)&address,
-		    (socklen_t)args[2]) :
-		    socket->ops->bind(socket, (struct sockaddr *)&address,
+	if (error == 0 && socket->family == AF_UNIX) {
+		credential = cred_process_ref(process);
+		if (credential == NULL)
+			error = EINVAL;
+		else
+			error = unix_socket_bind_path(socket, process->cwdi,
+			    credential, process->umask,
+			    (struct sockaddr *)&address, (socklen_t)args[2]);
+		cred_release(credential);
+	} else if (error == 0) {
+		error = socket->ops->bind(socket, (struct sockaddr *)&address,
 		    (socklen_t)args[2]);
+	}
 	return socket_result(&reference, error == 0 ? 0 : -error);
 }
 
@@ -1478,6 +1485,7 @@ syscall_context_at(struct process *process, int dirfd,
 static intptr_t sys_open_call(const uintptr_t args[6], int at)
 {
 	struct process *process = current_process();
+	struct ucred *credential;
 	struct cwdinfo temporary, *context;
 	struct file *file, *held;
 	struct file *files[1];
@@ -1488,6 +1496,9 @@ static intptr_t sys_open_call(const uintptr_t args[6], int at)
 	mode_t mode = (mode_t)(at ? args[3] : args[2]);
 	int descriptor, error;
 	if (process == NULL || process->fd == NULL || process->cwdi == NULL)
+		return -EINVAL;
+	credential = cred_process_ref(process);
+	if (credential == NULL)
 		return -EINVAL;
 	memset(&reservation, 0, sizeof(reservation));
 	error = copyinstr(path_address, path, sizeof(path), NULL);
@@ -1503,11 +1514,12 @@ static intptr_t sys_open_call(const uintptr_t args[6], int at)
 		    ((flags & O_CLOFORK) != 0 ? FILEDESC_CLOFORK : 0),
 		    &reservation);
 	if (error == 0)
-		error = file_openat_cred(context, process->cred, path,
+		error = file_openat_cred(context, credential, path,
 		    flags & ~(O_CLOEXEC | O_CLOFORK),
 		    (mode & 07777U) & ~process->umask,
 		    &file);
 	if (held != NULL) (void)file_close(held);
+	cred_release(credential);
 	if (error != 0) {
 		filedesc_abort_reserved(&reservation);
 		return -error;
@@ -2609,16 +2621,23 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 		    uintptr_t option, int new_dirfd, uintptr_t new_address)
 {
 	struct process *process = current_process();
+	struct ucred *credential = NULL;
 	struct cwdinfo temporary, other_temporary, *context, *other_context;
 	struct file *held = NULL, *other_held = NULL;
 	struct path parent, other_parent;
 	struct componentname name, other_name;
+	struct inode_creation_request creation;
 	struct inode *created = NULL;
 	char pathname[PATH_MAX], other_pathname[PATH_MAX];
 	char storage[NAME_MAX + 1U], other_storage[NAME_MAX + 1U];
+	mode_t process_umask;
 	int error, other_valid = 0;
 	if (process == NULL || process->cwdi == NULL)
 		return -EINVAL;
+	credential = cred_process_ref(process);
+	if (credential == NULL)
+		return -EINVAL;
+	process_umask = process->umask;
 	error = copyinstr(old_address, pathname, sizeof(pathname), NULL);
 	if (error != 0)
 		goto out_held;
@@ -2636,10 +2655,13 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 		goto out_held;
 	if (number == ZEDBSD_SYS_mkdir) {
 		mount_vfs_transaction_enter(parent.p_mount);
-		error = vfs_may_create(parent.p_inode, process->cred);
+		error = inode_creation_request_user(parent.p_inode,
+			    credential, INODE_DIR,
+			    ((mode_t)option & 07777U) & ~process_umask, 0, NULL,
+			    &creation);
 		if (error == 0)
-			error = inode_mkdir(parent.p_inode, &name,
-			    ((mode_t)option & 07777U) & ~process->umask, &created);
+			error = inode_mkdir(parent.p_inode, &name, &creation,
+			    &created);
 		mount_vfs_transaction_leave(parent.p_mount);
 	} else if (number == ZEDBSD_SYS_unlink ||
 	    number == ZEDBSD_SYS_rmdir) {
@@ -2648,8 +2670,7 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 		mount_vfs_transaction_enter(parent.p_mount);
 		error = inode_lookup(parent.p_inode, &name, &victim);
 		if (error == 0) {
-			error = vfs_may_remove(parent.p_inode, victim,
-			    process->cred);
+			error = vfs_may_remove(parent.p_inode, victim, credential);
 			inode_release(victim);
 		}
 		if (error == 0)
@@ -2687,7 +2708,7 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 		}
 		if (error == 0)
 			error = vfs_may_rename(parent.p_inode, source,
-			    other_parent.p_inode, target, process->cred);
+			    other_parent.p_inode, target, credential);
 		if (error == 0) {
 			error = inode_rename(parent.p_inode, &name,
 			    other_parent.p_inode, &other_name, 0);
@@ -2713,6 +2734,8 @@ sys_mutation_common(uint32_t number, int old_dirfd, uintptr_t old_address,
 	out_held:
 	if (held != NULL)
 		(void)file_close(held);
+	if (credential != NULL)
+		cred_release(credential);
 	return error == 0 ? 0 : -error;
 }
 
@@ -3647,15 +3670,20 @@ static SYSCALL_EXT intptr_t
 sys_symlinkat_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
+	struct ucred *credential = NULL;
 	struct cwdinfo temporary, *context;
 	struct file *held = NULL;
 	struct path parent;
 	struct componentname name;
+	struct inode_creation_request creation;
 	struct inode *created = NULL;
 	char target[PATH_MAX], pathname[PATH_MAX], storage[NAME_MAX + 1U];
 	int error, parent_valid = 0;
 
 	if (process == NULL || process->cred == NULL)
+		return -EINVAL;
+	credential = cred_process_ref(process);
+	if (credential == NULL)
 		return -EINVAL;
 	error = copyinstr(args[0], target, sizeof(target), NULL);
 	if (error == 0)
@@ -3669,9 +3697,11 @@ sys_symlinkat_call(const uintptr_t args[6])
 	if (error == 0)
 		mount_vfs_transaction_enter(parent.p_mount);
 	if (error == 0)
-		error = vfs_may_create(parent.p_inode, process->cred);
+		error = inode_creation_request_user(parent.p_inode, credential,
+		    INODE_SYMLINK, 0777U, 0, NULL, &creation);
 	if (error == 0)
-		error = inode_symlink(parent.p_inode, &name, target, &created);
+		error = inode_symlink(parent.p_inode, &name, target, &creation,
+		    &created);
 	if (error == 0)
 		namecache_remove(parent.p_inode, &name);
 	if (created != NULL)
@@ -3682,6 +3712,7 @@ sys_symlinkat_call(const uintptr_t args[6])
 		path_release(&parent);
 	if (held != NULL)
 		(void)file_close(held);
+	cred_release(credential);
 	return error == 0 ? 0 : -error;
 }
 
@@ -3824,45 +3855,58 @@ static SYSCALL_EXT intptr_t
 sys_mknodat_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
+	struct ucred *credential = NULL;
 	struct cwdinfo temporary, *context;
 	struct file *held = NULL;
 	struct path parent;
 	struct componentname name;
+	struct inode_creation_request creation;
 	struct inode *created = NULL;
 	char pathname[PATH_MAX], storage[NAME_MAX + 1U];
 	mode_t mode = (mode_t)args[2];
 	enum inode_type type;
+	mode_t process_umask;
 	int error;
 	if (process == NULL || process->cwdi == NULL)
 		return -EINVAL;
+	credential = cred_process_ref(process);
+	if (credential == NULL)
+		return -EINVAL;
+	process_umask = process->umask;
 	if ((mode & S_IFMT) == S_IFIFO) type = INODE_FIFO;
 	else if ((mode & S_IFMT) == S_IFCHR) type = INODE_CHAR;
 	else if ((mode & S_IFMT) == S_IFBLK) type = INODE_BLOCK;
-	else return -EOPNOTSUPP;
-	if (type == INODE_FIFO && args[3] != 0) return -EINVAL;
+	else { error = EOPNOTSUPP; goto out_credential; }
+	if (type == INODE_FIFO && args[3] != 0) {
+		error = EINVAL;
+		goto out_credential;
+	}
 	if ((type == INODE_CHAR || type == INODE_BLOCK) &&
-	    !cred_is_superuser(process->cred)) return -EPERM;
+	    !cred_is_superuser(credential)) {
+		error = EPERM;
+		goto out_credential;
+	}
 	path_init(&parent);
 	error = copyinstr(args[1], pathname, sizeof(pathname), NULL);
 	if (error != 0)
-		return -error;
+		goto out_credential;
 	if (pathname[0] == '/')
 		context = process->cwdi;
 	else {
 		error = syscall_context_at(process, (int)args[0], &temporary,
 		    &context, &held);
 		if (error != 0)
-			return -error;
+			goto out_credential;
 	}
 	error = namei_parent_path_at(context, pathname, &parent, &name, storage);
 	if (error == 0)
 		mount_vfs_transaction_enter(parent.p_mount);
 	if (error == 0)
-		error = vfs_may_create(parent.p_inode, process->cred);
+		error = inode_creation_request_user(parent.p_inode, credential,
+		    type, (mode & 07777U) & ~process_umask, (dev_t)args[3], NULL,
+		    &creation);
 	if (error == 0)
-		error = inode_mknod(parent.p_inode, &name, type,
-		    (mode & S_IFMT) | ((mode & 07777U) & ~process->umask),
-		    (dev_t)args[3], &created);
+		error = inode_mknod(parent.p_inode, &name, &creation, &created);
 	if (created != NULL)
 		inode_release(created);
 	if (parent.p_mount != NULL)
@@ -3870,6 +3914,8 @@ sys_mknodat_call(const uintptr_t args[6])
 	path_release(&parent);
 	if (held != NULL)
 		(void)file_close(held);
+	out_credential:
+	cred_release(credential);
 	return error == 0 ? 0 : -error;
 }
 

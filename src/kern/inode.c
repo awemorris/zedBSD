@@ -576,91 +576,223 @@ int inode_setattr(struct inode *i, const struct stat *s, unsigned mask)
 		mutex_unlock(&i->i_io_lock);
 	return error;
 }
-int inode_create(struct inode *i, const struct componentname *n, mode_t m,
-		 struct inode **r)
+static int
+creation_request_valid(const struct inode_creation_request *request)
+{
+	if (request == NULL ||
+	    request->origin < INODE_CREATION_USER ||
+	    request->origin > INODE_CREATION_PRESERVE ||
+	    request->type <= INODE_NONE || request->type > INODE_FIFO ||
+	    (request->mode & S_IFMT) != 0)
+		return 0;
+	if (request->type != INODE_CHAR && request->type != INODE_BLOCK &&
+	    request->rdev != 0)
+		return 0;
+	if ((request->type == INODE_SOCKET) != (request->special != NULL))
+		return 0;
+	if (request->origin == INODE_CREATION_PRESERVE)
+		return request->source != NULL &&
+		    request->source->i_type == request->type;
+	return request->source == NULL;
+}
+
+int
+inode_creation_request_user(struct inode *parent,
+	const struct ucred *credential, enum inode_type type, mode_t mode,
+	dev_t rdev, void *special, struct inode_creation_request *request)
 {
 	int error;
-	if (i == NULL || n == NULL || r == NULL) return EINVAL;
+
+	if (parent == NULL || credential == NULL || request == NULL ||
+	    type <= INODE_NONE || type > INODE_FIFO || (mode & S_IFMT) != 0)
+		return EINVAL;
+	memset(request, 0, sizeof(*request));
+	/* Authorization and the set-GID/GID snapshot are one metadata
+	 * observation.  inode_setattr() publishes parent mode and ownership under
+	 * i_io_lock; taking the same domain prevents a child from combining an
+	 * old S_ISGID bit with a newly published parent GID. */
+	error = inode_content_io_lock(parent);
+	if (error != 0)
+		return error;
+	error = vfs_may_create(parent, credential);
+	if (error != 0) {
+		mutex_unlock(&parent->i_io_lock);
+		return error;
+	}
+	request->origin = INODE_CREATION_USER;
+	request->type = type;
+	request->mode = mode & 07777U;
+	request->uid = credential->euid;
+	request->gid = (parent->i_mode & S_ISGID) != 0 ?
+	    parent->i_gid : credential->egid;
+	if (type == INODE_DIR && (parent->i_mode & S_ISGID) != 0)
+		request->mode |= S_ISGID;
+	request->rdev = rdev;
+	request->special = special;
+	mutex_unlock(&parent->i_io_lock);
+	return creation_request_valid(request) ? 0 : EINVAL;
+}
+
+int
+inode_creation_request_system(enum inode_type type, mode_t mode, uid_t uid,
+	gid_t gid, dev_t rdev, struct inode_creation_request *request)
+{
+	if (request == NULL || type <= INODE_NONE || type > INODE_FIFO ||
+	    (mode & S_IFMT) != 0)
+		return EINVAL;
+	memset(request, 0, sizeof(*request));
+	request->origin = INODE_CREATION_SYSTEM;
+	request->type = type;
+	request->mode = mode & 07777U;
+	request->uid = uid;
+	request->gid = gid;
+	request->rdev = rdev;
+	return creation_request_valid(request) ? 0 : EINVAL;
+}
+
+int
+inode_creation_request_preserve(const struct inode *source,
+	struct inode_creation_request *request)
+{
+	if (source == NULL || request == NULL || source->i_type <= INODE_NONE ||
+	    source->i_type > INODE_FIFO)
+		return EINVAL;
+	memset(request, 0, sizeof(*request));
+	request->origin = INODE_CREATION_PRESERVE;
+	request->type = source->i_type;
+	request->mode = source->i_mode & 07777U;
+	request->uid = source->i_uid;
+	request->gid = source->i_gid;
+	request->rdev = source->i_rdev;
+	request->special = source->i_type == INODE_SOCKET ?
+	    source->i_special : NULL;
+	request->source = source;
+	return creation_request_valid(request) ? 0 : EINVAL;
+}
+
+static int
+inode_creation_preserve_acl(struct inode *source, struct inode *child,
+	const char *name)
+{
+	struct posix_acl acl;
+	int error;
+
+	error = posix_acl_load(source, name, &acl);
+	if (error == ENODATA || error == EOPNOTSUPP)
+		return 0;
+	if (error != 0)
+		return error;
+	return posix_acl_store(child, name, &acl);
+}
+
+int
+inode_creation_prepare(struct inode *parent, struct inode *child,
+	const struct inode_creation_request *request)
+{
+	mode_t inherited;
+	int error;
+
+	if (parent == NULL || child == NULL || !creation_request_valid(request) ||
+	    child->i_type != request->type ||
+	    (request->special != NULL && request->type != INODE_SOCKET))
+		return EINVAL;
+	child->i_mode = inode_type_mode(request->type) |
+	    (request->mode & 07777U);
+	child->i_uid = request->uid;
+	child->i_gid = request->gid;
+	child->i_rdev = request->rdev;
+	if (request->origin == INODE_CREATION_PRESERVE &&
+	    (request->type == INODE_REG || request->type == INODE_DIR)) {
+		error = inode_creation_preserve_acl((struct inode *)request->source,
+		    child, POSIX_ACL_XATTR_ACCESS);
+		if (error == 0 && request->type == INODE_DIR)
+			error = inode_creation_preserve_acl(
+			    (struct inode *)request->source, child,
+			    POSIX_ACL_XATTR_DEFAULT);
+		if (error != 0)
+			return error;
+	} else if (request->origin != INODE_CREATION_PRESERVE &&
+	    (request->type == INODE_REG || request->type == INODE_DIR) &&
+	    posix_acl_inherit != NULL) {
+		inherited = child->i_mode;
+		error = posix_acl_inherit(parent, child, &inherited);
+		if (error != 0)
+			return error;
+		child->i_mode = inherited;
+	}
+	if (request->special != NULL) {
+		mutex_lock(&child->i_lock);
+		if (child->i_special != NULL)
+			error = EADDRINUSE;
+		else {
+			child->i_special = request->special;
+			error = 0;
+		}
+		mutex_unlock(&child->i_lock);
+		if (error != 0)
+			return error;
+	}
+	if (request->origin == INODE_CREATION_PRESERVE) {
+		child->i_atime = request->source->i_atime;
+		child->i_mtime = request->source->i_mtime;
+		child->i_ctime = request->source->i_ctime;
+	} else {
+		inode_touch(child, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
+		    INODE_ATTR_CTIME);
+	}
+	return 0;
+}
+
+int inode_create(struct inode *i, const struct componentname *n,
+		 const struct inode_creation_request *request, struct inode **r)
+{
+	int error;
+	if (i == NULL || n == NULL || r == NULL ||
+	    !creation_request_valid(request) || request->type != INODE_REG)
+		return EINVAL;
 	if (readonly(i)) return EROFS;
 	error = i->i_op != NULL && i->i_op->create != NULL ?
-		i->i_op->create(i, n, m, r) : EOPNOTSUPP;
-	if (error == 0 && posix_acl_inherit != NULL) {
-		mode_t inherited = (*r)->i_mode;
-		error = posix_acl_inherit(i, *r, &inherited);
-		if (error == 0 && inherited != (*r)->i_mode) {
-			struct stat status;
-			memset(&status, 0, sizeof(status));status.st_mode = inherited;
-			error = inode_setattr(*r, &status, INODE_ATTR_MODE);
-		}
-		if (error != 0) {
-			if (i->i_op != NULL && i->i_op->unlink != NULL)
-				(void)i->i_op->unlink(i, n);
-			(*r)->i_flags |= INODE_DEAD;
-			inode_release(*r);*r = NULL;
-		}
-	}
+		i->i_op->create(i, n, request, r) : EOPNOTSUPP;
 	if (error == 0) {
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-		inode_touch(*r, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
-			INODE_ATTR_CTIME);
 	}
 	return error;
 }
-int inode_mkdir(struct inode *i, const struct componentname *n, mode_t m,
-		struct inode **r)
+int inode_mkdir(struct inode *i, const struct componentname *n,
+		const struct inode_creation_request *request, struct inode **r)
 {
 	int error;
-	if (i == NULL || n == NULL || r == NULL) return EINVAL;
+	if (i == NULL || n == NULL || r == NULL ||
+	    !creation_request_valid(request) || request->type != INODE_DIR)
+		return EINVAL;
 	if (readonly(i)) return EROFS;
 	error = i->i_op != NULL && i->i_op->mkdir != NULL ?
-		i->i_op->mkdir(i, n, m, r) : EOPNOTSUPP;
-	if (error == 0 && posix_acl_inherit != NULL) {
-		mode_t inherited = (*r)->i_mode;
-		error = posix_acl_inherit(i, *r, &inherited);
-		if (error == 0 && inherited != (*r)->i_mode) {
-			struct stat status;
-			memset(&status, 0, sizeof(status));status.st_mode = inherited;
-			error = inode_setattr(*r, &status, INODE_ATTR_MODE);
-		}
-		if (error != 0) {
-			if (i->i_op != NULL && i->i_op->rmdir != NULL)
-				(void)i->i_op->rmdir(i, n);
-			(*r)->i_flags |= INODE_DEAD;
-			inode_release(*r);*r = NULL;
-		}
-	}
+		i->i_op->mkdir(i, n, request, r) : EOPNOTSUPP;
 	if (error == 0) {
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-		inode_touch(*r, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
-			INODE_ATTR_CTIME);
 	}
 	return error;
 }
 int inode_mknod(struct inode *i, const struct componentname *n,
-		enum inode_type type, mode_t m, dev_t dev, struct inode **r)
+		const struct inode_creation_request *request, struct inode **r)
 {
 	int error;
-	mode_t expected;
-	if (i == NULL || n == NULL || r == NULL)
+	if (i == NULL || n == NULL || r == NULL ||
+	    !creation_request_valid(request))
 		return EINVAL;
-	if (type != INODE_FIFO && type != INODE_SOCKET &&
-	    type != INODE_CHAR && type != INODE_BLOCK)
+	if (request->type != INODE_FIFO && request->type != INODE_SOCKET &&
+	    request->type != INODE_CHAR && request->type != INODE_BLOCK)
 		return EOPNOTSUPP;
-	expected = inode_type_mode(type);
-	if ((m & S_IFMT) != 0 && (m & S_IFMT) != expected)
-		return EINVAL;
 	if (readonly(i))
 		return EROFS;
 	error = i->i_op != NULL && i->i_op->mknod != NULL ?
-		i->i_op->mknod(i, n, type, expected | (m & 07777U), dev, r) :
+		i->i_op->mknod(i, n, request, r) :
 		EOPNOTSUPP;
 	if (error == 0) {
 		inode_dir_changed(i);
 		inode_touch(i, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-		inode_touch(*r, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
-			INODE_ATTR_CTIME);
 	}
 	return error;
 }
@@ -957,10 +1089,13 @@ int inode_link(struct inode *directory, const struct componentname *name,
 	return error;
 }
 int inode_symlink(struct inode *directory, const struct componentname *name,
-		  const char *target, struct inode **result)
+		  const char *target,
+		  const struct inode_creation_request *request,
+		  struct inode **result)
 {
 	int error;
-	if (directory == NULL || name == NULL || target == NULL || result == NULL)
+	if (directory == NULL || name == NULL || target == NULL || result == NULL ||
+	    !creation_request_valid(request) || request->type != INODE_SYMLINK)
 		return EINVAL;
 	if (directory->i_type != INODE_DIR)
 		return ENOTDIR;
@@ -969,13 +1104,11 @@ int inode_symlink(struct inode *directory, const struct componentname *name,
 	if (readonly(directory))
 		return EROFS;
 	error = directory->i_op != NULL && directory->i_op->symlink != NULL ?
-		directory->i_op->symlink(directory, name, target, result) :
+		directory->i_op->symlink(directory, name, target, request, result) :
 		EOPNOTSUPP;
 	if (error == 0) {
 		inode_dir_changed(directory);
 		inode_touch(directory, INODE_ATTR_MTIME | INODE_ATTR_CTIME);
-		inode_touch(*result, INODE_ATTR_ATIME | INODE_ATTR_MTIME |
-			INODE_ATTR_CTIME);
 	}
 	return error;
 }

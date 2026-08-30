@@ -429,3 +429,15 @@ directory `fsync()` may return a false success.  Consequently the required
 root/non-root native ownership and remount-durability cell cannot be honest.
 Resume only after both WS001 prerequisites complete, then rerun the full guest
 cell and all retained host regressions from the same artifact.
+
+## q042 dependency result
+
+q042 processed both prerequisite Phases but did not make either complete.
+`ws001-p015` now retains credential-aware creation and rollback hardening, and
+`ws001-p016` retains truthful directory-sync dispatch with 135 deterministic
+ordering/error checks. Their fresh native/remount gates remain blocked by the
+host Noct CLI regression, and p015 retains two backend fault-injection cells.
+Accordingly this Phase was marked `uncleared` without repeating a guest test
+whose stated prerequisites were not met. Resume only after both WS001 Phases
+are complete; then rerun the entire retained host matrix and the root/non-root
+credential ownership plus remount-durability guest cell from one artifact.

@@ -207,6 +207,15 @@ unix_resolve_endpoint(struct cwdinfo *context, const struct ucred *cred,
 		    !socket_tryref(socket))
 			socket = NULL;
 		mutex_unlock(&resolved.p_inode->i_lock);
+		/* Creation attaches i_special before publishing the pathname so that
+		 * lookup can never observe a socket inode without its endpoint.  The
+		 * inverse half of that contract is checked here: the endpoint is not
+		 * usable until bind() has atomically published this exact bound path. */
+		if (socket != NULL &&
+		    !unix_socket_bound_path_matches(socket, &resolved)) {
+			socket_release(socket);
+			socket = NULL;
+		}
 		if (socket == NULL)
 			error = ECONNREFUSED;
 	}
@@ -1056,8 +1065,9 @@ unix_socket_bind_path(struct socket *socket, struct cwdinfo *context,
 		      const struct sockaddr *address, socklen_t length)
 {
 	struct unix_socket *endpoint;
-	struct path parent;
+	struct path parent, committed_path;
 	struct componentname name;
+	struct inode_creation_request creation;
 	struct inode *inode = NULL;
 	char path[UNIX_PATH_MAX], storage[NAME_MAX + 1U];
 	unsigned long irq;
@@ -1077,29 +1087,26 @@ unix_socket_bind_path(struct socket *socket, struct cwdinfo *context,
 	endpoint->binding_in_progress = 1;
 	spin_unlock_irqrestore(&socket->lock, irq);
 	path_init(&parent);
+	path_init(&committed_path);
 	error = namei_parent_path_at(context, path, &parent, &name, storage);
 	if (error == 0)
 		mount_vfs_transaction_enter(parent.p_mount);
 	if (error == 0)
-		error = vfs_may_create(parent.p_inode, cred);
+		error = inode_creation_request_user(parent.p_inode, cred,
+		    INODE_SOCKET, 0777U & ~umask, 0, socket, &creation);
 	if (error == 0)
-		error = inode_mknod(parent.p_inode, &name, INODE_SOCKET,
-				    S_IFSOCK | (0777U & ~umask), 0, &inode);
+		error = inode_mknod(parent.p_inode, &name, &creation, &inode);
 	if (error == 0) {
-		path_set(&endpoint->bound_path, parent.p_mount, inode);
+		/* Acquire references before the socket spin lock.  Ownership of this
+		 * temporary path is then transferred as one lock-protected publication,
+		 * paired with unix_socket_bound_path_matches() in every resolver. */
+		path_set(&committed_path, parent.p_mount, inode);
+		irq = spin_lock_irqsave(&socket->lock);
+		endpoint->bound_path = committed_path;
+		path_init(&committed_path);
 		strcpy(endpoint->path, path);
 		endpoint->bound = 1;
-		mutex_lock(&inode->i_lock);
-		if (inode->i_special == NULL)
-			inode->i_special = socket;
-		else
-			error = EADDRINUSE;
-		mutex_unlock(&inode->i_lock);
-		if (error != 0) {
-			endpoint->bound = 0;
-			endpoint->path[0] = '\0';
-			path_release(&endpoint->bound_path);
-		}
+		spin_unlock_irqrestore(&socket->lock, irq);
 	}
 	if (error != 0 && inode != NULL)
 		(void)inode_unlink(parent.p_inode, &name);
@@ -1108,6 +1115,7 @@ unix_socket_bind_path(struct socket *socket, struct cwdinfo *context,
 	if (parent.p_mount != NULL)
 		mount_vfs_transaction_leave(parent.p_mount);
 	path_release(&parent);
+	path_release(&committed_path);
 	irq = spin_lock_irqsave(&socket->lock);
 	endpoint->binding_in_progress = 0;
 	spin_unlock_irqrestore(&socket->lock, irq);

@@ -1,20 +1,22 @@
 # WS008: Noct and BeUI
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 WSID: `ws008`
 
-Status: Active; maintainer hold released, target package remains disabled by
-`ws008-p007` until blocked `ws008-p009` can complete
+Status: Blocked; target package remains disabled by `ws008-p007`, p009 awaits
+an accepted target fix, and p010 awaits the maintainer-owned host CLI repair
 
 Parent: [master plan](../master.md)
 
 Last accepted Phase: `ws008-p008`
 
-Resume point: host toolchain p008 is complete at immutable upstream commit
-`3bf3d236aa8ce014c63853dee3b21fa023d877ed`.  Do not execute `ws008-p009`
-until a clean upstream zedBSD-target fix is published or the user explicitly
-chooses a downstream patch-overlay policy.
+Resume point: p008 selected immutable upstream commit
+`3bf3d236aa8ce014c63853dee3b21fa023d877ed`, but a later full production build
+proved that revision rejects the established `--path`/`require` script
+contract. Resume p010 only from a maintainer-approved upstream repair or an
+explicit compatible-revision decision. Do not execute p009 until its separate
+clean upstream zedBSD-target fix or downstream patch-overlay decision exists.
 
 Shared tests: [WS008 test index](tests/README.md)
 
@@ -31,6 +33,7 @@ Shared tests: [WS008 test index](tests/README.md)
 | [`ws008-p007`](phase007-target-package-hold/phase.md) | Complete (`q025`, 2026-08-28) | Target Noct and dependent Remacs are absent from menu, forced selection, and a fresh rootfs; the separate host Noct script runtime remains operational |
 | [`ws008-p008`](phase008-latest-host-toolchain-pin/phase.md) | Complete (`q041`, 2026-08-31) | Host pin `3bf3d236...`, clean detached checkout, Process-enabled static build, stale-stamp invalidation, and clean/incremental toolchain smoke pass |
 | [`ws008-p009`](phase009-base-noct-relocation-target-resume/phase.md) | Blocked | Move target integration to `userland/base/noct/` with clone at `userland/base/noct/noct/`, then re-enable amd64 Noct only after upstream/overlay resolution and QEMU acceptance |
+| [`ws008-p010`](phase010-host-script-cli-contract-repair/phase.md) | Blocked (`MB-008`) | Restore the upstream `--path`/`require` host CLI contract and prove the accepted pin through focused module tests plus an ordinary production build |
 
 The old NOCT-00--NOCT-05 labels are superseded as scheduling units by these
 immutable Phase IDs. Their concerns are retained inside p001--p003 rather than
@@ -48,13 +51,15 @@ requiring a preliminary audit-only Queue item.
   and revision selection rather than a divergent Noct/BeUI implementation.
 - Keep the host build-script interpreter current through one immutable
   upstream revision selected at Queue entry.
+- Preserve the published `--path`/`require` module-loading contract used by
+  repository build scripts, and validate it in an ordinary production build.
 - Own target integration under `userland/base/noct/` and acquire its pristine
   canonical source at `userland/base/noct/noct/` without a gitlink or copied
   source tree.
 
 ## WS completion conditions
 
-WS008 returns to complete when p001--p005 and p007--p009 are complete. p006 is
+WS008 returns to complete when p001--p005 and p007--p010 are complete. p006 is
 retained as an honestly uncleared historical review attempt and is superseded
 by the clean accepted upstream revision integrated through p008/p009; it does
 not need to be replayed. The official Noct source tree must provide working
@@ -147,6 +152,8 @@ ws008-p007 target package hold
                   |
 ws008-p008 latest host toolchain pin
                   |
+ws008-p010 host script CLI contract repair
+                  |
 ws008-p009 new target path and accepted target resume
 ```
 
@@ -158,10 +165,11 @@ VM/JIT failures independently of BeUI.
 
 p008 depends only on the completed scripting bootstrap and is selected by
 q041.
-p009 depends on p008 for the host-pin workflow, but its target revision may be
-newer; when it advances that revision it reruns p008's host gates. p009 also
-depends on an upstream target fix or an explicit downstream patch-overlay
-decision.
+p010 depends on p008 for the host-pin workflow and records a production-path
+compatibility regression discovered after p008's bounded smoke. p009 depends
+on p010 as well as p008, but its target revision may be newer; when it advances
+that revision it reruns the p008 and p010 host gates. p009 also depends on an
+upstream target fix or an explicit downstream patch-overlay decision.
 
 ## 4. Upstream/downstream ownership
 

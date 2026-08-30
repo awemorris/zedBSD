@@ -21,6 +21,8 @@ those paths.
 | `ws001-p009` | utility matrix check, source/test audit, format/provenance review evidence recorded in the Phase report |
 | `ws001-p010` | `tests/test-phase10-local-source.sh`, local bc/ed/m4 host tests, standalone installs, top build, Phase 10 QEMU target |
 | `ws001-p014` | `shell-job-control-test.sh` plus instrumented shell hooks/PTY probe; `qemu-shell-job-control.sh` against the installed amd64 `/bin/sh` |
+| `ws001-p015` | `credential-creation-request-host-test.mk` verifies the exact production authorization/parent-attribute locking boundary; `credential-vfs-qemu.mk` builds native UFS1, UFS2, tmpfs, FAT, and normal overlay-root credential/object probes; `fat-native-vfs-host-test.c` retains the exact FAT production-path regression |
+| `ws001-p016` | `directory-fsync-host-test.mk` links the exact production VFS, UFS1/UFS2, and overlay directory-sync functions and deterministically checks explicit directory dispatch, UFS inode-before-device order, overlay upper-before-journal-before-mount order, and first-error propagation |
 
 When a new Phase fixes a ledger item, add its normative case, failure case,
 executable path, and environment here before marking the row reviewed.
@@ -103,3 +105,72 @@ plan/ws001-posix/tests/qemu-shell-job-control.sh
 Its optional output-directory argument must name a new path. The default is a
 new ignored directory below `plan/ws001-posix/temp/`; only a disposable image
 copy is writable.
+
+## ws001-p015 credential-aware object creation
+
+[`credential-creation-request-host-test.mk`](./credential-creation-request-host-test.mk)
+links the exact production creation-request helper and verifies that create
+authorization and the set-GID/GID snapshot occur under one parent metadata
+lock.  It also checks denial cleanup and the ordinary/set-GID ownership rules:
+
+```sh
+make -f plan/ws001-posix/tests/credential-creation-request-host-test.mk run
+```
+
+[`credential-vfs-qemu.mk`](./credential-vfs-qemu.mk) adds a test-only native
+guest program and three disposable amd64 images.  The guest drops to synthetic
+effective UID/GID 123/456, exercises regular files, directories, FIFOs,
+symlinks, pathname sockets, set-GID parent inheritance, collision, permission
+denial, and FAT's explicit ownership-representation rejection, then verifies
+persistent results after a later boot/remount where applicable.  Build only
+the Phase targets by including the fragment after the ordinary project
+Makefile; do not install the probe in production images.
+
+The existing WS018 FAT native host test is also compiled against the new
+creation request boundary.  It checks successful representable root creation,
+non-destructive `EEXIST`, and the retained FAT lookup/read/write matrix.  The
+guest fixture is the authority for non-root effective ownership; the host FAT
+fixture is not a substitute for it.
+
+[`unix-socket-publication-contract-test.mk`](./unix-socket-publication-contract-test.mk)
+guards the pathname-socket publication boundary that cannot be paused from an
+ordinary guest process.  It requires endpoint resolution to retain the socket
+and then validate the exact committed bound path, and requires bind to acquire
+path references before publishing `bound_path`, the printable path, and the
+bound bit under one socket-lock critical section:
+
+```sh
+make -f plan/ws001-posix/tests/unix-socket-publication-contract-test.mk run
+```
+
+The native guest remains the behavioral authority for successful tmpfs, UFS,
+and overlay pathname binds.  This focused source contract specifically keeps
+an early-published `i_special` from becoming usable before bind commits.
+
+Image generation currently depends on the repository's established Noct
+module-search CLI.  A failure in which the pinned interpreter rejects
+`--path=tools/build` is the separate `ws008-p010` blocker and is not evidence
+that the guest acceptance passed.
+
+## ws001-p016 directory fsync ordering
+
+[`directory-fsync-host-test.mk`](./directory-fsync-host-test.mk) builds three
+small host executables from the exact production functions.  It uses linker
+section collection to avoid substituting copied filesystem logic and makes
+only the private UFS/overlay sync entry points visible in the temporary object
+files.  Run it without the aggregate test target:
+
+```sh
+make -f plan/ws001-posix/tests/directory-fsync-host-test.mk run
+```
+
+The VFS cell proves that a directory without an explicit operation returns
+`EOPNOTSUPP` without falling through to `inode_sync()`, while regular-file
+fallback remains unchanged.  The UFS cell proves inode persistence precedes
+the device flush and that either error is returned.  The overlay cell proves
+upper-directory sync, journal sync, and upper-mount sync order, including
+lower-only/read-only cases and independent failures at every boundary.
+
+This host fixture does not prove namespace survival across a real remount or a
+storage-device flush.  Those remain the disposable-image/QEMU acceptance
+portion of the Phase and must not be inferred from a clean host-test exit.

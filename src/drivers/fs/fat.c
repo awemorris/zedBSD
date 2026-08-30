@@ -1375,7 +1375,7 @@ fat_raw_set_cluster(struct fat_mount_state *filesystem, uint32_t cluster,
 	struct fat_mount_state *fat = filesystem;
 	uint32_t old_value;
 	unsigned copy;
-	int result;
+	int result, rollback = 0;
 
 	if (!fat_raw_valid_cluster(fat, cluster))
 		return EIO;
@@ -1396,10 +1396,16 @@ fat_raw_set_cluster(struct fat_mount_state *filesystem, uint32_t cluster,
 	 * mirrored FAT update as a side effect.  A healthy volume keeps all
 	 * copies equal, so the primary value is also the rollback value for its
 	 * mirrors. */
-	for (copy = 0; copy < fat->number_of_fats; copy++)
-		(void)fat_raw_set_cluster_copy(filesystem, cluster, old_value,
-			copy);
-	return result;
+	for (copy = 0; copy < fat->number_of_fats; copy++) {
+		int error = fat_raw_set_cluster_copy(filesystem, cluster,
+			old_value, copy);
+
+		if (rollback == 0 && error != 0)
+			rollback = error;
+	}
+	if (rollback != 0)
+		filesystem->read_only = 1;
+	return rollback != 0 ? rollback : result;
 }
 
 static uint32_t fat_raw_dir_cluster(const struct fat_mount_state *fat,
@@ -1516,16 +1522,24 @@ static int fat_raw_free_chain(
 		result = fat_raw_set_cluster(filesystem, clusters[index], 0);
 		if (result != 0) {
 			uint32_t restore;
+			int rollback = 0;
 
 			/* The failing entry restores itself.  Recreate every link
 			 * cleared earlier so callers can also restore the directory
 			 * entry and expose the complete old file after an error. */
-			for (restore = 0; restore < index; restore++)
-				(void)fat_raw_set_cluster(filesystem,
-					clusters[restore],
-					restore + 1U < count ?
-					clusters[restore + 1U] :
-					fat_raw_end_of_chain(fat));
+			for (restore = 0; restore < index; restore++) {
+				int restore_error = fat_raw_set_cluster(filesystem,
+				    clusters[restore], restore + 1U < count ?
+				    clusters[restore + 1U] :
+				    fat_raw_end_of_chain(fat));
+
+				if (rollback == 0 && restore_error != 0)
+					rollback = restore_error;
+			}
+			if (rollback != 0) {
+				filesystem->read_only = 1;
+				result = rollback;
+			}
 			goto out;
 		}
 	}
@@ -1990,9 +2004,15 @@ static int fat_raw_cluster_at(
 				return result;
 			result = fat_raw_set_cluster(file->mount, cluster, next);
 			if (result != 0) {
+				int rollback;
+
 				/* The new cluster is not reachable until the tail link
 				 * succeeds.  Return it to the free pool on failure. */
-				(void)fat_raw_set_cluster(file->mount, next, 0);
+				rollback = fat_raw_set_cluster(file->mount, next, 0);
+				if (rollback != 0) {
+					file->mount->read_only = 1;
+					return rollback;
+				}
 				return result;
 			}
 		} else if (!fat_raw_valid_cluster(fat, next)) {
@@ -2104,6 +2124,8 @@ fat_raw_rollback_growth(struct fat_file_state *file, uint32_t old_first,
 	state->first_cluster = old_first;
 	file->size = old_size;
 	state->directory_dirty = old_directory_dirty;
+	if (result != 0)
+		fat->read_only = 1;
 	return result;
 }
 
@@ -2196,8 +2218,7 @@ static int fat_raw_truncate(
 		return EROFS;
 	if (size > 0xffffffffU)
 		return EINVAL;
-	/* A zero-length file may still own a cluster chain.  Creating an
-	 * existing file has truncate semantics and must release that chain. */
+	/* A zero-length file may still own a cluster chain. */
 	if (size == file->size && (size || !state->first_cluster))
 		return 0;
 	if (state->first_cluster) {
@@ -2234,14 +2255,24 @@ static int fat_raw_truncate(
 		state->directory_dirty = 1;
 		result = fat_raw_flush_file(file);
 		if (result != 0) {
-			(void)fat_raw_restore_directory(file, old_first, old_size,
-				old_directory_dirty);
+			int rollback = fat_raw_restore_directory(file, old_first,
+				old_size, old_directory_dirty);
+
+			if (rollback != 0) {
+				file->mount->read_only = 1;
+				return rollback;
+			}
 			return result;
 		}
 		result = fat_raw_free_chain(file->mount, old_first);
 		if (result != 0) {
-			(void)fat_raw_restore_directory(file, old_first, old_size,
-				old_directory_dirty);
+			int rollback = fat_raw_restore_directory(file, old_first,
+				old_size, old_directory_dirty);
+
+			if (rollback != 0) {
+				file->mount->read_only = 1;
+				return rollback;
+			}
 			return result;
 		}
 		return 0;
@@ -2270,19 +2301,40 @@ static int fat_raw_truncate(
 		state->directory_dirty = 1;
 		result = fat_raw_flush_file(file);
 		if (result != 0) {
-			if (!fat_raw_is_end(fat, tail))
-				(void)fat_raw_set_cluster(file->mount, keep, tail);
-			(void)fat_raw_restore_directory(file, old_first, old_size,
-				old_directory_dirty);
+			int rollback = 0, cleanup;
+
+			if (!fat_raw_is_end(fat, tail)) {
+				cleanup = fat_raw_set_cluster(file->mount, keep, tail);
+				if (rollback == 0 && cleanup != 0)
+					rollback = cleanup;
+			}
+			cleanup = fat_raw_restore_directory(file, old_first,
+				old_size, old_directory_dirty);
+			if (rollback == 0 && cleanup != 0)
+				rollback = cleanup;
+			if (rollback != 0) {
+				file->mount->read_only = 1;
+				return rollback;
+			}
 			return result;
 		}
 		if (fat_raw_is_end(fat, tail))
 			return 0;
 		result = fat_raw_free_chain(file->mount, tail);
 		if (result != 0) {
-			(void)fat_raw_set_cluster(file->mount, keep, tail);
-			(void)fat_raw_restore_directory(file, old_first, old_size,
-				old_directory_dirty);
+			int rollback = 0, cleanup;
+
+			cleanup = fat_raw_set_cluster(file->mount, keep, tail);
+			if (cleanup != 0)
+				rollback = cleanup;
+			cleanup = fat_raw_restore_directory(file, old_first,
+				old_size, old_directory_dirty);
+			if (rollback == 0 && cleanup != 0)
+				rollback = cleanup;
+			if (rollback != 0) {
+				file->mount->read_only = 1;
+				return rollback;
+			}
 			return result;
 		}
 		return 0;
@@ -2347,7 +2399,12 @@ static int fat_raw_extend_directory(
 		return result;
 	result = fat_raw_set_cluster(filesystem, last, added);
 	if (result != 0) {
-		(void)fat_raw_set_cluster(filesystem, added, 0);
+		int rollback = fat_raw_set_cluster(filesystem, added, 0);
+
+		if (rollback != 0) {
+			filesystem->read_only = 1;
+			return rollback;
+		}
 		return result;
 	}
 	return 0;
@@ -2421,16 +2478,15 @@ static int fat_raw_write_directory_entry(
 {
 	uint32_t lba;
 	uint16_t offset;
-	uint8_t saved[32];
 	const uint8_t *raw;
 	uint8_t *sector;
-	int result, rollback;
+	int result;
 
 	result = fat_raw_directory_entry(
 		filesystem, directory, index, &lba, &offset, &raw);
 	if (result != 0)
 		return result;
-	copy_bytes(saved, raw, sizeof(saved));
+	(void)raw;
 	result = fat_engine_write_sector_result(filesystem, lba, &sector);
 	if (result != 0)
 		return result;
@@ -2438,11 +2494,6 @@ static int fat_raw_write_directory_entry(
 	result = fat_engine_mark_sector_dirty(filesystem);
 	if (result == 0)
 		result = fat_engine_flush(filesystem);
-	if (result != 0) {
-		rollback = fat_raw_restore_directory_entry(filesystem, lba, offset,
-			saved);
-		return rollback != 0 ? rollback : result;
-	}
 	if (result == 0) {
 		if (written_lba != 0) *written_lba = lba;
 		if (written_offset != 0) *written_offset = offset;
@@ -2450,29 +2501,9 @@ static int fat_raw_write_directory_entry(
 	return result;
 }
 
-static void fat_raw_rollback_directory_entries(
-	struct fat_mount_state *filesystem,
-	const struct fat_directory *directory, uint32_t first, unsigned count)
-{
-	unsigned i;
-
-	for (i = 0; i < count; i++) {
-		uint32_t lba;
-		uint16_t offset;
-		const uint8_t *raw;
-		uint8_t *sector;
-		if (fat_raw_directory_entry(filesystem, directory, first + i,
-					  &lba, &offset, &raw) != 0)
-			continue;
-		(void)raw;
-		if (fat_engine_write_sector_result(filesystem, lba, &sector) !=
-		    0)
-			continue;
-		sector[offset] = 0xe5;
-		(void)fat_engine_mark_sector_dirty(filesystem);
-		(void)fat_engine_flush(filesystem);
-	}
-}
+static FAT_MUTATION int fat_raw_restore_directory_entries(
+	struct fat_mount_state *filesystem, const uint32_t *lbas,
+	const uint16_t *offsets, const uint8_t entries[][32], unsigned count);
 
 static FAT_MUTATION int fat32_create_entry(
 	struct fat_mount_state *filesystem,
@@ -2483,10 +2514,13 @@ static FAT_MUTATION int fat32_create_entry(
 {
 	uint16_t units[FAT_LFN_MAX_UNITS];
 	uint8_t sfn[11], raw[32];
+	uint8_t saved[FAT_LFN_MAX_ENTRIES + 1U][32];
 	unsigned unit_count, lfn_count, serial, written = 0, i;
+	uint32_t saved_lba[FAT_LFN_MAX_ENTRIES + 1U];
+	uint16_t saved_offset[FAT_LFN_MAX_ENTRIES + 1U];
 	uint32_t first_index = 0, sfn_lba = 0;
 	uint16_t sfn_offset = 0;
-	int result;
+	int result, rollback;
 
 	if (!fat_utf8_to_utf16(component->text, units, &unit_count))
 		return EINVAL;
@@ -2506,6 +2540,20 @@ static FAT_MUTATION int fat32_create_entry(
 				     &first_index);
 	if (result != 0)
 		return result;
+	/* A directory end marker is semantic state, not merely a free slot.
+	 * Snapshot every slot before the first write so a failed multi-entry
+	 * create restores 0x00 markers and any bytes hidden beyond them exactly.
+	 */
+	for (i = 0; i < lfn_count + 1U; i++) {
+		const uint8_t *existing;
+
+		result = fat_raw_directory_entry(filesystem, parent,
+			first_index + i, &saved_lba[i], &saved_offset[i],
+			&existing);
+		if (result != 0)
+			return result;
+		copy_bytes(saved[i], existing, sizeof(saved[i]));
+	}
 	for (i = 0; i < lfn_count; i++) {
 		unsigned ordinal = lfn_count - i;
 		fat_lfn_build_entry(raw, units, unit_count, ordinal,
@@ -2532,9 +2580,9 @@ static FAT_MUTATION int fat32_create_entry(
 		*entry_offset = sfn_offset;
 	return 0;
 rollback:
-	fat_raw_rollback_directory_entries(filesystem, parent, first_index,
-				 written);
-	return result;
+	rollback = fat_raw_restore_directory_entries(filesystem, saved_lba,
+		saved_offset, saved, written);
+	return rollback != 0 ? rollback : result;
 }
 
 static FAT_MUTATION int
@@ -2585,6 +2633,8 @@ fat_raw_insert_entry(struct fat_mount_state *filesystem,
 	if (result != 0) {
 		rollback = fat_raw_restore_directory_entry(filesystem, free_lba,
 			free_offset, saved);
+		if (rollback != 0)
+			filesystem->read_only = 1;
 		return rollback != 0 ? rollback : result;
 	}
 	if (result == 0) {
@@ -2596,6 +2646,10 @@ fat_raw_insert_entry(struct fat_mount_state *filesystem,
 	return result;
 }
 
+static FAT_MUTATION int fat_raw_delete_location(
+	struct fat_mount_state *, const struct fat_directory *, uint32_t,
+	uint16_t);
+
 static FAT_MUTATION int fat_raw_create(
 	struct fat_mount_state *filesystem, const char *path,
 	struct fat_file_state *file)
@@ -2605,7 +2659,7 @@ static FAT_MUTATION int fat_raw_create(
 	uint32_t lba = 0, free_lba = 0;
 	uint16_t offset = 0, free_offset = 0;
 	const uint8_t *sector;
-	int result;
+	int result, rollback;
 
 	if (filesystem == NULL || path == NULL || file == NULL)
 		return EINVAL;
@@ -2618,19 +2672,8 @@ static FAT_MUTATION int fat_raw_create(
 	result = fat_raw_find_entry(filesystem, &parent, &component,
 				  FAT_NAME_EXACT, &lba, &offset,
 				  &free_lba, &free_offset, 0);
-	if (result == 0) {
-		result = fat_engine_read_sector_result(filesystem, lba,
-						       &sector);
-		if (result != 0)
-			return result;
-		if (sector[offset + 11] & 0x10U)
-			return EINVAL;
-		result = fat_raw_populate_file(file, lba, offset,
-					     sector + offset);
-		if (result != 0)
-			return result;
-		return fat_raw_truncate(file, 0);
-	}
+	if (result == 0)
+		return EEXIST;
 	if (result != ENOENT &&
 	    !(filesystem->type == ZEDBSD_FAT32 &&
 	      result == ENOSPC))
@@ -2640,9 +2683,16 @@ static FAT_MUTATION int fat_raw_create(
 	if (result != 0)
 		return result;
 	result = fat_engine_read_sector_result(filesystem, lba, &sector);
-	if (result != 0)
-		return result;
-	return fat_raw_populate_file(file, lba, offset, sector + offset);
+	if (result == 0)
+		result = fat_raw_populate_file(file, lba, offset, sector + offset);
+	if (result == 0)
+		return 0;
+	rollback = fat_raw_delete_location(filesystem, &parent, lba, offset);
+	if (rollback != 0) {
+		filesystem->read_only = 1;
+		return rollback;
+	}
+	return result;
 }
 
 static FAT_MUTATION int
@@ -2660,23 +2710,35 @@ fat_raw_mark_deleted(struct fat_mount_state *filesystem, uint32_t lba,
 	return result == 0 ? fat_engine_flush(filesystem) : result;
 }
 
-static FAT_MUTATION void
-fat_raw_restore_deleted_entries(struct fat_mount_state *filesystem,
+static FAT_MUTATION int
+fat_raw_restore_directory_entries(struct fat_mount_state *filesystem,
 	const uint32_t *lbas, const uint16_t *offsets,
 	const uint8_t entries[][32], unsigned count)
 {
 	unsigned i;
+	int rollback = 0;
 
 	for (i = 0; i < count; i++) {
 		uint8_t *sector;
+		int error;
 
-		if (fat_engine_write_sector_result(filesystem, lbas[i], &sector) !=
-		    0)
+		error = fat_engine_write_sector_result(filesystem, lbas[i],
+		    &sector);
+		if (error != 0) {
+			if (rollback == 0)
+				rollback = error;
 			continue;
+		}
 		copy_bytes(sector + offsets[i], entries[i], 32U);
-		(void)fat_engine_mark_sector_dirty(filesystem);
-		(void)fat_engine_flush(filesystem);
+		error = fat_engine_mark_sector_dirty(filesystem);
+		if (error == 0)
+			error = fat_engine_flush(filesystem);
+		if (rollback == 0 && error != 0)
+			rollback = error;
 	}
+	if (rollback != 0)
+		filesystem->read_only = 1;
+	return rollback;
 }
 
 static FAT_MUTATION int
@@ -2742,10 +2804,12 @@ fat_raw_delete_location(struct fat_mount_state *filesystem,
 				result = fat_raw_mark_deleted(filesystem,
 					saved_lba[i], saved_offset[i]);
 				if (result != 0) {
-					fat_raw_restore_deleted_entries(filesystem,
-						saved_lba, saved_offset, saved,
-						attempted);
-					return result;
+					int rollback =
+					    fat_raw_restore_directory_entries(filesystem,
+					    saved_lba, saved_offset, saved,
+					    attempted);
+
+					return rollback != 0 ? rollback : result;
 				}
 			}
 			return 0;
@@ -2819,7 +2883,8 @@ fat_raw_initialize_directory(struct fat_mount_state *filesystem,
 }
 
 static FAT_MUTATION int
-fat_raw_mkdir(struct fat_mount_state *filesystem, const char *path)
+fat_raw_mkdir(struct fat_mount_state *filesystem, const char *path,
+	uint32_t *created_cluster)
 {
 	struct fat_directory parent;
 	struct fat_component component;
@@ -2827,6 +2892,9 @@ fat_raw_mkdir(struct fat_mount_state *filesystem, const char *path)
 	uint16_t offset;
 	int result;
 
+	if (created_cluster == NULL)
+		return EINVAL;
+	*created_cluster = 0;
 	if (filesystem->read_only)
 		return EROFS;
 	result = fat_raw_resolve_parent(filesystem, path, &parent, &component);
@@ -2840,8 +2908,21 @@ fat_raw_mkdir(struct fat_mount_state *filesystem, const char *path)
 	if (result == 0)
 		result = fat_raw_insert_entry(filesystem, &parent, &component,
 			0x10U, cluster, 0, &lba, &offset);
-	if (result != 0)
-		(void)fat_raw_free_chain(filesystem, cluster);
+	if (result != 0) {
+		/* A failed entry rollback may have left a reachable reference to
+		 * this cluster.  In that state leaking it is safer than freeing
+		 * storage which an on-disk directory may still name. */
+		if (filesystem->read_only)
+			return result;
+		int rollback = fat_raw_free_chain(filesystem, cluster);
+
+		if (rollback != 0) {
+			filesystem->read_only = 1;
+			return rollback;
+		}
+	} else {
+		*created_cluster = cluster;
+	}
 	return result;
 }
 
@@ -2925,6 +3006,8 @@ fat_raw_update_dotdot(struct fat_mount_state *filesystem,
 		return 0;
 	rollback = fat_raw_restore_directory_entry(filesystem, lba, offset,
 		saved);
+	if (rollback != 0)
+		filesystem->read_only = 1;
 	return rollback != 0 ? rollback : result;
 }
 
@@ -3491,21 +3574,29 @@ fat_metadata_load(struct fat_mount_state *state)
 	}
 }
 
+static const struct fat_metadata *
+fat_metadata_find(const struct fat_mount_state *state, const char *path)
+{
+	unsigned i;
+
+	for (i = 0; state != NULL && state->metadata != NULL &&
+	     i < state->metadata->count; i++)
+		if (!strcmp(state->metadata->entries[i].path, path))
+			return &state->metadata->entries[i];
+	return NULL;
+}
+
 static void
 fat_metadata_apply(struct mount *mountp, const char *path, struct inode *inode)
 {
-	struct fat_mount_state *state = fat_mount_state(mountp);
-	unsigned i;
-	for (i = 0; state != NULL && state->metadata != NULL &&
-	     i < state->metadata->count; i++)
-		if (!strcmp(state->metadata->entries[i].path, path)) {
-			inode->i_mode =
-			    (inode->i_mode & S_IFMT) |
-			    state->metadata->entries[i].mode;
-			inode->i_uid = state->metadata->entries[i].uid;
-			inode->i_gid = state->metadata->entries[i].gid;
-			break;
-		}
+	const struct fat_metadata *metadata =
+	    fat_metadata_find(fat_mount_state(mountp), path);
+
+	if (metadata == NULL)
+		return;
+	inode->i_mode = (inode->i_mode & S_IFMT) | metadata->mode;
+	inode->i_uid = metadata->uid;
+	inode->i_gid = metadata->gid;
 }
 
 static struct fat_inode_slot *
@@ -3573,6 +3664,94 @@ join_path(const char *parent, const struct componentname *name,
 	memcpy(output + parent_length, name->cn_nameptr, name->cn_namelen);
 	output[parent_length + name->cn_namelen] = '\0';
 	return 0;
+}
+
+static int
+fat_creation_collision(struct fat_mount_state *state, const char *path)
+{
+	struct fat_directory parent;
+	struct fat_component component;
+	uint32_t lba = 0, free_lba = 0;
+	uint16_t offset = 0, free_offset = 0;
+	int error;
+
+	if (state == NULL || path == NULL)
+		return EINVAL;
+	error = fat_raw_resolve_parent(state, path, &parent, &component);
+	if (error != 0)
+		return error;
+	error = fat_raw_find_entry(state, &parent, &component, FAT_NAME_EXACT,
+	    &lba, &offset, &free_lba, &free_offset, 0);
+	if (error == 0)
+		return EEXIST;
+	if (error != ENOENT && error != ENOSPC)
+		return error;
+	if (state->type != ZEDBSD_FAT32)
+		return 0;
+	error = fat_raw_find_entry(state, &parent, &component,
+	    FAT_NAME_CASEFOLD, &lba, &offset, &free_lba, &free_offset, 0);
+	if (error == 0)
+		return EEXIST;
+	return error == ENOENT || error == ENOSPC ? 0 : error;
+}
+
+static int
+fat_creation_representation(const struct fat_mount_state *state,
+	const char *path, mode_t *mode, uid_t *uid, gid_t *gid)
+{
+	const struct fat_metadata *metadata;
+
+	if (state == NULL || path == NULL || mode == NULL || uid == NULL ||
+	    gid == NULL)
+		return EINVAL;
+	metadata = fat_metadata_find(state, path);
+	if (metadata != NULL) {
+		*mode = metadata->mode;
+		*uid = metadata->uid;
+		*gid = metadata->gid;
+	} else {
+		*mode = 0755U;
+		*uid = 0;
+		*gid = 0;
+	}
+	return 0;
+}
+
+static int
+fat_creation_representable(const struct fat_mount_state *state,
+	const char *path, const struct inode_creation_request *request,
+	enum inode_type type)
+{
+	mode_t mode;
+	uid_t uid;
+	gid_t gid;
+	int error;
+
+	if (request == NULL || request->origin < INODE_CREATION_USER ||
+	    request->origin > INODE_CREATION_PRESERVE ||
+	    request->type != type || (request->mode & S_IFMT) != 0 ||
+	    request->special != NULL || request->rdev != 0)
+		return EINVAL;
+	error = fat_creation_representation(state, path, &mode, &uid, &gid);
+	if (error != 0)
+		return error;
+	return mode == (request->mode & 07777U) && uid == request->uid &&
+	    gid == request->gid ? 0 : EOPNOTSUPP;
+}
+
+static int
+fat_created_inode_matches(const struct fat_mount_state *state,
+	const char *path, const struct inode *inode)
+{
+	mode_t mode;
+	uid_t uid;
+	gid_t gid;
+	int error = fat_creation_representation(state, path, &mode, &uid, &gid);
+
+	if (error != 0)
+		return error;
+	return (inode->i_mode & 07777U) == mode && inode->i_uid == uid &&
+	    inode->i_gid == gid ? 0 : EOPNOTSUPP;
 }
 
 static ino_t
@@ -3724,10 +3903,10 @@ static int fat_lookup(struct inode *, const struct componentname *,
 		      struct inode **);
 static int fat_lookup_casefold(struct inode *, const struct componentname *,
 			       struct inode **);
-static int fat_create(struct inode *, const struct componentname *, mode_t,
-		      struct inode **);
-static int fat_mkdir(struct inode *, const struct componentname *, mode_t,
-		     struct inode **);
+static int fat_create(struct inode *, const struct componentname *,
+		      const struct inode_creation_request *, struct inode **);
+static int fat_mkdir(struct inode *, const struct componentname *,
+		     const struct inode_creation_request *, struct inode **);
 static int fat_unlink(struct inode *, const struct componentname *);
 static int fat_rmdir(struct inode *, const struct componentname *);
 static int fat_rename(struct inode *, const struct componentname *,
@@ -3736,6 +3915,7 @@ static int fat_truncate(struct inode *, off_t);
 static int fat_getattr(struct inode *, struct stat *);
 static int fat_setattr(struct inode *, const struct stat *, unsigned);
 static void fat_reclaim(struct inode *);
+static void fat_orphan(struct inode *);
 static ssize_t fat_read_file(struct file *, void *, size_t);
 static ssize_t fat_write_file(struct file *, const void *, size_t);
 static ssize_t fat_pread_file(struct file *, void *, size_t, off_t);
@@ -4436,42 +4616,100 @@ fat_truncate(struct inode *inode, off_t size)
 
 static int
 fat_create_unlocked(struct inode *directory, const struct componentname *name,
-		    mode_t mode, struct inode **result)
+		    const struct inode_creation_request *request,
+		    struct inode **result)
 {
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
 	struct fat_file_state file = {0};
+	struct inode *created = NULL;
 	char path[ZEDBSD_PATH_MAX];
-	int fsresult;
-	int error;
-	(void)mode;
+	int error, rollback;
+
+	*result = NULL;
 	error = fat_flush_pending_closes(state);
 	if (error != 0)
 		return error;
 	error = join_path(fat_path(directory), name, path);
 	if (error != 0)
 		return error;
-	fsresult = fat_raw_create(state, path, &file);
-	if (fsresult != 0)
-		return fsresult;
-	fsresult = fat_raw_flush_file(&file);
-	if (fsresult != 0)
-		return fsresult;
+	error = fat_creation_collision(state, path);
+	if (error != 0)
+		return error;
+	error = fat_creation_representable(state, path, request, INODE_REG);
+	if (error != 0)
+		return error;
+	error = fat_raw_create(state, path, &file);
+	if (error != 0)
+		return error;
+	error = fat_raw_flush_file(&file);
+	if (error != 0)
+		goto rollback_raw;
 	namecache_remove(directory, name);
-	error = fat_stat_path(directory->i_mount, path, result);
+	error = fat_stat_path(directory->i_mount, path, &created);
+	if (error != 0)
+		goto rollback_raw;
+	fat_sync_inode_state(created, &file);
+	error = inode_creation_prepare(directory, created, request);
 	if (error == 0)
-		fat_sync_inode_state(*result, &file);
+		error = fat_created_inode_matches(state, fat_path(created), created);
+	if (error != 0)
+		goto rollback_inode;
+	*result = created;
+	return 0;
+
+rollback_inode:
+	rollback = fat_raw_unlink(state, path);
+	if (rollback == 0) {
+		fat_orphan(created);
+		namecache_remove(directory, name);
+	} else {
+		mode_t mode;
+		uid_t uid;
+		gid_t gid;
+
+		if (fat_creation_representation(state, fat_path(created), &mode,
+		    &uid, &gid) == 0) {
+			created->i_mode = S_IFREG | mode;
+			created->i_uid = uid;
+			created->i_gid = gid;
+			created->i_rdev = 0;
+		}
+		state->read_only = 1;
+		error = rollback;
+	}
+	*result = created;
+	return error;
+
+rollback_raw:
+	rollback = fat_raw_unlink(state, path);
+	if (rollback != 0) {
+		state->read_only = 1;
+		return rollback;
+	}
+	namecache_remove(directory, name);
 	return error;
 }
 
 static int
 fat_create(struct inode *directory, const struct componentname *name,
-	   mode_t mode, struct inode **result)
+	   const struct inode_creation_request *request, struct inode **result)
 {
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
+	struct inode *created = NULL;
 	int error;
+
+	if (result == NULL)
+		return EINVAL;
+	*result = NULL;
 	mutex_lock(&state->lock);
-	error = fat_create_unlocked(directory, name, mode, result);
+	error = fat_create_unlocked(directory, name, request, &created);
 	mutex_unlock(&state->lock);
+	if (error != 0) {
+		if (created != NULL)
+			inode_release(created);
+		return error;
+	}
+	*result = created;
 	return error;
 }
 
@@ -4499,32 +4737,114 @@ fat_release_orphan(struct inode *inode)
 
 static FAT_MUTATION int
 fat_mkdir_unlocked(struct inode *directory, const struct componentname *name,
-		   mode_t mode, struct inode **result)
+		   const struct inode_creation_request *request,
+		   struct inode **result)
 {
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
+	struct inode *created = NULL;
 	char path[ZEDBSD_PATH_MAX];
-	int error;
-	(void)mode;
+	uint32_t cluster = 0;
+	int error, rollback;
 
+	*result = NULL;
 	error = join_path(fat_path(directory), name, path);
 	if (error != 0)
 		return error;
-	error = fat_raw_mkdir(state, path);
+	error = fat_creation_collision(state, path);
+	if (error != 0)
+		return error;
+	error = fat_creation_representable(state, path, request, INODE_DIR);
+	if (error != 0)
+		return error;
+	error = fat_raw_mkdir(state, path, &cluster);
 	if (error != 0)
 		return error;
 	namecache_remove(directory, name);
-	return fat_stat_path(directory->i_mount, path, result);
+	error = fat_stat_path(directory->i_mount, path, &created);
+	if (error != 0)
+		goto rollback_raw;
+	error = inode_creation_prepare(directory, created, request);
+	if (error == 0)
+		error = fat_created_inode_matches(state, fat_path(created), created);
+	if (error != 0)
+		goto rollback_inode;
+	*result = created;
+	return 0;
+
+rollback_inode:
+	rollback = fat_raw_rmdir(state, path);
+	if (rollback != 0) {
+		mode_t mode;
+		uid_t uid;
+		gid_t gid;
+
+		if (fat_creation_representation(state, fat_path(created), &mode,
+		    &uid, &gid) == 0) {
+			created->i_mode = S_IFDIR | mode;
+			created->i_uid = uid;
+			created->i_gid = gid;
+			created->i_rdev = 0;
+		}
+		state->read_only = 1;
+		error = rollback;
+		*result = created;
+		return error;
+	}
+	/* The directory entry is gone, so no live inode may retain the cluster
+	 * once reclamation starts.  A recoverable free failure is represented by
+	 * pending_orphans instead of the now-dead inode. */
+	fat_inode(created)->fi_first_cluster = 0;
+	fat_orphan(created);
+	namecache_remove(directory, name);
+	rollback = fat_raw_free_chain(state, cluster);
+	if (rollback != 0) {
+		int deferred = state->read_only ? rollback :
+		    fat_defer_orphan(state, cluster);
+
+		if (deferred != 0)
+			state->read_only = 1;
+		*result = created;
+		return deferred != 0 ? deferred : rollback;
+	}
+	*result = created;
+	return error;
+
+rollback_raw:
+	rollback = fat_raw_rmdir(state, path);
+	if (rollback != 0) {
+		state->read_only = 1;
+		return rollback;
+	}
+	rollback = fat_raw_free_chain(state, cluster);
+	if (rollback != 0) {
+		if (state->read_only || fat_defer_orphan(state, cluster) != 0)
+			state->read_only = 1;
+		return rollback;
+	}
+	namecache_remove(directory, name);
+	return error;
 }
 
 static FAT_MUTATION int
 fat_mkdir(struct inode *directory, const struct componentname *name,
-	  mode_t mode, struct inode **result)
+	  const struct inode_creation_request *request, struct inode **result)
 {
 	struct fat_mount_state *state = fat_mount_state(directory->i_mount);
+	struct inode *created = NULL;
 	int error;
+
+	if (result == NULL)
+		return EINVAL;
+	*result = NULL;
 	mutex_lock(&state->lock);
-	error = fat_mkdir_unlocked(directory, name, mode, result);
+	error = fat_mkdir_unlocked(directory, name, request, &created);
 	mutex_unlock(&state->lock);
+	if (error != 0) {
+		if (created != NULL)
+			inode_release(created);
+		return error;
+	}
+	*result = created;
 	return error;
 }
 

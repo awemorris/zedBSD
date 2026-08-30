@@ -4,15 +4,22 @@ Last updated: 2026-08-31
 
 WSID: `ws007`
 
-Status: active; X11 launch and the independently reproduced PC-98 mouse
-regression are repaired, while the separate amd64 mouse report remains carried
+Status: active; X11 launch and the independently reproduced q039 PC-98 PIC
+cascade regression are repaired, but a new user-observed PC-98 Xzed mouse
+failure conflicts with the current managed QEMU pass and is reopened as the
+exact-reproduction Phase `ws007-p004`; the separate amd64 report remains
+carried
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws007-p003` complete; `ws007-p002` carried forward
+Last verified Phase: `ws007-p003` complete; `ws007-p004` planned;
+`ws007-p002` carried forward
 
-Resume point: select GFX-02 integration regression work when prioritized. The
-different amd64 p002 report remains carried pending its original reproducer.
+Resume point: run `ws007-p004` after the active Queue closes. Freeze the exact
+image, qemu-pc98 binary, full argv, display backend, GUI grab/focus state, and
+input path before diagnosing. Do not make a speculative second PIC or Xzed
+repair if the managed headless/GUI matrix continues to pass. The different
+amd64 p002 report remains carried pending its original reproducer.
 
 Shared tests: [WS007 test index](tests/README.md)
 
@@ -23,6 +30,7 @@ Shared tests: [WS007 test index](tests/README.md)
 | [`ws007-p001`](phase001-x11-launch/phase.md) | Complete | PATH script lookup repaired; production `startx` launches the four-program session |
 | [`ws007-p002`](phase002-x11-mouse/phase.md) | Carried forward | Relative tracking/bounds pass; reported mismatch not reproduced and absolute input unavailable |
 | [`ws007-p003`](phase003-pc98-xzed-mouse-pic-cascade/phase.md) | Complete (`q039`) | PIC cascade lifecycle fixture passes; production qemu-pc98 moves Xzed exactly `(320,240) -> (420,290)` through evdev without manual PIC repair |
+| [`ws007-p004`](phase004-pc98-xzed-mouse-exact-reproduction/phase.md) | Planned; Queue-ready | Reconcile the current managed QEMU pass with the user's reproduced failure using immutable image/QEMU/argv/GUI/input records; diagnose before any code repair |
 
 X11 repair precedes `/dev/gpuN`; i915, Vulkan, GLES, and Wayland remain
 separately extractable Phases.
@@ -69,7 +77,7 @@ stale mappings or a black console without a recorded fallback reason.
 | ID | Status | Deliverable | Dependencies | Acceptance gate |
 | --- | --- | --- | --- | --- |
 | GFX-00 | Complete | Xzed/startx packaging and launch audit | Current X11 tree/image rules | `/bin/startx` is present and starts the session by command name in QEMU |
-| GFX-01 | Carried forward | Xzed mouse coordinate/input repair | IN-00 complete; IN-01–IN-04 pending | Relative state/bounds pass; absolute path and original defect await a reproducer |
+| GFX-01 | Active; p002 carried, p003 complete, p004 planned | Xzed mouse coordinate/input repair and exact regression reproduction | IN-00 complete; IN-01–IN-04 pending | Managed and user-observed conditions are frozen separately; any repair follows a demonstrated first broken boundary |
 | GFX-02 | Planned | Xzed, zwm, zshell, and zterm integration regression suite | GFX-00/01 | Start, input, redraw, child exit, and clean session shutdown pass |
 | GFX-10 | Proposed | Versioned `/dev/gpuN` UAPI and capability profiles | Memory/VFS/security audit, BR-00 GPU inventory | Review resolves object lifetime, synchronization, validation, and reduced-profile rules |
 | GFX-11 | Proposed | GPU core and `/bin/gpu` diagnostic/control command | GFX-10 | UAPI conformance, invalid-request isolation, resource cleanup, and diagnostics pass |

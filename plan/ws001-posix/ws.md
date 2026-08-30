@@ -10,8 +10,11 @@ Parent: [master plan](../master.md)
 
 Last verified Phase: `ws001-p014`
 
-Resume point: `ws001-p015` and `ws001-p016` are Queue-ready, independent VFS
-prerequisites for the uncleared `ws005-p005` credential store.
+Resume point: q042 retained passing source and focused host milestones for
+`ws001-p015` and p016. Both remain uncleared until `ws008-p010` permits fresh
+disposable-image/remount acceptance; p015 also retains two explicitly recorded
+backend failure-injection cells. The dependent `ws005-p005` remains held until
+both native prerequisites complete.
 
 Shared tests: [WS001 test index](tests/README.md)
 
@@ -35,8 +38,8 @@ Shared tests: [WS001 test index](tests/README.md)
 | `ws001-p012` | [bounded dirname correction](phase012-dirname/phase.md) | Complete milestone | Host lexical/failure suite and native amd64 build pass; runtime/locale handoff remains |
 | `ws001-p013` | [bounded link/unlink correction](phase013-link-unlink/phase.md) | Complete | Host identity/failure suite and native amd64 build pass; broad filesystem matrix remains |
 | `ws001-p014` | [shell foreground job-control synchronization](phase014-shell-job-control/phase.md) | Complete (`q023`, 2026-08-28) | Foreground pipelines gate every member until TTY handoff; `fg` hands off before `SIGCONT`; background/non-TTY and cleanup regressions pass |
-| `ws001-p015` | [credential-aware VFS object creation](phase015-credential-aware-vfs-creation/phase.md) | Planned; Queue-ready | Carry effective UID/GID and set-GID-parent policy atomically through every filesystem creation backend; unblocks non-root `ws005-p005` |
-| `ws001-p016` | [truthful and durable directory fsync](phase016-directory-fsync/phase.md) | Planned; Queue-ready | Make UFS/overlay directory sync durable and unsupported filesystems fail explicitly; unblocks atomic-publication acceptance in `ws005-p005` |
+| `ws001-p015` | [credential-aware VFS object creation](phase015-credential-aware-vfs-creation/phase.md) | Uncleared (`q042`, 2026-08-31); source/host milestone passes | Explicit effective-credential creation, backend rollback hardening, 883,564 FAT ordinary/sanitized checks, UFS and AF_UNIX focused gates pass; two fault cells and fresh native/remount acceptance remain |
+| `ws001-p016` | [truthful and durable directory fsync](phase016-directory-fsync/phase.md) | Uncleared (`q042`, 2026-08-31); source/host milestone passes | Explicit VFS/UFS/overlay directory-sync behavior and 135 deterministic checks pass; fresh QEMU/remount evidence waits for `ws008-p010` |
 
 Original combined planning context is retained in the
 [legacy Phase 0–10 plan](history/phase000-010-legacy-plan.md).

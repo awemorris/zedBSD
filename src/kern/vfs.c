@@ -181,6 +181,7 @@ vfs_ensure_root_directory(const struct path *root, const char *name,
 			  mode_t mode)
 {
 	struct componentname component;
+	struct inode_creation_request request;
 	struct inode *inode = NULL;
 	int error;
 	component.cn_nameptr = name;
@@ -194,7 +195,10 @@ vfs_ensure_root_directory(const struct path *root, const char *name,
 	}
 	if (error != ENOENT)
 		return error;
-	error = inode_mkdir(root->p_inode, &component, mode, &inode);
+	error = inode_creation_request_system(INODE_DIR, mode, 0, 0, 0,
+	    &request);
+	if (error == 0)
+		error = inode_mkdir(root->p_inode, &component, &request, &inode);
 	if (inode != NULL)
 		inode_release(inode);
 	return error;
