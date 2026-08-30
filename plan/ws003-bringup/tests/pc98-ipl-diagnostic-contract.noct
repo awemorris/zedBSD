@@ -41,6 +41,8 @@ func main(args) {
     var normalImage = build + "/hdd-image.img";
     var diagnosticImage =
         build + "/ws003-p023-pc9821-v13-diagnostic.img";
+    var handoffImage = repo +
+        "/build/handoff/ws003-p024-pc9821-v13-fixed-read-diagnostic.img";
 
     if (Packed.size(normalStage1) != 512 ||
         Packed.size(diagnosticStage1) != 512 ||
@@ -77,13 +79,15 @@ func main(args) {
     run("cmp -i 8192:8192 " + zbShellQuote(normalImage) + " " +
         zbShellQuote(diagnosticImage),
         "unchanged image after fixed IPL sectors");
+    run("cmp " + zbShellQuote(diagnosticImage) + " " +
+        zbShellQuote(handoffImage),
+        "p024 handoff artifact identity");
 
     var diskSource = FileUtil.readText(repo + "/bootloader/pc98/disk-ipl.S");
     var selectorSource = FileUtil.readText(repo + "/bootloader/pc98/lba2.S");
     need(diskSource, "#if ZEDBSD_PC98_IPL_DIAGNOSTIC",
          "diagnostic-only Stage-1 guard");
     need(diskSource, "$0x4531, %dx", "P1E Stage-1 entry checkpoint");
-    need(diskSource, "$2, %cx", "two-tone SENSE-failure checkpoint");
     need(diskSource, "$3, %cx", "three-tone LBA-2-read checkpoint");
     need(selectorSource, "#if ZEDBSD_PC98_IPL_DIAGNOSTIC",
          "diagnostic-only Stage-2 guard");

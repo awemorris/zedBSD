@@ -66,4 +66,8 @@ The runner deliberately has no monitor operation which reads or writes PIC
 ports. It also verifies that the source disk hash is unchanged and rejects a
 fatal guest log.
 
-The 2026-08-31 q039 execution passed with `(320,240) -> (420,290)`.
+The 2026-08-31 q039 execution passed with `(320,240) -> (420,290)`. q043
+repeated that exact result on final image SHA-256 `b62c958f...` and emulator
+SHA-256 `9400ec81...`. That emulator exposes only `-display none` and rejects
+`-vnc`, so an interactive host-pointer/focus/grab cell remains external rather
+than being represented by the deterministic monitor-injection gate.

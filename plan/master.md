@@ -49,16 +49,19 @@ reproduced PC-98 PIC-cascade defect which blocked Xzed mouse events; the
 production qemu-pc98 cursor now moves by the exact injected delta through
 evdev without monitor-side PIC repair. A later comparative audit has isolated
 Stage 1's unused SENSE-before-fixed-read sequence as the narrowest remaining
-V13 compatibility difference; Queue-ready `ws003-p024` removes only that
-transaction while preserving PBR/BOOTZBSD geometry checks. The user's newer
-PC-98 Xzed mouse report conflicts with the still-passing managed QEMU path, so
-Queue-ready `ws007-p004` freezes the exact image/QEMU/GUI/input conditions and
-diagnoses the first divergent boundary before any further repair. The archived [q040](queue-q040.md)
+V13 compatibility difference. q043 removes only that transaction while
+preserving PBR/BOOTZBSD geometry checks; its normal and diagnostic qemu-pc98
+paths reach login and exact artifact `7d4e7d67...` awaits one V13 boot. q043 also freezes
+the newer PC-98 Xzed mouse report: the final image and maintained headless QEMU
+path again move the cursor exactly `(320,240) -> (420,290)`, and every focused
+host gate passes. Because that QEMU exposes no interactive display backend,
+`ws007-p004` remains honestly `uncleared` for the user's exact failing GUI
+environment rather than receiving a speculative repair. The archived [q040](queue-q040.md)
 records the uncleared printed-label-only Archer identity checkpoint and the
-completed independent AF_UNIX/network authorization foundation.  The current
-[Queue Book](queue.md) records active `q041`: checked UHCI/EHCI retirement is
-complete, followed by the independent Wi-Fi credential store and latest pinned host Noct
-toolchain in standing priority order. The
+completed independent AF_UNIX/network authorization foundation. The current
+[Queue Book](queue.md) records q043's PC-98 fixed-read correction and exact
+mouse reproduction; both locally controlled paths pass and their remaining
+external resume facts do not block the next Queue. The
 archived [q038](queue-q038.md) replaced the
 stale or intermediate image used for the first Intel Mac observation with one
 fresh, production-checked UEFI-only artifact and passed the exact larger-USB
@@ -313,11 +316,11 @@ actually warranted.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q042 retained passing source/host milestones for both VFS prerequisites discovered by q041 | `ws001-p014` complete; p015/p016 source/host milestones uncleared | Restore the Noct host CLI through WS008 p010, complete p015's two retained fault cells, then run fresh native/remount acceptance for p015/p016 before returning to WS005 p005 | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q039 p023 confirms the signature and passes every automatic entry-localization gate; p024 is the Queue-ready fixed-read compatibility correction; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p022/p023 qemu-pc98 login passes; p024, one new exact V13 observation, and p018/p019 remain | Execute p024 without waiting for the older p023 artifact, then request one consolidated boot of the new hash and return to dependency-ready p018 work | [WS003](ws003-bringup/ws.md) |
+| `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; restore its Make-owned Noct gate through ws008-p010 | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Audited active; q041 p016 completed checked UHCI/EHCI request retirement with configured and QEMU lifecycle evidence. q040 p026 completed every automatic/read-only intake step and is uncleared only for the purchased unit's printed model/region/revision. `q030` NVMe software and the physical USB-Ethernet path are complete | `ws004-p010`--`p016`, `p018`, p020, and p022--p024 complete | Proceed through q041; obtain one serial-redacted Archer label observation when convenient without blocking independent work | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q029 p001 and q040 p003 complete; q041 p005 host implementation passes and q042 advanced but did not complete its VFS dependencies | Physical USB Ethernet and authenticated control pass; strict local credential parser/store/CLI now pass host safety and regression gates | Complete WS001 p015/p016 after WS008 p010, then requeue p005 root/non-root ownership and remount-durability acceptance; p004 remains hardware-core dependency-gated | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Audited active; not complete. p005 is only the PC/AT capability milestone | `ws006-p005` complete | Execute p006--p008 for producer truthfulness and USB HID when selected; run p009 consumer/legacy-console removal only after the accepted WS008 userland tree is available | [WS006](ws006-input/ws.md) |
-| `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, newer PC-98 Xzed mouse report reopened for exact reproduction | `ws007-p001` and `p003` complete; p004 Queue-ready; amd64 `p002` carried | Execute p004's immutable headless/GUI matrix and diagnose only a reproduced first broken boundary; retain a non-reproduction honestly | [WS007](ws007-graphics/ws.md) |
+| `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked; target packages remain disabled, and the p008 host pin is not production-usable because upstream removed its documented module-path CLI | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 records the later `--path` production-build regression and p009 remains separately target-blocked | Resume p010 from the maintainer's accepted upstream repair or an explicit compatible revision, then resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
@@ -452,11 +455,11 @@ priority one.
 7. Implement WS017's `/dev/graphics` LFB fast path after resolving its retained
    `mprotect` permission-ceiling decision. Do not infer that decision from the
    priority change.
-8. Run the newly extracted `ws007-p004` exact PC-98 mouse reproduction when
-   its corrective Queue is selected. Re-run and finish the remaining WS007
-   integration work after WS017, including real Xzed/LFB behavior. If a mouse
-   defect cannot be reproduced under the frozen conditions, retain it
-   honestly rather than fabricating a fix.
+8. Retain q043's `ws007-p004` result as `uncleared`: the frozen headless PC-98
+   cell and focused input gates pass, while the maintained qemu-pc98 build has
+   no interactive display backend. Resume only from the user's exact failing
+   GUI environment. After WS017, continue the remaining WS007 integration,
+   including real Xzed/LFB behavior.
 9. Continue WS001 POSIX work. Add a bounded `lp`/`lpr` Phase whose deliberate
    model posts PDF directly to an LPD printer and has no local spool queue.
 10. Re-plan WS019 so the installer is written in Noct, then implement it after

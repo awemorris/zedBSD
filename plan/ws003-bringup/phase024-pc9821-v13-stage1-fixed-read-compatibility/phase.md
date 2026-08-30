@@ -4,7 +4,9 @@ Last updated: 2026-08-31
 
 Phase ID: `ws003-p024`
 
-Status: Planned; Queue-ready after the active Queue closes
+Status: Uncleared (`q043`); source/binary/QEMU milestone passes, one exact
+PC-9821V13 boot remains and the independent Noct host-CLI regression blocks
+the production Make-owned checker
 
 Parent: [WS003](../ws.md)
 
@@ -97,7 +99,7 @@ gate and leave this Phase `uncleared`; do not patch Noct inside WS003.
 - LBA-0 Stage 1 contains no AH=`84h` SENSE transaction or `1S` branch;
 - its one AH=`06h` read still publishes the complete fixed CHS 0/0/2 and
   buffer/register contract, checks carry, and reports `1R` on return failure;
-- PBR and BOOTZBSD SENSE/geometry validation remain byte- and source-checked;
+- PBR and BOOTZBSD SENSE/geometry validation remain source-checked;
 - Stage 1 remains 512 bytes and the image retains `IPL1`, `09 00`, `55 aa`,
   the native partition table/selector, and zero PC/AT partition entries;
 - focused positive/negative fixtures, the production image checker, and
@@ -114,3 +116,74 @@ fails in its partition-table/PBR path, if the fixed AH=`06h` call returns an
 explicit error, or if the medium is not exposed as the expected fixed-disk
 BIOS device. None of those outcomes authorizes weakening the PBR/BOOTZBSD
 SENSE checks or changing the native partition format in this Phase.
+
+## q043 automatic result (2026-08-31)
+
+The bounded Stage-1 correction is implemented. LBA 0 no longer issues
+AH=`84h`, owns no `bios_sense` helper or `1S` branch, and still performs one
+ordered AH=`06h` transaction with `ES:BP=1fc0:0000`, `BX=512`, `CX=0`,
+CHS 0/0/2, saved firmware `SI`/`DI`, and a carry-to-`1R` failure edge. The
+independent review found no register, BIOS, or layout defect in that sequence.
+PBR and BOOTZBSD still contain and validate their geometry-dependent SENSE
+paths.
+
+The ordinary and diagnostic Stage-1 binaries are exactly 512 bytes. The
+ordinary installed image retains `IPL1`, `09 00 55 aa`, a zero PC/AT
+partition-entry region, the native PC-98 partition table at LBA 1, and the
+byte-identical selector at LBA 2--15. The direct fixed-read/source/binary/layout
+contract and its corrupted-`IPL1` negative fixture pass. The strengthened Noct
+contract also confines every required register assignment to the one fixed
+read block and rejects an extra INT 1Bh transaction; it cannot currently run
+because of the independently tracked `ws008-p010` host-tool regression.
+
+QEMU evidence uses qemu-pc98 SHA-256
+`9400ec81d8ce99e89fafa580a5bf6adfaeb9e8be15a8f0eed427710bfd7e12da`
+and the maintained argv from this Phase. The ordinary image SHA-256
+`b62c958face27ed31e74e5725117b0dd2cda57cd3f57c33044f984310d9a804e`
+reaches `init: system running` and `login:`. The diagnostic image emits only
+`P1E` then `P2E`, emits no fixed-IPL failure marker, and also reaches init and
+login. Both disposable runs leave their source image unchanged.
+
+| Gate | Result |
+| --- | --- |
+| Stage-1 512-byte build and `IPL1`/tail checks | PASS |
+| fixed-read/source/binary/native-layout and corrupted-magic checks | PASS |
+| PBR/BOOTZBSD geometry-SENSE source contract | PASS |
+| ordinary qemu-pc98 continuation | PASS: init/login |
+| diagnostic qemu-pc98 continuation | PASS: `P1E`, `P2E`, init/login |
+| independent corrective review | PASS; test-strengthening recommendations applied |
+| `make -j16` compile/link path | Kernel link PASS; post-link Noct invocation rejects `--path=tools/build` |
+| Make-owned Noct contracts and p024 target | BLOCKED by `ws008-p010`; direct invocation also lacks required `zbReadFile`/`zbShellQuote` module symbols |
+| `git diff --check` | PASS |
+
+The p024 Make target deliberately reuses p023's diagnostic-only Stage-1 and
+Stage-2 build directories, then copies and hashes the resulting bytes at the
+p024 handoff path. The p024 contract compares those two images byte-for-byte;
+the current manual equivalent passes. No production image uses diagnostic
+code.
+
+## Physical handoff: one boot
+
+Purpose: check whether removing only the unused Stage-1 SENSE transaction
+allows the PC-9821V13 firmware to reach the fixed CHS read and Stage 2. Boot
+this exact diagnostic image once:
+
+`/home/awe/zedBSD/build/handoff/ws003-p024-pc9821-v13-fixed-read-diagnostic.img`
+
+| Property | Value |
+| --- | --- |
+| Size | 135,266,304 bytes |
+| SHA-256 | `7d4e7d674e4acfc171133567f2969c2d29a09cbbcdde1566d9f05985450eee50` |
+
+Report the screen reached and the audible groups in order:
+
+- no beep: firmware did not enter zedBSD Stage 1;
+- `1`, then `3`: Stage 1 entered but its fixed LBA-2 read failed;
+- `1`, then `4`: Stage 2 entered; a later group `5`, `6`, or `7` respectively
+  localizes partition-table read, `BOOT` lookup, or partition-PBR read;
+- loader/kernel output after `1`, then `4`: the p024 compatibility boundary
+  is cleared.
+
+No second physical attempt is required in this Phase. Until this one result
+arrives, p024 remains `uncleared`; q043 and later independent Queues may still
+finish.

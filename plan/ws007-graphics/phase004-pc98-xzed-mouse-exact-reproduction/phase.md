@@ -4,7 +4,8 @@ Last updated: 2026-08-31
 
 Phase ID: `ws007-p004`
 
-Status: Planned; Queue-ready for exact reproduction and diagnosis
+Status: Uncleared (`q043`); every locally constructible cell passes, while
+the reported interactive-GUI failure remains unreproduced
 
 Parent: [WS007](../ws.md)
 
@@ -125,3 +126,57 @@ evdev ABI, restoring `/dev/mouse`, changing generic QEMU input semantics,
 reopening the independent amd64 p002 report, or modifying a driver outside the
 PC-98 bus-mouse/PIC/Xzed path. Stop for user evidence only after the automatic
 headless and GUI-controlled matrix has been exhausted.
+
+## q043 result (2026-08-31)
+
+No additional mouse, PIC, evdev, or Xzed source change was justified. The
+final p024 production image and maintained qemu-pc98 binary were frozen as:
+
+- image: `build/pc98/hdd-image.img`, 135,266,304 bytes,
+  SHA-256 `b62c958face27ed31e74e5725117b0dd2cda57cd3f57c33044f984310d9a804e`;
+- emulator: `build/qemu-pc98/build/qemu-system-i386`, 84,180,552 bytes,
+  SHA-256 `9400ec81d8ce99e89fafa580a5bf6adfaeb9e8be15a8f0eed427710bfd7e12da`,
+  reporting QEMU `11.0.93`;
+- installed build artifact `build/pc98/bin/Xzed`, 72,408 bytes,
+  SHA-256 `8251ac5e2d5fe7b3bbc4ec218f6a81d38226930bfa60e5a3533f410cf7a455fb`;
+- repository base `c8176d02b5d9021bff4e9e24ff935d749267b933`, with only the
+  concurrently reviewed p024 and q043 planning edits dirty before the run.
+
+The exact passing invocation was:
+
+```text
+build/qemu-pc98/build/qemu-system-i386
+  -M pc9821,pegc=off,coregraph=on
+  -cpu 486 -m 64M -smp 1
+  -drive if=ide,bus=0,unit=0,format=raw,file=<disposable-copy>
+  -display none -serial none
+  -debugcon file=<debug-log> -monitor stdio -no-reboot
+```
+
+It reached login, launched Xzed, found the standard cursor at `(320,240)`,
+and five HMP `mouse_move 20 10` operations moved it exactly to `(420,290)`.
+The production source image remained byte-identical, and the debug log
+contained no `fatal:`, `panic:`, or VFS-initialization failure. A preliminary
+run of the preceding image hash `4982d051...` produced the same exact motion;
+it is not counted as immutable-source evidence because p024 intentionally
+published the final image while that run was active.
+
+Focused gates also pass for the ordinary and UBSan PIC lifecycle fixture, the
+ordinary and ASan/UBSan Xzed coordinate/clamp fixture, independent PC/AT and
+PC-98 input/HID producer ownership in ordinary and sanitized builds, and the
+ordinary and sanitized Xzed evdev consumer/disconnect matrix.
+
+The maintained qemu-pc98 build reports only `none` from `-display help` and
+rejects `-vnc` as an invalid option. Therefore no interactive window,
+focus/grab, or host-pointer cell exists locally; only deterministic monitor
+injection can be exercised. The maintained Noct runner is independently
+unavailable because the pinned host tool lacks its required helper/CLI
+contract (`zbShellQuote` is unresolved without the already-rejected
+`--path`); q043 used the Phase-authorized direct QEMU sequence and did not
+modify or work around Noct.
+
+The Phase remains `uncleared`. Resume only with the user's exact failing QEMU
+command, image SHA-256, qemu-pc98 binary SHA-256/version, display backend,
+focus/grab state, and observed pointer behavior. If those facts identify a
+GUI/backend difference, extract it as a new Phase. Do not change the current
+passing PC-98 input path speculatively.

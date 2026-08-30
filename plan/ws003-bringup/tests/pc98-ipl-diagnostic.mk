@@ -11,6 +11,8 @@ WS003_P023_STAGE2_ELF := $(WS003_P023_BUILD)/bootloader/stage2.elf
 WS003_P023_STAGE2_BIN := $(WS003_P023_BUILD)/bootloader/stage2.bin
 WS003_P023_IMAGE := $(BUILD)/ws003-p023-pc9821-v13-diagnostic.img
 WS003_P023_HASH := $(WS003_P023_IMAGE).sha256
+WS003_P024_IMAGE := build/handoff/ws003-p024-pc9821-v13-fixed-read-diagnostic.img
+WS003_P024_HASH := $(WS003_P024_IMAGE).sha256
 
 ifneq ($(ZEDBSD_PLATFORM_DIR),pc98)
 $(error ws003-p023 diagnostic image requires the PC-98 target)
@@ -45,6 +47,7 @@ $(WS003_P023_STAGE2_BIN): $(WS003_P023_STAGE2_ELF)
 	@test "$$(od -An -tx1 -j510 -N2 $@ | tr -d ' \n')" = 55aa
 
 .DELETE_ON_ERROR: $(WS003_P023_IMAGE) $(WS003_P023_HASH)
+.DELETE_ON_ERROR: $(WS003_P024_IMAGE) $(WS003_P024_HASH)
 
 $(WS003_P023_IMAGE): $(DISK_IMAGE_ARTIFACT) \
 	$(WS003_P023_STAGE1_BIN) $(WS003_P023_STAGE2_BIN)
@@ -65,3 +68,18 @@ ws003-p023-diagnostic-image: $(WS003_P023_IMAGE) $(WS003_P023_HASH)
 	@printf 'WS003 p023 diagnostic image: %s\n' \
 		'$(abspath $(WS003_P023_IMAGE))'
 	@cat $(WS003_P023_HASH)
+
+$(WS003_P024_IMAGE): $(WS003_P023_IMAGE)
+	@mkdir -p $(dir $@)
+	cp --reflink=auto --sparse=always $< $@.tmp
+	mv -f $@.tmp $@
+
+$(WS003_P024_HASH): $(WS003_P024_IMAGE)
+	sha256sum $< >$@.tmp
+	mv -f $@.tmp $@
+
+.PHONY: ws003-p024-diagnostic-image
+ws003-p024-diagnostic-image: $(WS003_P024_IMAGE) $(WS003_P024_HASH)
+	@printf 'WS003 p024 fixed-read diagnostic image: %s\n' \
+		'$(abspath $(WS003_P024_IMAGE))'
+	@cat $(WS003_P024_HASH)

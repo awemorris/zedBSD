@@ -9,6 +9,26 @@ func need(text, marker, what) {
     }
 }
 
+func forbid(text, marker, what) {
+    if (String.indexOf(text, marker) >= 0) {
+        zbFail(what + " must not appear: " + marker);
+    }
+}
+
+func needCount(text, marker, expected, what) {
+    var rest = text;
+    var count = 0;
+    while (1) {
+        var at = String.indexOf(rest, marker);
+        if (at < 0) { break; }
+        count = count + 1;
+        rest = String.substring(rest, at + String.charCount(marker), -1);
+    }
+    if (count != expected) {
+        zbFail(what + " count=" + count + " expected=" + expected);
+    }
+}
+
 func needOrder(text, first, second, what) {
     var firstAt = String.indexOf(text, first);
     var secondAt = String.indexOf(text, second);
@@ -63,23 +83,47 @@ func main(args) {
         repo + "/bootloader/pc98/disk-ipl.S");
     var selectorSource = FileUtil.readText(
         repo + "/bootloader/pc98/lba2.S");
+    var pbrSource = FileUtil.readText(
+        repo + "/bootloader/pc98/partition-pbr.S");
+    var loaderSource = FileUtil.readText(
+        repo + "/bootloader/pc98/bootzbsd.S");
     checkOwnedStack(diskSource, "relocate:", "LBA-0 IPL");
     checkOwnedStack(selectorSource, "_start:", "LBA-2 selector");
 
-    needOrder(diskSource, "\tcall\tbios_sense", "\tcall\tprepare_target",
-              "SENSE-before-target setup");
-    needOrder(diskSource, "\tcall\tprepare_target", "\tint\t$0x1b",
-              "target-before-read setup");
-    need(diskSource, "\tmovb\t$0x84, %ah", "INT 1Bh SENSE command");
-    need(diskSource, "\tcmpb\t$0x20, %ah", "SENSE status validation");
-    need(diskSource, "\tcmpw\t$512, %bx", "SENSE sector-size validation");
-    need(diskSource, "\ttestb\t%dh, %dh", "SENSE head validation");
-    need(diskSource, "\ttestb\t%dl, %dl", "SENSE sector validation");
-    need(diskSource, "\tmovw\t$0x0002, %dx",
+    var readStart = String.indexOf(diskSource, "\tcall\tprepare_target");
+    var readEnd = String.indexOf(diskSource, "enter_target:");
+    if (readStart < 0 || readEnd <= readStart) {
+        zbFail("fixed Stage-1 read block is missing");
+    }
+    var readBlock = String.substring(
+        diskSource, readStart, readEnd - readStart);
+    forbid(diskSource, "bios_sense", "Stage-1 geometry helper");
+    forbid(diskSource, "\tmovb\t$0x84, %ah", "Stage-1 SENSE command");
+    forbid(diskSource, "$0x5331, %dx", "Stage-1 1S diagnostic");
+    needCount(readBlock, "\tint\t$0x1b", 1,
+              "fixed Stage-1 INT 1Bh transaction");
+    needOrder(readBlock, "\tcall\tprepare_target", "\tmovb\t$0x06, %ah",
+              "target-before-command setup");
+    needOrder(readBlock, "\tmovb\t$0x06, %ah", "\tmovw\t$512, %bx",
+              "read command/sector-size setup");
+    needOrder(readBlock, "\tmovw\t$512, %bx", "\txorw\t%cx, %cx",
+              "sector-size/count setup");
+    needOrder(readBlock, "\txorw\t%cx, %cx", "\tmovw\t$0x0002, %dx",
+              "count/CHS setup");
+    needOrder(readBlock, "\tmovw\t$0x0002, %dx",
+              "\tmovw\t%cs:saved_si, %si", "CHS/SI setup");
+    needOrder(readBlock, "\tmovw\t%cs:saved_si, %si",
+              "\tmovw\t%cs:saved_di, %di", "SI/DI setup");
+    needOrder(readBlock, "\tmovw\t%cs:saved_di, %di", "\tint\t$0x1b",
+              "register-before-transfer setup");
+    needOrder(readBlock, "\tint\t$0x1b", "\tjc\tboot_failure_read",
+              "transfer carry check");
+    need(readBlock, "\tmovb\t$0x06, %ah", "fixed INT 1Bh read command");
+    need(readBlock, "\tmovw\t$512, %bx", "fixed physical-sector size");
+    need(readBlock, "\tmovw\t$0x0002, %dx",
          "physical LBA-2 selector read");
-    need(diskSource, "\tmovw\t%cs:saved_si, %si", "saved firmware SI");
-    need(diskSource, "\tmovw\t%cs:saved_di, %di", "saved firmware DI");
-    need(diskSource, "\tmovw\t$0x5331, %dx", "1S failure diagnostic");
+    need(readBlock, "\tmovw\t%cs:saved_si, %si", "saved firmware SI");
+    need(readBlock, "\tmovw\t%cs:saved_di, %di", "saved firmware DI");
     need(diskSource, "\tmovw\t$0x5231, %dx", "1R failure diagnostic");
     need(diskSource, "\tmovw\t%ax, %es:(%bx)",
          "LBA-0 full character-cell diagnostic");
@@ -92,6 +136,18 @@ func main(args) {
          "LBA-2 full character-cell diagnostic");
     need(selectorSource, "\tmovw\t$0x00e1, %es:(%bx)",
          "LBA-2 full attribute-cell diagnostic");
+    need(pbrSource, "\tcall\tbios_sense",
+         "PBR geometry-dependent SENSE call");
+    need(pbrSource, "\tmovb\t$0x84, %ah", "PBR SENSE command");
+    need(pbrSource, "\tcmpb\t$0x20, %ah", "PBR SENSE status validation");
+    need(pbrSource, "\tcmpw\t$512, %bx", "PBR sector-size validation");
+    need(loaderSource, "mov ah, 0x84", "BOOTZBSD SENSE command");
+    need(loaderSource, "cmp byte ptr [sense_status], 0x20",
+         "BOOTZBSD SENSE status validation");
+    need(loaderSource, "cmp byte ptr [sense_heads], 0",
+         "BOOTZBSD SENSE head validation");
+    need(loaderSource, "cmp byte ptr [sense_sectors], 0",
+         "BOOTZBSD SENSE sector validation");
 
     var stage1 = zbReadFile(repo + "/build/pc98/bootloader/stage1.bin");
     var stage2 = zbReadFile(repo + "/build/pc98/bootloader/stage2.bin");

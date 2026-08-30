@@ -64,10 +64,9 @@ relocated:
 	andb	$0x7f, %al
 	orb	$0x80, %al
 	movb	%al, boot_id
-	call	bios_sense
-	jc	boot_failure_sense
-	/* AH=84 is allowed to alter ES:BP, so establish the read destination
-	 * only after SENSE and immediately before the AH=06 transfer. */
+	/* This IPL always reads the fixed physical sector C=0/H=0/S=2 and does
+	 * not consume drive geometry.  Establish the destination immediately
+	 * before that one bounded AH=06 transfer. */
 	call	prepare_target
 	xorw	%ax, %ax
 	movw	%ax, %ds
@@ -96,40 +95,6 @@ prepare_target:
 	movw	%ax, %es
 	xorw	%bp, %bp
 	ret
-
-bios_sense:
-	pushw	%ds
-	xorw	%ax, %ax
-	movw	%ax, %ds
-	movb	%cs:boot_id, %al
-	movb	$0x84, %ah
-	movw	$0x0100, %bx
-	movw	%cs:saved_si, %si
-	movw	%cs:saved_di, %di
-	int	$0x1b
-	jc	1f
-	cmpb	$0x20, %ah
-	jae	1f
-	cmpw	$512, %bx
-	jne	1f
-	testb	%dh, %dh
-	jz	1f
-	testb	%dl, %dl
-	jz	1f
-	popw	%ds
-	clc
-	ret
-1:
-	popw	%ds
-	stc
-	ret
-
-boot_failure_sense:
-	movw	$0x5331, %dx	/* "1S": LBA 0 SENSE failed. */
-#if ZEDBSD_PC98_IPL_DIAGNOSTIC
-	movw	$2, %cx
-#endif
-	jmp	boot_failure
 boot_failure_read:
 	movw	$0x5231, %dx	/* "1R": LBA 2 read failed. */
 #if ZEDBSD_PC98_IPL_DIAGNOSTIC

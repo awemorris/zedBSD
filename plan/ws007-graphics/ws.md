@@ -5,21 +5,22 @@ Last updated: 2026-08-31
 WSID: `ws007`
 
 Status: active; X11 launch and the independently reproduced q039 PC-98 PIC
-cascade regression are repaired, but a new user-observed PC-98 Xzed mouse
-failure conflicts with the current managed QEMU pass and is reopened as the
-exact-reproduction Phase `ws007-p004`; the separate amd64 report remains
-carried
+cascade regression are repaired. q043 exhausts the maintained local PC-98
+display/input matrix without reproducing the newer user-observed failure, so
+`ws007-p004` is retained honestly as `uncleared`; the separate amd64 report
+also remains carried
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws007-p003` complete; `ws007-p004` planned;
+Last verified Phase: `ws007-p003` complete; `ws007-p004` uncleared in q043;
 `ws007-p002` carried forward
 
-Resume point: run `ws007-p004` after the active Queue closes. Freeze the exact
-image, qemu-pc98 binary, full argv, display backend, GUI grab/focus state, and
-input path before diagnosing. Do not make a speculative second PIC or Xzed
-repair if the managed headless/GUI matrix continues to pass. The different
-amd64 p002 report remains carried pending its original reproducer.
+Resume point: obtain the exact failing image, qemu-pc98 binary, full argv,
+interactive display backend, GUI grab/focus state, and observed pointer
+behavior. The maintained build exposes only `-display none`; its frozen
+headless cell passes exactly `(320,240) -> (420,290)`. Do not make a
+speculative second PIC or Xzed repair. The different amd64 p002 report remains
+carried pending its original reproducer.
 
 Shared tests: [WS007 test index](tests/README.md)
 
@@ -30,7 +31,7 @@ Shared tests: [WS007 test index](tests/README.md)
 | [`ws007-p001`](phase001-x11-launch/phase.md) | Complete | PATH script lookup repaired; production `startx` launches the four-program session |
 | [`ws007-p002`](phase002-x11-mouse/phase.md) | Carried forward | Relative tracking/bounds pass; reported mismatch not reproduced and absolute input unavailable |
 | [`ws007-p003`](phase003-pc98-xzed-mouse-pic-cascade/phase.md) | Complete (`q039`) | PIC cascade lifecycle fixture passes; production qemu-pc98 moves Xzed exactly `(320,240) -> (420,290)` through evdev without manual PIC repair |
-| [`ws007-p004`](phase004-pc98-xzed-mouse-exact-reproduction/phase.md) | Planned; Queue-ready | Reconcile the current managed QEMU pass with the user's reproduced failure using immutable image/QEMU/argv/GUI/input records; diagnose before any code repair |
+| [`ws007-p004`](phase004-pc98-xzed-mouse-exact-reproduction/phase.md) | Uncleared (`q043`) | Final image/QEMU/hash-recorded headless and focused host gates pass; maintained QEMU has no interactive backend, so resume only from the user's exact failing GUI environment |
 
 X11 repair precedes `/dev/gpuN`; i915, Vulkan, GLES, and Wayland remain
 separately extractable Phases.

@@ -4,8 +4,8 @@ Last updated: 2026-08-31
 
 Phase ID: `ws003-p023`
 
-Status: Uncleared (`q039`); every automatic gate passes, awaiting one exact
-PC-9821V13 diagnostic-image observation
+Status: Uncleared historical evidence (`q039`); every automatic gate passes,
+physical handoff superseded by `ws003-p024`
 
 Parent: [WS003](../ws.md)
 
@@ -19,6 +19,11 @@ contain ASCII `IPL1` at offsets 4--7, then produce one separately named,
 immutable diagnostic image whose audible checkpoints distinguish firmware
 handoff, Stage-1 SENSE/read failure, and Stage-2 entry in a single physical
 boot.
+
+The p023 physical request is retired: q043 p024 consumes this localization
+result, removes the unnecessary Stage-1 SENSE, and owns the single current V13
+artifact. Keep this Phase as historical evidence; do not boot its older image
+first.
 
 ## Established facts
 

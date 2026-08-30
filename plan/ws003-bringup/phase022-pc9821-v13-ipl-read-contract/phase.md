@@ -4,8 +4,8 @@ Last updated: 2026-08-31
 
 Phase ID: `ws003-p022`
 
-Status: Uncleared (`q037`); automatic checkpoint passed, awaiting the already
-requested one PC-9821V13 observation
+Status: Uncleared historical evidence (`q037`); automatic checkpoint passed,
+physical handoff superseded by `ws003-p024`
 
 Parent: [WS003](../ws.md)
 
@@ -22,6 +22,10 @@ The automatic result is one frozen `build/pc98/hdd-image.img` whose structure
 and QEMU boot pass.  Completion additionally needs one user-operated V13 boot
 that advances beyond the current beep-and-stop boundary.  Repeated physical
 boots remain a later final-acceptance activity.
+
+The p022 physical request is retired: q043 p024 removes the newly isolated
+unused Stage-1 SENSE transaction and owns the single current V13 artifact.
+Keep this Phase as historical evidence; do not boot its older image first.
 
 ## Captured boundary
 
