@@ -4,15 +4,14 @@ Last updated: 2026-08-30
 
 WSID: `ws018`
 
-Status: active in `q035`; `q026` ownership migration finished
+Status: Complete (`q035`)
 
 Parent: [master plan](../master.md)
 
-Last verified Phases: `ws018-p009`, `ws018-p010`, `ws018-p011`
+Last verified Phase: `ws018-p012`
 
-Resume point: p009 through p011 are complete in q035.  Begin p012 with a fresh
-live-caller audit, then remove only the now-unreferenced compatibility
-filesystem and startup residue.
+Resume point: No Phase remains.  Extract a new requirement before resuming
+this workstream.
 
 Shared tests: [WS018 test index](tests/README.md)
 
@@ -217,7 +216,7 @@ path in the same bounded change.
 | `ws018-p009` | [Independent graphics frontends](phase009-independent-graphics-frontends/phase.md) | Complete (`q035`) | Each supported graphics backend independently supplies `/dev/graphics`; shared frontend is gone |
 | `ws018-p010` | [FAT source consolidation](phase010-fat-source-consolidation/phase.md) | Complete (`q035`) | One driver-owned `fat.c` preserves current FAT/bootfs behavior |
 | `ws018-p011` | [FAT native VFS migration](phase011-fat-native-vfs/phase.md) | Complete (`q035`) | Boot-media files use the normal filesystem contract with overlay and swap intact |
-| `ws018-p012` | [Legacy bootfs and platform residue removal](phase012-legacy-bootfs-removal/phase.md) | Pending next (`q035`) | `struct bootfs`, obsolete internal state, and historical platform residue are absent without regressions |
+| `ws018-p012` | [Legacy bootfs and platform residue removal](phase012-legacy-bootfs-removal/phase.md) | Complete (`q035`) | `struct bootfs`, obsolete internal state, and historical platform residue are absent without regressions |
 
 ## WS completion conditions
 
@@ -238,6 +237,18 @@ path in the same bounded change.
   through ordinary filesystem interfaces; `struct bootfs` is absent.
 - All applicable KA-T001--KA-T110 gates, `make -j16`, and
   `git diff --check` pass without `make check` or `.internal/`.
+
+## Completion result
+
+WS018 completed in `q035` on 2026-08-30.  The final Phase removed the retired
+bootfs/namespace/environment/startup-shell/M9 graph and broad `internal.h`
+state after a fresh caller-and-state-use audit.  `/dev/system` now reads
+unchanged immutable BIOS/device metadata through the focused `kernel.h`
+accessors.
+KA-T110, retained FAT/VFS and swap gates, six fresh supported-manifest builds,
+the ordinary image build, and the four x86 production-loader runtime paths all
+passed.  The four runtime cells directly exercised valid and out-of-range
+`/dev/system` metadata ioctls before overlay/data/file-swap stress.
 
 ## Reconsideration boundaries
 

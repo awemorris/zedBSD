@@ -103,7 +103,7 @@ X68K_EARLY_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(X68K_EARLY_C_SOURCES)) \
 	$(BUILD)/src/hal/m68k/vectors.o
 
 X68K_KERNEL_SOURCES := \
-	src/kern/main.c src/kern/env.c src/kern/fs.c src/kern/namespace.c \
+	src/kern/main.c \
 	$(KERN_FAT_SOURCES) \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
 	src/kern/mount.c src/kern/rootfs.c src/kern/vfs.c src/kern/swap.c \

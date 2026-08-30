@@ -4,9 +4,9 @@ Last updated: 2026-08-30
 
 QID: `q035`
 
-Queue status: in-progress
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: on 2026-08-30 the user supplied an ordered backlog, directed
 the agent to reflect it into the plan, construct Queues in that order, and
@@ -34,7 +34,7 @@ gone.
 | 1 | `ws018-p009` | [Phase](ws018-kernel-architecture/phase009-independent-graphics-frontends/phase.md) | completed | Complete the remaining PC/AT VGA/Cirrus, PC-98 GDC/Cirrus, and graphics-disabled runtime matrix, or record the exact missing-runner boundary without changing the accepted UAPI |
 | 2 | `ws018-p010` | [Phase](ws018-kernel-architecture/phase010-fat-source-consolidation/phase.md) | completed | One `src/drivers/fs/fat.c` and one `include/kern/fat.h` preserve the measured legacy behavior |
 | 3 | `ws018-p011` | [Phase](ws018-kernel-architecture/phase011-fat-native-vfs/phase.md) | completed | FAT uses ordinary filesystem/VFS objects for boot media, overlay images, and swap with no embedded bootfs adapter |
-| 4 | `ws018-p012` | [Phase](ws018-kernel-architecture/phase012-legacy-bootfs-removal/phase.md) | pending | Remove the now-unreferenced bootfs/namespace/startup/M9/internal state while preserving explicit `/dev/system` handoff ownership and four-platform boot |
+| 4 | `ws018-p012` | [Phase](ws018-kernel-architecture/phase012-legacy-bootfs-removal/phase.md) | completed | Remove the now-unreferenced bootfs/namespace/startup/M9/internal state while preserving explicit `/dev/system` handoff ownership and four-platform boot |
 
 ## Dependency and deferral rules
 
@@ -72,3 +72,15 @@ result is synchronized into its Phase/WS/master record, and no deletion has
 crossed an uncleared dependency. WS018 is complete only if all four items meet
 their own completion conditions; a finished Queue with an uncleared item does
 not imply that result.
+
+## Execution result
+
+Completed on 2026-08-30 with all four items cleared.  The graphics runtime
+matrix, mechanical FAT consolidation, native FAT/VFS migration, and final
+legacy-state deletion passed in dependency order.  The final deletion gate
+used a fresh caller audit, focused ordinary/sanitized host coverage, six empty
+supported-manifest builds, the ordinary `make -j16` image build, and the four
+x86 production-loader file-swap paths.  Those runtime paths directly checked
+the production `/dev/system` BIOS/device metadata ioctls before completing
+overlay/data/swap stress.  No item was deferred and no human-decision boundary
+was reached.  WS018 is complete.

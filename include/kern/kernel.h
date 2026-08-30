@@ -20,4 +20,18 @@ kernel_main(
 	const struct boot_device *devices,
 	unsigned device_count);
 
+/*
+ * kernel_main() installs this read-only boot metadata once.  Device entries
+ * are borrowed from kernel-lifetime storage; an out-of-range lookup returns
+ * NULL.
+ */
+uint8_t
+kern_boot_bios_id(void);
+
+unsigned
+kern_boot_device_count(void);
+
+const struct boot_device *
+kern_boot_device_at(unsigned index);
+
 #endif

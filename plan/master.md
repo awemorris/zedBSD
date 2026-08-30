@@ -37,13 +37,17 @@ made the fixed 397,312-sector GPT image safely usable after raw copying to the
 successfully through the USB-root overlay and closes that root-continuity
 boundary without reopening the completed Latitude USB/network evidence.
 
-The current [Queue Book](queue.md) records `q034`, containing only
+The current [Queue Book](queue.md) records `q035`.  It completed the retained
+WS018 graphics runtime matrix, consolidated FAT, migrated FAT boot-media access
+to native VFS objects, and removed the retired bootfs/namespace/startup/M9 and
+broad internal-state graph.  Six empty supported-manifest builds, the ordinary
+image build, focused host gates, and four production x86 boot paths passed;
+WS018 is complete.  The archived [q034](queue-q034.md) completed
 `ws003-p021`. Its generic bounded-GPT implementation, corruption fixtures,
 larger-media SeaBIOS/OVMF USB boots, ordinary regressions, and final CF-SV7
-boot pass; q034 is finished. The accepted contract is general: a coherent
-GPT-declared end may precede the physical disk end; the remaining sectors are
-unallocated rather than an error. A declared end beyond physical capacity is
-rejected. Archived
+boot pass. The accepted contract is general: a coherent GPT-declared end may
+precede the physical disk end; the remaining sectors are unallocated rather
+than an error. A declared end beyond physical capacity is rejected. Archived
 [q033](queue-q033.md) completed `ws003-p020`: its implementation,
 host/negative fixtures, BIOS USB gate, OVMF 4/8/16-GiB matrix, and one CF-SV7
 observation pass.
@@ -290,7 +294,7 @@ actually warranted.
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
-| `ws018` | Kernel source ownership and interface consolidation | Active in `q035`; native FAT complete | p001--p011 complete; p012 remains | Execute p012's fresh caller audit, then remove only proven-dead legacy bootfs/startup residue | [WS018](ws018-kernel-architecture/ws.md) |
+| `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
 | `ws020` | Intel Mac UEFI bring-up and generic image variants | Planned; interrupts immediately after WS018 | p001--p004 planned | After q035, Queue p001 generic Variant/capacity, p002 image layouts, p003 QEMU matrix, then one bounded Intel Mac checkpoint and final five-run acceptance | [WS020](ws020-intel-mac/ws.md) |
 
@@ -392,9 +396,8 @@ priority one.
    checkpoint: record completed milestones and residual Phases separately;
    neither WS is called complete merely because its current visible use case
    works.
-2. Complete WS018. Finish p009's retained runtime evidence, then execute
-   p010--p012 in their consumer-before-deletion order until the source-
-   ownership and native-FAT/bootfs-removal completion contract passes.
+2. WS018 is complete.  q035 finished p009's retained runtime evidence and
+   p010--p012 in consumer-before-deletion order; no residual Phase remains.
 3. Complete WS020 Intel Mac bring-up. Add the generic board Variant and target-
    capacity selections, implement Hybrid/BIOS-only/UEFI-only amd64 image
    profiles, pass the QEMU matrix, then perform the bounded physical UEFI-only

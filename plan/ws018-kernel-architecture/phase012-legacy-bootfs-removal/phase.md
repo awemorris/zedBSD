@@ -1,6 +1,6 @@
 # WS018 Phase 012: legacy bootfs and startup residue removal
 
-Last updated: 2026-08-28
+Last updated: 2026-08-30
 
 WSID: `ws018`
 
@@ -8,8 +8,7 @@ Phase ID: `p012`
 
 Combined ID: `ws018-p012`
 
-Status: Planned; Queue-ready after `ws018-p002`, `ws018-p006`, and
-`ws018-p011`
+Status: Complete (`q035`)
 
 Parent: [WS018](../ws.md)
 
@@ -138,6 +137,59 @@ the removed code, but no active build or test may depend on it.
   existing kernel interface; and
 - all supported builds and representative four-platform boots use the modern
   boot/VFS/init path successfully.
+
+## Result and evidence
+
+Completed in `q035` on 2026-08-30.  The fresh live-caller audit classified the
+remaining graph as follows:
+
+- `fs.c`/`namespace.c` and their mounted-state globals had already been
+  replaced by native mount/namei/inode/file/VFS code;
+- `device.c` and `shell.c` were reachable only from the historical PC-98 M9
+  diagnostic graph; `env.c` was linked and `env_init` was called by production
+  `main.c`, but the initialized state had no reader or writer outside that
+  retired graph; `startup.c` was already absent;
+- `/dev/system` still required the boot BIOS ID and platform boot-device
+  table/count; and
+- no unexpected maintained consumer was found.
+
+`kernel.h` now owns three narrow read-only accessors for that live metadata.
+`main.c` continues to copy the boot handoff, while retaining the old device
+table lifetime contract as a borrowed const view of `entry.c`'s static
+kernel-lifetime array.  Out-of-range lookup returns `NULL`.
+`system-device.c` uses only those accessors; the mutable aliases and broad
+`internal.h` boundary are gone.
+
+The legacy filesystem/namespace facade, old environment, startup
+device/shell sources, their headers, and `internal.h` were deleted.  All six
+platform manifests were updated.  The PC-98 M9 object/rule/image graph, stale
+libc host target, and maintained-test references were removed.  KA-T090 is now
+only a native KA-T100/KA-T101 wrapper, so no active fixture recreates the
+deleted interface.
+
+Verification evidence:
+
+- KA-T110 passed ordinary and ASan/UBSan production-linked runs with 73 checks
+  each, including handoff copy, borrowed device lifetime/count, repeated host
+  initialization, out-of-range lookup, and active source/build/test audits.
+- The BR-T46 file-swap guest issued production `/dev/system` `GET_INFO`, every
+  in-range `GET_DEVICE`, and the count-index `ENOENT` request before exercising
+  overlay/data/swap.  i386 PC/AT, i386 PC-98, and amd64 BIOS passed with one
+  boot device; amd64 UEFI preserved and passed the valid pre-enumeration value
+  of zero devices.  All four paths emitted the metadata marker and final swap
+  PASS.
+- KA-T100/KA-T101 passed ordinary and ASan/UBSan runs with 441,528 checks per
+  run.  KA-T030/KA-T031 passed 110 checks and ownership audit; maintained
+  WS016 backing, runtime swap, boot-source, and command gates passed.
+  BR-T42, BR-T43, BR-T44, KA-T050, and shutdown-order coverage also passed.
+- Empty build directories produced amd64, i386 PC/AT, i386 PC-98,
+  arm64/RPi4, SPARC V9/sun4u, and m68k/X68k kernels, with each architecture's
+  contract checker passing.  Their artifact audit found no retired object;
+  the amd64 global-symbol audit exposed only the three new metadata accessors
+  and none of the old aliases.  The ordinary `make -j16` image build and
+  `git diff --check` passed.
+
+No reconsideration boundary was reached.
 
 ## Reconsideration boundary
 

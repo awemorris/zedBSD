@@ -304,7 +304,7 @@ BUILD_TOOLS_DIR := tools/build
 ZEDBSD_PRIMARY_TARGETS := menuconfig vmunix bootloader rootfs-bin rootfs-usr \
 	rootfs world disk-image run toolchain
 ZEDBSD_SUPPORT_TARGETS := help list-targets check clean distclean
-ZEDBSD_CHECK_TARGETS := check libc-host-test softfloat-host-test \
+ZEDBSD_CHECK_TARGETS := check softfloat-host-test \
 	check-disk-image \
 	phase20-init-notify-host-test phase20-net-config-host-test \
 	phase20-networkd-protocol-host-test phase20-dhcp-host-test \

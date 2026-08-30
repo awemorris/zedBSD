@@ -31,7 +31,7 @@ ARM64_BOOT_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(ARM64_BOOT_C)) \
 	$(patsubst %.S,$(BUILD)/%.o,$(ARM64_BOOT_S))
 
 ARM64_KERNEL_SOURCES := \
-	src/kern/main.c src/kern/env.c src/kern/fs.c src/kern/namespace.c \
+	src/kern/main.c \
 	$(KERN_FAT_SOURCES) \
 	src/kern/inode.c src/kern/file.c src/kern/namecache.c src/kern/namei.c \
 	src/kern/mount.c src/kern/rootfs.c src/kern/tmpfs.c src/kern/overlayfs.c \

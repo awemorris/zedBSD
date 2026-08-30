@@ -64,36 +64,7 @@ ZEDBSD_LIBC_CFLAGS := \
 	-mno-mmx -mno-sse -mno-sse2 \
 	-ffunction-sections -fdata-sections -Wall -Wextra -Werror
 
-ZEDBSD_HOST_TEST_CFLAGS := \
-	-m32 -O2 -fno-builtin -fno-stack-protector \
-	-Wall -Wextra -Werror \
-	-I. -Iinclude -Iinclude/uapi -Isrc -Ilibc/include
-
-$(BUILD)/tests/libc-host-test: tests/libc-host-test.c \
-	$(ZEDBSD_LIBC_SOURCES) src/kern/fs.c src/kern/namespace.c src/kern/env.c \
-	src/kern/disk.c src/kern/buf.c \
-	tests/vfs-host-stubs.c
-	@mkdir -p $(dir $@)
-	$(HOSTCC) $(ZEDBSD_HOST_TEST_CFLAGS) \
-		src/kern/fs.c src/kern/namespace.c src/kern/env.c \
-		src/kern/disk.c src/kern/buf.c src/kern/inode.c src/kern/file.c \
-		src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
-		src/kern/rootfs.c \
-		tests/vfs-host-stubs.c \
-		$(ZEDBSD_LIBC_SOURCES) $< -o $@
-
 libc-objects: $(ZEDBSD_LIBC_OBJECTS)
-
-libc-host-test:
-	@if printf 'int main(void){return 0;}\n' | \
-		$(HOSTCC) -m32 -x c - -o /tmp/zedbsd-libc-m32-probe >/dev/null 2>&1; then \
-		rm -f /tmp/zedbsd-libc-m32-probe; \
-		$(MAKE) --no-print-directory $(BUILD)/tests/libc-host-test; \
-		$(BUILD)/tests/libc-host-test; \
-		echo "zedBSD libc host tests: PASS"; \
-	else \
-		echo "zedBSD libc host tests: SKIP (32-bit host libc unavailable)"; \
-	fi
 
 libc-opcode-check: libc-objects
 	@if $(ZEDBSD_LIBC_OBJDUMP) -d --no-show-raw-insn $(ZEDBSD_LIBC_OBJECTS) | \
@@ -103,4 +74,4 @@ libc-opcode-check: libc-objects
 	fi
 	@echo "zedBSD libc i386 opcode check: PASS"
 
-.PHONY: libc-objects libc-host-test libc-opcode-check
+.PHONY: libc-objects libc-opcode-check

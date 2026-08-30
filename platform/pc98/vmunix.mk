@@ -94,9 +94,6 @@ $(BUILD)/src/kern/vfs.o $(BUILD)/src/kern/platform/pc98.o: \
 STAGE2_OBJS = \
 	$(BUILD)/$(PC98)/boot-header.o \
 	$(BUILD)/src/kern/main.o \
-	$(BUILD)/src/kern/env.o \
-	$(BUILD)/src/kern/fs.o \
-	$(BUILD)/src/kern/namespace.o \
 	$(PC98_DISPLAY_OBJS) \
 	$(KERN_FAT_OBJS) \
 	$(BUILD)/src/kern/inode.o \
@@ -129,11 +126,6 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/panic.o \
 	$(ZEDBSD_LIBC_OBJECTS) \
 	$(HAL_PC98_OBJS) $(KERN_OBJS) $(ZEDBSD_COMPILER_RT_OBJECTS)
-M9_STAGE2_OBJS = $(filter-out $(BUILD)/src/kern/main.o \
-	$(BUILD)/src/kern/shell.o $(BUILD)/src/kern/device.o,$(STAGE2_OBJS)) \
-	$(BUILD)/$(PC98)/stage2-m9-test.o \
-	$(BUILD)/$(PC98)/shell-m9-test.o \
-	$(BUILD)/$(PC98)/device-m9-test.o
 
 vmunix: $(BUILD)/vmunix
 
@@ -144,23 +136,6 @@ $(BUILD)/src/drivers/graphics/pc98/display-cirrus.o: OBJ_CFLAGS = $(PC98_CIRRUS_
 
 $(PC98_GRAPHICS_OBJS) $(PC98_DISPLAY_OBJS): OBJ_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
 $(PC98_GRAPHICS_OBJS): OBJ_CFLAGS = $(ZEDBSD_CFLAGS)
-
-STAGE2_CPPFLAGS = $(ZEDBSD_CPPFLAGS)
-
-$(BUILD)/$(PC98)/stage2-m9-test.o: src/kern/main.c
-	@mkdir -p $(dir $@)
-	$(CC) $(STAGE2_CPPFLAGS) $(ZEDBSD_CFLAGS) -DZEDBSD_M9_WRITE_TEST \
-		-MMD -MP -c $< -o $@
-
-$(BUILD)/$(PC98)/shell-m9-test.o: src/kern/shell.c
-	@mkdir -p $(dir $@)
-	$(CC) $(STAGE2_CPPFLAGS) $(ZEDBSD_CFLAGS) -DZEDBSD_M9_WRITE_TEST \
-		-MMD -MP -c $< -o $@
-
-$(BUILD)/$(PC98)/device-m9-test.o: src/kern/device.c
-	@mkdir -p $(dir $@)
-	$(CC) $(ZEDBSD_CPPFLAGS) $(ZEDBSD_CFLAGS) -DZEDBSD_M9_WRITE_TEST \
-		-MMD -MP -c $< -o $@
 
 # Native four-stage PC-98 boot chain.
 $(BUILD)/bootloader/stage1.o: $(BIOS_LOADER)/disk-ipl.S
@@ -739,16 +714,6 @@ $(BUILD)/stage2.elf: $(STAGE2_OBJS) $(ZEDBSD_GRAPHICS_CONFIG_STAMP) \
 # vmunix is the two-segment ELF itself; patch-stage2.py enforces the
 # subset contract Stage 1 relies on and patches the B98S v2 header.
 $(BUILD)/vmunix: $(BUILD)/stage2.elf platform/pc98/tools/patch-stage2.noct
-	cp $< $@
-	$(NOCT) --path=$(BUILD_TOOLS_DIR) platform/pc98/tools/patch-stage2.noct $@
-
-$(BUILD)/stage2-m9-test.elf: $(M9_STAGE2_OBJS) $(PC98)/stage2.ld
-	$(LD) -m elf_i386 --gc-sections -z max-page-size=512 \
-		-T $(PC98)/stage2.ld -nostdlib \
-		$(M9_STAGE2_OBJS) -o $@
-
-$(BUILD)/vmunix-m9: $(BUILD)/stage2-m9-test.elf \
-	platform/pc98/tools/patch-stage2.noct
 	cp $< $@
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) platform/pc98/tools/patch-stage2.noct $@
 

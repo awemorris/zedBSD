@@ -144,6 +144,35 @@ failure(const char *stage)
 	return 1;
 }
 
+static int
+check_boot_metadata(int descriptor)
+{
+	struct system_info info = {0};
+	struct system_device_info device;
+	uint32_t index;
+
+	if (ioctl(descriptor, ZEDBSD_SYSTEM_GET_INFO, &info) != 0 ||
+	    info.device_count > 64U ||
+	    info.reserved != 0U)
+		return -1;
+	for (index = 0; index < info.device_count; index++) {
+		device = (struct system_device_info){0};
+		device.index = index;
+		if (ioctl(descriptor, ZEDBSD_SYSTEM_GET_DEVICE, &device) != 0 ||
+		    device.index != index || device.reserved != 0U)
+			return -1;
+	}
+	device = (struct system_device_info){0};
+	device.index = info.device_count;
+	errno = 0;
+	if (ioctl(descriptor, ZEDBSD_SYSTEM_GET_DEVICE, &device) != -1 ||
+	    errno != ENOENT)
+		return -1;
+	printf("BR-T46-SYSTEM-METADATA PASS bios=%u devices=%u partitions=%u\n",
+	    info.boot_bios_id, info.device_count, info.partition_count);
+	return 0;
+}
+
 int
 main(void)
 {
@@ -159,6 +188,10 @@ main(void)
 	if (descriptor < 0)
 		return failure("open-system");
 	system_descriptor = descriptor;
+	if (check_boot_metadata(descriptor) != 0) {
+		(void)close(descriptor);
+		return failure("boot-metadata");
+	}
 	if (signal(SIGSEGV, fault_signal) == SIG_ERR ||
 	    signal(SIGBUS, fault_signal) == SIG_ERR) {
 		(void)close(descriptor);

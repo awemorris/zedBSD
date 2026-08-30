@@ -2,7 +2,7 @@
 #include "kern/system-device.h"
 #include "kern/system-swap-device.h"
 #include "kern/cdev.h"
-#include "kern/internal.h"
+#include "kern/kernel.h"
 #include "kern/kmem.h"
 #include "kern/platform.h"
 #include "kern/partition.h"
@@ -133,28 +133,30 @@ system_ioctl(struct file *file, unsigned long request, uintptr_t argument)
 	case ZEDBSD_SYSTEM_GET_INFO: {
 		struct system_info info;
 		memset(&info, 0, sizeof(info));
-		info.boot_bios_id = ho != NULL ? ho->boot_bios_id : 0;
-		info.device_count = device_count;
+		info.boot_bios_id = kern_boot_bios_id();
+		info.device_count = kern_boot_device_count();
 		info.partition_count = partition_count();
 		return copyout(&info, argument, sizeof(info));
 	}
 	case ZEDBSD_SYSTEM_GET_DEVICE: {
+		const struct boot_device *device;
 		struct system_device_info output;
 		uint32_t index;
 		int error = copyin(argument, &output, sizeof(output));
 		if (error != 0)
 			return error;
 		index = output.index;
-		if (index >= device_count)
+		device = kern_boot_device_at(index);
+		if (device == NULL)
 			return ENOENT;
 		memset(&output, 0, sizeof(output));
 		output.index = index;
-		output.device_class = devs[index].device_class;
-		output.flags = devs[index].flags;
-		output.bios_id = devs[index].bios_id;
-		output.display_index = devs[index].display_index;
-		output.heads = devs[index].heads;
-		output.sectors = devs[index].sectors;
+		output.device_class = device->device_class;
+		output.flags = device->flags;
+		output.bios_id = device->bios_id;
+		output.display_index = device->display_index;
+		output.heads = device->heads;
+		output.sectors = device->sectors;
 		return copyout(&output, argument, sizeof(output));
 	}
 	case ZEDBSD_SYSTEM_GET_VMSTAT: {

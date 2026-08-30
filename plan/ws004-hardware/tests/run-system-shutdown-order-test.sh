@@ -19,7 +19,3 @@ grep -A5 'case ZEDBSD_SYSTEM_HALT:' "$repo/src/kern/system-device.c" |
 	grep -q 'system_shutdown_prepare();'
 grep -A5 'case ZEDBSD_SYSTEM_REBOOT:' "$repo/src/kern/system-device.c" |
 	grep -q 'system_shutdown_prepare();'
-grep -A2 'streq(v\[0\], "halt")' "$repo/src/kern/shell.c" |
-	grep -q 'system_shutdown_prepare();'
-grep -A2 'streq(v\[0\], "reboot")' "$repo/src/kern/shell.c" |
-	grep -q 'system_shutdown_prepare();'

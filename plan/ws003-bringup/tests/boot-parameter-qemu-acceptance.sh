@@ -717,6 +717,7 @@ validate_log()
 	file-swap)
 		rg -a -F -q 'swap: swap0 source=boot0:swapfile slots=' "$guest_log" &&
 		rg -a -q 'swap: active sources=1 total=[1-9][0-9]* free=[1-9][0-9]*' "$guest_log" &&
+		rg -a -q 'BR-T46-SYSTEM-METADATA PASS bios=[0-9]+ devices=[0-9]+ partitions=[0-9]+' "$guest_log" &&
 		rg -a -q 'BR-T46-SWAP-EXERCISE OBJECT-SHARED PASS free=[0-9][0-9]* page-in=[0-9][0-9]* page-out=[1-9][0-9]*' "$guest_log" &&
 		rg -a -q 'BR-T46-SWAP-EXERCISE PASS bytes=[1-9][0-9]* page-in=[1-9][0-9]* page-out=[1-9][0-9]* swapped=[0-9][0-9]*' "$guest_log"
 		;;

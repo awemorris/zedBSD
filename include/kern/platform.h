@@ -17,7 +17,6 @@
 #include "kern/boot.h"
 
 struct disk;
-struct bootfs;
 
 #define KERN_PLATFORM_MAX_DEVICES	12U
 

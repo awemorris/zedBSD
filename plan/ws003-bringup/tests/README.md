@@ -274,7 +274,11 @@ Swap cells add the test-only production-ABI `/bin/brt46-swap` helper to a
 private acceptance root image.  A cell passes only after at least 1024 pages
 (4 MiB) have actually paged out, all touched anonymous pages have been read
 back with their contents intact, and the VM counters report a positive
-page-in.  PC-98 observations use QEMU monitor text-VRAM snapshots rather than
+page-in.  File-swap cells also require production `/dev/system` `GET_INFO`,
+every in-range `GET_DEVICE`, and one count-index `ENOENT` query to pass before
+swap pressure begins; a zero boot-device count remains valid on firmware paths
+whose storage enumerates after kernel entry.  PC-98 observations use QEMU
+monitor text-VRAM snapshots rather than
 OCR.  The amd64 UUID and PARTUUID regressions enumerate a distinct auxiliary
 MBR/FAT disk before the production boot disk while `bootindex` still selects
 the production image; this independently verifies loader-origin `boot0` and

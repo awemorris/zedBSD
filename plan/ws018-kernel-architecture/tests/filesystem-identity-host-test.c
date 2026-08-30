@@ -8,7 +8,6 @@
 #include <kern/block-identity.h>
 #include <kern/disk.h>
 #include <kern/fat.h>
-#include <kern/fs.h>
 #include <kern/mount.h>
 #include <kern/partition.h>
 #include <kern/swap.h>
