@@ -11,6 +11,11 @@ IDs, records the current stop/resume point of every WS, and defines dependencies
 between WSs. Detailed scope belongs in each `ws.md`; implementation design,
 acceptance, results, and interruption state belong in each `phase.md`.
 
+Observed defects deliberately deferred from the active Queue are maintained in
+the [known-bug ledger](known-bugs.md).  Their presence does not weaken a Phase's
+declared acceptance boundary, and they return to implementation only when a
+later Queue selects them explicitly.
+
 The completed first hardware north star was:
 
 > Boot zedBSD from USB on a Dell Latitude 5320, reach a usable local shell, and
@@ -285,7 +290,7 @@ actually warranted.
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
-| `ws018` | Kernel source ownership and interface consolidation | Active in `q035`; audited incomplete | p001--p008 and p010 complete; p009 runtime matrix and p011--p012 remain | Finish p009 evidence independently; execute p011 native FAT and only then p012 legacy deletion | [WS018](ws018-kernel-architecture/ws.md) |
+| `ws018` | Kernel source ownership and interface consolidation | Active in `q035`; audited incomplete | p001--p010 complete; p011 active and p012 remains | Complete p011 native FAT and only then execute p012 legacy deletion | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
 
 ## 4. Milestones

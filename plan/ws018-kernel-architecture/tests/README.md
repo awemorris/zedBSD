@@ -22,8 +22,8 @@ disposable build/QEMU evidence belongs under `../temp/` and remains untracked.
 | KA-T060 | p007 | [`run-xzed-input-host-test.sh`](run-xzed-input-host-test.sh) links Xzed's production evdev consumer and proves capability-only multi-device discovery, key/repeat/modifier/Caps translation, framed relative/absolute pointer input, dropped-event resynchronization, split reads, HUP, and absence of legacy/fixed-identity paths |
 | KA-T070 | p008 | [`run-input-hid-host-test.sh`](run-input-hid-host-test.sh) links each production mouse driver directly and proves independent evdev lifecycle, ordered press/release/motion frames, close/reopen state, and late-IRQ exclusion; platform boots provide hardware evidence |
 | KA-T071 | p008 | The same runner proves final input/console/HID source ownership, registration order, and no live `mouse-device.c`, `/dev/mouse`, registry symbol, or legacy UAPI implementation |
-| KA-T080 | p009 | [`run-graphics-frontends-host-test.sh`](run-graphics-frontends-host-test.sh) links the production PC/AT and PC-98 frontends independently and preserves registration, ownership, mode, drawing, glyph, copy-fault, rollback, and restore behavior |
-| KA-T081 | p009 | The same runner proves that both frontend copies remain explicit and behavior-identical, no registry/common implementation remains, and exactly two platform-owned registration sites exist; supported/disabled kernel builds separately prove capability selection and node ownership |
+| KA-T080 | p009 | [`run-graphics-frontends-host-test.sh`](run-graphics-frontends-host-test.sh) links the production PC/AT and PC-98 frontends independently and preserves registration, ownership, mode, drawing, glyph, copy-fault, rollback, and restore behavior; [`run-graphics-runtime-matrix.sh`](run-graphics-runtime-matrix.sh) exercises production PC/AT VGA/Cirrus and PC-98 GDC/Cirrus Xzed entry/render/console restoration |
+| KA-T081 | p009 | The host runner proves that both frontend copies remain explicit and behavior-identical, no registry/common implementation remains, and exactly two platform-owned registration sites exist; the runtime runner builds and boots an amd64 graphics-disabled image and proves `/dev/graphics` is absent |
 | KA-T090 | p010 | [`run-fat-consolidation-host-test.sh`](run-fat-consolidation-host-test.sh) links the consolidated production FAT and filesystem dispatch sources against in-memory FAT12/16/32 images and preserves probe/mount, SFN/LFN lookup and readdir, cross-cluster reads, compatibility-layer mutations, explicit flush persistence, no-space, and read-only behavior |
 | KA-T100 | p011 | FAT boot media provides rootfs image, writable data overlay, and file-backed swap through native filesystem/VFS calls |
 | KA-T101 | p011 | Native partition root and runtime FAT mounts remain usable, with bounded failures for missing/corrupt image files |
@@ -86,6 +86,15 @@ audits retired registry/common paths, and requires exactly one platform-owned
 registration call per frontend.  Supported-target and graphics-disabled kernel
 builds remain the link-time proof that only the selected frontend is present;
 QEMU boots provide the device-node and hardware-backend evidence.
+
+The q035 runtime runner uses `qemu-system-i386` for production PC/AT VGA and
+Cirrus cells, the maintained `pc9821` QEMU for forced GDC (`coregraph=off`) and
+Cirrus (`coregraph=on`) cells, and `qemu-system-x86_64` for the
+graphics-disabled node-absence cell.  Each graphics cell launches Xzed with
+the packaged session, captures a rendered frame, sends `SIGTERM` to its job
+process group, and captures the restored text console.  PC-98 prompt control
+uses the maintained text-VRAM decoder because post-init output is not mirrored
+to debugcon.  All QEMU disks are disposable copies under WS `temp/`.
 
 KA-T090 exercises the retained p010 `bootfs` compatibility boundary in both an
 ordinary build and an ASan/UBSan build.  Its mutations cover create and

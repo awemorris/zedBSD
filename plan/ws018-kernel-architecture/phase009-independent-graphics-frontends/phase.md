@@ -1,6 +1,6 @@
 # WS018 Phase 009: independent graphics frontends
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 WSID: `ws018`
 
@@ -8,7 +8,7 @@ Phase ID: `p009`
 
 Combined ID: `ws018-p009`
 
-Status: uncleared (`q026`; implementation complete, residual runtime matrix)
+Status: Complete (`q035`)
 
 Parent: [WS018](../ws.md)
 
@@ -259,7 +259,50 @@ check were not executed.  Resume by adding or selecting maintained runners for
 those configurations and recording the resulting KA-T080/KA-T081 evidence; no
 known source change is required first.
 
-The source-ownership dependency needed by `ws018-p002` is nevertheless
-satisfied: fonts and complete frontends no longer reside in historical
-platform directories.  q026 may therefore continue with p002 without claiming
-p009's outstanding runtime acceptance.
+The source-ownership dependency needed by `ws018-p002` was nevertheless
+satisfied in q026: fonts and complete frontends no longer resided in historical
+platform directories.  q026 could therefore continue with p002 without
+claiming p009's then-outstanding runtime acceptance.
+
+## q035 completion record (2026-08-30)
+
+q035 added the maintained residual runtime runner
+[`run-graphics-runtime-matrix.sh`](../tests/run-graphics-runtime-matrix.sh).
+It builds isolated production PC/AT, PC-98, and graphics-disabled amd64 images
+with `make -j16`, copies every writable QEMU disk into WS `temp/`, and drives
+login/Xzed/exit from QEMU's monitor only after the relevant guest marker is
+observable.  No `.internal/` material or `make check` target is used.
+
+The complete runner passed from one invocation:
+
+```text
+pcat-vga                 PASS  Xzed 640x480x4; PC/AT text mode restored
+pcat-cirrus              PASS  Xzed 640x480x24; PC/AT text mode restored
+pc98-gdc                 PASS  coregraph=off; Xzed 640x400; prompt restored
+pc98-cirrus              PASS  coregraph=on; Xzed 640x480; prompt restored
+amd64-graphics-disabled  PASS  no frontend/backend link symbol;
+                              stat /dev/graphics -> ENOENT
+KA-T080/KA-T081 production graphics runtime matrix: PASS
+```
+
+The PC/AT cells require the backend-selection marker, a nonempty Xzed
+screendump, process-group `SIGTERM`, the backend's text-restoration marker, and
+a distinct restored-console screendump.  PC-98 emits post-init diagnostics to
+its console rather than debugcon, so the runner uses the maintained PC-98 VRAM
+decoder for login and restored-prompt synchronization.  `coregraph=off` forces
+GDC and produces a 640x400 Xzed frame; `coregraph=on` selects Cirrus and
+produces a 640x480 Xzed frame before restoring the 640x400 text console.  The
+disabled cell boots with `qemu-system-x86_64`, verifies the internal capability
+stamp is `n`, audits the kernel symbol table, and observes `ENOENT` from a guest
+`stat /dev/graphics`.
+
+One preliminary PC/AT attempt observed the already separated intermittent ATA
+cache-flush failure (`BIO_FLUSH`, `error=5`) before graphics could run.  The
+same frozen image reached `login:` on retry and the full invocation above then
+passed.  This is recorded as [`BUG-001`](../../known-bugs.md), is outside this
+graphics Phase, and is not treated as a graphics regression.
+
+The focused host fixture was rerun after the matrix and passed both production
+frontend instances plus its source-ownership audit.  Together with q026's
+amd64 boot-framebuffer/Xzed evidence, the residual VGA/Cirrus and disabled-node
+results satisfy every p009 completion condition.  The Phase is complete.
