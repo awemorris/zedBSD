@@ -38,6 +38,7 @@ Parent: [WS003](../ws.md)
 | BR-T49 | Latitude NVMe overlay installation | The ordinary USB system verifies the existing GPT/ESP, installs only the fixed files into the ESP plus selected existing FAT32 without formatting or NVRAM mutation, and the frozen result boots the NVMe-backed overlay through installed `BOOTX64.EFI` |
 | BR-T50 | Physical network | Static or DHCP setup, peer reachability, and a bounded data transfer pass |
 | BR-T51 | Later Latitude native installation | After a separate WS019 design, the installed UEFI loader selects and boots the explicit native `rootpart` without regressing BR-T49 |
+| BR-T52 | Panasonic CF-SV7 early ACPI/interrupt boundary | Host fixtures cover APIC initial-state policy and bounded early waits, and the production 4/8/16-GiB OVMF and BIOS regressions pass. The physical observation is `PASS` only when one explicitly identified amd64 image advances through IRQ, XMM, and HAL readiness; a new bounded marker is recorded as `BOUNDARY-CAPTURED` and leaves p020 `uncleared`, never as a passing objective |
 
 For the q011 diagnostic BR-T32 image, the top-right GOP marker is unary: one
 large white block means boot services exited, two means the final map passed,

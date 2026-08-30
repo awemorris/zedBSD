@@ -25,6 +25,13 @@ The next hardware/install north star is deliberately staged:
 Native-root installation, GPT creation, and filesystem creation follow as a
 separate milestone after this non-formatting path is accepted.
 
+Panasonic CF-SV7 is the second declared laptop bring-up target. Its first
+captured boundary already passes amd64 UEFI loader handoff, kernel entry, and
+paging, then stops after `A64 ACPI RSDP PASS` and before `A64 IRQ READY`.
+`ws003-p020` owns this early ACPI/interrupt boundary. Later CF-SV7 xHCI,
+storage, root, and device work is extracted only after the earliest stop is
+cleared, without reopening the completed Latitude USB/network evidence.
+
 The current [Queue Book](queue.md) records completed `q032`: i386 PC/AT and
 amd64 BIOS `BOOTZBSD.EXE` now consume `/zedbsd.cfg`, PC-98 `BOOTZBSD.EXE`
 consumes the same language through `/BOOTZBSD.CFG`, and one amd64 hybrid image
@@ -252,7 +259,7 @@ actually warranted.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | Dell Latitude 5320 bring-up | Active; USB/network milestone complete; p018 overlay-NVMe install/boot dependency-gated | p017 LoadOptions policy is superseded by WS013 required `/zedbsd.cfg`; p018 and later native p019 are defined | Run p018 only after WS004/WS013/WS019 overlay prerequisites; retain p019 for the later native-install milestone | [WS003](ws003-bringup/ws.md) |
+| `ws003` | x86 laptop bring-up (Latitude 5320 and CF-SV7) | Active; Latitude USB/network milestone complete; CF-SV7 p020 planned; p018 Latitude overlay-NVMe install/boot dependency-gated | p017 LoadOptions policy is superseded by WS013 required `/zedbsd.cfg`; p018/p019 and CF-SV7 early p020 are defined | Queue p020 independently for the CF-SV7 early boundary; run p018 only after WS004/WS013/WS019 overlay prerequisites and retain p019 for later native installation | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; `q030` NVMe software sequence complete | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Complete automatic WS013/WS019 prerequisites, then run the read-only p025 Latitude checkpoint with the later installed-boot acceptance | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Active; q029 p001 complete; WLAN manually blocked | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Select reconnect/reliability or another dependency-ready networking Phase; WLAN remains blocked | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
@@ -286,6 +293,7 @@ actually warranted.
 | M9 — Asymmetric hard real time | A declared μITRON-compatible profile runs resident work on statically reserved RT cores, communicates with POSIX through a bounded message bridge, and meets a published board-specific latency and limited failure-recovery contract | WS001, WS003, WS004, WS009, WS015 |
 | M10 — Latitude NVMe overlay installation | The ordinary USB system installs into an existing ESP plus selected existing FAT32 without formatting; installed `BOOTX64.EFI` boots the NVMe-backed overlay root from the internal SN740 | WS003, WS004, WS009, WS013, WS019 |
 | M11 — Latitude native installation | A later installer step creates or selects the required native filesystem and boots it with `rootpart=` without regressing M10 | WS003, WS004, WS009, WS013, WS019 |
+| M12 — Panasonic CF-SV7 USB shell | The CF-SV7 clears its captured post-RSDP early interrupt stop, then reaches USB-backed init/login/shell with bounded diagnostics and final repeatability evidence | WS003, WS004, WS006, WS009 |
 | Continuous | POSIX debt and public documentation remain traceable | WS001, WS009, all producers |
 
 ## 5. Dependency map
@@ -303,6 +311,7 @@ WS011 configuration model
 WS003 hardware inventory
   +-- WS004 xHCI + USB storage -- WS003 QEMU/Latitude USB root
   |                                  +-- USB Ethernet -- WS003/WS005 network
+  +-- WS003 p020 CF-SV7 early ACPI/IRQ -- later CF-SV7 USB root
   +-- WS004 PCIe/DMA/interrupts
        +-- NVMe
        +-- RTL8822CE WLAN -- WS005 wpa/networkd (manual hold MB-006)
@@ -351,13 +360,16 @@ WS010 supplies host-side build and test scripting used by all workstreams.
 
 ## 6. Priority waves
 
-1. Preserve M0 and capture the exact Latitude hardware inventory.
+1. Preserve M0, retain the exact available Latitude inventory, and begin the
+   CF-SV7 inventory. Its complete PCI/USB inventory is required before driver
+   selection, not before the already bounded p020 early-IRQ investigation.
 2. Implement QEMU xHCI USB-root boot and stable boot-device selection.
-3. Reach a Latitude USB-root login shell and establish diagnostics.
+3. Preserve the completed Latitude USB/network path and clear the CF-SV7
+   post-RSDP early ACPI/interrupt boundary through `ws003-p020`.
 4. Bring up USB Ethernet as the first physical network path, then implement and
    accept NVMe, the read-only GPT inspector, the no-format overlay installer,
-   Latitude NVMe boot, evdev, and USB HID. USB trial use remains recommended
-   until that installer milestone is complete.
+   Latitude NVMe boot, CF-SV7 USB-root continuation, evdev, and USB HID. USB
+   trial use remains recommended until that installer milestone is complete.
 5. Add the optional LFB Xzed path and the upstream Noct target/BeUI/JIT
    sequence when selected. Independently, after `MB-006` is released, add the
    RTL8822CE driver and pluggable WPA path.
@@ -391,6 +403,7 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | Decision | Owning WS | Required before |
 | --- | --- | --- |
 | Exact Latitude BIOS, boot mode, PCI/USB topology and IDs | WS003 | Driver selection and hardware acceptance |
+| Exact CF-SV7 DMI identity, firmware settings, CPU/APIC mode, PCI/USB topology, and IDs | WS003 | Driver selection after p020; the captured UEFI/RSDP boundary is sufficient to begin bounded early-IRQ diagnostics |
 | Initial Secure Boot scope | WS003 | Resolved: use UEFI with Secure Boot disabled; signing/key enrollment deferred and not required for NVMe |
 | USB Ethernet interface descriptors and, for vendor-specific interfaces, VID:PID/controller family | WS003/WS004/WS005 | Choose CDC ECM/NCM class frontend or Realtek-family frontend for HW-12/NET-10; ACM is inapplicable |
 | Built-in PCI WLAN identity | WS004/WS005 | Resolved as RTL8822CE `10ec:c822`, subsystem `10ec:c130`; implementation and firmware packaging are manually blocked by `MB-006` |

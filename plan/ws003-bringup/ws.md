@@ -8,7 +8,8 @@ Status: active; `ws003-p004` through `ws003-p009` complete in q013; q014
 `ws003-p010` and physical U3 complete through BR-T41; q015 completed `p011`
 through `p015`; q023 completed `ws003-p016`; `ws003-p017` is superseded by
 the WS013 required-`zedbsd.cfg` path; `ws003-p018` is the dependency-gated
-final Latitude NVMe install/boot milestone
+final Latitude NVMe install/boot milestone; `ws003-p020` is the planned first
+Panasonic CF-SV7 early-ACPI/interrupt boundary
 
 Parent: [master plan](../master.md)
 
@@ -19,11 +20,13 @@ the intended UUID to `/dev/sda1`, mounted the
 read-write data loop and root overlay, started init, and reached a root shell,
 proving physical tier U3.
 
-Resume point: finish the automatic WS013/WS019 prerequisites, then perform
-`ws003-p018`. Physical follow-up still includes BR-T31
+Resume point: after explicit Queue approval, run `ws003-p020` as the next
+independent physical bring-up Phase. In parallel, finish the automatic
+WS013/WS019 prerequisites before `ws003-p018`. Latitude follow-up still
+includes BR-T31
 sustained root I/O and, after U4 is otherwise frozen, BR-T30 five-boot
 repeatability. Do not request an additional intermediate hardware boot now.
-Hardware inventory remains incomplete.
+Hardware inventory remains incomplete for both declared laptops.
 
 Shared tests: [WS003 test index](tests/README.md)
 
@@ -50,6 +53,7 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p017` | [UEFI LoadOptions firmware compatibility](phase017-uefi-load-options-compatibility/phase.md) | Superseded by WS013 p003 | Historical BR-T48 converter policy is removed; CT-T016 proves LoadOptions is ignored by the required `/zedbsd.cfg` path |
 | `ws003-p018` | [Latitude existing-FAT NVMe overlay installation and boot](phase018-latitude-nvme-install-boot/phase.md) | Planned; dependency-gated | Install without GPT/mkfs/NVRAM mutation, then boot the installed fallback loader and NVMe overlay |
 | `ws003-p019` | [Latitude NVMe native installation and boot](phase019-latitude-nvme-native-install-boot/phase.md) | Future; not designed | Accept the later native-root installer only after separate WS019 design and QEMU proof |
+| `ws003-p020` | [Panasonic CF-SV7 early ACPI/interrupt bring-up](phase020-cf-sv7-acpi-irq-bringup/phase.md) | Planned; Queue approval required | Replace the current post-RSDP silent stop with bounded evidence and reach IRQ/XMM/HAL readiness without regressing Latitude or QEMU |
 
 `ws003-p003` was the sole authorized item in q012. Its physical result closes
 the PCI/BAR/capability boundary and extracts the first device-enumeration stop
@@ -89,32 +93,46 @@ the affected regressions without reopening the p011--p015 public contract.
 ## Goals
 
 - Boot zedBSD from USB on the Dell Latitude 5320.
+- Boot zedBSD from USB on the Panasonic CF-SV7. Its first bounded milestone is
+  the current post-RSDP early ACPI/interrupt stop; later USB/device work is
+  extracted after that boundary is cleared.
 - Reach a stable init/login shell while continuing to use the intended USB
-  mass-storage root.
-- Establish usable diagnostics and at least one physical network path.
+  mass-storage root on each declared laptop target.
+- Establish usable diagnostics and at least one project physical network path.
+  The existing Latitude USB-Ethernet result satisfies the current network
+  milestone; CF-SV7 networking is not part of p020 or M12 and requires a later
+  explicit Phase if selected.
 - Install from the ordinary USB system into existing NVMe FAT32 partitions and
   boot the overlay through UEFI without formatting; retain native-root
   installation as later p019 work.
 
 ## WS completion conditions
 
-WS003 is complete when USB boot reaches tier U5 in both the declared QEMU matrix
-and on the target laptop, the frozen integrated image reaches a usable shell on
-five consecutive final-acceptance cold boots, the root filesystem passes safe
-I/O tests, one documented physical network path passes configuration and
-transfer tests, and p018 installs then boots the internal-NVMe overlay. The
-later native p019 is a separate milestone rather than a p018 condition.
+WS003 is complete when USB boot reaches tier U5 in the declared QEMU matrix and
+on both declared laptop targets, the frozen integrated image reaches a usable
+shell on five consecutive final-acceptance cold boots per target, the root
+filesystem passes safe I/O tests, one documented physical network path passes
+configuration and transfer tests, and p018 installs then boots the Latitude's
+internal-NVMe overlay. The later native p019 is a separate milestone rather
+than a p018 condition. Intermediate Phases use one consolidated physical
+acceptance boot after their automated batch; they do not demand repeated human
+boots for every internal change.
 
-Target: Dell Latitude 5320, Intel 11th generation platform
+Targets:
+
+- Dell Latitude 5320, Intel 11th-generation platform;
+- Panasonic CF-SV7, exact DMI/CPU/device inventory pending.
 
 ## 1. Objective
 
-Boot a reproducible zedBSD USB image on the target laptop, retain the USB mass
-storage device as the root backing store, reach a stable login shell, establish
-a diagnostic path, and make at least one physical network interface usable.
+Boot a reproducible zedBSD USB image on each target laptop, retain the USB mass
+storage device as the root backing store, reach a stable login shell, and
+establish a diagnostic path. The project also retains at least one physical
+network interface, currently the accepted Latitude USB-Ethernet path; CF-SV7
+networking is a later, separately scoped target.
 After that non-destructive base is stable, use the ordinary USB system to
 install the non-formatting overlay path to existing internal-NVMe FAT32
-storage. Native-root UEFI installation follows separately.
+storage on the Latitude. Native-root UEFI installation follows separately.
 
 The target name alone is insufficient to select drivers. The exact machine
 configuration and PCI/USB IDs are part of the first deliverable.
@@ -133,13 +151,15 @@ confused with operating-system support:
 | U4 — Stable system | init/login/shell work and sustained reads/writes complete without reset or corruption |
 | U5 — Recovery | Timeouts, missing media, and controller errors fail visibly without hanging silently |
 
-M1 requires U0–U5 in QEMU. M2 requires U0–U5 on the Latitude 5320.
+M1 requires U0–U5 in QEMU. M2 requires U0–U5 on the Latitude 5320, and M12
+requires the same staged result on the CF-SV7 after p020 clears its first
+early-HAL boundary.
 
 ## 3. Work items
 
 | ID | Status | Deliverable | Dependencies | Acceptance gate |
 | --- | --- | --- | --- | --- |
-| BR-00 | In progress; WLAN and NVMe IDs captured | Exact target inventory: BIOS, UEFI mode, Secure Boot state, CPU, GPU, xHCI, NVMe, WLAN, Ethernet/USB adapters, and IDs | Physical laptop | RTL8822CE `10ec:c822`/subsystem `10ec:c130` and SanDisk SN740 NVMe `15b7:5015` are recorded; remaining inventory is stored with commands and output summary |
+| BR-00 | In progress; Latitude WLAN/NVMe IDs captured, CF-SV7 inventory pending | Exact per-target inventory: BIOS, UEFI mode, Secure Boot state, CPU, GPU, xHCI, NVMe, WLAN, Ethernet/USB adapters, and IDs | Physical laptops | RTL8822CE `10ec:c822`/subsystem `10ec:c130` and SanDisk SN740 NVMe `15b7:5015` are recorded for the Latitude; remaining Latitude and CF-SV7 inventory is stored with commands and output summary |
 | BR-01 | Planned | Reproducible USB image layout and safe write/verify procedure | Current build/image pipeline | A disposable image is generated twice consistently and its partitions/files are inspected |
 | BR-02 | Planned | QEMU boot through `qemu-xhci` and `usb-storage` | BR-01, xHCI work in HW track | U0–U5 pass in the declared BIOS/UEFI matrix |
 | BR-03 | Complete (`q015`) | Stable boot/root device selection rather than enumeration-order assumptions | Bootloader/kernel parameter review | BR-T46 UUID and PARTUUID cells pass on both amd64 firmware paths with the auxiliary disk enumerated first; the PC/AT root/swap alias is rejected before publication |
@@ -150,6 +170,8 @@ M1 requires U0–U5 in QEMU. M2 requires U0–U5 on the Latitude 5320.
 | BR-08 | Planned | At least one working physical network path | BR-00, BR-06, relevant NET/HW item | DHCP or static configuration, ping, and data transfer pass on hardware |
 | BR-09 | Planned as `ws003-p018` | Install to and boot an overlay from existing Latitude NVMe FAT32 partitions | WS004 p025, WS013 p002/p003, WS019 p005 | No-format/no-GPT/no-NVRAM install followed by fallback/manual UEFI boot; final frozen image passes the declared repeatability gate |
 | BR-10 | Future as `ws003-p019` | Install and boot a native Latitude NVMe root | WS019 p006/p007 and explicit later design | Native `rootpart=` boot is accepted without weakening BR-09 |
+| BR-11 | Planned as `ws003-p020`; physical baseline captured | Clear the CF-SV7 post-RSDP early ACPI/interrupt boundary | Current amd64 UEFI loader/kernel, one consolidated physical acceptance boot | Bounded diagnostics replace silent failure and the CF-SV7 reaches `A64 IRQ READY`, `A64 XMM CONTEXT PASS`, and HAL readiness without QEMU/Latitude regression |
+| BR-12 | Future; extract after BR-11 | Continue CF-SV7 USB enumeration, root continuity, and local-shell bring-up | BR-11 and the first newly observed downstream boundary | CF-SV7 reaches U3/U4 with each new hardware stop owned by a bounded Phase; final five-run repeatability remains a WS-level gate |
 
 ## 4. QEMU USB matrix
 
