@@ -8,7 +8,7 @@ Phase ID: `p003`
 
 Combined ID: `ws005-p003`
 
-Status: planned; not queued
+Status: in-progress (`q040`)
 
 Parent: [WS005 networking and WLAN](../ws.md)
 
@@ -193,14 +193,18 @@ The initial operation policy is:
 | Peer | Permitted operations |
 | --- | --- |
 | effective UID 0 | All established and future checked `networkd` operations |
-| admitted non-root peer | Read-only show/status and bounded WLAN search/list/up/down/connect |
+| admitted non-root peer in q040 | Existing read-only `SHOW` only; future bounded WLAN categories are classified/tested but have no executable opcode until p006 |
 | any other or unauthenticated peer | None |
 
 Non-root admission does not grant the existing raw `STATIC`, `DEFAULTROUTE`,
-`DNS`, generic `DHCP`, or unrelated interface mutation opcodes.  A permitted
-compound `net wifi up` may cause root `networkd` to invoke `ifconfig`, `wifi`,
-and `dhcpc`, but the client cannot decompose that authority into arbitrary
-route, resolver, or address requests.
+`DNS`, generic `DHCP`, or unrelated interface mutation opcodes. q040 has no
+WLAN opcode yet, so its executable non-root surface is only the existing
+read-only `SHOW` operation. The bounded WLAN policy categories are retained in
+the authorization classifier and fixtures, but p006 is the first Phase allowed
+to attach real opcodes to them. A future permitted compound `net wifi up` may
+cause root `networkd` to invoke `ifconfig`, `wifi`, and `dhcpc`, but the client
+cannot decompose that authority into arbitrary route, resolver, or address
+requests.
 
 Profile selection is deliberately outside the daemon.  The `net` client uses
 its own effective UID to read `/etc/wifi.conf` or its passwd-record home
@@ -322,9 +326,10 @@ existing AF_UNIX/SCM_RIGHTS/POSIX tests, WS002 network-service regressions,
 - `/run/networkd.sock` is published as exactly `root:network 0660` before
   READY; a missing/non-69 `network` group or publication failure produces no
   `0600`, numeric-GID, world-accessible, or false-ready fallback.
-- Root retains all current networkd operations; an admitted non-root client is
-  restricted to the documented read/WLAN compound surface and cannot submit
-  arbitrary existing network mutation.
+- Root retains all current networkd operations; an admitted non-root client in
+  this Phase can execute only `SHOW` and cannot submit arbitrary existing
+  network mutation. Future bounded WLAN categories are classifier/test inputs,
+  not executable protocol promises before p006.
 - Every direct mutating network, route, and WLAN ioctl is rejected for
   non-root before driver or state mutation, while classified queries remain
   usable.

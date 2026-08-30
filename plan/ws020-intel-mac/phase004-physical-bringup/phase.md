@@ -8,8 +8,8 @@ Phase ID: `p004`
 
 Combined ID: `ws020-p004`
 
-Status: Ready for one provisional checkpoint with p005 hash `3bca88c3...`;
-final campaign after `ws020-p003`
+Status: Deferred by user; when reselected use p005 hash `3bca88c3...`, with
+the final campaign after `ws020-p003`
 
 Parent: [WS020](../ws.md)
 

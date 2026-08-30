@@ -41,13 +41,15 @@ NEC PC-9821V13 is the declared native PC-98 physical target. The observation
 which triggered q037 beeped before loader output; p022 owns that early-IPL regression
 without replacing the PC-98 partition scheme with a PC/AT MBR.
 
-The current [Queue Book](queue.md) records finished `q039`. It first proves the
+The archived [q039](queue-q039.md) first proves the
 already-correct PC-98 `IPL1` field and has prepared one immutable audio-trace
 image for the still-silent PC-9821V13 boundary; its automatic gates pass and
 one physical observation remains. It then repairs the independently
 reproduced PC-98 PIC-cascade defect which blocked Xzed mouse events; the
 production qemu-pc98 cursor now moves by the exact injected delta through
-evdev without monitor-side PIC repair. The
+evdev without monitor-side PIC repair. The current [Queue Book](queue.md)
+records active `q040`: exact Archer identity/firmware intake followed by the
+independent AF_UNIX/network authorization foundation. The
 archived [q038](queue-q038.md) replaced the
 stale or intermediate image used for the first Intel Mac observation with one
 fresh, production-checked UEFI-only artifact and passed the exact larger-USB
@@ -303,8 +305,8 @@ actually warranted.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q039 p023 confirms the signature and passes every automatic entry-localization gate but remains external-checkpoint uncleared; p018 Latitude overlay-NVMe install/boot dependency-gated | p020/p021 physical CF-SV7 path passes; p022/p023 qemu-pc98 login passes; one p023 V13 audio observation and p018/p019 remain | Record one boot of the exact p023 diagnostic artifact, then return to dependency-ready p018 work | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Audited active; not complete. `q030` NVMe software and the physical USB-Ethernet path are complete, while p016/p017/p021/p025 and p026--p030 remain | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Follow the requested WLAN priority: p026 exact-unit/firmware intake, p027 common core, then the interleaved WS005 and p028--p030 sequence. Keep the unrelated p016/p017/p021/p025 residuals visible rather than calling the WS complete | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WLAN | Active; q029 p001 complete; WLAN replacement plan detailed, not queued | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Freeze p002, confirm the exact Archer unit in WS004 p026, then propose only dependency-ready WLAN prerequisites to a Queue | [WS005](ws005-networking/ws.md) |
+| `ws004` | Hardware expansion | Audited active; q040 p026 completed every automatic/read-only intake step and is uncleared only for the purchased unit's printed model/region/revision. `q030` NVMe software and the physical USB-Ethernet path are complete, while p016/p017/p021/p025 and p026--p030 remain | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Obtain one serial-redacted label observation when convenient; meanwhile continue independent queued work | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WLAN | Active; q029 p001 complete; q040 p003 is in progress after the frozen p002 design | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Complete q040 p003 AF_UNIX peer credentials and network authorization without waiting on physical radio work | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Audited active; not complete. p005 is only the PC/AT capability milestone | `ws006-p005` complete | Execute p006--p008 for producer truthfulness and USB HID when selected; run p009 consumer/legacy-console removal only after the accepted WS008 userland tree is available | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 mouse repair complete | `ws007-p001` and `p003` complete; amd64 `p002` carried | Select GFX-02 integration regression work when prioritized; retain the separate amd64 p002 report honestly | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Resumed by user priority; target packages remain disabled until the target Phase passes | `ws008-p007` complete; p008 host refresh is Queue-ready; p009 target refresh is human-blocked by the current upstream zedBSD build regression | Queue p008 after WS005. Resume p009 only from a corrected upstream revision or an explicit downstream-patch-overlay decision; use `userland/base/noct/noct/` for the fresh target checkout and never mutate the old dirty checkout | [WS008](ws008-noct/ws.md) |
@@ -319,7 +321,7 @@ actually warranted.
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
-| `ws020` | Intel Mac UEFI bring-up and generic image variants | Active; q036 p001-p002 and q038 p005 complete, p003 uncleared, p004 provisional observation ready | First physical log used an older three-entry Hybrid-family artifact; fresh fixed UEFI-only hash `3bca88c3...` passes production checking and an exact 60,549,120-sector OVMF/xHCI boot through login | Run one p004 Intel Mac boot of only the frozen current image, then separately resolve p003 before the final five-run campaign | [WS020](ws020-intel-mac/ws.md) |
+| `ws020` | Intel Mac UEFI bring-up and generic image variants | Active but physical work deferred by user; q036 p001-p002 and q038 p005 complete, p003 uncleared | First physical log used an older three-entry Hybrid-family artifact; fresh fixed UEFI-only hash `3bca88c3...` passes production checking and an exact 60,549,120-sector OVMF/xHCI boot through login | Resume p004 only when the user reselects the Intel Mac checkpoint; separately resolve p003 before its final five-run campaign | [WS020](ws020-intel-mac/ws.md) |
 
 ## 4. Milestones
 

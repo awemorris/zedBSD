@@ -1,12 +1,11 @@
 # WS005: networking and WLAN
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 WSID: `ws005`
 
-Status: active; q029 p001 completed the first physical USB-Ethernet path;
-WLAN discussion resumed and the replacement Phase sequence is planned but not
-queued
+Status: active; q029 p001 completed the first physical USB-Ethernet path and
+q040 selects p003's AF_UNIX/network authorization foundation
 
 Parent: [master plan](../master.md)
 
@@ -15,11 +14,9 @@ DHCP, route/DNS, ping, and external-fetch path through the common
 `net`/`networkd` design. The final Latitude-native observation fetched
 `www.google.com` successfully.
 
-Resume point: review and freeze `ws005-p002`, then place only the bounded,
-dependency-ready prerequisite Phases in a separately approved Queue. In
-parallel, `ws004-p026` must record the exact Archer T3U Nano unit identity and
-firmware policy before its native driver is implemented. Planning these
-Phases is not implementation authorization.
+Resume point: execute q040 p003 after the independent p026 inventory attempt.
+The frozen p002 contract is its design dependency; physical radio identity and
+the later generic WLAN UAPI do not block this peer-credential foundation.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -29,7 +26,7 @@ Shared tests: [WS005 test index](tests/README.md)
 | --- | --- | --- |
 | [`ws005-p001`](phase001-usb-ncm-physical-datapath/phase.md) | Complete (`q029`) | RTL8156 NCM carrier/static/DHCP/ping and final Latitude external fetch pass |
 | [`ws005-p002`](phase002-wlan-v1-contract/phase.md) | Planned; not queued | Freeze the v1 control, security, scan, association, DHCP, cancellation, and ownership contracts; record every intentional exclusion |
-| [`ws005-p003`](phase003-unix-peer-credentials/phase.md) | Planned; depends on p002 | Add connection-time AF_UNIX peer credentials and make one `networkd` socket a truthful root/authorized-user boundary |
+| [`ws005-p003`](phase003-unix-peer-credentials/phase.md) | In progress (`q040`); p002 contract frozen | Add connection-time AF_UNIX peer credentials and make one `networkd` socket a truthful root/authorized-user boundary |
 | [`ws005-p004`](phase004-wifi-ioctl-command/phase.md) | Planned; depends on p002, p003, and `ws004-p027` | Add the primitive, L2-only `/sbin/wifi` ioctl command with bounded machine and human output |
 | [`ws005-p005`](phase005-wifi-credential-store/phase.md) | Planned; depends on p002 | Add root and per-user `wifi.conf` storage plus `net wifi set-key` without involving `networkd` |
 | [`ws005-p006`](phase006-networkd-wifi-protocol/phase.md) | Planned; depends on p003-p005 | Replace whitespace `ZNV1` limitations with bounded length-framed WLAN requests, peer authorization, and a secret-FD child path |

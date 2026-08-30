@@ -4,7 +4,8 @@ Last updated: 2026-08-30
 
 Phase ID: `ws004-p026`
 
-Status: planned evidence and policy checkpoint; not queued
+Status: Uncleared (`q040`); automatic/read-only intake complete, awaiting only
+the purchased unit's printed model/region/hardware revision
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -135,7 +136,7 @@ than adding an ad-hoc firmware-upload ioctl.
 - Official `linux-firmware` provenance and Realtek license files:
   <https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/WHENCE>
   and
-  <https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/LICENCE.rtlwifi_firmware.txt>
+  <https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/LICENSES/LICENCE.rtlwifi_firmware.txt>
 - FreeBSD's current rtw88 module makefile and manual. They are useful
   behavioral/inventory references only; no implementation is imported into
   the zedBSD base. USB is disabled in the module makefile and the manual does
@@ -187,3 +188,29 @@ firmware header cannot be validated before upload, or initialization requires
 another undisclosed board-specific file. Those findings are not permission to
 bind a neighboring USB ID, use an out-of-tree binary driver, or embed firmware
 in the base kernel.
+
+## q040 result (2026-08-31)
+
+The user-authorized Debian 13.6 development host supplied one complete,
+read-only descriptor for the unbound adapter. It is `2357:012e`, USB 2.10 at
+High Speed, device revision 2.10, with one `ff/ff/ff` interface and exact bulk
+IN/bulk OUT/bulk OUT/interrupt IN/bulk OUT endpoint tuple. The serial was
+redacted. TP-Link's pinned official INF and pinned Linux mainline independently
+map that ID to the 8822B/`rtw8822b_hw_spec` family.
+
+Official `linux-firmware` revision
+`458e40fdbb4dad5134ec230a42df21aea1b5baf8` is frozen at 161,240 bytes,
+version 30.20.0, and SHA-256
+`a72da690597bfa99d8eb6fc2ab090d18d8ad92ac2befd35db1c9e3662d8d8418`.
+The exact WHENCE and relocated `LICENSES/LICENCE.rtlwifi_firmware.txt` records,
+optional-package boundary, base-tree absence, update rule, and five later
+negative fixtures are recorded in the [HW-T32 intake](../tests/archer-t3u-nano-intake.md).
+No firmware is committed and no radio operation or zedBSD candidate boot was
+performed.
+
+The Phase is `uncleared` at one deliberately non-inferable field: the remote
+descriptor cannot reveal the model, region, and hardware revision printed on
+the purchased unit. A single transcription or photograph of those fields,
+with serial omitted, is the exact resume condition. `bcdDevice=2.10` is not
+substituted for that label. Dependent p027/p028 remain ineligible until this
+checkpoint is reconciled with the frozen descriptor.

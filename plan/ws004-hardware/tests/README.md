@@ -75,6 +75,11 @@ p028 does not ask the user to repeat an attach or scan.
 
 ## HW-T32 Archer identity and firmware policy
 
+The q040 read-only descriptor, independent 8822B mappings, pinned firmware and
+license record, negative-input definitions, and exact remaining printed-label
+checkpoint are retained in
+[`archer-t3u-nano-intake.md`](archer-t3u-nano-intake.md).
+
 `ws004-p026` retains the purchased adapter's model/region/hardware-revision
 label and complete raw USB device/configuration/interface/alternate/endpoint
 descriptor from one read-only `lsusb -v`/`usbconfig` inventory on an existing

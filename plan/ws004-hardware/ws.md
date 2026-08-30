@@ -1,13 +1,15 @@
 # WS004: hardware expansion
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 WSID: `ws004`
 
-Status: audited active; WS is not complete. `ws004-p020` deterministic CDC NCM hardening and
+Status: audited active; WS is not complete. `ws004-p026` completed every
+automatic/read-only intake field in q040 and is uncleared only at the printed
+unit label. `ws004-p020` deterministic CDC NCM hardening and
 `ws004-p022`--`p024` NVMe discovery/I/O/strict-GPT QEMU acceptance are
-complete; `ws004-p021` remains ready but independent; `ws004-p026`--`p030`
-define the new Archer T3U Nano WLAN path and are not queued
+complete; `ws004-p021` remains ready but independent; `ws004-p027`--`p030`
+define the later Archer T3U Nano WLAN implementation path
 
 Parent: [master plan](../master.md)
 
@@ -76,7 +78,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p023`](phase023-nvme-io-lifecycle/phase.md) | Complete (`q030`) | One depth-64 I/O queue, private 4-KiB bounce slots, checked 64-bit read/write, truthful flush, concurrent wrap, timeout/reset, normal shutdown, and quarantine pass focused/build/QEMU/regression gates |
 | [`ws004-p024`](phase024-nvme-qemu-acceptance/phase.md) | Complete (`q030`) | Strict 512/4096 GPT host gates and disposable QEMU partition write/flush/restart/rejection plus IDE, xHCI USB-root, amd64, and i386 gates pass |
 | [`ws004-p025`](phase025-latitude-nvme-readonly/phase.md) | Planned physical checkpoint; depends on p024 | Latitude SN740 `15b7:5015` identifies and reads safely without modifying internal storage |
-| [`ws004-p026`](phase026-archer-t3u-nano-identity-firmware/phase.md) | Planned evidence/policy checkpoint; not queued | Confirm the exact purchased unit as `2357:012e` before binding, reject the RTL8828BU guess, keep later TP-Link revisions inference-only, and freeze a separately packaged `rtw8822b_fw.bin` revision/license/digest |
+| [`ws004-p026`](phase026-archer-t3u-nano-identity-firmware/phase.md) | Uncleared (`q040`) | Complete descriptor/ID/firmware/license/package evidence retained; supply only the purchased unit's printed model/region/revision to reconcile and clear it |
 | [`ws004-p027`](phase027-wlan-uapi-common-core/phase.md) | Planned; not queued | Add the versioned pointer-free WLAN ioctl ABI, persistent common station state, generation-safe scan/status/cache/lifetime, and a deterministic fake radio without claiming hardware |
 | [`ws004-p028`](phase028-rtl8822bu-usb-scan/phase.md) | Planned; depends on p026/p027; not queued | Bind only the descriptor-confirmed RTL8822BU interface, load the pinned optional firmware, and implement conservative 2.4-GHz/20-MHz scan; physical attach/scan evidence is one field of the shared WS005 p008 ledger, not a p028 run |
 | [`ws004-p029`](phase029-wpa2-ccmp-l2/phase.md) | Planned; depends on p028 automatic milestone; not queued | Common-kernel WPA2-Personal/CCMP authentication, association, four-way handshake, key CAM, controlled port, and bidirectional Ethernet L2; physical evidence is shared with p030/WS005 p008 |
@@ -96,7 +98,8 @@ fetch. p021 remains ready for a future Queue as an independent standards
 correction, not an active failure response. Later WS004 candidates are
 p016/p017, p019, p021, p025, and the planned-only p026--p030 WLAN chain, plus
 HW-11, HW-20/HW-21, and HW-30 when their inputs and acceptance environments
-are available. No p026--p030 item is in an implementation Queue.
+are available. q040 selects the evidence/policy-only p026 boundary; it does
+not authorize p027--p030 implementation.
 
 ## Goals
 

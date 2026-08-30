@@ -1,73 +1,77 @@
-# Queue: PC-98 IPL entry localization and Xzed mouse recovery
+# Queue: Archer identity intake and network authorization foundation
 
 Last updated: 2026-08-31
 
-QID: `q039`
+QID: `q040`
 
-Queue status: finished
+Queue status: in-progress
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: the user reported that the PC-9821V13 still does not boot,
-asked whether the IPL1 signature is correct, and supplied a reproducible PC-98
-Xzed mouse regression. This Queue performs the bounded diagnosis and repair
-requested by that report.
+Authorization: after q039's automatic repairs completed, the user explicitly
+requested continuous execution of the remaining workstreams. The standing
+priority order selects the first dependency-ready WLAN evidence checkpoint and
+then an independent control-plane prerequisite rather than waiting on physical
+label evidence.
 
-Timebox: none. Automatic work continues through both items. The Queue does not
-wait on the physical V13 checkpoint before repairing and accepting the
-QEMU-reproducible mouse defect.
+Timebox: none. Process both finite items to `completed` or `uncleared`. A human
+label checkpoint in the first item does not block the second item.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q038](queue-q038.md)
+Previous Queue: [q039](queue-q039.md)
 
 ## Purpose
 
-Prove the installed PC-98 IPL signature instead of changing it speculatively,
-then prepare one immutable audio-trace image which localizes the physical
-Stage-1/Stage-2 boundary in one boot. Independently repair the demonstrated
-PC-98 slave-PIC cascade defect which prevents Xzed from receiving bus-mouse
-events, and retain both a focused PIC contract and a production QEMU cursor
-movement regression.
+Capture every safely obtainable identity, descriptor, provenance, and license
+fact for the exact connected Archer T3U Nano without binding a zedBSD driver.
+Then implement the independently specified AF_UNIX peer-credential and network
+authorization foundation required before ordinary users or desktop software
+may request WLAN orchestration through `networkd`.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws003-p023` | [Phase](ws003-bringup/phase023-pc9821-v13-ipl-entry-localization/phase.md) | uncleared | Automatic signature, corruption, normal-login, and diagnostic-login gates pass; one exact hashed image awaits one V13 audio observation |
-| 2 | `ws007-p003` | [Phase](ws007-graphics/phase003-pc98-xzed-mouse-pic-cascade/phase.md) | complete | Slave IRQ lifecycle preserves PC-98 master IRQ7 cascade; production QEMU moves Xzed exactly `+100,+50` through evdev without manual PIC repair |
+| 1 | `ws004-p026` | [Phase](ws004-hardware/phase026-archer-t3u-nano-identity-firmware/phase.md) | uncleared | Exact descriptor, independent ID mappings, firmware/license pin, package boundary, base absence, and negative inputs are recorded; only the non-inferable printed model/region/revision awaits one external observation |
+| 2 | `ws005-p003` | [Phase](ws005-networking/phase003-unix-peer-credentials/phase.md) | in-progress | Add immutable AF_UNIX `SO_PEERCRED`, transactional `root:network 0660` publication, peer-based `networkd` authorization, and central root checks for direct mutating network ioctls with focused and runtime evidence |
+
+## Dependency and deferral decisions
+
+- `ws004-p027` is not selected in q040. It depends on a completed p026 target
+  capability/firmware boundary; a USB descriptor cannot substitute for the
+  printed hardware revision required by p026.
+- `ws005-p003` depends on the already frozen `ws005-p002` topology, not on the
+  physical WLAN adapter or p027. It proceeds even if p026 is uncleared.
+- Intel Mac `ws020-p004` remains an external physical checkpoint and its final
+  repetition remains after the uncleared p003 matrix. It does not block the
+  next software workstream.
+- PC-9821V13 `ws003-p023` retains its one exact diagnostic-image observation
+  from q039 and does not block q040.
 
 ## Fixed boundaries
 
-- Keep the native PC-98 LBA0/LBA1/LBA2 format. Do not add a PC/AT MBR or
-  remove the trailing `55 aa`.
-- `IPL1` at LBA0 offsets 4--7 is already the accepted contract. Do not treat
-  bytes 508--509 as a Stage-1 sector count; they are the PC-98 boot-menu
-  version/reserved bytes.
-- Audio tracing is diagnostic-only and must not add a beep to the ordinary
-  production image.
-- Do not claim the physical V13 issue fixed until the single identified
-  diagnostic image has been observed on that machine.
-- The mouse repair belongs to the PC-98 PIC cascade. Do not bypass PIC
-  delivery in Xzed, evdev, or the bus-mouse driver.
-- Do not consume `.internal/` or run aggregate `make check`.
-- Use `make -j16`, focused host gates, the production image checker, and the
-  maintained qemu-pc98 binary.
-- Commit and push after each Phase. If push is unavailable, retain the local
-  commit and continue.
+- The p026 remote-host action is one read-only descriptor and package
+  inventory. Do not bind, reset, upload firmware to, or exercise the radio.
+- Redact serial identifiers. Do not infer a printed hardware revision from a
+  product string, USB `bcdDevice`, shared vendor archive, or VID:PID alone.
+- Do not commit a Realtek blob to the zlib-licensed base tree and do not add a
+  build-time or runtime network download.
+- p003 publishes one fixed 12-byte zedBSD peer-credential ABI and connection-
+  time snapshot semantics. Do not substitute live PID lookup or payload-supplied
+  identity.
+- Keep one `root:network 0660` `/run/networkd.sock`; do not add setuid clients,
+  a world-writable socket, or a second WLAN daemon socket.
+- Reject direct network mutation for non-root in the kernel before driver or
+  route state changes. Preserve query paths and root recovery commands.
+- Do not consume `.internal/` or run aggregate `make check`. Use `make -j16`,
+  focused owner tests, disposable QEMU images, and `git diff --check`.
+- Commit after each Phase. Retain a local commit if push is unavailable.
 
 ## Completion definition
 
-q039 is finished when each selected item is either completed or uncleared with
-its exact evidence and resume condition recorded. `ws003-p023` may be
-uncleared solely at its one external PC-9821V13 observation while
-`ws007-p003` completes automatically.
-
-## Queue result
-
-`ws003-p023` proves that the installed `IPL1` signature is correct, passes all
-automatic normal/diagnostic gates, and remains honestly `uncleared` only at
-one exact PC-9821V13 audio observation. `ws007-p003` fixes the demonstrated
-PC-98 PIC cascade defect and passes its focused, input-ownership, build, disk,
-and production qemu-pc98 Xzed cursor gates. The allowed uncleared external
-checkpoint does not prevent q039 from finishing.
+q040 is finished when both selected items have been processed to `completed`
+or `uncleared`, with exact evidence and resume conditions synchronized into
+their Phase, WS, and master books. A missing printed adapter revision is an
+allowed p026 uncleared result; it is not permission to widen a USB match or to
+skip the independent p003 security work.
