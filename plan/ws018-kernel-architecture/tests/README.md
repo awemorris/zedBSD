@@ -25,8 +25,8 @@ disposable build/QEMU evidence belongs under `../temp/` and remains untracked.
 | KA-T080 | p009 | [`run-graphics-frontends-host-test.sh`](run-graphics-frontends-host-test.sh) links the production PC/AT and PC-98 frontends independently and preserves registration, ownership, mode, drawing, glyph, copy-fault, rollback, and restore behavior; [`run-graphics-runtime-matrix.sh`](run-graphics-runtime-matrix.sh) exercises production PC/AT VGA/Cirrus and PC-98 GDC/Cirrus Xzed entry/render/console restoration |
 | KA-T081 | p009 | The host runner proves that both frontend copies remain explicit and behavior-identical, no registry/common implementation remains, and exactly two platform-owned registration sites exist; the runtime runner builds and boots an amd64 graphics-disabled image and proves `/dev/graphics` is absent |
 | KA-T090 | p010 | [`run-fat-consolidation-host-test.sh`](run-fat-consolidation-host-test.sh) links the consolidated production FAT and filesystem dispatch sources against in-memory FAT12/16/32 images and preserves probe/mount, SFN/LFN lookup and readdir, cross-cluster reads, compatibility-layer mutations, explicit flush persistence, no-space, and read-only behavior |
-| KA-T100 | p011 | FAT boot media provides rootfs image, writable data overlay, and file-backed swap through native filesystem/VFS calls |
-| KA-T101 | p011 | Native partition root and runtime FAT mounts remain usable, with bounded failures for missing/corrupt image files |
+| KA-T100 | p011 | [`run-fat-native-vfs-host-test.sh`](run-fat-native-vfs-host-test.sh) links the production FAT filesystem type against in-memory FAT12/16/32 disks and exercises native mount/inode/file lookup, I/O, mutation, sync, extents, and backing identity; boot media separately provides rootfs image, writable data overlay, and file-backed swap through the same native VFS path |
+| KA-T101 | p011 | The same runner covers native inode/file lifetime, open-writer rename and path-truncate authority, mutable replacement/unlink orphans, remount persistence, mirrored FAT copies, read-only and no-space behavior, 1024-byte logical sectors, close/reclaim durability retry, directory-entry slot reuse, FAT32 LFN sector-boundary namespace rollback, and partial grow/shrink rollback under bounded faults; native partition-root and private/runtime mount publication remain runtime gates |
 | KA-T110 | p012 | All supported builds and representative boots pass with no `struct bootfs`, legacy boot-source header, broad internal state, or obsolete platform residue |
 
 The supported build gate is `make -j16`; the aggregate `make check` target and
@@ -71,13 +71,14 @@ p003 rather than by duplicating the kernel's disk/inode/mount environment in a
 host shim.
 
 KA-T030/KA-T031 link the production registry dispatcher, generic block
-identity composer, swap-header parser, and link-visible private
-`fat_identify`, `ufs1_identify`, and `ufs2_identify` callbacks.  The fixture
-provides only memory-disk, registry, partition, allocation, and lock shims; it
-does not duplicate the identity decoders.  Its FAT driver tables delegate to
-the production `bootfat_probe` decoder while omitting unrelated file
-operations.  Cache coverage treats a newly initialized `struct disk` as the
-documented re-probe boundary; no test-only cache invalidation API is assumed.
+identity composer, swap-header parser, native `fat_filesystem_type`, and the
+UFS1/UFS2 identity callbacks.  The fixture provides only memory-disk,
+registry, partition, allocation, VFS-lifetime, and lock shims; it does not
+duplicate the identity decoders.  The FAT registry entry therefore exercises
+the production filesystem-owned identity path without exposing its private
+callback as public API.  Cache coverage treats a newly initialized
+`struct disk` as the documented re-probe boundary; no test-only cache
+invalidation API is assumed.
 
 KA-T080/KA-T081 compile the same host scenario twice: once with the real
 PC/AT frontend and a PC/AT fake backend, and once with the real PC-98 frontend
@@ -96,15 +97,34 @@ process group, and captures the restored text console.  PC-98 prompt control
 uses the maintained text-VRAM decoder because post-init output is not mirrored
 to debugcon.  All QEMU disks are disposable copies under WS `temp/`.
 
-KA-T090 exercises the retained p010 `bootfs` compatibility boundary in both an
-ordinary build and an ASan/UBSan build.  Its mutations cover create and
+KA-T090 recorded the p010 `bootfs` compatibility boundary in both an ordinary
+build and an ASan/UBSan build.  Its historical mutations cover create and
 create-truncate, offset write, append, sparse extension, truncate grow/shrink,
 mkdir, non-empty and empty rmdir, unlink, same- and cross-directory rename,
 replacement, directory reparenting, explicit flush/remount persistence,
 allocation exhaustion, and read-only rejection.  Open-writer rename repair,
 orphan-chain reclaim, `disk_sync`, and native inode/file lifetime are native
 VFS contracts rather than `bootfs` operations and are therefore not claimed by
-this fixture; they remain separate native-VFS integration coverage.
+that historical fixture.  Once p011 removes the compatibility API, the
+maintained KA-T090 runner reports the supersession and executes KA-T100/KA-T101
+instead of retaining a post-migration legacy consumer.
+
+KA-T100/KA-T101 supersede KA-T090's maintained behavioral gate after p011
+removes the FAT `bootfs` boundary.  The native runner repeats the FAT12/16/32
+SFN/LFN, cross-cluster read, mutation, persistence, no-space, and read-only
+checkpoint through production `filesystem_type`, `mount`, `inode`, and `file`
+operations, then adds the lifetime, extent, backing-identity, unmount, and
+fault/retry contracts which KA-T090 could not exercise.  The old KA-T090 C
+fixture remains historical checkpoint material; it is not a post-p011 API
+consumer.  Failure coverage verifies pre-retry size/content/extents/free-space
+authority, mount-sync durability for live and failed-close writers, deferred
+orphan reclaim, deleted-direntry reuse isolation, replacement and
+cross-directory rename rollback, FAT12/16 insertion rollback, 255-byte LFN
+lifecycle, and atomic multi-slot LFN unlink/rename—including an SFN at the
+next sector's first slot—before remount.  Generic namei
+permission/transaction checks, private-mount
+publication, loop/overlay/swap ownership, and the complete boot chain remain
+the Phase's kernel-build and runtime acceptance gates.
 
 KA-T060 supplies fake descriptors only at the I/O boundary and directly links
 `userland/X11/xzed/input.c`; directory traversal, event-name filtering,

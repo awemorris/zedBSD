@@ -1,6 +1,6 @@
 # WS018 Phase 011: FAT native VFS migration
 
-Last updated: 2026-08-28
+Last updated: 2026-08-30
 
 WSID: `ws018`
 
@@ -8,7 +8,7 @@ Phase ID: `p011`
 
 Combined ID: `ws018-p011`
 
-Status: Planned; Queue-ready after `ws018-p004` and `ws018-p010`
+Status: Complete (`q035`)
 
 Parent: [WS018](../ws.md)
 
@@ -154,6 +154,52 @@ owns their final deletion.
   file-backed swap use ordinary VFS objects and retain their safety contracts;
 - p004 identity dispatch remains filesystem-owned; and
 - only non-FAT legacy callers, if any, can remain for p012's explicit audit.
+
+## Result and evidence
+
+Completed on 2026-08-30.  `src/drivers/fs/fat.c` now mounts and operates on
+ordinary `struct mount`, `struct inode`, and `struct file` objects backed
+directly by `struct disk`.  FAT-private mount, inode, file, cache, allocation,
+orphan, and retry state is private to that translation unit.  The public FAT
+header now contains only the filesystem type, stable probe type, and the
+extent/contiguous-block/backing-identity interfaces used by generic VFS
+consumers.  No `bootfs_*` operation, `bootfat_*` operation, legacy driver
+table, embedded compatibility object, or private inode layout remains in the
+FAT source/header boundary.
+
+The conversion preserves filesystem-owned identity, directory-entry-derived
+backing identity, open-writer authority across rename and path truncate,
+unlinked-open inode lifetime, delayed orphan reclamation, file extent
+enumeration, mirrored FAT updates, read-only enforcement, and mount-sync
+durability.  Allocation, shrink/grow, close metadata, LFN deletion/rename, and
+directory-entry publication retain retry-safe rollback under injected
+allocation and I/O failures.  Focused non-regression hardening also covers
+replacement rename, cross-directory `..`, FAT12/16 insertion, the FAT32 LFN
+sector boundary, and 255-byte names.
+
+Verification evidence:
+
+- KA-T100/KA-T101 passed ordinary and ASan/UBSan runs with 441,528 checks per
+  run across FAT12, FAT16, FAT32, two FAT copies, and 1024-byte logical
+  sectors.  Exact regressions cover failed-close retry, deleted-slot reuse by
+  an old open inode, FAT32 LFN rollback with the SFN at the next sector's
+  first entry, replacement/orphan lifetime, and partial allocation rollback.
+- KA-T090's maintained post-conversion wrapper passed by dispatching to the
+  native gate.  KA-T030/KA-T031 passed 110 checks and the generic identity
+  source audit.  WS016 backing-claim and runtime boot-source runners passed.
+- `make -j16`, strict i386 PC/AT and i386 PC-98 FAT compilation,
+  `-fanalyzer`, and `git diff --check` passed.
+- The source/symbol audit found only `fat_filesystem_type`, `fat_probe_type`,
+  `fat_file_extents`, `fat_file_contiguous_block`, and
+  `fat_file_backing_identity` as global FAT definitions, no legacy FAT
+  adapter call, and no FAT/UFS decoder in generic `block-identity.c`.
+- A disposable amd64 OVMF/q35/xHCI USB-storage boot with 4096 MiB reached
+  `login:` with read-only `loop0` rootfs, read-write `loop1` data overlay, and
+  one active file-backed swap source.  The maintained runner reported PASS
+  with no BOT, loop-write, xHCI, or syslog I/O error.
+
+No reconsideration boundary was reached.  Generic legacy bootfs/startup
+residue remains intentionally untouched for `ws018-p012`'s fresh caller audit.
 
 ## Reconsideration boundary
 

@@ -29,7 +29,6 @@
 #define TEST_DISK_MAX 8U
 #define TEST_PARTITION_MAX 4U
 
-int fat_identify(struct disk *, struct block_identity *);
 int ufs1_identify(struct disk *, struct block_identity *);
 int ufs2_identify(struct disk *, struct block_identity *);
 
@@ -100,6 +99,18 @@ mutex_init(struct mutex *mutex, enum lock_rank rank, const char *name)
 }
 
 void
+mutex_lock(struct mutex *mutex)
+{
+	(void)mutex;
+}
+
+void
+mutex_unlock(struct mutex *mutex)
+{
+	(void)mutex;
+}
+
+void
 waitq_init(struct wait_queue *queue, const char *name)
 {
 	(void)queue;
@@ -145,6 +156,35 @@ inode_release(struct inode *inode)
 	(void)inode;
 }
 
+struct inode *
+inode_alloc(struct mount *mountp)
+{
+	(void)mountp;
+	return NULL;
+}
+
+int
+inode_get(struct mount *mountp, ino_t ino, struct inode **result)
+{
+	(void)mountp;
+	(void)ino;
+	(void)result;
+	return ENOENT;
+}
+
+void
+namecache_remove(struct inode *parent, const struct componentname *name)
+{
+	(void)parent;
+	(void)name;
+}
+
+void
+namecache_purge_inode(struct inode *inode)
+{
+	(void)inode;
+}
+
 int
 disk_open(struct disk *disk)
 {
@@ -156,6 +196,13 @@ void
 disk_close(struct disk *disk)
 {
 	(void)disk;
+}
+
+int
+disk_sync(struct disk *disk)
+{
+	(void)disk;
+	return 0;
 }
 
 int
@@ -369,12 +416,6 @@ static const struct filesystem_type callback_a_type = {
 static const struct filesystem_type callback_b_type = {
 	.fs_name = "callback-b",
 	.identify = callback_b,
-	.mount = dummy_mount,
-};
-
-static const struct filesystem_type fat_type = {
-	.fs_name = "fat-identity-test",
-	.identify = fat_identify,
 	.mount = dummy_mount,
 };
 
@@ -848,7 +889,7 @@ main(void)
 	CHECK(filesystem_register(&null_type) == 0);
 	CHECK(filesystem_register(&callback_a_type) == 0);
 	CHECK(filesystem_register(&callback_b_type) == 0);
-	CHECK(filesystem_register(&fat_type) == 0);
+	CHECK(filesystem_register(&fat_filesystem_type) == 0);
 	CHECK(filesystem_register(&ufs1_type) == 0);
 	CHECK(filesystem_register(&ufs2_type) == 0);
 

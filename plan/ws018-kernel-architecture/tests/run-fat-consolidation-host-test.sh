@@ -4,6 +4,17 @@ set -eu
 
 test_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$test_dir/../../.." && pwd)
+
+# KA-T090 is the p010 compatibility checkpoint.  Once p011 removes FAT's
+# bootfs interface, keep this maintained entry point useful by running the
+# native fixture which repeats that behavior through VFS and adds the p011
+# lifetime/error contracts.  On a p010 checkout the original fixture below
+# remains directly runnable.
+if ! grep -q 'bootfat12_driver' "$repo_dir/include/kern/fat.h"; then
+	echo "KA-T090: native FAT supersedes the p010 bootfs checkpoint"
+	exec "$test_dir/run-fat-native-vfs-host-test.sh"
+fi
+
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/zedbsd-fat-consolidation.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 

@@ -8,11 +8,11 @@ Status: active in `q035`; `q026` ownership migration finished
 
 Parent: [master plan](../master.md)
 
-Last verified Phases: `ws018-p009`, `ws018-p010`
+Last verified Phases: `ws018-p009`, `ws018-p010`, `ws018-p011`
 
-Resume point: p009 and p010 are complete in q035.  p011 is active; migrate FAT
-to direct native VFS before p012 removes the compatibility filesystem and
-startup residue.
+Resume point: p009 through p011 are complete in q035.  Begin p012 with a fresh
+live-caller audit, then remove only the now-unreferenced compatibility
+filesystem and startup residue.
 
 Shared tests: [WS018 test index](tests/README.md)
 
@@ -216,8 +216,8 @@ path in the same bounded change.
 | `ws018-p008` | [Independent input/HID driver ownership](phase008-input-hid-driver-ownership/phase.md) | Complete (`q026`) | Input sources have final owners, mouse backends emit evdev directly, and `/dev/mouse` is removed |
 | `ws018-p009` | [Independent graphics frontends](phase009-independent-graphics-frontends/phase.md) | Complete (`q035`) | Each supported graphics backend independently supplies `/dev/graphics`; shared frontend is gone |
 | `ws018-p010` | [FAT source consolidation](phase010-fat-source-consolidation/phase.md) | Complete (`q035`) | One driver-owned `fat.c` preserves current FAT/bootfs behavior |
-| `ws018-p011` | [FAT native VFS migration](phase011-fat-native-vfs/phase.md) | In progress (`q035`) | Boot-media files use the normal filesystem contract with overlay and swap intact |
-| `ws018-p012` | [Legacy bootfs and platform residue removal](phase012-legacy-bootfs-removal/phase.md) | Planned after p002, p006, p011 | `struct bootfs`, obsolete internal state, and historical platform residue are absent without regressions |
+| `ws018-p011` | [FAT native VFS migration](phase011-fat-native-vfs/phase.md) | Complete (`q035`) | Boot-media files use the normal filesystem contract with overlay and swap intact |
+| `ws018-p012` | [Legacy bootfs and platform residue removal](phase012-legacy-bootfs-removal/phase.md) | Pending next (`q035`) | `struct bootfs`, obsolete internal state, and historical platform residue are absent without regressions |
 
 ## WS completion conditions
 
