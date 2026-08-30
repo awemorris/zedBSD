@@ -4,7 +4,7 @@ Last updated: 2026-08-30
 
 Phase ID: `ws003-p021`
 
-Status: In progress (`q034`; automated checkpoint passed, awaiting one CF-SV7 boot)
+Status: Completed (`q034`, 2026-08-30)
 
 Parent: [WS003](../ws.md)
 
@@ -221,6 +221,19 @@ only to confirm that the photographed 60,549,120-sector USB device now accepts
 the bounded GPT, resolves `boot0`, mounts the overlay, and reaches init/login.
 A photograph of the final screen is sufficient. Repeated boots are reserved
 for later WS-level acceptance and are not part of this checkpoint.
+
+## Physical result (2026-08-30)
+
+The user reported that the frozen image identified above boots successfully on
+the Panasonic CF-SV7 and requested that the issue be closed. The result is
+accepted as the single planned `BR-T53` physical PASS: the larger physical USB
+medium no longer stops at protective-MBR validation and the USB-root overlay
+continues through init/login.
+
+Together with the preserved host, malformed-GPT, SeaBIOS, OVMF, exact-size,
+and 4/8/16-GiB evidence, this satisfies every Phase completion condition.
+There is no residual p021 blocker and no follow-up Phase is required for this
+issue.
 
 ## Reconsideration boundary
 

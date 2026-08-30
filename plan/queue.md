@@ -4,9 +4,9 @@ Last updated: 2026-08-30
 
 QID: `q034`
 
-Queue status: in-progress
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: the user approved implementation of `ws003-p021` on
 2026-08-30 and clarified that a GPT-declared end before the physical disk end
@@ -30,7 +30,7 @@ metadata, CRC, range, and no-MBR-fallback behavior.
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws003-p021` | [Phase](ws003-bringup/phase021-portable-gpt-image-extent/phase.md) | in-progress | Generic bounded GPT validation and all automated gates pass; one final CF-SV7 boot of the frozen image remains |
+| 1 | `ws003-p021` | [Phase](ws003-bringup/phase021-portable-gpt-image-extent/phase.md) | completed | Generic bounded GPT validation, automated regressions, and the final CF-SV7 boot of the frozen image all pass |
 
 ## Frozen execution boundary
 
@@ -82,8 +82,8 @@ is authorized by this Queue.
 
 ## Automated checkpoint (2026-08-30)
 
-The software batch is complete and q034 is paused at its one authorized
-physical observation. The frozen artifact is
+At the automated checkpoint, the software batch was complete and q034 paused
+at its one authorized physical observation. The frozen artifact was
 `/home/awe/zedBSD/build/amd64/hdd-image.img`, 203,423,744 bytes, SHA-256
 `6cf5fe81ce2695450a376e116b595291e5329e7c40fdc2820e2ebeb126732637`.
 
@@ -102,7 +102,15 @@ physical observation. The frozen artifact is
 - `make -j16`, shell syntax, and `git diff --check` pass. The aggregate
   `make check` target was not used.
 
-Evidence is preserved under `plan/ws003-bringup/temp/q034-final/`. The only
-remaining Queue action is one boot of the frozen image on the Panasonic
-CF-SV7; no further implementation or intermediate hardware repetition is
-required before that observation.
+Evidence is preserved under `plan/ws003-bringup/temp/q034-final/`. The final
+physical result is recorded below.
+
+## Physical result and closure (2026-08-30)
+
+The user reported that the exact frozen image boots successfully on the
+Panasonic CF-SV7 and requested closure. This accepts the bounded GPT, USB-root,
+overlay, and init/login continuation objective of `ws003-p021`. No residual
+failure or follow-up Phase was extracted from q034.
+
+q034 is finished by the successful branch of its completion definition:
+`ws003-p021` is `completed` and all authorized Queue work is closed.

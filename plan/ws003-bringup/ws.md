@@ -9,23 +9,21 @@ Status: active; `ws003-p004` through `ws003-p009` complete in q013; q014
 through `p015`; q023 completed `ws003-p016`; `ws003-p017` is superseded by
 the WS013 required-`zedbsd.cfg` path; `ws003-p018` is the dependency-gated
 final Latitude NVMe install/boot milestone; `ws003-p020` completed in q033 on
-the Panasonic CF-SV7, and its newly exposed raw-image GPT/root boundary has
-passed automated validation as `ws003-p021`/q034 and awaits one physical boot
+the Panasonic CF-SV7, and `ws003-p021` completed its raw-image GPT/root
+continuation in q034 with a successful physical CF-SV7 boot
 
 Parent: [master plan](../master.md)
 
-Last complete Phases: q015 `ws003-p011`--`p015`. BR-T46 passed 31/31
+Last completed Phase: `ws003-p021` in q034. q015 `ws003-p011`--`p015` also
+completed BR-T46 with 31/31
 production-loader cells across i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64
 UEFI in the post-review `q015-br-t46-final-007` run. Earlier BR-T41 resolved
 the intended UUID to `/dev/sda1`, mounted the
 read-write data loop and root overlay, started init, and reached a root shell,
 proving physical tier U3.
 
-Resume point: Perform the one consolidated CF-SV7 root/login observation for
-the frozen `ws003-p021` image; its generic bounded-GPT implementation and all
-automated gates pass.
-In parallel, finish the automatic WS013/WS019
-prerequisites before `ws003-p018`. Latitude follow-up still
+Resume point: The CF-SV7 USB-root issue is closed. Finish the automatic
+WS013/WS019 prerequisites before `ws003-p018`. Latitude follow-up still
 includes BR-T31
 sustained root I/O and, after U4 is otherwise frozen, BR-T30 five-boot
 repeatability. Do not request an additional intermediate hardware boot now.
@@ -57,7 +55,7 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p018` | [Latitude existing-FAT NVMe overlay installation and boot](phase018-latitude-nvme-install-boot/phase.md) | Planned; dependency-gated | Install without GPT/mkfs/NVRAM mutation, then boot the installed fallback loader and NVMe overlay |
 | `ws003-p019` | [Latitude NVMe native installation and boot](phase019-latitude-nvme-native-install-boot/phase.md) | Future; not designed | Accept the later native-root installer only after separate WS019 design and QEMU proof |
 | `ws003-p020` | [Panasonic CF-SV7 early ACPI/interrupt bring-up](phase020-cf-sv7-acpi-irq-bringup/phase.md) | Completed (`q033`, 2026-08-30) | The single physical boot passed IRQ/XMM/HAL and continued through xHCI, USB storage, and VFS; early-init automated gates remain passing |
-| `ws003-p021` | [Portable GPT image extent on larger USB media](phase021-portable-gpt-image-extent/phase.md) | In progress (`q034`; automated checkpoint passed) | Generic bounded-GPT host tests and larger-media SeaBIOS/OVMF USB boots pass to login; one CF-SV7 boot of the frozen image remains |
+| `ws003-p021` | [Portable GPT image extent on larger USB media](phase021-portable-gpt-image-extent/phase.md) | Completed (`q034`, 2026-08-30) | Generic bounded-GPT host/QEMU gates pass and the frozen image boots successfully on the CF-SV7 through USB-root overlay/init/login |
 
 `ws003-p003` was the sole authorized item in q012. Its physical result closes
 the PCI/BAR/capability boundary and extracts the first device-enumeration stop
@@ -98,9 +96,8 @@ the affected regressions without reopening the p011--p015 public contract.
 
 - Boot zedBSD from USB on the Dell Latitude 5320.
 - Boot zedBSD from USB on the Panasonic CF-SV7. Its post-RSDP early
-  ACPI/interrupt stop is cleared; the current bounded milestone is the
-  fixed-size GPT image copied onto larger USB media and subsequent root
-  continuity.
+  ACPI/interrupt stop and the fixed-size GPT image's larger-media root
+  continuity are both cleared by p020/p021.
 - Reach a stable init/login shell while continuing to use the intended USB
   mass-storage root on each declared laptop target.
 - Establish usable diagnostics and at least one project physical network path.
@@ -176,7 +173,7 @@ early-HAL boundary.
 | BR-09 | Planned as `ws003-p018` | Install to and boot an overlay from existing Latitude NVMe FAT32 partitions | WS004 p025, WS013 p002/p003, WS019 p005 | No-format/no-GPT/no-NVRAM install followed by fallback/manual UEFI boot; final frozen image passes the declared repeatability gate |
 | BR-10 | Future as `ws003-p019` | Install and boot a native Latitude NVMe root | WS019 p006/p007 and explicit later design | Native `rootpart=` boot is accepted without weakening BR-09 |
 | BR-11 | Complete as `ws003-p020` (`q033`) | Clear the CF-SV7 post-RSDP early ACPI/interrupt boundary | Current amd64 UEFI loader/kernel, one consolidated physical acceptance boot | CF-SV7 passed IRQ/XMM/HAL and continued into USB/VFS without QEMU/Latitude regression |
-| BR-12 | In progress as `ws003-p021` (`q034`); automated checkpoint passed | Accept a coherent GPT-declared extent on larger USB media and continue CF-SV7 root/local-shell bring-up | BR-11 and the captured GPT extent mismatch | Strict corruption checks and sparse larger-media BIOS/UEFI login pass; one CF-SV7 observation reaches U3/U4 or extracts the next bounded stop |
+| BR-12 | Complete as `ws003-p021` (`q034`) | Accept a coherent GPT-declared extent on larger USB media and continue CF-SV7 root/local-shell bring-up | BR-11 and the captured GPT extent mismatch | Strict corruption checks, sparse larger-media BIOS/UEFI login, and the final CF-SV7 USB-root overlay/init/login observation pass |
 
 ## 4. QEMU USB matrix
 

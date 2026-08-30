@@ -39,7 +39,7 @@ Parent: [WS003](../ws.md)
 | BR-T50 | Physical network | Static or DHCP setup, peer reachability, and a bounded data transfer pass |
 | BR-T51 | Later Latitude native installation | After a separate WS019 design, the installed UEFI loader selects and boots the explicit native `rootpart` without regressing BR-T49 |
 | BR-T52 | Panasonic CF-SV7 early ACPI/interrupt boundary | Complete in q033: host fixtures and production QEMU gates pass, and one physical boot advanced beyond IRQ/XMM/HAL through xHCI, USB storage, and VFS; the later GPT stop is outside p020 |
-| BR-T53 | Fixed GPT image copied to larger USB media | Automated PASS: a coherent generic GPT-declared extent sparsely extended to 60,549,120 sectors reaches `login:` through BIOS and UEFI without boot-time repair; malformed cases publish nothing and exact-size q030 behavior is unchanged. Pending: one final CF-SV7 overlay/init/login boot; automated evidence is in `temp/q034-final/br-t53/` |
+| BR-T53 | Fixed GPT image copied to larger USB media | PASS: a coherent generic GPT-declared extent sparsely extended to 60,549,120 sectors reaches `login:` through BIOS and UEFI without boot-time repair; malformed cases publish nothing, exact-size q030 behavior is unchanged, and the frozen image boots successfully through overlay/init/login on the CF-SV7. Automated evidence is in `temp/q034-final/br-t53/` |
 
 For the q011 diagnostic BR-T32 image, the top-right GOP marker is unary: one
 large white block means boot services exited, two means the final map passed,
@@ -450,6 +450,9 @@ bounded-GPT diagnostic, USB capacity, `boot0` UUID resolution, both overlay
 images, runtime mounts, and `login:`. It verifies the production source hash
 before and after. The final q034 run passes both firmware cells; the ordinary
 exact-size BIOS boot and OVMF 4/8/16-GiB matrix remain passing controls.
+
+The single q034 physical acceptance observation also passes: the user reported
+successful CF-SV7 boot of the frozen image and requested issue closure.
 
 This run postdates the final xHCI stop/IRQ ownership review. In addition to
 the eight existing affected regressions, `usb-hcd-unregister-test` now proves

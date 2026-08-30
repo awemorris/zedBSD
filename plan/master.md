@@ -26,17 +26,16 @@ Native-root installation, GPT creation, and filesystem creation follow as a
 separate milestone after this non-formatting path is accepted.
 
 Panasonic CF-SV7 is the second declared laptop bring-up target. `ws003-p020`
-cleared its original post-RSDP early ACPI/interrupt stop: the first consolidated
-physical result passed IRQ, XMM, and HAL, enumerated xHCI and USB storage, and
-entered VFS. The new boundary is the fixed 397,312-sector GPT image copied to
-a 60,549,120-sector USB device. `ws003-p021` owns that portable-image GPT
-extent and root-continuity work without reopening the completed Latitude
-USB/network or CF-SV7 early-interrupt evidence.
+cleared its original post-RSDP early ACPI/interrupt stop. `ws003-p021` then
+made the fixed 397,312-sector GPT image safely usable after raw copying to the
+60,549,120-sector USB device. Its final physical observation boots
+successfully through the USB-root overlay and closes that root-continuity
+boundary without reopening the completed Latitude USB/network evidence.
 
 The current [Queue Book](queue.md) records `q034`, containing only
 `ws003-p021`. Its generic bounded-GPT implementation, corruption fixtures,
-larger-media SeaBIOS/OVMF USB boots, and ordinary regressions pass. The frozen
-image now awaits one CF-SV7 boot. The accepted contract is general: a coherent
+larger-media SeaBIOS/OVMF USB boots, ordinary regressions, and final CF-SV7
+boot pass; q034 is finished. The accepted contract is general: a coherent
 GPT-declared end may precede the physical disk end; the remaining sectors are
 unallocated rather than an error. A declared end beyond physical capacity is
 rejected. Archived
@@ -271,7 +270,7 @@ actually warranted.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | x86 laptop bring-up (Latitude 5320 and CF-SV7) | Active; Latitude USB/network milestone complete; CF-SV7 p020 complete; p021 automated bounded-GPT/root gates pass and await one physical boot; p018 Latitude overlay-NVMe install/boot dependency-gated | p020 physical IRQ/XMM/HAL plus USB/VFS passes; p021 larger-media host/BIOS/UEFI gates pass; p017 is superseded; p018/p019 remain defined | Run the one frozen-image CF-SV7 p021 root/login observation; run p018 only after WS004/WS013/WS019 overlay prerequisites | [WS003](ws003-bringup/ws.md) |
+| `ws003` | x86 laptop bring-up (Latitude 5320 and CF-SV7) | Active; Latitude USB/network milestone complete; CF-SV7 p020 and p021 USB-root continuation complete; p018 Latitude overlay-NVMe install/boot dependency-gated | p020 physical IRQ/XMM/HAL plus USB/VFS passes; p021 larger-media host/BIOS/UEFI and CF-SV7 overlay/init/login pass; p017 is superseded; p018/p019 remain defined | Run p018 only after WS004/WS013/WS019 overlay prerequisites; retain later WS-level repeatability and inventory work | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; `q030` NVMe software sequence complete | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Complete automatic WS013/WS019 prerequisites, then run the read-only p025 Latitude checkpoint with the later installed-boot acceptance | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Active; q029 p001 complete; WLAN manually blocked | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Select reconnect/reliability or another dependency-ready networking Phase; WLAN remains blocked | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
@@ -377,11 +376,10 @@ WS010 supplies host-side build and test scripting used by all workstreams.
    selection, not before the already bounded p020 early-IRQ investigation.
 2. Implement QEMU xHCI USB-root boot and stable boot-device selection.
 3. Preserve the completed Latitude USB/network path and completed CF-SV7
-   early ACPI/interrupt result, then clear its larger-media GPT/root boundary
-   through `ws003-p021`.
+   early ACPI/interrupt plus larger-media GPT/root results from `ws003-p021`.
 4. Bring up USB Ethernet as the first physical network path, then implement and
    accept NVMe, the read-only GPT inspector, the no-format overlay installer,
-   Latitude NVMe boot, CF-SV7 USB-root continuation, evdev, and USB HID. USB
+   Latitude NVMe boot, evdev, and USB HID. USB
    trial use remains recommended until that installer milestone is complete.
 5. Add the optional LFB Xzed path and the upstream Noct target/BeUI/JIT
    sequence when selected. Independently, after `MB-006` is released, add the
