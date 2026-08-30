@@ -22,11 +22,120 @@ Parent: [WS004](../ws.md)
 | HW-T22 | CDC ECM QEMU baseline | A QEMU RNDIS-first/ECM-second `usb-net` function selects ECM without a quirk, publishes `ue0`, carries raw Ethernet and DHCP/ping traffic, detaches cleanly, and coexists with xHCI USB Storage |
 | HW-T23 | CDC NCM deterministic hardening | Arbitrary first and mismatched fully valid sequences deliver and resynchronize, malformed NTBs preserve state, zero-delivery completions consume bounded poll work, and each open programs the packet filter after the active alternate and before input URBs |
 | HW-T24 | xHCI SuperSpeed interrupt context | Companion `wBytesPerInterval` validation and host-endian decode produce exact Max ESIT/Average TRB Length fields for RTL8156 EP3; zero, oversized, reserved-field, 16384-byte ceiling, and 16385 rejection cases behave as specified while non-SS/non-interrupt contexts remain unchanged |
-| HW-T30 | WLAN logic | Scan/association/key/error state tests pass against a bounded fixture without claiming radio hardware success |
-| HW-T31 | WLAN hardware | Firmware load, scan, authentication, association, reconnect, and data-plane tests pass on the exact device |
+| HW-T30 | Generic WLAN logic | The versioned pointer-free ioctl ABI, scan generations/cache, station state, cancellation, carrier, detach, race, and secret-erasure rules pass against a deterministic fake radio without claiming RF success |
+| HW-T31 | RTL8822BU attach/scan | Only the descriptor-confirmed `2357:012e` interface binds; automatic firmware/USB/scan gates pass, and the physical attach/scan fields come from the one shared WS005 p008 ledger with no p028-specific run |
+| HW-T32 | Archer identity/firmware policy | The exact adapter label and complete descriptor are retained; V1.0 RTL8822BU evidence is separated from later-revision inference, and one separately packaged firmware blob/license/provenance/digest/update rule is frozen before binding |
+| HW-T33 | WPA2-Personal/CCMP L2 | Crypto vectors and strict positive/negative RSN/authentication/association/four-way/replay/key-CAM/controlled-port fixtures pass; physical secure-L2 fields come from the one shared WS005 p008 ledger with no p029-specific run |
+| HW-T34 | WLAN lifecycle hardening | Rekey, bounded reconnect, firmware/USB recovery, up/down, unplug/reinsert, shutdown, concurrent storage, and race/fault fixtures pass; one shared WS005 p008 lifecycle checkpoint and its frozen-artifact five-run batch supply nonduplicated physical evidence |
 | HW-T40 | i915 foundations | Device-independent UAPI/model tests pass; modeset/scanout/reset require target-hardware evidence |
 
 QEMU/model and physical-hardware results are always separate evidence fields.
+
+## HW-T30 generic WLAN logic
+
+`ws004-p027` owns this production-source fixture. It uses a deterministic fake
+radio and explicit test clock to verify:
+
+- identical fixed-width UAPI layouts on amd64/i386, nonzero `_IOW/_IOR/_IOWR`
+  encoded sizes and libc argument forwarding, version/size/reserved-field
+  rejection, pointer-free one-record BSS pagination, and `ESTALE` snapshots;
+- binary/hidden/32-octet SSIDs, 64-entry deterministic cache eviction,
+  malformed/truncated information elements, duplicate BSS updates, and strict
+  normalized security flags;
+- scan start/repeated-start idempotent join/stop/idempotent-stop/timeout, exact
+  generation publication, deterministic BSS selection, and rejection of late
+  events from an old generation;
+- all station-state, timeout, cancellation, driver-error, controlled-port, and
+  carrier transitions without treating a fake association as hardware;
+- concurrent list/status/connect/disconnect, the INET-to-`net_device` ioctl
+  dispatch, active-ioctl admission/join, close and detach during every state,
+  a callback blocked across teardown, and exact checked retry; and
+- passphrase/key test patterns proven erased on failure, disconnect, close,
+  detach, and shutdown, with no secret in UAPI or logs.
+
+Ordinary, ASan/UBSan, compiler-analyzer, race-stress, configured amd64/i386,
+`make -j16`, IDE, xHCI USB-root, wired-network, and net-device-hotplug gates are
+required. An optional QEMU fake-device ioctl round trip remains model evidence
+and is absent from ordinary images.
+
+## HW-T31 RTL8822BU attach, firmware, and scan
+
+`ws004-p028` first drives the production driver through a fake USB transport.
+It covers exact and neighboring IDs/interface tuples/endpoints, every attach
+allocation rollback, register width/endian/timeout handling, efuse cut/RFE/MAC/
+channel-plan validation, firmware size/digest/header/page/ready/error cases,
+descriptor bounds, concurrent URBs, scan stop, stale completions, retry, close,
+and detach while unrelated USB storage remains active.
+
+HW-T31 makes no independent physical request. After every p028--p030 and WS005
+automatic gate passes, the one combined WS005 p008 provisional ledger supplies
+its physical fields: exact `wlan0`, firmware/cut/RFE/endpoints, and bounded
+controlled-AP scan. That same run continues to HW-T33, HW-T34, and DHCP/E2E;
+p028 does not ask the user to repeat an attach or scan.
+
+## HW-T32 Archer identity and firmware policy
+
+`ws004-p026` retains the purchased adapter's model/region/hardware-revision
+label and complete raw USB device/configuration/interface/alternate/endpoint
+descriptor from one read-only `lsusb -v`/`usbconfig` inventory on an existing
+development host. It is not a zedBSD boot or radio test. Serial number and
+unrelated device identity are redacted. The positive binding input is
+`2357:012e` plus the exact interface and endpoint tuple; product text,
+vendor-only, broad Realtek, and neighboring IDs reject. If this inventory is
+unavailable, p026 is `uncleared` and p028 binding remains ineligible.
+
+The documentary evidence separately records:
+
+- FCC `2AXJ4T3UNANO` V1.0 internal-photo marking `RTL8822BU`;
+- the TP-Link INF 8822B mapping for `USB\VID_2357&PID_012E`;
+- Linux mainline's `2357:012e` to `rtw8822b_hw_spec` mapping; and
+- later TP-Link hardware labels as inference only until their own descriptor/
+  physical evidence exists. RTL8828BU is not an accepted alias.
+
+One official `linux-firmware` revision of `rtw88/rtw8822b_fw.bin` is pinned by
+path, reported version, size, SHA-256, WHENCE entry, and exact
+`LICENCE.rtlwifi_firmware.txt`. The optional package includes the unmodified
+blob and license; the ordinary base image includes neither the blob nor a
+download step. Absent, short, oversized, wrong-digest, and unsupported-header
+negative inputs are retained for HW-T31.
+
+## HW-T33 WPA2-Personal/CCMP L2
+
+`ws004-p029` runs official SHA-1/HMAC/PBKDF2/AES/key-wrap known-answer vectors,
+then scripted WPA2 traces through the production common core and fake driver.
+It covers strict RSN CCMP+PSK selection, every authentication/association
+field/status/timeout, exact EAPOL messages 1/4--4/4, nonce/MIC/replay/KDE
+validation, atomic PTK/GTK CAM install, entropy and CAM failures, and carrier
+only after controlled-port authorization. Retransmitted messages 1 and 3 must
+not regenerate SNonce, reinstall a key, or reset a packet number.
+
+Ethernet/LLC/SNAP and test-reference CCMP cases cover valid traffic plus wrong
+BSSID/direction/key generation/key ID/PN/MIC/length, preauthorization filtering,
+disconnect, and secret erasure. Wrong-passphrase, unsupported-security, and
+malformed-handshake negatives remain automatic and never raise carrier or
+transmit plaintext. HW-T33 makes no independent physical request: the one
+combined WS005 p008 ledger supplies the controlled-AP association, authorized
+carrier, and bounded bidirectional L2 fields before its DHCP/E2E stage, and the
+same ledger also satisfies HW-T31/HW-T34.
+
+## HW-T34 WLAN lifecycle hardening
+
+`ws004-p030` extends the same production fixtures through group and pairwise
+rekey, retransmission/replay/CAM failure, link loss at every state, firmware
+stall/reload, endpoint timeout/stall/short/foreign completion, reconnect
+backoff/cancellation/exhaustion, up/down, unplug/reinsert, and terminal shutdown.
+At least 100 synthetic iterations run with concurrent xHCI USB-storage work and
+prove exact timer/callback/URB/DMA/key/common/net-device retirement or checked
+retention.
+
+Physical evidence is not a second HW-T34 campaign. One shared WS005 p008
+provisional script validates the exact adapter/artifacts, complete WLAN path,
+one controlled link-loss/reconnect, down/cleanup, and one final removal while
+USB storage remains responsive. A pass freezes the artifact; p008 alone owns
+the final five-consecutive-cold-boot batch. The fifth run adds at most ten
+minutes of bounded bidirectional traffic with concurrent storage. HW-T34
+references that one redacted ledger, while forced rekey, repeated hotplug,
+firmware/endpoint negatives, and 100-iteration stress remain automatic.
 
 ## HW-T20 NVMe I/O and lifecycle evidence
 

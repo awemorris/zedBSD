@@ -1,29 +1,25 @@
-# WS005: networking and WPA
+# WS005: networking and WLAN
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 WSID: `ws005`
 
-Status: active; q029 p001 complete through final Latitude-native external
-fetch; WLAN manually blocked
+Status: active; q029 p001 completed the first physical USB-Ethernet path;
+WLAN discussion resumed and the replacement Phase sequence is planned but not
+queued
 
 Parent: [master plan](../master.md)
 
-Last verified result: the p001 safe DHCP/diagnostic automatic slice and
-candidate-image QEMU USB-root gate pass. A real RTL8156 capture identified that
-valid connection/speed notifications name its paired data interface; the
-bounded parser and DHCP route-transaction repairs now pass carrier, a
-static-to-DHCP transition, routing, and ping through QEMU USB-host with that
-physical adapter. The final Latitude-native image also reached DHCP and
-successfully fetched `www.google.com`, completing p001. Physical NCM
-publication dependency `ws004-p018` and deterministic hardening dependency
-`ws004-p020` are complete; the inherited control-plane baseline is
-`ws002-p020`.
+Last verified result: `ws005-p001` passes the RTL8156 NCM carrier, static,
+DHCP, route/DNS, ping, and external-fetch path through the common
+`net`/`networkd` design. The final Latitude-native observation fetched
+`www.google.com` successfully.
 
-Resume point: p001 needs no further acceptance. Select a separately approved
-follow-up such as reconnect/reliability, the independent ECM baseline, or
-`ws004-p021` xHCI specification cleanup when prioritized. RTL8822CE WLAN/WPA
-remains on `MB-006`.
+Resume point: review and freeze `ws005-p002`, then place only the bounded,
+dependency-ready prerequisite Phases in a separately approved Queue. In
+parallel, `ws004-p026` must record the exact Archer T3U Nano unit identity and
+firmware policy before its native driver is implemented. Planning these
+Phases is not implementation authorization.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -31,110 +27,276 @@ Shared tests: [WS005 test index](tests/README.md)
 
 | Phase | Status | Result / resume point |
 | --- | --- | --- |
-| [`ws005-p001`](phase001-usb-ncm-physical-datapath/phase.md) | Complete (`q029`) | Carrier/deadline, rollback, diagnostics, notification-pair and DHCP-route repairs, USB-root and real RTL8156 passthrough gates pass; final Latitude-native DHCP plus `fetch www.google.com` succeeds |
+| [`ws005-p001`](phase001-usb-ncm-physical-datapath/phase.md) | Complete (`q029`) | RTL8156 NCM carrier/static/DHCP/ping and final Latitude external fetch pass |
+| [`ws005-p002`](phase002-wlan-v1-contract/phase.md) | Planned; not queued | Freeze the v1 control, security, scan, association, DHCP, cancellation, and ownership contracts; record every intentional exclusion |
+| [`ws005-p003`](phase003-unix-peer-credentials/phase.md) | Planned; depends on p002 | Add connection-time AF_UNIX peer credentials and make one `networkd` socket a truthful root/authorized-user boundary |
+| [`ws005-p004`](phase004-wifi-ioctl-command/phase.md) | Planned; depends on p002, p003, and `ws004-p027` | Add the primitive, L2-only `/sbin/wifi` ioctl command with bounded machine and human output |
+| [`ws005-p005`](phase005-wifi-credential-store/phase.md) | Planned; depends on p002 | Add root and per-user `wifi.conf` storage plus `net wifi set-key` without involving `networkd` |
+| [`ws005-p006`](phase006-networkd-wifi-protocol/phase.md) | Planned; depends on p003-p005 | Replace whitespace `ZNV1` limitations with bounded length-framed WLAN requests, peer authorization, and a secret-FD child path |
+| [`ws005-p007`](phase007-net-wifi-orchestration/phase.md) | Planned; depends on p005-p006 and WS004 WLAN fixture | Implement the requested `net wifi` search/list/up/down/connect flow through `networkd` to `ifconfig`, `wifi`, and `dhcpc` |
+| [`ws005-p008`](phase008-archer-physical-acceptance/phase.md) | Planned; depends on p007 and `ws004-p030` | Prove one complete physical scan/WPA2/DHCP/transfer/down path, then run the final frozen-artifact repeatability campaign |
 
-`ws002-p020` remains historical ownership of the current `networkd`/`net`
-baseline; it is not renumbered into this WS.
+`ws002-p020` remains historical ownership of the current wired
+`networkd`/`net` baseline; it is not renumbered into this WS. Native device and
+common kernel WLAN work is owned by `ws004-p026` through `ws004-p030`.
 
 ## Goals
 
-- Extend `networkd` and `net` from the WS002 wired baseline to real hardware and
-  WLAN while preserving direct `/sbin/ifconfig` recovery.
-- Use `dhcpc` as the DHCP child and a separate pluggable `wpa` child for WLAN
-  authentication.
-- Keep network configuration synchronous, bounded, diagnosable, and safe for
-  boot use.
+- Preserve the completed wired and USB-Ethernet behavior while adding one
+  coherent WLAN control path.
+- Make `/sbin/net` the interface used by people and desktop software.
+- Keep `networkd` a privileged, lightweight command orchestrator whose fixed
+  primitive backends are `/sbin/ifconfig`, `/sbin/wifi`, and `/sbin/dhcpc`.
+- Keep `/sbin/wifi` a thin WLAN-ioctl command: no persistence, DHCP, routing,
+  DNS, interactive database, or resident daemon role.
+- Use one authenticated Unix-domain control socket for root and authorized
+  ordinary users; never trust an identity carried in the request payload.
+- Bring up TP-Link Archer T3U Nano V1.0 as the first WLAN target. Public
+  primary evidence identifies it as RTL8822BU, USB `2357:012e`; the exact
+  physical unit remains authoritative and must be recorded before driver
+  implementation.
 
 ## WS completion conditions
 
-WS005 is complete when wired/selected physical networking, WLAN association,
-DHCP/static addressing, routes, DNS, reconnect, and failure reporting operate
-through `net` → `networkd` → child backends; credential storage satisfies its
-documented permissions/atomicity rules; and the direct ioctl recovery path
-still works.
+WS005 is complete when the retained wired path and the selected WLAN path
+operate through `net` -> `networkd` -> fixed primitive children; peer
+authorization is kernel-attested; system and per-user credentials satisfy the
+documented ownership, atomicity, and redaction rules; scan, explicit and auto
+association, DHCP, disconnect, cancellation, recovery, and useful diagnostics
+pass the automatic fixture matrix; and the selected physical adapter passes
+the declared final acceptance campaign. Direct primitive recovery remains
+available to root without making `networkd` optional for ordinary users.
 
-Existing baseline: [ws002-p020 network service](../ws002-services/phase020-network-service/phase.md)
+## 1. Objective and ownership boundary
 
-## 1. Objective
-
-Extend the current `init`/`networkd`/`net` design from wired static/DHCP
-orchestration to physical bring-up, optional USB networking, and WLAN. Preserve
-`/sbin/ifconfig` as the direct ioctl path. Keep `networkd` a small command
-orchestrator and invoke a separate `dhcpc` for DHCP and a pluggable `wpa`
-backend for authentication.
-
-## 2. Stable control path
+The authoritative control topology is:
 
 ```text
-/etc/net.conf -> /sbin/net boot -> networkd
-                                      +-- direct interface/route/DNS operations
-                                      +-- dhcpc child for DHCP
-                                      +-- wpa child for WLAN authentication
-
-interactive /sbin/net ----------------^
+person / desktop environment
+            |
+            v
+        /sbin/net
+            |
+            v
+       networkd  -- one authenticated AF_UNIX socket
+        |   |   |
+        |   |   +-- /sbin/dhcpc     (IPv4 lease, route, resolver)
+        |   +------ /sbin/wifi      (WLAN ioctl, L2 only)
+        +---------- /sbin/ifconfig  (link/address primitive)
 ```
 
-The existing fd 3 readiness notification from `networkd` to init remains the
-daemon-start synchronization mechanism. Per-interface `net` commands remain
-synchronous and bounded so the boot service can distinguish ready, timeout,
-and failure.
+`networkd` does not implement radio protocols and `/sbin/wifi` does not become
+a resident backend. The common kernel WLAN layer owns long-lived scan,
+authentication, association, key/rekey, controlled-port, and disconnect state
+needed after a one-shot `wifi` process exits. A chip driver owns only the
+hardware/firmware-specific radio, management/data transport, channel, key-slot,
+and lifecycle operations exposed through that common layer.
 
-## 3. Work items
+This design supersedes, rather than preserves, the earlier resident
+`/sbin/wpa` child, pluggable stdin/stdout backend, and `/etc/wpa/` database.
+Those concepts have no compatibility requirement because they were never a
+released public contract.
+
+## 2. Scope and non-goals
+
+Initial scope includes:
+
+- a versioned WLAN UAPI and fake-device/state-machine fixture;
+- finite and cancellable scan with a bounded snapshot and generation number;
+- explicit association and disconnection;
+- WPA2-Personal PSK with CCMP, including 4-way/group-key handling, rekey, and
+  controlled-port state;
+- one TP-Link Archer T3U Nano V1.0 / RTL8822BU USB implementation;
+- root and per-user plaintext profiles with an `auto` flag;
+- high-level `net wifi` orchestration through DHCP; and
+- truthful hot-unplug, timeout, and failure reporting.
+
+The first usable radio milestone is restricted to station-mode, non-DFS
+2.4 GHz, 20 MHz. WEP, WPA/WPA1, WPA3/SAE, 802.1X/EAP, AP mode, ad-hoc mode,
+monitor mode, roaming,
+power-save optimization, DFS, regulatory certification claims, throughput
+tuning, and the later built-in RTL8822CE target are outside the first
+acceptance. They require separately planned follow-ups rather than silent
+expansion of the initial driver.
+
+## 3. Fixed control and authorization decisions
+
+1. `networkd` listens on the single `/run/networkd.sock`. A second root/user
+   socket is not part of v1.
+2. AF_UNIX snapshots the connecting process's PID, effective UID, and effective
+   GID at connection time. `networkd` retrieves the kernel-attested record with
+   `getsockopt(SOL_SOCKET, SO_PEERCRED, ...)` immediately after `accept`.
+3. The peer-credential UAPI uses a public fixed-width record distinct from the
+   kernel-internal `struct ucred`. It is valid only for connected AF_UNIX
+   endpoints; unsupported/unconnected uses fail explicitly.
+4. The socket is owned by `root:network` and has mode `0660`. The initial base
+   account database assigns the FreeBSD-compatible GID 69 to `network`, while
+   `networkd` resolves the name rather than hard-coding the number. Root and
+   members admitted by that group may connect. Root-only operations still
+   check the attested effective UID; request fields can never elevate access.
+5. Mutable WLAN ioctls are privileged in the kernel. Authorized ordinary users
+   reach them only through root `networkd`; a set-user-ID `/sbin/wifi` is not
+   introduced. The same Phase audits existing mutable interface/route ioctls
+   and records any broader network-admin defect instead of claiming the socket
+   alone is a complete boundary.
+6. `net wifi set-key` updates the caller's own file locally and normally does
+   not contact `networkd`. Root means effective UID zero and selects
+   `/etc/wifi.conf`; another effective UID selects that account's
+   `~/.wifi.conf`. Consequently `sudo net ...` intentionally uses the root
+   policy.
+7. `networkd` never accepts `HOME`, UID, GID, or a credential-file pathname as
+   proof of identity. `net` reads the selected profile and sends bounded values
+   over the authenticated socket.
+
+The euid-selected file is the official `net` policy, not a per-user secret
+isolation boundary. Because `networkd` receives values rather than opening the
+file itself, an admitted `network`-group member can construct a valid request
+with another bounded SSID/passphrase. Membership therefore grants the declared
+WLAN administration authority. Stronger seat/user-scoped credential isolation
+would require a separately designed broker and is outside v1.
+
+The `network` group is the v1 local authorization policy. A later seat/session
+manager may replace group membership with active-console authorization, but
+that is not required to implement the first desktop path.
+
+## 4. Command contracts
+
+The primitive command remains directly usable by root:
+
+```text
+wifi <interface> search start
+wifi <interface> search stop
+wifi <interface> list
+wifi <interface> status
+wifi <interface> connect <SSID> <passphrase>
+wifi <interface> disconnect
+```
+
+It performs no DHCP or persistence. Human output is separate from a bounded
+machine-readable mode used by `networkd`. The internal child form accepts key
+material from a dedicated inherited descriptor; `networkd` never places a
+passphrase in child argv, temporary diagnostic files, or logs. The requested
+public connect form is retained, with its shell-history/process-list exposure
+documented as a direct-administration limitation.
+
+The public high-level commands are:
+
+```text
+net wifi search start <interface>
+net wifi search stop <interface>
+net wifi list <interface>
+net wifi set-key <SSID> <passphrase> [auto]
+net wifi up <interface>
+net wifi down <interface>
+net wifi connect <interface> <SSID>
+```
+
+`net wifi list` is required because people and desktop software use `net`, not
+the primitive `wifi` command. The existing interactive `net` console exposes
+the same operations without a separate device-management mode.
+
+## 5. Operation semantics
+
+- `search start` begins a finite, cancellable background search policy in the
+  common WLAN layer. Reissuing it is idempotent. `search stop` cancels or waits
+  for the current hardware scan at a defined boundary and preserves the last
+  completed snapshot.
+- `list` returns a bounded snapshot containing SSID bytes, BSSID, RSSI,
+  channel/band, security capability, scan state, and generation. “Scanning,”
+  “complete with zero results,” and “failed” are distinguishable.
+- `set-key` locks, validates, and atomically rewrites the selected profile
+  file. Replacing an SSID preserves its position; a new SSID appends. Auto
+  selection therefore follows file order rather than an unstated RSSI policy.
+- `up` brings the interface up, starts search if necessary, walks visible
+  `auto` profiles in file order, waits for complete L2 authorization, then runs
+  `dhcpc`. Search stops after a successful association. With no matching auto
+  profile it leaves the interface up and the search active, and reports that
+  no configured candidate was found.
+- `connect` requires an existing profile for the named SSID, switches the L2
+  association, and reacquires DHCP so stale address, route, and resolver state
+  cannot survive an SSID change.
+- `down` cancels any pending WLAN/DHCP operation, removes only L3 state owned by
+  that interface/transaction, disconnects, stops search, and brings the link
+  down. Resolver reconstruction must preserve other active interfaces.
+- A failed `up` or `connect` reports the exact scan/profile/authentication/
+  association/key/DHCP stage. Validation failure before mutation preserves the
+  old state. Failure after mutation never reconnects the prior SSID: it retires
+  transaction-owned L2/L3 work and leaves the interface administratively up,
+  disconnected, search-stopped, and without managed WLAN L3 state. Incomplete
+  retirement is reported as `degraded`, never as success.
+
+All waits have one documented total deadline per operation. Driver, kernel,
+child, and protocol cancellation must meet at an ownership-safe boundary; a
+killed child alone is not evidence that an in-kernel request stopped.
+
+## 6. Protocol and secret boundary
+
+The existing whitespace-tokenized, small-buffer `ZNV1` request path cannot
+represent arbitrary SSIDs, passphrases, or bounded scan lists. WLAN commands
+therefore introduce `ZNV2` with:
+
+- one canonical ASCII header, no longer than 32 bytes,
+  `ZNV2 <request-id> <opcode> <payload-length>\n`, followed by exactly the
+  declared number of payload bytes;
+- explicitly encoded integers and length-delimited byte strings rather than a
+  copied C struct;
+- 4096-byte request, 32768-byte response, 64-result, and field-specific
+  maxima;
+- exactly one terminal response per request, containing any bounded typed
+  state/results and no unsolicited second frame;
+- exact malformed/truncated/oversized rejection; and
+- no secret echo in errors or diagnostics.
+
+Existing wired operations migrate to the same framing in p006. There is no
+unversioned fallback, and an old client receives an explicit version failure
+rather than being parsed as a WLAN request.
+
+## 7. Work items
 
 | ID | Status | Deliverable | Dependencies | Acceptance gate |
 | --- | --- | --- | --- | --- |
-| NET-00 | Complete with follow-ups | `networkd`, `net`, `dhcpc`, rc.conf boot orchestration, and fd 3 readiness | Phase 20 | See Phase 20 evidence and handoff list |
-| NET-05 | Planned in WS011 | Interactive `net`, `/etc/net.conf`, persistence, and VLAN/bridge configuration model | WS011 | WS011 owns its Phase and acceptance records |
-| NET-01 | Complete (`q029` p001) | Hardware-network bring-up procedure, safe DHCP transition/diagnostics, and bounded carrier/TX/RX evidence | BR-00, bound RTL8156 `ue0`, completed p020 hardening | Real RTL8156 carrier/static/DHCP/ping passes through QEMU and final Latitude-native DHCP/DNS/external fetch passes |
-| NET-10 | Active; NCM physical-device and native-controller milestone proven | Independent ECM and NCM USB Ethernet implementations behind common USB/`net_device` contracts; no Realtek frontend is assumed | BR-07, HW-12; HW-13 remains an independent baseline | p001 is complete; later work separately proves reconnect, ECM comparison, and sustained reliability |
-| NET-20 | Manually blocked (`MB-006`) | Versioned `networkd`-to-`wpa` child protocol and pluggable backend contract | Process/fd primitives, explicit release | Host protocol tests cover success, rejection, timeout, crash, and cancellation |
-| NET-21 | Manually blocked (`MB-006`) | `/etc/wpa/` plaintext database and safe management semantics | NET-20, explicit release | Root-only permissions, atomic update, parse/error tests, and no credential logging |
-| NET-22 | Manually blocked (`MB-006`) | `/sbin/wpa` initial RTL8822CE backend | WLAN userspace/control ABI, NET-20/21, firmware policy | Scan selection, authenticate/associate, reconnect, and useful errors on hardware |
-| NET-23 | Manually blocked (`MB-006`) | `net` WLAN commands through `networkd` and backend | NET-20–22, explicit release | End-to-end `net` operation reaches association and then DHCP/static configuration |
-| NET-24 | Deferred behind `MB-006` | Additional WPA backend implementations | Stable NET-20 contract | Backend can be swapped without changing `net` or `net.conf` semantics |
+| NET-00 | Complete with follow-ups | Existing `networkd`, `net`, `dhcpc`, boot orchestration, and fd 3 readiness | WS002 p020 | Retained regression baseline |
+| NET-01 | Complete (`q029`) | RTL8156 USB-Ethernet physical data path | WS004 NCM sequence | Latitude external fetch passes |
+| NET-05 | Planned in WS011 | Interactive `net`, `/etc/net.conf`, confirmed commit, VLAN/bridge model | WS011 | WS011 evidence |
+| NET-10 | Active follow-up pool | Independent ECM/reconnect/sustained USB-Ethernet reliability | WS004/WS005 | Separately queued gates |
+| NET-20 | Superseded by NET-25--NET-31 | Resident versioned `networkd`-to-`wpa` backend contract | 2026-08-30 topology decision | No implementation; retained as history |
+| NET-21 | Superseded by NET-28 | Root-only `/etc/wpa/` database | 2026-08-30 profile decision | No implementation; retained as history |
+| NET-22 | Superseded by WS004 p026-p030 | `/sbin/wpa` RTL8822CE backend | Archer-first decision | No implementation; RTL8822CE remains later hardware target |
+| NET-23 | Superseded by NET-29--NET-31 | Old `net` WLAN backend integration | Fixed primitive topology | No implementation |
+| NET-24 | Superseded | Pluggable WPA backend family | Fixed primitive topology | No implementation |
+| NET-25 | Planned as p002 | WLAN v1 contract freeze | User decisions recorded above | P-book has no unresolved implementation-changing ambiguity |
+| NET-26 | Planned as p003 | AF_UNIX peer credentials and one-socket authorization | NET-25 | Credential spoof/race/group/privilege fixtures pass |
+| NET-27 | Planned as p004 plus WS004 p027 | Primitive `/sbin/wifi` and stable WLAN ioctl contract | NET-25, common WLAN fixture | search/list/status/connect/disconnect pass without DHCP/persistence |
+| NET-28 | Planned as p005 | System/per-user `wifi.conf` and `set-key` | NET-25 | ownership/mode/symlink/locking/atomicity/redaction tests pass |
+| NET-29 | Planned as p006 | `ZNV2`, peer authorization, `wifi` child secret-FD bridge | NET-26--NET-28 | malformed/auth/timeout/cancel/crash fixtures pass |
+| NET-30 | Planned as p007 | Requested high-level `net wifi` operations | NET-29, WS004 WLAN fixture | full fake-device association/DHCP/down transaction passes |
+| NET-31 | Planned as p008 | Archer end-to-end and repeatability acceptance | NET-30, WS004 p030 | physical L2, DHCP, transfer, down, reconnect, final repetition pass |
 
-## 4. WPA backend contract
+## 8. Cross-WS dependencies
 
-The initial topology is `/sbin/net` to `networkd` to an `/sbin/wpa` child.
-`networkd` owns orchestration and interface lifecycle; `wpa` owns authentication
-protocol details. The child communicates through dedicated stdin/stdout file
-descriptors. The detailed Phase must define a versioned, bounded message format
-rather than depending on human-readable prompt parsing.
+- WS002 supplies init, fd 3 readiness, `networkd`, `net`, and `dhcpc` baseline.
+- WS004 owns generic kernel WLAN facilities, USB RTL8822BU hardware,
+  firmware, lifecycle, and test-double boundaries in p026-p030.
+- WS011 owns `/etc/net.conf`, interactive candidate/commit behavior, and later
+  VLAN/bridge design. WLAN secrets never enter `/etc/net.conf`.
+- WS009 will document administrator/user commands, plaintext-secret risk,
+  supported security modes, firmware provenance, and recovery.
 
-The protocol must provide at least:
+## 9. Reconsideration boundaries
 
-- startup/version negotiation and explicit readiness;
-- scan request/results;
-- connect request using a database entry rather than echoing a passphrase;
-- association, disconnection, and error events;
-- timeout/cancel and clean shutdown;
-- distinction between protocol output and logs (`stderr` or syslog).
+Return to planning rather than broadening an implementation Phase if:
 
-The backend executable/path is configurable internally so another
-implementation can replace it without changing `/sbin/net` or `net.conf`.
-
-## 5. `/etc/wpa/` initial database
-
-The first implementation may use plain text, but it is still a credential
-store. Requirements are:
-
-- a documented, versioned file format for SSID, authentication mode,
-  passphrase/PSK reference, priority, and auto-connect policy;
-- root ownership and permissions that do not expose secrets to ordinary users;
-- atomic rewrite (`temporary file`, validation, sync where available, rename);
-- escaping/length rules that cannot inject backend commands;
-- redaction in logs, diagnostics, crash reports, and tests.
-
-Encryption-at-rest or a secret service is a later enhancement, not a false
-property of the initial plaintext format.
-
-## 6. Boot and error semantics
-
-For an auto-configured WLAN interface, association completes before `dhcpc` or
-static address configuration. Each stage has its own timeout and error. A boot
-policy may decide whether failure is fatal or allows degraded boot, but
-`networkd` and `net` must report the actual stage rather than a generic failure.
-
-The WLAN sequence is tested with host-side protocol fixtures before physical
-radio testing. This validates orchestration but does not satisfy the WLAN
-hardware acceptance gate.
+- the physical unit is not USB `2357:012e`/RTL8822BU or has materially
+  different descriptors;
+- redistribution or loading of the required firmware cannot satisfy the
+  recorded package/license policy;
+- a one-shot primitive plus common kernel WLAN state cannot safely handle
+  rekey, disconnect, cancellation, or hot unplug without a resident userspace
+  supplicant;
+- WPA2-Personal/CCMP requires a public UAPI incompatible with the frozen p002
+  contract;
+- peer credentials cannot be captured without a generally unsafe AF_UNIX ABI;
+- ordinary-user control needs a seat/session policy rather than the approved
+  `network` group; or
+- physical acceptance requires DFS, WPA3, enterprise authentication, or a
+  different radio before the initial milestone can be honestly claimed.

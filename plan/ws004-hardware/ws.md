@@ -6,7 +6,8 @@ WSID: `ws004`
 
 Status: active; `ws004-p020` deterministic CDC NCM hardening and
 `ws004-p022`--`p024` NVMe discovery/I/O/strict-GPT QEMU acceptance are
-complete; `ws004-p021` remains ready but independent
+complete; `ws004-p021` remains ready but independent; `ws004-p026`--`p030`
+define the new Archer T3U Nano WLAN path and are not queued
 
 Parent: [master plan](../master.md)
 
@@ -36,7 +37,12 @@ automatic loader/installer prerequisites before requesting that physical
 checkpoint. p021 remains a ready
 but independent xHCI specification cleanup. p019 remains an independent ECM
 baseline. p016 and the remaining asynchronous-TX/accounting portion of p017
-stay later WS004 work.
+stay later WS004 work. WLAN planning has resumed with the Archer T3U Nano as
+the first target. `p026` must confirm the physical adapter descriptor and
+separate firmware-package policy; `p027`--`p030` then progress through the
+generic kernel WLAN core, RTL8822BU USB scan, WPA2-Personal/CCMP L2, and final
+lifecycle hardening. These five Phases are planning entries only and have not
+crossed the Queue boundary.
 
 Shared tests: [WS004 test index](tests/README.md)
 
@@ -69,6 +75,11 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p023`](phase023-nvme-io-lifecycle/phase.md) | Complete (`q030`) | One depth-64 I/O queue, private 4-KiB bounce slots, checked 64-bit read/write, truthful flush, concurrent wrap, timeout/reset, normal shutdown, and quarantine pass focused/build/QEMU/regression gates |
 | [`ws004-p024`](phase024-nvme-qemu-acceptance/phase.md) | Complete (`q030`) | Strict 512/4096 GPT host gates and disposable QEMU partition write/flush/restart/rejection plus IDE, xHCI USB-root, amd64, and i386 gates pass |
 | [`ws004-p025`](phase025-latitude-nvme-readonly/phase.md) | Planned physical checkpoint; depends on p024 | Latitude SN740 `15b7:5015` identifies and reads safely without modifying internal storage |
+| [`ws004-p026`](phase026-archer-t3u-nano-identity-firmware/phase.md) | Planned evidence/policy checkpoint; not queued | Confirm the exact purchased unit as `2357:012e` before binding, reject the RTL8828BU guess, keep later TP-Link revisions inference-only, and freeze a separately packaged `rtw8822b_fw.bin` revision/license/digest |
+| [`ws004-p027`](phase027-wlan-uapi-common-core/phase.md) | Planned; not queued | Add the versioned pointer-free WLAN ioctl ABI, persistent common station state, generation-safe scan/status/cache/lifetime, and a deterministic fake radio without claiming hardware |
+| [`ws004-p028`](phase028-rtl8822bu-usb-scan/phase.md) | Planned; depends on p026/p027; not queued | Bind only the descriptor-confirmed RTL8822BU interface, load the pinned optional firmware, and implement conservative 2.4-GHz/20-MHz scan; physical attach/scan evidence is one field of the shared WS005 p008 ledger, not a p028 run |
+| [`ws004-p029`](phase029-wpa2-ccmp-l2/phase.md) | Planned; depends on p028 automatic milestone; not queued | Common-kernel WPA2-Personal/CCMP authentication, association, four-way handshake, key CAM, controlled port, and bidirectional Ethernet L2; physical evidence is shared with p030/WS005 p008 |
+| [`ws004-p030`](phase030-wlan-lifecycle-hardware-hardening/phase.md) | Planned; depends on p029 automatic milestone; not queued | Rekey, bounded reconnect, reset, up/down, unplug/reinsert, shutdown, and concurrent-storage regressions; share one lifecycle checkpoint and the frozen-artifact five-run ledger with WS005 p008 rather than duplicate physical work |
 
 ### MSI follow-up register
 
@@ -82,9 +93,9 @@ Shared tests: [WS004 test index](tests/README.md)
 q029, p020, and WS005 p001 are complete through final Latitude-native external
 fetch. p021 remains ready for a future Queue as an independent standards
 correction, not an active failure response. Later WS004 candidates are
-p016/p017, p019, p021, p025, and HW-11,
-HW-20/HW-21, and HW-30 when their inputs and acceptance environments are
-available.
+p016/p017, p019, p021, p025, and the planned-only p026--p030 WLAN chain, plus
+HW-11, HW-20/HW-21, and HW-30 when their inputs and acceptance environments
+are available. No p026--p030 item is in an implementation Queue.
 
 ## Goals
 
@@ -106,8 +117,10 @@ Primary physical target: Dell Latitude 5320
 ## 1. Objective
 
 Build the reusable kernel foundations and native drivers needed for the target
-laptop, beginning with xHCI/USB-root support and NVMe, followed by the exact WLAN
-controller and i915 graphics generation discovered by hardware inventory.
+laptop, beginning with xHCI/USB-root support and NVMe. Bring up the
+descriptor-confirmed USB WLAN adapter through a reusable WLAN core before the
+separate built-in PCI WLAN follow-up, then continue to the i915 graphics
+generation discovered by hardware inventory.
 
 ## 2. Shared foundations
 
@@ -138,8 +151,13 @@ implemented initially, the security and addressability limitation is explicit.
 | HW-11 | Planned as `ws004-p025` plus WS003 p018 | Read-only SN740 verification before the separately confirmed existing-FAT overlay install/boot acceptance | HW-10, BR-00, WS019 | Identify/read-only first; file writes occur only through the explicitly confirmed installer Phase |
 | HW-12 | Active (`q029` p020 hardening; q028 bind complete) | Independent CDC NCM class driver on the common USB/xHCI/net-device lifetime foundations; Union-associated NCM does not require an IAD; deterministic valid-sequence recovery, bounded completion work, and post-alternate open filtering precede one physical data check | HW-01 | p020 automatic gates pass, then WS005 proves or precisely bounds carrier/static/DHCP traffic on the Latitude RTL8156 |
 | HW-13 | `ws004-p019` planned fallback | Independent standards-based CDC ECM driver and QEMU `usb-net` common-path baseline; no speculative shared ECM/NCM backend | HW-01, HW-12 foundations, NET-00, failed q029 physical discriminator | If needed after q029, QEMU selects ECM, publishes `ue0`, passes static/DHCP/ping in IDE and concurrent USB-storage topologies, and preserves detach/reconnect ownership |
-| HW-20 | Manually blocked (`MB-006`) | RTL8822CE (`10ec:c822`, subsystem `10ec:c130`) architecture and native driver | BR-00, HW-00, firmware packaging policy, explicit release | Scan, authenticate, associate, and exchange data on hardware |
-| HW-21 | Manually blocked (`MB-006`) | Testable RTL8822CE WLAN hardware abstraction or protocol fixture | HW-20 design and explicit release | Driver state/error paths can be tested without claiming QEMU emulates the laptop radio |
+| HW-20 | Deferred built-in follow-up; existing ID retained | RTL8822CE (`10ec:c822`, subsystem `10ec:c130`) architecture and native PCIe driver | BR-00, HW-00, stable generic WLAN core, separate 8822C firmware decision | Scan, authenticate, associate, and exchange data on the exact built-in hardware in a later Phase |
+| HW-21 | Deferred built-in follow-up; existing ID retained | Testable RTL8822CE-specific PCI/firmware hardware abstraction or protocol fixture | HW-20 design and the completed generic common-core fixture | Driver-specific state/error paths pass without claiming QEMU emulates the laptop radio |
+| HW-22 | Planned as `ws004-p026`; not queued | Archer T3U Nano exact-unit identity and optional Realtek firmware package/license policy | Physical adapter, primary-source record | HW-T32 performs one read-only development-host descriptor inventory and freezes one blob revision, digest, license, path, and update rule before any bind; missing inventory leaves p026 uncleared |
+| HW-23 | Planned as `ws004-p027`; not queued | Generic WLAN ioctl UAPI, persistent kernel station core, scan cache/state/lifetime, and deterministic fake device | HW-22 documentary capability boundary, p012 | HW-T30 passes ABI, state, race, detach, and secret-erasure fixtures without a physical-radio claim |
+| HW-24 | Planned as `ws004-p028`; not queued | Exact RTL8822BU USB attach, separately packaged firmware start, and conservative 2.4-GHz/20-MHz scan | HW-22, HW-23, p010/p011/p015 | HW-T31 passes automatic attach/firmware/scan gates; the eventual physical fields come from the single shared WS005 p008 ledger with no p028-specific request |
+| HW-25 | Planned as `ws004-p029`; not queued | WPA2-Personal/CCMP authentication, association, key installation, controlled port, and Ethernet L2 | HW-24, kernel entropy and reviewed crypto substrate | HW-T33 passes automatic handshake/replay/CCMP/negative fixtures; the eventual secure-L2 fields come from the same p008 ledger with no p029-specific request |
+| HW-26 | Planned as `ws004-p030`; not queued | Rekey, bounded reconnect, reset, hotplug, shutdown, and final exact-hardware hardening | HW-25, controlled AP, WS005 p008 | HW-T34 passes automatic fault/race/storage gates and references the one shared p008 lifecycle checkpoint/five-run frozen-artifact ledger |
 | HW-30 | Proposed | i915 hardware foundations for the discovered 11th-generation GPU | BR-00, HW-00, GFX UAPI | Modeset/scanout and recovery on hardware; model tests for device-independent layers |
 
 ## 4. NVMe sequence
@@ -163,22 +181,80 @@ part of the USB-root milestone or the read-only hardware checkpoint.
 
 ## 5. WLAN sequence
 
-The physical evidence identifies the built-in WLAN as Realtek RTL8822CE, PCI
-`10ec:c822`, subsystem `10ec:c130`. WLAN is explicitly behind manual hold
-`MB-006`; USB Ethernet is the earlier physical-network target. When resumed,
-the resulting Phase defines:
+The first WLAN target is now the USB TP-Link Archer T3U Nano, ahead of the
+Latitude's built-in PCI WLAN. The verified V1.0 documentary identity is
+RTL8822BU and the software USB identity is TP-Link `2357:012e`; the earlier
+RTL8828BU guess is rejected. The purchased unit must still supply its own exact
+descriptor before binding. TP-Link labels such as V1.40, V1.46, V1.60, and
+V1.80 remain inference-only until independently inspected: a shared download
+archive does not prove an unchanged chip, USB ID, endpoint layout, or RF front
+end.
 
-- the boundary between hardware driver, 802.11 state/frames, and the `wpa`
-  userspace backend;
-- scan and association event delivery;
-- key installation and sensitive-data handling;
-- firmware loading, reset, radio-kill, power, and reconnect behavior;
-- data-plane integration with the existing network stack.
+The ordered implementation path is:
 
-QEMU does not provide a faithful substitute for the RTL8822CE radio or Tiger
-Lake i915 device. Host-side state-machine tests, a constrained test double, or
-PCI passthrough may validate separable logic, but final completion requires the
-exact hardware.
+1. [`ws004-p026`](phase026-archer-t3u-nano-identity-firmware/phase.md) captures
+   the unit label and complete USB descriptor, pins one 8822B firmware blob,
+   and freezes the optional-package/license/update policy.
+2. [`ws004-p027`](phase027-wlan-uapi-common-core/phase.md) adds the generic
+   versioned ioctl ABI and long-lived common kernel station state, then proves
+   scan/cache/state/error/detach behavior with a deterministic fake device.
+3. [`ws004-p028`](phase028-rtl8822bu-usb-scan/phase.md) adds only the
+   RTL8822BU USB, efuse/RF, firmware, descriptor, and key-CAM hooks needed to
+   publish `wlanN` and scan a conservative 2.4-GHz/20-MHz profile.
+4. [`ws004-p029`](phase029-wpa2-ccmp-l2/phase.md) completes strict
+   WPA2-Personal/CCMP authentication, association, four-way handshake,
+   controlled-port authorization, and Ethernet L2 without DHCP.
+5. [`ws004-p030`](phase030-wlan-lifecycle-hardware-hardening/phase.md) completes
+   rekey, bounded reconnect, reset, up/down, unplug/reinsert, shutdown,
+   concurrent-storage regression, and exact-hardware reliability using the
+   same physical checkpoint and final five-run ledger as WS005 p008.
+
+All five are M/W/P planning entries. Each still requires a finite Queue
+proposal and explicit execution approval; this sequence is not itself an
+implementation Queue.
+
+### Responsibility boundary
+
+| Owner | Responsibilities |
+| --- | --- |
+| Common kernel WLAN layer | Versioned ioctl/status, scan generation/cache and BSS choice, 802.11 authentication/association, WPA2 state and crypto, rekey/reconnect, controlled port, Ethernet/802.11 conversion, carrier, cancellation, and secret lifetime |
+| RTL8822BU chip/USB driver | Exact descriptor binding, USB control/bulk transport, efuse/RFE/radio/channel, firmware upload/events, hardware TX/RX descriptors and status, key CAM and CCMP offload, reset/quiesce |
+| WS005 control plane | User-facing `wifi` and `net wifi` commands, per-user/root credential-file policy, automatic profile selection, and starting `dhcpc` only after L2 authorization |
+
+The kernel common layer is deliberately long-lived: a one-shot `wifi connect`
+process cannot own EAPOL retransmission, GTK rekey, link-loss handling, or
+controlled-port state after it exits. Conversely, the chip driver does not
+parse a passphrase, choose an SSID, run WPA, or raise carrier. DHCP begins only
+after p029's authorized L2 result and remains outside WS004.
+
+The first usable radio milestone is station-mode 2.4 GHz, non-DFS, 20 MHz,
+WPA2-Personal/CCMP. 5 GHz, DFS/radar, HT/VHT optimization, aggregation,
+power-save tuning, WPA3/SAE, 802.1X, AP/monitor mode, and roaming are later
+capabilities, not implicit AC1300 completion criteria.
+
+QEMU provides no faithful 802.11 RF model. Host fixtures and a constrained fake
+device prove the generic state/lifetime logic only; USB transport fixtures
+prove ownership only. Scan, association, encrypted L2, rekey, and final
+reliability require the descriptor-confirmed physical adapter and a controlled
+AP. Their first zedBSD observation is one combined WS005 p008 checkpoint after
+all p028--p030 and control-plane automatic gates; p028 and p029 make no
+independent physical request. p008 alone owns the later frozen-artifact
+five-consecutive-run ledger, which p028--p030 reference for physical completion.
+
+### Firmware and retained built-in target
+
+RTL8822BU uses `rtw88/rtw8822b_fw.bin`. It is installed only by a separately
+identified optional firmware package containing the exact unmodified upstream
+blob, `LICENCE.rtlwifi_firmware.txt`, provenance, revision, size, SHA-256, and
+update policy. The base source/image does not contain the binary and performs
+no build-time or runtime download. Missing, wrong-digest, incompatible, or
+unapproved newer firmware fails visibly with carrier down.
+
+The built-in WLAN identity remains Realtek RTL8822CE, PCI `10ec:c822`,
+subsystem `10ec:c130`. It is a later HW-20/HW-21 path, not an alias for the USB
+device: it uses the 8822C family, PCIe transport, and
+`rtw88/rtw8822c_fw.bin`. The generic common core is intended to be reused, but
+no p026--p030 completion claims the built-in device.
 
 On FreeBSD the built-in PCI WLAN inventory is collected with:
 
@@ -189,28 +265,25 @@ pciconf -lv | grep -A1 -B3 network
 Retain the full matching stanza, including `vendor`, `device`, `subvendor`, and
 `subdevice`. The supplied stanza is now the canonical RTL8822CE target identity.
 
-The matching `linux-firmware` payload is `rtw88/rtw8822c_fw.bin`. Its WHENCE
-entry uses `LICENCE.rtlwifi_firmware.txt`: unmodified binary use and
-redistribution are permitted when the copyright/disclaimer accompanies it,
-while reverse engineering, decompilation, and disassembly are prohibited and
-the patent grant is limited. It is therefore not zlib-licensed source and must
-not be represented as part of the permissively licensed base implementation.
-If later approved, ship it as a separately identified firmware package with
-the exact upstream blob, license text, provenance, hash, and update policy.
-Final acquisition/republication policy remains on `MB-006`.
-
 References:
 
+- FCC Equipment Authorization System V1.0 internal-photo record for FCC ID
+  `2AXJ4T3UNANO`:
+  <https://apps.fcc.gov/eas/GetApplicationAttachment.html?id=5468516>
+- TP-Link official driver archive containing the 8822B/`2357:012e` mapping:
+  <https://static.tp-link.com/upload/driver/2025/202512/20251231/Archer%20T3U%20Nano.zip>
+- Linux mainline maps `2357:012e` to `rtw8822b_hw_spec` and names
+  `rtw88/rtw8822b_fw.bin`:
+  <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/realtek/rtw88/rtw8822bu.c>
+  and
+  <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/net/wireless/realtek/rtw88/rtw8822b.c>
 - FreeBSD network-adapter inventory procedure:
   <https://docs.freebsd.org/en/books/handbook/network/>
 - FreeBSD `usbconfig(8)` descriptor inspection:
   <https://man.freebsd.org/cgi/man.cgi?query=usbconfig&sektion=8>
-- FreeBSD `ure(4)` identifies RTL8152/RTL8153 as a vendor-family USB Ethernet
-  target rather than generic CDC ACM:
-  <https://man.freebsd.org/cgi/man.cgi?query=ure&sektion=4>
-- Linux firmware maps RTL8822CE to `rtw8822c_fw.bin` and marks it
-  redistributable under the Realtek binary-firmware terms:
-  <https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+/f9b926a6e1d67e09e54adc329c4e76be5f24a895/LICENCE.rtlwifi_firmware.txt>
+- The exact Realtek binary-firmware terms are separate from the driver source
+  license:
+  <https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/LICENCE.rtlwifi_firmware.txt>
 - FreeBSD distributes rtw88 firmware as a separate package rather than
   treating it as driver source:
   <https://cgit.freebsd.org/ports/tree/net/wifi-firmware-rtw88-kmod>

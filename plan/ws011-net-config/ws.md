@@ -53,7 +53,8 @@ strict YAML-like zedBSD format, not general YAML.
 - an OS-wide configuration interpreter or Cisco IOS command compatibility;
 - a complete YAML implementation;
 - removal of direct `/sbin/ifconfig` ioctl control;
-- WLAN authentication and `/etc/wpa/`, which remain in WS005;
+- WLAN authentication and euid-selected `/etc/wifi.conf` or `~/.wifi.conf`,
+  which remain in WS005;
 - pretending VLAN/bridge work before the kernel data paths exist.
 
 ## Cross-WS dependencies
@@ -89,7 +90,8 @@ strict YAML-like zedBSD format, not general YAML.
   `true`, and `false`.
 - Persistent writes use a same-directory temporary file, validation, sync, and
   atomic rename. Failure preserves the prior valid file.
-- WPA secrets stay under `/etc/wpa/` and are never duplicated in `net.conf`.
+- Wi-Fi secrets stay in the euid-selected `/etc/wifi.conf` or `~/.wifi.conf`
+  owned by WS005 and are never duplicated in `net.conf`.
 - A VLAN is a virtual interface with a parent and 802.1Q ID. A bridge is a
   separate virtual L2 interface with members; a VLAN is not a bridge.
 - `commit confirmed MINUTES` follows the Junos-style user model: apply a

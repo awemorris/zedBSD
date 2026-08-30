@@ -33,7 +33,7 @@ For example, `ws001-p009` is WS001 Phase 009.
 | `ws002` | System services | [WS002](ws002-services/ws.md) |
 | `ws003` | Dell Latitude 5320 bring-up | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WPA | [WS005](ws005-networking/ws.md) |
+| `ws005` | Networking and WLAN | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | [WS008](ws008-noct/ws.md) |

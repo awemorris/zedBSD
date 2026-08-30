@@ -271,8 +271,8 @@ actually warranted.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop bring-up (Latitude 5320 and CF-SV7) | Active; Latitude USB/network milestone complete; CF-SV7 p020 and p021 USB-root continuation complete; p018 Latitude overlay-NVMe install/boot dependency-gated | p020 physical IRQ/XMM/HAL plus USB/VFS passes; p021 larger-media host/BIOS/UEFI and CF-SV7 overlay/init/login pass; p017 is superseded; p018/p019 remain defined | Run p018 only after WS004/WS013/WS019 overlay prerequisites; retain later WS-level repeatability and inventory work | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; `q030` NVMe software sequence complete | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Complete automatic WS013/WS019 prerequisites, then run the read-only p025 Latitude checkpoint with the later installed-boot acceptance | [WS004](ws004-hardware/ws.md) |
-| `ws005` | Networking and WPA | Active; q029 p001 complete; WLAN manually blocked | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Select reconnect/reliability or another dependency-ready networking Phase; WLAN remains blocked | [WS005](ws005-networking/ws.md) |
+| `ws004` | Hardware expansion | Active; `q030` NVMe software sequence complete; p026--p030 Archer WLAN sequence detailed, not queued | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Continue the dependency-ready NVMe path independently; for WLAN, complete p026's read-only exact-unit/firmware checkpoint, then propose the p027--p030 automatic sequence before the one shared WS005 p008 hardware checkpoint | [WS004](ws004-hardware/ws.md) |
+| `ws005` | Networking and WLAN | Active; q029 p001 complete; WLAN replacement plan detailed, not queued | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Freeze p002, confirm the exact Archer unit in WS004 p026, then propose only dependency-ready WLAN prerequisites to a Queue | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Manual hold; target packages disabled | `ws008-p006` uncleared after Principal Engineer rejection; `ws008-p007` complete | Leave all Noct source work to the maintainer until an accepted revision is explicitly returned | [WS008](ws008-noct/ws.md) |
@@ -311,12 +311,12 @@ actually warranted.
 
 ```text
 WS002 service baseline
-  +-- WS005 networkd/net/WPA expansion
+  +-- WS005 networkd/net/WLAN expansion
   +-- WS011 net console + /etc/net.conf
   +-- WS012 service administration console -- WS013 service containers
 
 WS011 configuration model
-  +-- WS005 physical network/WPA backends
+  +-- WS005 physical network/WLAN orchestration
   +-- WS011 VLAN/bridge data path (joint UAPI review with WS005)
 
 WS003 hardware inventory
@@ -325,7 +325,8 @@ WS003 hardware inventory
   +-- WS003 p020 CF-SV7 early ACPI/IRQ -- p021 portable GPT image -- CF-SV7 USB root
   +-- WS004 PCIe/DMA/interrupts
        +-- NVMe
-       +-- RTL8822CE WLAN -- WS005 wpa/networkd (manual hold MB-006)
+       +-- RTL8822BU USB WLAN -- WS005 wifi/networkd (first WLAN target)
+       +-- RTL8822CE PCI WLAN (later target)
        +-- i915 prerequisites -- WS014 GPU/Vulkan/GLES -- WS007 Wayland
 
 WS004 xHCI -- WS006 USB HID -- evdev
@@ -382,8 +383,10 @@ WS010 supplies host-side build and test scripting used by all workstreams.
    Latitude NVMe boot, evdev, and USB HID. USB
    trial use remains recommended until that installer milestone is complete.
 5. Add the optional LFB Xzed path and the upstream Noct target/BeUI/JIT
-   sequence when selected. Independently, after `MB-006` is released, add the
-   RTL8822CE driver and pluggable WPA path.
+   sequence when selected. Independently, develop the resumed WLAN sequence
+   around the Archer T3U Nano, a common kernel WLAN contract, `/sbin/wifi`, and
+   the fixed `net` -> `networkd` -> `ifconfig`/`wifi`/`dhcpc` path. The built-in
+   RTL8822CE remains a later device target.
 6. After its manual hold is released, complete WS014 GPU architecture
    discussion, then freeze the GPU UAPI and implement i915, Vulkan, and OpenGL
    ES 2.0 through separately authorized Phases.
@@ -417,7 +420,10 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | Exact CF-SV7 DMI identity, firmware settings, CPU/APIC mode, PCI/USB topology, and IDs | WS003 | Later device-specific driver selection; p020 early IRQ and p021 portable-GPT work do not depend on the remaining inventory |
 | Initial Secure Boot scope | WS003 | Resolved: use UEFI with Secure Boot disabled; signing/key enrollment deferred and not required for NVMe |
 | USB Ethernet interface descriptors and, for vendor-specific interfaces, VID:PID/controller family | WS003/WS004/WS005 | Choose CDC ECM/NCM class frontend or Realtek-family frontend for HW-12/NET-10; ACM is inapplicable |
-| Built-in PCI WLAN identity | WS004/WS005 | Resolved as RTL8822CE `10ec:c822`, subsystem `10ec:c130`; implementation and firmware packaging are manually blocked by `MB-006` |
+| First USB WLAN identity | WS004/WS005 | Primary evidence identifies Archer T3U Nano V1.0 as RTL8822BU, USB `2357:012e`; `ws004-p026` must still record the exact physical unit revision, descriptors, and firmware provenance before driver implementation |
+| Built-in PCI WLAN identity | WS004/WS005 | Resolved as RTL8822CE `10ec:c822`, subsystem `10ec:c130`; retained as a later target after the Archer-first sequence |
+| WLAN privilege and process topology | WS005 | Resolved for v1: one `root:network` mode-0660 `/run/networkd.sock`, kernel-attested connection-time peer credentials, `net` as user/desktop frontend, root `networkd` as orchestrator, and fixed primitive `ifconfig`/`wifi`/`dhcpc` children; no resident/pluggable `wpa` child |
+| WLAN protocol-state ownership | WS004/WS005 | Resolved for v1: a device-independent kernel WLAN layer retains scan/authentication/association/WPA2 key and rekey/controlled-port state after one-shot `/sbin/wifi` exits; the RTL8822BU driver owns only hardware/firmware-specific radio, USB, frame, channel, and key-slot operations |
 | `/etc/net.conf` v1 grammar and empty-collection syntax | WS011 | Parser and boot migration |
 | VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | Manually blocked; `ws011-p004` discussion and implementation |
 | Linux/FreeBSD evdev compatibility profile | WS006 | Resolved by `ws006-p001`; implement `/dev/input/eventN` against it |
@@ -454,8 +460,13 @@ until the user explicitly releases the named hold.
 | `MB-003` | `ws013-p001` | `cpar run`, `cpar sh`, and `cpar build` grammar/lifecycle | User explicitly resumes Runtime CPAR CLI/build discussion |
 | `MB-004` | `ws013-p001` | Service-container package format, dependencies, updates, config, and data | User explicitly resumes service-container package discussion |
 | `MB-005` | `ws014-p001` | GPU UAPI, capability profiles, display takeover, i915 split, Vulkan/GLES | User explicitly resumes GPU architecture discussion |
-| `MB-006` | `ws004`/`ws005` | RTL8822CE driver, firmware acquisition/republication policy, WPA database/backend, and WLAN integration | User explicitly resumes WLAN discussion after the USB Ethernet milestone |
 | `MB-007` | `ws015-p001` | μITRON profile/UAPI, legacy static configuration, RT/POSIX mailbox and filesystem proxy, scheduling, failure, and timing contracts | User explicitly resumes WS015 architecture/API discussion |
+
+Released holds remain permanent history rather than reusable identifiers:
+
+| Hold ID | Released | Result |
+| --- | --- | --- |
+| `MB-006` | 2026-08-30 | The user resumed WLAN design after completing USB Ethernet. The old RTL8822CE-first, `/sbin/wpa`, and `/etc/wpa/` proposal was superseded by the Archer T3U Nano first target and the fixed `net` -> `networkd` -> `ifconfig`/`wifi`/`dhcpc` topology. Firmware and exact-device facts are ordinary Phase dependencies, not a continuing manual hold. |
 
 ## 8. Interruption and resumption
 
