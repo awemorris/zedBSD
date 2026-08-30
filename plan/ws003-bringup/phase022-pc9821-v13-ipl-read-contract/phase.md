@@ -33,7 +33,7 @@ the native partition table, the BOOT entry, or the partition PBR failed.
 Inspection of the exact generated image disproves the PC/AT-MBR hypothesis:
 
 - bytes 446--507 of LBA 0 contain no PC/AT partition entries;
-- bytes 508--509 retain the PC-98 IPL metadata word `9`;
+- byte 508 retains boot-menu version `9` and byte 509 is reserved zero;
 - bytes 510--511 contain `55 aa`;
 - LBA 1 is the sixteen-entry native PC-98 partition table;
 - LBA 2 begins the native BOOT-partition selector.
@@ -53,7 +53,8 @@ does not establish that it is portable.
 
 1. Keep the PC-98-native LBA 0/LBA 1/LBA 2 layout.  Do not add a PC/AT MBR,
    GPT, active flag, or compatibility partition entry.
-2. Keep `IPL1`, the word-9 PC-98 metadata, and the trailing `55 aa` signature.
+2. Keep `IPL1`, the boot-menu version/reserved bytes `09 00`, and the trailing
+   `55 aa` signature.
 3. Do not use the inherited firmware stack.  Before the first `push`, `call`,
    or software interrupt that can depend on it, establish a bounded private
    stack which cannot overlap the relocated IPL or its load buffers.
@@ -102,7 +103,7 @@ does not establish that it is portable.
 - neither LBA-0 nor LBA-2 IPL uses the inherited firmware stack;
 - SENSE and fixed-disk read inputs are validated and load-buffer registers are
   re-established explicitly;
-- the image remains a native PC-98 layout with word `9`, `55 aa`, LBA-1 table,
+- the image remains a native PC-98 layout with `09 00`, `55 aa`, LBA-1 table,
   and LBA-2 selector, and contains no PC/AT partition entry;
 - focused source/binary/layout fixtures and the existing PC-98 image checker
   pass;
@@ -126,7 +127,7 @@ The implementation and every automatic completion gate pass.
   and attribute cells to PC-98 text VRAM and also reach debug port E9 before
   one audible alarm.
 - `BR-T54` proves stack ordering, SENSE/read markers, 512-byte Stage 1,
-  14-sector Stage 2, word `9`, `55 aa`, native LBA-1 partition table, exact
+  14-sector Stage 2, `09 00`, `55 aa`, native LBA-1 partition table, exact
   installed loader bytes, and zero PC/AT partition entries.
 
 Verification evidence:

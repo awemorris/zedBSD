@@ -46,6 +46,12 @@ func compareRange(left, leftAt, right, rightAt, count, what) {
     }
 }
 
+func checkIpl1(data, what) {
+    if (Packed.size(data) < 8 || !zbBytesEqual(data, 4, "IPL1")) {
+        zbFail(what + " does not contain IPL1 at offsets 4..7");
+    }
+}
+
 func main(args) {
     var repo = ".";
     if (Array.size(args) > 1) {
@@ -90,6 +96,8 @@ func main(args) {
     var stage1 = zbReadFile(repo + "/build/pc98/bootloader/stage1.bin");
     var stage2 = zbReadFile(repo + "/build/pc98/bootloader/stage2.bin");
     var image = zbReadFile(repo + "/build/pc98/hdd-image.img");
+    checkIpl1(stage1, "declared Stage 1");
+    checkIpl1(image, "installed LBA-0 IPL");
     if (Packed.size(stage1) != 512 || stage1[508] != 9 ||
         stage1[509] != 0 || stage1[510] != 0x55 || stage1[511] != 0xaa) {
         zbFail("LBA-0 IPL size/metadata/signature contract failed");
@@ -112,6 +120,41 @@ func main(args) {
     compareRange(stage1, 0, image, 0, 512, "installed LBA-0 IPL");
     compareRange(stage2, 0, image, 1024, Packed.size(stage2),
                  "installed LBA-2 selector");
+
+    // Corrupt the declared Stage 1 and installed LBA 0 identically. A byte
+    // comparison alone would accept this pair; the production checker must
+    // reject the independent fixed-offset IPL1 contract.
+    var temp = repo + "/plan/ws003-bringup/temp/pc98-v13-ipl";
+    if (System.shell("mkdir -p " + zbShellQuote(temp)) != 0) {
+        zbFail("cannot create BR-T54 negative-fixture directory");
+    }
+    var badStage1 = temp + "/bad-ipl1-stage1.bin";
+    var badImage = temp + "/bad-ipl1-image.img";
+    var rejectLog = temp + "/bad-ipl1-rejection.log";
+    var mutation = "cp " + zbShellQuote(
+        repo + "/build/pc98/bootloader/stage1.bin") + " " +
+        zbShellQuote(badStage1) + " && cp --reflink=auto --sparse=always " +
+        zbShellQuote(repo + "/build/pc98/hdd-image.img") + " " +
+        zbShellQuote(badImage) + " && printf X | dd of=" +
+        zbShellQuote(badStage1) +
+        " bs=1 seek=4 count=1 conv=notrunc status=none && printf X | dd of=" +
+        zbShellQuote(badImage) +
+        " bs=1 seek=4 count=1 conv=notrunc status=none";
+    if (System.shell(mutation) != 0) {
+        zbFail("cannot create one-byte IPL1 corruption fixture");
+    }
+    var checker = zbShellQuote(
+        repo + "/build/NoctLang/build-static/noct") + " --path=" +
+        zbShellQuote(repo + "/tools/build") + " " + zbShellQuote(
+        repo + "/tools/build/check-bios-hdd-image.noct") +
+        " --machine pc98 --stage1 " + zbShellQuote(badStage1) + " " +
+        zbShellQuote(badImage) + " >" + zbShellQuote(rejectLog) + " 2>&1";
+    if (System.shell(checker) == 0) {
+        zbFail("production checker accepted corrupted IPL1 in Stage 1 and LBA 0");
+    }
+    if (String.indexOf(FileUtil.readText(rejectLog), "IPL1") < 0) {
+        zbFail("corrupted IPL1 was rejected for an unrelated reason");
+    }
 
     print("WS003 BR-T54 PC-98 IPL contract: PASS");
 }

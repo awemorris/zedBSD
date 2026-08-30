@@ -40,6 +40,12 @@ relocated:
 	movw	%cs, %ax
 	movw	%ax, %ds
 	sti
+#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+	/* Four bounded tones prove that LBA 0 transferred control to LBA 2. */
+	movw	$0x4532, %dx	/* "2E": Stage 2 entry. */
+	movw	$4, %cx
+	call	diagnostic_checkpoint
+#endif
 
 	/* The BIOS work area records the fixed disk selected by the ITF. */
 	pushw	%ds
@@ -130,12 +136,21 @@ read_sector:
 	ret
 boot_failure_table:
 	movw	$0x5432, %dx	/* "2T": partition-table read failed. */
+#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+	movw	$5, %cx
+#endif
 	jmp	boot_failure
 boot_failure_name:
 	movw	$0x4e32, %dx	/* "2N": BOOT partition name not found. */
+#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+	movw	$6, %cx
+#endif
 	jmp	boot_failure
 boot_failure_pbr:
 	movw	$0x5032, %dx	/* "2P": partition boot-record read failed. */
+#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+	movw	$7, %cx
+#endif
 boot_failure:
 	movw	$0xa000, %ax
 	movw	%ax, %es
@@ -149,15 +164,75 @@ boot_failure:
 	movw	%ax, %es
 	movw	$0x00e1, %es:(%bx)
 	movw	$0x00e1, %es:2(%bx)
+#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+	call	diagnostic_checkpoint
+#else
 	movb	%dl, %al
 	outb	%al, $0xe9
 	movb	%dh, %al
 	outb	%al, $0xe9
 	movb	$0x06, %al
 	outb	%al, $0x37
+#endif
 1:
 	hlt
 	jmp	1b
+
+#if ZEDBSD_PC98_IPL_DIAGNOSTIC
+/* Keep the diagnostic stage self-contained; the two fixed IPL binaries do
+ * not share runtime code or state.  See disk-ipl.S for the marker contract. */
+diagnostic_checkpoint:
+	pushw	%ax
+	pushw	%bx
+	pushw	%cx
+	pushw	%dx
+	movb	$'P', %al
+	outb	%al, $0xe9
+	movb	%dl, %al
+	outb	%al, $0xe9
+	movb	%dh, %al
+	outb	%al, $0xe9
+	movb	$'\n', %al
+	outb	%al, $0xe9
+	movb	%cl, %bl
+1:
+	movb	$0x06, %ah
+	movw	$8, %cx
+	movw	$1000, %dx
+	int	$0x1c
+	movw	$8, %cx
+	call	diagnostic_wait_ticks
+	movb	$0x06, %ah
+	movw	$8, %cx
+	movw	$1000, %dx
+	int	$0x1c
+	movb	$0x07, %al
+	outb	%al, $0x37
+	movw	$8, %cx
+	call	diagnostic_wait_ticks
+	decb	%bl
+	jnz	1b
+	movb	$0x06, %ah
+	movw	$32, %cx
+	movw	$1000, %dx
+	int	$0x1c
+	movb	$0x07, %al
+	outb	%al, $0x37
+	movw	$32, %cx
+	call	diagnostic_wait_ticks
+	popw	%dx
+	popw	%cx
+	popw	%bx
+	popw	%ax
+	ret
+
+diagnostic_wait_ticks:
+	sti
+1:
+	hlt
+	loop	1b
+	ret
+#endif
 
 saved_si: .word 0
 saved_di: .word 0

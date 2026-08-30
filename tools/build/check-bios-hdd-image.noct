@@ -53,6 +53,11 @@ func biosCompareRaw(raw, offset, source, name) {
         }
     }
 }
+func biosRequirePc98Ipl1(data, name) {
+    if (Packed.size(data) < 8 || !zbBytesEqual(data, 4, "IPL1")) {
+        zbFail(name + " does not contain IPL1 at offsets 4..7");
+    }
+}
 func biosCompareStage1(raw, source, machine) {
     if (source == "") { return; }
     var expected = zbReadFile(source);
@@ -60,6 +65,7 @@ func biosCompareStage1(raw, source, machine) {
         zbFail("Stage 1 input or image extent is invalid");
     }
     if (machine == "pc98") {
+        biosRequirePc98Ipl1(expected, "declared PC-98 Stage 1");
         for (j in 0..512) {
             if (raw[j] != expected[j]) { zbFail("Stage 1 differs from its input"); }
         }
@@ -95,6 +101,7 @@ func main(args){
     }
     if((machine!="pcat"&&machine!="pc98")||image==""){zbFail("usage: check-bios-hdd-image.noct --machine pcat|pc98 ... IMAGE");}
     var raw=zbReadFile(image);if(Packed.size(raw)<1048576||Packed.size(raw)%512!=0||raw[510]!=85||raw[511]!=170){zbFail("invalid BIOS disk image");}
+    if(machine=="pc98"){biosRequirePc98Ipl1(raw,"installed PC-98 LBA-0 IPL");}
     biosCompareStage1(raw,stage1Input,machine);
     if(machine=="pcat"&&(raw[446]!=128||raw[450]!=14||zbU32LE(raw,454)!=2048)){zbFail("invalid PC/AT MBR partition");}
     if(machine=="pc98"&&(raw[512]!=0xa1||raw[513]!=0x91)){zbFail("invalid PC-98 partition table");}

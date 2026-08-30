@@ -41,7 +41,12 @@ NEC PC-9821V13 is the declared native PC-98 physical target. The observation
 which triggered q037 beeped before loader output; p022 owns that early-IPL regression
 without replacing the PC-98 partition scheme with a PC/AT MBR.
 
-The current [Queue Book](queue.md) records completed `q038`. It replaced the
+The current [Queue Book](queue.md) records active `q039`. It first proves the
+already-correct PC-98 `IPL1` field and has prepared one immutable audio-trace
+image for the still-silent PC-9821V13 boundary; its automatic gates pass and
+one physical observation remains. It then repairs the independently
+reproduced PC-98 PIC-cascade defect which blocks Xzed mouse events. The
+archived [q038](queue-q038.md) replaced the
 stale or intermediate image used for the first Intel Mac observation with one
 fresh, production-checked UEFI-only artifact and passed the exact larger-USB
 path through init/login. One provisional p004 boot of that exact hash is next.
@@ -295,11 +300,11 @@ actually warranted.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q037 PC-9821V13 IPL automatic repair gates pass but the item is uncleared at its external checkpoint; p018 Latitude overlay-NVMe install/boot dependency-gated | p020/p021 physical CF-SV7 path passes; p022 qemu-pc98 login passes and awaits one V13 observation; p018/p019 remain defined | Record the already-requested p022 V13 observation when available, then return to dependency-ready p018 work | [WS003](ws003-bringup/ws.md) |
+| `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q039 p023 confirms the signature and passes every automatic entry-localization gate but remains external-checkpoint uncleared; p018 Latitude overlay-NVMe install/boot dependency-gated | p020/p021 physical CF-SV7 path passes; p022/p023 qemu-pc98 login passes; one p023 V13 audio observation and p018/p019 remain | Record one boot of the exact p023 diagnostic artifact, then return to dependency-ready p018 work | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Audited active; not complete. `q030` NVMe software and the physical USB-Ethernet path are complete, while p016/p017/p021/p025 and p026--p030 remain | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Follow the requested WLAN priority: p026 exact-unit/firmware intake, p027 common core, then the interleaved WS005 and p028--p030 sequence. Keep the unrelated p016/p017/p021/p025 residuals visible rather than calling the WS complete | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q029 p001 complete; WLAN replacement plan detailed, not queued | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Freeze p002, confirm the exact Archer unit in WS004 p026, then propose only dependency-ready WLAN prerequisites to a Queue | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Audited active; not complete. p005 is only the PC/AT capability milestone | `ws006-p005` complete | Execute p006--p008 for producer truthfulness and USB HID when selected; run p009 consumer/legacy-console removal only after the accepted WS008 userland tree is available | [WS006](ws006-input/ws.md) |
-| `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
+| `ws007` | Graphics and desktop | Active in q039 | `ws007-p001` complete; amd64 `p002` carried; PC-98 `p003` in progress with a concrete PIC reproducer | Complete p003's cascade repair/QEMU cursor gate; retain the separate amd64 p002 report honestly | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Resumed by user priority; target packages remain disabled until the target Phase passes | `ws008-p007` complete; p008 host refresh is Queue-ready; p009 target refresh is human-blocked by the current upstream zedBSD build regression | Queue p008 after WS005. Resume p009 only from a corrected upstream revision or an explicit downstream-patch-overlay decision; use `userland/base/noct/noct/` for the fresh target checkout and never mutate the old dirty checkout | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |

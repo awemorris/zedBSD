@@ -1,70 +1,64 @@
-# Queue: Intel Mac production UEFI preflight
+# Queue: PC-98 IPL entry localization and Xzed mouse recovery
 
 Last updated: 2026-08-31
 
-QID: `q038`
+QID: `q039`
 
-Queue status: finished
+Queue status: in-progress
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: on 2026-08-31 the user supplied the Intel Mac physical log and
-explicitly requested a correction while independently checking PC-98. The user
-then classified the unrelated Apple USB device as deferrable.
+Authorization: the user reported that the PC-9821V13 still does not boot,
+asked whether the IPL1 signature is correct, and supplied a reproducible PC-98
+Xzed mouse regression. This Queue performs the bounded diagnosis and repair
+requested by that report.
 
-Timebox: none. This Queue contains one bounded automatic Phase. It ends with a
-fresh frozen image ready for one later user-operated Intel Mac observation.
+Timebox: none. Automatic work continues through both items. The Queue does not
+wait on the physical V13 checkpoint before repairing and accepting the
+QEMU-reproducible mouse defect.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q037](queue-q037.md)
+Previous Queue: [q038](queue-q038.md)
 
 ## Purpose
 
-Replace every stale or intermediate Intel Mac handoff with a freshly generated
-and checked UEFI-only artifact. Prove the exact observed larger-USB path in
-QEMU and make any remaining physical partition-publication failure explicit.
+Prove the installed PC-98 IPL signature instead of changing it speculatively,
+then prepare one immutable audio-trace image which localizes the physical
+Stage-1/Stage-2 boundary in one boot. Independently repair the demonstrated
+PC-98 slave-PIC cascade defect which prevents Xzed from receiving bus-mouse
+events, and retain both a focused PIC contract and a production QEMU cursor
+movement regression.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws020-p005` | [Phase](ws020-intel-mac/phase005-production-uefi-preflight/phase.md) | completed | Fresh production UEFI-only image passes its checker and the 60,549,120-sector OVMF/xHCI USB boot, then is frozen for p004 |
+| 1 | `ws003-p023` | [Phase](ws003-bringup/phase023-pc9821-v13-ipl-entry-localization/phase.md) | uncleared | Automatic signature, corruption, normal-login, and diagnostic-login gates pass; one exact hashed image awaits one V13 audio observation |
+| 2 | `ws007-p003` | [Phase](ws007-graphics/phase003-pc98-xzed-mouse-pic-cascade/phase.md) | in-progress | Slave IRQ lifecycle preserves PC-98 master IRQ7 cascade and QEMU moves the Xzed cursor by the injected relative delta |
 
 ## Fixed boundaries
 
-- Do not implement or require the Apple `05ac:8406` internal SD-card reader;
-  the independent boot USB already registers as `sda`.
-- Do not repair, relocate, or expand GPT on the source image or disposable
-  larger medium. Do not add a BIOS path to UEFI-only.
-- Do not weaken p003's separate six-cell/login contract or mark p004 complete.
+- Keep the native PC-98 LBA0/LBA1/LBA2 format. Do not add a PC/AT MBR or
+  remove the trailing `55 aa`.
+- `IPL1` at LBA0 offsets 4--7 is already the accepted contract. Do not treat
+  bytes 508--509 as a Stage-1 sector count; they are the PC-98 boot-menu
+  version/reserved bytes.
+- Audio tracing is diagnostic-only and must not add a beep to the ordinary
+  production image.
+- Do not claim the physical V13 issue fixed until the single identified
+  diagnostic image has been observed on that machine.
+- The mouse repair belongs to the PC-98 PIC cascade. Do not bypass PIC
+  delivery in Xzed, evdev, or the bus-mouse driver.
 - Do not consume `.internal/` or run aggregate `make check`.
-- Use `make -j16`, the production image checker, focused partition tests, and
-  one OVMF/Q35/xHCI larger-media cell.
-- Modify only a disposable sparse copy during runtime testing and prove the
-  pristine source hash remains unchanged.
-- Commit and push after the Phase reaches completed or uncleared state. If
-  push is unavailable, preserve the local commit and continue reporting it.
+- Use `make -j16`, focused host gates, the production image checker, and the
+  maintained qemu-pc98 binary.
+- Commit and push after each Phase. If push is unavailable, retain the local
+  commit and continue.
 
 ## Completion definition
 
-q038 is finished when `ws020-p005` is completed, or uncleared with the exact
-diagnostic and a concrete resume condition recorded.
-
-## Result
-
-Source/photo comparison proved that the first physical log used an older
-three-partition Hybrid-family artifact. `MAC-T021` then built a fresh fixed
-UEFI-only source with exactly two partitions, passed the production checker,
-and booted a disposable 60,549,120-sector copy through OVMF/Q35/xHCI to UUID
-resolution, overlay root, swap, init, and login.
-
-The checked source was published byte-for-byte as
-`/home/awe/zedBSD/build/amd64/hdd-image.img`, 202,392,064 bytes, SHA-256
-`3bca88c3f5673f0b447cac4a7af457b8aba3a745861a005459f374adbe50dc79`.
-Partition publication failures now report their exact partition and errno.
-The unrelated Apple `05ac:8406` internal reader remains intentionally deferred.
-
-q038 is finished by the successful branch of its completion definition. One
-provisional p004 Intel Mac boot of only this exact artifact is the next human
-checkpoint; final repetition remains later.
+q039 is finished when each selected item is either completed or uncleared with
+its exact evidence and resume condition recorded. `ws003-p023` may be
+uncleared solely at its one external PC-9821V13 observation while
+`ws007-p003` completes automatically.
