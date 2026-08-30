@@ -8,8 +8,8 @@ Phase ID: `p005`
 
 Combined ID: `ws005-p005`
 
-Status: selected (`q041`); pending after `ws004-p016`; v1 format and bounds
-frozen
+Status: Uncleared (`q041`, 2026-08-31); host implementation complete, native
+VFS prerequisites assigned to `ws001-p015` and `ws001-p016`
 
 Parent: [WS005 networking and WLAN](../ws.md)
 
@@ -53,6 +53,15 @@ rc.conf service option, or a confirmed-commit rollback program.
   command grammar, and no `/sbin/wpa` compatibility path.
 - Existing passwd/group lookup, `openat`, `renameat`, `O_DIRECTORY`,
   `O_NOFOLLOW`, `O_EXCL`, record locking, `fsync`, and effective-UID support.
+- [`ws001-p015`](../../ws001-posix/phase015-credential-aware-vfs-creation/phase.md)
+  must make newly created native objects inherit the caller's effective
+  UID/GID.  The current VFS authorizes with the credential but drops it before
+  backend creation, so a non-root caller cannot create an honestly owned
+  lock or temporary file.
+- [`ws001-p016`](../../ws001-posix/phase016-directory-fsync/phase.md) must make
+  directory `fsync()` durable or explicitly unsupported.  The current generic
+  fallback can return success without synchronizing an overlay directory or
+  its backing namespace.
 - `ws005-p003` is not required for local `set-key`, but later profile use over
   `networkd` depends on its peer-authenticated socket.
 
@@ -382,7 +391,41 @@ world-readable compatibility store.
 
 ## Queue boundary and handoff
 
-This Phase is not queued and has no remaining human design gate.  After a
-finite implementation slice is explicitly approved, its parser and
-selected-profile API become dependencies of `ws005-p006`/`p007`.  It does not
-itself authorize socket protocol, association, DHCP, or physical-adapter work.
+q041 processed this Phase to the reconsideration boundary.  Its parser and
+selected-profile API become dependencies of `ws005-p006`/`p007`, but the Phase
+must be requeued after `ws001-p015` and `ws001-p016`; it does not itself
+authorize socket protocol, association, DHCP, or physical-adapter work.
+
+## q041 execution result
+
+The host-side implementation is retained as safe partial progress:
+
+- `wifi-conf 1` parsing, bounded counted-byte SSIDs, validation, transactional
+  replacement/append, canonical serialization, limits, diagnostics, and
+  explicit secret clearing are implemented in `wifi-conf.c`;
+- the store selects root or passwd-record home from the effective UID without
+  trusting `HOME`, walks absolute home components with `O_NOFOLLOW`, validates
+  the final directory and every target/lock/temporary inode, and uses one
+  persistent shared-reader/exclusive-writer lock with a strict five-second
+  monotonic deadline;
+- writers publish a validated same-directory temporary by rename, preserve the
+  old generation before rename, report post-rename durability uncertainty,
+  never unlink the published lock inode, and sanitize a secret-bearing
+  temporary before reporting an unremovable residual; and
+- `/sbin/net wifi set-key SSID PASSPHRASE [auto]` is local-only and clears its
+  mutable argv passphrase after use.  It does not contact `networkd` or alter
+  `/etc/net.conf`.
+
+The Phase-owned ordinary, ASan+UBSan, compiler-analyzer, and parser/model gates
+pass.  Existing WS011 console, boot-application, parser, and persistence gates;
+the WS005 userland recovery and networkd-authentication gates; `make -j16` for
+the configured PC-98 tree; and `git diff --check` also pass.  The sandboxed
+AF_UNIX listener was denied as expected, and the identical bounded boot test
+passed when run with local socket permission.
+
+Completion is intentionally not claimed.  Source audit proved that native
+`O_CREAT` does not carry effective ownership into UFS/overlay creation and that
+directory `fsync()` may return a false success.  Consequently the required
+root/non-root native ownership and remount-durability cell cannot be honest.
+Resume only after both WS001 prerequisites complete, then rerun the full guest
+cell and all retained host regressions from the same artifact.

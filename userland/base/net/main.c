@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "userland/base/net/protocol.h"
 #include "userland/base/net/netconf.h"
+#include "userland/base/net/wifi-store.h"
 #include "userland/base/libedit/readline/history.h"
 #include "userland/base/libedit/readline/readline.h"
 
@@ -11,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -175,6 +177,7 @@ usage(void)
 		"       net static interface ipv4 address netmask mask\n"
 		"       net defaultroute gateway\n"
 		"       net dns address...\n"
+		"       net wifi set-key SSID PASSPHRASE [auto]\n"
 		"       net boot\n");
 	return 2;
 }
@@ -194,8 +197,36 @@ command_help(void)
 	     "                              configure a static IPv4 address\n"
 	     "  net defaultroute gateway    set the default IPv4 route\n"
 	     "  net dns address...          replace resolver name servers\n"
+	     "  net wifi set-key SSID PASSPHRASE [auto]\n"
+	     "                              save a local WPA2 profile\n"
 	     "  net boot                    apply boot network configuration");
 	return ferror(stdout) ? 1 : 0;
+}
+
+static int
+wifi_set_key_command(int argc, char **argv)
+{
+	char error[WIFI_CONF_DIAGNOSTIC_MAX] = "";
+	size_t passphrase_length;
+	int automatic, result;
+
+	if (argc < 5)
+		return usage();
+	passphrase_length = strlen(argv[4]);
+	if ((argc != 5 && argc != 6) ||
+	    (argc == 6 && strcmp(argv[5], "auto") != 0)) {
+		explicit_bzero(argv[4], passphrase_length);
+		return usage();
+	}
+	automatic = argc == 6;
+	result = wifi_store_set_key_for_effective_user(argv[3], argv[4],
+	    automatic, error, sizeof(error));
+	explicit_bzero(argv[4], passphrase_length);
+	if (result != 0)
+		fprintf(stderr, "net: Wi-Fi credential update failed: %s\n",
+		    error[0] != '\0' ? error : strerror(errno));
+	wifi_conf_explicit_clear(error, sizeof(error));
+	return result == 0 ? 0 : 1;
 }
 
 static int
@@ -209,6 +240,9 @@ dispatch(int argc, char **argv)
 		return command_help();
 	if (argc == 2 && strcmp(argv[1], "boot") == 0)
 		return boot();
+	if (argc >= 3 && strcmp(argv[1], "wifi") == 0 &&
+	    strcmp(argv[2], "set-key") == 0)
+		return wifi_set_key_command(argc, argv);
 	if (argc >= 2 && strcmp(argv[1], "show") == 0 && argc <= 3)
 		return backend("SHOW", argc == 3 ? argv[2] : NULL, 1);
 	if (argc == 3 &&

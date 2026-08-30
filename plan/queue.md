@@ -35,7 +35,7 @@ and later physical WLAN driver remain external checkpoints.
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
 | 1 | `ws004-p016` | [Phase](ws004-hardware/phase016-legacy-hcd-request-retirement/phase.md) | completed | UHCI frame and EHCI fresh Async Advance retirement, failure retention, callback re-entry, toggle continuity, 8,189-check model/sanitizer/analyzer gates, configured x86 builds, and UHCI/EHCI QEMU enumeration/bulk/reboot lifecycle pass; unavailable fault injection is explicitly model-only |
-| 2 | `ws005-p005` | [Phase](ws005-networking/phase005-wifi-credential-store/phase.md) | pending | Add the strict `wifi-conf 1` parser/model, euid/passwd-selected root and per-user stores, checked persistent lock and atomic writer, redacted `net wifi set-key`, focused fault/concurrency evidence, build, and bounded guest ownership evidence |
+| 2 | `ws005-p005` | [Phase](ws005-networking/phase005-wifi-credential-store/phase.md) | uncleared | Host parser/store/CLI and regressions pass; native non-root ownership and truthful directory-sync acceptance wait for newly planned `ws001-p015` and `ws001-p016` |
 | 3 | `ws008-p008` | [Phase](ws008-noct/phase008-latest-host-toolchain-pin/phase.md) | pending | Resolve public Noct `main` once, pin the full immutable commit for the host toolchain only, leave a clean detached `build/NoctLang`, and pass clean plus incremental `make toolchain` smoke without touching target Noct paths |
 
 ## Dependency and deferral decisions
@@ -44,7 +44,10 @@ and later physical WLAN driver remain external checkpoints.
   depend on the Archer label, NVMe hardware, or the later WLAN common core.
 - `ws005-p005` depends on the frozen p002 file/command contract.  Completed
   p003 is available for later networkd use but is not required by local
-  `set-key`; physical WLAN work does not block this Phase.
+  `set-key`; physical WLAN work does not block this Phase.  q041's read-only
+  kernel audit discovered two prerequisite defects, now owned by WS001 p015
+  and p016.  They are not silently added to this Queue; p005 is requeued only
+  after both complete.
 - `ws008-p008` changes only the host interpreter below `build/NoctLang` and
   the immutable top-level pin.  Target package p009 remains blocked and is not
   smuggled into this Queue.

@@ -6,7 +6,7 @@ WSID: `ws005`
 
 Status: active; q029 p001 completed the first physical USB-Ethernet path,
 q040 completed p003's AF_UNIX/network authorization foundation, and q041
-selects the independent p005 credential store
+retained p005's host implementation while assigning two native VFS blockers
 
 Parent: [master plan](../master.md)
 
@@ -17,10 +17,10 @@ non-root mutating network ioctls.  Its focused, analyzer, sanitizer, full
 build, and PC-98 native runtime gates pass.  The earlier RTL8156 carrier,
 DHCP, ping, and external-fetch path remains passing.
 
-Resume point: q041 first executes the higher-priority WS004 legacy-HCD
-retirement Phase, then `ws005-p005`.  The local credential store depends only
-on the frozen p002 contract; it does not wait for physical radio identity or
-the later generic WLAN UAPI.
+Resume point: complete `ws001-p015` effective-credential object creation and
+`ws001-p016` truthful directory `fsync`, then requeue `ws005-p005` for its
+root/non-root native ownership and remount-durability cell.  It does not wait
+for physical radio identity or the later generic WLAN UAPI.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -32,7 +32,7 @@ Shared tests: [WS005 test index](tests/README.md)
 | [`ws005-p002`](phase002-wlan-v1-contract/phase.md) | Planned; not queued | Freeze the v1 control, security, scan, association, DHCP, cancellation, and ownership contracts; record every intentional exclusion |
 | [`ws005-p003`](phase003-unix-peer-credentials/phase.md) | Complete (`q040`) | Fixed 12-byte connection-time AF_UNIX identity, checked `root:network 0660` publication, root/non-root operation policy, and kernel ioctl privilege boundary pass focused and native PC-98 gates |
 | [`ws005-p004`](phase004-wifi-ioctl-command/phase.md) | Planned; depends on p002, p003, and `ws004-p027` | Add the primitive, L2-only `/sbin/wifi` ioctl command with bounded machine and human output |
-| [`ws005-p005`](phase005-wifi-credential-store/phase.md) | Selected (`q041`); pending after `ws004-p016`; depends on p002 | Add root and per-user `wifi.conf` storage plus `net wifi set-key` without involving `networkd` |
+| [`ws005-p005`](phase005-wifi-credential-store/phase.md) | Uncleared (`q041`); host implementation passes; depends on p002 plus `ws001-p015`/p016 | Requeue after native creation ownership and directory-sync semantics are repaired, then run root/non-root guest acceptance |
 | [`ws005-p006`](phase006-networkd-wifi-protocol/phase.md) | Planned; depends on p003-p005 | Replace whitespace `ZNV1` limitations with bounded length-framed WLAN requests, peer authorization, and a secret-FD child path |
 | [`ws005-p007`](phase007-net-wifi-orchestration/phase.md) | Planned; depends on p005-p006 and WS004 WLAN fixture | Implement the requested `net wifi` search/list/up/down/connect flow through `networkd` to `ifconfig`, `wifi`, and `dhcpc` |
 | [`ws005-p008`](phase008-archer-physical-acceptance/phase.md) | Planned; depends on p007 and `ws004-p030` | Prove one complete physical scan/WPA2/DHCP/transfer/down path, then run the final frozen-artifact repeatability campaign |
