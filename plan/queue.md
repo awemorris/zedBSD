@@ -4,9 +4,9 @@ Last updated: 2026-08-30
 
 QID: `q033`
 
-Queue status: in-progress
+Queue status: completed
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: the user approved execution of the proposed `ws003-p020`
 single-Phase Queue on 2026-08-30.
@@ -31,7 +31,7 @@ xAPIC architecture is sufficient, reach `A64 IRQ READY`,
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws003-p020` | [Phase](ws003-bringup/phase020-cf-sv7-acpi-irq-bringup/phase.md) | in-progress | Early exceptions and ACPI/APIC/timer boundaries are observable; invalid APIC mode changes and unbounded PIT waits are removed; automated regressions pass; one final CF-SV7 image is handed off |
+| 1 | `ws003-p020` | [Phase](ws003-bringup/phase020-cf-sv7-acpi-irq-bringup/phase.md) | completed | Early exceptions and ACPI/APIC/timer boundaries are observable; invalid APIC mode changes and unbounded PIT waits are removed; automated regressions and the single CF-SV7 observation pass |
 
 ## Frozen execution boundary
 
@@ -67,10 +67,10 @@ xAPIC architecture is sufficient, reach `A64 IRQ READY`,
 - Synchronize actual results into P/W/M/Q. Commit `WIP` and push after this
   Queue reaches its software/physical handoff state.
 
-## Automated checkpoint
+## Result
 
-The q033 software batch is complete and the Queue remains `in-progress` only
-for its one physical observation.  The frozen artifact is
+The q033 software batch and its single physical observation are complete. The
+frozen artifact was
 `/home/awe/zedBSD/build/amd64/hdd-image.img`, 203,423,744 bytes, SHA-256
 `38e1d8e4ccfb6ce7d1c37082818f76546a6e07dbf8e86e551e654a5f2b3ca9e8`.
 
@@ -84,9 +84,27 @@ for its one physical observation.  The frozen artifact is
 - `make -j16`, `make check-disk-image`, shell syntax, and
   `git diff --check` pass; aggregate `make check` was not used.
 
-Evidence is preserved under `plan/ws003-bringup/temp/q033-final/`.  The next
-and only action in q033 is the physical `BR-T52` observation described in the
-Phase book.  No intermediate or repeatability boot is requested.
+Evidence is preserved under `plan/ws003-bringup/temp/q033-final/`. The
+2026-08-30 `BR-T52` CF-SV7 boot advanced through the objective's IRQ, XMM, and
+HAL boundary, then enumerated xHCI and USB storage and entered VFS. This is a
+passing p020 result even though the three earlier objective lines had scrolled
+off the photographed screen: none of the photographed USB/VFS code is reachable
+before them.
+
+The first downstream stop is a separate GPT/image-size contract issue:
+
+```text
+usb-storage: sda blocks=60549120 block-size=512
+gpt: sda rejected: invalid protective MBR (3)
+vfs: boot0 selector resolution failed (error 6)
+VFS initialization failed (6); entering idle.
+```
+
+The 397,312-sector image's protective MBR and backup GPT end at LBA 397,311,
+while the raw-copy target ends at LBA 60,549,119. A sparse QEMU copy extended
+to the photographed capacity reproduces the exact failure. Follow-up work is
+extracted as [ws003-p021](ws003-bringup/phase021-portable-gpt-image-extent/phase.md)
+and is not authorized by q033.
 
 ## Completion definition
 
@@ -100,3 +118,6 @@ q033 is finished when `ws003-p020` is either:
 
 The Queue may pause at `awaiting-physical` after its automated gates. That is
 not a second implementation item and does not authorize repeated human boots.
+
+q033 finished by the first branch: `ws003-p020` is completed. The new VFS/GPT
+boundary is downstream and does not reopen this Queue.

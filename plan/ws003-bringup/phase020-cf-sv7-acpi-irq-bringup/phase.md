@@ -4,8 +4,7 @@ Last updated: 2026-08-30
 
 Phase ID: `ws003-p020`
 
-Status: In progress (`q033`); automated checkpoint complete, awaiting one
-physical `BR-T52` observation
+Status: Completed (`q033`, 2026-08-30)
 
 Parent: [WS003](../ws.md)
 
@@ -225,6 +224,29 @@ or transcription must include the last visible `A64` lines.  The result is:
   the last boundary.  Record that result as `uncleared` and extract a separate
   follow-up Phase rather than expanding q033.
 
+## Physical result (2026-08-30)
+
+`BR-T52` passed on its first consolidated CF-SV7 observation. The photographed
+system had already advanced beyond all three objective markers and showed
+xHCI enumeration, USB-storage publication, boot parameters, and VFS
+initialization. Those later subsystems cannot execute before
+`A64 IRQ READY`, `A64 XMM CONTEXT PASS`, and
+`boot: HAL initialized successfully.`, so the downstream photograph is valid
+evidence that the early ACPI/interrupt boundary is cleared.
+
+The first new stop is outside this Phase:
+
+```text
+gpt: sda rejected: invalid protective MBR (3)
+vfs: boot0 selector resolution failed (error 6)
+VFS initialization failed (6); entering idle.
+```
+
+It is caused by copying the 397,312-sector fixed GPT image onto a
+60,549,120-sector USB device. It is owned by
+[ws003-p021](../phase021-portable-gpt-image-extent/phase.md); q033 and p020 do
+not absorb the GPT/root-continuity change.
+
 ## Completion conditions
 
 - No hardware wait between `A64 PAGING PASS` and `A64 IRQ READY` is unbounded.
@@ -237,6 +259,10 @@ or transcription must include the last visible `A64` lines.  The result is:
   an additional Latitude hardware checkpoint.
 - The next CF-SV7 stop, if any, is outside this Phase and is recorded as a new
   bounded Phase rather than folded into early interrupt bring-up.
+
+All completion conditions are satisfied. Remaining direct-injection gaps
+listed in the automated checkpoint remain accurately recorded as test debt;
+they did not prevent the production path from clearing the physical objective.
 
 ## Reconsideration boundary
 

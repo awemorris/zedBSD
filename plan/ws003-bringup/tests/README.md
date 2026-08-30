@@ -38,7 +38,8 @@ Parent: [WS003](../ws.md)
 | BR-T49 | Latitude NVMe overlay installation | The ordinary USB system verifies the existing GPT/ESP, installs only the fixed files into the ESP plus selected existing FAT32 without formatting or NVRAM mutation, and the frozen result boots the NVMe-backed overlay through installed `BOOTX64.EFI` |
 | BR-T50 | Physical network | Static or DHCP setup, peer reachability, and a bounded data transfer pass |
 | BR-T51 | Later Latitude native installation | After a separate WS019 design, the installed UEFI loader selects and boots the explicit native `rootpart` without regressing BR-T49 |
-| BR-T52 | Panasonic CF-SV7 early ACPI/interrupt boundary | Host fixtures cover APIC initial-state policy and bounded early waits, and the production 4/8/16-GiB OVMF and BIOS regressions pass. The physical observation is `PASS` only when one explicitly identified amd64 image advances through IRQ, XMM, and HAL readiness; a new bounded marker is recorded as `BOUNDARY-CAPTURED` and leaves p020 `uncleared`, never as a passing objective |
+| BR-T52 | Panasonic CF-SV7 early ACPI/interrupt boundary | Complete in q033: host fixtures and production QEMU gates pass, and one physical boot advanced beyond IRQ/XMM/HAL through xHCI, USB storage, and VFS; the later GPT stop is outside p020 |
+| BR-T53 | Fixed GPT image copied to larger USB media | A coherent zedBSD image-bounded GPT sparsely extended to 60,549,120 sectors reaches `login:` without boot-time repair; malformed, truncated, cross-pointer, out-of-extent, and non-zedBSD shortened cases publish nothing; exact-size q030 GPT behavior remains unchanged; one final CF-SV7 boot reaches overlay init/login |
 
 For the q011 diagnostic BR-T32 image, the top-right GOP marker is unary: one
 large white block means boot services exited, two means the final map passed,
@@ -421,6 +422,20 @@ legacy q35/xHCI USB runner documented above.  AP rejection publication, the
 PIT `out-high` timeout, exact port `0x61`/LVT cleanup, and guarded architectural
 MSR reads are additionally checked by source audit in q033; no test-only hook
 is compiled into the production kernel.
+
+The single 2026-08-30 CF-SV7 observation passed BR-T52 by reaching xHCI, USB
+storage, and VFS, which are downstream of every p020 objective marker. It also
+supplied the BR-T53 baseline. The 397,312-sector frozen image retained its
+backup GPT at LBA 397,311 after being copied to a 60,549,120-sector USB device,
+and strict whole-device validation rejected the protective entry with
+`EINVAL` (zedBSD errno 3).
+
+The same boundary is reproduced in QEMU by sparsely extending a disposable
+copy of the frozen image to `60549120 * 512` bytes and passing it to the legacy
+q35/xHCI USB runner. The guest reports the photographed block count followed
+by the same `invalid protective MBR (3)` and VFS error 6. `ws003-p021` must
+turn that one-off procedure into maintained positive and negative BR-T53 cells;
+the existing exact-size run remains the control.
 
 This run postdates the final xHCI stop/IRQ ownership review. In addition to
 the eight existing affected regressions, `usb-hcd-unregister-test` now proves
