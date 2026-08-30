@@ -1,8 +1,7 @@
 #include <hal/hal.h>
-#include "../i386/asm.h"
-#include "../i386/pic.h"
-#include "../i386/int.h"
-#include "../i386/asm.h"
+#include "../asm.h"
+#include "../pic.h"
+#include "../int.h"
 
 #define PIC_MASTER_PORT1	0x0000
 #define PIC_MASTER_PORT2	0x0002
@@ -11,10 +10,23 @@
 
 #define SLAVE_IRQ		7
 
+static uint8_t master_mask;
+static uint8_t slave_mask;
+
+static void
+pic_update_cascade_mask(void)
+{
+	if (slave_mask == 0xffU)
+		master_mask |= (uint8_t)(1U << SLAVE_IRQ);
+	else
+		master_mask &= (uint8_t)~(1U << SLAVE_IRQ);
+	asm_outb(PIC_MASTER_PORT2, master_mask);
+}
+
 /*
  * Initialize the PIC.
  */
-void pic_init()
+void pic_init(void)
 {
 	/* Initialize the 8259A master. */
 	asm_outb(PIC_MASTER_PORT1, 0x11);		/* Start init, edge-triggered / cascaded */
@@ -29,8 +41,10 @@ void pic_init()
 	asm_outb(PIC_SLAVE_PORT2, 0x01);		/* 80x86 mode */
 
 	/* Mask all IRQs. */
-	asm_outb(PIC_MASTER_PORT2, 0xff);
-	asm_outb(PIC_SLAVE_PORT2, 0xff);
+	master_mask = 0xffU;
+	slave_mask = 0xffU;
+	asm_outb(PIC_MASTER_PORT2, master_mask);
+	asm_outb(PIC_SLAVE_PORT2, slave_mask);
 }
 /*
  * Set the IRQ mask.
@@ -39,16 +53,35 @@ void pic_set_irq_mask(
 	int	irq_num,	/* IRQ number */
 	int	mask)		/* 0: allow, 1: disallow */
 {
-	if(irq_num < 8) {
-		uint8_t imr = asm_inb(PIC_MASTER_PORT2);
-		if(mask) imr |=  (1 << irq_num);
-		else     imr &= ~(1 << irq_num);
-		asm_outb(PIC_MASTER_PORT2, imr);
+	unsigned bit;
+
+	if (irq_num < 0 || irq_num > 15)
+		return;
+	if (irq_num < 8) {
+		/* IRQ7 is reserved for the slave and is derived from its mask. */
+		if (irq_num != SLAVE_IRQ) {
+			if (mask)
+				master_mask |= (uint8_t)(1U << irq_num);
+			else
+				master_mask &= (uint8_t)~(1U << irq_num);
+		}
+		pic_update_cascade_mask();
+		return;
+	}
+
+	bit = (unsigned)irq_num - 8U;
+	if (mask)
+		slave_mask |= (uint8_t)(1U << bit);
+	else
+		slave_mask &= (uint8_t)~(1U << bit);
+
+	/* Close the cascade only after the final slave source is masked. */
+	if (mask) {
+		asm_outb(PIC_SLAVE_PORT2, slave_mask);
+		pic_update_cascade_mask();
 	} else {
-		uint8_t imr = asm_inb(PIC_SLAVE_PORT2);
-		if(mask) imr |=  (1 << (irq_num&7));
-		else     imr &= ~(1 << (irq_num&7));
-		asm_outb(PIC_SLAVE_PORT2, imr);
+		pic_update_cascade_mask();
+		asm_outb(PIC_SLAVE_PORT2, slave_mask);
 	}
 }
 

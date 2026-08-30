@@ -32,3 +32,38 @@ GFX-T00 and the device-path part of GFX-T01 use the bounded QEMU matrix recorded
 by their Phase documents. QEMU monitor mouse deltas are sent as small repeated
 movements because a single delta outside the PS/2 packet range sets hardware
 overflow bits and is intentionally discarded by the current driver.
+
+## GFX-T02 PC-98 PIC cascade and production Xzed mouse
+
+Compile and run the focused fixture directly against the production PC-98 PIC
+implementation:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror \
+  -Iinclude -Iinclude/uapi -Isrc -Isrc/hal/i386 -Ilibc/include \
+  plan/ws007-graphics/tests/pc98-pic-cascade-test.c \
+  -o /tmp/ws007-pc98-pic-cascade-test
+/tmp/ws007-pc98-pic-cascade-test
+```
+
+After `make -j16` has produced the normal PC-98 image, run the end-to-end gate
+with a new evidence directory:
+
+```sh
+build/NoctLang/build-static/noct --path=tools/build \
+  plan/ws007-graphics/tests/pc98-xzed-mouse-qemu.noct \
+  . plan/ws007-graphics/temp/gfx-t02-fresh
+```
+
+The runner starts the maintained qemu-pc98 binary with a disposable copy of
+`build/pc98/hdd-image.img`, logs in, launches Xzed, captures PPM images before
+and after five `mouse_move 20 10` operations, and invokes
+`xzed-cursor-ppm-test.c` as the visual oracle. Acceptance requires exactly one
+standard Xzed cursor in each capture and an exact `+100,+50` hotspot delta.
+Both readiness and movement use bounded visual polling rather than a fixed
+Xzed startup delay.
+The runner deliberately has no monitor operation which reads or writes PIC
+ports. It also verifies that the source disk hash is unchanged and rejects a
+fatal guest log.
+
+The 2026-08-31 q039 execution passed with `(320,240) -> (420,290)`.

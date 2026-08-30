@@ -1,0 +1,191 @@
+require zedbuild;
+
+// WS007 GFX-T02 production PC-98 PIC/bus-mouse/evdev/Xzed path.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+func run(command, what) {
+    var status = System.shell(command);
+    if (status != 0) { zbFail(what + " failed (status=" + status + ")"); }
+}
+
+func captureScreen(child, decoder, vram, screen) {
+    System.shell("rm -f " + zbShellQuote(vram) + " " + zbShellQuote(screen));
+    Process.write(child, "pmemsave 0xa0000 0x2000 \"" + vram + "\"\n");
+    System.shell("sleep 0.25");
+    if (FileUtil.checkFileExists(vram) != 1) { return 0; }
+    if (System.shell(zbShellQuote(decoder) + " decode-pc98-vram " +
+        zbShellQuote(vram) + " >" + zbShellQuote(screen)) != 0) {
+        return 0;
+    }
+    return 1;
+}
+
+func waitScreen(child, decoder, vram, screen, marker, limit) {
+    var iteration = 0;
+    while (iteration < limit) {
+        if (captureScreen(child, decoder, vram, screen) == 1 &&
+            String.indexOf(FileUtil.readText(screen), marker) >= 0) {
+            return 1;
+        }
+        System.shell("sleep 0.75");
+        iteration = iteration + 1;
+    }
+    return 0;
+}
+
+func sendKey(child, key) {
+    Process.write(child, "sendkey " + key + "\n");
+    System.shell("sleep 0.05");
+}
+
+func sendText(child, text) {
+    var i = 0;
+    while (i < String.charCount(text)) {
+        var character = String.substring(text, i, 1);
+        if (character == "r" || character == "o" || character == "t" ||
+            character == "z" || character == "e" || character == "d") {
+            sendKey(child, character);
+        } else if (character == "X") {
+            sendKey(child, "shift-x");
+        } else {
+            zbFail("unsupported GFX-T02 keyboard character: " + character);
+        }
+        i = i + 1;
+    }
+}
+
+func capturePpm(child, path) {
+    System.shell("rm -f " + zbShellQuote(path));
+    Process.write(child, "screendump \"" + path + "\"\n");
+    System.shell("sleep 0.25");
+    return FileUtil.checkFileExists(path);
+}
+
+func waitCursor(child, cursorTest, screen, limit) {
+    var iteration = 0;
+    while (iteration < limit) {
+        if (capturePpm(child, screen) == 1 &&
+            System.shell(zbShellQuote(cursorTest) + " " +
+                zbShellQuote(screen) + " >/dev/null 2>&1") == 0) {
+            return 1;
+        }
+        System.shell("sleep 0.50");
+        iteration = iteration + 1;
+    }
+    return 0;
+}
+
+func waitCursorMotion(child, cursorTest, before, after, limit) {
+    var iteration = 0;
+    while (iteration < limit) {
+        if (capturePpm(child, after) == 1 &&
+            System.shell(zbShellQuote(cursorTest) + " " +
+                zbShellQuote(before) + " " + zbShellQuote(after) +
+                " >/dev/null 2>&1") == 0) {
+            return 1;
+        }
+        System.shell("sleep 0.50");
+        iteration = iteration + 1;
+    }
+    return 0;
+}
+
+func stopQemu(child) {
+    if (Process.isAlive(child) == 1) { Process.write(child, "quit\n"); }
+    var status = Process.wait(child);
+    Process.close(child);
+    return status;
+}
+
+func main(args) {
+    var repo = ".";
+    var evidence = "plan/ws007-graphics/temp/q039-p003-pc98-xzed-mouse";
+    if (Array.size(args) > 2) {
+        zbFail("usage: pc98-xzed-mouse-qemu.noct [REPOSITORY [EVIDENCE]]");
+    }
+    if (Array.size(args) >= 1) { repo = args[0]; }
+    if (Array.size(args) == 2) { evidence = args[1]; }
+    if (FileUtil.checkFileExists(evidence) == 1) {
+        zbFail("evidence path already exists: " + evidence);
+    }
+
+    var image = repo + "/build/pc98/hdd-image.img";
+    var qemu = repo + "/build/qemu-pc98/build/qemu-system-i386";
+    var runImage = evidence + "/run.img";
+    var decoder = evidence + "/pc98-vram-decoder";
+    var cursorTest = evidence + "/xzed-cursor-ppm-test";
+    var debugLog = evidence + "/debug.log";
+    var vram = evidence + "/vram.bin";
+    var screen = evidence + "/screen.log";
+    var before = evidence + "/before.ppm";
+    var after = evidence + "/after.ppm";
+    var sourceHash = evidence + "/source.sha256";
+    var finalHash = evidence + "/source-final.sha256";
+
+    run("mkdir -p " + zbShellQuote(evidence), "evidence directory creation");
+    run("test -x " + zbShellQuote(qemu) + " && test -s " +
+        zbShellQuote(image), "qemu-pc98 and image preflight");
+    run("cc -std=c11 -Wall -Wextra -Werror " + zbShellQuote(
+        repo + "/plan/ws003-bringup/tests/boot-parameter-image-tool.c") +
+        " -o " + zbShellQuote(decoder), "VRAM decoder build");
+    run("cc -std=c11 -Wall -Wextra -Werror " + zbShellQuote(
+        repo + "/plan/ws007-graphics/tests/xzed-cursor-ppm-test.c") +
+        " -o " + zbShellQuote(cursorTest), "cursor oracle build");
+    run("sha256sum " + zbShellQuote(image) + " >" +
+        zbShellQuote(sourceHash), "source hash capture");
+    run("cp --reflink=auto --sparse=always " + zbShellQuote(image) + " " +
+        zbShellQuote(runImage), "disposable image copy");
+
+    var command = [qemu, "-M", "pc9821,pegc=off,coregraph=on", "-cpu",
+        "486", "-m", "64M", "-smp", "1", "-drive",
+        "if=ide,bus=0,unit=0,format=raw,file=" + runImage,
+        "-display", "none", "-serial", "none", "-debugcon",
+        "file:" + debugLog, "-monitor", "stdio", "-no-reboot"];
+    var child = Process.spawn(command);
+    if (child < 0) { zbFail("could not start qemu-pc98"); }
+    if (waitScreen(child, decoder, vram, screen, "login:", 100) != 1) {
+        stopQemu(child);
+        zbFail("qemu-pc98 did not reach login");
+    }
+    sendText(child, "root");
+    sendKey(child, "ret");
+    if (waitScreen(child, decoder, vram, screen, "Password:", 30) != 1) {
+        stopQemu(child);
+        zbFail("login did not request the root password");
+    }
+    sendKey(child, "ret");
+    if (waitScreen(child, decoder, vram, screen, "root@zedbsd:", 40) != 1) {
+        stopQemu(child);
+        zbFail("root shell did not start");
+    }
+    sendText(child, "Xzed");
+    sendKey(child, "ret");
+    if (waitCursor(child, cursorTest, before, 40) != 1) {
+        stopQemu(child);
+        zbFail("Xzed cursor did not become ready");
+    }
+    for (i in 0..5) {
+        Process.write(child, "mouse_move 20 10\n");
+        System.shell("sleep 0.10");
+    }
+    if (waitCursorMotion(child, cursorTest, before, after, 40) != 1) {
+        stopQemu(child);
+        zbFail("Xzed cursor did not move by the injected delta");
+    }
+    if (stopQemu(child) != 0) { zbFail("qemu-pc98 exited with an error"); }
+
+    run("test -s " + zbShellQuote(before) + " && test -s " +
+        zbShellQuote(after), "Xzed screen capture");
+    run(zbShellQuote(cursorTest) + " " + zbShellQuote(before) + " " +
+        zbShellQuote(after), "Xzed cursor movement oracle");
+    run("sha256sum " + zbShellQuote(image) + " >" +
+        zbShellQuote(finalHash) + " && cmp " + zbShellQuote(sourceHash) +
+        " " + zbShellQuote(finalHash), "immutable source verification");
+    var debug = FileUtil.readText(debugLog);
+    if (String.indexOf(debug, "fatal:") >= 0 ||
+        String.indexOf(debug, "panic:") >= 0 ||
+        String.indexOf(debug, "VFS initialization failed") >= 0) {
+        zbFail("guest debug log contains a fatal failure");
+    }
+    print("WS007 GFX-T02 production qemu-pc98 Xzed mouse: PASS");
+}

@@ -4,7 +4,7 @@ Last updated: 2026-08-31
 
 Phase ID: `ws007-p003`
 
-Status: in-progress (`q039`)
+Status: Complete (`q039`)
 
 Parent: [WS007](../ws.md)
 
@@ -75,3 +75,43 @@ master cascade when a slave IRQ changes state.
 
 This Phase does not reopen the previously non-reproduced amd64 coordinate
 report in p002 and does not add legacy `/dev/mouse` support.
+
+## Result (2026-08-31)
+
+The PC-98 PIC now keeps explicit master and slave masks and derives the
+reserved master IRQ7 cascade from the complete slave mask. Unmasking the first
+slave source opens IRQ7, masking one of several active slave sources retains
+it, and masking the last slave source closes it. Direct attempts to mask IRQ7
+cannot disconnect an active slave, and unrelated master bits are preserved.
+
+The focused production-source fixture passes the required transition matrix:
+
+```text
+ff/ff -> 7f/df -> 7f/dd -> 7f/fd -> ff/ff
+```
+
+The fresh production qemu-pc98 regression booted the ordinary PC-98 image,
+logged in, launched Xzed, and captured its standard cursor at `(320,240)`.
+Five monitor `mouse_move 20 10` operations reached Xzed through the PC-98
+bus-mouse driver and `/dev/input/event1`, moving the hotspot exactly to
+`(420,290)`. The runner contains no direct PIC-port operation or manual IRQ7
+repair. Its disposable disk left the production source image unchanged, and
+the guest log contained no fatal, panic, or VFS failure.
+
+Verification evidence:
+
+| Gate | Result |
+| --- | --- |
+| strict focused PIC lifecycle fixture | PASS |
+| focused PIC fixture with UBSan | PASS |
+| WS018 input/HID ownership host gate | PASS |
+| Xzed coordinate/clamp host gate | PASS |
+| `make -j16` | PASS |
+| `make check-disk-image` | PASS |
+| production qemu-pc98 Xzed cursor gate | PASS: `(320,240) -> (420,290)` |
+| immutable production image check | PASS |
+| `git diff --check` | PASS |
+
+Reusable commands and oracle details are recorded under `GFX-T02` in the
+[WS007 test index](../tests/README.md). No physical checkpoint is needed for
+this QEMU-reproducible regression.

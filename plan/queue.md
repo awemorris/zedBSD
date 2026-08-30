@@ -4,9 +4,9 @@ Last updated: 2026-08-31
 
 QID: `q039`
 
-Queue status: in-progress
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes**
 
 Authorization: the user reported that the PC-9821V13 still does not boot,
 asked whether the IPL1 signature is correct, and supplied a reproducible PC-98
@@ -35,7 +35,7 @@ movement regression.
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
 | 1 | `ws003-p023` | [Phase](ws003-bringup/phase023-pc9821-v13-ipl-entry-localization/phase.md) | uncleared | Automatic signature, corruption, normal-login, and diagnostic-login gates pass; one exact hashed image awaits one V13 audio observation |
-| 2 | `ws007-p003` | [Phase](ws007-graphics/phase003-pc98-xzed-mouse-pic-cascade/phase.md) | in-progress | Slave IRQ lifecycle preserves PC-98 master IRQ7 cascade and QEMU moves the Xzed cursor by the injected relative delta |
+| 2 | `ws007-p003` | [Phase](ws007-graphics/phase003-pc98-xzed-mouse-pic-cascade/phase.md) | complete | Slave IRQ lifecycle preserves PC-98 master IRQ7 cascade; production QEMU moves Xzed exactly `+100,+50` through evdev without manual PIC repair |
 
 ## Fixed boundaries
 
@@ -62,3 +62,12 @@ q039 is finished when each selected item is either completed or uncleared with
 its exact evidence and resume condition recorded. `ws003-p023` may be
 uncleared solely at its one external PC-9821V13 observation while
 `ws007-p003` completes automatically.
+
+## Queue result
+
+`ws003-p023` proves that the installed `IPL1` signature is correct, passes all
+automatic normal/diagnostic gates, and remains honestly `uncleared` only at
+one exact PC-9821V13 audio observation. `ws007-p003` fixes the demonstrated
+PC-98 PIC cascade defect and passes its focused, input-ownership, build, disk,
+and production qemu-pc98 Xzed cursor gates. The allowed uncleared external
+checkpoint does not prevent q039 from finishing.

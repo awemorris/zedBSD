@@ -4,16 +4,15 @@ Last updated: 2026-08-31
 
 WSID: `ws007`
 
-Status: active; X11 launch repaired, the amd64 mouse report remains carried,
-and the independently reproduced PC-98 PIC-cascade regression is in q039
+Status: active; X11 launch and the independently reproduced PC-98 mouse
+regression are repaired, while the separate amd64 mouse report remains carried
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws007-p001` complete; `ws007-p002` carried forward;
-`ws007-p003` in progress
+Last verified Phase: `ws007-p003` complete; `ws007-p002` carried forward
 
-Resume point: complete p003's bounded PC-98 cascade repair and production
-qemu-pc98 cursor regression. The different amd64 p002 report remains carried.
+Resume point: select GFX-02 integration regression work when prioritized. The
+different amd64 p002 report remains carried pending its original reproducer.
 
 Shared tests: [WS007 test index](tests/README.md)
 
@@ -23,7 +22,7 @@ Shared tests: [WS007 test index](tests/README.md)
 | --- | --- | --- |
 | [`ws007-p001`](phase001-x11-launch/phase.md) | Complete | PATH script lookup repaired; production `startx` launches the four-program session |
 | [`ws007-p002`](phase002-x11-mouse/phase.md) | Carried forward | Relative tracking/bounds pass; reported mismatch not reproduced and absolute input unavailable |
-| [`ws007-p003`](phase003-pc98-xzed-mouse-pic-cascade/phase.md) | In progress (`q039`) | QEMU proves slave IRQ13 is pending behind masked master cascade IRQ7; repair PIC mask lifecycle and prove exact Xzed cursor movement |
+| [`ws007-p003`](phase003-pc98-xzed-mouse-pic-cascade/phase.md) | Complete (`q039`) | PIC cascade lifecycle fixture passes; production qemu-pc98 moves Xzed exactly `(320,240) -> (420,290)` through evdev without manual PIC repair |
 
 X11 repair precedes `/dev/gpuN`; i915, Vulkan, GLES, and Wayland remain
 separately extractable Phases.
