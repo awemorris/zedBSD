@@ -29,16 +29,19 @@ amd64_cmain(const void *raw_boot_info)
 	amd64_page_init();
 	amd64_space_init();
 	hal_puts("A64 PAGING PASS\n");
-	if (amd64_acpi_discover(&acpi, bsp_acpi_rsdp()) != HAL_OK)
-		HAL_FATAL("amd64 ACPI MADT discovery failed");
-	if (amd64_lapic_init(acpi.lapic_address) != HAL_OK)
-		HAL_FATAL("amd64 Local APIC initialization failed");
-	amd64_smp_init(&acpi);
 	amd64_descriptor_init();
 	amd64_int_init();
+	hal_puts("A64 IDT READY\n");
+	if (amd64_acpi_discover(&acpi, bsp_acpi_rsdp()) != HAL_OK)
+		HAL_FATAL("amd64 ACPI MADT discovery failed");
+	if (amd64_lapic_init(&acpi) != HAL_OK)
+		HAL_FATAL("amd64 Local APIC initialization failed");
+	amd64_smp_init(&acpi);
 	irq_init(&acpi);
-	bsp_timer_init();
+	if (bsp_timer_init() != HAL_OK)
+		HAL_FATAL("amd64 Local APIC timer initialization failed");
 	pcat_cons_irq_init();
+	hal_puts("A64 CONSOLE IRQ READY\n");
 	hal_puts("A64 IRQ READY\n");
 	kernel_entry(bsp_kernel_handoff(raw_boot_info));
 	HAL_FATAL("amd64 kernel_entry returned");

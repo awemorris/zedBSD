@@ -3,6 +3,7 @@
 
 #include <hal/hal.h>
 #include "ioapic.h"
+#include "early-init-policy.h"
 #include "../defs.h"
 
 struct ioapic_state {
@@ -83,6 +84,7 @@ int
 amd64_ioapic_init(const struct amd64_acpi_info *acpi,
 	uint32_t bootstrap_apic_id)
 {
+	struct amd64_ioapic_range ranges[AMD64_IOAPIC_MAX];
 	unsigned i;
 
 	if (acpi == NULL || acpi->ioapic_count == 0)
@@ -95,8 +97,13 @@ amd64_ioapic_init(const struct amd64_acpi_info *acpi,
 		};
 		struct hal_pmem memory;
 		uint32_t version;
-		if (hal_pmem_alloc(&request, &memory) != HAL_OK)
+		enum amd64_ioapic_policy_result policy;
+		hal_printf("A64 IOAPIC BEGIN index=%u address=%08X gsi=%u\n", i,
+		    acpi->ioapics[i].address, acpi->ioapics[i].gsi_base);
+		if (hal_pmem_alloc(&request, &memory) != HAL_OK) {
+			hal_printf("A64 IOAPIC MAP FAIL index=%u\n", i);
 			return HAL_ERR_UNSUPPORTED;
+		}
 		controllers[i].base = memory.vaddr;
 		controllers[i].gsi_base = acpi->ioapics[i].gsi_base;
 		{
@@ -108,16 +115,34 @@ amd64_ioapic_init(const struct amd64_acpi_info *acpi,
 			__atomic_store_n(&ioapic_lock, 0U, __ATOMIC_RELEASE);
 			if (enabled) hal_irq_enable();
 		}
-		controllers[i].redirections = ((version >> 16) & 0xffU) + 1U;
+		policy = amd64_ioapic_policy_evaluate(version,
+		    controllers[i].gsi_base, ranges, i,
+		    &controllers[i].redirections);
+		if (policy != AMD64_IOAPIC_POLICY_OK) {
+			hal_printf("A64 IOAPIC TOPOLOGY FAIL index=%u version=%08X "
+			    "gsi=%u pins=%u result=%s\n", i, version,
+			    controllers[i].gsi_base, controllers[i].redirections,
+			    amd64_ioapic_policy_result_name(policy));
+			return HAL_ERR_UNSUPPORTED;
+		}
+		ranges[i].gsi_base = controllers[i].gsi_base;
+		ranges[i].redirections = controllers[i].redirections;
+		hal_printf("A64 IOAPIC READY index=%u version=%08X pins=%u\n", i,
+		    version, controllers[i].redirections);
 		controller_count++;
 	}
 	for (i = 0; i < 16; i++) {
 		irq_gsi[i] = acpi->isa[i].gsi;
 		irq_flags[i] = acpi->isa[i].flags;
 		irq_destination[i] = bootstrap_apic_id;
-		if (write_route((int)i, bootstrap_apic_id, 1) != HAL_OK)
+		if (write_route((int)i, bootstrap_apic_id, 1) != HAL_OK) {
+			hal_printf("A64 IOAPIC ROUTE FAIL irq=%u gsi=%u\n", i,
+			    irq_gsi[i]);
 			return HAL_ERR_UNSUPPORTED;
+		}
 	}
+	hal_printf("A64 IOAPIC ROUTING READY controllers=%u destination=%u\n",
+	    controller_count, bootstrap_apic_id);
 	return HAL_OK;
 }
 

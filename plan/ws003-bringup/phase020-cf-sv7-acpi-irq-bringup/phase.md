@@ -4,7 +4,8 @@ Last updated: 2026-08-30
 
 Phase ID: `ws003-p020`
 
-Status: Planned; not yet admitted to a Queue
+Status: In progress (`q033`); automated checkpoint complete, awaiting one
+physical `BR-T52` observation
 
 Parent: [WS003](../ws.md)
 
@@ -163,6 +164,66 @@ decision only if the bounded CF-SV7 evidence proves that it is needed.
   `BOUNDARY-CAPTURED` and leaves this Phase `uncleared`.
 - `make -j16` and `git diff --check` pass.  The aggregate `make check` target
   is not used.
+
+## Automated checkpoint (2026-08-30)
+
+The implementation batch is complete and frozen for the single physical
+observation.  The handoff artifact is:
+
+| Property | Value |
+| --- | --- |
+| Image | `/home/awe/zedBSD/build/amd64/hdd-image.img` |
+| Size | 203,423,744 bytes |
+| Build time | 2026-08-30 15:45:54 +0900 |
+| SHA-256 | `38e1d8e4ccfb6ce7d1c37082818f76546a6e07dbf8e86e551e654a5f2b3ca9e8` |
+
+Implemented behavior:
+
+- GDT/TSS and IDT are active after paging and before ACPI, MSR, or APIC MMIO.
+  The disposable-kernel injection runner produced bounded vector 6, 13, and
+  14 diagnostics; the page fault reported `CR2=0xdeadbeef`.
+- The old `IA32_APIC_BASE` mode-changing write is gone.  Bootstrap and
+  secondary CPUs accept only an already-active xAPIC whose CPUID ID, MADT ID,
+  MSR base, and MMIO ID agree.  Rejected APs publish a reason and park without
+  APIC access; NMI panic broadcast becomes available only after every AP has
+  reached ready.
+- PIT calibration observes bounded OUT-low and OUT-high stages, restores port
+  `0x61` on every return, and masks/stops the LAPIC timer on failure.  QEMU
+  with `q35,pit=off` now stops in one second at
+  `A64 TIMER CAL TIMEOUT stage=out-low` and cannot reach IRQ/HAL readiness.
+- I/O APIC all-ones/invalid versions, impossible pin counts, GSI overflow, and
+  overlapping ranges fail with a distinct topology diagnostic.
+
+Automated evidence:
+
+| Gate | Result | Preserved evidence |
+| --- | --- | --- |
+| APIC/PIT/I/O-APIC host policy, ordinary and ASan/UBSan | PASS | `tests/early-init-policy-test.c` |
+| Early IDT `#UD/#GP/#PF` injection | PASS 3/3 | `temp/q033-final/early-idt/` |
+| PIT-disabled negative QEMU cell | PASS | `temp/q033-final/pit-off/` |
+| SeaBIOS q35/xHCI USB, SMP=4 | PASS to `login:` | `temp/q033-final/bios/` |
+| OVMF q35/xHCI USB, SMP=4, 4/8/16 GiB | PASS 3/3 | `temp/q033-final/br-t24/` |
+| `make -j16`, `make check-disk-image`, shell syntax, `git diff --check` | PASS | current worktree |
+
+The aggregate `make check` target was not used.  Direct injection of a
+malformed firmware ACPI table or architectural-MSR read, AP reject
+publication/park, the PIT OUT-high timeout, and exact port/LVT rollback remains
+impractical without compiling a production test hook, replacing the ACPI
+firmware tables, or adding a hardware-I/O shim.  Those paths were
+source-audited and the shared pure policies were executed, but they are not
+misreported as direct runtime injections.  This does not add another human
+checkpoint; the next action is the one physical CF-SV7 boot below.
+
+## Physical handoff (one observation)
+
+Boot the exact frozen image above on the Panasonic CF-SV7 once.  A photograph
+or transcription must include the last visible `A64` lines.  The result is:
+
+- `PASS` only if `A64 IRQ READY`, `A64 XMM CONTEXT PASS`, and
+  `boot: HAL initialized successfully.` all appear; or
+- `BOUNDARY-CAPTURED` if a new explicit ACPI/APIC/I/O-APIC/timer diagnostic is
+  the last boundary.  Record that result as `uncleared` and extract a separate
+  follow-up Phase rather than expanding q033.
 
 ## Completion conditions
 

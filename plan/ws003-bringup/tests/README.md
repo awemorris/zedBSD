@@ -388,6 +388,40 @@ BR-T48's whole-load-option compatibility fixture was retired by q031. The
 configured UEFI loader now ignores `LoadOptions`; WS013 `CT-T016` owns the
 current OVMF acceptance coverage.
 
+BR-T52 combines a production-policy fixture with two bounded QEMU negative
+tests.  The host fixture covers accepted and rejected xAPIC states, APIC-ID
+and MADT-base agreement, PIT level polling, and invalid I/O APIC versions and
+GSI ranges:
+
+```sh
+plan/ws003-bringup/tests/run-cf-sv7-early-init-host-test.sh
+```
+
+The PIT-disabled cell proves that a permanently high channel-2 output cannot
+be mistaken for successful calibration.  It must stop after the explicit
+`out-low` timeout and before IRQ/HAL readiness:
+
+```sh
+plan/ws003-bringup/tests/cf-sv7-pit-timeout-qemu.sh \
+  build/amd64/hdd-image.img plan/ws003-bringup/temp/br-t52-pit-off
+```
+
+The early-IDT cell patches only disposable copies of the production kernel
+inside disposable disk images.  Immediately after `amd64_int_init()` it
+injects `#UD`, `#GP`, and instruction-fetch `#PF`; each must print its vector,
+RIP, and CR2 where applicable, then halt before ACPI discovery:
+
+```sh
+plan/ws003-bringup/tests/cf-sv7-early-idt-fault-qemu.sh \
+  build/amd64/hdd-image.img plan/ws003-bringup/temp/br-t52-early-idt
+```
+
+The ordinary positive gates remain the BR-T24 4/8/16-GiB OVMF matrix and the
+legacy q35/xHCI USB runner documented above.  AP rejection publication, the
+PIT `out-high` timeout, exact port `0x61`/LVT cleanup, and guarded architectural
+MSR reads are additionally checked by source audit in q033; no test-only hook
+is compiled into the production kernel.
+
 This run postdates the final xHCI stop/IRQ ownership review. In addition to
 the eight existing affected regressions, `usb-hcd-unregister-test` now proves
 that a timeout cannot return a reusable synchronous URB while the HCD still

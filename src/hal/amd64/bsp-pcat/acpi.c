@@ -188,7 +188,8 @@ map_sdt(uint64_t physical)
 }
 
 static const struct sdt *
-find_sdt(const struct rsdp *rsdp, const char signature[4], size_t minimum)
+find_sdt(const struct rsdp *rsdp, const char signature[4], size_t minimum,
+	int report_root)
 {
 	const struct sdt *root;
 	unsigned width, count, index;
@@ -216,6 +217,9 @@ find_sdt(const struct rsdp *rsdp, const char signature[4], size_t minimum)
 	if ((root->length - sizeof(*root)) % width != 0)
 		return NULL;
 	count = (root->length - sizeof(*root)) / width;
+	if (report_root)
+		hal_printf("A64 ACPI ROOT READY kind=%s length=%u entries=%u\n",
+		    width == 8 ? "XSDT" : "RSDT", root->length, count);
 	for (index = 0; index < count; index++) {
 		const uint8_t *entries = (const uint8_t *)root + sizeof(*root);
 		const uint8_t *entry = entries + (size_t)index * width;
@@ -237,7 +241,8 @@ find_sdt(const struct rsdp *rsdp, const char signature[4], size_t minimum)
 static int
 discover_mcfg(struct amd64_acpi_info *result, const struct rsdp *rsdp)
 {
-	const struct sdt *mcfg = find_sdt(rsdp, "MCFG", sizeof(struct sdt) + 8U);
+	const struct sdt *mcfg = find_sdt(rsdp, "MCFG",
+	    sizeof(struct sdt) + 8U, 0);
 	if (mcfg == NULL)
 		return HAL_OK;
 	return amd64_acpi_parse_mcfg(mcfg, mcfg->length, result->ecam,
@@ -248,8 +253,10 @@ static int
 add_cpu(struct amd64_acpi_info *result, uint32_t apic_id)
 {
 	unsigned i;
-	if (apic_id > 255U)
+	if (apic_id > 255U) {
+		hal_printf("A64 ACPI CPU ID FAIL id=%u limit=255\n", apic_id);
 		return HAL_ERR_UNSUPPORTED;
+	}
 	for (i = 0; i < result->cpu_count; i++)
 		if (result->cpus[i].apic_id == apic_id)
 			return HAL_ERR_INVALID;
@@ -286,14 +293,19 @@ amd64_acpi_discover(struct amd64_acpi_info *result,
 	    rsdp->revision, rsdp->rsdt, (uint32_t)(rsdp->xsdt >> 32),
 	    (uint32_t)rsdp->xsdt);
 	madt = (const struct madt *)find_sdt(rsdp, "APIC",
-	    sizeof(struct madt));
+	    sizeof(struct madt), 1);
 	if (madt == NULL) {
 		hal_puts("A64 ACPI MADT FAIL\n");
 		return HAL_ERR_UNSUPPORTED;
 	}
+	hal_printf("A64 ACPI MADT READY length=%u lapic=%08X\n",
+	    madt->header.length, madt->lapic_address);
 	error = discover_mcfg(result, rsdp);
-	if (error != HAL_OK)
+	if (error != HAL_OK) {
+		hal_printf("A64 ACPI MCFG FAIL error=%d\n", error);
 		return error;
+	}
+	hal_printf("A64 ACPI MCFG READY regions=%u\n", result->ecam_count);
 	result->lapic_address = madt->lapic_address;
 	entry = madt->entries;
 	remaining = madt->header.length - sizeof(*madt);
@@ -342,17 +354,26 @@ amd64_acpi_discover(struct amd64_acpi_info *result,
 		remaining -= length;
 	}
 	if (result->cpu_count == 0 || result->ioapic_count == 0 ||
-	    result->lapic_address == 0)
+	    result->lapic_address == 0) {
+		hal_printf("A64 ACPI TOPOLOGY FAIL cpus=%u ioapics=%u lapic=%08X\n",
+		    result->cpu_count, result->ioapic_count,
+		    result->lapic_address);
 		return HAL_ERR_UNSUPPORTED;
+	}
 	discovered_ecam_count = result->ecam_count;
 	for (i = 0; i < result->ecam_count; i++) {
 		size_t size = ((size_t)result->ecam[i].end_bus -
 		    result->ecam[i].start_bus + 1U) << 20;
 		discovered_ecam[i] = result->ecam[i];
 		if (amd64_mmio_map_ecam(result->ecam[i].address, size,
-		    (void **)&discovered_ecam_virtual[i]) != HAL_OK)
+		    (void **)&discovered_ecam_virtual[i]) != HAL_OK) {
+			hal_printf("A64 ACPI ECAM MAP FAIL region=%u\n", i);
 			return HAL_ERR_UNSUPPORTED;
+		}
 	}
+	hal_printf("A64 ACPI READY cpus=%u ioapics=%u ecam=%u lapic=%08X\n",
+	    result->cpu_count, result->ioapic_count, result->ecam_count,
+	    result->lapic_address);
 	return HAL_OK;
 }
 

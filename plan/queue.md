@@ -1,137 +1,102 @@
-# Queue: BIOS `zedbsd.cfg` convergence
+# Queue: Panasonic CF-SV7 early ACPI/interrupt bring-up
 
 Last updated: 2026-08-30
 
-QID: `q032`
+QID: `q033`
 
-Queue status: completed
+Queue status: in-progress
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: the user explicitly requested that the three planned
-`BOOTZBSD.EXE` configuration targets be placed in a Queue and implemented on
-2026-08-30.
+Authorization: the user approved execution of the proposed `ws003-p020`
+single-Phase Queue on 2026-08-30.
 
-Timebox: no fixed wall-clock limit. Complete or honestly mark `uncleared` each
-finite Phase; stop only for a real human decision that cannot be resolved from
-the frozen p003 contract and existing loader behavior.
+Timebox: no fixed wall-clock limit. Complete the automated implementation and
+QEMU gates in this session, then stop at the one declared CF-SV7 physical
+acceptance checkpoint. A newly proven architecture decision makes the Phase
+`uncleared`; do not guess through it.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q031](queue-q031.md)
+Previous Queue: [q032](queue-q032.md)
 
 ## Purpose
 
-Converge all supported x86 BIOS `BOOTZBSD.EXE` loaders on the bounded
-configuration language already implemented by amd64 UEFI. i386 PC/AT and
-amd64 BIOS consume root `/zedbsd.cfg`; PC-98 consumes root
-`/BOOTZBSD.CFG` under the earlier filename decision. The grammar, configured
-kernel selection, shorthand, exact parameter record, and no-fallback behavior
-are otherwise identical.
+Replace the Panasonic CF-SV7's silent stop after
+`A64 ACPI RSDP PASS` with bounded early-HAL behavior and, when the existing
+xAPIC architecture is sufficient, reach `A64 IRQ READY`,
+`A64 XMM CONTEXT PASS`, and kernel HAL readiness.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws013-p005` | [Phase](ws013-containers/phase005-pcat-bios-zedbsd-config/phase.md) | completed | i386 PC/AT and amd64 BIOS reach payload PBR -> `BOOTZBSD.EXE` -> `/zedbsd.cfg`; one amd64 hybrid image shares its payload configuration with UEFI |
-| 2 | `ws013-p006` | [Phase](ws013-containers/phase006-pc98-bootzbsd-config/phase.md) | completed | PC-98 `BOOTZBSD.EXE` consumes `/BOOTZBSD.CFG` with exact p003 behavior and boots overlay/native roots |
+| 1 | `ws003-p020` | [Phase](ws003-bringup/phase020-cf-sv7-acpi-irq-bringup/phase.md) | in-progress | Early exceptions and ACPI/APIC/timer boundaries are observable; invalid APIC mode changes and unbounded PIT waits are removed; automated regressions pass; one final CF-SV7 image is handed off |
 
-## Dependency order
+## Frozen execution boundary
 
-```text
-q031 p002/p003 UEFI language and selected-FAT contract
-        |
-        +--> ws013-p005 PC/AT i386 + amd64 BIOS
-        |
-        `--> ws013-p006 PC-98 (reuses parser findings, not loader source)
-```
-
-The two Phases may share conformance vectors. Their loader implementations
-remain independent unless an already-stable boundary makes reuse simpler.
-
-## Frozen behavior
-
-- `/zedbsd.cfg` and `/BOOTZBSD.CFG` use the p003 v1 language: printable ASCII,
-  bounded `name=value` lines, exactly one loader-only `kernel=`, and every
-  other line passed through the existing textual kernel-parameter ABI.
-- Missing `boot0=` synthesizes the current payload FAT UUID. Relative
-  `overlay-root`, `overlay-data`, and boot-file `swapN` values receive
-  `boot0:`; explicit boot slots, raw swap selectors, `rootpart=`, and `init=`
-  retain their p003 meaning.
-- Missing/malformed/over-limit configuration, missing or invalid configured
-  kernel, or parameter overflow stops visibly. No embedded parameter record,
-  fixed `VMUNIX`, old direct-kernel path, or alternate configuration is a
-  production fallback.
-- i386 PC/AT and amd64 BIOS are separately accepted. amd64 must use its active
-  payload FAT PBR and MZ `BOOTZBSD.EXE`, replacing the reserved-area direct
-  Stage-2 kernel path while retaining valid hybrid GPT/MBR and UEFI boot.
-- PC-98 retains only the requested legacy filename difference. It does not
-  gain a second UEFI-style filename fallback.
-- The current i386 PC/AT and PC-98 physical-disk publication failure is a
-  preflight defect, not a relaxation of Phase completion. Repair it in a
-  bounded shared prerequisite when the root cause is common, or record a
-  platform-local repair in the owning Phase.
+- The current photograph is the physical baseline. Do not request another
+  physical boot until the complete software batch and automated regressions
+  are ready.
+- Install the minimum safe early GDT/TSS/IDT before firmware-dependent
+  ACPI/MSR/MMIO operations.
+- Accept only an already-active, validated xAPIC state. A disabled APIC,
+  x2APIC state, legacy-xAPIC lockout, or an APIC ID outside the existing
+  8-bit destination contract is a visible `BOUNDARY-CAPTURED` result, not
+  permission to add a partial x2APIC backend.
+- Remove the current mode-changing `IA32_APIC_BASE` write from the accepted
+  path. Validate CPUID, mode, base, and readback before xAPIC MMIO on every
+  CPU.
+- Bound PIT channel-2 calibration. On timeout, stop/mask the LAPIC timer and
+  restore the original port `0x61` state before reporting failure.
+- Keep diagnostics concise and permanent enough to identify ACPI completion,
+  APIC mode/base, LAPIC, IDT, IOAPIC, timer begin/end, and console IRQ.
+- Do not weaken ACPI physical-range validation or fold xHCI/storage/root work
+  into this Queue.
 
 ## Execution rules
 
 - Do not inspect or modify `.internal/` or `userland/noct/NoctLang`.
-- Preserve unrelated work. Use `make -j16` and focused Phase fixtures; do not
-  use `make check`.
-- Use disposable image copies for negative or destructive media cases.
-- Validate parser parity with common host vectors and validate each production
-  loader through its real image chain in QEMU.
-- After each completed Phase, synchronize P/W/M/Q, commit `WIP`, and push.
-  If push is unavailable, retain the local commit and continue.
-- A new product/ABI decision makes only the affected item `uncleared`; record
-  the decision request and continue independent work.
+- Preserve unrelated work. Use `make -j16`, focused fixtures, and
+  `qemu-system-x86_64`; do not use the aggregate `make check` target.
+- Run the established 4/8/16-GiB OVMF q35/xHCI USB matrix and the supported
+  amd64 BIOS regression before physical handoff.
+- A single CF-SV7 observation is `PASS` only if all Phase objective markers
+  appear. A new bounded diagnostic is `BOUNDARY-CAPTURED`, leaves the Phase
+  `uncleared`, and supplies the resume condition for a later Phase.
+- Synchronize actual results into P/W/M/Q. Commit `WIP` and push after this
+  Queue reaches its software/physical handoff state.
 
-## Verification contract
+## Automated checkpoint
 
-- Host fixtures compare exact parameter records for the same p003 valid and
-  invalid corpus across UEFI, PC/AT BIOS, and PC-98 policy.
-- i386 PC/AT boots overlay and native-root cells through the active FAT PBR
-  and configured `BOOTZBSD.EXE`.
-- One amd64 hybrid image boots through SeaBIOS and OVMF using the same payload
-  FAT configuration, kernel, images, and UUID.
-- PC-98 boots overlay and native-root cells through `BOOTZBSD.EXE` and
-  `/BOOTZBSD.CFG`.
-- Negative configuration and kernel cases stop without embedded/fixed-name or
-  direct-loader fallback; MZ/PBR size ceilings and image placement are checked.
-- `make -j16` passes after both Phases.
+The q033 software batch is complete and the Queue remains `in-progress` only
+for its one physical observation.  The frozen artifact is
+`/home/awe/zedBSD/build/amd64/hdd-image.img`, 203,423,744 bytes, SHA-256
+`38e1d8e4ccfb6ce7d1c37082818f76546a6e07dbf8e86e551e654a5f2b3ca9e8`.
 
-## Completion evidence
+- The host policy fixture and its ASan/UBSan build pass.
+- Disposable-kernel QEMU injection proves bounded early `#UD`, `#GP`, and
+  instruction-fetch `#PF` handling after IDT installation.
+- The PIT-disabled negative cell stops at the required OUT-low timeout.
+- SeaBIOS q35/xHCI USB with four CPUs reaches `login:`.
+- The final OVMF q35/xHCI USB matrix reaches `login:` with four CPUs at 4, 8,
+  and 16 GiB (3/3 pass).
+- `make -j16`, `make check-disk-image`, shell syntax, and
+  `git diff --check` pass; aggregate `make check` was not used.
 
-- `ws013-p005` passed its 20/20 production-loader matrix: i386 overlay/native,
-  amd64 SeaBIOS IDE, SeaBIOS xHCI USB, OVMF xHCI USB, LFN/subdirectory, missing
-  and invalid configuration/kernel, PBR/BPB, and ELF bound failures.
-- `ws013-p006` passed its 16/16 production-PBR matrix: overlay/native,
-  1024-byte-sector LFN, missing and invalid configuration/kernel, executable
-  entry, undersized reserved-area/volume, wrapped start LBA, and malformed
-  PBR/cluster/chain cases.
-- Shared configuration and FAT directory host tests passed ordinary,
-  sanitizer, and available static-analysis gates. Migrated BR-T46 image-helper
-  dry runs passed for PC/AT, amd64 BIOS, and amd64 UEFI.
-- The dedicated chain-Stage-2 artifact rebuilt correctly with a stale legacy
-  `stage2.o` present. Generic BIOS and GPT checkers rejected a one-byte-different
-  declared Stage 2. Stage 1 executable/signature identity checks passed for
-  PC/AT, amd64, and PC-98, and rejected one-byte and wrong-loader inputs.
-  Atomic checker failure preserved the previous published image and left no
-  unchecked temporary. FAT/GPT/native-UFS mismatch poisoning tests left no
-  extraction temporary and their immediate correct-input retries passed;
-  backend/checker failure paths also preserved the prior target and removed
-  both unchecked siblings. Per-medium GPT GUID generation and primary/backup
-  validation also passed.
-- A normal amd64 `config.mk` rebuild regenerated the root staging tree,
-  packaging tarball, UFS image, kernel, loader, and final hybrid image.
-  `make -j16`, public PC/AT/PC-98 image checks, the amd64 GPT checker,
-  shell syntax checks, and `git diff --check` passed.
-- No Phase required a new product or ABI decision. The remaining PC-98 FAT32
-  PBR layout and direct-DOS volume mapping questions are recorded as later
-  WS013 backlog, outside the completed FAT16 production contract.
+Evidence is preserved under `plan/ws003-bringup/temp/q033-final/`.  The next
+and only action in q033 is the physical `BR-T52` observation described in the
+Phase book.  No intermediate or repeatability boot is requested.
 
 ## Completion definition
 
-q032 is finished when p005 and p006 are each `completed` or honestly
-`uncleared`; exact implementation and QEMU evidence are synchronized into the
-Phase, WS, Queue, and master books; and no supported BIOS image silently uses
-the replaced fixed-name or embedded-parameter behavior.
+q033 is finished when `ws003-p020` is either:
+
+- `completed`, with host/QEMU evidence and one CF-SV7 boot reaching IRQ, XMM,
+  and HAL readiness; or
+- `uncleared`, with all safe automated work complete, a uniquely identified
+  physical image, and one new bounded hardware result or an explicit
+  architecture decision recorded.
+
+The Queue may pause at `awaiting-physical` after its automated gates. That is
+not a second implementation item and does not authorize repeated human boots.

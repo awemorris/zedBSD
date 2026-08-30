@@ -9,6 +9,7 @@
 #include "smp.h"
 #include "space.h"
 #include "task.h"
+#include "bsp-pcat/early-init-policy.h"
 #include "bsp-pcat/lapic.h"
 
 extern uint8_t amd64_ap_trampoline_start[];
@@ -60,7 +61,9 @@ amd64_smp_init(const struct amd64_acpi_info *acpi)
 		target++;
 	}
 	present_count = target;
-	__atomic_store_n(&panic_available, 1U, __ATOMIC_RELEASE);
+	/* NMI panic broadcast is unsafe until every AP has passed its local
+	 * APIC preflight and published ready. */
+	__atomic_store_n(&panic_available, 0U, __ATOMIC_RELEASE);
 }
 
 int amd64_smp_panic_available(void)
@@ -103,6 +106,7 @@ start_one(struct amd64_percpu *cpu)
 	if (image_size == 0 || image_size > 4096U ||
 	    hal_pmem_alloc(&stack_request, &cpu->bootstrap_stack) != HAL_OK)
 		return HAL_ERR_NOMEM;
+	__atomic_store_n(&cpu->startup_error, 0U, __ATOMIC_RELEASE);
 	hal_memcpy(destination, amd64_ap_trampoline_start, image_size);
 	*(uint32_t *)(destination + (amd64_ap_trampoline_cr3 -
 	    amd64_ap_trampoline_start)) = (uint32_t)amd64_system_cr3();
@@ -124,9 +128,23 @@ start_one(struct amd64_percpu *cpu)
 	(void)amd64_lapic_send_startup(cpu->apic_id,
 	    AMD64_AP_TRAMPOLINE >> 12);
 	for (timeout = 0; timeout < 10000000U; timeout++) {
+		unsigned startup_error;
+
 		hal_rmb();
 		if (__atomic_load_n(&cpu->ready, __ATOMIC_ACQUIRE) != 0)
 			return HAL_OK;
+		startup_error = __atomic_load_n(&cpu->startup_error,
+		    __ATOMIC_ACQUIRE);
+		if (startup_error != 0) {
+			const char *reason = startup_error ==
+			    AMD64_STARTUP_ERROR_TIMER ? "timer-start-failed" :
+			    amd64_apic_policy_result_name(
+			    (enum amd64_apic_policy_result)startup_error);
+
+			hal_printf("A64 AP START FAIL cpu=%u apic-id=%u result=%s\n",
+			    cpu->logical_id, cpu->apic_id, reason);
+			return HAL_ERR_UNSUPPORTED;
+		}
 		__asm__ volatile("pause");
 	}
 	return HAL_ERR_TIMEOUT;
@@ -141,6 +159,7 @@ hal_cpu_start_others(void)
 		if (error != HAL_OK)
 			return error;
 	}
+	__atomic_store_n(&panic_available, 1U, __ATOMIC_RELEASE);
 	return HAL_OK;
 }
 
@@ -148,6 +167,7 @@ void
 amd64_ap_entry(uint64_t logical_cpu)
 {
 	struct amd64_percpu *cpu = amd64_percpu_get((hal_cpu_id_t)logical_cpu);
+	unsigned startup_error;
 	if (cpu == NULL || cpu->logical_id != logical_cpu)
 		HAL_FATAL("invalid amd64 AP logical ID");
 	amd64_cpu_init();
@@ -155,9 +175,26 @@ amd64_ap_entry(uint64_t logical_cpu)
 	cpu->current_space = HAL_SPACE_SYS;
 	amd64_descriptor_init();
 	amd64_int_load();
-	amd64_lapic_init_cpu();
+	if (amd64_lapic_init_secondary(cpu->apic_id, &startup_error) != HAL_OK) {
+		hal_printf("A64 APIC AP HALT cpu=%u expected-id=%u\n",
+		    cpu->logical_id, cpu->apic_id);
+		if (startup_error == AMD64_APIC_POLICY_OK)
+			startup_error = AMD64_APIC_POLICY_INVALID_MODE;
+		__atomic_store_n(&cpu->startup_error, startup_error,
+		    __ATOMIC_RELEASE);
+		(void)hal_irq_disable();
+		for (;;)
+			asm_hlt();
+	}
 	amd64_task_init_cpu(0);
-	amd64_lapic_timer_start();
+	if (amd64_lapic_timer_start() != HAL_OK) {
+		hal_printf("A64 TIMER AP HALT cpu=%u\n", cpu->logical_id);
+		__atomic_store_n(&cpu->startup_error,
+		    AMD64_STARTUP_ERROR_TIMER, __ATOMIC_RELEASE);
+		(void)hal_irq_disable();
+		for (;;)
+			asm_hlt();
+	}
 	__atomic_store_n(&cpu->ready, 1U, __ATOMIC_RELEASE);
 	(void)__atomic_fetch_or(
 	    &ready_mask.bits[cpu->logical_id / 64U],

@@ -32,10 +32,15 @@ paging, then stops after `A64 ACPI RSDP PASS` and before `A64 IRQ READY`.
 storage, root, and device work is extracted only after the earliest stop is
 cleared, without reopening the completed Latitude USB/network evidence.
 
-The current [Queue Book](queue.md) records completed `q032`: i386 PC/AT and
-amd64 BIOS `BOOTZBSD.EXE` now consume `/zedbsd.cfg`, PC-98 `BOOTZBSD.EXE`
-consumes the same language through `/BOOTZBSD.CFG`, and one amd64 hybrid image
-uses a common payload FAT through BIOS and UEFI. Completed `q031` removed and
+The current [Queue Book](queue.md) records in-progress `q033`, containing only
+`ws003-p020` for the CF-SV7 early ACPI/interrupt boundary. Its implementation,
+host/negative fixtures, BIOS USB gate, and OVMF 4/8/16-GiB matrix pass; one
+frozen-image CF-SV7 observation remains before the Queue can be classified.
+The archived
+[q032](queue-q032.md) made i386 PC/AT and amd64 BIOS `BOOTZBSD.EXE` consume
+`/zedbsd.cfg`, made PC-98 `BOOTZBSD.EXE` consume the same language through
+`/BOOTZBSD.CFG`, and made one amd64 hybrid image use a common payload FAT
+through BIOS and UEFI. Completed `q031` removed and
 audited the dead UEFI boot path, then replaced the hard-coded amd64 UEFI
 launch with required same-disk `/zedbsd.cfg` discovery and direct
 kernel-parameter translation. The
@@ -259,7 +264,7 @@ actually warranted.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | x86 laptop bring-up (Latitude 5320 and CF-SV7) | Active; Latitude USB/network milestone complete; CF-SV7 p020 planned; p018 Latitude overlay-NVMe install/boot dependency-gated | p017 LoadOptions policy is superseded by WS013 required `/zedbsd.cfg`; p018/p019 and CF-SV7 early p020 are defined | Queue p020 independently for the CF-SV7 early boundary; run p018 only after WS004/WS013/WS019 overlay prerequisites and retain p019 for later native installation | [WS003](ws003-bringup/ws.md) |
+| `ws003` | x86 laptop bring-up (Latitude 5320 and CF-SV7) | Active; Latitude USB/network milestone complete; CF-SV7 p020 automated checkpoint complete; p018 Latitude overlay-NVMe install/boot dependency-gated | p020 host/negative/BIOS and OVMF 4/8/16-GiB gates pass; p017 is superseded; p018/p019 remain defined | Perform the one frozen-image CF-SV7 p020 observation; run p018 only after WS004/WS013/WS019 overlay prerequisites and retain p019 for later native installation | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; `q030` NVMe software sequence complete | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Complete automatic WS013/WS019 prerequisites, then run the read-only p025 Latitude checkpoint with the later installed-boot acceptance | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Active; q029 p001 complete; WLAN manually blocked | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Select reconnect/reliability or another dependency-ready networking Phase; WLAN remains blocked | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |

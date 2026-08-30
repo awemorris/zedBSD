@@ -3,11 +3,14 @@
 
 #include <hal/types.h>
 
-int amd64_lapic_init(uint32_t physical_address);
-void amd64_lapic_init_cpu(void);
+struct amd64_acpi_info;
+
+int amd64_lapic_init(const struct amd64_acpi_info *acpi);
+int amd64_lapic_init_secondary(uint32_t expected_apic_id,
+	unsigned *failure_reason);
 uint32_t amd64_lapic_id(void);
 void amd64_lapic_eoi(void);
-void amd64_lapic_timer_start(void);
+int amd64_lapic_timer_start(void);
 void amd64_lapic_timer_stop(void);
 int amd64_lapic_send_init(uint32_t apic_id);
 int amd64_lapic_send_startup(uint32_t apic_id, uint8_t vector);

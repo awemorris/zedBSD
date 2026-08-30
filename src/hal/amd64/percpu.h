@@ -11,6 +11,7 @@ struct amd64_irq_ack {
 };
 
 #define AMD64_IRQ_ACK_DEPTH 8U
+#define AMD64_STARTUP_ERROR_TIMER 0x100U
 
 struct amd64_task;
 
@@ -19,6 +20,7 @@ struct amd64_percpu {
 	hal_cpu_id_t logical_id;
 	uint32_t apic_id;
 	volatile unsigned ready;
+	volatile unsigned startup_error;
 	struct hal_pmem bootstrap_stack;
 	struct amd64_irq_ack acknowledgements[AMD64_IRQ_ACK_DEPTH];
 	unsigned acknowledgement_depth;

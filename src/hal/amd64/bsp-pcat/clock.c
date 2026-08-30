@@ -20,11 +20,17 @@ cmos_read(uint8_t index, void *context)
 	return index;
 }
 
-void
+int
 bsp_timer_init(void)
 {
+	int error;
+
 	first_tick = 1;
-	amd64_lapic_timer_start();
+	error = amd64_lapic_timer_start();
+	if (error != HAL_OK)
+		return error;
+	hal_puts("A64 TIMER READY\n");
+	return HAL_OK;
 }
 
 void

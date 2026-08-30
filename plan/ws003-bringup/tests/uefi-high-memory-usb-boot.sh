@@ -50,7 +50,7 @@ command -v sha256sum >/dev/null
 mkdir -p "$output"
 base_digest=$(sha256sum "$image" | awk '{print $1}')
 results=$output/results.tsv
-failure_pattern='fatal:|kernel panic|panic:|amd64 fault v=|loop1: write .*error=[1-9]|usb-storage: BOT .*error=[1-9]|usb-storage: BOT .*actual=0.*expected=[1-9]|usb-storage: sda op=2a .*error=[1-9]|usb-storage: sda flush .*error=[1-9]|xhci: transfer completion=|xhci: control |xhci: command [0-9][0-9]* failed|xhci: .*retain|syslogd: .*Input/output error'
+failure_pattern='fatal:|kernel panic|panic:|amd64 fault v=|A64 APIC PREFLIGHT FAIL|A64 IOAPIC .*FAIL|A64 TIMER CAL (TIMEOUT|INVALID)|loop1: write .*error=[1-9]|usb-storage: BOT .*error=[1-9]|usb-storage: BOT .*actual=0.*expected=[1-9]|usb-storage: sda op=2a .*error=[1-9]|usb-storage: sda flush .*error=[1-9]|xhci: transfer completion=|xhci: control |xhci: command [0-9][0-9]* failed|xhci: .*retain|syslogd: .*Input/output error'
 
 {
 	echo "base_image=$image"
@@ -143,8 +143,14 @@ for memory in $memory_list; do
 		    'A64 UEFI EXIT' \
 		    'A64 ENTRY PASS' \
 		    'A64 PAGING PASS' \
+		    'A64 IDT READY' \
 		    'A64 ACPI RSDP PASS' \
+		    'A64 LAPIC READY' \
+		    'A64 IOAPIC ROUTING READY' \
+		    'A64 TIMER READY' \
 		    'A64 IRQ READY' \
+		    'A64 XMM CONTEXT PASS' \
+		    'boot: HAL initialized successfully.' \
 		    "boot: CPUs ready: $smp_cpus" \
 		    'login:'; do
 			if ! rg -a -F -q "$marker" "$log"; then

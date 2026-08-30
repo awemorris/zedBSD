@@ -66,7 +66,7 @@ cp --reflink=auto --sparse=always "$image" "$run_image"
 : >"$guest_log"
 : >"$qemu_log"
 
-failure_pattern='fatal:|FATAL:|kernel panic|panic:|amd64 fault v=|VFS initialization failed|boot-storage wait expired|xhci: control |xhci: transfer completion=|xhci: ignored command completion|xhci: unmatched command completion|xhci: command [0-9][0-9]* (failed|timed out)|xhci: .*recovery failed|xhci: .*cancel failed|xhci: .*quiesce failed|xhci: .*attach failed|xhci: .*retain|xhci: refusing |usb[0-9][0-9]*: port [0-9][0-9]* enumeration failed|usb-storage: BOT .*error=[1-9]|usb-storage: BOT .*actual=0.*expected=[1-9]|usb-storage: sd[a-z][a-z]* op=2a .*error=[1-9]|usb-storage: sd[a-z][a-z]* flush .*error=[1-9]|loop[0-9][0-9]*: write .*error=[1-9]'
+failure_pattern='fatal:|FATAL:|kernel panic|panic:|amd64 fault v=|A64 APIC PREFLIGHT FAIL|A64 IOAPIC .*FAIL|A64 TIMER CAL (TIMEOUT|INVALID)|VFS initialization failed|boot-storage wait expired|xhci: control |xhci: transfer completion=|xhci: ignored command completion|xhci: unmatched command completion|xhci: command [0-9][0-9]* (failed|timed out)|xhci: .*recovery failed|xhci: .*cancel failed|xhci: .*quiesce failed|xhci: .*attach failed|xhci: .*retain|xhci: refusing |usb[0-9][0-9]*: port [0-9][0-9]* enumeration failed|usb-storage: BOT .*error=[1-9]|usb-storage: BOT .*actual=0.*expected=[1-9]|usb-storage: sd[a-z][a-z]* op=2a .*error=[1-9]|usb-storage: sd[a-z][a-z]* flush .*error=[1-9]|loop[0-9][0-9]*: write .*error=[1-9]'
 
 {
 	echo "base_image=$image"
@@ -137,9 +137,14 @@ qemu_pid=
 
 if [ "$class" = pass ]; then
 	for marker in \
+	    'A64 IDT READY' \
+	    'A64 LAPIC READY' \
+	    'A64 IOAPIC ROUTING READY' \
+	    'A64 TIMER READY' \
+	    'A64 XMM CONTEXT PASS' \
+	    'boot: HAL initialized successfully.' \
 	    'xhci: PCI controller' \
 	    'usb-storage: sda blocks=' \
-	    '-> /dev/sda1 (private FAT)' \
 	    'login:'; do
 		if ! rg -a -F -q -- "$marker" "$guest_log"; then
 			class=missing-marker
@@ -147,6 +152,12 @@ if [ "$class" = pass ]; then
 			break
 		fi
 	done
+fi
+if [ "$class" = pass ] &&
+    ! rg -a -q 'vfs: boot0 .* -> /dev/sda[0-9][0-9]* \(private FAT\)' \
+	"$guest_log"; then
+	class=missing-marker
+	first_failure="missing private FAT boot-device resolution"
 fi
 if [ "$class" = pass ] &&
     ! rg -a -q 'usb[0-9][0-9]*: device [0-9][0-9]* port [0-9][0-9]* .* configured' \

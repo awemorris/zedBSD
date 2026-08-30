@@ -8,8 +8,9 @@ Status: active; `ws003-p004` through `ws003-p009` complete in q013; q014
 `ws003-p010` and physical U3 complete through BR-T41; q015 completed `p011`
 through `p015`; q023 completed `ws003-p016`; `ws003-p017` is superseded by
 the WS013 required-`zedbsd.cfg` path; `ws003-p018` is the dependency-gated
-final Latitude NVMe install/boot milestone; `ws003-p020` is the planned first
-Panasonic CF-SV7 early-ACPI/interrupt boundary
+final Latitude NVMe install/boot milestone; `ws003-p020` is in progress in
+q033 with its automated checkpoint complete and one Panasonic CF-SV7
+early-ACPI/interrupt observation pending
 
 Parent: [master plan](../master.md)
 
@@ -20,8 +21,8 @@ the intended UUID to `/dev/sda1`, mounted the
 read-write data loop and root overlay, started init, and reached a root shell,
 proving physical tier U3.
 
-Resume point: after explicit Queue approval, run `ws003-p020` as the next
-independent physical bring-up Phase. In parallel, finish the automatic
+Resume point: boot the frozen q033 image once on the CF-SV7 and classify the
+result as p020 `PASS` or `BOUNDARY-CAPTURED`. In parallel, finish the automatic
 WS013/WS019 prerequisites before `ws003-p018`. Latitude follow-up still
 includes BR-T31
 sustained root I/O and, after U4 is otherwise frozen, BR-T30 five-boot
@@ -53,7 +54,7 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p017` | [UEFI LoadOptions firmware compatibility](phase017-uefi-load-options-compatibility/phase.md) | Superseded by WS013 p003 | Historical BR-T48 converter policy is removed; CT-T016 proves LoadOptions is ignored by the required `/zedbsd.cfg` path |
 | `ws003-p018` | [Latitude existing-FAT NVMe overlay installation and boot](phase018-latitude-nvme-install-boot/phase.md) | Planned; dependency-gated | Install without GPT/mkfs/NVRAM mutation, then boot the installed fallback loader and NVMe overlay |
 | `ws003-p019` | [Latitude NVMe native installation and boot](phase019-latitude-nvme-native-install-boot/phase.md) | Future; not designed | Accept the later native-root installer only after separate WS019 design and QEMU proof |
-| `ws003-p020` | [Panasonic CF-SV7 early ACPI/interrupt bring-up](phase020-cf-sv7-acpi-irq-bringup/phase.md) | Planned; Queue approval required | Replace the current post-RSDP silent stop with bounded evidence and reach IRQ/XMM/HAL readiness without regressing Latitude or QEMU |
+| `ws003-p020` | [Panasonic CF-SV7 early ACPI/interrupt bring-up](phase020-cf-sv7-acpi-irq-bringup/phase.md) | In progress (`q033`); automated checkpoint complete | Early IDT/APIC/IOAPIC/PIT behavior is bounded; host, negative QEMU, BIOS, and OVMF 4/8/16-GiB gates pass; one frozen-image CF-SV7 observation remains |
 
 `ws003-p003` was the sole authorized item in q012. Its physical result closes
 the PCI/BAR/capability boundary and extracts the first device-enumeration stop
