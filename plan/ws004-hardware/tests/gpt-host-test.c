@@ -20,6 +20,9 @@
 struct memory_medium {
 	uint8_t *bytes;
 	size_t size;
+	uint8_t *sparse_bytes;
+	uint64_t sparse_first;
+	uint32_t sparse_count;
 	uint64_t fail_lba;
 	int fail_reads;
 };
@@ -33,6 +36,7 @@ struct gpt_layout {
 	uint64_t backup_table;
 	uint64_t first_usable;
 	uint64_t last_usable;
+	uint64_t logical_last;
 };
 
 static struct memory_medium medium;
@@ -94,6 +98,8 @@ int
 disk_read(struct disk *target, uint64_t block, uint32_t count, void *data)
 {
 	struct memory_medium *source;
+	uint8_t *output = data;
+	uint32_t index;
 
 	if (target == NULL || data == NULL || target->d_data == NULL ||
 	    count == 0U)
@@ -104,11 +110,26 @@ disk_read(struct disk *target, uint64_t block, uint32_t count, void *data)
 		return EIO;
 	if (block >= target->d_block_count ||
 	    (uint64_t)count > target->d_block_count - block ||
-	    (uint64_t)target->d_block_size * count > SIZE_MAX ||
-	    block > SIZE_MAX / target->d_block_size)
+	    (uint64_t)target->d_block_size * count > SIZE_MAX)
 		return EOVERFLOW;
-	memcpy(data, source->bytes + (size_t)block * target->d_block_size,
-	    (size_t)count * target->d_block_size);
+	for (index = 0U; index < count; index++) {
+		uint64_t lba = block + index;
+		const uint8_t *input;
+
+		if (lba < source->size / target->d_block_size) {
+			input = source->bytes + (size_t)lba * target->d_block_size;
+		} else if (source->sparse_bytes != NULL &&
+		    lba >= source->sparse_first &&
+		    lba - source->sparse_first < source->sparse_count) {
+			input = source->sparse_bytes +
+			    (size_t)(lba - source->sparse_first) *
+			    target->d_block_size;
+		} else {
+			return EIO;
+		}
+		memcpy(output + (size_t)index * target->d_block_size, input,
+		    target->d_block_size);
+	}
 	return 0;
 }
 
@@ -151,14 +172,31 @@ crc32(const uint8_t *data, size_t size)
 static uint8_t *
 block_at(uint64_t lba)
 {
-	CHECK(lba < disk.d_block_count);
-	return medium.bytes + (size_t)lba * disk.d_block_size;
+	uint8_t *result = NULL;
+
+	if (disk.d_block_size == 0U || lba >= disk.d_block_count) {
+		fputs("fixture block address outside medium\n", stderr);
+		exit(2);
+	}
+	if (lba < medium.size / disk.d_block_size) {
+		result = medium.bytes + (size_t)lba * disk.d_block_size;
+	} else if (medium.sparse_bytes != NULL &&
+	    lba >= medium.sparse_first &&
+	    lba - medium.sparse_first < medium.sparse_count) {
+		result = medium.sparse_bytes +
+		    (size_t)(lba - medium.sparse_first) * disk.d_block_size;
+	}
+	if (result == NULL) {
+		fputs("fixture block is not materialized\n", stderr);
+		exit(2);
+	}
+	return result;
 }
 
 static uint8_t *
 header_at(int primary)
 {
-	return block_at(primary ? 1U : disk.d_block_count - 1U);
+	return block_at(primary ? 1U : layout.logical_last);
 }
 
 static uint8_t *
@@ -171,6 +209,7 @@ static void
 reset_medium(uint32_t block_size)
 {
 	free(medium.bytes);
+	free(medium.sparse_bytes);
 	memset(&medium, 0, sizeof(medium));
 	memset(&disk, 0, sizeof(disk));
 	memset(&layout, 0, sizeof(layout));
@@ -189,6 +228,53 @@ reset_medium(uint32_t block_size)
 }
 
 static void
+map_sparse_blocks(uint64_t first, uint32_t count)
+{
+	if (medium.sparse_bytes != NULL || count == 0U) {
+		fputs("invalid sparse fixture mapping\n", stderr);
+		exit(2);
+	}
+	medium.sparse_bytes = calloc(count, disk.d_block_size);
+	if (medium.sparse_bytes == NULL) {
+		fputs("sparse fixture allocation failed\n", stderr);
+		exit(2);
+	}
+	medium.sparse_first = first;
+	medium.sparse_count = count;
+}
+
+static void
+extend_sparse_blocks(uint64_t last)
+{
+	uint8_t *resized;
+	uint64_t count;
+	size_t old_size, new_size;
+
+	if (medium.sparse_bytes == NULL || last < medium.sparse_first) {
+		fputs("invalid sparse fixture extension\n", stderr);
+		exit(2);
+	}
+	count = last - medium.sparse_first + 1U;
+	if (count > UINT32_MAX ||
+	    count > SIZE_MAX / disk.d_block_size) {
+		fputs("sparse fixture extension too large\n", stderr);
+		exit(2);
+	}
+	if (count <= medium.sparse_count)
+		return;
+	old_size = (size_t)medium.sparse_count * disk.d_block_size;
+	new_size = (size_t)count * disk.d_block_size;
+	resized = realloc(medium.sparse_bytes, new_size);
+	if (resized == NULL) {
+		fputs("sparse fixture extension failed\n", stderr);
+		exit(2);
+	}
+	memset(resized + old_size, 0, new_size - old_size);
+	medium.sparse_bytes = resized;
+	medium.sparse_count = (uint32_t)count;
+}
+
+static void
 mbr_entry(unsigned slot, uint8_t status, uint8_t type, uint32_t start,
 	uint32_t blocks)
 {
@@ -203,7 +289,8 @@ mbr_entry(unsigned slot, uint8_t status, uint8_t type, uint32_t start,
 static void
 protective_mbr(void)
 {
-	uint32_t blocks = TEST_BLOCKS - 1U;
+	uint32_t blocks = layout.logical_last > UINT32_MAX ? UINT32_MAX :
+	    (uint32_t)layout.logical_last;
 	uint8_t *mbr = block_at(0U);
 
 	mbr[510U] = 0x55U;
@@ -228,8 +315,8 @@ static void
 write_header(int primary)
 {
 	uint8_t *header = header_at(primary);
-	uint64_t here = primary ? 1U : disk.d_block_count - 1U;
-	uint64_t other = primary ? disk.d_block_count - 1U : 1U;
+	uint64_t here = primary ? 1U : layout.logical_last;
+	uint64_t other = primary ? layout.logical_last : 1U;
 	uint64_t table = primary ? layout.primary_table : layout.backup_table;
 	static const uint8_t disk_guid[16U] = {
 		0xefU, 0xcdU, 0xabU, 0x89U, 0x67U, 0x45U, 0x23U, 0x01U,
@@ -264,11 +351,17 @@ refresh_table_and_header(int primary)
 }
 
 static void
-begin_gpt(uint32_t block_size, uint32_t entry_count, uint32_t entry_size)
+begin_gpt_extent(uint32_t block_size, uint32_t entry_count,
+	uint32_t entry_size, uint64_t logical_last, uint64_t physical_blocks)
 {
 	uint64_t reserved_blocks;
 
 	reset_medium(block_size);
+	if (logical_last < 3U || logical_last >= physical_blocks) {
+		fputs("invalid GPT fixture extent\n", stderr);
+		exit(2);
+	}
+	disk.d_block_count = physical_blocks;
 	layout.entry_count = entry_count;
 	layout.entry_size = entry_size;
 	layout.table_bytes = (uint64_t)entry_count * entry_size;
@@ -277,11 +370,22 @@ begin_gpt(uint32_t block_size, uint32_t entry_count, uint32_t entry_size)
 	reserved_blocks = (16384U + block_size - 1U) / block_size;
 	if (reserved_blocks < layout.table_blocks)
 		reserved_blocks = layout.table_blocks;
+	layout.logical_last = logical_last;
 	layout.primary_table = 2U;
-	layout.backup_table = TEST_BLOCKS - 1U - reserved_blocks;
+	layout.backup_table = logical_last - reserved_blocks;
+	if (layout.backup_table >= medium.size / block_size)
+		map_sparse_blocks(layout.backup_table,
+		    (uint32_t)reserved_blocks + 1U);
 	layout.first_usable = layout.primary_table + reserved_blocks;
 	layout.last_usable = layout.backup_table - 1U;
 	protective_mbr();
+}
+
+static void
+begin_gpt(uint32_t block_size, uint32_t entry_count, uint32_t entry_size)
+{
+	begin_gpt_extent(block_size, entry_count, entry_size, TEST_BLOCKS - 1U,
+	    TEST_BLOCKS);
 }
 
 static void
@@ -320,18 +424,65 @@ write_entry(unsigned slot, uint8_t unique_seed, uint64_t first,
 }
 
 static void
-build_gpt(uint32_t block_size)
+build_gpt_extent(uint32_t block_size, uint64_t logical_last,
+	uint64_t physical_blocks)
 {
 	static const uint16_t name[] = {
 		'z', 'e', 'd', 'B', 'S', 'D'
 	};
 
-	begin_gpt(block_size, 8U, 128U);
+	begin_gpt_extent(block_size, 8U, 128U, logical_last, physical_blocks);
 	write_entry(3U, 0x10U, layout.first_usable + 8U,
 	    layout.first_usable + 71U, name,
 	    (unsigned)(sizeof(name) / sizeof(name[0])));
 	write_header(1);
 	write_header(0);
+}
+
+static void
+build_gpt(uint32_t block_size)
+{
+	build_gpt_extent(block_size, TEST_BLOCKS - 1U, TEST_BLOCKS);
+}
+
+static void
+add_valid_stale_physical_backup(void)
+{
+	uint64_t saved_logical_last = layout.logical_last;
+	uint64_t saved_backup_table = layout.backup_table;
+	uint64_t saved_last_usable = layout.last_usable;
+	uint64_t physical_last = disk.d_block_count - 1U;
+	uint64_t reserve_blocks = saved_logical_last - saved_backup_table;
+	uint64_t stale_table = physical_last - reserve_blocks;
+	uint8_t *stale_entry;
+	unsigned index;
+
+	CHECK(physical_last > saved_logical_last);
+	if (stale_table >= medium.size / disk.d_block_size) {
+		if (medium.sparse_bytes == NULL)
+			map_sparse_blocks(stale_table,
+			    (uint32_t)(physical_last - stale_table + 1U));
+		else
+			extend_sparse_blocks(physical_last);
+	}
+	memcpy(block_at(stale_table), table_at(1), (size_t)layout.table_bytes);
+	/* Give the stale whole-device copy a distinct partition wholly inside
+	 * the destination tail, so accidental publication changes the result. */
+	stale_entry = block_at(stale_table) + 5U * layout.entry_size;
+	memset(stale_entry, 0, layout.entry_size);
+	stale_entry[0U] = 0x28U;
+	stale_entry[1U] = 0x73U;
+	for (index = 0U; index < 16U; index++)
+		stale_entry[16U + index] = (uint8_t)(0x90U + index);
+	put64(stale_entry + 32U, saved_logical_last + 8U);
+	put64(stale_entry + 40U, saved_logical_last + 15U);
+	layout.logical_last = physical_last;
+	layout.backup_table = stale_table;
+	layout.last_usable = stale_table - 1U;
+	write_header(0);
+	layout.logical_last = saved_logical_last;
+	layout.backup_table = saved_backup_table;
+	layout.last_usable = saved_last_usable;
 }
 
 static int
@@ -386,6 +537,223 @@ test_valid_geometry(uint32_t block_size)
 	result = scan(entries, TEST_CAPACITY);
 	CHECK(result == 1);
 	check_basic_entry(&entries[0], "zedBSD");
+}
+
+static void
+test_bounded_large_physical_media(void)
+{
+	const uint64_t logical_last = TEST_BLOCKS / 2U - 1U;
+	struct partition entries[TEST_CAPACITY];
+	int result;
+
+	/* A small copied GPT remains non-saturated even when a 512-byte-sector
+	 * destination itself has more than UINT32_MAX LBAs. */
+	build_gpt_extent(512U, logical_last, (uint64_t)UINT32_MAX + 129U);
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+
+	/* Saturation is based on the protective entry's LBA count, not bytes.
+	 * This 4096-byte-sector destination is over 2 TiB but below UINT32_MAX
+	 * sectors, so the small logical extent remains exact. */
+	build_gpt_extent(4096U, logical_last, UINT64_C(600000001));
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+}
+
+static void
+test_bounded_extent(uint32_t block_size)
+{
+	const uint64_t logical_last = TEST_BLOCKS / 2U - 1U;
+	struct partition entries[TEST_CAPACITY];
+	char expected[256];
+	int result;
+
+	build_gpt_extent(block_size, logical_last, TEST_BLOCKS);
+	memset(entries, 0xa5, sizeof(entries));
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	(void)snprintf(expected, sizeof(expected),
+	    "gpt: nvme0n1 bounded extent accepted: logical-last=%llu "
+	    "physical-last=%u declared-sectors=%llu physical-sectors=%u "
+	    "ignored-tail-sectors=%llu\n",
+	    (unsigned long long)logical_last, TEST_BLOCKS - 1U,
+	    (unsigned long long)(logical_last + 1U), TEST_BLOCKS,
+	    (unsigned long long)(TEST_BLOCKS - 1U - logical_last));
+	CHECK(strcmp(diagnostics, expected) == 0);
+
+	/* Neither arbitrary tail contents nor an unreadable physical last block
+	 * are part of the bounded GPT extent. */
+	memset(block_at(disk.d_block_count - 1U), 0x5a, disk.d_block_size);
+	medium.fail_lba = disk.d_block_count - 1U;
+	medium.fail_reads = 1;
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+
+	/* A complete but stale GPT backup at the destination's physical end is
+	 * ignored in favor of the mutually valid bounded pair. */
+	build_gpt_extent(block_size, logical_last, TEST_BLOCKS);
+	add_valid_stale_physical_backup();
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+}
+
+static void
+test_bounded_extent_rejection(void)
+{
+	const uint64_t logical_last = TEST_BLOCKS / 2U - 1U;
+	uint8_t *entry;
+	uint64_t tail_table;
+
+	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
+	header_at(0)[16U] ^= 1U;
+	expect_rejected("bounded-damaged-backup");
+
+	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
+	header_at(1)[16U] ^= 1U;
+	expect_rejected("bounded-damaged-primary");
+
+	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
+	put64(header_at(1) + 32U, disk.d_block_count);
+	refresh_header_crc(1);
+	expect_rejected("bounded-primary-alternate-after-physical-end");
+
+	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
+	put64(header_at(0) + 32U, 2U);
+	refresh_header_crc(0);
+	expect_rejected("bounded-backup-alternate-not-primary");
+
+	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
+	medium.fail_lba = logical_last;
+	medium.fail_reads = 1;
+	expect_rejected("bounded-unreadable-backup");
+
+	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
+	table_at(0)[3U * layout.entry_size + 56U] = 'X';
+	refresh_table_and_header(0);
+	expect_rejected("bounded-contradictory-entry-arrays");
+
+	/* A valid-CRC backup array in the ignored tail is still outside the
+	 * logical GPT extent and cannot be used as metadata. */
+	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
+	tail_table = logical_last + 16U;
+	memcpy(block_at(tail_table), table_at(0), (size_t)layout.table_bytes);
+	put64(header_at(0) + 72U, tail_table);
+	refresh_header_crc(0);
+	expect_rejected("bounded-backup-table-in-physical-tail");
+
+	/* A partition in physically present tail blocks remains out of range. */
+	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
+	entry = table_at(1) + 3U * layout.entry_size;
+	put64(entry + 32U, logical_last + 8U);
+	put64(entry + 40U, logical_last + 15U);
+	memcpy(table_at(0) + 3U * layout.entry_size, entry,
+	    layout.entry_size);
+	refresh_table_and_header(1);
+	refresh_table_and_header(0);
+	expect_rejected("bounded-partition-in-physical-tail");
+
+	/* The protective entry describes the copied GPT extent, not the larger
+	 * destination medium. */
+	build_gpt_extent(512U, logical_last, TEST_BLOCKS);
+	put32(block_at(0U) + 0x1beU + 12U, TEST_BLOCKS - 1U);
+	expect_rejected("bounded-pmbr-uses-physical-size");
+
+	/* Truncating even one block below the advertised logical end is fatal. */
+	build_gpt_extent(512U, 3071U, TEST_BLOCKS);
+	disk.d_block_count = 3071U;
+	expect_rejected("bounded-physical-medium-too-small");
+}
+
+static void
+test_bounded_saturated_protective_mbr(void)
+{
+	uint64_t logical_last = UINT32_MAX;
+	uint64_t physical_blocks = logical_last + 129U;
+	struct partition entries[TEST_CAPACITY];
+	int result;
+
+	/* Only the low primary area and the high backup area are materialized by
+	 * this sparse fixture.  Any accidental physical-tail read returns EIO. */
+	build_gpt_extent(512U, logical_last, physical_blocks);
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
+
+	logical_last = (uint64_t)UINT32_MAX + 64U;
+	physical_blocks = logical_last + 129U;
+	build_gpt_extent(512U, logical_last, physical_blocks);
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "bounded extent accepted") != NULL);
+
+	build_gpt_extent(512U, logical_last, physical_blocks);
+	put32(block_at(0U) + 0x1beU + 12U, UINT32_MAX - 1U);
+	expect_rejected("bounded-saturated-pmbr-must-be-ffffffff");
+}
+
+static void
+test_saturated_extent_ambiguity_rejection(void)
+{
+	const uint64_t logical_last = (uint64_t)UINT32_MAX + 64U;
+	const uint64_t physical_blocks = logical_last + 129U;
+
+	/* Each case has a fully valid but stale whole-device backup at the
+	 * physical end.  Saturation must not let primary damage select it. */
+	build_gpt_extent(512U, logical_last, physical_blocks);
+	add_valid_stale_physical_backup();
+	table_at(1)[0U] ^= 1U;
+	expect_rejected("saturated-primary-table-damaged-with-stale-tail");
+
+	build_gpt_extent(512U, logical_last, physical_blocks);
+	add_valid_stale_physical_backup();
+	header_at(1)[16U] ^= 1U;
+	expect_rejected("saturated-primary-header-damaged-with-stale-tail");
+
+	build_gpt_extent(512U, logical_last, physical_blocks);
+	add_valid_stale_physical_backup();
+	put64(header_at(1) + 32U, disk.d_block_count);
+	refresh_header_crc(1);
+	expect_rejected("saturated-primary-alternate-after-physical-end");
+
+	build_gpt_extent(512U, logical_last, physical_blocks);
+	add_valid_stale_physical_backup();
+	medium.fail_lba = 1U;
+	medium.fail_reads = 1;
+	expect_rejected("saturated-primary-unreadable-with-stale-tail");
+}
+
+static void
+test_saturated_canonical_recovery(void)
+{
+	uint64_t physical_last = UINT32_MAX;
+	struct partition entries[TEST_CAPACITY];
+	int result;
+
+	/* At the exact saturation boundary the PMBR still identifies the whole
+	 * device uniquely, so ordinary backup-only recovery remains available. */
+	build_gpt_extent(512U, physical_last, physical_last + 1U);
+	header_at(1)[16U] ^= 1U;
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "primary damaged") != NULL);
+
+	/* Above the boundary, a CRC-valid primary header still establishes a
+	 * canonical extent even if only its entry array is damaged. */
+	physical_last = (uint64_t)UINT32_MAX + 128U;
+	build_gpt_extent(512U, physical_last, physical_last + 1U);
+	table_at(1)[0U] ^= 1U;
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "primary damaged") != NULL);
 }
 
 static void
@@ -499,6 +867,11 @@ test_contradictory_valid_copies(void)
 	put64(header_at(0) + 40U, layout.first_usable + 1U);
 	refresh_header_crc(0);
 	expect_rejected("contradictory-usable-range");
+
+	build_gpt(512U);
+	put32(header_at(0) + 12U, 96U);
+	refresh_header_crc(0);
+	expect_rejected("contradictory-header-size");
 }
 
 static void
@@ -578,6 +951,14 @@ test_header_and_geometry_rejection(void)
 static void
 test_protective_mbr_rejection(void)
 {
+	build_gpt(512U);
+	put32(block_at(0U) + 0x1beU + 12U, 0U);
+	expect_rejected("protective-zero-size");
+
+	build_gpt(512U);
+	put32(block_at(0U) + 0x1beU + 12U, UINT32_MAX);
+	expect_rejected("protective-saturated-size-on-small-medium");
+
 	build_gpt(512U);
 	block_at(0U)[0x1beU] = 0x80U;
 	expect_rejected("protective-status");
@@ -813,6 +1194,13 @@ main(void)
 {
 	test_valid_geometry(512U);
 	test_valid_geometry(4096U);
+	test_bounded_extent(512U);
+	test_bounded_extent(4096U);
+	test_bounded_large_physical_media();
+	test_bounded_extent_rejection();
+	test_bounded_saturated_protective_mbr();
+	test_saturated_extent_ambiguity_rejection();
+	test_saturated_canonical_recovery();
 	test_hybrid_is_gpt_authoritative();
 	test_signature_without_ee_never_falls_back();
 	test_pure_mbr_fallback();
@@ -824,6 +1212,7 @@ main(void)
 	test_utf16_names();
 	test_entry_size_and_crc_extent();
 	free(medium.bytes);
+	free(medium.sparse_bytes);
 	if (failures != 0U) {
 		printf("HW-T20 strict GPT: %u failure(s)\n", failures);
 		return 1;

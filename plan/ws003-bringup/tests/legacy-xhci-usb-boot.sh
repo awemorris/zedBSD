@@ -14,6 +14,7 @@ settle_seconds=${SETTLE_SECONDS:-2}
 smp_cpus=${SMP_CPUS:-4}
 usb_write_cache=${USB_STORAGE_WRITE_CACHE:-auto}
 usb_commandlog=${USB_STORAGE_COMMANDLOG:-off}
+usb_media_sectors=${USB_MEDIA_SECTORS:-}
 
 case $boot_timeout:$settle_seconds:$smp_cpus in
 	*[!0-9:]* | 0:* | *:0:* | *:0)
@@ -35,6 +36,13 @@ on | off) ;;
 	exit 2
 	;;
 esac
+case $usb_media_sectors in
+'') ;;
+*[!0-9]* | 0*)
+	echo "USB_MEDIA_SECTORS must be a positive sector count" >&2
+	exit 2
+	;;
+esac
 
 test -f "$image" || {
 	echo "image not found: $image" >&2
@@ -43,6 +51,30 @@ test -f "$image" || {
 command -v "$qemu" >/dev/null
 command -v rg >/dev/null
 command -v sha256sum >/dev/null
+if [ -n "$usb_media_sectors" ]; then
+	command -v truncate >/dev/null
+	if [ "${#usb_media_sectors}" -gt 16 ]; then
+		echo "USB_MEDIA_SECTORS exceeds the supported host size" >&2
+		exit 2
+	fi
+	usb_media_bytes=$((usb_media_sectors * 512))
+	source_bytes=$(wc -c <"$image")
+	case $source_bytes in
+	'' | *[!0-9]*)
+		echo "could not determine image size: $image" >&2
+		exit 2
+		;;
+	esac
+	if [ $((source_bytes % 512)) -ne 0 ]; then
+		echo "USB media image size must be a multiple of 512 bytes" >&2
+		exit 2
+	fi
+	source_sectors=$((source_bytes / 512))
+	if [ "$usb_media_sectors" -lt "$source_sectors" ]; then
+		echo "USB_MEDIA_SECTORS must not truncate the source image" >&2
+		exit 2
+	fi
+fi
 
 mkdir -p "$output"
 run_image=$output/usb-boot.img
@@ -63,6 +95,9 @@ trap cleanup 0
 trap 'exit 130' HUP INT TERM
 
 cp --reflink=auto --sparse=always "$image" "$run_image"
+if [ -n "$usb_media_sectors" ]; then
+	truncate -s "$usb_media_bytes" -- "$run_image"
+fi
 : >"$guest_log"
 : >"$qemu_log"
 
@@ -78,6 +113,7 @@ failure_pattern='fatal:|FATAL:|kernel panic|panic:|amd64 fault v=|A64 APIC PREFL
 	echo "smp_cpus=$smp_cpus"
 	echo "usb_storage_write_cache=$usb_write_cache"
 	echo "usb_storage_commandlog=$usb_commandlog"
+	echo "usb_media_sectors=${usb_media_sectors:-source-image}"
 	echo "topology=SeaBIOS q35 qemu-xhci USB-storage-only system disk"
 } >"$metadata"
 

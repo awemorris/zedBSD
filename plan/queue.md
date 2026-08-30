@@ -1,123 +1,108 @@
-# Queue: Panasonic CF-SV7 early ACPI/interrupt bring-up
+# Queue: Generic bounded GPT and CF-SV7 USB-root continuation
 
 Last updated: 2026-08-30
 
-QID: `q033`
+QID: `q034`
 
-Queue status: completed
+Queue status: in-progress
 
-Queue finished: **Yes**
+Queue finished: **No**
 
-Authorization: the user approved execution of the proposed `ws003-p020`
-single-Phase Queue on 2026-08-30.
+Authorization: the user approved implementation of `ws003-p021` on
+2026-08-30 and clarified that a GPT-declared end before the physical disk end
+must be accepted generally rather than only for zedBSD-marked images.
 
-Timebox: no fixed wall-clock limit. Complete the automated implementation and
-QEMU gates in this session, then stop at the one declared CF-SV7 physical
-acceptance checkpoint. A newly proven architecture decision makes the Phase
-`uncleared`; do not guess through it.
+Timebox: no fixed wall-clock limit. Complete implementation and all automated
+gates, then stop at one final Panasonic CF-SV7 physical observation.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q032](queue-q032.md)
+Previous Queue: [q033](queue-q033.md)
 
 ## Purpose
 
-Replace the Panasonic CF-SV7's silent stop after
-`A64 ACPI RSDP PASS` with bounded early-HAL behavior and, when the existing
-xAPIC architecture is sufficient, reach `A64 IRQ READY`,
-`A64 XMM CONTEXT PASS`, and kernel HAL readiness.
+Allow a fully coherent GPT to describe a logical disk extent smaller than the
+physical device containing it. This makes raw-copied disk images boot from
+larger USB media without modifying GPT at write time, while retaining strict
+metadata, CRC, range, and no-MBR-fallback behavior.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws003-p020` | [Phase](ws003-bringup/phase020-cf-sv7-acpi-irq-bringup/phase.md) | completed | Early exceptions and ACPI/APIC/timer boundaries are observable; invalid APIC mode changes and unbounded PIT waits are removed; automated regressions and the single CF-SV7 observation pass |
+| 1 | `ws003-p021` | [Phase](ws003-bringup/phase021-portable-gpt-image-extent/phase.md) | in-progress | Generic bounded GPT validation and all automated gates pass; one final CF-SV7 boot of the frozen image remains |
 
 ## Frozen execution boundary
 
-- The current photograph is the physical baseline. Do not request another
-  physical boot until the complete software batch and automated regressions
-  are ready.
-- Install the minimum safe early GDT/TSS/IDT before firmware-dependent
-  ACPI/MSR/MMIO operations.
-- Accept only an already-active, validated xAPIC state. A disabled APIC,
-  x2APIC state, legacy-xAPIC lockout, or an APIC ID outside the existing
-  8-bit destination contract is a visible `BOUNDARY-CAPTURED` result, not
-  permission to add a partial x2APIC backend.
-- Remove the current mode-changing `IA32_APIC_BASE` write from the accepted
-  path. Validate CPUID, mode, base, and readback before xAPIC MMIO on every
-  CPU.
-- Bound PIT channel-2 calibration. On timeout, stop/mask the LAPIC timer and
-  restore the original port `0x61` state before reporting failure.
-- Keep diagnostics concise and permanent enough to identify ACPI completion,
-  APIC mode/base, LAPIC, IDT, IOAPIC, timer begin/end, and console IRQ.
-- Do not weaken ACPI physical-range validation or fold xHCI/storage/root work
-  into this Queue.
+- The GPT-declared last LBA may equal or precede the physical last LBA. A
+  declared end beyond physical capacity is rejected.
+- A bounded GPT must have valid and mutually consistent primary and backup
+  copies at LBA 1 and the GPT-declared last LBA. Unlike canonical whole-device
+  recovery, one damaged copy is insufficient to establish a shortened extent.
+- Every header, entry array, usable range, and partition remains within the
+  declared extent. Physical tail sectors are unallocated and never published.
+- This is generic GPT behavior. Do not require zedBSD labels, partition types,
+  hybrid-MBR entries, files, or other product markers.
+- Preserve whole-device GPT degraded-copy recovery where the GPT extent is
+  unambiguous, and preserve every q030 corruption rejection. A saturated PMBR
+  above the 32-bit LBA boundary is not sufficient by itself to select a stale
+  physical-tail backup. GPT evidence never falls back to legacy MBR.
+- Do not resize, repair, relocate, or write GPT metadata during boot.
+- Do not request another physical boot until parser, host fixtures, fresh
+  production build, larger-media BIOS/UEFI boots, and ordinary regressions all
+  pass against one frozen image.
 
 ## Execution rules
 
 - Do not inspect or modify `.internal/` or `userland/noct/NoctLang`.
 - Preserve unrelated work. Use `make -j16`, focused fixtures, and
-  `qemu-system-x86_64`; do not use the aggregate `make check` target.
-- Run the established 4/8/16-GiB OVMF q35/xHCI USB matrix and the supported
-  amd64 BIOS regression before physical handoff.
-- A single CF-SV7 observation is `PASS` only if all Phase objective markers
-  appear. A new bounded diagnostic is `BOUNDARY-CAPTURED`, leaves the Phase
-  `uncleared`, and supplies the resume condition for a later Phase.
-- Synchronize actual results into P/W/M/Q. Commit `WIP` and push after this
-  Queue reaches its software/physical handoff state.
-
-## Result
-
-The q033 software batch and its single physical observation are complete. The
-frozen artifact was
-`/home/awe/zedBSD/build/amd64/hdd-image.img`, 203,423,744 bytes, SHA-256
-`38e1d8e4ccfb6ce7d1c37082818f76546a6e07dbf8e86e551e654a5f2b3ca9e8`.
-
-- The host policy fixture and its ASan/UBSan build pass.
-- Disposable-kernel QEMU injection proves bounded early `#UD`, `#GP`, and
-  instruction-fetch `#PF` handling after IDT installation.
-- The PIT-disabled negative cell stops at the required OUT-low timeout.
-- SeaBIOS q35/xHCI USB with four CPUs reaches `login:`.
-- The final OVMF q35/xHCI USB matrix reaches `login:` with four CPUs at 4, 8,
-  and 16 GiB (3/3 pass).
-- `make -j16`, `make check-disk-image`, shell syntax, and
-  `git diff --check` pass; aggregate `make check` was not used.
-
-Evidence is preserved under `plan/ws003-bringup/temp/q033-final/`. The
-2026-08-30 `BR-T52` CF-SV7 boot advanced through the objective's IRQ, XMM, and
-HAL boundary, then enumerated xHCI and USB storage and entered VFS. This is a
-passing p020 result even though the three earlier objective lines had scrolled
-off the photographed screen: none of the photographed USB/VFS code is reachable
-before them.
-
-The first downstream stop is a separate GPT/image-size contract issue:
-
-```text
-usb-storage: sda blocks=60549120 block-size=512
-gpt: sda rejected: invalid protective MBR (3)
-vfs: boot0 selector resolution failed (error 6)
-VFS initialization failed (6); entering idle.
-```
-
-The 397,312-sector image's protective MBR and backup GPT end at LBA 397,311,
-while the raw-copy target ends at LBA 60,549,119. A sparse QEMU copy extended
-to the photographed capacity reproduces the exact failure. Follow-up work is
-extracted as [ws003-p021](ws003-bringup/phase021-portable-gpt-image-extent/phase.md)
-and is not authorized by q033.
+  `qemu-system-x86_64`; do not use aggregate `make check`.
+- Use only disposable sparse image copies for enlarged-media and malformed-GPT
+  tests. Verify that the source production image hash does not change.
+- Run the q030 GPT host regression, SeaBIOS q35/xHCI larger-media cell, OVMF
+  q35/xHCI larger-media cell, ordinary BIOS USB gate, and BR-T24 OVMF
+  4/8/16-GiB matrix.
+- Synchronize actual results into P/W/M/Q. Commit `WIP` and push at the final
+  automated handoff and after the physical result.
+- A later independent failure becomes another Phase; do not silently expand
+  q034 beyond GPT extent selection and CF-SV7 root continuity.
 
 ## Completion definition
 
-q033 is finished when `ws003-p020` is either:
+q034 is finished when `ws003-p021` is either:
 
-- `completed`, with host/QEMU evidence and one CF-SV7 boot reaching IRQ, XMM,
-  and HAL readiness; or
-- `uncleared`, with all safe automated work complete, a uniquely identified
-  physical image, and one new bounded hardware result or an explicit
-  architecture decision recorded.
+- `completed`, with all host/QEMU gates and one CF-SV7 boot resolving `boot0`,
+  mounting the overlay, and reaching init/login; or
+- `uncleared`, with all safe automated work complete, an exact residual
+  decision or physical boundary recorded, and a reproducible resume condition.
 
-The Queue may pause at `awaiting-physical` after its automated gates. That is
-not a second implementation item and does not authorize repeated human boots.
+The Queue may remain `in-progress` while its automated checkpoint awaits the
+single physical observation. No intermediate or repeatability hardware boot
+is authorized by this Queue.
 
-q033 finished by the first branch: `ws003-p020` is completed. The new VFS/GPT
-boundary is downstream and does not reopen this Queue.
+## Automated checkpoint (2026-08-30)
+
+The software batch is complete and q034 is paused at its one authorized
+physical observation. The frozen artifact is
+`/home/awe/zedBSD/build/amd64/hdd-image.img`, 203,423,744 bytes, SHA-256
+`6cf5fe81ce2695450a376e116b595291e5329e7c40fdc2820e2ebeb126732637`.
+
+- The production GPT host fixture passes normally, with ASan/UBSan, and with
+  the compiler analyzer. It includes 512/4096-byte sectors, PMBR saturation,
+  physical truncation, both-copy corruption, cross-pointer and extent
+  violations, stale physical-tail GPT data, and canonical recovery cases.
+- A disposable copy sparsely enlarged from 397,312 to 60,549,120 sectors
+  reaches `login:` through both SeaBIOS and OVMF q35/xHCI USB paths. Both
+  report the selected logical end at LBA 397,311 and ignore 60,151,808 trailing
+  sectors. The source image SHA-256 remains unchanged.
+- The ordinary exact-size SeaBIOS USB gate reaches `login:` and the OVMF
+  4/8/16-GiB matrix passes 3/3.
+- The q030 malformed-GPT QEMU cell still rejects the GPT without publishing a
+  partition or falling back to MBR, while the system continues to `login:`.
+- `make -j16`, shell syntax, and `git diff --check` pass. The aggregate
+  `make check` target was not used.
+
+Evidence is preserved under `plan/ws003-bringup/temp/q034-final/`. The only
+remaining Queue action is one boot of the frozen image on the Panasonic
+CF-SV7; no further implementation or intermediate hardware repetition is
+required before that observation.

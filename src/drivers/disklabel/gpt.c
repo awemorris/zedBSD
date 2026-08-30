@@ -26,6 +26,7 @@ struct gpt_copy {
 	uint64_t table_bytes;
 	uint32_t entry_count;
 	uint32_t entry_size;
+	uint32_t header_size;
 	uint8_t disk_guid[16U];
 	unsigned active_count;
 };
@@ -78,11 +79,25 @@ crc32(const uint8_t *data, size_t size)
 	return ~crc32_update(UINT32_MAX, data, size);
 }
 
-static int
-canonical_protective_mbr(struct disk *disk, uint8_t *block)
+static void
+decimal_u64(char output[21U], uint64_t value)
 {
-	uint64_t available;
-	uint32_t expected;
+	char reverse[20U];
+	unsigned count = 0U, index;
+
+	do {
+		reverse[count++] = (char)('0' + value % 10U);
+		value /= 10U;
+	} while (value != 0U);
+	for (index = 0U; index < count; index++)
+		output[index] = reverse[count - index - 1U];
+	output[count] = '\0';
+}
+
+static int
+canonical_protective_mbr(struct disk *disk, uint8_t *block,
+	uint32_t *advertised_blocks)
+{
 	unsigned protective_count = 0U, slot;
 
 	if (disk_read(disk, 0U, 1U, block) != 0)
@@ -91,8 +106,6 @@ canonical_protective_mbr(struct disk *disk, uint8_t *block)
 		return -EINVAL;
 	if (disk->d_block_count < 2U)
 		return -EINVAL;
-	available = disk->d_block_count - 1U;
-	expected = available > UINT32_MAX ? UINT32_MAX : (uint32_t)available;
 	/* The shared BIOS/UEFI system image also has a BIOS boot entry.  GPT is
 	 * authoritative: require exactly one canonical EE entry and ignore every
 	 * non-EE compatibility entry rather than reconciling or publishing it.
@@ -105,12 +118,22 @@ canonical_protective_mbr(struct disk *disk, uint8_t *block)
 			continue;
 		protective_count++;
 		if (entry[0U] != 0U || get32(entry + 8U) != 1U ||
-		    get32(entry + 12U) != expected)
+		    get32(entry + 12U) == 0U)
 			return -EINVAL;
+		*advertised_blocks = get32(entry + 12U);
 	}
 	if (protective_count != 1U)
 		return -EINVAL;
 	return 0;
+}
+
+static int
+protective_mbr_covers(uint32_t advertised_blocks, uint64_t logical_last)
+{
+	uint32_t expected = logical_last > UINT32_MAX ? UINT32_MAX :
+	    (uint32_t)logical_last;
+
+	return advertised_blocks == expected ? 0 : -EINVAL;
 }
 
 static int
@@ -241,7 +264,8 @@ gpt_name(char output[PARTITION_LABEL_MAX], const uint8_t raw[72U])
 }
 
 static int
-header_layout(struct disk *disk, struct gpt_copy *copy, int primary)
+header_layout(struct disk *disk, struct gpt_copy *copy, int primary,
+	uint64_t logical_last)
 {
 	uint64_t reserve_blocks;
 	uint64_t table_blocks;
@@ -265,13 +289,13 @@ header_layout(struct disk *disk, struct gpt_copy *copy, int primary)
 	reserve_blocks = GPT_ENTRY_ARRAY_RESERVE / disk->d_block_size;
 	if (GPT_ENTRY_ARRAY_RESERVE % disk->d_block_size != 0U)
 		reserve_blocks++;
-	if (copy->table_lba >= disk->d_block_count ||
-	    table_blocks > disk->d_block_count - copy->table_lba)
+	if (copy->table_lba > logical_last ||
+	    table_blocks > logical_last - copy->table_lba + 1U)
 		return -EINVAL;
 	table_end = copy->table_lba + table_blocks;
 	if (copy->first_usable < 2U ||
 	    copy->first_usable > copy->last_usable ||
-	    copy->last_usable >= disk->d_block_count - 1U)
+	    copy->last_usable >= logical_last)
 		return -EINVAL;
 	if (primary) {
 		if (copy->table_lba < 2U || table_end > copy->first_usable ||
@@ -370,41 +394,29 @@ validate_entries(struct disk *disk, struct gpt_copy *copy,
 }
 
 static int
-validate_copy(struct disk *disk, uint64_t header_lba, int primary,
-	struct gpt_copy *copy, struct partition *entries, unsigned capacity)
+read_header(struct disk *disk, uint64_t header_lba, struct gpt_copy *copy,
+	uint32_t *expected_table_crc, uint8_t *block)
 {
-	uint8_t *block;
-	uint32_t expected_header_crc, expected_table_crc, actual_table_crc;
+	uint32_t expected_header_crc;
 	uint32_t header_size;
-	int error;
 
 	memset(copy, 0, sizeof(*copy));
-	block = kern_malloc(disk->d_block_size);
-	if (block == NULL)
-		return -ENOMEM;
-	if (disk_read(disk, header_lba, 1U, block) != 0) {
-		error = -EIO;
-		goto out;
-	}
+	if (disk_read(disk, header_lba, 1U, block) != 0)
+		return -EIO;
 	if (memcmp(block, "EFI PART", 8U) != 0 ||
-	    get32(block + 8U) != 0x00010000U) {
-		error = -EINVAL;
-		goto out;
-	}
+	    get32(block + 8U) != 0x00010000U)
+		return -EINVAL;
 	header_size = get32(block + 12U);
 	if (header_size < GPT_HEADER_MIN_SIZE ||
 	    header_size > disk->d_block_size || get32(block + 20U) != 0U ||
 	    !all_zero(block + GPT_HEADER_MIN_SIZE,
-	    disk->d_block_size - GPT_HEADER_MIN_SIZE)) {
-		error = -EINVAL;
-		goto out;
-	}
+	    disk->d_block_size - GPT_HEADER_MIN_SIZE))
+		return -EINVAL;
 	expected_header_crc = get32(block + 16U);
 	memset(block + 16U, 0, 4U);
-	if (crc32(block, header_size) != expected_header_crc) {
-		error = -EINVAL;
-		goto out;
-	}
+	if (crc32(block, header_size) != expected_header_crc)
+		return -EINVAL;
+	copy->header_size = header_size;
 	copy->header_lba = get64(block + 24U);
 	copy->alternate_lba = get64(block + 32U);
 	copy->first_usable = get64(block + 40U);
@@ -413,14 +425,54 @@ validate_copy(struct disk *disk, uint64_t header_lba, int primary,
 	copy->table_lba = get64(block + 72U);
 	copy->entry_count = get32(block + 80U);
 	copy->entry_size = get32(block + 84U);
-	expected_table_crc = get32(block + 88U);
+	*expected_table_crc = get32(block + 88U);
 	if (copy->header_lba != header_lba ||
-	    copy->alternate_lba != (primary ? disk->d_block_count - 1U : 1U) ||
-	    all_zero(copy->disk_guid, sizeof(copy->disk_guid))) {
+	    all_zero(copy->disk_guid, sizeof(copy->disk_guid)))
+		return -EINVAL;
+	return 0;
+}
+
+static int
+primary_header_extent(struct disk *disk, uint64_t *logical_last)
+{
+	struct gpt_copy primary;
+	uint8_t *block;
+	uint32_t ignored_table_crc;
+	int error;
+
+	block = kern_malloc(disk->d_block_size);
+	if (block == NULL)
+		return -ENOMEM;
+	error = read_header(disk, 1U, &primary, &ignored_table_crc, block);
+	if (error == 0 && (primary.alternate_lba <= 1U ||
+	    primary.alternate_lba >= disk->d_block_count))
+		error = -EINVAL;
+	if (error == 0)
+		*logical_last = primary.alternate_lba;
+	kern_free(block);
+	return error;
+}
+
+static int
+validate_copy(struct disk *disk, uint64_t header_lba, int primary,
+	uint64_t logical_last,
+	struct gpt_copy *copy, struct partition *entries, unsigned capacity)
+{
+	uint8_t *block;
+	uint32_t expected_table_crc, actual_table_crc;
+	int error;
+
+	block = kern_malloc(disk->d_block_size);
+	if (block == NULL)
+		return -ENOMEM;
+	error = read_header(disk, header_lba, copy, &expected_table_crc, block);
+	if (error != 0)
+		goto out;
+	if (copy->alternate_lba != (primary ? logical_last : 1U)) {
 		error = -EINVAL;
 		goto out;
 	}
-	error = header_layout(disk, copy, primary);
+	error = header_layout(disk, copy, primary, logical_last);
 	if (error != 0)
 		goto out;
 	error = table_crc(disk, copy, block, &actual_table_crc);
@@ -441,6 +493,7 @@ copy_headers_equal(const struct gpt_copy *left, const struct gpt_copy *right)
 {
 	return left->first_usable == right->first_usable &&
 	    left->last_usable == right->last_usable &&
+	    left->header_size == right->header_size &&
 	    left->entry_count == right->entry_count &&
 	    left->entry_size == right->entry_size &&
 	    left->table_bytes == right->table_bytes &&
@@ -497,6 +550,9 @@ gpt_scan(const struct partition_scheme *scheme, struct disk *disk,
 	const struct gpt_copy *selected;
 	const struct partition *selected_entries;
 	uint8_t *block;
+	uint64_t logical_last = 0U, physical_last;
+	uint32_t protective_blocks = 0U;
+	int bounded = 0;
 	int primary_error, backup_error, equal;
 	int error = -EINVAL;
 
@@ -513,18 +569,62 @@ gpt_scan(const struct partition_scheme *scheme, struct disk *disk,
 		error = -ENOMEM;
 		goto out;
 	}
-	error = canonical_protective_mbr(disk, block);
+	error = canonical_protective_mbr(disk, block, &protective_blocks);
 	if (error != 0) {
 		hal_printf("gpt: %s rejected: invalid protective MBR (%d)\n",
 		    disk->d_name, -error);
 		goto out;
 	}
-	primary_error = validate_copy(disk, 1U, 1, &primary,
+	physical_last = disk->d_block_count - 1U;
+	if (protective_blocks < UINT32_MAX) {
+		logical_last = protective_blocks;
+		if (logical_last > physical_last) {
+			hal_printf("gpt: %s rejected: invalid protective MBR (%d)\n",
+			    disk->d_name, EINVAL);
+			error = -EINVAL;
+			goto out;
+		}
+	} else if (physical_last < UINT32_MAX) {
+		hal_printf("gpt: %s rejected: invalid protective MBR (%d)\n",
+		    disk->d_name, EINVAL);
+		error = -EINVAL;
+		goto out;
+	} else if (physical_last == UINT32_MAX) {
+		logical_last = physical_last;
+	} else {
+		error = primary_header_extent(disk, &logical_last);
+		if (error != 0) {
+			if (error != -ENOMEM)
+				hal_printf("gpt: %s rejected: saturated protective "
+				    "MBR has no valid primary extent (%d)\n",
+				    disk->d_name, -error);
+			goto out;
+		}
+	}
+	if (protective_mbr_covers(protective_blocks, logical_last) != 0) {
+		hal_printf("gpt: %s rejected: invalid protective MBR (%d)\n",
+		    disk->d_name, EINVAL);
+		error = -EINVAL;
+		goto out;
+	}
+	bounded = logical_last < physical_last;
+	primary_error = validate_copy(disk, 1U, 1, logical_last, &primary,
 	    primary_entries, capacity);
-	backup_error = validate_copy(disk, disk->d_block_count - 1U, 0, &backup,
-	    backup_entries, capacity);
-	if (primary_error == -ENOMEM || backup_error == -ENOMEM) {
+	if (primary_error == -ENOMEM) {
 		error = -ENOMEM;
+		goto out;
+	}
+	backup_error = validate_copy(disk, logical_last, 0, logical_last, &backup,
+	    backup_entries, capacity);
+	if (backup_error == -ENOMEM) {
+		error = -ENOMEM;
+		goto out;
+	}
+	if (bounded && (primary_error != 0 || backup_error != 0)) {
+		hal_printf("gpt: %s rejected: bounded extent requires both copies "
+		    "primary=%d backup=%d\n", disk->d_name, -primary_error,
+		    -backup_error);
+		error = -EINVAL;
 		goto out;
 	}
 	if (primary_error != 0 && backup_error != 0) {
@@ -571,6 +671,22 @@ gpt_scan(const struct partition_scheme *scheme, struct disk *disk,
 	}
 	memcpy(entries, selected_entries,
 	    selected->active_count * sizeof(*entries));
+	if (bounded) {
+		char logical_last_text[21U], physical_last_text[21U];
+		char declared_sectors_text[21U], physical_sectors_text[21U];
+		char ignored_tail_text[21U];
+
+		decimal_u64(logical_last_text, logical_last);
+		decimal_u64(physical_last_text, physical_last);
+		decimal_u64(declared_sectors_text, logical_last + 1U);
+		decimal_u64(physical_sectors_text, physical_last + 1U);
+		decimal_u64(ignored_tail_text, physical_last - logical_last);
+		hal_printf("gpt: %s bounded extent accepted: logical-last=%s "
+		    "physical-last=%s declared-sectors=%s physical-sectors=%s "
+		    "ignored-tail-sectors=%s\n", disk->d_name,
+		    logical_last_text, physical_last_text, declared_sectors_text,
+		    physical_sectors_text, ignored_tail_text);
+	}
 	error = (int)selected->active_count;
 out:
 	kern_free(block);

@@ -33,11 +33,16 @@ a 60,549,120-sector USB device. `ws003-p021` owns that portable-image GPT
 extent and root-continuity work without reopening the completed Latitude
 USB/network or CF-SV7 early-interrupt evidence.
 
-The current [Queue Book](queue.md) records completed `q033`, which contained
-only `ws003-p020`. Its implementation, host/negative fixtures, BIOS USB gate,
-OVMF 4/8/16-GiB matrix, and one CF-SV7 observation pass. The downstream GPT
-extent mismatch was independently reproduced with a sparse larger QEMU USB
-image and is planned, but not yet authorized, as `ws003-p021`.
+The current [Queue Book](queue.md) records `q034`, containing only
+`ws003-p021`. Its generic bounded-GPT implementation, corruption fixtures,
+larger-media SeaBIOS/OVMF USB boots, and ordinary regressions pass. The frozen
+image now awaits one CF-SV7 boot. The accepted contract is general: a coherent
+GPT-declared end may precede the physical disk end; the remaining sectors are
+unallocated rather than an error. A declared end beyond physical capacity is
+rejected. Archived
+[q033](queue-q033.md) completed `ws003-p020`: its implementation,
+host/negative fixtures, BIOS USB gate, OVMF 4/8/16-GiB matrix, and one CF-SV7
+observation pass.
 The archived
 [q032](queue-q032.md) made i386 PC/AT and amd64 BIOS `BOOTZBSD.EXE` consume
 `/zedbsd.cfg`, made PC-98 `BOOTZBSD.EXE` consume the same language through
@@ -266,7 +271,7 @@ actually warranted.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | x86 laptop bring-up (Latitude 5320 and CF-SV7) | Active; Latitude USB/network milestone complete; CF-SV7 p020 complete; p021 portable GPT/root continuation planned; p018 Latitude overlay-NVMe install/boot dependency-gated | p020 physical IRQ/XMM/HAL plus USB/VFS and its automated gates pass; p017 is superseded; p018/p019 remain defined | Queue p021 for the larger-USB GPT extent, then run one CF-SV7 root/login observation; run p018 only after WS004/WS013/WS019 overlay prerequisites | [WS003](ws003-bringup/ws.md) |
+| `ws003` | x86 laptop bring-up (Latitude 5320 and CF-SV7) | Active; Latitude USB/network milestone complete; CF-SV7 p020 complete; p021 automated bounded-GPT/root gates pass and await one physical boot; p018 Latitude overlay-NVMe install/boot dependency-gated | p020 physical IRQ/XMM/HAL plus USB/VFS passes; p021 larger-media host/BIOS/UEFI gates pass; p017 is superseded; p018/p019 remain defined | Run the one frozen-image CF-SV7 p021 root/login observation; run p018 only after WS004/WS013/WS019 overlay prerequisites | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; `q030` NVMe software sequence complete | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Complete automatic WS013/WS019 prerequisites, then run the read-only p025 Latitude checkpoint with the later installed-boot acceptance | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Active; q029 p001 complete; WLAN manually blocked | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Select reconnect/reliability or another dependency-ready networking Phase; WLAN remains blocked | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |

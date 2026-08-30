@@ -39,7 +39,7 @@ Parent: [WS003](../ws.md)
 | BR-T50 | Physical network | Static or DHCP setup, peer reachability, and a bounded data transfer pass |
 | BR-T51 | Later Latitude native installation | After a separate WS019 design, the installed UEFI loader selects and boots the explicit native `rootpart` without regressing BR-T49 |
 | BR-T52 | Panasonic CF-SV7 early ACPI/interrupt boundary | Complete in q033: host fixtures and production QEMU gates pass, and one physical boot advanced beyond IRQ/XMM/HAL through xHCI, USB storage, and VFS; the later GPT stop is outside p020 |
-| BR-T53 | Fixed GPT image copied to larger USB media | A coherent zedBSD image-bounded GPT sparsely extended to 60,549,120 sectors reaches `login:` without boot-time repair; malformed, truncated, cross-pointer, out-of-extent, and non-zedBSD shortened cases publish nothing; exact-size q030 GPT behavior remains unchanged; one final CF-SV7 boot reaches overlay init/login |
+| BR-T53 | Fixed GPT image copied to larger USB media | Automated PASS: a coherent generic GPT-declared extent sparsely extended to 60,549,120 sectors reaches `login:` through BIOS and UEFI without boot-time repair; malformed cases publish nothing and exact-size q030 behavior is unchanged. Pending: one final CF-SV7 overlay/init/login boot; automated evidence is in `temp/q034-final/br-t53/` |
 
 For the q011 diagnostic BR-T32 image, the top-right GOP marker is unary: one
 large white block means boot services exited, two means the final map passed,
@@ -433,9 +433,23 @@ and strict whole-device validation rejected the protective entry with
 The same boundary is reproduced in QEMU by sparsely extending a disposable
 copy of the frozen image to `60549120 * 512` bytes and passing it to the legacy
 q35/xHCI USB runner. The guest reports the photographed block count followed
-by the same `invalid protective MBR (3)` and VFS error 6. `ws003-p021` must
-turn that one-off procedure into maintained positive and negative BR-T53 cells;
-the existing exact-size run remains the control.
+by the same `invalid protective MBR (3)` and VFS error 6. `ws003-p021` turned
+that one-off procedure into maintained positive and negative BR-T53 cells; the
+existing exact-size run remains the control.
+
+q034 implements that maintained cell:
+
+```sh
+plan/ws003-bringup/tests/bounded-gpt-larger-usb-boot.sh \
+  build/amd64/hdd-image.img plan/ws003-bringup/temp/br-t53
+```
+
+The runner sparsely extends only disposable copies to 60,549,120 sectors,
+boots them through SeaBIOS and OVMF q35/xHCI USB, and requires the exact
+bounded-GPT diagnostic, USB capacity, `boot0` UUID resolution, both overlay
+images, runtime mounts, and `login:`. It verifies the production source hash
+before and after. The final q034 run passes both firmware cells; the ordinary
+exact-size BIOS boot and OVMF 4/8/16-GiB matrix remain passing controls.
 
 This run postdates the final xHCI stop/IRQ ownership review. In addition to
 the eight existing affected regressions, `usb-hcd-unregister-test` now proves

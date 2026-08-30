@@ -15,6 +15,7 @@ memory_list=${MEMORY_MIB_LIST:-4096 8192 16384}
 boot_timeout=${BOOT_TIMEOUT_SECONDS:-120}
 settle_seconds=${SETTLE_SECONDS:-1}
 smp_cpus=${SMP_CPUS:-4}
+usb_media_sectors=${USB_MEDIA_SECTORS:-}
 
 case $boot_timeout:$settle_seconds:$smp_cpus in
 	*[!0-9:]* | 0:* | *:0:* | *:0)
@@ -30,6 +31,13 @@ for memory in $memory_list; do
 		;;
 	esac
 done
+case $usb_media_sectors in
+'') ;;
+*[!0-9]* | 0*)
+	echo "USB_MEDIA_SECTORS must be a positive sector count" >&2
+	exit 2
+	;;
+esac
 
 test -f "$image" || {
 	echo "image not found: $image" >&2
@@ -46,11 +54,35 @@ test -f "$ovmf_vars" || {
 command -v "$qemu" >/dev/null
 command -v rg >/dev/null
 command -v sha256sum >/dev/null
+if [ -n "$usb_media_sectors" ]; then
+	command -v truncate >/dev/null
+	if [ "${#usb_media_sectors}" -gt 16 ]; then
+		echo "USB_MEDIA_SECTORS exceeds the supported host size" >&2
+		exit 2
+	fi
+	usb_media_bytes=$((usb_media_sectors * 512))
+	source_bytes=$(wc -c <"$image")
+	case $source_bytes in
+	'' | *[!0-9]*)
+		echo "could not determine image size: $image" >&2
+		exit 2
+		;;
+	esac
+	if [ $((source_bytes % 512)) -ne 0 ]; then
+		echo "USB media image size must be a multiple of 512 bytes" >&2
+		exit 2
+	fi
+	source_sectors=$((source_bytes / 512))
+	if [ "$usb_media_sectors" -lt "$source_sectors" ]; then
+		echo "USB_MEDIA_SECTORS must not truncate the source image" >&2
+		exit 2
+	fi
+fi
 
 mkdir -p "$output"
 base_digest=$(sha256sum "$image" | awk '{print $1}')
 results=$output/results.tsv
-failure_pattern='fatal:|kernel panic|panic:|amd64 fault v=|A64 APIC PREFLIGHT FAIL|A64 IOAPIC .*FAIL|A64 TIMER CAL (TIMEOUT|INVALID)|loop1: write .*error=[1-9]|usb-storage: BOT .*error=[1-9]|usb-storage: BOT .*actual=0.*expected=[1-9]|usb-storage: sda op=2a .*error=[1-9]|usb-storage: sda flush .*error=[1-9]|xhci: transfer completion=|xhci: control |xhci: command [0-9][0-9]* failed|xhci: .*retain|syslogd: .*Input/output error'
+failure_pattern='fatal:|kernel panic|panic:|amd64 fault v=|A64 APIC PREFLIGHT FAIL|A64 IOAPIC .*FAIL|A64 TIMER CAL (TIMEOUT|INVALID)|VFS initialization failed|loop1: write .*error=[1-9]|usb-storage: BOT .*error=[1-9]|usb-storage: BOT .*actual=0.*expected=[1-9]|usb-storage: sda op=2a .*error=[1-9]|usb-storage: sda flush .*error=[1-9]|xhci: transfer completion=|xhci: control |xhci: command [0-9][0-9]* failed|xhci: .*retain|syslogd: .*Input/output error'
 
 {
 	echo "base_image=$image"
@@ -60,6 +92,7 @@ failure_pattern='fatal:|kernel panic|panic:|amd64 fault v=|A64 APIC PREFLIGHT FA
 	echo "boot_timeout_seconds=$boot_timeout"
 	echo "settle_seconds=$settle_seconds"
 	echo "smp_cpus=$smp_cpus"
+	echo "usb_media_sectors=${usb_media_sectors:-source-image}"
 	echo "topology=OVMF q35 xHCI USB storage NE2000"
 } >"$output/metadata.txt"
 printf 'memory_mib\tclass\trsdp\telapsed_seconds\tfirst_failure\n' >"$results"
@@ -78,6 +111,9 @@ for memory in $memory_list; do
 	rsdp=
 
 	cp --reflink=auto --sparse=always "$image" "$run_image"
+	if [ -n "$usb_media_sectors" ]; then
+		truncate -s "$usb_media_bytes" -- "$run_image"
+	fi
 	cp "$ovmf_vars" "$vars"
 	# Reusing an evidence directory must never let a previous guest log satisfy
 	# this run's markers before QEMU has opened its debugcon output.
