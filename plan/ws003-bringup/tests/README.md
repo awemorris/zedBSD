@@ -232,9 +232,9 @@ build/NoctLang/build-static/noct --path=tools/build \
   tools/build/make-swapfile.noct --format v2 --size-mib 1 \
   --uuid 0123456789ABCDEF --label TESTSWAP \
   --output /tmp/ws003-swap-v2
-cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
+cc -std=c11 -Iinclude -Iinclude/uapi -I. -Wall -Wextra -Werror \
   -ffunction-sections -fdata-sections -pthread \
-  src/kern/swap.c src/kern/swap-source.c \
+  src/kern/swap.c src/kern/swap-source.c src/kern/backing-claim.c \
   plan/ws003-bringup/tests/swap-source-test.c \
   -Wl,--gc-sections -o /tmp/ws003-swap-source-test
 /tmp/ws003-swap-source-test /tmp/ws003-swap-v1 /tmp/ws003-swap-v2

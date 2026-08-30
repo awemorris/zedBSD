@@ -1,7 +1,7 @@
 /* Block-device discovery, partition selection, and image dispatch. SPDX-License-Identifier: Zlib */
 #include "kern/internal.h"
 #include "kern/disk.h"
-#include "kern/fat16.h"
+#include "kern/fat.h"
 #include "kern/partition.h"
 #include "kern/platform.h"
 

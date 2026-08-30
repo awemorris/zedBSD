@@ -366,6 +366,8 @@ KERN_NET_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_NET_SOURCES))
 KERN_BLOCK_IDENTITY_SOURCES := src/kern/block-identity.c
 KERN_BLOCK_IDENTITY_OBJS := $(patsubst %.c,$(BUILD)/%.o,\
 	$(KERN_BLOCK_IDENTITY_SOURCES))
+KERN_FAT_SOURCES := src/drivers/fs/fat.c
+KERN_FAT_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(KERN_FAT_SOURCES))
 KERN_UFS1_SOURCES := \
 	src/drivers/fs/ufs1/ufs1-endian.c \
 	src/drivers/fs/ufs1/ufs1-super.c \

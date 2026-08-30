@@ -8,8 +8,6 @@
 #include <kern/block-identity.h>
 #include <kern/disk.h>
 #include <kern/fat.h>
-#include <kern/fat16.h>
-#include <kern/fat32.h>
 #include <kern/fs.h>
 #include <kern/mount.h>
 #include <kern/partition.h>
@@ -252,39 +250,6 @@ partition_at(unsigned index)
 {
 	return index < test_partition_count ? &test_partitions[index] : NULL;
 }
-
-static enum bootfs_result
-test_fat12_probe(const struct boot_volume *volume)
-{
-	return bootfat_probe(volume, ZEDBSD_FAT12);
-}
-
-static enum bootfs_result
-test_fat16_probe(const struct boot_volume *volume)
-{
-	return bootfat_probe(volume, ZEDBSD_FAT16);
-}
-
-static enum bootfs_result
-test_fat32_probe(const struct boot_volume *volume)
-{
-	return bootfat_probe(volume, ZEDBSD_FAT32);
-}
-
-const struct bootfs_driver bootfat12_driver = {
-	.name = "fat12-test",
-	.probe = test_fat12_probe,
-};
-
-const struct bootfs_driver bootfat16_driver = {
-	.name = "fat16-test",
-	.probe = test_fat16_probe,
-};
-
-const struct bootfs_driver bootfat32_driver = {
-	.name = "fat32-test",
-	.probe = test_fat32_probe,
-};
 
 static int
 dummy_mount(struct mount *mountp)

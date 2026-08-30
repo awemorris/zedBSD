@@ -103,8 +103,7 @@ endif
 
 AMD64_KERNEL_SOURCES := \
 	src/kern/main.c src/kern/env.c src/kern/fs.c src/kern/namespace.c \
-	src/kern/fat.c src/kern/fat-lfn.c src/kern/fat16.c \
-	src/kern/fat-vfs.c src/kern/inode.c src/kern/file.c \
+	$(KERN_FAT_SOURCES) src/kern/inode.c src/kern/file.c \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
 	src/kern/rootfs.c src/kern/tmpfs.c src/kern/overlayfs.c src/kern/vfs.c \
 	src/kern/swap.c src/kern/backing-claim.c src/kern/swap-source.c \

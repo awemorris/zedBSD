@@ -1,6 +1,6 @@
 # WS018: kernel source ownership and interface consolidation
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 WSID: `ws018`
 
@@ -8,11 +8,11 @@ Status: active in `q035`; `q026` ownership migration finished
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws018-p008`
+Last verified Phase: `ws018-p010`
 
-Resume point: q035 processes p009's remaining graphics runtime matrix and then
-p010--p012 in consumer-before-deletion order. A missing p009 runner may leave
-that item uncleared without blocking dependency-ready p010.
+Resume point: q035 processes p009's remaining graphics runtime matrix in
+parallel with p011.  p010 is complete; migrate FAT to direct native VFS before
+p012 removes the compatibility filesystem and startup residue.
 
 Shared tests: [WS018 test index](tests/README.md)
 
@@ -215,7 +215,7 @@ path in the same bounded change.
 | `ws018-p007` | [Xzed evdev-only consumer](phase007-xzed-evdev-consumer/phase.md) | Complete (`q026`) | Xzed discovers and consumes keyboard plus relative/absolute pointer events only through `/dev/input/eventX` |
 | `ws018-p008` | [Independent input/HID driver ownership](phase008-input-hid-driver-ownership/phase.md) | Complete (`q026`) | Input sources have final owners, mouse backends emit evdev directly, and `/dev/mouse` is removed |
 | `ws018-p009` | [Independent graphics frontends](phase009-independent-graphics-frontends/phase.md) | Uncleared (`q026`; implementation complete, runtime matrix remains) | Each supported graphics backend independently supplies `/dev/graphics`; shared frontend is gone |
-| `ws018-p010` | [FAT source consolidation](phase010-fat-source-consolidation/phase.md) | Planned after p001 | One driver-owned `fat.c` preserves current FAT/bootfs behavior |
+| `ws018-p010` | [FAT source consolidation](phase010-fat-source-consolidation/phase.md) | Complete (`q035`) | One driver-owned `fat.c` preserves current FAT/bootfs behavior |
 | `ws018-p011` | [FAT native VFS migration](phase011-fat-native-vfs/phase.md) | Planned after p004, p010 | Boot-media files use the normal filesystem contract with overlay and swap intact |
 | `ws018-p012` | [Legacy bootfs and platform residue removal](phase012-legacy-bootfs-removal/phase.md) | Planned after p002, p006, p011 | `struct bootfs`, obsolete internal state, and historical platform residue are absent without regressions |
 

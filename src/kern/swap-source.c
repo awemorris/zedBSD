@@ -4,7 +4,7 @@
 #include <kern/backing-claim.h>
 #include <kern/buf.h>
 #include <kern/disk.h>
-#include <kern/fat-vfs.h>
+#include <kern/fat.h>
 #include <kern/file.h>
 #include <kern/inode.h>
 #include <kern/kmem.h>

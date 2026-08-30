@@ -3,7 +3,7 @@
 #include "kern/boot.h"
 #include "kern/disk.h"
 #include "kern/block-identity.h"
-#include "kern/fat-vfs.h"
+#include "kern/fat.h"
 #include "kern/file.h"
 #include "kern/ufs1.h"
 #include "kern/ufs2.h"

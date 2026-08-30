@@ -1,6 +1,6 @@
 # WS018 Phase 010: FAT source consolidation
 
-Last updated: 2026-08-28
+Last updated: 2026-08-30
 
 WSID: `ws018`
 
@@ -8,7 +8,7 @@ Phase ID: `p010`
 
 Combined ID: `ws018-p010`
 
-Status: Planned; Queue-ready after `ws018-p001`
+Status: Complete (`q035`)
 
 Parent: [WS018](../ws.md)
 
@@ -114,7 +114,38 @@ only after source, header, manifest, test, and linker audits are empty.
 - the compatibility `bootfs` path remains intentionally present and produces
   behavior identical to the baseline; and
 - FAT boot media, ordinary mounts, loop images, overlays, and swap remain
-  operational, providing the controlled starting point for p011.
+operational, providing the controlled starting point for p011.
+
+## Execution result
+
+Completed in `q035` on 2026-08-30.
+
+- The FAT12/16/32 sector/cache engine, VFAT LFN/case-fold implementation,
+  mutation engine, native VFS adapter, and compiled Unicode case-fold table
+  now have the single owner `src/drivers/fs/fat.c`.  Their only public/internal
+  interface is `include/kern/fat.h`; the four former implementation files and
+  four split headers are absent.
+- Every maintained platform manifest selects that one translation unit.
+  amd64, i386 PC/AT, i386 PC-98, arm64/RPi4, SPARC V9/sun4u, and m68k/X68k
+  kernels rebuilt successfully, including each target's existing image or
+  kernel contract checker.
+- [`run-fat-consolidation-host-test.sh`](../tests/run-fat-consolidation-host-test.sh)
+  links production `fat.c` and `fs.c` and passes ordinary plus ASan/UBSan runs
+  over real in-memory FAT12/16/32 images.  Its 215,161 checks cover probe,
+  mount, cross-cluster read, SFN/LFN lookup and traversal, create/write/append,
+  sparse and truncate behavior, directory mutation and rename/replacement,
+  explicit flush/remount persistence, allocation exhaustion, and read-only
+  rejection.  Native-VFS-only open-writer/orphan lifetime remains a p011
+  integration gate rather than being simulated at the compatibility boundary.
+- KA-T030/031, WS016 backing claims, WS003 boot-source and swap-source, and the
+  BIOS FAT-directory fixtures pass against the consolidated implementation.
+- A disposable amd64 q35/xHCI USB-only boot reached `login:` after resolving
+  FAT `boot0`, mounting `loop0` read-only and `loop1` read-write, and enabling
+  `swap0` with 16,383 slots.  No xHCI, BOT, loop-write, VFS, or swap failure
+  marker appeared.
+- The symbol/path audit finds one definition of each retained FAT entry point,
+  no active old source/header reference, and `git diff --check` passes.  The
+  compatibility `bootfs` boundary is deliberately retained exactly for p011.
 
 ## Reconsideration boundary
 
@@ -123,4 +154,3 @@ an on-disk, locking, lifetime, or public-API decision.  Record that issue for
 p011 or a new Phase.  Do not hide it by changing semantics during this
 mechanical checkpoint, and do not delete the compatibility path until p011 has
 its own verified replacement.
-

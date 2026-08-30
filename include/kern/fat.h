@@ -15,12 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Consolidated declarations from include/kern/fat.h. */
-/*
- * FAT family support
- */
-
-
+/* FAT family support. */
 
 enum bootfat_type {
 	ZEDBSD_FAT12 = 12,
@@ -155,12 +150,7 @@ bootfat_contiguous_lba(
 	uint32_t *absolute_lba,
 	bootfat_next_cluster_fn next_cluster);
 
-/* Consolidated declarations from include/kern/fat-lfn.h. */
-/*
- * VFAT long-file-name helpers.
- */
-
-
+/* VFAT long-file-name helpers. */
 
 #define FAT_LFN_MAX_UNITS	255U
 
@@ -215,12 +205,7 @@ fat_sfn_make_alias(
 	unsigned serial,
 	uint8_t sfn[11]);
 
-/* Consolidated declarations from include/kern/fat16.h. */
-/*
- * FAT12/FAT16 driver
- */
-
-
+/* FAT12/FAT16 driver contract. */
 
 extern const struct bootfs_driver bootfat12_driver;
 extern const struct bootfs_driver bootfat16_driver;
@@ -258,21 +243,11 @@ bootfat_discard_chain_result(
 	struct bootfs *filesystem,
 	uint32_t first_cluster);
 
-/* Consolidated declarations from include/kern/fat32.h. */
-/*
- * FAT32 support
- */
-
-
+/* FAT32 driver contract. */
 
 extern const struct bootfs_driver bootfat32_driver;
 
-/* Consolidated declarations from include/kern/fat-vfs.h. */
-/*
- * VFAT
- */
-
-
+/* Native VFS adapter contract. */
 
 struct fat_inode_info {
 	struct inode fi_inode;

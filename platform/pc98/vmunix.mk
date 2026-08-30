@@ -98,10 +98,7 @@ STAGE2_OBJS = \
 	$(BUILD)/src/kern/fs.o \
 	$(BUILD)/src/kern/namespace.o \
 	$(PC98_DISPLAY_OBJS) \
-	$(BUILD)/src/kern/fat.o \
-	$(BUILD)/src/kern/fat-lfn.o \
-	$(BUILD)/src/kern/fat16.o \
-	$(BUILD)/src/kern/fat-vfs.o \
+	$(KERN_FAT_OBJS) \
 	$(BUILD)/src/kern/inode.o \
 	$(BUILD)/src/kern/file.o \
 	$(BUILD)/src/kern/namecache.o \

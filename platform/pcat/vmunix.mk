@@ -95,8 +95,7 @@ endif
 
 VMUNIX_OBJS := $(BUILD)/src/kern/main.o $(BUILD)/src/kern/env.o \
 	$(BUILD)/src/kern/fs.o $(BUILD)/src/kern/namespace.o \
-	$(BUILD)/src/kern/fat.o $(BUILD)/src/kern/fat-lfn.o \
-	$(BUILD)/src/kern/fat16.o $(BUILD)/src/kern/fat-vfs.o \
+	$(KERN_FAT_OBJS) \
 	$(BUILD)/src/kern/inode.o $(BUILD)/src/kern/file.o \
 	$(BUILD)/src/kern/namecache.o $(BUILD)/src/kern/namei.o \
 	$(BUILD)/src/kern/mount.o $(BUILD)/src/kern/rootfs.o \

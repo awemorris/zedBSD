@@ -24,7 +24,7 @@ disposable build/QEMU evidence belongs under `../temp/` and remains untracked.
 | KA-T071 | p008 | The same runner proves final input/console/HID source ownership, registration order, and no live `mouse-device.c`, `/dev/mouse`, registry symbol, or legacy UAPI implementation |
 | KA-T080 | p009 | [`run-graphics-frontends-host-test.sh`](run-graphics-frontends-host-test.sh) links the production PC/AT and PC-98 frontends independently and preserves registration, ownership, mode, drawing, glyph, copy-fault, rollback, and restore behavior |
 | KA-T081 | p009 | The same runner proves that both frontend copies remain explicit and behavior-identical, no registry/common implementation remains, and exactly two platform-owned registration sites exist; supported/disabled kernel builds separately prove capability selection and node ownership |
-| KA-T090 | p010 | FAT12/16/32, LFN, file read, and directory traversal fixtures are behavior-identical after consolidation while compatibility `bootfs` remains |
+| KA-T090 | p010 | [`run-fat-consolidation-host-test.sh`](run-fat-consolidation-host-test.sh) links the consolidated production FAT and filesystem dispatch sources against in-memory FAT12/16/32 images and preserves probe/mount, SFN/LFN lookup and readdir, cross-cluster reads, compatibility-layer mutations, explicit flush persistence, no-space, and read-only behavior |
 | KA-T100 | p011 | FAT boot media provides rootfs image, writable data overlay, and file-backed swap through native filesystem/VFS calls |
 | KA-T101 | p011 | Native partition root and runtime FAT mounts remain usable, with bounded failures for missing/corrupt image files |
 | KA-T110 | p012 | All supported builds and representative boots pass with no `struct bootfs`, legacy boot-source header, broad internal state, or obsolete platform residue |
@@ -86,6 +86,16 @@ audits retired registry/common paths, and requires exactly one platform-owned
 registration call per frontend.  Supported-target and graphics-disabled kernel
 builds remain the link-time proof that only the selected frontend is present;
 QEMU boots provide the device-node and hardware-backend evidence.
+
+KA-T090 exercises the retained p010 `bootfs` compatibility boundary in both an
+ordinary build and an ASan/UBSan build.  Its mutations cover create and
+create-truncate, offset write, append, sparse extension, truncate grow/shrink,
+mkdir, non-empty and empty rmdir, unlink, same- and cross-directory rename,
+replacement, directory reparenting, explicit flush/remount persistence,
+allocation exhaustion, and read-only rejection.  Open-writer rename repair,
+orphan-chain reclaim, `disk_sync`, and native inode/file lifetime are native
+VFS contracts rather than `bootfs` operations and are therefore not claimed by
+this fixture; they remain separate native-VFS integration coverage.
 
 KA-T060 supplies fake descriptors only at the I/O boundary and directly links
 `userland/X11/xzed/input.c`; directory traversal, event-name filtering,

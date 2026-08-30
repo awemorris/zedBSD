@@ -32,8 +32,8 @@ gone.
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
 | 1 | `ws018-p009` | [Phase](ws018-kernel-architecture/phase009-independent-graphics-frontends/phase.md) | in-progress | Complete the remaining PC/AT VGA/Cirrus, PC-98 GDC/Cirrus, and graphics-disabled runtime matrix, or record the exact missing-runner boundary without changing the accepted UAPI |
-| 2 | `ws018-p010` | [Phase](ws018-kernel-architecture/phase010-fat-source-consolidation/phase.md) | pending | One `src/drivers/fs/fat.c` and one `include/kern/fat.h` preserve the measured legacy behavior |
-| 3 | `ws018-p011` | [Phase](ws018-kernel-architecture/phase011-fat-native-vfs/phase.md) | pending | FAT uses ordinary filesystem/VFS objects for boot media, overlay images, and swap with no embedded bootfs adapter |
+| 2 | `ws018-p010` | [Phase](ws018-kernel-architecture/phase010-fat-source-consolidation/phase.md) | completed | One `src/drivers/fs/fat.c` and one `include/kern/fat.h` preserve the measured legacy behavior |
+| 3 | `ws018-p011` | [Phase](ws018-kernel-architecture/phase011-fat-native-vfs/phase.md) | in-progress | FAT uses ordinary filesystem/VFS objects for boot media, overlay images, and swap with no embedded bootfs adapter |
 | 4 | `ws018-p012` | [Phase](ws018-kernel-architecture/phase012-legacy-bootfs-removal/phase.md) | pending | Remove the now-unreferenced bootfs/namespace/startup/M9/internal state while preserving explicit `/dev/system` handoff ownership and four-platform boot |
 
 ## Dependency and deferral rules

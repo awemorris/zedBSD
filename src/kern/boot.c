@@ -2,7 +2,6 @@
 #include "kern/boot.h"
 
 #include "kern/block-identity.h"
-#include "kern/fat-vfs.h"
 #include "kern/fat.h"
 #include "kern/namei.h"
 
@@ -778,4 +777,3 @@ kern_boot_source_release_unused(struct kern_boot_source_context *context)
 	}
 	return first_error;
 }
-
