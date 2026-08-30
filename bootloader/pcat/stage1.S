@@ -1,4 +1,4 @@
-/* PC/AT MBR Stage 1: load and validate ZBL2 from LBA 1. */
+/* PC/AT MBR Stage 1: load and validate ZBL2 from the configured disk LBA. */
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 .intel_syntax noprefix
 .code16
@@ -176,4 +176,3 @@ retry:      .byte 0
 	.space 64
 .org 0x01fe
 	.word 0xaa55
-

@@ -5,4 +5,5 @@
 .set MBR_TYPE_FAT16_16M,  0x04
 .set MBR_TYPE_FAT16,      0x06
 .set MBR_TYPE_FAT16_LBA,  0x0e
-
+.set MBR_TYPE_FAT32,      0x0b
+.set MBR_TYPE_FAT32_LBA,  0x0c

@@ -25,11 +25,13 @@ The next hardware/install north star is deliberately staged:
 Native-root installation, GPT creation, and filesystem creation follow as a
 separate milestone after this non-formatting path is accepted.
 
-The current [Queue Book](queue.md) records completed `q031`: it removed and
-audited the dead boot path, then replaced the hard-coded amd64 UEFI launch with
-required same-disk `/zedbsd.cfg` discovery and direct kernel-parameter
-translation. The next Boot work is the separately planned BIOS convergence in
-`ws013-p005` and `ws013-p006`; it has not yet crossed a new Queue boundary. The
+The current [Queue Book](queue.md) records completed `q032`: i386 PC/AT and
+amd64 BIOS `BOOTZBSD.EXE` now consume `/zedbsd.cfg`, PC-98 `BOOTZBSD.EXE`
+consumes the same language through `/BOOTZBSD.CFG`, and one amd64 hybrid image
+uses a common payload FAT through BIOS and UEFI. Completed `q031` removed and
+audited the dead UEFI boot path, then replaced the hard-coded amd64 UEFI
+launch with required same-disk `/zedbsd.cfg` discovery and direct
+kernel-parameter translation. The
 completed [q030](queue-q030.md) implemented `ws004-p022` through
 `ws004-p024`: the QEMU NVMe
 controller/admin/Identify foundation, bounded I/O/read/write/flush lifecycle,
@@ -180,7 +182,12 @@ format, bounds, normalization, configured-kernel behavior, and emitted kernel
 parameters are identical to `/zedbsd.cfg`. Common behavior is required;
 common loader source is not. On a modern hybrid GPT/MBR image, UEFI and BIOS
 must boot the same payload FAT and therefore the same configuration and
-images.
+images. q032 completed this milestone with the PC/AT/amd64 20/20 production
+matrix and the PC-98 16/16 production-PBR matrix. Atomic image validation,
+per-medium GPT GUID generation, and installed Stage 1/Stage 2 identity
+verification also passed. Checker mismatch and process-failure tests preserve
+the prior published image, clean every extraction/unchecked sibling, and allow
+an immediate clean retry.
 
 ### 2.5 Program completion direction
 
@@ -255,7 +262,7 @@ actually warranted.
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
 | `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
-| `ws013` | CPAR container partitioning | Active; q031 simple `zedbsd.cfg` UEFI path complete, Runtime topics manually blocked | `ws013-p002`--`p004` complete; BIOS p005/p006 are planned | Queue the three explicit configured-`BOOTZBSD.EXE` targets: i386 PC/AT and amd64 BIOS in p005, then PC-98 in p006 | [WS013](ws013-containers/ws.md) |
+| `ws013` | CPAR container partitioning | Active; q031/q032 configured x86 boot paths complete, Runtime topics manually blocked | `ws013-p002`--`p006` complete | No Boot configuration Phase remains; resume Runtime namespace/CLI/package design only after its explicit manual holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
@@ -395,7 +402,7 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | YAML `/etc/rc.conf` schema and versioned init status/control protocol | WS012 | Resolved and complete: q017 completed YAML/persistence; q018 completed typed `/run/init.sock` service and `ZSV1 HALT`/`POWEROFF`/`REBOOT` clients, argv/interactive administration, and production integration with no unversioned compatibility path |
 | x86 kernel boot-parameter contract | WS003/WS013 | Resolved and implemented by q015: `boot0`--`boot3`, exclusive `rootpart` or explicit overlay root/data, `swap0`--`swap3`, and `init`; BR-T46 passes all 31 four-platform QEMU cells |
 | UEFI `zedbsd.cfg` boot contract | WS013 | Resolved for q031: required same-disk FAT16/FAT32 `/zedbsd.cfg`, required loader-only `kernel=`, direct kernel parameters with bounded shorthand, overlay or native `rootpart`, no menu, and ignored UEFI LoadOptions |
-| BIOS boot configuration names and convergence | WS013 p005/p006 | Resolved for planning: i386 PC/AT PBR/`BOOTZBSD.EXE` and amd64 BIOS PBR/`BOOTZBSD.EXE` use `/zedbsd.cfg`; PC-98 `BOOTZBSD.EXE` uses `/BOOTZBSD.CFG`; all three implement the exact p003 format and parameter result, with no existing `boot.cfg` compatibility reader to preserve |
+| BIOS boot configuration names and convergence | WS013 p005/p006 | Resolved and implemented by q032: i386 PC/AT PBR/`BOOTZBSD.EXE` and amd64 BIOS PBR/`BOOTZBSD.EXE` use `/zedbsd.cfg`; PC-98 `BOOTZBSD.EXE` uses `/BOOTZBSD.CFG`; all implement the p003 format and parameter result with no `boot.cfg`, fixed-kernel, embedded-record, or reserved-area direct-kernel fallback |
 | NVMe partition naming | WS004/WS019 | Resolved by the existing one-based disk contract: namespace is `/dev/nvme0n1`, first partition is `p1`; the earlier `p0` example is not a new ABI |
 | Installer v1 layout and mutation boundary | WS019 p001 | Resolved: existing GPT, exactly one existing ESP, one explicitly selected distinct same-disk FAT32, no mkfs/GPT writes/label writes, overlay files only, and no firmware-variable mutation |
 | Installer read-only administration UAPI | WS019 p002 | Expose stable whole/partition identity, GPT type/PARTUUID, parent relation, capacity, filesystem type, mount/swap state, and loader-origin identity before read-only `diskpart` and `zedinst` preflight |

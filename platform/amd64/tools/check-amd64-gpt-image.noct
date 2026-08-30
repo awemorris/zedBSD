@@ -1,55 +1,199 @@
 require zedbuild;
 require overlay_journal_format;
 
-func compareFat(image, source, name) {
+func compareFat(image, volume, source, name) {
     if (source == "") { return; }
     var extracted = image + ".ws010-extract";
-    var command = "mcopy -n -i " + zbShellQuote(image + "@@1048576") +
+    System.shell("rm -f " + zbShellQuote(extracted));
+    var command = "mcopy -n -i " + zbShellQuote(volume) +
                   " " + zbShellQuote("::/" + name) + " " + zbShellQuote(extracted) +
                   " >/dev/null && cmp " + zbShellQuote(extracted) + " " +
-                  zbShellQuote(source) + " && rm -f " + zbShellQuote(extracted);
-    if (System.shell(command) != 0) { zbFail(name + " differs from its input"); }
+                  zbShellQuote(source);
+    var status = System.shell(command);
+    System.shell("rm -f " + zbShellQuote(extracted));
+    if (status != 0) { zbFail(name + " differs from its input"); }
 }
-func header(data, at, current, backup, entriesLba) {
+func rejectFatFile(volume, name) {
+    var command = "mdir -i " + zbShellQuote(volume) +
+                  " " + zbShellQuote("::/" + name) + " >/dev/null 2>&1";
+    if (System.shell(command) == 0) { zbFail(name + " is on the wrong FAT volume"); }
+}
+func guidIsZero(data, at) {
+    for (j in 0..16) { if (data[at + j] != 0) { return false; } }
+    return true;
+}
+func requireGeneratedGuid(data, at) {
+    if (guidIsZero(data, at) || (data[at + 7] & 240) != 64 ||
+        (data[at + 8] & 192) != 128) {
+        zbFail("GPT GUID is zero or lacks the generated UUID v4 form");
+    }
+}
+func requireGuidDifferent(data, first, second) {
+    for (j in 0..16) {
+        if (data[first + j] != data[second + j]) { return; }
+    }
+    zbFail("GPT disk and partition GUIDs are not distinct");
+}
+func requireGptEntry(data, at, type0, type1, type2, type3) {
+    if (zbU32LE(data, at) != type0 || zbU32LE(data, at + 4) != type1 ||
+        zbU32LE(data, at + 8) != type2 || zbU32LE(data, at + 12) != type3) {
+        zbFail("GPT partition type differs");
+    }
+    requireGeneratedGuid(data, at + 16);
+}
+func requireFat32RootNtCase(data, volumeOffset, shortName, expected) {
+    var reserved = zbU16LE(data, volumeOffset + 14);
+    var fatCount = data[volumeOffset + 16];
+    var fatSectors = zbU32LE(data, volumeOffset + 36);
+    var sectorsPerCluster = data[volumeOffset + 13];
+    var rootCluster = zbU32LE(data, volumeOffset + 44) & 268435455;
+    if (reserved == 0 || fatCount == 0 || fatSectors == 0 ||
+        sectorsPerCluster == 0 || rootCluster < 2) {
+        zbFail("invalid FAT32 geometry while checking stored filename case");
+    }
+    var rootSector = reserved + fatCount * fatSectors +
+                     (rootCluster - 2) * sectorsPerCluster;
+    var rootOffset = volumeOffset + rootSector * 512;
+    var entries = sectorsPerCluster * 16;
+    for (entry in 0..entries) {
+        var at = rootOffset + entry * 32;
+        if (data[at] == 0) { break; }
+        if (data[at] != 229 && data[at + 11] != 15 &&
+            zbBytesEqual(data, at, shortName)) {
+            if (data[at + 12] != expected) {
+                zbFail(shortName + " has wrong FAT lowercase metadata");
+            }
+            return;
+        }
+    }
+    zbFail(shortName + " short entry is absent from the FAT32 root");
+}
+func requireStage1(data, source) {
+    if (source == "") { return; }
+    var expected = zbReadFile(source);
+    if (Packed.size(expected) != 512 || Packed.size(data) < 512) {
+        zbFail("Stage 1 input or image extent is invalid");
+    }
+    // The image builder owns the disk signature and MBR entries at
+    // 0x1b8..0x1fd.  The executable bytes and 0x55aa signature must match the
+    // declared PC/AT Stage 1 exactly.
+    for (j in 0..440) {
+        if (data[j] != expected[j]) { zbFail("Stage 1 code differs from its input"); }
+    }
+    for (j in 510..512) {
+        if (data[j] != expected[j]) { zbFail("Stage 1 signature differs from its input"); }
+    }
+}
+func header(data, at, current, backup, entriesLba, firstUsable, lastUsable) {
     if (!zbBytesEqual(data, at, "EFI PART") || zbU32LE(data, at + 8) != 65536 ||
         zbU32LE(data, at + 12) != 92) { zbFail("invalid GPT header"); }
     var copy = Packed.uint8(92); zbCopy(copy, 0, data, at, 92);
     var stored = zbU32LE(copy, 16); zbPut32LE(copy, 16, 0);
     if (crc32Range(copy, 0, 92) != stored || zbU64SmallLE(data, at + 24) != current ||
         zbU64SmallLE(data, at + 32) != backup || zbU64SmallLE(data, at + 72) != entriesLba ||
+        zbU64SmallLE(data, at + 40) != firstUsable ||
+        zbU64SmallLE(data, at + 48) != lastUsable ||
         zbU32LE(data, at + 80) != 128 || zbU32LE(data, at + 84) != 128) {
         zbFail("GPT header CRC or geometry mismatch");
     }
     return zbU32LE(data, at + 88);
 }
 func main(args) {
-    var image="";var kernel="";var bootzbsd="";var bootx64="";var zedbsdConfig="";var arch="";var dataImage="";var swap="";var i=0;
+    var image="";var stage1Input="";var stage2Input="";var kernel="";var bootzbsd="";var pbr="";var bootx64="";var zedbsdConfig="";var arch="";var dataImage="";var swap="";var i=0;
     while(i<Array.size(args)){
         var a=args[i];
         if(a=="--kernel"&&i+1<Array.size(args)){kernel=args[i+1];i=i+2;}
+        else if(a=="--stage1"&&i+1<Array.size(args)){stage1Input=args[i+1];i=i+2;}
+        else if(a=="--stage2"&&i+1<Array.size(args)){stage2Input=args[i+1];i=i+2;}
         else if(a=="--bootzbsd"&&i+1<Array.size(args)){bootzbsd=args[i+1];i=i+2;}
+        else if(a=="--partition-pbr"&&i+1<Array.size(args)){pbr=args[i+1];i=i+2;}
         else if(a=="--bootx64"&&i+1<Array.size(args)){bootx64=args[i+1];i=i+2;}
         else if(a=="--zedbsd-config"&&i+1<Array.size(args)){zedbsdConfig=args[i+1];i=i+2;}
         else if(a=="--arch-image"&&i+1<Array.size(args)){arch=args[i+1];i=i+2;}
         else if(a=="--data-image"&&i+1<Array.size(args)){dataImage=args[i+1];i=i+2;}
         else if(a=="--swapfile"&&i+1<Array.size(args)){swap=args[i+1];i=i+2;}
-        else if((a=="--machine"||a=="--fat-type"||a=="--arch-profile"||a=="--arch-format"||a=="--noct"||a=="--holoris"||a=="--bin-file"||a=="--ufs-root")&&i+1<Array.size(args)){i=i+2;}
+        else if((a=="--machine"||a=="--arch-profile"||a=="--arch-format"||a=="--noct"||a=="--holoris"||a=="--bin-file"||a=="--ufs-root")&&i+1<Array.size(args)){i=i+2;}
         else if(String.indexOf(a,"--")==0){zbFail("unsupported GPT checker option: "+a);}
         else {image=a;i=i+1;}
     }
     if(image==""){zbFail("GPT image path is required");}
     var raw=zbReadFile(image);var total=Packed.size(raw)/512;
     if(Packed.size(raw)==0||Packed.size(raw)%512!=0||raw[510]!=85||raw[511]!=170){zbFail("invalid disk size or MBR");}
-    if(raw[446]!=128||raw[450]!=14||zbU32LE(raw,454)!=2048||raw[466]!=238||zbU32LE(raw,470)!=1){zbFail("invalid hybrid MBR");}
-    var tableCrc=header(raw,512,1,total-1,2);
+    requireStage1(raw,stage1Input);
+    var espStart=2048;var espBlocks=131072;var payloadStart=espStart+espBlocks;var payloadBlocks=262144;
+    var protectiveBlocks=total-1;if(protectiveBlocks>4294967295){protectiveBlocks=4294967295;}
+    if(raw[446]!=128||raw[450]!=12||zbU32LE(raw,454)!=payloadStart||
+       zbU32LE(raw,458)!=payloadBlocks||raw[466]!=238||zbU32LE(raw,470)!=1||
+       zbU32LE(raw,474)!=protectiveBlocks){zbFail("invalid hybrid MBR");}
+    var tableCrc=header(raw,512,1,total-1,2,34,total-34);
     if(crc32Range(raw,1024,16384)!=tableCrc){zbFail("primary GPT entry CRC mismatch");}
-    if(zbU64SmallLE(raw,1056)!=2048||zbU64SmallLE(raw,1064)+1!=2048+zbU32LE(raw,458)){zbFail("ESP extents differ");}
-    if(zbU64SmallLE(raw,1064)>zbU64SmallLE(raw,560)){zbFail("ESP exceeds GPT last usable LBA");}
-    if(zbU64SmallLE(raw,1184)!=34||zbU64SmallLE(raw,1192)!=2047){zbFail("BIOS partition extent mismatch");}
+    requireGeneratedGuid(raw,568);
+    requireGptEntry(raw,1024,0xc12a7328,0x11d2f81f,0xa0004bba,0x3bc93ec9);
+    requireGptEntry(raw,1152,0xebd0a0a2,0x4433b9e5,0xb668c087,0xc79926b7);
+    requireGptEntry(raw,1280,0x21686148,0x6e6f6449,0x65654e74,0x49464564);
+    requireGuidDifferent(raw,568,1040);
+    requireGuidDifferent(raw,568,1168);
+    requireGuidDifferent(raw,568,1296);
+    requireGuidDifferent(raw,1040,1168);
+    requireGuidDifferent(raw,1040,1296);
+    requireGuidDifferent(raw,1168,1296);
+    for(i in 1408..17408){if(raw[i]!=0){zbFail("unused GPT entries are not zero");}}
+    if(zbU64SmallLE(raw,1056)!=espStart||zbU64SmallLE(raw,1064)+1!=espStart+espBlocks){zbFail("ESP extents differ");}
+    if(zbU64SmallLE(raw,1184)!=payloadStart||zbU64SmallLE(raw,1192)+1!=payloadStart+payloadBlocks){zbFail("payload extents differ");}
+    if(zbU64SmallLE(raw,1312)!=34||zbU64SmallLE(raw,1320)!=2047){zbFail("BIOS partition extent mismatch");}
+    if(zbU64SmallLE(raw,1064)>=zbU64SmallLE(raw,1184)||zbU64SmallLE(raw,1192)>zbU64SmallLE(raw,560)){zbFail("GPT FAT volumes overlap or exceed usable media");}
     var stage=34*512;if(zbU32LE(raw,stage)!=0x324c425a||zbU16LE(raw,stage+4)!=1||zbU16LE(raw,stage+6)!=32||zbU16LE(raw,stage+14)!=1){zbFail("invalid ZBL2 header");}
-    var sectors=zbU16LE(raw,stage+12);var sum=0;for(i in 0..sectors*128){sum=(sum+zbU32LE(raw,stage+i*4))&4294967295;}if(sum!=0){zbFail("ZBL2 checksum mismatch");}
+    var sectors=zbU16LE(raw,stage+12);var stageSize=zbU32LE(raw,stage+8);var stageEntry=zbU32LE(raw,stage+16);
+    if(sectors<1||sectors>127||stage+sectors*512>espStart*512||stageSize<32||
+       stageSize>sectors*512||stageEntry<32||stageEntry>=stageSize||
+       (stageSize+511)/512!=sectors){zbFail("invalid ZBL2 bounds");}
+    var sum=0;for(i in 0..sectors*128){sum=(sum+zbU32LE(raw,stage+i*4))&4294967295;}if(sum!=0){zbFail("ZBL2 checksum mismatch");}
+    if(stage2Input!=""){
+        var expectedStage2=zbReadFile(stage2Input);
+        if(Packed.size(expectedStage2)==0||stage+Packed.size(expectedStage2)>espStart*512){zbFail("Stage 2 input is empty or exceeds the BIOS partition");}
+        for(i in 0..Packed.size(expectedStage2)){if(raw[stage+i]!=expectedStage2[i]){zbFail("reserved-area Stage 2 differs from its input");}}
+    }
     var backup=(total-33)*512;for(i in 0..16384){if(raw[1024+i]!=raw[backup+i]){zbFail("backup GPT entries differ");}}
-    header(raw,(total-1)*512,total-1,1,total-33);
-    compareFat(image,bootzbsd,"BOOTZBSD.EXE");compareFat(image,kernel,"VMUNIX");compareFat(image,bootx64,"EFI/BOOT/BOOTX64.EFI");compareFat(image,zedbsdConfig,"ZEDBSD.CFG");compareFat(image,arch,"ROOTFS.IMG");compareFat(image,dataImage,"DATA.IMG");compareFat(image,swap,"SWAPFILE");
+    var backupTableCrc=header(raw,(total-1)*512,total-1,1,total-33,34,total-34);
+    if(crc32Range(raw,backup,16384)!=backupTableCrc){zbFail("backup GPT entry CRC mismatch");}
+    for(i in 0..16){if(raw[568+i]!=raw[(total-1)*512+56+i]){zbFail("primary and backup GPT disk GUIDs differ");}}
+    var espOffset=espStart*512;var payloadOffset=payloadStart*512;
+    var espVolume=image+"@@1048576";var payloadVolume=image+"@@68157440";
+    if(zbU16LE(raw,espOffset+22)!=0||zbU16LE(raw,payloadOffset+22)!=0||
+       raw[espOffset+510]!=85||raw[espOffset+511]!=170||
+       raw[payloadOffset+510]!=85||raw[payloadOffset+511]!=170){zbFail("ESP or payload is not FAT32");}
+    var payloadReserved=zbU16LE(raw,payloadOffset+14);
+    var payloadBackup=zbU16LE(raw,payloadOffset+50);
+    if(payloadBackup==0||payloadBackup>=payloadReserved){zbFail("invalid payload FAT32 backup boot sector");}
+    for(i in 0..512){
+        if(raw[payloadOffset+i]!=raw[payloadOffset+payloadBackup*512+i]){
+            zbFail("payload FAT32 primary and backup PBR differ");
+        }
+    }
+    var espSerial=zbU32LE(raw,espOffset+67);var payloadSerial=zbU32LE(raw,payloadOffset+67);
+    if(espSerial==0||payloadSerial==0||espSerial==payloadSerial){zbFail("FAT volume serials are zero or ambiguous");}
+    if(pbr!=""){
+        var expectedPbr=zbReadFile(pbr);
+        if(Packed.size(expectedPbr)!=2048){zbFail("partition PBR input is not 2048 bytes");}
+        for(i in 0..3){if(raw[payloadOffset+i]!=expectedPbr[i]){zbFail("payload PBR entry differs");}}
+        for(i in 90..510){if(raw[payloadOffset+i]!=expectedPbr[i]){zbFail("payload PBR first-stage code differs");}}
+        // FAT32 reserved sector 1 is FSInfo, so input byte 512 is at sector 2.
+        for(i in 512..2048){if(raw[payloadOffset+512+i]!=expectedPbr[i]){zbFail("payload PBR continuation differs");}}
+    }
+    compareFat(image,payloadVolume,bootzbsd,"BOOTZBSD.EXE");
+    compareFat(image,payloadVolume,kernel,"VMUNIX");
+    compareFat(image,espVolume,bootx64,"EFI/BOOT/BOOTX64.EFI");
+    compareFat(image,payloadVolume,zedbsdConfig,"ZEDBSD.CFG");
+    compareFat(image,payloadVolume,arch,"ROOTFS.IMG");
+    compareFat(image,payloadVolume,dataImage,"DATA.IMG");
+    compareFat(image,payloadVolume,swap,"SWAPFILE");
+    if(kernel!=""){requireFat32RootNtCase(raw,payloadOffset,"VMUNIX     ",8);}
+    if(zedbsdConfig!=""){requireFat32RootNtCase(raw,payloadOffset,"ZEDBSD  CFG",24);}
+    if(arch!=""){requireFat32RootNtCase(raw,payloadOffset,"ROOTFS  IMG",24);}
+    if(dataImage!=""){requireFat32RootNtCase(raw,payloadOffset,"DATA    IMG",24);}
+    if(swap!=""){requireFat32RootNtCase(raw,payloadOffset,"SWAPFILE   ",8);}
+    rejectFatFile(espVolume,"ZEDBSD.CFG");
+    rejectFatFile(espVolume,"BOOTZBSD.EXE");
+    rejectFatFile(payloadVolume,"EFI/BOOT/BOOTX64.EFI");
     print("amd64 GPT image check: PASS");
 }

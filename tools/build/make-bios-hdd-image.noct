@@ -1,21 +1,106 @@
 require zedbuild;
 
+func cleanupUnchecked(output) {
+    System.shell("rm -f " + zbShellQuote(output + ".unchecked") + " " +
+                 zbShellQuote(output + ".unchecked.tmp"));
+}
+
 func main(args) {
     var backend = "";
+    var checker = "";
+    var checkerRunner = "";
     var forwarded = [];
+    var checkerArgs = [];
     var i = 0;
+    if (Array.size(args) == 0 || String.indexOf(args[Array.size(args) - 1], "--") == 0) {
+        zbFail("make-bios-hdd-image: output path is required");
+    }
+    var output = args[Array.size(args) - 1];
     while (i < Array.size(args)) {
         if (args[i] == "--backend" && i + 1 < Array.size(args)) {
             backend = args[i + 1]; i = i + 2;
-        } else { Array.push(forwarded, args[i]); i = i + 1; }
+        } else if (args[i] == "--checker" && i + 1 < Array.size(args)) {
+            checker = args[i + 1]; i = i + 2;
+        } else if (args[i] == "--checker-runner" && i + 1 < Array.size(args)) {
+            checkerRunner = args[i + 1]; i = i + 2;
+        } else if (i + 1 == Array.size(args)) {
+            if (checker == "") { Array.push(forwarded, output); }
+            else { Array.push(forwarded, output + ".unchecked"); }
+            i = i + 1;
+        } else {
+            Array.push(forwarded, args[i]); i = i + 1;
+        }
     }
     if (backend == "") { zbFail("make-bios-hdd-image: --backend is required"); }
+    if (checker != "" && checkerRunner == "") {
+        zbFail("make-bios-hdd-image: --checker requires --checker-runner");
+    }
+    if (checker != "") { cleanupUnchecked(output); }
     var command = [backend, "disk"];
     for (i in 0..Array.size(forwarded)) { Array.push(command, forwarded[i]); }
     var child = Process.spawn(command);
-    if (child < 0) { zbFail("cannot start disk-image backend"); }
+    if (child < 0) {
+        if (checker != "") { cleanupUnchecked(output); }
+        zbFail("cannot start disk-image backend");
+    }
     while (Process.isAlive(child) == 1) { Process.read(child, 100); }
     Process.read(child, 0);
     var status = Process.wait(child); Process.close(child);
-    if (status != 0) { zbFail("disk-image backend failed"); }
+    if (status != 0) {
+        if (checker != "") { cleanupUnchecked(output); }
+        zbFail("disk-image backend failed");
+    }
+    if (checker == "") { return; }
+
+    // Reconstruct only the public validator arguments.  Builder-private
+    // stage/layout switches must not leak into a checker interface.
+    i = 0;
+    while (i + 1 < Array.size(args)) {
+        var option = args[i];
+        if (option == "--machine" || option == "--stage1" ||
+            option == "--stage2" ||
+            option == "--partition-pbr" ||
+            option == "--bootzbsd" || option == "--kernel" ||
+            option == "--bootx64" || option == "--zedbsd-config" ||
+            option == "--arch-profile" || option == "--arch-image" ||
+            option == "--arch-format" || option == "--data-image" ||
+            option == "--swapfile" || option == "--ufs-root" ||
+            option == "--fat-type" || option == "--noct" ||
+            option == "--holoris" || option == "--bin-file") {
+            if (i + 1 >= Array.size(args)) {
+                cleanupUnchecked(output);
+                zbFail("missing image option value");
+            }
+            Array.push(checkerArgs, option);
+            Array.push(checkerArgs, args[i + 1]);
+            i = i + 2;
+        } else if (option == "--backend" || option == "--checker" ||
+                   option == "--checker-runner" ||
+                   option == "--size-mib" ||
+                   option == "--fat-size-mib") {
+            i = i + 2;
+        } else {
+            i = i + 1;
+        }
+    }
+    Array.push(checkerArgs, output + ".unchecked");
+    var checkCommand = [checkerRunner, "--path=tools/build", checker];
+    for (i in 0..Array.size(checkerArgs)) { Array.push(checkCommand, checkerArgs[i]); }
+    child = Process.spawn(checkCommand);
+    if (child < 0) {
+        cleanupUnchecked(output);
+        zbFail("cannot start disk-image checker");
+    }
+    while (Process.isAlive(child) == 1) { Process.read(child, 100); }
+    Process.read(child, 0);
+    status = Process.wait(child); Process.close(child);
+    if (status != 0) {
+        cleanupUnchecked(output);
+        zbFail("disk-image checker failed");
+    }
+    if (System.shell("mv -f " + zbShellQuote(output + ".unchecked") + " " +
+                     zbShellQuote(output)) != 0) {
+        cleanupUnchecked(output);
+        zbFail("cannot publish checked disk image");
+    }
 }

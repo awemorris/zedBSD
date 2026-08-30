@@ -4,20 +4,18 @@ Last updated: 2026-08-30
 
 WSID: `ws013`
 
-Status: Active; q031 UEFI path complete, BIOS p005-p006 planned, Runtime
-topics manually blocked
+Status: Active; q032 completed the configured x86 BIOS paths, Runtime topics
+remain manually blocked
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws013-p004`; p001 remains the architecture discussion
-ledger
+Last verified Phases: `ws013-p005` and `ws013-p006`; p001 remains the
+architecture discussion ledger
 
-Resume point: place the separately bounded PC/AT p005 and PC-98 p006
-configuration-unification work in a later Queue. The common four-x86
-boot-parameter foundation was implemented by q015, and q031 completed p002,
-p003, and p004.
-Runtime CPAR namespace, CLI/build, and service-package topics remain on the
-manual blocking register.
+Resume point: no Boot configuration Phase remains. The common four-x86
+boot-parameter foundation was implemented by q015, q031 completed p002-p004,
+and q032 completed p005-p006. Runtime CPAR namespace, CLI/build, and
+service-package topics remain on the manual blocking register.
 
 Shared reviews: [WS013 review index](tests/README.md)
 
@@ -103,8 +101,6 @@ PC-98 `BOOTZBSD.EXE` without expanding q031.
 - using or merging UEFI `LoadOptions` as a kernel-parameter source;
 - falling back to embedded parameters or a fixed kernel when `/zedbsd.cfg` is
   absent or invalid;
-- implementing the planned p005/p006 BIOS changes as part of the currently
-  authorized q031 UEFI work;
 - giving PC-98 a second `ZEDBSD.CFG` fallback in addition to its requested
   `BOOTZBSD.CFG`;
 - forcing containers on traditional services;
@@ -140,8 +136,31 @@ PC-98 `BOOTZBSD.EXE` without expanding q031.
 | `ws013-p002` | [UEFI `zedbsd.cfg` volume discovery](phase002-uefi-payload-discovery/phase.md) | Completed (`q031`) | Select the first same-disk FAT16/FAT32 containing `/zedbsd.cfg`, error on zero, and warn on later matches |
 | `ws013-p003` | [UEFI `zedbsd.cfg` parsing and parameter assembly](phase003-uefi-boot-config-menu/phase.md) | Completed (`q031`) | Load the required configured kernel and emit one bounded common parameter string without a menu or `LoadOptions` |
 | `ws013-p004` | [boot-path dead-source audit](phase004-boot-path-dead-source-audit/phase.md) | Completed (`q031`) | Remove `startup.c`, clean its remnants, and evidence-audit other boot-path sources before any further deletion |
-| `ws013-p005` | [PC/AT BIOS `zedbsd.cfg` boot unification](phase005-pcat-bios-zedbsd-config/phase.md) | Planned; not in q031 | Independently prove i386 PBR/`BOOTZBSD.EXE` and amd64 PBR/`BOOTZBSD.EXE` consume p003 `/zedbsd.cfg`; make the hybrid UEFI/BIOS image share one payload FAT |
-| `ws013-p006` | [PC-98 `BOOTZBSD.CFG` boot unification](phase006-pc98-bootzbsd-config/phase.md) | Planned; not in q031 | Make PC-98 `BOOTZBSD.EXE` use the p003 language under the PC-98-specific configuration filename |
+| `ws013-p005` | [PC/AT BIOS `zedbsd.cfg` boot unification](phase005-pcat-bios-zedbsd-config/phase.md) | Completed (`q032`, 20/20 production acceptance) | i386 and amd64 BIOS use payload PBR/`BOOTZBSD.EXE` with the p003 `/zedbsd.cfg`; one hybrid image shares its payload FAT with UEFI |
+| `ws013-p006` | [PC-98 `BOOTZBSD.CFG` boot unification](phase006-pc98-bootzbsd-config/phase.md) | Completed (`q032`, 16/16 production-PBR acceptance) | PC-98 `BOOTZBSD.EXE` uses the p003 language under the PC-98-specific configuration filename; PBR and FAT traversal reject malformed control/cluster inputs before execution or out-of-volume access |
+
+## Boot-loader backlog exposed by p006
+
+- Strengthen the generic BIOS image checker's standalone PC/AT ZBL2 validation
+  with explicit sector-count, image-size, and entry-offset bounds. q032
+  production images are already protected by byte-exact comparison with the
+  finalized Stage 2 input, but a checker invocation without that input should
+  reject malformed ZBL2 bounds independently.
+- Decide whether direct DOS/MZ execution of PC/AT `BOOTZBSD.EXE` remains a
+  supported product path. The legacy DOS-drive-letter arithmetic is not a
+  reliable BIOS-disk mapping and is outside the production MBR/PBR contract.
+  Either add an explicit current-volume mapping or retire the direct entry in
+  a separate compatibility Phase.
+- PC-98 FAT32 media need a redesigned partition PBR layout: the current PBR
+  starts executable code at `0x3e`, which overlaps the FAT32 extended BPB
+  ending at `0x59`. The production PC-98 FAT16/1024-byte media remain the p006
+  completion target; FAT32 PBR support is a later Phase.
+- Decide whether direct DOS/MZ execution of PC-98 `BOOTZBSD.EXE` remains a
+  supported product path. If retained, resolve the current DOS volume to its
+  native partition explicitly so a launch from a later partition still reads
+  that same FAT. If not retained, remove the DOS relocation entry in a
+  separate compatibility Phase. Selecting the first live native partition is
+  not a safe substitute for either decision.
 
 ## Confirmed product direction
 
@@ -179,17 +198,14 @@ PC-98 `BOOTZBSD.EXE` without expanding q031.
 - There are no sections, menu, default, timeout, version ordering, or keyboard
   controls in this revision. Supporting several selectable Boot CPAR
   environments is later work.
-- No PC/AT `boot.cfg` reader exists today. The i386 PC/AT
-  PBR/`BOOTZBSD.EXE` path uses a fixed kernel name and embedded parameter
-  record. A later p005 replaces those inputs with root `/zedbsd.cfg`.
-- The amd64 image already contains `BOOTZBSD.EXE`, but its BIOS entry currently
-  uses a separate reserved-area Stage 2 which loads the kernel directly. p005
-  changes the supported amd64 BIOS path to active payload FAT PBR ->
-  `BOOTZBSD.EXE` -> `/zedbsd.cfg` and removes the direct-loader fallback.
-  Its hybrid image separates the ESP from the following payload FAT and makes
-  UEFI and BIOS select the same payload configuration.
-- PC-98 later uses the same language through `BOOTZBSD.EXE`, but its requested
-  root filename is `BOOTZBSD.CFG`. This filename difference is not a different
+- No PC/AT `boot.cfg` compatibility reader exists. i386 PC/AT and amd64 BIOS
+  use active payload FAT PBR -> `BOOTZBSD.EXE` -> root `/zedbsd.cfg`; the
+  fixed-kernel, embedded-parameter, and reserved-area direct-kernel policies
+  are not production fallbacks.
+- The amd64 hybrid image separates the ESP from the following payload FAT and
+  makes UEFI and BIOS select the same payload configuration and files.
+- PC-98 uses the same language through `BOOTZBSD.EXE`, with the requested root
+  filename `BOOTZBSD.CFG`. This filename difference is not a different
   parameter grammar.
 - Runtime CPAR uses exactly two read-only image roles, `base` and `app`.
   Application state is written only through explicitly mounted writable data
@@ -267,8 +283,8 @@ The common q015 foundation is not a completion claim for this UEFI work. p002
 owns same-disk FAT discovery, deterministic first-match behavior, diagnostics,
 and selected-volume identity. p003 owns bounded `zedbsd.cfg` parsing, kernel
 path loading, parameter assembly, absence/error behavior, and UEFI acceptance.
-p004 then removes the confirmed unused startup path and records evidence for
-every other boot-path source retained or removed. Later p005/p006 converge the
+p004 removed the confirmed unused startup path and recorded evidence for
+every other boot-path source retained or removed. q032 p005/p006 converged the
 BIOS loaders on the same configuration language and exact handoff text.
 Runtime completion conditions remain deferred until the security boundary is
 honest and testable.

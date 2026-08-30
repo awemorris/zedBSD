@@ -256,10 +256,11 @@ generated configurations, build logs, exact QEMU commands and versions,
 parameter/image hashes, guest logs, controller results, and result table there.
 It hashes the user's `config.mk` before and after the run, uses the normal
 independent `build/pcat`, `build/pc98`, and `build/amd64` directories with
-`make -j16`, and builds each group's production loaders once. Each non-default
-cell patches only disposable BPR1-bearing loader copies, rebuilds and validates
-the corresponding BIOS/MZ or EFI wrapper, and verifies that every production
-loader hash remains unchanged. QEMU receives only per-cell disposable image
+`make -j16`, and builds each group's production loaders once. Every cell writes
+its parameters to a disposable on-disk configuration (`zedbsd.cfg` for PC/AT
+and amd64, `BOOTZBSD.CFG` for PC-98), then rebuilds and validates only the
+disposable medium around the unchanged production loader. No current cell
+patches an embedded BPR1 record. QEMU receives only per-cell disposable image
 copies:
 
 ```sh
@@ -338,14 +339,17 @@ for `results.tsv`, and
 `e38233677fbebf399d89cd2688c9a98d65f6ec2bea1b81baedcb3f26a4fffd1b`
 for `metadata.txt`.
 
-q023 reran the complete matrix after replacing the generated parameter header
-with the static BR-T47 source contract. The newest authoritative result is
+The following q023 evidence is historical: it predates q032's disk
+`zedbsd.cfg`/`BOOTZBSD.CFG` loader convergence. q023 reran the complete matrix
+after replacing the generated parameter header with the static BR-T47 source
+contract. Its authoritative result was
 **PASS 31/31** at
 `plan/ws003-bringup/temp/q023-p016-br-t46-authoritative.9rIQrm`: PC/AT 7/7,
 PC-98 6/6, amd64 BIOS 9/9, and amd64 UEFI 9/9. The default cell for each path
 boots the normal production `hdd-image.img`; only non-default cases patch a
 validated BPR1 record in a disposable loader copy. Production-loader hashes
-and `config.mk` stayed unchanged. The run's `cells.tsv`, `results.tsv`, and
+and `config.mk` stayed unchanged. This describes how that historical artifact
+was made, not the current BR-T46 procedure. The run's `cells.tsv`, `results.tsv`, and
 `metadata.txt` SHA-256 values are
 `d290ceb43b1f4b3c076c53b3b41d571dbfdf61b4526bd7821e03da5355efeb3c`,
 `afa1c1cb043f042a9efc6188a699d1fcfd9267964adc70cc8c82a876fa932e90`,
@@ -356,13 +360,12 @@ PC-98 at `plan/ws003-bringup/temp/q023-p016-audit-final.8oHUQf`. The affected
 WS016 runtime-swap runner also passed file, mixed, and native cells 3/3 at
 `plan/ws016-swap-control/temp/q023-p016-runtime-swap.UGNqkG`.
 
-BR-T47 guards the maintained-source boot-parameter contract. Run the project
-toolchain first, then use the two Phase-owned Noct helpers:
+BR-T47 guards the maintained-source kernel fallback contract and the absence
+of Python source generation. Run the project toolchain first, then use the
+source audit:
 
 ```sh
 make -j16 toolchain
-build/NoctLang/build-static/noct --path=tools/build \
-  plan/ws003-bringup/tests/patch-boot-parameter-record.noct --self-test
 build/NoctLang/build-static/noct --path=tools/build \
   plan/ws003-bringup/tests/boot-parameter-source-audit.noct \
   "$PWD" plan/ws003-bringup/temp/br-t47-source-audit
@@ -374,11 +377,11 @@ default, derived C/assembly lengths, absence of the removed generator, selector,
 and stale generated output, and forced amd64, PC/AT, and PC-98 disk-image
 dependency traces with no Python invocation.
 
-`patch-boot-parameter-record.noct` accepts either `--self-test` or
-`--text TEXT INPUT OUTPUT`. It is only for distinct disposable artifacts. It
-requires exactly one complete fixed-size BPR1 record, rejects zero, duplicate,
-malformed, oversized, non-ASCII, unterminated, and unsupported records, and
-atomically writes the patched output without changing its input.
+`patch-boot-parameter-record.noct` is retained only to reproduce historical
+q023 disposable artifacts. It is retired from the current BR-T46 path, which
+places every cell's parameters in its disk configuration file. The retired
+helper still accepts either `--self-test` or `--text TEXT INPUT OUTPUT` and
+retains its strict fixed-size BPR1 validation for artifact archaeology.
 
 BR-T48's whole-load-option compatibility fixture was retired by q031. The
 configured UEFI loader now ignores `LoadOptions`; WS013 `CT-T016` owns the

@@ -16,7 +16,7 @@ authorize implementation outside an approved Queue.
 | `CT-D004` | Traditional services, Runtime CPAR services, and interactive Runtime CPAR instances remain distinguishable |
 | `CT-D005` | Package manifests cover dependencies, modes, owners, hashes, licenses, upgrade, and rollback |
 | `CT-D006` | PID 1, runtime, service console, networking, and later resource-control ownership do not overlap |
-| `CT-D007` | UEFI discovers one required `/zedbsd.cfg` on a same-disk FAT16/FAT32 and boots its single direct configuration without sections, menu, timeout, or keyboard input; legacy PC/AT and PC-98 behavior remains separate |
+| `CT-D007` | UEFI discovers one required `/zedbsd.cfg` on a same-disk FAT16/FAT32 and boots its single direct configuration without sections, menu, timeout, or keyboard input; PC/AT BIOS consumes the same filename and grammar, while PC-98 consumes `BOOTZBSD.CFG` with that grammar |
 | `CT-D008` | Boot files remain administrable by direct filesystem operations without a second manifest, ABI registry, or `cpar boot` command |
 | `CT-D009` | Runtime `cpar` grammar names base, app, data source and guest path, command, instance, failure, and cleanup behavior |
 | `CT-D010` | A later `cpar build` format can reproducibly create the fixed app-image role without changing the two-image runtime contract |
@@ -25,7 +25,7 @@ authorize implementation outside an approved Queue.
 | `CT-D013` | Missing `boot0=` and relative overlay/data/swap files expand to the selected FAT identity, while explicit boot slots, raw swap selectors, and native `rootpart=` retain the common kernel contract |
 | `CT-D014` | Boot-path source is classified from all production and focused-test build owners before deletion; test-only code is not mislabeled as production-live or globally dead |
 
-## Planned p002 discovery fixtures
+## Completed p002 discovery fixtures
 
 | Case | Required evidence |
 | --- | --- |
@@ -37,7 +37,7 @@ authorize implementation outside an approved Queue.
 | `CT-T006` | The first selected FAT volume serial is formatted as canonical `UUID=XXXX-XXXX` and becomes the loader-origin identity even when `BOOTX64.EFI` came from another FAT |
 | `CT-T007` | Handle-count, device-path-byte, allocation, open/read, and media-change boundaries unwind every non-selected file/root/pool resource without a write |
 
-## Planned p003 configuration fixtures
+## Completed p003 configuration fixtures
 
 | Case | Required evidence |
 | --- | --- |
@@ -53,7 +53,7 @@ authorize implementation outside an approved Queue.
 | `CT-T017` | OVMF immediately boots configured overlay and native-UFS cells without a menu/countdown/key read and reports the exact expected common parameter string; the GOP descriptor and complete framebuffer mapping span pass checked length/arithmetic bounds first |
 | `CT-T018` | A two-marker OVMF image warns and boots the contractually first configuration; corruption of that selected file stops instead of retrying the second |
 
-## Planned p004 source-audit fixtures
+## Completed p004 source-audit fixtures
 
 | Case | Required evidence |
 | --- | --- |
@@ -64,17 +64,39 @@ authorize implementation outside an approved Queue.
 | `CT-T023` | Post-p003 UEFI LoadOptions helpers and every other new dead-source candidate have a retain/delete evidence row covering build owner, symbol references, tests, and docs |
 | `CT-T024` | The supported `make -j16` gate, affected host tests, p002/p003 OVMF boot, representative legacy x86 smoke, and retained PC-98 M9 link checks pass without aggregate `make check` |
 
-## Planned p005/p006 BIOS configuration fixtures
+## Completed p005/p006 BIOS configuration fixtures
 
 | Case | Required evidence |
 | --- | --- |
-| `CT-T025` | Source inventory proves that current PC/AT and PC-98 `BOOTZBSD.EXE` paths use fixed `VMUNIX` plus an embedded parameter record and do not implement a legacy `boot.cfg` reader |
+| `CT-T025` | The pre-q032 inventory recorded that the old PC/AT and PC-98 `BOOTZBSD.EXE` paths used fixed `VMUNIX` plus an embedded parameter record and had no legacy `boot.cfg` reader; the post-q032 audit proves those production fallbacks are gone and the platform configuration files are now authoritative |
 | `CT-T026` | i386 PC/AT BIOS reaches overlay and native roots through active MBR entry, payload FAT PBR, `BOOTZBSD.EXE`, and `/zedbsd.cfg`, with exact p003 parameter text |
 | `CT-T027` | One amd64 hybrid image has distinct ESP and payload FAT; SeaBIOS reaches PBR/`BOOTZBSD.EXE` and OVMF reaches `BOOTX64.EFI`, both consume the payload `/zedbsd.cfg`, kernel, and FAT UUID, and both reach the same init |
 | `CT-T028` | i386 PC/AT and amd64 BIOS missing/invalid config and missing/invalid configured kernel fail visibly without embedded or fixed-name fallback; each MZ payload remains within the PBR load ceiling |
 | `CT-T029` | The hybrid image validator proves ESP/payload separation, active hybrid-MBR payload selection, payload PBR, and correct placement of `BOOTX64.EFI`, `BOOTZBSD.EXE`, `/zedbsd.cfg`, kernel, and images; amd64 BIOS cannot fall back to the direct-kernel Stage 2 |
 | `CT-T030` | PC-98 `BOOTZBSD.EXE` consumes root `BOOTZBSD.CFG`, matches the p003 corpus and exact record, and boots both overlay and native-root QEMU cells |
-| `CT-T031` | PC-98 missing/invalid `BOOTZBSD.CFG` and kernel stop visibly; every obsolete fixed-loader entry path is either removed or proven to use the common configured path |
+| `CT-T031` | PC-98 missing/invalid `BOOTZBSD.CFG` and kernel stop visibly; malformed configuration first clusters, configured-subdirectory successors, and kernel successors cannot escape mounted FAT bounds; every obsolete fixed-loader entry path is either removed or proven to use the common configured path |
+
+Production-loader runners:
+
+```sh
+plan/ws013-containers/tests/run-pcat-zedbsd-config-qemu.sh OUTPUT
+plan/ws013-containers/tests/run-pc98-zedbsd-config-qemu.sh OUTPUT
+```
+
+The PC/AT runner covers i386 overlay/native BIOS, one amd64 image through
+SeaBIOS IDE, SeaBIOS xHCI USB, and OVMF xHCI USB, safe LFN/subdirectory
+selection, and missing/invalid config, missing kernel, PBR checksum, BPB, ELF
+file-bound, and ELF physical-destination failures (20 cells). The PC-98 runner
+covers its independent 16-cell configuration/path/bounds matrix, including an
+unmapped ELF entry, rejection of an undersized reserved area, an undersized
+BPB volume, and an overflowing partition start before PBR continuation reads,
+and rejection before an out-of-volume `BOOTZBSD.EXE` read.
+
+Final q032 evidence is `build/p005-pcat-acceptance7` (20/20) and
+`build/p006-pc98-pbr-total-final` (16/16). The image-tool gate also proves atomic
+failure preserves the previously published target, disk and partition GUIDs
+are nonzero and distinct per medium, and the installed reserved-area Stage 2
+is an exact byte match for the declared chain-loader input.
 
 ## Fixture rules
 

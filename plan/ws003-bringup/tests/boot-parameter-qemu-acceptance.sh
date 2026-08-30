@@ -18,7 +18,6 @@ case_filter=all
 mode=run
 output=
 noct=$repo/build/NoctLang/build-static/noct
-parameter_patcher=$script_dir/patch-boot-parameter-record.noct
 
 usage()
 {
@@ -163,12 +162,6 @@ done
 	echo "Noct toolchain missing; run make toolchain first" >&2
 	exit 2
 }
-[[ -f $parameter_patcher ]] || {
-	echo "BPR1 patcher missing: $parameter_patcher" >&2
-	exit 2
-}
-"$noct" --path="$repo/tools/build" "$parameter_patcher" --self-test
-
 image_tool=$output/host/boot-parameter-image-tool
 cc -std=c11 -Wall -Wextra -Werror \
     "$script_dir/boot-parameter-image-tool.c" -o "$image_tool"
@@ -267,8 +260,9 @@ parameter_text()
 {
 	local group=$1 case_name=$2 raw_device native_device
 	if [[ $group == amd64 ]]; then
-		raw_device=/dev/sda3
-		native_device=/dev/sda3
+		# GPT entries 1..3 are ESP, payload FAT, and BIOS loader.
+		raw_device=/dev/sda4
+		native_device=/dev/sda4
 	else
 		raw_device=/dev/sda2
 		native_device=/dev/sda2
@@ -301,7 +295,7 @@ parameter_text()
 	esac
 }
 
-write_uefi_config()
+write_zedbsd_config()
 {
 	local parameters=$1 destination=$2 bytes lines longest assembled
 	local -a tokens=()
@@ -318,7 +312,7 @@ write_uefi_config()
 	lines=$(wc -l <"$destination")
 	longest=$(awk '{ if (length > maximum) maximum=length }
 	    END { print maximum+0 }' "$destination")
-	assembled=$(uefi_parameter_text "$parameters")
+	assembled=$(normalized_parameter_text "$parameters")
 	if ((bytes > 4096 || lines > 64 || longest > 511 ||
 	    ${#assembled} > 3071)); then
 		echo "generated zedbsd.cfg exceeds parser bounds: $destination" >&2
@@ -326,7 +320,7 @@ write_uefi_config()
 	fi
 }
 
-uefi_parameter_text()
+normalized_parameter_text()
 {
 	local parameters=$1 token have_boot0=0
 	local -a tokens=()
@@ -383,15 +377,17 @@ build_group_once()
 production_loader_paths()
 {
 	local group=$1 build_dir=$repo/build/$group
+	local stage2_bin=$build_dir/bootloader/stage2-chain.bin
+	[[ $group == pc98 ]] && stage2_bin=$build_dir/bootloader/stage2.bin
 	printf '%s\n' \
 	    "$build_dir/bootloader/stage1.bin" \
-	    "$build_dir/bootloader/stage2.bin" \
+	    "$stage2_bin" \
 	    "$build_dir/bootloader/partition-pbr.bin" \
 	    "$build_dir/bootloader/bootzbsd.raw" \
 	    "$build_dir/bootloader/bootzbsd.bin" \
 	    "$build_dir/bootloader/BOOTZBSD.EXE"
 	if [[ $group == amd64 ]]; then
-		printf '%s\n' "$build_dir/bootloader/stage2.raw" \
+		printf '%s\n' "$build_dir/bootloader/stage2-chain.raw" \
 		    "$build_dir/uefi/BOOTX64.EFI"
 	fi
 }
@@ -409,41 +405,24 @@ hash_production_loaders()
 	done < <(production_loader_paths "$group")
 }
 
-patch_record()
-{
-	local parameters=$1 input=$2 output_file=$3
-	"$noct" --path="$repo/tools/build" "$parameter_patcher" \
-	    --text "$parameters" "$input" "$output_file"
-}
-
 prepare_case_loaders()
 {
 	local group=$1 parameters=$2 destination=$3
 	local build_dir=$repo/build/$group
+	local stage2_bin=$build_dir/bootloader/stage2-chain.bin
+	[[ $group == pc98 ]] && stage2_bin=$build_dir/bootloader/stage2.bin
 	mkdir -p -- "$destination"
-	if [[ $group == amd64 ]]; then
-		patch_record "$parameters" "$build_dir/bootloader/stage2.raw" \
-		    "$destination/stage2.raw"
-		"$noct" --path="$repo/tools/build" \
-		    "$repo/tools/build/finalize-bios-stage2.noct" --machine pcat \
-		    "$destination/stage2.raw" "$destination/stage2.bin"
-	else
-		cp "$build_dir/bootloader/stage2.bin" "$destination/stage2.bin"
-	fi
-
-	patch_record "$parameters" "$build_dir/bootloader/bootzbsd.raw" \
-	    "$destination/bootzbsd.raw"
-	"$noct" --path="$repo/tools/build" \
-	    "$repo/tools/build/finalize-bios-stage2.noct" \
-	    --machine "$([[ $group == pc98 ]] && echo pc98 || echo pcat)" \
-	    "$destination/bootzbsd.raw" "$destination/bootzbsd.bin"
-	"$noct" --path="$repo/tools/build" \
-	    "$repo/tools/build/make-mz-exe.noct" --entry 0x20 \
-	    "$destination/bootzbsd.bin" "$destination/BOOTZBSD.EXE"
+	# Loader code is invariant across cases.  Each case now supplies the
+	# authoritative on-disk configuration instead of patching an embedded BPR1.
+	cp "$stage2_bin" "$destination/stage2.bin"
+	cp "$build_dir/bootloader/bootzbsd.raw" "$destination/bootzbsd.raw"
+	cp "$build_dir/bootloader/bootzbsd.bin" "$destination/bootzbsd.bin"
+	cp "$build_dir/bootloader/BOOTZBSD.EXE" "$destination/BOOTZBSD.EXE"
+	write_zedbsd_config "$parameters" "$destination/zedbsd.cfg"
 
 	if [[ $group == amd64 ]]; then
+		cp "$build_dir/bootloader/stage2-chain.raw" "$destination/stage2.raw"
 		cp "$build_dir/uefi/BOOTX64.EFI" "$destination/BOOTX64.EFI"
-		write_uefi_config "$parameters" "$destination/zedbsd.cfg"
 		"$noct" --path="$repo/tools/build" \
 		    "$repo/platform/amd64/tools/check-bootx64.noct" \
 		    "$destination/BOOTX64.EFI"
@@ -465,10 +444,14 @@ build_extended_image()
 	    --stage2 "$loaders/stage2.bin"
 	    --partition-pbr "$build_dir/bootloader/partition-pbr.bin"
 	    --bootzbsd "$loaders/BOOTZBSD.EXE"
-	    --kernel "$build_dir/vmunix" --size-mib 201 --fat-size-mib 128)
+	    --kernel "$build_dir/vmunix" --size-mib 201 --fat-size-mib 128
+	    --zedbsd-config "$loaders/zedbsd.cfg")
 	if [[ $group == amd64 ]]; then
+		# Keep aligned room after the shifted payload FAT for an optional
+		# acceptance-only native-root or raw-swap GPT partition.
+		command+=(--size-mib 260)
 		command+=(--gpt --bootx64 "$loaders/BOOTX64.EFI"
-		    --zedbsd-config "$loaders/zedbsd.cfg")
+		    )
 	fi
 	case $case_name in
 	default|shell|invalid|cross-boot|partuuid-reorder)
@@ -480,7 +463,7 @@ build_extended_image()
 		    --swapfile "$repo/build/swapfile")
 		;;
 	native|root-swap-alias)
-		partition_index=$([[ $group == amd64 ]] && echo 3 || echo 2)
+		partition_index=$([[ $group == amd64 ]] && echo 4 || echo 2)
 		kind=ufs
 		payload=$build_dir/ufs-root.img
 		;;
@@ -492,7 +475,7 @@ build_extended_image()
 			command+=(--swapfile "$repo/build/swapfile")
 		fi
 		if [[ $case_name != file-swap ]]; then
-			partition_index=$([[ $group == amd64 ]] && echo 3 || echo 2)
+			partition_index=$([[ $group == amd64 ]] && echo 4 || echo 2)
 			kind=swap
 			payload=$repo/build/swapfile
 		fi
@@ -502,8 +485,10 @@ build_extended_image()
 	command+=("$destination")
 	"${command[@]}"
 	if [[ -n $partition_index ]]; then
+		local partition_start=264192
+		[[ $group == amd64 ]] && partition_start=397312
 		"$image_tool" add-partition --machine "$machine" --kind "$kind" \
-		    --index "$partition_index" --start-lba 264192 \
+		    --index "$partition_index" --start-lba "$partition_start" \
 		    --payload "$payload" "$destination"
 	fi
 	if [[ $case_name == root-swap-alias ]]; then
@@ -528,7 +513,7 @@ build_auxiliary_image()
 	local destination=$1 build_dir=$repo/build/amd64
 	"$repo/build/zedimage-host" disk --machine pcat \
 	    --stage1 "$build_dir/bootloader/stage1.bin" \
-	    --stage2 "$build_dir/bootloader/stage2.bin" \
+	    --stage2 "$build_dir/bootloader/stage2-chain.bin" \
 	    --partition-pbr "$build_dir/bootloader/partition-pbr.bin" \
 	    --bootzbsd "$build_dir/bootloader/BOOTZBSD.EXE" \
 	    --kernel "$build_dir/vmunix" \
@@ -654,6 +639,7 @@ monitor_controller()
 		    "$guest_log" "$boot_timeout" &&
 		    wait_for_pattern 'VFS initialization failed \(3\); entering idle\.' \
 		    "$guest_log" 5; then
+			sleep "$settle_seconds"
 			echo pass >"$result"
 		else
 			echo 'fail: expected root-mode rejection was not observed' >"$result"
@@ -666,6 +652,7 @@ monitor_controller()
 		    wait_for_pattern \
 		    'VFS initialization failed \(16\); entering idle\.' \
 		    "$guest_log" 5; then
+			sleep "$settle_seconds"
 			echo pass >"$result"
 		else
 			echo 'fail: expected root/swap alias rejection was not observed' \
@@ -704,11 +691,8 @@ monitor_controller()
 validate_log()
 {
 	local platform=$1 case_name=$2 parameters=$3 guest_log=$4
-	local raw_device expected_sources boot0_source='<loader-origin>'
-	raw_device=$([[ $platform == amd64-* ]] && echo /dev/sda3 || echo /dev/sda2)
-	if [[ $platform == amd64-uefi ]]; then
-		boot0_source=UUID=$uefi_fat_uuid
-	fi
+	local raw_device expected_sources boot0_source=UUID=$uefi_fat_uuid
+	raw_device=$([[ $platform == amd64-* ]] && echo /dev/sda4 || echo /dev/sda2)
 	if ! rg -a -F -q -- "boot: parameters: $parameters" "$guest_log"; then
 		echo "missing exact parameter marker" >&2
 		return 1
@@ -744,7 +728,9 @@ validate_log()
 		;;
 	invalid)
 		rg -a -q 'vfs: select root mode failed \(error 3\)' "$guest_log" &&
-		rg -a -q 'VFS initialization failed \(3\); entering idle\.' "$guest_log"
+		rg -a -q 'VFS initialization failed \(3\); entering idle\.' "$guest_log" &&
+		! rg -a -q 'vfs: root=' "$guest_log" &&
+		! rg -a -q 'init: system running' "$guest_log"
 		;;
 	root-swap-alias)
 		rg -a -q \
@@ -764,13 +750,13 @@ validate_log()
 		rg -a -q 'BR-T46-SWAP-EXERCISE PASS bytes=[1-9][0-9]* page-in=[1-9][0-9]* page-out=[1-9][0-9]* swapped=[0-9][0-9]*' "$guest_log"
 		;;
 	cross-boot)
-		rg -a -F -q "vfs: boot0 $boot0_source -> /dev/sdb1" "$guest_log" &&
+		rg -a -F -q "vfs: boot0 $boot0_source -> /dev/sdb2" "$guest_log" &&
 		rg -a -F -q 'vfs: boot1 UUID=A1B2-C3D4 -> /dev/sda1' "$guest_log" &&
 		rg -a -F -q 'vfs: root=overlay lower=boot0:rootfs.img upper=boot1:data.img' "$guest_log" &&
 		rg -a -q '(^|[[:blank:]])login:[[:blank:]]*$' "$guest_log"
 		;;
 	partuuid-reorder)
-		rg -a -F -q "vfs: boot0 $boot0_source -> /dev/sdb1" "$guest_log" &&
+		rg -a -F -q "vfs: boot0 $boot0_source -> /dev/sdb2" "$guest_log" &&
 		rg -a -F -q 'vfs: boot1 PARTUUID=fbf09090-01 -> /dev/sda1' "$guest_log" &&
 		rg -a -F -q 'vfs: root=overlay lower=boot0:rootfs.img upper=boot1:data.img' "$guest_log" &&
 		rg -a -q '(^|[[:blank:]])login:[[:blank:]]*$' "$guest_log"
@@ -798,11 +784,12 @@ validate_no_fatal_log()
 
 validator_self_test()
 {
-	local complete missing
+	local complete missing normalized_default
 	complete=$(mktemp /tmp/ws003-br-t46-validator-complete.XXXXXX)
 	missing=$(mktemp /tmp/ws003-br-t46-validator-missing.XXXXXX)
+	normalized_default=$(normalized_parameter_text "$default_parameters")
 	{
-		printf 'boot: parameters: %s\n' "$default_parameters"
+		printf 'boot: parameters: %s\n' "$normalized_default"
 		printf '%s\n' \
 		    'vfs: root=overlay lower=boot0:rootfs.img upper=boot0:data.img' \
 		    'swap: swap0 source=boot0:swapfile slots=16' \
@@ -810,13 +797,13 @@ validator_self_test()
 		    'boot: starting init /sbin/init' \
 		    'login:'
 	} >"$complete"
-	if ! validate_log pcat default "$default_parameters" "$complete"; then
+	if ! validate_log pcat default "$normalized_default" "$complete"; then
 		rm -f -- "$complete" "$missing"
 		echo 'BR-T46 validator self-test rejected a complete log' >&2
 		return 1
 	fi
 	awk '!/^login:$/' "$complete" >"$missing"
-	if validate_log pcat default "$default_parameters" "$missing"; then
+	if validate_log pcat default "$normalized_default" "$missing"; then
 		rm -f -- "$complete" "$missing"
 		echo 'BR-T46 validator self-test accepted a missing marker' >&2
 		return 1
@@ -974,7 +961,7 @@ run_group()
 {
 	local group=$1 config build_dir
 	local case_name parameters_file parameters group_cases
-	local uefi_parameters_file= uefi_parameters= run_parameters
+	local normalized_parameters_file= normalized_parameters= run_parameters
 	local run_parameters_file
 	local base_image auxiliary_image platform cell_dir image_hash param_hash elapsed
 	local cell_status elapsed_file
@@ -1009,11 +996,9 @@ run_group()
 		parameters_file=$output/config/$group-$case_name.parameters
 		parameter_text "$group" "$case_name" >"$parameters_file"
 		parameters=$(<"$parameters_file")
-		if [[ $group == amd64 ]]; then
-			uefi_parameters_file=$output/config/$group-$case_name.uefi.parameters
-			uefi_parameter_text "$parameters" >"$uefi_parameters_file"
-			uefi_parameters=$(<"$uefi_parameters_file")
-		fi
+		normalized_parameters_file=$output/config/$group-$case_name.normalized.parameters
+		normalized_parameter_text "$parameters" >"$normalized_parameters_file"
+		normalized_parameters=$(<"$normalized_parameters_file")
 		cell_dir=$output/cells/$group-$case_name-artifacts
 		mkdir -p "$cell_dir"
 		local loaders=$cell_dir/loaders
@@ -1031,15 +1016,12 @@ run_group()
 				}
 			done
 			if [[ $group == amd64 ]]; then
-				for artifact in bootloader/stage2.raw \
-				    bootloader/stage2.bin uefi/BOOTX64.EFI; do
-					relative=${artifact##*/}
-					[[ $(sha256sum "$build_dir/$artifact" | awk '{print $1}') == \
-					    $(sha256sum "$loaders/$relative" | awk '{print $1}') ]] || {
-						echo "static default differs in amd64/$artifact" >&2
-						return 1
-					}
-				done
+				[[ $(sha256sum "$build_dir/bootloader/stage2-chain.raw" | awk '{print $1}') == \
+				    $(sha256sum "$loaders/stage2.raw" | awk '{print $1}') ]]
+				[[ $(sha256sum "$build_dir/bootloader/stage2-chain.bin" | awk '{print $1}') == \
+				    $(sha256sum "$loaders/stage2.bin" | awk '{print $1}') ]]
+				[[ $(sha256sum "$build_dir/uefi/BOOTX64.EFI" | awk '{print $1}') == \
+				    $(sha256sum "$loaders/BOOTX64.EFI" | awk '{print $1}') ]]
 			fi
 		fi
 		base_image=$cell_dir/base.img
@@ -1071,11 +1053,11 @@ run_group()
 			    >"$cell_dir/image-layout.txt"
 			;;
 		esac
-		if [[ $group == amd64 ]]; then
-			"$image_tool" set-fat-uuid --partition-lba 2048 \
-			    --uuid "$uefi_fat_uuid" "$base_image" \
-			    >>"$cell_dir/image-layout.txt"
-		fi
+		local boot_partition_lba=2048
+		[[ $group == amd64 ]] && boot_partition_lba=133120
+		"$image_tool" set-fat-uuid --partition-lba "$boot_partition_lba" \
+		    --uuid "$uefi_fat_uuid" "$base_image" \
+		    >>"$cell_dir/image-layout.txt"
 		if [[ $case_name == cross-boot || \
 		    $case_name == partuuid-reorder ]]; then
 			auxiliary_image=$cell_dir/aux-base.img
@@ -1086,12 +1068,8 @@ run_group()
 		if [[ $group == amd64 ]]; then
 			for platform in amd64-bios amd64-uefi; do
 				selected "$platform" "$case_name" || continue
-				run_parameters=$parameters
-				run_parameters_file=$parameters_file
-				if [[ $platform == amd64-uefi ]]; then
-					run_parameters=$uefi_parameters
-					run_parameters_file=$uefi_parameters_file
-				fi
+				run_parameters=$normalized_parameters
+				run_parameters_file=$normalized_parameters_file
 				param_hash=$(sha256sum "$run_parameters_file" | \
 				    awk '{print $1}')
 				local run_dir=$output/cells/$platform-$case_name
@@ -1121,7 +1099,7 @@ run_group()
 			done
 		else
 			platform=$group
-			param_hash=$(sha256sum "$parameters_file" | awk '{print $1}')
+			param_hash=$(sha256sum "$normalized_parameters_file" | awk '{print $1}')
 			local run_dir=$output/cells/$platform-$case_name
 			mkdir -p "$run_dir"
 			echo "BR-T46 run: $platform $case_name"
@@ -1130,7 +1108,7 @@ run_group()
 			(
 				set -e
 				run_qemu_cell "$platform" "$case_name" \
-			    "$base_image" "$auxiliary_image" "$parameters" \
+			    "$base_image" "$auxiliary_image" "$normalized_parameters" \
 			    "$run_dir"
 			) >"$elapsed_file"
 			cell_status=$?

@@ -142,23 +142,24 @@ $(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
 	@test $$(stat -c%s $@) -eq 512
 	@test "$$(od -An -tx1 -j510 -N2 $@ | tr -d ' \n')" = 55aa
 
-$(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2-chain.S \
+$(BUILD)/bootloader/stage2-chain.o: $(BIOS_LOADER)/stage2-chain.S \
 	bootloader/include/stage2-header.inc
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
 
-$(BUILD)/bootloader/stage2.elf: $(BUILD)/bootloader/stage2.o \
+$(BUILD)/bootloader/stage2-chain.elf: $(BUILD)/bootloader/stage2-chain.o \
 	$(BIOS_LOADER)/stage2.ld
 	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage2.ld $< -o $@
 
-$(BUILD)/bootloader/stage2.raw: $(BUILD)/bootloader/stage2.elf
+$(BUILD)/bootloader/stage2-chain.raw: $(BUILD)/bootloader/stage2-chain.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 
-$(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.raw \
+$(BUILD)/bootloader/stage2-chain.bin: $(BUILD)/bootloader/stage2-chain.raw \
 	$(BUILD_TOOLS_DIR)/finalize-bios-stage2.noct
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/finalize-bios-stage2.noct --machine pcat $< $@
 
-$(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S
+$(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S \
+	bootloader/include/stage2-header.inc
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
 $(BUILD)/bootloader/partition-pbr.elf: $(BUILD)/bootloader/partition-pbr.o
@@ -169,16 +170,37 @@ $(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
 
 $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	$(BIOS_LOADER)/vbe.inc \
+	bootloader/bios/fat-directory.h \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
 	bootloader/include/elf.inc bootloader/include/amd64-handoff.h \
 	bootloader/include/boot-parameter-handoff.h \
 	bootloader/include/boot-parameter-record.inc \
+	bootloader/uefi/zedbsd-config.h \
 	include/boot/parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
-$(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o $(BIOS_LOADER)/stage2.ld
-	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+$(BUILD)/bootloader/bios-zedbsd-config.i386.o: \
+	bootloader/uefi/zedbsd-config.c bootloader/uefi/zedbsd-config.h \
+	bootloader/include/boot-parameter-handoff.h include/boot/parameters.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+		-fno-stack-protector -fno-asynchronous-unwind-tables \
+		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+		-c $< -o $@
+$(BUILD)/bootloader/bios-fat-directory.i386.o: \
+	bootloader/bios/fat-directory.c bootloader/bios/fat-directory.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+		-fno-stack-protector -fno-asynchronous-unwind-tables \
+		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+		-c $< -o $@
+PCAT_BOOTZBSD_HELPERS := $(BUILD)/bootloader/bios-zedbsd-config.i386.o \
+	$(BUILD)/bootloader/bios-fat-directory.i386.o
+$(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
+	$(PCAT_BOOTZBSD_HELPERS) $(BIOS_LOADER)/bootzbsd.ld
+	$(LD) -m elf_i386 -T $(BIOS_LOADER)/bootzbsd.ld \
+		$(filter %.o,$^) -o $@
 $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 $(BUILD)/bootloader/bootzbsd.bin: $(BUILD)/bootloader/bootzbsd.raw \
@@ -243,26 +265,31 @@ I386_ARCH_FILES += $(ZEDBSD_BASE_DATA_FILES)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 $(eval $(call ZEDBSD_ROOTFS_TAR_RULE,$(BUILD)/rootfs.tar.gz,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 I386_ARCH_UFS_IMAGE := $(ARCH_IMAGE_DIR)/i386.ufs
+PCAT_ZEDBSD_CONFIG := $(PCAT)/zedbsd.cfg
+PCAT_NATIVE_ZEDBSD_CONFIG := $(PCAT)/zedbsd-native.cfg
+.DELETE_ON_ERROR: $(BUILD)/bios-hdd-image.img \
+	$(BUILD)/ufs-root-hdd-image.img $(BUILD)/hdd-image.img
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(I386_ARCH_UFS_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(I386_ARCH_UFS_IMAGE) $(DATA_IMAGE) $(SWAP_IMAGE) \
+	$(PCAT_ZEDBSD_CONFIG) \
 	$(HOLORIS_NOCT) \
+	$(ZEDBSD_IMAGE_HOST) \
 	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct \
 	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
+		--checker $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
+		--checker-runner $(NOCT) \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--stage2 $(BUILD)/bootloader/stage2-chain.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+		--zedbsd-config $(PCAT_ZEDBSD_CONFIG) \
 		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
-	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
-		--machine pcat --bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
-		--kernel $(BUILD)/vmunix --arch-image $(I386_ARCH_UFS_IMAGE) \
-		--data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) $@
 
 $(BUILD)/ufs-root.img: $(I386_ARCH_UFS_IMAGE) \
 	$(BUILD_TOOLS_DIR)/make-ufs1-root-image.py tools/build/ufs1_format.py
@@ -270,13 +297,19 @@ $(BUILD)/ufs-root.img: $(I386_ARCH_UFS_IMAGE) \
 		--arch-profile i386 --arch-image $(I386_ARCH_UFS_IMAGE) $@
 
 $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(BUILD)/ufs-root.img \
-	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.py
-	$(PYTHON) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.py --force \
+	$(PCAT_NATIVE_ZEDBSD_CONFIG) \
+	$(ZEDBSD_IMAGE_HOST) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct \
+	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct
+	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct \
+		--backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
+		--checker $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
+		--checker-runner $(NOCT) \
 		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--stage2 $(BUILD)/bootloader/stage2-chain.bin --partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+		--zedbsd-config $(PCAT_NATIVE_ZEDBSD_CONFIG) \
 		--ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
 
 $(BUILD)/src/hal/%.o: src/hal/%.c
@@ -649,7 +682,8 @@ dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
 .PHONY: dynamic-userland-check
 
 $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
-	cp -f $< $@
+	cp -f $< $@.tmp
+	mv -f $@.tmp $@
 
 $(BUILD)/zedbsd-grub.iso: $(BUILD)/vmunix \
 	platform/pcat/tools/make-pcat-grub-iso.sh

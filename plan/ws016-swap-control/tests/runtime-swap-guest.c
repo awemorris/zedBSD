@@ -19,7 +19,7 @@
 #define FILE_SOURCE "boot0:swapfile"
 #define FILE_ALIAS "boot0:/swapfile"
 #define BAD_SOURCE "boot0:badswap"
-#define RAW_SOURCE "/dev/sda3"
+#define RAW_SOURCE "/dev/sda4"
 #define UNSUPPORTED_SOURCE "/unsupported.swap"
 #define READY_BYTE 'R'
 #define CONTINUE_BYTE 'C'

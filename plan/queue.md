@@ -1,141 +1,137 @@
-# Queue: UEFI `zedbsd.cfg` boot path
+# Queue: BIOS `zedbsd.cfg` convergence
 
 Last updated: 2026-08-30
 
-QID: `q031`
+QID: `q032`
 
 Queue status: completed
 
 Queue finished: **Yes**
 
-Authorization: after reviewing the current `BOOTX64.EFI` behavior, the user
-fixed the `zedbsd.cfg` discovery, kernel directive, direct-parameter,
-shorthand, native-root, missing-config, and LoadOptions policy and explicitly
-requested removal of the dead startup path on 2026-08-30.
+Authorization: the user explicitly requested that the three planned
+`BOOTZBSD.EXE` configuration targets be placed in a Queue and implemented on
+2026-08-30.
 
 Timebox: no fixed wall-clock limit. Complete or honestly mark `uncleared` each
-finite software Phase. No physical Latitude action is requested in this Queue.
+finite Phase; stop only for a real human decision that cannot be resolved from
+the frozen p003 contract and existing loader behavior.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q030](queue-q030.md)
+Previous Queue: [q031](queue-q031.md)
 
 ## Purpose
 
-Replace the hard-coded amd64 UEFI boot contract with one simple editable
-`/zedbsd.cfg` on a same-disk FAT16/FAT32, while retaining the existing textual
-kernel-parameter ABI. Remove the proven-dead kernel startup menu and audit the
-remaining boot path before adding more policy.
-
-Read-only `diskpart` and `zedinst` move to the next dependency-ready Queue.
-The installer source-image stability decision remains open and is not hidden
-inside this bootloader work.
+Converge all supported x86 BIOS `BOOTZBSD.EXE` loaders on the bounded
+configuration language already implemented by amd64 UEFI. i386 PC/AT and
+amd64 BIOS consume root `/zedbsd.cfg`; PC-98 consumes root
+`/BOOTZBSD.CFG` under the earlier filename decision. The grammar, configured
+kernel selection, shorthand, exact parameter record, and no-fallback behavior
+are otherwise identical.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws013-p002` | [Phase](ws013-containers/phase002-uefi-payload-discovery/phase.md) | completed | Search same-physical-disk FAT16/FAT32 filesystems for `/zedbsd.cfg`; zero is fatal, multiple warns and uses the deterministic first candidate |
-| 2 | `ws013-p003` | [Phase](ws013-containers/phase003-uefi-boot-config-menu/phase.md) | completed | Parse required `kernel=`, normalize direct kernel parameters and shorthand, load the selected-FAT kernel, and boot overlay or native UFS with LoadOptions ignored |
-| 3 | `ws013-p004` | [Phase](ws013-containers/phase004-boot-path-dead-source-audit/phase.md) | completed | Complete the post-p003 inventory without guessing that test-only code is dead, retaining or deleting each candidate from evidence |
+| 1 | `ws013-p005` | [Phase](ws013-containers/phase005-pcat-bios-zedbsd-config/phase.md) | completed | i386 PC/AT and amd64 BIOS reach payload PBR -> `BOOTZBSD.EXE` -> `/zedbsd.cfg`; one amd64 hybrid image shares its payload configuration with UEFI |
+| 2 | `ws013-p006` | [Phase](ws013-containers/phase006-pc98-bootzbsd-config/phase.md) | completed | PC-98 `BOOTZBSD.EXE` consumes `/BOOTZBSD.CFG` with exact p003 behavior and boots overlay/native roots |
 
 ## Dependency order
 
 ```text
-q030 strict GPT/PARTUUID/NVMe
+q031 p002/p003 UEFI language and selected-FAT contract
         |
-        `--> ws013-p002 discovery --> ws013-p003 cfg/load/handoff
-                                      `--> ws013-p004 final dead-path audit
-
-future q032: ws019-p002/p003 read-only administration
-        `--> source-template decision --> ws019-p004/p005 installer
+        +--> ws013-p005 PC/AT i386 + amd64 BIOS
+        |
+        `--> ws013-p006 PC-98 (reuses parser findings, not loader source)
 ```
+
+The two Phases may share conformance vectors. Their loader implementations
+remain independent unless an already-stable boundary makes reuse simpler.
 
 ## Frozen behavior
 
-- Search only UEFI SimpleFS handles on the same physical device as the loaded
-  `BOOTX64.EFI`; FAT16 and FAT32 are supported, FAT12 is not.
-- Check the loaded filesystem first, then retain UEFI handle-enumeration order.
-  Scan every eligible handle to count candidates. Zero candidates prints that
-  `/zedbsd.cfg` was not found and stops. More than one prints a warning and
-  uses the first candidate.
-- `kernel=PATH` is one required loader-only directive. It is removed from the
-  kernel parameter text and names a volume-root-relative file on the selected
-  config FAT; one leading slash is accepted. No device selector, empty
-  component, `.` or `..` is allowed.
-- Every other nonempty line is one existing textual kernel parameter. The
-  loader converts bounded ASCII LF/CRLF lines to a space-separated record.
-  There are no sections, menu, timeout, comments, quoting, or escaping.
-- Both root modes are supported: `rootpart=` selects native UFS, while
-  `overlay-root=` plus `overlay-data=` selects the existing overlay path.
-- If `boot0=` is absent, the loader inserts the selected config FAT's UUID.
-  An explicit `boot0=` is preserved, so an advanced configuration may use the
-  config/kernel FAT only as the loader source and bind `boot0` elsewhere.
-- Bare `overlay-root`, `overlay-data`, and `swapN` file values receive the
-  `boot0:` prefix. An existing `boot0:`--`boot3:` prefix is retained. A raw
-  swap selector must be explicit as `/dev/...`, `UUID=`, `LABEL=`,
-  `PARTUUID=`, or `PARTLABEL=` and is not prefixed.
-- On this configured path, UEFI LoadOptions are ignored. Missing or invalid
-  `zedbsd.cfg`, missing/invalid kernel, parameter duplication, or expanded text
-  beyond the existing 3071-byte ceiling fails visibly; there is no hard-coded
-  fallback configuration.
-- `/zedbsd.cfg` is the UEFI configuration name. The deleted kernel-internal
-  legacy `BOOT.CFG`/`ZEDBSD.CFG` startup menu is not revived or reused.
+- `/zedbsd.cfg` and `/BOOTZBSD.CFG` use the p003 v1 language: printable ASCII,
+  bounded `name=value` lines, exactly one loader-only `kernel=`, and every
+  other line passed through the existing textual kernel-parameter ABI.
+- Missing `boot0=` synthesizes the current payload FAT UUID. Relative
+  `overlay-root`, `overlay-data`, and boot-file `swapN` values receive
+  `boot0:`; explicit boot slots, raw swap selectors, `rootpart=`, and `init=`
+  retain their p003 meaning.
+- Missing/malformed/over-limit configuration, missing or invalid configured
+  kernel, or parameter overflow stops visibly. No embedded parameter record,
+  fixed `VMUNIX`, old direct-kernel path, or alternate configuration is a
+  production fallback.
+- i386 PC/AT and amd64 BIOS are separately accepted. amd64 must use its active
+  payload FAT PBR and MZ `BOOTZBSD.EXE`, replacing the reserved-area direct
+  Stage-2 kernel path while retaining valid hybrid GPT/MBR and UEFI boot.
+- PC-98 retains only the requested legacy filename difference. It does not
+  gain a second UEFI-style filename fallback.
+- The current i386 PC/AT and PC-98 physical-disk publication failure is a
+  preflight defect, not a relaxation of Phase completion. Repair it in a
+  bounded shared prerequisite when the root cause is common, or record a
+  platform-local repair in the owning Phase.
 
 ## Execution rules
 
 - Do not inspect or modify `.internal/` or `userland/noct/NoctLang`.
-- Preserve unrelated work and stage only q031 files at Phase boundaries.
-- Use `make -j16`, focused WS013 fixtures, and `qemu-system-x86_64`; do not use
-  `make check`.
-- Run ordinary, sanitizer, and analyzer variants for the pure discovery and
-  configuration helpers where supported.
-- After each completed Phase, synchronize P/W/M/Q, commit `WIP`, and push. If
-  push is unavailable, keep the local commit and continue.
-- A newly discovered human product/safety decision makes only the affected
-  Phase `uncleared`; record it and continue independent work.
+- Preserve unrelated work. Use `make -j16` and focused Phase fixtures; do not
+  use `make check`.
+- Use disposable image copies for negative or destructive media cases.
+- Validate parser parity with common host vectors and validate each production
+  loader through its real image chain in QEMU.
+- After each completed Phase, synchronize P/W/M/Q, commit `WIP`, and push.
+  If push is unavailable, retain the local commit and continue.
+- A new product/ABI decision makes only the affected item `uncleared`; record
+  the decision request and continue independent work.
 
 ## Verification contract
 
-- Static inventory proves whether each audited source is production-linked,
-  fixture-only, retained infrastructure, or truly orphaned before deletion.
-- Host fixtures cover candidate order/count, same-disk filtering, FAT type,
-  media change, all configuration bounds, kernel-path traversal, boot0
-  synthesis/validation, shorthand, native/overlay exclusivity, raw swap, and
-  exact final parameter text.
-- OVMF covers the config on the loaded FAT and on a separate same-disk FAT,
-  zero and duplicate candidates, cross-disk exclusion, overlay boot,
-  `rootpart=` native boot, missing kernel/config, and ignored LoadOptions.
-- The ordinary amd64 IDE and xHCI USB-root images continue to reach `login:`.
-- `make -j16` passes before q031 is closed.
+- Host fixtures compare exact parameter records for the same p003 valid and
+  invalid corpus across UEFI, PC/AT BIOS, and PC-98 policy.
+- i386 PC/AT boots overlay and native-root cells through the active FAT PBR
+  and configured `BOOTZBSD.EXE`.
+- One amd64 hybrid image boots through SeaBIOS and OVMF using the same payload
+  FAT configuration, kernel, images, and UUID.
+- PC-98 boots overlay and native-root cells through `BOOTZBSD.EXE` and
+  `/BOOTZBSD.CFG`.
+- Negative configuration and kernel cases stop without embedded/fixed-name or
+  direct-loader fallback; MZ/PBR size ceilings and image placement are checked.
+- `make -j16` passes after both Phases.
+
+## Completion evidence
+
+- `ws013-p005` passed its 20/20 production-loader matrix: i386 overlay/native,
+  amd64 SeaBIOS IDE, SeaBIOS xHCI USB, OVMF xHCI USB, LFN/subdirectory, missing
+  and invalid configuration/kernel, PBR/BPB, and ELF bound failures.
+- `ws013-p006` passed its 16/16 production-PBR matrix: overlay/native,
+  1024-byte-sector LFN, missing and invalid configuration/kernel, executable
+  entry, undersized reserved-area/volume, wrapped start LBA, and malformed
+  PBR/cluster/chain cases.
+- Shared configuration and FAT directory host tests passed ordinary,
+  sanitizer, and available static-analysis gates. Migrated BR-T46 image-helper
+  dry runs passed for PC/AT, amd64 BIOS, and amd64 UEFI.
+- The dedicated chain-Stage-2 artifact rebuilt correctly with a stale legacy
+  `stage2.o` present. Generic BIOS and GPT checkers rejected a one-byte-different
+  declared Stage 2. Stage 1 executable/signature identity checks passed for
+  PC/AT, amd64, and PC-98, and rejected one-byte and wrong-loader inputs.
+  Atomic checker failure preserved the previous published image and left no
+  unchecked temporary. FAT/GPT/native-UFS mismatch poisoning tests left no
+  extraction temporary and their immediate correct-input retries passed;
+  backend/checker failure paths also preserved the prior target and removed
+  both unchecked siblings. Per-medium GPT GUID generation and primary/backup
+  validation also passed.
+- A normal amd64 `config.mk` rebuild regenerated the root staging tree,
+  packaging tarball, UFS image, kernel, loader, and final hybrid image.
+  `make -j16`, public PC/AT/PC-98 image checks, the amd64 GPT checker,
+  shell syntax checks, and `git diff --check` passed.
+- No Phase required a new product or ABI decision. The remaining PC-98 FAT32
+  PBR layout and direct-DOS volume mapping questions are recorded as later
+  WS013 backlog, outside the completed FAT16 production contract.
 
 ## Completion definition
 
-q031 is finished when p004, p002, and p003 are each `completed` or honestly
-`uncleared`; P/W/M/Q contain the same actual evidence and residual findings;
-and the master identifies the next dependency-ready installer Queue or its
-remaining human source-template decision.
-
-## Actual result
-
-All three authorized Phases completed. `BOOTX64.EFI` now discovers the first
-readable same-disk FAT16/FAT32 `/zedbsd.cfg`, loads its required configured
-kernel, and emits the bounded common parameter record with the agreed
-normalization and no LoadOptions or fixed-name fallback. The final independent
-review aligned FAT media geometry with the kernel and added checked GOP and
-framebuffer mapping bounds.
-
-Evidence includes ordinary/sanitizer/analyzer host fixtures, BR-T43 handoff,
-the seven-cell post-review q35/OVMF matrix, overlay and native UEFI boot,
-cross-boot/PARTUUID cells, an amd64 SeaBIOS boot to `login:`, the retained
-PC-98 M9 link, strict `BOOTX64.EFI` rebuild, and `make -j16`. The dead-source
-audit removed only sources with proven no-owner or replacement evidence and
-retained uncertain/test-owned code.
-
-The later BIOS convergence goals are deliberately not smuggled into q031.
-They are now defined as `ws013-p005` (independently accepted i386 PC/AT and
-amd64 BIOS `/zedbsd.cfg`) and `ws013-p006` (PC-98 `/BOOTZBSD.CFG` using the
-same grammar). During an extra, non-gating PC-98 default-root run, the kernel
-entered successfully but the existing physical-disk registration remained
-empty and `boot0` resolution failed; p006 must preflight and either repair or
-separately prerequisite that baseline before claiming its loader acceptance.
+q032 is finished when p005 and p006 are each `completed` or honestly
+`uncleared`; exact implementation and QEMU evidence are synchronized into the
+Phase, WS, Queue, and master books; and no supported BIOS image silently uses
+the replaced fixed-name or embedded-parameter behavior.

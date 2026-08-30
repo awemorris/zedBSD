@@ -46,6 +46,7 @@ $(WS004_P023_IMAGE): $(BUILD)/bootloader/stage1.bin \
 		--backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
 		--machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \

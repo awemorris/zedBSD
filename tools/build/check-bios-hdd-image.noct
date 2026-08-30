@@ -3,26 +3,99 @@ require zedbuild;
 func biosCompare(image, source, name) {
     if (source == "") { return; }
     var extracted=image+".ws010-extract";
+    System.shell("rm -f "+zbShellQuote(extracted));
     var command="mcopy -n -i "+zbShellQuote(image+"@@1048576")+" "+
         zbShellQuote("::/"+name)+" "+zbShellQuote(extracted)+" >/dev/null && cmp "+
-        zbShellQuote(extracted)+" "+zbShellQuote(source)+" && rm -f "+zbShellQuote(extracted);
-    if(System.shell(command)!=0){zbFail(name+" differs from its input");}
+        zbShellQuote(extracted)+" "+zbShellQuote(source);
+    var status=System.shell(command);
+    System.shell("rm -f "+zbShellQuote(extracted));
+    if(status!=0){zbFail(name+" differs from its input");}
+}
+func biosCompareUfs(image, source, raw, machine) {
+    if (source == "") { return; }
+    var start=0;var blocks=0;
+    if (machine == "pcat") {
+        if (raw[462] != 0 || raw[466] != 0xa5) {
+            zbFail("native UFS MBR entry is invalid");
+        }
+        start=zbU32LE(raw,470);blocks=zbU32LE(raw,474);
+    } else {
+        if (raw[544] != 0x21 || raw[545] != 0x01) {
+            zbFail("native UFS PC-98 entry is invalid");
+        }
+        var first=(zbU16LE(raw,554)*8+raw[553])*17+raw[552];
+        var last=(zbU16LE(raw,558)*8+raw[557])*17+raw[556];
+        if (last < first) { zbFail("native UFS PC-98 extent is invalid"); }
+        start=first;blocks=last-first+1;
+    }
+    if (start == 0 || blocks == 0) { zbFail("native UFS extent is empty"); }
+    var extracted=image+".ws013-ufs-extract";
+    System.shell("rm -f "+zbShellQuote(extracted));
+    var command="test $(( $(stat -c %s "+zbShellQuote(source)+") % 512 )) -eq 0 && "+
+        "test $(( $(stat -c %s "+zbShellQuote(source)+") / 512 )) -eq "+blocks+" && "+
+        "dd if="+zbShellQuote(image)+" of="+zbShellQuote(extracted)+" bs=512 skip="+start+
+        " count="+blocks+" status=none && cmp "+zbShellQuote(extracted)+" "+
+        zbShellQuote(source);
+    var status=System.shell(command);
+    System.shell("rm -f "+zbShellQuote(extracted));
+    if (status != 0) { zbFail("native UFS differs from its input"); }
+}
+func biosCompareRaw(raw, offset, source, name) {
+    if (source == "") { return; }
+    var expected = zbReadFile(source);
+    if (Packed.size(expected) == 0 ||
+        offset + Packed.size(expected) > Packed.size(raw)) {
+        zbFail(name + " input is empty or outside the image");
+    }
+    for (j in 0..Packed.size(expected)) {
+        if (raw[offset + j] != expected[j]) {
+            zbFail(name + " differs from its input");
+        }
+    }
+}
+func biosCompareStage1(raw, source, machine) {
+    if (source == "") { return; }
+    var expected = zbReadFile(source);
+    if (Packed.size(expected) != 512 || Packed.size(raw) < 512) {
+        zbFail("Stage 1 input or image extent is invalid");
+    }
+    if (machine == "pc98") {
+        for (j in 0..512) {
+            if (raw[j] != expected[j]) { zbFail("Stage 1 differs from its input"); }
+        }
+        return;
+    }
+    // PC/AT builders populate the disk signature and partition table in the
+    // conventional 0x1b8..0x1fd range.  Everything else, including the boot
+    // signature, must remain byte-identical to the declared Stage 1.
+    for (j in 0..440) {
+        if (raw[j] != expected[j]) { zbFail("Stage 1 code differs from its input"); }
+    }
+    for (j in 510..512) {
+        if (raw[j] != expected[j]) { zbFail("Stage 1 signature differs from its input"); }
+    }
 }
 func main(args){
-    var machine="";var kernel="";var bootzbsd="";var arch="";var dataImage="";var swap="";var image="";var i=0;
+    var machine="";var stage1Input="";var stage2Input="";var kernel="";var bootzbsd="";var pbr="";var zedbsdConfig="";var arch="";var dataImage="";var swap="";var ufsRoot="";var image="";var i=0;
     while(i<Array.size(args)){var a=args[i];
         if(a=="--machine"&&i+1<Array.size(args)){machine=args[i+1];i=i+2;}
+        else if(a=="--stage1"&&i+1<Array.size(args)){stage1Input=args[i+1];i=i+2;}
+        else if(a=="--stage2"&&i+1<Array.size(args)){stage2Input=args[i+1];i=i+2;}
         else if(a=="--kernel"&&i+1<Array.size(args)){kernel=args[i+1];i=i+2;}
         else if(a=="--bootzbsd"&&i+1<Array.size(args)){bootzbsd=args[i+1];i=i+2;}
+        else if(a=="--partition-pbr"&&i+1<Array.size(args)){pbr=args[i+1];i=i+2;}
+        else if(a=="--zedbsd-config"&&i+1<Array.size(args)){zedbsdConfig=args[i+1];i=i+2;}
         else if(a=="--arch-image"&&i+1<Array.size(args)){arch=args[i+1];i=i+2;}
         else if(a=="--data-image"&&i+1<Array.size(args)){dataImage=args[i+1];i=i+2;}
         else if(a=="--swapfile"&&i+1<Array.size(args)){swap=args[i+1];i=i+2;}
-        else if((a=="--fat-type"||a=="--arch-profile"||a=="--arch-format"||a=="--noct"||a=="--holoris"||a=="--bin-file"||a=="--ufs-root"||a=="--bootx64"||a=="--zedbsd-config")&&i+1<Array.size(args)){i=i+2;}
+        else if(a=="--ufs-root"&&i+1<Array.size(args)){ufsRoot=args[i+1];i=i+2;}
+        else if((a=="--arch-profile"||a=="--arch-format"||a=="--noct"||a=="--holoris"||a=="--bin-file"||a=="--bootx64")&&i+1<Array.size(args)){i=i+2;}
         else if(String.indexOf(a,"--")==0){zbFail("unsupported BIOS checker option: "+a);}
         else {image=a;i=i+1;}
     }
     if((machine!="pcat"&&machine!="pc98")||image==""){zbFail("usage: check-bios-hdd-image.noct --machine pcat|pc98 ... IMAGE");}
     var raw=zbReadFile(image);if(Packed.size(raw)<1048576||Packed.size(raw)%512!=0||raw[510]!=85||raw[511]!=170){zbFail("invalid BIOS disk image");}
+    biosCompareStage1(raw,stage1Input,machine);
     if(machine=="pcat"&&(raw[446]!=128||raw[450]!=14||zbU32LE(raw,454)!=2048)){zbFail("invalid PC/AT MBR partition");}
     if(machine=="pc98"&&(raw[512]!=0xa1||raw[513]!=0x91)){zbFail("invalid PC-98 partition table");}
     var stage=512;if(machine=="pc98"){stage=1024;}
@@ -33,6 +106,35 @@ func main(args){
         if(zbU16LE(raw,stage+14)!=1){zbFail("ZBL2 machine mismatch");}
         var sectors=zbU16LE(raw,stage+12);var sum=0;for(i in 0..sectors*128){sum=(sum+zbU32LE(raw,stage+i*4))&4294967295;}if(sum!=0){zbFail("ZBL2 checksum mismatch");}
     }
-    biosCompare(image,bootzbsd,"BOOTZBSD.EXE");biosCompare(image,kernel,"VMUNIX");biosCompare(image,arch,"ROOTFS.IMG");biosCompare(image,dataImage,"DATA.IMG");biosCompare(image,swap,"SWAPFILE");
+    biosCompareRaw(raw,stage,stage2Input,"reserved-area Stage 2");
+    if(pbr!=""){
+        var volume=1048576;
+        var expectedPbr=zbReadFile(pbr);
+        if(Packed.size(expectedPbr)!=2048||Packed.size(raw)<volume+2560){zbFail("invalid partition PBR input or image extent");}
+        var fat32=zbU16LE(raw,volume+22)==0;
+        var bpbEnd=62;if(fat32){bpbEnd=90;}
+        for(i in 0..3){if(raw[volume+i]!=expectedPbr[i]){zbFail("partition PBR entry differs");}}
+        for(i in bpbEnd..512){if(raw[volume+i]!=expectedPbr[i]){zbFail("partition PBR first-stage code differs");}}
+        if(raw[volume+510]!=85||raw[volume+511]!=170){zbFail("partition PBR signature differs");}
+        if(fat32){
+            var reserved=zbU16LE(raw,volume+14);var backup=zbU16LE(raw,volume+50);
+            if(backup==0||backup>=reserved){zbFail("invalid FAT32 backup boot sector");}
+            for(i in 0..512){if(raw[volume+i]!=raw[volume+backup*512+i]){zbFail("FAT32 primary and backup PBR differ");}}
+            for(i in 512..2048){if(raw[volume+512+i]!=expectedPbr[i]){zbFail("partition PBR continuation differs");}}
+        } else {
+            for(i in 512..2048){if(raw[volume+i]!=expectedPbr[i]){zbFail("partition PBR continuation differs");}}
+        }
+    }
+    biosCompare(image,bootzbsd,"BOOTZBSD.EXE");
+    biosCompare(image,kernel,"VMUNIX");
+    if(machine=="pc98") {
+        biosCompare(image,zedbsdConfig,"BOOTZBSD.CFG");
+    } else {
+        biosCompare(image,zedbsdConfig,"ZEDBSD.CFG");
+    }
+    biosCompare(image,arch,"ROOTFS.IMG");
+    biosCompare(image,dataImage,"DATA.IMG");
+    biosCompare(image,swap,"SWAPFILE");
+    biosCompareUfs(image,ufsRoot,raw,machine);
     print("BIOS HDD image check: PASS");
 }

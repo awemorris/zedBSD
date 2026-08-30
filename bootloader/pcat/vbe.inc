@@ -1,5 +1,5 @@
 /* Legacy-BIOS VBE 2.0+ linear-framebuffer selection for amd64 loaders.
- * Included by stage2.S and bootzbsd.S while they are still in real mode. */
+ * Included by bootzbsd.S while it is still in real mode. */
 
 .set VBE_CONTROLLER_INFO_SIZE, 512
 .set VBE_MODE_INFO_SIZE,       256

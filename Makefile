@@ -399,8 +399,17 @@ $(BUILD)/%.o: %.S
 
 # PC/AT and PC-98 keep their established driver object paths even though the
 # production source owner is src/drivers.  Platform-specific target flags are
-# attached to these object names in their vmunix makefiles.
-$(BUILD)/drivers/%.o: src/drivers/%.c
+# attached to these object names in their vmunix makefiles.  The layout stamp
+# invalidates pre-move objects which have the same output name but no dependency
+# file; a source-only rename can otherwise leave those ABI-stale objects newer
+# than their new src/drivers prerequisite.
+DRIVER_SOURCE_LAYOUT_STAMP := $(BUILD)/.src-drivers-layout-v1
+
+$(DRIVER_SOURCE_LAYOUT_STAMP):
+	@mkdir -p $(dir $@)
+	@touch $@
+
+$(BUILD)/drivers/%.o: src/drivers/%.c $(DRIVER_SOURCE_LAYOUT_STAMP)
 	@mkdir -p $(dir $@)
 	$(OBJ_CC) $(OBJ_CPPFLAGS) $(OBJ_CFLAGS) -MMD -MP -c $< -o $@
 

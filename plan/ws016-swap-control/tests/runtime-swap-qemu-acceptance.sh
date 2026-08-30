@@ -151,7 +151,7 @@ parameters_for()
 		;;
 	native)
 		printf '%s\n' \
-		    'rootpart=/dev/sda3 swap0=boot0:swapfile init=/bin/ws016-swap'
+		    'rootpart=/dev/sda4 swap0=boot0:swapfile init=/bin/ws016-swap'
 		;;
 	*) return 2 ;;
 	esac
@@ -266,9 +266,9 @@ build_image()
 	local case_name=$1 destination=$2 bootx64=$3 zedbsd_config=$4
 	local build_dir=$repo/build/amd64
 	local command=("$repo/build/zedimage-host" disk --machine pcat --gpt
-	    --size-mib 201 --fat-size-mib 128
+	    --size-mib 260 --fat-size-mib 128
 	    --stage1 "$build_dir/bootloader/stage1.bin"
-	    --stage2 "$build_dir/bootloader/stage2.bin"
+	    --stage2 "$build_dir/bootloader/stage2-chain.bin"
 	    --partition-pbr "$build_dir/bootloader/partition-pbr.bin"
 	    --bootzbsd "$build_dir/bootloader/BOOTZBSD.EXE"
 	    --kernel "$build_dir/vmunix"
@@ -292,20 +292,20 @@ build_image()
 	esac
 	command+=("$destination")
 	"${command[@]}"
-	"$image_tool" set-fat-uuid --partition-lba 2048 \
+	"$image_tool" set-fat-uuid --partition-lba 133120 \
 	    --uuid "$uefi_fat_uuid" "$destination"
 	case $case_name in
 	file)
-		mcopy -o -i "$destination@@1048576" "$bad_swap" ::BADSWAP
+		mcopy -o -i "$destination@@68157440" "$bad_swap" ::badswap
 		;;
 	mixed)
 		"$image_tool" add-partition --machine pcat --kind swap \
-		    --index 3 --start-lba 264192 --payload "$raw_swap" \
+		    --index 4 --start-lba 397312 --payload "$raw_swap" \
 		    "$destination"
 		;;
 	native)
 		"$image_tool" add-partition --machine pcat --kind ufs \
-		    --index 3 --start-lba 264192 --payload "$native_rootfs" \
+		    --index 4 --start-lba 397312 --payload "$native_rootfs" \
 		    "$destination"
 		;;
 	esac
@@ -382,7 +382,7 @@ validate_case_log()
 		rg -a -F -q -- 'WS016-SWAP PASS scenario=file' "$guest_log"
 		;;
 	mixed)
-		rg -a -q 'WS016-SWAP MIXED ADD PASS id0=boot0:swapfile pages0=[1-9][0-9]* id1=/dev/sda3 pages1=[1-9][0-9]* label1=RAWSOURCE' "$guest_log" &&
+		rg -a -q 'WS016-SWAP MIXED ADD PASS id0=boot0:swapfile pages0=[1-9][0-9]* id1=/dev/sda4 pages1=[1-9][0-9]* label1=RAWSOURCE' "$guest_log" &&
 		rg -a -q 'WS016-SWAP PRESSURE READY generation=[0-9][0-9]* pages=[1-9][0-9]* used0=[1-9][0-9]* total0=[1-9][0-9]* used1=[1-9][0-9]* total1=[1-9][0-9]*' "$guest_log" &&
 		rg -a -q 'WS016-SWAP NUMERIC ORDER PASS full0=[1-9][0-9]* used1=[1-9][0-9][0-9][0-9][0-9]*' "$guest_log" &&
 		rg -a -q 'WS016-SWAP NUMERIC FIRST PASS full0=[1-9][0-9]* first-used1=[1-9][0-9]*' "$guest_log" &&

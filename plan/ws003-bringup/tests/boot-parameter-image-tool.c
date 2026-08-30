@@ -756,15 +756,49 @@ parse_uuid(const char *text)
 	return (uint32_t)value;
 }
 
+static int
+fat32_backup_byte_offset(const uint8_t boot[SECTOR_SIZE],
+    uint64_t partition_lba, uint64_t *backup_offset)
+{
+	uint64_t base, relative;
+	unsigned bytes_per_sector = get16(boot + 11);
+	unsigned reserved = get16(boot + 14);
+	unsigned backup = get16(boot + 50);
+
+	if ((bytes_per_sector != 512 && bytes_per_sector != 1024) ||
+	    backup == 0 || backup >= reserved ||
+	    partition_lba > UINT64_MAX / SECTOR_SIZE)
+		return 0;
+	base = partition_lba * SECTOR_SIZE;
+	relative = (uint64_t)backup * bytes_per_sector;
+	if (relative > UINT64_MAX - base)
+		return 0;
+	*backup_offset = base + relative;
+	return 1;
+}
+
+static int
+patch_fat32_serial_pair(uint8_t primary[SECTOR_SIZE],
+    uint8_t backup[SECTOR_SIZE], uint32_t serial)
+{
+	if (get16(backup + 11) != get16(primary + 11) ||
+	    backup[66] != 0x29 || backup[510] != 0x55 || backup[511] != 0xaa)
+		return 0;
+	put32(primary + 67, serial);
+	put32(backup + 67, serial);
+	return 1;
+}
+
 static void
 set_fat_uuid(int argc, char **argv)
 {
 	const char *uuid_text = NULL, *image_path = NULL;
 	uint64_t partition_lba = 0;
 	int argument, image;
-	uint8_t boot[SECTOR_SIZE];
+	uint8_t boot[SECTOR_SIZE], backup_boot[SECTOR_SIZE];
+	uint64_t backup_offset = 0, image_bytes;
 	uint32_t sectors, fatsz, root_sectors, data_sectors, clusters, serial;
-	unsigned serial_offset;
+	unsigned bytes_per_sector, serial_offset;
 
 	for (argument = 2; argument < argc; argument++) {
 		if (!strcmp(argv[argument], "--partition-lba") &&
@@ -785,18 +819,26 @@ set_fat_uuid(int argc, char **argv)
 	image = open(image_path, O_RDWR);
 	if (image < 0)
 		fail_errno(image_path);
+	image_bytes = file_size(image, image_path);
+	if (partition_lba > UINT64_MAX / SECTOR_SIZE ||
+	    partition_lba * SECTOR_SIZE > image_bytes ||
+	    image_bytes - partition_lba * SECTOR_SIZE < sizeof(boot))
+		fail("FAT partition boot sector is outside the image");
 	read_exact(image, partition_lba * SECTOR_SIZE, boot, sizeof(boot),
 	    image_path);
-	if (boot[510] != 0x55 || boot[511] != 0xaa || get16(boot + 11) != 512 ||
+	bytes_per_sector = get16(boot + 11);
+	if (boot[510] != 0x55 || boot[511] != 0xaa ||
+	    (bytes_per_sector != 512 && bytes_per_sector != 1024) ||
 	    boot[13] == 0 || boot[16] == 0)
-		fail("target is not a supported 512-byte FAT filesystem");
+		fail("target is not a supported FAT filesystem");
 	sectors = get16(boot + 19);
 	if (sectors == 0)
 		sectors = get32(boot + 32);
 	fatsz = get16(boot + 22);
 	if (fatsz == 0)
 		fatsz = get32(boot + 36);
-	root_sectors = ((uint32_t)get16(boot + 17) * 32U + 511U) / 512U;
+	root_sectors = ((uint32_t)get16(boot + 17) * 32U +
+	    bytes_per_sector - 1U) / bytes_per_sector;
 	if (sectors <= get16(boot + 14) + (uint32_t)boot[16] * fatsz +
 	    root_sectors)
 		fail("invalid FAT geometry");
@@ -806,7 +848,20 @@ set_fat_uuid(int argc, char **argv)
 	serial_offset = clusters < 65525U ? 39U : 67U;
 	if (boot[serial_offset - 1U] != 0x29)
 		fail("FAT volume has no extended serial field");
-	put32(boot + serial_offset, serial);
+	if (serial_offset == 67U) {
+		if (!fat32_backup_byte_offset(boot, partition_lba,
+		    &backup_offset) || backup_offset > image_bytes ||
+		    image_bytes - backup_offset < sizeof(backup_boot))
+			fail("FAT32 backup boot sector is outside the image");
+		read_exact(image, backup_offset, backup_boot,
+		    sizeof(backup_boot), image_path);
+		if (!patch_fat32_serial_pair(boot, backup_boot, serial))
+			fail("FAT32 backup boot sector is invalid");
+		write_exact(image, backup_offset, backup_boot,
+		    sizeof(backup_boot), image_path);
+	} else {
+		put32(boot + serial_offset, serial);
+	}
 	write_exact(image, partition_lba * SECTOR_SIZE, boot, sizeof(boot),
 	    image_path);
 	/* Give an auxiliary clone a distinct MBR PARTUUID as well. */
@@ -832,6 +887,9 @@ self_test(void)
 	struct gpt_copy gpt = {0};
 	uint8_t *entry;
 	uint32_t header_crc;
+	uint8_t fat32_primary[SECTOR_SIZE] = {0};
+	uint8_t fat32_backup[SECTOR_SIZE] = {0};
+	uint64_t fat32_backup_at;
 
 	mbr[510] = 0x55;
 	mbr[511] = 0xaa;
@@ -869,6 +927,28 @@ self_test(void)
 		fail("PC-98 self-test failed");
 	if (parse_uuid("A1B2-C3D4") != 0xa1b2c3d4U)
 		fail("FAT UUID self-test failed");
+	put16(fat32_primary + 11, 512);
+	put16(fat32_primary + 14, 32);
+	put16(fat32_primary + 50, 6);
+	put16(fat32_backup + 11, 512);
+	fat32_backup[66] = 0x29;
+	fat32_backup[510] = 0x55;
+	fat32_backup[511] = 0xaa;
+	if (!fat32_backup_byte_offset(fat32_primary, 2048,
+	    &fat32_backup_at) || fat32_backup_at != 1051648U ||
+	    !patch_fat32_serial_pair(fat32_primary, fat32_backup,
+	    0xa1b2c3d4U) || get32(fat32_primary + 67) != 0xa1b2c3d4U ||
+	    get32(fat32_backup + 67) != 0xa1b2c3d4U)
+		fail("FAT32 backup serial self-test failed");
+	put16(fat32_primary + 50, 32);
+	if (fat32_backup_byte_offset(fat32_primary, 2048,
+	    &fat32_backup_at))
+		fail("FAT32 backup range negative self-test failed");
+	put16(fat32_primary + 50, 6);
+	fat32_backup[66] = 0;
+	if (patch_fat32_serial_pair(fat32_primary, fat32_backup,
+	    0x01020304U))
+		fail("FAT32 backup signature negative self-test failed");
 	if (gpt_crc32((const uint8_t *)"123456789", 9) != 0xcbf43926U)
 		fail("GPT CRC32 self-test failed");
 	make_gpt_partition_entry(gpt_entry, sizeof(gpt_entry), 3, 0,

@@ -5,6 +5,7 @@ AMD64_PLATFORM := platform/amd64
 BIOS_LOADER := bootloader/pcat
 UEFI_LOADER := bootloader/uefi
 AMD64_ZEDBSD_CONFIG := $(AMD64_PLATFORM)/zedbsd.cfg
+AMD64_NATIVE_ZEDBSD_CONFIG := $(AMD64_PLATFORM)/zedbsd-native.cfg
 AMD64_UEFI_CONFIGURED_IMAGES := \
 	$(BUILD)/bios-hdd-image.img \
 	$(BUILD)/bios-hdd-image-fragmented.img \
@@ -19,7 +20,24 @@ AMD64_UEFI_CONFIGURED_IMAGES := \
 	$(BUILD)/posix-phase7-qemu.img \
 	$(BUILD)/posix-phase8-qemu.img \
 	$(BUILD)/posix-phase85-qemu.img
-$(AMD64_UEFI_CONFIGURED_IMAGES): $(AMD64_ZEDBSD_CONFIG)
+$(AMD64_UEFI_CONFIGURED_IMAGES): $(AMD64_ZEDBSD_CONFIG) \
+	$(ZEDBSD_IMAGE_HOST)
+.DELETE_ON_ERROR: $(AMD64_UEFI_CONFIGURED_IMAGES)
+.DELETE_ON_ERROR: $(BUILD)/ufs-root-hdd-image.img \
+	$(BUILD)/hdd-image.img
+
+define AMD64_VALIDATE_GPT_IMAGE
+	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-gpt-image.noct \
+		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
+		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $(1)
+endef
 EFI_CC ?= x86_64-w64-mingw32-gcc
 EFI_LD ?= x86_64-w64-mingw32-ld
 EFI_NM ?= x86_64-w64-mingw32-nm
@@ -199,29 +217,47 @@ $(BUILD)/bootloader/stage1.bin: $(BUILD)/bootloader/stage1.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 	@test $$(stat -c%s $@) -eq 512
 
-$(BUILD)/bootloader/stage2.o: $(BIOS_LOADER)/stage2.S \
-	$(BIOS_LOADER)/vbe.inc \
-	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
-	bootloader/include/mbr.inc bootloader/include/fat16.inc \
-	bootloader/include/elf.inc bootloader/include/amd64-handoff.h \
-	bootloader/include/boot-parameter-handoff.h \
-	bootloader/include/boot-parameter-record.inc \
-	include/boot/parameter-handoff.h include/boot/parameters.h
+# The GPT hybrid reserves LBA 34 for its chain sector.  The separate native
+# BIOS image retains the legacy LBA-1 chain sector and therefore needs a
+# stage-1 artifact built without the GPT override.
+$(BUILD)/bootloader/stage1-native.o: $(BIOS_LOADER)/stage1.S \
+	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
 
-$(BUILD)/bootloader/stage2.elf: $(BUILD)/bootloader/stage2.o \
+$(BUILD)/bootloader/stage1-native.elf: $(BUILD)/bootloader/stage1-native.o \
+	$(BIOS_LOADER)/stage1.ld
+	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage1.ld $< -o $@
+
+$(BUILD)/bootloader/stage1-native.bin: $(BUILD)/bootloader/stage1-native.elf
+	$(OBJCOPY) -O binary -j .text $< $@
+	@test $$(stat -c%s $@) -eq 512
+
+$(BUILD)/bootloader/stage2-chain.o: $(BIOS_LOADER)/stage2-chain.S \
+	bootloader/include/stage2-header.inc
+	@mkdir -p $(dir $@)
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/stage2-chain.elf: $(BUILD)/bootloader/stage2-chain.o \
 	$(BIOS_LOADER)/stage2.ld
-	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
+	$(LD) -m elf_i386 -T $(BIOS_LOADER)/stage2.ld $< -o $@
 
-$(BUILD)/bootloader/stage2.raw: $(BUILD)/bootloader/stage2.elf
+$(BUILD)/bootloader/stage2-chain.raw: $(BUILD)/bootloader/stage2-chain.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 
-$(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2.raw \
+$(BUILD)/bootloader/stage2-chain.bin: $(BUILD)/bootloader/stage2-chain.raw \
 	tools/build/finalize-bios-stage2.noct
 	$(NOCT) --path=tools/build tools/build/finalize-bios-stage2.noct --machine pcat $< $@
 
-$(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S
+# Compatibility alias for focused fixtures that predate the chain-loader
+# name. Its new chain-specific prerequisite forces an incremental tree with
+# the retired direct-kernel stage2.o/bin to regenerate before use.
+$(BUILD)/bootloader/stage2.bin: $(BUILD)/bootloader/stage2-chain.bin
+	cp -f $< $@.tmp
+	mv -f $@.tmp $@
+
+$(BUILD)/bootloader/partition-pbr.o: $(BIOS_LOADER)/partition-pbr.S \
+	bootloader/include/stage2-header.inc
 	@mkdir -p $(dir $@)
 	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
 
@@ -234,18 +270,42 @@ $(BUILD)/bootloader/partition-pbr.bin: $(BUILD)/bootloader/partition-pbr.elf
 
 $(BUILD)/bootloader/bootzbsd.o: $(BIOS_LOADER)/bootzbsd.S \
 	$(BIOS_LOADER)/vbe.inc \
+	bootloader/bios/fat-directory.h \
 	bootloader/include/disk-layout.inc bootloader/include/stage2-header.inc \
 	bootloader/include/mbr.inc bootloader/include/fat16.inc \
 	bootloader/include/elf.inc bootloader/include/amd64-handoff.h \
 	bootloader/include/boot-parameter-handoff.h \
 	bootloader/include/boot-parameter-record.inc \
+	bootloader/uefi/zedbsd-config.h \
 	include/boot/parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
-	$(CC) -m64 -I. -x assembler-with-cpp -c $< -o $@
+	$(CC) -m32 -I. -x assembler-with-cpp -c $< -o $@
+
+$(BUILD)/bootloader/bios-zedbsd-config.i386.o: \
+	bootloader/uefi/zedbsd-config.c bootloader/uefi/zedbsd-config.h \
+	bootloader/include/boot-parameter-handoff.h include/boot/parameters.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+		-fno-stack-protector -fno-asynchronous-unwind-tables \
+		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+		-c $< -o $@
+
+
+$(BUILD)/bootloader/bios-fat-directory.i386.o: \
+	bootloader/bios/fat-directory.c bootloader/bios/fat-directory.h
+	@mkdir -p $(dir $@)
+	$(CC) -m16 -march=i386 -mtune=i386 -Os -ffreestanding -fno-pic -fno-pie \
+		-fno-stack-protector -fno-asynchronous-unwind-tables \
+		-fno-unwind-tables -fno-builtin -Wall -Wextra -Werror -I. \
+		-c $< -o $@
+
+AMD64_BOOTZBSD_HELPERS := $(BUILD)/bootloader/bios-zedbsd-config.i386.o \
+	$(BUILD)/bootloader/bios-fat-directory.i386.o
 
 $(BUILD)/bootloader/bootzbsd.elf: $(BUILD)/bootloader/bootzbsd.o \
-	$(BIOS_LOADER)/stage2.ld
-	$(LD) -m elf_x86_64 -T $(BIOS_LOADER)/stage2.ld $< -o $@
+	$(AMD64_BOOTZBSD_HELPERS) $(BIOS_LOADER)/bootzbsd.ld
+	$(LD) -m elf_i386 -T $(BIOS_LOADER)/bootzbsd.ld \
+		$(filter %.o,$^) -o $@
 
 $(BUILD)/bootloader/bootzbsd.raw: $(BUILD)/bootloader/bootzbsd.elf
 	$(OBJCOPY) -O binary -j .text $< $@
@@ -702,15 +762,16 @@ $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_ARCH_UFS_IMAGE),amd64,$(AMD64_A
 rootfs: $(BUILD)/rootfs/.stamp
 
 $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
 	$(DATA_IMAGE) $(SWAP_IMAGE) $(BUILD)/uefi/BOOTX64.EFI \
 	tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
 		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
@@ -724,24 +785,32 @@ $(BUILD)/ufs-root.img: $(AMD64_ARCH_UFS_IMAGE) \
 	$(PYTHON) $(BUILD_TOOLS_DIR)/make-ufs1-root-image.py --force \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) $@
 
-$(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
-	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
+$(BUILD)/ufs-root-hdd-image.img: $(BUILD)/bootloader/stage1-native.bin \
+	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(BUILD)/ufs-root.img \
-	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct
+	$(AMD64_NATIVE_ZEDBSD_CONFIG) \
+	$(ZEDBSD_IMAGE_HOST) \
+	$(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct \
+	$(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct
 	$(NOCT) --path=$(BUILD_TOOLS_DIR) $(BUILD_TOOLS_DIR)/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
-		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
-		--stage2 $(BUILD)/bootloader/stage2.bin \
+		--checker $(BUILD_TOOLS_DIR)/check-bios-hdd-image.noct \
+		--checker-runner $(NOCT) \
+		--machine pcat --stage1 $(BUILD)/bootloader/stage1-native.bin \
+		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
+		--zedbsd-config $(AMD64_NATIVE_ZEDBSD_CONFIG) \
 		--ufs-root $(BUILD)/ufs-root.img --size-mib 193 $@
 
 $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/stage2.bin $(BUILD)/bootloader/partition-pbr.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
+	$(DATA_IMAGE) $(SWAP_IMAGE) \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -749,11 +818,13 @@ $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
 		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
-		--arch-format ufs \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) \
 		--fragment-kernel $@
 
 $(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
-	cp -f $< $@
+	cp -f $< $@.tmp
+	mv -f $@.tmp $@
 
 AMD64_DEFERRED_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-deferred-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_DEFERRED_TEST_UFS),amd64,\
@@ -768,6 +839,7 @@ $(BUILD)/deferred-stub-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -801,6 +873,7 @@ $(BUILD)/posix-phase2-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -834,6 +907,7 @@ $(BUILD)/posix-phase3-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -867,6 +941,7 @@ $(BUILD)/posix-phase4-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -908,6 +983,7 @@ $(BUILD)/posix-phase5-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -940,6 +1016,7 @@ $(BUILD)/posix-phase6-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -970,6 +1047,7 @@ $(BUILD)/posix-phase7-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -1001,6 +1079,7 @@ $(BUILD)/posix-phase8-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -1035,6 +1114,7 @@ $(BUILD)/phase19-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -1068,6 +1148,7 @@ $(BUILD)/phase20-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
@@ -1126,6 +1207,7 @@ $(BUILD)/posix-phase85-qemu.img: $(BUILD)/bootloader/stage1.bin \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct --backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat --gpt \
 		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
 		--stage1 $(BUILD)/bootloader/stage1.bin \
 		--stage2 $(BUILD)/bootloader/stage2.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
