@@ -22,11 +22,13 @@
 _start:
 	cli
 	cld
-	pushw	%cs
-	popw	%ds
+	movw	%cs, %ax
+	movw	%ax, %ds
 	movw	%si, saved_si
 	movw	%di, saved_di
 	movw	$RELOC_SEG, %ax
+	movw	%ax, %ss
+	movw	$0xfffe, %sp
 	movw	%ax, %es
 	xorw	%si, %si
 	xorw	%di, %di
@@ -35,11 +37,8 @@ _start:
 	ljmp	$RELOC_SEG, $relocated
 
 relocated:
-	pushw	%cs
-	popw	%ds
-	movw	$RELOC_SEG, %ax
-	movw	%ax, %ss
-	movw	$0xfffe, %sp
+	movw	%cs, %ax
+	movw	%ax, %ds
 	sti
 
 	/* The BIOS work area records the fixed disk selected by the ITF. */
@@ -59,7 +58,7 @@ relocated:
 	xorw	%cx, %cx
 	movw	$0x0001, %dx
 	call	read_sector
-	jc	boot_failure
+	jc	boot_failure_table
 
 	movw	$TABLE_SEG, %ax
 	movw	%ax, %ds
@@ -88,7 +87,7 @@ name_mismatch:
 next_partition:
 	addw	$32, %si
 	loop	find_partition
-	jmp	boot_failure
+	jmp	boot_failure_name
 
 partition_found:
 	/* Native entry bytes 4..7 are IPL-start sector, head, cylinder. */
@@ -100,7 +99,7 @@ partition_found:
 	movw	%ax, %es
 	xorw	%bp, %bp
 	call	read_sector
-	jc	boot_failure
+	jc	boot_failure_pbr
 
 	/* Preserve the normal firmware entry contract for the partition IPL. */
 	xorw	%ax, %ax
@@ -129,8 +128,31 @@ read_sector:
 	pushw	%cs:read_flags
 	popfw
 	ret
-
+boot_failure_table:
+	movw	$0x5432, %dx	/* "2T": partition-table read failed. */
+	jmp	boot_failure
+boot_failure_name:
+	movw	$0x4e32, %dx	/* "2N": BOOT partition name not found. */
+	jmp	boot_failure
+boot_failure_pbr:
+	movw	$0x5032, %dx	/* "2P": partition boot-record read failed. */
 boot_failure:
+	movw	$0xa000, %ax
+	movw	%ax, %es
+	xorw	%bx, %bx
+	xorw	%ax, %ax
+	movb	%dl, %al
+	movw	%ax, %es:(%bx)
+	movb	%dh, %al
+	movw	%ax, %es:2(%bx)
+	movw	$0xa200, %ax
+	movw	%ax, %es
+	movw	$0x00e1, %es:(%bx)
+	movw	$0x00e1, %es:2(%bx)
+	movb	%dl, %al
+	outb	%al, $0xe9
+	movb	%dh, %al
+	outb	%al, $0xe9
 	movb	$0x06, %al
 	outb	%al, $0x37
 1:

@@ -1,0 +1,117 @@
+require zedbuild;
+
+// WS003 BR-T54 PC-9821V13 IPL source/binary/layout contract.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+func need(text, marker, what) {
+    if (String.indexOf(text, marker) < 0) {
+        zbFail(what + " is missing: " + marker);
+    }
+}
+
+func needOrder(text, first, second, what) {
+    var firstAt = String.indexOf(text, first);
+    var secondAt = String.indexOf(text, second);
+    if (firstAt < 0 || secondAt < 0 || firstAt >= secondAt) {
+        zbFail(what + " is out of order");
+    }
+}
+
+func checkOwnedStack(source, entry, what) {
+    var start = String.indexOf(source, entry);
+    var stack = String.indexOf(source, "\tmovw\t%ax, %ss");
+    if (start < 0 || stack < start) { zbFail(what + " does not own SS"); }
+    var before = String.substring(source, start, stack - start);
+    if (String.indexOf(before, "\tpushw\t") >= 0 ||
+        String.indexOf(before, "\tcall\t") >= 0 ||
+        String.indexOf(before, "\tint\t") >= 0) {
+        zbFail(what + " uses the inherited firmware stack");
+    }
+    needOrder(source, "\tmovw\t%ax, %ss", "\tmovw\t$0xfffe, %sp",
+              what + " SS:SP setup");
+    needOrder(source, "\tmovw\t$0xfffe, %sp", "\trep movsw",
+              what + " stack-before-relocation contract");
+}
+
+func compareRange(left, leftAt, right, rightAt, count, what) {
+    if (leftAt < 0 || rightAt < 0 || count < 0 ||
+        leftAt + count > Packed.size(left) ||
+        rightAt + count > Packed.size(right)) {
+        zbFail(what + " range is invalid");
+    }
+    for (i in 0..count) {
+        if (left[leftAt + i] != right[rightAt + i]) {
+            zbFail(what + " differs at byte " + i);
+        }
+    }
+}
+
+func main(args) {
+    var repo = ".";
+    if (Array.size(args) > 1) {
+        zbFail("usage: pc98-ipl-contract.noct [REPOSITORY]");
+    }
+    if (Array.size(args) == 1) { repo = args[0]; }
+
+    var diskSource = FileUtil.readText(
+        repo + "/bootloader/pc98/disk-ipl.S");
+    var selectorSource = FileUtil.readText(
+        repo + "/bootloader/pc98/lba2.S");
+    checkOwnedStack(diskSource, "relocate:", "LBA-0 IPL");
+    checkOwnedStack(selectorSource, "_start:", "LBA-2 selector");
+
+    needOrder(diskSource, "\tcall\tbios_sense", "\tcall\tprepare_target",
+              "SENSE-before-target setup");
+    needOrder(diskSource, "\tcall\tprepare_target", "\tint\t$0x1b",
+              "target-before-read setup");
+    need(diskSource, "\tmovb\t$0x84, %ah", "INT 1Bh SENSE command");
+    need(diskSource, "\tcmpb\t$0x20, %ah", "SENSE status validation");
+    need(diskSource, "\tcmpw\t$512, %bx", "SENSE sector-size validation");
+    need(diskSource, "\ttestb\t%dh, %dh", "SENSE head validation");
+    need(diskSource, "\ttestb\t%dl, %dl", "SENSE sector validation");
+    need(diskSource, "\tmovw\t$0x0002, %dx",
+         "physical LBA-2 selector read");
+    need(diskSource, "\tmovw\t%cs:saved_si, %si", "saved firmware SI");
+    need(diskSource, "\tmovw\t%cs:saved_di, %di", "saved firmware DI");
+    need(diskSource, "\tmovw\t$0x5331, %dx", "1S failure diagnostic");
+    need(diskSource, "\tmovw\t$0x5231, %dx", "1R failure diagnostic");
+    need(diskSource, "\tmovw\t%ax, %es:(%bx)",
+         "LBA-0 full character-cell diagnostic");
+    need(diskSource, "\tmovw\t$0x00e1, %es:(%bx)",
+         "LBA-0 full attribute-cell diagnostic");
+    need(selectorSource, "\tmovw\t$0x5432, %dx", "2T failure diagnostic");
+    need(selectorSource, "\tmovw\t$0x4e32, %dx", "2N failure diagnostic");
+    need(selectorSource, "\tmovw\t$0x5032, %dx", "2P failure diagnostic");
+    need(selectorSource, "\tmovw\t%ax, %es:(%bx)",
+         "LBA-2 full character-cell diagnostic");
+    need(selectorSource, "\tmovw\t$0x00e1, %es:(%bx)",
+         "LBA-2 full attribute-cell diagnostic");
+
+    var stage1 = zbReadFile(repo + "/build/pc98/bootloader/stage1.bin");
+    var stage2 = zbReadFile(repo + "/build/pc98/bootloader/stage2.bin");
+    var image = zbReadFile(repo + "/build/pc98/hdd-image.img");
+    if (Packed.size(stage1) != 512 || stage1[508] != 9 ||
+        stage1[509] != 0 || stage1[510] != 0x55 || stage1[511] != 0xaa) {
+        zbFail("LBA-0 IPL size/metadata/signature contract failed");
+    }
+    if (Packed.size(stage2) != 14 * 512 || stage2[510] != 0x55 ||
+        stage2[511] != 0xaa) {
+        zbFail("LBA-2 selector size/signature contract failed");
+    }
+    if (Packed.size(image) < 1024 + Packed.size(stage2)) {
+        zbFail("PC-98 disk image is too short");
+    }
+    for (i in 446..508) {
+        if (image[i] != 0) {
+            zbFail("PC/AT partition entry leaked into native PC-98 LBA 0");
+        }
+    }
+    if (image[512] != 0xa1 || image[513] != 0x91) {
+        zbFail("native PC-98 partition table is missing from LBA 1");
+    }
+    compareRange(stage1, 0, image, 0, 512, "installed LBA-0 IPL");
+    compareRange(stage2, 0, image, 1024, Packed.size(stage2),
+                 "installed LBA-2 selector");
+
+    print("WS003 BR-T54 PC-98 IPL contract: PASS");
+}

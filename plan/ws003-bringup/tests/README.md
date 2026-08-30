@@ -40,6 +40,20 @@ Parent: [WS003](../ws.md)
 | BR-T51 | Later Latitude native installation | After a separate WS019 design, the installed UEFI loader selects and boots the explicit native `rootpart` without regressing BR-T49 |
 | BR-T52 | Panasonic CF-SV7 early ACPI/interrupt boundary | Complete in q033: host fixtures and production QEMU gates pass, and one physical boot advanced beyond IRQ/XMM/HAL through xHCI, USB storage, and VFS; the later GPT stop is outside p020 |
 | BR-T53 | Fixed GPT image copied to larger USB media | PASS: a coherent generic GPT-declared extent sparsely extended to 60,549,120 sectors reaches `login:` through BIOS and UEFI without boot-time repair; malformed cases publish nothing, exact-size q030 behavior is unchanged, and the frozen image boots successfully through overlay/init/login on the CF-SV7. Automated evidence is in `temp/q034-final/br-t53/` |
+| BR-T54 | PC-9821V13 early native-IPL disk read | Automatic PASS: LBA-0/LBA-2 own a safe stack, validate the INT 1Bh SENSE/read contract, retain word 9/`55 aa`/native LBA1/LBA2 with no PC/AT entries, and reach qemu-pc98 `login:`; awaiting one V13 boot of SHA-256 `d2bfc9c45077434670f4dd0578b26d295653eef98413ab31b667ca8d3368ed4d` |
+
+BR-T54 checks the maintained source plus the ordinary built Stage 1, Stage 2,
+and disk image. Run it after `make -j16`:
+
+```sh
+build/NoctLang/build-static/noct --path=tools/build \
+  plan/ws003-bringup/tests/pc98-ipl-contract.noct .
+make check-disk-image
+```
+
+The maintained BR-T46 `pc98/default` cell supplies the positive VRAM/login
+gate. Disposable corruption evidence lives below
+`plan/ws003-bringup/temp/pc98-v13-ipl/` and remains untracked.
 
 For the q011 diagnostic BR-T32 image, the top-right GOP marker is unary: one
 large white block means boot services exited, two means the final map passed,

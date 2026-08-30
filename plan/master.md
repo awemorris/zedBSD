@@ -1,6 +1,6 @@
 # zedBSD master plan
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 Status: active
 
@@ -37,9 +37,19 @@ made the fixed 397,312-sector GPT image safely usable after raw copying to the
 successfully through the USB-root overlay and closes that root-continuity
 boundary without reopening the completed Latitude USB/network evidence.
 
-The current [Queue Book](queue.md) records `q036`. Its generic Variant work is
-being revised after removal of the disk-capacity selector; the fixed three
-amd64 image layouts and six-cell SeaBIOS/OVMF matrix follow.
+NEC PC-9821V13 is the declared native PC-98 physical target. The observation
+which triggered q037 beeped before loader output; p022 owns that early-IPL regression
+without replacing the PC-98 partition scheme with a PC/AT MBR.
+
+The current [Queue Book](queue.md) records `q037`. Its native PC-98 IPL stack
+and INT 1Bh disk-read repair passes source/binary/layout checks and qemu-pc98
+login while retaining the native partition layout and `55 aa` signature. One
+PC-9821V13 observation of the frozen image remains.
+The archived [q036](queue-q036.md) completed the generic Variant and three
+fixed amd64 image-layout Phases through their automatic layout gates. Its
+strict six-cell runtime Phase is uncleared because three fresh runs exposed an
+image/firmware-independent init/getty scheduling flake after root and swap had
+already succeeded; the oracle was not weakened.
 The archived [q035](queue-q035.md) completed the retained WS018 graphics
 runtime matrix, consolidated FAT, migrated FAT boot-media access to native VFS
 objects, and removed the retired bootfs/namespace/startup/M9 and broad
@@ -282,7 +292,7 @@ actually warranted.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | x86 laptop bring-up (Latitude 5320 and CF-SV7) | Active; Latitude USB/network milestone complete; CF-SV7 p020 and p021 USB-root continuation complete; p018 Latitude overlay-NVMe install/boot dependency-gated | p020 physical IRQ/XMM/HAL plus USB/VFS passes; p021 larger-media host/BIOS/UEFI and CF-SV7 overlay/init/login pass; p017 is superseded; p018/p019 remain defined | Run p018 only after WS004/WS013/WS019 overlay prerequisites; retain later WS-level repeatability and inventory work | [WS003](ws003-bringup/ws.md) |
+| `ws003` | x86 laptop and PC-98 hardware bring-up | Active (`q037`); Latitude USB/network and CF-SV7 USB-root milestones complete; PC-9821V13 IPL automatic repair gates pass; p018 Latitude overlay-NVMe install/boot dependency-gated | p020/p021 physical CF-SV7 path passes; p022 qemu-pc98 login passes and awaits one V13 observation; p018/p019 remain defined | Run the one p022 V13 observation, then return to dependency-ready p018 work | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Audited active; not complete. `q030` NVMe software and the physical USB-Ethernet path are complete, while p016/p017/p021/p025 and p026--p030 remain | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Follow the requested WLAN priority: p026 exact-unit/firmware intake, p027 common core, then the interleaved WS005 and p028--p030 sequence. Keep the unrelated p016/p017/p021/p025 residuals visible rather than calling the WS complete | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q029 p001 complete; WLAN replacement plan detailed, not queued | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Freeze p002, confirm the exact Archer unit in WS004 p026, then propose only dependency-ready WLAN prerequisites to a Queue | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Audited active; not complete. p005 is only the PC/AT capability milestone | `ws006-p005` complete | Execute p006--p008 for producer truthfulness and USB HID when selected; run p009 consumer/legacy-console removal only after the accepted WS008 userland tree is available | [WS006](ws006-input/ws.md) |
@@ -299,7 +309,7 @@ actually warranted.
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
-| `ws020` | Intel Mac UEFI bring-up and generic image variants | Active (`q036`); revised p001-p002 complete, p003 in progress | Capacity selector removed; Variant invariance and fixed strict image/GPT layouts pass | Complete the six-cell QEMU matrix, then request one bounded Intel Mac checkpoint and final five-run acceptance | [WS020](ws020-intel-mac/ws.md) |
+| `ws020` | Intel Mac UEFI bring-up and generic image variants | Active; q036 p001-p002 complete, p003 uncleared | Capacity selector removed; Variant invariance and fixed strict image/GPT layouts pass; three fresh p003 runs exposed a separate runtime/init/getty flake | Diagnose/fix the recorded runtime flake in a separate Queue, rerun one fresh strict six-cell matrix, then request the physical Mac checkpoint | [WS020](ws020-intel-mac/ws.md) |
 
 ## 4. Milestones
 

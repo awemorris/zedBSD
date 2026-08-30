@@ -28,11 +28,15 @@ _start:
 relocate:
 	cli
 	cld
-	pushw	%cs
-	popw	%ds
+	/* Do not depend on the firmware's stack.  Some real PC-9821 ROMs enter
+	 * the IPL with an SS:SP pair which is only suitable for firmware use. */
+	movw	%cs, %ax
+	movw	%ax, %ds
 	movw	%si, saved_si
 	movw	%di, saved_di
 	movw	$RELOC_SEG, %ax
+	movw	%ax, %ss
+	movw	$0xfffe, %sp
 	movw	%ax, %es
 	xorw	%si, %si
 	xorw	%di, %di
@@ -41,18 +45,22 @@ relocate:
 	ljmp	$RELOC_SEG, $relocated
 
 relocated:
-	pushw	%cs
-	popw	%ds
+	movw	%cs, %ax
+	movw	%ax, %ds
 	sti
 	/* The fixed-disk IPL has one job: enter the installed LBA 2 loader. */
-	pushw	%ds
 	xorw	%ax, %ax
 	movw	%ax, %ds
 	movb	0x0584, %al
-	popw	%ds
+	movw	%cs, %dx
+	movw	%dx, %ds
 	andb	$0x7f, %al
 	orb	$0x80, %al
 	movb	%al, boot_id
+	call	bios_sense
+	jc	boot_failure_sense
+	/* AH=84 is allowed to alter ES:BP, so establish the read destination
+	 * only after SENSE and immediately before the AH=06 transfer. */
 	call	prepare_target
 	xorw	%ax, %ax
 	movw	%ax, %ds
@@ -64,7 +72,7 @@ relocated:
 	movw	%cs:saved_si, %si
 	movw	%cs:saved_di, %di
 	int	$0x1b
-	jc	boot_failure
+	jc	boot_failure_read
 
 enter_target:
 	xorw	%ax, %ax
@@ -82,7 +90,57 @@ prepare_target:
 	xorw	%bp, %bp
 	ret
 
+bios_sense:
+	pushw	%ds
+	xorw	%ax, %ax
+	movw	%ax, %ds
+	movb	%cs:boot_id, %al
+	movb	$0x84, %ah
+	movw	$0x0100, %bx
+	movw	%cs:saved_si, %si
+	movw	%cs:saved_di, %di
+	int	$0x1b
+	jc	1f
+	cmpb	$0x20, %ah
+	jae	1f
+	cmpw	$512, %bx
+	jne	1f
+	testb	%dh, %dh
+	jz	1f
+	testb	%dl, %dl
+	jz	1f
+	popw	%ds
+	clc
+	ret
+1:
+	popw	%ds
+	stc
+	ret
+
+boot_failure_sense:
+	movw	$0x5331, %dx	/* "1S": LBA 0 SENSE failed. */
+	jmp	boot_failure
+boot_failure_read:
+	movw	$0x5231, %dx	/* "1R": LBA 2 read failed. */
 boot_failure:
+	/* Failure-only physical diagnostic.  PC-98 text characters and their
+	 * attributes occupy corresponding words at A000: and A200:. */
+	movw	$0xa000, %ax
+	movw	%ax, %es
+	xorw	%bx, %bx
+	xorw	%ax, %ax
+	movb	%dl, %al
+	movw	%ax, %es:(%bx)
+	movb	%dh, %al
+	movw	%ax, %es:2(%bx)
+	movw	$0xa200, %ax
+	movw	%ax, %es
+	movw	$0x00e1, %es:(%bx)
+	movw	$0x00e1, %es:2(%bx)
+	movb	%dl, %al
+	outb	%al, $0xe9
+	movb	%dh, %al
+	outb	%al, $0xe9
 	movb	$0x06, %al
 	outb	%al, $0x37
 1:

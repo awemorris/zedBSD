@@ -1,71 +1,59 @@
-# Queue: Intel Mac automatic image groundwork
+# Queue: PC-9821V13 IPL read-contract repair
 
 Last updated: 2026-08-31
 
-QID: `q036`
+QID: `q037`
 
 Queue status: in-progress
 
 Queue finished: **No**
 
-Authorization: on 2026-08-30 the user inserted the Intel Mac bring-up
-workstream immediately after WS018 and directed autonomous Queue execution.
-The user-supplied design fixes a generic Board Variant axis and amd64 combined
-UEFI+BIOS / UEFI-only / BIOS-only image layouts. On 2026-08-31 the user
-removed the target-medium-capacity selector: Apple's relevant constraint is a
-pure Protective MBR with no compatibility entry.
+Authorization: on 2026-08-31 the user reported that the ordinary PC-98 image
+beeps and stops on a PC-9821V13, confirmed that this model ignores `55 aa`,
+and explicitly requested that the suspected early-IPL defect be fixed.
 
-Timebox: none. This finite Queue contains the three automatic WS020 Phases;
-the physical Intel Mac checkpoint remains outside this Queue.
+Timebox: none. This Queue contains one bounded Phase. Its automatic work ends
+with a frozen image for one user-operated PC-9821V13 observation.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q035](queue-q035.md)
+Previous Queue: [q036](queue-q036.md)
 
 ## Purpose
 
-Introduce the generic Architecture -> Board -> Variant configuration,
-implement the three amd64 disk layouts without changing kernel or loader
-compilation, then prove the six-cell positive and negative matrix under
-SeaBIOS and OVMF. Produce a frozen fixed UEFI-only artifact suitable for one
-bounded Intel Mac acceptance run.
+Restore the private-stack and validated PC-98 BIOS disk-read contract in the
+first native IPL stages without changing the native partition layout or
+removing the cross-model `55 aa` signature. Distinguish any remaining physical
+failure, preserve QEMU behavior, and produce the exact V13 handoff artifact.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws020-p001` | [Phase](ws020-intel-mac/phase001-target-variant-config/phase.md) | completed (revised) | Generic board-owned Variant round-trips through menuconfig/config.mk, the removed capacity field is absent, and all amd64 compiled artifacts remain identical |
-| 2 | `ws020-p002` | [Phase](ws020-intel-mac/phase002-image-layouts/phase.md) | completed (revised) | Combined, BIOS-only, and fixed pure-Protective-MBR UEFI-only layouts contain exactly their intended boot paths and strict GPT rules |
-| 3 | `ws020-p003` | [Phase](ws020-intel-mac/phase003-qemu-acceptance/phase.md) | in-progress | Six SeaBIOS/OVMF positive and negative acceptance cells pass |
+| 1 | `ws003-p022` | [Phase](ws003-bringup/phase022-pc9821-v13-ipl-read-contract/phase.md) | in-progress | Automatic gates pass and frozen image `d2bfc9c4...` is ready; one PC-9821V13 observation remains |
 
-## Dependency and deferral rules
+## Fixed boundaries
 
-- p002 starts only after p001 proves that Variant does not alter source
-  selection or loader/kernel binaries and the capacity selector is gone.
-- p003 starts only after p002's independent layout checker accepts all three
-  profiles, including the primary-only compact GPT contract.
-- `ws020-p004` is not part of q036. It requires a user-operated Intel Mac
-  boot of the frozen artifact after the automatic matrix passes.
-- If actual UEFI/GPT requirements contradict the fixed primary-only contract,
-  stop the affected Phase and request human judgment; do not silently add a
-  compatibility MBR entry or backup GPT.
-- An unrelated defect is returned to M/W/P planning and does not expand q036.
-
-## Execution rules
-
-- Do not inspect or consume `.internal/`.
-- Keep the target framework generic; do not encode Intel-Mac policy into the
-  architecture or kernel source lists.
-- Build both BIOS and UEFI loader families for every amd64 PC/AT Variant.
-- Use disposable writable image copies and `qemu-system-x86_64`; do not use
-  aggregate `make check`.
-- Run `make -j16`, focused WS020 fixtures, and `git diff --check`.
-- After each Phase, synchronize Phase/WS/master/Queue state and commit `WIP`;
-  push when permitted.
+- Retain `IPL1`, native PC-98 LBA-1 entries, the LBA-2 selector, word `9`, and
+  `55 aa`. Do not add a PC/AT partition entry or GPT.
+- Do not change the kernel, PC/AT/UEFI loaders, PC-98 filesystem format, or
+  higher-level boot parameter contract.
+- Do not consume `.internal/` or run aggregate `make check`.
+- Use `make -j16`, focused source/binary/layout checks, and qemu-pc98.
+- Ask for only one physical run after all automatic gates pass. A later
+  boundary becomes a separately planned Phase rather than speculative retries.
+- Commit and push after the Phase reaches completed or uncleared state. If
+  push is unavailable, preserve the local commit and continue reporting it.
 
 ## Completion definition
 
-q036 is finished when p001--p003 are each `completed` or `uncleared` with
-their exact evidence and resume condition recorded. A finished q036 does not
-complete WS020: p004's physical Intel Mac checkpoint and final five-run
-acceptance remain explicit human work.
+q037 is finished when `ws003-p022` is completed, or uncleared with the exact
+diagnostic, frozen image identity, and a concrete resume condition recorded.
+
+## Automatic checkpoint
+
+The private-stack/SENSE/read fix, full-cell failure diagnostics, BR-T54
+source/binary/layout fixture, ordinary image checker, `make -j16`, and positive
+qemu-pc98 login gate pass. The Queue is intentionally still in progress until
+the one physical V13 observation reports success or one of
+`1S`/`1R`/`2T`/`2N`/`2P`.
