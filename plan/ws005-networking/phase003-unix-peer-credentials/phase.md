@@ -8,7 +8,7 @@ Phase ID: `p003`
 
 Combined ID: `ws005-p003`
 
-Status: in-progress (`q040`)
+Status: Complete (`q040`)
 
 Parent: [WS005 networking and WLAN](../ws.md)
 
@@ -154,9 +154,12 @@ reported as either POSIX conformance or a POSIX gap.
 
 The installed account database gains the fixed entry `network:x:69:`.  GID 69
 is the v1 network-administration group, following the selected FreeBSD-family
-convention.  Production `networkd` still resolves `network` with
-`getgrnam("network")`, verifies the resolved GID is 69, and does not substitute
-a compiled number when the database is missing or contradictory.
+convention.  Production `networkd` resolves `network` with stack-backed
+`getgrnam_r()`, verifies the resolved GID is 69, and does not substitute a
+compiled number when the database is missing or contradictory.  A separate
+bounded raw-database pass rejects malformed records, duplicate `network`
+entries, and a second use of GID 69 without entering the target libc's
+non-reentrant account iterator.
 
 `networkd` publishes `/run/networkd.sock` as follows:
 
@@ -349,6 +352,53 @@ existing AF_UNIX/SCM_RIGHTS/POSIX tests, WS002 network-service regressions,
 - Authorization audit output is one field-bounded, secret-free record per
   accepted connection and no more than 512 bytes including its terminator.
 
+## q040 result (2026-08-31)
+
+The Phase is complete.  `SO_PEERCRED` is allocated as the previously unused
+local value `0x0011`.  Its public `zedbsd_peercred` payload has compile-time
+size, offset, native-width, and signedness guards for the frozen 12-byte ABI.
+AF_UNIX pathname streams and socketpairs now retain scalar listen/connect-time
+identity; delayed accept, later credential changes, peer exit, repeated
+`listen`, and `SCM_RIGHTS` transfer do not relabel it.  Concurrent connects are
+reserved per endpoint, the accepted endpoint and pending node are published
+under the listener lock before client publication, and the client connection
+and credential become visible atomically under its socket lock.  A 32-cell
+listener-close/connect race compares `/dev/system` live-socket counts before
+and after the campaign.  The review also restored the existing `EISCONN`
+behavior for pathname reconnect of an AF_UNIX datagram socketpair endpoint.
+
+`networkd` now publishes one checked `root:network` mode-`0660` inode before
+fd-3 `READY`, authenticates every accepted client before parsing its request,
+and permits an admitted non-root client only the existing `SHOW` operation.
+The first target run exposed a segmentation fault inside the target libc's
+non-reentrant `getgrnam()` wrapper.  The production path therefore uses
+stack-backed `getgrnam_r()` plus an 8192-byte strict `/etc/group` validation
+pass.  Missing/wrong, malformed, duplicate-name, and duplicate-GID-69 inputs
+all fail before socket creation; no numeric fallback is used.
+
+The common IPv4 ioctl dispatcher now uses a referenced caller credential and
+an explicit query allow-list.  Every present setter and route mutation, plus
+unknown/future driver-private commands, fails with `EPERM` for non-root before
+argument access or backend dispatch.  Existing queries and root recovery paths
+remain available.
+
+The following final-source evidence passed:
+
+- `run-networkd-auth-test.sh` in ordinary, ASan+UBSan, and compiler-analyzer
+  configurations;
+- `run-inet-ioctl-authorization-test.sh`, the existing net-device/ARP/inet
+  hotplug suite, and the existing userland network-recovery suite;
+- `make -j16` and `git diff --check`; and
+- `run-peercred-native-qemu.sh` on production qemu-pc98, including exact
+  socket ownership/mode, root access, supplementary-GID-69 admission,
+  non-root `SHOW`, non-root mutation `EPERM`, unrelated-user `EACCES`, the
+  peer-credential/lifetime matrix, `networkd` readiness, and
+  `init: system running`.
+
+The retained final QEMU evidence is
+`plan/ws005-networking/temp/peercred-native.VNv22f/`.  The reusable entry
+points and their ownership are indexed by [NET-T22](../tests/README.md).
+
 ## Reconsideration boundary
 
 Return to planning if a connection-time client snapshot cannot be published
@@ -361,7 +411,8 @@ after request receipt as a substitute for connection credentials.
 
 ## Queue boundary and handoff
 
-This Phase is planned only and has no remaining human design gate.  Queue
-construction still requires a finite implementation timebox and explicit
-approval.  Later WLAN command and credential Phases may be planned in parallel
-but must not claim non-root runtime operation until this Phase passes.
+q040 completed this Phase.  The independently dependency-ready credential
+store in p005 may proceed; p004 still waits for the generic WLAN core and p006
+still waits for p004/p005.  Later protocol work may rely on the authenticated
+single socket, but must extend the explicit operation classifier rather than
+turning admitted non-root access into generic network mutation.

@@ -1,77 +1,82 @@
-# Queue: Archer identity intake and network authorization foundation
+# Queue: legacy HCD retirement, Wi-Fi credentials, and host Noct refresh
 
 Last updated: 2026-08-31
 
-QID: `q040`
+QID: `q041`
 
 Queue status: in-progress
 
 Queue finished: **No**
 
-Authorization: after q039's automatic repairs completed, the user explicitly
-requested continuous execution of the remaining workstreams. The standing
-priority order selects the first dependency-ready WLAN evidence checkpoint and
-then an independent control-plane prerequisite rather than waiting on physical
-label evidence.
+Authorization: the user explicitly requested that, after the current fixes,
+the remaining workstreams continue automatically.  The standing priority
+order is WS004, WS005, then WS008.  Every selected Phase has a frozen design,
+known dependencies, and an automatic verification path; no selected item
+contains a pending product decision.
 
-Timebox: none. Process both finite items to `completed` or `uncleared`. A human
-label checkpoint in the first item does not block the second item.
+Timebox: none. Process each finite item to `completed` or `uncleared`, record
+any newly discovered human decision in its P/W/M books, and continue to the
+next independent item.  Do not weaken a safety boundary to force completion.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q039](queue-q039.md)
+Previous Queue: [q040](queue-q040.md)
 
 ## Purpose
 
-Capture every safely obtainable identity, descriptor, provenance, and license
-fact for the exact connected Archer T3U Nano without binding a zedBSD driver.
-Then implement the independently specified AF_UNIX peer-credential and network
-authorization foundation required before ordinary users or desktop software
-may request WLAN orchestration through `networkd`.
+Complete the oldest dependency-ready hardware lifetime repair, then implement
+the independently usable local Wi-Fi profile store, and finally refresh the
+host Noct script interpreter to one immutable latest-upstream revision.  This
+Queue deliberately advances software-only work while the Archer printed label
+and later physical WLAN driver remain external checkpoints.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws004-p026` | [Phase](ws004-hardware/phase026-archer-t3u-nano-identity-firmware/phase.md) | uncleared | Exact descriptor, independent ID mappings, firmware/license pin, package boundary, base absence, and negative inputs are recorded; only the non-inferable printed model/region/revision awaits one external observation |
-| 2 | `ws005-p003` | [Phase](ws005-networking/phase003-unix-peer-credentials/phase.md) | in-progress | Add immutable AF_UNIX `SO_PEERCRED`, transactional `root:network 0660` publication, peer-based `networkd` authorization, and central root checks for direct mutating network ioctls with focused and runtime evidence |
+| 1 | `ws004-p016` | [Phase](ws004-hardware/phase016-legacy-hcd-request-retirement/phase.md) | in-progress | UHCI uses a controller-observed frame retirement boundary and EHCI uses a checked Async Advance acknowledgement before any completed/cancelled request DMA is freed; focused races, configured x86 builds, and available QEMU UHCI/EHCI lifecycle gates pass |
+| 2 | `ws005-p005` | [Phase](ws005-networking/phase005-wifi-credential-store/phase.md) | pending | Add the strict `wifi-conf 1` parser/model, euid/passwd-selected root and per-user stores, checked persistent lock and atomic writer, redacted `net wifi set-key`, focused fault/concurrency evidence, build, and bounded guest ownership evidence |
+| 3 | `ws008-p008` | [Phase](ws008-noct/phase008-latest-host-toolchain-pin/phase.md) | pending | Resolve public Noct `main` once, pin the full immutable commit for the host toolchain only, leave a clean detached `build/NoctLang`, and pass clean plus incremental `make toolchain` smoke without touching target Noct paths |
 
 ## Dependency and deferral decisions
 
-- `ws004-p027` is not selected in q040. It depends on a completed p026 target
-  capability/firmware boundary; a USB descriptor cannot substitute for the
-  printed hardware revision required by p026.
-- `ws005-p003` depends on the already frozen `ws005-p002` topology, not on the
-  physical WLAN adapter or p027. It proceeds even if p026 is uncleared.
-- Intel Mac `ws020-p004` remains an external physical checkpoint and its final
-  repetition remains after the uncleared p003 matrix. It does not block the
-  next software workstream.
-- PC-9821V13 `ws003-p023` retains its one exact diagnostic-image observation
-  from q039 and does not block q040.
+- `ws004-p016` depends only on completed p009, p011, and p015.  It does not
+  depend on the Archer label, NVMe hardware, or the later WLAN common core.
+- `ws005-p005` depends on the frozen p002 file/command contract.  Completed
+  p003 is available for later networkd use but is not required by local
+  `set-key`; physical WLAN work does not block this Phase.
+- `ws008-p008` changes only the host interpreter below `build/NoctLang` and
+  the immutable top-level pin.  Target package p009 remains blocked and is not
+  smuggled into this Queue.
+- `ws004-p027`/p028 remain held by the missing printed Archer label.
+  `ws004-p021` and physical p025 are ready/physical work but are lower than the
+  explicitly selected sequence and are not bundled here.
+- `ws017-p001` still needs the recorded mapping-permission decision;
+  `ws019` needs the missing Noct installer contract; WS011 VLAN/bridge design
+  remains open; WS013--WS015 remain manually blocked.  None is executed by
+  q041.
 
 ## Fixed boundaries
 
-- The p026 remote-host action is one read-only descriptor and package
-  inventory. Do not bind, reset, upload firmware to, or exercise the radio.
-- Redact serial identifiers. Do not infer a printed hardware revision from a
-  product string, USB `bcdDevice`, shared vendor archive, or VID:PID alone.
-- Do not commit a Realtek blob to the zlib-licensed base tree and do not add a
-  build-time or runtime network download.
-- p003 publishes one fixed 12-byte zedBSD peer-credential ABI and connection-
-  time snapshot semantics. Do not substitute live PID lookup or payload-supplied
-  identity.
-- Keep one `root:network 0660` `/run/networkd.sock`; do not add setuid clients,
-  a world-writable socket, or a second WLAN daemon socket.
-- Reject direct network mutation for non-root in the kernel before driver or
-  route state changes. Preserve query paths and root recovery commands.
-- Do not consume `.internal/` or run aggregate `make check`. Use `make -j16`,
-  focused owner tests, disposable QEMU images, and `git diff --check`.
-- Commit after each Phase. Retain a local commit if push is unavailable.
+- p016 may not approximate hardware retirement with an arbitrary delay.  If
+  a controller-observed boundary or required QEMU event cannot be established,
+  retain ownership and mark the exact sub-gate `uncleared`.
+- p005 never contacts `networkd`, invokes `wifi`/`ifconfig`/`dhcpc`, trusts
+  `HOME`, writes secrets to logs, or edits `/etc/net.conf`.  Tests use only
+  synthetic credentials in disposable project-local directories/images.
+- p008 resolves the public remote exactly once and pins a full commit.  It
+  must not modify, commit, or push upstream Noct, re-enable target packages,
+  touch the old dirty checkout, or silently retain a moving ref.
+- Do not consume `.internal/` or run aggregate `make check`.  Use `make -j16`,
+  focused owner tests, project-local temporary directories, disposable QEMU
+  images, and `git diff --check`.
+- Commit locally after each processed Phase.  Do not retry the previously
+  rejected push without a new explicit informed authorization.
 
 ## Completion definition
 
-q040 is finished when both selected items have been processed to `completed`
-or `uncleared`, with exact evidence and resume conditions synchronized into
-their Phase, WS, and master books. A missing printed adapter revision is an
-allowed p026 uncleared result; it is not permission to widen a USB match or to
-skip the independent p003 security work.
+q041 is finished when all three selected items have been processed to
+`completed` or `uncleared` and their exact evidence/resume conditions are
+synchronized into P, W, and M.  An honest controller/QEMU limitation or
+upstream/toolchain failure may leave one item uncleared without blocking the
+next independent item.

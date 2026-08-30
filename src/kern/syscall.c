@@ -509,6 +509,23 @@ static struct process *current_process(void)
 	return curthread != NULL ? curthread->proc : NULL;
 }
 
+static struct ucred *
+peercred_snapshot_ref(struct process *process,
+		      struct zedbsd_peercred *snapshot)
+{
+	struct ucred *credential;
+
+	if (process == NULL || snapshot == NULL)
+		return NULL;
+	credential = cred_process_ref(process);
+	if (credential == NULL)
+		return NULL;
+	snapshot->pid = process->pid;
+	snapshot->euid = credential->euid;
+	snapshot->egid = credential->egid;
+	return credential;
+}
+
 static int
 descriptor_socket(struct process *process, int descriptor,
 	struct socket_file_ref *reference)
@@ -671,6 +688,8 @@ static intptr_t
 sys_socketpair_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
+	struct ucred *credential;
+	struct zedbsd_peercred creator;
 	struct socket *left_socket = NULL, *right_socket = NULL;
 	struct file *left_file = NULL, *right_file = NULL;
 	int descriptors[2] = { -1, -1 };
@@ -689,8 +708,12 @@ sys_socketpair_call(const uintptr_t args[6])
 		return -EINVAL;
 	if ((int)args[0] != AF_UNIX)
 		return -EAFNOSUPPORT;
-	error = unix_socket_pair_create(type, (int)args[2], &left_socket,
-	    &right_socket);
+	credential = peercred_snapshot_ref(process, &creator);
+	if (credential == NULL)
+		return -EINVAL;
+	error = unix_socket_pair_create(type, (int)args[2], &creator,
+	    &left_socket, &right_socket);
+	cred_release(credential);
 	if (error == 0)
 		error = socket_file_create(left_socket, &left_file);
 	if (error == 0)
@@ -754,6 +777,8 @@ static intptr_t
 sys_connect_call(const uintptr_t args[6])
 {
 	struct process *process = current_process();
+	struct ucred *credential = NULL;
+	struct zedbsd_peercred connector;
 	struct socket_file_ref reference;
 	struct socket *socket;
 	struct sockaddr_storage address;
@@ -765,29 +790,43 @@ sys_connect_call(const uintptr_t args[6])
 	if (socket->ops == NULL || socket->ops->connect == NULL)
 		return socket_result(&reference, -EOPNOTSUPP);
 	error = copy_sockaddr_in(args[1], (socklen_t)args[2], &address);
-	if (error == 0)
-		error = socket->family == AF_UNIX ?
-		    unix_socket_connect_path(socket, process->cwdi, process->cred,
-		    (struct sockaddr *)&address, (socklen_t)args[2],
+	if (error == 0 && socket->family == AF_UNIX) {
+		credential = peercred_snapshot_ref(process, &connector);
+		error = credential == NULL ? EINVAL :
+		    unix_socket_connect_path(socket, process->cwdi, credential,
+		    &connector, (struct sockaddr *)&address, (socklen_t)args[2],
 		    (file_status_flags_get(reference.file) & O_NONBLOCK) != 0 ?
-		    SOCKET_IO_NONBLOCK : 0) :
-		    socket->ops->connect(socket, (struct sockaddr *)&address,
+		    SOCKET_IO_NONBLOCK : 0);
+	} else if (error == 0) {
+		error = socket->ops->connect(socket, (struct sockaddr *)&address,
 		    (socklen_t)args[2],
 		    (file_status_flags_get(reference.file) & O_NONBLOCK) != 0 ?
 		    SOCKET_IO_NONBLOCK : 0);
+	}
+	cred_release(credential);
 	return socket_result(&reference, error == 0 ? 0 : -error);
 }
 
 static intptr_t
 sys_listen_call(const uintptr_t args[6])
 {
+	struct process *process = current_process();
 	struct socket_file_ref reference;
 	struct socket *socket;
+	struct ucred *credential = NULL;
+	struct zedbsd_peercred listener;
 	int error;
 
-	if (descriptor_socket(current_process(), (int)args[0], &reference) != 0)
+	if (descriptor_socket(process, (int)args[0], &reference) != 0)
 		return -EBADF;
 	socket = reference.socket;
+	if (socket->family == AF_UNIX) {
+		credential = peercred_snapshot_ref(process, &listener);
+		error = credential == NULL ? EINVAL :
+		    unix_socket_listen(socket, (int)args[1], &listener);
+		cred_release(credential);
+		return socket_result(&reference, error == 0 ? 0 : -error);
+	}
 	if (socket->ops == NULL || socket->ops->listen == NULL)
 		return socket_result(&reference, -EOPNOTSUPP);
 	error = socket->ops->listen(socket, (int)args[1]);

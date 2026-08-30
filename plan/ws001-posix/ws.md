@@ -116,6 +116,7 @@ following broader component states:
 |---|---|
 | `reviewed` | applicable Issue 8 behavior and failures have executable evidence |
 | `implemented-unreviewed` | useful implementation exists, but the full contract has not passed review |
+| `implementation extension` | tested zedBSD-specific interface outside POSIX/SUS; retained for compatibility/security but not counted as conformance progress |
 | `partial` | a required interface or semantic area is known to be incomplete |
 | `missing` | no usable implementation exists |
 | `policy-conflict` | implementation exists but violates the no-external-source policy |
@@ -220,6 +221,7 @@ may be implemented while its consuming utility remains non-conforming.
 | KERN-RSRC-02 | resource limits | reviewed | `ulimit`, shell | declared current scope has reviewed utility evidence; expand when new limit classes are exposed |
 | KERN-BOOT-01 | init/service lifecycle | implemented-unreviewed | `/sbin/init`, service providers | native PID 1 boots and initiates ordered shutdown in QEMU; complete crash-loop, required-failure, stop-timeout, cycle, credential, and recovery evidence; missing-login exit/reap invalid-free remains tracked by [`ws002-p021`](../ws002-services/phase021-missing-login-session-teardown/phase.md) |
 | KERN-NET-01 | loopback and interface control | implemented-unreviewed | `networkd`, `net`, socket users | four-CPU QEMU proves NE2000 receive/transmit, a real DHCP lease, default route, DNS, static `lo0`, up/down, and dp8390 SMP serialization; counters, aliases, IPv6, broader NICs, stress/race coverage, and full ioctl review remain |
+| KERN-NET-02 | AF_UNIX peer identity | implementation extension | `networkd`, local control protocols | `SO_PEERCRED` returns one immutable connection-time 12-byte `zedbsd_peercred` snapshot for connected AF_UNIX streams; this is a zedBSD extension, not a POSIX/SUS conformance interface, and its pathname/socketpair/SCM_RIGHTS lifecycle evidence is owned by `ws005-p003` |
 | KERN-POLL-01 | UNIX listener readiness | partial | `init`, `networkd` | listener `poll()` did not wake reliably after a queued AF_UNIX stream connection in Phase 19; daemons use a bounded one-second nonblocking accept loop pending a focused kernel repair |
 
 ## 6. System call and kernel-interface tracker
@@ -238,6 +240,7 @@ dependency even when they are not POSIX public APIs.
 | API-IPC-01 | `msgctl()` family | implemented-unreviewed | kernel IPC plus `libc/sysv-ipc.c` | full command, permission, limit, removal, and malformed-ID review |
 | API-IPC-02 | `semctl()` family | implemented-unreviewed | kernel IPC plus `libc/sysv-ipc.c` | operation/array/undo semantics and concurrent lifecycle review |
 | API-IPC-03 | `shmctl()` family | implemented-unreviewed | kernel IPC plus `libc/sysv-ipc.c` | attach/remove lifecycle, permissions, limits, and enumeration review |
+| API-NET-01 | `SO_PEERCRED`, `struct zedbsd_peercred` | implementation extension | fixed 12-byte PID/EUID/EGID ABI, connection-time AF_UNIX snapshot, and `ws005-p003` guest fixture | Explicitly non-POSIX/non-SUS; retain ABI layout, short-buffer atomicity, descriptor-transfer identity, and unconnected/non-AF_UNIX error regressions without counting this row toward POSIX conformance |
 | API-SYSTEM-01 | process-snapshot system-device ioctl | implemented-unreviewed | `include/uapi/zedbsd/system.h`, `src/kern/system-device.c` | ABI evolution rules, race-consistent snapshots, permissions, all `ps` fields |
 | API-SYSTEM-02 | file-usage system-device ioctl | implemented-unreviewed | `SYSTEM_IOC_FILE_USAGE`, `system_process_file_usage()` | all reference flags, path races, mount/socket cases, permissions, bounded output |
 | API-TTY-01 | `TCGETS`, `TCSETS*`, termios libc API | partial | tty ioctl implementation and libc declarations | complete attribute/speed/control-character semantics, drain/flush/interruption tests |

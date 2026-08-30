@@ -8,7 +8,8 @@ Phase ID: `p005`
 
 Combined ID: `ws005-p005`
 
-Status: planned; not queued; v1 format and bounds frozen
+Status: selected (`q041`); pending after `ws004-p016`; v1 format and bounds
+frozen
 
 Parent: [WS005 networking and WLAN](../ws.md)
 

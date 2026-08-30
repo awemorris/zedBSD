@@ -11,7 +11,8 @@ Parent: [master plan](../master.md)
 
 Last accepted Phase: `ws008-p007`
 
-Resume point: Queue-ready `ws008-p008` updates the host toolchain. Do not Queue
+Resume point: q041 selects `ws008-p008` after the preceding WS004/WS005
+items. Do not execute
 `ws008-p009` until a clean upstream zedBSD-target fix is published or the user
 explicitly chooses a downstream patch-overlay policy.
 
@@ -28,7 +29,7 @@ Shared tests: [WS008 test index](tests/README.md)
 | [`ws008-p005`](phase005-independent-beui-backends/phase.md) | Complete (`q023`, 2026-08-28) | Canonical Noct removes `api-beui.c` and `api-beui-backend.c`; each selected platform source independently owns the complete `noct_register_api_beui()` implementation, with HAL/core details private |
 | [`ws008-p006`](phase006-maintainer-api-layout-review/phase.md) | Uncleared (`q024`; manual review rejection) | Automated gates passed, but the Principal Engineer rejected the implementation quality and took ownership of the repair |
 | [`ws008-p007`](phase007-target-package-hold/phase.md) | Complete (`q025`, 2026-08-28) | Target Noct and dependent Remacs are absent from menu, forced selection, and a fresh rootfs; the separate host Noct script runtime remains operational |
-| [`ws008-p008`](phase008-latest-host-toolchain-pin/phase.md) | Planned; Queue-ready | Resolve upstream `main` once, pin its immutable commit for `build/NoctLang`, and prove the host Noct script toolchain |
+| [`ws008-p008`](phase008-latest-host-toolchain-pin/phase.md) | Selected (`q041`); pending after `ws005-p005` | Resolve upstream `main` once, pin its immutable commit for `build/NoctLang`, and prove the host Noct script toolchain |
 | [`ws008-p009`](phase009-base-noct-relocation-target-resume/phase.md) | Blocked | Move target integration to `userland/base/noct/` with clone at `userland/base/noct/noct/`, then re-enable amd64 Noct only after upstream/overlay resolution and QEMU acceptance |
 
 The old NOCT-00--NOCT-05 labels are superseded as scheduling units by these
@@ -155,7 +156,8 @@ are sufficient. p003 depends on the canonical executable from p001; it follows
 p002 so that its final image is also the target WS artifact, but it must diagnose
 VM/JIT failures independently of BeUI.
 
-p008 depends only on the completed scripting bootstrap and is Queue-ready.
+p008 depends only on the completed scripting bootstrap and is selected by
+q041.
 p009 depends on p008 for the host-pin workflow, but its target revision may be
 newer; when it advances that revision it reruns p008's host gates. p009 also
 depends on an upstream target fix or an explicit downstream patch-overlay

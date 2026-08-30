@@ -8,7 +8,7 @@ Phase ID: `p008`
 
 Combined ID: `ws008-p008`
 
-Status: Planned; Queue-ready
+Status: Selected (`q041`); pending after `ws005-p005`
 
 Parent: [WS008](../ws.md)
 

@@ -5,6 +5,8 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
+#include <limits.h>
 #include <net/route.h>
 #include <signal.h>
 #include <stdio.h>
@@ -18,8 +20,32 @@
 #include <unistd.h>
 
 #define CHILD_OUTPUT_MAX 384
+#define NETWORKD_AUTH_LOG_MAX 512U
+#define NETWORKD_GROUP_DATABASE_MAX 8192U
+#define NETWORKD_GROUP_BUFFER_MAX 2048U
+#define NETWORKD_GROUP_FILE "/etc/group"
+#define NETWORKD_GROUP_GID ((gid_t)69)
+#define NETWORKD_GROUP_NAME "network"
+
+enum networkd_client_role {
+	NETWORKD_CLIENT_ROOT,
+	NETWORKD_CLIENT_READ_ONLY
+};
+
+struct networkd_listener {
+	int descriptor;
+	dev_t device;
+	ino_t inode;
+	int owns_path;
+	const char *stage;
+};
 
 static volatile sig_atomic_t stopping;
+
+struct networkd_group_scan {
+	unsigned network_records;
+	unsigned gid_records;
+};
 
 static void
 handle_signal(int signal_number)
@@ -61,26 +87,284 @@ notify_init(const char *record)
 }
 
 static int
-open_listener(void)
+scan_group_record(char *line, struct networkd_group_scan *scan)
+{
+	char *field[4], *cursor, *end;
+	unsigned long gid;
+
+	if (line == NULL || scan == NULL || line[0] == '\0' || line[0] == '#')
+		return line != NULL && scan != NULL ? 0 : EINVAL;
+	field[0] = line;
+	cursor = strchr(field[0], ':');
+	if (cursor == NULL)
+		return EINVAL;
+	*cursor = '\0';
+	field[1] = cursor + 1;
+	cursor = strchr(field[1], ':');
+	if (cursor == NULL)
+		return EINVAL;
+	*cursor = '\0';
+	field[2] = cursor + 1;
+	cursor = strchr(field[2], ':');
+	if (cursor == NULL)
+		return EINVAL;
+	*cursor = '\0';
+	field[3] = cursor + 1;
+	if (strchr(field[3], ':') != NULL || field[0][0] == '\0' ||
+	    field[2][0] == '\0')
+		return EINVAL;
+	for (cursor = field[0]; *cursor != '\0'; cursor++)
+		if ((unsigned char)*cursor <= 32U ||
+		    (unsigned char)*cursor == 127U)
+			return EINVAL;
+	for (cursor = field[2]; *cursor != '\0'; cursor++)
+		if (*cursor < '0' || *cursor > '9')
+			return EINVAL;
+	errno = 0;
+	gid = strtoul(field[2], &end, 10);
+	if (errno != 0 || end == field[2] || *end != '\0' || gid > UINT_MAX)
+		return EINVAL;
+	if (strcmp(field[0], NETWORKD_GROUP_NAME) == 0)
+		scan->network_records++;
+	if (gid == (unsigned long)NETWORKD_GROUP_GID)
+		scan->gid_records++;
+	return 0;
+}
+
+static int
+validate_network_group_database(void)
+{
+	char database[NETWORKD_GROUP_DATABASE_MAX + 1U];
+	struct networkd_group_scan scan;
+	size_t used = 0, start;
+	ssize_t count;
+	int descriptor, error = 0;
+
+	descriptor = open(NETWORKD_GROUP_FILE, O_RDONLY | O_CLOEXEC);
+	if (descriptor < 0)
+		return -1;
+	while (used < NETWORKD_GROUP_DATABASE_MAX) {
+		count = read(descriptor, database + used,
+			     NETWORKD_GROUP_DATABASE_MAX - used);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			error = errno;
+			break;
+		}
+		if (count == 0)
+			break;
+		used += (size_t)count;
+	}
+	if (error == 0 && used == NETWORKD_GROUP_DATABASE_MAX) {
+		char extra;
+		do {
+			count = read(descriptor, &extra, 1U);
+		} while (count < 0 && errno == EINTR);
+		if (count != 0)
+			error = count < 0 ? errno : E2BIG;
+	}
+	if (close(descriptor) != 0 && error == 0)
+		error = errno;
+	if (error != 0) {
+		errno = error;
+		return -1;
+	}
+	if (memchr(database, '\0', used) != NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	database[used] = '\0';
+	memset(&scan, 0, sizeof(scan));
+	for (start = 0; start < used;) {
+		char *line = database + start;
+		char *newline = memchr(line, '\n', used - start);
+		size_t length = newline != NULL ? (size_t)(newline - line)
+						: used - start;
+
+		line[length] = '\0';
+		if (length != 0 && line[length - 1U] == '\r')
+			line[length - 1U] = '\0';
+		if (scan_group_record(line, &scan) != 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		start += length + (newline != NULL ? 1U : 0U);
+	}
+	if (scan.network_records != 1U || scan.gid_records != 1U) {
+		errno = EINVAL;
+		return -1;
+	}
+	return 0;
+}
+
+static int
+resolve_network_group(gid_t *result)
+{
+	char buffer[NETWORKD_GROUP_BUFFER_MAX];
+	struct group storage, *entry = NULL;
+	int error;
+
+	if (result == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	error = getgrnam_r(NETWORKD_GROUP_NAME, &storage, buffer,
+			   sizeof(buffer), &entry);
+	if (error != 0) {
+		errno = error;
+		return -1;
+	}
+	if (entry == NULL) {
+		errno = ENOENT;
+		return -1;
+	}
+	if (entry->gr_name == NULL ||
+	    strcmp(entry->gr_name, NETWORKD_GROUP_NAME) != 0 ||
+	    entry->gr_gid != NETWORKD_GROUP_GID) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (validate_network_group_database() != 0)
+		return -1;
+	*result = entry->gr_gid;
+	return 0;
+}
+
+static int
+listener_path_matches(const struct networkd_listener *listener)
+{
+	struct stat status;
+
+	if (listener == NULL || !listener->owns_path)
+		return 0;
+	if (lstat(NETWORKD_SOCKET, &status) != 0)
+		return 0;
+	return S_ISSOCK(status.st_mode) && status.st_dev == listener->device &&
+	       status.st_ino == listener->inode;
+}
+
+static int
+close_listener(struct networkd_listener *listener)
+{
+	int error = 0;
+
+	if (listener == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (listener->descriptor >= 0 && close(listener->descriptor) != 0)
+		error = errno;
+	listener->descriptor = -1;
+	if (listener->owns_path) {
+		if (listener_path_matches(listener)) {
+			if (unlink(NETWORKD_SOCKET) != 0 && error == 0)
+				error = errno;
+		} else {
+			struct stat status;
+			/* A removed path needs no cleanup.  A replacement is never
+			 * followed or unlinked by this daemon instance. */
+			if (lstat(NETWORKD_SOCKET, &status) == 0 && error == 0)
+				error = EBUSY;
+		}
+	}
+	listener->owns_path = 0;
+	if (error != 0) {
+		errno = error;
+		return -1;
+	}
+	return 0;
+}
+
+static int
+remove_stale_listener(void)
+{
+	struct stat status;
+
+	if (lstat(NETWORKD_SOCKET, &status) != 0)
+		return errno == ENOENT ? 0 : -1;
+	if (!S_ISSOCK(status.st_mode)) {
+		errno = EEXIST;
+		return -1;
+	}
+	return unlink(NETWORKD_SOCKET);
+}
+
+static int
+open_listener(struct networkd_listener *listener)
 {
 	struct sockaddr_un address;
-	int descriptor =
+	struct stat status;
+	mode_t old_mask;
+	gid_t group;
+	int saved;
+
+	if (listener == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	memset(listener, 0, sizeof(*listener));
+	listener->descriptor = -1;
+	listener->stage = "resolve-group";
+	if (resolve_network_group(&group) != 0)
+		return -1;
+	listener->stage = "remove-stale";
+	if (remove_stale_listener() != 0)
+		return -1;
+	listener->stage = "socket";
+	listener->descriptor =
 	    socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-	if (descriptor < 0)
+	if (listener->descriptor < 0)
 		return -1;
 	memset(&address, 0, sizeof(address));
 	address.sun_family = AF_UNIX;
 	strcpy(address.sun_path, NETWORKD_SOCKET);
-	(void)unlink(NETWORKD_SOCKET);
-	if (bind(descriptor, (struct sockaddr *)&address, sizeof(address)) !=
-		0 ||
-	    chmod(NETWORKD_SOCKET, 0600) != 0 || listen(descriptor, 8) != 0) {
-		int saved = errno;
-		close(descriptor);
+	listener->stage = "bind";
+	old_mask = umask(0177);
+	if (bind(listener->descriptor, (struct sockaddr *)&address,
+		 sizeof(address)) != 0) {
+		saved = errno;
+		(void)umask(old_mask);
 		errno = saved;
-		return -1;
+		goto fail;
 	}
-	return descriptor;
+	(void)umask(old_mask);
+	listener->stage = "identify";
+	if (lstat(NETWORKD_SOCKET, &status) != 0)
+		goto fail;
+	if (!S_ISSOCK(status.st_mode)) {
+		errno = EINVAL;
+		goto fail;
+	}
+	listener->device = status.st_dev;
+	listener->inode = status.st_ino;
+	listener->owns_path = 1;
+	listener->stage = "owner";
+	if (lchown(NETWORKD_SOCKET, 0, group) != 0)
+		goto fail;
+	listener->stage = "mode";
+	if (chmod(NETWORKD_SOCKET, 0660) != 0)
+		goto fail;
+	listener->stage = "verify";
+	if (lstat(NETWORKD_SOCKET, &status) != 0)
+		goto fail;
+	if (!S_ISSOCK(status.st_mode) || status.st_dev != listener->device ||
+	    status.st_ino != listener->inode || status.st_uid != 0 ||
+	    status.st_gid != group || (status.st_mode & 07777U) != 0660U) {
+		errno = EINVAL;
+		goto fail;
+	}
+	listener->stage = "listen";
+	if (listen(listener->descriptor, 8) != 0)
+		goto fail;
+	listener->stage = "ready";
+	return 0;
+
+fail:
+	saved = errno != 0 ? errno : EIO;
+	(void)close_listener(listener);
+	errno = saved;
+	return -1;
 }
 
 static int
@@ -357,7 +641,75 @@ send_error(int client, int error, const char *reason)
 }
 
 static void
-handle_request(int client)
+write_auth_log(const struct zedbsd_peercred *peer,
+	       enum networkd_client_role role, int error)
+{
+	char record[NETWORKD_AUTH_LOG_MAX];
+	int length;
+
+	if (error != 0 || peer == NULL) {
+		length = snprintf(record, sizeof(record),
+		    "networkd: auth result=denied reason=peercred error=%d",
+		    error != 0 ? error : EACCES);
+	} else {
+		length = snprintf(record, sizeof(record),
+		    "networkd: auth result=admitted role=%s pid=%ld euid=%lu egid=%lu",
+		    role == NETWORKD_CLIENT_ROOT ? "root-all" : "nonroot-show",
+		    (long)peer->pid, (unsigned long)peer->euid,
+		    (unsigned long)peer->egid);
+	}
+	if (length < 0 || (size_t)length > sizeof(record) - 2U) {
+		const char fallback[] =
+		    "networkd: auth result=denied reason=record-overflow\n";
+		(void)fputs(fallback, stderr);
+		return;
+	}
+	record[length++] = '\n';
+	record[length] = '\0';
+	(void)fputs(record, stderr);
+}
+
+static int
+authenticate_client(int client, struct zedbsd_peercred *peer,
+		    enum networkd_client_role *role)
+{
+	socklen_t length;
+	int error;
+
+	if (peer == NULL || role == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	memset(peer, 0, sizeof(*peer));
+	length = sizeof(*peer);
+	if (getsockopt(client, SOL_SOCKET, SO_PEERCRED, peer, &length) != 0) {
+		error = errno != 0 ? errno : EACCES;
+		write_auth_log(NULL, NETWORKD_CLIENT_READ_ONLY, error);
+		errno = error;
+		return -1;
+	}
+	if (length != sizeof(*peer) || peer->pid < 0) {
+		error = EINVAL;
+		write_auth_log(NULL, NETWORKD_CLIENT_READ_ONLY, error);
+		errno = error;
+		return -1;
+	}
+	*role = peer->euid == 0 ? NETWORKD_CLIENT_ROOT
+					 : NETWORKD_CLIENT_READ_ONLY;
+	write_auth_log(peer, *role, 0);
+	return 0;
+}
+
+static int
+operation_allowed(enum networkd_client_role role, const char *operation)
+{
+	if (role == NETWORKD_CLIENT_ROOT)
+		return 1;
+	return operation != NULL && strcmp(operation, "SHOW") == 0;
+}
+
+static void
+handle_request(int client, enum networkd_client_role role)
 {
 	char request[NETWORKD_REQUEST_MAX], response[NETWORKD_RESPONSE_MAX];
 	char diagnostic[CHILD_OUTPUT_MAX], *arguments[16], *token;
@@ -379,6 +731,10 @@ handle_request(int client)
 	}
 	if (count < 2 || strcmp(items[0], NETWORKD_PROTOCOL_VERSION) != 0) {
 		send_error(client, EINVAL, "unsupported protocol");
+		return;
+	}
+	if (!operation_allowed(role, items[1])) {
+		send_error(client, EPERM, "operation not permitted");
 		return;
 	}
 	diagnostic[0] = '\0';
@@ -469,26 +825,35 @@ handle_request(int client)
 int
 main(void)
 {
-	int listener;
+	struct networkd_listener listener;
+	int status = 0;
 	(void)signal(SIGHUP, ignore_signal);
 	(void)signal(SIGTERM, handle_signal);
 	(void)signal(SIGINT, handle_signal);
-	listener = open_listener();
-	if (listener < 0) {
+	if (open_listener(&listener) != 0) {
 		char record[256];
 		int saved = errno;
-		(void)snprintf(record, sizeof(record), "FAIL %d %s\n", saved,
+		(void)snprintf(record, sizeof(record), "FAIL %d %s %s\n", saved,
+			       listener.stage != NULL ? listener.stage : "unknown",
 			       strerror(saved));
 		notify_init(record);
-		fprintf(stderr, "networkd: control socket: %s\n",
+		fprintf(stderr, "networkd: control socket %s: %s\n",
+			listener.stage != NULL ? listener.stage : "unknown",
 			strerror(saved));
 		return 1;
 	}
 	notify_init("READY\n");
 	while (!stopping) {
-		int client = accept4(listener, NULL, NULL, SOCK_CLOEXEC);
+		int client =
+		    accept4(listener.descriptor, NULL, NULL, SOCK_CLOEXEC);
 		if (client >= 0) {
-			handle_request(client);
+			struct zedbsd_peercred peer;
+			enum networkd_client_role role;
+
+			if (authenticate_client(client, &peer, &role) == 0)
+				handle_request(client, role);
+			else
+				send_error(client, EACCES, "authentication failed");
 			close(client);
 			continue;
 		}
@@ -496,7 +861,11 @@ main(void)
 			break;
 		sleep(1);
 	}
-	close(listener);
-	unlink(NETWORKD_SOCKET);
-	return stopping ? 0 : 1;
+	status = stopping ? 0 : 1;
+	if (close_listener(&listener) != 0) {
+		fprintf(stderr, "networkd: control socket cleanup: %s\n",
+			strerror(errno));
+		status = 1;
+	}
+	return status;
 }

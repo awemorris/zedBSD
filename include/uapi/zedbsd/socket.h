@@ -51,6 +51,33 @@ typedef uint32_t socklen_t;
 #define SO_RCVTIMEO	0x1006
 #define SO_DOMAIN	0x100a
 #define SO_PROTOCOL	0x100b
+#define SO_PEERCRED	0x0011
+
+/*
+ * Immutable connection-time peer identity for connected AF_UNIX streams.
+ * This is a zedBSD extension and deliberately does not expose the kernel's
+ * internal credential object.
+ */
+struct zedbsd_peercred {
+	int32_t pid;
+	uint32_t euid;
+	uint32_t egid;
+};
+
+_Static_assert(sizeof(struct zedbsd_peercred) == 12U,
+    "zedBSD peer credential ABI must remain 12 bytes");
+_Static_assert(offsetof(struct zedbsd_peercred, pid) == 0U,
+    "zedBSD peer credential pid offset changed");
+_Static_assert(offsetof(struct zedbsd_peercred, euid) == 4U,
+    "zedBSD peer credential euid offset changed");
+_Static_assert(offsetof(struct zedbsd_peercred, egid) == 8U,
+    "zedBSD peer credential egid offset changed");
+_Static_assert(sizeof(pid_t) == sizeof(int32_t) && (pid_t)-1 < (pid_t)0,
+    "native pid_t no longer fits peer credential pid");
+_Static_assert(sizeof(uid_t) == sizeof(uint32_t) && (uid_t)-1 > (uid_t)0,
+    "native uid_t no longer fits peer credential euid");
+_Static_assert(sizeof(gid_t) == sizeof(uint32_t) && (gid_t)-1 > (gid_t)0,
+    "native gid_t no longer fits peer credential egid");
 
 #define MSG_DONTWAIT	0x0040
 #define MSG_NOSIGNAL	0x4000

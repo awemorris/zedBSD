@@ -92,6 +92,11 @@ struct unix_socket {
 	struct packet_buf *reserved_packet;
 	uint64_t reservation_token;
 	unsigned endpoint_closed;
+	unsigned connecting;
+	struct zedbsd_peercred listener_credential;
+	struct zedbsd_peercred peer_credential;
+	unsigned listener_credential_valid;
+	unsigned peer_credential_valid;
 };
 
 static struct unix_socket *
@@ -215,10 +220,15 @@ unix_resolve_endpoint(struct cwdinfo *context, const struct ucred *cred,
 }
 
 static int
-unix_connection_create(struct socket *left, struct socket *right)
+unix_connection_create(struct socket *left, struct socket *right,
+		       const struct zedbsd_peercred *left_peer,
+		       const struct zedbsd_peercred *right_peer)
 {
-	struct unix_connection *connection =
-	    kern_calloc(1, sizeof(*connection));
+	struct unix_connection *connection;
+
+	if (left_peer == NULL || right_peer == NULL)
+		return EINVAL;
+	connection = kern_calloc(1, sizeof(*connection));
 	if (connection == NULL)
 		return ENOMEM;
 	refcount_init(&connection->refs, 2);
@@ -230,6 +240,10 @@ unix_connection_create(struct socket *left, struct socket *right)
 	unix_endpoint(left)->side = 0;
 	unix_endpoint(right)->connection = connection;
 	unix_endpoint(right)->side = 1;
+	unix_endpoint(left)->peer_credential = *left_peer;
+	unix_endpoint(left)->peer_credential_valid = 1;
+	unix_endpoint(right)->peer_credential = *right_peer;
+	unix_endpoint(right)->peer_credential_valid = 1;
 	return 0;
 }
 
@@ -1100,52 +1114,89 @@ unix_socket_bind_path(struct socket *socket, struct cwdinfo *context,
 	return error;
 }
 
-static int
-unix_listen(struct socket *socket, int backlog)
+int
+unix_socket_listen(struct socket *socket, int backlog,
+		   const struct zedbsd_peercred *listener_credential)
 {
-	struct unix_socket *endpoint = unix_endpoint(socket);
+	struct unix_socket *endpoint;
+	unsigned long irq;
+
+	if (socket == NULL || socket->family != AF_UNIX ||
+	    listener_credential == NULL)
+		return EINVAL;
 	if (socket->type != SOCK_STREAM)
 		return EOPNOTSUPP;
-	if (!endpoint->bound)
+	endpoint = unix_endpoint(socket);
+	irq = spin_lock_irqsave(&socket->lock);
+	if (!endpoint->bound) {
+		spin_unlock_irqrestore(&socket->lock, irq);
 		return EDESTADDRREQ;
-	if (endpoint->connection != NULL)
+	}
+	if (endpoint->connection != NULL) {
+		spin_unlock_irqrestore(&socket->lock, irq);
 		return EISCONN;
+	}
 	if (backlog < 1)
 		backlog = 1;
 	if (backlog > 16)
 		backlog = 16;
 	endpoint->backlog = (unsigned)backlog;
+	if (!endpoint->listening) {
+		endpoint->listener_credential = *listener_credential;
+		endpoint->listener_credential_valid = 1;
+	}
 	endpoint->listening = 1;
+	spin_unlock_irqrestore(&socket->lock, irq);
 	return 0;
+}
+
+static void
+unix_connect_cancel(struct socket *socket)
+{
+	struct unix_socket *endpoint = unix_endpoint(socket);
+	unsigned long irq;
+
+	irq = spin_lock_irqsave(&socket->lock);
+	endpoint->connecting = 0;
+	spin_unlock_irqrestore(&socket->lock, irq);
 }
 
 static int
 unix_connect_resolved(struct socket *socket, struct socket *listener_socket,
+		      const struct zedbsd_peercred *connector_credential,
 		      const char *path, unsigned io_flags)
 {
 	struct unix_socket *client = unix_endpoint(socket);
 	struct unix_socket *listener = unix_endpoint(listener_socket);
 	struct unix_pending *pending;
 	struct unix_connection *connection;
+	struct zedbsd_peercred listener_credential;
 	struct socket *accepted = NULL;
 	unsigned long irq;
 	int error;
 	(void)io_flags;
-	if (client->connection != NULL) {
+	if (connector_credential == NULL) {
+		unix_connect_cancel(socket);
 		socket_release(listener_socket);
-		return EISCONN;
+		return EINVAL;
 	}
 	if (socket->type == SOCK_DGRAM) {
-		struct socket *old = client->datagram_peer;
+		struct socket *old;
+
+		irq = spin_lock_irqsave(&socket->lock);
+		old = client->datagram_peer;
 		client->datagram_peer = listener_socket;
 		strcpy(client->peer_path, path);
 		client->connected = 1;
+		client->connecting = 0;
+		spin_unlock_irqrestore(&socket->lock, irq);
 		if (old != NULL)
 			socket_release(old);
 		return 0;
 	}
 	error = socket_create(AF_UNIX, SOCK_STREAM, 0, &accepted);
 	if (error != 0) {
+		unix_connect_cancel(socket);
 		socket_release(listener_socket);
 		return error;
 	}
@@ -1156,6 +1207,7 @@ unix_connect_resolved(struct socket *socket, struct socket *listener_socket,
 		kern_free(pending);
 		socket_release(accepted);
 		socket_release(listener_socket);
+		unix_connect_cancel(socket);
 		return ENOMEM;
 	}
 	refcount_init(&connection->refs, 2);
@@ -1165,15 +1217,19 @@ unix_connect_resolved(struct socket *socket, struct socket *listener_socket,
 	irq = spin_lock_irqsave(&listener->socket.lock);
 	if (!listener->listening) {
 		error = ECONNREFUSED;
+	} else if (!listener->listener_credential_valid) {
+		error = ECONNREFUSED;
 	} else if (listener->pending_count >= listener->backlog) {
 		error = EAGAIN;
 	} else {
+		listener_credential = listener->listener_credential;
 		connection->ends[0] = socket;
 		connection->ends[1] = accepted;
-		client->connection = connection;
-		client->side = 0;
 		unix_endpoint(accepted)->connection = connection;
 		unix_endpoint(accepted)->side = 1;
+		unix_endpoint(accepted)->peer_credential =
+		    *connector_credential;
+		unix_endpoint(accepted)->peer_credential_valid = 1;
 		pending->socket = accepted;
 		if (listener->pending_tail != NULL)
 			listener->pending_tail->next = pending;
@@ -1182,9 +1238,25 @@ unix_connect_resolved(struct socket *socket, struct socket *listener_socket,
 		listener->pending_tail = pending;
 		listener->pending_count++;
 		waitq_wake_one(&listener->socket.accept_waitq);
-		poll_notify();
 	}
 	spin_unlock_irqrestore(&listener->socket.lock, irq);
+	if (error == 0) {
+		/*
+		 * The accepted end is complete before it enters the listener queue.
+		 * If it is accepted and closed before this publication, its connection
+		 * reference is released while the reserved client reference remains.
+		 */
+		irq = spin_lock_irqsave(&socket->lock);
+		client->connection = connection;
+		client->side = 0;
+		client->peer_credential = listener_credential;
+		client->peer_credential_valid = 1;
+		client->connecting = 0;
+		spin_unlock_irqrestore(&socket->lock, irq);
+		poll_notify();
+	} else {
+		unix_connect_cancel(socket);
+	}
 	socket_release(listener_socket);
 	if (error != 0) {
 		kern_free(pending);
@@ -1208,19 +1280,38 @@ unix_connect(struct socket *socket, const struct sockaddr *address,
 int
 unix_socket_connect_path(struct socket *socket, struct cwdinfo *context,
 			 const struct ucred *cred,
+			 const struct zedbsd_peercred *connector_credential,
 			 const struct sockaddr *address, socklen_t length,
 			 unsigned io_flags)
 {
+	struct unix_socket *endpoint;
 	struct socket *listener;
 	char path[UNIX_PATH_MAX];
+	unsigned long irq;
 	int error;
-	if (socket == NULL || socket->family != AF_UNIX)
+	if (socket == NULL || socket->family != AF_UNIX ||
+	    connector_credential == NULL)
 		return EINVAL;
+	endpoint = unix_endpoint(socket);
+	irq = spin_lock_irqsave(&socket->lock);
+	if (endpoint->connecting) {
+		spin_unlock_irqrestore(&socket->lock, irq);
+		return EALREADY;
+	}
+	if (endpoint->connection != NULL) {
+		spin_unlock_irqrestore(&socket->lock, irq);
+		return EISCONN;
+	}
+	endpoint->connecting = 1;
+	spin_unlock_irqrestore(&socket->lock, irq);
 	error = unix_resolve_endpoint(context, cred, address, length,
 				      socket->type, &listener, path);
-	if (error != 0)
+	if (error != 0) {
+		unix_connect_cancel(socket);
 		return error;
-	return unix_connect_resolved(socket, listener, path, io_flags);
+	}
+	return unix_connect_resolved(socket, listener, connector_credential, path,
+				     io_flags);
 }
 
 static int
@@ -1317,6 +1408,33 @@ connected_pair:
 		return error;
 	unix_store_address(unix_endpoint(peer), address, length);
 	socket_release(peer);
+	return 0;
+}
+
+static int
+unix_getsockopt(struct socket *socket, int level, int option, void *value,
+		 socklen_t *length)
+{
+	struct unix_socket *endpoint;
+	struct zedbsd_peercred credential;
+	unsigned long irq;
+
+	if (socket == NULL || level != SOL_SOCKET || option != SO_PEERCRED)
+		return ENOPROTOOPT;
+	if (socket->type != SOCK_STREAM)
+		return ENOPROTOOPT;
+	if (value == NULL || length == NULL || *length < sizeof(credential))
+		return EINVAL;
+	endpoint = unix_endpoint(socket);
+	irq = spin_lock_irqsave(&socket->lock);
+	if (!endpoint->peer_credential_valid) {
+		spin_unlock_irqrestore(&socket->lock, irq);
+		return ENOTCONN;
+	}
+	credential = endpoint->peer_credential;
+	spin_unlock_irqrestore(&socket->lock, irq);
+	memcpy(value, &credential, sizeof(credential));
+	*length = sizeof(credential);
 	return 0;
 }
 
@@ -1532,13 +1650,13 @@ unix_close(struct socket *socket)
 static const struct socket_ops unix_ops = {
     .bind = unix_bind,
     .connect = unix_connect,
-    .listen = unix_listen,
     .accept = unix_accept,
     .sendto = unix_sendto,
     .recvfrom = unix_recvfrom,
     .shutdown = unix_shutdown,
     .getsockname = unix_getsockname,
     .getpeername = unix_getpeername,
+    .getsockopt = unix_getsockopt,
     .poll = unix_poll,
     .buffer_changed = unix_buffer_changed,
     .endpoint_close = unix_endpoint_close,
@@ -1565,13 +1683,15 @@ unix_create(int type, int protocol, struct socket **result)
 }
 
 int
-unix_socket_pair_create(int type, int protocol, struct socket **left_result,
+unix_socket_pair_create(int type, int protocol,
+			const struct zedbsd_peercred *creator,
+			struct socket **left_result,
 			struct socket **right_result)
 {
 	struct socket *left = NULL, *right = NULL;
 	int error;
 
-	if (left_result == NULL || right_result == NULL)
+	if (creator == NULL || left_result == NULL || right_result == NULL)
 		return EINVAL;
 	error = socket_create(AF_UNIX, type, protocol, &left);
 	if (error != 0)
@@ -1581,7 +1701,7 @@ unix_socket_pair_create(int type, int protocol, struct socket **left_result,
 		socket_release(left);
 		return error;
 	}
-	error = unix_connection_create(left, right);
+	error = unix_connection_create(left, right, creator, creator);
 	if (error != 0) {
 		socket_release(left);
 		socket_release(right);

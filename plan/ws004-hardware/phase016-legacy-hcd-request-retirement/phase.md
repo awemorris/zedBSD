@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 Phase ID: `ws004-p016`
 
-Status: pending; residual from `ws004-p015`, not in the current Queue
+Status: in-progress (`q041`); residual from `ws004-p015`
 
 Parent: [WS004 hardware expansion](../ws.md)
 
