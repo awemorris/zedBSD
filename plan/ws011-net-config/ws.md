@@ -4,15 +4,18 @@ Last updated: 2026-08-27
 
 WSID: `ws011`
 
-Status: in progress; `ws011-p003` software milestone complete
+Status: in progress; `ws011-p003` software milestone complete; VLAN/bridge
+manual hold released
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws011-p003`
 
-Resume point: complete the remaining `ws011-p005` timeout maximum, companion
-lock path, and diagnostic bounds. `ws011-p004` VLAN/bridge work is on the
-manual blocking register and is not an implementation candidate.
+Resume point: after the higher-priority Queues, resume `ws011-p004` by closing
+its remaining virtual-interface UAPI, packet-ownership, filtering, and
+persistence design gates before implementation. Complete the independent
+`ws011-p005` timeout maximum, companion lock path, and diagnostic bounds when
+selected.
 
 Shared tests: [WS011 test index](tests/README.md)
 
@@ -70,7 +73,7 @@ strict YAML-like zedBSD format, not general YAML.
 | `ws011-p001` | [`net.conf` v1 format and parser](phase001-netconf/phase.md) | Complete | Strict native parser/model/writer and host/native build gates pass |
 | `ws011-p002` | [Interactive `net` console](phase002-console/phase.md) | Complete | Three modes, candidate safety, argv sharing, help/history, and native image gates pass |
 | `ws011-p003` | [Persistence and boot migration](phase003-persistence/phase.md) | Complete software milestone | Atomic authoritative configuration and boot/request evidence pass; migrated DHCP QEMU rerun remains |
-| `ws011-p004` | [VLAN and bridge interfaces](phase004-vlan-bridge/phase.md) | Blocked by manual hold | Future topology work; resume only when its design discussion is explicitly selected |
+| `ws011-p004` | [VLAN and bridge interfaces](phase004-vlan-bridge/phase.md) | Resumed; detailed design required before Queue | Close the recorded topology/UAPI/data-path decisions, then implement VLAN and bridge through kernel, networkd, `net`, persistence, and tests |
 | `ws011-p005` | [Confirmed-commit design](phase005-confirmed-commit-design/phase.md) | Proposed; public semantics fixed | Freeze three implementation bounds, then extract implementation and verification Phases |
 
 ## Fixed decisions

@@ -1,18 +1,21 @@
 # WS006: input and evdev
 
-Last updated: 2026-08-28
+Last updated: 2026-08-30
 
 WSID: `ws006`
 
-Status: active; `ws006-p005` complete PC/AT milestone in `q020`
+Status: active; `ws006-p005` is the last completed milestone, and closure
+Phases `ws006-p006` through `ws006-p009` are now defined but not queued
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws006-p005` complete PC/AT software milestone
 
-Resume point: capability/state queries now unblock Noct/BeUI. Later WS006 work
-retains character-only HAL truthfulness, multi-source pointer ownership,
-consumer migration, legacy-console removal, and USB HID.
+Resume point: start with `ws006-p006` producer truthfulness/ownership and
+`ws006-p007` the independent USB HID parser.  `ws006-p008` joins those results
+into live USB HID evdev devices.  `ws006-p009` remains blocked until
+`ws008-p009` makes the latest Noct target/userland integration available and
+verified.
 
 Shared tests: [WS006 test index](tests/README.md)
 
@@ -25,9 +28,29 @@ Shared tests: [WS006 test index](tests/README.md)
 | [`ws006-p003`](phase003-producer-bridge/phase.md) | Complete milestone | Production event nodes register in QEMU; physical-key broker/consumer evidence remains p004 |
 | [`ws006-p004`](phase004-console-broker/phase.md) | Complete PC/AT software milestone | Fixed string event, single broker, focused/build evidence, and production QEMU event-node/console coexistence pass; PC-98/X68000 physical detail remains |
 | [`ws006-p005`](phase005-evdev-capability-state/phase.md) | Complete PC/AT milestone (`q020`) | Registered native-word capabilities, state queries, boundary fixtures, and capability-only amd64 QEMU discovery pass; character-only HAL and multi-source pointer residuals retained |
+| [`ws006-p006`](phase006-input-truthfulness-ownership/phase.md) | Planned; not queued | Make character-only and physical producers truthful, add bounded internal console subscription, and make keyboard/pointer state and detach ownership per source |
+| [`ws006-p007`](phase007-usb-hid-parser/phase.md) | Planned; not queued | Implement the bounded device-independent HID descriptor/report and boot-layout core without claiming live USB hardware |
+| [`ws006-p008`](phase008-usb-hid-evdev/phase.md) | Planned; depends on p006/p007; not queued | Bind standards-based USB HID keyboard/mouse/tablet interfaces, publish evdev, feed the console, and prove hotplug/lifetime |
+| [`ws006-p009`](phase009-consumer-legacy-removal/phase.md) | Planned; blocked on latest WS008 userland | Revalidate Xzed and latest Noct/BeUI consumers, migrate the kernel shell, delete legacy console event/key-state UAPI, and close WS006 |
 
-The remaining sequence is input core, existing producer bridge, consumer
-migration, legacy-console removal, and USB HID.
+## Remaining Phase order
+
+```text
+ws006-p005 complete
+       |
+       +-- ws006-p006 truthfulness and multi-source ownership --+
+       |                                                        |
+       +-- ws006-p007 USB HID parser/report core ---------------+--> p008
+                                                                     |
+ws018-p007 Xzed evdev complete --------------------------------------+--> p009
+ws008-p009 latest Noct/BeUI evdev integration -----------------------+
+```
+
+P006 and p007 have independent implementation bodies and may be selected
+together only when a finite Queue records both verification paths.  P008 must
+consume both.  P009 cannot enter a Queue until `ws008-p009` replaces the
+rejected/disabled historical target integration with the latest official Noct
+target and passes its evdev consumer gate.
 
 ## Goals
 
@@ -78,11 +101,12 @@ console's character/key translation path.
 | IN-01 | Complete milestone | Kernel input core, registration, event fan-out, buffering, poll/read, and lifecycle | IN-00, VFS/device primitives | Queue/ABI/native build pass; guest producer lifecycle evidence is handed to IN-02 |
 | IN-02 | Complete PC/AT milestone | Existing console input producers also register evdev devices | IN-01 | Production keyboard/mouse nodes register and QEMU reads keyboard records without breaking console text input |
 | IN-03 | Complete PC/AT milestone | Console consumes the internal input stream | IN-01/02 | One worker fans out PC/AT physical events; keymap/queue/QEMU coexistence evidence passes |
-| IN-04 | Planned | Xzed evdev migration | IN-02, GFX X11 repair | Keyboard and absolute/relative mouse behavior pass in QEMU and hardware |
-| IN-05 | Planned | Noct/BeUI evdev migration | IN-02, NOCT upstream/backend work | BeUI event behavior passes without console event ioctls |
-| IN-06 | Planned | Remove console continuous-event and key-state UAPI | IN-03–05 | No in-tree consumer remains; compatibility audit and regression tests pass |
-| IN-10 | Planned | USB HID descriptor/report core | HW-01 xHCI, USB core | Descriptor parser corpus, malformed reports, boot/report protocol tests |
-| IN-11 | Planned | USB HID keyboard and mouse evdev devices | IN-01, IN-10 | QEMU USB keyboard/tablet/mouse and physical hotplug tests pass |
+| IN-04 | Complete through `ws018-p007` | Xzed evdev migration | IN-02, GFX X11 repair | Keyboard and absolute/relative mouse behavior pass without a console-event or `/dev/mouse` fallback |
+| IN-05 | Historical milestone complete; latest WS008 revalidation required | Noct/BeUI evdev migration | IN-02, latest NOCT upstream/backend work | Selected latest BeUI target passes without console event ioctls |
+| IN-06 | Planned as `ws006-p009` | Remove console continuous-event and key-state UAPI | IN-03–05, IN-11 | No in-tree consumer remains; compatibility audit and regression tests pass |
+| IN-07 | Planned as `ws006-p006` | Truthful logical/physical producers, internal console subscription, and per-source ownership | IN-01–03 | Character-only, multiple-source, detach, and console/evdev coexistence fixtures pass |
+| IN-10 | Planned as `ws006-p007` | USB HID descriptor/report core | HW-01 xHCI, USB core | Descriptor parser corpus, malformed reports, boot/report protocol tests |
+| IN-11 | Planned as `ws006-p008` | USB HID keyboard and mouse evdev devices | IN-01, IN-07, IN-10 | QEMU USB keyboard/tablet/mouse and physical hotplug tests pass |
 
 ## 4. UAPI design gate
 

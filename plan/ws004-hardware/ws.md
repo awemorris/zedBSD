@@ -4,7 +4,7 @@ Last updated: 2026-08-30
 
 WSID: `ws004`
 
-Status: active; `ws004-p020` deterministic CDC NCM hardening and
+Status: audited active; WS is not complete. `ws004-p020` deterministic CDC NCM hardening and
 `ws004-p022`--`p024` NVMe discovery/I/O/strict-GPT QEMU acceptance are
 complete; `ws004-p021` remains ready but independent; `ws004-p026`--`p030`
 define the new Archer T3U Nano WLAN path and are not queued
@@ -30,7 +30,8 @@ completed. `p018` corrected the IAD-less, Union-associated NCM match exposed by
 the first physical RTL8156 insertion, and the accepted follow-up published
 `ue0`. The broader asynchronous-TX/accounting decisions remain in p017.
 
-Resume point: q030 completed p022 through p024, including strict
+Resume point: the 2026-08-30 completion audit found p016, p017, p021, p025,
+and p026--p030 still open. q030 completed p022 through p024, including strict
 primary/backup GPT and the final disposable QEMU acceptance matrix. The later
 p025 is the single read-only Latitude SN740 checkpoint. Complete the remaining
 automatic loader/installer prerequisites before requesting that physical
@@ -68,7 +69,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p016`](phase016-legacy-hcd-request-retirement/phase.md) | Pending; not queued | Controller-proven UHCI frame and EHCI Async Advance retirement before normal-completion or cancellation DMA release |
 | [`ws004-p017`](phase017-cdc-ncm-runtime-recovery/phase.md) | Pending; not queued; residual TX-accounting policy open | p020 extracts the approved valid-sequence/resync and bounded-work rules; p017 retains asynchronous terminal TX accounting and any later separately approved recovery work |
 | [`ws004-p018`](phase018-rtl8156-ncm-association/phase.md) | Complete (`q028`) | CDC Union is authoritative and IAD is optional strict corroboration; automatic gates pass and physical RTL8156 configuration 2 binds and publishes `ue0`; carrier/data work moved to WS005 p001 |
-| [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Planned independent baseline; not in q029 | Independent CDC ECM plus QEMU `usb-net` remains available for a future common-path comparison; real RTL8156 NCM carrier/DHCP/ping now passes through QEMU, so p019 is not the automatic response to a native xHCI-only failure |
+| [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Deferred; trigger no longer present | Real RTL8156 NCM carrier/DHCP/ping passed through QEMU and on Latitude, so the diagnostic ECM fallback is not required by the current WLAN/NVMe path; retain it only as an independently selected future class-driver baseline |
 | [`ws004-p020`](phase020-cdc-ncm-deterministic-hardening/phase.md) | Complete (`q029` automatic software scope) | Valid sequences accept/resynchronize, malformed input preserves state, completions and rearms are bounded/fair, and the packet filter is programmed transactionally on open; focused and regression gates pass |
 | [`ws004-p021`](phase021-xhci-superspeed-interrupt-context/phase.md) | Planned; ready for Queue proposal; not queued | Encode legal SuperSpeed interrupt companion `wBytesPerInterval` as xHCI Max ESIT/Average TRB Length, reject malformed descriptors, and preserve every other endpoint context |
 | [`ws004-p022`](phase022-nvme-admin-identify/phase.md) | Complete (`q030`) | Bounded reset/admin Identify, transactional PCI/MSI lifecycle, stable names, focused fixtures, amd64/i386 builds, exact non-mutating QEMU namespace, IDE, and USB-root gates pass |
@@ -108,9 +109,10 @@ are available. No p026--p030 item is in an implementation Queue.
 ## WS completion conditions
 
 WS004 is complete when the common hardware facilities pass focused regression
-tests and the selected xHCI, NVMe, WLAN, and i915 driver scopes pass their
-declared lifecycle and recovery tests on the Latitude 5320. Unsupported devices
-and firmware constraints must be explicitly documented.
+tests and the selected xHCI, NVMe, and WLAN driver scopes pass their declared
+lifecycle and recovery tests on the Latitude 5320. Unsupported devices and
+firmware constraints must be explicitly documented. Native GPU/i915 ownership
+and its completion gate belong to pending WS014 rather than blocking WS004.
 
 Primary physical target: Dell Latitude 5320
 

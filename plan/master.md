@@ -271,22 +271,22 @@ actually warranted.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop bring-up (Latitude 5320 and CF-SV7) | Active; Latitude USB/network milestone complete; CF-SV7 p020 and p021 USB-root continuation complete; p018 Latitude overlay-NVMe install/boot dependency-gated | p020 physical IRQ/XMM/HAL plus USB/VFS passes; p021 larger-media host/BIOS/UEFI and CF-SV7 overlay/init/login pass; p017 is superseded; p018/p019 remain defined | Run p018 only after WS004/WS013/WS019 overlay prerequisites; retain later WS-level repeatability and inventory work | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; `q030` NVMe software sequence complete; p026--p030 Archer WLAN sequence detailed, not queued | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Continue the dependency-ready NVMe path independently; for WLAN, complete p026's read-only exact-unit/firmware checkpoint, then propose the p027--p030 automatic sequence before the one shared WS005 p008 hardware checkpoint | [WS004](ws004-hardware/ws.md) |
+| `ws004` | Hardware expansion | Audited active; not complete. `q030` NVMe software and the physical USB-Ethernet path are complete, while p016/p017/p021/p025 and p026--p030 remain | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Follow the requested WLAN priority: p026 exact-unit/firmware intake, p027 common core, then the interleaved WS005 and p028--p030 sequence. Keep the unrelated p016/p017/p021/p025 residuals visible rather than calling the WS complete | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q029 p001 complete; WLAN replacement plan detailed, not queued | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Freeze p002, confirm the exact Archer unit in WS004 p026, then propose only dependency-ready WLAN prerequisites to a Queue | [WS005](ws005-networking/ws.md) |
-| `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
+| `ws006` | Input and evdev | Audited active; not complete. p005 is only the PC/AT capability milestone | `ws006-p005` complete | Execute p006--p008 for producer truthfulness and USB HID when selected; run p009 consumer/legacy-console removal only after the accepted WS008 userland tree is available | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Paused | `ws007-p001` complete; `p002` carried | Resume mouse work with evdev/absolute input or a concrete reproducer | [WS007](ws007-graphics/ws.md) |
-| `ws008` | Noct and BeUI | Manual hold; target packages disabled | `ws008-p006` uncleared after Principal Engineer rejection; `ws008-p007` complete | Leave all Noct source work to the maintainer until an accepted revision is explicitly returned | [WS008](ws008-noct/ws.md) |
+| `ws008` | Noct and BeUI | Resumed by user priority; target packages remain disabled until the target Phase passes | `ws008-p007` complete; p008 host refresh is Queue-ready; p009 target refresh is human-blocked by the current upstream zedBSD build regression | Queue p008 after WS005. Resume p009 only from a corrected upstream revision or an explicit downstream-patch-overlay decision; use `userland/base/noct/noct/` for the fresh target checkout and never mutate the old dirty checkout | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
-| `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
+| `ws011` | Network configuration console | In progress; VLAN/bridge hold released, detailed design still open | `ws011-p003` complete; p004 resumed for design; p005 bounds open | After higher priorities, finish p004's virtual-interface/UAPI/packet-ownership design before implementation; freeze p005 bounds independently | [WS011](ws011-net-config/ws.md) |
 | `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
 | `ws013` | CPAR container partitioning | Active; q031/q032 configured x86 boot paths complete, Runtime topics manually blocked | `ws013-p002`--`p006` complete | No Boot configuration Phase remains; resume Runtime namespace/CLI/package design only after its explicit manual holds are released | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
-| `ws018` | Kernel source ownership and interface consolidation | Active; q026 ownership migration finished | p001--p008 complete; p009 source/build work implemented with runtime matrix uncleared | Resume p009's explicit runtime-only evidence when runners are available, or queue dependency-ready p010 | [WS018](ws018-kernel-architecture/ws.md) |
-| `ws019` | Installation and disk administration | Planned; overlay-only installer-v1 contract fixed | `ws019-p001` complete by design; p002--p005 define the non-formatting path | After NVMe dependencies, Queue p002 read-only administration followed by p003--p005; native/destructive work remains later | [WS019](ws019-installation/ws.md) |
+| `ws018` | Kernel source ownership and interface consolidation | Active in `q035`; audited incomplete | p001--p008 complete; p009 source/build work implemented with runtime matrix uncleared; p010--p012 remain | Process p009's runtime evidence, then p010--p012 in consumer-before-deletion order; a runner gap may defer p009 without blocking p010 | [WS018](ws018-kernel-architecture/ws.md) |
+| `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
 
 ## 4. Milestones
 
@@ -372,45 +372,56 @@ WS010 supplies host-side build and test scripting used by all workstreams.
 
 ## 6. Priority waves
 
-1. Preserve M0, retain the exact available Latitude inventory, and begin the
-   CF-SV7 inventory. Its complete PCI/USB inventory is required before driver
-   selection, not before the already bounded p020 early-IRQ investigation.
-2. Implement QEMU xHCI USB-root boot and stable boot-device selection.
-3. Preserve the completed Latitude USB/network path and completed CF-SV7
-   early ACPI/interrupt plus larger-media GPT/root results from `ws003-p021`.
-4. Bring up USB Ethernet as the first physical network path, then implement and
-   accept NVMe, the read-only GPT inspector, the no-format overlay installer,
-   Latitude NVMe boot, evdev, and USB HID. USB
-   trial use remains recommended until that installer milestone is complete.
-5. Add the optional LFB Xzed path and the upstream Noct target/BeUI/JIT
-   sequence when selected. Independently, develop the resumed WLAN sequence
-   around the Archer T3U Nano, a common kernel WLAN contract, `/sbin/wifi`, and
-   the fixed `net` -> `networkd` -> `ifconfig`/`wifi`/`dhcpc` path. The built-in
-   RTL8822CE remains a later device target.
-6. After its manual hold is released, complete WS014 GPU architecture
-   discussion, then freeze the GPU UAPI and implement i915, Vulkan, and OpenGL
-   ES 2.0 through separately authorized Phases.
-7. Implement the Wayland compositor/desktop environment.
-8. Complete the unblocked UEFI Boot CPAR design. Runtime CPAR and service
-   containers remain outside implementation priority until their manual holds
-   are released.
-9. After `MB-007` is released, complete WS015's μITRON/RT architecture
-   discussion; after its profile, target, isolation, mailbox/filesystem,
-   failure, and evidence decisions are fixed, schedule bounded RT
-   implementation Phases without displacing earlier physical-network and
-   storage milestones.
-10. Execute WS018 only as a sequence of bounded migrations.  Preserve the
-    consumer-before-deletion order for evdev, graphics, FAT/VFS, and bootfs;
-    source-layout planning does not authorize a bulk tree rewrite.
+The user replaced the earlier wave ordering on 2026-08-30 with the following
+active execution order. Dependency closure may interleave adjacent WSs, but it
+must not silently promote a lower-priority product goal over a ready higher-
+priority one.
 
-q023 completed the independently dependency-ready `ws003-p016`, `ws008-p005`,
-and `ws001-p014` sequence. q024's automated Noct correction was rejected in
-manual review and is `uncleared`; q025 holds the target package and executes
-WS018 kernel ownership. `ws017-p001` returns to the planning pool only after
-its recorded `mprotect` ceiling decision.
+1. Audit WS006 and WS004 completion claims. This is a read-only truthfulness
+   checkpoint: record completed milestones and residual Phases separately;
+   neither WS is called complete merely because its current visible use case
+   works.
+2. Complete WS018. Finish p009's retained runtime evidence, then execute
+   p010--p012 in their consumer-before-deletion order until the source-
+   ownership and native-FAT/bootfs-removal completion contract passes.
+3. Implement the Archer T3U Nano USB WLAN path across WS004 and WS005. The
+   dependency order is p026 exact-unit/firmware intake, p027 generic WLAN core,
+   WS005 privilege/command/profile/protocol prerequisites, p028--p030 radio and
+   WPA2 lifecycle, then WS005 orchestration and the single shared hardware
+   acceptance. The SSH host `awe@10.0.10.25` may be used for QEMU USB
+   passthrough of the connected adapter after automatic gates pass.
+4. Complete the `/sbin/net` WLAN stack in WS005 through the fixed
+   `net` -> `networkd` -> `ifconfig`/`wifi`/`dhcpc` topology.
+5. Resume WS008 from the maintainer's latest accepted NoctLang tree. Update
+   both the bootstrap/toolchain checkout and the userland package; the latter
+   is rooted at `userland/base/noct/` and clones upstream into
+   `userland/base/noct/noct/`.
+6. Implement WS017's `/dev/graphics` LFB fast path after resolving its retained
+   `mprotect` permission-ceiling decision. Do not infer that decision from the
+   priority change.
+7. Re-run and finish WS007 after WS017, including real Xzed/LFB behavior and
+   the existing mouse issue. If the mouse defect cannot be reproduced, retain
+   it honestly rather than fabricating a fix.
+8. Continue WS001 POSIX work. Add a bounded `lp`/`lpr` Phase whose deliberate
+   model posts PDF directly to an LPD printer and has no local spool queue.
+9. Re-plan WS019 so the installer is written in Noct, then implement it after
+   its complete installer specification is supplied. The user's latest message
+   ended after "仕様は"; that missing contract is a human blocker and must not be
+   guessed from the older C-oriented plan.
+10. After the installer passes automatic acceptance, complete WS003 by
+    installing to and booting from the Latitude 5320 NVMe device.
+11. Resume WS011 VLAN and bridge work. The previous manual hold is released by
+    this priority instruction, but any still-open virtual-interface, packet-
+    ownership, filtering, or persistence decision remains a design gate rather
+    than permission to improvise an incompatible UAPI.
+12. Keep WS013 Runtime CPAR, WS014 GPU, and WS015 μITRON pending until their
+    explicit architecture holds are separately released.
 
-WS001 and WS009 advance within every wave when bounded work is selected. Lower
-priority POSIX gaps may remain paused if they do not block the active milestone.
+When a higher-priority item reaches a recorded human decision, mark only that
+Phase `uncleared`/deferred and continue to the next dependency-ready item. A
+Queue remains finite even though the user authorized repeated Queue creation;
+on finishing one Queue, construct the next from the order above and continue
+until stopped or no judgment-free Phase remains.
 
 ## 7. Decisions that gate new Phases
 
@@ -425,7 +436,7 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | WLAN privilege and process topology | WS005 | Resolved for v1: one `root:network` mode-0660 `/run/networkd.sock`, kernel-attested connection-time peer credentials, `net` as user/desktop frontend, root `networkd` as orchestrator, and fixed primitive `ifconfig`/`wifi`/`dhcpc` children; no resident/pluggable `wpa` child |
 | WLAN protocol-state ownership | WS004/WS005 | Resolved for v1: a device-independent kernel WLAN layer retains scan/authentication/association/WPA2 key and rekey/controlled-port state after one-shot `/sbin/wifi` exits; the RTL8822BU driver owns only hardware/firmware-specific radio, USB, frame, channel, and key-slot operations |
 | `/etc/net.conf` v1 grammar and empty-collection syntax | WS011 | Parser and boot migration |
-| VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | Manually blocked; `ws011-p004` discussion and implementation |
+| VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | Manual hold released 2026-08-30; `ws011-p004` must now close the remaining design gates before implementation |
 | Linux/FreeBSD evdev compatibility profile | WS006 | Resolved by `ws006-p001`; implement `/dev/input/eventN` against it |
 | Device-mapping `mprotect` ceiling | WS017 | Choose whether an initial RW mapping may return from RO to RW within its original maximum, or whether every permission reduction is permanent, before `ws017-p001` enters a Queue |
 | zedBSD GPU/Vulkan capability, object, and display-takeover profile | WS014 | Manually blocked; publishing `/dev/gpuN` UAPI or transferring i915 ownership |
@@ -455,7 +466,6 @@ until the user explicitly releases the named hold.
 
 | Hold ID | Owning WS/Phase | Manually blocked topic | Resume condition |
 | --- | --- | --- | --- |
-| `MB-001` | `ws011-p004` | VLAN/bridge detailed design and implementation | User explicitly resumes VLAN/bridge discussion |
 | `MB-002` | `ws013-p001` | Runtime CPAR namespace, isolation, and security model | User explicitly resumes Runtime CPAR namespace discussion |
 | `MB-003` | `ws013-p001` | `cpar run`, `cpar sh`, and `cpar build` grammar/lifecycle | User explicitly resumes Runtime CPAR CLI/build discussion |
 | `MB-004` | `ws013-p001` | Service-container package format, dependencies, updates, config, and data | User explicitly resumes service-container package discussion |
@@ -466,6 +476,7 @@ Released holds remain permanent history rather than reusable identifiers:
 
 | Hold ID | Released | Result |
 | --- | --- | --- |
+| `MB-001` | 2026-08-30 | The user placed VLAN and bridge implementation back in the active priority order. The manual hold is removed; unresolved virtual-interface UAPI, packet ownership, filtering, and persistence details remain ordinary p004 design gates. |
 | `MB-006` | 2026-08-30 | The user resumed WLAN design after completing USB Ethernet. The old RTL8822CE-first, `/sbin/wpa`, and `/etc/wpa/` proposal was superseded by the Archer T3U Nano first target and the fixed `net` -> `networkd` -> `ifconfig`/`wifi`/`dhcpc` topology. Firmware and exact-device facts are ordinary Phase dependencies, not a continuing manual hold. |
 
 ## 8. Interruption and resumption

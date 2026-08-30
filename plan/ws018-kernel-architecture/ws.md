@@ -4,15 +4,15 @@ Last updated: 2026-08-29
 
 WSID: `ws018`
 
-Status: active; `q026` ownership migration finished
+Status: active in `q035`; `q026` ownership migration finished
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws018-p008`
 
-Resume point: p001--p008 are complete. Resume p009 when maintained runners are
-available for its remaining graphics runtime matrix; otherwise the next
-dependency-ready implementation Phase is p010.
+Resume point: q035 processes p009's remaining graphics runtime matrix and then
+p010--p012 in consumer-before-deletion order. A missing p009 runner may leave
+that item uncleared without blocking dependency-ready p010.
 
 Shared tests: [WS018 test index](tests/README.md)
 

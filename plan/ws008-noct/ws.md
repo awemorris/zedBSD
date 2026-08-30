@@ -1,17 +1,19 @@
 # WS008: Noct and BeUI
 
-Last updated: 2026-08-28
+Last updated: 2026-08-30
 
 WSID: `ws008`
 
-Status: Manual hold; target packages disabled by `ws008-p007`
+Status: Active; maintainer hold released, target package remains disabled by
+`ws008-p007` until blocked `ws008-p009` can complete
 
 Parent: [master plan](../master.md)
 
-Last accepted Phase: not advanced by `ws008-p006`
+Last accepted Phase: `ws008-p007`
 
-Resume point: maintainer-owned manual repair; agent work must not edit Noct
-until the maintainer explicitly returns the tree and re-enables the package
+Resume point: Queue-ready `ws008-p008` updates the host toolchain. Do not Queue
+`ws008-p009` until a clean upstream zedBSD-target fix is published or the user
+explicitly chooses a downstream patch-overlay policy.
 
 Shared tests: [WS008 test index](tests/README.md)
 
@@ -26,6 +28,8 @@ Shared tests: [WS008 test index](tests/README.md)
 | [`ws008-p005`](phase005-independent-beui-backends/phase.md) | Complete (`q023`, 2026-08-28) | Canonical Noct removes `api-beui.c` and `api-beui-backend.c`; each selected platform source independently owns the complete `noct_register_api_beui()` implementation, with HAL/core details private |
 | [`ws008-p006`](phase006-maintainer-api-layout-review/phase.md) | Uncleared (`q024`; manual review rejection) | Automated gates passed, but the Principal Engineer rejected the implementation quality and took ownership of the repair |
 | [`ws008-p007`](phase007-target-package-hold/phase.md) | Complete (`q025`, 2026-08-28) | Target Noct and dependent Remacs are absent from menu, forced selection, and a fresh rootfs; the separate host Noct script runtime remains operational |
+| [`ws008-p008`](phase008-latest-host-toolchain-pin/phase.md) | Planned; Queue-ready | Resolve upstream `main` once, pin its immutable commit for `build/NoctLang`, and prove the host Noct script toolchain |
+| [`ws008-p009`](phase009-base-noct-relocation-target-resume/phase.md) | Blocked | Move target integration to `userland/base/noct/` with clone at `userland/base/noct/noct/`, then re-enable amd64 Noct only after upstream/overlay resolution and QEMU acceptance |
 
 The old NOCT-00--NOCT-05 labels are superseded as scheduling units by these
 immutable Phase IDs. Their concerns are retained inside p001--p003 rather than
@@ -41,13 +45,21 @@ requiring a preliminary audit-only Queue item.
   native code through the supported `mmap`/`mprotect` path.
 - Reduce the zedBSD package to target integration, installation, provenance,
   and revision selection rather than a divergent Noct/BeUI implementation.
+- Keep the host build-script interpreter current through one immutable
+  upstream revision selected at Queue entry.
+- Own target integration under `userland/base/noct/` and acquire its pristine
+  canonical source at `userland/base/noct/noct/` without a gitlink or copied
+  source tree.
 
 ## WS completion conditions
 
-WS008 returns to complete when all six Phases are complete: the official Noct
-source tree provides working `zedbsd` configure and build presets, the
-installed amd64 artifact is built from that target, the official BeUI backend
-passes graphics and evdev tests without legacy console event ioctls, and a
+WS008 returns to complete when p001--p005 and p007--p009 are complete. p006 is
+retained as an honestly uncleared historical review attempt and is superseded
+by the clean accepted upstream revision integrated through p008/p009; it does
+not need to be replayed. The official Noct source tree must provide working
+`zedbsd-amd64` configure and build presets, the installed amd64 artifact must
+be built from that target, and the official BeUI backend must pass graphics
+and evdev tests without legacy console event ioctls, while a
 QEMU guest produces both correct JIT program output and positive
 JIT-compilation evidence after an RW-to-RX mapping transition. The SDL backend
 must retain its upstream tests, and the reviewed official revision must be
@@ -58,7 +70,10 @@ configured platform must own a complete BeUI implementation behind
 also leave `include/noct/noct.h` byte-for-byte unchanged, eliminate the removed
 Term/File callback interfaces, make each Term and BeUI platform source
 independently complete, and build moved accelerator/regex sources from their
-accepted directories.
+accepted directories. The host and target builds must use the same immutable
+accepted revision at final WS completion, with the host checkout under
+`build/NoctLang`, target integration under `userland/base/noct/`, and the
+pristine target clone under `userland/base/noct/noct/`.
 
 Publishing, committing, or pushing the canonical Noct changes requires the
 explicit two-repository approval recorded by p004; it is not inferred from an
@@ -66,7 +81,7 @@ ordinary zedBSD Phase execution.
 The implementation must nevertheless be authored in an official Noct checkout,
 not copied into a new zedBSD-owned fork. A reproducible package revision cannot
 be advanced until that revision exists; this is recorded honestly at Queue
-closure rather than worked around with an untracked source copy.
+closure rather than worked around with a locally modified ignored source copy.
 
 ## 1. Objective
 
@@ -99,6 +114,23 @@ runtime feature whose VM permissions are the most security-sensitive.
   `mmap`, `mprotect`, and `munmap`, but the exact end-to-end amd64 JIT path has
   not yet been accepted.
 
+## 2.1 Re-entry baseline after maintainer repair
+
+- The user's 2026-08-30 request releases the maintainer-only hold for bounded
+  WS008 integration work. It does not make the old dirty target checkout safe
+  to alter.
+- Host and target integration still pin
+  `c1e4e0fcdbb7b8cdf1705601b13d57b787c61621`; p008 advances the host pin
+  independently and p009 restores a common accepted pin.
+- The old ignored `userland/noct/NoctLang` checkout is detached at
+  `ec9936a4b75bf3181b1dde8f8c55d9827f649098` with numerous maintainer changes.
+  It is protected user material and is neither moved nor consumed.
+- The clean planning candidate
+  `58bec083fd9926b386b30e02559d79db0178905a` builds the host `static` preset,
+  but its zedBSD target currently fails at unsupported API/header boundaries
+  and no longer attaches the accepted zedBSD final-link adapter. p009 records
+  the precise blocker and may not be Queued yet.
+
 ## 3. Dependency order
 
 ```text
@@ -109,6 +141,12 @@ ws008-p001 zedBSD preset and executable
 ws008-p002 canonical BeUI graphics + evdev backend
                   |
 ws008-p003 amd64 mmap/mprotect JIT execution
+                  |
+ws008-p007 target package hold
+                  |
+ws008-p008 latest host toolchain pin
+                  |
+ws008-p009 new target path and accepted target resume
 ```
 
 p001 may build without enabling BeUI. p002 requires the implemented evdev core
@@ -116,6 +154,12 @@ and producers, but not USB HID: QEMU's existing console keyboard/mouse producers
 are sufficient. p003 depends on the canonical executable from p001; it follows
 p002 so that its final image is also the target WS artifact, but it must diagnose
 VM/JIT failures independently of BeUI.
+
+p008 depends only on the completed scripting bootstrap and is Queue-ready.
+p009 depends on p008 for the host-pin workflow, but its target revision may be
+newer; when it advances that revision it reruns p008's host gates. p009 also
+depends on an upstream target fix or an explicit downstream patch-overlay
+decision.
 
 ## 4. Upstream/downstream ownership
 
@@ -136,16 +180,19 @@ zedBSD owns:
 
 The backend includes zedBSD UAPI headers from the selected sysroot/source tree;
 it must not copy those definitions into Noct. Canonical source is published in
-`awemorris/NoctLang` and acquired at the accepted revision under
-`userland/noct/NoctLang`; the host build-tool checkout under `build/NoctLang`
-is separate. q022 explicitly authorized and completed the two-repository
-publication and removed the former submodule/gitlink.
+`awemorris/NoctLang`. The resumed target integration acquires it at the
+accepted revision under `userland/base/noct/noct/`; the host build-tool
+checkout under `build/NoctLang` is separate. The old
+`userland/noct/NoctLang` tree remains protected and unused. q022 explicitly
+authorized and completed the earlier two-repository publication and removed
+the former submodule/gitlink.
 
 ## 5. Product boundaries
 
-- Initial target and acceptance are amd64 only. i386/PC-98 Noct target support
-  is not removed, but porting the new preset/backend/JIT acceptance to those
-  ABIs is outside p001--p003.
+- Initial and resumed target acceptance is amd64 only. i386/PC-98 target Noct
+  is not claimed by the resumed package. Completing the missing canonical i386
+  toolchain and porting target/backend/JIT acceptance to those ABIs is a
+  separate later Phase.
 - p002 uses the ioctl rendering path. Direct LFB mapping belongs to the
   dedicated graphics/LFB workstream and is not folded into Noct migration.
 - The terminal/text API may continue to use ordinary tty or console services.
@@ -157,3 +204,6 @@ publication and removed the former submodule/gitlink.
   protection, instruction-cache synchronization, or Noct's target branch, that
   fix is in scope. A VM redesign or policy change is returned to planning as an
   `uncleared` result.
+- p008 does not edit, publish, or test target Noct. p009 does not change the
+  optional `/usr/bin/noct` policy, re-enable Remacs, delete the old dirty
+  checkout, or introduce an untracked downstream source modification.

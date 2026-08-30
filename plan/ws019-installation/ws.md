@@ -4,15 +4,18 @@ Last updated: 2026-08-29
 
 WSID: `ws019`
 
-Status: planned; overlay-only installer-v1 contract fixed
+Status: re-plan required; storage safety contract retained, implementation
+language changed to Noct
 
 Parent: [master plan](../master.md)
 
 Last verified Phase: `ws019-p001` design contract complete
 
-Resume point: after the WS004 NVMe dependencies, Queue p002 read-only block
-administration, then p003--p005 in dependency order. No implementation is
-authorized by this plan.
+Resume point: the user's latest request changes `/bin/zedinst` to a Noct
+implementation but ends after `仕様は`, before supplying the replacement
+contract. Retain p001's approved existing-GPT/existing-FAT/no-format safety
+boundary, but do not Queue the older p002--p005 map until the missing Noct
+installer specification is supplied and those Phases are revised.
 
 Shared tests: [WS019 test index](tests/README.md)
 
@@ -160,10 +163,10 @@ verify all sources before writing either destination.
 | Combined ID | Phase | Status | Required result |
 | --- | --- | --- | --- |
 | `ws019-p001` | [overlay installer-v1 contract](phase001-installer-v1-contract/phase.md) | Completed by design, 2026-08-29 | The existing-ESP/existing-FAT32, no-format, no-Boot-variable contract and Phase map are fixed |
-| `ws019-p002` | [read-only block/GPT administration](phase002-readonly-block-gpt-administration/phase.md) | Planned; depends on `ws004-p024` | Stable GPT/disk/partition/filesystem/mount identity is queryable without a mutation surface |
-| `ws019-p003` | [read-only `/sbin/diskpart`](phase003-diskpart-readonly/phase.md) | Planned; depends on p002 | List/show the exact GPT disk, ESP, FAT32 candidates, bounds, and stable identities |
-| `ws019-p004` | [existing-FAT overlay `/bin/zedinst`](phase004-zedinst-existing-fat-overlay/phase.md) | Planned; blocked by stable installer-source decision, then depends on p002/p003 and WS013 p002/p003 | Copy and verify only immutable fixed inputs without GPT, mkfs, label, or NVRAM mutation |
-| `ws019-p005` | [QEMU NVMe overlay-install acceptance](phase005-qemu-nvme-overlay-install/phase.md) | Planned; depends on p004 and `ws004-p024` | A fresh disposable existing-GPT/FAT fixture installs and boots its NVMe overlay |
+| `ws019-p002` | [read-only block/GPT administration](phase002-readonly-block-gpt-administration/phase.md) | Superseded pending Noct re-plan | Preserve the read-only capability requirement, but revise its implementation boundary after the missing installer contract arrives |
+| `ws019-p003` | [read-only `/sbin/diskpart`](phase003-diskpart-readonly/phase.md) | Superseded pending Noct re-plan | Preserve the user-visible read-only inspection goal, but do not assume the old C implementation plan |
+| `ws019-p004` | [existing-FAT overlay `/bin/zedinst`](phase004-zedinst-existing-fat-overlay/phase.md) | Superseded; human input required | Rewrite as a Noct Phase after the complete CLI/source/transaction contract and stable installer-source decision are supplied |
+| `ws019-p005` | [QEMU NVMe overlay-install acceptance](phase005-qemu-nvme-overlay-install/phase.md) | Superseded pending Noct re-plan | Rebuild the acceptance Phase around the revised Noct installer without weakening p001's non-formatting safety contract |
 | `ws019-p006` | Whole-disk GPT creation and filesystem provisioning | Future; not designed | Add destructive initialization only after a separate safety/product review |
 | `ws019-p007` | Native-root installation | Future; not designed | Add `rootpart=` installation without changing or weakening p001--p005 |
 
