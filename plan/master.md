@@ -37,12 +37,15 @@ made the fixed 397,312-sector GPT image safely usable after raw copying to the
 successfully through the USB-root overlay and closes that root-continuity
 boundary without reopening the completed Latitude USB/network evidence.
 
-The current [Queue Book](queue.md) records `q035`.  It completed the retained
-WS018 graphics runtime matrix, consolidated FAT, migrated FAT boot-media access
-to native VFS objects, and removed the retired bootfs/namespace/startup/M9 and
-broad internal-state graph.  Six empty supported-manifest builds, the ordinary
-image build, focused host gates, and four production x86 boot paths passed;
-WS018 is complete.  The archived [q034](queue-q034.md) completed
+The current [Queue Book](queue.md) records `q036`. Its generic
+Variant/capacity configuration Phase is complete and it is executing the three
+amd64 image layouts, followed by their SeaBIOS/OVMF matrix.
+The archived [q035](queue-q035.md) completed the retained WS018 graphics
+runtime matrix, consolidated FAT, migrated FAT boot-media access to native VFS
+objects, and removed the retired bootfs/namespace/startup/M9 and broad
+internal-state graph. Six empty supported-manifest builds, the ordinary image
+build, focused host gates, and four production x86 boot paths passed; WS018 is
+complete. The archived [q034](queue-q034.md) completed
 `ws003-p021`. Its generic bounded-GPT implementation, corruption fixtures,
 larger-media SeaBIOS/OVMF USB boots, ordinary regressions, and final CF-SV7
 boot pass. The accepted contract is general: a coherent GPT-declared end may
@@ -296,7 +299,7 @@ actually warranted.
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
-| `ws020` | Intel Mac UEFI bring-up and generic image variants | Planned; interrupts immediately after WS018 | p001--p004 planned | After q035, Queue p001 generic Variant/capacity, p002 image layouts, p003 QEMU matrix, then one bounded Intel Mac checkpoint and final five-run acceptance | [WS020](ws020-intel-mac/ws.md) |
+| `ws020` | Intel Mac UEFI bring-up and generic image variants | Active (`q036`); p001 complete, p002 in progress | Generic Variant/capacity configuration is verified without changing compiled artifacts | Complete p002 image layouts and p003 QEMU matrix, then request one bounded Intel Mac checkpoint and final five-run acceptance | [WS020](ws020-intel-mac/ws.md) |
 
 ## 4. Milestones
 

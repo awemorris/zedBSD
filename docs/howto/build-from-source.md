@@ -54,6 +54,14 @@ Select one platform, its drivers, and user programs, then save. `config.mk` is
 the sole selected-target input; normal build targets reject a missing or
 invalid file. It is generated and should not be hand-edited.
 
+The target menu is organized as Architecture -> Board -> Variant. PC/AT amd64
+provides `Hybrid (BIOS+UEFI)`, `BIOS-only`, and `UEFI-only (for Apple)`; the
+current single-profile boards save the fixed `Default` Variant. Disk image
+capacity is selected independently from 2, 4, 8, 16, 32, 64, 128, or 256 GiB.
+A saved configuration from before these fields were introduced uses the board
+default Variant and 2 GiB. These settings describe image layout and target
+media capacity; they do not change kernel or bootloader compilation.
+
 The maintained x86 output directories are:
 
 | Selection | Build directory | Disk image | Emulator |

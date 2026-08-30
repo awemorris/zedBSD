@@ -66,6 +66,69 @@ endif
 endif
 BUILD := build/$(ZEDBSD_PLATFORM_DIR)
 
+# Architecture + Board owns the image-layout Variant set.  These values are
+# image metadata only: do not add them to ZEDBSD_CPPFLAGS, source lists, object
+# lists, or firmware-loader selection.
+ZEDBSD_VARIANTS_i386_pcat := default
+ZEDBSD_VARIANTS_amd64_pcat := hybrid bios uefi
+ZEDBSD_VARIANTS_i386_pc98 := default
+ZEDBSD_VARIANTS_arm64_rpi4 := default
+ZEDBSD_VARIANTS_sparcv9_sun4u := default
+ZEDBSD_VARIANTS_m68k_x68k := default
+ZEDBSD_PLATFORM_TARGET_i386 := i386_pcat
+ZEDBSD_PLATFORM_TARGET_amd64 := amd64_pcat
+ZEDBSD_PLATFORM_TARGET_pc98 := i386_pc98
+ZEDBSD_PLATFORM_TARGET_rpi4 := arm64_rpi4
+ZEDBSD_PLATFORM_TARGET_sun4u := sparcv9_sun4u
+ZEDBSD_PLATFORM_TARGET_x68k := m68k_x68k
+ZEDBSD_TARGET_VARIANT_KEY := $(ZEDBSD_ARCHITECTURE)_$(ZEDBSD_BOARD)
+ZEDBSD_PLATFORM_TARGET := $(ZEDBSD_PLATFORM_TARGET_$(ZEDBSD_PLATFORM))
+ZEDBSD_TARGET_VARIANTS := \
+	$(ZEDBSD_VARIANTS_$(ZEDBSD_TARGET_VARIANT_KEY))
+ifeq ($(origin ZEDBSD_VARIANT),undefined)
+ZEDBSD_VARIANT := $(firstword $(ZEDBSD_TARGET_VARIANTS))
+endif
+ifeq ($(origin ZEDBSD_IMAGE_SIZE_GIB),undefined)
+ZEDBSD_IMAGE_SIZE_GIB := 2
+endif
+ZEDBSD_IMAGE_SIZE_GIB_CHOICES := 2 4 8 16 32 64 128 256
+ZEDBSD_TARGET_HIERARCHY_VALID := $(and \
+	$(filter 1,$(words $(ZEDBSD_PLATFORM))),\
+	$(filter 1,$(words $(ZEDBSD_ARCHITECTURE))),\
+	$(filter 1,$(words $(ZEDBSD_BOARD))),\
+	$(strip $(ZEDBSD_PLATFORM_TARGET)),\
+	$(if $(filter-out $(ZEDBSD_PLATFORM_TARGET),\
+		$(ZEDBSD_TARGET_VARIANT_KEY)),,yes))
+ZEDBSD_VARIANT_VALID := $(and $(strip $(ZEDBSD_VARIANT)),\
+	$(filter 1,$(words $(ZEDBSD_VARIANT))),\
+	$(if $(filter-out $(ZEDBSD_TARGET_VARIANTS),$(ZEDBSD_VARIANT)),,yes))
+ZEDBSD_IMAGE_SIZE_GIB_VALID := $(and $(strip $(ZEDBSD_IMAGE_SIZE_GIB)),\
+	$(filter 1,$(words $(ZEDBSD_IMAGE_SIZE_GIB))),\
+	$(if $(filter-out $(ZEDBSD_IMAGE_SIZE_GIB_CHOICES),\
+		$(ZEDBSD_IMAGE_SIZE_GIB)),,yes))
+
+# Reject a hand-edited image contract before any standard image target begins.
+# menuconfig and source-only targets remain usable so an invalid file can be
+# repaired without deleting it.
+ZEDBSD_IMAGE_REQUESTED := $(if $(strip $(MAKECMDGOALS)),\
+	$(filter disk-image run check-disk-image validate-image-config \
+		%.img %.hd,$(MAKECMDGOALS)),default)
+ifneq ($(strip $(ZEDBSD_IMAGE_REQUESTED)),)
+ifeq ($(strip $(ZEDBSD_TARGET_HIERARCHY_VALID)),)
+$(error Invalid target hierarchy ZEDBSD_PLATFORM='$(ZEDBSD_PLATFORM)' \
+	ZEDBSD_ARCHITECTURE='$(ZEDBSD_ARCHITECTURE)' ZEDBSD_BOARD='$(ZEDBSD_BOARD)')
+endif
+ifeq ($(strip $(ZEDBSD_VARIANT_VALID)),)
+$(error Invalid ZEDBSD_VARIANT '$(ZEDBSD_VARIANT)' for \
+	Architecture '$(ZEDBSD_ARCHITECTURE)' Board '$(ZEDBSD_BOARD)'; expected one of: \
+	$(ZEDBSD_TARGET_VARIANTS))
+endif
+ifeq ($(strip $(ZEDBSD_IMAGE_SIZE_GIB_VALID)),)
+$(error Invalid ZEDBSD_IMAGE_SIZE_GIB '$(ZEDBSD_IMAGE_SIZE_GIB)'; expected one of: \
+	$(ZEDBSD_IMAGE_SIZE_GIB_CHOICES))
+endif
+endif
+
 CONFIG_DRIVER_NE2000 ?= y
 CONFIG_DRIVER_LGY98 ?= y
 CONFIG_DRIVER_GRAPHICS ?= y
@@ -231,6 +294,14 @@ list-user-programs:
 .PHONY: menuconfig
 menuconfig:
 	@$(PYTHON) tools/menuconfig.py --output $(ZEDBSD_CONFIG)
+
+.PHONY: menuconfig-host-test
+menuconfig-host-test:
+	@$(PYTHON) plan/ws020-intel-mac/tests/menuconfig-target-host-test.py
+
+.PHONY: validate-image-config
+validate-image-config:
+	@:
 
 .PHONY: help list-targets
 help:

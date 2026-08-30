@@ -4,7 +4,7 @@ Last updated: 2026-08-30
 
 WSID: `ws020`
 
-Status: planned; interrupts the active priority order immediately after WS018
+Status: in progress; p001 completed, q036 continues with p002
 
 Parent: [master plan](../master.md)
 
@@ -37,7 +37,8 @@ sparse file before booting it.
   across the three variants for an otherwise identical configuration.
 - The declared target-medium choices are exactly 2, 4, 8, 16, 32, 64, 128,
   and 256 GiB.  They are stored independently of platform so another board may
-  interpret the same generic setting.
+  interpret the same generic setting.  An older configuration without this
+  field defaults to the smallest supported capacity, 2 GiB.
 - UEFI-only retains a standards-shaped protective MBR, including its `55 aa`
   signature, but contains no executable stage 1, active partition, hybrid FAT
   entry, BIOS boot partition, PBR loader, or `BOOTZBSD.EXE`.
@@ -70,7 +71,7 @@ partition.
 
 | Phase | Status | Result / resume point |
 | --- | --- | --- |
-| [`ws020-p001`](phase001-target-variant-config/phase.md) | Planned; Queue-ready after WS018 | Generic Variant and target-capacity configuration round-trip through menuconfig/config.mk without changing compiled amd64 artifacts |
+| [`ws020-p001`](phase001-target-variant-config/phase.md) | Completed (2026-08-30) | Generic Variant/capacity round-trip and validation pass; fresh Variant/capacity builds have identical kernel, loader, object, and compile-contract results |
 | [`ws020-p002`](phase002-image-layouts/phase.md) | Planned after p001 | The three amd64 image profiles and compact primary-only UEFI GPT are generated and strictly checked |
 | [`ws020-p003`](phase003-qemu-acceptance/phase.md) | Planned after p002 | SeaBIOS/OVMF positive and negative matrix passes at all declared capacities using materialized sparse media |
 | [`ws020-p004`](phase004-physical-bringup/phase.md) | Planned after p003; physical checkpoint | One Intel Mac UEFI-only boot reaches login, then the frozen artifact passes the final five-run campaign |
