@@ -16,24 +16,28 @@ func run(repo, command, what) {
     if (status != 0) { zbFail(what + " failed (status=" + status + ")"); }
 }
 
-func buildCase(repo, evidence, name, variant, capacity) {
-    var build = "build/ws020-p001-" + name;
+func buildCase(repo, evidence, config, name, variant, capacity) {
+    var build = evidence + "/build-" + name;
     var log = evidence + "/build-" + name + ".log";
     runLogged(repo, evidence + "/clean-" + name + ".log",
-              "make --no-print-directory ZEDBSD_CONFIG=config.mk BUILD=" +
-              build + " clean", name + " owned BUILD cleanup");
-    var common = "ZEDBSD_CONFIG=config.mk ZEDBSD_PLATFORM=amd64 " +
+              "make --no-print-directory ZEDBSD_CONFIG=" +
+              zbShellQuote(config) + " BUILD=" + zbShellQuote(build) +
+              " clean", name + " owned BUILD cleanup");
+    var common = "ZEDBSD_CONFIG=" + zbShellQuote(config) +
+        " ZEDBSD_PLATFORM=amd64 " +
         "ZEDBSD_ARCHITECTURE=amd64 ZEDBSD_BOARD=pcat " +
         "ZEDBSD_VARIANT=" + variant + " ZEDBSD_IMAGE_SIZE_GIB=" + capacity +
-        " BUILD=" + build;
+        " BUILD=" + zbShellQuote(build);
     runLogged(repo, log, "make --no-print-directory -j16 " + common +
               " vmunix bootloader", name + " fresh artifact build");
 
     var artifacts = "vmunix bootloader/stage1.bin " +
+        "bootloader/stage1-native.bin " +
         "bootloader/stage2-chain.bin bootloader/partition-pbr.bin " +
         "bootloader/BOOTZBSD.EXE uefi/BOOTX64.EFI";
     run(repo, "test -s " + build + "/vmunix && " +
         "test -s " + build + "/bootloader/stage1.bin && " +
+        "test -s " + build + "/bootloader/stage1-native.bin && " +
         "test -s " + build + "/bootloader/stage2-chain.bin && " +
         "test -s " + build + "/bootloader/partition-pbr.bin && " +
         "test -s " + build + "/bootloader/BOOTZBSD.EXE && " +
@@ -48,14 +52,15 @@ func buildCase(repo, evidence, name, variant, capacity) {
         name + " object manifest");
 }
 
-func contractCase(repo, evidence, name, variant, capacity) {
+func contractCase(repo, evidence, config, name, variant, capacity) {
     var variables = "'^[A-Za-z0-9_]*(SOURCES|OBJS|CPPFLAGS|CFLAGS|" +
         "ASFLAGS|LDFLAGS)[[:space:]]*[:+?]?='";
     var command = "LC_ALL=C make --no-print-directory -pn " +
-        "ZEDBSD_CONFIG=config.mk ZEDBSD_PLATFORM=amd64 " +
+        "ZEDBSD_CONFIG=" + zbShellQuote(config) + " ZEDBSD_PLATFORM=amd64 " +
         "ZEDBSD_ARCHITECTURE=amd64 ZEDBSD_BOARD=pcat " +
         "ZEDBSD_VARIANT=" + variant + " ZEDBSD_IMAGE_SIZE_GIB=" + capacity +
-        " BUILD=build/ws020-p001-contract vmunix bootloader";
+        " BUILD=" + zbShellQuote(evidence + "/contract-build") +
+        " vmunix bootloader";
     var raw = evidence + "/contract-" + name + ".raw";
     var unsorted = evidence + "/contract-" + name + ".unsorted";
     runLogged(repo, raw, command, name + " Make source graph");
@@ -80,16 +85,19 @@ func main(args) {
     var repo = args[0];
     var evidence = args[1];
     run(repo, "mkdir -p " + zbShellQuote(evidence), "create evidence directory");
+    var config = evidence + "/config.mk";
+    run(repo, "cp config.mk " + zbShellQuote(config),
+        "snapshot fixture configuration");
 
-    buildCase(repo, evidence, "hybrid-2", "hybrid", "2");
-    buildCase(repo, evidence, "bios-2", "bios", "2");
-    buildCase(repo, evidence, "uefi-2", "uefi", "2");
-    buildCase(repo, evidence, "hybrid-256", "hybrid", "256");
+    buildCase(repo, evidence, config, "hybrid-2", "hybrid", "2");
+    buildCase(repo, evidence, config, "bios-2", "bios", "2");
+    buildCase(repo, evidence, config, "uefi-2", "uefi", "2");
+    buildCase(repo, evidence, config, "hybrid-256", "hybrid", "256");
 
-    contractCase(repo, evidence, "hybrid-2", "hybrid", "2");
-    contractCase(repo, evidence, "bios-2", "bios", "2");
-    contractCase(repo, evidence, "uefi-2", "uefi", "2");
-    contractCase(repo, evidence, "hybrid-256", "hybrid", "256");
+    contractCase(repo, evidence, config, "hybrid-2", "hybrid", "2");
+    contractCase(repo, evidence, config, "bios-2", "bios", "2");
+    contractCase(repo, evidence, config, "uefi-2", "uefi", "2");
+    contractCase(repo, evidence, config, "hybrid-256", "hybrid", "256");
 
     for (name in ["bios-2", "uefi-2", "hybrid-256"]) {
         compare(repo, evidence, "hashes", "hybrid-2", name);

@@ -5,8 +5,8 @@ Parent: [WS020](../ws.md)
 | Case ID | Phase | Required observation |
 | --- | --- | --- |
 | `MAC-T001` | p001 | **PASS:** Architecture/Board/Variant and capacity values round-trip, validate, and leave compiled amd64 artifacts invariant |
-| `MAC-T010` | p002 | Variant-aware image checker proves exact MBR/GPT/partition/loader inclusion and exclusion contracts |
-| `MAC-T011` | p002 | Primary-only GPT accepts only a valid, capacity-matched, zero-backup materialized medium and rejects corrupt/contradictory alternatives |
+| `MAC-T010` | p002 | **PASS:** Variant-aware image checker proves exact MBR/GPT/partition/loader inclusion and exclusion contracts for 3 layouts and all 8 UEFI capacities |
+| `MAC-T011` | p002 | **PASS:** Primary-only GPT classifies only exact capacity-matched, conventional, zero-backup media as intentional and rejects malformed publication candidates |
 | `MAC-T020` | p003 | Hybrid positive 2-firmware cells, single-firmware positive/negative cells, and all eight UEFI capacity cells pass in QEMU |
 | `MAC-T030` | p004 | One provisional Intel Mac boot passes, followed only at final acceptance by five consecutive cold boots of the frozen artifact |
 
@@ -24,6 +24,33 @@ The runner creates fresh owned build trees for `vmunix`, every BIOS loader,
 and `BOOTX64.EFI` under all three amd64 Variants and the 2/256-GiB endpoints,
 then compares artifact hashes, object paths, and expanded source/object/compile
 flags exactly.
+
+Run the `MAC-T010`/`MAC-T011` production image matrix with:
+
+```sh
+build/NoctLang/build-static/noct --path=tools/build \
+  plan/ws020-intel-mac/tests/image-layout-test.noct \
+  . plan/ws020-intel-mac/temp/p002-layout
+```
+
+The runner covers Hybrid and BIOS at the 2/256-GiB endpoints, UEFI-only at
+2/4/8/16/32/64/128/256 GiB, CRC-preserving semantic GPT corruption,
+cross-layout and forbidden-loader cases, fixed `ZBL1` Stage-2-LBA semantics,
+ESP/payload backup-VBR checks, bounded rejection of a materialized 256-GiB
+sparse file, final-region zero/nonzero evidence, and atomic destination
+retention.  It passed on 2026-08-30.  Each runner snapshots `config.mk` and owns
+all mutable target/image artifacts below its evidence path; concurrent
+`MAC-T001` and `MAC-T010`/`MAC-T011` runs with distinct evidence paths also
+passed.  The kernel-side sparse-capacity,
+intentional-primary-only classification, degraded-copy compatibility, and
+sanitizer/analyzer matrix is run with:
+
+```sh
+plan/ws004-hardware/tests/run-gpt-host-test.sh
+```
+
+The compact UEFI artifact cannot clear old bytes at the end of a reused target
+medium.  Physical-image preparation in p004 must zero the final 33 sectors.
 
 Reusable runners added by an authorized Phase live here.  Disposable sparse
 media and QEMU logs live below `../temp/` and remain untracked.  Do not consume

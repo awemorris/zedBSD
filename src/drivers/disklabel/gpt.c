@@ -541,6 +541,38 @@ out:
 	return equal;
 }
 
+/* A compact UEFI image deliberately omits the conventional backup array and
+ * header.  After the image is materialized to its declared exact capacity,
+ * those fixed final metadata blocks must read as zero.  Keep this probe
+ * independent of attacker-controlled usable-range values: it reads at most
+ * the 16-KiB entry-array reservation plus one header block. */
+static int
+intentional_primary_only(struct disk *disk, const struct gpt_copy *primary,
+	uint64_t logical_last, uint8_t *block)
+{
+	uint64_t reserve_blocks, first, lba;
+
+	reserve_blocks = GPT_ENTRY_ARRAY_RESERVE / disk->d_block_size;
+	if (GPT_ENTRY_ARRAY_RESERVE % disk->d_block_size != 0U)
+		reserve_blocks++;
+	if (logical_last <= reserve_blocks + 1U ||
+	    primary->header_lba != 1U || primary->alternate_lba != logical_last ||
+	    primary->table_lba != 2U ||
+	    primary->entry_count != 128U || primary->entry_size != 128U ||
+	    primary->table_bytes != GPT_ENTRY_ARRAY_RESERVE ||
+	    primary->first_usable != 2U + reserve_blocks ||
+	    primary->last_usable != logical_last - reserve_blocks - 1U)
+		return 0;
+	first = logical_last - reserve_blocks;
+	for (lba = first; lba <= logical_last; lba++) {
+		if (disk_read(disk, lba, 1U, block) != 0)
+			return -EIO;
+		if (!all_zero(block, disk->d_block_size))
+			return 0;
+	}
+	return 1;
+}
+
 static int
 gpt_scan(const struct partition_scheme *scheme, struct disk *disk,
 	struct partition *entries, unsigned capacity)
@@ -553,6 +585,7 @@ gpt_scan(const struct partition_scheme *scheme, struct disk *disk,
 	uint64_t logical_last = 0U, physical_last;
 	uint32_t protective_blocks = 0U;
 	int bounded = 0;
+	int primary_only = 0;
 	int primary_error, backup_error, equal;
 	int error = -EINVAL;
 
@@ -627,6 +660,16 @@ gpt_scan(const struct partition_scheme *scheme, struct disk *disk,
 		error = -EINVAL;
 		goto out;
 	}
+	if (!bounded && primary_error == 0 && backup_error != 0 &&
+	    backup_error != -EIO) {
+		/* Zero is the only intentional-absence representation.  A readable
+		 * malformed/nonzero backup retains the established degraded-copy
+		 * recovery path, but is never reported as a primary-only image. */
+		primary_only = intentional_primary_only(disk, &primary,
+		    logical_last, block);
+		if (primary_only < 0)
+			primary_only = 0;
+	}
 	if (primary_error != 0 && backup_error != 0) {
 		hal_printf("gpt: %s rejected: primary=%d backup=%d\n",
 		    disk->d_name, -primary_error, -backup_error);
@@ -655,8 +698,12 @@ gpt_scan(const struct partition_scheme *scheme, struct disk *disk,
 		selected = &primary;
 		selected_entries = primary_entries;
 	} else if (primary_error == 0) {
-		hal_printf("gpt: %s backup damaged (%d), using primary read-only\n",
-		    disk->d_name, -backup_error);
+		if (primary_only != 0)
+			hal_printf("gpt: %s intentional primary-only GPT accepted "
+			    "read-only\n", disk->d_name);
+		else
+			hal_printf("gpt: %s backup damaged (%d), using primary "
+			    "read-only\n", disk->d_name, -backup_error);
 		selected = &primary;
 		selected_entries = primary_entries;
 	} else {

@@ -1,0 +1,405 @@
+require zedbuild;
+
+// MAC-T010/MAC-T011 production image-layout and atomic-publication fixture.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+func run(repo, command, what) {
+    var status = System.shell("cd " + zbShellQuote(repo) + " && " + command);
+    if (status != 0) { zbFail(what + " failed (status=" + status + ")"); }
+}
+
+func runLogged(repo, log, command, what) {
+    var status = System.shell("cd " + zbShellQuote(repo) + " && " + command +
+                              " >" + zbShellQuote(log) + " 2>&1");
+    if (status != 0) {
+        zbFail(what + " failed (status=" + status + "; log=" + log + ")");
+    }
+}
+
+func expectFailure(repo, log, command, what) {
+    var status = System.shell("cd " + zbShellQuote(repo) + " && " + command +
+                              " >" + zbShellQuote(log) + " 2>&1");
+    if (status == 0) { zbFail(what + " unexpectedly passed"); }
+}
+
+func crc32Range(data, start, count) {
+    var crc = 4294967295;
+    for (i in 0..count) {
+        crc = crc ^ data[start + i];
+        for (j in 0..8) {
+            if ((crc & 1) != 0) { crc = (crc >> 1) ^ 0xedb88320; }
+            else { crc = crc >> 1; }
+        }
+    }
+    return (crc ^ 4294967295) & 4294967295;
+}
+
+func updatePrimaryHeaderCrc(data) {
+    zbPut32LE(data, 512 + 16, 0);
+    zbPut32LE(data, 512 + 16, crc32Range(data, 512, 92));
+}
+
+func writeSemanticMutation(source, destination, kind) {
+    var data = zbReadFile(source);
+    if (kind == "alternate") {
+        // Keep the primary header internally valid while making its declared
+        // alternate LBA disagree with the selected 256-GiB capacity.
+        zbPut64LE(data, 512 + 32, 536870910);
+        updatePrimaryHeaderCrc(data);
+    } else if (kind == "overlap") {
+        // Move payload first-LBA into the ESP and update both CRCs so the
+        // semantic extent check, rather than a checksum check, rejects it.
+        zbPut64LE(data, 1152 + 32, 2048);
+        zbPut32LE(data, 512 + 88, crc32Range(data, 1024, 16384));
+        updatePrimaryHeaderCrc(data);
+    } else if (kind == "outside") {
+        // Extend payload one sector past compact EOF, again with valid CRCs.
+        zbPut64LE(data, 1152 + 40, 395264);
+        zbPut32LE(data, 512 + 88, crc32Range(data, 1024, 16384));
+        updatePrimaryHeaderCrc(data);
+    } else {
+        zbFail("unknown semantic GPT mutation");
+    }
+    zbWriteFile(destination, data);
+}
+
+func writeFat32BackupMutation(source, destination, volumeOffset) {
+    var data = zbReadFile(source);
+    var reserved = zbU16LE(data, volumeOffset + 14);
+    var backup = zbU16LE(data, volumeOffset + 50);
+    if (backup == 0 || backup >= reserved) {
+        zbFail("invalid FAT32 backup fixture geometry");
+    }
+    data[volumeOffset + backup * 512] =
+        data[volumeOffset + backup * 512] ^ 1;
+    zbWriteFile(destination, data);
+}
+
+func makeVariables(config, build, evidence) {
+    return " ZEDBSD_CONFIG=" + zbShellQuote(config) +
+        " BUILD=" + zbShellQuote(build) +
+        " ARCH_IMAGE_DIR=" + zbShellQuote(evidence + "/arch-images") +
+        " DATA_IMAGE=" + zbShellQuote(evidence + "/data.img") +
+        " SWAP_IMAGE=" + zbShellQuote(evidence + "/swapfile") +
+        " ZEDBSD_IMAGE_HOST=" + zbShellQuote(evidence + "/zedimage-host");
+}
+
+func makeImage(repo, evidence, config, build, layout, capacity) {
+    var name = layout + "-" + capacity;
+    var command = "make --no-print-directory -j16 " +
+        "ZEDBSD_PLATFORM=amd64 ZEDBSD_ARCHITECTURE=amd64 " +
+        "ZEDBSD_BOARD=pcat ZEDBSD_VARIANT=" + layout +
+        " ZEDBSD_IMAGE_SIZE_GIB=" + capacity +
+        makeVariables(config, build, evidence) + " disk-image";
+    runLogged(repo, evidence + "/build-" + name + ".log", command,
+              name + " production image");
+    var expected = "";
+    if (layout == "hybrid") { expected = "203423744"; }
+    else if (layout == "bios") { expected = "135266304"; }
+    else { expected = "202375168"; }
+    var image = build + "/hdd-image.img";
+    run(repo, "test \"$(stat -c%s " + zbShellQuote(image) + ")\" = " + expected,
+        name + " exact artifact extent");
+    var checker = "build/NoctLang/build-static/noct --path=tools/build " +
+        "platform/amd64/tools/check-amd64-gpt-image.noct ";
+    runLogged(repo, evidence + "/check-" + name + ".log",
+        checker + checkerArgs(build, evidence, layout, capacity, image),
+        name + " independent production check");
+}
+
+func checkerArgsForMachineStage1(build, evidence, layout, capacity, image,
+                                 machine, stage1) {
+    return "--layout " + layout + " --declared-size-gib " + capacity +
+        " --machine " + machine + " --stage1 " + zbShellQuote(stage1) +
+        " --stage2 " + zbShellQuote(build + "/bootloader/stage2-chain.bin") +
+        " --partition-pbr " +
+        zbShellQuote(build + "/bootloader/partition-pbr.bin") +
+        " --bootzbsd " + zbShellQuote(build + "/bootloader/BOOTZBSD.EXE") +
+        " --kernel " + zbShellQuote(build + "/vmunix") +
+        " --bootx64 " + zbShellQuote(build + "/uefi/BOOTX64.EFI") +
+        " --zedbsd-config platform/amd64/zedbsd.cfg" +
+        " --arch-profile amd64 --arch-image " +
+        zbShellQuote(evidence + "/arch-images/amd64.ufs") +
+        " --arch-format ufs --data-image " +
+        zbShellQuote(evidence + "/data.img") +
+        " --swapfile " + zbShellQuote(evidence + "/swapfile") + " " +
+        zbShellQuote(image);
+}
+
+func checkerArgsForStage1(build, evidence, layout, capacity, image, stage1) {
+    return checkerArgsForMachineStage1(build, evidence, layout, capacity,
+                                       image, "pcat", stage1);
+}
+
+func checkerArgs(build, evidence, layout, capacity, image) {
+    var stage1 = build + "/bootloader/stage1.bin";
+    if (layout == "bios") {
+        stage1 = build + "/bootloader/stage1-native.bin";
+    }
+    return checkerArgsForStage1(build, evidence, layout, capacity, image,
+                                stage1);
+}
+
+func backendArgsOmitting(build, evidence, layout, image, omitted) {
+    var stage1 = build + "/bootloader/stage1.bin";
+    if (layout == "bios") { stage1 = build + "/bootloader/stage1-native.bin"; }
+    var result = "--layout " + layout + " --declared-size-gib 2" +
+        " --machine pcat --stage1 " + zbShellQuote(stage1) +
+        " --stage2 " + zbShellQuote(build + "/bootloader/stage2-chain.bin") +
+        " --partition-pbr " +
+        zbShellQuote(build + "/bootloader/partition-pbr.bin") +
+        " --bootzbsd " + zbShellQuote(build + "/bootloader/BOOTZBSD.EXE") +
+        " --kernel " + zbShellQuote(build + "/vmunix") +
+        " --zedbsd-config platform/amd64/zedbsd.cfg" +
+        " --arch-image " + zbShellQuote(evidence + "/arch-images/amd64.ufs") +
+        " --swapfile " + zbShellQuote(evidence + "/swapfile");
+    if (omitted != "bootx64") {
+        result = result + " --bootx64 " +
+                 zbShellQuote(build + "/uefi/BOOTX64.EFI");
+    }
+    if (omitted != "data") {
+        result = result + " --data-image " + zbShellQuote(evidence + "/data.img");
+    }
+    return result + " " + zbShellQuote(image);
+}
+
+func main(args) {
+    if (Array.size(args) != 2) {
+        zbFail("usage: image-layout-test.noct REPOSITORY EVIDENCE");
+    }
+    var repo = args[0];
+    var evidence = args[1];
+    run(repo, "mkdir -p " + zbShellQuote(evidence), "create evidence directory");
+    var config = evidence + "/config.mk";
+    var build = evidence + "/build-amd64";
+    run(repo, "cp config.mk " + zbShellQuote(config),
+        "snapshot fixture configuration");
+    runLogged(repo, evidence + "/clean-private-build.log",
+        "make --no-print-directory ZEDBSD_CONFIG=" + zbShellQuote(config) +
+        " BUILD=" + zbShellQuote(build) + " clean",
+        "clean fixture-private BUILD");
+
+    // Hybrid remains the accepted self-contained GPT and BIOS remains the
+    // legacy MBR artifact; capacity is a deployment constraint for both.
+    makeImage(repo, evidence, config, build, "hybrid", "2");
+
+    // The explicit layout interface owns its fixed partition geometry.  Old
+    // geometry and native/fragmentation switches remain available only to
+    // legacy builder calls without --layout.
+    expectFailure(repo, evidence + "/reject-layout-size-override.log",
+        zbShellQuote(evidence + "/zedimage-host") + " disk " +
+        checkerArgs(build, evidence, "hybrid", "2",
+                    evidence + "/override.img") + " --size-mib 130",
+        "explicit layout size override");
+    expectFailure(repo, evidence + "/reject-layout-native-override.log",
+        zbShellQuote(evidence + "/zedimage-host") + " disk " +
+        checkerArgs(build, evidence, "bios", "2",
+                    evidence + "/override.img") +
+        " --ufs-root " + zbShellQuote(evidence + "/arch-images/amd64.ufs"),
+        "explicit layout native-root override");
+    expectFailure(repo, evidence + "/reject-hybrid-native-stage1-backend.log",
+        zbShellQuote(evidence + "/zedimage-host") + " disk " +
+        checkerArgsForStage1(build, evidence, "hybrid", "2",
+            evidence + "/override.img",
+            build + "/bootloader/stage1-native.bin"),
+        "Hybrid backend with native-LBA Stage 1");
+    expectFailure(repo, evidence + "/reject-bios-gpt-stage1-backend.log",
+        zbShellQuote(evidence + "/zedimage-host") + " disk " +
+        checkerArgsForStage1(build, evidence, "bios", "2",
+            evidence + "/override.img", build + "/bootloader/stage1.bin"),
+        "BIOS backend with GPT-LBA Stage 1");
+    expectFailure(repo, evidence + "/reject-layout-machine.log",
+        zbShellQuote(evidence + "/zedimage-host") + " disk " +
+        checkerArgsForMachineStage1(build, evidence, "hybrid", "2",
+            evidence + "/override.img", "banana",
+            build + "/bootloader/stage1.bin"),
+        "explicit layout non-PCAT machine");
+    var corruptStage1 = evidence + "/broken-stage1-metadata.bin";
+    run(repo, "cp " + zbShellQuote(build + "/bootloader/stage1.bin") + " " +
+        zbShellQuote(corruptStage1), "copy Stage 1 metadata fixture");
+    run(repo, "printf X | dd of=" + zbShellQuote(corruptStage1) +
+        " bs=1 seek=416 count=1 conv=notrunc status=none",
+        "corrupt Stage 1 metadata magic");
+    expectFailure(repo, evidence + "/reject-stage1-metadata-backend.log",
+        zbShellQuote(evidence + "/zedimage-host") + " disk " +
+        checkerArgsForStage1(build, evidence, "hybrid", "2",
+            evidence + "/override.img", corruptStage1),
+        "backend corrupted Stage 1 metadata");
+    expectFailure(repo, evidence + "/reject-bios-missing-data.log",
+        zbShellQuote(evidence + "/zedimage-host") + " disk " +
+        backendArgsOmitting(build, evidence, "bios",
+                            evidence + "/override.img", "data"),
+        "BIOS backend missing required data image");
+    expectFailure(repo, evidence + "/reject-hybrid-missing-bootx64.log",
+        zbShellQuote(evidence + "/zedimage-host") + " disk " +
+        backendArgsOmitting(build, evidence, "hybrid",
+                            evidence + "/override.img", "bootx64"),
+        "Hybrid backend missing required BOOTX64.EFI");
+
+    makeImage(repo, evidence, config, build, "hybrid", "256");
+    var hybrid = evidence + "/hybrid-256.img";
+    run(repo, "cp --reflink=auto --sparse=always " +
+        zbShellQuote(build + "/hdd-image.img") + " " +
+        zbShellQuote(hybrid), "save Hybrid fixture");
+    makeImage(repo, evidence, config, build, "bios", "2");
+    makeImage(repo, evidence, config, build, "bios", "256");
+    var bios = evidence + "/bios-256.img";
+    run(repo, "cp --reflink=auto --sparse=always " +
+        zbShellQuote(build + "/hdd-image.img") + " " +
+        zbShellQuote(bios), "save BIOS fixture");
+
+    // Every public capacity must be encoded exactly by compact UEFI-only.
+    for (capacity in ["2", "4", "8", "16", "32", "64", "128", "256"]) {
+        makeImage(repo, evidence, config, build, "uefi", capacity);
+    }
+    var valid = evidence + "/uefi-256.img";
+    run(repo, "cp --reflink=auto --sparse=always " +
+        zbShellQuote(build + "/hdd-image.img") + " " +
+        zbShellQuote(valid), "save compact UEFI fixture");
+
+    var checker = "build/NoctLang/build-static/noct --path=tools/build " +
+        "platform/amd64/tools/check-amd64-gpt-image.noct ";
+    for (mutation in ["primary", "table"]) {
+        var broken = evidence + "/broken-" + mutation + ".img";
+        run(repo, "cp --reflink=auto --sparse=always " + zbShellQuote(valid) +
+            " " + zbShellQuote(broken), "copy " + mutation + " mutation");
+        var offset = "512";
+        if (mutation == "table") { offset = "1024"; }
+        run(repo, "printf X | dd of=" + zbShellQuote(broken) +
+            " bs=1 seek=" + offset + " count=1 conv=notrunc status=none",
+            "write " + mutation + " mutation");
+        expectFailure(repo, evidence + "/reject-" + mutation + ".log",
+            checker + checkerArgs(build, evidence, "uefi", "256", broken),
+            mutation + " corruption rejection");
+    }
+    for (mutation in ["alternate", "overlap", "outside"]) {
+        var broken = evidence + "/broken-" + mutation + ".img";
+        writeSemanticMutation(valid, broken, mutation);
+        expectFailure(repo, evidence + "/reject-" + mutation + ".log",
+            checker + checkerArgs(build, evidence, "uefi", "256", broken),
+            mutation + " semantic rejection");
+    }
+
+    // Loader presence is layout-specific.  A BIOS loader inserted into the
+    // UEFI payload and either valid image checked as another layout must fail.
+    var crossLoader = evidence + "/broken-cross-loader.img";
+    run(repo, "cp --reflink=auto --sparse=always " + zbShellQuote(valid) +
+        " " + zbShellQuote(crossLoader), "copy cross-loader mutation");
+    run(repo, "mcopy -o -i " + zbShellQuote(crossLoader + "@@68157440") +
+        " " + zbShellQuote(build + "/bootloader/BOOTZBSD.EXE") +
+        " ::/BOOTZBSD.EXE",
+        "insert forbidden BIOS loader into UEFI payload");
+    expectFailure(repo, evidence + "/reject-cross-loader.log",
+        checker + checkerArgs(build, evidence, "uefi", "256", crossLoader),
+        "cross-layout loader rejection");
+    expectFailure(repo, evidence + "/reject-uefi-as-hybrid.log",
+        checker + checkerArgs(build, evidence, "hybrid", "256", valid),
+        "UEFI artifact as Hybrid rejection");
+    expectFailure(repo, evidence + "/reject-hybrid-as-uefi.log",
+        checker + checkerArgs(build, evidence, "uefi", "256", hybrid),
+        "Hybrid artifact as UEFI rejection");
+    expectFailure(repo, evidence + "/reject-bios-as-uefi.log",
+        checker + checkerArgs(build, evidence, "uefi", "256", bios),
+        "BIOS artifact as UEFI rejection");
+
+    // Byte comparison alone must not let a caller redefine a layout's Stage
+    // 2 LBA.  Preserve the valid MBR-owned tail while substituting only the
+    // executable prefix, then declare that wrong input to the checker.
+    var wrongHybridStage1 = evidence + "/broken-hybrid-native-stage1.img";
+    run(repo, "cp --reflink=auto --sparse=always " + zbShellQuote(hybrid) +
+        " " + zbShellQuote(wrongHybridStage1),
+        "copy Hybrid wrong-Stage-1 fixture");
+    run(repo, "dd if=" +
+        zbShellQuote(build + "/bootloader/stage1-native.bin") + " of=" +
+        zbShellQuote(wrongHybridStage1) +
+        " bs=1 count=440 conv=notrunc status=none",
+        "substitute native Stage 1 into Hybrid");
+    expectFailure(repo, evidence + "/reject-hybrid-native-stage1-check.log",
+        checker + checkerArgsForStage1(build, evidence, "hybrid", "256",
+            wrongHybridStage1, build + "/bootloader/stage1-native.bin"),
+        "Hybrid checker native-LBA Stage 1");
+    var wrongBiosStage1 = evidence + "/broken-bios-gpt-stage1.img";
+    run(repo, "cp --reflink=auto --sparse=always " + zbShellQuote(bios) +
+        " " + zbShellQuote(wrongBiosStage1),
+        "copy BIOS wrong-Stage-1 fixture");
+    run(repo, "dd if=" +
+        zbShellQuote(build + "/bootloader/stage1.bin") + " of=" +
+        zbShellQuote(wrongBiosStage1) +
+        " bs=1 count=440 conv=notrunc status=none",
+        "substitute GPT Stage 1 into BIOS");
+    expectFailure(repo, evidence + "/reject-bios-gpt-stage1-check.log",
+        checker + checkerArgsForStage1(build, evidence, "bios", "256",
+            wrongBiosStage1, build + "/bootloader/stage1.bin"),
+        "BIOS checker GPT-LBA Stage 1");
+    var corruptStage1Image = evidence + "/broken-hybrid-stage1-metadata.img";
+    run(repo, "cp --reflink=auto --sparse=always " + zbShellQuote(hybrid) +
+        " " + zbShellQuote(corruptStage1Image),
+        "copy Hybrid Stage 1 metadata fixture");
+    run(repo, "dd if=" + zbShellQuote(corruptStage1) + " of=" +
+        zbShellQuote(corruptStage1Image) +
+        " bs=1 count=440 conv=notrunc status=none",
+        "substitute corrupted Stage 1 metadata");
+    expectFailure(repo, evidence + "/reject-stage1-metadata-check.log",
+        checker + checkerArgsForStage1(build, evidence, "hybrid", "256",
+            corruptStage1Image, corruptStage1),
+        "checker corrupted Stage 1 metadata");
+
+    var hybridEspBackup = evidence + "/broken-hybrid-esp-backup.img";
+    writeFat32BackupMutation(hybrid, hybridEspBackup, 1048576);
+    expectFailure(repo, evidence + "/reject-hybrid-esp-backup.log",
+        checker + checkerArgs(build, evidence, "hybrid", "256",
+                              hybridEspBackup),
+        "Hybrid ESP backup-VBR corruption rejection");
+
+    // Materialization stays sparse and the checker rejects it before any
+    // whole-file read.  The exact final 33 sectors are initially zero.
+    var materialized = evidence + "/uefi-256-materialized.img";
+    run(repo, "cp --reflink=auto --sparse=always " + zbShellQuote(valid) +
+        " " + zbShellQuote(materialized), "copy materialized fixture");
+    run(repo, "truncate -s 274877906944 " + zbShellQuote(materialized),
+        "materialize selected capacity");
+    run(repo, "dd if=" + zbShellQuote(materialized) +
+        " bs=512 skip=536870879 count=33 status=none | " +
+        "cmp -n 16896 - /dev/zero", "zero absent-backup extent");
+    expectFailure(repo, evidence + "/reject-materialized.log",
+        checker + checkerArgs(build, evidence, "uefi", "256", materialized),
+        "bounded materialized checker rejection");
+    run(repo, "printf X | dd of=" + zbShellQuote(materialized) +
+        " bs=1 seek=274877906432 count=1 conv=notrunc status=none",
+        "materialize nonzero malformed backup extent");
+    expectFailure(repo, evidence + "/reject-nonzero-backup-region.log",
+        "dd if=" + zbShellQuote(materialized) +
+        " bs=512 skip=536870879 count=33 status=none | " +
+        "cmp -n 16896 - /dev/zero",
+        "nonzero final backup-region classification");
+    expectFailure(repo, evidence + "/reject-materialized-nonzero.log",
+        checker + checkerArgs(build, evidence, "uefi", "256", materialized),
+        "nonzero materialized checker rejection");
+
+    // Feed a corrupted compact image through the real atomic wrapper using a
+    // temporary backend.  A checker failure must retain the old destination.
+    var fake = evidence + "/copy-corrupt-backend";
+    var script = "#!/bin/sh\nlast=\nfor arg do last=$arg; done\n" +
+                 "cp " + zbShellQuote(evidence + "/broken-primary.img") +
+                 " \"$last\"\n";
+    run(repo, "printf %s " + zbShellQuote(script) + " >" + zbShellQuote(fake),
+        "write temporary corrupt backend");
+    run(repo, "chmod +x " + zbShellQuote(fake), "enable corrupt backend");
+    var destination = evidence + "/atomic.img";
+    run(repo, "printf SENTINEL >" + zbShellQuote(destination),
+        "write atomic sentinel");
+    var wrapper = "build/NoctLang/build-static/noct --path=tools/build " +
+        "tools/build/make-bios-hdd-image.noct --backend " + fake +
+        " --checker platform/amd64/tools/check-amd64-gpt-image.noct" +
+        " --checker-runner build/NoctLang/build-static/noct " +
+        checkerArgs(build, evidence, "uefi", "256", destination);
+    expectFailure(repo, evidence + "/reject-atomic.log", wrapper,
+        "atomic malformed-image publication");
+    run(repo, "test \"$(cat " + zbShellQuote(destination) +
+        ")\" = SENTINEL && test ! -e " + zbShellQuote(destination + ".unchecked") +
+        " && test ! -e " + zbShellQuote(destination + ".unchecked.tmp"),
+        "atomic destination retention");
+
+    print("MAC-T010/MAC-T011 image layouts: PASS (3 layouts, 8 capacities, " +
+          "negative and atomic gates; " + evidence + ")");
+}

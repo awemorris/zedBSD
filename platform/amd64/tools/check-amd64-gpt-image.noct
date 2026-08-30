@@ -18,6 +18,26 @@ func rejectFatFile(volume, name) {
                   " " + zbShellQuote("::/" + name) + " >/dev/null 2>&1";
     if (System.shell(command) == 0) { zbFail(name + " is on the wrong FAT volume"); }
 }
+func requireFatListing(image, tag, volume, expected) {
+    var actual = image + ".ws020-" + tag + "-actual";
+    var wanted = image + ".ws020-" + tag + "-expected";
+    System.shell("rm -f " + zbShellQuote(actual) + " " + zbShellQuote(wanted));
+    var command = "mdir -b -i " + zbShellQuote(volume) +
+                  " -s '::/' >" + zbShellQuote(actual);
+    if (System.shell(command) != 0 ||
+        System.shell("printf %s " + zbShellQuote(expected) + " >" +
+                     zbShellQuote(wanted)) != 0 ||
+        System.shell("sort -o " + zbShellQuote(actual) + " " +
+                     zbShellQuote(actual)) != 0 ||
+        System.shell("sort -o " + zbShellQuote(wanted) + " " +
+                     zbShellQuote(wanted)) != 0 ||
+        System.shell("cmp " + zbShellQuote(actual) + " " +
+                     zbShellQuote(wanted)) != 0) {
+        System.shell("rm -f " + zbShellQuote(actual) + " " + zbShellQuote(wanted));
+        zbFail(tag + " FAT file list differs");
+    }
+    System.shell("rm -f " + zbShellQuote(actual) + " " + zbShellQuote(wanted));
+}
 func guidIsZero(data, at) {
     for (j in 0..16) { if (data[at + j] != 0) { return false; } }
     return true;
@@ -34,12 +54,24 @@ func requireGuidDifferent(data, first, second) {
     }
     zbFail("GPT disk and partition GUIDs are not distinct");
 }
-func requireGptEntry(data, at, type0, type1, type2, type3) {
+func requireGptEntry(data, at, type0, type1, type2, type3, name) {
     if (zbU32LE(data, at) != type0 || zbU32LE(data, at + 4) != type1 ||
         zbU32LE(data, at + 8) != type2 || zbU32LE(data, at + 12) != type3) {
         zbFail("GPT partition type differs");
     }
     requireGeneratedGuid(data, at + 16);
+    if (zbU64SmallLE(data, at + 48) != 0) {
+        zbFail("GPT partition attributes differ");
+    }
+    var count = String.charCount(name);
+    if (count > 36) { zbFail("GPT partition name fixture is too long"); }
+    for (j in 0..36) {
+        var expected = 0;
+        if (j < count) { expected = String.charCodeAt(name, j); }
+        if (zbU16LE(data, at + 56 + j * 2) != expected) {
+            zbFail("GPT partition name or zero tail differs");
+        }
+    }
 }
 func requireFat32RootNtCase(data, volumeOffset, shortName, expected) {
     var reserved = zbU16LE(data, volumeOffset + 14);
@@ -84,9 +116,24 @@ func requireStage1(data, source) {
         if (data[j] != expected[j]) { zbFail("Stage 1 signature differs from its input"); }
     }
 }
+func requireStage1LoadLba(data, expected) {
+    // The fixed ZBL1 record at 0x1a0 is an interface boundary between the
+    // movable Stage 1 implementation and image composition/validation.
+    var at = 416;
+    if (Packed.size(data) < 440 || zbU32LE(data, at) != 0x314c425a ||
+        zbU16LE(data, at + 4) != 1 || zbU16LE(data, at + 6) != 16 ||
+        zbU32LE(data, at + 8) != expected ||
+        zbU16LE(data, at + 12) != 1 || zbU16LE(data, at + 14) != 0) {
+        zbFail("invalid Stage 1 layout metadata or Stage 2 LBA");
+    }
+    requireZero(data, at + 16, 440, "Stage 1 metadata reservation tail");
+}
 func header(data, at, current, backup, entriesLba, firstUsable, lastUsable) {
     if (!zbBytesEqual(data, at, "EFI PART") || zbU32LE(data, at + 8) != 65536 ||
-        zbU32LE(data, at + 12) != 92) { zbFail("invalid GPT header"); }
+        zbU32LE(data, at + 12) != 92 || zbU32LE(data, at + 20) != 0) {
+        zbFail("invalid GPT header");
+    }
+    requireZero(data, at + 92, at + 512, "GPT header reserved tail");
     var copy = Packed.uint8(92); zbCopy(copy, 0, data, at, 92);
     var stored = zbU32LE(copy, 16); zbPut32LE(copy, 16, 0);
     if (crc32Range(copy, 0, 92) != stored || zbU64SmallLE(data, at + 24) != current ||
@@ -98,8 +145,240 @@ func header(data, at, current, backup, entriesLba, firstUsable, lastUsable) {
     }
     return zbU32LE(data, at + 88);
 }
+func declaredSectors(text) {
+    if (text == "") { return 0; }
+    var gib = zbParseNumber(text);
+    if (gib != 2 && gib != 4 && gib != 8 && gib != 16 && gib != 32 &&
+        gib != 64 && gib != 128 && gib != 256) {
+        zbFail("unsupported declared image capacity");
+    }
+    return gib * 2097152;
+}
+func requireZero(data, first, last, what) {
+    if (first < 0 || last < first || last > Packed.size(data)) {
+        zbFail("invalid zero-range while checking " + what);
+    }
+    for (j in first..last) {
+        if (data[j] != 0) { zbFail(what + " is not zero"); }
+    }
+}
+func requireStage2(data, at, limit, source) {
+    if (zbU32LE(data, at) != 0x324c425a || zbU16LE(data, at + 4) != 1 ||
+        zbU16LE(data, at + 6) != 32 || zbU16LE(data, at + 14) != 1) {
+        zbFail("invalid ZBL2 header");
+    }
+    var sectors = zbU16LE(data, at + 12);
+    var stageSize = zbU32LE(data, at + 8);
+    var stageEntry = zbU32LE(data, at + 16);
+    if (sectors < 1 || sectors > 127 || at + sectors * 512 > limit ||
+        stageSize < 32 || stageSize > sectors * 512 || stageEntry < 32 ||
+        stageEntry >= stageSize || (stageSize + 511) / 512 != sectors) {
+        zbFail("invalid ZBL2 bounds");
+    }
+    var sum = 0;
+    for (j in 0..sectors * 128) {
+        sum = (sum + zbU32LE(data, at + j * 4)) & 4294967295;
+    }
+    if (sum != 0) { zbFail("ZBL2 checksum mismatch"); }
+    if (source != "") {
+        var expected = zbReadFile(source);
+        if (Packed.size(expected) == 0 || at + Packed.size(expected) > limit) {
+            zbFail("Stage 2 input is empty or exceeds its partition");
+        }
+        for (j in 0..Packed.size(expected)) {
+            if (data[at + j] != expected[j]) {
+                zbFail("reserved-area Stage 2 differs from its input");
+            }
+        }
+    }
+}
+func requireCustomPbr(data, volumeOffset, pbr, fat32) {
+    if (pbr == "") { return; }
+    var expected = zbReadFile(pbr);
+    if (Packed.size(expected) != 2048) {
+        zbFail("partition PBR input is not 2048 bytes");
+    }
+    for (j in 0..3) {
+        if (data[volumeOffset + j] != expected[j]) {
+            zbFail("payload PBR entry differs");
+        }
+    }
+    var codeStart = 62;
+    if (fat32) { codeStart = 90; }
+    for (j in codeStart..510) {
+        if (data[volumeOffset + j] != expected[j]) {
+            zbFail("payload PBR first-stage code differs");
+        }
+    }
+    if (fat32) {
+        for (j in 512..2048) {
+            if (data[volumeOffset + 512 + j] != expected[j]) {
+                zbFail("payload PBR continuation differs");
+            }
+        }
+    } else {
+        for (j in 512..2048) {
+            if (data[volumeOffset + j] != expected[j]) {
+                zbFail("payload PBR continuation differs");
+            }
+        }
+    }
+}
+func rejectCustomPbr(data, volumeOffset, pbr) {
+    if (pbr == "") { return; }
+    var expected = zbReadFile(pbr);
+    if (Packed.size(expected) != 2048) {
+        zbFail("partition PBR input is not 2048 bytes");
+    }
+    var sameCode = true;
+    for (j in 90..510) {
+        if (data[volumeOffset + j] != expected[j]) { sameCode = false; }
+    }
+    if (sameCode) { zbFail("UEFI payload contains the BIOS PBR first stage"); }
+    var sameContinuation = true;
+    for (j in 512..2048) {
+        if (data[volumeOffset + 512 + j] != expected[j]) {
+            sameContinuation = false;
+        }
+    }
+    if (sameContinuation) {
+        zbFail("UEFI payload contains the BIOS PBR continuation");
+    }
+}
+func requireFat32Backup(data, volumeOffset, what) {
+    var reserved = zbU16LE(data, volumeOffset + 14);
+    var backup = zbU16LE(data, volumeOffset + 50);
+    if (backup == 0 || backup >= reserved) {
+        zbFail("invalid " + what + " FAT32 backup boot sector");
+    }
+    for (j in 0..512) {
+        if (data[volumeOffset + j] !=
+            data[volumeOffset + backup * 512 + j]) {
+            zbFail(what + " FAT32 primary and backup boot sectors differ");
+        }
+    }
+}
+func checkBios(image, raw, stage1Input, stage2Input, kernel, bootzbsd, pbr,
+               bootx64, zedbsdConfig, arch, dataImage, swap) {
+    var total = Packed.size(raw) / 512;
+    var payloadStart = 2048;
+    var payloadBlocks = total - payloadStart;
+    if (total != 264192 || raw[510] != 85 || raw[511] != 170) {
+        zbFail("BIOS-only image has the wrong extent or signature");
+    }
+    requireStage1(raw, stage1Input);
+    requireStage1LoadLba(raw, 1);
+    if (zbU32LE(raw, 440) == 0 || raw[444] != 0 || raw[445] != 0) {
+        zbFail("invalid BIOS-only disk signature or reserved MBR bytes");
+    }
+    if (raw[446] != 128 || raw[447] != 254 || raw[448] != 255 ||
+        raw[449] != 255 || raw[450] != 14 || raw[451] != 254 ||
+        raw[452] != 255 || raw[453] != 255 ||
+        zbU32LE(raw, 454) != payloadStart || zbU32LE(raw, 458) != payloadBlocks) {
+        zbFail("invalid BIOS-only MBR payload entry");
+    }
+    requireZero(raw, 462, 510, "unused BIOS-only MBR entries");
+    requireStage2(raw, 512, payloadStart * 512, stage2Input);
+    requireZero(raw, 512 + zbU16LE(raw, 524) * 512, payloadStart * 512,
+                "unused BIOS-only Stage 2 reservation");
+    var payloadOffset = payloadStart * 512;
+    if (zbU16LE(raw, payloadOffset + 22) == 0 ||
+        raw[payloadOffset + 510] != 85 || raw[payloadOffset + 511] != 170) {
+        zbFail("BIOS payload is not FAT16");
+    }
+    requireCustomPbr(raw, payloadOffset, pbr, false);
+    var payloadVolume = image + "@@1048576";
+    compareFat(image, payloadVolume, bootzbsd, "BOOTZBSD.EXE");
+    compareFat(image, payloadVolume, kernel, "VMUNIX");
+    compareFat(image, payloadVolume, zedbsdConfig, "ZEDBSD.CFG");
+    compareFat(image, payloadVolume, arch, "ROOTFS.IMG");
+    compareFat(image, payloadVolume, dataImage, "DATA.IMG");
+    compareFat(image, payloadVolume, swap, "SWAPFILE");
+    rejectFatFile(payloadVolume, "EFI/BOOT/BOOTX64.EFI");
+    requireFatListing(image, "bios-payload", payloadVolume,
+        "::/BOOTZBSD.EXE\n::/VMUNIX\n::/ZEDBSD.CFG\n::/ROOTFS.IMG\n" +
+        "::/DATA.IMG\n::/SWAPFILE\n");
+    print("amd64 BIOS-only image check: PASS");
+}
+func checkUefi(image, raw, declared, kernel, bootzbsd, pbr, bootx64,
+               zedbsdConfig, arch, dataImage, swap) {
+    var espStart = 2048;
+    var espBlocks = 131072;
+    var payloadStart = espStart + espBlocks;
+    var payloadBlocks = 262144;
+    var compactSectors = payloadStart + payloadBlocks;
+    if (declared == 0) { zbFail("UEFI-only checker requires declared capacity"); }
+    if (Packed.size(raw) != compactSectors * 512) {
+        zbFail("UEFI-only artifact is not the exact compact extent");
+    }
+    requireZero(raw, 0, 446, "UEFI-only protective-MBR bootstrap area");
+    var protectiveBlocks = declared - 1;
+    if (protectiveBlocks > 4294967295) { protectiveBlocks = 4294967295; }
+    if (raw[446] != 0 || raw[447] != 0 || raw[448] != 2 || raw[449] != 0 ||
+        raw[450] != 238 || raw[451] != 255 || raw[452] != 255 ||
+        raw[453] != 255 || zbU32LE(raw, 454) != 1 ||
+        zbU32LE(raw, 458) != protectiveBlocks || raw[510] != 85 ||
+        raw[511] != 170) {
+        zbFail("invalid UEFI-only protective MBR");
+    }
+    requireZero(raw, 462, 510, "unused UEFI-only MBR entries");
+    var tableCrc = header(raw, 512, 1, declared - 1, 2, 34, declared - 34);
+    if (crc32Range(raw, 1024, 16384) != tableCrc) {
+        zbFail("UEFI-only primary GPT entry CRC mismatch");
+    }
+    requireGeneratedGuid(raw, 568);
+    requireGptEntry(raw, 1024, 0xc12a7328, 0x11d2f81f, 0xa0004bba,
+                    0x3bc93ec9, "zedBSD EFI System");
+    requireGptEntry(raw, 1152, 0xebd0a0a2, 0x4433b9e5, 0xb668c087,
+                    0xc79926b7, "zedBSD Payload");
+    requireGuidDifferent(raw, 568, 1040);
+    requireGuidDifferent(raw, 568, 1168);
+    requireGuidDifferent(raw, 1040, 1168);
+    requireZero(raw, 1280, 17408, "unused UEFI-only GPT entries");
+    if (zbU64SmallLE(raw, 1056) != espStart ||
+        zbU64SmallLE(raw, 1064) + 1 != espStart + espBlocks ||
+        zbU64SmallLE(raw, 1184) != payloadStart ||
+        zbU64SmallLE(raw, 1192) + 1 != payloadStart + payloadBlocks ||
+        zbU64SmallLE(raw, 1192) > declared - 34) {
+        zbFail("UEFI-only partition extents differ");
+    }
+    requireZero(raw, 17408, espStart * 512, "UEFI-only pre-ESP gap");
+    var espOffset = espStart * 512;
+    var payloadOffset = payloadStart * 512;
+    if (zbU16LE(raw, espOffset + 22) != 0 ||
+        zbU16LE(raw, payloadOffset + 22) != 0 ||
+        raw[espOffset + 510] != 85 || raw[espOffset + 511] != 170 ||
+        raw[payloadOffset + 510] != 85 || raw[payloadOffset + 511] != 170) {
+        zbFail("UEFI ESP or payload is not FAT32");
+    }
+    requireFat32Backup(raw, espOffset, "UEFI ESP");
+    requireFat32Backup(raw, payloadOffset, "UEFI payload");
+    var espSerial = zbU32LE(raw, espOffset + 67);
+    var payloadSerial = zbU32LE(raw, payloadOffset + 67);
+    if (espSerial == 0 || payloadSerial == 0 || espSerial == payloadSerial) {
+        zbFail("UEFI FAT volume serials are zero or ambiguous");
+    }
+    rejectCustomPbr(raw, payloadOffset, pbr);
+    var espVolume = image + "@@1048576";
+    var payloadVolume = image + "@@68157440";
+    compareFat(image, espVolume, bootx64, "EFI/BOOT/BOOTX64.EFI");
+    compareFat(image, payloadVolume, kernel, "vmunix");
+    compareFat(image, payloadVolume, zedbsdConfig, "zedbsd.cfg");
+    compareFat(image, payloadVolume, arch, "rootfs.img");
+    compareFat(image, payloadVolume, dataImage, "data.img");
+    compareFat(image, payloadVolume, swap, "swapfile");
+    rejectFatFile(payloadVolume, "BOOTZBSD.EXE");
+    rejectFatFile(payloadVolume, "EFI/BOOT/BOOTX64.EFI");
+    rejectFatFile(espVolume, "BOOTZBSD.EXE");
+    rejectFatFile(espVolume, "vmunix");
+    requireFatListing(image, "uefi-esp", espVolume,
+        "::/EFI/\n::/EFI/BOOT/\n::/EFI/BOOT/BOOTX64.EFI\n");
+    requireFatListing(image, "uefi-payload", payloadVolume,
+        "::/vmunix\n::/zedbsd.cfg\n::/rootfs.img\n::/data.img\n::/swapfile\n");
+    print("amd64 UEFI-only compact image check: PASS");
+}
 func main(args) {
-    var image="";var stage1Input="";var stage2Input="";var kernel="";var bootzbsd="";var pbr="";var bootx64="";var zedbsdConfig="";var arch="";var dataImage="";var swap="";var i=0;
+    var image="";var stage1Input="";var stage2Input="";var kernel="";var bootzbsd="";var pbr="";var bootx64="";var zedbsdConfig="";var arch="";var dataImage="";var swap="";var machine="";var layout="hybrid";var layoutSpecified=false;var declaredText="";var i=0;
     while(i<Array.size(args)){
         var a=args[i];
         if(a=="--kernel"&&i+1<Array.size(args)){kernel=args[i+1];i=i+2;}
@@ -112,25 +391,75 @@ func main(args) {
         else if(a=="--arch-image"&&i+1<Array.size(args)){arch=args[i+1];i=i+2;}
         else if(a=="--data-image"&&i+1<Array.size(args)){dataImage=args[i+1];i=i+2;}
         else if(a=="--swapfile"&&i+1<Array.size(args)){swap=args[i+1];i=i+2;}
-        else if((a=="--machine"||a=="--arch-profile"||a=="--arch-format"||a=="--noct"||a=="--holoris"||a=="--bin-file"||a=="--ufs-root")&&i+1<Array.size(args)){i=i+2;}
+        else if(a=="--layout"&&i+1<Array.size(args)){layout=args[i+1];layoutSpecified=true;i=i+2;}
+        else if(a=="--declared-size-gib"&&i+1<Array.size(args)){declaredText=args[i+1];i=i+2;}
+        else if(a=="--machine"&&i+1<Array.size(args)){machine=args[i+1];i=i+2;}
+        else if((a=="--arch-profile"||a=="--arch-format"||a=="--noct"||a=="--holoris"||a=="--bin-file"||a=="--ufs-root")&&i+1<Array.size(args)){i=i+2;}
         else if(String.indexOf(a,"--")==0){zbFail("unsupported GPT checker option: "+a);}
         else {image=a;i=i+1;}
     }
     if(image==""){zbFail("GPT image path is required");}
+    var declared = declaredSectors(declaredText);
+    if (layout != "hybrid" && layout != "bios" && layout != "uefi") {
+        zbFail("unsupported amd64 image layout");
+    }
+    if (layoutSpecified && declared == 0) {
+        zbFail("selected image layout requires declared capacity");
+    }
+    if (layoutSpecified && machine != "pcat") {
+        zbFail("selected amd64 image layout requires machine pcat");
+    }
+    if (layoutSpecified && (stage1Input == "" || stage2Input == "" ||
+        pbr == "" || bootzbsd == "" || kernel == "" || bootx64 == "" ||
+        zedbsdConfig == "" || arch == "" || dataImage == "" || swap == "")) {
+        zbFail("selected image layout is missing a fixed input artifact");
+    }
+    var fileSize = FileUtil.getFileSize(image);
+    if (fileSize < 0) { zbFail("cannot stat image"); }
+    // Enforce every public artifact extent before reading it into memory.  In
+    // particular, this rejects materialized 2--256-GiB sparse media without a
+    // whole-file read; the bounded kernel fixture and p003 own their tails.
+    var expectedFileSize = 203423744;
+    if (layout == "bios") { expectedFileSize = 135266304; }
+    else if (layout == "uefi") { expectedFileSize = 202375168; }
+    if (fileSize != expectedFileSize) {
+        zbFail(layout + " artifact has the wrong exact extent");
+    }
     var raw=zbReadFile(image);var total=Packed.size(raw)/512;
     if(Packed.size(raw)==0||Packed.size(raw)%512!=0||raw[510]!=85||raw[511]!=170){zbFail("invalid disk size or MBR");}
+    if (declared != 0 && declared < total) {
+        zbFail("selected deployment capacity is smaller than the artifact");
+    }
+    if (layout == "bios") {
+        checkBios(image, raw, stage1Input, stage2Input, kernel, bootzbsd, pbr,
+                  bootx64, zedbsdConfig, arch, dataImage, swap);
+        return;
+    }
+    if (layout == "uefi") {
+        checkUefi(image, raw, declared, kernel, bootzbsd, pbr, bootx64,
+                  zedbsdConfig, arch, dataImage, swap);
+        return;
+    }
+    if (total != 397312) { zbFail("Hybrid image has the wrong exact extent"); }
     requireStage1(raw,stage1Input);
+    requireStage1LoadLba(raw,34);
+    if(zbU32LE(raw,440)==0||raw[444]!=0||raw[445]!=0){zbFail("invalid Hybrid disk signature or reserved MBR bytes");}
     var espStart=2048;var espBlocks=131072;var payloadStart=espStart+espBlocks;var payloadBlocks=262144;
     var protectiveBlocks=total-1;if(protectiveBlocks>4294967295){protectiveBlocks=4294967295;}
-    if(raw[446]!=128||raw[450]!=12||zbU32LE(raw,454)!=payloadStart||
-       zbU32LE(raw,458)!=payloadBlocks||raw[466]!=238||zbU32LE(raw,470)!=1||
+    if(raw[446]!=128||raw[447]!=254||raw[448]!=255||raw[449]!=255||
+       raw[450]!=12||raw[451]!=254||raw[452]!=255||raw[453]!=255||
+       zbU32LE(raw,454)!=payloadStart||zbU32LE(raw,458)!=payloadBlocks||
+       raw[462]!=0||raw[463]!=0||raw[464]!=2||raw[465]!=0||
+       raw[466]!=238||raw[467]!=254||raw[468]!=255||raw[469]!=255||
+       zbU32LE(raw,470)!=1||
        zbU32LE(raw,474)!=protectiveBlocks){zbFail("invalid hybrid MBR");}
+    requireZero(raw,478,510,"unused hybrid MBR entries");
     var tableCrc=header(raw,512,1,total-1,2,34,total-34);
     if(crc32Range(raw,1024,16384)!=tableCrc){zbFail("primary GPT entry CRC mismatch");}
     requireGeneratedGuid(raw,568);
-    requireGptEntry(raw,1024,0xc12a7328,0x11d2f81f,0xa0004bba,0x3bc93ec9);
-    requireGptEntry(raw,1152,0xebd0a0a2,0x4433b9e5,0xb668c087,0xc79926b7);
-    requireGptEntry(raw,1280,0x21686148,0x6e6f6449,0x65654e74,0x49464564);
+    requireGptEntry(raw,1024,0xc12a7328,0x11d2f81f,0xa0004bba,0x3bc93ec9,"zedBSD EFI System");
+    requireGptEntry(raw,1152,0xebd0a0a2,0x4433b9e5,0xb668c087,0xc79926b7,"zedBSD Payload");
+    requireGptEntry(raw,1280,0x21686148,0x6e6f6449,0x65654e74,0x49464564,"zedBSD BIOS loader");
     requireGuidDifferent(raw,568,1040);
     requireGuidDifferent(raw,568,1168);
     requireGuidDifferent(raw,568,1296);
@@ -153,6 +482,8 @@ func main(args) {
         if(Packed.size(expectedStage2)==0||stage+Packed.size(expectedStage2)>espStart*512){zbFail("Stage 2 input is empty or exceeds the BIOS partition");}
         for(i in 0..Packed.size(expectedStage2)){if(raw[stage+i]!=expectedStage2[i]){zbFail("reserved-area Stage 2 differs from its input");}}
     }
+    requireZero(raw,stage+sectors*512,espStart*512,
+                "unused hybrid BIOS-loader reservation");
     var backup=(total-33)*512;for(i in 0..16384){if(raw[1024+i]!=raw[backup+i]){zbFail("backup GPT entries differ");}}
     var backupTableCrc=header(raw,(total-1)*512,total-1,1,total-33,34,total-34);
     if(crc32Range(raw,backup,16384)!=backupTableCrc){zbFail("backup GPT entry CRC mismatch");}
@@ -162,14 +493,8 @@ func main(args) {
     if(zbU16LE(raw,espOffset+22)!=0||zbU16LE(raw,payloadOffset+22)!=0||
        raw[espOffset+510]!=85||raw[espOffset+511]!=170||
        raw[payloadOffset+510]!=85||raw[payloadOffset+511]!=170){zbFail("ESP or payload is not FAT32");}
-    var payloadReserved=zbU16LE(raw,payloadOffset+14);
-    var payloadBackup=zbU16LE(raw,payloadOffset+50);
-    if(payloadBackup==0||payloadBackup>=payloadReserved){zbFail("invalid payload FAT32 backup boot sector");}
-    for(i in 0..512){
-        if(raw[payloadOffset+i]!=raw[payloadOffset+payloadBackup*512+i]){
-            zbFail("payload FAT32 primary and backup PBR differ");
-        }
-    }
+    requireFat32Backup(raw,espOffset,"Hybrid ESP");
+    requireFat32Backup(raw,payloadOffset,"Hybrid payload");
     var espSerial=zbU32LE(raw,espOffset+67);var payloadSerial=zbU32LE(raw,payloadOffset+67);
     if(espSerial==0||payloadSerial==0||espSerial==payloadSerial){zbFail("FAT volume serials are zero or ambiguous");}
     if(pbr!=""){
@@ -195,5 +520,10 @@ func main(args) {
     rejectFatFile(espVolume,"ZEDBSD.CFG");
     rejectFatFile(espVolume,"BOOTZBSD.EXE");
     rejectFatFile(payloadVolume,"EFI/BOOT/BOOTX64.EFI");
+    requireFatListing(image, "hybrid-esp", espVolume,
+        "::/EFI/\n::/EFI/BOOT/\n::/EFI/BOOT/BOOTX64.EFI\n");
+    requireFatListing(image, "hybrid-payload", payloadVolume,
+        "::/BOOTZBSD.EXE\n::/vmunix\n::/zedbsd.cfg\n::/rootfs.img\n" +
+        "::/data.img\n::/swapfile\n");
     print("amd64 GPT image check: PASS");
 }

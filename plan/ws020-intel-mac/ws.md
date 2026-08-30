@@ -4,7 +4,7 @@ Last updated: 2026-08-30
 
 WSID: `ws020`
 
-Status: in progress; p001 completed, q036 continues with p002
+Status: in progress; p001-p002 completed, next executable Phase is p003
 
 Parent: [master plan](../master.md)
 
@@ -41,7 +41,9 @@ sparse file before booting it.
   field defaults to the smallest supported capacity, 2 GiB.
 - UEFI-only retains a standards-shaped protective MBR, including its `55 aa`
   signature, but contains no executable stage 1, active partition, hybrid FAT
-  entry, BIOS boot partition, PBR loader, or `BOOTZBSD.EXE`.
+  entry, BIOS boot partition, zedBSD custom BIOS PBR loader, or
+  `BOOTZBSD.EXE`.  Formatter-owned FAT32 BPB/VBR bytes remain but provide no
+  reachable zedBSD BIOS boot path.
 - UEFI-only contains an ESP with `EFI/BOOT/BOOTX64.EFI` and a separate FAT32
   payload containing `vmunix`, `zedbsd.cfg`, `rootfs.img`, `data.img`, and
   `swapfile`.
@@ -49,6 +51,13 @@ sparse file before booting it.
   its declared alternate LBA equals the actual materialized medium's last LBA,
   all partitions fit, and the absent backup region is zero.  A present but
   corrupt or contradictory backup is not reclassified as intentionally absent.
+- Hybrid keeps its accepted 203,423,744-byte complete-GPT artifact and BIOS
+  keeps its 135,266,304-byte legacy-MBR artifact.  Their selected GiB value is
+  a validated target-media constraint only.  Only UEFI-only encodes the exact
+  selected last LBA and remains a compact 202,375,168-byte primary-only image.
+- Writing compact UEFI-only to reused media must include explicit zeroing of
+  the selected medium's final 33 sectors; copying the short file alone cannot
+  erase a stale backup GPT at the physical end.
 - Secure Boot remains disabled.  Signing and Apple-specific NVRAM mutation are
   not part of this WS.
 
@@ -72,7 +81,7 @@ partition.
 | Phase | Status | Result / resume point |
 | --- | --- | --- |
 | [`ws020-p001`](phase001-target-variant-config/phase.md) | Completed (2026-08-30) | Generic Variant/capacity round-trip and validation pass; fresh Variant/capacity builds have identical kernel, loader, object, and compile-contract results |
-| [`ws020-p002`](phase002-image-layouts/phase.md) | Planned after p001 | The three amd64 image profiles and compact primary-only UEFI GPT are generated and strictly checked |
+| [`ws020-p002`](phase002-image-layouts/phase.md) | Completed (2026-08-30) | Three strict image profiles pass; UEFI-only encodes all eight declared capacities in a compact primary-only GPT while Hybrid/BIOS bytes remain capacity-invariant |
 | [`ws020-p003`](phase003-qemu-acceptance/phase.md) | Planned after p002 | SeaBIOS/OVMF positive and negative matrix passes at all declared capacities using materialized sparse media |
 | [`ws020-p004`](phase004-physical-bringup/phase.md) | Planned after p003; physical checkpoint | One Intel Mac UEFI-only boot reaches login, then the frozen artifact passes the final five-run campaign |
 

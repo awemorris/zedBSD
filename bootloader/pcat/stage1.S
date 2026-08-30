@@ -37,7 +37,8 @@ start:
 	jz error_edd
 
 	mov word ptr [dap_segment], ZBL_STAGE2_SEG
-	mov dword ptr [dap_lba], ZBL_STAGE2_LBA
+	mov eax, dword ptr [stage1_metadata + 8]
+	mov dword ptr [dap_lba], eax
 	call read_one
 
 	push ds
@@ -72,7 +73,7 @@ start:
 	dec cx
 	jz loaded
 	mov ax, ZBL_STAGE2_SEG + 0x20
-	mov dword ptr [dap_lba], ZBL_STAGE2_LBA + 1
+	inc dword ptr [dap_lba]
 load_loop:
 	mov word ptr [dap_segment], ax
 	call read_one
@@ -171,6 +172,15 @@ dap_lba:
 	.quad 0
 boot_drive: .byte 0
 retry:      .byte 0
+
+.org ZBL1_METADATA_OFFSET
+stage1_metadata:
+	.long ZBL1_MAGIC
+	.word ZBL1_VERSION
+	.word ZBL1_HEADER_SIZE
+	.long ZBL_STAGE2_LBA
+	.word ZBL2_MACHINE_PCAT
+	.word 0
 
 .org 0x01be
 	.space 64

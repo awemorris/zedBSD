@@ -65,6 +65,7 @@ func main(args) {
             option == "--arch-profile" || option == "--arch-image" ||
             option == "--arch-format" || option == "--data-image" ||
             option == "--swapfile" || option == "--ufs-root" ||
+            option == "--layout" || option == "--declared-size-gib" ||
             option == "--fat-type" || option == "--noct" ||
             option == "--holoris" || option == "--bin-file") {
             if (i + 1 >= Array.size(args)) {

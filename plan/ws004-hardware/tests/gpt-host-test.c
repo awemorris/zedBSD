@@ -851,6 +851,94 @@ test_degraded_copy_selection(void)
 }
 
 static void
+test_intentional_primary_only_classification(void)
+{
+	static const uint16_t name[] = {
+		'z', 'e', 'd', 'B', 'S', 'D'
+	};
+	struct partition entries[TEST_CAPACITY];
+	int result;
+
+	begin_gpt(512U, 128U, 128U);
+	write_entry(3U, 0x10U, layout.first_usable + 8U,
+	    layout.first_usable + 71U, name,
+	    (unsigned)(sizeof(name) / sizeof(name[0])));
+	write_header(1);
+	write_header(0);
+	memset(table_at(0), 0, (size_t)layout.table_bytes);
+	memset(header_at(0), 0, disk.d_block_size);
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "intentional primary-only GPT accepted") !=
+	    NULL);
+	CHECK(strstr(diagnostics, "backup damaged") == NULL);
+
+	/* A readable nonzero malformed backup may retain generic degraded-copy
+	 * recovery, but it is never classified as an intentional omission. */
+	begin_gpt(512U, 128U, 128U);
+	write_entry(3U, 0x10U, layout.first_usable + 8U,
+	    layout.first_usable + 71U, name,
+	    (unsigned)(sizeof(name) / sizeof(name[0])));
+	write_header(1);
+	write_header(0);
+	table_at(0)[0U] ^= 1U;
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+	CHECK(strstr(diagnostics, "intentional primary-only") == NULL);
+
+	/* An all-zero final region with noncanonical entry geometry remains an
+	 * ordinary degraded GPT, not the compact-image contract. */
+	build_gpt(512U);
+	memset(table_at(0), 0, (size_t)layout.table_bytes);
+	memset(header_at(0), 0, disk.d_block_size);
+	result = scan(entries, TEST_CAPACITY);
+	CHECK(result == 1);
+	check_basic_entry(&entries[0], "zedBSD");
+	CHECK(strstr(diagnostics, "backup damaged") != NULL);
+	CHECK(strstr(diagnostics, "intentional primary-only") == NULL);
+}
+
+static void
+test_compact_primary_only_declared_capacities(void)
+{
+	static const uint16_t name[] = {
+		'z', 'e', 'd', 'B', 'S', 'D'
+	};
+	static const uint16_t capacities_gib[] = { 2U, 256U };
+	struct partition entries[TEST_CAPACITY];
+	unsigned index;
+
+	for (index = 0U; index < sizeof(capacities_gib) /
+	    sizeof(capacities_gib[0]); index++) {
+		uint64_t blocks = (uint64_t)capacities_gib[index] * 2097152U;
+		int result;
+
+		begin_gpt_extent(512U, 128U, 128U, blocks - 1U, blocks);
+		write_entry(3U, 0x10U, layout.first_usable + 8U,
+		    layout.first_usable + 71U, name,
+		    (unsigned)(sizeof(name) / sizeof(name[0])));
+		write_header(1);
+		write_header(0);
+		memset(table_at(0), 0, (size_t)layout.table_bytes);
+		memset(header_at(0), 0, disk.d_block_size);
+		result = scan(entries, TEST_CAPACITY);
+		CHECK(result == 1);
+		check_basic_entry(&entries[0], "zedBSD");
+		CHECK(strstr(diagnostics,
+		    "intentional primary-only GPT accepted") != NULL);
+
+		/* Exact selected capacity is part of the primary-only contract. */
+		disk.d_block_count = blocks - 1U;
+		expect_rejected("primary-only-medium-one-sector-short");
+		disk.d_block_count = blocks + 1U;
+		expect_rejected("primary-only-medium-one-sector-large");
+	}
+}
+
+static void
 test_contradictory_valid_copies(void)
 {
 	build_gpt(512U);
@@ -1205,6 +1293,8 @@ main(void)
 	test_signature_without_ee_never_falls_back();
 	test_pure_mbr_fallback();
 	test_degraded_copy_selection();
+	test_intentional_primary_only_classification();
+	test_compact_primary_only_declared_capacities();
 	test_contradictory_valid_copies();
 	test_header_and_geometry_rejection();
 	test_protective_mbr_rejection();

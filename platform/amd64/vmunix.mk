@@ -26,9 +26,28 @@ $(AMD64_UEFI_CONFIGURED_IMAGES): $(AMD64_ZEDBSD_CONFIG) \
 .DELETE_ON_ERROR: $(BUILD)/ufs-root-hdd-image.img \
 	$(BUILD)/hdd-image.img
 
+# Variant and capacity are image-composition inputs only.  This content-stable
+# stamp invalidates a previously published hdd-image.img without leaking either
+# selection into kernel, userland, or loader compilation.
+AMD64_IMAGE_CONTRACT_STAMP := $(BUILD)/.disk-image-contract
+AMD64_IMAGE_STAGE1 := $(if $(filter bios,$(ZEDBSD_VARIANT)),\
+	$(BUILD)/bootloader/stage1-native.bin,$(BUILD)/bootloader/stage1.bin)
+.PHONY: FORCE_AMD64_IMAGE_CONTRACT
+FORCE_AMD64_IMAGE_CONTRACT:
+
+$(AMD64_IMAGE_CONTRACT_STAMP): FORCE_AMD64_IMAGE_CONTRACT
+	@mkdir -p $(dir $@)
+	@value='layout=$(ZEDBSD_VARIANT) capacity-gib=$(ZEDBSD_IMAGE_SIZE_GIB)'; \
+		if ! test -f $@ || ! grep -Fqx "$$value" $@; then \
+			printf '%s\n' "$$value" > $@.tmp; \
+			mv $@.tmp $@; \
+		fi
+
 define AMD64_VALIDATE_GPT_IMAGE
 	$(NOCT) --path=tools/build platform/amd64/tools/check-amd64-gpt-image.noct \
-		--machine pcat --stage1 $(BUILD)/bootloader/stage1.bin \
+		--layout $(ZEDBSD_VARIANT) \
+		--declared-size-gib $(ZEDBSD_IMAGE_SIZE_GIB) \
+		--machine pcat --stage1 $(AMD64_IMAGE_STAGE1) \
 		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
@@ -822,9 +841,30 @@ $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 		--swapfile $(SWAP_IMAGE) \
 		--fragment-kernel $@
 
-$(BUILD)/hdd-image.img: $(BUILD)/bios-hdd-image.img
-	cp -f $< $@.tmp
-	mv -f $@.tmp $@
+$(BUILD)/hdd-image.img: $(BUILD)/bootloader/stage1.bin \
+	$(BUILD)/bootloader/stage1-native.bin \
+	$(BUILD)/bootloader/stage2-chain.bin $(BUILD)/bootloader/partition-pbr.bin \
+	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix $(AMD64_ARCH_UFS_IMAGE) \
+	$(DATA_IMAGE) $(SWAP_IMAGE) $(BUILD)/uefi/BOOTX64.EFI \
+	$(AMD64_ZEDBSD_CONFIG) $(ZEDBSD_IMAGE_HOST) \
+	$(AMD64_IMAGE_CONTRACT_STAMP) tools/build/make-bios-hdd-image.noct \
+	tools/build/zedbuild.noct tools/build/overlay_journal_format.noct \
+	platform/amd64/tools/check-amd64-gpt-image.noct
+	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct \
+		--backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force --machine pcat \
+		--layout $(ZEDBSD_VARIANT) \
+		--declared-size-gib $(ZEDBSD_IMAGE_SIZE_GIB) \
+		--checker platform/amd64/tools/check-amd64-gpt-image.noct \
+		--checker-runner $(NOCT) \
+		--stage1 $(AMD64_IMAGE_STAGE1) \
+		--stage2 $(BUILD)/bootloader/stage2-chain.bin \
+		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
+		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
+		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
+		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
+		--arch-format ufs --data-image $(DATA_IMAGE) \
+		--swapfile $(SWAP_IMAGE) $@
 
 AMD64_DEFERRED_TEST_UFS := $(ARCH_IMAGE_DIR)/amd64-deferred-test.ufs
 $(eval $(call ZEDBSD_ARCH_UFS_IMAGE_RULE,$(AMD64_DEFERRED_TEST_UFS),amd64,\
