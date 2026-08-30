@@ -292,6 +292,7 @@ actually warranted.
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | Active in `q035`; audited incomplete | p001--p010 complete; p011 active and p012 remains | Complete p011 native FAT and only then execute p012 legacy deletion | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
+| `ws020` | Intel Mac UEFI bring-up and generic image variants | Planned; interrupts immediately after WS018 | p001--p004 planned | After q035, Queue p001 generic Variant/capacity, p002 image layouts, p003 QEMU matrix, then one bounded Intel Mac checkpoint and final five-run acceptance | [WS020](ws020-intel-mac/ws.md) |
 
 ## 4. Milestones
 
@@ -310,6 +311,7 @@ actually warranted.
 | M10 — Latitude NVMe overlay installation | The ordinary USB system installs into an existing ESP plus selected existing FAT32 without formatting; installed `BOOTX64.EFI` boots the NVMe-backed overlay root from the internal SN740 | WS003, WS004, WS009, WS013, WS019 |
 | M11 — Latitude native installation | A later installer step creates or selects the required native filesystem and boots it with `rootpart=` without regressing M10 | WS003, WS004, WS009, WS013, WS019 |
 | M12 — Panasonic CF-SV7 USB shell | The CF-SV7 clears its captured post-RSDP early interrupt stop, then reaches USB-backed init/login/shell with bounded diagnostics and final repeatability evidence | WS003, WS004, WS006, WS009 |
+| M13 — Intel Mac UEFI boot | A compact capacity-matched amd64 UEFI-only image with no BIOS path boots an Intel Mac to login, while generic Variant support preserves Hybrid and BIOS-only images | WS003, WS009, WS013, WS020 |
 | Continuous | POSIX debt and public documentation remain traceable | WS001, WS009, all producers |
 
 ## 5. Dependency map
@@ -352,6 +354,10 @@ WS003 boot/storage + WS006 evdev + WS007 Xzed/graphics + WS016 swap
         +-- independent graphics frontends
         +-- boot/FAT native VFS consolidation -> remove bootfs
 
+WS018 completion -- WS020 generic target Variant + declared image capacity
+                    +-- amd64 Hybrid / BIOS-only / UEFI-only image profiles
+                    +-- compact primary-only GPT -- Intel Mac UEFI bring-up
+
 WS013 Boot foundation -- WS003 p011-p015 common x86 parameters
                        +-- UEFI same-disk FAT16/FAT32 `zedbsd.cfg`
                        +-- direct overlay/native parameters; no menu yet
@@ -389,37 +395,41 @@ priority one.
 2. Complete WS018. Finish p009's retained runtime evidence, then execute
    p010--p012 in their consumer-before-deletion order until the source-
    ownership and native-FAT/bootfs-removal completion contract passes.
-3. Implement the Archer T3U Nano USB WLAN path across WS004 and WS005. The
+3. Complete WS020 Intel Mac bring-up. Add the generic board Variant and target-
+   capacity selections, implement Hybrid/BIOS-only/UEFI-only amd64 image
+   profiles, pass the QEMU matrix, then perform the bounded physical UEFI-only
+   checkpoint and final five-run acceptance.
+4. Implement the Archer T3U Nano USB WLAN path across WS004 and WS005. The
    dependency order is p026 exact-unit/firmware intake, p027 generic WLAN core,
    WS005 privilege/command/profile/protocol prerequisites, p028--p030 radio and
    WPA2 lifecycle, then WS005 orchestration and the single shared hardware
    acceptance. The SSH host `awe@10.0.10.25` may be used for QEMU USB
    passthrough of the connected adapter after automatic gates pass.
-4. Complete the `/sbin/net` WLAN stack in WS005 through the fixed
+5. Complete the `/sbin/net` WLAN stack in WS005 through the fixed
    `net` -> `networkd` -> `ifconfig`/`wifi`/`dhcpc` topology.
-5. Resume WS008 from the maintainer's latest accepted NoctLang tree. Update
+6. Resume WS008 from the maintainer's latest accepted NoctLang tree. Update
    both the bootstrap/toolchain checkout and the userland package; the latter
    is rooted at `userland/base/noct/` and clones upstream into
    `userland/base/noct/noct/`.
-6. Implement WS017's `/dev/graphics` LFB fast path after resolving its retained
+7. Implement WS017's `/dev/graphics` LFB fast path after resolving its retained
    `mprotect` permission-ceiling decision. Do not infer that decision from the
    priority change.
-7. Re-run and finish WS007 after WS017, including real Xzed/LFB behavior and
+8. Re-run and finish WS007 after WS017, including real Xzed/LFB behavior and
    the existing mouse issue. If the mouse defect cannot be reproduced, retain
    it honestly rather than fabricating a fix.
-8. Continue WS001 POSIX work. Add a bounded `lp`/`lpr` Phase whose deliberate
+9. Continue WS001 POSIX work. Add a bounded `lp`/`lpr` Phase whose deliberate
    model posts PDF directly to an LPD printer and has no local spool queue.
-9. Re-plan WS019 so the installer is written in Noct, then implement it after
+10. Re-plan WS019 so the installer is written in Noct, then implement it after
    its complete installer specification is supplied. The user's latest message
    ended after "仕様は"; that missing contract is a human blocker and must not be
    guessed from the older C-oriented plan.
-10. After the installer passes automatic acceptance, complete WS003 by
+11. After the installer passes automatic acceptance, complete WS003 by
     installing to and booting from the Latitude 5320 NVMe device.
-11. Resume WS011 VLAN and bridge work. The previous manual hold is released by
+12. Resume WS011 VLAN and bridge work. The previous manual hold is released by
     this priority instruction, but any still-open virtual-interface, packet-
     ownership, filtering, or persistence decision remains a design gate rather
     than permission to improvise an incompatible UAPI.
-12. Keep WS013 Runtime CPAR, WS014 GPU, and WS015 μITRON pending until their
+13. Keep WS013 Runtime CPAR, WS014 GPU, and WS015 μITRON pending until their
     explicit architecture holds are separately released.
 
 When a higher-priority item reaches a recorded human decision, mark only that
@@ -434,6 +444,8 @@ until stopped or no judgment-free Phase remains.
 | --- | --- | --- |
 | Exact Latitude BIOS, boot mode, PCI/USB topology and IDs | WS003 | Driver selection and hardware acceptance |
 | Exact CF-SV7 DMI identity, firmware settings, CPU/APIC mode, PCI/USB topology, and IDs | WS003 | Later device-specific driver selection; p020 early IRQ and p021 portable-GPT work do not depend on the remaining inventory |
+| Intel Mac identity and exact target-medium sector count | WS020 | p004 physical acceptance only; p001--p003 use deterministic generic/QEMU fixtures |
+| UEFI-only protective MBR and primary-only GPT shape | WS020 | Resolved for the initial WS: zero non-executable protective MBR code with one non-active `0xee` entry and `55 aa`; valid primary GPT declares the selected exact final LBA; compact artifact omits the backup and QEMU materializes a zero tail |
 | Initial Secure Boot scope | WS003 | Resolved: use UEFI with Secure Boot disabled; signing/key enrollment deferred and not required for NVMe |
 | USB Ethernet interface descriptors and, for vendor-specific interfaces, VID:PID/controller family | WS003/WS004/WS005 | Choose CDC ECM/NCM class frontend or Realtek-family frontend for HW-12/NET-10; ACM is inapplicable |
 | First USB WLAN identity | WS004/WS005 | Primary evidence identifies Archer T3U Nano V1.0 as RTL8822BU, USB `2357:012e`; `ws004-p026` must still record the exact physical unit revision, descriptors, and firmware provenance before driver implementation |
