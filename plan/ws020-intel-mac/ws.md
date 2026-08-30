@@ -1,10 +1,10 @@
 # WS020: Intel Mac UEFI bring-up
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 WSID: `ws020`
 
-Status: in progress; p001-p002 completed, next executable Phase is p003
+Status: in progress; revised p001 complete, p002 fixed-layout correction in progress
 
 Parent: [master plan](../master.md)
 
@@ -14,96 +14,89 @@ Shared tests: [WS020 test index](tests/README.md)
 
 Boot the ordinary amd64 PC/AT zedBSD system on an Intel Mac through an
 explicitly UEFI-only disk layout, without turning firmware layout into a
-kernel/source-build variant.  At the same time, introduce a reusable
-Architecture -> Board -> Variant configuration axis and a declared target-media
-capacity so later boards such as Raspberry Pi 4 can select their own image
-profiles without inventing another target hierarchy.
+kernel/source-build variant. At the same time, introduce a reusable
+Architecture -> Board -> Variant configuration axis so later boards such as
+Raspberry Pi 4 can add their own image profiles without inventing another
+target hierarchy.
 
-The UEFI-only artifact is deliberately a compact flash image.  Its primary GPT
-declares the selected target medium's final LBA, while the file itself ends
-after the populated front partitions and contains no backup GPT.  Writing it to
-a medium whose exact capacity matches the selected value supplies the otherwise
-sparse/unwritten tail.  QEMU acceptance materializes that tail as a disposable
-sparse file before booting it.
+The Apple profile is deliberately a pure UEFI disk: it has a standards-shaped
+Protective MBR and GPT, but no compatibility MBR entry or reachable BIOS
+loader. Its size and GPT extent are derived from the fixed ESP and payload
+layout; the user does not select a target-medium capacity.
 
 ## Fixed decisions
 
 - `ZEDBSD_ARCHITECTURE` and `ZEDBSD_BOARD` continue to select compiled kernel
-  and driver sources.  `ZEDBSD_VARIANT` selects only board-owned image layout.
-- The amd64 PC/AT variants are `hybrid`, `bios`, and `uefi`; their menu labels
-  are `Hybrid (BIOS+UEFI)`, `BIOS-only`, and `UEFI-only (for Apple)`.
+  and driver sources. `ZEDBSD_VARIANT` selects only board-owned image layout.
+- The amd64 PC/AT variants and their menu order are:
+  - `hybrid`: `UEFI + BIOS (for PC/AT)`
+  - `uefi`: `UEFI (for Apple)`
+  - `bios`: `BIOS (for PC/AT)`
 - `make bootloader` always builds the maintained BIOS and UEFI loader artifacts
-  for amd64 PC/AT, regardless of selected image variant.  `vmunix` is identical
-  across the three variants for an otherwise identical configuration.
-- The declared target-medium choices are exactly 2, 4, 8, 16, 32, 64, 128,
-  and 256 GiB.  They are stored independently of platform so another board may
-  interpret the same generic setting.  An older configuration without this
-  field defaults to the smallest supported capacity, 2 GiB.
-- UEFI-only retains a standards-shaped protective MBR, including its `55 aa`
+  for amd64 PC/AT, regardless of selected image Variant. `vmunix` and every
+  compiled loader are identical across the three Variants for an otherwise
+  identical configuration.
+- There is no disk-capacity configuration field. Variant determines image
+  composition only; it does not describe the eventual USB/NVMe capacity.
+- UEFI-only retains a standards-shaped Protective MBR, including its `55 aa`
   signature, but contains no executable stage 1, active partition, hybrid FAT
   entry, BIOS boot partition, zedBSD custom BIOS PBR loader, or
-  `BOOTZBSD.EXE`.  Formatter-owned FAT32 BPB/VBR bytes remain but provide no
-  reachable zedBSD BIOS boot path.
+  `BOOTZBSD.EXE`. The only nonzero partition record is one non-active `0xee`
+  record; the other three records are zero.
 - UEFI-only contains an ESP with `EFI/BOOT/BOOTX64.EFI` and a separate FAT32
   payload containing `vmunix`, `zedbsd.cfg`, `rootfs.img`, `data.img`, and
   `swapfile`.
-- A primary-only GPT is accepted only when its header/table are fully valid,
-  its declared alternate LBA equals the actual materialized medium's last LBA,
-  all partitions fit, and the absent backup region is zero.  A present but
-  corrupt or contradictory backup is not reclassified as intentionally absent.
-- Hybrid keeps its accepted 203,423,744-byte complete-GPT artifact and BIOS
-  keeps its 135,266,304-byte legacy-MBR artifact.  Their selected GiB value is
-  a validated target-media constraint only.  Only UEFI-only encodes the exact
-  selected last LBA and remains a compact 202,375,168-byte primary-only image.
-- Writing compact UEFI-only to reused media must include explicit zeroing of
-  the selected medium's final 33 sectors; copying the short file alone cannot
-  erase a stale backup GPT at the physical end.
-- Secure Boot remains disabled.  Signing and Apple-specific NVRAM mutation are
+- The fixed UEFI-only artifact is 395,297 512-byte sectors (202,392,064
+  bytes). Its primary GPT has `alternate_lba=395296`,
+  `last_usable_lba=395263`, and a conventional final 33-sector zero
+  reservation. No backup GPT is generated.
+- The kernel accepts this intentional primary-only form both when the physical
+  medium ends at the declared GPT extent and when the physical medium is
+  larger. The larger remainder is ignored unallocated space. A GPT end beyond
+  the physical medium, a malformed primary, or nonzero malformed metadata in
+  the declared final reservation remains an error.
+- Hybrid keeps its accepted complete GPT plus compatibility-BIOS layout, and
+  BIOS-only keeps its legacy MBR layout. Both loader families are nevertheless
+  always compiled.
+- Secure Boot remains disabled. Signing and Apple-specific NVRAM mutation are
   not part of this WS.
 
 ## Variant layouts
 
 | Variant | Partition metadata | Firmware payload | BIOS payload |
 | --- | --- | --- | --- |
-| `hybrid` | Existing hybrid MBR plus GPT layout; preserve the already accepted BIOS+UEFI behavior | ESP fallback loader | BIOS stage 1/chain/PBR/`BOOTZBSD.EXE` |
-| `bios` | Legacy MBR layout with no GPT or ESP | none in the image, although the UEFI binary is still built | stage 1/PBR/`BOOTZBSD.EXE` and payload FAT |
-| `uefi` | Protective MBR plus primary-only GPT, ESP, and payload FAT32; no BIOS boot partition | ESP fallback loader | none in the image, although BIOS binaries are still built |
+| `hybrid` | Existing compatibility MBR plus complete GPT | ESP fallback loader | BIOS stage 1/chain/PBR/`BOOTZBSD.EXE` |
+| `uefi` | Pure Protective MBR plus fixed primary-only GPT, ESP, and payload FAT32 | ESP fallback loader | none in the image, although BIOS binaries are still built |
+| `bios` | Legacy MBR with no GPT or ESP | none in the image, although the UEFI binary is still built | stage 1/PBR/`BOOTZBSD.EXE` and payload FAT |
 
-The selected capacity is an image-format input, not permission to enlarge a
-partition.  ESP and payload geometry remain bounded near the front of the
-medium; the remaining LBAs are unallocated.  For a format with no on-disk
-whole-medium size field, the builder must state explicitly whether the setting
-is only an acceptance-media constraint rather than silently changing a
-partition.
+`BIOS (for PC/AT)` is retained as an independent BIOS regression path and as a
+fallback for old PC/AT firmware or tooling that cannot use GPT. The normal
+PC/AT default remains the combined UEFI+BIOS profile.
 
 ## Phase registry
 
 | Phase | Status | Result / resume point |
 | --- | --- | --- |
-| [`ws020-p001`](phase001-target-variant-config/phase.md) | Completed (2026-08-30) | Generic Variant/capacity round-trip and validation pass; fresh Variant/capacity builds have identical kernel, loader, object, and compile-contract results |
-| [`ws020-p002`](phase002-image-layouts/phase.md) | Completed (2026-08-30) | Three strict image profiles pass; UEFI-only encodes all eight declared capacities in a compact primary-only GPT while Hybrid/BIOS bytes remain capacity-invariant |
-| [`ws020-p003`](phase003-qemu-acceptance/phase.md) | Planned after p002 | SeaBIOS/OVMF positive and negative matrix passes at all declared capacities using materialized sparse media |
+| [`ws020-p001`](phase001-target-variant-config/phase.md) | Completed (revised 2026-08-31) | Capacity selector removed; generic Variant round-trip and three-way compiled-artifact invariance pass with the requested labels/order |
+| [`ws020-p002`](phase002-image-layouts/phase.md) | In progress | Replace capacity-dependent UEFI geometry with the fixed pure-Protective-MBR primary-only profile and retain strict layout gates |
+| [`ws020-p003`](phase003-qemu-acceptance/phase.md) | Pending revised p002 | Run the six-cell SeaBIOS/OVMF positive and negative matrix |
 | [`ws020-p004`](phase004-physical-bringup/phase.md) | Planned after p003; physical checkpoint | One Intel Mac UEFI-only boot reaches login, then the frozen artifact passes the final five-run campaign |
 
 ## Completion conditions
 
-WS020 is complete when the generic Variant/capacity selections are stable,
-amd64 always builds both loader families, each selected layout contains only
-its intended boot path, the full automatic matrix passes, and the declared
-Intel Mac boots the frozen UEFI-only artifact to a usable login five times in
-the final campaign.  A first successful physical boot is enough to continue
-debugging and implementation; repetition is deferred to the final acceptance
-campaign.
+WS020 is complete when the generic Variant selection is stable, amd64 always
+builds both loader families, each selected layout contains only its intended
+boot path, the six-cell automatic matrix passes, and the declared Intel Mac
+boots the frozen UEFI-only artifact to a usable login five times in the final
+campaign. A first successful physical boot is enough to continue debugging and
+implementation; repetition is deferred to final acceptance.
 
 ## Reconsideration boundaries
 
-- Stop physical acceptance if the actual device sector count does not exactly
-  match the selected capacity; record it rather than publishing a knowingly
-  mismatched GPT.  A later exact-sector/custom-size extension can be planned.
 - Stop and preserve evidence if the Intel Mac requires a nonstandard removable
-  path, HFS/APFS blessing, NVRAM entry, signed image, or a protective-MBR shape
+  path, HFS/APFS blessing, NVRAM entry, signed image, or a Protective-MBR shape
   incompatible with the fixed UEFI-only contract.
-- Do not remove the protective-MBR signature merely to make the image appear
-  non-BIOS; BIOS bootability is removed through contents and partition layout.
+- Do not add a compatibility MBR entry or backup GPT silently. Such a change
+  requires a new explicit design decision.
 - Do not specialize the generic menu hierarchy around one Mac model or make
   Variant change kernel source selection.

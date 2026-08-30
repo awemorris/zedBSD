@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MAC-T001 target Variant/capacity configuration fixture."""
+"""MAC-T001 target Variant configuration fixture."""
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 from __future__ import annotations
@@ -37,15 +37,10 @@ def main() -> None:
     expected_targets = {(record[1], record[2]) for record in menu.PLATFORMS}
     if set(menu.BOARD_VARIANTS) != expected_targets:
         fail("board Variant table is incomplete")
-    if [value for value, _label in menu.IMAGE_SIZE_CHOICES] != [
-            "2", "4", "8", "16", "32", "64", "128", "256"]:
-        fail("disk image size choices changed")
-    if menu.DEFAULT_IMAGE_SIZE_GIB != "2":
-        fail("old-config image-size default must remain 2 GiB")
     if menu.BOARD_VARIANTS[("amd64", "pcat")] != [
-            ("hybrid", "Hybrid (BIOS+UEFI)"),
-            ("bios", "BIOS-only"),
-            ("uefi", "UEFI-only (for Apple)")]:
+            ("hybrid", "UEFI + BIOS (for PC/AT)"),
+            ("uefi", "UEFI (for Apple)"),
+            ("bios", "BIOS (for PC/AT)")]:
         fail("amd64 PC/AT Variants changed")
 
     template = menu.defaults()
@@ -57,11 +52,10 @@ def main() -> None:
         return result
 
     def round_trip(directory: Path, platform: str, variant: str,
-                   image_size: str, suffix: str) -> None:
+                   suffix: str) -> None:
         values = fresh_values()
         values["ZEDBSD_PLATFORM"] = platform
         values["ZEDBSD_VARIANT"] = variant
-        values["ZEDBSD_IMAGE_SIZE_GIB"] = image_size
         values["CONFIG_BUF_CACHE_KIB"] = "1024"
         path = directory / f"config-{suffix}.mk"
         menu.save(path, values)
@@ -70,7 +64,6 @@ def main() -> None:
         expected = {
             "ZEDBSD_PLATFORM": platform,
             "ZEDBSD_VARIANT": variant,
-            "ZEDBSD_IMAGE_SIZE_GIB": image_size,
             "CONFIG_BUF_CACHE_KIB": "1024",
         }
         for key, value in expected.items():
@@ -80,8 +73,7 @@ def main() -> None:
         for assignment in [
                 f"ZEDBSD_ARCHITECTURE := {record[1]}",
                 f"ZEDBSD_BOARD := {record[2]}",
-                f"ZEDBSD_VARIANT := {variant}",
-                f"ZEDBSD_IMAGE_SIZE_GIB := {image_size}"]:
+                f"ZEDBSD_VARIANT := {variant}"]:
             if assignment not in text:
                 fail(f"{suffix} omitted {assignment}")
         result = make_result(path)
@@ -90,14 +82,13 @@ def main() -> None:
 
     def expect_make_rejection(directory: Path, name: str, platform: str,
                               architecture: str, board: str, variant: str,
-                              image_size: str, expected: str) -> None:
+                              expected: str) -> None:
         path = directory / f"rejected-{name}.mk"
         path.write_text(
             f"ZEDBSD_PLATFORM := {platform}\n"
             f"ZEDBSD_ARCHITECTURE := {architecture}\n"
             f"ZEDBSD_BOARD := {board}\n"
-            f"ZEDBSD_VARIANT := {variant}\n"
-            f"ZEDBSD_IMAGE_SIZE_GIB := {image_size}\n",
+            f"ZEDBSD_VARIANT := {variant}\n",
             encoding="utf-8")
         result = make_result(path)
         if result.returncode == 0 or expected not in result.stdout:
@@ -106,14 +97,10 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="zedbsd-menuconfig-") as temporary:
         directory = Path(temporary)
         for platform, _architecture, _board, _label in menu.PLATFORMS:
-            for image_size, _size_label in menu.IMAGE_SIZE_CHOICES:
-                round_trip(directory, platform,
-                           menu.variant_default(platform), image_size,
-                           f"{platform}-{image_size}")
+            round_trip(directory, platform,
+                       menu.variant_default(platform), platform)
         for variant, _variant_label in menu.variants_for_platform("amd64"):
-            for image_size, _size_label in menu.IMAGE_SIZE_CHOICES:
-                round_trip(directory, "amd64", variant, image_size,
-                           f"amd64-{variant}-{image_size}")
+            round_trip(directory, "amd64", variant, f"amd64-{variant}")
 
         for platform, architecture, board, _label in menu.PLATFORMS:
             old_path = directory / f"old-config-{platform}.mk"
@@ -122,16 +109,21 @@ def main() -> None:
                 f"ZEDBSD_PLATFORM := {platform}\n"
                 f"ZEDBSD_ARCHITECTURE := {architecture}\n"
                 f"ZEDBSD_BOARD := {board}\n"
+                "ZEDBSD_IMAGE_SIZE_GIB := 256\n"
                 "CONFIG_BUF_CACHE_KIB := 4096\n"
                 "ZEDBSD_USER_PROGRAMS := ls\n",
                 encoding="utf-8")
             restored = menu.load(old_path)
             if (restored["ZEDBSD_VARIANT"] !=
                     menu.variant_default(platform) or
-                    restored["ZEDBSD_IMAGE_SIZE_GIB"] != "2" or
                     restored["CONFIG_BUF_CACHE_KIB"] != "4096" or
                     restored["ZEDBSD_USER_PROGRAMS"] != {"ls"}):
                 fail(f"old-config defaults changed unrelated {platform} data")
+            migrated_path = directory / f"migrated-config-{platform}.mk"
+            menu.save(migrated_path, restored)
+            if "ZEDBSD_IMAGE_SIZE_GIB" in migrated_path.read_text(
+                    encoding="utf-8"):
+                fail(f"obsolete image-size setting survived save for {platform}")
             result = make_result(old_path)
             if result.returncode != 0:
                 fail(f"Make rejected old {platform} config: {result.stdout}")
@@ -141,12 +133,10 @@ def main() -> None:
             "ZEDBSD_PLATFORM := amd64\n"
             "ZEDBSD_ARCHITECTURE := amd64\n"
             "ZEDBSD_BOARD := pcat\n"
-            "ZEDBSD_VARIANT := broken\n"
-            "ZEDBSD_IMAGE_SIZE_GIB := 3\n",
+            "ZEDBSD_VARIANT := broken\n",
             encoding="utf-8")
         restored = menu.load(invalid_path)
-        if (restored["ZEDBSD_VARIANT"] != "hybrid" or
-                restored["ZEDBSD_IMAGE_SIZE_GIB"] != "2"):
+        if restored["ZEDBSD_VARIANT"] != "hybrid":
             fail("invalid menu values were not repaired")
         for goals in [[], ["disk-image"], ["build/amd64/hdd-image.img"],
                       ["build/x68k/zedbsd-x68k.hd"]]:
@@ -161,32 +151,24 @@ def main() -> None:
                      f"{result.stdout}")
 
         invalid = [
-            ("unknown-variant", "amd64", "amd64", "pcat", "broken", "2",
+            ("unknown-variant", "amd64", "amd64", "pcat", "broken",
              "Invalid ZEDBSD_VARIANT"),
-            ("pattern-variant", "amd64", "amd64", "pcat", "%", "2",
+            ("pattern-variant", "amd64", "amd64", "pcat", "%",
              "Invalid ZEDBSD_VARIANT"),
             ("multiword-variant", "amd64", "amd64", "pcat", "hybrid bios",
-             "2", "Invalid ZEDBSD_VARIANT"),
-            ("wrong-board-variant", "i386", "i386", "pcat", "uefi", "2",
              "Invalid ZEDBSD_VARIANT"),
-            ("wrong-board", "amd64", "amd64", "rpi4", "default", "2",
+            ("wrong-board-variant", "i386", "i386", "pcat", "uefi",
+             "Invalid ZEDBSD_VARIANT"),
+            ("wrong-board", "amd64", "amd64", "rpi4", "default",
              "Invalid target hierarchy"),
-            ("wrong-architecture", "amd64", "i386", "pcat", "default", "2",
+            ("wrong-architecture", "amd64", "i386", "pcat", "default",
              "Invalid target hierarchy"),
         ]
-        invalid.extend(
-            (name, "amd64", "amd64", "pcat", "hybrid", image_size,
-             "Invalid ZEDBSD_IMAGE_SIZE_GIB")
-            for name, image_size in [
-                ("size-0", "0"), ("size-3", "3"),
-                ("size-257", "257"), ("size-text", "large"),
-                ("size-pattern", "%"), ("size-multiword", "2 4"),
-                ("size-empty", "")])
         for case in invalid:
             expect_make_rejection(directory, *case)
 
     print("MAC-T001 menuconfig round-trip: PASS "
-          "(6 targets, 8 capacities, 3 amd64 Variants)")
+          "(6 targets, 3 amd64 Variants, obsolete capacity removed)")
 
 
 if __name__ == "__main__":

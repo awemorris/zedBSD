@@ -16,7 +16,7 @@ func run(repo, command, what) {
     if (status != 0) { zbFail(what + " failed (status=" + status + ")"); }
 }
 
-func buildCase(repo, evidence, config, name, variant, capacity) {
+func buildCase(repo, evidence, config, name, variant) {
     var build = evidence + "/build-" + name;
     var log = evidence + "/build-" + name + ".log";
     runLogged(repo, evidence + "/clean-" + name + ".log",
@@ -26,7 +26,7 @@ func buildCase(repo, evidence, config, name, variant, capacity) {
     var common = "ZEDBSD_CONFIG=" + zbShellQuote(config) +
         " ZEDBSD_PLATFORM=amd64 " +
         "ZEDBSD_ARCHITECTURE=amd64 ZEDBSD_BOARD=pcat " +
-        "ZEDBSD_VARIANT=" + variant + " ZEDBSD_IMAGE_SIZE_GIB=" + capacity +
+        "ZEDBSD_VARIANT=" + variant +
         " BUILD=" + zbShellQuote(build);
     runLogged(repo, log, "make --no-print-directory -j16 " + common +
               " vmunix bootloader", name + " fresh artifact build");
@@ -52,13 +52,13 @@ func buildCase(repo, evidence, config, name, variant, capacity) {
         name + " object manifest");
 }
 
-func contractCase(repo, evidence, config, name, variant, capacity) {
+func contractCase(repo, evidence, config, name, variant) {
     var variables = "'^[A-Za-z0-9_]*(SOURCES|OBJS|CPPFLAGS|CFLAGS|" +
         "ASFLAGS|LDFLAGS)[[:space:]]*[:+?]?='";
     var command = "LC_ALL=C make --no-print-directory -pn " +
         "ZEDBSD_CONFIG=" + zbShellQuote(config) + " ZEDBSD_PLATFORM=amd64 " +
         "ZEDBSD_ARCHITECTURE=amd64 ZEDBSD_BOARD=pcat " +
-        "ZEDBSD_VARIANT=" + variant + " ZEDBSD_IMAGE_SIZE_GIB=" + capacity +
+        "ZEDBSD_VARIANT=" + variant +
         " BUILD=" + zbShellQuote(evidence + "/contract-build") +
         " vmunix bootloader";
     var raw = evidence + "/contract-" + name + ".raw";
@@ -89,21 +89,19 @@ func main(args) {
     run(repo, "cp config.mk " + zbShellQuote(config),
         "snapshot fixture configuration");
 
-    buildCase(repo, evidence, config, "hybrid-2", "hybrid", "2");
-    buildCase(repo, evidence, config, "bios-2", "bios", "2");
-    buildCase(repo, evidence, config, "uefi-2", "uefi", "2");
-    buildCase(repo, evidence, config, "hybrid-256", "hybrid", "256");
+    buildCase(repo, evidence, config, "hybrid", "hybrid");
+    buildCase(repo, evidence, config, "uefi", "uefi");
+    buildCase(repo, evidence, config, "bios", "bios");
 
-    contractCase(repo, evidence, config, "hybrid-2", "hybrid", "2");
-    contractCase(repo, evidence, config, "bios-2", "bios", "2");
-    contractCase(repo, evidence, config, "uefi-2", "uefi", "2");
-    contractCase(repo, evidence, config, "hybrid-256", "hybrid", "256");
+    contractCase(repo, evidence, config, "hybrid", "hybrid");
+    contractCase(repo, evidence, config, "uefi", "uefi");
+    contractCase(repo, evidence, config, "bios", "bios");
 
-    for (name in ["bios-2", "uefi-2", "hybrid-256"]) {
-        compare(repo, evidence, "hashes", "hybrid-2", name);
-        compare(repo, evidence, "objects", "hybrid-2", name);
-        compare(repo, evidence, "contract", "hybrid-2", name);
+    for (name in ["uefi", "bios"]) {
+        compare(repo, evidence, "hashes", "hybrid", name);
+        compare(repo, evidence, "objects", "hybrid", name);
+        compare(repo, evidence, "contract", "hybrid", name);
     }
-    print("MAC-T001 artifact invariance: PASS (3 Variants, 2/256 GiB; " +
+    print("MAC-T001 artifact invariance: PASS (3 Variants; " +
           evidence + ")");
 }

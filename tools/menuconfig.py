@@ -46,27 +46,15 @@ BOARD_LABELS = {
 BOARD_VARIANTS = {
     ("i386", "pcat"): [("default", "Default")],
     ("amd64", "pcat"): [
-        ("hybrid", "Hybrid (BIOS+UEFI)"),
-        ("bios", "BIOS-only"),
-        ("uefi", "UEFI-only (for Apple)"),
+        ("hybrid", "UEFI + BIOS (for PC/AT)"),
+        ("uefi", "UEFI (for Apple)"),
+        ("bios", "BIOS (for PC/AT)"),
     ],
     ("i386", "pc98"): [("default", "Default")],
     ("arm64", "rpi4"): [("default", "Default")],
     ("sparcv9", "sun4u"): [("default", "Default")],
     ("m68k", "x68k"): [("default", "Default")],
 }
-
-IMAGE_SIZE_CHOICES = [
-    ("2", "2 GiB"),
-    ("4", "4 GiB"),
-    ("8", "8 GiB"),
-    ("16", "16 GiB"),
-    ("32", "32 GiB"),
-    ("64", "64 GiB"),
-    ("128", "128 GiB"),
-    ("256", "256 GiB"),
-]
-DEFAULT_IMAGE_SIZE_GIB = "2"
 
 DRIVER_CATEGORIES = [
     ("Architecture drivers", None),
@@ -168,7 +156,6 @@ def defaults() -> dict[str, object]:
     values: dict[str, object] = {
         "ZEDBSD_PLATFORM": "i386",
         "ZEDBSD_VARIANT": variant_default("i386"),
-        "ZEDBSD_IMAGE_SIZE_GIB": DEFAULT_IMAGE_SIZE_GIB,
     }
     for path in all_option_files():
         for key, kind, _label, _targets, default, _choices in read_rows(path, 6):
@@ -214,9 +201,6 @@ def normalize_target(values: dict[str, object]) -> None:
     allowed_variants = {value for value, _label in variants_for_platform(platform)}
     if str(values.get("ZEDBSD_VARIANT", "")) not in allowed_variants:
         values["ZEDBSD_VARIANT"] = variant_default(platform)
-    allowed_sizes = {value for value, _label in IMAGE_SIZE_CHOICES}
-    if str(values.get("ZEDBSD_IMAGE_SIZE_GIB", "")) not in allowed_sizes:
-        values["ZEDBSD_IMAGE_SIZE_GIB"] = DEFAULT_IMAGE_SIZE_GIB
 
 
 def normalize(values: dict[str, object]) -> None:
@@ -260,7 +244,6 @@ def save(path: Path, values: dict[str, object]) -> None:
         f"ZEDBSD_ARCHITECTURE := {architecture}",
         f"ZEDBSD_BOARD := {board}",
         f"ZEDBSD_VARIANT := {values['ZEDBSD_VARIANT']}",
-        f"ZEDBSD_IMAGE_SIZE_GIB := {values['ZEDBSD_IMAGE_SIZE_GIB']}",
         "",
     ]
     emitted = set()
@@ -396,17 +379,6 @@ def select_target(screen, values: dict[str, object]) -> None:
                                  if item[0] == variant), 0))
             if index is not None:
                 values["ZEDBSD_VARIANT"] = candidates[index][0]
-
-
-def select_image_size(screen, values: dict[str, object]) -> None:
-    current = str(values["ZEDBSD_IMAGE_SIZE_GIB"])
-    index = next((i for i, item in enumerate(IMAGE_SIZE_CHOICES)
-                  if item[0] == current), 0)
-    selected = choose(screen, "Select disk image size",
-                      [label for _value, label in IMAGE_SIZE_CHOICES],
-                      target_label(values), index)
-    if selected is not None:
-        values["ZEDBSD_IMAGE_SIZE_GIB"] = IMAGE_SIZE_CHOICES[selected][0]
 
 
 def option_value(option: dict[str, object], values: dict[str, object]) -> str:
@@ -593,7 +565,6 @@ def tui(screen, values: dict[str, object], output: Path) -> None:
             ("Build all", "build-all"),
             ("", ""),
             ("Select target", "target"),
-            ("Select disk image size", "image-size"),
             ("Select kernel option", "kernel-options"),
             ("Select drivers", "drivers"),
             ("Select user programs", "user-programs"),
@@ -617,8 +588,6 @@ def tui(screen, values: dict[str, object], output: Path) -> None:
             build(screen, values, output, "disk-image")
         elif action == "target":
             select_target(screen, values)
-        elif action == "image-size":
-            select_image_size(screen, values)
         elif action == "kernel-options":
             edit_options(screen, "Select kernel option",
                          option_rows(CONFIG_DIR / "kernel-options.list",

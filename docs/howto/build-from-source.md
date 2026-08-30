@@ -55,12 +55,12 @@ the sole selected-target input; normal build targets reject a missing or
 invalid file. It is generated and should not be hand-edited.
 
 The target menu is organized as Architecture -> Board -> Variant. PC/AT amd64
-provides `Hybrid (BIOS+UEFI)`, `BIOS-only`, and `UEFI-only (for Apple)`; the
-current single-profile boards save the fixed `Default` Variant. Disk image
-capacity is selected independently from 2, 4, 8, 16, 32, 64, 128, or 256 GiB.
-A saved configuration from before these fields were introduced uses the board
-default Variant and 2 GiB. These settings describe image layout and target
-media capacity; they do not change kernel or bootloader compilation.
+provides `UEFI + BIOS (for PC/AT)`, `UEFI (for Apple)`, and
+`BIOS (for PC/AT)`; the current single-profile boards save the fixed `Default`
+Variant. A saved configuration from before the Variant field was introduced
+uses its board default. Variant describes disk-image composition only; it does
+not change kernel or bootloader compilation. Disk capacity is not a build-menu
+selection.
 
 The maintained x86 output directories are:
 

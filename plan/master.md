@@ -37,9 +37,9 @@ made the fixed 397,312-sector GPT image safely usable after raw copying to the
 successfully through the USB-root overlay and closes that root-continuity
 boundary without reopening the completed Latitude USB/network evidence.
 
-The current [Queue Book](queue.md) records `q036`. Its generic
-Variant/capacity configuration Phase is complete and it is executing the three
-amd64 image layouts, followed by their SeaBIOS/OVMF matrix.
+The current [Queue Book](queue.md) records `q036`. Its generic Variant work is
+being revised after removal of the disk-capacity selector; the fixed three
+amd64 image layouts and six-cell SeaBIOS/OVMF matrix follow.
 The archived [q035](queue-q035.md) completed the retained WS018 graphics
 runtime matrix, consolidated FAT, migrated FAT boot-media access to native VFS
 objects, and removed the retired bootfs/namespace/startup/M9 and broad
@@ -299,7 +299,7 @@ actually warranted.
 | `ws017` | `/dev/graphics` LFB fast path | Planned; p001 blocked on one human `mprotect` decision | No Phase started | Choose the mapping permission ceiling, then Queue p001 device-mmap/UAPI followed by p002--p004 | [WS017](ws017-lfb-graphics/ws.md) |
 | `ws018` | Kernel source ownership and interface consolidation | Complete (`q035`) | `ws018-p012` complete; p001--p012 all cleared | No Phase remains; extract a new requirement before resuming | [WS018](ws018-kernel-architecture/ws.md) |
 | `ws019` | Installation and disk administration | Re-plan required; installer language changed to Noct | `ws019-p001` retains the approved storage safety contract; older p002--p005 implementation language is superseded pending revision | Do not implement from the old C-oriented Phase map. The latest request ended after `仕様は`; obtain the missing Noct installer contract, then rewrite the bounded implementation/acceptance Phases | [WS019](ws019-installation/ws.md) |
-| `ws020` | Intel Mac UEFI bring-up and generic image variants | Active (`q036`); p001--p002 complete, p003 in progress | Generic Variant/capacity configuration and the three strict image layouts are verified without changing compiled artifacts | Complete p003 QEMU matrix, then request one bounded Intel Mac checkpoint and final five-run acceptance | [WS020](ws020-intel-mac/ws.md) |
+| `ws020` | Intel Mac UEFI bring-up and generic image variants | Active (`q036`); revised p001 complete, p002 correction in progress, p003 pending | Capacity selector removed; generic Variant round-trip and compiled-artifact invariance pass | Complete the fixed UEFI geometry correction and six-cell QEMU matrix, then request one bounded Intel Mac checkpoint and final five-run acceptance | [WS020](ws020-intel-mac/ws.md) |
 
 ## 4. Milestones
 
@@ -318,7 +318,7 @@ actually warranted.
 | M10 — Latitude NVMe overlay installation | The ordinary USB system installs into an existing ESP plus selected existing FAT32 without formatting; installed `BOOTX64.EFI` boots the NVMe-backed overlay root from the internal SN740 | WS003, WS004, WS009, WS013, WS019 |
 | M11 — Latitude native installation | A later installer step creates or selects the required native filesystem and boots it with `rootpart=` without regressing M10 | WS003, WS004, WS009, WS013, WS019 |
 | M12 — Panasonic CF-SV7 USB shell | The CF-SV7 clears its captured post-RSDP early interrupt stop, then reaches USB-backed init/login/shell with bounded diagnostics and final repeatability evidence | WS003, WS004, WS006, WS009 |
-| M13 — Intel Mac UEFI boot | A compact capacity-matched amd64 UEFI-only image with no BIOS path boots an Intel Mac to login, while generic Variant support preserves Hybrid and BIOS-only images | WS003, WS009, WS013, WS020 |
+| M13 — Intel Mac UEFI boot | A fixed amd64 UEFI-only image with a pure Protective MBR and no BIOS path boots an Intel Mac to login, while generic Variant support preserves combined and BIOS-only images | WS003, WS009, WS013, WS020 |
 | Continuous | POSIX debt and public documentation remain traceable | WS001, WS009, all producers |
 
 ## 5. Dependency map
@@ -361,9 +361,9 @@ WS003 boot/storage + WS006 evdev + WS007 Xzed/graphics + WS016 swap
         +-- independent graphics frontends
         +-- boot/FAT native VFS consolidation -> remove bootfs
 
-WS018 completion -- WS020 generic target Variant + declared image capacity
-                    +-- amd64 Hybrid / BIOS-only / UEFI-only image profiles
-                    +-- compact primary-only GPT -- Intel Mac UEFI bring-up
+WS018 completion -- WS020 generic target Variant
+                    +-- amd64 combined / UEFI-only / BIOS-only image profiles
+                    +-- fixed pure-PMBR primary-only GPT -- Intel Mac UEFI bring-up
 
 WS013 Boot foundation -- WS003 p011-p015 common x86 parameters
                        +-- UEFI same-disk FAT16/FAT32 `zedbsd.cfg`
@@ -401,10 +401,10 @@ priority one.
    works.
 2. WS018 is complete.  q035 finished p009's retained runtime evidence and
    p010--p012 in consumer-before-deletion order; no residual Phase remains.
-3. Complete WS020 Intel Mac bring-up. Add the generic board Variant and target-
-   capacity selections, implement Hybrid/BIOS-only/UEFI-only amd64 image
-   profiles, pass the QEMU matrix, then perform the bounded physical UEFI-only
-   checkpoint and final five-run acceptance.
+3. Complete WS020 Intel Mac bring-up. Add the generic board Variant, implement
+   combined/UEFI-only/BIOS-only amd64 image profiles, pass the six-cell QEMU
+   matrix, then perform the bounded physical UEFI-only checkpoint and final
+   five-run acceptance. Disk capacity is not a menu selection.
 4. Implement the Archer T3U Nano USB WLAN path across WS004 and WS005. The
    dependency order is p026 exact-unit/firmware intake, p027 generic WLAN core,
    WS005 privilege/command/profile/protocol prerequisites, p028--p030 radio and
@@ -450,8 +450,8 @@ until stopped or no judgment-free Phase remains.
 | --- | --- | --- |
 | Exact Latitude BIOS, boot mode, PCI/USB topology and IDs | WS003 | Driver selection and hardware acceptance |
 | Exact CF-SV7 DMI identity, firmware settings, CPU/APIC mode, PCI/USB topology, and IDs | WS003 | Later device-specific driver selection; p020 early IRQ and p021 portable-GPT work do not depend on the remaining inventory |
-| Intel Mac identity and exact target-medium sector count | WS020 | p004 physical acceptance only; p001--p003 use deterministic generic/QEMU fixtures |
-| UEFI-only protective MBR and primary-only GPT shape | WS020 | Resolved for the initial WS: zero non-executable protective MBR code with one non-active `0xee` entry and `55 aa`; valid primary GPT declares the selected exact final LBA; compact artifact omits the backup and QEMU materializes a zero tail |
+| Intel Mac identity, firmware, and target-medium inventory | WS020 | p004 physical acceptance only; no exact capacity match is required because the fixed GPT extent may precede the physical end |
+| UEFI-only Protective MBR and primary-only GPT shape | WS020 | Resolved: zero non-executable Protective-MBR code, one non-active `0xee` entry, three zero entries, and `55 aa`; the fixed 395,297-sector artifact contains a valid primary GPT and zero final 33-sector reservation but no backup GPT or compatibility-MBR entry |
 | Initial Secure Boot scope | WS003 | Resolved: use UEFI with Secure Boot disabled; signing/key enrollment deferred and not required for NVMe |
 | USB Ethernet interface descriptors and, for vendor-specific interfaces, VID:PID/controller family | WS003/WS004/WS005 | Choose CDC ECM/NCM class frontend or Realtek-family frontend for HW-12/NET-10; ACM is inapplicable |
 | First USB WLAN identity | WS004/WS005 | Primary evidence identifies Archer T3U Nano V1.0 as RTL8822BU, USB `2357:012e`; `ws004-p026` must still record the exact physical unit revision, descriptors, and firmware provenance before driver implementation |
