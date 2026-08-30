@@ -20,7 +20,8 @@ creating a zedBSD UEFI variable.
 ## Dependencies
 
 - `ws004-p025`: read-only acceptance of the exact SN740 controller;
-- WS013 p002/p003: deterministic payload discovery and `boot.cfg` translation;
+- WS013 p002/p003: deterministic first-candidate `zedbsd.cfg` discovery and
+  direct parameter translation;
 - WS019 p005: the same non-formatting install/boot transaction accepted on
   disposable QEMU NVMe;
 - Secure Boot disabled, as already fixed by WS003 policy;
@@ -48,10 +49,10 @@ creating a zedBSD UEFI variable.
 - BR-T49 records the source image, disk/ESP/payload identities, installer
   transaction, managed-file digests, unchanged GPT/labels/NVRAM evidence, and
   the exact firmware selection used.
-- Firmware loads the installed fallback `BOOTX64.EFI`; it uniquely selects the
-  same-disk payload FAT32, loads `/vmunix`, and injects that PARTUUID as
-  `boot0`.
-- `/boot.cfg` mounts `rootfs.img` plus writable `data.img`, activates
+- Firmware loads the installed fallback `BOOTX64.EFI`; it selects the first
+  same-disk payload FAT32 containing `/zedbsd.cfg`, uses `kernel=vmunix`, and
+  binds omitted `boot0` to that FAT.
+- `/zedbsd.cfg` mounts `rootfs.img` plus writable `data.img`, activates
   `swapfile`, and reaches init/login/root shell from the internal NVMe.
 - Unmanaged files on the ESP and payload partition remain byte-identical.
 - The final frozen installation passes five consecutive cold boots with no

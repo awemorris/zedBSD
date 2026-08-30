@@ -1,6 +1,6 @@
 # WS013 Phase 001: CPAR architecture discussion
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 WSID: `ws013`
 
@@ -8,11 +8,19 @@ Phase ID: `p001`
 
 Combined ID: `ws013-p001`
 
-Status: Proposed
+Status: Proposed; Boot configuration notes superseded, Runtime discussion retained
 
 Parent: [WS013](../ws.md)
 
 Reviews: [WS013 review index](../tests/README.md)
+
+> **Boot-plan supersession:** the `boot.cfg` menu and “fixed legacy
+> `boot.cfg`” statements below record an earlier proposal and are not current
+> requirements. Source inspection proved that PC/AT and PC-98 do not have such
+> a reader. The authoritative Boot plan is now the parent W book plus p002--p006:
+> UEFI, i386 PC/AT, and amd64 BIOS use the same `/zedbsd.cfg` format, while
+> PC-98 uses that format under `/BOOTZBSD.CFG`. Runtime CPAR discussion in this
+> Phase remains current and manually blocked.
 
 ## Objective
 
@@ -231,18 +239,19 @@ claim is accepted merely from a successful chroot demonstration.
 
 q015 establishes the common boot-parameter, four-x86 handoff, private
 boot-slot, root-mode, multi-source swap, and init-selection foundation that
-Boot CPAR needs. It does not implement Boot CPAR's FAT32/VFAT LFN lookup,
-`boot.cfg` parser, menu, or selected-section translation. WS013 p002/p003 now
-own that bounded Boot work. The initial source audit also proves that private
+Boot CPAR needs. q031 assigns the initial direct UEFI `/zedbsd.cfg` discovery,
+parsing, and configured-kernel path to p002/p003 without a menu. p005 then
+converges i386 PC/AT and amd64 BIOS `BOOTZBSD.EXE`; p006 converges PC-98
+`BOOTZBSD.EXE`. The initial source audit also proves that private
 mount namespaces, public dynamic image
 attachment, and the requested Runtime CPAR multi-layer composition are not
 current features. Discussion remains open.
 
 ## Interruption / resumption
 
-Queue p002 after its NVMe/GPT fixture dependencies, then p003. Runtime
-namespace, Runtime CLI/build, and service-container package discussion remain
-on manual hold and must not enter a Queue until explicitly resumed.
+Finish q031 p002--p004, then Queue p005/p006 separately. Runtime namespace,
+Runtime CLI/build, and service-container package discussion remain on manual
+hold and must not enter a Queue until explicitly resumed.
 
 ## Remaining debt and handoff
 

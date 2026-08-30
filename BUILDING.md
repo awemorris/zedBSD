@@ -82,9 +82,6 @@ PC/AT, and amd64 share those formats, so the tools remain in `tools/build`.
 Header or image processing unique to one target, such as the PC-98 kernel-header
 patcher, lives in that platform's `tools` directory.
 
-Kernel startup messages are ordinary static strings in `src/kern/startup.c`.
-There is no generated message header or message-generation build step.
-
 ## Emulators
 
 The emulator command and flags can be overridden with `QEMU` and `QEMU_FLAGS`

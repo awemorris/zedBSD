@@ -7,7 +7,6 @@
 
 #include <boot/pc98-handoff.h>
 #include "bootloader/include/amd64-handoff.h"
-#include "bootloader/uefi/load-options.h"
 #include "src/hal/amd64/bsp-pcat/handoff-validation.h"
 #include "src/hal/x86/boot-parameters.h"
 
@@ -238,6 +237,55 @@ test_zbl6_layout_validation(void)
 }
 
 static void
+test_zbl6_uefi_partition_handoff(void)
+{
+	const uint32_t uefi = ZBL6_HANDOFF_FLAG_UEFI;
+	const uint32_t selected_fat = uefi | ZBL6_HANDOFF_FLAG_BOOT_UUID;
+
+	/* Preserve every historically accepted v2-v4 MBR value. */
+	assert(zbl6_uefi_partition_handoff_valid(
+	    ZBL6_HANDOFF_V2_VERSION, ZBL6_PARTITION_SCHEME_MBR,
+	    1U, 2U, uefi));
+	assert(zbl6_uefi_partition_handoff_valid(
+	    ZBL6_HANDOFF_V4_VERSION, ZBL6_PARTITION_SCHEME_MBR,
+	    4U, 2U, selected_fat));
+	assert(!zbl6_uefi_partition_handoff_valid(
+	    ZBL6_HANDOFF_V4_VERSION, ZBL6_PARTITION_SCHEME_MBR,
+	    ZBL6_PARTITION_INDEX_UNKNOWN, 2U, selected_fat));
+	assert(!zbl6_uefi_partition_handoff_valid(
+	    ZBL6_HANDOFF_V4_VERSION, ZBL6_PARTITION_SCHEME_MBR,
+	    1U, ZBL6_PARTITION_INDEX_UNKNOWN, selected_fat));
+
+	/* V5 preserves the actual MBR/GPT style but never overloads an ordinal as
+	 * root identity.  The mandatory FAT UUID is the stable boot0 selector. */
+	assert(zbl6_uefi_partition_handoff_valid(
+	    ZBL6_HANDOFF_V5_VERSION, ZBL6_PARTITION_SCHEME_MBR,
+	    ZBL6_PARTITION_INDEX_UNKNOWN,
+	    ZBL6_PARTITION_INDEX_UNKNOWN, selected_fat));
+	assert(!zbl6_uefi_partition_handoff_valid(
+	    ZBL6_HANDOFF_V5_VERSION, ZBL6_PARTITION_SCHEME_MBR,
+	    ZBL6_PARTITION_INDEX_UNKNOWN,
+	    ZBL6_PARTITION_INDEX_UNKNOWN, uefi));
+	assert(zbl6_uefi_partition_handoff_valid(
+	    ZBL6_HANDOFF_V5_VERSION, ZBL6_PARTITION_SCHEME_GPT,
+	    ZBL6_PARTITION_INDEX_UNKNOWN,
+	    ZBL6_PARTITION_INDEX_UNKNOWN, selected_fat));
+	assert(!zbl6_uefi_partition_handoff_valid(
+	    ZBL6_HANDOFF_V5_VERSION, ZBL6_PARTITION_SCHEME_GPT,
+	    ZBL6_PARTITION_INDEX_UNKNOWN,
+	    ZBL6_PARTITION_INDEX_UNKNOWN, uefi));
+	assert(!zbl6_uefi_partition_handoff_valid(
+	    ZBL6_HANDOFF_V5_VERSION, ZBL6_PARTITION_SCHEME_GPT, 1U,
+	    ZBL6_PARTITION_INDEX_UNKNOWN, selected_fat));
+	assert(!zbl6_uefi_partition_handoff_valid(
+	    ZBL6_HANDOFF_V5_VERSION, ZBL6_PARTITION_SCHEME_GPT,
+	    ZBL6_PARTITION_INDEX_UNKNOWN, 2U, selected_fat));
+	assert(!zbl6_uefi_partition_handoff_valid(
+	    ZBL6_HANDOFF_V5_VERSION, 0U, ZBL6_PARTITION_INDEX_UNKNOWN,
+	    ZBL6_PARTITION_INDEX_UNKNOWN, selected_fat));
+}
+
+static void
 test_pc98_layout_validation(void)
 {
 	assert(x86_pc98_handoff_classify(ZEDBSD_HANDOFF_VERSION_PC98,
@@ -254,225 +302,6 @@ test_pc98_layout_validation(void)
 	    ZEDBSD_PC98_PARAMETER_HANDOFF_SIZE) == X86_PC98_HANDOFF_INVALID);
 }
 
-static void
-encode_utf16le(uint8_t *destination, const char *source, int terminate)
-{
-	size_t length = strlen(source);
-
-	for (size_t index = 0; index < length; index++) {
-		destination[index * 2U] = (uint8_t)source[index];
-		destination[index * 2U + 1U] = 0U;
-	}
-	if (terminate) {
-		destination[length * 2U] = 0U;
-		destination[length * 2U + 1U] = 0U;
-	}
-}
-
-static size_t
-make_efi_load_option(uint8_t *destination, const uint8_t *optional_data,
-		     size_t optional_size)
-{
-	/* ACTIVE, a one-character description, one FilePath node and End. */
-	static const uint8_t descriptor[] = {
-		0x01, 0x00, 0x00, 0x00, 0x0a, 0x00,
-		'z',  0x00, 0x00, 0x00,
-		0x04, 0x04, 0x06, 0x00, 0x00, 0x00,
-		0x7f, 0xff, 0x04, 0x00,
-	};
-
-	memcpy(destination, descriptor, sizeof(descriptor));
-	if (optional_size != 0U)
-		memcpy(destination + sizeof(descriptor), optional_data,
-		    optional_size);
-	return sizeof(descriptor) + optional_size;
-}
-
-static enum zbl_uefi_load_options_result
-record_with_fallback(struct zedbsd_boot_parameter_record *record,
-		     const void *options, uint32_t options_size,
-		     const char *fallback, size_t fallback_size,
-		     enum zbl_uefi_load_options_result *input_result)
-{
-	enum zbl_uefi_load_options_result result;
-
-	result = zbl_uefi_load_options_record(record, options, options_size,
-	    fallback, fallback_size);
-	if (input_result != NULL)
-		*input_result = result;
-	if (result == ZBL_UEFI_LOAD_OPTIONS_OK ||
-	    result == ZBL_UEFI_LOAD_OPTIONS_DESCRIPTOR)
-		return ZBL_UEFI_LOAD_OPTIONS_OK;
-	return zbl_uefi_load_options_record(record, NULL, 0U, fallback,
-	    fallback_size);
-}
-
-static void
-test_uefi_conversion(void)
-{
-	struct zedbsd_boot_parameter_record record;
-	uint8_t options[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE * 2U + 2U];
-	uint8_t unaligned[sizeof(explicit_text) * 2U + 1U];
-	uint8_t descriptor[ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE * 2U + 64U];
-	const char fallback[] = ZEDBSD_BOOT_PARAMETERS_DEFAULT_TEXT;
-	enum zbl_uefi_load_options_result ignored;
-	size_t length = strlen(explicit_text);
-	size_t descriptor_size;
-
-	assert(zbl_uefi_load_options_record(&record, NULL, 0U, fallback,
-	    sizeof(fallback)) == ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(strcmp(record.text, fallback) == 0);
-	encode_utf16le(options, explicit_text, 1);
-	assert(zbl_uefi_load_options_record(&record, options,
-	    (uint32_t)((length + 1U) * 2U), fallback,
-	    sizeof(fallback)) == ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(strcmp(record.text, explicit_text) == 0);
-
-	/* LoadOptionsSize is authoritative; a final CHAR16 NUL is optional. */
-	encode_utf16le(options, explicit_text, 0);
-	assert(record_with_fallback(&record, options,
-	    (uint32_t)(length * 2U), fallback,
-	    sizeof(fallback), &ignored) == ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(ignored == ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(strcmp(record.text, explicit_text) == 0);
-	encode_utf16le(unaligned + 1U, explicit_text, 0);
-	assert(zbl_uefi_load_options_record(&record, unaligned + 1U,
-	    (uint32_t)(length * 2U), fallback, sizeof(fallback)) ==
-	    ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(strcmp(record.text, explicit_text) == 0);
-
-	options[0] = 0U;
-	options[1] = 0U;
-	assert(zbl_uefi_load_options_record(&record, options, 2U, fallback,
-	    sizeof(fallback)) == ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(strcmp(record.text, fallback) == 0);
-	assert(zbl_uefi_load_options_record(&record, options, 1U, fallback,
-	    sizeof(fallback)) == ZBL_UEFI_LOAD_OPTIONS_ODD_SIZE);
-	assert(zbl_uefi_load_options_record(&record, NULL, 2U, fallback,
-	    sizeof(fallback)) == ZBL_UEFI_LOAD_OPTIONS_INVALID_ARGUMENT);
-	options[0] = 'x';
-	options[1] = 0U;
-	make_record(&record, explicit_text);
-	assert(zbl_uefi_load_options_record(&record, options, 2U, fallback,
-	    sizeof(fallback)) == ZBL_UEFI_LOAD_OPTIONS_UNRECOGNIZED);
-	assert(strcmp(record.text, explicit_text) == 0);
-	assert(record_with_fallback(&record, options, 2U,
-	    fallback, sizeof(fallback), &ignored) ==
-	    ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(ignored == ZBL_UEFI_LOAD_OPTIONS_UNRECOGNIZED);
-	assert(strcmp(record.text, fallback) == 0);
-	options[0] = 'x';
-	options[1] = 0U;
-	options[2] = 0U;
-	options[3] = 0U;
-	options[4] = 'y';
-	options[5] = 0U;
-	options[6] = 'z';
-	options[7] = 0U;
-	assert(zbl_uefi_load_options_record(&record, options, 8U, fallback,
-	    sizeof(fallback)) == ZBL_UEFI_LOAD_OPTIONS_EMBEDDED_NUL);
-	assert(record_with_fallback(&record, options, 8U,
-	    fallback, sizeof(fallback), &ignored) ==
-	    ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(ignored == ZBL_UEFI_LOAD_OPTIONS_EMBEDDED_NUL);
-	assert(strcmp(record.text, fallback) == 0);
-	options[0] = 0x80U;
-	options[1] = 0U;
-	options[2] = 0U;
-	options[3] = 0U;
-	assert(zbl_uefi_load_options_record(&record, options, 4U, fallback,
-	    sizeof(fallback)) == ZBL_UEFI_LOAD_OPTIONS_NON_ASCII);
-	assert(record_with_fallback(&record, options, 4U,
-	    fallback, sizeof(fallback), &ignored) ==
-	    ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(ignored == ZBL_UEFI_LOAD_OPTIONS_NON_ASCII);
-	assert(strcmp(record.text, fallback) == 0);
-	assert(record_with_fallback(&record, options, 1U,
-	    fallback, sizeof(fallback), &ignored) ==
-	    ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(ignored == ZBL_UEFI_LOAD_OPTIONS_ODD_SIZE);
-	assert(strcmp(record.text, fallback) == 0);
-	assert(record_with_fallback(&record, NULL, 2U,
-	    fallback, sizeof(fallback), &ignored) ==
-	    ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(ignored == ZBL_UEFI_LOAD_OPTIONS_INVALID_ARGUMENT);
-	assert(strcmp(record.text, fallback) == 0);
-
-	/* Dell firmware may pass the complete EFI_LOAD_OPTION descriptor. */
-	descriptor_size = make_efi_load_option(descriptor, NULL, 0U);
-	assert(zbl_uefi_load_options_record(&record, descriptor,
-	    (uint32_t)descriptor_size, fallback, sizeof(fallback)) ==
-	    ZBL_UEFI_LOAD_OPTIONS_DESCRIPTOR);
-	assert(strcmp(record.text, fallback) == 0);
-	assert(record_with_fallback(&record, descriptor,
-	    (uint32_t)descriptor_size, fallback, sizeof(fallback), &ignored) ==
-	    ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(ignored == ZBL_UEFI_LOAD_OPTIONS_DESCRIPTOR);
-	assert(strcmp(record.text, fallback) == 0);
-	encode_utf16le(options, explicit_text, 0);
-	descriptor_size = make_efi_load_option(descriptor, options, length * 2U);
-	assert(zbl_uefi_load_options_record(&record, descriptor,
-	    (uint32_t)descriptor_size, fallback, sizeof(fallback)) ==
-	    ZBL_UEFI_LOAD_OPTIONS_DESCRIPTOR);
-	assert(strcmp(record.text, explicit_text) == 0);
-	descriptor_size = make_efi_load_option(descriptor + 1U, options,
-	    length * 2U);
-	assert(zbl_uefi_load_options_record(&record, descriptor + 1U,
-	    (uint32_t)descriptor_size, fallback, sizeof(fallback)) ==
-	    ZBL_UEFI_LOAD_OPTIONS_DESCRIPTOR);
-	assert(strcmp(record.text, explicit_text) == 0);
-
-	/* Every truncated descriptor prefix remains bounded and non-fatal. */
-	descriptor_size = make_efi_load_option(descriptor, NULL, 0U);
-	for (size_t prefix = 1U; prefix < descriptor_size; prefix++) {
-		assert(record_with_fallback(&record,
-		    descriptor, (uint32_t)prefix, fallback, sizeof(fallback),
-		    &ignored) == ZBL_UEFI_LOAD_OPTIONS_OK);
-		assert(strcmp(record.text, fallback) == 0);
-	}
-	descriptor[16] = 0xffU;
-	assert(zbl_uefi_load_options_record(&record, descriptor,
-	    (uint32_t)descriptor_size, fallback, sizeof(fallback)) ==
-	    ZBL_UEFI_LOAD_OPTIONS_DESCRIPTOR);
-	assert(strcmp(record.text, fallback) == 0);
-	descriptor[16] = 0x7fU;
-	descriptor[17] = 0x02U;
-	assert(record_with_fallback(&record, descriptor,
-	    (uint32_t)descriptor_size, fallback, sizeof(fallback), &ignored) ==
-	    ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(strcmp(record.text, fallback) == 0);
-	descriptor[17] = 0xffU;
-	descriptor[0] = 0x03U;
-	assert(record_with_fallback(&record, descriptor,
-	    (uint32_t)descriptor_size, fallback, sizeof(fallback), &ignored) ==
-	    ZBL_UEFI_LOAD_OPTIONS_OK);
-	assert(ignored != ZBL_UEFI_LOAD_OPTIONS_DESCRIPTOR);
-	assert(strcmp(record.text, fallback) == 0);
-	descriptor[0] = 0x01U;
-
-	/* Boundary-length recognized text works with and without a terminator. */
-	memset(options, 0, sizeof(options));
-	encode_utf16le(options, "init=/", 0);
-	for (size_t index = strlen("init=/");
-	     index < ZEDBSD_BOOT_PARAMETERS_TEXT_MAX; index++) {
-		options[index * 2U] = 'a';
-		options[index * 2U + 1U] = 0U;
-	}
-	assert(zbl_uefi_load_options_record(&record, options,
-	    ZEDBSD_BOOT_PARAMETERS_TEXT_MAX * 2U, fallback,
-	    sizeof(fallback)) == ZBL_UEFI_LOAD_OPTIONS_OK);
-	options[ZEDBSD_BOOT_PARAMETERS_TEXT_MAX * 2U] = 0U;
-	options[ZEDBSD_BOOT_PARAMETERS_TEXT_MAX * 2U + 1U] = 0U;
-	assert(zbl_uefi_load_options_record(&record, options,
-	    ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE * 2U,
-	    fallback, sizeof(fallback)) == ZBL_UEFI_LOAD_OPTIONS_OK);
-	options[ZEDBSD_BOOT_PARAMETERS_TEXT_MAX * 2U] = 'a';
-	options[ZEDBSD_BOOT_PARAMETERS_TEXT_MAX * 2U + 1U] = 0U;
-	assert(zbl_uefi_load_options_record(&record, options,
-	    ZEDBSD_BOOT_PARAMETERS_STORAGE_SIZE * 2U,
-	    fallback, sizeof(fallback)) == ZBL_UEFI_LOAD_OPTIONS_TOO_LONG);
-}
-
 int
 main(void)
 {
@@ -480,8 +309,8 @@ main(void)
 	test_record_validation();
 	test_four_layouts();
 	test_zbl6_layout_validation();
+	test_zbl6_uefi_partition_handoff();
 	test_pc98_layout_validation();
-	test_uefi_conversion();
 	puts("BR-T43 x86 parameter handoff: PASS");
 	return 0;
 }

@@ -14,7 +14,7 @@ source.
 | `IN-T004` | Installer publication changes only the six managed paths; GPT, formats, labels, unmanaged sentinels, and UEFI variables remain byte-identical |
 | `IN-T005` | Exact existing managed files are idempotent, while any non-identical conflict is refused without overwrite |
 | `IN-T006` | Copy, flush, digest, rename, media-change, and interruption failures never report success and remove only unpublished temporary files |
-| `IN-T007` | The loader chooses exactly one same-disk `/vmunix` plus `/boot.cfg` payload, injects its PARTUUID as `boot0`, and ignores matching files on an auxiliary disk |
+| `IN-T007` | The loader chooses the deterministic first same-disk FAT16/FAT32 with `/zedbsd.cfg`, uses its required `kernel=`, synthesizes omitted `boot0`/bare paths, ignores auxiliary disks, fails on zero, and warns on multiple candidates |
 | `IN-T008` | Installed OVMF boot reaches login with `rootfs.img`, writable `data.img`, and active `swapfile`, without installer-created `Boot####` state |
 | `IN-T009` | The ordinary single-partition USB source remains bootable and its artifacts are verified before installer use |
 

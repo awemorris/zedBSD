@@ -767,10 +767,34 @@ kern_vfs_init(const struct boot_handoff *handoff,
 		VFS_LOG("vfs: boot BIOS=%02x Sun slice=%u devices=%u\n",
 			handoff->boot_bios_id, handoff->boot_partition_index,
 			device_count);
-	else if (handoff->version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT)
-		VFS_LOG("vfs: boot BIOS=%02x MBR partition=%u devices=%u\n",
-			handoff->boot_bios_id, handoff->boot_partition_index,
-			device_count);
+	else if (handoff->version == ZEDBSD_HANDOFF_VERSION_MULTIBOOT) {
+		if (handoff->boot_partition_scheme ==
+		    ZEDBSD_PARTITION_SCHEME_MBR &&
+		    handoff->boot_partition_index ==
+		    ZEDBSD_PARTITION_INDEX_UNKNOWN)
+			VFS_LOG(
+			    "vfs: boot BIOS=%02x MBR partition=unknown devices=%u\n",
+			    handoff->boot_bios_id, device_count);
+		else if (handoff->boot_partition_scheme ==
+		    ZEDBSD_PARTITION_SCHEME_MBR)
+			VFS_LOG(
+			    "vfs: boot BIOS=%02x MBR partition=%u devices=%u\n",
+			    handoff->boot_bios_id,
+			    handoff->boot_partition_index, device_count);
+		else if (handoff->boot_partition_scheme ==
+		    ZEDBSD_PARTITION_SCHEME_GPT &&
+		    handoff->boot_partition_index ==
+		    ZEDBSD_PARTITION_INDEX_UNKNOWN)
+			VFS_LOG(
+			    "vfs: boot BIOS=%02x GPT partition=unknown devices=%u\n",
+			    handoff->boot_bios_id, device_count);
+		else
+			VFS_LOG(
+			    "vfs: boot BIOS=%02x scheme=%u partition=%u devices=%u\n",
+			    handoff->boot_bios_id,
+			    handoff->boot_partition_scheme,
+			    handoff->boot_partition_index, device_count);
+	}
 	else if (handoff->version == ZEDBSD_HANDOFF_VERSION_X68K)
 		VFS_LOG("vfs: boot SCSI=%u X68k partition=%u devices=%u\n",
 			handoff->boot_bios_id, handoff->boot_partition_index,

@@ -30,6 +30,9 @@ static struct amd64_acpi_window acpi_window;
 static paddr_t acpi_physical_max;
 #define AMD64_ECAM_PD_FIRST 128U
 #define AMD64_ECAM_PD_COUNT 128U
+#define AMD64_FRAMEBUFFER_PD_FIRST 16U
+#define AMD64_FRAMEBUFFER_PD_COUNT \
+	(AMD64_ECAM_PD_FIRST - AMD64_FRAMEBUFFER_PD_FIRST)
 #define AMD64_ECAM_VIRTUAL_BASE 0xffffffffd0000000ULL
 static unsigned ecam_pd_used;
 static uintptr_t system_cr3;
@@ -176,12 +179,10 @@ amd64_space_init(void)
 		uint64_t end = framebuffer->physical_base + framebuffer->size;
 		unsigned count = (unsigned)((end - base + 0x1fffffULL) /
 		    0x200000ULL);
-		if (count == 0 || count > 496U)
+		if (count == 0 || count > AMD64_FRAMEBUFFER_PD_COUNT)
 			HAL_FATAL("amd64 framebuffer MMIO window exceeded");
-		if (16U + count > AMD64_ECAM_PD_FIRST)
-			HAL_FATAL("amd64 framebuffer overlaps ECAM virtual window");
 		for (index = 0; index < count; index++)
-			system_mmio_pd[16U + index] = (base +
+			system_mmio_pd[AMD64_FRAMEBUFFER_PD_FIRST + index] = (base +
 			    (uint64_t)index * 0x200000ULL) |
 			    AMD64_PTE_PRESENT | AMD64_PTE_WRITE |
 			    AMD64_PTE_NOCACHE | AMD64_PTE_LARGE |

@@ -41,7 +41,10 @@ struct boot_handoff {
 	uint8_t boot_bios_id;
 	/*
 	 * Version 2 treats these bytes as a reserved zero word and selects the
-	 * boot partition by LBA.  Version 3 uses an MBR partition index.
+	 * boot partition by LBA.  Version 3 carries the partition scheme: legacy
+	 * loaders may carry a one-based MBR primary-partition index, while UEFI v5
+	 * carries the actual MBR/GPT style with an unknown index and resolves its
+	 * selected FAT by UUID.
 	 */
 	uint8_t boot_partition_scheme;
 	uint8_t boot_partition_index;
@@ -58,6 +61,8 @@ struct boot_handoff {
 #define ZEDBSD_PARTITION_SCHEME_MBR		1U
 #define ZEDBSD_PARTITION_SCHEME_SUN		2U
 #define ZEDBSD_PARTITION_SCHEME_X68K		3U
+#define ZEDBSD_PARTITION_SCHEME_GPT		4U
+#define ZEDBSD_PARTITION_INDEX_UNKNOWN		0U
 #define ZEDBSD_BOOT_PARTITION_LBA_UNKNOWN	0xffffffffU
 
 #define ZEDBSD_X68K_HANDOFF_MAGIC		0x58363848U /* "X68H" */

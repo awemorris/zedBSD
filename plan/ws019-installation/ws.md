@@ -49,7 +49,7 @@ ESP (existing FAT32)
 
 ZEDBSD payload (user-selected existing FAT32)
   /vmunix
-  /boot.cfg
+  /zedbsd.cfg
   /rootfs.img
   /data.img
   /swapfile
@@ -96,55 +96,56 @@ unattended fixed-disk boot may add a separately reviewed Boot entry later.
 
 The loader is physically on the ESP while all remaining files are on the
 payload FAT32. Therefore loader origin cannot continue to mean `boot0`.
-WS013 p002 must:
+WS013 p002/p003 must:
 
 1. enumerate SimpleFS handles on the same physical GPT disk as the loaded ESP;
-2. exclude the ESP and reject non-FAT32 or non-GPT candidates;
-3. select exactly one filesystem containing readable `/vmunix` and
-   `/boot.cfg`;
-4. fail visibly if zero or multiple candidates match;
-5. load `/vmunix` from that filesystem; and
-6. inject its GPT PARTUUID as explicit `boot0=PARTUUID=...` before translating
-   `/boot.cfg`.
+2. accept same-disk FAT16/FAT32, including the loaded filesystem when it owns
+   the configuration;
+3. use `/zedbsd.cfg` as the candidate marker;
+4. fail visibly if zero candidates match, and warn then use the deterministic
+   first candidate if multiple match;
+5. read required `kernel=` and load that relative file from the same FAT; and
+6. bind an omitted `boot0` and bare image paths to the selected config FAT.
 
-The installer preflight applies the same uniqueness rule before copying. No
+The installer deliberately applies a stricter uniqueness rule before copying:
+it refuses another same-disk `/zedbsd.cfg`, ensuring the installed payload is
+the loader's first and only candidate. No
 FAT label, GPT name, extra ESP locator file, or new CPAR handoff ABI is needed.
 
-The initial generated configuration contains one overlay section equivalent
-to:
+The initial generated configuration is direct and contains:
 
 ```ini
-timeout=5
-default=zedBSD
-
-[zedBSD]
-rootfs=boot0:rootfs.img
-datafs=boot0:data.img
-swap=boot0:swapfile
+kernel=vmunix
+overlay-root=rootfs.img
+overlay-data=data.img
+swap0=swapfile
 ```
 
-WS013 p003 owns its bounded parser/menu and translation to the already
-implemented `overlay-root=`, `overlay-data=`, and `swap0=` parameters.
+WS013 p003 removes the loader-only `kernel=` directive, adds the selected FAT
+identity as `boot0` when omitted, prefixes the three bare file values with
+`boot0:`, and hands the existing kernel parser a space-separated record. A
+future config may instead use direct `rootpart=` for native UFS; no menu or
+section syntax is implemented now.
 
 ## Source artifact contract
 
 `zedinst` resolves the loader-origin USB boot filesystem through the read-only
 administration UAPI, mounts it read-only in a private temporary location, and
 uses its verified `BOOTX64.EFI`, amd64 kernel, `rootfs.img`, `data.img`, and
-signed `swapfile`. It generates the single-section `/boot.cfg` above rather
+signed `swapfile`. It generates the direct `/zedbsd.cfg` above rather
 than copying mutable configuration from the running overlay. The implementation
 Phase must freeze the exact source filenames used by the current image and
 verify all sources before writing either destination.
 
 ## Required foundations discovered by audit
 
-- The UEFI loader currently opens only its own ESP, loads
+- The UEFI loader currently opens only its own filesystem, loads
   `/VMUNIX.X64`, and treats the ESP FAT serial as implicit `boot0`; it cannot
   boot this two-partition layout without WS013 p002/p003.
 - The current UEFI handoff also hard-codes MBR and partition indices. The
   loader/HAL boundary must stop presenting those values as authoritative for
-  a GPT boot. Explicit payload PARTUUID selection remains the filesystem
-  identity contract.
+  a GPT boot. The selected config FAT's synthesized `boot0` remains the
+  filesystem identity contract.
 - A strict GPT enumerator is required to publish partition type, PARTUUID,
   parent identity, and bounds. WS004 p024 owns its block-path acceptance;
   WS019 p002 owns the read-only user-visible query boundary.
@@ -161,7 +162,7 @@ verify all sources before writing either destination.
 | `ws019-p001` | [overlay installer-v1 contract](phase001-installer-v1-contract/phase.md) | Completed by design, 2026-08-29 | The existing-ESP/existing-FAT32, no-format, no-Boot-variable contract and Phase map are fixed |
 | `ws019-p002` | [read-only block/GPT administration](phase002-readonly-block-gpt-administration/phase.md) | Planned; depends on `ws004-p024` | Stable GPT/disk/partition/filesystem/mount identity is queryable without a mutation surface |
 | `ws019-p003` | [read-only `/sbin/diskpart`](phase003-diskpart-readonly/phase.md) | Planned; depends on p002 | List/show the exact GPT disk, ESP, FAT32 candidates, bounds, and stable identities |
-| `ws019-p004` | [existing-FAT overlay `/bin/zedinst`](phase004-zedinst-existing-fat-overlay/phase.md) | Planned; depends on p002/p003 and WS013 p002/p003 | Copy and verify only the fixed files without GPT, mkfs, label, or NVRAM mutation |
+| `ws019-p004` | [existing-FAT overlay `/bin/zedinst`](phase004-zedinst-existing-fat-overlay/phase.md) | Planned; blocked by stable installer-source decision, then depends on p002/p003 and WS013 p002/p003 | Copy and verify only immutable fixed inputs without GPT, mkfs, label, or NVRAM mutation |
 | `ws019-p005` | [QEMU NVMe overlay-install acceptance](phase005-qemu-nvme-overlay-install/phase.md) | Planned; depends on p004 and `ws004-p024` | A fresh disposable existing-GPT/FAT fixture installs and boots its NVMe overlay |
 | `ws019-p006` | Whole-disk GPT creation and filesystem provisioning | Future; not designed | Add destructive initialization only after a separate safety/product review |
 | `ws019-p007` | Native-root installation | Future; not designed | Add `rootpart=` installation without changing or weakening p001--p005 |
@@ -175,7 +176,8 @@ verify all sources before writing either destination.
   fallback loader into the overlay root.
 - Before and after partition tables, filesystem formats/labels, unmanaged
   files, and UEFI variables compare unchanged.
-- Zero/multiple ESPs, zero/multiple payload markers, non-FAT32 selection,
+- Zero/multiple ESPs, zero payload markers, an already-present second config,
+  non-FAT32 selection,
   insufficient space, existing conflicting files, copy/flush/verify failure,
   and source/target aliasing fail visibly without a success claim.
 - The public guide recommends USB trial use and states that the initial
@@ -187,6 +189,12 @@ Return to planning if the Latitude cannot launch the fallback path even by an
 explicit firmware selection, if current FAT rename/flush behavior cannot make
 publication bounded, if the selected FAT cannot be rediscovered by PARTUUID,
 or if implementation would need to format, resize, or rewrite GPT.
+
+The ordinary USB runtime currently uses `DATA.IMG` as its writable overlay
+upper and `SWAPFILE` as active swap. They are not stable installation inputs
+and must never be copied live. Before p004 enters a Queue, choose either unused
+immutable installer templates (recommended) or a separately designed
+target-generation contract.
 
 ## Standards references
 

@@ -16,5 +16,8 @@ enum zbl6_handoff_form {
 enum zbl6_handoff_form zbl6_handoff_classify(uint16_t version,
 	uint16_t size, uint32_t flags);
 enum zbl6_handoff_form zbl6_handoff_classify_raw(const void *raw_handoff);
+int zbl6_uefi_partition_handoff_valid(uint16_t version, uint8_t scheme,
+	uint8_t root_partition_index, uint8_t loader_partition_index,
+	uint32_t flags);
 
 #endif

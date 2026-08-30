@@ -26,10 +26,13 @@ on a disposable QEMU NVMe before any physical Latitude write.
 ## Required cells
 
 1. install succeeds and preserves GPT, labels, unmanaged files, and NVRAM;
-2. installed fallback loader discovers exactly one same-disk payload, loads
-   `/vmunix`, injects its PARTUUID as `boot0`, parses `/boot.cfg`, mounts
+2. installed fallback loader discovers the same-disk `/zedbsd.cfg`, consumes
+   `kernel=vmunix`, binds omitted `boot0` and bare image paths to that FAT,
+   mounts
    `rootfs.img` plus `data.img`, activates `swapfile`, and reaches login;
-3. absent and duplicate payload markers fail visibly;
+3. an absent config fails visibly; duplicate configs warn and choose the first
+   deterministic same-disk candidate, while the installer preflight refuses to
+   create such an ambiguous installed layout;
 4. conflicting file, insufficient space, wrong filesystem, source/target
    alias, and injected copy/flush/verify failures never report success;
 5. an auxiliary FAT disk with matching-looking files cannot steal selection

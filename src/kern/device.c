@@ -257,7 +257,7 @@ int probe_fixed_device(uint8_t device_class, uint8_t bios_id)
 	return -1;
 }
 
-/* Shell probes remain exhaustive; startup uses probe_fixed_device directly. */
+/* Shell probes remain exhaustive across every supported BIOS unit. */
 void probe_fixed_class(uint8_t device_class)
 {
 	uint8_t first = device_class == ZEDBSD_DEV_IDE ? 0x80 : 0xa0;

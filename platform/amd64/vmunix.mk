@@ -4,6 +4,22 @@
 AMD64_PLATFORM := platform/amd64
 BIOS_LOADER := bootloader/pcat
 UEFI_LOADER := bootloader/uefi
+AMD64_ZEDBSD_CONFIG := $(AMD64_PLATFORM)/zedbsd.cfg
+AMD64_UEFI_CONFIGURED_IMAGES := \
+	$(BUILD)/bios-hdd-image.img \
+	$(BUILD)/bios-hdd-image-fragmented.img \
+	$(BUILD)/deferred-stub-qemu.img \
+	$(BUILD)/phase19-qemu.img \
+	$(BUILD)/phase20-qemu.img \
+	$(BUILD)/posix-phase2-qemu.img \
+	$(BUILD)/posix-phase3-qemu.img \
+	$(BUILD)/posix-phase4-qemu.img \
+	$(BUILD)/posix-phase5-qemu.img \
+	$(BUILD)/posix-phase6-qemu.img \
+	$(BUILD)/posix-phase7-qemu.img \
+	$(BUILD)/posix-phase8-qemu.img \
+	$(BUILD)/posix-phase85-qemu.img
+$(AMD64_UEFI_CONFIGURED_IMAGES): $(AMD64_ZEDBSD_CONFIG)
 EFI_CC ?= x86_64-w64-mingw32-gcc
 EFI_LD ?= x86_64-w64-mingw32-ld
 EFI_NM ?= x86_64-w64-mingw32-nm
@@ -244,15 +260,27 @@ $(BUILD)/bootloader/BOOTZBSD.EXE: $(BUILD)/bootloader/bootzbsd.bin \
 
 $(BUILD)/uefi/bootx64.o: $(UEFI_LOADER)/bootx64.c \
 	$(UEFI_LOADER)/include/uefi.h $(UEFI_LOADER)/elf64.h \
-	$(UEFI_LOADER)/memory-map.h $(UEFI_LOADER)/load-options.h \
+	$(UEFI_LOADER)/framebuffer.h $(UEFI_LOADER)/memory-map.h \
+	$(UEFI_LOADER)/volume-discovery.h \
+	$(UEFI_LOADER)/zedbsd-config.h \
 	bootloader/include/amd64-handoff.h \
 	bootloader/include/boot-parameter-handoff.h \
 	include/boot/parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
 	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
 
-$(BUILD)/uefi/load-options.o: $(UEFI_LOADER)/load-options.c \
-	$(UEFI_LOADER)/load-options.h \
+$(BUILD)/uefi/volume-discovery.o: $(UEFI_LOADER)/volume-discovery.c \
+	$(UEFI_LOADER)/volume-discovery.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/framebuffer.o: $(UEFI_LOADER)/framebuffer.c \
+	$(UEFI_LOADER)/framebuffer.h
+	@mkdir -p $(dir $@)
+	$(EFI_CC) $(EFI_CFLAGS) -c $< -o $@
+
+$(BUILD)/uefi/zedbsd-config.o: $(UEFI_LOADER)/zedbsd-config.c \
+	$(UEFI_LOADER)/zedbsd-config.h \
 	bootloader/include/boot-parameter-handoff.h \
 	include/boot/parameter-handoff.h include/boot/parameters.h
 	@mkdir -p $(dir $@)
@@ -277,8 +305,9 @@ $(BUILD)/uefi/transition.o: $(UEFI_LOADER)/transition.S
 	$(EFI_CC) -m64 -mno-red-zone -c $< -o $@
 
 $(BUILD)/uefi/BOOTX64.EFI: $(BUILD)/uefi/bootx64.o \
-	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/memory-map.o \
-	$(BUILD)/uefi/load-options.o \
+	$(BUILD)/uefi/elf64.o $(BUILD)/uefi/framebuffer.o \
+	$(BUILD)/uefi/memory-map.o \
+	$(BUILD)/uefi/volume-discovery.o $(BUILD)/uefi/zedbsd-config.o \
 	$(BUILD)/uefi/transition.o \
 	platform/amd64/tools/check-bootx64.noct
 	$(EFI_LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \
@@ -685,6 +714,7 @@ $(BUILD)/bios-hdd-image.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
 		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -717,6 +747,7 @@ $(BUILD)/bios-hdd-image-fragmented.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --kernel $(BUILD)/vmunix \
 		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_ARCH_UFS_IMAGE) \
 		--arch-format ufs \
 		--fragment-kernel $@
@@ -742,6 +773,7 @@ $(BUILD)/deferred-stub-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_DEFERRED_TEST_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -774,6 +806,7 @@ $(BUILD)/posix-phase2-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE2_TEST_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -806,6 +839,7 @@ $(BUILD)/posix-phase3-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE3_TEST_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -838,6 +872,7 @@ $(BUILD)/posix-phase4-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE4_TEST_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -878,6 +913,7 @@ $(BUILD)/posix-phase5-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE5_TEST_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -909,6 +945,7 @@ $(BUILD)/posix-phase6-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE6_TEST_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -938,6 +975,7 @@ $(BUILD)/posix-phase7-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE7_TEST_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -968,6 +1006,7 @@ $(BUILD)/posix-phase8-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE8_TEST_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -1001,6 +1040,7 @@ $(BUILD)/phase19-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_PHASE19_TEST_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -1033,6 +1073,7 @@ $(BUILD)/phase20-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_PHASE20_TEST_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@
@@ -1090,6 +1131,7 @@ $(BUILD)/posix-phase85-qemu.img: $(BUILD)/bootloader/stage1.bin \
 		--partition-pbr $(BUILD)/bootloader/partition-pbr.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix --bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_ZEDBSD_CONFIG) \
 		--arch-profile amd64 --arch-image $(AMD64_POSIX_PHASE85_TEST_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@

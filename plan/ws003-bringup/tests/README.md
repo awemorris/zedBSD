@@ -29,12 +29,12 @@ Parent: [WS003](../ws.md)
 | BR-T40 | CDC selection | Selected ACM or ECM/NCM profile interoperates and reconnects; device-role capability is proven first |
 | BR-T41 | Latitude USB-storage U3 confirmation | One boot of the frozen q014 image resolves `/dev/sda1`, mounts the read-write data loop and root overlay, and starts init without opcode-35 `05/20/00` or a false-success cache policy |
 | BR-T42 | Common boot-parameter parser | The production parser enforces the 3071-byte grammar, known-key uniqueness, indexed boot/swap names, unknown-key policy, and architecture-independent absolute `init=` selection |
-| BR-T43 | Four-path x86 parameter handoff | i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI validate and copy the same bounded NUL-terminated parameter string without retaining loader memory; opaque UEFI binary options fall back to image defaults |
+| BR-T43 | Four-path x86 parameter handoff | i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI validate and copy the same bounded NUL-terminated parameter string without retaining loader memory; UEFI v5 preserves MBR/GPT style with UUID-owned unknown indices |
 | BR-T44 | Boot-slot and root-mode selection | Four sparse FAT boot slots, selector ambiguity/aliasing, safe `bootN:PATH`, native `rootpart`, explicit lower/upper overlay, and complete failure unwind follow the public contract |
 | BR-T45 | Multi-source swap | Zero to four sparse FAT-file or signed raw-partition sources activate atomically, allocate in numeric order, route I/O to the owning source, aggregate stats, and shut down without leaks |
 | BR-T46 | Four-platform parameter acceptance | Every declared i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI runtime cell proves normal/default init, explicit shell init, native root, overlay root, file swap, raw swap, and visible invalid-configuration failure |
 | BR-T47 | Static image parameters and scripting closure | One maintained source default feeds all four x86 loader paths and the kernel fallback; no generated input/header, Python generator, build-time file selector, stale state, or Python invocation remains, while affected non-default parameter/swap fixtures remain usable |
-| BR-T48 | UEFI whole-load-option compatibility | A test wrapper places one valid complete `EFI_LOAD_OPTION` descriptor with empty `OptionalData` in the real `EFI_LOADED_IMAGE_PROTOCOL.LoadOptions` fields, then the production loader boots through OVMF/q35/xHCI USB to `login:` without a LoadOptions fatal |
+| BR-T48 | Replaced by WS013 q031 `CT-T016` | The configured UEFI loader ignores `LoadOptions`; current acceptance is owned by WS013 rather than the retired whole-load-option compatibility fixture |
 | BR-T49 | Latitude NVMe overlay installation | The ordinary USB system verifies the existing GPT/ESP, installs only the fixed files into the ESP plus selected existing FAT32 without formatting or NVRAM mutation, and the frozen result boots the NVMe-backed overlay through installed `BOOTX64.EFI` |
 | BR-T50 | Physical network | Static or DHCP setup, peer reachability, and a bounded data transfer pass |
 | BR-T51 | Later Latitude native installation | After a separate WS019 design, the installed UEFI loader selects and boots the explicit native `rootpart` without regressing BR-T49 |
@@ -188,18 +188,15 @@ cc -std=c11 -Iinclude -Iinclude/uapi -I. -Wall -Wextra -Werror \
 /tmp/ws003-boot-parameters-test
 ```
 
-BR-T43 links the production shared record, four x86 layout classifiers, and
-UEFI `LoadOptions` conversion helpers directly. It also verifies optional-NUL
-length-delimited text, unaligned input, Dell-style complete
-`EFI_LOAD_OPTION` descriptor extraction, and that unrecognized, odd-sized, or
-embedded-NUL binary options cannot prevent boot and select the image default
-instead:
+BR-T43 links the production shared record and four x86 layout classifiers
+directly. It also verifies the UEFI v5 MBR/GPT handoff contract: the selected
+FAT UUID owns root identity while root and loader partition indices remain
+unknown:
 
 ```sh
 cc -std=c11 -Iinclude -I. -Wall -Wextra -Werror \
   src/hal/x86/boot-parameters.c \
   src/hal/amd64/bsp-pcat/handoff-validation.c \
-  bootloader/uefi/load-options.c \
   plan/ws003-bringup/tests/x86-parameter-handoff-test.c \
   -o /tmp/ws003-x86-parameter-handoff-test
 /tmp/ws003-x86-parameter-handoff-test
@@ -383,18 +380,9 @@ requires exactly one complete fixed-size BPR1 record, rejects zero, duplicate,
 malformed, oversized, non-ASCII, unterminated, and unsupported records, and
 atomically writes the patched output without changing its input.
 
-BR-T48 builds a test-only EFI entry wrapper around the production UEFI loader.
-The wrapper obtains the real loaded-image protocol, installs a complete packed
-`EFI_LOAD_OPTION` whose `OptionalData` length is zero, and then calls the
-production `efi_main` (renamed only in this test build). The bounded one-boot
-OVMF run uses a disposable copy of the supplied image and requires the
-injection marker, loader exit, kernel entry, and `login:` while rejecting the
-old `missing-nul`/LoadOptions fatal path:
-
-```sh
-plan/ws003-bringup/tests/uefi-load-option-qemu.sh \
-  build/amd64/hdd-image.img /tmp/ws003-br-t48
-```
+BR-T48's whole-load-option compatibility fixture was retired by q031. The
+configured UEFI loader now ignores `LoadOptions`; WS013 `CT-T016` owns the
+current OVMF acceptance coverage.
 
 This run postdates the final xHCI stop/IRQ ownership review. In addition to
 the eight existing affected regressions, `usb-hcd-unregister-test` now proves

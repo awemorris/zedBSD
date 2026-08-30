@@ -5,6 +5,11 @@
 
 #include "boot-parameter-handoff.h"
 
+/* Values carried by the root-partition fields in the ZBL6 ABI. */
+#define ZBL6_PARTITION_SCHEME_MBR 1U
+#define ZBL6_PARTITION_SCHEME_GPT 4U
+#define ZBL6_PARTITION_INDEX_UNKNOWN 0U
+
 #define ZBL6_HANDOFF_MAGIC 0x364c425a
 #define ZBL6_HANDOFF_VERSION 1
 #define ZBL6_HANDOFF_SIZE 24
@@ -91,6 +96,9 @@ struct zbl6_handoff_framebuffer {
 	uint32_t framebuffer_format;
 } __attribute__((packed));
 
+/* UEFI v2-v4 preserve their historical MBR/index contract.  V5 identifies
+ * the selected FAT by UUID and carries its actual MBR/GPT style with both
+ * partition-index bytes set to ZBL6_PARTITION_INDEX_UNKNOWN. */
 struct zbl6_handoff_v2 {
 	uint32_t magic;
 	uint16_t version;

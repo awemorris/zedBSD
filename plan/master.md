@@ -25,14 +25,20 @@ The next hardware/install north star is deliberately staged:
 Native-root installation, GPT creation, and filesystem creation follow as a
 separate milestone after this non-formatting path is accepted.
 
-The current [Queue Book](queue.md) records completed `q030`.
-`ws004-p022` through `ws004-p024` completed the QEMU NVMe
+The current [Queue Book](queue.md) records completed `q031`: it removed and
+audited the dead boot path, then replaced the hard-coded amd64 UEFI launch with
+required same-disk `/zedbsd.cfg` discovery and direct kernel-parameter
+translation. The next Boot work is the separately planned BIOS convergence in
+`ws013-p005` and `ws013-p006`; it has not yet crossed a new Queue boundary. The
+completed [q030](queue-q030.md) implemented `ws004-p022` through
+`ws004-p024`: the QEMU NVMe
 controller/admin/Identify foundation, bounded I/O/read/write/flush lifecycle,
 strict primary/backup GPT discovery, and the final disposable acceptance
-matrix. The next dependency-ready Queue is `q031`: `ws013-p002`--`p003`
-followed by `ws019-p002`--`p005`, before one combined physical
-`ws004-p025`/`ws003-p018` checkpoint. The
-previous Queue is [archived here](queue-q029.md). `ws004-p020` is
+matrix. Read-only storage administration moves to the next Queue; the
+installer and its QEMU acceptance remain outside q031 until live
+`DATA.IMG`/`SWAPFILE` copying is replaced by an approved stable-source
+contract. After WS019 p004/p005, one combined physical
+`ws004-p025`/`ws003-p018` checkpoint follows. `ws004-p020` is
 complete: fully valid NCM NTBs accept and resynchronize any sequence, malformed
 input preserves state, completion work is budgeted, and packet-filter
 programming occurs on open after the active alternate. The safe automatic
@@ -146,7 +152,7 @@ Installer v1 neither creates nor edits a partition table and never formats a
 filesystem. It requires an existing GPT disk with exactly one usable ESP, then
 requires the user to select a distinct existing FAT32 partition on that same
 disk. The ESP receives `EFI/BOOT/BOOTX64.EFI`; the selected payload filesystem
-receives `vmunix`, `boot.cfg`, `rootfs.img`, `data.img`, and `swapfile`.
+receives `vmunix`, `zedbsd.cfg`, `rootfs.img`, `data.img`, and `swapfile`.
 Unrelated files and partitions are preserved. Resize, move, GPT creation,
 filesystem creation, native root, and general dual-boot assistance are later
 work. USB boot remains the recommended way to try zedBSD without modifying
@@ -158,7 +164,25 @@ menu/file-selection boot on the Latitude. Portable unattended fixed-disk boot
 through an explicit firmware entry is a later optional step if the target
 firmware does not discover the fallback path.
 
-### 2.4 Program completion direction
+### 2.4 BIOS boot configuration convergence milestone
+
+All supported x86 BIOS loaders converge on the same direct configuration
+format already defined for UEFI. The three explicit targets are:
+
+- i386 PC/AT: active FAT PBR -> `BOOTZBSD.EXE` -> root `/zedbsd.cfg`;
+- amd64 BIOS: active payload FAT PBR -> `BOOTZBSD.EXE` -> root
+  `/zedbsd.cfg`, replacing the separate reserved-area direct-kernel path; and
+- i386 PC-98: native payload PBR -> `BOOTZBSD.EXE` -> root
+  `/BOOTZBSD.CFG`.
+
+The PC-98 filename remains different for its legacy environment, but its file
+format, bounds, normalization, configured-kernel behavior, and emitted kernel
+parameters are identical to `/zedbsd.cfg`. Common behavior is required;
+common loader source is not. On a modern hybrid GPT/MBR image, UEFI and BIOS
+must boot the same payload FAT and therefore the same configuration and
+images.
+
+### 2.5 Program completion direction
 
 The project advances toward the final goal when the base system can be built
 from its own maintained source, boots reliably on supported targets, provides
@@ -166,7 +190,7 @@ the documented UNIX/POSIX-oriented interfaces, and supports product-specific
 package sets for all four target classes. Individual WSs may complete or pause
 before this long-term product goal is reached.
 
-### 2.5 Design preference: interface-based modularity and late abstraction
+### 2.6 Design preference: interface-based modularity and late abstraction
 
 This subsection is informative rather than a mandatory project rule. It
 records the project owner's preferred style so that future design discussions
@@ -221,7 +245,7 @@ actually warranted.
 | --- | --- | --- | --- | --- | --- |
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q023 shell synchronization milestone complete | `ws001-p014` complete | Select the next bounded dependency-ready compliance item | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline | `ws002-p020` complete with handoffs | New networking work resumes in WS005 | [WS002](ws002-services/ws.md) |
-| `ws003` | Dell Latitude 5320 bring-up | Active; USB/network milestone complete; p018 overlay-NVMe install/boot dependency-gated | Dell-style UEFI `LoadOptions` regression is covered by BR-T48; p018 and later native p019 are defined | Run p018 only after WS004/WS013/WS019 overlay prerequisites; retain p019 for the later native-install milestone | [WS003](ws003-bringup/ws.md) |
+| `ws003` | Dell Latitude 5320 bring-up | Active; USB/network milestone complete; p018 overlay-NVMe install/boot dependency-gated | p017 LoadOptions policy is superseded by WS013 required `/zedbsd.cfg`; p018 and later native p019 are defined | Run p018 only after WS004/WS013/WS019 overlay prerequisites; retain p019 for the later native-install milestone | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; `q030` NVMe software sequence complete | `ws004-p010`--`p015`, `p018`, p020, and p022--p024 complete | Complete automatic WS013/WS019 prerequisites, then run the read-only p025 Latitude checkpoint with the later installed-boot acceptance | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WPA | Active; q029 p001 complete; WLAN manually blocked | Safe DHCP rollback/diagnostics, notification-pair and route-transaction repairs, USB-root/passthrough gates, and final Latitude-native `fetch www.google.com` pass | Select reconnect/reliability or another dependency-ready networking Phase; WLAN remains blocked | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; p005 PC/AT milestone complete in `q020` | `ws006-p005` complete | BeUI is unblocked; retain character-only HAL state/capability truthfulness, multi-source pointer ownership, consumer migration, legacy removal, and USB HID | [WS006](ws006-input/ws.md) |
@@ -231,7 +255,7 @@ actually warranted.
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; confirmed-commit public semantics fixed | `ws011-p003` complete; p005 bounds open; p004 manually blocked | Freeze p005 timeout/lock/diagnostic bounds; do not resume VLAN/bridge without explicit release | [WS011](ws011-net-config/ws.md) |
 | `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
-| `ws013` | CPAR container partitioning | Proposed; installer-relevant Boot v1 work split into p002/p003, Runtime topics manually blocked | `ws013-p001` records architecture; p002/p003 are planned | Implement deterministic ESP-to-payload discovery, then the bounded UEFI `boot.cfg` menu/translation | [WS013](ws013-containers/ws.md) |
+| `ws013` | CPAR container partitioning | Active; q031 simple `zedbsd.cfg` UEFI path complete, Runtime topics manually blocked | `ws013-p002`--`p004` complete; BIOS p005/p006 are planned | Queue the three explicit configured-`BOOTZBSD.EXE` targets: i386 PC/AT and amd64 BIOS in p005, then PC-98 in p006 | [WS013](ws013-containers/ws.md) |
 | `ws014` | Native GPU stack | Blocked by manual hold | `ws014-p001` is blocked before detailed design | Resume only after explicit user release | [WS014](ws014-gpu/ws.md) |
 | `ws015` | μITRON asymmetric real-time domain | Blocked by manual hold `MB-007`; user-mode RT direction recorded | `ws015-p001` is the only current Phase | After explicit hold release, select the μITRON profile and freeze the remaining RT/POSIX, mailbox/filesystem, failure, and timing contracts | [WS015](ws015-muitron-rt/ws.md) |
 | `ws016` | Runtime swap control | Complete (`q021`) | `ws016-p004` complete; SWAP-T001--T012 and the six-cell amd64 UEFI matrix pass | No Phase remains; extract a new requirement before resuming | [WS016](ws016-swap-control/ws.md) |
@@ -295,14 +319,17 @@ WS003 boot/storage + WS006 evdev + WS007 Xzed/graphics + WS016 swap
         +-- independent graphics frontends
         +-- boot/FAT native VFS consolidation -> remove bootfs
 
-WS013 Boot CPAR -- WS003 p011-p015 common x86 parameters
-                  +-- WS003/bootloader FAT32, LFN and boot.cfg menu
+WS013 Boot foundation -- WS003 p011-p015 common x86 parameters
+                       +-- UEFI same-disk FAT16/FAT32 `zedbsd.cfg`
+                       +-- direct overlay/native parameters; no menu yet
+                       +-- later PC/AT PBR/BOOTZBSD `/zedbsd.cfg`
+                       +-- later PC-98 BOOTZBSD `BOOTZBSD.CFG`
 WS013 Runtime CPAR -- WS012 service administration
                    +-- WS005 optional network profiles
                    +-- WS004 persistent image storage
 
 WS004 p022-p025 NVMe driver/read-only hardware acceptance
-  + WS013 p002/p003 ESP-to-payload discovery + overlay boot.cfg translation
+  + WS013 p002/p003 same-disk zedbsd.cfg discovery + direct parameter translation
   + WS019 p002-p005 read-only diskpart + existing-FAT zedinst acceptance
        -> WS003 p018 Latitude existing-FAT overlay install and boot
        -> WS009 USB-trial/install/recovery guide
@@ -367,11 +394,14 @@ priority POSIX gaps may remain paused if they do not block the active milestone.
 | zedBSD GPU/Vulkan capability, object, and display-takeover profile | WS014 | Manually blocked; publishing `/dev/gpuN` UAPI or transferring i915 ownership |
 | YAML `/etc/rc.conf` schema and versioned init status/control protocol | WS012 | Resolved and complete: q017 completed YAML/persistence; q018 completed typed `/run/init.sock` service and `ZSV1 HALT`/`POWEROFF`/`REBOOT` clients, argv/interactive administration, and production integration with no unversioned compatibility path |
 | x86 kernel boot-parameter contract | WS003/WS013 | Resolved and implemented by q015: `boot0`--`boot3`, exclusive `rootpart` or explicit overlay root/data, `swap0`--`swap3`, and `init`; BR-T46 passes all 31 four-platform QEMU cells |
-| UEFI Boot CPAR `boot.cfg`/LFN/menu contract | WS013 | Initial installer path uses `/boot.cfg` and `/vmunix` on one uniquely discoverable same-disk payload FAT32; p002 injects its PARTUUID as `boot0`, and p003 implements the bounded menu/translation; legacy PC/AT and PC-98 menus are excluded |
+| UEFI `zedbsd.cfg` boot contract | WS013 | Resolved for q031: required same-disk FAT16/FAT32 `/zedbsd.cfg`, required loader-only `kernel=`, direct kernel parameters with bounded shorthand, overlay or native `rootpart`, no menu, and ignored UEFI LoadOptions |
+| BIOS boot configuration names and convergence | WS013 p005/p006 | Resolved for planning: i386 PC/AT PBR/`BOOTZBSD.EXE` and amd64 BIOS PBR/`BOOTZBSD.EXE` use `/zedbsd.cfg`; PC-98 `BOOTZBSD.EXE` uses `/BOOTZBSD.CFG`; all three implement the exact p003 format and parameter result, with no existing `boot.cfg` compatibility reader to preserve |
 | NVMe partition naming | WS004/WS019 | Resolved by the existing one-based disk contract: namespace is `/dev/nvme0n1`, first partition is `p1`; the earlier `p0` example is not a new ABI |
 | Installer v1 layout and mutation boundary | WS019 p001 | Resolved: existing GPT, exactly one existing ESP, one explicitly selected distinct same-disk FAT32, no mkfs/GPT writes/label writes, overlay files only, and no firmware-variable mutation |
 | Installer read-only administration UAPI | WS019 p002 | Expose stable whole/partition identity, GPT type/PARTUUID, parent relation, capacity, filesystem type, mount/swap state, and loader-origin identity before read-only `diskpart` and `zedinst` preflight |
-| Installer payload discovery | WS013 p002 | Resolve exactly one same-disk non-ESP FAT32 containing `/vmunix` and `/boot.cfg`; ambiguity or absence is a visible error; inject its PARTUUID as `boot0` |
+| Installer payload discovery | WS013 p002 | Resolved for q031: search same-physical-disk FAT16/FAT32; zero `/zedbsd.cfg` candidates is fatal, multiple candidates warn and use the deterministic first, and omitted `boot0` defaults to the selected config FAT while an explicit value is preserved |
+| Installed UEFI `LoadOptions` precedence | WS013 p002/p003 | Resolved for q031: ignore LoadOptions on the required `zedbsd.cfg` path; do not merge or override the configuration |
+| Installer source-image stability | WS019 p004 | Choose unused immutable installer templates for data/swap (recommended) or explicitly redesign p004 to generate them at the target; never copy the live overlay upper or active swap |
 | Runtime CPAR namespace/security, CLI/build, and service-package contracts | WS013 | Manually blocked; any Runtime CPAR implementation Phase |
 | Confirmed-commit implementation bounds | WS011 | Public semantics are fixed: interactive only, explicit timeout, delayed `/etc/net.conf` write, ordinary `commit` confirms, and DHCP is reacquired; freeze timeout maximum, lock path, and diagnostic bounds before implementation |
 | Authoritative Noct repository, build sequence, and revision | WS008 | Resolved by q022 and refined by q023: official main is `awemorris/NoctLang`; zedBSD tracks only `userland/noct/Makefile`, which clones and builds pinned commit `c1e4e0fcdbb7b8cdf1705601b13d57b787c61621` under `userland/noct/NoctLang` |

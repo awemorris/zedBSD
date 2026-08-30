@@ -20,7 +20,8 @@ or weakening the completed existing-FAT overlay milestone.
 - select-existing versus create/format native filesystem;
 - whole-disk GPT layout and destructive confirmation, if offered;
 - UFS provisioning/growth and recovery;
-- native `boot.cfg` entry and exact `rootpart=PARTUUID=...` selection;
+- native `zedbsd.cfg` with `kernel=` and exact
+  `rootpart=PARTUUID=...` selection;
 - firmware Boot-entry policy after experience with p018 fallback boot.
 
 ## Entry condition

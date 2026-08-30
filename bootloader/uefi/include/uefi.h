@@ -10,6 +10,7 @@
 
 typedef uint8_t BOOLEAN;
 typedef uint16_t CHAR16;
+typedef int16_t INT16;
 typedef uint64_t EFI_STATUS;
 typedef void *EFI_HANDLE;
 typedef void *EFI_EVENT;
@@ -23,11 +24,18 @@ typedef uint64_t UINT64;
 #define EFI_LOAD_ERROR (0x8000000000000001ULL)
 #define EFI_INVALID_PARAMETER (0x8000000000000002ULL)
 #define EFI_UNSUPPORTED (0x8000000000000003ULL)
+#define EFI_BAD_BUFFER_SIZE (0x8000000000000004ULL)
 #define EFI_BUFFER_TOO_SMALL (0x8000000000000005ULL)
+#define EFI_DEVICE_ERROR (0x8000000000000007ULL)
+#define EFI_OUT_OF_RESOURCES (0x8000000000000009ULL)
+#define EFI_NO_MEDIA (0x800000000000000cULL)
+#define EFI_MEDIA_CHANGED (0x800000000000000dULL)
 #define EFI_NOT_FOUND (0x800000000000000eULL)
+#define EFI_ACCESS_DENIED (0x800000000000000fULL)
 #define EFI_ERROR(status) (((status) & 0x8000000000000000ULL) != 0)
 
 #define EFI_FILE_MODE_READ 0x0000000000000001ULL
+#define EFI_FILE_DIRECTORY 0x0000000000000010ULL
 
 enum efi_allocate_type {
 	AllocateAnyPages,
@@ -54,6 +62,12 @@ enum efi_memory_type {
 	EfiPersistentMemory,
 	EfiUnacceptedMemoryType,
 	EfiMaxMemoryType
+};
+
+enum efi_locate_search_type {
+	AllHandles,
+	ByRegisterNotify,
+	ByProtocol
 };
 
 typedef struct {
@@ -85,12 +99,43 @@ typedef struct {
 	UINT64 Attribute;
 } EFI_MEMORY_DESCRIPTOR;
 
+typedef struct {
+	uint16_t Year;
+	uint8_t Month;
+	uint8_t Day;
+	uint8_t Hour;
+	uint8_t Minute;
+	uint8_t Second;
+	uint8_t Pad1;
+	UINT32 Nanosecond;
+	INT16 TimeZone;
+	uint8_t Daylight;
+	uint8_t Pad2;
+} EFI_TIME;
+
+typedef struct {
+	UINT64 Size;
+	UINT64 FileSize;
+	UINT64 PhysicalSize;
+	EFI_TIME CreateTime;
+	EFI_TIME LastAccessTime;
+	EFI_TIME ModificationTime;
+	UINT64 Attribute;
+	CHAR16 FileName[1];
+} EFI_FILE_INFO;
+
 struct efi_simple_text_output_protocol;
 struct efi_boot_services;
 struct efi_system_table;
 struct efi_file_protocol;
 struct efi_graphics_output_protocol;
 struct efi_block_io_protocol;
+
+typedef struct {
+	uint8_t Type;
+	uint8_t SubType;
+	uint8_t Length[2];
+} EFI_DEVICE_PATH_PROTOCOL;
 
 typedef EFI_STATUS(EFIAPI *EFI_TEXT_STRING)(
     struct efi_simple_text_output_protocol *, const CHAR16 *);
@@ -120,6 +165,8 @@ typedef EFI_STATUS(EFIAPI *EFI_HANDLE_PROTOCOL)(EFI_HANDLE, const EFI_GUID *,
 typedef EFI_STATUS(EFIAPI *EFI_EXIT_BOOT_SERVICES)(EFI_HANDLE, UINTN);
 typedef EFI_STATUS(EFIAPI *EFI_LOCATE_PROTOCOL)(const EFI_GUID *, void *,
 						void **);
+typedef EFI_STATUS(EFIAPI *EFI_LOCATE_HANDLE_BUFFER)(
+	int, const EFI_GUID *, void *, UINTN *, EFI_HANDLE **);
 
 typedef struct efi_boot_services {
 	EFI_TABLE_HEADER Hdr;
@@ -159,7 +206,7 @@ typedef struct efi_boot_services {
 	void *CloseProtocol;
 	void *OpenProtocolInformation;
 	void *ProtocolsPerHandle;
-	void *LocateHandleBuffer;
+	EFI_LOCATE_HANDLE_BUFFER LocateHandleBuffer;
 	EFI_LOCATE_PROTOCOL LocateProtocol;
 	void *InstallMultipleProtocolInterfaces;
 	void *UninstallMultipleProtocolInterfaces;
@@ -209,6 +256,8 @@ typedef EFI_STATUS(EFIAPI *EFI_FILE_READ)(struct efi_file_protocol *, UINTN *,
 					  void *);
 typedef EFI_STATUS(EFIAPI *EFI_FILE_SET_POSITION)(struct efi_file_protocol *,
 						  UINT64);
+typedef EFI_STATUS(EFIAPI *EFI_FILE_GET_INFO)(struct efi_file_protocol *,
+					      const EFI_GUID *, UINTN *, void *);
 
 typedef struct efi_file_protocol {
 	UINT64 Revision;
@@ -219,7 +268,7 @@ typedef struct efi_file_protocol {
 	void *Write;
 	void *GetPosition;
 	EFI_FILE_SET_POSITION SetPosition;
-	void *GetInfo;
+	EFI_FILE_GET_INFO GetInfo;
 	void *SetInfo;
 	void *Flush;
 	void *OpenEx;
@@ -311,6 +360,16 @@ static const EFI_GUID EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID = {
 static const EFI_GUID EFI_BLOCK_IO_PROTOCOL_GUID = {
     0x964e5b21,
     0x6459,
+    0x11d2,
+    {0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b}};
+static const EFI_GUID EFI_DEVICE_PATH_PROTOCOL_GUID = {
+    0x09576e91,
+    0x6d3f,
+    0x11d2,
+    {0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b}};
+static const EFI_GUID EFI_FILE_INFO_ID = {
+    0x09576e92,
+    0x6d3f,
     0x11d2,
     {0x8e, 0x39, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b}};
 static const EFI_GUID EFI_ACPI_TABLE_GUID = {

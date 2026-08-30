@@ -13,6 +13,7 @@ boot_timeout=${BOOT_TIMEOUT_SECONDS:-120}
 command_timeout=${COMMAND_TIMEOUT_SECONDS:-3600}
 runtime_case=${RUNTIME_CASE:-all}
 run_br_t46=${RUN_BR_T46:-1}
+uefi_fat_uuid=6740-911D
 output=
 
 usage()
@@ -71,17 +72,10 @@ done
 [[ -f $ovmf_code ]] || { echo "OVMF code not found: $ovmf_code" >&2; exit 2; }
 [[ -f $ovmf_vars ]] || { echo "OVMF vars not found: $ovmf_vars" >&2; exit 2; }
 noct=$repo/build/NoctLang/build-static/noct
-parameter_patcher=$br_t46_dir/patch-boot-parameter-record.noct
 [[ -x $noct ]] || {
 	echo "Noct toolchain missing; run make toolchain first" >&2
 	exit 2
 }
-[[ -f $parameter_patcher ]] || {
-	echo "BPR1 patcher missing: $parameter_patcher" >&2
-	exit 2
-}
-"$noct" --path="$repo/tools/build" "$parameter_patcher" --self-test \
-	>"$output/host/bpr1-patcher-self-test.log"
 
 image_tool=$output/host/boot-parameter-image-tool
 cc -std=c11 -Wall -Wextra -Werror \
@@ -163,6 +157,49 @@ parameters_for()
 	esac
 }
 
+write_uefi_config()
+{
+	local parameters=$1 destination=$2 bytes lines longest assembled
+	local -a tokens=()
+	read -r -a tokens <<<"$parameters"
+	((${#tokens[@]} > 0)) || {
+		echo 'cannot create zedbsd.cfg from an empty parameter record' >&2
+		return 1
+	}
+	{
+		printf 'kernel=vmunix\n'
+		printf '%s\n' "${tokens[@]}"
+	} >"$destination"
+	bytes=$(wc -c <"$destination")
+	lines=$(wc -l <"$destination")
+	longest=$(awk '{ if (length > maximum) maximum=length }
+	    END { print maximum+0 }' "$destination")
+	assembled=$(uefi_parameter_text "$parameters")
+	if ((bytes > 4096 || lines > 64 || longest > 511 ||
+	    ${#assembled} > 3071)); then
+		echo "generated zedbsd.cfg exceeds parser bounds: $destination" >&2
+		return 1
+	fi
+}
+
+uefi_parameter_text()
+{
+	local parameters=$1 token have_boot0=0
+	local -a tokens=()
+	read -r -a tokens <<<"$parameters"
+	for token in "${tokens[@]}"; do
+		if [[ $token == boot0=* ]]; then
+			have_boot0=1
+			break
+		fi
+	done
+	if ((have_boot0)); then
+		printf '%s\n' "$parameters"
+	else
+		printf 'boot0=UUID=%s %s\n' "$uefi_fat_uuid" "$parameters"
+	fi
+}
+
 build_once()
 {
 	local build_log=$output/build-logs/production.log
@@ -178,14 +215,13 @@ build_once()
 	fi
 }
 
-prepare_uefi_loader()
+prepare_uefi_case()
 {
-	local parameters=$1 destination=$2
-	"$noct" --path="$repo/tools/build" "$parameter_patcher" \
-	    --text "$parameters" "$repo/build/amd64/uefi/BOOTX64.EFI" \
-	    "$destination"
+	local parameters=$1 loader=$2 config=$3
+	cp "$repo/build/amd64/uefi/BOOTX64.EFI" "$loader"
+	write_uefi_config "$parameters" "$config"
 	"$noct" --path="$repo/tools/build" \
-	    "$repo/platform/amd64/tools/check-bootx64.noct" "$destination"
+	    "$repo/platform/amd64/tools/check-bootx64.noct" "$loader"
 }
 
 rootfs_staging=$output/host/rootfs
@@ -227,7 +263,8 @@ build_rootfs_fixtures()
 
 build_image()
 {
-	local case_name=$1 destination=$2 bootx64=$3 build_dir=$repo/build/amd64
+	local case_name=$1 destination=$2 bootx64=$3 zedbsd_config=$4
+	local build_dir=$repo/build/amd64
 	local command=("$repo/build/zedimage-host" disk --machine pcat --gpt
 	    --size-mib 201 --fat-size-mib 128
 	    --stage1 "$build_dir/bootloader/stage1.bin"
@@ -235,7 +272,8 @@ build_image()
 	    --partition-pbr "$build_dir/bootloader/partition-pbr.bin"
 	    --bootzbsd "$build_dir/bootloader/BOOTZBSD.EXE"
 	    --kernel "$build_dir/vmunix"
-	    --bootx64 "$bootx64")
+	    --bootx64 "$bootx64"
+	    --zedbsd-config "$zedbsd_config")
 	case $case_name in
 	file)
 		command+=(--arch-image "$overlay_rootfs"
@@ -254,6 +292,8 @@ build_image()
 	esac
 	command+=("$destination")
 	"${command[@]}"
+	"$image_tool" set-fat-uuid --partition-lba 2048 \
+	    --uuid "$uefi_fat_uuid" "$destination"
 	case $case_name in
 	file)
 		mcopy -o -i "$destination@@1048576" "$bad_swap" ::BADSWAP
@@ -444,14 +484,18 @@ production_loader_hash=$(sha256sum "$repo/build/amd64/uefi/BOOTX64.EFI" | \
 build_rootfs_fixtures >"$output/build-logs/fixtures.log" 2>&1
 for case_name in file mixed native; do
 	selected_runtime_case "$case_name" || continue
+	source_parameters_file=$output/config/$case_name.source.parameters
+	parameters_for "$case_name" >"$source_parameters_file"
+	source_parameters=$(<"$source_parameters_file")
 	parameters_file=$output/config/$case_name.parameters
-	parameters_for "$case_name" >"$parameters_file"
+	uefi_parameter_text "$source_parameters" >"$parameters_file"
 	parameters=$(<"$parameters_file")
 	loader=$output/images/$case_name-BOOTX64.EFI
-	prepare_uefi_loader "$parameters" "$loader" \
-	    >"$output/build-logs/$case_name-loader-patch.log"
+	zedbsd_config=$output/config/$case_name.zedbsd.cfg
+	prepare_uefi_case "$source_parameters" "$loader" "$zedbsd_config" \
+	    >"$output/build-logs/$case_name-loader-preparation.log"
 	base_image=$output/images/$case_name-base.img
-	build_image "$case_name" "$base_image" "$loader" \
+	build_image "$case_name" "$base_image" "$loader" "$zedbsd_config" \
 	    >"$output/cells/$case_name-image-layout.txt"
 	image_hash=$(sha256sum "$base_image" | awk '{print $1}')
 	parameter_hash=$(sha256sum "$parameters_file" | awk '{print $1}')

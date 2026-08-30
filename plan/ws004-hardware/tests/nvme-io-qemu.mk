@@ -40,6 +40,7 @@ $(WS004_P023_IMAGE): $(BUILD)/bootloader/stage1.bin \
 	$(BUILD)/bootloader/BOOTZBSD.EXE $(BUILD)/vmunix \
 	$(WS004_P023_UFS) $(DATA_IMAGE) $(SWAP_IMAGE) \
 	$(BUILD)/uefi/BOOTX64.EFI tools/build/make-bios-hdd-image.noct \
+	platform/amd64/zedbsd.cfg \
 	platform/amd64/tools/check-amd64-gpt-image.noct
 	$(NOCT) --path=tools/build tools/build/make-bios-hdd-image.noct \
 		--backend $(abspath $(ZEDBSD_IMAGE_HOST)) --force \
@@ -51,6 +52,7 @@ $(WS004_P023_IMAGE): $(BUILD)/bootloader/stage1.bin \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE \
 		--kernel $(BUILD)/vmunix \
 		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config platform/amd64/zedbsd.cfg \
 		--arch-profile amd64 --arch-image $(WS004_P023_UFS) \
 		--arch-format ufs --data-image $(DATA_IMAGE) \
 		--swapfile $(SWAP_IMAGE) $@

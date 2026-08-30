@@ -17,7 +17,7 @@ func main(args){
         else if(a=="--arch-image"&&i+1<Array.size(args)){arch=args[i+1];i=i+2;}
         else if(a=="--data-image"&&i+1<Array.size(args)){dataImage=args[i+1];i=i+2;}
         else if(a=="--swapfile"&&i+1<Array.size(args)){swap=args[i+1];i=i+2;}
-        else if((a=="--fat-type"||a=="--arch-profile"||a=="--arch-format"||a=="--noct"||a=="--holoris"||a=="--bin-file"||a=="--ufs-root"||a=="--bootx64")&&i+1<Array.size(args)){i=i+2;}
+        else if((a=="--fat-type"||a=="--arch-profile"||a=="--arch-format"||a=="--noct"||a=="--holoris"||a=="--bin-file"||a=="--ufs-root"||a=="--bootx64"||a=="--zedbsd-config")&&i+1<Array.size(args)){i=i+2;}
         else if(String.indexOf(a,"--")==0){zbFail("unsupported BIOS checker option: "+a);}
         else {image=a;i=i+1;}
     }

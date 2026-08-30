@@ -1,6 +1,6 @@
 # WS003 Phase 017: UEFI LoadOptions firmware compatibility
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 WSID: `ws003`
 
@@ -8,14 +8,23 @@ Phase ID: `p017`
 
 Combined ID: `ws003-p017`
 
-Status: Implementation and QEMU verification complete; one physical acceptance
-boot pending
+Status: Superseded by `ws013-p003`; historical implementation/evidence only
 
 Parent: [WS003](../ws.md)
 
 Contract: [kernel boot parameters](../../../docs/reference/kernel-boot-parameters.md)
 
 Shared tests: [WS003 test index](../tests/README.md)
+
+## Supersession
+
+WS013 p003 deliberately removed the UEFI parameter-source behavior described
+below. `BOOTX64.EFI` now ignores `LoadOptions` and obtains its configured
+kernel and complete parameter text only from required `/zedbsd.cfg`. The old
+converter and BR-T48 entry wrapper are removed in WS013 p004; CT-T016 retains
+the useful negative regression by proving that nonempty valid LoadOptions does
+not alter the configuration result. No pending physical acceptance remains
+for this superseded policy.
 
 ## Trigger
 

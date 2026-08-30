@@ -23,12 +23,13 @@ func header(data, at, current, backup, entriesLba) {
     return zbU32LE(data, at + 88);
 }
 func main(args) {
-    var image="";var kernel="";var bootzbsd="";var bootx64="";var arch="";var dataImage="";var swap="";var i=0;
+    var image="";var kernel="";var bootzbsd="";var bootx64="";var zedbsdConfig="";var arch="";var dataImage="";var swap="";var i=0;
     while(i<Array.size(args)){
         var a=args[i];
         if(a=="--kernel"&&i+1<Array.size(args)){kernel=args[i+1];i=i+2;}
         else if(a=="--bootzbsd"&&i+1<Array.size(args)){bootzbsd=args[i+1];i=i+2;}
         else if(a=="--bootx64"&&i+1<Array.size(args)){bootx64=args[i+1];i=i+2;}
+        else if(a=="--zedbsd-config"&&i+1<Array.size(args)){zedbsdConfig=args[i+1];i=i+2;}
         else if(a=="--arch-image"&&i+1<Array.size(args)){arch=args[i+1];i=i+2;}
         else if(a=="--data-image"&&i+1<Array.size(args)){dataImage=args[i+1];i=i+2;}
         else if(a=="--swapfile"&&i+1<Array.size(args)){swap=args[i+1];i=i+2;}
@@ -49,6 +50,6 @@ func main(args) {
     var sectors=zbU16LE(raw,stage+12);var sum=0;for(i in 0..sectors*128){sum=(sum+zbU32LE(raw,stage+i*4))&4294967295;}if(sum!=0){zbFail("ZBL2 checksum mismatch");}
     var backup=(total-33)*512;for(i in 0..16384){if(raw[1024+i]!=raw[backup+i]){zbFail("backup GPT entries differ");}}
     header(raw,(total-1)*512,total-1,1,total-33);
-    compareFat(image,bootzbsd,"BOOTZBSD.EXE");compareFat(image,kernel,"VMUNIX");compareFat(image,kernel,"VMUNIX.X64");compareFat(image,bootx64,"EFI/BOOT/BOOTX64.EFI");compareFat(image,arch,"ROOTFS.IMG");compareFat(image,dataImage,"DATA.IMG");compareFat(image,swap,"SWAPFILE");
+    compareFat(image,bootzbsd,"BOOTZBSD.EXE");compareFat(image,kernel,"VMUNIX");compareFat(image,bootx64,"EFI/BOOT/BOOTX64.EFI");compareFat(image,zedbsdConfig,"ZEDBSD.CFG");compareFat(image,arch,"ROOTFS.IMG");compareFat(image,dataImage,"DATA.IMG");compareFat(image,swap,"SWAPFILE");
     print("amd64 GPT image check: PASS");
 }

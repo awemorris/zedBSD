@@ -261,6 +261,7 @@ printf 'platform\tcase\tstatus\timage_sha256\tparameters_sha256\telapsed_seconds
     >"$output/results.tsv"
 
 default_parameters='overlay-root=boot0:rootfs.img overlay-data=boot0:data.img swap0=boot0:swapfile'
+uefi_fat_uuid=6740-911D
 
 parameter_text()
 {
@@ -298,6 +299,49 @@ parameter_text()
 		;;
 	*) return 2 ;;
 	esac
+}
+
+write_uefi_config()
+{
+	local parameters=$1 destination=$2 bytes lines longest assembled
+	local -a tokens=()
+	read -r -a tokens <<<"$parameters"
+	((${#tokens[@]} > 0)) || {
+		echo 'cannot create zedbsd.cfg from an empty parameter record' >&2
+		return 1
+	}
+	{
+		printf 'kernel=vmunix\n'
+		printf '%s\n' "${tokens[@]}"
+	} >"$destination"
+	bytes=$(wc -c <"$destination")
+	lines=$(wc -l <"$destination")
+	longest=$(awk '{ if (length > maximum) maximum=length }
+	    END { print maximum+0 }' "$destination")
+	assembled=$(uefi_parameter_text "$parameters")
+	if ((bytes > 4096 || lines > 64 || longest > 511 ||
+	    ${#assembled} > 3071)); then
+		echo "generated zedbsd.cfg exceeds parser bounds: $destination" >&2
+		return 1
+	fi
+}
+
+uefi_parameter_text()
+{
+	local parameters=$1 token have_boot0=0
+	local -a tokens=()
+	read -r -a tokens <<<"$parameters"
+	for token in "${tokens[@]}"; do
+		if [[ $token == boot0=* ]]; then
+			have_boot0=1
+			break
+		fi
+	done
+	if ((have_boot0)); then
+		printf '%s\n' "$parameters"
+	else
+		printf 'boot0=UUID=%s %s\n' "$uefi_fat_uuid" "$parameters"
+	fi
 }
 
 build_group_once()
@@ -398,8 +442,8 @@ prepare_case_loaders()
 	    "$destination/bootzbsd.bin" "$destination/BOOTZBSD.EXE"
 
 	if [[ $group == amd64 ]]; then
-		patch_record "$parameters" "$build_dir/uefi/BOOTX64.EFI" \
-		    "$destination/BOOTX64.EFI"
+		cp "$build_dir/uefi/BOOTX64.EFI" "$destination/BOOTX64.EFI"
+		write_uefi_config "$parameters" "$destination/zedbsd.cfg"
 		"$noct" --path="$repo/tools/build" \
 		    "$repo/platform/amd64/tools/check-bootx64.noct" \
 		    "$destination/BOOTX64.EFI"
@@ -423,7 +467,8 @@ build_extended_image()
 	    --bootzbsd "$loaders/BOOTZBSD.EXE"
 	    --kernel "$build_dir/vmunix" --size-mib 201 --fat-size-mib 128)
 	if [[ $group == amd64 ]]; then
-		command+=(--gpt --bootx64 "$loaders/BOOTX64.EFI")
+		command+=(--gpt --bootx64 "$loaders/BOOTX64.EFI"
+		    --zedbsd-config "$loaders/zedbsd.cfg")
 	fi
 	case $case_name in
 	default|shell|invalid|cross-boot|partuuid-reorder)
@@ -659,8 +704,11 @@ monitor_controller()
 validate_log()
 {
 	local platform=$1 case_name=$2 parameters=$3 guest_log=$4
-	local raw_device expected_sources
+	local raw_device expected_sources boot0_source='<loader-origin>'
 	raw_device=$([[ $platform == amd64-* ]] && echo /dev/sda3 || echo /dev/sda2)
+	if [[ $platform == amd64-uefi ]]; then
+		boot0_source=UUID=$uefi_fat_uuid
+	fi
 	if ! rg -a -F -q -- "boot: parameters: $parameters" "$guest_log"; then
 		echo "missing exact parameter marker" >&2
 		return 1
@@ -716,13 +764,13 @@ validate_log()
 		rg -a -q 'BR-T46-SWAP-EXERCISE PASS bytes=[1-9][0-9]* page-in=[1-9][0-9]* page-out=[1-9][0-9]* swapped=[0-9][0-9]*' "$guest_log"
 		;;
 	cross-boot)
-		rg -a -F -q 'vfs: boot0 <loader-origin> -> /dev/sdb1' "$guest_log" &&
+		rg -a -F -q "vfs: boot0 $boot0_source -> /dev/sdb1" "$guest_log" &&
 		rg -a -F -q 'vfs: boot1 UUID=A1B2-C3D4 -> /dev/sda1' "$guest_log" &&
 		rg -a -F -q 'vfs: root=overlay lower=boot0:rootfs.img upper=boot1:data.img' "$guest_log" &&
 		rg -a -q '(^|[[:blank:]])login:[[:blank:]]*$' "$guest_log"
 		;;
 	partuuid-reorder)
-		rg -a -F -q 'vfs: boot0 <loader-origin> -> /dev/sdb1' "$guest_log" &&
+		rg -a -F -q "vfs: boot0 $boot0_source -> /dev/sdb1" "$guest_log" &&
 		rg -a -F -q 'vfs: boot1 PARTUUID=fbf09090-01 -> /dev/sda1' "$guest_log" &&
 		rg -a -F -q 'vfs: root=overlay lower=boot0:rootfs.img upper=boot1:data.img' "$guest_log" &&
 		rg -a -q '(^|[[:blank:]])login:[[:blank:]]*$' "$guest_log"
@@ -926,6 +974,8 @@ run_group()
 {
 	local group=$1 config build_dir
 	local case_name parameters_file parameters group_cases
+	local uefi_parameters_file= uefi_parameters= run_parameters
+	local run_parameters_file
 	local base_image auxiliary_image platform cell_dir image_hash param_hash elapsed
 	local cell_status elapsed_file
 	local acceptance_rootfs=
@@ -959,6 +1009,11 @@ run_group()
 		parameters_file=$output/config/$group-$case_name.parameters
 		parameter_text "$group" "$case_name" >"$parameters_file"
 		parameters=$(<"$parameters_file")
+		if [[ $group == amd64 ]]; then
+			uefi_parameters_file=$output/config/$group-$case_name.uefi.parameters
+			uefi_parameter_text "$parameters" >"$uefi_parameters_file"
+			uefi_parameters=$(<"$uefi_parameters_file")
+		fi
 		cell_dir=$output/cells/$group-$case_name-artifacts
 		mkdir -p "$cell_dir"
 		local loaders=$cell_dir/loaders
@@ -991,8 +1046,14 @@ run_group()
 		auxiliary_image=
 		case $case_name in
 		default)
-			cp --reflink=auto --sparse=always \
-			    "$build_dir/hdd-image.img" "$base_image"
+			if [[ $group == amd64 ]]; then
+				build_extended_image "$group" "$case_name" \
+				    "$base_image" "$loaders" \
+				    >"$cell_dir/image-layout.txt"
+			else
+				cp --reflink=auto --sparse=always \
+				    "$build_dir/hdd-image.img" "$base_image"
+			fi
 			;;
 		file-swap|raw-swap|mixed-swap)
 			if [[ -z $acceptance_rootfs ]]; then
@@ -1010,6 +1071,11 @@ run_group()
 			    >"$cell_dir/image-layout.txt"
 			;;
 		esac
+		if [[ $group == amd64 ]]; then
+			"$image_tool" set-fat-uuid --partition-lba 2048 \
+			    --uuid "$uefi_fat_uuid" "$base_image" \
+			    >>"$cell_dir/image-layout.txt"
+		fi
 		if [[ $case_name == cross-boot || \
 		    $case_name == partuuid-reorder ]]; then
 			auxiliary_image=$cell_dir/aux-base.img
@@ -1017,10 +1083,17 @@ run_group()
 			    >"$cell_dir/aux-layout.txt"
 		fi
 		image_hash=$(sha256sum "$base_image" | awk '{print $1}')
-		param_hash=$(sha256sum "$parameters_file" | awk '{print $1}')
 		if [[ $group == amd64 ]]; then
 			for platform in amd64-bios amd64-uefi; do
 				selected "$platform" "$case_name" || continue
+				run_parameters=$parameters
+				run_parameters_file=$parameters_file
+				if [[ $platform == amd64-uefi ]]; then
+					run_parameters=$uefi_parameters
+					run_parameters_file=$uefi_parameters_file
+				fi
+				param_hash=$(sha256sum "$run_parameters_file" | \
+				    awk '{print $1}')
 				local run_dir=$output/cells/$platform-$case_name
 				mkdir -p "$run_dir"
 				echo "BR-T46 run: $platform $case_name"
@@ -1029,7 +1102,7 @@ run_group()
 				(
 					set -e
 					run_qemu_cell "$platform" "$case_name" \
-				    "$base_image" "$auxiliary_image" "$parameters" \
+				    "$base_image" "$auxiliary_image" "$run_parameters" \
 				    "$run_dir"
 				) >"$elapsed_file"
 				cell_status=$?
@@ -1048,6 +1121,7 @@ run_group()
 			done
 		else
 			platform=$group
+			param_hash=$(sha256sum "$parameters_file" | awk '{print $1}')
 			local run_dir=$output/cells/$platform-$case_name
 			mkdir -p "$run_dir"
 			echo "BR-T46 run: $platform $case_name"

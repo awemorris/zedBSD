@@ -289,27 +289,20 @@ The bootloader-to-HAL handoff carries one bounded, NUL-terminated parameter
 string. The HAL copies it into kernel-owned storage before temporary loader
 memory can be unmapped. No CPAR-specific binary handoff is added.
 
-Each of the four x86 production loaders materializes the generated-image
-default shown in Section 5.2 when its loader input is absent or empty. A
-nonempty recognized loader parameter source is the complete final parameter
-string and replaces that default; it is not merged token by token.
-Consequently, an explicit override must include one complete root mode. This
-keeps precedence identical across Multiboot, custom BIOS handoffs, and
-recognized UEFI text `LoadOptions` and prevents hidden duplicate-key
-resolution.
+The current BIOS loaders materialize the maintained image default shown in
+Section 5.2 when their loader input is absent or empty. A nonempty supported
+BIOS/Multiboot source is the complete final parameter string and replaces that
+default; values are not merged token by token.
 
-UEFI defines `EFI_LOADED_IMAGE_PROTOCOL.LoadOptions` as an opaque,
-length-delimited binary buffer sourced from a boot option's `OptionalData`; it
-does not require that firmware terminate it as text. zedBSD recognizes a
-bounded printable-ASCII `CHAR16` buffer, with or without a final NUL, only when
-its first token begins with a known zedBSD parameter name. Empty or
-unrecognized options use the image default. Some x86 firmware passes the
-complete packed `EFI_LOAD_OPTION` descriptor instead of `OptionalData`; the
-loader validates every description and Device Path boundary before extracting
-that descriptor's `OptionalData`. Any other firmware-specific binary form is
-diagnosed as ignored and never prevents removable-media boot. All multi-byte
-fields are decoded bytewise because neither descriptor nor `OptionalData`
-requires natural alignment.
+amd64 UEFI instead requires a same-boot-disk FAT16/FAT32 root
+`/zedbsd.cfg`. Its one `kernel=` directive is consumed by `BOOTX64.EFI`; every
+other line forms the complete final parameter string after the documented
+selected-FAT `boot0` and relative-file normalizations. There is no embedded
+parameter or fixed-kernel fallback on this path.
+
+UEFI `EFI_LOADED_IMAGE_PROTOCOL.LoadOptions` is ignored unconditionally. It
+does not replace, prepend, append, or repair `/zedbsd.cfg`, and descriptor or
+opaque firmware data cannot prevent discovery of the required configuration.
 
 All four x86 paths use the same common parser and observable semantics:
 
@@ -318,7 +311,7 @@ All four x86 paths use the same common parser and observable semantics:
 | i386 PC/AT | Loader/Multiboot input reaches the common parser and boots both overlay and `rootpart` modes |
 | i386 PC-98 | Versioned loader handoff reaches the common parser and boots both root modes |
 | amd64 BIOS | Versioned ZBL6 handoff reaches the common parser and boots both root modes |
-| amd64 UEFI | Bounded UEFI/loader text reaches the common parser and boots both root modes |
+| amd64 UEFI | Required `/zedbsd.cfg` text reaches the common parser and boots both root modes; UEFI `LoadOptions` is ignored |
 
 ### 9.1 Non-x86 NULL-source compatibility boundary
 
@@ -352,8 +345,9 @@ The implementation is divided into focused production-code gates:
 
 - BR-T42 covers bounded parsing, owned storage, the complete key set,
   duplicates, malformed input, and `init=`;
-- BR-T43 covers the shared record, all four x86 handoff layouts, and UEFI
-  `LoadOptions` conversion;
+- BR-T43 covers the shared record and all four x86 handoff layouts;
+- WS013 CT-T008--CT-T016 cover bounded `/zedbsd.cfg` parsing, selected-FAT
+  normalization, configured-kernel loading, and ignored UEFI `LoadOptions`;
 - BR-T44 covers selectors, private boot slots, aliases, root-mode selection,
   path validation, and reverse-order failure unwind;
 - BR-T45 covers `ZEDSWAP1`, `ZEDSWAP2`, four-source aggregation,

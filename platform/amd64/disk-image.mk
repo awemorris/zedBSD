@@ -8,5 +8,6 @@ check-disk-image: $(DISK_IMAGE_ARTIFACT)
 		--kernel $(BUILD)/vmunix \
 		--bootzbsd $(BUILD)/bootloader/BOOTZBSD.EXE --arch-profile amd64 \
 		--bootx64 $(BUILD)/uefi/BOOTX64.EFI \
+		--zedbsd-config $(AMD64_PLATFORM)/zedbsd.cfg \
 		--arch-image $(AMD64_ARCH_UFS_IMAGE) --arch-format ufs \
 		--data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) $<

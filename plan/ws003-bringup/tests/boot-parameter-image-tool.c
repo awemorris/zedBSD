@@ -20,7 +20,11 @@ enum {
 	PC98_TABLE_LBA = 1,
 	PC98_ENTRY_SIZE = 32,
 	PC98_SECTORS = 17,
-	GPT_TRAILER_SECTORS = 33,
+	GPT_HEADER_SIZE_MIN = 92,
+	GPT_ENTRY_SIZE_MIN = 128,
+	GPT_ENTRY_SIZE_MAX = 4096,
+	GPT_ENTRY_COUNT_MAX = 4096,
+	GPT_TABLE_BYTES_MAX = 16 * 1024 * 1024,
 	SWAP_HEADER_SIZE = 64,
 	SWAP_PAGE_SIZE = 4096,
 	SWAP_CHECKSUM_OFFSET = 60
@@ -81,6 +85,31 @@ put64(uint8_t *p, uint64_t value)
 {
 	put32(p, (uint32_t)value);
 	put32(p + 4, (uint32_t)(value >> 32));
+}
+
+static int
+all_zero(const uint8_t *bytes, size_t size)
+{
+	while (size-- != 0)
+		if (*bytes++ != 0)
+			return 0;
+	return 1;
+}
+
+static uint32_t
+gpt_crc32(const uint8_t *bytes, size_t size)
+{
+	uint32_t crc = UINT32_MAX;
+
+	while (size-- != 0) {
+		unsigned bit;
+
+		crc ^= *bytes++;
+		for (bit = 0; bit < 8; bit++)
+			crc = (crc >> 1) ^
+			    (0xedb88320U & (uint32_t)-(int32_t)(crc & 1U));
+	}
+	return ~crc;
 }
 
 static uint64_t
@@ -313,6 +342,200 @@ add_mbr_partition(uint8_t sector[SECTOR_SIZE], unsigned index,
 	put32(entry + 12, (uint32_t)blocks);
 }
 
+struct gpt_copy {
+	uint8_t header[SECTOR_SIZE];
+	uint64_t current_lba;
+	uint64_t alternate_lba;
+	uint64_t first_usable;
+	uint64_t last_usable;
+	uint64_t table_lba;
+	uint64_t table_bytes;
+	uint32_t entry_count;
+	uint32_t entry_size;
+};
+
+static void
+read_gpt_copy(int image, uint64_t header_lba, uint64_t alternate_lba,
+	uint64_t disk_blocks, int primary, struct gpt_copy *copy,
+	const char *image_path)
+{
+	uint32_t header_size, stored_crc;
+	uint64_t table_blocks;
+
+	read_exact(image, header_lba * SECTOR_SIZE, copy->header,
+	    sizeof(copy->header), image_path);
+	if (memcmp(copy->header, "EFI PART", 8) != 0 ||
+	    get32(copy->header + 8) != 0x00010000U)
+		fail("invalid GPT signature or revision");
+	header_size = get32(copy->header + 12);
+	if (header_size < GPT_HEADER_SIZE_MIN || header_size > SECTOR_SIZE ||
+	    get32(copy->header + 20) != 0)
+		fail("invalid GPT header size or reserved field");
+	stored_crc = get32(copy->header + 16);
+	put32(copy->header + 16, 0);
+	if (gpt_crc32(copy->header, header_size) != stored_crc)
+		fail("invalid GPT header CRC");
+	put32(copy->header + 16, stored_crc);
+
+	copy->current_lba = get64(copy->header + 24);
+	copy->alternate_lba = get64(copy->header + 32);
+	copy->first_usable = get64(copy->header + 40);
+	copy->last_usable = get64(copy->header + 48);
+	copy->table_lba = get64(copy->header + 72);
+	copy->entry_count = get32(copy->header + 80);
+	copy->entry_size = get32(copy->header + 84);
+	if (copy->current_lba != header_lba ||
+	    copy->alternate_lba != alternate_lba ||
+	    copy->first_usable < 2U ||
+	    copy->first_usable > copy->last_usable ||
+	    copy->last_usable >= disk_blocks - 1U ||
+	    all_zero(copy->header + 56, 16))
+		fail("invalid GPT header geometry");
+	if (copy->entry_count == 0 ||
+	    copy->entry_count > GPT_ENTRY_COUNT_MAX ||
+	    copy->entry_size < GPT_ENTRY_SIZE_MIN ||
+	    copy->entry_size > GPT_ENTRY_SIZE_MAX ||
+	    copy->entry_size % GPT_ENTRY_SIZE_MIN != 0 ||
+	    copy->entry_count > GPT_TABLE_BYTES_MAX / copy->entry_size)
+		fail("unsupported GPT entry-array geometry");
+	copy->table_bytes =
+	    (uint64_t)copy->entry_count * copy->entry_size;
+	table_blocks = (copy->table_bytes + SECTOR_SIZE - 1U) / SECTOR_SIZE;
+	if (copy->table_lba >= disk_blocks ||
+	    table_blocks > disk_blocks - copy->table_lba)
+		fail("GPT entry array exceeds the image");
+	if (primary) {
+		if (copy->table_lba < 2U ||
+		    copy->table_lba + table_blocks > copy->first_usable)
+			fail("primary GPT entry array overlaps usable space");
+	} else if (copy->table_lba <= copy->last_usable ||
+	    copy->table_lba + table_blocks > copy->current_lba) {
+		fail("backup GPT entry array overlaps usable space");
+	}
+}
+
+static void
+make_gpt_partition_entry(uint8_t *entry, uint32_t entry_size,
+	unsigned index, int swap, uint64_t start, uint64_t blocks)
+{
+	/* FreeBSD swap and UFS partition type GUIDs, in GPT byte order. */
+	static const uint8_t swap_type[16] = {
+		0xb5, 0x7c, 0x6e, 0x51, 0xcf, 0x6e, 0xd6, 0x11,
+		0x8f, 0xf8, 0x00, 0x02, 0x2d, 0x09, 0x71, 0x2b
+	};
+	static const uint8_t ufs_type[16] = {
+		0xb6, 0x7c, 0x6e, 0x51, 0xcf, 0x6e, 0xd6, 0x11,
+		0x8f, 0xf8, 0x00, 0x02, 0x2d, 0x09, 0x71, 0x2b
+	};
+	static const char ufs_name[] = "BR-T46 UFS";
+	static const char swap_name[] = "BR-T46 SWAP";
+	const char *name = swap ? swap_name : ufs_name;
+	unsigned name_index;
+
+	memset(entry, 0, entry_size);
+	memcpy(entry, swap ? swap_type : ufs_type, 16);
+	/* Deterministic test-only unique GUID, distinct for kind/index/geometry. */
+	put32(entry + 16, 0x54343642U ^ (uint32_t)start);
+	put32(entry + 20, 0x47505400U | (index & 0xffU));
+	put32(entry + 24, (uint32_t)(start >> 32) ^ (uint32_t)blocks);
+	put32(entry + 28, 0x80000000U ^ (uint32_t)(blocks >> 32) ^
+	    (swap ? 0x53574150U : 0x55465300U));
+	put64(entry + 32, start);
+	put64(entry + 40, start + blocks - 1U);
+	for (name_index = 0; name[name_index] != '\0'; name_index++)
+		entry[56U + name_index * 2U] = (uint8_t)name[name_index];
+}
+
+static void
+update_gpt_header_crc(struct gpt_copy *copy, uint32_t table_crc)
+{
+	uint32_t header_size = get32(copy->header + 12);
+
+	put32(copy->header + 88, table_crc);
+	put32(copy->header + 16, 0);
+	put32(copy->header + 16, gpt_crc32(copy->header, header_size));
+}
+
+static void
+add_gpt_partition(int image, unsigned index, int swap, uint64_t start,
+	uint64_t blocks, uint64_t disk_blocks, const char *image_path)
+{
+	struct gpt_copy primary, backup;
+	uint8_t *primary_table, *backup_table, *entry;
+	uint64_t end = start + blocks - 1U;
+	uint32_t table_crc;
+	unsigned existing;
+
+	read_gpt_copy(image, 1U, disk_blocks - 1U, disk_blocks, 1, &primary,
+	    image_path);
+	read_gpt_copy(image, disk_blocks - 1U, 1U, disk_blocks, 0, &backup,
+	    image_path);
+	if (primary.first_usable != backup.first_usable ||
+	    primary.last_usable != backup.last_usable ||
+	    primary.entry_count != backup.entry_count ||
+	    primary.entry_size != backup.entry_size ||
+	    primary.table_bytes != backup.table_bytes ||
+	    memcmp(primary.header + 56, backup.header + 56, 16) != 0)
+		fail("primary and backup GPT headers disagree");
+	if (index == 0 || index > primary.entry_count || blocks == 0 ||
+	    start < primary.first_usable || end > primary.last_usable)
+		fail("new GPT partition exceeds usable space");
+
+	primary_table = malloc((size_t)primary.table_bytes);
+	backup_table = malloc((size_t)backup.table_bytes);
+	if (primary_table == NULL || backup_table == NULL)
+		fail("cannot allocate GPT entry arrays");
+	read_exact(image, primary.table_lba * SECTOR_SIZE, primary_table,
+	    (size_t)primary.table_bytes, image_path);
+	read_exact(image, backup.table_lba * SECTOR_SIZE, backup_table,
+	    (size_t)backup.table_bytes, image_path);
+	if (gpt_crc32(primary_table, (size_t)primary.table_bytes) !=
+	    get32(primary.header + 88) ||
+	    gpt_crc32(backup_table, (size_t)backup.table_bytes) !=
+	    get32(backup.header + 88) ||
+	    memcmp(primary_table, backup_table,
+	    (size_t)primary.table_bytes) != 0)
+		fail("primary and backup GPT entry arrays disagree");
+	entry = primary_table + (index - 1U) * primary.entry_size;
+	if (!all_zero(entry, primary.entry_size))
+		fail("target GPT entry is not empty");
+	make_gpt_partition_entry(entry, primary.entry_size, index, swap, start,
+	    blocks);
+	for (existing = 0; existing < primary.entry_count; existing++) {
+		const uint8_t *candidate =
+		    primary_table + existing * primary.entry_size;
+		uint64_t candidate_start, candidate_end;
+
+		if (existing == index - 1U || all_zero(candidate, 16))
+			continue;
+		candidate_start = get64(candidate + 32);
+		candidate_end = get64(candidate + 40);
+		if (candidate_start > candidate_end ||
+		    candidate_start < primary.first_usable ||
+		    candidate_end > primary.last_usable)
+			fail("existing GPT partition has invalid geometry");
+		if (region_overlaps(start, blocks, candidate_start,
+		    candidate_end - candidate_start + 1U))
+			fail("new GPT partition overlaps an existing partition");
+		if (memcmp(entry + 16, candidate + 16, 16) == 0)
+			fail("new GPT partition GUID is not unique");
+	}
+	memcpy(backup_table, primary_table, (size_t)primary.table_bytes);
+	table_crc = gpt_crc32(primary_table, (size_t)primary.table_bytes);
+	update_gpt_header_crc(&primary, table_crc);
+	update_gpt_header_crc(&backup, table_crc);
+	write_exact(image, primary.table_lba * SECTOR_SIZE, primary_table,
+	    (size_t)primary.table_bytes, image_path);
+	write_exact(image, backup.table_lba * SECTOR_SIZE, backup_table,
+	    (size_t)backup.table_bytes, image_path);
+	write_exact(image, primary.current_lba * SECTOR_SIZE, primary.header,
+	    sizeof(primary.header), image_path);
+	write_exact(image, backup.current_lba * SECTOR_SIZE, backup.header,
+	    sizeof(backup.header), image_path);
+	free(backup_table);
+	free(primary_table);
+}
+
 static void
 add_pc98_partition(uint8_t table[SECTOR_SIZE], unsigned index,
 		   int swap, uint64_t start, uint64_t blocks,
@@ -417,18 +640,17 @@ add_partition(int argc, char **argv)
 	if (start > disk_blocks || blocks > disk_blocks - start)
 		fail("payload partition exceeds image");
 	if (!strcmp(machine, "pcat")) {
+		uint8_t gpt[SECTOR_SIZE];
+		int has_gpt;
+
 		read_exact(image, 0, sector, sizeof(sector), image_path);
 		add_mbr_partition(sector, index, swap ? 0x82 : 0xa5, start,
 		    blocks, disk_blocks);
-		/* Preserve the backup GPT at the final 33 sectors of a hybrid
-		 * image.  Legacy MBR images have no EFI PART signature at LBA 1. */
-		{
-			uint8_t gpt[SECTOR_SIZE];
-			read_exact(image, SECTOR_SIZE, gpt, sizeof(gpt), image_path);
-			if (!memcmp(gpt, "EFI PART", 8) &&
-			    start + blocks > disk_blocks - GPT_TRAILER_SECTORS)
-				fail("payload partition overlaps backup GPT data");
-		}
+		read_exact(image, SECTOR_SIZE, gpt, sizeof(gpt), image_path);
+		has_gpt = memcmp(gpt, "EFI PART", 8) == 0;
+		if (has_gpt)
+			add_gpt_partition(image, index, swap, start, blocks,
+			    disk_blocks, image_path);
 		write_exact(image, 0, sector, sizeof(sector), image_path);
 	} else {
 		unsigned heads = image_bytes <= 20ULL * 1024ULL * 1024ULL ? 4 : 8;
@@ -605,8 +827,11 @@ self_test(void)
 {
 	uint8_t mbr[SECTOR_SIZE] = {0};
 	uint8_t table[SECTOR_SIZE] = {0};
+	uint8_t gpt_entry[GPT_ENTRY_SIZE_MIN];
 	uint8_t swap_header[SWAP_HEADER_SIZE];
+	struct gpt_copy gpt = {0};
 	uint8_t *entry;
+	uint32_t header_crc;
 
 	mbr[510] = 0x55;
 	mbr[511] = 0xaa;
@@ -644,6 +869,24 @@ self_test(void)
 		fail("PC-98 self-test failed");
 	if (parse_uuid("A1B2-C3D4") != 0xa1b2c3d4U)
 		fail("FAT UUID self-test failed");
+	if (gpt_crc32((const uint8_t *)"123456789", 9) != 0xcbf43926U)
+		fail("GPT CRC32 self-test failed");
+	make_gpt_partition_entry(gpt_entry, sizeof(gpt_entry), 3, 0,
+	    264192, 32768);
+	if (all_zero(gpt_entry, 16) || all_zero(gpt_entry + 16, 16) ||
+	    get64(gpt_entry + 32) != 264192 ||
+	    get64(gpt_entry + 40) != 296959 ||
+	    memcmp(gpt_entry + 56, "B\0R\0-\0T\0", 8) != 0)
+		fail("GPT partition-entry self-test failed");
+	memcpy(gpt.header, "EFI PART", 8);
+	put32(gpt.header + 8, 0x00010000U);
+	put32(gpt.header + 12, GPT_HEADER_SIZE_MIN);
+	update_gpt_header_crc(&gpt, 0x12345678U);
+	header_crc = get32(gpt.header + 16);
+	put32(gpt.header + 16, 0);
+	if (header_crc == 0 || get32(gpt.header + 88) != 0x12345678U ||
+	    gpt_crc32(gpt.header, GPT_HEADER_SIZE_MIN) != header_crc)
+		fail("GPT header-CRC self-test failed");
 	make_swap_v2_header(swap_header, 16U * 1024U * 1024U);
 	if (memcmp(swap_header, "ZEDSWAP2", 8) != 0 ||
 	    get16(swap_header + 8) != 2 ||

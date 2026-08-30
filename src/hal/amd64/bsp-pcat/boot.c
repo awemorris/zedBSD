@@ -12,6 +12,13 @@
 #define PCAT_BOOT_FONT_GLYPHS 128U
 #define PCAT_BOOT_FONT_HEIGHT 16U
 
+_Static_assert(ZBL6_PARTITION_SCHEME_MBR == ZEDBSD_PARTITION_SCHEME_MBR,
+    "ZBL6/kernel MBR partition scheme");
+_Static_assert(ZBL6_PARTITION_SCHEME_GPT == ZEDBSD_PARTITION_SCHEME_GPT,
+    "ZBL6/kernel GPT partition scheme");
+_Static_assert(ZBL6_PARTITION_INDEX_UNKNOWN ==
+    ZEDBSD_PARTITION_INDEX_UNKNOWN, "ZBL6/kernel unknown partition index");
+
 struct vga_font_handoff {
 	uint32_t magic;
 	uint16_t version;
@@ -169,10 +176,11 @@ bsp_boot_init(const void *raw_boot_info)
 		    raw->version == ZBL6_HANDOFF_V5_VERSION;
 
 		if (raw_v2->boot_drive < 0x80U ||
-		    raw_v2->root_partition_scheme !=
-			ZEDBSD_PARTITION_SCHEME_MBR ||
-		    raw_v2->root_partition_index < 1U ||
-		    raw_v2->root_partition_index > 4U ||
+		    !zbl6_uefi_partition_handoff_valid(
+			raw->version,
+			raw_v2->root_partition_scheme,
+			raw_v2->root_partition_index,
+			raw_v2->loader_partition_index, raw_v2->flags) ||
 		    raw_v2->memory_range_count == 0 ||
 		    raw_v2->memory_range_count > MAX_BOOT_MEMORY_RANGES ||
 		    raw_v2->memory_range_entry_size !=
@@ -182,7 +190,6 @@ bsp_boot_init(const void *raw_boot_info)
 		    raw_v2->memory_range_count >
 			(0x40000000ULL - raw_v2->memory_ranges) /
 			    sizeof(struct zbl6_memory_range) ||
-		    raw_v2->loader_partition_index != 2U ||
 		    raw_v2->kernel_phys_start != 0x00200000ULL ||
 		    raw_v2->kernel_phys_end <= raw_v2->kernel_phys_start ||
 		    raw_v2->kernel_phys_end > 0x01200000ULL ||

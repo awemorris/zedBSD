@@ -1,14 +1,14 @@
 # WS003: real-hardware bring-up
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 WSID: `ws003`
 
 Status: active; `ws003-p004` through `ws003-p009` complete in q013; q014
 `ws003-p010` and physical U3 complete through BR-T41; q015 completed `p011`
-through `p015`; q023 completed `ws003-p016`; `ws003-p017` corrects the
-post-q027 physical UEFI `LoadOptions` regression and awaits one physical boot;
-`ws003-p018` is the dependency-gated final Latitude NVMe install/boot milestone
+through `p015`; q023 completed `ws003-p016`; `ws003-p017` is superseded by
+the WS013 required-`zedbsd.cfg` path; `ws003-p018` is the dependency-gated
+final Latitude NVMe install/boot milestone
 
 Parent: [master plan](../master.md)
 
@@ -19,8 +19,8 @@ the intended UUID to `/dev/sda1`, mounted the
 read-write data loop and root overlay, started init, and reached a root shell,
 proving physical tier U3.
 
-Resume point: physically accept `ws003-p017`, then return to the remaining
-physical U4/U5 work. Physical follow-up still includes BR-T31
+Resume point: finish the automatic WS013/WS019 prerequisites, then perform
+`ws003-p018`. Physical follow-up still includes BR-T31
 sustained root I/O and, after U4 is otherwise frozen, BR-T30 five-boot
 repeatability. Do not request an additional intermediate hardware boot now.
 Hardware inventory remains incomplete.
@@ -47,7 +47,7 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p014` | [multi-source swap activation](phase014-multi-swap/phase.md) | Completed (`q015`, 2026-08-27) | BR-T45 and every BR-T46 file/raw/mixed swap cell pass actual page-out, page-in, and content restoration |
 | `ws003-p015` | [four-platform boot-parameter acceptance](phase015-x86-parameter-acceptance/phase.md) | Completed (`q015`, 2026-08-27) | BR-T46 passes 31/31 production-loader cells: PC/AT 7, PC-98 6, amd64 BIOS 9, and amd64 UEFI 9 |
 | `ws003-p016` | [static image boot parameters and Python-regression removal](phase016-boot-parameter-header-dependency/phase.md) | Completed (`q023`, 2026-08-28) | BR-T47 and a fresh BR-T46 pass: one maintained definition feeds all x86 loaders and the kernel fallback; generated inputs, Python, and stale cross-build state are absent |
-| `ws003-p017` | [UEFI LoadOptions firmware compatibility](phase017-uefi-load-options-compatibility/phase.md) | QEMU complete; physical acceptance pending | BR-T48 covers Dell-style whole-descriptor `LoadOptions`, length-delimited text, opaque fallback, and the actual loaded-image entry path |
+| `ws003-p017` | [UEFI LoadOptions firmware compatibility](phase017-uefi-load-options-compatibility/phase.md) | Superseded by WS013 p003 | Historical BR-T48 converter policy is removed; CT-T016 proves LoadOptions is ignored by the required `/zedbsd.cfg` path |
 | `ws003-p018` | [Latitude existing-FAT NVMe overlay installation and boot](phase018-latitude-nvme-install-boot/phase.md) | Planned; dependency-gated | Install without GPT/mkfs/NVRAM mutation, then boot the installed fallback loader and NVMe overlay |
 | `ws003-p019` | [Latitude NVMe native installation and boot](phase019-latitude-nvme-native-install-boot/phase.md) | Future; not designed | Accept the later native-root installer only after separate WS019 design and QEMU proof |
 

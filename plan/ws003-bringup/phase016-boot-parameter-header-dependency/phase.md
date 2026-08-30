@@ -16,6 +16,11 @@ Contract: [kernel boot parameters](../../../docs/reference/kernel-boot-parameter
 
 Shared tests: [WS003 test index](../tests/README.md)
 
+> Historical boundary: this completed Phase describes the image-default UEFI
+> implementation that existed in q023. WS013 p002/p003 supersede only the
+> amd64 UEFI portion with required `/zedbsd.cfg` and ignored LoadOptions.
+> BIOS image defaults remain until WS013 p005/p006 replace them.
+
 ## Objective
 
 Make the default parameter text embedded in each x86 boot image ordinary,
