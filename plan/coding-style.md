@@ -315,7 +315,30 @@ Tests must exercise the default production path.  They must not require a
 hidden environment variable to enable or disable the implementation under
 test.
 
-## 13. Review checklist
+## 13. Copyright header
+
+Source code files must start with:
+
+```
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+```
+
+Then add the file explanation:
+
+```
+/*
+ * The cmp progmra.
+ */
+
+```
+
+## 14. Review checklist
 
 Before finishing a C-source change, verify that:
 
