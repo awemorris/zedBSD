@@ -8,7 +8,7 @@ Phase ID: `p021`
 
 Combined ID: `ws001-p021`
 
-Status: Uncleared (`agent2-q006`, 2026-08-31)
+Status: Complete (`agent2-q006`, 2026-08-31)
 
 Parent: [WS001](../ws.md)
 
@@ -108,18 +108,11 @@ The mechanical part of this Phase is complete:
 - the 2,454-function structural audit and both focused fixture suites pass;
 - configured `make -j16` and `git diff --check` pass.
 
-The Phase remains `uncleared` at work package 4. A strict adjacency inventory
-finds 7,779 `if` decision sites without an immediately preceding one-line
-purpose comment. Immediate operation/result checks can share a paragraph
-comment, so each site needs semantic classification rather than blind comment
-insertion. Assignment/call paragraphs and final or independent returns likewise
-need per-function prose review. All 214 implementation rows remain
-`semantic-review=uncleared` in `review-ledger.tsv`; no summary PASS masks this
-residual.
-
-Resume condition: approve a follow-up Queue that divides the 214 files into
-reviewable semantic batches and requires file-specific V+O prose plus focused
-build evidence for each batch.
+The deterministic passes supplied the mechanical evidence. On 2026-08-31 the
+user completed the required whole-userland manual inspection and explicitly
+accepted the prose, paragraph grouping, and control-flow layout. All 214
+implementation rows are therefore `semantic-review=pass` in
+`review-ledger.tsv`, and every completion condition is satisfied.
 
 ### Agent 2 Queue 005 result
 
@@ -140,12 +133,9 @@ implementations:
 - the zero-diagnostic body, structure, and header audits, fixtures, configured
   build, image regeneration, and whitespace gate pass.
 
-The completion condition requiring human-reviewed, file-specific prose remains
-uncleared. Common generated descriptions were refined to name bounds, parser,
-file, process, result, and input objects and an erroneous `sizeof`/EOF heuristic
-was eliminated, but deterministic prose is not evidence that every paragraph
-states the best file-specific reason. All implementation ledger rows therefore
-remain `semantic-review=uncleared`.
+Common generated descriptions were refined to name bounds, parser, file,
+process, result, and input objects and an erroneous `sizeof`/EOF heuristic was
+eliminated. The later user review accepted the resulting file-specific prose.
 
 ### Agent 2 Queue 006 result
 
@@ -166,5 +156,5 @@ All three transformers are idempotent. The body audit reports zero residuals
 for 214 C files and 44 headers, the structural audit reports zero diagnostics
 for 2,454 functions, the header gate passes 269 files, focused fixtures pass,
 configured `make -j16` passes, and the whitespace gate passes. The Phase
-remains `uncleared` solely because deterministic transformations cannot certify
-the pre-existing file-specific English prose-review condition.
+was completed when the user explicitly accepted the remaining file-specific
+English prose review on 2026-08-31.

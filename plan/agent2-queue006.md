@@ -64,6 +64,6 @@ The positive and negative body fixtures cover asymmetric branches, a `for`
 whose body is an `if`, a physically multi-line loop body, excess entry
 indentation, and an empty block entry. The 214-C/44-header body audit reports
 zero residuals, the structural audit reports 2,454 functions and zero
-diagnostics, and the canonical header audit passes all 269 files. The Queue's
-mechanical scope is complete; Phase 21 remains conservatively uncleared only by
-its pre-existing human prose-review condition.
+diagnostics, and the canonical header audit passes all 269 files. On 2026-08-31
+the user completed the remaining manual inspection and explicitly accepted the
+result. Phase 21 and this Queue are complete.
