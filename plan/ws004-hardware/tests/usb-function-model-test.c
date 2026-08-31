@@ -140,13 +140,14 @@ static const uint8_t rtl8156_vendor_configuration[] = {
 
 /* RTL8156 exposes an explicit CDC Union but no IAD in its NCM mode. */
 static const uint8_t rtl8156_ncm_configuration[] = {
-	9, 2, 86, 0, 2, 2, 0, 0xa0, 64,
+	9, 2, 92, 0, 2, 2, 0, 0xa0, 64,
 	9, 4, 0, 0, 1, 2, 0x0d, 0, 5,
 	5, 0x24, 0, 0x10, 0x01,
 	5, 0x24, 6, 0, 1,
 	13, 0x24, 0x0f, 3, 0, 0, 0, 0, 0xee, 0x05, 0, 0, 0,
 	6, 0x24, 0x1a, 0x00, 0x01, 0x2b,
 	7, 5, 0x83, 3, 16, 0, 11,
+	6, 48, 0, 0, 16, 0,
 	9, 4, 1, 0, 0, 0x0a, 0, 1, 0,
 	9, 4, 1, 1, 2, 0x0a, 0, 1, 4,
 	7, 5, 0x81, 2, 0x00, 0x02, 0,
@@ -234,6 +235,15 @@ static const uint8_t mac_string[] = {
 	'A', 0, 'A', 0, 'B', 0, 'B', 0, 'C', 0, 'C', 0
 };
 static const uint8_t malformed_string[] = { 4, 3, 0x00, 0xd8 };
+static const uint8_t superspeed_companion_wire[] = {
+	6, 48, 3, 0, 0x34, 0x12
+};
+static const uint8_t malformed_companion_length[] = {
+	5, 48, 3, 0, 0x34, 0x12
+};
+static const uint8_t malformed_companion_type[] = {
+	6, 49, 3, 0, 0x34, 0x12
+};
 
 struct fake_controller {
 	struct drv_usb_hcd hcd;
@@ -802,6 +812,9 @@ main(void)
 	struct timespec settle = { .tv_sec = 0, .tv_nsec = 10000000L };
 	struct drv_usb_configuration *configuration;
 	struct drv_usb_interface *control, *data, *storage;
+	struct drv_usb_endpoint *notification;
+	struct drv_usb_superspeed_endpoint_companion_descriptor decoded;
+	const struct drv_usb_superspeed_endpoint_companion_descriptor *companion;
 	const struct drv_usb_host_interface *alternate;
 	const struct drv_usb_interface_descriptor *descriptor;
 	const struct drv_usb_interface_association_descriptor *iad;
@@ -809,6 +822,27 @@ main(void)
 	size_t baseline, extra_length, raw_length;
 	unsigned fault_nth, fault_success_nth = 0;
 	char string[32];
+
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(
+	    superspeed_companion_wire, sizeof(superspeed_companion_wire),
+	    &decoded) == 0);
+	CHECK(decoded.length == 6 && decoded.descriptor_type == 48 &&
+	    decoded.maximum_burst == 3 && decoded.attributes == 0 &&
+	    decoded.bytes_per_interval == UINT16_C(0x1234));
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(
+	    superspeed_companion_wire, sizeof(superspeed_companion_wire) - 1U,
+	    &decoded) == EINVAL);
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(
+	    malformed_companion_length, sizeof(malformed_companion_length),
+	    &decoded) == EINVAL);
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(
+	    malformed_companion_type, sizeof(malformed_companion_type),
+	    &decoded) == EINVAL);
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(NULL,
+	    sizeof(superspeed_companion_wire), &decoded) == EINVAL);
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(
+	    superspeed_companion_wire, sizeof(superspeed_companion_wire),
+	    NULL) == EINVAL);
 
 	CHECK(drv_usb_init() == 0);
 	memset(&invalid_hcd, 0, sizeof(invalid_hcd));
@@ -1039,6 +1073,16 @@ main(void)
 	control = drv_usb_configuration_find_interface(configuration, 0);
 	data = drv_usb_configuration_find_interface(configuration, 1);
 	CHECK(control != NULL && data != NULL);
+	notification = drv_usb_interface_find_endpoint(control,
+	    DRV_USB_TRANSFER_INTERRUPT, DRV_USB_DIR_IN, NULL);
+	CHECK(notification != NULL);
+	companion = drv_usb_endpoint_superspeed_companion(notification);
+	CHECK(companion != NULL && companion->length == 6 &&
+	    companion->descriptor_type == 48 && companion->maximum_burst == 0 &&
+	    companion->attributes == 0 && companion->bytes_per_interval == 16);
+	CHECK(drv_usb_endpoint_maximum_burst(notification) == 0);
+	CHECK(drv_usb_endpoint_superspeed_companion(
+	    drv_usb_interface_endpoint(data, 0)) == NULL);
 	CHECK(drv_usb_interface_driver(control) == &fake_driver);
 	CHECK(drv_usb_interface_claimed_by(data) == control);
 	CHECK(diagnostic_log_contains("0bda:8156 class 00 configuration=2 "

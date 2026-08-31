@@ -674,6 +674,9 @@ drv_usb_endpoint_max_packet_size(
 uint8_t
 drv_usb_endpoint_maximum_burst(
 	const struct drv_usb_endpoint *e);
+const struct drv_usb_superspeed_endpoint_companion_descriptor *
+drv_usb_endpoint_superspeed_companion(
+	const struct drv_usb_endpoint *e);
 bool
 drv_usb_endpoint_is_input(
 	const struct drv_usb_endpoint *e);

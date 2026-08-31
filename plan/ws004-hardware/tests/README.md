@@ -32,6 +32,26 @@ Parent: [WS004](../ws.md)
 
 QEMU/model and physical-hardware results are always separate evidence fields.
 
+## HW-T24 xHCI SuperSpeed interrupt context
+
+`ws004-p021` owns the pure strict context corpus, production USB descriptor
+fixture, and pre-DMA source-order gate:
+
+```sh
+TMPDIR="$PWD/build/q045-tmp" \
+  plan/ws004-hardware/tests/run-xhci-superspeed-interrupt-context-test.sh
+```
+
+Ordinary and ASan/UBSan runs pass 82 focused checks and 1,415 production USB
+function checks; the existing xHCI model, compiler analyzer, and configured
+amd64/i386 production objects also pass. Exact RTL8156 words are
+`0x000a0000`, `0x0010003e`, and `0x00100010`. The concurrent-URB, USB binding,
+NCM wire/driver, USB-storage SCSI, and URB-publication regressions pass their
+available ordinary, sanitizer, and analyzer gates. The q045 fresh-image/QEMU
+and Latitude fields remain empty because the existing host Noct rejects the
+repository's `--path=tools/build` verifier invocation; no older image is
+accepted as substitute evidence.
+
 ## HW-T30 generic WLAN logic
 
 `ws004-p027` owns this production-source fixture. It uses a deterministic fake

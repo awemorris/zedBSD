@@ -668,36 +668,17 @@ fill_slot(struct xhci_controller *c, struct xhci_device *d, void *context,
 }
 static void
 fill_endpoint(struct xhci_controller *c, void *context,
-	      struct xhci_endpoint *ep, unsigned type, unsigned packet,
-	      unsigned interval, unsigned maximum_burst)
+	      struct xhci_endpoint *ep,
+	      const struct drv_xhci_endpoint_context_words *encoded)
 {
 	uint32_t *w = context;
 	uint64_t dequeue = ep->ring.dma.device_address | 1U;
 	memset(context, 0, c->context_size);
-	w[0] = (interval & 0xffU) << 16;
-	w[1] = drv_xhci_endpoint_context_word1(type, packet, maximum_burst);
+	w[0] = encoded->word0;
+	w[1] = encoded->word1;
 	w[2] = (uint32_t)dequeue;
 	w[3] = (uint32_t)(dequeue >> 32);
-	w[4] = type == 4U ? DRV_XHCI_CONTROL_AVERAGE_TRB_LENGTH : packet;
-}
-
-static unsigned
-endpoint_interval(struct xhci_device *device,
-		  const struct drv_usb_endpoint_descriptor *descriptor)
-{
-	unsigned interval, microframes;
-	if ((descriptor->attributes & 3U) != DRV_USB_TRANSFER_INTERRUPT &&
-	    (descriptor->attributes & 3U) != DRV_USB_TRANSFER_ISOCHRONOUS)
-		return 0;
-	if (drv_usb_device_speed(device->usb) >= DRV_USB_SPEED_HIGH) {
-		interval = descriptor->interval ? descriptor->interval - 1U : 0;
-		return interval > 15U ? 15U : interval;
-	}
-	microframes = (descriptor->interval ? descriptor->interval : 1U) * 8U;
-	for (interval = 0; (1U << interval) < microframes && interval < 15U;
-	     interval++)
-		;
-	return interval;
+	w[4] = encoded->word4;
 }
 static struct xhci_device *
 xhci_usb_device(struct drv_usb_device *u)
@@ -866,6 +847,7 @@ static int
 xhci_device_enable(struct drv_usb_hcd *h, struct drv_usb_device *u)
 {
 	struct xhci_controller *c = hcd_controller(h);
+	struct drv_xhci_endpoint_context_words endpoint_context;
 	struct xhci_device *d;
 	uint32_t *control;
 	uint8_t *input;
@@ -924,8 +906,13 @@ xhci_device_enable(struct drv_usb_hcd *h, struct drv_usb_device *u)
 	packet = drv_usb_device_speed(u) >= DRV_USB_SPEED_SUPER	 ? 512U
 		 : drv_usb_device_speed(u) >= DRV_USB_SPEED_HIGH ? 64U
 								 : 8U;
-	fill_endpoint(c, input + 2U * c->context_size, &d->endpoints[1], 4,
-		      packet, 0, 0);
+	if (!drv_xhci_endpoint_context_encode(drv_usb_device_speed(u), 4U,
+	    (uint16_t)packet, 0, NULL, &endpoint_context)) {
+		e = EINVAL;
+		goto fail;
+	}
+	fill_endpoint(c, input + 2U * c->context_size, &d->endpoints[1],
+	    &endpoint_context);
 	{
 		unsigned expected = 0;
 
@@ -1036,11 +1023,13 @@ xhci_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 	struct xhci_controller *c = hcd_controller(h);
 	struct xhci_device *d =
 	    xhci_usb_device(drv_usb_endpoint_device(usbep));
+	struct drv_xhci_endpoint_context_words endpoint_context;
 	struct xhci_endpoint *ep;
+	const struct drv_usb_superspeed_endpoint_companion_descriptor *companion;
 	const struct drv_usb_endpoint_descriptor *desc;
 	uint8_t *input;
 	uint32_t *control;
-	unsigned number, dci, entries, type, packet, interval, maximum_burst;
+	unsigned number, dci, entries, type;
 	int e;
 	if (!d)
 		return ENODEV;
@@ -1052,16 +1041,6 @@ xhci_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 	ep = &d->endpoints[dci];
 	if (ep->enabled)
 		return 0;
-	if ((e = ring_alloc(c, &ep->ring)) != 0)
-		return e;
-	ep->dci = dci;
-	input = d->input_context.address;
-	memset(input, 0, 4096U);
-	control = (uint32_t *)input;
-	control[1] = 1U | (1U << dci);
-	entries = dci > d->context_entries ? dci : d->context_entries;
-	fill_slot(c, d, input + c->context_size, entries);
-	packet = desc->maximum_packet_size & 0x7ffU;
 	switch (drv_usb_endpoint_type(usbep)) {
 	case DRV_USB_TRANSFER_ISOCHRONOUS:
 		type = (desc->address & 0x80U) ? 5U : 1U;
@@ -1076,11 +1055,22 @@ xhci_endpoint_enable(struct drv_usb_hcd *h, struct drv_usb_endpoint *usbep)
 		type = 4U;
 		break;
 	}
-	interval = endpoint_interval(d, desc);
-	maximum_burst = drv_usb_device_speed(d->usb) >= DRV_USB_SPEED_SUPER ?
-	    drv_usb_endpoint_maximum_burst(usbep) : 0U;
-	fill_endpoint(c, input + (dci + 1U) * c->context_size, ep, type, packet,
-		      interval, maximum_burst);
+	companion = drv_usb_endpoint_superspeed_companion(usbep);
+	if (!drv_xhci_endpoint_context_encode(drv_usb_device_speed(d->usb),
+	    type, desc->maximum_packet_size, desc->interval, companion,
+	    &endpoint_context))
+		return EINVAL;
+	if ((e = ring_alloc(c, &ep->ring)) != 0)
+		return e;
+	ep->dci = dci;
+	input = d->input_context.address;
+	memset(input, 0, 4096U);
+	control = (uint32_t *)input;
+	control[1] = 1U | (1U << dci);
+	entries = dci > d->context_entries ? dci : d->context_entries;
+	fill_slot(c, d, input + c->context_size, entries);
+	fill_endpoint(c, input + (dci + 1U) * c->context_size, ep,
+	    &endpoint_context);
 	e = command(c, d->input_context.device_address, 0,
 		    XHCI_TRB_TYPE(12) | XHCI_TRB_SLOT(d->slot), NULL);
 	if (e) {

@@ -850,15 +850,20 @@ int
 drv_usb_decode_superspeed_endpoint_companion(const void *raw, size_t length,
 	struct drv_usb_superspeed_endpoint_companion_descriptor *result)
 {
+	const uint8_t *bytes = raw;
 	struct drv_usb_superspeed_endpoint_companion_descriptor descriptor;
 
 	if (raw == NULL || result == NULL || length < sizeof(descriptor))
 		return EINVAL;
-	memcpy(&descriptor, raw, sizeof(descriptor));
-	if (descriptor.length != sizeof(descriptor) ||
-	    descriptor.descriptor_type !=
+	if (bytes[0] != sizeof(descriptor) || bytes[1] !=
 		DRV_USB_DESCRIPTOR_SUPERSPEED_ENDPOINT_COMPANION)
 		return EINVAL;
+	descriptor.length = bytes[0];
+	descriptor.descriptor_type = bytes[1];
+	descriptor.maximum_burst = bytes[2];
+	descriptor.attributes = bytes[3];
+	descriptor.bytes_per_interval = (uint16_t)bytes[4] |
+	    ((uint16_t)bytes[5] << 8);
 	*result = descriptor;
 	return 0;
 }
@@ -3140,6 +3145,11 @@ enum drv_usb_transfer_type drv_usb_endpoint_type(const struct drv_usb_endpoint*e
 uint8_t drv_usb_endpoint_address(const struct drv_usb_endpoint*e){return e?e->descriptor.address:0;}
 uint16_t drv_usb_endpoint_max_packet_size(const struct drv_usb_endpoint*e){return e?e->descriptor.maximum_packet_size:0;}
 uint8_t drv_usb_endpoint_maximum_burst(const struct drv_usb_endpoint*e){return e&&e->companion_valid?e->companion.maximum_burst:0;}
+const struct drv_usb_superspeed_endpoint_companion_descriptor*
+drv_usb_endpoint_superspeed_companion(const struct drv_usb_endpoint*e)
+{
+	return e&&e->companion_valid?&e->companion:NULL;
+}
 bool drv_usb_endpoint_is_input(const struct drv_usb_endpoint*e){return e&&(e->descriptor.address&DRV_USB_DIR_IN)!=0;}
 uintptr_t drv_usb_endpoint_hcd_data(const struct drv_usb_endpoint*e,unsigned n){return e&&n<4U?e->hcd_private[n]:0;}
 int drv_usb_endpoint_set_hcd_data(struct drv_usb_endpoint*e,unsigned n,uintptr_t value){if(!e||n>=4U)return EINVAL;e->hcd_private[n]=value;return 0;}

@@ -67,9 +67,10 @@ host gate passes. Because that QEMU exposes no interactive display backend,
 `ws007-p004` remains honestly `uncleared` for the user's exact failing GUI
 environment rather than receiving a speculative repair. The archived [q040](queue-q040.md)
 records the uncleared printed-label-only Archer identity checkpoint and the
-completed independent AF_UNIX/network authorization foundation. The current
-[Queue Book](queue.md) records q044's completed input ownership and bounded
-HID parser milestones. The archived q043 PC-98 fixed-read and exact-mouse
+completed independent AF_UNIX/network authorization foundation. The archived
+[q044](queue-q044.md) records the completed input ownership and bounded HID
+parser milestones. The current [Queue Book](queue.md) selects the independent
+WS004 SuperSpeed interrupt-context correction. The archived q043 PC-98 fixed-read and exact-mouse
 paths both pass locally, and their remaining external resume facts do not
 block subsequent Queues. The
 archived [q038](queue-q038.md) replaced the

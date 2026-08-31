@@ -1,10 +1,11 @@
 # WS004 Phase 021: xHCI SuperSpeed interrupt endpoint context
 
-Last updated: 2026-08-29
+Last updated: 2026-08-31
 
 Phase ID: `ws004-p021`
 
-Status: planned; ready for a Queue proposal; not queued
+Status: uncleared (`q045` automatic/source milestone passed; fresh-image QEMU
+and Latitude checkpoints await the existing Noct verifier correction)
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -114,6 +115,82 @@ descriptor.
 - One Latitude boot with the combined candidate reaches truthful `ue0`
   carrier, DHCP, and peer ping without a freeze; any remaining failure retains
   the exact endpoint/transfer boundary.
+
+## q045 implementation result (2026-08-31)
+
+The automatic/source milestone passed. The USB core now decodes retained
+`wBytesPerInterval` explicitly from little endian and exposes the retained
+companion through one typed, read-only endpoint accessor. The xHCI path uses a
+pure transactional context encoder before `ring_alloc()`: USB SuperSpeed
+interrupt endpoints require the frozen packet, interval, burst, attribute, and
+payload bounds, while legal under-reports are encoded without rounding.
+Endpoint context word 4 receives the same accepted payload in Average TRB
+Length and Max ESIT Payload Low. SuperSpeedPlus LEC/SSP remains outside this
+Phase and retains the preceding context encoding, as do FS/HS interrupt,
+control, bulk, and isochronous endpoints.
+
+The Phase-owned runner is:
+
+```sh
+TMPDIR="$PWD/build/q045-tmp" \
+  plan/ws004-hardware/tests/run-xhci-superspeed-interrupt-context-test.sh
+```
+
+It passed ordinary and ASan/UBSan execution plus compiler-analyzer compilation:
+
+- the strict endpoint-context corpus passed 82 checks in each runtime mode;
+- the RTL8156 case produced word 0 `0x000a0000`, word 1 `0x0010003e`, and
+  word 4 `0x00100010` exactly;
+- the USB production-source function model passed 1,415 checks in each runtime
+  mode, including host-endian `0x1234` decoding, malformed descriptor headers,
+  retained typed access, and a missing-companion `NULL` result;
+- the pre-existing xHCI model passed in both runtime modes;
+- the source-order gate proved context validation precedes transfer-ring
+  allocation; and
+- production `pci-xhci.c` and `usb.c` objects compiled with `-Werror` under the
+  dedicated amd64/UEFI and i386/PC-AT xHCI configurations.
+
+The independently owned regressions also passed through their available
+ordinary, sanitizer, and analyzer gates:
+
+```sh
+TMPDIR="$PWD/build/q045-tmp" \
+  plan/ws004-hardware/tests/run-xhci-concurrent-urbs-test.sh
+TMPDIR="$PWD/build/q045-tmp" \
+  plan/ws004-hardware/tests/run-usb-binding-transactions-test.sh
+TMPDIR="$PWD/build/q045-tmp" \
+  plan/ws004-hardware/tests/run-usb-cdc-ncm-wire-test.sh
+TMPDIR="$PWD/build/q045-tmp" \
+  plan/ws004-hardware/tests/run-usb-cdc-ncm-driver-test.sh
+```
+
+The concurrent-URB fixture passed twice, the binding fixture passed 971 checks
+twice, the NCM wire fixture passed twice, and the NCM driver fixture passed
+1,540 checks twice. Direct ordinary and ASan/UBSan runs of
+`usb-storage-scsi-test.c` and `usb-urb-publication-test.c` also passed, and both
+compiled under the analyzer.
+
+The fresh-image boundary is not cleared. This exact configured build was
+attempted without `make check`, `.internal/`, or any Noct source change:
+
+```sh
+TMPDIR="$PWD/build/q045-tmp" make -j16 \
+  ZEDBSD_CONFIG=plan/ws004-hardware/tests/config-amd64-xhci.mk
+```
+
+Compilation reached the existing host-Noct verification step, where
+`build/NoctLang/build-static/noct --path=tools/build ...` failed with
+`Unknown option --path=tools/build`. A separate configured `vmunix` target
+linked the kernel containing this change, then failed at the same checker and
+deleted the target. Therefore no fresh candidate image existed for the
+disposable xHCI USB-root QEMU boot, and reusing the older image would not be
+valid evidence. The Latitude candidate/check was consequently not requested.
+
+Resume after the separately owned Noct command-line/build integration accepts
+the repository's verifier invocation: rerun the configured image build, one
+disposable q35/xHCI USB-root boot to `login:`, then one Latitude `ue0` carrier,
+DHCP, and external-fetch checkpoint. No source/model defect or additional
+implementation decision is presently known in this Phase.
 
 ## Reconsideration boundary
 

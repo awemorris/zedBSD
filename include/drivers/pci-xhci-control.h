@@ -53,6 +53,12 @@ struct drv_xhci_ep0_context_words {
 	uint32_t words[5];
 };
 
+struct drv_xhci_endpoint_context_words {
+	uint32_t word0;
+	uint32_t word1;
+	uint32_t word4;
+};
+
 static inline unsigned
 drv_xhci_port_speed_id(uint32_t portsc)
 {
@@ -65,6 +71,78 @@ drv_xhci_endpoint_context_word1(unsigned type, unsigned packet,
 {
 	return (3U << 1) | ((type & 7U) << 3) |
 	    ((maximum_burst & 0xffU) << 8) | ((packet & 0xffffU) << 16);
+}
+
+/*
+ * Build the controller-owned endpoint context fields which do not depend on
+ * the transfer-ring address.  The SuperSpeed interrupt case is intentionally
+ * strict because xHCI cannot truthfully schedule it without its companion's
+ * total service-interval payload.  Other endpoint kinds retain the legacy
+ * encoding while their wider periodic rules remain outside this contract.
+ */
+static inline int
+drv_xhci_endpoint_context_encode(enum drv_usb_speed speed, unsigned type,
+	uint16_t maximum_packet_size, uint8_t descriptor_interval,
+	const struct drv_usb_superspeed_endpoint_companion_descriptor *companion,
+	struct drv_xhci_endpoint_context_words *context)
+{
+	struct drv_xhci_endpoint_context_words encoded;
+	unsigned interval = 0;
+	unsigned maximum_burst = 0;
+	unsigned microframes;
+	unsigned packet = maximum_packet_size & 0x7ffU;
+	unsigned periodic;
+	unsigned interrupt;
+
+	if (context == NULL || type < 1U || type > 7U)
+		return 0;
+	periodic = type == 1U || type == 3U || type == 5U || type == 7U;
+	interrupt = type == 3U || type == 7U;
+	if (speed >= DRV_USB_SPEED_SUPER && companion != NULL)
+		maximum_burst = companion->maximum_burst;
+	if (speed == DRV_USB_SPEED_SUPER && interrupt) {
+		unsigned capacity;
+		unsigned payload;
+
+		if (companion == NULL || maximum_burst > 15U ||
+		    companion->attributes != 0 || packet == 0 ||
+		    (maximum_packet_size & 0xf800U) != 0 || packet > 1024U ||
+		    descriptor_interval == 0 || descriptor_interval > 16U)
+			return 0;
+		payload = companion->bytes_per_interval;
+		capacity = packet * (maximum_burst + 1U);
+		if (payload == 0 || payload > capacity || payload > 16384U)
+			return 0;
+		interval = descriptor_interval - 1U;
+		encoded.word0 = (uint32_t)interval << 16;
+		encoded.word1 = drv_xhci_endpoint_context_word1(type, packet,
+		    maximum_burst);
+		encoded.word4 = ((uint32_t)payload << 16) | payload;
+		*context = encoded;
+		return 1;
+	}
+	if (periodic) {
+		if (speed >= DRV_USB_SPEED_HIGH) {
+			interval = descriptor_interval != 0 ?
+			    descriptor_interval - 1U : 0;
+			if (interval > 15U)
+				interval = 15U;
+		} else {
+			microframes = (descriptor_interval != 0 ?
+			    descriptor_interval : 1U) * 8U;
+			for (interval = 0;
+			    (1U << interval) < microframes && interval < 15U;
+			    interval++)
+				;
+		}
+	}
+	encoded.word0 = (uint32_t)(interval & 0xffU) << 16;
+	encoded.word1 = drv_xhci_endpoint_context_word1(type, packet,
+	    maximum_burst);
+	encoded.word4 = type == 4U ?
+	    DRV_XHCI_CONTROL_AVERAGE_TRB_LENGTH : packet;
+	*context = encoded;
+	return 1;
 }
 
 static inline int
