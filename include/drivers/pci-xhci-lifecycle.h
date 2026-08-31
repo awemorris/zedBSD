@@ -28,6 +28,15 @@ enum drv_xhci_cancel_action {
 	DRV_XHCI_CANCEL_QUIESCE_CONTROLLER
 };
 
+enum drv_xhci_post_dequeue_action {
+	/* Ordinary cancellation leaves the endpoint usable for its next TD. */
+	DRV_XHCI_POST_DEQUEUE_RESTART_ENDPOINT = 0,
+	/* Disconnect has permanently closed USB-core admission.  Set TR Dequeue has
+	 * already retired controller access to the TD, so a now-absent endpoint
+	 * need not and generally cannot be returned to Running. */
+	DRV_XHCI_POST_DEQUEUE_RELEASE_REQUEST
+};
+
 enum drv_xhci_reserve_action {
 	DRV_XHCI_RESERVE_DYNAMIC = 0,
 	DRV_XHCI_RESERVE_USE,
@@ -114,6 +123,13 @@ drv_xhci_cancel_action(enum drv_xhci_endpoint_state state,
 	default:
 		return DRV_XHCI_CANCEL_QUIESCE_CONTROLLER;
 	}
+}
+
+static inline enum drv_xhci_post_dequeue_action
+drv_xhci_cancel_post_dequeue_action(int device_teardown)
+{
+	return device_teardown ? DRV_XHCI_POST_DEQUEUE_RELEASE_REQUEST :
+	    DRV_XHCI_POST_DEQUEUE_RESTART_ENDPOINT;
 }
 
 /*

@@ -4,6 +4,7 @@
 #include "kern/file.h"
 #include "kern/input-device.h"
 #include "kern/lock.h"
+#include "kern/poll.h"
 #include "kern/waitq.h"
 
 #include <assert.h>
@@ -28,6 +29,7 @@ static size_t registered_count;
 static unsigned cdev_failures;
 static unsigned cdev_probe_open;
 static int cdev_probe_error;
+static uint64_t cdev_next_generation;
 
 void
 spin_init(struct spinlock *lock, enum lock_rank rank, const char *name)
@@ -108,6 +110,24 @@ int
 cdev_register(const char *name, dev_t rdev, const struct cdev_ops *ops,
 	void *data)
 {
+	struct cdev *device;
+	int error;
+
+	error = cdev_register_managed(name, rdev, ops, data, NULL, &device);
+	if (error == 0)
+		cdev_release(device);
+	return error;
+}
+
+int
+cdev_register_managed(const char *name, dev_t rdev,
+	const struct cdev_ops *ops, void *data, cdev_finalizer_t finalizer,
+	struct cdev **result)
+{
+	struct cdev *device;
+	size_t index;
+
+	*result = NULL;
 	if (cdev_failures != 0) {
 		cdev_failures--;
 		return EIO;
@@ -130,15 +150,63 @@ cdev_register(const char *name, dev_t rdev, const struct cdev_ops *ops,
 			assert(ops->close(&file) == 0);
 	}
 	assert(registered_count < REGISTERED_MAX);
-	memset(&registered_cdevs[registered_count], 0,
-	    sizeof(registered_cdevs[registered_count]));
-	strncpy(registered_cdevs[registered_count].name, name,
-	    sizeof(registered_cdevs[registered_count].name) - 1U);
-	registered_cdevs[registered_count].rdev = rdev;
-	registered_cdevs[registered_count].ops = ops;
-	registered_cdevs[registered_count].data = data;
+	device = NULL;
+	for (index = 0; index < REGISTERED_MAX; index++)
+		if (refcount_load(&registered_cdevs[index].refs) == 0) {
+			device = &registered_cdevs[index];
+			break;
+		}
+	assert(device != NULL);
+	memset(device, 0, sizeof(*device));
+	strncpy(device->name, name, sizeof(device->name) - 1U);
+	device->rdev = rdev;
+	device->ops = ops;
+	device->data = data;
+	device->finalizer = finalizer;
+	device->generation = ++cdev_next_generation;
+	refcount_init(&device->refs, 2);
+	atomic_store_release(&device->published, 1);
 	registered_count++;
+	*result = device;
 	return 0;
+}
+
+int
+cdev_unregister(struct cdev *device)
+{
+	if (device == NULL || !cdev_is_published(device))
+		return ENOENT;
+	atomic_store_release(&device->published, 0);
+	registered_count--;
+	cdev_release(device);
+	return 0;
+}
+
+void
+cdev_ref(struct cdev *device)
+{
+	refcount_get(&device->refs);
+}
+
+void
+cdev_release(struct cdev *device)
+{
+	cdev_finalizer_t finalizer;
+	void *data;
+
+	if (!refcount_put(&device->refs))
+		return;
+	finalizer = device->finalizer;
+	data = device->data;
+	memset(device, 0, sizeof(*device));
+	if (finalizer != NULL)
+		finalizer(data);
+}
+
+int
+cdev_is_published(const struct cdev *device)
+{
+	return atomic_load_acquire(&device->published) != 0;
 }
 
 static void
@@ -280,8 +348,9 @@ device_cdev(struct input_device *device)
 {
 	size_t index;
 
-	for (index = 0; index < registered_count; index++)
-		if (registered_cdevs[index].data == device)
+	for (index = 0; index < REGISTERED_MAX; index++)
+		if (cdev_is_published(&registered_cdevs[index]) &&
+		    registered_cdevs[index].data == device)
 			return &registered_cdevs[index];
 	return NULL;
 }
@@ -296,6 +365,15 @@ test_file_init(struct test_file *test, struct input_device *device)
 	test->inode.i_data = (void *)cdev;
 	test->file.f_inode = &test->inode;
 	test->file.f_flags.value = O_RDONLY;
+	cdev_ref((struct cdev *)cdev);
+}
+
+static void
+test_file_destroy(struct test_file *test)
+{
+	if (test->inode.i_data != NULL)
+		cdev_release(test->inode.i_data);
+	test->inode.i_data = NULL;
 }
 
 static int
@@ -429,6 +507,120 @@ test_two_pointers(void)
 	assert(captured[1].flags == INPUT_REPORT_DETACH);
 }
 
+/*
+ * Keeps the detached generation alive through its open file.  The old
+ * reader must drain before EOF, and its event number cannot be recycled
+ * until the inode-owned cdev reference reaches the finalizer.
+ */
+static void
+test_detached_reader_and_delayed_slot_reuse(
+	void)
+{
+	struct input_device *first;
+	struct input_device *second;
+	struct input_device *third;
+	const struct cdev *first_cdev;
+	const struct cdev *second_cdev;
+	const struct cdev *third_cdev;
+	struct input_event events[4];
+	struct test_file test;
+	char first_name[sizeof(((struct cdev *)0)->name)];
+	short returned;
+	ssize_t count;
+
+	first = register_pointer(BTN_LEFT);
+	first_cdev = device_cdev(first);
+	assert(first_cdev != NULL);
+	strcpy(first_name, first_cdev->name);
+	test_file_init(&test, first);
+	assert(first_cdev->ops->open(&test.file) == 0);
+
+	returned = 0;
+	assert(first_cdev->ops->poll(&test.file, POLLIN | POLLRDNORM,
+	    &returned) == 0);
+	assert((returned & POLLHUP) == 0);
+	input_device_emit(first, EV_REL, REL_X, 7);
+	returned = 0;
+	assert(first_cdev->ops->poll(&test.file, POLLIN | POLLRDNORM,
+	    &returned) == 0);
+	assert((returned & (POLLIN | POLLRDNORM)) != 0);
+	assert((returned & POLLHUP) == 0);
+
+	input_device_unregister(first);
+	assert(!cdev_is_published(first_cdev));
+	returned = 0;
+	assert(first_cdev->ops->poll(&test.file, POLLIN | POLLRDNORM,
+	    &returned) == 0);
+	assert((returned & (POLLIN | POLLRDNORM)) != 0);
+	assert((returned & POLLHUP) != 0);
+
+	second = register_pointer(BTN_RIGHT);
+	second_cdev = device_cdev(second);
+	assert(second_cdev != NULL);
+	assert(strcmp(second_cdev->name, first_name) != 0);
+
+	count = first_cdev->ops->read(&test.file, events, sizeof(events));
+	assert(count == (ssize_t)sizeof(events[0]));
+	assert(events[0].type == EV_REL && events[0].code == REL_X &&
+	    events[0].value == 7);
+	assert(first_cdev->ops->read(&test.file, events, sizeof(events)) == 0);
+	assert(first_cdev->ops->close(&test.file) == 0);
+	test_file_destroy(&test);
+
+	third = register_pointer(BTN_MIDDLE);
+	third_cdev = device_cdev(third);
+	assert(third_cdev != NULL);
+	assert(!strcmp(third_cdev->name, first_name));
+	input_device_unregister(third);
+	input_device_unregister(second);
+}
+
+/* Verifies bounded event-slot exhaustion without a partial publication. */
+static void
+test_event_slot_exhaustion(
+	void)
+{
+	static const struct input_capability capabilities[] = {
+	    {EV_SYN, SYN_REPORT}, {EV_REL, REL_X}};
+	const struct input_device_info info = {
+	    .name = "overflow pointer",
+	    .capabilities = capabilities,
+	    .capability_count = sizeof(capabilities) / sizeof(capabilities[0]),
+	};
+	const struct cdev *cdevs[TEST_INPUT_DEVICE_MAX];
+	const struct cdev *replacement_cdev;
+	struct input_device *devices[TEST_INPUT_DEVICE_MAX];
+	struct input_device *replacement;
+	struct input_device *overflow;
+	struct test_file files[TEST_INPUT_DEVICE_MAX];
+	unsigned index;
+
+	for (index = 0; index < TEST_INPUT_DEVICE_MAX; index++) {
+		devices[index] = register_pointer(BTN_LEFT);
+		cdevs[index] = device_cdev(devices[index]);
+		assert(cdevs[index] != NULL);
+		test_file_init(&files[index], devices[index]);
+		assert(cdevs[index]->ops->open(&files[index].file) == 0);
+	}
+	for (index = 0; index < TEST_INPUT_DEVICE_MAX; index++)
+		input_device_unregister(devices[index]);
+	assert(registered_count == 0);
+	overflow = (struct input_device *)(uintptr_t)1U;
+	assert(input_device_register(&info, &overflow) == ENOSPC);
+	assert(overflow == NULL);
+	for (index = 0; index < TEST_INPUT_DEVICE_MAX; index++) {
+		assert(cdevs[index]->ops->close(&files[index].file) == 0);
+		test_file_destroy(&files[index]);
+	}
+	replacement = register_pointer(BTN_LEFT);
+	replacement_cdev = device_cdev(replacement);
+	if (replacement_cdev == NULL)
+		abort();
+	assert(!strcmp(replacement_cdev->name, "event0"));
+	input_device_unregister(replacement);
+	assert(registered_count == 0);
+}
+
 static void
 test_resync_transaction(void)
 {
@@ -486,6 +678,7 @@ test_resync_transaction(void)
 	assert(captured[2].flags == INPUT_REPORT_RESYNC_END &&
 	    captured[2].event_count == 0);
 	assert(cdev->ops->close(&test.file) == 0);
+	test_file_destroy(&test);
 	clear_capture();
 	input_device_unregister(device);
 	assert(captured_count == 2);
@@ -548,6 +741,10 @@ open_worker(void *argument)
 	struct callback_context *context = argument;
 	const struct cdev *cdev = device_cdev(context->device);
 
+	if (cdev == NULL) {
+		context->open_result = ENODEV;
+		return NULL;
+	}
 	context->open_result = cdev->ops->open(&context->file->file);
 	return NULL;
 }
@@ -611,6 +808,7 @@ test_callback_retirement(void)
 	assert(context.open_result == ENODEV);
 	assert(context.close_calls == 1);
 	assert(context.callback_after_return == 0);
+	test_file_destroy(&test);
 
 	/*
 	 * An already-open reader transfers its close to one unregister exactly
@@ -625,6 +823,8 @@ test_callback_retirement(void)
 	    producer_close, &context);
 	test_file_init(&test, context.device);
 	cdev = device_cdev(context.device);
+	if (cdev == NULL)
+		abort();
 	assert(cdev->ops->open(&test.file) == 0);
 	clear_capture();
 	memset(&first_call, 0, sizeof(first_call));
@@ -654,6 +854,7 @@ test_callback_retirement(void)
 	assert(captured_count == 1 &&
 	    captured[0].flags == INPUT_REPORT_DETACH);
 	assert(cdev->ops->close(&test.file) == 0);
+	test_file_destroy(&test);
 	assert(context.close_calls == 1 && context.callback_after_return == 0);
 }
 
@@ -690,6 +891,8 @@ main(void)
 	test_momentary();
 	assert(cdev_probe_error == 0);
 	cdev_probe_open = 0;
+	test_detached_reader_and_delayed_slot_reuse();
+	test_event_slot_exhaustion();
 	test_two_physical_keyboards();
 	test_two_pointers();
 	test_resync_transaction();

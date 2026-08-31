@@ -1,6 +1,6 @@
 # WS006 Phase 008: USB HID evdev producers and hotplug
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 WSID: `ws006`
 
@@ -8,8 +8,8 @@ Phase ID: `p008`
 
 Combined ID: `ws006-p008`
 
-Status: planned; Queue-ready. Report-Protocol and stale-fd namespace policies
-are resolved, and WS004 p031/p032 prerequisites are complete (`q047`)
+Status: complete automatic/software milestone (`q048`); the single bounded
+IN-T42 physical keyboard/mouse observation remains pending
 
 Parent: [WS006](../ws.md)
 
@@ -162,11 +162,65 @@ xHCI keyboard/mouse/tablet plus concurrent USB-root fixtures.
    is not blocked on repeated human boots; final WS acceptance records the
    exact frozen image and devices.
 
+## q048 automatic result (2026-09-01)
+
+The production USB function registry now binds validated Report-Protocol HID
+interfaces without VID:PID or port assumptions. Keyboard, relative-pointer,
+and absolute-pointer reports publish truthful `BUS_USB` evdev capabilities;
+keyboard events also reach the console subscriber. The worker owns one
+interrupt URB through checked completion/cancel/drain, and every terminal
+path unpublishes the input generation before stopping.
+
+Dynamic cdev/devfs/input ownership now removes a detached pathname
+immediately, keeps each old fd attached to its immutable generation through
+EOF/HUP and final close, and releases the reserved event number only after the
+last old reference is gone. The focused generation-lifecycle fixture passes
+ordinary, ASan/UBSan, and analyzer modes. The production HID fixture passes
+92 checks plus sanitizer, xHCI lifecycle, and analyzer gates; the retained
+IN-T30--IN-T35 ownership suite also passes.
+
+IN-T41 passed on QEMU 10.0.11 with i8042 disabled, so login and all control
+input used the production USB keyboard:
+
+- `build/q048-p008-xhci-usbonly3` passed capability-only keyboard, relative,
+  and absolute discovery/records, console coexistence, disconnect/reinsert,
+  stale-fd `event3 -> event4 -> event3` reservation/reuse, and a concurrent
+  64 MiB read from the same xHCI USB Storage root. Its immutable source image
+  SHA-256 is `457ca9583d814e61df71ee86e7e28aecc50356da0f0b4d8a085761368ca38733`.
+- `build/q048-p008-paired-uhci-baseline1` passed the same semantic sequence
+  with HID on companion UHCI and the 64 MiB root read on paired EHCI. It then
+  replaced the pointer with the absolute tablet and completed without a
+  kernel fault. Its immutable source image SHA-256 is
+  `40fa1a6149c4123c73b6ff789587192058130622605dff79108eea1821161e96`.
+
+The earlier one-off UHCI `#GP` did not reproduce on the integrated production
+source. Temporary diagnostics were removed, `pci-uhci.c` remained unchanged
+from its established implementation, and no speculative controller change
+was retained. The fault is not declared resolved: it is carried as WS004
+[`BUG-008`](../../known-bugs.md), with recurrence reopening this Phase's legacy
+acceptance. The final regression pass also cleared the legacy-HCD
+concurrency/hotplug and USB-recovery contracts, xHCI concurrent URBs, dynamic
+cdev/devfs lifecycle, IN-T30--IN-T35, and the USB HID 92-check,
+sanitizer/hot-unplug suites. Default PC-98, amd64, and i386 full builds and
+disk-image generation passed with `make -j16`.
+
+The i386 build retained one pre-existing limitation: `NOCT_NM` is undefined,
+so part of its undefined-symbol scan is skipped. The build itself passed and
+the skip is not introduced by USB HID. As a replacement q048 integrity gate,
+host `nm -u` scanned `build/pcat/vmunix`, every top-level `build/pcat/*.ELF`,
+and every file in `build/pcat/bin`; it found zero undefined-symbol lines. The
+transcript is `build/q048-regression-tmp/pcat-bin-undefined-symbols.txt`; the
+Makefile defect itself is tracked as `BUG-007`.
+Physical USB HID hardware was not exercised in q048; IN-T42 is the only
+remaining p008 hardware observation and does not invalidate the completed
+automatic/software milestone.
+
 ## Verification gates
 
 - IN-T40 remains passing against the production parser.
 - IN-T41 covers keyboard, mouse, tablet, composite binding, hotplug, detach,
-  event delivery, and console coexistence under QEMU xHCI.
+  event delivery, console coexistence, and concurrent USB-root I/O under QEMU
+  xHCI and paired EHCI/UHCI.
 - Existing USB function/binding/concurrent-URB/storage and evdev
   layout/queue/capability/keymap tests pass in their declared ordinary and
   sanitizer modes.

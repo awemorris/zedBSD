@@ -338,8 +338,7 @@ device_begin_disconnect(struct drv_usb_device *device)
 static int
 device_is_disconnecting(const struct drv_usb_device *device)
 {
-	return (hal_atomic_load_acquire(&device->lifecycle) &
-	    USB_DEVICE_LIFECYCLE_DISCONNECTING) != 0;
+	return drv_usb_device_is_tearing_down(device);
 }
 
 static int
@@ -2107,6 +2106,14 @@ enum drv_usb_speed drv_usb_device_speed(const struct drv_usb_device*d){return d?
 enum drv_usb_device_state drv_usb_device_state(const struct drv_usb_device*d){return d?d->state:DRV_USB_STATE_NOT_ATTACHED;}
 const struct drv_usb_device_descriptor*drv_usb_device_descriptor(const struct drv_usb_device*d){return d?&d->descriptor:NULL;}
 unsigned drv_usb_device_hcd_urb_count(const struct drv_usb_device*d){return d?hal_atomic_load_acquire(&d->hcd_urb_count):0;}
+int
+drv_usb_device_is_tearing_down(const struct drv_usb_device *device)
+{
+	return device != NULL &&
+	    (hal_atomic_load_acquire(&device->lifecycle) &
+		(USB_DEVICE_LIFECYCLE_DISCONNECTING |
+		USB_DEVICE_LIFECYCLE_FINALIZING)) != 0;
+}
 unsigned drv_usb_device_hcd_capabilities(const struct drv_usb_device*d){return d&&d->bus&&d->bus->hcd?d->bus->hcd->capabilities:0;}
 uintptr_t drv_usb_device_hcd_data(const struct drv_usb_device*d,unsigned n){return d&&n<4U?__atomic_load_n(&d->hcd_private[n],__ATOMIC_ACQUIRE):0;}
 int drv_usb_device_set_hcd_data(struct drv_usb_device*d,unsigned n,uintptr_t value){if(!d||n>=4U)return EINVAL;__atomic_store_n(&d->hcd_private[n],value,__ATOMIC_RELEASE);return 0;}

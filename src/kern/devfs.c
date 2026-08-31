@@ -28,20 +28,20 @@
 #define DEVFS_PTS_INO 3U
 #define DEVFS_INPUT_INO 4U
 #define DEVFS_PTS_INO_BASE 0x200000000ULL
+#define DEVFS_CHAR_INO_BASE 0x300000000ULL
 #define DEVFS_HIGH __attribute__((section(".hightext")))
 
 typedef char devfs_ino_must_be_64_bit[(sizeof(ino_t) >= 8) ? 1 : -1];
+#if !defined(ZEDBSD_DEVFS_HOST_TEST)
 typedef char devfs_dev_must_fit_32_bit[(sizeof(dev_t) <= 4) ? 1 : -1];
-
-struct devfs_node {
-	const struct cdev *device;
-	struct inode *inode;
-};
+#endif
 
 struct devfs_dir_entry {
 	char name[DEVFS_NAME_MAX];
 	ino_t ino;
 	enum inode_type type;
+	uint64_t generation;
+	int character;
 };
 
 struct devfs_dir_state {
@@ -49,47 +49,162 @@ struct devfs_dir_state {
 	struct devfs_dir_entry entries[DEVFS_ENTRY_MAX];
 };
 
-static struct devfs_node nodes[CDEV_MAX] __attribute__((section(".vfs_bss")));
-static unsigned node_count __attribute__((section(".vfs_bss")));
-static struct inode *devfs_root __attribute__((section(".vfs_bss")));
-static struct inode *devfs_shm __attribute__((section(".vfs_bss")));
-static struct inode *devfs_pts __attribute__((section(".vfs_bss")));
-static struct inode *devfs_input __attribute__((section(".vfs_bss")));
 static const struct file_ops devfs_block_ops;
 
+static DEVFS_HIGH int component_equal(const struct componentname *component, const char *text);
+static DEVFS_HIGH int component_copy(const struct componentname *component, char *name, size_t capacity);
+static DEVFS_HIGH int event_name(const char *name);
+static DEVFS_HIGH int devfs_cdev_inode(struct inode *directory, struct cdev *device, struct inode **result);
+static DEVFS_HIGH int devfs_fixed_inode(struct inode *directory, ino_t number, struct inode **result);
+static DEVFS_HIGH int devfs_dir_entry_live(const struct devfs_dir_entry *entry);
+static DEVFS_HIGH void devfs_directory_add_cdevs(struct devfs_dir_state *state, int input_directory);
+static void devfs_cdev_release(void *data);
+static void devfs_release_inode(struct inode *inode);
+
 static DEVFS_HIGH int
-component_equal(const struct componentname *component, const char *text)
+component_equal(
+	const struct componentname *component,
+	const char *text)
 {
-	size_t length = strlen(text);
+	size_t length;
+
+	length = strlen(text);
 	return component->cn_namelen == length &&
 		!memcmp(component->cn_nameptr, text, length);
+}
+
+/* Copies one bounded path component into a terminated device name. */
+static DEVFS_HIGH int
+component_copy(
+	const struct componentname *component,
+	char *name,
+	size_t capacity)
+{
+	if (component->cn_namelen == 0 ||
+	    component->cn_namelen >= capacity)
+		return ENOENT;
+
+	memcpy(name, component->cn_nameptr, component->cn_namelen);
+	name[component->cn_namelen] = '\0';
+	return 0;
+}
+
+/* Identifies names owned by the /dev/input event namespace. */
+static DEVFS_HIGH int
+event_name(
+	const char *name)
+{
+	return !strncmp(name, "event", 5);
+}
+
+/* Creates one ephemeral inode which owns a cdev-generation reference. */
+static DEVFS_HIGH int
+devfs_cdev_inode(
+	struct inode *directory,
+	struct cdev *device,
+	struct inode **result)
+{
+	struct inode *inode;
+	uint64_t number;
+
+	/* Creates a generation-unique inode and gives it one cdev reference. */
+	number = cdev_generation(device);
+	if (number > UINT64_MAX - DEVFS_CHAR_INO_BASE)
+		return EOVERFLOW;
+	inode = inode_alloc(directory->i_mount);
+	if (inode == NULL)
+		return ENOSPC;
+
+	cdev_ref(device);
+	inode->i_type = INODE_CHAR;
+	inode->i_ino = (ino_t)(DEVFS_CHAR_INO_BASE + number);
+	inode->i_op = directory->i_op;
+	inode->i_fop = &cdev_file_ops;
+	inode->i_data = device;
+	inode->i_special = device;
+	inode->i_special_destroy = devfs_cdev_release;
+	inode->i_linkcount = 1;
+	inode->i_mode = S_IFCHR | (event_name(device->name) ? 0640U : 0666U);
+	inode->i_rdev = device->rdev;
+	inode->i_flags = INODE_DEAD;
+
+	/* Closes allocation/unpublish races before exposing the ephemeral inode. */
+	if (!cdev_is_published(device)) {
+		devfs_release_inode(inode);
+		return ENOENT;
+	}
+
+	*result = inode;
+	return 0;
+}
+
+/* Gets or recreates one evictable fixed devfs directory inode. */
+static DEVFS_HIGH int
+devfs_fixed_inode(
+	struct inode *directory,
+	ino_t number,
+	struct inode **result)
+{
+	struct inode *inode;
+	int error;
+
+	if (directory == NULL || result == NULL ||
+	    (number != DEVFS_SHM_INO && number != DEVFS_PTS_INO &&
+	    number != DEVFS_INPUT_INO))
+		return EINVAL;
+
+	/* The mount-local mutex permits allocation and victim reclaim to sleep. */
+	mutex_lock(&directory->i_mount->m_lock);
+	error = inode_get(directory->i_mount, number, &inode);
+	if (error != 0) {
+		inode = inode_alloc(directory->i_mount);
+		if (inode == NULL) {
+			mutex_unlock(&directory->i_mount->m_lock);
+			return ENOSPC;
+		}
+		inode->i_type = INODE_DIR;
+		inode->i_ino = number;
+		inode->i_op = directory->i_op;
+		inode->i_fop = directory->i_fop;
+		inode->i_linkcount = 2;
+		inode->i_mode = S_IFDIR | 0555U;
+		inode->i_flags = INODE_NOCACHE_CHILDREN;
+	}
+	mutex_unlock(&directory->i_mount->m_lock);
+	*result = inode;
+	return 0;
 }
 
 static DEVFS_HIGH int
 devfs_lookup(struct inode *directory, const struct componentname *component,
 	     struct inode **result)
 {
+	struct cdev *device;
 	struct disk_info info;
 	struct inode *inode;
 	char name[DEVFS_NAME_MAX];
 	unsigned i;
+	uint64_t number;
+	unsigned char digit;
+	int error;
 
 	if (component_equal(component, ".") || component_equal(component, "..")) {
-		struct inode *target = component_equal(component, "..") &&
-		    (directory == devfs_pts || directory == devfs_input)
-		    ? devfs_root
-		    : directory;
-		inode_ref(target);
-		*result = target;
+		if (component_equal(component, "..") &&
+		    (directory->i_ino == DEVFS_SHM_INO ||
+		     directory->i_ino == DEVFS_PTS_INO ||
+		     directory->i_ino == DEVFS_INPUT_INO))
+			return inode_get(directory->i_mount, 1, result);
+
+		inode_ref(directory);
+		*result = directory;
 		return 0;
 	}
-	if (directory == devfs_pts) {
-		uint64_t number = 0;
+	if (directory->i_ino == DEVFS_PTS_INO) {
+		number = 0;
 		if (component->cn_namelen == 0 || component->cn_namelen > 3U)
 			return ENOENT;
 		for (i = 0; i < component->cn_namelen; i++) {
-			unsigned char digit =
-			    (unsigned char)component->cn_nameptr[i];
+			digit = (unsigned char)component->cn_nameptr[i];
 			if (digit < '0' || digit > '9')
 				return ENOENT;
 			number = number * 10U + (digit - '0');
@@ -113,41 +228,45 @@ devfs_lookup(struct inode *directory, const struct componentname *component,
 		*result = inode;
 		return 0;
 	}
-	if (directory == devfs_input) {
-		for (i = 0; i < node_count; i++)
-			if (!strncmp(nodes[i].device->name, "event", 5) &&
-			    component_equal(component, nodes[i].device->name)) {
-				inode_ref(nodes[i].inode);
-				*result = nodes[i].inode;
-				return 0;
-			}
-		return ENOENT;
+
+	error = component_copy(component, name, sizeof(name));
+	if (error != 0)
+		return error;
+
+	if (directory->i_ino == DEVFS_INPUT_INO) {
+		if (!event_name(name))
+			return ENOENT;
+
+		device = cdev_find_ref(name);
+		if (device == NULL)
+			return ENOENT;
+
+		error = devfs_cdev_inode(directory, device, result);
+		cdev_release(device);
+		return error;
 	}
 	if (component_equal(component, "shm")) {
-		inode_ref(devfs_shm);
-		*result = devfs_shm;
-		return 0;
+		return devfs_fixed_inode(directory, DEVFS_SHM_INO, result);
 	}
 	if (component_equal(component, "pts")) {
-		inode_ref(devfs_pts);
-		*result = devfs_pts;
-		return 0;
+		return devfs_fixed_inode(directory, DEVFS_PTS_INO, result);
 	}
 	if (component_equal(component, "input")) {
-		inode_ref(devfs_input);
-		*result = devfs_input;
-		return 0;
+		return devfs_fixed_inode(directory, DEVFS_INPUT_INO, result);
 	}
-	for (i = 0; i < node_count; i++)
-		if (component_equal(component, nodes[i].device->name)) {
-			inode_ref(nodes[i].inode);
-			*result = nodes[i].inode;
-			return 0;
-		}
+
+	/* Keeps input event nodes exclusively below /dev/input. */
+	device = cdev_find_ref(name);
+	if (device != NULL && !event_name(name)) {
+		error = devfs_cdev_inode(directory, device, result);
+		cdev_release(device);
+		return error;
+	}
+	if (device != NULL)
+		cdev_release(device);
+
 	if (component->cn_namelen >= sizeof(name))
 		return ENOENT;
-	memcpy(name, component->cn_nameptr, component->cn_namelen);
-	name[component->cn_namelen] = '\0';
 	if (disk_get_info(name, &info) != 0)
 		return ENOENT;
 	if (inode_get(directory->i_mount,
@@ -191,51 +310,107 @@ dir_name_exists(const struct devfs_dir_state *state, const char *name)
 	return 0;
 }
 
+/* Copies the current cdev namespace into one bounded directory snapshot. */
+static DEVFS_HIGH void
+devfs_directory_add_cdevs(
+	struct devfs_dir_state *state,
+	int input_directory)
+{
+	struct cdev *snapshot[CDEV_MAX];
+	struct cdev *device;
+	struct devfs_dir_entry *entry;
+	uint64_t generation;
+	unsigned count;
+	unsigned index;
+	int input;
+
+	count = cdev_snapshot(snapshot, CDEV_MAX);
+	for (index = 0; index < count; index++) {
+		device = snapshot[index];
+		input = event_name(device->name);
+		generation = cdev_generation(device);
+
+		if (input == input_directory &&
+		    generation <= UINT64_MAX - DEVFS_CHAR_INO_BASE &&
+		    state->count < DEVFS_ENTRY_MAX) {
+			entry = &state->entries[state->count++];
+			memcpy(entry->name, device->name, DEVFS_NAME_MAX);
+			entry->name[DEVFS_NAME_MAX - 1U] = '\0';
+			entry->ino = (ino_t)(DEVFS_CHAR_INO_BASE + generation);
+			entry->type = INODE_CHAR;
+			entry->generation = generation;
+			entry->character = 1;
+		}
+
+		cdev_release(device);
+	}
+}
+
+/* Revalidates an old directory entry against the visible cdev generation. */
+static DEVFS_HIGH int
+devfs_dir_entry_live(
+	const struct devfs_dir_entry *entry)
+{
+	struct cdev *device;
+	int live;
+
+	if (!entry->character)
+		return 1;
+
+	device = cdev_find_ref(entry->name);
+	if (device == NULL)
+		return 0;
+
+	live = cdev_generation(device) == entry->generation;
+	cdev_release(device);
+	return live;
+}
+
 static DEVFS_HIGH int
 devfs_dir_open(struct file *file)
 {
 	struct disk_info disks[DISK_MAX];
 	struct devfs_dir_state *state;
-	unsigned i, disk_count = 0;
+	struct devfs_dir_entry *entry;
+	unsigned indices[8];
+	unsigned count;
+	unsigned disk_count;
+	unsigned index;
+	unsigned value;
+	unsigned used;
+	unsigned digit_index;
+	char digits[4];
 	int error;
 
+	disk_count = 0;
 	state = kern_malloc(sizeof(*state));
 	if (state == NULL)
 		return ENFILE;
 	memset(state, 0, sizeof(*state));
-	if (file->f_inode == devfs_pts) {
-		unsigned indices[8];
-		unsigned count = tty_pty_snapshot(indices,
+	if (file->f_inode->i_ino == DEVFS_PTS_INO) {
+		count = tty_pty_snapshot(indices,
 		    sizeof(indices) / sizeof(indices[0]));
-		for (i = 0; i < count && i < sizeof(indices) / sizeof(indices[0]);
-		    i++) {
-			struct devfs_dir_entry *entry =
-			    &state->entries[state->count++];
-			unsigned value = indices[i];
-			char digits[4];
-			unsigned used = 0, j;
+		for (index = 0;
+		     index < count && index < sizeof(indices) / sizeof(indices[0]);
+		     index++) {
+			entry = &state->entries[state->count++];
+			value = indices[index];
+			used = 0;
 			do { digits[used++] = (char)('0' + value % 10U);
 			    value /= 10U; } while (value != 0);
-			for (j = 0; j < used; j++)
-				entry->name[j] = digits[used - j - 1U];
+			for (digit_index = 0; digit_index < used; digit_index++)
+				entry->name[digit_index] =
+				    digits[used - digit_index - 1U];
 			entry->name[used] = '\0';
-			entry->ino = (ino_t)(DEVFS_PTS_INO_BASE + indices[i]);
+			entry->ino =
+			    (ino_t)(DEVFS_PTS_INO_BASE + indices[index]);
 			entry->type = INODE_CHAR;
 		}
 		file->f_data = state;
 		return 0;
 	}
-	if (file->f_inode == devfs_input) {
-		for (i = 0; i < node_count; i++) {
-			struct devfs_dir_entry *entry;
-			if (strncmp(nodes[i].device->name, "event", 5) != 0)
-				continue;
-			entry = &state->entries[state->count++];
-			strncpy(entry->name, nodes[i].device->name,
-				DEVFS_NAME_MAX - 1U);
-			entry->ino = nodes[i].inode->i_ino;
-			entry->type = INODE_CHAR;
-		}
+	if (file->f_inode->i_ino == DEVFS_INPUT_INO) {
+		devfs_directory_add_cdevs(state, 1);
 		file->f_data = state;
 		return 0;
 	}
@@ -251,28 +426,20 @@ devfs_dir_open(struct file *file)
 	state->entries[state->count].ino = DEVFS_INPUT_INO;
 	state->entries[state->count].type = INODE_DIR;
 	state->count++;
-	for (i = 0; i < node_count; i++) {
-		struct devfs_dir_entry *entry = &state->entries[state->count++];
-		if (!strncmp(nodes[i].device->name, "event", 5)) {
-			state->count--;
-			continue;
-		}
-		strncpy(entry->name, nodes[i].device->name, DEVFS_NAME_MAX - 1U);
-		entry->ino = nodes[i].inode->i_ino;
-		entry->type = INODE_CHAR;
-	}
+	devfs_directory_add_cdevs(state, 0);
 	error = disk_registry_snapshot(disks, DISK_MAX, &disk_count);
 	if (error != 0) {
 		kern_free(state);
 		return error;
 	}
-	for (i = 0; i < disk_count; i++) {
-		struct devfs_dir_entry *entry;
-		if (dir_name_exists(state, disks[i].name))
+	for (index = 0; index < disk_count; index++) {
+		if (dir_name_exists(state, disks[index].name))
 			continue;
 		entry = &state->entries[state->count++];
-		strncpy(entry->name, disks[i].name, DEVFS_NAME_MAX - 1U);
-		entry->ino = (ino_t)(DEVFS_BLOCK_INO_BASE + (uint64_t)disks[i].dev);
+		memcpy(entry->name, disks[index].name, DEVFS_NAME_MAX);
+		entry->name[DEVFS_NAME_MAX - 1U] = '\0';
+		entry->ino = (ino_t)(DEVFS_BLOCK_INO_BASE +
+		    (uint64_t)disks[index].dev);
 		entry->type = INODE_BLOCK;
 	}
 	file->f_data = state;
@@ -291,10 +458,20 @@ devfs_dir_close(struct file *file)
 static DEVFS_HIGH int
 devfs_readdir(struct file *file, struct dirent *entry, int *eof)
 {
-	struct devfs_dir_state *state = file->f_data;
-	unsigned index = (unsigned)file->f_offset;
+	struct devfs_dir_state *state;
+	unsigned index;
+
+	state = file->f_data;
 	if (state == NULL)
 		return EIO;
+
+	/* Skips any generation unpublished after this directory was opened. */
+	index = (unsigned)file->f_offset;
+	while (index < state->count &&
+	       !devfs_dir_entry_live(&state->entries[index])) {
+		index++;
+		file->f_offset = (off_t)index;
+	}
 	if (index >= state->count) {
 		*eof = 1;
 		return 0;
@@ -498,81 +675,66 @@ static const struct file_ops devfs_directory_ops = {
 static DEVFS_HIGH int
 devfs_mount_impl(struct mount *mountp)
 {
-	unsigned i;
-	memset(nodes, 0, sizeof(nodes));
-	node_count = cdev_count();
-	devfs_root = inode_alloc(mountp);
-	if (devfs_root == NULL)
-		return ENOSPC;
-	devfs_root->i_type = INODE_DIR;
-	devfs_root->i_ino = 1;
-	devfs_root->i_op = &devfs_inode_ops;
-	devfs_root->i_fop = &devfs_directory_ops;
-	devfs_root->i_linkcount = 1;
-	devfs_root->i_mode = S_IFDIR | 0555U;
-	devfs_root->i_flags = INODE_ROOT | INODE_NOCACHE_CHILDREN;
-	devfs_shm = inode_alloc(mountp);
-	if (devfs_shm == NULL)
-		return ENOSPC;
-	devfs_shm->i_type = INODE_DIR;
-	devfs_shm->i_ino = DEVFS_SHM_INO;
-	devfs_shm->i_op = &devfs_inode_ops;
-	devfs_shm->i_fop = &devfs_directory_ops;
-	devfs_shm->i_linkcount = 2;
-	devfs_shm->i_mode = S_IFDIR | 0555U;
-	devfs_shm->i_flags = INODE_NOCACHE_CHILDREN;
-	devfs_pts = inode_alloc(mountp);
-	if (devfs_pts == NULL)
-		return ENOSPC;
-	devfs_pts->i_type = INODE_DIR;
-	devfs_pts->i_ino = DEVFS_PTS_INO;
-	devfs_pts->i_op = &devfs_inode_ops;
-	devfs_pts->i_fop = &devfs_directory_ops;
-	devfs_pts->i_linkcount = 2;
-	devfs_pts->i_mode = S_IFDIR | 0555U;
-	devfs_pts->i_flags = INODE_NOCACHE_CHILDREN;
-	devfs_input = inode_alloc(mountp);
-	if (devfs_input == NULL)
-		return ENOSPC;
-	devfs_input->i_type = INODE_DIR;
-	devfs_input->i_ino = DEVFS_INPUT_INO;
-	devfs_input->i_op = &devfs_inode_ops;
-	devfs_input->i_fop = &devfs_directory_ops;
-	devfs_input->i_linkcount = 2;
-	devfs_input->i_mode = S_IFDIR | 0555U;
-	devfs_input->i_flags = INODE_NOCACHE_CHILDREN;
-	for (i = 0; i < node_count; i++) {
-		struct inode *inode = inode_alloc(mountp);
-		if (inode == NULL)
-			return ENOSPC;
-		nodes[i].device = cdev_at(i);
-		nodes[i].inode = inode;
-		inode->i_type = INODE_CHAR;
-		inode->i_ino = 5U + i;
-		inode->i_op = &devfs_inode_ops;
-		inode->i_fop = &cdev_file_ops;
-		inode->i_data = (void *)nodes[i].device;
-		inode->i_linkcount = 1;
-		inode->i_mode = S_IFCHR |
-		    (!strncmp(nodes[i].device->name, "event", 5) ? 0640U
-								   : 0666U);
-		inode->i_rdev = nodes[i].device->rdev;
-	}
-	mountp->m_root = devfs_root;
+	struct inode *input;
+	struct inode *pts;
+	struct inode *root;
+	struct inode *shm;
+
+	root = NULL;
+	shm = NULL;
+	pts = NULL;
+	input = NULL;
+
+	/* Constructs every fixed directory before publishing the mount root. */
+	root = inode_alloc(mountp);
+	if (root == NULL)
+		goto no_space;
+	root->i_type = INODE_DIR;
+	root->i_ino = 1;
+	root->i_op = &devfs_inode_ops;
+	root->i_fop = &devfs_directory_ops;
+	root->i_linkcount = 1;
+	root->i_mode = S_IFDIR | 0555U;
+	root->i_flags = INODE_NOCACHE_CHILDREN;
+
+	if (devfs_fixed_inode(root, DEVFS_SHM_INO, &shm) != 0)
+		goto no_space;
+	if (devfs_fixed_inode(root, DEVFS_PTS_INO, &pts) != 0)
+		goto no_space;
+	if (devfs_fixed_inode(root, DEVFS_INPUT_INO, &input) != 0)
+		goto no_space;
+
+	/* Transfers root ownership and leaves fixed subdirs safely evictable. */
+	root->i_flags |= INODE_ROOT;
+	mountp->m_root = root;
+	inode_release(shm);
+	inode_release(pts);
+	inode_release(input);
 	return 0;
+
+no_space:
+	devfs_release_inode(input);
+	devfs_release_inode(pts);
+	devfs_release_inode(shm);
+	devfs_release_inode(root);
+	return ENOSPC;
 }
 
 static DEVFS_HIGH int
 devfs_statvfs(struct mount *mountp, struct statvfs *result)
 {
+	unsigned character_count;
+
 	(void)mountp;
 	if (result == NULL)
 		return EINVAL;
+
+	character_count = cdev_count();
 	memset(result, 0, sizeof(*result));
 	result->f_bsize = result->f_frsize = 1U;
 	result->f_files = DEVFS_ENTRY_MAX;
-	result->f_ffree = node_count < DEVFS_ENTRY_MAX ?
-	    DEVFS_ENTRY_MAX - node_count : 0;
+	result->f_ffree = character_count < DEVFS_ENTRY_MAX ?
+	    DEVFS_ENTRY_MAX - character_count : 0;
 	result->f_favail = result->f_ffree;
 	result->f_namemax = DEVFS_NAME_MAX - 1U;
 	return 0;
@@ -584,3 +746,23 @@ const struct filesystem_type devfs_type = {
 	.mount = devfs_mount_impl,
 	.statvfs = devfs_statvfs,
 };
+
+/* Releases the cdev reference held by one devfs character inode. */
+static void
+devfs_cdev_release(
+	void *data)
+{
+	cdev_release(data);
+}
+
+/* Marks an unpublished construction dead and drops its caller reference. */
+static void
+devfs_release_inode(
+	struct inode *inode)
+{
+	if (inode == NULL)
+		return;
+
+	inode->i_flags |= INODE_DEAD;
+	inode_release(inode);
+}

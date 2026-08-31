@@ -485,6 +485,13 @@ drv_usb_device_descriptor(
 unsigned
 drv_usb_device_hcd_urb_count(
 	const struct drv_usb_device *d);
+/* HCD-only lifecycle observation.  A true result means USB-core admission is
+ * permanently closed and an endpoint cancelled by teardown must not be
+ * restarted merely to release its retired request.  The device remains alive
+ * through the accepted URB's HCD ownership while this accessor is used. */
+int
+drv_usb_device_is_tearing_down(
+	const struct drv_usb_device *d);
 /* Public HCD behavior only; callers must not inspect an opaque controller's
  * name, ops table, or private data to infer concurrency support. */
 unsigned

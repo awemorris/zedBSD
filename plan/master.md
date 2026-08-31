@@ -46,10 +46,12 @@ character-only producer source-owned, routes console translation through a
 bounded internal subscriber, and repairs overflow through an atomic
 begin/snapshot/end state transaction. Its independent bounded HID parser
 rejects impossible field widths even on unsupported usages and passes 791
-strict/sanitizer/analyzer checks. Live USB HID attachment remains WS006 p008;
-q047 completed both p031 USB 1.1 concurrency/hotplug and p032 checked
-endpoint/device recovery, so p008 is Queue-ready. The accepted Noct revision
-now passes
+strict/sanitizer/analyzer checks. Q047 completed p008's USB 1.1 concurrency,
+hotplug, and checked recovery prerequisites. Q048 then completed the production
+Report-Protocol keyboard/mouse/tablet automatic milestone, including dynamic
+generation-safe evdev publication and xHCI plus paired EHCI/UHCI QEMU runtime;
+one bounded physical HID observation remains. The accepted Noct revision now
+passes
 runtime `--path`, the ordinary production build, and zedbuild byte primitives;
 only the unrelated compile/application CLI form remains uncleared.
 
@@ -75,13 +77,16 @@ completed independent AF_UNIX/network authorization foundation. The archived
 parser milestones. The archived [q045](queue-q045.md) records the independent
 WS004 SuperSpeed interrupt-context automatic/source correction. The completed
 [q046](queue-q046.md) reconciles the producer-linked evdev/input and kernel
-boot-parameter references. The current [Queue Book](queue.md) completed the
+boot-parameter references. The archived [q047](queue-q047.md) completed the
 WS004 legacy-HCD concurrency/hotplug and checked USB recovery prerequisites
-before USB HID. It has completed p031's focused, configured-production,
+before USB HID. It completed p031's focused, configured-production,
 regression, repository-build, and forced standalone/paired QEMU gates, p032's
 checked USB recovery and reclaim-safe reserve boundary, and p033, the bounded
 amd64 framebuffer-console race extracted when p031's third hot-add exposed a
 cursor-row overwrite. No physical recovery result is claimed for p032. The
+current [Queue Book](queue.md) and archived [q048](queue-q048.md) complete the
+WS006 p008 automatic HID milestone with xHCI and paired EHCI/UHCI acceptance;
+they do not claim the remaining physical IN-T42 observation. The
 archived q043 PC-98 fixed-read and exact-mouse
 paths both pass locally, and their remaining external resume facts do not
 block subsequent Queues. The
@@ -352,7 +357,7 @@ actually warranted.
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; restore its Make-owned Noct gate through ws008-p010 | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Active; q047 completed legacy-HCD concurrency/hotplug, checked general USB recovery for HID, and the extracted amd64 framebuffer-console correction. q040 p026 remains uncleared only at the purchased-unit label; NVMe software and physical USB Ethernet are complete | `ws004-p010`--`p016`, `p018`, p020, p022--p024, and p031--p033 complete | Hand the satisfied USB prerequisite boundary to WS006 p008; retain the separately listed p017, p019, p021, p025, and WLAN chain | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q029 p001 and q040 p003 complete; q041 p005 host implementation passes and q042 advanced but did not complete its VFS dependencies | Physical USB Ethernet and authenticated control pass; strict local credential parser/store/CLI now pass host safety and regression gates | Complete WS001 p015/p016 after WS008 p010, then requeue p005 root/non-root ownership and remount-durability acceptance; p004 remains hardware-core dependency-gated | [WS005](ws005-networking/ws.md) |
-| `ws006` | Input and evdev | Active; q044 completed truthful per-source ownership and the bounded HID parser; p008 has frozen Report-Protocol/stale-fd policies and satisfied WS004 prerequisites | `ws006-p006` automatic/source and `ws006-p007` parser milestones complete; p008 Queue-ready | Queue and implement p008. P009 still waits for accepted WS008 userland | [WS006](ws006-input/ws.md) |
+| `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; p009 still waits for accepted WS008 userland | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked; accepted host SHA restores runtime `--path` and passes the ordinary production build plus zedbuild byte primitives, while target packages remain separately disabled | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 is uncleared only at unrelated `NOCT-T082` compile/application parsing, and p009 remains separately target-blocked | Resume p010 only from a maintainer-reviewed commit which fixes `--compile --app --path=...`; resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | Active; q046 reconciled two already implemented producer contracts | `ws009-p004` and `p005` complete | Extract the next dependency-ready public reference alongside its producer WS | [WS009](ws009-documentation/ws.md) |
@@ -462,17 +467,14 @@ active execution order. Dependency closure may interleave adjacent WSs, but it
 must not silently promote a lower-priority product goal over a ready higher-
 priority one.
 
-1. Continue from the completed WS006/WS004 prerequisite audit in q047. q044
-   completed WS006
-   p006/p007 source boundaries without calling the WS complete. P008's checked
-   Report-Protocol and stale-fd namespace policies are resolved; the user
-   requires USB 1.1. P031 UHCI/EHCI concurrency/hotplug and p032 general
-   reset/STALL recovery are complete, so p008 is Queue-ready. P033 has
-   completed the
-   framebuffer-console
-   race correction using host gates and p031's passing forced QEMU evidence
-   rather than adding a second run, while
-   p009 remains WS008-dependent. WS004
+1. q048 completed the WS006 p008 production HID automatic/software milestone
+   after q044's p006/p007 source boundaries and q047's p031/p032 USB 1.1,
+   hotplug, and recovery prerequisites. Checked Report Protocol,
+   generation-safe stale-fd handling, xHCI, and paired EHCI/UHCI QEMU runtime
+   pass. One bounded physical HID observation remains without calling the WS
+   complete. q047 also completed p033's framebuffer-console race correction
+   using host gates and p031's passing forced QEMU evidence rather than adding
+   a second run. P009 remains WS008-dependent. WS004
    likewise retains its independently listed p017, p019, p021, p025, and WLAN
    chain rather than treating the working visible USB/NVMe cases as closure.
 2. WS018 is complete.  q035 finished p009's retained runtime evidence and

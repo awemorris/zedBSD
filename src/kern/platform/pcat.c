@@ -26,6 +26,9 @@
 #if CONFIG_DRIVER_USB_CDC_NCM
 #include <drivers/usb-cdc-ncm.h>
 #endif
+#if CONFIG_DRIVER_USB_HID
+#include <drivers/usb-hid.h>
+#endif
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 int usb_hid_checkpoint_driver_register(void);
 #endif
@@ -72,6 +75,9 @@ kern_platform_init(const struct boot_handoff *handoff,
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 	if (usb_hid_checkpoint_driver_register() != 0)
 		hal_printf("usb: HID checkpoint driver registration failed\n");
+#elif CONFIG_DRIVER_USB_HID
+	if (drv_usb_hid_driver_register() != 0)
+		hal_printf("usb: HID input driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_PCI_UHCI
 	if (drv_pci_uhci_driver_register() != 0)
@@ -171,7 +177,17 @@ nvme:
 #endif
 }
 
-int kern_platform_input_init(void) { return pcat_ps2_mouse_init(); }
+int
+kern_platform_input_init(void)
+{
+#if CONFIG_DRIVER_USB_HID && !CONFIG_KERNEL_USB_HID_CHECKPOINT
+	/* USB enumeration precedes VFS input construction.  The platform-input
+	 * boundary runs after input core and console registration, so dynamic HID
+	 * publication preserves console event0 and its subscriber route. */
+	drv_usb_hid_input_ready();
+#endif
+	return pcat_ps2_mouse_init();
+}
 
 struct disk *kern_platform_block_device(const struct boot_device *device)
 {

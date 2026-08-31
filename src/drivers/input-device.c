@@ -43,16 +43,24 @@ struct input_device {
 	int (*open)(void *);
 	void (*close)(void *);
 	void *context;
+	struct cdev *cdev;
+	refcount_t refs;
 	unsigned number;
 	unsigned flags;
 	unsigned producer_callbacks;
 	int registered;
 	int retiring;
 	int resyncing;
+	int owner_released;
 };
 
 static struct spinlock registry_lock;
-static uint8_t input_device_reserved[INPUT_DEVICE_MAX];
+static struct input_device *input_device_reserved[INPUT_DEVICE_MAX];
+
+static int input_device_tryref(struct input_device *device);
+static void input_device_ref(struct input_device *device);
+static void input_device_release(struct input_device *device);
+static void input_cdev_finalize(void *data);
 
 static void
 report_timestamp(struct input_event *event, uint64_t milliseconds)
@@ -458,7 +466,6 @@ void
 input_core_init(void)
 {
 	spin_init(&registry_lock, LOCK_RANK_DEVICE, "input registry");
-	memset(input_device_reserved, 0, sizeof(input_device_reserved));
 	input_subscriber_init();
 }
 
@@ -482,6 +489,9 @@ input_device_register(const struct input_device_info *info,
 	unsigned long irq;
 	unsigned slot;
 	int error;
+
+	if (result != NULL)
+		*result = NULL;
 	if (info == NULL || result == NULL || info->name == NULL)
 		return EINVAL;
 	if ((info->open == NULL) != (info->close == NULL))
@@ -495,6 +505,7 @@ input_device_register(const struct input_device_info *info,
 	device = kern_calloc(1, sizeof(*device));
 	if (device == NULL)
 		return ENOMEM;
+	refcount_init(&device->refs, 1);
 	if ((error = copy_info_text(device->name, info->name)) != 0 ||
 	    (error = copy_info_text(device->physical_path,
 				    info->physical_path)) != 0 ||
@@ -522,27 +533,30 @@ input_device_register(const struct input_device_info *info,
 	input_queue_init(&device->queue);
 	irq = spin_lock_irqsave(&registry_lock);
 	for (slot = 0; slot < INPUT_DEVICE_MAX; slot++)
-		if (!input_device_reserved[slot])
+		if (input_device_reserved[slot] == NULL)
 			break;
 	if (slot == INPUT_DEVICE_MAX) {
 		spin_unlock_irqrestore(&registry_lock, irq);
-		kern_free(device);
+		input_device_release(device);
 		return ENOSPC;
 	}
-	input_device_reserved[slot] = 1;
+	input_device_reserved[slot] = device;
 	device->number = slot;
 	spin_unlock_irqrestore(&registry_lock, irq);
 	(void)snprintf(node, sizeof(node), "event%u", device->number);
-	/* cdev_register publishes the node; all observable state is ready first. */
+
+	/* Gives the future cdev finalizer its device-lifetime reference. */
+	input_device_ref(device);
+
+	/* Managed publication exposes only completely initialized state. */
 	device->registered = 1;
-	error = cdev_register(node, (dev_t)(0x00030000U + device->number),
-			      &input_ops, device);
+	error = cdev_register_managed(node,
+	    (dev_t)(0x00030000U + device->number), &input_ops, device,
+	    input_cdev_finalize, &device->cdev);
 	if (error != 0) {
 		device->registered = 0;
-		irq = spin_lock_irqsave(&registry_lock);
-		input_device_reserved[slot] = 0;
-		spin_unlock_irqrestore(&registry_lock, irq);
-		kern_free(device);
+		input_device_release(device);
+		input_device_release(device);
 		return error;
 	}
 	*result = device;
@@ -556,13 +570,18 @@ input_device_unregister(struct input_device *device)
 	unsigned long held[INPUT_BIT_WORDS(KEY_MAX)];
 	struct input_report report;
 	struct input_reader *reader;
+	struct cdev *publication;
 	uint64_t milliseconds;
 	unsigned long irq, publication_irq;
 	unsigned code, close_count = 0;
+	int drop_owner;
 	int released = 0, was_resyncing;
 
-	if (device == NULL)
+	if (device == NULL || !input_device_tryref(device))
 		return;
+
+	publication = NULL;
+	drop_owner = 0;
 
 	/*
 	 * Retire callback admission before touching publication.  An open that
@@ -585,6 +604,7 @@ input_device_unregister(struct input_device *device)
 	}
 	if (!device->registered) {
 		spin_unlock_irqrestore(&device->lock, irq);
+		input_device_release(device);
 		return;
 	}
 	device->retiring = 1;
@@ -603,6 +623,14 @@ input_device_unregister(struct input_device *device)
 		device->close(device->context);
 		close_count--;
 	}
+
+	/* Removes the pathname before publishing terminal events to stale fds. */
+	irq = spin_lock_irqsave(&device->lock);
+	publication = device->cdev;
+	device->cdev = NULL;
+	spin_unlock_irqrestore(&device->lock, irq);
+	if (publication != NULL)
+		(void)cdev_unregister(publication);
 
 	milliseconds = clock_milliseconds(NULL);
 	publication_irq = spin_lock_irqsave(&device->publication_lock);
@@ -677,8 +705,19 @@ input_device_unregister(struct input_device *device)
 	/* DETACH and every transferred producer close are now terminal. */
 	irq = spin_lock_irqsave(&device->lock);
 	device->retiring = 0;
+	if (!device->owner_released) {
+		device->owner_released = 1;
+		drop_owner = 1;
+	}
 	waitq_wake_all(&device->waitq);
 	spin_unlock_irqrestore(&device->lock, irq);
+
+	/* Releases publication, returned-owner, and this call's temporary refs. */
+	if (publication != NULL)
+		cdev_release(publication);
+	if (drop_owner)
+		input_device_release(device);
+	input_device_release(device);
 }
 
 void
@@ -899,4 +938,48 @@ input_device_emit_key_event(struct input_device *device,
 	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 	if (published)
 		poll_notify();
+}
+
+/* Tries to retain an input generation across concurrent terminal removal. */
+static int
+input_device_tryref(
+	struct input_device *device)
+{
+	return device != NULL && refcount_tryget(&device->refs);
+}
+
+/* Retains one input generation for an owned subsystem reference. */
+static void
+input_device_ref(
+	struct input_device *device)
+{
+	if (device != NULL)
+		refcount_get(&device->refs);
+}
+
+/* Releases the event number only when the complete generation is gone. */
+static void
+input_device_release(
+	struct input_device *device)
+{
+	unsigned long irq;
+
+	if (device == NULL || !refcount_put(&device->refs))
+		return;
+
+	irq = spin_lock_irqsave(&registry_lock);
+	if (device->number < INPUT_DEVICE_MAX &&
+	    input_device_reserved[device->number] == device)
+		input_device_reserved[device->number] = NULL;
+	spin_unlock_irqrestore(&registry_lock, irq);
+
+	kern_free(device);
+}
+
+/* Releases the input reference owned by one terminal cdev generation. */
+static void
+input_cdev_finalize(
+	void *data)
+{
+	input_device_release(data);
 }

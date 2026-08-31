@@ -48,6 +48,10 @@ the first physical RTL8156 insertion, and the accepted follow-up published
 
 Resume point: p031, p032, and p033 are complete. WS006 p008 is Queue-ready; no
 physical-machine recovery result is claimed by p032.
+The single non-reproduced UHCI active-list `#GP` observed during q048 remains
+open as [`BUG-008`](../known-bugs.md); recurrence promotes it to a finite WS004
+Phase and reopens the legacy-HID acceptance rather than changing p031 by
+speculation.
 The 2026-08-30 completion audit also found p017, p021, p025,
 and p026--p030 still open. q030 completed p022 through p024, including strict
 primary/backup GPT and the final disposable QEMU acceptance matrix. The later

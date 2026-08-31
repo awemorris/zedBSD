@@ -12,6 +12,7 @@
 #ifndef ZEDBSD_KERN_CDEV_H
 #define ZEDBSD_KERN_CDEV_H
 
+#include <kern/atomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -20,6 +21,8 @@
 
 struct file;
 struct file_ops;
+
+typedef void (*cdev_finalizer_t)(void *);
 
 struct cdev_ops {
 	int (*open)(struct file *);
@@ -35,6 +38,10 @@ struct cdev {
 	dev_t rdev;
 	const struct cdev_ops *ops;
 	void *data;
+	cdev_finalizer_t finalizer;
+	refcount_t refs;
+	uint64_t generation;
+	atomic_uint_t published;
 };
 
 void
@@ -47,13 +54,52 @@ cdev_register(
 	const struct cdev_ops *ops,
 	void *data);
 
-const struct cdev *
-cdev_find(
+/*
+ * Publishes one managed, immutable character-device generation.
+ *
+ * The returned reference belongs to the caller.  The registry owns a
+ * separate reference until cdev_unregister() or cdev_reset() unpublishes the
+ * generation.  The finalizer runs after both those references and every
+ * devfs inode reference have been released.  A failed registration does not
+ * consume data and does not call the finalizer.
+ */
+int
+cdev_register_managed(
+	const char *name,
+	dev_t rdev,
+	const struct cdev_ops *ops,
+	void *data,
+	cdev_finalizer_t finalizer,
+	struct cdev **result);
+
+int
+cdev_unregister(
+	struct cdev *device);
+
+void
+cdev_ref(
+	struct cdev *device);
+
+void
+cdev_release(
+	struct cdev *device);
+
+int
+cdev_is_published(
+	const struct cdev *device);
+
+uint64_t
+cdev_generation(
+	const struct cdev *device);
+
+struct cdev *
+cdev_find_ref(
 	const char *name);
 
-const struct cdev *
-cdev_at(
-	unsigned index);
+unsigned
+cdev_snapshot(
+	struct cdev **snapshot,
+	unsigned capacity);
 
 unsigned
 cdev_count(void);

@@ -11,7 +11,7 @@ Parent: [WS006](../ws.md)
 | IN-T20 | Console bridge | Console text input and evdev readers coexist with modifiers, repeat, and virtual-terminal behavior |
 | IN-T30 | Consumer migration | Xzed and BeUI keyboard/relative/absolute pointer cases pass without console event ioctls |
 | IN-T40 | USB HID parser | Valid and malformed report descriptors, bit bounds, boot/report protocols, and unknown usages pass |
-| IN-T41 | QEMU USB HID | xHCI keyboard, mouse/tablet, hotplug, disconnect, and event delivery pass |
+| IN-T41 | QEMU USB HID | xHCI and paired EHCI/UHCI keyboard, mouse/tablet, hotplug, disconnect, event delivery, and concurrent USB-root I/O pass |
 | IN-T42 | Physical USB HID | Target laptop keyboard/mouse devices identify and operate through evdev across reconnect |
 | IN-T50 | Legacy removal | No in-tree consumer uses console continuous-event/key-state UAPI and console regressions pass after deletion |
 
@@ -107,3 +107,56 @@ test command; [evdev-capability-qemu.mk](evdev-capability-qemu.mk) adds the
 probe only to the dedicated IN-T12 image. The final q020 transcript and hashes
 are retained in
 [qemu-evdev-capability-evidence.md](qemu-evdev-capability-evidence.md).
+
+IN-T41 uses a private production image and a test-only guest probe:
+
+```sh
+plan/ws006-input/tests/qemu-usb-hid-acceptance.sh \
+  build/q048-p008-usb-hid-acceptance
+```
+
+The default matrix boots a fresh image copy for each of two q35 topologies.
+The xHCI cell places USB Storage root and HID on one controller. The paired
+legacy cell places Storage on ICH9 EHCI and USB 1.1 HID on its companion UHCI.
+Both disable i8042, so login, shell control, and the explicit console marker
+must travel through the production USB keyboard.
+
+The guest discovers keyboard, relative-pointer, and absolute-pointer roles
+from `EVIOCGBIT` capabilities and `BUS_USB`, never from a fixed event number or
+device name. It checks exact keyboard, relative, and absolute records. The
+hotplug sequence keeps the first pointer fd open across detach, requires EOF or
+HUP, proves that the stale generation reserves its `eventN`, closes the old
+fd, and then proves that a later generation may reuse the released number.
+Each cell also overlaps a 64 MiB read from the USB root disk with pointer event
+delivery before attaching the tablet.
+
+`USB_HID_QEMU_CELLS=xhci` or `paired` selects one topology for focused reruns.
+All build products, temporary compiler files, writable media, OVMF variables,
+logs, hashes, and tabular results remain below the named output directory (or
+the untracked WS temp directory when no output is supplied). The runner uses
+timeouts, rejects QMP command failures and fatal guest diagnostics, preserves
+`config.mk`, and never installs the guest probe in an ordinary production
+image. IN-T42 remains a separate, single bounded physical observation after
+the automatic milestone.
+
+The final q048 IN-T41 evidence is split across two immutable private builds:
+
+- `build/q048-p008-xhci-usbonly3/results.tsv` records every xHCI gate as
+  `pass`; its source image SHA-256 is
+  `457ca9583d814e61df71ee86e7e28aecc50356da0f0b4d8a085761368ca38733`.
+- `build/q048-p008-paired-uhci-baseline1/results.tsv` records every paired
+  EHCI/UHCI gate as `pass`; its source image SHA-256 is
+  `40fa1a6149c4123c73b6ff789587192058130622605dff79108eea1821161e96`.
+
+Both logs contain capability-only keyboard/relative/absolute selection, exact
+records, USB-only console control, stale-fd isolation and number reuse, plus
+the overlapping 64 MiB USB-root read. The final q048 regression pass also
+cleared the legacy-HCD, USB-recovery, xHCI concurrent-URB, dynamic lifecycle,
+IN-T30--IN-T35, and USB HID 92-check/sanitizer/hot-unplug gates, followed by
+default PC-98, amd64, and i386 full builds and disk-image generation. The
+pre-existing undefined `NOCT_NM` still causes part of the i386 undefined-symbol
+scan to be skipped. The replacement host `nm -u` scan of `build/pcat/vmunix`,
+all top-level `build/pcat/*.ELF`, and every `build/pcat/bin` file found zero
+undefined-symbol lines; its transcript is
+`build/q048-regression-tmp/pcat-bin-undefined-symbols.txt`. The Makefile defect
+is tracked as `BUG-007`. Physical IN-T42 was not run in q048.

@@ -2037,6 +2037,19 @@ xhci_cancel_request(struct xhci_controller *c, struct xhci_device *d,
 			    XHCI_TRB_TYPE(16) | (r->dci << 16) |
 				XHCI_TRB_SLOT(d->slot), NULL, &completion);
 			if (error == 0) {
+				/* Set TR Dequeue is the DMA-ownership boundary.  A normal
+				 * cancellation must restart the emptied endpoint before it can
+				 * accept another TD.  Disconnect has permanently closed core
+				 * admission, so demanding Running from an absent endpoint would
+				 * retain an already retired request forever. */
+				if (drv_xhci_cancel_post_dequeue_action(
+				    drv_usb_device_is_tearing_down(
+					drv_usb_urb_device(r->urb))) ==
+				    DRV_XHCI_POST_DEQUEUE_RELEASE_REQUEST) {
+					releasable =
+					    drv_xhci_request_resources_releasable(1, 0);
+					goto release;
+				}
 				error = xhci_endpoint_restart_empty(c, d, ep,
 				    r->dci);
 				if (error == 0) {
