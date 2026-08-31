@@ -496,7 +496,6 @@ pthread_exit(
 	/* Continue while the operation condition remains true. */
 	tcb = self_tcb();
 	while (tcb != NULL && tcb->cleanup != NULL) {
-
 		cleanup = tcb->cleanup;
 		tcb->cleanup = cleanup->previous;
 		cleanup->routine(cleanup->argument);
@@ -669,11 +668,11 @@ __pthread_fork_prepare(
 
 	/* Process each remaining element. */
 	atfork_active_count = atfork_count;
-	for (index = atfork_active_count; index != 0; index--)
-
+	for (index = atfork_active_count; index != 0; index--) {
 		/* Handles the prepare availability. */
 		if (atfork_handlers[index - 1U].prepare != NULL)
 			atfork_handlers[index - 1U].prepare();
+	}
 }
 
 /*
@@ -686,11 +685,11 @@ __pthread_fork_parent(
 	unsigned index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < atfork_active_count; index++)
-
+	for (index = 0; index < atfork_active_count; index++) {
 		/* Handles the parent availability. */
 		if (atfork_handlers[index].parent != NULL)
 			atfork_handlers[index].parent();
+	}
 	atfork_active_count = 0;
 	word_unlock(&atfork_lock);
 	RTLD_CALL(fork_parent)();
@@ -735,11 +734,11 @@ __pthread_fork_child(
 	}
 
 	/* Process each remaining element. */
-	for (index = 0; index < count; index++)
-
+	for (index = 0; index < count; index++) {
 		/* Handles the child availability. */
 		if (atfork_handlers[index].child != NULL)
 			atfork_handlers[index].child();
+	}
 	atfork_active_count = 0;
 	atfork_lock = 0;
 
@@ -1781,9 +1780,10 @@ pthread_rwlock_unlock(
 	rwlock_guard_unlock(lock);
 
 	/* Handles an operation failure. */
-	if (error == 0)
+	if (error == 0) {
 		usync_wake_word_flags(&lock->sequence, UINT32_MAX,
 				      lock->pshared);
+	}
 
 	/* Returns the computed result. */
 	return error;
@@ -2529,9 +2529,10 @@ mtx_init(
 	error = pthread_mutexattr_init(&attributes);
 
 	/* Handles an operation failure. */
-	if (error == 0 && (type & mtx_recursive) != 0)
+	if (error == 0 && (type & mtx_recursive) != 0) {
 		error = pthread_mutexattr_settype(&attributes,
 						  PTHREAD_MUTEX_RECURSIVE);
+	}
 
 	/* Handles an operation failure. */
 	if (error == 0)
@@ -2961,11 +2962,11 @@ ensure_main(
 	    (pthread_t)call(ZEDBSD_SYS_thread_self, 0, 0, 0, 0, 0, 0);
 
 	/* Handles a failed RTLD CALL operation. */
-	if (RTLD_CALL(thread_attach)(&main_tcb) != 0)
-
+	if (RTLD_CALL(thread_attach)(&main_tcb) != 0) {
 		/* Continue until the operation reaches a terminal state. */
 		for (;;)
 			;
+	}
 	main_tcb.runtime_tcb = (struct __rtld_tcb *)(uintptr_t)__syscall6(
 	    ZEDBSD_SYS_thread_self, ZEDBSD_THREAD_SELF_GET_TLS, 0, 0, 0, 0, 0);
 }
@@ -3000,8 +3001,8 @@ run_destructors(
 		/* Process each element required by the operation. */
 		invoked = 0;
 		for (key = 0; key < KEY_MAX; key++) {
-						destructor = key_destructor[key];
-						value = (void *)tcb->keys[key];
+			destructor = key_destructor[key];
+			value = (void *)tcb->keys[key];
 
 			/* Handles a failed void operation. */
 			if (value == NULL || destructor == NULL ||
@@ -3249,9 +3250,10 @@ rwlock_guard_lock(
 	pthread_rwlock_t *lock)
 {
 	/* Continue while the operation condition remains true. */
-	while (__atomic_exchange_n(&lock->guard, 1, __ATOMIC_ACQUIRE) != 0)
+	while (__atomic_exchange_n(&lock->guard, 1, __ATOMIC_ACQUIRE) != 0) {
 		(void)usync_wait_word_flags(&lock->guard, 1, NULL,
 					    lock->pshared);
+	}
 }
 
 /* Supports the rwlock guard unlock operation. */
@@ -3269,9 +3271,10 @@ barrier_guard_lock(
 	pthread_barrier_t *barrier)
 {
 	/* Continue while the operation condition remains true. */
-	while (__atomic_exchange_n(&barrier->guard, 1, __ATOMIC_ACQUIRE) != 0)
+	while (__atomic_exchange_n(&barrier->guard, 1, __ATOMIC_ACQUIRE) != 0) {
 		(void)usync_wait_word_flags(&barrier->guard, 1, NULL,
 					    barrier->pshared);
+	}
 }
 
 /* Supports the barrier guard unlock operation. */
@@ -3320,7 +3323,6 @@ detached_reaper(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		word_lock(&detached_lock);
 		tcb = detached_head;
 

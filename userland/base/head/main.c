@@ -68,9 +68,9 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (; index < argc; index++) {
-				descriptor = !strcmp(argv[index], "-")
-				     ? STDIN_FILENO
-				     : open(argv[index], O_RDONLY);
+		descriptor = !strcmp(argv[index], "-")
+		     ? STDIN_FILENO
+		     : open(argv[index], O_RDONLY);
 
 		/* Checks the file descriptor. */
 		if (descriptor < 0) {
@@ -80,9 +80,10 @@ main(
 		}
 
 		/* Handles the files condition. */
-		if (files > 1)
+		if (files > 1) {
 			printf("%s==> %s <==\n",
 			       index == argc - files ? "" : "\n", argv[index]);
+		}
 
 		/* Handles a failed copy head operation. */
 		if ((bytes ? copy_head(descriptor, limit, 1)
@@ -124,7 +125,6 @@ copy_head(
 	/* Process each remaining element. */
 	count = 0;
 	while (count < limit) {
-
 		wanted = sizeof(buffer);
 
 		/* Handles the bytes condition. */
@@ -157,7 +157,7 @@ copy_head(
 			count += (unsigned long long)got;
 		} else {
 			/* Process each remaining element. */
-						used = 0;
+			used = 0;
 			while (used < (size_t)got && count < limit) {
 				/* Process each remaining element. */
 				end = used;
@@ -211,7 +211,6 @@ copy_head_lines(
 	/* Continue while the operation condition remains true. */
 	lines = 0;
 	while (lines < limit) {
-
 		got = read(input, &byte, 1);
 
 		/* Handles the got condition. */

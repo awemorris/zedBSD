@@ -228,9 +228,10 @@ getopt(
 			next = NULL;
 
 		/* Handles the opterr condition. */
-		if (opterr && options[0] != ':')
+		if (opterr && options[0] != ':') {
 			fprintf(stderr, "%s: illegal option -- %c\n",
 				argv[0] != NULL ? argv[0] : "", option);
+		}
 
 		/* Returns the computed result. */
 		return '?';
@@ -249,11 +250,12 @@ getopt(
 			next = NULL;
 
 			/* Handles the opterr condition. */
-			if (opterr && options[0] != ':')
+			if (opterr && options[0] != ':') {
 				fprintf(
 				    stderr,
 				    "%s: option requires an argument -- %c\n",
 				    argv[0] != NULL ? argv[0] : "", option);
+			}
 
 			/* Returns the computed result. */
 			return options[0] == ':' ? ':' : '?';
@@ -285,14 +287,14 @@ getenv(
 	environment_lock();
 
 	/* Process each element required by the operation. */
-	for (i = 0; environ != NULL && environ[i] != NULL; i++)
-
+	for (i = 0; environ != NULL && environ[i] != NULL; i++) {
 		/* Handles the environment name condition. */
 		if (environment_name(environ[i], name)) {
 			result = strchr(environ[i], '=') + 1;
 			snapshot = strdup(result);
 			break;
 		}
+	}
 	environment_unlock();
 
 	/*
@@ -431,8 +433,7 @@ unsetenv(
 	environment_lock();
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < ENVIRONMENT_MAX && environ[i] != NULL;)
-
+	for (i = 0; i < ENVIRONMENT_MAX && environ[i] != NULL;) {
 		/* Handles the environment name condition. */
 		if (environment_name(environ[i], name)) {
 			/* Handles the environment owned condition. */
@@ -450,6 +451,7 @@ unsetenv(
 		} else {
 			i++;
 		}
+	}
 	environment_unlock();
 	environment_value_replace(NULL);
 
@@ -829,9 +831,9 @@ lockf(
 		operation = F_SETLKW;
 	else if (command == F_ULOCK || command == F_TLOCK)
 		operation = F_SETLK;
-	else if (command == F_TEST)
+	else if (command == F_TEST) {
 		operation = F_GETLK;
-	else {
+	} else {
 		errno = EINVAL;
 
 		/* Reports operation failure. */
@@ -1668,7 +1670,7 @@ confstr(
 
 	/* Handles the buffer availability. */
 	if (buffer != NULL && size != 0) {
-				copied = needed < size ? needed : size;
+		copied = needed < size ? needed : size;
 		memcpy(buffer, path, copied);
 		buffer[copied - 1U] = '\0';
 	}
@@ -2339,11 +2341,11 @@ aio_suspend(
 	}
 
 	/* Process each remaining element. */
-	for (index = 0; index < count; index++)
-
+	for (index = 0; index < count; index++) {
 		/* Handles the controls condition. */
 		if (controls[index] != NULL && controls[index]->__aio_submitted)
 			return 0;
+	}
 
 	/* Handles a failed nanosleep operation. */
 	if (timeout != NULL && nanosleep(timeout, NULL) != 0)
@@ -2409,7 +2411,7 @@ lio_listio(
 
 	/* Process each remaining element. */
 	for (index = 0; index < count; index++) {
-				control = controls[index];
+		control = controls[index];
 
 		/* Handles the control availability. */
 		if (control == NULL || control->aio_lio_opcode == LIO_NOP)
@@ -4640,7 +4642,6 @@ posix_getdents(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		result = call(ZEDBSD_SYS_getdents, fd, (uintptr_t)&source,
 			      sizeof(source), 0, 0, 0);
 
@@ -4672,9 +4673,10 @@ posix_getdents(
 		destination->d_name[name_length] = '\0';
 
 		/* Handles the record length condition. */
-		if (record_length > name_offset + name_length + 1U)
+		if (record_length > name_offset + name_length + 1U) {
 			memset(next + name_offset + name_length + 1U, 0,
 			       record_length - name_offset - name_length - 1U);
+		}
 
 		next += record_length;
 		remaining -= record_length;
@@ -4886,7 +4888,6 @@ scandir(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		errno = 0;
 		entry_local = readdir(directory);
 
@@ -4909,7 +4910,7 @@ scandir(
 		*copy_local = *entry_local;
 		/* Checks the remaining item count. */
 		if (count == capacity) {
-						next = capacity != 0 ? capacity * 2U : 16U;
+			next = capacity != 0 ? capacity * 2U : 16U;
 
 			/* Handles the next condition. */
 			if (next < capacity ||
@@ -4953,8 +4954,8 @@ scandir(
 		/* Process each remaining element. */
 		for (index = 1; index < count; index++) {
 			/* Continue while the operation condition remains true. */
-						entry_local1 = entries[index];
-						position = index;
+			entry_local1 = entries[index];
+			position = index;
 			while (
 			    position != 0 &&
 			    compare(
@@ -5311,11 +5312,11 @@ pclose(
 		return -1;
 
 	/* Continue while the operation condition remains true. */
-	while (waitpid(child, &status, 0) < 0)
-
+	while (waitpid(child, &status, 0) < 0) {
 		/* Handles the reported system error. */
 		if (errno != EINTR)
 			return -1;
+	}
 
 	/* Returns the computed result. */
 	return status;
@@ -5460,8 +5461,8 @@ fread(
 	while (done < total) {
 		/* Handles the stream condition. */
 		if (stream->buffer_start < stream->buffer_length) {
-						available = stream->buffer_length - stream->buffer_start;
-						take = available < total - done ? available : total - done;
+			available = stream->buffer_length - stream->buffer_start;
+			take = available < total - done ? available : total - done;
 			memcpy((unsigned char *)buffer + done,
 			       stream->buffer + stream->buffer_start, take);
 			stream->buffer_start += take;
@@ -5567,7 +5568,6 @@ fwrite(
 	} else if (stream_ensure_buffer(stream) == 0) {
 		/* Continue while the operation condition remains true. */
 		while (done < total) {
-
 			space = stream->buffer_size - stream->buffer_length;
 			put = space < total - done ? space : total - done;
 			source = (const unsigned char *)buffer + done;
@@ -5579,11 +5579,11 @@ fwrite(
 			/* Handles a failed memchr operation. */
 			if (stream->buffer_length == stream->buffer_size ||
 			    (stream->buffering_mode == _IOLBF &&
-			     memchr(source, '\n', put) != NULL))
-
+			     memchr(source, '\n', put) != NULL)) {
 				/* Handles the end-of-file condition. */
 				if (stream_flush_locked(stream) == EOF)
 					break;
+			}
 		}
 	}
 write_done:
@@ -5736,8 +5736,9 @@ fseek(
 					     ((uint64_t)(-(offset + 1L)) + 1U)
 				       : stream->position + (uint64_t)offset),
 			   SEEK_SET);
-	} else
+	} else {
 		at = lseek(stream_fd(stream), offset, whence);
+	}
 
 	/* Handles the at condition. */
 	if (at >= 0) {
@@ -5746,8 +5747,9 @@ fseek(
 		stream->ungot_character = EOF;
 		stream->buffer_start = stream->buffer_length = 0;
 		stream->last_operation = 0;
-	} else
+	} else {
 		stream->error = 1;
+	}
 	stream_leave(stream, old);
 
 	/* Returns the computed result. */
@@ -6088,7 +6090,7 @@ tzset(
 
 	/* Handles the at condition. */
 	if (*at != ',' && *at != '\0') {
-				next = timezone_offset(at, &timezone_daylight_east);
+		next = timezone_offset(at, &timezone_daylight_east);
 
 		/* Handles the next availability. */
 		if (next == NULL) {
@@ -7030,9 +7032,9 @@ environment_value_replace(
 	char *previous;
 
 	/* Handles the pthread environment exchange availability. */
-	if (__pthread_environment_exchange != NULL)
+	if (__pthread_environment_exchange != NULL) {
 		previous = __pthread_environment_exchange(replacement);
-	else {
+	} else {
 		previous = bootstrap_environment_value;
 		bootstrap_environment_value = replacement;
 	}
@@ -7232,9 +7234,10 @@ aio_notify(
 	const struct sigevent *event)
 {
 	/* Handles the event condition. */
-	if (event->sigev_notify == SIGEV_SIGNAL)
+	if (event->sigev_notify == SIGEV_SIGNAL) {
 		(void)sigqueue(getpid(), event->sigev_signo,
 			       event->sigev_value);
+	}
 }
 
 /* Supports the spawn action add operation. */
@@ -7295,12 +7298,13 @@ posix_spawn_common(
 		/* Handles an operation failure. */
 		if (child_error == 0) {
 			/* Handles the search condition. */
-			if (search)
+			if (search) {
 				(void)spawn_exec_search(
 				    path, argv, (char *const *)environment);
-			else
+			} else {
 				(void)execve(path, argv,
 					     (char *const *)environment);
+			}
 			child_error = errno;
 		}
 		(void)write(error_pipe[1], &child_error, sizeof(child_error));
@@ -7373,15 +7377,12 @@ spawn_child_setup(
 			return errno;
 
 		/* Handles the attr condition. */
-		if ((attr->flags & POSIX_SPAWN_SETSIGDEF) != 0)
-
+		if ((attr->flags & POSIX_SPAWN_SETSIGDEF) != 0) {
 			/* Process each remaining element. */
-			for (index = 1; index <= SIGRTMAX; index++)
-
+			for (index = 1; index <= SIGRTMAX; index++) {
 				/* Handles a failed sigismember operation. */
 				if (sigismember(&attr->sigdefault,
 						(int)index) == 1) {
-
 					memset(&action, 0, sizeof(action));
 					action.sa_handler = SIG_DFL;
 
@@ -7392,6 +7393,8 @@ spawn_child_setup(
 						/* Returns the computed result. */
 						return errno;
 				}
+			}
+		}
 	}
 
 	/* Handles the actions availability. */
@@ -7400,7 +7403,7 @@ spawn_child_setup(
 
 	/* Process each remaining element. */
 	for (index = 0; index < actions->count; index++) {
-				a = &actions->actions[index];
+		a = &actions->actions[index];
 
 		/* Handles the a condition. */
 		if (a->operation == SPAWN_ACTION_CLOSE) {
@@ -7412,7 +7415,7 @@ spawn_child_setup(
 			if (dup2(a->descriptor, a->new_descriptor) < 0)
 				return errno;
 		} else if (a->operation == SPAWN_ACTION_OPEN) {
-						fd = open(a->path, a->flags, a->mode);
+			fd = open(a->path, a->flags, a->mode);
 
 			/* Checks the file descriptor. */
 			if (fd < 0)
@@ -7421,7 +7424,7 @@ spawn_child_setup(
 			/* Handles a failed dup2 operation. */
 			if (fd != a->descriptor &&
 			    dup2(fd, a->descriptor) < 0) {
-								e = errno;
+				e = errno;
 				(void)close(fd);
 
 				/* Returns the computed result. */
@@ -7439,10 +7442,10 @@ spawn_child_setup(
 			/* Handles a failed fchdir operation. */
 			if (fchdir(a->descriptor) != 0)
 				return errno;
-		} else
-
+		} else {
 			/* Returns the computed result. */
 			return EINVAL;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -7462,6 +7465,7 @@ spawn_exec_search(
 	const char *path, *at;
 	char candidate[PATH_MAX];
 	int saw_access_error;
+	size_t directory_length;
 
 	saw_access_error = 0;
 
@@ -7485,17 +7489,17 @@ spawn_exec_search(
 	/* Process each element required by the operation. */
 	path = spawn_environment_path(environment);
 	for (at = path;;) {
-				colon = strchr(at, ':');
-		size_t directory_length =
+		colon = strchr(at, ':');
+		directory_length =
 		    colon != NULL ? (size_t)(colon - at) : strlen(at);
-				file_length = strlen(file);
+		file_length = strlen(file);
 
 		/* Handles the directory length condition. */
 		if (directory_length + file_length + 2U <= sizeof(candidate)) {
 			/* Handles the directory length condition. */
-			if (directory_length != 0)
+			if (directory_length != 0) {
 				memcpy(candidate, at, directory_length);
-			else {
+			} else {
 				candidate[0] = '.';
 				directory_length = 1;
 			}
@@ -7532,14 +7536,14 @@ spawn_environment_path(
 	unsigned index;
 
 	/* Handles the environment availability. */
-	if (environment != NULL)
-
+	if (environment != NULL) {
 		/* Process each remaining element. */
-		for (index = 0; environment[index] != NULL; index++)
-
+		for (index = 0; environment[index] != NULL; index++) {
 			/* Selects the matching prefix. */
 			if (strncmp(environment[index], "PATH=", 5) == 0)
 				return environment[index] + 5;
+		}
+	}
 
 	/* Returns the computed result. */
 	return "/bin:/usr/bin";
@@ -7558,6 +7562,7 @@ exec_search(
 	const char *path, *at;
 	char candidate[PATH_MAX];
 	int saw_access_error;
+	size_t directory_length;
 
 	saw_access_error = 0;
 
@@ -7588,17 +7593,17 @@ exec_search(
 	/* Process each element required by the operation. */
 		path = "/bin:/usr/bin";
 	for (at = path;;) {
-				colon = strchr(at, ':');
-		size_t directory_length =
+		colon = strchr(at, ':');
+		directory_length =
 		    colon != NULL ? (size_t)(colon - at) : strlen(at);
-				file_length = strlen(file);
+		file_length = strlen(file);
 
 		/* Handles the directory length condition. */
 		if (directory_length + file_length + 2U <= sizeof(candidate)) {
 			/* Handles the directory length condition. */
-			if (directory_length != 0)
+			if (directory_length != 0) {
 				memcpy(candidate, at, directory_length);
-			else {
+			} else {
 				candidate[0] = '.';
 				directory_length = 1;
 			}
@@ -7653,8 +7658,7 @@ exec_with_shell(
 	shell_argv[count++] = (char *)(uintptr_t)path;
 
 	/* Validates the command-line arguments. */
-	if (argv != NULL)
-
+	if (argv != NULL) {
 		/* Process each remaining command-line operand. */
 		for (index_for = 1; argv[index_for] != NULL; index_for++) {
 			/* Checks the remaining item count. */
@@ -7666,6 +7670,7 @@ exec_with_shell(
 			}
 			shell_argv[count++] = argv[index_for];
 		}
+	}
 	shell_argv[count] = NULL;
 
 	/* Obtains the execve result. */
@@ -7758,8 +7763,7 @@ stream_unregister_locked(
 
 	/* Process each element required by the operation. */
 	for (link = &stream_registry; *link != NULL;
-	     link = &(*link)->registry_next)
-
+	     link = &(*link)->registry_next) {
 		/* Handles the link condition. */
 		if (*link == stream) {
 			*link = stream->registry_next;
@@ -7768,6 +7772,7 @@ stream_unregister_locked(
 			/* Returns the computed result. */
 			return;
 		}
+	}
 }
 
 /* Supports the stream flush locked operation. */
@@ -7777,6 +7782,7 @@ stream_flush_locked(
 {
 	size_t written;
 	off_t unread;
+	off_t result;
 
 	/* Handles the stream condition. */
 	if (stream->last_operation == 2 && stream->buffer_length != 0) {
@@ -7798,9 +7804,8 @@ stream_flush_locked(
 		stream->buffer_length = 0;
 	} else if (stream->last_operation == 1 &&
 		   stream->buffer_length > stream->buffer_start) {
-				unread = (off_t)(stream->buffer_length - stream->buffer_start);
-		off_t result =
-		    stream->cookie_seek != NULL
+		unread = (off_t)(stream->buffer_length - stream->buffer_start);
+		result = stream->cookie_seek != NULL
 			? stream->cookie_seek(stream->context, -unread,
 					      SEEK_CUR)
 			: lseek(stream_fd(stream), -unread, SEEK_CUR);
@@ -7833,7 +7838,6 @@ stream_write_direct(
 	/* Process each remaining element. */
 	*written = 0;
 	while (*written < length) {
-
 		request = length - *written;
 
 		/* Handles the cookie write availability. */
@@ -8281,11 +8285,11 @@ timezone_rule_yday(
 
 	/* Handles the rule condition. */
 	if (rule->second == 5) {
-						next_month = rule->first == 12 ? 1 : rule->first + 1;
-						next_year = rule->first == 12 ? year + 1 : year;
-					month_days = (int)(days_from_civil(next_year,
-					  (unsigned)next_month, 1) -
-			  first);
+		next_month = rule->first == 12 ? 1 : rule->first + 1;
+		next_year = rule->first == 12 ? year + 1 : year;
+		month_days = (int)(days_from_civil(next_year,
+		  (unsigned)next_month, 1) -
+	  first);
 
 		/* Continue while the operation condition remains true. */
 		while (day + 7 <= month_days)

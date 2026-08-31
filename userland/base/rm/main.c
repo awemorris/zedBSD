@@ -60,8 +60,7 @@ main(
 		return force ? 0 : 1;
 
 	/* Process each remaining command-line operand. */
-	for (; i < argc; i++)
-
+	for (; i < argc; i++) {
 		/* Validates the command-line arguments. */
 		if (unlink(argv[i])) {
 			/* Handles the reported system error. */
@@ -70,6 +69,7 @@ main(
 			command_error("rm", argv[i]);
 			failed = 1;
 		}
+	}
 
 	/* Returns the computed result. */
 	return failed;

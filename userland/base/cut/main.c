@@ -30,6 +30,7 @@ main(
 	int function_result;
 	FILE *f;
 	int yes;
+	int has;
 	long k;
 	unsigned long pos;
 	int fields, suppress, i;
@@ -84,9 +85,8 @@ main(
 			return 1;
 		}
 		while ((n = command_read_line(f, &line, &cap)) > 0) {
-
-						pos = 1;
-			int has = memchr(line, delim, (size_t)n) != NULL;
+			pos = 1;
+			has = memchr(line, delim, (size_t)n) != NULL;
 
 			/* Handles the fields condition. */
 			if (fields && !has) {
@@ -160,7 +160,6 @@ selected(
 	/* Continue while the operation condition remains true. */
 	p = list;
 	while (*p) {
-
 		a = strtoul(p, &e, 10);
 		b = a;
 
@@ -174,9 +173,9 @@ selected(
 			++p;
 
 			/* Checks the current pointer. */
-			if (*p == ',' || !*p)
+			if (*p == ',' || !*p) {
 				b = (unsigned long)-1;
-			else {
+			} else {
 				b = strtoul(p, &e, 10);
 
 				/* Handles the e condition. */

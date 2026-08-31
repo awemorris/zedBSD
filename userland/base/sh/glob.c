@@ -49,7 +49,7 @@ sh_glob_fields(
 	*error_text = NULL;
 	for (field = 0; field < list->count; field++) {
 		memset(&matches, 0, sizeof(matches));
-				length = strlen(list->fields[field]);
+		length = strlen(list->fields[field]);
 
 		/* Handles a failed meta operation. */
 		if (!has_meta(list->fields[field], list->quoted[field],
@@ -193,7 +193,7 @@ expand_path(
 
 	/* Handles a failed meta operation. */
 	if (!has_meta(pattern + position, quoted + position, end - position)) {
-				next_local = join_path(prefix, pattern + position, end - position);
+		next_local = join_path(prefix, pattern + position, end - position);
 
 		/* Handles the next local availability. */
 		if (next_local == NULL)
@@ -360,8 +360,8 @@ match_component(
 
 	/* Handles the quoted condition. */
 	if (!quoted[0] && pattern[0] == '[') {
-				index = 1;
-				negate = 0;
+		index = 1;
+		negate = 0;
 		matched = 0;
 
 		/* Checks the current index. */
@@ -371,8 +371,8 @@ match_component(
 			index++;
 		}
 		while (index < length && pattern[index] != ']') {
-						first = pattern[index++];
-						last = first;
+			first = pattern[index++];
+			last = first;
 
 			/* Checks the current index. */
 			if (index + 1U < length && pattern[index] == '-' &&
@@ -434,8 +434,8 @@ sort_matches(
 	/* Process each remaining element. */
 	for (index = 1; index < matches->count; index++) {
 		/* Continue while the operation condition remains true. */
-				value = matches->items[index];
-				position = index;
+		value = matches->items[index];
+		position = index;
 		while (position != 0 &&
 		       strcmp(matches->items[position - 1U], value) > 0) {
 			matches->items[position] =

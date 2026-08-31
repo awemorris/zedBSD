@@ -189,16 +189,17 @@ main(
 		memset(&archive, 0, sizeof(archive));
 
 		/* Handles the create silent condition. */
-		if (!create_silent)
+		if (!create_silent) {
 			fprintf(stderr, "%s: creating %s\n", program,
 				archive_path);
+		}
 	}
 
 	/* Validates the selected operation. */
 	if (operation == 't' || operation == 'p' || operation == 'x') {
 		/* Process each remaining element. */
 		for (i_index_for = 0; i_index_for < archive.count; i_index_for++) {
-						member_local = &archive.members[i_index_for];
+			member_local = &archive.members[i_index_for];
 
 			/* Validates the command-line arguments. */
 			if (member_local->special ||
@@ -240,33 +241,35 @@ main(
 	 */
 
 	/* Process each remaining element. */
-	for (i_index_for1 = 0; i_index_for1 < archive.count;)
-
+	for (i_index_for1 = 0; i_index_for1 < archive.count;) {
 		/* Handles the archive condition. */
 		if (archive.members[i_index_for1].special)
 			remove_at(&archive, i_index_for1);
 		else
 			i_index_for1++;
+	}
 
 	/* Validates the selected operation. */
 	if (operation == 'd') {
 		/* Process each remaining element. */
-		for (i_index_for2 = 0; i_index_for2 < archive.count;)
-
+		for (i_index_for2 = 0; i_index_for2 < archive.count;) {
 			/* Validates the command-line arguments. */
 			if (selected(&archive.members[i_index_for2], argc - argi,
 				     argv + argi)) {
 				/* Handles the verbose condition. */
-				if (verbose)
+				if (verbose) {
 					printf("d - %s\n",
 					       archive.members[i_index_for2].name);
+				}
 				remove_at(&archive, i_index_for2);
 				modify = 1;
-			} else
+			} else {
 				i_index_for2++;
+			}
+		}
 	} else if (operation == 'm') {
-				moved = move_members(&archive, position_name, after,
-					 argc - argi, argv + argi, verbose);
+		moved = move_members(&archive, position_name, after,
+			 argc - argi, argv + argi, verbose);
 
 		/* Handles the moved condition. */
 		if (moved < 0) {
@@ -276,13 +279,12 @@ main(
 		} else if (moved)
 			modify = 1;
 	} else if (operation == 'q' || operation == 'r') {
-				target = position_name
-				    ? position(&archive, position_name, after)
-				    : archive.count;
+		target = position_name
+		    ? position(&archive, position_name, after)
+		    : archive.count;
 
 		/* Process each remaining command-line operand. */
 		for (; argi < argc; argi++) {
-
 			found = -1;
 
 			/* Validates the command-line arguments. */
@@ -293,17 +295,17 @@ main(
 			}
 
 			/* Validates the selected operation. */
-			if (operation == 'r')
-
+			if (operation == 'r') {
 				/* Process each remaining element. */
-				for (i_index_for3 = 0; i_index_for3 < archive.count; i_index_for3++)
-
+				for (i_index_for3 = 0; i_index_for3 < archive.count; i_index_for3++) {
 					/* Selects the matching value. */
 					if (!strcmp(archive.members[i_index_for3].name,
 						    member_local1.name)) {
 						found = (ssize_t)i_index_for3;
 						break;
 					}
+				}
+			}
 
 			/* Handles the found condition. */
 			if (found >= 0 && update &&
@@ -324,9 +326,10 @@ main(
 			}
 
 			/* Handles the verbose condition. */
-			if (verbose)
+			if (verbose) {
 				printf("%c - %s\n", found >= 0 ? 'r' : 'a',
 				       argv[argi]);
+			}
 			modify = 1;
 		}
 	} else if (operation == 's') {
@@ -384,11 +387,11 @@ selected(
 		return 1;
 
 	/* Process each remaining command-line operand. */
-	for (i_index_for = 0; i_index_for < argc; i_index_for++)
-
+	for (i_index_for = 0; i_index_for < argc; i_index_for++) {
 		/* Handles the selected command-line operation. */
 		if (!strcmp(member->name, archive_basename(argv[i_index_for])))
 			return 1;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -406,11 +409,11 @@ verbose_name(
 	static const char chars[] = "rwxrwxrwx";
 
 	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < 9; i_index_for++)
-
+	for (i_index_for = 0; i_index_for < 9; i_index_for++) {
 		/* Handles the member condition. */
 		if (member->mode & bits[i_index_for])
 			modes[i_index_for] = chars[i_index_for];
+	}
 	printf("%s %u/%u %10zu %llu %s\n", modes, member->uid, member->gid,
 	       member->size, (unsigned long long)member->mtime, member->name);
 }
@@ -426,7 +429,6 @@ print_member(
 	/* Process each remaining element. */
 	done = 0;
 	while (done < member->size) {
-
 		n = write(STDOUT_FILENO, member->data + done,
 				  member->size - done);
 
@@ -475,7 +477,7 @@ extract_member(
 
 	/* Handles a failed fchmod operation. */
 	if (fchmod(fd, member->mode & 07777)) {
-				saved_local = errno;
+		saved_local = errno;
 		(void)close(fd);
 		errno = saved_local;
 
@@ -485,7 +487,6 @@ extract_member(
 
 	/* Process each remaining element. */
 	for (done_for = 0; done_for < member->size;) {
-
 		count = write(fd, member->data + done_for, member->size - done_for);
 
 		/* Handles the reported system error. */
@@ -494,7 +495,7 @@ extract_member(
 
 		/* Checks the remaining item count. */
 		if (count <= 0) {
-						saved = count == 0 ? EIO : errno;
+			saved = count == 0 ? EIO : errno;
 
 			(void)close(fd);
 			errno = saved;
@@ -580,11 +581,13 @@ move_members(
 			moved[moved_count++] = archive->members[index_for];
 
 			/* Handles the verbose condition. */
-			if (verbose)
+			if (verbose) {
 				printf("m - %s\n",
 				       archive->members[index_for].name);
-		} else
+			}
+		} else {
 			ordered[kept_count++] = archive->members[index_for];
+		}
 	}
 	free(archive->members);
 	archive->members = ordered;
@@ -602,8 +605,9 @@ move_members(
 			errno = EINVAL;
 			goto fail;
 		}
-	} else
+	} else {
 		target = archive->count;
+	}
 	memmove(ordered + target + moved_count, ordered + target,
 		(kept_count - target) * sizeof(*ordered));
 	memcpy(ordered + target, moved, moved_count * sizeof(*moved));
@@ -634,14 +638,14 @@ position(
 	size_t i_index_for;
 
 	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < archive->count; i_index_for++)
-
+	for (i_index_for = 0; i_index_for < archive->count; i_index_for++) {
 		/* Handles the archive condition. */
 		if (!archive->members[i_index_for].special &&
 		    !strcmp(archive->members[i_index_for].name, name))
 
 			/* Returns the computed result. */
 			return i_index_for + (after != 0);
+	}
 
 	/* Returns the computed result. */
 	return archive->count;
@@ -683,7 +687,6 @@ read_regular(
 
 	/* Process each remaining element. */
 	while (done < (size_t)st.st_size) {
-
 		n = read(fd, member->data + done, (size_t)st.st_size - done);
 
 		/* Handles the reported system error. */
@@ -806,7 +809,7 @@ build_symbol_index(
 
 		/* Process each remaining element. */
 		for (item_for = 0; item_for < tables[member_for].count; item_for++) {
-						symbol = &tables[member_for].symbols[item_for];
+			symbol = &tables[member_for].symbols[item_for];
 
 			/* Handles the symbol condition. */
 			if ((symbol->binding != 1U && symbol->binding != 2U) ||
@@ -855,16 +858,17 @@ build_symbol_index(
 
 	/* Process each remaining element. */
 	for (member_for1 = 0, item_for2 = 0; member_for1 < archive->count; member_for1++) {
-				stored = stored_member_size(&archive->members[member_for1]);
+		stored = stored_member_size(&archive->members[member_for1]);
 
 		/* Handles the stored condition. */
 		if (stored == SIZE_MAX || member_offset > UINT32_MAX)
 			goto overflow;
 
 		/* Process each remaining element. */
-		while (item_for2 < symbol_count && symbols[item_for2].member == member_for1)
+		while (item_for2 < symbol_count && symbols[item_for2].member == member_for1) {
 			put_be32(index_member.data + 4U + item_for2++ * 4U,
 				 (uint32_t)member_offset);
+		}
 
 		/* Handles the member offset condition. */
 		if (member_offset > SIZE_MAX - stored)
@@ -876,7 +880,7 @@ build_symbol_index(
 
 	/* Process each remaining element. */
 	for (item_for3 = 0; item_for3 < symbol_count; item_for3++) {
-					length = strlen(symbols[item_for3].name) + 1U;
+		length = strlen(symbols[item_for3].name) + 1U;
 
 		(void)memcpy(names, symbols[item_for3].name, length);
 		names += length;

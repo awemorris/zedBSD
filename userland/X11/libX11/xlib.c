@@ -485,7 +485,6 @@ XCreatePixmap(
 {
 	Pixmap function_result;
 	uint8_t q[16] = {0};
-
 	Pixmap id = d->base | d->next++;
 	q[0] = 53;
 	q[1] = (uint8_t)depth;
@@ -910,14 +909,14 @@ XQueryTree(
 				return 0;
 			}
 		}
-	} else
-
+	} else {
 		/* Continue while the operation condition remains true. */
 		while (extra--) {
 			/* Handles a failed rd operation. */
 			if (rd(d->fd, x_local4, 4))
 				return 0;
 		}
+	}
 
 	/* Handles the root condition. */
 	if (root)
@@ -1043,8 +1042,7 @@ XzedPutImageRGB24(
 	}
 
 	/* Process each element required by the operation. */
-	for (row = 0; row < height; row++)
-
+	for (row = 0; row < height; row++) {
 		/* Process each element required by the operation. */
 		for (column = 0; column < width;) {
 			tile = width - column;
@@ -1078,6 +1076,7 @@ XzedPutImageRGB24(
 				return -1;
 			column += tile;
 		}
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -1623,7 +1622,6 @@ wr(
 	/* Continue while the operation condition remains true. */
 	p = v;
 	while (n) {
-
 		z = send(f, p, n, 0);
 
 		/* Handles the z condition. */
@@ -1664,7 +1662,6 @@ rd(
 	/* Continue while the operation condition remains true. */
 	p = v;
 	while (n) {
-
 		z = recv(f, p, n, 0);
 
 		/* Handles the z condition. */

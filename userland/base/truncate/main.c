@@ -44,13 +44,13 @@ main(
 	}
 
 	/* Process each remaining command-line operand. */
-	for (index = 3; index < argc; index++)
-
+	for (index = 3; index < argc; index++) {
 		/* Validates the command-line arguments. */
 		if (truncate(argv[index], (off_t)value) != 0) {
 			command_error("truncate", argv[index]);
 			failed = 1;
 		}
+	}
 
 	/* Returns the computed result. */
 	return failed;

@@ -163,18 +163,18 @@ main(
 	/* Process each remaining command-line operand. */
 	state.depth_first = parser.depth_first;
 	state.same_device = parser.same_device;
-	for (index = 0; index < argc; index++)
-
+	for (index = 0; index < argc; index++) {
 		/* Handles the selected command-line operation. */
 		if (strcmp(argv[index], "-print") == 0 ||
 		    strcmp(argv[index], "-exec") == 0 ||
 		    strcmp(argv[index], "-ok") == 0)
 			has_action = 1;
+	}
 
 	/* Handles the action condition. */
 	if (!has_action) {
-				print = new_node(NODE_PRINT);
-				both = new_node(NODE_AND);
+		print = new_node(NODE_PRINT);
+		both = new_node(NODE_AND);
 
 		/* Handles the print availability. */
 		if (print == NULL || both == NULL) {
@@ -259,7 +259,6 @@ parse_or(
 	/* Process each remaining command-line operand. */
 	while (!parser->failed && parser->index < parser->argc &&
 	       strcmp(parser->argv[parser->index], "-o") == 0) {
-
 		parent = new_node(NODE_OR);
 
 		parser->index++;
@@ -290,7 +289,6 @@ parse_and(
 	while (!parser->failed && parser->index < parser->argc &&
 	       strcmp(parser->argv[parser->index], ")") != 0 &&
 	       strcmp(parser->argv[parser->index], "-o") != 0) {
-
 		parent = new_node(NODE_AND);
 
 		/* Handles the selected command-line operation. */
@@ -358,6 +356,7 @@ parse_primary(
 	size_t length;
 	char *path;
 	int begin;
+	int prompt;
 	struct node *node;
 	char *token;
 
@@ -445,7 +444,6 @@ parse_primary(
 
 	/* Selects the matching value. */
 	if (strcmp(token, "-type") == 0) {
-
 		node = new_node(NODE_TYPE);
 		type = take_operand(parser, token);
 
@@ -462,7 +460,7 @@ parse_primary(
 
 	/* Selects the matching value. */
 	if (strcmp(token, "-perm") == 0) {
-				value_local = take_operand(parser, token);
+		value_local = take_operand(parser, token);
 
 		node = new_node(NODE_PERM);
 
@@ -489,7 +487,7 @@ parse_primary(
 
 	/* Selects the matching value. */
 	if (strcmp(token, "-user") == 0 || strcmp(token, "-group") == 0) {
-				value_local1 = take_operand(parser, token);
+		value_local1 = take_operand(parser, token);
 
 		node = new_node(strcmp(token, "-user") == 0 ? NODE_USER
 							    : NODE_GROUP);
@@ -508,7 +506,7 @@ parse_primary(
 			else
 				node->gid = (gid_t)id;
 		} else if (node->kind == NODE_USER) {
-						account = getpwnam(value_local1);
+			account = getpwnam(value_local1);
 
 			/* Handles the account availability. */
 			if (account == NULL)
@@ -516,7 +514,7 @@ parse_primary(
 			else
 				node->uid = account->pw_uid;
 		} else {
-						group = getgrnam(value_local1);
+			group = getgrnam(value_local1);
 
 			/* Handles the group availability. */
 			if (group == NULL)
@@ -551,7 +549,7 @@ parse_primary(
 	if (strcmp(token, "-links") == 0 || strcmp(token, "-size") == 0 ||
 	    strcmp(token, "-atime") == 0 || strcmp(token, "-ctime") == 0 ||
 	    strcmp(token, "-mtime") == 0) {
-				value_local3 = take_operand(parser, token);
+		value_local3 = take_operand(parser, token);
 
 		/* Selects the matching value. */
 		if (strcmp(token, "-links") == 0)
@@ -587,7 +585,7 @@ parse_primary(
 
 	/* Selects the matching value. */
 	if (strcmp(token, "-newer") == 0) {
-				path = take_operand(parser, token);
+		path = take_operand(parser, token);
 
 		node = new_node(NODE_NEWER);
 
@@ -605,8 +603,8 @@ parse_primary(
 
 	/* Selects the matching value. */
 	if (strcmp(token, "-exec") == 0 || strcmp(token, "-ok") == 0) {
-				begin = parser->index;
-		int prompt = strcmp(token, "-ok") == 0;
+		begin = parser->index;
+		prompt = strcmp(token, "-ok") == 0;
 
 		/* Process each remaining command-line operand. */
 		while (parser->index < parser->argc &&
@@ -775,8 +773,7 @@ walk_path(
 	if (directory && !state->prune &&
 	    (!state->same_device || status.st_dev == state->root_device)) {
 		/* Process each element required by the operation. */
-		for (ancestor = 0; ancestor < state->depth; ancestor++)
-
+		for (ancestor = 0; ancestor < state->depth; ancestor++) {
 			/* Handles the state condition. */
 			if (state->ancestors_dev[ancestor] == status.st_dev &&
 			    state->ancestors_ino[ancestor] == status.st_ino) {
@@ -787,6 +784,7 @@ walk_path(
 				/* Reports successful completion. */
 				return 0;
 			}
+		}
 
 		/* Handles the state condition. */
 		if (state->depth == sizeof(state->ancestors_dev) /
@@ -1092,21 +1090,20 @@ run_command(
 		return 0;
 
 	/* Process each remaining element. */
-	for (index = 0; index < node->argument_count; index++)
+	for (index = 0; index < node->argument_count; index++) {
 		arguments[index] = strcmp(node->arguments[index], "{}") == 0
 				       ? (char *)path
 				       : node->arguments[index];
+	}
 
 	/* Handles the node condition. */
 	if (node->type == 'o') {
-
 		fprintf(stderr, "< %s ... %s > ? ", arguments[0], path);
 		(void)fflush(stderr);
 
 		/* Continue while the operation condition remains true. */
 		answer = getchar();
 		while (answer != '\n' && answer != EOF) {
-
 			next = getchar();
 
 			/* Handles the end-of-file condition. */
@@ -1138,11 +1135,11 @@ run_command(
 		return 0;
 
 	/* Continue while the operation condition remains true. */
-	while (waitpid(child, &status, 0) < 0)
-
+	while (waitpid(child, &status, 0) < 0) {
 		/* Handles the reported system error. */
 		if (errno != EINTR)
 			return 0;
+	}
 
 	/* Computes the function result. */
 	function_result = WIFEXITED(status) && WEXITSTATUS(status) == 0;

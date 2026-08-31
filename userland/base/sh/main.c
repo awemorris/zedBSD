@@ -360,13 +360,12 @@ parse_pipeline(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-				type = list->tokens[*position].type;
+		type = list->tokens[*position].type;
 
 		/* Handles the type condition. */
 		if (type == SH_TOKEN_WORD) {
-
-						assignment = assignment_length(
-					     list->tokens[*position].text) >= 0;
+			assignment = assignment_length(
+		     list->tokens[*position].text) >= 0;
 
 			/* Handles the assignment condition. */
 			if (assignment) {
@@ -447,7 +446,6 @@ parse_pipeline(
 		/* Handles the type condition. */
 		if (type == SH_TOKEN_INPUT || type == SH_TOKEN_OUTPUT ||
 		    type == SH_TOKEN_APPEND) {
-
 			(*position)++;
 
 			/* Handles the list condition. */
@@ -769,7 +767,6 @@ execute_pipeline(
 
 	/* Handles the synchronize condition. */
 	if (synchronize) {
-
 		(void)close(gate[0]);
 		gate[0] = -1;
 
@@ -794,7 +791,6 @@ execute_pipeline(
 
 	/* Process each remaining element. */
 	for (index = 0; index < created; index++) {
-
 		status = 0;
 
 		do
@@ -822,10 +818,11 @@ execute_pipeline(
 	}
 
 	/* Handles a failed shell tcsetpgrp operation. */
-	if (terminal_owned && shell_tcsetpgrp(STDIN_FILENO, shell_group) != 0)
+	if (terminal_owned && shell_tcsetpgrp(STDIN_FILENO, shell_group) != 0) {
 		fprintf(stderr,
 			"sh: cannot restore foreground process group: %s\n",
 			strerror(errno));
+	}
 
 	/* Handles the stopped count condition. */
 	if (stopped_count > 0) {
@@ -856,20 +853,20 @@ failed:
 		(void)close(gate[1]);
 
 	/* Process each remaining element. */
-	for (index = 0; index < created; index++)
-
+	for (index = 0; index < created; index++) {
 		/* Handles the active condition. */
 		if (active[index]) {
 			(void)kill(-group, SIGKILL);
 			break;
 		}
+	}
 
 	/* Process each remaining element. */
-	for (index = 0; index < created; index++)
-
+	for (index = 0; index < created; index++) {
 		/* Handles the active condition. */
 		if (active[index])
 			(void)kill(children[index], SIGKILL);
+	}
 
 	/* Process each remaining element. */
 	for (index = 0; index < created; index++) {
@@ -1035,11 +1032,11 @@ command_argv(
 
 	/* Continue while the operation condition remains true. */
 	result = command_dispatch(argc - assignments, argv + assignments);
-	while (temporary-- > 0)
-
+	while (temporary-- > 0) {
 		/* Handles a failed sh var restore operation. */
 		if (sh_var_restore(&snapshots[temporary]) != 0)
 			result = 0;
+	}
 
 	/* Returns the computed result. */
 	return result;
@@ -1057,11 +1054,11 @@ special_builtin_name(
 	int index;
 
 	/* Process each remaining element. */
-	for (index = 0; names[index] != NULL; index++)
-
+	for (index = 0; names[index] != NULL; index++) {
 		/* Selects the matching value. */
 		if (strcmp(name, names[index]) == 0)
 			return 1;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -1166,6 +1163,9 @@ command_dispatch(
 	int number;
 	const char *action;
 	char *text;
+	int index;
+	int result;
+	int success;
 	long count;
 	mode_t old;
 	char input[SHELL_LINE_MAX];
@@ -1197,8 +1197,8 @@ command_dispatch(
 
 	/* Handles the selected command-line operation. */
 	if (!strcmp(argv[0], "fg")) {
-				status = 0;
-				job = last_job;
+		status = 0;
+		job = last_job;
 
 		/* Handles the job condition. */
 		if (job <= 0)
@@ -1232,11 +1232,11 @@ command_dispatch(
 
 		/* Process each remaining command-line operand. */
 		for (index_local = 1; index_local < argc; index_local++) {
-						equals = strchr(argv[index_local], '=');
+			equals = strchr(argv[index_local], '=');
 
 			/* Handles the equals availability. */
 			if (equals == NULL) {
-								value_local = sh_alias_get(argv[index_local]);
+				value_local = sh_alias_get(argv[index_local]);
 
 				/* Handles the value local availability. */
 				if (value_local == NULL)
@@ -1260,7 +1260,7 @@ command_dispatch(
 
 	/* Handles the selected command-line operation. */
 	if (!strcmp(argv[0], "unalias")) {
-				result_local = 1;
+		result_local = 1;
 
 		/* Handles the selected command-line operation. */
 		if (argc == 2 && !strcmp(argv[1], "-a")) {
@@ -1275,11 +1275,11 @@ command_dispatch(
 			return 0;
 
 		/* Process each remaining command-line operand. */
-		for (index_local1 = 1; index_local1 < argc; index_local1++)
-
+		for (index_local1 = 1; index_local1 < argc; index_local1++) {
 			/* Validates the command-line arguments. */
 			if (sh_alias_unset(argv[index_local1]) != 0)
 				result_local = 0;
+		}
 
 		/* Returns the computed result. */
 		return result_local;
@@ -1287,9 +1287,8 @@ command_dispatch(
 
 	/* Handles the selected command-line operation. */
 	if (!strcmp(argv[0], "hash")) {
-				path = sh_var_get("PATH");
-		int index;
-		int result = 1;
+		path = sh_var_get("PATH");
+		result = 1;
 
 		/* Handles the selected command-line operation. */
 		if (argc == 2 && !strcmp(argv[1], "-r")) {
@@ -1352,12 +1351,13 @@ command_dispatch(
 		/* Validates the command-line arguments. */
 		if (argc == 1) {
 			/* Process each remaining element. */
-			for (index_local2 = 1; index_local2 < SHELL_SIGNAL_MAX; index_local2++)
-
+			for (index_local2 = 1; index_local2 < SHELL_SIGNAL_MAX; index_local2++) {
 				/* Handles the trap action condition. */
-				if (trap_action[index_local2] != NULL)
+				if (trap_action[index_local2] != NULL) {
 					printf("trap -- '%s' %d\n",
 					       trap_action[index_local2], index_local2);
+				}
+			}
 
 			/* Reports operation failure. */
 			return 1;
@@ -1370,7 +1370,7 @@ command_dispatch(
 		/* Process each remaining command-line operand. */
 		action = !strcmp(argv[1], "-") ? NULL : argv[1];
 		for (index_local2 = 2; index_local2 < argc; index_local2++) {
-						number = signal_number(argv[index_local2]);
+			number = signal_number(argv[index_local2]);
 
 			/* Handles a failed set trap operation. */
 			if (number < 0 || !set_trap(action, number))
@@ -1404,8 +1404,7 @@ command_dispatch(
 
 	/* Handles the selected command-line operation. */
 	if (!strcmp(argv[0], "shift")) {
-				count = 1;
-		char *end;
+		count = 1;
 
 		/* Validates the command-line arguments. */
 		if (argc > 2)
@@ -1444,8 +1443,7 @@ command_dispatch(
 
 		/* Validates the command-line arguments. */
 		if (argc == 2) {
-
-						value_local4 = strtoul(argv[1], &end, 8);
+			value_local4 = strtoul(argv[1], &end, 8);
 
 			/* Validates the command-line arguments. */
 			if (*argv[1] == '\0' || *end != '\0' || value_local4 > 0777UL)
@@ -1462,8 +1460,7 @@ command_dispatch(
 
 	/* Handles the selected command-line operation. */
 	if (!strcmp(argv[0], "read")) {
-
-				name = argc == 2 ? argv[1] : "REPLY";
+		name = argc == 2 ? argv[1] : "REPLY";
 
 		/* Validates the command-line arguments. */
 		if (argc > 2 || assignment_length(name) >= 0 ||
@@ -1497,17 +1494,17 @@ command_dispatch(
 	if (!strcmp(argv[0], "type") || (!strcmp(argv[0], "command") &&
 					 argc > 1 && !strcmp(argv[1], "-v"))) {
 		/* Process each remaining command-line operand. */
-				first = !strcmp(argv[0], "type") ? 1 : 2;
-		int index, success = first < argc;
+		first = !strcmp(argv[0], "type") ? 1 : 2;
+		success = first < argc;
 		for (index = first; index < argc; index++) {
 			/* Validates the command-line arguments. */
-			if (shell_builtin_name(argv[index]))
+			if (shell_builtin_name(argv[index])) {
 				printf("%s%s\n",
 				       !strcmp(argv[0], "type")
 					   ? "shell builtin: "
 					   : "",
 				       argv[index]);
-			else if (strchr(argv[index], '/') != NULL &&
+			} else if (strchr(argv[index], '/') != NULL &&
 				 access(argv[index], F_OK) == 0)
 				puts(argv[index]);
 			else if (search_path(argv[index], "", candidate_local5,
@@ -1532,8 +1529,7 @@ command_dispatch(
 
 	/* Handles the selected command-line operation. */
 	if (!strcmp(argv[0], "exec")) {
-
-				child_local = argv + 1;
+		child_local = argv + 1;
 
 		/* Validates the command-line arguments. */
 		if (argc < 2)
@@ -1598,11 +1594,11 @@ command_dispatch(
 
 		/* Process each remaining command-line operand. */
 		for (index_local8 = 1; index_local8 < argc; index_local8++) {
-						length_local = assignment_length(argv[index_local8]);
+			length_local = assignment_length(argv[index_local8]);
 
 			/* Handles the length local condition. */
 			if (length_local >= 0) {
-								saved_local = argv[index_local8][length_local];
+				saved_local = argv[index_local8][length_local];
 				argv[index_local8][length_local] = '\0';
 
 				/* Validates the command-line arguments. */
@@ -1633,11 +1629,11 @@ command_dispatch(
 
 		/* Process each remaining command-line operand. */
 		for (index_local11 = 1; index_local11 < argc; index_local11++) {
-						length_local10 = assignment_length(argv[index_local11]);
+			length_local10 = assignment_length(argv[index_local11]);
 
 			/* Handles the length local10 condition. */
 			if (length_local10 >= 0) {
-								saved_local9 = argv[index_local11][length_local10];
+				saved_local9 = argv[index_local11][length_local10];
 				argv[index_local11][length_local10] = '\0';
 
 				/* Validates the command-line arguments. */
@@ -1749,11 +1745,12 @@ continue_foreground(
 
 		/* Handles a failed shell tcsetpgrp operation. */
 		if (foreground_set &&
-		    shell_tcsetpgrp(STDIN_FILENO, shell_pgrp) != 0)
+		    shell_tcsetpgrp(STDIN_FILENO, shell_pgrp) != 0) {
 			fprintf(
 			    stderr,
 			    "sh: cannot restore foreground process group: %s\n",
 			    strerror(errno));
+		}
 		errno = saved_errno;
 		fprintf(stderr, "fg: cannot continue process %d: %s\n",
 			(int)pid, strerror(errno));
@@ -1764,7 +1761,6 @@ continue_foreground(
 
 	/* Process each remaining element. */
 	for (index = 0; index < process_count; index++) {
-
 		do
 
 		/* Continue while the operation condition remains true. */
@@ -1791,10 +1787,11 @@ continue_foreground(
 	}
 
 	/* Handles a failed shell tcsetpgrp operation. */
-	if (foreground_set && shell_tcsetpgrp(STDIN_FILENO, shell_pgrp) != 0)
+	if (foreground_set && shell_tcsetpgrp(STDIN_FILENO, shell_pgrp) != 0) {
 		fprintf(stderr,
 			"sh: cannot restore foreground process group: %s\n",
 			strerror(errno));
+	}
 
 	/* Handles an operation failure. */
 	if (wait_failed) {
@@ -1908,7 +1905,6 @@ search_path(
 	/* Continue until the operation reaches a terminal state. */
 		path = "/bin:/usr/bin";
 	for (;;) {
-
 		result = path_candidate(path, &position, name, suffix,
 					    candidate, capacity, &last);
 
@@ -2060,7 +2056,7 @@ shell_getopts_builtin(
 
 	/* Handles the getopts offset condition. */
 	if (getopts_offset == 1) {
-				argument = arguments[option_index - 1];
+		argument = arguments[option_index - 1];
 
 		/* Handles the argument condition. */
 		if (argument[0] != '-' || argument[1] == '\0')
@@ -2199,11 +2195,11 @@ signal_number(
 		return (int)value;
 
 	/* Process each remaining element. */
-	for (index = 0; index < sizeof(names) / sizeof(names[0]); index++)
-
+	for (index = 0; index < sizeof(names) / sizeof(names[0]); index++) {
 		/* Selects the matching value. */
 		if (!strcmp(name, names[index].name))
 			return names[index].number;
+	}
 
 	/* Reports operation failure. */
 	return -1;
@@ -2330,7 +2326,6 @@ source_file_mode(
 	buffer[status.st_size] = '\0';
 	line = buffer;
 	while (*line != '\0') {
-
 		end = line;
 		line_number++;
 
@@ -2383,7 +2378,7 @@ join_arguments(
 	/* Process each remaining command-line operand. */
 	length = 0;
 	for (index = first; index < argc; index++) {
-				item_local = strlen(argv[index]);
+		item_local = strlen(argv[index]);
 
 		/* Checks the current data length. */
 		if (length > (size_t)-1 - item_local - 2U)
@@ -2399,7 +2394,7 @@ join_arguments(
 	/* Process each remaining command-line operand. */
 	cursor = text;
 	for (index = first; index < argc; index++) {
-				item_local1 = strlen(argv[index]);
+		item_local1 = strlen(argv[index]);
 
 		/* Checks the current index. */
 		if (index != first)
@@ -2470,8 +2465,7 @@ shell_wait_builtin(
 
 	/* Validates the command-line arguments. */
 	if (argc == 2) {
-
-				value = strtol(argv[1], &end, 10);
+		value = strtol(argv[1], &end, 10);
 
 		/* Validates the command-line arguments. */
 		if (*argv[1] == '\0' || *end != '\0' || value <= 0) {
@@ -2486,10 +2480,10 @@ shell_wait_builtin(
 		if (waitpid(target, &status, 0) != target)
 			return 0;
 	} else if (last_job > 0) {
-				group = last_job;
+		group = last_job;
 
-				count = last_job_process_count;
-				remaining_count = 0;
+		count = last_job_process_count;
+		remaining_count = 0;
 
 		/* Checks the remaining item count. */
 		if (count <= 0) {
@@ -2512,9 +2506,10 @@ shell_wait_builtin(
 			/* Handles the reported system error. */
 			if (target < 0 && errno != ECHILD) {
 				/* Process each remaining element. */
-				for (; index < count; index++)
+				for (; index < count; index++) {
 					remaining[remaining_count++] =
 					    processes[index];
+				}
 				remember_job(group, remaining, remaining_count);
 
 				/* Reports successful completion. */
@@ -2553,11 +2548,11 @@ shell_builtin_name(
 	int index;
 
 	/* Process each remaining element. */
-	for (index = 0; names[index] != NULL; index++)
-
+	for (index = 0; names[index] != NULL; index++) {
 		/* Selects the matching value. */
 		if (strcmp(name, names[index]) == 0)
 			return 1;
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -2691,7 +2686,6 @@ spawn_wait(
 
 	/* Handles the command subshell condition. */
 	if (command_subshell) {
-
 		do
 
 		/* Continue while the operation condition remains true. */
@@ -2756,7 +2750,7 @@ spawn_foreground_tty(
 
 	/* Checks the child process state. */
 	if (child < 0) {
-				saved_errno_local = errno;
+		saved_errno_local = errno;
 
 		(void)close(gate[0]);
 		(void)close(gate[1]);
@@ -2815,10 +2809,11 @@ spawn_foreground_tty(
 	while (waited < 0 && errno == EINTR);
 
 	/* Handles a failed shell tcsetpgrp operation. */
-	if (shell_tcsetpgrp(STDIN_FILENO, shell_pgrp) != 0)
+	if (shell_tcsetpgrp(STDIN_FILENO, shell_pgrp) != 0) {
 		fprintf(stderr,
 			"sh: cannot restore foreground process group: %s\n",
 			strerror(errno));
+	}
 
 	/* Handles the waited condition. */
 	if (waited < 0)
@@ -2973,10 +2968,11 @@ wait_foreground(
 	while (result < 0 && errno == EINTR);
 
 	/* Handles a failed shell tcsetpgrp operation. */
-	if (foreground_set && shell_tcsetpgrp(0, shell_pgrp) != 0)
+	if (foreground_set && shell_tcsetpgrp(0, shell_pgrp) != 0) {
 		fprintf(stderr,
 			"sh: cannot restore foreground process group: %s\n",
 			strerror(errno));
+	}
 
 	/* Checks the operation result. */
 	if (result < 0)
@@ -3254,7 +3250,6 @@ shell_command_substitute(
 
 	/* Checks the child process state. */
 	if (child == 0) {
-
 		(void)close(descriptors[0]);
 
 		/* Handles a failed dup2 operation. */
@@ -3270,7 +3265,6 @@ shell_command_substitute(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		count = read(descriptors[0], chunk, sizeof(chunk));
 
 		/* Checks the remaining item count. */

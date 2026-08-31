@@ -425,7 +425,7 @@ execute_command(
 	/* Handles the range condition. */
 	if (!range.addressed) {
 		free(editor->filename);
-			editor->filename = strdup(path_local3);
+		editor->filename = strdup(path_local3);
 
 		/* Handles the filename availability. */
 		if (editor->filename == NULL)
@@ -438,7 +438,7 @@ execute_command(
 	case 'f':
 		/* Checks the current cursor position. */
 		if (*cursor != '\0') {
-						name = strdup(cursor);
+			name = strdup(cursor);
 
 			/* Handles the name availability. */
 			if (name == NULL)
@@ -529,7 +529,6 @@ parse_range(
 
 	/* Validates the current text. */
 	if (*text == ',' || *text == ';') {
-
 		text++;
 		second = parse_address(editor, &text, &range->last);
 
@@ -588,7 +587,6 @@ parse_address(
 
 	/* Continue while the operation condition remains true. */
 	while (*text >= '0' && *text <= '9') {
-
 		digit = (unsigned)(*text - '0');
 
 		/* Validates the current value. */
@@ -874,7 +872,7 @@ builder_append(
 
 	/* Handles the needed condition. */
 	if (needed > builder->capacity) {
-				capacity = builder->capacity == 0 ? 128 : builder->capacity;
+		capacity = builder->capacity == 0 ? 128 : builder->capacity;
 
 		/* Continue while the operation condition remains true. */
 		while (capacity < needed) {
@@ -920,9 +918,8 @@ substitute_line(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
-				flags = offset == 0 ? 0 : REG_NOTBOL;
-				status = regexec(expression, line + offset, 10, matches, flags);
+		flags = offset == 0 ? 0 : REG_NOTBOL;
+		status = regexec(expression, line + offset, 10, matches, flags);
 
 		/* Checks the operation status. */
 		if (status == REG_NOMATCH)
@@ -1000,7 +997,6 @@ append_replacement(
 
 	/* Continue while the operation condition remains true. */
 	while (*cursor != '\0') {
-
 		group = -1;
 
 		/* Checks the current cursor position. */
@@ -1087,8 +1083,8 @@ global_command(
 
 	/* Process each remaining element. */
 	for (index = 0; index < editor->buffer.count; index++) {
-				matched = regexec(&expression, editor->buffer.line[index],
-				      0, NULL, 0) == 0;
+		matched = regexec(&expression, editor->buffer.line[index],
+		      0, NULL, 0) == 0;
 
 		/* Handles the matched condition. */
 		if (matched != invert)
@@ -1123,8 +1119,7 @@ global_command(
 		}
 	} else if (strcmp(command, "p") == 0 || *command == '\0') {
 		/* Process each remaining element. */
-		for (index = 0; index < count; index++)
-
+		for (index = 0; index < count; index++) {
 			/* Handles a failed print range operation. */
 			if (print_range(editor, selected[index],
 					selected[index], 0) != 0) {
@@ -1133,6 +1128,7 @@ global_command(
 				/* Reports operation failure. */
 				return -1;
 			}
+		}
 	} else if (strcmp(command, "d") == 0) {
 		/* Handles a failed editor snapshot operation. */
 		if (editor_snapshot(editor) != 0) {

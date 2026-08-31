@@ -145,7 +145,6 @@ main(
 
 	/* Process each remaining element. */
 	for (i_index_for1 = 0; i_index_for1 < count;) {
-
 		j = i_index_for1;
 		column = 0;
 

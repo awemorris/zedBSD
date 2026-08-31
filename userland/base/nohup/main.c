@@ -46,7 +46,7 @@ main(
 
 	/* Handles the isatty condition. */
 	if (isatty(1)) {
-				fd = open("nohup.out", O_WRONLY | O_CREAT | O_APPEND, 0600);
+		fd = open("nohup.out", O_WRONLY | O_CREAT | O_APPEND, 0600);
 
 		/* Handles a failed dup2 operation. */
 		if (fd < 0 || dup2(fd, 1) < 0) {

@@ -268,8 +268,9 @@ waddch(
 	if (value == '\n') {
 		window->cursor_y++;
 		window->cursor_x = 0;
-	} else
+	} else {
 		window->cursor_x++;
+	}
 
 	/* Returns the computed result. */
 	return OK;
@@ -304,11 +305,11 @@ waddstr(
 		return ERR;
 
 	/* Continue while the operation condition remains true. */
-	while (*text != '\0')
-
+	while (*text != '\0') {
 		/* Handles a failed waddch operation. */
 		if (waddch(window, (unsigned char)*text++) == ERR)
 			return ERR;
+	}
 
 	/* Returns the computed result. */
 	return OK;

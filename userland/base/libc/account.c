@@ -170,8 +170,7 @@ getpwent(
 	/* Process input until it is exhausted. */
 		passwd_stream = fopen("/etc/passwd", "r");
 	while (passwd_stream != NULL &&
-	       fgets(line, sizeof(line), passwd_stream))
-
+	       fgets(line, sizeof(line), passwd_stream)) {
 		/* Handles a failed passwd parse operation. */
 		if (line[0] != '#' && line[0] != '\n' &&
 		    passwd_parse(line, &passwd_result, passwd_buffer,
@@ -179,6 +178,7 @@ getpwent(
 			result = &passwd_result;
 			break;
 		}
+	}
 	pthread_mutex_unlock(&account_lock);
 
 	/* Returns the computed result. */
@@ -325,8 +325,7 @@ getgrent(
 
 	/* Process input until it is exhausted. */
 		group_stream = fopen("/etc/group", "r");
-	while (group_stream && fgets(line, sizeof(line), group_stream))
-
+	while (group_stream && fgets(line, sizeof(line), group_stream)) {
 		/* Handles a failed group parse operation. */
 		if (line[0] != '#' && line[0] != '\n' &&
 		    group_parse(line, &group_result, group_buffer,
@@ -334,6 +333,7 @@ getgrent(
 			r = &group_result;
 			break;
 		}
+	}
 	pthread_mutex_unlock(&account_lock);
 
 	/* Returns the computed result. */
@@ -391,7 +391,6 @@ initgroups(
 
 	/* Process input until it is exhausted. */
 	while (fgets(line, sizeof(line), stream)) {
-
 		duplicate = 0;
 
 		/* Handles a failed group parse operation. */
@@ -399,22 +398,22 @@ initgroups(
 			continue;
 
 		/* Process each element required by the operation. */
-		for (i = 0; entry.gr_mem[i]; i++)
-
+		for (i = 0; entry.gr_mem[i]; i++) {
 			/* Selects the matching value. */
 			if (!strcmp(entry.gr_mem[i], user))
 				break;
+		}
 
 		/* Handles the entry condition. */
 		if (!entry.gr_mem[i])
 			continue;
 
 		/* Process each remaining element. */
-		for (i = 0; i < count; i++)
-
+		for (i = 0; i < count; i++) {
 			/* Handles the groups condition. */
 			if (groups[i] == entry.gr_gid)
 				duplicate = 1;
+		}
 
 		/* Handles the duplicate condition. */
 		if (!duplicate) {
@@ -548,8 +547,7 @@ getspent(
 
 	/* Process input until it is exhausted. */
 		shadow_stream = fopen("/etc/shadow", "r");
-	while (shadow_stream && fgets(line, sizeof(line), shadow_stream))
-
+	while (shadow_stream && fgets(line, sizeof(line), shadow_stream)) {
 		/* Handles a failed shadow parse operation. */
 		if (line[0] != '#' && line[0] != '\n' &&
 		    shadow_parse(line, &shadow_result, shadow_buffer,
@@ -557,6 +555,7 @@ getspent(
 			r = &shadow_result;
 			break;
 		}
+	}
 	pthread_mutex_unlock(&account_lock);
 
 	/* Returns the computed result. */
@@ -817,11 +816,11 @@ group_parse(
 		return EINVAL;
 
 	/* Process each element required by the operation. */
-	for (cursor = field[3]; *cursor != '\0'; cursor++)
-
+	for (cursor = field[3]; *cursor != '\0'; cursor++) {
 		/* Checks the current cursor position. */
 		if (*cursor == ',')
 			slots++;
+	}
 
 	/* Handles the field condition. */
 	if (field[3][0] == '\0')
@@ -837,7 +836,7 @@ group_parse(
 	/* Handles the slots condition. */
 	if (slots != 0) {
 		/* Continue until the operation reaches a terminal state. */
-				index = 0;
+		index = 0;
 		cursor = field[3];
 		while (1) {
 			members[index++] = cursor;
@@ -849,8 +848,9 @@ group_parse(
 			*cursor++ = '\0';
 		}
 		members[index] = NULL;
-	} else
+	} else {
 		members[0] = NULL;
+	}
 	entry->gr_name = field[0];
 	entry->gr_passwd = field[1];
 	entry->gr_gid = (gid_t)gid;

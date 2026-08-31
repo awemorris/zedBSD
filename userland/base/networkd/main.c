@@ -130,6 +130,7 @@ main(
 
 		/* Handles the client condition. */
 		if (client >= 0) {
+			/* Handles a failed authenticate client operation. */
 			if (authenticate_client(client, &peer, &role) == 0)
 				handle_request(client, role);
 			else
@@ -168,42 +169,67 @@ scan_group_record(
 	char *end;
 	unsigned long gid;
 
+	/* Handles the line availability. */
 	if (line == NULL || scan == NULL || line[0] == '\0' || line[0] == '#')
 		return line != NULL && scan != NULL ? 0 : EINVAL;
 	field[0] = line;
 	cursor = strchr(field[0], ':');
+
+	/* Handles the cursor availability. */
 	if (cursor == NULL)
 		return EINVAL;
 	*cursor = '\0';
 	field[1] = cursor + 1;
 	cursor = strchr(field[1], ':');
+
+	/* Handles the cursor availability. */
 	if (cursor == NULL)
 		return EINVAL;
 	*cursor = '\0';
 	field[2] = cursor + 1;
 	cursor = strchr(field[2], ':');
+
+	/* Handles the cursor availability. */
 	if (cursor == NULL)
 		return EINVAL;
 	*cursor = '\0';
 	field[3] = cursor + 1;
+
+	/* Handles a failed strchr operation. */
 	if (strchr(field[3], ':') != NULL || field[0][0] == '\0' ||
 	    field[2][0] == '\0')
+
+		/* Returns the computed result. */
 		return EINVAL;
-	for (cursor = field[0]; *cursor != '\0'; cursor++)
+	for (cursor = field[0]; *cursor != '\0'; cursor++) {
+		/* Checks the current cursor position. */
 		if ((unsigned char)*cursor <= 32U ||
 		    (unsigned char)*cursor == 127U)
+
+			/* Returns the computed result. */
 			return EINVAL;
-	for (cursor = field[2]; *cursor != '\0'; cursor++)
+	}
+	for (cursor = field[2]; *cursor != '\0'; cursor++) {
+		/* Checks the current cursor position. */
 		if (*cursor < '0' || *cursor > '9')
 			return EINVAL;
+	}
 	errno = 0;
 	gid = strtoul(field[2], &end, 10);
+
+	/* Handles the reported system error. */
 	if (errno != 0 || end == field[2] || *end != '\0' || gid > UINT_MAX)
 		return EINVAL;
+
+	/* Selects the matching value. */
 	if (strcmp(field[0], NETWORKD_GROUP_NAME) == 0)
 		scan->network_records++;
+
+	/* Handles the gid condition. */
 	if (gid == (unsigned long)NETWORKD_GROUP_GID)
 		scan->gid_records++;
+
+	/* Reports successful completion. */
 	return 0;
 }
 
@@ -227,36 +253,58 @@ validate_network_group_database(
 	used = 0;
 	error = 0;
 	descriptor = open(NETWORKD_GROUP_FILE, O_RDONLY | O_CLOEXEC);
+
+	/* Checks the file descriptor. */
 	if (descriptor < 0)
 		return -1;
 	while (used < NETWORKD_GROUP_DATABASE_MAX) {
 		count = read(descriptor, database + used,
 			     NETWORKD_GROUP_DATABASE_MAX - used);
+
+		/* Handles the reported system error. */
 		if (count < 0 && errno == EINTR)
 			continue;
+
+		/* Checks the remaining item count. */
 		if (count < 0) {
 			error = errno;
 			break;
 		}
+
+		/* Checks the remaining item count. */
 		if (count == 0)
 			break;
 		used += (size_t)count;
 	}
+
+	/* Handles an operation failure. */
 	if (error == 0 && used == NETWORKD_GROUP_DATABASE_MAX) {
 		do {
 			count = read(descriptor, &extra, 1U);
 		} while (count < 0 && errno == EINTR);
+
+		/* Checks the remaining item count. */
 		if (count != 0)
 			error = count < 0 ? errno : E2BIG;
 	}
+
+	/* Handles an operation failure. */
 	if (close(descriptor) != 0 && error == 0)
 		error = errno;
+
+	/* Handles an operation failure. */
 	if (error != 0) {
 		errno = error;
+
+		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* Handles a failed memchr operation. */
 	if (memchr(database, '\0', used) != NULL) {
 		errno = EINVAL;
+
+		/* Reports operation failure. */
 		return -1;
 	}
 	database[used] = '\0';
@@ -267,18 +315,30 @@ validate_network_group_database(
 		length = newline != NULL ? (size_t)(newline - line)
 					 : used - start;
 		line[length] = '\0';
+
+		/* Checks the current data length. */
 		if (length != 0 && line[length - 1U] == '\r')
 			line[length - 1U] = '\0';
+
+		/* Handles a failed scan group record operation. */
 		if (scan_group_record(line, &scan) != 0) {
 			errno = EINVAL;
+
+			/* Reports operation failure. */
 			return -1;
 		}
 		start += length + (newline != NULL ? 1U : 0U);
 	}
+
+	/* Handles the scan condition. */
 	if (scan.network_records != 1U || scan.gid_records != 1U) {
 		errno = EINVAL;
+
+		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* Reports successful completion. */
 	return 0;
 }
 
@@ -293,29 +353,48 @@ resolve_network_group(
 	int error;
 
 	entry = NULL;
+
+	/* Handles the result availability. */
 	if (result == NULL) {
 		errno = EINVAL;
+
+		/* Reports operation failure. */
 		return -1;
 	}
 	error = getgrnam_r(NETWORKD_GROUP_NAME, &storage, buffer,
 			   sizeof(buffer), &entry);
+
+	/* Handles an operation failure. */
 	if (error != 0) {
 		errno = error;
+
+		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* Handles the entry availability. */
 	if (entry == NULL) {
 		errno = ENOENT;
+
+		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* Handles the gr name availability. */
 	if (entry->gr_name == NULL ||
 	    strcmp(entry->gr_name, NETWORKD_GROUP_NAME) != 0 ||
 	    entry->gr_gid != NETWORKD_GROUP_GID) {
 		errno = EINVAL;
+
+		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* Handles a failed validate network group database operation. */
 	if (validate_network_group_database() != 0)
 		return -1;
 	*result = entry->gr_gid;
+	/* Reports successful completion. */
 	return 0;
 }
 
@@ -324,14 +403,23 @@ static int
 listener_path_matches(
 	const struct networkd_listener *listener)
 {
+	int function_result;
 	struct stat status;
 
+	/* Handles the listener availability. */
 	if (listener == NULL || !listener->owns_path)
 		return 0;
+
+	/* Handles a failed lstat operation. */
 	if (lstat(NETWORKD_SOCKET, &status) != 0)
 		return 0;
-	return S_ISSOCK(status.st_mode) && status.st_dev == listener->device &&
+
+	/* Computes the function result. */
+	function_result = S_ISSOCK(status.st_mode) && status.st_dev == listener->device &&
 	       status.st_ino == listener->inode;
+
+	/* Returns the computed result. */
+	return function_result;
 }
 
 /* Closes a listener without unlinking a pathname replaced by another owner. */
@@ -343,15 +431,25 @@ close_listener(
 	int error;
 
 	error = 0;
+
+	/* Handles the listener availability. */
 	if (listener == NULL) {
 		errno = EINVAL;
+
+		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* Handles a failed close operation. */
 	if (listener->descriptor >= 0 && close(listener->descriptor) != 0)
 		error = errno;
 	listener->descriptor = -1;
+
+	/* Handles the listener condition. */
 	if (listener->owns_path) {
+		/* Handles the listener path matches condition. */
 		if (listener_path_matches(listener)) {
+			/* Handles an operation failure. */
 			if (unlink(NETWORKD_SOCKET) != 0 && error == 0)
 				error = errno;
 		} else if (lstat(NETWORKD_SOCKET, &status) == 0 && error == 0) {
@@ -363,10 +461,16 @@ close_listener(
 		}
 	}
 	listener->owns_path = 0;
+
+	/* Handles an operation failure. */
 	if (error != 0) {
 		errno = error;
+
+		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* Reports successful completion. */
 	return 0;
 }
 
@@ -375,15 +479,26 @@ static int
 remove_stale_listener(
 	void)
 {
+	int function_result;
 	struct stat status;
 
+	/* Handles a failed lstat operation. */
 	if (lstat(NETWORKD_SOCKET, &status) != 0)
 		return errno == ENOENT ? 0 : -1;
+
+	/* Handles a failed S ISSOCK operation. */
 	if (!S_ISSOCK(status.st_mode)) {
 		errno = EEXIST;
+
+		/* Reports operation failure. */
 		return -1;
 	}
-	return unlink(NETWORKD_SOCKET);
+
+	/* Obtains the unlink result. */
+	function_result = unlink(NETWORKD_SOCKET);
+
+	/* Returns the computed result. */
+	return function_result;
 }
 
 /* Creates the group-accessible network control listener. */
@@ -397,21 +512,30 @@ open_listener(
 	gid_t group;
 	int saved;
 
+	/* Handles the listener availability. */
 	if (listener == NULL) {
 		errno = EINVAL;
+
+		/* Reports operation failure. */
 		return -1;
 	}
 	memset(listener, 0, sizeof(*listener));
 	listener->descriptor = -1;
 	listener->stage = "resolve-group";
+
+	/* Handles a failed resolve network group operation. */
 	if (resolve_network_group(&group) != 0)
 		return -1;
 	listener->stage = "remove-stale";
+
+	/* Handles a failed remove stale listener operation. */
 	if (remove_stale_listener() != 0)
 		return -1;
 	listener->stage = "socket";
 	listener->descriptor =
 	    socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+
+	/* Handles the listener condition. */
 	if (listener->descriptor < 0)
 		return -1;
 	memset(&address, 0, sizeof(address));
@@ -419,6 +543,8 @@ open_listener(
 	strcpy(address.sun_path, NETWORKD_SOCKET);
 	listener->stage = "bind";
 	old_mask = umask(0177);
+
+	/* Handles a failed bind operation. */
 	if (bind(listener->descriptor, (struct sockaddr *)&address,
 		 sizeof(address)) != 0) {
 		saved = errno;
@@ -428,8 +554,12 @@ open_listener(
 	}
 	(void)umask(old_mask);
 	listener->stage = "identify";
+
+	/* Handles a failed lstat operation. */
 	if (lstat(NETWORKD_SOCKET, &status) != 0)
 		goto fail;
+
+	/* Handles a failed S ISSOCK operation. */
 	if (!S_ISSOCK(status.st_mode)) {
 		errno = EINVAL;
 		goto fail;
@@ -438,14 +568,22 @@ open_listener(
 	listener->inode = status.st_ino;
 	listener->owns_path = 1;
 	listener->stage = "owner";
+
+	/* Handles a failed lchown operation. */
 	if (lchown(NETWORKD_SOCKET, 0, group) != 0)
 		goto fail;
 	listener->stage = "mode";
+
+	/* Handles a failed chmod operation. */
 	if (chmod(NETWORKD_SOCKET, 0660) != 0)
 		goto fail;
 	listener->stage = "verify";
+
+	/* Handles a failed lstat operation. */
 	if (lstat(NETWORKD_SOCKET, &status) != 0)
 		goto fail;
+
+	/* Handles a failed S ISSOCK operation. */
 	if (!S_ISSOCK(status.st_mode) || status.st_dev != listener->device ||
 	    status.st_ino != listener->inode || status.st_uid != 0 ||
 	    status.st_gid != group || (status.st_mode & 07777U) != 0660U) {
@@ -453,15 +591,21 @@ open_listener(
 		goto fail;
 	}
 	listener->stage = "listen";
+
+	/* Handles a failed listen operation. */
 	if (listen(listener->descriptor, 8) != 0)
 		goto fail;
 	listener->stage = "ready";
+
+	/* Reports successful completion. */
 	return 0;
 
 fail:
 	saved = errno != 0 ? errno : EIO;
 	(void)close_listener(listener);
 	errno = saved;
+
+	/* Reports operation failure. */
 	return -1;
 }
 
@@ -494,7 +638,6 @@ write_all(
 	/* Process each remaining element. */
 	offset = 0;
 	while (offset < length) {
-
 		count = write(descriptor, buffer + offset, length - offset);
 
 		/* Handles the reported system error. */
@@ -523,6 +666,7 @@ write_auth_log(
 	char record[NETWORKD_AUTH_LOG_MAX];
 	int length;
 
+	/* Handles an operation failure. */
 	if (error != 0 || peer == NULL) {
 		length = snprintf(record, sizeof(record),
 		    "networkd: auth result=denied reason=peercred error=%d",
@@ -534,8 +678,12 @@ write_auth_log(
 		    (long)peer->pid, (unsigned long)peer->euid,
 		    (unsigned long)peer->egid);
 	}
+
+	/* Checks the current data length. */
 	if (length < 0 || (size_t)length > sizeof(record) - 2U) {
 		(void)fputs(fallback, stderr);
+
+		/* Returns the computed result. */
 		return;
 	}
 	record[length++] = '\n';
@@ -553,27 +701,40 @@ authenticate_client(
 	socklen_t length;
 	int error;
 
+	/* Handles the peer availability. */
 	if (peer == NULL || role == NULL) {
 		errno = EINVAL;
+
+		/* Reports operation failure. */
 		return -1;
 	}
 	memset(peer, 0, sizeof(*peer));
 	length = sizeof(*peer);
+
+	/* Handles a failed getsockopt operation. */
 	if (getsockopt(client, SOL_SOCKET, SO_PEERCRED, peer, &length) != 0) {
 		error = errno != 0 ? errno : EACCES;
 		write_auth_log(NULL, NETWORKD_CLIENT_READ_ONLY, error);
 		errno = error;
+
+		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* Checks the current data length. */
 	if (length != sizeof(*peer) || peer->pid < 0) {
 		error = EINVAL;
 		write_auth_log(NULL, NETWORKD_CLIENT_READ_ONLY, error);
 		errno = error;
+
+		/* Reports operation failure. */
 		return -1;
 	}
 	*role = peer->euid == 0 ? NETWORKD_CLIENT_ROOT
 				 : NETWORKD_CLIENT_READ_ONLY;
 	write_auth_log(peer, *role, 0);
+
+	/* Reports successful completion. */
 	return 0;
 }
 
@@ -583,9 +744,17 @@ operation_allowed(
 	enum networkd_client_role role,
 	const char *operation)
 {
+	int function_result;
+
+	/* Handles the role condition. */
 	if (role == NETWORKD_CLIENT_ROOT)
 		return 1;
-	return operation != NULL && strcmp(operation, "SHOW") == 0;
+
+	/* Computes the function result. */
+	function_result = operation != NULL && strcmp(operation, "SHOW") == 0;
+
+	/* Returns the computed result. */
+	return function_result;
 }
 
 /* Supports the handle request operation. */
@@ -642,6 +811,8 @@ handle_request(
 	/* Applies authorization before dispatching or parsing operands. */
 	if (!operation_allowed(role, items[1])) {
 		send_error(client, EPERM, "operation not permitted");
+
+		/* Returns the computed result. */
 		return;
 	}
 	diagnostic[0] = '\0';
@@ -692,7 +863,6 @@ handle_request(
 		error = errno;
 	} else if (strcmp(items[1], "DHCP") == 0 && count == 4 &&
 		   parse_seconds(items[3], &timeout) == 0) {
-
 		(void)snprintf(seconds, sizeof(seconds), "%u", timeout);
 		arguments[0] = "/sbin/dhcpc";
 		arguments[1] = "-t";
@@ -701,18 +871,19 @@ handle_request(
 		arguments[4] = NULL;
 
 		/* Handles a failed interface exists operation. */
-		if (interface_exists(items[2]) == 0)
+		if (interface_exists(items[2]) == 0) {
 			result =
 			    run_command(arguments, timeout + 5U, diagnostic);
+		}
 		error = errno;
 	} else if (strcmp(items[1], "DEFAULTROUTE") == 0 && count == 3) {
 		/* Handles a failed netutil parse ipv4 operation. */
 		if (netutil_parse_ipv4(items[2], &gateway) == 0 &&
 		    (present = default_route_exists()) >= 0) {
 			/* Handles the present condition. */
-			if (present)
+			if (present) {
 				result = 0;
-			else {
+			} else {
 				arguments[0] = "/sbin/route";
 				arguments[1] = "add";
 				arguments[2] = "default";
@@ -757,7 +928,6 @@ read_request(
 	/* Continue while the operation condition remains true. */
 	used = 0;
 	while (used + 1U < NETWORKD_REQUEST_MAX) {
-
 		count = read(descriptor, buffer + used,
 				     NETWORKD_REQUEST_MAX - used - 1U);
 
@@ -843,16 +1013,15 @@ show_interfaces(
 		return -1;
 
 	/* Handles the name availability. */
-	if (name != NULL)
+	if (name != NULL) {
 		result = append_interface_status(descriptor, name, output,
 						 capacity, &used);
-	else if (netutil_interfaces(descriptor, &items, &count) != 0)
+	} else if (netutil_interfaces(descriptor, &items, &count) != 0)
 		result = -1;
 	else
 
 		/* Process each remaining element. */
-		for (index = 0; index < count; index++)
-
+		for (index = 0; index < count; index++) {
 			/* Handles a failed append interface status operation. */
 			if (append_interface_status(
 				descriptor, items[index].ifr_name, output,
@@ -860,6 +1029,7 @@ show_interfaces(
 				result = -1;
 				break;
 			}
+		}
 	free(items);
 	close(descriptor);
 
@@ -969,6 +1139,8 @@ run_command(
 	if (child == 0) {
 		/* Close every inherited or duplicated descriptor on failure. */
 		standard_output = dup2(output, STDOUT_FILENO);
+
+		/* Handles the standard output condition. */
 		if (standard_output < 0) {
 			close(STDOUT_FILENO);
 			close(STDERR_FILENO);
@@ -976,6 +1148,8 @@ run_command(
 			_exit(126);
 		}
 		standard_error = dup2(output, STDERR_FILENO);
+
+		/* Handles an operation failure. */
 		if (standard_error < 0) {
 			close(STDOUT_FILENO);
 			close(STDERR_FILENO);
@@ -998,7 +1172,6 @@ run_command(
 		return -1;
 	}
 	while (!child_done) {
-
 		result = waitpid(child, &status, WNOHANG);
 
 		/* Checks the operation result. */
@@ -1023,7 +1196,7 @@ run_command(
 
 	/* Handles a failed lseek operation. */
 	if (lseek(output, 0, SEEK_SET) >= 0) {
-				count = read(output, diagnostic, CHILD_OUTPUT_MAX - 1U);
+		count = read(output, diagnostic, CHILD_OUTPUT_MAX - 1U);
 
 		/* Checks the remaining item count. */
 		if (count > 0)
@@ -1064,11 +1237,11 @@ clean_diagnostic(
 
 	/* Process each remaining element. */
 		text[--length] = '\0';
-	for (index = 0; index < length; index++)
-
+	for (index = 0; index < length; index++) {
 		/* Validates the current text. */
 		if ((unsigned char)text[index] < 32U || text[index] == 127)
 			text[index] = ' ';
+	}
 }
 
 /* Supports the parse seconds operation. */
@@ -1112,7 +1285,6 @@ default_route_exists(
 	/* Process each remaining element. */
 	for (route.rt_index = 0; ioctl(descriptor, SIOCGRTENTRY, &route) == 0;
 	     route.rt_index++) {
-
 		destination = (const struct sockaddr_in *)&route.rt_dst;
 		mask = (const struct sockaddr_in *)&route.rt_genmask;
 
@@ -1167,17 +1339,17 @@ write_resolver(
 			goto fail;
 
 		/* Process each remaining element. */
-		for (prior = 0; prior < index; prior++)
-
+		for (prior = 0; prior < index; prior++) {
 			/* Selects the matching value. */
 			if (strcmp(addresses[prior], addresses[index]) == 0)
 				break;
+		}
 
 		/* Handles the prior condition. */
 		if (prior != index)
 			continue;
-					length = snprintf(line, sizeof(line), "nameserver %s\n",
-			     addresses[index]);
+		length = snprintf(line, sizeof(line), "nameserver %s\n",
+	     addresses[index]);
 
 		/* Handles a failed write all operation. */
 		if (length < 0 || (size_t)length >= sizeof(line) ||

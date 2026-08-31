@@ -127,23 +127,25 @@ list_objects(
 	}
 
 	/* Handles the messages condition. */
-	if (messages)
+	if (messages) {
 		puts("Message Queues:\n       key       msqid        owner     "
 		     "   group       bytes    messages");
+	}
 
 	/* Handles the shared memory condition. */
-	if (shared_memory)
+	if (shared_memory) {
 		puts("Shared Memory:\n       key       shmid        owner      "
 		     "  group       bytes     nattch");
+	}
 
 	/* Handles the semaphores condition. */
-	if (semaphores)
+	if (semaphores) {
 		puts("Semaphores:\n       key       semid        owner        "
 		     "group      nsems");
+	}
 
 	/* Process each directory entry. */
 	while ((entry = readdir(directory)) != NULL) {
-
 		result = 0;
 
 		/* Handles a failed decode name operation. */

@@ -78,8 +78,7 @@ main(
 	close_out = 0;
 	failed = 0;
 	o.ibs = o.obs = DD_DEFAULT_BLOCK;
-	for (i = 1; i < argc; i++)
-
+	for (i = 1; i < argc; i++) {
 		/* Validates the command-line arguments. */
 		if (option(&o, argv[i])) {
 			fprintf(stderr, "dd: invalid operand: %s\n", argv[i]);
@@ -87,6 +86,7 @@ main(
 			/* Reports operation failure. */
 			return 2;
 		}
+	}
 	inbuf = malloc(o.ibs);
 	outbuf = malloc(o.obs);
 
@@ -113,7 +113,7 @@ main(
 
 	/* Handles the o condition. */
 	if (o.output) {
-				flags = O_WRONLY | O_CREAT;
+		flags = O_WRONLY | O_CREAT;
 
 		/* Handles the o condition. */
 		if (!o.notrunc && o.seek == 0)
@@ -143,7 +143,6 @@ main(
 		goto done;
 	}
 	while (!interrupted && (!o.have_count || records < o.count)) {
-
 		got = read_retry(in, inbuf, o.ibs);
 		at = 0;
 
@@ -153,7 +152,7 @@ main(
 
 		/* Handles the got condition. */
 		if (got < 0) {
-						saved = errno;
+			saved = errno;
 			command_error("dd", o.input);
 
 			/* Handles an operation failure. */
@@ -193,7 +192,6 @@ main(
 			}
 		}
 		while (at < amount) {
-
 			take = o.obs - used;
 
 			/* Handles the take condition. */
@@ -366,7 +364,6 @@ parse_conv(
 	/* Continue while the operation condition remains true. */
 	p = value;
 	while (*p) {
-
 		end = strchr(p, ',');
 		n = end ? (size_t)(end - p) : strlen(p);
 
@@ -426,7 +423,6 @@ number(
 
 		/* Continue while the operation condition remains true. */
 		while (*p >= '0' && *p <= '9') {
-
 			d = (unsigned)(*p++ - '0');
 
 			/* Handles the piece condition. */
@@ -545,7 +541,6 @@ skip_input(
 
 	/* Process each element required by the operation. */
 	for (i = 0; i < o->skip; i++) {
-
 		n = read_retry(fd, buffer, o->ibs);
 
 		/* Checks the current item count. */
@@ -622,7 +617,6 @@ write_all(
 	/* Continue while the operation condition remains true. */
 	at = 0;
 	while (at < n) {
-
 		w = write(fd, b + at, n - at);
 
 		/* Handles the reported system error. */

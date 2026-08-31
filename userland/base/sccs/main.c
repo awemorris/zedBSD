@@ -349,7 +349,6 @@ get_main(
 
 	/* Handles the edit condition. */
 	if (edit) {
-
 		latest = sccs_find(&history, NULL);
 
 		/* Handles a failed sccs sid next operation. */
@@ -422,7 +421,7 @@ write_path(
 
 	/* Handles the write all condition. */
 	if (write_all(fd, data, size) || fsync(fd) || close(fd)) {
-				saved = errno;
+		saved = errno;
 		close(fd);
 
 		/* Handles the exclusive condition. */
@@ -451,7 +450,6 @@ write_all(
 	/* Process each remaining element. */
 	p = data;
 	while (size) {
-
 		n = write(fd, p, size);
 
 		/* Handles the reported system error. */
@@ -493,7 +491,6 @@ keyword_output(
 
 	/* Process each remaining element. */
 	for (i_index_for = 0; i_index_for < delta->text_size;) {
-
 		replacement = NULL;
 
 		/* Handles the i index for condition. */
@@ -714,7 +711,6 @@ prs_format(
 
 	/* Process each remaining element. */
 	for (i_index_for = 0; format[i_index_for];) {
-
 		replacement = NULL;
 
 		/* Handles the format condition. */
@@ -742,8 +738,9 @@ prs_format(
 		if (replacement) {
 			fputs(replacement, stdout);
 			i_index_for += 3;
-		} else
+		} else {
 			putchar(format[i_index_for++]);
+		}
 	}
 	putchar('\n');
 }
@@ -770,8 +767,9 @@ val_main(
 		if (sccs_load(argv[i_index_for], &history)) {
 			error_path(argv[i_index_for]);
 			failed = 1;
-		} else
+		} else {
 			sccs_free(&history);
+		}
 	}
 
 	/* Returns the computed result. */
@@ -910,8 +908,7 @@ rmdel_main(
 	/* Parse each command-line option. */
 	sid = NULL;
 	status = 1;
-	while ((ch = getopt(argc, argv, "r:")) != -1)
-
+	while ((ch = getopt(argc, argv, "r:")) != -1) {
 		/* Handles the ch condition. */
 		if (ch == 'r')
 			sid = optarg;
@@ -919,6 +916,7 @@ rmdel_main(
 
 			/* Reports operation failure. */
 			return 2;
+	}
 
 	/* Validates the command-line arguments. */
 	if (!sid || optind + 1 != argc)
@@ -957,11 +955,11 @@ sccs_main(
 		return 2;
 
 	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < sizeof(commands) / sizeof(commands[0]); i_index_for++)
-
+	for (i_index_for = 0; i_index_for < sizeof(commands) / sizeof(commands[0]); i_index_for++) {
 		/* Handles the selected command-line operation. */
 		if (!strcmp(argv[1], commands[i_index_for]))
 			allowed = 1;
+	}
 
 	/* Handles the allowed condition. */
 	if (!allowed) {
@@ -973,11 +971,12 @@ sccs_main(
 	slash = strrchr(argv[0], '/');
 
 	/* Handles the slash condition. */
-	if (slash)
+	if (slash) {
 		snprintf(path, sizeof(path), "%.*s/%s", (int)(slash - argv[0]),
 			 argv[0], argv[1]);
-	else
+	} else {
 		snprintf(path, sizeof(path), "/bin/%s", argv[1]);
+	}
 	argv[1] = path;
 	execv(path, argv + 1);
 	error_path(path);

@@ -309,6 +309,31 @@ if (offset > 0) {
 }
 ```
 
+Keep the two sides of an `if`-`else` decision structurally symmetric.  If the
+`if` body or the terminal `else` body uses braces, the other body uses braces
+too.  An `else if` remains part of the same decision chain and is not treated as
+a terminal unbraced `else`:
+
+```c
+if (ready) {
+	start_request();
+} else {
+	defer_request();
+}
+```
+
+Use braces around a `for` body whose controlled statement is an `if`, even when
+that `if` is grammatically one statement.  Also use braces around a `for` or
+`while` body whenever its controlled statement occupies more than one physical
+line.  Comments do not make a statement compound, but a comment plus a
+controlled statement still belongs inside the loop's braces.
+
+The first content line in an `if`, `else`, `for`, or `while` block is indented
+exactly one tab beyond its controlling statement.  Do not add an extra
+indentation level merely because the first content is a comment or because an
+unbraced statement was converted to a block.  A block starts with content, not
+an empty line; do not leave a blank line immediately after its opening brace.
+
 Do not build deeply nested call expressions as arguments.  Store complex
 intermediate results in named temporary variables, check each fallible result,
 and then pass the completed values to the outer call.
@@ -442,6 +467,9 @@ Before finishing a C-source change, verify that:
 - every loop and `switch` has an immediately preceding intent comment
 - split calls use one argument per line and split controlled statements use
   braces
+- `if`/terminal-`else` braces are symmetric, loop bodies containing `if` or
+  multi-line statements are braced, and block-entry indentation is exactly one
+  level with no leading blank line
 - allocations, checks, and per-object initialization form clear blocks
 - every semantic paragraph, decision, loop, and return has an adjacent purpose
   comment and the expected blank lines

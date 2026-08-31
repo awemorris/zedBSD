@@ -46,7 +46,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (; i < argc; i++) {
-				fd = !strcmp(argv[i], "-") ? 0 : open(argv[i], O_RDONLY);
+		fd = !strcmp(argv[i], "-") ? 0 : open(argv[i], O_RDONLY);
 
 		/* Checks the file descriptor. */
 		if (fd < 0) {
@@ -81,7 +81,6 @@ checksum(
 	crc = 0;
 	length = 0;
 	for (;;) {
-
 		n = read(fd, buffer, sizeof(buffer));
 
 		/* Checks the current item count. */
@@ -127,9 +126,10 @@ crc_byte(
 	crc ^= (unsigned long)byte << 24;
 
 	/* Process each element required by the operation. */
-	for (bit = 0; bit < 8; bit++)
+	for (bit = 0; bit < 8; bit++) {
 		crc =
 		    (crc & 0x80000000UL) ? (crc << 1) ^ 0x04c11db7UL : crc << 1;
+	}
 
 	/* Returns the computed result. */
 	return crc & 0xffffffffUL;

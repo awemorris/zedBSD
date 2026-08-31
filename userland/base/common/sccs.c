@@ -78,7 +78,6 @@ sccs_read_regular(
 
 	/* Process each remaining element. */
 	while (done < (size_t)st.st_size) {
-
 		n = read(fd, *data + done, (size_t)st.st_size - done);
 
 		/* Handles the reported system error. */
@@ -177,7 +176,6 @@ sccs_sid_next(
 	count = 0;
 	p = sid;
 	while (*p && count < 4) {
-
 		value = strtoul(p, &end, 10);
 
 		/* Checks the current endpoint. */
@@ -214,10 +212,10 @@ sccs_sid_next(
 			     values[2], values[3] + 1);
 	} else {
 		/* Handles the branch condition. */
-		if (branch)
+		if (branch) {
 			n = snprintf(output, size, "%u.%u.1.1", values[0],
 				     values[1]);
-		else {
+		} else {
 			/* Handles the values condition. */
 			if (values[1] == 9999) {
 				errno = ERANGE;
@@ -261,11 +259,11 @@ sccs_find(
 		return &history->deltas[history->count - 1];
 
 	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < history->count; i_index_for++)
-
+	for (i_index_for = 0; i_index_for < history->count; i_index_for++) {
 		/* Selects the matching value. */
 		if (!strcmp(history->deltas[i_index_for].sid, sid))
 			return &history->deltas[i_index_for];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -352,8 +350,7 @@ sccs_remove(
 			continue;
 
 		/* Process each remaining element. */
-		for (j_index_for = 0; j_index_for < history->count; j_index_for++)
-
+		for (j_index_for = 0; j_index_for < history->count; j_index_for++) {
 			/* Handles the history condition. */
 			if (history->deltas[j_index_for].predecessor ==
 			    history->deltas[i_index_for].serial) {
@@ -362,6 +359,7 @@ sccs_remove(
 				/* Reports operation failure. */
 				return -1;
 			}
+		}
 		free(history->deltas[i_index_for].sid);
 		free(history->deltas[i_index_for].timestamp);
 		free(history->deltas[i_index_for].user);
@@ -478,7 +476,6 @@ sccs_load(
 
 		/* Handles the line condition. */
 		if (line[1] == 'd') {
-
 			memset(&delta_local1, 0, sizeof(delta_local1));
 
 			/* Handles the parse header line condition. */
@@ -506,11 +503,11 @@ sccs_load(
 			/* Process each remaining element. */
 			serial = (unsigned)serial_value;
 			active = -1;
-			for (i_index_for1 = 0; i_index_for1 < history->count; i_index_for1++)
-
+			for (i_index_for1 = 0; i_index_for1 < history->count; i_index_for1++) {
 				/* Handles the history condition. */
 				if (history->deltas[i_index_for1].serial == serial)
 					active = (ssize_t)i_index_for1;
+			}
 
 			/* Handles the active condition. */
 			if (active < 0)
@@ -634,6 +631,7 @@ sccs_save(
 	size_t length;
 	char pid[32];
 	int pid_length;
+	ssize_t amount;
 
 	lock = NULL;
 	temporary = NULL;
@@ -655,11 +653,10 @@ sccs_save(
 
 	/* Handles the reported system error. */
 	if (lock_fd < 0 && errno == EEXIST) {
-
-				existing = open(lock, O_RDONLY);
-		ssize_t amount = existing >= 0 ? read(existing, contents,
-						      sizeof(contents) - 1)
-					       : -1;
+		existing = open(lock, O_RDONLY);
+		amount = existing >= 0 ? read(existing, contents,
+					     sizeof(contents) - 1)
+					      : -1;
 
 		/* Handles the existing condition. */
 		if (existing >= 0)
@@ -667,15 +664,15 @@ sccs_save(
 
 		/* Handles the amount condition. */
 		if (amount > 0) {
-
 			contents[amount] = '\0';
 			pid_value = strtol(contents, &end, 10);
 
 			/* Handles the reported system error. */
 			if (pid_value > 1 && kill((pid_t)pid_value, 0) < 0 &&
-			    errno == ESRCH && !unlink(lock))
+			    errno == ESRCH && !unlink(lock)) {
 				lock_fd = open(
 				    lock, O_WRONLY | O_CREAT | O_EXCL, 0600);
+			}
 		}
 	}
 
@@ -887,7 +884,7 @@ history_serialize(
 
 	/* Process each remaining element. */
 	for (i_index_for = 0; i_index_for < history->count; i_index_for++) {
-				delta_local = &history->deltas[i_index_for];
+		delta_local = &history->deltas[i_index_for];
 
 		/* Handles a failed sccs sid valid operation. */
 		if (!sccs_sid_valid(delta_local->sid) ||
@@ -917,7 +914,7 @@ history_serialize(
 
 	/* Process each remaining element. */
 	for (i_index_for1 = 0; i_index_for1 < history->count; i_index_for1++) {
-				delta_local1 = &history->deltas[i_index_for1];
+		delta_local1 = &history->deltas[i_index_for1];
 
 		/* Handles a failed buffer format operation. */
 		if (buffer_format(&body, "\001I %u\n", delta_local1->serial) ||
@@ -1009,7 +1006,7 @@ buffer_append(
 	/* Handles the buffer condition. */
 	if (buffer->size + size > buffer->capacity) {
 		/* Process each remaining element. */
-				capacity = buffer->capacity ? buffer->capacity : 1024;
+		capacity = buffer->capacity ? buffer->capacity : 1024;
 		while (capacity < buffer->size + size) {
 			/* Handles the capacity condition. */
 			if (capacity > SIZE_MAX / 2) {
@@ -1046,7 +1043,6 @@ write_all(
 	/* Process each remaining element. */
 	p = data;
 	while (size) {
-
 		n = write(fd, p, size);
 
 		/* Handles the reported system error. */

@@ -93,8 +93,8 @@ main(
 	if (!plural && options.join) {
 		/* Process each remaining command-line operand. */
 		for (; first < argc; first++) {
-						message = argv[first];
-						expanded = NULL;
+			message = argv[first];
+			expanded = NULL;
 
 			/* Checks the selected options. */
 			if (options.escape) {
@@ -137,9 +137,8 @@ main(
 
 	/* Handles the plural condition. */
 	if (plural) {
-
-				singular = allocated[0] != NULL ? allocated[0] : argv[first];
-				multiple = allocated[1] != NULL ? allocated[1] : argv[first + 1];
+		singular = allocated[0] != NULL ? allocated[0] : argv[first];
+		multiple = allocated[1] != NULL ? allocated[1] : argv[first + 1];
 
 		errno = 0;
 		count = strtoul(argv[first + 2], &end, 10);
@@ -218,7 +217,7 @@ parse_options(
 	options->escape = -1;
 	options->newline = 1;
 	for (index = 1; index < argc; index++) {
-				option = argv[index];
+		option = argv[index];
 
 		/* Handles the option condition. */
 		if (option[0] != '-' || option[1] == '\0')
@@ -382,7 +381,6 @@ expand_escapes(
 
 		/* Handles the source condition. */
 		if (*source == 'x') {
-
 			source++;
 
 			/* Continue while the operation condition remains true. */

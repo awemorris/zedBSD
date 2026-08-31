@@ -267,7 +267,6 @@ noct_napi_cleanup(
 
 	/* Continue while the operation condition remains true. */
 	while (source != NULL) {
-
 		next = source->next;
 
 		free(source);
@@ -288,7 +287,7 @@ register_intrinsics(
 
 	/* Process each remaining element. */
 	for (index = 0; index < item_count; index++) {
-				item = &items[index];
+		item = &items[index];
 
 		/* Handles a failed noct register cfunc operation. */
 		if (!noct_register_cfunc(
@@ -332,7 +331,7 @@ register_module(
 
 	/* Process each remaining element. */
 	for (index = 0; index < item_count; index++) {
-				item = &items[index];
+		item = &items[index];
 
 		/* Handles a failed noct register cfunc operation. */
 		if (!noct_register_cfunc(
@@ -738,13 +737,13 @@ cfunc_console_gets(
 	}
 
 	/* Handles the screen show cursor availability. */
-	if (active.services->screen_show_cursor != NULL)
+	if (active.services->screen_show_cursor != NULL) {
 		(void)active.services->screen_show_cursor(
 		    active.services->context, 1);
+	}
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		key = active.services->keyboard_read(active.services->context);
 
 		/* Handles the selected key. */
@@ -959,11 +958,12 @@ cfunc_screen_set_cursor(
 	    row >= 25 || column < 0 || column >= 80 || !services_ready() ||
 	    active.services->screen_set_cursor == NULL ||
 	    !active.services->screen_set_cursor(
-		active.services->context, (unsigned)row, (unsigned)column))
+		active.services->context, (unsigned)row, (unsigned)column)) {
 		noct_error(env,
 			   "Screen.setCursor received an invalid position.");
-	else
+	} else {
 		ok = return_int(env, 0);
+	}
 	(void)noct_unpin_local(env, 1, &argument);
 
 	/* Returns the computed result. */
@@ -1191,7 +1191,6 @@ ascii_equal_folded(
 
 	/* Continue while the operation condition remains true. */
 	while (*left != '\0' && *right != '\0') {
-
 		a = (unsigned char)*left++;
 		b = (unsigned char)*right++;
 

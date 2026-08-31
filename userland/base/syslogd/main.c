@@ -93,7 +93,7 @@ main(
 	while (!stopping) {
 		/* Handles the reopening condition. */
 		if (reopening) {
-						replacement = open_output();
+			replacement = open_output();
 			reopening = 0;
 
 			/* Handles the replacement condition. */
@@ -120,9 +120,10 @@ main(
 
 		/* Handles a failed write all operation. */
 		if (write_all(output, message, (size_t)length) != 0 ||
-		    write_all(output, "\n", 1) != 0)
+		    write_all(output, "\n", 1) != 0) {
 			fprintf(stderr, "syslogd: log write failed: %s\n",
 				strerror(errno));
+		}
 	}
 	(void)fsync(output);
 	close(output);
@@ -170,7 +171,6 @@ write_all(
 	/* Process each remaining element. */
 	cursor = buffer;
 	while (length != 0) {
-
 		written = write(descriptor, cursor, length);
 
 		/* Handles the reported system error. */

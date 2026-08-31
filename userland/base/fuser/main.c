@@ -80,7 +80,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (index = optind; index < argc; index++) {
-				result = show_file(descriptor, argv[index], mount_query, show_user);
+		result = show_file(descriptor, argv[index], mount_query, show_user);
 
 		/* Checks the operation result. */
 		if (result > 0)
@@ -153,7 +153,7 @@ show_file(
 
 		/* Handles the show user condition. */
 		if (show_user) {
-						account = getpwuid(query.uid);
+			account = getpwuid(query.uid);
 
 			/* Handles the account availability. */
 			if (account != NULL)

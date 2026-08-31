@@ -106,7 +106,6 @@ main(
 	struct msghdr message;
 	struct iovec vector;
 
-	thread_result = NULL;
 	union {
 		struct cmsghdr alignment;
 		unsigned char bytes[CMSG_SPACE(sizeof(int))];
@@ -149,6 +148,8 @@ main(
 	socklen_t option_length;
 	int option_value, saved_flags;
 	int realtime_offset, realtime_round;
+
+	thread_result = NULL;
 
 	/* Handles a failed getenv operation. */
 	if (getenv("R2_EXEC_FINAL") != NULL) {
@@ -304,11 +305,12 @@ main(
 	}
 
 	/* Checks the child process state. */
-	if (child == 0)
+	if (child == 0) {
 		_exit(atfork_prepare_called == 1 && atfork_child_called == 1 &&
 			      atfork_parent_called == 0
 			  ? 0
 			  : 41);
+	}
 	memset(&child_information, 0, sizeof(child_information));
 
 	/* Handles a failed waitid operation. */
@@ -468,8 +470,7 @@ main(
 	}
 
 	/* Process each remaining element. */
-	for (stream_index = 0; stream_index < 16; stream_index++)
-
+	for (stream_index = 0; stream_index < 16; stream_index++) {
 		/* Handles a failed send operation. */
 		if (send(pair[0], "w", 1, 0) != 1) {
 			/* Obtains the fail errno result. */
@@ -478,6 +479,7 @@ main(
 			/* Returns the computed result. */
 			return function_result;
 		}
+	}
 
 	/* Handles a failed recv operation. */
 	if (recv(pair[1], stream_readback, 16, MSG_WAITALL) != 16) {
@@ -521,7 +523,6 @@ main(
 	/* Continue while the operation condition remains true. */
 	stream_queued = 0;
 	while (stream_queued < 65536U) {
-
 		amount = 65536U - stream_queued;
 
 		/* Handles the amount condition. */
@@ -585,7 +586,6 @@ main(
 	/* Continue until the operation reaches a terminal state. */
 	stream_drained = 1;
 	for (;;) {
-
 		received = recv(pair[1], stream_readback, sizeof(stream_readback), 0);
 
 		/* Handles the received condition. */
@@ -1001,11 +1001,9 @@ main(
 	}
 
 	/* Process each element required by the operation. */
-	for (realtime_offset = 7; realtime_offset >= 0; realtime_offset--)
-
+	for (realtime_offset = 7; realtime_offset >= 0; realtime_offset--) {
 		/* Process each element required by the operation. */
 		for (realtime_round = 0; realtime_round < 2; realtime_round++) {
-
 			queued.sival_int =
 			    realtime_offset * 10 + realtime_round;
 
@@ -1019,10 +1017,10 @@ main(
 				return function_result;
 			}
 		}
+	}
 
 	/* Process each element required by the operation. */
-	for (realtime_offset = 0; realtime_offset < 8; realtime_offset++)
-
+	for (realtime_offset = 0; realtime_offset < 8; realtime_offset++) {
 		/* Process each element required by the operation. */
 		for (realtime_round = 0; realtime_round < 2; realtime_round++) {
 			memset(&notify_info, 0, sizeof(notify_info));
@@ -1041,6 +1039,7 @@ main(
 				return function_result;
 			}
 		}
+	}
 	(void)pthread_sigmask(SIG_SETMASK, &realtime_old_mask, NULL);
 
 	/*
@@ -1417,17 +1416,17 @@ main(
 	}
 
 	/* Checks the child process state. */
-	if (child == 0)
+	if (child == 0) {
 		_exit(write(pty_slave, pty_stress_input,
 			    sizeof(pty_stress_input)) ==
 			      (ssize_t)sizeof(pty_stress_input)
 			  ? 0
 			  : 42);
+	}
 
 	/* Process each remaining element. */
 	pty_received = 0;
 	while (pty_received < sizeof(pty_stress_output)) {
-
 		count = read(pty_master, pty_stress_output + pty_received,
 			 sizeof(pty_stress_output) - pty_received);
 
@@ -1612,7 +1611,7 @@ main(
 
 	/* Checks the child process state. */
 	if (child == 0) {
-				locked = fcntl(regular_fd, F_SETLK, &file_lock);
+		locked = fcntl(regular_fd, F_SETLK, &file_lock);
 		_exit(locked == -1 && (errno == EAGAIN || errno == EACCES) ? 0
 									   : 1);
 	}
@@ -1978,10 +1977,11 @@ thread_timer_callback(
 			 __ATOMIC_RELEASE);
 
 	/* Validates the current value. */
-	if (value.sival_int > 0 && value.sival_int < 32)
+	if (value.sival_int > 0 && value.sival_int < 32) {
 		(void)__atomic_fetch_or(&timer_callback_bits,
 					1U << (unsigned)value.sival_int,
 					__ATOMIC_RELEASE);
+	}
 	(void)sem_post(&timer_ready);
 }
 

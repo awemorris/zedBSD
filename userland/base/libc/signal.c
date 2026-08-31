@@ -478,8 +478,7 @@ sig2str(
 	unsigned i;
 
 	/* Process each remaining element. */
-	for (i = 0; i < sizeof(signal_names) / sizeof(signal_names[0]); i++)
-
+	for (i = 0; i < sizeof(signal_names) / sizeof(signal_names[0]); i++) {
 		/* Handles the signal names condition. */
 		if (signal_names[i].number == number) {
 			strcpy(name, signal_names[i].name);
@@ -487,6 +486,7 @@ sig2str(
 			/* Reports successful completion. */
 			return 0;
 		}
+	}
 
 	/* Handles the number condition. */
 	if (number >= SIGRTMIN && number <= SIGRTMAX) {
@@ -521,14 +521,14 @@ str2sig(
 		return 0;
 
 	/* Process each remaining element. */
-	for (i = 0; i < sizeof(signal_names) / sizeof(signal_names[0]); i++)
-
+	for (i = 0; i < sizeof(signal_names) / sizeof(signal_names[0]); i++) {
 		/* Selects the matching value. */
 		if (!strcmp(name, signal_names[i].name)) {
 			*number = signal_names[i].number;
 			/* Reports successful completion. */
 			return 0;
 		}
+	}
 
 	/* Selects the matching value. */
 	if (!strcmp(name, "POLL")) {

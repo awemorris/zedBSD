@@ -104,8 +104,9 @@ main(
 
 			/* Returns the computed result. */
 			return function_result;
-		} else
+		} else {
 			url = argv[index_for];
+		}
 	}
 
 	/* Handles a failed strlen operation. */
@@ -122,9 +123,9 @@ main(
 		output_name = default_output(url);
 
 	/* Selects the matching value. */
-	if (strcmp(output_name, "-") == 0)
+	if (strcmp(output_name, "-") == 0) {
 		output = STDOUT_FILENO;
-	else {
+	} else {
 		output = open(output_name, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 
 		/* Handles the output condition. */
@@ -375,11 +376,11 @@ parse_url(
 	/* Process each element required by the operation. */
 		path = text + strlen(text);
 	colon = NULL;
-	for (cursor_for = host; cursor_for < path; cursor_for++)
-
+	for (cursor_for = host; cursor_for < path; cursor_for++) {
 		/* Handles the cursor for condition. */
 		if (*cursor_for == ':')
 			colon = cursor_for;
+	}
 	length = (size_t)((colon != NULL ? colon : path) - host);
 
 	/* Checks the current data length. */
@@ -462,9 +463,10 @@ connect_server(
 	freeaddrinfo(addresses);
 
 	/* Checks the file descriptor. */
-	if (descriptor < 0)
+	if (descriptor < 0) {
 		fprintf(stderr, "fetch: cannot connect to %s:%u\n", url->host,
 			url->port);
+	}
 
 	/* Returns the computed result. */
 	return descriptor;
@@ -483,7 +485,6 @@ send_all(
 	/* Process each remaining element. */
 	cursor = buffer;
 	while (length != 0) {
-
 		count = send(fd, cursor, length, 0);
 
 		/* Checks the remaining item count. */
@@ -614,16 +615,16 @@ make_redirect(
 	}
 
 	/* Handles the location condition. */
-	if (location[0] == '/')
+	if (location[0] == '/') {
 		count = base->port == 80
 			    ? snprintf(result, capacity, "http://%s%s",
 				       base->host, location)
 			    : snprintf(result, capacity, "http://%s:%u%s",
 				       base->host, base->port, location);
-	else
-
+	} else {
 		/* Reports operation failure. */
 		return -1;
+	}
 
 	/* Returns the computed result. */
 	return count >= 0 && count < (int)capacity ? 0 : -1;
@@ -723,7 +724,6 @@ write_all(
 	/* Process each remaining element. */
 	cursor = buffer;
 	while (length != 0) {
-
 		count = write(fd, cursor, length);
 
 		/* Checks the remaining item count. */

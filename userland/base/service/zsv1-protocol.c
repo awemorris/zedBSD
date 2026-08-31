@@ -49,7 +49,7 @@ zsv1_name_valid(
 
 	/* Process each remaining element. */
 	for (length = 0; name[length] != '\0'; length++) {
-				character = (unsigned char)name[length];
+		character = (unsigned char)name[length];
 
 		/* Handles a failed ascii alphanumeric operation. */
 		if (!ascii_alphanumeric(character) && character != '_' &&
@@ -209,11 +209,12 @@ zsv1_request_format(
 	}
 
 	/* Handles a failed command has service operation. */
-	if (command_has_service(request->command))
+	if (command_has_service(request->command)) {
 		result = snprintf(output, capacity, "ZSV1 %s %s\n", command,
 				  request->service);
-	else
+	} else {
 		result = snprintf(output, capacity, "ZSV1 %s\n", command);
+	}
 
 	/* Checks the operation result. */
 	if (result < 0 || (size_t)result >= capacity ||
@@ -465,8 +466,7 @@ zsv1_decoder_feed(
 
 	/* Process each remaining element. */
 	for (index = 0; index < length; index++) {
-
-				byte = bytes[index];
+		byte = bytes[index];
 
 		/* Handles the decoder condition. */
 		if (decoder->response.ended) {
@@ -798,7 +798,7 @@ token_valid(
 
 	/* Process each remaining element. */
 	for (length = 0; token[length] != '\0'; length++) {
-				character = (unsigned char)token[length];
+		character = (unsigned char)token[length];
 
 		/* Classifies the current input character. */
 		if ((character < 'a' || character > 'z') &&

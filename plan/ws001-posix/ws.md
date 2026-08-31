@@ -45,7 +45,7 @@ Shared tests: [WS001 test index](tests/README.md)
 | `ws001-p018` | [bounded tee conformance](phase018-tee-conformance/phase.md) | Complete implementation milestone (`agent2-q001`, 2026-08-31) | `-i`, dynamic outputs, robust writes, failure continuation, and statuses pass focused tests |
 | `ws001-p019` | [canonical userland source headers](phase019-userland-file-headers/phase.md) | Complete (`agent2-q002`, 2026-08-31) | All 269 userland C-family files have the exact section 13 block and a separate explanation; body hashes, fixtures, assembler preprocessing, full build, and whitespace checks pass |
 | `ws001-p020` | [complete userland C-style conformance](phase020-complete-userland-c-style/phase.md) | Uncleared (`agent2-q003`, 2026-08-31) | All 2,454 functions pass public/static order, prototype, header-layout, comment, loop/switch, case-label, and build gates; the body audit records 731 mechanical residuals plus semantic-review handoffs in the 258-row ledger |
-| `ws001-p021` | [ANSI C declarations and semantic layout](phase021-ansi-c-semantic-layout/phase.md) | Uncleared (`agent2-q005`, 2026-08-31) | Whole-tree paragraph spacing, loop preparation, decision/return comments, and explicit call-result gates pass; human file-specific prose review remains across all 214 implementations |
+| `ws001-p021` | [ANSI C declarations and semantic layout](phase021-ansi-c-semantic-layout/phase.md) | Complete (`agent2-q006`, 2026-08-31) | All 214 implementations pass ANSI declaration, semantic paragraph, symmetric brace, loop block, entry spacing, indentation, build, automated audit, and user manual-review gates |
 
 ### Concurrent q042 records with colliding pre-merge IDs
 

@@ -141,16 +141,18 @@ main(
 	snapshot = load_rcconf_snapshot();
 
 	/* Handles the snapshot availability. */
-	if (snapshot == NULL)
+	if (snapshot == NULL) {
 		fprintf(stderr, "init: cannot load %s: %s\n", RCCONF_PATH,
 			strerror(errno));
+	}
 	set_configured_hostname(snapshot);
 	run_mount_all();
 
 	/* Handles a failed load services operation. */
-	if (load_services(snapshot) != 0)
+	if (load_services(snapshot) != 0) {
 		fprintf(stderr,
 			"init: continuing without service definitions\n");
+	}
 	free(snapshot);
 
 	listener = open_control_socket();
@@ -165,7 +167,6 @@ main(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		reap_children();
 
 		/* Handles the action requested condition. */
@@ -300,10 +301,11 @@ load_services(
 			continue;
 
 		/* Handles a failed load one service operation. */
-		if (load_one_service(entry->d_name, snapshot) != 0)
+		if (load_one_service(entry->d_name, snapshot) != 0) {
 			fprintf(stderr,
 				"init: invalid service definition: %s\n",
 				entry->d_name);
+		}
 	}
 
 	closedir(directory);
@@ -503,7 +505,7 @@ open_control_socket(
 	if (bind(descriptor, (struct sockaddr *)&address, sizeof(address)) !=
 		0 ||
 	    chmod(address.sun_path, 0600) != 0 || listen(descriptor, 8) != 0) {
-				error = errno;
+		error = errno;
 
 		close(descriptor);
 		errno = error;
@@ -531,7 +533,7 @@ start_enabled_services(
 	for (pass = 0; pass < service_count; pass++) {
 		/* Process each remaining element. */
 		for (index = 0; index < service_count; index++) {
-						service = &services[index];
+			service = &services[index];
 
 			/* Handles the service condition. */
 			if (!service->enabled ||
@@ -580,7 +582,6 @@ dependencies_state(
 		/* Process each element required by the operation. */
 		for (name = strtok(copy, ","); name != NULL;
 		     name = strtok(NULL, ",")) {
-
 			dependency_local = find_service(name);
 
 			/* Handles the dependency local availability. */
@@ -603,7 +604,6 @@ dependencies_state(
 		/* Process each element required by the operation. */
 		for (name = strtok(copy, ","); name != NULL;
 		     name = strtok(NULL, ",")) {
-
 			dependency_local1 = find_service(name);
 
 			/* Handles an operation failure. */
@@ -735,7 +735,7 @@ spawn_service(
 
 	/* Checks the child process state. */
 	if (child < 0) {
-				error_local = errno;
+		error_local = errno;
 
 		/* Handles the notify pipe condition. */
 		if (notify_pipe[0] >= 0)
@@ -759,7 +759,7 @@ spawn_service(
 
 		/* Handles a failed wait for notification operation. */
 		if (wait_for_notification(service, notify_pipe[0]) != 0) {
-						error_local1 = errno;
+			error_local1 = errno;
 
 			close(notify_pipe[0]);
 			(void)kill(child, SIGTERM);
@@ -786,7 +786,7 @@ spawn_service(
 
 	/* Handles a failed waitpid operation. */
 	if (waitpid(child, &status, 0) != child) {
-				error_local2 = errno;
+		error_local2 = errno;
 
 		service->state = SERVICE_FAILED;
 		service->pid = 0;
@@ -836,7 +836,6 @@ wait_for_notification(
 	for (;;) {
 		/* Continue until the operation reaches a terminal state. */
 		for (;;) {
-
 			count = read(descriptor, record + used,
 					     sizeof(record) - used - 1U);
 
@@ -892,14 +891,15 @@ wait_for_notification(
 				return 0;
 
 			/* Handles an operation failure. */
-			if (valid_failure_record(record))
+			if (valid_failure_record(record)) {
 				fprintf(stderr, "init: %s: %s\n",
 					service->name, record);
-			else
+			} else {
 				fprintf(stderr,
 					"init: %s malformed readiness "
 					"record\n",
 					service->name);
+			}
 			errno = EINVAL;
 
 			/* Reports operation failure. */
@@ -966,7 +966,6 @@ valid_failure_record(
 
 	/* Continue while the operation condition remains true. */
 	while (*cursor != '\0') {
-
 		character = (unsigned char)*cursor++;
 
 		/* Classifies the current input character. */
@@ -993,7 +992,7 @@ reap_children(
 	while ((child = waitpid(-1, &status, WNOHANG)) > 0) {
 		/* Process each remaining element. */
 		for (index = 0; index < service_count; index++) {
-						service = &services[index];
+			service = &services[index];
 
 			/* Handles the service condition. */
 			if (service->pid != child)
@@ -1126,7 +1125,7 @@ reload_policy(
 
 	/* Handles the snapshot availability. */
 	if (snapshot == NULL) {
-				error = errno;
+		error = errno;
 
 		fprintf(stderr, "init: cannot reload %s: %s\n", RCCONF_PATH,
 			strerror(error));
@@ -1138,7 +1137,6 @@ reload_policy(
 
 	/* Process each remaining element. */
 	for (index = 0; index < service_count; index++) {
-
 		services[index].enabled =
 		    rcconf_service_enabled(snapshot, services[index].name,
 					   &enabled) == 0 &&
@@ -1193,9 +1191,9 @@ handle_request(
 	/* Handles the request condition. */
 	if (request.command == ZSV1_COMMAND_RELOAD) {
 		/* Handles a failed reload policy operation. */
-		if (reload_policy() == 0)
+		if (reload_policy() == 0) {
 			(void)zsv1_server_send_ok_end_fd(client, "reloaded");
-		else {
+		} else {
 			error = errno;
 			(void)zsv1_server_send_error_end_fd(
 			    client, error > 0 ? error : EIO, "reload-failed");
@@ -1209,10 +1207,10 @@ handle_request(
 	if (request.command == ZSV1_COMMAND_HALT ||
 	    request.command == ZSV1_COMMAND_POWEROFF ||
 	    request.command == ZSV1_COMMAND_REBOOT) {
-				action = request.command == ZSV1_COMMAND_REBOOT ? INIT_ACTION_REBOOT
-		    : request.command == ZSV1_COMMAND_POWEROFF
-			? INIT_ACTION_POWEROFF
-			: INIT_ACTION_HALT;
+		action = request.command == ZSV1_COMMAND_REBOOT ? INIT_ACTION_REBOOT
+	    : request.command == ZSV1_COMMAND_POWEROFF
+	? INIT_ACTION_POWEROFF
+	: INIT_ACTION_HALT;
 
 		/* Handles a failed zsv1 server send ok end fd operation. */
 		if (zsv1_server_send_ok_end_fd(client, "scheduled") == 0)
@@ -1396,7 +1394,6 @@ send_dependencies(
 
 	/* Process each element required by the operation. */
 	for (name = strtok(copy, ","); name != NULL; name = strtok(NULL, ",")) {
-
 		memset(&record, 0, sizeof(record));
 		record.type = type;
 		strcpy(record.name, name);

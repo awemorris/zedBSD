@@ -164,7 +164,6 @@ main(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		waited = waitpid(child, &status, 0);
 
 		/* Handles the waited condition. */
@@ -255,7 +254,7 @@ parse_options(
 	/* Process each remaining command-line operand. */
 	options->signal_number = SIGTERM;
 	for (index = 1; index < argc; index++) {
-				argument = argv[index];
+		argument = argv[index];
 
 		/* Handles the argument condition. */
 		if (argument[0] != '-' || argument[1] == '\0')
@@ -358,7 +357,6 @@ duration_parse(
 
 	/* Continue while the operation condition remains true. */
 	while (isdigit((unsigned char)*cursor)) {
-
 		digit_local = (unsigned)(*cursor++ - '0');
 
 		/* Handles the seconds condition. */
@@ -378,7 +376,6 @@ duration_parse(
 
 		/* Continue while the operation condition remains true. */
 		while (isdigit((unsigned char)*cursor)) {
-
 			digit_local1 = (unsigned)(*cursor++ - '0');
 
 			/* Handles the scale condition. */
@@ -430,7 +427,7 @@ duration_parse(
 
 	/* Handles the nanoseconds condition. */
 	if (nanoseconds != 0) {
-				multiplied = nanoseconds * multiplier;
+		multiplied = nanoseconds * multiplier;
 
 		seconds += multiplied / 1000000000U;
 		nanoseconds = multiplied % 1000000000U;

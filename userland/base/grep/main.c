@@ -36,6 +36,7 @@ main(
 	long n, ln, hits;
 	int inv, num, count, list, quiet, fixed, i, status, multi;
 	const char *pat;
+	const char *name;
 
 	/* Process each remaining command-line operand. */
 	inv = 0;
@@ -47,7 +48,7 @@ main(
 	i = 1;
 	status = 1;
 	for (; i < argc && argv[i][0] == '-'; i++) {
-				p = argv[i] + 1;
+		p = argv[i] + 1;
 
 		/* Handles the selected command-line operation. */
 		if (!strcmp(argv[i], "--")) {
@@ -96,7 +97,7 @@ main(
 				cap = 0;
 				ln = 0;
 		hits = 0;
-		const char *name = i == argc ? "(standard input)" : argv[i];
+		name = i == argc ? "(standard input)" : argv[i];
 
 		/* Checks the current file state. */
 		if (!f) {
@@ -106,7 +107,6 @@ main(
 			continue;
 		}
 		while ((n = command_read_line(f, &l, &cap)) > 0) {
-
 			ln++;
 
 			/* Checks the current item count. */

@@ -89,7 +89,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (index = 2; index < argc; index++) {
-				stream = !strcmp(argv[index], "-") ? stdin : fopen(argv[index], "r");
+		stream = !strcmp(argv[index], "-") ? stdin : fopen(argv[index], "r");
 
 		/* Handles the stream availability. */
 		if (stream == NULL) {
@@ -197,7 +197,6 @@ catalog_load(
 
 	/* Process each remaining element. */
 	for (index = 0; index < count; index++) {
-
 		entry = data + entries + index * ZEDBSD_CATALOG_ENTRY_SIZE;
 		set = zedbsd_catalog_get32(entry);
 		number = zedbsd_catalog_get32(entry + 4U);
@@ -241,7 +240,6 @@ read_all(
 
 	/* Process each remaining element. */
 	while (done < size) {
-
 		count = read(descriptor, data + done, size - done);
 
 		/* Handles the reported system error. */
@@ -289,7 +287,7 @@ catalog_set(
 
 	/* Handles the catalog condition. */
 	if (catalog->count == catalog->capacity) {
-				capacity = catalog->capacity == 0 ? 16U : catalog->capacity * 2U;
+		capacity = catalog->capacity == 0 ? 16U : catalog->capacity * 2U;
 
 		/* Handles the capacity condition. */
 		if (capacity < catalog->capacity ||
@@ -332,14 +330,14 @@ catalog_find(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < catalog->count; index++)
-
+	for (index = 0; index < catalog->count; index++) {
 		/* Handles the catalog condition. */
 		if (catalog->items[index].set == set &&
 		    catalog->items[index].number == number)
 
 			/* Returns the computed result. */
 			return &catalog->items[index];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -372,7 +370,6 @@ parse_file(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		source_line = line_number;
 		line = logical_line(stream, &line_number);
 
@@ -398,7 +395,6 @@ parse_file(
 			/* Handles a failed isspace operation. */
 			if (!strncmp(cursor, "set", 3) &&
 			    isspace((unsigned char)cursor[3])) {
-
 				cursor += 3;
 
 				/* Continue while the operation condition remains true. */
@@ -413,7 +409,6 @@ parse_file(
 				current_set = number;
 			} else if (!strncmp(cursor, "delset", 6) &&
 				   isspace((unsigned char)cursor[6])) {
-
 				cursor += 6;
 
 				/* Continue while the operation condition remains true. */
@@ -530,7 +525,7 @@ logical_line(
 
 		/* Checks the current capacity usage. */
 		if (used + 2U > capacity) {
-						wanted = capacity == 0 ? 128U : capacity * 2U;
+			wanted = capacity == 0 ? 128U : capacity * 2U;
 
 			/* Handles the wanted condition. */
 			if (wanted < capacity) {
@@ -612,8 +607,9 @@ catalog_delete_set(
 			free(catalog->items[index].text);
 			catalog->items[index] =
 			    catalog->items[--catalog->count];
-		} else
+		} else {
 			index++;
+		}
 	}
 }
 
@@ -660,7 +656,6 @@ message_decode(
 
 	/* Continue while the operation condition remains true. */
 	while (*text != '\0') {
-
 		value = 0;
 		digits = 0;
 
@@ -769,7 +764,7 @@ catalog_encode(
 
 	/* Process each remaining element. */
 	for (index = 0; index < catalog->count; index++) {
-				length = strlen(catalog->items[index].text) + 1U;
+		length = strlen(catalog->items[index].text) + 1U;
 
 		/* Checks the current data length. */
 		if (length > UINT32_MAX - strings) {
@@ -812,9 +807,9 @@ catalog_encode(
 
 	/* Process each remaining element. */
 	for (index = 0; index < catalog->count; index++) {
-				entry = data + ZEDBSD_CATALOG_HEADER_SIZE +
-				       index * ZEDBSD_CATALOG_ENTRY_SIZE;
-		size_t length = strlen(catalog->items[index].text);
+		entry = data + ZEDBSD_CATALOG_HEADER_SIZE +
+		       index * ZEDBSD_CATALOG_ENTRY_SIZE;
+		length = strlen(catalog->items[index].text);
 
 		zedbsd_catalog_put32(entry, catalog->items[index].set);
 		zedbsd_catalog_put32(entry + 4U, catalog->items[index].number);

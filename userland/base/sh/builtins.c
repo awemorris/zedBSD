@@ -172,11 +172,11 @@ sh_hash_lookup(
 	struct hash_entry *entry;
 
 	/* Process each linked entry. */
-	for (entry = hash_entries; entry != NULL; entry = entry->next)
-
+	for (entry = hash_entries; entry != NULL; entry = entry->next) {
 		/* Selects the matching value. */
 		if (strcmp(entry->name, name) == 0)
 			return entry->path;
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -194,8 +194,7 @@ sh_hash_store(
 	char *copy;
 
 	/* Process each linked entry. */
-	for (entry = hash_entries; entry != NULL; entry = entry->next)
-
+	for (entry = hash_entries; entry != NULL; entry = entry->next) {
 		/* Selects the matching value. */
 		if (strcmp(entry->name, name) == 0) {
 			copy = strdup(path);
@@ -209,6 +208,7 @@ sh_hash_store(
 			/* Reports successful completion. */
 			return 0;
 		}
+	}
 	entry = calloc(1, sizeof(*entry));
 
 	/* Handles the entry availability. */
@@ -464,7 +464,7 @@ builtin_printf(
 				cursor++;
 				continue;
 			}
-							value_local1 = argument < argc ? argv[argument++] : "";
+			value_local1 = argument < argc ? argv[argument++] : "";
 
 			/* Dispatch the selected operation case. */
 			switch (*cursor++) {
@@ -485,12 +485,14 @@ builtin_printf(
 						&stop);
 
 					/* Handles the stop condition. */
-					if (!stop)
+					if (!stop) {
 						putchar(
 						    byte);
-				} else
+					}
+				} else {
 					putchar((
 					    unsigned char)*bytes++);
+				}
 			}
 			break;
 			case 'c':
@@ -917,8 +919,7 @@ builtin_cat(
 
 	/* Process each remaining command-line operand. */
 	for (argument = 1; argument < argc; argument++) {
-
-				descriptor = open(argv[argument], O_RDONLY);
+		descriptor = open(argv[argument], O_RDONLY);
 
 		/* Checks the file descriptor. */
 		if (descriptor < 0) {
@@ -977,7 +978,6 @@ write_all(
 	/* Process each remaining element. */
 	bytes = buffer;
 	while (length != 0) {
-
 		count = write(descriptor, bytes, length);
 
 		/* Checks the remaining item count. */
@@ -1069,16 +1069,15 @@ builtin_ls(
 
 	/* Handles a failed S ISDIR operation. */
 	if (!S_ISDIR(status.st_mode)) {
-
 		memset(&single, 0, sizeof(single));
 		strncpy(single.name, path, sizeof(single.name) - 1U);
 		single.status = status;
 		single.status_valid = 1;
 
 		/* Checks the selected options. */
-		if (options.long_format)
+		if (options.long_format) {
 			print_long_entries("", &single, 1, &options, 0);
-		else {
+		} else {
 			print_entry_name(&single);
 			putchar('\n');
 		}
@@ -1127,13 +1126,14 @@ print_long_entries(
 	/* Handles the show total condition. */
 	if (show_total) {
 		/* Process each remaining element. */
-		for (index = 0; index < count; index++)
-
+		for (index = 0; index < count; index++) {
 			/* Handles the entries condition. */
 			if (entries[index].status_valid &&
-			    entries[index].status.st_blocks > 0)
+			    entries[index].status.st_blocks > 0) {
 				blocks += (unsigned long long)entries[index]
 					      .status.st_blocks;
+			}
+		}
 
 		/* Checks the selected options. */
 		if (options->human)
@@ -1239,8 +1239,8 @@ human_size(
 
 	/* Handles the magnitude condition. */
 	if (magnitude / scale < 10ULL) {
-				whole = magnitude / scale;
-				tenth = ((magnitude % scale) * 10ULL + scale / 2ULL) / scale;
+		whole = magnitude / scale;
+		tenth = ((magnitude % scale) * 10ULL + scale / 2ULL) / scale;
 
 		/* Handles the tenth condition. */
 		if (tenth == 10ULL) {
@@ -1348,8 +1348,7 @@ print_long_entry(
 	/* Handles a failed S ISLNK operation. */
 	if (S_ISLNK(entry->status.st_mode) &&
 	    join_path(directory, entry->name, path, sizeof(path))) {
-
-				length = readlink(path, target, sizeof(target) - 1U);
+		length = readlink(path, target, sizeof(target) - 1U);
 
 		/* Checks the current data length. */
 		if (length >= 0) {
@@ -1374,9 +1373,10 @@ mode_text(
 
 	/* Process each remaining element. */
 	result[0] = type_character(mode);
-	for (index = 0; index < 9; index++)
+	for (index = 0; index < 9; index++) {
 		result[index + 1U] =
 		    mode & bits[index] ? letters[index % 3U] : '-';
+	}
 	result[10] = '\0';
 }
 
@@ -1456,12 +1456,13 @@ long_time_text(
 	}
 
 	/* Handles the now condition. */
-	if (now != (time_t)-1 && (value < now - 15552000 || value > now + 3600))
+	if (now != (time_t)-1 && (value < now - 15552000 || value > now + 3600)) {
 		snprintf(result, 32, "%s %2d  %4lld", month_names[month],
 			 (int)days + 1, year);
-	else
+	} else {
 		snprintf(result, 32, "%s %2d %02lld:%02lld", month_names[month],
 			 (int)days + 1, seconds / 3600, (seconds / 60) % 60);
+	}
 }
 
 /* Supports the leap year operation. */
@@ -1564,8 +1565,7 @@ load_directory(
 	if (options->all) {
 		/* Process each element required by the operation. */
 		for (dot = 0; dot < 2U; dot++) {
-
-						item_local = &entries[count++];
+			item_local = &entries[count++];
 			strcpy(item_local->name, dot_names[dot]);
 			item_local->type = DT_DIR;
 			item_local->status_valid =
@@ -1649,8 +1649,8 @@ sort_entries(
 	/* Process each remaining element. */
 	for (index = 1; index < count; index++) {
 		/* Continue while the operation condition remains true. */
-				current = entries[index];
-				position = index;
+		current = entries[index];
+		position = index;
 		while (position != 0 &&
 		       strcmp(entries[position - 1U].name, current.name) > 0) {
 			entries[position] = entries[position - 1U];
@@ -1686,7 +1686,7 @@ print_column_entries(
 	/* Process each remaining element. */
 		size.columns = 80;
 	for (row = 0; row < count; row++) {
-				length_local = entry_display_length(&entries[row]);
+		length_local = entry_display_length(&entries[row]);
 
 		/* Handles the length local condition. */
 		if (length_local > maximum)
@@ -1708,7 +1708,6 @@ print_column_entries(
 	for (row = 0; row < rows; row++) {
 		/* Process each element required by the operation. */
 		for (column = 0; column < columns; column++) {
-
 			index = row + column * rows;
 			next = index + rows;
 
@@ -1990,7 +1989,7 @@ builtin_touch(
 
 	/* Process each remaining command-line operand. */
 	for (argument = 1; argument < argc; argument++) {
-				descriptor = open(argv[argument], O_WRONLY | O_CREAT, 0666);
+		descriptor = open(argv[argument], O_WRONLY | O_CREAT, 0666);
 
 		/* Handles a failed close operation. */
 		if (descriptor < 0 || close(descriptor) != 0) {
@@ -2038,7 +2037,7 @@ builtin_ulimit(
 	/* Process each remaining command-line operand. */
 	while (index < argc && argv[index][0] == '-' &&
 	       argv[index][1] != '\0') {
-				option = argv[index] + 1;
+		option = argv[index] + 1;
 
 		/* Handles the selected command-line operation. */
 		if (strcmp(argv[index], "--") == 0) {
@@ -2053,9 +2052,9 @@ builtin_ulimit(
 				soft = 1;
 			else if (*option == 'a')
 				all = 1;
-			else if ((selected = ulimit_kind_find(*option)) != NULL)
+			else if ((selected = ulimit_kind_find(*option)) != NULL) {
 				kind = selected;
-			else {
+			} else {
 				fprintf(stderr,
 					"ulimit: invalid option -- %c\n",
 					*option);
@@ -2171,11 +2170,11 @@ ulimit_kind_find(
 
 	/* Process each remaining element. */
 	for (index = 0; index < sizeof(ulimit_kinds) / sizeof(ulimit_kinds[0]);
-	     index++)
-
+	     index++) {
 		/* Handles the ulimit kinds condition. */
 		if (ulimit_kinds[index].option == option)
 			return &ulimit_kinds[index];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;

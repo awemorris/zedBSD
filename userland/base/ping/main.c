@@ -84,8 +84,7 @@ main(
 
 		/* Handles the selected command-line operation. */
 		if (strcmp(argv[arg], "-c") == 0) {
-
-						v = strtoul(argv[arg + 1], &end, 10);
+			v = strtoul(argv[arg + 1], &end, 10);
 
 			/* Checks the current endpoint. */
 			if (*end != '\0' || v == 0 || v > 65535U) {
@@ -202,7 +201,6 @@ main(
 		if (length == (ssize_t)sizeof(echo)) {
 			/* Continue while the operation condition remains true. */
 			while (netutil_monotonic_us() < deadline) {
-
 				source_length = sizeof(source);
 				length = recvfrom(
 				    descriptor, packet, sizeof(packet), 0,
@@ -268,7 +266,7 @@ main(
 		   : (transmitted - received) * 100U / transmitted);
 
 	/* Handles the received condition. */
-	if (received != 0)
+	if (received != 0) {
 		printf("round-trip min/avg/max = "
 		       "%llu.%03llu/%llu.%03llu/%llu.%03llu ms\n",
 		       (unsigned long long)(minimum / 1000U),
@@ -277,6 +275,7 @@ main(
 		       (unsigned long long)(total / received % 1000U),
 		       (unsigned long long)(maximum / 1000U),
 		       (unsigned long long)(maximum % 1000U));
+	}
 
 	/* Returns the computed result. */
 	return received == 0;

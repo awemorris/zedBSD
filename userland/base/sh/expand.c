@@ -213,6 +213,7 @@ expand_raw(
 	unsigned char quote;
 	char value;
 	size_t index;
+	int output_quoted;
 
 	index = 0;
 	memset(buffer, 0, sizeof(*buffer));
@@ -221,9 +222,9 @@ expand_raw(
 	buffer->preserve_empty = token->length == 0;
 	*error_text = NULL;
 	while (index < token->length) {
-				quote = token->quote[index];
-				value = token->text[index];
-		int output_quoted = quote != SH_QUOTE_UNQUOTED;
+		quote = token->quote[index];
+		value = token->text[index];
+		output_quoted = quote != SH_QUOTE_UNQUOTED;
 
 		/* Validates the current value. */
 		if (value == '~' && quote == SH_QUOTE_UNQUOTED &&
@@ -232,10 +233,10 @@ expand_raw(
 		      token->quote[index - 1U] == SH_QUOTE_UNQUOTED)) &&
 		    (index + 1U == token->length ||
 		     token->text[index + 1U] == '/')) {
-						home = context->lookup == NULL
-				? getenv("HOME")
-				: context->lookup(context->lookup_context,
-						  "HOME");
+			home = context->lookup == NULL
+		? getenv("HOME")
+		: context->lookup(context->lookup_context,
+			  "HOME");
 
 			/* Handles a failed append bytes operation. */
 			if (home != NULL &&
@@ -270,9 +271,9 @@ expand_raw(
 			/* Checks the current index. */
 			if (index + 2U < token->length &&
 			    token->text[index + 2U] == '(') {
-								scan_local = index + 3U;
-								start_local = scan_local;
-								depth_local = 1;
+				scan_local = index + 3U;
+				start_local = scan_local;
+				depth_local = 1;
 
 				/* Process each remaining element. */
 				while (scan_local < token->length && depth_local != 0) {
@@ -334,7 +335,7 @@ expand_raw(
 			inner_quote = '\0';
 			substitution = NULL;
 			while (scan_local1 < token->length && depth_local3 != 0) {
-								current = token->text[scan_local1++];
+				current = token->text[scan_local1++];
 
 				/* Handles the current condition. */
 				if (current == '\\' && scan_local1 < token->length) {
@@ -345,10 +346,11 @@ expand_raw(
 				/* Handles the current condition. */
 				if ((current == '\'' || current == '"') &&
 				    (inner_quote == '\0' ||
-				     inner_quote == current))
+				     inner_quote == current)) {
 					inner_quote = inner_quote == '\0'
 							  ? current
 							  : '\0';
+				}
 
 				/* Handles the inner quote condition. */
 				if (inner_quote == '\0') {
@@ -409,11 +411,11 @@ expand_raw(
 		/* Validates the current value. */
 		if (value == '?' || value == '$' || value == '!' ||
 		    value == '#') {
-						number = value == '?'   ? context->status
-				      : value == '$' ? context->shell_pid
-				      : value == '!'
-					  ? context->last_job
-					  : context->positional_count;
+			number = value == '?'   ? context->status
+		      : value == '$' ? context->shell_pid
+		      : value == '!'
+		  ? context->last_job
+		  : context->positional_count;
 
 			/* Handles a failed append number operation. */
 			if (!append_number(buffer, number, output_quoted))
@@ -433,10 +435,10 @@ expand_raw(
 
 		/* Validates the current value. */
 		if (value >= '0' && value <= '9') {
-						argument = value == '0' ? context->shell_name
-			    : value - '1' < context->positional_count
-				? context->positional[value - '1']
-				: NULL;
+			argument = value == '0' ? context->shell_name
+		    : value - '1' < context->positional_count
+		? context->positional[value - '1']
+		: NULL;
 
 			/* Handles a failed append bytes operation. */
 			if (argument != NULL &&
@@ -449,14 +451,13 @@ expand_raw(
 
 		/* Validates the current value. */
 		if (value == '{') {
-						start_local6 = index + 2U;
-						name_end = start_local6;
-			size_t end;
-						colon = 0;
-						operation = '\0';
-						name = NULL;
+			start_local6 = index + 2U;
+			name_end = start_local6;
+			colon = 0;
+			operation = '\0';
+			name = NULL;
 
-						use_word = 0;
+			use_word = 0;
 
 			/* Process each remaining element. */
 			while (name_end < token->length &&
@@ -637,8 +638,8 @@ expand_raw(
 		/* Handles the name start condition. */
 		if (name_start(value)) {
 			/* Process each remaining element. */
-						start_local7 = index + 1U;
-						end = start_local7 + 1U;
+			start_local7 = index + 1U;
+			end = start_local7 + 1U;
 			while (end < token->length &&
 			       name_character(token->text[end]))
 				end++;

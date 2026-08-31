@@ -60,7 +60,7 @@ main(
 
 	/* Validates the command-line arguments. */
 	if (argc == 2 && !short_name) {
-				length = strlen(argv[1]);
+		length = strlen(argv[1]);
 
 		/* Validates the command-line arguments. */
 		if (sethostname(argv[1], length) == 0)

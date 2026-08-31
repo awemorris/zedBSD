@@ -65,7 +65,6 @@ zsv1_server_receive_fd(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		buffer = used < sizeof(wire) ? wire + used : &extra;
 		capacity = used < sizeof(wire) ? sizeof(wire) - used : 1U;
 
@@ -323,7 +322,6 @@ wait_readable(
 	poll_descriptor.fd = descriptor;
 	poll_descriptor.events = POLLIN;
 	for (;;) {
-
 		timeout = remaining_milliseconds(deadline);
 
 		/* Handles the timeout condition. */
@@ -437,7 +435,6 @@ send_all(
 
 	/* Process each remaining element. */
 	while (sent < length) {
-
 		count = send(descriptor, bytes + sent, length - sent, MSG_NOSIGNAL);
 
 		/* Handles the reported system error. */
@@ -471,6 +468,7 @@ dependency_list_validate(
 	char tokens[ZSV1_DEPENDENCY_MAX][ZSV1_NAME_CAPACITY];
 	const char *cursor;
 	size_t count;
+	size_t length;
 
 	count = 0;
 
@@ -492,9 +490,9 @@ dependency_list_validate(
 	/* Continue until the operation reaches a terminal state. */
 	cursor = list;
 	for (;;) {
-				comma = strchr(cursor, ',');
-		size_t length =
-		    comma != NULL ? (size_t)(comma - cursor) : strlen(cursor);
+		comma = strchr(cursor, ',');
+		length = comma != NULL ? (size_t)(comma - cursor)
+				       : strlen(cursor);
 
 		/* Checks the current data length. */
 		if (length == 0 || length >= ZSV1_NAME_CAPACITY) {

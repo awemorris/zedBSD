@@ -253,7 +253,6 @@ wait_ready(
 	poll_descriptor.fd = descriptor;
 	poll_descriptor.events = events;
 	for (;;) {
-
 		timeout = remaining_milliseconds(deadline);
 
 		/* Handles the timeout condition. */

@@ -76,7 +76,6 @@ dhcp_build(
 
 	/* Handles the type condition. */
 	if (type == DHCP_REQUEST) {
-
 		memcpy(value, &requested, 4U);
 
 		/* Handles a failed option operation. */
@@ -132,7 +131,7 @@ dhcp_parse(
 
 	/* Process each remaining element. */
 	while (offset < length) {
-				code = packet[offset++];
+		code = packet[offset++];
 
 		/* Handles the code condition. */
 		if (code == 0)
@@ -161,16 +160,18 @@ dhcp_parse(
 		case 3:
 			/* Process each remaining element. */
 			for (i = 0; i + 4U <= size && lease->router_count < 4U;
-			     i += 4U)
+			     i += 4U) {
 				memcpy(&lease->routers[lease->router_count++],
 				       packet + offset + i, 4U);
+			}
 			break;
 		case 6:
 			/* Process each remaining element. */
 			for (i = 0; i + 4U <= size && lease->dns_count < 3U;
-			     i += 4U)
+			     i += 4U) {
 				memcpy(&lease->dns_servers[lease->dns_count++],
 				       packet + offset + i, 4U);
+			}
 			break;
 		case 28:
 			/* Checks the current data size. */
@@ -189,9 +190,10 @@ dhcp_parse(
 			break;
 		case 54:
 			/* Checks the current data size. */
-			if (size == 4)
+			if (size == 4) {
 				memcpy(&lease->server_identifier,
 				       packet + offset, 4U);
+			}
 			break;
 		case 58:
 			/* Checks the current data size. */

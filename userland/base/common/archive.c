@@ -75,7 +75,6 @@ archive_read_memory(
 		return -1;
 	}
 	while (offset < size) {
-
 		name_length = 0;
 
 		memset(&member, 0, sizeof(member));
@@ -112,7 +111,7 @@ archive_read_memory(
 			member.name = strdup("//");
 		} else if (!memcmp(field, "#1/", 3)) {
 			/* Continue while the operation condition remains true. */
-						n_local = strtoul(field + 3, &end_local, 10);
+			n_local = strtoul(field + 3, &end_local, 10);
 			while (*end_local == ' ')
 				end_local++;
 
@@ -126,7 +125,7 @@ archive_read_memory(
 		} else if (field[0] == '/' && field[1] >= '0' &&
 			   field[1] <= '9') {
 			/* Continue while the operation condition remains true. */
-						n_local2 = strtoul(field + 1, &end_local1, 10);
+			n_local2 = strtoul(field + 1, &end_local1, 10);
 			while (*end_local1 == ' ')
 				end_local1++;
 
@@ -266,7 +265,6 @@ archive_read(
 		return -1;
 	}
 	while (done < (size_t)st.st_size) {
-
 		n = read(fd, data + done, (size_t)st.st_size - done);
 
 		/* Handles the reported system error. */
@@ -335,11 +333,11 @@ archive_write_atomic(
 		goto fail;
 
 	/* Process each remaining element. */
-	for (i_index_for = 0; i_index_for < archive->count; i_index_for++)
-
+	for (i_index_for = 0; i_index_for < archive->count; i_index_for++) {
 		/* Handles a failed write member operation. */
 		if (write_member(fd, &archive->members[i_index_for]))
 			goto fail;
+	}
 
 	/* Handles the fsync condition. */
 	if (fsync(fd) || close(fd)) {
@@ -439,11 +437,11 @@ parse_number(
 			return -1;
 		result = result * base + digit;
 	}
-	while (i < width)
-
+	while (i < width) {
 		/* Handles the field condition. */
 		if (field[i++] != ' ')
 			return -1;
+	}
 	*value = result;
 	/* Reports successful completion. */
 	return 0;
@@ -539,7 +537,6 @@ write_all(
 	/* Process each remaining element. */
 	p = buffer;
 	while (size) {
-
 		n = write(fd, p, size);
 
 		/* Checks the current item count. */
@@ -641,12 +638,13 @@ put_field(
 	int length;
 
 	/* Handles the base condition. */
-	if (base == 8)
+	if (base == 8) {
 		length = snprintf(number, sizeof(number), "%llo",
 				  (unsigned long long)value);
-	else
+	} else {
 		length = snprintf(number, sizeof(number), "%llu",
 				  (unsigned long long)value);
+	}
 
 	/* Checks the current data length. */
 	if (length < 0 || (size_t)length > width)

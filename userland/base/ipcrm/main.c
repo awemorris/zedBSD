@@ -47,8 +47,7 @@ main(
 
 	/* Parse each command-line option. */
 	while ((option = getopt(argc, argv, "q:m:s:Q:M:S:")) != -1) {
-
-				by_key = option == 'Q' || option == 'M' || option == 'S';
+		by_key = option == 'Q' || option == 'M' || option == 'S';
 
 		/* Dispatch the selected command-line option. */
 		switch (option) {

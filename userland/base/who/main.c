@@ -32,15 +32,14 @@ main(
 	setutxent();
 
 	/* Continue while the operation condition remains true. */
-	while ((entry = getutxent()) != NULL)
-
+	while ((entry = getutxent()) != NULL) {
 		/* Handles the entry condition. */
 		if (entry->ut_type == USER_PROCESS) {
-
 			utc_fields(entry->ut_tv_sec, &y, &m, &d, &h, &n);
 			printf("%-16s %-16s %04d-%02d-%02d %02d:%02d\n",
 			       entry->ut_user, entry->ut_line, y, m, d, h, n);
 		}
+	}
 	endutxent();
 
 	/* Reports successful completion. */

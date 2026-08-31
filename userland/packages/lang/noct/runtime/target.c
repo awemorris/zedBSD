@@ -177,9 +177,10 @@ term_open(
 	term->open = 1;
 
 	/* Handles the screen show cursor availability. */
-	if (term->services->screen_show_cursor != NULL)
+	if (term->services->screen_show_cursor != NULL) {
 		(void)term->services->screen_show_cursor(
 		    term->services->context, 1);
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -196,9 +197,10 @@ term_close(
 
 	/* Handles the services availability. */
 	if (term->services != NULL &&
-	    term->services->screen_show_cursor != NULL)
+	    term->services->screen_show_cursor != NULL) {
 		(void)term->services->screen_show_cursor(
 		    term->services->context, 1);
+	}
 	term->open = 0;
 }
 
@@ -300,7 +302,6 @@ term_write(
 
 	/* Process each remaining element. */
 	while (position < length) {
-
 		start = position;
 
 		/* Process each remaining element. */
@@ -420,9 +421,10 @@ term_set_style(
 		return 0;
 
 	/* Handles the style condition. */
-	if (style->foreground >= 0)
+	if (style->foreground >= 0) {
 		attribute =
 		    (uint8_t)(1U | ((unsigned)style->foreground & 7U) << 5);
+	}
 
 	/* Handles the style condition. */
 	if (style->reverse)
@@ -468,9 +470,10 @@ term_flush(
 	term = context;
 
 	/* Handles the services availability. */
-	if (term->services != NULL && term->services->screen_set_cursor != NULL)
+	if (term->services != NULL && term->services->screen_set_cursor != NULL) {
 		(void)term->services->screen_set_cursor(
 		    term->services->context, term->row, term->column);
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -651,14 +654,14 @@ term_read_key(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-
 		key = -1;
 
 		/* Handles a failed keyboard poll operation. */
 		if (term->services->keyboard_poll != NULL &&
-		    term->services->keyboard_poll(term->services->context) >= 0)
+		    term->services->keyboard_poll(term->services->context) >= 0) {
 			key = term->services->keyboard_read(
 			    term->services->context);
+		}
 
 		/*
  * The PC-98 BIOS offers a blocking read and a poll, but no
@@ -667,9 +670,10 @@ term_read_key(
 		 * grace read into a blocking BIOS call leaves every typed
 		 * character waiting for the next one. Preserve blocking
 		 * behavior only for the normal one-second event-loop wait. */
-		else if (allow_blocking)
+		else if (allow_blocking) {
 			key = term->services->keyboard_read(
 			    term->services->context);
+		}
 
 		/* Handles the selected key. */
 		if (key < 0)

@@ -64,8 +64,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (i = 1; i < argc - 1; i++) {
-
-				destination = argv[argc - 1];
+		destination = argv[argc - 1];
 
 		/* Handles the destination is dir condition. */
 		if (destination_is_dir) {

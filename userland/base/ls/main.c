@@ -78,7 +78,7 @@ main(
 	failed = 0;
 	for (; index < argc && argv[index][0] == '-' && argv[index][1];
 	     index++) {
-				p = argv[index] + 1;
+		p = argv[index] + 1;
 
 		/* Handles the selected command-line operation. */
 		if (!strcmp(argv[index], "--")) {
@@ -87,8 +87,7 @@ main(
 		}
 
 		/* Process each element required by the operation. */
-		for (; *p; p++)
-
+		for (; *p; p++) {
 			/* Dispatch the selected operation case. */
 			switch (*p) {
 			case 'a':
@@ -131,6 +130,7 @@ main(
 				/* Reports operation failure. */
 				return 1;
 			}
+		}
 	}
 	operands = argc - index;
 
@@ -194,7 +194,6 @@ list_operand(
 
 	/* Handles the o condition. */
 	if (o->long_format) {
-
 		measure_long(&item, 1, o, &widths);
 
 		/* Obtains the print long result. */
@@ -314,9 +313,9 @@ load(
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		/* Handles the o condition. */
-		if (o->all && dot < 2U)
+		if (o->all && dot < 2U) {
 			name = dots[dot++];
-		else {
+		} else {
 			de = readdir(d);
 
 			/* Handles the de condition. */
@@ -445,8 +444,8 @@ sort_entries(
 	/* Process each remaining element. */
 	for (i = 1; i < count; i++) {
 		/* Continue while the operation condition remains true. */
-				value = items[i];
-				at = i;
+		value = items[i];
+		at = i;
 		while (at && compare(&items[at - 1U], &value, o) > 0) {
 			items[at] = items[at - 1U];
 			at--;
@@ -473,8 +472,9 @@ compare(
 			value = 1;
 		else
 			value = strcmp(a->name, b->name);
-	} else
+	} else {
 		value = strcmp(a->name, b->name);
+	}
 
 	/* Returns the computed result. */
 	return o->reverse ? -value : value;
@@ -501,18 +501,19 @@ print_entries(
 
 	/* Handles the o condition. */
 	if (o->long_format) {
-				blocks = 0;
+		blocks = 0;
 
 		measure_long(items, count, o, &widths);
 
 		/* Process each remaining element. */
-		for (i = 0; i < count; i++)
-
+		for (i = 0; i < count; i++) {
 			/* Handles the items condition. */
 			if (items[i].status_valid &&
-			    items[i].status.st_blocks > 0)
+			    items[i].status.st_blocks > 0) {
 				blocks += (unsigned long long)items[i]
 					      .status.st_blocks;
+			}
+		}
 
 		/* Handles the o condition. */
 		if (o->human)
@@ -523,11 +524,11 @@ print_entries(
 		printf("total %s\n", total);
 
 		/* Process each remaining element. */
-		for (i = 0; i < count; i++)
-
+		for (i = 0; i < count; i++) {
 			/* Handles a failed print long operation. */
 			if (!print_long(path, &items[i], o, &widths))
 				ok = 0;
+		}
 
 		/* Returns the computed result. */
 		return ok;
@@ -548,7 +549,7 @@ print_entries(
 	/* Process each remaining element. */
 	width = 1;
 	for (i = 0; i < count; i++) {
-					n_local = strlen(items[i].name) + (o->classify ? 1U : 0U);
+		n_local = strlen(items[i].name) + (o->classify ? 1U : 0U);
 
 		/* Handles the n local condition. */
 		if (n_local > width)
@@ -566,7 +567,6 @@ print_entries(
 	for (row = 0; row < rows; row++) {
 		/* Process each element required by the operation. */
 		for (column = 0; column < columns; column++) {
-
 			index_local = column * rows + row;
 
 			/* Handles the index local condition. */
@@ -581,11 +581,11 @@ print_entries(
 
 			/* Handles the column condition. */
 			if (column + 1U < columns &&
-			    index_local + rows < count)
-
+			    index_local + rows < count) {
 				/* Continue while the operation condition remains true. */
 				while (n_local1++ < width)
 					putchar(' ');
+			}
 		}
 		putchar('\n');
 	}
@@ -687,7 +687,7 @@ human_size(
 
 	/* Handles the whole condition. */
 	if (whole < 10U) {
-					tenth = (remainder * 10ULL + scale / 2ULL) / scale;
+		tenth = (remainder * 10ULL + scale / 2ULL) / scale;
 
 		/* Handles the tenth condition. */
 		if (tenth == 10U) {
@@ -789,8 +789,7 @@ print_long(
 	/* Handles a failed S ISLNK operation. */
 	if (S_ISLNK(item->status.st_mode) &&
 	    join_path(directory, item->name, path, sizeof(path))) {
-
-				n = readlink(path, target, sizeof(target) - 1U);
+		n = readlink(path, target, sizeof(target) - 1U);
 
 		/* Checks the current item count. */
 		if (n >= 0) {
@@ -935,7 +934,7 @@ print_name(
 
 	/* Handles the o condition. */
 	if (o->classify && item->status_valid) {
-				mark = suffix(item->status.st_mode);
+		mark = suffix(item->status.st_mode);
 
 		/* Handles the mark condition. */
 		if (mark)

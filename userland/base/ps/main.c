@@ -152,9 +152,9 @@ main(
 
 	/* Handles the field count condition. */
 	if (field_count == 0) {
-				format = long_form ? "state,uid,pid,ppid,pri,ni,vsz,tty,time,comm"
-		    : full    ? "user,pid,ppid,tty,time,comm"
-			      : "pid,tty,time,comm";
+		format = long_form ? "state,uid,pid,ppid,pri,ni,vsz,tty,time,comm"
+	    : full    ? "user,pid,ppid,tty,time,comm"
+	      : "pid,tty,time,comm";
 
 		strcpy(copy, format);
 		(void)parse_fields(copy, fields, &field_count);
@@ -176,14 +176,15 @@ main(
 	close(descriptor);
 
 	/* Process each remaining element. */
-	for (field_index = 0; field_index < field_count; field_index++)
+	for (field_index = 0; field_index < field_count; field_index++) {
 		printf("%s%s", field_index == 0 ? "" : " ",
 		       fields[field_index].header);
+	}
 	putchar('\n');
 
 	/* Process each remaining element. */
 	for (index = 0; index < process_count; index++) {
-				process = &processes[index];
+		process = &processes[index];
 
 		/* Handles a failed selected operation. */
 		if (!selected(process->pid, &pids) ||
@@ -295,8 +296,7 @@ field_definition(
 
 	/* Process each remaining element. */
 	for (index = 0; index < sizeof(definitions) / sizeof(definitions[0]);
-	     index++)
-
+	     index++) {
 		/* Selects the matching value. */
 		if (!strcmp(name, definitions[index].name)) {
 			field->kind = definitions[index].kind;
@@ -305,6 +305,7 @@ field_definition(
 			/* Reports successful completion. */
 			return 0;
 		}
+	}
 
 	/* Reports operation failure. */
 	return -1;
@@ -379,7 +380,7 @@ snapshot(
 	cursor = -1;
 	*count = 0;
 	while (*count < PS_MAX_PROCESSES) {
-				process = &processes[*count];
+		process = &processes[*count];
 		memset(process, 0, sizeof(*process));
 		process->pid = cursor;
 
@@ -424,11 +425,11 @@ selected(
 		return 1;
 
 	/* Process each remaining element. */
-	for (index = 0; index < selection->count; index++)
-
+	for (index = 0; index < selection->count; index++) {
 		/* Handles the selection condition. */
 		if (selection->values[index] == value)
 			return 1;
+	}
 
 	/* Reports successful completion. */
 	return 0;

@@ -63,8 +63,8 @@ main(
 
 	/* Handles the script condition. */
 	if (script[0] == 's' && script[1]) {
-				sep = script[1];
-				a = script + 2;
+		sep = script[1];
+		a = script + 2;
 		b = strchr(a, sep);
 
 		/* Handles a failed strchr operation. */
@@ -84,9 +84,9 @@ main(
 		print = strchr(e + 1, 'p') != NULL;
 	} else if (!strcmp(script, "p"))
 		print = 1;
-	else if (!strcmp(script, "d"))
+	else if (!strcmp(script, "d")) {
 		del = 1;
-	else {
+	} else {
 		fprintf(stderr, "sed: unsupported script\n");
 
 		/* Reports operation failure. */
@@ -107,7 +107,6 @@ main(
 			return 1;
 		}
 		while ((n = command_read_line(f, &l, &cap)) > 0) {
-
 			changed = 0;
 
 			/* Handles the script condition. */
@@ -172,12 +171,11 @@ subst(
 
 	/* Continue while the operation condition remains true. */
 	while (p) {
-
 		tail = strlen(p + ol);
 
 		/* Handles the rl condition. */
 		if (rl > ol) {
-						end = line + strlen(line);
+			end = line + strlen(line);
 
 			/* Checks the current endpoint. */
 			if ((size_t)(end - line) + rl - ol >= 4095)

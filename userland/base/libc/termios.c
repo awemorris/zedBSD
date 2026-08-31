@@ -100,9 +100,9 @@ tcsetattr(
 		request = TCSETS;
 	else if (action == TCSADRAIN)
 		request = TCSETSW;
-	else if (action == TCSAFLUSH)
+	else if (action == TCSAFLUSH) {
 		request = TCSETSF;
-	else {
+	} else {
 		errno = EINVAL;
 
 		/* Reports operation failure. */

@@ -87,9 +87,10 @@ main(
 		/* Validates the command-line arguments. */
 		if (compile_stream(stream, argv[optind], directory) != 0) {
 			/* Handles the reported system error. */
-			if (errno != EINVAL && errno != ENOTSUP)
+			if (errno != EINVAL && errno != ENOTSUP) {
 				fprintf(stderr, "tic: %s: %s\n", argv[optind],
 					strerror(errno));
+			}
 			status = 1;
 		}
 
@@ -132,7 +133,6 @@ compile_stream(
 	/* Process input until it is exhausted. */
 	entry[0] = '\0';
 	while (fgets(line_buffer, sizeof(line_buffer), stream) != NULL) {
-
 		line++;
 
 		/* Handles a failed strchr operation. */
@@ -339,13 +339,13 @@ name_valid(
 		return 0;
 
 	/* Process each element required by the operation. */
-	for (; *name != '\0'; name++)
-
+	for (; *name != '\0'; name++) {
 		/* Handles a failed isalnum operation. */
 		if (!isalnum((unsigned char)*name) && *name != '-' &&
 		    *name != '_' && *name != '.' && *name != '+')
 			/* Reports successful completion. */
 			return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -402,7 +402,6 @@ write_entry_file(
 
 	/* Continue while the operation condition remains true. */
 	while (*cursor != '\0') {
-
 		field = trim(next_field(&cursor));
 
 		/* Handles the field condition. */

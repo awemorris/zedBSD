@@ -113,7 +113,7 @@ bc_number_from_decimal(
 		/* Process each remaining element. */
 		carry = (unsigned)(text[offset] - '0');
 		for (index = 0; index < result.length; index++) {
-						value = (uint64_t)result.digit[index] * 10U + carry;
+			value = (uint64_t)result.digit[index] * 10U + carry;
 			result.digit[index] = (uint32_t)(value % BC_BASE);
 			carry = value / BC_BASE;
 		}
@@ -316,13 +316,12 @@ bc_number_multiply(
 	/* Process each remaining element. */
 	result.length = left->length + right->length;
 	for (i = 0; i < left->length; i++) {
-
 		carry = 0;
 
 		/* Process each remaining element. */
 		for (j = 0; j < right->length; j++) {
-						value = result.digit[i + j] + carry +
-			    (uint64_t)left->digit[i] * right->digit[j];
+			value = result.digit[i + j] + carry +
+		    (uint64_t)left->digit[i] * right->digit[j];
 
 			result.digit[i + j] = (uint32_t)(value % BC_BASE);
 			carry = value / BC_BASE;
@@ -626,7 +625,6 @@ number_add_absolute(
 
 	/* Process each remaining element. */
 	for (index = 0; index < length; index++) {
-
 		value = carry;
 
 		/* Checks the current index. */
@@ -667,9 +665,10 @@ number_compare_absolute(
 		index--;
 
 		/* Handles the left condition. */
-		if (left->digit[index] != right->digit[index])
+		if (left->digit[index] != right->digit[index]) {
 			return left->digit[index] < right->digit[index] ? -1
 									: 1;
+		}
 	}
 
 	/* Reports successful completion. */
@@ -692,8 +691,8 @@ number_subtract_absolute(
 
 	/* Process each remaining element. */
 	for (index = 0; index < left->length; index++) {
-				value = left->digit[index];
-				subtract = borrow;
+		value = left->digit[index];
+		subtract = borrow;
 
 		/* Checks the current index. */
 		if (index < right->length)
@@ -758,7 +757,6 @@ number_divide_absolute(
 	q.length = dividend->length;
 	index = dividend->length;
 	while (index != 0) {
-
 		low = 0;
 		high = BC_BASE - 1;
 		selected = 0;
@@ -771,7 +769,6 @@ number_divide_absolute(
 
 		/* Continue while the operation condition remains true. */
 		while (low <= high) {
-
 			middle = low + (high - low) / 2;
 
 			bc_number_init(&product_local);
@@ -804,7 +801,6 @@ number_divide_absolute(
 
 		/* Handles the selected condition. */
 		if (selected != 0) {
-
 			bc_number_init(&product_local1);
 
 			/* Handles a failed number multiply small operation. */
@@ -887,7 +883,7 @@ number_multiply_small(
 
 	/* Process each remaining element. */
 	for (index = 0; index < source->length; index++) {
-				value = (uint64_t)source->digit[index] * factor + carry;
+		value = (uint64_t)source->digit[index] * factor + carry;
 
 		result.digit[index] = (uint32_t)(value % BC_BASE);
 		carry = value / BC_BASE;

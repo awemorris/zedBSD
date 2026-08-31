@@ -31,6 +31,8 @@ CONTROL = load_module(
 ANSI = load_module("userland_c_ansi_body", "refactor-userland-ansi-c.py")
 SEMANTIC = load_module(
     "userland_c_semantic_body", "refactor-userland-semantic-layout.py")
+CONTROL_BLOCKS = load_module(
+    "userland_c_control_blocks_body", "refactor-userland-control-blocks.py")
 
 
 def nested_declaration_diagnostics(text, type_names):
@@ -152,6 +154,21 @@ def semantic_layout_diagnostics(text):
     return [(1, "semantic-layout transformer would change: " + details)]
 
 
+def control_block_diagnostics(text):
+    """Find source that the deterministic control-block pass would change."""
+    migrated, counts = CONTROL_BLOCKS.refactor(text)
+    if migrated == text:
+        return []
+    labels = (
+        "if branches", "loop bodies", "overindented control statements",
+        "block-entry blank lines")
+    details = ", ".join(
+        f"{count} {label}" for count, label in zip(counts, labels) if count)
+    if not details:
+        details = "control-block layout"
+    return [(1, "control-block transformer would change: " + details)]
+
+
 def audit_source(path, type_names):
     """Return body-style diagnostics for one implementation."""
     text = path.read_text(encoding="utf-8", errors="surrogateescape")
@@ -161,6 +178,7 @@ def audit_source(path, type_names):
     diagnostics.extend(scope_only_block_diagnostics(text))
     diagnostics.extend(for_declaration_diagnostics(text, type_names))
     diagnostics.extend(malformed_multiline_comments(text))
+    diagnostics.extend(control_block_diagnostics(text))
     diagnostics.extend(semantic_layout_diagnostics(text))
     return sorted(diagnostics)
 

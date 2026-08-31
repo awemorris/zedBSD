@@ -50,9 +50,9 @@ main(
 	/* Validates the command-line arguments. */
 	if (index < argc && argv[index][0] == '-' && argv[index][1] != '\0') {
 		/* Validates the command-line arguments. */
-		if (argv[index][1] == '-' && argv[index][2] == '\0')
+		if (argv[index][1] == '-' && argv[index][2] == '\0') {
 			index++;
-		else {
+		} else {
 			fprintf(stderr, "usage: cal [[month] year]\n");
 
 			/* Reports operation failure. */
@@ -62,8 +62,8 @@ main(
 
 	/* Validates the command-line arguments. */
 	if (argc - index == 0) {
-				now = time(NULL);
-				current = localtime(&now);
+		now = time(NULL);
+		current = localtime(&now);
 
 		/* Handles the current availability. */
 		if (current == NULL) {

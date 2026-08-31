@@ -438,7 +438,7 @@ sem_wait_common(
 
 		/* Handles a failed sem usync wait operation. */
 		if (sem_usync_wait(sem, absolute, clock) != 0) {
-						saved_errno = errno;
+			saved_errno = errno;
 
 			__atomic_sub_fetch(&sem->waiters, 1, __ATOMIC_RELAXED);
 

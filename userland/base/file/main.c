@@ -68,11 +68,11 @@ main(
 	}
 
 	/* Process each remaining command-line operand. */
-	for (; index < argc; index++)
-
+	for (; index < argc; index++) {
 		/* Validates the command-line arguments. */
 		if (!classify(argv[index], follow))
 			failed = 1;
+	}
 
 	/* Returns the computed result. */
 	return failed;
@@ -111,7 +111,6 @@ classify(
 
 	/* Handles the st condition. */
 	if (S_ISLNK(st.st_mode)) {
-
 		n = readlink(path, (char *)target, sizeof(target) - 1U);
 
 		/* Checks the current item count. */
@@ -196,7 +195,7 @@ classify(
 	    data[3] == 'F' &&
 	    (data[4] == ELFCLASS32 || data[4] == ELFCLASS64) &&
 	    (data[5] == ELFDATA2LSB || data[5] == ELFDATA2MSB)) {
-				little = data[5] == ELFDATA2LSB;
+		little = data[5] == ELFDATA2LSB;
 		printf("ELF %s-bit %s-endian, %s\n",
 		       data[4] == ELFCLASS32 ? "32" : "64",
 		       little ? "little" : "big",
@@ -209,7 +208,7 @@ classify(
 	/* Checks the current item count. */
 	if (n >= 2 && data[0] == '#' && data[1] == '!') {
 		/* Process each remaining element. */
-				i = 2;
+		i = 2;
 		while (i < (size_t)n && (data[i] == ' ' || data[i] == '\t'))
 			i++;
 		printf("script text executable for ");
@@ -292,14 +291,14 @@ text_data(
 	size_t i;
 
 	/* Process each element required by the operation. */
-	for (i = 0; i < n; i++)
-
+	for (i = 0; i < n; i++) {
 		/* Handles a failed isprint operation. */
 		if (p[i] != 0 && p[i] != '\n' && p[i] != '\r' && p[i] != '\t' &&
 		    !isprint(p[i]))
 
 			/* Reports successful completion. */
 			return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;

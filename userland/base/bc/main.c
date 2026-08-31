@@ -129,9 +129,9 @@ main(
 	}
 
 	/* Validates the command-line arguments. */
-	if (index == argc)
+	if (index == argc) {
 		status = run_file(&runtime, "-") != 0;
-	else {
+	} else {
 		/* Process each remaining command-line operand. */
 		for (; index < argc; index++) {
 			/* Validates the command-line arguments. */
@@ -294,7 +294,6 @@ run_source(
 
 	/* Continue while the operation condition remains true. */
 	while (parser.lexer.token.kind != TOKEN_END) {
-
 		assignment = 0;
 
 		/* Continue while the operation condition remains true. */
@@ -307,7 +306,7 @@ run_source(
 
 		/* Checks the parser state. */
 		if (parser.lexer.token.kind == TOKEN_IDENTIFIER) {
-						lookahead = parser.lexer;
+			lookahead = parser.lexer;
 
 			lexer_next(&lookahead);
 			assignment = lookahead.token.kind == TOKEN_ASSIGN;
@@ -317,13 +316,14 @@ run_source(
 		/* Handles an operation failure. */
 		if (!runtime->failed &&
 		    parser.lexer.token.kind != TOKEN_SEPARATOR &&
-		    parser.lexer.token.kind != TOKEN_END)
+		    parser.lexer.token.kind != TOKEN_END) {
 			parser_error(&parser,
 				     "unexpected token after expression");
+		}
 
 		/* Handles an operation failure. */
 		if (!runtime->failed && !assignment) {
-						output = bc_number_to_string(&value);
+			output = bc_number_to_string(&value);
 
 			/* Handles a failed command write all operation. */
 			if (output == NULL ||
@@ -366,7 +366,7 @@ lexer_next(
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-				c = text[lexer->offset];
+		c = text[lexer->offset];
 
 		/* Continue while the operation condition remains true. */
 		while (c == ' ' || c == '\t' || c == '\r')
@@ -520,13 +520,12 @@ parse_expression(
 
 	/* Handles the saved condition. */
 	if (saved.token.kind == TOKEN_IDENTIFIER) {
-				name = saved.token;
+		name = saved.token;
 
 		lexer_next(&saved);
 
 		/* Handles the saved condition. */
 		if (saved.token.kind == TOKEN_ASSIGN) {
-
 			parser->lexer = saved;
 			lexer_next(&parser->lexer);
 			value = parse_expression(parser);
@@ -605,9 +604,10 @@ parser_error(
 	const char *message)
 {
 	/* Handles an operation failure. */
-	if (!parser->runtime->failed)
+	if (!parser->runtime->failed) {
 		fprintf(stderr, "bc: %s:%u: %s\n", parser->source,
 			parser->lexer.token.line, message);
+	}
 	parser->runtime->failed = 1;
 }
 
@@ -637,14 +637,14 @@ runtime_find(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < runtime->count; index++)
-
+	for (index = 0; index < runtime->count; index++) {
 		/* Handles a failed strlen operation. */
 		if (strlen(runtime->variable[index].name) == length &&
 		    memcmp(runtime->variable[index].name, name, length) == 0)
 
 			/* Returns the computed result. */
 			return &runtime->variable[index];
+	}
 
 	/* Handles the create condition. */
 	if (!create)
@@ -660,7 +660,7 @@ runtime_find(
 
 	/* Handles the runtime condition. */
 	if (runtime->count == runtime->capacity) {
-				capacity = runtime->capacity == 0 ? 16 : runtime->capacity * 2;
+		capacity = runtime->capacity == 0 ? 16 : runtime->capacity * 2;
 
 		/* Handles the capacity condition. */
 		if (capacity < runtime->capacity ||
@@ -704,7 +704,6 @@ parse_sum(
 	while (!parser->runtime->failed &&
 	       (parser->lexer.token.kind == TOKEN_ADD ||
 		parser->lexer.token.kind == TOKEN_SUBTRACT)) {
-
 		operation = parser->lexer.token.kind;
 		result = invalid_number();
 
@@ -745,7 +744,6 @@ parse_product(
 	       (parser->lexer.token.kind == TOKEN_MULTIPLY ||
 		parser->lexer.token.kind == TOKEN_DIVIDE ||
 		parser->lexer.token.kind == TOKEN_REMAINDER)) {
-
 		operation = parser->lexer.token.kind;
 		result = invalid_number();
 
@@ -758,20 +756,22 @@ parse_product(
 			if (operation == TOKEN_MULTIPLY) {
 				/* Handles a failed bc number multiply operation. */
 				if (bc_number_multiply(&result, &left,
-						       &right) != 0)
+						       &right) != 0) {
 					parser_error(parser,
 						     "multiplication failed");
+				}
 			} else {
-								quotient = invalid_number();
-								remainder = invalid_number();
+				quotient = invalid_number();
+				remainder = invalid_number();
 
 				/* Handles a failed bc number divide operation. */
 				if (bc_number_divide(&quotient, &remainder,
-						     &left, &right) != 0)
+						     &left, &right) != 0) {
 					parser_error(parser,
 						     bc_number_is_zero(&right)
 							 ? "division by zero"
 							 : "division failed");
+				}
 
 				/* Validates the selected operation. */
 				if (operation == TOKEN_DIVIDE) {
@@ -806,8 +806,7 @@ parse_power(
 	/* Handles an operation failure. */
 	if (!parser->runtime->failed &&
 	    parser->lexer.token.kind == TOKEN_POWER) {
-
-				result = invalid_number();
+		result = invalid_number();
 
 		lexer_next(&parser->lexer);
 		right = parse_power(parser);
@@ -847,8 +846,7 @@ parse_unary(
 
 	/* Checks the parser state. */
 	if (parser->lexer.token.kind == TOKEN_SUBTRACT) {
-
-				result = invalid_number();
+		result = invalid_number();
 
 		lexer_next(&parser->lexer);
 		value = parse_unary(parser);
@@ -894,7 +892,7 @@ parse_primary(
 			parser_error(parser, "invalid or too large number");
 		lexer_next(&parser->lexer);
 	} else if (token.kind == TOKEN_IDENTIFIER) {
-				variable = runtime_find(parser->runtime, token.text, token.length, 0);
+		variable = runtime_find(parser->runtime, token.text, token.length, 0);
 
 		/* Handles a failed bc number copy operation. */
 		if (variable != NULL &&
@@ -909,8 +907,9 @@ parse_primary(
 		if (parser->lexer.token.kind != TOKEN_RIGHT) {
 			bc_number_free(&result);
 			parser_error(parser, "missing closing parenthesis");
-		} else
+		} else {
 			lexer_next(&parser->lexer);
+		}
 	} else {
 		parser_error(parser, token.kind == TOKEN_ERROR
 					 ? "invalid input"

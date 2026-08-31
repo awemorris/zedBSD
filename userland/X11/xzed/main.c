@@ -280,8 +280,7 @@ main(
 
 		/* Handles the selected command-line operation. */
 		if (strcmp(argv[arg], "--depth") == 0 && arg + 1 < argc) {
-
-						d = strtoul(argv[arg + 1], &end, 10);
+			d = strtoul(argv[arg + 1], &end, 10);
 
 			/* Checks the current endpoint. */
 			if (*end == '\0' &&
@@ -313,7 +312,7 @@ main(
 
 	/* Validates the command-line arguments. */
 	if (arg < argc) {
-				pid = fork();
+		pid = fork();
 
 		/* Handles the pid condition. */
 		if (pid < 0) {
@@ -333,7 +332,6 @@ main(
 		}
 	}
 	while (!stopped) {
-
 		count = 0;
 		p[count++] = (struct pollfd){s.listener, POLLIN, 0};
 		input_base = count;
@@ -342,12 +340,13 @@ main(
 		count += input_count;
 
 		/* Process each element required by the operation. */
-		for (i = 0; i < MAX_CLIENTS; i++)
-
+		for (i = 0; i < MAX_CLIENTS; i++) {
 			/* Checks the current string state. */
-			if (s.clients[i].fd >= 0)
+			if (s.clients[i].fd >= 0) {
 				p[count++] =
 				    (struct pollfd){s.clients[i].fd, POLLIN, 0};
+			}
+		}
 		ready = poll(p, count, 20);
 
 		/* Handles the ready condition. */
@@ -360,12 +359,12 @@ main(
 
 		/* Checks the current pointer. */
 		if (p[0].revents & POLLIN) {
-						fd = accept(s.listener, NULL, NULL);
+			fd = accept(s.listener, NULL, NULL);
 
 			/* Checks the file descriptor. */
 			if (fd >= 0) {
-								descriptor_flags = fcntl(fd, F_GETFD);
-								status_flags = fcntl(fd, F_GETFL);
+				descriptor_flags = fcntl(fd, F_GETFD);
+				status_flags = fcntl(fd, F_GETFL);
 
 				/* Handles a failed fcntl operation. */
 				if (descriptor_flags < 0 || status_flags < 0 ||
@@ -382,9 +381,9 @@ main(
 						;
 
 					/* Checks the current index. */
-					if (i == MAX_CLIENTS)
+					if (i == MAX_CLIENTS) {
 						close(fd);
-					else {
+					} else {
 						s.clients[i].fd = fd;
 						s.clients[i].base = (i + 1U)
 								    << 22;
@@ -399,11 +398,11 @@ main(
 		finish_pointer_input(&s);
 
 		/* Process each element required by the operation. */
-		for (i = 0; i < MAX_CLIENTS; i++)
-
+		for (i = 0; i < MAX_CLIENTS; i++) {
 			/* Checks the current string state. */
 			if (s.clients[i].fd >= 0)
 				read_client(&s, i);
+		}
 		present(&s);
 	}
 	cleanup(&s);
@@ -562,6 +561,8 @@ choose_mode(
 	struct graphics_mode_info modes[16];
 	struct graphics_mode_list list;
 	int best;
+	int depth_ok;
+	int size_ok;
 	unsigned pass, i;
 
 	best = -1;
@@ -586,13 +587,12 @@ choose_mode(
 		/* Process each remaining element. */
 		best_area = 0;
 		for (i = 0; i < list.count; i++) {
-						area = (uint64_t)modes[i].width * modes[i].height;
-			int depth_ok =
-			    preferred_depth == 0 ||
-			    modes[i].bits_per_pixel == preferred_depth;
-			int size_ok = preferred_width == 0 ||
-				      (modes[i].width <= preferred_width &&
-				       modes[i].height <= preferred_height);
+			area = (uint64_t)modes[i].width * modes[i].height;
+			depth_ok = preferred_depth == 0 ||
+				   modes[i].bits_per_pixel == preferred_depth;
+			size_ok = preferred_width == 0 ||
+				  (modes[i].width <= preferred_width &&
+				   modes[i].height <= preferred_height);
 
 			/* Handles the pass condition. */
 			if ((pass < 2 && !size_ok) ||
@@ -766,16 +766,15 @@ present(
  * The cursor is transient: overlay it only in the RGB24 transfer
 	 * buffer. */
 	/* Process each element required by the operation. */
-	for (row_for = 0; row_for < h; row_for++)
-
+	for (row_for = 0; row_for < h; row_for++) {
 		/* Process each element required by the operation. */
 		for (column_for = 0; column_for < w; column_for++) {
-						ax = x + column_for;
+			ax = x + column_for;
 			ay = y + row_for;
-						cx = ax - (s->pointer_x - hot_x);
-						cy = ay - (s->pointer_y - hot_y);
-						color = s->screen[(size_t)ay * s->mode.width + ax];
-						off = ((size_t)row_for * w + column_for) * 3;
+			cx = ax - (s->pointer_x - hot_x);
+			cy = ay - (s->pointer_y - hot_y);
+			color = s->screen[(size_t)ay * s->mode.width + ax];
+			off = ((size_t)row_for * w + column_for) * 3;
 
 			/* Handles the cx condition. */
 			if (cx >= 0 && cx < CURSOR_WIDTH && cy >= 0 &&
@@ -785,6 +784,7 @@ present(
 			s->transfer[off + 1] = (uint8_t)(color >> 8);
 			s->transfer[off + 2] = (uint8_t)color;
 		}
+	}
 	memset(&b, 0, sizeof(b));
 	b.x = (uint32_t)x;
 	b.y = (uint32_t)y;
@@ -826,11 +826,11 @@ find_window(
 	unsigned i;
 
 	/* Process each remaining element. */
-	for (i = 0; i < s->window_count; i++)
-
+	for (i = 0; i < s->window_count; i++) {
 		/* Checks the current string state. */
 		if (s->windows[i].id == id)
 			return &s->windows[i];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -867,7 +867,7 @@ input_at_parent(
 	/* Continue while the operation condition remains true. */
 	i = s->window_count;
 	while (i-- > 1) {
-				w = &s->windows[i];
+		w = &s->windows[i];
 
 		/* Handles the w condition. */
 		if (!w->mapped || w->parent != parent)
@@ -882,7 +882,7 @@ input_at_parent(
 			/* Checks the current horizontal value. */
 			if (x >= w->x && y >= w->y && x < w->x + w->width &&
 			    y < w->y + w->height) {
-								child = input_at_parent(s, w->id, x, y);
+				child = input_at_parent(s, w->id, x, y);
 
 				/* Checks the child process state. */
 				if (child)
@@ -940,17 +940,16 @@ composite_region(
 		return;
 
 	/* Process each element required by the operation. */
-	for (row = y; row < y + height; row++)
-
+	for (row = y; row < y + height; row++) {
 		/* Process each element required by the operation. */
 		for (column = x; column < x + width; column++) {
-
 			w = top_at(s, column, row);
 			local_x = column - w->x;
 			local_y = row - w->y;
 			s->screen[(size_t)row * s->mode.width + column] =
 			    w->pixels[(size_t)local_y * w->width + local_x];
 		}
+	}
 }
 
 /* Supports the top at operation. */
@@ -983,12 +982,12 @@ top_at_parent(
 	/* Continue while the operation condition remains true. */
 	i = s->window_count;
 	while (i-- > 1) {
-				w = &s->windows[i];
+		w = &s->windows[i];
 
 		/* Handles the w condition. */
 		if (w->mapped && w->parent == parent && x >= w->x &&
 		    y >= w->y && x < w->x + w->width && y < w->y + w->height) {
-						child = top_at_parent(s, w->id, x, y);
+			child = top_at_parent(s, w->id, x, y);
 
 			/* Returns the computed result. */
 			return child ? child : w;
@@ -1012,7 +1011,7 @@ cursor_pixel(
 
 	/* Handles the shape condition. */
 	if (shape == XC_LEFT_PTR) {
-				bit = (uint16_t)(1U << (unsigned)x);
+		bit = (uint16_t)(1U << (unsigned)x);
 
 		/* Handles the pointer mask condition. */
 		if (!(pointer_mask[y] & bit))
@@ -1030,11 +1029,9 @@ cursor_pixel(
 	}
 
 	/* Process each element required by the operation. */
-	for (ny = y - 1; ny <= y + 1; ny++)
-
+	for (ny = y - 1; ny <= y + 1; ny++) {
 		/* Process each element required by the operation. */
-		for (nx = x - 1; nx <= x + 1; nx++)
-
+		for (nx = x - 1; nx <= x + 1; nx++) {
 			/* Handles a failed resize cursor black operation. */
 			if (nx >= 0 && ny >= 0 && nx < CURSOR_WIDTH &&
 			    ny < CURSOR_HEIGHT &&
@@ -1043,6 +1040,8 @@ cursor_pixel(
 				/* Reports operation failure. */
 				return 1;
 			}
+		}
+	}
 
 	/* Reports successful completion. */
 	return 0;
@@ -1064,14 +1063,16 @@ resize_cursor_black(
 	ady = abs(dy);
 
 	/* Handles the shape condition. */
-	if (shape == XC_SB_H_DOUBLE_ARROW)
+	if (shape == XC_SB_H_DOUBLE_ARROW) {
 		return (ady <= 1 && x >= 2 && x <= 13) ||
 		       (x <= 6 && adx + ady <= 5) || (x >= 9 && adx + ady <= 6);
+	}
 
 	/* Handles the shape condition. */
-	if (shape == XC_SB_V_DOUBLE_ARROW)
+	if (shape == XC_SB_V_DOUBLE_ARROW) {
 		return (adx <= 1 && y >= 2 && y <= 13) ||
 		       (y <= 6 && adx + ady <= 5) || (y >= 9 && adx + ady <= 6);
+	}
 
 	/* Handles the shape condition. */
 	if (shape == XC_BOTTOM_LEFT_CORNER) {
@@ -1155,13 +1156,13 @@ close_client(
 	for (;;) {
 		/* Process each remaining element. */
 		id = 0;
-		for (j = 1; j < s->window_count; j++)
-
+		for (j = 1; j < s->window_count; j++) {
 			/* Checks the current string state. */
 			if (s->windows[j].owner == (uint32_t)i) {
 				id = s->windows[j].id;
 				break;
 			}
+		}
 
 		/* Handles the id condition. */
 		if (!id)
@@ -1176,15 +1177,17 @@ close_client(
 			free(s->pixmaps[j].pixels);
 
 			/* Handles the j condition. */
-			if (j + 1U < s->pixmap_count)
+			if (j + 1U < s->pixmap_count) {
 				memmove(&s->pixmaps[j], &s->pixmaps[j + 1],
 					(s->pixmap_count - j - 1U) *
 					    sizeof(s->pixmaps[0]));
+			}
 			s->pixmap_count--;
 			memset(&s->pixmaps[s->pixmap_count], 0,
 			       sizeof(s->pixmaps[0]));
-		} else
+		} else {
 			j++;
+		}
 	}
 
 	/* Process each remaining element. */
@@ -1192,14 +1195,16 @@ close_client(
 		/* Checks the current string state. */
 		if (s->gcs[j].owner == (int)i) {
 			/* Handles the j condition. */
-			if (j + 1U < s->gc_count)
+			if (j + 1U < s->gc_count) {
 				memmove(&s->gcs[j], &s->gcs[j + 1],
 					(s->gc_count - j - 1U) *
 					    sizeof(s->gcs[0]));
+			}
 			s->gc_count--;
 			memset(&s->gcs[s->gc_count], 0, sizeof(s->gcs[0]));
-		} else
+		} else {
 			j++;
+		}
 	}
 
 	/* Process each remaining element. */
@@ -1207,15 +1212,17 @@ close_client(
 		/* Checks the current string state. */
 		if (s->fonts[j].owner == (int)i) {
 			/* Handles the j condition. */
-			if (j + 1U < s->font_count)
+			if (j + 1U < s->font_count) {
 				memmove(&s->fonts[j], &s->fonts[j + 1],
 					(s->font_count - j - 1U) *
 					    sizeof(s->fonts[0]));
+			}
 			s->font_count--;
 			memset(&s->fonts[s->font_count], 0,
 			       sizeof(s->fonts[0]));
-		} else
+		} else {
 			j++;
+		}
 	}
 	free(s->clients[i].input);
 	memset(&s->clients[i], 0, sizeof(s->clients[i]));
@@ -1244,13 +1251,13 @@ destroy_window(
 	for (;;) {
 		/* Process each remaining element. */
 		child = 0;
-		for (i = 1; i < s->window_count; i++)
-
+		for (i = 1; i < s->window_count; i++) {
 			/* Checks the current string state. */
 			if (s->windows[i].parent == id) {
 				child = s->windows[i].id;
 				break;
 			}
+		}
 
 		/* Checks the child process state. */
 		if (!child)
@@ -1269,9 +1276,10 @@ destroy_window(
 		destroy_notify(owner_client(s, w->owner), w->id, w->id);
 
 	/* Handles the parent condition. */
-	if (parent && (parent->event_mask & (1U << 19)) != 0)
+	if (parent && (parent->event_mask & (1U << 19)) != 0) {
 		destroy_notify(owner_client(s, parent->owner), parent->id,
 			       w->id);
+	}
 	mark_dirty(s, w->x, w->y, w->width, w->height);
 
 	/* Checks the current string state. */
@@ -1288,9 +1296,10 @@ destroy_window(
 	index = (size_t)(w - s->windows);
 
 	/* Checks the current index. */
-	if (index + 1U < s->window_count)
+	if (index + 1U < s->window_count) {
 		memmove(&s->windows[index], &s->windows[index + 1],
 			(s->window_count - index - 1U) * sizeof(s->windows[0]));
+	}
 	s->window_count--;
 	memset(&s->windows[s->window_count], 0, sizeof(s->windows[0]));
 }
@@ -1366,7 +1375,6 @@ write_all(
 	/* Continue while the operation condition remains true. */
 	p = v;
 	while (n) {
-
 		r = write(fd, p, n);
 
 		/* Handles the r condition. */
@@ -1452,9 +1460,10 @@ send_motion_event(
 	uint16_t buttons)
 {
 	/* Classifies the current input character. */
-	if (c && w && (w->event_mask & (1U << 6)))
+	if (c && w && (w->event_mask & (1U << 6))) {
 		send_event(c, 6, w->id, 0, (uint32_t)(time / 1000000), x, y,
 			   buttons);
+	}
 }
 
 /* X11 event and reply construction. */
@@ -1515,7 +1524,7 @@ read_client(
 		/* Classifies the current input character. */
 		if (c->used + (size_t)nr > c->capacity) {
 			/* Process each remaining element. */
-						z = c->capacity ? c->capacity * 2 : 4096;
+			z = c->capacity ? c->capacity * 2 : 4096;
 			while (z < c->used + (size_t)nr)
 				z *= 2;
 			c->input = realloc(c->input, z);
@@ -1787,6 +1796,12 @@ request(
 	uint8_t op = q[0];
 	uint32_t id;
 	struct window *w;
+	size_t count, padded;
+	int sx, sy, dx, dy;
+	int wi, he, row, column;
+	struct pixmap *p;
+	int x, y;
+	int oldx, oldy, oldw, oldh;
 
 	c->sequence++;
 
@@ -1819,11 +1834,10 @@ request(
 		/* Process each element required by the operation. */
 		mask_local = rd32(q + 28, c->order);
 		off_local = 32;
-		for (bit_local = 0; bit_local < 32 && off_local + 4 <= n; bit_local++)
-
+		for (bit_local = 0; bit_local < 32 && off_local + 4 <= n; bit_local++) {
 			/* Handles the mask local condition. */
 			if (mask_local & (1U << bit_local)) {
-									v_local = rd32(q + off_local, c->order);
+				v_local = rd32(q + off_local, c->order);
 
 				/* Handles the bit local condition. */
 				if (bit_local == 1)
@@ -1834,6 +1848,7 @@ request(
 					w->event_mask = v_local;
 				off_local += 4;
 			}
+		}
 		w->pixels =
 		    window_pixels_alloc(w->width, w->height, w->background);
 
@@ -1857,11 +1872,10 @@ request(
 		/* Process each element required by the operation. */
 		mask_local2 = rd32(q + 8, c->order);
 		off_local3 = 12;
-		for (bit_local4 = 0; bit_local4 < 32 && off_local3 + 4 <= n; bit_local4++)
-
+		for (bit_local4 = 0; bit_local4 < 32 && off_local3 + 4 <= n; bit_local4++) {
 			/* Handles the mask local2 condition. */
 			if (mask_local2 & (1U << bit_local4)) {
-									v_local1 = rd32(q + off_local3, c->order);
+				v_local1 = rd32(q + off_local3, c->order);
 
 				/* Handles the bit local4 condition. */
 				if (bit_local4 == 1)
@@ -1877,6 +1891,7 @@ request(
 				}
 				off_local3 += 4;
 			}
+		}
 
 		/* Reports successful completion. */
 		return 0;
@@ -1888,7 +1903,7 @@ request(
 	case 7: /* ReparentWindow */
 		if (n >= 16 &&
 		    (w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-						p_local = find_window(s, rd32(q + 8, c->order));
+			p_local = find_window(s, rd32(q + 8, c->order));
 
 			/* Handles the p local condition. */
 			if (p_local) {
@@ -1905,7 +1920,7 @@ request(
 		break;
 	case 8: /* MapWindow */
 		if ((w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-						p_local5 = find_window(s, w->parent);
+			p_local5 = find_window(s, w->parent);
 
 			/* Handles the p local5 condition. */
 			if (p_local5 && (p_local5->event_mask & (1U << 20)) &&
@@ -1925,7 +1940,7 @@ request(
 		break;
 	case 10: /* UnmapWindow */
 		if ((w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-						x_local = w->x;
+			x_local = w->x;
 			y_local = w->y;
 			wi_local = w->width;
 			he_local = w->height;
@@ -1939,25 +1954,24 @@ request(
 	case 12: /* ConfigureWindow */
 		if (n >= 12 &&
 		    (w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-						mask_local7 = rd16(q + 8, c->order);
-						off_local8 = 12;
+			mask_local7 = rd16(q + 8, c->order);
+			off_local8 = 12;
 
 			/* Process each element required by the operation. */
-						oldx_local = w->x;
+			oldx_local = w->x;
 			oldy_local = w->y;
 			oldw_local = w->width;
 			oldh_local = w->height;
 			newx_local = w->x;
 			newy_local = w->y;
 			raise_local = 0;
-						neww = w->width;
+			neww = w->width;
 			newh = w->height;
 			newborder = w->border;
-			for (bit_local9 = 0; bit_local9 < 7 && off_local8 + 4 <= n; bit_local9++)
-
+			for (bit_local9 = 0; bit_local9 < 7 && off_local8 + 4 <= n; bit_local9++) {
 				/* Handles the mask local7 condition. */
 				if (mask_local7 & (1U << bit_local9)) {
-										v_local6 = rd32(q + off_local8, c->order);
+					v_local6 = rd32(q + off_local8, c->order);
 
 					/* Handles the bit local9 condition. */
 					if (bit_local9 == 0)
@@ -1974,6 +1988,7 @@ request(
 						raise_local = 1;
 					off_local8 += 4;
 				}
+			}
 
 			/* Handles a failed window pixels resize operation. */
 			if ((neww != w->width || newh != w->height) &&
@@ -1992,8 +2007,7 @@ request(
 			/* Handles the w condition. */
 			if (w->x != oldx_local || w->y != oldy_local) {
 				/* Process each remaining element. */
-				for (j = 1; j < s->window_count; j++)
-
+				for (j = 1; j < s->window_count; j++) {
 					/* Checks the current string state. */
 					if (s->windows[j].parent == w->id) {
 						s->windows[j].x +=
@@ -2001,6 +2015,7 @@ request(
 						s->windows[j].y +=
 						    (int16_t)(w->y - oldy_local);
 					}
+				}
 			}
 			mark_dirty(s, oldx_local, oldy_local, oldw_local, oldh_local);
 			mark_dirty(s, w->x, w->y, w->width, w->height);
@@ -2019,7 +2034,6 @@ request(
 		break;
 	case 14: /* GetGeometry */
 		if ((w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-
 			memset(r_local, 0, 32);
 			r_local[1] = 24;
 			wr32(r_local + 8, ROOT_XID, c->order);
@@ -2036,15 +2050,13 @@ request(
 		break;
 	case 15: /* QueryTree: return all direct children in stacking order. */
 		if ((w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-
-						count_local = 0;
+			count_local = 0;
 			memset(r_local10, 0, sizeof(r_local10));
 			wr32(r_local10 + 8, ROOT_XID, c->order);
 			wr32(r_local10 + 12, w->parent, c->order);
 
 			/* Process each remaining element. */
-			for (i_local = 1; i_local < s->window_count; i_local++)
-
+			for (i_local = 1; i_local < s->window_count; i_local++) {
 				/* Checks the current string state. */
 				if (s->windows[i_local].id &&
 				    s->windows[i_local].parent == w->id) {
@@ -2052,6 +2064,7 @@ request(
 					     s->windows[i_local].id, c->order);
 					count_local++;
 				}
+			}
 			wr16(r_local10 + 16, (uint16_t)count_local, c->order);
 			simple_reply(c, r_local10, 32 + count_local * 4);
 
@@ -2062,11 +2075,11 @@ request(
 	case 18: /* ChangeProperty: retain desktop string properties. */
 		if (n >= 24 &&
 		    (w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-						property_local = rd32(q + 8, c->order);
+			property_local = rd32(q + 8, c->order);
 			type_local = rd32(q + 12, c->order);
 			count_local11 = rd32(q + 20, c->order);
-						target = NULL;
-						capacity = 0;
+			target = NULL;
+			capacity = 0;
 
 			/* Handles the property local condition. */
 			if (property_local == 39) {
@@ -2080,7 +2093,7 @@ request(
 			/* Handles the target condition. */
 			if (target && type_local == 31 && q[16] == 8 &&
 			    count_local11 <= n - 24) {
-								copy = count_local11 < capacity - 1 ? count_local11 : capacity - 1;
+				copy = count_local11 < capacity - 1 ? count_local11 : capacity - 1;
 				memcpy(target, q + 24, copy);
 				target[copy] = 0;
 			}
@@ -2092,10 +2105,10 @@ request(
 	case 20: /* GetProperty: WM_NAME and Xzed desktop strings. */
 		if (n >= 24 &&
 		    (w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-
-						property_local13 = rd32(q + 8, c->order);
-						value = NULL;
-			size_t count = 0, padded = 0;
+			property_local13 = rd32(q + 8, c->order);
+			value = NULL;
+			count = 0;
+			padded = 0;
 			memset(r_local12, 0, sizeof(r_local12));
 
 			/* Handles the property local13 condition. */
@@ -2153,7 +2166,7 @@ request(
 	return 0;
 	case 45: /* OpenFont */
 		if (n >= 12 && s->font_count < MAX_FONTS) {
-						ln = rd16(q + 8, c->order);
+			ln = rd16(q + 8, c->order);
 
 			/* Handles the ln condition. */
 			if (12U + ln <= n) {
@@ -2170,15 +2183,15 @@ request(
 
 	/* Process each remaining element. */
 	id = rd32(q + 4, c->order);
-	for (i_local16 = 0; i_local16 < s->font_count; i_local16++)
-
+	for (i_local16 = 0; i_local16 < s->font_count; i_local16++) {
 		/* Checks the current string state. */
 		if (s->fonts[i_local16].id == id) {
 			/* Handles the i local16 condition. */
-			if (i_local16 + 1U < s->font_count)
+			if (i_local16 + 1U < s->font_count) {
 				memmove(&s->fonts[i_local16], &s->fonts[i_local16 + 1],
 					(s->font_count - i_local16 - 1U) *
 					    sizeof(s->fonts[0]));
+			}
 			s->font_count--;
 			memset(&s->fonts[s->font_count], 0,
 			       sizeof(s->fonts[0]));
@@ -2186,6 +2199,7 @@ request(
 			/* Reports successful completion. */
 			return 0;
 		}
+	}
 	break;
 	case 47: /*
  * QueryFont: the font is Unicode BMP, with 1- or 2-cell
@@ -2217,7 +2231,7 @@ request(
 	return 0;
 	case 53: /* CreatePixmap */
 		if (n >= 16 && s->pixmap_count < MAX_PIXMAPS) {
-						p_local19 = &s->pixmaps[s->pixmap_count];
+			p_local19 = &s->pixmaps[s->pixmap_count];
 
 			memset(p_local19, 0, sizeof(*p_local19));
 			p_local19->id = rd32(q + 4, c->order);
@@ -2248,14 +2262,15 @@ request(
 
 	/* Handles the p local21 condition. */
 	if (p_local21) {
-					pi = (size_t)(p_local21 - s->pixmaps);
+		pi = (size_t)(p_local21 - s->pixmaps);
 		free(p_local21->pixels);
 
 		/* Handles the pi condition. */
-		if (pi + 1U < s->pixmap_count)
+		if (pi + 1U < s->pixmap_count) {
 			memmove(&s->pixmaps[pi], &s->pixmaps[pi + 1],
 				(s->pixmap_count - pi - 1U) *
 				    sizeof(s->pixmaps[0]));
+		}
 		s->pixmap_count--;
 		memset(&s->pixmaps[s->pixmap_count], 0,
 		       sizeof(s->pixmaps[0]));
@@ -2266,9 +2281,9 @@ request(
 	break;
 	case 55: /* CreateGC */
 		if (n >= 16 && s->gc_count < MAX_GCS) {
-						g_local = &s->gcs[s->gc_count++];
-						mask_local23 = rd32(q + 12, c->order);
-						off_local24 = 16;
+			g_local = &s->gcs[s->gc_count++];
+			mask_local23 = rd32(q + 12, c->order);
+			off_local24 = 16;
 
 			memset(g_local, 0, sizeof(*g_local));
 
@@ -2276,11 +2291,10 @@ request(
 			g_local->id = rd32(q + 4, c->order);
 			g_local->owner = (int)ci;
 			g_local->foreground = 0xffffff;
-			for (bit_local25 = 0; bit_local25 < 32 && off_local24 + 4 <= n; bit_local25++)
-
+			for (bit_local25 = 0; bit_local25 < 32 && off_local24 + 4 <= n; bit_local25++) {
 				/* Handles the mask local23 condition. */
 				if (mask_local23 & (1U << bit_local25)) {
-										v_local22 = rd32(q + off_local24, c->order);
+					v_local22 = rd32(q + off_local24, c->order);
 
 					/* Handles the bit local25 condition. */
 					if (bit_local25 == 2)
@@ -2291,6 +2305,7 @@ request(
 						g_local->font = v_local22;
 					off_local24 += 4;
 				}
+			}
 
 			/* Reports successful completion. */
 			return 0;
@@ -2302,15 +2317,14 @@ request(
 
 	/* Handles the g local30 condition. */
 	if (g_local30 && n >= 12) {
-					mask_local27 = rd32(q + 8, c->order);
-					off_local28 = 12;
+		mask_local27 = rd32(q + 8, c->order);
+		off_local28 = 12;
 
 		/* Process each element required by the operation. */
-		for (bit_local29 = 0; bit_local29 < 32 && off_local28 + 4 <= n; bit_local29++)
-
+		for (bit_local29 = 0; bit_local29 < 32 && off_local28 + 4 <= n; bit_local29++) {
 			/* Handles the mask local27 condition. */
 			if (mask_local27 & (1U << bit_local29)) {
-									v_local26 = rd32(q + off_local28, c->order);
+				v_local26 = rd32(q + off_local28, c->order);
 
 				/* Handles the bit local29 condition. */
 				if (bit_local29 == 2)
@@ -2321,6 +2335,7 @@ request(
 					g_local30->font = v_local26;
 				off_local28 += 4;
 			}
+		}
 
 		/* Reports successful completion. */
 		return 0;
@@ -2330,15 +2345,15 @@ request(
 
 	/* Process each remaining element. */
 	id = rd32(q + 4, c->order);
-	for (i_local31 = 0; i_local31 < s->gc_count; i_local31++)
-
+	for (i_local31 = 0; i_local31 < s->gc_count; i_local31++) {
 		/* Checks the current string state. */
 		if (s->gcs[i_local31].id == id) {
 			/* Handles the i local31 condition. */
-			if (i_local31 + 1U < s->gc_count)
+			if (i_local31 + 1U < s->gc_count) {
 				memmove(&s->gcs[i_local31], &s->gcs[i_local31 + 1],
 					(s->gc_count - i_local31 - 1U) *
 					    sizeof(s->gcs[0]));
+			}
 			s->gc_count--;
 			memset(&s->gcs[s->gc_count], 0,
 			       sizeof(s->gcs[0]));
@@ -2346,30 +2361,29 @@ request(
 			/* Reports successful completion. */
 			return 0;
 		}
+	}
 	break;
 	case 62: /*
  * CopyArea: the minimal server currently supports Pixmap to
 		    Window. */
 		if (n >= 28) {
-						p_local32 = find_pixmap(s, rd32(q + 4, c->order));
-						dest = find_window(s, rd32(q + 8, c->order));
-			int sx = (int16_t)rd16(q + 16, c->order),
-			    sy = (int16_t)rd16(q + 18, c->order),
-			    dx = (int16_t)rd16(q + 20, c->order),
-			    dy = (int16_t)rd16(q + 22, c->order);
-			int wi = rd16(q + 24, c->order),
-			    he = rd16(q + 26, c->order), row, column;
+			p_local32 = find_pixmap(s, rd32(q + 4, c->order));
+			dest = find_window(s, rd32(q + 8, c->order));
+			sx = (int16_t)rd16(q + 16, c->order);
+			sy = (int16_t)rd16(q + 18, c->order);
+			dx = (int16_t)rd16(q + 20, c->order);
+			dy = (int16_t)rd16(q + 22, c->order);
+			wi = rd16(q + 24, c->order);
+			he = rd16(q + 26, c->order);
 
 			/* Handles the p local32 condition. */
 			if (!p_local32 || !dest)
 				break;
 
 			/* Process each element required by the operation. */
-			for (row = 0; row < he; row++)
-
+			for (row = 0; row < he; row++) {
 				/* Process each element required by the operation. */
 				for (column = 0; column < wi; column++) {
-
 					px = sx + column;
 					py = sy + row;
 					wx = dx + column;
@@ -2380,14 +2394,16 @@ request(
 					    px < p_local32->width && py < p_local32->height &&
 					    wx >= 0 && wy >= 0 &&
 					    wx < dest->width &&
-					    wy < dest->height)
+					    wy < dest->height) {
 						dest->pixels[(size_t)wy *
 								 dest->width +
 							     wx] =
 						    p_local32->pixels[(size_t)py *
 								  p_local32->width +
 							      px];
+					}
 				}
+			}
 			mark_dirty(s, dest->x + dx, dest->y + dy, wi, he);
 			present(s);
 
@@ -2398,21 +2414,20 @@ request(
 	case 65: /* PolyLine */
 		if (n >= 16 &&
 		    (w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-						g_local33 = find_gc(s, rd32(q + 8, c->order));
+			g_local33 = find_gc(s, rd32(q + 8, c->order));
 
 			/* Process each element required by the operation. */
-						x_local35 = 0;
+			x_local35 = 0;
 			y_local36 = 0;
-						color_local = g_local33 ? g_local33->foreground : 0xffffff;
+			color_local = g_local33 ? g_local33->foreground : 0xffffff;
 			for (off_local34 = 12; off_local34 + 4 <= n; off_local34 += 4) {
-
 				nx = (int16_t)rd16(q + off_local34, c->order);
 				ny = (int16_t)rd16(q + off_local34 + 2, c->order);
 
 				/* Handles the off local34 condition. */
 				if (off_local34 != 12) {
 					/* Continue until the operation reaches a terminal state. */
-										x0_local = x_local35;
+					x0_local = x_local35;
 					y0_local = y_local36;
 					dx_local = abs(nx - x0_local);
 					sx_local = x0_local < nx ? 1 : -1;
@@ -2423,10 +2438,11 @@ request(
 						/* Handles the x0 local condition. */
 						if (x0_local >= 0 && y0_local >= 0 &&
 						    x0_local < w->width &&
-						    y0_local < w->height)
+						    y0_local < w->height) {
 							w->pixels[(size_t)y0_local *
 								      w->width +
 								  x0_local] = color_local;
+						}
 
 						/* Handles the x0 local condition. */
 						if (x0_local == nx && y0_local == ny)
@@ -2460,10 +2476,9 @@ request(
 		return 0;
 	case 70: /* PolyFillRectangle */
 		if (n >= 12) {
+			g_local42 = find_gc(s, rd32(q + 8, c->order));
 
-						g_local42 = find_gc(s, rd32(q + 8, c->order));
-
-						color_local44 = g_local42 ? g_local42->foreground : 0xffffff;
+			color_local44 = g_local42 ? g_local42->foreground : 0xffffff;
 			w = find_window(s, rd32(q + 4, c->order));
 			p_local41 = find_pixmap(s, rd32(q + 4, c->order));
 
@@ -2473,7 +2488,6 @@ request(
 
 			/* Process each element required by the operation. */
 			for (off_local43 = 12; off_local43 + 8 <= n; off_local43 += 8) {
-
 				x_local37 = (int16_t)rd16(q + off_local43, c->order);
 				y_local38 = (int16_t)rd16(q + off_local43 + 2,
 							  c->order);
@@ -2500,15 +2514,16 @@ request(
 	case 77: /* ImageText8 / ImageText16 */
 		if (n >= 16 &&
 		    (w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-						g_local45 = find_gc(s, rd32(q + 8, c->order));
-						chars = q[1];
+			g_local45 = find_gc(s, rd32(q + 8, c->order));
+			chars = q[1];
 
 			/* Handles the chars condition. */
-			if (16 + chars * (op == 77 ? 2U : 1U) <= n)
+			if (16 + chars * (op == 77 ? 2U : 1U) <= n) {
 				(void)draw_text(s, w, g_local45,
 						(int16_t)rd16(q + 12, c->order),
 						(int16_t)rd16(q + 14, c->order),
 						q + 16, chars, op == 77);
+			}
 
 			/* Reports successful completion. */
 			return 0;
@@ -2522,7 +2537,7 @@ request(
 	/* Process each element required by the operation. */
 	r_local46[1] = 1;
 	for (i_local47 = 0; i_local47 < q[5] && i_local47 < 248; i_local47++) {
-					kc = (uint32_t)(q[4] + i_local47);
+		kc = (uint32_t)(q[4] + i_local47);
 		ks = kc >= 8 ? kc - 8 : 0;
 
 		/* Dispatch the selected operation case. */
@@ -2577,27 +2592,25 @@ request(
 	return 0;
 	case 128: /* XzedPutImageRGB24: compact private RGB24 image upload. */
 		if (n >= 16) {
-						drawable = rd32(q + 4, c->order);
-			struct pixmap *p = find_pixmap(s, drawable);
-			int x = (int16_t)rd16(q + 8, c->order),
-			    y = (int16_t)rd16(q + 10, c->order);
-			unsigned wi = rd16(q + 12, c->order),
-				 he = rd16(q + 14, c->order);
-			size_t count = (size_t)wi * he;
-			unsigned row, column;
+			drawable = rd32(q + 4, c->order);
+			p = find_pixmap(s, drawable);
+			x = (int16_t)rd16(q + 8, c->order);
+			y = (int16_t)rd16(q + 10, c->order);
+			wi = rd16(q + 12, c->order);
+			he = rd16(q + 14, c->order);
+			count = (size_t)wi * he;
 			w = find_window(s, drawable);
 
 			/* Handles the w condition. */
 			if ((!w && !p) || !wi || !he ||
-			    (wi && count / wi != he) || count > (n - 16U) / 3U)
+			    (wi && count / (size_t)wi != (size_t)he) ||
+			    count > (n - 16U) / 3U)
 				break;
 
 			/* Process each element required by the operation. */
-			for (row = 0; row < he; row++)
-
+			for (row = 0; row < he; row++) {
 				/* Process each element required by the operation. */
 				for (column = 0; column < wi; column++) {
-
 					rgb = q + 16U +
 					    ((size_t)row * wi + column) * 3U;
 					dx_local49 = x + (int)column;
@@ -2610,24 +2623,28 @@ request(
 						/* Handles the dx local49 condition. */
 						if (dx_local49 >= 0 && dy_local50 >= 0 &&
 						    dx_local49 < w->width &&
-						    dy_local50 < w->height)
+						    dy_local50 < w->height) {
 							w->pixels[(size_t)dy_local50 *
 								      w->width +
 								  (unsigned)
 								      dx_local49] =
 							    color_local51;
+						}
 					} else if (dx_local49 >= 0 && dy_local50 >= 0 &&
 						   dx_local49 < p->width &&
-						   dy_local50 < p->height)
+						   dy_local50 < p->height) {
 						p->pixels[(size_t)dy_local50 *
 							      p->width +
 							  (unsigned)dx_local49] = color_local51;
+					}
 				}
+			}
 
 			/* Handles the w condition. */
-			if (w)
+			if (w) {
 				mark_dirty(s, w->x + x, w->y + y, (int)wi,
 					   (int)he);
+			}
 
 			/* Reports successful completion. */
 			return 0;
@@ -2636,7 +2653,7 @@ request(
 	case 129: /* XzedSetCursorShape */
 		if (n >= 12 &&
 		    (w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-						shape = (uint16_t)rd32(q + 8, c->order);
+			shape = (uint16_t)rd32(q + 8, c->order);
 
 			/* Handles the shape condition. */
 			if (shape != XC_LEFT_PTR &&
@@ -2668,12 +2685,14 @@ request(
 	case 131: /* XzedMoveResizeWindowBuffered: no child move or Expose. */
 		if (n >= 24 &&
 		    (w = find_window(s, rd32(q + 4, c->order))) != NULL) {
-						newx_local52 = (int32_t)rd32(q + 8, c->order);
+			newx_local52 = (int32_t)rd32(q + 8, c->order);
 			newy_local53 = (int32_t)rd32(q + 12, c->order);
-						width = rd32(q + 16, c->order);
+			width = rd32(q + 16, c->order);
 			height = rd32(q + 20, c->order);
-			int oldx = w->x, oldy = w->y, oldw = w->width,
-			    oldh = w->height;
+			oldx = w->x;
+			oldy = w->y;
+			oldw = w->width;
+			oldh = w->height;
 
 			/* Handles the newx local52 condition. */
 			if (newx_local52 < INT16_MIN || newx_local52 > INT16_MAX ||
@@ -2885,10 +2904,11 @@ window_pixels_resize(
 	/* Process each element required by the operation. */
 	copy_width = width < w->width ? width : w->width;
 	copy_height = height < w->height ? height : w->height;
-	for (row = 0; row < copy_height; row++)
+	for (row = 0; row < copy_height; row++) {
 		memcpy(p + (size_t)row * width,
 		       w->pixels + (size_t)row * w->width,
 		       (size_t)copy_width * sizeof(*p));
+	}
 	free(w->pixels);
 	w->pixels = p;
 
@@ -2984,11 +3004,11 @@ find_pixmap(
 	unsigned i;
 
 	/* Process each remaining element. */
-	for (i = 0; i < s->pixmap_count; i++)
-
+	for (i = 0; i < s->pixmap_count; i++) {
 		/* Checks the current string state. */
 		if (s->pixmaps[i].id == id)
 			return &s->pixmaps[i];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -3003,11 +3023,11 @@ find_gc(
 	unsigned i;
 
 	/* Process each remaining element. */
-	for (i = 0; i < s->gc_count; i++)
-
+	for (i = 0; i < s->gc_count; i++) {
 		/* Checks the current string state. */
 		if (s->gcs[i].id == id)
 			return &s->gcs[i];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -3051,11 +3071,11 @@ window_fill(
 		return;
 
 	/* Process each element required by the operation. */
-	for (row = y; row < y + height; row++)
-
+	for (row = y; row < y + height; row++) {
 		/* Process each element required by the operation. */
 		for (column = x; column < x + width; column++)
 			w->pixels[(size_t)row * w->width + column] = color;
+	}
 	mark_dirty(s, w->x + x, w->y + y, width, height);
 }
 
@@ -3096,11 +3116,11 @@ pixmap_fill(
 		return;
 
 	/* Process each element required by the operation. */
-	for (row = y; row < y + height; row++)
-
+	for (row = y; row < y + height; row++) {
 		/* Process each element required by the operation. */
 		for (column = x; column < x + width; column++)
 			p->pixels[(size_t)row * p->width + column] = color;
+	}
 }
 
 /* Supports the draw text operation. */
@@ -3125,9 +3145,8 @@ draw_text(
 	/* Process each remaining element. */
 	color = g ? g->foreground : 0xffffff;
 	for (i = 0; i < count; i++) {
-
-				cp = wide ? ((uint32_t)text[i * 2] << 8) | text[i * 2 + 1]
-			 : text[i];
+		cp = wide ? ((uint32_t)text[i * 2] << 8) | text[i * 2 + 1]
+	 : text[i];
 
 		memset(&q, 0, sizeof(q));
 		q.codepoint = cp;
@@ -3140,20 +3159,21 @@ draw_text(
 
 		/* Process each element required by the operation. */
 		top = y - (int)q.height;
-		for (gy = 0; gy < (int)q.height; gy++)
-
+		for (gy = 0; gy < (int)q.height; gy++) {
 			/* Process each element required by the operation. */
-			for (gx = 0; gx < (int)q.width; gx++)
-
+			for (gx = 0; gx < (int)q.width; gx++) {
 				/* Checks the current horizontal value. */
 				if (x + gx >= 0 && x + gx < w->width &&
 				    top + gy >= 0 && top + gy < w->height &&
 				    (bitmap[(size_t)gy * q.stride +
 					    (unsigned)gx / 8] &
-				     (0x80U >> ((unsigned)gx & 7))))
+				     (0x80U >> ((unsigned)gx & 7)))) {
 					w->pixels[(size_t)(top + gy) *
 						      w->width +
 						  (x + gx)] = color;
+				}
+			}
+		}
 		mark_dirty(s, w->x + x, w->y + top, (int)q.width,
 			   (int)q.height);
 		x += (int)(q.advance ? q.advance : q.width);
@@ -3218,15 +3238,16 @@ window_pixels_resize_buffered(
 		copy_height = (int)height - dest_y;
 
 	/* Handles the copy width condition. */
-	if (copy_width > 0 && copy_height > 0)
-
+	if (copy_width > 0 && copy_height > 0) {
 		/* Process each element required by the operation. */
-		for (row = 0; row < copy_height; row++)
+		for (row = 0; row < copy_height; row++) {
 			memcpy(p + (size_t)(dest_y + row) * width +
 				   (unsigned)dest_x,
 			       w->pixels + (size_t)(source_y + row) * w->width +
 				   (unsigned)source_x,
 			       (size_t)copy_width * sizeof(*p));
+		}
+	}
 	free(w->pixels);
 	w->pixels = p;
 
@@ -3270,13 +3291,13 @@ input_key(
 		return;
 
 	/* Validates the current value. */
-	if (value == 1)
+	if (value == 1) {
 		send_event(c, 2, w->id, keycode, time, s->pointer_x,
 		    s->pointer_y, state);
-	else if (value == 0)
+	} else if (value == 0) {
 		send_event(c, 3, w->id, keycode, time, s->pointer_x,
 		    s->pointer_y, state);
-	else if (value == 2) {
+	} else if (value == 2) {
 		send_event(c, 3, w->id, keycode, time, s->pointer_x,
 		    s->pointer_y, state);
 		send_event(c, 2, w->id, keycode, time, s->pointer_x,
@@ -3321,10 +3342,11 @@ input_pointer(
 	}
 
 	/* Handles the frame condition. */
-	if (frame->relative_x != 0 || frame->relative_y != 0)
+	if (frame->relative_x != 0 || frame->relative_y != 0) {
 		xzed_pointer_move(&s->pointer_x, &s->pointer_y,
 		    frame->relative_x, frame->relative_y, s->mode.width,
 		    s->mode.height);
+	}
 	w = s->pointer_grab_owner >= 0
 		? find_window(s, s->pointer_grab_window)
 		: hit(s, s->pointer_x, s->pointer_y);
@@ -3337,10 +3359,10 @@ input_pointer(
 		: owner_client(s, w->owner);
 
 	/* Handles the moved condition. */
-	if (moved && frame->edge_count != 0)
+	if (moved && frame->edge_count != 0) {
 		send_motion_event(c, w, (uint64_t)frame->time * 1000000U,
 		    s->pointer_x, s->pointer_y, s->buttons);
-	else if (moved) {
+	} else if (moved) {
 		s->pending_motion_client = c;
 		s->pending_motion_window = w;
 		s->pending_motion_time = frame->time;
@@ -3352,19 +3374,20 @@ input_pointer(
 
 	/* Process each remaining element. */
 	for (index = 0; index < frame->edge_count; index++) {
-				edge = &frame->edges[index];
-				window_id = w->id;
+		edge = &frame->edges[index];
+		window_id = w->id;
 
 		/* Classifies the current input character. */
-		if (c)
+		if (c) {
 			send_event(c, edge->pressed ? 4 : 5, window_id,
 			    edge->button, frame->time, s->pointer_x, s->pointer_y,
 			    s->buttons);
+		}
 		s->buttons = edge->buttons;
 
 		/* Handles the edge condition. */
 		if (edge->pressed) {
-						top = top_level_window(s, w);
+			top = top_level_window(s, w);
 
 			/*
  * The desktop panel remains clickable without taking the

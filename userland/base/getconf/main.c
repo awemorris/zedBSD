@@ -109,8 +109,7 @@ main(
 
 	/* Handles the selected command-line operation. */
 	if (index < argc && strcmp(argv[index], "-a") == 0) {
-
-				result = 1;
+		result = 1;
 
 		index++;
 		path = index < argc ? argv[index++] : ".";
@@ -122,12 +121,12 @@ main(
 		/* Process each remaining element. */
 		for (variable_index = 0;
 		     variable_index < sizeof(variables) / sizeof(variables[0]);
-		     variable_index++)
-
+		     variable_index++) {
 			/* Handles a failed print variable operation. */
 			if (!print_variable(&variables[variable_index], path,
 					    1))
 				result = 0;
+		}
 
 		/* Returns the computed result. */
 		return result ? 0 : 1;
@@ -231,7 +230,7 @@ print_variable(
 
 	/* Handles the variable condition. */
 	if (variable->kind == VARIABLE_CONFSTR) {
-				needed = confstr((int)variable->number, NULL, 0);
+		needed = confstr((int)variable->number, NULL, 0);
 
 		/* Handles the needed condition. */
 		if (needed == 0)
@@ -293,11 +292,11 @@ variable_find(
 
 	/* Process each remaining element. */
 	for (index = 0; index < sizeof(variables) / sizeof(variables[0]);
-	     index++)
-
+	     index++) {
 		/* Selects the matching value. */
 		if (strcmp(variables[index].name, name) == 0)
 			return &variables[index];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;

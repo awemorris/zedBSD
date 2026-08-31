@@ -87,7 +87,7 @@ main(
 	/* Validates the command-line arguments. */
 	if (argc <= 1 && result != 37) {
 		strcpy(failure, "POSIX_R1_FAIL:000\n");
-				value = result < 0 ? 999U : (unsigned int)result;
+		value = result < 0 ? 999U : (unsigned int)result;
 		failure[14] = (char)('0' + value / 100U % 10U);
 		failure[15] = (char)('0' + value / 10U % 10U);
 		failure[16] = (char)('0' + value % 10U);
@@ -348,7 +348,7 @@ run_test(
 
 	/* Checks the child process state. */
 	if (child == 0) {
-				grandchild = fork();
+		grandchild = fork();
 
 		/* Handles the grandchild condition. */
 		if (grandchild < 0)
@@ -648,7 +648,7 @@ run_test(
 
 	/* Checks the child process state. */
 	if (child == 0) {
-				member = fork();
+		member = fork();
 
 		/* Handles the member condition. */
 		if (member < 0)
@@ -656,7 +656,6 @@ run_test(
 
 		/* Handles the member condition. */
 		if (member == 0) {
-
 			(void)close(descriptors[0]);
 			caught_signals = 0;
 
@@ -745,7 +744,7 @@ run_test(
 
 	/* Checks the child process state. */
 	if (child == 0) {
-					value_local3 = mapping_local5[0];
+		value_local3 = mapping_local5[0];
 		(void)value_local3;
 		_exit(1);
 	}
@@ -781,7 +780,6 @@ run_test(
 
 	/* Checks the child process state. */
 	if (child == 0) {
-
 		memset(&action_local8, 0, sizeof(action_local8));
 		action_local8.sa_handler =
 		    (uint64_t)(uintptr_t)catch_fault_siginfo;

@@ -57,7 +57,7 @@ main(
 		while ((c = fgetc(f)) != EOF) {
 			/* Classifies the current input character. */
 			if (c == '\n') {
-								d = fgetc(f);
+				d = fgetc(f);
 
 				/* Checks the current descriptor. */
 				if (d == '\n') {

@@ -121,7 +121,7 @@ valid(
 	/* Continue while the operation condition remains true. */
 	i = 0;
 	while (i < n) {
-				c = b[i++];
+		c = b[i++];
 
 		/* Classifies the current input character. */
 		if (c < 128)
@@ -144,11 +144,11 @@ valid(
 			return 0;
 
 		/* Continue while the operation condition remains true. */
-		while (need--)
-
+		while (need--) {
 			/* Handles the b condition. */
 			if ((b[i++] & 0xc0) != 0x80)
 				return 0;
+		}
 	}
 
 	/* Reports operation failure. */

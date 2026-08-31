@@ -75,9 +75,9 @@ check(
 	const char *name)
 {
 	/* Handles the condition condition. */
-	if (condition)
+	if (condition) {
 		printf("SUSV4 PASS: %s\n", name);
-	else {
+	} else {
 		printf("SUSV4 FAIL: %s (errno=%d)\n", name, errno);
 		failures++;
 	}

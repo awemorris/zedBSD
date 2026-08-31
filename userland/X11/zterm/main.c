@@ -146,7 +146,7 @@ main(
 		/* Checks the terminal state. */
 		if (terminal.master >= 0 &&
 		    (descriptors[1].revents & (POLLIN | POLLHUP)) != 0) {
-						received = 0;
+			received = 0;
 			count = read(terminal.master, input, sizeof(input));
 
 			/* Checks the remaining item count. */
@@ -187,16 +187,17 @@ main(
 		if (terminal.child > 0 && waitpid(terminal.child, &status,
 						  WNOHANG) == terminal.child) {
 			/* Checks the operation status. */
-			if (WIFSIGNALED(status))
+			if (WIFSIGNALED(status)) {
 				snprintf(message, sizeof(message),
 					 "\r\nzterm: /bin/sh terminated by "
 					 "signal %d\r\n",
 					 WTERMSIG(status));
-			else
+			} else {
 				snprintf(message, sizeof(message),
 					 "\r\nzterm: /bin/sh exited (%d)\r\n",
 					 WIFEXITED(status) ? WEXITSTATUS(status)
 							   : -1);
+			}
 			terminal_message(&terminal, message);
 			redraw(&terminal);
 			close(terminal.master);
@@ -296,7 +297,6 @@ initialize(
 
 	/* Checks the terminal state. */
 	if (terminal->child < 0) {
-
 		snprintf(message_local, sizeof(message_local),
 			 "zterm: cannot start /bin/sh: %s\r\n",
 			 strerror(errno));
@@ -476,7 +476,7 @@ terminal_byte(
 	if (terminal->parser_state == 2) {
 		/* Classifies the current byte. */
 		if (byte >= '0' && byte <= '9') {
-						value = &terminal->parameters[terminal->parameter_index];
+			value = &terminal->parameters[terminal->parameter_index];
 
 			/* Validates the current value. */
 			if (*value < 0)
@@ -485,11 +485,10 @@ terminal_byte(
 		} else if (byte == ';' &&
 			   terminal->parameter_index + 1 < CSI_PARAMETERS)
 			terminal->parameter_index++;
-		else if (byte == '?')
-
+		else if (byte == '?') {
 			/* Returns the computed result. */
 			return;
-		else {
+		} else {
 			csi_dispatch(terminal, byte);
 			terminal->parser_state = 0;
 		}
@@ -511,7 +510,7 @@ terminal_byte(
 		if (terminal->cursor_column != 0)
 			terminal->cursor_column--;
 	} else if (byte == '\t') {
-				next = (terminal->cursor_column + 8U) & ~7U;
+		next = (terminal->cursor_column + 8U) & ~7U;
 		terminal->cursor_column =
 		    next < terminal->columns ? next : terminal->columns - 1U;
 	} else if (byte >= 0x20)
@@ -584,25 +583,27 @@ csi_dispatch(
 
 			/* Process each element required by the operation. */
 			for (row = terminal->cursor_row + 1U;
-			     row < terminal->rows; row++)
+			     row < terminal->rows; row++) {
 				erase_range(terminal, row, 0,
 					    terminal->columns - 1U);
+			}
 		}
 		break;
 	case 'K':
 		value = parameter(terminal, 0, 0);
 
 		/* Validates the current value. */
-		if (value == 1)
+		if (value == 1) {
 			erase_range(terminal, terminal->cursor_row, 0,
 				    terminal->cursor_column);
-		else if (value == 2)
+		} else if (value == 2) {
 			erase_range(terminal, terminal->cursor_row, 0,
 				    terminal->columns - 1U);
-		else
+		} else {
 			erase_range(terminal, terminal->cursor_row,
 				    terminal->cursor_column,
 				    terminal->columns - 1U);
+		}
 		break;
 	case 'm':
 		/* Process each remaining element. */
@@ -616,20 +617,20 @@ csi_dispatch(
 				terminal->foreground = 0xdcdde5;
 				terminal->background = 0x000000;
 			} else if (value == 7) {
-								swap = terminal->foreground;
+				swap = terminal->foreground;
 				terminal->foreground = terminal->background;
 				terminal->background = swap;
 			} else if (value >= 30 && value <= 37)
 				terminal->foreground = ansi_colors[value - 30];
 			else if (value >= 40 && value <= 47)
 				terminal->background = ansi_colors[value - 40];
-			else if (value >= 90 && value <= 97)
+			else if (value >= 90 && value <= 97) {
 				terminal->foreground =
 				    ansi_colors[value - 90 + 8];
-			else if (value >= 100 && value <= 107)
+			} else if (value >= 100 && value <= 107) {
 				terminal->background =
 				    ansi_colors[value - 100 + 8];
-			else if (value == 39)
+			} else if (value == 39)
 				terminal->foreground = 0xdcdde5;
 			else if (value == 49)
 				terminal->background = 0x000000;
@@ -719,8 +720,9 @@ utf8_byte(
 			terminal->utf8_value = byte & 0x07U;
 			terminal->utf8_minimum = 0x10000;
 			terminal->utf8_remaining = 3;
-		} else
+		} else {
 			put_codepoint(terminal, 0xfffd);
+		}
 
 		/* Returns the computed result. */
 		return;
@@ -739,7 +741,7 @@ utf8_byte(
 
 	/* Checks the terminal state. */
 	if (--terminal->utf8_remaining == 0) {
-				codepoint = terminal->utf8_value;
+		codepoint = terminal->utf8_value;
 
 		/* Handles the codepoint condition. */
 		if (codepoint < terminal->utf8_minimum ||
@@ -822,18 +824,20 @@ redraw(
 	/*
  * First restore the old cursor cell, then draw the cursor at its new
 	 * site. */
-	if (terminal->cursor_drawn)
+	if (terminal->cursor_drawn) {
 		damage(terminal, terminal->drawn_cursor_row,
 		       terminal->drawn_cursor_column,
 		       terminal->drawn_cursor_column);
+	}
 
 	/* Process each element required by the operation. */
-	for (row = 0; row < terminal->rows; row++)
-
+	for (row = 0; row < terminal->rows; row++) {
 		/* Checks the terminal state. */
-		if (terminal->dirty[row])
+		if (terminal->dirty[row]) {
 			draw_row(terminal, row, terminal->dirty_first[row],
 				 terminal->dirty_last[row]);
+		}
+	}
 	XSetForeground(terminal->display, terminal->gc, 0xffffff);
 	x_request(terminal);
 	XFillRectangle(terminal->display, terminal->window, terminal->gc,
@@ -908,7 +912,6 @@ draw_row(
 
 	/* Process each element required by the operation. */
 	for (column = first; column <= last;) {
-
 		count = 0;
 
 		/*
@@ -927,7 +930,6 @@ draw_row(
 		foreground = cell_at(terminal, column, row)->foreground;
 		scan = column;
 		while (scan <= last) {
-
 			cell = cell_at(terminal, scan, row);
 
 			/* Handles the cell condition. */
@@ -1035,18 +1037,19 @@ resize_terminal(
 	/* Process each element required by the operation. */
 	terminal->columns = columns;
 	terminal->rows = rows;
-	for (row = 0; row < rows; row++)
-
+	for (row = 0; row < rows; row++) {
 		/* Process each element required by the operation. */
 		for (column = 0; column < columns; column++)
 			blank_cell(terminal, column, row);
+	}
 
 	/* Process each element required by the operation. */
 	copy_columns = columns < old_columns ? columns : old_columns;
 	copy_rows = rows < old_rows ? rows : old_rows;
-	for (row = 0; row < copy_rows; row++)
+	for (row = 0; row < copy_rows; row++) {
 		memcpy(&terminal->cells[row * columns], &old[row * old_columns],
 		       (size_t)copy_columns * sizeof(*old));
+	}
 	free(old);
 
 	/* Checks the terminal state. */
@@ -1142,10 +1145,10 @@ send_key(
 			     (byte >= 'A' && byte <= 'Z')))
 				byte = (char)((byte & 0x1f));
 			sequence = &byte;
-		} else
-
+		} else {
 			/* Reports successful completion. */
 			return 0;
+		}
 		break;
 	}
 

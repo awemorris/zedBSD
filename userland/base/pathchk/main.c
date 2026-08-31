@@ -53,13 +53,13 @@ main(
 	}
 
 	/* Process each remaining command-line operand. */
-	for (; index < argc; index++)
-
+	for (; index < argc; index++) {
 		/* Validates the command-line arguments. */
 		if (!check_path(argv[index], portable)) {
 			command_error("pathchk", argv[index]);
 			failed = 1;
 		}
+	}
 
 	/* Returns the computed result. */
 	return failed;
@@ -75,6 +75,7 @@ check_path(
 	const char *component;
 	long path_limit;
 	long name_limit;
+	size_t length;
 	const unsigned char *byte;
 
 	component = path;
@@ -98,11 +99,9 @@ check_path(
 	}
 
 	/* Handles the portable condition. */
-	if (portable)
-
+	if (portable) {
 		/* Process each element required by the operation. */
-		for (byte = (const unsigned char *)path; *byte != '\0'; byte++)
-
+		for (byte = (const unsigned char *)path; *byte != '\0'; byte++) {
 			/* Handles a failed portable character operation. */
 			if (!portable_character(*byte)) {
 				errno = EINVAL;
@@ -110,12 +109,14 @@ check_path(
 				/* Reports successful completion. */
 				return 0;
 			}
+		}
+	}
 
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
-				end = strchr(component, '/');
-		size_t length =
-		    end == NULL ? strlen(component) : (size_t)(end - component);
+		end = strchr(component, '/');
+		length = end == NULL ? strlen(component)
+				     : (size_t)(end - component);
 
 		/* Checks the current data length. */
 		if (length > (size_t)name_limit) {

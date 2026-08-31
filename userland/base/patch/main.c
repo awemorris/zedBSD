@@ -59,7 +59,7 @@ main(
 		/* Selects the matching prefix. */
 		if (!strncmp(l, "+++ ", 4)) {
 			/* Continue while the operation condition remains true. */
-						e = l + 4;
+			e = l + 4;
 			q = e;
 			while (*q && *q != '\t' && *q != '\n' && *q != ' ')
 				q++;
@@ -75,9 +75,10 @@ main(
 			target[q - e] = 0;
 
 			/* Selects the matching prefix. */
-			if (!strncmp(target, "b/", 2))
+			if (!strncmp(target, "b/", 2)) {
 				memmove(target, target + 2,
 					strlen(target + 2) + 1);
+			}
 
 			/* Handles a failed strstr operation. */
 			if (target[0] == '/' || strstr(target, "../")) {

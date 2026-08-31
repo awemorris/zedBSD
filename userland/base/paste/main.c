@@ -63,12 +63,11 @@ main(
 	if (serial) {
 		/* Process each remaining command-line operand. */
 		for (; i < argc; i++) {
-						f = !strcmp(argv[i], "-") ? stdin : fopen(argv[i], "r");
-						l = NULL;
-						c = 0;
-			long n;
-						di = 0;
-						first = 1;
+			f = !strcmp(argv[i], "-") ? stdin : fopen(argv[i], "r");
+			l = NULL;
+			c = 0;
+			di = 0;
+			first = 1;
 
 			/* Checks the current file state. */
 			if (!f) {
@@ -101,10 +100,10 @@ main(
 		/* Returns the computed result. */
 		return function_result;
 	} else {
-				count = argc - i;
-				fs = calloc((size_t)count, sizeof(*fs));
-				ls = calloc((size_t)count, sizeof(*ls));
-				cs = calloc((size_t)count, sizeof(*cs));
+		count = argc - i;
+		fs = calloc((size_t)count, sizeof(*fs));
+		ls = calloc((size_t)count, sizeof(*ls));
+		cs = calloc((size_t)count, sizeof(*cs));
 
 		/* Handles the fs condition. */
 		if (!fs || !ls || !cs)
@@ -128,7 +127,7 @@ main(
 			/* Process each remaining element. */
 			active = 0;
 			for (j = 0; j < count; j++) {
-								n = command_read_line(fs[j], &ls[j], &cs[j]);
+				n = command_read_line(fs[j], &ls[j], &cs[j]);
 
 				/* Checks the current item count. */
 				if (n > 0) {

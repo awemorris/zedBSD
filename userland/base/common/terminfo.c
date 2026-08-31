@@ -41,11 +41,11 @@ terminfo_find(
 	size_t index;
 
 	/* Process each remaining element. */
-	for (index = 0; index < terminal->count; index++)
-
+	for (index = 0; index < terminal->count; index++) {
 		/* Selects the matching value. */
 		if (strcmp(terminal->capabilities[index].name, name) == 0)
 			return &terminal->capabilities[index];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -107,7 +107,6 @@ terminfo_load(
 
 	/* Process input until it is exhausted. */
 	while (fgets(line, sizeof(line), stream) != NULL) {
-
 		line_number++;
 
 		/* Handles a failed strchr operation. */
@@ -164,7 +163,6 @@ terminfo_load(
 				goto invalid;
 			capability->number = equals[0] - '0';
 		} else if (strcmp(text, "num") == 0) {
-
 			errno = 0;
 			capability->kind = TERMINFO_NUMBER;
 			capability->number = strtol(equals, &end, 10);
@@ -180,8 +178,9 @@ terminfo_load(
 			if (!decode_string(equals, capability->string,
 					   sizeof(capability->string)))
 				goto invalid;
-		} else
+		} else {
 			goto invalid;
+		}
 		terminal->count++;
 	}
 
@@ -232,7 +231,7 @@ terminfo_write_source(
 
 	/* Process each remaining element. */
 	for (index = 0; index < terminal->count; index++) {
-				capability = &terminal->capabilities[index];
+		capability = &terminal->capabilities[index];
 
 		/* Handles the capability condition. */
 		if (capability->kind == TERMINFO_BOOLEAN && !capability->number)
@@ -419,7 +418,7 @@ terminfo_expand(
 					goto invalid;
 				format++;
 			} else if (operation == '{') {
-									end_local = strchr(format, '}');
+				end_local = strchr(format, '}');
 
 				/* Handles the end local availability. */
 				if (end_local == NULL)
@@ -605,13 +604,13 @@ terminal_name_valid(
 		return 0;
 
 	/* Process each element required by the operation. */
-	for (; *name != '\0'; name++)
-
+	for (; *name != '\0'; name++) {
 		/* Handles a failed isalnum operation. */
 		if (!isalnum((unsigned char)*name) && *name != '-' &&
 		    *name != '_' && *name != '.' && *name != '+')
 			/* Reports successful completion. */
 			return 0;
+	}
 
 	/* Reports operation failure. */
 	return 1;
@@ -654,7 +653,6 @@ decode_string(
 
 	/* Continue while the operation condition remains true. */
 	while (*source != '\0') {
-
 		value = (unsigned char)*source++;
 
 		/* Validates the current value. */
@@ -698,8 +696,8 @@ decode_string(
 								  source[1]));
 				source += 2;
 			} else if (value >= '0' && value <= '7') {
-								number = value - '0';
-								digits = 1;
+				number = value - '0';
+				digits = 1;
 
 				/* Continue while the operation condition remains true. */
 				while (digits < 3U && *source >= '0' &&
@@ -754,7 +752,6 @@ write_encoded(
 
 	/* Process each element required by the operation. */
 	for (; *text != '\0'; text++) {
-
 		value = (unsigned char)*text;
 
 		/* Validates the current value. */

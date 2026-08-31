@@ -53,8 +53,8 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (i = 1; i < argc; ++i) {
-				on = argv[i][0] != '-';
-				n = on ? argv[i] : argv[i] + 1;
+		on = argv[i][0] != '-';
+		n = on ? argv[i] : argv[i] + 1;
 
 		/* Selects the matching value. */
 		if (!strcmp(n, "echo")) {

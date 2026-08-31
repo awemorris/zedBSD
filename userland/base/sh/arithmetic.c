@@ -100,9 +100,10 @@ parse_conditional(
 	if (!parse_conditional(parser, &true_value) || !accept(parser, ":") ||
 	    !parse_conditional(parser, &false_value)) {
 		/* Handles an operation failure. */
-		if (parser->error == NULL)
+		if (parser->error == NULL) {
 			parser->error =
 			    "invalid conditional arithmetic expression";
+		}
 
 		/* Reports successful completion. */
 		return 0;
@@ -316,10 +317,10 @@ parse_relation(
 			if (!parse_shift(p, &v))
 				return 0;
 			*r = *r > v;
-		} else
-
+		} else {
 			/* Reports operation failure. */
 			return 1;
+		}
 	}
 }
 
@@ -433,10 +434,10 @@ parse_multiply(
 				return 0;
 			}
 			*r %= v;
-		} else
-
+		} else {
 			/* Reports operation failure. */
 			return 1;
+		}
 	}
 }
 
@@ -577,7 +578,7 @@ parse_primary(
 	if ((*parser->cursor >= 'A' && *parser->cursor <= 'Z') ||
 	    (*parser->cursor >= 'a' && *parser->cursor <= 'z') ||
 	    *parser->cursor == '_') {
-				start = parser->cursor;
+		start = parser->cursor;
 
 		/* Continue while the operation condition remains true. */
 		while ((*parser->cursor >= 'A' && *parser->cursor <= 'Z') ||

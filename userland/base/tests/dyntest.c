@@ -263,11 +263,11 @@ main(
 		return 36;
 
 	/* Process each element required by the operation. */
-	for (reload_iteration = 0; reload_iteration < 64; reload_iteration++)
-
+	for (reload_iteration = 0; reload_iteration < 64; reload_iteration++) {
 		/* Handles a failed dlclose operation. */
 		if (dlclose(exhausted_handles[reload_iteration]) != 0)
 			return 37;
+	}
 	handle = dlopen("libc.so", RTLD_NOW | RTLD_LOCAL);
 
 	/* Handles a failed dlclose operation. */

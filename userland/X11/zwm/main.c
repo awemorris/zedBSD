@@ -146,7 +146,7 @@ main(
 
 	/* Validates the command-line arguments. */
 	if (argc > 1) {
-				pid = fork();
+		pid = fork();
 
 		/* Handles the pid condition. */
 		if (pid == 0) {
@@ -165,7 +165,7 @@ main(
 		if (event.type == MapRequest) {
 			manage(display, root, event.xmaprequest.window);
 		} else if (event.type == DestroyNotify) {
-						frame_local = by_client(event.xany.window);
+			frame_local = by_client(event.xany.window);
 
 			/* Handles the frame local availability. */
 			if (frame_local != NULL) {
@@ -173,7 +173,7 @@ main(
 				unmanage(display, frame_local);
 			}
 		} else if (event.type == Expose) {
-						frame_local1 = by_frame(event.xexpose.window);
+			frame_local1 = by_frame(event.xexpose.window);
 
 			/* Handles the event condition. */
 			if (event.xexpose.window == root) {
@@ -186,13 +186,13 @@ main(
 				decorate(display, frame_local1);
 			}
 		} else if (event.type == ButtonPress) {
-						frame_local2 = by_frame(event.xbutton.window);
+			frame_local2 = by_frame(event.xbutton.window);
 
 			/* Handles the frame local2 availability. */
 			if (frame_local2 != NULL && event.xbutton.keycode == 1) {
-								local_x = event.xbutton.x_root - frame_local2->x;
-								local_y = event.xbutton.y_root - frame_local2->y;
-								fw = frame_width(frame_local2);
+				local_x = event.xbutton.x_root - frame_local2->x;
+				local_y = event.xbutton.y_root - frame_local2->y;
+				fw = frame_width(frame_local2);
 
 				activate(display, frame_local2);
 
@@ -215,20 +215,21 @@ main(
 				    resize_edges_at(frame_local2, local_x, local_y);
 			}
 		} else if (event.type == MotionNotify && drag == NULL) {
-						frame_local3 = by_frame(event.xmotion.window);
+			frame_local3 = by_frame(event.xmotion.window);
 
 			/* Handles the frame local3 availability. */
-			if (frame_local3 != NULL)
+			if (frame_local3 != NULL) {
 				set_resize_cursor(
 				    display, frame_local3,
 				    event.xmotion.x_root - frame_local3->x,
 				    event.xmotion.y_root - frame_local3->y);
+			}
 		} else if (event.type == MotionNotify) {
-						dx = event.xmotion.x_root - drag_start_x;
-						dy = event.xmotion.y_root - drag_start_y;
-						x = drag_frame_x;
+			dx = event.xmotion.x_root - drag_start_x;
+			dy = event.xmotion.y_root - drag_start_y;
+			x = drag_frame_x;
 			y = drag_frame_y;
-						width = (int)drag_width;
+			width = (int)drag_width;
 			height = (int)drag_height;
 
 			/* Handles the drag edges condition. */
@@ -259,18 +260,20 @@ main(
 				/* Handles the width condition. */
 				if (width < (int)MIN_CLIENT_WIDTH) {
 					/* Handles the drag edges condition. */
-					if (drag_edges & EDGE_LEFT)
+					if (drag_edges & EDGE_LEFT) {
 						x -= (int)MIN_CLIENT_WIDTH -
 						     width;
+					}
 					width = MIN_CLIENT_WIDTH;
 				}
 
 				/* Handles the height condition. */
 				if (height < (int)MIN_CLIENT_HEIGHT) {
 					/* Handles the drag edges condition. */
-					if (drag_edges & EDGE_TOP)
+					if (drag_edges & EDGE_TOP) {
 						y -= (int)MIN_CLIENT_HEIGHT -
 						     height;
+					}
 					height = MIN_CLIENT_HEIGHT;
 				}
 			}
@@ -286,24 +289,26 @@ main(
 			drag->height = (unsigned)height;
 
 			/* Handles the drag edges condition. */
-			if (drag_edges == 0)
+			if (drag_edges == 0) {
 				XMoveResizeWindow(display, drag->frame, drag->x,
 						  drag->y, frame_width(drag),
 						  frame_height(drag));
-			else
+			} else {
 				XzedMoveResizeWindowBuffered(
 				    display, drag->frame, drag->x, drag->y,
 				    frame_width(drag), frame_height(drag));
+			}
 		} else if (event.type == ButtonRelease) {
 			/* Handles the drag availability. */
 			if (drag != NULL) {
 				/* Handles the drag edges condition. */
-				if (drag_edges != 0)
+				if (drag_edges != 0) {
 					XMoveResizeWindow(display, drag->client,
 							  drag->x + CLIENT_X,
 							  drag->y + CLIENT_Y,
 							  drag->width,
 							  drag->height);
+				}
 				decorate(display, drag);
 				set_resize_cursor(
 				    display, drag,
@@ -347,7 +352,6 @@ load_background(
 	/* Process input until it is exhausted. */
 	file = fopen("/etc/Xzed/zwm.conf", "r");
 	while (file != NULL && fgets(line, sizeof(line), file) != NULL) {
-
 		p = line;
 
 		/* Continue while the operation condition remains true. */
@@ -571,7 +575,6 @@ read_entire_file(
 		return 0;
 	}
 	while (got < (size_t)st.st_size) {
-
 		nread = read(fd, data + got, (size_t)st.st_size - got);
 
 		/* Handles the reported system error. */
@@ -696,7 +699,6 @@ load_xpm(
 
 	/* Process each element required by the operation. */
 	for (i = 0; i < ncolors; i++) {
-
 		quoted = next_quoted(&cursor, end);
 
 		/* Handles the quoted availability. */
@@ -752,14 +754,12 @@ load_xpm(
 	 */
 	/* Process each element required by the operation. */
 	for (i = 0; i < ncolors; i++) {
-
 		count = 0;
 
 		XSetForeground(display, gc, colors[i].pixel);
 
 		/* Process each element required by the operation. */
 		for (y = 0; y < height; y++) {
-
 			x = 0;
 
 			/* Continue while the operation condition remains true. */
@@ -1004,11 +1004,11 @@ manage(
 		goto fail;
 
 	/* Handles the title font availability. */
-	if (title_font != NULL)
-
+	if (title_font != NULL) {
 		/* Handles a failed XSetFont operation. */
 		if (XSetFont(display, frame->gc, title_font->fid) != 0)
 			goto fail;
+	}
 
 	/* Handles a failed XSelectInput operation. */
 	if (XSelectInput(display, frame->frame,
@@ -1063,11 +1063,11 @@ by_client(
 	unsigned i;
 
 	/* Process each remaining element. */
-	for (i = 0; i < frame_count; i++)
-
+	for (i = 0; i < frame_count; i++) {
 		/* Handles the frames condition. */
 		if (frames[i].client == window)
 			return &frames[i];
+	}
 
 	/* Reports that no result is available. */
 	return NULL;
@@ -1224,9 +1224,10 @@ unmanage(
 		(void)XDestroyWindow(display, frame->frame);
 
 	/* Checks the current index. */
-	if (index + 1U < frame_count)
+	if (index + 1U < frame_count) {
 		memmove(&frames[index], &frames[index + 1U],
 			(frame_count - index - 1U) * sizeof(frames[0]));
+	}
 	frame_count--;
 	memset(&frames[frame_count], 0, sizeof(frames[0]));
 	(void)XSync(display, False);

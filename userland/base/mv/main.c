@@ -60,8 +60,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (i = 1; i < argc - 1; i++) {
-
-				to = argv[argc - 1];
+		to = argv[argc - 1];
 
 		/* Handles the isdir condition. */
 		if (isdir) {

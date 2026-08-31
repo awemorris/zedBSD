@@ -52,7 +52,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (; i < argc; i++) {
-				fd = open(argv[i], O_WRONLY | O_CREAT, 0666);
+		fd = open(argv[i], O_WRONLY | O_CREAT, 0666);
 
 		/* Validates the command-line arguments. */
 		if (fd < 0 ||

@@ -56,7 +56,7 @@ main(
 
 	/* Process each remaining command-line operand. */
 	for (; i < argc; i++) {
-				fd = !strcmp(argv[i], "-") ? 0 : open(argv[i], O_RDONLY);
+		fd = !strcmp(argv[i], "-") ? 0 : open(argv[i], O_RDONLY);
 
 		/* Handles a failed tail fd operation. */
 		if (fd < 0 || tail_fd(fd, lines)) {
@@ -95,7 +95,6 @@ tail_fd(
 	used = 0;
 	capacity = 0;
 	for (;;) {
-
 		n = read(fd, buffer, sizeof(buffer));
 
 		/* Checks the current item count. */

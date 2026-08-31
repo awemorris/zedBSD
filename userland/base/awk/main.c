@@ -51,10 +51,10 @@ main(
 	prog = argv[i++];
 
 	/* Selects the matching value. */
-	if (!strcmp(prog, "{print}") || !strcmp(prog, "{ print }"))
+	if (!strcmp(prog, "{print}") || !strcmp(prog, "{ print }")) {
 		whole = 1;
-	else {
-				p_local = strstr(prog, "print $");
+	} else {
+		p_local = strstr(prog, "print $");
 
 		/* Handles the p local condition. */
 		if (p_local)
@@ -85,12 +85,12 @@ main(
 		}
 		while ((n = command_read_line(f, &l, &cap)) > 0) {
 			/* Handles the whole condition. */
-			if (whole)
+			if (whole) {
 				fwrite(l, 1, (size_t)n, stdout);
-			else {
+			} else {
 				/* Continue while the operation condition remains true. */
-								p_local1 = l;
-								k = 1;
+				p_local1 = l;
+				k = 1;
 				while (isspace((unsigned char)*p_local1))
 					p_local1++;
 

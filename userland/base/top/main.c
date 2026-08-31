@@ -67,9 +67,9 @@ main(
 			batch = 1;
 		else if (!strcmp(argv[i], "-n") && i + 1 < argc)
 			iterations = atoi(argv[++i]);
-		else if (!strcmp(argv[i], "-d") && i + 1 < argc)
+		else if (!strcmp(argv[i], "-d") && i + 1 < argc) {
 			delay = atoi(argv[++i]) * 1000;
-		else {
+		} else {
 			fprintf(stderr,
 				"usage: top [-b] [-n count] [-d seconds]\n");
 
@@ -200,8 +200,7 @@ draw(
 
 	/* Process each remaining element. */
 	for (i = 0; i < count; i++) {
-
-				u = user_name(p[i].uid, ub);
+		u = user_name(p[i].uid, ub);
 		human(p[i].virtual_bytes, virt);
 		printf("%7d %-8.8s  20   0 %7s      0      0 %c   0.0  0.0   "
 		       "0:00.00 %s\n",

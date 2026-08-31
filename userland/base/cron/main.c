@@ -58,7 +58,6 @@ main(
 	/* Continue while the operation condition remains true. */
 	last_minute = (time_t)-1;
 	while (!stopping) {
-
 		now = time(NULL);
 
 		/* Handles the now condition. */
@@ -93,7 +92,6 @@ run_periodic(
 
 	/* Process each directory entry. */
 	while ((entry = readdir(directory)) != NULL) {
-
 		uid = strtoul(entry->d_name, &end, 10);
 
 		/* Handles the entry condition. */
@@ -128,7 +126,6 @@ run_crontab(
 
 	/* Process input until it is exhausted. */
 	while (fgets(line, sizeof(line), stream) != NULL) {
-
 		cursor = line;
 		line_number++;
 
@@ -261,7 +258,6 @@ run_at_jobs(
 
 	/* Process each directory entry. */
 	while ((entry = readdir(directory)) != NULL) {
-
 		when = strtoll(entry->d_name, &end, 10);
 		used = 0;
 

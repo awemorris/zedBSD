@@ -114,7 +114,6 @@ parse_or(
 
 	/* Continue while the operation condition remains true. */
 	while (left.text != NULL && accept(parser, "|")) {
-
 		right = parse_and(parser);
 
 		/* Handles the text availability. */
@@ -162,7 +161,6 @@ parse_and(
 
 	/* Continue while the operation condition remains true. */
 	while (left.text != NULL && accept(parser, "&")) {
-
 		right = parse_comparison(parser);
 
 		/* Handles the text availability. */
@@ -212,8 +210,8 @@ parse_comparison(
 	/* Process each remaining command-line operand. */
 	while (left.text != NULL && parser->index < parser->argc &&
 	       is_comparison(parser->argv[parser->index])) {
-				operation = parser->argv[parser->index++];
-				right = parse_add(parser);
+		operation = parser->argv[parser->index++];
+		right = parse_add(parser);
 
 		/* Handles the text availability. */
 		if (right.text == NULL) {
@@ -261,7 +259,7 @@ parse_add(
 
 	/* Process each remaining command-line operand. */
 	while (left.text != NULL && parser->index < parser->argc) {
-				operation = parser->argv[parser->index];
+		operation = parser->argv[parser->index];
 
 		/* Selects the matching value. */
 		if (strcmp(operation, "+") != 0 && strcmp(operation, "-") != 0)
@@ -342,9 +340,9 @@ parse_multiply(
 
 	/* Process each remaining command-line operand. */
 	while (left.text != NULL && parser->index < parser->argc) {
-				operation = parser->argv[parser->index];
+		operation = parser->argv[parser->index];
 
-				failed = 0;
+		failed = 0;
 
 		/* Selects the matching value. */
 		if (strcmp(operation, "*") != 0 &&
@@ -427,7 +425,6 @@ parse_match(
 
 	/* Continue while the operation condition remains true. */
 	while (left.text != NULL && accept(parser, ":")) {
-
 		right = parse_primary(parser);
 
 		/* Handles the text availability. */
@@ -587,7 +584,6 @@ match_value(
 
 	/* Checks the operation status. */
 	if (status != 0) {
-
 		(void)regerror(status, &expression, message_local, sizeof(message_local));
 		fprintf(stderr, "expr: regular expression: %s\n", message_local);
 		parser->status = 2;
@@ -613,16 +609,15 @@ match_value(
 		result = expression.re_nsub != 0 ? string_value("")
 						 : integer_value(0);
 	} else if (status != 0) {
-
 		(void)regerror(status, &expression, message_local1, sizeof(message_local1));
 		fprintf(stderr, "expr: regular expression: %s\n", message_local1);
 		parser->status = 3;
 	} else if (expression.re_nsub != 0) {
 		/* Handles the matches condition. */
-		if (matches[1].rm_so < 0)
+		if (matches[1].rm_so < 0) {
 			result = string_value("");
-		else {
-						length = (size_t)(matches[1].rm_eo - matches[1].rm_so);
+		} else {
+			length = (size_t)(matches[1].rm_eo - matches[1].rm_so);
 
 			result.text = malloc(length + 1U);
 
@@ -682,7 +677,6 @@ character_count(
 
 	/* Process each remaining element. */
 	while (offset < byte_count) {
-
 		used = mbrtowc(&character, text + offset,
 				      byte_count - offset, &state);
 
@@ -751,7 +745,6 @@ integer_parse(
 
 	/* Continue while the operation condition remains true. */
 	while (*cursor >= '0' && *cursor <= '9') {
-
 		digit = (unsigned)(*cursor++ - '0');
 
 		/* Validates the current value. */
