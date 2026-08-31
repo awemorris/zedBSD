@@ -1,5 +1,16 @@
 /* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the zedBSD tee userland command.
+ */
+
 #include "userland/base/common/command.h"
 
 #include <errno.h>
@@ -22,13 +33,15 @@ struct tee_options {
 	int ignore_interrupt;
 };
 
-static void tee_usage(void);
 static int tee_parse_options(int argc, char **argv, struct tee_options *options);
+static void tee_usage(void);
 static int tee_open_outputs(struct tee_output *outputs, char **names, size_t count, int append);
 static int tee_write_output(struct tee_output *output, const void *data, size_t size);
 static int tee_close_outputs(struct tee_output *outputs, size_t count);
 
-/* Copies standard input to standard output and every named file. */
+/*
+ * Copies standard input to standard output and every named file.
+ */
 int
 main(
 	int argc,
@@ -47,32 +60,45 @@ main(
 
 	memset(&options, 0, sizeof(options));
 	first_operand = tee_parse_options(argc, argv, &options);
+
+	/* Handles the first operand condition. */
 	if (first_operand < 0) {
 		tee_usage();
 
+		/* Reports operation failure. */
 		return 1;
 	}
 
+	/* Handles a failed signal operation. */
 	if (options.ignore_interrupt &&
 	    signal(SIGINT, (void (*)(int))SIG_IGN) == SIG_ERR) {
 		command_error("tee", "SIGINT");
 
+		/* Reports operation failure. */
 		return 1;
 	}
 
 	output_count = (size_t)(argc - first_operand);
+
+	/* Handles the output count condition. */
 	if (output_count > SIZE_MAX / sizeof(*outputs)) {
 		errno = EOVERFLOW;
 		command_error("tee", "output list");
 
+		/* Reports operation failure. */
 		return 1;
 	}
 	outputs = NULL;
+
+	/* Handles the output count condition. */
 	if (output_count != 0) {
 		outputs = calloc(output_count, sizeof(*outputs));
+
+		/* Handles the outputs availability. */
 		if (outputs == NULL) {
 			command_error("tee", "output list");
 
+			/* Reports operation failure. */
 			return 1;
 		}
 	}
@@ -87,21 +113,30 @@ main(
 	/* Forward each unbuffered input chunk to every still-active output. */
 	for (;;) {
 		count = read(STDIN_FILENO, buffer, sizeof(buffer));
+
+		/* Handles the reported system error. */
 		if (count < 0 && errno == EINTR)
 			continue;
+
+		/* Checks the remaining item count. */
 		if (count < 0) {
 			command_error("tee", "standard input");
 			failed = 1;
 			break;
 		}
+
+		/* Checks the remaining item count. */
 		if (count == 0)
 			break;
 
+		/* Handles the stdout active condition. */
 		if (stdout_active) {
 			status = command_write_all(
 				STDOUT_FILENO,
 				buffer,
 				(size_t)count);
+
+			/* Checks the operation status. */
 			if (status != 0) {
 				command_error("tee", "standard output");
 				stdout_active = 0;
@@ -115,25 +150,22 @@ main(
 				&outputs[index],
 				buffer,
 				(size_t)count);
+
+			/* Checks the operation status. */
 			if (status != 0)
 				failed = 1;
 		}
 	}
 
 	status = tee_close_outputs(outputs, output_count);
+
+	/* Checks the operation status. */
 	if (status != 0)
 		failed = 1;
 	free(outputs);
 
+	/* Returns the computed result. */
 	return failed;
-}
-
-/* Prints the standard option synopsis. */
-static void
-tee_usage(
-	void)
-{
-	fprintf(stderr, "usage: tee [-ai] [file ...]\n");
 }
 
 /* Parses append and interrupt-handling modes. */
@@ -149,6 +181,7 @@ tee_parse_options(
 
 	/* Accept combined and repeated standard options. */
 	while ((option = getopt(argc, argv, "ai")) != -1) {
+		/* Dispatch the selected command-line option. */
 		switch (option) {
 		case 'a':
 			options->append = 1;
@@ -157,11 +190,21 @@ tee_parse_options(
 			options->ignore_interrupt = 1;
 			break;
 		default:
+			/* Reports operation failure. */
 			return -1;
 		}
 	}
 
+	/* Returns the computed result. */
 	return optind;
+}
+
+/* Prints the standard option synopsis. */
+static void
+tee_usage(
+	void)
+{
+	fprintf(stderr, "usage: tee [-ai] [file ...]\n");
 }
 
 /* Opens every file operand while retaining failures in the final status. */
@@ -177,6 +220,8 @@ tee_open_outputs(
 	int failed;
 
 	flags = O_WRONLY | O_CREAT;
+
+	/* Handles the append condition. */
 	if (append)
 		flags |= O_APPEND;
 	else
@@ -187,6 +232,8 @@ tee_open_outputs(
 	for (index = 0; index < count; index++) {
 		outputs[index].name = names[index];
 		outputs[index].descriptor = open(names[index], flags, 0666);
+
+		/* Handles the outputs condition. */
 		if (outputs[index].descriptor < 0) {
 			command_error("tee", names[index]);
 			failed = 1;
@@ -195,6 +242,7 @@ tee_open_outputs(
 		}
 	}
 
+	/* Returns the computed result. */
 	return failed;
 }
 
@@ -208,10 +256,13 @@ tee_write_output(
 	int saved;
 	int status;
 
+	/* Handles the output condition. */
 	if (!output->active)
 		return 0;
 
 	status = command_write_all(output->descriptor, data, size);
+
+	/* Checks the operation status. */
 	if (status == 0)
 		return 0;
 
@@ -221,6 +272,7 @@ tee_write_output(
 	errno = saved;
 	command_error("tee", output->name);
 
+	/* Reports operation failure. */
 	return -1;
 }
 
@@ -238,16 +290,20 @@ tee_close_outputs(
 
 	/* Close all active outputs even after an earlier close fails. */
 	for (index = 0; index < count; index++) {
+		/* Handles the outputs condition. */
 		if (!outputs[index].active)
 			continue;
 
 		outputs[index].active = 0;
 		status = close(outputs[index].descriptor);
+
+		/* Checks the operation status. */
 		if (status != 0) {
 			command_error("tee", outputs[index].name);
 			failed = 1;
 		}
 	}
 
+	/* Returns the computed result. */
 	return failed;
 }

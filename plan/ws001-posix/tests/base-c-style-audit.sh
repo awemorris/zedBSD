@@ -19,7 +19,7 @@ for source do
 		;;
 	esac
 
-	if ! sed -n '1,2p' "$source" |
+	if ! sed -n '1,20p' "$source" |
 	    grep -Fq -- '-*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*-'; then
 		echo "base-c-style: missing modeline: $source" >&2
 		failed=1

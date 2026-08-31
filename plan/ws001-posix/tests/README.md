@@ -25,6 +25,9 @@ those paths.
 | `ws001-p016` | `run-lpd-host-test.sh` plus `fake-lpd-test.py`; `qemu-base-utility-smoke.sh` proves the native guest binary/error path while guest networking remains a handoff |
 | `ws001-p017` | `run-cmp-host-test.sh` and the shared `qemu-base-utility-smoke.sh` native guest cell |
 | `ws001-p018` | `run-tee-host-test.sh` and the shared `qemu-base-utility-smoke.sh` native guest cell |
+| `ws001-p019` | `userland-file-header-audit.py`, `userland-file-header-audit-test.sh`, `migrate-userland-file-headers.py`, the deterministic 269-file inventory and body hashes, assembler preprocessing, and the configured build gate |
+| `ws001-p020` | `userland-c-style-audit.py`, `userland-c-style-audit-test.sh`, `userland-c-body-audit.py`, three idempotent refactoring tools, the deterministic 258-file review ledger, Phase 19 header regression, declaration-after-statement compiler gate, and configured build; Phase is honestly uncleared by recorded body/semantic residuals |
+| `ws001-p021` | `refactor-userland-ansi-c.py`, `refactor-userland-semantic-layout.py`, the extended zero-residual body audit and `userland-c-body-audit-test.sh`, the 269-file header gate, structural/header fixtures, the 258-row review ledger, configured `make -j16`, and whitespace validation; q005 adds loop-preparation paragraphs, mandatory comment gaps, decision/return comments, and explicit call results across all implementations |
 
 When a new Phase fixes a ledger item, add its normative case, failure case,
 executable path, and environment here before marking the row reviewed.

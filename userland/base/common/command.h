@@ -1,5 +1,16 @@
 /* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Declares shared userland command support.
+ */
+
 #ifndef ZEDBSD_USERLAND_COMMON_COMMAND_H
 #define ZEDBSD_USERLAND_COMMON_COMMAND_H
 

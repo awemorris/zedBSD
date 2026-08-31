@@ -1,5 +1,16 @@
 /* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the zedBSD userland lpd client component.
+ */
+
 #include "userland/base/lp/lpd-client.h"
 
 #include "userland/base/common/command.h"
@@ -16,17 +27,19 @@
 #define LPD_LINE_MAX 512
 #define LPD_IO_TIMEOUT_SECONDS 15
 
-static int lpd_component_valid(const char *text, size_t maximum);
 static int lpd_copy_component(char *output, size_t capacity, const char *input, size_t length);
+static int lpd_component_valid(const char *text, size_t maximum);
+static int lpd_build_control(char **output, size_t *size, const char *host, const char *user, const char *title, const char *source_name, const char *data_name, unsigned copies, int mail);
 static int lpd_connect(const struct lpd_destination *destination);
-static int lpd_read_ack(int descriptor);
 static int lpd_write_command(int descriptor, unsigned char command, const char *argument);
+static int lpd_read_ack(int descriptor);
+static int lpd_write_file_record(int descriptor, unsigned char command, const char *name, int input, uint64_t size);
 static int lpd_write_record_header(int descriptor, unsigned char command, uint64_t size, const char *name);
 static int lpd_write_memory_record(int descriptor, unsigned char command, const char *name, const void *data, size_t size);
-static int lpd_write_file_record(int descriptor, unsigned char command, const char *name, int input, uint64_t size);
-static int lpd_build_control(char **output, size_t *size, const char *host, const char *user, const char *title, const char *source_name, const char *data_name, unsigned copies, int mail);
 
-/* Parses a direct LPD destination name. */
+/*
+ * Parses a direct LPD destination name.
+ */
 int
 lpd_parse_destination(
 	const char *text,
@@ -41,17 +54,22 @@ lpd_parse_destination(
 	char *end;
 	int status;
 
+	/* Handles the text availability. */
 	if (text == NULL || result == NULL) {
 		errno = EINVAL;
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
 	slash = strchr(text, '/');
+
+	/* Handles a failed strchr operation. */
 	if (slash == NULL || slash == text || slash[1] == '\0' ||
 	    strchr(slash + 1, '/') != NULL) {
 		errno = EINVAL;
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
@@ -61,34 +79,46 @@ lpd_parse_destination(
 		sizeof(result->queue),
 		slash + 1,
 		queue_length);
+
+	/* Checks the operation status. */
 	if (status != 0)
 		return -1;
 
 	colon = memchr(text, ':', (size_t)(slash - text));
+
+	/* Handles the colon availability. */
 	if (colon == NULL) {
 		host_length = (size_t)(slash - text);
 		port = "515";
 	} else {
+		/* Handles a failed memchr operation. */
 		if (memchr(colon + 1, ':', (size_t)(slash - colon - 1)) != NULL) {
 			errno = EINVAL;
 
+			/* Reports operation failure. */
 			return -1;
 		}
 
 		host_length = (size_t)(colon - text);
 		port = colon + 1;
+
+		/* Handles the port condition. */
 		if (port == slash) {
 			errno = EINVAL;
 
+			/* Reports operation failure. */
 			return -1;
 		}
 
 		errno = 0;
 		port_value = strtoul(port, &end, 10);
+
+		/* Handles the reported system error. */
 		if (errno != 0 || end != slash || port_value == 0 ||
 		    port_value > 65535UL) {
 			errno = EINVAL;
 
+			/* Reports operation failure. */
 			return -1;
 		}
 	}
@@ -98,16 +128,22 @@ lpd_parse_destination(
 		sizeof(result->host),
 		text,
 		host_length);
+
+	/* Checks the operation status. */
 	if (status != 0)
 		return -1;
 
+	/* Handles the colon availability. */
 	if (colon == NULL) {
 		strcpy(result->service, port);
 	} else {
 		host_length = (size_t)(slash - port);
+
+		/* Handles the host length condition. */
 		if (host_length >= sizeof(result->service)) {
 			errno = EINVAL;
 
+			/* Reports operation failure. */
 			return -1;
 		}
 
@@ -115,10 +151,13 @@ lpd_parse_destination(
 		result->service[host_length] = '\0';
 	}
 
+	/* Reports successful completion. */
 	return 0;
 }
 
-/* Submits one staged PDF as an LPD job. */
+/*
+ * Submits one staged PDF as an LPD job.
+ */
 int
 lpd_submit(
 	const struct lpd_destination *destination,
@@ -140,10 +179,12 @@ lpd_submit(
 	int result;
 	int saved;
 
+	/* Handles the destination availability. */
 	if (destination == NULL || input < 0 || host == NULL || user == NULL ||
 	    title == NULL || source_name == NULL || copies == 0) {
 		errno = EINVAL;
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
@@ -153,9 +194,12 @@ lpd_submit(
 		"cfA%03u%s",
 		sequence % 1000U,
 		host);
+
+	/* Checks the operation result. */
 	if (result < 0 || (size_t)result >= sizeof(control_name)) {
 		errno = EOVERFLOW;
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
@@ -165,9 +209,12 @@ lpd_submit(
 		"dfA%03u%s",
 		sequence % 1000U,
 		host);
+
+	/* Checks the operation result. */
 	if (result < 0 || (size_t)result >= sizeof(data_name)) {
 		errno = EOVERFLOW;
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
@@ -181,17 +228,24 @@ lpd_submit(
 		data_name,
 		copies,
 		mail);
+
+	/* Checks the operation result. */
 	if (result != 0)
 		return -1;
 
 	descriptor = lpd_connect(destination);
+
+	/* Checks the file descriptor. */
 	if (descriptor < 0) {
 		free(control);
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
 	result = lpd_write_command(descriptor, 2, destination->queue);
+
+	/* Checks the operation result. */
 	if (result == 0) {
 		result = lpd_write_file_record(
 			descriptor,
@@ -200,6 +254,8 @@ lpd_submit(
 			input,
 			size);
 	}
+
+	/* Checks the operation result. */
 	if (result == 0) {
 		result = lpd_write_memory_record(
 			descriptor,
@@ -211,40 +267,16 @@ lpd_submit(
 
 	saved = errno;
 	free(control);
+
+	/* Handles a failed close operation. */
 	if (close(descriptor) != 0 && result == 0) {
 		result = -1;
 		saved = errno;
 	}
 	errno = saved;
 
+	/* Returns the computed result. */
 	return result;
-}
-
-/* Checks an LPD control-field component. */
-static int
-lpd_component_valid(
-	const char *text,
-	size_t maximum)
-{
-	size_t length;
-	size_t index;
-	unsigned char value;
-
-	if (text == NULL || *text == '\0')
-		return 0;
-
-	length = strlen(text);
-	if (length > maximum)
-		return 0;
-
-	/* Reject control characters and protocol separators. */
-	for (index = 0; index < length; index++) {
-		value = (unsigned char)text[index];
-		if (value < 0x21U || value > 0x7eU || value == '/')
-			return 0;
-	}
-
-	return 1;
 }
 
 /* Copies one validated destination component. */
@@ -257,22 +289,183 @@ lpd_copy_component(
 {
 	char temporary[LPD_HOST_MAX + 1];
 
+	/* Checks the current data length. */
 	if (length == 0 || length >= capacity || length >= sizeof(temporary)) {
 		errno = EINVAL;
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
 	memcpy(temporary, input, length);
 	temporary[length] = '\0';
+
+	/* Handles a failed lpd component valid operation. */
 	if (!lpd_component_valid(temporary, capacity - 1)) {
 		errno = EINVAL;
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
 	memcpy(output, temporary, length + 1);
 
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Checks an LPD control-field component. */
+static int
+lpd_component_valid(
+	const char *text,
+	size_t maximum)
+{
+	size_t length;
+	size_t index;
+	unsigned char value;
+
+	/* Handles the text availability. */
+	if (text == NULL || *text == '\0')
+		return 0;
+
+	length = strlen(text);
+
+	/* Checks the current data length. */
+	if (length > maximum)
+		return 0;
+
+	/* Reject control characters and protocol separators. */
+	for (index = 0; index < length; index++) {
+		value = (unsigned char)text[index];
+
+		/* Validates the current value. */
+		if (value < 0x21U || value > 0x7eU || value == '/')
+			return 0;
+	}
+
+	/* Reports operation failure. */
+	return 1;
+}
+
+/* Builds the bounded LPD control-file payload. */
+static int
+lpd_build_control(
+	char **output,
+	size_t *size,
+	const char *host,
+	const char *user,
+	const char *title,
+	const char *source_name,
+	const char *data_name,
+	unsigned copies,
+	int mail)
+{
+	char *control;
+	size_t capacity;
+	size_t used;
+	unsigned copy;
+	int length;
+
+	/* Handles a failed lpd component valid operation. */
+	if (!lpd_component_valid(host, LPD_HOST_MAX) ||
+	    !lpd_component_valid(user, 63) ||
+	    !lpd_component_valid(title, 255) ||
+	    !lpd_component_valid(source_name, 255) ||
+	    !lpd_component_valid(data_name, LPD_LINE_MAX - 1)) {
+		errno = EINVAL;
+
+		/* Reports operation failure. */
+		return -1;
+	}
+
+	/* Handles the copies condition. */
+	if (copies > 999U) {
+		errno = E2BIG;
+
+		/* Reports operation failure. */
+		return -1;
+	}
+
+	capacity = 1024U + (size_t)copies * (strlen(data_name) + 2U);
+	control = malloc(capacity);
+
+	/* Handles the control availability. */
+	if (control == NULL)
+		return -1;
+
+	length = snprintf(
+		control,
+		capacity,
+		"H%s\nP%s\nJ%s\n",
+		host,
+		user,
+		title);
+
+	/* Checks the current data length. */
+	if (length < 0 || (size_t)length >= capacity) {
+		free(control);
+		errno = EOVERFLOW;
+
+		/* Reports operation failure. */
+		return -1;
+	}
+	used = (size_t)length;
+
+	/* Handles the mail condition. */
+	if (mail) {
+		length = snprintf(control + used, capacity - used, "M%s\n", user);
+
+		/* Checks the current data length. */
+		if (length < 0 || (size_t)length >= capacity - used) {
+			free(control);
+			errno = EOVERFLOW;
+
+			/* Reports operation failure. */
+			return -1;
+		}
+		used += (size_t)length;
+	}
+
+	/* Add one raw-data command for every requested copy. */
+	for (copy = 0; copy < copies; copy++) {
+		length = snprintf(
+			control + used,
+			capacity - used,
+			"l%s\n",
+			data_name);
+
+		/* Checks the current data length. */
+		if (length < 0 || (size_t)length >= capacity - used) {
+			free(control);
+			errno = EOVERFLOW;
+
+			/* Reports operation failure. */
+			return -1;
+		}
+		used += (size_t)length;
+	}
+
+	length = snprintf(
+		control + used,
+		capacity - used,
+		"U%s\nN%s\n",
+		data_name,
+		source_name);
+
+	/* Checks the current data length. */
+	if (length < 0 || (size_t)length >= capacity - used) {
+		free(control);
+		errno = EOVERFLOW;
+
+		/* Reports operation failure. */
+		return -1;
+	}
+	used += (size_t)length;
+
+	*output = control;
+	*size = used;
+
+	/* Reports successful completion. */
 	return 0;
 }
 
@@ -298,9 +491,12 @@ lpd_connect(
 		destination->service,
 		&hints,
 		&addresses);
+
+	/* Checks the operation status. */
 	if (status != 0) {
 		errno = status == EAI_SYSTEM ? errno : EHOSTUNREACH;
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
@@ -313,12 +509,16 @@ lpd_connect(
 			current->ai_family,
 			current->ai_socktype,
 			current->ai_protocol);
+
+		/* Checks the file descriptor. */
 		if (descriptor < 0) {
 			saved = errno;
 			continue;
 		}
 
 		status = connect(descriptor, current->ai_addr, current->ai_addrlen);
+
+		/* Checks the operation status. */
 		if (status == 0)
 			break;
 
@@ -328,9 +528,12 @@ lpd_connect(
 	}
 
 	freeaddrinfo(addresses);
+
+	/* Checks the file descriptor. */
 	if (descriptor < 0) {
 		errno = saved;
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
@@ -342,6 +545,8 @@ lpd_connect(
 		SO_RCVTIMEO,
 		&timeout,
 		sizeof(timeout));
+
+	/* Checks the operation status. */
 	if (status == 0) {
 		status = setsockopt(
 			descriptor,
@@ -350,15 +555,55 @@ lpd_connect(
 			&timeout,
 			sizeof(timeout));
 	}
+
+	/* Checks the operation status. */
 	if (status != 0) {
 		saved = errno;
 		close(descriptor);
 		errno = saved;
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
+	/* Returns the computed result. */
 	return descriptor;
+}
+
+/* Writes one single-line LPD command. */
+static int
+lpd_write_command(
+	int descriptor,
+	unsigned char command,
+	const char *argument)
+{
+	int function_result;
+	char line[LPD_LINE_MAX];
+	int length;
+	int status;
+
+	length = snprintf(line + 1, sizeof(line) - 1, "%s\n", argument);
+
+	/* Checks the current data length. */
+	if (length < 0 || (size_t)length >= sizeof(line) - 1) {
+		errno = EOVERFLOW;
+
+		/* Reports operation failure. */
+		return -1;
+	}
+
+	line[0] = (char)command;
+	status = command_write_all(descriptor, line, (size_t)length + 1);
+
+	/* Checks the operation status. */
+	if (status != 0)
+		return -1;
+
+	/* Obtains the lpd read ack result. */
+	function_result = lpd_read_ack(descriptor);
+
+	/* Returns the computed result. */
+	return function_result;
 }
 
 /* Reads and validates one LPD acknowledgement byte. */
@@ -372,105 +617,34 @@ lpd_read_ack(
 	/* Retry only an interrupted acknowledgement read. */
 	for (;;) {
 		count = read(descriptor, &acknowledgement, 1);
+
+		/* Handles the reported system error. */
 		if (count < 0 && errno == EINTR)
 			continue;
 
 		break;
 	}
 
+	/* Checks the remaining item count. */
 	if (count != 1) {
+		/* Checks the remaining item count. */
 		if (count == 0)
 			errno = ECONNRESET;
 
+		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* Handles the acknowledgement condition. */
 	if (acknowledgement != 0) {
 		errno = ECONNREFUSED;
 
+		/* Reports operation failure. */
 		return -1;
 	}
 
+	/* Reports successful completion. */
 	return 0;
-}
-
-/* Writes one single-line LPD command. */
-static int
-lpd_write_command(
-	int descriptor,
-	unsigned char command,
-	const char *argument)
-{
-	char line[LPD_LINE_MAX];
-	int length;
-	int status;
-
-	length = snprintf(line + 1, sizeof(line) - 1, "%s\n", argument);
-	if (length < 0 || (size_t)length >= sizeof(line) - 1) {
-		errno = EOVERFLOW;
-
-		return -1;
-	}
-
-	line[0] = (char)command;
-	status = command_write_all(descriptor, line, (size_t)length + 1);
-	if (status != 0)
-		return -1;
-
-	return lpd_read_ack(descriptor);
-}
-
-/* Writes an LPD record header and receives its acknowledgement. */
-static int
-lpd_write_record_header(
-	int descriptor,
-	unsigned char command,
-	uint64_t size,
-	const char *name)
-{
-	char argument[LPD_LINE_MAX];
-	int length;
-
-	length = snprintf(
-		argument,
-		sizeof(argument),
-		"%llu %s",
-		(unsigned long long)size,
-		name);
-	if (length < 0 || (size_t)length >= sizeof(argument)) {
-		errno = EOVERFLOW;
-
-		return -1;
-	}
-
-	return lpd_write_command(descriptor, command, argument);
-}
-
-/* Writes one memory-backed LPD record. */
-static int
-lpd_write_memory_record(
-	int descriptor,
-	unsigned char command,
-	const char *name,
-	const void *data,
-	size_t size)
-{
-	unsigned char terminator;
-	int status;
-
-	status = lpd_write_record_header(descriptor, command, size, name);
-	if (status != 0)
-		return -1;
-
-	status = command_write_all(descriptor, data, size);
-	if (status != 0)
-		return -1;
-
-	terminator = 0;
-	status = command_write_all(descriptor, &terminator, 1);
-	if (status != 0)
-		return -1;
-
-	return lpd_read_ack(descriptor);
 }
 
 /* Writes one file-backed LPD record. */
@@ -482,6 +656,7 @@ lpd_write_file_record(
 	int input,
 	uint64_t size)
 {
+	int function_result;
 	unsigned char buffer[4096];
 	unsigned char terminator;
 	uint64_t remaining;
@@ -490,6 +665,8 @@ lpd_write_file_record(
 	int status;
 
 	status = lpd_write_record_header(descriptor, command, size, name);
+
+	/* Checks the operation status. */
 	if (status != 0)
 		return -1;
 
@@ -497,22 +674,31 @@ lpd_write_file_record(
 
 	/* Send exactly the byte count announced to the server. */
 	while (remaining != 0) {
+		/* Handles the remaining condition. */
 		if (remaining > sizeof(buffer))
 			wanted = sizeof(buffer);
 		else
 			wanted = (size_t)remaining;
 
 		count = read(input, buffer, wanted);
+
+		/* Handles the reported system error. */
 		if (count < 0 && errno == EINTR)
 			continue;
+
+		/* Checks the remaining item count. */
 		if (count <= 0) {
+			/* Checks the remaining item count. */
 			if (count == 0)
 				errno = EIO;
 
+			/* Reports operation failure. */
 			return -1;
 		}
 
 		status = command_write_all(descriptor, buffer, (size_t)count);
+
+		/* Checks the operation status. */
 		if (status != 0)
 			return -1;
 
@@ -521,109 +707,87 @@ lpd_write_file_record(
 
 	terminator = 0;
 	status = command_write_all(descriptor, &terminator, 1);
+
+	/* Checks the operation status. */
 	if (status != 0)
 		return -1;
 
-	return lpd_read_ack(descriptor);
+	/* Obtains the lpd read ack result. */
+	function_result = lpd_read_ack(descriptor);
+
+	/* Returns the computed result. */
+	return function_result;
 }
 
-/* Builds the bounded LPD control-file payload. */
+/* Writes an LPD record header and receives its acknowledgement. */
 static int
-lpd_build_control(
-	char **output,
-	size_t *size,
-	const char *host,
-	const char *user,
-	const char *title,
-	const char *source_name,
-	const char *data_name,
-	unsigned copies,
-	int mail)
+lpd_write_record_header(
+	int descriptor,
+	unsigned char command,
+	uint64_t size,
+	const char *name)
 {
-	char *control;
-	size_t capacity;
-	size_t used;
-	unsigned copy;
+	int function_result;
+	char argument[LPD_LINE_MAX];
 	int length;
 
-	if (!lpd_component_valid(host, LPD_HOST_MAX) ||
-	    !lpd_component_valid(user, 63) ||
-	    !lpd_component_valid(title, 255) ||
-	    !lpd_component_valid(source_name, 255) ||
-	    !lpd_component_valid(data_name, LPD_LINE_MAX - 1)) {
-		errno = EINVAL;
-
-		return -1;
-	}
-	if (copies > 999U) {
-		errno = E2BIG;
-
-		return -1;
-	}
-
-	capacity = 1024U + (size_t)copies * (strlen(data_name) + 2U);
-	control = malloc(capacity);
-	if (control == NULL)
-		return -1;
-
 	length = snprintf(
-		control,
-		capacity,
-		"H%s\nP%s\nJ%s\n",
-		host,
-		user,
-		title);
-	if (length < 0 || (size_t)length >= capacity) {
-		free(control);
+		argument,
+		sizeof(argument),
+		"%llu %s",
+		(unsigned long long)size,
+		name);
+
+	/* Checks the current data length. */
+	if (length < 0 || (size_t)length >= sizeof(argument)) {
 		errno = EOVERFLOW;
 
+		/* Reports operation failure. */
 		return -1;
 	}
-	used = (size_t)length;
 
-	if (mail) {
-		length = snprintf(control + used, capacity - used, "M%s\n", user);
-		if (length < 0 || (size_t)length >= capacity - used) {
-			free(control);
-			errno = EOVERFLOW;
+	/* Obtains the lpd write command result. */
+	function_result = lpd_write_command(descriptor, command, argument);
 
-			return -1;
-		}
-		used += (size_t)length;
-	}
+	/* Returns the computed result. */
+	return function_result;
+}
 
-	/* Add one raw-data command for every requested copy. */
-	for (copy = 0; copy < copies; copy++) {
-		length = snprintf(
-			control + used,
-			capacity - used,
-			"l%s\n",
-			data_name);
-		if (length < 0 || (size_t)length >= capacity - used) {
-			free(control);
-			errno = EOVERFLOW;
+/* Writes one memory-backed LPD record. */
+static int
+lpd_write_memory_record(
+	int descriptor,
+	unsigned char command,
+	const char *name,
+	const void *data,
+	size_t size)
+{
+	int function_result;
+	unsigned char terminator;
+	int status;
 
-			return -1;
-		}
-		used += (size_t)length;
-	}
+	status = lpd_write_record_header(descriptor, command, size, name);
 
-	length = snprintf(
-		control + used,
-		capacity - used,
-		"U%s\nN%s\n",
-		data_name,
-		source_name);
-	if (length < 0 || (size_t)length >= capacity - used) {
-		free(control);
-		errno = EOVERFLOW;
-
+	/* Checks the operation status. */
+	if (status != 0)
 		return -1;
-	}
-	used += (size_t)length;
 
-	*output = control;
-	*size = used;
+	status = command_write_all(descriptor, data, size);
 
-	return 0;
+	/* Checks the operation status. */
+	if (status != 0)
+		return -1;
+
+	terminator = 0;
+	status = command_write_all(descriptor, &terminator, 1);
+
+	/* Checks the operation status. */
+	if (status != 0)
+		return -1;
+
+	/* Obtains the lpd read ack result. */
+	function_result = lpd_read_ack(descriptor);
+
+	/* Returns the computed result. */
+	return function_result;
 }

@@ -1,43 +1,81 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the zedBSD basename userland command.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * Runs the basename command.
+ */
 int
-main(int argc, char **argv)
+main(
+	int argc,
+	char **argv)
 {
 	char *copy, *base;
 	size_t length, suffix_length;
-	int status = 0;
+	int status;
 
+	status = 0;
+
+	/* Handles the selected command-line operation. */
 	if (argc > 1 && strcmp(argv[1], "--") == 0) {
 		argc--;
 		argv++;
 	}
+
+	/* Validates the command-line arguments. */
 	if (argc != 2 && argc != 3) {
 		fprintf(stderr, "usage: basename string [suffix]\n");
+
+		/* Reports operation failure. */
 		return 1;
 	}
 	copy = strdup(argv[1]);
+
+	/* Handles the copy availability. */
 	if (copy == NULL) {
 		fprintf(stderr, "basename: out of memory\n");
+
+		/* Reports operation failure. */
 		return 1;
 	}
+
+	/* Process each remaining element. */
 	length = strlen(copy);
 	while (length > 1 && copy[length - 1U] == '/')
 		copy[--length] = '\0';
 	base = strrchr(copy, '/');
+
+	/* Handles the base availability. */
 	if (base == NULL)
 		base = copy;
 	else if (base[1] != '\0')
 		base++;
 	length = strlen(base);
+
+	/* Validates the command-line arguments. */
 	if (argc == 3 && (suffix_length = strlen(argv[2])) != 0 &&
 	    suffix_length < length &&
 	    !memcmp(base + length - suffix_length, argv[2], suffix_length))
 		base[length - suffix_length] = '\0';
+
+	/* Handles the end-of-file condition. */
 	if (printf("%s\n", base) < 0 || fflush(stdout) == EOF)
 		status = 1;
 	free(copy);
+
+	/* Returns the computed result. */
 	return status;
 }

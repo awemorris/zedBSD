@@ -12,6 +12,17 @@ sh "$audit" userland/base/common/command.c userland/base/common/command.h
 
 mkdir -p "$temporary/userland/base/sample"
 printf '%s\n' \
+	'/*' \
+	' * zedBSD' \
+	' * Copyright (C) 2026 Awe Morris' \
+	' *' \
+	' * SPDX-License-Identifier: Zlib' \
+	' */' \
+	'' \
+	'/*' \
+	' * Declares the sample interface.' \
+	' */' \
+	'' \
 	'/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */' \
 	'int sample(void);' >"$temporary/userland/base/sample/good.h"
 (
@@ -19,7 +30,19 @@ printf '%s\n' \
 	sh "$audit" userland/base/sample/good.h
 )
 
-printf '%s\n' 'int missing_modeline(void);' \
+printf '%s\n' \
+	'/*' \
+	' * zedBSD' \
+	' * Copyright (C) 2026 Awe Morris' \
+	' *' \
+	' * SPDX-License-Identifier: Zlib' \
+	' */' \
+	'' \
+	'/*' \
+	' * Declares the missing-modeline fixture.' \
+	' */' \
+	'' \
+	'int missing_modeline(void);' \
 	>"$temporary/userland/base/sample/bad-modeline.h"
 if (
 	cd "$temporary"
@@ -30,6 +53,17 @@ if (
 fi
 
 printf '%s\n' \
+	'/*' \
+	' * zedBSD' \
+	' * Copyright (C) 2026 Awe Morris' \
+	' *' \
+	' * SPDX-License-Identifier: Zlib' \
+	' */' \
+	'' \
+	'/*' \
+	' * Exercises the same-line case fixture.' \
+	' */' \
+	'' \
 	'/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */' \
 	'case 1: return 0;' >"$temporary/userland/base/sample/bad-case.c"
 if (

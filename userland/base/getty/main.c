@@ -1,8 +1,14 @@
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
 /*
  * zedBSD
  * Copyright (C) 2026 Awe Morris
  *
  * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the zedBSD getty userland command.
  */
 
 #include <errno.h>
@@ -14,22 +20,11 @@
 #include <unistd.h>
 #include <utmpx.h>
 
-static void
-record_login_process(
-	const char *device)
-{
-	struct utmpx record;
-	const char *line = strrchr(device, '/');
+static void record_login_process(const char *device);
 
-	memset(&record, 0, sizeof(record));
-	record.ut_type = LOGIN_PROCESS;
-	record.ut_pid = getpid();
-	line = line != NULL ? line + 1 : device;
-	strncpy(record.ut_line, line, sizeof(record.ut_line) - 1);
-	strncpy(record.ut_id, line, sizeof(record.ut_id));
-	(void)pututxline(&record);
-}
-
+/*
+ * Runs the getty command.
+ */
 int
 main(
 	int argc,
@@ -40,22 +35,33 @@ main(
 	int descriptor;
 	char *login_arguments[] = {"login", NULL};
 
+	/* Validates the command-line arguments. */
 	if (argc != 2 || strchr(argv[1], '/') != NULL) {
 		fprintf(stderr, "usage: getty device\n");
+
+		/* Reports operation failure. */
 		return 2;
 	}
 
+	/* Validates the command-line arguments. */
 	if (snprintf(path, sizeof(path), "/dev/%s", argv[1]) >= (int)sizeof(path)) {
 		fprintf(stderr, "getty: device name is too long\n");
+
+		/* Reports operation failure. */
 		return 2;
 	}
 
 	descriptor = open(path, O_RDWR | O_NOCTTY);
+
+	/* Checks the file descriptor. */
 	if (descriptor < 0) {
 		fprintf(stderr, "getty: %s: %s\n", path, strerror(errno));
+
+		/* Reports operation failure. */
 		return 1;
 	}
 
+	/* Handles a failed tcgetattr operation. */
 	if (tcgetattr(descriptor, &attributes) == 0) {
 		attributes.c_iflag = BRKINT | ICRNL | IXON;
 		attributes.c_oflag = OPOST | ONLCR;
@@ -74,13 +80,18 @@ main(
 		(void)tcsetattr(descriptor, TCSAFLUSH, &attributes);
 	}
 
+	/* Handles a failed login tty operation. */
 	if (login_tty(descriptor) != 0) {
 		fprintf(stderr, "getty: cannot acquire %s: %s\n", path,
 			strerror(errno));
+
+		/* Reports operation failure. */
 		return 1;
 	}
 
 	record_login_process(path);
+
+	/* Handles a failed gethostname operation. */
 	if (gethostname(hostname, sizeof(hostname)) != 0)
 		strcpy(hostname, "zedbsd");
 
@@ -93,5 +104,25 @@ main(
 
 	fprintf(stderr, "getty: /bin/login: %s\n", strerror(errno));
 
+	/* Reports operation failure. */
 	return 1;
+}
+
+/* Supports the record login process operation. */
+static void
+record_login_process(
+	const char *device)
+{
+	struct utmpx record;
+	const char *line;
+
+	line = strrchr(device, '/');
+
+	memset(&record, 0, sizeof(record));
+	record.ut_type = LOGIN_PROCESS;
+	record.ut_pid = getpid();
+	line = line != NULL ? line + 1 : device;
+	strncpy(record.ut_line, line, sizeof(record.ut_line) - 1);
+	strncpy(record.ut_id, line, sizeof(record.ut_id));
+	(void)pututxline(&record);
 }

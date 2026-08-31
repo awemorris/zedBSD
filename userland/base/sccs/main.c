@@ -1,4 +1,16 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the zedBSD sccs userland command.
+ */
+
 #include "userland/base/common/sccs.h"
 
 #include <errno.h>
@@ -12,74 +24,165 @@
 
 static const char *program;
 
-static const char *
-base_name(const char *path)
+static const char *base_name(const char *path);
+static int admin_main(int argc, char **argv);
+static void error_path(const char *path);
+static const char *current_user(void);
+static int get_main(int argc, char **argv);
+static int write_path(const char *path, const void *data, size_t size, int exclusive);
+static int write_all(int fd, const void *data, size_t size);
+static int keyword_output(int fd, const struct sccs_delta *delta, const char *module, int keep);
+static int delta_main(int argc, char **argv);
+static int read_pending(const char *path, char *old_sid, char *new_sid, char *user);
+static int prs_main(int argc, char **argv);
+static void prs_format(const char *format, const struct sccs_delta *delta);
+static int val_main(int argc, char **argv);
+static int what_main(int argc, char **argv);
+static int sact_main(int argc, char **argv);
+static int unget_main(int argc, char **argv);
+static int rmdel_main(int argc, char **argv);
+static int sccs_main(int argc, char **argv);
+
+/*
+ * Runs the sccs command.
+ */
+int
+main(
+	int argc,
+	char **argv)
 {
-	const char *slash = strrchr(path, '/');
+	int function_result;
+
+	program = base_name(argv[0]);
+
+	/* Selects the matching value. */
+	if (!strcmp(program, "admin")) {
+		/* Obtains the admin main result. */
+		function_result = admin_main(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (!strcmp(program, "get")) {
+		/* Obtains the get main result. */
+		function_result = get_main(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (!strcmp(program, "delta")) {
+		/* Obtains the delta main result. */
+		function_result = delta_main(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (!strcmp(program, "prs")) {
+		/* Obtains the prs main result. */
+		function_result = prs_main(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (!strcmp(program, "val")) {
+		/* Obtains the val main result. */
+		function_result = val_main(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (!strcmp(program, "what")) {
+		/* Obtains the what main result. */
+		function_result = what_main(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (!strcmp(program, "sact")) {
+		/* Obtains the sact main result. */
+		function_result = sact_main(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (!strcmp(program, "unget")) {
+		/* Obtains the unget main result. */
+		function_result = unget_main(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (!strcmp(program, "rmdel")) {
+		/* Obtains the rmdel main result. */
+		function_result = rmdel_main(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Selects the matching value. */
+	if (!strcmp(program, "sccs")) {
+		/* Obtains the sccs main result. */
+		function_result = sccs_main(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Reports operation failure. */
+	return 2;
+}
+
+/* Supports the base name operation. */
+static const char *
+base_name(
+	const char *path)
+{
+	const char *slash;
+
+	slash = strrchr(path, '/');
+
+	/* Returns the computed result. */
 	return slash ? slash + 1 : path;
 }
 
-static void
-error_path(const char *path)
-{
-	fprintf(stderr, "%s: %s: %s\n", program, path, strerror(errno));
-}
-
-static const char *
-current_user(void)
-{
-	const char *name = getenv("LOGNAME");
-	static char numeric[32];
-	if (name && *name)
-		return name;
-	snprintf(numeric, sizeof(numeric), "%lu", (unsigned long)getuid());
-	return numeric;
-}
-
+/* Supports the admin main operation. */
 static int
-write_all(int fd, const void *data, size_t size)
-{
-	const char *p = data;
-	while (size) {
-		ssize_t n = write(fd, p, size);
-		if (n < 0 && errno == EINTR)
-			continue;
-		if (n <= 0)
-			return -1;
-		p += (size_t)n;
-		size -= (size_t)n;
-	}
-	return 0;
-}
-
-static int
-write_path(const char *path, const void *data, size_t size, int exclusive)
-{
-	int flags = O_WRONLY | O_CREAT | (exclusive ? O_EXCL : O_TRUNC);
-	int fd = open(path, flags, 0644);
-	if (fd < 0)
-		return -1;
-	if (write_all(fd, data, size) || fsync(fd) || close(fd)) {
-		int saved = errno;
-		close(fd);
-		if (exclusive)
-			unlink(path);
-		errno = saved;
-		return -1;
-	}
-	return 0;
-}
-
-static int
-admin_main(int argc, char **argv)
+admin_main(
+	int argc,
+	char **argv)
 {
 	struct sccs_history history = {0};
-	const char *input_path = NULL, *sid = "1.1",
-		   *comment = "date and time created";
-	char *text = NULL;
-	size_t text_size = 0;
-	int ch, status = 1;
+	const char *input_path, *sid, *comment;
+	char *text;
+	size_t text_size;
+	int ch, status;
+
+	/* Parse each command-line option. */
+	input_path = NULL;
+	sid = "1.1";
+	comment = "date and time created";
+	text = NULL;
+	text_size = 0;
+	status = 1;
 	while ((ch = getopt(argc, argv, "i:nr:y:")) != -1) {
+		/* Dispatch the selected operation case. */
 		switch (ch) {
 		case 'i':
 			input_path = optarg;
@@ -93,26 +196,42 @@ admin_main(int argc, char **argv)
 			comment = optarg;
 			break;
 		default:
+			/* Reports operation failure. */
 			return 2;
 		}
 	}
+
+	/* Validates the command-line arguments. */
 	if (optind + 1 != argc || !sccs_sid_valid(sid))
 		return 2;
+
+	/* Validates the command-line arguments. */
 	if (!access(argv[optind], F_OK)) {
 		errno = EEXIST;
 		error_path(argv[optind]);
+
+		/* Reports operation failure. */
 		return 1;
 	}
+
+	/* Handles the input path condition. */
 	if (input_path) {
+		/* Handles the sccs read regular condition. */
 		if (sccs_read_regular(input_path, &text, &text_size)) {
 			error_path(input_path);
+
+			/* Reports operation failure. */
 			return 1;
 		}
 	} else {
 		text = strdup("");
+
+		/* Validates the current text. */
 		if (!text)
 			return 1;
 	}
+
+	/* Validates the command-line arguments. */
 	if (sccs_add(&history, sid, current_user(), comment, text, text_size,
 		     0) ||
 	    sccs_save(argv[optind], &history))
@@ -121,55 +240,65 @@ admin_main(int argc, char **argv)
 		status = 0;
 	free(text);
 	sccs_free(&history);
+
+	/* Returns the computed result. */
 	return status;
 }
 
-static int
-keyword_output(int fd, const struct sccs_delta *delta, const char *module,
-	       int keep)
+/* Supports the error path operation. */
+static void
+error_path(
+	const char *path)
 {
-	if (keep)
-		return write_all(fd, delta->text, delta->text_size);
-	for (size_t i = 0; i < delta->text_size;) {
-		const char *replacement = NULL;
-		char combined[512];
-		if (i + 3 <= delta->text_size && delta->text[i] == '%' &&
-		    delta->text[i + 2] == '%') {
-			switch (delta->text[i + 1]) {
-			case 'M':
-				replacement = module;
-				break;
-			case 'I':
-				replacement = delta->sid;
-				break;
-			case 'W':
-				snprintf(combined, sizeof(combined),
-					 "@(#)%s\t%s", module, delta->sid);
-				replacement = combined;
-				break;
-			default:
-				break;
-			}
-		}
-		if (replacement) {
-			if (write_all(fd, replacement, strlen(replacement)))
-				return -1;
-			i += 3;
-		} else if (write_all(fd, delta->text + i++, 1))
-			return -1;
-	}
-	return 0;
+	fprintf(stderr, "%s: %s: %s\n", program, path, strerror(errno));
 }
 
-static int
-get_main(int argc, char **argv)
+/* Supports the current user operation. */
+static const char *
+current_user(
+	void)
 {
+	const char *name;
+	static char numeric[32];
+
+	name = getenv("LOGNAME");
+
+	/* Validates the current name. */
+	if (name && *name)
+		return name;
+	snprintf(numeric, sizeof(numeric), "%lu", (unsigned long)getuid());
+
+	/* Returns the computed result. */
+	return numeric;
+}
+
+/* Supports the get main operation. */
+static int
+get_main(
+	int argc,
+	char **argv)
+{
+	char next[64], record[512];
+	const struct sccs_delta *latest;
+	int length;
 	struct sccs_history history;
 	const struct sccs_delta *delta;
-	const char *sid = NULL;
-	char *gfile = NULL, *pfile = NULL;
-	int print = 0, edit = 0, keep = 0, silent = 0, ch, fd = -1, status = 1;
+	const char *sid;
+	char *gfile, *pfile;
+	int print, edit, keep, silent, ch, fd, status;
+
+	/* Parse each command-line option. */
+	sid = NULL;
+	gfile = NULL;
+	pfile = NULL;
+	print = 0;
+	edit = 0;
+	keep = 0;
+	silent = 0;
+	fd = -1;
+	status = 1;
 	while ((ch = getopt(argc, argv, "ekpsr:")) != -1) {
+		/* Dispatch the selected operation case. */
 		switch (ch) {
 		case 'e':
 			edit = 1;
@@ -187,16 +316,25 @@ get_main(int argc, char **argv)
 			sid = optarg;
 			break;
 		default:
+			/* Reports operation failure. */
 			return 2;
 		}
 	}
+
+	/* Validates the command-line arguments. */
 	if (optind + 1 != argc || (edit && print))
 		return 2;
+
+	/* Validates the command-line arguments. */
 	if (sccs_load(argv[optind], &history)) {
 		error_path(argv[optind]);
+
+		/* Reports operation failure. */
 		return 1;
 	}
 	delta = sccs_find(&history, sid);
+
+	/* Handles the delta condition. */
 	if (!delta) {
 		errno = ENOENT;
 		error_path(sid ? sid : argv[optind]);
@@ -204,16 +342,24 @@ get_main(int argc, char **argv)
 	}
 	gfile = sccs_gfile_name(argv[optind]);
 	pfile = sccs_aux_name(argv[optind], 'p');
+
+	/* Handles the gfile condition. */
 	if (!gfile || !pfile)
 		goto out;
+
+	/* Handles the edit condition. */
 	if (edit) {
-		char next[64], record[512];
-		const struct sccs_delta *latest = sccs_find(&history, NULL);
+
+		latest = sccs_find(&history, NULL);
+
+		/* Handles a failed sccs sid next operation. */
 		if (sccs_sid_next(delta->sid, delta != latest, next,
 				  sizeof(next)))
 			goto out;
-		int length = snprintf(record, sizeof(record), "%s %s %s\n",
-				      delta->sid, next, current_user());
+		length = snprintf(record, sizeof(record), "%s %s %s\n",
+				  delta->sid, next, current_user());
+
+		/* Handles the write path condition. */
 		if (write_path(pfile, record, (size_t)length, 1)) {
 			error_path(pfile);
 			goto out;
@@ -221,84 +367,222 @@ get_main(int argc, char **argv)
 	}
 	fd = print ? STDOUT_FILENO
 		   : open(gfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+	/* Handles a failed keyword output operation. */
 	if (fd < 0 ||
 	    keyword_output(fd, delta, base_name(gfile), keep || edit)) {
 		error_path(print ? "standard output" : gfile);
+
+		/* Handles the edit condition. */
 		if (edit)
 			unlink(pfile);
 		goto out;
 	}
+
+	/* Handles a failed close operation. */
 	if (!print && close(fd))
 		goto out;
 	fd = -1;
+
+	/* Handles the silent condition. */
 	if (!silent)
 		fprintf(stderr, "%s\n", delta->sid);
 	status = 0;
 out:
+
+	/* Checks the file descriptor. */
 	if (fd >= 0 && fd != STDOUT_FILENO)
 		close(fd);
 	free(gfile);
 	free(pfile);
 	sccs_free(&history);
+
+	/* Returns the computed result. */
 	return status;
 }
 
+/* Supports the write path operation. */
 static int
-read_pending(const char *path, char *old_sid, char *new_sid, char *user)
+write_path(
+	const char *path,
+	const void *data,
+	size_t size,
+	int exclusive)
 {
-	char *data = NULL;
-	size_t size;
-	if (sccs_read_regular(path, &data, &size))
+	int saved;
+	int flags;
+	int fd;
+
+	flags = O_WRONLY | O_CREAT | (exclusive ? O_EXCL : O_TRUNC);
+	fd = open(path, flags, 0644);
+
+	/* Checks the file descriptor. */
+	if (fd < 0)
 		return -1;
-	char *old_word = strtok(data, " \t\r\n");
-	char *new_word = strtok(NULL, " \t\r\n");
-	char *user_word = strtok(NULL, " \t\r\n");
-	char *extra = strtok(NULL, " \t\r\n");
-	int valid = old_word && new_word && user_word && !extra &&
-		    strlen(old_word) < 64 && strlen(new_word) < 64 &&
-		    strlen(user_word) < 128;
-	if (valid) {
-		strcpy(old_sid, old_word);
-		strcpy(new_sid, new_word);
-		strcpy(user, user_word);
-	}
-	free(data);
-	if (!valid || !sccs_sid_valid(old_sid) || !sccs_sid_valid(new_sid)) {
-		errno = EINVAL;
+
+	/* Handles the write all condition. */
+	if (write_all(fd, data, size) || fsync(fd) || close(fd)) {
+				saved = errno;
+		close(fd);
+
+		/* Handles the exclusive condition. */
+		if (exclusive)
+			unlink(path);
+		errno = saved;
+
+		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* Reports successful completion. */
 	return 0;
 }
 
+/* Supports the write all operation. */
 static int
-delta_main(int argc, char **argv)
+write_all(
+	int fd,
+	const void *data,
+	size_t size)
+{
+	ssize_t n;
+	const char *p;
+
+	/* Process each remaining element. */
+	p = data;
+	while (size) {
+
+		n = write(fd, p, size);
+
+		/* Handles the reported system error. */
+		if (n < 0 && errno == EINTR)
+			continue;
+
+		/* Checks the current item count. */
+		if (n <= 0)
+			return -1;
+		p += (size_t)n;
+		size -= (size_t)n;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the keyword output operation. */
+static int
+keyword_output(
+	int fd,
+	const struct sccs_delta *delta,
+	const char *module,
+	int keep)
+{
+	int function_result;
+	const char *replacement;
+	char combined[512];
+	size_t i_index_for;
+
+	/* Handles the keep condition. */
+	if (keep) {
+		/* Obtains the write all result. */
+		function_result = write_all(fd, delta->text, delta->text_size);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Process each remaining element. */
+	for (i_index_for = 0; i_index_for < delta->text_size;) {
+
+		replacement = NULL;
+
+		/* Handles the i index for condition. */
+		if (i_index_for + 3 <= delta->text_size && delta->text[i_index_for] == '%' &&
+		    delta->text[i_index_for + 2] == '%') {
+			/* Dispatch the selected operation case. */
+			switch (delta->text[i_index_for + 1]) {
+			case 'M':
+				replacement = module;
+				break;
+			case 'I':
+				replacement = delta->sid;
+				break;
+			case 'W':
+				snprintf(combined, sizeof(combined),
+					 "@(#)%s\t%s", module, delta->sid);
+				replacement = combined;
+				break;
+			default:
+				break;
+			}
+		}
+
+		/* Handles the replacement condition. */
+		if (replacement) {
+			/* Handles the write all condition. */
+			if (write_all(fd, replacement, strlen(replacement)))
+				return -1;
+			i_index_for += 3;
+		} else if (write_all(fd, delta->text + i_index_for++, 1))
+
+			/* Reports operation failure. */
+			return -1;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the delta main operation. */
+static int
+delta_main(
+	int argc,
+	char **argv)
 {
 	struct sccs_history history;
-	const char *comment = "";
+	const char *comment;
 	char old_sid[64] = {0}, new_sid[64] = {0}, owner[128] = {0};
-	char *gfile = NULL, *pfile = NULL, *text = NULL;
+	char *gfile, *pfile, *text;
+	const struct sccs_delta *old;
 	size_t text_size;
-	int ch, status = 1;
+	int ch, status;
+
+	/* Parse each command-line option. */
+	comment = "";
+	gfile = NULL;
+	pfile = NULL;
+	text = NULL;
+	status = 1;
 	while ((ch = getopt(argc, argv, "y:")) != -1) {
+		/* Handles the ch condition. */
 		if (ch == 'y')
 			comment = optarg;
 		else
+
+			/* Reports operation failure. */
 			return 2;
 	}
+
+	/* Validates the command-line arguments. */
 	if (optind + 1 != argc)
 		return 2;
 	gfile = sccs_gfile_name(argv[optind]);
 	pfile = sccs_aux_name(argv[optind], 'p');
+
+	/* Handles the selected command-line operation. */
 	if (!gfile || !pfile || read_pending(pfile, old_sid, new_sid, owner) ||
 	    strcmp(owner, current_user()) ||
 	    sccs_read_regular(gfile, &text, &text_size) ||
 	    sccs_load(argv[optind], &history)) {
+		/* Handles the owner condition. */
 		if (owner[0] && strcmp(owner, current_user()))
 			errno = EPERM;
 		error_path(argv[optind]);
 		goto out_no_history;
 	}
-	const struct sccs_delta *old = sccs_find(&history, old_sid);
+	old = sccs_find(&history, old_sid);
+
+	/* Validates the command-line arguments. */
 	if (!old ||
 	    sccs_add(&history, new_sid, current_user(), comment, text,
 		     text_size, old ? old->serial : 0) ||
@@ -315,16 +599,128 @@ out_no_history:
 	free(gfile);
 	free(pfile);
 	free(text);
+
+	/* Returns the computed result. */
 	return status;
 }
 
-static void
-prs_format(const char *format, const struct sccs_delta *delta)
+/* Supports the read pending operation. */
+static int
+read_pending(
+	const char *path,
+	char *old_sid,
+	char *new_sid,
+	char *user)
 {
-	for (size_t i = 0; format[i];) {
-		const char *replacement = NULL;
-		if (format[i] == ':' && format[i + 1] && format[i + 2] == ':') {
-			switch (format[i + 1]) {
+	char *data;
+	char *old_word, *new_word, *user_word, *extra;
+	size_t size;
+	int valid;
+
+	data = NULL;
+
+	/* Handles the sccs read regular condition. */
+	if (sccs_read_regular(path, &data, &size))
+		return -1;
+	old_word = strtok(data, " \t\r\n");
+	new_word = strtok(NULL, " \t\r\n");
+	user_word = strtok(NULL, " \t\r\n");
+	extra = strtok(NULL, " \t\r\n");
+	valid = old_word && new_word && user_word && !extra &&
+		strlen(old_word) < 64 && strlen(new_word) < 64 &&
+		strlen(user_word) < 128;
+
+	/* Handles the valid condition. */
+	if (valid) {
+		strcpy(old_sid, old_word);
+		strcpy(new_sid, new_word);
+		strcpy(user, user_word);
+	}
+	free(data);
+
+	/* Handles a failed sccs sid valid operation. */
+	if (!valid || !sccs_sid_valid(old_sid) || !sccs_sid_valid(new_sid)) {
+		errno = EINVAL;
+
+		/* Reports operation failure. */
+		return -1;
+	}
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the prs main operation. */
+static int
+prs_main(
+	int argc,
+	char **argv)
+{
+	struct sccs_history history;
+	const struct sccs_delta *delta;
+	const char *sid, *format;
+	int ch;
+
+	/* Parse each command-line option. */
+	sid = NULL;
+	format = ":I:\t:D:\t:P:\t:C:";
+	while ((ch = getopt(argc, argv, "d:r:")) != -1) {
+		/* Handles the ch condition. */
+		if (ch == 'd')
+			format = optarg;
+		else if (ch == 'r')
+			sid = optarg;
+		else
+
+			/* Reports operation failure. */
+			return 2;
+	}
+
+	/* Validates the command-line arguments. */
+	if (optind + 1 != argc || sccs_load(argv[optind], &history)) {
+		/* Validates the command-line arguments. */
+		if (optind < argc)
+			error_path(argv[optind]);
+
+		/* Reports operation failure. */
+		return 1;
+	}
+	delta = sccs_find(&history, sid);
+
+	/* Handles the delta condition. */
+	if (!delta) {
+		errno = ENOENT;
+		error_path(sid);
+		sccs_free(&history);
+
+		/* Reports operation failure. */
+		return 1;
+	}
+	prs_format(format, delta);
+	sccs_free(&history);
+
+	/* Reports successful completion. */
+	return 0;
+}
+
+/* Supports the prs format operation. */
+static void
+prs_format(
+	const char *format,
+	const struct sccs_delta *delta)
+{
+	const char *replacement;
+	size_t i_index_for;
+
+	/* Process each remaining element. */
+	for (i_index_for = 0; format[i_index_for];) {
+
+		replacement = NULL;
+
+		/* Handles the format condition. */
+		if (format[i_index_for] == ':' && format[i_index_for + 1] && format[i_index_for + 2] == ':') {
+			/* Dispatch the selected operation case. */
+			switch (format[i_index_for + 1]) {
 			case 'I':
 				replacement = delta->sid;
 				break;
@@ -341,176 +737,242 @@ prs_format(const char *format, const struct sccs_delta *delta)
 				break;
 			}
 		}
+
+		/* Handles the replacement condition. */
 		if (replacement) {
 			fputs(replacement, stdout);
-			i += 3;
+			i_index_for += 3;
 		} else
-			putchar(format[i++]);
+			putchar(format[i_index_for++]);
 	}
 	putchar('\n');
 }
 
+/* Supports the val main operation. */
 static int
-prs_main(int argc, char **argv)
+val_main(
+	int argc,
+	char **argv)
 {
 	struct sccs_history history;
-	const char *sid = NULL, *format = ":I:\t:D:\t:P:\t:C:";
-	int ch;
-	while ((ch = getopt(argc, argv, "d:r:")) != -1) {
-		if (ch == 'd')
-			format = optarg;
-		else if (ch == 'r')
-			sid = optarg;
-		else
-			return 2;
-	}
-	if (optind + 1 != argc || sccs_load(argv[optind], &history)) {
-		if (optind < argc)
-			error_path(argv[optind]);
-		return 1;
-	}
-	const struct sccs_delta *delta = sccs_find(&history, sid);
-	if (!delta) {
-		errno = ENOENT;
-		error_path(sid);
-		sccs_free(&history);
-		return 1;
-	}
-	prs_format(format, delta);
-	sccs_free(&history);
-	return 0;
-}
+	int i_index_for;
+	int failed;
 
-static int
-val_main(int argc, char **argv)
-{
-	int failed = 0;
+	failed = 0;
+
+	/* Validates the command-line arguments. */
 	if (argc < 2)
 		return 2;
-	for (int i = 1; i < argc; i++) {
-		struct sccs_history history;
-		if (sccs_load(argv[i], &history)) {
-			error_path(argv[i]);
+
+	/* Process each remaining command-line operand. */
+	for (i_index_for = 1; i_index_for < argc; i_index_for++) {
+		/* Validates the command-line arguments. */
+		if (sccs_load(argv[i_index_for], &history)) {
+			error_path(argv[i_index_for]);
 			failed = 1;
 		} else
 			sccs_free(&history);
 	}
+
+	/* Returns the computed result. */
 	return failed;
 }
 
+/* Supports the what main operation. */
 static int
-what_main(int argc, char **argv)
+what_main(
+	int argc,
+	char **argv)
 {
-	int failed = 0;
+	char *data;
+	size_t size;
+	int i_index_for;
+	size_t p_index_for;
+	int failed;
+
+	failed = 0;
+
+	/* Validates the command-line arguments. */
 	if (argc < 2)
 		return 2;
-	for (int i = 1; i < argc; i++) {
-		char *data;
-		size_t size;
-		if (sccs_read_regular(argv[i], &data, &size)) {
-			error_path(argv[i]);
+
+	/* Process each remaining command-line operand. */
+	for (i_index_for = 1; i_index_for < argc; i_index_for++) {
+		/* Validates the command-line arguments. */
+		if (sccs_read_regular(argv[i_index_for], &data, &size)) {
+			error_path(argv[i_index_for]);
 			failed = 1;
 			continue;
 		}
-		for (size_t p = 0; p + 4 <= size; p++) {
-			if (memcmp(data + p, "@(#)", 4))
+
+		/* Process each remaining element. */
+		for (p_index_for = 0; p_index_for + 4 <= size; p_index_for++) {
+			/* Handles the memcmp condition. */
+			if (memcmp(data + p_index_for, "@(#)", 4))
 				continue;
-			p += 4;
+			p_index_for += 4;
 			fputs("\t", stdout);
-			while (p < size && data[p] != '\n' && data[p] != '"' &&
-			       data[p] != '>' && data[p] != '\0')
-				putchar((unsigned char)data[p++]);
+
+			/* Process each remaining element. */
+			while (p_index_for < size && data[p_index_for] != '\n' && data[p_index_for] != '"' &&
+			       data[p_index_for] != '>' && data[p_index_for] != '\0')
+				putchar((unsigned char)data[p_index_for++]);
 			putchar('\n');
 		}
 		free(data);
 	}
+
+	/* Returns the computed result. */
 	return failed;
 }
 
+/* Supports the sact main operation. */
 static int
-sact_main(int argc, char **argv)
+sact_main(
+	int argc,
+	char **argv)
 {
-	if (argc != 2)
-		return 2;
-	char *pfile = sccs_aux_name(argv[1], 'p');
+	char *pfile;
 	char *data;
 	size_t size;
+	int status;
+
+	/* Validates the command-line arguments. */
+	if (argc != 2)
+		return 2;
+	pfile = sccs_aux_name(argv[1], 'p');
+
+	/* Handles a failed sccs read regular operation. */
 	if (!pfile || sccs_read_regular(pfile, &data, &size)) {
 		error_path(pfile ? pfile : argv[1]);
 		free(pfile);
+
+		/* Reports operation failure. */
 		return 1;
 	}
-	int status = write_all(STDOUT_FILENO, data, size) != 0;
+	status = write_all(STDOUT_FILENO, data, size) != 0;
 	free(data);
 	free(pfile);
+
+	/* Returns the computed result. */
 	return status;
 }
 
+/* Supports the unget main operation. */
 static int
-unget_main(int argc, char **argv)
+unget_main(
+	int argc,
+	char **argv)
 {
 	char old_sid[64], new_sid[64], owner[128];
+	char *pfile, *gfile;
+	int status;
+
+	/* Validates the command-line arguments. */
 	if (argc != 2)
 		return 2;
-	char *pfile = sccs_aux_name(argv[1], 'p');
-	char *gfile = sccs_gfile_name(argv[1]);
+	pfile = sccs_aux_name(argv[1], 'p');
+	gfile = sccs_gfile_name(argv[1]);
+
+	/* Handles a failed read pending operation. */
 	if (!pfile || !gfile || read_pending(pfile, old_sid, new_sid, owner) ||
 	    strcmp(owner, current_user())) {
 		errno = EPERM;
 		error_path(argv[1]);
 		free(pfile);
 		free(gfile);
+
+		/* Reports operation failure. */
 		return 1;
 	}
-	int status = unlink(pfile);
+	status = unlink(pfile);
+
+	/* Checks the operation status. */
 	if (!status)
 		unlink(gfile);
 	free(pfile);
 	free(gfile);
+
+	/* Returns the computed result. */
 	return status != 0;
 }
 
+/* Supports the rmdel main operation. */
 static int
-rmdel_main(int argc, char **argv)
+rmdel_main(
+	int argc,
+	char **argv)
 {
 	struct sccs_history history;
-	const char *sid = NULL;
-	int ch, status = 1;
+	const char *sid;
+	int ch, status;
+
+	/* Parse each command-line option. */
+	sid = NULL;
+	status = 1;
 	while ((ch = getopt(argc, argv, "r:")) != -1)
+
+		/* Handles the ch condition. */
 		if (ch == 'r')
 			sid = optarg;
 		else
+
+			/* Reports operation failure. */
 			return 2;
+
+	/* Validates the command-line arguments. */
 	if (!sid || optind + 1 != argc)
 		return 2;
+
+	/* Validates the command-line arguments. */
 	if (sccs_load(argv[optind], &history) || sccs_remove(&history, sid) ||
 	    sccs_save(argv[optind], &history))
 		error_path(argv[optind]);
 	else
 		status = 0;
 	sccs_free(&history);
+
+	/* Returns the computed result. */
 	return status;
 }
 
+/* Supports the sccs main operation. */
 static int
-sccs_main(int argc, char **argv)
+sccs_main(
+	int argc,
+	char **argv)
 {
+	size_t i_index_for;
 	static const char *const commands[] = {"admin", "delta", "get",
 					       "prs",	"rmdel", "sact",
 					       "unget", "val",	 "what"};
 	char path[1024];
 	const char *slash;
-	int allowed = 0;
+	int allowed;
+
+	allowed = 0;
+
+	/* Validates the command-line arguments. */
 	if (argc < 2)
 		return 2;
-	for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
-		if (!strcmp(argv[1], commands[i]))
+
+	/* Process each remaining element. */
+	for (i_index_for = 0; i_index_for < sizeof(commands) / sizeof(commands[0]); i_index_for++)
+
+		/* Handles the selected command-line operation. */
+		if (!strcmp(argv[1], commands[i_index_for]))
 			allowed = 1;
+
+	/* Handles the allowed condition. */
 	if (!allowed) {
 		fprintf(stderr, "sccs: unknown command: %s\n", argv[1]);
+
+		/* Reports operation failure. */
 		return 2;
 	}
 	slash = strrchr(argv[0], '/');
+
+	/* Handles the slash condition. */
 	if (slash)
 		snprintf(path, sizeof(path), "%.*s/%s", (int)(slash - argv[0]),
 			 argv[0], argv[1]);
@@ -519,32 +981,7 @@ sccs_main(int argc, char **argv)
 	argv[1] = path;
 	execv(path, argv + 1);
 	error_path(path);
-	return 1;
-}
 
-int
-main(int argc, char **argv)
-{
-	program = base_name(argv[0]);
-	if (!strcmp(program, "admin"))
-		return admin_main(argc, argv);
-	if (!strcmp(program, "get"))
-		return get_main(argc, argv);
-	if (!strcmp(program, "delta"))
-		return delta_main(argc, argv);
-	if (!strcmp(program, "prs"))
-		return prs_main(argc, argv);
-	if (!strcmp(program, "val"))
-		return val_main(argc, argv);
-	if (!strcmp(program, "what"))
-		return what_main(argc, argv);
-	if (!strcmp(program, "sact"))
-		return sact_main(argc, argv);
-	if (!strcmp(program, "unget"))
-		return unget_main(argc, argv);
-	if (!strcmp(program, "rmdel"))
-		return rmdel_main(argc, argv);
-	if (!strcmp(program, "sccs"))
-		return sccs_main(argc, argv);
-	return 2;
+	/* Reports operation failure. */
+	return 1;
 }

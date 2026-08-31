@@ -1,4 +1,15 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the zedBSD tabs userland command.
+ */
 
 #include "userland/base/common/command.h"
 #include "userland/base/common/terminfo.h"
@@ -13,87 +24,21 @@
 
 #define TAB_STOP_COUNT 64U
 
-static int
-append_stop(unsigned stops[TAB_STOP_COUNT], size_t *count, unsigned stop,
-	    unsigned width)
-{
-	if (stop == 0 || stop > width || *count == TAB_STOP_COUNT ||
-	    (*count != 0 && stop <= stops[*count - 1U]))
-		return 0;
-	stops[(*count)++] = stop;
-	return 1;
-}
+static int explicit_stops(char *text, unsigned stops[TAB_STOP_COUNT], size_t *count, unsigned width);
+static int append_stop(unsigned stops[TAB_STOP_COUNT], size_t *count, unsigned stop, unsigned width);
+static int uniform_stops(unsigned stops[TAB_STOP_COUNT], size_t *count, unsigned every, unsigned width);
+static int emit_capability(const struct terminfo_capability *capability, long parameter);
 
-static int
-uniform_stops(unsigned stops[TAB_STOP_COUNT], size_t *count, unsigned every,
-	      unsigned width)
-{
-	unsigned stop;
-
-	if (every == 0)
-		return 0;
-	for (stop = every + 1U; stop <= width; stop += every)
-		if (!append_stop(stops, count, stop, width) ||
-		    stop > UINT_MAX - every)
-			return 0;
-	return 1;
-}
-
-static int
-explicit_stops(char *text, unsigned stops[TAB_STOP_COUNT], size_t *count,
-	       unsigned width)
-{
-	char *cursor = text;
-	unsigned previous = 1;
-
-	while (*cursor != '\0') {
-		char *end;
-		unsigned long value;
-		int relative;
-
-		while (*cursor == ',' || isspace((unsigned char)*cursor))
-			cursor++;
-		if (*cursor == '\0')
-			break;
-		relative = *cursor == '+';
-		if (relative)
-			cursor++;
-		errno = 0;
-		value = strtoul(cursor, &end, 10);
-		if (errno != 0 || end == cursor || value > UINT_MAX)
-			return 0;
-		if (*end != '\0' && *end != ',' &&
-		    !isspace((unsigned char)*end))
-			return 0;
-		if (relative) {
-			if (value > UINT_MAX - previous)
-				return 0;
-			value += previous;
-		}
-		if (!append_stop(stops, count, (unsigned)value, width))
-			return 0;
-		previous = (unsigned)value;
-		cursor = end;
-	}
-	return *count != 0;
-}
-
-static int
-emit_capability(const struct terminfo_capability *capability, long parameter)
-{
-	long parameters[9] = {parameter, 0};
-	char expanded[1024];
-
-	if (capability == NULL || capability->kind != TERMINFO_STRING ||
-	    terminfo_expand(capability->string, parameters, expanded,
-			    sizeof(expanded)) < 0)
-		return -1;
-	return command_write_all(STDOUT_FILENO, expanded, strlen(expanded));
-}
-
+/*
+ * Runs the tabs command.
+ */
 int
-main(int argc, char **argv)
+main(
+	int argc,
+	char **argv)
 {
+	size_t item;
+	unsigned distance;
 	static const unsigned assembler[] = {1, 10, 16, 36, 72};
 	static const unsigned assembler2[] = {1, 10, 16, 40, 72};
 	static const unsigned cobol[] = {1, 8, 12, 16, 20, 55};
@@ -107,29 +52,45 @@ main(int argc, char **argv)
 	static const unsigned univac[] = {1, 12, 20, 44};
 	struct terminfo terminal;
 	const struct terminfo_capability *columns;
-	const char *type = NULL;
-	const char *directory = getenv("TERMINFO");
-	const unsigned *predefined = NULL;
-	size_t predefined_count = 0;
+	const char *type;
+	const char *directory;
+	const unsigned *predefined;
+	size_t predefined_count;
 	unsigned stops[TAB_STOP_COUNT];
-	size_t stop_count = 0;
-	unsigned uniform = 8;
+	size_t stop_count;
+	unsigned uniform;
 	unsigned width;
-	unsigned position = 1;
-	int index = 1;
+	unsigned position;
+	int index;
 
+	type = NULL;
+	directory = getenv("TERMINFO");
+	predefined = NULL;
+	predefined_count = 0;
+	stop_count = 0;
+	uniform = 8;
+	position = 1;
+	index = 1;
+
+	/* Process each remaining command-line operand. */
 	while (index < argc && argv[index][0] == '-' &&
 	       argv[index][1] != '\0') {
+		/* Handles the selected command-line operation. */
 		if (strcmp(argv[index], "--") == 0) {
 			index++;
 			break;
 		}
+
+		/* Handles the selected command-line operation. */
 		if (strcmp(argv[index], "-T") == 0) {
+			/* Validates the command-line arguments. */
 			if (++index >= argc)
 				goto usage;
 			type = argv[index++];
 			continue;
 		}
+
+		/* Handles the selected command-line operation. */
 		if (strcmp(argv[index], "-a") == 0) {
 			predefined = assembler;
 			predefined_count =
@@ -166,58 +127,226 @@ main(int argc, char **argv)
 			goto usage;
 		index++;
 	}
+
+	/* Handles the type availability. */
 	if (type == NULL)
 		type = getenv("TERM");
+
+	/* Handles the type availability. */
 	if (type == NULL || *type == '\0') {
 		fprintf(stderr, "tabs: TERM is not set\n");
+
+		/* Reports operation failure. */
 		return 2;
 	}
+
+	/* Handles a failed terminfo load operation. */
 	if (terminfo_load(&terminal, type, directory) != 0) {
 		fprintf(stderr, "tabs: %s: unknown or invalid terminal\n",
 			type);
+
+		/* Returns the computed result. */
 		return 3;
 	}
 	columns = terminfo_find(&terminal, "cols");
+
+	/* Handles the columns availability. */
 	if (columns == NULL || columns->kind != TERMINFO_NUMBER ||
 	    columns->number <= 0 || (unsigned long)columns->number > UINT_MAX)
+
+		/* Returns the computed result. */
 		return 3;
 	width = (unsigned)columns->number;
+
+	/* Validates the command-line arguments. */
 	if (index < argc) {
+		/* Validates the command-line arguments. */
 		if (index + 1 != argc ||
 		    !explicit_stops(argv[index], stops, &stop_count, width))
 			goto usage;
 	} else if (predefined != NULL) {
-		size_t item;
-
+		/* Process each remaining element. */
 		for (item = 0; item < predefined_count; item++)
+
+			/* Handles a failed append stop operation. */
 			if (predefined[item] > 1U &&
 			    !append_stop(stops, &stop_count, predefined[item],
 					 width))
 				goto usage;
 	} else if (!uniform_stops(stops, &stop_count, uniform, width))
 		goto usage;
+
+	/* Handles a failed emit capability operation. */
 	if (emit_capability(terminfo_find(&terminal, "cr"), 0) != 0 ||
 	    emit_capability(terminfo_find(&terminal, "tbc"), 0) != 0)
 		goto terminal_error;
-	for (index = 0; (size_t)index < stop_count; index++) {
-		unsigned distance = stops[index] - position;
 
+	/* Process each remaining element. */
+	for (index = 0; (size_t)index < stop_count; index++) {
+				distance = stops[index] - position;
+
+		/* Handles a failed emit capability operation. */
 		if (emit_capability(terminfo_find(&terminal, "cuf"),
 				    distance) != 0 ||
 		    emit_capability(terminfo_find(&terminal, "hts"), 0) != 0)
 			goto terminal_error;
 		position = stops[index];
 	}
+
+	/* Handles a failed emit capability operation. */
 	if (emit_capability(terminfo_find(&terminal, "cr"), 0) != 0)
 		goto terminal_error;
+
+	/* Reports successful completion. */
 	return 0;
 
 terminal_error:
 	fprintf(stderr, "tabs: terminal does not support tab programming\n");
+
+	/* Reports operation failure. */
 	return 1;
 
 usage:
 	fprintf(stderr, "usage: tabs [-1..-9|-a|-a2|-c|-c2|-c3|-f|-p|-s|-u] "
 			"[-T terminal] [tabstops]\n");
+
+	/* Reports operation failure. */
 	return 2;
+}
+
+/* Supports the explicit stops operation. */
+static int
+explicit_stops(
+	char *text,
+	unsigned stops[TAB_STOP_COUNT],
+	size_t *count,
+	unsigned width)
+{
+	char *end;
+	unsigned long value;
+	int relative;
+	char *cursor;
+	unsigned previous;
+
+	cursor = text;
+	previous = 1;
+
+	/* Continue while the operation condition remains true. */
+	while (*cursor != '\0') {
+		/* Continue while the operation condition remains true. */
+		while (*cursor == ',' || isspace((unsigned char)*cursor))
+			cursor++;
+
+		/* Checks the current cursor position. */
+		if (*cursor == '\0')
+			break;
+		relative = *cursor == '+';
+
+		/* Handles the relative condition. */
+		if (relative)
+			cursor++;
+		errno = 0;
+		value = strtoul(cursor, &end, 10);
+
+		/* Handles the reported system error. */
+		if (errno != 0 || end == cursor || value > UINT_MAX)
+			return 0;
+
+		/* Handles a failed isspace operation. */
+		if (*end != '\0' && *end != ',' &&
+		    !isspace((unsigned char)*end))
+
+			/* Reports successful completion. */
+			return 0;
+
+		/* Handles the relative condition. */
+		if (relative) {
+			/* Validates the current value. */
+			if (value > UINT_MAX - previous)
+				return 0;
+			value += previous;
+		}
+
+		/* Handles a failed append stop operation. */
+		if (!append_stop(stops, count, (unsigned)value, width))
+			return 0;
+		previous = (unsigned)value;
+		cursor = end;
+	}
+
+	/* Returns the computed result. */
+	return *count != 0;
+}
+
+/* Supports the append stop operation. */
+static int
+append_stop(
+	unsigned stops[TAB_STOP_COUNT],
+	size_t *count,
+	unsigned stop,
+	unsigned width)
+{
+	/* Handles the stop condition. */
+	if (stop == 0 || stop > width || *count == TAB_STOP_COUNT ||
+	    (*count != 0 && stop <= stops[*count - 1U]))
+
+		/* Reports successful completion. */
+		return 0;
+	stops[(*count)++] = stop;
+
+	/* Reports operation failure. */
+	return 1;
+}
+
+/* Supports the uniform stops operation. */
+static int
+uniform_stops(
+	unsigned stops[TAB_STOP_COUNT],
+	size_t *count,
+	unsigned every,
+	unsigned width)
+{
+	unsigned stop;
+
+	/* Handles the every condition. */
+	if (every == 0)
+		return 0;
+
+	/* Process each element required by the operation. */
+	for (stop = every + 1U; stop <= width; stop += every)
+
+		/* Handles a failed append stop operation. */
+		if (!append_stop(stops, count, stop, width) ||
+		    stop > UINT_MAX - every)
+
+			/* Reports successful completion. */
+			return 0;
+
+	/* Reports operation failure. */
+	return 1;
+}
+
+/* Supports the emit capability operation. */
+static int
+emit_capability(
+	const struct terminfo_capability *capability,
+	long parameter)
+{
+	int function_result;
+	long parameters[9] = {parameter, 0};
+	char expanded[1024];
+
+	/* Handles a failed terminfo expand operation. */
+	if (capability == NULL || capability->kind != TERMINFO_STRING ||
+	    terminfo_expand(capability->string, parameters, expanded,
+			    sizeof(expanded)) < 0)
+
+		/* Reports operation failure. */
+		return -1;
+
+	/* Obtains the command write all result. */
+	function_result = command_write_all(STDOUT_FILENO, expanded, strlen(expanded));
+
+	/* Returns the computed result. */
+	return function_result;
 }

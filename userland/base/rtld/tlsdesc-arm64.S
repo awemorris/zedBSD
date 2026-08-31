@@ -1,4 +1,16 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the arm64 runtime-linker TLSDESC resolver.
+ */
+
 	.text
 	.globl d_tlsdesc_resolver
 	.hidden d_tlsdesc_resolver

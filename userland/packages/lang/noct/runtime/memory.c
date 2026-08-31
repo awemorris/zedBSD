@@ -1,4 +1,16 @@
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the zedBSD package memory component.
+ */
+
 #include "userland/packages/lang/noct/runtime/memory.h"
 
 #include <limits.h>
@@ -27,23 +39,35 @@ static const struct memory_limits limits[] = {
     {32U, 512U * KIB, 1U * MIB, 256U * KIB, 4U * MIB},
 };
 
+/*
+ * Implements the user noct select memory operation.
+ */
 int
-user_noct_select_memory(uint64_t capacity_bytes, uint64_t available_bytes,
-			struct user_noct_memory_profile *profile)
+user_noct_select_memory(
+	uint64_t capacity_bytes,
+	uint64_t available_bytes,
+	struct user_noct_memory_profile *profile)
 {
 	struct memory_limits selected;
 	uint64_t arena_bytes;
 
+	/* Handles the profile availability. */
 	if (profile == NULL)
 		return 0;
-	/* VM heap policy is based on installed physical memory plus swap.  The
+
+	/*
+ * VM heap policy is based on installed physical memory plus swap.  The
 	 * current strict-commit availability is deliberately not used to shrink
 	 * the requested heap: mmap must fail atomically if the selected Noct
 	 * profile cannot be guaranteed alongside the other live processes. */
 	if (capacity_bytes < 8ULL * MIB)
 		return 0;
+
+	/* Handles the capacity bytes condition. */
 	if (capacity_bytes > 64ULL * MIB) {
 		arena_bytes = capacity_bytes / 2U;
+
+		/* Handles the arena bytes condition. */
 		if (arena_bytes > 1024ULL * MIB)
 			arena_bytes = 1024ULL * MIB;
 		selected = limits[3];
@@ -75,5 +99,7 @@ user_noct_select_memory(uint64_t capacity_bytes, uint64_t available_bytes,
 	profile->gc_nursery_size = selected.gc_nursery_size;
 	profile->gc_graduate_size = selected.gc_graduate_size;
 	profile->gc_tenure_size = selected.gc_tenure_size;
+
+	/* Reports operation failure. */
 	return 1;
 }

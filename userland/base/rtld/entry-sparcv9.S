@@ -1,3 +1,16 @@
+/* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Implements the sparcv9 runtime-linker entry point.
+ */
+
 .section ".text"
 .align 4
 .global _rtld_start

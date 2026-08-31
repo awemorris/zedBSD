@@ -1,0 +1,270 @@
+path	explanation-source	had-bom	body-sha256	explanation
+userland/X11/libX11/xlib.c	retained	no	27e44aca9bf2776a53a79bb1f6e989a328e7d8924cf9fa3f3d1acc21900a1789	Minimal Xlib-compatible client library for Xzed.
+userland/X11/xzed/input-posix.c	generated	no	7405ed7e2be952cc87090358eb6ff66bd2fe899ebeb35456ffc10c63cc5ef135	Implements the zedBSD X11 input posix component.
+userland/X11/xzed/input.c	generated	no	d63d10ec06c4c9f17fb255881bf55816f39034b54ed6b37376af08331cfebcd8	Implements the zedBSD X11 input component.
+userland/X11/xzed/input.h	generated	no	03ae147670af8f2598e576801a156611b489c46d19b25dcbfa3e14485717914d	Declares the zedBSD X11 input interface.
+userland/X11/xzed/main.c	retained	no	b954d1b5ae9a040d8045afbfead2bc137a7449d8ee6705e1ea829eebd2bd081b	Xzed - small local X11 server for zedBSD Wire constants and layouts follow the public X11 core protocol.
+userland/X11/xzed/pointer.h	generated	no	4be020c211e3f829c09a463ea07337803bc5ecc1f0cc5696755cfed944245fcb	Declares the zedBSD X11 pointer interface.
+userland/X11/zshell/main.c	retained	no	f5a46b387c590014a86cd1fd5e8ede5025980c38d278a611b56933175eccc8ef	zshell - lightweight Xzed desktop taskbar
+userland/X11/zterm/main.c	retained	no	3d925c8ad0f8aeec0d5142646fa4ff7a913cae7408b2b8f8676905a32fcb3729	zterm - compact Unicode VT100 terminal for Xzed
+userland/X11/zwm/main.c	retained	no	8afae85b52c9fa53858e89d834340d05951019c1389c46258c0226ee17722cee	zwm - minimal reparenting window manager.
+userland/base/ar/main.c	generated	no	ac468edee369e500cc87f8afe2abe2f422a71f410cafd0ad92ce6edd1446d220	Implements the zedBSD ar userland command.
+userland/base/at/main.c	generated	no	fc608537d4e996851e8853a9729de4dcaba5a9802ce186fe18360a6699eb9b64	Implements the zedBSD at userland command.
+userland/base/awk/main.c	generated	no	6cfafd5300044a50068481179a94b9f4ff5f9e3ce97f9eb05ff23704f8e5aec8	Implements the zedBSD awk userland command.
+userland/base/basename/main.c	generated	no	08dd620c33a98b1d0f39fd5900fbe10f7bfec451dc8dc505e399c32855e71460	Implements the zedBSD basename userland command.
+userland/base/bc/main.c	generated	no	50762005719f2ea06e307be2da47ef244db1ee8c95b791b0bccf957c48b8868d	Implements the zedBSD bc userland command.
+userland/base/bc/number.c	generated	no	daddd5f4fc353eaed25162bd2956d612e7f5c15abbf9bb7caddcc06639ffe069	Implements the zedBSD userland number component.
+userland/base/bc/number.h	generated	no	75823e2e1bee6827b89ab9b486bddbbf6d7f9441c95bad8de6aa884b7996bd85	Declares the zedBSD userland number interface.
+userland/base/blkid/main.c	retained	no	a6a1a9edb87e9786cc6bf7d6ea17dd9c6f977a9c6638b368136f99ddc342be38	blkid - print block-device attributes.
+userland/base/cal/main.c	generated	no	485fc218131805cc7f068a8ed18dd30aeba31e796a024cab3dc25e4ab8f83839	Implements the zedBSD cal userland command.
+userland/base/cat/main.c	generated	no	bcdbd563712f82f2eaa6af4b9c7dbaff7519b7d8ff47fc570019071cbbfcce82	Implements the zedBSD cat userland command.
+userland/base/cflow/main.c	generated	no	952d0384523ed96be3269fd0c1075afec90480dbf787f1f18340fdb8c356a6e6	Implements the zedBSD cflow userland command.
+userland/base/chgrp/main.c	generated	no	7123a874576c953b2c48c51e2ffe10edfc768aa0d2173166eae8c0c2753a6f42	Implements the zedBSD chgrp userland command.
+userland/base/chmod/main.c	generated	no	502dcc8130ef775d573902834dd588946e710ca2313f41ad135d7559354d3408	Implements the zedBSD chmod userland command.
+userland/base/chown/main.c	generated	no	308e00f4c4bf25efeadb1e72e2448a161f15dbfc819c5acfda47c5816299b66a	Implements the zedBSD chown userland command.
+userland/base/cksum/main.c	generated	no	a1ec1a99e246f1abb15f331ed36e7964ba7ae758a81c72b2285890ba430e6e01	Implements the zedBSD cksum userland command.
+userland/base/cmp/main.c	generated	no	e2c1508dedafedbc52763aebc03d1f8c00700dc37483232c3b5c44c9131e7b6d	Implements the zedBSD cmp userland command.
+userland/base/comm/main.c	generated	no	3201885eecc0968f7ad74e92677769f302461de3a93b85556f34d15534eddc2c	Implements the zedBSD comm userland command.
+userland/base/common/archive.c	generated	no	3a1c537184c1792600adf6817df5a810517b81a9d6be16ad0fbe45252c7c04b1	Implements shared userland archive support.
+userland/base/common/archive.h	generated	no	1fbe7f847da5d7cd5974017e1f571e7b6d79110407439b7bfd7aafd6c55df9c2	Declares shared userland archive support.
+userland/base/common/c_parser.c	generated	no	cdff276d54f7b5ab2d23b66b78fe6203acacfcae26f303399e86b4bbae8953be	Implements shared userland c parser support.
+userland/base/common/c_parser.h	generated	no	b0da1beef4360a9283253ed85fc1f2dcb34f6536c319d2060b5620003a001531	Declares shared userland c parser support.
+userland/base/common/command.c	generated	no	f501e24892c9b2d283b5d1ac8cc5b12e2497929dd0785c7f69f98b38b03ebe5e	Implements shared userland command support.
+userland/base/common/command.h	generated	no	bdb4642cdfdc86954e5572db73e34a6b3f931a2dac30aac72a26ff9442aee74e	Declares shared userland command support.
+userland/base/common/elf_symbols.c	generated	no	f3722c54343bb7fe2d9f6800a9b569f5c901638775775ea168f3459591efb98a	Implements shared userland elf symbols support.
+userland/base/common/elf_symbols.h	generated	no	763bbf3dd6920c17fa8b3988c504781cef28589981c9ef67cd733e25e26ecad7	Declares shared userland elf symbols support.
+userland/base/common/lzw.c	generated	no	8b95320df358faa5fc81910c9f75138936bac07daa6d38fff5fdcfaa136853a6	Implements shared userland lzw support.
+userland/base/common/lzw.h	generated	no	412bdc63b44bb5015ed802abb4f94a282b1d04b94509741aa2b95f9b2dfce576	Declares shared userland lzw support.
+userland/base/common/pager.c	generated	no	1b2c310cd18bdee85db408e213da566b3447c2295d0a554814dc1d855e370975	Implements shared userland pager support.
+userland/base/common/pager.h	generated	no	bfee37313c649d65ed7123097840c1f0e0d0dfdd61022f1f13916929315230dc	Declares shared userland pager support.
+userland/base/common/sccs.c	generated	no	496dbb605932407f96d63f258dbd102e7b8b07f7de3e17884877ebd65f7f3b98	Implements shared userland sccs support.
+userland/base/common/sccs.h	generated	no	2defaceb13f54109315efcccdb4ca7254b4c9428bec680dd1e9886cd8fac0a1e	Declares shared userland sccs support.
+userland/base/common/terminfo.c	generated	no	e2184621d699c1e7e1d3d1d09c88d64b4120fcdf4ee4e69c4a77c71f55a6cd7c	Implements shared userland terminfo support.
+userland/base/common/terminfo.h	generated	no	2a13a67fedb0d3d5d30a57d95c7644e6ecf59beec420a8ffadffa74105a03580	Declares shared userland terminfo support.
+userland/base/common/uucodec.c	generated	no	c25050fc6cee302ae6ad0a332ff08c6de5fbfe0b167e4ab6e8ebeaaea54f67d9	Implements shared userland uucodec support.
+userland/base/common/uucodec.h	generated	no	1d1fe83589ac7f4aaf272de275cf5dee35cbfedcc1ddc7f468dde4dad6aa4195	Declares shared userland uucodec support.
+userland/base/compress/main.c	generated	no	8127371e4e18a5e69479092e230845b45945b4cde3c8583f3512953e56d54028	Implements the zedBSD compress userland command.
+userland/base/cp/main.c	generated	no	00216dab0fa41e7bbe45928e52507640afb895aa6b42f90b7b438951033f0f65	Implements the zedBSD cp userland command.
+userland/base/cron/main.c	generated	no	9ccbfd1541fbcaae22b27d16a9f2f2f376e4ccf2afecd7d877564a40240bc047	Implements the zedBSD cron userland command.
+userland/base/crontab/main.c	generated	no	1c66b83127b4f5febb6c6c4aa10bc1688678122804a6e910bc0d64de055d1e3d	Implements the zedBSD crontab userland command.
+userland/base/csplit/main.c	generated	no	b1ef25b600177ce9e27b44679ac91d8a4ce6d3407cb35c53bbd1b86798bf4ee2	Implements the zedBSD csplit userland command.
+userland/base/curses/curses.c	generated	no	2f6dbf6e1c9a47c827f91b195ac811a1e4a87cbd56e3d668d7b3311665dd4791	Implements the zedBSD userland curses component.
+userland/base/curses/curses.h	generated	no	0c787917299b6974b3aecb8dee447e1c2fdfc076b5b883058d3f8b1677065f8a	Declares the zedBSD userland curses interface.
+userland/base/cut/main.c	generated	no	c278b63379bfe086fd4617f74693117aab462222077c0c4dc838ddc5ae5e3b97	Implements the zedBSD cut userland command.
+userland/base/cxref/main.c	generated	no	980bb19deb44051aae12cea84c7c6b60e380c30956d10dc6c08e9369d4c83179	Implements the zedBSD cxref userland command.
+userland/base/date/main.c	generated	no	b05b5305d85c0a68d29231410c36c8d683bfb8e62bbc6cfdbc656cde8360ba5b	Implements the zedBSD date userland command.
+userland/base/dd/main.c	generated	no	943b3e1d78c3df0933a794144a102b8c28345cf43e1a559eb9b324235b3bb396	Implements the zedBSD dd userland command.
+userland/base/deferred-stub/main.c	generated	no	55b6dd8e11e41bc8a4514900687cf7445be112d1744f8432d83da9739ac64be1	Implements the zedBSD deferred stub userland command.
+userland/base/df/main.c	generated	no	6d8202a3a4f485295963272e397816214ce661a6b3fe2d8d296592b70591892b	Implements the zedBSD df userland command.
+userland/base/dhcpc/main.c	generated	no	3feee5e64a876b6043ed7a7191225cb8c82bf759cf4dbc84c0511220051d2a25	Implements the zedBSD dhcpc userland command.
+userland/base/diff/main.c	generated	no	7627962bb43f5dfc74f58d4c0408e84b79ec9871a8e214499f0ce9e8aa196d0b	Implements the zedBSD diff userland command.
+userland/base/dirname/main.c	generated	no	e185727804458db93500f5057479301997d4e652ec6d79620f3c752c473c62ab	Implements the zedBSD dirname userland command.
+userland/base/dmesg/main.c	generated	no	a6fa26847ec6cc38e3bdb4c1f2976291030a9e2b36f637c74501f4a542cb9660	Implements the zedBSD dmesg userland command.
+userland/base/du/main.c	generated	no	720926b56a28ad44aecf8f6dc0a9fd75aea6c9695f21bb4d031c8e1d0300e148	Implements the zedBSD du userland command.
+userland/base/ed/buffer.c	generated	no	fd6a7b68ad3353613ab2e6ab3570d0c5ebc07b839699db18ab53f98a4b671081	Implements the zedBSD userland buffer component.
+userland/base/ed/editor.h	generated	no	a9a58de6a76b52f493561cac8570fb4d30efd816bbbbf2656a7145eb7414d582	Declares the zedBSD userland editor interface.
+userland/base/ed/main.c	generated	no	8f8fe918ff87a2da3916383973ac2730b5f0d0f3bbd9559d00a84c73fba497c2	Implements the zedBSD ed userland command.
+userland/base/expand/main.c	generated	no	1d216aab270bf134b8a47ccdc7841a51ea4f77d659c4c67631e7e1dc3279bcad	Implements the zedBSD expand userland command.
+userland/base/expr/main.c	generated	no	70e2292d0bb1b1e2816f3cee1b4cf5f86b2f5ad3b23ad4a886db4090b61ebafe	Implements the zedBSD expr userland command.
+userland/base/fetch/main.c	retained	no	0f21df889018d38aa42b4c377b61b8ccd76942ee5b343b66c2ee3b5072daed82	Simple HTTP/1.1 file retrieval utility.
+userland/base/file/main.c	generated	no	02b225173a2e8fa6648af0379a5280071672b869e866faa1f1150bd4de8b2921	Implements the zedBSD file userland command.
+userland/base/find/main.c	generated	no	7012be387339936c10f8b57b8e91208603d0172decf51ceff6e69a64a1e9bcd6	Implements the zedBSD find userland command.
+userland/base/fmt/main.c	generated	no	cf6b650c715c067c586923fee2ff4426acbb36e3113877cd7e1335e54c64aa65	Implements the zedBSD fmt userland command.
+userland/base/fold/main.c	generated	no	e05c22e61c944b74636d6b2dc9d9a4c6b112ceedb3acedc82e0f6a65659159cc	Implements the zedBSD fold userland command.
+userland/base/fuser/main.c	generated	no	99d8251e73eff3f4a2993340194fc718a1da29652bee1c1441da48d1c286c97e	Implements the zedBSD fuser userland command.
+userland/base/gencat/main.c	generated	no	df4765c31f24eb609ca40703c7a67280cf1b01a93b799e6386f1ccc1221f31b2	Implements the zedBSD gencat userland command.
+userland/base/getconf/getconf-table.h	retained	no	0491176d18a66e14997fdfbe3b315879561ed39e5931e398652bf15c7e175ca4	One maintained mapping for getconf names and their defining interfaces.
+userland/base/getconf/main.c	generated	no	b95354bb186bee4ee9f58686191fe3ff8a35d57786f45122a5a0fa39d70b629c	Implements the zedBSD getconf userland command.
+userland/base/gettext/main.c	generated	no	757b2c3f6023b72e123745e85dd30bb26d145bf14ca4f9107f5d3c6b60ecfbc1	Implements the zedBSD gettext userland command.
+userland/base/getty/main.c	generated	no	91d269f7beff711c860cb8cf55533b50536b2eb5dbc26a77554da9cbaa6411b1	Implements the zedBSD getty userland command.
+userland/base/grep/main.c	generated	no	e9a26739a229bf9abff024fcd1467aeaef7118d20be87c2f3cc291fb8f6e74c0	Implements the zedBSD grep userland command.
+userland/base/head/main.c	generated	no	1abfc36ee4930d72ffa601b313a18d6f5f8af961851ff0c25c4171d747b8e796	Implements the zedBSD head userland command.
+userland/base/host/main.c	generated	no	f9389ea1e20f8d0d5013b63936717268d32df17744e027e62d3eea48412cc209	Implements the zedBSD host userland command.
+userland/base/hostname/main.c	generated	no	84717de7c6dea8897dca6861d662da5a779559b86195834955468dab602d3deb	Implements the zedBSD hostname userland command.
+userland/base/iconv/main.c	generated	no	3df04e848dd6687d354a8527a7b6f86f86ed8377f1c064656588a19d1708f1cf	Implements the zedBSD iconv userland command.
+userland/base/id/main.c	generated	no	c19a974d5b0bbcb7f13f50a63e159c5634d61b635a46a6ad306e61c43263f8d9	Implements the zedBSD id userland command.
+userland/base/ifconfig/main.c	generated	no	28dd88f89b1bec79ad12a901e70b4106db12e7407ad4848ec2df1bdc00cfd2ae	Implements the zedBSD ifconfig userland command.
+userland/base/infocmp/main.c	generated	no	6e2db3af4d9c47fbc56f2ea903a92c0dce9571930dabc3e2bf6cb2b12125b159	Implements the zedBSD infocmp userland command.
+userland/base/init/main.c	generated	no	d81e1233315a408ed3b48d45d9336f878c777f08bf5bfb6d1c11999e92b248f1	Implements the zedBSD init userland command.
+userland/base/ipcrm/main.c	generated	no	a86f238fa7b984bb3e3d0dda0175d386e071bde702cd8efe55cc1ff02430e295	Implements the zedBSD ipcrm userland command.
+userland/base/ipcs/main.c	generated	no	a9085cdfa7cca1fe99e8b691a172e784bb90bb29f5783f6b0791857644bad84e	Implements the zedBSD ipcs userland command.
+userland/base/join/main.c	generated	no	5e3d7a629ddd05be430e99ea3dca97c22aa9bbc99fb5ca0a8c77f2bf5bc855a6	Implements the zedBSD join userland command.
+userland/base/kill/main.c	generated	no	8aafe6a5e1669e8fdcfb3c3a902722fba9f3a1370399dfd67b51062679cf5336	Implements the zedBSD kill userland command.
+userland/base/less/main.c	generated	no	9596164ae0b103002c4c7039c0480e369ec27195e7337a9ebe3fb0ea2d3a0239	Implements the zedBSD less userland command.
+userland/base/libc/account.c	generated	no	030b0d5f1588a465dff08e697720b76a1efacc816fc838f8bdf444c1a76d896e	Implements the zedBSD C library account support.
+userland/base/libc/atomic-runtime.c	generated	no	abea38ab079218fefddb7d1bbb9f84e7dde53a3bc929b8c5ddc785145d0406aa	Implements the zedBSD C library atomic runtime support.
+userland/base/libc/crypt.c	generated	no	b2aa950e95cfada3ff3483e40ad474eb78f214726b07ff1c8e3dffc216a517ce	Implements the zedBSD C library crypt support.
+userland/base/libc/dlfcn.c	generated	no	793f18a16f8cbda3874ecd32cded856ab1195e121ab427b4950bc0b81c09f50a	Implements the zedBSD C library dlfcn support.
+userland/base/libc/mqueue.c	generated	no	24ac3eab3312c436b5944222c76dd8fec352646582d6cc03701f74ddab97aa48	Implements the zedBSD C library mqueue support.
+userland/base/libc/poll.c	generated	no	ba688f4eb8c83b2b29a2fdac96317c85a738cf97b776fcef94965111a47c2b80	Implements the zedBSD C library poll support.
+userland/base/libc/posix.c	generated	no	b3cf5ba464b9f66038fa32d27509a925f9348c0331c50212d260631033900593	Implements the zedBSD C library posix support.
+userland/base/libc/pthread.c	generated	no	fcd01f9e15190061af4a5b5ec04701ccc2b52512fa82a5d8d78de8499e465609	Implements the zedBSD C library pthread support.
+userland/base/libc/resolver-dns.c	generated	no	5caddc02f162b0ba48d96ced6f52f2098b6bec23e378947dd62bac42a2fc6e0d	Implements the zedBSD C library resolver dns support.
+userland/base/libc/resolver-internal.h	generated	no	da87dd3cdfd1bf9b2319ed178ec11ac90ad77afba3ec56f5cd527c8e6b2bc068	Declares the zedBSD C library resolver internal interface.
+userland/base/libc/resolver.c	generated	no	d495ae95ce1efd6d219f0c90eb58c29c984923700e1cb29e59e514de8b285fe0	Implements the zedBSD C library resolver support.
+userland/base/libc/semaphore.c	generated	no	a0d1d405a16a71879d5ce7c68e49721b2b367f0985eafd5c1341f149be2208fe	Implements the zedBSD C library semaphore support.
+userland/base/libc/shm.c	generated	no	423c6e197bb36f3095687f937256ff18edd6a559971967538f458da294c03557	Implements the zedBSD C library shm support.
+userland/base/libc/signal.c	generated	no	d3165abe8f1bc24d2dd5098efa16298d4a0596ff89ab2e702f2740108cc09569	Implements the zedBSD C library signal support.
+userland/base/libc/socket.c	generated	no	b17c25e129a6490741fd671f71b110640619648a7744f526fa88d07cf953ad65	Implements the zedBSD C library socket support.
+userland/base/libc/static-tls.c	generated	no	2994080797e776b00d548451b940b4dae942e6d1dedaf0206db44ac19a6932c8	Implements the zedBSD C library static tls support.
+userland/base/libc/syscall-aarch64.S	generated	no	f82798029ce7778e6d4ec436d8fbf0ed203a1d6a77433bfc30737546e11a18c8	Implements the aarch64 user-space system call entry point.
+userland/base/libc/syscall-amd64.S	generated	no	289e5b9aa8b1b662bd694dcb752cf3f7d3ae563918a38c4d44b99817267d72a3	Implements the amd64 user-space system call entry point.
+userland/base/libc/syscall-i386.S	generated	no	3da78666252ccc42e8828966d55dcd858f69637e47a4caf60c35a1dd1298456e	Implements the i386 user-space system call entry point.
+userland/base/libc/syscall-sparcv9.S	generated	no	6e751e4add81d46e84856b242561da37de3d3205591666cd40c0a2cfb1849f30	Implements the sparcv9 user-space system call entry point.
+userland/base/libc/syscall.h	generated	no	99547f8228da6c2fad04d8c8cb469c6a5fa25f1d7118b796b49f8070ef5b8afe	Declares the zedBSD C library syscall interface.
+userland/base/libc/termios.c	generated	no	51b515b6820466be63e007b0f869f807718b5613c59c369a8c68436dc0a359e4	Implements the zedBSD C library termios support.
+userland/base/libc/timer.c	retained	no	1beae2104c51d95314083327b08d021a93286c9019bf954ff9386cef09abcf35	POSIX process timers are kernel objects.  SIGEV_THREAD is implemented here because creating a user thread is necessarily a libc operation.  The signal handler only updates preallocated atomic state and wakes a private usync word; allocation and pthread_create() are confined to timer_worker().
+userland/base/libc/utmpx.c	generated	no	d3cb8f03731bb847ad264a8a35d0a4cad39e73a4021bc21fd316d1a81846376c	Implements the zedBSD C library utmpx support.
+userland/base/libedit/readline/history.h	generated	no	9508f5ef4c0b8b2ca2c59fd6d08ef71f318579b62bf1a6bba05e7d881760fa7e	Declares the zedBSD userland history interface.
+userland/base/libedit/readline/readline.h	generated	no	703af081e4a1d6fc2b9a5acead10dd33e58aa0702cd757007d7d19cccc0be490	Declares the zedBSD userland readline interface.
+userland/base/libedit/readline.c	retained	no	ee5fe8032b836bc177ba84aee8e72d85438df33b37d87b9e8f23170342f2f74f	A deliberately small Readline-compatible editor.  The package is named libedit, while its public header and archive names follow Readline.
+userland/base/link/main.c	generated	no	8c8e98eae1b68b58d9a558113196609bdae63848d52ffe281811d45922aff8ae	Implements the zedBSD link userland command.
+userland/base/ln/main.c	generated	no	285dd4218f98891ebcbb7707c33e1e52861a718b60fb26ebde69421220a1b137	Implements the zedBSD ln userland command.
+userland/base/locale/main.c	generated	no	13ba233bc8db0bb0e7e631f8a89f9651ca06fdae1a50b3d6197af6be1d527b6f	Implements the zedBSD locale userland command.
+userland/base/localedef/main.c	generated	no	bad5eabe371275229d36239a7ab7dfb10be12318ac7d9ead1ee44feacc5d21e8	Implements the zedBSD localedef userland command.
+userland/base/logger/main.c	generated	no	f1694338aa4277777c0522f9160c61c8f5064f7ad000402768a85bb5c708274e	Implements the zedBSD logger userland command.
+userland/base/login/main.c	generated	no	d3a8fd923c596b794d3a5c1dcf09554492c0d5c7e4be854086eaaadd4325b117	Implements the zedBSD login userland command.
+userland/base/logname/main.c	generated	no	184e122f042141995fbc6e81410aa03a1ebaeacedccd4daf7e2fa01490d997fb	Implements the zedBSD logname userland command.
+userland/base/lp/lpd-client.c	generated	no	602544160f66463e94352b45e5be07a2327a2f744cd848506810a85863ae90dd	Implements the zedBSD userland lpd client component.
+userland/base/lp/lpd-client.h	generated	no	2f91b16423b3c0f193e4ba24a5dc11a8406272035daaf32e28990413a6a04060	Declares the zedBSD userland lpd client interface.
+userland/base/lp/main.c	generated	no	165340620d0cd59569b44ce4d67db0f4de56451ad4ec2aebb5f554ad89670ac0	Implements the zedBSD lp userland command.
+userland/base/ls/main.c	generated	no	75636116b21d761a2ef05c6645494f03f8908f07fe72b2c22441ac5900e43ce2	Implements the zedBSD ls userland command.
+userland/base/m4/engine.c	generated	no	8f8ee183d6977592c7d498822b115f4174e6670602b05e31d633ddd1dab1014f	Implements the zedBSD userland engine component.
+userland/base/m4/m4.h	generated	no	facaf3054db9431bb08869b7614e54b1865fcd60cff57c67614ed4e9958202c6	Declares the zedBSD userland m4 interface.
+userland/base/m4/main.c	generated	no	93713595f35d02f5481244929db403bf79829006fed4d02526df55e7bdf3acc7	Implements the zedBSD m4 userland command.
+userland/base/mesg/main.c	generated	no	f5a5cf08b3cd32d0da19456c91787e08f9fb0cdc437e1ddbeed8ffdd17f13d9b	Implements the zedBSD mesg userland command.
+userland/base/mkdir/main.c	generated	no	27d3c966d5f7fcd390c505c573e6c716f2a074a2e362a63ccf7c6f265bd574a6	Implements the zedBSD mkdir userland command.
+userland/base/mkfifo/main.c	generated	no	3edee880dc3e9893521869a9efe985bbf07e79cd3458fb056a58ddea6cc4d856	Implements the zedBSD mkfifo userland command.
+userland/base/more/main.c	generated	no	3a1b44fd24cf7b12df3aab8dd81de9c2025029479c24e45924d25d2b94b1e444	Implements the zedBSD more userland command.
+userland/base/mount/main.c	generated	no	6e2b07d378bea1271a176a7e707b5d0286418ab077c1f3e5550c0c91606a30b5	Implements the zedBSD mount userland command.
+userland/base/msgfmt/main.c	generated	no	adb7ed9e27ab7f6d048cb7e415f684895d5c32dc5f6d1003165173a63a673947	Implements the zedBSD msgfmt userland command.
+userland/base/mv/main.c	generated	no	ff54feac4b95a5fb4d40443024c934bba32735fe72e022444db4ea1f7edd6579	Implements the zedBSD mv userland command.
+userland/base/net/dhcp.c	generated	no	f1ab2ec948662628cebdc1ca41603ee8930c41d7ed8dc31fb70a0e2c1e186ddc	Implements the zedBSD userland dhcp component.
+userland/base/net/dhcp.h	generated	no	d3e98edc19cc5367f2b1545af112104af234a4f671a294e704b52babc946c3cf	Declares the zedBSD userland dhcp interface.
+userland/base/net/main.c	generated	no	52f4b0e15d81831702663bd4839e3e7252d0bae7efb7f20865a35286fdf9de90	Implements the zedBSD net userland command.
+userland/base/net/netconf.c	generated	no	c42bff411df08c7d48d37cf5815bc94efbcc4584caee8144f295143968af3e42	Implements the zedBSD userland netconf component.
+userland/base/net/netconf.h	generated	no	3f2e036b3c8fa87772e3e1b42e6fc4e3836265a1f66d22a9716273e3bbf91a37	Declares the zedBSD userland netconf interface.
+userland/base/net/netutil.c	generated	no	f26196e38b295bb9e7bbdf1d00c1dc23ab97df0f7f06acfe08a907acb9a1393a	Implements the zedBSD userland netutil component.
+userland/base/net/netutil.h	generated	no	9a464f3078b24066cba50223ed683cf656ce30d8d9e2a81e29fbfe88fe7a796c	Declares the zedBSD userland netutil interface.
+userland/base/net/protocol.h	generated	no	e0c3915b8004f2412e7f676aa41a4aafb6892bddc4d4d8fb6c6b598cc71cf540	Declares the zedBSD userland protocol interface.
+userland/base/nettest/main.c	generated	no	0e13b9562f672cb320023968101ed235584e597fcf725afbc0522ca37836d6fe	Implements the zedBSD nettest userland command.
+userland/base/networkd/main.c	generated	no	ceab82125955d61368d3158ff53dcb392b132f6b30cac9900040a138b299ca72	Implements the zedBSD networkd userland command.
+userland/base/newgrp/main.c	generated	no	ccc2d37a8e9e72b1028366f20dd26e95bec5cb480ce586af8ee9360675bcc071	Implements the zedBSD newgrp userland command.
+userland/base/nice/main.c	generated	no	06704a6910ba8cbe3d8c93c90b1011340c52b1cc6e4dc90f6d35295e78a1f392	Implements the zedBSD nice userland command.
+userland/base/nl/main.c	generated	no	fa02fa08510ae1b7545fd4daf31f4d776e056c4ee9d0bd707cc6dfa2c2efc5fc	Implements the zedBSD nl userland command.
+userland/base/nm/main.c	generated	no	dc37e6c0c873503a01ae4aed80e44e41b2fd0fd49b96f92707e76e0b73f40128	Implements the zedBSD nm userland command.
+userland/base/nohup/main.c	generated	no	add2855ad9622509172107d1f39f4a3d6e67c26fac292addbc3c10304a4b5bd6	Implements the zedBSD nohup userland command.
+userland/base/nslookup/main.c	generated	no	df80acc926fd7a05c20fce66115ddfc46644d43533422698f9b1ccdd0900e085	Implements the zedBSD nslookup userland command.
+userland/base/ntpdate/main.c	generated	no	1247fe04bd16b5edcf81bc0fa5f67bd3e8245562c32749e2a73866924c8ef80a	Implements the zedBSD ntpdate userland command.
+userland/base/od/main.c	generated	no	3eedd66a9b9429a5f8e7ae4a05bd8acc1b1af8ae75908df0a1b681cce3981f77	Implements the zedBSD od userland command.
+userland/base/paste/main.c	generated	no	267da56f6f2634b1bb8b51cd98f998ad7095496013dea985e5955f74986f303a	Implements the zedBSD paste userland command.
+userland/base/patch/main.c	generated	no	9fb6bd9b29012530461b3f6c893ef34bd0a178abb7d42c4320cf552ee60dd69b	Implements the zedBSD patch userland command.
+userland/base/pathchk/main.c	generated	no	0b5bcc7e48150a0c83c3493ce2e17aa3231733fbdfb5fd63e356d665a5676e3b	Implements the zedBSD pathchk userland command.
+userland/base/pax/main.c	generated	no	80e9aacdfc1b97f5c35c5fd09703b12625c64fb8b080356298ee2b358c460787	Implements the zedBSD pax userland command.
+userland/base/ping/main.c	generated	no	9862f65cc7ab88f3864bf6fc5da8a00479fa960597f4ef263a22a7a5cfb92dcc	Implements the zedBSD ping userland command.
+userland/base/pr/main.c	generated	no	49ebe338e4d6544bf5e1217c6fbfac5f94f8df0219afa6b62c974db655c83d4b	Implements the zedBSD pr userland command.
+userland/base/ps/main.c	generated	no	b2d10fcd57ba4a9fb5bc3292a83512026ecf9dfcd4165edfb5699576b426a5b9	Implements the zedBSD ps userland command.
+userland/base/readlink/main.c	generated	no	d04d677701b1af124f6d3603c9d81c65499e5865dd1f315b7743d6003890daa8	Implements the zedBSD readlink userland command.
+userland/base/realpath/main.c	generated	no	fdda61e4df6fe11631ab2060c6ddcd28687d1027d81608772238bfb1201c11ef	Implements the zedBSD realpath userland command.
+userland/base/renice/main.c	generated	no	47c55c49953a994754565e67527993342e2cc57eb2281bd790f2a401ace5f358	Implements the zedBSD renice userland command.
+userland/base/rm/main.c	generated	no	93dd03868f8f11fe5f691828dec8e6038ce0461797852ad9ff030336901c2871	Implements the zedBSD rm userland command.
+userland/base/rmdir/main.c	generated	no	c69ed23d8617bed44bacf7c505e5dc7123a7dc9e98df637f55847449c755f538	Implements the zedBSD rmdir userland command.
+userland/base/route/main.c	generated	no	162d35af7df233034c0118ff87755e69e5faa619057d4e218bec25fa8c04225c	Implements the zedBSD route userland command.
+userland/base/rtld/elf.h	generated	no	8b6be9e84dd9b125e1fea797daefdb4b17689d9e5e150961c79fe768cdc9f728	Declares the zedBSD userland elf interface.
+userland/base/rtld/entry-aarch64.S	generated	no	312c41ed1436b377101f47bc6260a278642e68c32e123c039ba59f2ae5655623	Implements the aarch64 runtime-linker entry point.
+userland/base/rtld/entry-amd64.S	generated	no	b95c72a53a3502eff569abb63ed4588ca9ffc8257a27c1a6072af7866984be66	Implements the amd64 runtime-linker entry point.
+userland/base/rtld/entry-i386.S	generated	no	2f017820b688ab17b237ceef3c4ebd4be392b2efa7df8ce2664729cbd938454e	Implements the i386 runtime-linker entry point.
+userland/base/rtld/entry-sparcv9.S	generated	no	6b04fd551837eb4f2c31da4df311e4d69373bccc4d29c2bec2a0a33a6db10c56	Implements the sparcv9 runtime-linker entry point.
+userland/base/rtld/rtld.c	retained	no	f520f71924c05e16f32c1aafcd9ad00f3add2918b5df781e7c9fbab794e98133	zedBSD ELF runtime linker
+userland/base/rtld/rtld.h	generated	no	a5199748d7dd22729b1737f3155c4dde705b0a5c348e4e1358d08e5c439ac0af	Declares the zedBSD userland rtld interface.
+userland/base/rtld/string.c	generated	no	ed7ce7fc4c8b69ad84604d763db24850f3bce7b9fc79d215c8f1a2fc5c8e5b95	Implements the zedBSD userland string component.
+userland/base/rtld/tlsdesc-amd64.S	generated	no	590d0c109439f2f006df6b9d464fb239bcc4f14485394d64f03efdcc17df7015	Implements the amd64 runtime-linker TLSDESC resolver.
+userland/base/rtld/tlsdesc-arm64.S	generated	no	1832b6ec082c09e3f42fcda7dfa0a499616433ed937b9c6e382e38d1a51b1811	Implements the arm64 runtime-linker TLSDESC resolver.
+userland/base/sccs/main.c	generated	no	c3b43ef8c3a7b005620a73ff522fd963e315df8ff95d47091706e2ef7cad9b6c	Implements the zedBSD sccs userland command.
+userland/base/sed/main.c	generated	no	1c920b75dc9dbbeb1a2d3d473d8b3c02893e83452b56abb020040c3018d83830	Implements the zedBSD sed userland command.
+userland/base/service/main.c	generated	no	ec988d52fb7d2096eee7a90d008bc330f5c817d6c47060fd8a0b4026c93f101a	Implements the zedBSD service userland command.
+userland/base/service/rcconf.c	generated	no	6470b04d0b14dae8538674ea3fcae46a397afbb9884cd06893df8ee5312f9a19	Implements shared userland service rcconf support.
+userland/base/service/rcconf.h	generated	no	b39657bac15d369b7fe554558fc63447d114c50f39b3b5585e0e9e2d6d73d4f6	Declares the zedBSD userland rcconf interface.
+userland/base/service/service-command.c	generated	no	e4beff72edaa50cc58f6572a8564b919ee66860b4221c4e652ad99a3e7d3caf4	Implements shared userland service service command support.
+userland/base/service/service-command.h	generated	no	b20f14ef108475fcf103fc63e0b1b731ee1a8921f36a1d79729c423c0ff142a8	Declares the zedBSD userland service command interface.
+userland/base/service/service-config.c	generated	no	aaa0e9b2d964a9bd2649cc0f18860a5a9fc42f69871c4fc55bb186b9a9b569e0	Implements shared userland service service config support.
+userland/base/service/service-config.h	generated	no	96f34230534c1333788aa26cce26bb1cf9f59898af836be8c74aaed8275c2e59	Declares the zedBSD userland service config interface.
+userland/base/service/service-console.c	generated	no	094698977830c5da60ddee49f383a86043f58a314179d06039a3df7065360bce	Implements shared userland service service console support.
+userland/base/service/service-console.h	generated	no	adaa9c183a31cf93ebd9114458e36afc0430076b1e4afd9eaeaeac8acdd83fac	Declares the zedBSD userland service console interface.
+userland/base/service/zsv1-client.c	generated	no	4da967b902ba015d3ab2b6a9647b63205ad98283f3ae309e89db44b4b42e23fb	Implements shared userland service zsv1 client support.
+userland/base/service/zsv1-client.h	generated	no	853ca9bbf2d724a9f2f0f22912f20409934e0df9e43b36501521f4d5512bc801	Declares the zedBSD userland zsv1 client interface.
+userland/base/service/zsv1-protocol.c	generated	no	4d533a0a34df5303b4ff3827d0fedafd53a825a162a15e3e9ef073ea265b1234	Implements shared userland service zsv1 protocol support.
+userland/base/service/zsv1-protocol.h	generated	no	21099b2792e52af27aaea41573830dc3d9e7edb89e2680838a7fde6a362df7b6	Declares the zedBSD userland zsv1 protocol interface.
+userland/base/service/zsv1-server.c	generated	no	893046db95356821601c720d6e8fc85af273bdfe922ea4c2085b370bfa09997e	Implements shared userland service zsv1 server support.
+userland/base/service/zsv1-server.h	generated	no	a80c2c164bc00139de5fa726b0022a48456899fd4a30cee32dede25732cb5722	Declares the zedBSD userland zsv1 server interface.
+userland/base/sh/alias.c	generated	no	47e100d0adeb32ed38653a9c55181e83d3e58fe581a52d86ed1e225433092e67	Implements the zedBSD userland alias component.
+userland/base/sh/alias.h	generated	no	3128f05cb5b6d5879229e1940295065216c6251f1035905dda29a7f647d0f9da	Declares the zedBSD userland alias interface.
+userland/base/sh/arithmetic.c	generated	no	2793214b95b29b55a2dae87e96f86099a8253a6fa3f8e540a1ed18077ef0a7bc	Implements the zedBSD userland arithmetic component.
+userland/base/sh/arithmetic.h	generated	no	e875753730211c3c8b7e1f959aa3ba2b8f610b9f37df612eedbab7b00e661ec3	Declares the zedBSD userland arithmetic interface.
+userland/base/sh/builtins.c	generated	no	d4e9dd552e5237094756955adf259b306ab680ff6b61b3a12201c8abf299d7af	Implements the zedBSD userland builtins component.
+userland/base/sh/builtins.h	generated	no	cf4f53e745daced9350267dde5bc939fd62495cb8bd600b1ea29fcb54223bc68	Declares the zedBSD userland builtins interface.
+userland/base/sh/expand.c	generated	no	d3ddbd8430d6160cb5e0741af744b56eb9fd2fca840677e287e5f0d5837b4f37	Implements the zedBSD userland expand component.
+userland/base/sh/expand.h	generated	no	2297fb507992ddde9c868244a71cbd9444cceaf3a0ecb477bacf178c6252cdff	Declares the zedBSD userland expand interface.
+userland/base/sh/glob.c	generated	no	a1e287b1a62b20030654d25e3aedc63d5f37f868a874efeb3be467aa6cedfa89	Implements the zedBSD userland glob component.
+userland/base/sh/glob.h	generated	no	e3a507ad21e450ccecd02cc7b430e99b4d37ff444353fe1d65a2dd0c4f7d41c5	Declares the zedBSD userland glob interface.
+userland/base/sh/lexer.c	generated	no	7acfa43ef1187e505633b54c93a79a0b1d7f5f114baa7f8570eea00178b4130e	Implements the zedBSD userland lexer component.
+userland/base/sh/lexer.h	generated	no	2039476bf6da218811a4b2b52ff29cf88bf33fec3e6b62b7e3fe3c8911e4f736	Declares the zedBSD userland lexer interface.
+userland/base/sh/main.c	generated	yes	4a804ce61fac7b4df792e99ea71b50e3e23adb944141715d5f0e6df1e8fd1ede	Implements the zedBSD sh userland command.
+userland/base/sh/vars.c	generated	no	fc1a6589d6646e49921d51b4e92929b9ce1929f663aa13f8f2822f7fa79efa2a	Implements the zedBSD userland vars component.
+userland/base/sh/vars.h	generated	no	082ef59f7a9d662918bd966f40def100fbe993bc58e84c4c47498218e9b1738b	Declares the zedBSD userland vars interface.
+userland/base/shutdown-control/main.c	generated	no	b83000a73d1b5d9efdcbe5c229daa444ffb6008b22bfeb3ccf3760239da77541	Implements the zedBSD shutdown control userland command.
+userland/base/sleep/main.c	generated	no	980398f6ec099b73d4818d49e4ea9824c984566dc760e978e480608a3904edd5	Implements the zedBSD sleep userland command.
+userland/base/sort/main.c	generated	no	e49a6dd2e058b02790621681ad944dbfd4c3c7ddda354329eacedc3c3ea191e3	Implements the zedBSD sort userland command.
+userland/base/split/main.c	generated	no	821131d48c8ea55f26bbead08b7ac1624e101ac34950e8916b6f05123610e7d3	Implements the zedBSD split userland command.
+userland/base/stat/main.c	generated	no	f8e33f4836bd281b4c258de43184a4910f60dcbd44db245cc21988deb434ca22	Implements the zedBSD stat userland command.
+userland/base/strings/main.c	generated	no	48d14d82699e648bf0509ab66acf0495c568e3284d8de02a7f3b0027475e27b6	Implements the zedBSD strings userland command.
+userland/base/stty/main.c	generated	no	de6e70bc687ee22968771f6ed1c95a23b8188b892d4c68a0846649fe857c6bca	Implements the zedBSD stty userland command.
+userland/base/swap-control/swap-command.h	generated	no	4b525e3971a1f4c1fcd8f1fa32081a2fdcd06c9ef621fa801cb9a9c1aa0dbf46	Declares the zedBSD userland swap command interface.
+userland/base/swapoff/main.c	generated	no	d28003e734083594575e475ca09ef2367f6385678a5b7c36434cad840595030e	Implements the zedBSD swapoff userland command.
+userland/base/swapon/main.c	generated	no	45115497d1969b60b289cf4584f0764d74076ead682283ddfdfbfcc96912b24c	Implements the zedBSD swapon userland command.
+userland/base/sysctl/main.c	generated	no	20473d94c7f1b114c6720c7fbd4cdc586a2431361c4178efda92e287d2db2f8a	Implements the zedBSD sysctl userland command.
+userland/base/syslogd/main.c	generated	no	be71d3dfb852adda5f7030999fc60a7fe7cdbb9945f88274d282e512880554a6	Implements the zedBSD syslogd userland command.
+userland/base/tabs/main.c	generated	no	796cf81aa10f2969d76d3877caca457642ac9e1df2969f32db4f88bb710b33bf	Implements the zedBSD tabs userland command.
+userland/base/tail/main.c	generated	no	8954f0169c4126aa3aabf7f5f949fe29326ff7cd3d55e6c04dae174dac138f3d	Implements the zedBSD tail userland command.
+userland/base/tee/main.c	generated	no	cb5b4a5e593db9dabe47abc189505488837d40eb46dd4d915dba697e43467185	Implements the zedBSD tee userland command.
+userland/base/tests/dyntest.c	generated	no	f47ec0b95d9276f6af499261788d30b6ee674352c158b02db72a62aed94e8209	Exercises the zedBSD dyntest userland behavior.
+userland/base/tests/posix-phase5-helper.c	generated	no	0a5cedb9b8603f23af4cd3bf2c49c457db60350bf4e090fc11cd8e9535510627	Exercises the zedBSD posix phase5 helper userland behavior.
+userland/base/tests/posix-r2-remaining.c	generated	no	7e18f29d7408539f202d5da7a46a2085e61a14c1c835b07651383e9c519fb3ff	Exercises the zedBSD posix r2 remaining userland behavior.
+userland/base/tests/posix-r2.c	generated	no	87ccc33a7ae405c8d7a408f6b764df4534abab93dedc6b65512932b316497fbf	Exercises the zedBSD posix r2 userland behavior.
+userland/base/tests/rpathdep.c	generated	no	9f9df2ecddf922603ca0d9ec033b6361a0783c7ff7b48699d19815e87bba9db7	Exercises the zedBSD rpathdep userland behavior.
+userland/base/tests/rpathtest.c	generated	no	e05269b8347c5dc98417cf2ca688a96b23c849ed619b73b2d837928903ce4653	Exercises the zedBSD rpathtest userland behavior.
+userland/base/tests/smp-resource-stress.c	retained	no	e4bba574318289314cf7813e4aaefa642e2327a7a107f2c9b2ed340942f1dbef	amd64 SMP lifetime and resource-accounting stress.
+userland/base/tests/susv4-xsi.c	retained	no	83e96a9ac0089bdece475a7eb1070502b973b8752928a5ba349f6ea5ec37862d	Focused SUSv4/XSI regression executable for a dedicated test image.
+userland/base/tests/syscall-smoke.c	generated	no	97f3e470aa45d60c024d10c99038a0ad60143f68f0b525ac2aa5645904479ae7	Exercises the zedBSD syscall smoke userland behavior.
+userland/base/tests/tlstest.c	generated	no	db85b5b08fb173ab75d827dff0af1c93bcc08977b814db8edc83092900fe07a8	Exercises the zedBSD tlstest userland behavior.
+userland/base/tests/versiontest.c	generated	no	35ad7ec31f977278014488852e46a42287eeea1aa254df95f15c4d2419889e08	Exercises the zedBSD versiontest userland behavior.
+userland/base/tests/versionuse.c	generated	no	40b4d7304145c40e2e0a36470a005d76f4c5c04cbb26a0966974077bd5c04a62	Exercises the zedBSD versionuse userland behavior.
+userland/base/tic/main.c	generated	no	2127a5bb8c1015db362a929e64f3ed9e87c4ea59915844e0b66fc94ee077f362	Implements the zedBSD tic userland command.
+userland/base/time/main.c	generated	no	2d00892663f26f2ed827eb38bed5005c5e0d2277ae32810784dad847f040ac68	Implements the zedBSD time userland command.
+userland/base/timeout/main.c	generated	no	94ba6175dd8d17f03c3b4428027cecd972f78af5d2ea7013eada91a55740f44f	Implements the zedBSD timeout userland command.
+userland/base/top/main.c	generated	no	7e8ecbb53a663b853ae8c872116479ae4406b7f59dd68889c6769a054384a0ff	Implements the zedBSD top userland command.
+userland/base/touch/main.c	generated	no	434dc28787924cfd588328ba68f70dfcd9b3f0faf09b87997e13dec93838aa54	Implements the zedBSD touch userland command.
+userland/base/tput/main.c	generated	no	8cb5f1b88f5b3c65f94b53b9a20c8f7edf5ba62319adfbbcdf2e2fff123f34cc	Implements the zedBSD tput userland command.
+userland/base/tr/main.c	generated	no	cf5a07c83291145190289c0d7b0ce5e51932971864838db7db65f0c3937d67ab	Implements the zedBSD tr userland command.
+userland/base/truncate/main.c	generated	no	751a4ba5d436aa43b58fe7e9402c9ba34abc8bafdec13962b9960326a54a96d1	Implements the zedBSD truncate userland command.
+userland/base/tsort/main.c	generated	no	d3b2ec6fdef2e515e5a4e8ed8c6b4188a379f32cf52fe24b4ff2f6c0fb8f14d4	Implements the zedBSD tsort userland command.
+userland/base/tty/main.c	generated	no	ccca1ef0ca94acb6dc3672044337936c03cff9170c52ff6dc294aa8443b87e4d	Implements the zedBSD tty userland command.
+userland/base/uname/main.c	generated	no	cd19903f27ee3314b1880d9f1f049f7881069ce3fcca792d75c15ee7a427dd5a	Implements the zedBSD uname userland command.
+userland/base/unexpand/main.c	generated	no	1564a7f8ce68391fcca969c4495f72cd7be61a290087f40cad40079361e78ce3	Implements the zedBSD unexpand userland command.
+userland/base/uniq/main.c	generated	no	55fb58806b4671f24f985acb78178aa83da2fb5a9c60ec7318999a441a401dcb	Implements the zedBSD uniq userland command.
+userland/base/unlink/main.c	generated	no	f27350cf8359f347a356d211b58af1a7be671af713c40b2e2e5e90af680ca267	Implements the zedBSD unlink userland command.
+userland/base/uudecode/main.c	generated	no	80f29131a6c39ef0bbcacd43fe3135d10d77a96f182a92c2b05eebef95d01507	Implements the zedBSD uudecode userland command.
+userland/base/uuencode/main.c	generated	no	a380210613c064c13b25a18c54c866505a14ad6bb02774ceec976790dbb540e1	Implements the zedBSD uuencode userland command.
+userland/base/wc/main.c	generated	no	47dc65cd29cd25ac401d1ca53a248e7138f717c69b4d9f83fadeffaff1c061d5	Implements the zedBSD wc userland command.
+userland/base/who/main.c	generated	no	c0a15415243c4d02bed87f281840a98f625d4bc096ff395148ac3edd14ab25d5	Implements the zedBSD who userland command.
+userland/base/write/main.c	generated	no	938cdadc79ff2f39df59dbf18078ea638060759885fa0ebaca745a9cb6098bb6	Implements the zedBSD write userland command.
+userland/base/x68k-contract.S	retained	no	aef5bbedc3dfdecad08f8dd94fad602de0174dcc349fb0d49697b4225c1e8028	m68k soft-float user ABI link contract fixture.
+userland/base/xargs/main.c	generated	no	515bb1c68ee3b675cf1c44a5c7ea9436155d12b1ae64819c2b8ab02280f539da	Implements the zedBSD xargs userland command.
+userland/packages/lang/noct/runtime/env.c	retained	no	5504f5e24dc77944e1d3d7ba1745a8be0c7e3c4b6a2272ed0d55e6e95c19b35a	zedBSD persistent environment store
+userland/packages/lang/noct/runtime/main.c	generated	no	8e7bc0b3c56484546c9c14aa43e909a23d061d1c9a4a4a494b4b823b52f7fcbe	Implements the zedBSD runtime userland command.
+userland/packages/lang/noct/runtime/memory.c	generated	no	b0499b9d43dffc32e8e8d8901c22e785678e85002c6ee207359ec07717ebf830	Implements the zedBSD package memory component.
+userland/packages/lang/noct/runtime/memory.h	generated	no	1ac9346c9e7663c8d3b95de05c0c1a945296b2fe57c15dc41e0a5187397fdd0a	Declares the zedBSD userland memory interface.
+userland/packages/lang/noct/runtime/napi.c	retained	no	ecbba7bd5ab664a166cab1e70d6ed7e55647ecc57679aeb7624297700e47f117	zedBSD Noct native APIs
+userland/packages/lang/noct/runtime/platform.c	generated	no	209d58f0be1d4c03183b41526f1aaab2747e7163dcaba33112d9065acc0cedee	Implements the zedBSD package platform component.
+userland/packages/lang/noct/runtime/target.c	retained	no	c9299ba119f76b513ee3a413e95806c96fafb34bf581981fbd37bdf167d37c9a	zedBSD Noct target adapters
+userland/packages/lang/noct/runtime/zedbsd-api.h	generated	no	12568724dd1bda3727b74601f40073519024cfd34c93f175a33d38c53a6c9f0c	Declares the zedBSD userland zedbsd api interface.

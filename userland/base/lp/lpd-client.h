@@ -1,5 +1,16 @@
 /* -*- coding: utf-8; tab-width: 8; indent-tabs-mode: t; -*- */
-/* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
+
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * Declares the zedBSD userland lpd client interface.
+ */
+
 #ifndef ZEDBSD_USERLAND_LP_LPD_CLIENT_H
 #define ZEDBSD_USERLAND_LP_LPD_CLIENT_H
 
