@@ -28,6 +28,8 @@
 #ifdef WIFI_STORE_TESTING
 static unsigned char wifi_store_failure_pending[WIFI_STORE_TEST_UNLOCK + 1U];
 static int wifi_store_failure_errno[WIFI_STORE_TEST_UNLOCK + 1U];
+static wifi_store_test_load_after_read_hook_t
+	wifi_store_load_after_read_hook;
 
 void
 wifi_store_test_fail_once(enum wifi_store_test_stage stage, int error)
@@ -37,6 +39,25 @@ wifi_store_test_fail_once(enum wifi_store_test_stage stage, int error)
 		wifi_store_failure_pending[stage] = 1U;
 		wifi_store_failure_errno[stage] = error;
 	}
+}
+
+void
+wifi_store_test_set_load_after_read_hook(
+	wifi_store_test_load_after_read_hook_t hook)
+{
+	wifi_store_load_after_read_hook = hook;
+}
+
+static int
+test_load_after_read(int directory, const char *target)
+{
+	wifi_store_test_load_after_read_hook_t hook;
+
+	hook = wifi_store_load_after_read_hook;
+	wifi_store_load_after_read_hook = NULL;
+
+	/* Returns the computed result. */
+	return hook != NULL ? hook(directory, target) : 0;
 }
 
 static int
@@ -56,8 +77,11 @@ test_failure(enum wifi_store_test_stage stage)
 	return -1;
 }
 #define WIFI_STORE_FAIL(stage) test_failure(stage)
+#define WIFI_STORE_LOAD_AFTER_READ(directory, target) \
+	test_load_after_read((directory), (target))
 #else
 #define WIFI_STORE_FAIL(stage) 0
+#define WIFI_STORE_LOAD_AFTER_READ(directory, target) 0
 #endif
 
 struct selected_store {
@@ -769,6 +793,7 @@ wifi_store_load_at(int directory, const char *target, uid_t uid, gid_t gid,
 {
 	int function_result;
 	struct wifi_conf_model loaded;
+	struct stat target_status;
 	unsigned char *input = NULL;
 	size_t input_length = 0;
 	int lock_descriptor = -1, failed = 0, saved = 0, finish_result;
@@ -802,7 +827,7 @@ wifi_store_load_at(int directory, const char *target, uid_t uid, gid_t gid,
 
 	/* Handles a failed read checked file operation. */
 	if (read_checked_file(directory, target, uid, gid, &input,
-	    &input_length, NULL, WIFI_STORE_TEST_TARGET_OPEN,
+	    &input_length, &target_status, WIFI_STORE_TEST_TARGET_OPEN,
 	    WIFI_STORE_TEST_TARGET_READ) != 0) {
 		failed = 1;
 		saved = errno;
@@ -811,6 +836,11 @@ wifi_store_load_at(int directory, const char *target, uid_t uid, gid_t gid,
 	    error_capacity) != 0) {
 		failed = 1;
 		saved = errno;
+	} else if (WIFI_STORE_LOAD_AFTER_READ(directory, target) != 0 ||
+	    named_inode_matches(directory, target, &target_status, uid,
+	    gid) != 0) {
+		failed = 1;
+		saved = errno != 0 ? errno : EIO;
 	}
 
 	/* Handles the input availability. */

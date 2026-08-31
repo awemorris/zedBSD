@@ -296,6 +296,55 @@ test_unsafe_objects(void)
 	wifi_conf_explicit_clear(secret, sizeof(secret));
 }
 
+static int
+replace_target_after_read(int directory, const char *target)
+{
+	int saved;
+
+	if (renameat(directory, target, directory, "reader-old") != 0)
+		return -1;
+	if (renameat(directory, "reader-new", directory, target) == 0)
+		return 0;
+	saved = errno;
+	(void)renameat(directory, "reader-old", directory, target);
+	errno = saved;
+	return -1;
+}
+
+static void
+test_reader_replaced_target(void)
+{
+	static const char replacement[] =
+	    "wifi-conf 1\n"
+	    "network \"replacement\" wpa2-personal-ccmp \"87654321\" manual\n";
+	struct wifi_conf_model model;
+	char secret[17], error[WIFI_CONF_DIAGNOSTIC_MAX];
+	int index;
+
+	secret_fill(secret, 52);
+	clear_store();
+	set_key("original", secret, 1);
+	load_model(&model);
+	write_fixture("reader-new", replacement, sizeof(replacement) - 1U);
+	wifi_store_test_set_load_after_read_hook(replace_target_after_read);
+	errno = 0;
+	CHECK(wifi_store_load_at(directory_fd, "wifi.conf", owner_uid,
+	    owner_gid, &model, error, sizeof(error)) != 0);
+	CHECK(errno == EBUSY);
+	CHECK(strstr(error, secret) == NULL);
+	CHECK(model.profile_count == 1U);
+	index = find_profile(&model, "original");
+	CHECK(index == 0);
+	CHECK(model.profiles[index].passphrase_length == strlen(secret));
+	CHECK(memcmp(model.profiles[index].passphrase, secret,
+	    strlen(secret)) == 0);
+	wifi_conf_model_clear(&model);
+	assert_passphrase("replacement", "87654321", 0);
+	remove_name("reader-old");
+	assert_no_temporary();
+	wifi_conf_explicit_clear(secret, sizeof(secret));
+}
+
 static void
 test_invalid_automatic_and_truncation(void)
 {
@@ -609,6 +658,7 @@ main(int argc, char **argv)
 	test_create_replace_append();
 	test_invalid_existing_preserved();
 	test_unsafe_objects();
+	test_reader_replaced_target();
 	test_invalid_automatic_and_truncation();
 	test_persistent_lock_survives_open_failure();
 	test_cleanup_sanitizes_residual();

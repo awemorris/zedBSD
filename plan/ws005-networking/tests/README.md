@@ -26,15 +26,32 @@ and are cross-owned as regression inputs rather than duplicated.
 NET-T21 has one host-side parser/store gate:
 
 ```sh
-plan/ws005-networking/tests/run-wifi-conf-store-test.sh
+sh plan/ws005-networking/tests/run-wifi-conf-store-test.sh
 ```
 
 It exercises the strict v1 model, canonical serialization, checked
 same-directory store operations, injected publication failures, lock timing,
 concurrency, and redaction in ordinary, ASan+UBSan, and compiler-analyzer
-builds. Native root/non-root ownership and directory-durability acceptance is
-the remaining Phase-owned guest gate. Its kernel VFS prerequisites
-`ws001-p022` and `ws001-p023` completed in q050.
+builds.  Native root/non-root ownership and directory-durability acceptance
+uses the actual `/sbin/net wifi set-key` command through:
+
+```sh
+make -j16 toolchain
+build/NoctLang/build-static/noct --path=tools/build \
+  plan/ws005-networking/tests/wifi-credential-native-qemu.noct \
+  "$PWD" /tmp/ws005-p005-native-evidence
+```
+
+That private amd64/UEFI fixture runs root, sudo-like, effective-user, and
+ordinary-user command invocations without a shell. It checks exact owner,
+group, mode, persistent-lock inode, rename replacement, temporary cleanup,
+ignored `HOME`, unchanged `net.conf`, and absent `networkd`, then issues QMP
+`quit` immediately after the first PASS and validates both stores after a
+second boot of the same overlay writable medium. Synthetic passphrases are
+captured inside the guest, rejected from every retained text stream, and the
+mode-0600 writable medium is deleted on success. The source image remains
+immutable. Its kernel VFS prerequisites `ws001-p022` and `ws001-p023`
+completed in q050.
 
 NET-T22 has three reproducible executable entry points:
 

@@ -8,8 +8,8 @@ Phase ID: `p005`
 
 Combined ID: `ws005-p005`
 
-Status: Ready to requeue; q041 host implementation complete and q050 completed
-the native VFS prerequisites `ws001-p022` and `ws001-p023`
+Status: Complete (`q051`); q041 host implementation, q050 native VFS
+prerequisites, and q051 real-command abrupt-stop/reboot acceptance pass
 
 Parent: [WS005 networking and WLAN](../ws.md)
 
@@ -388,10 +388,9 @@ world-readable compatibility store.
 
 ## Queue boundary and handoff
 
-q041 processed this Phase to the reconsideration boundary.  Its parser and
-selected-profile API become dependencies of `ws005-p006`/`p007`, but the Phase
-must be requeued after `ws001-p022` and `ws001-p023`; it does not itself
-authorize socket protocol, association, DHCP, or physical-adapter work.
+q051 completes this Phase. Its parser, selected-profile API, safe reader, and
+atomic store are available to `ws005-p006`/`p007`; this completion does not
+itself authorize socket protocol, association, DHCP, or physical-adapter work.
 
 ## q041 execution result
 
@@ -451,3 +450,29 @@ effective-root process, and as an ordinary user; verify ownership, mode,
 persistent locking, same-directory atomic replacement, no secret output, and
 no temporary residue; stop QEMU without a guest unmount; then verify both
 stores on the same writable image after reboot.
+
+## q051 execution result
+
+The remaining consumer boundary is complete:
+
+- `wifi_store_load_at()` retains the opened target status and revalidates the
+  named inode after parsing while its shared persistent lock is still held. A
+  deterministic post-read rename fixture now proves `EBUSY`, caller-model
+  preservation, complete replacement visibility, and diagnostic redaction.
+- The credential-store ordinary, ASan/UBSan, compiler-analyzer, and parser/model
+  gates pass, together with retained WS011 console/boot and WS005 recovery/
+  networkd-auth tests.
+- A private amd64/UEFI q35+xHCI image runs the actual installed `/sbin/net`
+  command as root, sudo-like effective root, effective ordinary user, and
+  ordinary user. Exact owner, group, `0600` mode, single-link type, persistent
+  lock identity, atomic target replacement, and temporary cleanup all pass.
+- Stage 1 is stopped by QMP immediately after PASS without guest unmount or
+  shutdown. Stage 2 reuses the same writable overlay and verifies both profile
+  generations, their metadata, the persistent locks, absent runtime fake HOME,
+  and byte-identical `/etc/net.conf`.
+- No networkd socket is needed, no retained output contains a synthetic
+  credential, the source image hash is unchanged, and the private writable
+  credential image is removed after success. `make -j16` and
+  `git diff --check` pass.
+
+Final disposable evidence: `/tmp/ws005-q051-final-001`.

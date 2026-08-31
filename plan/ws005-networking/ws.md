@@ -6,21 +6,25 @@ WSID: `ws005`
 
 Status: active; q029 p001 completed the first physical USB-Ethernet path,
 q040 completed p003's AF_UNIX/network authorization foundation, q041 retained
-p005's host implementation, and q050 completed both native VFS prerequisites
+p005's host implementation, q050 completed both native VFS prerequisites, and
+q051 completed p005's real-command guest and abrupt-stop/remount acceptance
 
 Parent: [master plan](../master.md)
 
-Last verified result: `ws005-p003` publishes one authenticated
+Last verified result: `ws005-p005` now passes the real root, sudo-like,
+effective-user, and ordinary-user `/sbin/net wifi set-key` paths, checked
+read-side inode replacement, exact metadata/atomicity/redaction gates, and an
+abrupt-stop second-boot persistence cell. `ws005-p003` publishes one authenticated
 `root:network 0660` socket, returns immutable 12-byte AF_UNIX peer snapshots,
 permits admitted non-root `SHOW` while denying mutation, and rejects direct
 non-root mutating network ioctls.  Its focused, analyzer, sanitizer, full
 build, and PC-98 native runtime gates pass.  The earlier RTL8156 carrier,
 DHCP, ping, and external-fetch path remains passing.
 
-Resume point: requeue `ws005-p005` for its root/non-root native ownership and
-abrupt-stop/remount-durability cell. Completed `ws001-p022` and
-`ws001-p023` now satisfy both kernel prerequisites. This cell does not wait for
-physical radio identity or the later generic WLAN UAPI.
+Resume point: p005 is complete. The next WLAN implementation dependency is the
+WS004 generic WLAN core/fake radio before `ws005-p004`; p006 then consumes the
+completed p003/p005 contracts plus that primitive. The frozen p002 design has
+no remaining human decision, but remains a separate design-closure record.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -32,8 +36,8 @@ Shared tests: [WS005 test index](tests/README.md)
 | [`ws005-p002`](phase002-wlan-v1-contract/phase.md) | Planned; not queued | Freeze the v1 control, security, scan, association, DHCP, cancellation, and ownership contracts; record every intentional exclusion |
 | [`ws005-p003`](phase003-unix-peer-credentials/phase.md) | Complete (`q040`) | Fixed 12-byte connection-time AF_UNIX identity, checked `root:network 0660` publication, root/non-root operation policy, and kernel ioctl privilege boundary pass focused and native PC-98 gates |
 | [`ws005-p004`](phase004-wifi-ioctl-command/phase.md) | Planned; depends on p002, p003, and `ws004-p027` | Add the primitive, L2-only `/sbin/wifi` ioctl command with bounded machine and human output |
-| [`ws005-p005`](phase005-wifi-credential-store/phase.md) | Ready to requeue; host implementation passes and q050 completed `ws001-p022`/p023 | Run the real root/non-root `/sbin/net wifi set-key` guest cell and verify the same writable media after abrupt stop/remount |
-| [`ws005-p006`](phase006-networkd-wifi-protocol/phase.md) | Planned; depends on p003-p005 | Replace whitespace `ZNV1` limitations with bounded length-framed WLAN requests, peer authorization, and a secret-FD child path |
+| [`ws005-p005`](phase005-wifi-credential-store/phase.md) | Complete (`q051`) | Real root/sudo-like/non-root `/sbin/net wifi set-key`, read-side replacement rejection, metadata, redaction, atomic update, abrupt stop, and second-boot persistence pass |
+| [`ws005-p006`](phase006-networkd-wifi-protocol/phase.md) | Planned; depends on p003-p005 and the p004 primitive | Replace whitespace `ZNV1` limitations with bounded length-framed WLAN requests, peer authorization, and a secret-FD child path |
 | [`ws005-p007`](phase007-net-wifi-orchestration/phase.md) | Planned; depends on p005-p006 and WS004 WLAN fixture | Implement the requested `net wifi` search/list/up/down/connect flow through `networkd` to `ifconfig`, `wifi`, and `dhcpc` |
 | [`ws005-p008`](phase008-archer-physical-acceptance/phase.md) | Planned; depends on p007 and `ws004-p030` | Prove one complete physical scan/WPA2/DHCP/transfer/down path, then run the final frozen-artifact repeatability campaign |
 
@@ -268,7 +272,7 @@ rather than being parsed as a WLAN request.
 | NET-25 | Planned as p002 | WLAN v1 contract freeze | User decisions recorded above | P-book has no unresolved implementation-changing ambiguity |
 | NET-26 | Planned as p003 | AF_UNIX peer credentials and one-socket authorization | NET-25 | Credential spoof/race/group/privilege fixtures pass |
 | NET-27 | Planned as p004 plus WS004 p027 | Primitive `/sbin/wifi` and stable WLAN ioctl contract | NET-25, common WLAN fixture | search/list/status/connect/disconnect pass without DHCP/persistence |
-| NET-28 | Planned as p005 | System/per-user `wifi.conf` and `set-key` | NET-25 | ownership/mode/symlink/locking/atomicity/redaction tests pass |
+| NET-28 | Complete as p005 (`q051`) | System/per-user `wifi.conf` and `set-key` | NET-25 | ownership/mode/symlink/locking/atomicity/redaction and abrupt-stop/remount tests pass |
 | NET-29 | Planned as p006 | `ZNV2`, peer authorization, `wifi` child secret-FD bridge | NET-26--NET-28 | malformed/auth/timeout/cancel/crash fixtures pass |
 | NET-30 | Planned as p007 | Requested high-level `net wifi` operations | NET-29, WS004 WLAN fixture | full fake-device association/DHCP/down transaction passes |
 | NET-31 | Planned as p008 | Archer end-to-end and repeatability acceptance | NET-30, WS004 p030 | physical L2, DHCP, transfer, down, reconnect, final repetition pass |

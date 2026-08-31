@@ -38,12 +38,16 @@ enum wifi_store_test_stage {
 
 #ifdef WIFI_STORE_TESTING
 /* Test-only stable-dirfd entry points and deterministic failure boundaries. */
+typedef int (*wifi_store_test_load_after_read_hook_t)(int, const char *);
+
 int wifi_store_set_key_at(int, const char *, uid_t, gid_t, const void *,
 			  size_t, const void *, size_t, int, char *, size_t);
 int wifi_store_load_at(int, const char *, uid_t, gid_t,
 		       struct wifi_conf_model *, char *, size_t);
 
 void wifi_store_test_fail_once(enum wifi_store_test_stage, int);
+void wifi_store_test_set_load_after_read_hook(
+	wifi_store_test_load_after_read_hook_t);
 int wifi_store_test_open_directory(const char *, uid_t);
 #endif
 
