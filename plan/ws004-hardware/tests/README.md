@@ -678,6 +678,50 @@ The final p018 gate is one Latitude boot and one adapter insertion. It verifies
 only selected NCM binding and `ue0` publication. Link, DHCP, data transfer,
 reconnect, and repeated hardware reliability remain WS005.
 
+## HW-T22 CDC ECM QEMU baseline
+
+The production-source ECM fixture directly exercises the independent class
+driver with a fake concurrent HCD. It covers strict Header/Union/Ethernet
+descriptor binding, optional and contradictory IADs, RNDIS rejection, MAC and
+endpoint bounds, packet-filter ordering, raw-frame RX/TX, carrier/speed
+notifications, exact-MPS zero-packet requests, attach unwind, close, shutdown,
+detach retry, twelve reconnects, concurrent Storage ownership, and callback,
+poll, and drain races. It runs ordinarily, with ASan/UBSan, and through the
+production-driver analyzer:
+
+```sh
+plan/ws004-hardware/tests/run-usb-cdc-ecm-driver-test.sh
+```
+
+The terminating-zero-packet gate covers the HCD contract needed by CDC ECM
+bulk Ethernet frames whose positive length is an exact endpoint-packet
+multiple. It proves that the flag affects only non-control bulk OUT transfers;
+control, IN, interrupt, zero-length, and non-multiple transfers remain
+unchanged. The xHCI model covers the chained payload TRB, final zero-length
+Normal TRB with IOC, TD Size, and usable-ring bound. The EHCI and UHCI models
+cover the extra descriptor, final-only IOC, packet-toggle progression, and
+descriptor-count bounds.
+
+The runner executes the model normally, with ASan/UBSan, with GCC
+`-fanalyzer`, and audits the three production HCD implementations:
+
+```sh
+plan/ws004-hardware/tests/run-usb-hcd-zero-packet-test.sh
+```
+
+The Noct QEMU harness builds private production images and runs four fresh
+UEFI cells: IDE/static, IDE/DHCP, shared-xHCI USB-root/static, and
+shared-xHCI USB-root/DHCP. Each cell verifies standards configuration
+selection, `ue0`, carrier, ping, counters, detach, and a second generation,
+and retains command, hashes, logs, and pcap evidence:
+
+```sh
+make -j16 toolchain
+build/NoctLang/build-static/noct --path=tools/build \
+  plan/ws004-hardware/tests/qemu-usb-cdc-ecm.noct \
+  "$PWD" /tmp/ws004-p019-evidence
+```
+
 ## HW-T20 NVMe QEMU
 
 The p022 admin fixture exercises production register/CAP/queue/Identify

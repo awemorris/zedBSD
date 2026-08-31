@@ -1,10 +1,10 @@
 # WS004 Phase 019: independent CDC ECM and QEMU network baseline
 
-Last updated: 2026-08-29
+Last updated: 2026-09-01
 
 Phase ID: `ws004-p019`
 
-Status: planned fallback; not in `q029`
+Status: complete (`q049`)
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -13,11 +13,11 @@ Tests: [WS004 test index](../tests/README.md) and
 
 ## Objective
 
-If q029's one deterministic-hardened physical NCM check still fails, implement
-a self-contained USB CDC ECM Ethernet driver and use QEMU's standard `usb-net`
-function to prove the complete common path from xHCI and USB binding through
-`net_device`, ARP/IPv4/UDP, `networkd`, and `dhcpc`. This then supplies the
-independent automatic reference path before another physical RTL8156 cycle.
+Implement a self-contained USB CDC ECM Ethernet driver and use QEMU's standard
+`usb-net` function to prove the complete common path from xHCI and USB binding
+through `net_device`, ARP/IPv4/UDP, `networkd`, and `dhcpc`. This is an
+explicitly selected standards-based class-driver baseline, independent of the
+already working physical CDC NCM path.
 
 This Phase does not replace CDC NCM and does not extract a speculative common
 USB-Ethernet backend. ECM and NCM keep separate implementations behind the
@@ -52,17 +52,17 @@ model is `hw/usb/dev-network.c`:
   zero-packet transfer-contract work outside xHCI.
 - `ws002-p020`: `net` -> `networkd` -> `dhcpc` control-plane baseline.
 
-This Phase is not a prerequisite for q029's first `ws005-p001` physical check.
-Its Queue resume condition is that p020 and the safe WS005 automatic fixes have
-passed but the one retained physical acceptance still fails. Once queued, this
-Phase does not itself depend on further physical RTL8156 access.
+The completed p020 and WS005 p001 paths provide regression prerequisites, not
+a conditional trigger. This Phase is selected in q049 on its own merit and
+does not depend on further physical RTL8156 access.
 
 ## Queue sequencing
 
-`ws004-p020`, the safe DHCP/diagnostic fixes, one candidate image, and one
-physical acceptance run before p019. No ECM implementation belongs in q029. If
-that check passes, p019 returns to the ordinary planning pool; if it fails with
-bounded evidence, p019 is the next controlled Queue item.
+q029 completed NCM hardening plus the physical RTL8156 data-path result, and
+q048 completed the general USB HID/lifecycle milestone. q049 now contains only
+p019 and executes its independent ECM implementation and automatic QEMU
+baseline. A passing NCM path neither substitutes for nor weakens these ECM
+acceptance gates.
 
 ## Frozen driver boundary
 
@@ -179,3 +179,38 @@ changing a public USB/network UAPI, or the failure proves to be an unrelated
 network-stack redesign rather than a bounded defect. Do not add RNDIS support,
 QEMU-specific matching, a shared ECM/NCM backend, or physical-hardware work to
 force this Phase complete.
+
+## Result
+
+The independent production `usb-cdc-ecm` driver now validates the CDC Header,
+Union, and Ethernet descriptors, uses the Union-associated data interface,
+selects its bulk alternate, programs the packet filter, and publishes a raw
+Ethernet `ueN` device.  It does not share framing or negotiation code with
+CDC NCM.  The common xHCI, EHCI, and UHCI implementations now honor
+`DRV_USB_URB_ZERO_PACKET` for positive exact-packet-multiple bulk OUT
+transfers.
+
+The production-source ECM fixture passes 1,464 checks in both ordinary and
+ASan/UBSan modes, and the driver passes GCC `-fanalyzer`.  The HCD
+zero-packet model, NCM wire/driver, USB binding, checked recovery, Storage,
+xHCI concurrent-URB, legacy-HCD retirement/concurrency, network hotplug, and
+shutdown regressions pass.  Default `make -j16`, the private amd64 image
+build, and a configured i386 PC/AT build pass.  The known `BUG-007` Makefile
+warning still skips its nominal Noct-nm invocation on i386; a direct host
+`nm -u` check on the resulting PC/AT `vmunix` reports no undefined symbol and
+confirms that the ECM registration symbol is linked.  This Phase does not
+silently claim to fix that separate build-audit bug.
+
+The finite QEMU 10.0.11 matrix passes all four fresh-image cells:
+
+- IDE system disk, static `10.0.2.16`, ping, detach, and reconnect;
+- IDE system disk, DHCP `10.0.2.15`, ping, detach, and reconnect;
+- xHCI USB system disk plus ECM, static address, ping, detach, and reconnect;
+- xHCI USB system disk plus ECM, DHCP address, ping, detach, and reconnect.
+
+Every cell selected QEMU's standards configuration 1 instead of its
+RNDIS-first configuration, bound `02/06/00` plus claimed `0a/00/00`, completed
+two interface generations, retained nonempty packet-capture evidence, and
+left its source image and production configuration hashes unchanged.  This
+completes `HW-T22`, `NET-T42`, this Phase, and q049 without claiming a new
+physical-device result.

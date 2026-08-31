@@ -1,6 +1,6 @@
 # zedBSD master plan
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 Status: active
 
@@ -84,9 +84,12 @@ regression, repository-build, and forced standalone/paired QEMU gates, p032's
 checked USB recovery and reclaim-safe reserve boundary, and p033, the bounded
 amd64 framebuffer-console race extracted when p031's third hot-add exposed a
 cursor-row overwrite. No physical recovery result is claimed for p032. The
-current [Queue Book](queue.md) and archived [q048](queue-q048.md) complete the
-WS006 p008 automatic HID milestone with xHCI and paired EHCI/UHCI acceptance;
-they do not claim the remaining physical IN-T42 observation. The
+archived [q048](queue-q048.md) completes the WS006 p008 automatic HID milestone
+with xHCI and paired EHCI/UHCI acceptance; it does not claim the remaining
+physical IN-T42 observation. The current [Queue Book](queue.md) and completed
+[q049](queue-q049.md) contain only WS004 p019: the independent standards CDC
+ECM driver, general zero-packet HCD contract, and passing four-cell
+IDE/xHCI-storage static/DHCP QEMU baseline. The
 archived q043 PC-98 fixed-read and exact-mouse
 paths both pass locally, and their remaining external resume facts do not
 block subsequent Queues. The
@@ -155,7 +158,8 @@ ping with that physical adapter through QEMU xHCI. The final Latitude-native
 image then completed DHCP and `fetch www.google.com`. This achieves the
 immediate USB-boot/local-shell/network north star and completes `ws005-p001`
 and q029. CDC ECM and the separately planned xHCI SuperSpeed-interrupt context
-Phase were excluded from q029 and remain independent future work.
+Phase were excluded from q029. The former is complete as `ws004-p019` in
+q049; the latter remains independent future work.
 
 The archived [q028](queue-q028.md) corrected the IAD-less, Union-associated CDC
 NCM match, added concise binding diagnostics, and passed its physical scope when
@@ -355,7 +359,7 @@ actually warranted.
 | `ws001` | POSIX.1-2024 compliance | Active ledger; q042 retained passing source/host milestones for both VFS prerequisites discovered by q041 | `ws001-p014` complete; p015/p016 source/host milestones uncleared | Restore the Noct host CLI through WS008 p010, complete p015's two retained fault cells, then run fresh native/remount acceptance for p015/p016 before returning to WS005 p005 | [WS001](ws001-posix/ws.md) |
 | `ws002` | System services | Complete baseline; p022 corrective complete | `ws002-p022` complete; USB submit-commit local-IRQ self-wait repaired and five final exact-login boots pass | Retain the p022 regression; p021 remains separately planned and non-blocking | [WS002](ws002-services/ws.md) |
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; restore its Make-owned Noct gate through ws008-p010 | [WS003](ws003-bringup/ws.md) |
-| `ws004` | Hardware expansion | Active; q047 completed legacy-HCD concurrency/hotplug, checked general USB recovery for HID, and the extracted amd64 framebuffer-console correction. q040 p026 remains uncleared only at the purchased-unit label; NVMe software and physical USB Ethernet are complete | `ws004-p010`--`p016`, `p018`, p020, p022--p024, and p031--p033 complete | Hand the satisfied USB prerequisite boundary to WS006 p008; retain the separately listed p017, p019, p021, p025, and WLAN chain | [WS004](ws004-hardware/ws.md) |
+| `ws004` | Hardware expansion | Active; q049 completed the independent CDC ECM QEMU network baseline after q047 completed legacy-HCD concurrency/hotplug and checked USB recovery and q048 consumed that boundary for HID. q040 p026 remains uncleared only at the purchased-unit label; NVMe software and physical CDC NCM Ethernet are complete | `ws004-p010`--`p016`, `p018`--`p020`, p022--p024, and p031--p033 complete | Retain p017, resume p021 and p025 when their finite runtime/hardware boundaries are ready, then continue the WLAN chain | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q029 p001 and q040 p003 complete; q041 p005 host implementation passes and q042 advanced but did not complete its VFS dependencies | Physical USB Ethernet and authenticated control pass; strict local credential parser/store/CLI now pass host safety and regression gates | Complete WS001 p015/p016 after WS008 p010, then requeue p005 root/non-root ownership and remount-durability acceptance; p004 remains hardware-core dependency-gated | [WS005](ws005-networking/ws.md) |
 | `ws006` | Input and evdev | Active; q048 completed the production Report-Protocol HID automatic/software milestone with generation-safe stale-fd handling and xHCI plus paired EHCI/UHCI runtime | `ws006-p008` automatic/software milestone complete; IN-T42 physical observation and p009 remain | Record one bounded physical keyboard/mouse observation; p009 still waits for accepted WS008 userland | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
@@ -472,10 +476,12 @@ priority one.
    hotplug, and recovery prerequisites. Checked Report Protocol,
    generation-safe stale-fd handling, xHCI, and paired EHCI/UHCI QEMU runtime
    pass. One bounded physical HID observation remains without calling the WS
-   complete. q047 also completed p033's framebuffer-console race correction
+   complete. q049 independently implemented CDC ECM and proved its four QEMU
+   network cells without making NCM wire behavior a shared implementation
+   dependency. q047 also completed p033's framebuffer-console race correction
    using host gates and p031's passing forced QEMU evidence rather than adding
-   a second run. P009 remains WS008-dependent. WS004
-   likewise retains its independently listed p017, p019, p021, p025, and WLAN
+   a second run. P009 remains WS008-dependent. WS004 completed p019 in q049 and
+   retains its independently listed p017, p021, p025, and WLAN
    chain rather than treating the working visible USB/NVMe cases as closure.
 2. WS018 is complete.  q035 finished p009's retained runtime evidence and
    p010--p012 in consumer-before-deletion order; no residual Phase remains.

@@ -1,0 +1,7 @@
+type=oneshot
+command=/usr/bin/usb-cdc-ecm-guest-probe
+arguments=static
+after=networkd
+requires=networkd
+restart=no
+required=YES

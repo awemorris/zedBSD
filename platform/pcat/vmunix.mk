@@ -95,6 +95,9 @@ ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-cdc-ncm.o \
 	$(BUILD)/drivers/usb-cdc-ncm-net.o
 endif
+ifeq ($(CONFIG_DRIVER_USB_CDC_ECM),y)
+PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-cdc-ecm.o
+endif
 ifeq ($(CONFIG_DRIVER_USB_HID),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb-hid.o
 endif

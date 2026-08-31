@@ -26,6 +26,9 @@
 #if CONFIG_DRIVER_USB_CDC_NCM
 #include <drivers/usb-cdc-ncm.h>
 #endif
+#if CONFIG_DRIVER_USB_CDC_ECM
+#include <drivers/usb-cdc-ecm.h>
+#endif
 #if CONFIG_DRIVER_USB_HID
 #include <drivers/usb-hid.h>
 #endif
@@ -71,6 +74,10 @@ kern_platform_init(const struct boot_handoff *handoff,
 #if CONFIG_DRIVER_USB_CDC_NCM
 	if (drv_usb_cdc_ncm_driver_register() != 0)
 		hal_printf("usb: CDC NCM driver registration failed\n");
+#endif
+#if CONFIG_DRIVER_USB_CDC_ECM
+	if (drv_usb_cdc_ecm_driver_register() != 0)
+		hal_printf("usb: CDC ECM driver registration failed\n");
 #endif
 #if CONFIG_KERNEL_USB_HID_CHECKPOINT
 	if (usb_hid_checkpoint_driver_register() != 0)

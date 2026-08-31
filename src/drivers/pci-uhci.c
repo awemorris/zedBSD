@@ -831,7 +831,7 @@ uhci_endpoint_parameters(struct drv_usb_endpoint *endpoint,
 
 static int
 uhci_required_td_count(enum drv_usb_transfer_type type, size_t length,
-	unsigned packet, unsigned *result)
+	unsigned packet, unsigned zero_packet, unsigned *result)
 {
 	size_t data_count, total;
 
@@ -841,7 +841,7 @@ uhci_required_td_count(enum drv_usb_transfer_type type, size_t length,
 			return E2BIG;
 		total = data_count + 2U;
 	} else {
-		total = data_count != 0 ? data_count : 1U;
+		total = data_count != 0 ? data_count + zero_packet : 1U;
 		if (total > UHCI_MAX_TDS)
 			return E2BIG;
 	}
@@ -885,6 +885,7 @@ static int uhci_build_request(struct uhci_controller*c,struct drv_usb_urb*urb,
 	enum drv_usb_speed speed;
 	size_t length, offset = 0;
 	unsigned packet, address, endpoint, toggle = 0, required_tds;
+	unsigned zero_packet;
 	int error;
 
 	if (urb == NULL || result == NULL)
@@ -917,7 +918,12 @@ static int uhci_build_request(struct uhci_controller*c,struct drv_usb_urb*urb,
 		return error;
 	if (type == DRV_USB_TRANSFER_INTERRUPT && length > packet)
 		return E2BIG;
-	error = uhci_required_td_count(type, length, packet, &required_tds);
+	zero_packet = control == NULL && type == DRV_USB_TRANSFER_BULK &&
+	    !drv_usb_endpoint_is_input(ep) && length != 0 &&
+	    (drv_usb_urb_flags(urb) & DRV_USB_URB_ZERO_PACKET) != 0 &&
+	    length % packet == 0;
+	error = uhci_required_td_count(type, length, packet, zero_packet,
+	    &required_tds);
 	if (error != 0)
 		return error;
 
@@ -1023,7 +1029,7 @@ static int uhci_build_request(struct uhci_controller*c,struct drv_usb_urb*urb,
 			toggle ^= 1U;
 			r->data_count++;
 		}
-		if (length == 0) {
+		if (length == 0 || zero_packet) {
 			error = uhci_add_td(r, r->input ? UHCI_PID_IN :
 			    UHCI_PID_OUT, address, endpoint, toggle, 0, 0);
 			if (error != 0)

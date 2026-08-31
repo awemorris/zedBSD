@@ -1086,6 +1086,7 @@ ehci_build_request(struct ehci_controller *controller,
 	unsigned endpoint_number;
 	unsigned toggle = 0;
 	unsigned initial_toggle = 0;
+	unsigned zero_packet = 0;
 	int error;
 
 	if (endpoint == NULL || device == NULL || result == NULL)
@@ -1135,15 +1136,20 @@ ehci_build_request(struct ehci_controller *controller,
 		packet = 64U;
 		mult = 1U;
 	}
+	zero_packet = control == NULL && type == DRV_USB_TRANSFER_BULK &&
+	    !drv_usb_endpoint_is_input(endpoint) && length != 0 &&
+	    (drv_usb_urb_flags(urb) & DRV_USB_URB_ZERO_PACKET) != 0 &&
+	    length % packet == 0;
 	data_qtds = length / 0x4000U + (length % 0x4000U != 0);
 	if (type == DRV_USB_TRANSFER_CONTROL) {
 		if (data_qtds > EHCI_MAX_QTDS - 2U)
 			return E2BIG;
 		required_qtds = (unsigned)data_qtds + 2U;
 	} else {
-		if (data_qtds > EHCI_MAX_QTDS)
+		if (data_qtds > EHCI_MAX_QTDS - zero_packet)
 			return E2BIG;
-		required_qtds = data_qtds == 0 ? 1U : (unsigned)data_qtds;
+		required_qtds = data_qtds == 0 ? 1U :
+		    (unsigned)data_qtds + zero_packet;
 	}
 	if (required_qtds > EHCI_MAX_QTDS)
 		return E2BIG;
@@ -1253,10 +1259,13 @@ ehci_build_request(struct ehci_controller *controller,
 			if (error != 0)
 				goto fail;
 			offset += chunk;
-			toggle ^= 1U;
+			/* The next qTD starts with the toggle after every packet in
+			 * this qTD.  This matters when a terminating zero-length packet
+			 * follows an exact packet multiple. */
+			toggle ^= ((chunk + packet - 1U) / packet) & 1U;
 			request->data_count++;
 		}
-		if (length == 0) {
+		if (length == 0 || zero_packet) {
 			error = ehci_add_qtd(request,
 			    request->input ? EHCI_PID_IN : EHCI_PID_OUT,
 			    toggle, 0, 0);
@@ -1265,6 +1274,8 @@ ehci_build_request(struct ehci_controller *controller,
 		}
 		request->data_count = request->qtd_count;
 	}
+	if (request->qtd_count != required_qtds)
+		__builtin_trap();
 	request->qtds[request->qtd_count - 1U].token |= EHCI_QTD_IOC;
 	request->qh->horizontal = EHCI_LINK_TERM;
 	request->qh->characteristics = (address & 0x7fU) |

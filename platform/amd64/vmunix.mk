@@ -118,6 +118,9 @@ ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb-cdc-ncm.c \
 	src/drivers/usb-cdc-ncm-net.c
 endif
+ifeq ($(CONFIG_DRIVER_USB_CDC_ECM),y)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb-cdc-ecm.c
+endif
 ifeq ($(CONFIG_DRIVER_USB_HID),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb-hid.c
 endif

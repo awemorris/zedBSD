@@ -1,4 +1,5 @@
 # key|kind|label|platforms|default|choices
 CONFIG_DRIVER_USB_STORAGE|bool|USB Mass Storage|i386,amd64|y|
 CONFIG_DRIVER_USB_CDC_NCM|bool|USB CDC NCM Ethernet|i386,amd64|y|
+CONFIG_DRIVER_USB_CDC_ECM|bool|USB CDC ECM Ethernet|i386,amd64|y|
 CONFIG_DRIVER_USB_HID|bool|USB HID input|i386,amd64|y|

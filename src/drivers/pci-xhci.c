@@ -1458,7 +1458,7 @@ normal_trb_count(uint64_t address, size_t length)
 
 static uint64_t
 enqueue_normal(struct xhci_ring *ring, uint64_t address, size_t length,
-	       int input, size_t maximum_packet_size)
+	       int input, size_t maximum_packet_size, int zero_packet)
 {
 	unsigned count = normal_trb_count(address, length);
 	size_t cumulative = 0;
@@ -1471,24 +1471,36 @@ enqueue_normal(struct xhci_ring *ring, uint64_t address, size_t length,
 	while (length != 0) {
 		size_t chunk = 0x10000U - (size_t)(address & 0xffffU);
 		uint32_t control = XHCI_TRB_TYPE(1);
+		unsigned td_size;
+		int final;
+
 		if (chunk > length)
 			chunk = length;
 		count--;
 		cumulative += chunk;
 		if (input)
 			control |= DRV_XHCI_TRB_ISP;
-		if (count != 0)
+		final = count == 0 && !zero_packet;
+		if (!final)
 			control |= XHCI_TRB_CHAIN;
 		else
 			control |= XHCI_TRB_IOC;
+		td_size = drv_xhci_normal_td_size(total_length, cumulative,
+		    maximum_packet_size, final);
+		/* A requested terminating zero packet is one more packet in this TD.
+		 * The final payload TRB therefore reports one packet remaining instead
+		 * of looking terminal to the controller. */
+		if (zero_packet && td_size < 31U)
+			td_size++;
 		final_trb = ring_push(ring, address,
-		    (uint32_t)chunk |
-			(drv_xhci_normal_td_size(total_length, cumulative,
-			    maximum_packet_size, count == 0) << 17),
+		    (uint32_t)chunk | (td_size << 17),
 		    control);
 		address += chunk;
 		length -= chunk;
 	}
+	if (zero_packet)
+		final_trb = ring_push(ring, address, 0,
+		    XHCI_TRB_TYPE(1) | XHCI_TRB_IOC);
 	return final_trb;
 }
 
@@ -1821,9 +1833,9 @@ xhci_urb_enqueue(struct drv_usb_hcd *h, struct drv_usb_urb *u)
 	    drv_usb_urb_control_request(u);
 	size_t length = drv_usb_urb_length(u);
 	uint64_t dma;
-	unsigned dci, maximum_packet_size = 0;
+	unsigned dci, maximum_packet_size = 0, normal_count = 0;
 	unsigned long irq;
-	int e, input;
+	int e, input, zero_packet = 0;
 
 	e = xhci_submission_enter(c);
 	if (e != 0)
@@ -1882,7 +1894,16 @@ xhci_urb_enqueue(struct drv_usb_hcd *h, struct drv_usb_urb *u)
 	if (!r->input && length)
 		memcpy(r->bounce.address, drv_usb_urb_buffer(u), length);
 	dma = r->bounce.device_address;
-	if ((!q && normal_trb_count(dma, length) >= XHCI_RING_TRBS - 1U) ||
+	input = r->input;
+	if (q == NULL) {
+		normal_count = normal_trb_count(dma, length);
+		zero_packet = drv_usb_endpoint_type(drv_usb_urb_endpoint(u)) ==
+		    DRV_USB_TRANSFER_BULK && !input && length != 0 &&
+		    (drv_usb_urb_flags(u) & DRV_USB_URB_ZERO_PACKET) != 0 &&
+		    length % maximum_packet_size == 0;
+	}
+	if ((!q && (normal_count >= XHCI_RING_TRBS - 1U ||
+	    (zero_packet && normal_count >= XHCI_RING_TRBS - 2U))) ||
 	    (q && length != 0 &&
 	     (length > 0x10000U || (dma & 0xffffU) + length > 0x10000U))) {
 		xhci_request_release(c, r);
@@ -1892,7 +1913,6 @@ xhci_urb_enqueue(struct drv_usb_hcd *h, struct drv_usb_urb *u)
 		xhci_submission_leave(c);
 		return EOVERFLOW;
 	}
-	input = r->input;
 	if (q != NULL) {
 		uint64_t setup = 0;
 
@@ -1936,7 +1956,7 @@ xhci_urb_enqueue(struct drv_usb_hcd *h, struct drv_usb_urb *u)
 	}
 	r->first_trb = ep->ring.enqueue;
 	r->trb_count = q != NULL ? (length ? 3U : 2U) :
-	    normal_trb_count(dma, length);
+	    normal_count + (zero_packet ? 1U : 0U);
 	if (xhci_request_publish_locked(c, r) != 0)
 		__builtin_trap();
 	/* Publish the request, its URB association, the complete TD, and its
@@ -1959,7 +1979,7 @@ xhci_urb_enqueue(struct drv_usb_hcd *h, struct drv_usb_urb *u)
 		    status_words.status, status_words.control);
 	} else {
 		(void)enqueue_normal(&ep->ring, dma, length, input,
-		    maximum_packet_size);
+		    maximum_packet_size, zero_packet);
 	}
 	wr32(c->doorbells, d->slot * 4U, dci);
 	xhci_recovery_leave_locked(c, ep);

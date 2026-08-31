@@ -1,0 +1,563 @@
+require zedbuild;
+
+// HW-T22/NET-T42 finite QEMU CDC ECM acceptance.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+var qmpTranscript = "";
+var cellFailure = "";
+
+func normalizeProcessText(value) {
+    var result = "";
+    for (i in 0..String.charCount(value)) {
+        if (String.charCodeAt(value, i) != 13) {
+            result = result + String.charAt(value, i);
+        }
+    }
+    return result;
+}
+
+func capture(command, what) {
+    var child = Process.spawn(["/bin/sh", "-c", command + " 2>&1"]);
+    if (child < 0) { zbFail("cannot start " + what); }
+    var output = "";
+    while (Process.isAlive(child) == 1) {
+        output = output + Process.read(child, 100);
+    }
+    output = output + Process.read(child, 0);
+    var status = Process.wait(child);
+    Process.close(child);
+    output = normalizeProcessText(output);
+    while (String.charCount(output) > 0 &&
+           String.charCodeAt(output, String.charCount(output) - 1) == 10) {
+        output = String.substring(output, 0, String.charCount(output) - 1);
+    }
+    if (status != 0) {
+        zbFail(what + " failed (status=" + status + "): " + output);
+    }
+    return output;
+}
+
+func run(command, what) {
+    var status = System.shell(command);
+    if (status != 0) { zbFail(what + " failed (status=" + status + ")"); }
+}
+
+func runLogged(command, log, what) {
+    var status = System.shell(command + " >" + zbShellQuote(log) + " 2>&1");
+    if (status != 0) {
+        zbFail(what + " failed (status=" + status + "; log=" + log + ")");
+    }
+}
+
+func requirePattern(path, pattern, what) {
+    if (System.shell("rg -a -q -- " + zbShellQuote(pattern) + " " +
+                     zbShellQuote(path)) != 0) {
+        zbFail(what + " is missing (log=" + path + ")");
+    }
+}
+
+func rejectPattern(path, pattern, what) {
+    var status = System.shell("rg -a -q -- " + zbShellQuote(pattern) + " " +
+                              zbShellQuote(path));
+    if (status == 0) { zbFail(what + " was observed (log=" + path + ")"); }
+    if (status != 1 && status != 256) { zbFail("cannot inspect " + path); }
+}
+
+func resolveCommand(expression, what) {
+    var value = capture("command -v \"" + expression + "\"", what);
+    if (value == "") { zbFail(what + " resolved to an empty path"); }
+    return value;
+}
+
+func resolveFile(expression, what) {
+    var value = capture("realpath \"" + expression + "\"", what);
+    if (FileUtil.checkFileExists(value) != 1) {
+        zbFail(what + " not found: " + value);
+    }
+    return value;
+}
+
+func commandText(command) {
+    var result = "";
+    for (i in 0..Array.size(command)) {
+        if (i != 0) { result = result + " "; }
+        result = result + zbShellQuote(command[i]);
+    }
+    return result + "\n";
+}
+
+func appendText(path, value) {
+    var existing = "";
+    if (FileUtil.checkFileExists(path) == 1) {
+        existing = FileUtil.readText(path);
+    }
+    FileUtil.writeText(path, existing + value);
+}
+
+func makeNetworkArguments(command, pcap) {
+    Array.push(command, "-netdev");
+    Array.push(command,
+        "user,id=net0,restrict=on,net=10.0.2.0/24,host=10.0.2.2," +
+        "dhcpstart=10.0.2.15,dns=10.0.2.3");
+    Array.push(command, "-device");
+    Array.push(command,
+        "usb-net,bus=xhci.0,port=2,id=ecm,netdev=net0," +
+        "mac=52:54:00:12:34:56,serial=hw-t22-ecm,msos-desc=on");
+    Array.push(command, "-object");
+    Array.push(command,
+        "filter-dump,id=ecmpcap,netdev=net0,file=" + pcap);
+}
+
+func makeParserCommand(qemu, image, topology, pcap) {
+    var command = [qemu, "-S", "-nodefaults", "-no-user-config",
+        "-machine", "q35,usb=off", "-m", "64", "-smp", "1",
+        "-device", "qemu-xhci,id=xhci", "-drive",
+        "if=none,id=boot,file=" + image + ",format=raw"];
+    if (topology == "ide") {
+        Array.push(command, "-device");
+        Array.push(command, "piix3-ide,id=ide");
+        Array.push(command, "-device");
+        Array.push(command, "ide-hd,bus=ide.0,drive=boot,bootindex=1");
+    } else {
+        Array.push(command, "-device");
+        Array.push(command,
+            "usb-storage,bus=xhci.0,port=1,drive=boot," +
+            "id=rootstick,bootindex=1");
+    }
+    makeNetworkArguments(command, pcap);
+    Array.push(command, "-display");
+    Array.push(command, "none");
+    Array.push(command, "-serial");
+    Array.push(command, "none");
+    Array.push(command, "-qmp");
+    Array.push(command, "stdio");
+    return command;
+}
+
+func stopQemu(child) {
+    if (Process.isAlive(child) == 1) {
+        Process.write(child, "{\"execute\":\"quit\"}\n");
+    }
+    var output = "";
+    var ticks = 0;
+    var forced = 0;
+    while (Process.isAlive(child) == 1 && ticks < 50) {
+        output = output + Process.read(child, 100);
+        ticks = ticks + 1;
+    }
+    if (Process.isAlive(child) == 1) {
+        forced = 15;
+        Process.kill(child, 15);
+        ticks = 0;
+        while (Process.isAlive(child) == 1 && ticks < 20) {
+            output = output + Process.read(child, 100);
+            ticks = ticks + 1;
+        }
+    }
+    if (Process.isAlive(child) == 1) {
+        forced = 9;
+        Process.kill(child, 9);
+        ticks = 0;
+        while (Process.isAlive(child) == 1 && ticks < 20) {
+            output = output + Process.read(child, 100);
+            ticks = ticks + 1;
+        }
+    }
+    output = output + Process.read(child, 0);
+    if (Process.isAlive(child) == 1) {
+        Process.close(child);
+        return [-2, normalizeProcessText(output), forced];
+    }
+    var status = Process.wait(child);
+    Process.close(child);
+    return [status, normalizeProcessText(output), forced];
+}
+
+func runParserPreflight(qemu, evidence, topology) {
+    var image = evidence + "/parser.img";
+    var log = evidence + "/parser-" + topology + ".log";
+    var pcap = evidence + "/parser-" + topology + ".pcap";
+    var command = makeParserCommand(qemu, image, topology, pcap);
+    var child = Process.spawn(command);
+    if (child < 0) { zbFail("cannot start " + topology + " parser cell"); }
+    qmpTranscript = "";
+    Process.write(child, "{\"execute\":\"qmp_capabilities\"}\n");
+    Process.write(child,
+        "{\"execute\":\"device_del\",\"arguments\":{\"id\":\"ecm\"}}\n");
+    var ticks = 0;
+    while (ticks < 100 && Process.isAlive(child) == 1 &&
+           String.indexOf(qmpTranscript, "DEVICE_DELETED") < 0) {
+        qmpTranscript = qmpTranscript + Process.read(child, 100);
+        ticks = ticks + 1;
+    }
+    if (String.indexOf(qmpTranscript, "DEVICE_DELETED") < 0 ||
+        String.indexOf(qmpTranscript, "\"error\"") >= 0) {
+        var failed = stopQemu(child);
+        FileUtil.writeText(log, qmpTranscript + failed[1]);
+        zbFail(topology + " parser hot-unplug failed");
+    }
+    Process.write(child,
+        "{\"execute\":\"human-monitor-command\",\"arguments\":" +
+        "{\"command-line\":\"device_add usb-net,bus=xhci.0," +
+        "port=2,id=ecm2,netdev=net0,mac=52:54:00:12:34:56," +
+        "serial=hw-t22-parser2,msos-desc=on\"}}\n");
+    Process.write(child,
+        "{\"execute\":\"human-monitor-command\",\"arguments\":" +
+        "{\"command-line\":\"info usb\"}}\n");
+    Process.write(child, "{\"execute\":\"quit\"}\n");
+    var output = qmpTranscript;
+    ticks = 0;
+    while (Process.isAlive(child) == 1 && ticks < 100) {
+        output = output + Process.read(child, 100);
+        ticks = ticks + 1;
+    }
+    var stopped = stopQemu(child);
+    output = output + stopped[1];
+    FileUtil.writeText(log, output);
+    if (stopped[0] != 0 || stopped[2] != 0) {
+        zbFail(topology + " QEMU parser preflight did not stop cleanly");
+    }
+    requirePattern(log, "Product QEMU USB Network Interface, ID: ecm2",
+                   topology + " usb-net topology");
+    if (topology == "usb-root") {
+        requirePattern(log, "Product QEMU USB MSD",
+                       "combined USB Storage topology");
+    }
+    rejectPattern(log, "\\\"error\\\"[[:space:]]*:",
+                  topology + " QMP error");
+    if (FileUtil.getFileSize(pcap) != 24) {
+        zbFail(topology + " parser pcap has an unexpected header size");
+    }
+}
+
+func productionSourceReady(repo) {
+    var command = "test -f " +
+        zbShellQuote(repo + "/src/drivers/usb-cdc-ecm.c") +
+        " && test -f " +
+        zbShellQuote(repo + "/include/drivers/usb-cdc-ecm.h") +
+        " && rg -q 'CONFIG_DRIVER_USB_CDC_ECM' " +
+        zbShellQuote(repo + "/Makefile") +
+        " && rg -q 'src/drivers/usb-cdc-ecm[.]c' " +
+        zbShellQuote(repo + "/platform/amd64/vmunix.mk") +
+        " && rg -q 'drv_usb_cdc_ecm_driver_register' " +
+        zbShellQuote(repo + "/src/kern/platform/pcat.c");
+    return System.shell(command) == 0;
+}
+
+func makeQemuCommand(qemu, ovmfCode, varsCopy, image, topology,
+                     guestLog, serialLog, pcap) {
+    var command = [qemu, "-machine", "q35,usb=off", "-accel",
+        "tcg,thread=single", "-m", "512", "-smp", "4", "-drive",
+        "if=pflash,format=raw,unit=0,readonly=on,file=" + ovmfCode,
+        "-drive", "if=pflash,format=raw,unit=1,file=" + varsCopy,
+        "-device", "qemu-xhci,id=xhci", "-drive",
+        "if=none,id=boot,file=" + image + ",format=raw"];
+    if (topology == "ide") {
+        Array.push(command, "-device");
+        Array.push(command, "piix3-ide,id=ide");
+        Array.push(command, "-device");
+        Array.push(command, "ide-hd,bus=ide.0,drive=boot,bootindex=1");
+    } else {
+        Array.push(command, "-device");
+        Array.push(command,
+            "usb-storage,bus=xhci.0,port=1,drive=boot," +
+            "id=rootstick,bootindex=1");
+    }
+    makeNetworkArguments(command, pcap);
+    Array.push(command, "-boot");
+    Array.push(command, "order=c,strict=on");
+    Array.push(command, "-display");
+    Array.push(command, "none");
+    Array.push(command, "-serial");
+    Array.push(command, "file:" + serialLog);
+    Array.push(command, "-debugcon");
+    Array.push(command, "file:" + guestLog);
+    Array.push(command, "-qmp");
+    Array.push(command, "stdio");
+    Array.push(command, "-no-reboot");
+    Array.push(command, "-no-shutdown");
+    return command;
+}
+
+func guestHas(path, marker) {
+    if (FileUtil.checkFileExists(path) != 1) { return false; }
+    return String.indexOf(FileUtil.readText(path), marker) >= 0;
+}
+
+func guestFatal(path) {
+    if (FileUtil.checkFileExists(path) != 1) { return false; }
+    var text = FileUtil.readText(path);
+    return String.indexOf(text, "kernel panic") >= 0 ||
+        String.indexOf(text, "panic:") >= 0 ||
+        String.indexOf(text, "amd64 fault v=") >= 0 ||
+        String.indexOf(text, "VFS initialization failed") >= 0;
+}
+
+func waitGuest(child, guestLog, marker, ticks) {
+    var count = 0;
+    while (count < ticks && Process.isAlive(child) == 1) {
+        qmpTranscript = qmpTranscript + Process.read(child, 100);
+        if (guestHas(guestLog, "ECM-QEMU FAIL ")) {
+            cellFailure = "guest reported terminal failure while waiting for " +
+                          marker;
+            return false;
+        }
+        if (guestFatal(guestLog)) {
+            cellFailure = "guest reported a fatal system failure while waiting for " +
+                          marker;
+            return false;
+        }
+        if (String.indexOf(qmpTranscript, "\"error\"") >= 0) {
+            cellFailure = "QMP rejected a command while waiting for " + marker;
+            return false;
+        }
+        if (guestHas(guestLog, marker)) { return true; }
+        count = count + 1;
+    }
+    if (Process.isAlive(child) != 1) {
+        cellFailure = "QEMU exited while waiting for " + marker;
+    } else {
+        cellFailure = "timeout waiting for " + marker;
+    }
+    return false;
+}
+
+func waitQmp(child, marker, ticks) {
+    var count = 0;
+    while (count < ticks && Process.isAlive(child) == 1) {
+        if (String.indexOf(qmpTranscript, marker) >= 0) { return true; }
+        qmpTranscript = qmpTranscript + Process.read(child, 100);
+        if (String.indexOf(qmpTranscript, "\"error\"") >= 0) {
+            cellFailure = "QMP rejected a command while waiting for " + marker;
+            return false;
+        }
+        count = count + 1;
+    }
+    cellFailure = "timeout waiting for QMP " + marker;
+    return false;
+}
+
+func runCell(qemu, ovmfCode, ovmfVars, source, mode, topology, evidence,
+             results) {
+    var name = topology + "-" + mode;
+    var cell = evidence + "/cells/" + name;
+    run("mkdir -p " + zbShellQuote(cell), "create " + name + " cell");
+    var image = cell + "/run.img";
+    var varsCopy = cell + "/OVMF_VARS.fd";
+    var guestLog = cell + "/debugcon.log";
+    var serialLog = cell + "/serial.log";
+    var qmpLog = cell + "/qmp.log";
+    var pcap = cell + "/network.pcap";
+    run("cp --reflink=auto --sparse=always " + zbShellQuote(source) + " " +
+        zbShellQuote(image) + " && cp " + zbShellQuote(ovmfVars) + " " +
+        zbShellQuote(varsCopy), "prepare " + name + " disposable inputs");
+    FileUtil.writeText(guestLog, "");
+    FileUtil.writeText(serialLog, "");
+    qmpTranscript = "";
+    cellFailure = "";
+    var command = makeQemuCommand(qemu, ovmfCode, varsCopy, image, topology,
+                                  guestLog, serialLog, pcap);
+    FileUtil.writeText(cell + "/qemu-command.txt", commandText(command));
+    var child = Process.spawn(command);
+    if (child < 0) { zbFail("cannot start QEMU cell " + name); }
+    Process.write(child, "{\"execute\":\"qmp_capabilities\"}\n");
+    var ready = "ECM-QEMU READY-DETACH mode=" + mode;
+    var detached = "ECM-QEMU DETACHED mode=" + mode;
+    var passed = "ECM-QEMU PASS mode=" + mode + " generations=2";
+    var okay = waitGuest(child, guestLog, ready, 1800);
+    if (okay) {
+        Process.write(child,
+            "{\"execute\":\"device_del\",\"arguments\":{\"id\":\"ecm\"}}\n");
+        okay = waitGuest(child, guestLog, detached, 900);
+    }
+    if (okay) {
+        okay = waitQmp(child, "DEVICE_DELETED", 100);
+    }
+    if (okay) {
+        Process.write(child,
+            "{\"execute\":\"human-monitor-command\",\"arguments\":" +
+            "{\"command-line\":\"device_add usb-net,bus=xhci.0," +
+            "port=2,id=ecm2,netdev=net0,mac=52:54:00:12:34:56," +
+            "serial=hw-t22-ecm2,msos-desc=on\"}}\n");
+        okay = waitGuest(child, guestLog, passed, 1800);
+    }
+    var stopped = stopQemu(child);
+    qmpTranscript = qmpTranscript + stopped[1];
+    FileUtil.writeText(qmpLog, normalizeProcessText(qmpTranscript));
+    if (!okay) {
+        zbFail(name + " failed: " + cellFailure + " (logs=" + cell + ")");
+    }
+    if (stopped[0] != 0 || stopped[2] != 0) {
+        zbFail(name + " QEMU did not stop cleanly");
+    }
+    rejectPattern(qmpLog, "\\\"error\\\"[[:space:]]*:",
+                  name + " QMP error");
+    rejectPattern(guestLog, "ECM-QEMU FAIL ", name + " guest failure");
+    rejectPattern(guestLog,
+        "kernel panic|panic:|amd64 fault v=|VFS initialization failed|" +
+        "usb-storage: BOT .*error=[1-9]|" +
+        "usb-storage: sd[a-z]+ .*error=[1-9]|" +
+        "loop[0-9]+: .*error=[1-9]",
+        name + " fatal guest failure");
+    rejectPattern(guestLog, "configuration=2 configured",
+                  name + " RNDIS configuration selection");
+    requirePattern(guestLog, "configuration=1 configured",
+                   name + " ECM configuration selection");
+    requirePattern(guestLog,
+        "class 02/06/00 .*driver=usb-cdc-ecm",
+        name + " CDC ECM driver binding");
+    requirePattern(guestLog, "ECM-QEMU GENERATION mode=" + mode +
+        " generation=1", name + " first traffic generation");
+    requirePattern(guestLog, "ECM-QEMU GENERATION mode=" + mode +
+        " generation=2", name + " reconnected traffic generation");
+    requirePattern(guestLog, passed, name + " terminal pass");
+    requirePattern(guestLog, "disconnected", name + " detach observation");
+    if (FileUtil.getFileSize(pcap) <= 24) {
+        zbFail(name + " pcap contains no Ethernet traffic");
+    }
+    run("sha256sum " + zbShellQuote(image) + " " +
+        zbShellQuote(varsCopy) + " " + zbShellQuote(pcap) + " >" +
+        zbShellQuote(cell + "/artifacts.sha256"),
+        "hash " + name + " evidence");
+    FileUtil.writeText(cell + "/result.txt",
+        "HW-T22\tNET-T42\t" + name + "\tPASS\n");
+    appendText(results, name + "\tPASS\t" + name + "/result.txt\n");
+}
+
+func main(args) {
+    if (Array.size(args) != 2 && Array.size(args) != 3) {
+        zbFail("usage: qemu-usb-cdc-ecm.noct REPOSITORY EVIDENCE " +
+               "[--preflight-only]");
+    }
+    var preflightOnly = false;
+    if (Array.size(args) == 3) {
+        if (args[2] != "--preflight-only") {
+            zbFail("unknown qemu-usb-cdc-ecm option: " + args[2]);
+        }
+        preflightOnly = true;
+    }
+    var repo = capture("realpath " + zbShellQuote(args[0]),
+                       "resolve repository");
+    var evidence = capture("realpath -m " + zbShellQuote(args[1]),
+                           "resolve evidence");
+    if (FileUtil.checkFileExists(evidence) == 1) {
+        zbFail("evidence path already exists: " + evidence);
+    }
+    run("mkdir -p " + zbShellQuote(evidence + "/cells") + " " +
+        zbShellQuote(evidence + "/tmp") + " " +
+        zbShellQuote(evidence + "/build"), "create evidence tree");
+    var results = evidence + "/results.tsv";
+    FileUtil.writeText(results, "cell\tresult\tevidence\n");
+    var qemu = resolveCommand("${QEMU_SYSTEM_X86_64:-qemu-system-x86_64}",
+                              "qemu-system-x86_64");
+    var ovmfCode = resolveFile("${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}",
+                               "OVMF code");
+    var ovmfVars = resolveFile("${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}",
+                               "OVMF vars");
+    var fixture = repo + "/plan/ws004-hardware/tests";
+    var guest = fixture + "/usb-cdc-ecm-guest-probe.c";
+    var config = fixture + "/qemu-usb-cdc-ecm-config.mk";
+    var makefile = fixture + "/qemu-usb-cdc-ecm.mk";
+    runLogged("cc -std=c11 -Wall -Wextra -Werror -I" +
+        zbShellQuote(repo + "/libc/include") + " -I" +
+        zbShellQuote(repo + "/include/uapi") + " -fsyntax-only " +
+        zbShellQuote(guest), evidence + "/guest-syntax.log",
+        "guest probe host syntax gate");
+    appendText(results, "guest-syntax\tPASS\tguest-syntax.log\n");
+    run("truncate -s 1048576 " + zbShellQuote(evidence + "/parser.img"),
+        "create QEMU parser image");
+    runParserPreflight(qemu, evidence, "ide");
+    runParserPreflight(qemu, evidence, "usb-root");
+    appendText(results, "qemu-parser-ide\tPASS\tparser-ide.log\n" +
+        "qemu-parser-usb-root\tPASS\tparser-usb-root.log\n");
+    var sourceReady = productionSourceReady(repo);
+    var readyText = "no";
+    if (sourceReady) { readyText = "yes"; }
+    FileUtil.writeText(evidence + "/metadata.txt",
+        "test=HW-T22 NET-T42 ws004-p019\n" +
+        "qemu=" + capture(zbShellQuote(qemu) + " --version | sed -n '1p'",
+                           "capture QEMU version") + "\n" +
+        "network=restricted 10.0.2.0/24 gateway=10.0.2.2 " +
+        "dhcpstart=10.0.2.15 dns=10.0.2.3\n" +
+        "mac=52:54:00:12:34:56\nmsos_desc=on\n" +
+        "production_source_ready=" + readyText + "\n");
+    run("sha256sum " + zbShellQuote(guest) + " " + zbShellQuote(config) +
+        " " + zbShellQuote(makefile) + " " +
+        zbShellQuote(fixture + "/qemu-usb-cdc-ecm-service-static") + " " +
+        zbShellQuote(fixture + "/qemu-usb-cdc-ecm-service-dhcp") + " " +
+        zbShellQuote(fixture + "/qemu-usb-cdc-ecm-rc-static.conf") + " " +
+        zbShellQuote(fixture + "/qemu-usb-cdc-ecm-rc-dhcp.conf") + " >" +
+        zbShellQuote(evidence + "/inputs.sha256"), "hash fixture inputs");
+    if (preflightOnly || !sourceReady) {
+        appendText(results,
+            "production-runtime\tNOT-RUN\tproduction driver integration pending\n");
+        print("WS004 p019 QEMU preflight: PASS (runtime not run): " + evidence);
+        return;
+    }
+    var productionConfig = repo + "/config.mk";
+    var productionHash = "missing";
+    if (FileUtil.checkFileExists(productionConfig) == 1) {
+        productionHash = capture("sha256sum " + zbShellQuote(productionConfig) +
+            " | awk '{print $1}'", "hash production config");
+    }
+    var build = evidence + "/build/amd64";
+    var arch = evidence + "/build/arch-images";
+    var data = evidence + "/build/data.img";
+    var swap = evidence + "/build/swapfile";
+    var buildCommand = "TMPDIR=" + zbShellQuote(evidence + "/tmp") +
+        " make -C " + zbShellQuote(repo) + " -j16 -f Makefile -f " +
+        zbShellQuote(makefile) + " ZEDBSD_CONFIG=" + zbShellQuote(config) +
+        " BUILD=" + zbShellQuote(build) + " ARCH_IMAGE_DIR=" +
+        zbShellQuote(arch) + " DATA_IMAGE=" + zbShellQuote(data) +
+        " SWAP_IMAGE=" + zbShellQuote(swap) + " ws004-p019-qemu-images";
+    runLogged("make -C " + zbShellQuote(repo) + " -j16 toolchain",
+              evidence + "/toolchain.log", "Noct toolchain");
+    runLogged(buildCommand, evidence + "/build.log",
+              "private CDC ECM images");
+    var staticImage = build + "/tests/ws004-p019-static.img";
+    var dhcpImage = build + "/tests/ws004-p019-dhcp.img";
+    if (FileUtil.checkFileExists(staticImage) != 1 ||
+        FileUtil.checkFileExists(dhcpImage) != 1) {
+        zbFail("private CDC ECM images were not produced");
+    }
+    var staticHash = capture("sha256sum " + zbShellQuote(staticImage) +
+        " | awk '{print $1}'", "hash static source image");
+    var dhcpHash = capture("sha256sum " + zbShellQuote(dhcpImage) +
+        " | awk '{print $1}'", "hash DHCP source image");
+    appendText(evidence + "/metadata.txt",
+        "static_image=" + staticImage + "\nstatic_image_sha256=" +
+        staticHash + "\ndhcp_image=" + dhcpImage +
+        "\ndhcp_image_sha256=" + dhcpHash + "\n");
+    appendText(results, "private-images\tPASS\tbuild.log\n");
+    runCell(qemu, ovmfCode, ovmfVars, staticImage, "static", "ide",
+            evidence, results);
+    runCell(qemu, ovmfCode, ovmfVars, dhcpImage, "dhcp", "ide",
+            evidence, results);
+    runCell(qemu, ovmfCode, ovmfVars, staticImage, "static", "usb-root",
+            evidence, results);
+    runCell(qemu, ovmfCode, ovmfVars, dhcpImage, "dhcp", "usb-root",
+            evidence, results);
+    var staticAfter = capture("sha256sum " + zbShellQuote(staticImage) +
+        " | awk '{print $1}'", "rehash static source image");
+    var dhcpAfter = capture("sha256sum " + zbShellQuote(dhcpImage) +
+        " | awk '{print $1}'", "rehash DHCP source image");
+    if (staticAfter != staticHash || dhcpAfter != dhcpHash) {
+        zbFail("a private source image changed during the four-cell matrix");
+    }
+    var productionAfter = "missing";
+    if (FileUtil.checkFileExists(productionConfig) == 1) {
+        productionAfter = capture("sha256sum " +
+            zbShellQuote(productionConfig) + " | awk '{print $1}'",
+            "rehash production config");
+    }
+    if (productionAfter != productionHash) {
+        zbFail("config.mk changed during the four-cell matrix");
+    }
+    appendText(evidence + "/metadata.txt",
+        "static_image_sha256_after=" + staticAfter +
+        "\ndhcp_image_sha256_after=" + dhcpAfter +
+        "\nproduction_config_sha256_before=" + productionHash +
+        "\nproduction_config_sha256_after=" + productionAfter + "\n");
+    appendText(results, "input-integrity\tPASS\tmetadata.txt\n");
+    print("WS004 HW-T22/NET-T42 QEMU acceptance: PASS: " + evidence);
+}
