@@ -1,11 +1,11 @@
 # WS004 Phase 021: xHCI SuperSpeed interrupt endpoint context
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 Phase ID: `ws004-p021`
 
-Status: uncleared (`q045` automatic/source milestone passed; fresh-image QEMU
-and Latitude checkpoints await the existing Noct verifier correction)
+Status: uncleared (`q052` automatic/runtime milestone passed; one hash-pinned
+Latitude checkpoint remains)
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -52,13 +52,15 @@ notification-`wIndex` parser defect and remains a separate change and Phase.
 2. Correlate the companion with a SuperSpeed interrupt endpoint before xHCI
    enable. Require `bMaxBurst <= 15`, reserved interrupt companion attributes
    to be zero, a nonzero interval payload, and a payload no larger than
-   `min(wMaxPacketSize * (bMaxBurst + 1), 16384)`. Also require packet size
+   `min(wMaxPacketSize * (bMaxBurst + 1), 3072)`. The 3-KiB ceiling is the
+   SuperSpeed Interrupt limit; the wider SuperSpeed Isochronous limit does not
+   apply. Also require packet size
    `1..1024` with reserved bits clear and `bInterval` `1..16`. Accept every
    payload inside that legal closed range exactly as reported; do not round a
    legal under-report upward.
 3. Encode the accepted Max ESIT Payload in Endpoint Context word 4 and set
    Average TRB Length to the same value. SuperSpeed interrupt payload is at
-   most 16 KiB, so word 0 Max ESIT High remains zero; LEC/SSP and wider periodic
+   most 3 KiB, so word 0 Max ESIT High remains zero; LEC/SSP and wider periodic
    payloads are explicitly outside this Phase.
 4. Keep FS/LS/HS interrupt contexts and control, bulk, and isochronous contexts
    byte-for-byte unchanged. Isochronous Mult and periodic high-bandwidth
@@ -74,7 +76,7 @@ notification-`wIndex` parser defect and remains a separate change and Phase.
 USB 3.x defines `wBytesPerInterval` as the total bytes per service interval and
 does not require it to equal or exceed `wMaxPacketSize`. The Phase therefore
 accepts any nonzero value no larger than
-`min(wMaxPacketSize * (bMaxBurst + 1), 16384)`. Zero, an oversized value, reserved
+`min(wMaxPacketSize * (bMaxBurst + 1), 3072)`. Zero, an oversized value, reserved
 interrupt attributes, or a missing SuperSpeed companion is rejected before
 Configure Endpoint. Linux-style rounding and a missing-companion fallback are
 separate compatibility quirks and are not needed for the conforming RTL8156
@@ -90,7 +92,7 @@ descriptor.
    - zero payload rejection;
    - payload 15 acceptance and payload 17 rejection for packet 16/burst 0;
    - `bMaxBurst > 15` and nonzero reserved interrupt attributes rejection;
-   - the 16384-byte ceiling and 16385 rejection; and
+   - the 3072-byte ceiling and 3073 rejection; and
    - unchanged FS/HS interrupt, bulk, and control context words.
 3. Run the USB function-model, xHCI model/control, concurrent-URB, NCM driver,
    USB binding, and USB-storage regressions in ordinary and sanitizer modes
@@ -126,8 +128,11 @@ interrupt endpoints require the frozen packet, interval, burst, attribute, and
 payload bounds, while legal under-reports are encoded without rounding.
 Endpoint context word 4 receives the same accepted payload in Average TRB
 Length and Max ESIT Payload Low. SuperSpeedPlus LEC/SSP remains outside this
-Phase and retains the preceding context encoding, as do FS/HS interrupt,
-control, bulk, and isochronous endpoints.
+Phase, as do FS/HS interrupt, control, bulk, and isochronous endpoints. The
+q045 host model checked the pre-existing SuperSpeedPlus encoder branch, but
+native xHCI root-port speed classification currently folds controller speed
+IDs 4 and above into `SUPER`; p021 therefore makes no physical SuperSpeedPlus
+compatibility claim.
 
 The Phase-owned runner is:
 
@@ -186,11 +191,41 @@ deleted the target. Therefore no fresh candidate image existed for the
 disposable xHCI USB-root QEMU boot, and reusing the older image would not be
 valid evidence. The Latitude candidate/check was consequently not requested.
 
-Resume after the separately owned Noct command-line/build integration accepts
-the repository's verifier invocation: rerun the configured image build, one
-disposable q35/xHCI USB-root boot to `login:`, then one Latitude `ue0` carrier,
-DHCP, and external-fetch checkpoint. No source/model defect or additional
-implementation decision is presently known in this Phase.
+That Noct blocker was later removed by q047. The q052 result below supersedes
+only the stale build/QEMU hold; q045 remains the implementation history.
+
+## q052 automatic/runtime result (2026-09-01)
+
+The current-source automatic milestone is complete without a further product
+decision:
+
+- the endpoint-context corpus passes 82 ordinary and ASan/UBSan checks; the
+  current production USB function corpus passes 1,496 in each runtime mode;
+  the xHCI model, source-order gate, analyzer builds, and amd64/i386 configured
+  production objects pass;
+- a commit-time standards audit corrected the SuperSpeed Interrupt ceiling
+  from the SuperSpeed Isochronous 16-KiB limit to the required 3-KiB limit;
+  the focused boundary accepts 3,072 bytes and rejects 3,073 while retaining
+  excess descriptor capacity, and the pre-audit image is not accepted as
+  evidence;
+- concurrent xHCI URBs, USB binding, NCM wire, the integrated NCM driver,
+  Storage-SCSI, and terminal URB publication pass their retained ordinary,
+  sanitizer, and available analyzer gates;
+- a fresh empty-tree amd64/UEFI p021 configuration builds successfully, and a
+  disposable four-CPU, 4-GiB OVMF q35 launch boots the resulting image solely
+  through xHCI USB Storage to `login:` in 12 seconds with no fatal marker; and
+- the QEMU source image remains unchanged and `git diff --check` passes.
+
+Automatic evidence: `/tmp/ws004-q052-final-002/qemu`.
+
+The one remaining Phase condition is a single physical observation, not a
+design decision. Use the read-only candidate
+`build/ws004-p021-q052-hdd-image.img`, SHA-256
+`43f3ee1165a0bd4b719df5eea1a3b4d54b8b2c2655f5267cb1581e9b84099bde`.
+For that one boot on the Latitude 5320, insert the RTL8156 and record truthful
+`ue0` carrier, DHCP, peer ping, one external fetch, and no freeze. Do not run a
+repeatability batch at this development checkpoint. Passing that observation
+completes p021; a failure must retain the exact endpoint/transfer boundary.
 
 ## Reconsideration boundary
 

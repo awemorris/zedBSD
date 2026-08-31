@@ -22,7 +22,7 @@ Parent: [WS004](../ws.md)
 | HW-T21 | NVMe hardware | The Latitude SN740 identifies and completes bounded reads without modification before any separately confirmed installation write; exact device and error logs are stored |
 | HW-T22 | CDC ECM QEMU baseline | A QEMU RNDIS-first/ECM-second `usb-net` function selects ECM without a quirk, publishes `ue0`, carries raw Ethernet and DHCP/ping traffic, detaches cleanly, and coexists with xHCI USB Storage |
 | HW-T23 | CDC NCM deterministic hardening | Arbitrary first and mismatched fully valid sequences deliver and resynchronize, malformed NTBs preserve state, zero-delivery completions consume bounded poll work, and each open programs the packet filter after the active alternate and before input URBs |
-| HW-T24 | xHCI SuperSpeed interrupt context | Companion `wBytesPerInterval` validation and host-endian decode produce exact Max ESIT/Average TRB Length fields for RTL8156 EP3; zero, oversized, reserved-field, 16384-byte ceiling, and 16385 rejection cases behave as specified while non-SS/non-interrupt contexts remain unchanged |
+| HW-T24 | xHCI SuperSpeed interrupt context | Companion `wBytesPerInterval` validation and host-endian decode produce exact Max ESIT/Average TRB Length fields for RTL8156 EP3; zero, oversized, reserved-field, 3072-byte ceiling, and 3073 rejection cases behave as specified while non-SS/non-interrupt contexts remain unchanged |
 | HW-T25 | Legacy HCD concurrency and hotplug | Shared PCI INTx dispatch lets all paired controllers attach; UHCI/EHCI accept independent endpoint owners, retire only target schedule graphs, keep interrupt and Storage progress concurrent, and perform detach/reinsert only through independent root workers |
 | HW-T26 | Checked USB recovery | Core STALL latching, ordered endpoint clear-halt, xHCI ring recovery, UHCI/EHCI DATA0, direct-root reset, and Mass Storage migration preserve exact callback/URB/DMA ownership under failure |
 | HW-T27 | amd64 framebuffer console serialization | Concurrent CPU/IRQ-style output, terminal same-CPU re-entry, invalid cell coordinates, and framebuffer extent guards preserve cursor/cell/pixel state; the final HW-T25 QEMU run has no console fault or stall |
@@ -145,15 +145,17 @@ TMPDIR="$PWD/build/q045-tmp" \
   plan/ws004-hardware/tests/run-xhci-superspeed-interrupt-context-test.sh
 ```
 
-Ordinary and ASan/UBSan runs pass 82 focused checks and 1,415 production USB
-function checks; the existing xHCI model, compiler analyzer, and configured
-amd64/i386 production objects also pass. Exact RTL8156 words are
+Q052 revalidates ordinary and ASan/UBSan runs at 82 focused checks and 1,496
+current production USB function checks; the xHCI model, compiler analyzer,
+configured amd64/i386 production objects, and a fresh OVMF q35/xHCI USB-root
+boot also pass. The final q052 audit replaces the incorrect 16-KiB interrupt
+ceiling with the 3-KiB architectural limit and proves 3,072 acceptance plus
+3,073 rejection with descriptor capacity still available. Exact RTL8156 words are
 `0x000a0000`, `0x0010003e`, and `0x00100010`. The concurrent-URB, USB binding,
 NCM wire/driver, USB-storage SCSI, and URB-publication regressions pass their
-available ordinary, sanitizer, and analyzer gates. The q045 fresh-image/QEMU
-and Latitude fields remain empty because the existing host Noct rejects the
-repository's `--path=tools/build` verifier invocation; no older image is
-accepted as substitute evidence.
+available ordinary, sanitizer, and analyzer gates. The q045 Noct blocker is
+superseded. One q052 hash-pinned Latitude carrier/DHCP/ping/fetch observation
+remains before p021 completion; no older image substitutes for it.
 
 ## HW-T30 generic WLAN logic
 

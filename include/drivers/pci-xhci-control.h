@@ -22,6 +22,7 @@
 #define DRV_XHCI_CONTROL_DATA_MAX_LENGTH	0x00010000U
 
 #define DRV_XHCI_CONTROL_AVERAGE_TRB_LENGTH	8U
+#define DRV_XHCI_SUPERSPEED_INTERRUPT_MAX_ESIT_PAYLOAD	3072U
 
 #define DRV_XHCI_PORTSC_CCS	0x00000001U
 #define DRV_XHCI_PORTSC_PED	0x00000002U
@@ -135,7 +136,8 @@ drv_xhci_endpoint_context_encode(enum drv_usb_speed speed, unsigned type,
 			return 0;
 		payload = companion->bytes_per_interval;
 		capacity = packet * (maximum_burst + 1U);
-		if (payload == 0 || payload > capacity || payload > 16384U)
+		if (payload == 0 || payload > capacity ||
+		    payload > DRV_XHCI_SUPERSPEED_INTERRUPT_MAX_ESIT_PAYLOAD)
 			return 0;
 		interval = descriptor_interval - 1U;
 		encoded.word0 = (uint32_t)interval << 16;

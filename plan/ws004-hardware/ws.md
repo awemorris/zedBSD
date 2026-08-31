@@ -15,9 +15,9 @@ completed every
 automatic/read-only intake field in q040 and is uncleared only at the printed
 unit label. `ws004-p020` deterministic CDC NCM hardening and
 `ws004-p022`--`p024` NVMe discovery/I/O/strict-GPT QEMU acceptance are
-complete; `ws004-p021` has passed its q045 automatic/source milestone and is
-uncleared only at its fresh-image QEMU/Latitude runtime boundary, now released
-by q047's accepted Noct runtime path;
+complete; q052 has completed `ws004-p021`'s current-source automatic/runtime
+milestone, including one fresh xHCI USB-root QEMU boot, and the Phase is
+uncleared only at one hash-pinned Latitude/RTL8156 checkpoint;
 `ws004-p027`--`p030`
 define the later Archer T3U Nano WLAN implementation path
 
@@ -37,8 +37,10 @@ parser and real adapter pass carrier, DHCP, and ping through QEMU xHCI, and the
 final Latitude-native image successfully fetches `www.google.com`.
 `p021` corrects the independent native-xHCI Max ESIT defect exposed by the same
 audit; q045 passes its exact-word, strict-validation, regression, analyzer, and
-configured-object gates. Q047's accepted Noct `--path` runtime releases its
-fresh QEMU/Latitude candidate build; those runtime checkpoints remain. `p016`
+configured-object gates. Q047's accepted Noct `--path` runtime released the
+candidate build, and q052 then passed the current-source regressions, fresh
+private configured build, and OVMF q35/xHCI USB-root boot. One physical
+Latitude checkpoint remains. `p016`
 now completes the controller-proven
 legacy-HCD hardware-retirement follow-up exposed by that audit. `p031` now
 completes concurrent UHCI/EHCI endpoint ownership, request-local retirement,
@@ -60,8 +62,8 @@ and p026--p030 still open. q030 completed p022 through p024, including strict
 primary/backup GPT and the final disposable QEMU acceptance matrix. The later
 p025 is the single read-only Latitude SN740 checkpoint. Complete the remaining
 automatic loader/installer prerequisites before requesting that physical
-checkpoint. Q047's Noct runtime and production gates release p021; it still
-needs one disposable QEMU boot and one Latitude checkpoint. P019 completed in
+checkpoint. Q052 consumed q047's Noct release and completed p021's disposable
+QEMU boot; one hash-pinned Latitude checkpoint remains. P019 completed in
 q049 as an independent ECM baseline. The remaining asynchronous-TX/accounting
 portion of p017 stays later
 WS004 work. WLAN planning has resumed with the Archer T3U Nano as
@@ -97,7 +99,7 @@ Shared tests: [WS004 test index](tests/README.md)
 | [`ws004-p018`](phase018-rtl8156-ncm-association/phase.md) | Complete (`q028`) | CDC Union is authoritative and IAD is optional strict corroboration; automatic gates pass and physical RTL8156 configuration 2 binds and publishes `ue0`; carrier/data work moved to WS005 p001 |
 | [`ws004-p019`](phase019-cdc-ecm-qemu-baseline/phase.md) | Complete (`q049`) | Independent standards CDC ECM, the general xHCI/EHCI/UHCI zero-packet HCD contract, focused lifetime/fault evidence, and all four IDE/xHCI-storage static/DHCP QEMU cells pass without NCM wire sharing or VID:PID/configuration quirks |
 | [`ws004-p020`](phase020-cdc-ncm-deterministic-hardening/phase.md) | Complete (`q029` automatic software scope) | Valid sequences accept/resynchronize, malformed input preserves state, completions and rearms are bounded/fair, and the packet filter is programmed transactionally on open; focused and regression gates pass |
-| [`ws004-p021`](phase021-xhci-superspeed-interrupt-context/phase.md) | Uncleared (`q045`; automatic/source milestone passed) | Host-endian companion access, exact RTL8156 Max ESIT/Average TRB fields, pre-ring strict rejection, non-target compatibility, regressions, analyzer, and x86 objects pass; q047 releases the Noct runtime build blocker, while fresh QEMU/Latitude evidence remains |
+| [`ws004-p021`](phase021-xhci-superspeed-interrupt-context/phase.md) | Uncleared (`q052`; automatic/runtime milestone passed) | Host-endian companion access, exact RTL8156 Max ESIT/Average TRB fields, pre-ring strict rejection, current regressions/x86 objects, fresh configured build, and one OVMF xHCI USB-root boot pass; only the hash-pinned Latitude carrier/DHCP/ping/fetch checkpoint remains |
 | [`ws004-p022`](phase022-nvme-admin-identify/phase.md) | Complete (`q030`) | Bounded reset/admin Identify, transactional PCI/MSI lifecycle, stable names, focused fixtures, amd64/i386 builds, exact non-mutating QEMU namespace, IDE, and USB-root gates pass |
 | [`ws004-p023`](phase023-nvme-io-lifecycle/phase.md) | Complete (`q030`) | One depth-64 I/O queue, private 4-KiB bounce slots, checked 64-bit read/write, truthful flush, concurrent wrap, timeout/reset, normal shutdown, and quarantine pass focused/build/QEMU/regression gates |
 | [`ws004-p024`](phase024-nvme-qemu-acceptance/phase.md) | Complete (`q030`) | Strict 512/4096 GPT host gates and disposable QEMU partition write/flush/restart/rejection plus IDE, xHCI USB-root, amd64, and i386 gates pass |
@@ -122,9 +124,9 @@ Shared tests: [WS004 test index](tests/README.md)
 
 q029, p020, and WS005 p001 are complete through final Latitude-native external
 fetch. p021 is an independent standards correction rather than an active
-failure response; its implementation is retained and only its fresh-image
-runtime checkpoints remain after the Noct verifier correction. Later WS004
-candidates after q049 are p017, the p021 runtime resume, p025, the planned-only
+failure response; q052 retains its passing fresh-image QEMU result and only one
+physical checkpoint remains. Later WS004 candidates after q052 are p017, the
+p021 physical checkpoint, p025, the planned-only
 p026--p030 WLAN chain; q047 p031--p033 are complete. Additional work is
 HW-11, HW-20/HW-21, and HW-30 when their inputs and acceptance environments
 are available. q040 selects the evidence/policy-only p026 boundary; it does

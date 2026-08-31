@@ -90,14 +90,15 @@ main(void)
 	CHECK(!drv_xhci_endpoint_context_encode(DRV_USB_SPEED_SUPER, 7U, 16U,
 	    11U, &descriptor, NULL));
 
-	/* The largest legal service payload fits word 4 without high ESIT bits. */
-	descriptor = companion(15U, 0, 16384U);
+	/* xHCI 1.2b section 4.14.2 caps SS interrupt ESIT payload at 3 KiB. */
+	descriptor = companion(2U, 0, 3072U);
 	CHECK(drv_xhci_endpoint_context_encode(DRV_USB_SPEED_SUPER, 7U,
 	    1024U, 16U, &descriptor, &words));
 	CHECK(words.word0 == UINT32_C(0x000f0000));
-	CHECK(words.word1 == UINT32_C(0x04000f3e));
-	CHECK(words.word4 == UINT32_C(0x40004000));
-	descriptor.bytes_per_interval = 16385U;
+	CHECK(words.word1 == UINT32_C(0x0400023e));
+	CHECK(words.word4 == UINT32_C(0x0c000c00));
+	/* Keep capacity above 3 KiB so this isolates the architectural ceiling. */
+	descriptor = companion(15U, 0, 3073U);
 	check_rejected(1024U, 16U, &descriptor);
 
 	/* OUT interrupt endpoints use the same strict companion contract. */
