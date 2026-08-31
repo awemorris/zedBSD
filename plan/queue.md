@@ -1,71 +1,103 @@
-# Queue: Intel Mac automatic image groundwork
+# Queue: USB 1.1 concurrency, Intel Mac GPT repair, and checked recovery
 
 Last updated: 2026-08-31
 
-QID: `q036`
+QID: `q047`
 
-Queue status: in-progress
+Queue status: finished
 
-Queue finished: **No**
+Queue finished: **Yes**
 
-Authorization: on 2026-08-30 the user inserted the Intel Mac bring-up
-workstream immediately after WS018 and directed autonomous Queue execution.
-The user-supplied design fixes a generic Board Variant axis and amd64 combined
-UEFI+BIOS / UEFI-only / BIOS-only image layouts. On 2026-08-31 the user
-removed the target-medium-capacity selector: Apple's relevant constraint is a
-pure Protective MBR with no compatibility entry.
+Authorization: the user selected Report Protocol, prohibited event-number
+reuse while an old fd survives, required correct USB 1.1 operation rather than
+an xHCI-only first release, and directed execution to continue. The standing
+authorization permits finite follow-on Queues while deferring any newly found
+human decision.
 
-Timebox: none. This finite Queue contains the three automatic WS020 Phases;
-the physical Intel Mac checkpoint remains outside this Queue.
+Timebox: none. P031 and p033 are complete: all focused, configured-production,
+regression, repository-build, and shared forced HW-T25 QEMU gates pass. At that
+buildable USB boundary, q047 consumed the maintainer's accepted Noct SHA;
+runtime `--path`, NOCT-T084, and the zedbuild byte-primitives gate pass. Only
+the unrelated NOCT-T082 `--compile --app --path=...` form remains uncleared.
+WS020 p003 now passes one fresh uninterrupted six-cell `MAC-T020` matrix. Its
+refreshed `MAC-T021` handoff artifact at hash `f811a0f5...` reached the Intel
+Mac kernel but exposed a host-relocated GPT compatibility failure. P006 now
+passes its host, relocated/pristine QEMU, exact-login, and repeated six-cell
+automatic gates; the exact `692160cf...331d` artifact is published for one
+non-blocking provisional Intel Mac boot. P031 and p006 automatic work released
+p032. P032 then completed its focused, configured, repository-build, and
+xHCI/legacy-HCD QEMU gates. Its physical-machine behavior was not exercised in
+this Queue.
+The intervening `ws002-p022` console-login stall is also complete: a USB
+submit-commit local-IRQ self-wait was captured and repaired, its deterministic
+old-order regression passes, and ordinary initial plus final-five exact-login
+boots release p006's login gate.
 
 Parent: [master plan](master.md)
 
-Previous Queue: [q035](queue-q035.md)
+Previous Queue: [q046](queue-q046.md)
 
 ## Purpose
 
-Introduce the generic Architecture -> Board -> Variant configuration,
-implement the three amd64 disk layouts without changing kernel or loader
-compilation, then prove the six-cell positive and negative matrix under
-SeaBIOS and OVMF. Produce a frozen fixed UEFI-only artifact suitable for one
-bounded Intel Mac acceptance run.
+Remove the two general-USB prerequisites which block the already planned USB
+HID producer Phase. P031 made UHCI/EHCI concurrent and hotpluggable for USB
+1.1 HID plus Storage. P032 added the single checked endpoint-halt and
+conservative direct-root reset contract shared by xHCI/UHCI/EHCI.
+The p031 stress run also exposed an independent amd64 framebuffer-console
+cursor race; p033 completed that repair using p031's final forced QEMU run.
+At that buildable USB boundary, q047 consumed the maintainer's released Noct
+`--path` repair. Runtime module loading, the ordinary production build, and
+zedbuild byte primitives pass; only the unrelated compile/application CLI form
+remains uncleared. The WS020 automatic Variant matrix and refreshed UEFI-only
+handoff preflight pass. The first refreshed physical observation then exposed
+a host-relocated physical-end GPT with a stale compact PMBR; p006 owns the
+GPT-over-Protective-MBR precedence repair before the separately retained final
+campaign.
 
 ## Execution registry
 
 | Priority | WS / Phase | Authoritative document | Status | Required result |
 | --- | --- | --- | --- | --- |
-| 1 | `ws020-p001` | [Phase](ws020-intel-mac/phase001-target-variant-config/phase.md) | completed (revised) | Generic board-owned Variant round-trips through menuconfig/config.mk, the removed capacity field is absent, and all amd64 compiled artifacts remain identical |
-| 2 | `ws020-p002` | [Phase](ws020-intel-mac/phase002-image-layouts/phase.md) | completed (revised) | Combined, BIOS-only, and fixed pure-Protective-MBR UEFI-only layouts contain exactly their intended boot paths and strict GPT rules |
-| 3 | `ws020-p003` | [Phase](ws020-intel-mac/phase003-qemu-acceptance/phase.md) | in-progress | Six SeaBIOS/OVMF positive and negative acceptance cells pass |
+| 1 | `ws004-p031` | [Phase](ws004-hardware/phase031-legacy-hcd-concurrent-hotplug/phase.md) | completed | UHCI/EHCI independent endpoints, request-local retirement, periodic/asynchronous progress, worker-context detach/reinsert, all focused/configured/regression/build gates, and both QEMU topologies pass |
+| 2 | `ws004-p033` | [Phase](ws004-hardware/phase033-amd64-framebuffer-console-serialization/phase.md) | completed | One early-safe lock and strict cell/pixel bounds pass HW-T27 host gates and forced standalone/paired HW-T25 QEMU without console fault, corruption, or stall |
+| 3 | `ws008-p010` | [Phase](ws008-noct/phase010-host-script-cli-contract-repair/phase.md) | uncleared | Accepted SHA, runtime `--path`, `NOCT-T084`, and zedbuild byte primitives pass; only unrelated `NOCT-T082` remains at its recorded resume condition |
+| 4 | `ws020-p003` | [Phase](ws020-intel-mac/phase003-qemu-acceptance/phase.md) | completed | One fresh uninterrupted `MAC-T020` matrix passes all six strict cells without weakening exact `login:` or negative absence/settle acceptance |
+| 5 | `ws002-p022` | [Phase](ws002-services/phase022-intermittent-console-login/phase.md) | completed | USB submit-commit local-IRQ self-wait repaired; deterministic old-order gate, unchanged `MAC-T022`, and ordinary initial plus final-five exact-login boots pass without retry-to-pass |
+| 6 | `ws020-p006` | [Phase](ws020-intel-mac/phase006-relocated-physical-gpt/phase.md) | uncleared | Automatic valid-GPT precedence, strict host/QEMU/login/six-cell gates, and artifact publication pass; the only resume condition is one non-blocking provisional physical boot outside this Queue |
+| 7 | `ws004-p032` | [Phase](ws004-hardware/phase032-usb-endpoint-device-recovery/phase.md) | completed | The common core orders device-side clear-halt before HCD ring/toggle recovery, implements bounded direct-root reset and allocation-free reclaim-safe recovery, removes the Storage private-state hack, and passes HW-T26 plus xHCI/legacy-HCD QEMU controls; physical recovery was not tested |
 
-## Dependency and deferral rules
+## Fixed boundaries
 
-- p002 starts only after p001 proves that Variant does not alter source
-  selection or loader/kernel binaries and the capacity selector is gone.
-- p003 starts only after p002's independent layout checker accepts all three
-  profiles, including the primary-only compact GPT contract.
-- `ws020-p004` is not part of q036. It requires a user-operated Intel Mac
-  boot of the frozen artifact after the automatic matrix passes.
-- If actual UEFI/GPT requirements contradict the fixed primary-only contract,
-  stop the affected Phase and request human judgment; do not silently add a
-  compatibility MBR entry or backup GPT.
-- An unrelated defect is returned to M/W/P planning and does not expand q036.
-
-## Execution rules
-
-- Do not inspect or consume `.internal/`.
-- Keep the target framework generic; do not encode Intel-Mac policy into the
-  architecture or kernel source lists.
-- Build both BIOS and UEFI loader families for every amd64 PC/AT Variant.
-- Use disposable writable image copies and `qemu-system-x86_64`; do not use
-  aggregate `make check`.
-- Run `make -j16`, focused WS020 fixtures, and `git diff --check`.
-- After each Phase, synchronize Phase/WS/master/Queue state and commit `WIP`;
-  push when permitted.
+- Do not implement the production USB HID/evdev driver in this Queue; that is
+  `ws006-p008` after both prerequisites pass.
+- Do not add a user-visible UAPI, HCD-name check, vendor quirk, hub/transaction-
+  translator support, multi-independent-owner reset, or class reset callback.
+- Preserve exact URB callback, cancellation, drain, DMA-retirement, PCI IRQ,
+  shutdown, and fail-closed quarantine contracts from p009/p011/p015/p016.
+- Keep `BUG-003` short-IN/error classification separate unless it becomes the
+  direct blocker; then record and defer it rather than broadening q047.
+- Keep p033 limited to the amd64 PC/AT output lock and cell/framebuffer bounds.
+  The repeated PS/2 key producer, USB/HID ownership, other architectures, and
+  public console API remain unchanged.
+- Use dedicated WS004 fixtures, ordinary/sanitizer/analyzer modes, configured
+  amd64/i386 builds, and disposable QEMU media. Do not run aggregate
+  `make check`, consume `.internal/`, or modify Noct source.
 
 ## Completion definition
 
-q036 is finished when p001--p003 are each `completed` or `uncleared` with
-their exact evidence and resume condition recorded. A finished q036 does not
-complete WS020: p004's physical Intel Mac checkpoint and final five-run
-acceptance remain explicit human work.
+q047 finishes after every selected item is `completed`, `uncleared`, or left
+`pending` solely because its earlier Queue dependency is uncleared. P033's
+HW-T27 host gates and shared fresh QEMU evidence are complete. P031's complete
+ownership/evidence result releases p032. At that buildable boundary, p010
+proved the refreshed host Noct runtime and ordinary production path but remains
+uncleared only at the unrelated NOCT-T082 compile/application form. P003 is
+complete from one strict six-cell PASS. P022 is complete from its captured
+USB submit-commit race, deterministic negative control, unchanged `MAC-T022`,
+and ordinary initial plus five fresh-copy exact-login boots. P006 has cleared
+its automatic host/relocated-media/pristine-media regression boundary and
+published one exact artifact; its provisional Mac boot and p004 final
+repetitions remain external.
+P032 is complete and makes `ws006-p008` implementation-ready but does not itself
+claim USB HID, evdev hotplug, or physical keyboard/mouse acceptance. The
+separately declared physical five-boot campaign still prevents whole-WS020
+completion.

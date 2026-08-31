@@ -48,6 +48,8 @@ void hal_cons_restore_terminal(const struct hal_cons_state *in)
 void hal_cons_update_cursor(void) {}
 int hal_cons_poll_event(struct hal_key_event *event)
 { if (input_peek < 0 && sun4u_uart_poll()) input_peek=console_getc(); if(input_peek<0)return 0;if(event){for(unsigned i=0;i<HAL_KEY_SYMBOL_SIZE;i++)event->symbol[i]='\0';event->symbol[0]=(char)input_peek;event->flags=HAL_KEY_EVENT_PRESS;}return 1; }
+void hal_cons_get_input_info(struct hal_cons_input_info *info)
+{ if(info){info->flags=HAL_CONS_INPUT_TEXT;info->symbols=NULL;info->symbol_count=0;} }
 int hal_cons_read_event(struct hal_key_event *event)
 { while (!hal_cons_poll_event(event)) ; input_peek=-1; return 1; }
 int hal_cons_key_state(int key) { (void)key; return 0; }

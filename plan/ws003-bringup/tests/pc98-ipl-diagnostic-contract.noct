@@ -1,0 +1,99 @@
+require zedbuild;
+
+// WS003 BR-T55 diagnostic-only image byte-range contract.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+func requireDifference(left, right, what) {
+    if (Packed.size(left) != Packed.size(right)) {
+        zbFail(what + " extents differ");
+    }
+    for (i in 0..Packed.size(left)) {
+        if (left[i] != right[i]) { return; }
+    }
+    zbFail(what + " did not acquire diagnostic code");
+}
+
+func need(text, marker, what) {
+    if (String.indexOf(text, marker) < 0) {
+        zbFail(what + " is missing: " + marker);
+    }
+}
+
+func run(command, what) {
+    var status = System.shell(command);
+    if (status != 0) { zbFail(what + " failed (status=" + status + ")"); }
+}
+
+func main(args) {
+    var repo = ".";
+    if (Array.size(args) > 1) {
+        zbFail("usage: pc98-ipl-diagnostic-contract.noct [REPOSITORY]");
+    }
+    if (Array.size(args) == 1) { repo = args[0]; }
+
+    var build = repo + "/build/pc98";
+    var normalStage1 = zbReadFile(build + "/bootloader/stage1.bin");
+    var normalStage2 = zbReadFile(build + "/bootloader/stage2.bin");
+    var diagnosticStage1 = zbReadFile(
+        build + "/ws003-p023/bootloader/stage1.bin");
+    var diagnosticStage2 = zbReadFile(
+        build + "/ws003-p023/bootloader/stage2.bin");
+    var normalImage = build + "/hdd-image.img";
+    var diagnosticImage =
+        build + "/ws003-p023-pc9821-v13-diagnostic.img";
+    var handoffImage = repo +
+        "/build/handoff/ws003-p024-pc9821-v13-fixed-read-diagnostic.img";
+
+    if (Packed.size(normalStage1) != 512 ||
+        Packed.size(diagnosticStage1) != 512 ||
+        Packed.size(normalStage2) != 14 * 512 ||
+        Packed.size(diagnosticStage2) != 14 * 512) {
+        zbFail("normal or diagnostic fixed IPL extent changed");
+    }
+    if (!zbBytesEqual(normalStage1, 4, "IPL1") ||
+        !zbBytesEqual(diagnosticStage1, 4, "IPL1")) {
+        zbFail("normal or diagnostic Stage-1 IPL1 contract changed");
+    }
+    if (normalStage1[508] != 9 || normalStage1[509] != 0 ||
+        diagnosticStage1[508] != 9 || diagnosticStage1[509] != 0 ||
+        normalStage1[510] != 0x55 || normalStage1[511] != 0xaa ||
+        diagnosticStage1[510] != 0x55 || diagnosticStage1[511] != 0xaa) {
+        zbFail("normal or diagnostic Stage-1 tail changed");
+    }
+    if (FileUtil.getFileSize(normalImage) !=
+        FileUtil.getFileSize(diagnosticImage)) {
+        zbFail("diagnostic image changed the production image extent");
+    }
+    requireDifference(normalStage1, diagnosticStage1, "Stage 1");
+    requireDifference(normalStage2, diagnosticStage2, "Stage 2");
+    run("dd if=" + zbShellQuote(diagnosticImage) +
+        " bs=512 count=1 status=none | cmp - " +
+        zbShellQuote(build + "/ws003-p023/bootloader/stage1.bin"),
+        "diagnostic LBA 0 installation");
+    run("dd if=" + zbShellQuote(diagnosticImage) +
+        " bs=512 skip=2 count=14 status=none | cmp - " +
+        zbShellQuote(build + "/ws003-p023/bootloader/stage2.bin"),
+        "diagnostic LBA 2..15 installation");
+    run("cmp -i 512:512 -n 512 " + zbShellQuote(normalImage) + " " +
+        zbShellQuote(diagnosticImage), "unchanged native partition table");
+    run("cmp -i 8192:8192 " + zbShellQuote(normalImage) + " " +
+        zbShellQuote(diagnosticImage),
+        "unchanged image after fixed IPL sectors");
+    run("cmp " + zbShellQuote(diagnosticImage) + " " +
+        zbShellQuote(handoffImage),
+        "p024 handoff artifact identity");
+
+    var diskSource = FileUtil.readText(repo + "/bootloader/pc98/disk-ipl.S");
+    var selectorSource = FileUtil.readText(repo + "/bootloader/pc98/lba2.S");
+    need(diskSource, "#if ZEDBSD_PC98_IPL_DIAGNOSTIC",
+         "diagnostic-only Stage-1 guard");
+    need(diskSource, "$0x4531, %dx", "P1E Stage-1 entry checkpoint");
+    need(diskSource, "$3, %cx", "three-tone LBA-2-read checkpoint");
+    need(selectorSource, "#if ZEDBSD_PC98_IPL_DIAGNOSTIC",
+         "diagnostic-only Stage-2 guard");
+    need(selectorSource, "$0x4532, %dx", "P2E Stage-2 entry checkpoint");
+    need(selectorSource, "$4, %cx", "four-tone Stage-2 entry checkpoint");
+    need(selectorSource, "$7, %cx", "bounded Stage-2 failure checkpoints");
+
+    print("WS003 BR-T55 PC-98 diagnostic image contract: PASS");
+}

@@ -49,6 +49,7 @@ struct componentname;
 struct file_ops;
 struct mount;
 struct ucred;
+struct inode;
 
 enum inode_type {
 	INODE_NONE,
@@ -59,6 +60,30 @@ enum inode_type {
 	INODE_SYMLINK,
 	INODE_SOCKET,
 	INODE_FIFO,
+};
+
+enum inode_creation_origin {
+	INODE_CREATION_INVALID = 0,
+	INODE_CREATION_USER,
+	INODE_CREATION_SYSTEM,
+	INODE_CREATION_PRESERVE,
+};
+
+/*
+ * Fully resolved attributes for one new inode.  The caller applies umask
+ * before constructing this request.  Filesystems must call
+ * inode_creation_prepare() after allocating the child and before publishing
+ * its directory entry.
+ */
+struct inode_creation_request {
+	enum inode_creation_origin origin;
+	enum inode_type type;
+	mode_t mode;
+	uid_t uid;
+	gid_t gid;
+	dev_t rdev;
+	void *special;
+	const struct inode *source;
 };
 
 #define INODE_ROOT		0x00000001U
@@ -83,8 +108,6 @@ enum inode_type {
 #define INODE_XATTR_REPLACE	0x00000002U
 #define INODE_XATTR_NAME_MAX	255U
 #define INODE_XATTR_SIZE_MAX	(64U * 1024U)
-
-struct inode;
 
 struct inode_time {
 	time_t tv_sec;
@@ -112,14 +135,18 @@ struct inode_truncate_result {
 struct inode_ops {
 	int (*lookup)(struct inode *, const struct componentname *, struct inode **);
 	int (*lookup_casefold)(struct inode *, const struct componentname *, struct inode **);
-	int (*create)(struct inode *, const struct componentname *, mode_t, struct inode **);
-	int (*mkdir)(struct inode *, const struct componentname *, mode_t, struct inode **);
-	int (*mknod)(struct inode *, const struct componentname *, enum inode_type, mode_t, dev_t, struct inode **);
+	int (*create)(struct inode *, const struct componentname *,
+	    const struct inode_creation_request *, struct inode **);
+	int (*mkdir)(struct inode *, const struct componentname *,
+	    const struct inode_creation_request *, struct inode **);
+	int (*mknod)(struct inode *, const struct componentname *,
+	    const struct inode_creation_request *, struct inode **);
 	int (*unlink)(struct inode *, const struct componentname *);
 	int (*rmdir)(struct inode *, const struct componentname *);
 	int (*rename)(struct inode *, const struct componentname *, struct inode *, const struct componentname *, unsigned);
 	int (*link)(struct inode *, const struct componentname *, struct inode *);
-	int (*symlink)(struct inode *, const struct componentname *, const char *, struct inode **);
+	int (*symlink)(struct inode *, const struct componentname *, const char *,
+	    const struct inode_creation_request *, struct inode **);
 	ssize_t (*readlink)(struct inode *, char *, size_t);
 	int (*getattr)(struct inode *, struct stat *);
 	int (*setattr)(struct inode *, const struct stat *, unsigned);
@@ -272,24 +299,55 @@ int
 inode_create(
 	struct inode *i,
 	const struct componentname *n,
-	mode_t m,
+	const struct inode_creation_request *request,
 	struct inode **r);
 
 int
 inode_mkdir(
 	struct inode *i,
 	const struct componentname *n,
-	mode_t m,
+	const struct inode_creation_request *request,
 	struct inode **r);
 
 int
 inode_mknod(
 	struct inode *i,
 	const struct componentname *n,
-	enum inode_type type,
-	mode_t m,
-	dev_t dev,
+	const struct inode_creation_request *request,
 	struct inode **r);
+
+/* Authorize creation and resolve parent-derived attributes under the
+ * parent's metadata lock.  The returned request no longer borrows a
+ * credential and may be passed to a backend after the lock is released. */
+int
+inode_creation_request_user(
+	struct inode *parent,
+	const struct ucred *credential,
+	enum inode_type type,
+	mode_t mode,
+	dev_t rdev,
+	void *special,
+	struct inode_creation_request *request);
+
+int
+inode_creation_request_system(
+	enum inode_type type,
+	mode_t mode,
+	uid_t uid,
+	gid_t gid,
+	dev_t rdev,
+	struct inode_creation_request *request);
+
+int
+inode_creation_request_preserve(
+	const struct inode *source,
+	struct inode_creation_request *request);
+
+int
+inode_creation_prepare(
+	struct inode *parent,
+	struct inode *child,
+	const struct inode_creation_request *request);
 
 int
 inode_unlink(
@@ -323,6 +381,7 @@ inode_symlink(
 	struct inode *directory,
 	const struct componentname *name,
 	const char *target,
+	const struct inode_creation_request *request,
 	struct inode **result);
 
 ssize_t

@@ -4,6 +4,7 @@
 #include "kern/net/net-device.h"
 #include "kern/net/route.h"
 #include "kern/atomic.h"
+#include "kern/cred.h"
 #include "kern/uaccess.h"
 #include "internal.h"
 
@@ -403,6 +404,42 @@ is_route_request(unsigned long command)
 	       command == SIOCGRTENTRY;
 }
 
+/*
+ * Keep the unprivileged surface an explicit allow-list.  In particular, a
+ * future driver-private ioctl must not become writable merely because its
+ * command was not known when this common dispatcher was written.
+ */
+static bool
+inet_ioctl_is_query(unsigned long command)
+{
+	switch (command) {
+	case SIOCGIFCONF:
+	case SIOCGIFNAME:
+	case SIOCGIFINDEX:
+	case SIOCGIFFLAGS:
+	case SIOCGIFHWADDR:
+	case SIOCGIFADDR:
+	case SIOCGIFNETMASK:
+	case SIOCGIFBRDADDR:
+	case SIOCGIFMTU:
+	case SIOCGIFSTATS:
+	case SIOCGRTENTRY:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool
+inet_ioctl_caller_is_superuser(void)
+{
+	struct ucred *credential = cred_current_ref();
+	bool permitted = cred_is_superuser(credential);
+
+	cred_release(credential);
+	return permitted;
+}
+
 int
 inet_socket_ioctl(struct socket *socket, unsigned long command,
 		  uintptr_t argument)
@@ -415,6 +452,9 @@ inet_socket_ioctl(struct socket *socket, unsigned long command,
 	int error;
 
 	(void)socket;
+	if (!inet_ioctl_is_query(command) &&
+	    !inet_ioctl_caller_is_superuser())
+		return EPERM;
 	if (is_route_request(command))
 		return route_ioctl(command, argument);
 	if (command == SIOCGIFCONF)

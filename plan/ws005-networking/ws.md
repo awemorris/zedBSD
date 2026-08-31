@@ -1,25 +1,27 @@
 # WS005: networking and WLAN
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 WSID: `ws005`
 
-Status: active; q029 p001 completed the first physical USB-Ethernet path;
-WLAN discussion resumed and the replacement Phase sequence is planned but not
-queued
+Status: active; q029 p001 completed the first physical USB-Ethernet path,
+q040 completed p003's AF_UNIX/network authorization foundation, and q041
+retained p005's host implementation while assigning two native VFS blockers;
+q042 advanced both blockers but could not complete their native/remount gates
 
 Parent: [master plan](../master.md)
 
-Last verified result: `ws005-p001` passes the RTL8156 NCM carrier, static,
-DHCP, route/DNS, ping, and external-fetch path through the common
-`net`/`networkd` design. The final Latitude-native observation fetched
-`www.google.com` successfully.
+Last verified result: `ws005-p003` publishes one authenticated
+`root:network 0660` socket, returns immutable 12-byte AF_UNIX peer snapshots,
+permits admitted non-root `SHOW` while denying mutation, and rejects direct
+non-root mutating network ioctls.  Its focused, analyzer, sanitizer, full
+build, and PC-98 native runtime gates pass.  The earlier RTL8156 carrier,
+DHCP, ping, and external-fetch path remains passing.
 
-Resume point: review and freeze `ws005-p002`, then place only the bounded,
-dependency-ready prerequisite Phases in a separately approved Queue. In
-parallel, `ws004-p026` must record the exact Archer T3U Nano unit identity and
-firmware policy before its native driver is implemented. Planning these
-Phases is not implementation authorization.
+Resume point: complete `ws001-p015` effective-credential object creation and
+`ws001-p016` truthful directory `fsync`, then requeue `ws005-p005` for its
+root/non-root native ownership and remount-durability cell.  It does not wait
+for physical radio identity or the later generic WLAN UAPI.
 
 Shared tests: [WS005 test index](tests/README.md)
 
@@ -29,9 +31,9 @@ Shared tests: [WS005 test index](tests/README.md)
 | --- | --- | --- |
 | [`ws005-p001`](phase001-usb-ncm-physical-datapath/phase.md) | Complete (`q029`) | RTL8156 NCM carrier/static/DHCP/ping and final Latitude external fetch pass |
 | [`ws005-p002`](phase002-wlan-v1-contract/phase.md) | Planned; not queued | Freeze the v1 control, security, scan, association, DHCP, cancellation, and ownership contracts; record every intentional exclusion |
-| [`ws005-p003`](phase003-unix-peer-credentials/phase.md) | Planned; depends on p002 | Add connection-time AF_UNIX peer credentials and make one `networkd` socket a truthful root/authorized-user boundary |
+| [`ws005-p003`](phase003-unix-peer-credentials/phase.md) | Complete (`q040`) | Fixed 12-byte connection-time AF_UNIX identity, checked `root:network 0660` publication, root/non-root operation policy, and kernel ioctl privilege boundary pass focused and native PC-98 gates |
 | [`ws005-p004`](phase004-wifi-ioctl-command/phase.md) | Planned; depends on p002, p003, and `ws004-p027` | Add the primitive, L2-only `/sbin/wifi` ioctl command with bounded machine and human output |
-| [`ws005-p005`](phase005-wifi-credential-store/phase.md) | Planned; depends on p002 | Add root and per-user `wifi.conf` storage plus `net wifi set-key` without involving `networkd` |
+| [`ws005-p005`](phase005-wifi-credential-store/phase.md) | Uncleared (`q042`); host implementation passes; depends on p002 plus `ws001-p015`/p016 | q042 did not rerun invalid native acceptance; resume after both VFS Phases complete, then run root/non-root guest and remount durability |
 | [`ws005-p006`](phase006-networkd-wifi-protocol/phase.md) | Planned; depends on p003-p005 | Replace whitespace `ZNV1` limitations with bounded length-framed WLAN requests, peer authorization, and a secret-FD child path |
 | [`ws005-p007`](phase007-net-wifi-orchestration/phase.md) | Planned; depends on p005-p006 and WS004 WLAN fixture | Implement the requested `net wifi` search/list/up/down/connect flow through `networkd` to `ifconfig`, `wifi`, and `dhcpc` |
 | [`ws005-p008`](phase008-archer-physical-acceptance/phase.md) | Planned; depends on p007 and `ws004-p030` | Prove one complete physical scan/WPA2/DHCP/transfer/down path, then run the final frozen-artifact repeatability campaign |

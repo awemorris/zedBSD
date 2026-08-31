@@ -19,7 +19,6 @@
 #define USB_MASS_STORAGE_BULK_ONLY 0x50U
 #define USB_MASS_STORAGE_RESET 0xffU
 #define USB_MASS_STORAGE_GET_MAX_LUN 0xfeU
-#define USB_ENDPOINT_HALT 0U
 
 #define BOT_CBW_SIGNATURE 0x43425355U
 #define BOT_CSW_SIGNATURE 0x53425355U
@@ -30,6 +29,7 @@
 #define SCSI_REQUEST_SENSE 0x03U
 #define SCSI_INQUIRY 0x12U
 #define SCSI_READ_CAPACITY_10 0x25U
+#define SCSI_READ_10 0x28U
 #define SCSI_SYNCHRONIZE_CACHE_10 0x35U
 
 struct bot_cbw {
@@ -48,6 +48,11 @@ struct bot_csw {
 	uint8_t residue[4];
 	uint8_t status;
 } __attribute__((packed));
+
+struct storage_read_checkpoint {
+	uint32_t lba;
+	uint16_t blocks;
+};
 
 struct usb_storage {
 	struct drv_usb_interface *interface;
@@ -69,6 +74,9 @@ struct usb_storage {
 	uint8_t dpofua;
 	int flush_error;
 	enum drv_usb_scsi_flush_policy flush_policy;
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+	unsigned checkpoint_read_sequence;
+#endif
 };
 
 static uint32_t get_le32(const uint8_t value[4])
@@ -88,6 +96,11 @@ static uint32_t get_be32(const uint8_t value[4])
 {
 	return ((uint32_t)value[0] << 24) | ((uint32_t)value[1] << 16) |
 	    ((uint32_t)value[2] << 8) | value[3];
+}
+
+static uint16_t get_be16(const uint8_t value[2])
+{
+	return (uint16_t)((uint16_t)value[0] << 8) | value[1];
 }
 
 static void put_be32(uint8_t value[4], uint32_t number)
@@ -111,12 +124,19 @@ static void put_be16(uint8_t value[2], uint16_t number)
  * objects.
  */
 static int
-storage_urb_transfer(struct drv_usb_urb *urb, void *buffer, size_t length,
-	unsigned timeout, size_t *actual)
+storage_urb_transfer(struct usb_storage *storage, struct drv_usb_urb *urb,
+	void *buffer, size_t length, unsigned timeout, size_t *actual,
+	const struct storage_read_checkpoint *checkpoint)
 {
 	unsigned flags = length <= DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE ?
 	    DRV_USB_URB_RECLAIM_SAFE : 0;
 	int error;
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+	unsigned checkpoint_sequence = 0;
+#else
+	(void)storage;
+	(void)checkpoint;
+#endif
 
 	if (actual != NULL)
 		*actual = 0;
@@ -124,8 +144,37 @@ storage_urb_transfer(struct drv_usb_urb *urb, void *buffer, size_t length,
 	    NULL);
 	if (error == 0)
 		error = drv_usb_urb_submit(urb);
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+	/* This marker is intentionally emitted only after the HCD accepted the
+	 * READ(10) data URB and while the USB core still publishes it as pending.
+	 * HW-T25 waits for it before injecting the concurrent HID completion. */
+	if (error == 0 && checkpoint != NULL &&
+	    drv_usb_urb_status(urb) == DRV_USB_URB_PENDING) {
+		checkpoint_sequence = ++storage->checkpoint_read_sequence;
+		hal_printf("usb-storage-checkpoint: accepted disk=%s generation=%u "
+		    "usb%u device=%u lba=%u blocks=%u bytes=%u status=pending\n",
+		    storage->disk != NULL ? storage->disk->d_name : "unpublished",
+		    checkpoint_sequence,
+		    drv_usb_bus_number(drv_usb_device_bus(storage->device)),
+		    drv_usb_device_address(storage->device), checkpoint->lba,
+		    (unsigned)checkpoint->blocks, (unsigned)length);
+	}
+#endif
 	if (error == 0)
 		error = drv_usb_urb_wait_reusable(urb);
+#ifdef ZEDBSD_TEST_CHECKPOINTS
+	if (checkpoint_sequence != 0)
+		hal_printf("usb-storage-checkpoint: completed disk=%s generation=%u "
+		    "usb%u device=%u lba=%u blocks=%u bytes=%u status=%u "
+		    "actual=%u error=%d\n",
+		    storage->disk != NULL ? storage->disk->d_name : "unpublished",
+		    checkpoint_sequence,
+		    drv_usb_bus_number(drv_usb_device_bus(storage->device)),
+		    drv_usb_device_address(storage->device), checkpoint->lba,
+		    (unsigned)checkpoint->blocks, (unsigned)length,
+		    (unsigned)drv_usb_urb_status(urb),
+		    (unsigned)drv_usb_urb_actual_length(urb), error);
+#endif
 	if (actual != NULL)
 		*actual = drv_usb_urb_actual_length(urb);
 	return error;
@@ -133,7 +182,8 @@ storage_urb_transfer(struct drv_usb_urb *urb, void *buffer, size_t length,
 
 static int
 storage_bulk(struct usb_storage *storage, struct drv_usb_endpoint *endpoint,
-	void *buffer, size_t length, unsigned timeout, size_t *actual)
+	void *buffer, size_t length, unsigned timeout, size_t *actual,
+	const struct storage_read_checkpoint *checkpoint)
 {
 	struct drv_usb_urb *urb;
 
@@ -143,7 +193,8 @@ storage_bulk(struct usb_storage *storage, struct drv_usb_endpoint *endpoint,
 		urb = storage->bulk_out_urb;
 	else
 		return EINVAL;
-	return storage_urb_transfer(urb, buffer, length, timeout, actual);
+	return storage_urb_transfer(storage, urb, buffer, length, timeout, actual,
+	    checkpoint);
 }
 
 static int
@@ -220,16 +271,6 @@ storage_urbs_free(struct usb_storage *storage)
 	storage->control_urb = NULL;
 }
 
-static int clear_halt(struct usb_storage *storage,
-	struct drv_usb_endpoint *endpoint)
-{
-	size_t actual = 0;
-	return storage_control(storage,
-	    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_ENDPOINT,
-	    1U, USB_ENDPOINT_HALT, drv_usb_endpoint_address(endpoint), NULL, 0,
-	    1000U, &actual);
-}
-
 static int bot_reset(struct usb_storage *storage)
 {
 	size_t actual = 0;
@@ -240,20 +281,20 @@ static int bot_reset(struct usb_storage *storage)
 	    NULL, 0, 1000U, &actual);
 	if (error != 0)
 		return error;
-	(void)drv_usb_endpoint_set_hcd_data(storage->bulk_in, 0, 0);
-	(void)drv_usb_endpoint_set_hcd_data(storage->bulk_out, 0, 0);
-	error = clear_halt(storage, storage->bulk_in);
+	error = drv_usb_endpoint_clear_halt(storage->bulk_in);
 	if (error == 0)
-		error = clear_halt(storage, storage->bulk_out);
+		error = drv_usb_endpoint_clear_halt(storage->bulk_out);
 	return error;
 }
 
 static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 	size_t cdb_length, void *buffer, size_t length, int input,
-	size_t *transferred, int *command_failed)
+	size_t *transferred, int *command_failed, int report_command_failed)
 {
 	struct bot_cbw cbw;
 	struct bot_csw csw;
+	struct storage_read_checkpoint read_checkpoint;
+	const struct storage_read_checkpoint *checkpoint = NULL;
 	enum drv_usb_bot_csw_result csw_result;
 	uint32_t residue, tag;
 	size_t actual, data_actual = 0, processed;
@@ -278,10 +319,16 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 	cbw.lun = storage->lun;
 	cbw.command_length = (uint8_t)cdb_length;
 	memcpy(cbw.command, cdb, cdb_length);
+	if (input != 0 && ((const uint8_t *)cdb)[0] == SCSI_READ_10 &&
+	    cdb_length >= 10U) {
+		read_checkpoint.lba = get_be32((const uint8_t *)cdb + 2);
+		read_checkpoint.blocks = get_be16((const uint8_t *)cdb + 7);
+		checkpoint = &read_checkpoint;
+	}
 
 	actual = 0;
 	error = storage_bulk(storage, storage->bulk_out, &cbw,
-	    sizeof(cbw), BOT_TIMEOUT_MS, &actual);
+	    sizeof(cbw), BOT_TIMEOUT_MS, &actual, NULL);
 	if (error != 0 || actual != sizeof(cbw)) {
 		hal_printf("usb-storage: BOT CBW error=%d actual=%u expected=%u\n",
 		    error, (unsigned)actual, (unsigned)sizeof(cbw));
@@ -294,15 +341,14 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 
 		actual = 0;
 		error = storage_bulk(storage, endpoint, buffer, length,
-		    BOT_TIMEOUT_MS, &actual);
+		    BOT_TIMEOUT_MS, &actual, checkpoint);
 		data_actual = actual;
 		if (error == EPIPE) {
-			int halt_error = clear_halt(storage, endpoint);
+			int halt_error = drv_usb_endpoint_clear_halt(endpoint);
 
 			if (halt_error != 0)
 				error = halt_error;
 			else {
-				(void)drv_usb_endpoint_set_hcd_data(endpoint, 0, 0);
 				data_stalled = 1;
 				error = 0;
 			}
@@ -317,7 +363,7 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 	}
 	actual = 0;
 	error = storage_bulk(storage, storage->bulk_in, &csw,
-	    sizeof(csw), BOT_TIMEOUT_MS, &actual);
+	    sizeof(csw), BOT_TIMEOUT_MS, &actual, NULL);
 	if (error != 0 || actual != sizeof(csw) ||
 	    get_le32(csw.signature) != BOT_CSW_SIGNATURE ||
 	    get_le32(csw.tag) != tag) {
@@ -353,8 +399,9 @@ static int bot_command_locked(struct usb_storage *storage, const void *cdb,
 		return 0;
 	}
 	if (drv_usb_bot_csw_requests_sense(csw_result)) {
-		hal_printf("usb-storage: BOT check-condition residue=%u\n",
-		    residue);
+		if (report_command_failed != 0)
+			hal_printf("usb-storage: BOT check-condition residue=%u\n",
+			    residue);
 		if (command_failed != NULL)
 			*command_failed = 1;
 		return EIO;
@@ -378,7 +425,7 @@ request_sense_locked(struct usb_storage *storage,
 	if (decoded != NULL)
 		memset(decoded, 0, sizeof(*decoded));
 	error = bot_command_locked(storage, command, sizeof(command), sense,
-	    sizeof(sense), 1, &actual, NULL);
+	    sizeof(sense), 1, &actual, NULL, 1);
 	if (error == 0 && decoded != NULL &&
 	    !drv_usb_scsi_parse_sense(sense, actual, decoded))
 		return EIO;
@@ -388,7 +435,8 @@ request_sense_locked(struct usb_storage *storage,
 static int
 bot_command_sense_locked(struct usb_storage *storage, const void *cdb,
 	size_t cdb_length, void *buffer, size_t length, int input,
-	struct drv_usb_scsi_sense *sense, size_t *transferred)
+	struct drv_usb_scsi_sense *sense, size_t *transferred,
+	int report_command_failed)
 {
 	int command_failed = 0;
 	int error;
@@ -396,9 +444,24 @@ bot_command_sense_locked(struct usb_storage *storage, const void *cdb,
 	if (sense != NULL)
 		memset(sense, 0, sizeof(*sense));
 	error = bot_command_locked(storage, cdb, cdb_length, buffer, length,
-	    input, transferred, &command_failed);
+	    input, transferred, &command_failed, report_command_failed);
 	if (command_failed != 0 && sense != NULL)
 		(void)request_sense_locked(storage, sense);
+	return error;
+}
+
+static int
+bot_command_sense_report(struct usb_storage *storage, const void *cdb,
+	size_t cdb_length, void *buffer, size_t length, int input,
+	struct drv_usb_scsi_sense *sense, size_t *transferred,
+	int report_command_failed)
+{
+	int error;
+
+	mutex_lock(&storage->lock);
+	error = bot_command_sense_locked(storage, cdb, cdb_length, buffer,
+	    length, input, sense, transferred, report_command_failed);
+	mutex_unlock(&storage->lock);
 	return error;
 }
 
@@ -407,13 +470,8 @@ bot_command_sense(struct usb_storage *storage, const void *cdb,
 	size_t cdb_length, void *buffer, size_t length, int input,
 	struct drv_usb_scsi_sense *sense, size_t *transferred)
 {
-	int error;
-
-	mutex_lock(&storage->lock);
-	error = bot_command_sense_locked(storage, cdb, cdb_length, buffer,
-	    length, input, sense, transferred);
-	mutex_unlock(&storage->lock);
-	return error;
+	return bot_command_sense_report(storage, cdb, cdb_length, buffer,
+	    length, input, sense, transferred, 1);
 }
 
 static int bot_command(struct usb_storage *storage, const void *cdb,
@@ -498,7 +556,7 @@ scsi_configure_flush_policy(struct usb_storage *storage)
 		    error, flush_policy_name(storage->flush_policy));
 }
 
-static int scsi_probe(struct usb_storage *storage)
+static int scsi_probe(struct usb_storage *storage, int *medium_absent)
 {
 	uint8_t ready_command[6] = { SCSI_TEST_UNIT_READY };
 	uint8_t inquiry_command[6] = { SCSI_INQUIRY, 0, 0, 0, 36, 0 };
@@ -506,8 +564,12 @@ static int scsi_probe(struct usb_storage *storage)
 	uint8_t inquiry[36], capacity[8];
 	uint32_t last_block, block_size;
 	size_t actual;
-	int error;
+	int error, removable;
 	unsigned attempt;
+	struct drv_usb_scsi_sense sense;
+
+	if (medium_absent != NULL)
+		*medium_absent = 0;
 
 	memset(inquiry, 0, sizeof(inquiry));
 	error = bot_command(storage, inquiry_command, sizeof(inquiry_command),
@@ -516,16 +578,29 @@ static int scsi_probe(struct usb_storage *storage)
 		return error;
 	if (actual < 1U || (inquiry[0] & 0x1fU) != 0U)
 		return ENODEV;
+	removable = actual >= 2U && (inquiry[1] & 0x80U) != 0;
 	for (attempt = 0; attempt < 3U; attempt++) {
-		struct drv_usb_scsi_sense sense;
-
-		error = bot_command_sense(storage, ready_command,
-		    sizeof(ready_command), NULL, 0, 0, &sense, NULL);
+		error = bot_command_sense_report(storage, ready_command,
+		    sizeof(ready_command), NULL, 0, 0, &sense, NULL, 0);
 		if (error == 0)
 			break;
+		if (removable != 0 &&
+		    drv_usb_scsi_sense_is_medium_absent(&sense)) {
+			if (medium_absent != NULL)
+				*medium_absent = 1;
+			return error;
+		}
 	}
-	if (error != 0)
+	if (error != 0) {
+		if (sense.valid)
+			hal_printf("usb-storage: LUN %u not ready error=%d "
+			    "sense=%02x/%02x/%02x\n", storage->lun, error,
+			    sense.key, sense.asc, sense.ascq);
+		else
+			hal_printf("usb-storage: LUN %u not ready error=%d "
+			    "sense=unavailable\n", storage->lun, error);
 		return error;
+	}
 	memset(capacity, 0, sizeof(capacity));
 	error = bot_command_sense(storage, capacity_command,
 	    sizeof(capacity_command), capacity, sizeof(capacity), 1, NULL,
@@ -564,7 +639,7 @@ static int storage_submit(struct disk *disk, struct bio *bio)
 		    storage->flush_policy)) {
 			opcode = command[0] = SCSI_SYNCHRONIZE_CACHE_10;
 			error = bot_command_sense_locked(storage, command,
-			    sizeof(command), NULL, 0, 0, &sense, NULL);
+			    sizeof(command), NULL, 0, 0, &sense, NULL, 1);
 			drv_usb_scsi_record_flush_result(storage->flush_policy,
 			    error, &storage->flush_error);
 		} else if (drv_usb_scsi_flush_policy_allows_write(
@@ -596,7 +671,7 @@ static int storage_submit(struct disk *disk, struct bio *bio)
 		error = bot_command_sense_locked(storage, command,
 		    sizeof(command),
 		    bio->b_data,
-		    expected, bio->b_op == BIO_READ, &sense, &actual);
+		    expected, bio->b_op == BIO_READ, &sense, &actual, 1);
 		if (error == 0 && actual != expected)
 			error = EIO;
 	}
@@ -660,7 +735,7 @@ static int storage_attach(struct drv_usb_interface *interface,
 	struct disk *disk;
 	uint8_t maximum_lun = 0;
 	size_t actual = 0;
-	int error;
+	int error, medium_absent = 0;
 	(void)id;
 
 	storage = hal_malloc(sizeof(*storage));
@@ -690,8 +765,14 @@ static int storage_attach(struct drv_usb_interface *interface,
 	    &actual) == 0 && actual == 1 && maximum_lun != 0)
 		hal_printf("usb-storage: only LUN 0 of %u is supported\n",
 		    (unsigned)maximum_lun + 1U);
-	error = scsi_probe(storage);
+	error = scsi_probe(storage, &medium_absent);
 	if (error != 0) {
+		if (medium_absent != 0) {
+			(void)drv_usb_interface_set_driver_data(interface, storage);
+			hal_printf("usb-storage: LUN %u has no medium; "
+			    "reader attached without a disk\n", storage->lun);
+			return 0;
+		}
 		storage_urbs_free(storage);
 		hal_free(storage);
 		return error;
@@ -745,12 +826,14 @@ static int storage_detach(struct drv_usb_interface *interface, unsigned flags)
 	(void)flags;
 	if (storage == NULL)
 		return 0;
-	error = disk_gone_if_idle(storage->disk);
-	if (error != 0)
-		return error;
-	error = disk_destroy(storage->disk);
-	if (error != 0)
-		return error;
+	if (storage->disk != NULL) {
+		error = disk_gone_if_idle(storage->disk);
+		if (error != 0)
+			return error;
+		error = disk_destroy(storage->disk);
+		if (error != 0)
+			return error;
+	}
 	storage_urbs_free(storage);
 	hal_free(storage);
 	return 0;

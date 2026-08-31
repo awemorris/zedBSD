@@ -156,7 +156,9 @@ unsigned socket_count_current(void);
 
 int packet_socket_init(void);
 int unix_socket_init(void);
-int unix_socket_pair_create(int type, int protocol, struct socket **left_result,
+int unix_socket_pair_create(int type, int protocol,
+			    const struct zedbsd_peercred *creator,
+			    struct socket **left_result,
 			    struct socket **right_result);
 ssize_t unix_socket_send_message(struct socket *socket, const void *buffer,
 				 size_t length, int flags,
@@ -187,8 +189,11 @@ void unix_socket_receive_abort(struct unix_recv_transaction *transaction);
 int unix_socket_bind_path(struct socket *socket, struct cwdinfo *context,
 			  const struct ucred *cred, mode_t umask,
 			  const struct sockaddr *address, socklen_t length);
+int unix_socket_listen(struct socket *socket, int backlog,
+		       const struct zedbsd_peercred *listener);
 int unix_socket_connect_path(struct socket *socket, struct cwdinfo *context,
 			     const struct ucred *cred,
+			     const struct zedbsd_peercred *connector,
 			     const struct sockaddr *address, socklen_t length,
 			     unsigned io_flags);
 int unix_socket_bound_path_matches(struct socket *socket,

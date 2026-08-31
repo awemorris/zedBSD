@@ -868,15 +868,40 @@ enum hal_cons_mode {
 #define HAL_KEY_EVENT_PRESS		0x00000001U
 #define HAL_KEY_EVENT_RELEASE		0x00000002U
 #define HAL_KEY_EVENT_REPEAT		0x00000004U
+#define HAL_KEY_EVENT_RESYNC		0x00000008U
+#define HAL_KEY_EVENT_SNAPSHOT		0x00000010U
+#define HAL_KEY_EVENT_RESYNC_END	0x00000020U
+#define HAL_KEY_EVENT_LOCK_CAPS		0x00000040U
+#define HAL_KEY_EVENT_LOCK_KANA		0x00000080U
+
+#define HAL_CONS_INPUT_TEXT		0x00000001U
+#define HAL_CONS_INPUT_RELEASE		0x00000002U
+#define HAL_CONS_INPUT_REPEAT		0x00000004U
 
 /*
  * A keysymbol is stable lowercase ASCII, at most 15 bytes, and NUL terminated.
- * Exactly one flag describes a transition. Character-only consoles may emit a
- * one-byte symbol with PRESS and need not synthesize release events.
+ * Exactly one of PRESS, RELEASE, or REPEAT describes a normal transition.
+ * Character-only consoles may emit a one-byte symbol with PRESS and need not
+ * synthesize release events.  RESYNC begins an internal authoritative-state
+ * stream, PRESS|SNAPSHOT describes held state without input, and RESYNC_END
+ * closes it.  LOCK_* is valid only on RESYNC.
  */
 struct hal_key_event {
 	char symbol[HAL_KEY_SYMBOL_SIZE];
 	uint32_t flags;
+};
+
+/*
+ * Describe what the console input adapter can actually publish.  TEXT means
+ * that one-byte character symbols are possible.  The optional symbol table
+ * lists named keys in addition to those characters.  Generic console code
+ * uses this declaration to build a truthful evdev capability bitmap and to
+ * distinguish physical make/break sources from momentary character streams.
+ */
+struct hal_cons_input_info {
+	uint32_t flags;
+	const char *const *symbols;
+	size_t symbol_count;
 };
 
 struct hal_cons_state {
@@ -992,6 +1017,10 @@ hal_cons_read_event(
 int
 hal_cons_poll_event(
 	struct hal_key_event *event);
+
+void
+hal_cons_get_input_info(
+	struct hal_cons_input_info *info);
 
 int
 hal_cons_key_state(

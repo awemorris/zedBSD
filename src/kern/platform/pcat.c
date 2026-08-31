@@ -26,6 +26,9 @@
 #if CONFIG_DRIVER_USB_CDC_NCM
 #include <drivers/usb-cdc-ncm.h>
 #endif
+#if CONFIG_KERNEL_USB_HID_CHECKPOINT
+int usb_hid_checkpoint_driver_register(void);
+#endif
 #include <drivers/pci.h>
 #include <drivers/usb.h>
 #if CONFIG_DRIVER_NE2000
@@ -65,6 +68,10 @@ kern_platform_init(const struct boot_handoff *handoff,
 #if CONFIG_DRIVER_USB_CDC_NCM
 	if (drv_usb_cdc_ncm_driver_register() != 0)
 		hal_printf("usb: CDC NCM driver registration failed\n");
+#endif
+#if CONFIG_KERNEL_USB_HID_CHECKPOINT
+	if (usb_hid_checkpoint_driver_register() != 0)
+		hal_printf("usb: HID checkpoint driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_PCI_UHCI
 	if (drv_pci_uhci_driver_register() != 0)

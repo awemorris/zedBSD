@@ -22,3 +22,41 @@ Parent: [WS005](../ws.md)
 
 Existing executable Phase 20 and DHCP tests remain under repository `/tests`
 and are cross-owned as regression inputs rather than duplicated.
+
+NET-T21 has one host-side parser/store gate:
+
+```sh
+plan/ws005-networking/tests/run-wifi-conf-store-test.sh
+```
+
+It exercises the strict v1 model, canonical serialization, checked
+same-directory store operations, injected publication failures, lock timing,
+concurrency, and redaction in ordinary, ASan+UBSan, and compiler-analyzer
+builds.  Native root/non-root ownership and directory-durability acceptance
+remain separate guest gates because they depend on the kernel VFS semantics
+recorded by `ws001-p015` and `ws001-p016`.
+
+NET-T22 has three reproducible executable entry points:
+
+```sh
+plan/ws005-networking/tests/run-networkd-auth-test.sh
+plan/ws005-networking/tests/run-peercred-native-qemu.sh
+plan/ws005-networking/tests/run-inet-ioctl-authorization-test.sh
+```
+
+`run-networkd-auth-test.sh` builds and executes the production-source
+`networkd` publication and authorization fixture in ordinary, ASan+UBSan, and
+compiler-analyzer variants.  Its temporary build directory defaults to the
+project-local `plan/ws005-networking/temp` directory and honors `TMPDIR` when
+the caller supplies one.
+
+`run-peercred-native-qemu.sh` builds the test-only PC-98 image and proves the
+native AF_UNIX peer snapshot together with `networkd` readiness, root/all and
+non-root/SHOW-only decisions, and the final `init: system running` gate.
+
+`run-inet-ioctl-authorization-test.sh` exercises NET-T22's direct-kernel
+authorization boundary.  It proves that every current route and interface
+mutation is rejected before argument access for a non-root caller, that root
+reaches the ordinary validation path, that the explicit query set remains
+available, and that future unknown/private commands default to the privileged
+side of the boundary.

@@ -1,6 +1,6 @@
 # WS003: real-hardware bring-up
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 WSID: `ws003`
 
@@ -10,7 +10,12 @@ through `p015`; q023 completed `ws003-p016`; `ws003-p017` is superseded by
 the WS013 required-`zedbsd.cfg` path; `ws003-p018` is the dependency-gated
 final Latitude NVMe install/boot milestone; `ws003-p020` completed in q033 on
 the Panasonic CF-SV7, and `ws003-p021` completed its raw-image GPT/root
-continuation in q034 with a successful physical CF-SV7 boot
+continuation in q034 with a successful physical CF-SV7 boot. q043
+`ws003-p024` now removes only Stage 1's unused SENSE transaction before its
+invariant CHS 0/0/2 read while retaining the geometry-dependent PBR/BOOTZBSD
+SENSE paths. Its source/binary/QEMU milestone passes and one exact
+PC-9821V13 artifact boot remains; p022/p023 are retained as historical
+automatic evidence rather than competing physical requests
 
 Parent: [master plan](../master.md)
 
@@ -22,8 +27,12 @@ the intended UUID to `/dev/sda1`, mounted the
 read-write data loop and root overlay, started init, and reached a root shell,
 proving physical tier U3.
 
-Resume point: The CF-SV7 USB-root issue is closed. Finish the automatic
-WS013/WS019 prerequisites before `ws003-p018`. Latitude follow-up still
+Resume point: boot the single p024 diagnostic artifact named in its Phase once
+on the PC-9821V13 and report its screen/audio boundary. Do not run the older
+p022/p023 physical artifacts first. The fixed-read automatic milestone and
+independent review already pass; the production Make-owned Noct gate resumes
+separately through `ws008-p010`. The CF-SV7 USB-root issue is closed.
+Finish the automatic WS013/WS019 prerequisites before `ws003-p018`. Latitude follow-up still
 includes BR-T31
 sustained root I/O and, after U4 is otherwise frozen, BR-T30 five-boot
 repeatability. Do not request an additional intermediate hardware boot now.
@@ -56,6 +65,9 @@ Shared tests: [WS003 test index](tests/README.md)
 | `ws003-p019` | [Latitude NVMe native installation and boot](phase019-latitude-nvme-native-install-boot/phase.md) | Future; not designed | Accept the later native-root installer only after separate WS019 design and QEMU proof |
 | `ws003-p020` | [Panasonic CF-SV7 early ACPI/interrupt bring-up](phase020-cf-sv7-acpi-irq-bringup/phase.md) | Completed (`q033`, 2026-08-30) | The single physical boot passed IRQ/XMM/HAL and continued through xHCI, USB storage, and VFS; early-init automated gates remain passing |
 | `ws003-p021` | [Portable GPT image extent on larger USB media](phase021-portable-gpt-image-extent/phase.md) | Completed (`q034`, 2026-08-30) | Generic bounded-GPT host/QEMU gates pass and the frozen image boots successfully on the CF-SV7 through USB-root overlay/init/login |
+| `ws003-p022` | [PC-9821V13 IPL stack and disk-read contract](phase022-pc9821-v13-ipl-read-contract/phase.md) | Uncleared historical evidence (`q037`); physical handoff superseded by p024 | Native layout, private stack, and then-current SENSE/read invariants passed QEMU; do not run its older artifact |
+| `ws003-p023` | [PC-9821V13 IPL entry localization](phase023-pc9821-v13-ipl-entry-localization/phase.md) | Uncleared historical evidence (`q039`); physical handoff superseded by p024 | Exact/corrupted `IPL1` and normal/diagnostic QEMU login pass; p024 consumes its localization result and owns the current artifact |
+| `ws003-p024` | [PC-9821V13 Stage-1 fixed-read compatibility](phase024-pc9821-v13-stage1-fixed-read-compatibility/phase.md) | Uncleared (`q043`); automatic milestone passes | Stage 1 contains only its fixed AH=`06h` CHS 0/0/2 read, PBR/BOOTZBSD retain SENSE, normal and diagnostic QEMU reach login, and exact artifact `7d4e7d67...` awaits one V13 boot; Make-owned Noct gates resume through p010 |
 
 `ws003-p003` was the sole authorized item in q012. Its physical result closes
 the PCI/BAR/capability boundary and extracts the first device-enumeration stop
@@ -98,6 +110,8 @@ the affected regressions without reopening the p011--p015 public contract.
 - Boot zedBSD from USB on the Panasonic CF-SV7. Its post-RSDP early
   ACPI/interrupt stop and the fixed-size GPT image's larger-media root
   continuity are both cleared by p020/p021.
+- Restore the native PC-98 disk image on the NEC PC-9821V13 without replacing
+  its IPL/partition format with a PC/AT-compatible MBR.
 - Reach a stable init/login shell while continuing to use the intended USB
   mass-storage root on each declared laptop target.
 - Establish usable diagnostics and at least one project physical network path.
@@ -123,7 +137,8 @@ boots for every internal change.
 Targets:
 
 - Dell Latitude 5320, Intel 11th-generation platform;
-- Panasonic CF-SV7, exact DMI/CPU/device inventory pending.
+- Panasonic CF-SV7, exact DMI/CPU/device inventory pending;
+- NEC PC-9821V13, native PC-98 fixed-disk BIOS path.
 
 ## 1. Objective
 

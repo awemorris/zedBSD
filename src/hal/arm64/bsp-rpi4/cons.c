@@ -107,6 +107,7 @@ void rpi4_cons_irq_init(void)
 	rpi4_uart_enable_rx_irq();hal_irq_unmask((int)info->uart_irq);
 }
 int hal_cons_poll_event(struct hal_key_event*event){bool enabled=hal_cons_wait_queue_lock(&input_waiters);int available=input_head!=input_tail;if(available&&event!=NULL)*event=input_events[input_tail];hal_cons_wait_queue_unlock(&input_waiters,enabled);return available;}
+void hal_cons_get_input_info(struct hal_cons_input_info*info){if(info){info->flags=HAL_CONS_INPUT_TEXT;info->symbols=NULL;info->symbol_count=0;}}
 int hal_cons_read_event(struct hal_key_event*event){struct hal_cons_wait_entry waiter={hal_task_get_current(),NULL,0};for(;;){bool enabled=hal_cons_wait_queue_lock(&input_waiters);if(input_head!=input_tail){if(event!=NULL)*event=input_events[input_tail];input_tail=(input_tail+1U)%INPUT_EVENT_COUNT;hal_cons_wait_queue_unlock(&input_waiters,enabled);return 1;}hal_cons_wait_queue_add(&input_waiters,&waiter);hal_cons_wait_queue_unlock(&input_waiters,enabled);kernel_wait_task();}}
 int hal_cons_key_state(int key){(void)key;return 0;}
 void hal_cons_drain_input(void){bool enabled=hal_cons_wait_queue_lock(&input_waiters);input_tail=input_head;hal_cons_wait_queue_unlock(&input_waiters,enabled);}

@@ -13,6 +13,7 @@
 
 #include "userland/base/net/protocol.h"
 #include "userland/base/net/netconf.h"
+#include "userland/base/net/wifi-store.h"
 #include "userland/base/libedit/readline/history.h"
 #include "userland/base/libedit/readline/readline.h"
 
@@ -23,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -58,6 +60,7 @@ static int interface_name_valid(const char *name);
 static int show_configuration(const struct netconf *configuration);
 static int dispatch(int argc, char **argv);
 static int command_help(void);
+static int wifi_set_key_command(int argc, char **argv);
 static int boot(void);
 static int apply_candidate(const struct netconf *configuration);
 static int candidate_supported(const struct netconf *configuration, char *error, size_t capacity);
@@ -641,6 +644,15 @@ dispatch(
 	}
 
 	/* Handles the selected command-line operation. */
+	if (argc >= 3 && strcmp(argv[1], "wifi") == 0 &&
+	    strcmp(argv[2], "set-key") == 0) {
+		function_result = wifi_set_key_command(argc, argv);
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+
+	/* Handles the selected command-line operation. */
 	if (argc >= 2 && strcmp(argv[1], "show") == 0 && argc <= 3) {
 		/* Obtains the backend result. */
 		function_result = backend("SHOW", argc == 3 ? argv[2] : NULL, 1);
@@ -767,6 +779,8 @@ command_help(
 	     "                              configure a static IPv4 address\n"
 	     "  net defaultroute gateway    set the default IPv4 route\n"
 	     "  net dns address...          replace resolver name servers\n"
+	     "  net wifi set-key SSID PASSPHRASE [auto]\n"
+	     "                              save a local WPA2 profile\n"
 	     "  net boot                    apply boot network configuration");
 
 	/* Computes the function result. */
@@ -774,6 +788,55 @@ command_help(
 
 	/* Returns the computed result. */
 	return function_result;
+}
+
+/* Supports the local Wi-Fi credential update operation. */
+static int
+wifi_set_key_command(
+	int argc,
+	char **argv)
+{
+	int function_result;
+	char error[WIFI_CONF_DIAGNOSTIC_MAX] = "";
+	size_t passphrase_length;
+	int automatic;
+	int result;
+
+	/* A passphrase does not exist yet when the command is incomplete. */
+	if (argc < 5) {
+		/* Obtains the usage result. */
+		function_result = usage();
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+	passphrase_length = strlen(argv[4]);
+
+	/* Clear a supplied secret even when the remaining syntax is invalid. */
+	if ((argc != 5 && argc != 6) ||
+	    (argc == 6 && strcmp(argv[5], "auto") != 0)) {
+		explicit_bzero(argv[4], passphrase_length);
+
+		/* Obtains the usage result. */
+		function_result = usage();
+
+		/* Returns the computed result. */
+		return function_result;
+	}
+	automatic = argc == 6;
+	result = wifi_store_set_key_for_effective_user(argv[3], argv[4],
+	    automatic, error, sizeof(error));
+	explicit_bzero(argv[4], passphrase_length);
+
+	/* Reports a credential store failure without retaining diagnostics. */
+	if (result != 0) {
+		fprintf(stderr, "net: Wi-Fi credential update failed: %s\n",
+		    error[0] != '\0' ? error : strerror(errno));
+	}
+	wifi_conf_explicit_clear(error, sizeof(error));
+
+	/* Returns the computed result. */
+	return result == 0 ? 0 : 1;
 }
 
 /* Supports the boot operation. */
@@ -1074,6 +1137,7 @@ usage(
 		"       net static interface ipv4 address netmask mask\n"
 		"       net defaultroute gateway\n"
 		"       net dns address...\n"
+		"       net wifi set-key SSID PASSPHRASE [auto]\n"
 		"       net boot\n");
 
 	/* Reports operation failure. */

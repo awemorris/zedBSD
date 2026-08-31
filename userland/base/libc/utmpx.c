@@ -23,7 +23,16 @@
 static pthread_mutex_t utmp_lock = PTHREAD_MUTEX_INITIALIZER;
 static int utmp_fd = -1;
 static off_t utmp_offset;
+#if defined(ZEDBSD_DYNAMIC_LIBC)
 static _Thread_local struct utmpx utmp_result;
+#else
+/*
+ * The utmpx interfaces return implementation-owned storage and this file
+ * serializes access with utmp_lock.  Static executables intentionally use the
+ * shared object because their linker contract does not include PT_TLS.
+ */
+static struct utmpx utmp_result;
+#endif
 
 static int utmp_open(int writing);
 static int utmp_record_read(off_t offset, struct utmpx *entry);

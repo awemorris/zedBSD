@@ -15,9 +15,11 @@
 #include <string.h>
 
 #define USB_REQ_GET_DESCRIPTOR 6U
+#define USB_REQ_CLEAR_FEATURE 1U
 #define USB_REQ_SET_ADDRESS 5U
 #define USB_REQ_SET_CONFIGURATION 9U
 #define USB_REQ_SET_INTERFACE 11U
+#define USB_FEATURE_ENDPOINT_HALT 0U
 #define USB_ADDRESS_RECOVERY_TICKS 2U
 #define USB_RESET_RECOVERY_TICKS 2U
 #define USB_CONTROL_TIMEOUT_MS 1000U
@@ -59,6 +61,7 @@ struct drv_usb_endpoint {
 	struct drv_usb_superspeed_endpoint_companion_descriptor companion;
 	enum drv_usb_transfer_type type;
 	unsigned companion_valid;
+	atomic_uint_t halted;
 	uintptr_t hcd_private[4];
 };
 
@@ -99,6 +102,7 @@ struct drv_usb_device {
 	struct drv_usb_configuration *configurations, *active_configuration;
 	struct drv_usb_device_descriptor descriptor;
 	unsigned configuration_count, address, port;
+	uint64_t generation, port_generation;
 	enum drv_usb_speed speed;
 	enum drv_usb_device_state state;
 	unsigned lifecycle;
@@ -110,6 +114,7 @@ struct drv_usb_device {
 	atomic_uint_t submit_gate;
 	atomic_uint_t binding_transactions;
 	atomic_uint_t disconnect_barrier;
+	struct drv_usb_urb *recovery_urb;
 	void *quarantine_buffer;
 	uintptr_t hcd_private[4];
 	struct drv_usb_endpoint endpoint0;
@@ -119,9 +124,17 @@ struct drv_usb_bus {
 	struct usb_port_state {
 		unsigned observed;
 		unsigned connected;
+		unsigned enabled;
+		uint64_t connection_generation;
 	} *ports;
 	unsigned number;
 	unsigned stopping;
+	/* Protected by usb_topology_gate.  HCD quiesce may join a root worker
+	 * which is itself waiting for that gate, so shutdown/unregister claim the
+	 * bus here and invoke the blocking HCD barrier with the gate released. */
+	unsigned lifecycle_claimed;
+	unsigned shutdown_processed;
+	uint64_t shutdown_attempt_generation;
 	struct drv_usb_hcd *hcd;
 	struct drv_usb_device *root_hub, *devices;
 	struct drv_usb_bus *next;
@@ -165,6 +178,8 @@ struct usb_driver_entry {
 static struct drv_usb_bus *usb_buses;
 static struct usb_driver_entry *usb_drivers;
 static unsigned next_bus_number;
+static uint64_t usb_shutdown_generation;
+static uint64_t usb_device_generation;
 static bool usb_initialized;
 static atomic_uint_t usb_topology_gate;
 
@@ -192,6 +207,15 @@ static void
 usb_topology_unlock(void)
 {
 	atomic_store_release(&usb_topology_gate, 0U);
+}
+
+static uint64_t
+usb_generation_next(uint64_t *generation)
+{
+	(*generation)++;
+	if (*generation == 0)
+		(*generation)++;
+	return *generation;
 }
 
 static int
@@ -436,6 +460,8 @@ int drv_usb_init(void)
 {
 	if (usb_initialized) return EALREADY;
 	usb_buses = NULL; usb_drivers = NULL; next_bus_number = 0;
+	usb_shutdown_generation = 0;
+	usb_device_generation = 0;
 	atomic_store_release(&usb_topology_gate, 0U);
 	usb_initialized = true;
 	hal_printf("usb: URB completion contract q009-release-acquire-v1\n");
@@ -444,15 +470,34 @@ int drv_usb_init(void)
 
 void drv_usb_shutdown(void)
 {
-	struct drv_usb_bus *bus;
+	uint64_t generation;
 
 	usb_topology_lock();
-	for (bus = usb_buses; bus != NULL; bus = bus->next) {
+	generation = ++usb_shutdown_generation;
+	if (generation == 0)
+		generation = ++usb_shutdown_generation;
+	usb_topology_unlock();
+	for (;;) {
+		struct drv_usb_bus *bus;
 		struct drv_usb_device *device;
 		int error, retain = 0;
 
-		if (hal_atomic_fetch_or_release(&bus->stopping, 1U) != 0)
-			continue;
+		usb_topology_lock();
+		for (bus = usb_buses; bus != NULL; bus = bus->next)
+			if (!bus->shutdown_processed && !bus->lifecycle_claimed &&
+			    bus->shutdown_attempt_generation != generation)
+				break;
+		if (bus == NULL) {
+			usb_topology_unlock();
+			return;
+		}
+		bus->lifecycle_claimed = 1U;
+		bus->shutdown_attempt_generation = generation;
+		/* stopping closes admission, but is not evidence that the HCD has
+		 * crossed its checked DMA-stop boundary.  In particular, unregister
+		 * leaves it set when a worker join or quiesce attempt fails.  A terminal
+		 * shutdown must retry that same checked sequence. */
+		hal_atomic_store_release(&bus->stopping, 1U);
 		/* Stop admission first, then let every class driver disconnect and
 		 * cancel/drain its own work while the HCD is still operational. */
 		for (device = bus->devices; device != NULL; device = device->next)
@@ -474,20 +519,36 @@ void drv_usb_shutdown(void)
 			if (error != 0)
 				retain = 1;
 		}
-		if (bus->hcd->ops->quiesce != NULL &&
-		    bus->hcd->ops->quiesce(bus->hcd) != 0) {
+		/* A runtime root worker can be blocked trying to enter the topology
+		 * gate.  Release it before the HCD joins that worker.  The bus claim
+		 * prevents concurrent unregister/free while the pointer is borrowed. */
+		usb_topology_unlock();
+		error = bus->hcd->ops->quiesce == NULL ? 0 :
+		    bus->hcd->ops->quiesce(bus->hcd);
+		if (error != 0) {
 			hal_printf("usb%u: host controller stop failed\n",
 			    bus->number);
+			usb_topology_lock();
+			if (!bus->lifecycle_claimed)
+				__builtin_trap();
+			bus->lifecycle_claimed = 0U;
+			usb_topology_unlock();
+			/* Leave shutdown_processed clear so a later shutdown request can
+			 * retry.  This invocation marks it attempted and continues through
+			 * every other controller without spinning on this one. */
 			continue;
 		}
 		/* A failed class/device teardown keeps callback-visible HCD memory,
 		 * but the checked HCD quiesce above still stops DMA before reboot. */
-		if (retain)
-			continue;
-		if (bus->hcd->ops->stop != NULL)
+		if (!retain && bus->hcd->ops->stop != NULL)
 			bus->hcd->ops->stop(bus->hcd);
+		usb_topology_lock();
+		bus->shutdown_processed = 1U;
+		if (!bus->lifecycle_claimed)
+			__builtin_trap();
+		bus->lifecycle_claimed = 0U;
+		usb_topology_unlock();
 	}
-	usb_topology_unlock();
 }
 
 int drv_usb_hcd_register(struct drv_usb_hcd *hcd, struct drv_usb_bus **result)
@@ -498,6 +559,7 @@ int drv_usb_hcd_register(struct drv_usb_hcd *hcd, struct drv_usb_bus **result)
 	    hcd->ops == NULL || hcd->ops->start == NULL ||
 	    hcd->ops->stop == NULL || hcd->ops->urb_enqueue == NULL ||
 	    hcd->ops->urb_dequeue == NULL ||
+	    hcd->ops->endpoint_reset == NULL ||
 	    ((hcd->ops->endpoint_enable == NULL) !=
 	    (hcd->ops->endpoint_disable == NULL)) || result == NULL ||
 	    (hcd->capabilities & ~DRV_USB_HCD_CAP_CONCURRENT_URBS) != 0)
@@ -549,26 +611,37 @@ int drv_usb_hcd_unregister(struct drv_usb_hcd *hcd)
 	usb_topology_lock();
 	for (link = &usb_buses; (bus = *link) != NULL; link = &bus->next) {
 		if (bus->hcd != hcd) continue;
-		if (bus->devices != NULL) {
+		if (bus->devices != NULL || bus->lifecycle_claimed) {
 			usb_topology_unlock();
 			return EBUSY;
 		}
+		bus->lifecycle_claimed = 1U;
 		hal_atomic_store_release(&bus->stopping, 1U);
 		device_begin_disconnect(bus->root_hub);
+		/* Root workers enter the topology path in process context.  Never join
+		 * one while retaining the gate it may be waiting to acquire. */
+		usb_topology_unlock();
 		if (hcd->ops->quiesce != NULL) {
 			error = hcd->ops->quiesce(hcd);
 			if (error != 0) {
+				usb_topology_lock();
+				if (!bus->lifecycle_claimed)
+					__builtin_trap();
+				bus->lifecycle_claimed = 0U;
 				usb_topology_unlock();
 				return error;
 			}
 		}
+		usb_topology_lock();
 		state = hal_atomic_load_acquire(&bus->root_hub->lifecycle);
 		for (;;) {
 			if ((state & USB_DEVICE_LIFECYCLE_URB_MASK) != 0) {
+				bus->lifecycle_claimed = 0U;
 				usb_topology_unlock();
 				return EBUSY;
 			}
 			if ((state & USB_DEVICE_LIFECYCLE_FINALIZING) != 0) {
+				bus->lifecycle_claimed = 0U;
 				usb_topology_unlock();
 				return EALREADY;
 			}
@@ -577,12 +650,20 @@ int drv_usb_hcd_unregister(struct drv_usb_hcd *hcd)
 			    state | USB_DEVICE_LIFECYCLE_FINALIZING))
 				break;
 		}
+		usb_topology_unlock();
 		hcd->ops->stop(hcd);
+		usb_topology_lock();
+		for (link = &usb_buses; *link != NULL && *link != bus;
+		    link = &(*link)->next)
+			;
+		if (*link != bus || !bus->lifecycle_claimed)
+			__builtin_trap();
 		*link = bus->next;
+		bus->lifecycle_claimed = 0U;
+		usb_topology_unlock();
 		hal_free(bus->root_hub);
 		hal_free(bus->ports);
 		hal_free(bus);
-		usb_topology_unlock();
 		return 0;
 	}
 	usb_topology_unlock();
@@ -742,9 +823,17 @@ device_finalize(struct drv_usb_bus *bus, struct drv_usb_device *device)
 static int
 device_release(struct drv_usb_bus *bus, struct drv_usb_device *device)
 {
+	struct drv_usb_urb *recovery_urb;
 	unsigned state;
 
 	device_begin_disconnect(device);
+	/* The retained recovery URB owns one device lifecycle reference.  Binding
+	 * transactions are joined above, so no clear-halt operation can still use
+	 * it.  Drop it before testing the final lifecycle-reference count. */
+	recovery_urb = device->recovery_urb;
+	device->recovery_urb = NULL;
+	if (recovery_urb != NULL)
+		drv_usb_urb_free(recovery_urb);
 	state = hal_atomic_load_acquire(&device->lifecycle);
 	for (;;) {
 		if ((state & USB_DEVICE_LIFECYCLE_URB_MASK) != 0) {
@@ -850,15 +939,20 @@ int
 drv_usb_decode_superspeed_endpoint_companion(const void *raw, size_t length,
 	struct drv_usb_superspeed_endpoint_companion_descriptor *result)
 {
+	const uint8_t *bytes = raw;
 	struct drv_usb_superspeed_endpoint_companion_descriptor descriptor;
 
 	if (raw == NULL || result == NULL || length < sizeof(descriptor))
 		return EINVAL;
-	memcpy(&descriptor, raw, sizeof(descriptor));
-	if (descriptor.length != sizeof(descriptor) ||
-	    descriptor.descriptor_type !=
+	if (bytes[0] != sizeof(descriptor) || bytes[1] !=
 		DRV_USB_DESCRIPTOR_SUPERSPEED_ENDPOINT_COMPANION)
 		return EINVAL;
+	descriptor.length = bytes[0];
+	descriptor.descriptor_type = bytes[1];
+	descriptor.maximum_burst = bytes[2];
+	descriptor.attributes = bytes[3];
+	descriptor.bytes_per_interval = (uint16_t)bytes[4] |
+	    ((uint16_t)bytes[5] << 8);
 	*result = descriptor;
 	return 0;
 }
@@ -1398,6 +1492,10 @@ static int enumerate_port(struct drv_usb_bus *bus,unsigned port,uint32_t status)
 	device->bus = bus;
 	device->parent = bus->root_hub;
 	device->port = port;
+	device->generation = usb_generation_next(&usb_device_generation);
+	if (bus->ports[port].connection_generation == 0)
+		usb_generation_next(&bus->ports[port].connection_generation);
+	device->port_generation = bus->ports[port].connection_generation;
 	device->speed = (status & 0x800U) ? DRV_USB_SPEED_SUPER :
 	    (status & 0x400U) ? DRV_USB_SPEED_HIGH :
 	    (status & 0x200U) ? DRV_USB_SPEED_LOW : DRV_USB_SPEED_FULL;
@@ -1442,12 +1540,19 @@ static int enumerate_port(struct drv_usb_bus *bus,unsigned port,uint32_t status)
 	if (bus->hcd->ops->device_set_address != NULL)
 		error = bus->hcd->ops->device_set_address(bus->hcd, device,
 		    (unsigned)address);
-	else
+	else {
+		/* A wire SET_ADDRESS request is addressed to endpoint zero at the
+		 * default address.  Keep the allocated value in the device for failure
+		 * cleanup, but expose address zero while the synchronous request is built
+		 * and completed.  Controller-command HCDs use the callback above. */
+		device->address = 0;
 		error = drv_usb_control(device,
 		    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
 			DRV_USB_RECIP_DEVICE,
 		    USB_REQ_SET_ADDRESS, (uint16_t)address, 0, NULL, 0,
 		    USB_CONTROL_TIMEOUT_MS, &actual);
+		device->address = (unsigned)address;
+	}
 	if (error != 0)
 		goto fail;
 	device->state = DRV_USB_STATE_ADDRESS;
@@ -1493,6 +1598,14 @@ static int enumerate_port(struct drv_usb_bus *bus,unsigned port,uint32_t status)
 				error = EINVAL;
 				goto fail;
 			}
+	}
+	/* Endpoint recovery must remain usable while reclaim itself is waiting on
+	 * USB-backed storage.  Reserve its endpoint-zero URB before any class
+	 * driver can enter an error path. */
+	device->recovery_urb = drv_usb_urb_alloc(device, NULL, 0);
+	if (device->recovery_urb == NULL) {
+		error = ENOMEM;
+		goto fail;
 	}
 	preferred = device_preferred_configuration(device, &preferred_score);
 	error = drv_usb_device_set_configuration(device,
@@ -1617,7 +1730,9 @@ void drv_usb_hcd_root_hub_changed(struct drv_usb_hcd *hcd)
 	for (port = 1; port <= hcd->root_port_count; port++) {
 		struct drv_usb_device *present;
 		uint32_t status = 0;
-		unsigned connected, connection_changed, initial, state_changed;
+		unsigned connected, enabled, connection_changed, enable_changed;
+		unsigned initial, state_changed, port_disabled;
+		unsigned replace_generation = 0;
 		int error;
 
 		error = root_port_status(hcd, port, &status);
@@ -1630,21 +1745,40 @@ void drv_usb_hcd_root_hub_changed(struct drv_usb_hcd *hcd)
 			continue;
 		}
 		connected = (status & 1U) != 0;
+		enabled = (status & 2U) != 0;
 		connection_changed = (status & (1U << 16)) != 0;
+		enable_changed = (status & (1U << 17)) != 0;
 		initial = !bus->ports[port].observed;
 		state_changed = !initial &&
 		    bus->ports[port].connected != connected;
+		if (initial || connection_changed || state_changed)
+			usb_generation_next(
+			    &bus->ports[port].connection_generation);
+		port_disabled = connected && !enabled &&
+		    (!initial && (bus->ports[port].enabled || enable_changed));
 		bus->ports[port].observed = 1U;
 		bus->ports[port].connected = connected;
+		bus->ports[port].enabled = enabled;
 		present = find_port_device(bus, port);
-		if (present != NULL && (!connected ||
+		/* A connection edge identifies a new physical generation even when
+		 * the port is connected again by the time it is sampled.  Never let
+		 * the retained device, bindings, or URBs cross that edge.  A failed
+		 * destroy leaves DISCONNECTING set; periodic root scans then retry the
+		 * same teardown without relying on another hardware change bit. */
+		if (present != NULL && connected && (connection_changed ||
+		    state_changed || port_disabled ||
+		    device_is_disconnecting(present)))
+			replace_generation = 1;
+		if (present != NULL && (!connected || connection_changed ||
+		    state_changed || port_disabled ||
 		    device_is_disconnecting(present))) {
 			if (destroy_device(bus, present) == 0)
 				present = NULL;
 		}
 		if (!connected || present != NULL)
 			continue;
-		if (!initial && !connection_changed && !state_changed)
+		if (!initial && !connection_changed && !state_changed &&
+		    !replace_generation)
 			continue;
 		if (hcd->ops->root_port_reset != NULL)
 			error = hcd->ops->root_port_reset(hcd, port);
@@ -1652,10 +1786,14 @@ void drv_usb_hcd_root_hub_changed(struct drv_usb_hcd *hcd)
 			error = legacy_root_port_reset(hcd, port);
 		if (error == 0)
 			error = root_port_status(hcd, port, &status);
-		if (error == 0 && (status & 1U) != 0)
-			error = enumerate_port(bus, port, status);
-		else if (error == 0)
-			error = ENODEV;
+		if (error == 0) {
+			bus->ports[port].connected = (status & 1U) != 0;
+			bus->ports[port].enabled = (status & 2U) != 0;
+			if ((status & 3U) == 3U)
+				error = enumerate_port(bus, port, status);
+			else
+				error = ENODEV;
+		}
 		if (error != 0)
 			hal_printf("usb%u: port %u enumeration failed (%d)\n",
 			    bus->number, port, error);
@@ -1703,6 +1841,31 @@ endpoint_retained_by_device(const struct drv_usb_device *device,
 		if (&alternate->endpoints[index] == endpoint)
 			return 1;
 	return 0;
+}
+
+static int
+endpoint_uses_halt(const struct drv_usb_device *device,
+	const struct drv_usb_endpoint *endpoint)
+{
+	return endpoint != NULL && endpoint != &device->endpoint0 &&
+	    (endpoint->type == DRV_USB_TRANSFER_BULK ||
+	    endpoint->type == DRV_USB_TRANSFER_INTERRUPT);
+}
+
+static int
+endpoint_is_halted(const struct drv_usb_device *device,
+	const struct drv_usb_endpoint *endpoint)
+{
+	return endpoint_uses_halt(device, endpoint) &&
+	    atomic_load_acquire(&endpoint->halted) != 0;
+}
+
+static void
+endpoint_publish_halted(struct drv_usb_device *device,
+	struct drv_usb_endpoint *endpoint, unsigned halted)
+{
+	if (endpoint_uses_halt(device, endpoint))
+		atomic_store_release(&endpoint->halted, halted);
 }
 
 static struct drv_usb_interface *
@@ -1902,6 +2065,11 @@ urb_publish_terminal(struct drv_usb_urb *urb,
 	if (!hal_atomic_compare_exchange_acq_rel(&urb->terminal_claimed,
 	    &expected, 1U))
 		return 0;
+	/* Publish the protocol halt before the terminal status and callback.  HCDs
+	 * keep their endpoint publication barrier until this function returns, so
+	 * a rearm cannot cross the hardware-STALL/core-latch handoff. */
+	if (status == DRV_USB_URB_STALL)
+		endpoint_publish_halted(urb->device, urb->endpoint, 1U);
 	urb->actual_length = actual > urb->length ? urb->length : actual;
 	/* The terminal state publishes actual_length and all HCD input data. */
 	hal_atomic_store_release(&urb->status, status);
@@ -1943,7 +2111,6 @@ unsigned drv_usb_device_hcd_capabilities(const struct drv_usb_device*d){return d
 uintptr_t drv_usb_device_hcd_data(const struct drv_usb_device*d,unsigned n){return d&&n<4U?__atomic_load_n(&d->hcd_private[n],__ATOMIC_ACQUIRE):0;}
 int drv_usb_device_set_hcd_data(struct drv_usb_device*d,unsigned n,uintptr_t value){if(!d||n>=4U)return EINVAL;__atomic_store_n(&d->hcd_private[n],value,__ATOMIC_RELEASE);return 0;}
 struct drv_dma_device*drv_usb_device_dma(struct drv_usb_device*d){return d?d->bus->hcd->dma:NULL;}
-int drv_usb_device_reset(struct drv_usb_device*d){(void)d;return ENOTSUP;}
 
 static void
 device_quarantine_selection(struct drv_usb_device *device, const char *stage,
@@ -1951,6 +2118,17 @@ device_quarantine_selection(struct drv_usb_device *device, const char *stage,
 {
 	if (!device_is_quarantined(device))
 		hal_printf("usb%u: device %u %s rollback failed (%d); quarantined\n",
+		    device->bus->number, device->address, stage, error);
+	hal_atomic_store_release(&device->quarantined, 1U);
+	io_gate_close(&device->submit_gate);
+}
+
+static void
+device_quarantine_recovery(struct drv_usb_device *device, const char *stage,
+	int error)
+{
+	if (!device_is_quarantined(device))
+		hal_printf("usb%u: device %u %s failed (%d); quarantined\n",
 		    device->bus->number, device->address, stage, error);
 	hal_atomic_store_release(&device->quarantined, 1U);
 	io_gate_close(&device->submit_gate);
@@ -2024,6 +2202,28 @@ host_interface_disable(struct drv_usb_host_interface *alternate)
 }
 
 static int
+host_interface_reset_endpoints(struct drv_usb_host_interface *alternate)
+{
+	struct drv_usb_device *device = alternate->interface->device;
+	struct drv_usb_hcd *hcd = device->bus->hcd;
+	unsigned index;
+	int error;
+
+	/* Keep every core latch closed until all host-side endpoint state agrees
+	 * with the confirmed device-side reset.  A partial HCD reset is visible
+	 * only inside a subsequently quarantined device. */
+	for (index = 0; index < alternate->endpoint_count; index++) {
+		error = hcd->ops->endpoint_reset(hcd,
+		    &alternate->endpoints[index]);
+		if (error != 0)
+			return error;
+	}
+	for (index = 0; index < alternate->endpoint_count; index++)
+		endpoint_publish_halted(device, &alternate->endpoints[index], 0U);
+	return 0;
+}
+
+static int
 configuration_enable_endpoints(struct drv_usb_configuration *configuration)
 {
 	struct drv_usb_interface *interface;
@@ -2081,6 +2281,39 @@ configuration_disable_endpoints(struct drv_usb_configuration *configuration)
 			return error;
 		}
 		disabled[disabled_count++] = interface;
+	}
+	return 0;
+}
+
+static int
+configuration_reset_endpoints(struct drv_usb_configuration *configuration)
+{
+	struct drv_usb_interface *interface;
+	struct drv_usb_device *device = configuration->device;
+	struct drv_usb_hcd *hcd = device->bus->hcd;
+	unsigned index;
+	int error;
+
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = interface->next) {
+		struct drv_usb_host_interface *alternate =
+		    interface_active_alternate(interface);
+
+		for (index = 0; index < alternate->endpoint_count; index++) {
+			error = hcd->ops->endpoint_reset(hcd,
+			    &alternate->endpoints[index]);
+			if (error != 0)
+				return error;
+		}
+	}
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = interface->next) {
+		struct drv_usb_host_interface *alternate =
+		    interface_active_alternate(interface);
+
+		for (index = 0; index < alternate->endpoint_count; index++)
+			endpoint_publish_halted(device,
+			    &alternate->endpoints[index], 0U);
 	}
 	return 0;
 }
@@ -2185,7 +2418,275 @@ configuration_restore(struct drv_usb_device *device,
 		if (error != 0)
 			return error;
 	}
-	return configuration_enable_endpoints(configuration);
+	error = configuration_enable_endpoints(configuration);
+	return error != 0 ? error :
+	    configuration_reset_endpoints(configuration);
+}
+
+static int
+configuration_effective_owner(struct drv_usb_configuration *configuration,
+	struct drv_usb_interface **effective_owner)
+{
+	struct drv_usb_interface *interface, *owner;
+	unsigned state;
+
+	*effective_owner = NULL;
+	if (configuration == NULL)
+		return 0;
+	for (interface = configuration->interfaces; interface != NULL;
+	    interface = interface->next) {
+		owner = interface_binding_owner(interface);
+		if (owner == NULL)
+			continue;
+		state = atomic_load_acquire(&owner->binding_state);
+		if (state != USB_BINDING_PROBING && state != USB_BINDING_BOUND)
+			return EBUSY;
+		if (*effective_owner == NULL)
+			*effective_owner = owner;
+		else if (*effective_owner != owner)
+			return ENOTSUP;
+	}
+	return 0;
+}
+
+static int
+device_reset_connection_check(struct drv_usb_bus *bus,
+	struct drv_usb_device *device, uint64_t device_generation,
+	uint64_t port_generation)
+{
+	uint32_t status = 0;
+	int error;
+
+	error = root_port_status(bus->hcd, device->port, &status);
+	if (error != 0)
+		return error;
+	/* GET_STATUS does not acknowledge CSC.  With the topology worker excluded,
+	 * the hardware edge bit is the only witness for a detach/reinsert which
+	 * happens between two restore operations. */
+	if ((status & 3U) != 3U || (status & (1U << 16)) != 0 ||
+	    device->generation != device_generation ||
+	    bus->ports[device->port].connection_generation != port_generation)
+		return ENODEV;
+	return 0;
+}
+
+int
+drv_usb_device_reset(struct drv_usb_device *device)
+{
+	struct drv_usb_bus *bus;
+	struct drv_usb_configuration *configuration;
+	struct drv_usb_interface *closed[DRV_USB_MAX_INTERFACES];
+	struct drv_usb_interface *effective_owner;
+	uint64_t device_generation, port_generation;
+	uint32_t port_status = 0;
+	unsigned closed_count = 0, old_address;
+	int binding_closed = 0, selection_locked = 0, control_locked = 0;
+	int error, rollback_error;
+
+	if (device == NULL)
+		return EINVAL;
+	/* A reset caller may be running immediately after an URB callback.  Never
+	 * wait behind root-worker teardown while that path is joining the callback
+	 * or its submission admission; topology ownership is an all-or-nothing
+	 * preflight condition for this synchronous API. */
+	if (!atomic_try_acquire_zero(&usb_topology_gate))
+		return EBUSY;
+	bus = device->bus;
+	if (bus == NULL || device == bus->root_hub || device->parent == NULL) {
+		error = EINVAL;
+		goto out;
+	}
+	if (device->parent != bus->root_hub) {
+		error = ENOTSUP;
+		goto out;
+	}
+	if (device->port == 0 || device->port > bus->hcd->root_port_count ||
+	    !device_linked(bus, device) || device_is_disconnecting(device) ||
+	    device_is_quarantined(device) ||
+	    hal_atomic_load_acquire(&bus->stopping) != 0) {
+		error = ENODEV;
+		goto out;
+	}
+	error = root_port_status(bus->hcd, device->port, &port_status);
+	if (error != 0)
+		goto out;
+	if ((port_status & 3U) != 3U || (port_status & (1U << 16)) != 0 ||
+	    bus->ports[device->port].connection_generation !=
+	    device->port_generation) {
+		error = ENODEV;
+		goto out;
+	}
+	device_generation = device->generation;
+	port_generation = bus->ports[device->port].connection_generation;
+	if (io_gate_close_empty(&device->binding_transactions) != 0) {
+		error = EBUSY;
+		goto out;
+	}
+	binding_closed = 1;
+	if (!atomic_try_acquire_zero(&device->selection_gate)) {
+		error = EBUSY;
+		goto out;
+	}
+	selection_locked = 1;
+	configuration = device_active_configuration(device);
+	error = configuration_effective_owner(configuration, &effective_owner);
+	if (error != 0)
+		goto out;
+	(void)effective_owner;
+	error = configuration_close_io(configuration, closed, &closed_count);
+	if (error != 0)
+		goto out;
+	error = device_control_try_lock(device);
+	if (error != 0)
+		goto out;
+	control_locked = 1;
+	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
+	    hal_atomic_load_acquire(&bus->stopping) != 0 ||
+	    device->generation != device_generation ||
+	    bus->ports[device->port].connection_generation != port_generation ||
+	    drv_usb_device_hcd_urb_count(device) != 0) {
+		error = device_is_disconnecting(device) ||
+		    hal_atomic_load_acquire(&bus->stopping) != 0 ? ENODEV : EBUSY;
+		goto out;
+	}
+	error = device_disable_active_endpoints(device);
+	if (error != 0)
+		goto out;
+	/* Endpoint scheduling is disabled, but the HCD device and physical port are
+	 * still intact.  Recheck the captured physical generation immediately before
+	 * the destructive boundary and compensate this invocation on failure. */
+	error = device_reset_connection_check(bus, device, device_generation,
+	    port_generation);
+	if (error != 0) {
+		int identity_error = error;
+		int proof_error = identity_error == ENODEV ? identity_error :
+		    device_reset_connection_check(bus, device, device_generation,
+			port_generation);
+
+		/* Never restore the old endpoint schedule onto a detached or replaced
+		 * physical device.  A transient status-read failure may be compensated
+		 * only after a second positive identity proof; otherwise the retained
+		 * core object is quarantined for terminal topology teardown. */
+		if (proof_error == 0) {
+			rollback_error = configuration == NULL ? 0 :
+			    configuration_enable_endpoints(configuration);
+			if (rollback_error != 0)
+				device_quarantine_recovery(device,
+				    "device reset rollback", rollback_error);
+		} else {
+			if (proof_error == ENODEV)
+				error = ENODEV;
+			device_quarantine_recovery(device,
+			    "device reset identity", error);
+		}
+		goto out;
+	}
+
+	/* Calling the HCD's checked per-device DMA barrier is the destructive
+	 * boundary.  Do not use device_quiesce(): that helper is for terminal
+	 * teardown and may relink the object or change its quarantine state. */
+	if (bus->hcd->ops->device_quiesce != NULL) {
+		error = bus->hcd->ops->device_quiesce(bus->hcd, device);
+		if (error != 0)
+			goto fail_destructive;
+		if (drv_usb_device_hcd_urb_count(device) != 0) {
+			error = EBUSY;
+			goto fail_destructive;
+		}
+	}
+	if (bus->hcd->ops->device_disable != NULL)
+		bus->hcd->ops->device_disable(bus->hcd, device);
+	/* A controller with a per-device quiesce/release operation has crossed its
+	 * boundary already.  Sample again before touching the physical port. */
+	if (bus->hcd->ops->device_quiesce != NULL ||
+	    bus->hcd->ops->device_disable != NULL) {
+		error = device_reset_connection_check(bus, device,
+		    device_generation, port_generation);
+		if (error != 0)
+			goto fail_destructive;
+	}
+	if (bus->hcd->ops->root_port_reset != NULL)
+		error = bus->hcd->ops->root_port_reset(bus->hcd, device->port);
+	else
+		error = legacy_root_port_reset(bus->hcd, device->port);
+	if (error != 0)
+		goto fail_destructive;
+	error = device_reset_connection_check(bus, device, device_generation,
+	    port_generation);
+	if (error != 0)
+		goto fail_destructive;
+	bus->ports[device->port].connected = 1U;
+	bus->ports[device->port].enabled = 1U;
+	old_address = device->address;
+	device->state = DRV_USB_STATE_DEFAULT;
+	device->address = 0;
+	if (bus->hcd->ops->device_enable != NULL) {
+		error = bus->hcd->ops->device_enable(bus->hcd, device);
+		if (error != 0) {
+			device->address = old_address;
+			goto fail_destructive;
+		}
+	}
+	error = device_reset_connection_check(bus, device, device_generation,
+	    port_generation);
+	if (error != 0)
+		goto fail_destructive;
+	if (bus->hcd->ops->device_set_address != NULL) {
+		device->address = old_address;
+		error = bus->hcd->ops->device_set_address(bus->hcd, device,
+		    old_address);
+	} else {
+		size_t actual = 0;
+
+		error = usb_control_locked(device,
+		    DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
+		    DRV_USB_RECIP_DEVICE, USB_REQ_SET_ADDRESS,
+		    (uint16_t)old_address, 0, NULL, 0,
+		    USB_CONTROL_TIMEOUT_MS, &actual);
+		device->address = old_address;
+	}
+	if (error != 0)
+		goto fail_destructive;
+	device->state = DRV_USB_STATE_ADDRESS;
+	usb_delay_ticks(USB_ADDRESS_RECOVERY_TICKS);
+	error = device_reset_connection_check(bus, device, device_generation,
+	    port_generation);
+	if (error != 0)
+		goto fail_destructive;
+	error = configuration_restore(device, configuration);
+	if (error != 0)
+		goto fail_destructive;
+	/* This final non-acknowledging sample is both the post-configuration seam
+	 * and the publication barrier for all retained binding objects. */
+	error = device_reset_connection_check(bus, device, device_generation,
+	    port_generation);
+	if (error != 0)
+		goto fail_destructive;
+	device_publish_configuration(device, configuration);
+	device->interfaces = configuration == NULL ? NULL :
+	    configuration->interfaces;
+	device->state = configuration == NULL ? DRV_USB_STATE_ADDRESS :
+	    DRV_USB_STATE_CONFIGURED;
+	error = 0;
+	goto out;
+
+fail_destructive:
+	if (!device_is_disconnecting(device) &&
+	    hal_atomic_load_acquire(&bus->stopping) == 0)
+		device_quarantine_recovery(device, "device reset", error);
+	else
+		error = ENODEV;
+
+out:
+	if (control_locked)
+		device_control_unlock(device);
+	configuration_open_io(closed, closed_count);
+	if (selection_locked)
+		atomic_store_release(&device->selection_gate, 0U);
+	if (binding_closed)
+		io_gate_open(&device->binding_transactions);
+	usb_topology_unlock();
+	return error;
 }
 
 int
@@ -2278,6 +2779,13 @@ drv_usb_device_set_configuration(struct drv_usb_device *device,
 			if (rollback_error != 0)
 				device_quarantine_selection(device,
 				    "configuration-enable", rollback_error);
+			goto out;
+		}
+		error = configuration_reset_endpoints(target);
+		if (error != 0) {
+			/* SET_CONFIGURATION has succeeded; schedule compensation cannot
+			 * reconstruct the old device-side endpoint state. */
+			device_quarantine_selection(device, "configuration-reset", error);
 			goto out;
 		}
 	}
@@ -2508,6 +3016,8 @@ drv_usb_urb_submit(struct drv_usb_urb *urb)
 	struct drv_usb_device *device;
 	struct drv_usb_interface *submitting_owner = NULL;
 	struct usb_submit_commit commit;
+	struct usb_submit_commit *claimed = NULL;
+	bool irq_enabled;
 	int error;
 
 	if (urb == NULL)
@@ -2521,6 +3031,8 @@ drv_usb_urb_submit(struct drv_usb_urb *urb)
 		return EBUSY;
 	if (device_is_disconnecting(device) || device_is_quarantined(device))
 		return ENODEV;
+	if (endpoint_is_halted(device, urb->endpoint))
+		return EPIPE;
 	error = io_gate_enter(&device->submit_gate);
 	if (error != 0)
 		return device_is_disconnecting(device) ||
@@ -2534,6 +3046,13 @@ drv_usb_urb_submit(struct drv_usb_urb *urb)
 	if (hal_atomic_load_acquire(&device->bus->stopping) != 0 ||
 	    device_is_disconnecting(device) || device_is_quarantined(device)) {
 		error = ENODEV;
+		goto out_hcd;
+	}
+	/* Recheck after interface and binding admission.  The completion-side HCD
+	 * publication barrier cannot be released until the STALL latch is visible,
+	 * so no TD can enter between this check and enqueue. */
+	if (endpoint_is_halted(device, urb->endpoint)) {
+		error = EPIPE;
 		goto out_hcd;
 	}
 	urb->actual_length = 0;
@@ -2550,18 +3069,24 @@ drv_usb_urb_submit(struct drv_usb_urb *urb)
 	hal_atomic_store_release(&urb->status, DRV_USB_URB_PENDING);
 	error = device->bus->hcd->ops->urb_enqueue(device->bus->hcd, urb);
 	/* If synchronous completion already claimed the stack record, it publishes
-	 * finished before entering the callback.  Avoid touching an URB which that
-	 * callback may have released. */
+	 * finished before entering the callback.  Claiming it here and releasing
+	 * the short submit gates must be indivisible with respect to a local HCD
+	 * interrupt: otherwise that interrupt can observe a NULL record, wait for
+	 * submit_commit_pending, and deadlock on the submitter it preempted.  A
+	 * remote completion which wins the claim can still finish while local IRQs
+	 * are masked. */
+	irq_enabled = hal_irq_disable();
 	if (atomic_load_acquire(&commit.finished) == 0) {
-		struct usb_submit_commit *claimed = __atomic_exchange_n(
-		    &urb->submit_commit, NULL, __ATOMIC_ACQ_REL);
-
+		claimed = __atomic_exchange_n(&urb->submit_commit, NULL,
+		    __ATOMIC_ACQ_REL);
 		if (claimed != NULL)
 			submit_commit_finish(urb, claimed);
-		else
-			while (atomic_load_acquire(&commit.finished) == 0)
-				sched_yield();
 	}
+	if (irq_enabled)
+		hal_irq_enable();
+	if (claimed == NULL)
+		while (atomic_load_acquire(&commit.finished) == 0)
+			sched_yield();
 	if (error != 0) {
 		hal_atomic_store_release(&urb->status, DRV_USB_URB_IDLE);
 		urb_hcd_put(urb);
@@ -2577,8 +3102,54 @@ out_submit:
 }
 static int urb_cancel_to(struct drv_usb_urb*u,enum drv_usb_urb_status terminal){int e,published;if(!u||hal_atomic_load_acquire(&u->status)!=DRV_USB_URB_PENDING)return EINVAL;e=u->device->bus->hcd->ops->urb_dequeue(u->device->bus->hcd,u);if(e)return e;published=urb_publish_terminal(u,terminal,0);urb_hcd_put(u);return published?0:EALREADY;}
 int drv_usb_urb_cancel(struct drv_usb_urb*u){return urb_cancel_to(u,DRV_USB_URB_CANCELLED);}
-static int urb_status_error(enum drv_usb_urb_status status){return status==DRV_USB_URB_COMPLETE?0:status==DRV_USB_URB_TIMEOUT?ETIMEDOUT:status==DRV_USB_URB_STALL?EPIPE:status==DRV_USB_URB_DISCONNECTED?ENODEV:EIO;}
-int drv_usb_urb_wait(struct drv_usb_urb*u){uint64_t deadline,cancel_deadline=0;enum drv_usb_urb_status status;if(!u)return EINVAL;deadline=u->timeout_ms?sched_ticks()+(u->timeout_ms+9U)/10U:0;for(;;){status=hal_atomic_load_acquire(&u->status);if(status!=DRV_USB_URB_PENDING)return urb_status_error(status);if(deadline&&sched_ticks()>=deadline){int e=urb_cancel_to(u,DRV_USB_URB_TIMEOUT);if(e==0)continue;if(e!=EBUSY&&e!=EINVAL&&e!=EALREADY)return e;if(cancel_deadline==0)cancel_deadline=sched_ticks()+100U;if(sched_ticks()>=cancel_deadline)return ETIMEDOUT;sched_yield();continue;}hal_compiler_barrier();}}
+int
+drv_usb_urb_wait(struct drv_usb_urb *urb)
+{
+	uint64_t deadline, cancel_deadline = 0;
+
+	if (urb == NULL)
+		return EINVAL;
+	deadline = urb->timeout_ms ?
+	    sched_ticks() + (urb->timeout_ms + 9U) / 10U : 0;
+	for (;;) {
+		/* Keep the atomic observation inside the switch expression.  Besides
+		 * making the single-load terminal mapping explicit, this avoids GCC's
+		 * analyzer losing the initialized state of an automatic enum across the
+		 * cancel/retry back edge. */
+		switch (hal_atomic_load_acquire(&urb->status)) {
+		case DRV_USB_URB_PENDING:
+			break;
+		case DRV_USB_URB_COMPLETE:
+			return 0;
+		case DRV_USB_URB_TIMEOUT:
+			return ETIMEDOUT;
+		case DRV_USB_URB_STALL:
+			return EPIPE;
+		case DRV_USB_URB_DISCONNECTED:
+			return ENODEV;
+		case DRV_USB_URB_IDLE:
+		case DRV_USB_URB_IO_ERROR:
+		case DRV_USB_URB_CANCELLED:
+		default:
+			return EIO;
+		}
+		if (deadline != 0 && sched_ticks() >= deadline) {
+			int error = urb_cancel_to(urb, DRV_USB_URB_TIMEOUT);
+
+			if (error == 0)
+				continue;
+			if (error != EBUSY && error != EINVAL && error != EALREADY)
+				return error;
+			if (cancel_deadline == 0)
+				cancel_deadline = sched_ticks() + 100U;
+			if (sched_ticks() >= cancel_deadline)
+				return ETIMEDOUT;
+			sched_yield();
+			continue;
+		}
+		hal_compiler_barrier();
+	}
+}
 int
 drv_usb_urb_drain(struct drv_usb_urb *u, unsigned timeout_ms)
 {
@@ -2884,11 +3455,22 @@ drv_usb_interface_set_alternate(struct drv_usb_interface *interface,
 			    old->descriptor.alternate_setting,
 			    old->descriptor.interface_number, NULL, 0,
 			    USB_CONTROL_TIMEOUT_MS, &actual);
-		if (rollback_error == 0 && !device_is_quarantined(device))
+		if (rollback_error == 0 && !device_is_quarantined(device)) {
 			rollback_error = host_interface_enable(old);
+			if (rollback_error == 0)
+				rollback_error = host_interface_reset_endpoints(old);
+		}
 		if (rollback_error != 0)
 			device_quarantine_selection(device, "alternate-enable",
 			    rollback_error);
+		goto out;
+	}
+	error = host_interface_reset_endpoints(target);
+	if (error != 0) {
+		/* SET_INTERFACE has succeeded.  A host reset failure leaves the
+		 * selected endpoint state uncertain and cannot be rolled back by a
+		 * schedule-only enable. */
+		device_quarantine_selection(device, "alternate-reset", error);
 		goto out;
 	}
 	interface_publish_alternate(interface, target);
@@ -3133,9 +3715,196 @@ enum drv_usb_transfer_type drv_usb_endpoint_type(const struct drv_usb_endpoint*e
 uint8_t drv_usb_endpoint_address(const struct drv_usb_endpoint*e){return e?e->descriptor.address:0;}
 uint16_t drv_usb_endpoint_max_packet_size(const struct drv_usb_endpoint*e){return e?e->descriptor.maximum_packet_size:0;}
 uint8_t drv_usb_endpoint_maximum_burst(const struct drv_usb_endpoint*e){return e&&e->companion_valid?e->companion.maximum_burst:0;}
+const struct drv_usb_superspeed_endpoint_companion_descriptor*
+drv_usb_endpoint_superspeed_companion(const struct drv_usb_endpoint*e)
+{
+	return e&&e->companion_valid?&e->companion:NULL;
+}
 bool drv_usb_endpoint_is_input(const struct drv_usb_endpoint*e){return e&&(e->descriptor.address&DRV_USB_DIR_IN)!=0;}
 uintptr_t drv_usb_endpoint_hcd_data(const struct drv_usb_endpoint*e,unsigned n){return e&&n<4U?e->hcd_private[n]:0;}
 int drv_usb_endpoint_set_hcd_data(struct drv_usb_endpoint*e,unsigned n,uintptr_t value){if(!e||n>=4U)return EINVAL;e->hcd_private[n]=value;return 0;}
+
+static int
+endpoint_binding_pin(struct drv_usb_interface *interface,
+	struct drv_usb_interface **pinned_owner)
+{
+	struct drv_usb_interface *owner;
+	unsigned state;
+	int error;
+
+	*pinned_owner = NULL;
+	owner = interface_binding_owner(interface);
+	if (owner == NULL)
+		return ENODEV;
+	state = atomic_load_acquire(&owner->binding_state);
+	if (state != USB_BINDING_PROBING && state != USB_BINDING_BOUND)
+		return ENODEV;
+	error = io_gate_enter(&owner->binding_submitters);
+	if (error != 0)
+		return atomic_load_acquire(&owner->binding_state) == state ?
+		    error : ENODEV;
+	if (atomic_load_acquire(&owner->binding_state) != state) {
+		binding_submitter_put(owner);
+		return ENODEV;
+	}
+	error = io_gate_enter(&owner->binding_gate);
+	if (error != 0) {
+		binding_submitter_put(owner);
+		return atomic_load_acquire(&owner->binding_state) == state ?
+		    error : ENODEV;
+	}
+	if (atomic_load_acquire(&owner->binding_state) != state ||
+	    interface_binding_owner(interface) != owner) {
+		io_gate_exit(&owner->binding_gate);
+		binding_submitter_put(owner);
+		return ENODEV;
+	}
+	*pinned_owner = owner;
+	return 0;
+}
+
+static void
+endpoint_binding_unpin(struct drv_usb_interface *owner)
+{
+	if (owner == NULL)
+		return;
+	io_gate_exit(&owner->binding_gate);
+	binding_submitter_put(owner);
+}
+
+static int
+endpoint_clear_halt_request(struct drv_usb_device *device,
+	struct drv_usb_endpoint *endpoint, unsigned *accepted)
+{
+	struct drv_usb_control_request request = {
+		DRV_USB_DIR_OUT | DRV_USB_REQUEST_STANDARD |
+		    DRV_USB_RECIP_ENDPOINT,
+		USB_REQ_CLEAR_FEATURE,
+		USB_FEATURE_ENDPOINT_HALT,
+		endpoint->descriptor.address,
+		0
+	};
+	struct drv_usb_urb *urb = device->recovery_urb;
+	int error;
+
+	*accepted = 0;
+	if (urb == NULL)
+		return ENODEV;
+	error = drv_usb_urb_setup_control_flags(urb, &request, NULL, 0,
+	    DRV_USB_URB_RECLAIM_SAFE, USB_CONTROL_TIMEOUT_MS, NULL, NULL);
+	if (error != 0)
+		return error;
+	urb->control_admitted = USB_CONTROL_ADMISSION_EXTERNAL;
+	error = drv_usb_urb_submit(urb);
+	if (error != 0)
+		return error;
+	*accepted = 1U;
+	return drv_usb_urb_wait_reusable(urb);
+}
+
+int
+drv_usb_endpoint_clear_halt(struct drv_usb_endpoint *endpoint)
+{
+	struct drv_usb_device *device;
+	struct drv_usb_interface *interface, *owner = NULL;
+	unsigned accepted = 0;
+	int binding_entered = 0, selection_locked = 0;
+	int interface_locked = 0, control_locked = 0;
+	int error;
+
+	if (endpoint == NULL || endpoint->interface == NULL ||
+	    endpoint->alternate == NULL ||
+	    (endpoint->type != DRV_USB_TRANSFER_BULK &&
+	    endpoint->type != DRV_USB_TRANSFER_INTERRUPT) ||
+	    (endpoint->descriptor.address & 0x0fU) == 0)
+		return EINVAL;
+	interface = endpoint->interface;
+	device = interface->device;
+	if (!endpoint_retained_by_device(device, endpoint))
+		return ENODEV;
+	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
+	    hal_atomic_load_acquire(&device->bus->stopping) != 0)
+		return ENODEV;
+	error = device_binding_enter(device);
+	if (error != 0)
+		return error;
+	binding_entered = 1;
+	error = endpoint_binding_pin(interface, &owner);
+	if (error != 0)
+		goto out;
+	if (!atomic_try_acquire_zero(&device->selection_gate)) {
+		error = EBUSY;
+		goto out;
+	}
+	selection_locked = 1;
+	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
+	    hal_atomic_load_acquire(&device->bus->stopping) != 0 ||
+	    device->state != DRV_USB_STATE_CONFIGURED ||
+	    device_active_configuration(device) != interface->configuration ||
+	    interface_active_alternate(interface) != endpoint->alternate ||
+	    interface_binding_owner(interface) != owner) {
+		error = ENODEV;
+		goto out;
+	}
+	error = io_gate_close_empty(&interface->io_gate);
+	if (error != 0)
+		goto out;
+	interface_locked = 1;
+	error = device_control_try_lock(device);
+	if (error != 0)
+		goto out;
+	control_locked = 1;
+	if (device_is_disconnecting(device) || device_is_quarantined(device) ||
+	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
+		error = ENODEV;
+		goto out;
+	}
+	error = endpoint_clear_halt_request(device, endpoint, &accepted);
+	if (error != 0) {
+		if (accepted && error != EPIPE &&
+		    !device_is_disconnecting(device) &&
+		    hal_atomic_load_acquire(&device->bus->stopping) == 0)
+			device_quarantine_recovery(device, "clear-halt wire", error);
+		else if (device_is_disconnecting(device) ||
+		    hal_atomic_load_acquire(&device->bus->stopping) != 0)
+			error = ENODEV;
+		goto out;
+	}
+	if (device_is_disconnecting(device) ||
+	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
+		error = ENODEV;
+		goto out;
+	}
+	error = device->bus->hcd->ops->endpoint_reset(device->bus->hcd,
+	    endpoint);
+	if (error != 0) {
+		if (device_is_disconnecting(device) ||
+		    hal_atomic_load_acquire(&device->bus->stopping) != 0)
+			error = ENODEV;
+		else
+			device_quarantine_recovery(device, "endpoint reset", error);
+		goto out;
+	}
+	if (device_is_disconnecting(device) ||
+	    hal_atomic_load_acquire(&device->bus->stopping) != 0) {
+		error = ENODEV;
+		goto out;
+	}
+	endpoint_publish_halted(device, endpoint, 0U);
+	error = 0;
+
+out:
+	if (control_locked)
+		device_control_unlock(device);
+	if (interface_locked)
+		io_gate_open(&interface->io_gate);
+	if (selection_locked)
+		atomic_store_release(&device->selection_gate, 0U);
+	endpoint_binding_unpin(owner);
+	if (binding_entered)
+		device_binding_exit(device);
+	return error;
+}
 
 int
 drv_usb_id_match(const struct drv_usb_id *id,

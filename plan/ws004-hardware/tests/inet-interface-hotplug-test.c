@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #include "kern/net/byteorder.h"
+#include "kern/cred.h"
 #include "kern/net/inet-socket.h"
 #include "kern/net/net-device.h"
 #include "kern/net/packet-buf.h"
@@ -15,6 +16,25 @@
 #include <string.h>
 
 static _Thread_local int irq_enabled = 1;
+static struct ucred root_credential = {.euid = 0};
+
+struct ucred *
+cred_current_ref(void)
+{
+	return &root_credential;
+}
+
+void
+cred_release(struct ucred *credential)
+{
+	assert(credential == &root_credential);
+}
+
+int
+cred_is_superuser(const struct ucred *credential)
+{
+	return credential != NULL && credential->euid == 0;
+}
 
 bool
 hal_irq_disable(void)

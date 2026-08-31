@@ -1,0 +1,216 @@
+require zedbuild;
+
+// WS003 BR-T54 PC-9821V13 IPL source/binary/layout contract.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+func need(text, marker, what) {
+    if (String.indexOf(text, marker) < 0) {
+        zbFail(what + " is missing: " + marker);
+    }
+}
+
+func forbid(text, marker, what) {
+    if (String.indexOf(text, marker) >= 0) {
+        zbFail(what + " must not appear: " + marker);
+    }
+}
+
+func needCount(text, marker, expected, what) {
+    var rest = text;
+    var count = 0;
+    while (1) {
+        var at = String.indexOf(rest, marker);
+        if (at < 0) { break; }
+        count = count + 1;
+        rest = String.substring(rest, at + String.charCount(marker), -1);
+    }
+    if (count != expected) {
+        zbFail(what + " count=" + count + " expected=" + expected);
+    }
+}
+
+func needOrder(text, first, second, what) {
+    var firstAt = String.indexOf(text, first);
+    var secondAt = String.indexOf(text, second);
+    if (firstAt < 0 || secondAt < 0 || firstAt >= secondAt) {
+        zbFail(what + " is out of order");
+    }
+}
+
+func checkOwnedStack(source, entry, what) {
+    var start = String.indexOf(source, entry);
+    var stack = String.indexOf(source, "\tmovw\t%ax, %ss");
+    if (start < 0 || stack < start) { zbFail(what + " does not own SS"); }
+    var before = String.substring(source, start, stack - start);
+    if (String.indexOf(before, "\tpushw\t") >= 0 ||
+        String.indexOf(before, "\tcall\t") >= 0 ||
+        String.indexOf(before, "\tint\t") >= 0) {
+        zbFail(what + " uses the inherited firmware stack");
+    }
+    needOrder(source, "\tmovw\t%ax, %ss", "\tmovw\t$0xfffe, %sp",
+              what + " SS:SP setup");
+    needOrder(source, "\tmovw\t$0xfffe, %sp", "\trep movsw",
+              what + " stack-before-relocation contract");
+}
+
+func compareRange(left, leftAt, right, rightAt, count, what) {
+    if (leftAt < 0 || rightAt < 0 || count < 0 ||
+        leftAt + count > Packed.size(left) ||
+        rightAt + count > Packed.size(right)) {
+        zbFail(what + " range is invalid");
+    }
+    for (i in 0..count) {
+        if (left[leftAt + i] != right[rightAt + i]) {
+            zbFail(what + " differs at byte " + i);
+        }
+    }
+}
+
+func checkIpl1(data, what) {
+    if (Packed.size(data) < 8 || !zbBytesEqual(data, 4, "IPL1")) {
+        zbFail(what + " does not contain IPL1 at offsets 4..7");
+    }
+}
+
+func main(args) {
+    var repo = ".";
+    if (Array.size(args) > 1) {
+        zbFail("usage: pc98-ipl-contract.noct [REPOSITORY]");
+    }
+    if (Array.size(args) == 1) { repo = args[0]; }
+
+    var diskSource = FileUtil.readText(
+        repo + "/bootloader/pc98/disk-ipl.S");
+    var selectorSource = FileUtil.readText(
+        repo + "/bootloader/pc98/lba2.S");
+    var pbrSource = FileUtil.readText(
+        repo + "/bootloader/pc98/partition-pbr.S");
+    var loaderSource = FileUtil.readText(
+        repo + "/bootloader/pc98/bootzbsd.S");
+    checkOwnedStack(diskSource, "relocate:", "LBA-0 IPL");
+    checkOwnedStack(selectorSource, "_start:", "LBA-2 selector");
+
+    var readStart = String.indexOf(diskSource, "\tcall\tprepare_target");
+    var readEnd = String.indexOf(diskSource, "enter_target:");
+    if (readStart < 0 || readEnd <= readStart) {
+        zbFail("fixed Stage-1 read block is missing");
+    }
+    var readBlock = String.substring(
+        diskSource, readStart, readEnd - readStart);
+    forbid(diskSource, "bios_sense", "Stage-1 geometry helper");
+    forbid(diskSource, "\tmovb\t$0x84, %ah", "Stage-1 SENSE command");
+    forbid(diskSource, "$0x5331, %dx", "Stage-1 1S diagnostic");
+    needCount(readBlock, "\tint\t$0x1b", 1,
+              "fixed Stage-1 INT 1Bh transaction");
+    needOrder(readBlock, "\tcall\tprepare_target", "\tmovb\t$0x06, %ah",
+              "target-before-command setup");
+    needOrder(readBlock, "\tmovb\t$0x06, %ah", "\tmovw\t$512, %bx",
+              "read command/sector-size setup");
+    needOrder(readBlock, "\tmovw\t$512, %bx", "\txorw\t%cx, %cx",
+              "sector-size/count setup");
+    needOrder(readBlock, "\txorw\t%cx, %cx", "\tmovw\t$0x0002, %dx",
+              "count/CHS setup");
+    needOrder(readBlock, "\tmovw\t$0x0002, %dx",
+              "\tmovw\t%cs:saved_si, %si", "CHS/SI setup");
+    needOrder(readBlock, "\tmovw\t%cs:saved_si, %si",
+              "\tmovw\t%cs:saved_di, %di", "SI/DI setup");
+    needOrder(readBlock, "\tmovw\t%cs:saved_di, %di", "\tint\t$0x1b",
+              "register-before-transfer setup");
+    needOrder(readBlock, "\tint\t$0x1b", "\tjc\tboot_failure_read",
+              "transfer carry check");
+    need(readBlock, "\tmovb\t$0x06, %ah", "fixed INT 1Bh read command");
+    need(readBlock, "\tmovw\t$512, %bx", "fixed physical-sector size");
+    need(readBlock, "\tmovw\t$0x0002, %dx",
+         "physical LBA-2 selector read");
+    need(readBlock, "\tmovw\t%cs:saved_si, %si", "saved firmware SI");
+    need(readBlock, "\tmovw\t%cs:saved_di, %di", "saved firmware DI");
+    need(diskSource, "\tmovw\t$0x5231, %dx", "1R failure diagnostic");
+    need(diskSource, "\tmovw\t%ax, %es:(%bx)",
+         "LBA-0 full character-cell diagnostic");
+    need(diskSource, "\tmovw\t$0x00e1, %es:(%bx)",
+         "LBA-0 full attribute-cell diagnostic");
+    need(selectorSource, "\tmovw\t$0x5432, %dx", "2T failure diagnostic");
+    need(selectorSource, "\tmovw\t$0x4e32, %dx", "2N failure diagnostic");
+    need(selectorSource, "\tmovw\t$0x5032, %dx", "2P failure diagnostic");
+    need(selectorSource, "\tmovw\t%ax, %es:(%bx)",
+         "LBA-2 full character-cell diagnostic");
+    need(selectorSource, "\tmovw\t$0x00e1, %es:(%bx)",
+         "LBA-2 full attribute-cell diagnostic");
+    need(pbrSource, "\tcall\tbios_sense",
+         "PBR geometry-dependent SENSE call");
+    need(pbrSource, "\tmovb\t$0x84, %ah", "PBR SENSE command");
+    need(pbrSource, "\tcmpb\t$0x20, %ah", "PBR SENSE status validation");
+    need(pbrSource, "\tcmpw\t$512, %bx", "PBR sector-size validation");
+    need(loaderSource, "mov ah, 0x84", "BOOTZBSD SENSE command");
+    need(loaderSource, "cmp byte ptr [sense_status], 0x20",
+         "BOOTZBSD SENSE status validation");
+    need(loaderSource, "cmp byte ptr [sense_heads], 0",
+         "BOOTZBSD SENSE head validation");
+    need(loaderSource, "cmp byte ptr [sense_sectors], 0",
+         "BOOTZBSD SENSE sector validation");
+
+    var stage1 = zbReadFile(repo + "/build/pc98/bootloader/stage1.bin");
+    var stage2 = zbReadFile(repo + "/build/pc98/bootloader/stage2.bin");
+    var image = zbReadFile(repo + "/build/pc98/hdd-image.img");
+    checkIpl1(stage1, "declared Stage 1");
+    checkIpl1(image, "installed LBA-0 IPL");
+    if (Packed.size(stage1) != 512 || stage1[508] != 9 ||
+        stage1[509] != 0 || stage1[510] != 0x55 || stage1[511] != 0xaa) {
+        zbFail("LBA-0 IPL size/metadata/signature contract failed");
+    }
+    if (Packed.size(stage2) != 14 * 512 || stage2[510] != 0x55 ||
+        stage2[511] != 0xaa) {
+        zbFail("LBA-2 selector size/signature contract failed");
+    }
+    if (Packed.size(image) < 1024 + Packed.size(stage2)) {
+        zbFail("PC-98 disk image is too short");
+    }
+    for (i in 446..508) {
+        if (image[i] != 0) {
+            zbFail("PC/AT partition entry leaked into native PC-98 LBA 0");
+        }
+    }
+    if (image[512] != 0xa1 || image[513] != 0x91) {
+        zbFail("native PC-98 partition table is missing from LBA 1");
+    }
+    compareRange(stage1, 0, image, 0, 512, "installed LBA-0 IPL");
+    compareRange(stage2, 0, image, 1024, Packed.size(stage2),
+                 "installed LBA-2 selector");
+
+    // Corrupt the declared Stage 1 and installed LBA 0 identically. A byte
+    // comparison alone would accept this pair; the production checker must
+    // reject the independent fixed-offset IPL1 contract.
+    var temp = repo + "/plan/ws003-bringup/temp/pc98-v13-ipl";
+    if (System.shell("mkdir -p " + zbShellQuote(temp)) != 0) {
+        zbFail("cannot create BR-T54 negative-fixture directory");
+    }
+    var badStage1 = temp + "/bad-ipl1-stage1.bin";
+    var badImage = temp + "/bad-ipl1-image.img";
+    var rejectLog = temp + "/bad-ipl1-rejection.log";
+    var mutation = "cp " + zbShellQuote(
+        repo + "/build/pc98/bootloader/stage1.bin") + " " +
+        zbShellQuote(badStage1) + " && cp --reflink=auto --sparse=always " +
+        zbShellQuote(repo + "/build/pc98/hdd-image.img") + " " +
+        zbShellQuote(badImage) + " && printf X | dd of=" +
+        zbShellQuote(badStage1) +
+        " bs=1 seek=4 count=1 conv=notrunc status=none && printf X | dd of=" +
+        zbShellQuote(badImage) +
+        " bs=1 seek=4 count=1 conv=notrunc status=none";
+    if (System.shell(mutation) != 0) {
+        zbFail("cannot create one-byte IPL1 corruption fixture");
+    }
+    var checker = zbShellQuote(
+        repo + "/build/NoctLang/build-static/noct") + " --path=" +
+        zbShellQuote(repo + "/tools/build") + " " + zbShellQuote(
+        repo + "/tools/build/check-bios-hdd-image.noct") +
+        " --machine pc98 --stage1 " + zbShellQuote(badStage1) + " " +
+        zbShellQuote(badImage) + " >" + zbShellQuote(rejectLog) + " 2>&1";
+    if (System.shell(checker) == 0) {
+        zbFail("production checker accepted corrupted IPL1 in Stage 1 and LBA 0");
+    }
+    if (String.indexOf(FileUtil.readText(rejectLog), "IPL1") < 0) {
+        zbFail("corrupted IPL1 was rejected for an unrelated reason");
+    }
+
+    print("WS003 BR-T54 PC-98 IPL contract: PASS");
+}

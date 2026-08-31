@@ -8,7 +8,7 @@ Phase ID: `p008`
 
 Combined ID: `ws008-p008`
 
-Status: Planned; Queue-ready
+Status: Complete (`q041`, 2026-08-31)
 
 Parent: [WS008](../ws.md)
 
@@ -121,3 +121,34 @@ This P book is Queue-ready, but planning does not authorize implementation.
 Execution may fetch and pin the public Noct repository and edit the zedBSD
 host-toolchain integration. It does not authorize changes, commits, or pushes
 in `awemorris/NoctLang`, and it does not authorize target-package re-enable.
+
+## q041 execution result
+
+Completed with upstream `main` resolved once, after network access became
+available, as commit `3bf3d236aa8ce014c63853dee3b21fa023d877ed`.
+`ZEDBSD_HOST_NOCT_REVISION` now contains that full immutable SHA and
+`build/NoctLang` is a tracked-clean detached checkout at the same object.
+
+The first clean static build exposed one upstream configuration change rather
+than a source failure: the generic `static` preset now leaves the non-standard
+Process API disabled, so the existing project-owned smoke stopped at
+`Symbol "Process" not found`.  The host toolchain requires this API for its
+build scripts.  The zedBSD wrapper now explicitly configures the same static
+preset with `NOCT_ENABLE_API_PROCESS=ON`; no upstream or target Noct source was
+modified.  The rebuilt executable checksum is
+`035f69c8a82ed119bda77b1a56257ce0d50fec966ddffcea6c2923cfab864bda`.
+
+The checkout rule now also validates tracked cleanliness and actual HEAD on
+every invocation, even when an old revision-named stamp exists.  A disposable
+local-repository fixture began at the old `c1e4e0f...` object with a falsely
+present new-revision stamp; the verification target moved it to `3bf3d23...`
+and invalidated the falsely matching build stamp.  The Process-enabled build
+uses a feature-bearing revision stamp so the earlier Process-disabled artifact
+cannot satisfy it.
+
+A clean `make -j16 toolchain` then passed the File, Process, and System smoke;
+an immediate second invocation passed the same smoke without rebuilding or
+resolving another revision.  The final selected checkout is detached and has
+no tracked changes.  Only the top-level host pin/build mechanics and planning
+books changed in zedBSD; target holds and `userland/noct/NoctLang` or
+`userland/base/noct/noct` were not touched.  `git diff --check` passed.

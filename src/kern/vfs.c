@@ -181,6 +181,7 @@ vfs_ensure_root_directory(const struct path *root, const char *name,
 			  mode_t mode)
 {
 	struct componentname component;
+	struct inode_creation_request request;
 	struct inode *inode = NULL;
 	int error;
 	component.cn_nameptr = name;
@@ -194,7 +195,10 @@ vfs_ensure_root_directory(const struct path *root, const char *name,
 	}
 	if (error != ENOENT)
 		return error;
-	error = inode_mkdir(root->p_inode, &component, mode, &inode);
+	error = inode_creation_request_system(INODE_DIR, mode, 0, 0, 0,
+	    &request);
+	if (error == 0)
+		error = inode_mkdir(root->p_inode, &component, &request, &inode);
 	if (inode != NULL)
 		inode_release(inode);
 	return error;
@@ -878,9 +882,21 @@ kern_vfs_init(const struct boot_handoff *handoff,
 			continue;
 		}
 		for (slot = 0; slot < count; slot++) {
-			if (entries[slot].p_block_count == 0 ||
-			    partition_create_disk(&entries[slot]) != 0)
+			int partition_error;
+
+			if (entries[slot].p_block_count == 0) {
+				VFS_LOG("vfs: %s partition %u has zero blocks; "
+				    "not published\n", physical[i]->d_name,
+				    entries[slot].p_index + 1U);
 				continue;
+			}
+			partition_error = partition_create_disk(&entries[slot]);
+			if (partition_error != 0) {
+				VFS_LOG("vfs: %s partition %u create failed "
+				    "(error %d)\n", physical[i]->d_name,
+				    entries[slot].p_index + 1U, partition_error);
+				continue;
+			}
 			VFS_LOG(
 			    "vfs: %s partition %u start=%08X:%08X "
 			    "data=%08X:%08X blocks=%08X:%08X\n",

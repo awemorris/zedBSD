@@ -104,6 +104,17 @@ sched_yield(void)
 {
 }
 
+bool
+hal_irq_disable(void)
+{
+	return true;
+}
+
+void
+hal_irq_enable(void)
+{
+}
+
 static const uint8_t device_descriptor[] = {
 	18, 1, 0x00, 0x02, 0xef, 2, 1, 64,
 	0x34, 0x12, 0x78, 0x56, 0x00, 0x01, 1, 2, 5, 2
@@ -140,13 +151,14 @@ static const uint8_t rtl8156_vendor_configuration[] = {
 
 /* RTL8156 exposes an explicit CDC Union but no IAD in its NCM mode. */
 static const uint8_t rtl8156_ncm_configuration[] = {
-	9, 2, 86, 0, 2, 2, 0, 0xa0, 64,
+	9, 2, 92, 0, 2, 2, 0, 0xa0, 64,
 	9, 4, 0, 0, 1, 2, 0x0d, 0, 5,
 	5, 0x24, 0, 0x10, 0x01,
 	5, 0x24, 6, 0, 1,
 	13, 0x24, 0x0f, 3, 0, 0, 0, 0, 0xee, 0x05, 0, 0, 0,
 	6, 0x24, 0x1a, 0x00, 0x01, 0x2b,
 	7, 5, 0x83, 3, 16, 0, 11,
+	6, 48, 0, 0, 16, 0,
 	9, 4, 1, 0, 0, 0x0a, 0, 1, 0,
 	9, 4, 1, 1, 2, 0x0a, 0, 1, 4,
 	7, 5, 0x81, 2, 0x00, 0x02, 0,
@@ -234,12 +246,22 @@ static const uint8_t mac_string[] = {
 	'A', 0, 'A', 0, 'B', 0, 'B', 0, 'C', 0, 'C', 0
 };
 static const uint8_t malformed_string[] = { 4, 3, 0x00, 0xd8 };
+static const uint8_t superspeed_companion_wire[] = {
+	6, 48, 3, 0, 0x34, 0x12
+};
+static const uint8_t malformed_companion_length[] = {
+	5, 48, 3, 0, 0x34, 0x12
+};
+static const uint8_t malformed_companion_type[] = {
+	6, 49, 3, 0, 0x34, 0x12
+};
 
 struct fake_controller {
 	struct drv_usb_hcd hcd;
 	struct drv_usb_bus *bus;
 	unsigned bus_number;
 	unsigned connected;
+	unsigned connection_changed;
 	unsigned malformed;
 	unsigned vendor_first;
 	unsigned rtl8156_layout;
@@ -250,6 +272,7 @@ struct fake_controller {
 	unsigned endpoint_enabled[256];
 	unsigned endpoint_enable_count;
 	unsigned endpoint_disable_count;
+	unsigned endpoint_reset_count;
 	unsigned invalid_endpoint_operations;
 	unsigned set_interface_count;
 	unsigned last_set_interface_number;
@@ -263,6 +286,7 @@ struct fake_controller {
 	struct drv_usb_urb *held_async_urb;
 	unsigned fail_enable_address;
 	unsigned fail_disable_address;
+	unsigned fail_reset_address;
 	unsigned expected_published_alternate;
 	struct drv_usb_interface *observed_interface;
 	unsigned teardown_tracking;
@@ -275,6 +299,7 @@ struct fake_controller {
 	unsigned teardown_stop_sequence;
 	int teardown_detach_error;
 	int teardown_device_quiesce_error;
+	int teardown_hcd_quiesce_error;
 };
 
 static struct fake_controller *
@@ -308,7 +333,7 @@ fake_quiesce(struct drv_usb_hcd *hcd)
 	if (controller->teardown_tracking)
 		controller->teardown_hcd_quiesce_sequence =
 		    ++controller->teardown_sequence;
-	return 0;
+	return controller->teardown_hcd_quiesce_error;
 }
 
 static int
@@ -525,6 +550,25 @@ fake_endpoint_disable(struct drv_usb_hcd *hcd,
 }
 
 static int
+fake_endpoint_reset(struct drv_usb_hcd *hcd,
+	struct drv_usb_endpoint *endpoint)
+{
+	struct fake_controller *controller = fake_controller(hcd);
+	uint8_t address = drv_usb_endpoint_address(endpoint);
+
+	controller->endpoint_reset_count++;
+	if (!controller->endpoint_enabled[address]) {
+		controller->invalid_endpoint_operations++;
+		return EBUSY;
+	}
+	if (controller->fail_reset_address == address) {
+		controller->fail_reset_address = 0U;
+		return EIO;
+	}
+	return 0;
+}
+
+static int
 fake_root_control(struct drv_usb_hcd *hcd,
 	const struct drv_usb_control_request *request, void *buffer,
 	size_t length, size_t *actual)
@@ -534,10 +578,17 @@ fake_root_control(struct drv_usb_hcd *hcd,
 
 	if (request->request == 0 && request->request_type == 0xa3U) {
 		CHECK(buffer != NULL && length >= sizeof(status));
-		status = controller->connected ? 1U | 0x400U | (1U << 16) :
-		    (1U << 16);
+		status = controller->connected ? 1U | 2U | 0x400U : 0U;
+		if (controller->connection_changed)
+			status |= 1U << 16;
 		memcpy(buffer, &status, sizeof(status));
 		*actual = sizeof(status);
+		return 0;
+	}
+	if (request->request == 1 && request->request_type == 0x23U &&
+	    request->value == 16U) {
+		controller->connection_changed = 0U;
+		*actual = 0;
 		return 0;
 	}
 	*actual = 0;
@@ -561,6 +612,7 @@ static const struct drv_usb_hcd_ops fake_ops = {
 	.device_disable = fake_device_disable,
 	.endpoint_enable = fake_endpoint_enable,
 	.endpoint_disable = fake_endpoint_disable,
+	.endpoint_reset = fake_endpoint_reset,
 	.root_hub_control = fake_root_control,
 	.root_port_reset = fake_root_reset
 };
@@ -572,6 +624,7 @@ fake_register_capabilities(struct fake_controller *controller,
 	memset(controller, 0, sizeof(*controller));
 	controller->malformed = malformed;
 	controller->connected = 1;
+	controller->connection_changed = 1U;
 	controller->expected_published_alternate = UINT32_MAX;
 	controller->hcd.name = "fixture";
 	controller->hcd.ops = &fake_ops;
@@ -592,6 +645,7 @@ static void
 fake_unregister(struct fake_controller *controller)
 {
 	controller->connected = 0;
+	controller->connection_changed = 1U;
 	drv_usb_hcd_root_hub_changed(&controller->hcd);
 	CHECK(controller->invalid_endpoint_operations == 0);
 	CHECK(drv_usb_hcd_unregister(&controller->hcd) == 0);
@@ -789,7 +843,7 @@ main(void)
 	struct fake_controller tie_controller, no_driver_controller, rtl8156;
 	struct fake_controller hotplug_success, hotplug_detach_failure;
 	struct fake_controller shutdown_success, shutdown_detach_failure;
-	struct fake_controller shutdown_device_failure;
+	struct fake_controller shutdown_device_failure, shutdown_hcd_failure;
 	struct fake_controller capability_controller;
 	struct drv_usb_hcd invalid_hcd;
 	struct drv_usb_hcd_ops invalid_ops;
@@ -802,6 +856,9 @@ main(void)
 	struct timespec settle = { .tv_sec = 0, .tv_nsec = 10000000L };
 	struct drv_usb_configuration *configuration;
 	struct drv_usb_interface *control, *data, *storage;
+	struct drv_usb_endpoint *notification;
+	struct drv_usb_superspeed_endpoint_companion_descriptor decoded;
+	const struct drv_usb_superspeed_endpoint_companion_descriptor *companion;
 	const struct drv_usb_host_interface *alternate;
 	const struct drv_usb_interface_descriptor *descriptor;
 	const struct drv_usb_interface_association_descriptor *iad;
@@ -810,11 +867,38 @@ main(void)
 	unsigned fault_nth, fault_success_nth = 0;
 	char string[32];
 
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(
+	    superspeed_companion_wire, sizeof(superspeed_companion_wire),
+	    &decoded) == 0);
+	CHECK(decoded.length == 6 && decoded.descriptor_type == 48 &&
+	    decoded.maximum_burst == 3 && decoded.attributes == 0 &&
+	    decoded.bytes_per_interval == UINT16_C(0x1234));
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(
+	    superspeed_companion_wire, sizeof(superspeed_companion_wire) - 1U,
+	    &decoded) == EINVAL);
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(
+	    malformed_companion_length, sizeof(malformed_companion_length),
+	    &decoded) == EINVAL);
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(
+	    malformed_companion_type, sizeof(malformed_companion_type),
+	    &decoded) == EINVAL);
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(NULL,
+	    sizeof(superspeed_companion_wire), &decoded) == EINVAL);
+	CHECK(drv_usb_decode_superspeed_endpoint_companion(
+	    superspeed_companion_wire, sizeof(superspeed_companion_wire),
+	    NULL) == EINVAL);
+
 	CHECK(drv_usb_init() == 0);
 	memset(&invalid_hcd, 0, sizeof(invalid_hcd));
 	invalid_ops = fake_ops;
 	invalid_ops.endpoint_disable = NULL;
 	invalid_hcd.name = "invalid one-sided endpoint contract";
+	invalid_hcd.ops = &invalid_ops;
+	CHECK(drv_usb_hcd_register(&invalid_hcd, &invalid_bus) == EINVAL);
+	memset(&invalid_hcd, 0, sizeof(invalid_hcd));
+	invalid_ops = fake_ops;
+	invalid_ops.endpoint_reset = NULL;
+	invalid_hcd.name = "invalid missing endpoint reset";
 	invalid_hcd.ops = &invalid_ops;
 	CHECK(drv_usb_hcd_register(&invalid_hcd, &invalid_bus) == EINVAL);
 	memset(&invalid_hcd, 0, sizeof(invalid_hcd));
@@ -1039,6 +1123,16 @@ main(void)
 	control = drv_usb_configuration_find_interface(configuration, 0);
 	data = drv_usb_configuration_find_interface(configuration, 1);
 	CHECK(control != NULL && data != NULL);
+	notification = drv_usb_interface_find_endpoint(control,
+	    DRV_USB_TRANSFER_INTERRUPT, DRV_USB_DIR_IN, NULL);
+	CHECK(notification != NULL);
+	companion = drv_usb_endpoint_superspeed_companion(notification);
+	CHECK(companion != NULL && companion->length == 6 &&
+	    companion->descriptor_type == 48 && companion->maximum_burst == 0 &&
+	    companion->attributes == 0 && companion->bytes_per_interval == 16);
+	CHECK(drv_usb_endpoint_maximum_burst(notification) == 0);
+	CHECK(drv_usb_endpoint_superspeed_companion(
+	    drv_usb_interface_endpoint(data, 0)) == NULL);
 	CHECK(drv_usb_interface_driver(control) == &fake_driver);
 	CHECK(drv_usb_interface_claimed_by(data) == control);
 	CHECK(diagnostic_log_contains("0bda:8156 class 00 configuration=2 "
@@ -1105,6 +1199,7 @@ main(void)
 	CHECK(drv_usb_interface_claimed_by(data) == control);
 	fake_driver_state.detach_error = EBUSY;
 	claim_controller.connected = 0;
+	claim_controller.connection_changed = 1U;
 	drv_usb_hcd_root_hub_changed(&claim_controller.hcd);
 	CHECK(drv_usb_find_device(claim_controller.bus_number, 1) == device);
 	CHECK(drv_usb_interface_driver(control) == &fake_driver);
@@ -1203,6 +1298,7 @@ main(void)
 	CHECK(diagnostic_log_contains("interface 2 class 08/06/50 "
 	    "driver=fixture-storage"));
 	hotplug_success.connected = 0;
+	hotplug_success.connection_changed = 1U;
 	drv_usb_hcd_root_hub_changed(&hotplug_success.hcd);
 	CHECK(drv_usb_find_device(hotplug_success.bus_number, 1) == NULL);
 	CHECK(hotplug_success.teardown_detach_sequence == 1U);
@@ -1230,6 +1326,7 @@ main(void)
 	CHECK(drv_usb_interface_claimed_by(data) == control);
 	CHECK(drv_usb_interface_driver(storage) == &fake_storage_driver);
 	hotplug_detach_failure.connected = 0;
+	hotplug_detach_failure.connection_changed = 1U;
 	drv_usb_hcd_root_hub_changed(&hotplug_detach_failure.hcd);
 	CHECK(drv_usb_find_device(hotplug_detach_failure.bus_number, 1) ==
 	    device);
@@ -1289,7 +1386,27 @@ main(void)
 	CHECK(control != NULL &&
 	    drv_usb_interface_driver(control) == &fake_driver);
 
+	/* Register this controller last so its checked HCD-stop failure is the
+	 * first bus visited.  The same shutdown invocation must still quiesce all
+	 * later buses, and a later invocation must retry only this retained bus. */
+	fake_register(&shutdown_hcd_failure, 0);
+	shutdown_hcd_failure.teardown_tracking = 1U;
+	shutdown_hcd_failure.teardown_hcd_quiesce_error = EIO;
+	shutdown_hcd_failure.vendor_first = 1U;
+	drv_usb_hcd_root_hub_changed(&shutdown_hcd_failure.hcd);
+	device = drv_usb_find_device(shutdown_hcd_failure.bus_number, 1);
+	CHECK(device != NULL);
+	configuration = drv_usb_device_active_configuration(device);
+	control = drv_usb_configuration_find_interface(configuration, 0);
+	CHECK(control != NULL &&
+	    drv_usb_interface_driver(control) == &fake_driver);
+
 	drv_usb_shutdown();
+	CHECK(shutdown_hcd_failure.teardown_detach_sequence == 1U);
+	CHECK(shutdown_hcd_failure.teardown_device_quiesce_sequence == 2U);
+	CHECK(shutdown_hcd_failure.teardown_hcd_quiesce_sequence == 3U);
+	CHECK(shutdown_hcd_failure.teardown_stop_sequence == 0U);
+	CHECK(shutdown_hcd_failure.teardown_sequence == 3U);
 	CHECK(shutdown_success.teardown_detach_sequence == 1U);
 	CHECK(shutdown_success.teardown_device_quiesce_sequence == 2U);
 	CHECK(shutdown_success.teardown_hcd_quiesce_sequence == 3U);
@@ -1306,6 +1423,15 @@ main(void)
 	CHECK(shutdown_device_failure.teardown_device_quiesce_sequence == 2U);
 	CHECK(shutdown_device_failure.teardown_hcd_quiesce_sequence == 3U);
 	CHECK(shutdown_device_failure.teardown_stop_sequence == 0U);
+	CHECK(shutdown_device_failure.teardown_sequence == 3U);
+
+	shutdown_hcd_failure.teardown_hcd_quiesce_error = 0;
+	drv_usb_shutdown();
+	CHECK(shutdown_hcd_failure.teardown_hcd_quiesce_sequence == 5U);
+	CHECK(shutdown_hcd_failure.teardown_stop_sequence == 6U);
+	CHECK(shutdown_hcd_failure.teardown_sequence == 6U);
+	CHECK(shutdown_success.teardown_sequence == 4U);
+	CHECK(shutdown_detach_failure.teardown_sequence == 3U);
 	CHECK(shutdown_device_failure.teardown_sequence == 3U);
 
 	printf("usb function model: %u checks passed\n", checks);

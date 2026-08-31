@@ -1,0 +1,521 @@
+require zedbuild;
+
+// MAC-T022 valid-GPT precedence over a mismatched Protective-MBR extent.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+func normalizeProcessText(value) {
+    var result = "";
+    for (i in 0..String.charCount(value)) {
+        if (String.charCodeAt(value, i) != 13) {
+            result = result + String.charAt(value, i);
+        }
+    }
+    return result;
+}
+
+func capture(command, what) {
+    var child = Process.spawn(["/bin/sh", "-c", command + " 2>&1"]);
+    if (child < 0) { zbFail("cannot start " + what); }
+    var output = "";
+    while (Process.isAlive(child) == 1) {
+        output = output + Process.read(child, 100);
+    }
+    output = output + Process.read(child, 0);
+    var status = Process.wait(child);
+    Process.close(child);
+    output = normalizeProcessText(output);
+    while (String.charCount(output) > 0 &&
+           String.charCodeAt(output, String.charCount(output) - 1) == 10) {
+        output = String.substring(output, 0, String.charCount(output) - 1);
+    }
+    if (status != 0) {
+        zbFail(what + " failed (status=" + status + "): " + output);
+    }
+    return output;
+}
+
+func run(repo, command, what) {
+    var status = System.shell("cd " + zbShellQuote(repo) + " && " + command);
+    if (status != 0) { zbFail(what + " failed (status=" + status + ")"); }
+}
+
+func runLogged(repo, log, command, what) {
+    var status = System.shell("cd " + zbShellQuote(repo) + " && " + command +
+                              " >" + zbShellQuote(log) + " 2>&1");
+    if (status != 0) {
+        zbFail(what + " failed (status=" + status + "; log=" + log + ")");
+    }
+}
+
+func requirePattern(path, pattern, what) {
+    if (System.shell("rg -a -q -- " + zbShellQuote(pattern) + " " +
+                     zbShellQuote(path)) != 0) {
+        zbFail(what + " is missing (log=" + path + ")");
+    }
+}
+
+func rejectPattern(path, pattern, what) {
+    var status = System.shell("rg -a -q -- " + zbShellQuote(pattern) + " " +
+                              zbShellQuote(path));
+    if (status == 0) { zbFail(what + " was observed (log=" + path + ")"); }
+    if (status != 1 && status != 256) { zbFail("cannot inspect " + path); }
+}
+
+func resolveCommand(shellExpression, what) {
+    var value = capture("command -v \"" + shellExpression + "\"", what);
+    if (value == "") { zbFail(what + " resolved to an empty path"); }
+    return value;
+}
+
+func resolveFile(shellExpression, what) {
+    var value = capture("realpath \"" + shellExpression + "\"", what);
+    if (FileUtil.checkFileExists(value) != 1) {
+        zbFail(what + " not found: " + value);
+    }
+    return value;
+}
+
+func writeFixtureConfig(repo, destination) {
+    var source = FileUtil.readText(repo + "/config.mk");
+    FileUtil.writeText(destination, source +
+        "\n# MAC-T022 private UEFI-only QEMU overrides.\n" +
+        "ZEDBSD_PLATFORM := amd64\n" +
+        "ZEDBSD_ARCHITECTURE := amd64\n" +
+        "ZEDBSD_BOARD := pcat\n" +
+        "ZEDBSD_VARIANT := uefi\n" +
+        "CONFIG_DRIVER_NE2000 := n\n" +
+        "CONFIG_DRIVER_PCI_UHCI := n\n" +
+        "CONFIG_DRIVER_PCI_EHCI := n\n" +
+        "CONFIG_DRIVER_PCI_XHCI := y\n" +
+        "CONFIG_DRIVER_USB_STORAGE := y\n");
+}
+
+func makeVariables(config, build, evidence) {
+    return " ZEDBSD_CONFIG=" + zbShellQuote(config) +
+        " BUILD=" + zbShellQuote(build) +
+        " ARCH_IMAGE_DIR=" + zbShellQuote(evidence + "/arch-images") +
+        " DATA_IMAGE=" + zbShellQuote(evidence + "/data.img") +
+        " SWAP_IMAGE=" + zbShellQuote(evidence + "/swapfile") +
+        " ZEDBSD_IMAGE_HOST=" + zbShellQuote(evidence + "/zedimage-host");
+}
+
+func checkerArgs(build, evidence, image) {
+    return "--layout uefi --machine pcat --stage1 " +
+        zbShellQuote(build + "/bootloader/stage1.bin") +
+        " --stage2 " + zbShellQuote(build + "/bootloader/stage2-chain.bin") +
+        " --partition-pbr " +
+        zbShellQuote(build + "/bootloader/partition-pbr.bin") +
+        " --bootzbsd " + zbShellQuote(build + "/bootloader/BOOTZBSD.EXE") +
+        " --kernel " + zbShellQuote(build + "/vmunix") +
+        " --bootx64 " + zbShellQuote(build + "/uefi/BOOTX64.EFI") +
+        " --zedbsd-config platform/amd64/zedbsd.cfg" +
+        " --arch-profile amd64 --arch-image " +
+        zbShellQuote(evidence + "/arch-images/amd64.ufs") +
+        " --arch-format ufs --data-image " +
+        zbShellQuote(evidence + "/data.img") +
+        " --swapfile " + zbShellQuote(evidence + "/swapfile") + " " +
+        zbShellQuote(image);
+}
+
+func buildCheckedSource(repo, evidence, config, build) {
+    var command = "TMPDIR=" + zbShellQuote(evidence + "/tmp") +
+        " make --no-print-directory -j16 " +
+        "ZEDBSD_PLATFORM=amd64 ZEDBSD_ARCHITECTURE=amd64 " +
+        "ZEDBSD_BOARD=pcat ZEDBSD_VARIANT=uefi" +
+        " CONFIG_DRIVER_NE2000=n CONFIG_DRIVER_PCI_UHCI=n" +
+        " CONFIG_DRIVER_PCI_EHCI=n CONFIG_DRIVER_PCI_XHCI=y" +
+        " CONFIG_DRIVER_USB_STORAGE=y" +
+        makeVariables(config, build, evidence) + " disk-image";
+    runLogged(repo, evidence + "/images/build-uefi.log", command,
+              "private production UEFI-only image");
+    var built = build + "/hdd-image.img";
+    if (FileUtil.getFileSize(built) != 202392064) {
+        zbFail("private production UEFI-only image has the wrong extent");
+    }
+    if (FileUtil.readText(build + "/.disk-image-contract") !=
+        "layout=uefi\n") {
+        zbFail("private build retained a stale disk-image contract");
+    }
+    var source = evidence + "/images/uefi.img";
+    run("/", "cp --reflink=auto --sparse=always " + zbShellQuote(built) +
+        " " + zbShellQuote(source) + " && cmp " + zbShellQuote(built) +
+        " " + zbShellQuote(source), "freeze checked-source candidate");
+    var checker = "build/NoctLang/build-static/noct --path=tools/build " +
+        "platform/amd64/tools/check-amd64-gpt-image.noct ";
+    runLogged(repo, evidence + "/images/check-uefi.log",
+        checker + checkerArgs(build, evidence, source),
+        "production UEFI-only byte checker");
+    requirePattern(evidence + "/images/check-uefi.log",
+                   "^amd64 UEFI-only primary-only image check: PASS$",
+                   "production UEFI-only checker PASS");
+    return source;
+}
+
+func fatUuid(source, evidence) {
+    var serialPath = evidence + "/images/payload-fat-vbr.bin";
+    run("/", "dd if=" + zbShellQuote(source) + " of=" +
+        zbShellQuote(serialPath) + " bs=512 skip=133120 count=1 status=none",
+        "extract payload FAT VBR");
+    var raw = zbReadFile(serialPath);
+    if (Packed.size(raw) != 512 || raw[66] != 41) {
+        zbFail("payload FAT VBR has no extended serial");
+    }
+    var serial = zbU32LE(raw, 67);
+    if (serial == 0) { zbFail("zero payload FAT serial"); }
+    var digits = "0123456789ABCDEF";
+    var uuid = "";
+    for (i in 0..4) {
+        uuid = uuid + String.charAt(digits,
+            (serial >> (28 - i * 4)) & 15);
+    }
+    uuid = uuid + "-";
+    for (i in 0..4) {
+        uuid = uuid + String.charAt(digits,
+            (serial >> (12 - i * 4)) & 15);
+    }
+    FileUtil.writeText(evidence + "/images/payload-fat-uuid.txt", uuid + "\n");
+    return uuid;
+}
+
+func allZeroRange(data, start, count) {
+    if (start < 0 || count < 0 || start + count > Packed.size(data)) {
+        return false;
+    }
+    for (i in 0..count) {
+        if (data[start + i] != 0) { return false; }
+    }
+    return true;
+}
+
+func equalRange(left, leftOffset, right, rightOffset, count) {
+    if (leftOffset < 0 || rightOffset < 0 || count < 0 ||
+        leftOffset + count > Packed.size(left) ||
+        rightOffset + count > Packed.size(right)) {
+        return false;
+    }
+    for (i in 0..count) {
+        if (left[leftOffset + i] != right[rightOffset + i]) { return false; }
+    }
+    return true;
+}
+
+func crc32Range(data, start, count) {
+    var crc = 4294967295;
+    for (i in 0..count) {
+        crc = crc ^ data[start + i];
+        for (j in 0..8) {
+            if ((crc & 1) != 0) { crc = (crc >> 1) ^ 0xedb88320; }
+            else { crc = crc >> 1; }
+        }
+    }
+    return (crc ^ 4294967295) & 4294967295;
+}
+
+func validHeaderCrc(header) {
+    if (Packed.size(header) != 512) { return false; }
+    var copy = Packed.uint8(92);
+    zbCopy(copy, 0, header, 0, 92);
+    var stored = zbU32LE(copy, 16);
+    zbPut32LE(copy, 16, 0);
+    return stored == crc32Range(copy, 0, 92);
+}
+
+func requireBoundedSourceHeader(header, table) {
+    if (Packed.size(header) != 512 || Packed.size(table) != 16384 ||
+        !zbBytesEqual(header, 0, "EFI PART") ||
+        zbU32LE(header, 8) != 65536 || zbU32LE(header, 12) != 92 ||
+        zbU32LE(header, 20) != 0 || zbU64SmallLE(header, 24) != 1 ||
+        zbU64SmallLE(header, 32) != 395296 ||
+        zbU64SmallLE(header, 40) != 34 ||
+        zbU64SmallLE(header, 48) != 395263 ||
+        zbU64SmallLE(header, 72) != 2 ||
+        zbU32LE(header, 80) != 128 || zbU32LE(header, 84) != 128 ||
+        zbU32LE(header, 88) != crc32Range(table, 0, 16384) ||
+        !allZeroRange(header, 92, 420) || !validHeaderCrc(header)) {
+        zbFail("fresh checked source does not have the production bounded GPT header");
+    }
+}
+
+func requireExpectedSourceEntries(table) {
+    var active = 0;
+    for (index in 0..128) {
+        var at = index * 128;
+        if (!allZeroRange(table, at, 16)) {
+            var first = zbU64SmallLE(table, at + 32);
+            var last = zbU64SmallLE(table, at + 40);
+            if (first < 34 || first > last || last > 395263) {
+                zbFail("production source partition is outside its declared usable range");
+            }
+            active = active + 1;
+        }
+    }
+    if (active != 2) {
+        zbFail("production source must contain exactly two active GPT entries");
+    }
+}
+
+func extract(source, destination, skip, count, what) {
+    run("/", "dd if=" + zbShellQuote(source) + " of=" +
+        zbShellQuote(destination) + " bs=512 skip=" + skip +
+        " count=" + count + " status=none", what);
+}
+
+func makeHostRepairedImage(source, image, evidence) {
+    var physicalSectors = 60549120;
+    var physicalLast = physicalSectors - 1;
+    var backupTableLba = physicalLast - 32;
+    var primaryPath = evidence + "/images/source-primary-header.bin";
+    var tablePath = evidence + "/images/source-primary-table.bin";
+    var pmbrPath = evidence + "/images/source-pmbr.bin";
+    extract(source, pmbrPath, 0, 1, "extract production-source PMBR");
+    extract(source, primaryPath, 1, 1,
+            "extract production-source primary GPT header");
+    extract(source, tablePath, 2, 32,
+            "extract production-source primary GPT array");
+
+    var primary = zbReadFile(primaryPath);
+    var table = zbReadFile(tablePath);
+    requireBoundedSourceHeader(primary, table);
+    requireExpectedSourceEntries(table);
+
+    run("/", "cp --reflink=auto --sparse=always " + zbShellQuote(source) +
+        " " + zbShellQuote(image) + " && truncate -s 31001149440 " +
+        zbShellQuote(image), "create 60,549,120-sector sparse repair medium");
+
+    // Model the host transformation observed on the Intel Mac medium.  The
+    // PMBR remains bounded, while a valid conventional GPT is relocated to
+    // the actual end and its usable range is expanded.  Its two entries stay
+    // unchanged solely so the guest can prove source-payload identity; the
+    // kernel's general GPT-precedence policy is not limited to this layout.
+    zbPut64LE(primary, 32, physicalLast);
+    zbPut64LE(primary, 48, physicalLast - 33);
+    zbPut32LE(primary, 16, 0);
+    zbPut32LE(primary, 16, crc32Range(primary, 0, 92));
+
+    var backup = Packed.uint8(512);
+    zbCopy(backup, 0, primary, 0, 512);
+    zbPut64LE(backup, 24, physicalLast);
+    zbPut64LE(backup, 32, 1);
+    zbPut64LE(backup, 72, backupTableLba);
+    zbPut32LE(backup, 16, 0);
+    zbPut32LE(backup, 16, crc32Range(backup, 0, 92));
+
+    var repairedPrimaryPath = evidence + "/images/repaired-primary-header.bin";
+    var repairedBackupPath = evidence + "/images/repaired-backup-header.bin";
+    zbWriteFile(repairedPrimaryPath, primary);
+    zbWriteFile(repairedBackupPath, backup);
+    run("/", "dd if=" + zbShellQuote(repairedPrimaryPath) + " of=" +
+        zbShellQuote(image) + " bs=512 seek=1 conv=notrunc status=none && " +
+        "dd if=" + zbShellQuote(tablePath) + " of=" + zbShellQuote(image) +
+        " bs=512 seek=" + backupTableLba + " conv=notrunc status=none && " +
+        "dd if=" + zbShellQuote(repairedBackupPath) + " of=" +
+        zbShellQuote(image) + " bs=512 seek=" + physicalLast +
+        " conv=notrunc status=none", "install complete physical-end GPT repair");
+
+    var repairedPmbrPath = evidence + "/images/repaired-pmbr.bin";
+    var verifyPrimaryPath = evidence + "/images/verify-primary-header.bin";
+    var verifyTablePath = evidence + "/images/verify-primary-table.bin";
+    var verifyBackupTablePath = evidence + "/images/verify-backup-table.bin";
+    var verifyBackupPath = evidence + "/images/verify-backup-header.bin";
+    extract(image, repairedPmbrPath, 0, 1, "extract repaired PMBR");
+    extract(image, verifyPrimaryPath, 1, 1, "verify repaired primary header");
+    extract(image, verifyTablePath, 2, 32, "verify repaired primary table");
+    extract(image, verifyBackupTablePath, backupTableLba, 32,
+            "verify repaired backup table");
+    extract(image, verifyBackupPath, physicalLast, 1,
+            "verify repaired backup header");
+    run("/", "cmp " + zbShellQuote(pmbrPath) + " " +
+        zbShellQuote(repairedPmbrPath) + " && cmp " +
+        zbShellQuote(tablePath) + " " + zbShellQuote(verifyTablePath) +
+        " && cmp " + zbShellQuote(tablePath) + " " +
+        zbShellQuote(verifyBackupTablePath),
+        "verify deterministic PMBR-mismatch fixture bytes");
+
+    var verifyPrimary = zbReadFile(verifyPrimaryPath);
+    var verifyBackup = zbReadFile(verifyBackupPath);
+    if (!validHeaderCrc(verifyPrimary) || !validHeaderCrc(verifyBackup) ||
+        zbU64SmallLE(verifyPrimary, 24) != 1 ||
+        zbU64SmallLE(verifyPrimary, 32) != physicalLast ||
+        zbU64SmallLE(verifyPrimary, 40) != 34 ||
+        zbU64SmallLE(verifyPrimary, 48) != physicalLast - 33 ||
+        zbU64SmallLE(verifyPrimary, 72) != 2 ||
+        zbU64SmallLE(verifyBackup, 24) != physicalLast ||
+        zbU64SmallLE(verifyBackup, 32) != 1 ||
+        zbU64SmallLE(verifyBackup, 40) != 34 ||
+        zbU64SmallLE(verifyBackup, 48) != physicalLast - 33 ||
+        zbU64SmallLE(verifyBackup, 72) != backupTableLba ||
+        !equalRange(verifyPrimary, 56, verifyBackup, 56, 16) ||
+        zbU32LE(verifyPrimary, 88) != crc32Range(table, 0, 16384) ||
+        zbU32LE(verifyBackup, 88) != crc32Range(table, 0, 16384)) {
+        zbFail("written physical-end GPT fixture is not valid and self-consistent");
+    }
+    run("/", "test \"$(stat -c%s " + zbShellQuote(image) +
+        ")\" = 31001149440 && stat -c 'logical_bytes=%s allocated_blocks=%b " +
+        "allocation_unit=%B' " + zbShellQuote(image) + " >" +
+        zbShellQuote(evidence + "/images/repaired-image-stat.txt") +
+        " && sha256sum " + zbShellQuote(pmbrPath) + " " +
+        zbShellQuote(repairedPmbrPath) + " " + zbShellQuote(primaryPath) +
+        " " + zbShellQuote(verifyPrimaryPath) + " " +
+        zbShellQuote(verifyBackupPath) + " " + zbShellQuote(tablePath) +
+        " >" + zbShellQuote(evidence + "/images/gpt-evidence.sha256"),
+        "retain exact host-repair evidence");
+}
+
+func validateGuest(log, uuid) {
+    requirePattern(log,
+        "^usb-storage: sda blocks=60549120 block-size=512([[:blank:]]|$)",
+        "observed USB capacity");
+    requirePattern(log,
+        "^gpt: sda protective MBR extent mismatch: " +
+        "advertised-last=395296 gpt-last=60549119; using GPT$",
+        "exact GPT-precedence mismatch diagnostic");
+    requirePattern(log, "^vfs: scan sda .* blocks=60549120: 2 entries$",
+                   "two-entry GPT scan");
+    requirePattern(log,
+        "^vfs: sda partition 1 start=00000000:00000800 " +
+        "data=00000000:00000800 blocks=00000000:00020000$",
+        "sda1 publication");
+    requirePattern(log,
+        "^vfs: sda partition 2 start=00000000:00020800 " +
+        "data=00000000:00020800 blocks=00000000:00040000$",
+        "sda2 publication");
+    rejectPattern(log, "^vfs: sda partition ([3-9]|[1-9][0-9]+) start=",
+                  "partition outside the expected source two-entry GPT");
+    requirePattern(log, "^vfs: boot0 UUID=" + uuid +
+        " -> /dev/sda2 \\(private FAT\\)$", "payload UUID resolution");
+    requirePattern(log,
+        "^vfs: loop0 <- boot0:rootfs.img \\(private, read-only\\)$",
+        "rootfs loop publication");
+    requirePattern(log,
+        "^vfs: loop1 <- boot0:data.img \\(private, read-write\\)$",
+        "data loop publication");
+    requirePattern(log,
+        "^vfs: root=overlay lower=boot0:rootfs.img upper=boot0:data.img$",
+        "overlay-root activation");
+    requirePattern(log,
+        "^swap: active sources=1 total=[1-9][0-9]* free=[1-9][0-9]*$",
+        "active swap source");
+    requirePattern(log, "^init: system running[[:space:]]*$",
+                   "running init state");
+    requirePattern(log, "(^|[[:blank:]])login:[[:blank:]]*$",
+                   "exact login prompt");
+    rejectPattern(log,
+        "fatal:|FATAL:|kernel panic|panic:|amd64 fault v=|A64 .*FAIL|" +
+        "VFS initialization failed|UFS initialization failed|" +
+        "Input/output error|boot-storage wait expired|gpt: .*rejected|" +
+        "vfs: .* failed|vfs: .*publication failed|" +
+        "mount root overlay failed|usb-storage: BOT|" +
+        "usb-storage: sd[a-z]+ .*error=[1-9]|" +
+        "usb-storage: .*attach-failed|loop[0-9]+: .*error=[1-9]|" +
+        "xhci: .*failed|xhci: transfer completion=|" +
+        "usb[0-9]+: port .*enumeration failed",
+        "fatal, GPT, VFS, storage, or xHCI failure");
+}
+
+func main(args) {
+    if (Array.size(args) != 2) {
+        zbFail("usage: qemu-uefi-relocated-gpt.noct REPOSITORY EVIDENCE");
+    }
+    var repo = capture("realpath " + zbShellQuote(args[0]),
+                       "resolve repository path");
+    var evidence = capture("realpath -m " + zbShellQuote(args[1]),
+                           "resolve evidence path");
+    if (FileUtil.checkFileExists(evidence) == 1) {
+        zbFail("evidence path already exists: " + evidence);
+    }
+    run(repo, "mkdir -p " + zbShellQuote(evidence + "/images") + " " +
+        zbShellQuote(evidence + "/qemu") + " " +
+        zbShellQuote(evidence + "/tmp"), "create p006 evidence tree");
+
+    var qemuRunner = repo +
+        "/plan/ws003-bringup/tests/uefi-high-memory-usb-boot.sh";
+    run("/", "test -x " + zbShellQuote(qemuRunner),
+        "maintained OVMF USB runner");
+    run("/", "cp " + zbShellQuote(repo + "/config.mk") + " " +
+        zbShellQuote(evidence + "/repository-config-before.mk") +
+        " && sha256sum " + zbShellQuote(repo + "/config.mk") + " >" +
+        zbShellQuote(evidence + "/repository-config-before.sha256"),
+        "freeze repository config");
+
+    var config = evidence + "/config.mk";
+    var build = evidence + "/build-amd64";
+    writeFixtureConfig(repo, config);
+    runLogged(repo, evidence + "/clean-private-build.log",
+        "TMPDIR=" + zbShellQuote(evidence + "/tmp") +
+        " make --no-print-directory ZEDBSD_CONFIG=" + zbShellQuote(config) +
+        " BUILD=" + zbShellQuote(build) + " clean",
+        "clean fixture-private BUILD");
+    var source = buildCheckedSource(repo, evidence, config, build);
+    var sourceDigest = capture("sha256sum " + zbShellQuote(source) +
+        " | awk '{print $1}'", "capture pristine source digest");
+    var uuid = fatUuid(source, evidence);
+    var repaired = evidence + "/images/uefi-host-repaired.img";
+    makeHostRepairedImage(source, repaired, evidence);
+    run("/", "sha256sum " + zbShellQuote(source) + " >" +
+        zbShellQuote(evidence + "/images/source-before.sha256") +
+        " && sha256sum " + zbShellQuote(repaired) + " >" +
+        zbShellQuote(evidence + "/images/repaired-before.sha256"),
+        "freeze source and repaired identities");
+
+    var qemu = resolveCommand("${QEMU_SYSTEM_X86_64:-qemu-system-x86_64}",
+                              "qemu-system-x86_64");
+    var ovmfCode = resolveFile("${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}",
+                               "OVMF code firmware");
+    var ovmfVars = resolveFile("${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}",
+                               "OVMF variable template");
+    var qemuCommand =
+        "QEMU_SYSTEM_X86_64=" + zbShellQuote(qemu) +
+        " OVMF_CODE=" + zbShellQuote(ovmfCode) +
+        " OVMF_VARS=" + zbShellQuote(ovmfVars) +
+        " MEMORY_MIB_LIST=4096 SMP_CPUS=1 BOOT_TIMEOUT_SECONDS=120" +
+        " SETTLE_SECONDS=1 " + zbShellQuote(qemuRunner) + " " +
+        zbShellQuote(repaired) + " " + zbShellQuote(evidence + "/qemu");
+    FileUtil.writeText(evidence + "/qemu-invocation.txt", qemuCommand + "\n");
+    runLogged(repo, evidence + "/qemu-runner.log", qemuCommand,
+              "host-repaired OVMF Q35 xHCI USB boot");
+    requirePattern(evidence + "/qemu-runner.log",
+                   "^BR-T24 PASS: 1/1 high-memory OVMF USB boots$",
+                   "single-cell repaired OVMF runner PASS");
+    var guestLog = evidence + "/qemu/boot-4096m.log";
+    if (FileUtil.checkFileExists(guestLog) != 1) {
+        zbFail("host-repaired guest log is missing: " + guestLog);
+    }
+    validateGuest(guestLog, uuid);
+    requirePattern(evidence + "/qemu/results.tsv",
+                   "^4096[[:blank:]]+pass[[:blank:]]+",
+                   "single repaired 4-GiB OVMF result");
+
+    var sourceAfter = capture("sha256sum " + zbShellQuote(source) +
+        " | awk '{print $1}'", "verify pristine source digest");
+    if (sourceAfter != sourceDigest) {
+        zbFail("fresh checked UEFI-only source changed during p006");
+    }
+    run("/", "sha256sum -c " +
+        zbShellQuote(evidence + "/images/repaired-before.sha256") + " >" +
+        zbShellQuote(evidence + "/images/repaired-hash-after.log") +
+        " && sha256sum -c " +
+        zbShellQuote(evidence + "/images/source-before.sha256") + " >" +
+        zbShellQuote(evidence + "/images/source-hash-after.log"),
+        "immutable pristine and repaired inputs after QEMU");
+    run("/", "cmp " +
+        zbShellQuote(evidence + "/repository-config-before.mk") + " " +
+        zbShellQuote(repo + "/config.mk") + " && sha256sum " +
+        zbShellQuote(repo + "/config.mk") + " >" +
+        zbShellQuote(evidence + "/repository-config-after.sha256") +
+        " && sha256sum " + zbShellQuote(build + "/vmunix") + " " +
+        zbShellQuote(build + "/uefi/BOOTX64.EFI") + " " +
+        zbShellQuote(source) + " " + zbShellQuote(repaired) + " >" +
+        zbShellQuote(evidence + "/artifacts.sha256"),
+        "unchanged config and retained artifact identities");
+    FileUtil.writeText(evidence + "/metadata.txt",
+        "case=MAC-T022\nsource=" + source + "\nsource_sha256=" +
+        sourceDigest + "\nsource_sectors=395297\nrepaired=" + repaired +
+        "\nrepaired_sectors=60549120\nprotective_last=395296\n" +
+        "physical_last=60549119\nbackup_table_lba=60549087\n" +
+        "payload_uuid=" + uuid + "\nmemory_mib=4096\nsmp_cpus=1\n" +
+        "topology=OVMF q35 xHCI USB-storage NE2000\n");
+    FileUtil.writeText(evidence + "/result.txt",
+        "MAC-T022\tuefi-relocated-physical-gpt\tPASS\n");
+    print("MAC-T022 host-relocated physical-end GPT boot: PASS (" +
+          evidence + ")");
+}

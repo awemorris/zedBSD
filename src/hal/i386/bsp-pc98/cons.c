@@ -6,6 +6,9 @@
  */
 
 #include "hal/hal.h"
+#include "keyboard-map.h"
+
+#include <string.h>
 
 static volatile uint16_t *const text_vram =
 	(volatile uint16_t *)0x800a0000;
@@ -486,15 +489,6 @@ void hal_cons_update_cursor(void)
 }
 
 /* PC-98 keyboard scan translation and interrupt-driven input. */
-struct pc98_keyboard {
-	uint8_t shift;
-	uint8_t ctrl;
-	uint8_t graph;
-	uint8_t caps;
-	uint8_t kana;
-	uint8_t down[16];
-	uint16_t last_key[128];
-};
 /*
  * NEC PC-98 keyboard scancode translation
  * Copyright (C) 2026 Awe Morris
@@ -518,73 +512,27 @@ struct pc98_keyboard {
 #define SCAN_CTRL    0x74U
 #define SCAN_SHIFT_R 0x7dU
 
-/* Private legacy translation values; they are not part of the HAL API. */
-#define HAL_KEY_ESCAPE 0x1b
-#define HAL_KEY_BACKSPACE 0x08
-#define HAL_KEY_TAB 0x09
-#define HAL_KEY_ENTER 0x0d
-#define HAL_KEY_PAGE_UP 0x136
-#define HAL_KEY_PAGE_DOWN 0x137
-#define HAL_KEY_INSERT 0x138
-#define HAL_KEY_DELETE 0x139
-#define HAL_KEY_UP 0x13a
-#define HAL_KEY_LEFT 0x13b
-#define HAL_KEY_RIGHT 0x13c
-#define HAL_KEY_DOWN 0x13d
-#define HAL_KEY_HOME 0x13e
-#define HAL_KEY_END 0x13f
-#define HAL_KEY_F1 0x162
-#define HAL_KEY_F2 0x163
-#define HAL_KEY_F3 0x164
-#define HAL_KEY_F4 0x165
-#define HAL_KEY_F5 0x166
-#define HAL_KEY_F6 0x167
-#define HAL_KEY_F7 0x168
-#define HAL_KEY_F8 0x169
-#define HAL_KEY_F9 0x16a
-#define HAL_KEY_F10 0x16b
-#define HAL_KEY_SHIFT 0x170
-#define HAL_KEY_CAPS_LOCK 0x171
-#define HAL_KEY_KANA 0x172
-#define HAL_KEY_GRAPH 0x173
-#define HAL_KEY_CTRL 0x174
-#define HAL_KEY_EVENT_KEY_MASK 0x000001ffU
-#define HAL_KEY_EVENT_SHIFT_PRIVATE 0x00010000U
-#define HAL_KEY_EVENT_CTRL_PRIVATE 0x00020000U
-#define HAL_KEY_EVENT_GRAPH_PRIVATE 0x00040000U
-#define HAL_KEY_EVENT_RELEASE_PRIVATE 0x00080000U
-
 /* Unshifted characters.  0 means "not a printable key" (handled by the
  * special-key table or ignored). */
-static const uint8_t base_table[SCAN_MAX] = {
-	[0x01] = '1', [0x02] = '2', [0x03] = '3', [0x04] = '4', [0x05] = '5',
-	[0x06] = '6', [0x07] = '7', [0x08] = '8', [0x09] = '9', [0x0a] = '0',
-	[0x0b] = '-', [0x0c] = '^', [0x0d] = '\\',
+static const uint16_t base_table[SCAN_MAX] = {
+	[0x01] = HAL_KEY_JIS_1, [0x02] = HAL_KEY_JIS_2,
+	[0x03] = HAL_KEY_JIS_3, [0x04] = HAL_KEY_JIS_4,
+	[0x05] = HAL_KEY_JIS_5, [0x06] = HAL_KEY_JIS_6,
+	[0x07] = HAL_KEY_JIS_7, [0x08] = HAL_KEY_JIS_8,
+	[0x09] = HAL_KEY_JIS_9, [0x0a] = HAL_KEY_JIS_0,
+	[0x0b] = HAL_KEY_JIS_MINUS, [0x0c] = HAL_KEY_JIS_CARET,
+	[0x0d] = HAL_KEY_JIS_YEN,
 	[0x10] = 'q', [0x11] = 'w', [0x12] = 'e', [0x13] = 'r', [0x14] = 't',
 	[0x15] = 'y', [0x16] = 'u', [0x17] = 'i', [0x18] = 'o', [0x19] = 'p',
-	[0x1a] = '@', [0x1b] = '[',
+	[0x1a] = HAL_KEY_JIS_AT, [0x1b] = HAL_KEY_JIS_LBRACE,
 	[0x1d] = 'a', [0x1e] = 's', [0x1f] = 'd', [0x20] = 'f', [0x21] = 'g',
-	[0x22] = 'h', [0x23] = 'j', [0x24] = 'k', [0x25] = 'l', [0x26] = ';',
-	[0x27] = ':', [0x28] = ']',
+	[0x22] = 'h', [0x23] = 'j', [0x24] = 'k', [0x25] = 'l',
+	[0x26] = HAL_KEY_JIS_SEMI, [0x27] = HAL_KEY_JIS_COLON,
+	[0x28] = HAL_KEY_JIS_RBRACE,
 	[0x29] = 'z', [0x2a] = 'x', [0x2b] = 'c', [0x2c] = 'v', [0x2d] = 'b',
-	[0x2e] = 'n', [0x2f] = 'm', [0x30] = ',', [0x31] = '.', [0x32] = '/',
-	[0x33] = '\\', [0x34] = ' ',
-};
-
-/* Shifted characters for the same keys. */
-static const uint8_t shift_table[SCAN_MAX] = {
-	[0x01] = '!', [0x02] = '"', [0x03] = '#', [0x04] = '$', [0x05] = '%',
-	[0x06] = '&', [0x07] = '\'', [0x08] = '(', [0x09] = ')', [0x0a] = '0',
-	[0x0b] = '=', [0x0c] = '~', [0x0d] = '|',
-	[0x10] = 'Q', [0x11] = 'W', [0x12] = 'E', [0x13] = 'R', [0x14] = 'T',
-	[0x15] = 'Y', [0x16] = 'U', [0x17] = 'I', [0x18] = 'O', [0x19] = 'P',
-	[0x1a] = '`', [0x1b] = '{',
-	[0x1d] = 'A', [0x1e] = 'S', [0x1f] = 'D', [0x20] = 'F', [0x21] = 'G',
-	[0x22] = 'H', [0x23] = 'J', [0x24] = 'K', [0x25] = 'L', [0x26] = '+',
-	[0x27] = '*', [0x28] = '}',
-	[0x29] = 'Z', [0x2a] = 'X', [0x2b] = 'C', [0x2c] = 'V', [0x2d] = 'B',
-	[0x2e] = 'N', [0x2f] = 'M', [0x30] = '<', [0x31] = '>', [0x32] = '?',
-	[0x33] = '_', [0x34] = ' ',
+	[0x2e] = 'n', [0x2f] = 'm', [0x30] = HAL_KEY_JIS_COMMA,
+	[0x31] = HAL_KEY_JIS_DOT, [0x32] = HAL_KEY_JIS_SLASH,
+	[0x33] = HAL_KEY_JIS_RO, [0x34] = ' ',
 };
 
 static int
@@ -631,6 +579,31 @@ key_to_scan(int key)
 		return -1;
 	if (key >= 'A' && key <= 'Z')
 		key = key - 'A' + 'a';
+	/* Stable JIS HAL symbols retain the scalar key-state ABI aliases. */
+	switch (key) {
+	case '1': return 0x01;
+	case '2': return 0x02;
+	case '3': return 0x03;
+	case '4': return 0x04;
+	case '5': return 0x05;
+	case '6': return 0x06;
+	case '7': return 0x07;
+	case '8': return 0x08;
+	case '9': return 0x09;
+	case '0': return 0x0a;
+	case '-': return 0x0b;
+	case '^': return 0x0c;
+	case '\\': return 0x0d;
+	case '@': return 0x1a;
+	case '[': return 0x1b;
+	case ';': return 0x26;
+	case ':': return 0x27;
+	case ']': return 0x28;
+	case ',': return 0x30;
+	case '.': return 0x31;
+	case '/': return 0x32;
+	default: break;
+	}
 	switch (key) {
 	case HAL_KEY_ESCAPE: return 0x00;
 	case HAL_KEY_BACKSPACE: return 0x0e;
@@ -646,7 +619,8 @@ key_to_scan(int key)
 	case HAL_KEY_END: return 0x3f;
 	case HAL_KEY_PAGE_UP: return 0x36;
 	case HAL_KEY_PAGE_DOWN: return 0x37;
-	case HAL_KEY_SHIFT: return SCAN_SHIFT_L;
+	case HAL_KEY_SHIFT_L: return SCAN_SHIFT_L;
+	case HAL_KEY_SHIFT_R: return SCAN_SHIFT_R;
 	case HAL_KEY_CTRL: return SCAN_CTRL;
 	case HAL_KEY_GRAPH: return SCAN_GRAPH;
 	case HAL_KEY_CAPS_LOCK: return SCAN_CAPS;
@@ -661,7 +635,7 @@ key_to_scan(int key)
 	return -1;
 }
 
-static void
+void
 pc98_keyboard_reset(struct pc98_keyboard *kb)
 {
 	unsigned i;
@@ -684,14 +658,12 @@ set_down(struct pc98_keyboard *kb, uint8_t scan, int pressed)
 		kb->down[scan >> 3] &= (uint8_t)~mask;
 }
 
-static unsigned keyboard_modifiers_locked(void);
-
 static int
 modifier_key(uint8_t scan)
 {
 	switch (scan) {
-	case SCAN_SHIFT_L:
-	case SCAN_SHIFT_R: return HAL_KEY_SHIFT;
+	case SCAN_SHIFT_L: return HAL_KEY_SHIFT_L;
+	case SCAN_SHIFT_R: return HAL_KEY_SHIFT_R;
 	case SCAN_CTRL: return HAL_KEY_CTRL;
 	case SCAN_GRAPH: return HAL_KEY_GRAPH;
 	case SCAN_CAPS: return HAL_KEY_CAPS_LOCK;
@@ -701,11 +673,26 @@ modifier_key(uint8_t scan)
 }
 
 static int
+pc98_keyboard_scan_down(const struct pc98_keyboard *kb, uint8_t scan)
+{
+	return (kb->down[scan >> 3] >> (scan & 7U)) & 1U;
+}
+
+static unsigned
+pc98_keyboard_modifiers(const struct pc98_keyboard *kb)
+{
+	return (kb->shift ? HAL_KEY_EVENT_SHIFT_PRIVATE : 0U) |
+	    (kb->ctrl ? HAL_KEY_EVENT_CTRL_PRIVATE : 0U) |
+	    (kb->graph ? HAL_KEY_EVENT_GRAPH_PRIVATE : 0U);
+}
+
+int
 pc98_keyboard_feed(struct pc98_keyboard *kb, uint8_t raw, unsigned *result)
 {
 	uint8_t scan = raw & 0x7fU;
 	int pressed = (raw & 0x80U) == 0;
-	uint8_t ch;
+	int was_down = pc98_keyboard_scan_down(kb, scan);
+	uint16_t ch;
 	int key;
 
 	if (result == NULL)
@@ -717,7 +704,9 @@ pc98_keyboard_feed(struct pc98_keyboard *kb, uint8_t raw, unsigned *result)
 	switch (scan) {
 	case SCAN_SHIFT_L:
 	case SCAN_SHIFT_R:
-		kb->shift = (uint8_t)pressed;
+		kb->shift = (uint8_t)(
+		    pc98_keyboard_scan_down(kb, SCAN_SHIFT_L) ||
+		    pc98_keyboard_scan_down(kb, SCAN_SHIFT_R));
 		break;
 	case SCAN_CTRL:
 		kb->ctrl = (uint8_t)pressed;
@@ -727,11 +716,11 @@ pc98_keyboard_feed(struct pc98_keyboard *kb, uint8_t raw, unsigned *result)
 		break;
 	case SCAN_CAPS:
 		/* Caps and kana are locking keys: toggle on the make. */
-		if (pressed)
+		if (pressed && !was_down)
 			kb->caps ^= 1U;
 		break;
 	case SCAN_KANA:
-		if (pressed)
+		if (pressed && !was_down)
 			kb->kana ^= 1U;
 		break;
 	default:
@@ -745,7 +734,7 @@ pc98_keyboard_feed(struct pc98_keyboard *kb, uint8_t raw, unsigned *result)
 		if (key == 0)
 			return 0;
 		*result = ((unsigned)key & HAL_KEY_EVENT_KEY_MASK) |
-		    keyboard_modifiers_locked() | HAL_KEY_EVENT_RELEASE_PRIVATE;
+		    pc98_keyboard_modifiers(kb) | HAL_KEY_EVENT_RELEASE_PRIVATE;
 		return 1;
 	}
 
@@ -761,25 +750,20 @@ pc98_keyboard_feed(struct pc98_keyboard *kb, uint8_t raw, unsigned *result)
 		}
 	}
 
-	ch = kb->shift ? shift_table[scan] : base_table[scan];
+	ch = base_table[scan];
 	if (ch == 0)
 		return 0;
-
-	/* Caps lock affects letters only. */
-	if (kb->caps && ch >= 'a' && ch <= 'z')
-		ch = (uint8_t)(ch - 'a' + 'A');
-	else if (kb->caps && ch >= 'A' && ch <= 'Z')
-		ch = (uint8_t)(ch - 'A' + 'a');
 
 	key = ch;
 emit:
 	kb->last_key[scan] = (uint16_t)key;
 	*result = ((unsigned)key & HAL_KEY_EVENT_KEY_MASK) |
-	    keyboard_modifiers_locked();
+	    pc98_keyboard_modifiers(kb) |
+	    (was_down ? HAL_KEY_EVENT_REPEAT_PRIVATE : 0U);
 	return 1;
 }
 
-static int
+int
 pc98_keyboard_is_down(const struct pc98_keyboard *kb, int key)
 {
 	int scan = key_to_scan(key);
@@ -797,7 +781,8 @@ pc98_keyboard_is_down(const struct pc98_keyboard *kb, int key)
 #define KBD_DATA 0x41U
 #define KBD_STATUS 0x43U
 #define KBD_RXRDY 0x02U
-#define QUEUE_SIZE 32U
+/* 128 physical scans, two resync markers, and one ring sentinel. */
+#define QUEUE_SIZE 131U
 
 static struct pc98_keyboard keyboard;
 static struct hal_key_event events[QUEUE_SIZE];
@@ -826,11 +811,34 @@ special_symbol(unsigned key)
 	case HAL_KEY_DOWN: return "down";
 	case HAL_KEY_HOME: return "home";
 	case HAL_KEY_END: return "end";
-	case HAL_KEY_SHIFT: return "leftshift";
+	case HAL_KEY_SHIFT_L: return "leftshift";
+	case HAL_KEY_SHIFT_R: return "rightshift";
 	case HAL_KEY_CTRL: return "leftctrl";
 	case HAL_KEY_GRAPH: return "leftalt";
 	case HAL_KEY_CAPS_LOCK: return "capslock";
 	case HAL_KEY_KANA: return "kana";
+	case HAL_KEY_JIS_1: return "jis-1";
+	case HAL_KEY_JIS_2: return "jis-2";
+	case HAL_KEY_JIS_3: return "jis-3";
+	case HAL_KEY_JIS_4: return "jis-4";
+	case HAL_KEY_JIS_5: return "jis-5";
+	case HAL_KEY_JIS_6: return "jis-6";
+	case HAL_KEY_JIS_7: return "jis-7";
+	case HAL_KEY_JIS_8: return "jis-8";
+	case HAL_KEY_JIS_9: return "jis-9";
+	case HAL_KEY_JIS_0: return "jis-0";
+	case HAL_KEY_JIS_MINUS: return "jis-minus";
+	case HAL_KEY_JIS_CARET: return "jis-caret";
+	case HAL_KEY_JIS_YEN: return "jis-yen";
+	case HAL_KEY_JIS_AT: return "jis-at";
+	case HAL_KEY_JIS_LBRACE: return "jis-lbrace";
+	case HAL_KEY_JIS_SEMI: return "jis-semi";
+	case HAL_KEY_JIS_COLON: return "jis-colon";
+	case HAL_KEY_JIS_RBRACE: return "jis-rbrace";
+	case HAL_KEY_JIS_COMMA: return "jis-comma";
+	case HAL_KEY_JIS_DOT: return "jis-dot";
+	case HAL_KEY_JIS_SLASH: return "jis-slash";
+	case HAL_KEY_JIS_RO: return "jis-ro";
 	default: return NULL;
 	}
 }
@@ -856,9 +864,97 @@ event_from_legacy(struct hal_key_event *event, unsigned legacy)
 	while (index < HAL_KEY_SYMBOL_SIZE)
 		event->symbol[index++] = '\0';
 	event->flags = (legacy & HAL_KEY_EVENT_RELEASE_PRIVATE) != 0 ?
-	    HAL_KEY_EVENT_RELEASE : HAL_KEY_EVENT_PRESS;
+	    HAL_KEY_EVENT_RELEASE :
+	    (legacy & HAL_KEY_EVENT_REPEAT_PRIVATE) != 0 ? HAL_KEY_EVENT_REPEAT :
+	    HAL_KEY_EVENT_PRESS;
 	return 1;
 }
+
+static int
+snapshot_modifier(unsigned key)
+{
+	return key == HAL_KEY_SHIFT_L || key == HAL_KEY_SHIFT_R ||
+	    key == HAL_KEY_CTRL || key == HAL_KEY_GRAPH ||
+	    key == HAL_KEY_CAPS_LOCK || key == HAL_KEY_KANA;
+}
+
+static void
+rebuild_keyboard_events_locked(void)
+{
+	unsigned pass, scan;
+
+	head = tail = 0;
+	memset(&events[head], 0, sizeof(events[head]));
+	events[head].flags = HAL_KEY_EVENT_RESYNC |
+	    (keyboard.caps ? HAL_KEY_EVENT_LOCK_CAPS : 0U) |
+	    (keyboard.kana ? HAL_KEY_EVENT_LOCK_KANA : 0U);
+	head = (head + 1U) % QUEUE_SIZE;
+	for (pass = 0; pass < 2U; pass++)
+		for (scan = 0; scan < SCAN_MAX; scan++) {
+			unsigned key = keyboard.last_key[scan];
+
+			if (!pc98_keyboard_scan_down(&keyboard, (uint8_t)scan) ||
+			    key == 0 || snapshot_modifier(key) != (pass == 0U))
+				continue;
+			if (!event_from_legacy(&events[head], key))
+				continue;
+			events[head].flags = HAL_KEY_EVENT_PRESS |
+			    HAL_KEY_EVENT_SNAPSHOT;
+			head = (head + 1U) % QUEUE_SIZE;
+		}
+	memset(&events[head], 0, sizeof(events[head]));
+	events[head].flags = HAL_KEY_EVENT_RESYNC_END;
+	head = (head + 1U) % QUEUE_SIZE;
+}
+
+static void
+enqueue_raw_locked(uint8_t raw)
+{
+	unsigned event, next;
+
+	if (!pc98_keyboard_feed(&keyboard, raw, &event))
+		return;
+	next = (head + 1U) % QUEUE_SIZE;
+	if (next == tail) {
+		rebuild_keyboard_events_locked();
+		return;
+	}
+	if (event_from_legacy(&events[head], event))
+		head = next;
+}
+
+#ifdef ZEDBSD_INPUT_OWNERSHIP_TEST
+void
+pc98_input_ownership_test_reset(void)
+{
+	pc98_keyboard_reset(&keyboard);
+	memset(events, 0, sizeof(events));
+	head = tail = 0;
+}
+
+void
+pc98_input_ownership_test_raw(uint8_t raw)
+{
+	enqueue_raw_locked(raw);
+}
+
+void
+pc98_input_ownership_test_rebuild(void)
+{
+	rebuild_keyboard_events_locked();
+}
+
+int
+pc98_input_ownership_test_pop(struct hal_key_event *event)
+{
+	if (tail == head)
+		return 0;
+	if (event != NULL)
+		*event = events[tail];
+	tail = (tail + 1U) % QUEUE_SIZE;
+	return 1;
+}
+#endif
 
 static uint8_t inb(uint16_t port)
 {
@@ -879,14 +975,6 @@ unsigned hal_cons_modifiers(void)
 	return modifiers;
 }
 
-static unsigned
-keyboard_modifiers_locked(void)
-{
-	return (keyboard.shift ? HAL_KEY_EVENT_SHIFT_PRIVATE : 0) |
-		(keyboard.ctrl ? HAL_KEY_EVENT_CTRL_PRIVATE : 0) |
-		(keyboard.graph ? HAL_KEY_EVENT_GRAPH_PRIVATE : 0);
-}
-
 static bool
 input_lock_acquire(void)
 {
@@ -904,16 +992,8 @@ pump_locked(void)
 {
 	while ((inb(KBD_STATUS) & KBD_RXRDY) != 0) {
 		uint8_t raw = inb(KBD_DATA);
-		unsigned event;
-		unsigned next;
 
-		if (!pc98_keyboard_feed(&keyboard, raw, &event))
-			continue;
-		next = (head + 1U) % QUEUE_SIZE;
-		if (next == tail)
-			continue;
-		if (event_from_legacy(&events[head], event))
-			head = next;
+		enqueue_raw_locked(raw);
 	}
 }
 
@@ -945,6 +1025,29 @@ int hal_cons_poll_event(struct hal_key_event *event)
 	return available;
 }
 
+void
+hal_cons_get_input_info(struct hal_cons_input_info *info)
+{
+	static const char *const symbols[] = {
+	    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k",
+	    "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v",
+	    "w", "x", "y", "z", " ",
+	    "jis-1", "jis-2", "jis-3", "jis-4", "jis-5", "jis-6",
+	    "jis-7", "jis-8", "jis-9", "jis-0", "jis-minus",
+	    "jis-caret", "jis-yen", "jis-at", "jis-lbrace", "jis-semi",
+	    "jis-colon", "jis-rbrace", "jis-comma", "jis-dot",
+	    "jis-slash", "jis-ro", "esc", "backspace", "tab", "enter",
+	    "leftshift", "rightshift", "leftctrl", "leftalt", "capslock",
+	    "kana", "home", "up", "pageup", "left", "right", "end",
+	    "down", "pagedown", "insert", "delete", "f1", "f2", "f3",
+	    "f4", "f5", "f6", "f7", "f8", "f9", "f10"};
+	if (info == NULL)
+		return;
+	info->flags = HAL_CONS_INPUT_RELEASE | HAL_CONS_INPUT_REPEAT;
+	info->symbols = symbols;
+	info->symbol_count = sizeof(symbols) / sizeof(symbols[0]);
+}
+
 int hal_cons_read_event(struct hal_key_event *event)
 {
 	struct hal_cons_wait_entry waiter;
@@ -973,10 +1076,34 @@ int hal_cons_getc(void)
 	struct hal_key_event event;
 	for (;;) {
 		(void)hal_cons_read_event(&event);
+		if ((event.flags & HAL_KEY_EVENT_SNAPSHOT) != 0)
+			continue;
 		if ((event.flags & (HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_REPEAT)) == 0)
 			continue;
 		if (event.symbol[1] == '\0')
 			return event.symbol[0];
+		if (strcmp(event.symbol, "jis-1") == 0) return '1';
+		if (strcmp(event.symbol, "jis-2") == 0) return '2';
+		if (strcmp(event.symbol, "jis-3") == 0) return '3';
+		if (strcmp(event.symbol, "jis-4") == 0) return '4';
+		if (strcmp(event.symbol, "jis-5") == 0) return '5';
+		if (strcmp(event.symbol, "jis-6") == 0) return '6';
+		if (strcmp(event.symbol, "jis-7") == 0) return '7';
+		if (strcmp(event.symbol, "jis-8") == 0) return '8';
+		if (strcmp(event.symbol, "jis-9") == 0) return '9';
+		if (strcmp(event.symbol, "jis-0") == 0) return '0';
+		if (strcmp(event.symbol, "jis-minus") == 0) return '-';
+		if (strcmp(event.symbol, "jis-caret") == 0) return '^';
+		if (strcmp(event.symbol, "jis-yen") == 0) return '\\';
+		if (strcmp(event.symbol, "jis-at") == 0) return '@';
+		if (strcmp(event.symbol, "jis-lbrace") == 0) return '[';
+		if (strcmp(event.symbol, "jis-semi") == 0) return ';';
+		if (strcmp(event.symbol, "jis-colon") == 0) return ':';
+		if (strcmp(event.symbol, "jis-rbrace") == 0) return ']';
+		if (strcmp(event.symbol, "jis-comma") == 0) return ',';
+		if (strcmp(event.symbol, "jis-dot") == 0) return '.';
+		if (strcmp(event.symbol, "jis-slash") == 0) return '/';
+		if (strcmp(event.symbol, "jis-ro") == 0) return '\\';
 		if (event.symbol[0] == 'e' && event.symbol[1] == 'n') return '\r';
 		if (event.symbol[0] == 't' && event.symbol[1] == 'a') return '\t';
 		if (event.symbol[0] == 'b' && event.symbol[1] == 'a') return '\b';

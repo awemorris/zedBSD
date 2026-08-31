@@ -9,6 +9,7 @@
 
 #include <hal/hal.h>
 #include "asm.h"
+#include "bsp.h"
 #include "smp.h"
 
 int
@@ -136,7 +137,9 @@ hal_printf(const char *format, ...)
 {
 	__builtin_va_list ap;
 	const char *p;
+	uint64_t output_token;
 
+	output_token = pcat_cons_output_begin();
 	__builtin_va_start(ap, format);
 	for (p = format; *p != '\0'; p++) {
 		int zero = 0;
@@ -200,6 +203,7 @@ hal_printf(const char *format, ...)
 		}
 	}
 	__builtin_va_end(ap);
+	pcat_cons_output_end(output_token);
 	return 0;
 }
 

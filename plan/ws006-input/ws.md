@@ -1,19 +1,23 @@
 # WS006: input and evdev
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 WSID: `ws006`
 
-Status: active; `ws006-p005` is the last completed milestone, and closure
-Phases `ws006-p006` through `ws006-p009` are now defined but not queued
+Status: active; q044 completed the p006 automatic/source ownership boundary
+and the p007 device-independent HID parser boundary; p008's Report-Protocol
+and stale-fd namespace policies are resolved, and q047 completed its WS004
+legacy-HCD and general recovery prerequisites
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws006-p005` complete PC/AT software milestone
+Last verified Phases: `ws006-p006` automatic/source milestone and
+`ws006-p007` parser milestone (`q044`)
 
-Resume point: start with `ws006-p006` producer truthfulness/ownership and
-`ws006-p007` the independent USB HID parser.  `ws006-p008` joins those results
-into live USB HID evdev devices.  `ws006-p009` remains blocked until
+Resume point: p008 is Queue-ready after WS004 p031/p032 completion. It uses
+checked Report Protocol and retains a detached
+`eventN` number until its final old-generation fd closes. `ws006-p009` remains
+blocked until
 `ws008-p009` makes the latest Noct target/userland integration available and
 verified.
 
@@ -28,9 +32,9 @@ Shared tests: [WS006 test index](tests/README.md)
 | [`ws006-p003`](phase003-producer-bridge/phase.md) | Complete milestone | Production event nodes register in QEMU; physical-key broker/consumer evidence remains p004 |
 | [`ws006-p004`](phase004-console-broker/phase.md) | Complete PC/AT software milestone | Fixed string event, single broker, focused/build evidence, and production QEMU event-node/console coexistence pass; PC-98/X68000 physical detail remains |
 | [`ws006-p005`](phase005-evdev-capability-state/phase.md) | Complete PC/AT milestone (`q020`) | Registered native-word capabilities, state queries, boundary fixtures, and capability-only amd64 QEMU discovery pass; character-only HAL and multi-source pointer residuals retained |
-| [`ws006-p006`](phase006-input-truthfulness-ownership/phase.md) | Planned; not queued | Make character-only and physical producers truthful, add bounded internal console subscription, and make keyboard/pointer state and detach ownership per source |
-| [`ws006-p007`](phase007-usb-hid-parser/phase.md) | Planned; not queued | Implement the bounded device-independent HID descriptor/report and boot-layout core without claiming live USB hardware |
-| [`ws006-p008`](phase008-usb-hid-evdev/phase.md) | Planned; depends on p006/p007; not queued | Bind standards-based USB HID keyboard/mouse/tablet interfaces, publish evdev, feed the console, and prove hotplug/lifetime |
+| [`ws006-p006`](phase006-input-truthfulness-ownership/phase.md) | Complete automatic/source milestone (`q044`) | Per-source physical/momentary input, bounded console subscription, atomic overflow resync, and terminal callback ownership pass; fresh QEMU image acceptance remains behind WS008 MB-008 |
+| [`ws006-p007`](phase007-usb-hid-parser/phase.md) | Complete parser milestone (`q044`) | Bounded report/boot layouts and malformed/unsupported descriptor handling pass strict, sanitizer, and analyzer gates at 791 checks without live USB claims |
+| [`ws006-p008`](phase008-usb-hid-evdev/phase.md) | Planned; Queue-ready (`q047` prerequisites satisfied) | Bind standards-based Report-Protocol USB HID keyboard/mouse/tablet interfaces after completed USB 1.1 concurrent-request/hotplug and general reset/STALL support; retain detached event numbers through the final stale-fd close |
 | [`ws006-p009`](phase009-consumer-legacy-removal/phase.md) | Planned; blocked on latest WS008 userland | Revalidate Xzed and latest Noct/BeUI consumers, migrate the kernel shell, delete legacy console event/key-state UAPI, and close WS006 |
 
 ## Remaining Phase order
@@ -38,17 +42,19 @@ Shared tests: [WS006 test index](tests/README.md)
 ```text
 ws006-p005 complete
        |
-       +-- ws006-p006 truthfulness and multi-source ownership --+
+       +-- ws006-p006 truthfulness and multi-source ownership --+ complete
        |                                                        |
-       +-- ws006-p007 USB HID parser/report core ---------------+--> p008
+       +-- ws006-p007 USB HID parser/report core ---------------+ complete --> p008
                                                                      |
 ws018-p007 Xzed evdev complete --------------------------------------+--> p009
 ws008-p009 latest Noct/BeUI evdev integration -----------------------+
 ```
 
-P006 and p007 have independent implementation bodies and may be selected
-together only when a finite Queue records both verification paths.  P008 must
-consume both.  P009 cannot enter a Queue until `ws008-p009` replaces the
+P006 and p007 completed their independent implementation bodies in q044. P008
+must consume both without reopening their private contracts. Its observable
+policies are resolved, p031/p032 completed the required legacy-HCD and recovery
+work, and p008 is Queue-ready. P009 cannot enter
+a Queue until `ws008-p009` replaces the
 rejected/disabled historical target integration with the latest official Noct
 target and passes its evdev consumer gate.
 

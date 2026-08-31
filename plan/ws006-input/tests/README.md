@@ -15,6 +15,19 @@ Parent: [WS006](../ws.md)
 | IN-T42 | Physical USB HID | Target laptop keyboard/mouse devices identify and operate through evdev across reconnect |
 | IN-T50 | Legacy removal | No in-tree consumer uses console continuous-event/key-state UAPI and console regressions pass after deletion |
 
+The q044 ownership, console, producer, and physical-HAL fixtures are run with:
+
+```sh
+sh plan/ws006-input/tests/run-input-ownership-host-test.sh
+```
+
+This runner covers ordinary and ASan/UBSan input-device/subscriber lifecycle,
+two-source state, atomic overflow resynchronization, console drain/detach, and
+amd64/i386 PC/AT, PC-98, and X68000 producer behavior. The p007 IN-T40 corpus
+links `src/drivers/hid/hid-report.c` directly with
+`plan/ws006-input/tests/hid-report-test.c`; its strict, ASan/UBSan, and GCC
+analyzer modes each pass 791 checks in q044.
+
 Executable paths are added when each Phase is extracted.
 
 IN-T00 uses `evdev-layout-test.c`. Compile it for both zedBSD x86 ABIs without

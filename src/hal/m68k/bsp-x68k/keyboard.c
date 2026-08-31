@@ -7,8 +7,11 @@
 #include "mmio.h"
 #include "../../cons-wait.h"
 
+#include <string.h>
+
 #define X68K_KEYBOARD_VECTOR 0x4c
-#define X68K_KEYBOARD_QUEUE  64U
+/* 128 physical scans, two resync markers, and one ring sentinel. */
+#define X68K_KEYBOARD_QUEUE  131U
 #define X68K_SEND_SPINS      1000000U
 
 #define MFP_IERA 3U
@@ -54,6 +57,50 @@ special_symbol(unsigned key)
 	case X68K_KEY_DOWN: return "down";
 	case X68K_KEY_HOME: return "home";
 	case X68K_KEY_END: return "end";
+	case X68K_KEY_SHIFT: return "leftshift";
+	case X68K_KEY_CTRL: return "leftctrl";
+	case X68K_KEY_GRAPH: return "leftalt";
+	case X68K_KEY_CAPS_LOCK: return "capslock";
+	case X68K_KEY_JIS_1: return "jis-1";
+	case X68K_KEY_JIS_2: return "jis-2";
+	case X68K_KEY_JIS_3: return "jis-3";
+	case X68K_KEY_JIS_4: return "jis-4";
+	case X68K_KEY_JIS_5: return "jis-5";
+	case X68K_KEY_JIS_6: return "jis-6";
+	case X68K_KEY_JIS_7: return "jis-7";
+	case X68K_KEY_JIS_8: return "jis-8";
+	case X68K_KEY_JIS_9: return "jis-9";
+	case X68K_KEY_JIS_0: return "jis-0";
+	case X68K_KEY_JIS_MINUS: return "jis-minus";
+	case X68K_KEY_JIS_CARET: return "jis-caret";
+	case X68K_KEY_JIS_YEN: return "jis-yen";
+	case X68K_KEY_JIS_AT: return "jis-at";
+	case X68K_KEY_JIS_LBRACE: return "jis-lbrace";
+	case X68K_KEY_JIS_SEMI: return "jis-semi";
+	case X68K_KEY_JIS_COLON: return "jis-colon";
+	case X68K_KEY_JIS_RBRACE: return "jis-rbrace";
+	case X68K_KEY_JIS_COMMA: return "jis-comma";
+	case X68K_KEY_JIS_DOT: return "jis-dot";
+	case X68K_KEY_JIS_SLASH: return "jis-slash";
+	case X68K_KEY_JIS_RO: return "jis-ro";
+	case X68K_KEY_KP_SLASH: return "jis-kp-slash";
+	case X68K_KEY_KP_STAR: return "jis-kp-star";
+	case X68K_KEY_KP_MINUS: return "jis-kp-minus";
+	case X68K_KEY_KP_7: return "jis-kp-7";
+	case X68K_KEY_KP_8: return "jis-kp-8";
+	case X68K_KEY_KP_9: return "jis-kp-9";
+	case X68K_KEY_KP_PLUS: return "jis-kp-plus";
+	case X68K_KEY_KP_4: return "jis-kp-4";
+	case X68K_KEY_KP_5: return "jis-kp-5";
+	case X68K_KEY_KP_6: return "jis-kp-6";
+	case X68K_KEY_KP_EQUAL: return "jis-kp-equal";
+	case X68K_KEY_KP_1: return "jis-kp-1";
+	case X68K_KEY_KP_2: return "jis-kp-2";
+	case X68K_KEY_KP_3: return "jis-kp-3";
+	case X68K_KEY_KP_ENTER: return "jis-kp-enter";
+	case X68K_KEY_KP_0: return "jis-kp-0";
+	case X68K_KEY_KP_COMMA: return "jis-kp-comma";
+	case X68K_KEY_KP_DOT: return "jis-kp-dot";
 	default: return NULL;
 	}
 }
@@ -79,8 +126,49 @@ event_from_legacy(struct hal_key_event *result, unsigned event)
 	}
 	while (index < HAL_KEY_SYMBOL_SIZE)
 		result->symbol[index++] = '\0';
-	result->flags = HAL_KEY_EVENT_PRESS;
+	result->flags = (event & X68K_KEY_EVENT_RELEASE) != 0 ?
+	    HAL_KEY_EVENT_RELEASE :
+	    (event & X68K_KEY_EVENT_REPEAT) != 0 ? HAL_KEY_EVENT_REPEAT :
+	    HAL_KEY_EVENT_PRESS;
 	return 1;
+}
+
+static int
+snapshot_modifier(unsigned key)
+{
+	return key == X68K_KEY_SHIFT || key == X68K_KEY_CTRL ||
+	    key == X68K_KEY_GRAPH || key == X68K_KEY_CAPS_LOCK;
+}
+
+static void
+rebuild_keyboard_events_locked(void)
+{
+	unsigned pass, scan;
+
+	event_head = event_tail = 0;
+	for (scan = 0; scan < HAL_KEY_SYMBOL_SIZE; scan++)
+		events[event_head].symbol[scan] = '\0';
+	events[event_head].flags = HAL_KEY_EVENT_RESYNC |
+	    (keyboard.caps_lock ? HAL_KEY_EVENT_LOCK_CAPS : 0U);
+	event_head = (event_head + 1U) % X68K_KEYBOARD_QUEUE;
+	for (pass = 0; pass < 2U; pass++)
+		for (scan = 0; scan < 128U; scan++) {
+			unsigned key = keyboard.last_key[scan];
+
+			if (((keyboard.down[scan >> 3] >> (scan & 7U)) & 1U) == 0 ||
+			    key == 0 || snapshot_modifier(key) != (pass == 0U))
+				continue;
+			if (!event_from_legacy(&events[event_head], key))
+				continue;
+			events[event_head].flags = HAL_KEY_EVENT_PRESS |
+			    HAL_KEY_EVENT_SNAPSHOT;
+			event_head =
+			    (event_head + 1U) % X68K_KEYBOARD_QUEUE;
+		}
+	for (scan = 0; scan < HAL_KEY_SYMBOL_SIZE; scan++)
+		events[event_head].symbol[scan] = '\0';
+	events[event_head].flags = HAL_KEY_EVENT_RESYNC_END;
+	event_head = (event_head + 1U) % X68K_KEYBOARD_QUEUE;
 }
 
 static void
@@ -93,13 +181,47 @@ enqueue_raw(uint8_t raw)
 		return;
 	next = (event_head + 1U) % X68K_KEYBOARD_QUEUE;
 	if (next == event_tail) {
-		/* Preserve queued input and deterministically discard the new key. */
 		overflow_count++;
+		rebuild_keyboard_events_locked();
 		return;
 	}
 	events[event_head] = converted;
 	event_head = next;
 }
+
+#ifdef ZEDBSD_INPUT_OWNERSHIP_TEST
+void
+x68k_input_ownership_test_reset(void)
+{
+	x68k_keyboard_state_reset(&keyboard);
+	memset(events, 0, sizeof(events));
+	event_head = event_tail = 0;
+	overflow_count = 0;
+}
+
+void
+x68k_input_ownership_test_raw(uint8_t raw)
+{
+	enqueue_raw(raw);
+}
+
+void
+x68k_input_ownership_test_rebuild(void)
+{
+	rebuild_keyboard_events_locked();
+}
+
+int
+x68k_input_ownership_test_pop(struct hal_key_event *event)
+{
+	if (event_tail == event_head)
+		return 0;
+	if (event != NULL)
+		*event = events[event_tail];
+	event_tail = (event_tail + 1U) % X68K_KEYBOARD_QUEUE;
+	return 1;
+}
+#endif
 
 static void
 receive_one(void)
@@ -192,6 +314,32 @@ hal_cons_poll_event(struct hal_key_event *event)
 		*event = events[event_tail];
 	hal_cons_wait_queue_unlock(&input_waiters, enabled);
 	return available;
+}
+
+void
+hal_cons_get_input_info(struct hal_cons_input_info *info)
+{
+	static const char *const symbols[] = {
+	    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k",
+	    "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v",
+	    "w", "x", "y", "z", " ", "jis-1", "jis-2", "jis-3",
+	    "jis-4", "jis-5", "jis-6", "jis-7", "jis-8", "jis-9",
+	    "jis-0", "jis-minus", "jis-caret", "jis-yen", "jis-at",
+	    "jis-lbrace", "jis-semi", "jis-colon", "jis-rbrace",
+	    "jis-comma", "jis-dot", "jis-slash", "jis-ro", "jis-kp-slash",
+	    "jis-kp-star", "jis-kp-minus", "jis-kp-7", "jis-kp-8",
+	    "jis-kp-9", "jis-kp-plus", "jis-kp-4", "jis-kp-5",
+	    "jis-kp-6", "jis-kp-equal", "jis-kp-1", "jis-kp-2",
+	    "jis-kp-3", "jis-kp-enter", "jis-kp-0", "jis-kp-comma",
+	    "jis-kp-dot", "esc", "backspace", "tab", "enter", "leftshift",
+	    "leftctrl", "leftalt", "capslock", "home", "up", "pageup",
+	    "left", "right", "end", "down", "pagedown", "delete", "f1",
+	    "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10"};
+	if (info == NULL)
+		return;
+	info->flags = HAL_CONS_INPUT_RELEASE | HAL_CONS_INPUT_REPEAT;
+	info->symbols = symbols;
+	info->symbol_count = sizeof(symbols) / sizeof(symbols[0]);
 }
 
 int

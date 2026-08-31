@@ -1,0 +1,5 @@
+require helper;
+
+func main() {
+    print(path_contract());
+}

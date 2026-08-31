@@ -74,6 +74,17 @@ sched_yield(void)
 	thrd_yield();
 }
 
+bool
+hal_irq_disable(void)
+{
+	return true;
+}
+
+void
+hal_irq_enable(void)
+{
+}
+
 static const uint8_t fixture_device_descriptor[] = {
 	18, 1, 0x00, 0x02, 0xef, 2, 1, 64,
 	0x34, 0x12, 0x15, 0x00, 0x00, 0x01, 0, 0, 0, 2
@@ -114,11 +125,13 @@ struct fake_controller {
 	struct drv_usb_bus *bus;
 	unsigned bus_number;
 	atomic_uint connected;
+	atomic_uint connection_changed;
 	atomic_uint configuration;
 	atomic_uint alternate[DRV_USB_MAX_INTERFACES];
 	atomic_uint endpoint_enabled[256];
 	atomic_uint endpoint_enable_count;
 	atomic_uint endpoint_disable_count;
+	atomic_uint endpoint_reset_count;
 	atomic_uint invalid_data_enqueue;
 	atomic_uint data_enqueue_count;
 	atomic_uint set_interface_count;
@@ -479,6 +492,19 @@ fake_endpoint_disable(struct drv_usb_hcd *hcd,
 }
 
 static int
+fake_endpoint_reset(struct drv_usb_hcd *hcd,
+	struct drv_usb_endpoint *endpoint)
+{
+	struct fake_controller *controller = controller_from_hcd(hcd);
+	uint8_t address = drv_usb_endpoint_address(endpoint);
+
+	(void)atomic_fetch_add_explicit(&controller->endpoint_reset_count, 1U,
+	    memory_order_relaxed);
+	return atomic_load_explicit(&controller->endpoint_enabled[address],
+	    memory_order_acquire) != 0 ? 0 : EBUSY;
+}
+
+static int
 fake_root_control(struct drv_usb_hcd *hcd,
 	const struct drv_usb_control_request *request, void *buffer,
 	size_t length, size_t *actual)
@@ -489,10 +515,19 @@ fake_root_control(struct drv_usb_hcd *hcd,
 	if (request->request == 0U && request->request_type == 0xa3U) {
 		CHECK(buffer != NULL && length >= sizeof(status));
 		status = atomic_load_explicit(&controller->connected,
-		    memory_order_acquire) != 0 ? 1U | 0x400U | (1U << 16) :
-		    (1U << 16);
+		    memory_order_acquire) != 0 ? 1U | 2U | 0x400U : 0U;
+		if (atomic_load_explicit(&controller->connection_changed,
+		    memory_order_acquire) != 0)
+			status |= 1U << 16;
 		memcpy(buffer, &status, sizeof(status));
 		*actual = sizeof(status);
+		return 0;
+	}
+	if (request->request == 1U && request->request_type == 0x23U &&
+	    request->value == 16U) {
+		atomic_store_explicit(&controller->connection_changed, 0U,
+		    memory_order_release);
+		*actual = 0;
 		return 0;
 	}
 	*actual = 0;
@@ -516,6 +551,7 @@ static const struct drv_usb_hcd_ops fake_ops = {
 	.device_disable = fake_device_disable,
 	.endpoint_enable = fake_endpoint_enable,
 	.endpoint_disable = fake_endpoint_disable,
+	.endpoint_reset = fake_endpoint_reset,
 	.root_hub_control = fake_root_control,
 	.root_port_reset = fake_root_reset
 };
@@ -530,6 +566,8 @@ register_controller(struct fake_controller *controller)
 	controller->hcd.capabilities = DRV_USB_HCD_CAP_CONCURRENT_URBS;
 	controller->hcd.private_data[0] = (uintptr_t)controller;
 	atomic_store_explicit(&controller->connected, 1U, memory_order_relaxed);
+	atomic_store_explicit(&controller->connection_changed, 1U,
+	    memory_order_relaxed);
 	CHECK(drv_usb_hcd_register(&controller->hcd, &controller->bus) == 0);
 	controller->bus_number = drv_usb_bus_number(controller->bus);
 	drv_usb_hcd_root_hub_changed(&controller->hcd);
@@ -540,6 +578,8 @@ static void
 unregister_controller(struct fake_controller *controller)
 {
 	atomic_store_explicit(&controller->connected, 0U, memory_order_release);
+	atomic_store_explicit(&controller->connection_changed, 1U,
+	    memory_order_release);
 	drv_usb_hcd_root_hub_changed(&controller->hcd);
 	CHECK(drv_usb_find_device(controller->bus_number, 1U) == NULL);
 	CHECK(drv_usb_hcd_unregister(&controller->hcd) == 0);
@@ -794,6 +834,8 @@ disconnect_thread(void *argument)
 
 	atomic_store_explicit(&fixture->started, 1U, memory_order_release);
 	atomic_store_explicit(&fixture->controller->connected, 0U,
+	    memory_order_release);
+	atomic_store_explicit(&fixture->controller->connection_changed, 1U,
 	    memory_order_release);
 	drv_usb_hcd_root_hub_changed(&fixture->controller->hcd);
 	atomic_store_explicit(&fixture->done, 1U, memory_order_release);
@@ -1816,6 +1858,8 @@ exercise_bound_disconnect_cleanup(struct fake_controller *controller)
 	 * binding gate is permanently closed.  HCD quiesce observes that binding
 	 * state and the sibling claim already disappeared. */
 	atomic_store_explicit(&controller->connected, 0U, memory_order_release);
+	atomic_store_explicit(&controller->connection_changed, 1U,
+	    memory_order_release);
 	drv_usb_hcd_root_hub_changed(&controller->hcd);
 	CHECK(drv_usb_find_device(controller->bus_number, 1U) == NULL);
 	CHECK(binding_driver_state.detach_count == 1U);

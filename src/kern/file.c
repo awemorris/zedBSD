@@ -133,13 +133,15 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 		struct path parent;
 		struct inode *collision;
 		struct componentname last;
+		struct inode_creation_request request;
 		char storage[NAME_MAX + 1U];
 		error = namei_parent_path_at(context, path, &parent, &last, storage);
 		if (error != 0)
 			goto fail_file;
 		mount_vfs_transaction_enter(parent.p_mount);
 		if (cred != NULL &&
-		    (error = vfs_access(parent.p_inode, cred, W_OK | X_OK)) != 0) {
+		    (error = inode_creation_request_user(parent.p_inode, cred,
+		    INODE_REG, mode, 0, NULL, &request)) != 0) {
 			mount_vfs_transaction_leave(parent.p_mount);
 			path_release(&parent);
 			goto fail_file;
@@ -163,7 +165,13 @@ file_openat_cred(struct cwdinfo *context, const struct ucred *cred,
 			error = ENOENT;
 			goto fail_file;
 		}
-		error = inode_create(parent.p_inode, &last, mode, &inode);
+		if (cred != NULL)
+			error = 0;
+		else
+			error = inode_creation_request_system(INODE_REG, mode, 0, 0,
+			    0, &request);
+		if (error == 0)
+			error = inode_create(parent.p_inode, &last, &request, &inode);
 		if (error == 0) {
 			path_set(&found, parent.p_mount, inode);
 			inode_release(inode);
@@ -1306,6 +1314,10 @@ file_fsync(struct file *file)
 	mutex_lock(&file->f_lock);
 	if (file->f_ops != NULL && file->f_ops->fsync != NULL)
 		error = file->f_ops->fsync(file);
+	else if (file->f_inode != NULL &&
+	    file->f_inode->i_type == INODE_DIR)
+		/* Directory durability is an explicit filesystem capability. */
+		error = EOPNOTSUPP;
 	else
 		error = file->f_inode != NULL ? inode_sync(file->f_inode) : 0;
 	mutex_unlock(&file->f_lock);

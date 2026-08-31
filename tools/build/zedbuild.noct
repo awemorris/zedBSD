@@ -62,6 +62,13 @@ func zbNeed(data, offset, size, what) {
     }
 }
 
+func zbNeedBytes(data, offset, size, what) {
+    if (Type.of(data) != "packed" || Packed.type(data) != "uint8") {
+        zbFail(what + ": expected packed uint8");
+    }
+    zbNeed(data, offset, size, what);
+}
+
 func zbU16LE(data, offset) {
     zbNeed(data, offset, 2, "u16le");
     return data[offset] | (data[offset + 1] << 8);
@@ -73,7 +80,11 @@ func zbU16BE(data, offset) {
 }
 
 func zbU32LE(data, offset) {
-    return Binary.readU32LE(data, offset);
+    zbNeedBytes(data, offset, 4, "u32le");
+    return Long.from(data[offset]) +
+           Long.from(data[offset + 1]) * 256 +
+           Long.from(data[offset + 2]) * 65536 +
+           Long.from(data[offset + 3]) * 16777216;
 }
 
 func zbU32BE(data, offset) {
@@ -83,13 +94,17 @@ func zbU32BE(data, offset) {
 }
 
 func zbI64LE(data, offset) {
-    return Binary.readI64LE(data, offset);
+    zbNeedBytes(data, offset, 8, "i64le");
+    var low = zbU32LE(data, offset);
+    var high = zbU32LE(data, offset + 4);
+    if (high >= 2147483648L) { high = high - 4294967296L; }
+    return low + high * 4294967296L;
 }
 
 func zbU64SmallLE(data, offset) {
     var low = zbU32LE(data, offset);
     var high = zbU32LE(data, offset + 4);
-    return low + high * 4294967296;
+    return low + high * 4294967296L;
 }
 
 func zbPut16LE(data, offset, value) {
@@ -107,7 +122,16 @@ func zbPut32LE(data, offset, value) {
 }
 
 func zbPut64LE(data, offset, value) {
-    Binary.writeU64LE(data, offset, value);
+    zbNeedBytes(data, offset, 8, "put u64le");
+    var kind = Type.of(value);
+    if (kind != "int" && kind != "long") {
+        zbFail("put u64le value is not an integer");
+    }
+    var remaining = Long.from(value);
+    for (index in 0..8) {
+        data[offset + index] = remaining & 255;
+        remaining = remaining >> 8;
+    }
 }
 
 func zbCopy(destination, destinationOffset, source, sourceOffset, count) {

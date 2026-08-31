@@ -4,7 +4,9 @@ Last updated: 2026-08-31
 
 WSID: `ws020`
 
-Status: in progress; revised p001-p002 complete, p003 QEMU matrix in progress
+Status: active; p001-p003 and p005 automatic work complete, p006 automatic
+GPT compatibility repair complete with one provisional physical boot pending,
+and p004 final physical acceptance pending
 
 Parent: [master plan](../master.md)
 
@@ -53,8 +55,22 @@ layout; the user does not select a target-medium capacity.
 - The kernel accepts this intentional primary-only form both when the physical
   medium ends at the declared GPT extent and when the physical medium is
   larger. The larger remainder is ignored unallocated space. A GPT end beyond
-  the physical medium, a malformed primary, or nonzero malformed metadata in
-  the declared final reservation remains an error.
+  the physical medium or a malformed primary remains an error. Nonzero or
+  otherwise noncanonical metadata in the declared final reservation excludes
+  the special `intentional primary-only` classification; when the primary GPT
+  itself remains fully valid, the ordinary read-only one-copy recovery rule
+  still accepts it. The production image checker separately rejects that
+  noncanonical source shape.
+- Some contemporary raw-image workflows can rewrite that copied primary-only
+  form into a complete GPT at the larger medium's physical end while leaving
+  the compact Protective-MBR advertisement. P006 makes a valid GPT
+  authoritative over that advertisement. The protective entry remains
+  mandatory, its extent disagreement is warned, and ordinary CRC, geometry,
+  bounds, copy-consistency, and read-only one-copy recovery rules remain in
+  force. If the primary header is damaged, recovery examines only the
+  PMBR-advertised end and the physical end, accepts one valid candidate (or two
+  identical candidates), and rejects contradictions without scanning arbitrary
+  LBAs. The source-image layout is unchanged.
 - Hybrid keeps its accepted complete GPT plus compatibility-BIOS layout, and
   BIOS-only keeps its legacy MBR layout. Both loader families are nevertheless
   always compiled.
@@ -79,17 +95,20 @@ PC/AT default remains the combined UEFI+BIOS profile.
 | --- | --- | --- |
 | [`ws020-p001`](phase001-target-variant-config/phase.md) | Completed (revised 2026-08-31) | Capacity selector removed; generic Variant round-trip and three-way compiled-artifact invariance pass with the requested labels/order |
 | [`ws020-p002`](phase002-image-layouts/phase.md) | Completed (revised 2026-08-31) | Fixed pure-PMBR primary-only UEFI layout and larger-medium kernel handling pass strict image and GPT host gates |
-| [`ws020-p003`](phase003-qemu-acceptance/phase.md) | In progress | Run the six-cell SeaBIOS/OVMF positive and negative matrix |
-| [`ws020-p004`](phase004-physical-bringup/phase.md) | Planned after p003; physical checkpoint | One Intel Mac UEFI-only boot reaches login, then the frozen artifact passes the final five-run campaign |
+| [`ws020-p003`](phase003-qemu-acceptance/phase.md) | Complete (`q047`, 2026-08-31) | One fresh uninterrupted `MAC-T020` run passed all six strict positive/negative cells; every positive reached exact `login:` and every immutable source remained unchanged |
+| [`ws020-p004`](phase004-physical-bringup/phase.md) | Provisional boot pending | The former `FDC1-A4EF` payload exposed the host-relocated-GPT boundary; p006 automatic repair now passes, so boot the newly frozen `A93F-BBBE` artifact once, then retain the final five-cold-boot gate |
+| [`ws020-p005`](phase005-production-uefi-preflight/phase.md) | Completed (`q038`); refreshed `q047` | Current two-partition UEFI-only source passed `MAC-T021` and partition publication ordinary/sanitizer/analyzer gates; exact checked hash `f811a0f5...` is installed |
+| [`ws020-p006`](phase006-relocated-physical-gpt/phase.md) | Automatic complete; physical pending | GPT precedence, host/sanitizer/analyzer, relocated/pristine QEMU, exact login, and six-cell gates pass; published image SHA-256 `692160cf...331d`, UUID `A93F-BBBE`, awaits one provisional Intel Mac boot |
 
 ## Completion conditions
 
 WS020 is complete when the generic Variant selection is stable, amd64 always
 builds both loader families, each selected layout contains only its intended
-boot path, the six-cell automatic matrix passes, and the declared Intel Mac
-boots the frozen UEFI-only artifact to a usable login five times in the final
-campaign. A first successful physical boot is enough to continue debugging and
-implementation; repetition is deferred to final acceptance.
+boot path, the six-cell automatic matrix and the p006 GPT-precedence
+compatibility gates pass, and the declared Intel Mac boots the frozen UEFI-only
+artifact to a usable login five times in the final campaign. A first successful
+physical boot after p006 is enough to continue debugging and implementation;
+repetition is deferred to final acceptance.
 
 ## Reconsideration boundaries
 

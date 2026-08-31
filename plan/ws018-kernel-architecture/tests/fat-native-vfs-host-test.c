@@ -45,6 +45,7 @@ struct memory_image {
 	unsigned fail_reads;
 	unsigned fail_writes;
 	unsigned fail_write_attempt;
+	unsigned fail_write_attempt2;
 	unsigned arm_read_after_writes;
 	unsigned fail_syncs;
 };
@@ -276,6 +277,23 @@ inode_release(struct inode *inode)
 		inode_free(inode);
 }
 
+int
+inode_creation_prepare(struct inode *parent, struct inode *child,
+	const struct inode_creation_request *request)
+{
+	(void)parent;
+	if (child == NULL || request == NULL ||
+	    request->origin == INODE_CREATION_INVALID ||
+	    child->i_type != request->type)
+		return EINVAL;
+	child->i_mode = (child->i_mode & S_IFMT) | (request->mode & 07777U);
+	child->i_uid = request->uid;
+	child->i_gid = request->gid;
+	child->i_rdev = request->rdev;
+	child->i_special = request->special;
+	return 0;
+}
+
 /* Host disk boundary with deterministic one-shot fault injection. */
 
 static int
@@ -297,6 +315,10 @@ memory_transfer(struct disk *disk, uint64_t block, uint32_t count, void *data,
 		image->write_attempts++;
 		if (image->fail_write_attempt == image->write_attempts) {
 			image->fail_write_attempt = 0;
+			return EIO;
+		}
+		if (image->fail_write_attempt2 == image->write_attempts) {
+			image->fail_write_attempt2 = 0;
 			return EIO;
 		}
 		if (image->fail_writes != 0) {
@@ -750,6 +772,7 @@ clone_image(const struct memory_image *source, struct memory_image *clone)
 	clone->fail_reads = 0;
 	clone->fail_writes = 0;
 	clone->fail_write_attempt = 0;
+	clone->fail_write_attempt2 = 0;
 	clone->arm_read_after_writes = 0;
 	clone->fail_syncs = 0;
 	memset(&clone->disk, 0, sizeof(clone->disk));
@@ -825,16 +848,30 @@ static int
 create_child(struct inode *directory, const char *name, struct inode **result)
 {
 	struct componentname part = component(name);
+	const struct inode_creation_request request = {
+		.origin = INODE_CREATION_SYSTEM,
+		.type = INODE_REG,
+		.mode = 0755U,
+		.uid = 0,
+		.gid = 0,
+	};
 
-	return directory->i_op->create(directory, &part, 0644U, result);
+	return directory->i_op->create(directory, &part, &request, result);
 }
 
 static int
 mkdir_child(struct inode *directory, const char *name, struct inode **result)
 {
 	struct componentname part = component(name);
+	const struct inode_creation_request request = {
+		.origin = INODE_CREATION_SYSTEM,
+		.type = INODE_DIR,
+		.mode = 0755U,
+		.uid = 0,
+		.gid = 0,
+	};
 
-	return directory->i_op->mkdir(directory, &part, 0755U, result);
+	return directory->i_op->mkdir(directory, &part, &request, result);
 }
 
 static int
@@ -1217,7 +1254,10 @@ check_file_mutations(struct memory_image *image, struct mount *mountp)
 	CHECK_ERROR(host_file_close(&reader), 0);
 	CHECK_ERROR(host_file_close(&writer), 0);
 
-	CHECK_ERROR(create_child(mountp->m_root, name, &again), 0);
+	CHECK_ERROR(create_child(mountp->m_root, name, &again), EEXIST);
+	CHECK(inode->i_size == 2);
+	CHECK_ERROR(inode->i_op->truncate(inode, 0), 0);
+	CHECK_ERROR(lookup_child(mountp->m_root, name, &again), 0);
 	CHECK(again == inode);
 	CHECK(again->i_size == 0);
 	CHECK_ERROR(host_file_open(again, O_RDONLY, &empty), 0);
@@ -2239,6 +2279,16 @@ schedule_write_failure(struct memory_image *image, unsigned ordinal)
 {
 	CHECK(ordinal != 0U);
 	image->fail_write_attempt = image->write_attempts + ordinal;
+}
+
+static void
+schedule_two_write_failures(struct memory_image *image, unsigned first,
+	unsigned second)
+{
+	CHECK(first != 0U);
+	CHECK(second > first);
+	image->fail_write_attempt = image->write_attempts + first;
+	image->fail_write_attempt2 = image->write_attempts + second;
 }
 
 static void
@@ -3332,6 +3382,112 @@ check_partial_shrink_faults(void)
 }
 
 static void
+check_mirrored_fat_rollback_failure_freezes_mount(void)
+{
+	struct memory_image image;
+	struct mount mountp;
+	struct inode *created = NULL;
+
+	current_type = ZEDBSD_FAT32;
+	current_stage = "mirrored FAT rollback failure";
+	current_fault_ordinal = 2U;
+	format_image(&image, ZEDBSD_FAT32, 1U, 2U);
+	CHECK_ERROR(host_mount(&image, 0U, &mountp), 0);
+	/* mkdir first zeroes its new cluster, then updates the two FAT copies.
+	 * Fail the second mirror and the dirty-cache flush at rollback entry so
+	 * the mirrored allocation cannot be proven restored.
+	 */
+	schedule_two_write_failures(&image, 3U, 4U);
+	CHECK_ERROR(mkdir_child(mountp.m_root, "MIRRORFAIL", &created), EIO);
+	CHECK(created == NULL);
+	CHECK(image.fail_write_attempt == 0U);
+	CHECK(image.fail_write_attempt2 == 0U);
+	CHECK(get_fat_entry(&image, 0U, 6U) !=
+	    get_fat_entry(&image, 1U, 6U));
+	/* A later mutation must not proceed on the uncertain allocation map. */
+	CHECK_ERROR(create_child(mountp.m_root, "FROZEN.TXT", &created),
+	    EROFS);
+	CHECK(created == NULL);
+	host_unmount(&mountp);
+	destroy_image(&image);
+}
+
+static void
+check_failed_create_restores_end_marker(void)
+{
+	static const uint8_t stale_sfn[11] = {
+	    'S', 'T', 'A', 'L', 'E', ' ', ' ', ' ', 'T', 'X', 'T',
+	};
+	struct memory_image image;
+	struct mount mountp;
+	struct inode *created = NULL;
+	uint8_t saved[4U * 32U];
+	uint8_t *root;
+
+	current_type = ZEDBSD_FAT32;
+	current_stage = "failed create restores FAT end marker";
+	current_fault_ordinal = 1U;
+	format_image(&image, ZEDBSD_FAT32, 1U, 2U);
+	root = image_sector(&image, cluster_lba(&image, image.root_cluster));
+	/* The formatted image ends at slot 4.  A syntactically valid stale
+	 * entry after that marker must remain hidden if a long-name create fails.
+	 */
+	CHECK(root[4U * 32U] == 0U);
+	set_dirent(root + 7U * 32U, stale_sfn, 0x20U, 0U, 0U,
+	    ZEDBSD_FAT32);
+	memcpy(saved, root + 4U * 32U, sizeof(saved));
+	CHECK_ERROR(host_mount(&image, 0U, &mountp), 0);
+	schedule_write_failure(&image, 2U);
+	CHECK_ERROR(create_child(mountp.m_root, "Rollback End Marker.txt",
+	    &created), EIO);
+	CHECK(created == NULL);
+	CHECK(image.fail_write_attempt == 0U);
+	CHECK(memcmp(saved, root + 4U * 32U, sizeof(saved)) == 0);
+	CHECK_ERROR(lookup_child(mountp.m_root, "Rollback End Marker.txt",
+	    &created), ENOENT);
+	CHECK_ERROR(lookup_child(mountp.m_root, "STALE.TXT", &created),
+	    ENOENT);
+	host_unmount(&mountp);
+
+	/* Validate the persisted bytes through a fresh directory traversal too. */
+	CHECK_ERROR(host_mount(&image, 0U, &mountp), 0);
+	CHECK_ERROR(lookup_child(mountp.m_root, "Rollback End Marker.txt",
+	    &created), ENOENT);
+	CHECK_ERROR(lookup_child(mountp.m_root, "STALE.TXT", &created),
+	    ENOENT);
+	host_unmount(&mountp);
+	destroy_image(&image);
+
+	/* Repeat with a second fault in the first rollback flush.  Restoration
+	 * continues while the mount is still writable; a later exact-slot flush
+	 * persists the complete sector, but any rollback error still freezes it.
+	 */
+	current_stage = "double-fault create restores FAT end marker";
+	current_fault_ordinal = 2U;
+	created = NULL;
+	format_image(&image, ZEDBSD_FAT32, 1U, 2U);
+	root = image_sector(&image, cluster_lba(&image, image.root_cluster));
+	set_dirent(root + 7U * 32U, stale_sfn, 0x20U, 0U, 0U,
+	    ZEDBSD_FAT32);
+	memcpy(saved, root + 4U * 32U, sizeof(saved));
+	CHECK_ERROR(host_mount(&image, 0U, &mountp), 0);
+	schedule_two_write_failures(&image, 2U, 3U);
+	CHECK_ERROR(create_child(mountp.m_root, "Rollback End Marker.txt",
+	    &created), EIO);
+	CHECK(created == NULL);
+	CHECK(image.fail_write_attempt == 0U);
+	CHECK(image.fail_write_attempt2 == 0U);
+	CHECK(memcmp(saved, root + 4U * 32U, sizeof(saved)) == 0);
+	CHECK_ERROR(lookup_child(mountp.m_root, "STALE.TXT", &created),
+	    ENOENT);
+	CHECK_ERROR(create_child(mountp.m_root, "FROZEN.TXT", &created),
+	    EROFS);
+	CHECK(created == NULL);
+	host_unmount(&mountp);
+	destroy_image(&image);
+}
+
+static void
 check_mount_faults_and_validation(void)
 {
 	struct memory_image image;
@@ -3476,6 +3632,8 @@ main(void)
 	check_sector_boundary_lfn_faults();
 	check_partial_shrink_faults();
 	check_partial_grow_faults();
+	check_mirrored_fat_rollback_failure_freezes_mount();
+	check_failed_create_restores_end_marker();
 	current_type = 0;
 	current_stage = "final fixture cleanup";
 	current_fault_ordinal = 0;

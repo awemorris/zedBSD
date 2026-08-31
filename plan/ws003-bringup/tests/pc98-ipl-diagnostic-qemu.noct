@@ -1,0 +1,91 @@
+require zedbuild;
+
+// WS003 BR-T55 diagnostic-image continuation under qemu-pc98.
+// Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+func run(command, what) {
+    var status = System.shell(command);
+    if (status != 0) { zbFail(what + " failed (status=" + status + ")"); }
+}
+
+func need(text, marker, what) {
+    if (String.indexOf(text, marker) < 0) {
+        zbFail(what + " is missing: " + marker);
+    }
+}
+
+func main(args) {
+    var repo = ".";
+    var evidence = "plan/ws003-bringup/temp/q039-p023-diagnostic-qemu";
+    if (Array.size(args) > 2) {
+        zbFail("usage: pc98-ipl-diagnostic-qemu.noct [REPOSITORY [EVIDENCE]]");
+    }
+    if (Array.size(args) >= 1) { repo = args[0]; }
+    if (Array.size(args) == 2) { evidence = args[1]; }
+
+    var image = repo +
+        "/build/pc98/ws003-p023-pc9821-v13-diagnostic.img";
+    var qemu = repo + "/build/qemu-pc98/build/qemu-system-i386";
+    var decoder = evidence + "/pc98-vram-decoder";
+    var runImage = evidence + "/run.img";
+    var debugLog = evidence + "/debug.log";
+    var vram = evidence + "/vram.bin";
+    var screen = evidence + "/screen.log";
+    var sourceHash = evidence + "/source.sha256";
+    var finalHash = evidence + "/source-final.sha256";
+
+    if (FileUtil.checkFileExists(evidence) == 1) {
+        zbFail("evidence path already exists: " + evidence);
+    }
+    run("mkdir -p " + zbShellQuote(evidence), "evidence directory creation");
+    run("test -x " + zbShellQuote(qemu) + " && test -s " +
+        zbShellQuote(image), "qemu-pc98 and diagnostic image preflight");
+    run("cc -std=c11 -Wall -Wextra -Werror " + zbShellQuote(
+        repo + "/plan/ws003-bringup/tests/boot-parameter-image-tool.c") +
+        " -o " + zbShellQuote(decoder), "VRAM decoder build");
+    run("sha256sum " + zbShellQuote(image) + " >" +
+        zbShellQuote(sourceHash), "source hash capture");
+    run("cp --reflink=auto --sparse=always " + zbShellQuote(image) + " " +
+        zbShellQuote(runImage), "disposable image copy");
+
+    var command = [qemu, "-M", "pc9821,pegc=off,coregraph=on", "-cpu",
+        "486", "-m", "64M", "-smp", "1", "-drive",
+        "if=ide,bus=0,unit=0,format=raw,file=" + runImage,
+        "-display", "none", "-serial", "none", "-debugcon",
+        "file:" + debugLog, "-monitor", "stdio", "-no-reboot"];
+    var child = Process.spawn(command);
+    if (child < 0) { zbFail("could not start qemu-pc98"); }
+    if (System.shell("sleep 25") != 0 || Process.isAlive(child) != 1) {
+        zbFail("qemu-pc98 exited before the diagnostic capture point");
+    }
+    Process.write(child, "pmemsave 0xa0000 0x2000 \"" + vram + "\"\n");
+    System.shell("sleep 1");
+    Process.write(child, "quit\n");
+    var status = Process.wait(child);
+    Process.close(child);
+    if (status != 0 || FileUtil.checkFileExists(vram) != 1) {
+        zbFail("qemu-pc98 diagnostic capture failed");
+    }
+
+    run(zbShellQuote(decoder) + " decode-pc98-vram " +
+        zbShellQuote(vram) + " >" + zbShellQuote(screen),
+        "PC-98 VRAM decode");
+    run("sha256sum " + zbShellQuote(image) + " >" +
+        zbShellQuote(finalHash) + " && cmp " + zbShellQuote(sourceHash) +
+        " " + zbShellQuote(finalHash), "immutable source verification");
+
+    var debug = FileUtil.readText(debugLog);
+    var visible = FileUtil.readText(screen);
+    need(debug, "P1E\n", "Stage-1 entry marker");
+    need(debug, "P2E\n", "Stage-2 entry marker");
+    if (String.indexOf(debug, "P1S\n") >= 0 ||
+        String.indexOf(debug, "P1R\n") >= 0 ||
+        String.indexOf(debug, "P2T\n") >= 0 ||
+        String.indexOf(debug, "P2N\n") >= 0 ||
+        String.indexOf(debug, "P2P\n") >= 0) {
+        zbFail("diagnostic image entered a failure checkpoint");
+    }
+    need(visible, "init: system running", "runtime continuation");
+    need(visible, "login:", "login continuation");
+    print("WS003 BR-T55 diagnostic qemu-pc98 continuation: PASS");
+}
