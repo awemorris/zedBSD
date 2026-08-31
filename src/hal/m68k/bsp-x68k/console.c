@@ -4,6 +4,8 @@
 #include <hal/hal.h>
 #include "mmio.h"
 
+#include <string.h>
+
 #define X68K_TVRAM_PLANE_BYTES 0x00020000U
 #define X68K_TEXT_ROW_BYTES    128U
 #define X68K_FONT_HEIGHT       16U
@@ -146,16 +148,44 @@ cons_putc(int character)
 void cons_puts(const char *string) { if (string != NULL) while (*string != '\0') cons_putc(*string++); }
 int cons_getc(void)
 {
+	static const struct {
+		const char *symbol;
+		unsigned char character;
+	} legacy_jis[] = {
+	    {"jis-1", '1'}, {"jis-2", '2'}, {"jis-3", '3'},
+	    {"jis-4", '4'}, {"jis-5", '5'}, {"jis-6", '6'},
+	    {"jis-7", '7'}, {"jis-8", '8'}, {"jis-9", '9'},
+	    {"jis-0", '0'}, {"jis-minus", '-'}, {"jis-caret", '^'},
+	    {"jis-yen", '\\'}, {"jis-at", '@'}, {"jis-lbrace", '['},
+	    {"jis-semi", ';'}, {"jis-colon", ':'}, {"jis-rbrace", ']'},
+	    {"jis-comma", ','}, {"jis-dot", '.'}, {"jis-slash", '/'},
+	    {"jis-ro", '_'}, {"jis-kp-slash", '/'}, {"jis-kp-star", '*'},
+	    {"jis-kp-minus", '-'}, {"jis-kp-7", '7'}, {"jis-kp-8", '8'},
+	    {"jis-kp-9", '9'}, {"jis-kp-plus", '+'}, {"jis-kp-4", '4'},
+	    {"jis-kp-5", '5'}, {"jis-kp-6", '6'}, {"jis-kp-equal", '='},
+	    {"jis-kp-1", '1'}, {"jis-kp-2", '2'}, {"jis-kp-3", '3'},
+	    {"jis-kp-enter", '\n'}, {"jis-kp-0", '0'},
+	    {"jis-kp-comma", ','}, {"jis-kp-dot", '.'},
+	};
 	struct hal_key_event event;
 	for (;;) {
+		unsigned index;
+
 		(void)hal_cons_read_event(&event);
-		if ((event.flags & (HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_REPEAT)) != 0 &&
-		    event.symbol[0] != '\0' && event.symbol[1] == '\0')
+		if ((event.flags & HAL_KEY_EVENT_SNAPSHOT) != 0)
+			continue;
+		if ((event.flags & (HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_REPEAT)) == 0)
+			continue;
+		if (event.symbol[0] != '\0' && event.symbol[1] == '\0')
 			return (unsigned char)event.symbol[0];
 		if (event.symbol[0] == 'e' && event.symbol[1] == 'n' &&
 		    event.symbol[2] == 't' && event.symbol[3] == 'e' &&
 		    event.symbol[4] == 'r' && event.symbol[5] == '\0')
 			return '\n';
+		for (index = 0; index < sizeof(legacy_jis) / sizeof(legacy_jis[0]);
+		    index++)
+			if (strcmp(event.symbol, legacy_jis[index].symbol) == 0)
+				return legacy_jis[index].character;
 	}
 }
 void cons_set_attr(int foreground, int background)

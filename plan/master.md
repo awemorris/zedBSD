@@ -41,6 +41,15 @@ NEC PC-9821V13 is the declared native PC-98 physical target. The observation
 which triggered q037 beeped before loader output; p022 owns that early-IPL regression
 without replacing the PC-98 partition scheme with a PC/AT MBR.
 
+The completed q044 input milestone makes every current physical or
+character-only producer source-owned, routes console translation through a
+bounded internal subscriber, and repairs overflow through an atomic
+begin/snapshot/end state transaction. Its independent bounded HID parser
+rejects impossible field widths even on unsupported usages and passes 791
+strict/sanitizer/analyzer checks. Live USB HID attachment remains WS006 p008;
+fresh image/QEMU evidence is presently held by the already recorded WS008
+Noct CLI incompatibility.
+
 The archived [q039](queue-q039.md) first proves the
 already-correct PC-98 `IPL1` field and has prepared one immutable audio-trace
 image for the still-silent PC-9821V13 boundary; its automatic gates pass and
@@ -59,9 +68,10 @@ host gate passes. Because that QEMU exposes no interactive display backend,
 environment rather than receiving a speculative repair. The archived [q040](queue-q040.md)
 records the uncleared printed-label-only Archer identity checkpoint and the
 completed independent AF_UNIX/network authorization foundation. The current
-[Queue Book](queue.md) records q043's PC-98 fixed-read correction and exact
-mouse reproduction; both locally controlled paths pass and their remaining
-external resume facts do not block the next Queue. The
+[Queue Book](queue.md) records q044's completed input ownership and bounded
+HID parser milestones. The archived q043 PC-98 fixed-read and exact-mouse
+paths both pass locally, and their remaining external resume facts do not
+block subsequent Queues. The
 archived [q038](queue-q038.md) replaced the
 stale or intermediate image used for the first Intel Mac observation with one
 fresh, production-checked UEFI-only artifact and passed the exact larger-USB
@@ -319,7 +329,7 @@ actually warranted.
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; restore its Make-owned Noct gate through ws008-p010 | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Audited active; q041 p016 completed checked UHCI/EHCI request retirement with configured and QEMU lifecycle evidence. q040 p026 completed every automatic/read-only intake step and is uncleared only for the purchased unit's printed model/region/revision. `q030` NVMe software and the physical USB-Ethernet path are complete | `ws004-p010`--`p016`, `p018`, p020, and p022--p024 complete | Proceed through q041; obtain one serial-redacted Archer label observation when convenient without blocking independent work | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q029 p001 and q040 p003 complete; q041 p005 host implementation passes and q042 advanced but did not complete its VFS dependencies | Physical USB Ethernet and authenticated control pass; strict local credential parser/store/CLI now pass host safety and regression gates | Complete WS001 p015/p016 after WS008 p010, then requeue p005 root/non-root ownership and remount-durability acceptance; p004 remains hardware-core dependency-gated | [WS005](ws005-networking/ws.md) |
-| `ws006` | Input and evdev | Audited active; not complete. p005 is only the PC/AT capability milestone | `ws006-p005` complete | Execute p006--p008 for producer truthfulness and USB HID when selected; run p009 consumer/legacy-console removal only after the accepted WS008 userland tree is available | [WS006](ws006-input/ws.md) |
+| `ws006` | Input and evdev | Active; q044 completed truthful per-source ownership and the bounded HID parser, but live USB HID and final legacy removal remain | `ws006-p006` automatic/source and `ws006-p007` parser milestones complete | Execute dependency-ready p008 for live USB HID; run p009 consumer/legacy-console removal only after the accepted WS008 userland tree is available | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked; target packages remain disabled, and the p008 host pin is not production-usable because upstream removed its documented module-path CLI | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 records the later `--path` production-build regression and p009 remains separately target-blocked | Resume p010 from the maintainer's accepted upstream repair or an explicit compatible revision, then resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
 | `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
@@ -429,10 +439,10 @@ active execution order. Dependency closure may interleave adjacent WSs, but it
 must not silently promote a lower-priority product goal over a ready higher-
 priority one.
 
-1. Audit WS006 and WS004 completion claims. This is a read-only truthfulness
-   checkpoint: record completed milestones and residual Phases separately;
-   neither WS is called complete merely because its current visible use case
-   works.
+1. Continue the WS006/WS004 completion audit. q044 completed WS006 p006/p007
+   source boundaries without calling the WS complete; p008/p009 remain. WS004
+   likewise retains its independently listed p017, p019, p021, p025, and WLAN
+   chain rather than treating the working visible USB/NVMe cases as closure.
 2. WS018 is complete.  q035 finished p009's retained runtime evidence and
    p010--p012 in consumer-before-deletion order; no residual Phase remains.
 3. Complete WS020 Intel Mac bring-up. Add the generic board Variant, implement

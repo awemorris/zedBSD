@@ -4,6 +4,7 @@
 #include "kern/clock.h"
 #include "kern/file.h"
 #include "kern/input-capability.h"
+#include "kern/input-keymap.h"
 #include "kern/input-queue.h"
 #include "kern/kmem.h"
 #include "kern/lock.h"
@@ -23,10 +24,12 @@
 struct input_reader {
 	struct input_queue_reader cursor;
 	struct input_reader *next;
+	int producer_opened;
 };
 
 struct input_device {
 	struct spinlock lock;
+	struct spinlock publication_lock;
 	struct wait_queue waitq;
 	struct input_queue queue;
 	struct input_reader *readers;
@@ -36,15 +39,59 @@ struct input_device {
 	char physical_path[INPUT_TEXT_MAX];
 	char unique_id[INPUT_TEXT_MAX];
 	struct input_capability_state capability_state;
+	unsigned long resync_key_state[INPUT_BIT_WORDS(KEY_MAX)];
 	int (*open)(void *);
 	void (*close)(void *);
 	void *context;
 	unsigned number;
+	unsigned flags;
+	unsigned producer_callbacks;
 	int registered;
+	int retiring;
+	int resyncing;
 };
 
 static struct spinlock registry_lock;
-static unsigned input_device_count;
+static uint8_t input_device_reserved[INPUT_DEVICE_MAX];
+
+static void
+report_timestamp(struct input_event *event, uint64_t milliseconds)
+{
+	memset(event, 0, sizeof(*event));
+	event->time.tv_sec = (time_t)(milliseconds / 1000U);
+	event->time.tv_usec = (int64_t)((milliseconds % 1000U) * 1000U);
+}
+
+static void
+report_init(struct input_report *report, struct input_device *device)
+{
+	memset(report, 0, sizeof(*report));
+	report->device = device;
+	report->device_id = device->number;
+}
+
+static void
+report_event(struct input_report *report, uint64_t milliseconds,
+	uint16_t type, uint16_t code, int32_t value,
+	const struct hal_key_event *key_event)
+{
+	struct input_report_event *item;
+	size_t index;
+
+	if (report->event_count == INPUT_REPORT_EVENT_MAX)
+		return;
+	item = &report->events[report->event_count++];
+	report_timestamp(&item->event, milliseconds);
+	item->event.type = type;
+	item->event.code = code;
+	item->event.value = value;
+	if (key_event == NULL)
+		return;
+	for (index = 0; index < HAL_KEY_SYMBOL_SIZE; index++)
+		item->symbol[index] = key_event->symbol[index];
+	item->key_flags = key_event->flags;
+}
+
 
 static struct input_device *
 file_device(struct file *file)
@@ -62,38 +109,76 @@ file_reader(struct file *file)
 }
 
 static int
+producer_callback_enter(struct input_device *device)
+{
+	unsigned long irq = spin_lock_irqsave(&device->lock);
+
+	if (!device->registered || device->retiring) {
+		spin_unlock_irqrestore(&device->lock, irq);
+		return ENODEV;
+	}
+	device->producer_callbacks++;
+	spin_unlock_irqrestore(&device->lock, irq);
+	return 0;
+}
+
+static void
+producer_callback_leave(struct input_device *device)
+{
+	unsigned long irq = spin_lock_irqsave(&device->lock);
+
+	if (device->producer_callbacks != 0)
+		device->producer_callbacks--;
+	waitq_wake_all(&device->waitq);
+	spin_unlock_irqrestore(&device->lock, irq);
+}
+
+static int
 input_open(struct file *file)
 {
 	struct input_device *device = file_device(file);
 	struct input_reader *reader;
 	unsigned long irq;
-	if (device == NULL || !device->registered)
+	int error, attached = 0;
+
+	if (device == NULL)
 		return ENODEV;
 	if ((file_status_flags_get(file) & O_ACCMODE) == O_WRONLY)
 		return EACCES;
 	reader = kern_calloc(1, sizeof(*reader));
 	if (reader == NULL)
 		return ENOMEM;
+	error = producer_callback_enter(device);
+	if (error != 0) {
+		kern_free(reader);
+		return error;
+	}
 	if (device->open != NULL) {
-		int error = device->open(device->context);
+		error = device->open(device->context);
 		if (error != 0) {
+			producer_callback_leave(device);
 			kern_free(reader);
 			return error;
 		}
 	}
 	irq = spin_lock_irqsave(&device->lock);
-	if (!device->registered) {
-		spin_unlock_irqrestore(&device->lock, irq);
-		if (device->close != NULL)
-			device->close(device->context);
+	if (device->registered && !device->retiring) {
+		input_queue_reader_init(&device->queue, &reader->cursor);
+		reader->producer_opened = device->close != NULL;
+		reader->next = device->readers;
+		device->readers = reader;
+		file->f_data = reader;
+		attached = 1;
+	}
+	spin_unlock_irqrestore(&device->lock, irq);
+	/* Keep the admission held through the compensating close. */
+	if (!attached && device->close != NULL)
+		device->close(device->context);
+	producer_callback_leave(device);
+	if (!attached) {
 		kern_free(reader);
 		return ENODEV;
 	}
-	input_queue_reader_init(&device->queue, &reader->cursor);
-	reader->next = device->readers;
-	device->readers = reader;
-	file->f_data = reader;
-	spin_unlock_irqrestore(&device->lock, irq);
 	return 0;
 }
 
@@ -103,6 +188,7 @@ input_close(struct file *file)
 	struct input_device *device = file_device(file);
 	struct input_reader *reader = file_reader(file), **link;
 	unsigned long irq;
+	int close_producer = 0;
 	if (device == NULL || reader == NULL)
 		return 0;
 	irq = spin_lock_irqsave(&device->lock);
@@ -113,11 +199,18 @@ input_close(struct file *file)
 		}
 	if (device->grabber == reader)
 		device->grabber = NULL;
+	if (reader->producer_opened) {
+		reader->producer_opened = 0;
+		device->producer_callbacks++;
+		close_producer = 1;
+	}
 	file->f_data = NULL;
 	spin_unlock_irqrestore(&device->lock, irq);
-	kern_free(reader);
-	if (device->close != NULL)
+	if (close_producer)
 		device->close(device->context);
+	if (close_producer)
+		producer_callback_leave(device);
+	kern_free(reader);
 	return 0;
 }
 
@@ -365,7 +458,8 @@ void
 input_core_init(void)
 {
 	spin_init(&registry_lock, LOCK_RANK_DEVICE, "input registry");
-	input_device_count = 0;
+	memset(input_device_reserved, 0, sizeof(input_device_reserved));
+	input_subscriber_init();
 }
 
 static int
@@ -386,8 +480,17 @@ input_device_register(const struct input_device_info *info,
 	struct input_device *device;
 	char node[16];
 	unsigned long irq;
+	unsigned slot;
 	int error;
 	if (info == NULL || result == NULL || info->name == NULL)
+		return EINVAL;
+	if ((info->open == NULL) != (info->close == NULL))
+		return EINVAL;
+	if ((info->flags & ~(INPUT_DEVICE_KEY_MOMENTARY |
+	    INPUT_DEVICE_KEY_REPEAT)) != 0 ||
+	    (info->flags & (INPUT_DEVICE_KEY_MOMENTARY |
+	    INPUT_DEVICE_KEY_REPEAT)) == (INPUT_DEVICE_KEY_MOMENTARY |
+	    INPUT_DEVICE_KEY_REPEAT))
 		return EINVAL;
 	device = kern_calloc(1, sizeof(*device));
 	if (device == NULL)
@@ -411,25 +514,37 @@ input_device_register(const struct input_device_info *info,
 	device->open = info->open;
 	device->close = info->close;
 	device->context = info->context;
+	device->flags = info->flags;
 	spin_init(&device->lock, LOCK_RANK_DEVICE, "input device");
+	spin_init(&device->publication_lock, LOCK_RANK_DEVICE,
+	    "input publication");
 	waitq_init(&device->waitq, "input event");
 	input_queue_init(&device->queue);
 	irq = spin_lock_irqsave(&registry_lock);
-	if (input_device_count == INPUT_DEVICE_MAX) {
+	for (slot = 0; slot < INPUT_DEVICE_MAX; slot++)
+		if (!input_device_reserved[slot])
+			break;
+	if (slot == INPUT_DEVICE_MAX) {
 		spin_unlock_irqrestore(&registry_lock, irq);
 		kern_free(device);
 		return ENOSPC;
 	}
-	device->number = input_device_count++;
+	input_device_reserved[slot] = 1;
+	device->number = slot;
 	spin_unlock_irqrestore(&registry_lock, irq);
 	(void)snprintf(node, sizeof(node), "event%u", device->number);
+	/* cdev_register publishes the node; all observable state is ready first. */
+	device->registered = 1;
 	error = cdev_register(node, (dev_t)(0x00030000U + device->number),
 			      &input_ops, device);
 	if (error != 0) {
+		device->registered = 0;
+		irq = spin_lock_irqsave(&registry_lock);
+		input_device_reserved[slot] = 0;
+		spin_unlock_irqrestore(&registry_lock, irq);
 		kern_free(device);
 		return error;
 	}
-	device->registered = 1;
 	*result = device;
 	hal_printf("input: /dev/input/%s: %s\n", node, device->name);
 	return 0;
@@ -438,43 +553,350 @@ input_device_register(const struct input_device_info *info,
 void
 input_device_unregister(struct input_device *device)
 {
-	unsigned long irq;
+	unsigned long held[INPUT_BIT_WORDS(KEY_MAX)];
+	struct input_report report;
+	struct input_reader *reader;
+	uint64_t milliseconds;
+	unsigned long irq, publication_irq;
+	unsigned code, close_count = 0;
+	int released = 0, was_resyncing;
+
 	if (device == NULL)
 		return;
+
+	/*
+	 * Retire callback admission before touching publication.  An open that
+	 * was admitted first either installs its reader or performs its matching
+	 * close before leaving; unregister joins it here.  Existing readers have
+	 * their matching close transferred to this call, so no producer callback
+	 * can run after unregister returns.
+	 */
 	irq = spin_lock_irqsave(&device->lock);
+	/*
+	 * Every remover joins the one thread which owns terminal publication.
+	 * In particular, registered becomes false before DETACH is published, so
+	 * observing that bit alone is not a sufficient unregister completion
+	 * condition.
+	 */
+	while (device->retiring) {
+		uint64_t sequence = waitq_sequence(&device->waitq);
+
+		(void)waitq_sleep(&device->waitq, &device->lock, sequence, 0, 0);
+	}
+	if (!device->registered) {
+		spin_unlock_irqrestore(&device->lock, irq);
+		return;
+	}
+	device->retiring = 1;
+	while (device->producer_callbacks != 0) {
+		uint64_t sequence = waitq_sequence(&device->waitq);
+
+		(void)waitq_sleep(&device->waitq, &device->lock, sequence, 0, 0);
+	}
+	for (reader = device->readers; reader != NULL; reader = reader->next)
+		if (reader->producer_opened) {
+			reader->producer_opened = 0;
+			close_count++;
+		}
+	spin_unlock_irqrestore(&device->lock, irq);
+	while (close_count != 0) {
+		device->close(device->context);
+		close_count--;
+	}
+
+	milliseconds = clock_milliseconds(NULL);
+	publication_irq = spin_lock_irqsave(&device->publication_lock);
+	irq = spin_lock_irqsave(&device->lock);
+	was_resyncing = device->resyncing;
+	device->resyncing = 0;
+	memcpy(held, device->capability_state.key_state, sizeof(held));
+	if (was_resyncing) {
+		struct input_event event;
+
+		report_timestamp(&event, milliseconds);
+		event.type = EV_SYN;
+		event.code = SYN_DROPPED;
+		input_queue_push(&device->queue, &event);
+	}
+	for (code = 0; code <= KEY_MAX; code++) {
+		struct input_event event;
+		if ((held[code / INPUT_BITS_PER_WORD] &
+		    (1UL << (code % INPUT_BITS_PER_WORD))) == 0)
+			continue;
+		report_timestamp(&event, milliseconds);
+		event.type = EV_KEY;
+		event.code = (uint16_t)code;
+		event.value = 0;
+		(void)input_capability_event(&device->capability_state,
+		    EV_KEY, (uint16_t)code, 0);
+		input_queue_push(&device->queue, &event);
+		released = 1;
+	}
+	if (released || was_resyncing) {
+		struct input_event event;
+		report_timestamp(&event, milliseconds);
+		event.type = EV_SYN;
+		event.code = SYN_REPORT;
+		input_queue_push(&device->queue, &event);
+	}
 	device->registered = 0;
 	input_queue_detach(&device->queue);
 	waitq_wake_all(&device->waitq);
 	spin_unlock_irqrestore(&device->lock, irq);
+
+	if (!was_resyncing) {
+		report_init(&report, device);
+		for (code = 0; code <= KEY_MAX; code++) {
+			if ((held[code / INPUT_BITS_PER_WORD] &
+			    (1UL << (code % INPUT_BITS_PER_WORD))) == 0)
+				continue;
+			if (report.event_count == INPUT_REPORT_EVENT_MAX) {
+				input_subscriber_publish(&report);
+				report_init(&report, device);
+			}
+			report_event(&report, milliseconds, EV_KEY,
+			    (uint16_t)code, 0, NULL);
+		}
+		if (released) {
+			if (report.event_count == INPUT_REPORT_EVENT_MAX) {
+				input_subscriber_publish(&report);
+				report_init(&report, device);
+			}
+			report_event(&report, milliseconds, EV_SYN, SYN_REPORT, 0,
+			    NULL);
+		}
+		if (report.event_count != 0)
+			input_subscriber_publish(&report);
+	}
+	report_init(&report, device);
+	report.flags = INPUT_REPORT_DETACH;
+	input_subscriber_publish(&report);
+	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 	poll_notify();
+
+	/* DETACH and every transferred producer close are now terminal. */
+	irq = spin_lock_irqsave(&device->lock);
+	device->retiring = 0;
+	waitq_wake_all(&device->waitq);
+	spin_unlock_irqrestore(&device->lock, irq);
 }
 
 void
 input_device_emit(struct input_device *device, uint16_t type, uint16_t code,
 		  int32_t value)
 {
-	struct input_event event;
+	struct input_report report;
 	uint64_t milliseconds;
-	unsigned long irq;
+	unsigned long irq, publication_irq;
 	int published = 0;
 	if (device == NULL)
 		return;
 	milliseconds = clock_milliseconds(NULL);
-	memset(&event, 0, sizeof(event));
-	event.time.tv_sec = (time_t)(milliseconds / 1000U);
-	event.time.tv_usec = (int64_t)((milliseconds % 1000U) * 1000U);
-	event.type = type;
-	event.code = code;
-	event.value = value;
+	report_init(&report, device);
+	report_event(&report, milliseconds, type, code, value, NULL);
+	publication_irq = spin_lock_irqsave(&device->publication_lock);
 	irq = spin_lock_irqsave(&device->lock);
-	if (device->registered &&
+	if (device->registered && !device->retiring && !device->resyncing &&
 	    input_capability_event(&device->capability_state, type, code,
 				   value)) {
+		input_queue_push(&device->queue, &report.events[0].event);
+		waitq_wake_all(&device->waitq);
+		published = 1;
+	}
+	spin_unlock_irqrestore(&device->lock, irq);
+	if (published) {
+		input_subscriber_publish(&report);
+	}
+	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
+	if (published)
+		poll_notify();
+}
+
+static void
+input_device_resync_begin(struct input_device *device, uint32_t key_flags)
+{
+	struct input_report report;
+	unsigned long irq, publication_irq;
+	int published = 0;
+
+	publication_irq = spin_lock_irqsave(&device->publication_lock);
+	irq = spin_lock_irqsave(&device->lock);
+	if (device->registered && !device->retiring) {
+		memset(device->resync_key_state, 0,
+		    sizeof(device->resync_key_state));
+		device->resyncing = 1;
+		published = 1;
+	}
+	spin_unlock_irqrestore(&device->lock, irq);
+	if (published) {
+		report_init(&report, device);
+		report.flags = INPUT_REPORT_RESYNC_BEGIN |
+		    ((key_flags & HAL_KEY_EVENT_LOCK_CAPS) != 0 ?
+		    INPUT_REPORT_LOCK_CAPS : 0U) |
+		    ((key_flags & HAL_KEY_EVENT_LOCK_KANA) != 0 ?
+		    INPUT_REPORT_LOCK_KANA : 0U);
+		input_subscriber_publish(&report);
+	}
+	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
+}
+
+static void
+input_device_resync_snapshot(struct input_device *device,
+	const struct hal_key_event *key_event)
+{
+	struct input_report report;
+	uint64_t milliseconds = clock_milliseconds(NULL);
+	unsigned long irq, publication_irq;
+	uint16_t code = input_key_from_symbol(key_event->symbol);
+	int logical_only = code == KEY_RESERVED &&
+	    input_key_symbol_supported(key_event->symbol);
+	int published = 0;
+
+	if (code == KEY_RESERVED && !logical_only)
+		return;
+	report_init(&report, device);
+	report.flags = INPUT_REPORT_SNAPSHOT;
+	report_event(&report, milliseconds, EV_KEY, code, 1, key_event);
+	publication_irq = spin_lock_irqsave(&device->publication_lock);
+	irq = spin_lock_irqsave(&device->lock);
+	if (device->registered && !device->retiring && device->resyncing) {
+		if (logical_only) {
+			published = 1;
+		} else if ((device->capability_state.key_bits[
+		    code / INPUT_BITS_PER_WORD] &
+		    (1UL << (code % INPUT_BITS_PER_WORD))) != 0 &&
+		    (device->resync_key_state[code / INPUT_BITS_PER_WORD] &
+		    (1UL << (code % INPUT_BITS_PER_WORD))) == 0) {
+			device->resync_key_state[code / INPUT_BITS_PER_WORD] |=
+			    1UL << (code % INPUT_BITS_PER_WORD);
+			published = 1;
+		}
+	}
+	spin_unlock_irqrestore(&device->lock, irq);
+	if (published)
+		input_subscriber_publish(&report);
+	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
+}
+
+static void
+input_device_resync_end(struct input_device *device)
+{
+	struct input_report report;
+	struct input_event event;
+	uint64_t milliseconds = clock_milliseconds(NULL);
+	unsigned long irq, publication_irq;
+	int published = 0;
+
+	publication_irq = spin_lock_irqsave(&device->publication_lock);
+	irq = spin_lock_irqsave(&device->lock);
+	if (device->registered && !device->retiring && device->resyncing) {
+		device->resyncing = 0;
+		memcpy(device->capability_state.key_state,
+		    device->resync_key_state,
+		    sizeof(device->capability_state.key_state));
+		report_timestamp(&event, milliseconds);
+		event.type = EV_SYN;
+		event.code = SYN_DROPPED;
+		input_queue_push(&device->queue, &event);
+		event.code = SYN_REPORT;
 		input_queue_push(&device->queue, &event);
 		waitq_wake_all(&device->waitq);
 		published = 1;
 	}
 	spin_unlock_irqrestore(&device->lock, irq);
+	if (published) {
+		report_init(&report, device);
+		report.flags = INPUT_REPORT_RESYNC_END;
+		input_subscriber_publish(&report);
+	}
+	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
+	if (published)
+		poll_notify();
+}
+
+void
+input_device_emit_key_event(struct input_device *device,
+	const struct hal_key_event *key_event)
+{
+	struct input_report report;
+	uint64_t milliseconds;
+	unsigned long irq, publication_irq;
+	uint16_t code;
+	int value, momentary, logical_only, published = 0;
+
+	if (device == NULL || key_event == NULL ||
+	    key_event->symbol[HAL_KEY_SYMBOL_SIZE - 1U] != '\0')
+		return;
+	if ((key_event->flags & ~(HAL_KEY_EVENT_RESYNC |
+	    HAL_KEY_EVENT_LOCK_CAPS | HAL_KEY_EVENT_LOCK_KANA)) == 0 &&
+	    (key_event->flags & HAL_KEY_EVENT_RESYNC) != 0 &&
+	    key_event->symbol[0] == '\0') {
+		input_device_resync_begin(device, key_event->flags);
+		return;
+	}
+	if (key_event->flags == (HAL_KEY_EVENT_PRESS |
+	    HAL_KEY_EVENT_SNAPSHOT)) {
+		input_device_resync_snapshot(device, key_event);
+		return;
+	}
+	if (key_event->flags == HAL_KEY_EVENT_RESYNC_END &&
+	    key_event->symbol[0] == '\0') {
+		input_device_resync_end(device);
+		return;
+	}
+	if (key_event->flags == HAL_KEY_EVENT_PRESS)
+		value = 1;
+	else if (key_event->flags == HAL_KEY_EVENT_RELEASE)
+		value = 0;
+	else if (key_event->flags == HAL_KEY_EVENT_REPEAT)
+		value = 2;
+	else
+		return;
+	momentary = (device->flags & INPUT_DEVICE_KEY_MOMENTARY) != 0;
+	if ((momentary && value != 1) ||
+	    (value == 2 && (device->flags & INPUT_DEVICE_KEY_REPEAT) == 0))
+		return;
+	code = input_key_from_symbol(key_event->symbol);
+	logical_only = code == KEY_RESERVED &&
+	    input_key_symbol_supported(key_event->symbol);
+	if (code == KEY_RESERVED && !logical_only)
+		return;
+	milliseconds = clock_milliseconds(NULL);
+	report_init(&report, device);
+	report_event(&report, milliseconds, EV_KEY, code, value, key_event);
+	if (momentary) {
+		struct hal_key_event release = *key_event;
+		release.flags = HAL_KEY_EVENT_RELEASE;
+		report_event(&report, milliseconds, EV_KEY, code, 0, &release);
+	}
+	report_event(&report, milliseconds, EV_SYN, SYN_REPORT, 0, NULL);
+
+	publication_irq = spin_lock_irqsave(&device->publication_lock);
+	irq = spin_lock_irqsave(&device->lock);
+	if (device->registered && !device->retiring && !device->resyncing) {
+		if (logical_only) {
+			published = 1;
+		} else if (input_capability_event(&device->capability_state,
+		    EV_KEY, code, value)) {
+			input_queue_push(&device->queue,
+			    &report.events[0].event);
+			if (momentary) {
+				(void)input_capability_event(
+				    &device->capability_state, EV_KEY, code, 0);
+				input_queue_push(&device->queue,
+				    &report.events[1].event);
+			}
+			input_queue_push(&device->queue,
+			    &report.events[report.event_count - 1U].event);
+			waitq_wake_all(&device->waitq);
+			published = 1;
+		}
+	}
+	spin_unlock_irqrestore(&device->lock, irq);
+	if (published) {
+		input_subscriber_publish(&report);
+	}
+	spin_unlock_irqrestore(&device->publication_lock, publication_irq);
 	if (published)
 		poll_notify();
 }

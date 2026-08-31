@@ -152,8 +152,9 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/user-probe.c src/kern/syscall.c src/kern/uaccess.c \
 	src/kern/cdev.c src/kern/devfs.c src/drivers/fs/console.c \
 	src/drivers/input-queue.c src/drivers/input-capability.c \
-	src/drivers/input-device.c \
-	src/drivers/input-keymap.c src/kern/locale-record.c \
+	src/drivers/input-device.c src/drivers/input-subscriber.c \
+	src/drivers/input-keymap.c src/drivers/hid/hid-report.c \
+	src/kern/locale-record.c \
 	src/kern/tty.c \
 	src/kern/system-swap-device.c \
 	src/kern/system-device.c src/kern/shutdown.c \

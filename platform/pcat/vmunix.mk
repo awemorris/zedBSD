@@ -58,7 +58,10 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/drivers/input-queue.o \
 	$(BUILD)/src/drivers/input-capability.o \
 	$(BUILD)/src/drivers/input-device.o \
-	$(BUILD)/src/drivers/input-keymap.o $(BUILD)/src/kern/locale-record.o \
+	$(BUILD)/src/drivers/input-subscriber.o \
+	$(BUILD)/src/drivers/input-keymap.o \
+	$(BUILD)/src/drivers/hid/hid-report.o \
+	$(BUILD)/src/kern/locale-record.o \
 	$(BUILD)/src/kern/tty.o \
 	$(BUILD)/src/kern/system-swap-device.o \
 	$(BUILD)/src/kern/system-device.o $(BUILD)/src/kern/shutdown.o \

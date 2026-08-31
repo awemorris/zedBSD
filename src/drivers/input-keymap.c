@@ -44,6 +44,46 @@ static const struct symbol_entry symbols[] = {
 	{"comma", KEY_COMMA, 0, ',', '<'},
 	{"dot", KEY_DOT, 0, '.', '>'},
 	{"slash", KEY_SLASH, 0, '/', '?'},
+	{"jis-1", KEY_1, 0, '1', '!'},
+	{"jis-2", KEY_2, 0, '2', '"'},
+	{"jis-3", KEY_3, 0, '3', '#'},
+	{"jis-4", KEY_4, 0, '4', '$'},
+	{"jis-5", KEY_5, 0, '5', '%'},
+	{"jis-6", KEY_6, 0, '6', '&'},
+	{"jis-7", KEY_7, 0, '7', '\''},
+	{"jis-8", KEY_8, 0, '8', '('},
+	{"jis-9", KEY_9, 0, '9', ')'},
+	{"jis-0", KEY_0, 0, '0', '0'},
+	{"jis-minus", KEY_MINUS, 0, '-', '='},
+	{"jis-caret", KEY_EQUAL, 0, '^', '~'},
+	{"jis-yen", KEY_RESERVED, 0, '\\', '|'},
+	{"jis-at", KEY_LEFTBRACE, 0, '@', '`'},
+	{"jis-lbrace", KEY_RIGHTBRACE, 0, '[', '{'},
+	{"jis-semi", KEY_SEMICOLON, 0, ';', '+'},
+	{"jis-colon", KEY_APOSTROPHE, 0, ':', '*'},
+	{"jis-rbrace", KEY_BACKSLASH, 0, ']', '}'},
+	{"jis-comma", KEY_COMMA, 0, ',', '<'},
+	{"jis-dot", KEY_DOT, 0, '.', '>'},
+	{"jis-slash", KEY_SLASH, 0, '/', '?'},
+	{"jis-ro", KEY_RESERVED, 0, '\\', '_'},
+	{"jis-kp-slash", KEY_RESERVED, 0, '/', '/'},
+	{"jis-kp-star", KEY_RESERVED, 0, '*', '*'},
+	{"jis-kp-minus", KEY_RESERVED, 0, '-', '-'},
+	{"jis-kp-7", KEY_RESERVED, 0, '7', '7'},
+	{"jis-kp-8", KEY_RESERVED, 0, '8', '8'},
+	{"jis-kp-9", KEY_RESERVED, 0, '9', '9'},
+	{"jis-kp-plus", KEY_RESERVED, 0, '+', '+'},
+	{"jis-kp-4", KEY_RESERVED, 0, '4', '4'},
+	{"jis-kp-5", KEY_RESERVED, 0, '5', '5'},
+	{"jis-kp-6", KEY_RESERVED, 0, '6', '6'},
+	{"jis-kp-equal", KEY_RESERVED, 0, '=', '='},
+	{"jis-kp-1", KEY_RESERVED, 0, '1', '1'},
+	{"jis-kp-2", KEY_RESERVED, 0, '2', '2'},
+	{"jis-kp-3", KEY_RESERVED, 0, '3', '3'},
+	{"jis-kp-enter", KEY_RESERVED, INPUT_KEY_ENTER, 0, 0},
+	{"jis-kp-0", KEY_RESERVED, 0, '0', '0'},
+	{"jis-kp-comma", KEY_RESERVED, 0, ',', ','},
+	{"jis-kp-dot", KEY_RESERVED, 0, '.', '.'},
 	{"leftshift", KEY_LEFTSHIFT, INPUT_KEY_SHIFT_SYMBOL, 0, 0},
 	{"rightshift", KEY_RIGHTSHIFT, INPUT_KEY_SHIFT_SYMBOL, 0, 0},
 	{"leftctrl", KEY_LEFTCTRL, INPUT_KEY_CTRL_SYMBOL, 0, 0},
@@ -100,13 +140,27 @@ input_key_from_symbol(const char *symbol)
 	if (symbol == NULL || symbol[0] == '\0')
 		return KEY_RESERVED;
 	if (symbol[1] == '\0') {
+		unsigned char original = (unsigned char)symbol[0];
 		char value = symbol[0];
+		switch (original) {
+		case 0x08: return KEY_BACKSPACE;
+		case 0x09: return KEY_TAB;
+		case 0x0a:
+		case 0x0d: return KEY_ENTER;
+		case 0x1b: return KEY_ESC;
+		default: break;
+		}
 		if (value >= 'A' && value <= 'Z')
 			value = (char)(value - 'A' + 'a');
 		if (value >= 'a' && value <= 'z')
 			return letter_codes[value - 'a'];
 		if (value >= '0' && value <= '9')
 			return digit_codes[value - '0'];
+		for (unsigned index = 0;
+		     index < sizeof(shifted_digits) / sizeof(shifted_digits[0]);
+		     index++)
+			if (value == shifted_digits[index])
+				return digit_codes[index];
 		switch (value) {
 		case ' ': return KEY_SPACE;
 		case '-': case '_': return KEY_MINUS;
@@ -130,6 +184,71 @@ input_key_from_symbol(const char *symbol)
 	return entry != NULL ? entry->evdev : KEY_RESERVED;
 }
 
+int
+input_key_symbol_supported(const char *symbol)
+{
+	if (symbol == NULL || symbol[0] == '\0')
+		return 0;
+	if (symbol[1] == '\0')
+		return 1;
+	return function_number(symbol) != 0 || find_symbol(symbol) != NULL;
+}
+
+int
+input_keymap_event_from_code(uint16_t code, int32_t value,
+	struct hal_key_event *event)
+{
+	const struct symbol_entry *entry = NULL;
+	const char *symbol = NULL;
+	char character[2];
+	unsigned index;
+
+	if (event == NULL || (value != 0 && value != 1 && value != 2))
+		return 0;
+	memset(event, 0, sizeof(*event));
+	for (index = 0;
+	     index < sizeof(letter_codes) / sizeof(letter_codes[0]); index++)
+		if (letter_codes[index] == code) {
+			character[0] = (char)('a' + index);
+			character[1] = '\0';
+			symbol = character;
+			break;
+		}
+	if (symbol == NULL)
+		for (index = 0;
+		     index < sizeof(digit_codes) / sizeof(digit_codes[0]);
+		     index++)
+			if (digit_codes[index] == code) {
+				character[0] = (char)('0' + index);
+				character[1] = '\0';
+				symbol = character;
+				break;
+			}
+	if (symbol == NULL && code >= KEY_F1 && code <= KEY_F10) {
+		static const char *const functions[] = {
+		    "f1", "f2", "f3", "f4", "f5",
+		    "f6", "f7", "f8", "f9", "f10"};
+		symbol = functions[code - KEY_F1];
+	}
+	if (symbol == NULL) {
+		for (index = 0; index < sizeof(symbols) / sizeof(symbols[0]);
+		     index++)
+			if (symbols[index].evdev == code) {
+				entry = &symbols[index];
+				break;
+			}
+		symbol = entry != NULL ? entry->name : NULL;
+	}
+	if (symbol == NULL)
+		return 0;
+	for (index = 0; index + 1U < HAL_KEY_SYMBOL_SIZE &&
+	     symbol[index] != '\0'; index++)
+		event->symbol[index] = symbol[index];
+	event->flags = value == 0 ? HAL_KEY_EVENT_RELEASE :
+	    value == 2 ? HAL_KEY_EVENT_REPEAT : HAL_KEY_EVENT_PRESS;
+	return 1;
+}
+
 static void
 update_modifier(struct input_keymap_state *state, const char *symbol,
 	int down, int press)
@@ -148,6 +267,8 @@ update_modifier(struct input_keymap_state *state, const char *symbol,
 		state->right_graph = (uint8_t)down;
 	else if (strcmp(symbol, "capslock") == 0 && press)
 		state->caps_lock ^= 1U;
+	else if (strcmp(symbol, "kana") == 0 && press)
+		state->kana_lock ^= 1U;
 }
 
 int

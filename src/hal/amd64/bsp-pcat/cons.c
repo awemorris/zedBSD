@@ -8,6 +8,8 @@
 #include "../irq.h"
 #include "../../cons-wait.h"
 
+#include <string.h>
+
 #define VGA_MEMORY ((volatile uint16_t *)((uintptr_t)AMD64_DIRECT_BASE + \
 	0x000b8000U))
 #define VGA_INDEX 0x3d4U
@@ -15,7 +17,8 @@
 #define KBD_DATA 0x60U
 #define KBD_STATUS 0x64U
 #define KBD_STATUS_AUX 0x20U
-#define EVENT_COUNT 32U
+/* 256 physical scan positions, two resync markers, and one ring sentinel. */
+#define EVENT_COUNT 259U
 
 static unsigned cursor_row, cursor_column;
 static uint8_t current_attribute = 0x07U;
@@ -409,6 +412,117 @@ symbol_equal(const char *left, const char *right)
 	return *left == *right;
 }
 
+static void rebuild_keyboard_events_locked(void);
+
+static void
+enqueue_keyboard_event_locked(const char *symbol, uint32_t flags)
+{
+	unsigned next = (event_head + 1U) % EVENT_COUNT;
+
+	if (next == event_tail) {
+		rebuild_keyboard_events_locked();
+		return;
+	}
+	set_event(&events[event_head], symbol, flags);
+	event_head = next;
+}
+
+static int
+snapshot_modifier(const char *symbol)
+{
+	return symbol_equal(symbol, "leftshift") ||
+	    symbol_equal(symbol, "rightshift") ||
+	    symbol_equal(symbol, "leftctrl") ||
+	    symbol_equal(symbol, "rightctrl") ||
+	    symbol_equal(symbol, "leftalt") ||
+	    symbol_equal(symbol, "rightalt") ||
+	    symbol_equal(symbol, "capslock");
+}
+
+static void
+rebuild_keyboard_events_locked(void)
+{
+	unsigned pass, extended, scan;
+
+	event_head = event_tail = 0;
+	set_event(&events[event_head], "", HAL_KEY_EVENT_RESYNC |
+	    (caps_lock ? HAL_KEY_EVENT_LOCK_CAPS : 0U));
+	event_head = (event_head + 1U) % EVENT_COUNT;
+	/* Modifiers precede ordinary held keys so the snapshot is truthful. */
+	for (pass = 0; pass < 2U; pass++)
+		for (extended = 0; extended < 2U; extended++)
+			for (scan = 0; scan < 128U; scan++) {
+			const char *symbol;
+			unsigned state_index = extended * 16U + (scan >> 3);
+
+			if (((key_down[state_index] >> (scan & 7U)) & 1U) == 0)
+				continue;
+			symbol = scan_symbol((uint8_t)scan, (int)extended);
+			if (symbol == NULL ||
+			    snapshot_modifier(symbol) != (pass == 0U))
+				continue;
+			set_event(&events[event_head], symbol,
+			    HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_SNAPSHOT);
+			event_head = (event_head + 1U) % EVENT_COUNT;
+		}
+	set_event(&events[event_head], "", HAL_KEY_EVENT_RESYNC_END);
+	event_head = (event_head + 1U) % EVENT_COUNT;
+}
+
+#ifdef ZEDBSD_INPUT_OWNERSHIP_TEST
+void
+pcat_input_ownership_test_reset(void)
+{
+	memset(key_down, 0, sizeof(key_down));
+	memset(events, 0, sizeof(events));
+	event_head = event_tail = 0;
+	caps_lock = shift_down = ctrl_down = alt_down = 0;
+}
+
+void
+pcat_input_ownership_test_key(unsigned extended, unsigned scan, int down)
+{
+	unsigned state_index;
+
+	if (extended > 1U || scan >= 128U)
+		return;
+	state_index = extended * 16U + (scan >> 3);
+	if (down)
+		key_down[state_index] |= (uint8_t)(1U << (scan & 7U));
+	else
+		key_down[state_index] &= (uint8_t)~(1U << (scan & 7U));
+}
+
+void
+pcat_input_ownership_test_caps(int locked)
+{
+	caps_lock = locked != 0;
+}
+
+void
+pcat_input_ownership_test_rebuild(void)
+{
+	rebuild_keyboard_events_locked();
+}
+
+void
+pcat_input_ownership_test_repeat(const char *symbol)
+{
+	enqueue_keyboard_event_locked(symbol, HAL_KEY_EVENT_REPEAT);
+}
+
+int
+pcat_input_ownership_test_pop(struct hal_key_event *event)
+{
+	if (event_tail == event_head)
+		return 0;
+	if (event != NULL)
+		*event = events[event_tail];
+	event_tail = (event_tail + 1U) % EVENT_COUNT;
+	return 1;
+}
+#endif
+
 unsigned hal_cons_modifiers(void)
 {
 	return (shift_down ? 1U : 0U) | (ctrl_down ? 2U : 0U) |
@@ -425,7 +539,7 @@ pump_keyboard_locked(void)
 		uint8_t raw = asm_inb(KBD_DATA), scan;
 		int released, extended, was_down;
 		const char *symbol;
-		unsigned next, state_index;
+		unsigned state_index;
 		if (raw == 0xe0U) { e0_prefix = 1; continue; }
 		released = (raw & 0x80U) != 0; scan = raw & 0x7fU;
 		extended = e0_prefix; e0_prefix = 0;
@@ -441,16 +555,14 @@ pump_keyboard_locked(void)
 		    (key_down[16U + (0x1dU >> 3)] >> (0x1dU & 7U))) & 1U;
 		alt_down = ((key_down[0x38U >> 3] >> (0x38U & 7U)) |
 		    (key_down[16U + (0x38U >> 3)] >> (0x38U & 7U))) & 1U;
-		if (scan == 0x3aU && !released) caps_lock = !caps_lock;
+		if (scan == 0x3aU && !released && !was_down)
+			caps_lock = !caps_lock;
 		symbol = scan_symbol(scan, extended);
 		if (symbol == NULL)
 			continue;
-		next = (event_head + 1U) % EVENT_COUNT;
-		if (next == event_tail) continue;
-		set_event(&events[event_head], symbol,
+		enqueue_keyboard_event_locked(symbol,
 		    released ? HAL_KEY_EVENT_RELEASE :
 		    was_down ? HAL_KEY_EVENT_REPEAT : HAL_KEY_EVENT_PRESS);
-		event_head = next;
 	}
 }
 
@@ -482,6 +594,24 @@ int hal_cons_poll_event(struct hal_key_event *event)
 	return available;
 }
 
+void
+hal_cons_get_input_info(struct hal_cons_input_info *info)
+{
+	static const char *const symbols[] = {
+	    "esc", "backspace", "tab", "enter",
+	    "leftshift", "rightshift", "leftctrl", "rightctrl",
+	    "leftalt", "rightalt", "capslock", "home", "up", "pageup",
+	    "left", "right", "end", "down", "pagedown", "insert",
+	    "delete", "f1", "f2", "f3", "f4", "f5", "f6", "f7",
+	    "f8", "f9", "f10"};
+	if (info == NULL)
+		return;
+	info->flags = HAL_CONS_INPUT_TEXT | HAL_CONS_INPUT_RELEASE |
+	    HAL_CONS_INPUT_REPEAT;
+	info->symbols = symbols;
+	info->symbol_count = sizeof(symbols) / sizeof(symbols[0]);
+}
+
 int hal_cons_read_event(struct hal_key_event *event)
 {
 	struct hal_cons_wait_entry waiter;
@@ -510,6 +640,8 @@ int hal_cons_getc(void)
 	struct hal_key_event event;
 	for (;;) {
 		(void)hal_cons_read_event(&event);
+		if ((event.flags & HAL_KEY_EVENT_SNAPSHOT) != 0)
+			continue;
 		if ((event.flags & (HAL_KEY_EVENT_PRESS | HAL_KEY_EVENT_REPEAT)) == 0)
 			continue;
 		if (event.symbol[1] == '\0')
