@@ -16,6 +16,18 @@ Parent: [WS009](../ws.md)
 Link validation is shared across all WSs; producer WSs own behavioral evidence
 while WS009 owns document accuracy and navigation.
 
+## q046 reference reconciliation
+
+`ws009-p004` closes DOC-T53 at the q044 producer boundary: the public evdev
+reference is anchored to the public headers, production input/console owners,
+LP64/ILP32 layout checks, and the ordinary plus ASan/UBSan ownership runner.
+It deliberately does not claim live USB HID or final legacy-console removal.
+
+`ws009-p005` closes DOC-T31 against BR-T42, BR-T44, the configured-loader
+parser fixture, and retained q015/q031/q032 evidence. It separates current
+required `zedbsd.cfg`/`BOOTZBSD.CFG` loader behavior from the old-handoff
+compatibility default and from runtime `swapon`/`swapoff`.
+
 ## WS012 service-console handoff
 
 As of 2026-08-28, the public contract is

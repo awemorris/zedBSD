@@ -1,6 +1,7 @@
 # Kernel boot parameters
 
-Status: implemented for the four x86 production-loader paths
+Status: implemented for the four x86 production-loader paths; reconciled with
+the configured-loader paths on 2026-08-31
 
 This document defines the implemented textual kernel-parameter contract for
 selecting boot filesystems, the root mode, swap sources, and PID 1. The common
@@ -29,6 +30,18 @@ This strict contract applies to every explicit parameter source on every
 architecture. A separate, narrowly bounded compatibility path exists only
 when a non-x86 architecture supplies a NULL parameter-source pointer; Section
 9.1 documents that boundary.
+
+### 1.1 Source and evidence map
+
+| Contract area | Production anchors | Executable and retained evidence |
+| --- | --- | --- |
+| Limits, record, names, grammar, defaults | [`include/boot/parameters.h`](../../include/boot/parameters.h), [`include/boot/parameter-handoff.h`](../../include/boot/parameter-handoff.h), [`include/kern/boot.h`](../../include/kern/boot.h), [`src/kern/boot.c`](../../src/kern/boot.c) | [BR-T42 parser fixture](../../plan/ws003-bringup/tests/boot-parameters-test.c), [q015 completion record](../../plan/queue-q015.md) |
+| Selectors, boot slots, and root modes | [`src/kern/block-identity.c`](../../src/kern/block-identity.c), [`src/kern/boot.c`](../../src/kern/boot.c), [`src/kern/vfs.c`](../../src/kern/vfs.c) | [BR-T44 source/root fixture](../../plan/ws003-bringup/tests/boot-source-test.c), [WS003 p013 evidence](../../plan/ws003-bringup/phase013-root-source-selection/phase.md) |
+| Boot-time swap sources | [`src/kern/swap-boot.c`](../../src/kern/swap-boot.c), [`src/kern/swap-source.c`](../../src/kern/swap-source.c), [`src/kern/swap.c`](../../src/kern/swap.c) | [BR-T45 swap fixture](../../plan/ws003-bringup/tests/swap-source-test.c), [WS003 p014 evidence](../../plan/ws003-bringup/phase014-multi-swap/phase.md) |
+| Runtime swap separation | [`include/uapi/zedbsd/system.h`](../../include/uapi/zedbsd/system.h), [`src/kern/swap-control.c`](../../src/kern/swap-control.c), [`src/kern/system-swap-device.c`](../../src/kern/system-swap-device.c) | [WS016 test index](../../plan/ws016-swap-control/tests/README.md), [runtime acceptance phase](../../plan/ws016-swap-control/phase004-runtime-swap-acceptance/phase.md), [q021 completion record](../../plan/queue-q021.md) |
+| PID 1 selection | [`src/kern/main.c`](../../src/kern/main.c), [`src/kern/init.c`](../../src/kern/init.c) | [BR-T42 init cases](../../plan/ws003-bringup/tests/boot-parameters-test.c), [WS003 p011 evidence](../../plan/ws003-bringup/phase011-boot-parameter-core/phase.md) |
+| Common configured-loader language | [`bootloader/uefi/zedbsd-config.c`](../../bootloader/uefi/zedbsd-config.c), [`bootloader/uefi/zedbsd-config.h`](../../bootloader/uefi/zedbsd-config.h) | [configuration host fixture](../../plan/ws013-containers/tests/zedbsd-config-host-test.c), [WS013 test index](../../plan/ws013-containers/tests/README.md) |
+| Four current x86 loader paths | [`bootloader/uefi/bootx64.c`](../../bootloader/uefi/bootx64.c), [`bootloader/pcat/bootzbsd.S`](../../bootloader/pcat/bootzbsd.S), [`bootloader/pc98/bootzbsd.S`](../../bootloader/pc98/bootzbsd.S), [`src/hal/x86/boot-parameters.c`](../../src/hal/x86/boot-parameters.c) | [BR-T43 handoff fixture](../../plan/ws003-bringup/tests/x86-parameter-handoff-test.c), [q031 UEFI evidence](../../plan/queue-q031.md), [q032 BIOS evidence](../../plan/queue-q032.md) |
 
 ## 2. Text format
 
@@ -115,8 +128,8 @@ these lookups. This contract does not itself require exposing them at `/boot`.
 
 ## 5. Root modes
 
-Exactly one of `rootpart=` and `overlay-root=` must be effective after loader
-defaults are applied.
+Exactly one of `rootpart=` and `overlay-root=` must be effective after the
+complete loader-produced parameter record is parsed.
 
 ### 5.1 Native root partition
 
@@ -160,17 +173,31 @@ The overlay is enabled only by `overlay-root=`. The kernel no longer silently
 selects an overlay merely because files named `rootfs.img` and `data.img`
 exist.
 
-To preserve the current generated-image behavior before Boot CPAR supplies a
-menu selection, each of the four x86 production loaders supplies this default
-root selection when it has no explicit replacement:
+The repository-generated overlay configuration files contain these root/swap
+lines:
 
 ```text
-overlay-root=boot0:rootfs.img overlay-data=boot0:data.img \
-swap0=boot0:swapfile
+overlay-root=rootfs.img
+overlay-data=data.img
+swap0=swapfile
 ```
 
-`boot0` in this default is the loader-origin boot filesystem. `init=` is
-omitted so its kernel default applies.
+The configuration parser turns the omitted `boot0=` into the selected payload
+FAT UUID and qualifies the three relative file values with `boot0:` before it
+builds this normalized final record:
+
+```text
+boot0=UUID=XXXX-XXXX overlay-root=boot0:rootfs.img \
+overlay-data=boot0:data.img swap0=boot0:swapfile
+```
+
+`init=` is omitted so its kernel default applies.
+
+This is installed configuration content, not a missing-input loader fallback.
+The current production loaders stop when their configuration file is absent or
+invalid. A configuration which supplies neither `rootpart=` nor the complete
+overlay pair reaches the common root-mode check and fails there; the loader
+does not invent a root mode.
 
 ## 6. Swap sources
 
@@ -203,8 +230,9 @@ swap3=boot1:swap-extra
 - Source validation is atomic: if any explicitly selected swap source is
   missing, ambiguous, read-only, malformed, duplicated, or cannot be opened,
   no selected swap source is activated and boot fails visibly.
-- With no `swapN=` parameters, the kernel runs without swap. The generated
-  legacy-layout loader default above explicitly supplies `swap0=`.
+- With no `swapN=` parameters, the kernel runs without swap. The
+  repository-installed overlay configuration above explicitly supplies
+  `swap0=`.
 
 The active sources form one system swap pool. Allocation is deterministic:
 the kernel fills available slots in `swap0`, then `swap1`, `swap2`, and
@@ -217,12 +245,13 @@ An I/O error after activation is reported for the affected page and source;
 the kernel does not silently reinterpret that page as belonging to another
 source.
 
-The initial contract is boot-time activation only. A future runtime
-`swapon`/`swapoff` facility must add a filesystem-wide backing-object claim
-shared by ordinary write/truncate and loop attachment, prevent writable
-aliases through a second mount of the same disk, and recalculate VM commit
-limits when capacity changes. Those runtime synchronization rules are not
-implicitly provided by the serialized private boot-filesystem path.
+The `swapN=` parameters describe boot-time activation. Runtime
+`/sbin/swapon` and `/sbin/swapoff` are a separate control path and do not add,
+remove, or reinterpret kernel parameters. Their implementation uses the same
+source manager with backing-object claims, writable-alias exclusion, draining,
+and VM commit-limit resizing; none of those runtime operations changes the
+immutable boot-parameter record. The runtime ABI and behavioral evidence are
+linked from the source/evidence map in Section 1.1.
 
 ## 7. Init selection
 
@@ -289,16 +318,25 @@ The bootloader-to-HAL handoff carries one bounded, NUL-terminated parameter
 string. The HAL copies it into kernel-owned storage before temporary loader
 memory can be unmapped. No CPAR-specific binary handoff is added.
 
-The current BIOS loaders materialize the maintained image default shown in
-Section 5.2 when their loader input is absent or empty. A nonempty supported
-BIOS/Multiboot source is the complete final parameter string and replaces that
-default; values are not merged token by token.
+All four current x86 production paths require a FAT-root configuration file.
+i386 PC/AT and amd64 BIOS read `/zedbsd.cfg` from the active payload FAT;
+PC-98 reads `/BOOTZBSD.CFG` from its active payload FAT. amd64 UEFI searches
+same-physical-disk FAT16/FAT32 filesystems for `/zedbsd.cfg`, considering the
+loaded filesystem first and otherwise retaining firmware enumeration order;
+zero candidates is fatal, while multiple candidates warn and use the first.
 
-amd64 UEFI instead requires a same-boot-disk FAT16/FAT32 root
-`/zedbsd.cfg`. Its one `kernel=` directive is consumed by `BOOTX64.EFI`; every
-other line forms the complete final parameter string after the documented
-selected-FAT `boot0` and relative-file normalizations. There is no embedded
-parameter or fixed-kernel fallback on this path.
+The three loader implementations use the same bounded configuration parser.
+Exactly one `kernel=` directive selects a safe path relative to the selected
+FAT and is consumed by the loader. Every other nonempty line contributes one
+kernel-parameter token. The parser synthesizes `boot0=UUID=XXXX-XXXX` when
+`boot0=` is absent and qualifies bare `overlay-root`, `overlay-data`, and
+file-form `swapN` values with `boot0:`. Explicit boot references and raw swap
+selectors beginning with `/dev/`, `UUID=`, `LABEL=`, `PARTUUID=`, or
+`PARTLABEL=` remain unchanged. An unqualified `swapN` value is deliberately a
+file on the selected FAT and receives `boot0:`. Missing or malformed
+configuration, a missing or invalid configured kernel, and an over-limit final
+record stop visibly; there is no embedded-parameter, fixed-`VMUNIX`, or
+direct-kernel production fallback.
 
 UEFI `EFI_LOADED_IMAGE_PROTOCOL.LoadOptions` is ignored unconditionally. It
 does not replace, prepend, append, or repair `/zedbsd.cfg`, and descriptor or
@@ -308,17 +346,25 @@ All four x86 paths use the same common parser and observable semantics:
 
 | Platform | Required transport and runtime result |
 | --- | --- |
-| i386 PC/AT | Loader/Multiboot input reaches the common parser and boots both overlay and `rootpart` modes |
-| i386 PC-98 | Versioned loader handoff reaches the common parser and boots both root modes |
-| amd64 BIOS | Versioned ZBL6 handoff reaches the common parser and boots both root modes |
-| amd64 UEFI | Required `/zedbsd.cfg` text reaches the common parser and boots both root modes; UEFI `LoadOptions` is ignored |
+| i386 PC/AT | PBR -> `BOOTZBSD.EXE` consumes required `/zedbsd.cfg`; copied Multiboot text reaches the common parser and boots both root modes |
+| i386 PC-98 | PBR -> `BOOTZBSD.EXE` consumes required `/BOOTZBSD.CFG`; its versioned inline record reaches the common parser and boots both root modes |
+| amd64 BIOS | PBR -> `BOOTZBSD.EXE` consumes required `/zedbsd.cfg`; its versioned ZBL6 record reaches the common parser and boots both root modes |
+| amd64 UEFI | `BOOTX64.EFI` discovers required same-disk `/zedbsd.cfg`; its versioned ZBL6 record reaches the common parser and boots both root modes, with UEFI `LoadOptions` ignored |
+
+Older supported x86 handoff forms remain a compatibility boundary inside the
+HAL. When such a form has no parameter record, or an i386 Multiboot source is
+absent or empty, [`src/hal/x86/boot-parameters.c`](../../src/hal/x86/boot-parameters.c)
+synthesizes `ZEDBSD_BOOT_PARAMETERS_DEFAULT_TEXT`. That compatibility behavior
+does not relax the required configuration-file policy of the current
+production loaders.
 
 ### 9.1 Non-x86 NULL-source compatibility boundary
 
 NULL at the kernel parameter-source interface is not the same condition as an
-absent x86 loader option. The x86 HALs convert absent loader input to the
-generated default before the kernel parser runs. On i386 and amd64, the kernel
-therefore never invokes legacy automatic root selection.
+absent legacy x86 loader option. The x86 HAL compatibility path converts the
+latter to the generated default before the kernel parser runs, while current
+production loaders provide a configuration-derived record. On i386 and amd64,
+the kernel therefore never invokes legacy automatic root selection.
 
 Only a non-x86 build receiving a NULL parameter-source pointer uses the
 retained legacy automatic-root path:
@@ -346,27 +392,38 @@ The implementation is divided into focused production-code gates:
 - BR-T42 covers bounded parsing, owned storage, the complete key set,
   duplicates, malformed input, and `init=`;
 - BR-T43 covers the shared record and all four x86 handoff layouts;
-- WS013 CT-T008--CT-T016 cover bounded `/zedbsd.cfg` parsing, selected-FAT
-  normalization, configured-kernel loading, and ignored UEFI `LoadOptions`;
+- WS013 CT-T008--CT-T018 cover bounded `/zedbsd.cfg` parsing, selected-FAT
+  normalization, configured-kernel loading, discovery, and ignored UEFI
+  `LoadOptions`;
 - BR-T44 covers selectors, private boot slots, aliases, root-mode selection,
   path validation, and reverse-order failure unwind;
 - BR-T45 covers `ZEDSWAP1`, `ZEDSWAP2`, four-source aggregation,
-  allocation/free, first-error flush, and shutdown; and
-- BR-T46 is the production-loader QEMU acceptance gate.
+  allocation/free, first-error flush, and shutdown;
+- q015 BR-T46 is the completed common-parser/root/swap QEMU acceptance gate;
+  and
+- WS013 CT-T025--CT-T031 are the later current-loader configuration and
+  no-fallback gates for PC/AT BIOS and PC-98.
 
-BR-T46 acceptance requires one fresh 31-cell matrix: six common cases on each
-of i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI (24 cells); mixed
-file/raw swap, UUID disk reordering, and PARTUUID disk reordering on both
-amd64 firmware paths (six cells); and one PC/AT native-root/raw-swap alias
-rejection cell. The six common cases cover the generated default and normal
-login, `init=/bin/sh`, native root, file swap, raw swap, and visible
-rejection of invalid input.
+The authoritative q015 BR-T46 run passed 31 cells: six common cases on each of
+i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI (24 cells); mixed file/raw
+swap, UUID disk reordering, and PARTUUID disk reordering on both amd64 firmware
+paths (six cells); and one PC/AT native-root/raw-swap alias rejection cell. The
+six common cases covered the then-generated overlay selection and normal login,
+`init=/bin/sh`, native root, file swap, raw swap, and visible rejection of
+invalid input.
 
-Every positive swap cell must force at least 1024 pages (4 MiB) to page out,
-read all touched anonymous pages back with their contents intact, and observe
-a positive page-in counter. The alias-rejection cell must fail before swap
-publication, root mount, or init. The UUID and PARTUUID reordering cells must
-enumerate another disk first while still selecting the production boot image,
-so loader-origin `boot0` and explicit secondary-slot resolution are both
+Every positive swap cell forced at least 1024 pages (4 MiB) to page out, read
+all touched anonymous pages back with their contents intact, and observed a
+positive page-in counter. The alias-rejection cell failed before swap
+publication, root mount, or init. The UUID and PARTUUID reordering cells
+enumerated another disk first while still selecting the production boot image,
+so loader-origin `boot0` and explicit secondary-slot resolution were both
 proved. Artifacts, generated configuration, hashes, commands, guest logs, and
-the result table must be preserved from that fresh run.
+the result table are retained by the [q015 completion record](../../plan/queue-q015.md).
+Because q015 preceded the configured-loader convergence, current loader-file
+behavior is additionally established by [q031](../../plan/queue-q031.md)
+(UEFI discovery/configuration and ignored `LoadOptions`) and
+[q032](../../plan/queue-q032.md) (20/20 PC/AT/amd64 BIOS and 16/16 PC-98
+configuration-path cells). These later Queue records replace q015 only for
+loader configuration and fallback wording; q015 remains the integrated
+kernel parser, root, swap, and PID 1 evidence.

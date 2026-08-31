@@ -1,16 +1,18 @@
 # WS009: documentation
 
-Last updated: 2026-08-25
+Last updated: 2026-08-31
 
 WSID: `ws009`
 
-Status: in progress; `ws009-p003` complete
+Status: active; q046 completed the evdev/input and kernel-parameter reference
+reconciliation
 
 Parent: [master plan](../master.md)
 
-Last verified Phase: `ws009-p003` complete
+Last verified Phases: `ws009-p004` and `ws009-p005` complete (`q046`)
 
-Resume point: extract the next dependency-ready public reference.
+Resume point: extract the next dependency-ready public reference alongside its
+producer WS; DOC-10--12, DOC-30/32--34, and DOC-50--55 remain scoped work.
 
 Shared tests: [WS009 test index](tests/README.md)
 
@@ -21,6 +23,8 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p001`](phase001-information-architecture/phase.md) | Complete | Product hierarchy/rules and Noct relative-link validation established |
 | [`ws009-p002`](phase002-build-guide/phase.md) | Complete | Toolchain, parallel image build, amd64 QEMU marker, diagnostics, and links pass |
 | [`ws009-p003`](phase003-init-services/phase.md) | Complete | Current init/service configuration, readiness, supervision, and shutdown contract published |
+| [`ws009-p004`](phase004-evdev-input-reference/phase.md) | Complete (`q046`) | Current multi-source, momentary, resync, console-subscriber, and detach behavior is documented without claiming live USB HID |
+| [`ws009-p005`](phase005-kernel-parameter-reference/phase.md) | Complete (`q046`) | Common parameters and all four required configured x86 loader paths are reconciled with production source and retained q015/q031/q032 evidence |
 
 Documentation work may be extracted alongside a producer WS when it describes
 a newly frozen public interface, but it retains a WS009 Phase ID and acceptance
@@ -64,7 +68,7 @@ than assumed here.
 | DOC-12 | Planned | UAPI POSIX/SUS compliance and `_XOPEN_SOURCE` profile | PX-02 | Claims match headers, implementations, and compliance ledger |
 | DOC-20 | Complete | Complete build-from-source guide | Supported toolchain/build audit | Toolchain/image commands reproduced; amd64 QEMU and links pass |
 | DOC-30 | Planned | Bootloader and boot-flow guide | BR-01–BR-04 design | BIOS/UEFI flow, failure points, and diagnostic paths are documented |
-| DOC-31 | Planned | Kernel parameter reference | Parser/default audit | Every documented parameter cites parser/default and unknown-key behavior |
+| DOC-31 | Complete through `ws009-p005` | Kernel parameter reference | Parser/default audit | Every documented parameter cites parser/default and unknown-key behavior |
 | DOC-32 | Planned | Boot filesystem plus loopback-root guide | Boot/root implementation | QEMU procedure reaches the intended root reproducibly |
 | DOC-33 | Planned | Native UFS-root guide | Stable native storage drivers | QEMU and supported hardware procedures are explicit and safe |
 | DOC-34 | Planned | USB trial and NVMe installation guide | WS019 p005, WS003 p018 | USB-first evaluation, the existing-GPT/ESP/FAT32 prerequisite, read-only `diskpart`, no-format overlay `zedinst`, fallback/manual UEFI selection, and recovery limits match the released first-stage tools; native/destructive guidance waits for its later Phase |
@@ -72,7 +76,7 @@ than assumed here.
 | DOC-50 | Planned | `/dev/console` HAL-bridge reference | IN migration state | Text/input/framebuffer roles and deprecated interfaces are accurate |
 | DOC-51 | Planned | `/dev/graphics` HAL-bridge reference | GFX takeover design | Framebuffer, mmap/ioctl, ownership, and GPU takeover are specified |
 | DOC-52 | Planned | `/dev/system` HAL-bridge reference | Device/UAPI audit | Operations, permissions, data structures, and architecture hooks are specified |
-| DOC-53 | Planned | evdev and `/dev/input` UAPI reference | IN-00 | ABI profile, event semantics, examples, and compatibility differences are published |
+| DOC-53 | Complete through `ws009-p004` | evdev and `/dev/input` UAPI reference | IN-00 through the q044 p006/p007 boundary | ABI profile, event semantics, examples, current ownership, and compatibility differences are published without claiming live USB HID |
 | DOC-54 | Proposed | `/dev/gpu` UAPI and capability reference | GFX-10 | Versioned object model and supported profiles match headers/tests |
 | DOC-55 | Planned | `networkd`, `net`, `dhcpc`, WPA backend, and rc.conf networking reference | NET-20+ as applicable | Command/config/protocol/error examples pass tests |
 

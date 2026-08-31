@@ -69,8 +69,12 @@ environment rather than receiving a speculative repair. The archived [q040](queu
 records the uncleared printed-label-only Archer identity checkpoint and the
 completed independent AF_UNIX/network authorization foundation. The archived
 [q044](queue-q044.md) records the completed input ownership and bounded HID
-parser milestones. The current [Queue Book](queue.md) selects the independent
-WS004 SuperSpeed interrupt-context correction. The archived q043 PC-98 fixed-read and exact-mouse
+parser milestones. The archived [q045](queue-q045.md) records the independent
+WS004 SuperSpeed interrupt-context automatic/source correction. The completed
+[q046](queue-q046.md) reconciles the producer-linked evdev/input and kernel
+boot-parameter references. The current [Queue Book](queue.md) records that
+completion while the next WS004 prerequisite Queue is extracted. The archived
+q043 PC-98 fixed-read and exact-mouse
 paths both pass locally, and their remaining external resume facts do not
 block subsequent Queues. The
 archived [q038](queue-q038.md) replaced the
@@ -330,10 +334,10 @@ actually warranted.
 | `ws003` | x86 laptop and PC-98 hardware bring-up | Active; Latitude USB/network and CF-SV7 USB-root milestones complete; q043 p024 fixed-read source/binary/QEMU milestone passes; p018 Latitude overlay-NVMe install/boot remains dependency-gated | p020/p021 physical CF-SV7 path passes; p024 exact artifact `7d4e7d67...` awaits one V13 boot; p018/p019 remain | Record one p024 PC-9821V13 result without first running older artifacts, then return to dependency-ready p018 work; restore its Make-owned Noct gate through ws008-p010 | [WS003](ws003-bringup/ws.md) |
 | `ws004` | Hardware expansion | Audited active; q041 p016 completed checked UHCI/EHCI request retirement with configured and QEMU lifecycle evidence. q040 p026 completed every automatic/read-only intake step and is uncleared only for the purchased unit's printed model/region/revision. `q030` NVMe software and the physical USB-Ethernet path are complete | `ws004-p010`--`p016`, `p018`, p020, and p022--p024 complete | Proceed through q041; obtain one serial-redacted Archer label observation when convenient without blocking independent work | [WS004](ws004-hardware/ws.md) |
 | `ws005` | Networking and WLAN | Active; q029 p001 and q040 p003 complete; q041 p005 host implementation passes and q042 advanced but did not complete its VFS dependencies | Physical USB Ethernet and authenticated control pass; strict local credential parser/store/CLI now pass host safety and regression gates | Complete WS001 p015/p016 after WS008 p010, then requeue p005 root/non-root ownership and remount-durability acceptance; p004 remains hardware-core dependency-gated | [WS005](ws005-networking/ws.md) |
-| `ws006` | Input and evdev | Active; q044 completed truthful per-source ownership and the bounded HID parser, but live USB HID and final legacy removal remain | `ws006-p006` automatic/source and `ws006-p007` parser milestones complete | Execute dependency-ready p008 for live USB HID; run p009 consumer/legacy-console removal only after the accepted WS008 userland tree is available | [WS006](ws006-input/ws.md) |
+| `ws006` | Input and evdev | Active; q044 completed truthful per-source ownership and the bounded HID parser; p008 now has frozen Report-Protocol and stale-fd namespace policies | `ws006-p006` automatic/source and `ws006-p007` parser milestones complete | Complete WS004 USB 1.1 concurrency/hotplug and reset/STALL prerequisites, then implement p008; p009 still waits for accepted WS008 userland | [WS006](ws006-input/ws.md) |
 | `ws007` | Graphics and desktop | Active; q039 PC-98 cascade repair complete, q043 local exact-reproduction matrix passes while the newer GUI report remains external | `ws007-p001` and `p003` complete; p004 uncleared; amd64 `p002` carried | Resume p004 only from the user's exact failing image/QEMU/interactive-backend/focus record; do not alter the passing headless path speculatively | [WS007](ws007-graphics/ws.md) |
 | `ws008` | Noct and BeUI | Blocked; target packages remain disabled, and the p008 host pin is not production-usable because upstream removed its documented module-path CLI | `ws008-p008` completed its bounded pin/smoke at `3bf3d236...`; p010 records the later `--path` production-build regression and p009 remains separately target-blocked | Resume p010 from the maintainer's accepted upstream repair or an explicit compatible revision, then resume p009 only after its target blocker is also resolved | [WS008](ws008-noct/ws.md) |
-| `ws009` | Documentation | In progress | `ws009-p003` complete | Extract the next dependency-ready producer-linked reference | [WS009](ws009-documentation/ws.md) |
+| `ws009` | Documentation | Active; q046 reconciled two already implemented producer contracts | `ws009-p004` and `p005` complete | Extract the next dependency-ready public reference alongside its producer WS | [WS009](ws009-documentation/ws.md) |
 | `ws010` | Noct scripting and x86 image tools | Complete | `ws010-p001`–`p004` complete | Noct toolchain and the 15-script x86 production closure are complete; three images boot to `login:` | [WS010](ws010-scripting/ws.md) |
 | `ws011` | Network configuration console | In progress; VLAN/bridge hold released, detailed design still open | `ws011-p003` complete; p004 resumed for design; p005 bounds open | After higher priorities, finish p004's virtual-interface/UAPI/packet-ownership design before implementation; freeze p005 bounds independently | [WS011](ws011-net-config/ws.md) |
 | `ws012` | Service administration console | Complete (`q018`) | `ws012-p006` complete | No current Phase; extract a new requirement or continue container integration in WS013 | [WS012](ws012-service-console/ws.md) |
@@ -441,7 +445,11 @@ must not silently promote a lower-priority product goal over a ready higher-
 priority one.
 
 1. Continue the WS006/WS004 completion audit. q044 completed WS006 p006/p007
-   source boundaries without calling the WS complete; p008/p009 remain. WS004
+   source boundaries without calling the WS complete. P008's checked Report-
+   Protocol and stale-fd namespace policies are resolved; the user requires
+   USB 1.1, so focused UHCI/EHCI concurrency/hotplug and general reset/STALL
+   work must precede it, while
+   p009 remains WS008-dependent. WS004
    likewise retains its independently listed p017, p019, p021, p025, and WLAN
    chain rather than treating the working visible USB/NVMe cases as closure.
 2. WS018 is complete.  q035 finished p009's retained runtime evidence and
@@ -509,6 +517,7 @@ until stopped or no judgment-free Phase remains.
 | `/etc/net.conf` v1 grammar and empty-collection syntax | WS011 | Parser and boot migration |
 | VLAN/bridge virtual-interface UAPI and packet ownership | WS005/WS011 | Manual hold released 2026-08-30; `ws011-p004` must now close the remaining design gates before implementation |
 | Linux/FreeBSD evdev compatibility profile | WS006 | Resolved by `ws006-p001`; implement `/dev/input/eventN` against it |
+| USB HID v1 policy boundary | WS006 p008 / WS004 | Resolved: use checked Report Protocol with no malformed-descriptor fallback, and reserve a detached `eventN` until the final old-generation fd closes. USB 1.1 is required, so UHCI/EHCI concurrent-request scheduling and hotplug precede p008; a general endpoint-STALL/device-reset recovery contract is also required |
 | Device-mapping `mprotect` ceiling | WS017 | Choose whether an initial RW mapping may return from RO to RW within its original maximum, or whether every permission reduction is permanent, before `ws017-p001` enters a Queue |
 | zedBSD GPU/Vulkan capability, object, and display-takeover profile | WS014 | Manually blocked; publishing `/dev/gpuN` UAPI or transferring i915 ownership |
 | YAML `/etc/rc.conf` schema and versioned init status/control protocol | WS012 | Resolved and complete: q017 completed YAML/persistence; q018 completed typed `/run/init.sock` service and `ZSV1 HALT`/`POWEROFF`/`REBOOT` clients, argv/interactive administration, and production integration with no unversioned compatibility path |
